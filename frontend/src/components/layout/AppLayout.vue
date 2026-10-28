@@ -41,7 +41,7 @@ const authStore = useAuthStore()
 const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
 const mainRef = ref<HTMLElement | null>(null)
 usePageEntrance(mainRef)
-const isAdmin = computed(() => authStore.user?.role === 'admin')
+const isAdmin = computed(() => authStore.canAccessAdmin)
 
 const { replayTour } = useOnboardingTour({
   storageKey: isAdmin.value ? 'admin_guide' : 'user_guide',

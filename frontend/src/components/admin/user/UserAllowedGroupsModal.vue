@@ -44,6 +44,7 @@
                     <input
                       type="checkbox"
                       :checked="config.isSelected"
+                      :disabled="!canAdjustBalance && !config.wasAllowed"
                       @change="toggleExclusiveGroup(config.groupId)"
                       class="peer sr-only"
                     />
@@ -76,7 +77,7 @@
                 </div>
 
                 <!-- 专属倍率输入 -->
-                <div class="flex flex-shrink-0 items-center gap-3">
+                <div v-if="canAdjustBalance" class="flex flex-shrink-0 items-center gap-3">
                   <label class="text-sm font-medium text-gray-600 dark:text-gray-400">{{ t('admin.users.customRate') }}</label>
                   <input
                     type="number"
@@ -156,7 +157,7 @@
                 </div>
 
                 <!-- 专属倍率输入 -->
-                <div class="flex flex-shrink-0 items-center gap-3">
+                <div v-if="canAdjustBalance" class="flex flex-shrink-0 items-center gap-3">
                   <label class="text-sm font-medium text-gray-600 dark:text-gray-400">{{ t('admin.users.customRate') }}</label>
                   <input
                     type="number"
@@ -208,6 +209,7 @@ import { adminAPI } from '@/api/admin'
 import type { AdminUser, Group, GroupPlatform } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
+import { useAdminPermission } from '@/composables/useAdminPermission'
 
 interface GroupRateConfig {
   groupId: number
@@ -217,12 +219,16 @@ interface GroupRateConfig {
   defaultRate: number
   customRate: number | null
   isSelected: boolean
+  wasAllowed: boolean
 }
 
 const props = defineProps<{ show: boolean; user: AdminUser | null }>()
 const emit = defineEmits(['close', 'success'])
 const { t } = useI18n()
 const appStore = useAppStore()
+// 没有“加减余额”权限时：不改分组倍率，也不能新加专属分组（移除仍可以）
+const { has } = useAdminPermission('users')
+const canAdjustBalance = computed(() => has('users.balance_adjust'))
 
 const groups = ref<Group[]>([])
 const groupConfigs = ref<GroupRateConfig[]>([])
@@ -275,6 +281,7 @@ const load = async () => {
       // 公开分组：未开启限制时恒可用；开启后同样以 allowed_groups 为准
       isSelected:
         g.is_exclusive || restrictPublicGroups.value ? userAllowedGroups.includes(g.id) : true,
+      wasAllowed: userAllowedGroups.includes(g.id),
     }))
     loaded.value = true
   } catch (error) {
@@ -287,6 +294,7 @@ const load = async () => {
 const toggleExclusiveGroup = (groupId: number) => {
   const config = groupConfigs.value.find((c) => c.groupId === groupId)
   if (config && config.isExclusive) {
+    if (!canAdjustBalance.value && !config.wasAllowed) return
     config.isSelected = !config.isSelected
   }
 }
@@ -350,7 +358,7 @@ const handleSave = async () => {
     await adminAPI.users.update(props.user.id, {
       allowed_groups: allowedGroups,
       restrict_public_groups: restrictPublicGroups.value,
-      group_rates: Object.keys(groupRates).length > 0 ? groupRates : undefined,
+      group_rates: canAdjustBalance.value && Object.keys(groupRates).length > 0 ? groupRates : undefined,
     })
 
     appStore.showSuccess(t('admin.users.groupConfigUpdated'))

@@ -628,6 +628,7 @@ export default {
         bodyModeHintReplace: '完全用下方 JSON 作为请求体。注意：此模式下跳过 challenge 校验，改为 HTTP 2xx + 响应文本非空即视为可用。',
         bodyJson: 'Body JSON',
         bodyJsonFormat: '格式化',
+        bodyConfiguredHidden: '已配置，请求体内容已隐藏。输入新的 JSON 可替换原值。',
         bodyJsonHint: '失焦时自动解析校验。留空等价于没有覆盖。',
         bodyJsonError: 'JSON 解析失败',
         bodyJsonObjectError: '请求体必须是一个 JSON 对象（不能是数组或基本类型）'

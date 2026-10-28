@@ -32,10 +32,11 @@ type UsageExportHandler struct {
 	users    exportUserReader
 	sessions service.RefreshTokenCache
 	settings *service.SettingService
+	access   *service.OperatorAccessService
 }
 
-func NewUsageExportHandler(e *usageexport.Engine, u *UsageHandler, a *admin.UsageHandler, auth *service.AuthService, users *service.UserService, sessions service.RefreshTokenCache, settings *service.SettingService) *UsageExportHandler {
-	return &UsageExportHandler{e, u, a, auth, users, sessions, settings}
+func NewUsageExportHandler(e *usageexport.Engine, u *UsageHandler, a *admin.UsageHandler, auth *service.AuthService, users *service.UserService, sessions service.RefreshTokenCache, settings *service.SettingService, access *service.OperatorAccessService) *UsageExportHandler {
+	return &UsageExportHandler{e, u, a, auth, users, sessions, settings, access}
 }
 func exportScope(c *gin.Context) string {
 	if strings.Contains(c.FullPath(), "/admin/") {
@@ -264,7 +265,7 @@ func (h *UsageExportHandler) Download(c *gin.Context) {
 
 func (h *UsageExportHandler) authorizeDownload(c *gin.Context, t *usageexport.Task, identity usageexport.TicketIdentity) bool {
 	user, err := h.users.GetByID(c.Request.Context(), identity.Owner)
-	if err != nil || user == nil || !user.IsActive() || user.TokenVersion != identity.TokenVersion || time.Now().Unix() >= identity.TokenExpires || (t.Scope == "admin" && user.Role != service.RoleAdmin) {
+	if err != nil || user == nil || !user.IsActive() || user.TokenVersion != identity.TokenVersion || time.Now().Unix() >= identity.TokenExpires || (t.Scope == "admin" && !h.adminExportAllowed(c.Request.Context(), user)) {
 		response.Unauthorized(c, "Export session is no longer valid")
 		return false
 	}
@@ -275,7 +276,7 @@ func (h *UsageExportHandler) authorizeDownload(c *gin.Context, t *usageexport.Ta
 				response.Forbidden(c, "Administrator acknowledgement required")
 				return false
 			}
-		} else if h.settings.IsBackendModeEnabled(c.Request.Context()) && user.Role != service.RoleAdmin {
+		} else if h.settings.IsBackendModeEnabled(c.Request.Context()) && !user.CanAccessAdmin() {
 			response.Forbidden(c, "User panel disabled")
 			return false
 		}
@@ -303,4 +304,8 @@ func (h *UsageExportHandler) authorizeDownload(c *gin.Context, t *usageexport.Ta
 		}
 	}
 	return true
+}
+
+func (h *UsageExportHandler) adminExportAllowed(ctx context.Context, user *service.User) bool {
+	return user.IsAdmin() || (user != nil && user.Role == service.RoleOperator && h.access != nil && h.access.AllowsAdminExport(ctx, user.ID))
 }

@@ -49,7 +49,7 @@
       </div>
 
       <!-- Add Method Selection (Claude only) -->
-      <fieldset v-if="isAnthropic" class="border-0 p-0">
+      <fieldset v-if="isAnthropic" class="border-0 p-0" :disabled="isOperator">
         <legend class="input-label">{{ t('admin.accounts.oauth.authMethod') }}</legend>
         <div class="mt-2 flex gap-4">
           <label class="flex cursor-pointer items-center">
@@ -194,6 +194,7 @@ import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
+import { useAdminAccessStore } from '@/stores/adminAccess'
 import {
   useAccountOAuth,
   type AddMethod,
@@ -232,6 +233,8 @@ const emit = defineEmits<{
 
 const appStore = useAppStore()
 const { t } = useI18n()
+// Operators keep the stored method: switching oauth / setup-token changes the account type.
+const isOperator = computed(() => useAdminAccessStore().isOperator)
 
 // OAuth composables
 const claudeOAuth = useAccountOAuth()

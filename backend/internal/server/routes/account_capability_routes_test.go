@@ -24,6 +24,7 @@ func TestClearAccountCapabilityRouteAdminProtection(t *testing.T) {
 		case "Bearer user-token":
 			servermiddleware.AbortWithError(c, http.StatusForbidden, "FORBIDDEN", "Admin access required")
 		default:
+			c.Set(string(servermiddleware.ContextKeyUserRole), "admin")
 			c.Next()
 		}
 	})

@@ -320,6 +320,7 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 	if err != nil {
 		return nil, fmt.Errorf("clone account credentials: %w", err)
 	}
+	delete(credentials, "newapi_access_token")
 	extra, err := duplicateAccountExtra(source.Extra)
 	if err != nil {
 		return nil, fmt.Errorf("clone account extra configuration: %w", err)
@@ -552,6 +553,9 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 }
 
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
+	if err := s.operatorAccountCreateRules(ctx, input); err != nil {
+		return nil, err
+	}
 	accountExtra, err := normalizeOpenAILongContextBillingExtra(input.Platform, input.Extra)
 	if err != nil {
 		return nil, err
@@ -600,6 +604,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	}
 	// Never persist ephemeral SSO/password secrets after OAuth conversion.
 	input.Credentials = SanitizeStoredCredentials(input.Platform, input.Credentials)
+	if err := validateNewAPIAccessCredentials(input.Credentials); err != nil {
+		return nil, err
+	}
 
 	account, err := buildAccountForCreate(input, accountExtra)
 	if err != nil {
@@ -652,9 +659,16 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if err != nil {
 		return nil, err
 	}
+	if err := s.operatorAccountUpdateRules(ctx, account, input); err != nil {
+		return nil, err
+	}
 	if err := ValidateIQTargetsPatch(account.Platform, input.IQTargets); err != nil {
 		return nil, err
 	}
+	if err := validateNewAPIAccessCredentials(input.Credentials); err != nil {
+		return nil, err
+	}
+	previousForToken := *account
 	account.IQTargetsPatch = input.IQTargets
 	account.IQPreserveTokenRotation = input.IQPreserveTokenRotation
 	if account.Platform == PlatformTypeSafe && input.Type != "" && input.Type != AccountTypeAPIKey {
@@ -850,6 +864,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 		account.Proxy = nil // 清除关联对象，防止 GORM Save 时根据 Proxy.ID 覆盖 ProxyID
 	}
+	account.Credentials = dropNewAPITokenOnOriginChange(&previousForToken, account.Credentials, input.Credentials, account.ProxyID)
 	if !reflect.DeepEqual(previousProbeIdentity, upstreamBillingProbeIdentity(account)) && account.Extra != nil {
 		delete(account.Extra, UpstreamBillingProbeExtraKey)
 		if !isUpstreamBillingProbeAccount(account) {
@@ -1006,6 +1021,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
+	if err := s.operatorAccountExtraRules(ctx, id, updates); err != nil {
+		return err
+	}
 	updates = MergeCapabilityLearningExtra(updates, nil)
 	updates = MergeOpenAICodexTicketExtra(updates, nil)
 	updates = sanitizedCodexFingerprintExtraUpdates(updates)
@@ -1055,6 +1073,10 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			return nil, err
 		}
 		input.AccountIDs = accountIDs
+	}
+
+	if err := s.operatorAccountBulkRules(ctx, input); err != nil {
+		return nil, err
 	}
 
 	result := &BulkUpdateAccountsResult{
@@ -1194,7 +1216,11 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	// only when platform is known Grok — empty platform still strips password/*).
 	if input.Credentials != nil {
 		input.Credentials = SanitizeStoredCredentials("", input.Credentials)
+		if err := validateNewAPIAccessCredentials(input.Credentials); err != nil {
+			return nil, err
+		}
 	}
+	input.Credentials = clearBulkNewAPITokenOnIdentityChange(cachedTargets, input.Credentials, input.ProxyID)
 
 	// Prepare bulk updates for columns and JSONB fields.
 	repoUpdates := AccountBulkUpdate{
@@ -1442,6 +1468,9 @@ func (s *adminServiceImpl) SetAccountSchedulable(ctx context.Context, id int64, 
 }
 
 func (s *adminServiceImpl) RevertAccountProxyFallback(ctx context.Context, id int64) error {
+	if err := s.operatorSuperAdminOnly(ctx); err != nil {
+		return err
+	}
 	if err := s.accountRepo.RevertProxyFallback(ctx, id); err != nil {
 		return err
 	}

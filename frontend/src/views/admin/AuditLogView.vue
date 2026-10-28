@@ -73,7 +73,7 @@
               <button type="button" class="btn btn-secondary" :disabled="loading" @click="resetFilters">
                 {{ t('common.reset') }}
               </button>
-              <button type="button" class="btn btn-danger" @click="openClearDialog">
+              <button v-if="isSuperAdmin" type="button" class="btn btn-danger" @click="openClearDialog">
                 <Icon name="trash" size="sm" class="mr-1.5" />
                 {{ t('admin.audit.clearAll') }}
               </button>
@@ -366,9 +366,11 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores'
+import { useAdminPermission } from '@/composables/useAdminPermission'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const { isSuperAdmin } = useAdminPermission('audit_logs')
 
 const loading = ref(false)
 const logs = ref<AuditLog[]>([])

@@ -52,7 +52,7 @@
         <Icon name="cog" size="md" class="mr-2" />
         {{ t('admin.channelMonitor.template.manageButton') }}
       </button>
-      <button @click="$emit('create')" class="btn btn-primary">
+      <button v-if="canCreate" @click="$emit('create')" class="btn btn-primary">
         <Icon name="plus" size="md" class="mr-2" />
         {{ t('admin.channelMonitor.createButton') }}
       </button>
@@ -79,9 +79,10 @@ import {
   PROVIDER_OPENCODE_GO,
 } from '@/constants/channelMonitor'
 
-defineProps<{
+withDefaults(defineProps<{
   loading: boolean
-}>()
+  canCreate?: boolean
+}>(), { canCreate: true })
 
 defineEmits<{
   (e: 'reload'): void

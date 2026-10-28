@@ -137,9 +137,9 @@
         </div>
       </div>
 
-      <!-- OpenAI API long-context billing -->
+      <!-- OpenAI API long-context billing (a price field: needs "Adjust balance" for operators) -->
       <div
-        v-if="allOpenAIPassthroughCapable"
+        v-if="canAdjustBalance && allOpenAIPassthroughCapable"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="mb-3 flex items-center justify-between gap-4">
@@ -197,8 +197,8 @@
         </p>
       </div>
 
-      <!-- Base URL (API Key only) -->
-      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <!-- Base URL (API Key only; never for operators: bulk edits cannot change addresses) -->
+      <div v-if="!isOperator" class="border-t border-gray-200 pt-4 dark:border-dark-600" data-testid="bulk-edit-base-url-section">
         <div class="mb-3 flex items-center justify-between">
           <label
             id="bulk-edit-base-url-label"
@@ -670,8 +670,8 @@
         </div>
       </div>
 
-      <!-- Proxy -->
-      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <!-- Proxy (never for operators: bulk edits cannot change the network identity) -->
+      <div v-if="!isOperator" class="border-t border-gray-200 pt-4 dark:border-dark-600" data-testid="bulk-edit-proxy-section">
         <div class="mb-3 flex items-center justify-between">
           <label
             id="bulk-edit-proxy-label"
@@ -1398,8 +1398,8 @@
         </div>
       </div>
 
-      <!-- Groups -->
-      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <!-- Groups (placement needs "Adjust balance" for operators) -->
+      <div v-if="canAdjustBalance" class="border-t border-gray-200 pt-4 dark:border-dark-600" data-testid="bulk-edit-groups-section">
         <div class="mb-3 flex items-center justify-between">
           <label
             id="bulk-edit-groups-label"
@@ -1498,6 +1498,8 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
+import { useAdminAccessStore } from '@/stores/adminAccess'
+import { applyOperatorAccountPayloadRules, operatorAccountErrorMessage } from '@/components/account/operatorAccountRules'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -1548,6 +1550,10 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const appStore = useAppStore()
+// 普通管理员（xy-admin-operator-scope）：批量编辑不改代理和地址；分组与计费附加项需要“加减余额”。
+const access = useAdminAccessStore()
+const isOperator = computed(() => access.isOperator)
+const canAdjustBalance = computed(() => access.can('users.balance_adjust'))
 
 // Platform awareness
 const targetMode = computed(() => props.target?.mode ?? 'selected')
@@ -2287,9 +2293,12 @@ const handleSubmit = async () => {
 
 const submitBulkUpdate = async (baseUpdates: Record<string, unknown>) => {
   // 无论是预检查确认还是 409 兜底确认，只要 mixedChannelConfirmed 为 true 就带上 flag
-  const updates = mixedChannelConfirmed.value
+  const confirmedUpdates = mixedChannelConfirmed.value
     ? { ...baseUpdates, confirm_mixed_channel_risk: true }
     : baseUpdates
+  const updates = isOperator.value
+    ? applyOperatorAccountPayloadRules(confirmedUpdates, { mode: 'bulk', networkLocked: true, canAdjustBalance: canAdjustBalance.value })
+    : confirmedUpdates
 
   submitting.value = true
 
@@ -2340,7 +2349,7 @@ const submitBulkUpdate = async (baseUpdates: Record<string, unknown>) => {
     } else if (error.reason === 'OPENAI_LONG_CONTEXT_PARENT_REQUIRED') {
       appStore.showError(t('admin.accounts.bulkEdit.longContextParentRequired'))
     } else {
-      appStore.showError(error.message || t('admin.accounts.bulkEdit.failed'))
+      appStore.showError(operatorAccountErrorMessage(error, t, t('admin.accounts.bulkEdit.failed')) || error.message || t('admin.accounts.bulkEdit.failed'))
       console.error('Error bulk updating accounts:', error)
     }
   } finally {

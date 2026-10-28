@@ -8,7 +8,7 @@
           {{ view.version > 0 && view.updated_at ? t('admin.shareScheduling.mode.updated', { version: view.version, time: formatDateTime(view.updated_at) }) : t('admin.shareScheduling.mode.neverSaved') }}
         </p>
       </div>
-      <div class="flex flex-wrap items-center gap-2">
+      <div v-if="canManage" class="flex flex-wrap items-center gap-2">
         <button
           v-if="view.scheduler === 'share'"
           type="button"
@@ -49,8 +49,8 @@
           :model-value="view.session_keep"
           :aria-label="t('admin.shareScheduling.mode.sessionKeep')"
           data-testid="share-session-keep"
-          :class="{ 'pointer-events-none opacity-50': busy }"
-          @update:model-value="value => !busy && store.requestChange({ session_keep: value })"
+          :class="{ 'pointer-events-none opacity-50': busy || !canManage }"
+          @update:model-value="value => !busy && canManage && store.requestChange({ session_keep: value })"
         />
       </div>
     </div>
@@ -83,11 +83,13 @@ import type { SharePolicyView } from '@/api/admin/shareScheduling'
 import { useShareSchedulingLabels } from '@/composables/useShareSchedulingLabels'
 import { useShareSchedulingStore } from '@/stores/shareScheduling'
 import { formatDateTime } from '@/utils/format'
+import { useAdminPermission } from '@/composables/useAdminPermission'
 
 defineProps<{ view: SharePolicyView }>()
 
 const { t } = useI18n()
 const labels = useShareSchedulingLabels()
+const { canManage } = useAdminPermission('share_scheduling')
 const store = useShareSchedulingStore()
 const busy = computed(() => store.saving || store.previewing || store.pending !== null)
 </script>

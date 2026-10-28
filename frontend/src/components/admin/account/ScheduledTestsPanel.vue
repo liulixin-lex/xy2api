@@ -12,6 +12,7 @@
           {{ t('admin.scheduledTests.title') }}
         </p>
         <button
+          v-if="!readonly"
           @click="showAddForm = !showAddForm"
           class="btn btn-primary flex items-center gap-1.5 text-sm"
         >
@@ -170,6 +171,7 @@
               <div class="flex items-center gap-1.5" @click.stop>
                 <Toggle
                   :model-value="plan.enabled"
+                  :disabled="readonly"
                   @update:model-value="(val: boolean) => handleToggleEnabled(plan, val)"
                 />
                 <span class="text-xs text-gray-500 dark:text-gray-400">
@@ -200,7 +202,7 @@
               </div>
 
               <!-- Actions -->
-              <div class="flex items-center gap-1" @click.stop>
+              <div v-if="!readonly" class="flex items-center gap-1" @click.stop>
                 <button
                   @click="startEdit(plan)"
                   class="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-blue-50 hover:text-blue-500 dark:hover:bg-blue-900/20"
@@ -484,6 +486,8 @@ const props = defineProps<{
   show: boolean
   accountId: number | null
   modelOptions: SelectOption[]
+  /** View-only operators: no add, toggle, edit or delete. */
+  readonly?: boolean
 }>()
 
 const emit = defineEmits<{

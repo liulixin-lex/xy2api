@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/operatoraccess"
 	"github.com/liulixin-lex/xy2api/internal/pkg/response"
 	"github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
@@ -30,7 +31,7 @@ func NewChannelMonitorV2Handler(svc *service.ChannelMonitorV2Service, apiKeyServ
 // (shared Dimensions/Errors handlers serve both user and admin route groups).
 func channelMonitorV2IsAdmin(c *gin.Context) bool {
 	role, ok := middleware.GetUserRoleFromContext(c)
-	return ok && role == service.RoleAdmin
+	return ok && (role == service.RoleAdmin || operatoraccess.ScopeFrom(c.Request.Context()).Can(operatoraccess.ModuleChannels, operatoraccess.LevelView))
 }
 
 func (h *ChannelMonitorV2Handler) GetConfig(c *gin.Context) {

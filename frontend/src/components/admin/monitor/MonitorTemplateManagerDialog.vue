@@ -31,7 +31,7 @@
 
     <!-- active provider list -->
     <div v-if="!editing" class="space-y-2">
-      <div class="flex justify-end">
+      <div v-if="canManage" class="flex justify-end">
         <button class="btn btn-primary btn-sm" @click="openCreateForm">
           <Icon name="plus" size="sm" class="mr-1" />
           {{ t('admin.channelMonitor.template.createButton') }}
@@ -87,12 +87,15 @@
                 n: Object.keys(tpl.extra_headers || {}).length,
               }) }}
             </p>
+            <p v-if="canManage && applyNeedsSuperAdmin(tpl)" class="mt-1 text-xs text-amber-600 dark:text-amber-400" data-testid="template-apply-super-only">
+              {{ t('admin.operatorAccess.templateApplySuperOnly') }}
+            </p>
           </div>
-          <div class="flex flex-shrink-0 gap-2">
+          <div v-if="canManage" class="flex flex-shrink-0 gap-2">
             <button
               class="btn btn-secondary btn-sm"
-              :disabled="tpl.associated_monitors === 0"
-              :title="t('admin.channelMonitor.template.applyTooltip')"
+              :disabled="tpl.associated_monitors === 0 || applyNeedsSuperAdmin(tpl)"
+              :title="applyNeedsSuperAdmin(tpl) ? t('admin.operatorAccess.templateApplySuperOnly') : t('admin.channelMonitor.template.applyTooltip')"
               @click="confirmApply(tpl)"
             >
               <Icon name="refresh" size="sm" class="mr-1" />
@@ -210,6 +213,7 @@
     :show="applyPicker.show"
     :template-id="applyPicker.tpl ? applyPicker.tpl.id : null"
     :template-name="applyPicker.tpl ? applyPicker.tpl.name : ''"
+    :template-has-headers="applyPicker.tpl ? templateHasHeaders(applyPicker.tpl) : false"
     @close="applyPicker.show = false"
     @applied="onApplied"
   />
@@ -244,6 +248,8 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import MonitorAdvancedRequestConfig from '@/components/admin/monitor/MonitorAdvancedRequestConfig.vue'
 import MonitorTemplateApplyPickerDialog from '@/components/admin/monitor/MonitorTemplateApplyPickerDialog.vue'
+import { useAdminPermission } from '@/composables/useAdminPermission'
+import { useAdminAccessStore } from '@/stores/adminAccess'
 import { useChannelMonitorFormat } from '@/composables/useChannelMonitorFormat'
 import {
   PROVIDER_ANTHROPIC,
@@ -272,6 +278,15 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const appStore = useAppStore()
 const { providerPickerClass } = useChannelMonitorFormat()
+const { canManage } = useAdminPermission('channels')
+const adminAccess = useAdminAccessStore()
+// 含请求头的模板只能由超级管理员应用（应用会把请求头复制到所选监控）
+function templateHasHeaders(tpl: ChannelMonitorTemplate): boolean {
+  return Object.keys(tpl.extra_headers || {}).length > 0 || (tpl.body_override === '******' || Object.keys(tpl.body_override || {}).length > 0)
+}
+function applyNeedsSuperAdmin(tpl: ChannelMonitorTemplate): boolean {
+  return adminAccess.isOperator && templateHasHeaders(tpl)
+}
 
 const providerTabs = computed<{ value: Provider; label: string }[]>(() => [
   { value: PROVIDER_ANTHROPIC, label: t('monitorCommon.providers.anthropic') },
@@ -311,7 +326,7 @@ interface TemplateForm {
   description: string
   extra_headers: Record<string, string>
   body_override_mode: BodyOverrideMode
-  body_override: Record<string, unknown> | null
+  body_override: Record<string, unknown> | '******' | null
 }
 
 const editing = ref<null | 'new' | number>(null) // null = list view; 'new' = create; <id> = edit
@@ -339,7 +354,7 @@ function loadForm(tpl: ChannelMonitorTemplate) {
   form.description = tpl.description
   form.extra_headers = { ...(tpl.extra_headers || {}) }
   form.body_override_mode = tpl.body_override_mode
-  form.body_override = tpl.body_override ? { ...tpl.body_override } : null
+  form.body_override = tpl.body_override === '******' ? '******' : tpl.body_override ? { ...tpl.body_override } : null
 }
 
 function openCreateForm() {
@@ -434,6 +449,7 @@ const applyPicker = reactive<{ show: boolean; tpl: ChannelMonitorTemplate | null
 })
 
 function confirmApply(tpl: ChannelMonitorTemplate) {
+  if (applyNeedsSuperAdmin(tpl)) return
   applyPicker.tpl = tpl
   applyPicker.show = true
 }

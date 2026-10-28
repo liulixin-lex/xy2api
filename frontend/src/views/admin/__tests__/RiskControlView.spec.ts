@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h } from 'vue'
+import { getActivePinia } from 'pinia'
+import { useAdminAccessStore } from '@/stores/adminAccess'
 import { flushPromises, mount } from '@vue/test-utils'
 import type { DOMWrapper, VueWrapper } from '@vue/test-utils'
 
@@ -218,6 +220,28 @@ describe('admin RiskControlView', () => {
       api_key_masks: [],
       api_key_statuses: [],
     }))
+  })
+
+  it.each([undefined, 'https://***@relay.example.com/v1'])('omits an unchanged operator base URL and locks the engine (%s)', async (base_url) => {
+    getActivePinia()!.state.value.auth = { user: { id: 7, role: 'operator' } }
+    const access = useAdminAccessStore()
+    access.access = { role: 'operator', is_super_admin: false, modules: { security_audit: 'manage' }, flags: base_url ? ['accounts.upstream_address'] : [], settings: {} as any, custom_menu_items: [] }
+    access.loaded = true
+    getConfig.mockResolvedValue({ ...baseConfig(), base_url, engine: 'openai', engine_configs: { openai: { ...baseConfig(), base_url } } })
+    const wrapper = mount(RiskControlView, { global: { stubs: { AppLayout: AppLayoutStub, BaseDialog: BaseDialogStub, Icon: true, Select: true, Toggle: true, Pagination: true, ModelWhitelistSelector: ModelWhitelistSelectorStub, ProxySelector: true } } })
+    await flushPromises()
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    const engine = wrapper.findComponent('[data-test="audit-engine-select"]')
+    expect(engine.attributes('disabled')).toBeDefined()
+    engine.vm.$emit('update:modelValue', 'typesafe')
+    await flushPromises()
+    await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click')
+    await flushPromises()
+    const payload = updateConfig.mock.calls.at(-1)![0]
+    expect(payload.engine).toBe('openai')
+    expect(payload).not.toHaveProperty('base_url')
+    expect(payload).not.toHaveProperty('engine_configs')
+    wrapper.unmount()
   })
 
   it.each(['openai', 'typesafe'] as const)('shows the selected draft engine keys while %s remains active', async (activeEngine) => {

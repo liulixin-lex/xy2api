@@ -272,6 +272,9 @@ func validatePayGAccount(account *Account) error {
 	if account == nil {
 		return infraerrors.New(http.StatusNotFound, "CN_BALANCE_ACCOUNT_NOT_FOUND", "account not found")
 	}
+	if upstreamBalanceCNRelayAccount(account) {
+		return ErrCNBalanceRelayAccount
+	}
 	// Cline 积分余额只查官方主机。
 	if account.IsCline() {
 		if !account.clineAccountAPISupported() {

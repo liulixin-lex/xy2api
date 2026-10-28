@@ -15,6 +15,7 @@
         </p>
       </div>
       <button
+        v-if="canManage"
         type="button"
         class="btn btn-primary"
         :disabled="saving || !dirty"
@@ -276,9 +277,11 @@ import {
 } from '@/api/channelMonitorV2'
 import { adminAPI } from '@/api/admin'
 import type { AdminGroup } from '@/types'
+import { useAdminPermission } from '@/composables/useAdminPermission'
 
 const { t, te } = useI18n()
 const appStore = useAppStore()
+const { canManage } = useAdminPermission('channels')
 const loading = ref(true)
 const saving = ref(false)
 const draft = ref<MonitorConfig | null>(null)

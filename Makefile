@@ -56,8 +56,36 @@ FRONTEND_CRITICAL_VITEST := \
 	src/views/admin/__tests__/GroupsView.categories.spec.ts \
 	src/views/admin/__tests__/AccountsView.groupCategories.spec.ts \
 	src/components/common/__tests__/Select.spec.ts \
+	src/components/common/__tests__/DataTable.spec.ts \
 	src/components/common/__tests__/GroupOptionItem.spec.ts \
-	src/components/common/__tests__/TruncatedTextPopover.spec.ts
+	src/components/common/__tests__/TruncatedTextPopover.spec.ts \
+	src/components/account/__tests__/UpstreamBalanceCell.spec.ts \
+	src/components/account/__tests__/NewApiWalletSection.spec.ts \
+	src/components/account/__tests__/EditAccountModal.newapiWallet.spec.ts \
+	src/api/__tests__/admin.accounts.upstreamBalances.spec.ts \
+	src/views/admin/__tests__/AccountsView.upstreamBalance.spec.ts \
+	src/stores/__tests__/adminAccess.spec.ts \
+	src/router/__tests__/adminPermissionMeta.spec.ts \
+	src/components/layout/__tests__/AppSidebar.operator.spec.ts \
+	src/components/admin/user/__tests__/OperatorPermissionsTable.spec.ts \
+	src/components/admin/user/__tests__/UserEditModal.operator.spec.ts \
+	src/views/admin/__tests__/AccountsView.operatorAccess.spec.ts \
+	src/api/__tests__/client.permissionDenied.spec.ts \
+	src/components/admin/__tests__/AdminComplianceDialog.operator.spec.ts \
+	src/stores/__tests__/adminSettings.operator.spec.ts \
+	src/components/account/__tests__/EditAccountModal.operatorAddress.spec.ts \
+	src/components/account/__tests__/CreateAccountModal.operator.spec.ts \
+	src/components/account/__tests__/BulkEditAccountModal.operator.spec.ts \
+	src/components/admin/account/__tests__/ReAuthAccountModal.operator.spec.ts \
+	src/views/admin/__tests__/ProxiesView.operator.spec.ts \
+	src/components/admin/monitor/__tests__/MonitorTemplateApplyPickerDialog.operator.spec.ts \
+	src/views/admin/ops/components/__tests__/OpsSettingsDialog.operator.spec.ts \
+	src/views/admin/__tests__/UsersView.operator.spec.ts \
+	src/views/admin/__tests__/ChannelsView.operator.spec.ts \
+	src/views/admin/__tests__/GroupsView.operator.spec.ts \
+	src/components/admin/__tests__/accountToolPanels.readonly.spec.ts \
+	src/components/admin/monitor/__tests__/MonitorFormDialog.operator.spec.ts \
+	src/views/admin/__tests__/RiskControlView.spec.ts
 
 # 一键编译前后端
 build: build-backend build-frontend

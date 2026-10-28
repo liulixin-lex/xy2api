@@ -29,7 +29,8 @@
 
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
-        <div v-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
+        <!-- 接入地址：普通管理员需要“显示上游地址”权限 -->
+        <div v-if="showUpstreamAddress && (!isCNApiKeyAccount || editApiProtocol !== 'adaptive')" data-testid="edit-access-address">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
             v-model="editBaseUrl"
@@ -63,7 +64,7 @@
             @select="onCnPresetSelect"
           />
         </div>
-        <div v-else>
+        <div v-else-if="showUpstreamAddress" data-testid="edit-access-address-endpoints">
           <label class="input-label">{{ t('admin.accounts.cnProviders.apiProtocol.endpoints') }}</label>
           <div class="mt-2 space-y-3">
             <div v-for="item in editAdaptiveProtocolOptions" :key="item.value">
@@ -77,6 +78,8 @@
             {{ t('admin.accounts.cnProviders.apiProtocol.responsesFallbackDesc') }}
           </p>
         </div>
+        <!-- 接入模式与协议：普通管理员没有“显示上游地址”权限时只读 -->
+        <fieldset :disabled="networkLocked" class="contents [&>*]:mt-4">
         <!-- OpenCode Zen vs GO -->
         <div v-if="isCNApiKeyAccount && account.platform === 'opencode_go'">
           <label class="input-label">{{ t('admin.accounts.cnProviders.accountMode.title') }}</label>
@@ -191,6 +194,7 @@
           </div>
           <p class="input-hint">{{ t(`admin.accounts.cnProviders.apiProtocol.${cnProtocolDescKey}Desc`) }}</p>
         </div>
+        </fieldset>
         <OpenCodeGoProtocolRulesEditor
           v-if="isCNApiKeyAccount && providerRoutesByModel(account.platform) && editApiProtocol === 'adaptive'"
           v-model:rows="editOpenCodeGoProtocolRules"
@@ -250,6 +254,12 @@
           />
           <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
         </div>
+        <NewApiWalletSection
+          v-if="account.platform !== 'antigravity'"
+          :key="account.id"
+          v-model="editNewApiWallet"
+          :configured="account.credentials_status?.has_newapi_access_token === true"
+        />
 
         <!-- Model Restriction Section (不适用于 Antigravity) -->
         <div v-if="account.platform !== 'antigravity'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
@@ -674,9 +684,11 @@
 
       <!-- Grok OAuth Custom Upstream URL (仅改写转发端点，OAuth 授权/刷新不受影响) -->
       <div
-        v-if="account.platform === 'grok' && account.type === 'oauth'"
+        v-if="showUpstreamAddress && account.platform === 'grok' && account.type === 'oauth'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
+        <p v-if="networkLocked" class="input-hint mb-2">{{ t('admin.operatorAccess.networkLockedRefreshable') }}</p>
+        <fieldset :disabled="networkLocked">
         <div class="mb-3 flex items-center justify-between">
           <div>
             <label class="input-label mb-0">{{ t('admin.accounts.grokCustomBaseUrl.title') }}</label>
@@ -711,6 +723,7 @@
           />
           <GrokBaseUrlPresets @select="grokOAuthBaseUrl = $event" />
         </div>
+        </fieldset>
       </div>
 
       <!-- Header Override Section (eligible API-key platforms + grok OAuth) -->
@@ -892,7 +905,7 @@
 
       <!-- Upstream fields (only for upstream type) -->
       <div v-if="account.type === 'upstream'" class="space-y-4">
-        <div>
+        <div v-if="showUpstreamAddress" data-testid="edit-upstream-address">
           <label class="input-label">{{ t('admin.accounts.upstream.baseUrl') }}</label>
           <input
             v-model="editBaseUrl"
@@ -1184,6 +1197,7 @@
             type="text"
             class="input"
             placeholder="us-east-1"
+            :disabled="networkLocked"
           />
           <p class="input-hint">{{ t('admin.accounts.bedrockRegionHint') }}</p>
         </div>
@@ -1665,11 +1679,12 @@
         </div>
       </div>
 
-      <div v-if="!isSparkShadow">
+      <div v-if="!isSparkShadow && showUpstreamAddress" data-testid="edit-account-proxy">
         <div class="mb-1 flex items-center gap-2">
           <label class="input-label mb-0">{{ t('admin.accounts.proxy') }}</label>
         </div>
-        <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
+        <ProxySelector v-model="form.proxy_id" :proxies="proxies" :disabled="networkLocked" />
+        <p v-if="networkLocked" class="input-hint">{{ t('admin.operatorAccess.networkLockedRefreshable') }}</p>
       </div>
 
       <CodexAccountTicketSettings
@@ -2279,7 +2294,7 @@
 
       <!-- OpenAI API 长上下文计费开关 -->
       <div
-        v-if="account?.platform === 'openai' && !isSparkShadow && !hideAccountLongContextBilling && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
+        v-if="canAdjustBalance && account?.platform === 'openai' && !isSparkShadow && !hideAccountLongContextBilling && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between gap-4">
@@ -2930,7 +2945,7 @@
         </div>
 
         <!-- Cache TTL Override -->
-        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+        <div v-if="canAdjustBalance" class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
           <div class="flex items-center justify-between">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.cacheTTLOverride.label') }}</label>
@@ -2970,7 +2985,9 @@
         </div>
 
         <!-- Custom Base URL Relay -->
-        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+        <div v-if="showUpstreamAddress" class="rounded-lg border border-gray-200 p-4 dark:border-dark-600" data-testid="edit-custom-base-url">
+          <p v-if="networkLocked" class="input-hint mb-2">{{ t('admin.operatorAccess.networkLockedRefreshable') }}</p>
+          <fieldset :disabled="networkLocked">
           <div class="flex items-center justify-between">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.customBaseUrl.label') }}</label>
@@ -3002,6 +3019,7 @@
               :placeholder="t('admin.accounts.quotaControl.customBaseUrl.urlHint')"
             />
           </div>
+          </fieldset>
         </div>
       </div>
 
@@ -3070,8 +3088,9 @@
         </div>
       </div>
 
-      <!-- Group Selection - 仅标准模式显示 -->
+      <!-- Group Selection - 仅标准模式显示；放入或移出分组需要“加减余额”权限 -->
       <GroupSelector
+        v-if="canAdjustBalance"
         v-model="form.group_ids"
         :groups="selectableGroups"
         :platform="account?.platform"
@@ -3165,6 +3184,8 @@ import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestId
 import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
+import { useAdminAccessStore } from '@/stores/adminAccess'
+import { REFRESHABLE_ACCOUNT_TYPES, applyOperatorAccountPayloadRules, operatorAccountErrorMessage } from '@/components/account/operatorAccountRules'
 import CodexAccountTicketSettings from '@/components/account/CodexAccountTicketSettings.vue'
 import ShareAccountRules from '@/components/account/ShareAccountRules.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
@@ -3175,6 +3196,8 @@ import CnBaseUrlPresets from '@/components/account/CnBaseUrlPresets.vue'
 import OpenCodeGoProtocolRulesEditor from '@/components/account/OpenCodeGoProtocolRulesEditor.vue'
 import HeaderOverrideEditor from '@/components/account/HeaderOverrideEditor.vue'
 import OllamaCloudUsageSettings from '@/components/account/OllamaCloudUsageSettings.vue'
+import NewApiWalletSection from '@/components/account/NewApiWalletSection.vue'
+import { applyNewApiWalletCredentials, isNewApiWalletUserIdValid, newApiWalletDraftFromCredentials, type NewApiWalletDraft } from '@/components/account/newApiWalletCredentials'
 import {
   applyAntigravityProjectID,
   applyHeaderOverride,
@@ -3257,6 +3280,14 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const appStore = useAppStore()
 const browserTimeZone = getBrowserTimeZone()
+
+// 普通管理员（xy-admin-operator-scope）：接入地址与代理需要“显示上游地址”，
+// OAuth 类账号的网络设置只读；分组与计费附加项需要“加减余额”。
+const access = useAdminAccessStore()
+const showUpstreamAddress = computed(() => access.can('accounts.upstream_address'))
+const canAdjustBalance = computed(() => access.can('users.balance_adjust'))
+const isRefreshableAccount = computed(() => REFRESHABLE_ACCOUNT_TYPES.includes(props.account?.type ?? ''))
+const networkLocked = computed(() => access.isOperator && (!showUpstreamAddress.value || isRefreshableAccount.value))
 
 const selectableGroups = computed(() => {
   const groups = new Map<number, Group>(props.groups.map(group => [group.id, group]))
@@ -3392,6 +3423,7 @@ interface TempUnschedRuleForm {
 const submitting = ref(false)
 const editBaseUrl = ref('https://api.anthropic.com')
 const editApiKey = ref('')
+const editNewApiWallet = ref<NewApiWalletDraft>(newApiWalletDraftFromCredentials())
 
 // ── 国产供应商（Kimi / Zhipu / DeepSeek）account_mode / api_protocol 编辑 ──
 // account_mode 决定额度/余额监控路径，api_protocol 决定转发端点与格式；
@@ -3770,10 +3802,14 @@ const {
   reset: resetQuotaNotify,
 } = useQuotaNotifyState()
 
-// Load global feature states once
+// Load global feature states once (operators read it from /admin/me/access)
+if (access.isOperator) {
+  void access.ensureLoaded().then(() => { webSearchGlobalEnabled.value = access.settings?.web_search_emulation_enabled === true })
+} else {
 adminAPI.settings.getWebSearchEmulationConfig().then(cfg => {
   webSearchGlobalEnabled.value = cfg?.enabled === true && (cfg?.providers?.length ?? 0) > 0
 }).catch(() => { webSearchGlobalEnabled.value = false })
+}
 
 loadQuotaNotifyGlobal()
 const editQuotaLimit = ref<number | null>(null)
@@ -4596,6 +4632,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     selectedErrorCodes.value = []
   }
   editApiKey.value = ''
+  editNewApiWallet.value = newApiWalletDraftFromCredentials(newAccount.credentials)
 }
 
 async function loadTLSProfiles() {
@@ -5165,7 +5202,10 @@ const persistGrokMediaEligibility = async (accountID: number, updatedAccount: Ac
 const submitUpdateAccount = async (accountID: number, updatePayload: Record<string, unknown>) => {
   submitting.value = true
   try {
-    let updatedAccount = await adminAPI.accounts.update(accountID, withAntigravityConfirmFlag(updatePayload))
+    const payload = access.isOperator
+      ? applyOperatorAccountPayloadRules(updatePayload, { networkLocked: networkLocked.value, canAdjustBalance: canAdjustBalance.value })
+      : updatePayload
+    let updatedAccount = await adminAPI.accounts.update(accountID, withAntigravityConfirmFlag(payload))
     updatedAccount = await persistGrokMediaEligibility(accountID, updatedAccount)
     appStore.showSuccess(t('admin.accounts.accountUpdated'))
     emit('updated', updatedAccount)
@@ -5181,7 +5221,7 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
       })
       return
     }
-    appStore.showError(error.message || t('admin.accounts.failedToUpdate'))
+    appStore.showError(operatorAccountErrorMessage(error, t, t('admin.accounts.failedToUpdate')) || error.message || t('admin.accounts.failedToUpdate'))
   } finally {
     submitting.value = false
   }
@@ -5284,6 +5324,13 @@ const handleSubmit = async () => {
       } else if (!hasExistingApiKey) {
         appStore.showError(t('admin.accounts.apiKeyIsRequired'))
         return
+      }
+      if (props.account.platform !== 'antigravity') {
+        if (!isNewApiWalletUserIdValid(editNewApiWallet.value.userId)) {
+          appStore.showError(t('admin.accounts.newapiWallet.userIdInvalid'))
+          return
+        }
+        applyNewApiWalletCredentials(newCredentials, editNewApiWallet.value, 'edit')
       }
 
       // Add model mapping if configured（OpenAI 开启自动透传时保留现有映射，不再编辑）

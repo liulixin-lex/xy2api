@@ -13,6 +13,7 @@
           />
           <AccountTableActions
             :loading="loading"
+            :can-create="canManage"
             @refresh="handleManualRefresh"
             @create="showCreate = true"
           >
@@ -83,6 +84,8 @@
                     @click.stop
                   >
                     <div class="overflow-y-auto p-2" :style="{ maxHeight: `${accountToolsDropdownPosition.maxHeight}px` }">
+                      <!-- 数据导入、导出与 CRS 同步只对超级管理员开放 -->
+                      <template v-if="isSuperAdmin">
                       <div class="px-2 py-2">
                         <div class="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
                           {{ t('admin.accounts.dataActions') }}
@@ -116,6 +119,7 @@
                       </button>
 
                       <div class="my-2 border-t border-gray-100 dark:border-dark-700"></div>
+                      </template>
                       <div class="px-2 py-2">
                         <div class="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
                           {{ t('admin.accounts.toolActions') }}
@@ -173,6 +177,7 @@
       </template>
       <template #table>
         <AccountBulkActionsBar
+          v-if="canManage"
           :selected-ids="selIds"
           :total-results="pagination.total"
           :selecting-all="selectingAllResults"
@@ -210,14 +215,15 @@
           <template #header-select>
             <input
               type="checkbox"
-              class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
               :checked="allVisibleSelected"
+              :disabled="!canManage"
               @click.stop
               @change="toggleSelectAllVisible($event)"
             />
           </template>
           <template #cell-select="{ row }">
-            <input type="checkbox" :checked="isSelected(row.id)" @change="toggleSel(row.id)" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+            <input type="checkbox" :checked="isSelected(row.id)" :disabled="!canManage" @change="toggleSel(row.id)" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500 disabled:cursor-not-allowed disabled:opacity-50" />
           </template>
           <template #cell-id="{ value }">
             <span class="font-mono text-xs text-gray-500 dark:text-gray-400">#{{ value }}</span>
@@ -295,13 +301,13 @@
           <template #header-schedulable="{ column }"><div class="flex items-center gap-1"><span>{{ column.label }}</span><HelpTooltip :content="t('admin.accounts.schedulableHint')" width-class="w-72" /></div></template>
           <template #cell-schedulable="{ row }">
             <div class="flex flex-col items-start gap-1.5">
-            <button type="button" role="switch" :aria-checked="row.schedulable" :aria-busy="togglingSchedulable.has(row.id)" :aria-label="t('admin.accounts.columns.schedulable') + ' ' + row.name" @click="handleToggleSchedulable(row)" :disabled="togglingSchedulable.has(row.id)" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
+            <button type="button" role="switch" :aria-checked="row.schedulable" :aria-busy="togglingSchedulable.has(row.id)" :aria-label="t('admin.accounts.columns.schedulable') + ' ' + row.name" @click="handleToggleSchedulable(row)" :disabled="!canManage || togglingSchedulable.has(row.id)" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
               <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out motion-reduce:transition-none" :class="[row.schedulable ? 'translate-x-4' : 'translate-x-0']" />
             </button>
             </div>
           </template>
           <template #cell-iq_check="{ row }">
-            <IQCheckCell :account="row" :busy="togglingIQCheck.has(row.id)" @toggle="handleToggleIQCheck(row, $event)" @records="iqRecordsAccount = row" />
+            <IQCheckCell :account="row" :busy="!canManage || togglingIQCheck.has(row.id)" @toggle="handleToggleIQCheck(row, $event)" @records="iqRecordsAccount = row" />
           </template>
           <template #cell-today_stats="{ row }">
             <AccountTodayStatsCell
@@ -311,7 +317,7 @@
             />
           </template>
           <template #cell-groups="{ row }">
-            <AccountGroupsCellButton :groups="accountGroupsForRow(row)" :account-name="row.name" @open="groupsDialogAccount = row" />
+            <AccountGroupsCellButton :groups="accountGroupsForRow(row)" :account-name="row.name" @open="canPlaceGroups && (groupsDialogAccount = row)" />
           </template>
           <template #header-usage="{ column }">
             <div class="flex items-center">
@@ -350,7 +356,7 @@
                 <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200" :title="t('admin.accounts.fallbackActiveTip', { origin: row.proxy_fallback_origin_name })">
                   {{ t('admin.accounts.fallbackActive') }}
                 </span>
-                <button class="text-xs px-1.5 py-0.5 rounded border border-gray-300 dark:border-dark-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700" @click="onRevertFallback(row)">{{ t('admin.accounts.revertProxy') }}</button>
+                <button v-if="isSuperAdmin" class="text-xs px-1.5 py-0.5 rounded border border-gray-300 dark:border-dark-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700" data-testid="revert-proxy-fallback" @click="onRevertFallback(row)">{{ t('admin.accounts.revertProxy') }}</button>
               </div>
             </div>
           </template>
@@ -384,6 +390,9 @@
               :probing="probingUpstreamBilling.has(row.id)"
               @probe="handleProbeUpstreamBilling(row)"
             />
+          </template>
+          <template #cell-upstream_balance="{ row }">
+            <UpstreamBalanceCell :item="upstreamBalanceByAccountId[String(row.id)]" :now="upstreamBalanceNow" />
           </template>
           <template #cell-priority="{ row }">
             <AccountPriorityCell
@@ -448,11 +457,11 @@
           </template>
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
-              <button @click="handleEdit(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400">
+              <button v-if="canManage" @click="handleEdit(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400">
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
                 <span class="text-xs">{{ t('common.edit') }}</span>
               </button>
-              <button @click="handleDelete(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400">
+              <button v-if="canManage" @click="handleDelete(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400">
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
                 <span class="text-xs">{{ t('common.delete') }}</span>
               </button>
@@ -467,16 +476,16 @@
       </template>
       <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
     </TablePageLayout>
-    <CreateAccountModal v-if="createModalMounted" :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
+    <CreateAccountModal v-if="createModalMounted" :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="handleAccountCreated" />
     <EditAccountModal v-if="editModalMounted" :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
     <ReAuthAccountModal v-if="reAuthModalMounted" :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountTestModal v-if="testModalMounted" :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal v-if="statsModalMounted" :show="showStats" :account="statsAcc" @close="closeStatsModal" />
-    <ScheduledTestsPanel v-if="schedulePanelMounted" :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
+    <ScheduledTestsPanel v-if="schedulePanelMounted" :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" :readonly="!canManage" @close="closeSchedulePanel" />
     <IQCheckResultsModal v-if="iqRecordsAccount" :show="true" :account="iqRecordsAccount" @close="iqRecordsAccount = null" @updated="handleIQSummaryUpdated" />
     <AccountGroupsDialog v-if="groupsDialogAccount" :account="groupsDialogAccount" :groups="groups" @close="groupsDialogAccount = null" @updated="handleAccountUpdated" />
     <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @iq-run="handleRunIQCheck" @iq-records="iqRecordsAccount = $event" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
-    <SyncFromCrsModal v-if="syncModalMounted" :show="showSync" @close="showSync = false" @synced="reload" />
+    <SyncFromCrsModal v-if="syncModalMounted" :show="showSync" @close="showSync = false" @synced="handleCrsSynced" />
     <ImportDataModal v-if="importModalMounted" :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
       v-if="bulkEditModalMounted"
@@ -499,19 +508,21 @@
         <span>{{ t('admin.accounts.dataExportIncludeProxies') }}</span>
       </label>
     </ConfirmDialog>
-    <ErrorPassthroughRulesModal v-if="errorPassthroughModalMounted" :show="showErrorPassthrough" @close="showErrorPassthrough = false" />
-    <TLSFingerprintProfilesModal v-if="tlsProfilesModalMounted" :show="showTLSFingerprintProfiles" @close="showTLSFingerprintProfiles = false" />
+    <ErrorPassthroughRulesModal v-if="errorPassthroughModalMounted" :show="showErrorPassthrough" :readonly="!canManage" @close="showErrorPassthrough = false" />
+    <TLSFingerprintProfilesModal v-if="tlsProfilesModalMounted" :show="showTLSFingerprintProfiles" :readonly="!canManage" @close="showTLSFingerprintProfiles = false" />
     <TotpStepUpDialog :controller="accountExportStepUp" />
   </AppLayout>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
-import { useIntervalFn } from '@vueuse/core'
+import { useEventListener, useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useGroupCategoriesStore } from '@/stores/groupCategories'
+import { useAdminAccessStore } from '@/stores/adminAccess'
+import { useAdminPermission } from '@/composables/useAdminPermission'
 import { adminAPI } from '@/api/admin'
 import { useTableLoader } from '@/composables/useTableLoader'
 import { useSwipeSelect, type SwipeSelectVirtualContext } from '@/composables/useSwipeSelect'
@@ -547,6 +558,8 @@ import AccountGroupsCellButton from '@/components/admin/account/AccountGroupsCel
 import AccountGroupsDialog from '@/components/admin/account/AccountGroupsDialog.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
 import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
+import UpstreamBalanceCell from '@/components/account/UpstreamBalanceCell.vue'
+import type { UpstreamBalanceItem } from '@/api/admin/accounts'
 import AccountPriorityCell from '@/components/account/AccountPriorityCell.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -581,6 +594,10 @@ const TLSFingerprintProfilesModal = defineLazyComponent(() => import('@/componen
 const { t, te } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
+const adminAccess = useAdminAccessStore()
+const { canManage, has, isSuperAdmin } = useAdminPermission('accounts')
+// Group placement (group dialog) also needs "Adjust balance".
+const canPlaceGroups = computed(() => canManage.value && has('users.balance_adjust'))
 const proxies = ref<AccountProxy[]>([])
 const groups = ref<AdminGroup[]>([])
 const groupCategories = useGroupCategoriesStore()
@@ -1166,6 +1183,7 @@ const toggleColumn = (key: string) => {
     })
   }
   if (key === 'status' && wasHidden) void refreshRecentHealthBatch()
+  if (key === 'upstream_balance' && wasHidden) void refreshUpstreamBalances()
   if (key === 'scheduler_score') {
     // The server only returns scheduler scores when this column is visible, so reload the current page immediately.
     syncAccountListDerivedParams()
@@ -1270,9 +1288,9 @@ const swipeVirtualContext: SwipeSelectVirtualContext = {
 
 useSwipeSelect(accountTableRef, {
   isSelected,
-  select,
-  deselect,
-  batchUpdate
+  select: (id) => { if (canManage.value) select(id) },
+  deselect: (id) => { if (canManage.value) deselect(id) },
+  batchUpdate: (updater) => { if (canManage.value) batchUpdate(updater) }
 }, swipeVirtualContext)
 
 const resetAutoRefreshCache = () => {
@@ -1519,6 +1537,168 @@ const isAnyModalOpen = computed(() => {
     groupsDialogAccount.value !== null ||
     showTLSFingerprintProfiles.value
   )
+})
+
+// 上游余额列（xy-upstream-balance）：每 30 秒读一次后端缓存（后端每分钟采集），只请求当前页账号；
+// 与“自动刷新”互不相关。弹窗打开、页面隐藏或该列隐藏时不请求；菜单打开时只跳过定时轮询。
+const UPSTREAM_BALANCE_POLL_MS = 30_000
+// 后端单次最多接受 200 个 id，超出返回 400。
+const UPSTREAM_BALANCE_MAX_IDS = 200
+const upstreamBalanceByAccountId = ref<Record<string, UpstreamBalanceItem>>({})
+// 本机时钟与服务端的偏差，按每次成功响应的 server_time 校正；单元格的“现在”= Date.now() + 偏差。
+let upstreamBalanceClockOffsetMs = 0
+const upstreamBalanceNow = ref(Date.now())
+// 请求代次：新请求、账号增删改、卸载都会 +1，旧代次的响应一律丢弃。
+let upstreamBalanceReqSeq = 0
+let upstreamBalanceAbortController: AbortController | null = null
+// 每个账号行的“身份版本”：取决定后端余额指纹的配置字段（平台、类型、代理、脱敏后的凭据与 has_* 标记）。
+// 不用 updated_at：网关每 10 秒回写最近使用时间时也会刷新它。别处改了地址、代理等配置时行被原位替换、
+// id 集合不变，只能靠版本变化发现。列表看不到的密钥轮换由后端指纹在下一次轮询内隐藏旧值。
+let upstreamBalanceRowVersions = new Map<number, string>()
+let upstreamBalanceIdKeySeen = ''
+// 403 后停止余额请求：只在页面重新挂载，或权限刷新后仍有 accounts:view 时恢复（普通管理员被撤权时只有一次 403）。
+let upstreamBalanceForbidden = false
+const isForbiddenError = (error: unknown) => (error as { status?: number } | null)?.status === 403
+watch(() => adminAccess.version, () => {
+  if (adminAccess.can('accounts:view')) upstreamBalanceForbidden = false
+})
+const stableStringify = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  if (value && typeof value === 'object') {
+    const entries = Object.keys(value as Record<string, unknown>)
+      .sort()
+      .map(key => `${JSON.stringify(key)}:${stableStringify((value as Record<string, unknown>)[key])}`)
+    return `{${entries.join(',')}}`
+  }
+  return JSON.stringify(value ?? null)
+}
+const upstreamBalanceRowVersion = (account: Pick<Account, 'platform' | 'type' | 'proxy_id' | 'credentials' | 'credentials_status'>) =>
+  stableStringify([account.platform, account.type, account.proxy_id ?? null, account.credentials ?? null, account.credentials_status ?? null])
+const upstreamBalanceIdKey = (rows: Array<{ id: number }>) => rows.map(row => row.id).sort((a, b) => a - b).join(',')
+
+const tickUpstreamBalanceNow = () => {
+  upstreamBalanceNow.value = Date.now() + upstreamBalanceClockOffsetMs
+}
+
+const isAbortLikeError = (error: unknown) => {
+  const refreshError = error as { name?: string; code?: string } | null
+  return refreshError?.name === 'AbortError' || refreshError?.name === 'CanceledError' || refreshError?.code === 'ERR_CANCELED'
+}
+
+const abortUpstreamBalanceRequests = () => {
+  upstreamBalanceReqSeq += 1
+  upstreamBalanceAbortController?.abort()
+  upstreamBalanceAbortController = null
+}
+
+// 账号创建、修改、删除后：作废进行中的请求，并丢掉这些账号的缓存值，避免旧身份的余额在新配置下闪回。
+const invalidateUpstreamBalances = (accountIDs: number[] = []) => {
+  abortUpstreamBalanceRequests()
+  if (accountIDs.length === 0) return
+  const next = { ...upstreamBalanceByAccountId.value }
+  for (const id of accountIDs) delete next[String(id)]
+  upstreamBalanceByAccountId.value = next
+}
+
+const refreshUpstreamBalances = async () => {
+  if (upstreamBalanceForbidden) return
+  if (hiddenColumns.has('upstream_balance') || isAnyModalOpen.value) return
+  if (typeof document !== 'undefined' && document.hidden) return
+  const accountIDs = accounts.value.map(account => account.id)
+  abortUpstreamBalanceRequests()
+  const reqSeq = upstreamBalanceReqSeq
+  if (accountIDs.length === 0) {
+    upstreamBalanceByAccountId.value = {}
+    return
+  }
+  const controller = new AbortController()
+  upstreamBalanceAbortController = controller
+  try {
+    // 后端单次最多 200 个 id：按页内顺序分片并行请求，再按 account_id 合并。
+    const chunks: number[][] = []
+    for (let i = 0; i < accountIDs.length; i += UPSTREAM_BALANCE_MAX_IDS) {
+      chunks.push(accountIDs.slice(i, i + UPSTREAM_BALANCE_MAX_IDS))
+    }
+    // 时钟偏差按每个分片响应到达的那一刻计算，取最后到达的一个；慢分片不会拿别的分片的 server_time 去比。
+    let clockOffsetSample: number | null = null
+    const results = await Promise.allSettled(
+      chunks.map(async (chunk) => {
+        const result = await adminAPI.accounts.getUpstreamBalances(chunk, { signal: controller.signal })
+        const serverMs = Date.parse(result?.server_time ?? '')
+        if (Number.isFinite(serverMs)) clockOffsetSample = serverMs - Date.now()
+        return result
+      })
+    )
+    if (reqSeq !== upstreamBalanceReqSeq) return
+    if (clockOffsetSample !== null) upstreamBalanceClockOffsetMs = clockOffsetSample
+    const previous = upstreamBalanceByAccountId.value
+    const next: Record<string, UpstreamBalanceItem> = {}
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') {
+        for (const item of result.value?.items ?? []) next[String(item.account_id)] = item
+        return
+      }
+      if (isForbiddenError(result.reason)) upstreamBalanceForbidden = true
+      // 失败的分片保留这些账号上一次的值（配置变了的账号在发现时已删掉，不会被带回来）。
+      for (const id of chunks[index]) {
+        const key = String(id)
+        if (previous[key]) next[key] = previous[key]
+      }
+      if (!isAbortLikeError(result.reason)) {
+        console.error('Failed to load upstream balances:', result.reason)
+      }
+    })
+    upstreamBalanceByAccountId.value = next
+    tickUpstreamBalanceNow()
+  } catch (error) {
+    if (isForbiddenError(error)) upstreamBalanceForbidden = true
+    if (reqSeq !== upstreamBalanceReqSeq) return
+    if (!isAbortLikeError(error)) console.error('Failed to load upstream balances:', error)
+  } finally {
+    if (upstreamBalanceAbortController === controller) upstreamBalanceAbortController = null
+  }
+}
+
+const pollUpstreamBalances = () => {
+  tickUpstreamBalanceNow()
+  if (loading.value) return
+  if (menu.show || showAccountToolsDropdown.value || showAutoRefreshDropdown.value) return
+  void refreshUpstreamBalances()
+}
+useIntervalFn(pollUpstreamBalances, UPSTREAM_BALANCE_POLL_MS)
+
+// 当前页账号变化时只用这一个监听，一次变化最多发一次请求：
+// - 切页、改每页条数、筛选或增删行使 id 集合变化（只是重新排序不算）；
+// - 同一批账号里有行的身份版本变了（自动刷新、重载或别的管理员改了配置）：先删掉这些账号的旧值，
+//   请求返回前显示 —，重查失败也不会把旧值带回来。
+// 运行时字段（并发数、会话数、最近使用时间、updated_at）的变化不会多发请求。
+watch(accounts, (rows) => {
+  const idKey = upstreamBalanceIdKey(rows)
+  const idChanged = idKey !== upstreamBalanceIdKeySeen
+  upstreamBalanceIdKeySeen = idKey
+  const versions = new Map<number, string>()
+  const changedIDs: number[] = []
+  for (const row of rows) {
+    const version = upstreamBalanceRowVersion(row)
+    const known = upstreamBalanceRowVersions.get(row.id)
+    if (known !== undefined && known !== version) changedIDs.push(row.id)
+    versions.set(row.id, version)
+  }
+  upstreamBalanceRowVersions = versions
+  if (changedIDs.length > 0) invalidateUpstreamBalances(changedIDs)
+  else if (idChanged) abortUpstreamBalanceRequests()
+  if (idChanged || changedIDs.length > 0) void refreshUpstreamBalances()
+})
+const invalidateCurrentPageUpstreamBalances = () => {
+  invalidateUpstreamBalances(accounts.value.map(account => account.id))
+}
+// 弹窗关闭后立即补一次（弹窗打开期间轮询被跳过）。
+watch(isAnyModalOpen, (open, wasOpen) => {
+  if (wasOpen && !open) void refreshUpstreamBalances()
+})
+// 页面重新可见时立即补一次。
+useEventListener(document, 'visibilitychange', () => {
+  if (!document.hidden) void refreshUpstreamBalances()
 })
 
 const enterAutoRefreshSilentWindow = () => {
@@ -1955,6 +2135,7 @@ const allColumns = computed(() => {
     { key: 'scheduler_score', label: t('admin.accounts.columns.schedulerScore'), sortable: false },
     { key: 'rate_multiplier', label: t('admin.accounts.columns.billingRateMultiplier'), sortable: true },
     { key: 'upstream_billing_rate', label: t('admin.accounts.columns.upstreamBillingRate'), sortable: true },
+    { key: 'upstream_balance', label: t('admin.accounts.columns.upstreamBalance'), sortable: false },
     { key: 'last_used_at', label: t('admin.accounts.columns.lastUsed'), sortable: true },
     { key: 'created_at', label: t('admin.accounts.columns.createdAt'), sortable: true },
     { key: 'expires_at', label: t('admin.accounts.columns.expiresAt'), sortable: true },
@@ -2029,6 +2210,7 @@ const handleBulkDelete = async () => {
   if (!confirm(t('admin.accounts.bulkActions.confirmDelete', { count: accountIds.length }))) return
   try {
     const result = await adminAPI.accounts.batchDelete(accountIds)
+    invalidateUpstreamBalances(accountIds)
     if (result.failed > 0) {
       appStore.showError(t('admin.accounts.bulkActions.partialSuccess', {
         success: result.success,
@@ -2300,12 +2482,18 @@ const openBulkEditFiltered = async () => {
 }
 
 const handleBulkUpdated = () => {
+  // 按筛选批量编辑时改动范围不止所选行：作废当前页全部账号；按所选编辑时用打开时保存的 id。
+  const target = bulkEditTarget.value
+  if (target?.mode === 'selected') invalidateUpstreamBalances([...target.accountIds])
+  else if (target?.mode === 'filtered') invalidateCurrentPageUpstreamBalances()
+  else invalidateUpstreamBalances([...selIds.value])
   showBulkEdit.value = false
   bulkEditTarget.value = null
   clearSelection()
   reload()
 }
-const handleDataImported = () => { showImportData.value = false; reload() }
+const handleDataImported = () => { showImportData.value = false; invalidateCurrentPageUpstreamBalances(); reload() }
+const handleCrsSynced = () => { invalidateCurrentPageUpstreamBalances(); reload() }
 const ACCOUNT_UNGROUPED_GROUP_QUERY_VALUE = 'ungrouped'
 const ACCOUNT_PRIVACY_MODE_UNSET_QUERY_VALUE = '__unset__'
 const buildAccountQueryFilters = () => ({
@@ -2422,6 +2610,7 @@ const refreshAccountsAfterUpstreamBillingProbe = async () => {
   await refreshUpstreamBillingSortedList(true)
 }
 const handleProbeUpstreamBilling = async (account: Account) => {
+  if (!canManage.value) return
   if (probingUpstreamBilling.has(account.id)) return
   probingUpstreamBilling.add(account.id)
   try {
@@ -2440,6 +2629,16 @@ const handleProbeUpstreamBilling = async (account: Account) => {
 const handleAccountUpdated = (updatedAccount: Account) => {
   patchAccountInList(updatedAccount)
   enterAutoRefreshSilentWindow()
+  invalidateUpstreamBalances([updatedAccount.id])
+  // 已在此处作废并重查，记下新版本，避免版本监听再发一次请求。
+  if (upstreamBalanceRowVersions.has(updatedAccount.id)) {
+    upstreamBalanceRowVersions.set(updatedAccount.id, upstreamBalanceRowVersion(updatedAccount))
+  }
+  void refreshUpstreamBalances()
+}
+const handleAccountCreated = () => {
+  invalidateUpstreamBalances()
+  reload()
 }
 const formatExportTimestamp = () => {
   const now = new Date()
@@ -2637,7 +2836,7 @@ const confirmCreateSparkShadow = async () => {
   }
 }
 const handleDelete = (a: Account) => { deletingAcc.value = a; showDeleteDialog.value = true }
-const confirmDelete = async () => { if(!deletingAcc.value) return; try { await adminAPI.accounts.delete(deletingAcc.value.id); showDeleteDialog.value = false; deletingAcc.value = null; reload() } catch (error) { console.error('Failed to delete account:', error) } }
+const confirmDelete = async () => { if(!deletingAcc.value) return; try { await adminAPI.accounts.delete(deletingAcc.value.id); invalidateUpstreamBalances([deletingAcc.value.id]); showDeleteDialog.value = false; deletingAcc.value = null; reload() } catch (error) { console.error('Failed to delete account:', error) } }
 const setSchedulableLocally = (accountId: number, schedulable: boolean) => {
   accounts.value = accounts.value.map((account) => (account.id === accountId ? { ...account, schedulable } : account))
 }
@@ -2798,6 +2997,7 @@ let cancelModalPrefetch: (() => void) | null = null
 onUnmounted(() => {
   cancelModalPrefetch?.()
   upstreamBillingRateAbortController?.abort()
+  abortUpstreamBalanceRequests()
   if (usageBatchFlushTimer !== null) {
     clearTimeout(usageBatchFlushTimer)
     usageBatchFlushTimer = null

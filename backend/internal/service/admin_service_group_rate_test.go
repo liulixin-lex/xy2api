@@ -41,6 +41,10 @@ func (s *userGroupRateRepoStubForGroupRate) GetRPMOverrideByUserAndGroup(_ conte
 	panic("unexpected GetRPMOverrideByUserAndGroup call")
 }
 
+func (s *userGroupRateRepoStubForGroupRate) GetOwnerIDsByGroupID(context.Context, int64, bool) ([]int64, error) {
+	panic("unexpected GetOwnerIDsByGroupID call")
+}
+
 func (s *userGroupRateRepoStubForGroupRate) GetByGroupID(_ context.Context, groupID int64) ([]UserGroupRateEntry, error) {
 	if s.getByGroupIDErr != nil {
 		return nil, s.getByGroupIDErr

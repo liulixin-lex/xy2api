@@ -1134,7 +1134,9 @@
           </button>
 
           <button
+            v-if="showUpstreamAddress"
             type="button"
+            data-testid="antigravity-upstream-type"
             @click="antigravityAccountType = 'upstream'"
             :class="[
               'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
@@ -1160,6 +1162,8 @@
           </button>
         </div>
       </div>
+
+      <p v-if="form.platform === 'antigravity' && !showUpstreamAddress" class="input-hint" data-testid="address-needs-flag">{{ t('admin.operatorAccess.addressNeedsFlag') }}</p>
 
       <div v-if="form.platform === 'antigravity' && antigravityAccountType === 'oauth'">
         <label class="input-label">{{ t('admin.accounts.antigravityProjectIdLabel') }}</label>
@@ -1423,7 +1427,9 @@
 
       <!-- API Key input (only for apikey type, excluding Antigravity which has its own fields) -->
       <div v-if="form.type === 'apikey' && form.platform !== 'antigravity'" class="space-y-4">
-        <div v-if="!isMultiProtocolPlatform || apiProtocol !== 'adaptive'">
+        <!-- 接入地址：普通管理员需要“显示上游地址”权限，否则使用平台默认地址 -->
+        <p v-if="!showUpstreamAddress" class="input-hint" data-testid="address-needs-flag">{{ t('admin.operatorAccess.addressNeedsFlag') }}</p>
+        <div v-if="showUpstreamAddress && (!isMultiProtocolPlatform || apiProtocol !== 'adaptive')" data-testid="create-access-address">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
             v-model="apiKeyBaseUrl"
@@ -1447,7 +1453,7 @@
             @select="onCnPresetSelect"
           />
         </div>
-        <div v-else>
+        <div v-else-if="showUpstreamAddress">
           <label class="input-label">{{ t('admin.accounts.cnProviders.apiProtocol.endpoints') }}</label>
           <div class="mt-2 space-y-3">
             <div v-for="item in cnAdaptiveProtocolOptions" :key="item.value">
@@ -1483,6 +1489,7 @@
           />
           <p v-if="apiKeyHint" class="input-hint">{{ apiKeyHint }}</p>
         </div>
+        <NewApiWalletSection v-model="newApiWallet" />
 
         <!-- 上游倍率自动探测：全部 API-key 平台可用（所在区块已限定 apikey 类型） -->
         <div
@@ -2281,7 +2288,7 @@
 
       <!-- Grok OAuth Custom Upstream URL (仅改写转发端点，OAuth 授权/刷新不受影响) -->
       <div
-        v-if="form.platform === 'grok' && isOAuthFlow"
+        v-if="showUpstreamAddress && form.platform === 'grok' && isOAuthFlow"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="mb-3 flex items-center justify-between">
@@ -2991,7 +2998,7 @@
         </div>
 
         <!-- Cache TTL Override -->
-        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+        <div v-if="canAdjustBalance" class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
           <div class="flex items-center justify-between">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.cacheTTLOverride.label') }}</label>
@@ -3031,7 +3038,7 @@
         </div>
 
         <!-- Custom Base URL Relay -->
-        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+        <div v-if="showUpstreamAddress" class="rounded-lg border border-gray-200 p-4 dark:border-dark-600" data-testid="create-custom-base-url">
           <div class="flex items-center justify-between">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.customBaseUrl.label') }}</label>
@@ -3066,7 +3073,7 @@
         </div>
       </div>
 
-      <div>
+      <div v-if="showUpstreamAddress" data-testid="create-account-proxy">
         <div class="mb-1 flex items-center gap-2">
           <label class="input-label mb-0">{{ t('admin.accounts.proxy') }}</label>
         </div>
@@ -3279,7 +3286,7 @@
 
       <!-- OpenAI API 长上下文计费开关 -->
       <div
-        v-if="form.platform === 'openai' && !hideAccountLongContextBilling && (accountCategory === 'oauth-based' || accountCategory === 'apikey')"
+        v-if="canAdjustBalance && form.platform === 'openai' && !hideAccountLongContextBilling && (accountCategory === 'oauth-based' || accountCategory === 'apikey')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between gap-4">
@@ -3589,8 +3596,10 @@
           </div>
         </div>
 
-        <!-- Group Selection - 仅标准模式显示 -->
+        <!-- Group Selection - 仅标准模式显示；放入分组需要“加减余额”权限 -->
+        <p v-if="!canAdjustBalance" class="input-hint" data-testid="account-ungrouped-hint">{{ t('admin.operatorAccess.accountUngroupedHint') }}</p>
         <GroupSelector
+          v-if="canAdjustBalance"
           v-model="form.group_ids"
           :groups="groups"
           :platform="form.platform"
@@ -3998,6 +4007,8 @@ import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestId
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
+import { useAdminAccessStore } from '@/stores/adminAccess'
+import { applyOperatorAccountPayloadRules, operatorAccountErrorMessage } from '@/components/account/operatorAccountRules'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
@@ -4006,6 +4017,8 @@ import GrokBaseUrlPresets from '@/components/account/GrokBaseUrlPresets.vue'
 import CnBaseUrlPresets from '@/components/account/CnBaseUrlPresets.vue'
 import OpenCodeGoProtocolRulesEditor from '@/components/account/OpenCodeGoProtocolRulesEditor.vue'
 import HeaderOverrideEditor from '@/components/account/HeaderOverrideEditor.vue'
+import NewApiWalletSection from '@/components/account/NewApiWalletSection.vue'
+import { applyNewApiWalletCredentials, emptyNewApiWalletDraft, isNewApiWalletUserIdValid, type NewApiWalletDraft } from '@/components/account/newApiWalletCredentials'
 import { accountLongContextOverrideHasNoEffect } from '@/components/account/longContextBilling'
 import {
   applyAntigravityProjectID,
@@ -4164,6 +4177,20 @@ const emit = defineEmits<{
 
 const appStore = useAppStore()
 
+// 普通管理员（xy-admin-operator-scope）：没有“显示上游地址”时不设置地址和代理（使用平台默认地址），
+// 没有“加减余额”时不放入分组、不设置计费附加项。
+const access = useAdminAccessStore()
+const showUpstreamAddress = computed(() => access.can('accounts.upstream_address'))
+const canAdjustBalance = computed(() => access.can('users.balance_adjust'))
+const operatorCreatePayload = <T extends object>(payload: T): T =>
+  access.isOperator
+    ? (applyOperatorAccountPayloadRules(payload as Record<string, unknown>, {
+        mode: 'create',
+        networkLocked: !showUpstreamAddress.value,
+        canAdjustBalance: canAdjustBalance.value
+      }) as T)
+    : payload
+
 const hideAccountLongContextBilling = computed(() => {
   return accountLongContextOverrideHasNoEffect(form.group_ids, props.groups)
 })
@@ -4232,6 +4259,8 @@ const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-
 const apiKeyBaseUrl = ref('https://api.anthropic.com')
 const apiKeyValue = ref('')
 const upstreamBillingAutoProbeEnabled = ref(true)
+// 上游余额列：new-api 钱包令牌与用户 ID（可选）
+const newApiWallet = ref<NewApiWalletDraft>(emptyNewApiWalletDraft())
 
 // ── 国产供应商（Kimi / Zhipu / DeepSeek）账号类型、API 协议与端点 ──
 // 多协议供应商（国产厂商与走通用表单的供应商）的接入模式；OpenCode 用 openCodeAccountMode。
@@ -4448,7 +4477,8 @@ const syncPreviewCredentials = computed(() => {
   return {
     platform: form.platform,
     type: form.type,
-    base_url: baseUrl || undefined,
+    // Operators without the upstream-address flag preview the platform default endpoint.
+    base_url: (showUpstreamAddress.value ? baseUrl : '') || undefined,
     api_key: apiKeyValue.value,
     ...(modelMapping ? { model_mapping: modelMapping } : {})
   }
@@ -4574,9 +4604,14 @@ const {
 } = useQuotaNotifyState()
 
 // Load global feature states once
+if (access.isOperator) {
+  // Operators read the switch from /admin/me/access (the settings route is super-admin only).
+  void access.ensureLoaded().then(() => { webSearchGlobalEnabled.value = access.settings?.web_search_emulation_enabled === true })
+} else {
 adminAPI.settings.getWebSearchEmulationConfig().then(cfg => {
   webSearchGlobalEnabled.value = cfg?.enabled === true && (cfg?.providers?.length ?? 0) > 0
 }).catch(() => { webSearchGlobalEnabled.value = false })
+}
 
 loadQuotaNotifyGlobal()
 const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling
@@ -5358,7 +5393,7 @@ const ensureAntigravityMixedChannelConfirmed = async (onConfirm: () => Promise<v
 const submitCreateAccount = async (payload: CreateAccountRequest) => {
   submitting.value = true
   try {
-    const account = await adminAPI.accounts.create(withAntigravityConfirmFlag(payload))
+    const account = await adminAPI.accounts.create(operatorCreatePayload(withAntigravityConfirmFlag(payload)))
     const modelMapping = payload.credentials.model_mapping
     const hasConcreteMappedTarget = payload.type === 'apikey' &&
       typeof modelMapping === 'object' &&
@@ -5403,7 +5438,7 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
       })
       return
     }
-    appStore.showError(error.response?.data?.message || error.response?.data?.detail || t('admin.accounts.failedToCreate'))
+    appStore.showError(operatorAccountErrorMessage(error, t, t('admin.accounts.failedToCreate')) || error.response?.data?.message || error.response?.data?.detail || t('admin.accounts.failedToCreate'))
   } finally {
     submitting.value = false
   }
@@ -5433,6 +5468,7 @@ const resetForm = () => {
   adaptiveBaseUrls.value = { chat_completions: '', anthropic: '', responses: '' }
   apiKeyBaseUrl.value = 'https://api.anthropic.com'
   apiKeyValue.value = ''
+  newApiWallet.value = emptyNewApiWalletDraft()
   upstreamRequestIdHeader.value = ''
   upstreamBillingAutoProbeEnabled.value = true
   editQuotaLimit.value = null
@@ -5902,6 +5938,11 @@ const handleSubmit = async () => {
   if (form.platform === 'gemini') {
     credentials.tier_id = geminiTierAIStudio.value
   }
+  if (!isNewApiWalletUserIdValid(newApiWallet.value.userId)) {
+    appStore.showError(t('admin.accounts.newapiWallet.userIdInvalid'))
+    return
+  }
+  applyNewApiWalletCredentials(credentials, newApiWallet.value, 'create')
 
   // 国产供应商：账号模式 + 协议 + 对应端点写入凭据；后端按 account_mode 路由
   // 额度/余额探测，按 api_protocol 路由转发端点与格式。注意 CN apikey 走本函数
@@ -6174,7 +6215,7 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
           return
         }
 
-        await adminAPI.accounts.create({
+        await adminAPI.accounts.create(operatorCreatePayload({
           name: accountName,
           notes: form.notes,
           platform: 'grok',
@@ -6189,7 +6230,7 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
           group_ids: form.group_ids,
           expires_at: form.expires_at,
           auto_pause_on_expired: autoPauseOnExpired.value
-        })
+        }))
         successCount++
       } catch (error: any) {
         failedCount++
@@ -6351,7 +6392,7 @@ const handleGrokAuthorizePassword = async (emailPasswordInput: string) => {
           return
         }
 
-        await adminAPI.accounts.create({
+        await adminAPI.accounts.create(operatorCreatePayload({
           name: accountName,
           notes: form.notes,
           platform: 'grok',
@@ -6366,7 +6407,7 @@ const handleGrokAuthorizePassword = async (emailPasswordInput: string) => {
           group_ids: form.group_ids,
           expires_at: form.expires_at,
           auto_pause_on_expired: autoPauseOnExpired.value
-        })
+        }))
         successCount++
       } catch (error: any) {
         failedCount++
@@ -6450,7 +6491,7 @@ const handleOpenAIExchange = async (authCode: string) => {
     }
 
     if (shouldCreateOpenAI) {
-      await adminAPI.accounts.create({
+      await adminAPI.accounts.create(operatorCreatePayload({
         name: form.name,
         notes: form.notes,
         platform: 'openai',
@@ -6465,7 +6506,7 @@ const handleOpenAIExchange = async (authCode: string) => {
         group_ids: form.group_ids,
         expires_at: form.expires_at,
         auto_pause_on_expired: autoPauseOnExpired.value
-      })
+      }))
       appStore.showSuccess(t('admin.accounts.accountCreated'))
     }
 
@@ -6558,7 +6599,7 @@ const handleOpenAIImportCodexSession = async (content: string) => {
 
   try {
     const extra = buildOpenAICodexImportExtra()
-    const result = await adminAPI.accounts.importCodexSession({
+    const result = await adminAPI.accounts.importCodexSession(operatorCreatePayload({
       content: trimmed,
       name: form.name,
       notes: form.notes || null,
@@ -6573,7 +6614,7 @@ const handleOpenAIImportCodexSession = async (content: string) => {
       credential_extras: Object.keys(credentialExtras).length > 0 ? credentialExtras : undefined,
       extra: withUpstreamRequestIdHeader(extra),
       update_existing: true
-    })
+    }))
 
     const successCount = result.created + result.updated
     const params = {
@@ -6636,7 +6677,7 @@ const handleOpenAIImportCodexPAT = async (accessToken: string) => {
 
   try {
     const extra = buildOpenAICodexImportExtra()
-    await adminAPI.accounts.createOpenAICodexPAT({
+    await adminAPI.accounts.createOpenAICodexPAT(operatorCreatePayload({
       access_token: trimmed,
       name: form.name,
       notes: form.notes || null,
@@ -6650,7 +6691,7 @@ const handleOpenAIImportCodexPAT = async (accessToken: string) => {
       auto_pause_on_expired: autoPauseOnExpired.value,
       credential_extras: Object.keys(credentialExtras).length > 0 ? credentialExtras : undefined,
       extra: withUpstreamRequestIdHeader(extra)
-    })
+    }))
 
     appStore.showSuccess(t('admin.accounts.accountCreated'))
     emit('created')
@@ -6731,7 +6772,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
         const accountName = refreshTokens.length > 1 ? `${baseName} #${i + 1}` : baseName
 
         if (shouldCreateOpenAI) {
-          await adminAPI.accounts.create({
+          await adminAPI.accounts.create(operatorCreatePayload({
             name: accountName,
             notes: form.notes,
             platform: 'openai',
@@ -6746,7 +6787,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
             group_ids: form.group_ids,
             expires_at: form.expires_at,
             auto_pause_on_expired: autoPauseOnExpired.value
-          })
+          }))
         }
 
         successCount++
@@ -6846,7 +6887,7 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
           expires_at: form.expires_at,
           auto_pause_on_expired: autoPauseOnExpired.value
         })
-        await adminAPI.accounts.create(createPayload)
+        await adminAPI.accounts.create(operatorCreatePayload(createPayload))
         successCount++
       } catch (error: any) {
         failedCount++
@@ -7211,7 +7252,7 @@ const handleCookieAuth = async (sessionKey: string) => {
           credentials.temp_unschedulable_rules = tempUnschedPayload
         }
 
-        await adminAPI.accounts.create({
+        await adminAPI.accounts.create(operatorCreatePayload({
           name: accountName,
           notes: form.notes,
           platform: form.platform,
@@ -7226,7 +7267,7 @@ const handleCookieAuth = async (sessionKey: string) => {
           group_ids: form.group_ids,
           expires_at: form.expires_at,
           auto_pause_on_expired: autoPauseOnExpired.value
-        })
+        }))
 
         successCount++
       } catch (error: any) {

@@ -1,6 +1,7 @@
 import { reactive, ref } from 'vue'
 import { adminAPI } from '@/api/admin'
 import { QUOTA_THRESHOLD_TYPE_FIXED, type QuotaThresholdType } from '@/constants/account'
+import { useAdminAccessStore } from '@/stores/adminAccess'
 
 export const QUOTA_NOTIFY_DIMS = ['daily', 'weekly', 'total'] as const
 export type QuotaNotifyDim = (typeof QUOTA_NOTIFY_DIMS)[number]
@@ -19,7 +20,16 @@ export function useQuotaNotifyState() {
     total: { enabled: null, threshold: null, thresholdType: null },
   })
 
+  const adminAccess = useAdminAccessStore()
+
   function loadGlobalState() {
+    // 普通管理员不能读取系统设置：开关来自 /me/access
+    if (adminAccess.isOperator) {
+      void adminAccess.ensureLoaded().then(() => {
+        globalEnabled.value = adminAccess.settings?.account_quota_notify_enabled === true
+      })
+      return
+    }
     adminAPI.settings
       .getSettings()
       .then((settings) => {

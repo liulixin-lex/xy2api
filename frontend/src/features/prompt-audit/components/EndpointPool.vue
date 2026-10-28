@@ -5,7 +5,7 @@
         <h2 id="prompt-pool-title" class="text-base font-semibold text-gray-950 dark:text-white">{{ t('admin.promptAudit.pool.title') }}</h2>
         <p class="mt-1 text-sm text-gray-500 dark:text-dark-300">{{ t('admin.promptAudit.pool.description') }}</p>
       </div>
-      <button type="button" class="btn btn-primary btn-sm" data-test="add-endpoint" @click="openCreate">
+      <button v-if="!readonly" type="button" class="btn btn-primary btn-sm" data-test="add-endpoint" @click="openCreate">
         {{ t('admin.promptAudit.pool.add') }}
       </button>
     </div>
@@ -35,6 +35,7 @@
               role="switch"
               :aria-checked="endpoint.enabled"
               :aria-label="t('admin.promptAudit.pool.toggleNode', { name: endpoint.name })"
+              :disabled="readonly"
               class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
               :class="endpoint.enabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'"
               @click="toggleEndpoint(endpoint.id)"
@@ -81,7 +82,7 @@
             </p>
           </div>
 
-          <div class="flex flex-wrap items-center justify-end gap-1 border-t border-gray-100 pt-3 dark:border-dark-800 xl:flex-nowrap xl:border-0 xl:pt-0">
+          <div v-if="!readonly" class="flex flex-wrap items-center justify-end gap-1 border-t border-gray-100 pt-3 dark:border-dark-800 xl:flex-nowrap xl:border-0 xl:pt-0">
             <button type="button" class="btn btn-secondary btn-sm" :disabled="probingIds.includes(endpoint.id)" @click="$emit('probe', endpoint)">
               {{ probingIds.includes(endpoint.id) ? t('admin.promptAudit.pool.probing') : t('admin.promptAudit.pool.probe') }}
             </button>
@@ -149,6 +150,8 @@ const props = defineProps<{
   endpoints: PromptAuditEndpointDraft[]
   probeResults: Record<string, PromptProbeResult>
   probingIds: string[]
+  /** Operators: no probe, edit or delete (the config is super-admin only). */
+  readonly?: boolean
 }>()
 const emit = defineEmits<{
   (event: 'update:endpoints', value: PromptAuditEndpointDraft[]): void

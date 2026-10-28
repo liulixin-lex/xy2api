@@ -56,6 +56,7 @@
           v-model:provider="providerFilter"
           v-model:enabled="enabledFilter"
           :loading="loading"
+          :can-create="canManage"
           @reload="reload"
           @create="openCreateDialog"
           @manage-templates="showTemplateManager = true"
@@ -97,11 +98,12 @@
           </template>
 
           <template #cell-enabled="{ row }">
-            <Toggle :modelValue="row.enabled" @update:modelValue="toggleEnabled(row)" />
+            <Toggle :modelValue="row.enabled" :disabled="!canManage" class="disabled:cursor-not-allowed disabled:opacity-60" @update:modelValue="toggleEnabled(row)" />
           </template>
 
           <template #cell-actions="{ row }">
             <MonitorActionsCell
+              v-if="canManage"
               :row="row"
               :running="runningId === row.id"
               :duplicating="duplicatingIds.has(row.id)"
@@ -116,7 +118,7 @@
             <EmptyState
               :title="t('admin.channelMonitor.noMonitorsYet')"
               :description="t('admin.channelMonitor.createFirstMonitor')"
-              :action-text="t('admin.channelMonitor.createButton')"
+              :action-text="canManage ? t('admin.channelMonitor.createButton') : undefined"
               @action="openCreateDialog"
             />
           </template>
@@ -201,9 +203,11 @@ import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { useChannelMonitorFormat } from '@/composables/useChannelMonitorFormat'
 import MonitorSettingsPanel from '@/features/channel-monitor-v2/MonitorSettingsPanel.vue'
 import { isChannelMonitorV1Mode } from '@/utils/featureFlags'
+import { useAdminPermission } from '@/composables/useAdminPermission'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const { canManage } = useAdminPermission('channels')
 const isV1Mode = computed(() => isChannelMonitorV1Mode())
 const adminMonitorTab = ref<'v2' | 'legacy'>(isChannelMonitorV1Mode() ? 'legacy' : 'v2')
 const {

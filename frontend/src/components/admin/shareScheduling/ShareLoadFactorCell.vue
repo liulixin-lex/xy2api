@@ -23,7 +23,7 @@
         :class="member.load_factor === null ? 'text-gray-400 dark:text-dark-400' : 'font-medium text-gray-900 dark:text-white'"
         :title="member.load_factor === null ? unsetHint : t('admin.shareScheduling.loadFactor.edit', { name: member.name })"
         :aria-label="t('admin.shareScheduling.loadFactor.edit', { name: member.name })"
-        :disabled="saving"
+        :disabled="saving || !canEdit"
         :data-testid="'share-load-factor-value-' + member.account_id"
         @click="start"
       >
@@ -49,6 +49,7 @@ import { update as updateAccount } from '@/api/admin/accounts'
 import type { ShareMember } from '@/api/admin/shareScheduling'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { SHARE_MAX_LOAD_FACTOR, SHARE_MIN_LOAD_FACTOR } from '@/utils/shareScheduling'
+import { useAdminAccessStore } from '@/stores/adminAccess'
 
 /**
  * Inline editor of an account's load factor. The load factor belongs to the
@@ -65,6 +66,8 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+/** Editing calls PUT /accounts/:id, so it needs accounts:manage; otherwise the value is read-only. */
+const canEdit = computed(() => useAdminAccessStore().can('accounts:manage'))
 /** An unset load factor counts as the concurrency limit (the effective value). */
 const unsetHint = computed(() => t('admin.shareScheduling.loadFactor.fromConcurrency', { value: props.member.effective_load_factor }))
 const editing = ref(false)
@@ -73,7 +76,7 @@ const input = ref('')
 const inputRef = ref<HTMLInputElement | null>(null)
 
 async function start() {
-  if (saving.value) return
+  if (saving.value || !canEdit.value) return
   input.value = props.member.load_factor === null ? '' : String(props.member.load_factor)
   editing.value = true
   await nextTick()

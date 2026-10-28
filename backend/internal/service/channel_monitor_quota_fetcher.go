@@ -409,6 +409,9 @@ func (f *ChannelMonitorQuotaFetcher) fetchCNQuota(ctx context.Context, account *
 
 // fetchCNBalance 国产 payg：CNProviderBalanceService.QueryBalanceForAccount → 快照。
 func (f *ChannelMonitorQuotaFetcher) fetchCNBalance(ctx context.Context, account *Account, now time.Time) *domain.MonitorQuotaSnapshot {
+	if upstreamBalanceCNRelayAccount(account) {
+		return &domain.MonitorQuotaSnapshot{Source: "cn_balance", Success: true, FetchedAt: now}
+	}
 	if f.cnBalance == nil {
 		return quotaErrorSnapshot("cn_balance", "cn balance service is not configured", now)
 	}

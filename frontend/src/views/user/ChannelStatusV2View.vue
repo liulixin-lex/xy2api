@@ -472,6 +472,7 @@ import MonitorRankBadge from '@/features/channel-monitor-v2/MonitorRankBadge.vue
 import MonitorTrendChart from '@/features/channel-monitor-v2/MonitorTrendChart.vue'
 import RelayPulseMatrix from '@/features/channel-monitor-v2/RelayPulseMatrix.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useAdminAccessStore } from '@/stores/adminAccess'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { isChannelMonitorThroughputHidden, isChannelMonitorUserRankingHidden } from '@/utils/featureFlags'
@@ -511,7 +512,9 @@ const router = useRouter()
 const authStore = useAuthStore()
 const appStore = useAppStore()
 const { t, te, locale } = useI18n()
-const isAdmin = computed(() => authStore.isAdmin)
+const access = useAdminAccessStore()
+/** Super admins, and operators holding channels:view, use the admin monitor API. */
+const isAdmin = computed(() => authStore.isAdmin || (authStore.canAccessAdmin && access.can('channels:view')))
 /** Admins always see RPM/TPM; users honor the hide-throughput system setting. */
 const showThroughput = computed(() => isAdmin.value || !isChannelMonitorThroughputHidden())
 /** Admins always see ranking; users honor the hide-user-ranking system setting. */
@@ -926,7 +929,11 @@ watch(showUserRanking, (allowed) => {
     activeTab.value = 'models'
   }
 })
-onMounted(() => void reload(false))
+onMounted(async () => {
+  // Operators: know channels:view before the first fetch picks the admin or user API.
+  if (authStore.canAccessAdmin) await access.ensureLoaded()
+  void reload(false)
+})
 onBeforeUnmount(() => {
   controller?.abort()
   if (autoRefreshTimer) window.clearInterval(autoRefreshTimer)

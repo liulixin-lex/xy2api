@@ -46,6 +46,7 @@
                 :endpoints="draft.endpoints"
                 :probe-results="probeResults"
                 :probing-ids="probingIds"
+                :readonly="!superOnly"
                 @update:endpoints="updateEndpoints"
                 @probe="runProbe"
               />
@@ -75,6 +76,7 @@
               :selected-ids="selectedEventIds"
               :loading="loading.events"
               :error="loadErrors.events"
+              :can-delete="superOnly"
               @filters-change="handleFiltersChanged"
               @search="applyEventFilters"
               @selection="selectedEventIds = $event"
@@ -90,7 +92,7 @@
       </template>
     </div>
 
-    <div v-if="draft && activeTab === 'config'" class="fixed inset-x-0 bottom-0 z-30 border-t border-gray-200 bg-white/95 px-4 py-3 shadow-[0_-12px_35px_rgba(15,23,42,0.08)] dark:border-dark-700/80 dark:bg-dark-900/95 dark:shadow-[0_-12px_35px_rgba(0,0,0,0.35)] lg:left-64">
+    <div v-if="draft && activeTab === 'config' && superOnly" class="fixed inset-x-0 bottom-0 z-30 border-t border-gray-200 bg-white/95 px-4 py-3 shadow-[0_-12px_35px_rgba(15,23,42,0.08)] dark:border-dark-700/80 dark:bg-dark-900/95 dark:shadow-[0_-12px_35px_rgba(0,0,0,0.35)] lg:left-64">
       <div class="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3">
         <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
           <SaveToggle :label="t('admin.promptAudit.saveBar.enabled')" :model-value="draft.enabled" data-test="enabled-toggle" @update:model-value="setEnabled" />
@@ -158,6 +160,7 @@ import EventWorkspace from './components/EventWorkspace.vue'
 import EventDetailDialog from './components/EventDetailDialog.vue'
 import FilterDeleteDialog from './components/FilterDeleteDialog.vue'
 import promptAuditAPI from './api'
+import { useAdminAccessStore } from '@/stores/adminAccess'
 import type {
   PromptAuditDraft,
   PromptAuditEndpointDraft,
@@ -174,6 +177,9 @@ import { buildUpdateRequest, cloneData, configToDraft, draftFingerprint, emptyEv
 
 const { t, locale } = useI18n()
 const appStore = useAppStore()
+const adminAccess = useAdminAccessStore()
+// 保存配置、探测端点和删除事件只有超级管理员可以操作
+const superOnly = computed(() => !adminAccess.isOperator)
 type PromptAuditPageTab = 'config' | 'events'
 const activeTab = ref<PromptAuditPageTab>('events')
 const pageTabs = computed(() => [
