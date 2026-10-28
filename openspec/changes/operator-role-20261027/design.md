@@ -31,6 +31,7 @@
   - 新增一条未登记的路由，测试会失败；
   - 引擎不能有自定义的 NoRoute、NoMethod 兜底链，全局中间件只能是白名单里的那几个。
 - **跨模块读取**：页面里的下拉选择（分组、代理、用户列表等）在目录行上用 any_of 登记，不新增接口。名单来自前端调用方扫描，不靠猜测。
+- **链路测试**：认证、目标与字段保护各自使用能到达该保护的夹具；四项受影响的链路回归必须在移除对应保护时失败，不能因无关的先行拒绝而通过。
 
 为什么用一张表：
 - 授权集中在一个可审查的地方；
@@ -40,6 +41,8 @@
 ## 3. 失败即拒绝的中间件
 
 **链路**：认证 → 限流 → 审计 → 权限 → 合规 → 处理器。三个组都挂载 `AdminPermission()`：admin 组、payment 管理组、`/api/v1/pages` 组。审计在权限之前，所以被拒绝的请求也会以 403 留下记录。
+
+`PUT /users/:id/operator-permissions` 沿用这条链路：审计中间件先缓冲请求体，处理器随后执行二次验证。开启二次验证后，没有通过验证仍拒绝权限写入。
 
 **adminAuth 具名补丁 `xy-admin-operator-scope`**
 - 准入条件改为 `CanAccessAdmin()`；`IsAdmin()` 保持“超级管理员”语义。
@@ -55,6 +58,8 @@
 5. 响应按该行的脱敏规则改写（第 6 节）。
 
 请求体上限 16 MiB。存储的权限 JSON 不合法时按空权限处理，并记一次日志。
+
+按 ID 加载分组、用户、代理或账号的辅助函数保留 not-found 错误；分组不存在返回 404，与超级管理员相同。只有其他加载错误或仓库缺失才返回 503 `OPERATOR_ACCESS_UNAVAILABLE`。
 
 **规范请求检查**：处理器用 `encoding/json` 绑定，它有三个宽松之处：
 - 键名不区分大小写（还会做 Unicode 折叠）；
@@ -87,7 +92,9 @@
 **资金**
 - 没有 `users.balance_adjust` 时：
   - 新建用户把余额设为 0，跳过默认订阅；
-  - 分组价格字段在服务自身的规范化（`normalizeLimit`）之后与原值比较。
+  - 分组价格字段在服务自身的规范化之后与原值比较：限额用 `normalizeLimit`，可选价格用 `normalizePrice`，推理强度映射和最大推理强度也按服务的有效值比较。可选价格的 `-1` 与 NULL 等价，空价格可以原样往返。
+- 已有分组的 `platform`、`force_openai_fast`、`reasoning_effort_mappings`、`max_reasoning_effort` 都属于价格字段；没有资金开关时，修改返回 400 `ADMIN_FIELD_FORBIDDEN`，携带字段名，且不写入。平台切换会重新规范化利润控制与 Fast 计费，不能借切到 `composite` 再切回重置价格。新建分组没有旧价格状态，平台与强制 Fast 的比较规则不改变新建行为。
+- 渠道绑定任意分组后，`account_stats_pricing_rules` 与 `apply_pricing_to_account_stats` 也需要 `users.balance_adjust`。没有开关时只能缺省或与已保存的有效值相同，否则在 `ChannelService.Update` 写入前返回 400 与字段名；新建时绑定分组同样检查。
 - 价格字段与“自由字段”两份清单覆盖输入结构的全部字段。`TestOperatorGroupFieldListCoversInputs` 与 `TestOperatorGroupFieldListCoversUpdateRequest` 在出现未归类字段时失败，因为漏掉一个价格字段就等于放行。
 
 **放置**
@@ -98,6 +105,12 @@
   - 分组的 `copy_accounts_from_group_ids`；
   - 删除仍有账号的分组：只走“必须为空”的删除路径。
 - 没有开关时只能新建专属分组：新的公开分组对所有用户可用，价格又由创建者决定。
+- 删除账号属于 `accounts:manage`，可以删除仍绑定分组的账号并移除绑定，不另要求资金开关；这一操作不增加余额或提高价格。
+
+**目标用户**
+- 分组每用户倍率表与 RPM 表的所有者查询包含已软删除用户，不能漏掉其管理员或普通管理员身份。
+- `DELETE /user-attributes/:id` 使用 `attribute_value_owners`，加载定义下全部属性值的所有者（含已软删除用户）。任一所有者为管理员、普通管理员或自己，删除前返回 403 `ADMIN_TARGET_FORBIDDEN`；加载失败返回 503。
+- `POST /user-attributes/batch` 对 `user_ids` 执行 `user_body_ids`，混合批次在任何缓存读取前整批拒绝。前端批量读取属性时跳过管理员、普通管理员与自己。
 
 **凭据**
 - **网络身份键**：地址键、`proxy_id`、`type`、`platform`、`api_protocol`、`account_mode`、`aws_region`。`TestOperatorNetworkKeysCoverBaseURLGetters` 解析地址、协议、模式与区域相关的取值函数，函数里读到的键不在清单中就失败。
@@ -108,6 +121,8 @@
 - **Bedrock 区域**：普通管理员提交的区域必须符合 `^[a-z]{2}(-[a-z]+)+-[0-9]+$`，这样主机名总在 `amazonaws.com` 之下。
 
 渠道、渠道监控、代理、兑换码、风控配置等规则只看请求体与存储值，放在中间件的守卫里。
+
+风控配置禁止普通管理员切换审计引擎：非空 `engine` 与当前引擎不同，返回 400 `ADMIN_FIELD_FORBIDDEN`，字段为 `engine`。API Key、模型和代理按当前生效引擎的已保存配置比较，不能靠选择另一引擎绕过检查。
 
 ## 5. 显式调用者
 
@@ -125,7 +140,7 @@
 ## 6. 脱敏
 
 - **位置**：脱敏是 `AdminPermission()` 内的响应改写，按目录行选择规则，只对普通管理员执行。DTO 映射不改，一处覆盖所有路由。
-- **规则**：`account`、`api_key`、`redeem_code`、`promo_code`、`order_code`、`proxy_password`、`monitor`、`monitor_template`、`monitor_message`、`audit_body`、`ops_upstream_url`。各自的范围与解除开关见现行文档“保护措施”。
+- **规则**：`account`、`api_key`、`redeem_code`、`promo_code`、`order_code`、`proxy_password`、`monitor`、`monitor_template`、`monitor_message`、`monitor_v2_errors`、`risk_config_url`、`audit_body`、`ops_upstream_url`。各自的范围与解除开关见现行文档“保护措施”。
 - **机制**：
   - 只缓冲 JSON 响应，数字按 `json.Number` 往返；
   - 处理器设置了 `ETag` 时，按改写后的内容重新计算，并由中间件自己回答 304；
@@ -133,14 +148,20 @@
   - 改写失败返回 500 `ADMIN_REDACTION_FAILED`，绝不返回原文。
 - **流式响应**：带 `account` 规则的 SSE 响应逐行改写并立即转发，不缓冲整个流。账号测试的处理器在调用服务前先声明 `text/event-stream`（一行改动），因为服务在设置响应头之前就可能写出错误事件。
 - **错误详情**：没有 `accounts.upstream_address` 时，错误字段换成固定文字 `upstream error details hidden`，而不是逐个删除主机名。主机名清单仍会漏掉 TLS 证书名、重定向目标和不带协议的地址，固定文字什么都不会漏，也更容易测试。5xx 响应只做这一步。
+- **网址中的凭据**：所有普通管理员都先执行 `StripURLUserinfo`，再按开关删除地址字段。覆盖账号的 `credentials.base_url`、每个 `api_base_urls` 值、`extra` 与顶层的 `custom_base_url`，监控 `endpoint`，风控顶层和各 `engine_configs` 的 `base_url`，以及运维的 `upstream_url`（含 `upstream_errors` JSON 字符串，有 `ops:view` 也处理）。全局扫描每个 `scheme://`，包括逗号后、查询参数内和多个网址；用户名中含单引号也处理。
+- **地址往返**：账号更新与批量规则、`monitor_update`、`risk_config` 把等于 `StripURLUserinfo(stored)` 的输入还原为存储值，再判断网络变化。其他带 `***@` 的输入返回 400 `ADMIN_FIELD_FORBIDDEN` 与字段名。原样保存不会覆盖凭据或误触发重填密钥。
+- **监控覆盖请求体**：`monitor` 与 `monitor_template` 的非空 `body_override` 一律显示为字符串 `******`，与地址开关无关。新建、编辑监控和编辑模板时按掩码保留已保存值；监控网络变化时丢弃未重新填写的覆盖请求体，与请求头一致。含非空覆盖请求体的模板，普通管理员既不能应用，也不能在创建或编辑监控时关联，返回 `SUPER_ADMIN_REQUIRED`。
+- **风控地址**：`risk_config_url` 只处理响应副本，覆盖 `GET` 与 `PUT /risk-control/config`。没有地址开关时删除顶层与每个引擎的 `base_url`；有开关时仍去掉网址中的用户名和密码。
 - **操作日志请求体**：
   - 按 `EqualFold` 匹配键名，同一对象里的别名和重复键都会处理；
   - 先按记录的路由模板查目录：普通管理员不能调用的接口（`super_only` 行、目录外的路由、登录与用户端接口）整段隐藏请求体和查询参数。这些请求体大多是密钥和配置，存储时的按键名脱敏覆盖不全（例如 `rt`、带账号密码的代理网址、路径里带令牌的 webhook 网址）；
   - 其余请求体：`rt`、`proxy_url` 一律打码，网址里的用户名和密码一律去掉；没有 `accounts.upstream_address` 时，所有字符串里的网址都换成 `[upstream]`；
-  - 查询参数按 `url.ParseQuery` 解码后判断，含网址或地址键时整段隐藏（存储的是百分号编码的原文）；
+  - 查询参数按 `url.ParseQuery` 解码后判断，无法解析或含网址用户名密码时一律隐藏；没有地址开关时，含网址或地址键也整段隐藏（存储的是百分号编码的原文）；
+  - 路由检查通过后，没有 `redeem_codes.issue` 时，带 `redeem_code`、`promo_code` 脱敏或 `redeem_search`、`promo_search` 字段规则的记录（含兑换码导出），`extra.query` 整段改为 `<query hidden>`，已有日志也一样；
   - 无法解析的请求体（包括超过 16 KB 被截断的）整体隐藏；
   - 存储时的脱敏与审计中间件不改。
-- **运维与监控的错误文字**：只通过「使用记录」查看错误详情的调用者，上游错误信息和错误事件的 `message`、`detail` 换成固定文字；渠道监控的检测历史与立即检测结果里，状态为 `error` 的 `message` 换成固定文字（`monitor_message`）。
+- **运维与监控的错误文字**：只通过「使用记录」查看错误详情且没有地址开关的调用者，上游错误信息和错误事件的 `message`、`detail` 换成固定文字；没有地址开关时，渠道监控的检测历史与立即检测结果里，状态为 `error` 的 `message` 换成固定文字（`monitor_message`）。`monitor` 与 `monitor_message` 还处理额度快照：`data` 下带 `source` 或 `success` 的对象中，非空 `error` 换成固定文字，覆盖 `latest_quota` 与 `quota`。
+- **渠道监控 v2**：`GET /channel-monitor-v2/errors` 用 `monitor_v2_errors`。同时没有 `ops:view` 与地址开关时，`data` 下非空 `details[*].message` 换成固定文字；次数、分类、状态码与响应外层保留。
 - **机器码保留**：错误字段里形如 `mixed_channel_warning` 的机器码（`^[a-z][a-z0-9_]{0,63}$`）不替换，前端仍能识别。
 - **防止搜索还原**：被打码的值不能靠搜索逐字试出来。
   - 用户搜索对普通管理员不匹配 API Key；
@@ -224,7 +245,9 @@
 - 开关持有者保存地址后的 DNS 重绑定（D14）；
 - 超级管理员不受 Bedrock 区域格式约束；
 - 账号测试显示上游正常回复，个别字段里可能残留主机名；
-- 运维监控错误详情显示上游地址；
+- 运维监控错误详情显示上游地址，但网址中的用户名和密码始终隐藏；
 - 账号自身倍率；
 - 绑定真实第三方身份的首次绑定赠送；
-- 原代理被超级管理员删除后复制回退中的账号。
+- 原代理被超级管理员删除后复制回退中的账号；
+- 有账号管理权限即可删除已绑定分组的账号并移除绑定（E10）；
+- 权限保存的审计中间件先缓冲请求体，再由处理器检查二次验证；验证未通过仍拒绝写入（E11）。
