@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AxiosInstance } from 'axios'
-import { ADMIN_PERMISSION_DENIED_EVENT } from '@/stores/adminAccess'
+import { ADMIN_ACCESS_SUPER_CACHE_KEY, ADMIN_PERMISSION_DENIED_EVENT } from '@/stores/adminAccess'
 
 vi.mock('@/i18n', () => ({
   getLocale: () => 'zh-CN'
@@ -72,5 +72,32 @@ describe('API client permission-denied event', () => {
       await expect(apiClient.get('/admin/accounts')).rejects.toMatchObject({ status })
     }
     expect(events).toHaveLength(2)
+  })
+
+  it('clears the cached super-admin flag on both 401 cleanup paths', async () => {
+    window.history.replaceState({}, '', '/login')
+    const expired = {
+      response: { status: 401, data: { code: 'TOKEN_EXPIRED' } },
+      config: { url: '/admin/users', headers: { Authorization: 'Bearer expired-token' } }
+    }
+
+    // No refresh token: the session is cleared at once.
+    localStorage.setItem('auth_token', 'expired-token')
+    localStorage.setItem(ADMIN_ACCESS_SUPER_CACHE_KEY, 'false')
+    apiClient.defaults.adapter = vi.fn().mockRejectedValueOnce(expired)
+    await expect(apiClient.get('/admin/users')).rejects.toBeDefined()
+    expect(localStorage.getItem('auth_token')).toBeNull()
+    expect(localStorage.getItem(ADMIN_ACCESS_SUPER_CACHE_KEY)).toBeNull()
+
+    // Refresh rejected: the session is cleared after the failed refresh.
+    localStorage.setItem('auth_token', 'expired-token')
+    localStorage.setItem('refresh_token', 'refresh-token')
+    localStorage.setItem(ADMIN_ACCESS_SUPER_CACHE_KEY, 'true')
+    const refresh = await import('@/api/tokenRefresh')
+    vi.spyOn(refresh, 'refreshAuthTokens').mockRejectedValueOnce(new Error('Invalid refresh response'))
+    apiClient.defaults.adapter = vi.fn().mockRejectedValueOnce(expired)
+    await expect(apiClient.get('/admin/users')).rejects.toMatchObject({ status: 401, code: 'TOKEN_REFRESH_FAILED' })
+    expect(localStorage.getItem('refresh_token')).toBeNull()
+    expect(localStorage.getItem(ADMIN_ACCESS_SUPER_CACHE_KEY)).toBeNull()
   })
 })

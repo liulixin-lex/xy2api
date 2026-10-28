@@ -1,5 +1,5 @@
-import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { defineStore, getActivePinia } from 'pinia'
+import { ref, watch } from 'vue'
 import { adminAPI } from '@/api'
 import type { CustomMenuItem } from '@/types'
 import { useAuthStore } from './auth'
@@ -67,6 +67,9 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
   // 侧栏、运维页、用量页会在同一时刻各自调用 fetch：共享进行中的请求，
   // 让后到的调用方也能等到数据，而不是立即返回默认值或重复请求。
   let inflight: Promise<void> | null = null
+  // Bumped when the signed-in user or role changes: a load started for the
+  // previous session must not mark the store loaded for the next one.
+  let generation = 0
 
   function fetch(force = false): Promise<void> {
     if (loaded.value && !force) return Promise.resolve()
@@ -85,11 +88,12 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
   async function loadForOperator(): Promise<void> {
     loading.value = true
     const usageMetricsReadRevision = usageMetricsRevision
+    const loadGeneration = generation
     try {
       await useAdminAccessStore().refresh()
       const access = useAdminAccessStore()
       const settings = access.settings
-      if (!access.loaded || !settings) return
+      if (loadGeneration !== generation || !access.loaded || !settings) return
       if (usageMetricsReadRevision === usageMetricsRevision) setUsageMetricsLocal(settings)
       opsMonitoringEnabled.value = settings.ops_monitoring_enabled
       writeCachedBool('ops_monitoring_enabled_cached', opsMonitoringEnabled.value)
@@ -119,11 +123,13 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
     }
     loading.value = true
     const usageMetricsReadRevision = usageMetricsRevision
+    const loadGeneration = generation
     try {
       const [settingsResult, paymentResult] = await Promise.allSettled([
         adminAPI.settings.getSettings(),
         adminAPI.payment.getConfig()
       ])
+      if (loadGeneration !== generation) return
       if (settingsResult.status === 'rejected') throw settingsResult.reason
       const settings = settingsResult.value
       if (usageMetricsReadRevision === usageMetricsRevision) setUsageMetricsLocal(settings)
@@ -199,6 +205,27 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
   if (typeof window !== 'undefined') {
     initializeEventListeners()
   }
+
+  // An operator's snapshot (no custom admin menu, settings from /me/access)
+  // must not outlive the session: reset on logout and on a switch to another
+  // user or role, as the admin access store does.
+  const pinia = getActivePinia()
+  watch(
+    () => {
+      const user = (pinia?.state.value as Record<string, { user?: { id?: number; role?: string } | null } | undefined> | undefined)?.auth?.user
+      return user ? `${user.id}:${user.role}` : null
+    },
+    (current, previous) => {
+      if (previous && current !== previous) {
+        generation += 1
+        inflight = null
+        loaded.value = false
+        loading.value = false
+        customMenuItems.value = []
+      }
+    },
+    { flush: 'sync' }
+  )
 
   return {
     usageCacheHitRateEnabled,

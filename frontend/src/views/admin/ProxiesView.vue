@@ -1003,6 +1003,7 @@ import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatDateTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 import { useAdminPermission } from '@/composables/useAdminPermission'
+import { useAdminAccessStore } from '@/stores/adminAccess'
 import { operatorAccountErrorMessage } from '@/components/account/operatorAccountRules'
 
 const { t } = useI18n()
@@ -1012,6 +1013,11 @@ const { canManage, has, isSuperAdmin } = useAdminPermission('proxies')
 // 新建代理、修改代理的协议/主机/端口/账号/密码/备用链需要“显示上游地址”权限
 const canEditNetwork = computed(() => has('accounts.upstream_address'))
 const canCreateProxies = computed(() => canManage.value && canEditNetwork.value)
+const adminAccess = useAdminAccessStore()
+// The status and expiry shown when the edit form opened. An operator's save
+// leaves them out unless they were changed: an in-use proxy refuses a status
+// change, and the form maps a stored "expired" to "inactive".
+const editLoaded = reactive({ status: '', expires_at: '' })
 /** Fields of `PUT /proxies/:id` an operator without the upstream-address flag leaves out. */
 const PROXY_NETWORK_FIELDS = ['protocol', 'host', 'port', 'username', 'password', 'fallback_mode', 'backup_proxy_id'] as const
 
@@ -1449,6 +1455,8 @@ const handleEdit = (proxy: Proxy) => {
   editForm.fallback_mode = proxy.fallback_mode || 'none'
   editForm.backup_proxy_id = proxy.backup_proxy_id ?? null
   editForm.expiry_warn_days = proxy.expiry_warn_days ?? 7
+  editLoaded.status = editForm.status
+  editLoaded.expires_at = editForm.expires_at
   editPasswordVisible.value = false
   editPasswordDirty.value = false
   showEditModal.value = true
@@ -1498,6 +1506,11 @@ const handleUpdateProxy = async () => {
     // 没有“显示上游地址”权限：网络字段只读，不随保存提交（后端保留原值）
     if (!canEditNetwork.value) {
       for (const field of PROXY_NETWORK_FIELDS) delete updateData[field]
+    }
+    // 普通管理员：状态和到期日只在本次修改时提交
+    if (adminAccess.isOperator) {
+      if (editForm.status === editLoaded.status) delete updateData.status
+      if (editForm.expires_at === editLoaded.expires_at) delete updateData.expires_at
     }
 
     await adminAPI.proxies.update(editingProxy.value.id, updateData)

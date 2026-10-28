@@ -8,9 +8,16 @@ vi.mock('@/api', () => ({
   adminAPI: { settings: { getSettings: mocks.getSettings }, payment: { getConfig: mocks.getConfig } }
 }))
 vi.mock('@/api/admin/access', () => ({ getMeAccess: mocks.getMeAccess }))
-vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ isAdmin: false, canAccessAdmin: true })
-}))
+vi.mock('@/stores/auth', async () => {
+  const { getActivePinia } = await import('pinia')
+  const role = () => (getActivePinia()!.state.value.auth?.user as { role?: string } | null | undefined)?.role
+  return {
+    useAuthStore: () => ({
+      get isAdmin() { return role() === 'admin' },
+      get canAccessAdmin() { return role() === 'admin' || role() === 'operator' }
+    })
+  }
+})
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -88,5 +95,44 @@ describe('admin settings for operators', () => {
     await store.fetch()
     expect(mocks.getMeAccess).toHaveBeenCalledTimes(2)
     expect(store.loaded).toBe(true)
+  })
+
+  it('reloads full admin settings when a super admin signs in after an operator session', async () => {
+    const adminMenu = [{ id: 'm1', label: 'Docs', icon_svg: '', url: 'https://example.com', visibility: 'admin', sort_order: 1 }]
+    mocks.getSettings.mockResolvedValue({ ops_monitoring_enabled: true, custom_menu_items: adminMenu })
+    mocks.getConfig.mockResolvedValue({ data: { enabled: false } })
+    const store = useAdminSettingsStore()
+    await store.fetch()
+    expect(store.loaded).toBe(true)
+    expect(mocks.getSettings).not.toHaveBeenCalled()
+
+    getActivePinia()!.state.value.auth = { user: { id: 1, role: 'admin' }, runMode: 'standard' }
+    expect(store.loaded).toBe(false)
+
+    await store.fetch()
+    expect(mocks.getSettings).toHaveBeenCalledTimes(1)
+    expect(mocks.getConfig).toHaveBeenCalledTimes(1)
+    expect(store.loaded).toBe(true)
+    expect(store.customMenuItems).toEqual(adminMenu)
+    expect(store.paymentEnabled).toBe(false)
+  })
+
+  it('drops an operator load that finishes after the user changed', async () => {
+    let resolveAccess!: (value: unknown) => void
+    mocks.getMeAccess.mockReturnValueOnce(new Promise((resolve) => { resolveAccess = resolve }))
+    mocks.getSettings.mockResolvedValue({ ops_monitoring_enabled: true, custom_menu_items: [] })
+    mocks.getConfig.mockResolvedValue({ data: { enabled: true } })
+    const store = useAdminSettingsStore()
+    const stale = store.fetch()
+
+    getActivePinia()!.state.value.auth = { user: { id: 1, role: 'admin' }, runMode: 'standard' }
+    resolveAccess({ role: 'operator', is_super_admin: false, modules: {}, flags: [], settings: { payment_enabled: false }, custom_menu_items: [] })
+    await stale
+    expect(store.loaded).toBe(false)
+
+    await store.fetch()
+    expect(mocks.getSettings).toHaveBeenCalledTimes(1)
+    expect(store.loaded).toBe(true)
+    expect(store.paymentEnabled).toBe(true)
   })
 })

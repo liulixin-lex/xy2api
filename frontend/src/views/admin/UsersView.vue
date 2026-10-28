@@ -461,6 +461,7 @@
               <div class="group relative">
                 <button
                   class="font-medium text-gray-900 underline decoration-dashed decoration-gray-300 underline-offset-4 transition-colors hover:text-primary-600 dark:text-white dark:decoration-dark-500 dark:hover:text-primary-400"
+                  :disabled="!canReadRow(row)"
                   @click="handleBalanceHistory(row)"
                 >
                   ${{ value.toFixed(2) }}
@@ -472,7 +473,7 @@
                 </div>
               </div>
               <button
-                v-if="canActOn(row) && has('users.balance_adjust')"
+                v-if="canAdjustBalanceOf(row)"
                 @click.stop="handleDeposit(row)"
                 class="rounded px-2 py-0.5 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
                 :title="t('admin.users.deposit')"
@@ -487,6 +488,7 @@
               type="button"
               class="block text-left underline decoration-dashed decoration-gray-300 underline-offset-4 transition-colors hover:decoration-primary-400 dark:decoration-dark-500"
               :title="t('admin.users.platformQuota.cellColumnTooltip')"
+              :disabled="!canReadRow(row)"
               @click="handlePlatformQuota(row)"
             >
               <UserPlatformQuotaCell :quotas="platformQuotaStats[row.id]" />
@@ -721,7 +723,7 @@
 
               <!-- Allowed Groups -->
               <button
-                v-if="canActOn(user)"
+                v-if="isSuperAdmin || canActOn(user)"
                 @click="handleAllowedGroups(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
               >
@@ -733,7 +735,7 @@
 
               <!-- Deposit -->
               <button
-                v-if="canActOn(user) && has('users.balance_adjust')"
+                v-if="canAdjustBalanceOf(user)"
                 @click="handleDeposit(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
               >
@@ -743,7 +745,7 @@
 
               <!-- Withdraw -->
               <button
-                v-if="canActOn(user) && has('users.balance_adjust')"
+                v-if="canAdjustBalanceOf(user)"
                 @click="handleWithdraw(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
               >
@@ -755,7 +757,7 @@
 
               <!-- Platform Quotas -->
               <button
-                v-if="canActOn(user)"
+                v-if="isSuperAdmin || canActOn(user)"
                 @click="handlePlatformQuota(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
               >
@@ -883,8 +885,11 @@ const { canManage, has, isSuperAdmin } = useAdminPermission('users')
 // on plain users other than themselves (the backend target rule).
 const canActOn = (row: AdminUser) =>
   isSuperAdmin.value ? row.role !== 'admin' : canManage.value && row.role === 'user' && row.id !== authStore.user?.id
-// Operators can only open plain users' details.
+// Operators can only open plain users' details (never admins, operators or themselves).
 const canReadRow = (row: AdminUser) => isSuperAdmin.value || row.role === 'user'
+// Super admins keep deposit and withdraw on every row; operators need the row and "Adjust balance".
+const canAdjustBalanceOf = (row: AdminUser) =>
+  isSuperAdmin.value || (canActOn(row) && has('users.balance_adjust'))
 
 // Generate dynamic attribute columns from enabled definitions
 const attributeColumns = computed<Column[]>(() =>
@@ -1376,7 +1381,13 @@ const {
 })
 
 const handleSelectedKeysUpdate = (keys: Array<string | number>) => {
-  setSelectedIds(keys.filter((key): key is number => typeof key === 'number'))
+  const ids = keys.filter((key): key is number => typeof key === 'number')
+  // Operators never select rows they cannot act on (admins, operators, themselves),
+  // so bulk actions never send a target the backend refuses.
+  setSelectedIds(isSuperAdmin.value ? ids : ids.filter((id) => {
+    const row = sortedUsers.value.find((user) => user.id === id)
+    return !row || canActOn(row)
+  }))
 }
 
 const getUserSelectionLabel = (user: AdminUser) =>
@@ -1410,6 +1421,7 @@ const viewingUser = ref<AdminUser | null>(null)
 const platformQuotaUser = ref<AdminUser | null>(null)
 
 const handlePlatformQuota = (user: AdminUser) => {
+  if (!canReadRow(user)) return
   platformQuotaUser.value = user
   showPlatformQuotaModal.value = true
 }
@@ -1467,11 +1479,14 @@ const loadUsersSecondaryData = async (
       (async () => {
         try {
           // 无批量端点：对当前页用户逐个拉取，分块并发（每批 6），批间检查中止条件，避免大 pageSize 时请求洪峰
+          // 普通管理员只拉取自己能查看的用户（不含管理员、其他普通管理员和自己）
+          const readableIds = new Set(users.value.filter(canReadRow).map((user) => user.id))
+          const quotaIds = isSuperAdmin.value ? userIds : userIds.filter((id) => readableIds.has(id))
           const CHUNK = 6
-          for (let i = 0; i < userIds.length; i += CHUNK) {
+          for (let i = 0; i < quotaIds.length; i += CHUNK) {
             if (signal?.aborted) return
             if (typeof expectedSeq === 'number' && expectedSeq !== secondaryDataSeq) return
-            const chunk = userIds.slice(i, i + CHUNK)
+            const chunk = quotaIds.slice(i, i + CHUNK)
             const results = await Promise.allSettled(
               chunk.map((id) => adminAPI.users.getPlatformQuotas(id))
             )
@@ -1958,6 +1973,7 @@ const closeBalanceModal = () => {
 }
 
 const handleBalanceHistory = (user: AdminUser) => {
+  if (!canReadRow(user)) return
   balanceHistoryUser.value = user
   showBalanceHistoryModal.value = true
 }

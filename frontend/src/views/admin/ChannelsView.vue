@@ -68,6 +68,8 @@
           <template #cell-status="{ row }">
             <Toggle
               :modelValue="row.status === 'active'"
+              :disabled="!canToggleStatus(row)"
+              class="disabled:cursor-not-allowed disabled:opacity-50"
               @update:modelValue="toggleChannelStatus(row)"
             />
           </template>
@@ -1660,7 +1662,13 @@ async function handleSubmit() {
 }
 
 // ── Toggle status ──
+// A grouped channel's status counts as a price field without "Adjust balance".
+function canToggleStatus(channel: Channel) {
+  return canManage.value && (has('users.balance_adjust') || (channel.group_ids || []).length === 0)
+}
+
 async function toggleChannelStatus(channel: Channel) {
+  if (!canToggleStatus(channel)) return
   const newStatus = channel.status === 'active' ? 'disabled' : 'active'
   try {
     await adminAPI.channels.update(channel.id, { status: newStatus })

@@ -88,8 +88,8 @@ function mountView() {
         ScheduledTestsPanel: true,
         SyncFromCrsModal: true,
         TempUnschedStatusModal: true,
-        ErrorPassthroughRulesModal: true,
-        TLSFingerprintProfilesModal: true,
+        ErrorPassthroughRulesModal: { name: 'ErrorPassthroughRulesModal', props: ['show', 'readonly'], template: '<div />' },
+        TLSFingerprintProfilesModal: { name: 'TLSFingerprintProfilesModal', props: ['show', 'readonly'], template: '<div />' },
         CreateAccountModal: true,
         EditAccountModal: true,
         BulkEditAccountModal: true,
@@ -236,6 +236,28 @@ describe('admin AccountsView for operators', () => {
     expect(adminText).toContain('admin.accounts.syncFromCrs')
     expect(adminText).toContain('admin.accounts.dataImport')
     expect(adminText).toContain('admin.accounts.dataExport')
+  })
+
+  it('opens the account tool panels read-only for view-only operators', async () => {
+    const openPanels = async () => {
+      const wrapper = mountView()
+      await flushPromises()
+      for (const title of ['admin.errorPassthrough.title', 'admin.tlsFingerprintProfiles.title']) {
+        await wrapper.get('button[title="admin.accounts.moreActions"]').trigger('click')
+        await wrapper.findAll('button.account-tools-menu-item').find(button => button.text().includes(title))!.trigger('click')
+        await flushPromises()
+      }
+      const readonlyOf = (name: string) => wrapper.findComponent({ name }).props('readonly')
+      const result = [readonlyOf('ErrorPassthroughRulesModal'), readonlyOf('TLSFingerprintProfilesModal')]
+      wrapper.unmount()
+      return result
+    }
+
+    seedOperator({ accounts: 'view' })
+    expect(await openPanels()).toEqual([true, true])
+
+    seedOperator({ accounts: 'manage' })
+    expect(await openPanels()).toEqual([false, false])
   })
 
   it('hides revert proxy fallback from operators', async () => {

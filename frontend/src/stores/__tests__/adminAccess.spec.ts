@@ -210,4 +210,21 @@ describe('adminAccess store', () => {
     await store.refresh()
     expect(store.adminHomePath).toBe('/profile')
   })
+
+  it('keeps the cached super-admin flag in step with the signed-in role', () => {
+    localStorage.setItem(ADMIN_ACCESS_SUPER_CACHE_KEY, 'false')
+    seedAuth('admin')
+    useAdminAccessStore()
+    expect(localStorage.getItem(ADMIN_ACCESS_SUPER_CACHE_KEY)).toBe('true')
+
+    getActivePinia()!.state.value.auth = { user: { id: 8, role: 'operator' }, runMode: 'standard' }
+    expect(localStorage.getItem(ADMIN_ACCESS_SUPER_CACHE_KEY)).toBe('false')
+
+    getActivePinia()!.state.value.auth = { user: { id: 9, role: 'user' }, runMode: 'standard' }
+    expect(localStorage.getItem(ADMIN_ACCESS_SUPER_CACHE_KEY)).toBeNull()
+
+    localStorage.setItem(ADMIN_ACCESS_SUPER_CACHE_KEY, 'true')
+    getActivePinia()!.state.value.auth = { user: null, runMode: 'standard' }
+    expect(localStorage.getItem(ADMIN_ACCESS_SUPER_CACHE_KEY)).toBeNull()
+  })
 })

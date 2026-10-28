@@ -6834,11 +6834,12 @@ const confirmDelete = async () => {
     deletingGroup.value = null;
     loadGroups();
   } catch (error: any) {
-    // 没有“加减余额”权限时只能删除没有账号的分组（409 GROUP_NOT_EMPTY）
+    // 没有“加减余额”权限时只能删除没有账号的分组（409 GROUP_NOT_EMPTY）；
+    // 其他情况（如超级管理员在简易模式下）保持原来的提示
     const groupNotEmpty =
       error?.reason === "GROUP_NOT_EMPTY" || error?.code === "GROUP_NOT_EMPTY";
     appStore.showError(
-      groupNotEmpty
+      groupNotEmpty && !canAdjustBalance.value
         ? t("admin.operatorAccess.groupDeleteNeedsEmpty")
         : error.response?.data?.detail || t("admin.groups.failedToDelete"),
     );

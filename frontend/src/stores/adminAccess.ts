@@ -346,12 +346,17 @@ export const useAdminAccessStore = defineStore('adminAccess', () => {
 
   // Reset on logout and on a switch to another user or role. Synchronous, so
   // a load started right after a login is never dropped by a late reset.
+  // The super-admin cache follows the signed-in role from the first value on,
+  // so a key left by an earlier session never outlives it.
   watch(
     () => (authUser.value ? `${authUser.value.id}:${authUser.value.role}` : null),
     (current, previous) => {
       if (previous && current !== previous) reset()
+      if (role.value === 'admin') writeSuperCache(true)
+      else if (role.value === 'operator') writeSuperCache(false)
+      else writeSuperCache(null)
     },
-    { flush: 'sync' }
+    { flush: 'sync', immediate: true }
   )
 
   return {

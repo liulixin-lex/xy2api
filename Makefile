@@ -78,7 +78,12 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/admin/account/__tests__/ReAuthAccountModal.operator.spec.ts \
 	src/views/admin/__tests__/ProxiesView.operator.spec.ts \
 	src/components/admin/monitor/__tests__/MonitorTemplateApplyPickerDialog.operator.spec.ts \
-	src/views/admin/ops/components/__tests__/OpsSettingsDialog.operator.spec.ts
+	src/views/admin/ops/components/__tests__/OpsSettingsDialog.operator.spec.ts \
+	src/views/admin/__tests__/UsersView.operator.spec.ts \
+	src/views/admin/__tests__/ChannelsView.operator.spec.ts \
+	src/views/admin/__tests__/GroupsView.operator.spec.ts \
+	src/components/admin/__tests__/accountToolPanels.readonly.spec.ts \
+	src/components/admin/monitor/__tests__/MonitorFormDialog.operator.spec.ts
 
 # 一键编译前后端
 build: build-backend build-frontend

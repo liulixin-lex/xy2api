@@ -94,4 +94,27 @@ describe('ProxiesView for operators', () => {
     const payload = await submitEdit()
     expect(payload).toMatchObject({ host: '203.0.113.10', port: 8080, protocol: 'http', username: 'old-user', fallback_mode: 'none' })
   })
+
+  it('sends status and expiry only when the operator changed them', async () => {
+    seedOperator([])
+    list.mockResolvedValue({
+      items: [{ id: 9, name: 'proxy', protocol: 'http', host: 'proxy.example', port: 8080, status: 'expired', expires_at: '2026-01-01T00:00:00Z', fallback_mode: 'none' }],
+      total: 1,
+      pages: 1
+    })
+    await openEdit()
+    await wrapper.findAll<HTMLInputElement>('#edit-proxy-form input').find(input => input.element.value === 'proxy')!.setValue('renamed')
+    const payload = await submitEdit()
+    expect(payload.name).toBe('renamed')
+    expect(payload).not.toHaveProperty('status')
+    expect(payload).not.toHaveProperty('expires_at')
+
+    update.mockClear()
+    wrapper.unmount()
+    await openEdit()
+    await wrapper.get<HTMLInputElement>('#edit-proxy-form input[type="date"]').setValue('2027-01-01')
+    const extended = await submitEdit()
+    expect(extended.expires_at).toBe(Math.floor(new Date('2027-01-01').getTime() / 1000))
+    expect(extended).not.toHaveProperty('status')
+  })
 })
