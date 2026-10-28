@@ -6,6 +6,27 @@
 
 ## 当前交接状态
 
+### 报错后补救、重试与路由优化：集成完成，待 astra 发布 0.4.12（2026-10-28 更新）
+
+- **背景**：生产 48 小时只读分析显示，可补救的失败集中在三处：各平台按状态码各自决定是否换号；写出过协议字节就算已输出；出口不符合 Codex 与 Claude Code 的重试规则。方案见本地 `.work/tasks/20261028-error-recovery-routing/plan/FINAL_PLAN.md`。
+- **目标**：失败请求更快、更准地换号或重试，减少客户端重连与中断；首字、缓存、成功率与路由不受损；精简，不加开关与影子。用户 2026-10-28 授权实施，并在完成后授权 astra 推送、开 PR、把其他所有开启的 PR（#158、#159）一同合进 main、发布 0.4.12；部署不在授权内。
+- **已完成**：
+  - R1 分类换号与惩罚、R2 语义输出判定与 Anthropic 暂存、R3 客户端出口与替补粘性、FE 设置文案；
+  - astra 逐路审查与 R1 修复（FIX）、集成终审与 M1/M2 修复；
+  - 现行文档：`GATEWAY_RESILIENCE.md` §4.9 等、`account-scheduling.md`、runbook；
+  - 上游登记：5 条失效 literal 替换，新增钩子，具名补丁 `xy-error-recovery-routing`，scheduler-diff 审阅块。
+- **未完成**：
+  1. astra 按 `implementation/RELEASE_BRIEF.md`：本任务 PR；#158 → #159 → 本任务依次合并；发版准备 PR；annotated tag v0.4.12 与 Release；发版后记忆归档 PR。
+  2. 上线后按 `evidence/prod_errors_48h.md` 的查询复跑 48 小时对比（需另行授权部署后）。
+- **卡点与风险**：
+  - WS 与 WS→HTTP 桥接的余额升档与复位暂缓（缺统一发送点与逐轮快照）；
+  - Gemini 429 无重置时间落 PST 午夜、count_tokens 负能力等残留未做；
+  - 历史账号 424 未暂停的根因属推断；
+  - GitHub API 配额曾耗尽，CI 监视需控制频率。
+- **关键位置**：
+  - 集成分支 `feat/error-recovery-routing-20261028`；
+  - 本地交接包 `.work/tasks/20261028-error-recovery-routing/`（各路报告、审查、发版说明）。
+
 ### 智商检测记录界面精简与上线观察修复：随 0.4.11 发布（2026-10-28；未部署）
 
 - 检测记录分页（每页 10 轮、总数、“仅异常”）与弹窗精简；答对题紧凑诊断；默认全局并发 8；403/429/`rate_limited`/带 `Retry-After` 的未知结果不在轮内重试；不可自动领取的账号显示“暂停：账号不可调度”；排期抖动生效。用户 2026-10-28 授权推送并合并，全部保护检查通过后以合并提交合入。
@@ -245,7 +266,7 @@
 
 ## 进行中的工作
 
-### 20261028-error-recovery-routing — 报错后补救、重试与路由优化（实施中）
+### 20261028-error-recovery-routing — 报错后补救、重试与路由优化（集成完成，待发布）
 
 - 2026-10-28 用户授权实施，指定 Claude 作产品经理编排：后端 gpt-6.1-sol（xhigh）、前端 gpt-6-astra（xhigh）、审查 gpt-6-astra（xhigh）。§3 决策未逐条答复，按推荐执行（余额阶梯 ×1/×3/×12；E2 同优先级 LoadRate ≤ 最低值+20pp；Codex Retry-After 沿用 10s）。
 - 集成分支 `feat/error-recovery-routing-20261028`（主检出）；实施工作树 `../xy2api-wt/err-{r1,r2,r3,fe}`，分支 `wip/err-{r1,r2,r3,fe}-20261028`，基线 main `d57883bec`。归属与接缝见 FINAL_PLAN §4，实施通用说明 `implementation/BRIEF.md`，各路报告写在 `implementation/`。集成顺序 R1 → R2 → R3 → FE，由 Claude 同步文档与登记。
@@ -254,8 +275,8 @@
 - 本地交接包 `.work/tasks/20261028-error-recovery-routing/`（不入库）：唯一实施依据 `plan/FINAL_PLAN.md`；`evidence/`（生产只读分析、外部网关与 Codex/Claude Code 客户端重试规则调研）；`reviews/`（astra r1 独立审查、r2 对抗审查）。
 - 结论：韧性骨架不删不重写；可救失败来自三处口径脱节：换号判定按状态码各自为政（Grok 400 `unknown provider for model` 19 小时 4,080 次、Gemini 402 余额 517 次直接失败）、“写过字节”被当成“已交付语义输出”（原生 Anthropic 零内容流内 429 178 次不换号；`codex.response.metadata` 让首字截止失效）、出口没按客户端重试规则塑形（`overloaded_error` 让 Claude Code 3 次即停；无 Retry-After 的 429 让 Codex 立即终止；专属分组拒绝用 503）。
 - 方案 19 项（A 换号与惩罚 5、B 提交判定 3、C 余额阶梯 1、D 出口语义 8、E 粘性 2），无迁移、无新开关；不做 hedge、后台余额探针、循环重写。拆 3 路实施，接缝见 FINAL_PLAN §4。
-- 进度（2026-10-28）：FE（`957138e18`）、R3（`9cf601d49`）、R2（`9562a71c2`）已完成并经 astra 审查修复；R1 已交付报告，astra 审查中。PM 预审 R1 的 4 项：成功路径每次 `GetByID`（热路径）、余额阶梯依赖的 AttemptProfile 只在 OpenAI 与 Gemini 设置、删掉旧的 404 `status_404_model` 规则（计划外）、Gemini 排队满写死 2 秒。临时树试合四路无冲突，build 与 unit vet 通过。现行文档（`GATEWAY_RESILIENCE.md` §4.9 等、`account-scheduling.md`）已在集成分支起草，A/C 部分待 R1 修复后核对。
-- 下一步：R1 审查修复 → 按 R1 → R2 → R3 → FE 合入集成分支 → 登记 policy（失效的 5 条 required literal、具名补丁 `xy-error-recovery-routing` 与绑定测试、UPSTREAM_BASE）与 scheduler-diff（E2、Gemini 文件）→ 全量门禁与联合回归 → astra 终审。提交、PR、发版、部署各自待授权。
+- 进度（2026-10-28）：四路实施与 FIX、终审修复都已合入集成分支（`66765e6dd`），详见顶部交接状态与操作日志。
+- 下一步：astra 按 `implementation/RELEASE_BRIEF.md` 推送、合并全部开启的 PR、发布 0.4.12；发布后把本条与顶部小节原样归档。部署另行授权。
 
 ### 20261025-pr131-release047 — 0.4.7 已发布（2026-10-26 更正）
 
@@ -1136,3 +1157,21 @@ pnpm --dir frontend run build
 - 验证：文档一致性检查通过；本轮无代码改动。
 - 卡点/风险：历史 Gemini 余额号未暂停多半是 0.4.8 漏接（0.4.9 已修），部署版本与日志不可得，属推断；240s 计时来源未闭环。
 - 下一步：用户确认 FINAL_PLAN §3 决策点后实施；提交、PR、发版、部署各自待授权。
+
+### 2026-10-28 — 20261028-error-recovery-routing — 实施、审查与集成完成，交 astra 发布
+
+- 请求/目标：用户授权实施 FINAL_PLAN v1.0，Claude 作产品经理编排：后端 gpt-6.1-sol、前端与审查 gpt-6-astra，均为 xhigh。完成后授权 astra 推送、开 PR、合并全部开启的 PR 并发布 0.4.12，不部署。
+- 开始状态：main `d57883bec`；集成分支 `feat/error-recovery-routing-20261028`；实施工作树 `../xy2api-wt/err-{r1,r2,r3,fe,fix}`。
+- 完成操作：
+  - 实施：R1 `a85205475`、R2 `3e6d37f3b`+`9562a71c2`、R3 `5dc07a78a`+`9cf601d49`、FE `deb270292`+`957138e18`。每路先经 astra 审查，修复后再合入。只有 `gateway_forward.go` 有一处 import 冲突。
+  - R1 审查：3 项 P1 与 5 项 P2，由新的 sol 实施 FIX `15209e662`，内容包括转换入口、成功路径预筛、脱敏漏口、数值 code、旧 404 分类、开关边界、Gemini 503 与并发提示、图片尝试时间、Bedrock。WS 余额阶梯按约定暂缓。
+  - 集成终审：剩 M1（只发过暂存心跳后耗尽时追加裸 JSON）与 M2（硬类原地重试旁路总开关），由 `3f4147212` 修复，合并提交 `66765e6dd`。
+  - 文档与登记 `c8d1f7059` 及后续修正：现行文档、runbook、policy（替换 5 条失效 literal，新增钩子，具名补丁 `xy-error-recovery-routing` 绑定 23 个测试）、`UPSTREAM_BASE.json`、scheduler-diff 审阅块 `error-recovery-routing-20261028`。
+- 修改文件：后端 resilience、service、handler、repository；前端韧性设置文案；`docs/GATEWAY_RESILIENCE.md`、`docs/account-scheduling.md`、runbook、`tools/upstream-sync/{policy,scheduler-diff}.json`、`UPSTREAM_BASE.json`、本文件。无数据库迁移，无新开关。
+- 验证：
+  - FIX 门禁：build、四种 tag 的 vet、service/handler/resilience/repository 全量 unit、`ci_gate.py` 474 项 `-race` 零跳过、golangci-lint 0 issues。
+  - 余额阶梯的 PostgreSQL 行锁并发测试：在本机临时 PostgreSQL 18 上用 overlay 测试桩执行，30 次通过，测后清理。
+  - `sync.py audit`、scheduler-diff、文档一致性、tools 41 项通过。
+  - 前端 lint、typecheck、vitest 由 FE 执行并通过。
+- 卡点/风险：WS 余额阶梯暂缓；计费残留是 Anthropic 暂存期失败尝试的上游成本由网关承担（已写入 §7）。
+- 下一步：astra 执行 `RELEASE_BRIEF.md`；完成后归档本任务。
