@@ -217,6 +217,24 @@ describe('CreateAccountModal for operators', () => {
     }
   })
 
+  it('shows the group selector and sends group_ids with account management and no balance flag', async () => {
+    seedOperator([])
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    expect(wrapper.find('[data-testid="select-groups"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="create-account-proxy"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="create-access-address"]').exists()).toBe(false)
+    await fillNameAndKey(wrapper, 'grouped account')
+    await wrapper.get('[data-testid="select-groups"]').trigger('click')
+    await submit(wrapper)
+    const payload = createAccountMock.mock.calls[0][0]
+    expect(payload.group_ids).toEqual([1, 2])
+    expect(payload).not.toHaveProperty('proxy_id')
+    for (const key of ADDRESS_CREDENTIAL_KEYS) expect(payload.credentials).not.toHaveProperty(key)
+    expect(payload.extra ?? {}).not.toHaveProperty('openai_long_context_billing_enabled')
+  })
+
   it('keeps the address and proxy fields for a flag holder', async () => {
     seedOperator(['accounts.upstream_address', 'users.balance_adjust'])
 

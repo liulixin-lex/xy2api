@@ -3596,10 +3596,9 @@
           </div>
         </div>
 
-        <!-- Group Selection - 仅标准模式显示；放入分组需要“加减余额”权限 -->
-        <p v-if="!canAdjustBalance" class="input-hint" data-testid="account-ungrouped-hint">{{ t('admin.operatorAccess.accountUngroupedHint') }}</p>
+        <!-- Group Selection - 账号管理权限包含分组调整 -->
         <GroupSelector
-          v-if="canAdjustBalance"
+          v-if="canPlaceGroups"
           v-model="form.group_ids"
           :groups="groups"
           :platform="form.platform"
@@ -4182,6 +4181,7 @@ const appStore = useAppStore()
 const access = useAdminAccessStore()
 const showUpstreamAddress = computed(() => access.can('accounts.upstream_address'))
 const canAdjustBalance = computed(() => access.can('users.balance_adjust'))
+const canPlaceGroups = computed(() => access.can('accounts:manage'))
 const operatorCreatePayload = <T extends object>(payload: T): T =>
   access.isOperator
     ? (applyOperatorAccountPayloadRules(payload as Record<string, unknown>, {

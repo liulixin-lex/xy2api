@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"reflect"
 	"slices"
+	"strconv"
 	"testing"
 )
 
@@ -115,12 +116,27 @@ func TestOperatorGroupFieldListCoversInputs(t *testing.T) {
 		}
 	}
 }
-func TestOperatorCopyAccountsNeedsBalanceFlag(t *testing.T) {
-	s, _, _ := operatorUserFixture()
-	ctx := operatorRulesContext(s)
-	operatorRuleError(t, s.operatorGroupCreateRules(ctx, &CreateGroupInput{IsExclusive: true, CopyAccountsFromGroupIDs: []int64{2}}), "ADMIN_FIELD_FORBIDDEN", "copy_accounts_from_group_ids", "")
-	operatorRuleError(t, s.operatorGroupUpdateRules(ctx, 1, &UpdateGroupInput{CopyAccountsFromGroupIDs: []int64{2}}), "ADMIN_FIELD_FORBIDDEN", "copy_accounts_from_group_ids", "")
-	require.NoError(t, s.operatorGroupCreateRules(operatorRulesContext(s, operatoraccess.FlagUsersBalanceAdjust), &CreateGroupInput{CopyAccountsFromGroupIDs: []int64{2}}))
+func TestOperatorCopyAccountsNeedsBalanceFlagOrAccountManage(t *testing.T) {
+	for _, level := range []operatoraccess.Level{operatoraccess.LevelNone, operatoraccess.LevelView, operatoraccess.LevelManage} {
+		for _, flag := range []bool{false, true} {
+			t.Run(level.String()+"/balance="+strconv.FormatBool(flag), func(t *testing.T) {
+				s, _, _ := operatorUserFixture()
+				ctx := operatorRulesContext(s)
+				sc := operatoraccess.ScopeFrom(ctx)
+				sc.Perms.Modules = map[operatoraccess.Module]operatoraccess.Level{operatoraccess.ModuleGroups: operatoraccess.LevelManage, operatoraccess.ModuleAccounts: level}
+				sc.Perms.Flags[operatoraccess.FlagUsersBalanceAdjust] = flag
+				createErr := s.operatorGroupCreateRules(ctx, &CreateGroupInput{IsExclusive: true, CopyAccountsFromGroupIDs: []int64{2}})
+				updateErr := s.operatorGroupUpdateRules(ctx, 1, &UpdateGroupInput{CopyAccountsFromGroupIDs: []int64{2}})
+				if flag || level == operatoraccess.LevelManage {
+					require.NoError(t, createErr)
+					require.NoError(t, updateErr)
+				} else {
+					operatorRuleError(t, createErr, "ADMIN_FIELD_FORBIDDEN", "copy_accounts_from_group_ids", "")
+					operatorRuleError(t, updateErr, "ADMIN_FIELD_FORBIDDEN", "copy_accounts_from_group_ids", "")
+				}
+			})
+		}
+	}
 }
 func TestOperatorDeleteGroupWithAccountsNeedsBalanceFlag(t *testing.T) {
 	s, _, groups := operatorUserFixture()

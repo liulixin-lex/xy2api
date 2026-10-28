@@ -1398,8 +1398,8 @@
         </div>
       </div>
 
-      <!-- Groups (placement needs "Adjust balance" for operators) -->
-      <div v-if="canAdjustBalance" class="border-t border-gray-200 pt-4 dark:border-dark-600" data-testid="bulk-edit-groups-section">
+      <!-- Groups (account management includes group placement) -->
+      <div v-if="canPlaceGroups" class="border-t border-gray-200 pt-4 dark:border-dark-600" data-testid="bulk-edit-groups-section">
         <div class="mb-3 flex items-center justify-between">
           <label
             id="bulk-edit-groups-label"
@@ -1554,6 +1554,7 @@ const appStore = useAppStore()
 const access = useAdminAccessStore()
 const isOperator = computed(() => access.isOperator)
 const canAdjustBalance = computed(() => access.can('users.balance_adjust'))
+const canPlaceGroups = computed(() => access.can('accounts:manage'))
 
 // Platform awareness
 const targetMode = computed(() => props.target?.mode ?? 'selected')

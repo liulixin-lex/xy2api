@@ -153,19 +153,8 @@ func (s *adminServiceImpl) operatorAccountCreateRules(ctx context.Context, input
 				return operatorFieldError("extra." + key)
 			}
 		}
-		if len(input.GroupIDs) > 0 {
-			return operatorFieldError("group_ids")
-		}
-		input.SkipDefaultGroupBind = true
 	}
 	return nil
-}
-func operatorSameIDs(a, b []int64) bool {
-	a = slices.Clone(a)
-	b = slices.Clone(b)
-	slices.Sort(a)
-	slices.Sort(b)
-	return slices.Equal(slices.Compact(a), slices.Compact(b))
 }
 func (s *adminServiceImpl) operatorAccountUpdateRules(ctx context.Context, account *Account, input *UpdateAccountInput) error {
 	sc, _, err := s.operatorScope(ctx)
@@ -270,9 +259,6 @@ func (s *adminServiceImpl) operatorAccountUpdateRules(ctx context.Context, accou
 		}
 	}
 	operatorAccountHeaders(account, input, changed != "")
-	if !sc.Has(operatoraccess.FlagUsersBalanceAdjust) && input.GroupIDs != nil && !operatorSameIDs(*input.GroupIDs, account.GroupIDs) {
-		return operatorFieldError("group_ids")
-	}
 	return nil
 }
 func operatorAccountHeaders(account *Account, input *UpdateAccountInput, changed bool) {
@@ -435,9 +421,6 @@ func (s *adminServiceImpl) operatorAccountBulkRules(ctx context.Context, input *
 		}
 	}
 	if !sc.Has(operatoraccess.FlagUsersBalanceAdjust) {
-		if input.GroupIDs != nil {
-			return operatorFieldError("group_ids")
-		}
 		for _, k := range OperatorAccountBillingExtraKeys {
 			if _, ok := input.Extra[k]; ok {
 				return operatorFieldError("extra." + k)

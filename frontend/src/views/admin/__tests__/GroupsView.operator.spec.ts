@@ -11,6 +11,7 @@ const api = vi.hoisted(() => ({
   listGroups: vi.fn(),
   deleteGroup: vi.fn(),
   updateGroup: vi.fn(),
+  createGroup: vi.fn(),
   showError: vi.fn()
 }))
 
@@ -23,7 +24,7 @@ vi.mock('@/api/admin', () => ({
       getUsageSummary: vi.fn().mockResolvedValue([]),
       getCapacitySummary: vi.fn().mockResolvedValue([]),
       getLiveCapability: vi.fn().mockResolvedValue({ supported: false }),
-      create: vi.fn(),
+      create: api.createGroup,
       update: api.updateGroup,
       delete: api.deleteGroup,
       updateSortOrder: vi.fn()
@@ -94,13 +95,13 @@ const createGroup = (overrides: Partial<AdminGroup> = {}): AdminGroup => ({
   ...overrides,
 })
 
-function seedOperator(flags: AdminFlagId[]) {
+function seedOperator(flags: AdminFlagId[], accountLevel?: 'view' | 'manage') {
   getActivePinia()!.state.value.auth = { user: { id: 7, role: 'operator' }, runMode: 'standard' }
   const access = useAdminAccessStore()
   access.access = {
     role: 'operator',
     is_super_admin: false,
-    modules: { groups: 'manage' },
+    modules: { groups: 'manage', ...(accountLevel ? { accounts: accountLevel } : {}) },
     flags,
     settings: {} as MeAccess['settings'],
     custom_menu_items: []
@@ -200,6 +201,55 @@ describe('GroupsView protected edit prices', () => {
     expect(payload.name).toBe('Renamed')
     const protectedFields = ['platform', 'force_openai_fast', 'rate_multiplier', 'subscription_type', 'daily_limit_usd', 'weekly_limit_usd', 'monthly_limit_usd', 'long_context_pricing_enabled', 'long_context_pricing_scope', 'long_context_pricing_models', 'model_pricing', 'image_rate_independent', 'image_rate_multiplier', 'batch_image_discount_multiplier', 'batch_image_hold_multiplier', 'video_rate_independent', 'video_rate_multiplier', 'peak_rate_enabled', 'peak_start', 'peak_end', 'peak_rate_multiplier', 'profit_control_enabled', 'profit_min_margin', 'profit_safety_buffer', 'image_price_1k', 'image_price_2k', 'image_price_4k', 'video_price_480p', 'video_price_720p', 'video_price_1080p', 'video_model_prices', 'web_search_price_per_call', 'search_price_per_1k', 'audio_realtime_price_per_min', 'audio_tts_price_per_million_chars', 'audio_stt_price_per_hour', 'free_openai_fast', 'max_reasoning_effort', 'reasoning_effort_mappings']
     for (const field of protectedFields) expect(Object.hasOwn(payload, field), field).toBe(!!flag)
+    wrapper.unmount()
+  })
+})
+
+
+describe('GroupsView account copying', () => {
+  it.each([
+    { accountLevel: 'manage' as const, balance: false, allowed: true },
+    { accountLevel: 'view' as const, balance: false, allowed: false },
+    { accountLevel: undefined, balance: false, allowed: false },
+    { accountLevel: undefined, balance: true, allowed: true }
+  ])('requires account management or the balance flag: $accountLevel / $balance', async ({ accountLevel, balance, allowed }) => {
+    vi.clearAllMocks()
+    seedOperator(balance ? ['users.balance_adjust'] : [], accountLevel)
+    api.listGroups.mockResolvedValue({ items: [createGroup(), createGroup({ id: 2, name: 'source' })], total: 2 })
+    api.createGroup.mockResolvedValue({ id: 3 })
+    api.updateGroup.mockResolvedValue({})
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'admin.groups.createGroup')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="group-create-copy-accounts"]').exists()).toBe(allowed)
+    if (allowed) await wrapper.get('[data-testid="group-create-copy-accounts"] select').setValue('2')
+    await wrapper.get('#create-group-form input[type="text"]').setValue('created')
+    await wrapper.get('#create-group-form').trigger('submit')
+    await flushPromises()
+    expect(api.createGroup).toHaveBeenCalledTimes(1)
+    const created = api.createGroup.mock.calls[0][0]
+    if (allowed) expect(created.copy_accounts_from_group_ids).toEqual([2])
+    else expect(created).not.toHaveProperty('copy_accounts_from_group_ids')
+    if (!balance) expect(created.is_exclusive).toBe(true)
+
+    await wrapper.findAll('button').find(button => button.text() === 'common.edit')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="group-edit-copy-accounts"]').exists()).toBe(allowed)
+    if (allowed) await wrapper.get('[data-testid="group-edit-copy-accounts"] select').setValue('2')
+    if (!balance) {
+      for (const fieldset of wrapper.findAll('[data-testid="group-protected-pricing"]')) expect(fieldset.attributes('disabled')).toBeDefined()
+    }
+    await wrapper.get('#edit-group-form').trigger('submit')
+    await flushPromises()
+    expect(api.updateGroup).toHaveBeenCalledTimes(1)
+    const updated = api.updateGroup.mock.calls[0][1]
+    if (allowed) expect(updated.copy_accounts_from_group_ids).toEqual([2])
+    else expect(updated).not.toHaveProperty('copy_accounts_from_group_ids')
+    if (!balance) {
+      expect(updated).not.toHaveProperty('rate_multiplier')
+      expect(updated).not.toHaveProperty('platform')
+    }
     wrapper.unmount()
   })
 })

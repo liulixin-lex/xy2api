@@ -3088,9 +3088,9 @@
         </div>
       </div>
 
-      <!-- Group Selection - 仅标准模式显示；放入或移出分组需要“加减余额”权限 -->
+      <!-- Group Selection - 账号管理权限包含分组调整 -->
       <GroupSelector
-        v-if="canAdjustBalance"
+        v-if="canPlaceGroups"
         v-model="form.group_ids"
         :groups="selectableGroups"
         :platform="account?.platform"
@@ -3286,6 +3286,7 @@ const browserTimeZone = getBrowserTimeZone()
 const access = useAdminAccessStore()
 const showUpstreamAddress = computed(() => access.can('accounts.upstream_address'))
 const canAdjustBalance = computed(() => access.can('users.balance_adjust'))
+const canPlaceGroups = computed(() => access.can('accounts:manage'))
 const isRefreshableAccount = computed(() => REFRESHABLE_ACCOUNT_TYPES.includes(props.account?.type ?? ''))
 const networkLocked = computed(() => access.isOperator && (!showUpstreamAddress.value || isRefreshableAccount.value))
 

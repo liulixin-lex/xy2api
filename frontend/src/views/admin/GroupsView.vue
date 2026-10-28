@@ -530,7 +530,7 @@
         </div>
         <GroupCategoryField v-if="!authStore.isSimpleMode" ref="createCategoryFieldRef" />
         <!-- 从分组复制账号 -->
-        <div v-if="!authStore.isSimpleMode && canAdjustBalance && copyAccountsGroupOptions.length > 0" data-testid="group-create-copy-accounts">
+        <div v-if="!authStore.isSimpleMode && canCopyAccounts && copyAccountsGroupOptions.length > 0" data-testid="group-create-copy-accounts">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
               {{ t("admin.groups.copyAccounts.title") }}
@@ -2206,7 +2206,7 @@
         <GroupCategoryField v-if="!authStore.isSimpleMode" ref="editCategoryFieldRef" :group-id="editingGroup.id" />
         <template v-if="!authStore.isSimpleMode">
         <!-- 从分组复制账号（编辑时） -->
-        <div v-if="canAdjustBalance && copyAccountsGroupOptionsForEdit.length > 0" data-testid="group-edit-copy-accounts">
+        <div v-if="canCopyAccounts && copyAccountsGroupOptionsForEdit.length > 0" data-testid="group-edit-copy-accounts">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
               {{ t("admin.groups.copyAccounts.title") }}
@@ -4443,6 +4443,7 @@ import type { ChannelModelPricing } from "@/api/admin/channels";
 import { VueDraggable } from "vue-draggable-plus";
 import { createStableObjectKeyResolver } from "@/utils/stableObjectKey";
 import { extractApiErrorMessage } from "@/utils/apiError";
+import { useAdminAccessStore } from "@/stores/adminAccess";
 import { useAdminPermission } from "@/composables/useAdminPermission";
 import { useKeyedDebouncedSearch } from "@/composables/useKeyedDebouncedSearch";
 import { getPersistedPageSize } from "@/composables/usePersistedPageSize";
@@ -4577,8 +4578,11 @@ const { t } = useI18n();
 const appStore = useAppStore();
 const authStore = useAuthStore();
 const { canManage, has } = useAdminPermission("groups");
-// 分组倍率、复制账号、公开分组和删除有账号的分组需要“加减余额”权限
+// 分组倍率、公开分组和删除有账号的分组需要“加减余额”权限
 const canAdjustBalance = computed(() => has("users.balance_adjust"));
+const adminAccess = useAdminAccessStore();
+// 复制账号还可由账号管理权限授权，分组管理权限仍由页面控制。
+const canCopyAccounts = computed(() => canAdjustBalance.value || adminAccess.can("accounts:manage"));
 // Catalog §2.2.1 and R8-4: omit protected fields, including normalized NULL prices.
 const operatorGroupPriceFields = [
   "platform",
@@ -6257,7 +6261,7 @@ const handleCreateGroup = async () => {
     requestData.peak_rate_multiplier = normalizeRateMultiplier(
       createForm.peak_rate_multiplier,
     );
-    if (!canAdjustBalance.value) {
+    if (!canCopyAccounts.value) {
       delete (requestData as Record<string, unknown>).copy_accounts_from_group_ids;
     }
     const payload = authStore.isSimpleMode
@@ -6630,8 +6634,10 @@ const handleUpdateGroup = async () => {
     payload.peak_rate_multiplier = normalizeRateMultiplier(
       editForm.peak_rate_multiplier,
     );
-    if (!canAdjustBalance.value) {
+    if (!canCopyAccounts.value) {
       delete (payload as Record<string, unknown>).copy_accounts_from_group_ids;
+    }
+    if (!canAdjustBalance.value) {
       for (const field of operatorGroupPriceFields) {
         delete (payload as Record<string, unknown>)[field];
       }

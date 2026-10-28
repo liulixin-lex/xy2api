@@ -508,7 +508,7 @@ func TestOperatorChains(t *testing.T) {
 		run  func(*testing.T)
 	}{
 		{"TestOperatorCreateUserGetsNoSignupGrants", chainCreateUser},
-		{"TestOperatorPlacementNeedsBalanceFlag", chainPlacement},
+		{"TestOperatorAccountManageAllowsPlacement", chainAccountPlacement},
 		{"TestOperatorNoncanonicalRequestsRejected", chainNoncanonical},
 		{"TestOperatorGroupNullLimitIsAChange", chainNullGroup},
 		{"TestOperatorApplyOAuthCannotChangeAddress", chainOAuth},
@@ -588,25 +588,49 @@ func chainCreateUser(t *testing.T) {
 		}
 	}
 }
-func chainPlacement(t *testing.T) {
-	for _, tc := range []struct{ method, path, body, field string }{
-		{"PUT", "/accounts/10", `{"group_ids":[2]}`, "group_ids"},
-		{"POST", "/accounts", `{"name":"a","platform":"openai","type":"apikey","credentials":{"api_key":"new"},"group_ids":[2]}`, "group_ids"},
-		{"POST", "/accounts/bulk-update", `{"account_ids":[10],"group_ids":[2]}`, "group_ids"},
-		{"POST", "/groups", `{"name":"g","platform":"openai","rate_multiplier":1,"is_exclusive":true,"copy_accounts_from_group_ids":[2]}`, "copy_accounts_from_group_ids"},
-		{"PUT", "/groups/1", `{"copy_accounts_from_group_ids":[2]}`, "copy_accounts_from_group_ids"},
+func chainAccountPlacement(t *testing.T) {
+	for _, tc := range []struct{ method, path, body string }{
+		{"PUT", "/accounts/10", `{"group_ids":[2]}`},
+		{"PUT", "/accounts/10", `{"group_ids":[]}`},
+		{"POST", "/accounts", `{"name":"a","platform":"openai","type":"apikey","credentials":{"api_key":"new"},"group_ids":[2]}`},
+		{"POST", "/accounts/bulk-update", `{"account_ids":[10],"group_ids":[2]}`},
+		{"POST", "/accounts/bulk-update", `{"account_ids":[10],"group_ids":[]}`},
 	} {
-		f := newOperatorChain(t, service.RoleOperator, true, nil, false)
-		chainDeny(t, f, tc.method, tc.path, tc.body, 400, "ADMIN_FIELD_FORBIDDEN", tc.field)
-		allowed := newOperatorChain(t, service.RoleOperator, true, []operatoraccess.Flag{operatoraccess.FlagUsersBalanceAdjust}, false)
-		rec := allowed.do(tc.method, tc.path, tc.body)
-		require.Equal(t, 200, rec.Code, rec.Body.String())
-		require.NotEmpty(t, allowed.w.calls)
+		t.Run(tc.method+tc.path+tc.body, func(t *testing.T) {
+			f := newOperatorChain(t, service.RoleOperator, true, nil, false)
+			rec := f.do(tc.method, tc.path, tc.body)
+			require.Equal(t, 200, rec.Code, rec.Body.String())
+			var payload struct {
+				GroupIDs []int64 `json:"group_ids"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(tc.body), &payload))
+			require.Equal(t, payload.GroupIDs, f.accounts.row.GroupIDs)
+			require.Contains(t, f.w.calls, "account.bind")
+		})
+	}
+	for _, tc := range []struct{ method, path, body string }{
+		{"POST", "/groups", `{"name":"g","platform":"openai","rate_multiplier":1,"is_exclusive":true,"copy_accounts_from_group_ids":[2]}`},
+		{"PUT", "/groups/1", `{"copy_accounts_from_group_ids":[2]}`},
+	} {
+		for _, level := range []operatoraccess.Level{operatoraccess.LevelNone, operatoraccess.LevelView, operatoraccess.LevelManage} {
+			for _, flag := range []bool{false, true} {
+				f := newOperatorChain(t, service.RoleOperator, false, nil, false)
+				perms := operatoraccess.Permissions{Modules: map[operatoraccess.Module]operatoraccess.Level{operatoraccess.ModuleGroups: operatoraccess.LevelManage, operatoraccess.ModuleAccounts: level}, Flags: map[operatoraccess.Flag]bool{operatoraccess.FlagUsersBalanceAdjust: flag}}
+				raw, err := json.Marshal(perms.Wire())
+				require.NoError(t, err)
+				f.permissions.raw = raw
+				if level != operatoraccess.LevelManage && !flag {
+					chainDeny(t, f, tc.method, tc.path, tc.body, 400, "ADMIN_FIELD_FORBIDDEN", "copy_accounts_from_group_ids")
+				} else {
+					rec := f.do(tc.method, tc.path, tc.body)
+					require.Equal(t, 200, rec.Code, rec.Body.String())
+					require.Contains(t, f.w.calls, "group.bind")
+				}
+			}
+		}
 	}
 	for _, action := range []string{"shadow", "duplicate"} {
-		denied := newOperatorChain(t, service.RoleOperator, true, nil, false)
-		chainDeny(t, denied, "POST", "/accounts/10/"+action, `{}`, 403, "ADMIN_PERMISSION_DENIED", "")
-		allowed := newOperatorChain(t, service.RoleOperator, true, []operatoraccess.Flag{operatoraccess.FlagUsersBalanceAdjust}, false)
+		allowed := newOperatorChain(t, service.RoleOperator, true, nil, false)
 		if action == "shadow" {
 			allowed.accounts.row.Type = "oauth"
 		} else {
@@ -616,11 +640,13 @@ func chainPlacement(t *testing.T) {
 		require.Equal(t, 200, rec.Code, rec.Body.String())
 		require.Contains(t, allowed.w.calls, "account.create")
 	}
-	f := newOperatorChain(t, service.RoleOperator, true, nil, false)
-	rec := f.do("POST", "/accounts", `{"name":"a","platform":"openai","type":"apikey","credentials":{"api_key":"new"}}`)
-	require.Equal(t, 200, rec.Code, rec.Body.String())
-	require.Empty(t, f.accounts.row.GroupIDs)
-	require.NotContains(t, f.w.calls, "account.bind")
+	for _, role := range []string{service.RoleOperator, service.RoleAdmin} {
+		f := newOperatorChain(t, role, true, nil, false)
+		rec := f.do("POST", "/accounts", `{"name":"a","platform":"openai","type":"apikey","credentials":{"api_key":"new"}}`)
+		require.Equal(t, 200, rec.Code, rec.Body.String())
+		require.Equal(t, []int64{1}, f.accounts.row.GroupIDs)
+		require.Contains(t, f.w.calls, "account.bind")
+	}
 }
 func chainNoncanonical(t *testing.T) {
 	chainPlainText(t)
@@ -1242,7 +1268,7 @@ type chainAxisCase struct {
 func chainFindingAxes(t *testing.T, finding string) {
 	cases := map[string]chainAxisCase{
 		"TestOperatorCreateUserGetsNoSignupGrants":                {"POST", "/users", `{"email":"new@example.com","password":"password123","balance":5}`, 400, "ADMIN_FIELD_FORBIDDEN", "balance", operatoraccess.FlagUsersBalanceAdjust, false, nil, false},
-		"TestOperatorPlacementNeedsBalanceFlag":                   {"PUT", "/accounts/10", `{"group_ids":[1]}`, 400, "ADMIN_FIELD_FORBIDDEN", "group_ids", operatoraccess.FlagUsersBalanceAdjust, false, nil, false},
+		"TestOperatorAccountManageAllowsPlacement":                {"PUT", "/accounts/10", `{"group_ids":[1]}`, 200, "", "", operatoraccess.FlagUsersBalanceAdjust, false, nil, false},
 		"TestOperatorNoncanonicalRequestsRejected":                {"PUT", "/users/1", `{"balance":null,"Balance":5}`, 400, "ADMIN_FIELD_FORBIDDEN", "body", operatoraccess.FlagUsersBalanceAdjust, true, nil, false},
 		"TestOperatorGroupNullLimitIsAChange":                     {"PUT", "/groups/1", `{"daily_limit_usd":null}`, 400, "ADMIN_FIELD_FORBIDDEN", "daily_limit_usd", operatoraccess.FlagUsersBalanceAdjust, false, nil, false},
 		"TestOperatorApplyOAuthCannotChangeAddress":               {"POST", "/accounts/10/apply-oauth-credentials", `{"type":"oauth","credentials":{},"extra":{"custom_base_url":"https://203.0.113.11"}}`, 403, "OPERATOR_NETWORK_CHANGE_FORBIDDEN", "extra.custom_base_url", operatoraccess.FlagAccountsUpstreamAddress, true, func(f *operatorChain) { f.accounts.row.Type = "oauth" }, false},

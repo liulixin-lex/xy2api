@@ -26,7 +26,7 @@ export default {
     flags: {
       balanceAdjust: {
         label: '加减余额',
-        hint: '开：可以加减余额、设初始余额、发放和延期订阅、修改分组倍率和套餐价格、把账号加入或移出分组。关：只能查看这些内容。'
+        hint: '开：可以加减余额、设初始余额、发放和延期订阅、修改分组倍率和套餐价格。关：只能查看这些内容。'
       },
       upstreamAddress: {
         label: '显示上游地址',
@@ -50,7 +50,6 @@ export default {
     groupExclusiveHint: '没有“加减余额”权限时，新分组只能是专属分组。',
     searchByEmail: "按用户邮箱搜索（需包含 {'@'}）",
     createNoSignupGrants: '没有“加减余额”权限时，新用户余额为 0，也不会获得默认订阅。',
-    accountUngroupedHint: '没有“加减余额”权限时，新账号不加入任何分组，需由有该权限的管理员分配。',
     monitorHeadersDropped: '修改地址、服务商或接口模式后，只保留本次填写的请求头。',
     templateApplySuperOnly: '含请求头或请求体覆盖的模板只能由超级管理员应用。',
     addressNeedsFlag: '没有“显示上游地址”权限时不能设置上游地址，新账号使用平台默认地址。',
