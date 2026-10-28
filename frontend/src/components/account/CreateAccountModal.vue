@@ -1483,6 +1483,7 @@
           />
           <p v-if="apiKeyHint" class="input-hint">{{ apiKeyHint }}</p>
         </div>
+        <NewApiWalletSection v-model="newApiWallet" />
 
         <!-- 上游倍率自动探测：全部 API-key 平台可用（所在区块已限定 apikey 类型） -->
         <div
@@ -4006,6 +4007,8 @@ import GrokBaseUrlPresets from '@/components/account/GrokBaseUrlPresets.vue'
 import CnBaseUrlPresets from '@/components/account/CnBaseUrlPresets.vue'
 import OpenCodeGoProtocolRulesEditor from '@/components/account/OpenCodeGoProtocolRulesEditor.vue'
 import HeaderOverrideEditor from '@/components/account/HeaderOverrideEditor.vue'
+import NewApiWalletSection from '@/components/account/NewApiWalletSection.vue'
+import { applyNewApiWalletCredentials, emptyNewApiWalletDraft, isNewApiWalletUserIdValid, type NewApiWalletDraft } from '@/components/account/newApiWalletCredentials'
 import { accountLongContextOverrideHasNoEffect } from '@/components/account/longContextBilling'
 import {
   applyAntigravityProjectID,
@@ -4232,6 +4235,8 @@ const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-
 const apiKeyBaseUrl = ref('https://api.anthropic.com')
 const apiKeyValue = ref('')
 const upstreamBillingAutoProbeEnabled = ref(true)
+// 上游余额列：new-api 钱包令牌与用户 ID（可选）
+const newApiWallet = ref<NewApiWalletDraft>(emptyNewApiWalletDraft())
 
 // ── 国产供应商（Kimi / Zhipu / DeepSeek）账号类型、API 协议与端点 ──
 // 多协议供应商（国产厂商与走通用表单的供应商）的接入模式；OpenCode 用 openCodeAccountMode。
@@ -5433,6 +5438,7 @@ const resetForm = () => {
   adaptiveBaseUrls.value = { chat_completions: '', anthropic: '', responses: '' }
   apiKeyBaseUrl.value = 'https://api.anthropic.com'
   apiKeyValue.value = ''
+  newApiWallet.value = emptyNewApiWalletDraft()
   upstreamRequestIdHeader.value = ''
   upstreamBillingAutoProbeEnabled.value = true
   editQuotaLimit.value = null
@@ -5902,6 +5908,11 @@ const handleSubmit = async () => {
   if (form.platform === 'gemini') {
     credentials.tier_id = geminiTierAIStudio.value
   }
+  if (!isNewApiWalletUserIdValid(newApiWallet.value.userId)) {
+    appStore.showError(t('admin.accounts.newapiWallet.userIdInvalid'))
+    return
+  }
+  applyNewApiWalletCredentials(credentials, newApiWallet.value, 'create')
 
   // 国产供应商：账号模式 + 协议 + 对应端点写入凭据；后端按 account_mode 路由
   // 额度/余额探测，按 api_protocol 路由转发端点与格式。注意 CN apikey 走本函数

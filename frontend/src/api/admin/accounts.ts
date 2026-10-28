@@ -662,6 +662,57 @@ export async function getBatchRecentHealth(accountIds: number[]): Promise<BatchR
   return data
 }
 
+/** 上游余额列（xy-upstream-balance）。state=ok 表示有当前身份下的成功值；其余见 docs/UPSTREAM_BALANCE.md。 */
+export type UpstreamBalanceState = 'ok' | 'unavailable' | 'not_applicable'
+/** null 表示口径未知（new-api 只用 Key 查询时通常为 null）。 */
+export type UpstreamBalanceBasis = 'wallet' | 'key' | 'subscription'
+export type UpstreamBalanceKind = 'sub2api' | 'newapi'
+export type UpstreamBalanceReason =
+  | 'unidentified'
+  | 'rate_limited'
+  | 'auth_failed'
+  | 'token_invalid'
+  | 'key_ungrouped'
+  | 'key_exhausted'
+  | 'upstream_error'
+  | 'no_data'
+  | 'redis_unavailable'
+
+export interface UpstreamBalanceItem {
+  account_id: number
+  state: UpstreamBalanceState
+  /** unlimited 或 state != ok 时为 null；可能为负数（上游欠费），原样显示。 */
+  amount_usd: number | null
+  unlimited: boolean
+  basis: UpstreamBalanceBasis | null
+  upstream_kind: UpstreamBalanceKind | null
+  reason: UpstreamBalanceReason | null
+  /** 最后一次成功采集时间（RFC3339） */
+  observed_at: string | null
+  last_attempt_at: string | null
+}
+
+export interface UpstreamBalancesResponse {
+  items: UpstreamBalanceItem[]
+  /** 服务端生成响应的时间（RFC3339 UTC），前端用于校正本机时钟偏差 */
+  server_time?: string
+}
+
+/**
+ * 上游余额列：只读后端 Redis 缓存（后端每分钟采集，本接口不触发上游请求）。
+ * 调用方保证 ids ≤ 200（页面负责分片），超出后端返回 400。
+ */
+export async function getUpstreamBalances(
+  ids: number[],
+  options?: { signal?: AbortSignal }
+): Promise<UpstreamBalancesResponse> {
+  const { data } = await apiClient.get<UpstreamBalancesResponse>('/admin/accounts/upstream-balances', {
+    params: { ids: ids.join(',') },
+    signal: options?.signal
+  })
+  return data
+}
+
 /**
  * Set account schedulable status
  * @param id - Account ID
@@ -1235,6 +1286,7 @@ export const accountsAPI = {
   getTodayStats,
   getBatchTodayStats,
   getBatchRecentHealth,
+  getUpstreamBalances,
   clearRateLimit,
   recoverState,
   resetAccountQuota,

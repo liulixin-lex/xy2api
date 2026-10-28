@@ -385,6 +385,9 @@
               @probe="handleProbeUpstreamBilling(row)"
             />
           </template>
+          <template #cell-upstream_balance="{ row }">
+            <UpstreamBalanceCell :item="upstreamBalanceByAccountId[String(row.id)]" :now="upstreamBalanceNow" />
+          </template>
           <template #cell-priority="{ row }">
             <AccountPriorityCell
               :account="row"
@@ -467,7 +470,7 @@
       </template>
       <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
     </TablePageLayout>
-    <CreateAccountModal v-if="createModalMounted" :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
+    <CreateAccountModal v-if="createModalMounted" :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="handleAccountCreated" />
     <EditAccountModal v-if="editModalMounted" :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
     <ReAuthAccountModal v-if="reAuthModalMounted" :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountTestModal v-if="testModalMounted" :show="showTest" :account="testingAcc" @close="closeTestModal" />
@@ -476,7 +479,7 @@
     <IQCheckResultsModal v-if="iqRecordsAccount" :show="true" :account="iqRecordsAccount" @close="iqRecordsAccount = null" @updated="handleIQSummaryUpdated" />
     <AccountGroupsDialog v-if="groupsDialogAccount" :account="groupsDialogAccount" :groups="groups" @close="groupsDialogAccount = null" @updated="handleAccountUpdated" />
     <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @iq-run="handleRunIQCheck" @iq-records="iqRecordsAccount = $event" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
-    <SyncFromCrsModal v-if="syncModalMounted" :show="showSync" @close="showSync = false" @synced="reload" />
+    <SyncFromCrsModal v-if="syncModalMounted" :show="showSync" @close="showSync = false" @synced="handleCrsSynced" />
     <ImportDataModal v-if="importModalMounted" :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
       v-if="bulkEditModalMounted"
@@ -507,7 +510,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
-import { useIntervalFn } from '@vueuse/core'
+import { useEventListener, useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
@@ -547,6 +550,8 @@ import AccountGroupsCellButton from '@/components/admin/account/AccountGroupsCel
 import AccountGroupsDialog from '@/components/admin/account/AccountGroupsDialog.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
 import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
+import UpstreamBalanceCell from '@/components/account/UpstreamBalanceCell.vue'
+import type { UpstreamBalanceItem } from '@/api/admin/accounts'
 import AccountPriorityCell from '@/components/account/AccountPriorityCell.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -1166,6 +1171,7 @@ const toggleColumn = (key: string) => {
     })
   }
   if (key === 'status' && wasHidden) void refreshRecentHealthBatch()
+  if (key === 'upstream_balance' && wasHidden) void refreshUpstreamBalances()
   if (key === 'scheduler_score') {
     // The server only returns scheduler scores when this column is visible, so reload the current page immediately.
     syncAccountListDerivedParams()
@@ -1519,6 +1525,154 @@ const isAnyModalOpen = computed(() => {
     groupsDialogAccount.value !== null ||
     showTLSFingerprintProfiles.value
   )
+})
+
+// 上游余额列（xy-upstream-balance）：每 30 秒读一次后端缓存（后端每分钟采集），只请求当前页账号；
+// 与“自动刷新”互不相关。弹窗打开、页面隐藏或该列隐藏时不请求；菜单打开时只跳过定时轮询。
+const UPSTREAM_BALANCE_POLL_MS = 30_000
+// 后端单次最多接受 200 个 id，超出返回 400。
+const UPSTREAM_BALANCE_MAX_IDS = 200
+const upstreamBalanceByAccountId = ref<Record<string, UpstreamBalanceItem>>({})
+// 本机时钟与服务端的偏差，按每次成功响应的 server_time 校正；单元格的“现在”= Date.now() + 偏差。
+let upstreamBalanceClockOffsetMs = 0
+const upstreamBalanceNow = ref(Date.now())
+// 请求代次：新请求、账号增删改、卸载都会 +1，旧代次的响应一律丢弃。
+let upstreamBalanceReqSeq = 0
+let upstreamBalanceAbortController: AbortController | null = null
+// 每个账号行的版本（updated_at）。别处改了 Key、地址、代理等配置时行被原位替换、id 集合不变，
+// 只能靠版本变化发现；版本变了的账号记为“待确认”，重查失败时不保留它们的旧值。
+let upstreamBalanceRowVersions = new Map<number, string>()
+const upstreamBalanceStaleIds = new Set<string>()
+const upstreamBalanceRowVersion = (account: { updated_at?: string | null }) => account.updated_at ?? ''
+const upstreamBalanceIdKey = (rows: Array<{ id: number }>) => rows.map(row => row.id).sort((a, b) => a - b).join(',')
+
+const tickUpstreamBalanceNow = () => {
+  upstreamBalanceNow.value = Date.now() + upstreamBalanceClockOffsetMs
+}
+
+const isAbortLikeError = (error: unknown) => {
+  const refreshError = error as { name?: string; code?: string } | null
+  return refreshError?.name === 'AbortError' || refreshError?.name === 'CanceledError' || refreshError?.code === 'ERR_CANCELED'
+}
+
+const abortUpstreamBalanceRequests = () => {
+  upstreamBalanceReqSeq += 1
+  upstreamBalanceAbortController?.abort()
+  upstreamBalanceAbortController = null
+}
+
+// 账号创建、修改、删除后：作废进行中的请求，并丢掉这些账号的缓存值，避免旧身份的余额在新配置下闪回。
+const invalidateUpstreamBalances = (accountIDs: number[] = []) => {
+  abortUpstreamBalanceRequests()
+  if (accountIDs.length === 0) return
+  const next = { ...upstreamBalanceByAccountId.value }
+  for (const id of accountIDs) delete next[String(id)]
+  upstreamBalanceByAccountId.value = next
+}
+
+const refreshUpstreamBalances = async () => {
+  if (hiddenColumns.has('upstream_balance') || isAnyModalOpen.value) return
+  if (typeof document !== 'undefined' && document.hidden) return
+  const accountIDs = accounts.value.map(account => account.id)
+  abortUpstreamBalanceRequests()
+  const reqSeq = upstreamBalanceReqSeq
+  if (accountIDs.length === 0) {
+    upstreamBalanceByAccountId.value = {}
+    return
+  }
+  const controller = new AbortController()
+  upstreamBalanceAbortController = controller
+  try {
+    // 后端单次最多 200 个 id：按页内顺序分片并行请求，再按 account_id 合并。
+    const chunks: number[][] = []
+    for (let i = 0; i < accountIDs.length; i += UPSTREAM_BALANCE_MAX_IDS) {
+      chunks.push(accountIDs.slice(i, i + UPSTREAM_BALANCE_MAX_IDS))
+    }
+    // 时钟偏差按每个分片响应到达的那一刻计算，取最后到达的一个；慢分片不会拿别的分片的 server_time 去比。
+    let clockOffsetSample: number | null = null
+    const results = await Promise.allSettled(
+      chunks.map(async (chunk) => {
+        const result = await adminAPI.accounts.getUpstreamBalances(chunk, { signal: controller.signal })
+        const serverMs = Date.parse(result?.server_time ?? '')
+        if (Number.isFinite(serverMs)) clockOffsetSample = serverMs - Date.now()
+        return result
+      })
+    )
+    if (reqSeq !== upstreamBalanceReqSeq) return
+    if (clockOffsetSample !== null) upstreamBalanceClockOffsetMs = clockOffsetSample
+    const previous = upstreamBalanceByAccountId.value
+    const next: Record<string, UpstreamBalanceItem> = {}
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') {
+        for (const item of result.value?.items ?? []) next[String(item.account_id)] = item
+        for (const id of chunks[index]) upstreamBalanceStaleIds.delete(String(id))
+        return
+      }
+      // 失败的分片保留这些账号上一次的值；配置已变（版本变了）的账号除外。
+      for (const id of chunks[index]) {
+        const key = String(id)
+        if (previous[key] && !upstreamBalanceStaleIds.has(key)) next[key] = previous[key]
+      }
+      if (!isAbortLikeError(result.reason)) {
+        console.error('Failed to load upstream balances:', result.reason)
+      }
+    })
+    upstreamBalanceByAccountId.value = next
+    tickUpstreamBalanceNow()
+  } catch (error) {
+    if (reqSeq !== upstreamBalanceReqSeq) return
+    if (!isAbortLikeError(error)) console.error('Failed to load upstream balances:', error)
+  } finally {
+    if (upstreamBalanceAbortController === controller) upstreamBalanceAbortController = null
+  }
+}
+
+const pollUpstreamBalances = () => {
+  tickUpstreamBalanceNow()
+  if (loading.value) return
+  if (menu.show || showAccountToolsDropdown.value || showAutoRefreshDropdown.value) return
+  void refreshUpstreamBalances()
+}
+useIntervalFn(pollUpstreamBalances, UPSTREAM_BALANCE_POLL_MS)
+
+// 切页、改每页条数、筛选或增删行使当前页的账号集合变化时立即重新请求；只是重新排序不算变化。
+watch(
+  () => upstreamBalanceIdKey(accounts.value),
+  () => { void refreshUpstreamBalances() }
+)
+// 同一批账号里有行的版本变了（自动刷新、重载或别的管理员改了配置）：作废进行中的请求并立即重查一次。
+// 只看 updated_at，并发数、会话数等运行时字段的变化不会多发请求。
+watch(accounts, (rows, previousRows) => {
+  const versions = new Map<number, string>()
+  let versionChanged = false
+  for (const row of rows) {
+    const version = upstreamBalanceRowVersion(row)
+    const known = upstreamBalanceRowVersions.get(row.id)
+    if (known !== undefined && known !== version) {
+      upstreamBalanceStaleIds.add(String(row.id))
+      versionChanged = true
+    }
+    versions.set(row.id, version)
+  }
+  upstreamBalanceRowVersions = versions
+  for (const key of [...upstreamBalanceStaleIds]) {
+    if (!versions.has(Number(key))) upstreamBalanceStaleIds.delete(key)
+  }
+  if (!versionChanged) return
+  abortUpstreamBalanceRequests()
+  // id 集合也变了时由上面的 id 监听负责重查，避免同一次变化发两次请求。
+  if (upstreamBalanceIdKey(rows) === upstreamBalanceIdKey(previousRows ?? [])) void refreshUpstreamBalances()
+})
+const invalidateCurrentPageUpstreamBalances = () => {
+  invalidateUpstreamBalances(accounts.value.map(account => account.id))
+}
+// 弹窗关闭后立即补一次（弹窗打开期间轮询被跳过）。
+watch(isAnyModalOpen, (open, wasOpen) => {
+  if (wasOpen && !open) void refreshUpstreamBalances()
+})
+// 页面重新可见时立即补一次。
+useEventListener(document, 'visibilitychange', () => {
+  if (!document.hidden) void refreshUpstreamBalances()
 })
 
 const enterAutoRefreshSilentWindow = () => {
@@ -1955,6 +2109,7 @@ const allColumns = computed(() => {
     { key: 'scheduler_score', label: t('admin.accounts.columns.schedulerScore'), sortable: false },
     { key: 'rate_multiplier', label: t('admin.accounts.columns.billingRateMultiplier'), sortable: true },
     { key: 'upstream_billing_rate', label: t('admin.accounts.columns.upstreamBillingRate'), sortable: true },
+    { key: 'upstream_balance', label: t('admin.accounts.columns.upstreamBalance'), sortable: false },
     { key: 'last_used_at', label: t('admin.accounts.columns.lastUsed'), sortable: true },
     { key: 'created_at', label: t('admin.accounts.columns.createdAt'), sortable: true },
     { key: 'expires_at', label: t('admin.accounts.columns.expiresAt'), sortable: true },
@@ -2029,6 +2184,7 @@ const handleBulkDelete = async () => {
   if (!confirm(t('admin.accounts.bulkActions.confirmDelete', { count: accountIds.length }))) return
   try {
     const result = await adminAPI.accounts.batchDelete(accountIds)
+    invalidateUpstreamBalances(accountIds)
     if (result.failed > 0) {
       appStore.showError(t('admin.accounts.bulkActions.partialSuccess', {
         success: result.success,
@@ -2300,12 +2456,18 @@ const openBulkEditFiltered = async () => {
 }
 
 const handleBulkUpdated = () => {
+  // 按筛选批量编辑时改动范围不止所选行：作废当前页全部账号；按所选编辑时用打开时保存的 id。
+  const target = bulkEditTarget.value
+  if (target?.mode === 'selected') invalidateUpstreamBalances([...target.accountIds])
+  else if (target?.mode === 'filtered') invalidateCurrentPageUpstreamBalances()
+  else invalidateUpstreamBalances([...selIds.value])
   showBulkEdit.value = false
   bulkEditTarget.value = null
   clearSelection()
   reload()
 }
-const handleDataImported = () => { showImportData.value = false; reload() }
+const handleDataImported = () => { showImportData.value = false; invalidateCurrentPageUpstreamBalances(); reload() }
+const handleCrsSynced = () => { invalidateCurrentPageUpstreamBalances(); reload() }
 const ACCOUNT_UNGROUPED_GROUP_QUERY_VALUE = 'ungrouped'
 const ACCOUNT_PRIVACY_MODE_UNSET_QUERY_VALUE = '__unset__'
 const buildAccountQueryFilters = () => ({
@@ -2440,6 +2602,16 @@ const handleProbeUpstreamBilling = async (account: Account) => {
 const handleAccountUpdated = (updatedAccount: Account) => {
   patchAccountInList(updatedAccount)
   enterAutoRefreshSilentWindow()
+  invalidateUpstreamBalances([updatedAccount.id])
+  // 已在此处作废并重查，记下新版本，避免版本监听再发一次请求。
+  if (upstreamBalanceRowVersions.has(updatedAccount.id)) {
+    upstreamBalanceRowVersions.set(updatedAccount.id, upstreamBalanceRowVersion(updatedAccount))
+  }
+  void refreshUpstreamBalances()
+}
+const handleAccountCreated = () => {
+  invalidateUpstreamBalances()
+  reload()
 }
 const formatExportTimestamp = () => {
   const now = new Date()
@@ -2637,7 +2809,7 @@ const confirmCreateSparkShadow = async () => {
   }
 }
 const handleDelete = (a: Account) => { deletingAcc.value = a; showDeleteDialog.value = true }
-const confirmDelete = async () => { if(!deletingAcc.value) return; try { await adminAPI.accounts.delete(deletingAcc.value.id); showDeleteDialog.value = false; deletingAcc.value = null; reload() } catch (error) { console.error('Failed to delete account:', error) } }
+const confirmDelete = async () => { if(!deletingAcc.value) return; try { await adminAPI.accounts.delete(deletingAcc.value.id); invalidateUpstreamBalances([deletingAcc.value.id]); showDeleteDialog.value = false; deletingAcc.value = null; reload() } catch (error) { console.error('Failed to delete account:', error) } }
 const setSchedulableLocally = (accountId: number, schedulable: boolean) => {
   accounts.value = accounts.value.map((account) => (account.id === accountId ? { ...account, schedulable } : account))
 }
@@ -2798,6 +2970,7 @@ let cancelModalPrefetch: (() => void) | null = null
 onUnmounted(() => {
   cancelModalPrefetch?.()
   upstreamBillingRateAbortController?.abort()
+  abortUpstreamBalanceRequests()
   if (usageBatchFlushTimer !== null) {
     clearTimeout(usageBatchFlushTimer)
     usageBatchFlushTimer = null

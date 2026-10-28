@@ -602,7 +602,15 @@ export function cnBalanceCellVisible(account: CNUsageCellAccount): boolean {
   const { platform } = account
   const mode = cnUsageCellAccountMode(account)
   if (OFFICIAL_ACCOUNT_API_PLATFORMS.includes(platform)) return officialAccountAPISupported(account, mode)
-  return (platform === 'kimi' || platform === 'deepseek') && mode !== 'coding'
+  // Kimi / DeepSeek 自定义中转（非官方主机）的余额改由「上游余额」列负责，后端也不再探测其 CN 余额。
+  return (platform === 'kimi' || platform === 'deepseek') && mode !== 'coding' && officialAccountAPISupported(account, mode)
+}
+
+/** Kimi / DeepSeek 按量付费的中转账号：CN 余额子单元格隐藏，余额见「上游余额」列。 */
+export function cnBalanceShownInUpstreamColumn(account: CNUsageCellAccount): boolean {
+  const { platform } = account
+  const mode = cnUsageCellAccountMode(account)
+  return (platform === 'kimi' || platform === 'deepseek') && mode !== 'coding' && !officialAccountAPISupported(account, mode)
 }
 
 /**

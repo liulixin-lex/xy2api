@@ -481,7 +481,7 @@
         <div
           v-if="!cnQuotaCellVisible && !cnBalanceCellVisible"
           class="text-xs text-gray-400"
-          :title="t('admin.accounts.cnProviders.noBalanceEndpoint')"
+          :title="cnBalanceInUpstreamColumn ? t('admin.accounts.upstreamBalance.seeColumn') : t('admin.accounts.cnProviders.noBalanceEndpoint')"
         >-</div>
         <CNProviderQuotaCell :account="account" />
         <CNProviderBalanceCell :account="account" />
@@ -706,6 +706,7 @@ import OllamaCloudUsageCell from './OllamaCloudUsageCell.vue'
 import {
   cnQuotaCellVisible as cnQuotaCellVisibleFn,
   cnBalanceCellVisible as cnBalanceCellVisibleFn,
+  cnBalanceShownInUpstreamColumn,
   isMultiProtocolApiKeyPlatform
 } from './credentialsBuilder'
 import OpenCodeGoUsageCell from './OpenCodeGoUsageCell.vue'
@@ -801,6 +802,7 @@ const shouldFetchUsage = computed(() => {
 // credentialsBuilder 的单一实现）：都不可见时显示 `-` 占位符。
 const cnQuotaCellVisible = computed(() => cnQuotaCellVisibleFn(props.account))
 const cnBalanceCellVisible = computed(() => cnBalanceCellVisibleFn(props.account))
+const cnBalanceInUpstreamColumn = computed(() => cnBalanceShownInUpstreamColumn(props.account))
 
 const isBatchManaged = computed(() => typeof props.requestBatchedUsage === 'function')
 

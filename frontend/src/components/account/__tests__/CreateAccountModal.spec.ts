@@ -903,4 +903,50 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
 
     expect(createOpenAICodexPATMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBe(false)
   })
+
+  it('adds the new-api access token and user id only when filled in', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('openai account')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+    // 小节默认折叠，展开后再填令牌与用户 ID（用户 ID 只保留数字）。
+    expect(wrapper.find('[data-testid="newapi-wallet-token"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="newapi-wallet-toggle"]').trigger('click')
+    await wrapper.get('[data-testid="newapi-wallet-token"]').setValue(' tok ')
+    await wrapper.get('[data-testid="newapi-wallet-user-id"]').setValue('12a3')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials).toMatchObject({
+      api_key: 'test-api-key',
+      newapi_access_token: 'tok',
+      newapi_user_id: '123'
+    })
+  })
+
+  it('blocks creating an account with a new-api user id longer than 20 digits', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('openai account')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+    await wrapper.get('[data-testid="newapi-wallet-toggle"]').trigger('click')
+    await wrapper.get('[data-testid="newapi-wallet-user-id"]').setValue('1'.repeat(21))
+    expect(wrapper.get('[data-testid="newapi-wallet-user-id-error"]').text()).toBe('admin.accounts.newapiWallet.userIdInvalid')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).not.toHaveBeenCalled()
+  })
+
+  it('leaves the new-api fields out when the section is untouched', async () => {
+    await submitApiKeyAccount('openai')
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    const credentials = createAccountMock.mock.calls[0]?.[0]?.credentials
+    expect(credentials).not.toHaveProperty('newapi_access_token')
+    expect(credentials).not.toHaveProperty('newapi_user_id')
+  })
 })
