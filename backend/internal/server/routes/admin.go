@@ -29,6 +29,7 @@ func RegisterAdminRoutes(
 	admin.Use(panelRateLimiter.Global())
 	// 审计中间件挂在认证之后：所有管理面变更类操作 + 敏感读取入审计日志
 	admin.Use(gin.HandlerFunc(auditLog))
+	admin.Use(middleware.AdminPermission())
 	admin.Use(middleware.AdminComplianceGuard(settingService))
 
 	if h.UsageExport != nil {

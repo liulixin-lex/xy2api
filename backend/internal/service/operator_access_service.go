@@ -165,15 +165,6 @@ func (s *OperatorAccessService) AllowsAdminExport(ctx context.Context, userID in
 	return err == nil && p.Can(operatoraccess.ModuleUsage, operatoraccess.LevelView) && p.Has(operatoraccess.FlagDataExport)
 }
 
-// CheckTarget and CheckFields fail closed until Block 2 installs the rule guard.
-// Block 1 does not mount operator requests.
-func (s *OperatorAccessService) CheckTarget(_ context.Context, _ *operatoraccess.Scope, _ operatoraccess.TargetRule, _ operatoraccess.Request) error {
-	return operatorUnavailable()
-}
-func (s *OperatorAccessService) CheckFields(_ context.Context, _ *operatoraccess.Scope, _ operatoraccess.FieldRule, _ operatoraccess.Request) ([]byte, error) {
-	return nil, operatorUnavailable()
-}
-
 // MeAccess contains only the console bootstrap fields from B11.1. Custom menu
 // entries remain raw JSON here to keep service independent of handler/dto.
 type MeAccess struct {

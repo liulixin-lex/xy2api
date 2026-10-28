@@ -1405,6 +1405,7 @@ func (h *AccountHandler) Test(c *gin.Context) {
 	}
 
 	// Use AccountTestService to test the account with SSE streaming
+	c.Header("Content-Type", "text/event-stream") // xy-admin-operator-scope
 	if err := h.accountTestService.TestAccountConnection(c, accountID, req.ModelID, req.Prompt, req.Mode, opts); err != nil {
 		// Error already sent via SSE, just log
 		return
