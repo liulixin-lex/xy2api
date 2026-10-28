@@ -44,3 +44,20 @@ func (r *operatorAccessQueryRepository) ProxyIDsUsedByAccounts(ctx context.Conte
 	}
 	return ids, nil
 }
+
+func (r *operatorAccessQueryRepository) AttributeValueOwnerIDs(ctx context.Context, attributeID int64) ([]int64, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT user_id FROM user_attribute_values WHERE attribute_id = $1`, attributeID)
+	if err != nil {
+		return nil, fmt.Errorf("query attribute value owners: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err = rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan attribute value owner: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}

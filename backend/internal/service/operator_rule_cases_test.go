@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/url"
 	"testing"
 
@@ -69,6 +70,7 @@ var operatorRuleCases = map[string][]operatorRuleCase{
 	"order_owner":              {{"allow", `{}`, ""}, {"deny", `{}`, "ADMIN_TARGET_FORBIDDEN"}, {"boundary", `{}`, "OPERATOR_ACCESS_UNAVAILABLE"}},
 	"group_rate_rows":          {{"allow", `{}`, ""}, {"deny", `{}`, "ADMIN_TARGET_FORBIDDEN"}, {"boundary", `{}`, ""}},
 	"group_rpm_rows":           {{"allow", `{}`, ""}, {"deny", `{}`, "ADMIN_TARGET_FORBIDDEN"}, {"boundary", `{}`, ""}},
+	"attribute_value_owners":   {{"allow", `{}`, ""}, {"deny", `{}`, "ADMIN_TARGET_FORBIDDEN"}, {"boundary", `{}`, "OPERATOR_ACCESS_UNAVAILABLE"}},
 	"group_members":            {{"allow", `{}`, ""}, {"deny", `{}`, "ADMIN_TARGET_FORBIDDEN"}, {"boundary", `{}`, "OPERATOR_ACCESS_UNAVAILABLE"}},
 }
 
@@ -128,6 +130,15 @@ func runOperatorRuleCase(t *testing.T, id string, tc operatorRuleCase) error {
 		return nil
 	}
 	switch id {
+	case "attribute_value_owners":
+		f.query.owners = []int64{1}
+		if tc.kind == "deny" {
+			f.query.owners = []int64{1, 2}
+		}
+		if tc.kind == "boundary" {
+			f.query.err = errors.New("query unavailable")
+		}
+		return f.svc.CheckTarget(ctx, f.sc, operatoraccess.TargetRule(id), r)
 	case "promo_search", "redeem_search":
 		if tc.kind == "deny" {
 			r.Query = url.Values{"sort_by": {" CoDe "}}

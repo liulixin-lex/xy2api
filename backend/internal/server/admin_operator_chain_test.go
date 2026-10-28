@@ -76,8 +76,15 @@ func (r *chainUsers) Update(ctx context.Context, u *service.User, _ service.User
 	r.users[u.ID] = u
 	return nil
 }
+func (r *chainUsers) GetByID(ctx context.Context, id int64) (*service.User, error) {
+	u, err := r.stubUserRepo.GetByID(ctx, id)
+	if err == nil && u.DeletedAt != nil {
+		return nil, service.ErrUserNotFound
+	}
+	return u, err
+}
 func (r *chainUsers) GetByIDIncludeDeleted(ctx context.Context, id int64) (*service.User, error) {
-	return r.GetByID(ctx, id)
+	return r.stubUserRepo.GetByID(ctx, id)
 }
 func (r *chainUsers) BatchSetConcurrency(ctx context.Context, _ []int64, _ int) (int, error) {
 	r.w.record(ctx, "user.batch")
@@ -94,8 +101,10 @@ func (r *chainUsers) AddGroupToAllowedGroups(ctx context.Context, _ int64, _ int
 
 type chainAccounts struct {
 	stubAccountRepo
-	w   *chainWrites
-	row *service.Account
+	w      *chainWrites
+	row    *service.Account
+	shadow *service.Account
+	outbox []int64
 }
 
 func (r *chainAccounts) GetByID(context.Context, int64) (*service.Account, error) {
@@ -123,6 +132,11 @@ func (r *chainAccounts) CreateWithAccountGroups(ctx context.Context, a *service.
 }
 func (r *chainAccounts) Update(ctx context.Context, a *service.Account) error {
 	r.w.record(ctx, "account.update")
+	r.outbox = append(r.outbox, a.ID)
+	if r.shadow != nil && a.ID == r.shadow.ID {
+		r.shadow = a
+		return nil
+	}
 	r.row = a
 	return nil
 }
@@ -147,10 +161,15 @@ func (r *chainAccounts) ListWithFilters(_ context.Context, p pagination.Paginati
 	return []service.Account{*r.row}, &pagination.PaginationResult{Total: 1}, nil
 }
 func (r *chainAccounts) ListShadowsByParent(context.Context, int64) ([]*service.Account, error) {
+	if r.shadow != nil {
+		shadow := *r.shadow
+		return []*service.Account{&shadow}, nil
+	}
 	return nil, nil
 }
 func (r *chainAccounts) RevertProxyFallback(ctx context.Context, _ int64) error {
 	r.w.record(ctx, "account.revert")
+	r.outbox = append(r.outbox, r.row.ID)
 	r.row.ProxyID = r.row.ProxyFallbackOriginID
 	r.row.ProxyFallbackOriginID = nil
 	return nil
@@ -213,17 +232,24 @@ func (r *chainGroups) ListActiveByPlatform(context.Context, string) ([]service.G
 
 type chainProxies struct {
 	stubProxyRepo
-	w       *chainWrites
-	row     *service.Proxy
-	extra   []service.Proxy
-	deleted bool
+	w            *chainWrites
+	row          *service.Proxy
+	extra        []service.Proxy
+	deleted      bool
+	deletedState *bool
 }
 
 func (r *chainProxies) GetByID(context.Context, int64) (*service.Proxy, error) {
+	if r.deletedState != nil && *r.deletedState {
+		return nil, service.ErrProxyNotFound
+	}
 	p := *r.row
 	return &p, nil
 }
 func (r *chainProxies) ListAllForFallback(context.Context) ([]service.Proxy, error) {
+	if r.deletedState != nil && *r.deletedState {
+		return append([]service.Proxy(nil), r.extra...), nil
+	}
 	return append([]service.Proxy{*r.row}, r.extra...), nil
 }
 func (r *chainProxies) Create(ctx context.Context, p *service.Proxy) error {
@@ -240,6 +266,9 @@ func (r *chainProxies) Update(ctx context.Context, p *service.Proxy) error {
 func (r *chainProxies) Delete(ctx context.Context, _ int64) error {
 	r.w.record(ctx, "proxy.delete")
 	r.deleted = true
+	if r.deletedState != nil {
+		*r.deletedState = true
+	}
 	return nil
 }
 func (r *chainProxies) ExistsByHostPortAuth(context.Context, string, int, string, string) (bool, error) {
@@ -250,6 +279,8 @@ func (r *chainProxies) CountAccountsByProxyID(context.Context, int64) (int64, er
 type chainQuery struct {
 	protected, used bool
 	usedIDs         map[int64]bool
+	owners          []int64
+	err             error
 }
 
 func (q *chainQuery) GroupHasProtectedMembers(context.Context, int64, int64) (bool, error) {
@@ -263,6 +294,9 @@ func (q *chainQuery) ProxyIDsUsedByAccounts(_ context.Context, ids []int64) ([]i
 		}
 	}
 	return out, nil
+}
+func (q *chainQuery) AttributeValueOwnerIDs(context.Context, int64) ([]int64, error) {
+	return q.owners, q.err
 }
 
 type chainPermissions struct{ raw []byte }
@@ -295,6 +329,10 @@ type operatorChain struct {
 	redeems      *chainRedeems
 	http         *chainHTTP
 	sql          sqlmock.Sqlmock
+	riskWrites   *chainRiskSettings
+	channels     *chainChannels
+	attributes   *chainAttributes
+	cfg          *config.Config
 }
 
 func newOperatorChain(t *testing.T, role string, modules bool, flags []operatoraccess.Flag, backendMode bool) *operatorChain {
@@ -309,6 +347,7 @@ func newOperatorChain(t *testing.T, role string, modules bool, flags []operatora
 	f.groups = &chainGroups{stubGroupRepo: &stubGroupRepo{}, w: f.w, row: &service.Group{ID: 1, Name: "group", Platform: service.PlatformOpenAI, RateMultiplier: 1, IsExclusive: true, Status: service.StatusActive, DailyLimitUSD: chainPtr(10.0)}}
 	f.proxies = &chainProxies{w: f.w, row: &service.Proxy{ID: 10, Name: "proxy", Protocol: "http", Host: "203.0.113.10", Port: 8080, Status: service.StatusActive, FallbackMode: service.FallbackModeNone}}
 	cfg := &config.Config{JWT: config.JWTConfig{Secret: "unit-chain-secret", ExpireHour: 1}, RunMode: config.RunModeStandard}
+	f.cfg = cfg
 	f.settingsRepo = newStubSettingRepo()
 	f.settingsRepo.all[service.SettingKeyDefaultBalance] = "5"
 	f.settingsRepo.all[service.SettingKeyDefaultSubscriptions] = `[{"group_id":1,"validity_days":7}]`
@@ -361,8 +400,12 @@ func newOperatorChain(t *testing.T, role string, modules bool, flags []operatora
 	monitorService := service.NewChannelMonitorService(f.monitors, chainEncryptor{})
 	templateService := service.NewChannelMonitorRequestTemplateService(f.templates)
 	moderation := service.NewContentModerationService(f.settingsRepo, nil, nil, nil, nil, nil, nil, nil)
-	_ = moderation
-	access := service.NewOperatorAccessService(f.permissions, f.users, keys, nil, nil, f.redeems, f.proxies, f.admin, nil, nil, monitorService, templateService, moderation, nil, f.settings, nil, nil, f.query)
+	f.riskWrites = &chainRiskSettings{SettingRepository: f.settingsRepo, w: f.w}
+	moderation = service.NewContentModerationService(f.riskWrites, nil, nil, nil, nil, nil, nil, nil)
+	f.channels = &chainChannels{w: f.w, row: &service.Channel{ID: 10, Name: "channel", Status: service.StatusActive, GroupIDs: []int64{1}}}
+	channelService := service.NewChannelService(f.channels, f.groups, nil, nil, nil)
+	f.attributes = &chainAttributes{w: f.w}
+	access := service.NewOperatorAccessService(f.permissions, f.users, keys, nil, nil, f.redeems, f.proxies, f.admin, nil, channelService, monitorService, templateService, moderation, nil, f.settings, nil, nil, f.query)
 	users := service.NewUserService(f.users, nil, nil, nil)
 	auth := service.NewAuthService(nil, f.users, nil, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil)
 	f.token, err = auth.GenerateToken(context.Background(), f.users.users[7])
@@ -384,6 +427,14 @@ func newOperatorChain(t *testing.T, role string, modules bool, flags []operatora
 	g.POST("/users/batch-concurrency", user.BatchUpdateConcurrency)
 	g.POST("/users/:id/replace-group", user.ReplaceGroup)
 	g.GET("/users", user.List)
+	attrs := adminhandler.NewUserAttributeHandler(service.NewUserAttributeService(f.attributes, &chainAttributeValues{f.attributes}))
+	g.DELETE("/user-attributes/:id", attrs.DeleteDefinition)
+	g.POST("/user-attributes/batch", attrs.GetBatchUserAttributes)
+	channels := adminhandler.NewChannelHandler(channelService, nil, nil)
+	g.PUT("/channels/:id", channels.Update)
+	risk := adminhandler.NewContentModerationHandler(moderation)
+	g.GET("/risk-control/config", risk.GetConfig)
+	g.PUT("/risk-control/config", risk.UpdateConfig)
 	g.POST("/accounts", account.Create)
 	g.PUT("/accounts/:id", account.Update)
 	g.GET("/accounts/:id", account.GetByID)
@@ -415,6 +466,7 @@ func newOperatorChain(t *testing.T, role string, modules bool, flags []operatora
 	g.GET("/channel-monitors", monitor.List)
 	g.GET("/audit-logs/:id", adminhandler.NewAuditLogHandler(service.NewAuditLogService(chainAudit{}, f.settings), nil).Get)
 	g.GET("/channel-monitor-templates", template.List)
+	g.PUT("/channel-monitor-templates/:id", template.Update)
 	g.POST("/channel-monitor-templates/:id/apply", template.Apply)
 	g.POST("/redeem-codes/batch-update", redeem.BatchUpdate)
 	g.GET("/redeem-codes", redeem.List)
@@ -719,6 +771,18 @@ func chainActors(t *testing.T) {
 			if strings.Contains(tc.path, "refresh-tier") {
 				require.Contains(t, f.w.calls, "account.update")
 			}
+			if tc.path == "/accounts/batch" {
+				var result struct {
+					Data struct {
+						Success int `json:"success"`
+						Failed  int `json:"failed"`
+					} `json:"data"`
+				}
+				require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result), rec.Body.String())
+				require.Equal(t, 1, result.Data.Success, rec.Body.String())
+				require.Zero(t, result.Data.Failed, rec.Body.String())
+				require.Contains(t, f.w.calls, "account.create")
+			}
 			if tc.path == "/accounts" {
 				require.Contains(t, f.w.calls, "idempotency.claim")
 			}
@@ -749,14 +813,22 @@ func chainStream(t *testing.T) {
 		t.Run(base, func(t *testing.T) {
 			for _, role := range []string{service.RoleOperator, service.RoleAdmin} {
 				f := newOperatorChain(t, role, true, nil, false)
+				f.cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 				f.accounts.row.Credentials["base_url"] = base
 				f.http.client = client
 				// The TLS client trusts the test CA; only its hostname is wrong.
 
 				rec := f.do("POST", "/accounts/10/test", `{}`)
+				if base == "http://"+refused {
+					require.Greater(t, f.http.calls.Load(), int32(0), "request must reach the transport")
+					if role == service.RoleAdmin {
+						require.Contains(t, rec.Body.String(), "connection refused")
+						require.Contains(t, rec.Body.String(), refused)
+					}
+				}
 				if role == service.RoleOperator {
 					require.Contains(t, rec.Body.String(), operatoraccess.ErrorDetailHidden)
-					for _, hidden := range []string{base, "127.0.0.1", parsed.Port(), "localhost", "no-such-host.invalid", "example.com"} {
+					for _, hidden := range []string{base, "127.0.0.1", refused, parsed.Port(), "localhost", "no-such-host.invalid", "example.com"} {
 						require.NotContains(t, rec.Body.String(), hidden)
 					}
 				} else {
@@ -781,28 +853,45 @@ func chainRevert(t *testing.T) {
 			f.accounts.row.ProxyID = chainPtr(int64(20))
 			f.accounts.row.ProxyFallbackOriginID = chainPtr(int64(10))
 			f.query.usedIDs = map[int64]bool{10: true}
-			before, _ := json.Marshal(f.accounts.row)
+			f.accounts.shadow = &service.Account{ID: 11, ProxyID: chainPtr(int64(20)), ParentAccountID: chainPtr(int64(10))}
+			f.accounts.outbox = []int64{99}
+			snapshot := func() string {
+				raw, e := json.Marshal([]any{f.accounts.row, f.accounts.shadow, f.accounts.outbox})
+				require.NoError(t, e)
+				return string(raw)
+			}
+			before := snapshot()
 			for _, tc := range []struct{ method, path, body, field string }{{"DELETE", "/proxies/10", "", "id"}, {"POST", "/proxies/batch-delete", `{"ids":[10]}`, "ids"}} {
 				chainDeny(t, f, tc.method, tc.path, tc.body, 400, "ADMIN_FIELD_FORBIDDEN", tc.field)
 				require.False(t, f.proxies.deleted)
 			}
 			chainDeny(t, f, "POST", "/accounts/10/revert-proxy-fallback", `{}`, 403, "SUPER_ADMIN_REQUIRED", "")
-			after, _ := json.Marshal(f.accounts.row)
-			require.JSONEq(t, string(before), string(after))
-			require.NotContains(t, f.w.calls, "account.shadow")
-			require.NotContains(t, f.w.calls, "account.outbox")
+			require.JSONEq(t, before, snapshot())
 			// Delete through the super-admin's actual authenticated chain, sharing state.
+			deleted := false
+			f.proxies.deletedState = &deleted
 			admin := newOperatorChain(t, service.RoleAdmin, true, nil, false)
 			admin.proxies.row = f.proxies.row
+			admin.proxies.deletedState = &deleted
 			rec := admin.do("DELETE", "/proxies/10", "")
 			require.Equal(t, 200, rec.Code, rec.Body.String())
-			require.True(t, admin.proxies.deleted)
+			require.True(t, deleted)
+			_, err := f.proxies.GetByID(context.Background(), 10)
+			require.ErrorIs(t, err, service.ErrProxyNotFound)
+			_, err = admin.proxies.GetByID(context.Background(), 10)
+			require.ErrorIs(t, err, service.ErrProxyNotFound)
 			chainDeny(t, f, "POST", "/accounts/10/revert-proxy-fallback", `{}`, 403, "SUPER_ADMIN_REQUIRED", "")
+			require.JSONEq(t, before, snapshot())
 			admin.accounts.row = f.accounts.row
+			admin.accounts.shadow = f.accounts.shadow
+			admin.accounts.outbox = append([]int64(nil), f.accounts.outbox...)
 			rec = admin.do("POST", "/accounts/10/revert-proxy-fallback", `{}`)
 			require.Equal(t, 200, rec.Code, rec.Body.String())
 			require.Nil(t, admin.accounts.row.ProxyFallbackOriginID)
 			require.Equal(t, int64(10), *admin.accounts.row.ProxyID)
+			require.Equal(t, int64(10), *admin.accounts.shadow.ProxyID)
+			require.Equal(t, []int64{99, 10, 11}, admin.accounts.outbox)
+			require.Contains(t, admin.w.calls, "account.update")
 		}
 	}
 }
@@ -852,10 +941,25 @@ func chainProxy(t *testing.T) {
 }
 func chainReadOnly(t *testing.T) {
 	f := newOperatorChain(t, service.RoleOperator, true, nil, false)
+	_, found := operatoraccess.Lookup("PUT /channel-monitors/:id")
+	require.True(t, found, "audit route must resolve through the production catalog")
 	f.accounts.row.Extra["custom_base_url"] = "https://203.0.113.15"
-	for _, path := range []string{"/accounts", "/accounts/10", "/channel-monitors", "/channel-monitor-templates", "/audit-logs/10"} {
+	for _, path := range []string{"/accounts", "/accounts/10", "/channel-monitors", "/channel-monitor-templates", "/audit-logs/10", "/audit-logs/11"} {
 		rec := f.do("GET", path, "")
 		require.Equal(t, 200, rec.Code, rec.Body.String())
+		if strings.HasPrefix(path, "/audit-logs/") {
+			var out struct {
+				Data struct {
+					Body string `json:"request_body"`
+				} `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+			if path == "/audit-logs/10" {
+				require.Equal(t, "<request body hidden>", out.Data.Body)
+			} else {
+				require.JSONEq(t, `{"extra_headers":{"x-secret":"***"},"name":"visible"}`, out.Data.Body)
+			}
+		}
 		for _, secret := range []string{"https://203.0.113.", "custom_base_url", "stored-header", "audit-secret", "truncated-secret"} {
 			require.NotContains(t, rec.Body.String(), secret, path)
 		}
@@ -1010,6 +1114,11 @@ func (r *chainTemplates) GetByID(context.Context, int64) (*service.ChannelMonito
 func (r *chainTemplates) List(context.Context, service.ChannelMonitorRequestTemplateListParams) ([]*service.ChannelMonitorRequestTemplate, error) {
 	return []*service.ChannelMonitorRequestTemplate{r.row}, nil
 }
+func (r *chainTemplates) Update(ctx context.Context, row *service.ChannelMonitorRequestTemplate) error {
+	r.w.record(ctx, "template.update")
+	r.row = row
+	return nil
+}
 func (r *chainTemplates) CountAssociatedMonitors(context.Context, int64) (int64, error) {
 	return 1, nil
 }
@@ -1110,8 +1219,11 @@ func (chainDrive) GetStorageQuota(context.Context, string, string) (*geminicli.D
 
 type chainAudit struct{ service.AuditLogRepository }
 
-func (chainAudit) GetByID(context.Context, int64) (*service.AuditLog, error) {
-	return &service.AuditLog{ID: 10, Method: "PUT", Path: "/api/v1/admin/channel-monitors/10", RequestBody: `{"extra_headers":{"x-secret":"audit-secret"}`, Extra: map[string]any{"body_truncated": true}}, nil
+func (chainAudit) GetByID(_ context.Context, id int64) (*service.AuditLog, error) {
+	if id == 11 {
+		return &service.AuditLog{ID: 11, Method: "PUT", Path: "/api/v1/admin/channel-monitors/:id", RequestBody: `{"extra_headers":{"x-secret":"audit-secret"},"name":"visible"}`}, nil
+	}
+	return &service.AuditLog{ID: 10, Method: "PUT", Path: "/api/v1/admin/channel-monitors/:id", RequestBody: `{"extra_headers":{"x-secret":"truncated-secret"}`, Extra: map[string]any{"body_truncated": true}}, nil
 }
 
 type chainAxisCase struct {

@@ -19,6 +19,8 @@ var OperatorGroupPriceFields = []string{
 	"LongContextPricingScope",
 	"LongContextPricingModels",
 	"ModelPricing",
+	"MaxReasoningEffort",
+	"ReasoningEffortMappings",
 	"ImageRateIndependent",
 	"ImageRateMultiplier",
 	"BatchImageDiscountMultiplier",
@@ -72,9 +74,7 @@ var OperatorGroupFreeFields = []string{
 	"ModelAllowlist",
 	"CodexModelsManifestConfig",
 	"RPMLimit",
-	"MaxReasoningEffort",
 	"MaxReasoningEffortOverLimit",
-	"ReasoningEffortMappings",
 	"CopyAccountsFromGroupIDs",
 }
 var operatorGroupJSONNames = map[string]string{
@@ -205,6 +205,34 @@ func (s *adminServiceImpl) operatorGroupUpdateRules(ctx context.Context, id int6
 			}
 			continue
 		}
+		if slices.Contains([]string{"ImagePrice1K", "ImagePrice2K", "ImagePrice4K", "VideoPrice480P", "VideoPrice720P", "VideoPrice1080P", "WebSearchPricePerCall", "SearchPricePer1k", "AudioRealtimePricePerMin", "AudioTTSPricePerMillionChars", "AudioSTTPricePerHour"}, name) {
+			incomingPrice, incomingOK := value.Interface().(*float64)
+			storedPrice, storedOK := old.Interface().(*float64)
+			if !incomingOK || !storedOK {
+				return operatorUnavailable()
+			}
+			if !reflect.DeepEqual(normalizePrice(incomingPrice), normalizePrice(storedPrice)) {
+				return operatorFieldError(operatorGroupJSONNames[name])
+			}
+			continue
+		}
+		if name == "MaxReasoningEffort" {
+			normalized, e := normalizeMaxReasoningEffortForPlatform(group.Platform, *input.MaxReasoningEffort)
+			oldNormalized, oldErr := normalizeMaxReasoningEffortForPlatform(group.Platform, group.MaxReasoningEffort)
+			if e != nil || oldErr != nil || normalized != oldNormalized {
+				return operatorFieldError("max_reasoning_effort")
+			}
+			continue
+		}
+		if name == "ReasoningEffortMappings" {
+			normalized, e := NormalizeReasoningEffortMappings(group.Platform, *input.ReasoningEffortMappings)
+			oldNormalized, oldErr := NormalizeReasoningEffortMappings(group.Platform, group.ReasoningEffortMappings)
+			if e != nil || oldErr != nil || !reflect.DeepEqual(normalized, oldNormalized) {
+				return operatorFieldError("reasoning_effort_mappings")
+			}
+			continue
+		}
+
 		if !reflect.DeepEqual(operatorGroupValue(value), operatorGroupValue(old)) {
 			return operatorFieldError(operatorGroupJSONNames[name])
 		}

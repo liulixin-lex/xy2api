@@ -141,6 +141,31 @@ func (s *OperatorAccessService) CheckTarget(ctx context.Context, sc *operatoracc
 	case "user_body_ids":
 		field = "user_ids"
 		ids, err = operatorRead[[]int64](obj, field)
+	case "attribute_value_owners":
+		id, e := operatorPathID(r, "id")
+		if e != nil {
+			return e
+		}
+		if s.queryRepo == nil {
+			return operatorUnavailable()
+		}
+		ids, e = s.queryRepo.AttributeValueOwnerIDs(ctx, id)
+		if e != nil {
+			return operatorUnavailable()
+		}
+		if len(ids) > 0 && s.userRepo == nil {
+			return operatorUnavailable()
+		}
+		for _, ownerID := range ids {
+			owner, loadErr := s.userRepo.GetByIDIncludeDeleted(ctx, ownerID)
+			if loadErr != nil || owner == nil {
+				return operatorUnavailable()
+			}
+			if owner.Role != RoleUser || owner.ID == sc.UserID {
+				return operatorTargetError()
+			}
+		}
+		return nil
 	case "apikey_owner":
 		id, e := operatorPathID(r, "id")
 		if e != nil {
@@ -321,7 +346,10 @@ func (s *OperatorAccessService) CheckFields(ctx context.Context, sc *operatoracc
 			return nil, operatorFieldError("proxy_url")
 		}
 	case "risk_config":
-		return nil, s.operatorRiskRules(ctx, obj)
+		if err := s.operatorRiskRules(ctx, obj); err != nil {
+			return nil, err
+		}
+		return json.Marshal(obj)
 	case "ops_runtime_alert":
 		if s.opsService == nil {
 			return nil, operatorUnavailable()

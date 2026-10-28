@@ -57,6 +57,13 @@ func TestOperatorGroupMoneyFieldsNeedBalanceFlag(t *testing.T) {
 	for _, in := range []*UpdateGroupInput{{Platform: PlatformComposite}, {ForceOpenAIFast: operatorPtr(true)}} {
 		require.NoError(t, s.operatorGroupUpdateRules(operatorRulesContext(s, operatoraccess.FlagUsersBalanceAdjust), 1, in))
 	}
+	for _, field := range []string{"MaxReasoningEffort", "ReasoningEffortMappings"} {
+		require.Contains(t, OperatorGroupPriceFields, field)
+		require.NotContains(t, OperatorGroupFreeFields, field)
+	}
+	operatorRuleError(t, s.operatorGroupUpdateRules(ctx, 1, &UpdateGroupInput{MaxReasoningEffort: operatorPtr("high")}), "ADMIN_FIELD_FORBIDDEN", "max_reasoning_effort", "")
+	operatorRuleError(t, s.operatorGroupUpdateRules(ctx, 1, &UpdateGroupInput{ReasoningEffortMappings: &[]ReasoningEffortMapping{{From: "low", To: "high"}}}), "ADMIN_FIELD_FORBIDDEN", "reasoning_effort_mappings", "")
+	require.NoError(t, s.operatorGroupUpdateRules(ctx, 1, &UpdateGroupInput{ImagePrice1K: operatorPtr(-1.0)}))
 }
 
 func TestOperatorGroupEntityLoadNotFoundAndUnavailable(t *testing.T) {
@@ -129,4 +136,23 @@ func TestOperatorDeleteGroupWithAccountsNeedsBalanceFlag(t *testing.T) {
 	require.Equal(t, 1, groups.cascade)
 	require.NoError(t, s.DeleteGroup(operatoraccess.WithSuperAdmin(context.Background(), 2), 1))
 	require.Equal(t, 2, groups.cascade)
+}
+
+func TestOperatorGroupNormalizedMoneyRoundTrip(t *testing.T) {
+	s, _, groups := operatorUserFixture()
+	group := groups.rows[1]
+	group.Platform = PlatformOpenAI
+	group.MaxReasoningEffort = "high"
+	group.ReasoningEffortMappings = []ReasoningEffortMapping{{From: "low", To: "high"}}
+	ctx := operatorRulesContext(s)
+	require.NoError(t, s.operatorGroupUpdateRules(ctx, 1, &UpdateGroupInput{MaxReasoningEffort: operatorPtr(" HIGH "), ReasoningEffortMappings: &[]ReasoningEffortMapping{{From: " LOW ", To: " HIGH "}}}))
+	for _, name := range []string{"ImagePrice1K", "ImagePrice2K", "ImagePrice4K", "VideoPrice480P", "VideoPrice720P", "VideoPrice1080P", "WebSearchPricePerCall", "SearchPricePer1k", "AudioRealtimePricePerMin", "AudioTTSPricePerMillionChars", "AudioSTTPricePerHour"} {
+		t.Run(name, func(t *testing.T) {
+			input := &UpdateGroupInput{Name: "renamed"}
+			reflect.ValueOf(input).Elem().FieldByName(name).Set(reflect.ValueOf(operatorPtr(-1.0)))
+			require.NoError(t, s.operatorGroupUpdateRules(ctx, 1, input))
+			reflect.ValueOf(input).Elem().FieldByName(name).Set(reflect.ValueOf(operatorPtr(0.0)))
+			operatorRuleError(t, s.operatorGroupUpdateRules(ctx, 1, input), "ADMIN_FIELD_FORBIDDEN", operatorGroupJSONNames[name], "")
+		})
+	}
 }

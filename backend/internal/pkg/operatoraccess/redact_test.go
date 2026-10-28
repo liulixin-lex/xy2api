@@ -38,6 +38,39 @@ func TestRedactAccountStripsAddressWithoutFlag(t *testing.T) {
 	obj = redactTest(t, testAccount, []Redaction{"account"}, FlagAccountsUpstreamAddress)
 	require.Equal(t, "https://relay.example", obj["credentials"].(map[string]any)["base_url"])
 }
+
+func TestRedactOperatorAddressUserinfoEverywhere(t *testing.T) {
+	body := `{"platform":"openai","type":"apikey","credentials":{"base_url":"https://u:p@one.example/v1","api_base_urls":["https://a:b@two.example/v1","https://plain.example/v1"]},"extra":{"custom_base_url":"https://x:y@three.example/v1"},"custom_base_url":"https://z:q@four.example/v1"}`
+	obj := redactTest(t, body, []Redaction{"account"}, FlagAccountsUpstreamAddress)
+	raw, _ := json.Marshal(obj)
+	for _, secret := range []string{"u:p@", "a:b@", "x:y@", "z:q@"} {
+		require.NotContains(t, string(raw), secret)
+	}
+	require.Contains(t, string(raw), "https://***@one.example/v1")
+	require.Contains(t, string(raw), "https://***@two.example/v1")
+	require.Contains(t, string(raw), "https://***@three.example/v1")
+	require.Contains(t, string(raw), "https://***@four.example/v1")
+	monitor := redactTest(t, `{"endpoint":"https://m:n@monitor.example/v1"}`, []Redaction{"monitor"}, FlagAccountsUpstreamAddress)
+	require.Equal(t, "https://***@monitor.example/v1", monitor["endpoint"])
+	ops := redactTest(t, `{"data":{"upstream_url":"https://o:p@ops.example/v1","upstream_errors":"[{\"upstream_url\":\"https://e:f@event.example/v1\"}]"}}`, []Redaction{"ops_upstream_url"}, FlagAccountsUpstreamAddress)
+	opsRaw, _ := json.Marshal(ops)
+	require.NotContains(t, string(opsRaw), "o:p@")
+	require.NotContains(t, string(opsRaw), "e:f@")
+}
+func TestRedactAddressMapAndOpsViewUserinfo(t *testing.T) {
+	obj := redactTest(t, `{"platform":"openai","type":"apikey","credentials":{"api_base_urls":{"responses":"https://u:p@relay.example/v1","messages":"https://a:b@other.example"}}}`, []Redaction{"account"}, FlagAccountsUpstreamAddress)
+	urls := obj["credentials"].(map[string]any)["api_base_urls"].(map[string]any)
+	require.Equal(t, "https://***@relay.example/v1", urls["responses"])
+	require.Equal(t, "https://***@other.example", urls["messages"])
+	body := []byte(`{"data":{"upstream_url":"https://u:p@relay.example","upstream_errors":"[{\"upstream_url\":\"https://a:b@other.example\"}]"}}`)
+	raw, err := Redact(body, []Redaction{"ops_upstream_url"}, &Scope{Perms: Permissions{Modules: map[Module]Level{ModuleOps: LevelView}}})
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "u:p@")
+	require.NotContains(t, string(raw), "a:b@")
+	require.Contains(t, string(raw), "relay.example")
+	require.Contains(t, string(raw), "other.example")
+}
+
 func TestRedactAccountDeletesTopLevelCustomBaseURL(t *testing.T) {
 	for _, body := range []string{testAccount, `{"platform":"openai","type":"apikey","custom_base_url":"https://relay.example","custom_base_url_enabled":true}`} {
 		obj := redactTest(t, body, []Redaction{"account"})
@@ -109,13 +142,14 @@ func TestRedactEventLine(t *testing.T) {
 	require.NotPanics(t, func() { RedactEventLine([]byte(`data: {"error":{"message":"https://relay.example"}}`)) })
 }
 func TestRedactMonitorMasksEveryHeaderValue(t *testing.T) {
-	body := `{"endpoint":"https://relay.example","extra_headers":{"Authorization":"secret","X-Relay-Admission":"secret","nested":{"x":"secret"}}}`
+	body := `{"endpoint":"https://relay.example","extra_headers":{"Authorization":"secret","X-Relay-Admission":"secret","nested":{"x":"secret"}},"body_override":{"authorization":"secret","server_url":"https://u:p@host.example"}}`
 	for _, rule := range []Redaction{"monitor", "monitor_template"} {
 		for _, flags := range [][]Flag{nil, {FlagAccountsUpstreamAddress}} {
 			obj := redactTest(t, body, []Redaction{rule}, flags...)
 			for _, value := range obj["extra_headers"].(map[string]any) {
 				require.Equal(t, HeaderMask, value)
 			}
+			require.Equal(t, HeaderMask, obj["body_override"])
 			if rule == "monitor" && len(flags) == 0 {
 				require.NotContains(t, obj, "endpoint")
 			} else {
@@ -124,6 +158,52 @@ func TestRedactMonitorMasksEveryHeaderValue(t *testing.T) {
 		}
 	}
 }
+
+func TestAuditBodyHidesRedeemExportSearch(t *testing.T) {
+	obj := auditR5(t, "GET", "/api/v1/admin/redeem-codes/export", "", "status=unused&search=secret-code")
+	require.Equal(t, "<query hidden>", obj["extra"].(map[string]any)["query"])
+	obj = auditR5(t, "GET", "/api/v1/admin/redeem-codes/export", "", "status=unused&search=secret-code", FlagRedeemCodesIssue)
+	require.Equal(t, "status=unused&search=secret-code", obj["extra"].(map[string]any)["query"])
+}
+
+func TestRedactMonitorV2ErrorsAndRiskConfigURLs(t *testing.T) {
+	body := `{"data":{"items":[{"count":2,"details":[{"message":"dial 192.0.2.4:443 https://u:p@relay.example","status_code":502},{"message":""}]}]}}`
+	obj := redactTest(t, body, []Redaction{"monitor_v2_errors"})
+	items := obj["data"].(map[string]any)["items"].([]any)
+	details := items[0].(map[string]any)["details"].([]any)
+	require.Equal(t, ErrorDetailHidden, details[0].(map[string]any)["message"])
+	require.Equal(t, "", details[1].(map[string]any)["message"])
+	require.Equal(t, float64(2), items[0].(map[string]any)["count"])
+	for _, scope := range []*Scope{
+		{Perms: Permissions{Modules: map[Module]Level{ModuleOps: LevelView}}},
+		{Perms: Permissions{Flags: map[Flag]bool{FlagAccountsUpstreamAddress: true}}},
+	} {
+		raw, err := Redact([]byte(body), []Redaction{"monitor_v2_errors"}, scope)
+		require.NoError(t, err)
+		require.Contains(t, string(raw), "192.0.2.4:443")
+	}
+	config := `{"base_url":"https://u:p@one.example","engine_configs":{"typesafe":{"base_url":"https://u:p@two.example"}}}`
+	obj = redactTest(t, config, []Redaction{"risk_config_url"})
+	require.NotContains(t, obj, "base_url")
+	require.NotContains(t, obj["engine_configs"].(map[string]any)["typesafe"].(map[string]any), "base_url")
+	obj = redactTest(t, config, []Redaction{"risk_config_url"}, FlagAccountsUpstreamAddress)
+	require.Equal(t, "https://***@one.example", obj["base_url"])
+	require.Equal(t, "https://***@two.example", obj["engine_configs"].(map[string]any)["typesafe"].(map[string]any)["base_url"])
+}
+func TestRedactMonitorV2NetworkErrorKinds(t *testing.T) {
+	for _, message := range []string{"Post https://relay.example: refused", "dial tcp 192.0.2.4:443: refused", "lookup dns.example: no such host", "x509: certificate valid for cert.example"} {
+		raw, err := json.Marshal(map[string]any{"code": 0, "message": "ok", "data": map[string]any{"items": []any{map[string]any{"count": 3, "category": "network", "details": []any{map[string]any{"message": message, "status_code": 502}}}}}})
+		require.NoError(t, err)
+		result, err := Redact(raw, []Redaction{"monitor_v2_errors"}, &Scope{})
+		require.NoError(t, err)
+		require.NotContains(t, string(result), message)
+		require.Contains(t, string(result), ErrorDetailHidden)
+		require.Contains(t, string(result), `"status_code":502`)
+		require.Contains(t, string(result), `"count":3`)
+		require.Contains(t, string(result), `"category":"network"`)
+	}
+}
+
 func TestRedactAPIKeyRedeemPromoAndOrderCodes(t *testing.T) {
 	obj := redactTest(t, `{"key":"abcdefghijklmnop","user_id":4,"other":{"key":"not-an-apikey"},"password":"secret","rows":[{"code":"ABCDEFGH"}],"recharge_code":"recharge","detail":"{\"rechargeCode\":\"another\"}"}`, []Redaction{"api_key", "redeem_code", "promo_code", "order_code", "proxy_password"})
 	require.Equal(t, "abcdef****mnop", obj["key"])

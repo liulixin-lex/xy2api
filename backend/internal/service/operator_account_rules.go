@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"github.com/liulixin-lex/xy2api/internal/pkg/operatoraccess"
 	"reflect"
@@ -74,6 +75,47 @@ func operatorAccountAddressValues(ctx context.Context, field string, value any) 
 	}
 	return nil
 }
+
+// Restore the exact response projection before comparing network identity. A
+// partial edit containing a mask is ambiguous and must never reach storage.
+func operatorRestoreURLUserinfo(value, stored any, field string) (any, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, operatorFieldError(field)
+	}
+	if !strings.Contains(string(raw), "***@") {
+		return value, nil
+	}
+	oldRaw, err := json.Marshal(stored)
+	if err != nil {
+		return nil, operatorFieldError(field)
+	}
+	var projection any
+	if json.Unmarshal(oldRaw, &projection) != nil {
+		return nil, operatorFieldError(field)
+	}
+	var strip func(any) any
+	strip = func(v any) any {
+		switch x := v.(type) {
+		case string:
+			return operatoraccess.StripURLUserinfo(x)
+		case []any:
+			for i := range x {
+				x[i] = strip(x[i])
+			}
+		case map[string]any:
+			for k := range x {
+				x[k] = strip(x[k])
+			}
+		}
+		return v
+	}
+	masked, err := json.Marshal(strip(projection))
+	if err == nil && string(masked) == string(raw) {
+		return stored, nil
+	}
+	return nil, operatorFieldError(field)
+}
 func (s *adminServiceImpl) operatorAccountCreateRules(ctx context.Context, input *CreateAccountInput) error {
 	sc, _, err := s.operatorScope(ctx)
 	if err != nil {
@@ -93,6 +135,9 @@ func (s *adminServiceImpl) operatorAccountCreateRules(ctx context.Context, input
 		}
 		if !sc.Has(operatoraccess.FlagAccountsUpstreamAddress) {
 			return operatorNetworkError(path, "address")
+		}
+		if _, err := operatorRestoreURLUserinfo(v, nil, path); err != nil {
+			return err
 		}
 		if err := operatorAccountAddressValues(ctx, path, v); err != nil {
 			return err
@@ -138,6 +183,14 @@ func (s *adminServiceImpl) operatorAccountUpdateRules(ctx context.Context, accou
 			continue
 		}
 		v, present := m[k]
+		if present && slices.Contains(OperatorAddressKeys, path) && path != "extra.custom_base_url_enabled" {
+			restored, restoreErr := operatorRestoreURLUserinfo(v, old[k], path)
+			if restoreErr != nil {
+				return restoreErr
+			}
+			m[k] = restored
+			v = restored
+		}
 		if !present || (!address && slices.Contains(OperatorAddressKeys, path) && operatorEmpty(v)) {
 			if stored, ok := old[k]; ok {
 				m[k] = stored
@@ -288,8 +341,15 @@ func (s *adminServiceImpl) operatorAccountExtraRules(ctx context.Context, id int
 	}
 	for _, path := range OperatorAddressKeys {
 		if k, ok := strings.CutPrefix(path, "extra."); ok {
-			if v, present := updates[k]; present && !reflect.DeepEqual(v, account.Extra[k]) {
-				return operatorNetworkError(path, "address")
+			if v, present := updates[k]; present {
+				restored, err := operatorRestoreURLUserinfo(v, account.Extra[k], path)
+				if err != nil {
+					return err
+				}
+				if !reflect.DeepEqual(restored, account.Extra[k]) {
+					return operatorNetworkError(path, "address")
+				}
+				updates[k] = restored
 			}
 		}
 	}
@@ -309,6 +369,52 @@ func (s *adminServiceImpl) operatorAccountBulkRules(ctx context.Context, input *
 	}
 	if sc == nil {
 		return nil
+	}
+	// Bulk updates merge keys. Remove unchanged address projections after
+	// validating every target so each account retains its own stored userinfo.
+	var targets []*Account
+	for _, path := range OperatorAddressKeys {
+		if path == "extra.custom_base_url_enabled" {
+			continue
+		}
+		m, k := operatorMapKey(path, input.Credentials, input.Extra)
+		value, present := m[k]
+		if !present {
+			continue
+		}
+		if len(input.AccountIDs) == 0 {
+			return operatorNetworkError(path, "address")
+		}
+		if s.accountRepo == nil {
+			return operatorUnavailable()
+		}
+		if targets == nil {
+			targets, err = s.accountRepo.GetByIDs(ctx, input.AccountIDs)
+			if err != nil {
+				return operatorUnavailable()
+			}
+		}
+		seen := map[int64]bool{}
+		for _, account := range targets {
+			if account == nil {
+				continue
+			}
+			old, key := operatorMapKey(path, account.Credentials, account.Extra)
+			restored, e := operatorRestoreURLUserinfo(value, old[key], path)
+			if e != nil {
+				return e
+			}
+			if !reflect.DeepEqual(restored, old[key]) {
+				return operatorNetworkError(path, "address")
+			}
+			seen[account.ID] = true
+		}
+		for _, id := range input.AccountIDs {
+			if !seen[id] {
+				return ErrAccountNotFound
+			}
+		}
+		delete(m, k)
 	}
 	for _, path := range OperatorNetworkIdentityKeys {
 		m, k := operatorMapKey(path, input.Credentials, input.Extra)

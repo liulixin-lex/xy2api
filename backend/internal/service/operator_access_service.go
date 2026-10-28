@@ -19,6 +19,7 @@ type AdminOperatorPermissionRepository interface {
 type OperatorAccessQueryRepository interface {
 	GroupHasProtectedMembers(ctx context.Context, groupID, operatorID int64) (bool, error)
 	ProxyIDsUsedByAccounts(ctx context.Context, proxyIDs []int64) ([]int64, error)
+	AttributeValueOwnerIDs(ctx context.Context, attributeID int64) ([]int64, error)
 }
 
 type OperatorAccessService struct {

@@ -69,6 +69,23 @@ func TestOperatorNetworkChangeRequiresEverySecret(t *testing.T) {
 		})
 	}
 }
+
+func TestOperatorAccountMaskedURLRoundTrip(t *testing.T) {
+	s := &adminServiceImpl{}
+	a := operatorStoredAccount()
+	a.Credentials["base_url"] = "https://relay-user:relay-pass@relay.example/v1"
+	a.Credentials["api_base_urls"] = []any{"https://user:pass@one.example/v1", "https://two.example/v1"}
+	ctx := operatorRulesContext(s, operatoraccess.FlagAccountsUpstreamAddress)
+	in := &UpdateAccountInput{Credentials: map[string]any{
+		"base_url":      operatoraccess.StripURLUserinfo(a.Credentials["base_url"].(string)),
+		"api_base_urls": []any{"https://***@one.example/v1", "https://two.example/v1"},
+	}}
+	require.NoError(t, s.operatorAccountUpdateRules(ctx, a, in))
+	require.Equal(t, a.Credentials["base_url"], in.Credentials["base_url"])
+	require.Equal(t, a.Credentials["api_base_urls"], in.Credentials["api_base_urls"])
+	in = &UpdateAccountInput{Credentials: map[string]any{"base_url": "https://***@other.example/v1"}}
+	operatorRuleError(t, s.operatorAccountUpdateRules(ctx, a, in), "ADMIN_FIELD_FORBIDDEN", "credentials.base_url", "")
+}
 func TestOperatorCannotChangeNetworkOfRefreshableAccount(t *testing.T) {
 	for _, typ := range OperatorRefreshableTypes {
 		for _, flags := range [][]operatoraccess.Flag{nil, {operatoraccess.FlagAccountsUpstreamAddress}} {

@@ -74,6 +74,7 @@ type operatorGuardQuery struct {
 	protected bool
 	used      map[int64]bool
 	queried   []int64
+	owners    []int64
 	err       error
 }
 
@@ -89,6 +90,9 @@ func (r *operatorGuardQuery) ProxyIDsUsedByAccounts(_ context.Context, ids []int
 		}
 	}
 	return out, r.err
+}
+func (r *operatorGuardQuery) AttributeValueOwnerIDs(context.Context, int64) ([]int64, error) {
+	return append([]int64(nil), r.owners...), r.err
 }
 
 type operatorGuardProxies struct {
@@ -267,6 +271,33 @@ func TestOperatorTargetOwners(t *testing.T) {
 	f.svc.paymentService = nil
 	guardReason(t, f.svc.CheckTarget(context.Background(), f.sc, "order_owner", guardRequest("")), "OPERATOR_ACCESS_UNAVAILABLE", "")
 }
+
+func TestOperatorAttributeValueOwnersProtectDelete(t *testing.T) {
+	f := newOperatorGuardFixture(t)
+	deleted := time.Now()
+	f.users.rows[1].DeletedAt = &deleted
+	f.query.owners = []int64{1, 2}
+	r := guardRequest("")
+	r.Params["id"] = "44"
+	guardReason(t, f.svc.CheckTarget(context.Background(), f.sc, "attribute_value_owners", r), "ADMIN_TARGET_FORBIDDEN", "")
+	f.query.owners = []int64{9}
+	guardReason(t, f.svc.CheckTarget(context.Background(), f.sc, "attribute_value_owners", r), "ADMIN_TARGET_FORBIDDEN", "")
+	f.query.owners = []int64{2}
+	guardReason(t, f.svc.CheckTarget(context.Background(), f.sc, "attribute_value_owners", r), "ADMIN_TARGET_FORBIDDEN", "")
+	f.query.owners = nil
+	require.NoError(t, f.svc.CheckTarget(context.Background(), f.sc, "attribute_value_owners", r))
+	f.query.err = errors.New("db")
+	guardReason(t, f.svc.CheckTarget(context.Background(), f.sc, "attribute_value_owners", r), "OPERATOR_ACCESS_UNAVAILABLE", "")
+}
+
+func TestOperatorUserAttributeBatchProtectsMixedTargets(t *testing.T) {
+	f := newOperatorGuardFixture(t)
+	r := guardRequest(`{"user_ids":[1,2]}`)
+	reads := f.users.reads
+	guardReason(t, f.svc.CheckTarget(context.Background(), f.sc, "user_body_ids", r), "ADMIN_TARGET_FORBIDDEN", "")
+	require.Greater(t, f.users.reads, reads)
+	require.Equal(t, 2, f.users.reads, "target validation finishes before the handler reads attributes")
+}
 func TestOperatorTargetBatchLimit(t *testing.T) {
 	f := newOperatorGuardFixture(t)
 	ids := make([]int64, 1001)
@@ -301,6 +332,27 @@ func TestOperatorGroupRateTargets(t *testing.T) {
 	guardReason(t, f.svc.CheckTarget(context.Background(), f.sc, "group_rpm_rows", guardRequest("{}")), "ADMIN_TARGET_FORBIDDEN", "")
 	rates.err = errors.New("db")
 	guardReason(t, f.svc.CheckTarget(context.Background(), f.sc, "group_rate_rows", guardRequest("{}")), "OPERATOR_ACCESS_UNAVAILABLE", "")
+}
+
+func TestOperatorChannelAccountStatsPricingNeedsBalanceFlag(t *testing.T) {
+	f := newOperatorGuardFixture(t)
+	r := guardRequest(`{"account_stats_pricing_rules":[{"name":"custom","group_ids":[1],"pricing":[{"platform":"openai","models":["*"],"billing_mode":"per_request","per_request_price":1000}]}]}`)
+	r.Key = "PUT /channels/:id"
+	guardReason(t, f.svc.operatorChannelRules(context.Background(), f.sc, "channel_update", r, mustOperatorObject(t, r.Body)), "ADMIN_FIELD_FORBIDDEN", "account_stats_pricing_rules")
+	r.Body = []byte(`{"apply_pricing_to_account_stats":true}`)
+	guardReason(t, f.svc.operatorChannelRules(context.Background(), f.sc, "channel_update", r, mustOperatorObject(t, r.Body)), "ADMIN_FIELD_FORBIDDEN", "apply_pricing_to_account_stats")
+	r.Body = []byte(`{"account_stats_pricing_rules":[],"apply_pricing_to_account_stats":false}`)
+	require.NoError(t, f.svc.operatorChannelRules(context.Background(), f.sc, "channel_update", r, mustOperatorObject(t, r.Body)))
+	r.Key = "POST /channels"
+	r.Body = []byte(`{"group_ids":[1],"apply_pricing_to_account_stats":true}`)
+	guardReason(t, f.svc.operatorChannelRules(context.Background(), f.sc, "channel_create", r, mustOperatorObject(t, r.Body)), "ADMIN_FIELD_FORBIDDEN", "apply_pricing_to_account_stats")
+}
+
+func mustOperatorObject(t *testing.T, body []byte) operatorObject {
+	t.Helper()
+	obj, err := operatorObjectBody(body)
+	require.NoError(t, err)
+	return obj
 }
 func TestOperatorDeleteGroupWithProtectedMembers(t *testing.T) {
 	f := newOperatorGuardFixture(t)
@@ -368,7 +420,19 @@ func TestOperatorMonitorRules(t *testing.T) {
 		require.NoError(t, err)
 	})
 	f := newOperatorGuardFixture(t)
-	_, err := f.check("monitor_create", `{"account_id":1}`)
+	f.monitor.row.Endpoint = "https://relay-user:relay-pass@relay.example/v1"
+	f.monitor.row.BodyOverride = map[string]any{"authorization": "stored-secret"}
+	raw, err := f.check("monitor_update", `{"endpoint":"https://***@relay.example/v1","body_override":"******"}`)
+	require.NoError(t, err)
+	require.Contains(t, string(raw), `"endpoint":"https://relay-user:relay-pass@relay.example/v1"`)
+	require.Contains(t, string(raw), `"body_override":{"authorization":"stored-secret"}`)
+	_, err = f.check("monitor_update", `{"body_override":{"authorization":"******"}}`)
+	guardReason(t, err, "ADMIN_FIELD_FORBIDDEN", "body_override")
+	_, err = f.check("monitor_update", `{"endpoint":"https://***@different.example/v1"}`)
+	guardReason(t, err, "ADMIN_FIELD_FORBIDDEN", "endpoint")
+	f.monitor.row.Endpoint = "https://203.0.113.10"
+	f.monitor.row.BodyOverride = nil
+	_, err = f.check("monitor_create", `{"account_id":1}`)
 	guardReason(t, err, "ADMIN_PERMISSION_DENIED", "")
 	f.sc.Perms.Modules[operatoraccess.ModuleAccounts] = operatoraccess.LevelView
 	_, err = f.check("monitor_create", `{"account_id":1}`)
@@ -379,7 +443,7 @@ func TestOperatorMonitorRules(t *testing.T) {
 	guardReason(t, err, "ADMIN_FIELD_FORBIDDEN", "endpoint")
 	_, err = f.check("monitor_create", `{"endpoint":"https://203.0.113.10"}`)
 	require.NoError(t, err)
-	raw, err := f.check("monitor_update", `{"Extra_Headers":{"x-secret":"******","missing":"******"}}`)
+	raw, err = f.check("monitor_update", `{"Extra_Headers":{"x-secret":"******","missing":"******"}}`)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"endpoint":"https://203.0.113.10","extra_headers":{"x-secret":"stored"}}`, string(raw))
 	_, err = f.check("monitor_update", `{"endpoint":"https://203.0.113.11","api_key":"new"}`)
@@ -387,9 +451,16 @@ func TestOperatorMonitorRules(t *testing.T) {
 	raw, err = f.check("monitor_template_update", `{"extra_headers":{"x-secret":"******"}}`)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"extra_headers":{"x-secret":"stored"}}`, string(raw))
+	f.template.row.BodyOverride = map[string]any{"authorization": "template-secret"}
+	raw, err = f.check("monitor_template_update", `{"body_override":"******"}`)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"body_override":{"authorization":"template-secret"}}`, string(raw))
+	_, err = f.check("monitor_template_update", `{"body_override":{"authorization":"******"}}`)
+	guardReason(t, err, "ADMIN_FIELD_FORBIDDEN", "body_override")
 }
 func TestOperatorMonitorEndpointChangeDropsStoredHeaders(t *testing.T) {
 	f := newOperatorGuardFixture(t)
+	f.monitor.row.BodyOverride = map[string]any{"secret": "kept"}
 	f.sc.Perms.Flags[operatoraccess.FlagAccountsUpstreamAddress] = true
 	for _, body := range []string{`{"endpoint":"https://203.0.113.11"}`, `{"provider":"anthropic"}`, `{"api_mode":"chat_completions"}`} {
 		_, err := f.check("monitor_update", body)
@@ -397,7 +468,8 @@ func TestOperatorMonitorEndpointChangeDropsStoredHeaders(t *testing.T) {
 	}
 	raw, err := f.check("monitor_update", `{"endpoint":"https://203.0.113.11","api_key":"new","extra_headers":{"x-secret":"******","x-new":"fresh"}}`)
 	require.NoError(t, err)
-	require.JSONEq(t, `{"endpoint":"https://203.0.113.11","api_key":"new","extra_headers":{"x-new":"fresh"}}`, string(raw))
+	require.JSONEq(t, `{"endpoint":"https://203.0.113.11","api_key":"new","extra_headers":{"x-new":"fresh"},"body_override_mode":"off","body_override":{}}`, string(raw))
+	require.Contains(t, string(raw), `"body_override":{}`)
 	raw, err = f.check("monitor_update", `{"provider":"anthropic","api_key":"new"}`)
 	require.NoError(t, err)
 	require.Contains(t, string(raw), `"extra_headers":{}`)
@@ -425,9 +497,11 @@ func TestOperatorTemplateApplyWithHeadersIsSuperOnly(t *testing.T) {
 		})
 	}
 	f := newOperatorGuardFixture(t)
+	f.template.row.BodyOverride = map[string]any{"secret": "kept"}
 	_, err := f.check("monitor_template_apply", "{}")
 	guardReason(t, err, "SUPER_ADMIN_REQUIRED", "")
 	f.template.row.ExtraHeaders = nil
+	f.template.row.BodyOverride = nil
 	_, err = f.check("monitor_template_apply", "{}")
 	require.NoError(t, err)
 	f.template.err = errors.New("db")
@@ -821,7 +895,7 @@ func TestOperatorMonitorEmptyEndpointAndBlankKey(t *testing.T) {
 	guardReason(t, err, "ACCOUNT_API_KEY_REQUIRED", "api_key")
 	raw, err = f.check("monitor_update", `{"endpoint":"","api_key":"new"}`)
 	require.NoError(t, err)
-	require.JSONEq(t, `{"endpoint":"","api_key":"new","extra_headers":{}}`, string(raw))
+	require.JSONEq(t, `{"endpoint":"","api_key":"new","extra_headers":{},"body_override_mode":"off","body_override":{}}`, string(raw))
 	f.monitor.row.Endpoint = "http://127.0.0.1"
 	_, err = f.check("monitor_update", `{"endpoint":"http://127.0.0.1"}`)
 	guardReason(t, err, "ADMIN_FIELD_FORBIDDEN", "endpoint")
@@ -843,6 +917,17 @@ func TestOperatorRiskEngineConfigEquality(t *testing.T) {
 		_, err = f.check("risk_config", body)
 		guardReason(t, err, "ADMIN_FIELD_FORBIDDEN", "engine_configs")
 	}
+	_, err = f.check("risk_config", `{"engine":"typesafe","proxy_id":0}`)
+	guardReason(t, err, "ADMIN_FIELD_FORBIDDEN", "engine")
+}
+
+func TestOperatorRiskConfigMaskedURLRoundTrip(t *testing.T) {
+	f := newOperatorGuardFixture(t)
+	f.settings.values[SettingKeyContentModerationConfig] = `{"base_url":"https://risk-user:risk-pass@moderation.example/v1"}`
+	_, err := f.check("risk_config", `{"base_url":"https://***@moderation.example/v1"}`)
+	require.NoError(t, err)
+	_, err = f.check("risk_config", `{"base_url":"https://***@other.example/v1"}`)
+	guardReason(t, err, "ADMIN_FIELD_FORBIDDEN", "base_url")
 }
 
 func testOperatorNormalizedSort(t *testing.T, rule operatoraccess.FieldRule) {
@@ -882,4 +967,28 @@ func TestOperatorTargetIDNormalization(t *testing.T) {
 	guardReason(t, f.svc.CheckTarget(context.Background(), f.sc, "user_path_user_id", r), "ADMIN_TARGET_FORBIDDEN", "")
 	r.Key = "PUT /affiliates/users/:user_id"
 	guardReason(t, f.svc.CheckTarget(context.Background(), f.sc, "user_path_user_id", r), "ADMIN_FIELD_FORBIDDEN", "user_id")
+}
+
+func TestOperatorChannelStatsPricingEffectiveEquality(t *testing.T) {
+	f := newOperatorGuardFixture(t)
+	f.channel.row.AccountStatsPricingRules = []AccountStatsPricingRule{{ID: 42, ChannelID: 10, Name: "same", GroupIDs: []int64{1}, AccountIDs: []int64{10}, SortOrder: 4, Pricing: []ChannelModelPricing{{ID: 11, ChannelID: 10, Platform: PlatformOpenAI, Models: []string{"*"}, BillingMode: BillingModeToken}}}}
+	equal := `{"account_stats_pricing_rules":[{"name":"same","group_ids":[1],"account_ids":[10],"pricing":[{"platform":"openai","models":["*"]}]}]}`
+	_, err := f.check("channel_update", equal)
+	require.NoError(t, err)
+	for _, body := range []string{
+		`{"account_stats_pricing_rules":[{"name":"same","group_ids":[2],"account_ids":[10],"pricing":[{"platform":"openai","models":["*"]}]}]}`,
+		`{"account_stats_pricing_rules":[{"name":"same","group_ids":[1],"account_ids":[20],"pricing":[{"platform":"openai","models":["*"]}]}]}`,
+		`{"account_stats_pricing_rules":[{"name":"same","group_ids":[1],"account_ids":[10],"pricing":[{"platform":"openai","models":["*"],"input_price":1000}]}]}`,
+	} {
+		_, err = f.check("channel_update", body)
+		guardReason(t, err, "ADMIN_FIELD_FORBIDDEN", "account_stats_pricing_rules")
+	}
+	require.Equal(t, int64(11), f.channel.row.AccountStatsPricingRules[0].Pricing[0].ID, "normalization must not mutate repository state")
+	f.sc.Perms.Flags[operatoraccess.FlagUsersBalanceAdjust] = true
+	_, err = f.check("channel_update", `{"account_stats_pricing_rules":[],"apply_pricing_to_account_stats":true}`)
+	require.NoError(t, err)
+	f.sc.Perms.Flags[operatoraccess.FlagUsersBalanceAdjust] = false
+	f.channel.row.GroupIDs = nil
+	_, err = f.check("channel_update", `{"account_stats_pricing_rules":[],"apply_pricing_to_account_stats":true}`)
+	require.NoError(t, err)
 }

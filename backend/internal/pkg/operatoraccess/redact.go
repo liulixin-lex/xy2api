@@ -183,11 +183,17 @@ func Redact(body []byte, rules []Redaction, s *Scope) ([]byte, error) {
 				}
 				if creds, ok := m["credentials"].(map[string]any); ok {
 					maskHeaderValues(creds["header_overrides"], HeaderMask)
+					stripAddressUserinfo(creds, "base_url", "api_base_urls")
 					if !address {
 						delete(creds, "base_url")
 						delete(creds, "api_base_urls")
 					}
 				}
+
+				if extra, ok := m["extra"].(map[string]any); ok {
+					stripAddressUserinfo(extra, "custom_base_url")
+				}
+				stripAddressUserinfo(m, "custom_base_url")
 				if !address {
 					if extra, ok := m["extra"].(map[string]any); ok {
 						delete(extra, "custom_base_url")
@@ -235,8 +241,14 @@ func Redact(body []byte, rules []Redaction, s *Scope) ([]byte, error) {
 		case "monitor", "monitor_template":
 			walkObjects(v, func(m map[string]any) {
 				maskHeaderValues(m["extra_headers"], HeaderMask)
-				if rule == "monitor" && !address {
-					delete(m, "endpoint")
+				if body, ok := m["body_override"]; ok && hasJSONValue(body) {
+					m["body_override"] = HeaderMask
+				}
+				if rule == "monitor" {
+					stripAddressUserinfo(m, "endpoint")
+					if !address {
+						delete(m, "endpoint")
+					}
 				}
 			})
 			if rule == "monitor" && !address {
@@ -255,6 +267,19 @@ func Redact(body []byte, rules []Redaction, s *Scope) ([]byte, error) {
 					m["request_body"] = "<request body hidden>"
 					delete(extra, "query")
 					return
+				}
+				hidesCodes := row.Fields == "redeem_search" || row.Fields == "promo_search" || Key(method, path) == "GET /redeem-codes/export"
+				for _, redaction := range row.Redact {
+					if redaction == "redeem_code" || redaction == "promo_code" {
+						hidesCodes = true
+					}
+				}
+				if hidesCodes && !s.Has(FlagRedeemCodesIssue) {
+					if extra != nil {
+						if _, ok := extra["query"]; ok {
+							extra["query"] = "<query hidden>"
+						}
+					}
 				}
 				body, _ := m["request_body"].(string)
 				parsed, err := decodeJSON([]byte(body))
@@ -284,15 +309,74 @@ func Redact(body []byte, rules []Redaction, s *Scope) ([]byte, error) {
 				redactMonitorQuotaErrors(data)
 			}
 		case "ops_upstream_url":
+			v = transformStrings(v, StripURLUserinfo)
+			redactOpsUserinfoJSON(v)
 			if !address && !s.Can(ModuleOps, LevelView) {
 				redactOpsURLs(v)
 				redactOps(dataValue(v), false)
 			}
+		case "monitor_v2_errors":
+			if !s.Can(ModuleOps, LevelView) && !address {
+				walkObjects(dataValue(v), func(m map[string]any) {
+					if details, ok := m["details"].([]any); ok {
+						for _, item := range details {
+							if detail, ok := item.(map[string]any); ok {
+								if message, ok := detail["message"].(string); ok && message != "" {
+									detail["message"] = ErrorDetailHidden
+								}
+							}
+						}
+					}
+				})
+			}
+		case "risk_config_url":
+			walkObjects(v, func(m map[string]any) {
+				stripAddressUserinfo(m, "base_url")
+				if !address {
+					delete(m, "base_url")
+				}
+			})
 		default:
 			return nil, fmt.Errorf("operatoraccess: unknown redaction %q", rule)
 		}
 	}
 	return json.Marshal(v)
+}
+
+func hasJSONValue(v any) bool {
+	switch value := v.(type) {
+	case nil:
+		return false
+	case string:
+		return value != ""
+	case map[string]any:
+		return len(value) > 0
+	case []any:
+		return len(value) > 0
+	default:
+		return true
+	}
+}
+
+func stripAddressUserinfo(m map[string]any, keys ...string) {
+	for _, key := range keys {
+		if value, ok := m[key]; ok {
+			m[key] = transformStrings(value, StripURLUserinfo)
+		}
+	}
+}
+
+func redactOpsUserinfoJSON(v any) {
+	walkObjects(v, func(m map[string]any) {
+		if raw, ok := m["upstream_errors"].(string); ok {
+			parsed, err := decodeJSON([]byte(raw))
+			if err == nil {
+				parsed = transformStrings(parsed, StripURLUserinfo)
+				encoded, _ := json.Marshal(parsed)
+				m["upstream_errors"] = string(encoded)
+			}
+		}
+	})
 }
 
 func redactMonitorQuotaErrors(data any) {

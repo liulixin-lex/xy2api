@@ -22,6 +22,7 @@ func TestOperatorFieldRuleKeysMatchRequestTags(t *testing.T) {
 	requests := map[string]reflect.Type{
 		"CreateAndRedeemCodeRequest":                   reflect.TypeFor[CreateAndRedeemCodeRequest](),
 		"AssignSubscriptionRequest":                    reflect.TypeFor[AssignSubscriptionRequest](),
+		"BatchGetUserAttributesRequest":                reflect.TypeFor[BatchGetUserAttributesRequest](),
 		"BatchSetRateRequest":                          reflect.TypeFor[BatchSetRateRequest](),
 		"BulkAssignSubscriptionRequest":                reflect.TypeFor[BulkAssignSubscriptionRequest](),
 		"BatchUpdateConcurrencyRequest":                reflect.TypeFor[BatchUpdateConcurrencyRequest](),
@@ -124,6 +125,7 @@ func operatorAssertDecodeType(t *testing.T, handler, guard reflect.Type) {
 	case reflect.Struct:
 		// Only these package-private wire twins may differ in nominal identity.
 		allowed := map[string]string{
+			"accountStatsPricingRuleRequest":  "operatorAccountStatsPricingRuleRequest",
 			"channelModelPricingRequest":      "operatorChannelModelPricingRequest",
 			"channelTimePricingRequest":       "operatorChannelTimePricingRequest",
 			"channelTimePricingPeriodRequest": "operatorChannelTimePricingPeriodRequest",

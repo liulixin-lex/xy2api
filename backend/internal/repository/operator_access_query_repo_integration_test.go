@@ -78,3 +78,41 @@ func TestOperatorAccessQueryRepoProxyIDsUsedByAccounts(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, used)
 }
+
+func TestOperatorAccessQueryRepoAttributeValueOwnersIncludesDeletedUsers(t *testing.T) {
+	ctx := context.Background()
+	repo := NewOperatorAccessQueryRepository(integrationDB)
+	u := operatorRepositoryUser(t, service.RoleOperator)
+	client := testEntClient(t)
+	def, err := client.UserAttributeDefinition.Create().SetKey(groupCategoryTestPrefix()).SetName("guard-test").SetType("text").Save(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = integrationDB.Exec(`DELETE FROM user_attribute_values WHERE attribute_id=$1`, def.ID)
+		_, _ = integrationDB.Exec(`DELETE FROM user_attribute_definitions WHERE id=$1`, def.ID)
+	})
+	_, err = integrationDB.Exec(`INSERT INTO user_attribute_values(user_id,attribute_id,value) VALUES($1,$2,$3)`, u.ID, def.ID, "held")
+	require.NoError(t, err)
+	_, err = integrationDB.Exec(`UPDATE users SET deleted_at=NOW() WHERE id=$1`, u.ID)
+	require.NoError(t, err)
+	ids, err := repo.AttributeValueOwnerIDs(ctx, def.ID)
+	require.NoError(t, err)
+	require.Equal(t, []int64{u.ID}, ids)
+}
+
+func TestUserGroupRateRepoIncludesSoftDeletedOwners(t *testing.T) {
+	ctx := context.Background()
+	g := mustCreateCategoryGroup(t, groupCategoryTestPrefix())
+	u := operatorRepositoryUser(t, service.RoleOperator)
+	_, err := integrationDB.Exec(`INSERT INTO user_group_rate_multipliers(user_id,group_id,rate_multiplier,rpm_override) VALUES($1,$2,$3,25)`, u.ID, g.ID, 1.25)
+	require.NoError(t, err)
+	_, err = integrationDB.Exec(`UPDATE users SET deleted_at=NOW() WHERE id=$1`, u.ID)
+	require.NoError(t, err)
+	rows, err := NewUserGroupRateRepository(integrationDB).GetByGroupID(ctx, g.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, u.ID, rows[0].UserID)
+	require.NotNil(t, rows[0].RateMultiplier)
+	require.Equal(t, 1.25, *rows[0].RateMultiplier)
+	require.NotNil(t, rows[0].RPMOverride)
+	require.Equal(t, 25, *rows[0].RPMOverride)
+}

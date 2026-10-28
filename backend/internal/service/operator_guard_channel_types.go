@@ -49,3 +49,11 @@ type operatorPricingIntervalRequest struct {
 	PerRequestPrice      *float64 `json:"per_request_price"`
 	SortOrder            int      `json:"sort_order"`
 }
+
+// Wire twin of the handler's stats rule. Sort order is its array position.
+type operatorAccountStatsPricingRuleRequest struct {
+	Name       string                               `json:"name"`
+	GroupIDs   []int64                              `json:"group_ids"`
+	AccountIDs []int64                              `json:"account_ids"`
+	Pricing    []operatorChannelModelPricingRequest `json:"pricing"`
+}

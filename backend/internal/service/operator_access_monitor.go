@@ -14,6 +14,48 @@ func operatorNewKey(field string) error {
 	return infraerrors.BadRequest("ACCOUNT_API_KEY_REQUIRED", "A new key is required for this change").WithMetadata(map[string]string{"field": field})
 }
 
+func operatorRestoreMaskedBody(obj operatorObject, stored map[string]any, field string) error {
+	var value any
+	if raw, ok := operatoraccess.Field(obj, field); ok {
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return operatorFieldError(field)
+		}
+	}
+	if value == "******" {
+		operatorSet(obj, field, stored)
+		return nil
+	}
+	var hasMask func(any) bool
+	hasMask = func(v any) bool {
+		switch item := v.(type) {
+		case string:
+			return strings.Contains(item, "******")
+		case map[string]any:
+			for _, child := range item {
+				if hasMask(child) {
+					return true
+				}
+			}
+		case []any:
+			for _, child := range item {
+				if hasMask(child) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if hasMask(value) {
+		return operatorFieldError(field)
+	}
+	if value != nil {
+		if _, ok := value.(map[string]any); !ok {
+			return operatorFieldError(field)
+		}
+	}
+	return nil
+}
+
 func (s *OperatorAccessService) operatorMonitorRules(ctx context.Context, sc *operatoraccess.Scope, rule operatoraccess.FieldRule, r operatoraccess.Request, obj operatorObject) ([]byte, error) {
 	if rule == "monitor_create" {
 		if err := s.operatorMonitorTemplate(ctx, obj, nil, false); err != nil {
@@ -35,14 +77,22 @@ func (s *OperatorAccessService) operatorMonitorRules(ctx context.Context, sc *op
 				return nil, operatorFieldError("extra_headers")
 			}
 		}
+		if err := operatorRestoreMaskedBody(obj, nil, "body_override"); err != nil {
+			return nil, err
+		}
 		endpoint, err := operatorRead[string](obj, "endpoint")
 		if err != nil {
 			return nil, err
 		}
-		if endpoint != "" {
-			return nil, operatorAddressField(ctx, "endpoint", endpoint)
+		if strings.Contains(endpoint, "***@") {
+			return nil, operatorFieldError("endpoint")
 		}
-		return nil, nil
+		if endpoint != "" {
+			if err := operatorAddressField(ctx, "endpoint", endpoint); err != nil {
+				return nil, err
+			}
+		}
+		return json.Marshal(obj)
 	}
 	id, err := operatorPathID(r, "id")
 	if err != nil {
@@ -60,20 +110,23 @@ func (s *OperatorAccessService) operatorMonitorRules(ctx context.Context, sc *op
 			return nil, ErrChannelMonitorTemplateNotFound
 		}
 		if rule == "monitor_template_apply" {
-			if len(stored.ExtraHeaders) > 0 {
+			if len(stored.ExtraHeaders) > 0 || len(stored.BodyOverride) > 0 {
 				return nil, operatorSuperOnly()
 			}
 			return nil, nil
+		}
+
+		if err := operatorRestoreMaskedBody(obj, stored.BodyOverride, "body_override"); err != nil {
+			return nil, err
 		}
 		headers, err := operatorRead[*map[string]string](obj, "extra_headers")
 		if err != nil {
 			return nil, err
 		}
-		if headers == nil {
-			return nil, nil
+		if headers != nil {
+			operatorRestoreHeaders(*headers, stored.ExtraHeaders, false)
+			operatorSet(obj, "extra_headers", headers)
 		}
-		operatorRestoreHeaders(*headers, stored.ExtraHeaders, false)
-		operatorSet(obj, "extra_headers", headers)
 		return json.Marshal(obj)
 	}
 	if s.monitorService == nil || s.monitorService.repo == nil {
@@ -96,6 +149,15 @@ func (s *OperatorAccessService) operatorMonitorRules(ctx context.Context, sc *op
 	if err := s.operatorMonitorTemplate(ctx, obj, stored.TemplateID, true); err != nil {
 		return nil, err
 	}
+	bodyMasked := false
+	if raw, ok := operatoraccess.Field(obj, "body_override"); ok {
+		var mask string
+		bodyMasked = json.Unmarshal(raw, &mask) == nil && mask == operatoraccess.HeaderMask
+	}
+
+	if err := operatorRestoreMaskedBody(obj, stored.BodyOverride, "body_override"); err != nil {
+		return nil, err
+	}
 	endpoint, err := operatorRead[*string](obj, "endpoint")
 	if err != nil {
 		return nil, err
@@ -103,7 +165,15 @@ func (s *OperatorAccessService) operatorMonitorRules(ctx context.Context, sc *op
 	// Without the address flag the edit view omits the redacted endpoint.
 	// With the flag an explicit empty endpoint retains its handler meaning
 	// (clearing it in quota mode), and therefore counts as a network change.
+	endpointMasked := false
 	if endpoint != nil {
+		if strings.Contains(*endpoint, "***@") {
+			endpointMasked = true
+			if operatoraccess.StripURLUserinfo(stored.Endpoint) != *endpoint {
+				return nil, operatorFieldError("endpoint")
+			}
+			*endpoint = stored.Endpoint
+		}
 		*endpoint = normalizeEndpoint(*endpoint)
 		operatorSet(obj, "endpoint", *endpoint)
 	}
@@ -115,7 +185,7 @@ func (s *OperatorAccessService) operatorMonitorRules(ctx context.Context, sc *op
 		if changed && !sc.Has(operatoraccess.FlagAccountsUpstreamAddress) {
 			return nil, operatorFieldError("endpoint")
 		}
-		if *endpoint != "" {
+		if *endpoint != "" && !endpointMasked {
 			if err = operatorAddressField(ctx, "endpoint", *endpoint); err != nil {
 				return nil, err
 			}
@@ -139,6 +209,10 @@ func (s *OperatorAccessService) operatorMonitorRules(ctx context.Context, sc *op
 	}
 	if changed && (key == nil || strings.TrimSpace(*key) == "") {
 		return nil, operatorNewKey("api_key")
+	}
+	if changed && (!operatorHas(obj, "body_override") || bodyMasked) {
+		operatorSet(obj, "body_override_mode", "off")
+		operatorSet(obj, "body_override", map[string]any{})
 	}
 	headers, err := operatorRead[*map[string]string](obj, "extra_headers")
 	if err != nil {
@@ -183,6 +257,20 @@ func (s *OperatorAccessService) operatorChannelRules(ctx context.Context, sc *op
 			return err
 		}
 		if len(groups) > 0 {
+			apply, e := operatorRead[bool](obj, "apply_pricing_to_account_stats")
+			if e != nil {
+				return e
+			}
+			if apply {
+				return operatorFieldError("apply_pricing_to_account_stats")
+			}
+			rules, e := operatorRead[[]operatorAccountStatsPricingRuleRequest](obj, "account_stats_pricing_rules")
+			if e != nil {
+				return e
+			}
+			if len(rules) > 0 {
+				return operatorFieldError("account_stats_pricing_rules")
+			}
 			return operatorFieldError("group_ids")
 		}
 		return nil
@@ -210,6 +298,33 @@ func (s *OperatorAccessService) operatorChannelRules(ctx context.Context, sc *op
 	}
 	if len(stored.GroupIDs) == 0 {
 		return nil
+	}
+	apply, err := operatorRead[*bool](obj, "apply_pricing_to_account_stats")
+	if err != nil {
+		return err
+	}
+	if apply != nil && *apply != stored.ApplyPricingToAccountStats {
+		return operatorFieldError("apply_pricing_to_account_stats")
+	}
+	rules, err := operatorRead[*[]operatorAccountStatsPricingRuleRequest](obj, "account_stats_pricing_rules")
+	if err != nil {
+		return err
+	}
+	if rules != nil {
+		old := make([]operatorAccountStatsPricingRuleRequest, 0, len(stored.AccountStatsPricingRules))
+		for _, rule := range stored.AccountStatsPricingRules {
+			raw, _ := json.Marshal(rule.Pricing)
+			var pricing []operatorChannelModelPricingRequest
+			if json.Unmarshal(raw, &pricing) != nil {
+				return operatorUnavailable()
+			}
+			old = append(old, operatorAccountStatsPricingRuleRequest{Name: rule.Name, GroupIDs: rule.GroupIDs, AccountIDs: rule.AccountIDs, Pricing: pricing})
+		}
+		incoming := normalizeOperatorStatsPricing(*rules)
+		current := normalizeOperatorStatsPricing(old)
+		if !reflect.DeepEqual(incoming, current) {
+			return operatorFieldError("account_stats_pricing_rules")
+		}
 	}
 	for _, pair := range []struct{ key, stored string }{{"status", stored.Status}, {"billing_model_source", stored.BillingModelSource}} {
 		value, e := operatorRead[string](obj, pair.key)
@@ -263,6 +378,34 @@ func (s *OperatorAccessService) operatorChannelRules(ctx context.Context, sc *op
 	}
 	return nil
 }
+
+func normalizeOperatorStatsPricing(rules []operatorAccountStatsPricingRuleRequest) []operatorAccountStatsPricingRuleRequest {
+	out := make([]operatorAccountStatsPricingRuleRequest, len(rules))
+	for i, rule := range rules {
+		out[i] = rule
+		if len(rule.GroupIDs) == 0 {
+			out[i].GroupIDs = nil
+		}
+		if len(rule.AccountIDs) == 0 {
+			out[i].AccountIDs = nil
+		}
+		out[i].Pricing = append([]operatorChannelModelPricingRequest(nil), rule.Pricing...)
+		for j := range out[i].Pricing {
+			p := &out[i].Pricing[j]
+			if p.BillingMode == "" {
+				p.BillingMode = "token"
+			}
+			// The stats handler deliberately ignores channel multipliers.
+			p.FastMultiplier, p.FlexMultiplier = nil, nil
+			p.Intervals = append([]operatorPricingIntervalRequest(nil), p.Intervals...)
+			for k := range p.Intervals {
+				v := &p.Intervals[k]
+				v.InputMultiplier, v.OutputMultiplier, v.CacheWriteMultiplier, v.CacheReadMultiplier = nil, nil, nil, nil
+			}
+		}
+	}
+	return out
+}
 func operatorSameIDSet(a, b []int64) bool {
 	m := map[int64]bool{}
 	for _, id := range a {
@@ -287,16 +430,30 @@ func (s *OperatorAccessService) operatorRiskRules(ctx context.Context, obj opera
 	if err != nil || stored == nil {
 		return operatorUnavailable()
 	}
-	if err = operatorRiskIdentity(ctx, obj, stored, ""); err != nil {
+	engine, err := operatorRead[*string](obj, "engine")
+	if err != nil {
+		return err
+	}
+	if engine != nil && *engine != "" && *engine != stored.Engine {
+		return operatorFieldError("engine")
+	}
+	effective := stored.EngineConfigs[stored.Engine]
+	if effective == nil {
+		effective = stored
+	}
+	if err = operatorRiskIdentity(ctx, obj, effective, ""); err != nil {
 		return err
 	}
 	if operatorHas(obj, "engine_configs") {
-		configs, e := operatorRead[map[string]UpdateContentModerationEngineInput](obj, "engine_configs")
+		configs, e := operatorRead[map[string]json.RawMessage](obj, "engine_configs")
 		if e != nil {
 			return e
 		}
-		for engine, input := range configs {
-			raw, _ := json.Marshal(input)
+		for engine, raw := range configs {
+			var input UpdateContentModerationEngineInput
+			if json.Unmarshal(raw, &input) != nil {
+				return operatorFieldError("engine_configs")
+			}
 			child, e := operatorObjectBody(raw)
 			if e != nil {
 				return e
@@ -321,7 +478,12 @@ func (s *OperatorAccessService) operatorRiskRules(ctx context.Context, obj opera
 			if input.Thresholds != nil && !reflect.DeepEqual(*input.Thresholds, old.Thresholds) {
 				return operatorFieldError("engine_configs")
 			}
+			configs[engine], e = json.Marshal(child)
+			if e != nil {
+				return operatorUnavailable()
+			}
 		}
+		operatorSet(obj, "engine_configs", configs)
 	}
 	return nil
 }
@@ -366,16 +528,25 @@ func operatorRiskIdentity(ctx context.Context, obj operatorObject, stored *Conte
 		return operatorFieldError(key)
 	}
 	for _, pair := range []struct{ key, stored string }{{"base_url", stored.BaseURL}, {"model", stored.Model}} {
+		maskedUnchanged := false
 		value, err := operatorRead[*string](obj, pair.key)
 		if err != nil {
 			return err
 		}
 		if value != nil {
+			if pair.key == "base_url" && strings.Contains(*value, "***@") {
+				if operatoraccess.StripURLUserinfo(pair.stored) != *value {
+					return fail(pair.key)
+				}
+				*value = pair.stored
+				operatorSet(obj, pair.key, *value)
+				maskedUnchanged = true
+			}
 			*value = strings.TrimSpace(*value)
 			if pair.key == "base_url" {
 				*value = strings.TrimRight(*value, "/")
 			}
-			if pair.key == "base_url" && *value != "" {
+			if pair.key == "base_url" && *value != "" && !maskedUnchanged {
 				if err = operatorAddressField(ctx, pair.key, *value); err != nil {
 					return err
 				}
@@ -424,7 +595,7 @@ func (s *OperatorAccessService) operatorMonitorTemplate(ctx context.Context, obj
 	if template == nil {
 		return ErrChannelMonitorTemplateNotFound
 	}
-	if len(template.ExtraHeaders) > 0 {
+	if len(template.ExtraHeaders) > 0 || len(template.BodyOverride) > 0 {
 		return operatorSuperOnly()
 	}
 	return nil

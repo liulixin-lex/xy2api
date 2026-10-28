@@ -2146,7 +2146,9 @@
   "flags": [],
   "target": null,
   "fields": null,
-  "redact": [],
+  "redact": [
+   "monitor_v2_errors"
+  ],
   "ws": false
  },
  {
@@ -5620,7 +5622,9 @@
   "flags": [],
   "target": null,
   "fields": null,
-  "redact": [],
+  "redact": [
+   "risk_config_url"
+  ],
   "ws": false
  },
  {
@@ -5634,7 +5638,9 @@
   "flags": [],
   "target": null,
   "fields": "risk_config",
-  "redact": [],
+  "redact": [
+   "risk_config_url"
+  ],
   "ws": false
  },
  {
@@ -7166,7 +7172,7 @@
   "level": "manage",
   "any_of": [],
   "flags": [],
-  "target": null,
+  "target": "attribute_value_owners",
   "fields": null,
   "redact": [],
   "ws": false
@@ -7194,7 +7200,7 @@
   "level": "view",
   "any_of": [],
   "flags": [],
-  "target": null,
+  "target": "user_body_ids",
   "fields": null,
   "redact": [],
   "ws": false
