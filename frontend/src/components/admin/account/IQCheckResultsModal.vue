@@ -117,7 +117,7 @@
                       <dt class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqNormalizedAnswer') }}</dt>
                       <dd class="break-words tabular-nums" data-testid="iq-answer">
                         <template v-if="attempt.answer">
-                          <span class="font-semibold" :class="answerClass(attempt)">{{ attempt.answer }}</span>
+                          <span class="font-semibold" :class="outcomeClass(attempt)">{{ attempt.answer }}</span>
                           <span v-if="isNaive(attempt)" class="ml-1 text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqNaiveMatch') }}</span>
                         </template>
                         <span v-else class="text-gray-600 dark:text-dark-300">{{ attempt.reason ? reasonLabel(attempt.reason) : '—' }}</span>
@@ -207,7 +207,6 @@ const roundBadge = (round: IQRound) => !round.finished_at ? 'badge-primary' : ro
 const outcomeLabel = (attempt: IQAttempt) => t('admin.accounts.iqOutcomes.' + iqAttemptOutcome(attempt))
 const outcomeIcon = (attempt: IQAttempt) => ({ correct: 'checkCircle', wrong: 'xCircle', naive: 'xCircle', downgrade: 'xCircle', conflict: 'exclamationTriangle', unknown: 'questionCircle' } as const)[iqAttemptOutcome(attempt)]
 const outcomeClass = (attempt: IQAttempt) => ({ correct: 'text-emerald-700 dark:text-emerald-400', wrong: 'text-red-700 dark:text-red-400', naive: 'text-red-700 dark:text-red-400', downgrade: 'text-red-700 dark:text-red-400', conflict: 'text-amber-700 dark:text-amber-400', unknown: 'text-gray-600 dark:text-dark-300' })[iqAttemptOutcome(attempt)]
-const answerClass = (attempt: IQAttempt) => !attempt.expected ? 'text-gray-900 dark:text-gray-100' : attempt.answer === attempt.expected ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-700 dark:text-red-400'
 const isNaive = (attempt: IQAttempt) => !!attempt.challenge && attempt.answer === String(attempt.challenge.naive) && attempt.answer !== attempt.expected
 const classBadge = (attempt: IQAttempt) => ({ danger: 'badge-danger', warning: 'badge-warning', neutral: 'badge-gray' })[iqModelClassTone(attempt)]
 const technicalRows = (attempt: IQAttempt) => iqTechnicalRows(attempt, t, te, formatDateTime)
@@ -262,9 +261,9 @@ async function loadRounds(): Promise<void> {
   try {
     const result = await adminAPI.accounts.listIQResults(id, { model, page: page.value, page_size: PAGE_SIZE, filter: filter.value }, controller.signal)
     if (s !== session || version !== roundsVersion) return
-    // The page emptied under us (records expired): fall back to the last page that exists.
-    if (!result.rounds.length && result.total > 0 && page.value > 1) {
-      page.value = Math.ceil(result.total / PAGE_SIZE)
+    // The page emptied under us (records expired): fall back to the last page that exists, page 1 when none are left.
+    if (!result.rounds.length && page.value > 1) {
+      page.value = Math.max(1, Math.ceil(result.total / PAGE_SIZE))
       return loadRounds()
     }
     roundsError.value = ''

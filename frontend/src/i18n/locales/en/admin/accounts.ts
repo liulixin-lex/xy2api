@@ -318,6 +318,7 @@ export default {
       iqFirstByteValue: "first byte {value}",
       iqTotalValue: "total {value}",
       iqRetryAfterUnbounded: "Unbounded",
+      iqUpstreamErrors: { rate_limit_exceeded: "Rate limit exceeded", rate_limit_error: "Rate limit exceeded", insufficient_quota: "Insufficient quota", invalid_api_key: "Invalid API key", model_not_found: "Model not found", server_error: "Upstream server error", overloaded_error: "Upstream overloaded" },
       iqStages: {"request": "Request preparation", "http": "HTTP response", "read": "Response reading", "decode": "Response decoding", "parse": "Response parsing", "terminal": "Completion check", "format": "Format detection", "grade": "Answer grading"},
       iqHistoryFailed: "Could not load check history. Try again.",
       iqDownloadFailed: "Could not download diagnostics. Try again.",

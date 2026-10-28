@@ -99,6 +99,9 @@ export function iqTechnicalRows(attempt: IQAttempt, t: Translate, exists: (key: 
   const translated = (group: string, value: string) => exists(prefix + group + '.' + value) ? t(prefix + group + '.' + value) : value
   const firstByte = numberOf(d, 'first_byte_ms'), total = numberOf(d, 'total_ms'), status = numberOf(d, 'http_status')
   const retryAfter = stringOf(d, 'retry_after')
+  // Upstream error code and type come from one closed backend list; only the common ones are worded, the rest stay hidden.
+  const errorKeys = ['error_code', 'error_type'].map(key => stringOf(d, key)).filter(Boolean).map(value => prefix + 'iqUpstreamErrors.' + value).filter(exists)
+  const upstreamError = [...new Set(errorKeys.map(key => t(key)))].join(' · ')
   const stage = stringOf(d, 'stage'), reason = stringOf(d, 'code') || attempt.reason
   const failure = attempt.status === 'unknown' ? [stage && translated('iqStages', stage), reason && translated('iqReasons', reason)].filter(Boolean).join(' · ') : ''
   const rows: [string, string][] = [
@@ -106,7 +109,7 @@ export function iqTechnicalRows(attempt: IQAttempt, t: Translate, exists: (key: 
     ['latency', [firstByte ? t(prefix + 'iqFirstByteValue', { value: iqSeconds(firstByte) }) : '', total ? t(prefix + 'iqTotalValue', { value: iqSeconds(total) }) : ''].filter(Boolean).join(' / ')],
     ['tokens', iqTokenSummary(d, t)],
     ['http_status', status != null && status !== 200 ? String(status) : ''],
-    ['error', [stringOf(d, 'error_code'), stringOf(d, 'error_type')].filter(Boolean).join(' · ')],
+    ['error', upstreamError],
     ['retry_after', retryAfter ? formatTime(retryAfter) : d?.retry_after_unbounded === true ? t(prefix + 'iqRetryAfterUnbounded') : ''],
     ['failure', failure]
   ]

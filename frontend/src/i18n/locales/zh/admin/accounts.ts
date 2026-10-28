@@ -316,6 +316,7 @@ export default {
       iqFirstByteValue: "首字节 {value}",
       iqTotalValue: "总计 {value}",
       iqRetryAfterUnbounded: "无上限",
+      iqUpstreamErrors: { rate_limit_exceeded: "请求频率超限", rate_limit_error: "请求频率超限", insufficient_quota: "额度不足", invalid_api_key: "API Key 无效", model_not_found: "模型不存在", server_error: "上游服务错误", overloaded_error: "上游过载" },
       iqStages: {"request": "准备请求", "http": "接收响应", "read": "读取响应", "decode": "解码响应", "parse": "解析响应", "terminal": "检查完成状态", "format": "识别格式", "grade": "答案判定"},
       iqHistoryFailed: "检测记录加载失败，请重试。",
       iqDownloadFailed: "诊断下载失败，请重试。",

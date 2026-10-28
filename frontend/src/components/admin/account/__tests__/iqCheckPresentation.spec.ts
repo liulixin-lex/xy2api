@@ -29,14 +29,14 @@ describe('IQ presentation', () => {
    request_id: 'req-1', latency: '首字节 11.67 s / 总计 16.20 s', tokens: '输入 243 · 输出 241（含推理 230）'
   })
  })
- it.each(['zh', 'en'])('keeps only failure facts from a historical full diagnostic in %s', locale => {
-  const full = { parser_version: 'iq-response-v7', stage: 'parse', code: 'empty_answer', protocol: 'responses', transport: 'http', media_type: 'text/event-stream', answer_source: 'terminal_output', category: 'answer', retry_visibility: 'single_attempt', limit_kind: 'response_bytes', bytes_read: 10, http_status: 429, error_code: 'rate_limit_exceeded', error_type: 'requests', retry_after_unbounded: true, first_byte_ms: 0, total_ms: 820 }
+ it.each(['zh', 'en'])('keeps only worded failure facts from a historical full diagnostic in %s', locale => {
+  const full = { parser_version: 'iq-response-v7', stage: 'parse', code: 'empty_answer', protocol: 'responses', transport: 'http', media_type: 'text/event-stream', answer_source: 'terminal_output', category: 'answer', retry_visibility: 'single_attempt', limit_kind: 'response_bytes', bytes_read: 10, http_status: 429, error_code: 'rate_limit_exceeded', error_type: 'rate_limit_error', retry_after_unbounded: true, first_byte_ms: 0, total_ms: 820 }
   const shown = rows(attempt('unknown', full), locale)
   expect(Object.keys(shown)).toEqual(['latency', 'http_status', 'error', 'retry_after', 'failure'])
   expect(shown.http_status).toBe('429')
-  expect(shown.error).toBe('rate_limit_exceeded · requests')
-  expect(shown.retry_after).not.toBe('true')
-  expect(shown.failure).not.toMatch(/parse|empty_answer/)
+  expect(shown.error).toBe(locale === 'zh' ? '请求频率超限' : 'Rate limit exceeded')
+  expect(Object.values(shown).join(' ')).not.toMatch(/rate_limit|empty_answer|parse\b|true/)
+  expect(rows(attempt('unknown', { error_code: 'invalid_request_error', error_type: 'invalid_request' }), locale)).toEqual({})
   expect(rows(attempt('unknown', { retry_after: '2026-10-28T06:00:00Z' }), locale).retry_after).toBe('at 2026-10-28T06:00:00Z')
  })
  it('locates a failure from the attempt reason when the diagnostic has no code, and only for unknown answers', () => {

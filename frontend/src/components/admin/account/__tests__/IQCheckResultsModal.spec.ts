@@ -7,7 +7,7 @@ vi.mock('@/api/admin/accounts', () => ({ downloadIQCheckDiagnostics: vi.fn() }))
 const { targetsAPI, roundsAPI, run } = vi.hoisted(() => ({ targetsAPI: vi.fn(), roundsAPI: vi.fn(), run: vi.fn() }))
 vi.mock('@/api/admin', () => ({ adminAPI: { accounts: { getIQCheck: targetsAPI, listIQResults: roundsAPI, runIQCheck: run } } }))
 vi.mock('@/utils/format', () => ({ formatDateTime: (s: string) => s }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (s: string, p?: Record<string, unknown>) => p ? `${s}${JSON.stringify(p)}` : s, te: () => true }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (s: string, p?: Record<string, unknown>) => p ? `${s}${JSON.stringify(p)}` : s, te: (key: string) => !key.endsWith('.blocked') }) }))
 
 const target = (model: string, patch: Partial<IQTarget> = {}): IQTarget => ({ model, enabled: true, reasoning_effort: 'low', interval_minutes: 5, timeout_seconds: 120, verdict: 'smart', verdict_at: null, gate_active: false, gate_model: null, gate_reset_at: null, state: 'idle', paused_reason: '', last_run_at: null, last_result: '', last_reason: '', next_run_at: null, not_before: null, round_id: null, completed_attempts: 0, ...patch })
 const attempt = (patch: Partial<IQAttempt>): IQAttempt => ({ attempt_no: 1, effort: 'low', challenge: null, expected: '', answer: '', reported_model: '', model_class: '', status: 'smart', reason: '', latency_ms: 1250, diagnostic: null, ...patch })
@@ -87,6 +87,16 @@ describe('IQ results', () => {
     expect(wrapper.find(`[aria-label='pagination.goToPage{"page":2}']`).exists()).toBe(false)
   })
 
+  it('returns to page 1 when a later page empties because every record expired', async () => {
+    roundsAPI.mockResolvedValueOnce(pageOf([round(30)], 12))
+    const wrapper = mountModal()
+    await flushPromises()
+    roundsAPI.mockResolvedValueOnce(pageOf([], 0, 2)).mockResolvedValueOnce(pageOf([], 0))
+    await goTo(wrapper, 2); await flushPromises()
+    expect(roundsAPI).toHaveBeenLastCalledWith(8, query({ page: 1 }), expect.any(AbortSignal))
+    expect(wrapper.text()).toContain('admin.accounts.iqEmpty')
+  })
+
   it('replaces page 1 while polling, freezes older pages and stops once every target is idle', async () => {
     vi.useFakeTimers()
     targetsAPI.mockResolvedValue([target('gpt-6-astra', { state: 'running', round_id: 31 })])
@@ -128,12 +138,13 @@ describe('IQ results', () => {
     roundsAPI.mockResolvedValue(pageOf([round(5, { status: 'degraded', reason: 'wrong_answer', attempts: [
       attempt({ attempt_no: 1, challenge, expected: '21', answer: '29', status: 'degraded', reason: 'wrong_answer', reported_model: 'gpt-6-astra', model_class: 'same' }),
       attempt({ attempt_no: 2, challenge, expected: '21', answer: '21', status: 'degraded', reason: 'model_mismatch', reported_model: 'gpt-5.6-luna', model_class: 'downgrade', diagnostic: { model_identity: { source: 'header', body: ['gpt-6-astra'], header: ['gpt-5.6-luna'], flags: ['source_disagreement'] } } }),
-      attempt({ attempt_no: 3, expected: '21', status: 'unknown', reason: 'empty_answer' })
+      attempt({ attempt_no: 3, expected: '21', status: 'unknown', reason: 'empty_answer' }),
+      attempt({ attempt_no: 4, expected: '21', answer: '21', status: 'unknown', reason: 'model_conflict' })
     ] })]))
     const wrapper = mountModal()
     await flushPromises()
     await wrapper.get('[data-testid="iq-round"] button').trigger('click'); await flushPromises()
-    const [naive, downgrade, legacy] = wrapper.findAll('[data-testid="iq-attempt"]')
+    const [naive, downgrade, legacy, conflict] = wrapper.findAll('[data-testid="iq-attempt"]')
     const table = naive.get('[data-testid="iq-challenge"]')
     expect(table.findAll('thead th').slice(1).map(th => th.text())).toEqual(['admin.accounts.iqFlavors.watermelon', 'admin.accounts.iqFlavors.apple', 'admin.accounts.iqFlavors.peach'])
     expect(table.findAll('tbody tr').map(tr => tr.findAll('td').map(td => td.text()))).toEqual([['4', '7', '6'], ['8', '7', '9']])
@@ -143,6 +154,8 @@ describe('IQ results', () => {
     expect(naive.get('[data-testid="iq-answer"] span').classes()).toContain('text-red-700')
     expect(naive.get('[data-testid="iq-outcome"]').text()).toBe('admin.accounts.iqOutcomes.naive')
     expect(downgrade.get('[data-testid="iq-answer"]').text()).toBe('21')
+    expect(downgrade.get('[data-testid="iq-answer"] span').classes()).toContain('text-red-700')
+    expect(conflict.get('[data-testid="iq-answer"] span').classes()).toContain('text-amber-700')
     expect(downgrade.get('[data-testid="iq-model-class"]').classes()).toContain('badge-danger')
     expect(downgrade.get('[data-testid="iq-reported-model"]').text()).toMatch(/body.*gpt-6-astra.*header.*gpt-5\.6-luna.*iqSourceDisagreement/)
     expect(legacy.findAll('[data-testid="iq-answers"] dt').map(dt => dt.text())).toEqual(['admin.accounts.iqExpected', 'admin.accounts.iqNormalizedAnswer', 'admin.accounts.iqReportedModel'])
@@ -150,7 +163,7 @@ describe('IQ results', () => {
   })
 
   it('shows only the kept technical details, without raw codes, for compact and full diagnostics', async () => {
-    const full = { parser_version: 'iq-response-v7', stage: 'parse', code: 'empty_answer', protocol: 'responses', media_type: 'text/event-stream', answer_source: 'terminal_output', category: 'answer', http_status: 403, error_code: 'blocked', error_type: 'forbidden', retry_after: '2026-10-28T06:00:00Z', first_byte_ms: 0, total_ms: 820, request_id: 'req-full' }
+    const full = { parser_version: 'iq-response-v7', stage: 'parse', code: 'empty_answer', protocol: 'responses', media_type: 'text/event-stream', answer_source: 'terminal_output', category: 'answer', http_status: 403, error_code: 'blocked', error_type: 'server_error', retry_after: '2026-10-28T06:00:00Z', first_byte_ms: 0, total_ms: 820, request_id: 'req-full' }
     roundsAPI.mockResolvedValue(pageOf([round(5, { attempts: [
       attempt({ attempt_no: 1, expected: '21', answer: '21', diagnostic: { request_id: 'req-1', http_status: 200, first_byte_ms: 11670, total_ms: 16200, input_tokens: 243, output_tokens: 241, reasoning_tokens: 230 } }),
       attempt({ attempt_no: 2, expected: '21', status: 'unknown', reason: 'empty_answer', diagnostic: full })
@@ -164,8 +177,9 @@ describe('IQ results', () => {
     expect(compact.get('[data-testid="iq-tech-latency"]').text()).toBe('admin.accounts.iqFirstByteValue{"value":"11.67 s"} / admin.accounts.iqTotalValue{"value":"16.20 s"}')
     expect(failed.findAll('dt').map(dt => dt.text())).toEqual(['request_id', 'latency', 'http_status', 'error', 'retry_after', 'failure'].map(key => 'admin.accounts.iqDiagnosticLabels.' + key))
     expect(failed.get('[data-testid="iq-tech-failure"]').text()).toBe('admin.accounts.iqStages.parse · admin.accounts.iqReasons.empty_answer')
+    expect(failed.get('[data-testid="iq-tech-error"]').text()).toBe('admin.accounts.iqUpstreamErrors.server_error')
     for (const raw of ['iq-response-v7', 'responses', 'text/event-stream', 'terminal_output', 'answer']) expect(failed.findAll('dd').map(dd => dd.text())).not.toContain(raw)
-    expect(failed.text()).not.toMatch(/iq-response-v7|event-stream|terminal_output/)
+    expect(failed.text()).not.toMatch(/iq-response-v7|event-stream|terminal_output|blocked/)
   })
 
   it('disables manual checks while queued or running and stops polling on close', async () => {
