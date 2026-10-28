@@ -404,6 +404,10 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 		if v := resp.Header.Get("x-request-id"); v != "" {
 			c.Header("x-request-id", v)
 		}
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("Connection", "keep-alive")
+		c.Header("X-Accel-Buffering", "no")
 	}
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")

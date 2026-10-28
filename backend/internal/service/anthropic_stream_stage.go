@@ -178,13 +178,14 @@ func projectAnthropicStreamError(body []byte) []byte {
 	result := resilience.ClassifyWithSettings(resilience.Outcome{Source: resilience.SourceStreamEvent,
 		Type: gjson.GetBytes(body, "error.type").String(), Code: extractUpstreamErrorCode(body),
 		Message: extractUpstreamErrorMessage(body), Body: body}, resilience.Current())
-	if result.Category == resilience.CategoryCapacityShed {
+	projectCapacity := resilience.Current().ErrorsOn() && result.Category == resilience.CategoryCapacityShed
+	if projectCapacity {
 		body, _ = sjson.SetBytes(body, "error.type", "api_error")
 	}
 	for _, path := range []string{"error.message", "message"} {
 		if value := gjson.GetBytes(body, path); value.Type == gjson.String {
 			message := SanitizeUpstreamErrorMessage(value.String())
-			if result.Category == resilience.CategoryCapacityShed {
+			if projectCapacity {
 				message = strings.ReplaceAll(message, "overloaded_error", "api_error")
 			}
 			body, _ = sjson.SetBytes(body, path, message)

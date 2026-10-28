@@ -1154,6 +1154,9 @@ func openAIStreamClientOutputStarted(c *gin.Context, localStarted bool) bool {
 	if localStarted {
 		return true
 	}
+	if only, tracked := DeliveryOnlyHeartbeats(c); tracked && only {
+		return false
+	}
 	if c == nil || c.Writer == nil {
 		return false
 	}

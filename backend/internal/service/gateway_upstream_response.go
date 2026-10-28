@@ -501,7 +501,10 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		errMsg = "Upstream rate limit exceeded, please retry later"
 	case 529:
 		statusCode = http.StatusServiceUnavailable
-		errType = "api_error"
+		errType = "overloaded_error"
+		if resilience.Current().ErrorsOn() {
+			errType = "api_error"
+		}
 		errMsg = "Upstream service overloaded, please retry later"
 	case 500, 502, 503, 504:
 		statusCode = http.StatusBadGateway
@@ -718,6 +721,10 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		if v := resp.Header.Get("x-request-id"); v != "" {
 			c.Header("x-request-id", v)
 		}
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("Connection", "keep-alive")
+		c.Header("X-Accel-Buffering", "no")
 	}
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
