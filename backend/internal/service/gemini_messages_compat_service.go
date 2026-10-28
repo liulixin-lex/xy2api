@@ -1750,7 +1750,7 @@ func (s *GeminiMessagesCompatService) shouldRetryGeminiUpstreamError(account *Ac
 	}
 }
 
-func (s *GeminiMessagesCompatService) shouldFailoverGeminiUpstreamError(statusCode int, responseBody ...[]byte) bool {
+func (s *GeminiMessagesCompatService) shouldFailoverGeminiUpstreamError(statusCode int, responseBody []byte) bool {
 	switch statusCode {
 	case 401, 402, 403, 408, 429, 529:
 		return true
@@ -1759,7 +1759,7 @@ func (s *GeminiMessagesCompatService) shouldFailoverGeminiUpstreamError(statusCo
 			return true
 		}
 	}
-	return len(responseBody) > 0 && shouldFailoverClassifiedUpstreamError(statusCode, nil, responseBody[0])
+	return shouldFailoverClassifiedUpstreamError(statusCode, nil, responseBody)
 }
 
 // skippedErrorPolicyFailoverError 命中 ErrorPolicySkipped（池模式、或自定义错误码未命中）

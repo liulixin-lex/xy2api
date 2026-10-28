@@ -45,12 +45,13 @@ func TestContentRefusalEndsFailoverWithoutRetry(t *testing.T) {
 		require.True(t, resilienceAttemptFailed(ctx, 399, contentRefusal()), name)
 	}
 
-	// Another 403 keeps the pool-mode same-account retry.
+	// An ordinary AUTH 403 switches accounts without ending the request.
 	fs := NewFailoverState(10, false)
 	other := contentRefusal()
 	other.ResponseBody = []byte(`{"error":{"message":"forbidden"}}`)
 	require.Equal(t, FailoverContinue, fs.HandleFailoverError(context.Background(), &mockTempUnscheduler{}, 399, service.PlatformZhipu, 3, other))
-	require.Equal(t, 1, fs.SameAccountRetryCount[399])
+	require.Zero(t, fs.SameAccountRetryCount[399])
+	require.Equal(t, 1, fs.SwitchCount)
 
 	// Switch off: 0.3.0 retries the same account.
 	withHandlerResilience(t, func(s *resilience.Settings) { s.Enabled = false })

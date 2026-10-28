@@ -93,7 +93,7 @@ func resilienceInServiceRetryAllowed(ctx context.Context, accountID int64, statu
 }
 
 func resilienceInServiceRetryAllowedWithBody(ctx context.Context, accountID int64, status int, body []byte) bool {
-	if isUnrecoverableAccountFailure(status, body) {
+	if resilience.Current().FailureOn() && isUnrecoverableAccountFailure(status, body) {
 		return false
 	}
 	return resilienceInServiceRetryAllowed(ctx, accountID, status)

@@ -130,7 +130,7 @@ func (s *GatewayService) forwardBedrock(
 
 	// 错误/failover 处理
 	if resp.StatusCode >= 400 {
-		return s.handleBedrockUpstreamErrors(ctx, resp, c, account)
+		return s.handleBedrockUpstreamErrors(ctx, resp, c, account, reqModel)
 	}
 
 	// Bedrock 分支绕过通用 Forward 成功路径，这里保持上游接受回调语义一致。
@@ -227,11 +227,13 @@ func (s *GatewayService) executeBedrockUpstream(
 				}
 				// xy2api resilience: charge the request budget only for a retry
 				// that will run (design §6.2).
-				if !resilienceInServiceRetryAllowed(ctx, account.ID, resp.StatusCode) {
+				respBody, _ := s.readUpstreamErrorBody(resp)
+				_ = resp.Body.Close()
+				resp.Body = io.NopCloser(bytes.NewReader(respBody))
+				if !resilienceInServiceRetryAllowedWithBody(ctx, account.ID, resp.StatusCode, respBody) {
 					break
 				}
 
-				respBody, _ := s.readUpstreamErrorBody(resp)
 				_ = resp.Body.Close()
 				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 					ProxyID:            opsUpstreamProxyID(account),
@@ -274,13 +276,15 @@ func (s *GatewayService) handleBedrockUpstreamErrors(
 	resp *http.Response,
 	c *gin.Context,
 	account *Account,
+	requestedModel string,
 ) (*ForwardResult, error) {
+	respBody, _ := s.readUpstreamErrorBody(resp)
+	_ = resp.Body.Close()
+	resp.Body = io.NopCloser(bytes.NewReader(respBody))
+	hardClassifiedFailure := isUnrecoverableAccountFailure(resp.StatusCode, respBody)
 	// retry exhausted + failover
-	if s.shouldRetryUpstreamError(account, resp.StatusCode) {
+	if !hardClassifiedFailure && s.shouldRetryUpstreamError(account, resp.StatusCode) {
 		if s.shouldFailoverUpstreamError(resp.StatusCode) {
-			respBody, _ := s.readUpstreamErrorBody(resp)
-			_ = resp.Body.Close()
-			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
 			logger.LegacyPrintf("service.gateway", "[Bedrock] Upstream error (retry exhausted, failover): Account=%d(%s) Status=%d Body=%s",
 				account.ID, account.Name, resp.StatusCode, truncateString(string(respBody), 1000))
@@ -306,12 +310,8 @@ func (s *GatewayService) handleBedrockUpstreamErrors(
 	}
 
 	// non-retryable failover
-	if s.shouldFailoverUpstreamError(resp.StatusCode) {
-		respBody, _ := s.readUpstreamErrorBody(resp)
-		_ = resp.Body.Close()
-		resp.Body = io.NopCloser(bytes.NewReader(respBody))
-
-		s.handleFailoverSideEffects(ctx, resp, account)
+	if s.shouldFailoverUpstreamError(resp.StatusCode) || shouldFailoverClassifiedUpstreamError(resp.StatusCode, resp.Header, respBody) {
+		s.handleFailoverSideEffectsWithBody(ctx, account, resp.StatusCode, resp.Header, respBody, requestedModel)
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 			ProxyID:            opsUpstreamProxyID(account),
 			ProxyName:          opsUpstreamProxyName(account),

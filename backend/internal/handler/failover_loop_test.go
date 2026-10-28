@@ -551,7 +551,7 @@ func TestHandleFailoverError_SameAccountRetry(t *testing.T) {
 		// pool_mode_retry_count 配置。此处验证传入 retryLimit=1 时只重试 1 次即切换。
 		mock := &mockTempUnscheduler{}
 		fs := NewFailoverState(5, false)
-		err := newTestFailoverErr(403, true, false)
+		err := newTestFailoverErr(400, true, false)
 		const retryLimit = 1
 
 		// 第 1 次：同账号重试

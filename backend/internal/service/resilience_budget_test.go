@@ -34,6 +34,7 @@ func TestInServiceRetryOnlyForCapacityShedding(t *testing.T) {
 }
 
 func TestInServiceRetryWithBodySkipsHardCategories(t *testing.T) {
+	withResilienceSettings(t, nil)
 	for _, tc := range []struct {
 		name   string
 		status int
@@ -48,6 +49,8 @@ func TestInServiceRetryWithBodySkipsHardCategories(t *testing.T) {
 		})
 	}
 	require.True(t, resilienceInServiceRetryAllowedWithBody(context.Background(), 1, 529, []byte(`{"error":{"type":"overloaded_error"}}`)))
+	withResilienceSettings(t, func(s *resilience.Settings) { s.Enabled = false })
+	require.True(t, resilienceInServiceRetryAllowedWithBody(context.Background(), 1, 503, []byte(balance403Body)), "master off keeps legacy retries")
 }
 
 func TestGeminiInPlaceRetries(t *testing.T) {

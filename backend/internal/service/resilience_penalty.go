@@ -344,7 +344,7 @@ func (r *ResilienceService) NoteAccountSuccess(ctx context.Context, account *Acc
 		return
 	}
 	profile := resilience.StateFrom(ctx).AttemptProfile()
-	if profile.AccountID == account.ID && !profile.AttemptStart.IsZero() {
+	if resilience.IsBalancePause(account.TempUnschedulableReason) && profile.AccountID == account.ID && !profile.AttemptStart.IsZero() {
 		r.rateLimit.liftBalancePause(ctx, account.ID, profile.AttemptStart)
 	}
 	// A last-resort account that served successfully has recovered: lift its

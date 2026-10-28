@@ -151,7 +151,7 @@ func TestClassifySpecScenarios(t *testing.T) {
 		},
 		{
 			name: "404 model",
-			in:   Outcome{StatusCode: 404, Body: []byte(`{"error":{"type":"invalid_request_error","message":"model not found: gpt-x"}}`)},
+			in:   Outcome{StatusCode: 404, Type: "invalid_request_error", Message: "The model `gpt-x` does not exist"},
 			want: CategoryModelUnsupported,
 		},
 		{

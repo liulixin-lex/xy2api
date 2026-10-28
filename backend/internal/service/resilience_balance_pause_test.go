@@ -124,6 +124,8 @@ func TestBalancePauseSuccessRequiresAttemptStartedAfterSavedUntil(t *testing.T) 
 	start := time.Now().UTC()
 	pause, err := repo.SetBalancePauseTiered(context.Background(), account.ID, 300*time.Second, start, start, "balance")
 	require.NoError(t, err)
+	account.TempUnschedulableReason = pause.Reason
+	account.TempUnschedulableUntil = &pause.Until
 
 	st := resilience.NewRequestState()
 	st.SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: start.Add(time.Second)})

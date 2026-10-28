@@ -266,10 +266,10 @@ var modelUnsupportedCodes = map[string]struct{}{
 }
 
 type structuredModelError struct {
-	Code    string `json:"code"`
-	Type    string `json:"type"`
-	Param   string `json:"param"`
-	Message string `json:"message"`
+	Code    json.RawMessage `json:"code"`
+	Type    string          `json:"type"`
+	Param   string          `json:"param"`
+	Message string          `json:"message"`
 }
 
 // IsModelUnsupportedResponse recognizes the narrow relay messages used when a
@@ -279,7 +279,7 @@ func IsModelUnsupportedResponse(statusCode int, body []byte) bool {
 	if statusCode != http.StatusBadRequest && statusCode != http.StatusNotFound {
 		return false
 	}
-	return isStructuredModelUnsupportedError(parseStructuredModelError(body))
+	return isStructuredModelUnsupportedError(parseStructuredModelError(body), statusCode)
 }
 
 // IsOpenAICompatibleModelNotFound401 keeps the existing OpenAI-compatible
@@ -287,7 +287,7 @@ func IsModelUnsupportedResponse(statusCode int, body []byte) bool {
 // account type. It accepts structured model codes or the same restricted
 // message phrases, but never scans arbitrary body text.
 func IsOpenAICompatibleModelNotFound401(body []byte) bool {
-	return isStructuredModelUnsupportedError(parseStructuredModelError(body))
+	return isStructuredModelUnsupportedError(parseStructuredModelError(body), http.StatusUnauthorized)
 }
 
 func parseStructuredModelError(body []byte) structuredModelError {
@@ -306,7 +306,7 @@ func parseStructuredModelError(body []byte) structuredModelError {
 	if json.Unmarshal(body, &payload) != nil {
 		return structuredModelError{}
 	}
-	if payload.Error.Message != "" || payload.Error.Code != "" || payload.Error.Type != "" || payload.Error.Param != "" {
+	if payload.Error.Message != "" || len(payload.Error.Code) > 0 || payload.Error.Type != "" || payload.Error.Param != "" {
 		return payload.Error
 	}
 	return payload.Response.Error
@@ -324,8 +324,18 @@ func modelUnsupportedMessage(message string) bool {
 		strings.Contains(message, "model is not supported")
 }
 
-func isStructuredModelUnsupportedError(err structuredModelError) bool {
-	code := strings.ToLower(strings.TrimSpace(err.Code))
+func isStructuredModelUnsupportedError(err structuredModelError, statusCode int) bool {
+	var code string
+	if len(err.Code) > 0 && string(err.Code) != "null" {
+		if json.Unmarshal(err.Code, &code) != nil {
+			var numericCode int
+			if (statusCode != http.StatusBadRequest && statusCode != http.StatusNotFound) ||
+				json.Unmarshal(err.Code, &numericCode) != nil || numericCode != statusCode {
+				return false
+			}
+		}
+	}
+	code = strings.ToLower(strings.TrimSpace(code))
 	typ := strings.ToLower(strings.TrimSpace(err.Type))
 	_, codeModel := modelUnsupportedCodes[code]
 	_, typeModel := modelUnsupportedCodes[typ]
@@ -539,6 +549,9 @@ func classify(o Outcome, extraBalanceKeywords []string, decisionV2 bool) Result 
 
 	// 6. Remaining client errors by status or type.
 	if status == http.StatusNotFound {
+		if strings.Contains(text, "model") {
+			return Result{Category: CategoryModelUnsupported, Reason: "status_404_model"}
+		}
 		return Result{Category: CategoryTransient, RetryAfter: retryAfter, Reason: "status_404"}
 	}
 	if _, ok := clientErrorCodes[typ]; ok {

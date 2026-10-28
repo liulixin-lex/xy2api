@@ -82,6 +82,12 @@ func sameAccountRetryAllowedCtx(ctx context.Context, accountID int64, failoverEr
 	if !sameAccountRetryAllowed(failoverErr, retryCount, retryLimit) {
 		return false
 	}
+	if resilience.Current().FailureOn() {
+		switch service.ClassifyFailoverError(failoverErr).Category {
+		case resilience.CategoryBalance, resilience.CategoryAuth, resilience.CategoryModelUnsupported:
+			return false
+		}
+	}
 	b := requestBudget(ctx)
 	if b == nil {
 		return true
