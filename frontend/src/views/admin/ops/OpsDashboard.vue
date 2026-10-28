@@ -815,7 +815,8 @@ onMounted(async () => {
 
   await adminSettingsStore.fetch()
   if (!adminSettingsStore.opsMonitoringEnabled) {
-    await router.replace('/admin/settings')
+    // Operators cannot open /admin/settings; /admin resolves to their first permitted page.
+    await router.replace(localStorage.getItem('admin_access_is_super_cached') === 'false' ? '/admin' : '/admin/settings')
     return
   }
 

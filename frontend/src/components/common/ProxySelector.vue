@@ -38,7 +38,7 @@
             />
           </div>
           <button
-            v-if="proxies.length > 0"
+            v-if="proxies.length > 0 && canTestProxies"
             type="button"
             @click.stop="handleBatchTest"
             :disabled="batchTesting"
@@ -120,6 +120,7 @@
 
             <!-- Individual test button -->
             <button
+              v-if="canTestProxies"
               type="button"
               @click.stop="handleTestProxy(proxy)"
               :disabled="testingProxyIds.has(proxy.id)"
@@ -173,8 +174,11 @@ import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import Icon from '@/components/icons/Icon.vue'
 import type { Proxy } from '@/types'
+import { useAdminPermission } from '@/composables/useAdminPermission'
 
 const { t } = useI18n()
+// 测试代理需要 IP 管理的管理权限
+const { canManage: canTestProxies } = useAdminPermission('proxies')
 
 interface ProxyTestResult {
   success: boolean

@@ -38,6 +38,7 @@ import auditAPI from './audit'
 import pluginsAPI from './plugins'
 import shareSchedulingAPI from './shareScheduling'
 import resilienceAPI from './resilience'
+import accessAPI from './access'
 
 /**
  * Unified admin API object for convenient access
@@ -77,7 +78,8 @@ export const adminAPI = {
   audit: auditAPI,
   plugins: pluginsAPI,
   shareScheduling: shareSchedulingAPI,
-  resilience: resilienceAPI
+  resilience: resilienceAPI,
+  access: accessAPI
 }
 
 export {
@@ -115,7 +117,8 @@ export {
   auditAPI,
   pluginsAPI,
   shareSchedulingAPI,
-  resilienceAPI
+  resilienceAPI,
+  accessAPI
 }
 
 export default adminAPI

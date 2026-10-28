@@ -8,10 +8,11 @@
             <input
               v-model="searchQuery"
               type="text"
-              :placeholder="t('admin.redeem.searchCodes')"
+              :placeholder="hasIssue ? t('admin.redeem.searchCodes') : t('admin.operatorAccess.searchByEmail')"
               class="input"
               @input="handleSearch"
             />
+            <p v-if="searchNeedsEmail" class="input-hint" data-test="redeem-search-needs-email">{{ t('admin.operatorAccess.searchByEmail') }}</p>
           </div>
           <Select
             v-model="filters.type"
@@ -36,10 +37,11 @@
             >
               <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
             </button>
-            <button @click="handleExportCodes" class="btn btn-secondary">
+            <button v-if="has('data.export') && hasIssue" @click="handleExportCodes" class="btn btn-secondary">
               {{ t('admin.redeem.exportCsv') }}
             </button>
             <button
+              v-if="canIssue"
               data-test="batch-update-open"
               @click="openBatchUpdateDialog"
               :disabled="selectedCount === 0 || batchUpdating"
@@ -48,7 +50,7 @@
               <Icon name="edit" size="md" class="mr-2" />
               {{ t('admin.redeem.batchUpdate') }}
             </button>
-            <button @click="showGenerateDialog = true" class="btn btn-primary">
+            <button v-if="canIssue" @click="showGenerateDialog = true" class="btn btn-primary">
               {{ t('admin.redeem.generateCodes') }}
             </button>
           </div>
@@ -184,7 +186,7 @@
           <template #cell-actions="{ row }">
             <div class="flex items-center space-x-2">
               <button
-                v-if="row.status === 'unused'"
+                v-if="canManage && row.status === 'unused'"
                 @click="handleDelete(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
               >
@@ -206,7 +208,7 @@
 
       <template #pagination>
         <div
-          v-if="selectedCount > 0"
+          v-if="canIssue && selectedCount > 0"
           class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-primary-50 p-3 dark:bg-primary-900/20"
         >
           <span class="text-sm font-medium text-primary-900 dark:text-primary-100">
@@ -240,7 +242,7 @@
         />
 
         <!-- Batch Actions -->
-        <div v-if="filters.status === 'unused'" class="flex justify-end">
+        <div v-if="canManage && filters.status === 'unused'" class="flex justify-end">
           <button @click="showDeleteUnusedDialog = true" class="btn btn-danger">
             {{ t('admin.redeem.deleteAllUnused') }}
           </button>
@@ -641,9 +643,14 @@ import Select from '@/components/common/Select.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { useAdminPermission } from '@/composables/useAdminPermission'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const { canManage, has } = useAdminPermission('redeem_codes')
+// 生成兑换码、批量修改和按兑换码搜索需要“生成兑换码”权限；没有时只能按用户邮箱搜索
+const hasIssue = computed(() => has('redeem_codes.issue'))
+const canIssue = computed(() => canManage.value && hasIssue.value)
 const { copyToClipboard: clipboardCopy } = useClipboard()
 const browserTimeZone = getBrowserTimeZone()
 
@@ -777,6 +784,7 @@ const loading = ref(false)
 const generating = ref(false)
 const batchUpdating = ref(false)
 const searchQuery = ref('')
+const searchNeedsEmail = computed(() => !hasIssue.value && searchQuery.value.trim() !== '' && !searchQuery.value.includes('@'))
 const filters = reactive({
   type: '',
   status: ''
@@ -860,7 +868,7 @@ watch(
 const buildRedeemQueryFilters = () => ({
   type: (filters.type || undefined) as RedeemCodeType | undefined,
   status: (filters.status || undefined) as 'used' | 'expired' | 'unused' | 'disabled' | undefined,
-  search: searchQuery.value || undefined,
+  search: (searchNeedsEmail.value ? '' : searchQuery.value) || undefined,
   sort_by: sortState.sort_by,
   sort_order: sortState.sort_order
 })
@@ -909,6 +917,7 @@ let searchTimeout: ReturnType<typeof setTimeout>
 const handleSearch = () => {
   clearTimeout(searchTimeout)
   searchTimeout = setTimeout(() => {
+    if (searchNeedsEmail.value) return
     pagination.page = 1
     loadCodes()
   }, 300)

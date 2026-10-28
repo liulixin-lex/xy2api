@@ -13,6 +13,7 @@
           />
           <AccountTableActions
             :loading="loading"
+            :can-create="canManage"
             @refresh="handleManualRefresh"
             @create="showCreate = true"
           >
@@ -83,6 +84,8 @@
                     @click.stop
                   >
                     <div class="overflow-y-auto p-2" :style="{ maxHeight: `${accountToolsDropdownPosition.maxHeight}px` }">
+                      <!-- 数据导入、导出与 CRS 同步只对超级管理员开放 -->
+                      <template v-if="isSuperAdmin">
                       <div class="px-2 py-2">
                         <div class="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
                           {{ t('admin.accounts.dataActions') }}
@@ -116,6 +119,7 @@
                       </button>
 
                       <div class="my-2 border-t border-gray-100 dark:border-dark-700"></div>
+                      </template>
                       <div class="px-2 py-2">
                         <div class="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
                           {{ t('admin.accounts.toolActions') }}
@@ -173,6 +177,7 @@
       </template>
       <template #table>
         <AccountBulkActionsBar
+          v-if="canManage"
           :selected-ids="selIds"
           :total-results="pagination.total"
           :selecting-all="selectingAllResults"
@@ -295,13 +300,13 @@
           <template #header-schedulable="{ column }"><div class="flex items-center gap-1"><span>{{ column.label }}</span><HelpTooltip :content="t('admin.accounts.schedulableHint')" width-class="w-72" /></div></template>
           <template #cell-schedulable="{ row }">
             <div class="flex flex-col items-start gap-1.5">
-            <button type="button" role="switch" :aria-checked="row.schedulable" :aria-busy="togglingSchedulable.has(row.id)" :aria-label="t('admin.accounts.columns.schedulable') + ' ' + row.name" @click="handleToggleSchedulable(row)" :disabled="togglingSchedulable.has(row.id)" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
+            <button type="button" role="switch" :aria-checked="row.schedulable" :aria-busy="togglingSchedulable.has(row.id)" :aria-label="t('admin.accounts.columns.schedulable') + ' ' + row.name" @click="handleToggleSchedulable(row)" :disabled="!canManage || togglingSchedulable.has(row.id)" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
               <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out motion-reduce:transition-none" :class="[row.schedulable ? 'translate-x-4' : 'translate-x-0']" />
             </button>
             </div>
           </template>
           <template #cell-iq_check="{ row }">
-            <IQCheckCell :account="row" :busy="togglingIQCheck.has(row.id)" @toggle="handleToggleIQCheck(row, $event)" @records="iqRecordsAccount = row" />
+            <IQCheckCell :account="row" :busy="!canManage || togglingIQCheck.has(row.id)" @toggle="handleToggleIQCheck(row, $event)" @records="iqRecordsAccount = row" />
           </template>
           <template #cell-today_stats="{ row }">
             <AccountTodayStatsCell
@@ -311,7 +316,7 @@
             />
           </template>
           <template #cell-groups="{ row }">
-            <AccountGroupsCellButton :groups="accountGroupsForRow(row)" :account-name="row.name" @open="groupsDialogAccount = row" />
+            <AccountGroupsCellButton :groups="accountGroupsForRow(row)" :account-name="row.name" @open="canPlaceGroups && (groupsDialogAccount = row)" />
           </template>
           <template #header-usage="{ column }">
             <div class="flex items-center">
@@ -350,7 +355,7 @@
                 <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200" :title="t('admin.accounts.fallbackActiveTip', { origin: row.proxy_fallback_origin_name })">
                   {{ t('admin.accounts.fallbackActive') }}
                 </span>
-                <button class="text-xs px-1.5 py-0.5 rounded border border-gray-300 dark:border-dark-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700" @click="onRevertFallback(row)">{{ t('admin.accounts.revertProxy') }}</button>
+                <button v-if="isSuperAdmin" class="text-xs px-1.5 py-0.5 rounded border border-gray-300 dark:border-dark-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700" data-testid="revert-proxy-fallback" @click="onRevertFallback(row)">{{ t('admin.accounts.revertProxy') }}</button>
               </div>
             </div>
           </template>
@@ -451,11 +456,11 @@
           </template>
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
-              <button @click="handleEdit(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400">
+              <button v-if="canManage" @click="handleEdit(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400">
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
                 <span class="text-xs">{{ t('common.edit') }}</span>
               </button>
-              <button @click="handleDelete(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400">
+              <button v-if="canManage" @click="handleDelete(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400">
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
                 <span class="text-xs">{{ t('common.delete') }}</span>
               </button>
@@ -515,6 +520,8 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useGroupCategoriesStore } from '@/stores/groupCategories'
+import { useAdminAccessStore } from '@/stores/adminAccess'
+import { useAdminPermission } from '@/composables/useAdminPermission'
 import { adminAPI } from '@/api/admin'
 import { useTableLoader } from '@/composables/useTableLoader'
 import { useSwipeSelect, type SwipeSelectVirtualContext } from '@/composables/useSwipeSelect'
@@ -586,6 +593,10 @@ const TLSFingerprintProfilesModal = defineLazyComponent(() => import('@/componen
 const { t, te } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
+const adminAccess = useAdminAccessStore()
+const { canManage, has, isSuperAdmin } = useAdminPermission('accounts')
+// Group placement (group dialog) also needs "Adjust balance".
+const canPlaceGroups = computed(() => canManage.value && has('users.balance_adjust'))
 const proxies = ref<AccountProxy[]>([])
 const groups = ref<AdminGroup[]>([])
 const groupCategories = useGroupCategoriesStore()
@@ -1544,6 +1555,12 @@ let upstreamBalanceAbortController: AbortController | null = null
 // id 集合不变，只能靠版本变化发现。列表看不到的密钥轮换由后端指纹在下一次轮询内隐藏旧值。
 let upstreamBalanceRowVersions = new Map<number, string>()
 let upstreamBalanceIdKeySeen = ''
+// 403 后停止余额请求：只在页面重新挂载，或权限刷新后仍有 accounts:view 时恢复（普通管理员被撤权时只有一次 403）。
+let upstreamBalanceForbidden = false
+const isForbiddenError = (error: unknown) => (error as { status?: number } | null)?.status === 403
+watch(() => adminAccess.version, () => {
+  if (adminAccess.can('accounts:view')) upstreamBalanceForbidden = false
+})
 const stableStringify = (value: unknown): string => {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
   if (value && typeof value === 'object') {
@@ -1583,6 +1600,7 @@ const invalidateUpstreamBalances = (accountIDs: number[] = []) => {
 }
 
 const refreshUpstreamBalances = async () => {
+  if (upstreamBalanceForbidden) return
   if (hiddenColumns.has('upstream_balance') || isAnyModalOpen.value) return
   if (typeof document !== 'undefined' && document.hidden) return
   const accountIDs = accounts.value.map(account => account.id)
@@ -1619,6 +1637,7 @@ const refreshUpstreamBalances = async () => {
         for (const item of result.value?.items ?? []) next[String(item.account_id)] = item
         return
       }
+      if (isForbiddenError(result.reason)) upstreamBalanceForbidden = true
       // 失败的分片保留这些账号上一次的值（配置变了的账号在发现时已删掉，不会被带回来）。
       for (const id of chunks[index]) {
         const key = String(id)
@@ -1631,6 +1650,7 @@ const refreshUpstreamBalances = async () => {
     upstreamBalanceByAccountId.value = next
     tickUpstreamBalanceNow()
   } catch (error) {
+    if (isForbiddenError(error)) upstreamBalanceForbidden = true
     if (reqSeq !== upstreamBalanceReqSeq) return
     if (!isAbortLikeError(error)) console.error('Failed to load upstream balances:', error)
   } finally {
@@ -2589,6 +2609,7 @@ const refreshAccountsAfterUpstreamBillingProbe = async () => {
   await refreshUpstreamBillingSortedList(true)
 }
 const handleProbeUpstreamBilling = async (account: Account) => {
+  if (!canManage.value) return
   if (probingUpstreamBilling.has(account.id)) return
   probingUpstreamBilling.add(account.id)
   try {

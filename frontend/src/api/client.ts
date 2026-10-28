@@ -132,7 +132,8 @@ apiClient.interceptors.response.use(
         }
 
         if (window.location.pathname.startsWith('/admin/ops')) {
-          window.location.href = '/admin/settings'
+          // Operators cannot open /admin/settings; /admin resolves to their first permitted page.
+          window.location.href = localStorage.getItem('admin_access_is_super_cached') === 'false' ? '/admin' : '/admin/settings'
         }
 
         return Promise.reject({
@@ -252,6 +253,21 @@ apiClient.interceptors.response.use(
         // Only redirect if not already on login page
         if (!window.location.pathname.includes('/login')) {
           window.location.href = '/login'
+        }
+      }
+
+      // Operator permission errors: let the admin access store refresh /me/access
+      // (throttled there). No redirect here.
+      if (
+        status === 403 &&
+        (apiData.reason === 'ADMIN_PERMISSION_DENIED' || apiData.reason === 'SUPER_ADMIN_REQUIRED')
+      ) {
+        try {
+          window.dispatchEvent(new CustomEvent('admin-permission-denied', {
+            detail: { reason: apiData.reason, required: apiData.metadata?.required, url }
+          }))
+        } catch {
+          // ignore event failures
         }
       }
 

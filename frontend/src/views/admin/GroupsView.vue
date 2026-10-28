@@ -94,9 +94,9 @@
                 </button>
               </div>
             </div>
-            <GroupCategoryManagerButton v-if="!authStore.isSimpleMode" />
+            <GroupCategoryManagerButton v-if="!authStore.isSimpleMode && canManage" />
             <button
-              v-if="!authStore.isSimpleMode"
+              v-if="!authStore.isSimpleMode && canManage"
               @click="openSortModal"
               class="btn btn-secondary"
               :title="t('admin.groups.sortOrder')"
@@ -105,6 +105,7 @@
               {{ t("admin.groups.sortOrder") }}
             </button>
             <button
+              v-if="canManage"
               @click="openCreateModal"
               class="btn btn-primary"
               data-tour="groups-create-btn"
@@ -386,6 +387,7 @@
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
               <button
+                v-if="canManage"
                 @click="handleEdit(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
@@ -393,7 +395,7 @@
                 <span class="text-xs">{{ t("common.edit") }}</span>
               </button>
               <button
-                v-if="!authStore.isSimpleMode"
+                v-if="!authStore.isSimpleMode && canManage"
                 data-testid="group-duplicate"
                 :title="
                   duplicatingGroupIds.has(row.id)
@@ -414,7 +416,7 @@
                 </span>
               </button>
               <button
-                v-if="!authStore.isSimpleMode && row.platform === 'composite'"
+                v-if="!authStore.isSimpleMode && canManage && row.platform === 'composite'"
                 data-testid="group-composite-routes"
                 @click="handleCompositeRoutes(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-cyan-600 dark:hover:bg-dark-700 dark:hover:text-cyan-400"
@@ -425,7 +427,7 @@
                 }}</span>
               </button>
               <button
-                v-if="!authStore.isSimpleMode"
+                v-if="!authStore.isSimpleMode && canManage && canAdjustBalance"
                 data-testid="group-rate-multipliers"
                 @click="handleRateMultipliers(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-purple-600 dark:hover:bg-dark-700 dark:hover:text-purple-400"
@@ -436,7 +438,7 @@
                 }}</span>
               </button>
               <button
-                v-if="!authStore.isSimpleMode"
+                v-if="!authStore.isSimpleMode && canManage"
                 data-testid="group-rpm-overrides"
                 @click="handleRPMOverrides(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-orange-600 dark:hover:bg-dark-700 dark:hover:text-orange-400"
@@ -447,6 +449,7 @@
                 }}</span>
               </button>
               <button
+                v-if="canManage"
                 @click="handleDelete(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
               >
@@ -460,7 +463,7 @@
             <EmptyState
               :title="t('admin.groups.noGroupsYet')"
               :description="t('admin.groups.createFirstGroup')"
-              :action-text="t('admin.groups.createGroup')"
+              :action-text="canManage ? t('admin.groups.createGroup') : undefined"
               @action="openCreateModal"
             />
           </template>
@@ -527,7 +530,7 @@
         </div>
         <GroupCategoryField v-if="!authStore.isSimpleMode" ref="createCategoryFieldRef" />
         <!-- 从分组复制账号 -->
-        <div v-if="!authStore.isSimpleMode && copyAccountsGroupOptions.length > 0">
+        <div v-if="!authStore.isSimpleMode && canAdjustBalance && copyAccountsGroupOptions.length > 0" data-testid="group-create-copy-accounts">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
               {{ t("admin.groups.copyAccounts.title") }}
@@ -700,7 +703,7 @@
             </div>
           </div>
           <div class="flex flex-wrap items-center gap-3">
-            <Toggle v-model="createForm.is_exclusive" />
+            <Toggle v-model="createForm.is_exclusive" :disabled="!canAdjustBalance" class="disabled:cursor-not-allowed disabled:opacity-50" />
             <span class="text-sm text-gray-500 dark:text-gray-400">
               {{
                 createForm.is_exclusive
@@ -713,6 +716,7 @@
               <span>{{ t('admin.groups.showExclusiveBadge') }}</span>
             </label>
           </div>
+          <p v-if="!canAdjustBalance" class="input-hint" data-testid="group-exclusive-hint">{{ t('admin.operatorAccess.groupExclusiveHint') }}</p>
         </div>
 
         <label v-if="createForm.subscription_type === 'subscription'" class="flex items-center gap-3 text-sm text-gray-700 dark:text-gray-200">
@@ -2202,7 +2206,7 @@
         <GroupCategoryField v-if="!authStore.isSimpleMode" ref="editCategoryFieldRef" :group-id="editingGroup.id" />
         <template v-if="!authStore.isSimpleMode">
         <!-- 从分组复制账号（编辑时） -->
-        <div v-if="copyAccountsGroupOptionsForEdit.length > 0">
+        <div v-if="canAdjustBalance && copyAccountsGroupOptionsForEdit.length > 0" data-testid="group-edit-copy-accounts">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
               {{ t("admin.groups.copyAccounts.title") }}
@@ -2303,6 +2307,7 @@
             min="0.001"
             required
             class="input"
+            :disabled="!canAdjustBalance"
             data-tour="group-form-multiplier"
           />
         </div>
@@ -2372,7 +2377,7 @@
             </div>
           </div>
           <div class="flex flex-wrap items-center gap-3">
-            <Toggle v-model="editForm.is_exclusive" />
+            <Toggle v-model="editForm.is_exclusive" :disabled="!canAdjustBalance && editingGroup?.is_exclusive === true" class="disabled:cursor-not-allowed disabled:opacity-50" />
             <span class="text-sm text-gray-500 dark:text-gray-400">
               {{
                 editForm.is_exclusive
@@ -4407,6 +4412,7 @@ import type { ChannelModelPricing } from "@/api/admin/channels";
 import { VueDraggable } from "vue-draggable-plus";
 import { createStableObjectKeyResolver } from "@/utils/stableObjectKey";
 import { extractApiErrorMessage } from "@/utils/apiError";
+import { useAdminPermission } from "@/composables/useAdminPermission";
 import { useKeyedDebouncedSearch } from "@/composables/useKeyedDebouncedSearch";
 import { getPersistedPageSize } from "@/composables/usePersistedPageSize";
 import {
@@ -4539,6 +4545,9 @@ const groupPricingToAPI = (
 const { t } = useI18n();
 const appStore = useAppStore();
 const authStore = useAuthStore();
+const { canManage, has } = useAdminPermission("groups");
+// 分组倍率、复制账号、公开分组和删除有账号的分组需要“加减余额”权限
+const canAdjustBalance = computed(() => has("users.balance_adjust"));
 const onboardingStore = useOnboardingStore();
 const groupCategories = useGroupCategoriesStore();
 
@@ -5688,12 +5697,15 @@ const deleteConfirmMessage = computed(() => {
   if (!deletingGroup.value) {
     return "";
   }
-  if (deletingGroup.value.subscription_type === "subscription") {
-    return t("admin.groups.deleteConfirmSubscription", {
-      name: deletingGroup.value.name,
-    });
-  }
-  return t("admin.groups.deleteConfirm", { name: deletingGroup.value.name });
+  const message =
+    deletingGroup.value.subscription_type === "subscription"
+      ? t("admin.groups.deleteConfirmSubscription", {
+          name: deletingGroup.value.name,
+        })
+      : t("admin.groups.deleteConfirm", { name: deletingGroup.value.name });
+  return canAdjustBalance.value
+    ? message
+    : `${message} ${t("admin.operatorAccess.groupDeleteNeedsEmpty")}`;
 });
 
 const loadLiveCapability = async () => {
@@ -5901,6 +5913,8 @@ const handleSort = (key: string, order: 'asc' | 'desc') => {
 };
 
 const openCreateModal = () => {
+  // 没有“加减余额”权限：新分组只能是专属分组
+  if (!canAdjustBalance.value) createForm.is_exclusive = true;
   showCreateModal.value = true;
   loadModelAllowlistCandidates("create", 0, createForm.platform);
 };
@@ -6170,12 +6184,16 @@ const handleCreateGroup = async () => {
     requestData.peak_rate_multiplier = normalizeRateMultiplier(
       createForm.peak_rate_multiplier,
     );
+    if (!canAdjustBalance.value) {
+      delete (requestData as Record<string, unknown>).copy_accounts_from_group_ids;
+    }
     const payload = authStore.isSimpleMode
       ? {
           name: createForm.name,
           description: createForm.description,
           platform: createForm.platform,
           system_prompt_config: createForm.system_prompt_config,
+          ...(canAdjustBalance.value ? {} : { is_exclusive: true }),
         }
       : requestData;
     const created = await adminAPI.groups.create(payload);
@@ -6539,6 +6557,9 @@ const handleUpdateGroup = async () => {
     payload.peak_rate_multiplier = normalizeRateMultiplier(
       editForm.peak_rate_multiplier,
     );
+    if (!canAdjustBalance.value) {
+      delete (payload as Record<string, unknown>).copy_accounts_from_group_ids;
+    }
     const requestData = authStore.isSimpleMode
       ? {
           name: editForm.name,
@@ -6813,8 +6834,13 @@ const confirmDelete = async () => {
     deletingGroup.value = null;
     loadGroups();
   } catch (error: any) {
+    // 没有“加减余额”权限时只能删除没有账号的分组（409 GROUP_NOT_EMPTY）
+    const groupNotEmpty =
+      error?.reason === "GROUP_NOT_EMPTY" || error?.code === "GROUP_NOT_EMPTY";
     appStore.showError(
-      error.response?.data?.detail || t("admin.groups.failedToDelete"),
+      groupNotEmpty
+        ? t("admin.operatorAccess.groupDeleteNeedsEmpty")
+        : error.response?.data?.detail || t("admin.groups.failedToDelete"),
     );
     console.error("Error deleting group:", error);
   }

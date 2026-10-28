@@ -335,7 +335,7 @@
                         <span v-if="row.auto_banned"> / {{ t('admin.riskControl.autoBanned') }}</span>
                       </div>
                       <button
-                        v-if="canUnbanRow(row)"
+                        v-if="canManage && canUnbanRow(row)"
                         type="button"
                         class="mt-2 inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-900/60 dark:bg-emerald-900/20 dark:text-emerald-300 dark:hover:bg-emerald-900/30"
                         :disabled="unbanningUserID === row.user_id"
@@ -410,18 +410,18 @@
               </div>
               <div>
                 <label class="input-label">{{ t('admin.riskControl.engine') }}</label>
-                <Select data-test="audit-engine-select" :model-value="configForm.engine" :options="engineOptions" :disabled="apiKeyTesting || saving" @update:model-value="switchEngine" />
+                <Select data-test="audit-engine-select" :model-value="configForm.engine" :options="engineOptions" :disabled="apiKeyTesting || saving || !superOnly" @update:model-value="switchEngine" />
               </div>
               <div v-if="configForm.engine === 'typesafe'" class="lg:col-span-2 text-sm text-amber-700 dark:text-amber-300" role="status">
                 {{ t('admin.riskControl.typeSafeNotice') }}
               </div>
               <div>
                 <label class="input-label">{{ t('admin.riskControl.baseUrl') }}</label>
-                <input v-model.trim="configForm.base_url" data-test="audit-base-url" type="url" class="input" :placeholder="configForm.engine === 'typesafe' ? 'https://api.typesafe.ai' : 'https://api.openai.com'" />
+                <input v-model.trim="configForm.base_url" data-test="audit-base-url" type="url" class="input" :disabled="!superOnly" :placeholder="configForm.engine === 'typesafe' ? 'https://api.typesafe.ai' : 'https://api.openai.com'" />
               </div>
               <div>
                 <label class="input-label">{{ t('admin.riskControl.model') }}</label>
-                <input v-model.trim="configForm.model" data-test="audit-model" type="text" class="input" :placeholder="configForm.engine === 'typesafe' ? 'jev-latest' : 'omni-moderation-latest'" />
+                <input v-model.trim="configForm.model" data-test="audit-model" type="text" class="input" :disabled="!superOnly" :placeholder="configForm.engine === 'typesafe' ? 'jev-latest' : 'omni-moderation-latest'" />
               </div>
               <div>
                 <label class="input-label">{{ t('admin.riskControl.timeoutMs') }}</label>
@@ -440,12 +440,12 @@
               </div>
               <div>
                 <label class="input-label">{{ t('admin.riskControl.proxy') }}</label>
-                <ProxySelector v-model="configForm.proxy_id" :proxies="proxies" />
+                <ProxySelector v-model="configForm.proxy_id" :proxies="proxies" :disabled="!superOnly" />
                 <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.proxyHint') }}</p>
               </div>
             </div>
 
-            <div class="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800">
+            <div v-if="superOnly" class="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800">
               <div class="flex flex-col gap-4 border-b border-gray-100 bg-gray-50 px-4 py-4 dark:border-dark-700 dark:bg-dark-800/60 lg:flex-row lg:items-center lg:justify-between">
                 <div class="flex items-start gap-3">
                   <span class="mt-0.5 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-300">
@@ -853,6 +853,7 @@
                     <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.flaggedHashHint') }}</p>
                   </div>
                   <button
+                    v-if="superOnly"
                     type="button"
                     class="btn btn-secondary inline-flex items-center justify-center gap-2 text-red-600 hover:text-red-700 dark:text-red-300"
                     :disabled="hashActionLoading || (status?.flagged_hash_count ?? 0) === 0"
@@ -862,7 +863,7 @@
                     {{ t('admin.riskControl.clearFlaggedHashes') }}
                   </button>
                 </div>
-                <div class="mt-3 flex flex-col gap-2 sm:flex-row">
+                <div v-if="canManage" class="mt-3 flex flex-col gap-2 sm:flex-row">
                   <input
                     v-model.trim="flaggedHashInput"
                     type="text"
@@ -1069,7 +1070,7 @@
         <template #footer>
           <div class="flex justify-end gap-2">
             <button type="button" class="btn btn-secondary" @click="settingsOpen = false">{{ t('common.cancel') }}</button>
-            <button type="button" class="btn btn-primary inline-flex items-center gap-2" :disabled="saving" @click="saveConfig">
+            <button v-if="canManage" type="button" class="btn btn-primary inline-flex items-center gap-2" :disabled="saving" @click="saveConfig">
               <Icon v-if="saving" name="refresh" size="sm" class="animate-spin" />
               <Icon v-else name="check" size="sm" />
               {{ saving ? t('common.saving') : t('admin.riskControl.saveConfig') }}
@@ -1157,6 +1158,8 @@ import Toggle from '@/components/common/Toggle.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
+import { useAdminPermission } from '@/composables/useAdminPermission'
+import { useAdminAccessStore } from '@/stores/adminAccess'
 import { adminAPI } from '@/api/admin'
 import type {
   ContentModerationAPIKeyLoad,
@@ -1227,6 +1230,10 @@ const riskThresholdCategories = Object.keys(riskThresholdDefaults)
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const { canManage } = useAdminPermission('security_audit')
+const adminAccess = useAdminAccessStore()
+// 审计引擎、密钥配置与测试、清空全部哈希只有超级管理员可以操作
+const superOnly = computed(() => !adminAccess.isOperator)
 const defaultBlockMessage = () => t('admin.riskControl.defaultBlockMessage')
 
 const loading = ref(true)
@@ -1931,6 +1938,12 @@ async function saveConfig() {
 
     engineDrafts.value[configForm.engine] = captureEngineDraft()
     payload.engine_configs = Object.fromEntries(Object.entries(engineDrafts.value).map(([engine, draft]) => [engine, engineDraftPayload(draft)]))
+    if (!superOnly.value) {
+      // 普通管理员：不提交密钥和引擎连接字段，后端保留原值
+      for (const field of ['api_keys', 'api_keys_mode', 'delete_api_key_hashes', 'clear_api_key', 'engine_configs', 'base_url', 'model', 'proxy_id'] as const) {
+        delete payload[field]
+      }
+    }
     const updated = await adminAPI.riskControl.updateConfig(payload)
     applyConfig(updated)
     settingsOpen.value = false

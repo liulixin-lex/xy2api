@@ -96,7 +96,8 @@
         </div>
       </div>
 
-      <div v-if="usesProbePart">
+      <!-- 编辑时没有“显示上游地址”权限：不显示地址（后端保留原地址） -->
+      <div v-if="usesProbePart && (!editing || canSeeEndpoint)">
         <label class="input-label">{{ t('admin.channelMonitor.form.endpoint') }} <span class="text-red-500">*</span></label>
         <div class="flex gap-2">
           <input v-model="form.endpoint" data-testid="monitor-endpoint" type="text" required class="input flex-1" :placeholder="t('admin.channelMonitor.form.endpointPlaceholder')" />
@@ -105,6 +106,10 @@
           </button>
         </div>
       </div>
+
+      <p v-if="headersDropped" class="text-xs text-amber-600 dark:text-amber-400" data-testid="monitor-headers-dropped">
+        {{ t('admin.operatorAccess.monitorHeadersDropped') }}
+      </p>
 
       <div v-if="usesProbePart">
         <label class="input-label">
@@ -260,6 +265,8 @@ import MonitorKeyPickerDialog from '@/components/admin/monitor/MonitorKeyPickerD
 import MonitorAdvancedRequestConfig from '@/components/admin/monitor/MonitorAdvancedRequestConfig.vue'
 import ProviderIcon from '@/components/user/monitor/ProviderIcon.vue'
 import { useChannelMonitorFormat } from '@/composables/useChannelMonitorFormat'
+import { useAdminAccessStore } from '@/stores/adminAccess'
+import { operatorAccountErrorMessage } from '@/components/account/operatorAccountRules'
 import {
   PROVIDER_OPENAI,
   PROVIDER_ANTHROPIC,
@@ -310,6 +317,18 @@ const systemDefaultInterval = computed<number>(() => {
 
 // editing is true when we have an existing monitor
 const editing = computed<ChannelMonitor | null>(() => props.monitor)
+const adminAccess = useAdminAccessStore()
+// 普通管理员编辑监控：没有“显示上游地址”权限时不显示地址
+const canSeeEndpoint = computed(() => adminAccess.can('accounts.upstream_address'))
+// 普通管理员修改地址、服务商或接口模式时，只保留本次填写的请求头（"******" 是未重填的已存值）
+const MASKED_HEADER_VALUE = '******'
+const monitorNetworkChanged = computed(() => {
+  const m = editing.value
+  if (!m) return false
+  const endpointChanged = canSeeEndpoint.value && form.endpoint.trim() !== (m.endpoint || '').trim()
+  return endpointChanged || form.provider !== m.provider || form.api_mode !== normalizeAPIMode(m.api_mode)
+})
+const headersDropped = computed(() => adminAccess.isOperator && monitorNetworkChanged.value)
 
 const submitting = ref(false)
 
@@ -869,6 +888,12 @@ async function handleSubmit() {
       // account_id 同理：probe 模式不带账号，update 发 0 显式解绑存量关联
       // （后端 0=清空、null=不动）。仅 update——create 发 0 会落 &0 触发 FK 违约。
       if (!usesQuotaMode.value) req.account_id = 0
+      if (!canSeeEndpoint.value) delete req.endpoint
+      if (headersDropped.value) {
+        req.extra_headers = Object.fromEntries(
+          Object.entries(req.extra_headers || {}).filter(([, value]) => value !== MASKED_HEADER_VALUE),
+        )
+      }
       await adminAPI.channelMonitor.update(target.id, req)
       appStore.showSuccess(t('admin.channelMonitor.updateSuccess'))
     } else {
@@ -878,7 +903,7 @@ async function handleSubmit() {
     emit('saved')
     emit('close')
   } catch (err: unknown) {
-    appStore.showError(extractApiErrorMessage(err, t('common.error')))
+    appStore.showError(operatorAccountErrorMessage(err, t) || extractApiErrorMessage(err, t('common.error')))
   } finally {
     submitting.value = false
   }

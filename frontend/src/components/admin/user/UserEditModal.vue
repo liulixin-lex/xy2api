@@ -9,6 +9,7 @@
       <div>
         <label class="input-label">{{ t('admin.users.email') }}</label>
         <input v-model="form.email" type="email" class="input" />
+        <p v-if="emailError" class="input-error-text" data-test="email-error">{{ emailError }}</p>
       </div>
       <div>
         <label class="input-label">{{ t('admin.users.password') }}</label>
@@ -29,13 +30,17 @@
         <label class="input-label">{{ t('admin.users.username') }}</label>
         <input v-model="form.username" type="text" class="input" />
       </div>
-      <div>
+      <div v-if="isSuperAdmin">
         <label class="input-label">{{ t('admin.users.form.roleLabel') }}</label>
         <Select
           v-model="form.role"
           :options="roleOptions"
           :searchable="false"
         />
+      </div>
+      <div v-if="isSuperAdmin && form.role === 'operator'">
+        <OperatorPermissionsTable v-if="operatorPermissionsState === 'loaded'" v-model="operatorPermissions" />
+        <p v-else-if="operatorPermissionsState === 'error'" class="input-error-text">{{ t('admin.operatorAccess.loadFailed') }}</p>
       </div>
       <div>
         <label class="input-label">{{ t('admin.users.notes') }}</label>
@@ -95,16 +100,39 @@ import UserAttributeForm from '@/components/user/UserAttributeForm.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
+import OperatorPermissionsTable from '@/components/admin/user/OperatorPermissionsTable.vue'
+import { useAdminPermission } from '@/composables/useAdminPermission'
+import type { AdminPermissionsWire } from '@/types/adminAccess'
 
 const props = defineProps<{ show: boolean, user: AdminUser | null }>()
 const emit = defineEmits(['close', 'success'])
 const { t } = useI18n(); const appStore = useAppStore(); const { copyToClipboard } = useClipboard()
 
 const submitting = ref(false); const passwordCopied = ref(false)
+const { isSuperAdmin } = useAdminPermission('users')
 const roleOptions = computed(() => [
   { value: 'user', label: t('admin.users.roles.user') },
+  { value: 'operator', label: t('admin.users.roles.operator') },
   { value: 'admin', label: t('admin.users.roles.admin') }
 ])
+const emailError = ref('')
+// Operator permissions (super admins only): loaded once per opened user.
+const operatorPermissions = ref<AdminPermissionsWire>({ modules: {}, flags: [] })
+const operatorPermissionsState = ref<'idle' | 'loading' | 'loaded' | 'error'>('idle')
+let operatorPermissionsUserId: number | null = null
+async function loadOperatorPermissions(userId: number) {
+  if (operatorPermissionsUserId === userId && operatorPermissionsState.value !== 'error') return
+  operatorPermissionsUserId = userId
+  operatorPermissionsState.value = 'loading'
+  try {
+    const perms = await adminAPI.users.getOperatorPermissions(userId)
+    if (operatorPermissionsUserId !== userId) return
+    operatorPermissions.value = { modules: { ...(perms?.modules ?? {}) }, flags: [...(perms?.flags ?? [])] }
+    operatorPermissionsState.value = 'loaded'
+  } catch {
+    if (operatorPermissionsUserId === userId) operatorPermissionsState.value = 'error'
+  }
+}
 const form = reactive({
   email: '',
   password: '',
@@ -120,8 +148,27 @@ watch(() => props.user, (u) => {
   if (u) {
     Object.assign(form, { email: u.email, password: '', username: u.username || '', notes: u.notes || '', role: u.role || 'user', concurrency: u.concurrency, rpm_limit: u.rpm_limit ?? 0, customAttributes: {} })
     passwordCopied.value = false
+    emailError.value = ''
+    operatorPermissionsUserId = null
+    operatorPermissionsState.value = 'idle'
+    operatorPermissions.value = { modules: {}, flags: [] }
   }
 }, { immediate: true })
+// Each opening starts from the stored permissions, never from an earlier unsaved edit.
+watch(() => props.show, (show) => {
+  if (show) {
+    operatorPermissionsUserId = null
+    operatorPermissionsState.value = 'idle'
+  }
+})
+// Load the table when the modal opens with an operator, or when the select first switches to operator.
+watch(
+  () => [props.show, props.user?.id, form.role] as const,
+  ([show, userId, role]) => {
+    if (show && userId && role === 'operator' && isSuperAdmin.value) void loadOperatorPermissions(userId)
+  },
+  { immediate: true }
+)
 
 const generatePassword = () => {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%^&*'
@@ -147,10 +194,23 @@ const handleUpdateUser = async () => {
     return
   }
   const userId = props.user.id
+  const savesOperatorPermissions = isSuperAdmin.value && form.role === 'operator'
+  if (savesOperatorPermissions && operatorPermissionsState.value !== 'loaded') {
+    appStore.showError(t('admin.operatorAccess.loadFailed'))
+    return
+  }
+  emailError.value = ''
   submitting.value = true
   try {
-    const data: any = { email: form.email, username: form.username, notes: form.notes, role: form.role, concurrency: form.concurrency, rpm_limit: form.rpm_limit }
+    const data: any = { email: form.email, username: form.username, notes: form.notes, concurrency: form.concurrency, rpm_limit: form.rpm_limit }
+    // 角色只能由超级管理员修改；普通管理员提交 role 会被后端拒绝
+    if (isSuperAdmin.value) data.role = form.role
     if (form.password.trim()) data.password = form.password.trim()
+    // 任命普通管理员：先保存权限，再保存用户（含角色），两步都走 step-up
+    if (savesOperatorPermissions) {
+      const perms: AdminPermissionsWire = { modules: { ...operatorPermissions.value.modules }, flags: [...operatorPermissions.value.flags] }
+      await stepUp.run(() => adminAPI.users.updateOperatorPermissions(userId, perms))
+    }
     // 提升为管理员属敏感操作：后端返回 STEP_UP_REQUIRED 时弹 TOTP 验证并重试
     await stepUp.run(() => adminAPI.users.update(userId, data))
     if (Object.keys(form.customAttributes).length > 0) await adminAPI.userAttributes.updateUserAttributeValues(userId, form.customAttributes)
@@ -165,6 +225,8 @@ const handleUpdateUser = async () => {
           ? t('stepUp.adminApiKeyForbidden')
           : t('stepUp.notEnabled')
       )
+    } else if (e?.reason === 'ADMIN_FIELD_FORBIDDEN' && e?.metadata?.field === 'email') {
+      emailError.value = t('admin.operatorAccess.errors.reservedEmail')
     } else {
       appStore.showError(e?.message || t('admin.users.failedToUpdate'))
     }

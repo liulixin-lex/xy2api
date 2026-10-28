@@ -2,6 +2,8 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { adminAPI } from '@/api'
 import type { CustomMenuItem } from '@/types'
+import { useAuthStore } from './auth'
+import { useAdminAccessStore } from './adminAccess'
 
 export const useAdminSettingsStore = defineStore('adminSettings', () => {
   // A late settings read must not overwrite a more recent successful save.
@@ -78,7 +80,43 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
     return inflight
   }
 
+  // Operators cannot read /admin/settings or /admin/payment/config; the same
+  // switches come from /admin/me/access.
+  async function loadForOperator(): Promise<void> {
+    loading.value = true
+    const usageMetricsReadRevision = usageMetricsRevision
+    try {
+      await useAdminAccessStore().refresh()
+      const access = useAdminAccessStore()
+      const settings = access.settings
+      if (!access.loaded || !settings) return
+      if (usageMetricsReadRevision === usageMetricsRevision) setUsageMetricsLocal(settings)
+      opsMonitoringEnabled.value = settings.ops_monitoring_enabled
+      writeCachedBool('ops_monitoring_enabled_cached', opsMonitoringEnabled.value)
+
+      opsRealtimeMonitoringEnabled.value = settings.ops_realtime_monitoring_enabled
+      writeCachedBool('ops_realtime_monitoring_enabled_cached', opsRealtimeMonitoringEnabled.value)
+
+      opsQueryModeDefault.value = settings.ops_query_mode_default || 'auto'
+      writeCachedString('ops_query_mode_default_cached', opsQueryModeDefault.value)
+
+      paymentEnabled.value = settings.payment_enabled
+      writeCachedBool('payment_enabled_cached', paymentEnabled.value)
+
+      customMenuItems.value = []
+      loaded.value = true
+    } catch (err) {
+      console.error('[adminSettings] Failed to fetch operator settings:', err)
+    } finally {
+      loading.value = false
+    }
+  }
+
   async function load(): Promise<void> {
+    const authStore = useAuthStore()
+    if (!authStore.isAdmin && authStore.canAccessAdmin) {
+      return loadForOperator()
+    }
     loading.value = true
     const usageMetricsReadRevision = usageMetricsRevision
     try {

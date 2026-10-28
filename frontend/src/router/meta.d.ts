@@ -4,6 +4,7 @@
  */
 
 import 'vue-router'
+import type { AdminModuleId } from '@/types/adminAccess'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -18,6 +19,9 @@ declare module 'vue-router' {
      * @default false
      */
     requiresAdmin?: boolean
+
+    /** Admin module that grants this page (view level), or 'super_only'. Required on every requiresAdmin route. */
+    permission?: AdminModuleId | 'super_only'
 
     /**
      * Page title for this route

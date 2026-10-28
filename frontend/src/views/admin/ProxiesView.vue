@@ -47,6 +47,7 @@
               <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
             </button>
             <button
+              v-if="canManage"
               @click="handleBatchTest"
               :disabled="batchTesting || loading"
               class="btn btn-secondary"
@@ -56,6 +57,7 @@
               {{ t('admin.proxies.testConnection') }}
             </button>
             <button
+              v-if="canManage"
               @click="handleBatchQualityCheck"
               :disabled="batchQualityChecking || loading"
               class="btn btn-secondary"
@@ -65,6 +67,7 @@
               {{ t('admin.proxies.batchQualityCheck') }}
             </button>
             <button
+              v-if="canManage"
               @click="openBatchDelete"
               :disabled="selectedCount === 0"
               class="btn btn-danger"
@@ -73,13 +76,15 @@
               <Icon name="trash" size="md" class="mr-2" />
               {{ t('admin.proxies.batchDeleteAction') }}
             </button>
-            <button @click="showImportData = true" class="btn btn-secondary">
-              {{ t('admin.proxies.dataImport') }}
-            </button>
-            <button @click="showExportDataDialog = true" class="btn btn-secondary">
-              {{ selectedCount > 0 ? t('admin.proxies.dataExportSelected') : t('admin.proxies.dataExport') }}
-            </button>
-            <button @click="showCreateModal = true" class="btn btn-primary">
+            <template v-if="isSuperAdmin">
+              <button @click="showImportData = true" class="btn btn-secondary">
+                {{ t('admin.proxies.dataImport') }}
+              </button>
+              <button @click="showExportDataDialog = true" class="btn btn-secondary">
+                {{ selectedCount > 0 ? t('admin.proxies.dataExportSelected') : t('admin.proxies.dataExport') }}
+              </button>
+            </template>
+            <button v-if="canCreateProxies" @click="showCreateModal = true" class="btn btn-primary" data-testid="proxy-create">
               <Icon name="plus" size="md" class="mr-2" />
               {{ t('admin.proxies.createProxy') }}
             </button>
@@ -270,6 +275,7 @@
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
               <button
+                v-if="canManage"
                 @click="handleTestConnection(row)"
                 :disabled="testingProxyIds.has(row.id)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-emerald-50 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-emerald-900/20 dark:hover:text-emerald-400"
@@ -298,6 +304,7 @@
                 <span class="text-xs">{{ t('admin.proxies.testConnection') }}</span>
               </button>
               <button
+                v-if="canManage"
                 @click="handleQualityCheck(row)"
                 :disabled="qualityCheckingProxyIds.has(row.id)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
@@ -326,6 +333,7 @@
                 <span class="text-xs">{{ t('admin.proxies.qualityCheck') }}</span>
               </button>
               <button
+                v-if="canManage"
                 @click="handleEdit(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
@@ -333,6 +341,7 @@
                 <span class="text-xs">{{ t('common.edit') }}</span>
               </button>
               <button
+                v-if="canManage"
                 @click="handleDelete(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
               >
@@ -346,7 +355,7 @@
             <EmptyState
               :title="t('admin.proxies.noProxiesYet')"
               :description="t('admin.proxies.createFirstProxy')"
-              :action-text="t('admin.proxies.createProxy')"
+              :action-text="canCreateProxies ? t('admin.proxies.createProxy') : undefined"
               @action="showCreateModal = true"
             />
           </template>
@@ -676,9 +685,13 @@
           <label class="input-label">{{ t('admin.proxies.name') }}</label>
           <input v-model="editForm.name" type="text" required class="input" />
         </div>
+        <p v-if="!canEditNetwork" class="input-hint" data-testid="proxy-network-needs-flag">
+          {{ t('admin.operatorAccess.proxyNetworkNeedsFlag') }}
+        </p>
+        <fieldset :disabled="!canEditNetwork" class="contents [&>*]:mt-5" data-testid="proxy-network-fields">
         <div>
           <label class="input-label">{{ t('admin.proxies.protocol') }}</label>
-          <Select v-model="editForm.protocol" :options="protocolSelectOptions" />
+          <Select v-model="editForm.protocol" :options="protocolSelectOptions" :disabled="!canEditNetwork" />
         </div>
         <div class="grid grid-cols-2 gap-4">
           <div>
@@ -720,6 +733,7 @@
             </button>
           </div>
         </div>
+        </fieldset>
         <div>
           <label class="input-label">{{ t('admin.proxies.status') }}</label>
           <Select v-model="editForm.status" :options="editStatusOptions" />
@@ -747,9 +761,10 @@
           />
           <input v-model="editForm.expires_at" type="date" max="9999-12-31" class="input" />
         </div>
+        <fieldset :disabled="!canEditNetwork" class="contents [&>*]:mt-5" data-testid="proxy-fallback-fields">
         <div>
           <label class="input-label">{{ t('admin.proxies.fallbackMode') }}</label>
-          <Select v-model="editForm.fallback_mode" :options="[
+          <Select v-model="editForm.fallback_mode" :disabled="!canEditNetwork" :options="[
             { label: t('admin.proxies.fallbackNone'), value: 'none' },
             { label: t('admin.proxies.fallbackProxy'), value: 'proxy' },
             { label: t('admin.proxies.fallbackDirect'), value: 'direct' },
@@ -757,8 +772,9 @@
         </div>
         <div v-if="editForm.fallback_mode === 'proxy'">
           <label class="input-label">{{ t('admin.proxies.backupProxy') }}</label>
-          <Select v-model="editForm.backup_proxy_id" :options="backupProxyOptions(editingProxy?.id)" />
+          <Select v-model="editForm.backup_proxy_id" :options="backupProxyOptions(editingProxy?.id)" :disabled="!canEditNetwork" />
         </div>
+        </fieldset>
 
       </form>
 
@@ -986,10 +1002,18 @@ import { useTableSelection } from '@/composables/useTableSelection'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatDateTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
+import { useAdminPermission } from '@/composables/useAdminPermission'
+import { operatorAccountErrorMessage } from '@/components/account/operatorAccountRules'
 
 const { t } = useI18n()
 const appStore = useAppStore()
 const { copyToClipboard } = useClipboard()
+const { canManage, has, isSuperAdmin } = useAdminPermission('proxies')
+// 新建代理、修改代理的协议/主机/端口/账号/密码/备用链需要“显示上游地址”权限
+const canEditNetwork = computed(() => has('accounts.upstream_address'))
+const canCreateProxies = computed(() => canManage.value && canEditNetwork.value)
+/** Fields of `PUT /proxies/:id` an operator without the upstream-address flag leaves out. */
+const PROXY_NETWORK_FIELDS = ['protocol', 'host', 'port', 'username', 'password', 'fallback_mode', 'backup_proxy_id'] as const
 
 const columns = computed<Column[]>(() => [
   { key: 'select', label: '', sortable: false },
@@ -1367,7 +1391,7 @@ const handleBatchCreate = async () => {
     closeCreateModal()
     loadProxies()
   } catch (error: any) {
-    appStore.showError(error.response?.data?.detail || t('admin.proxies.failedToImport'))
+    appStore.showError(operatorAccountErrorMessage(error, t) || error.response?.data?.detail || t('admin.proxies.failedToImport'))
     console.error('Error batch creating proxies:', error)
   } finally {
     submitting.value = false
@@ -1405,7 +1429,7 @@ const handleCreateProxy = async () => {
     closeCreateModal()
     loadProxies()
   } catch (error: any) {
-    appStore.showError(error.response?.data?.detail || t('admin.proxies.failedToCreate'))
+    appStore.showError(operatorAccountErrorMessage(error, t) || error.response?.data?.detail || t('admin.proxies.failedToCreate'))
     console.error('Error creating proxy:', error)
   } finally {
     submitting.value = false
@@ -1443,11 +1467,11 @@ const handleUpdateProxy = async () => {
     appStore.showError(t('admin.proxies.nameRequired'))
     return
   }
-  if (!editForm.host.trim()) {
+  if (canEditNetwork.value && !editForm.host.trim()) {
     appStore.showError(t('admin.proxies.hostRequired'))
     return
   }
-  if (editForm.port < 1 || editForm.port > 65535) {
+  if (canEditNetwork.value && (editForm.port < 1 || editForm.port > 65535)) {
     appStore.showError(t('admin.proxies.portInvalid'))
     return
   }
@@ -1471,13 +1495,17 @@ const handleUpdateProxy = async () => {
     if (editPasswordDirty.value) {
       updateData.password = editForm.password.trim()
     }
+    // 没有“显示上游地址”权限：网络字段只读，不随保存提交（后端保留原值）
+    if (!canEditNetwork.value) {
+      for (const field of PROXY_NETWORK_FIELDS) delete updateData[field]
+    }
 
     await adminAPI.proxies.update(editingProxy.value.id, updateData)
     appStore.showSuccess(t('admin.proxies.proxyUpdated'))
     closeEditModal()
     loadProxies()
   } catch (error: any) {
-    appStore.showError(error.response?.data?.detail || t('admin.proxies.failedToUpdate'))
+    appStore.showError(operatorAccountErrorMessage(error, t) || error.response?.data?.detail || t('admin.proxies.failedToUpdate'))
     console.error('Error updating proxy:', error)
   } finally {
     submitting.value = false
@@ -1973,7 +2001,7 @@ const confirmDelete = async () => {
     deletingProxy.value = null
     loadProxies()
   } catch (error: any) {
-    appStore.showError(error.response?.data?.detail || t('admin.proxies.failedToDelete'))
+    appStore.showError(operatorAccountErrorMessage(error, t) || error.response?.data?.detail || t('admin.proxies.failedToDelete'))
     console.error('Error deleting proxy:', error)
   }
 }
@@ -2000,7 +2028,7 @@ const confirmBatchDelete = async () => {
     showBatchDeleteDialog.value = false
     loadProxies()
   } catch (error: any) {
-    appStore.showError(error.response?.data?.detail || t('admin.proxies.batchDeleteFailed'))
+    appStore.showError(operatorAccountErrorMessage(error, t) || error.response?.data?.detail || t('admin.proxies.batchDeleteFailed'))
     console.error('Error batch deleting proxies:', error)
   }
 }

@@ -29,6 +29,7 @@
                 :options="[
                   { value: '', label: t('admin.users.allRoles') },
                   { value: 'admin', label: t('admin.users.admin') },
+                  { value: 'operator', label: t('admin.users.operator') },
                   { value: 'user', label: t('admin.users.user') }
                 ]"
                 @change="applyFilter"
@@ -233,6 +234,7 @@
               </div>
               <!-- Attributes Config Button -->
               <button
+                v-if="canManage"
                 @click="showAttributesModal = true"
                 class="btn btn-secondary px-2 md:px-3"
                 :title="t('admin.users.attributes.configButton')"
@@ -243,7 +245,7 @@
             </div>
 
             <button
-              v-if="selectedCount > 0"
+              v-if="canManage && selectedCount > 0"
               class="btn btn-secondary flex-1 md:flex-initial"
               data-test="bulk-edit-limits"
               @click="showBulkEditModal = true"
@@ -253,7 +255,7 @@
             </button>
 
             <button
-              v-if="selectedCount > 0"
+              v-if="canManage && selectedCount > 0"
               class="btn btn-secondary flex-1 md:flex-initial"
               data-test="bulk-disable-users"
               :disabled="bulkStatusUpdating"
@@ -264,7 +266,7 @@
             </button>
 
             <button
-              v-if="selectedCount > 0"
+              v-if="canManage && selectedCount > 0"
               class="btn btn-secondary flex-1 md:flex-initial"
               data-test="bulk-enable-users"
               :disabled="bulkStatusUpdating"
@@ -275,7 +277,7 @@
             </button>
 
             <button
-              v-if="selectedCount > 0"
+              v-if="canManage && selectedCount > 0"
               class="btn btn-danger flex-1 md:flex-initial"
               data-test="bulk-delete-users"
               :disabled="bulkDeleting"
@@ -286,7 +288,7 @@
             </button>
 
             <!-- Create User Button (full width on mobile, auto width on desktop) -->
-            <button @click="showCreateModal = true" class="btn btn-primary flex-1 md:flex-initial">
+            <button v-if="canManage" @click="showCreateModal = true" class="btn btn-primary flex-1 md:flex-initial">
               <Icon name="plus" size="md" class="mr-2" />
               {{ t('admin.users.createUser') }}
             </button>
@@ -359,7 +361,7 @@
           </template>
 
           <template #cell-role="{ value }">
-            <span :class="['badge', value === 'admin' ? 'badge-purple' : 'badge-gray']">
+            <span :class="['badge', value === 'admin' ? 'badge-purple' : value === 'operator' ? 'badge-primary' : 'badge-gray']">
               {{ t('admin.users.roles.' + value) }}
             </span>
           </template>
@@ -470,6 +472,7 @@
                 </div>
               </div>
               <button
+                v-if="canActOn(row) && has('users.balance_adjust')"
                 @click.stop="handleDeposit(row)"
                 class="rounded px-2 py-0.5 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
                 :title="t('admin.users.deposit')"
@@ -636,6 +639,7 @@
             <div class="flex items-center gap-1">
               <!-- Edit Button -->
               <button
+                v-if="isSuperAdmin || canActOn(row)"
                 @click="handleEdit(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
@@ -645,7 +649,7 @@
 
               <!-- Toggle Status Button (not for admin) -->
               <button
-                v-if="row.role !== 'admin'"
+                v-if="canActOn(row)"
                 @click="handleToggleStatus(row)"
                 :class="[
                   'flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors',
@@ -661,6 +665,7 @@
 
               <!-- More Actions Menu Trigger -->
               <button
+                v-if="canReadRow(row)"
                 @click="openActionMenu(row, $event)"
                 class="action-menu-trigger flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-dark-700 dark:hover:text-white"
                 :class="{ 'bg-gray-100 text-gray-900 dark:bg-dark-700 dark:text-white': activeMenuId === row.id }"
@@ -675,7 +680,7 @@
             <EmptyState
               :title="t('admin.users.noUsersYet')"
               :description="t('admin.users.createFirstUser')"
-              :action-text="t('admin.users.createUser')"
+              :action-text="canManage ? t('admin.users.createUser') : undefined"
               @action="showCreateModal = true"
             />
           </template>
@@ -716,6 +721,7 @@
 
               <!-- Allowed Groups -->
               <button
+                v-if="canActOn(user)"
                 @click="handleAllowedGroups(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
               >
@@ -727,6 +733,7 @@
 
               <!-- Deposit -->
               <button
+                v-if="canActOn(user) && has('users.balance_adjust')"
                 @click="handleDeposit(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
               >
@@ -736,6 +743,7 @@
 
               <!-- Withdraw -->
               <button
+                v-if="canActOn(user) && has('users.balance_adjust')"
                 @click="handleWithdraw(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
               >
@@ -747,6 +755,7 @@
 
               <!-- Platform Quotas -->
               <button
+                v-if="canActOn(user)"
                 @click="handlePlatformQuota(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
               >
@@ -767,7 +776,7 @@
 
               <!-- Delete (not for admin) -->
               <button
-                v-if="user.role !== 'admin'"
+                v-if="canActOn(user)"
                 @click="handleDelete(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
               >
@@ -828,6 +837,8 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
+import { useAdminPermission } from '@/composables/useAdminPermission'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { useTableSelection } from '@/composables/useTableSelection'
 import { formatDateTime } from '@/utils/format'
@@ -866,6 +877,14 @@ import UserBalanceHistoryModal from '@/components/admin/user/UserBalanceHistoryM
 import GroupReplaceModal from '@/components/admin/user/GroupReplaceModal.vue'
 
 const appStore = useAppStore()
+const authStore = useAuthStore()
+const { canManage, has, isSuperAdmin } = useAdminPermission('users')
+// Super admins act on everyone except admins. Operators with users:manage act
+// on plain users other than themselves (the backend target rule).
+const canActOn = (row: AdminUser) =>
+  isSuperAdmin.value ? row.role !== 'admin' : canManage.value && row.role === 'user' && row.id !== authStore.user?.id
+// Operators can only open plain users' details.
+const canReadRow = (row: AdminUser) => isSuperAdmin.value || row.role === 'user'
 
 // Generate dynamic attribute columns from enabled definitions
 const attributeColumns = computed<Column[]>(() =>

@@ -33,7 +33,7 @@
     <nav ref="sidebarNavRef" class="sidebar-nav scrollbar-hide relative">
       <span ref="activeIndicatorRef" class="sidebar-active-indicator" aria-hidden="true"></span>
       <!-- Admin View: Admin menu first, then personal menu -->
-      <template v-if="isAdmin">
+      <template v-if="canAccessAdmin">
         <!-- Admin Section -->
         <div class="sidebar-section">
           <template v-for="item in adminNavItems" :key="item.path">
@@ -195,6 +195,8 @@ import { flattenNav, registerCommandEntries } from '@/composables/useCommandPale
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
+import { useAdminAccessStore } from '@/stores/adminAccess'
+import type { AdminModuleId } from '@/types/adminAccess'
 import VersionBadge from '@/components/common/VersionBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { sanitizeSvg } from '@/utils/sanitize'
@@ -222,6 +224,8 @@ interface NavItem {
    * 开关切换时菜单自动更新。
    */
   featureFlag?: () => boolean | undefined
+  /** Admin module that grants this entry (view level), or 'super_only'. */
+  permission?: AdminModuleId | 'super_only'
 }
 
 // applyFeatureFlags 递归过滤掉 featureFlag() === false 的节点（含子节点）。
@@ -239,6 +243,26 @@ function applyFeatureFlags(items: NavItem[]): NavItem[] {
   return out
 }
 
+// applyPermissions keeps, for operators, only entries whose module is granted
+// (view level). Fail closed: 'super_only' and a missing permission are
+// dropped, and a group whose children are all dropped is dropped too.
+function applyPermissions(items: NavItem[]): NavItem[] {
+  if (isSuperAdmin.value) return items
+  const out: NavItem[] = []
+  for (const item of items) {
+    if (item.children?.length) {
+      const children = applyPermissions(item.children)
+      if (children.length > 0) out.push({ ...item, children })
+      continue
+    }
+    const permission = item.permission
+    if (!permission || permission === 'super_only') continue
+    if (!adminAccessStore.can(`${permission}:view`)) continue
+    out.push(item)
+  }
+  return out
+}
+
 const { t } = useI18n()
 
 const route = useRoute()
@@ -247,16 +271,20 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 const onboardingStore = useOnboardingStore()
 const adminSettingsStore = useAdminSettingsStore()
+const adminAccessStore = useAdminAccessStore()
 const { canUseBatchImage, refreshBatchImageAccess } = useBatchImageAccess()
 
 const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
 const mobileOpen = computed(() => appStore.mobileOpen)
-const isAdmin = computed(() => authStore.isAdmin)
+const canAccessAdmin = computed(() => authStore.canAccessAdmin)
+const isSuperAdmin = computed(() => authStore.isAdmin)
 const sidebarNavRef = ref<HTMLElement | null>(null)
 const activeIndicatorRef = ref<HTMLElement | null>(null)
 const isDark = ref(document.documentElement.classList.contains('dark'))
 
-const homePath = computed(() => (isAdmin.value ? '/admin/dashboard' : '/dashboard'))
+const homePath = computed(() =>
+  canAccessAdmin.value ? (isSuperAdmin.value ? '/admin/dashboard' : adminAccessStore.adminHomePath) : '/dashboard'
+)
 
 // Per-group expand/collapse overrides. A group with no entry follows the
 // automatic behavior (expanded while the active route is one of its children);
@@ -800,10 +828,10 @@ const customMenuItemsForAdmin = computed(() => {
 // Admin navigation items
 const adminNavItems = computed((): NavItem[] => {
   const baseItems: NavItem[] = [
-    { path: '/admin/dashboard', label: t('nav.dashboard'), icon: DashboardIcon },
-    { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon, featureFlag: flagOpsMonitoring },
-    { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true },
-    { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon },
+    { path: '/admin/dashboard', label: t('nav.dashboard'), icon: DashboardIcon, permission: 'dashboard' },
+    { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon, featureFlag: flagOpsMonitoring, permission: 'ops' },
+    { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true, permission: 'users' },
+    { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon, permission: 'groups' },
     {
       path: '/admin/channels',
       label: t('nav.channelManagement'),
@@ -811,17 +839,17 @@ const adminNavItems = computed((): NavItem[] => {
       hideInSimpleMode: true,
       expandOnly: true,
       children: [
-        { path: '/admin/channels/pricing', label: t('nav.channelPricing'), icon: PriceTagIcon },
-        { path: '/admin/channels/monitor', label: t('nav.channelMonitor'), icon: SignalIcon, featureFlag: flagChannelMonitor },
+        { path: '/admin/channels/pricing', label: t('nav.channelPricing'), icon: PriceTagIcon, permission: 'channels' },
+        { path: '/admin/channels/monitor', label: t('nav.channelMonitor'), icon: SignalIcon, featureFlag: flagChannelMonitor, permission: 'channels' },
       ],
     },
     // 「仅充值」站点连管理端的「订阅管理」入口也一并收起（路由本身不拦截）。
-    { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, featureFlag: flagSubscription },
-    { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
-    { path: '/admin/share-scheduling', label: t('nav.shareScheduling'), icon: ScaleIcon },
-    { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement },
-    { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
-    { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
+    { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, featureFlag: flagSubscription, permission: 'subscriptions' },
+    { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon, permission: 'accounts' },
+    { path: '/admin/share-scheduling', label: t('nav.shareScheduling'), icon: ScaleIcon, permission: 'share_scheduling' },
+    { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement, permission: 'super_only' },
+    { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon, permission: 'announcements' },
+    { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon, permission: 'proxies' },
     {
       path: '/admin/security-audit',
       label: t('nav.securityAudit'),
@@ -829,12 +857,12 @@ const adminNavItems = computed((): NavItem[] => {
       expandOnly: true,
       featureFlag: flagRiskControl,
       children: [
-        { path: '/admin/risk-control', label: t('nav.contentModeration'), icon: ShieldIcon },
-        { path: '/admin/prompt-audit', label: t('nav.promptAudit'), icon: ShieldIcon },
+        { path: '/admin/risk-control', label: t('nav.contentModeration'), icon: ShieldIcon, permission: 'security_audit' },
+        { path: '/admin/prompt-audit', label: t('nav.promptAudit'), icon: ShieldIcon, permission: 'security_audit' },
       ],
     },
-    { path: '/admin/redeem', label: t('nav.redeemCodes'), icon: TicketIcon, hideInSimpleMode: true },
-    { path: '/admin/promo-codes', label: t('nav.promoCodes'), icon: GiftIcon, hideInSimpleMode: true },
+    { path: '/admin/redeem', label: t('nav.redeemCodes'), icon: TicketIcon, hideInSimpleMode: true, permission: 'redeem_codes' },
+    { path: '/admin/promo-codes', label: t('nav.promoCodes'), icon: GiftIcon, hideInSimpleMode: true, permission: 'promo_codes' },
     {
       path: '/admin/affiliates',
       label: t('nav.affiliateManagement'),
@@ -843,9 +871,9 @@ const adminNavItems = computed((): NavItem[] => {
       expandOnly: true,
       featureFlag: flagAffiliate,
       children: [
-        { path: '/admin/affiliates/invites', label: t('nav.affiliateInviteRecords'), icon: UsersIcon },
-        { path: '/admin/affiliates/rebates', label: t('nav.affiliateRebateRecords'), icon: OrderIcon },
-        { path: '/admin/affiliates/transfers', label: t('nav.affiliateTransferRecords'), icon: CreditCardIcon },
+        { path: '/admin/affiliates/invites', label: t('nav.affiliateInviteRecords'), icon: UsersIcon, permission: 'affiliates' },
+        { path: '/admin/affiliates/rebates', label: t('nav.affiliateRebateRecords'), icon: OrderIcon, permission: 'affiliates' },
+        { path: '/admin/affiliates/transfers', label: t('nav.affiliateTransferRecords'), icon: CreditCardIcon, permission: 'affiliates' },
       ],
     },
     {
@@ -856,38 +884,43 @@ const adminNavItems = computed((): NavItem[] => {
       expandOnly: true,
       featureFlag: flagAdminPayment,
       children: [
-        { path: '/admin/orders/dashboard', label: t('nav.paymentDashboard'), icon: ChartIcon },
-        { path: '/admin/orders', label: t('nav.orderManagement'), icon: OrderIcon },
-        { path: '/admin/orders/plans', label: t('nav.paymentPlans'), icon: CreditCardIcon },
+        { path: '/admin/orders/dashboard', label: t('nav.paymentDashboard'), icon: ChartIcon, permission: 'orders' },
+        { path: '/admin/orders', label: t('nav.orderManagement'), icon: OrderIcon, permission: 'orders' },
+        { path: '/admin/orders/plans', label: t('nav.paymentPlans'), icon: CreditCardIcon, permission: 'orders' },
       ],
     },
-    { path: '/admin/usage', label: t('nav.usage'), icon: ChartIcon },
-    { path: '/admin/audit-logs', label: t('nav.auditLogs'), icon: ShieldIcon, hideInSimpleMode: true }
+    { path: '/admin/usage', label: t('nav.usage'), icon: ChartIcon, permission: 'usage' },
+    { path: '/admin/audit-logs', label: t('nav.auditLogs'), icon: ShieldIcon, hideInSimpleMode: true, permission: 'audit_logs' }
   ]
 
-  const visible = applyFeatureFlags(baseItems)
+  const visible = applyPermissions(applyFeatureFlags(baseItems))
 
   // 简单模式下，在系统设置前插入 API密钥
   if (authStore.isSimpleMode) {
     const filtered = visible.filter(item => !item.hideInSimpleMode)
     filtered.push({ path: '/keys', label: t('nav.apiKeys'), icon: KeyIcon })
-    filtered.push({ path: '/admin/settings', label: t('nav.settings'), icon: CogIcon })
-    for (const cm of customMenuItemsForAdmin.value) {
-      filtered.push({ path: `/custom/${cm.id}`, label: cm.label, icon: null, iconSvg: cm.icon_svg })
+    // 系统设置与自定义管理菜单只对超级管理员显示
+    if (isSuperAdmin.value) {
+      filtered.push({ path: '/admin/settings', label: t('nav.settings'), icon: CogIcon, permission: 'super_only' })
+      for (const cm of customMenuItemsForAdmin.value) {
+        filtered.push({ path: `/custom/${cm.id}`, label: cm.label, icon: null, iconSvg: cm.icon_svg })
+      }
     }
     return filtered
   }
 
-  visible.push({ path: '/admin/settings', label: t('nav.settings'), icon: CogIcon })
-  for (const cm of customMenuItemsForAdmin.value) {
-    visible.push({ path: `/custom/${cm.id}`, label: cm.label, icon: null, iconSvg: cm.icon_svg })
+  if (isSuperAdmin.value) {
+    visible.push({ path: '/admin/settings', label: t('nav.settings'), icon: CogIcon, permission: 'super_only' })
+    for (const cm of customMenuItemsForAdmin.value) {
+      visible.push({ path: `/custom/${cm.id}`, label: cm.label, icon: null, iconSvg: cm.icon_svg })
+    }
   }
   return visible
 })
 
 // 命令面板（Ctrl/⌘K）的页面清单直接取侧栏当前可见的菜单，权限与功能开关只维护一处
 registerCommandEntries(() => {
-  if (isAdmin.value) {
+  if (canAccessAdmin.value) {
     const list = flattenNav(adminNavItems.value)
     if (!authStore.isSimpleMode) {
       const seen = new Set(list.map((entry) => entry.path))
@@ -983,10 +1016,11 @@ if (
 
 // Fetch admin settings (for feature-gated nav items like Ops).
 watch(
-  isAdmin,
+  canAccessAdmin,
   (v) => {
     if (v) {
       adminSettingsStore.fetch()
+      if (!isSuperAdmin.value) void adminAccessStore.ensureLoaded()
     }
   },
   { immediate: true }
@@ -994,7 +1028,7 @@ watch(
 
 onMounted(() => {
   void refreshBatchImageAccess()
-  if (isAdmin.value) {
+  if (canAccessAdmin.value) {
     adminSettingsStore.fetch()
   }
   // Restore sidebar scroll position after route change re-mounts the component

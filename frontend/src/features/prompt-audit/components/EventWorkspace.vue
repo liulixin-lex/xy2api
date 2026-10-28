@@ -5,7 +5,7 @@
         <h2 id="prompt-events-title" class="text-base font-semibold text-gray-950 dark:text-white">{{ t('admin.promptAudit.events.title') }}</h2>
         <p class="mt-1 text-sm text-gray-500 dark:text-dark-300">{{ t('admin.promptAudit.events.description') }}</p>
       </div>
-      <div class="flex flex-wrap gap-2">
+      <div v-if="canDelete" class="flex flex-wrap gap-2">
         <button type="button" class="btn btn-secondary btn-sm" :disabled="selectedIds.length === 0" @click="$emit('batch-delete')">
           {{ t('admin.promptAudit.events.deleteSelected', { count: selectedIds.length }) }}
         </button>
@@ -93,7 +93,7 @@
             <td class="max-w-xs px-3 py-3"><p class="line-clamp-2 break-words text-gray-600 dark:text-dark-300">{{ event.snapshot.redacted_preview || '—' }}</p></td>
             <td class="whitespace-nowrap px-3 py-3 text-right">
               <button type="button" class="btn btn-ghost btn-sm" @click="$emit('view', event.id)">{{ t('common.view') }}</button>
-              <button type="button" class="btn btn-ghost btn-sm text-red-600" @click="$emit('delete', event.id)">{{ t('common.delete') }}</button>
+              <button v-if="canDelete" type="button" class="btn btn-ghost btn-sm text-red-600" @click="$emit('delete', event.id)">{{ t('common.delete') }}</button>
             </td>
           </tr>
         </tbody>
@@ -110,10 +110,12 @@ import Pagination from '@/components/common/Pagination.vue'
 import type { PromptAuditEvent, PromptEventFilters } from '../types'
 import { cloneData, emptyEventFilters, SCANNER_CATALOG } from '../viewModel'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   events: PromptAuditEvent[]; total: number; page: number; pageSize: number
   filters: PromptEventFilters; selectedIds: number[]; loading: boolean; error: string
-}>()
+  /** Deleting events is super-admin only. */
+  canDelete?: boolean
+}>(), { canDelete: true })
 const emit = defineEmits<{
   (event: 'filters-change', value: PromptEventFilters): void
   (event: 'search', value: PromptEventFilters): void

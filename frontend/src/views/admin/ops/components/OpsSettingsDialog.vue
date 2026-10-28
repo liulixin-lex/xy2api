@@ -7,9 +7,15 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import type { OpsAlertRuntimeSettings, EmailNotificationConfig, AlertSeverity, OpsAdvancedSettings, OpsMetricThresholds } from '../types'
+import { useAdminPermission } from '@/composables/useAdminPermission'
+import { useAdminAccessStore } from '@/stores/adminAccess'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+// 普通管理员：邮件通知和高级设置只读，保存只提交预警运行设置和指标阈值
+const { canManage } = useAdminPermission('ops')
+const adminAccess = useAdminAccessStore()
+const canEditSuperSections = computed(() => !adminAccess.isOperator)
 
 const props = defineProps<{
   show: boolean
@@ -209,7 +215,7 @@ async function saveAllSettings() {
   saving.value = true
   try {
     // 无收件人时自动禁用邮件通知
-    if (emailConfig.value) {
+    if (emailConfig.value && canEditSuperSections.value) {
       if (emailConfig.value.alert.enabled && emailConfig.value.alert.recipients.length === 0) {
         emailConfig.value.alert.enabled = false
       }
@@ -219,8 +225,8 @@ async function saveAllSettings() {
     }
     await Promise.all([
       runtimeSettings.value ? opsAPI.updateAlertRuntimeSettings(runtimeSettings.value) : Promise.resolve(),
-      emailConfig.value ? opsAPI.updateEmailNotificationConfig(emailConfig.value) : Promise.resolve(),
-      advancedSettings.value ? opsAPI.updateAdvancedSettings(advancedSettings.value) : Promise.resolve(),
+      emailConfig.value && canEditSuperSections.value ? opsAPI.updateEmailNotificationConfig(emailConfig.value) : Promise.resolve(),
+      advancedSettings.value && canEditSuperSections.value ? opsAPI.updateAdvancedSettings(advancedSettings.value) : Promise.resolve(),
       opsAPI.updateMetricThresholds(metricThresholds.value)
     ])
     appStore.showSuccess(t('admin.ops.settings.saveSuccess'))
@@ -266,6 +272,7 @@ async function saveAllSettings() {
         </div>
       </div>
 
+      <fieldset :disabled="!canEditSuperSections" class="min-w-0 space-y-6" data-test="ops-email-settings">
       <!-- 预警配置 -->
       <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-700/50">
         <h4 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.ops.settings.alertConfig') }}</h4>
@@ -374,6 +381,8 @@ async function saveAllSettings() {
         </div>
       </div>
 
+      </fieldset>
+
       <!-- 指标阈值配置 -->
       <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-700/50">
         <h4 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.ops.settings.metricThresholds') }}</h4>
@@ -435,6 +444,7 @@ async function saveAllSettings() {
       </div>
 
       <!-- 高级设置 -->
+      <fieldset :disabled="!canEditSuperSections" class="min-w-0" data-test="ops-advanced-settings">
       <details class="rounded-2xl bg-gray-50 dark:bg-dark-700/50">
         <summary class="cursor-pointer p-4 text-sm font-semibold text-gray-900 dark:text-white">
           {{ t('admin.ops.settings.advancedSettings') }}
@@ -640,12 +650,13 @@ async function saveAllSettings() {
           </div>
         </div>
       </details>
+      </fieldset>
     </div>
 
     <template #footer>
       <div class="flex justify-end gap-2">
         <button class="btn btn-secondary" @click="emit('close')">{{ t('common.cancel') }}</button>
-        <button class="btn btn-primary" :disabled="loading || !settingsLoaded || saving || !validation.valid" @click="saveAllSettings">
+        <button v-if="canManage" class="btn btn-primary" :disabled="loading || !settingsLoaded || saving || !validation.valid" @click="saveAllSettings">
           {{ saving ? t('common.saving') : t('common.save') }}
         </button>
       </div>

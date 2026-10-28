@@ -159,14 +159,14 @@
             >
               <Icon name="questionCircle" size="md" />
             </button>
-            <button @click="showAssignModal = true" class="btn btn-primary">
+            <button v-if="canAdjustBalance" @click="showAssignModal = true" class="btn btn-primary">
               <Icon name="plus" size="md" class="mr-2" />
               {{ t('admin.subscriptions.assignSubscription') }}
             </button>
           </div>
         </div>
         <div
-          v-if="selectedCount > 0"
+          v-if="selectedCount > 0 && permittedBulkActions.length > 0"
           class="mt-3 space-y-2 rounded-xl border border-primary-200 bg-primary-50 p-3 dark:border-primary-800 dark:bg-primary-900/20"
           data-test="subscription-bulk-actions"
         >
@@ -175,7 +175,7 @@
               {{ t('admin.subscriptions.bulk.selected', { count: selectedCount }) }}
             </span>
             <button
-              v-for="action in bulkActions"
+              v-for="action in permittedBulkActions"
               :key="action"
               type="button"
               :class="action === 'revoke' ? 'btn btn-danger btn-sm' : 'btn btn-secondary btn-sm'"
@@ -419,7 +419,7 @@
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
               <button
-                v-if="row.status === 'active' || row.status === 'expired'"
+                v-if="canAdjustBalance && (row.status === 'active' || row.status === 'expired')"
                 @click="handleExtend(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
               >
@@ -427,7 +427,7 @@
                 <span class="text-xs">{{ t('admin.subscriptions.adjust') }}</span>
               </button>
               <button
-                v-if="row.status === 'active'"
+                v-if="canAdjustBalance && row.status === 'active'"
                 @click="handleResetQuota(row)"
                 :disabled="resettingQuota && resettingSubscription?.id === row.id"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-orange-50 hover:text-orange-600 dark:hover:bg-orange-900/20 dark:hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
@@ -436,7 +436,7 @@
                 <span class="text-xs">{{ t('admin.subscriptions.resetQuota') }}</span>
               </button>
               <button
-                v-if="row.status === 'active'"
+                v-if="canManage && row.status === 'active'"
                 @click="handleRevoke(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
               >
@@ -444,7 +444,7 @@
                 <span class="text-xs">{{ t('admin.subscriptions.revoke') }}</span>
               </button>
               <button
-                v-if="row.status === 'revoked'"
+                v-if="canAdjustBalance && row.status === 'revoked'"
                 @click="handleRestore(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/20 dark:hover:text-green-400"
               >
@@ -458,7 +458,7 @@
             <EmptyState
               :title="t('admin.subscriptions.noSubscriptionsYet')"
               :description="t('admin.subscriptions.assignFirstSubscription')"
-              :action-text="t('admin.subscriptions.assignSubscription')"
+              :action-text="canAdjustBalance ? t('admin.subscriptions.assignSubscription') : undefined"
               @action="showAssignModal = true"
             />
           </template>
@@ -863,6 +863,7 @@ import Select from '@/components/common/Select.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { useAdminPermission } from '@/composables/useAdminPermission'
 import {
   getRemainingDurationParts,
   getRemainingExpiryDuration,
@@ -873,6 +874,9 @@ import { GROUP_PLATFORM_OPTIONS } from '@/constants/platforms'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const { canManage, has } = useAdminPermission('subscriptions')
+// 发放、延期、重置额度和恢复订阅需要“加减余额”权限；撤销只需管理权限
+const canAdjustBalance = computed(() => canManage.value && has('users.balance_adjust'))
 
 interface GroupOption {
   value: number
@@ -1015,6 +1019,9 @@ let abortController: AbortController | null = null
 const { selectedIds, selectedCount, setSelectedIds, clear: clearSelection, removeMany: removeSelectedIds } =
   useTableSelection<UserSubscription>({ rows: subscriptions, getId: (subscription) => subscription.id })
 const bulkActions: SubscriptionBulkAction[] = ['extend', 'reset_quota', 'revoke', 'restore']
+const permittedBulkActions = computed(() =>
+  bulkActions.filter((action) => (action === 'revoke' ? canManage.value : canAdjustBalance.value))
+)
 const bulkAction = ref<SubscriptionBulkAction | null>(null)
 const bulkSubscriptions = ref<UserSubscription[]>([])
 const bulkTargets = computed(() => {

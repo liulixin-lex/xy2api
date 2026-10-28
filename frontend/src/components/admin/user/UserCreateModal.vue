@@ -9,6 +9,7 @@
       <div>
         <label class="input-label">{{ t('admin.users.email') }}</label>
         <input v-model="form.email" type="email" required class="input" :placeholder="t('admin.users.enterEmail')" />
+        <p v-if="emailError" class="input-error-text" data-test="email-error">{{ emailError }}</p>
       </div>
       <div>
         <label class="input-label">{{ t('admin.users.password') }}</label>
@@ -25,15 +26,18 @@
         <label class="input-label">{{ t('admin.users.username') }}</label>
         <input v-model="form.username" type="text" class="input" :placeholder="t('admin.users.enterUsername')" />
       </div>
-      <div>
+      <div v-if="isSuperAdmin">
         <label class="input-label">{{ t('admin.users.form.roleLabel') }}</label>
         <select v-model="form.role" class="input">
           <option value="user">{{ t('admin.users.roles.user') }}</option>
+          <option value="operator">{{ t('admin.users.roles.operator') }}</option>
           <option value="admin">{{ t('admin.users.roles.admin') }}</option>
         </select>
+        <p v-if="form.role === 'operator'" class="input-hint">{{ t('admin.operatorAccess.createHint') }}</p>
       </div>
+      <p v-if="!canAdjustBalance" class="input-hint" data-test="create-no-signup-grants">{{ t('admin.operatorAccess.createNoSignupGrants') }}</p>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
+        <div v-if="canAdjustBalance">
           <label class="input-label">{{ t('admin.users.columns.balance') }}</label>
           <input v-model="form.balance" type="number" step="any" class="input" />
         </div>
@@ -70,19 +74,23 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'; import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
+import { useAdminPermission } from '@/composables/useAdminPermission'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits(['close', 'success']); const { t } = useI18n()
 const appStore = useAppStore()
 
-const form = reactive({ email: '', password: '', username: '', notes: '', role: 'user' as 'user' | 'admin', balance: '', concurrency: 1, rpm_limit: 0 })
+const form = reactive({ email: '', password: '', username: '', notes: '', role: 'user' as 'user' | 'operator' | 'admin', balance: '', concurrency: 1, rpm_limit: 0 })
+const { isSuperAdmin, has } = useAdminPermission('users')
+const canAdjustBalance = computed(() => has('users.balance_adjust'))
+const emailError = ref('')
 
 const stepUp = useStepUp()
 const loading = ref(false)
@@ -91,12 +99,15 @@ const submit = async () => {
   if (loading.value) return
   loading.value = true
   try {
-    const { balance: rawBalance, ...rest } = { ...form }
+    const { balance: rawBalance, role, ...rest } = { ...form }
     const balance = String(rawBalance).trim()
-    const payload: typeof rest & { balance?: number } = { ...rest }
-    if (balance !== '') {
+    const payload: typeof rest & { balance?: number; role?: typeof role } = { ...rest }
+    // 角色只能由超级管理员设置；初始余额需要“加减余额”权限
+    if (isSuperAdmin.value) payload.role = role
+    if (balance !== '' && canAdjustBalance.value) {
       payload.balance = Number(balance)
     }
+    emailError.value = ''
     // 创建管理员属敏感操作：后端返回 STEP_UP_REQUIRED 时弹 TOTP 验证并重试
     await stepUp.run(() => adminAPI.users.create(payload))
     appStore.showSuccess(t('admin.users.userCreated'))
@@ -110,13 +121,15 @@ const submit = async () => {
           ? t('stepUp.adminApiKeyForbidden')
           : t('stepUp.notEnabled')
       )
+    } else if (e?.reason === 'ADMIN_FIELD_FORBIDDEN' && e?.metadata?.field === 'email') {
+      emailError.value = t('admin.operatorAccess.errors.reservedEmail')
     } else {
       appStore.showError(e?.message || t('admin.users.failedToCreate'))
     }
   } finally { loading.value = false }
 }
 
-watch(() => props.show, (v) => { if(v) Object.assign(form, { email: '', password: '', username: '', notes: '', role: 'user', balance: '', concurrency: 1, rpm_limit: 0 }) })
+watch(() => props.show, (v) => { if(v) { Object.assign(form, { email: '', password: '', username: '', notes: '', role: 'user', balance: '', concurrency: 1, rpm_limit: 0 }); emailError.value = '' } })
 
 const generateRandomPassword = () => {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%^&*'

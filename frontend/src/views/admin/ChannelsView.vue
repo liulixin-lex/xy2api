@@ -39,7 +39,7 @@
             >
               <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
             </button>
-            <button @click="openCreateDialog" class="btn btn-primary">
+            <button v-if="canManage" @click="openCreateDialog" class="btn btn-primary">
               <Icon name="plus" size="md" class="mr-2" />
               {{ t('admin.channels.createChannel', 'Create Channel') }}
             </button>
@@ -99,6 +99,7 @@
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
               <button
+                v-if="canManage"
                 @click="openEditDialog(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
@@ -106,6 +107,7 @@
                 <span class="text-xs">{{ t('common.edit', 'Edit') }}</span>
               </button>
               <button
+                v-if="canManage && has('users.balance_adjust')"
                 @click="handleDelete(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
               >
@@ -119,7 +121,7 @@
             <EmptyState
               :title="t('admin.channels.noChannelsYet', 'No Channels Yet')"
               :description="t('admin.channels.createFirstChannel', 'Create your first channel to manage model pricing')"
-              :action-text="t('admin.channels.createChannel', 'Create Channel')"
+              :action-text="canManage ? t('admin.channels.createChannel', 'Create Channel') : undefined"
               @action="openCreateDialog"
             />
           </template>
@@ -306,7 +308,7 @@
                     <input
                       type="checkbox"
                       :checked="section.group_ids.includes(group.id)"
-                      :disabled="isGroupInOtherChannel(group.id, section.platform)"
+                      :disabled="isGroupInOtherChannel(group.id, section.platform) || !has('users.balance_adjust')"
                       class="h-3 w-3 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                       @change="toggleGroupInSection(sIdx, group.id)"
                     />
@@ -654,13 +656,22 @@ import Toggle from '@/components/common/Toggle.vue'
 import PricingEntryCard from '@/components/admin/channel/PricingEntryCard.vue'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { useKeyedDebouncedSearch } from '@/composables/useKeyedDebouncedSearch'
+import { useAdminPermission } from '@/composables/useAdminPermission'
+import { useAdminAccessStore } from '@/stores/adminAccess'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const { canManage, has } = useAdminPermission('channels')
+const adminAccess = useAdminAccessStore()
 
 // Web Search global enabled state (loaded once on mount)
 const webSearchGlobalEnabled = ref(false)
 async function loadWebSearchGlobalState() {
+  if (adminAccess.isOperator) {
+    await adminAccess.ensureLoaded()
+    webSearchGlobalEnabled.value = adminAccess.settings?.web_search_emulation_enabled === true
+    return
+  }
   try {
     const cfg = await adminAPI.settings.getWebSearchEmulationConfig()
     webSearchGlobalEnabled.value = cfg?.enabled === true && (cfg?.providers?.length ?? 0) > 0
