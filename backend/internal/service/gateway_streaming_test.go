@@ -184,8 +184,9 @@ func TestHandleStreamingResponse_EmptyStream(t *testing.T) {
 	result, err := svc.handleStreamingResponse(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "model", "model", false)
 	_ = pr.Close()
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "missing terminal event")
-	require.NotNil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Nil(t, result)
 }
 
 func TestHandleStreamingResponse_SpecialCharactersInJSON(t *testing.T) {
@@ -254,7 +255,7 @@ func TestHandleStreamingResponse_StreamReadErrorBeforeOutput_TriggersFailover(t 
 	require.NotEmpty(t, extractedMsg, "ExtractUpstreamErrorMessage 必须从 ResponseBody 取到非空 message，否则 ops 日志会丢失诊断信息")
 	require.Contains(t, extractedMsg, "upstream stream disconnected")
 	require.Contains(t, string(failoverErr.ResponseBody), `"type":"error"`)
-	require.Contains(t, string(failoverErr.ResponseBody), `"upstream_disconnected"`)
+	require.Contains(t, string(failoverErr.ResponseBody), `"api_error"`)
 
 	// 客户端应收不到任何 stream_read_error 事件，由 handler 层根据 failover 结果再决定
 	require.NotContains(t, rec.Body.String(), "stream_read_error")
@@ -275,7 +276,7 @@ func TestHandleStreamingResponse_StreamReadErrorAfterOutput_PassesThrough(t *tes
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 		Body: &streamReadCloser{
-			payload: []byte("data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":5}}}\n\n"),
+			payload: []byte("data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":5}}}\n\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"partial\"}}\n\n"),
 			err:     io.ErrUnexpectedEOF,
 		},
 	}
@@ -418,7 +419,7 @@ func TestHandleStreamingResponse_SSEErrorEvent_ReturnsTypedErrorWithRawData(t *t
 	_ = pr.Close()
 
 	require.Error(t, err)
-	require.Nil(t, result)
+	require.NotNil(t, result)
 
 	// typed error 必须可被 errors.As 匹配，RawData 必须保留上游 dataLine 原文
 	var sseErr *sseStreamErrorEventError
@@ -481,6 +482,7 @@ func TestHandleStreamingResponse_SSEErrorEvent_AfterPartialStreamOutput(t *testi
 		defer func() { _ = pw.Close() }()
 		// 先发 message_start，让 handleStreamingResponse 把它转发到客户端 → c.Writer 已被写
 		_, _ = pw.Write([]byte(`data: {"type":"message_start","message":{"usage":{"input_tokens":5}}}` + "\n\n"))
+		_, _ = pw.Write([]byte(`data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"partial"}}` + "\n\n"))
 		// 紧接着发 event:error
 		_, _ = pw.Write([]byte("event: error\ndata: " + errorJSON + "\n\n"))
 	}()

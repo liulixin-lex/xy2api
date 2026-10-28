@@ -364,7 +364,8 @@ func TestClaudeCacheForwardFailuresDoNotProbeOrReplay(t *testing.T) {
 				upstream.err = context.Canceled
 			}
 			if stream {
-				upstream.resp = &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"partial\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"usage\":{\"input_tokens\":2,\"cache_creation_input_tokens\":200,\"cache_read_input_tokens\":9000}}}\n\n"))}
+				upstream.resp = &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"partial\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"usage\":{\"input_tokens\":2,\"cache_creation_input_tokens\":200,\"cache_read_input_tokens\":9000}}}\n\n" +
+					"data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"partial\"}}\n\n"))}
 			}
 			svc.httpUpstream = upstream
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())

@@ -139,13 +139,14 @@ func TestGatewayService_Forward_StreamReadErrorAfterOutputPreservesPartialUsage(
 	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
 	require.NoError(t, err)
 
-	// message_start 已写出（含 usage），随后上游连接异常中断。
+	// 正文已交付（开场含 usage），随后上游连接异常中断。
 	upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 		Body: &streamReadCloser{
-			payload: []byte("data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":9,\"cache_creation_input_tokens\":4}}}\n\n"),
-			err:     io.ErrUnexpectedEOF,
+			payload: []byte("data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":9,\"cache_creation_input_tokens\":4}}}\n\n" +
+				"data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"partial\"}}\n\n"),
+			err: io.ErrUnexpectedEOF,
 		},
 	}}
 	svc := newForwardPartialUsageServiceForTest(upstream)
@@ -181,7 +182,8 @@ func TestGatewayService_Forward_StreamErrorWithoutUsageReturnsNilResult(t *testi
 
 	result, err := svc.Forward(context.Background(), c, account, parsed)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "missing terminal event")
+	var failover *UpstreamFailoverError
+	require.ErrorAs(t, err, &failover)
 	require.Nil(t, result, "无已观测 usage 时不应返回部分结果")
 }
 
@@ -262,9 +264,8 @@ func TestGatewayService_Forward_PreOutputSSEOverloadedErrorUsesSemantic529(t *te
 	require.Empty(t, rec.Body.String(), "pre-output overload must remain eligible for account failover")
 }
 
-func TestGatewayService_Forward_PostOutputSSEOverloadedErrorKeepsExistingStatus(t *testing.T) {
-	// xy2api resilience maps the event type to its status
-	// (resilience_stream_error_test.go); switched off, 0.3.0's 403 holds.
+func TestGatewayService_Forward_PostOutputSSEOverloadedErrorKeepsUsageWithoutFailover(t *testing.T) {
+	// Even with resilience disabled, an already written stream cannot replay.
 	orig := *resilience.Current()
 	off := resilience.Defaults()
 	off.Enabled = false
@@ -300,14 +301,18 @@ func TestGatewayService_Forward_PostOutputSSEOverloadedErrorKeepsExistingStatus(
 
 	result, err := svc.Forward(context.Background(), c, newAnthropicOAuthAccountForPartialUsageTest(), parsed)
 	require.Error(t, err)
-	require.Nil(t, result)
+	require.NotNil(t, result)
+	require.Equal(t, 1, result.Usage.InputTokens)
 
 	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, err, &failoverErr)
-	require.Equal(t, http.StatusForbidden, failoverErr.StatusCode)
-	require.JSONEq(t, errorJSON, string(failoverErr.ResponseBody))
+	require.False(t, errors.As(err, &failoverErr))
+	var eventErr *sseStreamErrorEventError
+	require.ErrorAs(t, err, &eventErr)
+	require.JSONEq(t, errorJSON, eventErr.RawData)
 	require.Zero(t, repo.tempCalls)
 	require.Contains(t, rec.Body.String(), "message_start")
+	require.Equal(t, 1, strings.Count(rec.Body.String(), "event: error\n"))
+	require.True(t, IsResponseCommitted(c))
 }
 
 func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardStreamMissingTerminalPreservesPartialUsage(t *testing.T) {

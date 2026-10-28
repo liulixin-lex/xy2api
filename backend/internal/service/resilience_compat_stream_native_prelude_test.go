@@ -76,7 +76,8 @@ func TestNativePreludeAttemptBoundary(t *testing.T) {
 		{"unmarked_whitespace", "data: {\"type\":\"response.output_text.delta\",\"delta\":\" \\t\"}\n\n", "", true},
 		{"marked", relayKeepaliveFrame, "", true},
 		{"nonempty_before_created", "data: {\"type\":\"response.output_text.delta\",\"delta\":\"real\"}\n\n", "", false},
-		{"unknown_codex", "", "data: {\"type\":\"codex.response.metadata\"}\n\n", false},
+		{"codex_metadata", "", "data: {\"type\":\"codex.response.metadata\"}\n\n", true},
+		{"unknown_codex", "", "data: {\"type\":\"codex.unknown\"}\n\n", false},
 		{"response_metadata", "", "event: response.metadata\ndata: {\"type\":\"response.metadata\",\"sequence_number\":1,\"metadata\":{\"openai_chatgpt_moderation_metadata\":{}}}\n\n", true},
 		{"unknown_added_payload", "", "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"message\",\"content\":[],\"opaque\":\"payload\"}}\n\n", false},
 	}
@@ -154,7 +155,7 @@ func TestNativePreludeSwitchOff(t *testing.T) {
 // 生产 2026-10-22：Codex 后端过载时先回 200，依次发 created、in_progress、
 // response.metadata，再在 seq 3 发裸 error（server_is_overloaded），没有
 // response.failed。白名单开启时 response.metadata 是开场，应在输出前换号；
-// 关闭时回到旧边界；codex.response.metadata 始终算输出。
+// 关闭时回到旧边界；codex.response.metadata 与 response.metadata 同条件。
 func nativeMetadataOverloadBody(metadataType string) string {
 	return "event: response.created\n" +
 		"data: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp_a\",\"status\":\"in_progress\"}}\n\n" +
@@ -174,7 +175,8 @@ func TestNativePreludeResponseMetadataBeforeOverloadedError(t *testing.T) {
 	}{
 		{"response_metadata/whitelist_on", "response.metadata", true, true},
 		{"response_metadata/whitelist_off", "response.metadata", false, false},
-		{"codex_metadata/whitelist_on", "codex.response.metadata", true, false},
+		{"codex_metadata/whitelist_on", "codex.response.metadata", true, true},
+		{"codex_metadata/whitelist_off", "codex.response.metadata", false, false},
 	} {
 		for _, passthrough := range []bool{false, true} {
 			t.Run(tc.name+"/passthrough_"+fmtBool(passthrough), func(t *testing.T) {
