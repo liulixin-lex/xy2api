@@ -2042,7 +2042,7 @@ func (h *GatewayHandler) handleStreamingAwareErrorWithCode(c *gin.Context, statu
 	}
 	errType, code, message = resilienceTranslateError(c, status, errType, code, message)
 	// xy2api resilience: a pre-output heartbeat may have committed 200.
-	if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
+	if service.StopOpenAICompactSSEKeepaliveCommitted(c) || c.Writer.Written() {
 		streamStarted = true
 	}
 	if streamStarted {

@@ -152,7 +152,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 				cachedErrorBody = respBody
 				hardClassifiedFailure = isUnrecoverableAccountFailure(resp.StatusCode, respBody)
 				resp.Body = io.NopCloser(bytes.NewReader(respBody))
-				if hardClassifiedFailure || !resilienceInServiceRetryAllowedWithBody(ctx, account.ID, resp.StatusCode, respBody) {
+				if !resilienceInServiceRetryAllowedWithBody(ctx, account.ID, resp.StatusCode, respBody) {
 					break
 				}
 				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{

@@ -1695,7 +1695,7 @@ func (h *OpenAIGatewayHandler) anthropicStreamingAwareError(c *gin.Context, stat
 		message = strings.ReplaceAll(message, "overloaded_error", "api_error")
 	}
 	// xy2api resilience: a pre-output heartbeat may have committed 200.
-	if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
+	if service.StopOpenAICompactSSEKeepaliveCommitted(c) || c.Writer.Written() {
 		streamStarted = true
 	}
 	if streamStarted {
