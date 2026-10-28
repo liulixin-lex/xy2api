@@ -147,6 +147,15 @@ func TestUpstreamBalanceBudgetDoesNotOverwriteSuccess(t *testing.T) {
 }
 
 func TestUpstreamBalanceBillingPairResetsAuthStreak(t *testing.T) {
+	t.Run("malformed usage", func(t *testing.T) {
+		f := newAPIFixtureFor(t)
+		f.reply(newAPIUsagePath, 200, "<html>ok</html>")
+		f.state.AuthStreak = 4
+		out := f.collect()
+		require.Equal(t, "upstream_error", out.reason)
+		f.save(out)
+		require.Zero(t, f.state.AuthStreak)
+	})
 	f := newAPIFixtureFor(t)
 	f.reply(newAPIStatusPath, 200, `{"success":true,"data":{"quota_per_unit":100,"quota_display_type":"TOKENS"}}`)
 	f.reply(newAPISubPath, 200, `{"hard_limit_usd":100000000}`)
@@ -185,6 +194,8 @@ func TestUpstreamBalanceIdentificationStatusClassification(t *testing.T) {
 					return &http.Response{StatusCode: code, Header: make(http.Header), Body: io.NopCloser(bytes.NewBufferString("{}"))}, nil
 				})
 				svc := NewUpstreamBalanceService(&upstreamBalanceRoundRepo{accounts: []Account{a}}, &AccountTestService{cfg: upstreamBalanceTestConfig(), httpUpstream: upstream}, store, nil)
+				roundStart := time.Now().UTC().Truncate(time.Second).Add(999800 * time.Microsecond)
+				svc.now = func() time.Time { return roundStart }
 				require.NoError(t, svc.RunRound(context.Background()))
 				st := store.savedStates[a.ID]
 				require.NotNil(t, st)
@@ -195,7 +206,7 @@ func TestUpstreamBalanceIdentificationStatusClassification(t *testing.T) {
 					require.Equal(t, "unidentified", st.LastReason)
 					require.Equal(t, 1, st.UnsupportedStreak)
 					require.Equal(t, "unsupported", store.entries.Kinds[a.ID].Kind)
-					require.Equal(t, 30*time.Minute, st.NextDueAt.Sub(st.LastAttemptAt).Truncate(time.Second))
+					require.Equal(t, roundStart.Add(30*time.Minute), st.NextDueAt)
 				default:
 					require.Equal(t, "upstream_error", st.LastReason)
 					require.Equal(t, 1, st.TransientStreak)

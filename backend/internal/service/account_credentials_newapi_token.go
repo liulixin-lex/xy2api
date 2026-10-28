@@ -2,6 +2,7 @@ package service
 
 import (
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
+	"net"
 	"net/url"
 	"strings"
 )
@@ -26,16 +27,18 @@ func normalizedCredentialOrigin(base string) string {
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return ""
 	}
-	return strings.ToLower(u.Scheme) + "://" + strings.ToLower(strings.TrimSuffix(u.Hostname(), ".")) + func() string {
-		p := u.Port()
-		if (u.Scheme == "https" && p == "443") || (u.Scheme == "http" && p == "80") {
-			return ""
-		}
-		if p == "" {
-			return ""
-		}
-		return ":" + p
-	}()
+	scheme := strings.ToLower(u.Scheme)
+	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	port := u.Port()
+	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
+		port = ""
+	}
+	if port != "" {
+		host = net.JoinHostPort(host, port)
+	} else if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	return scheme + "://" + host
 }
 func dropNewAPITokenOnOriginChange(oldAccount *Account, merged, incoming map[string]any, proxyIDs ...*int64) map[string]any {
 	if oldAccount == nil {

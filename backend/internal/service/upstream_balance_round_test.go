@@ -1,8 +1,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -499,7 +502,59 @@ func TestUpstreamBalanceStoreTimeout(t *testing.T) {
 	require.WithinDuration(t, time.Now().Add(upstreamBalanceStoreTimeout), store.deadline, 100*time.Millisecond)
 }
 
+type upstreamBalanceRealErrorStore struct {
+	upstreamBalanceMemoryStore
+	loadErr, lockErr error
+}
+
+func (s *upstreamBalanceRealErrorStore) Load(ctx context.Context, ids []int64) (*UpstreamBalanceEntries, error) {
+	if s.loadErr != nil {
+		return nil, s.loadErr
+	}
+	return s.upstreamBalanceMemoryStore.Load(ctx, ids)
+}
+func (s *upstreamBalanceRealErrorStore) GetSite(context.Context, string) (*UpstreamBalanceSite, error) {
+	return &UpstreamBalanceSite{QuotaPerUnit: 1, DisplayType: "USD"}, nil
+}
+func (s *upstreamBalanceRealErrorStore) TryLockOrigin(context.Context, string, string, time.Duration) (bool, error) {
+	return false, s.lockErr
+}
+
 func TestUpstreamBalanceStoreErrorDropsOutcome(t *testing.T) {
+	for _, operation := range []string{"load", "try_lock_origin"} {
+		t.Run(operation, func(t *testing.T) {
+			a := upstreamBalanceCandidate(36, StatusActive)
+			store := &upstreamBalanceRealErrorStore{upstreamBalanceMemoryStore: upstreamBalanceMemoryStore{entries: balanceEntriesFor([]Account{a}, "newapi")}}
+			storeErr := errors.New("fixture store failure")
+			if operation == "load" {
+				store.loadErr = storeErr
+			} else {
+				store.lockErr = storeErr
+			}
+			calls := 0
+			upstream := balanceCallbackHTTP(func(*http.Request) (*http.Response, error) {
+				calls++
+				return &http.Response{StatusCode: http.StatusUnauthorized, Body: io.NopCloser(strings.NewReader(`{"error":"denied"}`))}, nil
+			})
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+			defer slog.SetDefault(previous)
+			memo := &upstreamBalanceRoundMemo{}
+			svc := NewUpstreamBalanceService(nil, &AccountTestService{cfg: upstreamBalanceTestConfig(), httpUpstream: upstream}, store, nil)
+			svc.pollOne(context.Background(), time.Now(), a.ID, &a, nil, memo)
+			require.True(t, memo.failed())
+			require.Empty(t, store.savedStates)
+			require.Empty(t, store.savedRecords)
+			require.Contains(t, logs.String(), "upstream_balance.paused")
+			require.Contains(t, logs.String(), "cause=redis_unavailable")
+			if operation == "load" {
+				require.Zero(t, calls)
+			} else {
+				require.Equal(t, 1, calls)
+			}
+		})
+	}
 	t.Run("get site", func(t *testing.T) {
 		memo := &upstreamBalanceRoundMemo{}
 		store := &upstreamBalanceErrorStore{getSiteErr: context.DeadlineExceeded}

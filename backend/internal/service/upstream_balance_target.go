@@ -69,10 +69,10 @@ func upstreamBalanceOrigin(base string) (string, error) {
 	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
 		port = ""
 	}
-	if strings.Contains(host, ":") {
+	if port != "" {
 		host = net.JoinHostPort(host, port)
-	} else if port != "" {
-		host = net.JoinHostPort(host, port)
+	} else if strings.Contains(host, ":") {
+		host = "[" + host + "]"
 	}
 	return scheme + "://" + host, nil
 }

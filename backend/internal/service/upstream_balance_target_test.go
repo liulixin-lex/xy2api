@@ -42,6 +42,9 @@ func TestUpstreamBalanceURLHelpers(t *testing.T) {
 		{"http://h.example.com:3000/v1", "http://h.example.com:3000"},
 		{"https://u:p@h.example.com./v1", "https://h.example.com"},
 		{"https://[2001:db8::1]:8443/v1", "https://[2001:db8::1]:8443"},
+		{"https://[2001:db8::1]/v1", "https://[2001:db8::1]"},
+		{"https://[2001:db8::1]:443/v1", "https://[2001:db8::1]"},
+		{"http://[::1]:8080/", "http://[::1]:8080"},
 		{"https://u:p@H.Example.com:443/v1", "https://h.example.com"},
 	} {
 		t.Run("origin/"+row.base, func(t *testing.T) {
