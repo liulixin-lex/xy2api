@@ -97,11 +97,11 @@ func (s *OperatorAccessService) operatorTargetUsers(ctx context.Context, sc *ope
 	}
 	for _, id := range ids {
 		user, err := s.userRepo.GetByIDIncludeDeleted(ctx, id)
-		if errors.Is(err, ErrUserNotFound) || (err == nil && user == nil) {
-			return ErrUserNotFound
-		}
 		if err != nil {
-			return operatorUnavailable()
+			return operatorLoadError(err, ErrUserNotFound)
+		}
+		if user == nil {
+			return ErrUserNotFound
 		}
 		if user.Role != RoleUser || user.ID == sc.UserID {
 			return operatorTargetError()
@@ -151,13 +151,10 @@ func (s *OperatorAccessService) CheckTarget(ctx context.Context, sc *operatoracc
 		}
 		key, e := s.apiKeyRepo.GetByID(ctx, id)
 		if e != nil {
-			if infraerrors.Code(e) == 404 {
-				return e
-			}
-			return operatorUnavailable()
+			return operatorLoadError(e, ErrAPIKeyNotFound)
 		}
 		if key == nil {
-			return operatorUnavailable()
+			return ErrAPIKeyNotFound
 		}
 		ids = []int64{key.UserID}
 	case "sub_owner", "sub_body_owners":
@@ -184,13 +181,10 @@ func (s *OperatorAccessService) CheckTarget(ctx context.Context, sc *operatoracc
 		for i, id := range ids {
 			sub, e := s.subscriptionRepo.GetByIDIncludeDeleted(ctx, id)
 			if e != nil {
-				if infraerrors.Code(e) == 404 {
-					return e
-				}
-				return operatorUnavailable()
+				return operatorLoadError(e, ErrSubscriptionNotFound)
 			}
 			if sub == nil {
-				return operatorUnavailable()
+				return ErrSubscriptionNotFound
 			}
 			ids[i] = sub.UserID
 		}
@@ -204,10 +198,16 @@ func (s *OperatorAccessService) CheckTarget(ctx context.Context, sc *operatoracc
 		}
 		order, e := s.paymentService.GetOrderByID(ctx, id)
 		if e != nil {
-			return e
+			if errors.Is(e, ErrOrderNotFound) {
+				return e
+			}
+			if infraerrors.Code(e) == 404 {
+				return e
+			}
+			return operatorUnavailable()
 		}
 		if order == nil {
-			return operatorUnavailable()
+			return ErrOrderNotFound
 		}
 		ids = []int64{order.UserID}
 	case "group_rate_rows", "group_rpm_rows":
@@ -533,13 +533,10 @@ func (s *OperatorAccessService) operatorRedeemRules(ctx context.Context, sc *ope
 	for _, id := range ids {
 		row, err := s.redeemRepo.GetByID(ctx, id)
 		if err != nil {
-			if infraerrors.Code(err) == 404 {
-				return err
-			}
-			return operatorUnavailable()
+			return operatorLoadError(err, ErrRedeemCodeNotFound)
 		}
 		if row == nil {
-			return operatorUnavailable()
+			return ErrRedeemCodeNotFound
 		}
 		if !slices.Contains([]string{"balance", "concurrency", "subscription", "invitation"}, row.Type) {
 			return operatorSuperOnly()

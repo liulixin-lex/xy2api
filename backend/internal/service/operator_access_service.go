@@ -54,6 +54,17 @@ func NewOperatorAccessService(repo AdminOperatorPermissionRepository, userRepo U
 func operatorUnavailable() error {
 	return infraerrors.New(http.StatusServiceUnavailable, "OPERATOR_ACCESS_UNAVAILABLE", "operator access unavailable")
 }
+
+func operatorLoadError(err, notFound error) error {
+	if err == nil {
+		return notFound
+	}
+	if infraerrors.Code(err) == http.StatusNotFound {
+		return err
+	}
+	return operatorUnavailable()
+}
+
 func (s *OperatorAccessService) permissions(ctx context.Context, userID int64) (operatoraccess.Permissions, error) {
 	empty := operatoraccess.Permissions{}
 	if s == nil || s.repo == nil {
@@ -108,10 +119,7 @@ func (s *OperatorAccessService) permissionUser(ctx context.Context, id int64) er
 	}
 	u, err := s.userRepo.GetByID(ctx, id)
 	if err != nil {
-		if errors.Is(err, ErrUserNotFound) {
-			return ErrUserNotFound
-		}
-		return operatorUnavailable()
+		return operatorLoadError(err, ErrUserNotFound)
 	}
 	if u == nil || u.DeletedAt != nil {
 		return ErrUserNotFound

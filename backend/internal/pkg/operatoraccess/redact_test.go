@@ -228,6 +228,19 @@ func TestRedactAuditBodyAlwaysMasksTokensProxyURLsAndUserinfo(t *testing.T) {
 	}
 	require.Equal(t, "http://***@h:1/x and socks5://***@host:2", StripURLUserinfo("http://u:p@h:1/x and socks5://u:p@host:2"))
 }
+
+func TestStripURLUserinfoFindsEveryURLAndAllowsApostrophe(t *testing.T) {
+	input := "one=https://u:p@first.example/a, two=http://u:p@second.example, https://u:pa'ss@third.example/x?next=https://u:q@query.example/x"
+	want := "one=https://***@first.example/a, two=http://***@second.example, https://***@third.example/x?next=https://***@query.example/x"
+	require.Equal(t, want, StripURLUserinfo(input))
+	for _, flags := range [][]Flag{nil, {FlagAccountsUpstreamAddress}} {
+		obj := auditR5(t, "POST", "/api/v1/admin/accounts", `{"note":"`+input+`"}`, "", flags...)
+		raw := obj["request_body"].(string)
+		require.NotContains(t, raw, "u:p")
+		require.NotContains(t, raw, "u:pa'ss")
+	}
+}
+
 func TestRedactAuditBodyHidesEncodedQueryURLs(t *testing.T) {
 	for _, q := range []string{"base_url=https%3A%2F%2Fr.example", "u=https:%2F%2Fr.example", "u=http%3A%2F%2Fu%3Ap%40h%3A1", "u=%ZZ", "Endpoint=bare"} {
 		obj := auditR5(t, "POST", "/api/v1/admin/accounts", `{}`, q)
@@ -265,6 +278,22 @@ func TestRedactMonitorMessageHidesNetworkErrors(t *testing.T) {
 	obj = redactTest(t, body, []Redaction{"monitor_message"}, FlagAccountsUpstreamAddress)
 	require.Contains(t, obj["data"].([]any)[0].(map[string]any)["message"], "192.0.2.1")
 }
+
+func TestRedactMonitorQuotaSnapshotErrors(t *testing.T) {
+	body := `{"data":{"items":[{"latest_quota":{"source":"relay","error":"dial tcp 192.0.2.3:443: relay.example"},"quota":{"success":false,"error":"https://relay.example/quota"},"unrelated":{"error":"leave this text"}}]}}`
+	for _, rule := range []Redaction{"monitor", "monitor_message"} {
+		obj := redactTest(t, body, []Redaction{rule})
+		item := obj["data"].(map[string]any)["items"].([]any)[0].(map[string]any)
+		require.Equal(t, ErrorDetailHidden, item["latest_quota"].(map[string]any)["error"])
+		require.Equal(t, ErrorDetailHidden, item["quota"].(map[string]any)["error"])
+		require.Equal(t, "leave this text", item["unrelated"].(map[string]any)["error"])
+		preserved := redactTest(t, body, []Redaction{rule}, FlagAccountsUpstreamAddress)
+		kept := preserved["data"].(map[string]any)["items"].([]any)[0].(map[string]any)
+		require.Contains(t, kept["latest_quota"].(map[string]any)["error"], "192.0.2.3:443")
+		require.Contains(t, kept["quota"].(map[string]any)["error"], "relay.example")
+	}
+}
+
 func TestScrubErrorStringsKeepsMachineCodes(t *testing.T) {
 	for _, code := range []string{"mixed_channel_warning", "x", "a" + strings.Repeat("0", 63)} {
 		body, _ := json.Marshal(map[string]any{"error": code, "error_message": code, "nested": map[string]any{"last_error": code, "response_text": code, "temp_unschedulable_reason": code}})

@@ -35,6 +35,60 @@ func TestOperatorGroupRules(t *testing.T) {
 	require.NoError(t, s.operatorReplaceGroupRules(ctx, 1, 3))
 	operatorRuleError(t, s.operatorReplaceGroupRules(ctx, 1, 4), "ADMIN_FIELD_FORBIDDEN", "new_group_id", "")
 }
+
+func TestOperatorGroupMoneyFieldsNeedBalanceFlag(t *testing.T) {
+	s, _, groups := operatorUserFixture()
+	groups.rows[1].Platform = PlatformOpenAI
+	groups.rows[1].ForceOpenAIFast = false
+	ctx := operatorRulesContext(s)
+	for _, tc := range []struct {
+		input *UpdateGroupInput
+		field string
+	}{
+		{&UpdateGroupInput{Platform: PlatformComposite}, "platform"},
+		{&UpdateGroupInput{ForceOpenAIFast: operatorPtr(true)}, "force_openai_fast"},
+	} {
+		operatorRuleError(t, s.operatorGroupUpdateRules(ctx, 1, tc.input), "ADMIN_FIELD_FORBIDDEN", tc.field, "")
+	}
+	for _, field := range []string{"Platform", "ForceOpenAIFast"} {
+		require.Contains(t, OperatorGroupPriceFields, field)
+		require.NotContains(t, OperatorGroupFreeFields, field)
+	}
+	for _, in := range []*UpdateGroupInput{{Platform: PlatformComposite}, {ForceOpenAIFast: operatorPtr(true)}} {
+		require.NoError(t, s.operatorGroupUpdateRules(operatorRulesContext(s, operatoraccess.FlagUsersBalanceAdjust), 1, in))
+	}
+}
+
+func TestOperatorGroupEntityLoadNotFoundAndUnavailable(t *testing.T) {
+	s, _, groups := operatorUserFixture()
+	ctx := operatorRulesContext(s)
+	require.ErrorIs(t, s.operatorGroupUpdateRules(ctx, 99, &UpdateGroupInput{}), ErrGroupNotFound)
+	require.ErrorIs(t, s.operatorAllowedGroups(ctx, []int64{99}, nil, "allowed_groups"), ErrGroupNotFound)
+	require.ErrorIs(t, s.operatorReplaceGroupRules(ctx, 99, 1), ErrUserNotFound)
+	require.ErrorIs(t, s.operatorReplaceGroupRules(ctx, 1, 99), ErrGroupNotFound)
+
+	s.apiKeyRepo = &operatorGuardAPIKeys{}
+	ctx = operatorRulesContext(s)
+	require.ErrorIs(t, s.operatorAPIKeyGroupRules(ctx, 99, operatorPtr(int64(2))), ErrAPIKeyNotFound)
+	s.apiKeyRepo = &operatorGuardAPIKeys{key: &APIKey{UserID: 99}}
+	ctx = operatorRulesContext(s)
+	require.ErrorIs(t, s.operatorAPIKeyGroupRules(ctx, 1, operatorPtr(int64(2))), ErrUserNotFound)
+
+	s.groupRepo = nil
+	ctx = operatorRulesContext(s)
+	operatorRuleError(t, s.operatorGroupUpdateRules(ctx, 1, &UpdateGroupInput{}), "OPERATOR_ACCESS_UNAVAILABLE", "", "")
+	operatorRuleError(t, s.operatorAllowedGroups(ctx, []int64{2}, nil, "allowed_groups"), "OPERATOR_ACCESS_UNAVAILABLE", "", "")
+	operatorRuleError(t, s.operatorReplaceGroupRules(ctx, 1, 2), "OPERATOR_ACCESS_UNAVAILABLE", "", "")
+	s.groupRepo = groups
+	groups.err = ErrGroupNotEmpty
+	ctx = operatorRulesContext(s)
+	operatorRuleError(t, s.operatorGroupUpdateRules(ctx, 1, &UpdateGroupInput{}), "OPERATOR_ACCESS_UNAVAILABLE", "", "")
+	groups.err = nil
+	s.userRepo = nil
+	ctx = operatorRulesContext(s)
+	operatorRuleError(t, s.operatorReplaceGroupRules(ctx, 1, 2), "OPERATOR_ACCESS_UNAVAILABLE", "", "")
+}
+
 func TestOperatorGroupNullLimitIsAChange(t *testing.T) {
 	s, _, groups := operatorUserFixture()
 	ctx := operatorRulesContext(s)

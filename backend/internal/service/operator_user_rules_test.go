@@ -53,9 +53,13 @@ type operatorRulesGroups struct {
 	rows           map[int64]*Group
 	cascade, empty int
 	notEmpty       bool
+	err            error
 }
 
 func (r *operatorRulesGroups) GetByID(_ context.Context, id int64) (*Group, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
 	if g := r.rows[id]; g != nil {
 		return g, nil
 	}

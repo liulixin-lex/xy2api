@@ -589,6 +589,27 @@ func TestOperatorProxyNetworkFieldsFollowUpstreamAddressFlag(t *testing.T) {
 	_, err = f.svc.CheckFields(context.Background(), f.sc, "proxy_create", r)
 	guardReason(t, err, "ADMIN_FIELD_FORBIDDEN", "host")
 }
+
+func TestOperatorEntityLoadersPreserveNotFound(t *testing.T) {
+	f := newOperatorGuardFixture(t)
+	f.sc.Perms.Modules[operatoraccess.ModuleAccounts] = operatoraccess.LevelView
+	f.template.err = ErrChannelMonitorTemplateNotFound
+	_, err := f.check("monitor_template_apply", `{"template_id":11}`)
+	require.ErrorIs(t, err, ErrChannelMonitorTemplateNotFound)
+	f.monitor.err = ErrChannelMonitorNotFound
+	_, err = f.check("monitor_update", `{}`)
+	require.ErrorIs(t, err, ErrChannelMonitorNotFound)
+	f.channel.err = ErrChannelNotFound
+	err = f.svc.operatorChannelRules(context.Background(), f.sc, "channel_update", guardRequest(`{}`), operatorObject{})
+	require.ErrorIs(t, err, ErrChannelNotFound)
+	f.admin.err = ErrProxyNotFound
+	err = f.svc.operatorProxyRules(context.Background(), f.sc, "proxy_update", guardRequest(`{}`), operatorObject{})
+	require.ErrorIs(t, err, ErrProxyNotFound)
+	f.redeem.rows = nil
+	err = f.svc.operatorRedeemRules(context.Background(), f.sc, "redeem_safe_rows", guardRequest(`{"ids":[11]}`), operatorObject{"ids": json.RawMessage(`[11]`)})
+	require.ErrorIs(t, err, ErrRedeemCodeNotFound)
+}
+
 func TestOperatorRedeemRules(t *testing.T) {
 	t.Run("R6_code_trim_and_load_failure", func(t *testing.T) {
 		f := newOperatorGuardFixture(t)

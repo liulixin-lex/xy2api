@@ -8,6 +8,8 @@ import (
 )
 
 var OperatorGroupPriceFields = []string{
+	"Platform",
+	"ForceOpenAIFast",
 	"RateMultiplier",
 	"SubscriptionType",
 	"DailyLimitUSD",
@@ -47,7 +49,6 @@ var OperatorGroupPriceFields = []string{
 var OperatorGroupFreeFields = []string{
 	"Name",
 	"Description",
-	"Platform",
 	"IsExclusive",
 	"ShowExclusiveBadge",
 	"SystemPromptConfig",
@@ -64,7 +65,6 @@ var OperatorGroupFreeFields = []string{
 	"SupportedModelScopes",
 	"AllowMessagesDispatch",
 	"AllowLive",
-	"ForceOpenAIFast",
 	"DefaultMappedModel",
 	"RequireOAuthOnly",
 	"RequirePrivacySet",
@@ -177,9 +177,15 @@ func (s *adminServiceImpl) operatorGroupUpdateRules(ctx context.Context, id int6
 	if sc == nil || sc.Has(operatoraccess.FlagUsersBalanceAdjust) {
 		return nil
 	}
-	group, err := s.groupRepo.GetByID(ctx, id)
-	if err != nil || group == nil {
+	if s.groupRepo == nil {
 		return operatorUnavailable()
+	}
+	group, err := s.groupRepo.GetByID(ctx, id)
+	if err != nil {
+		return operatorLoadError(err, ErrGroupNotFound)
+	}
+	if group == nil {
+		return ErrGroupNotFound
 	}
 	incoming, stored := reflect.ValueOf(input).Elem(), reflect.ValueOf(group).Elem()
 	for _, name := range OperatorGroupPriceFields {
@@ -248,13 +254,25 @@ func (s *adminServiceImpl) operatorAPIKeyGroupRules(ctx context.Context, keyID i
 	if sc == nil || sc.Has(operatoraccess.FlagUsersBalanceAdjust) || groupID == nil || *groupID <= 0 {
 		return nil
 	}
+	if s.apiKeyRepo == nil {
+		return operatorUnavailable()
+	}
 	key, err := s.apiKeyRepo.GetByID(ctx, keyID)
-	if err != nil || key == nil {
+	if err != nil {
+		return operatorLoadError(err, ErrAPIKeyNotFound)
+	}
+	if key == nil {
+		return ErrAPIKeyNotFound
+	}
+	if s.userRepo == nil {
 		return operatorUnavailable()
 	}
 	user, err := s.userRepo.GetByIDIncludeDeleted(ctx, key.UserID)
-	if err != nil || user == nil {
-		return operatorUnavailable()
+	if err != nil {
+		return operatorLoadError(err, ErrUserNotFound)
+	}
+	if user == nil {
+		return ErrUserNotFound
 	}
 	return s.operatorAllowedGroups(ctx, []int64{*groupID}, user.AllowedGroups, "group_id")
 }
@@ -266,16 +284,28 @@ func (s *adminServiceImpl) operatorReplaceGroupRules(ctx context.Context, userID
 	if sc == nil || sc.Has(operatoraccess.FlagUsersBalanceAdjust) {
 		return nil
 	}
-	user, err := s.userRepo.GetByIDIncludeDeleted(ctx, userID)
-	if err != nil || user == nil {
+	if s.userRepo == nil {
 		return operatorUnavailable()
+	}
+	user, err := s.userRepo.GetByIDIncludeDeleted(ctx, userID)
+	if err != nil {
+		return operatorLoadError(err, ErrUserNotFound)
+	}
+	if user == nil {
+		return ErrUserNotFound
 	}
 	if slices.Contains(user.AllowedGroups, newGroupID) {
 		return nil
 	}
-	group, err := s.groupRepo.GetByID(ctx, newGroupID)
-	if err != nil || group == nil {
+	if s.groupRepo == nil {
 		return operatorUnavailable()
+	}
+	group, err := s.groupRepo.GetByID(ctx, newGroupID)
+	if err != nil {
+		return operatorLoadError(err, ErrGroupNotFound)
+	}
+	if group == nil {
+		return ErrGroupNotFound
 	}
 	if group.IsExclusive {
 		return operatorFieldError("new_group_id")

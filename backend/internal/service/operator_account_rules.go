@@ -276,12 +276,15 @@ func (s *adminServiceImpl) operatorAccountExtraRules(ctx context.Context, id int
 	if !needed {
 		return nil
 	}
-	account, err := s.accountRepo.GetByID(ctx, id)
-	if err != nil {
+	if s.accountRepo == nil {
 		return operatorUnavailable()
 	}
+	account, err := s.accountRepo.GetByID(ctx, id)
+	if err != nil {
+		return operatorLoadError(err, ErrAccountNotFound)
+	}
 	if account == nil {
-		return operatorUnavailable()
+		return ErrAccountNotFound
 	}
 	for _, path := range OperatorAddressKeys {
 		if k, ok := strings.CutPrefix(path, "extra."); ok {

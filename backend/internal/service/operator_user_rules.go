@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"github.com/liulixin-lex/xy2api/internal/pkg/operatoraccess"
 	"slices"
 	"strings"
@@ -49,11 +48,11 @@ func (s *adminServiceImpl) operatorUserUpdateRules(ctx context.Context, id int64
 		return operatorUnavailable()
 	}
 	user, err := svc.userRepo.GetByIDIncludeDeleted(ctx, id)
-	if errors.Is(err, ErrUserNotFound) || (err == nil && user == nil) {
-		return ErrUserNotFound
-	}
 	if err != nil {
-		return operatorUnavailable()
+		return operatorLoadError(err, ErrUserNotFound)
+	}
+	if user == nil {
+		return ErrUserNotFound
 	}
 	if user.Role != RoleUser || user.ID == sc.UserID {
 		return operatorTargetError()
@@ -119,8 +118,11 @@ func (s *adminServiceImpl) operatorAllowedGroups(ctx context.Context, ids, exist
 			return operatorUnavailable()
 		}
 		group, err := s.groupRepo.GetByID(ctx, id)
-		if err != nil || group == nil {
-			return operatorUnavailable()
+		if err != nil {
+			return operatorLoadError(err, ErrGroupNotFound)
+		}
+		if group == nil {
+			return ErrGroupNotFound
 		}
 		if group.IsExclusive && group.SubscriptionType != "subscription" {
 			return operatorFieldError(field)

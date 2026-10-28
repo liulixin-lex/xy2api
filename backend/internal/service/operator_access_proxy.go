@@ -131,8 +131,11 @@ func (s *OperatorAccessService) operatorProxyRules(ctx context.Context, sc *oper
 		return operatorUnavailable()
 	}
 	stored, err := s.adminService.GetProxy(ctx, id)
-	if err != nil || stored == nil {
-		return operatorUnavailable()
+	if err != nil {
+		return operatorLoadError(err, ErrProxyNotFound)
+	}
+	if stored == nil {
+		return ErrProxyNotFound
 	}
 	differences := map[string]bool{}
 	for _, pair := range []struct{ key, stored string }{{"protocol", stored.Protocol}, {"host", stored.Host}, {"fallback_mode", stored.FallbackMode}} {

@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"github.com/liulixin-lex/xy2api/internal/pkg/operatoraccess"
 	"github.com/stretchr/testify/require"
@@ -240,11 +241,12 @@ type operatorAccountReadRepo struct {
 	AccountRepository
 	account *Account
 	reads   int
+	err     error
 }
 
 func (r *operatorAccountReadRepo) GetByID(context.Context, int64) (*Account, error) {
 	r.reads++
-	return r.account, nil
+	return r.account, r.err
 }
 func TestOperatorAccountExtraRules(t *testing.T) {
 	r := &operatorAccountReadRepo{account: operatorStoredAccount()}
@@ -256,6 +258,10 @@ func TestOperatorAccountExtraRules(t *testing.T) {
 		require.NoError(t, s.operatorAccountExtraRules(ctx, 1, map[string]any{"custom_base_url": r.account.Extra["custom_base_url"]}))
 	}
 	operatorRuleError(t, s.operatorAccountExtraRules(operatorRulesContext(s), 1, map[string]any{"cache_ttl_override_enabled": false}), "ADMIN_FIELD_FORBIDDEN", "extra.cache_ttl_override_enabled", "")
+	r.err = ErrAccountNotFound
+	require.ErrorIs(t, s.operatorAccountExtraRules(operatorRulesContext(s), 1, map[string]any{"custom_base_url": "https://8.8.8.8"}), ErrAccountNotFound)
+	r.err = errors.New("database unavailable")
+	operatorRuleError(t, s.operatorAccountExtraRules(operatorRulesContext(s), 1, map[string]any{"custom_base_url": "https://8.8.8.8"}), "OPERATOR_ACCESS_UNAVAILABLE", "", "")
 }
 func TestOperatorCheckOAuthApply(t *testing.T) {
 	s := &adminServiceImpl{}

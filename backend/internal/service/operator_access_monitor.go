@@ -49,12 +49,15 @@ func (s *OperatorAccessService) operatorMonitorRules(ctx context.Context, sc *op
 		return nil, err
 	}
 	if rule == "monitor_template_update" || rule == "monitor_template_apply" {
-		if s.templateService == nil {
+		if s.templateService == nil || s.templateService.repo == nil {
 			return nil, operatorUnavailable()
 		}
 		stored, err := s.templateService.Get(ctx, id)
-		if err != nil || stored == nil {
-			return nil, operatorUnavailable()
+		if err != nil {
+			return nil, operatorLoadError(err, ErrChannelMonitorTemplateNotFound)
+		}
+		if stored == nil {
+			return nil, ErrChannelMonitorTemplateNotFound
 		}
 		if rule == "monitor_template_apply" {
 			if len(stored.ExtraHeaders) > 0 {
@@ -73,12 +76,15 @@ func (s *OperatorAccessService) operatorMonitorRules(ctx context.Context, sc *op
 		operatorSet(obj, "extra_headers", headers)
 		return json.Marshal(obj)
 	}
-	if s.monitorService == nil {
+	if s.monitorService == nil || s.monitorService.repo == nil {
 		return nil, operatorUnavailable()
 	}
 	stored, err := s.monitorService.Get(ctx, id)
-	if err != nil || stored == nil {
-		return nil, operatorUnavailable()
+	if err != nil {
+		return nil, operatorLoadError(err, ErrChannelMonitorNotFound)
+	}
+	if stored == nil {
+		return nil, ErrChannelMonitorNotFound
 	}
 	accountID, err := operatorRead[*int64](obj, "account_id")
 	if err != nil {
@@ -185,12 +191,15 @@ func (s *OperatorAccessService) operatorChannelRules(ctx context.Context, sc *op
 	if err != nil {
 		return err
 	}
-	if s.channelService == nil {
+	if s.channelService == nil || s.channelService.repo == nil {
 		return operatorUnavailable()
 	}
 	stored, err := s.channelService.GetByID(ctx, id)
-	if err != nil || stored == nil {
-		return operatorUnavailable()
+	if err != nil {
+		return operatorLoadError(err, ErrChannelNotFound)
+	}
+	if stored == nil {
+		return ErrChannelNotFound
 	}
 	groups, err := operatorRead[*[]int64](obj, "group_ids")
 	if err != nil {
@@ -405,12 +414,15 @@ func (s *OperatorAccessService) operatorMonitorTemplate(ctx context.Context, obj
 	if (allowClear && clear) || id == nil || operatorInt64PtrEqual(id, storedID) {
 		return nil
 	}
-	if s.templateService == nil {
+	if s.templateService == nil || s.templateService.repo == nil {
 		return operatorUnavailable()
 	}
 	template, err := s.templateService.Get(ctx, *id)
-	if err != nil || template == nil {
-		return operatorUnavailable()
+	if err != nil {
+		return operatorLoadError(err, ErrChannelMonitorTemplateNotFound)
+	}
+	if template == nil {
+		return ErrChannelMonitorTemplateNotFound
 	}
 	if len(template.ExtraHeaders) > 0 {
 		return operatorSuperOnly()

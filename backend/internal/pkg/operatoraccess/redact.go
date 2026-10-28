@@ -14,21 +14,15 @@ const HeaderMask = "******"
 const ErrorDetailHidden = "upstream error details hidden"
 
 var upstreamURL = regexp.MustCompile("[A-Za-z][A-Za-z0-9+.-]*://[^\\s\\\"'<>\\x60]+")
+var userinfoURL = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://[^/?#\s"<>\x60]*@`)
 
 var machineCode = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 
 // StripURLUserinfo removes credentials from every URL embedded in a string.
 func StripURLUserinfo(s string) string {
-	return upstreamURL.ReplaceAllStringFunc(s, func(raw string) string {
+	return userinfoURL.ReplaceAllStringFunc(s, func(raw string) string {
 		start := strings.Index(raw, "://") + 3
-		end := len(raw)
-		if i := strings.IndexAny(raw[start:], "/?#"); i >= 0 {
-			end = start + i
-		}
-		if at := strings.LastIndex(raw[start:end], "@"); at >= 0 {
-			return raw[:start] + "***@" + raw[start+at+1:]
-		}
-		return raw
+		return raw[:start] + "***@"
 	})
 }
 func ScrubURLs(s string) string { return upstreamURL.ReplaceAllString(s, "[upstream]") }
@@ -245,6 +239,9 @@ func Redact(body []byte, rules []Redaction, s *Scope) ([]byte, error) {
 					delete(m, "endpoint")
 				}
 			})
+			if rule == "monitor" && !address {
+				redactMonitorQuotaErrors(dataValue(v))
+			}
 		case "audit_body":
 			walkObjects(v, func(m map[string]any) {
 				if _, body := m["request_body"]; !body && m["path"] == nil {
@@ -274,7 +271,8 @@ func Redact(body []byte, rules []Redaction, s *Scope) ([]byte, error) {
 			})
 		case "monitor_message":
 			if !address {
-				walkObjects(dataValue(v), func(m map[string]any) {
+				data := dataValue(v)
+				walkObjects(data, func(m map[string]any) {
 					if msg, ok := m["message"].(string); ok && msg != "" {
 						if m["status"] == "error" {
 							m["message"] = ErrorDetailHidden
@@ -283,6 +281,7 @@ func Redact(body []byte, rules []Redaction, s *Scope) ([]byte, error) {
 						}
 					}
 				})
+				redactMonitorQuotaErrors(data)
 			}
 		case "ops_upstream_url":
 			if !address && !s.Can(ModuleOps, LevelView) {
@@ -295,6 +294,20 @@ func Redact(body []byte, rules []Redaction, s *Scope) ([]byte, error) {
 	}
 	return json.Marshal(v)
 }
+
+func redactMonitorQuotaErrors(data any) {
+	walkObjects(data, func(m map[string]any) {
+		if _, source := m["source"]; !source {
+			if _, success := m["success"]; !success {
+				return
+			}
+		}
+		if detail, ok := m["error"].(string); ok && detail != "" {
+			m["error"] = ErrorDetailHidden
+		}
+	})
+}
+
 func redactOrder(v any) {
 	walkObjects(v, func(m map[string]any) {
 		for _, key := range []string{"recharge_code", "rechargeCode"} {
