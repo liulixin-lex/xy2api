@@ -199,6 +199,7 @@
     "xy-openai-session-uuid",
     "xy-openai-ttft-health-routing",
     "xy-resilience-coverage",
+    "xy-error-recovery-routing",
     "xy-upstream-balance",
     "xy-admin-operator-scope"
   ],

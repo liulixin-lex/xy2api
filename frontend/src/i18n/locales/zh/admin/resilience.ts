@@ -12,7 +12,7 @@ export default {
         lastResort: '末位兜底',
         lastResortHint: '没有健康账号时，在软罚账号中按优先级与冷却结束时间依次找空闲的继续服务，全部占满才排队（单账号分组不再整组不可用）。',
         balance: '余额不足暂停',
-        balanceHint: '上游余额不足的账号暂停调度，到期后由真实请求重试，仍不足就再暂停同样时长；账号列表的“恢复状态”可立即放回。',
+        balanceHint: '上游余额不足的账号暂停调度，到期后由真实请求重试；账号列表的“恢复状态”可立即放回。',
         budget: '请求预算',
         budgetHint: '每个请求最多尝试的次数与首输出前的总时长。流式请求在首个输出前受总时长约束；非流式请求只用它决定能否再发起新的尝试，进行中的单次请求不按它截断。Gemini 文本请求例外：不是最后候选的尝试，在 gemini_first_event_timeout_seconds（默认 60 秒）内没有收到首个内容（非流式为完整响应）就换号；Antigravity 的首事件截止读 anthropic_first_event_timeout_seconds，两项都在高级 JSON 中修改。同号重试仅用于容量降载。',
         failure: '失败分类修正',
@@ -37,7 +37,8 @@ export default {
         outputP99Hint: '在途预留的输出 Token 取模型近 7 天 P99（下限 1024）。'
       },
       fields: {
-        balancePause: '暂停时长（秒）',
+        balancePause: '首次暂停时长（秒）',
+        balancePauseHint: '同一账号连续余额不足时按本时长 ×1 → ×3 → ×12 暂停（默认 5/15/60 分钟，第 3 档封顶），请求成功或手动“恢复状态”后复位。',
         maxAttempts: '最多尝试次数',
         preOutputBudget: '首输出前总时长（秒）',
         keepaliveDelay: '首次心跳延迟（秒）',

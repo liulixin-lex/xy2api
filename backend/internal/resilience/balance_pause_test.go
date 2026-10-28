@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -54,11 +55,23 @@ func TestParseIgnoresRemovedBalanceFields(t *testing.T) {
 
 func TestBalancePauseReason(t *testing.T) {
 	r := BalancePauseReason("HTTP 403: Insufficient account balance")
-	require.Equal(t, "balance:exhausted: HTTP 403: Insufficient account balance", r)
+	require.Equal(t, "balance:exhausted[step=1]: HTTP 403: Insufficient account balance", r)
 	require.True(t, IsBalancePause(r))
 	require.Equal(t, TierHard, TempUnschedTier(r))
-	require.LessOrEqual(t, len(BalancePauseReason(strings.Repeat("x", 500))), len("balance:exhausted: ")+200)
+	require.LessOrEqual(t, len(BalancePauseReason(strings.Repeat("x", 500))), len("balance:exhausted[step=1]: ")+200)
+	require.Equal(t, 1, BalancePauseStep("balance:exhausted: old reason [step=3]"))
+	require.Equal(t, 2, BalancePauseStep("balance:exhausted[step=2]: reason"))
+	require.Equal(t, 1, BalancePauseStep("balance:exhausted[step=9]: invalid"))
 	for _, other := range []string{"transient:TRANSIENT HTTP 502", "OAuth 401: expired", "cn_balance_low: x", ""} {
 		require.False(t, IsBalancePause(other), other)
 	}
+}
+
+func TestBalancePauseStepAdvancesOnlyForPostExpiryAttempt(t *testing.T) {
+	until := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
+	reason := "balance:exhausted[step=1]: prior failure"
+	require.Equal(t, 1, BalancePauseStepForFailure(reason, until, until.Add(-time.Second), until.Add(time.Second)))
+	require.Equal(t, 1, BalancePauseStepForFailure(reason, until, until, until.Add(time.Second)))
+	require.Equal(t, 2, BalancePauseStepForFailure(reason, until, until.Add(time.Nanosecond), until.Add(time.Second)))
+	require.Equal(t, 3, BalancePauseStepForFailure("balance:exhausted[step=3]: prior", until, until.Add(time.Second), until.Add(2*time.Second)))
 }

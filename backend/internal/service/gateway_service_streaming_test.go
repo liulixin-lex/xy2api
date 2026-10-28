@@ -78,7 +78,7 @@ func TestGatewayService_StreamingKeepaliveUsesIdleTimer(t *testing.T) {
 	_ = pr.Close()
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	require.Contains(t, rec.Body.String(), "event: ping")
+	require.Contains(t, rec.Body.String(), ": ping\n\n")
 }
 
 func TestGatewayService_StreamingKeepaliveUsesNoopDeltaForAffectedClaudeCodeVersion(t *testing.T) {
@@ -108,8 +108,8 @@ func TestGatewayService_StreamingKeepaliveUsesNoopDeltaForAffectedClaudeCodeVers
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	body := rec.Body.String()
-	require.Contains(t, body, "event: content_block_delta")
-	require.Contains(t, body, `"delta":{"type":"text_delta","text":""}`)
+	require.Contains(t, body, ": ping\n\n")
+	require.NotContains(t, body, "event: content_block_delta")
 }
 
 func TestGatewayService_StreamingKeepaliveUsesNoopDeltaDuringToolUseForAffectedClaudeCodeVersion(t *testing.T) {
@@ -171,7 +171,7 @@ func TestGatewayService_StreamingKeepaliveKeepsPingForOlderClaudeCodeVersion(t *
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	body := rec.Body.String()
-	require.Contains(t, body, "event: ping")
+	require.Contains(t, body, ": ping\n\n")
 	require.NotContains(t, body, `"delta":{"type":"text_delta","text":""}`)
 }
 

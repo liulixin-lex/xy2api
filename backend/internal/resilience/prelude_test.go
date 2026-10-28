@@ -21,11 +21,11 @@ func TestClassifyStreamEvent(t *testing.T) {
 		{"unknown_part_payload", "responses", "response.content_part.added", `{"part":{"type":"output_text","text":"","annotation":{"value":"opaque"}}}`, Content, false},
 		{"malformed_message_content", "responses", "response.output_item.added", `{"item":{"type":"message","content":"opaque"}}`, Content, false},
 		{"phase_is_metadata", "responses", "response.output_item.added", `{"item":{"id":"msg_a","type":"message","status":"in_progress","role":"assistant","phase":"answer","content":[]}}`, Prelude, false},
-		{"unknown_codex_metadata", "responses", "codex.response.metadata", `{}`, Unknown, false},
+		{"codex_metadata", "responses", "codex.response.metadata", `{}`, Prelude, false},
 		{"response_metadata", "responses", "response.metadata", `{"type":"response.metadata","sequence_number":2,"metadata":{"openai_chatgpt_moderation_metadata":{}}}`, Prelude, false},
 		{"response_metadata_type_only", "responses", "", `{"type":"response.metadata","metadata":{}}`, Prelude, false},
 		{"codex_rate_limits", "responses", "codex.rate_limits", `{"type":"codex.rate_limits","rate_limits":{"primary":{"used_percent":12}}}`, Prelude, false},
-		{"codex_metadata_payload_type_wins", "responses", "response.metadata", `{"type":"codex.response.metadata"}`, Unknown, false},
+		{"codex_metadata_payload_type_wins", "responses", "response.metadata", `{"type":"codex.response.metadata"}`, Prelude, false},
 		{"response_metadata_not_messages", "messages", "response.metadata", `{}`, Unknown, false},
 		{"empty_reasoning", "responses", "response.output_item.added", `{"item":{"type":"reasoning","summary":[]}}`, Prelude, false},
 		{"encrypted_reasoning", "responses", "response.output_item.added", `{"item":{"type":"reasoning","encrypted_content":"secret"}}`, Content, false},
@@ -108,8 +108,8 @@ func TestClassifyStreamEventResponseMetadataFollowsNativeWhitelist(t *testing.T)
 			if got := ClassifyStreamEvent("responses", "response.metadata", payload); got.Kind != tc.want {
 				t.Fatalf("got %+v, want kind=%v", got, tc.want)
 			}
-			if got := ClassifyStreamEvent("responses", "codex.response.metadata", []byte(`{}`)); got.Kind != Unknown {
-				t.Fatalf("codex.response.metadata must stay unknown: %+v", got)
+			if got := ClassifyStreamEvent("responses", "codex.response.metadata", []byte(`{}`)); got.Kind != tc.want {
+				t.Fatalf("codex.response.metadata got %+v, want kind=%v", got, tc.want)
 			}
 		})
 	}

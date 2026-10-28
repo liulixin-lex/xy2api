@@ -207,7 +207,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 				SameAccountRetryMax:      retryMax,
 			}
 		}
-		return s.handleErrorResponse(ctx, resp, c, account, patchedBody, upstreamModel)
+		return s.handleGrokErrorResponseAfterAccountHandling(ctx, resp, c, account, patchedBody, upstreamModel)
 	}
 
 	// Attach model so rate-limit snapshots can fan out a team+model cool.
@@ -2022,6 +2022,12 @@ func (s *OpenAIGatewayService) handleGrokAccountUpstreamError(ctx context.Contex
 	}
 	if isGrokContentPolicyRejection(statusCode, responseBody) {
 		return
+	}
+	if s.rateLimitService != nil {
+		if model := grokRequestedModelFromCtx(ctx); model != "" &&
+			s.rateLimitService.handleUpstreamModelNotFoundAtKey(ctx, account, model, model, statusCode, responseBody) {
+			return
+		}
 	}
 	// xy2api resilience: balance wording on an API-key account pauses the
 	// account instead of installing a quota-window rate limit.

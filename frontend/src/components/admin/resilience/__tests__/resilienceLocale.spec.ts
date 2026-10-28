@@ -8,7 +8,7 @@ const dynamicKeys = [
   ...['failure', 'stream', 'capability'].flatMap((k) => [`admin.resilience.settings.sections.${k}`, `admin.resilience.settings.sections.${k}Hint`]),
   ...['preludeStaging', 'nativePreludeWhitelist', 'strictTerminal', 'failedFrameRetryAfter']
     .flatMap((k) => [`admin.resilience.settings.switches.${k}`, `admin.resilience.settings.switches.${k}Hint`]),
-  ...['codexRetryAfterCap', 'learnTtl'].flatMap((k) => [`admin.resilience.settings.fields.${k}`, `admin.resilience.settings.fields.${k}Hint`]),
+  ...['balancePause', 'codexRetryAfterCap', 'learnTtl'].flatMap((k) => [`admin.resilience.settings.fields.${k}`, `admin.resilience.settings.fields.${k}Hint`]),
   'admin.resilience.explain.reasons.capability_stream_only',
   'admin.resilience.panel.metrics.pre_created_delta'
 ]
@@ -18,9 +18,13 @@ function lookup(messages: unknown, key: string): unknown {
 }
 
 describe('gateway resilience 0.4.4 locale keys', () => {
-  it.each([['zh', zh], ['en', en]])('%s has every runtime-built key', (_, messages) => {
+  it.each([
+    ['zh', zh, '默认 5/15/60 分钟，第 3 档封顶'],
+    ['en', en, '5/15/60 min by default; the third step is the cap']
+  ])('%s has every runtime-built key and describes the default balance pause schedule', (_, messages, defaultSchedule) => {
     const missing = dynamicKeys.filter((key) => typeof lookup(messages, key) !== 'string' || !(lookup(messages, key) as string).trim())
     expect(missing).toEqual([])
+    expect(lookup(messages, 'admin.resilience.settings.fields.balancePauseHint')).toContain(defaultSchedule)
   })
 
   // C0: both errors switches also need errors.enabled; moving the current

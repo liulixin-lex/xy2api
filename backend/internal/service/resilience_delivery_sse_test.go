@@ -61,6 +61,7 @@ func TestSSEOpeningEventsAreNoDelivery(t *testing.T) {
 				"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n",
 				"event: response.in_progress\ndata: {\"type\":\"response.in_progress\"}\n\n",
 				"event: response.metadata\ndata: {\"type\":\"response.metadata\",\"metadata\":{\"openai_chatgpt_moderation_metadata\":{}}}\n\n",
+				"event: codex.response.metadata\ndata: {\"type\":\"codex.response.metadata\"}\n\n",
 				": ping\n\n",
 			},
 			content: "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"Hi\"}\n\n",
@@ -89,7 +90,7 @@ func TestSSEDeliveryCountsUnknownAndErrorBlocksAsContent(t *testing.T) {
 		"chat usage":       "data: {\"object\":\"chat.completion.chunk\",\"choices\":[],\"usage\":{\"total_tokens\":3}}\n\n",
 		"chat tool call":   "data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0}]}}]}\n\n",
 		"unknown event":    "event: future.event\ndata: {\"type\":\"future.event\"}\n\n",
-		"codex metadata":   "event: codex.response.metadata\ndata: {\"type\":\"codex.response.metadata\"}\n\n",
+		"unknown codex":    "event: codex.unknown\ndata: {\"type\":\"codex.unknown\"}\n\n",
 		"image partial":    "event: image_generation.partial_image\ndata: {\"type\":\"image_generation.partial_image\",\"b64_json\":\"AAAA\"}\n\n",
 	} {
 		t.Run(name, func(t *testing.T) {

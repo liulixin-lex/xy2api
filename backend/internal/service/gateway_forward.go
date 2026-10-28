@@ -14,7 +14,7 @@ import (
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/claude"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
-	"github.com/tidwall/gjson"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 
 	"github.com/gin-gonic/gin"
 )
@@ -393,6 +393,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 
 	// 重试循环
 	var resp *http.Response
+	var cachedErrorResponse *http.Response
+	var cachedErrorBody []byte
+	hardClassifiedFailure := false
 	lastWireBody := body
 	retryStart := time.Now()
 	// xy2api resilience: the first-event guard of the attempt in flight; an
@@ -400,6 +403,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	var activeFirstEvent *firstEventGuard
 	defer func() { activeFirstEvent.Release() }()
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
+		cachedErrorResponse = nil
+		cachedErrorBody = nil
+		hardClassifiedFailure = false
 		// 构建上游请求（每次重试需要重新构建，因为请求体需要重新读取）
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
 		// xy2api resilience: first upstream event timeout (design §7.4).
@@ -418,6 +424,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		lastWireBody = wireBody
 
 		// 发送请求
+		resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{
+			AccountID: account.ID, Model: originalModel, AttemptStart: time.Now(), Stream: reqStream, BodyBytes: len(wireBody),
+		})
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
 		if err != nil {
 			if resp != nil && resp.Body != nil {
@@ -653,14 +662,17 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				if delay <= 0 {
 					break
 				}
-				// xy2api resilience: charge the request budget only for a retry
-				// that will run (design §6.2).
-				if !resilienceInServiceRetryAllowed(ctx, account.ID, resp.StatusCode) {
-					break
-				}
-
 				respBody, _ := s.readUpstreamErrorBody(resp)
 				_ = resp.Body.Close()
+				cachedErrorResponse = resp
+				cachedErrorBody = respBody
+				hardClassifiedFailure = isUnrecoverableAccountFailure(resp.StatusCode, respBody)
+				resp.Body = io.NopCloser(bytes.NewReader(respBody))
+				// Read the complete error before charging retry budget; account-hard
+				// failures must reach the one final penalty and switch path.
+				if !resilienceInServiceRetryAllowedWithBody(ctx, account.ID, resp.StatusCode, respBody) {
+					break
+				}
 				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 					ProxyID:            opsUpstreamProxyID(account),
 					ProxyName:          opsUpstreamProxyName(account),
@@ -707,9 +719,15 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 
 	// 处理重试耗尽的情况
 	if resp.StatusCode >= 400 && s.shouldRetryUpstreamError(account, resp.StatusCode) {
-		if s.shouldFailoverUpstreamError(resp.StatusCode) {
-			respBody, _ := s.readUpstreamErrorBody(resp)
+		if cachedErrorResponse != resp {
+			cachedErrorBody, _ = s.readUpstreamErrorBody(resp)
 			_ = resp.Body.Close()
+			cachedErrorResponse = resp
+			hardClassifiedFailure = isUnrecoverableAccountFailure(resp.StatusCode, cachedErrorBody)
+			resp.Body = io.NopCloser(bytes.NewReader(cachedErrorBody))
+		}
+		if !hardClassifiedFailure && s.shouldFailoverUpstreamError(resp.StatusCode) {
+			respBody := cachedErrorBody
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
 			// 调试日志：打印重试耗尽后的错误响应
@@ -740,49 +758,54 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 			}
 		}
-		return s.handleRetryExhaustedError(ctx, resp, c, account)
+		if !hardClassifiedFailure {
+			return s.handleRetryExhaustedError(ctx, resp, c, account)
+		}
 	}
 
 	// 处理可切换账号的错误
-	if resp.StatusCode >= 400 && s.shouldFailoverUpstreamError(resp.StatusCode) {
-		respBody, _ := s.readUpstreamErrorBody(resp)
-		_ = resp.Body.Close()
-		resp.Body = io.NopCloser(bytes.NewReader(respBody))
-
-		// 调试日志：打印上游错误响应
-		logger.LegacyPrintf("service.gateway", "[Forward] Upstream error (failover): Account=%d(%s) Status=%d RequestID=%s Body=%s",
-			account.ID, account.Name, resp.StatusCode, resp.Header.Get("x-request-id"), truncateString(string(respBody), 1000))
-
-		s.handleFailoverSideEffects(ctx, resp, account, reqModel)
-		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-			ProxyID:            opsUpstreamProxyID(account),
-			ProxyName:          opsUpstreamProxyName(account),
-			Platform:           account.Platform,
-			AccountID:          account.ID,
-			UpstreamStatusCode: resp.StatusCode,
-			UpstreamRequestID:  resp.Header.Get("x-request-id"),
-			Kind:               "failover",
-			Message:            extractUpstreamErrorMessage(respBody),
-			Detail: func() string {
-				if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
-					return truncateString(string(respBody), s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
-				}
-				return ""
-			}(),
-		})
-		return nil, &UpstreamFailoverError{
-			StatusCode:             resp.StatusCode,
-			ResponseBody:           respBody,
-			RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
-		}
-	}
 	if resp.StatusCode >= 400 {
+		respBody := cachedErrorBody
+		if cachedErrorResponse != resp {
+			respBody, _ = s.readUpstreamErrorBody(resp)
+			_ = resp.Body.Close()
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(respBody))
+		if s.shouldFailoverUpstreamError(resp.StatusCode) || shouldFailoverClassifiedUpstreamError(resp.StatusCode, resp.Header, respBody) {
+
+			// 调试日志：打印上游错误响应
+			logger.LegacyPrintf("service.gateway", "[Forward] Upstream error (failover): Account=%d(%s) Status=%d RequestID=%s Body=%s",
+				account.ID, account.Name, resp.StatusCode, resp.Header.Get("x-request-id"), truncateString(string(respBody), 1000))
+
+			s.handleFailoverSideEffectsWithBody(ctx, account, resp.StatusCode, resp.Header, respBody, originalModel)
+			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+				ProxyID:            opsUpstreamProxyID(account),
+				ProxyName:          opsUpstreamProxyName(account),
+				Platform:           account.Platform,
+				AccountID:          account.ID,
+				UpstreamStatusCode: resp.StatusCode,
+				UpstreamRequestID:  resp.Header.Get("x-request-id"),
+				Kind:               "failover",
+				Message:            extractUpstreamErrorMessage(respBody),
+				Detail: func() string {
+					if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
+						return truncateString(string(respBody), s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
+					}
+					return ""
+				}(),
+			})
+			return nil, &UpstreamFailoverError{
+				StatusCode:             resp.StatusCode,
+				ResponseBody:           respBody,
+				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
+			}
+		}
 		// 可选：对部分 400 触发 failover（默认关闭以保持语义）
 		if resp.StatusCode == 400 && s.cfg != nil && s.cfg.Gateway.FailoverOn400 {
 			respBody, readErr := s.readUpstreamErrorBody(resp)
 			if readErr != nil {
 				// ReadAll failed, fall back to normal error handling without consuming the stream
-				return s.handleErrorResponse(ctx, resp, c, account, reqModel)
+				return s.handleErrorResponse(ctx, resp, c, account, originalModel)
 			}
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
@@ -820,11 +843,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				} else {
 					logger.LegacyPrintf("service.gateway", "Account %d: 400 error, attempting failover", account.ID)
 				}
-				s.handleFailoverSideEffects(ctx, resp, account, reqModel)
+				s.handleFailoverSideEffects(ctx, resp, account, originalModel)
 				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
 			}
 		}
-		return s.handleErrorResponse(ctx, resp, c, account, reqModel)
+		return s.handleErrorResponse(ctx, resp, c, account, originalModel)
 	}
 
 	// 处理正常响应
@@ -845,61 +868,10 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	var firstTokenMs *int
 	var clientDisconnect bool
 	if reqStream {
-		writerSizeBeforeStream := c.Writer.Size()
 		streamResult, err := s.handleStreamingResponse(ctx, resp, c, account, startTime, originalModel, reqModel, shouldMimicClaudeCode)
 		if err != nil {
-			var sseErr *sseStreamErrorEventError
-			if errors.As(err, &sseErr) {
-				// 上游 HTTP 200 + SSE 流体内出现 event:error 帧。
-				body := []byte(sseErr.RawData)
-				// xy2api resilience: the event's error.type decides the status.
-				semanticStatus, sideEffectHeader := resilienceStreamErrorStatus(gjson.GetBytes(body, "error.type").String(), c.Writer.Size() != writerSizeBeforeStream, resp.Header)
-				if sideEffectHeader != nil {
-					syntheticResp := &http.Response{
-						StatusCode: semanticStatus,
-						Header:     sideEffectHeader,
-						Body:       io.NopCloser(bytes.NewReader(body)),
-					}
-					s.handleFailoverSideEffects(ctx, syntheticResp, account, reqModel)
-				}
+			err = s.anthropicStreamEventError(ctx, c, resp, account, reqModel, err)
 
-				upstreamMsg := sanitizeUpstreamErrorMessage(
-					strings.TrimSpace(extractUpstreamErrorMessage(body)),
-				)
-
-				upstreamDetail := ""
-				if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
-					maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
-					if maxBytes <= 0 {
-						maxBytes = 2048
-					}
-					upstreamDetail = truncateString(sseErr.RawData, maxBytes)
-				}
-
-				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-					ProxyID:            opsUpstreamProxyID(account),
-					ProxyName:          opsUpstreamProxyName(account),
-					Platform:           account.Platform,
-					AccountID:          account.ID,
-					AccountName:        account.Name,
-					UpstreamStatusCode: semanticStatus,
-					UpstreamRequestID:  resp.Header.Get("x-request-id"),
-					Kind:               "stream_error",
-					Message:            upstreamMsg,
-					Detail:             upstreamDetail,
-				})
-
-				logger.LegacyPrintf("service.gateway",
-					"[Forward] SSE error event in stream: Account=%d(%s) RequestID=%s Body=%s",
-					account.ID, account.Name, resp.Header.Get("x-request-id"),
-					truncateString(sseErr.RawData, 1000),
-				)
-
-				return nil, &UpstreamFailoverError{
-					StatusCode:   semanticStatus,
-					ResponseBody: body,
-				}
-			}
 			// 流中断（缺失 terminal 事件、读错误、数据间隔超时等）时保留已观测到的
 			// usage 与错误一起返回，handler 在错误处理完成后照常提交 usage 记录。
 			if partial := partialStreamUsageResult(c, resp, streamResult, originalModel, mappedModel, startTime, err); partial != nil {

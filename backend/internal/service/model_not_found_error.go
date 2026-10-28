@@ -3,19 +3,12 @@ package service
 import (
 	"net/http"
 	"strings"
+
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
-var upstreamModelNotFoundKeywords = []string{"model not found", "unknown model", "not found"}
-
 func isUpstreamModelNotFoundError(statusCode int, body []byte) bool {
-	if statusCode != http.StatusNotFound {
-		return false
-	}
-	normalized := normalizeModelNotFoundBody(body)
-	if normalized == "" || !strings.Contains(normalized, "model") {
-		return false
-	}
-	return containsModelNotFoundKeyword(normalized)
+	return resilience.IsModelUnsupportedResponse(statusCode, body)
 }
 
 func isModelNotFoundError(statusCode int, body []byte) bool {
@@ -44,18 +37,6 @@ func isOpenAICodexPlanGatedModelError(statusCode int, body []byte) bool {
 		return false
 	}
 	return strings.Contains(normalized, openAICodexPlanGatedModelPhrase)
-}
-
-func containsModelNotFoundKeyword(normalizedBody string) bool {
-	if normalizedBody == "" {
-		return false
-	}
-	for _, keyword := range upstreamModelNotFoundKeywords {
-		if strings.Contains(normalizedBody, keyword) {
-			return true
-		}
-	}
-	return false
 }
 
 func normalizeModelNotFoundBody(body []byte) string {

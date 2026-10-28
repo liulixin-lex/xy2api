@@ -163,7 +163,7 @@ const sections: SectionDef[] = [
 
 // Ranges mirror resilience.Settings.Validate; the server stays authoritative.
 const numberFields: NumberField[] = [
-  { key: 'balancePause', section: 'balance', min: 30, max: 3600, get: (s) => s.balance.pause_seconds, set: (s, v) => { s.balance.pause_seconds = v } },
+  { key: 'balancePause', section: 'balance', min: 30, max: 3600, hint: true, get: (s) => s.balance.pause_seconds, set: (s, v) => { s.balance.pause_seconds = v } },
   { key: 'maxAttempts', section: 'budget', min: 1, max: 10, get: (s) => s.budget.max_attempts, set: (s, v) => { s.budget.max_attempts = v } },
   { key: 'preOutputBudget', section: 'budget', min: 60, max: 290, get: (s) => s.budget.pre_output_budget_seconds, set: (s, v) => { s.budget.pre_output_budget_seconds = v } },
   { key: 'keepaliveDelay', section: 'keepalive', min: 5, max: 60, get: (s) => s.keepalive.delay_seconds, set: (s, v) => { s.keepalive.delay_seconds = v } },

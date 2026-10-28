@@ -41,7 +41,7 @@ func TestShouldFailoverGeminiUpstreamError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := svc.shouldFailoverGeminiUpstreamError(tt.statusCode)
+			got := svc.shouldFailoverGeminiUpstreamError(tt.statusCode, nil)
 			require.Equal(t, tt.expected, got)
 		})
 	}
@@ -329,7 +329,7 @@ func TestGeminiErrorPolicyIntegration(t *testing.T) {
 				case ErrorPolicySkipped:
 					// Skipped → 不标记账号状态；可 failover 的状态码仍换号
 					handleErrorCalled = false
-					gotFailover = svc.skippedErrorPolicyFailoverError(c, account, statusCode, respBody, "req-test") != nil
+					gotFailover = svc.skippedErrorPolicyFailoverError(c, account, statusCode, headers, respBody, "req-test") != nil
 					goto verify
 				case ErrorPolicyMatched:
 					svc.handleGeminiUpstreamError(ctx, account, statusCode, headers, respBody)
@@ -346,7 +346,7 @@ func TestGeminiErrorPolicyIntegration(t *testing.T) {
 			// ErrorPolicyNone → original logic
 			svc.handleGeminiUpstreamError(ctx, account, statusCode, headers, respBody)
 			handleErrorCalled = true
-			if svc.shouldFailoverGeminiUpstreamError(statusCode) {
+			if svc.shouldFailoverGeminiUpstreamError(statusCode, nil) {
 				gotFailover = true
 			}
 
@@ -361,7 +361,7 @@ func TestGeminiErrorPolicyIntegration(t *testing.T) {
 			}
 
 			if tt.expectShouldFailover {
-				require.True(t, svc.shouldFailoverGeminiUpstreamError(statusCode),
+				require.True(t, svc.shouldFailoverGeminiUpstreamError(statusCode, nil),
 					"shouldFailoverGeminiUpstreamError should return true for status %d", statusCode)
 			}
 		})
@@ -417,7 +417,7 @@ func TestSkippedErrorPolicyFailoverError(t *testing.T) {
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 
 			body := []byte(`{"error":{"code":"bad_response_status_code","message":"openai_error"}}`)
-			failoverErr := svc.skippedErrorPolicyFailoverError(c, tt.account, tt.statusCode, body, "req-1")
+			failoverErr := svc.skippedErrorPolicyFailoverError(c, tt.account, tt.statusCode, http.Header{}, body, "req-1")
 
 			if !tt.expectFailover {
 				require.Nil(t, failoverErr)
@@ -462,8 +462,8 @@ func TestGeminiErrorPolicy_NilRateLimitService(t *testing.T) {
 	}
 
 	// shouldFailoverGeminiUpstreamError still works
-	require.True(t, svc.shouldFailoverGeminiUpstreamError(429))
-	require.False(t, svc.shouldFailoverGeminiUpstreamError(400))
+	require.True(t, svc.shouldFailoverGeminiUpstreamError(429, nil))
+	require.False(t, svc.shouldFailoverGeminiUpstreamError(400, nil))
 
 	// handleGeminiUpstreamError should not panic with nil rateLimitService
 	require.NotPanics(t, func() {

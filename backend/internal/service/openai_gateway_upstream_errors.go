@@ -13,6 +13,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
@@ -286,23 +287,7 @@ func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(account *Acc
 }
 
 func isOpenAICompatibleModelNotFound400(respBody []byte) bool {
-	return isOpenAICompatibleModelNotFoundBody(respBody)
-}
-
-func isOpenAICompatibleModelNotFoundBody(respBody []byte) bool {
-	code := strings.TrimSpace(extractUpstreamErrorCode(respBody))
-	if code != "" {
-		return strings.EqualFold(code, "model_not_found")
-	}
-
-	msg := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
-	if msg == "" && !gjson.ValidBytes(respBody) {
-		msg = strings.ToLower(strings.TrimSpace(string(respBody)))
-	}
-	return strings.Contains(msg, "unknown provider for model") ||
-		strings.Contains(msg, "unknown model") ||
-		strings.Contains(msg, "model not found") ||
-		strings.Contains(msg, "model is not supported")
+	return resilience.IsModelUnsupportedResponse(http.StatusBadRequest, respBody)
 }
 
 // IsOpenAICompatibleModelNotFound400 reports whether an OpenAI-compatible 400
@@ -523,6 +508,29 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 	requestBody []byte,
 	requestedModel ...string,
 ) (*OpenAIForwardResult, error) {
+	return s.handleErrorResponseCore(ctx, resp, c, account, requestBody, false, requestedModel...)
+}
+
+func (s *OpenAIGatewayService) handleGrokErrorResponseAfterAccountHandling(
+	ctx context.Context,
+	resp *http.Response,
+	c *gin.Context,
+	account *Account,
+	requestBody []byte,
+	requestedModel string,
+) (*OpenAIForwardResult, error) {
+	return s.handleErrorResponseCore(ctx, resp, c, account, requestBody, true, requestedModel)
+}
+
+func (s *OpenAIGatewayService) handleErrorResponseCore(
+	ctx context.Context,
+	resp *http.Response,
+	c *gin.Context,
+	account *Account,
+	requestBody []byte,
+	accountErrorAlreadyHandled bool,
+	requestedModel ...string,
+) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
 	body = s.redactAgentIdentitySensitiveBody(ctx, account, body)
 
@@ -636,18 +644,20 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 
 	// Check custom error codes
 	if !account.ShouldHandleErrorCode(resp.StatusCode) {
-		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-			ProxyID:            opsUpstreamProxyID(account),
-			ProxyName:          opsUpstreamProxyName(account),
-			Platform:           account.Platform,
-			AccountID:          account.ID,
-			AccountName:        account.Name,
-			UpstreamStatusCode: resp.StatusCode,
-			UpstreamRequestID:  resp.Header.Get("x-request-id"),
-			Kind:               "http_error",
-			Message:            upstreamMsg,
-			Detail:             upstreamDetail,
-		})
+		if !accountErrorAlreadyHandled {
+			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+				ProxyID:            opsUpstreamProxyID(account),
+				ProxyName:          opsUpstreamProxyName(account),
+				Platform:           account.Platform,
+				AccountID:          account.ID,
+				AccountName:        account.Name,
+				UpstreamStatusCode: resp.StatusCode,
+				UpstreamRequestID:  resp.Header.Get("x-request-id"),
+				Kind:               "http_error",
+				Message:            upstreamMsg,
+				Detail:             upstreamDetail,
+			})
+		}
 		MarkResponseCommitted(c)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": gin.H{
@@ -670,23 +680,28 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		reqModel, _, _ = extractOpenAIRequestMetaFromBody(requestBody)
 		reqModel = canonicalOpenAIAccountSchedulingModel(account, reqModel)
 	}
-	shouldDisable := s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, reqModel)
+	shouldDisable := false
+	if !accountErrorAlreadyHandled {
+		shouldDisable = s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, reqModel)
+	}
 	kind := "http_error"
 	if shouldDisable {
 		kind = "failover"
 	}
-	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-		ProxyID:            opsUpstreamProxyID(account),
-		ProxyName:          opsUpstreamProxyName(account),
-		Platform:           account.Platform,
-		AccountID:          account.ID,
-		AccountName:        account.Name,
-		UpstreamStatusCode: resp.StatusCode,
-		UpstreamRequestID:  resp.Header.Get("x-request-id"),
-		Kind:               kind,
-		Message:            upstreamMsg,
-		Detail:             upstreamDetail,
-	})
+	if !accountErrorAlreadyHandled {
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			ProxyID:            opsUpstreamProxyID(account),
+			ProxyName:          opsUpstreamProxyName(account),
+			Platform:           account.Platform,
+			AccountID:          account.ID,
+			AccountName:        account.Name,
+			UpstreamStatusCode: resp.StatusCode,
+			UpstreamRequestID:  resp.Header.Get("x-request-id"),
+			Kind:               kind,
+			Message:            upstreamMsg,
+			Detail:             upstreamDetail,
+		})
+	}
 	if shouldDisable {
 		return nil, &UpstreamFailoverError{
 			StatusCode:             resp.StatusCode,
@@ -708,7 +723,8 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 	// 回真实状态码 + invalid_request_error + 真实 message；/v1/images 还额外透传
 	// code/param。原生 Responses 是唯一漏掉的一条。
 	if isOpenAIDeterministicClientError(resp.StatusCode) {
-		writeOpenAIUpstreamClientError(c, resp.StatusCode, body, upstreamMsg)
+		clientMessage := SanitizeUpstreamErrorMessage(upstreamMsg)
+		writeOpenAIUpstreamClientError(c, resp.StatusCode, body, clientMessage)
 		if upstreamMsg == "" {
 			return nil, fmt.Errorf("upstream error: %d", resp.StatusCode)
 		}

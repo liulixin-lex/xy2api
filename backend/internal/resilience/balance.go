@@ -1,6 +1,10 @@
 package resilience
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+	"time"
+)
 
 // Temp-unschedulable reason prefixes written by the resilience layer. The
 // prefix decides the penalty tier and lets each component clear only what it
@@ -13,7 +17,50 @@ const (
 // BalancePauseReason is the temp_unschedulable reason of a balance pause
 // (design §3.2): the account's relay reported an exhausted balance.
 func BalancePauseReason(evidence string) string {
-	return ReasonPrefixBalanceExhausted + ": " + truncate(evidence, 200)
+	return BalancePauseReasonAtStep(1, evidence)
+}
+
+// BalancePauseReasonAtStep formats the persisted balance failure level. Old
+// balance:exhausted: reasons remain readable as step one.
+func BalancePauseReasonAtStep(step int, evidence string) string {
+	if step < 1 || step > 3 {
+		step = 1
+	}
+	return ReasonPrefixBalanceExhausted + "[step=" + strconv.Itoa(step) + "]: " + truncate(evidence, 200)
+}
+
+func BalancePauseStep(reason string) int {
+	reason = strings.TrimSpace(reason)
+	prefix := ReasonPrefixBalanceExhausted + "[step="
+	if !strings.HasPrefix(reason, prefix) {
+		return 1
+	}
+	end := strings.IndexByte(reason[len(prefix):], ']')
+	if end < 0 {
+		return 1
+	}
+	step, err := strconv.Atoi(reason[len(prefix) : len(prefix)+end])
+	if err != nil || step < 1 || step > 3 {
+		return 1
+	}
+	return step
+}
+
+// BalancePauseStepForFailure only advances after a failure attempt began
+// after the previous balance pause expired. A late response from an older
+// in-flight attempt therefore cannot advance the ladder.
+func BalancePauseStepForFailure(reason string, previousUntil, attemptStartedAt, now time.Time) int {
+	if !IsBalancePause(reason) {
+		return 1
+	}
+	step := BalancePauseStep(reason)
+	if previousUntil.IsZero() || attemptStartedAt.IsZero() || now.Before(previousUntil) || !attemptStartedAt.After(previousUntil) {
+		return step
+	}
+	if step < 3 {
+		step++
+	}
+	return step
 }
 
 // IsBalancePause reports whether a temp_unschedulable reason is a balance

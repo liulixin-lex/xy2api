@@ -20,6 +20,7 @@ import (
 	pkghttputil "github.com/liulixin-lex/xy2api/internal/pkg/httputil"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ip"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
 
@@ -595,6 +596,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 					zap.Int64("account_id", account.ID),
 					zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
 				)
+				applyConcurrencyRetryHint(c, http.StatusTooManyRequests, gatewayQueueFullCode)
 				googleError(c, http.StatusTooManyRequests, "Too many pending requests, please retry later")
 				return
 			}
@@ -811,7 +813,7 @@ func (h *GatewayHandler) handleGeminiFailoverExhausted(c *gin.Context, failoverE
 				c.Set(service.OpsSkipPassthroughKey, true)
 			}
 
-			googleError(c, respCode, msg)
+			googleError(c, respCode, service.SanitizeUpstreamErrorMessage(msg))
 			return
 		}
 	}
@@ -827,6 +829,20 @@ func (h *GatewayHandler) handleGeminiFailoverExhausted(c *gin.Context, failoverE
 
 	// 使用默认的错误映射
 	status, message := mapGeminiUpstreamError(statusCode)
+	if resilience.Current().ErrorsOn() {
+		classification := service.ClassifyFailoverError(failoverErr)
+		switch classification.Category {
+		case resilience.CategoryBalance, resilience.CategoryRateLimit, resilience.CategoryRateLimitReset,
+			resilience.CategoryCapacityShed, resilience.CategoryTransient,
+			resilience.CategoryFirstOutputTimeout, resilience.CategoryStall:
+			status = http.StatusServiceUnavailable
+			_, message = mapGeminiUpstreamError(status)
+			if retryAfter := failoverErr.ResponseHeaders.Get("Retry-After"); retryAfter != "" {
+				c.Header("Retry-After", retryAfter)
+			}
+			status = applyExhaustedRetryHint(c, h.gatewayService, status)
+		}
+	}
 	googleError(c, status, message)
 }
 
@@ -864,7 +880,8 @@ func googleError(c *gin.Context, status int, message string) {
 // googleConcurrencyError 以 Google 错误格式回写并发槽获取失败，状态码与文案
 // 沿用 concurrencyErrorResponse 的统一映射（客户端断开为 499）。
 func googleConcurrencyError(c *gin.Context, err error, slotType string) {
-	status, _, _, message := concurrencyErrorResponse(err, slotType)
+	status, _, code, message := concurrencyErrorResponse(err, slotType)
+	applyConcurrencyRetryHint(c, status, code)
 	googleError(c, status, message)
 }
 

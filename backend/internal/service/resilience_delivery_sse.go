@@ -141,7 +141,7 @@ func sseBlockIsOpening(block []byte) bool {
 	if typ == "" {
 		typ = event
 	}
-	if resilience.Current().NativePreludeWhitelistOn() && (strings.HasPrefix(typ, "response.") || typ == "keepalive" || typ == "codex.rate_limits") {
+	if resilience.Current().NativePreludeWhitelistOn() && (strings.HasPrefix(typ, "response.") || typ == "keepalive" || typ == "codex.rate_limits" || typ == "codex.response.metadata") {
 		return resilience.ClassifyStreamEvent("responses", event, data).Kind == resilience.Prelude
 	}
 	if resilience.Current().PreludeStagingOn() {

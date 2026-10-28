@@ -211,6 +211,31 @@ func TestClassifySpecScenarios(t *testing.T) {
 	}
 }
 
+func TestIsModelUnsupportedResponseUsesRestrictedStructuredMessages(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+		want   bool
+	}{
+		{"unknown provider", 400, `{"error":{"type":"invalid_request_error","message":"unknown provider for model x"}}`, true},
+		{"unsupported model", 404, `{"error":{"message":"model is not supported: x"}}`, true},
+		{"explicit model code wins with param", 400, `{"error":{"code":"model_not_found","param":"model","message":"model not found"}}`, true},
+		{"strong code wins", 400, `{"error":{"code":"invalid_api_key","message":"unknown model x"}}`, false},
+		{"strong type wins", 404, `{"error":{"type":"context_length_exceeded","message":"model not found"}}`, false},
+		{"param blocks text", 400, `{"error":{"param":"tools","message":"model not found"}}`, false},
+		{"endpoint mismatch", 400, `{"error":{"message":"model is not supported by this endpoint"}}`, false},
+		{"mode mismatch", 404, `{"error":{"message":"model is not supported in this mode"}}`, false},
+		{"auth unavailable", 400, `{"error":{"message":"auth_unavailable: no auth available (model=x)"}}`, false},
+		{"plain text ignored", 404, `unknown model x`, false},
+		{"wrong status", 503, `{"error":{"message":"unknown model x"}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, IsModelUnsupportedResponse(tc.status, []byte(tc.body)))
+		})
+	}
+}
+
 func TestCategoryPolicyTable(t *testing.T) {
 	// Spec: category determines failover, penalty and session handling.
 	type policy struct{ switchAcct, session, soft, scoped bool }

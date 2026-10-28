@@ -90,7 +90,7 @@ func opsHTTPResilienceCategory(status int, headers http.Header, body []byte, mes
 // which leave the account untouched.
 func (s *RateLimitService) resilienceHandleUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, upstreamMsg string) (handled bool, shouldDisable bool) {
 	cfg := resilience.Current()
-	if !cfg.FailureOn() || account == nil || statusCode == 529 {
+	if !cfg.FailureOn() || account == nil {
 		return false, false
 	}
 	res := classifyUpstreamHTTP(statusCode, headers, responseBody, upstreamMsg)
@@ -235,26 +235,40 @@ func (s *RateLimitService) applyBalancePause(ctx context.Context, account *Accou
 	if s == nil || s.accountRepo == nil || account == nil {
 		return
 	}
-	pause := time.Duration(resilience.Current().Balance.PauseSeconds) * time.Second
-	until := time.Now().Add(pause)
+	basePause := time.Duration(resilience.Current().Balance.PauseSeconds) * time.Second
+	now := time.Now().UTC()
+	attemptStart := resilience.StateFrom(ctx).AttemptProfile()
+	if attemptStart.AccountID != account.ID {
+		attemptStart.AttemptStart = time.Time{}
+	}
 	stateCtx, cancel := resilienceStateContext(ctx)
 	defer cancel()
-	written, err := s.writeTempPenalty(stateCtx, account.ID, until, resilience.BalancePauseReason(evidence))
+	var update BalancePauseWrite
+	var err error
+	if store, ok := s.accountRepo.(BalancePauseStore); ok {
+		update, err = store.SetBalancePauseTiered(stateCtx, account.ID, basePause, attemptStart.AttemptStart, now, evidence)
+	} else {
+		update.Until = now.Add(basePause)
+		update.Reason = resilience.BalancePauseReason(evidence)
+		update.Step = 1
+		update.Changed, err = s.writeTempPenalty(stateCtx, account.ID, update.Until, update.Reason)
+	}
 	if err != nil {
 		slog.Warn("resilience.balance_pause_failed", "account_id", account.ID, "error", err)
 		return
 	}
-	if !written {
+	if !update.Changed {
 		// A longer hard pause of another kind stays; nothing changed.
 		return
 	}
-	s.notifyAccountSchedulingBlocked(account, until, "balance_exhausted")
+	s.notifyAccountSchedulingBlocked(account, update.Until, "balance_exhausted")
 	s.resilience.invalidateAccountGroups(account)
 	slog.Warn("resilience.balance_paused",
 		"account_id", account.ID,
 		"account_name", account.Name,
 		"platform", account.Platform,
-		"pause", pause.String(),
+		"pause", update.Until.Sub(now).String(),
+		"step", update.Step,
 		"evidence", truncateString(evidence, 300),
 	)
 }
@@ -274,6 +288,17 @@ func (s *RateLimitService) handleCounted403(ctx context.Context, account *Accoun
 type ResiliencePenaltyStore interface {
 	SetTempUnschedulableTiered(ctx context.Context, id int64, until time.Time, reason string, hard, keepLaterEnd bool, softPrefixes []string) (bool, error)
 	ClearTempUnschedulableIf(ctx context.Context, id int64, reason string, until time.Time) (bool, error)
+}
+
+type BalancePauseWrite struct {
+	Changed bool
+	Until   time.Time
+	Reason  string
+	Step    int
+}
+
+type BalancePauseStore interface {
+	SetBalancePauseTiered(ctx context.Context, id int64, basePause time.Duration, attemptStart, startedAt time.Time, evidence string) (BalancePauseWrite, error)
 }
 
 // writeTempPenalty writes a temp_unschedulable penalty by tier: a hard
@@ -318,6 +343,10 @@ func (r *ResilienceService) NoteAccountSuccess(ctx context.Context, account *Acc
 	if r.rateLimit == nil {
 		return
 	}
+	profile := resilience.StateFrom(ctx).AttemptProfile()
+	if resilience.IsBalancePause(account.TempUnschedulableReason) && profile.AccountID == account.ID && !profile.AttemptStart.IsZero() {
+		r.rateLimit.liftBalancePause(ctx, account.ID, profile.AttemptStart)
+	}
 	// A last-resort account that served successfully has recovered: lift its
 	// transient cooldown so normal selection uses it again (design §4.3).
 	if v, ok := r.lastResortUsed.LoadAndDelete(account.ID); ok {
@@ -325,6 +354,32 @@ func (r *ResilienceService) NoteAccountSuccess(ctx context.Context, account *Acc
 			r.rateLimit.liftTransientCooldown(ctx, account.ID)
 		}
 	}
+}
+
+func (s *RateLimitService) liftBalancePause(ctx context.Context, accountID int64, attemptStart time.Time) {
+	if s == nil || s.accountRepo == nil || attemptStart.IsZero() {
+		return
+	}
+	store, ok := s.accountRepo.(ResiliencePenaltyStore)
+	if !ok {
+		return
+	}
+	stateCtx, cancel := resilienceStateContext(ctx)
+	defer cancel()
+	fresh, err := s.accountRepo.GetByID(stateCtx, accountID)
+	if err != nil || fresh == nil || fresh.TempUnschedulableUntil == nil ||
+		!resilience.IsBalancePause(fresh.TempUnschedulableReason) || !attemptStart.After(*fresh.TempUnschedulableUntil) {
+		return
+	}
+	cleared, err := store.ClearTempUnschedulableIf(stateCtx, accountID, fresh.TempUnschedulableReason, *fresh.TempUnschedulableUntil)
+	if err != nil {
+		slog.Warn("resilience.balance_lift_failed", "account_id", accountID, "error", err)
+		return
+	}
+	if !cleared {
+		return
+	}
+	s.resilience.invalidateAccountGroups(fresh)
 }
 
 // liftTransientCooldown clears a soft transient cooldown after the account

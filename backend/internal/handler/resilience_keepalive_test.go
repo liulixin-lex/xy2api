@@ -92,7 +92,8 @@ func TestHeartbeatThenFailoverKeepsSwitching(t *testing.T) {
 	require.True(t, strings.HasSuffix(body, "\n\n"), body)
 	last := body[strings.LastIndex(body, "event: "):]
 	require.True(t, strings.HasPrefix(last, "event: error\ndata: {\"type\":\"error\""), last)
-	require.Contains(t, last, "overloaded_error")
+	require.Contains(t, last, "api_error")
+	require.NotContains(t, last, "overloaded_error")
 }
 
 func TestArmPreOutputKeepaliveResumesBetweenAPIKeyAttempts(t *testing.T) {

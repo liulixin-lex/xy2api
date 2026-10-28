@@ -86,10 +86,10 @@ func TestBudgetBalanceNotRetriedOnSameAccount(t *testing.T) {
 		require.Zero(t, fs.SameAccountRetryCount[1], status)
 	}
 
-	// Without a budget the pool-mode retry happens as before.
+	// Hard failures also switch when the request carries no budget.
 	fs = NewFailoverState(10, false)
 	require.Equal(t, FailoverContinue, fs.HandleFailoverError(context.Background(), &mockTempUnscheduler{}, 1, service.PlatformOpenAI, 3, err))
-	require.Equal(t, 1, fs.SameAccountRetryCount[1])
+	require.Zero(t, fs.SameAccountRetryCount[1])
 }
 
 func TestBudgetSameAccountRetryOncePerAccount(t *testing.T) {
@@ -104,6 +104,18 @@ func TestBudgetSameAccountRetryOncePerAccount(t *testing.T) {
 	require.Equal(t, FailoverContinue, fs.HandleFailoverError(ctx, sched, 1, service.PlatformOpenAI, 3, err))
 	require.Equal(t, 1, fs.SameAccountRetryCount[1], "at most one same-account retry")
 	require.Equal(t, 1, fs.SwitchCount)
+}
+
+func TestHardModelUnsupportedDoesNotRetrySameAccount(t *testing.T) {
+	withHandlerResilience(t, nil)
+	ctx := budgetCtx(t, resilience.KindText, 7)
+	err := &service.UpstreamFailoverError{
+		RetryableOnSameAccount: true,
+		StatusCode:             http.StatusBadRequest,
+		ResponseBody:           []byte(`{"error":{"message":"unknown provider for model x"}}`),
+	}
+	require.True(t, resilienceAccountLevelFailure(err, time.Millisecond))
+	require.False(t, sameAccountRetryAllowedCtx(ctx, 1, err, 0, 3))
 }
 
 func TestBudgetUpstreamRetryAfterBeyondCapSwitches(t *testing.T) {

@@ -6,6 +6,28 @@
 
 ## 当前交接状态
 
+### 报错后补救、重试与路由优化：终审修复验收通过，发布执行中（2026-10-28 更新）
+
+- **背景**：生产 48 小时只读分析显示，可补救的失败集中在三处：各平台按状态码各自决定是否换号；写出过协议字节就算已输出；出口不符合 Codex 与 Claude Code 的重试规则。方案见本地 `.work/tasks/20261028-error-recovery-routing/plan/FINAL_PLAN.md`。
+- **目标**：失败请求更快、更准地换号或重试，减少客户端重连与中断；首字、缓存、成功率与路由不受损；精简，不加开关与影子。用户 2026-10-28 授权实施，并在完成后授权 astra 推送、开 PR、把其他所有开启的 PR（#158、#159）一同合进 main、发布 0.4.12；部署不在授权内。
+- **已完成**：
+  - R1 分类换号与惩罚、R2 语义输出判定与 Anthropic 暂存、R3 客户端出口与替补粘性、FE 设置文案；
+  - astra 逐路审查与 R1 修复（FIX）、集成终审与 M1/M2 修复；
+  - 现行文档：`GATEWAY_RESILIENCE.md` §4.9 等、`account-scheduling.md`、runbook；
+  - 上游登记：5 条失效 literal 替换，新增钩子，具名补丁 `xy-error-recovery-routing`，scheduler-diff 审阅块。
+  - 发布执行：快速验收 M1/M2/F2 与 D1–D4 通过；PR #158、#159 均在全部检查成功后常规合入 main（`39ef32f51`、`5b06d6ef4`）。本任务 PR #160 已开，初轮 CI 全绿；正在跟进最新 main 的登记合并与检查。
+- **未完成**：
+  1. PR #160 跟进 main 后的 CI 与合并；发版准备 PR；annotated tag v0.4.12 与 Release；发版后记忆归档 PR。
+  2. 上线后按 `evidence/prod_errors_48h.md` 的查询复跑 48 小时对比（需另行授权部署后）。
+- **卡点与风险**：
+  - WS 与 WS→HTTP 桥接的余额升档与复位暂缓（缺统一发送点与逐轮快照）；
+  - Gemini 429 无重置时间落 PST 午夜、count_tokens 负能力等残留未做；
+  - 历史账号 424 未暂停的根因属推断；
+  - GitHub API 配额曾耗尽，CI 监视需控制频率。
+- **关键位置**：
+  - 集成分支 `feat/error-recovery-routing-20261028`；
+  - 本地交接包 `.work/tasks/20261028-error-recovery-routing/`（各路报告、审查、发版说明）。
+
 ### PR-A 普通管理员角色（本地开发、审查与 final bookkeeping 完成，待提交后 audit 与授权推送）
 
 - `feat/operator-role-20261027` 当前 HEAD `3a115065d`，叠加 PR-B #158，基点 `7e590f9ac`。代码、文档、审查和本地 final bookkeeping 已完成，尚未提交、推送或开 PR。最终策略字面量修正后，`sync.py audit` 待提交后在干净树复跑；详细状态、风险与下一步见“进行中的工作”同名条目及 `20261027-operator-role-final-pra-1` 操作日志。
@@ -248,6 +270,21 @@
 - 后续部署事项：升级后显式保存public备份范围；新目标先初始化所需扩展，production备份仍需在实际部署后验证。share默认关闭，实际影子/逐组启用与业务账单观察是部署后的流程。非阻断维护项：GoReleaser旧配置字段弃用提醒、前端依赖审计中未达high/critical阻断等级的告警；本次未借此扩展依赖升级。
 
 ## 进行中的工作
+
+### 20261028-error-recovery-routing — 报错后补救、重试与路由优化（集成完成，待发布）
+
+- 发布执行（2026-10-28，astra）：从干净的 `c4ec8cd7b` 接手；按用户明确授权快速验收 M1/M2/F2 与 D1–D4 后，执行本任务 PR、#158 → #159 → 本任务合并、0.4.12 版本 PR、annotated tag/Release 与记忆归档 PR。只对登记文件按并集解决冲突，业务冲突或非偶发 CI 失败即停止；不操作生产。执行证据写在本地 `implementation/RELEASE_report.md`。
+- 验收结果：M1/M2/F2 与 D1–D4 通过，三个定向真实入口测试通过。发版说明需更正交接包的“无迁移、直接换回镜像”：#159 含迁移 282，回退按 ADMIN_PERMISSIONS 处理；#158 在回退旧版本前须清除 new-api 访问令牌。其他长门禁继承 FIX 与 PM 的源绑定结果，远端完整 CI 仍须通过。
+
+- 2026-10-28 用户授权实施，指定 Claude 作产品经理编排：后端 gpt-6.1-sol（xhigh）、前端 gpt-6-astra（xhigh）、审查 gpt-6-astra（xhigh）。§3 决策未逐条答复，按推荐执行（余额阶梯 ×1/×3/×12；E2 同优先级 LoadRate ≤ 最低值+20pp；Codex Retry-After 沿用 10s）。
+- 集成分支 `feat/error-recovery-routing-20261028`（主检出）；实施工作树 `../xy2api-wt/err-{r1,r2,r3,fe}`，分支 `wip/err-{r1,r2,r3,fe}-20261028`，基线 main `d57883bec`。归属与接缝见 FINAL_PLAN §4，实施通用说明 `implementation/BRIEF.md`，各路报告写在 `implementation/`。集成顺序 R1 → R2 → R3 → FE，由 Claude 同步文档与登记。
+
+- 请求（用户 2026-10-28）：只读分析生产近 48 小时各类报错及补救/路由；与 Codex（gpt-6-astra xhigh）联合审查报错补救模块的缺陷与可优化项，参考外部网关实现，给出精简的最佳方案；首字、缓存、成功率、路由不受损。按惯例先定方案、经用户确认再写代码。
+- 本地交接包 `.work/tasks/20261028-error-recovery-routing/`（不入库）：唯一实施依据 `plan/FINAL_PLAN.md`；`evidence/`（生产只读分析、外部网关与 Codex/Claude Code 客户端重试规则调研）；`reviews/`（astra r1 独立审查、r2 对抗审查）。
+- 结论：韧性骨架不删不重写；可救失败来自三处口径脱节：换号判定按状态码各自为政（Grok 400 `unknown provider for model` 19 小时 4,080 次、Gemini 402 余额 517 次直接失败）、“写过字节”被当成“已交付语义输出”（原生 Anthropic 零内容流内 429 178 次不换号；`codex.response.metadata` 让首字截止失效）、出口没按客户端重试规则塑形（`overloaded_error` 让 Claude Code 3 次即停；无 Retry-After 的 429 让 Codex 立即终止；专属分组拒绝用 503）。
+- 方案 19 项（A 换号与惩罚 5、B 提交判定 3、C 余额阶梯 1、D 出口语义 8、E 粘性 2），无迁移、无新开关；不做 hedge、后台余额探针、循环重写。拆 3 路实施，接缝见 FINAL_PLAN §4。
+- 进度（2026-10-28）：四路实施与 FIX、终审修复都已合入集成分支（`66765e6dd`），详见顶部交接状态与操作日志。
+- 下一步：astra 按 `implementation/RELEASE_BRIEF.md` 推送、合并全部开启的 PR、发布 0.4.12；发布后把本条与顶部小节原样归档。部署另行授权。
 
 ### 20261027-upstream-balance — 账号页「上游余额」列（PR-B；PR #158 已开，CI 全绿，待合并，2026-10-28）
 
@@ -1172,3 +1209,50 @@ pnpm --dir frontend run build
 - 验证：rebase 后代码与本机全量门禁通过的版本逐字节一致（只差 main 自身的改动）；CI 全部检查通过。
 - 卡点/风险：无。
 - 下一步：等待合并；不合并、不打 tag、不发版、不部署。
+
+### 2026-10-28 — 20261028-error-recovery-routing — 生产只读分析与方案定稿 v1.0，待确认
+
+- 请求/目标：只读分析生产近 48 小时报错与补救/路由；与 Codex astra（xhigh）联合审查报错补救模块；参考外部网关；给出精简最佳方案。
+- 开始状态：main `d57883bec`，工作树干净；生产运行 0.4.11。
+- 完成操作：
+  - 生产只读：`ops_error_logs`、`usage_logs`、容器日志（约 3.7 小时）；数据库会话只读，未导出设置表；本地临时日志已删除，SSH 连接已关闭。
+  - 外部网关与 Codex / Claude Code 客户端重试规则调研（源码依据）。
+  - Claude 独立草案 → astra r1 独立审查 → 合并 v0.9 → astra r2 对抗审查 → 定稿 v1.0。r2 否决“模型不支持复用瞬时阶梯”（改用现有 30 分钟账号×模型不可用），补 service 层原地重试、余额阶梯原子性与成功栅栏、可恢复 429 必带 Retry-After 等边界。
+- 修改文件：只有本记忆文件（任务登记与本日志）；方案与证据在本地交接包。
+- 验证：文档一致性检查通过；本轮无代码改动。
+- 卡点/风险：历史 Gemini 余额号未暂停多半是 0.4.8 漏接（0.4.9 已修），部署版本与日志不可得，属推断；240s 计时来源未闭环。
+- 下一步：用户确认 FINAL_PLAN §3 决策点后实施；提交、PR、发版、部署各自待授权。
+
+### 2026-10-28 — 20261028-error-recovery-routing — 实施、审查与集成完成，交 astra 发布
+
+- 请求/目标：用户授权实施 FINAL_PLAN v1.0，Claude 作产品经理编排：后端 gpt-6.1-sol、前端与审查 gpt-6-astra，均为 xhigh。完成后授权 astra 推送、开 PR、合并全部开启的 PR 并发布 0.4.12，不部署。
+- 开始状态：main `d57883bec`；集成分支 `feat/error-recovery-routing-20261028`；实施工作树 `../xy2api-wt/err-{r1,r2,r3,fe,fix}`。
+- 完成操作：
+  - 实施：R1 `a85205475`、R2 `3e6d37f3b`+`9562a71c2`、R3 `5dc07a78a`+`9cf601d49`、FE `deb270292`+`957138e18`。每路先经 astra 审查，修复后再合入。只有 `gateway_forward.go` 有一处 import 冲突。
+  - R1 审查：3 项 P1 与 5 项 P2，由新的 sol 实施 FIX `15209e662`，内容包括转换入口、成功路径预筛、脱敏漏口、数值 code、旧 404 分类、开关边界、Gemini 503 与并发提示、图片尝试时间、Bedrock。WS 余额阶梯按约定暂缓。
+  - 集成终审：剩 M1（只发过暂存心跳后耗尽时追加裸 JSON）与 M2（硬类原地重试旁路总开关），由 `3f4147212` 修复，合并提交 `66765e6dd`。
+  - 文档与登记 `c8d1f7059` 及后续修正：现行文档、runbook、policy（替换 5 条失效 literal，新增钩子，具名补丁 `xy-error-recovery-routing` 绑定 23 个测试）、`UPSTREAM_BASE.json`、scheduler-diff 审阅块 `error-recovery-routing-20261028`。
+- 修改文件：后端 resilience、service、handler、repository；前端韧性设置文案；`docs/GATEWAY_RESILIENCE.md`、`docs/account-scheduling.md`、runbook、`tools/upstream-sync/{policy,scheduler-diff}.json`、`UPSTREAM_BASE.json`、本文件。无数据库迁移，无新开关。
+- 验证：
+  - FIX 门禁：build、四种 tag 的 vet、service/handler/resilience/repository 全量 unit、`ci_gate.py` 474 项 `-race` 零跳过、golangci-lint 0 issues。
+  - 余额阶梯的 PostgreSQL 行锁并发测试：在本机临时 PostgreSQL 18 上用 overlay 测试桩执行，30 次通过，测后清理。
+  - `sync.py audit`、scheduler-diff、文档一致性、tools 41 项通过。
+  - 前端 lint、typecheck、vitest 由 FE 执行并通过。
+- 卡点/风险：WS 余额阶梯暂缓；计费残留是 Anthropic 暂存期失败尝试的上游成本由网关承担（已写入 §7）。
+- 下一步：astra 执行 `RELEASE_BRIEF.md`；完成后归档本任务。
+
+### 2026-10-28 — 20261028-release0412 — 终审修复验收与发布接手
+
+- 请求/目标：用户授权推送本任务、依次合并 #158/#159/本任务、发布 0.4.12 与记忆归档，不部署。
+- 开始状态：`feat/error-recovery-routing-20261028`，`c4ec8cd7b`，工作树干净；远端开放 PR 仍为 #158、#159。
+- 完成操作：核对 M1/M2/F2 的最小修改与真实入口测试、D1–D4 文档修正；快速验收通过。已核实 #159 含迁移 282，与交接包的无迁移描述不符，发布说明按代码及现行文档更正，并保留 #158 的回退前令牌清除条件。
+- 修改文件：仅本记忆登记；产品代码未改。详细执行记录在本地 RELEASE_report。
+- 验证：三个定向 Go 测试通过；发布所需本地文档、调度登记与工具门禁继续执行，干净提交上运行 audit。
+- 下一步：按固定 head 和全绿 CI 依次常规合并，再执行版本 PR、annotated tag/Release 与归档 PR；发现业务冲突或非偶发 CI 失败即停止并记录。
+
+### 2026-10-28 — 20261028-release0412 — 合入 #158、#159，本任务跟进 main
+
+- 完成操作：#158 以固定 head 常规合入 `39ef32f51`；#159 先普通 merge main，产品 tree 与原 head 完全相同，本地文档/audit/scheduler-diff/工具 41 项通过后普通推送，全部检查成功后合入 `5b06d6ef4`。#160 已开，初轮 18 项检查通过，随后普通 merge 最新 main。
+- 冲突：仅 provenance、policy 和记忆。补丁登记按并集合并；保留已替换的旧字面量删除，不恢复失效保护；两侧任务与操作日志完整保留，已归档的 0.4.7 条目不重新引入。业务代码未手改。
+- CI：#159 两次 shell 作业均未分配到 macOS runner、无执行步骤，平台 annotation 明确容量不足；只重跑该作业，第二次实际重跑在 19 秒内通过，最终 18/18 SUCCESS。没有绕过检查或改 runner 配置。
+- 下一步：#160 新合并提交的本地门禁与完整 CI，通过后合并；版本 PR 与发布尚未执行，不操作生产。

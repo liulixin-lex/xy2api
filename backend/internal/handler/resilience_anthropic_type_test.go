@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/liulixin-lex/xy2api/internal/model"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
@@ -23,7 +24,7 @@ func TestAnthropicGatewayFailuresUseAPIError(t *testing.T) {
 			}{
 				{"transient", 503, `{"error":{"code":"server_error","message":"unavailable"}}`, "api_error"},
 				{"numeric_overload", 529, `{}`, "api_error"},
-				{"upstream_overload", 529, `{"type":"error","error":{"type":"overloaded_error","message":"busy"}}`, "overloaded_error"},
+				{"upstream_overload", 529, `{"type":"error","error":{"type":"overloaded_error","message":"busy"}}`, "api_error"},
 				{"bad_gateway", 502, `{"error":{"message":"unavailable"}}`, "api_error"},
 			} {
 				t.Run(tc.name+boolName(viaOpenAI)+boolName(stream), func(t *testing.T) {
@@ -54,4 +55,56 @@ func TestAnthropicGatewayTypeSwitchOffRestoresLegacy(t *testing.T) {
 	(&GatewayHandler{}).handleFailoverExhausted(c, &service.UpstreamFailoverError{StatusCode: 529}, service.PlatformAnthropic, false)
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 	require.Equal(t, "overloaded_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
+	c, rec = newResilienceTestContext(t)
+	(&GatewayHandler{}).handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "overloaded_error", false)
+	require.Equal(t, "overloaded_error", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
+}
+
+func TestAnthropicCapacityRuleProjectsMessageAndStatus(t *testing.T) {
+	withHandlerResilience(t, nil)
+	message := `busy: {"type":"overloaded_error"} https://relay.invalid/?key=secret`
+	rules := &passthroughRuleRepo{rules: []*model.ErrorPassthroughRule{{
+		ID: 1, Name: "capacity", Enabled: true, Priority: 1, ErrorCodes: []int{502},
+		MatchMode: model.MatchModeAll, Platforms: []string{"anthropic"}, PassthroughCode: true, CustomMessage: &message,
+	}}}
+	h := &GatewayHandler{errorPassthroughService: service.NewErrorPassthroughService(rules, nil)}
+	for _, stream := range []bool{false, true} {
+		c, rec := newResilienceTestContext(t)
+		failure := &service.UpstreamFailoverError{StatusCode: 502, ResponseBody: []byte(`{"error":{"type":"overloaded_error","message":"busy"}}`)}
+		h.handleFailoverExhausted(c, failure, service.PlatformAnthropic, stream)
+		require.NotContains(t, rec.Body.String(), "overloaded_error")
+		require.NotContains(t, rec.Body.String(), "secret")
+		require.Contains(t, rec.Body.String(), "api_error")
+		if !stream {
+			require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+		}
+		require.NotEmpty(t, rec.Header().Get("Retry-After"))
+	}
+}
+
+func TestTerminalPassthroughRuleDropsUpstreamRetryAfter(t *testing.T) {
+	withHandlerResilience(t, nil)
+	status := http.StatusForbidden
+	message := "access denied by rule"
+	rules := &passthroughRuleRepo{rules: []*model.ErrorPassthroughRule{{
+		ID: 1, Name: "terminal", Enabled: true, Priority: 1, ErrorCodes: []int{502},
+		MatchMode: model.MatchModeAll, Platforms: []string{"anthropic", "openai"}, ResponseCode: &status, CustomMessage: &message,
+	}}}
+	for _, name := range []string{"gateway", "openai"} {
+		t.Run(name, func(t *testing.T) {
+			c, rec := newResilienceTestContext(t)
+			passthrough := service.NewErrorPassthroughService(rules, nil)
+			failure := &service.UpstreamFailoverError{StatusCode: http.StatusBadGateway,
+				ResponseBody: []byte(`{"error":{"message":"upstream failure"}}`), ResponseHeaders: http.Header{"Retry-After": {"60"}}}
+			if name == "gateway" {
+				(&GatewayHandler{errorPassthroughService: passthrough}).handleFailoverExhausted(c, failure, service.PlatformAnthropic, false)
+			} else {
+				(&OpenAIGatewayHandler{errorPassthroughService: passthrough}).handleFailoverExhausted(c, failure, false)
+			}
+			require.Equal(t, http.StatusForbidden, rec.Code)
+			require.Equal(t, message, gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
+			require.Empty(t, rec.Header().Get("Retry-After"))
+			require.Empty(t, c.GetString(ginKeyResilienceUpstreamRetryAfter))
+		})
+	}
 }

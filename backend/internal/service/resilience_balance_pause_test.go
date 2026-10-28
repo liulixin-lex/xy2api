@@ -27,7 +27,7 @@ func (r *resilienceAccountRepo) ClearModelRateLimits(context.Context, int64) err
 func requireBalancePause(t *testing.T, repo *resilienceAccountRepo, pause time.Duration) {
 	t.Helper()
 	require.Zero(t, repo.errorCalls, "the account stays active")
-	require.True(t, strings.HasPrefix(repo.tempReason, "balance:exhausted: "), repo.tempReason)
+	require.True(t, strings.HasPrefix(repo.tempReason, "balance:exhausted[step=1]: "), repo.tempReason)
 	require.True(t, resilience.IsBalancePause(repo.tempReason))
 	require.Equal(t, resilience.TierHard, resilience.TempUnschedTier(repo.tempReason))
 	require.WithinDuration(t, time.Now().Add(pause), repo.tempUntil, 3*time.Second)
@@ -81,6 +81,63 @@ func TestBalancePauseLengthIsConfigurable(t *testing.T) {
 	repo.tempUntil = time.Now().Add(-time.Second)
 	svc.HandleUpstreamError(context.Background(), account, http.StatusForbidden, http.Header{}, []byte(balance403Body))
 	requireBalancePause(t, repo, 45*time.Second)
+}
+
+func TestBalancePauseTieringUsesAttemptStartedAfterExpiry(t *testing.T) {
+	_, repo, account, _ := newPenaltyFixture(t, PlatformAnthropic)
+	base := 300 * time.Second
+	firstStart := time.Now().UTC()
+	first, err := repo.SetBalancePauseTiered(context.Background(), account.ID, base, firstStart, firstStart, "first")
+	require.NoError(t, err)
+	require.True(t, first.Changed)
+	require.Equal(t, 1, first.Step)
+	require.Equal(t, 1, resilience.BalancePauseStep(first.Reason))
+
+	// An attempt started in the active pause is the same round, even if it
+	// reports its failure after the stored pause expires.
+	lateAt := first.Until.Add(time.Second)
+	late, err := repo.SetBalancePauseTiered(context.Background(), account.ID, base, first.Until, lateAt, "late old attempt")
+	require.NoError(t, err)
+	require.True(t, late.Changed)
+	require.Equal(t, 1, late.Step)
+
+	// A fresh attempt started after the previous pause's end advances one step.
+	nextStart := late.Until.Add(time.Nanosecond)
+	next, err := repo.SetBalancePauseTiered(context.Background(), account.ID, base, nextStart, nextStart.Add(time.Millisecond), "new round")
+	require.NoError(t, err)
+	require.True(t, next.Changed)
+	require.Equal(t, 2, next.Step)
+	require.Equal(t, 2, resilience.BalancePauseStep(next.Reason))
+	require.WithinDuration(t, nextStart.Add(15*time.Minute), next.Until, time.Millisecond)
+
+	// Clearing the reason also clears the persisted level; the next failure is
+	// a first pause again.
+	require.NoError(t, repo.ClearTempUnschedulable(context.Background(), account.ID))
+	reset, err := repo.SetBalancePauseTiered(context.Background(), account.ID, base, next.Until.Add(time.Second), next.Until.Add(time.Second), "after admin recovery")
+	require.NoError(t, err)
+	require.True(t, reset.Changed)
+	require.Equal(t, 1, reset.Step)
+}
+
+func TestBalancePauseSuccessRequiresAttemptStartedAfterSavedUntil(t *testing.T) {
+	_, repo, account, r := newPenaltyFixture(t, PlatformAnthropic)
+	start := time.Now().UTC()
+	pause, err := repo.SetBalancePauseTiered(context.Background(), account.ID, 300*time.Second, start, start, "balance")
+	require.NoError(t, err)
+	account.TempUnschedulableReason = pause.Reason
+	account.TempUnschedulableUntil = &pause.Until
+
+	st := resilience.NewRequestState()
+	st.SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: start.Add(time.Second)})
+	r.NoteAccountSuccess(resilience.WithRequestState(context.Background(), st), account)
+	require.True(t, resilience.IsBalancePause(repo.tempReason), "an attempt started during the pause cannot clear it")
+	require.Zero(t, repo.clearCalls)
+
+	st = resilience.NewRequestState()
+	st.SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: pause.Until.Add(time.Nanosecond)})
+	r.NoteAccountSuccess(resilience.WithRequestState(context.Background(), st), account)
+	require.Empty(t, repo.tempReason)
+	require.Equal(t, 1, repo.clearCalls)
 }
 
 // While paused the account is never selected, not even as a last resort;

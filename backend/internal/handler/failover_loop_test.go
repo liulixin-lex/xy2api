@@ -551,7 +551,7 @@ func TestHandleFailoverError_SameAccountRetry(t *testing.T) {
 		// pool_mode_retry_count 配置。此处验证传入 retryLimit=1 时只重试 1 次即切换。
 		mock := &mockTempUnscheduler{}
 		fs := NewFailoverState(5, false)
-		err := newTestFailoverErr(403, true, false)
+		err := newTestFailoverErr(400, true, false)
 		const retryLimit = 1
 
 		// 第 1 次：同账号重试
@@ -934,6 +934,20 @@ func TestHandleSelectionExhausted(t *testing.T) {
 		require.Empty(t, fs.FailedAccountIDs, "应清除失败账号列表")
 		require.GreaterOrEqual(t, elapsed, 1500*time.Millisecond, "应等待约 2s")
 		require.Less(t, elapsed, 5*time.Second)
+	})
+
+	t.Run("503余额错误不清排除列表重选", func(t *testing.T) {
+		fs := NewFailoverState(3, false)
+		fs.LastFailoverErr = &service.UpstreamFailoverError{
+			StatusCode:   http.StatusServiceUnavailable,
+			ResponseBody: []byte(`{"error":{"message":"insufficient balance"}}`),
+		}
+		fs.FailedAccountIDs[100] = struct{}{}
+		start := time.Now()
+		action := fs.HandleSelectionExhausted(context.Background())
+		require.Equal(t, FailoverExhausted, action)
+		require.Contains(t, fs.FailedAccountIDs, int64(100))
+		require.Less(t, time.Since(start), 100*time.Millisecond, "hard balance failures do not wait and reselect")
 	})
 
 	t.Run("503但SwitchCount已超过MaxSwitches_返回Exhausted", func(t *testing.T) {

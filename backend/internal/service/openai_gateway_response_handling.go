@@ -253,6 +253,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	// 注意：OpenAI `/v1/responses` streaming 事件必须符合 OpenAI Responses schema；
 	// 否则下游 SDK（例如 OpenCode）会因为类型校验失败而报错。
 	errorEventSent := false
+	nextFailureSequence := int64(0)
 	clientDisconnected := false // 客户端断开后继续 drain 上游以收集 usage
 	sawTerminalEvent := false
 	sawFailedEvent := false
@@ -324,30 +325,31 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		eventStartsTTFTOutput = false
 		eventShouldFlush = false
 	}
-	sendErrorEvent := func(code, message string) {
-		if errorEventSent || clientDisconnected || failureDelivered {
+	sendErrorEvent := func(message string) {
+		if errorEventSent || clientDisconnected || failureDelivered || sawTerminalEvent {
 			return
 		}
 		errorEventSent = true
-		// Responses error events use top-level code/message/param fields. A nested
-		// Chat Completions error envelope loses the classification in strict clients.
-		payload := `{"type":"error","sequence_number":0,"code":` + strconv.Quote(code) + `,"message":` + strconv.Quote(message) + `,"param":null}`
-		if err := flushBuffered(); err != nil {
-			clientDisconnected = true
-			return
+		applyAttemptResponseHeaders()
+		source, _ := json.Marshal(gin.H{
+			"sequence_number": nextFailureSequence,
+			"error":           gin.H{"type": "server_error", "code": "server_error", "status_code": http.StatusInternalServerError},
+		})
+		frame := buildOpenAIResponseFailedSSE(ctx, responseID, originalModel, source, message)
+		if eventInProgress {
+			frame = "\n" + frame
 		}
-		if _, err := writePendingString("event: error\ndata: " + payload + "\n\n"); err != nil {
+		if _, err := writePendingString(frame); err != nil {
 			clientDisconnected = true
-			return
-		}
-		if err := flushBuffered(); err != nil {
+		} else if err := flushBuffered(); err != nil {
 			clientDisconnected = true
-			return
+		} else {
+			failureDelivered = true
+			clientOutputStarted = true
+			lastDownstreamWriteAt = time.Now()
+			MarkResponseCommitted(c)
 		}
-		clientOutputStarted = true
-		lastDownstreamWriteAt = time.Now()
-		// The handler must not append its generic failure after this error event.
-		MarkResponseCommitted(c)
+		_ = resp.Body.Close()
 	}
 
 	needModelReplace := originalModel != mappedModel
@@ -469,7 +471,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 		if errors.Is(scanErr, bufio.ErrTooLong) {
 			logger.LegacyPrintf("service.openai_gateway", "SSE line too long: account=%d max_size=%d error=%v", account.ID, maxLineSize, scanErr)
-			sendErrorEvent("response_too_large", "Upstream response exceeded the size limit")
+			sendErrorEvent("Upstream response exceeded the size limit")
 			return resultWithUsage(), scanErr, true
 		}
 		if !openAIStreamClientOutputStarted(c, clientOutputStarted) && !eventShouldFlush {
@@ -485,8 +487,8 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 		s.recordOpenAIProxyStreamDisconnect(account, scanErr, upstreamRequestID)
 		resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, scanErr, true)
-		code, message := classifyOpenAIUpstreamStreamReadError(scanErr)
-		sendErrorEvent(code, message)
+		_, message := classifyOpenAIUpstreamStreamReadError(scanErr)
+		sendErrorEvent(message)
 		return resultWithUsage(), fmt.Errorf("stream read error: %w", scanErr), true
 	}
 	processSSELine := func(line string, queueDrained bool) {
@@ -501,6 +503,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		// Extract data from SSE line (supports both "data: " and "data:" formats)
 		if data, ok := extractOpenAISSEDataLine(line); ok {
 			dataBytes := []byte(data)
+			if seq := gjson.GetBytes(dataBytes, "sequence_number"); seq.Exists() && seq.Int() >= nextFailureSequence {
+				nextFailureSequence = seq.Int() + 1
+			}
 			eventType := effectiveOpenAISSEEventType(dataBytes, pendingSSEEventType)
 			observeOpenAIPreludeCreated(preludeTrace, eventType)
 			if codexFailureTerminal && sawBareError && !sawResponseFailed &&
@@ -971,7 +976,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 					return resultWithUsage(), grokStreamIdleFailoverError(account, streamInterval)
 				}
 			}
-			sendErrorEvent("stream_timeout", "Upstream response stream timed out")
+			sendErrorEvent("Upstream response stream timed out")
 			return resultWithUsage(), fmt.Errorf("stream data interval timeout")
 
 		case <-firstOutputCh:
@@ -1859,6 +1864,7 @@ func buildOpenAIResponseFailedSSE(ctx context.Context, responseID, model string,
 	if message == "" {
 		message = strings.TrimSpace(fallbackMessage)
 	}
+	message = SanitizeUpstreamErrorMessage(message)
 	if message == "" {
 		message = "Upstream response failed"
 	}
@@ -1885,10 +1891,11 @@ func buildOpenAIResponseFailedSSE(ctx context.Context, responseID, model string,
 	if model = strings.TrimSpace(model); model != "" {
 		response["model"] = model
 	}
-	payload, err := marshalOpenAIUpstreamJSON(gin.H{
-		"type":     "response.failed",
-		"response": response,
-	})
+	frame := gin.H{"type": "response.failed", "response": response}
+	if sequence := gjson.GetBytes(source, "sequence_number"); sequence.Exists() {
+		frame["sequence_number"] = sequence.Int()
+	}
+	payload, err := marshalOpenAIUpstreamJSON(frame)
 	if err != nil {
 		// All values above are JSON primitives, so this is only a defensive fallback.
 		payload = []byte(`{"type":"response.failed","response":{"status":"failed","output":[],"error":{"code":"upstream_error","message":"Upstream response failed"}}}`)
@@ -1908,6 +1915,15 @@ func sanitizeOpenAIResponseFailedEventForClient(payload []byte, eventType string
 	// 总是先推 error 帧再收 failed，两帧携带同一个错误。
 	if rewritten, changed := sanitizeOpenAICapacityShedErrorCodeForClient(updated); changed {
 		updated = rewritten
+	}
+	for _, path := range []string{"response.error.message", "error.message", "message"} {
+		if message := gjson.GetBytes(updated, path); message.Type == gjson.String {
+			if sanitized := SanitizeUpstreamErrorMessage(message.String()); sanitized != message.String() {
+				if next, err := sjson.SetBytes(updated, path, sanitized); err == nil {
+					updated = next
+				}
+			}
+		}
 	}
 	if !isFailedEvent {
 		return updated, !bytes.Equal(updated, payload)
