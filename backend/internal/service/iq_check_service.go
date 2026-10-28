@@ -73,7 +73,7 @@ type IQTargetRepository interface {
 	SetIQTargetOutboundModel(context.Context, IQTargetClaim, string) (bool, error)
 	DeferIQTarget(context.Context, IQTargetClaim, string, time.Time) error
 	CleanupIQResults(context.Context, time.Time, int) (int64, error)
-	ListIQResults(context.Context, int64, string, int64, int) (IQResultsPage, error)
+	ListIQResults(context.Context, int64, string, IQResultsQuery) (IQResultsPage, error)
 	QueueIQTargets(context.Context, int64, []string) ([]IQRunTarget, error)
 	ReconcileIQGates(context.Context) error
 	ListIQTargetViews(context.Context, int64) ([]domain.IQTargetView, error)
@@ -81,8 +81,16 @@ type IQTargetRepository interface {
 }
 
 type IQResultsPage struct {
-	Rounds       []IQRound `json:"rounds"`
-	NextBeforeID *int64    `json:"next_before_id"`
+	Rounds   []IQRound `json:"rounds"`
+	Total    int64     `json:"total"`
+	Page     int       `json:"page"`
+	PageSize int       `json:"page_size"`
+}
+
+type IQResultsQuery struct {
+	Page, PageSize int
+	Filter         string
+	CountTotal     bool
 }
 type IQRunTarget struct {
 	Model   string `json:"model"`
@@ -320,15 +328,15 @@ type IQCheckService struct {
 	targetRepo     IQTargetRepository
 }
 
-func (s *IQCheckService) ResultsPage(ctx context.Context, id int64, model string, beforeID int64, limit int) (IQResultsPage, error) {
-	if s == nil || s.targetRepo == nil {
+func (s *IQCheckService) ResultsPage(ctx context.Context, id int64, model string, page, pageSize int, filter string) (IQResultsPage, error) {
+	if s == nil || s.targetRepo == nil || strings.TrimSpace(model) == "" || filter != "" && filter != "abnormal" {
 		return IQResultsPage{}, ErrIQCheckInvalid
 	}
-	page, err := s.targetRepo.ListIQResults(ctx, id, model, beforeID, limit)
+	result, err := s.targetRepo.ListIQResults(ctx, id, model, IQResultsQuery{Page: page, PageSize: pageSize, Filter: filter, CountTotal: true})
 	if err == nil {
-		normalizeIQResultsPage(&page)
+		normalizeIQResultsPage(&result)
 	}
-	return page, err
+	return result, err
 }
 
 func normalizeIQResultsPage(page *IQResultsPage) {
@@ -366,7 +374,7 @@ func (s *IQCheckService) Diagnostics(ctx context.Context, id int64) (any, error)
 		Targets []diagnosticTarget `json:"targets"`
 	}{Version: 3, Targets: make([]diagnosticTarget, 0, len(targets))}
 	for _, target := range targets {
-		page, err := s.targetRepo.ListIQResults(ctx, id, target.Model, 0, 100)
+		page, err := s.targetRepo.ListIQResults(ctx, id, target.Model, IQResultsQuery{Page: 1, PageSize: 100})
 		if err != nil {
 			return nil, err
 		}

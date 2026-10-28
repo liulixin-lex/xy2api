@@ -604,7 +604,7 @@ func TestIQRoundStoresCanonicalOutboundModelAndNormalizedAnswerOnly(t *testing.T
 	require.Equal(t, "gpt-6.1-sol", persistedOutbound)
 	require.Equal(t, "21", persistedAnswer)
 
-	page, err := repo.ListIQResults(ctx, a.ID, "public-alias", 0, 20)
+	page, err := repo.ListIQResults(ctx, a.ID, "public-alias", service.IQResultsQuery{Page: 1, PageSize: 10, CountTotal: true})
 	require.NoError(t, err)
 	require.Len(t, page.Rounds, 1)
 	require.Equal(t, "21", page.Rounds[0].Attempts[0].Answer)
@@ -613,7 +613,7 @@ func TestIQRoundStoresCanonicalOutboundModelAndNormalizedAnswerOnly(t *testing.T
 	require.NotContains(t, string(encodedPage), rawAnswer)
 	_, err = integrationDB.ExecContext(ctx, `UPDATE account_iq_check_attempts SET answer=$2 WHERE lease_token=$1`, claim.LeaseToken+":1", "The final answer is 21, with detailed explanation 99")
 	require.NoError(t, err)
-	page, err = repo.ListIQResults(ctx, a.ID, "public-alias", 0, 20)
+	page, err = repo.ListIQResults(ctx, a.ID, "public-alias", service.IQResultsQuery{Page: 1, PageSize: 10, CountTotal: true})
 	require.NoError(t, err)
 	require.Equal(t, "21", page.Rounds[0].Attempts[0].Answer)
 	encodedPage, err = json.Marshal(page)
