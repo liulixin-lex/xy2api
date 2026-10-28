@@ -225,6 +225,9 @@
       "backend/internal/server/middleware/admin_auth.go",
       "backend/internal/server/middleware/backend_mode_guard.go",
       "backend/internal/service/admin_user.go",
+      "backend/internal/service/admin_service_group_rate_test.go",
+      "backend/internal/service/admin_service_list_users_test.go",
+      "backend/internal/service/user_group_rate.go",
       "frontend/src/App.vue",
       "frontend/src/components/admin/AdminComplianceDialog.vue",
       "frontend/src/components/admin/ErrorPassthroughRulesModal.vue",
@@ -2581,7 +2584,7 @@
     },
     {
       "path": "backend/internal/service/operator_access_monitor.go",
-      "value": "if changed && (!operatorHas(obj, \"body_override\") || bodyMasked) {"
+      "value": "if changed && !bodySubmitted {"
     },
     {
       "path": "backend/internal/service/operator_access_monitor.go",
@@ -2650,6 +2653,66 @@
     {
       "path": "frontend/src/views/admin/RiskControlView.vue",
       "value": "if (!superOnly.value || (value !== 'openai' && value !== 'typesafe') || apiKeyTesting.value || saving.value) return"
+    },
+    {
+      "path": "backend/internal/service/operator_access_monitor.go",
+      "value": "bodySubmitted = json.Unmarshal(raw, &body) == nil && len(body) > 0"
+    },
+    {
+      "path": "backend/internal/repository/user_group_rate_repo.go",
+      "value": "WHERE ugr.group_id = $1 AND u.deleted_at IS NULL"
+    },
+    {
+      "path": "backend/internal/repository/user_group_rate_repo.go",
+      "value": "SELECT user_id FROM user_group_rate_multipliers\n\t\tWHERE group_id = $1 AND (NOT $2::boolean OR rpm_override IS NOT NULL)"
+    },
+    {
+      "path": "backend/internal/service/operator_access_guard.go",
+      "value": "owners, e := s.userGroupRateRepo.GetOwnerIDsByGroupID(ctx, id, rule == \"group_rpm_rows\")"
+    },
+    {
+      "path": "backend/internal/pkg/operatoraccess/catalog.go",
+      "value": "\"GET /ops/errors/:id\":                                                      {Kind: KindModule, Module: \"ops\", Level: LevelView, Redact: []Redaction{\"ops_upstream_url\"}},"
+    },
+    {
+      "path": "backend/internal/pkg/operatoraccess/catalog.go",
+      "value": "\"GET /ops/request-errors\":                                                  {Kind: KindModule, Module: \"ops\", Level: LevelView, Redact: []Redaction{\"ops_upstream_url\"}},"
+    },
+    {
+      "path": "backend/internal/pkg/operatoraccess/catalog.go",
+      "value": "\"GET /ops/requests\":                                                        {Kind: KindModule, Module: \"ops\", Level: LevelView, Redact: []Redaction{\"ops_upstream_url\"}},"
+    },
+    {
+      "path": "backend/internal/pkg/operatoraccess/catalog.go",
+      "value": "\"GET /ops/upstream-errors\":                                                 {Kind: KindModule, Module: \"ops\", Level: LevelView, Redact: []Redaction{\"ops_upstream_url\"}},"
+    },
+    {
+      "path": "backend/internal/pkg/operatoraccess/catalog.go",
+      "value": "\"GET /ops/upstream-errors/:id\":                                             {Kind: KindModule, Module: \"ops\", Level: LevelView, Redact: []Redaction{\"ops_upstream_url\"}},"
+    },
+    {
+      "path": "frontend/src/components/admin/user/UserEditModal.vue",
+      "value": "watch(() => [props.show, props.user] as const, ([, u]) => {"
+    },
+    {
+      "path": "frontend/src/components/admin/user/UserEditModal.vue",
+      "value": "{ immediate: true, flush: 'post' }"
+    },
+    {
+      "path": "frontend/src/components/admin/user/UserEditModal.vue",
+      "value": "if (operatorPermissionsUserId !== userId || requestVersion !== operatorPermissionsRequestVersion) return"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": ":checked=\"isSelected(row.id)\" :disabled=\"!canManage\""
+    },
+    {
+      "path": "frontend/src/views/admin/UsersView.vue",
+      "value": ":row-selectable=\"canSelectUser\""
+    },
+    {
+      "path": "frontend/src/components/common/DataTableRow.ts",
+      "value": "disabled: props.selectionDisabled,"
     }
   ],
   "forbidden_module_paths": [
@@ -4462,6 +4525,51 @@
       "id": "xy-admin-operator-scope",
       "path": "frontend/src/components/account/__tests__/EditAccountModal.operatorAddress.spec.ts",
       "literal": "preserves masked userinfo byte for byte on a %s API-key account"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_access_fix3_http_test.go",
+      "literal": "func TestOperatorMonitorNetworkChangeDropsOldProbeBody(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/admin_operator_fix3_chain_test.go",
+      "literal": "func TestOperatorOpsDetailsAlwaysStripURLUserinfo(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/pkg/operatoraccess/catalog_test.go",
+      "literal": "func TestCatalogOpsGETUserinfoRedactions(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_access_guard_test.go",
+      "literal": "func TestOperatorGroupRateOwnersIncludeSoftDeletedUsers(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/repository/operator_access_query_repo_integration_test.go",
+      "literal": "func TestUserGroupRateRepoSeparatesVisibleRowsAndOwners(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "frontend/src/components/admin/user/__tests__/UserEditModal.operator.spec.ts",
+      "literal": "loads the table when the always-mounted UsersView modal receives user then show in one click"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "frontend/src/views/admin/__tests__/AccountsView.operatorAccess.spec.ts",
+      "literal": "only enables bulk selection for managers and super admins (%s)"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "frontend/src/views/admin/__tests__/UsersView.operator.spec.ts",
+      "literal": "renders protected row selection correctly in the real table for %s"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "frontend/src/components/common/__tests__/DataTable.spec.ts",
+      "literal": "disables protected rows and selects only eligible rows on %s"
     }
   ]
 }

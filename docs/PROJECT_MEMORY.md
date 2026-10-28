@@ -6,6 +6,10 @@
 
 ## 当前交接状态
 
+### PR-A 普通管理员角色（本地开发、审查与 final bookkeeping 完成，待提交后 audit 与授权推送）
+
+- `feat/operator-role-20261027` 当前 HEAD `3a115065d`，叠加 PR-B #158，基点 `7e590f9ac`。代码、文档、审查和本地 final bookkeeping 已完成，尚未提交、推送或开 PR。最终策略字面量修正后，`sync.py audit` 待提交后在干净树复跑；详细状态、风险与下一步见“进行中的工作”同名条目及 `20261027-operator-role-final-pra-1` 操作日志。
+
 ### 智商检测记录界面精简与上线观察修复：随 0.4.11 发布（2026-10-28；未部署）
 
 - 检测记录分页（每页 10 轮、总数、“仅异常”）与弹窗精简；答对题紧凑诊断；默认全局并发 8；403/429/`rate_limited`/带 `Retry-After` 的未知结果不在轮内重试；不可自动领取的账号显示“暂停：账号不可调度”；排期抖动生效。用户 2026-10-28 授权推送并合并，全部保护检查通过后以合并提交合入。
@@ -255,12 +259,16 @@
 - **PR**：[#158](https://github.com/liulixin-lex/xy2api/pull/158)，rebase 到 main `d57883bec` 后全部检查通过。
 - **下一步**：等待合并（由其他作者合并，本会话不合并）。发版、部署需用户另行授权。PR-A 叠加在本 PR 之上。
 
-### 20261027-operator-role — 普通管理员角色与逐人权限（PR-A；设计审查中，2026-10-28）
+### 20261027-operator-role — 普通管理员角色与逐人权限（PR-A；本地收尾完成，待提交后 audit 与授权推送，2026-10-28）
 
 - **请求**（用户 2026-10-27，方案已批准）：新增「普通管理员」（`operator`）角色，在用户编辑弹窗中逐人勾选各模块的「查看 / 管理」，资金与数据外流操作各有默认关闭的开关，「显示上游地址」也是开关。
 - **分支**：`feat/operator-role-20261027`（worktree `xy2api-wt/operator-role`），叠加在 PR-B 之上，PR 写明依赖 PR-B。PR-B 开出后建分支。
-- **进度**：全部 admin 路由（含 payment、`/pages`、WS、下载票据）的权限目录与开发契约已在仓库外定稿，正在做设计审查。main 已有 `281_iq_targets.sql`，本功能的迁移改用 282。
-- **下一步**：设计审查无 P0/P1 后前后端并行开发；收尾同 PR-B。
+- **进度**：代码、现行文档和 OpenSpec 实现完成，分支 `feat/operator-role-20261027` 叠加在 PR-B #158（基点 `7e590f9ac`）；当前 HEAD `3a115065d`。gpt-6-astra 三轮设计审查、修订 5–9 后的代码审查（包含 money/targets/secrets/authz lens 与 refute-first 复核）均已闭环，fix3 与前端复核 READY，无 P0/P1 遗留。最终策略与 provenance 已登记；OpenSpec 已勾选完成项，PR 正文草稿在仓库外 handoff。本次文档、JSON、策略字面量、候选路径与 diff 检查均通过。
+- **决策**：D12 模型映射继续属于 manage；D14 的 `accounts.upstream_address` 允许持有该 flag 的 operator 修改 API-key 账号和代理地址，接受 E3 的 DNS rebinding 风险；OAuth、setup-token、service_account 等可刷新的账号对 operator 锁定网络身份。
+- **已接受风险**：Part E E1–E11 按合同接受：E1 令牌刷新竞态仍只由超管触发；E2 模型映射可能提供高价上游模型、计费仍按请求模型（D12）；E3 flag 持有者的地址存在 DNS rebinding 风险；E4 超管不受 Bedrock region 格式校验；E5 账号测试会显示上游普通响应文本，少地址权限者的错误事件固定脱敏但 2xx 消息及嵌套 reason 只做 URL 清理；E6 `ops:view` 可见运维上游地址；E7 账号自身成本倍率影响成本与账号额度、不改变用户组价格；E8 新用户绑定真实第三方身份时可能获得一次已启用的首次绑定赠送；E9 超管先删除回退代理源后，带余额权限的 operator 复制账号可能直连；E10 有 `accounts:manage` 的 operator 删除账号会一并删除其分组绑定；E11 现有审计中间件在 step-up 前缓冲权限写入请求体，但未通过 step-up 的写入仍会拒绝。`safeUpstreamURL` 在 ops 事件中保存 URL userinfo 是既有行为，operator 响应会剥离 userinfo、operator 看不到，后续单独处理。
+- **验证与审查**：最终后端全量 unit 67 包通过（显式 30 分钟 timeout）、golangci-lint 0 issues；fix3 后端 build、生成幂等、四组 vet、gofmt、定向 race、`ci_gate` 451 项零跳过和 8 项集成测试通过。前端 typecheck、build、`make test-frontend` 903 项、全量 Vitest 3433 项通过，浏览器复测修复只读选择及权限表加载。初始 E2E gate summary 的 unit、lint、audit 三项失败中，unit 与 lint 后续通过；audit 的旧字面量已修正，须在最终登记提交后的干净树复跑。初始浏览器 3/5/6 失败已由 fix3 复测通过。
+- **后续**：operator 若没有 `accounts:view`，不能创建只有 quota 的渠道监控（例如 antigravity）；此限制按当前合同保留。完成最终复核后，用户授权再推送并开 PR，写明依赖 #158 且当前 diff 包含 #158；等待 CI。合并、发版、部署各需另行授权。
+- **本次收尾登记**（2026-10-28）：Codex gpt-6.1-sol 按 handoff 报告、最终 HEAD 和 `PRA_CONTRACT.md` 更新登记。当前任务仍待提交后干净树 audit、授权推送与 PR/CI，不归档。
 
 ### 20261021-channel-monitor-v1 — 渠道监控 v1 探测优化（PR #120 已合入 main，进入下一个版本；待真实上游验证；2026-10-22 DOCS 更新状态）
 
@@ -418,6 +426,16 @@ pnpm --dir frontend run build
 ## 操作日志
 
 <!-- 按时间从旧到新追加。历史记录只允许追加更正，不应静默改写。 -->
+
+### 2026-10-28T18:13:25Z — `20261027-operator-role-final-pra-1` — 本地收尾完成，待提交后 audit 与授权推送
+
+- 请求/目标：完成 PR-A 推送前登记、OpenSpec tasks、项目记忆与 PR 正文草稿；不提交、stash 或 push。
+- 开始状态：`feat/operator-role-20261027`，HEAD `3a115065d`，开始时工作树干净；分支叠加在 PR-B #158，基点 `7e590f9ac`。
+- 完成操作：通过 handoff 注册器把 fix3 后端和前端 16 条 required literals、9 条 custom patch tests 写入策略；`UPSTREAM_BASE.json` 已有该补丁，登记器幂等运行未改变它。将 monitor 正文条件换成现行 `if changed && !bodySubmitted {`；候选脚本输出的 3 个路径加入 `manual_merge`；确认 OpenSpec 变更已有 `xy_owned` 分类。更新任务勾选、审查/风险/后续记忆，并写 PR 正文草稿。
+- 修改文件：`tools/upstream-sync/policy.json`、`openspec/changes/operator-role-20261027/tasks.md`、`docs/PROJECT_MEMORY.md`；仓库外 `H/runs/final-pra-1/spec.json` 与 `H/runs/PRA_BODY.md`。工作树后来另出现 4 个前端文件的未提交修改，本次未触碰。
+- 验证：后端 unit 与 lint 后续复跑通过；fix3 前端门禁和浏览器复测通过；`python3 tools/check_docs_consistency.py`、`git diff --check`、策略/provenance/spec JSON 解析、609 条 required literals 与 359 条 custom patch test 字面量、候选脚本空输出均通过。PR 正文已检查无本机路径、私有网段或末行偏差。`sync.py audit` 要求干净工作树，需提交后另行运行。
+- 卡点/风险：初始 summary 中 unit 超时、lint 并行锁已由后续独立复跑解决；audit 旧字面量已更新，但不能在当前 dirty tree 做要求干净树的最终 audit。最终 gates 仍须依提交后 audit 与 CI。
+- 下一步：完成本次校验；人工复核 PR 正文；用户授权后提交、推送、开 PR 并等待 CI，PR-A 描述依赖 #158。
 
 ### 2026-10-22T03:16:51Z — `20261022-pr120-release045-integration` — 合入已发布的 main，四项本地检查通过
 
