@@ -245,6 +245,18 @@
 
 ## 进行中的工作
 
+### 20261028-error-recovery-routing — 报错后补救、重试与路由优化（实施中）
+
+- 2026-10-28 用户授权实施，指定 Claude 作产品经理编排：后端 gpt-6.1-sol（xhigh）、前端 gpt-6-astra（xhigh）、审查 gpt-6-astra（xhigh）。§3 决策未逐条答复，按推荐执行（余额阶梯 ×1/×3/×12；E2 同优先级 LoadRate ≤ 最低值+20pp；Codex Retry-After 沿用 10s）。
+- 集成分支 `feat/error-recovery-routing-20261028`（主检出）；实施工作树 `../xy2api-wt/err-{r1,r2,r3,fe}`，分支 `wip/err-{r1,r2,r3,fe}-20261028`，基线 main `d57883bec`。归属与接缝见 FINAL_PLAN §4，实施通用说明 `implementation/BRIEF.md`，各路报告写在 `implementation/`。集成顺序 R1 → R2 → R3 → FE，由 Claude 同步文档与登记。
+
+- 请求（用户 2026-10-28）：只读分析生产近 48 小时各类报错及补救/路由；与 Codex（gpt-6-astra xhigh）联合审查报错补救模块的缺陷与可优化项，参考外部网关实现，给出精简的最佳方案；首字、缓存、成功率、路由不受损。按惯例先定方案、经用户确认再写代码。
+- 本地交接包 `.work/tasks/20261028-error-recovery-routing/`（不入库）：唯一实施依据 `plan/FINAL_PLAN.md`；`evidence/`（生产只读分析、外部网关与 Codex/Claude Code 客户端重试规则调研）；`reviews/`（astra r1 独立审查、r2 对抗审查）。
+- 结论：韧性骨架不删不重写；可救失败来自三处口径脱节：换号判定按状态码各自为政（Grok 400 `unknown provider for model` 19 小时 4,080 次、Gemini 402 余额 517 次直接失败）、“写过字节”被当成“已交付语义输出”（原生 Anthropic 零内容流内 429 178 次不换号；`codex.response.metadata` 让首字截止失效）、出口没按客户端重试规则塑形（`overloaded_error` 让 Claude Code 3 次即停；无 Retry-After 的 429 让 Codex 立即终止；专属分组拒绝用 503）。
+- 方案 19 项（A 换号与惩罚 5、B 提交判定 3、C 余额阶梯 1、D 出口语义 8、E 粘性 2），无迁移、无新开关；不做 hedge、后台余额探针、循环重写。拆 3 路实施，接缝见 FINAL_PLAN §4。
+- 进度（2026-10-28）：FE（`957138e18`）、R3（`9cf601d49`）、R2（`9562a71c2`）已完成并经 astra 审查修复；R1 已交付报告，astra 审查中。PM 预审 R1 的 4 项：成功路径每次 `GetByID`（热路径）、余额阶梯依赖的 AttemptProfile 只在 OpenAI 与 Gemini 设置、删掉旧的 404 `status_404_model` 规则（计划外）、Gemini 排队满写死 2 秒。临时树试合四路无冲突，build 与 unit vet 通过。现行文档（`GATEWAY_RESILIENCE.md` §4.9 等、`account-scheduling.md`）已在集成分支起草，A/C 部分待 R1 修复后核对。
+- 下一步：R1 审查修复 → 按 R1 → R2 → R3 → FE 合入集成分支 → 登记 policy（失效的 5 条 required literal、具名补丁 `xy-error-recovery-routing` 与绑定测试、UPSTREAM_BASE）与 scheduler-diff（E2、Gemini 文件）→ 全量门禁与联合回归 → astra 终审。提交、PR、发版、部署各自待授权。
+
 ### 20261025-pr131-release047 — 0.4.7 已发布（2026-10-26 更正）
 
 - v0.4.7 已于 2026-10-25T16:49:36Z 发布；发布准备登记已原样归档。缓存部分已被 cache-slim 精简方案取代，PR #142 已于 2026-10-26 合入 main，见“当前交接状态”。
@@ -1111,3 +1123,16 @@ pnpm --dir frontend run build
 - 修改：6 个心跳测试的首输出截止时间 2 s→3 s，完成帧 2.2 s→3.2 s（`gateway_convert_client_gone_parity_test.go`、`resilience_compat_stream_prelude_test.go`、`resilience_heartbeat_headers_test.go`、`openai_passthrough_first_output_test.go`），测试语义不变；操作陷阱补一条。
 - 验证：`-race -tags=unit` 编译的测试二进制，8 个进程并发、每个跑 5 轮，共 40 轮全部通过。
 - 其他：定时 Upstream Sync（run 40667898182）失败，原因是 prepare 遇到清单外冲突被阻塞，与本次修复无关，属于另开的上游同步任务（见版本速览中的 v0.2.17 项）。未部署生产。
+
+### 2026-10-28 — 20261028-error-recovery-routing — 生产只读分析与方案定稿 v1.0，待确认
+
+- 请求/目标：只读分析生产近 48 小时报错与补救/路由；与 Codex astra（xhigh）联合审查报错补救模块；参考外部网关；给出精简最佳方案。
+- 开始状态：main `d57883bec`，工作树干净；生产运行 0.4.11。
+- 完成操作：
+  - 生产只读：`ops_error_logs`、`usage_logs`、容器日志（约 3.7 小时）；数据库会话只读，未导出设置表；本地临时日志已删除，SSH 连接已关闭。
+  - 外部网关与 Codex / Claude Code 客户端重试规则调研（源码依据）。
+  - Claude 独立草案 → astra r1 独立审查 → 合并 v0.9 → astra r2 对抗审查 → 定稿 v1.0。r2 否决“模型不支持复用瞬时阶梯”（改用现有 30 分钟账号×模型不可用），补 service 层原地重试、余额阶梯原子性与成功栅栏、可恢复 429 必带 Retry-After 等边界。
+- 修改文件：只有本记忆文件（任务登记与本日志）；方案与证据在本地交接包。
+- 验证：文档一致性检查通过；本轮无代码改动。
+- 卡点/风险：历史 Gemini 余额号未暂停多半是 0.4.8 漏接（0.4.9 已修），部署版本与日志不可得，属推断；240s 计时来源未闭环。
+- 下一步：用户确认 FINAL_PLAN §3 决策点后实施；提交、PR、发版、部署各自待授权。
