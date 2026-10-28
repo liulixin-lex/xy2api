@@ -71,7 +71,7 @@ func TestCompatPreludeCommentHeartbeatStillAllowsFailover(t *testing.T) {
 	withResilienceSettings(t, nil)
 	for _, messages := range []bool{false, true} {
 		t.Run(fmtBool(messages), func(t *testing.T) {
-			svc := compatStreamService(&silentUpstream{headers: true, before: keepaliveStallCreated}, 2, 30, 1)
+			svc := compatStreamService(&silentUpstream{headers: true, before: keepaliveStallCreated}, 3, 30, 1)
 			c, rec := compatStreamContext("/v1/chat/completions", compatChatStreamBody)
 			var err error
 			if messages {
@@ -125,7 +125,7 @@ func TestCompatPreludeHeartbeatDisconnectSkipsOpsAndFailover(t *testing.T) {
 						Body:       body,
 					}}
 				}
-				svc := compatStreamService(upstream, 2, 30, 1)
+				svc := compatStreamService(upstream, 3, 30, 1)
 				account := rawChatCompletionsTestAccount()
 				var result *OpenAIForwardResult
 				var err error
@@ -162,7 +162,7 @@ func TestCompatPreludeHeartbeatDisconnectDrainsUsageAfterContent(t *testing.T) {
 			failedHeartbeat := make(chan struct{})
 			writer := &openAICompatFailingWriter{ResponseWriter: c.Writer, onFailure: func() { close(failedHeartbeat) }}
 			c.Writer = writer
-			svc := compatStreamService(nil, 2, 30, 1)
+			svc := compatStreamService(nil, 3, 30, 1)
 			account := rawChatCompletionsTestAccount()
 			started := time.Now()
 			upstreamCtx, guard := svc.armOpenAICompatFirstEvent(c.Request.Context(), context.Background(), account, true, "model", "", started)
@@ -174,7 +174,7 @@ func TestCompatPreludeHeartbeatDisconnectDrainsUsageAfterContent(t *testing.T) {
 			go func() {
 				// Content arrives after the failed heartbeat but before the first-
 				// output deadline; completion arrives after that original deadline.
-				completedAt := time.NewTimer(time.Until(started.Add(2200 * time.Millisecond)))
+				completedAt := time.NewTimer(time.Until(started.Add(3200 * time.Millisecond)))
 				defer completedAt.Stop()
 				_, err := io.WriteString(pw, keepaliveStallCreated)
 				if err == nil {

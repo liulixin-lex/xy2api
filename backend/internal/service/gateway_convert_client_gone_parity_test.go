@@ -51,7 +51,9 @@ func TestStagedHeartbeatFailureOutcomeMatchesCompatPath(t *testing.T) {
 }
 
 // runStagedHeartbeatFailure: the opening, a heartbeat that fails, content
-// before the 2 s first-output deadline and completion after it.
+// before the 3 s first-output deadline and completion after it. The 1 s
+// keepalive may skip its first tick when the opening lands just after the
+// ticker starts, so the deadline leaves room for the second tick.
 func runStagedHeartbeatFailure(t *testing.T, path string) clientGoneOutcome {
 	t.Helper()
 	c, rec := compatStreamContext("/v1/chat/completions", "")
@@ -80,12 +82,12 @@ func runStagedHeartbeatFailure(t *testing.T, path string) clientGoneOutcome {
 
 	var upstreamCtx context.Context
 	var release func()
-	compatSvc := compatStreamService(nil, 2, 30, 1)
+	compatSvc := compatStreamService(nil, 3, 30, 1)
 	if path == "openai_compat_chat" {
 		ctx, guard := compatSvc.armOpenAICompatFirstEvent(c.Request.Context(), context.Background(), rawChatCompletionsTestAccount(), true, "model", "", started)
 		upstreamCtx, release = ctx, guard.close
 	} else {
-		ctx, guard := newFirstEventGuard(context.Background(), 2*time.Second)
+		ctx, guard := newFirstEventGuard(context.Background(), 3*time.Second)
 		upstreamCtx, release = ctx, guard.Release
 	}
 	defer release()
@@ -93,7 +95,7 @@ func runStagedHeartbeatFailure(t *testing.T, path string) clientGoneOutcome {
 	pr, pw := io.Pipe()
 	defer func() { _ = pr.Close() }()
 	go func() {
-		completeAt := time.NewTimer(time.Until(started.Add(2200 * time.Millisecond)))
+		completeAt := time.NewTimer(time.Until(started.Add(3200 * time.Millisecond)))
 		defer completeAt.Stop()
 		_, err := io.WriteString(pw, opening)
 		for _, step := range []struct {

@@ -182,7 +182,7 @@ func TestOpenAIPassthroughHeartbeatWriteFailureIsClientGone(t *testing.T) {
 			w.fail = func(data string) bool { return strings.HasPrefix(data, ":") }
 			c := ptContext(w)
 			up := newGWUpstream(nil)
-			done := ptRun(compatStreamService(nil, 2, 0, 1), c, up.response(nil))
+			done := ptRun(compatStreamService(nil, 3, 0, 1), c, up.response(nil))
 			up.send(t, ptCreated)
 			require.Eventually(t, func() bool {
 				w.mu.Lock()

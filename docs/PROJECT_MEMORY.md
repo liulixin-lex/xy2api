@@ -288,6 +288,7 @@
 - `sync.py audit` 把工作树里的 `node_modules` 软链接也算作未跟踪文件。借用别处的依赖时放在工作树外面，或者 audit 前删掉软链接。
 - 本机默认的 pnpm（12）不认这份 lockfile 的 `pnpm.overrides`，CI 用 pnpm 9。前端命令用 `npx -y pnpm@9 …`；`corepack pnpm@9 run build` 不够，`build` 脚本里嵌套的 `pnpm run` 仍会从 PATH 取到 12，报 `ERR_PNPM_VERIFY_DEPS_BEFORE_RUN`（2026-10-21 集成门禁遇到）。
 - repository 集成测试（testcontainers）在开发机上要加 `TESTCONTAINERS_HOST_OVERRIDE=127.0.0.1`。该机 Docker 给同一容器的 IPv4 与 IPv6 映射分配了不同主机端口，`localhost` 先解析到 `::1` 时会连到另一个容器（实测连到 redis），lib/pq 卡在 startup、不受 ping 超时约束，表现为测试无输出挂起。另外只同步 `backend/` 时 `TestBillingIntent_ReadOnlyAuditScript` 会因缺 `tools/billing-integrity/audit.sql` 失败，要连 `tools/` 一起同步（2026-10-28 遇到）。排查时若设了 `TESTCONTAINERS_RYUK_DISABLED=true`，harness 的 `TestMain` 以 `os.Exit` 退出、defer 的 `Terminate` 不执行，每次运行都会留下一对 postgres/redis 容器，测完按 `label=org.testcontainers=true` 核对后手动删除。
+- 流式心跳测试不要把首输出截止时间设成 keepalive 的 2 倍。ticker 先于 opening 事件更新 `lastDataAt` 创建，第一拍可能因 `elapsed < interval` 被跳过，心跳推迟到第二拍，正好撞上 2 s 截止（CI 约 1/120 失败）。2026-10-28 把这组测试的截止时间改为 3 s、完成帧改为 3.2 s。
 
 ## 项目速览
 
@@ -1102,3 +1103,11 @@ pnpm --dir frontend run build
 - 完成操作：版本 PR #155 首轮 `test` 撞上已知的心跳计时不稳定测试（`TestCompatHeartbeatCommitsOnlyStableStreamHeaders`，版本 PR 只改版本号），只重跑失败 job 后全部检查通过，以合并提交合入 main `368958301`；在该提交上创建 annotated v0.4.11（正文为更新内容与升级说明）并推送。Release run 40670083466 的 verify-version、build-frontend、release 均成功，2026-10-28T10:22:18Z 正式发布（非 draft、非 prerelease）。
 - 验证：checksums 核验 darwin_arm64 与 linux_amd64；二进制报告 XY2API 0.4.11、兼容 0.2.15、commit 368958301，vcs.modified=false；GHCR 0.4.11/0.4/latest 指向同一 index（amd64+arm64），镜像标签 version=0.4.11、revision=368958301（GHCR registry API 匿名只读核验）。
 - 记忆：版本准备登记原样归档；版本速览更新为 0.4.11。未部署生产。
+
+### 2026-10-28 — 20261028-heartbeat-test-timing — 修复心跳计时不稳定测试
+
+- 请求：用户反馈 v0.4.11 tag 触发的 CI（run 40670083446）`test` 失败，要求尽快检查并修复。
+- 根因：`TestStagedHeartbeatFailureOutcomeMatchesCompatPath` 在 2.00 s 报首输出超时。keepalive ticker 在 opening 事件更新 `lastDataAt` 之前创建，第一拍可能被跳过，心跳落到第二拍（2 s），与 2 s 首输出截止赛跑。同族测试（#154、#155 上的失败）也是这个原因。生产代码行为正确，不改。
+- 修改：6 个心跳测试的首输出截止时间 2 s→3 s，完成帧 2.2 s→3.2 s（`gateway_convert_client_gone_parity_test.go`、`resilience_compat_stream_prelude_test.go`、`resilience_heartbeat_headers_test.go`、`openai_passthrough_first_output_test.go`），测试语义不变；操作陷阱补一条。
+- 验证：`-race -tags=unit` 编译的测试二进制，8 个进程并发、每个跑 5 轮，共 40 轮全部通过。
+- 其他：定时 Upstream Sync（run 40667898182）失败，原因是 prepare 遇到清单外冲突被阻塞，与本次修复无关，属于另开的上游同步任务（见版本速览中的 v0.2.17 项）。未部署生产。
