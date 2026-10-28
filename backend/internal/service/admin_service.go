@@ -704,6 +704,8 @@ var ErrRPMStatusUnavailable = infraerrors.New(http.StatusNotImplemented, "RPM_ST
 
 // adminServiceImpl implements AdminService
 type adminServiceImpl struct {
+	requireActor bool // xy-admin-operator-scope
+
 	cfg                  *config.Config
 	userRepo             UserRepository
 	groupRepo            GroupRepository
