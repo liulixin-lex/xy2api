@@ -56,7 +56,7 @@ func resilienceModelBreakerBlocks(ctx context.Context, account *Account, model s
 // before recording the current HTTP failure, preserving a healthy account's
 // retry for an isolated transient error.
 func resilienceGeminiSkipInPlaceRetry(ctx context.Context, account *Account, status int, headers http.Header, body []byte) bool {
-	if isUnrecoverableAccountFailure(status, body) {
+	if resilience.Current().FailureOn() && isUnrecoverableAccountFailure(status, body) {
 		return true
 	}
 	if !resilience.Current().FailureOn() || account == nil || account.IsPoolMode() || account.IsOpenAICompatible() ||

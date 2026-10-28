@@ -120,6 +120,53 @@ func TestGeminiChatBalance429AppliesOnePenalty(t *testing.T) {
 	require.Equal(t, 1, repo.balanceCalls)
 }
 
+func TestHardFailureInPlaceRetryFollowsMasterInRealForwarders(t *testing.T) {
+	for _, entry := range []string{"anthropic native", "anthropic passthrough", "gemini chat"} {
+		for _, enabled := range []bool{false, true} {
+			t.Run(entry+"/master_"+fmtBool(enabled), func(t *testing.T) {
+				withResilienceSettings(t, func(s *resilience.Settings) { s.Enabled = enabled })
+				platform := PlatformAnthropic
+				if entry == "gemini chat" {
+					platform = PlatformGemini
+				}
+				rateLimit, _, account, _ := newPenaltyFixtureKeepSettings(t, platform)
+				account.Credentials = map[string]any{"api_key": "test-key"}
+				upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{
+					{StatusCode: 503, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(balance403Body))},
+					{StatusCode: 401, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"invalid_api_key","message":"credentials rejected"}}`))},
+				}}
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+				body := []byte(`{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"hello"}]}`)
+				var err error
+				if platform == PlatformGemini {
+					svc := &GeminiMessagesCompatService{cfg: &config.Config{}, httpUpstream: upstream, rateLimitService: rateLimit}
+					require.True(t, svc.shouldRetryGeminiUpstreamError(account, 503), "legacy retry branch is reachable")
+					_, err = svc.ForwardAsChatCompletions(c.Request.Context(), c, account, body)
+				} else {
+					account.Credentials["custom_error_codes_enabled"] = true
+					account.Credentials["custom_error_codes"] = []any{float64(401)}
+					account.Extra = map[string]any{"anthropic_passthrough": entry == "anthropic passthrough"}
+					svc := &GatewayService{cfg: &config.Config{}, httpUpstream: upstream, rateLimitService: rateLimit, tlsFPProfileService: &TLSFingerprintProfileService{}}
+					require.True(t, svc.shouldRetryUpstreamError(account, 503), "custom codes exclude 503 so the legacy retry branch is reachable")
+					require.Equal(t, entry == "anthropic passthrough", account.IsAnthropicAPIKeyPassthroughEnabled())
+					parsed, parseErr := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+					require.NoError(t, parseErr)
+					_, err = svc.Forward(c.Request.Context(), c, account, parsed)
+				}
+				var failover *UpstreamFailoverError
+				require.ErrorAs(t, err, &failover)
+				wantCalls, wantStatus := 2, 401
+				if enabled {
+					wantCalls, wantStatus = 1, 503
+				}
+				require.Equal(t, wantCalls, upstream.callCount)
+				require.Equal(t, wantStatus, failover.StatusCode)
+			})
+		}
+	}
+}
+
 func TestHealthyAccountSuccessSkipsBalanceLookup(t *testing.T) {
 	rateLimit, base, account, r := newPenaltyFixture(t, PlatformOpenAI)
 	repo := &recoveryFixRepo{resilienceAccountRepo: base}
@@ -131,29 +178,55 @@ func TestHealthyAccountSuccessSkipsBalanceLookup(t *testing.T) {
 }
 
 func TestBedrockHardFailureSkipsRetryAndAppliesFinalModelPenalty(t *testing.T) {
-	for _, status := range []int{400, 529} {
-		t.Run(http.StatusText(status), func(t *testing.T) {
-			withResilienceSettings(t, nil)
+	for _, tc := range []struct {
+		name      string
+		status    int
+		enabled   bool
+		wantCalls int
+	}{
+		{"model", 400, true, 1},
+		{"auth", 529, true, 1},
+		{"auth master off", 529, false, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withResilienceSettings(t, func(s *resilience.Settings) { s.Enabled = tc.enabled })
 			repo := &modelNotFoundAccountRepoStub{}
 			account := &Account{ID: 81, Platform: PlatformAnthropic, Type: AccountTypeBedrock, Credentials: map[string]any{"auth_mode": "apikey", "api_key": "test-key"}}
 			body := []byte(`{"error":{"message":"unknown model upstream"}}`)
-			if status == 529 {
+			var signer *BedrockSigner
+			if tc.status == 529 {
+				// Custom error codes apply to API-key accounts. Exercise the
+				// Bedrock executor's retry branch with signed API-key input.
+				account.Type = AccountTypeAPIKey
+				account.Credentials["custom_error_codes_enabled"] = true
+				account.Credentials["custom_error_codes"] = []any{float64(401)}
+				signer = NewBedrockSigner("test-id", "test-secret", "", "us-east-1")
 				body = []byte(`{"error":{"code":"invalid_api_key","message":"credentials rejected"}}`)
 			}
-			upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{StatusCode: status, Header: http.Header{"Retry-After": {"17"}}, Body: io.NopCloser(strings.NewReader(string(body)))}}}
+			finalBody := []byte(`{"error":{"code":"invalid_api_key","message":"final authentication failure"}}`)
+			upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{
+				{StatusCode: tc.status, Header: http.Header{"Retry-After": {"17"}}, Body: io.NopCloser(strings.NewReader(string(body)))},
+				{StatusCode: 401, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(string(finalBody)))},
+			}}
 			svc := &GatewayService{cfg: &config.Config{}, httpUpstream: upstream, rateLimitService: &RateLimitService{accountRepo: repo}}
+			if tc.status == 529 {
+				require.True(t, svc.shouldRetryUpstreamError(account, 529), "legacy retry branch is reachable")
+			}
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
-			resp, err := svc.executeBedrockUpstream(c.Request.Context(), c, account, []byte(`{}`), "upstream", "us-east-1", false, nil, "test-key", "")
+			resp, err := svc.executeBedrockUpstream(c.Request.Context(), c, account, []byte(`{}`), "upstream", "us-east-1", false, signer, "test-key", "")
 			require.NoError(t, err)
-			require.Equal(t, 1, upstream.callCount)
+			require.Equal(t, tc.wantCalls, upstream.callCount)
 			defer func() { _ = resp.Body.Close() }()
 			// The final path handles AUTH once and writes one model penalty.
 			_, err = svc.handleBedrockUpstreamErrors(c.Request.Context(), resp, c, account, "upstream")
 			var failover *UpstreamFailoverError
 			require.ErrorAs(t, err, &failover)
+			if tc.wantCalls == 2 {
+				body = finalBody
+			}
 			require.Equal(t, body, failover.ResponseBody)
-			if status == 400 {
+			if tc.status == 400 {
 				require.Len(t, repo.modelRateLimitCalls, 1)
 			}
 		})

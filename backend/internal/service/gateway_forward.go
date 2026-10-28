@@ -670,7 +670,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				resp.Body = io.NopCloser(bytes.NewReader(respBody))
 				// Read the complete error before charging retry budget; account-hard
 				// failures must reach the one final penalty and switch path.
-				if hardClassifiedFailure || !resilienceInServiceRetryAllowedWithBody(ctx, account.ID, resp.StatusCode, respBody) {
+				if !resilienceInServiceRetryAllowedWithBody(ctx, account.ID, resp.StatusCode, respBody) {
 					break
 				}
 				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
