@@ -252,7 +252,14 @@
       "frontend/src/views/admin/affiliates/AdminAffiliateRecordsTable.vue",
       "frontend/src/views/admin/ops/components/OpsSettingsDialog.vue",
       "frontend/src/views/admin/ops/components/OpsSystemLogTable.vue",
-      "frontend/src/views/admin/orders/AdminPaymentPlansView.vue"
+      "frontend/src/views/admin/orders/AdminPaymentPlansView.vue",
+      "backend/internal/repository/user_group_rate_repo.go",
+      "frontend/src/api/admin/channelMonitor.ts",
+      "frontend/src/api/admin/channelMonitorTemplate.ts",
+      "frontend/src/components/admin/monitor/MonitorAdvancedRequestConfig.vue",
+      "frontend/src/i18n/locales/en/admin/channels.ts",
+      "frontend/src/i18n/locales/zh/admin/channels.ts",
+      "frontend/src/views/admin/__tests__/RiskControlView.spec.ts"
     ],
     "generated": [
       "backend/ent/**",
@@ -2543,6 +2550,106 @@
     {
       "path": "frontend/src/i18n/locales/en/admin/overview.ts",
       "value": "operator: 'Operator'"
+    },
+    {
+      "path": "backend/internal/service/operator_group_rules.go",
+      "value": "\"Platform\",\n\t\"ForceOpenAIFast\","
+    },
+    {
+      "path": "backend/internal/service/operator_group_rules.go",
+      "value": "return operatorLoadError(err, ErrGroupNotFound)"
+    },
+    {
+      "path": "backend/internal/pkg/operatoraccess/redact.go",
+      "value": "func redactMonitorQuotaErrors(data any) {"
+    },
+    {
+      "path": "backend/internal/repository/user_group_rate_repo.go",
+      "value": "JOIN users u ON u.id = ugr.user_id\n\t\tWHERE ugr.group_id = $1"
+    },
+    {
+      "path": "backend/internal/repository/operator_access_query_repo.go",
+      "value": "SELECT DISTINCT user_id FROM user_attribute_values WHERE attribute_id = $1"
+    },
+    {
+      "path": "backend/internal/service/operator_access_guard.go",
+      "value": "case \"attribute_value_owners\":"
+    },
+    {
+      "path": "backend/internal/service/operator_access_monitor.go",
+      "value": "apply != nil && *apply != stored.ApplyPricingToAccountStats"
+    },
+    {
+      "path": "backend/internal/service/operator_access_monitor.go",
+      "value": "if changed && (!operatorHas(obj, \"body_override\") || bodyMasked) {"
+    },
+    {
+      "path": "backend/internal/service/operator_access_monitor.go",
+      "value": "len(stored.ExtraHeaders) > 0 || len(stored.BodyOverride) > 0"
+    },
+    {
+      "path": "backend/internal/service/operator_access_monitor.go",
+      "value": "engine != nil && *engine != \"\" && *engine != stored.Engine"
+    },
+    {
+      "path": "backend/internal/service/operator_access_monitor.go",
+      "value": "effective := stored.EngineConfigs[stored.Engine]"
+    },
+    {
+      "path": "backend/internal/service/operator_account_rules.go",
+      "value": "operatorRestoreURLUserinfo(v, old[k], path)"
+    },
+    {
+      "path": "backend/internal/service/operator_group_rules.go",
+      "value": "\"ModelPricing\",\n\t\"MaxReasoningEffort\",\n\t\"ReasoningEffortMappings\","
+    },
+    {
+      "path": "backend/internal/pkg/operatoraccess/redact.go",
+      "value": "Key(method, path) == \"GET /redeem-codes/export\""
+    },
+    {
+      "path": "backend/internal/pkg/operatoraccess/redact.go",
+      "value": "case \"monitor_v2_errors\":"
+    },
+    {
+      "path": "backend/internal/pkg/operatoraccess/redact.go",
+      "value": "case \"risk_config_url\":"
+    },
+    {
+      "path": "backend/internal/pkg/operatoraccess/redact.go",
+      "value": "m[\"body_override\"] = HeaderMask"
+    },
+    {
+      "path": "frontend/src/views/admin/GroupsView.vue",
+      "value": "for (const field of operatorGroupPriceFields) {"
+    },
+    {
+      "path": "frontend/src/views/admin/ChannelsView.vue",
+      "value": "delete req.account_stats_pricing_rules"
+    },
+    {
+      "path": "frontend/src/views/admin/ChannelsView.vue",
+      "value": "delete req.apply_pricing_to_account_stats"
+    },
+    {
+      "path": "frontend/src/views/admin/UsersView.vue",
+      "value": "getBatchUserAttributes(attributeUserIds)"
+    },
+    {
+      "path": "frontend/src/components/admin/monitor/MonitorAdvancedRequestConfig.vue",
+      "value": "if (body === '******') return ''"
+    },
+    {
+      "path": "frontend/src/components/admin/monitor/MonitorFormDialog.vue",
+      "value": "form.body_override = m.body_override === '******' ? '******' : m.body_override ? { ...m.body_override } : null"
+    },
+    {
+      "path": "frontend/src/components/admin/monitor/MonitorTemplateManagerDialog.vue",
+      "value": "form.body_override = tpl.body_override === '******' ? '******' : tpl.body_override ? { ...tpl.body_override } : null"
+    },
+    {
+      "path": "frontend/src/views/admin/RiskControlView.vue",
+      "value": "if (!superOnly.value || (value !== 'openai' && value !== 'typesafe') || apiKeyTesting.value || saving.value) return"
     }
   ],
   "forbidden_module_paths": [
@@ -4170,6 +4277,191 @@
       "id": "xy-admin-operator-scope",
       "path": "frontend/src/components/account/__tests__/CreateAccountModal.operator.spec.ts",
       "literal": "omits every address key and proxy_id and hides the upstream type without the upstream-address flag"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_group_rules_test.go",
+      "literal": "func TestOperatorGroupMoneyFieldsNeedBalanceFlag(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_group_rules_test.go",
+      "literal": "func TestOperatorGroupEntityLoadNotFoundAndUnavailable(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/pkg/operatoraccess/redact_test.go",
+      "literal": "func TestStripURLUserinfoFindsEveryURLAndAllowsApostrophe(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/pkg/operatoraccess/redact_test.go",
+      "literal": "func TestRedactMonitorQuotaSnapshotErrors(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_access_guard_test.go",
+      "literal": "func TestOperatorEntityLoadersPreserveNotFound(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/pkg/operatoraccess/redact_test.go",
+      "literal": "func TestRedactOperatorAddressUserinfoEverywhere(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/pkg/operatoraccess/redact_test.go",
+      "literal": "func TestRedactAddressMapAndOpsViewUserinfo(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/pkg/operatoraccess/redact_test.go",
+      "literal": "func TestAuditBodyHidesRedeemExportSearch(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/pkg/operatoraccess/redact_test.go",
+      "literal": "func TestRedactMonitorV2ErrorsAndRiskConfigURLs(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/pkg/operatoraccess/redact_test.go",
+      "literal": "func TestRedactMonitorV2NetworkErrorKinds(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/repository/operator_access_query_repo_integration_test.go",
+      "literal": "func TestOperatorAccessQueryRepoAttributeValueOwnersIncludesDeletedUsers(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/repository/operator_access_query_repo_integration_test.go",
+      "literal": "func TestUserGroupRateRepoIncludesSoftDeletedOwners(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/admin_operator_fix2_chain_test.go",
+      "literal": "func TestOperatorURLUserinfoEditRoundTrip(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/admin_operator_fix2_chain_test.go",
+      "literal": "func TestOperatorMonitorBodyOverrideEditRoundTrip(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/admin_operator_fix2_chain_test.go",
+      "literal": "func TestOperatorRiskConfigEngineAndMaskedURLHTTP(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/admin_operator_fix2_chain_test.go",
+      "literal": "func TestOperatorChannelStatsPricingHTTP(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/admin_operator_fix2_chain_test.go",
+      "literal": "func TestOperatorAttributeOwnersAndBatchHTTP(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/admin_operator_fix2_chain_test.go",
+      "literal": "func TestOperatorGroupReasoningAndPriceHTTP(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_access_guard_test.go",
+      "literal": "func TestOperatorAttributeValueOwnersProtectDelete(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_access_guard_test.go",
+      "literal": "func TestOperatorUserAttributeBatchProtectsMixedTargets(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_access_guard_test.go",
+      "literal": "func TestOperatorChannelAccountStatsPricingNeedsBalanceFlag(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_access_guard_test.go",
+      "literal": "func TestOperatorRiskConfigMaskedURLRoundTrip(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_access_guard_test.go",
+      "literal": "func TestOperatorChannelStatsPricingEffectiveEquality(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_account_rules_test.go",
+      "literal": "func TestOperatorAccountMaskedURLRoundTrip(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_group_rules_test.go",
+      "literal": "func TestOperatorGroupNormalizedMoneyRoundTrip(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/admin_operator_chain_test.go",
+      "literal": "{\"TestProtectedCallsFromBatchAndIdempotentPathsCarryActor\", chainActors}"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/admin_operator_chain_test.go",
+      "literal": "{\"TestOperatorAccountTestStreamHidesAddress\", chainStream}"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/admin_operator_chain_test.go",
+      "literal": "{\"TestOperatorReadOnlyViewsHideSecrets\", chainReadOnly}"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/admin_operator_chain_test.go",
+      "literal": "{\"TestOperatorCannotDeleteFallbackOriginThenRevert\", chainRevert}"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "frontend/src/views/admin/__tests__/GroupsView.operator.spec.ts",
+      "literal": "renames a group with NULL prices and omits protected prices when flag=%s"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "frontend/src/views/admin/__tests__/ChannelsView.operator.spec.ts",
+      "literal": "locks grouped account-stats pricing and omits unchanged values without the flag (%s)"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "frontend/src/views/admin/__tests__/UsersView.operator.spec.ts",
+      "literal": "only reads readable attribute rows and skips an empty batch (%s)"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "frontend/src/components/admin/monitor/__tests__/MonitorFormDialog.operator.spec.ts",
+      "literal": "keeps a masked body configured without parsing it and replaces it only on new input"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "frontend/src/components/admin/monitor/__tests__/MonitorFormDialog.operator.spec.ts",
+      "literal": "disables templates with either a masked or visible body override for operators"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "frontend/src/components/admin/monitor/__tests__/MonitorTemplateApplyPickerDialog.operator.spec.ts",
+      "literal": "locks application of a template with a body override (%s)"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "frontend/src/views/admin/__tests__/RiskControlView.spec.ts",
+      "literal": "omits an unchanged operator base URL and locks the engine (%s)"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "frontend/src/components/account/__tests__/EditAccountModal.operatorAddress.spec.ts",
+      "literal": "preserves masked userinfo byte for byte on a %s API-key account"
     }
   ]
 }
