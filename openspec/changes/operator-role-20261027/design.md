@@ -125,7 +125,7 @@
 ## 6. 脱敏
 
 - **位置**：脱敏是 `AdminPermission()` 内的响应改写，按目录行选择规则，只对普通管理员执行。DTO 映射不改，一处覆盖所有路由。
-- **规则**：`account`、`api_key`、`redeem_code`、`promo_code`、`order_code`、`proxy_password`、`monitor`、`monitor_template`、`audit_body`、`ops_upstream_url`。各自的范围与解除开关见现行文档“保护措施”。
+- **规则**：`account`、`api_key`、`redeem_code`、`promo_code`、`order_code`、`proxy_password`、`monitor`、`monitor_template`、`monitor_message`、`audit_body`、`ops_upstream_url`。各自的范围与解除开关见现行文档“保护措施”。
 - **机制**：
   - 只缓冲 JSON 响应，数字按 `json.Number` 往返；
   - 处理器设置了 `ETag` 时，按改写后的内容重新计算，并由中间件自己回答 304；
@@ -135,8 +135,13 @@
 - **错误详情**：没有 `accounts.upstream_address` 时，错误字段换成固定文字 `upstream error details hidden`，而不是逐个删除主机名。主机名清单仍会漏掉 TLS 证书名、重定向目标和不带协议的地址，固定文字什么都不会漏，也更容易测试。5xx 响应只做这一步。
 - **操作日志请求体**：
   - 按 `EqualFold` 匹配键名，同一对象里的别名和重复键都会处理；
+  - 先按记录的路由模板查目录：普通管理员不能调用的接口（`super_only` 行、目录外的路由、登录与用户端接口）整段隐藏请求体和查询参数。这些请求体大多是密钥和配置，存储时的按键名脱敏覆盖不全（例如 `rt`、带账号密码的代理网址、路径里带令牌的 webhook 网址）；
+  - 其余请求体：`rt`、`proxy_url` 一律打码，网址里的用户名和密码一律去掉；没有 `accounts.upstream_address` 时，所有字符串里的网址都换成 `[upstream]`；
+  - 查询参数按 `url.ParseQuery` 解码后判断，含网址或地址键时整段隐藏（存储的是百分号编码的原文）；
   - 无法解析的请求体（包括超过 16 KB 被截断的）整体隐藏；
   - 存储时的脱敏与审计中间件不改。
+- **运维与监控的错误文字**：只通过「使用记录」查看错误详情的调用者，上游错误信息和错误事件的 `message`、`detail` 换成固定文字；渠道监控的检测历史与立即检测结果里，状态为 `error` 的 `message` 换成固定文字（`monitor_message`）。
+- **机器码保留**：错误字段里形如 `mixed_channel_warning` 的机器码（`^[a-z][a-z0-9_]{0,63}$`）不替换，前端仍能识别。
 - **防止搜索还原**：被打码的值不能靠搜索逐字试出来。
   - 用户搜索对普通管理员不匹配 API Key；
   - 没有 `redeem_codes.issue` 时，兑换码只能按邮箱搜索，优惠码不能搜索；

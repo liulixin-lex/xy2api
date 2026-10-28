@@ -75,6 +75,10 @@ Without `orders.refund`, an operator MUST NOT refund, query refunds, retry fulfi
 - **WHEN** an operator with `accounts: manage` and without `users.balance_adjust` creates an account with `group_ids`
 - **THEN** the response is 400 `ADMIN_FIELD_FORBIDDEN` with `metadata.field = "group_ids"`.
 
+#### Scenario: Create-and-redeem with a padded existing code
+- **WHEN** an operator with `users.balance_adjust` sends `POST /api/v1/admin/redeem-codes/create-and-redeem` with `code` set to an existing unused code padded with spaces
+- **THEN** the response is 400 `ADMIN_FIELD_FORBIDDEN` with `metadata.field = "code"` and the existing code stays unused.
+
 #### Scenario: Export after revoke
 - **WHEN** an operator obtains a download ticket and a super admin then removes `data.export`
 - **THEN** the download with that ticket is refused.
@@ -116,7 +120,10 @@ Operator responses MUST be redacted by the catalog row before they are sent:
 - proxy passwords MUST be removed;
 - every value of account `header_overrides` and of channel-monitor and template `extra_headers` MUST be shown as `******`, and a submitted `******` MUST keep the stored value;
 - redeem and promo codes MUST be masked without `redeem_codes.issue`, and order recharge codes without `orders.refund`;
-- in audit-log request bodies, header-map values MUST be masked always, address values MUST be masked without `accounts.upstream_address`, and a body that does not parse as JSON MUST be hidden.
+- in audit-log entries of routes an operator cannot call (`super_only` rows, routes outside the catalog, auth and user routes), the request body and query MUST be hidden;
+- in the other audit-log request bodies, header-map values, `rt` and `proxy_url` values and URL userinfo MUST be masked always; without `accounts.upstream_address`, address values MUST be masked and every URL MUST be scrubbed, and a query holding a URL MUST be hidden; a body that does not parse as JSON MUST be hidden;
+- for callers without `ops:view` and without `accounts.upstream_address`, upstream error messages and details in ops error views MUST be replaced by fixed text, and without `accounts.upstream_address` error-status channel-monitor history and run messages MUST be replaced by fixed text;
+- machine codes such as `mixed_channel_warning` in error fields MUST be kept.
 
 Redaction MUST keep numbers exact, MUST recompute `ETag` and `Content-Length`, and MUST answer 500 `ADMIN_REDACTION_FAILED` instead of the raw body when it fails. Searches MUST NOT reveal masked values: user search MUST skip the API-key match for operators, and without `redeem_codes.issue` redeem-code search MUST be email-only, promo-code search MUST be off and sorting by code MUST be refused.
 
@@ -124,6 +131,10 @@ Redaction MUST keep numbers exact, MUST recompute `ETag` and `Content-Length`, a
 - **WHEN** an operator reads an account whose `header_overrides` has `x-relay-key: secret`
 - **THEN** the response shows `"x-relay-key": "******"`
 - **AND** saving the form with `******` keeps `secret` stored.
+
+#### Scenario: Super-admin-only audit body
+- **WHEN** an operator with `audit_logs:view` reads the audit entry of a super admin's `PUT /api/v1/admin/settings/codex-ticket/proxies`
+- **THEN** its `request_body` is `<request body hidden>` and it has no `extra.query`.
 
 #### Scenario: Redeem search oracle
 - **WHEN** an operator without `redeem_codes.issue` searches redeem codes with a string that has no `@`
