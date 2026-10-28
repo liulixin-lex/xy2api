@@ -337,6 +337,21 @@
         "backend/migrations/246_iq_check_simplification.sql",
         "backend/migrations/256_iq_current_health.sql"
       ]
+    },
+    {
+      "pattern": "\\b(?:next_before_id|before_id)\\b",
+      "reason": "IQ check records are paged with page/page_size/filter; the ops alert events API still uses before_id, so this rule only reads IQ files",
+      "paths": [
+        "backend/internal/handler/admin/account_iq_handler*.go",
+        "backend/internal/service/iq_check_service*.go",
+        "backend/internal/repository/account_iq_*.go",
+        "frontend/src/api/admin/accounts.ts",
+        "frontend/src/api/__tests__/admin.accounts.iqCheck.spec.ts",
+        "frontend/src/types/index.ts",
+        "frontend/src/components/admin/account/IQCheck*",
+        "frontend/src/components/admin/account/__tests__/IQCheck*",
+        "docs/OPENAI_IQ_CHECK.md"
+      ]
     }
   ],
   "private": [
