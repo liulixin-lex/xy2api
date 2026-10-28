@@ -277,6 +277,13 @@
   4. 审查 P2-7（Anthropic 补选失败时可能泄漏槽位）是原有写法，未改；只有闭合 `</think>` 的上游可能被提前判答，写在文档已知局限。
 - 边界：未碰 δ、ε、RA-1 正在改的 handler、`resilience_*`、`GATEWAY_RESILIENCE.md`；`policy.json` 与它们的分支都有追加，合并时注意顺序。
 
+### 20261028-operator-account-groups — 普通管理员凭账号管理权限调整账号分组（2026-10-28 开始）
+
+- 请求（用户 2026-10-28，0.4.12 发布后）：给了普通管理员“账号管理”的管理权限，却不能给账号加入或取消分组。原因是 0.4.12 把账号放入或移出分组归到“用户管理 → 加减余额”（审查认为把高价账号放进便宜分组等于降价）。用户选定：有账号“管理”就能改分组，不加新开关。
+- 范围：账号新建、编辑、批量编辑、复制、影子账号、新建时绑定平台默认分组只要求 `accounts:manage`；分组表单的 `copy_accounts_from_group_ids` 改为有加减余额或账号管理任一即可。账号计费类 extra、分组价格、渠道绑定分组等其余规则不变。同步前端分组选择器、加减余额说明、`ADMIN_PERMISSIONS.md`、OpenSpec `operator-role-20261027` 与已接受风险。
+- 分支：`fix/operator-account-groups-20261028`（工作树 `xy2api-wt/operator-account-groups`，自 origin/main `03fc67de3`）。编码交 gpt-6.1-sol，只读审查交 gpt-6-astra；交接包在仓库外 `xy2api-handoff/operator-account-groups-20261028/`。
+- 停止点：PR CI 全绿后停止；合并、发版、部署需用户另行授权。
+
 ## 操作陷阱
 
 - 处理 Sub2API 同步只以 `docs/UPSTREAM_SYNC.md`、同步 Skill、policy 和脚本为准。`DEV_GUIDE.md` 的“Git 操作”曾写着直接 merge/rebase 上游 main，2026-10-17 已改为指向同步规范，这两条命令也登记为 `tools/docs_consistency.json` 的退役写法。
