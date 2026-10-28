@@ -245,9 +245,22 @@
 
 ## 进行中的工作
 
-### 20261025-pr131-release047 — 0.4.7 已发布（2026-10-26 更正）
+### 20261027-upstream-balance — 账号页「上游余额」列（PR-B；PR #158 已开，CI 全绿，待合并，2026-10-28）
 
-- v0.4.7 已于 2026-10-25T16:49:36Z 发布；发布准备登记已原样归档。缓存部分已被 cache-slim 精简方案取代，PR #142 已于 2026-10-26 合入 main，见“当前交接状态”。
+- **请求**（用户 2026-10-27，方案已批准）：账号管理页新增一列，显示每个上游 API Key 账号（sub2api / new-api）的余额，每分钟采集；new-api 可选填访问令牌读取钱包余额。不新增设置开关。
+- **分支**：`feat/upstream-balance-20261027`（worktree `xy2api-wt/upstream-balance`），开 PR 前 rebase 到最新 main。方案、契约、审查记录在仓库外本地交接包（不入库）。
+- **分工**：总设计 Claude（Opus 5.5）定契约、集成、提交与 PR；后端 Codex（gpt-6.1-sol）；前端 Claude（Opus 5.5）；审查 Codex（gpt-6-astra，只报告不改代码）加 Claude 对抗式核实。
+- **要点**：余额只存 Redis（`upstream_balance:*`），不写 accounts 表、不发调度事件；读接口 `GET /api/v1/admin/accounts/upstream-balances` 只读缓存；发请求前按网关的上游地址策略检查；新凭据 `newapi_access_token`（敏感、脱敏，站点或代理变化时清除）与 `newapi_user_id`；base_url 不是官方域名的 kimi/deepseek 账号不再走 CN 余额检查。现行说明见 [`UPSTREAM_BALANCE.md`](UPSTREAM_BALANCE.md)。
+- **进度**：后端 125 项契约条目与三轮审查修复完成；前端三轮审查修复完成；gpt-6-astra 第三轮与 Claude 核实均无 P0/P1/P2 遗留（两项 P2 列为后续）；本机门禁通过；本机端到端（假上游）12 个账号状态符合预期，浏览器截图在仓库外。
+- **PR**：[#158](https://github.com/liulixin-lex/xy2api/pull/158)，rebase 到 main `d57883bec` 后全部检查通过。
+- **下一步**：等待合并（由其他作者合并，本会话不合并）。发版、部署需用户另行授权。PR-A 叠加在本 PR 之上。
+
+### 20261027-operator-role — 普通管理员角色与逐人权限（PR-A；设计审查中，2026-10-28）
+
+- **请求**（用户 2026-10-27，方案已批准）：新增「普通管理员」（`operator`）角色，在用户编辑弹窗中逐人勾选各模块的「查看 / 管理」，资金与数据外流操作各有默认关闭的开关，「显示上游地址」也是开关。
+- **分支**：`feat/operator-role-20261027`（worktree `xy2api-wt/operator-role`），叠加在 PR-B 之上，PR 写明依赖 PR-B。PR-B 开出后建分支。
+- **进度**：全部 admin 路由（含 payment、`/pages`、WS、下载票据）的权限目录与开发契约已在仓库外定稿，正在做设计审查。main 已有 `281_iq_targets.sql`，本功能的迁移改用 282。
+- **下一步**：设计审查无 P0/P1 后前后端并行开发；收尾同 PR-B。
 
 ### 20261021-channel-monitor-v1 — 渠道监控 v1 探测优化（PR #120 已合入 main，进入下一个版本；待真实上游验证；2026-10-22 DOCS 更新状态）
 
@@ -1111,3 +1124,33 @@ pnpm --dir frontend run build
 - 修改：6 个心跳测试的首输出截止时间 2 s→3 s，完成帧 2.2 s→3.2 s（`gateway_convert_client_gone_parity_test.go`、`resilience_compat_stream_prelude_test.go`、`resilience_heartbeat_headers_test.go`、`openai_passthrough_first_output_test.go`），测试语义不变；操作陷阱补一条。
 - 验证：`-race -tags=unit` 编译的测试二进制，8 个进程并发、每个跑 5 轮，共 40 轮全部通过。
 - 其他：定时 Upstream Sync（run 40667898182）失败，原因是 prepare 遇到清单外冲突被阻塞，与本次修复无关，属于另开的上游同步任务（见版本速览中的 v0.2.17 项）。未部署生产。
+
+### 2026-10-28 — 20261027-upstream-balance — 开发与首轮审查完成，rebase 到 0.4.10 的 main
+
+- 请求/目标：按已批准的 DEV_PLAN 先做 PR-B（上游余额列），再做 PR-A（普通管理员）。
+- 开始状态：分支 `feat/upstream-balance-20261027` 基于 `d25bcd8dc`；开发期间 main 前进到 `478f1b335`（#150–#153，0.4.10）。
+- 完成操作：后端分块开发（125 项契约条目）；gpt-6-astra 与 Claude 对抗式核实两路全量审查，确认的问题已修：采集前缺上游地址策略检查、失败计数不清零且退避溢出、已识别 sub2api 被一次 404 判为不支持、`/api/status` 识别绕过站点缓存、singleflight 内 panic 逃出 recover、单账号更新漏校验用户 ID、代理变化不清令牌、前端两个监听器互相取消请求、`updated_at` 被当作身份变化。rebase 时去掉本分支早先的记忆归档提交，改在 main 的记忆上重新登记；0.4.7 进行中条目原样归档。
+- 修改文件：`backend/`（`upstream_balance*`、凭据钩子、CN 中转跳过、wire）、`frontend/`（余额列、令牌小节）、`docs/UPSTREAM_BALANCE.md`、OpenSpec `upstream-balance-20261027`、`policy.json`、`UPSTREAM_BASE.json`、`Makefile`、本记忆与归档。
+- 验证：rebase 前本机 build、`make generate` 幂等、四种 vet、gofmt、相关包 unit 与 `-race`、golangci-lint、`ci_gate.py`（446 项）、`make test-frontend`、文档一致性、`sync.py audit` 通过；rebase 后的全量门禁在第二轮审查后重跑。
+- 卡点/风险：无。传输层既有 Debug 日志会带出代理地址，属后续事项。
+- 下一步：第二轮审查、全量门禁、浏览器截图，推送并开 PR。
+
+### 2026-10-28 — 20261027-upstream-balance — 审查完成，准备推送
+
+- 请求/目标：完成 PR-B 的审查循环与门禁，推送并开 PR。
+- 开始状态：分支 `feat/upstream-balance-20261027` 基于 main `478f1b335`；main 之后又合入 #154。
+- 完成操作：第二、三轮审查（gpt-6-astra 加 Claude 对抗式核实）后修复 P2：账号预算超时误判为 Redis 故障、预算补写覆盖已保存结果、billing 成功后鉴权计数不清零、已识别 sub2api 在其他 4xx 时被删除类型、识别阶段 `/api/status` 4xx 分类、IPv6 站点末尾多冒号、一处跨秒偶发失败的测试断言；补前端身份变化后只请求一次的 spec。第三轮 astra 结论 READY。两项 P2 列为后续：传输层既有 Debug 日志；前端无法察觉其他管理员只轮换 Key 或令牌。
+- 修改文件：`backend/internal/service/upstream_balance*`、`account_credentials_newapi_token*`，前端 spec，OpenSpec tasks，本记忆。
+- 验证：build、`make generate` 无差异、四种 vet、gofmt、全量 unit、相关包 `-race`、golangci-lint 0 项、`ci_gate.py`（451 项 `-race`，0 跳过）、`make test-frontend`、账号相关前端 1201 项、前端 build、文档一致性、`sync.py audit`；本机端到端用最终代码重跑，12 个账号状态符合预期。rebase 到最新 main 后重跑全量门禁。
+- 卡点/风险：无。
+- 下一步：rebase、推送、开 PR，CI 全绿后停止。
+
+### 2026-10-28 — 20261027-upstream-balance — 推送并开 PR #158，CI 全绿
+
+- 请求/目标：推送 PR-B 并开 PR，CI 全绿后停止。
+- 开始状态：分支 `feat/upstream-balance-20261027`；main 在推送前后依次合入 #155（0.4.11）、#156、#157。
+- 完成操作：rebase 到最新 main（只在本记忆冲突，按脚本重新登记），推送并开 [PR #158](https://github.com/liulixin-lex/xy2api/pull/158)。首轮 CI 全绿后 main 合入 #157 导致记忆冲突，再次 rebase 并 `--force-with-lease` 推送，第二轮 CI 全绿，GitHub 显示可合并。
+- 修改文件：本记忆。
+- 验证：rebase 后代码与本机全量门禁通过的版本逐字节一致（只差 main 自身的改动）；CI 全部检查通过。
+- 卡点/风险：无。
+- 下一步：等待合并；不合并、不打 tag、不发版、不部署。

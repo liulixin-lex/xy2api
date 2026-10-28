@@ -73,6 +73,7 @@ type AccountHandler struct {
 	codexAccountTickets     codexAccountTicketManager
 	cfg                     *config.Config
 	opencodeGoUsage         *service.OpenCodeGoUsageService
+	upstreamBalance         *service.UpstreamBalanceService
 }
 
 // SetUpstreamBillingProbeService attaches the optional remote billing probe service.

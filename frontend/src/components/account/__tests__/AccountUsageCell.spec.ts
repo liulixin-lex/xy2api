@@ -419,6 +419,29 @@ describe('AccountUsageCell', () => {
     expect(wrapper.find('div[title="admin.accounts.cnProviders.noBalanceEndpoint"]').exists()).toBe(true)
   })
 
+  it.each([
+    ['kimi official payg', 'kimi', { account_mode: 'payg', base_url: 'https://api.moonshot.cn/v1' }, null],
+    ['deepseek payg without base_url', 'deepseek', { account_mode: 'payg' }, null],
+    ['kimi relay', 'kimi', { account_mode: 'payg', base_url: 'https://relay.example.com/v1' }, 'admin.accounts.upstreamBalance.seeColumn'],
+    ['deepseek relay', 'deepseek', { account_mode: 'payg', base_url: 'https://relay.example.com' }, 'admin.accounts.upstreamBalance.seeColumn']
+  ] as const)('%s: CN 余额子单元格与占位符按官方主机判定', async (_name, platform, credentials, placeholderTitle) => {
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({ id: 9110, platform, type: 'apikey', credentials: { api_key: 'sk-test', ...credentials } })
+      },
+      global: {
+        stubs: { ...cnUsageCellStubs, UsageProgressBar: true, AccountQuotaInfo: true }
+      }
+    })
+
+    await flushPromises()
+
+    // 中转账号的余额改由「上游余额」列显示：占位符提示去那一列看，而不是“该平台暂无余额查询接口”。
+    expect(wrapper.find('div[title="admin.accounts.cnProviders.noBalanceEndpoint"]').exists()).toBe(false)
+    const placeholder = wrapper.find('div[title="admin.accounts.upstreamBalance.seeColumn"]')
+    expect(placeholder.exists()).toBe(placeholderTitle !== null)
+  })
+
   it('Cline 账号渲染 ClinePass 窗口与积分余额单元格', async () => {
     const wrapper = mount(AccountUsageCell, {
       props: {

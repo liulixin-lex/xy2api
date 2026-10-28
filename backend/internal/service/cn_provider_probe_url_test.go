@@ -92,14 +92,14 @@ func TestCNProviderQuotaService_RejectsURLBlockedByPolicy(t *testing.T) {
 	require.Zero(t, upstream.calls, "probe must not issue any upstream request when URL policy rejects the target")
 }
 
-// deepseek payg 账号自定义 base_url → 余额端点落在中转主机上，必须先过策略。
+// deepseek relay base is rejected by URL policy before any balance request.
 func TestCNProviderBalanceService_RejectsURLBlockedByPolicy(t *testing.T) {
 	repo := &fakeCNProbeAccountRepo{account: &Account{
 		ID: 2, Platform: PlatformDeepseek, Type: AccountTypeAPIKey, Status: StatusActive,
 		Credentials: map[string]any{
 			"account_mode": "payg",
 			"api_key":      "sk-test",
-			"base_url":     "https://relay.attacker.example",
+			"base_url":     "https://relay.deepseek.com",
 		},
 	}}
 	upstream := &recordingHTTPUpstream{}
@@ -107,7 +107,7 @@ func TestCNProviderBalanceService_RejectsURLBlockedByPolicy(t *testing.T) {
 
 	_, err := svc.QueryBalance(context.Background(), 2)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "CN_BALANCE_URL_REJECTED")
+	require.ErrorIs(t, err, ErrCNBalanceRelayAccount)
 	require.Zero(t, upstream.calls, "probe must not issue any upstream request when URL policy rejects the target")
 }
 

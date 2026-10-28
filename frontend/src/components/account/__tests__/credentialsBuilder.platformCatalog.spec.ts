@@ -14,6 +14,7 @@ import {
   OPENCODE_ZEN_ANTHROPIC_BASE_URL,
   OPENCODE_ZEN_BASE_URL,
   cnBalanceCellVisible,
+  cnBalanceShownInUpstreamColumn,
   cnQuotaCellVisible,
   cnSupportsNativeResponses,
   defaultCNAdaptiveBaseUrls,
@@ -224,6 +225,29 @@ describe('credentialsBuilder built-in Command Code provider', () => {
     expect(cnBalanceCellVisible(account({ account_mode: 'payg' }, 'oauth'))).toBe(false)
     expect(cnQuotaCellVisible({ platform: 'deepseek', type: 'apikey', credentials: { account_mode: 'payg' } })).toBe(false)
     expect(cnBalanceCellVisible({ platform: 'zhipu', type: 'apikey', credentials: { account_mode: 'payg' } })).toBe(false)
+  })
+})
+
+describe('credentialsBuilder CN balance sub-cell for kimi and deepseek', () => {
+  // 与后端 upstreamBalanceCNOfficial 的 Go 表格测试逐行对应：中转账号的余额改由「上游余额」列显示。
+  it('hides the CN balance sub-cell for kimi and deepseek relays', () => {
+    const cases: Array<[string, Record<string, unknown>, boolean]> = [
+      ['kimi', { account_mode: 'payg' }, true],
+      ['kimi', {}, true],
+      ['kimi', { account_mode: 'payg', base_url: 'https://api.moonshot.cn/v1' }, true],
+      ['deepseek', { account_mode: 'payg', base_url: 'https://api.deepseek.com' }, true],
+      ['kimi', { account_mode: 'payg', base_url: 'https://relay.example.com/v1' }, false],
+      ['deepseek', { account_mode: 'payg', base_url: 'https://relay.example.com' }, false],
+      ['deepseek', { account_mode: 'payg', base_url: 'http://api.deepseek.com' }, false],
+      ['kimi', { account_mode: 'coding' }, false]
+    ]
+    for (const [platform, credentials, visible] of cases) {
+      const account = { platform, type: 'apikey', credentials }
+      expect(cnBalanceCellVisible(account), `${platform} ${JSON.stringify(credentials)}`).toBe(visible)
+      // coding 模式本来就没有余额子单元格，也不归上游余额列；其余行两者恰好互补。
+      const inUpstreamColumn = credentials.account_mode !== 'coding' && !visible
+      expect(cnBalanceShownInUpstreamColumn(account), `${platform} ${JSON.stringify(credentials)}`).toBe(inUpstreamColumn)
+    }
   })
 })
 
