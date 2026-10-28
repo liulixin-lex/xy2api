@@ -4165,3 +4165,92 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - v0.4.7 已于 2026-10-25T16:49:36Z 发布；发布准备登记已原样归档。缓存部分已被 cache-slim 精简方案取代，PR #142 已于 2026-10-26 合入 main，见“当前交接状态”。
 
 <!-- 2026-10-28 0.4.7 原样归档结束。 -->
+
+## 2026-10-28 0.4.12 发布完成后归档（原样归档）
+
+以下保留归档前原文，其中“待提交/待合并/待发布”是当时状态；#158、#159、#160、#161 已依次合入，0.4.12 已正式发布。实际发布与制品证据见主文件最新摘要和日志。
+
+### 报错后补救、重试与路由优化：终审修复验收通过，发布执行中（2026-10-28 更新）
+
+- **背景**：生产 48 小时只读分析显示，可补救的失败集中在三处：各平台按状态码各自决定是否换号；写出过协议字节就算已输出；出口不符合 Codex 与 Claude Code 的重试规则。方案见本地 `.work/tasks/20261028-error-recovery-routing/plan/FINAL_PLAN.md`。
+- **目标**：失败请求更快、更准地换号或重试，减少客户端重连与中断；首字、缓存、成功率与路由不受损；精简，不加开关与影子。用户 2026-10-28 授权实施，并在完成后授权 astra 推送、开 PR、把其他所有开启的 PR（#158、#159）一同合进 main、发布 0.4.12；部署不在授权内。
+- **已完成**：
+  - R1 分类换号与惩罚、R2 语义输出判定与 Anthropic 暂存、R3 客户端出口与替补粘性、FE 设置文案；
+  - astra 逐路审查与 R1 修复（FIX）、集成终审与 M1/M2 修复；
+  - 现行文档：`GATEWAY_RESILIENCE.md` §4.9 等、`account-scheduling.md`、runbook；
+  - 上游登记：5 条失效 literal 替换，新增钩子，具名补丁 `xy-error-recovery-routing`，scheduler-diff 审阅块。
+  - 发布执行：快速验收 M1/M2/F2 与 D1–D4 通过；PR #158、#159、#160 均在全部检查成功后常规合入 main（`39ef32f51`、`5b06d6ef4`、`62c2fe72c`）。正在准备 0.4.12 版本 PR。
+- **未完成**：
+  1. 发版准备 PR 的检查与合并；annotated tag v0.4.12 与 Release；发版后记忆归档 PR。
+  2. 上线后按 `evidence/prod_errors_48h.md` 的查询复跑 48 小时对比（需另行授权部署后）。
+- **卡点与风险**：
+  - WS 与 WS→HTTP 桥接的余额升档与复位暂缓（缺统一发送点与逐轮快照）；
+  - Gemini 429 无重置时间落 PST 午夜、count_tokens 负能力等残留未做；
+  - 历史账号 424 未暂停的根因属推断；
+  - GitHub API 配额曾耗尽，CI 监视需控制频率。
+- **关键位置**：
+  - 集成分支 `feat/error-recovery-routing-20261028`；
+  - 本地交接包 `.work/tasks/20261028-error-recovery-routing/`（各路报告、审查、发版说明）。
+
+### PR-A 普通管理员角色（本地开发、审查与 final bookkeeping 完成，待提交后 audit 与授权推送）
+
+- `feat/operator-role-20261027` 当前 HEAD `3a115065d`，叠加 PR-B #158，基点 `7e590f9ac`。代码、文档、审查和本地 final bookkeeping 已完成，尚未提交、推送或开 PR。最终策略字面量修正后，`sync.py audit` 待提交后在干净树复跑；详细状态、风险与下一步见“进行中的工作”同名条目及 `20261027-operator-role-final-pra-1` 操作日志。
+
+### 20261028-release0412 — 0.4.12 版本准备与发布（进行中）
+
+- 用户授权推送、合并本任务与其他开放 PR、发布 0.4.12；不部署。#158、#159、#160 均已按固定 head 与全部成功检查常规合入。
+- 版本分支 `release/0.4.12-20261028` 基于 main `62c2fe72c`；只将程序 VERSION 与 provenance 产品版本 0.4.11→0.4.12，并登记本任务，Sub2API 兼容基线 0.2.15 不变。
+- 本版包含迁移 282。升级与回退按 ADMIN_PERMISSIONS、UPSTREAM_BALANCE；回退前必须清除 new-api 访问令牌并处理 operator 角色、权限表及迁移记录，不能仅换旧镜像。
+- 下一步：本地门禁、版本 PR 完整 CI 与合并；在版本合并提交打 annotated tag，核验 Release、五平台附件与 GHCR 双架构；最后通过纯记忆 PR 原样归档完成的任务。
+
+### 20261028-error-recovery-routing — 报错后补救、重试与路由优化（集成完成，待发布）
+
+- 发布执行（2026-10-28，astra）：从干净的 `c4ec8cd7b` 接手；按用户明确授权快速验收 M1/M2/F2 与 D1–D4 后，执行本任务 PR、#158 → #159 → 本任务合并、0.4.12 版本 PR、annotated tag/Release 与记忆归档 PR。只对登记文件按并集解决冲突，业务冲突或非偶发 CI 失败即停止；不操作生产。执行证据写在本地 `implementation/RELEASE_report.md`。
+- 验收结果：M1/M2/F2 与 D1–D4 通过，三个定向真实入口测试通过。发版说明需更正交接包的“无迁移、直接换回镜像”：#159 含迁移 282，回退按 ADMIN_PERMISSIONS 处理；#158 在回退旧版本前须清除 new-api 访问令牌。其他长门禁继承 FIX 与 PM 的源绑定结果，远端完整 CI 仍须通过。
+
+- 2026-10-28 用户授权实施，指定 Claude 作产品经理编排：后端 gpt-6.1-sol（xhigh）、前端 gpt-6-astra（xhigh）、审查 gpt-6-astra（xhigh）。§3 决策未逐条答复，按推荐执行（余额阶梯 ×1/×3/×12；E2 同优先级 LoadRate ≤ 最低值+20pp；Codex Retry-After 沿用 10s）。
+- 集成分支 `feat/error-recovery-routing-20261028`（主检出）；实施工作树 `../xy2api-wt/err-{r1,r2,r3,fe}`，分支 `wip/err-{r1,r2,r3,fe}-20261028`，基线 main `d57883bec`。归属与接缝见 FINAL_PLAN §4，实施通用说明 `implementation/BRIEF.md`，各路报告写在 `implementation/`。集成顺序 R1 → R2 → R3 → FE，由 Claude 同步文档与登记。
+
+- 请求（用户 2026-10-28）：只读分析生产近 48 小时各类报错及补救/路由；与 Codex（gpt-6-astra xhigh）联合审查报错补救模块的缺陷与可优化项，参考外部网关实现，给出精简的最佳方案；首字、缓存、成功率、路由不受损。按惯例先定方案、经用户确认再写代码。
+- 本地交接包 `.work/tasks/20261028-error-recovery-routing/`（不入库）：唯一实施依据 `plan/FINAL_PLAN.md`；`evidence/`（生产只读分析、外部网关与 Codex/Claude Code 客户端重试规则调研）；`reviews/`（astra r1 独立审查、r2 对抗审查）。
+- 结论：韧性骨架不删不重写；可救失败来自三处口径脱节：换号判定按状态码各自为政（Grok 400 `unknown provider for model` 19 小时 4,080 次、Gemini 402 余额 517 次直接失败）、“写过字节”被当成“已交付语义输出”（原生 Anthropic 零内容流内 429 178 次不换号；`codex.response.metadata` 让首字截止失效）、出口没按客户端重试规则塑形（`overloaded_error` 让 Claude Code 3 次即停；无 Retry-After 的 429 让 Codex 立即终止；专属分组拒绝用 503）。
+- 方案 19 项（A 换号与惩罚 5、B 提交判定 3、C 余额阶梯 1、D 出口语义 8、E 粘性 2），无迁移、无新开关；不做 hedge、后台余额探针、循环重写。拆 3 路实施，接缝见 FINAL_PLAN §4。
+- 进度（2026-10-28）：四路实施与 FIX、终审修复都已合入集成分支（`66765e6dd`），详见顶部交接状态与操作日志。
+- 下一步：astra 按 `implementation/RELEASE_BRIEF.md` 推送、合并全部开启的 PR、发布 0.4.12；发布后把本条与顶部小节原样归档。部署另行授权。
+
+### 20261027-upstream-balance — 账号页「上游余额」列（PR-B；PR #158 已开，CI 全绿，待合并，2026-10-28）
+
+- **请求**（用户 2026-10-27，方案已批准）：账号管理页新增一列，显示每个上游 API Key 账号（sub2api / new-api）的余额，每分钟采集；new-api 可选填访问令牌读取钱包余额。不新增设置开关。
+- **分支**：`feat/upstream-balance-20261027`（worktree `xy2api-wt/upstream-balance`），开 PR 前 rebase 到最新 main。方案、契约、审查记录在仓库外本地交接包（不入库）。
+- **分工**：总设计 Claude（Opus 5.5）定契约、集成、提交与 PR；后端 Codex（gpt-6.1-sol）；前端 Claude（Opus 5.5）；审查 Codex（gpt-6-astra，只报告不改代码）加 Claude 对抗式核实。
+- **要点**：余额只存 Redis（`upstream_balance:*`），不写 accounts 表、不发调度事件；读接口 `GET /api/v1/admin/accounts/upstream-balances` 只读缓存；发请求前按网关的上游地址策略检查；新凭据 `newapi_access_token`（敏感、脱敏，站点或代理变化时清除）与 `newapi_user_id`；base_url 不是官方域名的 kimi/deepseek 账号不再走 CN 余额检查。现行说明见 [`UPSTREAM_BALANCE.md`](UPSTREAM_BALANCE.md)。
+- **进度**：后端 125 项契约条目与三轮审查修复完成；前端三轮审查修复完成；gpt-6-astra 第三轮与 Claude 核实均无 P0/P1/P2 遗留（两项 P2 列为后续）；本机门禁通过；本机端到端（假上游）12 个账号状态符合预期，浏览器截图在仓库外。
+- **PR**：[#158](https://github.com/liulixin-lex/xy2api/pull/158)，rebase 到 main `d57883bec` 后全部检查通过。
+- **下一步**：等待合并（由其他作者合并，本会话不合并）。发版、部署需用户另行授权。PR-A 叠加在本 PR 之上。
+
+### 20261027-operator-role — 普通管理员角色与逐人权限（PR-A；本地收尾完成，待提交后 audit 与授权推送，2026-10-28）
+
+- **请求**（用户 2026-10-27，方案已批准）：新增「普通管理员」（`operator`）角色，在用户编辑弹窗中逐人勾选各模块的「查看 / 管理」，资金与数据外流操作各有默认关闭的开关，「显示上游地址」也是开关。
+- **分支**：`feat/operator-role-20261027`（worktree `xy2api-wt/operator-role`），叠加在 PR-B 之上，PR 写明依赖 PR-B。PR-B 开出后建分支。
+- **进度**：代码、现行文档和 OpenSpec 实现完成，分支 `feat/operator-role-20261027` 叠加在 PR-B #158（基点 `7e590f9ac`）；当前 HEAD `3a115065d`。gpt-6-astra 三轮设计审查、修订 5–9 后的代码审查（包含 money/targets/secrets/authz lens 与 refute-first 复核）均已闭环，fix3 与前端复核 READY，无 P0/P1 遗留。最终策略与 provenance 已登记；OpenSpec 已勾选完成项，PR 正文草稿在仓库外 handoff。本次文档、JSON、策略字面量、候选路径与 diff 检查均通过。
+- **决策**：D12 模型映射继续属于 manage；D14 的 `accounts.upstream_address` 允许持有该 flag 的 operator 修改 API-key 账号和代理地址，接受 E3 的 DNS rebinding 风险；OAuth、setup-token、service_account 等可刷新的账号对 operator 锁定网络身份。
+- **已接受风险**：Part E E1–E11 按合同接受：E1 令牌刷新竞态仍只由超管触发；E2 模型映射可能提供高价上游模型、计费仍按请求模型（D12）；E3 flag 持有者的地址存在 DNS rebinding 风险；E4 超管不受 Bedrock region 格式校验；E5 账号测试会显示上游普通响应文本，少地址权限者的错误事件固定脱敏但 2xx 消息及嵌套 reason 只做 URL 清理；E6 `ops:view` 可见运维上游地址；E7 账号自身成本倍率影响成本与账号额度、不改变用户组价格；E8 新用户绑定真实第三方身份时可能获得一次已启用的首次绑定赠送；E9 超管先删除回退代理源后，带余额权限的 operator 复制账号可能直连；E10 有 `accounts:manage` 的 operator 删除账号会一并删除其分组绑定；E11 现有审计中间件在 step-up 前缓冲权限写入请求体，但未通过 step-up 的写入仍会拒绝。`safeUpstreamURL` 在 ops 事件中保存 URL userinfo 是既有行为，operator 响应会剥离 userinfo、operator 看不到，后续单独处理。
+- **验证与审查**：最终后端全量 unit 67 包通过（显式 30 分钟 timeout）、golangci-lint 0 issues；fix3 后端 build、生成幂等、四组 vet、gofmt、定向 race、`ci_gate` 451 项零跳过和 8 项集成测试通过。前端 typecheck、build、`make test-frontend` 903 项、全量 Vitest 3433 项通过，浏览器复测修复只读选择及权限表加载。初始 E2E gate summary 的 unit、lint、audit 三项失败中，unit 与 lint 后续通过；audit 的旧字面量已修正，须在最终登记提交后的干净树复跑。初始浏览器 3/5/6 失败已由 fix3 复测通过。
+- **后续**：operator 若没有 `accounts:view`，不能创建只有 quota 的渠道监控（例如 antigravity）；此限制按当前合同保留。完成最终复核后，用户授权再推送并开 PR，写明依赖 #158 且当前 diff 包含 #158；等待 CI。合并、发版、部署各需另行授权。
+- **本次收尾登记**（2026-10-28）：Codex gpt-6.1-sol 按 handoff 报告、最终 HEAD 和 `PRA_CONTRACT.md` 更新登记。当前任务仍待提交后干净树 audit、授权推送与 PR/CI，不归档。
+
+### 2026-10-28T18:13:25Z — `20261027-operator-role-final-pra-1` — 本地收尾完成，待提交后 audit 与授权推送
+
+- 请求/目标：完成 PR-A 推送前登记、OpenSpec tasks、项目记忆与 PR 正文草稿；不提交、stash 或 push。
+- 开始状态：`feat/operator-role-20261027`，HEAD `3a115065d`，开始时工作树干净；分支叠加在 PR-B #158，基点 `7e590f9ac`。
+- 完成操作：通过 handoff 注册器把 fix3 后端和前端 16 条 required literals、9 条 custom patch tests 写入策略；`UPSTREAM_BASE.json` 已有该补丁，登记器幂等运行未改变它。将 monitor 正文条件换成现行 `if changed && !bodySubmitted {`；候选脚本输出的 3 个路径加入 `manual_merge`；确认 OpenSpec 变更已有 `xy_owned` 分类。更新任务勾选、审查/风险/后续记忆，并写 PR 正文草稿。
+- 修改文件：`tools/upstream-sync/policy.json`、`openspec/changes/operator-role-20261027/tasks.md`、`docs/PROJECT_MEMORY.md`；仓库外 `H/runs/final-pra-1/spec.json` 与 `H/runs/PRA_BODY.md`。工作树后来另出现 4 个前端文件的未提交修改，本次未触碰。
+- 验证：后端 unit 与 lint 后续复跑通过；fix3 前端门禁和浏览器复测通过；`python3 tools/check_docs_consistency.py`、`git diff --check`、策略/provenance/spec JSON 解析、609 条 required literals 与 359 条 custom patch test 字面量、候选脚本空输出均通过。PR 正文已检查无本机路径、私有网段或末行偏差。`sync.py audit` 要求干净工作树，需提交后另行运行。
+- 卡点/风险：初始 summary 中 unit 超时、lint 并行锁已由后续独立复跑解决；audit 旧字面量已更新，但不能在当前 dirty tree 做要求干净树的最终 audit。最终 gates 仍须依提交后 audit 与 CI。
+- 下一步：完成本次校验；人工复核 PR 正文；用户授权后提交、推送、开 PR 并等待 CI，PR-A 描述依赖 #158。
+
+### 发布前版本与环境速览（原文）
+
+- 正式版：XY2API v0.4.11（2026-10-28，Sub2API 兼容基线 0.2.15）。生产 2026-10-28 05:25Z 起运行 0.4.10（只读核实），0.4.11 未部署；以下 2026-10-21 的生产记录供追溯。生产主机 2026-10-20 09:15Z 起经在线更新运行 0.4.3 程序（2026-10-21T11:35Z 只读核实：公开设置的版本为 0.4.3，容器内程序 commit `888f49db8`），容器镜像仍是 0.3.0；部署需要用户单独授权。
+
+<!-- 2026-10-28 0.4.12 原样归档结束。 -->
