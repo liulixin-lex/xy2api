@@ -215,14 +215,15 @@
           <template #header-select>
             <input
               type="checkbox"
-              class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
               :checked="allVisibleSelected"
+              :disabled="!canManage"
               @click.stop
               @change="toggleSelectAllVisible($event)"
             />
           </template>
           <template #cell-select="{ row }">
-            <input type="checkbox" :checked="isSelected(row.id)" @change="toggleSel(row.id)" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+            <input type="checkbox" :checked="isSelected(row.id)" :disabled="!canManage" @change="toggleSel(row.id)" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500 disabled:cursor-not-allowed disabled:opacity-50" />
           </template>
           <template #cell-id="{ value }">
             <span class="font-mono text-xs text-gray-500 dark:text-gray-400">#{{ value }}</span>
@@ -1287,9 +1288,9 @@ const swipeVirtualContext: SwipeSelectVirtualContext = {
 
 useSwipeSelect(accountTableRef, {
   isSelected,
-  select,
-  deselect,
-  batchUpdate
+  select: (id) => { if (canManage.value) select(id) },
+  deselect: (id) => { if (canManage.value) deselect(id) },
+  batchUpdate: (updater) => { if (canManage.value) batchUpdate(updater) }
 }, swipeVirtualContext)
 
 const resetAutoRefreshCache = () => {

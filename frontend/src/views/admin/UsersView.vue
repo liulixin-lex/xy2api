@@ -306,6 +306,7 @@
           selectable
           :selected-keys="selectedIds"
           :selection-label="getUserSelectionLabel"
+          :row-selectable="canSelectUser"
           :actions-count="7"
           :server-side-sort="true"
           default-sort-key="created_at"
@@ -885,6 +886,7 @@ const { canManage, has, isSuperAdmin } = useAdminPermission('users')
 // on plain users other than themselves (the backend target rule).
 const canActOn = (row: AdminUser) =>
   isSuperAdmin.value ? row.role !== 'admin' : canManage.value && row.role === 'user' && row.id !== authStore.user?.id
+const canSelectUser = (row: AdminUser) => isSuperAdmin.value || canActOn(row)
 // Operators can only open plain users' details (never admins, operators or themselves).
 const canReadRow = (row: AdminUser) => isSuperAdmin.value || row.role === 'user'
 // Super admins keep deposit and withdraw on every row; operators need the row and "Adjust balance".

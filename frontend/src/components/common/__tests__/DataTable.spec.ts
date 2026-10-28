@@ -309,6 +309,37 @@ describe('DataTable', () => {
     expect(wrapper.emitted('selectionChange')?.at(-1)?.[0]).toEqual([99, 2])
   })
 
+  it.each(['desktop', 'mobile'] as const)('disables protected rows and selects only eligible rows on %s', async (viewport) => {
+    if (viewport === 'mobile') stubMobileMatchMedia()
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: [{ key: 'name', label: 'Name' }],
+        data: [{ id: 1, name: 'Protected' }, { id: 2, name: 'Allowed' }],
+        rowKey: 'id',
+        selectable: true,
+        selectedKeys: [99],
+        rowSelectable: (row: { id: number }) => row.id === 2
+      }
+    })
+    const header = wrapper.get<HTMLInputElement>(`[data-test="select-all${viewport === 'mobile' ? '-mobile' : ''}"]`)
+    const inputs = wrapper.findAll<HTMLInputElement>('[data-test="select-row"]')
+    expect(inputs.map(input => input.element.disabled)).toEqual([true, false])
+    await inputs[0].trigger('change')
+    expect(wrapper.emitted('update:selectedKeys')).toBeUndefined()
+
+    await header.setValue(true)
+    expect(wrapper.emitted('update:selectedKeys')?.at(-1)?.[0]).toEqual([99, 2])
+    await wrapper.setProps({ selectedKeys: [99, 2] })
+    expect(header.element.checked).toBe(true)
+    expect(header.element.indeterminate).toBe(false)
+    await header.setValue(false)
+    expect(wrapper.emitted('update:selectedKeys')?.at(-1)?.[0]).toEqual([99])
+
+    await wrapper.setProps({ data: [{ id: 1, name: 'Protected' }] })
+    expect(header.element.disabled).toBe(true)
+    wrapper.unmount()
+  })
+
   it('keeps the single usage field shrinkable in a 320px mobile card', () => {
     stubMobileMatchMedia()
     const viewport = document.createElement('div')

@@ -1,6 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { defineComponent, h, ref } from 'vue'
 import { getActivePinia } from 'pinia'
+import type { AdminUser } from '@/types'
 
 import UserEditModal from '../UserEditModal.vue'
 
@@ -66,6 +68,26 @@ vi.mock('vue-i18n', async (importOriginal) => ({
 
 type Role = 'admin' | 'operator' | 'user'
 
+const member = (id = 7, role: Role = 'operator') => ({
+  id, email: `member-${id}@example.test`, username: 'member', notes: '', role, concurrency: 1, rpm_limit: 0
+}) as AdminUser
+
+const modalGlobals = () => ({
+  plugins: [getActivePinia()!],
+  stubs: {
+    BaseDialog: {
+      props: ['show', 'title'],
+      template: '<div v-if="show"><slot /><slot name="footer" /></div>'
+    },
+    Select: true,
+    Icon: true,
+    UserAttributeForm: true,
+    TotpStepUpDialog: true
+  }
+})
+
+enableAutoUnmount(afterEach)
+
 function mountModal(signedInRole: Role, editedRole: Role) {
   getActivePinia()!.state.value.auth = { user: { id: 1, role: signedInRole }, runMode: 'standard' }
   return mount(UserEditModal, {
@@ -81,19 +103,7 @@ function mountModal(signedInRole: Role, editedRole: Role) {
         rpm_limit: 0
       } as never
     },
-    global: {
-      plugins: [getActivePinia()!],
-      stubs: {
-        BaseDialog: {
-          props: ['show', 'title'],
-          template: '<div v-if="show"><slot /><slot name="footer" /></div>'
-        },
-        Select: true,
-        Icon: true,
-        UserAttributeForm: true,
-        TotpStepUpDialog: true
-      }
-    }
+    global: modalGlobals()
   })
 }
 
@@ -107,6 +117,103 @@ describe('UserEditModal operator role', () => {
     update.mockResolvedValue({})
     updateOperatorPermissions.mockResolvedValue({ modules: {}, flags: [] })
     getOperatorPermissions.mockResolvedValue({ modules: { users: 'view' }, flags: [] })
+  })
+
+  it('loads the table when the always-mounted UsersView modal receives user then show in one click', async () => {
+    let resolvePermissions!: (value: unknown) => void
+    getOperatorPermissions.mockImplementationOnce(() => new Promise(resolve => { resolvePermissions = resolve }))
+    getActivePinia()!.state.value.auth = { user: { id: 1, role: 'admin' }, runMode: 'standard' }
+    // UsersView.handleEdit assigns editingUser, then showEditModal in the same tick;
+    // UserEditModal stays mounted with null/false between openings.
+    const wrapper = mount(defineComponent({
+      components: { UserEditModal },
+      setup() {
+        const editingUser = ref<AdminUser | null>(null)
+        const showEditModal = ref(false)
+        const open = () => { editingUser.value = member(); showEditModal.value = true }
+        const close = () => { showEditModal.value = false; editingUser.value = null }
+        return { editingUser, showEditModal, open, close }
+      },
+      // The browser applies the user prop before the Boolean-cast show prop.
+      render() {
+        return [h('button', { onClick: this.open }, 'edit'), h(UserEditModal, {
+          user: this.editingUser, show: this.showEditModal, onClose: this.close
+        })]
+      }
+    }), { global: modalGlobals() })
+
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+    resolvePermissions({ modules: { users: 'view' }, flags: [] })
+    await flushPromises()
+
+    expect(getOperatorPermissions).toHaveBeenCalledTimes(1)
+    expect(getOperatorPermissions).toHaveBeenCalledWith(7)
+    expect(wrapper.find('[data-test="operator-permissions-table"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="operator-view-users"]').element).toHaveProperty('checked', true)
+  })
+
+  it.each(['user-first', 'show-first'] as const)('loads with separate prop updates (%s)', async (order) => {
+    const wrapper = mountModal('admin', 'user')
+    await wrapper.setProps({ show: false, user: null })
+    if (order === 'user-first') {
+      await wrapper.setProps({ user: member() })
+      expect(getOperatorPermissions).not.toHaveBeenCalled()
+      await wrapper.setProps({ show: true })
+    } else {
+      await wrapper.setProps({ show: true })
+      expect(getOperatorPermissions).not.toHaveBeenCalled()
+      await wrapper.setProps({ user: member() })
+    }
+    await flushPromises()
+    expect(wrapper.find('[data-test="operator-permissions-table"]').exists()).toBe(true)
+    expect(getOperatorPermissions).toHaveBeenCalledTimes(1)
+    expect(getOperatorPermissions).toHaveBeenCalledWith(7)
+  })
+
+  it('reloads stored permissions when reopening the same user after unsaved edits', async () => {
+    const wrapper = mountModal('admin', 'operator')
+    await flushPromises()
+    await wrapper.get('[data-test="operator-manage-users"]').setValue(true)
+    await wrapper.setProps({ show: false })
+    getOperatorPermissions.mockResolvedValue({ modules: { accounts: 'view' }, flags: [] })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    expect(getOperatorPermissions).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-test="operator-manage-users"]').element).toHaveProperty('checked', false)
+    expect(wrapper.get('[data-test="operator-view-accounts"]').element).toHaveProperty('checked', true)
+  })
+
+  it('loads when the role select changes to operator', async () => {
+    const wrapper = mountModal('admin', 'user')
+    await flushPromises()
+    expect(getOperatorPermissions).not.toHaveBeenCalled()
+    wrapper.findComponent({ name: 'Select' }).vm.$emit('update:modelValue', 'operator')
+    await flushPromises()
+    expect(getOperatorPermissions).toHaveBeenCalledTimes(1)
+    expect(getOperatorPermissions).toHaveBeenCalledWith(7)
+    expect(wrapper.find('[data-test="operator-permissions-table"]').exists()).toBe(true)
+  })
+
+  it.each(['switch-user', 'reopen-same-user'] as const)('ignores a stale response after %s', async (action) => {
+    let resolveOld!: (value: unknown) => void
+    getOperatorPermissions.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+    const wrapper = mountModal('admin', 'operator')
+    await flushPromises()
+    if (action === 'switch-user') await wrapper.setProps({ user: member(8) })
+    else {
+      await wrapper.setProps({ show: false })
+      await wrapper.setProps({ show: true })
+    }
+    await flushPromises()
+    expect(getOperatorPermissions).toHaveBeenCalledTimes(2)
+    resolveOld({ modules: { accounts: 'manage' }, flags: ['data.export'] })
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="operator-view-users"]').element).toHaveProperty('checked', true)
+    expect(wrapper.get('[data-test="operator-manage-accounts"]').element).toHaveProperty('checked', false)
+    expect(wrapper.get('[data-test="operator-flag-data.export"]').element).toHaveProperty('checked', false)
   })
 
   it('saves operator permissions before the user, both through step-up', async () => {

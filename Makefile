@@ -56,6 +56,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/views/admin/__tests__/GroupsView.categories.spec.ts \
 	src/views/admin/__tests__/AccountsView.groupCategories.spec.ts \
 	src/components/common/__tests__/Select.spec.ts \
+	src/components/common/__tests__/DataTable.spec.ts \
 	src/components/common/__tests__/GroupOptionItem.spec.ts \
 	src/components/common/__tests__/TruncatedTextPopover.spec.ts \
 	src/components/account/__tests__/UpstreamBalanceCell.spec.ts \

@@ -13,13 +13,14 @@ const api = vi.hoisted(() => ({
   batchUpdateStatus: vi.fn(),
   getAllGroups: vi.fn(),
   getBatchUsersUsage: vi.fn(),
+  getOperatorPermissions: vi.fn(),
   listEnabledDefinitions: vi.fn(),
   getBatchUserAttributes: vi.fn()
 }))
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
-    users: { list: api.list, getPlatformQuotas: api.getPlatformQuotas, batchUpdateStatus: api.batchUpdateStatus },
+    users: { list: api.list, getPlatformQuotas: api.getPlatformQuotas, batchUpdateStatus: api.batchUpdateStatus, getOperatorPermissions: api.getOperatorPermissions },
     groups: { getAll: api.getAllGroups },
     dashboard: { getBatchUsersUsage: api.getBatchUsersUsage },
     userAttributes: { listEnabledDefinitions: api.listEnabledDefinitions, getBatchUserAttributes: api.getBatchUserAttributes }
@@ -69,14 +70,14 @@ const DataTableStub = {
   `
 }
 
-function mountView() {
+function mountView(realTable = false, realEditModal = false) {
   return mount(UsersView, {
     global: {
       plugins: [getActivePinia()!],
       stubs: {
         AppLayout: { template: '<div><slot /></div>' },
         TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>' },
-        DataTable: DataTableStub,
+        DataTable: realTable ? false : DataTableStub,
         Pagination: true,
         ConfirmDialog: {
           props: ['show'],
@@ -89,7 +90,9 @@ function mountView() {
         UserAttributesConfigModal: true,
         UserConcurrencyCell: true,
         UserCreateModal: true,
-        UserEditModal: true,
+        UserEditModal: realEditModal ? false : true,
+        UserAttributeForm: true,
+        TotpStepUpDialog: true,
         BulkEditUserModal: true,
         UserPlatformQuotaModal: true,
         UserApiKeysModal: true,
@@ -139,7 +142,48 @@ describe('UsersView row actions by role', () => {
     api.getBatchUserAttributes.mockResolvedValue({ attributes: {} })
     api.getPlatformQuotas.mockResolvedValue({ platform_quotas: [] })
     api.batchUpdateStatus.mockResolvedValue({ affected: 1, skipped: 0 })
+    api.getOperatorPermissions.mockResolvedValue({ modules: { accounts: 'view' }, flags: [] })
   })
+  it('opens the real operator permission table from the UsersView edit action', async () => {
+    let resolvePermissions!: (value: unknown) => void
+    api.getOperatorPermissions.mockImplementationOnce(() => new Promise(resolve => { resolvePermissions = resolve }))
+    signIn(1, 'admin')
+    api.list.mockResolvedValue({ items: [user({ id: 8, role: 'operator' })], total: 1 })
+    const wrapper = mountView(false, true)
+    await flushPromises()
+    const edit = wrapper.get('[data-test="row-8"]').findAll('button')
+      .find(button => button.text() === 'common.edit')!
+    await edit.trigger('click')
+    await flushPromises()
+    resolvePermissions({ modules: { accounts: 'view' }, flags: [] })
+    await flushPromises()
+
+    expect(api.getOperatorPermissions).toHaveBeenCalledWith(8)
+    expect(wrapper.find('[data-test="operator-permissions-table"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="operator-view-accounts"]').element).toHaveProperty('checked', true)
+    wrapper.unmount()
+  })
+
+  it.each(['operator', 'admin'] as const)('renders protected row selection correctly in the real table for %s', async (role) => {
+    signIn(7, role, role === 'operator' ? { modules: { users: 'manage' } } : undefined)
+    api.list.mockResolvedValue({
+      items: [user({ id: 1, role: 'admin' }), user({ id: 8, role: 'operator' }), user({ id: 7 }), user({ id: 42 })],
+      total: 4, page: 1, page_size: 20, pages: 1
+    })
+    const wrapper = mountView(true)
+    await flushPromises()
+
+    for (const id of [1, 8, 7, 42]) {
+      const checkbox = wrapper.get<HTMLInputElement>(`tr[data-row-id="${id}"] [data-test="select-row"]`)
+      expect(checkbox.element.disabled).toBe(role === 'operator' && id !== 42)
+    }
+    await wrapper.get('[data-test="select-all"]').setValue(true)
+    const checkedIds = wrapper.findAll<HTMLInputElement>('tr[data-row-id] [data-test="select-row"]')
+      .filter(input => input.element.checked).map(input => Number(input.element.closest('tr')!.dataset.rowId))
+    expect(checkedIds.sort((a, b) => a - b)).toEqual(role === 'operator' ? [42] : [1, 7, 8, 42])
+    wrapper.unmount()
+  })
+
   it('shows deposit, withdraw, allowed groups and platform quotas on an admin row to a super admin', async () => {
     signIn(1, 'admin')
     api.list.mockResolvedValue({

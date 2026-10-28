@@ -25,6 +25,7 @@ export default defineComponent({
     paddingClass: { type: String, required: true },
     selectable: { type: Boolean, default: false },
     selected: { type: Boolean, default: false },
+    selectionDisabled: { type: Boolean, default: false },
     selectionLabel: { type: String, default: '' },
     clickable: { type: Boolean, default: false },
     expanded: { type: Boolean, default: false },
@@ -55,6 +56,7 @@ export default defineComponent({
               class:
                 'h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800',
               checked: props.selected,
+              disabled: props.selectionDisabled,
               'aria-label': props.selectionLabel,
               'data-test': 'select-row',
               onClick: (event: Event) => event.stopPropagation(),

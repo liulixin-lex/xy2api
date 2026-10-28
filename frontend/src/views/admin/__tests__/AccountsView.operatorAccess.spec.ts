@@ -52,7 +52,9 @@ const DataTableStub = {
   props: ['columns', 'data'],
   template: `
     <div>
+      <div data-test="select-header"><slot name="header-select" /></div>
       <div v-for="row in data" :key="row.id">
+        <div :data-test="'select-' + row.id"><slot name="cell-select" :row="row" /></div>
         <div :data-test="'name-' + row.id"><slot name="cell-name" :row="row" :value="row.name" /></div>
         <div :data-test="'proxy-' + row.id"><slot name="cell-proxy" :row="row" /></div>
         <div :data-test="'balance-' + row.id"><slot name="cell-upstream_balance" :row="row" /></div>
@@ -187,6 +189,17 @@ describe('admin AccountsView for operators', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it.each(['view', 'manage', 'admin'] as const)('only enables bulk selection for managers and super admins (%s)', async (level) => {
+    if (level === 'admin') signIn('admin')
+    else seedOperator({ accounts: level })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const selection = wrapper.findAll<HTMLInputElement>('[data-test^="select-"] input[type="checkbox"]')
+    expect(selection).toHaveLength(3)
+    expect(selection.every(input => input.element.disabled === (level === 'view'))).toBe(true)
   })
 
   it('shows the account name as plain text when base_url is not returned', async () => {

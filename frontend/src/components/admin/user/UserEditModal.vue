@@ -120,17 +120,19 @@ const emailError = ref('')
 const operatorPermissions = ref<AdminPermissionsWire>({ modules: {}, flags: [] })
 const operatorPermissionsState = ref<'idle' | 'loading' | 'loaded' | 'error'>('idle')
 let operatorPermissionsUserId: number | null = null
+let operatorPermissionsRequestVersion = 0
 async function loadOperatorPermissions(userId: number) {
   if (operatorPermissionsUserId === userId && operatorPermissionsState.value !== 'error') return
   operatorPermissionsUserId = userId
   operatorPermissionsState.value = 'loading'
+  const requestVersion = ++operatorPermissionsRequestVersion
   try {
     const perms = await adminAPI.users.getOperatorPermissions(userId)
-    if (operatorPermissionsUserId !== userId) return
+    if (operatorPermissionsUserId !== userId || requestVersion !== operatorPermissionsRequestVersion) return
     operatorPermissions.value = { modules: { ...(perms?.modules ?? {}) }, flags: [...(perms?.flags ?? [])] }
     operatorPermissionsState.value = 'loaded'
   } catch {
-    if (operatorPermissionsUserId === userId) operatorPermissionsState.value = 'error'
+    if (operatorPermissionsUserId === userId && requestVersion === operatorPermissionsRequestVersion) operatorPermissionsState.value = 'error'
   }
 }
 const form = reactive({
@@ -144,30 +146,27 @@ const form = reactive({
   customAttributes: {} as UserAttributeValuesMap
 })
 
-watch(() => props.user, (u) => {
+// Reset the opening and user together, before starting any permission request.
+// Each opening starts from stored permissions, never an earlier unsaved edit.
+watch(() => [props.show, props.user] as const, ([, u]) => {
+  operatorPermissionsRequestVersion++
+  operatorPermissionsUserId = null
+  operatorPermissionsState.value = 'idle'
+  operatorPermissions.value = { modules: {}, flags: [] }
   if (u) {
     Object.assign(form, { email: u.email, password: '', username: u.username || '', notes: u.notes || '', role: u.role || 'user', concurrency: u.concurrency, rpm_limit: u.rpm_limit ?? 0, customAttributes: {} })
     passwordCopied.value = false
     emailError.value = ''
-    operatorPermissionsUserId = null
-    operatorPermissionsState.value = 'idle'
-    operatorPermissions.value = { modules: {}, flags: [] }
   }
 }, { immediate: true })
-// Each opening starts from the stored permissions, never from an earlier unsaved edit.
-watch(() => props.show, (show) => {
-  if (show) {
-    operatorPermissionsUserId = null
-    operatorPermissionsState.value = 'idle'
-  }
-})
 // Load the table when the modal opens with an operator, or when the select first switches to operator.
+// Post-flush keeps this after initialization regardless of the parent's prop order.
 watch(
-  () => [props.show, props.user?.id, form.role] as const,
-  ([show, userId, role]) => {
-    if (show && userId && role === 'operator' && isSuperAdmin.value) void loadOperatorPermissions(userId)
+  () => [props.show, props.user?.id, form.role, isSuperAdmin.value] as const,
+  ([show, userId, role, superAdmin]) => {
+    if (show && userId && role === 'operator' && superAdmin) void loadOperatorPermissions(userId)
   },
-  { immediate: true }
+  { immediate: true, flush: 'post' }
 )
 
 const generatePassword = () => {
