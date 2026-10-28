@@ -5,7 +5,27 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+
+	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
+
+// Only transient slot/queue failures receive this short recovery hint.
+func applyConcurrencyRetryHint(c *gin.Context, status int, code string) {
+	if c == nil || status != http.StatusTooManyRequests || (code != gatewayQueueFullCode && code != gatewayConcurrencyLimitCode) {
+		return
+	}
+	if c.Request != nil && resilience.RetryAdviceFrom(c.Request.Context()).Suppress {
+		return
+	}
+	if c.Writer.Header().Get("Retry-After") == "" {
+		c.Header("Retry-After", "5")
+		c.Set(ginKeyResilienceRetryAfter, 5)
+		if c.Request != nil {
+			resilience.SetRetryAdvice(c.Request.Context(), resilience.RetryAdvice{Seconds: 5, Source: "concurrency"})
+		}
+	}
+}
 
 const statusClientClosedRequest = 499
 

@@ -207,9 +207,9 @@ func applyNoAccountRetryHints(c *gin.Context, diag any, apiKey *service.APIKey, 
 	c.Set(ginKeyResilienceRetryAfter, secs)
 }
 
-// codexNoAccountRetryAfter bounds only no-account hints. Codex waits out
-// Retry-After without its own ceiling; other exhausted errors keep their
-// existing bounds. This client hint is independent of access restrictions.
+// codexNoAccountRetryAfter bounds no-account and exhausted HTTP hints. Codex
+// waits out Retry-After without its own ceiling. This client hint is
+// independent of access restrictions.
 func codexNoAccountRetryAfter(c *gin.Context, cfg *resilience.Settings, seconds int) int {
 	if c == nil || c.Request == nil || !cfg.CodexRetryAfterCapOn() {
 		return seconds
@@ -255,8 +255,8 @@ func applyExhaustedRetryHint(c *gin.Context, diag any, status int) int {
 		(status != http.StatusTooManyRequests && status < http.StatusInternalServerError && !resilienceTerminalHint(c, status)) {
 		return status
 	}
-	if advice := resilience.RetryAdviceFrom(c.Request.Context()); advice.Suppress && advice.Source == resilience.ReasonCapabilityStreamOnly {
-		suppressResilienceRetryAdvice(c, resilience.ReasonCapabilityStreamOnly)
+	if advice := resilience.RetryAdviceFrom(c.Request.Context()); advice.Suppress {
+		suppressResilienceRetryAdvice(c, advice.Source)
 		c.Header("x-should-retry", "false")
 		return status
 	}
@@ -278,6 +278,7 @@ func applyExhaustedRetryHint(c *gin.Context, diag any, status int) int {
 		if secs <= 0 {
 			secs = lo
 		}
+		secs = codexNoAccountRetryAfter(c, cfg, secs)
 		c.Header("Retry-After", strconv.Itoa(secs))
 		c.Set(ginKeyResilienceRetryAfter, secs)
 		return status
@@ -285,6 +286,9 @@ func applyExhaustedRetryHint(c *gin.Context, diag any, status int) int {
 	apiKey, _ := middleware2.GetAPIKeyFromContext(c)
 	setNoAccountRetryAfter(c, diag, apiKey, exhaustedRetryModel(c))
 	prepareExhaustedRetryAdvice(c, diag)
+	secs := codexNoAccountRetryAfter(c, cfg, c.GetInt(ginKeyResilienceRetryAfter))
+	c.Header("Retry-After", strconv.Itoa(secs))
+	c.Set(ginKeyResilienceRetryAfter, secs)
 	return status
 }
 

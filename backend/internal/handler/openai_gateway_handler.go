@@ -1670,6 +1670,9 @@ func resolveOpenAIMessagesMetadataSession(c *gin.Context, sessionHash, promptCac
 // anthropicErrorResponse writes an error in Anthropic Messages API format.
 func (h *OpenAIGatewayHandler) anthropicErrorResponse(c *gin.Context, status int, errType, message string) {
 	errType = anthropicLocalErrorType(status, errType)
+	if resilience.Current().ErrorsOn() && status >= http.StatusInternalServerError && errType == "api_error" {
+		message = strings.ReplaceAll(message, "overloaded_error", "api_error")
+	}
 	_, code, message := resilienceTranslateError(c, status, errType, "", message)
 	if !beginResilienceTerminal(c) {
 		return
@@ -1688,6 +1691,9 @@ func (h *OpenAIGatewayHandler) anthropicErrorResponse(c *gin.Context, status int
 // using Anthropic SSE error format.
 func (h *OpenAIGatewayHandler) anthropicStreamingAwareError(c *gin.Context, status int, errType, message string, streamStarted bool) {
 	errType = anthropicLocalErrorType(status, errType)
+	if resilience.Current().ErrorsOn() && status >= http.StatusInternalServerError && errType == "api_error" {
+		message = strings.ReplaceAll(message, "overloaded_error", "api_error")
+	}
 	// xy2api resilience: a pre-output heartbeat may have committed 200.
 	if service.StopOpenAICompactSSEKeepaliveCommitted(c) {
 		streamStarted = true
@@ -1723,10 +1729,6 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 		return
 	}
 	write := func(status int, errType, message string) {
-		var upstreamBody []byte
-		if failoverErr != nil {
-			upstreamBody = failoverErr.ResponseBody
-		}
 		if streamStarted && c.Writer.Size() > 0 && !gatewayStreamHasOnlyHeartbeats(c) {
 			service.MarkOpsStreamError(c, errType, message, status)
 			return
@@ -1734,7 +1736,8 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 		if failoverErr != nil {
 			copyFailoverRetryAfter(c, failoverErr.StatusCode, failoverErr.ResponseHeaders)
 		}
-		errType = anthropicFailoverErrorType(status, errType, upstreamBody)
+		status, errType, message = anthropicFailoverError(status, errType, message, failoverErr)
+		message = service.SanitizeUpstreamErrorMessage(message)
 		status = applyExhaustedRetryHint(c, h.gatewayService, status)
 		h.anthropicStreamingAwareError(c, status, errType, message, streamStarted)
 	}
@@ -2416,6 +2419,11 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 			h.handleStreamingAwareErrorWithCode(c, status, errType, code, message, *streamStarted, false)
 		}
 	}
+	writeSlotError := writeError
+	writeError = func(status int, errType, code, message string) {
+		applyConcurrencyRetryHint(c, status, code)
+		writeSlotError(status, errType, code, message)
+	}
 	if selection == nil || selection.Account == nil {
 		markOpsRoutingCapacityLimited(c)
 		writeError(http.StatusServiceUnavailable, "api_error", "", "No available accounts")
@@ -2816,6 +2824,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	// 会话结束且所有轮次扣减落地后释放。
 	inflightCtx, inflightDone, inflightErr := reserveInflightBalanceCtx(ctx, h.billingCacheService, h.gatewayService, apiKey, subscription, tokenInflightEstimate(reqModel, firstMessage))
 	if inflightErr != nil {
+		markInflightReservationBusinessLimit(c, inflightErr)
 		reqLog.Info("openai.websocket_inflight_reservation_rejected", zap.Error(inflightErr))
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "billing check failed")
 		return
@@ -3709,7 +3718,7 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	}
 	if failoverErr.IsCredentialFailure() {
 		status, message := credentialFailoverClientResponse(failoverErr)
-		h.handleStreamingAwareError(c, status, "upstream_error", message, streamStarted)
+		h.handleStreamingAwareError(c, status, "upstream_error", service.SanitizeUpstreamErrorMessage(message), streamStarted)
 		return
 	}
 	if failoverErr.IsOpenAICapacityShed() && strings.TrimSpace(failoverErr.ClientMessage) != "" {
@@ -3718,7 +3727,7 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 			status = http.StatusServiceUnavailable
 		}
 		status = applyExhaustedRetryHint(c, h.gatewayService, status)
-		h.handleStreamingAwareError(c, status, "server_error", failoverErr.ClientMessage, streamStarted)
+		h.handleStreamingAwareError(c, status, "server_error", service.SanitizeUpstreamErrorMessage(failoverErr.ClientMessage), streamStarted)
 		return
 	}
 	statusCode := failoverErr.StatusCode
@@ -3754,7 +3763,9 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 				c.Set(service.OpsSkipPassthroughKey, true)
 			}
 
-			h.handleStreamingAwareError(c, respCode, "upstream_error", msg, streamStarted)
+			copyFailoverRetryAfter(c, statusCode, failoverErr.ResponseHeaders)
+			respCode = applyExhaustedRetryHint(c, h.gatewayService, respCode)
+			h.handleStreamingAwareError(c, respCode, "upstream_error", service.SanitizeUpstreamErrorMessage(msg), streamStarted)
 			return
 		}
 	}
@@ -3861,6 +3872,7 @@ func (h *OpenAIGatewayHandler) handleStreamingAwareErrorWithCode(
 	streamStarted bool,
 	countTowardsSLA bool,
 ) {
+	applyConcurrencyRetryHint(c, status, code)
 	errType, code, message = resilienceTranslateError(c, status, errType, code, message)
 	// body-signal compact 心跳可能已把响应头提交为 200：先停心跳（建立
 	// happens-before，接管 ResponseWriter），并升级为流内错误处理。

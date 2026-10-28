@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/service"
@@ -66,10 +67,17 @@ func reserveInflightBalance(
 	}
 	ctx, done, err := reserveInflightBalanceCtx(c.Request.Context(), billing, estimator, apiKey, subscription, req)
 	if err != nil {
+		markInflightReservationBusinessLimit(c, err)
 		return inflightNoop, err
 	}
 	c.Request = c.Request.WithContext(ctx)
 	return done, nil
+}
+
+func markInflightReservationBusinessLimit(c *gin.Context, err error) {
+	if errors.Is(err, service.ErrInflightBalanceReserved) {
+		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
+	}
 }
 
 // reserveInflightBalanceCtx 同 reserveInflightBalance，但返回携带预留句柄的新 context
