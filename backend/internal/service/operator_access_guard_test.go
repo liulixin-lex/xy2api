@@ -70,6 +70,16 @@ func (r *operatorGuardRates) GetByGroupID(context.Context, int64) ([]UserGroupRa
 	return r.rows, r.err
 }
 
+func (r *operatorGuardRates) GetOwnerIDsByGroupID(_ context.Context, _ int64, rpmOnly bool) ([]int64, error) {
+	var ids []int64
+	for _, row := range r.rows {
+		if !rpmOnly || row.RPMOverride != nil {
+			ids = append(ids, row.UserID)
+		}
+	}
+	return ids, r.err
+}
+
 type operatorGuardQuery struct {
 	protected bool
 	used      map[int64]bool
@@ -991,4 +1001,26 @@ func TestOperatorChannelStatsPricingEffectiveEquality(t *testing.T) {
 	f.channel.row.GroupIDs = nil
 	_, err = f.check("channel_update", `{"account_stats_pricing_rules":[],"apply_pricing_to_account_stats":true}`)
 	require.NoError(t, err)
+}
+
+type operatorGuardVisibleRates struct{ *operatorGuardRates }
+
+func (*operatorGuardVisibleRates) GetByGroupID(context.Context, int64) ([]UserGroupRateEntry, error) {
+	// Lists hide deleted users, while the owner query retains their rows.
+	return []UserGroupRateEntry{{UserID: 1}}, nil
+}
+
+func TestOperatorGroupRateOwnersIncludeSoftDeletedUsers(t *testing.T) {
+	for _, rule := range []operatoraccess.TargetRule{"group_rate_rows", "group_rpm_rows"} {
+		t.Run(string(rule), func(t *testing.T) {
+			f := newOperatorGuardFixture(t)
+			now, rpm := time.Now(), 25
+			f.users.rows[3].DeletedAt = &now
+			rates := &operatorGuardRates{rows: []UserGroupRateEntry{{UserID: 1}, {UserID: 3, RPMOverride: &rpm}}}
+			f.svc.userGroupRateRepo = &operatorGuardVisibleRates{rates}
+			guardReason(t, f.svc.CheckTarget(context.Background(), f.sc, rule, guardRequest("{}")), "ADMIN_TARGET_FORBIDDEN", "")
+			rates.err = errors.New("owner query failed")
+			guardReason(t, f.svc.CheckTarget(context.Background(), f.sc, rule, guardRequest("{}")), "OPERATOR_ACCESS_UNAVAILABLE", "")
+		})
+	}
 }

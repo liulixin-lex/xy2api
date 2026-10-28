@@ -149,10 +149,10 @@ func (s *OperatorAccessService) operatorMonitorRules(ctx context.Context, sc *op
 	if err := s.operatorMonitorTemplate(ctx, obj, stored.TemplateID, true); err != nil {
 		return nil, err
 	}
-	bodyMasked := false
+	bodySubmitted := false
 	if raw, ok := operatoraccess.Field(obj, "body_override"); ok {
-		var mask string
-		bodyMasked = json.Unmarshal(raw, &mask) == nil && mask == operatoraccess.HeaderMask
+		var body map[string]any
+		bodySubmitted = json.Unmarshal(raw, &body) == nil && len(body) > 0
 	}
 
 	if err := operatorRestoreMaskedBody(obj, stored.BodyOverride, "body_override"); err != nil {
@@ -210,7 +210,7 @@ func (s *OperatorAccessService) operatorMonitorRules(ctx context.Context, sc *op
 	if changed && (key == nil || strings.TrimSpace(*key) == "") {
 		return nil, operatorNewKey("api_key")
 	}
-	if changed && (!operatorHas(obj, "body_override") || bodyMasked) {
+	if changed && !bodySubmitted {
 		operatorSet(obj, "body_override_mode", "off")
 		operatorSet(obj, "body_override", map[string]any{})
 	}

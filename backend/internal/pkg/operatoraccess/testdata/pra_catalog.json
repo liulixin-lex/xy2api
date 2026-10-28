@@ -4184,7 +4184,9 @@
   "flags": [],
   "target": null,
   "fields": null,
-  "redact": [],
+  "redact": [
+   "ops_upstream_url"
+  ],
   "ws": false
  },
  {
@@ -4254,7 +4256,9 @@
   "flags": [],
   "target": null,
   "fields": null,
-  "redact": [],
+  "redact": [
+   "ops_upstream_url"
+  ],
   "ws": false
  },
  {
@@ -4318,7 +4322,9 @@
   "flags": [],
   "target": null,
   "fields": null,
-  "redact": [],
+  "redact": [
+   "ops_upstream_url"
+  ],
   "ws": false
  },
  {
@@ -4472,7 +4478,9 @@
   "flags": [],
   "target": null,
   "fields": null,
-  "redact": [],
+  "redact": [
+   "ops_upstream_url"
+  ],
   "ws": false
  },
  {
@@ -4486,7 +4494,9 @@
   "flags": [],
   "target": null,
   "fields": null,
-  "redact": [],
+  "redact": [
+   "ops_upstream_url"
+  ],
   "ws": false
  },
  {

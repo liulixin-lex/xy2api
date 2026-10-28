@@ -143,3 +143,11 @@ func TestCatalogMatchesApprovedTable(t *testing.T) {
 	require.Len(t, skip, 13)
 	require.ElementsMatch(t, skip, actual)
 }
+
+func TestCatalogOpsGETUserinfoRedactions(t *testing.T) {
+	for _, path := range []string{"/ops/errors/:id", "/ops/upstream-errors/:id", "/ops/request-errors", "/ops/upstream-errors", "/ops/requests"} {
+		entry, ok := Lookup("GET " + path)
+		require.True(t, ok, path)
+		require.Contains(t, entry.Redact, Redaction("ops_upstream_url"), path)
+	}
+}

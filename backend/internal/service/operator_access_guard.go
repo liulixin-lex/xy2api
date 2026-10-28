@@ -255,15 +255,11 @@ func (s *OperatorAccessService) CheckTarget(ctx context.Context, sc *operatoracc
 		if s.userGroupRateRepo == nil {
 			return operatorUnavailable()
 		}
-		rows, e := s.userGroupRateRepo.GetByGroupID(ctx, id)
+		owners, e := s.userGroupRateRepo.GetOwnerIDsByGroupID(ctx, id, rule == "group_rpm_rows")
 		if e != nil {
 			return operatorUnavailable()
 		}
-		for _, row := range rows {
-			if rule == "group_rate_rows" || row.RPMOverride != nil {
-				ids = append(ids, row.UserID)
-			}
-		}
+		ids = append(ids, owners...)
 	case "group_members":
 		id, e := operatorPathID(r, "id")
 		if e != nil {

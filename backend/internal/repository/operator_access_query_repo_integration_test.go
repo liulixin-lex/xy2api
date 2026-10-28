@@ -4,8 +4,11 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
+	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
+	"github.com/liulixin-lex/xy2api/internal/pkg/operatoraccess"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -107,12 +110,61 @@ func TestUserGroupRateRepoIncludesSoftDeletedOwners(t *testing.T) {
 	require.NoError(t, err)
 	_, err = integrationDB.Exec(`UPDATE users SET deleted_at=NOW() WHERE id=$1`, u.ID)
 	require.NoError(t, err)
-	rows, err := NewUserGroupRateRepository(integrationDB).GetByGroupID(ctx, g.ID)
-	require.NoError(t, err)
-	require.Len(t, rows, 1)
-	require.Equal(t, u.ID, rows[0].UserID)
-	require.NotNil(t, rows[0].RateMultiplier)
-	require.Equal(t, 1.25, *rows[0].RateMultiplier)
-	require.NotNil(t, rows[0].RPMOverride)
-	require.Equal(t, 25, *rows[0].RPMOverride)
+	repo := NewUserGroupRateRepository(integrationDB)
+	for _, rpmOnly := range []bool{false, true} {
+		ids, err := repo.GetOwnerIDsByGroupID(ctx, g.ID, rpmOnly)
+		require.NoError(t, err)
+		require.Equal(t, []int64{u.ID}, ids)
+	}
+}
+
+func TestUserGroupRateRepoSeparatesVisibleRowsAndOwners(t *testing.T) {
+	ctx := context.Background()
+	repo := NewUserGroupRateRepository(integrationDB)
+	users := NewUserRepository(testEntClient(t), integrationDB)
+	admin := service.NewAdminService(nil, users, nil, nil, nil, nil, nil, repo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	access := service.NewOperatorAccessService(nil, users, nil, nil, repo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	actor := operatorRepositoryUser(t, service.RoleOperator)
+	adminActor := operatorRepositoryUser(t, service.RoleAdmin)
+	for _, role := range []string{service.RoleUser, service.RoleOperator} {
+		t.Run(role, func(t *testing.T) {
+			g := mustCreateCategoryGroup(t, groupCategoryTestPrefix())
+			live := operatorRepositoryUser(t, service.RoleUser)
+			deleted := operatorRepositoryUser(t, role)
+			_, err := integrationDB.Exec(`INSERT INTO user_group_rate_multipliers(user_id,group_id,rate_multiplier,rpm_override) VALUES($1,$3,1.5,NULL),($2,$3,1.25,25)`, live.ID, deleted.ID, g.ID)
+			require.NoError(t, err)
+			listCtx := operatoraccess.WithSuperAdmin(ctx, adminActor.ID)
+			before, err := admin.GetGroupRateMultipliers(listCtx, g.ID)
+			require.NoError(t, err)
+			require.Len(t, before, 2)
+			require.NoError(t, users.Delete(listCtx, deleted.ID))
+			stored, err := users.GetByIDIncludeDeleted(ctx, deleted.ID)
+			require.NoError(t, err)
+			require.NotNil(t, stored.DeletedAt)
+			after, err := admin.GetGroupRateMultipliers(listCtx, g.ID)
+			require.NoError(t, err)
+			require.Len(t, after, 1, "the super-admin list must exclude the deleted user's rate/RPM row")
+			require.Equal(t, live.ID, after[0].UserID)
+			require.Contains(t, before, after[0], "the remaining user's fields stay unchanged")
+			for _, rpmOnly := range []bool{false, true} {
+				owners, err := repo.GetOwnerIDsByGroupID(ctx, g.ID, rpmOnly)
+				require.NoError(t, err)
+				if rpmOnly {
+					require.Equal(t, []int64{deleted.ID}, owners)
+				} else {
+					require.ElementsMatch(t, []int64{live.ID, deleted.ID}, owners)
+				}
+			}
+			scope := &operatoraccess.Scope{UserID: actor.ID}
+			for _, rule := range []operatoraccess.TargetRule{"group_rate_rows", "group_rpm_rows"} {
+				request := operatoraccess.Request{Params: map[string]string{"id": fmt.Sprint(g.ID)}, Body: []byte("{}")}
+				err := access.CheckTarget(ctx, scope, rule, request)
+				if role == service.RoleOperator {
+					require.Equal(t, "ADMIN_TARGET_FORBIDDEN", infraerrors.Reason(err))
+				} else {
+					require.NoError(t, err)
+				}
+			}
+		})
+	}
 }
