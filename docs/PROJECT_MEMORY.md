@@ -245,14 +245,15 @@
 
 ## 进行中的工作
 
-### 20261027-upstream-balance — 账号页「上游余额」列（PR-B；审查完成、待开 PR，2026-10-28）
+### 20261027-upstream-balance — 账号页「上游余额」列（PR-B；PR #158 已开，CI 全绿，待合并，2026-10-28）
 
 - **请求**（用户 2026-10-27，方案已批准）：账号管理页新增一列，显示每个上游 API Key 账号（sub2api / new-api）的余额，每分钟采集；new-api 可选填访问令牌读取钱包余额。不新增设置开关。
 - **分支**：`feat/upstream-balance-20261027`（worktree `xy2api-wt/upstream-balance`），开 PR 前 rebase 到最新 main。方案、契约、审查记录在仓库外本地交接包（不入库）。
 - **分工**：总设计 Claude（Opus 5.5）定契约、集成、提交与 PR；后端 Codex（gpt-6.1-sol）；前端 Claude（Opus 5.5）；审查 Codex（gpt-6-astra，只报告不改代码）加 Claude 对抗式核实。
 - **要点**：余额只存 Redis（`upstream_balance:*`），不写 accounts 表、不发调度事件；读接口 `GET /api/v1/admin/accounts/upstream-balances` 只读缓存；发请求前按网关的上游地址策略检查；新凭据 `newapi_access_token`（敏感、脱敏，站点或代理变化时清除）与 `newapi_user_id`；base_url 不是官方域名的 kimi/deepseek 账号不再走 CN 余额检查。现行说明见 [`UPSTREAM_BALANCE.md`](UPSTREAM_BALANCE.md)。
 - **进度**：后端 125 项契约条目与三轮审查修复完成；前端三轮审查修复完成；gpt-6-astra 第三轮与 Claude 核实均无 P0/P1/P2 遗留（两项 P2 列为后续）；本机门禁通过；本机端到端（假上游）12 个账号状态符合预期，浏览器截图在仓库外。
-- **下一步**：推送并开 PR，CI 全绿后停止。合并、发版、部署不在授权范围内。
+- **PR**：[#158](https://github.com/liulixin-lex/xy2api/pull/158)，rebase 到 main `d57883bec` 后全部检查通过。
+- **下一步**：等待合并（由其他作者合并，本会话不合并）。发版、部署需用户另行授权。PR-A 叠加在本 PR 之上。
 
 ### 20261027-operator-role — 普通管理员角色与逐人权限（PR-A；设计审查中，2026-10-28）
 
@@ -1143,3 +1144,13 @@ pnpm --dir frontend run build
 - 验证：build、`make generate` 无差异、四种 vet、gofmt、全量 unit、相关包 `-race`、golangci-lint 0 项、`ci_gate.py`（451 项 `-race`，0 跳过）、`make test-frontend`、账号相关前端 1201 项、前端 build、文档一致性、`sync.py audit`；本机端到端用最终代码重跑，12 个账号状态符合预期。rebase 到最新 main 后重跑全量门禁。
 - 卡点/风险：无。
 - 下一步：rebase、推送、开 PR，CI 全绿后停止。
+
+### 2026-10-28 — 20261027-upstream-balance — 推送并开 PR #158，CI 全绿
+
+- 请求/目标：推送 PR-B 并开 PR，CI 全绿后停止。
+- 开始状态：分支 `feat/upstream-balance-20261027`；main 在推送前后依次合入 #155（0.4.11）、#156、#157。
+- 完成操作：rebase 到最新 main（只在本记忆冲突，按脚本重新登记），推送并开 [PR #158](https://github.com/liulixin-lex/xy2api/pull/158)。首轮 CI 全绿后 main 合入 #157 导致记忆冲突，再次 rebase 并 `--force-with-lease` 推送，第二轮 CI 全绿，GitHub 显示可合并。
+- 修改文件：本记忆。
+- 验证：rebase 后代码与本机全量门禁通过的版本逐字节一致（只差 main 自身的改动）；CI 全部检查通过。
+- 卡点/风险：无。
+- 下一步：等待合并；不合并、不打 tag、不发版、不部署。
