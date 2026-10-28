@@ -106,7 +106,7 @@ func TestUpstreamBalanceBackoffStreaksResetAndCap(t *testing.T) {
 }
 
 func TestUpstreamBalanceKnownSub2APIClassification(t *testing.T) {
-	for _, status := range []int{200, 400, 401, 403, 404, 405} {
+	for _, status := range []int{200, 400, 401, 402, 403, 404, 405, 408, 413} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			var statusCalls atomic.Int64
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +136,11 @@ func TestUpstreamBalanceKnownSub2APIClassification(t *testing.T) {
 			} else {
 				require.Equal(t, "upstream_error", st.LastReason)
 				require.Equal(t, 1, st.TransientStreak)
-				require.NotContains(t, store.entries.Kinds, a.ID)
+				if status == 200 || status == 404 || status == 405 {
+					require.NotContains(t, store.entries.Kinds, a.ID)
+				} else {
+					require.Equal(t, "sub2api", store.entries.Kinds[a.ID].Kind)
+				}
 			}
 			require.Zero(t, st.UnsupportedStreak)
 			require.Contains(t, logs.String(), "upstream_kind=sub2api")

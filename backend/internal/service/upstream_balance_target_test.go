@@ -8,25 +8,48 @@ import (
 )
 
 func TestUpstreamBalanceURLHelpers(t *testing.T) {
-	for _, row := range []struct{ base, want string }{
-		{"https://relay.example/prefix/V1", "https://relay.example/prefix/v1/usage"},
-		{"https://relay.example/prefix/v1beta2", "https://relay.example/prefix/v1/usage"},
-		{"https://relay.example/prefix/vinf", "https://relay.example/prefix/vinf/v1/usage"},
-	} {
-		got, err := upstreamBalanceV1URL(row.base, "/v1/usage", nil)
-		require.NoError(t, err)
-		require.Equal(t, row.want, got)
-	}
 	q := url.Values{"days": {"1"}, "start_date": {"D"}, "end_date": {"D"}}
-	got, err := upstreamBalanceV1URL("https://H.Example.com/v1beta?tenant=a", "/v1/usage", q)
-	require.NoError(t, err)
-	require.Equal(t, "https://H.Example.com/v1/usage?days=1&end_date=D&start_date=D&tenant=a", got)
-	origin, err := upstreamBalanceOrigin("https://u:p@H.Example.com:443/v1")
-	require.NoError(t, err)
-	require.Equal(t, "https://h.example.com", origin)
-	rootURL, err := upstreamBalanceV1URL("https://relay.example", "/v1/usage", nil)
-	require.NoError(t, err)
-	require.Equal(t, "https://relay.example/v1/usage", rootURL)
+	for _, row := range []struct {
+		base, endpoint string
+		query          url.Values
+		want           string
+	}{
+		{"https://h", "/v1/usage", q, "https://h/v1/usage?days=1&end_date=D&start_date=D"},
+		{"https://h/v1", "/v1/usage", q, "https://h/v1/usage?days=1&end_date=D&start_date=D"},
+		{"https://h/v1/", "/v1/usage", q, "https://h/v1/usage?days=1&end_date=D&start_date=D"},
+		{"https://h/v1beta", "/v1/usage", q, "https://h/v1/usage?days=1&end_date=D&start_date=D"},
+		{"https://h/openai/v1", "/v1/usage", q, "https://h/openai/v1/usage?days=1&end_date=D&start_date=D"},
+		{"https://h/v1?tenant=a", "/v1/usage", q, "https://h/v1/usage?days=1&end_date=D&start_date=D&tenant=a"},
+		{"https://h/v1?days=7", "/v1/usage", q, "https://h/v1/usage?days=1&end_date=D&start_date=D"},
+		{"https://u:p@h/v1#x", "/v1/usage", nil, "https://h/v1/usage"},
+		{"https://h/v1beta", "/v1/dashboard/billing/subscription", nil, "https://h/v1/dashboard/billing/subscription"},
+		{"https://h/api/v3", "/v1/usage", nil, "https://h/api/v1/usage"},
+		{"https://relay.example/prefix/V1", "/v1/usage", nil, "https://relay.example/prefix/v1/usage"},
+		{"https://relay.example/prefix/v1beta2", "/v1/usage", nil, "https://relay.example/prefix/v1/usage"},
+		{"https://relay.example/prefix/vinf", "/v1/usage", nil, "https://relay.example/prefix/vinf/v1/usage"},
+		{"https://H.Example.com/v1beta?tenant=a", "/v1/usage", q, "https://H.Example.com/v1/usage?days=1&end_date=D&start_date=D&tenant=a"},
+	} {
+		t.Run("V1/"+row.base, func(t *testing.T) {
+			got, err := upstreamBalanceV1URL(row.base, row.endpoint, row.query)
+			require.NoError(t, err)
+			require.Equal(t, row.want, got)
+		})
+	}
+	for _, row := range []struct{ base, want string }{
+		{"https://H.Example.com/v1?x=1", "https://h.example.com"},
+		{"https://h.example.com:443/v1", "https://h.example.com"},
+		{"http://h.example.com:80/", "http://h.example.com"},
+		{"http://h.example.com:3000/v1", "http://h.example.com:3000"},
+		{"https://u:p@h.example.com./v1", "https://h.example.com"},
+		{"https://[2001:db8::1]:8443/v1", "https://[2001:db8::1]:8443"},
+		{"https://u:p@H.Example.com:443/v1", "https://h.example.com"},
+	} {
+		t.Run("origin/"+row.base, func(t *testing.T) {
+			got, err := upstreamBalanceOrigin(row.base)
+			require.NoError(t, err)
+			require.Equal(t, row.want, got)
+		})
+	}
 }
 func TestUpstreamBalanceFingerprintInputs(t *testing.T) {
 	for _, field := range []string{"platform", "type", "base", "api_key", "newapi_access_token", "newapi_user_id", "proxy_id"} {

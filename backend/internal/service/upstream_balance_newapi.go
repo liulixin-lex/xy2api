@@ -82,6 +82,9 @@ func (s *UpstreamBalanceService) collectNewAPI(ctx context.Context, a *Account, 
 		return *out
 	}
 	var usage newAPIBillingUsage
+	// Both billing responses accepted the key, even if the value or wallet
+	// cannot produce a usable balance below.
+	st.AuthStreak = 0
 	if json.Unmarshal(b, &usage) != nil || usage.TotalUsage == nil || !isFinite(*usage.TotalUsage) {
 		return ubOutcome{reason: "upstream_error", kind: "newapi"}
 	}
@@ -220,7 +223,7 @@ func (s *UpstreamBalanceService) rateLimitedNewAPI(origin string, r *http.Respon
 	writeCtx, cancel := context.WithTimeout(context.Background(), upstreamBalanceStoreTimeout)
 	defer cancel()
 	if err := s.store.SaveCooldown(writeCtx, origin, deadline); err != nil {
-		memo.failStore()
+		memo.failStore(writeCtx)
 		return ubOutcome{reason: "redis_unavailable", kind: "newapi", status: r.StatusCode}
 	}
 	return ubOutcome{reason: "rate_limited", kind: "newapi", status: r.StatusCode, retryAfter: d, retryNotBefore: &deadline}
@@ -311,8 +314,11 @@ func newAPIRequestOutcome(err error) (ubOutcome, bool) {
 func (s *UpstreamBalanceService) newAPICooldown(ctx context.Context, origin string, memo *upstreamBalanceRoundMemo) *ubOutcome {
 	until, err := s.store.GetCooldown(ctx, origin)
 	if err != nil {
-		memo.failStore()
-		return &ubOutcome{reason: "redis_unavailable", kind: "newapi"}
+		reason := "upstream_error"
+		if memo.failStore(ctx) {
+			reason = "redis_unavailable"
+		}
+		return &ubOutcome{reason: reason, kind: "newapi"}
 	}
 	if until != nil && s.now().Before(*until) {
 		memo.setCooldown(origin, *until)
@@ -354,8 +360,7 @@ func (s *UpstreamBalanceService) newAPIBillingFailure(ctx context.Context, a *Ac
 	if newAPIAuthRejected(body) {
 		return &ubOutcome{reason: "auth_failed", kind: "newapi", status: status}
 	}
-	// A successful partial billing response clears the episode, but only a
-	// successful account outcome may reset the failure streak.
+	// Do not reset the streak until both billing envelopes have been accepted.
 	st.AuthEpisode, st.AuthEpisodeAt = "", nil
 	return nil
 }
@@ -377,8 +382,11 @@ func (s *UpstreamBalanceService) newAPISite(ctx context.Context, a *Account, ori
 	result, err, _ := s.siteFlight.Do(origin, func() (any, error) {
 		site, err := s.store.GetSite(ctx, origin)
 		if err != nil {
-			memo.failStore()
-			return newAPISiteResult{out: &ubOutcome{reason: "redis_unavailable", kind: "newapi"}}, nil
+			reason := "upstream_error"
+			if memo.failStore(ctx) {
+				reason = "redis_unavailable"
+			}
+			return newAPISiteResult{out: &ubOutcome{reason: reason, kind: "newapi"}}, nil
 		}
 		if site != nil {
 			return newAPISiteResult{site: site}, nil
@@ -394,12 +402,8 @@ func (s *UpstreamBalanceService) newAPISite(ctx context.Context, a *Account, ori
 			return newAPISiteResult{out: &ubOutcome{reason: "upstream_error", kind: "newapi", status: statusOf(resp)}}, nil
 		}
 		status := resp.StatusCode
-		if status == http.StatusTooManyRequests {
-			out := ubOutcome{reason: "rate_limited", kind: "newapi", status: status, retryAfter: parseRetryAfter(resp.Header, s.now())}
-			return newAPISiteResult{out: &out}, nil
-		}
 		if status < 200 || status >= 300 {
-			return newAPISiteResult{out: &ubOutcome{reason: "upstream_error", kind: "newapi", status: status, deleteKind: status == 404 || status == 405, notNewAPI: status == 404 || status == 405}}, nil
+			return newAPISiteResult{out: &ubOutcome{reason: "upstream_error", kind: "newapi", status: status, deleteKind: status == 404 || status == 405, notNewAPI: status >= 400 && status < 500 && status != http.StatusUnauthorized && status != http.StatusForbidden}}, nil
 		}
 		site, ok := parseNewAPIStatus(body)
 		if !ok {
@@ -407,8 +411,11 @@ func (s *UpstreamBalanceService) newAPISite(ctx context.Context, a *Account, ori
 		}
 		site.FetchedAt = s.now().UTC()
 		if err := s.store.SaveSite(ctx, origin, site, 30*time.Minute); err != nil {
-			memo.failStore()
-			return newAPISiteResult{out: &ubOutcome{reason: "redis_unavailable", kind: "newapi"}}, nil
+			reason := "upstream_error"
+			if memo.failStore(ctx) {
+				reason = "redis_unavailable"
+			}
+			return newAPISiteResult{out: &ubOutcome{reason: reason, kind: "newapi"}}, nil
 		}
 		return newAPISiteResult{site: site}, nil
 	})
@@ -420,7 +427,7 @@ func (s *UpstreamBalanceService) newAPISite(ctx context.Context, a *Account, ori
 		return nil, &ubOutcome{reason: "upstream_error", kind: "newapi"}
 	}
 	if v.out != nil && v.out.reason == "redis_unavailable" {
-		memo.failStore()
+		memo.failStore(ctx)
 	}
 	return v.site, v.out
 }
@@ -444,8 +451,11 @@ func (s *UpstreamBalanceService) disambiguate401(ctx context.Context, a *Account
 	if lockErr != nil || !locked {
 		memo.releaseOne(a.ID)
 		if lockErr != nil {
-			memo.failStore()
-			return ubOutcome{reason: "redis_unavailable", kind: "newapi"}
+			reason := "upstream_error"
+			if memo.failStore(ctx) {
+				reason = "redis_unavailable"
+			}
+			return ubOutcome{reason: reason, kind: "newapi"}
 		}
 		return ubOutcome{reason: "auth_failed", kind: "newapi"}
 	}

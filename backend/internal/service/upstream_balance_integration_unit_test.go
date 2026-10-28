@@ -89,8 +89,11 @@ func TestUpdateAccountRejectsInvalidNewAPIUserID(t *testing.T) {
 }
 
 func TestUpdateAndBulkUpdateClearTokenOnProxyChange(t *testing.T) {
-	for _, scenario := range []string{"set", "change", "clear", "same", "new-token"} {
+	for _, scenario := range []string{"set", "change", "clear", "same", "new-token", "none-zero", "absent"} {
 		for _, bulk := range []bool{false, true} {
+			if bulk && scenario == "absent" {
+				continue
+			}
 			name := scenario + "/single"
 			if bulk {
 				name = scenario + "/bulk"
@@ -106,6 +109,9 @@ func TestUpdateAndBulkUpdateClearTokenOnProxyChange(t *testing.T) {
 					newID = 0
 				case "same":
 					newID = oldID
+				case "none-zero":
+					a.ProxyID = nil
+					newID = 0
 				case "new-token":
 					delta = map[string]any{"newapi_access_token": "replacement-token"}
 				}
@@ -115,17 +121,22 @@ func TestUpdateAndBulkUpdateClearTokenOnProxyChange(t *testing.T) {
 					_, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{AccountIDs: []int64{1}, ProxyID: &newID, Credentials: delta})
 					require.NoError(t, err)
 					require.Len(t, repo.bulkUpdates, 1)
-					if scenario != "same" && scenario != "new-token" {
+					if scenario == "none-zero" {
+						require.NotContains(t, repo.bulkUpdates[0].Credentials, "newapi_access_token")
+					} else if scenario != "same" && scenario != "new-token" {
 						require.Contains(t, repo.bulkUpdates[0].Credentials, "newapi_access_token")
 						require.Nil(t, repo.bulkUpdates[0].Credentials["newapi_access_token"])
 					}
+				} else if scenario == "absent" {
+					_, err := svc.UpdateAccount(context.Background(), 1, &UpdateAccountInput{Name: "renamed", Credentials: map[string]any{"base_url": "https://relay.example"}})
+					require.NoError(t, err)
 				} else {
 					_, err := svc.UpdateAccount(context.Background(), 1, &UpdateAccountInput{ProxyID: &newID, Credentials: delta})
 					require.NoError(t, err)
 				}
 				a = repo.accounts[1]
 				switch scenario {
-				case "same":
+				case "same", "none-zero", "absent":
 					require.Equal(t, "original-token", a.GetCredential("newapi_access_token"))
 				case "new-token":
 					require.Equal(t, "replacement-token", a.GetCredential("newapi_access_token"))

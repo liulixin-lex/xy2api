@@ -76,6 +76,7 @@ type upstreamBalanceRoundMemo struct {
 	origins     map[int64]string
 	storeFailed bool
 	cooldowns   map[string]time.Time
+	persisted   map[int64]bool
 }
 
 func (m *upstreamBalanceRoundMemo) reserveAccount(id int64, origin string, n int) bool {
@@ -167,13 +168,38 @@ func (m *upstreamBalanceRoundMemo) failed() bool {
 	defer m.mu.Unlock()
 	return m.storeFailed
 }
-func (m *upstreamBalanceRoundMemo) failStore() {
+func (m *upstreamBalanceRoundMemo) failStore(ctx context.Context) bool {
+	// An account deadline says nothing about Redis health. Its worker records
+	// a transient outcome using the still-live round context.
+	if errors.Is(context.Cause(ctx), errUpstreamBalanceAccountBudgetExceeded) {
+		return false
+	}
 	if m == nil {
-		return
+		return false
 	}
 	m.mu.Lock()
 	m.storeFailed = true
 	m.mu.Unlock()
+	return true
+}
+func (m *upstreamBalanceRoundMemo) markPersisted(id int64) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.persisted == nil {
+		m.persisted = make(map[int64]bool)
+	}
+	m.persisted[id] = true
+}
+func (m *upstreamBalanceRoundMemo) wasPersisted(id int64) bool {
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.persisted[id]
 }
 func NewUpstreamBalanceService(repo AccountRepository, ats *AccountTestService, store UpstreamBalanceStore, lock LeaderLockCache) *UpstreamBalanceService {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -358,7 +384,7 @@ func (s *UpstreamBalanceService) RunRound(ctx context.Context) error {
 			defer accountCancel()
 			defer memo.releaseAccount(id)
 			s.pollOne(accountCtx, roundStart, id, a, st, memo)
-			if errors.Is(context.Cause(accountCtx), errUpstreamBalanceAccountBudgetExceeded) && roundCtx.Err() == nil && !memo.failed() {
+			if errors.Is(context.Cause(accountCtx), errUpstreamBalanceAccountBudgetExceeded) && roundCtx.Err() == nil && !memo.failed() && !memo.wasPersisted(id) {
 				kind := ""
 				if k := entries.Kinds[id]; k != nil {
 					kind = k.Kind
@@ -427,12 +453,14 @@ func (s *UpstreamBalanceService) pollOne(ctx context.Context, roundStart time.Ti
 			probe := collectUpstreamBalance(upstreamBalanceAdapter(sub2APIUpstreamBalanceAdapter{service: s}), ctx, a, st, memo)
 			switch probe.reason {
 			case "unidentified":
-				writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), upstreamBalanceStoreTimeout)
-				err := s.store.DeleteKind(writeCtx, id)
-				cancel()
-				if err != nil {
-					memo.failStore()
-					return
+				if probe.status == http.StatusNotFound || probe.status == http.StatusMethodNotAllowed || (probe.status >= 200 && probe.status < 300) {
+					writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), upstreamBalanceStoreTimeout)
+					err := s.store.DeleteKind(writeCtx, id)
+					cancel()
+					if err != nil {
+						memo.failStore(writeCtx)
+						return
+					}
 				}
 				probe.reason, probe.kind, probe.deleteKind = "upstream_error", "sub2api", false
 			case "auth_failed":
@@ -447,7 +475,7 @@ func (s *UpstreamBalanceService) pollOne(ctx context.Context, roundStart time.Ti
 	if strings.TrimSpace(a.GetCredential("newapi_access_token")) != "" && !st.TokenShortcutRejected {
 		memo.refundUnconsumed(id)
 		if err := s.store.SaveKind(ctx, id, &UpstreamBalanceKindRecord{Version: 1, Fingerprint: fp, Kind: "newapi", IdentifiedAt: s.now().UTC()}, 24*time.Hour); err != nil {
-			memo.failStore()
+			memo.failStore(ctx)
 			return
 		}
 		if !memo.reserveMore(id, mustOrigin(base), 2+tokenCallBudget(a)) {
@@ -463,7 +491,7 @@ func (s *UpstreamBalanceService) pollOne(ctx context.Context, roundStart time.Ti
 	}
 	if probe.kind == "sub2api" && (probe.success || probe.reason == "no_data" || probe.reason == "key_ungrouped" || (probe.reason == "auth_failed" && probe.status == http.StatusOK)) {
 		if err := s.store.SaveKind(ctx, id, &UpstreamBalanceKindRecord{Version: 1, Fingerprint: fp, Kind: "sub2api", IdentifiedAt: s.now().UTC()}, 24*time.Hour); err != nil {
-			memo.failStore()
+			memo.failStore(ctx)
 			return
 		}
 		s.persistOutcome(ctx, roundStart, id, st, probe, memo)
@@ -492,7 +520,7 @@ func (s *UpstreamBalanceService) pollOne(ctx context.Context, roundStart time.Ti
 		}
 	} else if site != nil {
 		if err := s.store.SaveKind(ctx, id, &UpstreamBalanceKindRecord{Version: 1, Fingerprint: fp, Kind: "newapi", IdentifiedAt: s.now().UTC()}, 24*time.Hour); err != nil {
-			memo.failStore()
+			memo.failStore(ctx)
 			return
 		}
 		if !memo.reserveMore(id, origin, 2+tokenCallBudget(a)) {
@@ -510,7 +538,7 @@ func (s *UpstreamBalanceService) pollOne(ctx context.Context, roundStart time.Ti
 	}
 	st.UnsupportedStreak = min(st.UnsupportedStreak+1, 16)
 	if err := s.store.SaveKind(ctx, id, &UpstreamBalanceKindRecord{Version: 1, Fingerprint: fp, Kind: "unsupported", IdentifiedAt: s.now().UTC()}, unsupportedTTL(st.UnsupportedStreak)); err != nil {
-		memo.failStore()
+		memo.failStore(ctx)
 		return
 	}
 	probe.reason = "unidentified"
@@ -521,6 +549,9 @@ func (s *UpstreamBalanceService) pollOne(ctx context.Context, roundStart time.Ti
 func (s *UpstreamBalanceService) persistOutcome(ctx context.Context, roundStart time.Time, id int64, st *UpstreamBalanceState, out ubOutcome, memos ...*upstreamBalanceRoundMemo) {
 	if ctx.Err() != nil {
 		return
+	}
+	if len(memos) > 0 {
+		memos[0].markPersisted(id)
 	}
 	now := s.now().UTC().Truncate(time.Second)
 	st.LastAttemptAt = now
@@ -550,7 +581,7 @@ func (s *UpstreamBalanceService) persistOutcome(ctx context.Context, roundStart 
 	}
 	if err != nil {
 		if len(memos) > 0 && memos[0] != nil {
-			memos[0].failStore()
+			memos[0].failStore(writeCtx)
 		}
 		s.logPaused()
 	} else {
@@ -585,7 +616,7 @@ func (s *UpstreamBalanceService) kindForAccount(ctx context.Context, id int64, f
 	e, err := s.store.Load(ctx, []int64{id})
 	if err != nil || e == nil {
 		if err != nil && memo != nil {
-			memo.failStore()
+			memo.failStore(ctx)
 		}
 		return nil
 	}
@@ -608,7 +639,7 @@ func (s *UpstreamBalanceService) pollKnownNewAPI(ctx context.Context, roundStart
 		writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), upstreamBalanceStoreTimeout)
 		if err := s.store.DeleteKind(writeCtx, id); err != nil {
 			cancel()
-			memo.failStore()
+			memo.failStore(writeCtx)
 			return
 		}
 		cancel()
@@ -618,7 +649,7 @@ func (s *UpstreamBalanceService) pollKnownNewAPI(ctx context.Context, roundStart
 		}
 		if probe.kind == "sub2api" && (probe.success || probe.reason == "no_data" || probe.reason == "key_ungrouped" || (probe.reason == "auth_failed" && probe.status == http.StatusOK)) {
 			if err := s.store.SaveKind(ctx, id, &UpstreamBalanceKindRecord{Version: 1, Fingerprint: st.Fingerprint, Kind: "sub2api", IdentifiedAt: s.now().UTC()}, 24*time.Hour); err != nil {
-				memo.failStore()
+				memo.failStore(ctx)
 				return
 			}
 		} else if probe.reason == "budget_deferred" {
@@ -627,7 +658,7 @@ func (s *UpstreamBalanceService) pollKnownNewAPI(ctx context.Context, roundStart
 			st.UnsupportedStreak = min(st.UnsupportedStreak+1, 16)
 			probe.reason, probe.kind = "unidentified", "unsupported"
 			if err := s.store.SaveKind(ctx, id, &UpstreamBalanceKindRecord{Version: 1, Fingerprint: st.Fingerprint, Kind: "unsupported", IdentifiedAt: s.now().UTC()}, unsupportedTTL(st.UnsupportedStreak)); err != nil {
-				memo.failStore()
+				memo.failStore(ctx)
 				return
 			}
 		}
@@ -639,7 +670,7 @@ func (s *UpstreamBalanceService) pollKnownNewAPI(ctx context.Context, roundStart
 		err := s.store.DeleteKind(writeCtx, id)
 		cancel()
 		if err != nil {
-			memo.failStore()
+			memo.failStore(writeCtx)
 			return
 		}
 	}
