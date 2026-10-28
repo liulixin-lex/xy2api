@@ -48,7 +48,7 @@ func TestCompatHeartbeatCommitsOnlyStableStreamHeaders(t *testing.T) {
 					before = keepaliveStallCreated
 				}
 				upstream := &attemptHeaderUpstream{silentUpstream: silentUpstream{headers: true, before: before}, requestID: "req_attempt_a"}
-				svc := compatStreamService(upstream, 2, 30, 1)
+				svc := compatStreamService(upstream, 3, 30, 1)
 				svc.responseHeaderFilter = compileResponseHeaderFilter(svc.cfg)
 				c, rec := compatStreamContext("/v1/chat/completions", compatChatStreamBody)
 				var err error
