@@ -282,7 +282,8 @@
 - 请求（用户 2026-10-28，0.4.12 发布后）：给了普通管理员“账号管理”的管理权限，却不能给账号加入或取消分组。原因是 0.4.12 把账号放入或移出分组归到“用户管理 → 加减余额”（审查认为把高价账号放进便宜分组等于降价）。用户选定：有账号“管理”就能改分组，不加新开关。
 - 范围：账号新建、编辑、批量编辑、复制、影子账号、新建时绑定平台默认分组只要求 `accounts:manage`；分组表单的 `copy_accounts_from_group_ids` 改为有加减余额或账号管理任一即可。账号计费类 extra、分组价格、渠道绑定分组等其余规则不变。同步前端分组选择器、加减余额说明、`ADMIN_PERMISSIONS.md`、OpenSpec `operator-role-20261027` 与已接受风险。
 - 分支：`fix/operator-account-groups-20261028`（工作树 `xy2api-wt/operator-account-groups`，自 origin/main `03fc67de3`）。编码交 gpt-6.1-sol，只读审查交 gpt-6-astra；交接包在仓库外 `xy2api-handoff/operator-account-groups-20261028/`。
-- 停止点：PR CI 全绿后停止；合并、发版、部署需用户另行授权。
+- 状态（2026-10-28）：已推送，[PR #163](https://github.com/liulixin-lex/xy2api/pull/163) 已开，CI 结果以 GitHub 为准。gpt-6-astra 只读审查 READY（无 P0/P1/P2，建议的三处过期注释已改）。本机门禁与浏览器联调通过，见操作日志。
+- 停止点：PR CI 全绿后停止；合并、发版、部署需用户另行授权。无迁移、无新设置，回退到 0.4.12 即恢复旧规则。
 
 ## 操作陷阱
 
@@ -1215,3 +1216,13 @@ pnpm --dir frontend run build
 - 制品：6 个资产、201,250,293 字节双 SHA 一致；五平台源码 revision 与版本构建一致，均 `vcs.modified=false`；darwin_arm64 实际版本命令通过；GHCR 双架构、版本/源码/source 标签与全部稳定别名核验通过。未执行部署、安装演练或任何生产操作。
 - 记忆：本次将报错补救、上游余额、普通管理员和版本任务的交接/登记，以及普通管理员旧收尾日志和发布前版本速览原样追加归档；保留其他进行中任务与原有历史。正式标签不移动，发布后收尾只改记忆文件。
 - 后续：部署及生产观察另行授权；WS 余额阶梯等残留见现行文档与顶部摘要。Release 的旧 Node.js Action 弃用提示属后续维护项，不影响本次成功发布。
+
+### 2026-10-28 — 20261028-operator-account-groups — 修复并开 PR #163
+
+- 请求/目标：0.4.12 发布后用户反馈，普通管理员有“账号管理”管理权限却不能调整账号分组。用户选定：有账号管理（管理）就能改分组，不加开关。
+- 开始状态：自 origin/main `03fc67de3` 新建 `fix/operator-account-groups-20261028`（工作树 `xy2api-wt/operator-account-groups`），工作树干净。
+- 完成操作：原因是 0.4.12 契约把账号放组归到 `users.balance_adjust`。账号新建、编辑、批量编辑放开 `group_ids` 并恢复平台默认分组绑定；duplicate、shadow 去掉余额开关（目录与快照同步）；分组的 `copy_accounts_from_group_ids` 改为加减余额或账号管理任一。计费 extra、分组价格、渠道绑定等不变。前端选择器、分组弹窗、复制与影子操作、复制账号选择器、加减余额说明同步；`ADMIN_PERMISSIONS.md` 与 OpenSpec 记录已接受风险。编码由 gpt-6.1-sol 完成，gpt-6-astra 只读审查 READY。
+- 修改文件：`operator_account_rules.go`、`operator_group_rules.go`、`operatoraccess/catalog.go` 与 `testdata/pra_catalog.json`、相关 Go 测试；三个账号弹窗、`operatorAccountRules.ts`、`AccountActionMenu.vue`、`AccountsView.vue`、`GroupsView.vue`、zh/en `operatorAccess.ts` 及规格；`ADMIN_PERMISSIONS.md`、OpenSpec `operator-role-20261027`；本记忆。
+- 验证：build、gofmt、四种 vet、相关包 unit 与 `-race`、golangci-lint 0 issues；前端 lint、typecheck、相关 878 项、`make test-frontend` 917 项；文档一致性、`git diff --check`、干净树 `sync.py audit` 通过。本机浏览器以只有账号管理（管理）、分组管理（查看）的普通管理员改分组成功（`[2]`→`[3]`），复制账号继承分组。
+- 卡点/风险：无。已接受风险：账号管理者可把高价账号放进便宜分组，效果类似降价。
+- 下一步：等 PR #163 CI 全绿后停止；合并、发版、部署待用户授权。
