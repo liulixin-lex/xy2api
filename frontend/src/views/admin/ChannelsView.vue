@@ -268,6 +268,7 @@
                   </p>
                 </div>
                 <Toggle
+                  :disabled="accountStatsPricingLocked"
                   :modelValue="form.apply_pricing_to_account_stats"
                   @update:modelValue="form.apply_pricing_to_account_stats = $event"
                 />
@@ -461,7 +462,7 @@
             </div>
 
             <!-- Account Stats Pricing Rules (per-platform, always visible) -->
-            <div class="mt-4 border-t border-gray-200 pt-4 dark:border-dark-700 space-y-3">
+            <fieldset :disabled="accountStatsPricingLocked" :inert="accountStatsPricingLocked" data-testid="account-stats-pricing" class="mt-4 border-t border-gray-200 pt-4 dark:border-dark-700 space-y-3">
               <div class="flex items-center justify-between">
                 <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">
                   {{ t('admin.channels.form.accountStatsPricingRules') }}
@@ -590,7 +591,7 @@
                   </div>
                 </div>
               </div>
-            </div>
+            </fieldset>
           </div>
         </form>
       </div>
@@ -1366,6 +1367,10 @@ function handleSort(key: string, order: 'asc' | 'desc') {
   loadChannels()
 }
 
+// A grouped channel uses these rules for billing too (R8-5).
+const accountStatsPricingLocked = computed(() => !has('users.balance_adjust') && (editingChannel.value?.group_ids.length ?? 0) > 0)
+let originalAccountStatsPricing = ''
+
 // ── Dialog ──
 function resetForm() {
   form.name = ''
@@ -1402,6 +1407,8 @@ async function openEditDialog(channel: Channel) {
 
   // Distribute channel-level rules into per-platform sections
   distributeRulesToPlatforms(channel.account_stats_pricing_rules || [])
+
+  originalAccountStatsPricing = JSON.stringify(accountStatsRulesToAPI())
 
   // Populate ruleAccountNameCache for existing rule accounts
   await populateRuleAccountNameCache()
@@ -1631,6 +1638,15 @@ async function handleSubmit() {
         features_config,
         apply_pricing_to_account_stats: form.apply_pricing_to_account_stats,
         account_stats_pricing_rules: accountStatsRulesToAPI()
+      }
+      // Omit unchanged projections: distributing rules into platform sections can normalize them.
+      if (!has('users.balance_adjust')) {
+        if (accountStatsPricingLocked.value || form.apply_pricing_to_account_stats === !!editingChannel.value.apply_pricing_to_account_stats) {
+          delete req.apply_pricing_to_account_stats
+        }
+        if (accountStatsPricingLocked.value || JSON.stringify(accountStatsRulesToAPI()) === originalAccountStatsPricing) {
+          delete req.account_stats_pricing_rules
+        }
       }
       await adminAPI.channels.update(editingChannel.value.id, req)
       appStore.showSuccess(t('admin.channels.updateSuccess', 'Channel updated'))

@@ -628,6 +628,7 @@ export default {
         bodyModeHintReplace: 'Use the JSON below as the complete body. Challenge validation is skipped; HTTP 2xx + non-empty response text is treated as operational.',
         bodyJson: 'Body JSON',
         bodyJsonFormat: 'Format',
+        bodyConfiguredHidden: 'Configured; body content is hidden. Enter new JSON to replace it.',
         bodyJsonHint: 'Parsed on blur. Empty means no override.',
         bodyJsonError: 'JSON parse failed',
         bodyJsonObjectError: 'Body must be a JSON object (no arrays or primitives)'

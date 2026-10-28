@@ -73,6 +73,8 @@
       </p>
     </div>
 
+    <p v-if="bodyHidden" class="mt-1 text-xs text-gray-400" data-testid="body-configured-hidden">{{ t('admin.channelMonitor.advanced.bodyConfiguredHidden') }}</p>
+
     <!-- Body JSON (仅当 mode != off) -->
     <div v-if="bodyOverrideMode !== 'off'">
       <div class="mb-1 flex items-center justify-between">
@@ -89,7 +91,7 @@
       <textarea
         v-model="bodyText"
         rows="10"
-        :placeholder="bodyPlaceholder"
+        :placeholder="bodyHidden ? t('admin.channelMonitor.advanced.bodyConfiguredHidden') : bodyPlaceholder"
         class="input font-mono text-xs"
         style="white-space: pre; overflow-wrap: normal; overflow-x: auto;"
         spellcheck="false"
@@ -106,7 +108,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { APIMode, BodyOverrideMode, Provider } from '@/api/admin/channelMonitor'
+import type { APIMode, BodyOverride, BodyOverrideMode, Provider } from '@/api/admin/channelMonitor'
 import {
   API_MODE_RESPONSES,
   supportsMonitorResponses,
@@ -120,13 +122,13 @@ const props = defineProps<{
   apiMode?: APIMode
   extraHeaders: Record<string, string>
   bodyOverrideMode: BodyOverrideMode
-  bodyOverride: Record<string, unknown> | null
+  bodyOverride: BodyOverride
 }>()
 
 const emit = defineEmits<{
   (e: 'update:extraHeaders', value: Record<string, string>): void
   (e: 'update:bodyOverrideMode', value: BodyOverrideMode): void
-  (e: 'update:bodyOverride', value: Record<string, unknown> | null): void
+  (e: 'update:bodyOverride', value: BodyOverride): void
 }>()
 
 const { t } = useI18n()
@@ -209,6 +211,7 @@ function removeRow(index: number) {
 // ---- Body mode + JSON ----
 const bodyText = ref(serializeBody(props.bodyOverride))
 const bodyError = ref('')
+const bodyHidden = computed(() => props.bodyOverride === '******' && bodyText.value === '')
 
 watch(
   () => props.bodyOverride,
@@ -222,6 +225,7 @@ function commitBody() {
   if (props.bodyOverrideMode === 'off') {
     return
   }
+  if (bodyHidden.value) return
   const trimmed = bodyText.value.trim()
   if (trimmed === '') {
     emit('update:bodyOverride', null)
@@ -263,7 +267,8 @@ function formatBody() {
   }
 }
 
-function serializeBody(body: Record<string, unknown> | null): string {
+function serializeBody(body: BodyOverride): string {
+  if (body === '******') return ''
   if (!body || Object.keys(body).length === 0) return ''
   return JSON.stringify(body, null, 2)
 }

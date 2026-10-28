@@ -306,3 +306,15 @@ describe('EditAccountModal for operators: upstream address and proxy', () => {
     expect(anthropicPayload.extra ?? {}).not.toHaveProperty('cache_ttl_override_target')
   })
 })
+
+
+it.each(['openai', 'kimi', 'grok'])('preserves masked userinfo byte for byte on a %s API-key account', async (platform) => {
+  seedOperator(['accounts.upstream_address', 'users.balance_adjust'])
+  updateAccountMock.mockClear()
+  const base_url = 'https://***@relay.example.com:8443/v1/'
+  const wrapper = mountModal(baseAccount({ platform, credentials: { base_url } }))
+  await flushPromises()
+  const payload = await submit(wrapper)
+  expect(payload.credentials.base_url).toBe(base_url)
+  wrapper.unmount()
+})

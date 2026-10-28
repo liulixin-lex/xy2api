@@ -10,6 +10,7 @@ import GroupsView from '../GroupsView.vue'
 const api = vi.hoisted(() => ({
   listGroups: vi.fn(),
   deleteGroup: vi.fn(),
+  updateGroup: vi.fn(),
   showError: vi.fn()
 }))
 
@@ -23,7 +24,7 @@ vi.mock('@/api/admin', () => ({
       getCapacitySummary: vi.fn().mockResolvedValue([]),
       getLiveCapability: vi.fn().mockResolvedValue({ supported: false }),
       create: vi.fn(),
-      update: vi.fn(),
+      update: api.updateGroup,
       delete: api.deleteGroup,
       updateSortOrder: vi.fn()
     },
@@ -107,8 +108,8 @@ function seedOperator(flags: AdminFlagId[]) {
   access.loaded = true
 }
 
-async function deleteNonEmptyGroup() {
-  const wrapper = mount(GroupsView, {
+function mountView() {
+  return mount(GroupsView, {
     global: {
       stubs: {
         AppLayout: { template: '<div><slot /></div>' },
@@ -124,7 +125,10 @@ async function deleteNonEmptyGroup() {
           template: '<button v-if="show" :data-test="title" @click="$emit(\'confirm\')">{{ title }}</button>'
         },
         Pagination: true,
-        BaseDialog: true,
+        BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' },
+        GroupCategoryField: true,
+        ReasoningEffortPolicyFields: { template: '<div />', methods: { validate: () => true } },
+        CodexManifestAccountsField: true,
         EmptyState: true,
         Select: true,
         PlatformIcon: true,
@@ -136,6 +140,10 @@ async function deleteNonEmptyGroup() {
       }
     }
   })
+ }
+
+async function deleteNonEmptyGroup() {
+  const wrapper = mountView()
   await flushPromises()
   await wrapper.findAll('button').find((button) => button.text() === 'common.delete')!.trigger('click')
   await wrapper.get('[data-test="admin.groups.deleteGroup"]').trigger('click')
@@ -150,6 +158,7 @@ describe('GroupsView delete of a group that still has accounts', () => {
     vi.clearAllMocks()
     localStorage.clear()
     vi.spyOn(console, 'error').mockImplementation(() => {})
+    api.updateGroup.mockResolvedValue({})
     api.listGroups.mockResolvedValue({ items: [createGroup()], total: 1, page: 1, page_size: 20, pages: 1 })
     api.deleteGroup.mockRejectedValue({ status: 409, code: 'CONFLICT', reason: 'GROUP_NOT_EMPTY', message: 'group still has accounts' })
   })
@@ -167,5 +176,30 @@ describe('GroupsView delete of a group that still has accounts', () => {
     useAdminAccessStore().reset()
     getActivePinia()!.state.value.auth = { user: { id: 1, role: 'admin' }, runMode: 'standard' }
     expect(await deleteNonEmptyGroup()).toEqual(['admin.groups.failedToDelete'])
+  })
+})
+
+
+describe('GroupsView protected edit prices', () => {
+  it.each([false, true, 'admin'] as const)('renames a group with NULL prices and omits protected prices when flag=%s', async (flag) => {
+    seedOperator(flag ? ['users.balance_adjust'] : [])
+    if (flag === 'admin') getActivePinia()!.state.value.auth = { user: { id: 1, role: 'admin' } }
+    api.listGroups.mockResolvedValue({ items: [createGroup({ platform: 'openai' })], total: 1 })
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'common.edit')!.trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-tour="edit-group-form-name"]').setValue('Renamed')
+    for (const fieldset of wrapper.findAll('[data-testid="group-protected-pricing"]')) {
+      expect(fieldset.attributes('disabled') !== undefined).toBe(!flag)
+    }
+    expect(wrapper.get('[data-testid="edit-force-openai-fast"]').attributes('disabled') !== undefined).toBe(!flag)
+    await wrapper.get('#edit-group-form').trigger('submit')
+    await flushPromises()
+    const payload = api.updateGroup.mock.calls.at(-1)![1]
+    expect(payload.name).toBe('Renamed')
+    const protectedFields = ['platform', 'force_openai_fast', 'rate_multiplier', 'subscription_type', 'daily_limit_usd', 'weekly_limit_usd', 'monthly_limit_usd', 'long_context_pricing_enabled', 'long_context_pricing_scope', 'long_context_pricing_models', 'model_pricing', 'image_rate_independent', 'image_rate_multiplier', 'batch_image_discount_multiplier', 'batch_image_hold_multiplier', 'video_rate_independent', 'video_rate_multiplier', 'peak_rate_enabled', 'peak_start', 'peak_end', 'peak_rate_multiplier', 'profit_control_enabled', 'profit_min_margin', 'profit_safety_buffer', 'image_price_1k', 'image_price_2k', 'image_price_4k', 'video_price_480p', 'video_price_720p', 'video_price_1080p', 'video_model_prices', 'web_search_price_per_call', 'search_price_per_1k', 'audio_realtime_price_per_min', 'audio_tts_price_per_million_chars', 'audio_stt_price_per_hour', 'free_openai_fast', 'max_reasoning_effort', 'reasoning_effort_mappings']
+    for (const field of protectedFields) expect(Object.hasOwn(payload, field), field).toBe(!!flag)
+    wrapper.unmount()
   })
 })

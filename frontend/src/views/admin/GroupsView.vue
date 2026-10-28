@@ -2323,8 +2323,8 @@
           />
           <p class="input-hint">{{ t("admin.groups.form.rpmLimitHint") }}</p>
         </div>
-        <ReasoningEffortPolicyFields
-          v-if="supportsReasoningEffortPolicyPlatform(editForm.platform)"
+        <fieldset v-if="supportsReasoningEffortPolicyPlatform(editForm.platform)" :disabled="!canAdjustBalance" :inert="!canAdjustBalance" data-testid="group-protected-pricing">
+          <ReasoningEffortPolicyFields
           ref="editReasoningEffortPolicyRef"
           id-prefix="edit-group-reasoning"
           :platform="editForm.platform"
@@ -2332,6 +2332,7 @@
           v-model:over-limit="editForm.max_reasoning_effort_over_limit"
           v-model:mappings="editForm.reasoning_effort_mappings"
         />
+        </fieldset>
         <div v-if="editForm.subscription_type !== 'subscription'">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -2426,6 +2427,7 @@
                 t("admin.groups.subscription.dailyLimit")
               }}</label>
               <input
+                :disabled="!canAdjustBalance"
                 v-model.number="editForm.daily_limit_usd"
                 type="number"
                 step="0.01"
@@ -2439,6 +2441,7 @@
                 t("admin.groups.subscription.weeklyLimit")
               }}</label>
               <input
+                :disabled="!canAdjustBalance"
                 v-model.number="editForm.weekly_limit_usd"
                 type="number"
                 step="0.01"
@@ -2452,6 +2455,7 @@
                 t("admin.groups.subscription.monthlyLimit")
               }}</label>
               <input
+                :disabled="!canAdjustBalance"
                 v-model.number="editForm.monthly_limit_usd"
                 type="number"
                 step="0.01"
@@ -2608,6 +2612,7 @@
             </label>
             <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
               <input
+                :disabled="!canAdjustBalance"
                 v-model="editForm.image_rate_independent"
                 type="checkbox"
                 class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
@@ -2623,6 +2628,7 @@
               t(imagePricingI18nKey(editForm.platform, "imageMultiplier"))
             }}</label>
             <input
+              :disabled="!canAdjustBalance"
               v-model.number="editForm.image_rate_multiplier"
               type="number"
               step="0.0001"
@@ -2635,6 +2641,7 @@
             <div>
               <label class="input-label">1K ($)</label>
               <input
+                :disabled="!canAdjustBalance"
                 v-model.number="editForm.image_price_1k"
                 type="number"
                 step="0.001"
@@ -2646,6 +2653,7 @@
             <div>
               <label class="input-label">2K ($)</label>
               <input
+                :disabled="!canAdjustBalance"
                 v-model.number="editForm.image_price_2k"
                 type="number"
                 step="0.001"
@@ -2657,6 +2665,7 @@
             <div>
               <label class="input-label">4K ($)</label>
               <input
+                :disabled="!canAdjustBalance"
                 v-model.number="editForm.image_price_4k"
                 type="number"
                 step="0.001"
@@ -2705,6 +2714,7 @@
                   t("admin.groups.imagePricing.batchDiscountMultiplier")
                 }}</label>
                 <input
+                  :disabled="!canAdjustBalance"
                   v-model.number="editForm.batch_image_discount_multiplier"
                   type="number"
                   step="0.0001"
@@ -2718,6 +2728,7 @@
                   t("admin.groups.imagePricing.batchHoldMultiplier")
                 }}</label>
                 <input
+                  :disabled="!canAdjustBalance"
                   v-model.number="editForm.batch_image_hold_multiplier"
                   type="number"
                   step="0.0001"
@@ -2752,6 +2763,7 @@
           <div class="mb-4">
             <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
               <input
+                :disabled="!canAdjustBalance"
                 v-model="editForm.video_rate_independent"
                 type="checkbox"
                 class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
@@ -2767,6 +2779,7 @@
               t(videoPricingI18nKey("videoMultiplier"))
             }}</label>
             <input
+              :disabled="!canAdjustBalance"
               v-model.number="editForm.video_rate_multiplier"
               type="number"
               step="0.0001"
@@ -2779,6 +2792,7 @@
             <div>
               <label class="input-label">480p ($/s)</label>
               <input
+                :disabled="!canAdjustBalance"
                 v-model.number="editForm.video_price_480p"
                 type="number"
                 step="0.001"
@@ -2790,6 +2804,7 @@
             <div>
               <label class="input-label">720p ($/s)</label>
               <input
+                :disabled="!canAdjustBalance"
                 v-model.number="editForm.video_price_720p"
                 type="number"
                 step="0.001"
@@ -2801,6 +2816,7 @@
             <div>
               <label class="input-label">1080p ($/s)</label>
               <input
+                :disabled="!canAdjustBalance"
                 v-model.number="editForm.video_price_1080p"
                 type="number"
                 step="0.001"
@@ -2838,6 +2854,7 @@
                     {{ resolution.label }} ($/s)
                   </span>
                   <input
+                    :disabled="!canAdjustBalance"
                     v-model.number="editForm.video_model_prices[family.key][resolution.key]"
                     type="number"
                     step="0.001"
@@ -2872,6 +2889,7 @@
           <div class="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2">
             <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
               <input
+                :disabled="!canAdjustBalance"
                 v-model="editForm.peak_rate_enabled"
                 type="checkbox"
                 class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
@@ -2886,6 +2904,7 @@
             <div>
               <label class="input-label">{{ t("admin.groups.peakRate.peakStart") }}</label>
               <input
+                :disabled="!canAdjustBalance"
                 v-model="editForm.peak_start"
                 type="time"
                 class="input"
@@ -2894,6 +2913,7 @@
             <div>
               <label class="input-label">{{ t("admin.groups.peakRate.peakEnd") }}</label>
               <input
+                :disabled="!canAdjustBalance"
                 v-model="editForm.peak_end"
                 type="time"
                 class="input"
@@ -2902,6 +2922,7 @@
             <div>
               <label class="input-label">{{ t("admin.groups.peakRate.peakMultiplier") }}</label>
               <input
+                :disabled="!canAdjustBalance"
                 v-model.number="editForm.peak_rate_multiplier"
                 type="number"
                 step="0.001"
@@ -2918,6 +2939,7 @@
         <div v-if="isProfitControlPlatform(editForm.platform)" class="border-t pt-4">
           <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
             <input
+              :disabled="!canAdjustBalance"
               v-model="editForm.profit_control_enabled"
               type="checkbox"
               class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
@@ -2938,6 +2960,7 @@
             <div>
               <label class="input-label">{{ t("admin.groups.profitControl.minMargin") }}</label>
               <input
+                :disabled="!canAdjustBalance"
                 v-model.number="editForm.profit_min_margin_percent"
                 type="number"
                 step="0.1"
@@ -2951,6 +2974,7 @@
             <div>
               <label class="input-label">{{ t("admin.groups.profitControl.safetyBuffer") }}</label>
               <input
+                :disabled="!canAdjustBalance"
                 v-model.number="editForm.profit_safety_buffer_percent"
                 type="number"
                 step="0.1"
@@ -3148,6 +3172,7 @@
               t("admin.groups.webSearchPricing.pricePerCall")
             }}</label>
             <input
+              :disabled="!canAdjustBalance"
               v-model.number="editForm.web_search_price_per_call"
               type="number"
               step="0.001"
@@ -3181,7 +3206,7 @@
         />
 
 
-        <div class="border-t border-gray-200 pt-4 mt-4 dark:border-dark-400">
+        <fieldset :disabled="!canAdjustBalance" :inert="!canAdjustBalance" data-testid="group-protected-pricing" class="border-t border-gray-200 pt-4 mt-4 dark:border-dark-400">
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div class="min-w-0 flex-1">
               <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t("admin.groups.modelPricing.title") }}</h4>
@@ -3192,7 +3217,7 @@
             </button>
           </div>
           <label class="mt-3 flex items-start gap-2">
-            <input v-model="editForm.long_context_pricing_enabled" type="checkbox" class="mt-0.5" />
+            <input :disabled="!canAdjustBalance" v-model="editForm.long_context_pricing_enabled" type="checkbox" class="mt-0.5" />
             <span><span class="block text-sm text-gray-700 dark:text-gray-300">{{ t("admin.groups.modelPricing.longContext") }}</span><span class="block text-xs text-gray-500">{{ t("admin.groups.modelPricing.longContextHint") }}</span></span>
           </label>
           <LongContextPricingFields
@@ -3206,7 +3231,7 @@
           <div class="mt-3 space-y-2">
             <PricingEntryCard v-for="(entry, index) in editForm.model_pricing" :key="index" :entry="entry" :platform="editForm.platform" hide-token-intervals @update="editForm.model_pricing[index] = $event" @remove="editForm.model_pricing.splice(index, 1)" />
           </div>
-        </div>
+        </fieldset>
 
         <!-- Grok Voice 显式定价（仅 grok 平台） -->
         <div
@@ -3223,6 +3248,7 @@
             <div>
               <label class="input-label">{{ t("admin.groups.explicitPricing.searchPricePer1k") }}</label>
               <input
+                :disabled="!canAdjustBalance"
                 v-model.number="editForm.search_price_per_1k"
                 type="number"
                 step="0.000001"
@@ -3235,6 +3261,7 @@
             <div>
               <label class="input-label">{{ t("admin.groups.voicePricing.audioRealtimePerMin") }}</label>
               <input
+                :disabled="!canAdjustBalance"
                 v-model.number="editForm.audio_realtime_price_per_min"
                 type="number"
                 step="0.000001"
@@ -3247,6 +3274,7 @@
             <div>
               <label class="input-label">{{ t("admin.groups.voicePricing.audioTtsPerMillionChars") }}</label>
               <input
+                :disabled="!canAdjustBalance"
                 v-model.number="editForm.audio_tts_price_per_million_chars"
                 type="number"
                 step="0.000001"
@@ -3259,6 +3287,7 @@
             <div>
               <label class="input-label">{{ t("admin.groups.voicePricing.audioSttPerHour") }}</label>
               <input
+                :disabled="!canAdjustBalance"
                 v-model.number="editForm.audio_stt_price_per_hour"
                 type="number"
                 step="0.000001"
@@ -3285,6 +3314,7 @@
             <Toggle
               data-testid="edit-force-openai-fast"
               :aria-label="t('admin.groups.openaiFast.force')"
+              :disabled="!canAdjustBalance"
               v-model="editForm.force_openai_fast"
             />
           </div>
@@ -3298,6 +3328,7 @@
             <Toggle
               data-testid="edit-free-openai-fast"
               :aria-label="t('admin.groups.openaiFast.free')"
+              :disabled="!canAdjustBalance"
               v-model="editForm.free_openai_fast"
             />
           </div>
@@ -4548,6 +4579,48 @@ const authStore = useAuthStore();
 const { canManage, has } = useAdminPermission("groups");
 // 分组倍率、复制账号、公开分组和删除有账号的分组需要“加减余额”权限
 const canAdjustBalance = computed(() => has("users.balance_adjust"));
+// Catalog §2.2.1 and R8-4: omit protected fields, including normalized NULL prices.
+const operatorGroupPriceFields = [
+  "platform",
+  "force_openai_fast",
+  "rate_multiplier",
+  "subscription_type",
+  "daily_limit_usd",
+  "weekly_limit_usd",
+  "monthly_limit_usd",
+  "long_context_pricing_enabled",
+  "long_context_pricing_scope",
+  "long_context_pricing_models",
+  "model_pricing",
+  "image_rate_independent",
+  "image_rate_multiplier",
+  "batch_image_discount_multiplier",
+  "batch_image_hold_multiplier",
+  "video_rate_independent",
+  "video_rate_multiplier",
+  "peak_rate_enabled",
+  "peak_start",
+  "peak_end",
+  "peak_rate_multiplier",
+  "profit_control_enabled",
+  "profit_min_margin",
+  "profit_safety_buffer",
+  "image_price_1k",
+  "image_price_2k",
+  "image_price_4k",
+  "video_price_480p",
+  "video_price_720p",
+  "video_price_1080p",
+  "video_model_prices",
+  "web_search_price_per_call",
+  "search_price_per_1k",
+  "audio_realtime_price_per_min",
+  "audio_tts_price_per_million_chars",
+  "audio_stt_price_per_hour",
+  "free_openai_fast",
+  "max_reasoning_effort",
+  "reasoning_effort_mappings"
+] as const;
 const onboardingStore = useOnboardingStore();
 const groupCategories = useGroupCategoriesStore();
 
@@ -6559,6 +6632,9 @@ const handleUpdateGroup = async () => {
     );
     if (!canAdjustBalance.value) {
       delete (payload as Record<string, unknown>).copy_accounts_from_group_ids;
+      for (const field of operatorGroupPriceFields) {
+        delete (payload as Record<string, unknown>)[field];
+      }
     }
     const requestData = authStore.isSimpleMode
       ? {

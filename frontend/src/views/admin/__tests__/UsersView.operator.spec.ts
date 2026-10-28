@@ -194,3 +194,22 @@ describe('UsersView row actions by role', () => {
     wrapper.unmount()
   })
 })
+
+
+describe('UsersView operator attribute batches', () => {
+  it.each([false, true])('only reads readable attribute rows and skips an empty batch (%s)', async (empty) => {
+    localStorage.setItem('user-hidden-columns', '[]')
+    localStorage.setItem('user-column-settings-version', '3')
+    signIn(7, 'operator', { modules: { users: 'view' } })
+    api.getBatchUserAttributes.mockClear().mockResolvedValue({ attributes: {} })
+    api.listEnabledDefinitions.mockResolvedValue([{ id: 1, name: 'Team', enabled: true, type: 'text' }])
+    api.list.mockResolvedValue({ items: [user({ id: 1, role: 'admin' }), user({ id: 7, role: 'operator' }), user({ id: 8, role: 'operator' }), ...(empty ? [] : [user({ id: 42 })])], total: 4 })
+    const wrapper = mountView()
+    await flushPromises()
+    await new Promise(resolve => setTimeout(resolve, 80))
+    await flushPromises()
+    if (empty) expect(api.getBatchUserAttributes).not.toHaveBeenCalled()
+    else expect(api.getBatchUserAttributes).toHaveBeenCalledWith([42])
+    wrapper.unmount()
+  })
+})

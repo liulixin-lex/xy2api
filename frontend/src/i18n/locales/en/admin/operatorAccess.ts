@@ -52,7 +52,7 @@ export default {
     createNoSignupGrants: 'Without "Adjust balance", new users start at balance 0 and get no default subscription.',
     accountUngroupedHint: 'Without "Adjust balance", new accounts join no group until someone with that permission assigns one.',
     monitorHeadersDropped: 'After changing the endpoint, provider or API mode, only the headers entered in this edit are kept.',
-    templateApplySuperOnly: 'Only a super admin can apply a template that has headers.',
+    templateApplySuperOnly: 'Only a super admin can apply a template that has headers or a body override.',
     addressNeedsFlag: 'Without "Show upstream address", you cannot set an upstream address. New accounts use the platform\'s default address.',
     networkLockedRefreshable: 'Only a super admin can change the address, proxy, type and access mode of an OAuth-type account.',
     proxyNetworkNeedsFlag: 'Without "Show upstream address", you cannot create proxies or change a proxy\'s protocol, host, port, user name, password or backup chain.',

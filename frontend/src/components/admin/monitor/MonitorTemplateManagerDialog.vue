@@ -282,7 +282,7 @@ const { canManage } = useAdminPermission('channels')
 const adminAccess = useAdminAccessStore()
 // 含请求头的模板只能由超级管理员应用（应用会把请求头复制到所选监控）
 function templateHasHeaders(tpl: ChannelMonitorTemplate): boolean {
-  return Object.keys(tpl.extra_headers || {}).length > 0
+  return Object.keys(tpl.extra_headers || {}).length > 0 || (tpl.body_override === '******' || Object.keys(tpl.body_override || {}).length > 0)
 }
 function applyNeedsSuperAdmin(tpl: ChannelMonitorTemplate): boolean {
   return adminAccess.isOperator && templateHasHeaders(tpl)
@@ -326,7 +326,7 @@ interface TemplateForm {
   description: string
   extra_headers: Record<string, string>
   body_override_mode: BodyOverrideMode
-  body_override: Record<string, unknown> | null
+  body_override: Record<string, unknown> | '******' | null
 }
 
 const editing = ref<null | 'new' | number>(null) // null = list view; 'new' = create; <id> = edit
@@ -354,7 +354,7 @@ function loadForm(tpl: ChannelMonitorTemplate) {
   form.description = tpl.description
   form.extra_headers = { ...(tpl.extra_headers || {}) }
   form.body_override_mode = tpl.body_override_mode
-  form.body_override = tpl.body_override ? { ...tpl.body_override } : null
+  form.body_override = tpl.body_override === '******' ? '******' : tpl.body_override ? { ...tpl.body_override } : null
 }
 
 function openCreateForm() {

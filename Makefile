@@ -83,7 +83,8 @@ FRONTEND_CRITICAL_VITEST := \
 	src/views/admin/__tests__/ChannelsView.operator.spec.ts \
 	src/views/admin/__tests__/GroupsView.operator.spec.ts \
 	src/components/admin/__tests__/accountToolPanels.readonly.spec.ts \
-	src/components/admin/monitor/__tests__/MonitorFormDialog.operator.spec.ts
+	src/components/admin/monitor/__tests__/MonitorFormDialog.operator.spec.ts \
+	src/views/admin/__tests__/RiskControlView.spec.ts
 
 # 一键编译前后端
 build: build-backend build-frontend

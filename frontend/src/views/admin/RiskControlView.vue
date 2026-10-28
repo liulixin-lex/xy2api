@@ -1312,7 +1312,7 @@ function captureEngineDraft(): EngineDraft {
 }
 
 function switchEngine(value: string | number | boolean | null) {
-  if ((value !== 'openai' && value !== 'typesafe') || apiKeyTesting.value || saving.value) return
+  if (!superOnly.value || (value !== 'openai' && value !== 'typesafe') || apiKeyTesting.value || saving.value) return
   engineDrafts.value[configForm.engine] = captureEngineDraft()
   configForm.engine = value
   const draft = engineDrafts.value[value]

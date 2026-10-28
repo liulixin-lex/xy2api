@@ -52,7 +52,7 @@ export default {
     createNoSignupGrants: '没有“加减余额”权限时，新用户余额为 0，也不会获得默认订阅。',
     accountUngroupedHint: '没有“加减余额”权限时，新账号不加入任何分组，需由有该权限的管理员分配。',
     monitorHeadersDropped: '修改地址、服务商或接口模式后，只保留本次填写的请求头。',
-    templateApplySuperOnly: '含请求头的模板只能由超级管理员应用。',
+    templateApplySuperOnly: '含请求头或请求体覆盖的模板只能由超级管理员应用。',
     addressNeedsFlag: '没有“显示上游地址”权限时不能设置上游地址，新账号使用平台默认地址。',
     networkLockedRefreshable: 'OAuth 类账号的接入地址、代理、类型和接入方式只有超级管理员可以修改。',
     proxyNetworkNeedsFlag: '没有“显示上游地址”权限时不能新建代理，也不能修改代理的协议、主机、端口、用户名、密码和备用链。',

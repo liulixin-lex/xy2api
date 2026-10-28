@@ -337,7 +337,7 @@ const headersDropped = computed(() => adminAccess.isOperator && monitorNetworkCh
 const canLinkAccount = computed(() => adminAccess.can('accounts:view'))
 // Operators cannot attach a template that carries extra headers (super admin only).
 function templateHasHeaders(tpl: ChannelMonitorTemplate): boolean {
-  return Object.keys(tpl.extra_headers || {}).length > 0
+  return Object.keys(tpl.extra_headers || {}).length > 0 || (tpl.body_override === '******' || Object.keys(tpl.body_override || {}).length > 0)
 }
 function templateIsSuperOnly(tpl: ChannelMonitorTemplate): boolean {
   return adminAccess.isOperator && templateHasHeaders(tpl)
@@ -369,7 +369,7 @@ interface MonitorForm {
   template_id: number | null
   extra_headers: Record<string, string>
   body_override_mode: BodyOverrideMode
-  body_override: Record<string, unknown> | null
+  body_override: Record<string, unknown> | '******' | null
 }
 
 const form = reactive<MonitorForm>({
@@ -453,7 +453,7 @@ const templateSelectValue = computed<string>({
       form.template_id = id
       form.extra_headers = { ...(tpl.extra_headers || {}) }
       form.body_override_mode = tpl.body_override_mode
-      form.body_override = tpl.body_override ? { ...tpl.body_override } : null
+      form.body_override = tpl.body_override === '******' ? '******' : tpl.body_override ? { ...tpl.body_override } : null
       suppressFormWatchers = false
     }
   },
@@ -810,7 +810,7 @@ function loadFromMonitor(m: ChannelMonitor) {
   form.template_id = m.template_id ?? null
   form.extra_headers = { ...(m.extra_headers || {}) }
   form.body_override_mode = m.body_override_mode || 'off'
-  form.body_override = m.body_override ? { ...m.body_override } : null
+  form.body_override = m.body_override === '******' ? '******' : m.body_override ? { ...m.body_override } : null
   suppressFormWatchers = false
 }
 

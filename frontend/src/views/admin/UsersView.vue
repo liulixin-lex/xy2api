@@ -1458,11 +1458,13 @@ const loadUsersSecondaryData = async (
     )
   }
 
-  if (attributeDefinitions.value.length > 0 && hasVisibleAttributeColumns.value) {
+  const readableIds = new Set(users.value.filter(canReadRow).map((user) => user.id))
+  const attributeUserIds = isSuperAdmin.value ? userIds : userIds.filter((id) => readableIds.has(id))
+  if (attributeUserIds.length > 0 && attributeDefinitions.value.length > 0 && hasVisibleAttributeColumns.value) {
     tasks.push(
       (async () => {
         try {
-          const attrResponse = await adminAPI.userAttributes.getBatchUserAttributes(userIds)
+          const attrResponse = await adminAPI.userAttributes.getBatchUserAttributes(attributeUserIds)
           if (signal?.aborted) return
           if (typeof expectedSeq === 'number' && expectedSeq !== secondaryDataSeq) return
           userAttributeValues.value = attrResponse.attributes

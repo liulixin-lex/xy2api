@@ -52,9 +52,9 @@ function mountView() {
         }),
         DataTable: defineComponent({
           props: ['data'],
-          template: '<div><div v-for="row in data" :key="row.id" :data-test="`channel-${row.id}`"><slot name="cell-status" :row="row" /></div></div>'
+          template: '<div><div v-for="row in data" :key="row.id" :data-test="`channel-${row.id}`"><slot name="cell-status" :row="row" /><slot name="cell-actions" :row="row" /></div></div>'
         }),
-        BaseDialog: true,
+        BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' },
         Pagination: true,
         ConfirmDialog: true,
         EmptyState: true,
@@ -119,4 +119,25 @@ describe('ChannelsView status toggle for operators', () => {
     expect(updateChannel).not.toHaveBeenCalled()
     wrapper.unmount()
   })
+})
+
+
+it.each([false, true, 'admin'] as const)('locks grouped account-stats pricing and omits unchanged values without the flag (%s)', async (flag) => {
+  seedOperator('manage', flag ? ['users.balance_adjust'] : [])
+  if (flag === 'admin') getActivePinia()!.state.value.auth = { user: { id: 1, role: 'admin' } }
+  getGroups.mockResolvedValue([{ id: 3, name: 'Group', platform: 'openai' }])
+  listChannels.mockResolvedValue({ items: [{ id: 1, name: 'grouped', status: 'active', group_ids: [3], model_pricing: [], account_stats_pricing_rules: [], apply_pricing_to_account_stats: true }], total: 1 })
+  const wrapper = mountView()
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'common.edit')!.trigger('click')
+  await flushPromises()
+  expect(wrapper.get('[data-testid="account-stats-pricing"]').attributes('disabled') !== undefined).toBe(!flag)
+  const pricingToggle = wrapper.findAllComponents(Toggle).find(toggle => toggle.props('modelValue') === true && toggle.attributes('disabled') !== undefined)
+  if (!flag) expect(pricingToggle).toBeDefined()
+  await wrapper.get('#channel-form').trigger('submit')
+  await flushPromises()
+  const payload = updateChannel.mock.calls.at(-1)![1]
+  expect(Object.hasOwn(payload, 'apply_pricing_to_account_stats')).toBe(!!flag)
+  expect(Object.hasOwn(payload, 'account_stats_pricing_rules')).toBe(!!flag)
+  wrapper.unmount()
 })

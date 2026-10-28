@@ -127,7 +127,7 @@ function mountDialog(monitor: ChannelMonitor | null = null) {
         Toggle: true,
         ModelTagInput: true,
         MonitorKeyPickerDialog: true,
-        MonitorAdvancedRequestConfig: true
+        MonitorAdvancedRequestConfig: false
       }
     }
   })
@@ -238,4 +238,33 @@ describe('MonitorFormDialog for operators', () => {
     expect(wrapper.get('[data-testid="monitor-check-mode-quota_probe"]').attributes('disabled')).toBeDefined()
     expect(accountsList).not.toHaveBeenCalled()
   })
+})
+
+
+it('keeps a masked body configured without parsing it and replaces it only on new input', async () => {
+  seedOperator({ channels: 'manage' }, ['accounts.upstream_address'])
+  const wrapper = mountDialog(makeMonitor({ body_override_mode: 'merge', body_override: '******' }))
+  await flushPromises()
+  expect(wrapper.get('[data-testid="body-configured-hidden"]').text()).toBe('admin.channelMonitor.advanced.bodyConfiguredHidden')
+  const body = wrapper.get('textarea.font-mono')
+  expect((body.element as HTMLTextAreaElement).value).toBe('')
+  await body.trigger('blur')
+  await submit(wrapper)
+  expect(monitorUpdate.mock.calls.at(-1)![1].body_override).toBe('******')
+  await body.setValue('{"max_tokens":10}')
+  await body.trigger('blur')
+  await submit(wrapper)
+  expect(monitorUpdate.mock.calls.at(-1)![1].body_override).toEqual({ max_tokens: 10 })
+})
+
+it('disables templates with either a masked or visible body override for operators', async () => {
+  seedOperator({ channels: 'manage' })
+  listTemplates.mockResolvedValue({ items: [
+    template(1, 'plain', {}),
+    { ...template(2, 'masked body', {}), body_override: '******' },
+    { ...template(3, 'visible body', {}), body_override: { max_tokens: 10 } }
+  ] })
+  const wrapper = mountDialog(makeMonitor())
+  await flushPromises()
+  expect(await templateOptionStates(wrapper)).toMatchObject({ plain: 'false', 'masked body': 'true', 'visible body': 'true' })
 })

@@ -5,8 +5,9 @@ import type { AssociatedMonitorBrief } from '@/api/admin/channelMonitorTemplate'
 import { useAdminAccessStore } from '@/stores/adminAccess'
 import type { MeAccess } from '@/types/adminAccess'
 import MonitorTemplateApplyPickerDialog from '../MonitorTemplateApplyPickerDialog.vue'
+import MonitorTemplateManagerDialog from '../MonitorTemplateManagerDialog.vue'
 
-const mocks = vi.hoisted(() => ({ listAssociatedMonitors: vi.fn(), apply: vi.fn(), showError: vi.fn(), showSuccess: vi.fn() }))
+const mocks = vi.hoisted(() => ({ list: vi.fn(), update: vi.fn(), listAssociatedMonitors: vi.fn(), apply: vi.fn(), showError: vi.fn(), showSuccess: vi.fn() }))
 vi.mock('@/api/admin', () => ({ adminAPI: { channelMonitorTemplate: mocks } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => mocks }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
@@ -62,5 +63,32 @@ describe('MonitorTemplateApplyPickerDialog for operators', () => {
     await applicable.trigger('click')
     await flushPromises()
     expect(mocks.apply).toHaveBeenCalledWith(3, [11])
+  })
+})
+
+
+describe('MonitorTemplateManagerDialog operator body overrides', () => {
+  it.each(['******', { max_tokens: 10 }] as const)('locks application of a template with a body override (%s)', async (body_override) => {
+    mocks.list.mockResolvedValue({ items: [{ id: 3, name: 'Hidden body', description: '', provider: 'anthropic', extra_headers: {}, body_override_mode: 'merge', body_override, associated_monitors: 1 }] })
+    const wrapper = mount(MonitorTemplateManagerDialog, {
+      props: { show: true },
+      global: { stubs: { BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' }, Icon: true } }
+    })
+    await flushPromises()
+    const apply = wrapper.findAll('button').find(button => button.text() === 'admin.channelMonitor.template.applyButton')!
+    expect(apply.attributes('disabled')).toBeDefined()
+    await wrapper.findAll('button').find(button => button.text() === 'common.edit')!.trigger('click')
+    await flushPromises()
+    if (body_override === '******') {
+      expect(wrapper.get('[data-testid="body-configured-hidden"]').exists()).toBe(true)
+      const textarea = wrapper.get('textarea.font-mono')
+      expect((textarea.element as HTMLTextAreaElement).value).toBe('')
+      await textarea.trigger('blur')
+    }
+    mocks.update.mockResolvedValue({})
+    await wrapper.findAll('button').find(button => button.text() === 'common.update')!.trigger('click')
+    await flushPromises()
+    expect(mocks.update).toHaveBeenLastCalledWith(3, expect.objectContaining({ body_override }))
+    wrapper.unmount()
   })
 })
