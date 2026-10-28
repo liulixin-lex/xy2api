@@ -46,11 +46,10 @@ func TestIQCompletedItemsRecovery(t *testing.T) {
 }
 
 func TestIQRecoveryRetryPolicy(t *testing.T) {
-	for _, reason := range []string{"timeout", "request_failed", "response_read_failed", "http_502", "http_503", "http_504", "rate_limited", "missing_final_message", "empty_final_text", "incomplete_response", "zero_byte_response"} {
+	for _, reason := range []string{"timeout", "request_failed", "response_read_failed", "http_502", "http_503", "http_504", "missing_final_message", "empty_final_text", "incomplete_response", "zero_byte_response"} {
 		require.True(t, Retryable(Unknown(reason)), reason)
 	}
-	require.True(t, Retryable(Unknown("http_403")), "transient forbidden responses follow FailurePolicy")
-	for _, reason := range []string{"quota_exhausted", "wrong_answer", "refusal"} {
+	for _, reason := range []string{"quota_exhausted", "http_403", "http_429", "rate_limited", "wrong_answer", "refusal"} {
 		require.False(t, Retryable(Unknown(reason)), reason)
 	}
 	require.False(t, Retryable(Grade("29", fixtureCheck)))

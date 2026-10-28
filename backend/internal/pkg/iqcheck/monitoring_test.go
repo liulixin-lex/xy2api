@@ -46,3 +46,37 @@ func TestRetryableFollowsFailurePolicyForServerErrorsAndParseFailures(t *testing
 	}
 	require.False(t, Retryable(Unknown("authentication_unavailable")))
 }
+
+func TestIQRoundStopsOnResourceFailuresWithoutChangingValidAnswers(t *testing.T) {
+	for _, tc := range []struct {
+		name, retryAfter, body, want string
+		httpStatus                   int
+	}{
+		{name: "forbidden", httpStatus: 403, body: `{}`, want: "unknown"},
+		{name: "limited", httpStatus: 429, body: `{}`, want: "unknown"},
+		{name: "rewritten forbidden", httpStatus: 403, body: `{"error":{"code":"server_error"}}`, want: "unknown"},
+		{name: "rewritten limited", httpStatus: 429, body: `{"error":{"code":"server_error"}}`, want: "unknown"},
+		{name: "body rate limit", httpStatus: 503, body: `{"error":{"code":"rate_limit_exceeded"}}`, want: "unknown"},
+		{name: "retry floor", httpStatus: 503, retryAfter: "60", body: `{}`, want: "unknown"},
+		{name: "unbounded retry", httpStatus: 503, retryAfter: strings.Repeat("9", 100), body: `{}`, want: "unknown"},
+		{name: "correct with retry floor", httpStatus: 200, retryAfter: "60", body: `{"choices":[{"message":{"content":"21"},"finish_reason":"stop"}]}`, want: "smart"},
+		{name: "wrong with retry floor", httpStatus: 200, retryAfter: "60", body: `{"choices":[{"message":{"content":"29"},"finish_reason":"stop"}]}`, want: "degraded"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := ParseHTTP(&http.Response{StatusCode: tc.httpStatus, Header: http.Header{"Retry-After": []string{tc.retryAfter}}, Body: io.NopCloser(strings.NewReader(tc.body))}, true, "http", fixtureCheck)
+			require.Equal(t, tc.want, r.Status, r.Reason)
+			require.False(t, Retryable(r))
+			mode := "normal"
+			if r.Status == "degraded" {
+				mode = "recheck"
+			}
+			status, done := DecideRound(mode, []Outcome{{Status: r.Status, Retryable: Retryable(r)}})
+			require.True(t, done)
+			require.Equal(t, tc.want, status)
+			if tc.retryAfter == "60" {
+				schedule := NextSchedule(time.Now(), time.Minute, 0, 0, r, 0)
+				require.Equal(t, r.Diagnostic.RetryAfter, schedule.NotBefore)
+			}
+		})
+	}
+}

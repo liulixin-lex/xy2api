@@ -54,6 +54,8 @@ type iqExecutionRepo struct {
 	deferredContextDeadline time.Time
 	views                   []domain.IQTargetView
 	page                    IQResultsPage
+	resultQueries           []IQResultsQuery
+	resultModels            []string
 }
 
 type iqReconcileFailureRepo struct {
@@ -95,7 +97,9 @@ func (r *iqExecutionRepo) DeferIQTarget(ctx context.Context, claim IQTargetClaim
 func (r *iqExecutionRepo) ListIQTargetViews(context.Context, int64) ([]domain.IQTargetView, error) {
 	return r.views, nil
 }
-func (r *iqExecutionRepo) ListIQResults(context.Context, int64, string, int64, int) (IQResultsPage, error) {
+func (r *iqExecutionRepo) ListIQResults(_ context.Context, _ int64, model string, query IQResultsQuery) (IQResultsPage, error) {
+	r.resultQueries = append(r.resultQueries, query)
+	r.resultModels = append(r.resultModels, model)
 	return r.page, nil
 }
 
@@ -219,7 +223,7 @@ func TestIQRoundRetriesTransientUnknownBeforeJudging(t *testing.T) {
 }
 
 func TestIQResponseCollectionsAndEmptyTimesSerializeByContract(t *testing.T) {
-	emptyPage, err := (&IQCheckService{targetRepo: &iqExecutionRepo{}}).ResultsPage(context.Background(), 1, "", 0, 20)
+	emptyPage, err := (&IQCheckService{targetRepo: &iqExecutionRepo{}}).ResultsPage(context.Background(), 1, "gpt-6-astra", 1, 10, "")
 	require.NoError(t, err)
 	emptyPageJSON, err := json.Marshal(emptyPage)
 	require.NoError(t, err)
@@ -252,7 +256,7 @@ func TestIQResultsAndDiagnosticsExposeOnlyNormalizedAnswers(t *testing.T) {
 		page:  IQResultsPage{Rounds: []IQRound{{Attempts: []IQAttempt{{Answer: rawAnswer}}}}},
 	}
 	svc := &IQCheckService{targetRepo: repo}
-	page, err := svc.ResultsPage(context.Background(), 1, "gpt-6-astra", 0, 20)
+	page, err := svc.ResultsPage(context.Background(), 1, "gpt-6-astra", 1, 10, "")
 	require.NoError(t, err)
 	require.Equal(t, "21", page.Rounds[0].Attempts[0].Answer)
 	pageJSON, err := json.Marshal(page)
@@ -265,6 +269,10 @@ func TestIQResultsAndDiagnosticsExposeOnlyNormalizedAnswers(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(diagnosticsJSON), `"answer":"21"`)
 	require.NotContains(t, string(diagnosticsJSON), "detailed explanation")
+	require.Equal(t, []IQResultsQuery{
+		{Page: 1, PageSize: 10, CountTotal: true},
+		{Page: 1, PageSize: 100},
+	}, repo.resultQueries, "diagnostic downloads retain 100 rounds per target and skip counting")
 }
 
 func TestIQProbeQuestionDeadlineCancelsHungUpstreamAndReleasesSlot(t *testing.T) {

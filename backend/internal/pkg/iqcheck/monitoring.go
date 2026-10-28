@@ -163,7 +163,14 @@ func NotSent(r Result) bool {
 
 // Retryable is deliberately narrower than the periodic failure policy.
 func Retryable(r Result) bool {
-	if r.Reason == "quota_exhausted" || r.Status != "unknown" || r.Diagnostic != nil && (r.Diagnostic.Transport == "plugin" || r.Diagnostic.RetryAfterUnbounded) {
+	if r.Status != "unknown" {
+		return false
+	}
+	switch r.Reason {
+	case "quota_exhausted", "http_403", "http_429", "rate_limited":
+		return false
+	}
+	if d := r.Diagnostic; d != nil && (d.Transport == "plugin" || d.HTTPStatus == http.StatusForbidden || d.HTTPStatus == http.StatusTooManyRequests || d.RetryAfter != nil || d.RetryAfterUnbounded) {
 		return false
 	}
 	if pause, transient, protocol := FailurePolicy(r); pause {
@@ -173,12 +180,12 @@ func Retryable(r Result) bool {
 	}
 	if r.Diagnostic != nil && r.Diagnostic.Stage == "http" {
 		switch r.Diagnostic.HTTPStatus {
-		case 429, 502, 503, 504:
+		case 502, 503, 504:
 			return true
 		}
 	}
 	switch r.Reason {
-	case "request_failed", "timeout", "response_read_failed", "rate_limited", "http_408", "http_429", "http_502", "http_503", "http_504", "upstream_error", "incomplete_response", "unparseable_answer", "invalid_answer_structure", "ambiguous_answer", "model_conflict":
+	case "request_failed", "timeout", "response_read_failed", "http_408", "http_502", "http_503", "http_504", "upstream_error", "incomplete_response", "unparseable_answer", "invalid_answer_structure", "ambiguous_answer", "model_conflict":
 		return true
 	}
 	return false
