@@ -223,6 +223,11 @@ func TestOtherStreamStallExitsAreCounted(t *testing.T) {
 			var err error
 			switch name {
 			case "passthrough":
+				// Opening-only stalls now switch accounts. Exercise the existing
+				// stall accounting after actual semantic output.
+				go func() {
+					_, _ = io.WriteString(pw, "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"partial\"}}\n\n")
+				}()
 				_, err = (&GatewayService{cfg: cfg}).handleStreamingResponseAnthropicAPIKeyPassthrough(ctx, resp, c, account, time.Now(), "claude-sonnet-5-5")
 			case "bedrock":
 				_, err = (&GatewayService{cfg: cfg}).handleBedrockStreamingResponse(ctx, resp, c, account, time.Now(), "claude-sonnet-5-5")

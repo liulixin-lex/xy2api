@@ -925,7 +925,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			if fs.ForceCacheBilling {
 				requestCtx = service.WithForceCacheBilling(requestCtx)
 			}
-			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
+			// 释放语义事件前只写已登记的心跳；事件短写留下的字节均不可回滚。
 			// xy2api resilience: delayed pre-output heartbeat for CDN-fronted streams (design §7.2).
 			armPreOutputKeepalive(c, service.PreOutputProtocolAnthropic, reqStream, account)
 			writerSizeBeforeForward := service.OpenAICompactKeepaliveAdjustedWrittenSize(c)
@@ -1068,6 +1068,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
+					if c.Request.Context().Err() != nil {
+						failoverClientGone(c)
+						return
+					}
 					// 流式内容已写入客户端，无法撤销，禁止 failover 以防止流拼接腐化
 					if service.OpenAICompactKeepaliveAdjustedWrittenSize(c) != writerSizeBeforeForward {
 						h.handleFailoverExhausted(c, failoverErr, account.Platform, true)

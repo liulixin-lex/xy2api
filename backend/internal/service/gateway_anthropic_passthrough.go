@@ -282,6 +282,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	if input.RequestStream {
 		streamResult, err := s.handleStreamingResponseAnthropicAPIKeyPassthrough(ctx, resp, c, account, input.StartTime, input.RequestModel)
 		if err != nil {
+			err = s.anthropicStreamEventError(ctx, c, resp, account, input.RequestModel, err)
 			// 流中断时保留已观测到的 usage 与错误一起返回，避免上游已计量的请求
 			// 完全漏记漏计费（issue #5148）。
 			if partial := partialStreamUsageResult(c, resp, streamResult, input.OriginalModel, input.RequestModel, input.StartTime, err); partial != nil {
@@ -417,29 +418,31 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 		s.rateLimitService.UpdateSessionWindow(ctx, account, resp.Header)
 	}
 
-	writeAnthropicPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
-
-	contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
-	if contentType == "" {
-		contentType = "text/event-stream"
-	}
-	c.Header("Content-Type", contentType)
-	if c.Writer.Header().Get("Cache-Control") == "" {
+	resilience.StateFrom(ctx).SetStage(resilience.StagePreOutput)
+	applyHeaders := func() {
+		writeAnthropicPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+		if v := resp.Header.Get("x-request-id"); v != "" {
+			c.Header("x-request-id", v)
+		}
+		c.Header("Content-Type", "text/event-stream")
 		c.Header("Cache-Control", "no-cache")
-	}
-	if c.Writer.Header().Get("Connection") == "" {
 		c.Header("Connection", "keep-alive")
+		c.Header("X-Accel-Buffering", "no")
 	}
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
 	c.Header("X-Accel-Buffering", "no")
-	if v := resp.Header.Get("x-request-id"); v != "" {
-		c.Header("x-request-id", v)
-	}
 
 	w := c.Writer
-	flusher, ok := w.(http.Flusher)
+	_, ok := w.(http.Flusher)
 	if !ok {
 		return nil, errors.New("streaming not supported")
 	}
+
+	stage := newAnthropicStreamStage(ctx, c, applyHeaders)
+	defer stage.close()
+	defer func() { _ = resp.Body.Close() }()
 
 	usage := &ClaudeUsage{}
 	var firstTokenMs *int
@@ -453,12 +456,13 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 	}
 	scanBuf := getSSEScannerBuf64K()
 	scanner.Buffer(scanBuf[:0], maxLineSize)
+	scanner.Split(openAIFirstOutputDynamicScanLines(&stage.scanGuard))
 
 	type scanEvent struct {
 		line string
 		err  error
 	}
-	events := make(chan scanEvent, 16)
+	events := make(chan scanEvent, openAIFirstOutputEventQueueSize(stage.holding()))
 	done := make(chan struct{})
 	sendEvent := func(ev scanEvent) bool {
 		select {
@@ -490,8 +494,8 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 		streamInterval = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
 	}
 	var intervalTicker *time.Ticker
-	if streamInterval > 0 {
-		intervalTicker = time.NewTicker(streamInterval)
+	if base := resilienceStallCheckBase(streamInterval); base > 0 {
+		intervalTicker = time.NewTicker(resilienceStallCheckPeriod(base))
 		defer intervalTicker.Stop()
 	}
 	var intervalCh <-chan time.Time
@@ -525,17 +529,63 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 		}
 		keepaliveTimer.Reset(keepaliveInterval)
 	}
-	inPartialEvent := false
+	pendingEvent := strings.Builder{}
+	processEvent := func() error {
+		if pendingEvent.Len() == 0 {
+			return nil
+		}
+		block := pendingEvent.String() + "\n"
+		pendingEvent.Reset()
+		event, data := anthropicSSEEvent(block)
+		observer.ObserveAnthropic([]byte(data))
+		parseSSEUsagePassthrough(data, usage)
+		class := anthropicEventClass(event, data)
+		if class.Kind == resilience.TerminalSuccess || class.Kind == resilience.TerminalFailure {
+			sawTerminalEvent = true
+		}
+		if clientDisconnected {
+			return nil
+		}
+		class, err := stage.submit(string(reverseToolNamesIfPresent(c, []byte(block))))
+		if err != nil {
+			var eventErr *sseStreamErrorEventError
+			if errors.As(err, &eventErr) {
+				s.resilienceAnthropicFailedAfterOutput(ctx, c, account, resp, err)
+				return err
+			}
+			if stage.holding() && ctx.Err() == nil && class.Kind == resilience.Prelude {
+				return anthropicPreOutputFailover(resp, "Upstream opening event staging failed")
+			}
+			clientDisconnected = true
+			stage.close()
+			return nil
+		}
+		if !stage.holding() {
+			lastDataAt = time.Now()
+			resetKeepaliveTimer()
+			if firstTokenMs == nil && (class.Kind == resilience.Content || class.Kind == resilience.Unknown) {
+				ms := int(time.Since(startTime).Milliseconds())
+				firstTokenMs = &ms
+			}
+		}
+		return nil
+	}
 
 	for {
+		if stage.holding() && !clientDisconnected && ctx.Err() != nil {
+			return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, ctx.Err()
+		}
 		select {
 		case ev, ok := <-events:
 			if !ok {
-				if !clientDisconnected {
-					// 兜底补刷，确保最后一个未以空行结尾的事件也能及时送达客户端。
-					flusher.Flush()
+				if err := processEvent(); err != nil {
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, err
 				}
 				if !sawTerminalEvent {
+					if stage.holding() && !clientDisconnected && ctx.Err() == nil {
+						return nil, anthropicPreOutputFailover(resp, "Upstream stream ended before semantic output")
+					}
+					resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, nil, !clientDisconnected && openAIStreamClientOutputStarted(c, false))
 					if clientDisconnected && streamInterval > 0 {
 						lastRead := time.Unix(0, atomic.LoadInt64(&lastReadAt))
 						if time.Since(lastRead) >= streamInterval {
@@ -556,6 +606,10 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 				if errors.Is(ev.err, context.Canceled) || errors.Is(ev.err, context.DeadlineExceeded) {
 					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, fmt.Errorf("stream usage incomplete: %w", ev.err)
 				}
+				if stage.holding() && ctx.Err() == nil {
+					return nil, anthropicPreOutputFailover(resp, "Upstream stream disconnected before semantic output: "+sanitizeStreamError(ev.err))
+				}
+				resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, ev.err, openAIStreamClientOutputStarted(c, false))
 				if errors.Is(ev.err, bufio.ErrTooLong) {
 					logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] SSE line too long: account=%d max_size=%d error=%v", account.ID, maxLineSize, ev.err)
 					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, ev.err
@@ -563,51 +617,40 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream read error: %w", ev.err)
 			}
 
-			line := ev.line
-			if data, ok := extractAnthropicSSEDataLine(line); ok {
-				trimmed := strings.TrimSpace(data)
-				observer.ObserveAnthropic([]byte(trimmed))
-				if anthropicStreamEventIsTerminal("", trimmed) {
-					sawTerminalEvent = true
+			if ev.line == "" {
+				if err := processEvent(); err != nil {
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, err
 				}
-				if firstTokenMs == nil && trimmed != "" && trimmed != "[DONE]" {
-					ms := int(time.Since(startTime).Milliseconds())
-					firstTokenMs = &ms
+				if sawTerminalEvent {
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil
 				}
-				parseSSEUsagePassthrough(data, usage)
-			} else {
-				trimmed := strings.TrimSpace(line)
-				if strings.HasPrefix(trimmed, "event:") && anthropicStreamEventIsTerminal(strings.TrimSpace(strings.TrimPrefix(trimmed, "event:")), "") {
-					sawTerminalEvent = true
-				}
+				continue
 			}
+			if stage.holding() && int64(pendingEvent.Len()+len(ev.line)+1)+stage.stage.Buffered() > openAIFirstOutputStageMaxBytes {
+				return nil, anthropicPreOutputFailover(resp, "Upstream opening event exceeds staging limit")
+			}
+			_, _ = pendingEvent.WriteString(ev.line)
+			_ = pendingEvent.WriteByte('\n')
 
-			if !clientDisconnected {
-				restored := string(reverseToolNamesIfPresent(c, []byte(line)))
-				if _, err := io.WriteString(w, restored); err != nil {
-					clientDisconnected = true
-					logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
-				} else if _, err := io.WriteString(w, "\n"); err != nil {
-					clientDisconnected = true
-					logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
-				} else if line == "" {
-					// 按 SSE 事件边界刷出，减少每行 flush 带来的 syscall 开销。
-					flusher.Flush()
-					lastDataAt = time.Now()
-					resetKeepaliveTimer()
-					inPartialEvent = false
-				} else {
-					inPartialEvent = true
-				}
+		case <-stage.timeout:
+			if ctx.Err() != nil {
+				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, ctx.Err()
 			}
+			return nil, anthropicPreOutputFailover(resp, "Upstream produced no semantic output before the request deadline")
+		case <-stage.cancel:
+			return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, ctx.Err()
 
 		case <-intervalCh:
 			lastRead := time.Unix(0, atomic.LoadInt64(&lastReadAt))
-			if time.Since(lastRead) < streamInterval {
+			stallThreshold := resilienceStallThreshold(streamInterval, openAIStreamClientOutputStarted(c, false))
+			if stallThreshold <= 0 || time.Since(lastRead) < stallThreshold {
 				continue
 			}
 			if clientDisconnected {
 				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, fmt.Errorf("stream usage incomplete after timeout")
+			}
+			if stage.holding() && ctx.Err() == nil {
+				return nil, anthropicPreOutputFailover(resp, "Upstream stream timed out before semantic output")
 			}
 			logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] Stream data interval timeout: account=%d model=%s interval=%s", account.ID, model, streamInterval)
 			if s.rateLimitService != nil {
@@ -620,20 +663,17 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 			if clientDisconnected {
 				continue
 			}
-			if inPartialEvent {
-				resetKeepaliveTimer()
-				continue
-			}
+
 			if time.Since(lastDataAt) < keepaliveInterval {
 				resetKeepaliveTimer()
 				continue
 			}
-			if _, err := fmt.Fprint(w, "event: ping\ndata: {\"type\": \"ping\"}\n\n"); err != nil {
+			if err := stage.heartbeat("event: ping\ndata: {\"type\": \"ping\"}\n\n"); err != nil {
 				clientDisconnected = true
+				stage.close()
 				logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] Client disconnected during keepalive ping, continue draining upstream for usage: account=%d", account.ID)
 				continue
 			}
-			flusher.Flush()
 			lastDataAt = time.Now()
 			resetKeepaliveTimer()
 		}

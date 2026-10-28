@@ -1154,6 +1154,9 @@ func openAIStreamClientOutputStarted(c *gin.Context, localStarted bool) bool {
 	if localStarted {
 		return true
 	}
+	if only, tracked := DeliveryOnlyHeartbeats(c); tracked && only {
+		return false
+	}
 	if c == nil || c.Writer == nil {
 		return false
 	}
@@ -1168,6 +1171,8 @@ func openAIStreamEventIsMetadata(eventType string) bool {
 	switch strings.TrimSpace(eventType) {
 	case "response.created", "response.in_progress", "keepalive":
 		return true
+	case "response.metadata", "codex.response.metadata", "codex.rate_limits":
+		return resilience.Current().NativePreludeWhitelistOn()
 	default:
 		return false
 	}

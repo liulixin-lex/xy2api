@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -69,7 +70,7 @@ func (r *streamErrorRepo) touched() bool {
 
 // forwardStreamError runs a streaming Forward whose upstream answers 200 with
 // the given SSE body.
-func forwardStreamError(t *testing.T, sse string, header http.Header) (*UpstreamFailoverError, *streamErrorRepo, *httptest.ResponseRecorder) {
+func forwardStreamError(t *testing.T, sse string, header http.Header) (error, *streamErrorRepo, *httptest.ResponseRecorder) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
@@ -97,10 +98,13 @@ func forwardStreamError(t *testing.T, sse string, header http.Header) (*Upstream
 		deferredService:      &DeferredService{},
 	}
 	result, err := svc.Forward(context.Background(), c, newAnthropicOAuthAccountForPartialUsageTest(), parsed)
-	require.Nil(t, result)
 	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, err, &failoverErr)
-	return failoverErr, repo, rec
+	if errors.As(err, &failoverErr) {
+		require.Nil(t, result)
+	} else {
+		require.NotNil(t, result)
+	}
+	return err, repo, rec
 }
 
 func streamErrorEvent(errType string) string {
@@ -171,8 +175,10 @@ func TestForwardPreOutputStreamRateLimitIsA429(t *testing.T) {
 	header := http.Header{}
 	header.Set("anthropic-ratelimit-unified-5h-reset", strconv.FormatInt(time.Now().Add(3*time.Hour).Unix(), 10))
 	header.Set("anthropic-ratelimit-unified-7d-reset", strconv.FormatInt(time.Now().Add(72*time.Hour).Unix(), 10))
-	failoverErr, repo, rec := forwardStreamError(t, "event: error\ndata: "+errorJSON+"\n\n", header)
+	err, repo, rec := forwardStreamError(t, "event: error\ndata: "+errorJSON+"\n\n", header)
 
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
 	require.Equal(t, http.StatusTooManyRequests, failoverErr.StatusCode)
 	require.JSONEq(t, errorJSON, string(failoverErr.ResponseBody))
 	require.Equal(t, resilience.CategoryRateLimit, ClassifyFailoverError(failoverErr).Category)
@@ -186,17 +192,15 @@ func TestForwardPreOutputStreamRateLimitIsA429(t *testing.T) {
 
 func TestForwardPostOutputStreamErrorsMapStatusWithoutSideEffects(t *testing.T) {
 	withResilienceSettings(t, nil)
-	for errType, want := range map[string]int{
-		"rate_limit_error":  http.StatusTooManyRequests,
-		"overloaded_error":  529,
-		"api_error":         http.StatusBadGateway,
-		"permission_error":  http.StatusForbidden,
-		"invalid_request_x": http.StatusForbidden,
-	} {
+	for _, errType := range []string{"rate_limit_error", "overloaded_error", "api_error", "permission_error", "invalid_request_x"} {
 		sse := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}\n\n" +
+			"data: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"partial\"}}\n\n" +
 			"event: error\ndata: " + streamErrorEvent(errType) + "\n\n"
-		failoverErr, repo, rec := forwardStreamError(t, sse, nil)
-		require.Equal(t, want, failoverErr.StatusCode, errType)
+		err, repo, rec := forwardStreamError(t, sse, nil)
+		var eventErr *sseStreamErrorEventError
+		require.ErrorAs(t, err, &eventErr)
+		var failoverErr *UpstreamFailoverError
+		require.False(t, errors.As(err, &failoverErr))
 		require.False(t, repo.touched(), "%s: output was written, no account side effects", errType)
 		require.Contains(t, rec.Body.String(), "message_start", errType)
 	}
@@ -204,7 +208,9 @@ func TestForwardPostOutputStreamErrorsMapStatusWithoutSideEffects(t *testing.T) 
 
 func TestForwardPreOutputStreamApiErrorIsA502(t *testing.T) {
 	withResilienceSettings(t, nil)
-	failoverErr, repo, rec := forwardStreamError(t, "event: error\ndata: "+streamErrorEvent("api_error")+"\n\n", nil)
+	err, repo, rec := forwardStreamError(t, "event: error\ndata: "+streamErrorEvent("api_error")+"\n\n", nil)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
 	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
 	require.Equal(t, resilience.CategoryTransient, ClassifyFailoverError(failoverErr).Category)
 	require.False(t, repo.touched())
