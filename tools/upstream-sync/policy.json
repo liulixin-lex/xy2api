@@ -53,7 +53,8 @@
       "tools/**",
       "openspec/changes/gateway-resilience-v2-20261021/**",
       "openspec/changes/gateway-resilience-045-20261021/**",
-      "openspec/changes/upstream-balance-20261027/**"
+      "openspec/changes/upstream-balance-20261027/**",
+      "openspec/changes/operator-role-20261027/**"
     ],
     "manual_merge": [
       "Makefile",
@@ -218,7 +219,40 @@
       "frontend/src/components/admin/account/AccountTableFilters.vue",
       "frontend/src/components/admin/usage/UsageTable.vue",
       "backend/Makefile",
-      "backend/internal/service/account_credentials_redact.go"
+      "backend/internal/service/account_credentials_redact.go",
+      "backend/internal/handler/admin/user_handler.go",
+      "backend/internal/handler/auth_handler.go",
+      "backend/internal/server/middleware/admin_auth.go",
+      "backend/internal/server/middleware/backend_mode_guard.go",
+      "backend/internal/service/admin_user.go",
+      "frontend/src/App.vue",
+      "frontend/src/components/admin/AdminComplianceDialog.vue",
+      "frontend/src/components/admin/ErrorPassthroughRulesModal.vue",
+      "frontend/src/components/admin/account/AccountTableActions.vue",
+      "frontend/src/components/admin/account/ReAuthAccountModal.vue",
+      "frontend/src/components/admin/account/ScheduledTestsPanel.vue",
+      "frontend/src/components/admin/monitor/MonitorFiltersBar.vue",
+      "frontend/src/components/admin/user/UserAllowedGroupsModal.vue",
+      "frontend/src/components/admin/user/UserCreateModal.vue",
+      "frontend/src/components/admin/user/UserEditModal.vue",
+      "frontend/src/components/common/ProxySelector.vue",
+      "frontend/src/components/user/profile/ProfileInfoCard.vue",
+      "frontend/src/composables/useQuotaNotifyState.ts",
+      "frontend/src/features/channel-monitor-v2/MonitorSettingsPanel.vue",
+      "frontend/src/features/prompt-audit/components/EndpointPool.vue",
+      "frontend/src/features/prompt-audit/components/EventWorkspace.vue",
+      "frontend/src/router/meta.d.ts",
+      "frontend/src/stores/auth.ts",
+      "frontend/src/views/admin/AnnouncementsView.vue",
+      "frontend/src/views/admin/AuditLogView.vue",
+      "frontend/src/views/admin/ChannelsView.vue",
+      "frontend/src/views/admin/PromoCodesView.vue",
+      "frontend/src/views/admin/RedeemView.vue",
+      "frontend/src/views/admin/SubscriptionsView.vue",
+      "frontend/src/views/admin/affiliates/AdminAffiliateRecordsTable.vue",
+      "frontend/src/views/admin/ops/components/OpsSettingsDialog.vue",
+      "frontend/src/views/admin/ops/components/OpsSystemLogTable.vue",
+      "frontend/src/views/admin/orders/AdminPaymentPlansView.vue"
     ],
     "generated": [
       "backend/ent/**",
@@ -2257,6 +2291,258 @@
     {
       "path": "backend/internal/service/admin_account.go",
       "value": "input.Credentials = clearBulkNewAPITokenOnIdentityChange(cachedTargets, input.Credentials, input.ProxyID)"
+    },
+    {
+      "path": "backend/internal/service/admin_service.go",
+      "value": "requireActor bool // xy-admin-operator-scope"
+    },
+    {
+      "path": "backend/internal/service/wire.go",
+      "value": "NewOperatorAccessService,"
+    },
+    {
+      "path": "backend/internal/repository/wire.go",
+      "value": "NewAdminOperatorPermissionRepository,"
+    },
+    {
+      "path": "backend/internal/repository/wire.go",
+      "value": "NewOperatorAccessQueryRepository,"
+    },
+    {
+      "path": "backend/internal/server/middleware/admin_auth.go",
+      "value": "if !user.CanAccessAdmin() {"
+    },
+    {
+      "path": "backend/internal/server/middleware/admin_auth.go",
+      "value": "if !setOperatorScope(c, user, operatorAccess) {"
+    },
+    {
+      "path": "backend/internal/server/middleware/admin_auth.go",
+      "value": "setSuperAdminActor(c, admin.ID)"
+    },
+    {
+      "path": "backend/internal/server/routes/admin.go",
+      "value": "admin.Use(middleware.AdminPermission())"
+    },
+    {
+      "path": "backend/internal/server/routes/payment.go",
+      "value": "adminGroup.Use(middleware.AdminPermission())"
+    },
+    {
+      "path": "backend/internal/handler/page_handler.go",
+      "value": "adminPages.Use(middleware2.AdminPermission())"
+    },
+    {
+      "path": "backend/internal/handler/admin/account_handler.go",
+      "value": "c.Header(\"Content-Type\", \"text/event-stream\") // xy-admin-operator-scope"
+    },
+    {
+      "path": "backend/cmd/server/wire_gen.go",
+      "value": "service.NewOperatorAccessService("
+    },
+    {
+      "path": "backend/internal/server/middleware/backend_mode_guard.go",
+      "value": "if service.CanAccessAdminRole(role) {"
+    },
+    {
+      "path": "backend/internal/handler/auth_handler.go",
+      "value": "!h.isBackendModeEnabled(ctx) || user.CanAccessAdmin() {"
+    },
+    {
+      "path": "backend/internal/handler/auth_handler.go",
+      "value": "!service.CanAccessAdminRole(result.UserRole)"
+    },
+    {
+      "path": "backend/internal/handler/passkey_handler.go",
+      "value": "!h.settingSvc.IsBackendModeEnabled(ctx) || user.CanAccessAdmin() {"
+    },
+    {
+      "path": "backend/internal/handler/usage_export_handler.go",
+      "value": "(t.Scope == \"admin\" && !h.adminExportAllowed(c.Request.Context(), user))"
+    },
+    {
+      "path": "backend/internal/handler/usage_export_handler.go",
+      "value": "h.settings.IsBackendModeEnabled(c.Request.Context()) && !user.CanAccessAdmin()"
+    },
+    {
+      "path": "backend/internal/handler/channel_monitor_v2_handler.go",
+      "value": "operatoraccess.ScopeFrom(c.Request.Context()).Can(operatoraccess.ModuleChannels, operatoraccess.LevelView)"
+    },
+    {
+      "path": "backend/internal/service/admin_user.go",
+      "value": "if user.Role == RoleAdmin && role != RoleAdmin {"
+    },
+    {
+      "path": "backend/internal/handler/admin/user_handler.go",
+      "value": "binding:\"omitempty,oneof=admin operator user\""
+    },
+    {
+      "path": "backend/internal/handler/admin/user_handler.go",
+      "value": "if req.Role != \"\" && req.Role != service.RoleAdmin && userID == getAdminIDFromContext(c) {"
+    },
+    {
+      "path": "backend/internal/service/admin_account.go",
+      "value": "if err := s.operatorAccountCreateRules(ctx, input); err != nil {"
+    },
+    {
+      "path": "backend/internal/service/admin_account.go",
+      "value": "if err := s.operatorAccountUpdateRules(ctx, account, input); err != nil {"
+    },
+    {
+      "path": "backend/internal/service/admin_account.go",
+      "value": "if err := s.operatorAccountExtraRules(ctx, id, updates); err != nil {"
+    },
+    {
+      "path": "backend/internal/service/admin_account.go",
+      "value": "if err := s.operatorAccountBulkRules(ctx, input); err != nil {"
+    },
+    {
+      "path": "backend/internal/handler/admin/account_handler.go",
+      "value": "if err := service.OperatorCheckOAuthApply(ctx, existing, req.Type, req.Credentials, req.Extra); err != nil {"
+    },
+    {
+      "path": "backend/internal/service/admin_account.go",
+      "value": "if err := s.operatorSuperAdminOnly(ctx); err != nil {"
+    },
+    {
+      "path": "backend/internal/service/admin_user.go",
+      "value": "if err := s.operatorUserCreateRules(ctx, input); err != nil {"
+    },
+    {
+      "path": "backend/internal/service/admin_user.go",
+      "value": "if s.operatorSkipsSignupGrants(ctx) {"
+    },
+    {
+      "path": "backend/internal/service/admin_user.go",
+      "value": "if err := s.operatorUserUpdateRules(ctx, id, input); err != nil {"
+    },
+    {
+      "path": "backend/internal/service/admin_user.go",
+      "value": "if err := s.operatorBindIdentityRules(ctx, input); err != nil {"
+    },
+    {
+      "path": "backend/internal/service/admin_user.go",
+      "value": "if err := s.operatorCheckUserTargets(ctx, userIDs); err != nil {"
+    },
+    {
+      "path": "backend/internal/service/admin_user_batch_status.go",
+      "value": "if err := s.operatorCheckUserTargets(ctx, userIDs); err != nil {"
+    },
+    {
+      "path": "backend/internal/service/admin_group.go",
+      "value": "if err := s.operatorGroupCreateRules(ctx, input); err != nil {"
+    },
+    {
+      "path": "backend/internal/service/admin_group.go",
+      "value": "if err := s.operatorGroupUpdateRules(ctx, id, input); err != nil {"
+    },
+    {
+      "path": "backend/internal/service/admin_group.go",
+      "value": "if err := s.operatorAPIKeyGroupRules(ctx, keyID, groupID); err != nil {"
+    },
+    {
+      "path": "backend/internal/service/admin_group.go",
+      "value": "if err := s.operatorReplaceGroupRules(ctx, userID, newGroupID); err != nil {"
+    },
+    {
+      "path": "backend/internal/service/admin_group.go",
+      "value": "if handled, err := s.operatorDeleteGroup(ctx, id); handled {"
+    },
+    {
+      "path": "backend/internal/repository/user_repo.go",
+      "value": "if !operatoraccess.HideAPIKeySearch(ctx) {"
+    },
+    {
+      "path": "backend/internal/server/middleware/admin_permission.go",
+      "value": "go recheckOperatorWebSocket(ctx, cancel, scope, 30*time.Second)"
+    },
+    {
+      "path": "backend/internal/service/admin_user.go",
+      "value": "audit: privileged user created actor_admin_id=%d target_user_id=%d role=%s"
+    },
+    {
+      "path": "backend/internal/server/routes/admin.go",
+      "value": "meAccess.GET(\"/access\", h.Admin.OperatorAccess.MeAccess)"
+    },
+    {
+      "path": "backend/internal/server/routes/admin.go",
+      "value": "users.PUT(\"/:id/operator-permissions\", h.Admin.OperatorAccess.PutPermissions)"
+    },
+    {
+      "path": "backend/internal/handler/wire.go",
+      "value": "operatorAccessHandler *admin.OperatorAccessHandler,"
+    },
+    {
+      "path": "backend/internal/server/routes/admin.go",
+      "value": "users.GET(\"/:id/operator-permissions\", h.Admin.OperatorAccess.GetPermissions)"
+    },
+    {
+      "path": "backend/internal/handler/wire.go",
+      "value": "admin.NewOperatorAccessHandler,"
+    },
+    {
+      "path": "backend/internal/handler/handler.go",
+      "value": "OperatorAccess         *admin.OperatorAccessHandler"
+    },
+    {
+      "path": "backend/cmd/server/wire_gen.go",
+      "value": "admin.NewOperatorAccessHandler("
+    },
+    {
+      "path": "frontend/src/stores/auth.ts",
+      "value": "const canAccessAdmin = computed(() => user.value?.role === 'admin' || user.value?.role === 'operator')"
+    },
+    {
+      "path": "frontend/src/router/index.ts",
+      "value": "if (!p || p === 'super_only' || !access.can(`${p}:view`)) {"
+    },
+    {
+      "path": "frontend/src/api/client.ts",
+      "value": "new CustomEvent('admin-permission-denied'"
+    },
+    {
+      "path": "frontend/src/components/layout/AppSidebar.vue",
+      "value": "applyPermissions(applyFeatureFlags(baseItems))"
+    },
+    {
+      "path": "frontend/src/App.vue",
+      "value": "if (authStore.canAccessAdmin) {"
+    },
+    {
+      "path": "frontend/src/components/admin/AdminComplianceDialog.vue",
+      "value": "authStore.canAccessAdmin && complianceStore.shouldShow"
+    },
+    {
+      "path": "frontend/src/stores/adminSettings.ts",
+      "value": "useAdminAccessStore().refresh()"
+    },
+    {
+      "path": "frontend/src/types/index.ts",
+      "value": "role: 'admin' | 'operator' | 'user'"
+    },
+    {
+      "path": "frontend/src/components/admin/user/UserEditModal.vue",
+      "value": "<OperatorPermissionsTable"
+    },
+    {
+      "path": "frontend/src/components/account/EditAccountModal.vue",
+      "value": "const showUpstreamAddress = computed(() => access.can('accounts.upstream_address'))"
+    },
+    {
+      "path": "frontend/src/views/admin/AccountsView.vue",
+      "value": "if (upstreamBalanceForbidden) return"
+    },
+    {
+      "path": "frontend/src/views/user/ChannelStatusV2View.vue",
+      "value": "authStore.isAdmin || (authStore.canAccessAdmin && access.can('channels:view'))"
+    },
+    {
+      "path": "frontend/src/i18n/locales/zh/admin/overview.ts",
+      "value": "operator: '普通管理员'"
+    },
+    {
+      "path": "frontend/src/i18n/locales/en/admin/overview.ts",
+      "value": "operator: 'Operator'"
     }
   ],
   "forbidden_module_paths": [
@@ -2316,7 +2602,8 @@
     "xy-openai-session-uuid",
     "xy-openai-ttft-health-routing",
     "xy-resilience-coverage",
-    "xy-upstream-balance"
+    "xy-upstream-balance",
+    "xy-admin-operator-scope"
   ],
   "custom_patch_tests": [
     {
@@ -3528,6 +3815,361 @@
       "id": "xy-upstream-balance",
       "path": "backend/internal/service/upstream_balance_reviewfix_test.go",
       "literal": "func TestUpstreamBalanceStatusPanicRecoveredAndStopWaits"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/pkg/operatoraccess/redact_test.go",
+      "literal": "func TestRedactAccountStripsAddressWithoutFlag(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/pkg/operatoraccess/canonical_test.go",
+      "literal": "func TestCheckCanonicalRejectsDuplicateAndFoldedKeys(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/pkg/operatoraccess/catalog_test.go",
+      "literal": "func TestCatalogMatchesApprovedTable(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/middleware/admin_permission_test.go",
+      "literal": "func TestAdminPermissionOperatorMatrix(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/middleware/admin_permission_test.go",
+      "literal": "func TestAdminPermissionCallsGuardForEveryMiddlewareFieldRule(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/middleware/admin_permission_test.go",
+      "literal": "func TestAdminPermissionScrubsSSEErrorEvents(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/middleware/admin_auth_operator_test.go",
+      "literal": "func TestAdminAuthAPIKeyNeverCarriesOperatorScope(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_access_guard_test.go",
+      "literal": "func TestOperatorProxyDeleteRespectsInUseSet(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/handler/admin/operator_field_specs_test.go",
+      "literal": "func TestOperatorFieldRuleKeysMatchRequestTags(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/handler/admin/operator_account_stream_test.go",
+      "literal": "func TestOperatorAccountTestDeclaresStreamType(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/middleware/admin_permission_test.go",
+      "literal": "func TestAdminPermissionWebSocketClosesAfterRevoke(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_account_rules_test.go",
+      "literal": "func TestOperatorAccountNetworkChangeRequiresNewKey(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_account_rules_test.go",
+      "literal": "func TestOperatorAccountNewAPITokenTreatedLikeAPIKey(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/admin_user_operator_role_test.go",
+      "literal": "func TestAdminToOperatorTriggersLastAdminProtection(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_account_rules_test.go",
+      "literal": "func TestOperatorCannotChangeNetworkOfRefreshableAccount(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_account_rules_test.go",
+      "literal": "func TestOperatorAddressWritesFollowUpstreamAddressFlag(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_actor_test.go",
+      "literal": "func TestProtectedServiceCallsWithoutActorFail(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_actor_test.go",
+      "literal": "func TestOperatorAccessServiceArmsActorRequirement(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_group_rules_test.go",
+      "literal": "func TestOperatorDeleteGroupWithAccountsNeedsBalanceFlag(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_user_rules_test.go",
+      "literal": "func TestOperatorCannotCreateOrRenameUserToReservedEmail(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_actor_test.go",
+      "literal": "func TestOperatorCannotRevertProxyFallback(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_group_rules_test.go",
+      "literal": "func TestOperatorGroupFieldListCoversInputs(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_user_rules_test.go",
+      "literal": "func TestOperatorCreateUserSkipsDefaultsWithoutFlag(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/pkg/operatoraccess/redact_test.go",
+      "literal": "func TestRedactAuditBodyHidesBodiesOfRoutesOperatorsCannotCall(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/pkg/operatoraccess/redact_test.go",
+      "literal": "func TestRedactAuditBodyAlwaysMasksTokensProxyURLsAndUserinfo(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/pkg/operatoraccess/redact_test.go",
+      "literal": "func TestRedactAuditBodyHidesEncodedQueryURLs(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/pkg/operatoraccess/redact_test.go",
+      "literal": "func TestRedactOpsUpstreamMessagesForUsageOnlyCallers(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/pkg/operatoraccess/redact_test.go",
+      "literal": "func TestRedactMonitorMessageHidesNetworkErrors(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/pkg/operatoraccess/redact_test.go",
+      "literal": "func TestScrubErrorStringsKeepsMachineCodes(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/pkg/operatoraccess/canonical_test.go",
+      "literal": "func TestCheckCanonicalIsLinearInKeyCount(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/repository/user_repo_operator_search_integration_test.go",
+      "literal": "func TestUserSearchSkipsAPIKeyMatchForOperators(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/handler/usage_export_operator_test.go",
+      "literal": "func TestAdminExportDownloadChecksOperatorFlagAtConsumption(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/handler/usage_export_operator_test.go",
+      "literal": "func TestUserExportDownloadAllowsOperatorInBackendMode(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/handler/admin/operator_group_fields_test.go",
+      "literal": "func TestOperatorGroupFieldListCoversUpdateRequest(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/admin_permission_catalog_test.go",
+      "literal": "func TestEveryAdminAuthRouteHasCatalogEntry(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/admin_permission_catalog_test.go",
+      "literal": "func TestEveryCatalogEntryHasRoute(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/admin_permission_catalog_test.go",
+      "literal": "func TestEveryAdminAuthRouteRunsAdminPermission(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/admin_permission_catalog_test.go",
+      "literal": "func TestMeAccessSkipsComplianceAndPermission(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/admin_permission_catalog_test.go",
+      "literal": "func TestDownloadTicketIsTheOnlyAdminPathWithoutAdminAuth(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/admin_permission_catalog_test.go",
+      "literal": "func TestCatalogGapsReportsUnregisteredRoute(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/admin_permission_catalog_test.go",
+      "literal": "func TestEnumerationCoversPaymentPagesAndWebSocket(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/admin_permission_catalog_test.go",
+      "literal": "func TestGlobalMiddlewareAllowlist(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/admin_permission_catalog_test.go",
+      "literal": "func TestUnknownAdminPathsNeverReachAHandler(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/admin_permission_catalog_test.go",
+      "literal": "func TestEngineHasNoCustomFallbackChain(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/admin_permission_catalog_test.go",
+      "literal": "func TestFallbackCheckRejectsSelectiveFallback(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/admin_operator_chain_test.go",
+      "literal": "func TestOperatorChains(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/server/admin_operator_chain_test.go",
+      "literal": "func TestEveryServiceEnforcedFieldHasAServiceHook(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_rule_cases_test.go",
+      "literal": "func TestEveryRuleHasAllowDenyAndBoundaryCases(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_rule_cases_test.go",
+      "literal": "func TestOperatorErrorContracts(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_access_guard_test.go",
+      "literal": "func TestOperatorRedeemRules(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_access_guard_test.go",
+      "literal": "func TestOperatorPromoSearchRule(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_access_guard_test.go",
+      "literal": "func TestOperatorMonitorRules(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_access_guard_test.go",
+      "literal": "func TestOperatorTemplateApplyWithHeadersIsSuperOnly(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_access_guard_test.go",
+      "literal": "func TestOperatorProxyNetworkFieldsFollowUpstreamAddressFlag(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/service/operator_access_guard_test.go",
+      "literal": "func TestOperatorTargetIDNormalization(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/handler/admin/operator_access_handler_test.go",
+      "literal": "func TestMeAccessContractShape(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/handler/admin/operator_access_handler_test.go",
+      "literal": "func TestGetOperatorPermissionsEmptyShape(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/handler/admin/operator_access_handler_test.go",
+      "literal": "func TestPutOperatorPermissionsRequiresStepUp(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/handler/admin/operator_access_handler_test.go",
+      "literal": "func TestPutOperatorPermissionsRejectsUnknownKeys(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "backend/internal/web/embed_admin_bypass_test.go",
+      "literal": "func TestEmbeddedFrontendBypassesAdminAPI(t *testing.T) {"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "frontend/src/stores/__tests__/adminAccess.spec.ts",
+      "literal": "fails closed for an operator until me/access has loaded"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "frontend/src/stores/__tests__/adminAccess.spec.ts",
+      "literal": "refreshes me/access at most once a minute after permission errors"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "frontend/src/router/__tests__/adminPermissionMeta.spec.ts",
+      "literal": "declares meta.permission on every admin page route"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "frontend/src/components/layout/__tests__/AppSidebar.operator.spec.ts",
+      "literal": "never shows settings, plugins or custom admin items to operators"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "frontend/src/components/admin/user/__tests__/OperatorPermissionsTable.spec.ts",
+      "literal": "keeps each flag in its own row with one on and off sentence"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "frontend/src/components/admin/user/__tests__/UserEditModal.operator.spec.ts",
+      "literal": "saves operator permissions before the user, both through step-up"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "frontend/src/views/admin/__tests__/AccountsView.operatorAccess.spec.ts",
+      "literal": "stops polling upstream balances after a 403"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "frontend/src/api/__tests__/client.permissionDenied.spec.ts",
+      "literal": "emits one event for ADMIN_PERMISSION_DENIED and SUPER_ADMIN_REQUIRED only"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "frontend/src/components/account/__tests__/EditAccountModal.operatorAddress.spec.ts",
+      "literal": "hides the access address inputs without the upstream-address flag"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "frontend/src/components/account/__tests__/EditAccountModal.operatorAddress.spec.ts",
+      "literal": "never sends address keys or proxy_id for an operator without the flag"
+    },
+    {
+      "id": "xy-admin-operator-scope",
+      "path": "frontend/src/components/account/__tests__/CreateAccountModal.operator.spec.ts",
+      "literal": "omits every address key and proxy_id and hides the upstream type without the upstream-address flag"
     }
   ]
 }
