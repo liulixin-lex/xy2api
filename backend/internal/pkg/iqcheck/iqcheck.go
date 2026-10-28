@@ -47,9 +47,10 @@ func Grade(answer string, c Check) Result {
 	if extracted.Value != "" {
 		r.NormalizedAnswer = &extracted.Value
 		r.Status, r.Reason = "degraded", "wrong_answer"
-		if extracted.Value == c.Expected {
+		switch extracted.Value {
+		case c.Expected:
 			r.Status, r.Reason = "smart", "correct_answer"
-		} else if extracted.Value == c.Naive {
+		case c.Naive:
 			r.Diagnostic = &Diagnostic{NaiveAnswer: true}
 		}
 	}

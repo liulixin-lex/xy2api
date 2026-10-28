@@ -10,7 +10,7 @@ import (
 func drawFeasible(c Challenge, r, s int) bool {
 	ra, rp, rw := c.R[0], c.R[1], c.R[2]
 	sa, sp, sw := c.S[0], c.S[1], c.S[2]
-	return r <= ra+rp+rw && s <= sa+sp+sw && r > rw && s > sw && !(r <= rp+rw && s <= sp+sw) && !(r <= ra+rw && s <= sa+sw)
+	return r <= ra+rp+rw && s <= sa+sp+sw && r > rw && s > sw && (r > rp+rw || s > sp+sw) && (r > ra+rw || s > sa+sw)
 }
 
 func TestChallengeClosedFormAllParameters(t *testing.T) {

@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -112,9 +111,6 @@ func qualityEvent(event, scope string, account int64, generation uint64, details
 	attrs := []any{"event", event, "scope", scope, "account_id", account, "generation", generation}
 	slog.Info("openai_quality_routing", append(attrs, details...)...)
 }
-
-var qualityModelPattern = regexp.MustCompile(`^gpt-([0-9]+)(?:\.([0-9]+))?(?:-(astra|sol|terra|luna))?((?:-[a-z0-9]+)*)$`)
-var qualityDatePattern = regexp.MustCompile(`-\d{4}-\d{2}-\d{2}(?:$|-(?:max|high|medium|low|minimal|xhigh|none)$)`)
 
 // Deliberately does not use the forgiving Codex model mapper: unknown names and
 // suffixes are not evidence of a downgrade.

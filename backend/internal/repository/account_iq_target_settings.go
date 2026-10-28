@@ -19,7 +19,7 @@ func (r *accountRepository) ListIQTargetSettings(ctx context.Context, ids []int6
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var accountID int64
 		var settings domain.IQTargetSettings

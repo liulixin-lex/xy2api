@@ -86,7 +86,7 @@ func (r *accountRepository) ListIQResults(ctx context.Context, accountID int64, 
 	if err != nil {
 		return service.IQResultsPage{}, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	page := service.IQResultsPage{Rounds: make([]service.IQRound, 0)}
 	for rows.Next() {
 		var x service.IQRound
@@ -102,7 +102,7 @@ func (r *accountRepository) ListIQResults(ctx context.Context, accountID int64, 
 			var a service.IQAttempt
 			var challenge, diagnostic []byte
 			if err := ar.Scan(&a.AttemptNo, &a.Effort, &challenge, &a.Expected, &a.Answer, &a.ReportedModel, &a.ModelClass, &a.Status, &a.Reason, &a.LatencyMS, &diagnostic); err != nil {
-				ar.Close()
+				_ = ar.Close()
 				return page, err
 			}
 			a.Challenge = json.RawMessage(challenge)
@@ -113,7 +113,7 @@ func (r *accountRepository) ListIQResults(ctx context.Context, accountID int64, 
 			}
 			x.Attempts = append(x.Attempts, a)
 		}
-		ar.Close()
+		_ = ar.Close()
 		page.Rounds = append(page.Rounds, x)
 	}
 	if err := rows.Err(); err != nil {
@@ -131,7 +131,7 @@ func iqDatabaseTime(ctx context.Context, c *dbent.Client) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
 		return time.Time{}, sql.ErrNoRows
 	}
@@ -150,7 +150,7 @@ func (r *accountRepository) ClaimIQTargets(ctx context.Context, _ time.Time, lim
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	c := tx.Client()
 	if _, err = c.ExecContext(ctx, `SELECT pg_advisory_xact_lock(78421021)`); err != nil {
 		return nil, err
@@ -167,14 +167,14 @@ func (r *accountRepository) ClaimIQTargets(ctx context.Context, _ time.Time, lim
 		return nil, e
 	}
 	if !countRows.Next() {
-		countRows.Close()
+		_ = countRows.Close()
 		return nil, sql.ErrNoRows
 	}
 	if err = countRows.Scan(&active); err != nil {
-		countRows.Close()
+		_ = countRows.Close()
 		return nil, err
 	}
-	countRows.Close()
+	_ = countRows.Close()
 	remaining := limit - active
 	if remaining <= 0 {
 		return nil, tx.Commit()
@@ -183,7 +183,7 @@ func (r *accountRepository) ClaimIQTargets(ctx context.Context, _ time.Time, lim
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []service.IQTargetClaim
 	for rows.Next() {
 		var x service.IQTargetClaim
@@ -232,22 +232,22 @@ func (r *accountRepository) DeferIQTarget(ctx context.Context, claim service.IQT
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	c := tx.Client()
 	rows, err := c.QueryContext(ctx, `SELECT revision FROM account_iq_targets WHERE id=$1 AND lease_token=$2 AND lease_until>clock_timestamp() FOR UPDATE`, claim.ID, claim.LeaseToken)
 	if err != nil {
 		return err
 	}
 	if !rows.Next() {
-		rows.Close()
+		_ = rows.Close()
 		return tx.Commit()
 	}
 	var revision string
 	if err := rows.Scan(&revision); err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return err
 	}
-	rows.Close()
+	_ = rows.Close()
 	if _, err = c.ExecContext(ctx, `DELETE FROM account_iq_check_results WHERE lease_token=$1`, claim.LeaseToken); err != nil {
 		return err
 	}
@@ -288,7 +288,7 @@ func (r *accountRepository) CompleteIQTarget(ctx context.Context, claim service.
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	c := tx.Client()
 	if _, err = c.ExecContext(ctx, `SELECT id FROM accounts WHERE id=$1 FOR NO KEY UPDATE`, claim.AccountID); err != nil {
 		return false, err
@@ -302,7 +302,7 @@ func (r *accountRepository) CompleteIQTarget(ctx context.Context, claim service.
 	var interval, timeout int
 	var leaseUntil time.Time
 	if !rows.Next() {
-		rows.Close()
+		_ = rows.Close()
 		completedAt, timeErr := iqDatabaseTime(ctx, c)
 		if timeErr != nil {
 			return false, timeErr
@@ -317,10 +317,10 @@ func (r *accountRepository) CompleteIQTarget(ctx context.Context, claim service.
 		return false, nil
 	}
 	if err = rows.Scan(&revision, &enabled, &verdict, &gate, &effort, &interval, &timeout, &leaseUntil); err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return false, err
 	}
-	rows.Close()
+	_ = rows.Close()
 	completedAt, err := iqDatabaseTime(ctx, c)
 	if err != nil {
 		return false, err
@@ -435,7 +435,7 @@ func (r *accountRepository) ListIQTargetSummaries(ctx context.Context, ids []int
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	now := time.Now().UTC()
 	for rows.Next() {
 		var id int64
@@ -469,7 +469,7 @@ func (r *accountRepository) ListIQTargetViews(ctx context.Context, id int64) ([]
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []domain.IQTargetView
 	for rows.Next() {
 		var x domain.IQTargetView
@@ -528,7 +528,7 @@ func (r *accountRepository) SaveIQTargets(ctx context.Context, id int64, patch d
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	c := tx.Client()
 	if _, err = c.ExecContext(ctx, `SELECT id FROM accounts WHERE id=$1 FOR NO KEY UPDATE`, id); err != nil {
 		return err
@@ -544,7 +544,7 @@ func (r *accountRepository) QueueIQTargets(ctx context.Context, accountID int64,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []service.IQRunTarget
 	seen := map[string]bool{}
 	for rows.Next() {
@@ -579,7 +579,7 @@ func (r *accountRepository) ReconcileIQGates(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var ids []int64
 	for rows.Next() {
 		var id int64
@@ -598,12 +598,12 @@ func (r *accountRepository) ReconcileIQGates(ctx context.Context) error {
 		}
 		c := tx.Client()
 		if _, err = c.ExecContext(ctx, `SELECT id FROM accounts WHERE id=$1 FOR NO KEY UPDATE`, id); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return err
 		}
 		missingRows, err := c.QueryContext(ctx, `SELECT id,model FROM account_iq_targets WHERE account_id=$1 AND enabled AND verdict='degraded' AND gate_model IS NULL ORDER BY id FOR UPDATE`, id)
 		if err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return err
 		}
 		type missingGate struct {
@@ -614,22 +614,22 @@ func (r *accountRepository) ReconcileIQGates(ctx context.Context) error {
 		for missingRows.Next() {
 			var target missingGate
 			if err = missingRows.Scan(&target.id, &target.model); err != nil {
-				missingRows.Close()
-				tx.Rollback()
+				_ = missingRows.Close()
+				_ = tx.Rollback()
 				return err
 			}
 			missing = append(missing, target)
 		}
 		if err = missingRows.Err(); err != nil {
-			missingRows.Close()
-			tx.Rollback()
+			_ = missingRows.Close()
+			_ = tx.Rollback()
 			return err
 		}
-		missingRows.Close()
+		_ = missingRows.Close()
 		if len(missing) > 0 {
 			entity, loadErr := c.Account.Query().Where(dbaccount.IDEQ(id)).WithProxy().Only(ctx)
 			if loadErr != nil {
-				tx.Rollback()
+				_ = tx.Rollback()
 				return loadErr
 			}
 			account := accountEntityToService(entity)
@@ -639,13 +639,13 @@ func (r *accountRepository) ReconcileIQGates(ctx context.Context) error {
 			for _, target := range missing {
 				outboundModel := service.CanonicalIQOutboundModel(account, target.model)
 				if _, err = c.ExecContext(ctx, `UPDATE account_iq_targets SET gate_model=$2,updated_at=now() WHERE id=$1 AND gate_model IS NULL`, target.id, outboundModel); err != nil {
-					tx.Rollback()
+					_ = tx.Rollback()
 					return err
 				}
 			}
 		}
 		if _, err := r.ProjectIQGates(ctx, c, id); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return err
 		}
 		if err = tx.Commit(); err != nil {
@@ -679,7 +679,7 @@ func (r *accountRepository) SaveIQTargetsTx(ctx context.Context, c *dbent.Client
 			err = q.Scan(&id, &oldEnabled, &oldEffort, &oldInterval, &oldTimeout)
 		}
 		if q != nil {
-			q.Close()
+			_ = q.Close()
 		}
 		if err != nil && err != sql.ErrNoRows {
 			return false, err
@@ -757,7 +757,7 @@ func (r *accountRepository) RequeueIQTargetsTx(ctx context.Context, c *dbent.Cli
 		var model string
 		var enabled bool
 		if err := rows.Scan(&id, &model, &enabled); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return false, err
 		}
 		if enabled && service.CanonicalIQOutboundModel(account, model) == outboundModel {
@@ -765,10 +765,10 @@ func (r *accountRepository) RequeueIQTargetsTx(ctx context.Context, c *dbent.Cli
 		}
 	}
 	if err = rows.Err(); err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return false, err
 	}
-	rows.Close()
+	_ = rows.Close()
 	if len(ids) == 0 {
 		return false, nil
 	}
@@ -790,14 +790,14 @@ func (r *accountRepository) RequeueIQTargetsTx(ctx context.Context, c *dbent.Cli
 	}
 	var raw []byte
 	if !rows.Next() {
-		rows.Close()
+		_ = rows.Close()
 		return false, sql.ErrNoRows
 	}
 	if err = rows.Scan(&raw); err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return false, err
 	}
-	rows.Close()
+	_ = rows.Close()
 	var currentLimits map[string]any
 	if len(raw) > 0 {
 		if err = json.Unmarshal(raw, &currentLimits); err != nil {
@@ -858,7 +858,7 @@ func (r *accountRepository) ProjectIQGates(ctx context.Context, c *dbent.Client,
 	if err != nil {
 		return false, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	desired := map[string]time.Time{}
 	for rows.Next() {
 		var m string
@@ -879,14 +879,14 @@ func (r *accountRepository) ProjectIQGates(ctx context.Context, c *dbent.Client,
 		return false, err
 	}
 	if !rowsAccount.Next() {
-		rowsAccount.Close()
+		_ = rowsAccount.Close()
 		return false, sql.ErrNoRows
 	}
 	if err := rowsAccount.Scan(&raw); err != nil {
-		rowsAccount.Close()
+		_ = rowsAccount.Close()
 		return false, err
 	}
-	rowsAccount.Close()
+	_ = rowsAccount.Close()
 	if err != nil {
 		return false, err
 	}

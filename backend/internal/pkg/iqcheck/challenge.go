@@ -58,11 +58,11 @@ func (c Challenge) Prompt() string {
 	shapes := [2]string{"圆形", "五角星形"}
 	counts := [2][3]int{c.R, c.S}
 	var b strings.Builder
-	b.WriteString(intro)
+	_, _ = b.WriteString(intro)
 	fmt.Fprintf(&b, "\n%s %s %s", flavors[c.Cols[0]], flavors[c.Cols[1]], flavors[c.Cols[2]])
 	for _, row := range c.Rows {
 		fmt.Fprintf(&b, "\n%s %d %d %d", shapes[row], counts[row][c.Cols[0]], counts[row][c.Cols[1]], counts[row][c.Cols[2]])
 	}
-	b.WriteString("\n只输出一个 JSON 对象，仅含整数 answer，不输出解释或 Markdown。")
+	_, _ = b.WriteString("\n只输出一个 JSON 对象，仅含整数 answer，不输出解释或 Markdown。")
 	return b.String()
 }

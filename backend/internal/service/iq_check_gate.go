@@ -18,10 +18,6 @@ func CanonicalIQOutboundModel(account *Account, model string) string {
 	return canonicalOpenAIAccountSchedulingModel(account, model)
 }
 
-func iqGateKeyPresent(account *Account, model string) bool {
-	return accountHasIQGate(account)
-}
-
 func accountHasIQGate(account *Account) bool {
 	if account == nil || account.Extra == nil {
 		return false

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -18,8 +19,8 @@ func TestAccountIQTargetVerdictDoesNotBecomeAccountWideGate(t *testing.T) {
 		IQTargets: []domain.IQTargetSummary{{Model: "gpt-6-astra", Enabled: true, Verdict: "degraded"}},
 	}
 	require.True(t, account.IsSchedulable(), "a target verdict does not change account-wide schedulability")
-	require.True(t, account.isModelRateLimitedWithContext(nil, "public"))
-	require.False(t, account.isModelRateLimitedWithContext(nil, "gpt-6.1-sol"))
+	require.True(t, account.isModelRateLimitedWithContext(context.Background(), "public"))
+	require.False(t, account.isModelRateLimitedWithContext(context.Background(), "gpt-6.1-sol"))
 	account.IQTargets[0].Verdict = "smart"
 	require.True(t, account.IsSchedulable(), "a later verdict remains scoped to its model gate")
 }

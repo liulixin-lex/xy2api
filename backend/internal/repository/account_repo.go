@@ -2990,12 +2990,12 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 		}
 		if rows.Next() {
 			if err := rows.Scan(&identityChanged); err != nil {
-				rows.Close()
+				_ = rows.Close()
 				return err
 			}
 		}
 		if err := rows.Err(); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
 		if err := rows.Close(); err != nil {
@@ -3585,11 +3585,11 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			var platform string
 			var changed bool
 			if err := lockRows.Scan(&accountID, &platform, &changed); err != nil {
-				lockRows.Close()
+				_ = lockRows.Close()
 				return 0, err
 			}
 			if updates.IQTargets != nil && platform != service.PlatformOpenAI {
-				lockRows.Close()
+				_ = lockRows.Close()
 				return 0, service.ErrIQCheckInvalid
 			}
 			targetAccountIDs = append(targetAccountIDs, accountID)
@@ -3598,7 +3598,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			}
 		}
 		if err := lockRows.Err(); err != nil {
-			lockRows.Close()
+			_ = lockRows.Close()
 			return 0, err
 		}
 		if err := lockRows.Close(); err != nil {

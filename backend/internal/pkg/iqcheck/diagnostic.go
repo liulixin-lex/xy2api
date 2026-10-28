@@ -94,8 +94,6 @@ func (d *Diagnostic) Bounded() *Diagnostic {
 				identity.Body = identity.Body[:len(identity.Body)-1]
 			case len(identity.Header) > 0:
 				identity.Header = identity.Header[:len(identity.Header)-1]
-			default:
-				break
 			}
 			truncated = true
 			v.ModelIdentity = &identity
