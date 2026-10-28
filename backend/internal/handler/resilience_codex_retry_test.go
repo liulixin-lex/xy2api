@@ -59,10 +59,21 @@ func TestCodexNoAccountRetryAfterCap(t *testing.T) {
 	}
 }
 
-func TestCodexCapOnlyChangesNoAccountResponses(t *testing.T) {
+func TestCodexExhaustedRetryAfterCap(t *testing.T) {
 	withHandlerResilience(t, nil)
+	for _, header := range []string{"", "60"} {
+		c, w := newResilienceTestContext(t)
+		c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1")
+		c.Header("Retry-After", header)
+		applyExhaustedRetryHint(c, nil, http.StatusBadGateway)
+		require.Equal(t, "10", w.Header().Get("Retry-After"))
+		require.Equal(t, 10, c.GetInt(ginKeyResilienceRetryAfter))
+	}
 	c, w := newResilienceTestContext(t)
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1")
+	c.Header("Retry-After", "60")
+	resilience.SetRetryAdvice(c.Request.Context(), resilience.RetryAdvice{Suppress: true, Source: "turn_cap"})
 	applyExhaustedRetryHint(c, nil, http.StatusBadGateway)
-	require.Equal(t, "30", w.Header().Get("Retry-After"))
+	require.Empty(t, w.Header().Get("Retry-After"))
+	require.True(t, resilience.RetryAdviceFrom(c.Request.Context()).Suppress)
 }

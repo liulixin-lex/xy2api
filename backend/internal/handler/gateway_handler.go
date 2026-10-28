@@ -695,6 +695,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					reqLog.Info("gateway.account_select_aborted_client_disconnected", zap.Error(err))
 					return
 				}
+				if errors.Is(err, service.ErrClaudeCodeOnly) {
+					service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
+					h.handleStreamingAwareError(c, http.StatusForbidden, "permission_error", err.Error(), streamStarted)
+					return
+				}
 				if len(fs.FailedAccountIDs) == 0 {
 					cls := classifyNoAccountErrorFromGin(c, h.gatewayService, currentAPIKey, reqModel, reqModel, platform)
 					if !cls.ModelNotFound {
@@ -710,7 +715,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					)
 					message := cls.Message
 					if !cls.ModelNotFound {
-						message = "No available accounts: " + err.Error()
+						message = "No available accounts: " + service.SanitizeUpstreamErrorMessage(err.Error())
 					}
 					h.handleStreamingAwareError(c, cls.Status, cls.ErrType, message, streamStarted)
 					return
@@ -1142,8 +1147,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// - 粘性账号因负载/RPM 被跳过、选中了其他账号：不覆盖原绑定，
 			//   下次请求粘性账号恢复后仍可命中
 			if sessionKey != "" && (sessionBoundAccountID == 0 || sessionBoundAccountID == account.ID) {
-				if err := h.gatewayService.BindStickySession(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
-					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+				bindCtx, cancelBind := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 3*time.Second)
+				bindErr := h.gatewayService.BindStickySession(bindCtx, currentAPIKey.GroupID, sessionKey, account.ID)
+				cancelBind()
+				if bindErr != nil {
+					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(bindErr))
 				}
 			}
 
@@ -1958,7 +1966,10 @@ func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *se
 				c.Set(service.OpsSkipPassthroughKey, true)
 			}
 
-			h.handleStreamingAwareError(c, respCode, "upstream_error", msg, streamStarted)
+			respCode, errType, msg := anthropicFailoverError(respCode, "upstream_error", msg, failoverErr)
+			copyFailoverRetryAfter(c, respCode, failoverErr.ResponseHeaders)
+			respCode = applyExhaustedRetryHint(c, h.gatewayService, respCode)
+			h.handleStreamingAwareError(c, respCode, errType, service.SanitizeUpstreamErrorMessage(msg), streamStarted)
 			return
 		}
 	}
@@ -1982,7 +1993,7 @@ func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *se
 	// 使用默认的错误映射
 	status, errType, errMsg := h.mapUpstreamError(statusCode)
 	status, errType, errMsg = resilienceCapacityExhausted(c, failoverErr, status, errType, errMsg)
-	errType = anthropicFailoverErrorType(status, errType, responseBody)
+	status, errType, errMsg = anthropicFailoverError(status, errType, errMsg, failoverErr)
 	status = applyExhaustedRetryHint(c, h.gatewayService, status)
 	h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)
 }
@@ -2022,8 +2033,12 @@ func (h *GatewayHandler) handleStreamingAwareError(c *gin.Context, status int, e
 }
 
 func (h *GatewayHandler) handleStreamingAwareErrorWithCode(c *gin.Context, status int, errType, code, message string, streamStarted bool) {
+	applyConcurrencyRetryHint(c, status, code)
 	if !inboundIsResponses(c) && !inboundIsChatCompletions(c) {
 		errType = anthropicLocalErrorType(status, errType)
+		if resilience.Current().ErrorsOn() && status >= http.StatusInternalServerError && errType == "api_error" {
+			message = strings.ReplaceAll(message, "overloaded_error", "api_error")
+		}
 	}
 	errType, code, message = resilienceTranslateError(c, status, errType, code, message)
 	// xy2api resilience: a pre-output heartbeat may have committed 200.

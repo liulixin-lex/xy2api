@@ -5,6 +5,7 @@ package service
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cespare/xxhash/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/domain"
@@ -1253,6 +1255,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			stickyAccountID = accountID
 		}
 	}
+	replacementSession := platform == PlatformOpenAI && sessionHash != "" &&
+		(stickyAccountID > 0 || len(excludedIDs) > 0) &&
+		!s.shareScheduling.shareSchedulingActive(derefGroupID(groupID))
 	stickyAccountID = s.migrateOpenAILatencyHeldOwner(ctx, groupID, platform, sessionHash, requestedModel, stickyAccountID, excludedIDs, requireCompact, requiredCapability)
 	if s.concurrencyService == nil || !cfg.LoadBatchEnabled {
 		account, stickyHit, err := s.selectAccountForModelWithExclusionsStickyHit(ctx, groupID, platform, sessionHash, requestedModel, excludedIDs, requireCompact, stickyAccountID, requiredCapability, preferLowUpstreamRate)
@@ -1458,7 +1463,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			}
 		})
 		shuffleWithinSortGroups(available)
-		if !rateOrder.enabled && !stickySpillover && stickyAccountID == 0 {
+		if replacementSession {
+			s.preferOpenAIReplacementSession(ctx, available, groupID, sessionHash, requestedModel, rateOrder, requireCompact)
+		} else if !rateOrder.enabled && !stickySpillover && stickyAccountID == 0 {
 			s.preferCacheCandidates(ctx, available, requestedModel)
 		}
 		if rateOrder.enabled {
@@ -1606,6 +1613,83 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		return nil, ErrNoAvailableCompactAccounts
 	}
 	return nil, ErrNoAvailableAccounts
+}
+
+// preferOpenAIReplacementSession keeps a stable fallback order within the
+// lowest-load band of each priority. Rate and compact cohorts remain separate;
+// the caller still applies their ordering and the final latency-hold partition.
+func (s *OpenAIGatewayService) preferOpenAIReplacementSession(ctx context.Context, available []accountWithLoad, groupID *int64, session, model string, rateOrder openAILegacyUpstreamRateOrder, compact bool) {
+	type cohortKey struct {
+		priority int
+		rate     float64
+		known    bool
+		tier     int
+	}
+	minLoad := make(map[int]int)
+	for _, item := range available {
+		priority, load := item.account.Priority, item.loadInfo.LoadRate
+		if old, ok := minLoad[priority]; !ok || load < old {
+			minLoad[priority] = load
+		}
+	}
+	cohorts := make(map[cohortKey][]int)
+	for i, item := range available {
+		if item.loadInfo.LoadRate > minLoad[item.account.Priority]+20 {
+			continue
+		}
+		key := cohortKey{priority: item.account.Priority}
+		if rateOrder.enabled {
+			key.rate, key.known = rateOrder.rates[item.account.ID]
+		}
+		if compact {
+			key.tier = openAICompactSupportTier(item.account)
+		}
+		cohorts[key] = append(cohorts[key], i)
+	}
+	for _, indices := range cohorts {
+		if len(indices) < 2 {
+			continue
+		}
+		items := make([]accountWithLoad, len(indices))
+		scores := make(map[int64]float64, len(indices))
+		hashes := make(map[int64]uint64, len(indices))
+		complete := true
+		for i, index := range indices {
+			item := available[index]
+			items[i] = item
+			value, known := s.cachePreference(ctx, item.account, model)
+			complete = complete && known
+			scores[item.account.ID] = value
+			hashes[item.account.ID] = openAIReplacementSessionHash(derefGroupID(groupID), session, item.account.ID)
+		}
+		sort.SliceStable(items, func(i, j int) bool {
+			a, b := items[i].account.ID, items[j].account.ID
+			if complete && scores[a] != scores[b] {
+				return scores[a] < scores[b]
+			}
+			if hashes[a] != hashes[b] {
+				return hashes[a] > hashes[b]
+			}
+			return a < b
+		})
+		for i, index := range indices {
+			available[index] = items[i]
+		}
+	}
+}
+
+// Same fixed xxhash inputs as sharesched.hrwUniform: group salt, session key,
+// then account ID. Maximizing the hash is the equal-weight HRW order.
+func openAIReplacementSessionHash(groupID int64, session string, accountID int64) uint64 {
+	var digest xxhash.Digest
+	digest.Reset()
+	var buf [8]byte
+	binary.LittleEndian.PutUint64(buf[:], uint64(groupID))
+	_, _ = digest.Write(buf[:])
+	_, _ = digest.WriteString(session)
+	binary.LittleEndian.PutUint64(buf[:], uint64(accountID))
+	_, _ = digest.Write(buf[:])
+	return digest.Sum64() >> 11
 }
 
 func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, groupID *int64, platform string) ([]Account, error) {

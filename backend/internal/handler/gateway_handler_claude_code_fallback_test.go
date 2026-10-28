@@ -89,6 +89,11 @@ func TestGatewayOpenAICompatibleHandlersClaudeCodeOnlyFallback(t *testing.T) {
 		call func(*GatewayHandler, *gin.Context)
 	}{
 		{
+			name: "messages", path: "/v1/messages",
+			body: `{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`,
+			call: (*GatewayHandler).Messages,
+		},
+		{
 			name: "responses", path: "/v1/responses",
 			body: `{"model":"claude-sonnet-4-5","input":"hello","stream":false}`,
 			call: (*GatewayHandler).Responses,
@@ -164,9 +169,18 @@ func TestGatewayOpenAICompatibleHandlersClaudeCodeOnlyFallback(t *testing.T) {
 				selected, reachedSelection := c.Get(opsAccountIDKey)
 				if !tc.hasFallback {
 					require.Equal(t, http.StatusForbidden, recorder.Code)
-					require.Contains(t, recorder.Body.String(), "This group is restricted to Claude Code clients")
+					if ep.name == "messages" {
+						require.Contains(t, recorder.Body.String(), "only allows Claude Code clients")
+						require.Contains(t, recorder.Body.String(), "permission_error")
+						require.True(t, service.HasOpsClientBusinessLimited(c))
+						require.Empty(t, recorder.Header().Get("Retry-After"))
+					} else {
+						require.Contains(t, recorder.Body.String(), "This group is restricted to Claude Code clients")
+					}
 					require.False(t, reachedSelection, "a Claude Code only group without fallback must be rejected before account selection")
-					require.Empty(t, schedulerCache.queriedGroupIDs())
+					if ep.name != "messages" {
+						require.Empty(t, schedulerCache.queriedGroupIDs())
+					}
 					return
 				}
 				require.NotContains(t, recorder.Body.String(), "restricted to Claude Code clients")
@@ -174,7 +188,9 @@ func TestGatewayOpenAICompatibleHandlersClaudeCodeOnlyFallback(t *testing.T) {
 				require.Equal(t, fallbackAccountID, selected)
 				queried := schedulerCache.queriedGroupIDs()
 				require.Contains(t, queried, fallbackGroupID)
-				require.NotContains(t, queried, primaryGroupID)
+				if ep.name != "messages" {
+					require.NotContains(t, queried, primaryGroupID)
+				}
 			})
 		}
 	}
