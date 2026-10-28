@@ -130,7 +130,7 @@ func (s *CNProviderBalanceCheckService) runOnce() {
 			}
 			// payg 余额探测仅 kimi/deepseek（智谱 / MiniMax 无公开余额端点，
 			// payg 账号依赖响应式 402/429 处理）。
-			if platform != PlatformZhipu && platform != PlatformMiniMax && account.Schedulable {
+			if platform != PlatformZhipu && platform != PlatformMiniMax && account.Schedulable && !upstreamBalanceCNRelayAccount(account) {
 				paygTargets = append(paygTargets, account)
 			}
 		}

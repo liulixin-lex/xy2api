@@ -63,7 +63,7 @@ func newDeepSeekBalanceProbeAccount() *Account {
 		Credentials: map[string]any{
 			"account_mode": AccountModePayG,
 			"api_key":      "sk-test",
-			"base_url":     "https://relay.example.com",
+			"base_url":     "https://api.deepseek.com",
 		},
 	}
 }

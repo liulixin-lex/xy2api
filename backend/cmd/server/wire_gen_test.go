@@ -101,6 +101,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		&service.IQCheckService{},   // iqCheck
 		nil,                         // ollamaCloudUsage
 		nil,                         // opencodeGoUsage
+		nil,                         // upstreamBalance
 		nil,                         // auditLog
 		nil,                         // openAIAutoReset
 		nil,                         // promptAudit
