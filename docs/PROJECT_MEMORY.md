@@ -267,6 +267,7 @@
 - `tools/upstream-sync/policy.json` 的 `xy_owned` 范围较宽（包括大部分 `backend/internal/**`、`frontend/**`、`docs/**`）。audit 通过只证明差异被分类、固定契约与具名补丁仍在、migration/provenance 合法，不等于所有二开语义已经自动审查；重叠文件仍需人工核对。
 - GoReleaser 的稳定别名（`latest`、主版本、次版本）现用 `skip_push: auto`，prerelease 不再改写它们（v0.3.0-rc.1、v0.4.0-rc.1 发布后均核实未动）。早期 v0.0.7 RC 曾短暂改写别名，正式发布后已恢复。
 - GitHub Actions 在本次 RC/正式 Release 中提示 `docker/login-action@v3`、`docker/setup-buildx-action@v3`、`docker/setup-qemu-action@v3` 的 Node.js 20 runtime 已弃用，Runner 强制切到 Node.js 24 后仍成功；这是后续 Action 版本维护项，不是本次发布阻塞。
+- 本机门禁要包括 golangci-lint（版本见 `tools/docs_consistency.json` 的 pins，本机需自行安装），运行时加 `--max-issues-per-linter=0 --max-same-issues=0`：CI 注释只显示同类问题的前几条，照注释逐条修会漏（2026-10-28 PR #151 遇到）。
 - macOS 会定期删掉 `/tmp` 下 3 天没访问的文件。0.4.2 期间放在 `/tmp` 的 Go 工具链和测试服务器辅助脚本被删过一次。跨天的任务把工具链和脚本放到用户目录下，`/tmp` 只放当次的临时文件。
 - 提交与打 tag 前先看一眼 `git config user.email`：仓库本地配置可能被别的会话改过（0.4.2 的 `release/0.4.2` 因此留下 4 个占位身份的合并提交）。`gh pr merge --match-head-commit` 要用完整的 40 位 SHA。
 - `sync.py audit` 把工作树里的 `node_modules` 软链接也算作未跟踪文件。借用别处的依赖时放在工作树外面，或者 audit 前删掉软链接。
@@ -989,8 +990,8 @@ pnpm --dir frontend run build
 
 - 请求/目标：用户 2026-10-28 授权“全部推送并合并”（不含发版、部署）。
 - 开始状态：分支 `feat/iq-per-model-20261027`，HEAD `eb75150e5`，origin/main 仍为 `d25bcd8dc`，工作树干净。
-- 完成操作：推送分支并开 PR #151。首轮 backend-security 因 govulncheck 新公告 GO-2026-6860（`golang.org/x/net/html` 文本节点合并的二次复杂度，经 Ollama Cloud 用量解析可达）失败，与本改动无关、main 同样会失败；按惯例把 `golang.org/x/net` 升到修复版 v0.62.0，其余 `golang.org/x` 模块随之小幅升级（`39947b7ce`）。本机 build、vet、govulncheck（0 个可达漏洞）、定向测试、文档一致性与 `sync.py audit` 通过。任务记录原样归档。
-- 修改文件：`backend/go.mod`、`backend/go.sum`、本记忆与归档。
+- 完成操作：推送分支并开 PR #151。首轮 backend-security 因 govulncheck 新公告 GO-2026-6860（`golang.org/x/net/html` 文本节点合并的二次复杂度，经 Ollama Cloud 用量解析可达）失败，与本改动无关、main 同样会失败；按惯例把 `golang.org/x/net` 升到修复版 v0.62.0，其余 `golang.org/x` 模块随之小幅升级（`39947b7ce`）。本机 build、vet、govulncheck（0 个可达漏洞）、定向测试、文档一致性与 `sync.py audit` 通过。任务记录原样归档。随后 golangci-lint 报 62 项（errcheck 52：`rows.Close`/`tx.Rollback`/Builder 写入未处理返回值；staticcheck 7；unused 3：遗留的 `iqGateKeyPresent` 与两个质量路由正则），均来自本改动、本机门禁漏跑；按仓库写法修正并删除死代码，本机 golangci-lint 0 项，开发机集成套件与受影响 unit 复跑通过。
+- 修改文件：`backend/go.mod`、`backend/go.sum`；lint 涉及 `repository/account_iq_targets.go` 等 IQ 新文件；本记忆与归档。
 - 验证：PR #151 全部保护检查通过后合并。
 - 卡点/风险：见“当前交接状态”的遗留项。
 - 下一步：发版与部署待用户授权。
