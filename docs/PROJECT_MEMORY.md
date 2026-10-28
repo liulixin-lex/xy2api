@@ -15,9 +15,9 @@
   - astra 逐路审查与 R1 修复（FIX）、集成终审与 M1/M2 修复；
   - 现行文档：`GATEWAY_RESILIENCE.md` §4.9 等、`account-scheduling.md`、runbook；
   - 上游登记：5 条失效 literal 替换，新增钩子，具名补丁 `xy-error-recovery-routing`，scheduler-diff 审阅块。
-  - 发布执行：快速验收 M1/M2/F2 与 D1–D4 通过；PR #158、#159 均在全部检查成功后常规合入 main（`39ef32f51`、`5b06d6ef4`）。本任务 PR #160 已开，初轮 CI 全绿；正在跟进最新 main 的登记合并与检查。
+  - 发布执行：快速验收 M1/M2/F2 与 D1–D4 通过；PR #158、#159、#160 均在全部检查成功后常规合入 main（`39ef32f51`、`5b06d6ef4`、`62c2fe72c`）。正在准备 0.4.12 版本 PR。
 - **未完成**：
-  1. PR #160 跟进 main 后的 CI 与合并；发版准备 PR；annotated tag v0.4.12 与 Release；发版后记忆归档 PR。
+  1. 发版准备 PR 的检查与合并；annotated tag v0.4.12 与 Release；发版后记忆归档 PR。
   2. 上线后按 `evidence/prod_errors_48h.md` 的查询复跑 48 小时对比（需另行授权部署后）。
 - **卡点与风险**：
   - WS 与 WS→HTTP 桥接的余额升档与复位暂缓（缺统一发送点与逐轮快照）；
@@ -270,6 +270,13 @@
 - 后续部署事项：升级后显式保存public备份范围；新目标先初始化所需扩展，production备份仍需在实际部署后验证。share默认关闭，实际影子/逐组启用与业务账单观察是部署后的流程。非阻断维护项：GoReleaser旧配置字段弃用提醒、前端依赖审计中未达high/critical阻断等级的告警；本次未借此扩展依赖升级。
 
 ## 进行中的工作
+
+### 20261028-release0412 — 0.4.12 版本准备与发布（进行中）
+
+- 用户授权推送、合并本任务与其他开放 PR、发布 0.4.12；不部署。#158、#159、#160 均已按固定 head 与全部成功检查常规合入。
+- 版本分支 `release/0.4.12-20261028` 基于 main `62c2fe72c`；只将程序 VERSION 与 provenance 产品版本 0.4.11→0.4.12，并登记本任务，Sub2API 兼容基线 0.2.15 不变。
+- 本版包含迁移 282。升级与回退按 ADMIN_PERMISSIONS、UPSTREAM_BALANCE；回退前必须清除 new-api 访问令牌并处理 operator 角色、权限表及迁移记录，不能仅换旧镜像。
+- 下一步：本地门禁、版本 PR 完整 CI 与合并；在版本合并提交打 annotated tag，核验 Release、五平台附件与 GHCR 双架构；最后通过纯记忆 PR 原样归档完成的任务。
 
 ### 20261028-error-recovery-routing — 报错后补救、重试与路由优化（集成完成，待发布）
 
@@ -1256,3 +1263,9 @@ pnpm --dir frontend run build
 - 冲突：仅 provenance、policy 和记忆。补丁登记按并集合并；保留已替换的旧字面量删除，不恢复失效保护；两侧任务与操作日志完整保留，已归档的 0.4.7 条目不重新引入。业务代码未手改。
 - CI：#159 两次 shell 作业均未分配到 macOS runner、无执行步骤，平台 annotation 明确容量不足；只重跑该作业，第二次实际重跑在 19 秒内通过，最终 18/18 SUCCESS。没有绕过检查或改 runner 配置。
 - 下一步：#160 新合并提交的本地门禁与完整 CI，通过后合并；版本 PR 与发布尚未执行，不操作生产。
+
+### 2026-10-28 — 20261028-release0412 — 功能 PR 全部合入，准备版本 PR
+
+- 完成操作：#160 跟进 main 的 `88e85638c` 全部 18 项检查成功，无需重跑；按固定 head 常规合入 main `62c2fe72c`。合并树与已验证 head 完全相同，开放 PR 已清空。
+- 修改文件：仅 `backend/cmd/server/VERSION`、`UPSTREAM_BASE.json` 的产品版本和本记忆。正式版本为 0.4.12，Sub2API 兼容基线保持 0.2.15。
+- 验证与下一步：本地文档、audit、scheduler-diff、工具单测通过后推送版本 PR；完整检查成功后合并、打 annotated tag 并验证发布制品。部署不在授权内。
