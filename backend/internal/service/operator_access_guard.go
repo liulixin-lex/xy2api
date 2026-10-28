@@ -48,7 +48,12 @@ func operatorSet(obj operatorObject, key string, value any) {
 	obj[key], _ = json.Marshal(value)
 }
 func operatorPathID(r operatoraccess.Request, key string) (int64, error) {
-	id, err := strconv.ParseInt(r.Params[key], 10, 64)
+	raw := r.Params[key]
+	if r.Key == "POST /risk-control/users/:user_id/unban" && key == "user_id" {
+		// ContentModerationHandler.UnbanUser trims its path parameter.
+		raw = strings.TrimSpace(raw)
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || id <= 0 {
 		return 0, operatorFieldError(key)
 	}
@@ -284,11 +289,11 @@ func (s *OperatorAccessService) CheckFields(ctx context.Context, sc *operatoracc
 		return nil, s.operatorProxyRules(ctx, sc, rule, r, obj)
 	case "redeem_search", "promo_search":
 		if !sc.Has(operatoraccess.FlagRedeemCodesIssue) {
-			search := r.Query.Get("search")
+			search := strings.TrimSpace(r.Query.Get("search"))
 			if search != "" && (rule == "promo_search" || !strings.Contains(search, "@")) {
 				return nil, operatorFieldError("search")
 			}
-			if r.Query.Get("sort_by") == "code" {
+			if strings.ToLower(strings.TrimSpace(r.Query.Get("sort_by"))) == "code" {
 				return nil, operatorFieldError("sort_by")
 			}
 		}
@@ -496,7 +501,11 @@ func (s *OperatorAccessService) operatorRedeemRules(ctx context.Context, sc *ope
 		if err != nil {
 			return err
 		}
-		stored, err := s.redeemRepo.GetByCode(ctx, code)
+		trimmed := strings.TrimSpace(code)
+		if trimmed != code {
+			return operatorFieldError("code")
+		}
+		stored, err := s.redeemRepo.GetByCode(ctx, trimmed)
 		if err == nil && stored != nil {
 			return operatorFieldError("code")
 		}

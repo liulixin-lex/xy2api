@@ -69,7 +69,7 @@ func (s *OperatorAccessService) operatorProxyRules(ctx context.Context, sc *oper
 		if !sc.Has(operatoraccess.FlagAccountsUpstreamAddress) {
 			return operatorNetworkError("host", "address")
 		}
-		if operatorHas(obj, "proxies") {
+		if r.Key == "POST /proxies/batch" {
 			proxies, err := operatorRead[[]operatorObject](obj, "proxies")
 			if err != nil {
 				return err
@@ -168,8 +168,11 @@ func (s *OperatorAccessService) operatorProxyRules(ctx context.Context, sc *oper
 			}
 		}
 	}
-	if differences["host"] {
-		host, _ := operatorRead[string](obj, "host")
+	if differences["host"] || differences["protocol"] || differences["port"] {
+		host := stored.Host
+		if differences["host"] {
+			host, _ = operatorRead[string](obj, "host")
+		}
 		if err = validateOperatorHost(ctx, host); err != nil {
 			return operatorPrivateAddress("host")
 		}

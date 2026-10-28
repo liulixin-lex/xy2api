@@ -345,6 +345,28 @@ func TestOperatorChannelRules(t *testing.T) {
 	require.NoError(t, err)
 }
 func TestOperatorMonitorRules(t *testing.T) {
+	t.Run("R6_account_update", func(t *testing.T) {
+		f := newOperatorGuardFixture(t)
+		f.monitor.row.AccountID = ptrInt64(8)
+		for _, body := range []string{`{"account_id":9}`, `{"account_id":1}`} {
+			_, err := f.check("monitor_update", body)
+			guardReason(t, err, "ADMIN_PERMISSION_DENIED", "")
+			require.Equal(t, "accounts:view", infraerrors.FromError(err).Metadata["required"])
+		}
+		for _, body := range []string{`{}`, `{"account_id":8}`, `{"account_id":0}`, `{"account_id":null}`} {
+			_, err := f.check("monitor_update", body)
+			require.NoError(t, err)
+		}
+		f.sc.Perms.Modules[operatoraccess.ModuleAccounts] = operatoraccess.LevelView
+		_, err := f.check("monitor_update", `{"account_id":9}`)
+		require.NoError(t, err)
+	})
+	t.Run("normalized_endpoint_and_defaults", func(t *testing.T) {
+		f := newOperatorGuardFixture(t)
+		f.monitor.row.APIMode = defaultAPIMode("")
+		_, err := f.check("monitor_update", `{"endpoint":" https://203.0.113.10/ ","api_mode":""}`)
+		require.NoError(t, err)
+	})
 	f := newOperatorGuardFixture(t)
 	_, err := f.check("monitor_create", `{"account_id":1}`)
 	guardReason(t, err, "ADMIN_PERMISSION_DENIED", "")
@@ -382,6 +404,26 @@ func TestOperatorMonitorEndpointChangeDropsStoredHeaders(t *testing.T) {
 	require.NotContains(t, string(raw), "stored")
 }
 func TestOperatorTemplateApplyWithHeadersIsSuperOnly(t *testing.T) {
+	for _, rule := range []string{"monitor_create", "monitor_update"} {
+		t.Run("R6_"+rule, func(t *testing.T) {
+			f := newOperatorGuardFixture(t)
+			_, err := f.check(rule, `{"template_id":10}`)
+			guardReason(t, err, "SUPER_ADMIN_REQUIRED", "")
+			f.template.row.ExtraHeaders = nil
+			_, err = f.check(rule, `{"template_id":10}`)
+			require.NoError(t, err)
+			f.template.err = errors.New("db")
+			_, err = f.check(rule, `{"template_id":10}`)
+			guardReason(t, err, "OPERATOR_ACCESS_UNAVAILABLE", "")
+			if rule == "monitor_update" {
+				f.monitor.row.TemplateID = ptrInt64(10)
+				_, err = f.check(rule, `{"template_id":10}`)
+				require.NoError(t, err)
+				_, err = f.check(rule, `{"template_id":12,"clear_template":true}`)
+				require.NoError(t, err)
+			}
+		})
+	}
 	f := newOperatorGuardFixture(t)
 	_, err := f.check("monitor_template_apply", "{}")
 	guardReason(t, err, "SUPER_ADMIN_REQUIRED", "")
@@ -498,6 +540,32 @@ func TestOperatorProxyDeleteRespectsInUseSet(t *testing.T) {
 	guardReason(t, err, "OPERATOR_ACCESS_UNAVAILABLE", "")
 }
 func TestOperatorProxyNetworkFieldsFollowUpstreamAddressFlag(t *testing.T) {
+	t.Run("R6_route_shape", func(t *testing.T) {
+		f := newOperatorGuardFixture(t)
+		f.sc.Perms.Flags[operatoraccess.FlagAccountsUpstreamAddress] = true
+		for _, body := range []string{`{"host":"127.0.0.1","proxies":[]}`, `{"proxies":[]}`} {
+			r := guardRequest(body)
+			r.Key = "POST /proxies"
+			_, err := f.svc.CheckFields(context.Background(), f.sc, "proxy_create", r)
+			guardReason(t, err, "ADMIN_FIELD_FORBIDDEN", "host")
+		}
+		r := guardRequest(`{"host":"127.0.0.1","proxies":[{"host":"203.0.113.10"}]}`)
+		r.Key = "POST /proxies/batch"
+		_, err := f.svc.CheckFields(context.Background(), f.sc, "proxy_create", r)
+		require.NoError(t, err)
+	})
+	t.Run("R6_stored_private_host", func(t *testing.T) {
+		f := newOperatorGuardFixture(t)
+		f.sc.Perms.Flags[operatoraccess.FlagAccountsUpstreamAddress] = true
+		f.admin.proxy.Host = "127.0.0.1"
+		for _, body := range []string{`{"port":9090,"password":"new"}`, `{"protocol":"https","password":"new"}`} {
+			_, err := f.check("proxy_update", body)
+			guardReason(t, err, "ADMIN_FIELD_FORBIDDEN", "host")
+			require.Equal(t, "private_address", infraerrors.FromError(err).Metadata["cause"])
+		}
+		_, err := f.check("proxy_update", `{"password":"new"}`)
+		require.NoError(t, err)
+	})
 	operatorTestDNS(t)
 	f := newOperatorGuardFixture(t)
 	_, err := f.check("proxy_create", `{"host":"203.0.113.10"}`)
@@ -516,10 +584,25 @@ func TestOperatorProxyNetworkFieldsFollowUpstreamAddressFlag(t *testing.T) {
 		guardReason(t, err, "ADMIN_FIELD_FORBIDDEN", "host")
 		require.Equal(t, "private_address", infraerrors.FromError(err).Metadata["cause"])
 	}
-	_, err = f.check("proxy_create", `{"proxies":[{"host":"203.0.113.10"},{"host":"127.0.0.1"}]}`)
+	r := guardRequest(`{"proxies":[{"host":"203.0.113.10"},{"host":"127.0.0.1"}]}`)
+	r.Key = "POST /proxies/batch"
+	_, err = f.svc.CheckFields(context.Background(), f.sc, "proxy_create", r)
 	guardReason(t, err, "ADMIN_FIELD_FORBIDDEN", "host")
 }
 func TestOperatorRedeemRules(t *testing.T) {
+	t.Run("R6_code_trim_and_load_failure", func(t *testing.T) {
+		f := newOperatorGuardFixture(t)
+		for _, code := range []string{" existing ", "\tnew\n", " "} {
+			raw, err := json.Marshal(map[string]string{"code": code})
+			require.NoError(t, err)
+			_, err = f.check("redeem_create_and_redeem", string(raw))
+			guardReason(t, err, "ADMIN_FIELD_FORBIDDEN", "code")
+		}
+		f.redeem.err = errors.New("db")
+		_, err := f.check("redeem_create_and_redeem", `{"code":"new"}`)
+		guardReason(t, err, "OPERATOR_ACCESS_UNAVAILABLE", "")
+	})
+	testOperatorNormalizedSort(t, "redeem_search")
 	f := newOperatorGuardFixture(t)
 	for _, tc := range []struct {
 		query url.Values
@@ -565,6 +648,7 @@ func TestOperatorRedeemBatchUpdateRejectsLedgerAndAdminRows(t *testing.T) {
 	require.NoError(t, err)
 }
 func TestOperatorPromoSearchRule(t *testing.T) {
+	testOperatorNormalizedSort(t, "promo_search")
 	f := newOperatorGuardFixture(t)
 	r := guardRequest("")
 	r.Query = url.Values{"search": {"email@example.com"}}
@@ -738,4 +822,43 @@ func TestOperatorRiskEngineConfigEquality(t *testing.T) {
 		_, err = f.check("risk_config", body)
 		guardReason(t, err, "ADMIN_FIELD_FORBIDDEN", "engine_configs")
 	}
+}
+
+func testOperatorNormalizedSort(t *testing.T, rule operatoraccess.FieldRule) {
+	t.Helper()
+	for _, sort := range []string{"CODE", " code", " CoDe "} {
+		f := newOperatorGuardFixture(t)
+		r := guardRequest("")
+		r.Query = url.Values{"sort_by": {sort}}
+		_, err := f.svc.CheckFields(context.Background(), f.sc, rule, r)
+		guardReason(t, err, "ADMIN_FIELD_FORBIDDEN", "sort_by")
+		f.sc.Perms.Flags[operatoraccess.FlagRedeemCodesIssue] = true
+		_, err = f.svc.CheckFields(context.Background(), f.sc, rule, r)
+		require.NoError(t, err)
+	}
+}
+
+func TestOperatorGuardNormalizationMatchesConsumers(t *testing.T) {
+	f := newOperatorGuardFixture(t)
+	// The create binder has no clear_template field: it cannot cancel template_id.
+	_, err := f.check("monitor_create", `{"template_id":10,"clear_template":true}`)
+	guardReason(t, err, "SUPER_ADMIN_REQUIRED", "")
+	f.monitor.row.APIMode = MonitorAPIModeChatCompletions
+	raw, err := f.check("monitor_update", `{"endpoint":"  https://203.0.113.10///  ","api_mode":"  "}`)
+	require.NoError(t, err)
+	require.Contains(t, string(raw), `"endpoint":"https://203.0.113.10"`)
+	_, err = f.check("proxy_update", `{"host":" 203.0.113.10 ","protocol":" http ","username":" "}`)
+	require.NoError(t, err)
+}
+
+func TestOperatorTargetIDNormalization(t *testing.T) {
+	f := newOperatorGuardFixture(t)
+	r := guardRequest("")
+	r.Key = "POST /risk-control/users/:user_id/unban"
+	r.Params = map[string]string{"user_id": " 1 "}
+	require.NoError(t, f.svc.CheckTarget(context.Background(), f.sc, "user_path_user_id", r))
+	r.Params["user_id"] = " 2 "
+	guardReason(t, f.svc.CheckTarget(context.Background(), f.sc, "user_path_user_id", r), "ADMIN_TARGET_FORBIDDEN", "")
+	r.Key = "PUT /affiliates/users/:user_id"
+	guardReason(t, f.svc.CheckTarget(context.Background(), f.sc, "user_path_user_id", r), "ADMIN_FIELD_FORBIDDEN", "user_id")
 }

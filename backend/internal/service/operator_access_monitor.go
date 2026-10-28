@@ -16,11 +16,14 @@ func operatorNewKey(field string) error {
 
 func (s *OperatorAccessService) operatorMonitorRules(ctx context.Context, sc *operatoraccess.Scope, rule operatoraccess.FieldRule, r operatoraccess.Request, obj operatorObject) ([]byte, error) {
 	if rule == "monitor_create" {
+		if err := s.operatorMonitorTemplate(ctx, obj, nil, false); err != nil {
+			return nil, err
+		}
 		id, err := operatorRead[*int64](obj, "account_id")
 		if err != nil {
 			return nil, err
 		}
-		if id != nil && *id != 0 && !sc.Can(operatoraccess.ModuleAccounts, operatoraccess.LevelView) {
+		if id != nil && *id > 0 && !sc.Can(operatoraccess.ModuleAccounts, operatoraccess.LevelView) {
 			return nil, infraerrors.Forbidden("ADMIN_PERMISSION_DENIED", "Permission required").WithMetadata(map[string]string{"required": "accounts:view"})
 		}
 		headers, err := operatorRead[map[string]string](obj, "extra_headers")
@@ -77,6 +80,16 @@ func (s *OperatorAccessService) operatorMonitorRules(ctx context.Context, sc *op
 	if err != nil || stored == nil {
 		return nil, operatorUnavailable()
 	}
+	accountID, err := operatorRead[*int64](obj, "account_id")
+	if err != nil {
+		return nil, err
+	}
+	if accountID != nil && *accountID > 0 && !operatorInt64PtrEqual(accountID, stored.AccountID) && !sc.Can(operatoraccess.ModuleAccounts, operatoraccess.LevelView) {
+		return nil, infraerrors.Forbidden("ADMIN_PERMISSION_DENIED", "Permission required").WithMetadata(map[string]string{"required": "accounts:view"})
+	}
+	if err := s.operatorMonitorTemplate(ctx, obj, stored.TemplateID, true); err != nil {
+		return nil, err
+	}
 	endpoint, err := operatorRead[*string](obj, "endpoint")
 	if err != nil {
 		return nil, err
@@ -84,6 +97,10 @@ func (s *OperatorAccessService) operatorMonitorRules(ctx context.Context, sc *op
 	// Without the address flag the edit view omits the redacted endpoint.
 	// With the flag an explicit empty endpoint retains its handler meaning
 	// (clearing it in quota mode), and therefore counts as a network change.
+	if endpoint != nil {
+		*endpoint = normalizeEndpoint(*endpoint)
+		operatorSet(obj, "endpoint", *endpoint)
+	}
 	changed := endpoint != nil && *endpoint != stored.Endpoint
 	if !sc.Has(operatoraccess.FlagAccountsUpstreamAddress) && (endpoint == nil || *endpoint == "") {
 		operatorSet(obj, "endpoint", stored.Endpoint)
@@ -102,6 +119,9 @@ func (s *OperatorAccessService) operatorMonitorRules(ctx context.Context, sc *op
 		value, e := operatorRead[*string](obj, pair.key)
 		if e != nil {
 			return nil, e
+		}
+		if value != nil && pair.key == "api_mode" {
+			*value = defaultAPIMode(*value)
 		}
 		if value != nil && *value != pair.stored {
 			changed = true
@@ -213,11 +233,17 @@ func (s *OperatorAccessService) operatorChannelRules(ctx context.Context, sc *op
 		}
 		// Normalize the handler's default token mode before comparing, and ignore DB IDs.
 		for i := range *pricing {
+			if (*pricing)[i].Platform == "" {
+				(*pricing)[i].Platform = PlatformAnthropic
+			}
 			if (*pricing)[i].BillingMode == "" {
 				(*pricing)[i].BillingMode = "token"
 			}
 		}
 		for i := range old {
+			if old[i].Platform == "" {
+				old[i].Platform = PlatformAnthropic
+			}
 			if old[i].BillingMode == "" {
 				old[i].BillingMode = "token"
 			}
@@ -336,6 +362,10 @@ func operatorRiskIdentity(ctx context.Context, obj operatorObject, stored *Conte
 			return err
 		}
 		if value != nil {
+			*value = strings.TrimSpace(*value)
+			if pair.key == "base_url" {
+				*value = strings.TrimRight(*value, "/")
+			}
 			if pair.key == "base_url" && *value != "" {
 				if err = operatorAddressField(ctx, pair.key, *value); err != nil {
 					return err
@@ -358,6 +388,32 @@ func operatorRiskIdentity(ctx context.Context, obj operatorObject, stored *Conte
 		if *proxy != actual {
 			return fail("proxy_id")
 		}
+	}
+	return nil
+}
+
+// A staged template is a future outbound header source, even before apply.
+func (s *OperatorAccessService) operatorMonitorTemplate(ctx context.Context, obj operatorObject, storedID *int64, allowClear bool) error {
+	clear, err := operatorRead[bool](obj, "clear_template")
+	if err != nil {
+		return err
+	}
+	id, err := operatorRead[*int64](obj, "template_id")
+	if err != nil {
+		return err
+	}
+	if (allowClear && clear) || id == nil || operatorInt64PtrEqual(id, storedID) {
+		return nil
+	}
+	if s.templateService == nil {
+		return operatorUnavailable()
+	}
+	template, err := s.templateService.Get(ctx, *id)
+	if err != nil || template == nil {
+		return operatorUnavailable()
+	}
+	if len(template.ExtraHeaders) > 0 {
+		return operatorSuperOnly()
 	}
 	return nil
 }
