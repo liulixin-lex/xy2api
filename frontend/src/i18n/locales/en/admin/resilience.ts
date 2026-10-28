@@ -38,7 +38,7 @@ export default {
       },
       fields: {
         balancePause: 'Initial pause (s)',
-        balancePauseHint: 'Consecutive balance failures on the same account pause it for ×1 → ×3 → ×12 of this duration (capped at ×12), resetting after a successful request or manual "Recover State".',
+        balancePauseHint: 'Consecutive balance failures on the same account pause it for ×1 → ×3 → ×12 of this duration (5/15/60 min by default; the third step is the cap), resetting after a successful request or a manual "Recover State".',
         maxAttempts: 'Maximum attempts',
         preOutputBudget: 'Total time before first output (s)',
         keepaliveDelay: 'First heartbeat delay (s)',

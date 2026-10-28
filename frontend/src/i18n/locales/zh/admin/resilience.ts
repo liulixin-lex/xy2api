@@ -38,7 +38,7 @@ export default {
       },
       fields: {
         balancePause: '首次暂停时长（秒）',
-        balancePauseHint: '同一账号连续余额不足时按首次时长 ×1 → ×3 → ×12 暂停（×12 封顶），请求成功或手动“恢复状态”后复位。',
+        balancePauseHint: '同一账号连续余额不足时按本时长 ×1 → ×3 → ×12 暂停（默认 5/15/60 分钟，第 3 档封顶），请求成功或手动“恢复状态”后复位。',
         maxAttempts: '最多尝试次数',
         preOutputBudget: '首输出前总时长（秒）',
         keepaliveDelay: '首次心跳延迟（秒）',

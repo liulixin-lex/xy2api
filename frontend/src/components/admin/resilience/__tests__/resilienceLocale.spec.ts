@@ -18,9 +18,13 @@ function lookup(messages: unknown, key: string): unknown {
 }
 
 describe('gateway resilience 0.4.4 locale keys', () => {
-  it.each([['zh', zh], ['en', en]])('%s has every runtime-built key', (_, messages) => {
+  it.each([
+    ['zh', zh, '默认 5/15/60 分钟，第 3 档封顶'],
+    ['en', en, '5/15/60 min by default; the third step is the cap']
+  ])('%s has every runtime-built key and describes the default balance pause schedule', (_, messages, defaultSchedule) => {
     const missing = dynamicKeys.filter((key) => typeof lookup(messages, key) !== 'string' || !(lookup(messages, key) as string).trim())
     expect(missing).toEqual([])
+    expect(lookup(messages, 'admin.resilience.settings.fields.balancePauseHint')).toContain(defaultSchedule)
   })
 
   // C0: both errors switches also need errors.enabled; moving the current
