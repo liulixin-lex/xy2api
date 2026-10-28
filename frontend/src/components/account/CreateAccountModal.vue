@@ -4177,7 +4177,7 @@ const emit = defineEmits<{
 const appStore = useAppStore()
 
 // 普通管理员（xy-admin-operator-scope）：没有“显示上游地址”时不设置地址和代理（使用平台默认地址），
-// 没有“加减余额”时不放入分组、不设置计费附加项。
+// 没有“加减余额”时不设置计费附加项；分组随账号管理权限。
 const access = useAdminAccessStore()
 const showUpstreamAddress = computed(() => access.can('accounts.upstream_address'))
 const canAdjustBalance = computed(() => access.can('users.balance_adjust'))

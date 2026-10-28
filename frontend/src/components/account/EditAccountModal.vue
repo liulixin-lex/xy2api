@@ -3282,7 +3282,7 @@ const appStore = useAppStore()
 const browserTimeZone = getBrowserTimeZone()
 
 // 普通管理员（xy-admin-operator-scope）：接入地址与代理需要“显示上游地址”，
-// OAuth 类账号的网络设置只读；分组与计费附加项需要“加减余额”。
+// OAuth 类账号的网络设置只读；计费附加项需要“加减余额”，分组随账号管理权限。
 const access = useAdminAccessStore()
 const showUpstreamAddress = computed(() => access.can('accounts.upstream_address'))
 const canAdjustBalance = computed(() => access.can('users.balance_adjust'))

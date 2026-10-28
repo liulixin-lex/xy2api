@@ -1550,7 +1550,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const appStore = useAppStore()
-// 普通管理员（xy-admin-operator-scope）：批量编辑不改代理和地址；分组与计费附加项需要“加减余额”。
+// 普通管理员（xy-admin-operator-scope）：批量编辑不改代理和地址；计费附加项需要“加减余额”，分组随账号管理权限。
 const access = useAdminAccessStore()
 const isOperator = computed(() => access.isOperator)
 const canAdjustBalance = computed(() => access.can('users.balance_adjust'))
