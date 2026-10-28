@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/stretchr/testify/require"
 
 	"github.com/liulixin-lex/xy2api/internal/service"
@@ -58,6 +59,31 @@ func TestAccountFromServiceShallow_RedactsSensitiveCredentials(t *testing.T) {
 
 	// 原始 service.Account 不应被改动
 	require.Equal(t, "rt-secret", src.Credentials["refresh_token"])
+}
+
+func TestAccountDTOExposesIQTargetsWithoutLegacyIQCheck(t *testing.T) {
+	src := &service.Account{
+		ID:        42,
+		Name:      "iq-account",
+		IQTargets: []domain.IQTargetSummary{{Model: "gpt-6-astra", Enabled: true, Verdict: "unknown", State: "idle"}},
+	}
+
+	for name, account := range map[string]*Account{
+		"detail": AccountFromService(src),
+		"list":   AccountFromServiceShallow(src),
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw, err := json.Marshal(account)
+			require.NoError(t, err)
+			var fields map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(raw, &fields))
+			require.NotContains(t, fields, "iq_check")
+			require.Contains(t, fields, "iq_targets")
+			var targets []domain.IQTargetSummary
+			require.NoError(t, json.Unmarshal(fields["iq_targets"], &targets))
+			require.Equal(t, "gpt-6-astra", targets[0].Model)
+		})
+	}
 }
 
 func TestAccountFromServiceShallow_RedactsOllamaCloudManagedExtra(t *testing.T) {

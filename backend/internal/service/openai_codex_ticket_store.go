@@ -75,7 +75,6 @@ type codexTicketRuntime struct {
 	Events            []CodexTicketEvent `json:"events,omitempty"`
 	Recoveries        []time.Time        `json:"recoveries,omitempty"`
 	IQRecoveryAt      *time.Time         `json:"iq_recovery_at,omitempty"`
-	IQRetest          string             `json:"iq_retest,omitempty"`
 }
 
 func codexTicketRuntimes(a *Account) map[string]codexTicketRuntime {

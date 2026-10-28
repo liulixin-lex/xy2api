@@ -2,9 +2,15 @@
 
 > 跨 Agent、跨会话的持续交接文件。开始仓库任务前必须完整阅读本文件；执行过程中在关键节点更新；结束前写明结果、验证、卡点和下一步。项目事实变化时同步更新本文件，不能只追加日志而保留过期的顶部状态。
 >
-> 本文件只放进行中与近期的内容。已结束任务的交接状态、登记，以及 2026-10-19 及以前的操作日志在 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)（按归档规范原样移入，最近一次为 2026-10-26）。文档目录见 [`README.md`](README.md)。
+> 本文件只放进行中与近期的内容。已结束任务的交接状态、登记，以及 2026-10-19 及以前的操作日志在 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)（按归档规范原样移入，最近一次为 2026-10-27）。文档目录见 [`README.md`](README.md)。
 
 ## 当前交接状态
+
+### OpenAI 智商检测按模型重构：PR #151 合入 main（2026-10-28；未发版、未部署）
+
+- 账号 × 模型检测与 `iq:<出站模型>` fail-closed 门禁，现行说明见 [`OPENAI_IQ_CHECK.md`](OPENAI_IQ_CHECK.md)。用户 2026-10-28 授权推送并合并；PR #151 全部保护检查通过后以 merge commit 合入。同 PR 将 `golang.org/x/net` 升到 v0.62.0（GO-2026-6860，govulncheck 新公告）。
+- 遗留：参数化题未做真实上游校准；发版说明须写明默认降级组合新增 6.1-sol、6-sol → 5.6-luna 会改变质量路由，升级须停全部旧副本后执行迁移 281、启动对账失败即不启动；上线观察 7 天后再删旧结构。发版与部署另行授权。
+- 详细交接与实施记录已原样归档。
 
 ### 网关韧性复盘：随 0.4.9 发布（2026-10-27 更新）
 
@@ -31,7 +37,7 @@
   - 已管理端保存过设置的部署，Gemini 截止仍为 90 秒（库里存有显式值）；
   - 非 OpenAI breaker 是进程内状态，多实例各自计数；
   - 迁移的空位预检仍有抢槽竞态。
-- **关键位置**：本地交接包 `.work/resilience-review/`（不入库），含 `FINAL_PLAN.md`、`IMPLEMENTATION_SPLIT.md`、`C_IMPLEMENTATION_REPORT.md`、`code_review_*.md`。D 路 worktree 与分支已删除，其交接记录保留在 `.work/resilience-review/d-route/`。
+- **关键位置**：本地交接包 `.work/tasks/20261027-resilience-review/`（不入库；2026-10-27 自 `.work/resilience-review/` 迁入），含 `FINAL_PLAN.md`、`IMPLEMENTATION_SPLIT.md`、`reviews/`、`implementation/`（C 路报告与 D 路交接）。D 路 worktree 与分支已删除。
 
 ### OpenAI 首字、成功率、缓存与账号路由优化：随 0.4.9 发布（2026-10-27 更新）
 
@@ -58,7 +64,7 @@
   - Forward 内部的原地重发沿用本次 attempt 的 profile 与截止；
   - 非 load 选号路径在并发迁移时可能重新读到新绑定；
   - 看板 SLA 预计因口径修正下降约 1.5 个点。
-- **关键位置**：本工作区本地交接包 `.work/`（不入库）：`plan/FINAL_PLAN.md`、`plan/IMPLEMENTATION_SPLIT.md`（两路拆分与接缝）、`integration/`（B 路补丁）。
+- **关键位置**：本地交接包 `.work/tasks/20261026-openai-ttft-health-routing/`（不入库；2026-10-27 自 `.work/` 根目录迁入）：`plan/FINAL_PLAN.md`、`plan/IMPLEMENTATION_SPLIT.md`（两路拆分与接缝）、`integration/`（B 路补丁）。
 
 ### XY2API 0.4.8 已发布：缓存精简（2026-10-26）
 
@@ -224,49 +230,6 @@
 
 ## 进行中的工作
 
-### 20261027-resilience-review — 网关韧性功能复盘（已提交 `7140cda93`，PR #146；2026-10-27）
-
-- **请求**（用户 2026-10-27）：0.4.9 改动提交后，分析原有“网关韧性”策略是否需要同步调整，有无多余、臃肿、无用的功能与可优化项；与 Codex 讨论后给出最终方案，批准后再写代码。
-- **过程**：Claude（Opus）与 Codex（astra）各自独立分析，再互审 8 个分歧，总设计师合并为最终方案（本地交接包 `.work/resilience-review/FINAL_PLAN.md`，不入库）。
-- **结论摘要**：没有需要整块删除的功能，问题在覆盖不均与 0.4.9 联动缺口。
-  - 第一批（随 0.4.9）：首包前心跳按尝试恢复；planned 截断不计会话失败；末位候选改读选号结果；无号 Retry-After 读模型健康；迁移推迟到写绑定时删旧绑定；末位兜底排序加 hold；清死代码与错文档。
-  - 第二批（建议同进 0.4.9）：Gemini 5xx 接进通用惩罚（固定 30 秒冷却，不做账号级升级：astra 反例证明它会伤同账号的健康模型）；Gemini 60 秒尝试截止、输出后 stall 与阶段标签。
-  - 第三批（上线 7 天后）：删过渡开关、Retry-After 收敛。
-- **根因已核实**：Gemini helper 只把 401/403/529 交给通用惩罚，普通 5xx 直接返回，问题账号非 pool、无自定义规则；Gemini 三入口无尝试截止且不设阶段，`select` 段平均 295 秒其实是在等上游。
-- **用户决策**（2026-10-27）：批准方案 v3；第二批同进 0.4.9；非 OpenAI 冷却本轮就做模型级 breaker（复用 OpenAI 账号×模型内核，阶梯 10/45/90/180/300 秒、同轮不升级、成功按起点保护；OpenAI 普通失败阶梯随之从封顶 45 秒改为逐级到 300 秒）；开关删除放在上线 7 天后。
-- **实施**（2026-10-27）：拆分见本地 `.work/resilience-review/IMPLEMENTATION_SPLIT.md`。
-  - C 路（第 1–7 项）在主检出的本分支，由 Codex 实施；
-  - D 路（Gemini 5xx 接线、模型级 breaker、Gemini 60 秒截止）在 worktree 分支 `wip/resil-gemini-20261027`，由 Codex 实施；
-  - 两路都不提交，由总设计师集成，并登记 policy/scheduler-diff；文档与 i18n 由文档 agent 负责，审查由 astra 负责。
-- **集成与审查**：C 路在主检出实施；D 路的补丁先暂存 C 改动再三方合并，之后的修正直接在主检出进行。astra 的 10 条应改全部修复。总设计师另外纠正了两处越界：D 路同号重试跳过范围过宽、C 路回退配置下透传心跳缺口。
-- **下一步**：等 PR #146 的 CI；合并、发版、部署另行授权。
-
-### 20261026-openai-ttft-health-routing — OpenAI 首字、成功率、缓存与账号路由优化（已提交 `ed2e429f6`，随 PR #146 推送；2026-10-27）
-
-- **实施**（2026-10-26T17:40Z）：总设计师（Claude）编排，代码由两路 Codex agent 并行实施，astra 审查，文档与前端文案由 Claude 完成。
-  - A 路（截止链路：起步补丁、改动 1、2、3、6、判慢样本采集点）在分支 `feat/openai-ttft-health-routing-20261026`；
-  - B 路（判慢 hold 模块与 legacy 分区、会话迁移，即改动 4、5）在本地独立工作树的 `wip/ttft-sched-20261026`，完成后由总设计师集成进 A 分支；
-  - 唯一跨路接缝：B 路提供 `recordOpenAIAccountLatencySample`，hold 状态与账号×模型 breaker 分开存放；
-  - 未授权提交、推送、PR、部署。
-- **进展**（2026-10-26T19:16Z）：B 路已集成进 A 分支，两路各经一轮 astra 代码审查，采纳的问题已修复；文档、前端文案、登记完成；本机门禁通过（见“当前交接状态”）。改动仍未提交，B 路的本地工作树已不再使用。
-
-- **请求**（用户 2026-10-26）：只读分析生产近 48 小时的 OpenAI 慢首字请求，与 Codex 协作审查首字延迟、请求成功率、缓存命中率、账号路由四个方面，给出优化方案。要求精简，不做影子模式与冗余兜底。
-- **生产事实**（只读，2026-10-26）：
-  - 生产为 0.4.8，没有存韧性设置文档，参数都是代码缺省；
-  - OpenAI 流量约 98% 走 API Key 中转，中转链路约 125 秒截断（524），首输出截止 180–220 秒从未先于它触发；
-  - 粘性续轮缓存命中 80%，换号后降到 41.5%；
-  - 无号 503 在 48 小时内约 1,300 次，被标为业务限制。
-- **方案**（三轮评审后的定稿，2026-10-26 批准）：
-  1. 首输出截止分热/冷：热为 20/25/30/30 秒；冷的换号重试与新会话首轮，按请求大小放宽到 45 或 75 秒。截止按已耗时递增，最后候选不截断。
-  2. 计划内截止使用专属原因，只计入账号×模型的慢失败，不触发会写库的账号级惩罚。从连续第 2 次起冷却 60 秒并倍增，封顶 10 分钟。
-  3. `codex.rate_limits` 判为开场事件，交付观测同步识别。
-  4. 只用热且成功的首个内容交付时间判慢。判慢账号在候选中排到最后 3 分钟，不剔除。
-  5. 只有同组存在健康替代时，才把会话一次性改绑。
-  6. 无号 503 计入 SLA。
-
-  撤回：端到端首字口径、全局拥塞阈值。“预算过期的槽位等待”经核实为误报。
-- **下一步**：2026-10-27 经用户授权本地提交为 `ed2e429f6`，干净工作树上 `sync.py audit` 通过；推送、PR、合并、发版、部署分别待授权。
-
 ### 20261025-pr131-release047 — 0.4.7 已发布（2026-10-26 更正）
 
 - v0.4.7 已于 2026-10-25T16:49:36Z 发布；发布准备登记已原样归档。缓存部分已被 cache-slim 精简方案取代，PR #142 已于 2026-10-26 合入 main，见“当前交接状态”。
@@ -304,10 +267,12 @@
 - `tools/upstream-sync/policy.json` 的 `xy_owned` 范围较宽（包括大部分 `backend/internal/**`、`frontend/**`、`docs/**`）。audit 通过只证明差异被分类、固定契约与具名补丁仍在、migration/provenance 合法，不等于所有二开语义已经自动审查；重叠文件仍需人工核对。
 - GoReleaser 的稳定别名（`latest`、主版本、次版本）现用 `skip_push: auto`，prerelease 不再改写它们（v0.3.0-rc.1、v0.4.0-rc.1 发布后均核实未动）。早期 v0.0.7 RC 曾短暂改写别名，正式发布后已恢复。
 - GitHub Actions 在本次 RC/正式 Release 中提示 `docker/login-action@v3`、`docker/setup-buildx-action@v3`、`docker/setup-qemu-action@v3` 的 Node.js 20 runtime 已弃用，Runner 强制切到 Node.js 24 后仍成功；这是后续 Action 版本维护项，不是本次发布阻塞。
+- 本机门禁要包括 golangci-lint（版本见 `tools/docs_consistency.json` 的 pins，本机需自行安装），运行时加 `--max-issues-per-linter=0 --max-same-issues=0`：CI 注释只显示同类问题的前几条，照注释逐条修会漏（2026-10-28 PR #151 遇到）。
 - macOS 会定期删掉 `/tmp` 下 3 天没访问的文件。0.4.2 期间放在 `/tmp` 的 Go 工具链和测试服务器辅助脚本被删过一次。跨天的任务把工具链和脚本放到用户目录下，`/tmp` 只放当次的临时文件。
 - 提交与打 tag 前先看一眼 `git config user.email`：仓库本地配置可能被别的会话改过（0.4.2 的 `release/0.4.2` 因此留下 4 个占位身份的合并提交）。`gh pr merge --match-head-commit` 要用完整的 40 位 SHA。
 - `sync.py audit` 把工作树里的 `node_modules` 软链接也算作未跟踪文件。借用别处的依赖时放在工作树外面，或者 audit 前删掉软链接。
 - 本机默认的 pnpm（12）不认这份 lockfile 的 `pnpm.overrides`，CI 用 pnpm 9。前端命令用 `npx -y pnpm@9 …`；`corepack pnpm@9 run build` 不够，`build` 脚本里嵌套的 `pnpm run` 仍会从 PATH 取到 12，报 `ERR_PNPM_VERIFY_DEPS_BEFORE_RUN`（2026-10-21 集成门禁遇到）。
+- repository 集成测试（testcontainers）在开发机上要加 `TESTCONTAINERS_HOST_OVERRIDE=127.0.0.1`。该机 Docker 给同一容器的 IPv4 与 IPv6 映射分配了不同主机端口，`localhost` 先解析到 `::1` 时会连到另一个容器（实测连到 redis），lib/pq 卡在 startup、不受 ping 超时约束，表现为测试无输出挂起。另外只同步 `backend/` 时 `TestBillingIntent_ReadOnlyAuditScript` 会因缺 `tools/billing-integrity/audit.sql` 失败，要连 `tools/` 一起同步（2026-10-28 遇到）。排查时若设了 `TESTCONTAINERS_RYUK_DISABLED=true`，harness 的 `TestMain` 以 `os.Exit` 退出、defer 的 `Terminate` 不执行，每次运行都会留下一对 postgres/redis 容器，测完按 `label=org.testcontainers=true` 核对后手动删除。
 
 ## 项目速览
 
@@ -424,521 +389,6 @@ pnpm --dir frontend run build
 ## 操作日志
 
 <!-- 按时间从旧到新追加。历史记录只允许追加更正，不应静默改写。 -->
-
-### 2026-10-20T02:46Z — 20261019-frontend-ux — 本地完成，待授权提交
-
-- 请求/目标：拉取最新 xy2api，在本次对话内一次执行完整的前端优化方案，分三步：
-  1. 先修性能；
-  2. 再做动效系统；
-  3. 最后做交互增强。
-- 开始状态：分支 `feat/frontend-ux-20261019`，自 main `0320d4e68`（VERSION 0.4.1）；独立 clone，工作树干净。
-- 完成操作：
-  - **性能**
-    - 表格：去掉 `<table>`/`<tbody>` 上的 `divide-y`。这类兄弟选择器让虚拟滚动每插入一行都要重算整个 tbody 的样式，Performance trace 定位到了这个问题。
-    - 桌面表格改为逐行渲染的 `DataTableRow.ts`。行高测量只读 ResizeObserver 的结果。
-    - 账号页 13 个弹窗改为按需加载加按需挂载，新建和编辑弹窗在页面空闲时预取。
-    - 新增 chunk 加载失败自动恢复（`router.onError`、`vite:preloadError`、异步组件），10 秒内不重复刷新。
-    - 去掉大面积毛玻璃，`transition-all` 都换成只过渡实际会变的属性。
-    - `Intl` 实例改为缓存复用；`adminSettings.fetch` 的并发调用合并为一个请求。
-    - 页面在后台时，5 处轮询跳过本轮。
-    - 拆出 7 个按需加载的依赖分块。
-  - **动效**
-    - `styles/motion.css` 统一定义时长与缓动变量。
-    - 减少动画有两条途径：系统设置，或右上角头像菜单里的开关（`useMotionPreference`）。
-    - 页面区块入场（`usePageEntrance`）；弹窗进出场，`BaseDialog` 加了 `appear`。
-    - 侧栏指示条在切换页面时滑到新位置。
-    - 卡片悬停的阴影改由伪元素承担，只过渡透明度。
-    - 仪表盘数字首次显示时滚动到目标值（`AnimatedNumber`），数据插入后区块入场一次。用户仪表盘刷新时不再整页显示加载转圈。
-    - 最终复测发现，入场从透明度 0 开始时，Chromium 要等动画结束才记 LCP，冷启动因此晚了约 500ms。改为从 0.4 起步后恢复。
-  - **交互**
-    - Ctrl/⌘K 命令面板：页面清单取自侧栏，用 combobox/listbox 的 ARIA；其他弹窗打开时不响应快捷键。
-    - `v-roving-tabs` 指令为 7 处标签栏补上方向键、Home/End 操作。
-    - 手机端 DataTable 加了排序栏。
-    - 账号“可调度”开关改为乐观更新：失败时回滚，请求期间返回的列表沿用提交中的值。手机端筛选折叠上游已有，没有重做。
-- 修改文件：
-  - `frontend/src` 下 42 个已跟踪文件被修改，另新增 17 个文件，主要有：
-    - 组件与 composable：`DataTableRow.ts`、`AnimatedNumber.vue`、`CommandPalette.vue`；`useLazyMount`、`useMotionPreference`、`usePageEntrance`、`useSidebarActiveIndicator`、`useCommandPalette`
-    - 工具与样式：`chunkLoadError.ts`、`rovingTabs.ts`、`styles/motion.css`
-    - 以上相应的测试
-  - 配置：`tailwind.config.js`、`vite.config.ts`。
-  - 文档：新增 `docs/FRONTEND_UX.md`，并登记到 `docs/README.md` 和 `.gitignore` 白名单；更新本文件。
-- 验证：
-  - `pnpm run lint:check`、`typecheck` 通过。
-  - `test:run` 395 个文件、3080 个用例通过。
-  - `pnpm run build`（含 `check:i18n` 与 `vue-tsc -b`）通过，构建产物目录已删除。
-  - 在提交后的临时克隆里，`check_docs_consistency.py` 和 `sync.py audit` 通过。
-  - 仓库外基准：CPU 降速 4 倍、模拟接口、每组 3 轮，结果见“当前交接状态”。
-  - 截图检查了以下内容：亮色和暗色表格的分隔线与固定列、弹窗、命令面板、手机端排序栏、仪表盘；控制台无报错。
-- 卡点/风险：
-  - 账号页滚动 27 FPS，没达到 50 FPS。
-  - 分组页首次进入和新建账号弹窗首开略慢，原因见交接状态。
-  - `BaseDialog.vue` 属于 `manual_merge`，下次同步上游时要保留 `appear`。
-- 下一步：用户授权后提交并开 PR；合并后按“归档”规则移走本任务的交接小节和进行中条目。若要继续提升账号页滚动，可考虑行内文案预先计算或单元格懒渲染。
-
-### 2026-10-20T03:10Z — 20261019-frontend-ux — 推送并开 PR #112
-
-- 请求/目标：用户授权推送并开 PR。
-- 开始状态：分支 `feat/frontend-ux-20261019` 有本地提交 `3a1aa3831`（前端）和 `059a19766`（文档）；此时 main 已前进到 `50055270f`（0.4.2，含 #105、#107、#108）。
-- 完成操作：
-  - 推送后开 [PR #112](https://github.com/liulixin-lex/xy2api/pull/112)。
-  - 把 main 合并进分支，解决两处冲突：
-    - `AccountsView.vue`：同时保留 `useLazyMount` 和 #108 的 `useColumnOrder` 引入。
-    - 本文件：两边条目都保留，操作日志按时间排序。
-- 修改文件：合并结果与本条。
-- 验证：
-  - 合并后 `lint:check`、`typecheck` 通过。
-  - `test:run` 398 个文件、3093 个用例通过。
-  - `check_docs_consistency.py`、`sync.py audit` 通过。
-- 卡点/风险：CI 的 `backend-security` 失败，与本 PR 无关。原因是 govulncheck 新收录了 excelize v2.11.0 的公告 GO-2026-6688，main 上的 `50055270f` 同样失败，需要另开任务升级依赖。
-- 下一步：等待审阅与合并；合并、发版、部署需用户另行授权。
-
-### 2026-10-20T04:59Z — 20261019-readiness-0.4.2 — 0.4.2 正式发布完成
-
-- 请求/目标：用户在本会话直接确认：条件满足就合并开放的 PR 并发版 0.4.2（2026-10-19T17:33Z）；接受浸泡分析、继续发版（2026-10-20T02:19Z）；#110、#112 一并进入 0.4.2，不再浸泡，只验证最终候选（03:11Z）。生产主机与更换密码不在范围内。旁路审查会话在各节点验收，打 tag 前做最终把关。
-- 开始状态：main `0320d4e68`；PR #105–#108 开放，#110、#112 在授权后新开；最终浸泡（`0ad63fab7`）在跑。
-- 完成操作：
-  - 浸泡结论：10/11，存活堆 1.2 MiB/h 未过，按用户决定放行，原结果不改写（tasks“0.4.2”）。
-  - `release/0.4.2` 依次 `--no-ff` 合入固定头的 #106、#105、#107、#108 → PR #109 常规 merge `50055270f`（候选 `368b418ef` 场景 55/55、升级演练通过）。
-  - main 的安全扫描因 excelize 新公告 GO-2026-6688、GO-2026-6684 失败：PR #111 把 excelize 升到上游修复提交，`x/image` 随之升到 v0.44.0 → `9e3b25a14`。
-  - #110、#112 分别先合入 main（不 rebase、不强推）再常规合并 → `7a0bafa2c`、`6e0ad2f3e`。
-  - 最终候选 `6e0ad2f3e`：CI 与安全扫描全绿，场景 55/55，0.4.1 升级演练通过，接口与浏览器冒烟、XLSX 导出、头像上传通过。旁路审查最终把关通过，并要求在发版说明里写明浸泡未过的那一项，已照办。
-  - 打 annotated `v0.4.2` → `6e0ad2f3e`，Release 核验与全新安装见“当前交接状态”。
-- 修改文件：本收尾只改本文件、归档、tasks、staging-validation §8 与 `docs/README.md` 的状态列。
-- 验证：见上；本收尾为纯文档，跑文档一致性检查、`sync.py audit`、`tools/tests`。
-- 卡点/风险：浸泡的存活堆一项未过，由用户放行；兼容转换写出开场事件之后不再换号等已知限制见 [`GATEWAY_RESILIENCE.md`](GATEWAY_RESILIENCE.md) §7。
-- 下一步：见“当前交接状态”中 0.4.2 的遗留与去向。
-
-### 2026-10-20T08:41Z — 20261020-resilience-0.4.3 — 0.4.3 正式发布完成
-
-- 请求/目标：0.4.2 生产只读观测报告里要改代码的项。用户经旁路审查会话转达，“执行，p1 和 p2，其中 p1-1 暂时不考虑”，并在本会话直接确认按 0.4.2 的流程发 0.4.3（2026-10-20），生产不部署。本会话不碰任何主机；主机上的 Caddy 改动由另一位执行者完成。
-- 开始状态：main `a6d28756f`（0.4.2 收尾后），工作树干净。
-- 完成操作：
-  - 分支 `fix/resilience-0.4.3-20261020`，共 6 个提交（`36b26dfc8`…`972a2211c`）。每项先写失败用例，确认修复前失败。
-  - PR #114，18/18 通过。测试服务器候选 `972a2211c`：场景 56/56，两条升级演练通过。
-  - 旁路审查在合并前、打 tag 前各把关一次；它要求发版说明去掉本站部署情况、去掉内部编号，已照办。
-  - 常规 merge 为 `888f49db8`，main 上的 CI 与安全扫描全绿。annotated `v0.4.3` 指向它，Release 核验与全新安装见“当前交接状态”。
-- 修改文件：见上述提交。本收尾只改本文件、归档、tasks“0.4.3”和 `deploy/README.md`：补了一句 systemd 需要 `Restart=always`，以及按 runbook 配置的反代在排空期间的应答。
-- 验证：见上。本收尾为纯文档，跑了文档一致性检查、`sync.py audit` 和 `tools/tests`。
-- 卡点/风险：等待 CI 的脚本在 zsh 下不拆分 `$ids`，空转到时限被停，改用 bash 脚本。macOS 自带的 bash 3.2 没有 `mapfile`。
-- 下一步：见“当前交接状态”中 0.4.3 的遗留与去向。
-
-### 2026-10-20T12:20Z — `20261020-share-simplify` — 只读分析完成，开始实施
-
-- 请求/目标：用户要求在保留必要功能的前提下精简份额调度（设置、界面与模块），允许打破现有框架。先由多个 agent 做只读分析，再由用户决定方案。
-- 开始状态：origin/main `3092629d7`（0.4.3 加文档）；分析期间未改仓库。
-- 完成操作：
-  - 只读分析，报告在仓库外 `xy2api-artifacts/share-simplify-20261020/`：
-    - A 后端审计：设置与模块清单、数据模型替代方案、原版调度对比，以及对 PM 方案的复核；
-    - B 前端交互审计（含截图）；
-    - C 生产只读分析：管理员的真实用法、账号池结构、影子数据；
-    - D PM 综合；
-    - E 实施说明。
-  - 用户决定按 D 的推荐执行（核心方向、删除排空、删除影子、不浸泡），授权到 PR。
-  - 建立分支 `feat/share-simplify-20261020`，提交 OpenSpec 变更与本登记。
-- 修改文件：`openspec/changes/simplify-share-scheduling-20261020/`（新增）、`docs/README.md`、`tools/upstream-sync/policy.json`（`xy_owned`）、本文件。
-- 验证：`check_docs_consistency.py`。
-- 卡点/风险：见顶部同名小节。
-- 下一步：等 PM 确认契约；其间先做不影响契约的后端语义改动。
-
-### 2026-10-20T15:37Z — `20261020-share-simplify` — 实现与本机联调完成，门禁全绿，待独立审查
-
-- 请求/目标：按 E 实施说明与 PM 的逐层批准完成后端、并入前端、本机联调、文档与登记，跑全部门禁后交 PM 安排独立审查。
-- 开始状态：分支 `feat/share-simplify-20261020`（自 origin/main `3092629d7`），契约提交 `47d48d6bc` 之后。
-- 完成操作：
-  - 后端：语义层（`4e0a34b6e`）、韧性关闭回退修复（`afc6e7153`）、接口重写与模块删除（`b5a2242db`）、计数精简（`5e1447c7e`）、自适应权重（`6d8ba41af`）、原版组按需健康系数（`b9b0232ce`）、切换后立即生效的健康系数与因子取整（`70bb80673`）。
-  - 前端分支两次 `--no-ff` 并入（`6927438d0`、`2e3f7f424`）；文档与登记（`a3a13acfc`）；`policy.json` 重复键修复与 `sync.py` 严格解码（`97b3fbcc3`）。
-  - 本机联调：本地 PG 18 与 Redis（只监听本机），种子与脚本在仓库外；结束后停进程、删临时库与 Redis 第 2 库、删临时凭据，停掉本地实例并删除数据目录。
-- 修改文件：相对 origin/main 共 107 个文件，+9418 −7327（本条记录之前）。后端产品 +2488 −2399，后端测试 +2533 −1344，前端产品 +2417 −2890，前端测试 +1028 −596，文档与 OpenSpec +840 −94，工具 +112 −4。
-- 验证：上面“当前交接状态”所列全部门禁在干净树上通过。
-- 卡点/风险：见顶部同名小节与 design §10。
-- 下一步：等独立审查；审查通过并经 PM 通知后推送开 PR，不合并、不打 tag。
-
-### 2026-10-20T16:32Z — `20261020-share-simplify` — 独立审查修复完成，门禁全绿，待复核
-
-- 请求/目标：独立审查（仓库外报告 H，头 `684d83f5e`）结论“需修复后推送”，无 P0。PM 分工：后端修 P1-1 的后端部分、P1-2、P1-3 与 P2-1、P2-2、P2-4、P2-9 的爬升触发；前端在自己的分支修其余前端项；`reenabled` 采样粒度登记后续。
-- 开始状态：`684d83f5e`，工作树干净。
-- 完成操作：
-  - `530f94753`：内核 `Reason.ActiveMigration`（`realign_cold`、`return_cold`；`spill_rebind` 与已退役原因不算主动），报表 `hot_migrations.active`；从切换点截断的窗口精确读取归因计数；`"affinity": null` 的空值处理；健康失败查询 `ORDER BY 6 DESC, 1, 2, 3, 4, 5`。每项先写失败用例并确认修复前失败。
-  - `02fb8fe41`：proposal、design 的生产账号号码、解码夹具里的生产账号号码、`GATEWAY_RESILIENCE.md` 的第三种爬升触发、tasks 4.5、5.2、6.4 与 §8。
-  - 前端 `8746c1951` 以 `--no-ff` 并入（`92d7c13c6`）。
-  - 全分支扫描生产编号与主机信息：除上述两处外没有命中。
-- 修改文件：见上述提交。
-- 验证：
-  - 在 `92d7c13c6` 的干净树上重跑：gofmt、四种 vet、golangci-lint、`make generate` 零 diff、`-tags=unit` 与无 tag 测试、`ci_gate.py`（282 个，0 SKIP）、`-tags embed` 构建、前端四项（3147 个用例）、`tools/tests`、scheduler-diff、文档一致性检查，全部通过。`sync.py audit` 在记忆提交后的干净树上运行。
-  - 本机没有 Docker，集成测试在本机跳过。失败查询的排序在临时的本机 PG 18 上验证，用完即删。
-- 卡点/风险：见顶部同名小节。
-- 下一步：等审查 agent 复核；复核通过并经 PM 通知后推送开 PR，不合并、不打 tag。
-
-### 2026-10-20T16:42Z — `20261020-share-simplify` — 旧策略字段名登记为退役，并入前端精度说明
-
-- 请求/目标：PM 审核通过 `7dd363a66`，同意两处口径（`spill_rebind` 算被动、已退役原因只计 `total`）与夹具号码的改动；要求补审查 P2-9 第二点，并入前端 `061f8fea7` 后重跑。
-- 完成操作：
-  - `592f67c2b`：`retired` 新增一条，登记 `soft_spill_max_seconds`、`ms_per_1k_tokens`、`return_deadline_seconds`、`stable_seconds`、`on_spill`、`on_saturated`、`on_failed`、`min_volume`、`cache_domain`、`drain_until` 与 `"realign"`。只在 `sharesched/policy.go`、`policy_test.go`、`compat043/`、两个份额变更、网关韧性 design 与记忆中放行。
-  - `correction`、`window_minutes`、`ttl_seconds`、`max_ms`、`max_waiting`、`drain` 在别处仍在用，不登记。
-  - 仍点名旧字段的 5 处注释改写（`resilience_session.go`、`share_scheduling_exec.go`、`share_scheduling_service.go`、`share_scheduling_resilience_test.go`、`tools/share-scheduling/baseline.sql`）。
-  - 前端 `061f8fea7` 以 `--no-ff` 并入（`400ab364e`）。
-- 修改文件：见上述提交。
-- 验证：
-  - 规则在基线 `3092629d7` 上命中放行范围外 20 个文件、103 处（旧编辑器、接口类型、内核与服务），在当前树上为 0。
-  - 本轮后端只改了注释，`internal/service` 的 vet、lint 与份额用例通过；完整的后端门禁沿用 `92d7c13c6` 的结果。
-  - 在 `400ab364e` 上重跑前端四项（408 个文件、3148 个用例），以及 `tools/tests`、scheduler-diff、文档一致性检查，全部通过；`sync.py audit` 在记忆提交后的干净树上运行。
-- 下一步：等审查 agent 复核；复核通过并经 PM 通知后推送开 PR。
-
-### 2026-10-20T17:19Z — `20261020-share-simplify` — 复核通过，推送并开 Draft PR #117，CI 全绿
-
-- 请求/目标：独立审查复核结论“可以推送”。PM 要求推送、开 Draft PR，等 CI，再把记忆作为追加提交推送。授权范围到 PR，不合并、不打 tag、不发版、不连任何服务器。
-- 开始状态：`c0579a624`，工作树干净，提交身份为 noreply。
-- 完成操作：
-  - 推送前扫描待推送提交的新增行与提交说明：各任务私有清单里的主机、域名、路径 0 命中；IP、绝对路径、私钥、令牌类模式 0 命中。
-  - 按规定的凭据方式推送 `feat/share-simplify-20261020`，`ls-remote` 核对远端头为 `c0579a624`。
-  - 开 Draft [PR #117](https://github.com/liulixin-lex/xy2api/pull/117)（base `main`，可合并）。描述写明目标与新模型、删除与保留、R1–R3 的口径与失效条件、兼容与回退、升级注意、验证与未做项、文档链接与后续事项。
-- 验证：CI（push 与 pull_request）、Security Scan（push 与 pull_request）共 18 项全部通过。`test` 作业的 unit 与 integration 都通过，integration 在真实容器里跑了 `internal/repository`。
-- 修改文件：本文件（追加提交）。
-- 下一步：等 PM 决定合并与发版步骤；测试服务器场景、升级演练与浸泡需要另行授权。
-
-### 2026-10-20T18:05Z — `20261020-share-simplify` — PR #117 的 CI 说明
-
-- 记忆提交 `e03e9e188` 的 push 运行（CI run 39465158255）中，`shell` 作业在 macOS 运行机上排队未被领取，GitHub 以容量不足取消，未执行任何步骤；重跑一次同样被取消。
-- 同一提交的 pull_request 运行（39465165734）全部通过，含 `shell`。两次 Security Scan 也都通过。
-- PM 决定以 pull_request 那次为准，不再重跑。PR #117 已发评论说明，合并前需重跑该作业并确认通过。
-- 下一步：等 PM 决定合并与发版步骤。工作树保留。
-
-### 2026-10-20T14:29Z — 20261020-lazy-modal-first-open — 已修复，待授权提交
-
-- 请求/目标：账号页“测试连接”的模型、“临时不可调度”的原因等，第一次点开刷不出来，第二次才行。用户要求拉取最新代码，分析所有同类问题的根因并修复。
-- 开始状态：main `3092629d7`（0.4.3，#112 已合并），新分支 `fix/lazy-modal-first-open-20261020`，工作树干净。
-- 完成操作：
-  - 定位：AccountsView 用 `useLazyMount` 加 `defineLazyComponent` 按需挂载 12 个弹窗。这些弹窗都用不带 `immediate` 的 `watch(() => props.show)` 加载数据：
-    - TempUnschedStatusModal 监听 `[show, account.id]`；
-    - AccountTestModal、AccountStatsModal、ScheduledTestsPanel 等监听 `show`。
-    - IQCheckResultsModal 已带 `immediate`，不受影响。
-  - 排查其他用 `v-if` 挂载、带打开状态属性的组件：ClaudeResetCreditsCell、OpenAIReferralCell、CodexAccountTicketSettings、BulkSubscriptionActionDialog、AffiliateOfflineWithdrawDialog、LoginAgreementPrompt 及 BaseDialog 自身，都已用 `immediate` 或挂载时为关闭状态，不需要改。
-  - 修复：`defineLazyComponent` 不再直接用 `defineAsyncComponent`，改为自行加载并缓存组件。内层组件第一次渲染时把打开状态属性（默认 `show`，可用第二个参数指定）传为 false，`onVnodeMounted` 之后再传真实值。chunk 加载失败时仍会自动刷新页面。
-  - 现有弹窗测试都是先以关闭状态挂载再打开，没覆盖到这种情况。`FRONTEND_UX.md` 已补写这条约定和测试要求。
-- 修改文件：
-  - `frontend/src/composables/useLazyMount.ts`
-  - 新增 `frontend/src/composables/__tests__/defineLazyComponent.spec.ts`
-  - `docs/FRONTEND_UX.md`
-  - 本文件
-- 验证：
-  - 新用例在旧实现下 3 个全失败，修复后 3 个全通过。
-  - `lint:check`、`typecheck`、`test:run`（402 个文件、3104 个用例）、`check_docs_consistency.py` 通过。
-  - 仓库外浏览器脚本对比修复前后，修复前第一次打开时：
-    - 测试连接：0 次模型请求，下拉框为空。
-    - 临时不可调度：0 次状态请求，不显示原因。
-    - 账号统计：0 次请求。
-  - 修复后第一次打开就都有请求和数据。
-  - `sync.py audit` 需要干净的工作树，提交后再跑。
-- 卡点/风险：无。
-- 下一步：用户授权后提交、推送、开 PR；随下一个版本发布后生产才生效。
-
-### 2026-10-21T02:26Z — `20261021-resilience-v2-qa` — 阶段 1 完成（DOCS 代记）
-
-- 请求/目标：0.4.4 冲刺的 QA 阶段 1，补新故障与测试服务器场景，并在基线上确认它们的结果。
-- 开始状态：分支 `rv2/qa`，自 `027a434ad`，工作树干净。
-- 完成操作：
-  - 新故障 F31–F37 与 F34B，新场景 CV-5–CV-9、RAW-1、RAW-2、SO-1、RA-1、RA-2、ANT-3、SH-1、SH-2；DC-6 改为断言兼容转换的开场延迟，LR-1 改为份额层级取账号优先级。合计 69 个场景。
-  - CV-5 按 PM 指令保留 D18：A 最多试 2 次、每次记一条 `CAPACITY_SHED`，最终在 B 完成。
-  - 基线结果：15 项定向场景 8 项通过，7 项为预期红灯（CV-6、CV-8、RAW-1、RAW-2、SO-1、RA-1、DC-6）。CV-8 复现了“`response.created` 之前的无标记空 delta 让后续失败无法换号”。
-- 修改文件：`tools/gateway-resilience/` 下 5 个文件（提交 `ce8c3c01d`）；场景清单登记在 `gateway-resilience-20261015/staging-validation.md` §6.1（DOCS）。
-- 验证：工具全包 `-race`、Python 编译、文档一致性检查通过；场景在测试服务器的基线上运行。
-- 卡点/风险：无。
-- 下一步：阶段 2（唯一候选的全套场景、升级演练、3 小时浸泡）等 PM 指定提交放行。
-
-### 2026-10-21T02:56Z — `20261021-resilience-v2-qa` — 阶段 1 补充完成（DOCS 代记）
-
-- 请求/目标：PM 指令 3，补排队 ping 后终止帧与 Codex `Retry-After` 上限的测试服务器场景。
-- 开始状态：`rv2/qa` 在 `ce8c3c01d`，工作树干净。
-- 完成操作：新增 Q-1（真实用户队列 ping 后余额归零：基线上 Gateway Responses 与 Chat 写裸 JSON，Messages 已是带名字的 error）与 CX-1（`originator` 与 UA 两种 Codex 标记在基线都是 30 秒，普通客户端对照不变）。合计 71 个场景。
-- 修改文件：`tools/gateway-resilience/` 下 3 个文件（提交 `3320a508a`）；场景清单在 `gateway-resilience-20261015/staging-validation.md` §6.1（DOCS）。
-- 验证：Python 编译、文档一致性与 diff 检查通过；测试用的专用用户已恢复。基线 17 项定向 8 项通过、9 项预期红灯。
-- 卡点/风险：无。
-- 下一步：阶段 2 等 PM 指定提交放行，候选跑全部 71 项。
-
-### 2026-10-21T03:08Z — `20261021-resilience-v2-qa` — Q-1 心跳断言补充（DOCS 代记）
-
-- 请求/目标：PM 指令 4，Q-1 要能发现 Responses 与 Chat 在开场前收到 Claude 风格 ping 的问题（审查 R1-P1-4）。
-- 开始状态：`rv2/qa` 在 `3320a508a`，工作树干净。
-- 完成操作：Q-1 新增断言，Responses 与 Chat 的第一个 data 帧必须是 `response.created` 或 Chat 分块/错误，前面不能有 typed ping 或 `[DONE]`；Messages 仍允许 typed `ping`。按 PM 许可只复核基线的原始证据，没有重发请求：两条新断言为红灯，Messages 原有检查通过。
-- 修改文件：`tools/gateway-resilience/` 下 2 个文件（提交 `236b12b97`）；仓库外报告 `REPORT_PHASE1.md` 追加更正与证据。
-- 验证：Python 编译、文档一致性与 diff 检查通过；专用用户已恢复。
-- 卡点/风险：无。
-- 下一步：待命；阶段 2 等 PM 指定提交放行。
-
-### 2026-10-21T03:35Z — `20261021-resilience-v2-qa` — 阶段 2 准备完成（DOCS 代记）
-
-- 请求/目标：PM 指令 5，在放行前准备好候选验证的工具。
-- 开始状态：`rv2/qa` 在 `236b12b97`，工作树干净。
-- 完成操作：
-  - 新增候选构建与阶段 2 执行脚本：只构建一个候选，记录源码树、镜像 ID、二进制与工具的 SHA-256；缺省只出计划、不自动部署；71 个场景一条命令串行，输出 JSON 汇总。
-  - 升级演练增加本期的配置并在失败时留证；浸泡在缺 GC 或协程数据、SQL 失败时直接判为不通过，ERROR 刷屏门槛为连续 3 分钟每分钟 ≥60 条。
-  - 测试服务器只读检查资源，余量足够，无需清理；旧基线未重启。
-- 修改文件：`tools/gateway-resilience/` 下 5 个文件（提交 `a542b3cb7`）；浸泡判据登记在 `gateway-resilience-20261015/staging-validation.md` §8（DOCS）。
-- 验证：本机离线反例、语法与文档检查通过。没有构建候选、没有跑阶段 2。
-- 卡点/风险：按估计，06:15Z 才构建的话，浸泡可能晚于 07:30Z 开始，已在仓库外 `REPORT_PREPARATION.md` 提示 PM。
-- 下一步：等 PM 放行与候选 SHA。
-
-### 2026-10-21T03:39Z — `20261021-rv2-beta` — 功能与审查修复提交完毕（DOCS 代记）
-
-- 请求/目标：W1.1、W1.2-lite、W5.3/W5.4 的 service 部分、释放事件采集，以及第一轮代码审查（R1）分给 β 的修复。
-- 开始状态：`rv2/be-b` 自 `027a434ad`，工作树干净。
-- 完成操作：提交清单见“进行中的工作”的 β 条目（HEAD `4eed85c1a`）。PM 改判 U4 后，兼容转换的暂存期改为写注释心跳；created 之前的空 delta 窗口在第一个非空 delta 时关闭；service 侧三个失败帧合成点接入 `ResolveRetryAdvice`；仅流式检测在 HTTP 400 的任何副作用之前调用。
-- 修改文件：`backend/internal/` 下 β 名下的文件，以及声明接手的 `openai_compact_sse_keepalive.go`、`openai_gateway_cc_pipeline.go` 与一个 WS bridge 测试文件；上游文件钩子列在仓库外 `contract/CHANGES_B.md`，由 α 集成时登记。
-- 验证：每项先写失败用例、确认在旧代码上失败；相关包 `-race` 通过。最终的 35 个测试文件、270 个顶层用例 `-race` 与 lint、vet 在跑，结论另记。
-- 卡点/风险：OpenAI Responses 透传的首输出守卫延后，已写进 design §11 与网关韧性说明 §7。
-- 下一步：α 集成时须包含 α 的 `5924b2b5a`（handler 取消归因）与 γ 的 `4ac81dc94`（限流分类更正）。
-
-### 2026-10-21T04:05Z — `20261021-resilience-v2-alpha` — 功能与审查项完成，准备集成（DOCS 代记）
-
-- 请求/目标：RetryAdvice、W5.1–W5.5、W8-lite、W6 的入口标记与管理接口，以及第一轮代码审查分给 α 的修复；04:45Z 起负责集成。
-- 开始状态：`rv2/be-a` 自 `027a434ad`，工作树干净。
-- 完成操作：提交清单见“进行中的工作”的 α 条目。R1 的 P1-1（handler 取消归因）、P1-4（排队心跳格式）、P1-5（事件请求 ID）与 P2-9、P2-11、P2-12、P2-13、P2-15、A-P2-3/7、A-P2-5 已修；P2-10、P2-14 本期不做；P2-16 按 PM 决定只登记。
-- 修改文件：`backend/internal/handler/**`、`internal/resilience` 中 α 名下的文件，以及声明接手的 `routes/admin.go`（清除路由）、`resilience_explain.go`、`share_scheduling_openai.go`（能力原因与份额无号接线）；上游文件钩子列在仓库外 `contract/CHANGES_A.md`，集成时登记到 `policy.json`。
-- 验证：每项先红后绿，相关包定向 `-race` 通过；增量 lint 收尾中。**全量门禁尚未执行。**
-- 卡点/风险：后端分支间的 cherry-pick 冲突需在集成时按 owner 最新版本解决。
-- 下一步：β、γ 写明最终 HEAD 后开始集成，跑全量门禁。
-
-### 2026-10-21T04:05Z — `20261021-resilience-v2-gamma` — 分支冻结（DOCS 代记）
-
-- 请求/目标：C0 设置、W2.1-lite 分类修正、W6-lite 仅流式学习、RetryAdvice 的分组 advisor，以及 PM 指令分给 γ 的第一轮审查修复。
-- 开始状态：`rv2/be-c` 自 `027a434ad`，工作树干净。
-- 完成操作：提交清单见“进行中的工作”的 γ 条目（HEAD `ae783b370`）。C0 沿用单一设置键，0.4.3 回退安全；分类只把真正的容量信号算作降载，明确的限流文案保留原类别；仅流式学习存于账号 `extra` 的两个键，带凭据指纹，只在同协议、流模式跟随客户端的路径上过滤，只因能力而无号时返回专用 503；advisor 只读 2 秒的本地快照。
-- 修改文件：`backend/internal/resilience` 与 `service` 中 γ 名下的文件（含新增的 `capability*.go`、`settings_compat043_test.go`）；调度文件的钩子 `capabilityEligibilityReason` 等由 α 集成时登记到 `scheduler-diff.json` 与 `policy.json`。
-- 验证：各轮先红后绿；resilience、service、handler、admin、repository 的定向 `-race` 通过，覆盖 Grok 的 A 返回 400、换 B 成功，之后的过滤与流式可用，有效期与清除，旧页面保存时保留学习状态，回退设置，分类证据，纯能力与混合原因的耗尽。γ 树上的文档检查报 10 项，由 rv2/docs 补齐，合入后才通过。
-- 卡点/风险：无。按 PM 裁剪的未做项见上。
-- 下一步：α 统一集成、跑全量门禁并登记钩子。
-
-### 2026-10-21T04:10Z — `20261021-resilience-v2-qa` — 独立并行浸泡准备完成（DOCS 代记）
-
-- 请求/目标：PM 指令 6，让 3 小时浸泡与 71 个场景并行，缩短阶段 2 的总时长。
-- 开始状态：`rv2/qa` 在 `a542b3cb7`，工作树干净。
-- 完成操作：新增两套 Compose 的资源上限配置与独立的浸泡栈脚本；浸泡与夹具按 Compose 项目与端口隔离；两套用同一镜像与二进制并在前后校验；日志连续留证并检查应用是否重启；场景主线仍是 71 个串行后接升级演练，升级时的临时应用限制资源，IO 重叠时段写入浸泡报告；清理只动独立的那一套。
-- 修改文件：`tools/gateway-resilience/` 下 8 个文件（提交 `9ca7c3347`）；判据说明在 `gateway-resilience-20261015/staging-validation.md` §8（DOCS）。
-- 验证：本机离线反例、语法与文档检查通过；测试服务器只读核对端口与子网无冲突。第二套环境未创建任何 Docker 资源，原有容器未动，未构建候选。
-- 卡点/风险：主机内存余量有限，启动前须再查，不足时脚本拒绝启动。
-- 下一步：等 PM 放行与候选 SHA；按仓库外 `REPORT_PARALLEL_PREPARATION.md` 的排期执行。
-
-### 2026-10-21T04:12Z — `20261021-rv2-beta` — 分支冻结（DOCS 代记）
-
-- 请求/目标：完成 β 的验证收尾并冻结分支，交 α 集成。
-- 开始状态：`rv2/be-b` 在 `4eed85c1a`。
-- 完成操作：收尾提交 `7c8ad6ec2`：两条旧测试改为显式验证开关关闭时的旧行为，修正自有 lint，WS 回归测试改用独立夹具以兼容无 tag 构建。生产代码在 645 项验证之后没有再改。
-- 修改文件：只有测试与 lint 修正（见上述提交）。
-- 验证：645 项 `-tags=unit -race` 0 失败 0 跳过；WS 与 Chat 空流的无 tag `-race`、`go vet`、gofmt、`diff --check` 通过。DOCS 把 `7c8ad6ec2` 的全部后端文件叠加到 rv2/docs 上，文档一致性检查通过。
-- 卡点/风险：OpenAI Responses 透传的首输出守卫延后；上游在 `response.created` 之前发出的非空 delta 照常转发，严格 SDK 仍可能报错（已知限制）。
-- 下一步：α 集成时保留 α 的 `5924b2b5a` 与 γ 最新的分类、能力提交，不用 β 树里提取的旧依赖覆盖。
-
-### 2026-10-21T04:22Z — `20261021-resilience-v2-gamma` — 冻结后 lint 修复（DOCS 代记）
-
-- 请求/目标：PM 指令 3，修 α 集成前报出的 7 项 lint，不改行为。
-- 开始状态：`rv2/be-c` 在 `ae783b370`，工作树干净。
-- 完成操作：提交 `d61d106aa`，7 项 lint 全部修复；冻结的 0.4.3 旧解码器测试未改，`legacy043SettingKey` 由既有回退测试断言与现行键一致后使用。
-- 修改文件：γ 名下的 `internal/resilience` 与 `service` 测试及 `capability` 实现文件（只为 lint）。
-- 验证：指定的增量 lint，γ 自有文件 0 项；resilience 与 service 的能力、C0 定向 `-race` 通过。γ 树上的文档检查仍报 10 项，由 rv2/docs 补齐。
-- 卡点/风险：剩 α 名下 `retry_advice_test.go` 两处 SA1012。
-- 下一步：按 PM 指令 4 另作 fix 提交（`param` 为 null 或空值时照常学习）；α 集成须带上 `d61d106aa` 与该补丁。
-
-### 2026-10-21T04:25Z — `20261021-resilience-v2-qa` — F36 显式 `param: null`（DOCS 代记）
-
-- 请求/目标：PM 04:20Z 补充，让 SO-1 覆盖错误体带 `"param": null` 的常见 OpenAI 兼容形态（对应 γ 的 PM 指令 4 修复）。
-- 开始状态：`rv2/qa` 在 `9ca7c3347`，工作树干净。
-- 完成操作：F36 的非流式 400 错误体加入 `"param": null`，type、code、message 不变；流式成功、能力探测与 Anthropic 错误格式不变。SO-1 已用 F36，不新增场景编号。
-- 修改文件：`tools/gateway-resilience/` 下 README、`fault-upstream/main.go` 与 `resilience_v2_test.go`（提交 `0ad64390c`）。
-- 验证：夹具测试先校验 `error.param` 存在且为 null（先红后绿），再验证流式成功与全部能力探测；gofmt、文档与 diff 检查通过。本轮未连接测试服务器，基线不重跑。
-- 卡点/风险：测试服务器上仍是旧夹具与旧应用；阶段 2 启动前须同步本提交并重建故障工具镜像。
-- 下一步：等 PM 指定候选 SHA 并放行阶段 2。
-
-### 2026-10-21T04:29Z — `20261021-resilience-v2-gamma` — PM4 修复，恢复冻结（DOCS 代记）
-
-- 请求/目标：PM 指令 4（第二轮审查 P1，用户确认授权）：上游错误体带 `"param": null` 或空值时，仅流式学习被误判为“指向其他参数”而拒学。
-- 开始状态：`rv2/be-c` 在 `d61d106aa`。
-- 完成操作：提交 `fe7d6cbbc`。`param` 缺失、为 null、空字符串或只有空白时视为未指定参数，继续做确定性判断；`param` 为 `stream` 时允许学习；其他非空参数名以及对象、数字、数组、布尔值仍拒学。设置、接口、错误码、事件字段与上游钩子都没有变化。
-- 修改文件：`internal/resilience/capability.go` 与 `service` 中的能力检测及其测试。
-- 验证：先写红测，旧实现对 null、空串、空白三例拒学（失败），`reasoning.effort` 与非字符串拒学的反例通过；修复后定向 `-race` 23 个顶层用例（含子用例 79 项）0 失败 0 跳过；γ 自有文件增量 lint 0 项。DOCS 已把新规则写进 design §6.1、网关韧性说明 §7 与规格。
-- 卡点/风险：无。
-- 下一步：α 集成时依次带上 `d61d106aa`、`fe7d6cbbc`；阶段 2 的 SO-1（F36 已带 `"param": null`）验证这项修复。
-
-### 2026-10-21T04:46Z — `20261021-rv2-beta` — 第二轮审查修复，恢复冻结（DOCS 代记）
-
-- 请求/目标：PM 指令 6，第二轮审查（R2）分给 β 的两项 P1，冻结后的例外。
-- 开始状态：`rv2/be-b` 在 `7c8ad6ec2`，工作树干净。
-- 完成操作：
-  - R2-P1③（`a1a2ff211`）：raw Chat 严格模式在第一条 data 之前只暂存 event、id、retry 行，上游注释心跳立即写出并计为心跳字节，不关闭换号窗口。
-  - R2-P1②（`2323768d9`）：service 的三个失败帧合成点共用 α 导出的 `RetryAdviceEligible`；不可重试的原因先写 `Suppress`（`non_retryable`）再求值，invalid_request、model_not_found 等不再带重试头与尾句。
-- 修改文件：`openai_gateway_chat_completions_raw.go`、`resilience_keepalive.go` 与共用的失败帧构造及测试；上游钩子 `recordOpenAIStreamKeepaliveBytes`（raw）、`RetryAdviceEligible`（keepalive）由 α 集成时登记。
-- 验证：两项先红后绿；raw 普通与大请求两例、service 54 例（30 例在旧代码失败）与相关回归 `-race` 通过；增量 lint 0 项。DOCS 叠加 `2323768d9` 的全部后端文件到 rv2/docs，文档一致性检查通过。
-- 卡点/风险：无。
-- 下一步：α 增量合入后，与 DOCS 最终 HEAD 一起跑一次全量门禁。
-
-### 2026-10-21T05:11Z — `20261021-rv2-fe` — 前端完成（DOCS 代记）
-
-- 请求/目标：0.4.4 新开关的设置界面与 i18n、账号仅流式学习状态的显示与清除、Explain 的“已学能力”列与“请求类型”、运维面板的 `pre_created_delta` 文案。
-- 开始状态：`rv2/fe` 自 `027a434ad`，工作树干净。
-- 完成操作：15 个提交，只改 `frontend/**`（17 个文件）；文案随 C0 与各 CHANGES 多次对齐（原生白名单不含元数据事件、Codex 上限覆盖配置拒绝、仅流式只影响会因此失败的非流式请求、`decision_v2` 关闭后的说明）。
-- 修改文件：`api/admin/resilience.ts`、新增的 `api/admin/accountCapability.ts`、`utils/accountCapability.ts`、`AccountStreamOnlyBadge.vue`，以及 `ResilienceExplainResult.vue`、`OpsResilienceExplain.vue`、`GatewayResilienceSettings.vue`、中英文 i18n 与测试；上游文件 `AccountsView.vue` 两处钩子登记为具名补丁 `xy-account-stream-only-learning`。
-- 验证：HEAD `bd215aa0c` 上 lint:check、typecheck、test:run（413 个文件、3182 个用例）、build（含 i18n 检查）通过；集成 `27cef7db0` 上的前端四项门禁通过。
-- 卡点/风险：无。本机 pnpm 版本的坑已记入“操作陷阱”。
-- 下一步：无；推送、PR 与发版由 α 与 PM 安排。
-
-### 2026-10-21T05:35Z — `20261021-rv2-beta`、`20261021-resilience-v2-alpha` — 集成门禁期间的 PM7 修复（DOCS 代记）
-
-- 请求/目标：全量 unit 中 service 的两条 MissingTerminal 用例失败；PM7 允许 β 在冻结后修复，并要求保留开关关闭时的旧语义断言。
-- 开始状态：β `2323768d9`、α `fc244028a` 之后的集成 `093241b50`。
-- 完成操作：旧的“客户端断开”用例只发 `response.created`，在默认暂存下根本没有写出，所以没有真正断开；按默认暂存补真实写失败后，新用例确认产品缺陷（暂存期心跳写失败后首输出截止到期仍换号 504，Chat EOF 结果缺断开标记）。β `766a54fc8`、`dbcc1c80a`、`c7290e396`，α `32f2a6ca7`（handler 出口）。收尾时又发现并修正两处：先查断开会跳过首输出守卫的停表；取消回调与返回清理的竞态会让上游不被关闭。
-- 修改文件：β 的 Chat、Messages 转换器与 `openai_compat_model_test.go`（β 按 PM7 声明接手）、暂存测试；α 的 `openai_chat_completions.go` 与 `openai_compat_client_cancel_test.go`；文档同步 design §3.4 与 §9、`GATEWAY_RESILIENCE.md` §6、tasks 2.5。
-- 验证：见“进行中的工作”的 β、α 条目；集成的全量门禁需在 `7c021b6a4` 之后重跑。
-- 卡点/风险：这是冻结后的产品代码改动，不能沿用此前“只改测试”的门禁结论。
-- 下一步：α 重跑后端静态检查与全量门禁，再合入 rv2/docs 最终 HEAD。
-
-### 2026-10-21T05:55Z — `20261021-resilience-v2-alpha` — 代码门禁全绿；第二轮审查放行（DOCS 代记）
-
-- 请求/目标：在 PM7 产品代码改动之后，对集成代码重跑全部后端门禁。
-- 开始状态：集成 `7c021b6a4`，已含 β `c7290e396` 及前置、α `32f2a6ca7`。
-- 完成操作：按序重跑 gofmt、四种 vet、golangci-lint、全量 unit、无 tag 全量测试与 `ci_gate.py`；前端与 `tools/tests` 的源码未再改，沿用此前通过的结果。第二轮独立审查对最终代码放行。
-- 修改文件：无（α 只跑门禁）；DOCS 同步 tasks 10.2、10.3，design §9 与 `GATEWAY_RESILIENCE.md` §6 补 R2-P2-3（raw Chat 取消后的截断，β `f9edc3a4d`，不受开关控制）。
-- 验证：`ci_gate` 375 项 `-race` 0 跳过，lint 0 项；明细见“进行中的工作”的 α 条目。
-- 卡点/风险：文档检查、scheduler-diff 与干净树 audit 要在合入 DOCS 最终 HEAD 后复跑，本条不记为已通过。
-- 下一步：α 报告可推送后等 PM 安排推送、PR 与 QA 候选验证；DOCS 到 QA 验证结束前不再改动 rv2/docs。
-
-### 2026-10-21T06:04Z — `20261021-resilience-v2-alpha` — Go 1.27.3 安全升级（PM 冻结例外）
-
-- 请求/目标：修复 PR #118 安全扫描发现的 `GO-2026-6809`；PM 06:07Z 授权 α 单独跨所有权原子更新全部版本固定位置，不增加审计例外。
-- 开始状态：集成 `c086f4cc6`，本地门禁通过、push 与 PR 安全扫描失败；旧候选作废，尚未进行场景、升级演练或浸泡。
-- 完成操作：官方 darwin/arm64 安装包 SHA256 校验通过，切换本机 Go 1.27.3 并保留旧工具链；确认 Docker Hub 的 `golang:1.27.3` 与 `golang:1.27.3-alpine` 标签存在；统一 go.mod、三个工作流、三个 Dockerfile、README 三语、开发指南与两处当前工具链记录。历史同步记录和测试中的固定版本夹具保留。
-- 修改范围：只改工具链版本及相关文档；无业务代码、模块依赖图、迁移或配置字段变化。FE 的 `follow-redirects` 1.16.1 修复另由其分支提供。
-- 验证：官方安装包与镜像标签已核验，`go version` 为 1.27.3，文档一致性检查通过；全量门禁与 `govulncheck` 将在合入 FE 修复后的干净集成树串行执行。
-- 卡点/风险：旧候选的测试结果不替代新工具链验证；新候选必须等安全扫描与完整门禁通过，之后更新 PR #118 并由 PM 安排复审及 QA。
-- 下一步：合入 FE 安全修复，重跑完整门禁、构建与两端安全扫描，记录新候选 SHA；不合并、不部署。
-
-### 2026-10-21T11:00Z — `20261021-resilience-v2-0.4.4` — 0.4.4 发布，记忆收尾与归档（DOCS 代记）
-
-- 请求/目标：网关韧性第二期与 0.4.4 发版（用户 2026-10-21）；发版后按 PM 2026-10-21T10:50Z“收尾放行”做纯文档收尾。
-- 开始状态：main `4b0b6d94b`（PR #118 合并提交）；`docs/post-release-0.4.4` 从它建立。
-- 完成操作：
-  - 候选：`c086f4cc6` 本地门禁全绿，但 PR 的安全扫描报出 GO-2026-6809 与 follow-redirects 两个高危公告，作废，未做服务器验证；α `8d7a30f27` 升级 Go 1.27.3（PM 授权跨所有权改全部版本固定位置）、FE `60680d3c5` 升级 follow-redirects 1.16.1 后，最终候选 `a38ae5995` 本地 21 项门禁与 CI 18/18 全绿。
-  - QA 阶段 2（候选只构建一次）：场景 70/71，RA-1 失败（PM 裁定为已知缺陷，0.4.5 修复）；升级演练 62/62；3 小时浸泡 11/12，存活堆 1.4 MiB/h 未达标，用户决定放行；浸泡夹具的工具修复 `cd72f5eb1`；临时栈与演练库已清理。
-  - 发布：PR #118 合并为 `4b0b6d94b`，`v0.4.4` 对象 `333f54ad5`，Release run 39582933562 成功；产物核验第一次因校验脚本的旧远端入口失败，换现行入口重跑通过。
-  - 收尾：0.4.4、#117、#116 的交接与登记原样移入归档，主文件留 0.4.4 摘要；登记三项后续（6.5 小时浸泡、pprof 诊断、0.4.5 的 RA-1 修复）；版本速览改为 0.4.4。
-- 修改文件：`docs/PROJECT_MEMORY.md`、`docs/PROJECT_MEMORY_ARCHIVE.md`、`docs/README.md`、`docs/GATEWAY_RESILIENCE.md` §7、OpenSpec `gateway-resilience-v2-20261021` 的 design §11 与 tasks；cherry-pick QA 的 `cd72f5eb1`（只改 `tools/gateway-resilience/`）。
-- 验证：`check_docs_consistency.py`、干净树 `sync.py audit`、`tools/tests`，结果见收尾 PR。
-- 卡点/风险：正式镜像全新安装的结果写入时还没出来，tasks 与摘要里留了占位；生产部署 0.4.4 需要单独授权，并先通过 6.5 小时浸泡。
-- 下一步：α 推送收尾分支、开 PR 并在 CI 全绿后合并；全新安装结果出来后补占位。
-
-### 2026-10-21T11:05Z — `20261021-resilience-v2-0.4.4` — 收尾补充：全新安装结果与 0.4.5 预备登记（DOCS 代记）
-
-- 请求/目标：PM 2026-10-21T10:58Z，在收尾分支上补一个提交。
-- 开始状态：`docs/post-release-0.4.4` @ `6d0fdf1e3`（PR #119）。
-- 完成操作：
-  - 正式镜像全新安装通过（QA，按 digest 拉取，空库）：324 条迁移，`/ready`、`/health`、首页、6 个静态资源与 `/auth/me` 正常，公开版本 0.4.4，计费请求写入 1 条正费用，0 ERROR；第一次执行的失败属于安装脚本的夹具问题。替换了 tasks“发布记录”、12.2 与 0.4.4 摘要里的占位；上一条日志所说的占位已补齐。
-  - 进行中登记 δ（`feat/w12-gateway-guards-045`）与 ε（`fix/review-p2-045`）两条 0.4.5 本地预备分支；RA-1 条目补审查结论；pprof 条目补诊断分支 `3298f9f9e`。
-- 修改文件：`docs/PROJECT_MEMORY.md`、OpenSpec `gateway-resilience-v2-20261021` 的 tasks。
-- 验证：`check_docs_consistency.py`、干净树 `sync.py audit`、`tools/tests`。
-- 卡点/风险：无新增；生产部署 0.4.4 仍需单独授权并先通过 6.5 小时浸泡。
-- 下一步：α 推送并在 CI 全绿后合并 PR #119。
-
-### 2026-10-21T12:20Z — `20261021-channel-monitor-v1` — 只读分析与方案规划完成
-
-- 请求/目标：见“进行中的工作”同名条目。
-- 开始状态：主工作树在 `fix/resilience-0.4.3-20261020` @ `972a2211c`（干净，未动）；新分支自 origin/main `4b0b6d94b` 建立，PR #119 合并后快进到 `a1cf8f104`。其他工作树中只有 `045-delta`（δ）有未提交改动，未触碰。
-- 完成操作：
-  - 梳理 PM 7c768913 与 10 个子代理（只读）：进行中的 δ、ε、RA-1、诊断分支与 QA 浸泡都不碰渠道监控、迁移与并发核心；热点是三个网关 handler、`resilience_*`、`policy.json` 与本文件。
-  - 生产只读（会话强制只读、20 秒语句超时）：4 个 v1 监控都经 CDN 打本站入口；统计 7 天 76,397 次探测的结果分布，与同批账号真实用户按 5 分钟对照，推算排队与换号耗时。用户页列表接口 p50 约 0.5 秒；LATERAL 改写的执行计划把时间轴查询从 180 ms 降到 0.87 ms。
-  - 代码核实：判定与超时口径、runner 队列语义、流式排队 ping（每 10 秒一次，首次 ping 时写出 200 与 SSE 头）、各条调度等待路径；调研 17 个生态仓库与上游 v0.2.15 之后的监控提交和未合并 PR。
-  - 7 天回放：一期规则下黄色占比 Grok 16.0% → 约 1.2%、GPT 约 3% → 0.5%、Claude 3.7% → 0.4%，红色约减半。回放仍用非流式总耗时近似，结果偏保守。
-  - 独立审查（只读，对照代码）修正了初稿 6 处：排队 ping 与 CDN 心跳字节相同、无法据此区分排队（删去 `queued`）；官方 OAuth 账号与直连入口没有首包前心跳，不能单设 20 秒响应头超时；本轮结束即释放的租约起不到去重作用；直接复用 v2 分类会把本站 429 和 Cloudflare 502 判成容量类；流内错误识别；pond 有界队列达不到目的。
-- 更正：生产运行的是 0.4.3 程序（2026-10-20 09:15Z 在线更新，2026-10-21T11:35Z 只读核实），不是此前记录的 0.4.2；“版本与环境速览”已更新。
-- 修改文件：`docs/PROJECT_MEMORY.md`（本条、进行中登记、版本速览的生产版本）。
-- 验证：`python3 tools/check_docs_consistency.py`。
-- 卡点/风险：方案待用户确认；调度缺陷影响所有请求，不在本任务范围。
-- 下一步：见进行中条目。
-
-### 2026-10-21T13:05Z — `20261021-channel-monitor-v1` — 按用户意见重规划（v3）
-
-- 请求/目标：用户 2026-10-21：不要偏离探测本身；红色不要放宽到 60 秒；黄色改为超过 10 秒；探测协议兼容各种模型、不能出错；不显示繁忙、不要“不判红”类分类；不显示数据过期；优化探针让模型更快回答。
-- 开始状态：分支 `feat/channel-monitor-v1-20261021` @ `09ecd5396`，工作树干净。
-- 完成操作：方案改为 v3（仓库外 `plan/PLAN.md`，前两版另存）。补充生产只读证据：Grok 探测耗时几乎完全由输出 token（含推理）决定，输出 120–250 token 时 p50 3.4 秒，500–1000 token 时 12.3 秒；只把黄色阈值改为 10 秒，7 天回放的黄色占比 Grok 16.0% → 8.9%、GPT 约 3% → 1.3%、Claude 3.7% → 0.7%，其余靠压低推理与读到答案即停。
-- 修改文件：`docs/PROJECT_MEMORY.md`（进行中条目与本条）。
-- 验证：`python3 tools/check_docs_consistency.py`。
-- 卡点/风险：探测选号要改两处原版调度出口（只对探测生效），待用户确认。
-- 下一步：见进行中条目。
-
-### 2026-10-21T15:00Z — `20261021-channel-monitor-v1` — 本地实现完成，门禁全绿，待授权推送
-
-- 请求/目标：用户“按你认为的最佳方案执行”方案 v3；取舍：做探测通道（只对签名探测生效），不做本机直连，推理强度取 `low`。
-- 开始状态：分支在 `4442128c1`，工作树干净。
-- 完成操作：先提交签名头契约；两个子代理在独立工作树并行实现“探针本身”与“探测通道”，协调者实现调度可靠性、读路径、前端与文档；两条分支常规合并；独立代码审查后修复 4 项 P1（手动检测与编辑会让下一轮被跳过、签名头可被第三方重放、MiniMax 式流尾重复 message 误判、quota_probe 超时整轮丢弃）与选定 P2；临时工作树与分支已删除。
-- 修改文件：`backend/internal/service/channel_monitor_*`、`monitor_probe_scheduling*.go` 及四个调度文件的调用点、`repository/channel_monitor_repo.go`、`handler/admin/channel_monitor_handler.go`、`pkg/monitorprobe/`、`server/middleware/monitor_probe*.go`、`server/router.go`、前端 3 个文件与 1 个新测试、`docs/CHANNEL_MONITOR_V1.md`（新）、`docs/GROK_MONITOR_RESPONSES.md`、`docs/README.md`、`.gitignore`、`tools/upstream-sync/policy.json`、`scheduler-diff.json`、`UPSTREAM_BASE.json`。
-- 验证：见“进行中的工作”同名条目；第一次门禁的 vet 因共享 Go 编译缓存被并发清理而报错（环境问题），重跑通过；`sync.py audit` 第一次因改名的绑定测试失败，修正后通过。
-- 卡点/风险：未在真实上游验证；本机磁盘余量紧张（约 9 GiB）。
-- 下一步：用户授权后推送并开 PR；测试服务器跑兼容矩阵与响应时间实测；生产部署单独授权。
-
-### 2026-10-21T17:00Z — `20261021-channel-monitor-v1` — 推送 PR #120，CI 修复，本机端到端测试
-
-- 请求/目标：用户“推送PR，并测试”。
-- 完成操作：推送分支并开 PR #120；修复 CI 的 lint（测试专用函数移到带 unit tag 的测试文件）与偶发失败用例（`3737a6f5c`）；在本机隔离环境完成 E1–E9 端到端测试（测试专用的回环放行补丁只在临时工作树，未提交，临时工作树与分支已删除）。
-- 验证：E1–E9 通过，结果见“进行中的工作”同名条目与 artifacts `e2e/REPORT.md`；本机 golangci-lint 0 项、`sync.py audit` 与文档一致性通过。
-- 卡点/风险：真实上游兼容矩阵与 Grok 延迟未测（需要测试服务器或真实 Key）；一次 21.5 秒等待未能复现。
-- 下一步：CI 全绿后等待用户决定合并；协调测试服务器做真实上游验证。
-
-### 2026-10-21T15:50+00:00 — `20261021-integ-0.4.5-prep` — 本地候选门禁完成
-
-- 请求/目标：PM 12:51Z 授权本地集成，15:18Z 要求合入 δ 与 DOCS 最终交付后从头跑 25 项门禁，15:40Z 指定全局堆阈值偶发失败的复核流程；不推送、不开 PR、不发布、不部署。
-- 开始状态：main 基线 `a1cf8f104`；最终增量开始于干净的 `7297410a4`。δ `50053a8ea` 合为 `95662d477`，DOCS `2ebb17d1e` 合为 `46239531d`。只在网关说明与 tasks 有文档冲突，保留双方有效增补；ε 三个相关文件逐字不变。
-- 完成操作：已有测试夹具修复 `c906ba5ca` 只改测试并完成修前/修后 `-race -count=3`；版本 0.4.5；policy 308 条 required_literals、106 条 custom_patch_tests、37 个 custom_patches，有效登记并集与零重复核对通过，已撤回透传稳定头的钩子和测试登记清除；四个原版调度文件相对 main 未变。
-- 验证：候选 `46239531d` 的 attempt3 从头跑全部 25 项。首次 unit 25355 pass、39 条件 skip、1 fail，唯一失败为未改动的 `TestInflightEstimate_AccountMappingNoDBAndBoundedMemory`（8664864 > 8388608 字节）。按 PM 指令单例五次全过，HeapAlloc 差值为 4369472、2948840、2902976、2864184、3378360 字节；只用仓库外 overlay 在测量后打印值，断言和工作量未变。attempt3b 不用 overlay 的完整 unit 重跑 25356 pass、39 条件 skip、零 fail；原失败不改写，未降低阈值或跳过该用例。
-- 其余门禁：无 tag 14519 pass、28 条件 skip；`ci_gate` 390 顶层 `-race`、额外 service 178 顶层/476 项、handler 94/224 项全部实际执行，零失败/跳过/竞争；gofmt、四 vet、lint（0 issues）通过。前端 413 文件/3182 项、lint/typecheck/build、tools 41 项、audit 校验器 13 项、docs、scheduler-diff、embed 构建和干净树 audit 均通过。govulncheck 调用路径 0 漏洞（另有未调用的包/模块提示）；前端审计 high/critical 为 0，13 moderate/4 low。
-- 证据/清理：完整原始记录与明确引用 attempt3b 的最终 25/25 汇总保存在仓库外 `evidence/integ-045/`；旧候选和环境失败也保留。本轮独立 GOCACHE 已按授权删除，目录占用 7361564672 字节（约 6.86 GiB），未动共享缓存或其他工作树。
-- 卡点/下一步：本地集成与门禁完成；REVIEW 尚需补审最终增量，测试服务器全套候选验证尚未进行。DOCS 跟进 tasks 4.2 与 0.4.6 的测试稳定化待办；后续远端操作等待 PM 指令。
-
-
-### 2026-10-21T17:16:40+00:00 — `20261021-native-heartbeat-turn-state-045` — O3 实现完成，待独立审查
-
-- 请求/目标：PM 指令 8，把原生 Responses 首次心跳提前提交 turn-state 的 O3 修正纳入 0.4.5；不新增开关，只本地提交，不推送、不修改 Git 配置、不操作生产。
-- 开始状态：从 `integ/0.4.5-prep` 的干净基线 `b966306de52d5bf83cf5147971edf346464a3ad5` 建立 `feat/native-heartbeat-turn-state-045`；中断恢复后核对原未提交实现与测试，并完成验证收尾。
-- 完成操作：先确认基线红测，再只修改原生 `stageFirstOutput` 心跳分支：响应尚未提交且暂存头有 turn-state 时，写这一个头并同步记溯源；首个语义输出的 `applyAttemptResponseHeaders` 闭包与基线逐字一致。后续尝试、重复心跳及既有 CDN/排队提交不覆盖头或溯源；其余上游头仍暂存。
-- 修改文件：`openai_gateway_response_handling.go`、新增 `openai_native_heartbeat_turn_state_test.go`、`tools/upstream-sync/policy.json`、`docs/GATEWAY_RESILIENCE.md` 与本记忆。policy 新增 1 条 required_literal 与 6 条既有补丁测试绑定，无重复；网关说明 §6 登记无开关的受控例外。OpenSpec design/spec/tasks 由 DOCS 在 `c8e3b9669` 同步，按 16:40Z 分工未在本分支修改。
-- 验证：有效红测 6 个顶层中 3 个缺陷用例因首心跳缺少 turn-state 失败、3 个边界回归通过。修后最终 49 个顶层逐项执行 `-tags=unit -p 2 -race -count=3`，147 个顶层结果、含子用例 243 项全部通过，零失败、跳过与竞争；覆盖方案 §1.6 九项清单，第 6 项因不加开关不适用，另测总开关关闭仍生效。service 的无 tag/unit vet 与增量 lint（0 issues）通过。编译/夹具及首轮 lint 的失败记录保留；提交前复核与提交后干净树审计的最终结果在仓库外 `evidence/o3-045/`。
-- 卡点/风险：无实现阻塞。心跳已提交后仍不能补发 request-id 与用量头，是 O3 保留的限制；定向验证不替代新集成候选的全量门禁与 QA。
-- 下一步：在仓库外交接中记录最终完整 HEAD 并通知 γ 只读独立审查；α 合入 O3 与 DOCS 后跑全量门禁、安排 QA 新候选验证。`b966306de` 只作预跑。 **更正（PM 17:38Z）：独立审查实际由 REVIEW 执行，O3 `93fd9bdf2` 已获放行，无 P0/P1/P2；本条原交接对象不再有效，原始操作记录保留。**
-
-### 2026-10-21T18:05:12+00:00 — `20261021-integ-0.4.5-prep` — O3 新候选门禁与纯记忆交接
-
-- 请求/目标：PM 17:42Z 放行 O3 与 DOCS 最终交付，要求新 attempt/独立缓存从头跑 25 项；17:38Z 要求更正三处 O3 审查归属；18:00Z 要求剩余门禁完成后先交最终 SHA 给 QA，unit 阻塞单独处理。
-- 开始状态：干净本地 `b966306de`；快进 O3 `93fd9bdf2`，常规合入 DOCS `88ad8c43c`，仅 tasks 冲突按指令取 DOCS 整份，得到 `4bb8026db`。O3 代码/测试/policy/网关说明未改，ε EOF 防护保留。
-- 验证：新 attempt4 全 25 项完成，24 PASS、unit FAIL；同一基线全局 HeapAlloc 用例两次完整运行分别 9100136、8414632 字节超出 8388608，五次单例均通过，测试文件与 main 未变。其余静态、无 tag、竞态、安全、前端、工具、文档、scheduler、embed、干净树 audit 均过，完整数字见进行中条目。失败记录不覆盖，不能声称全绿。
-- 本次修改：只改 `docs/PROJECT_MEMORY.md`，更正 O3 已由 REVIEW 审查的事实、更新集成状态，历史交接对象以追加更正标明。门禁对象 `4bb8026db` 与最终 SHA 只差记忆文档；最终提交上复验 docs/干净 audit，结果及完整 SHA 写仓库外交接。
-- 卡点/下一步：按 PM 授权先把最终 SHA 交 QA，unit 标记“阻塞：只有基线堆阈值用例在完整套件中失败，处理中”；之后 main `a1cf8f104` 同命令完整 unit 对照，ε 测试修复等 PM 裁定。本地缓存与临时基线树在对照结束后清理，未推送、未开 PR、未发布或部署。
-
-### 2026-10-21T18:45:39+00:00 — `20261021-integ-0.4.5-prep` — 堆用例稳健修复并入与最终树复验安排
-
-- 请求/目标：执行 PM 18:42Z，只合入 ε `13baa2869` 并同步指定文档，在最终 HEAD 复跑完整 unit、ci_gate、docs、干净树 audit；新失败停止报告，不自行修。
-- 开始状态：`integ/0.4.5-prep` @ `0c31b5b3861f72f711b376bff61f17a94e5aa674`，工作树干净。ε 分支固定 HEAD `13baa2869f8d9c3221985710f2bb9d01fe07b987` 的父提交是 `4bb8026db`，只改一份测试，普通合并无冲突。
-- 完成操作：按已验收交付保留预热与两次 GC 的修复，未放宽 8 MiB 阈值；tasks 7.4 勾为已在 0.4.5 修复，旧门禁条目补修复指引；顶部及本任务集成条目同步，main 对照结论与历史失败保留。
-- 修改文件：`backend/internal/service/billing_inflight_reservation_test.go`、`openspec/changes/gateway-resilience-045-20261021/tasks.md`、`docs/PROJECT_MEMORY.md`；无产品代码变化，不追加其他 DOCS 分支提交。
-- 验证：ε 的完整 service 三轮已通过，不替代本轮集成门禁；本批提交后按集成条目固定最终 HEAD，运行四项检查，原始日志与结果绑定最终 SHA 写仓库外进度和交接。ci_gate 带 `-race` 但未选择本次堆用例，竞态覆盖按实际选择记录。
-- 卡点/下一步：QA 镜像候选 `0c31b5b38` 不变，测试文件不进入产品镜像；四项若有新失败即停止报告 PM。复验结束清理独立缓存并待命；未推送、未开 PR、未发布或部署。
-
-### 2026-10-21T19:17:54+00:00 — `20261021-integ-0.4.5-prep` — 四项复跑全过与最后一次文档收尾
-
-- 请求/目标：PM 18:42Z 要求合入 ε 并在最终树复跑；18:55Z、19:00Z、19:10Z 要求四项全过后一次性合入 DOCS、同步 tasks 4.5/4.6 与 P2 待办 7.5，随后冻结受跟踪文件。
-- 开始状态：干净 `e9c686e848cbe9019673ffcb18d96aaa3f3a0415`，测试文件与 ε `13baa2869` 同 blob，产品代码与 QA 镜像候选 `0c31b5b38` 无变化。
-- 已完成验证：18:55:26Z–19:08:33Z 四项退出码全为 0；完整 unit 25368 pass、39 条件 skip、0 fail，堆用例实际通过；ci_gate 390 顶层 `-race` 全过、零 skip，不包含堆用例；docs 与干净树 audit 通过。完整命令和并发参数与 attempt4 相同，未跳过用例、未放宽阈值，历史失败不改写。
-- 完成操作：无冲突合入 DOCS 固定 `d1fa3a4a3`，在同一个文档提交里写入上述结果、REVIEW 最终无 P0/P1 的放行结论和两项留待 0.4.6 的测试 P2。只改记忆与 OpenSpec 五份文档；相对 `e9c686e84` 的 backend/frontend/tools/deploy 差异为空，按 PM 不重跑 unit/ci_gate。独立缓存已删除，约 3.80 GiB，未动共享缓存。
-- 验证与证据：本次文档提交后仅复验 `check_docs_consistency.py` 与干净树 `sync.py audit`；最终 SHA、退出码、相对 `0c31b5b38` 的测试/文档差异，以及相对 `e9c686e84` 的代码/测试零差异，统一写仓库外 `PROGRESS_A`、`PATCH_REQUESTS` 与 `evidence/integ-045/heapfix-e9c686e84/`。QA 继续验证原镜像候选，不重建、不重新浸泡。
-- 卡点/下一步：没有产品代码新增问题；本轮最后两项若有新失败停止报 PM，不修。通过后本地树冻结并待命，推送、PR 与发布等用户决定，生产部署未授权。
-
-### 2026-10-21T18:07Z — `20261021-usage-tps-public` — 本地完成，推送并开 PR
-
-- 请求/目标：用户 2026-10-21（附截图）：使用记录“延迟”列改为“平均TPS N t/s”；“功能开关 → 管理员使用记录”两项指标的开关左边各加一个公开按钮，打开 = 公开，关闭 = 仅管理员可见（用户明确不要第三个开关）。
-- 开始状态：本地检出原在 `feat/account-recent-health-20261019` 且落后远端；`git fetch` 后自 main `a1cf8f104`（0.4.4 发布后）建 `feat/usage-tps-public-metrics-20261021`，工作树干净。
-- 完成操作：
-  - 文案：`formatTokenSpeed` 后缀改为 `t/s`；`usage.outputTps` 改为“平均TPS”/“Avg TPS”；设置卡片改为“显示平均TPS”，单位 t/s。运维页与渠道监控的 tokens/s 不变。
-  - 公开按钮：新键 `usage_cache_hit_rate_public`、`usage_token_speed_public`（缺省 false，管理接口部分更新保留旧值）；公开设置与页面注入只给生效值 `user_usage_cache_hit_rate_enabled`、`user_usage_token_speed_enabled`（显示开关与公开按钮都打开）；用户使用记录页按它传 `UsageTable` 的两个 prop。按钮只有两种状态、不置灰，样式沿用同页模式按钮。
-  - 无迁移；用户接口字段不变（本来就返回 Token 与耗时），只改页面是否展示。
-- 修改文件：后端设置常量、解析、写入、视图、DTO、管理与公开处理器及其测试、API 契约夹具；前端 `usageMetrics.ts`、`SettingsView.vue`、用户 `UsageView.vue`、类型与 app store 兜底、中英文案及对应测试；`docs/USAGE_METRICS.md`。
-- 验证：见“进行中的工作”本条；`sync.py audit` 在提交后的干净树执行。
-- 卡点/风险：无。生产仍为旧版本，本改动随下次发版才上线。
-- 下一步：推送、开 PR、等 CI 全绿；不合并、不发版、不部署。
 
 ### 2026-10-22T03:16:51Z — `20261022-pr120-release045-integration` — 合入已发布的 main，四项本地检查通过
 
@@ -1456,3 +906,92 @@ pnpm --dir frontend run build
 - 请求/目标：v0.4.9 已发布，用户要求更新现行文档中仍写着“0.4.9（未发布）”的标注。
 - 修改：`docs/GATEWAY_RESILIENCE.md`、`docs/account-scheduling.md`、`docs/USAGE_METRICS.md` 只改版本标注，行为描述不变；韧性文档引言改为按 0.4.9 的行为描述。
 - 验证：文档一致性通过；全仓库再无 0.4.8/0.4.9 的“未发布”残留。未部署生产。
+
+### 2026-10-27 — 20261027-iq-per-model — 只读分析与方案定稿，待批准
+
+- **请求/目标**：见“进行中的工作”同名条目。
+- **开始状态**：main `d25bcd8dc`，工作树干净，与远端一致。
+- **完成操作**：
+  - 生产只读：数据库会话只读，查询检测配置、48 小时结果与小时指标、业务流量模型分布、表写入统计；未导出设置表；连接已关闭，本机临时脚本已删除。
+  - Claude 与 Codex 各自独立分析，互审三轮收口；判定规则用蒙特卡洛模拟比较三种方案；参数化题的闭式解经全枚举验证。
+- **修改文件**：只有本记忆文件（任务登记与本条）。
+- **验证**：文档一致性检查。
+- **卡点/风险**：方案待用户批准；参数化题未用真实上游校准。
+- **下一步**：等待用户对 `FINAL_PLAN.md` §10 五个决策点的答复。
+
+### 2026-10-27 — 20261027-iq-per-model — 工作区整理，方案定稿 v1.1（实施交其他 agent）
+
+- **请求/目标**：用户明确代码由另行安排的 agent 编写；本任务整理工作区、同步最新 main，并把方案、调研背景、目标与注意事项定为最终版。
+- **开始状态**：main `d25bcd8dc`，与 origin 一致（重新 fetch 核实）；工作树只有本记忆文件的任务登记。
+- **完成操作**：
+  - 本地 `.work/` 重组为 `tasks/<日期>-<任务>/`（各带 README）与 `reference/`，顶层 `README.md` 为索引；旧路径在各任务 README 有对照。
+  - IQ 方案定稿：Codex 第四轮只读审查 v1.0（P0 5、P1 12、P2 1），关键论据经代码核实后全部采纳，形成 v1.1；另写背景文档（缺陷→方案对应、双方取舍、实施注意事项）。参数化题闭式解与暴力枚举在全部 46,656 组参数上一致。
+  - 记忆维护：已结束的 `20261027-resilience-review`、`20261026-openai-ttft-health-routing` 进行中条目原样移入归档文件；“当前交接状态”中的本地交接包路径改为新布局。
+- **修改文件**：`docs/PROJECT_MEMORY.md`、`docs/PROJECT_MEMORY_ARCHIVE.md`（未提交）。
+- **验证**：文档一致性检查通过。
+- **卡点/风险**：方案 §17 的 5 个决策点待用户确认；参数化题未用真实上游校准。
+- **下一步**：用户确认决策点后，由实施 agent 按方案 §15 分 A/B/C 三路实施并在本条目登记接手；提交本记忆改动需用户授权。
+
+### 2026-10-27 — 20261027-iq-per-model — 方案 v1.2：每题题面显示与自报模型识别
+
+- **请求/目标**：用户要求把“每题显示题面、正确答案与推导”加入方案；并依据实际请求、其他网关实现与联网检索，完善上游自报模型与本站请求模型的识别逻辑，确保识别准确。
+- **开始状态**：main `d25bcd8dc`，与 origin 一致；工作树只有本记忆文件与归档文件的未提交改动。
+- **完成操作**：
+  - 生产只读：30 天自报模型统计（按发出值与声明值组合汇总）、OAuth 与 API Key 的声明情况、反向代理日志中的模型响应头、应用的质量路由配置（窄范围检查，值打码）；未导出设置表；连接已关闭，本机临时脚本已删除。
+  - Codex 第五轮做自报模型识别专项源码核实；Claude 核实官方 Codex 客户端的响应头读取，并检索模型替换审计的研究与测量。
+  - 方案改为 v1.2：新增 §4.5（来源与提取、规范化、分类、降级规则、多声明合并、三处使用、记录与显示），并同步题目存储、判题表、接口、弹窗、改动清单、测试、文档登记、拆分与验收。识别原型的生产回放与第五轮 25 条向量断言全部通过。
+- **修改文件**：`docs/PROJECT_MEMORY.md`（未提交）；本地交接包不入库。
+- **验证**：文档一致性检查通过。
+- **卡点/风险**：方案 §17 的 5 个决策点待用户确认；参数化题未用真实上游校准；业务转发路径仍不读模型响应头（另开任务）。
+- **下一步**：同上一条；实施 agent 以交接包内的 `FINAL_PLAN.md` §4.5 与识别原型为准。
+
+### 2026-10-27 — 20261027-iq-integfix — PostgreSQL 集成回归修复完成
+
+- **请求/目标**：在独立 worktree 修复真实 PostgreSQL repository 集成套件发现的 12 项 IQ 按模型改造回归，按 FINAL_PLAN v1.2 与 ROUTES 契约裁定代码和测试责任；全部验证通过后提交并写仓库外报告。
+- **开始状态**：分支 `wip/iq-integfix-20261027`，HEAD `3ae964a7e27bfe3f74a89e83e1b79c810bb5b8cc`，工作树干净。
+- **完成操作**：修复 `Create` 事务上下文、清限流后空对象、BulkUpdate 锁查询参数类型/编号、NULL diagnostic 读取；身份重置断言改读持久化快照。按契约修正四处既有用例：增加第二个自动目标、让投影输入有效改变 reset 时间、断言规范出站 gate、并发 test 留言数匹配目标数。上游登记字面量原样保留，未改两个 scheduler 原版文件。
+- **修改文件**：`backend/internal/repository/account_repo.go`、`account_iq_targets.go`、`account_repo_iq_targets_integration_test.go` 与本记忆。
+- **验证**：8c8g 真实 PostgreSQL `go test -tags=integration -count=1 -timeout 24m ./internal/repository/` 通过（0 失败）；本机 `go build ./...`、default/unit/integration/e2e 四组 vet、`go test -count=1 -tags=unit ./internal/repository/... ./internal/service/...`、gofmt、文档一致性、diff-check 均通过。
+- **提交**：实现与测试 `72310c050d5036d7dc1b23930b285192b3354aeb`（`fix(iq): repair PostgreSQL integration regressions`）；本记忆收尾随下一条纯记忆提交。
+- **卡点/风险**：无。未推送、未开 PR、未连接生产。
+- **下一步**：无。详细逐项根因、代码/测试裁决和测试用例名记于本机 `.work/tasks/20261027-iq-per-model/implementation/INTEGFIX_REPORT.md`。
+
+### 2026-10-27T23:53Z — 20261027-iq-r4fix — 修复、验证并本地提交
+
+- 请求/目标：修复 astra R4 的 3 个 P1 与 1 个 P2；每项一个最小单测，准确执行 compact 协议分流，不加剧业务请求中断。
+- 开始状态：分支 `wip/iq-r4fix-20261027`，HEAD `9b3597b7e0859f2e92e783236a34279e7f326065`，工作树干净。
+- 完成操作：
+  - fresh last-resort 复核改为读取 fresh 账号后重新计算 compact 出站模型；Codex ticket 出站预测仅在实际 compact Responses 分支应用 fallback，raw Chat 沿用普通映射。
+  - Retry-After 或普通题间等待超出 `lease_until - 10s` 安全窗口时不继续等待，立即以具体 unknown 原因 Complete，并保留汇总 Retry-After。
+  - 出站快照返回 false 或 error 时，以独立 3 秒 context 按旧 token Defer，revision 不符时由既有仓储逻辑清旧租约并保留新排期。
+  - 更新 `docs/OPENAI_IQ_CHECK.md` 的 compact 门禁说明；没有修改 repository、调度白名单文件或 policy。
+- 修改文件：`backend/internal/service/iq_check_service.go`、`iq_check_service_test.go`、`iq_check_gate_test.go`、`resilience_last_resort_iq_gate_test.go`、`resilience_session.go`、`share_scheduling_gateway.go`、`share_scheduling_openai.go`、`openai_codex_ticket.go`、`docs/OPENAI_IQ_CHECK.md`、本记忆文件。
+- 单测：`TestOpenAILastResortFreshCompactGateUsesFreshMapping`、`TestRawChatCompactRequestUsesOrdinaryOutboundForIQGateAndTicket`、`TestIQExecutionCompletesBeforeLeaseWhenRetryAfterExceedsBudget`、`TestIQExecutionReleasesLeaseWhenOutboundSnapshotFails`，通过。
+- 验证：`go build ./...`；default/unit/integration/e2e 四组 `go vet`；`gofmt -l` 空；完整 `go test -count=1 -tags=unit ./internal/service/... ./internal/pkg/iqcheck/... ./internal/pkg/openai/... ./internal/handler/...` 最终通过；`ci_gate.py` 451 项 `-race`、0 跳过；`sync.py scheduler-diff`、`sync.py audit`、文档一致性、`git diff --check` 通过。`ci_gate.py` 初次因 `go` 不在 PATH 未启动，加入指定 Go 目录后通过。第一次完整 unit 曾返回一次失败，但输出因测试日志量过大被截断；service 单包复跑与第二次完整命令都通过，未定位首轮具体断言。
+- 提交：`41b5f9f5c`（`fix(iq): repair R4 model gates and lease completion`）。未推送、未开 PR、未连接服务器。
+- 卡点/风险：最终完整 unit 与韧性 race 门禁全过；首轮全量 unit 的失败断言未能从被截断输出恢复，已由单包和完整复跑验证通过。
+- 下一步：无。
+
+### 2026-10-28 — 20261027-iq-per-model — 集成收尾，本地完成待授权推送
+
+- 请求/目标：按交接包方案 v1.2 完成 OpenAI 智商检测按模型重构；总设计师编排 Codex（后端）、Claude（前端）、astra（审查）。
+- 开始状态：分支 `feat/iq-per-model-20261027`，HEAD `3ae964a7e`（R3 修复已合入），前端、文档与登记未提交。
+- 完成操作：
+  - 提交前端、文档、上游同步登记；R3 修复改了统一资格函数签名，scheduler-diff 与 policy 字面量随之更新。
+  - 开发机集成测试长时间无输出，定位为 Docker IPv4/IPv6 端口不同导致连错容器，见“操作陷阱”。之后对比 main 基线，确认 12 个失败均为本分支回归，派 integfix 修复（4 处代码缺陷；4 处测试期望与方案不符，按方案修正，未放宽）。
+  - astra R4 复核 R3 修复：八项关闭、两项部分关闭，另报 3 个 P1 + 1 个 P2（fresh 复核沿用旧 compact 出站值、raw Chat 被 compact 兜底误挡、长 Retry-After 等到租约过期、快照失败遗留租约），派 r4fix 修复。
+  - 两个分支合入，补新延后原因的中英文案；`OPENAI_IQ_CHECK.md` 补 compact 兜底、raw Chat 与启动对账失败的说明；操作日志 2026-10-20 至 10-21 原样归档。
+- 修改文件：`frontend/`（IQ 管理界面）、`docs/`、`openspec/` 取代说明、`deploy/config.example.yaml`、`tools/docs_consistency.json`、`tools/upstream-sync/{policy,scheduler-diff}.json`；后端修复见各分支提交。
+- 验证：开发机 repository 集成套件 0 失败；本机 build、四组 vet、gofmt、全量 unit、`ci_gate.py`、scheduler-diff、policy 字面量、文档一致性、tools 41 项、前端 lint/typecheck/3261 项测试/build 全部通过。`sync.py audit` 需干净工作树，提交本记忆后运行。
+- 卡点/风险：未做真实上游校准；默认降级组合新增两条会改变生产质量路由。未推送、未开 PR、未部署，生产只读。
+- 下一步：用户授权后推送并开 PR；合并、发版、部署另行授权。
+
+### 2026-10-28 — 20261027-iq-per-model — 推送、开 PR #151 并合并
+
+- 请求/目标：用户 2026-10-28 授权“全部推送并合并”（不含发版、部署）。
+- 开始状态：分支 `feat/iq-per-model-20261027`，HEAD `eb75150e5`，origin/main 仍为 `d25bcd8dc`，工作树干净。
+- 完成操作：推送分支并开 PR #151。首轮 backend-security 因 govulncheck 新公告 GO-2026-6860（`golang.org/x/net/html` 文本节点合并的二次复杂度，经 Ollama Cloud 用量解析可达）失败，与本改动无关、main 同样会失败；按惯例把 `golang.org/x/net` 升到修复版 v0.62.0，其余 `golang.org/x` 模块随之小幅升级（`39947b7ce`）。本机 build、vet、govulncheck（0 个可达漏洞）、定向测试、文档一致性与 `sync.py audit` 通过。任务记录原样归档。随后 golangci-lint 报 62 项（errcheck 52：`rows.Close`/`tx.Rollback`/Builder 写入未处理返回值；staticcheck 7；unused 3：遗留的 `iqGateKeyPresent` 与两个质量路由正则），均来自本改动、本机门禁漏跑；按仓库写法修正并删除死代码，本机 golangci-lint 0 项，开发机集成套件与受影响 unit 复跑通过。
+- 修改文件：`backend/go.mod`、`backend/go.sum`；lint 涉及 `repository/account_iq_targets.go` 等 IQ 新文件；本记忆与归档。
+- 验证：PR #151 全部保护检查通过后合并。
+- 卡点/风险：见“当前交接状态”的遗留项。
+- 下一步：发版与部署待用户授权。

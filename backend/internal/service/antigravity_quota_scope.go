@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"strings"
 	"time"
 )
@@ -42,6 +43,9 @@ func (a *Account) IsSchedulableForModelWithContext(ctx context.Context, requeste
 		return false
 	}
 	if a.isModelRateLimitedWithContext(ctx, requestedModel) {
+		if a.Platform == PlatformOpenAI && resilienceLastResortGate(ctx) && !iqGateBlocksRequest(a, requestedModel, false) && a.IsSchedulable() && a.GetRateLimitRemainingTimeWithContext(ctx, requestedModel) <= resilience.HardRateLimitThreshold {
+			return true
+		}
 		// Antigravity + overages 启用 + 积分未耗尽 → 放行（有积分可用）
 		if a.Platform == PlatformAntigravity && a.IsOveragesEnabled() && !a.isCreditsExhausted() {
 			return true

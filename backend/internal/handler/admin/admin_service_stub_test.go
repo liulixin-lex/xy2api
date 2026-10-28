@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
@@ -14,6 +15,10 @@ type stubAdminService struct {
 	apiKeys                             []service.APIKey
 	groups                              []service.Group
 	accounts                            []service.Account
+	iqTargetSettings                    map[int64][]domain.IQTargetSettings
+	iqTargetSummaries                   map[int64][]domain.IQTargetSummary
+	iqTargetSummariesErr                error
+	iqSummariesContextValue             any
 	accountSchedulerScoreFilterAccounts []service.Account
 	openAISchedulerScorePoolAccounts    []service.Account
 	schedulerScoreFilterCalls           int
@@ -505,6 +510,26 @@ func (s *stubAdminService) GetAccountsByIDs(ctx context.Context, ids []int64) ([
 	for _, id := range ids {
 		account := service.Account{ID: id, Name: "account", Status: service.StatusActive}
 		out = append(out, &account)
+	}
+	return out, nil
+}
+
+func (s *stubAdminService) ListIQTargetSummaries(ctx context.Context, ids []int64) (map[int64][]domain.IQTargetSummary, error) {
+	s.iqSummariesContextValue = ctx.Value(iqSummaryContextTestKey{})
+	if s.iqTargetSummariesErr != nil {
+		return nil, s.iqTargetSummariesErr
+	}
+	out := make(map[int64][]domain.IQTargetSummary, len(ids))
+	for _, id := range ids {
+		out[id] = append([]domain.IQTargetSummary(nil), s.iqTargetSummaries[id]...)
+	}
+	return out, nil
+}
+
+func (s *stubAdminService) ListIQTargetSettings(_ context.Context, ids []int64) (map[int64][]domain.IQTargetSettings, error) {
+	out := make(map[int64][]domain.IQTargetSettings, len(ids))
+	for _, id := range ids {
+		out[id] = append([]domain.IQTargetSettings(nil), s.iqTargetSettings[id]...)
 	}
 	return out, nil
 }

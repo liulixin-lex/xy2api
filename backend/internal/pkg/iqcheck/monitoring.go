@@ -9,7 +9,67 @@ import (
 	"time"
 )
 
-const MaxAttemptsPerRound = 3
+const MaxAttemptsPerRound = 5
+
+func NextEffort(effort string) string {
+	switch effort {
+	case "minimal":
+		return "low"
+	case "low":
+		return "medium"
+	case "medium":
+		return "high"
+	case "high":
+		return "xhigh"
+	case "xhigh":
+		return "max"
+	}
+	return effort
+}
+
+type Schedule struct {
+	NextRunAt                     *time.Time
+	NotBefore                     *time.Time
+	PausedReason                  string
+	DegradedStreak, FailureStreak int
+}
+
+// NextSchedule takes the previous streaks and an injected jitter, so scheduling
+// can be tested without a clock or random source. NotBefore is a separate floor.
+func NextSchedule(now time.Time, interval time.Duration, degradedStreak, failureStreak int, r Result, jitter time.Duration) Schedule {
+	s := Schedule{DegradedStreak: degradedStreak, FailureStreak: failureStreak}
+	delay := interval
+	switch r.Status {
+	case "smart":
+		s.DegradedStreak, s.FailureStreak = 0, 0
+		delay += min(max(0, jitter), min(30*time.Second, interval/20))
+	case "degraded":
+		s.DegradedStreak, s.FailureStreak = min(4, degradedStreak+1), 0
+		delay = []time.Duration{30 * time.Second, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute}[max(0, s.DegradedStreak-1)]
+	case "unknown":
+		pause, _, _ := FailurePolicy(r)
+		if pause {
+			s.PausedReason = r.Reason
+		}
+		if r.Reason == "quota_exhausted" || r.Reason == "http_402" {
+			delay = max(interval, 15*time.Minute)
+		} else {
+			s.FailureStreak = min(3, failureStreak+1)
+			delay = min(interval*time.Duration(1<<max(0, s.FailureStreak-1)), max(interval, time.Hour))
+		}
+	}
+	if r.Diagnostic != nil {
+		s.NotBefore = r.Diagnostic.RetryAfter
+		if r.Diagnostic.RetryAfterUnbounded {
+			s.PausedReason = "retry_after_unbounded"
+		}
+	}
+	if s.PausedReason == "" {
+		next := now.Add(delay)
+		s.NextRunAt = &next
+	}
+	return s
+}
 
 // Only documented machine codes enter diagnostics. Raw messages never do.
 func ReadUpstreamError(raw []byte, d *Diagnostic) string {
@@ -106,9 +166,9 @@ func Retryable(r Result) bool {
 	if r.Reason == "quota_exhausted" || r.Status != "unknown" || r.Diagnostic != nil && (r.Diagnostic.Transport == "plugin" || r.Diagnostic.RetryAfterUnbounded) {
 		return false
 	}
-	if pause, _, protocol := FailurePolicy(r); pause {
+	if pause, transient, protocol := FailurePolicy(r); pause {
 		return false
-	} else if protocol {
+	} else if transient || protocol {
 		return true
 	}
 	if r.Diagnostic != nil && r.Diagnostic.Stage == "http" {
@@ -118,7 +178,7 @@ func Retryable(r Result) bool {
 		}
 	}
 	switch r.Reason {
-	case "request_failed", "timeout", "response_read_failed", "rate_limited", "http_408", "http_429", "http_502", "http_503", "http_504", "upstream_error", "incomplete_response", "unparseable_answer", "invalid_answer_structure", "ambiguous_answer":
+	case "request_failed", "timeout", "response_read_failed", "rate_limited", "http_408", "http_429", "http_502", "http_503", "http_504", "upstream_error", "incomplete_response", "unparseable_answer", "invalid_answer_structure", "ambiguous_answer", "model_conflict":
 		return true
 	}
 	return false

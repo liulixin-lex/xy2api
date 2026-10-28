@@ -15,6 +15,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -36,6 +37,45 @@ import (
 	entsql "entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqljson"
 )
+
+func extraModelRateLimits(extra map[string]any) map[string]any {
+	if extra == nil {
+		return nil
+	}
+	limits, _ := extra["model_rate_limits"].(map[string]any)
+	return limits
+}
+
+func normalizeModelRateLimits(extra map[string]any) error {
+	if extra == nil {
+		return nil
+	}
+	v, ok := extra["model_rate_limits"]
+	if !ok {
+		return nil
+	}
+	if v == nil {
+		extra["model_rate_limits"] = map[string]any{}
+		return nil
+	}
+	if limits, ok := v.(map[string]any); ok {
+		if limits == nil {
+			extra["model_rate_limits"] = map[string]any{}
+		}
+		return nil
+	}
+	return fmt.Errorf("model_rate_limits must be an object")
+}
+
+func stripIQGateEntries(extra map[string]any) map[string]any {
+	limits := extraModelRateLimits(extra)
+	for key := range limits {
+		if domain.IsIQGateKey(key) {
+			delete(limits, key)
+		}
+	}
+	return extra
+}
 
 // accountRepository 实现 service.AccountRepository 接口。
 // 提供 AI API 账户的完整数据访问功能。
@@ -132,10 +172,41 @@ func newAccountRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor, schedul
 }
 
 func (r *accountRepository) Create(ctx context.Context, account *service.Account) error {
-	if err := createAccountRecord(ctx, r.client, account); err != nil {
+	client := r.client
+	contextTx := dbent.TxFromContext(ctx)
+	var tx *dbent.Tx
+	if contextTx != nil {
+		client = contextTx.Client()
+	} else if account != nil && account.IQTargetsPatch != nil {
+		var err error
+		tx, err = r.client.Tx(ctx)
+		if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+			return err
+		}
+		if tx != nil {
+			defer func() { _ = tx.Rollback() }()
+			ctx = dbent.NewTxContext(ctx, tx)
+			client = tx.Client()
+		}
+	}
+	if err := createAccountRecord(ctx, client, account); err != nil {
 		return err
 	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
+	if account.IQTargetsPatch != nil {
+		if _, err := r.SaveIQTargetsTx(ctx, client, account.ID, *account.IQTargetsPatch); err != nil {
+			return err
+		}
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	outboxExec := r.sql
+	if contextTx != nil || (account.IQTargetsPatch != nil && tx == nil) {
+		outboxExec = client
+	}
+	if err := enqueueSchedulerOutbox(ctx, outboxExec, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue account create failed: account=%d err=%v", account.ID, err)
 	}
 	return nil
@@ -145,13 +216,16 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	if account == nil {
 		return service.ErrAccountNilInput
 	}
-
-	if err := service.ValidateIQCheckSettings(account.Platform, account.IQCheckSettings); err != nil {
+	if err := service.ValidateIQTargetsPatch(account.Platform, account.IQTargetsPatch); err != nil {
 		return err
 	}
+
 	account.Extra = service.MergeOpenAICodexTicketExtra(account.Extra, nil)
+	if err := normalizeModelRateLimits(account.Extra); err != nil {
+		return err
+	}
+	account.Extra = stripIQGateEntries(account.Extra)
 	service.InitializeNewCodexTicketAccount(account)
-	account.IQCheck = resetIQState(domain.DefaultIQCheck(), account.IQCheckSettings, time.Now().UTC())
 
 	builder := client.Account.Create().
 		SetName(account.Name).
@@ -165,7 +239,6 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		SetStatus(account.Status).
 		SetErrorMessage(account.ErrorMessage).
 		SetSchedulable(account.Schedulable).
-		SetIqCheck(account.IQCheck).
 		SetAutoPauseOnExpired(account.AutoPauseOnExpired)
 
 	if account.RateMultiplier != nil {
@@ -212,7 +285,6 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	if err != nil {
 		return translatePersistenceError(err, service.ErrAccountNotFound, nil)
 	}
-
 	account.ID = created.ID
 	account.CreatedAt = created.CreatedAt
 	account.UpdatedAt = created.UpdatedAt
@@ -481,6 +553,9 @@ func (r *accountRepository) updateAccount(
 	if account == nil {
 		return nil
 	}
+	if err := service.ValidateIQTargetsPatch(account.Platform, account.IQTargetsPatch); err != nil {
+		return err
+	}
 
 	baseCtx := ctx
 	contextTx := dbent.TxFromContext(ctx)
@@ -512,6 +587,11 @@ func (r *accountRepository) updateAccount(
 	)
 	if err != nil {
 		return translatePersistenceError(err, service.ErrAccountNotFound, nil)
+	}
+	if account.IQTargetsPatch != nil {
+		if _, err := r.SaveIQTargetsTx(ctx, client, account.ID, *account.IQTargetsPatch); err != nil {
+			return err
+		}
 	}
 	if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
 		return err
@@ -564,7 +644,7 @@ func (r *accountRepository) updateLockedAccount(
 		SetErrorMessage(account.ErrorMessage).
 		SetAutoPauseOnExpired(account.AutoPauseOnExpired)
 
-	current, err := client.Account.Query().Where(dbaccount.IDEQ(account.ID)).ForUpdate().Only(ctx)
+	current, err := client.Account.Query().Where(dbaccount.IDEQ(account.ID)).ForUpdate(entsql.WithLockClause("FOR NO KEY UPDATE")).Only(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -575,9 +655,8 @@ func (r *accountRepository) updateLockedAccount(
 	}
 	builder.SetSchedulable(schedulable)
 	account.Schedulable = schedulable
-	state := current.IqCheck
 	identityChanged := current.Type != account.Type || current.Platform != account.Platform
-	for _, key := range iqIdentityKeys {
+	for _, key := range iqTargetIdentityKeys {
 		if account.IQPreserveTokenRotation && (key == "access_token" || key == "refresh_token") {
 			continue
 		}
@@ -593,16 +672,6 @@ func (r *accountRepository) updateLockedAccount(
 	if !reflect.DeepEqual(current.ProxyID, account.ProxyID) {
 		identityChanged = true
 	}
-	if identityChanged || account.IQCheckSettings != nil {
-		if err := service.ValidateIQCheckSettings(account.Platform, account.IQCheckSettings); err != nil {
-			return nil, err
-		}
-		state = applyIQSettings(state, account.IQCheckSettings, identityChanged, time.Now().UTC())
-		builder.SetIqCheck(state)
-	}
-
-	account.IQCheck = state
-
 	if explicitRateMultiplier != nil {
 		builder.SetRateMultiplier(*explicitRateMultiplier)
 	}
@@ -664,7 +733,16 @@ func (r *accountRepository) updateLockedAccount(
 	builder.SetQuotaDimension(dbaccount.QuotaDimension(account.QuotaDimensionOrDefault()))
 	builder.SetNillableParentAccountID(account.ParentAccountID)
 
-	return builder.Save(ctx)
+	updated, err := builder.Save(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if identityChanged {
+		if _, err := r.ResetIQTargetsOnIdentityChangeTx(ctx, client, account.ID); err != nil {
+			return nil, err
+		}
+	}
+	return updated, nil
 }
 
 func lockAndMergeAccountProbeExtra(
@@ -792,7 +870,31 @@ func lockAndMergeAccountProbeExtra(
 			currentExtra = nil
 		}
 	}
-	extra := service.MergeOpenAICodexTicketExtra(copyJSONMap(normalizeJSONMap(account.Extra)), currentExtra)
+	incomingExtra := copyJSONMap(normalizeJSONMap(account.Extra))
+	if err := normalizeModelRateLimits(incomingExtra); err != nil {
+		return nil, err
+	}
+	extra := service.MergeOpenAICodexTicketExtra(incomingExtra, currentExtra)
+	for key := range extraModelRateLimits(extra) {
+		if domain.IsIQGateKey(key) {
+			delete(extraModelRateLimits(extra), key)
+		}
+	}
+	if current := extraModelRateLimits(currentExtra); len(current) > 0 {
+		limits := extraModelRateLimits(extra)
+		if limits == nil {
+			limits = map[string]any{}
+		}
+		for key, value := range current {
+			if domain.IsIQGateKey(key) {
+				limits[key] = value
+			}
+		}
+		extra["model_rate_limits"] = limits
+	}
+	if err := normalizeModelRateLimits(extra); err != nil {
+		return nil, err
+	}
 	extra = service.MergeCapabilityLearningExtra(extra, currentExtra)
 	for _, key := range []string{
 		service.UpstreamBillingProbeEnabledExtraKey,
@@ -2108,10 +2210,8 @@ func (r *accountRepository) ListSchedulableAccountLoads(ctx context.Context) ([]
 func (r *accountRepository) schedulableAccountsQuery(now time.Time) *dbent.AccountQuery {
 	return r.client.Account.Query().
 		Where(
-			iqSchedulablePredicate(),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
-			iqSchedulablePredicate(),
 			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
 			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
@@ -2218,7 +2318,6 @@ func (r *accountRepository) ListSchedulableByPlatform(ctx context.Context, platf
 			dbaccount.PlatformEQ(platform),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
-			iqSchedulablePredicate(),
 			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
 			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
@@ -2253,7 +2352,6 @@ func (r *accountRepository) ListSchedulableByPlatforms(ctx context.Context, plat
 			dbaccount.PlatformIn(platforms...),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
-			iqSchedulablePredicate(),
 			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
 			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
@@ -2274,7 +2372,6 @@ func (r *accountRepository) ListSchedulableUngroupedByPlatform(ctx context.Conte
 			dbaccount.PlatformEQ(platform),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
-			iqSchedulablePredicate(),
 			dbaccount.Not(dbaccount.HasAccountGroups()),
 			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
@@ -2299,7 +2396,6 @@ func (r *accountRepository) ListSchedulableUngroupedByPlatforms(ctx context.Cont
 			dbaccount.PlatformIn(platforms...),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
-			iqSchedulablePredicate(),
 			dbaccount.Not(dbaccount.HasAccountGroups()),
 			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
@@ -2351,7 +2447,6 @@ func (r *accountRepository) ListModelAvailabilityCandidates(
 	preds := []dbpredicate.Account{
 		dbaccount.StatusEQ(service.StatusActive),
 		dbaccount.SchedulableEQ(true),
-		iqSchedulablePredicate(),
 		dbaccount.PlatformIn(platforms...),
 	}
 	if !includeGrouped {
@@ -2712,7 +2807,7 @@ func (r *accountRepository) ClearModelRateLimits(ctx context.Context, id int64) 
 	client := clientFromContext(ctx, r.client)
 	result, err := client.ExecContext(
 		ctx,
-		"UPDATE accounts SET extra = COALESCE(extra, '{}'::jsonb) - 'model_rate_limits', updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL",
+		"UPDATE accounts SET extra = CASE WHEN jsonb_typeof(extra->'model_rate_limits')='object' AND EXISTS (SELECT 1 FROM jsonb_each(extra->'model_rate_limits') WHERE key LIKE 'iq:%') THEN jsonb_set(COALESCE(extra, '{}'::jsonb), '{model_rate_limits}', (SELECT jsonb_object_agg(key, value) FROM jsonb_each(extra->'model_rate_limits') WHERE key LIKE 'iq:%'), true) ELSE COALESCE(extra, '{}'::jsonb) - 'model_rate_limits' END, updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL",
 		id,
 	)
 	if err != nil {
@@ -2830,6 +2925,16 @@ func (r *accountRepository) AutoPauseExpiredAccounts(ctx context.Context, now ti
 
 func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
 	updates = stripCodexFingerprintSeedFromExtraUpdate(updates)
+	if err := normalizeModelRateLimits(updates); err != nil {
+		return err
+	}
+	if limits, ok := updates["model_rate_limits"].(map[string]any); ok {
+		for key := range limits {
+			if domain.IsIQGateKey(key) {
+				delete(limits, key)
+			}
+		}
+	}
 	if len(updates) == 0 {
 		return nil
 	}
@@ -2846,10 +2951,6 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 		if _, ok := updates[key]; ok {
 			iqConditions = append(iqConditions, "extra->'"+key+"' IS DISTINCT FROM $1::jsonb->'"+key+"'")
 		}
-	}
-	iqExpression := ""
-	if len(iqConditions) > 0 {
-		iqExpression = ", iq_check = CASE WHEN platform='openai' THEN xy_iq_apply_settings(iq_check,'{}'::jsonb,(" + joinClauses(iqConditions, " OR ") + "),NOW()) ELSE iq_check END"
 	}
 	durableSchedulerChange := shouldEnqueueSchedulerOutboxForExtraUpdates(updates) || clearProbeSnapshot || len(iqConditions) > 0
 	baseCtx := ctx
@@ -2869,15 +2970,41 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 		}
 	}
 	extraExpression := "COALESCE(extra, '{}'::jsonb) || $1::jsonb"
+	if _, hasLimits := updates["model_rate_limits"]; hasLimits {
+		extraExpression = "COALESCE(extra, '{}'::jsonb) || jsonb_set($1::jsonb, '{model_rate_limits}', COALESCE(($1::jsonb->'model_rate_limits') || (SELECT COALESCE(jsonb_object_agg(key,value),'{}'::jsonb) FROM jsonb_each(COALESCE(accounts.extra->'model_rate_limits','{}'::jsonb)) WHERE key LIKE 'iq:%'),'{}'::jsonb), true)"
+	}
 	if clearProbeSnapshot {
 		extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
 	}
 	if service.ShouldEnsureCodexFingerprintSeedForExtraUpdates(updates) {
 		extraExpression = ensureCodexFingerprintSeedSQL(extraExpression)
 	}
+	identityChanged := false
+	if len(iqConditions) > 0 {
+		rows, err := client.QueryContext(ctx,
+			"SELECT ("+joinClauses(iqConditions, " OR ")+") FROM accounts WHERE id = $2 AND deleted_at IS NULL FOR NO KEY UPDATE",
+			string(payload), id,
+		)
+		if err != nil {
+			return err
+		}
+		if rows.Next() {
+			if err := rows.Scan(&identityChanged); err != nil {
+				_ = rows.Close()
+				return err
+			}
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+	}
 	result, err := client.ExecContext(
 		ctx,
-		"UPDATE accounts SET extra = "+extraExpression+iqExpression+", updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL",
+		"UPDATE accounts SET extra = "+extraExpression+", updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL",
 		string(payload), id,
 	)
 
@@ -2891,6 +3018,11 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	}
 	if affected == 0 {
 		return service.ErrAccountNotFound
+	}
+	if identityChanged {
+		if _, err := r.ResetIQTargetsOnIdentityChangeTx(ctx, client, id); err != nil {
+			return err
+		}
 	}
 	if durableSchedulerChange {
 		if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
@@ -3116,20 +3248,20 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	if len(ids) == 0 {
 		return 0, nil
 	}
-	if updates.IQCheck != nil {
-		if err := service.ValidateIQCheckSettings(service.PlatformOpenAI, updates.IQCheck); err != nil {
-			return 0, err
-		}
-		invalid, err := r.client.Account.Query().Where(dbaccount.IDIn(ids...), dbaccount.PlatformNEQ(service.PlatformOpenAI)).Exist(ctx)
-		if err != nil {
-			return 0, err
-		}
-		if invalid {
-			return 0, service.ErrIQCheckInvalid
+	if err := service.ValidateIQTargetsPatch(service.PlatformOpenAI, updates.IQTargets); err != nil {
+		return 0, err
+	}
+	updates.Extra = stripCodexFingerprintSeedFromExtraUpdate(updates.Extra)
+	if err := normalizeModelRateLimits(updates.Extra); err != nil {
+		return 0, err
+	}
+	if limits, ok := updates.Extra["model_rate_limits"].(map[string]any); ok {
+		for key := range limits {
+			if domain.IsIQGateKey(key) {
+				delete(limits, key)
+			}
 		}
 	}
-
-	updates.Extra = stripCodexFingerprintSeedFromExtraUpdate(updates.Extra)
 
 	setClauses := make([]string, 0, 8)
 	args := make([]any, 0, 8)
@@ -3196,11 +3328,13 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	}
 	// JSONB 需要合并而非覆盖，使用 raw SQL 保持旧行为。
 	credentialPlaceholder := ""
+	var credentialPayload []byte
 	if len(updates.Credentials) > 0 {
 		payload, err := json.Marshal(updates.Credentials)
 		if err != nil {
 			return 0, err
 		}
+		credentialPayload = payload
 		credentialPlaceholder = "$" + itoa(idx)
 		setClauses = append(setClauses, "credentials = COALESCE(credentials, '{}'::jsonb) || "+credentialPlaceholder+"::jsonb")
 		args = append(args, payload)
@@ -3208,15 +3342,33 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	}
 
 	iqResetConditions := make([]string, 0)
+	iqSelectResetConditions := make([]string, 0)
+	iqSelectArgs := make([]any, 0)
 	if credentialPlaceholder != "" {
-		for _, key := range iqIdentityKeys {
+		identityKeys := make([]string, 0, len(iqTargetIdentityKeys))
+		for _, key := range iqTargetIdentityKeys {
 			if _, ok := updates.Credentials[key]; ok {
+				identityKeys = append(identityKeys, key)
+			}
+		}
+		if len(identityKeys) > 0 {
+			selectCredentialPlaceholder := "$" + itoa(len(iqSelectArgs)+1)
+			iqSelectArgs = append(iqSelectArgs, credentialPayload)
+			for _, key := range identityKeys {
 				iqResetConditions = append(iqResetConditions, "credentials->'"+key+"' IS DISTINCT FROM "+credentialPlaceholder+"::jsonb->'"+key+"'")
+				iqSelectResetConditions = append(iqSelectResetConditions, "credentials->'"+key+"' IS DISTINCT FROM "+selectCredentialPlaceholder+"::jsonb->'"+key+"'")
 			}
 		}
 	}
 	if ollamaProxyIdentityChanged != "" {
 		iqResetConditions = append(iqResetConditions, ollamaProxyIdentityChanged)
+		if *updates.ProxyID == 0 {
+			iqSelectResetConditions = append(iqSelectResetConditions, "proxy_id IS NOT NULL")
+		} else {
+			selectProxyPlaceholder := "$" + itoa(len(iqSelectArgs)+1)
+			iqSelectArgs = append(iqSelectArgs, *updates.ProxyID)
+			iqSelectResetConditions = append(iqSelectResetConditions, "proxy_id IS DISTINCT FROM "+selectProxyPlaceholder)
+		}
 	}
 	for _, key := range iqTransportExtraKeys {
 		if value, ok := updates.Extra[key]; ok {
@@ -3227,25 +3379,12 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			iqResetConditions = append(iqResetConditions, "extra->'"+key+"' IS DISTINCT FROM $"+itoa(idx)+"::jsonb")
 			args = append(args, raw)
 			idx++
+			selectExtraPlaceholder := "$" + itoa(len(iqSelectArgs)+1)
+			iqSelectArgs = append(iqSelectArgs, raw)
+			iqSelectResetConditions = append(iqSelectResetConditions, "extra->'"+key+"' IS DISTINCT FROM "+selectExtraPlaceholder+"::jsonb")
 		}
 	}
-	iqPatch := "'{}'::jsonb"
-	if updates.IQCheck != nil {
-		payload, err := json.Marshal(updates.IQCheck)
-		if err != nil {
-			return 0, err
-		}
-		iqPatch = "$" + itoa(idx) + "::jsonb"
-		idx++
-		args = append(args, payload)
-	}
-	if len(iqResetConditions) > 0 || updates.IQCheck != nil {
-		condition := "false"
-		if len(iqResetConditions) > 0 {
-			condition = "(" + joinClauses(iqResetConditions, " OR ") + ")"
-		}
-		setClauses = append(setClauses, "iq_check = CASE WHEN platform='openai' THEN xy_iq_apply_settings(iq_check,"+iqPatch+","+condition+",NOW()) ELSE iq_check END")
-	}
+	// Identity changes are selected and locked before UPDATE below.
 
 	ollamaGroupIdentityChanges := make([]string, 0, 2)
 	if _, ok := updates.Credentials["api_key"]; ok {
@@ -3292,6 +3431,13 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	if len(updates.Extra) > 0 || len(ollamaGroupIdentityChanges) > 0 || len(opencodeGroupIdentityChanges) > 0 || ollamaProxyIdentityChanged != "" || updates.EnsureCodexFingerprintSeed {
 		extraExpression := "COALESCE(extra, '{}'::jsonb)"
 		if len(updates.Extra) > 0 {
+			if limits, ok := updates.Extra["model_rate_limits"].(map[string]any); ok {
+				for key := range limits {
+					if domain.IsIQGateKey(key) {
+						delete(limits, key)
+					}
+				}
+			}
 			payload, err := json.Marshal(updates.Extra)
 			if err != nil {
 				return 0, err
@@ -3299,6 +3445,9 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			extraExpression += " || $" + itoa(idx) + "::jsonb"
 			args = append(args, payload)
 			idx++
+			if _, hasLimits := updates.Extra["model_rate_limits"]; hasLimits {
+				extraExpression = "(" + extraExpression + ") || jsonb_build_object('model_rate_limits', COALESCE((" + extraExpression + ")->'model_rate_limits', '{}'::jsonb) || (SELECT COALESCE(jsonb_object_agg(key,value),'{}'::jsonb) FROM jsonb_each(COALESCE(accounts.extra->'model_rate_limits','{}'::jsonb)) WHERE key LIKE 'iq:%'))"
+			}
 			if upstreamBillingProbeExplicitlyDisabled(updates.Extra) || upstreamBillingProbeSnapshotClearRequested(updates.Extra) {
 				extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
 			}
@@ -3375,13 +3524,14 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		setClauses = append(setClauses, "extra = "+extraExpression)
 	}
 
-	if len(setClauses) == 0 {
+	if len(setClauses) == 0 && updates.IQTargets == nil {
 		return 0, nil
 	}
 
 	setClauses = append(setClauses, "updated_at = NOW()")
 
-	whereClause := " WHERE id = ANY($" + itoa(idx) + ") AND deleted_at IS NULL"
+	idsPlaceholder := "$" + itoa(idx)
+	whereClause := " WHERE id = ANY(" + idsPlaceholder + ") AND deleted_at IS NULL"
 	args = append(args, pq.Array(ids))
 	idx++
 	if updates.ProbeEnabled != nil {
@@ -3408,6 +3558,53 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			exec = tx.Client()
 		}
 	}
+	targetClient := clientFromContext(ctx, r.client)
+	if updates.IQTargets != nil && targetClient == nil {
+		return 0, errors.New("IQ target update requires an Ent transaction client")
+	}
+	var targetAccountIDs []int64
+	var identityChangedAccountIDs []int64
+	if targetClient != nil && (len(iqResetConditions) > 0 || updates.IQTargets != nil) {
+		identityExpr := "FALSE"
+		if len(iqSelectResetConditions) > 0 {
+			identityExpr = "(" + joinClauses(iqSelectResetConditions, " OR ") + ")"
+		}
+		selectIDsPlaceholder := "$" + itoa(len(iqSelectArgs)+1)
+		selectQuery := "SELECT id, platform, " + identityExpr + " FROM accounts WHERE id = ANY(" + selectIDsPlaceholder + ") AND deleted_at IS NULL"
+		if len(iqResetConditions) > 0 && updates.IQTargets == nil {
+			selectQuery += " AND " + identityExpr
+		}
+		selectQuery += " ORDER BY id FOR NO KEY UPDATE"
+		selectArgs := append(iqSelectArgs, pq.Array(ids))
+		lockRows, err := exec.QueryContext(ctx, selectQuery, selectArgs...)
+		if err != nil {
+			return 0, err
+		}
+		for lockRows.Next() {
+			var accountID int64
+			var platform string
+			var changed bool
+			if err := lockRows.Scan(&accountID, &platform, &changed); err != nil {
+				_ = lockRows.Close()
+				return 0, err
+			}
+			if updates.IQTargets != nil && platform != service.PlatformOpenAI {
+				_ = lockRows.Close()
+				return 0, service.ErrIQCheckInvalid
+			}
+			targetAccountIDs = append(targetAccountIDs, accountID)
+			if changed {
+				identityChangedAccountIDs = append(identityChangedAccountIDs, accountID)
+			}
+		}
+		if err := lockRows.Err(); err != nil {
+			_ = lockRows.Close()
+			return 0, err
+		}
+		if err := lockRows.Close(); err != nil {
+			return 0, err
+		}
+	}
 
 	result, err := exec.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -3431,6 +3628,23 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			return 0, service.ErrUpstreamBillingProbeAccountInvalid
 		}
 	}
+	targetStateChanged := false
+	for _, accountID := range identityChangedAccountIDs {
+		changed, err := r.ResetIQTargetsOnIdentityChangeTx(ctx, targetClient, accountID)
+		if err != nil {
+			return 0, err
+		}
+		targetStateChanged = targetStateChanged || changed
+	}
+	if updates.IQTargets != nil {
+		for _, accountID := range targetAccountIDs {
+			changed, err := r.SaveIQTargetsTx(ctx, targetClient, accountID, *updates.IQTargets)
+			if err != nil {
+				return 0, err
+			}
+			targetStateChanged = targetStateChanged || changed
+		}
+	}
 	if rows > 0 {
 		payload := map[string]any{"account_ids": ids}
 		if err := enqueueSchedulerOutbox(ctx, exec, service.SchedulerOutboxEventAccountBulkChanged, nil, nil, payload); err != nil {
@@ -3443,7 +3657,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 	}
 	if rows > 0 && contextTx == nil {
-		shouldSync := false
+		shouldSync := targetStateChanged
 		if updates.Status != nil && (*updates.Status == service.StatusError || *updates.Status == service.StatusDisabled) {
 			shouldSync = true
 		}
@@ -3482,7 +3696,7 @@ func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID in
 		preds = append(preds, dbaccount.PlatformIn(opts.platforms...))
 	}
 	if opts.schedulable {
-		preds = append(preds, dbaccount.SchedulableEQ(true), iqSchedulablePredicate())
+		preds = append(preds, dbaccount.SchedulableEQ(true))
 		if !opts.ignoreTransientState {
 			now := time.Now()
 			preds = append(preds,
@@ -3806,7 +4020,6 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 		CreatedAt:               m.CreatedAt,
 		UpdatedAt:               m.UpdatedAt,
 		Schedulable:             m.Schedulable,
-		IQCheck:                 m.IqCheck.CurrentAssessment(),
 		RateLimitedAt:           m.RateLimitedAt,
 		RateLimitResetAt:        m.RateLimitResetAt,
 		OverloadUntil:           m.OverloadUntil,

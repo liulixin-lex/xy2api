@@ -42,10 +42,7 @@ func (s *OpenAIGatewayService) codexTicketScanDue(a *Account, now time.Time) boo
 	if !ac.Enabled || !codexAccountTicketEligible(a) || codexTicketAccountRetryAfter(a, now) != nil {
 		return false
 	}
-	if reason, _ := iqHealth(a, now); reason != "" {
-		return false
-	}
-	if a.IQCheck.LeaseUntil != nil && a.IQCheck.LeaseUntil.After(now) {
+	if reason, _ := accountProbeHealth(a, now); reason != "" {
 		return false
 	}
 	runtimes := codexTicketRuntimes(a)

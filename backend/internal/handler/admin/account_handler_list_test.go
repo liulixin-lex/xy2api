@@ -3,7 +3,9 @@ package admin
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -12,9 +14,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
+
+type iqSummaryContextTestKey struct{}
 
 func TestAccountHandlerListLiteUsesCompactDTOAndETag(t *testing.T) {
 	router, adminSvc := setupAccountListRouter()
@@ -29,6 +34,9 @@ func TestAccountHandlerListLiteUsesCompactDTOAndETag(t *testing.T) {
 		AccountGroups: []service.AccountGroup{{AccountID: 501, GroupID: groupID, Priority: 2, Group: &service.Group{ID: groupID, Name: "codex", Platform: service.PlatformOpenAI}}},
 		CreatedAt:     now, UpdatedAt: now,
 	}}
+	adminSvc.iqTargetSummaries = map[int64][]domain.IQTargetSummary{
+		501: {{Model: "gpt-6-astra", Enabled: true, Verdict: "smart", State: "idle"}},
+	}
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?page=1&page_size=20&lite=1", nil)
@@ -47,6 +55,13 @@ func TestAccountHandlerListLiteUsesCompactDTOAndETag(t *testing.T) {
 	require.Equal(t, float64(501), liteItem["id"])
 	require.Equal(t, []any{float64(groupID)}, liteItem["group_ids"])
 	require.Equal(t, true, liteItem["schedulable"])
+	require.NotContains(t, liteItem, "iq_check")
+	iqTargets, ok := liteItem["iq_targets"].([]any)
+	require.True(t, ok)
+	require.Len(t, iqTargets, 1)
+	iqTarget, ok := iqTargets[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "gpt-6-astra", iqTarget["model"])
 	require.NotContains(t, liteItem, "groups")
 	require.NotContains(t, liteItem, "account_groups")
 	credentials, ok := liteItem["credentials"].(map[string]any)
@@ -77,6 +92,8 @@ func TestAccountHandlerListLiteUsesCompactDTOAndETag(t *testing.T) {
 	require.NoError(t, json.Unmarshal(recFull.Body.Bytes(), &fullPayload))
 	require.Contains(t, fullPayload.Data.Items[0], "groups")
 	require.Contains(t, fullPayload.Data.Items[0], "account_groups")
+	require.NotContains(t, fullPayload.Data.Items[0], "iq_check")
+	require.Contains(t, fullPayload.Data.Items[0], "iq_targets")
 }
 
 func TestAccountHandlerListLiteStaysBelowResponseBudget(t *testing.T) {
@@ -148,6 +165,27 @@ func TestAccountHandlerListIncludesCreatedAt(t *testing.T) {
 	require.NoError(t, err)
 	_, offset := parsed.Zone()
 	require.Equal(t, 0, offset)
+}
+
+func TestAccountIQSummaryErrorsPropagateWithRequestContext(t *testing.T) {
+	router, adminSvc := setupAccountListRouter()
+	adminSvc.iqTargetSummariesErr = errors.New("summary read failed")
+	ctx := context.WithValue(context.Background(), iqSummaryContextTestKey{}, "request-context")
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?page=1&page_size=20", nil).WithContext(ctx)
+	listResponse := httptest.NewRecorder()
+	router.ServeHTTP(listResponse, request)
+	require.Equal(t, http.StatusInternalServerError, listResponse.Code)
+	require.Equal(t, "request-context", adminSvc.iqSummariesContextValue)
+
+	adminSvc.iqTargetSummariesErr = nil
+	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	router = gin.New()
+	router.GET("/api/v1/admin/accounts/:id", handler.GetByID)
+	adminSvc.iqTargetSummariesErr = errors.New("summary read failed")
+	detailResponse := httptest.NewRecorder()
+	router.ServeHTTP(detailResponse, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/1", nil).WithContext(ctx))
+	require.Equal(t, http.StatusInternalServerError, detailResponse.Code)
+	require.Equal(t, "request-context", adminSvc.iqSummariesContextValue)
 }
 
 func TestAccountHandlerListReturnsSchedulerScoresPerGroup(t *testing.T) {

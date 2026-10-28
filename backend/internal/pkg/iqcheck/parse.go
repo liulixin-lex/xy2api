@@ -19,6 +19,7 @@ import (
 
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/zstd"
+	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
 )
 
 const MaxEventBytes = 2 * 1024 * 1024
@@ -59,8 +60,8 @@ func failure(code string) error       { return &parseFailure{code: code} }
 func validateEvent(raw []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
-	known := map[string]bool{"output_index": true, "item": true, "type": true, "response": true, "status": true, "output": true, "content": true, "text": true, "answer": true, "role": true, "phase": true, "error": true, "model": true, "choices": true, "delta": true, "message": true, "finish_reason": true, "index": true, "id": true, "refusal": true}
-	critical := map[string]bool{"output_index": true, "item": true, "type": true, "response": true, "status": true, "output": true, "content": true, "text": true, "answer": true, "role": true, "phase": true, "error": true, "choices": true, "delta": true, "message": true, "finish_reason": true, "index": true, "model": true, "id": true, "refusal": true}
+	known := map[string]bool{"headers": true, "openai-model": true, "x-openai-model": true, "output_index": true, "item": true, "type": true, "response": true, "status": true, "output": true, "content": true, "text": true, "answer": true, "role": true, "phase": true, "error": true, "model": true, "choices": true, "delta": true, "message": true, "finish_reason": true, "index": true, "id": true, "refusal": true}
+	critical := known
 	var walk func(int, string) error
 	walk = func(depth int, path string) error {
 		if depth > 32 {
@@ -161,6 +162,97 @@ type streamParser struct {
 	doneItems                  map[int]json.RawMessage
 	itemIDs                    map[string]int
 	d                          *Diagnostic
+	bodyModels, headerModels   []string
+	selection                  openai.DeclarationSelection
+	identityResponseID         string
+}
+
+func collectDeclaration(values *[]string, selected *string, value string, terminal bool) error {
+	if len(value) > 200 {
+		return failure("metadata_too_large")
+	}
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	if terminal {
+		*selected = value
+	}
+	for _, prior := range *values {
+		if prior == value {
+			return nil
+		}
+	}
+	if len(*values) == 4 {
+		return failure("too_many_model_declarations")
+	}
+	*values = append(*values, value)
+	return nil
+}
+
+func (p *streamParser) collectModel(raw json.RawMessage, terminal bool) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	var value string
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return failure("invalid_event_shape")
+	}
+	if err := decode(raw, &value, "model"); err != nil {
+		return err
+	}
+	return collectDeclaration(&p.bodyModels, &p.selection.Body, value, terminal)
+}
+
+func (p *streamParser) collectHeaders(raw json.RawMessage, terminal bool) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	var headers map[string]json.RawMessage
+	if err := decode(raw, &headers, "headers"); err != nil {
+		return err
+	}
+	// Sort to keep diagnostics stable when both supported header names appear.
+	keys := make([]string, 0, len(headers))
+	for key := range headers {
+		if strings.EqualFold(key, "openai-model") || strings.EqualFold(key, "x-openai-model") {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		var value string
+		if bytes.Equal(bytes.TrimSpace(headers[key]), []byte("null")) {
+			return failure("invalid_event_shape")
+		}
+		if err := decode(headers[key], &value, "headers.openai-model"); err != nil {
+			return err
+		}
+		if err := collectDeclaration(&p.headerModels, &p.selection.Header, value, terminal); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *streamParser) collectResponseIdentity(raw []byte, terminal bool) error {
+	var r struct {
+		ID      string          `json:"id"`
+		Model   json.RawMessage `json:"model"`
+		Headers json.RawMessage `json:"headers"`
+	}
+	if err := decode(raw, &r, "response"); err != nil {
+		return err
+	}
+	if r.ID != "" {
+		if p.identityResponseID != "" && p.identityResponseID != r.ID {
+			return failure("conflicting_response_identity")
+		}
+		p.identityResponseID = r.ID
+	}
+	if err := p.collectModel(r.Model, terminal); err != nil {
+		return err
+	}
+	return p.collectHeaders(r.Headers, terminal)
 }
 
 func (p *streamParser) consume(raw []byte, eventName string) error {
@@ -200,6 +292,16 @@ func (p *streamParser) consume(raw []byte, eventName string) error {
 		return p.terminal(raw)
 	}
 	switch env.Type {
+	case "response.created", "response.in_progress":
+		return p.collectResponseIdentity(env.Response, false)
+	case "response.headers":
+		var h struct {
+			Headers json.RawMessage `json:"headers"`
+		}
+		if err := decode(raw, &h, "root"); err != nil {
+			return err
+		}
+		return p.collectHeaders(h.Headers, false)
 	case "error", "response.failed":
 		return failure(ReadUpstreamError(raw, p.d))
 	case "response.incomplete":
@@ -279,6 +381,9 @@ func (p *streamParser) collectDone(raw []byte) error {
 }
 
 func (p *streamParser) terminal(raw []byte) error {
+	if err := p.collectResponseIdentity(raw, true); err != nil {
+		return err
+	}
 	var r struct {
 		ID     string            `json:"id"`
 		Status string            `json:"status"`
@@ -296,9 +401,6 @@ func (p *streamParser) terminal(raw []byte) error {
 		return failure("incomplete_response")
 	}
 	ReadUsage(raw, p.d)
-	if len(r.Model) > 256 {
-		return failure("metadata_too_large")
-	}
 	p.d.TerminalItems = len(r.Output)
 	p.d.AnswerSource = "terminal_output"
 	// Identity and content must agree wherever the terminal repeats a done item.
@@ -417,7 +519,9 @@ func (p *streamParser) terminal(raw []byte) error {
 		p.d.LimitKind, p.d.LimitBytes = "answer_bytes", MaxAnswerBytes
 		return failure("answer_too_large")
 	}
-	if p.completed && (p.answer != answer || p.responseID != r.ID || p.model != r.Model) {
+	// Model declarations use the shared equivalence/conflict classifier below;
+	// only disagreeing answer content or response identity damages the protocol.
+	if p.completed && (p.answer != answer || p.responseID != r.ID) {
 		return failure("conflicting_final_response")
 	}
 	ReadUsage(raw, p.d)
@@ -432,7 +536,7 @@ func (p *streamParser) terminal(raw []byte) error {
 
 func (p *streamParser) consumeChat(raw []byte) error {
 	var r struct {
-		Model   string `json:"model"`
+		Model   json.RawMessage `json:"model"`
 		Choices []struct {
 			Index  int     `json:"index"`
 			Finish *string `json:"finish_reason"`
@@ -450,12 +554,6 @@ func (p *streamParser) consumeChat(raw []byte) error {
 		return err
 	}
 	ReadUsage(raw, p.d)
-	if len(r.Model) > 256 {
-		return failure("metadata_too_large")
-	}
-	if r.Model != "" {
-		p.model = r.Model
-	}
 	for _, c := range r.Choices {
 		if c.Index != 0 {
 			continue
@@ -482,19 +580,18 @@ func (p *streamParser) consumeChat(raw []byte) error {
 			p.completed = true
 		}
 	}
-	return nil
+	return p.collectModel(r.Model, p.completed)
 }
 
-// Parse keeps the established explicit-format API for callers and fixtures.
-func Parse(body io.Reader, sse, chat bool) Result {
+func parseInput(body io.Reader, sse, chat bool, c Check) Result {
 	d := &Diagnostic{ParserVersion: ParserVersion, Stage: "decode", Protocol: "responses"}
 	if chat {
 		d.Protocol = "chat_completions"
 	}
-	return parse(body, sse, chat, d)
+	return parse(body, sse, chat, d, c, nil)
 }
 
-func parse(body io.Reader, sse, chat bool, d *Diagnostic) Result {
+func parse(body io.Reader, sse, chat bool, d *Diagnostic, c Check, headers []string) Result {
 	reader := &countedReader{r: body}
 	p := streamParser{chat: chat, sse: sse, d: d}
 	finish := func(err error) Result {
@@ -531,11 +628,26 @@ func parse(body io.Reader, sse, chat bool, d *Diagnostic) Result {
 		if p.answer == "" && d.Code != "" {
 			return finishUnknown(d, d.Code)
 		}
-		r := Grade(p.answer)
+		if strings.TrimSpace(p.answer) == "" {
+			return finishUnknown(d, "empty_final_text")
+		}
+		identity := openai.ClassifyDeclarations(c.Sent, p.bodyModels, p.headerModels, c.PreferHeader, c.Rules, p.selection)
+		c.declaration = &identity
+		r := Grade(p.answer, c)
+		if r.Diagnostic != nil {
+			d.NaiveAnswer = r.Diagnostic.NaiveAnswer
+		}
+		if identity.Class != openai.ModelSame && identity.Class != openai.ModelEquivalent || len(identity.Flags) > 0 {
+			d.ModelIdentity = &ModelIdentityDiagnostic{Source: identity.Source, Sent: c.Sent, Body: p.bodyModels, Header: p.headerModels, Flags: identity.Flags}
+		}
 		d.Code = r.Reason
-		r.ReportedModel = p.model
 		r.Diagnostic = d.Bounded()
 		return r
+	}
+	for _, value := range headers {
+		if err := collectDeclaration(&p.headerModels, &p.selection.Header, value, false); err != nil {
+			return finish(err)
+		}
 	}
 	if !sse {
 		raw, err := io.ReadAll(reader)
@@ -626,7 +738,7 @@ func finishUnknown(d *Diagnostic, code string) Result {
 
 // ParseHTTP resolves media type once and parses the decoded response stream.
 // Transport normally decompresses; bounded decoding covers plugin responses too.
-func ParseHTTP(resp *http.Response, chat bool, transport string) (result Result) {
+func ParseHTTP(resp *http.Response, chat bool, transport string, c Check) (result Result) {
 	started := time.Now()
 	defer func() {
 		if result.Diagnostic != nil {
@@ -750,7 +862,13 @@ func ParseHTTP(resp *http.Response, chat bool, transport string) (result Result)
 	}
 	d.FormatDetected = (sse && media != "text/event-stream") || (!sse && media != "application/json")
 	d.Stage = "decode"
-	result = parse(io.MultiReader(bytes.NewReader(prefix), br), sse, chat, d)
+	var headers []string
+	for key, values := range resp.Header {
+		if strings.EqualFold(key, "openai-model") {
+			headers = append(headers, values...)
+		}
+	}
+	result = parse(io.MultiReader(bytes.NewReader(prefix), br), sse, chat, d, c, headers)
 	if d.Encoding != "" && d.Encoding != "identity" && result.Reason == "response_read_failed" {
 		result = finishUnknown(result.Diagnostic, "response_decompression_failed")
 	}

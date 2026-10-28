@@ -2043,6 +2043,46 @@
     {
       "path": "backend/internal/service/gateway_service.go",
       "value": "return s.bindGatewayStickySession(ctx, groupID, sessionHash, accountID, resilience.StateFrom(ctx).Model())"
+    },
+    {
+      "path": "backend/internal/repository/account_repo.go",
+      "value": "account.Extra = stripIQGateEntries(account.Extra)"
+    },
+    {
+      "path": "backend/internal/repository/account_repo.go",
+      "value": "r.ResetIQTargetsOnIdentityChangeTx(ctx, client, account.ID)"
+    },
+    {
+      "path": "backend/internal/repository/account_repo.go",
+      "value": "WHERE key LIKE 'iq:%'"
+    },
+    {
+      "path": "backend/internal/service/admin_account.go",
+      "value": "ValidateIQTargetsPatch(input.Platform, input.IQTargets)"
+    },
+    {
+      "path": "backend/internal/service/admin_account.go",
+      "value": "account.IQTargetsPatch = input.IQTargets"
+    },
+    {
+      "path": "backend/internal/handler/admin/account_handler.go",
+      "value": "*domain.IQTargetsPatch"
+    },
+    {
+      "path": "backend/internal/handler/dto/types.go",
+      "value": "[]domain.IQTargetSummary"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "iqGateBlocksRequest(account, requestedModel, true, compactOutbound)"
+    },
+    {
+      "path": "frontend/src/types/index.ts",
+      "value": "iq_check?: IQTargetsPatch"
+    },
+    {
+      "path": "frontend/src/components/account/EditAccountModal.vue",
+      "value": "@patch=\"iqPatch = $event\""
     }
   ],
   "forbidden_module_paths": [

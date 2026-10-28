@@ -15,7 +15,6 @@ func (r *accountRepository) ListCodexTicketScanPage(ctx context.Context, after i
 	}
 	rows, err := r.client.QueryContext(ctx, `SELECT a.id,a.platform,a.type,a.status,a.schedulable,
  a.proxy_id,a.expires_at,a.auto_pause_on_expired,a.rate_limit_reset_at,a.overload_until,a.temp_unschedulable_until,
- a.iq_check,
  COALESCE((SELECT jsonb_object_agg(key,value) FROM jsonb_each(COALESCE(a.credentials,'{}'::jsonb))
  WHERE key IN ('chatgpt_account_id','chatgpt_user_id','email','client_id','oauth_type','openai_auth_type','agent_identity','header_override_enabled','header_overrides','user_agent','device_id','base_url')
  OR (a.type='setup-token' AND key='access_token')),'{}'::jsonb),
@@ -34,11 +33,8 @@ func (r *accountRepository) ListCodexTicketScanPage(ctx context.Context, after i
 	out := make([]service.Account, 0, limit)
 	for rows.Next() {
 		var a service.Account
-		var iq, credentials, extra, proxy []byte
-		if err = rows.Scan(&a.ID, &a.Platform, &a.Type, &a.Status, &a.Schedulable, &a.ProxyID, &a.ExpiresAt, &a.AutoPauseOnExpired, &a.RateLimitResetAt, &a.OverloadUntil, &a.TempUnschedulableUntil, &iq, &credentials, &extra, &proxy); err != nil {
-			return nil, err
-		}
-		if err = json.Unmarshal(iq, &a.IQCheck); err != nil {
+		var credentials, extra, proxy []byte
+		if err = rows.Scan(&a.ID, &a.Platform, &a.Type, &a.Status, &a.Schedulable, &a.ProxyID, &a.ExpiresAt, &a.AutoPauseOnExpired, &a.RateLimitResetAt, &a.OverloadUntil, &a.TempUnschedulableUntil, &credentials, &extra, &proxy); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal(credentials, &a.Credentials); err != nil {

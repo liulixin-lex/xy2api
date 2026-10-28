@@ -78,6 +78,8 @@ func TestOpenAIQualityDetection(t *testing.T) {
 		want     bool
 	}{
 		{"gpt-6-astra", "gpt-5.6-luna", true},
+		{"gpt-6.1-sol", "gpt-5.6-luna", true},
+		{"gpt-6-sol", "gpt-5.6-luna", true},
 		{"gpt-6", "gpt-5.6-luna", true},
 		{"gpt-6-astra-max", "gpt-5.6-luna-max", true},
 		{"gpt-6-astra-2026-09-01-high", "gpt-5.6-luna", true},
@@ -85,7 +87,7 @@ func TestOpenAIQualityDetection(t *testing.T) {
 		{"gpt-6-unknown", "gpt-5.6-luna", false},
 		{"gpt-5.6-sol", "gpt-5.6-luna-max", true},
 		{"openai/gpt6_astra", "gpt-5.6-luna-2026-09-01", true},
-		{"vendor/GPT 6 ASTRA", "gpt-5.6-luna-2026-09-01-max", true},
+		{"vendor/GPT 6 ASTRA", "gpt-5.6-luna-2026-09-01-max", false},
 		{"gpt-6-astra", "gpt-5.6-luna-2026-02-31", false},
 		{"gpt-5.6-terra-high", "gpt-5.6-luna", true},
 		{"gpt-5.6-sol", "gpt-5.6-terra", false},
@@ -101,7 +103,7 @@ func TestOpenAIQualityDetection(t *testing.T) {
 	}
 	s.cfg = &config.Config{}
 	s.cfg.Gateway.OpenAIQualityRouting.Rules = []config.OpenAIQualityRoutingRule{{From: "gpt-7", To: "gpt-5.6-terra"}}
-	require.True(t, s.qualityDowngrade("gpt-7", "gpt-5.6-terra"))
+	require.False(t, s.qualityDowngrade("gpt-7", "gpt-5.6-terra"), "unknown rule names are rejected by the shared model identity classifier")
 }
 
 func TestOpenAIQualityObserverEvidence(t *testing.T) {

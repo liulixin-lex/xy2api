@@ -4,6 +4,7 @@ package ent
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"strings"
 	"time"
@@ -12,7 +13,6 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"github.com/liulixin-lex/xy2api/ent/account"
 	"github.com/liulixin-lex/xy2api/ent/proxy"
-	"github.com/liulixin-lex/xy2api/internal/domain"
 )
 
 // Account is the model entity for the Account schema.
@@ -63,7 +63,7 @@ type Account struct {
 	// Schedulable holds the value of the "schedulable" field.
 	Schedulable bool `json:"schedulable,omitempty"`
 	// IqCheck holds the value of the "iq_check" field.
-	IqCheck domain.IQCheck `json:"iq_check,omitempty"`
+	IqCheck jsontext.Value `json:"iq_check,omitempty"`
 	// RateLimitedAt holds the value of the "rate_limited_at" field.
 	RateLimitedAt *time.Time `json:"rate_limited_at,omitempty"`
 	// RateLimitResetAt holds the value of the "rate_limit_reset_at" field.

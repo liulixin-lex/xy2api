@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +22,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -112,66 +112,10 @@ func qualityEvent(event, scope string, account int64, generation uint64, details
 	slog.Info("openai_quality_routing", append(attrs, details...)...)
 }
 
-var qualityModelPattern = regexp.MustCompile(`^gpt-([0-9]+)(?:\.([0-9]+))?(?:-(astra|sol|terra|luna))?((?:-[a-z0-9]+)*)$`)
-var qualityDatePattern = regexp.MustCompile(`-\d{4}-\d{2}-\d{2}(?:$|-(?:max|high|medium|low|minimal|xhigh|none)$)`)
-
 // Deliberately does not use the forgiving Codex model mapper: unknown names and
 // suffixes are not evidence of a downgrade.
 func canonicalQualityModel(raw string) string {
-	if len(raw) > upstreamResponseModelMaxLength {
-		return ""
-	}
-	v := strings.ToLower(strings.TrimSpace(raw))
-	if slash := strings.LastIndexByte(v, '/'); slash >= 0 {
-		v = strings.TrimSpace(v[slash+1:])
-	}
-	v = strings.ReplaceAll(v, "_", "-")
-	if strings.ContainsAny(v, " \t\r\n") {
-		v = strings.Join(strings.Fields(v), "-")
-	}
-	for strings.Contains(v, "--") {
-		v = strings.ReplaceAll(v, "--", "-")
-	}
-	if strings.HasPrefix(v, "gpt") && len(v) > 3 && v[3] >= '0' && v[3] <= '9' {
-		v = "gpt-" + v[3:]
-	}
-	if loc := qualityDatePattern.FindStringIndex(v); loc != nil {
-		dateEnd := loc[0] + 11
-		if _, err := time.Parse("2006-01-02", v[loc[0]+1:dateEnd]); err != nil {
-			return ""
-		}
-		v = v[:loc[0]] + v[dateEnd:]
-	}
-	m := qualityModelPattern.FindStringSubmatch(v)
-	if m == nil {
-		return ""
-	}
-	major, _ := strconv.Atoi(m[1])
-	minor, _ := strconv.Atoi(m[2])
-	if major < 5 || major == 5 && minor < 6 {
-		return ""
-	}
-	if m[4] != "" {
-		switch m[4] {
-		case "-max", "-high", "-medium", "-low", "-minimal", "-xhigh", "-none":
-		default:
-			return ""
-		}
-	}
-	base := "gpt-" + m[1]
-	if m[2] != "" {
-		base += "." + m[2]
-	}
-	if m[3] != "" {
-		return base + "-" + m[3]
-	}
-	switch base {
-	case "gpt-6":
-		return "gpt-6-astra"
-	case "gpt-5.6":
-		return "gpt-5.6-sol"
-	}
-	return base
+	return openai.ModelIdentity(raw).Base
 }
 
 func (s *OpenAIGatewayService) qualityConfig() config.OpenAIQualityRoutingConfig {
@@ -186,18 +130,7 @@ func (s *OpenAIGatewayService) qualityDowngrade(outbound, observed string) bool 
 	if from == "" || to == "" || from == to {
 		return false
 	}
-	if to == "gpt-5.6-luna" {
-		switch from {
-		case "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra":
-			return true
-		}
-	}
-	for _, r := range s.qualityConfig().Rules {
-		if canonicalQualityModel(r.From) == from && canonicalQualityModel(r.To) == to {
-			return true
-		}
-	}
-	return false
+	return openai.ClassifyDeclaredModel(from, to, s.qualityConfig().DowngradeRules()) == openai.ModelDowngrade
 }
 
 func qualityDigest(value string) string {

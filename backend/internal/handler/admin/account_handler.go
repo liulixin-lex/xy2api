@@ -68,7 +68,6 @@ type AccountHandler struct {
 	tokenCacheInvalidator   service.TokenCacheInvalidator
 	grokImportProber        grokImportProber
 	upstreamBillingProbe    *service.UpstreamBillingProbeService
-	iqCheckService          *service.IQCheckService
 	ollamaCloudUsage        *service.OllamaCloudUsageService
 	codexTicketSettings     *service.SettingService
 	codexAccountTickets     codexAccountTicketManager
@@ -79,99 +78,6 @@ type AccountHandler struct {
 // SetUpstreamBillingProbeService attaches the optional remote billing probe service.
 func (h *AccountHandler) SetUpstreamBillingProbeService(probe *service.UpstreamBillingProbeService) {
 	h.upstreamBillingProbe = probe
-}
-
-func (h *AccountHandler) SetIQCheckService(check *service.IQCheckService) { h.iqCheckService = check }
-
-func (h *AccountHandler) ListIQCheckModels(c *gin.Context) {
-	if h.iqCheckService == nil {
-		response.ErrorFrom(c, service.ErrIQCheckInvalid)
-		return
-	}
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.ErrorFrom(c, service.ErrIQCheckInvalid)
-		return
-	}
-	result, err := h.iqCheckService.Models(c.Request.Context(), id, c.Query("refresh") == "true")
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, result)
-}
-
-func (h *AccountHandler) ConfigureIQCheck(c *gin.Context) {
-	if h.iqCheckService == nil {
-		response.ErrorFrom(c, service.ErrIQCheckInvalid)
-		return
-	}
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	var settings domain.IQCheckSettings
-	if err := c.ShouldBindJSON(&settings); err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	state, err := h.iqCheckService.Configure(c.Request.Context(), id, settings)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, state.Summary())
-}
-
-func (h *AccountHandler) GetIQCheckStatus(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 || h.iqCheckService == nil {
-		response.ErrorFrom(c, service.ErrIQCheckInvalid)
-		return
-	}
-	state, err := h.iqCheckService.Status(c.Request.Context(), id)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, state)
-}
-
-func (h *AccountHandler) RunIQCheck(c *gin.Context) {
-	if h.iqCheckService == nil {
-		response.ErrorFrom(c, service.ErrIQCheckInvalid)
-		return
-	}
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	result, err := h.iqCheckService.QueueStatus(c.Request.Context(), id)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, result)
-}
-
-func (h *AccountHandler) ListIQCheckResults(c *gin.Context) {
-	if h.iqCheckService == nil {
-		response.ErrorFrom(c, service.ErrIQCheckInvalid)
-		return
-	}
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	items, err := h.iqCheckService.Records(c.Request.Context(), id)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, items)
 }
 
 func (h *AccountHandler) SetOllamaCloudUsageService(usage *service.OllamaCloudUsageService) {
@@ -225,51 +131,51 @@ func NewAccountHandler(
 
 // CreateAccountRequest represents create account request
 type CreateAccountRequest struct {
-	IQCheck                 *domain.IQCheckSettings `json:"iq_check"`
-	Name                    string                  `json:"name" binding:"required"`
-	Notes                   *string                 `json:"notes"`
-	Platform                string                  `json:"platform" binding:"required"`
-	Type                    string                  `json:"type" binding:"required,oneof=oauth setup-token apikey upstream bedrock service_account"`
-	Credentials             map[string]any          `json:"credentials" binding:"required"`
-	Extra                   map[string]any          `json:"extra"`
-	ProxyID                 *int64                  `json:"proxy_id"`
-	Concurrency             int                     `json:"concurrency"`
-	Priority                int                     `json:"priority"`
-	RateMultiplier          *float64                `json:"rate_multiplier"`
-	LoadFactor              *int                    `json:"load_factor"`
-	GroupIDs                []int64                 `json:"group_ids"`
-	ExpiresAt               *int64                  `json:"expires_at"`
-	AutoPauseOnExpired      *bool                   `json:"auto_pause_on_expired"`
-	ProbeEnabled            *bool                   `json:"upstream_billing_probe_enabled"`
-	ConfirmMixedChannelRisk *bool                   `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
+	IQCheck                 *domain.IQTargetsPatch `json:"iq_check"`
+	Name                    string                 `json:"name" binding:"required"`
+	Notes                   *string                `json:"notes"`
+	Platform                string                 `json:"platform" binding:"required"`
+	Type                    string                 `json:"type" binding:"required,oneof=oauth setup-token apikey upstream bedrock service_account"`
+	Credentials             map[string]any         `json:"credentials" binding:"required"`
+	Extra                   map[string]any         `json:"extra"`
+	ProxyID                 *int64                 `json:"proxy_id"`
+	Concurrency             int                    `json:"concurrency"`
+	Priority                int                    `json:"priority"`
+	RateMultiplier          *float64               `json:"rate_multiplier"`
+	LoadFactor              *int                   `json:"load_factor"`
+	GroupIDs                []int64                `json:"group_ids"`
+	ExpiresAt               *int64                 `json:"expires_at"`
+	AutoPauseOnExpired      *bool                  `json:"auto_pause_on_expired"`
+	ProbeEnabled            *bool                  `json:"upstream_billing_probe_enabled"`
+	ConfirmMixedChannelRisk *bool                  `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
 }
 
 // UpdateAccountRequest represents update account request
 // 使用指针类型来区分"未提供"和"设置为0"
 type UpdateAccountRequest struct {
-	IQCheck                 *domain.IQCheckSettings `json:"iq_check"`
-	Name                    string                  `json:"name"`
-	Notes                   *string                 `json:"notes"`
-	Type                    string                  `json:"type" binding:"omitempty,oneof=oauth setup-token apikey upstream bedrock service_account"`
-	Credentials             map[string]any          `json:"credentials"`
-	Extra                   map[string]any          `json:"extra"`
-	ProxyID                 *int64                  `json:"proxy_id"`
-	Concurrency             *int                    `json:"concurrency"`
-	Priority                *int                    `json:"priority"`
-	RateMultiplier          *float64                `json:"rate_multiplier"`
-	LoadFactor              *int                    `json:"load_factor"`
-	Status                  string                  `json:"status" binding:"omitempty,oneof=active inactive error"`
-	GroupIDs                *[]int64                `json:"group_ids"`
-	ExpiresAt               *int64                  `json:"expires_at"`
-	AutoPauseOnExpired      *bool                   `json:"auto_pause_on_expired"`
-	ProbeEnabled            *bool                   `json:"upstream_billing_probe_enabled"`
-	RateSyncEnabled         *bool                   `json:"upstream_billing_rate_sync_enabled"`
-	ConfirmMixedChannelRisk *bool                   `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
+	IQCheck                 *domain.IQTargetsPatch `json:"iq_check"`
+	Name                    string                 `json:"name"`
+	Notes                   *string                `json:"notes"`
+	Type                    string                 `json:"type" binding:"omitempty,oneof=oauth setup-token apikey upstream bedrock service_account"`
+	Credentials             map[string]any         `json:"credentials"`
+	Extra                   map[string]any         `json:"extra"`
+	ProxyID                 *int64                 `json:"proxy_id"`
+	Concurrency             *int                   `json:"concurrency"`
+	Priority                *int                   `json:"priority"`
+	RateMultiplier          *float64               `json:"rate_multiplier"`
+	LoadFactor              *int                   `json:"load_factor"`
+	Status                  string                 `json:"status" binding:"omitempty,oneof=active inactive error"`
+	GroupIDs                *[]int64               `json:"group_ids"`
+	ExpiresAt               *int64                 `json:"expires_at"`
+	AutoPauseOnExpired      *bool                  `json:"auto_pause_on_expired"`
+	ProbeEnabled            *bool                  `json:"upstream_billing_probe_enabled"`
+	RateSyncEnabled         *bool                  `json:"upstream_billing_rate_sync_enabled"`
+	ConfirmMixedChannelRisk *bool                  `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
 }
 
 // BulkUpdateAccountsRequest represents the payload for bulk editing accounts
 type BulkUpdateAccountsRequest struct {
-	IQCheck                 *domain.IQCheckSettings   `json:"iq_check"`
+	IQCheck                 *domain.IQTargetsPatch    `json:"iq_check"`
 	AccountIDs              []int64                   `json:"account_ids"`
 	Filters                 *BulkUpdateAccountFilters `json:"filters"`
 	Name                    string                    `json:"name"`
@@ -455,13 +361,27 @@ type AccountSchedulerGroupScore struct {
 
 const accountListGroupUngroupedQueryValue = "ungrouped"
 
-func (h *AccountHandler) accountResponseFromService(account *service.Account) *dto.Account {
+func (h *AccountHandler) accountResponseWithContext(ctx context.Context, account *service.Account) (*dto.Account, error) {
+	if account != nil {
+		if h.adminService == nil {
+			account.IQTargets = []domain.IQTargetSummary{}
+		} else {
+			summaries, err := h.adminService.ListIQTargetSummaries(ctx, []int64{account.ID})
+			if err != nil {
+				return nil, err
+			}
+			account.IQTargets = summaries[account.ID]
+			if account.IQTargets == nil {
+				account.IQTargets = []domain.IQTargetSummary{}
+			}
+		}
+	}
 	out := dto.AccountFromService(account)
 	h.enrichCodexTicketStatus(account, out)
 	if h != nil && h.ollamaCloudUsage != nil && out != nil {
 		h.ollamaCloudUsage.EnrichState(out.OllamaCloudUsage)
 	}
-	return out
+	return out, nil
 }
 
 func (h *AccountHandler) accountListResponseFromService(account *service.Account) *dto.Account {
@@ -490,14 +410,19 @@ func (h *AccountHandler) isSimpleMode() bool {
 	return h != nil && h.cfg != nil && h.cfg.RunMode == config.RunModeSimple
 }
 
-func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, account *service.Account) AccountWithConcurrency {
+func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, account *service.Account) (AccountWithConcurrency, error) {
 	item := AccountWithConcurrency{
-		Account:            h.accountResponseFromService(account),
+		Account:            nil,
 		simpleMode:         h.isSimpleMode(),
 		CurrentConcurrency: 0,
 	}
+	var err error
+	item.Account, err = h.accountResponseWithContext(ctx, account)
+	if err != nil {
+		return AccountWithConcurrency{}, err
+	}
 	if account == nil {
-		return item
+		return item, nil
 	}
 
 	if h.concurrencyService != nil {
@@ -534,7 +459,7 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 
 	h.enrichShadowParents(ctx, []AccountWithConcurrency{item})
 
-	return item
+	return item, nil
 }
 
 // scoreOpenAIAccountSchedulerPool 对池内 OpenAI 账号计算调度分数快照。
@@ -833,6 +758,23 @@ func (h *AccountHandler) List(c *gin.Context) {
 			}
 		}
 	}
+	if len(accounts) > 0 {
+		ids := make([]int64, len(accounts))
+		for i := range accounts {
+			ids[i] = accounts[i].ID
+		}
+		summaries, err := h.adminService.ListIQTargetSummaries(c.Request.Context(), ids)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		for i := range accounts {
+			accounts[i].IQTargets = summaries[accounts[i].ID]
+			if accounts[i].IQTargets == nil {
+				accounts[i].IQTargets = []domain.IQTargetSummary{}
+			}
+		}
+	}
 
 	// Get current concurrency counts for all accounts
 	accountIDs := make([]int64, len(accounts))
@@ -935,7 +877,11 @@ func (h *AccountHandler) List(c *gin.Context) {
 	result := make([]AccountWithConcurrency, len(accounts))
 	for i := range accounts {
 		acc := &accounts[i]
-		accountResponse := h.accountResponseFromService(acc)
+		accountResponse := dto.AccountFromService(acc)
+		h.enrichCodexTicketStatus(acc, accountResponse)
+		if h.ollamaCloudUsage != nil {
+			h.ollamaCloudUsage.EnrichState(accountResponse.OllamaCloudUsage)
+		}
 		if lite {
 			accountResponse = h.accountListResponseFromService(acc)
 			if h.isSimpleMode() {
@@ -1100,7 +1046,12 @@ func (h *AccountHandler) GetByID(c *gin.Context) {
 		}
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+	item, err := h.buildAccountResponseWithRuntime(c.Request.Context(), account)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
 }
 
 // CheckMixedChannel handles checking mixed channel risk for account-group binding.
@@ -1194,7 +1145,7 @@ func (h *AccountHandler) Create(c *gin.Context) {
 			ExpiresAt:             req.ExpiresAt,
 			AutoPauseOnExpired:    req.AutoPauseOnExpired,
 			ProbeEnabled:          req.ProbeEnabled,
-			IQCheck:               req.IQCheck,
+			IQTargets:             req.IQCheck,
 			SkipMixedChannelCheck: skipCheck,
 		})
 		if execErr != nil {
@@ -1205,7 +1156,7 @@ func (h *AccountHandler) Create(c *gin.Context) {
 		h.adminService.ForceAntigravityPrivacy(ctx, account)
 		// OpenAI OAuth: 新账号直接设置隐私
 		h.adminService.ForceOpenAIPrivacy(ctx, account)
-		return h.buildAccountResponseWithRuntime(ctx, account), nil
+		return h.buildAccountResponseWithRuntime(ctx, account)
 	})
 	if err != nil {
 		// 检查是否为混合渠道错误
@@ -1258,7 +1209,7 @@ func (h *AccountHandler) Duplicate(c *gin.Context) {
 			if execErr != nil {
 				return nil, execErr
 			}
-			return h.buildAccountResponseWithRuntime(ctx, account), nil
+			return h.buildAccountResponseWithRuntime(ctx, account)
 		},
 	)
 	if err != nil {
@@ -1269,7 +1220,12 @@ func (h *AccountHandler) Duplicate(c *gin.Context) {
 				slog.Warn("account_duplicate_recovery_failed", "account_id", accountID, "actor_scope", actorScope, "reason", reason, "error", recoverErr)
 			} else if recovered != nil {
 				c.Header("X-Idempotency-Recovered", "true")
-				response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), recovered))
+				item, responseErr := h.buildAccountResponseWithRuntime(c.Request.Context(), recovered)
+				if responseErr != nil {
+					response.ErrorFrom(c, responseErr)
+					return
+				}
+				response.Success(c, item)
 				return
 			}
 		}
@@ -1327,7 +1283,7 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		ExpiresAt:             req.ExpiresAt,
 		AutoPauseOnExpired:    req.AutoPauseOnExpired,
 		ProbeEnabled:          req.ProbeEnabled,
-		IQCheck:               req.IQCheck,
+		IQTargets:             req.IQCheck,
 		RateSyncEnabled:       req.RateSyncEnabled,
 		SkipMixedChannelCheck: skipCheck,
 	})
@@ -1353,7 +1309,12 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		h.scheduleOpenAIResponsesProbe(account)
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+	item, err := h.buildAccountResponseWithRuntime(c.Request.Context(), account)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
 }
 
 // scheduleOpenAIResponsesProbe 异步触发 OpenAI APIKey 账号的 Responses API 能力探测。
@@ -1482,7 +1443,12 @@ func (h *AccountHandler) RecoverState(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+	item, err := h.buildAccountResponseWithRuntime(c.Request.Context(), account)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
 }
 
 // ClearCapabilityLearning removes only learned stream-mode restrictions.
@@ -1727,15 +1693,25 @@ func (h *AccountHandler) Refresh(c *gin.Context) {
 	}
 
 	if warning == "missing_project_id_temporary" {
+		item, responseErr := h.buildAccountResponseWithRuntime(c.Request.Context(), updatedAccount)
+		if responseErr != nil {
+			response.ErrorFrom(c, responseErr)
+			return
+		}
 		response.Success(c, gin.H{
-			"account": h.buildAccountResponseWithRuntime(c.Request.Context(), updatedAccount),
+			"account": item,
 			"message": "Token refreshed successfully, but project_id could not be retrieved (will retry automatically)",
 			"warning": "missing_project_id_temporary",
 		})
 		return
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), updatedAccount))
+	item, err := h.buildAccountResponseWithRuntime(c.Request.Context(), updatedAccount)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
 }
 
 // ApplyOAuthCredentialsRequest is the payload for persisting re-authorized OAuth credentials.
@@ -1858,7 +1834,12 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 		}
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(ctx, updatedAccount))
+	item, err := h.buildAccountResponseWithRuntime(ctx, updatedAccount)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
 }
 
 // GetStats handles getting account statistics
@@ -1915,7 +1896,12 @@ func (h *AccountHandler) ClearError(c *gin.Context) {
 		}
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+	item, err := h.buildAccountResponseWithRuntime(c.Request.Context(), account)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
 }
 
 // RevertProxyFallback handles reverting account proxy to original before fallback.
@@ -2520,7 +2506,7 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		Credentials:           req.Credentials,
 		Extra:                 req.Extra,
 		ProbeEnabled:          req.ProbeEnabled,
-		IQCheck:               req.IQCheck,
+		IQTargets:             req.IQCheck,
 		SkipMixedChannelCheck: skipCheck,
 	})
 	if err != nil {
@@ -2752,7 +2738,12 @@ func (h *AccountHandler) ClearRateLimit(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+	item, err := h.buildAccountResponseWithRuntime(c.Request.Context(), account)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
 }
 
 // ResetQuota handles resetting account quota usage
@@ -2775,7 +2766,12 @@ func (h *AccountHandler) ResetQuota(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+	item, err := h.buildAccountResponseWithRuntime(c.Request.Context(), account)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
 }
 
 // GetTempUnschedulable handles getting temporary unschedulable status
@@ -2957,7 +2953,12 @@ func (h *AccountHandler) SetSchedulable(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+	item, err := h.buildAccountResponseWithRuntime(c.Request.Context(), account)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
 }
 
 // GetAvailableModels handles getting available models for an account
@@ -3351,10 +3352,20 @@ func (h *AccountHandler) SetPrivacy(c *gin.Context) {
 			account.Extra = make(map[string]any)
 		}
 		account.Extra["privacy_mode"] = mode
-		response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+		item, responseErr := h.buildAccountResponseWithRuntime(c.Request.Context(), account)
+		if responseErr != nil {
+			response.ErrorFrom(c, responseErr)
+			return
+		}
+		response.Success(c, item)
 		return
 	}
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), updated))
+	item, err := h.buildAccountResponseWithRuntime(c.Request.Context(), updated)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
 }
 
 // RefreshTier handles refreshing Google One tier for a single account
@@ -3541,24 +3552,4 @@ func sanitizeExtraBaseRPM(extra map[string]any) {
 		v = 10000
 	}
 	extra["base_rpm"] = v
-}
-
-func (h *AccountHandler) DownloadIQCheckDiagnostics(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	if h.iqCheckService == nil {
-		response.ErrorFrom(c, service.ErrIQCheckInvalid)
-		return
-	}
-	result, err := h.iqCheckService.Diagnostics(c.Request.Context(), id)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	c.Header("Content-Disposition", `attachment; filename="iq-check-diagnostics.json"`)
-	c.Header("Cache-Control", "no-store")
-	c.JSON(200, result)
 }

@@ -1,6 +1,6 @@
 # 智商检测稳定性实施交接
 
-> 本文保留早期实施记录。2026-09-27 后的当前状态、最多3次请求、余额复检与解析限制以 [OPENAI_IQ_CHECK.md](OPENAI_IQ_CHECK.md) 及 [IQ_CURRENT_HEALTH.md](IQ_CURRENT_HEALTH.md) 为准。下文“两次”“最后有效判定保持当前状态”等描述不再代表现行实现。
+> 历史记录：本文保留早期实施记录，描述的是已被取代的单模型实现。现行行为是按“账号 × 模型”检测与冷却、未知不改变判定，见 [OPENAI_IQ_CHECK.md](OPENAI_IQ_CHECK.md)。
 
 实施对象：v0.0.11 / `b07824af9f94dc5dfd40b5e4789e17a62daae592`，本地分支 `fix/iq-reliability-v2`。原仓库已快进到该远端版本；实现位于 `<工作机 A>/artifacts/openai-iq-check/reliability-work`。未改变糖果题、标准答案21、默认模型或评分口径。答错但取得有效答案也算链路成功。
 

@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
@@ -10,7 +11,9 @@ import (
 func TestAccountResponseCodexTicketsUsesConfiguredPolicy(t *testing.T) {
 	account := &service.Account{ID: 41, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth}
 	h := &AccountHandler{cfg: &config.Config{}}
-	require.Empty(t, h.accountResponseFromService(account).CodexTurnTickets)
+	response, err := h.accountResponseWithContext(context.Background(), account)
+	require.NoError(t, err)
+	require.Empty(t, response.CodexTurnTickets)
 	require.Empty(t, h.accountListResponseFromService(account).CodexTurnTickets)
 	h.cfg.Gateway.OpenAICodexTicket = config.OpenAICodexTicketConfig{Enabled: true, Models: []string{"configured-model"}, FailClosed: false}
 	// A global switch must not add missing-ticket warnings to untouched accounts.
@@ -23,7 +26,9 @@ func TestAccountResponseCodexTicketsUsesConfiguredPolicy(t *testing.T) {
 	require.Equal(t, "gpt-6-astra", status[0].Model)
 	require.True(t, status[0].Blocked)
 	h.cfg.Gateway.OpenAICodexTicket.FailClosed = true
-	require.True(t, h.accountResponseFromService(account).CodexTurnTickets[0].Blocked)
+	response, err = h.accountResponseWithContext(context.Background(), account)
+	require.NoError(t, err)
+	require.True(t, response.CodexTurnTickets[0].Blocked)
 }
 
 func TestAccountResponseCodexTicketsReadsLiveSettingsAfterRestart(t *testing.T) {
@@ -41,5 +46,7 @@ func TestAccountResponseCodexTicketsReadsLiveSettingsAfterRestart(t *testing.T) 
 	require.False(t, cfg.Gateway.OpenAICodexTicket.Enabled)
 	repo.values[service.SettingKeyOpenAICodexTicketEnabled] = "false"
 	settings.InvalidateOpenAICodexTicketEnabledCache()
-	require.Empty(t, h.accountResponseFromService(account).CodexTurnTickets)
+	response, err := h.accountResponseWithContext(context.Background(), account)
+	require.NoError(t, err)
+	require.Empty(t, response.CodexTurnTickets)
 }

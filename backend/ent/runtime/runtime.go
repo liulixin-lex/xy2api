@@ -3,6 +3,7 @@
 package runtime
 
 import (
+	"encoding/json/jsontext"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/ent/account"
@@ -255,7 +256,7 @@ func init() {
 	// accountDescIqCheck is the schema descriptor for iq_check field.
 	accountDescIqCheck := accountFields[18].Descriptor()
 	// account.DefaultIqCheck holds the default value on creation for the iq_check field.
-	account.DefaultIqCheck = accountDescIqCheck.Default.(func() domain.IQCheck)
+	account.DefaultIqCheck = accountDescIqCheck.Default.(func() jsontext.Value)
 	// accountDescSessionWindowStatus is the schema descriptor for session_window_status field.
 	accountDescSessionWindowStatus := accountFields[26].Descriptor()
 	// account.SessionWindowStatusValidator is a validator for the "session_window_status" field. It is called by the builders before save.

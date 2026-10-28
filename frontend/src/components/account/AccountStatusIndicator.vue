@@ -1,6 +1,5 @@
 <template>
   <div class="flex items-center gap-2">
-    <span v-if="isIQBlocked" class="badge badge-warning text-xs">{{ t('admin.accounts.iqBlocked') }}</span>
     <!-- Rate Limit Display (429) - Two-line layout -->
     <div v-if="isRateLimited" class="flex flex-col items-center gap-1">
       <span class="badge text-xs badge-warning">{{ t('admin.accounts.status.rateLimited') }}</span>
@@ -28,7 +27,7 @@
           {{ tempUnschedRecoveryText }}
         </span>
       </div>
-      <span v-else-if="account.status !== 'active' || !account.schedulable || isQuotaExceeded || !isIQBlocked" :class="['badge text-xs', statusClass]">
+      <span v-else :class="['badge text-xs', statusClass]">
         {{ statusText }}
       </span>
     </template>
@@ -138,6 +137,14 @@
       </div>
     </div>
 
+    <!-- IQ gates: fail-closed per-model cooldowns, shown apart from ordinary rate limits -->
+    <div v-if="iqGates.length" class="flex flex-col gap-1">
+      <span v-for="gate in iqGates" :key="gate.model" class="inline-flex flex-col rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400" data-testid="iq-gate">
+        <span>{{ t('admin.accounts.iqGateCooling', { model: gate.model }) }}</span>
+        <span class="text-[10px] font-normal opacity-80">{{ new Date(gate.reset_at) > new Date() ? t('admin.accounts.iqRecheckAt', { time: formatDateTime(gate.reset_at, IQ_CLOCK) }) : t('admin.accounts.iqRecheckPending') }}</span>
+      </span>
+    </div>
+
     <!-- Overload Indicator (529) -->
     <div v-if="isOverloaded" class="group relative">
       <span
@@ -165,6 +172,7 @@ import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import type { Account } from '@/types'
 import { formatCountdown, formatDateTime, formatDateTimeToMinute, formatCountdownWithSuffix, formatTime } from '@/utils/format'
+import { IQ_GATE_KEY_PREFIX, IQ_CLOCK, iqGateEntries } from '@/components/admin/account/iqCheckPresentation'
 
 const { t } = useI18n()
 
@@ -176,12 +184,7 @@ const emit = defineEmits<{
   (e: 'show-temp-unsched', account: Account): void
 }>()
 
-const isIQBlocked = computed(() => {
-  const state = props.account.iq_check
-  if (!state?.enabled) return false
-  // Use the server gate when available; legacy summaries fall back to the last valid verdict.
-  return state.scheduling_blocked ?? (state.last_valid_status || state.status) === 'degraded'
-})
+const iqGates = computed(() => iqGateEntries(props.account.extra as Record<string, unknown> | undefined))
 
 // Computed: is rate limited (429)
 const isRateLimited = computed(() => {
@@ -212,7 +215,7 @@ const activeModelStatuses = computed<AccountModelStatusItem[]>(() => {
   const allowOverages = !!(extra?.allow_overages)
 
   for (const [model, info] of Object.entries(modelLimits)) {
-    if (new Date(info.rate_limit_reset_at) <= now) continue
+    if (model.startsWith(IQ_GATE_KEY_PREFIX) || new Date(info.rate_limit_reset_at) <= now) continue
 
     if (model === 'AICredits') {
       // AICredits key → 积分已用尽

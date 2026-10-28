@@ -11,7 +11,7 @@
       @submit.prevent="handleSubmit"
       class="space-y-5"
     >
-      <IQCheckSettings v-if="account.platform === 'openai'" v-model="iqSettings" :account-id="account.id" :discovery-disabled="iqDiscoveryDirty" @validity="iqValid = $event" />
+      <IQCheckSettings v-if="account.platform === 'openai'" :key="iqSettingsKey" :account-id="account.id" :discovery-disabled="iqDiscoveryDirty" @patch="iqPatch = $event" @validity="iqValid = $event" />
       <div>
         <label class="input-label">{{ t('common.name') }}</label>
         <input v-model="form.name" type="text" required class="input" data-tour="edit-account-form-name" />
@@ -3135,7 +3135,7 @@
 
 <script setup lang="ts">
 import IQCheckSettings from './IQCheckSettings.vue'
-import type { IQCheckSettings as IQSettings } from '@/types'
+import type { IQTargetsPatch } from '@/types'
 import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -4062,7 +4062,9 @@ const mixedChannelWarningMessageText = computed(() => {
   return mixedChannelWarningRawMessage.value
 })
 
-const iqSettings = ref<IQSettings>({ enabled: false, interval_minutes: 15, model: 'gpt-6-astra', reasoning_effort: 'low', output_mode: 'compat' })
+// IQ targets load inside IQCheckSettings; the form only forwards the changed fields.
+const iqPatch = ref<IQTargetsPatch | null>(null)
+const iqSettingsKey = ref(0)
 const iqValid = ref(true)
 const iqTransportDraft = () => JSON.stringify([editBaseUrl.value, editApiKey.value, form.proxy_id, openAIResponsesMode.value, openaiPassthroughEnabled.value, tlsFingerprintEnabled.value, tlsFingerprintProfileId.value, customBaseUrlEnabled.value, customBaseUrl.value, headerOverrideEnabled.value, headerOverrideRows.value])
 const iqTransportInitial = ref('')
@@ -4613,7 +4615,8 @@ watch(
     }
     if (!wasShow || newAccount !== previousAccount) {
       iqValid.value = true
-      iqSettings.value = { timeout_seconds: newAccount.iq_check?.timeout_seconds ?? 120, enabled: newAccount.iq_check?.enabled ?? false, interval_minutes: newAccount.iq_check?.interval_minutes || 15, model: newAccount.iq_check?.model || 'gpt-6-astra', reasoning_effort: newAccount.iq_check?.reasoning_effort || 'low', output_mode: newAccount.iq_check?.output_mode || 'compat' }
+      iqPatch.value = null
+      iqSettingsKey.value++
       syncFormFromAccount(newAccount)
       iqTransportInitial.value = iqTransportDraft()
       loadTLSProfiles()
@@ -5201,7 +5204,7 @@ const handleSubmit = async () => {
 	}
 
   const updatePayload: Record<string, unknown> = { ...form }
-  if (props.account.platform === 'openai') updatePayload.iq_check = { ...iqSettings.value }
+  if (props.account.platform === 'openai' && iqPatch.value) updatePayload.iq_check = iqPatch.value
   try {
     // 后端期望 proxy_id: 0 表示清除代理，而不是 null
     if (updatePayload.proxy_id === null) {

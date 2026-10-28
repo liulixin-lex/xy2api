@@ -3,6 +3,8 @@ package service
 import (
 	"strings"
 
+	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
+
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
@@ -292,6 +294,10 @@ func upstreamModelMismatch(sentModel, responseModel string) *bool {
 func upstreamModelsMatchForAudit(sentModel, responseModel string) bool {
 	if strings.EqualFold(sentModel, responseModel) {
 		return true
+	}
+	if strings.HasPrefix(strings.ToLower(sentModel), "gpt-") || strings.HasPrefix(strings.ToLower(responseModel), "gpt-") {
+		class := openai.ClassifyDeclaredModel(sentModel, responseModel, nil)
+		return class == openai.ModelSame || class == openai.ModelEquivalent
 	}
 
 	// xAI reports the runtime build ID for these supported public aliases.

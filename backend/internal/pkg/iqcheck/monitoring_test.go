@@ -26,13 +26,23 @@ func TestRetryAfter(t *testing.T) {
 }
 func TestIQMonitoringErrorCodes(t *testing.T) {
 	for code, reason := range map[string]string{"insufficient_quota": "quota_exhausted", "invalid_api_key": "authentication_unavailable", "unsupported_parameter": "unsupported_parameter", "rate_limit_exceeded": "rate_limited"} {
-		r := ParseHTTP(&http.Response{StatusCode: 429, Header: http.Header{"Retry-After": []string{"3600"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"` + code + `","message":"secret"}}`))}, false, "http")
+		r := ParseHTTP(&http.Response{StatusCode: 429, Header: http.Header{"Retry-After": []string{"3600"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"` + code + `","message":"secret"}}`))}, false, "http", fixtureCheck)
 		require.Equal(t, reason, r.Reason)
 		require.Equal(t, "unknown", r.Status)
 		require.NotNil(t, r.Diagnostic.RetryAfter)
 		require.NotContains(t, string(r.Diagnostic.JSON()), "secret")
 	}
-	r := ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"insufficient_quota\"}}}\n\n"))}, false, "plugin")
+	r := ParseHTTP(&http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"insufficient_quota\"}}}\n\n"))}, false, "plugin", fixtureCheck)
 	require.Equal(t, "quota_exhausted", r.Reason)
 	require.Equal(t, "plugin_attempts_unknown", r.Diagnostic.RetryVisibility)
+}
+
+func TestRetryableFollowsFailurePolicyForServerErrorsAndParseFailures(t *testing.T) {
+	for _, result := range []Result{
+		{Status: "unknown", Reason: "http_500"},
+		{Status: "unknown", Reason: "unparseable_answer", Diagnostic: &Diagnostic{Stage: "parse"}},
+	} {
+		require.True(t, Retryable(result), result.Reason)
+	}
+	require.False(t, Retryable(Unknown("authentication_unavailable")))
 }

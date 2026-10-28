@@ -321,7 +321,7 @@ func (s *OpenAIGatewayService) migrateOpenAILatencyHeldOwner(ctx context.Context
 		if _, excluded := excludedIDs[candidate.ID]; excluded {
 			continue
 		}
-		if !isOpenAICompatibleAccountEligibleForRequest(ctx, candidate, platform, requestedModel, requireCompact, requiredCapability) {
+		if !isOpenAICompatibleAccountEligibleForRequest(ctx, candidate, platform, requestedModel, requireCompact, requiredCapability, s) {
 			continue
 		}
 		if needsUpstreamCheck && groupID != nil && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, candidate, requestedModel, requireCompact) {

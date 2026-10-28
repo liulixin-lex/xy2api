@@ -350,6 +350,23 @@
           "return ctx",
           "}"
         ]
+      },
+      {
+        "block": "iq-per-model-20261027",
+        "note": "Model-level IQ gate in the advanced request-compatibility check: an account whose iq:<canonical outbound model> gate (or compact outbound key, resolved like Forward including the compact fallback model) matches the request is excluded before top-K; in last-resort context ordinary model limits beyond the soft threshold stay hard while IQ gates are never softened.",
+        "removed": [],
+        "added": [
+          "return false, \"model_rate_limited\"",
+          "}",
+          "return false, \"model_rate_limited\"",
+          "}",
+          "compactOutboundModel := \"\"",
+          "compactOutboundModel = s.service.openAICodexTicketOutboundModel(account, req.RequestedModel, true)",
+          "if iqGateBlocksRequest(account, req.RequestedModel, req.RequireCompact, compactOutboundModel) {",
+          "if lastResort && account.IsSchedulable() && account.isModelRateLimitedWithContext(ctx, req.RequestedModel) && !lastResortModelLimitSoft(ctx, account, req.RequestedModel, req.RequireCompact, compactOutboundModel) {",
+          "if req.RequireCompact && s != nil && s.service != nil {",
+          "}"
+        ]
       }
     ],
     "backend/internal/service/openai_gateway_scheduling.go": [
@@ -576,6 +593,43 @@
         "removed": [],
         "added": [
           "stickyAccountID = s.migrateOpenAILatencyHeldOwner(ctx, groupID, platform, sessionHash, requestedModel, stickyAccountID, excludedIDs, requireCompact, requiredCapability)"
+        ]
+      },
+      {
+        "block": "iq-per-model-20261027",
+        "note": "Unified eligibility also rejects compact requests whose compact outbound model carries an IQ gate; the canonical non-compact key is covered by the existing model rate-limit check. The eligibility helpers take an optional gateway so the compact outbound (including the configured compact fallback model) matches Forward; callers that can be compact pass the service.",
+        "removed": [
+          "func isOpenAICompatibleAccountEligibleForRequest(ctx context.Context, account *Account, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) bool {",
+          "func isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx context.Context, account *Account, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) bool {",
+          "func openAICompatibleAccountEligibilityFailureReason(ctx context.Context, account *Account, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) string {",
+          "func openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx context.Context, account *Account, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) string {",
+          "if !isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx, account, platform, requestedModel, requireCompact, requiredCapability) {",
+          "if !isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx, fresh, platform, requestedModel, requireCompact, requiredCapability) {",
+          "if !isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx, latest, platform, requestedModel, requireCompact, requiredCapability) {",
+          "if reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx, account, platform, requestedModel, requireCompact, requiredCapability); reason != \"\" {",
+          "return openAICompatibleAccountEligibilityFailureReason(ctx, account, platform, requestedModel, requireCompact, requiredCapability) == \"\"",
+          "return openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx, account, platform, requestedModel, requireCompact, requiredCapability) == \"\""
+        ],
+        "added": [
+          "return \"model_rate_limited\"",
+          "}",
+          "compactOutbound := \"\"",
+          "compactOutbound = gateway[0].openAICodexTicketOutboundModel(account, requestedModel, true)",
+          "func isOpenAICompatibleAccountEligibleForRequest(ctx context.Context, account *Account, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability, gateway ...*OpenAIGatewayService) bool {",
+          "func isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx context.Context, account *Account, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability, gateway ...*OpenAIGatewayService) bool {",
+          "func openAICompatibleAccountEligibilityFailureReason(ctx context.Context, account *Account, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability, gateway ...*OpenAIGatewayService) string {",
+          "func openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx context.Context, account *Account, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability, gateway ...*OpenAIGatewayService) string {",
+          "if !isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx, account, platform, requestedModel, requireCompact, requiredCapability, s) {",
+          "if !isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx, fresh, platform, requestedModel, requireCompact, requiredCapability, s) {",
+          "if !isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx, latest, platform, requestedModel, requireCompact, requiredCapability, s) {",
+          "if account.Platform == PlatformOpenAI && requireCompact {",
+          "if iqGateBlocksRequest(account, requestedModel, true, compactOutbound) {",
+          "if len(gateway) > 0 && gateway[0] != nil {",
+          "if reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx, account, platform, requestedModel, requireCompact, requiredCapability, gateway...); reason != \"\" {",
+          "return openAICompatibleAccountEligibilityFailureReason(ctx, account, platform, requestedModel, requireCompact, requiredCapability, gateway...) == \"\"",
+          "return openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx, account, platform, requestedModel, requireCompact, requiredCapability, gateway...) == \"\"",
+          "}",
+          "}"
         ]
       }
     ],

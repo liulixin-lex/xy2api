@@ -1312,7 +1312,7 @@ export interface Account {
 
   // Rate limit & scheduling fields
   schedulable: boolean
-  iq_check?: IQCheckSettings & { last_valid_status?: 'smart' | 'degraded' | null; last_valid_reason?: string | null; scheduling_blocked?: boolean; last_valid_at?: string | null; last_run_status?: string; last_run_reason?: string; retry_at?: string | null; attempt_count?: number; busy_deferrals?: number; execution_state?: string; execution_reason?: string; task_id?: string; next_eligible_at?: string | null; freshness?: string; status: 'smart' | 'degraded' | 'unknown'; reason?: string; last_run_at?: string | null; next_run_at?: string | null }
+  iq_targets?: IQTargetSummary[]
   rate_limited_at: string | null
   rate_limit_reset_at: string | null
   overload_until: string | null
@@ -1564,16 +1564,28 @@ export interface OpenAIResponsesState {
   openai_responses_supported?: boolean
 }
 
-export interface IQCheckSettings { timeout_seconds?: number; enabled: boolean; interval_minutes: number; model?: string; reasoning_effort?: string; output_mode?: 'compat' | 'strict' }
+export type IQVerdict = 'unknown' | 'smart' | 'degraded'
+export type IQState = 'idle' | 'queued' | 'running' | 'paused'
+export interface IQTargetSettings { model: string; enabled?: boolean; reasoning_effort?: string; interval_minutes?: number; timeout_seconds?: number }
+export interface IQTargetsPatch { targets?: IQTargetSettings[]; remove?: string[] }
+export interface IQTargetSummary { model: string; enabled: boolean; verdict: IQVerdict; state: IQState; gate_active: boolean; verdict_at: string | null; last_run_at: string | null; next_run_at: string | null }
+// gate_reset_at is the expected finish time of the next recheck; round_id/completed_attempts describe the open round.
+export interface IQTarget extends IQTargetSummary { reasoning_effort: string; interval_minutes: number; timeout_seconds: number; gate_model: string | null; gate_reset_at: string | null; paused_reason: string; last_result: '' | IQVerdict; last_reason: string; not_before: string | null; round_id: number | null; completed_attempts: number }
+export interface IQRunTarget { model: string; state: 'queued' | 'running' | 'rejected'; round_id?: number; reason?: string }
+// A whole account rejected by the batch endpoint carries reason and no targets.
+export interface IQRunAccount { account_id: number; reason?: string; targets: IQRunTarget[] }
 export interface IQModel { id: string; display_name: string; source: string; reasoning?: boolean; supported_reasoning_levels?: string[]; default_reasoning_level?: string; capability_sources: Record<string, string> }
 export interface IQModelCatalog { models: IQModel[]; fetched_at: string | null; from_cache: boolean; stale: boolean; error?: string }
-export interface IQCheckDiagnostic { category?: string; limit_kind?: string; limit_bytes?: number; done_messages?: number; terminal_items?: number; ignored_items?: number; ignored_types?: string; answer_source?: string; first_byte_ms?: number; total_ms?: number; error_code?: string; error_type?: string; retry_after?: string; retry_after_unbounded?: boolean; input_tokens?: number; output_tokens?: number; reasoning_tokens?: number; retry_visibility?: string; parser_version: string; stage: string; code?: string; http_status?: number; media_type?: string; content_encoding?: string; protocol?: string; transport?: string; format_detected?: boolean; event_type?: string; event_index?: number; field?: string; offset?: number; bytes_read?: number; request_id?: string }
-
-export interface IQCheckAttempt { attempt_no: number; started_at: string; finished_at?: string | null; status: string; reason: string; latency_ms: number; diagnostic?: IQCheckDiagnostic | null }
-export interface IQCheckRecord { attempts?: IQCheckAttempt[]; diagnostic?: IQCheckDiagnostic | null; id: number; prompt_version: string; model: string; effort: string; status: 'smart' | 'degraded' | 'unknown'; answer: string; reason?: string; started_at: string; finished_at?: string | null; latency_ms: number; normalized_answer?: string | null; answer_format?: string; output_mode?: string; format_compliant?: boolean | null; grader_version?: string; protocol?: string; reported_model?: string | null; config_revision?: string }
+// Index order: r/s = [apple, peach, watermelon]; cols = flavor per column; rows = shape per row (0 circle, 1 star); draw = [circles, stars].
+export interface IQChallenge { v: 1; r: [number, number, number]; s: [number, number, number]; cols: [number, number, number]; rows: [number, number]; draw: [number, number]; naive: number }
+export interface IQModelIdentity { source?: string; sent?: string; body?: string[]; header?: string[]; flags?: string[] }
+export type IQDiagnostic = Record<string, unknown> & { model_identity?: IQModelIdentity }
+export interface IQAttempt { attempt_no: number; effort: string; challenge: IQChallenge | null; expected: string; answer: string; reported_model: string; model_class: string; status: IQVerdict; reason: string; latency_ms: number | null; diagnostic: IQDiagnostic | null }
+export interface IQRound { id: number; model: string; outbound_model: string; mode: 'normal' | 'recheck'; effort: string; status: '' | IQVerdict; reason: string; started_at: string; finished_at: string | null; prompt_version: string; attempts: IQAttempt[] }
+export interface IQRoundPage { rounds: IQRound[]; next_before_id: number | null }
 
 export interface CreateAccountRequest {
-  iq_check?: Partial<IQCheckSettings>
+  iq_check?: IQTargetsPatch
   name: string
   notes?: string | null
   platform: AccountPlatform
@@ -1593,7 +1605,7 @@ export interface CreateAccountRequest {
 }
 
 export interface UpdateAccountRequest {
-  iq_check?: Partial<IQCheckSettings>
+  iq_check?: IQTargetsPatch
   name?: string
   notes?: string | null
   type?: AccountType

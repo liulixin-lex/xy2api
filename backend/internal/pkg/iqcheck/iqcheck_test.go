@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-
-	"github.com/liulixin-lex/xy2api/internal/domain"
 )
+
+var fixtureCheck = Check{Expected: "21", Naive: "29"}
 
 func TestGrade(t *testing.T) {
 	for _, tc := range []struct{ answer, status string }{
@@ -36,14 +36,14 @@ func TestGrade(t *testing.T) {
 		{"", "unknown"}, {"  ", "unknown"},
 	} {
 		t.Run(tc.answer, func(t *testing.T) {
-			if got := Grade(tc.answer); got.Status != tc.status {
+			if got := Grade(tc.answer, fixtureCheck); got.Status != tc.status {
 				t.Fatalf("%q: got %s, want %s", tc.answer, got.Status, tc.status)
 			}
 		})
 	}
 }
 
-func TestParse(t *testing.T) {
+func TestParseHTTPGrade(t *testing.T) {
 	for _, tc := range []struct {
 		name, body string
 		sse, chat  bool
@@ -59,20 +59,21 @@ func TestParse(t *testing.T) {
 		{"invalid", `{`, false, false, "unknown"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := Parse(strings.NewReader(tc.body), tc.sse, tc.chat); got.Status != tc.status {
+			if got := parseInput(strings.NewReader(tc.body), tc.sse, tc.chat, fixtureCheck); got.Status != tc.status {
 				t.Fatalf("%+v", got)
 			}
 		})
 	}
-	if got := Parse(strings.NewReader(strings.Repeat("x", MaxResponseBytes+1)), false, false); got.Reason != "response_too_large" {
+	if got := parseInput(strings.NewReader(strings.Repeat("x", MaxResponseBytes+1)), false, false, fixtureCheck); got.Reason != "response_too_large" {
 		t.Fatal(got)
 	}
 }
 
 func TestPayloadFresh(t *testing.T) {
+	model, effort := "gpt-6-astra", "low"
 	for _, chat := range []bool{false, true} {
-		p := Payload(chat)
-		if p["model"] != Model || p["store"] != false {
+		p := Payload(chat, model, effort, NewChallenge())
+		if p["model"] != model || p["store"] != false {
 			t.Fatal(p)
 		}
 		for _, key := range []string{"conversation", "previous_response_id", "session_id"} {
@@ -90,43 +91,17 @@ func TestPayloadFresh(t *testing.T) {
 func TestCompletedSSE(t *testing.T) {
 	terminal := `{"type":"response.completed","response":{"status":"completed","output":[{"type":"message","role":"assistant","phase":"commentary","content":[{"type":"output_text","text":"29"}]},{"type":"message","role":"assistant","phase":"final_answer","status":"completed","content":[{"type":"output_text","text":"21"}]}]}}`
 	body := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"21\"}\n\ndata: " + terminal + "\n\ndata: " + terminal + "\n\n"
-	got := Parse(strings.NewReader(body), true, false)
+	got := parseInput(strings.NewReader(body), true, false, fixtureCheck)
 	if got.Status != "smart" || got.Answer != "21" {
 		t.Fatal(got)
 	}
-	got = Parse(strings.NewReader(body+"data: {\"type\":\"error\",\"error\":{\"message\":\"interrupted\"}}\n\n"), true, false)
+	got = parseInput(strings.NewReader(body+"data: {\"type\":\"error\",\"error\":{\"message\":\"interrupted\"}}\n\n"), true, false, fixtureCheck)
 	if got.Status != "unknown" {
 		t.Fatal(got)
 	}
-	got = Parse(strings.NewReader("data: {\"type\":\"response.incomplete\",\"response\":{\"status\":\"incomplete\"}}\n\n"), true, false)
+	got = parseInput(strings.NewReader("data: {\"type\":\"response.incomplete\",\"response\":{\"status\":\"incomplete\"}}\n\n"), true, false, fixtureCheck)
 	if got.Status != "unknown" {
 		t.Fatal(got)
-	}
-}
-
-func TestConfiguredPayload(t *testing.T) {
-	for _, chat := range []bool{false, true} {
-		p := Payload(chat, domain.IQProfile{Model: "vendor/custom", ReasoningEffort: "upstream_default", OutputMode: "strict"})
-		if p["model"] != "vendor/custom" || p["reasoning"] != nil || p["reasoning_effort"] != nil {
-			t.Fatal(p)
-		}
-		raw, _ := json.Marshal(p)
-		if strings.Contains(string(raw), "21") || strings.Contains(string(raw), "temperature") {
-			t.Fatal(string(raw))
-		}
-		if chat && p["response_format"] == nil || !chat && p["text"] == nil {
-			t.Fatal(p)
-		}
-		p = Payload(chat, domain.IQProfile{Model: "custom", ReasoningEffort: "ultra"})
-		if chat && p["reasoning_effort"] != "ultra" {
-			t.Fatal(p)
-		}
-		if !chat {
-			reasoning, ok := p["reasoning"].(map[string]string)
-			if !ok || reasoning["effort"] != "ultra" {
-				t.Fatal(p)
-			}
-		}
 	}
 }
 
@@ -146,7 +121,7 @@ func TestProtocolAmbiguityAndRefusal(t *testing.T) {
 		{"duplicate envelope", `{"status":"incomplete","status":"completed","output":[]}`, "unknown", false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			result := Parse(strings.NewReader(tc.body), tc.sse, tc.chat)
+			result := parseInput(strings.NewReader(tc.body), tc.sse, tc.chat, Check{Expected: "21", Naive: "29"})
 			if result.Status != tc.status {
 				t.Fatalf("%+v", result)
 			}
@@ -162,7 +137,7 @@ func TestExactExplainedNumbers(t *testing.T) {
 		{"最终答案是 -21。", "degraded"}, {"答案是21e2。", "degraded"}, {"最终答案是2.1e1。", "smart"}, {"答案是21.0000000000000001。", "degraded"},
 		{`{"answer":21,"explanation":"答案是21或29。"}`, "unknown"},
 	} {
-		if r := Grade(tc.answer); r.Status != tc.status {
+		if r := Grade(tc.answer, fixtureCheck); r.Status != tc.status {
 			t.Errorf("%s: %+v", tc.answer, r)
 		}
 	}
@@ -180,7 +155,7 @@ func TestGradeQuantityAlternatives(t *testing.T) {
 		{"counterexample", "最终答案是21个。有人认为最少需要29个，但这个说法不成立。", "smart", "correct_answer"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := Grade(tc.answer)
+			r := Grade(tc.answer, fixtureCheck)
 			if r.Status != tc.status || r.Reason != tc.reason || tc.status == "unknown" && r.NormalizedAnswer != nil {
 				t.Fatalf("%q: %+v", tc.answer, r)
 			}

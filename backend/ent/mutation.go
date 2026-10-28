@@ -2310,7 +2310,8 @@ type AccountMutation struct {
 	expires_at                  *time.Time
 	auto_pause_on_expired       *bool
 	schedulable                 *bool
-	iq_check                    *domain.IQCheck
+	iq_check                    *jsontext.Value
+	appendiq_check              jsontext.Value
 	rate_limited_at             *time.Time
 	rate_limit_reset_at         *time.Time
 	overload_until              *time.Time
@@ -3400,12 +3401,13 @@ func (m *AccountMutation) ResetSchedulable() {
 }
 
 // SetIqCheck sets the "iq_check" field.
-func (m *AccountMutation) SetIqCheck(dc domain.IQCheck) {
-	m.iq_check = &dc
+func (m *AccountMutation) SetIqCheck(j jsontext.Value) {
+	m.iq_check = &j
+	m.appendiq_check = nil
 }
 
 // IqCheck returns the value of the "iq_check" field in the mutation.
-func (m *AccountMutation) IqCheck() (r domain.IQCheck, exists bool) {
+func (m *AccountMutation) IqCheck() (r jsontext.Value, exists bool) {
 	v := m.iq_check
 	if v == nil {
 		return
@@ -3416,7 +3418,7 @@ func (m *AccountMutation) IqCheck() (r domain.IQCheck, exists bool) {
 // OldIqCheck returns the old "iq_check" field's value of the Account entity.
 // If the Account object wasn't provided to the builder, the object is fetched from the database.
 // An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *AccountMutation) OldIqCheck(ctx context.Context) (v domain.IQCheck, err error) {
+func (m *AccountMutation) OldIqCheck(ctx context.Context) (v jsontext.Value, err error) {
 	if !m.op.Is(OpUpdateOne) {
 		return v, errors.New("OldIqCheck is only allowed on UpdateOne operations")
 	}
@@ -3430,9 +3432,23 @@ func (m *AccountMutation) OldIqCheck(ctx context.Context) (v domain.IQCheck, err
 	return oldValue.IqCheck, nil
 }
 
+// AppendIqCheck adds j to the "iq_check" field.
+func (m *AccountMutation) AppendIqCheck(j jsontext.Value) {
+	m.appendiq_check = append(m.appendiq_check, j...)
+}
+
+// AppendedIqCheck returns the list of values that were appended to the "iq_check" field in this mutation.
+func (m *AccountMutation) AppendedIqCheck() (jsontext.Value, bool) {
+	if len(m.appendiq_check) == 0 {
+		return nil, false
+	}
+	return m.appendiq_check, true
+}
+
 // ResetIqCheck resets all changes to the "iq_check" field.
 func (m *AccountMutation) ResetIqCheck() {
 	m.iq_check = nil
+	m.appendiq_check = nil
 }
 
 // SetRateLimitedAt sets the "rate_limited_at" field.
@@ -4574,7 +4590,7 @@ func (m *AccountMutation) SetField(name string, value ent.Value) error {
 		m.SetSchedulable(v)
 		return nil
 	case account.FieldIqCheck:
-		v, ok := value.(domain.IQCheck)
+		v, ok := value.(jsontext.Value)
 		if !ok {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}

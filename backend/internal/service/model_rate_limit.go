@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 )
 
@@ -20,12 +21,35 @@ const (
 
 // isRateLimitActiveForKey 检查指定 key 的限流是否生效
 func (a *Account) isRateLimitActiveForKey(key string) bool {
+	if domain.IsIQGateKey(key) {
+		return a.hasRateLimitKey(key)
+	}
 	resetAt := a.modelRateLimitResetAt(key)
 	return resetAt != nil && time.Now().Before(*resetAt)
 }
 
+func (a *Account) hasRateLimitKey(key string) bool {
+	if a == nil || a.Extra == nil {
+		return false
+	}
+	limits, _ := a.Extra[modelRateLimitsKey].(map[string]any)
+	_, ok := limits[key]
+	return ok
+}
+
 // getRateLimitRemainingForKey 获取指定 key 的限流剩余时间，0 表示未限流或已过期
 func (a *Account) getRateLimitRemainingForKey(key string) time.Duration {
+	if domain.IsIQGateKey(key) && a.hasRateLimitKey(key) {
+		resetAt := a.modelRateLimitResetAt(key)
+		if resetAt == nil {
+			return 30 * time.Second
+		}
+		remaining := time.Until(*resetAt)
+		if remaining < 30*time.Second {
+			return 30 * time.Second
+		}
+		return remaining
+	}
 	resetAt := a.modelRateLimitResetAt(key)
 	if resetAt == nil {
 		return 0
@@ -75,7 +99,6 @@ func (a *Account) modelRateLimitKeysForRequest(ctx context.Context, requestedMod
 	if modelKey == "" {
 		return nil
 	}
-
 	keys := []string{modelKey}
 	switch a.Platform {
 	case PlatformAntigravity:
@@ -83,6 +106,12 @@ func (a *Account) modelRateLimitKeysForRequest(ctx context.Context, requestedMod
 			keys = append(keys, antigravityGeminiModelRateLimitKey)
 		}
 	case PlatformOpenAI:
+		if accountHasIQGate(a) {
+			canonical := canonicalOpenAIAccountSchedulingModel(a, requestedModel)
+			if canonical != "" {
+				keys = append(keys, domain.IQGateKeyPrefix+canonical)
+			}
+		}
 		if openAIImageGenerationRateLimitApplies(ctx, requestedModel, modelKey) && modelKey != openAIImageGenerationRateLimitKey {
 			keys = append(keys, openAIImageGenerationRateLimitKey)
 		}

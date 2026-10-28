@@ -4,6 +4,7 @@ package ent
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"time"
@@ -15,7 +16,6 @@ import (
 	"github.com/liulixin-lex/xy2api/ent/group"
 	"github.com/liulixin-lex/xy2api/ent/proxy"
 	"github.com/liulixin-lex/xy2api/ent/usagelog"
-	"github.com/liulixin-lex/xy2api/internal/domain"
 )
 
 // AccountCreate is the builder for creating a Account entity.
@@ -281,16 +281,8 @@ func (_c *AccountCreate) SetNillableSchedulable(v *bool) *AccountCreate {
 }
 
 // SetIqCheck sets the "iq_check" field.
-func (_c *AccountCreate) SetIqCheck(v domain.IQCheck) *AccountCreate {
+func (_c *AccountCreate) SetIqCheck(v jsontext.Value) *AccountCreate {
 	_c.mutation.SetIqCheck(v)
-	return _c
-}
-
-// SetNillableIqCheck sets the "iq_check" field if the given value is not nil.
-func (_c *AccountCreate) SetNillableIqCheck(v *domain.IQCheck) *AccountCreate {
-	if v != nil {
-		_c.SetIqCheck(*v)
-	}
 	return _c
 }
 
@@ -1287,7 +1279,7 @@ func (u *AccountUpsert) UpdateSchedulable() *AccountUpsert {
 }
 
 // SetIqCheck sets the "iq_check" field.
-func (u *AccountUpsert) SetIqCheck(v domain.IQCheck) *AccountUpsert {
+func (u *AccountUpsert) SetIqCheck(v jsontext.Value) *AccountUpsert {
 	u.Set(account.FieldIqCheck, v)
 	return u
 }
@@ -1889,7 +1881,7 @@ func (u *AccountUpsertOne) UpdateSchedulable() *AccountUpsertOne {
 }
 
 // SetIqCheck sets the "iq_check" field.
-func (u *AccountUpsertOne) SetIqCheck(v domain.IQCheck) *AccountUpsertOne {
+func (u *AccountUpsertOne) SetIqCheck(v jsontext.Value) *AccountUpsertOne {
 	return u.Update(func(s *AccountUpsert) {
 		s.SetIqCheck(v)
 	})
@@ -2688,7 +2680,7 @@ func (u *AccountUpsertBulk) UpdateSchedulable() *AccountUpsertBulk {
 }
 
 // SetIqCheck sets the "iq_check" field.
-func (u *AccountUpsertBulk) SetIqCheck(v domain.IQCheck) *AccountUpsertBulk {
+func (u *AccountUpsertBulk) SetIqCheck(v jsontext.Value) *AccountUpsertBulk {
 	return u.Update(func(s *AccountUpsert) {
 		s.SetIqCheck(v)
 	})
