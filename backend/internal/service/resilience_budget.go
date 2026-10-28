@@ -91,3 +91,19 @@ func resilienceInServiceRetryAllowed(ctx context.Context, accountID int64, statu
 	}
 	return b.ConsumeInPlaceRetry(accountID, true, time.Now())
 }
+
+func resilienceInServiceRetryAllowedWithBody(ctx context.Context, accountID int64, status int, body []byte) bool {
+	if isUnrecoverableAccountFailure(status, body) {
+		return false
+	}
+	return resilienceInServiceRetryAllowed(ctx, accountID, status)
+}
+
+func isUnrecoverableAccountFailure(status int, body []byte) bool {
+	switch classifyUpstreamHTTP(status, nil, body, "").Category {
+	case resilience.CategoryBalance, resilience.CategoryAuth, resilience.CategoryModelUnsupported:
+		return true
+	default:
+		return false
+	}
+}

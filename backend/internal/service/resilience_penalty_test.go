@@ -104,6 +104,36 @@ func (r *resilienceAccountRepo) SetTempUnschedulableTiered(_ context.Context, _ 
 	return true, nil
 }
 
+func (r *resilienceAccountRepo) SetBalancePauseTiered(_ context.Context, _ int64, basePause time.Duration, attemptStart, startedAt time.Time, evidence string) (BalancePauseWrite, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	startedAt = startedAt.UTC()
+	step := resilience.BalancePauseStepForFailure(r.tempReason, r.tempUntil, attemptStart, startedAt)
+	duration := basePause
+	switch step {
+	case 2:
+		duration *= 3
+	case 3:
+		duration *= 12
+	}
+	until := startedAt.Add(duration)
+	active := !r.tempUntil.IsZero() && r.tempUntil.After(startedAt)
+	if active && resilience.IsBalancePause(r.tempReason) {
+		return BalancePauseWrite{Until: r.tempUntil, Reason: r.tempReason, Step: step}, nil
+	}
+	if active && resilience.TempUnschedTier(r.tempReason) == resilience.TierHard && !until.After(r.tempUntil) {
+		return BalancePauseWrite{Until: r.tempUntil, Reason: r.tempReason, Step: step}, nil
+	}
+	if active && resilience.TempUnschedTier(r.tempReason) == resilience.TierSoft && r.tempUntil.After(until) {
+		until = r.tempUntil
+	}
+	reason := resilience.BalancePauseReasonAtStep(step, evidence)
+	r.tempCalls++
+	r.tempUntil = until
+	r.tempReason = reason
+	return BalancePauseWrite{Changed: true, Until: until, Reason: reason, Step: step}, nil
+}
+
 // ClearTempUnschedulableIf mirrors the repository statement (review R02).
 func (r *resilienceAccountRepo) ClearTempUnschedulableIf(_ context.Context, _ int64, reason string, until time.Time) (bool, error) {
 	r.mu.Lock()

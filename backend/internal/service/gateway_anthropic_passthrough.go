@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/util/responseheaders"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -93,8 +94,14 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	}
 
 	var resp *http.Response
+	var cachedErrorResponse *http.Response
+	var cachedErrorBody []byte
+	hardClassifiedFailure := false
 	retryStart := time.Now()
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
+		cachedErrorResponse = nil
+		cachedErrorBody = nil
+		hardClassifiedFailure = false
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, input.RequestStream)
 		upstreamReq, wireBody, err := s.buildUpstreamRequestAnthropicAPIKeyPassthrough(upstreamCtx, c, account, input.Body, token)
 		releaseUpstreamCtx()
@@ -109,6 +116,9 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 			input.Body = input.Parsed.Body.Bytes()
 		}
 
+		resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{
+			AccountID: account.ID, Model: input.OriginalModel, AttemptStart: time.Now(), Stream: input.RequestStream, BodyBytes: len(wireBody),
+		})
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 		if err != nil {
 			if resp != nil && resp.Body != nil {
@@ -136,14 +146,15 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 				if delay <= 0 {
 					break
 				}
-				// xy2api resilience: charge the request budget only for a retry
-				// that will run (design §6.2).
-				if !resilienceInServiceRetryAllowed(ctx, account.ID, resp.StatusCode) {
-					break
-				}
-
 				respBody, _ := s.readUpstreamErrorBody(resp)
 				_ = resp.Body.Close()
+				cachedErrorResponse = resp
+				cachedErrorBody = respBody
+				hardClassifiedFailure = isUnrecoverableAccountFailure(resp.StatusCode, respBody)
+				resp.Body = io.NopCloser(bytes.NewReader(respBody))
+				if hardClassifiedFailure || !resilienceInServiceRetryAllowedWithBody(ctx, account.ID, resp.StatusCode, respBody) {
+					break
+				}
 				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 					ProxyID:            opsUpstreamProxyID(account),
 					ProxyName:          opsUpstreamProxyName(account),
@@ -181,9 +192,15 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 && s.shouldRetryUpstreamError(account, resp.StatusCode) {
-		if s.shouldFailoverUpstreamError(resp.StatusCode) {
-			respBody, _ := s.readUpstreamErrorBody(resp)
+		if cachedErrorResponse != resp {
+			cachedErrorBody, _ = s.readUpstreamErrorBody(resp)
 			_ = resp.Body.Close()
+			cachedErrorResponse = resp
+			hardClassifiedFailure = isUnrecoverableAccountFailure(resp.StatusCode, cachedErrorBody)
+			resp.Body = io.NopCloser(bytes.NewReader(cachedErrorBody))
+		}
+		if !hardClassifiedFailure && s.shouldFailoverUpstreamError(resp.StatusCode) {
+			respBody := cachedErrorBody
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
 			logger.LegacyPrintf("service.gateway", "[Anthropic Passthrough] Upstream error (retry exhausted, failover): Account=%d(%s) Status=%d RequestID=%s Body=%s",
@@ -214,45 +231,49 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 			}
 		}
-		return s.handleRetryExhaustedError(ctx, resp, c, account)
-	}
-
-	if resp.StatusCode >= 400 && s.shouldFailoverUpstreamError(resp.StatusCode) {
-		respBody, _ := s.readUpstreamErrorBody(resp)
-		_ = resp.Body.Close()
-		resp.Body = io.NopCloser(bytes.NewReader(respBody))
-
-		logger.LegacyPrintf("service.gateway", "[Anthropic Passthrough] Upstream error (failover): Account=%d(%s) Status=%d RequestID=%s Body=%s",
-			account.ID, account.Name, resp.StatusCode, resp.Header.Get("x-request-id"), truncateString(string(respBody), 1000))
-
-		s.handleFailoverSideEffects(ctx, resp, account, input.RequestModel)
-		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-			ProxyID:            opsUpstreamProxyID(account),
-			ProxyName:          opsUpstreamProxyName(account),
-			Platform:           account.Platform,
-			AccountID:          account.ID,
-			AccountName:        account.Name,
-			UpstreamStatusCode: resp.StatusCode,
-			UpstreamRequestID:  resp.Header.Get("x-request-id"),
-			Passthrough:        true,
-			Kind:               "failover",
-			Message:            extractUpstreamErrorMessage(respBody),
-			Detail: func() string {
-				if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
-					return truncateString(string(respBody), s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
-				}
-				return ""
-			}(),
-		})
-		return nil, &UpstreamFailoverError{
-			StatusCode:             resp.StatusCode,
-			ResponseBody:           respBody,
-			RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
+		if !hardClassifiedFailure {
+			return s.handleRetryExhaustedError(ctx, resp, c, account)
 		}
 	}
 
 	if resp.StatusCode >= 400 {
-		return s.handleErrorResponse(ctx, resp, c, account, input.RequestModel)
+		respBody := cachedErrorBody
+		if cachedErrorResponse != resp {
+			respBody, _ = s.readUpstreamErrorBody(resp)
+			_ = resp.Body.Close()
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(respBody))
+		if s.shouldFailoverUpstreamError(resp.StatusCode) || shouldFailoverClassifiedUpstreamError(resp.StatusCode, resp.Header, respBody) {
+
+			logger.LegacyPrintf("service.gateway", "[Anthropic Passthrough] Upstream error (failover): Account=%d(%s) Status=%d RequestID=%s Body=%s",
+				account.ID, account.Name, resp.StatusCode, resp.Header.Get("x-request-id"), truncateString(string(respBody), 1000))
+
+			s.handleFailoverSideEffectsWithBody(ctx, account, resp.StatusCode, resp.Header, respBody, input.OriginalModel)
+			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+				ProxyID:            opsUpstreamProxyID(account),
+				ProxyName:          opsUpstreamProxyName(account),
+				Platform:           account.Platform,
+				AccountID:          account.ID,
+				AccountName:        account.Name,
+				UpstreamStatusCode: resp.StatusCode,
+				UpstreamRequestID:  resp.Header.Get("x-request-id"),
+				Passthrough:        true,
+				Kind:               "failover",
+				Message:            extractUpstreamErrorMessage(respBody),
+				Detail: func() string {
+					if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
+						return truncateString(string(respBody), s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
+					}
+					return ""
+				}(),
+			})
+			return nil, &UpstreamFailoverError{
+				StatusCode:             resp.StatusCode,
+				ResponseBody:           respBody,
+				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
+			}
+		}
+		return s.handleErrorResponse(ctx, resp, c, account, input.OriginalModel)
 	}
 
 	var usage *ClaudeUsage

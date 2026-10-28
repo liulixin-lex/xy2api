@@ -15,6 +15,7 @@ import (
 
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 )
 
@@ -361,6 +362,20 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			s.handleCustomErrorCode(ctx, account, statusCode, extractUpstreamErrorMessage(responseBody))
 			return true
 		}
+		result := classifyUpstreamHTTP(statusCode, headers, responseBody, "")
+		if result.Category == resilience.CategoryBalance {
+			if handled, disable := s.resilienceHandleUpstreamError(ctx, account, statusCode, headers, responseBody, extractUpstreamErrorMessage(responseBody)); handled {
+				return disable
+			}
+		}
+		if result.Category == resilience.CategoryAuth {
+			message := "Authentication failed (529): upstream credentials were rejected"
+			if upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(responseBody)); upstreamMsg != "" {
+				message = "Authentication failed (529): " + upstreamMsg
+			}
+			s.handleAuthError(ctx, account, message)
+			return true
+		}
 		s.handle529(ctx, account)
 		return false
 	}
@@ -555,7 +570,7 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			break
 		}
 		// OpenAI: deactivated_workspace 表示工作区已停用，直接标记 error
-		if account.Platform == PlatformOpenAI && gjson.GetBytes(responseBody, "detail.code").String() == "deactivated_workspace" {
+		if classifyUpstreamHTTP(statusCode, headers, responseBody, upstreamMsg).Reason == "deactivated_workspace" {
 			msg := "Workspace deactivated (402): workspace has been deactivated"
 			s.handleAuthError(ctx, account, msg)
 			shouldDisable = true
@@ -2509,6 +2524,7 @@ func parseOpenAIImageTryAgainCooldown(body []byte) time.Duration {
 
 const upstreamModelNotFoundCooldown = 30 * time.Minute
 const upstreamModelNotFoundReason = "upstream_404_model_not_found"
+const upstreamModelUnsupported400Reason = "upstream_400_model_unsupported"
 const upstreamModelNotFound401Reason = "upstream_401_model_not_found"
 const upstreamCodexPlanGatedModelCooldown = 30 * time.Minute
 const upstreamCodexPlanGatedModelReason = "upstream_400_codex_plan_gated_model"
@@ -2517,13 +2533,25 @@ const tempUnschedMessageMaxBytes = 2048
 
 // HandleUpstreamModelNotFound marks the requested model as temporarily
 // unavailable on the account when the upstream deterministically reports it
-// cannot serve that model: a 404 model-not-found, or the Codex 400 rejecting a
+// cannot serve that model: a structured 400/404 model error, the OpenAI
+// compatible 401 model-not-found exception, or the Codex 400 rejecting a
 // plan-gated model on a ChatGPT OAuth account. Returning true tells the caller
 // to fail the current attempt over to another account; the scheduler skips the
 // (account, model) pair via IsSchedulableForModelWithContext until the
 // cooldown expires, instead of re-selecting an account that can never serve
 // the model.
 func (s *RateLimitService) HandleUpstreamModelNotFound(ctx context.Context, account *Account, requestedModel string, statusCode int, responseBody []byte) bool {
+	return s.handleUpstreamModelNotFoundAtKey(
+		ctx,
+		account,
+		requestedModel,
+		modelRateLimitKeyForUpstreamModelNotFound(ctx, account, requestedModel),
+		statusCode,
+		responseBody,
+	)
+}
+
+func (s *RateLimitService) handleUpstreamModelNotFoundAtKey(ctx context.Context, account *Account, requestedModel, modelKey string, statusCode int, responseBody []byte) bool {
 	if s == nil || account == nil || s.accountRepo == nil {
 		return false
 	}
@@ -2534,15 +2562,20 @@ func (s *RateLimitService) HandleUpstreamModelNotFound(ctx context.Context, acco
 	var reason string
 	switch {
 	case isUpstreamModelNotFoundError(statusCode, responseBody):
-		cooldown, reason = upstreamModelNotFoundCooldown, upstreamModelNotFoundReason
-	case statusCode == http.StatusUnauthorized && account.Type == AccountTypeAPIKey && account.IsOpenAICompatible() && isOpenAICompatibleModelNotFoundBody(responseBody):
+		cooldown = upstreamModelNotFoundCooldown
+		if statusCode == http.StatusBadRequest {
+			reason = upstreamModelUnsupported400Reason
+		} else {
+			reason = upstreamModelNotFoundReason
+		}
+	case statusCode == http.StatusUnauthorized && account.Type == AccountTypeAPIKey && account.IsOpenAICompatible() && resilience.IsOpenAICompatibleModelNotFound401(responseBody):
 		cooldown, reason = upstreamModelNotFoundCooldown, upstreamModelNotFound401Reason
 	case isOpenAIOAuthAccount(account) && isOpenAICodexPlanGatedModelError(statusCode, responseBody):
 		cooldown, reason = upstreamCodexPlanGatedModelCooldown, upstreamCodexPlanGatedModelReason
 	default:
 		return false
 	}
-	modelKey := modelRateLimitKeyForUpstreamModelNotFound(ctx, account, requestedModel)
+	modelKey = strings.TrimSpace(modelKey)
 	if modelKey == "" {
 		return false
 	}

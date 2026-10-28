@@ -288,6 +288,12 @@ func (s *FailoverState) HandleSelectionExhausted(ctx context.Context) FailoverAc
 	if ctx.Err() != nil {
 		return FailoverCanceled
 	}
+	if s.LastFailoverErr != nil {
+		category := service.ClassifyFailoverError(s.LastFailoverErr).Category
+		if category == resilience.CategoryBalance || category == resilience.CategoryAuth || category == resilience.CategoryModelUnsupported {
+			return FailoverExhausted
+		}
+	}
 	// xy2api resilience: back-off re-selection draws from the request budget;
 	// after the capacity switch only other hosts may serve (design §6.3).
 	if b := requestBudget(ctx); b != nil {

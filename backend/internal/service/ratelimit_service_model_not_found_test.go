@@ -69,6 +69,29 @@ func TestRateLimitService_HandleUpstreamError_ModelNotFoundUsesModelRateLimit(t 
 	require.WithinDuration(t, time.Now().Add(upstreamModelNotFoundCooldown), call.resetAt, 5*time.Second)
 }
 
+func TestRateLimitService_HandleUpstreamError_Structured400UnsupportedModelUsesModelRateLimit(t *testing.T) {
+	repo := &modelNotFoundAccountRepoStub{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := openAIModelNotFoundTempAccount()
+
+	handled := svc.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusBadRequest,
+		http.Header{},
+		[]byte(`{"error":{"type":"invalid_request_error","message":"unknown provider for model gpt-5.4"}}`),
+		"gpt-5.4",
+	)
+
+	require.True(t, handled)
+	require.Zero(t, repo.tempCalls)
+	require.Len(t, repo.modelRateLimitCalls, 1)
+	call := repo.modelRateLimitCalls[0]
+	require.Equal(t, "gpt-5.4", call.scope)
+	require.Equal(t, upstreamModelUnsupported400Reason, call.reason)
+	require.WithinDuration(t, time.Now().Add(upstreamModelNotFoundCooldown), call.resetAt, 5*time.Second)
+}
+
 func TestRateLimitService_HandleUpstreamError_APIKeyModel401UsesModelRateLimit(t *testing.T) {
 	repo := &modelNotFoundAccountRepoStub{}
 	svc := &RateLimitService{accountRepo: repo}

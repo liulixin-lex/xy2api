@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"net/http"
 	"testing"
 	"time"
 
@@ -30,6 +31,23 @@ func TestInServiceRetryOnlyForCapacityShedding(t *testing.T) {
 	require.True(t, resilienceInServiceRetryAllowed(ctx, 1, 529))
 	require.False(t, resilienceInServiceRetryAllowed(ctx, 1, 529), "once per account")
 	require.True(t, resilienceInServiceRetryAllowed(ctx, 2, 529))
+}
+
+func TestInServiceRetryWithBodySkipsHardCategories(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"balance", http.StatusServiceUnavailable, `{"error":{"message":"insufficient balance"}}`},
+		{"auth", http.StatusPaymentRequired, `{"error":{"code":"deactivated_workspace"}}`},
+		{"model unsupported", http.StatusBadRequest, `{"error":{"message":"unknown provider for model x"}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.False(t, resilienceInServiceRetryAllowedWithBody(context.Background(), 1, tc.status, []byte(tc.body)))
+		})
+	}
+	require.True(t, resilienceInServiceRetryAllowedWithBody(context.Background(), 1, 529, []byte(`{"error":{"type":"overloaded_error"}}`)))
 }
 
 func TestGeminiInPlaceRetries(t *testing.T) {

@@ -2,6 +2,7 @@ package resilience
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -264,6 +265,88 @@ var modelUnsupportedCodes = map[string]struct{}{
 	"unsupported_model":   {},
 }
 
+type structuredModelError struct {
+	Code    string `json:"code"`
+	Type    string `json:"type"`
+	Param   string `json:"param"`
+	Message string `json:"message"`
+}
+
+// IsModelUnsupportedResponse recognizes the narrow relay messages used when a
+// credential cannot serve a model. Text is read only from a structured error
+// message and only for 400/404 responses; model codes remain authoritative.
+func IsModelUnsupportedResponse(statusCode int, body []byte) bool {
+	if statusCode != http.StatusBadRequest && statusCode != http.StatusNotFound {
+		return false
+	}
+	return isStructuredModelUnsupportedError(parseStructuredModelError(body))
+}
+
+// IsOpenAICompatibleModelNotFound401 keeps the existing OpenAI-compatible
+// API-key exception scoped to callers that have already checked platform and
+// account type. It accepts structured model codes or the same restricted
+// message phrases, but never scans arbitrary body text.
+func IsOpenAICompatibleModelNotFound401(body []byte) bool {
+	return isStructuredModelUnsupportedError(parseStructuredModelError(body))
+}
+
+func parseStructuredModelError(body []byte) structuredModelError {
+	if len(body) == 0 {
+		return structuredModelError{}
+	}
+	if len(body) > inspectLimit {
+		body = body[:inspectLimit]
+	}
+	var payload struct {
+		Error    structuredModelError `json:"error"`
+		Response struct {
+			Error structuredModelError `json:"error"`
+		} `json:"response"`
+	}
+	if json.Unmarshal(body, &payload) != nil {
+		return structuredModelError{}
+	}
+	if payload.Error.Message != "" || payload.Error.Code != "" || payload.Error.Type != "" || payload.Error.Param != "" {
+		return payload.Error
+	}
+	return payload.Response.Error
+}
+
+func modelUnsupportedMessage(message string) bool {
+	message = strings.ToLower(strings.TrimSpace(message))
+	if message == "" || strings.Contains(message, "auth_unavailable") ||
+		strings.Contains(message, "by this endpoint") || strings.Contains(message, "in this mode") {
+		return false
+	}
+	return strings.Contains(message, "unknown provider for model") ||
+		strings.Contains(message, "unknown model") ||
+		strings.Contains(message, "model not found") ||
+		strings.Contains(message, "model is not supported")
+}
+
+func isStructuredModelUnsupportedError(err structuredModelError) bool {
+	code := strings.ToLower(strings.TrimSpace(err.Code))
+	typ := strings.ToLower(strings.TrimSpace(err.Type))
+	_, codeModel := modelUnsupportedCodes[code]
+	_, typeModel := modelUnsupportedCodes[typ]
+	if codeModel {
+		return true
+	}
+	if typeModel {
+		return code == "" || code == "invalid_request_error"
+	}
+	if err.Param != "" {
+		return false
+	}
+	if code != "" && code != "invalid_request_error" {
+		return false
+	}
+	if typ != "" && typ != "invalid_request_error" {
+		return false
+	}
+	return modelUnsupportedMessage(err.Message)
+}
+
 var (
 	reRetryAfterJSON = regexp.MustCompile(`(?i)"?retry[_-]after"?\s*[:=]\s*"?(\d+(?:\.\d+)?)`)
 	reTryAgainIn     = regexp.MustCompile(`(?i)try again in\s+(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|secs?|seconds?|m|mins?|minutes?|h|hours?)\b`)
@@ -373,6 +456,9 @@ func classify(o Outcome, extraBalanceKeywords []string, decisionV2 bool) Result 
 	if contentPolicyCode(code, typ, lowerBody) {
 		return Result{Category: CategoryClientError, Reason: ReasonContentPolicy}
 	}
+	if IsModelUnsupportedResponse(status, body) {
+		return Result{Category: CategoryModelUnsupported, Reason: "model_message"}
+	}
 	if _, ok := clientErrorCodes[code]; ok {
 		return Result{Category: CategoryClientError, Reason: "client_code"}
 	}
@@ -453,9 +539,6 @@ func classify(o Outcome, extraBalanceKeywords []string, decisionV2 bool) Result 
 
 	// 6. Remaining client errors by status or type.
 	if status == http.StatusNotFound {
-		if strings.Contains(text, "model") {
-			return Result{Category: CategoryModelUnsupported, Reason: "status_404_model"}
-		}
 		return Result{Category: CategoryTransient, RetryAfter: retryAfter, Reason: "status_404"}
 	}
 	if _, ok := clientErrorCodes[typ]; ok {

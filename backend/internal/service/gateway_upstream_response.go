@@ -286,10 +286,10 @@ func ExtractUpstreamErrorMessage(body []byte) string {
 	return extractUpstreamErrorMessage(body)
 }
 
-// SanitizeUpstreamErrorMessage redacts sensitive query parameter values before
-// an upstream error message is recorded or returned to a client.
+// SanitizeUpstreamErrorMessage redacts sensitive values in an upstream error
+// message before client projection.
 func SanitizeUpstreamErrorMessage(message string) string {
-	return sanitizeUpstreamErrorMessage(message)
+	return sanitizeUpstreamErrorIdentifiers(sanitizeUpstreamErrorMessage(message))
 }
 
 func extractUpstreamErrorMessage(body []byte) string {
@@ -544,11 +544,15 @@ func (s *GatewayService) handleRetryExhaustedSideEffects(ctx context.Context, re
 
 func (s *GatewayService) handleFailoverSideEffects(ctx context.Context, resp *http.Response, account *Account, requestedModel ...string) {
 	body, _ := s.readUpstreamErrorBody(resp)
-	if len(requestedModel) > 0 {
-		s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, requestedModel[0])
+	s.handleFailoverSideEffectsWithBody(ctx, account, resp.StatusCode, resp.Header, body, firstRequestedModel(requestedModel))
+}
+
+func (s *GatewayService) handleFailoverSideEffectsWithBody(ctx context.Context, account *Account, statusCode int, headers http.Header, body []byte, requestedModel string) {
+	if requestedModel != "" {
+		s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, headers, body, requestedModel)
 		return
 	}
-	s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, body)
+	s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, headers, body)
 }
 
 // handleRetryExhaustedError 处理重试耗尽后的错误

@@ -329,7 +329,7 @@ func TestGeminiErrorPolicyIntegration(t *testing.T) {
 				case ErrorPolicySkipped:
 					// Skipped → 不标记账号状态；可 failover 的状态码仍换号
 					handleErrorCalled = false
-					gotFailover = svc.skippedErrorPolicyFailoverError(c, account, statusCode, respBody, "req-test") != nil
+					gotFailover = svc.skippedErrorPolicyFailoverError(c, account, statusCode, headers, respBody, "req-test") != nil
 					goto verify
 				case ErrorPolicyMatched:
 					svc.handleGeminiUpstreamError(ctx, account, statusCode, headers, respBody)
@@ -417,7 +417,7 @@ func TestSkippedErrorPolicyFailoverError(t *testing.T) {
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 
 			body := []byte(`{"error":{"code":"bad_response_status_code","message":"openai_error"}}`)
-			failoverErr := svc.skippedErrorPolicyFailoverError(c, tt.account, tt.statusCode, body, "req-1")
+			failoverErr := svc.skippedErrorPolicyFailoverError(c, tt.account, tt.statusCode, http.Header{}, body, "req-1")
 
 			if !tt.expectFailover {
 				require.Nil(t, failoverErr)

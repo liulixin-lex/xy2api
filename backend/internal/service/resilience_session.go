@@ -72,6 +72,9 @@ func resiliencePenaltyOf(a *Account, model string, now time.Time) (resilience.Pe
 		soft(*a.OverloadUntil, "overloaded")
 	}
 	if model != "" {
+		if a.modelUnsupportedRateLimitActive(context.Background(), model, now) {
+			return hard(now.Add(a.GetRateLimitRemainingTimeWithContext(context.Background(), model)), "model_unsupported")
+		}
 		if !a.IsOpenAICompatible() {
 			if !modelBreakerEnd.IsZero() {
 				soft(modelBreakerEnd, "model_transient")
@@ -751,7 +754,8 @@ func resilienceLastResortGate(ctx context.Context) bool {
 // account through as a last resort: only in a last-resort context and only
 // while the limit is within the soft threshold (design §3.1).
 func lastResortModelLimitSoft(ctx context.Context, acc *Account, model string, requireCompact bool, compactOutbound ...string) bool {
-	if iqGateBlocksRequest(acc, model, requireCompact, compactOutbound...) {
+	if iqGateBlocksRequest(acc, model, requireCompact, compactOutbound...) ||
+		acc.modelUnsupportedRateLimitActive(ctx, model, time.Now()) {
 		return false
 	}
 	return resilienceLastResortGate(ctx) && acc.GetRateLimitRemainingTimeWithContext(ctx, model) <= resilience.HardRateLimitThreshold

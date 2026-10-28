@@ -4,6 +4,7 @@ package repository
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -79,4 +80,53 @@ func TestAccountRepositoryTieredTempUnschedulable(t *testing.T) {
 	require.True(t, write(now.Add(30*time.Second), resilience.ReasonPrefixTransient+"TRANSIENT 524"))
 	require.True(t, write(now.Add(90*time.Second), resilience.ReasonPrefixTransient+"TRANSIENT 503"))
 	require.False(t, write(now.Add(10*time.Second), resilience.ReasonPrefixTransient+"TRANSIENT 502"))
+}
+
+func TestAccountRepositoryBalancePauseConcurrentFailuresStayInOneTier(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	acc := mustCreateAccount(t, client, &service.Account{Name: "balance-tier-concurrent", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey})
+	basePause := 5 * time.Minute
+	firstStartedAt := time.Now().UTC().Truncate(time.Microsecond)
+	first, err := repo.SetBalancePauseTiered(ctx, acc.ID, basePause, firstStartedAt, firstStartedAt, "first")
+	require.NoError(t, err)
+	require.Equal(t, 1, first.Step)
+
+	expiredUntil := time.Now().UTC().Add(-time.Second).Truncate(time.Microsecond)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET temp_unschedulable_until = $1 WHERE id = $2`, expiredUntil, acc.ID)
+	require.NoError(t, err)
+	attemptStart := expiredUntil.Add(time.Millisecond)
+	startedAt := time.Now().UTC().Truncate(time.Microsecond)
+
+	start := make(chan struct{})
+	results := make(chan service.BalancePauseWrite, 2)
+	var workers sync.WaitGroup
+	for range 2 {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			write, err := repo.SetBalancePauseTiered(ctx, acc.ID, basePause, attemptStart, startedAt, "same round")
+			if err != nil {
+				t.Errorf("SetBalancePauseTiered: %v", err)
+				return
+			}
+			results <- write
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(results)
+	changed := 0
+	for write := range results {
+		if write.Changed {
+			changed++
+		}
+	}
+	require.Equal(t, 1, changed)
+	got, err := repo.GetByID(ctx, acc.ID)
+	require.NoError(t, err)
+	require.Equal(t, 2, resilience.BalancePauseStep(got.TempUnschedulableReason))
+	require.WithinDuration(t, startedAt.Add(15*time.Minute), *got.TempUnschedulableUntil, time.Millisecond)
 }
