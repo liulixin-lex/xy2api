@@ -4106,3 +4106,21 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - **真实 PostgreSQL 集成测试**（开发机）：本分支 repository 套件有 12 个失败，main 基线全过，均为本分支回归（Create 嵌套事务、ClearModelRateLimits 无 IQ 时留空对象、BulkUpdate 参数类型、结果分页 NULL diagnostic 等），已派 Codex 在 worktree 分支 `wip/iq-integfix-20261027` 修复。astra 复核 R3：八项关闭、两项部分关闭，另报修复引入的 3 个 P1 + 1 个 P2（fresh 复核沿用旧 compact 出站值、raw Chat 被 compact 兜底模型误挡、长 Retry-After 等到租约过期丢失 not_before、出站快照失败遗留租约），全部采纳，已派 Codex 在 `wip/iq-r4fix-20261027` 修复。
 - **收尾**（2026-10-28）：integfix（`72310c050`）与 r4fix（`41b5f9f5c`）已合入，另补出站快照失败原因的中英文案（`c05ceb31d`）；最终 HEAD 全部门禁通过，状态见“当前交接状态”。
 - **下一步**：见“当前交接状态”的未完成项。
+
+## 2026-10-28 0.4.10 发布完成后归档（原样归档）
+
+### 20261027-key-dialog-exclusive — 创建密钥弹窗加宽与专属标识（2026-10-27）
+
+- **请求**（用户 2026-10-27）：用户端“API 密钥”创建密钥选 OpenAI 时，分组下拉比弹窗宽。把弹窗加宽，下拉与之同宽，长说明换行；专属分组开启“向用户显示专属标识”时，选分组要带专属标识，关闭时不带。
+- **分支**：`fix/key-dialog-width-exclusive-badge-20261027`（工作树 `xy2api-wt/key-dialog`，自 main `d25bcd8dc`）。只改前端：`/groups/available` 已返回 `is_exclusive` 与 `show_exclusive_badge`。
+- **结果**：[PR #150](https://github.com/liulixin-lex/xy2api/pull/150)，提交 `90d589190`、`676a497df`、`1d854e3c6`、`db90eceb6`。钩子登记 `required_literals` 14 条，Select/GroupOptionItem/TruncatedTextPopover 三个 spec 进 CI 关键集。本机实测（127.0.0.1，已清理）：弹窗 896px，输入框与下拉均 846px；说明一行省略，悬停弹完整说明；只有开关打开的专属分组带标签。
+- **用户追加**（2026-10-27）：先要求过长说明“省略、悬停另弹、移开消失”，再要求“只留一行”。管理端页面不变（3 行 + 原生 title）。
+- **下一步**：已合入 main `1ef9213bd`（2026-10-28），随 0.4.10 发布；发布后归档。
+
+### 20261028-release0410 — XY2API 0.4.10 版本准备
+
+- 分支 `release/0.4.10-20261028` 基于 main `1ef9213bd`（#151：OpenAI 智商检测按模型重构；#150：用户端密钥弹窗加宽与专属标识）；只改 VERSION、UPSTREAM_BASE 产品版本与本记忆，兼容基线 0.2.15 不变。
+- 发布说明写在 annotated tag 正文：更新内容，以及升级要求（停全部旧副本、迁移 281、sol 检测请求量翻倍、默认降级组合新增两条、回退步骤）。
+- 下一步：保护检查通过后合入 main，在合并提交上打 annotated v0.4.10，核验 Release 附件、GHCR 镜像与版本号。不部署生产。
+
+<!-- 2026-10-28 0.4.10 原样归档结束。 -->
