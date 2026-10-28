@@ -6,16 +6,16 @@
 
 ## 当前交接状态
 
-### 创建密钥弹窗加宽与专属标识：PR #150 合入 main，随 0.4.10 发布（2026-10-28 更新）
+### 创建密钥弹窗加宽与专属标识：随 0.4.10 发布（2026-10-28 更新）
 
 - 用户端“API 密钥”的创建/编辑弹窗改为 `wide`，分组下拉与输入框同宽（`Select` 可选 `matchTriggerWidth`）。分组说明按用户要求只显示一行，超出省略，悬停弹出完整说明（`GroupOptionItem` 可选 `compactDescription` + `TruncatedTextPopover`）。专属分组在开启“向用户显示专属标识”时，选项、已选值、行内切换浮层都带“专属”标签（`ExclusiveGroupTag`）。只改前端。
-- [PR #150](https://github.com/liulixin-lex/xy2api/pull/150)：2026-10-28 用户授权合并。与 #151 在本记忆和 `policy.json` 登记处冲突，两侧都保留后全部保护检查通过，以合并提交 `1ef9213bd` 合入 main。随 0.4.10 发布，部署未授权。
+- [PR #150](https://github.com/liulixin-lex/xy2api/pull/150)：2026-10-28 用户授权合并。与 #151 在本记忆和 `policy.json` 登记处冲突，两侧都保留后全部保护检查通过，以合并提交 `1ef9213bd` 合入 main，[v0.4.10](https://github.com/liulixin-lex/xy2api/releases/tag/v0.4.10) 已于 2026-10-28T04:53:58Z 正式发布；部署未授权。
 - 已知：main 上 `resilienceLocale.spec.ts` 有 2 项失败（0.4.9 文案已含 `codex.rate_limits`，旧断言要求不含 `codex.`），不在 CI 关键集里，未修。（更正 2026-10-28：已随 PR #151 的 `9d9594975` 修复。）
 
-### OpenAI 智商检测按模型重构：PR #151 合入 main，随 0.4.10 发布（2026-10-28；未部署）
+### OpenAI 智商检测按模型重构：随 0.4.10 发布（2026-10-28；未部署）
 
 - 账号 × 模型检测与 `iq:<出站模型>` fail-closed 门禁，现行说明见 [`OPENAI_IQ_CHECK.md`](OPENAI_IQ_CHECK.md)。用户 2026-10-28 授权推送并合并；PR #151 全部保护检查通过后以 merge commit 合入。同 PR 将 `golang.org/x/net` 升到 v0.62.0（GO-2026-6860，govulncheck 新公告）。
-- 遗留：参数化题未做真实上游校准；发版说明须写明默认降级组合新增 6.1-sol、6-sol → 5.6-luna 会改变质量路由，升级须停全部旧副本后执行迁移 281、启动对账失败即不启动；上线观察 7 天后再删旧结构。0.4.10 发版进行中，部署未授权。
+- 遗留：参数化题未做真实上游校准；发版说明须写明默认降级组合新增 6.1-sol、6-sol → 5.6-luna 会改变质量路由，升级须停全部旧副本后执行迁移 281、启动对账失败即不启动；上线观察 7 天后再删旧结构。[v0.4.10](https://github.com/liulixin-lex/xy2api/releases/tag/v0.4.10) 已于 2026-10-28T04:53:58Z 正式发布，发布说明（含升级要求）写在 tag 正文；部署未授权。
 - 详细交接与实施记录已原样归档。
 
 ### 网关韧性复盘：随 0.4.9 发布（2026-10-27 更新）
@@ -172,9 +172,9 @@
   6. 测试服务器收尾：本任务的候选镜像（`xy2api-staging:*`）、`evidence/` 下的浸泡与演练目录、升级演练留下的 `xy2api_upgrade` 库，按 staging-validation §11 在生产验证后清理；预上线主机上的两份切换前备份（路径见私有清单）在正式部署后再删。
 - 本任务与 #105、#107、#108、#110、#112 的交接状态与登记已原样移入 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)。
 
-### 版本与环境速览（2026-10-26 更新正式版）
+### 版本与环境速览（2026-10-28 更新正式版）
 
-- 正式版：XY2API v0.4.7（2026-10-25，Sub2API 兼容基线 0.2.15）。生产主机 2026-10-20 09:15Z 起经在线更新运行 0.4.3 程序（2026-10-21T11:35Z 只读核实：公开设置的版本为 0.4.3，容器内程序 commit `888f49db8`），容器镜像仍是 0.3.0；部署需要用户单独授权。
+- 正式版：XY2API v0.4.10（2026-10-28，Sub2API 兼容基线 0.2.15）。2026-10-26 只读分析时生产运行 0.4.8，以下 2026-10-21 的生产记录供追溯。生产主机 2026-10-20 09:15Z 起经在线更新运行 0.4.3 程序（2026-10-21T11:35Z 只读核实：公开设置的版本为 0.4.3，容器内程序 commit `888f49db8`），容器镜像仍是 0.3.0；部署需要用户单独授权。
 - 待定：XY-image 0.0.17（先交接，并经用户确认）；0.4.6 生产部署（单独授权）。预上线主机运行 0.4.2 的浸泡候选 `0ad63fab7`，换成正式镜像需要授权。见上两节。
 - 上游：Sub2API v0.2.17 已发布、尚未同步（2026-10-17 定时检测；2026-10-19 定时同步的 prepare 失败），需按 [`UPSTREAM_SYNC.md`](UPSTREAM_SYNC.md) 另开任务。
 - 工具链：Go 以 `backend/go.mod` 为准（当前 1.27.3）；golangci-lint v2.14.0（与 CI 同版）。
@@ -235,20 +235,6 @@
 - 后续部署事项：升级后显式保存public备份范围；新目标先初始化所需扩展，production备份仍需在实际部署后验证。share默认关闭，实际影子/逐组启用与业务账单观察是部署后的流程。非阻断维护项：GoReleaser旧配置字段弃用提醒、前端依赖审计中未达high/critical阻断等级的告警；本次未借此扩展依赖升级。
 
 ## 进行中的工作
-
-### 20261027-key-dialog-exclusive — 创建密钥弹窗加宽与专属标识（2026-10-27）
-
-- **请求**（用户 2026-10-27）：用户端“API 密钥”创建密钥选 OpenAI 时，分组下拉比弹窗宽。把弹窗加宽，下拉与之同宽，长说明换行；专属分组开启“向用户显示专属标识”时，选分组要带专属标识，关闭时不带。
-- **分支**：`fix/key-dialog-width-exclusive-badge-20261027`（工作树 `xy2api-wt/key-dialog`，自 main `d25bcd8dc`）。只改前端：`/groups/available` 已返回 `is_exclusive` 与 `show_exclusive_badge`。
-- **结果**：[PR #150](https://github.com/liulixin-lex/xy2api/pull/150)，提交 `90d589190`、`676a497df`、`1d854e3c6`、`db90eceb6`。钩子登记 `required_literals` 14 条，Select/GroupOptionItem/TruncatedTextPopover 三个 spec 进 CI 关键集。本机实测（127.0.0.1，已清理）：弹窗 896px，输入框与下拉均 846px；说明一行省略，悬停弹完整说明；只有开关打开的专属分组带标签。
-- **用户追加**（2026-10-27）：先要求过长说明“省略、悬停另弹、移开消失”，再要求“只留一行”。管理端页面不变（3 行 + 原生 title）。
-- **下一步**：已合入 main `1ef9213bd`（2026-10-28），随 0.4.10 发布；发布后归档。
-
-### 20261028-release0410 — XY2API 0.4.10 版本准备
-
-- 分支 `release/0.4.10-20261028` 基于 main `1ef9213bd`（#151：OpenAI 智商检测按模型重构；#150：用户端密钥弹窗加宽与专属标识）；只改 VERSION、UPSTREAM_BASE 产品版本与本记忆，兼容基线 0.2.15 不变。
-- 发布说明写在 annotated tag 正文：更新内容，以及升级要求（停全部旧副本、迁移 281、sol 检测请求量翻倍、默认降级组合新增两条、回退步骤）。
-- 下一步：保护检查通过后合入 main，在合并提交上打 annotated v0.4.10，核验 Release 附件、GHCR 镜像与版本号。不部署生产。
 
 ### 20261025-pr131-release047 — 0.4.7 已发布（2026-10-26 更正）
 
@@ -1042,3 +1028,9 @@ pnpm --dir frontend run build
 - 验证：文档一致性、`sync.py audit`、scheduler-diff、tools 单测通过后提交版本 PR。
 - 卡点/风险：本机磁盘一度被 Go 构建缓存（约 96G）占满，`go clean -cache` 后恢复。
 - 下一步：版本 PR 合入后打 annotated tag v0.4.10，触发 Release，核验产物。不部署生产。
+
+### 2026-10-28 — 20261028-release0410 — 0.4.10 发布完成
+
+- 完成操作：版本 PR #152 全部检查通过后以合并提交合入 main `6042b7b68`；在该提交上创建 annotated v0.4.10（tag 对象 `922929557`，正文为更新内容与升级要求，用 `--cleanup=whitespace` 保留 `##` 标题行）并推送。Release run 40633537613 的 verify-version、build-frontend、release 均成功，2026-10-28T04:53:58Z 正式发布（非 draft、非 prerelease），Release 页面正文即 tag 正文。
+- 验证：checksums 核验 darwin_arm64 与 linux_amd64 附件；解包二进制报告 XY2API 0.4.10、兼容 0.2.15、commit 6042b7b68，构建信息 vcs.modified=false；GHCR 0.4.10/0.4/latest 指向同一 index（amd64+arm64），镜像标签 version=0.4.10、revision=6042b7b68（开发机 Docker 无 buildx，改用 GHCR registry API 匿名只读核验）。
+- 记忆：#150 与版本准备登记原样归档；版本速览更新为 0.4.10。未部署生产。
