@@ -34,6 +34,7 @@ type openaiStreamingResult struct {
 	imageCount       int
 	imageOutputSizes []string
 	searchCount      int
+	clientSawOutput  bool
 }
 
 type openaiNonStreamingResult struct {
@@ -147,7 +148,12 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 		return int64(bufferedWriter.Buffered())
 	}
+	clientSawOutput := false
+	pendingSemanticOutput := false
 	flushBuffered := func() error {
+		// A semantic write may be partial even when the downstream returns an error.
+		clientSawOutput = clientSawOutput || pendingSemanticOutput
+		pendingSemanticOutput = false
 		if firstOutputStage != nil && !firstOutputStage.closed {
 			if err := firstOutputStage.CommitTo(w); err != nil {
 				return err
@@ -369,6 +375,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			imageCount:       imageCounter.Count(),
 			imageOutputSizes: imageCounter.Sizes(),
 			searchCount:      searchCounter,
+			clientSawOutput:  clientSawOutput,
 		}
 	}
 	flushPending := func(disconnectMessage string) {
@@ -734,6 +741,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 
 			// 写入客户端（客户端断开后继续 drain 上游）
 			if !clientDisconnected && !failureDelivered && !suppressCurrentEvent {
+				pendingSemanticOutput = pendingSemanticOutput || (startsClientOutput && !openAIStreamEventTypeIsTerminal(eventType))
 				shouldFlush := queueDrained && (clientOutputStarted || startsClientOutput)
 				if firstTokenMs == nil && startsVisibleOutput {
 					// 保证首个 token 事件尽快出站，避免影响 TTFT。

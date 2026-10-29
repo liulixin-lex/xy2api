@@ -34,9 +34,21 @@ const (
 
 type ptUsageUpstream struct{ body func() io.ReadCloser }
 
+type ptUsageBody struct {
+	io.ReadCloser
+	stop func() bool
+}
+
+func (b *ptUsageBody) Close() error {
+	b.stop()
+	return b.ReadCloser.Close()
+}
+
 func (u *ptUsageUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	body := u.body()
+	stop := context.AfterFunc(req.Context(), func() { _ = body.Close() })
 	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}},
-		Body: u.body(), Request: req}, nil
+		Body: &ptUsageBody{ReadCloser: body, stop: stop}, Request: req}, nil
 }
 
 func (u *ptUsageUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
@@ -45,11 +57,16 @@ func (u *ptUsageUpstream) DoWithTLS(req *http.Request, proxyURL string, accountI
 
 func newPassthroughUsageHandler(t *testing.T, usageRepo service.UsageLogRepository, upstream service.HTTPUpstream, streamInterval int) *OpenAIGatewayHandler {
 	t.Helper()
+	return newResponsesUsageHandler(t, usageRepo, upstream, streamInterval, true)
+}
+
+func newResponsesUsageHandler(t *testing.T, usageRepo service.UsageLogRepository, upstream service.HTTPUpstream, streamInterval int, passthrough bool) *OpenAIGatewayHandler {
+	t.Helper()
 	repo := &grokCredentialHandlerRepo{accounts: []service.Account{{
 		ID: 811, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
 		Status: service.StatusActive, Schedulable: true, Concurrency: 1,
 		Credentials: map[string]any{"api_key": "test-key", "base_url": "https://upstream.example"},
-		Extra:       map[string]any{"openai_passthrough": true},
+		Extra:       map[string]any{"openai_passthrough": passthrough},
 	}}}
 	cfg := &config.Config{RunMode: config.RunModeSimple}
 	cfg.Gateway.StreamDataIntervalTimeout = streamInterval
@@ -74,6 +91,7 @@ func servePassthroughResponses(h *OpenAIGatewayHandler, ctx context.Context, wri
 		Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive},
 	}
 	router := gin.New()
+	router.Use(middleware.ClientRequestID())
 	router.POST("/v1/responses", func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyAPIKey), key)
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: key.User.ID, Concurrency: 1})
@@ -125,12 +143,17 @@ func TestOpenAIPassthroughBreakAfterOutputBillsPartialUsageOnce(t *testing.T) {
 }
 
 func TestOpenAIPassthroughCancelBeforeOutputBillsNothing(t *testing.T) {
+	testResponsesCancelBeforeOutputBillsNothing(t, true)
+}
+
+func testResponsesCancelBeforeOutputBillsNothing(t *testing.T, passthrough bool) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	withHandlerResilience(t, nil)
 	pr, pw := io.Pipe()
 	t.Cleanup(func() { _ = pw.Close() })
 	usageRepo := &gwUsageLogRepo{}
-	h := newPassthroughUsageHandler(t, usageRepo, &ptUsageUpstream{body: func() io.ReadCloser { return pr }}, 0)
+	h := newResponsesUsageHandler(t, usageRepo, &ptUsageUpstream{body: func() io.ReadCloser { return pr }}, 0, passthrough)
 	ctx, cancel := context.WithCancel(context.Background())
 	rec := httptest.NewRecorder()
 	done := make(chan struct{})

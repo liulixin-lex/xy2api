@@ -2825,6 +2825,14 @@
     {
       "path": "frontend/src/components/common/DataTableRow.ts",
       "value": "disabled: props.selectionDisabled,"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "streamResult == nil || !streamResult.clientSawOutput || errors.As(err, &failoverErr)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "clientSawOutput:  clientSawOutput,"
     }
   ],
   "forbidden_module_paths": [
@@ -2886,7 +2894,8 @@
     "xy-resilience-coverage",
     "xy-error-recovery-routing",
     "xy-upstream-balance",
-    "xy-admin-operator-scope"
+    "xy-admin-operator-scope",
+    "xy-responses-partial-usage"
   ],
   "custom_patch_tests": [
     {
@@ -4798,6 +4807,16 @@
       "id": "xy-admin-operator-scope",
       "path": "frontend/src/components/common/__tests__/DataTable.spec.ts",
       "literal": "disables protected rows and selects only eligible rows on %s"
+    },
+    {
+      "id": "xy-responses-partial-usage",
+      "path": "backend/internal/service/openai_native_partial_usage_test.go",
+      "literal": "func TestOpenAINativeForwardFailureKeepsOnlyPostOutputResult"
+    },
+    {
+      "id": "xy-responses-partial-usage",
+      "path": "backend/internal/handler/openai_native_partial_usage_test.go",
+      "literal": "func TestOpenAINativeFailureBillsKnownPartialUsageOnce"
     }
   ]
 }

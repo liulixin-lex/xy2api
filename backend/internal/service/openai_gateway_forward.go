@@ -1257,6 +1257,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		imageCount := 0
 		searchCount := 0
 		var imageOutputSizes []string
+		var partialErr error
 		if reqStream {
 			streamResult, err := s.handleStreamingResponseWithReasoning(ctx, resp, c, account, startTime, originalModel, upstreamModel, reasoningEffortValue)
 			if err != nil {
@@ -1303,7 +1304,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					}
 					return s.handleErrorResponse(ctx, compactResp, c, account, body, resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel))
 				}
-				return nil, err
+				var failoverErr *UpstreamFailoverError
+				if streamResult == nil || !streamResult.clientSawOutput || errors.As(err, &failoverErr) {
+					return nil, err
+				}
+				// Keep metered usage after output without turning a failed attempt into success.
+				partialErr = err
 			}
 			usage = streamResult.usage
 			firstTokenMs = streamResult.firstTokenMs
@@ -1335,16 +1341,18 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			imageOutputSizes = nonStreamResult.imageOutputSizes
 			searchCount = nonStreamResult.searchCount
 		}
-		webSearchReplay.succeeded()
-		s.bindHTTPResponseAccount(ctx, c, account, responseID)
+		if partialErr == nil {
+			webSearchReplay.succeeded()
+			s.bindHTTPResponseAccount(ctx, c, account, responseID)
+		}
 
 		// Extract and save Codex usage snapshot from response headers (for OAuth accounts).
 		// 排除 spark 影子:其 codex_* 仅由 QueryUsage(/wham/usage bengalfox)更新(外审第7轮 P1)。
-		if account.UsesOpenAICodexProtocol() && !account.IsShadow() {
+		if partialErr == nil && account.UsesOpenAICodexProtocol() && !account.IsShadow() {
 			if snapshot := ParseCodexRateLimitHeaders(resp.Header); snapshot != nil {
 				s.updateCodexUsageSnapshot(ctx, account.ID, snapshot)
 			}
-		} else if account.IsShadow() && account.ParentAccountID != nil {
+		} else if partialErr == nil && account.IsShadow() && account.ParentAccountID != nil {
 			notifyOpenAIAutoReset(*account.ParentAccountID)
 		}
 
@@ -1384,7 +1392,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			forwardResult.SearchCount = searchCount
 		}
 		stampOpenAIResponsesUpstreamEndpoint(c, forwardResult)
-		return forwardResult, nil
+		return forwardResult, partialErr
 	}
 }
 
