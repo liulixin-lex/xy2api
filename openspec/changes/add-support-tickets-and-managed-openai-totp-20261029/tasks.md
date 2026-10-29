@@ -25,7 +25,7 @@
 
 ## 4. Final verification
 
-- [ ] 4.1 Regenerate Wire and verify generated tree is clean.
-- [ ] 4.2 Run focused Go/backend integration and frontend test/lint/typecheck/build.
-- [ ] 4.3 Run `python3 tools/check_docs_consistency.py`, `python3 tools/upstream-sync/sync.py scheduler-diff`, `python3 -m unittest discover -s tools/tests -p 'test_*.py' -v`, and clean-tree `sync.py audit`.
+- [x] 4.1 Regenerate Wire and verify generated tree is clean.
+- [x] 4.2 Run focused Go/backend integration and frontend test/lint/typecheck/build.
+- [x] 4.3 Run `python3 tools/check_docs_consistency.py`, `python3 tools/upstream-sync/sync.py scheduler-diff`, `python3 -m unittest discover -s tools/tests -p 'test_*.py' -v`, and clean-tree `sync.py audit`.
 - [x] 4.4 Complete a focused independent security review of owner isolation, admin privilege gates, worker credentials, encrypted storage and ambiguous-rotation recovery.

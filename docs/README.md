@@ -92,5 +92,5 @@
 | [`stabilize-openai-iq-check`](../openspec/changes/stabilize-openai-iq-check/) | 智商检测稳定性 | 已完成；2026-10-27 起被按模型检测取代，见 `docs/OPENAI_IQ_CHECK.md` |
 | [`iq-detection-operations`](../openspec/changes/iq-detection-operations/) | 智商检测运营 | 已结束（线上验收按用户决定不再执行）；2026-10-27 起被按模型检测取代 |
 | [`add-openai-compatible-prompt-audit`](../openspec/changes/add-openai-compatible-prompt-audit/) | 提示词审计 | 上游 Sub2API 的变更，随同步引入 |
-| [`add-support-tickets-and-managed-openai-totp-20261029`](../openspec/changes/add-support-tickets-and-managed-openai-totp-20261029/) | 网站工单与托管 OpenAI 账号 TOTP 管理 | 实施与集成验证中，含普通管理员工单授权；未发布 |
+| [`add-support-tickets-and-managed-openai-totp-20261029`](../openspec/changes/add-support-tickets-and-managed-openai-totp-20261029/) | 网站工单与托管 OpenAI 账号 TOTP 管理 | 本地开发与验证完成，含普通管理员工单授权；未推送、未发布，真实上游未验证 |
 | [`codex-manifest-pinned-accounts`](../openspec/changes/codex-manifest-pinned-accounts/) | Codex manifest 固定账号 | 上游 Sub2API 的变更，随同步引入 |
