@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/tlsfingerprint"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
+	"github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -65,26 +66,66 @@ func TestRecoveryOutcomeUsesHandlerResult(t *testing.T) {
 	}
 }
 
-type recoveryRejectedRequestUpstream struct{ service.HTTPUpstream }
+type recoveryRejectedRequestUpstream struct {
+	service.HTTPUpstream
+	status int
+	body   string
+	calls  int
+}
 
 func (u *recoveryRejectedRequestUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
-	return &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","code":"invalid_value","param":"max_output_tokens","message":"Invalid value: -1. Expected a value >= 1."}}`)), Request: req}, nil
+	u.calls++
+	return &http.Response{StatusCode: u.status, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(u.body)), Request: req}, nil
 }
 
 func (u *recoveryRejectedRequestUpstream) DoWithTLS(req *http.Request, proxy string, account int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
 	return u.Do(req, proxy, account, concurrency)
 }
 
-func TestRecoveryOutcomeDeterministicRejectionInResponsesHandler(t *testing.T) {
+func TestRecoveryOutcomeRejectionAcrossHandlers(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	withHandlerResilience(t, nil)
-	h := newResponsesUsageHandler(t, &gwUsageLogRepo{}, &recoveryRejectedRequestUpstream{}, 0, false)
-	st := resilience.NewRequestState()
-	recorder := httptest.NewRecorder()
-	servePassthroughResponses(h, resilience.WithRequestState(context.Background(), st), recorder)
-	require.Equal(t, http.StatusBadRequest, recorder.Code)
-	require.Contains(t, recorder.Body.String(), `"code":"invalid_value"`)
-	require.Equal(t, "terminal_rejection", *st.RecoveryOutcome())
+	for _, tc := range []struct {
+		name, body, outcome string
+		status              int
+	}{
+		{"invalid value", `{"error":{"type":"invalid_request_error","code":"invalid_value","param":"max_output_tokens","message":"Invalid value: -1. Expected a value >= 1."}}`, "terminal_rejection", 400},
+		{"cyber policy", `{"error":{"code":"cyber_policy","message":"flagged for cyber policy"}}`, "terminal_rejection", 400},
+		{"upstream failure exhausts selection", `{"error":{"type":"server_error","message":"upstream unavailable"}}`, "selection_exhausted", 502},
+	} {
+		for _, endpoint := range []string{"native responses", "passthrough responses", "chat"} {
+			t.Run(endpoint+"/"+tc.name, func(t *testing.T) {
+				withHandlerResilience(t, nil)
+				upstream := &recoveryRejectedRequestUpstream{status: tc.status, body: tc.body}
+				h := newResponsesUsageHandler(t, &gwUsageLogRepo{}, upstream, 0, endpoint == "passthrough responses")
+				st := resilience.NewRequestState()
+				ctx := resilience.WithRequestState(context.Background(), st)
+				recorder := httptest.NewRecorder()
+				if endpoint != "chat" {
+					servePassthroughResponses(h, ctx, recorder)
+				} else {
+					groupID := int64(911)
+					key := &service.APIKey{ID: 912, GroupID: &groupID, User: &service.User{ID: 913, Status: service.StatusActive}, Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive}}
+					router := gin.New()
+					router.Use(middleware.ClientRequestID())
+					router.POST("/v1/chat/completions", func(c *gin.Context) {
+						c.Set(string(middleware.ContextKeyAPIKey), key)
+						c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: key.User.ID, Concurrency: 1})
+						h.ChatCompletions(c)
+					})
+					req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5.4","stream":true,"messages":[{"role":"user","content":"hi"}]}`)).WithContext(ctx)
+					req.Header.Set("Content-Type", "application/json")
+					router.ServeHTTP(recorder, req)
+				}
+				require.Equal(t, tc.status, recorder.Code, recorder.Body.String())
+				require.Equal(t, 1, upstream.calls, "request rejection must not retry or change accounts")
+				require.NotNil(t, st.RecoveryOutcome())
+				require.Equal(t, tc.outcome, *st.RecoveryOutcome())
+				if endpoint == "native responses" && tc.name == "invalid value" {
+					require.Contains(t, recorder.Body.String(), `"code":"invalid_value"`)
+				}
+			})
+		}
+	}
 }
 
 func TestGeminiTimeoutSwitchThenCancelKeepsFinalOutcome(t *testing.T) {

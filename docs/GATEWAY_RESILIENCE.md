@@ -324,7 +324,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 
 ### 5.2 计数项
 
-未发布观测：`usage_logs` 与既有 `ops_error_logs` 行新增可空 `end_to_end_first_output_ms`，从入站 delivery 初始化到首个成功送达的语义输出，包含排队和所有先前尝试；没有输出为 NULL。开场、心跳、真实错误、`[DONE]`、纯终态与空内容数组/对象不算；正常 `error: null` 等占位字段不排除真实内容，旧首字与计费判据不变。运维行另记 `recovery_outcome`，由 handler 按实际结果分类：`completed`、`post_output_failure`、`client_cancel`、`budget_exhausted`、`selection_exhausted`、`terminal_rejection`、`upstream_failure`。取消优先于之前的超时/换号；下游写失败已明确报告断开时，即使请求 context 尚未取消也保留 `client_cancel`。已确定的请求或策略拒绝记 `terminal_rejection`，由明确的拒绝信号传递，不根据最终 HTTP 状态或错误字符串推断；部分输出后上游失败仍是失败。只附在本来产生的行上，正常成功不新增运维行，不增加接口或前端展示。
+未发布观测：`usage_logs` 与既有 `ops_error_logs` 行新增可空 `end_to_end_first_output_ms`，从入站 delivery 初始化到首个成功送达的语义输出，包含排队和所有先前尝试；没有输出为 NULL。开场、心跳、真实错误、`[DONE]`、纯终态与空内容数组/对象不算；正常 `error: null` 等占位字段不排除真实内容，旧首字与计费判据不变。运维行另记 `recovery_outcome`，由 handler 按实际结果分类：`completed`、`post_output_failure`、`client_cancel`、`budget_exhausted`、`selection_exhausted`、`terminal_rejection`、`upstream_failure`。取消优先于之前的超时/换号；下游写失败已明确报告断开时，即使请求 context 尚未取消也保留 `client_cancel`。OpenAI 原生/透传 Responses 与 Chat/Messages 中已确定的请求或策略拒绝均记 `terminal_rejection`，由明确的拒绝信号传递，不根据最终 HTTP 状态或错误字符串推断；部分输出后上游失败仍是失败。只附在本来产生的行上，正常成功不新增运维行，不增加接口或前端展示。
 
 首字超时的现有失败尝试 JSON 另带 `warm`（缺失/false/true）、`body_bytes`、`effort`、`attempt_elapsed_ms`、`timeout_ms`，沿既有队列脱敏裁剪，不保存正文、不新增成功尝试事件。这些维度描述失败的那次尝试，不能套到随后成功的尝试上。迁移 283 的锁与回退要求见 [用量指标](USAGE_METRICS.md#迁移与回退)。
 

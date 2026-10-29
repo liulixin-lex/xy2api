@@ -209,7 +209,8 @@
     "xy-openai-recent-session-success",
     "xy-openai-warm-input-floor",
     "xy-recovery-observability-precision",
-    "xy-openai-recent-session-endpoint-model"
+    "xy-openai-recent-session-endpoint-model",
+    "xy-recovery-rejection-endpoints"
   ],
   "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/92"
 }

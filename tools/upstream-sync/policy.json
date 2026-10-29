@@ -2961,6 +2961,14 @@
     {
       "path": "backend/internal/handler/openai_gateway_handler.go",
       "value": "h.gatewayService.RecordOpenAIRecentSessionSuccess(c.Request.Context(), apiKey.GroupID, sessionHash, account, openAIAccountScheduleModel(c, account, currentRoutingModel, false, result), result)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_upstream_errors.go",
+      "value": "return nil, &OpenAIRequestRejectionError{err}"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "if cyberHit || contextWindow || (isOpenAIDeterministicClientError(resp.StatusCode) && classifyUpstreamHTTP(resp.StatusCode, resp.Header, body, upstreamMsg).Category == resilience.CategoryClientError) {"
     }
   ],
   "forbidden_module_paths": [
@@ -3030,7 +3038,8 @@
     "xy-openai-recent-session-success",
     "xy-openai-warm-input-floor",
     "xy-recovery-observability-precision",
-    "xy-openai-recent-session-endpoint-model"
+    "xy-openai-recent-session-endpoint-model",
+    "xy-recovery-rejection-endpoints"
   ],
   "custom_patch_tests": [
     {
@@ -5026,7 +5035,7 @@
     {
       "id": "xy-recovery-observability-precision",
       "path": "backend/internal/handler/recovery_observability_test.go",
-      "literal": "func TestRecoveryOutcomeDeterministicRejectionInResponsesHandler"
+      "literal": "func TestRecoveryOutcomeRejectionAcrossHandlers"
     },
     {
       "id": "xy-recovery-observability-precision",
@@ -5037,6 +5046,11 @@
       "id": "xy-openai-recent-session-endpoint-model",
       "path": "backend/internal/service/openai_recent_session_success_test.go",
       "literal": "func TestOpenAIRecentSessionPassthroughModelsMatchEndpoints"
+    },
+    {
+      "id": "xy-recovery-rejection-endpoints",
+      "path": "backend/internal/handler/recovery_observability_test.go",
+      "literal": "func TestRecoveryOutcomeRejectionAcrossHandlers"
     }
   ]
 }
