@@ -94,4 +94,4 @@ OpenAI 原始总输入含缓存明细，在 `backend/internal/service/openai_gat
 
 ## 迁移与回退
 
-未发布迁移 283 仅追加三个可空列：`usage_logs.end_to_end_first_output_ms`、`ops_error_logs.end_to_end_first_output_ms`（BIGINT）及 `ops_error_logs.recovery_outcome`（VARCHAR(32)）。无 DEFAULT、NOT NULL、索引或回填。PostgreSQL 18 不重写存量表，但 ALTER 会短暂取得 ACCESS EXCLUSIVE 锁，应避开长事务并预留迁移窗口。回退旧版本可保留三列；重新执行迁移幂等。合并前须再核对迁移编号是否被占用。
+0.4.13 的迁移 283 仅追加三个可空列：`usage_logs.end_to_end_first_output_ms`、`ops_error_logs.end_to_end_first_output_ms`（BIGINT）及 `ops_error_logs.recovery_outcome`（VARCHAR(32)）。无 DEFAULT、NOT NULL、索引或回填。PostgreSQL 18 不重写存量表，但 ALTER 会短暂取得 ACCESS EXCLUSIVE 锁，应避开长事务并预留迁移窗口。回退旧版本可保留三列；重新执行迁移幂等。本次迁移编号 283 已与 main 核对，旧迁移及其校验和保持不变。
