@@ -6,6 +6,20 @@
 
 ## 当前交接状态
 
+### 网站工单与 OpenAI 账号 2FA 管理（2026-10-29；实施中）
+
+- **背景**：用户要求对照 Sub2API 最新仓库补齐 XY2API 缺失的在线工单与 2FA 功能。核对 Sub2API 默认分支 HEAD `12a49ef4ef6a2f116389701ac8f1fe620f27bbf5`；XY2API 基线为 `origin/main` `03fc67de35d2515ab274a8045782c59a0cf22b52`（0.4.12）。XY2API 已有平台用户 TOTP 登录、启停与 OAuth 账号创建/授权流程。
+- **目标**：增加在线工单；为 OpenAI 托管账号增加专用凭据保存、2FA 更换/中断恢复与安全导出，复用现有 TOTP 加密、step-up、审计与管理台模式，不在账号普通凭据 API 暴露登录秘密。平台用户的 TOTP 登录本身不重复实现。
+- **要求与约束**：新增 migration 只追加 checksum；新增管理/用户路由需复用鉴权、限流、operator 权限和审计；2FA 新密钥必须在上游激活前经加密、持久化确认，失败或结果不确定时不得自动重复 enroll；在线工单默认关闭、用户只能访问自有工单。登录、换绑和真实 OpenAI MFA 均用本地 mock 验证；不连接生产或真实 OpenAI 账号。
+- **已完成**：从 `origin/main` 建立独立工作树与分支 `feat/support-tickets-2fa-20261029`；核对现有用户 TOTP 登录与设置流程，以及 Sub2API 12a49ef 的工单、托管账号 2FA 换绑文档与代码。
+- **未完成**：
+  1. 定稿 OpenSpec 规格、文件清单、复用边界和验证矩阵；
+  2. 实施工单后端迁移、权限隔离、配置开关、前后端交互与测试；
+  3. 实施托管 OpenAI 凭据密文保存、worker 队列/恢复、轮换验证与导出；
+  4. 跑定向及完整门禁，更新文档目录、migration checksum、upstream 补丁登记和任务记录。
+- **卡点与风险**：OpenAI MFA 为非公开网页协议；需要把任何真实账号协议不确定性视为待确认状态，自动化 mock 不能证明上游兼容。XY2API 当前没有 Sub2API Credential Operations/Worker 子系统，需定义最小可审计的独立实现。
+- **关键位置**：实施基线 `03fc67de3`；Sub2API 本地只读克隆位于临时审阅目录；详细任务见“进行中的工作”的 `20261029-support-tickets-2fa`。
+
 ### XY2API 0.4.12 正式发布完成（2026-10-28；本轮未部署）
 
 - [v0.4.12](https://github.com/liulixin-lex/xy2api/releases/tag/v0.4.12) 于 2026-10-28T22:06:21Z 正式发布：annotated tag 对象 `c36904c45` 指向版本 PR [#161](https://github.com/liulixin-lex/xy2api/pull/161) 的合并提交 `fdedd33dc`；Release run `40775331704` 成功，非 draft、非 prerelease。
@@ -252,6 +266,20 @@
 - 后续部署事项：升级后显式保存public备份范围；新目标先初始化所需扩展，production备份仍需在实际部署后验证。share默认关闭，实际影子/逐组启用与业务账单观察是部署后的流程。非阻断维护项：GoReleaser旧配置字段弃用提醒、前端依赖审计中未达high/critical阻断等级的告警；本次未借此扩展依赖升级。
 
 ## 进行中的工作
+
+### 20261029-support-tickets-2fa — 对照 Sub2API 补齐在线工单与 OpenAI 账号 2FA 管理
+
+- **请求/目标**：用户要求查看 `ranxi2001/sub2api` 最新仓库，将 XY2API 已有能力以外的缺失功能补齐。2026-10-29 核实 Sub2API 默认分支 HEAD 为 `12a49ef4ef6a2f116389701ac8f1fe620f27bbf5`；XY2API 默认分支为 `03fc67de35d2515ab274a8045782c59a0cf22b52`。XY2API 已有自身用户的 TOTP 登录、绑定/停用；本任务聚焦网站工单和托管 OpenAI 账号 2FA 轮换/恢复/导出，不重复建用户登录第二因素。
+- **开始状态**：独立工作树 `/Users/admin/BIN-MAC-01/XY2-BIN/xy2api-wt/support-tickets-2fa`，分支 `feat/support-tickets-2fa-20261029`，基于 origin/main `03fc67de3`，初始工作树干净。未推送、未开 PR。
+- **范围与约束**：工单默认关闭，后台可配分类/限制/提示；用户所有权在数据库读写层强制，管理员支持筛选、回复、状态和删除。托管 OpenAI 密码/TOTP 使用专用加密存储，不进入账号普通凭据 API；Worker 的轮换/导出接口必须鉴权，2FA 新候选在激活前经本地恢复日志和数据库密文确认，未知结果不能自动重新 enrollment。真实上游协议仅 mock，不操作生产或真实 OpenAI 账号。migration 只追加，需更新 checksum manifest、docs、upstream 补丁登记与测试。
+- **已完成**：检查 Sub2API 最新代码/文档与 XY2API 当前主线 TOTP、账号授权、迁移、权限、设置和审计接缝；已建立独立工作树。
+- **未完成**：
+  1. 规格与实现拆分；
+  2. 工单后端、用户/管理员界面、权限及迁移；
+  3. OpenAI 账号 2FA 专用凭据、Worker 任务和恢复/导出；
+  4. 定向、全量验证及门禁收尾。
+- **卡点与风险**：上游 MFA 是非公开网页协议，真实账号行为未核验；XY2API 无 Credential Operations/本地 Worker 组件，轮换功能需明确最小独立实现边界。
+- **关键位置**：OpenSpec `add-support-tickets-and-managed-openai-totp-20261029/`（待建）；现行文档 `docs/SUPPORT_TICKETS_AND_OPENAI_2FA.md`（待建）；Sub2API `docs/openai-2fa-rotation.md` 与工单后端文件仅作行为参考。
 
 ### 20261021-channel-monitor-v1 — 渠道监控 v1 探测优化（PR #120 已合入 main，进入下一个版本；待真实上游验证；2026-10-22 DOCS 更新状态）
 
