@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -676,29 +675,4 @@ func TestOpenAINativeFirstOutputFailoverKeepsAttemptHeadersPrivateAfterKeepalive
 	case <-time.After(time.Second):
 		t.Fatal("first account writer did not exit after timeout")
 	}
-}
-
-func TestFirstOutputTimeoutPersistsOnlyFailedAttemptProfile(t *testing.T) {
-	c, st := newSSEDeliveryContext(t, "text/event-stream")
-	start := time.Now().Add(-20 * time.Second)
-	st.SetAttemptProfile(resilience.AttemptProfile{AccountID: 1, Model: "gpt-5.5", Warm: false, BodyBytes: 256 << 10, AttemptStart: start})
-	svc := &OpenAIGatewayService{}
-	svc.newOpenAIFirstOutputTimeoutError(c.Request.Context(), c, &Account{ID: 1, Platform: PlatformOpenAI}, nil, "", start, "gpt-5.5", "high", 20*time.Second, "semantic_output", nil)
-	raw, _ := c.Get(OpsUpstreamErrorsKey)
-	events := raw.([]*OpsUpstreamErrorEvent)
-	require.Len(t, events, 1)
-	require.NotNil(t, events[0].Warm)
-	require.False(t, *events[0].Warm)
-	require.Equal(t, 256<<10, events[0].BodyBytes)
-	require.Equal(t, "high", events[0].Effort)
-	require.InDelta(t, 20000, events[0].AttemptElapsedMs, 100)
-	require.Equal(t, int64(20000), events[0].TimeoutMs)
-	entry := &OpsInsertErrorLogInput{UpstreamErrors: events}
-	require.NoError(t, sanitizeOpsUpstreamErrors(entry))
-	stored, err := ParseOpsUpstreamErrors(*entry.UpstreamErrorsJSON)
-	require.NoError(t, err)
-	require.Len(t, stored, 1)
-	require.NotNil(t, stored[0].Warm)
-	require.False(t, *stored[0].Warm)
-	require.Equal(t, events[0].BodyBytes, stored[0].BodyBytes)
 }

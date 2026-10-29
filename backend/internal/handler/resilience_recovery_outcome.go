@@ -25,7 +25,8 @@ func recordForwardRecovery(c *gin.Context, err error, disconnected, completed bo
 		outcome = "completed"
 	default:
 		var failure *service.UpstreamFailoverError
-		if errors.As(err, &failure) && failure != nil && (!failure.ShouldRetryNextAccount() || resilienceContentRejected(failure)) {
+		var rejection *service.OpenAIRequestRejectionError
+		if errors.As(err, &rejection) || (errors.As(err, &failure) && failure != nil && (!failure.ShouldRetryNextAccount() || resilienceContentRejected(failure))) {
 			outcome = "terminal_rejection"
 		}
 	}
@@ -47,7 +48,7 @@ func recoveryOutcome(c *gin.Context) *string {
 	outcome := st.RecoveryOutcome()
 	// A client may cancel after a timeout was switched away from or while a
 	// detached upstream is draining. This final request reason wins.
-	if st.ClientGone() {
+	if st.ClientGone() || (outcome != nil && *outcome == "client_cancel") {
 		v := "client_cancel"
 		return &v
 	}

@@ -3,9 +3,11 @@
 package service
 
 import (
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/liulixin-lex/xy2api/internal/resilience"
+	"github.com/stretchr/testify/require"
 )
 
 func TestEndToEndFirstOutputIncludesQueueAndFailedAttempt(t *testing.T) {
@@ -47,11 +49,26 @@ func TestEndToEndFirstOutputExcludesProtocolOnlyDelivery(t *testing.T) {
 			}
 		})
 	}
-	for _, payload := range []string{`{"data":[]}`, `{"output":[]}`, `{"candidates":[{"finishReason":"STOP"}]}`} {
+	for _, payload := range []string{`{"data":[]}`, `{"output":[]}`, `{"candidates":[{"finishReason":"STOP"}]}`,
+		`{"choices":[{"message":{"role":"assistant","content":[]},"finish_reason":"stop"}]}`,
+		`{"choices":[{"message":{"content":{}}}]}`,
+		`{"error":{"message":"failed"},"choices":[{"message":{"content":"hello"}}]}`} {
 		c, st := newSSEDeliveryContext(t, "application/json")
 		_, err := c.Writer.WriteString(payload)
 		require.NoError(t, err)
 		require.Nil(t, st.EndToEndFirstOutputMs())
+	}
+}
+
+func TestEndToEndFirstOutputAcceptsPlaceholderErrors(t *testing.T) {
+	for _, tc := range []struct{ contentType, payload string }{
+		{"application/json", `{"status":"completed","error":null,"output":[{"type":"message","content":[{"type":"output_text","text":"hello"}]}]}`},
+		{"text/event-stream", "data: {\"error\":null,\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n"},
+	} {
+		c, st := newSSEDeliveryContext(t, tc.contentType)
+		_, err := c.Writer.WriteString(tc.payload)
+		require.NoError(t, err)
+		require.NotNil(t, st.EndToEndFirstOutputMs())
 	}
 }
 
@@ -67,4 +84,29 @@ func TestEndToEndFirstOutputAcrossProtocols(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, st.EndToEndFirstOutputMs(), payload)
 	}
+}
+
+func TestFirstOutputTimeoutPersistsOnlyFailedAttemptProfile(t *testing.T) {
+	c, st := newSSEDeliveryContext(t, "text/event-stream")
+	start := time.Now().Add(-20 * time.Second)
+	st.SetAttemptProfile(resilience.AttemptProfile{AccountID: 1, Model: "gpt-5.5", Warm: false, BodyBytes: 256 << 10, AttemptStart: start})
+	svc := &OpenAIGatewayService{}
+	svc.newOpenAIFirstOutputTimeoutError(c.Request.Context(), c, &Account{ID: 1, Platform: PlatformOpenAI}, nil, "", start, "gpt-5.5", "high", 20*time.Second, "semantic_output", nil)
+	raw, _ := c.Get(OpsUpstreamErrorsKey)
+	events := raw.([]*OpsUpstreamErrorEvent)
+	require.Len(t, events, 1)
+	require.NotNil(t, events[0].Warm)
+	require.False(t, *events[0].Warm)
+	require.Equal(t, 256<<10, events[0].BodyBytes)
+	require.Equal(t, "high", events[0].Effort)
+	require.InDelta(t, 20000, events[0].AttemptElapsedMs, 100)
+	require.Equal(t, int64(20000), events[0].TimeoutMs)
+	entry := &OpsInsertErrorLogInput{UpstreamErrors: events}
+	require.NoError(t, sanitizeOpsUpstreamErrors(entry))
+	stored, err := ParseOpsUpstreamErrors(*entry.UpstreamErrorsJSON)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	require.NotNil(t, stored[0].Warm)
+	require.False(t, *stored[0].Warm)
+	require.Equal(t, events[0].BodyBytes, stored[0].BodyBytes)
 }

@@ -5,19 +5,25 @@ package handler
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/tlsfingerprint"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
-	"net/http"
-	"testing"
-	"time"
 )
 
 func TestRecoveryOutcomeUsesHandlerResult(t *testing.T) {
 	withHandlerResilience(t, nil)
 	for _, tc := range []struct {
-		name, want                        string
-		output, cancel, budget, completed bool
+		name, want                                      string
+		output, cancel, budget, completed, disconnected bool
 	}{
 		{name: "completed", want: "completed", completed: true},
 		{name: "empty completed", want: "completed", completed: true},
@@ -25,6 +31,7 @@ func TestRecoveryOutcomeUsesHandlerResult(t *testing.T) {
 		{name: "partial", want: "post_output_failure", output: true},
 		{name: "cancel", want: "client_cancel", cancel: true},
 		{name: "cancel after output", want: "client_cancel", cancel: true, output: true},
+		{name: "explicit disconnect before context cancel", want: "client_cancel", output: true, disconnected: true},
 		{name: "budget", want: "budget_exhausted", budget: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -41,7 +48,7 @@ func TestRecoveryOutcomeUsesHandlerResult(t *testing.T) {
 			if !tc.completed {
 				err = errors.New("upstream failure")
 			}
-			recordForwardRecovery(c, err, false, tc.completed)
+			recordForwardRecovery(c, err, tc.disconnected, tc.completed)
 			if tc.cancel {
 				cancel()
 			}
@@ -56,6 +63,28 @@ func TestRecoveryOutcomeUsesHandlerResult(t *testing.T) {
 			require.Equal(t, tc.output, entry.EndToEndFirstOutputMs != nil)
 		})
 	}
+}
+
+type recoveryRejectedRequestUpstream struct{ service.HTTPUpstream }
+
+func (u *recoveryRejectedRequestUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	return &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","code":"invalid_value","param":"max_output_tokens","message":"Invalid value: -1. Expected a value >= 1."}}`)), Request: req}, nil
+}
+
+func (u *recoveryRejectedRequestUpstream) DoWithTLS(req *http.Request, proxy string, account int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxy, account, concurrency)
+}
+
+func TestRecoveryOutcomeDeterministicRejectionInResponsesHandler(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withHandlerResilience(t, nil)
+	h := newResponsesUsageHandler(t, &gwUsageLogRepo{}, &recoveryRejectedRequestUpstream{}, 0, false)
+	st := resilience.NewRequestState()
+	recorder := httptest.NewRecorder()
+	servePassthroughResponses(h, resilience.WithRequestState(context.Background(), st), recorder)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Contains(t, recorder.Body.String(), `"code":"invalid_value"`)
+	require.Equal(t, "terminal_rejection", *st.RecoveryOutcome())
 }
 
 func TestGeminiTimeoutSwitchThenCancelKeepsFinalOutcome(t *testing.T) {

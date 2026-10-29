@@ -106,13 +106,9 @@ func sseBlockEnd(p []byte) (int, int) {
 	return best, sep
 }
 
-// sseBlockIsOpening reports whether a complete SSE block carries no content:
-// comments, pings, keepalive events, Anthropic message_start and an empty
-// text or thinking content_block_start, Responses created/in_progress/queued,
-// and Chat chunks that only announce the role. Blank blocks are opening too.
-func sseBlockIsOpening(block []byte) bool {
-	event := ""
-	var data []byte
+// sseBlockFields is shared by billing delivery and semantic observation;
+// their content predicates and stopping conditions remain independent.
+func sseBlockFields(block []byte) (event string, data []byte) {
 	for _, raw := range bytes.Split(block, []byte("\n")) {
 		line := bytes.TrimRight(raw, "\r")
 		switch {
@@ -127,6 +123,15 @@ func sseBlockIsOpening(block []byte) bool {
 			continue
 		}
 	}
+	return event, data
+}
+
+// sseBlockIsOpening reports whether a complete SSE block carries no content:
+// comments, pings, keepalive events, Anthropic message_start and an empty
+// text or thinking content_block_start, Responses created/in_progress/queued,
+// and Chat chunks that only announce the role. Blank blocks are opening too.
+func sseBlockIsOpening(block []byte) bool {
+	event, data := sseBlockFields(block)
 	if len(data) == 0 {
 		switch event {
 		case "", "ping", "keepalive":

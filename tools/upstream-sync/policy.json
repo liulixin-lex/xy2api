@@ -2933,6 +2933,26 @@
     {
       "path": "backend/internal/service/resilience_first_output.go",
       "value": "tier = warmFirstOutputTier(tier, profile.BodyBytes)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_upstream_errors.go",
+      "value": "type OpenAIRequestRejectionError struct{ error }"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_upstream_errors.go",
+      "value": "return nil, &OpenAIRequestRejectionError{fmt.Errorf(\"upstream error: %d message=%s\", resp.StatusCode, upstreamMsg)}"
+    },
+    {
+      "path": "backend/internal/service/resilience_semantic_output.go",
+      "value": "resilience.ChatErrorField(root)"
+    },
+    {
+      "path": "backend/internal/service/resilience_delivery_sse.go",
+      "value": "func sseBlockFields(block []byte) (event string, data []byte)"
+    },
+    {
+      "path": "backend/internal/handler/resilience_recovery_outcome.go",
+      "value": "st.ClientGone() || (outcome != nil && *outcome == \"client_cancel\")"
     }
   ],
   "forbidden_module_paths": [
@@ -3000,7 +3020,8 @@
     "xy-recovery-observability",
     "xy-responses-partial-success-guard",
     "xy-openai-recent-session-success",
-    "xy-openai-warm-input-floor"
+    "xy-openai-warm-input-floor",
+    "xy-recovery-observability-precision"
   ],
   "custom_patch_tests": [
     {
@@ -4977,6 +4998,31 @@
       "id": "xy-openai-warm-input-floor",
       "path": "backend/internal/service/resilience_warm_input_floor_test.go",
       "literal": "func TestOpenAIWarmInputFloorPreservesBudgetAndProfiles"
+    },
+    {
+      "id": "xy-recovery-observability",
+      "path": "backend/internal/service/recovery_observability_test.go",
+      "literal": "func TestFirstOutputTimeoutPersistsOnlyFailedAttemptProfile"
+    },
+    {
+      "id": "xy-recovery-observability-precision",
+      "path": "backend/internal/service/recovery_observability_test.go",
+      "literal": "func TestEndToEndFirstOutputAcceptsPlaceholderErrors"
+    },
+    {
+      "id": "xy-recovery-observability-precision",
+      "path": "backend/internal/service/recovery_observability_test.go",
+      "literal": "func TestEndToEndFirstOutputExcludesProtocolOnlyDelivery"
+    },
+    {
+      "id": "xy-recovery-observability-precision",
+      "path": "backend/internal/handler/recovery_observability_test.go",
+      "literal": "func TestRecoveryOutcomeDeterministicRejectionInResponsesHandler"
+    },
+    {
+      "id": "xy-recovery-observability-precision",
+      "path": "backend/internal/handler/recovery_observability_test.go",
+      "literal": "func TestRecoveryOutcomeUsesHandlerResult"
     }
   ]
 }
