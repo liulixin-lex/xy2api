@@ -491,6 +491,7 @@ type OpenAIGatewayService struct {
 	openaiWSPassthroughDialerOnce  sync.Once
 	openaiModelTransientOnce       sync.Once
 	openaiAccountLatencyHoldOnce   sync.Once
+	openaiRecentSessionOnce        sync.Once
 	agentIdentityTaskMu            sync.Mutex
 	openaiWSPool                   *openAIWSConnPool
 	openaiWSStateStore             OpenAIWSStateStore
@@ -500,6 +501,7 @@ type OpenAIGatewayService struct {
 	openaiAccountStats             *openAIAccountRuntimeStats
 	openaiModelTransient           *openAIAccountModelTransientState
 	openaiAccountLatencyHold       *openAIAccountLatencyHoldState
+	openaiRecentSession            *openAIRecentSessionSuccess
 	openaiProxyStreamCircuit       *openAIProxyStreamCircuit
 	openaiProxyStreamFailOpenLogAt atomic.Int64
 

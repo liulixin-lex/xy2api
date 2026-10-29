@@ -720,6 +720,20 @@
           "_, _ = digest.Write(buf[:])",
           "return digest.Sum64() >> 11"
         ]
+      },
+      {
+        "block": "openai-recent-session-success",
+        "note": "N4: recent delivered successful accounts precede cache evidence inside the existing E2 priority/load/rate/compact cohorts; candidate gates, hold partition, fresh checks and slot acquisition remain unchanged.",
+        "removed": [],
+        "added": [
+          "}",
+          "recent := make(map[int64]time.Time, len(indices))",
+          "now := time.Now()",
+          "outboundModel := resolveOpenAIAccountUpstreamModelForRequest(item.account, model, compact)",
+          "recent[item.account.ID] = s.recentSessionSuccess().lastSuccess(openAIRecentSessionKey{derefGroupID(groupID), session, outboundModel}, item.account.ID, now)",
+          "if !recent[a].Equal(recent[b]) {",
+          "return recent[a].After(recent[b])"
+        ]
       }
     ],
     "backend/internal/service/gemini_messages_compat_service.go": [

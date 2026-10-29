@@ -33,6 +33,8 @@ func TestOpenAIReplacementSessionStableLoadBand(t *testing.T) {
 	winners := map[int64]bool{}
 	for i := 0; i < 40; i++ {
 		session := fmt.Sprintf("session-%d", i)
+		svc.recentSessionSuccess().record(openAIRecentSessionKey{group, session, "gpt-test"}, outside.ID, newer)
+		svc.recentSessionSuccess().record(openAIRecentSessionKey{group, session, "gpt-test"}, lower.ID, newer)
 		items := makeItems()
 		svc.preferOpenAIReplacementSession(context.Background(), items, &group, session, "gpt-test", openAILegacyUpstreamRateOrder{}, false)
 		winners[items[0].account.ID] = true
@@ -79,6 +81,10 @@ func TestOpenAIReplacementSessionHonorsCacheRateCompactAndHold(t *testing.T) {
 	items := []accountWithLoad{{account: a, loadInfo: &AccountLoadInfo{}}, {account: b, loadInfo: &AccountLoadInfo{LoadRate: 20}}}
 	svc.preferOpenAIReplacementSession(ctx, items, &group, session, "gpt-test", openAILegacyUpstreamRateOrder{}, true)
 	require.Equal(t, b.ID, items[0].account.ID, "complete cache evidence outranks HRW")
+	svc.recentSessionSuccess().record(openAIRecentSessionKey{group, session, "gpt-test"}, a.ID, now)
+	svc.preferOpenAIReplacementSession(ctx, items, &group, session, "gpt-test", openAILegacyUpstreamRateOrder{}, true)
+	require.Equal(t, a.ID, items[0].account.ID, "recent success precedes complete cache evidence")
+	svc.recentSessionSuccess().record(openAIRecentSessionKey{group, session, "gpt-test"}, b.ID, now.Add(time.Second))
 	items = []accountWithLoad{{account: a, loadInfo: &AccountLoadInfo{}}, {account: b, loadInfo: &AccountLoadInfo{}}}
 	order := openAILegacyUpstreamRateOrder{enabled: true, rates: map[int64]float64{1: 0.1, 2: 1}}
 	svc.preferOpenAIReplacementSession(ctx, items, &group, session, "gpt-test", order, true)
@@ -86,6 +92,7 @@ func TestOpenAIReplacementSessionHonorsCacheRateCompactAndHold(t *testing.T) {
 	b.Extra = nil
 	svc.preferOpenAIReplacementSession(ctx, items, &group, session, "gpt-test", openAILegacyUpstreamRateOrder{}, true)
 	require.Equal(t, a.ID, items[0].account.ID, "different compact tiers cannot exchange positions")
+	svc.recentSessionSuccess().record(openAIRecentSessionKey{group, session, "gpt-test"}, a.ID, now.Add(2*time.Second))
 	held := map[int64]openAIAccountLatencyHoldSnapshot{a.ID: {Held: true}}
 	items = partitionLatencyHeld(items, func(item accountWithLoad) *Account { return item.account }, held, false)
 	require.Equal(t, b.ID, items[0].account.ID, "the final hold partition wins over affinity")

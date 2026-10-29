@@ -205,7 +205,8 @@
     "xy-responses-partial-usage",
     "xy-responses-authoritative-failed-close",
     "xy-recovery-observability",
-    "xy-responses-partial-success-guard"
+    "xy-responses-partial-success-guard",
+    "xy-openai-recent-session-success"
   ],
   "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/92"
 }

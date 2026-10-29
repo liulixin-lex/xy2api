@@ -1654,6 +1654,8 @@ func (s *OpenAIGatewayService) preferOpenAIReplacementSession(ctx context.Contex
 		scores := make(map[int64]float64, len(indices))
 		hashes := make(map[int64]uint64, len(indices))
 		complete := true
+		recent := make(map[int64]time.Time, len(indices))
+		now := time.Now()
 		for i, index := range indices {
 			item := available[index]
 			items[i] = item
@@ -1661,9 +1663,14 @@ func (s *OpenAIGatewayService) preferOpenAIReplacementSession(ctx context.Contex
 			complete = complete && known
 			scores[item.account.ID] = value
 			hashes[item.account.ID] = openAIReplacementSessionHash(derefGroupID(groupID), session, item.account.ID)
+			outboundModel := resolveOpenAIAccountUpstreamModelForRequest(item.account, model, compact)
+			recent[item.account.ID] = s.recentSessionSuccess().lastSuccess(openAIRecentSessionKey{derefGroupID(groupID), session, outboundModel}, item.account.ID, now)
 		}
 		sort.SliceStable(items, func(i, j int) bool {
 			a, b := items[i].account.ID, items[j].account.ID
+			if !recent[a].Equal(recent[b]) {
+				return recent[a].After(recent[b])
+			}
 			if complete && scores[a] != scores[b] {
 				return scores[a] < scores[b]
 			}

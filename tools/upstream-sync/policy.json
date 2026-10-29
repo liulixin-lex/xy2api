@@ -2909,6 +2909,26 @@
     {
       "path": "backend/internal/service/openai_gateway_service.go",
       "value": "if r != nil && r.PartialFailure {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_service.go",
+      "value": "openaiRecentSessionOnce        sync.Once"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "outboundModel := resolveOpenAIAccountUpstreamModelForRequest(item.account, model, compact)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "return recent[a].After(recent[b])"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "h.gatewayService.RecordOpenAIRecentSessionSuccess(c.Request.Context(), apiKey.GroupID, sessionHash, account, result)"
+    },
+    {
+      "path": "backend/internal/handler/openai_chat_completions.go",
+      "value": "h.gatewayService.RecordOpenAIRecentSessionSuccess(c.Request.Context(), apiKey.GroupID, sessionHash, account, result)"
     }
   ],
   "forbidden_module_paths": [
@@ -2974,7 +2994,8 @@
     "xy-responses-partial-usage",
     "xy-responses-authoritative-failed-close",
     "xy-recovery-observability",
-    "xy-responses-partial-success-guard"
+    "xy-responses-partial-success-guard",
+    "xy-openai-recent-session-success"
   ],
   "custom_patch_tests": [
     {
@@ -4926,6 +4947,26 @@
       "id": "xy-responses-partial-success-guard",
       "path": "backend/internal/service/openai_native_partial_usage_test.go",
       "literal": "func TestOpenAINativePartialUsageDoesNotResetSuccessState"
+    },
+    {
+      "id": "xy-openai-recent-session-success",
+      "path": "backend/internal/service/openai_recent_session_success_test.go",
+      "literal": "func TestOpenAIRecentSessionSuccessBoundsAndExpiry"
+    },
+    {
+      "id": "xy-openai-recent-session-success",
+      "path": "backend/internal/service/openai_recent_session_success_test.go",
+      "literal": "func TestOpenAIRecentSessionSuccessRegistration"
+    },
+    {
+      "id": "xy-openai-recent-session-success",
+      "path": "backend/internal/service/openai_recent_session_success_test.go",
+      "literal": "func TestOpenAIRecentSessionMappedForwardAndReplacementOrder"
+    },
+    {
+      "id": "xy-openai-recent-session-success",
+      "path": "backend/internal/service/openai_recent_session_success_test.go",
+      "literal": "func TestOpenAIRecentSessionSelectionKeepsEligibility"
     }
   ]
 }

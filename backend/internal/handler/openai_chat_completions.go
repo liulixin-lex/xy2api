@@ -460,6 +460,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			h.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, reqModel, false, result), true, nil)
 		}
 
+		h.gatewayService.RecordOpenAIRecentSessionSuccess(c.Request.Context(), apiKey.GroupID, sessionHash, account, result)
 		submitChatUsage(result)
 		reqLog.Debug("openai_chat_completions.request_completed",
 			zap.Int64("account_id", account.ID),
