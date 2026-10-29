@@ -6,16 +6,17 @@
 
 ## 当前交接状态
 
-### 0.4.12 后补救与路由优化：本地实施验证完成（2026-10-29）
+### 0.4.12 后补救与路由优化：验收完成，可合入（2026-10-29）
 
 - **背景**：0.4.12 后生产观察发现原生 Responses 部分用量丢失、权威失败后等待、补救等待观测缺口及大输入缓存损失；方案为仓库外任务包 FINAL_PLAN v1.1。
 - **目标**：按 N1→N5 独立本地提交，并闭合三批审查的必须修；保留 Responses 透传空 UpstreamModel 的用量契约，区分入站协议与最低账号能力。
 - **要求与约束**：不加开关、影子或兜底，仅窄测试；不推送、PR、生产连接或部署。当前分支 `feat/recovery-optimization-20261029`，基于 `03fc67de3`。
-- **已完成**：N1–N5 与后续修复均已提交，最终代码提交 `fe7ca1b02`。N3-1、N3-2-R1、N4-1-R1、M1/M2 与 N5 已获独立复核通过，无剩余审查 P1。迁移 283、Ent 生成、手写 usage/ops SQL、现行文档、具名补丁/literal/测试与 scheduler-diff 同步；go.sum 无增量。
+- **已完成**：N1–N5 与后续修复均已提交，最终代码提交 `fe7ca1b02`。N3-1、N3-2-R1、N4-1-R1、M1/M2 与 N5 已获独立复核通过，无剩余审查 P1。产品经理验收已完成，全分支终审 FINAL_review 结论为“可合入”，无 P0/P1。迁移 283、Ent 生成、手写 usage/ops SQL、现行文档、具名补丁/literal/测试与 scheduler-diff 同步；go.sum 无增量。
 - **已完成验证**：在 `fe7ca1b02` 串行跑完整 BRIEF：build、mod verify、四组 vet、8 包 unit、475 项 ci_gate race 零跳过、lint 0 issues、文档、scheduler-diff、tools 41 项、diff-check 与干净树 audit 全通过。迁移幂等和 usage 四条写入/ops 单批 NULL/值往返已在本机临时 PostgreSQL 18 实测；临时服务及数据已清理。
-- **未完成**：1. 产品经理最终验收；2. 合入前再核实迁移 283 编号；3. 推送/PR/发布/部署及上线校准另行授权。
+- **迁移与合入**：产品经理于 2026-10-29 核实远端 main 仍为 `03fc67de3`、最高迁移为 282，编号 283 空闲；唯一开启的 PR #163 不含迁移，但也修改了 PROJECT_MEMORY，合入时需解决本文件冲突并保留双方记录。
+- **未完成**：推送、PR、发布、部署及上线后的 N5 校准，均需另行授权。
 - **卡点与风险**：无实施阻塞。额外较宽 race 筛选暴露未修改的内容审计测试后台 worker 读 TTL 与测试写 TTL 竞态，已在报告单独留证；本轮必需 race 门禁和受影响入口窄 race 全通过，未扩大范围。热尝试输入下限仍需上线后校准。
-- **关键位置**：仓库外任务包 `.work/tasks/20261029-recovery-optimization-next/implementation/REPORT.md`；现行行为见 GATEWAY_RESILIENCE、USAGE_METRICS 与 account-scheduling。收尾提交仅维护本记忆。
+- **关键位置**：仓库外任务包 `.work/tasks/20261029-recovery-optimization-next/implementation/REPORT.md`；现行行为见 GATEWAY_RESILIENCE、USAGE_METRICS 与 account-scheduling。本次验收收尾仅更新 USAGE_METRICS 的尝试计时表述与本记忆，不改变统计口径或代码。
 
 ### XY2API 0.4.12 正式发布完成（2026-10-28；本轮未部署）
 
@@ -264,7 +265,7 @@
 
 ## 进行中的工作
 
-### 20261029-recovery-optimization-next — 0.4.12 后补救与路由优化（2026-10-29，本地实施验证完成，待验收）
+### 20261029-recovery-optimization-next — 0.4.12 后补救与路由优化（2026-10-29，产品经理验收完成，可合入）
 
 - 依据与开始状态：仓库外 FINAL_PLAN v1.1，分支 `feat/recovery-optimization-20261029` 自 `03fc67de3` 开始，初始工作树干净；按 N1→N5 单独本地提交。
 - 五项提交：N1 `47d950eb5`（部分用量）、N2 `18265f80c`（权威 failed 关流）、N3 `9cb7708d8`（迁移 283 与观测）、N4 `c0d81eb46`（近期成功替补）、N5 `b1e43534b`（热输入下限）。仅更新受新列/新阈值影响的旧断言；Ent 用生成器，go.sum 无增量。
@@ -272,7 +273,8 @@
 - 关键契约：部分用量真实记一次但不复位成功专属状态；新时间只看实际送达语义，旧 first_token/计费判据不变；warm/body_bytes 等仅附首字超时失败事件；近期成功只影响 E2，三 HTTP 完成点传既有成功回报模型，透传结果空模型契约不变；大热输入 256/512 KiB 下限为 30/40 秒，冷/预算/末位不变。
 - 最终验证：`fe7ca1b02` 完整串行 build、mod verify、四组 vet、8 包 unit、ci_gate 475 项 race 零跳过、lint 0 issues、文档/调度差异/tools 41 项/diff 与 audit 全通过。各批受影响窄 race、临时 PostgreSQL 18 迁移幂等与 usage 四路径/ops 单批 NULL/值往返通过；临时服务已清理。早先两轮为审查修复主动停止；final4 因磁盘满中断，清理未用备用 Go 编译缓存后 final5 完整通过，不将中断轮当最终证据。
 - 额外发现：较宽筛选触发既有 TestRecordCyberPolicyEvent_RuntimeSnapshotRefreshFailureKeepsStaleScope 的后台 worker TTL 竞态，报告留证；未修改该模块或放宽测试。本次实际受影响入口窄 race 和完整 BRIEF race 门禁均通过。
-- 交付与下一步：逐批报告和通知已完成，详细提交/命令/偏差/证据在仓库外 `implementation/REPORT.md`；等待产品经理验收和后续授权。合入前再次核实 283，未推送、PR、连接生产或部署。
+- 验收与迁移：产品经理验收已完成，`reviews/FINAL_review.md` 全分支终审可合入，无 P0/P1。产品经理 2026-10-29 核实远端 main `03fc67de3`、最高迁移 282，283 空闲；唯一开启的 PR #163 无迁移，但也修改 PROJECT_MEMORY，合入时需解决本文件冲突。
+- 交付与下一步：逐批报告和通知已完成，详细提交/命令/偏差/证据在仓库外 `implementation/REPORT.md`；剩余推送、PR、发布、部署和上线后的 N5 校准均待另行授权。此次只修 USAGE_METRICS 的计时表述，不做三处 openAIAccountScheduleModel 重复计算精简，不动代码或 literal；未推送、PR、连接生产或部署。
 
 ### 20261021-channel-monitor-v1 — 渠道监控 v1 探测优化（PR #120 已合入 main，进入下一个版本；待真实上游验证；2026-10-22 DOCS 更新状态）
 
@@ -1239,3 +1241,10 @@ pnpm --dir frontend run build
 - 验证：最终代码 `fe7ca1b02` 串行 gofmt、build、mod verify、四组 vet、service/handler/resilience/repository 8 包 unit、ci_gate 475 项 race 零跳过、golangci-lint 0 issues、文档/调度差异/tools 41 项、diff-check 与干净树 audit 全通过；各批真实 Forward/handler/RecordUsage/E2 窄 race 通过；临时 PostgreSQL 18 实测迁移幂等、usage 四路径与 ops 单批 NULL/值往返。测试服务、数据及本任务停止后残留构建目录均已清理。final4 磁盘满中断，不算最终验证；清理未用的备用编译缓存后 final5 全套通过。
 - 卡点/风险：无实施阻塞；额外宽筛选发现未改内容审计测试的 TTL 竞态，报告单独留证。N5 常量需部署后校准，LRU 重启丢失符合设计。未做生产或前端操作。
 - 下一步：产品经理最终验收，合入前再查迁移编号；推送、PR、发布和部署均需后续授权。报告在仓库外任务包 implementation/REPORT.md。
+
+### 2026-10-29 — 20261029-recovery-optimization-next — 产品经理验收与文档收尾
+
+- 请求/开始状态：产品经理确认全分支终审可合入、无 P0/P1，要求仅文档收尾；本分支 HEAD `ff31aaed1`，工作树干净。
+- 完成操作：USAGE_METRICS 删除最后一次尝试的“成功”限定，说明输出后失败保留的部分用量从所属尝试计时，统计口径不变；更新本任务验收与迁移编号核实结果。PR #163 也改记忆，合入时保留双方记录并解决冲突。按要求保留三处成功模型计算的既有代码与 literal。
+- 验证与边界：仅改两份文档，提交前运行文档一致性与 diff-check，提交后在干净树跑 audit；结果追加仓库外 implementation/REPORT.md。不推送。
+- 下一步：推送、PR、发布、部署与上线后的 N5 校准均待另行授权。
