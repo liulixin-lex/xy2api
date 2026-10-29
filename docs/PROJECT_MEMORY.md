@@ -6,6 +6,17 @@
 
 ## 当前交接状态
 
+### 0.4.12 后补救与路由优化：本地实施验证完成（2026-10-29）
+
+- **背景**：0.4.12 后生产观察发现原生 Responses 部分用量丢失、权威失败后等待、补救等待观测缺口及大输入缓存损失；方案为仓库外任务包 FINAL_PLAN v1.1。
+- **目标**：按 N1→N5 独立本地提交，并闭合三批审查的必须修；保留 Responses 透传空 UpstreamModel 的用量契约，区分入站协议与最低账号能力。
+- **要求与约束**：不加开关、影子或兜底，仅窄测试；不推送、PR、生产连接或部署。当前分支 `feat/recovery-optimization-20261029`，基于 `03fc67de3`。
+- **已完成**：N1–N5 与后续修复均已提交，最终代码提交 `fe7ca1b02`。N3-1、N3-2-R1、N4-1-R1、M1/M2 与 N5 已获独立复核通过，无剩余审查 P1。迁移 283、Ent 生成、手写 usage/ops SQL、现行文档、具名补丁/literal/测试与 scheduler-diff 同步；go.sum 无增量。
+- **已完成验证**：在 `fe7ca1b02` 串行跑完整 BRIEF：build、mod verify、四组 vet、8 包 unit、475 项 ci_gate race 零跳过、lint 0 issues、文档、scheduler-diff、tools 41 项、diff-check 与干净树 audit 全通过。迁移幂等和 usage 四条写入/ops 单批 NULL/值往返已在本机临时 PostgreSQL 18 实测；临时服务及数据已清理。
+- **未完成**：1. 产品经理最终验收；2. 合入前再核实迁移 283 编号；3. 推送/PR/发布/部署及上线校准另行授权。
+- **卡点与风险**：无实施阻塞。额外较宽 race 筛选暴露未修改的内容审计测试后台 worker 读 TTL 与测试写 TTL 竞态，已在报告单独留证；本轮必需 race 门禁和受影响入口窄 race 全通过，未扩大范围。热尝试输入下限仍需上线后校准。
+- **关键位置**：仓库外任务包 `.work/tasks/20261029-recovery-optimization-next/implementation/REPORT.md`；现行行为见 GATEWAY_RESILIENCE、USAGE_METRICS 与 account-scheduling。收尾提交仅维护本记忆。
+
 ### XY2API 0.4.12 正式发布完成（2026-10-28；本轮未部署）
 
 - [v0.4.12](https://github.com/liulixin-lex/xy2api/releases/tag/v0.4.12) 于 2026-10-28T22:06:21Z 正式发布：annotated tag 对象 `c36904c45` 指向版本 PR [#161](https://github.com/liulixin-lex/xy2api/pull/161) 的合并提交 `fdedd33dc`；Release run `40775331704` 成功，非 draft、非 prerelease。
@@ -253,13 +264,15 @@
 
 ## 进行中的工作
 
-### 20261029-recovery-optimization-next — 0.4.12 后补救与路由优化（2026-10-29，实施中）
+### 20261029-recovery-optimization-next — 0.4.12 后补救与路由优化（2026-10-29，本地实施验证完成，待验收）
 
-- 依据：仓库外任务交接包的 `plan/FINAL_PLAN.md` v1.1；按 N1→N5 实施，每项独立本地提交。
-- 开始状态：`feat/recovery-optimization-20261029`，HEAD 与 origin/main 均为 `03fc67de3`，工作树干净。
-- 范围：原生 Responses 部分用量、权威 failed 后关流、端到端观测迁移、近期成功会话替补排序、热尝试输入下限；同步现行文档与上游登记，不新增开关或兜底。
-- 进度：N1 已接通原生 Forward 的部分结果返回，成功绑定与快照更新只在成功时执行；真实 Forward/handler 窄测试覆盖部分用量、读错、缺终态、drain、首输出前换号与取消，并验证较新暂停及 breaker 不被清除。N1 本地提交 `47d950eb5`，干净树 audit 通过。N2 已收窄三处 bare error 等待条件；新增 8 个表格分支验证权威 failed 及时返回与 bare-only EOF，相关既有终态测试及 N1+N2 定向 race 全过。N2 本地提交 `18265f80c`。N3 已完成迁移 283、独立语义送达时间、handler 结果分类、首字超时尝试字段及手写 SQL/Ent；窄 unit/race 与临时 PostgreSQL 18 的幂等迁移、四条 usage 写入和 ops 单条/批量 NULL/值往返通过。仅更新受加列影响的旧列序断言。N3 提交 `9cb7708d8`，干净树 audit、build 与 go mod verify 通过，go.sum 生成器依赖未保留。第一批审查 N2 通过、N1 的 M1/M2 待修：已按实际写入语义区间计送达，并用 PartialFailure 将计账与成功副作用分离；真实 handler/Forward→RecordUsage 窄用例及定向 race 通过（service 28.194s、handler 3.449s）；文档、diff、scheduler-diff、tools 41 项通过。M1/M2 已独立提交 `7d8599e43`，干净树 audit 通过，已将 N3 与修复一起通知产品经理送审。N4 已接入有界近期成功 LRU、实际出站模型键与 E2 比较器，映射、逐账号过期、3/16384 上限与既有调度边界窄测试 race 通过（service 29.481s、handler 1.835s），文档、scheduler-diff、diff、tools 41 项通过。N4 独立提交 `c0d81eb46`，干净树 audit 通过。N5 已加热尝试 256/512 KiB 的 30/40 秒下限，边界表与既有截止相关测试 race 通过（1.561s），文档、scheduler-diff、diff、tools 41 项通过；只更新受影响的既有 warm 256 KiB 断言。N5 提交 `b1e43534b`，干净树 audit 通过。第一轮全量 build、四组 vet、相关 8 包 unit 通过；vet 捕获一个 N3 测试引用 unit 夹具，已移入 unit 文件。第二批审查 M1/M2 闭合，N3-1/2 必须修：已修占位 error 与空内容识别、明确拒绝信号及显式断开优先，并按 C1/C2 共享帧字段提取、移除重复选号登记；窄 race（service 2.099s、handler 7.585s）、文档、scheduler-diff、diff、tools 41 项通过。已停止旧版后续门禁，N3 修复已提交 `438588d04`，干净树 audit 通过。第二轮 build/mod verify/四组 vet 已通过，unit 期间收到第三批审查 N4-1：透传账号经 Chat/Messages 的实际模型与 E2 查询键不一致；已停止第二轮全量门禁，按当前选择请求的端点能力解析候选实际模型；写端接收 handler 既有成功回报模型，按产品经理要求保留透传 result.UpstreamModel 为空的用量契约。三入口真实 Forward→登记→E2 及既有边界窄 race 通过（1.892s），完整 lint 0 issues，文档/调度差异/tools 41 项通过；仅修 LRU 类型断言写法以满足 errcheck，不加兜底。N4 修复已独立提交 `873c36972`，干净树 audit 通过。该提交完整串行门禁通过：build、mod verify、四组 vet、8 包 unit、475 项 ci_gate race 零跳过、lint 0 issues、文档/调度差异/tools 41 项及 audit。复核新增 N3-2-R1（兼容/透传拒绝出口遗漏）与 N4-1-R1（普通 Responses 最低能力被误当成协议），按产品经理要求分别追加修复提交，再在最终代码提交重跑全套。N3-1、M1/M2 与 N5 已复核通过。N3-2-R1 已补兼容 cyber/Grok/确定性请求拒绝和透传 cyber/context/确定性拒绝的 typed 信号，仅在原非 failover 出口包装，原响应/处罚不改；C2 剩余 Chat/Responses 重复登记已移除。六个真实 handler 拒绝场景与三条 502 耗尽对照、相关 service/handler 窄 race 通过（2.018s/1.215s），文档/调度差异/tools 41 项通过。较宽筛选曾触发既有内容审计测试的后台 worker 竞态，单独留证，不扩本轮范围。N3-2-R1 已提交 `85c1255f9`，干净树 audit 通过。N4-1-R1 复用 CapabilityRequestFrom 的 Responses 标记，普通文本最低能力仍为 Chat，实际模型按 Responses resolver；保留 compact/显式 Responses 分支，Chat/Messages 普通映射不改。四种入口真实 Forward→登记→E2 及映射变化、最低能力 handler 对照窄 race 通过（service 1.669s、handler 1.157s）。同步文档、literal、测试绑定与 scheduler-diff，提交后重跑完整门禁。
-- 交付：每批 N1+N2、N3、N4+N5 后追加仓库外 `implementation/REPORT.md` 并通知产品经理；未授权推送、PR、生产连接或部署。
+- 依据与开始状态：仓库外 FINAL_PLAN v1.1，分支 `feat/recovery-optimization-20261029` 自 `03fc67de3` 开始，初始工作树干净；按 N1→N5 单独本地提交。
+- 五项提交：N1 `47d950eb5`（部分用量）、N2 `18265f80c`（权威 failed 关流）、N3 `9cb7708d8`（迁移 283 与观测）、N4 `c0d81eb46`（近期成功替补）、N5 `b1e43534b`（热输入下限）。仅更新受新列/新阈值影响的旧断言；Ent 用生成器，go.sum 无增量。
+- 审查修复：M1/M2 `7d8599e43`（实际语义字节、PartialFailure 成功副作用守卫）；N3 `438588d04`（占位 error、空内容、拒绝/断开与 C1/C2）；N4 `873c36972`（三入口实际模型写读）；N3-2-R1 `85c1255f9`（兼容/透传已知拒绝信号及剩余 C2）；N4-1-R1 `fe7ca1b02`（普通文本 Responses 标记与最低能力分离）。每项提交后干净树 audit 通过；上述必须修均已由原审查者独立复核闭合。
+- 关键契约：部分用量真实记一次但不复位成功专属状态；新时间只看实际送达语义，旧 first_token/计费判据不变；warm/body_bytes 等仅附首字超时失败事件；近期成功只影响 E2，三 HTTP 完成点传既有成功回报模型，透传结果空模型契约不变；大热输入 256/512 KiB 下限为 30/40 秒，冷/预算/末位不变。
+- 最终验证：`fe7ca1b02` 完整串行 build、mod verify、四组 vet、8 包 unit、ci_gate 475 项 race 零跳过、lint 0 issues、文档/调度差异/tools 41 项/diff 与 audit 全通过。各批受影响窄 race、临时 PostgreSQL 18 迁移幂等与 usage 四路径/ops 单批 NULL/值往返通过；临时服务已清理。早先两轮为审查修复主动停止；final4 因磁盘满中断，清理未用备用 Go 编译缓存后 final5 完整通过，不将中断轮当最终证据。
+- 额外发现：较宽筛选触发既有 TestRecordCyberPolicyEvent_RuntimeSnapshotRefreshFailureKeepsStaleScope 的后台 worker TTL 竞态，报告留证；未修改该模块或放宽测试。本次实际受影响入口窄 race 和完整 BRIEF race 门禁均通过。
+- 交付与下一步：逐批报告和通知已完成，详细提交/命令/偏差/证据在仓库外 `implementation/REPORT.md`；等待产品经理验收和后续授权。合入前再次核实 283，未推送、PR、连接生产或部署。
 
 ### 20261021-channel-monitor-v1 — 渠道监控 v1 探测优化（PR #120 已合入 main，进入下一个版本；待真实上游验证；2026-10-22 DOCS 更新状态）
 
@@ -1216,3 +1229,13 @@ pnpm --dir frontend run build
 - 制品：6 个资产、201,250,293 字节双 SHA 一致；五平台源码 revision 与版本构建一致，均 `vcs.modified=false`；darwin_arm64 实际版本命令通过；GHCR 双架构、版本/源码/source 标签与全部稳定别名核验通过。未执行部署、安装演练或任何生产操作。
 - 记忆：本次将报错补救、上游余额、普通管理员和版本任务的交接/登记，以及普通管理员旧收尾日志和发布前版本速览原样追加归档；保留其他进行中任务与原有历史。正式标签不移动，发布后收尾只改记忆文件。
 - 后续：部署及生产观察另行授权；WS 余额阶梯等残留见现行文档与顶部摘要。Release 的旧 Node.js Action 弃用提示属后续维护项，不影响本次成功发布。
+
+### 2026-10-29 — 20261029-recovery-optimization-next — N1–N5 与审查修复本地交付完成
+
+- 请求/目标：按 FINAL_PLAN v1.1 实施 0.4.12 后补救与路由优化，逐项提交并按产品经理转达的审查修复，完成最终固定代码门禁；仅本地工作。
+- 开始状态：`feat/recovery-optimization-20261029`，HEAD/origin/main 为 `03fc67de3`，工作树干净。
+- 完成操作：N1→N5 独立提交 `47d950eb5`、`18265f80c`、`9cb7708d8`、`c0d81eb46`、`b1e43534b`；追加 M1/M2 `7d8599e43`、N3 精确分类 `438588d04`、N4 端点模型 `873c36972`、跨入口拒绝 `85c1255f9`、普通 Responses 协议键 `fe7ca1b02`。未改写已审提交；所有审查 P1 已独立复核闭合。最终收尾只改本记忆。
+- 修改文件：backend 的原生/透传响应流、调度与成功登记、handler 观测、usage/ops 模型与 SQL、迁移 283/校验和及 Ent 生成代码；三份现行文档、policy、UPSTREAM_BASE 与 scheduler-diff。go.sum 无增量；文档未放宽目标契约。
+- 验证：最终代码 `fe7ca1b02` 串行 gofmt、build、mod verify、四组 vet、service/handler/resilience/repository 8 包 unit、ci_gate 475 项 race 零跳过、golangci-lint 0 issues、文档/调度差异/tools 41 项、diff-check 与干净树 audit 全通过；各批真实 Forward/handler/RecordUsage/E2 窄 race 通过；临时 PostgreSQL 18 实测迁移幂等、usage 四路径与 ops 单批 NULL/值往返。测试服务、数据及本任务停止后残留构建目录均已清理。final4 磁盘满中断，不算最终验证；清理未用的备用编译缓存后 final5 全套通过。
+- 卡点/风险：无实施阻塞；额外宽筛选发现未改内容审计测试的 TTL 竞态，报告单独留证。N5 常量需部署后校准，LRU 重启丢失符合设计。未做生产或前端操作。
+- 下一步：产品经理最终验收，合入前再查迁移编号；推送、PR、发布和部署均需后续授权。报告在仓库外任务包 implementation/REPORT.md。
