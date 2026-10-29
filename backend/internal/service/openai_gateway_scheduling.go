@@ -1464,7 +1464,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		})
 		shuffleWithinSortGroups(available)
 		if replacementSession {
-			s.preferOpenAIReplacementSession(ctx, available, groupID, sessionHash, requestedModel, rateOrder, requireCompact)
+			s.preferOpenAIReplacementSession(ctx, available, groupID, sessionHash, requestedModel, rateOrder, requireCompact, requiredCapability)
 		} else if !rateOrder.enabled && !stickySpillover && stickyAccountID == 0 {
 			s.preferCacheCandidates(ctx, available, requestedModel)
 		}
@@ -1618,7 +1618,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 // preferOpenAIReplacementSession keeps a stable fallback order within the
 // lowest-load band of each priority. Rate and compact cohorts remain separate;
 // the caller still applies their ordering and the final latency-hold partition.
-func (s *OpenAIGatewayService) preferOpenAIReplacementSession(ctx context.Context, available []accountWithLoad, groupID *int64, session, model string, rateOrder openAILegacyUpstreamRateOrder, compact bool) {
+func (s *OpenAIGatewayService) preferOpenAIReplacementSession(ctx context.Context, available []accountWithLoad, groupID *int64, session, model string, rateOrder openAILegacyUpstreamRateOrder, compact bool, capability OpenAIEndpointCapability) {
 	type cohortKey struct {
 		priority int
 		rate     float64
@@ -1663,7 +1663,13 @@ func (s *OpenAIGatewayService) preferOpenAIReplacementSession(ctx context.Contex
 			complete = complete && known
 			scores[item.account.ID] = value
 			hashes[item.account.ID] = openAIReplacementSessionHash(derefGroupID(groupID), session, item.account.ID)
-			outboundModel := resolveOpenAIAccountUpstreamModelForRequest(item.account, model, compact)
+			var outboundModel string
+			// Chat and Messages apply ordinary mapping even on passthrough accounts.
+			if capability == OpenAIEndpointCapabilityChatCompletions {
+				outboundModel = normalizeOpenAIModelForUpstream(item.account, resolveOpenAIForwardModel(item.account, model, ""))
+			} else {
+				outboundModel = resolveOpenAIAccountUpstreamModelForRequest(item.account, model, compact)
+			}
 			recent[item.account.ID] = s.recentSessionSuccess().lastSuccess(openAIRecentSessionKey{derefGroupID(groupID), session, outboundModel}, item.account.ID, now)
 		}
 		sort.SliceStable(items, func(i, j int) bool {

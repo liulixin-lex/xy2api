@@ -16,6 +16,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestOpenAIRecentSessionSuccessBoundsAndExpiry(t *testing.T) {
@@ -71,7 +72,7 @@ func TestOpenAIRecentSessionSuccessRegistration(t *testing.T) {
 			}
 			account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"model_mapping": map[string]any{"gpt-5.4": "gpt-5.5"}}}
 			group := int64(71)
-			svc.RecordOpenAIRecentSessionSuccess(ctx, &group, "session", account, result)
+			svc.RecordOpenAIRecentSessionSuccess(ctx, &group, "session", account, result.UpstreamModel, result)
 			at := svc.recentSessionSuccess().lastSuccess(openAIRecentSessionKey{group, "session", "gpt-5.4"}, account.ID, time.Now())
 			require.Equal(t, name == "completed", !at.IsZero())
 			require.True(t, svc.recentSessionSuccess().lastSuccess(openAIRecentSessionKey{group, "session", "gpt-5.5"}, account.ID, time.Now()).IsZero(), "canonical outbound model must not be mapped again")
@@ -97,10 +98,10 @@ func TestOpenAIRecentSessionMappedForwardAndReplacementOrder(t *testing.T) {
 	st := resilience.StateFrom(c.Request.Context())
 	require.NotNil(t, st.EndToEndFirstOutputMs())
 	st.SetRecoveryOutcome("completed")
-	svc.RecordOpenAIRecentSessionSuccess(c.Request.Context(), &group, session, a, result)
+	svc.RecordOpenAIRecentSessionSuccess(c.Request.Context(), &group, session, a, result.UpstreamModel, result)
 	order := func() int64 {
 		items := []accountWithLoad{{account: b, loadInfo: &AccountLoadInfo{}}, {account: a, loadInfo: &AccountLoadInfo{LoadRate: 20}}}
-		svc.preferOpenAIReplacementSession(context.Background(), items, &group, session, "alias", openAILegacyUpstreamRateOrder{}, false)
+		svc.preferOpenAIReplacementSession(context.Background(), items, &group, session, "alias", openAILegacyUpstreamRateOrder{}, false, OpenAIEndpointCapabilityResponses)
 		return items[0].account.ID
 	}
 	require.Equal(t, a.ID, order(), "request alias must find the successful outbound model")
@@ -158,6 +159,78 @@ func TestOpenAIRecentSessionSelectionKeepsEligibility(t *testing.T) {
 			require.True(t, selected.Acquired)
 			defer selected.ReleaseFunc()
 			require.Equal(t, want, selected.Account.ID)
+		})
+	}
+}
+
+func TestOpenAIRecentSessionPassthroughModelsMatchEndpoints(t *testing.T) {
+	for _, protocol := range []string{"responses", "chat", "messages"} {
+		t.Run(protocol, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			withResilienceSettings(t, nil)
+			group := int64(71)
+			account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+				Extra: map[string]any{"openai_passthrough": true},
+				Credentials: map[string]any{"api_key": "test-key", "base_url": "https://upstream.example",
+					"model_mapping": map[string]any{"alias": "gpt-5.4", "gpt-5.4": "gpt-5.5"}}}
+			other := &Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+			session := ""
+			for i := 0; i < 100; i++ {
+				key := fmt.Sprintf("mapping-session-%d", i)
+				if openAIReplacementSessionHash(group, key, other.ID) > openAIReplacementSessionHash(group, key, account.ID) {
+					session = key
+					break
+				}
+			}
+			require.NotEmpty(t, session)
+			stream := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_review\",\"model\":\"gpt-5.4\"}}\n\n" +
+				"data: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"content_index\":0,\"delta\":\"hello\"}\n\n" +
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_review\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}]}}\n\n"
+			upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(stream))}}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/"+protocol, nil).WithContext(resilience.WithRequestState(context.Background(), resilience.NewRequestState()))
+			InstallDeliveryTracking(c, time.Now())
+			var result *OpenAIForwardResult
+			var err error
+			switch protocol {
+			case "responses":
+				result, err = svc.Forward(c.Request.Context(), c, account, []byte(`{"model":"alias","stream":true,"input":"hi"}`))
+			case "chat":
+				result, err = svc.ForwardAsChatCompletions(c.Request.Context(), c, account, []byte(`{"model":"alias","stream":true,"messages":[{"role":"user","content":"hi"}]}`), "", "")
+			case "messages":
+				result, err = svc.ForwardAsAnthropic(c.Request.Context(), c, account, []byte(`{"model":"alias","stream":true,"max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`), "", "")
+			}
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Len(t, upstream.requestBodies, 1)
+			sentModel := gjson.GetBytes(upstream.requestBodies[0], "model").String()
+			scheduleModel := result.UpstreamModel
+			if protocol == "responses" {
+				require.Empty(t, result.UpstreamModel, "unchanged passthrough model keeps the usage NULL contract")
+				scheduleModel = ResolveOpenAIAccountUpstreamModelForRequest(account, "alias", false)
+			}
+			require.Equal(t, sentModel, scheduleModel)
+			st := resilience.StateFrom(c.Request.Context())
+			require.NotNil(t, st.EndToEndFirstOutputMs(), "fixture really delivered content")
+			st.SetRecoveryOutcome("completed")
+			svc.RecordOpenAIRecentSessionSuccess(c.Request.Context(), &group, session, account, scheduleModel, result)
+			require.False(t, svc.recentSessionSuccess().lastSuccess(openAIRecentSessionKey{group, session, sentModel}, account.ID, time.Now()).IsZero(), "write uses actual successful outbound model")
+			capability := OpenAIEndpointCapabilityChatCompletions
+			wantModel := "gpt-5.4"
+			if protocol == "responses" {
+				capability = OpenAIEndpointCapabilityResponses
+				wantModel = "alias"
+			}
+			require.Equal(t, wantModel, sentModel, "canonical outbound model is not mapped again")
+			items := []accountWithLoad{{account: other, loadInfo: &AccountLoadInfo{}}, {account: account, loadInfo: &AccountLoadInfo{LoadRate: 20}}}
+			svc.preferOpenAIReplacementSession(c.Request.Context(), items, &group, session, "alias", openAILegacyUpstreamRateOrder{}, false, capability)
+			require.Equal(t, account.ID, items[0].account.ID, "recent success must outrank the chosen HRW control winner")
+			if protocol != "responses" {
+				account.Credentials["model_mapping"] = map[string]any{"alias": "gpt-5.5"}
+				svc.preferOpenAIReplacementSession(c.Request.Context(), items, &group, session, "alias", openAILegacyUpstreamRateOrder{}, false, capability)
+				require.Equal(t, other.ID, items[0].account.ID, "changed outbound model must not reuse old history")
+			}
 		})
 	}
 }

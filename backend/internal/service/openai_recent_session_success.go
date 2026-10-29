@@ -46,11 +46,12 @@ func (s *OpenAIGatewayService) recentSessionSuccess() *openAIRecentSessionSucces
 }
 
 // RecordOpenAIRecentSessionSuccess is called only after HTTP forwarding completes.
+// outboundModel is the handler's resolved success-report model, already canonical.
 // Usage submission also accepts partial failures, so it must not populate this history.
-func (s *OpenAIGatewayService) RecordOpenAIRecentSessionSuccess(ctx context.Context, groupID *int64, session string, account *Account, result *OpenAIForwardResult) {
+func (s *OpenAIGatewayService) RecordOpenAIRecentSessionSuccess(ctx context.Context, groupID *int64, session string, account *Account, outboundModel string, result *OpenAIForwardResult) {
 	if s == nil || account == nil || account.Platform != PlatformOpenAI || result == nil ||
 		result.PartialFailure || result.ClientDisconnect || result.OpenAIWSMode || ctx.Err() != nil ||
-		session == "" || strings.TrimSpace(result.UpstreamModel) == "" {
+		session == "" || strings.TrimSpace(outboundModel) == "" {
 		return
 	}
 	st := resilience.StateFrom(ctx)
@@ -60,7 +61,7 @@ func (s *OpenAIGatewayService) RecordOpenAIRecentSessionSuccess(ctx context.Cont
 	if outcome := st.RecoveryOutcome(); outcome == nil || *outcome != "completed" {
 		return
 	}
-	key := openAIRecentSessionKey{derefGroupID(groupID), session, strings.TrimSpace(result.UpstreamModel)}
+	key := openAIRecentSessionKey{derefGroupID(groupID), session, strings.TrimSpace(outboundModel)}
 	s.recentSessionSuccess().record(key, account.ID, time.Now())
 }
 
@@ -72,7 +73,7 @@ func (s *openAIRecentSessionSuccess) record(key openAIRecentSessionKey, accountI
 		element = s.lru.PushFront(&openAIRecentSessionEntry{key: key})
 		s.entries[key] = element
 	}
-	entry := element.Value.(*openAIRecentSessionEntry)
+	entry, _ := element.Value.(*openAIRecentSessionEntry)
 	accounts := entry.accounts[:0]
 	for _, success := range entry.accounts {
 		if success.account != accountID && now.Sub(success.at) < openAIRecentSessionTTL {
@@ -92,7 +93,8 @@ func (s *openAIRecentSessionSuccess) record(key openAIRecentSessionKey, accountI
 	s.lru.MoveToFront(element)
 	if s.lru.Len() > openAIRecentSessionCapacity {
 		oldest := s.lru.Back()
-		delete(s.entries, oldest.Value.(*openAIRecentSessionEntry).key)
+		oldestEntry, _ := oldest.Value.(*openAIRecentSessionEntry)
+		delete(s.entries, oldestEntry.key)
 		s.lru.Remove(oldest)
 	}
 }
@@ -104,7 +106,7 @@ func (s *openAIRecentSessionSuccess) lastSuccess(key openAIRecentSessionKey, acc
 	if element == nil {
 		return time.Time{}
 	}
-	entry := element.Value.(*openAIRecentSessionEntry)
+	entry, _ := element.Value.(*openAIRecentSessionEntry)
 	var at time.Time
 	accounts := entry.accounts[:0]
 	for _, success := range entry.accounts {

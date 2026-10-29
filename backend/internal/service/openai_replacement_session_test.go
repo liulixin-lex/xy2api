@@ -36,13 +36,13 @@ func TestOpenAIReplacementSessionStableLoadBand(t *testing.T) {
 		svc.recentSessionSuccess().record(openAIRecentSessionKey{group, session, "gpt-test"}, outside.ID, newer)
 		svc.recentSessionSuccess().record(openAIRecentSessionKey{group, session, "gpt-test"}, lower.ID, newer)
 		items := makeItems()
-		svc.preferOpenAIReplacementSession(context.Background(), items, &group, session, "gpt-test", openAILegacyUpstreamRateOrder{}, false)
+		svc.preferOpenAIReplacementSession(context.Background(), items, &group, session, "gpt-test", openAILegacyUpstreamRateOrder{}, false, OpenAIEndpointCapabilityResponses)
 		winners[items[0].account.ID] = true
 		want := []int64{items[0].account.ID, items[1].account.ID}
 		a.LastUsedAt, b.LastUsedAt = b.LastUsedAt, a.LastUsedAt
 		again := makeItems()
 		again[0], again[1] = again[1], again[0]
-		svc.preferOpenAIReplacementSession(context.Background(), again, &group, session, "gpt-test", openAILegacyUpstreamRateOrder{}, false)
+		svc.preferOpenAIReplacementSession(context.Background(), again, &group, session, "gpt-test", openAILegacyUpstreamRateOrder{}, false, OpenAIEndpointCapabilityResponses)
 		require.Equal(t, want, []int64{again[0].account.ID, again[1].account.ID})
 		require.Equal(t, int64(3), items[2].account.ID)
 		require.Equal(t, int64(4), items[3].account.ID)
@@ -79,18 +79,18 @@ func TestOpenAIReplacementSessionHonorsCacheRateCompactAndHold(t *testing.T) {
 		svc.cacheTelemetry().scores[cacheSampleKey(diagnostic, acc, "gpt-test")] = sample
 	}
 	items := []accountWithLoad{{account: a, loadInfo: &AccountLoadInfo{}}, {account: b, loadInfo: &AccountLoadInfo{LoadRate: 20}}}
-	svc.preferOpenAIReplacementSession(ctx, items, &group, session, "gpt-test", openAILegacyUpstreamRateOrder{}, true)
+	svc.preferOpenAIReplacementSession(ctx, items, &group, session, "gpt-test", openAILegacyUpstreamRateOrder{}, true, OpenAIEndpointCapabilityResponses)
 	require.Equal(t, b.ID, items[0].account.ID, "complete cache evidence outranks HRW")
 	svc.recentSessionSuccess().record(openAIRecentSessionKey{group, session, "gpt-test"}, a.ID, now)
-	svc.preferOpenAIReplacementSession(ctx, items, &group, session, "gpt-test", openAILegacyUpstreamRateOrder{}, true)
+	svc.preferOpenAIReplacementSession(ctx, items, &group, session, "gpt-test", openAILegacyUpstreamRateOrder{}, true, OpenAIEndpointCapabilityResponses)
 	require.Equal(t, a.ID, items[0].account.ID, "recent success precedes complete cache evidence")
 	svc.recentSessionSuccess().record(openAIRecentSessionKey{group, session, "gpt-test"}, b.ID, now.Add(time.Second))
 	items = []accountWithLoad{{account: a, loadInfo: &AccountLoadInfo{}}, {account: b, loadInfo: &AccountLoadInfo{}}}
 	order := openAILegacyUpstreamRateOrder{enabled: true, rates: map[int64]float64{1: 0.1, 2: 1}}
-	svc.preferOpenAIReplacementSession(ctx, items, &group, session, "gpt-test", order, true)
+	svc.preferOpenAIReplacementSession(ctx, items, &group, session, "gpt-test", order, true, OpenAIEndpointCapabilityResponses)
 	require.Equal(t, a.ID, items[0].account.ID, "different rates cannot exchange positions")
 	b.Extra = nil
-	svc.preferOpenAIReplacementSession(ctx, items, &group, session, "gpt-test", openAILegacyUpstreamRateOrder{}, true)
+	svc.preferOpenAIReplacementSession(ctx, items, &group, session, "gpt-test", openAILegacyUpstreamRateOrder{}, true, OpenAIEndpointCapabilityResponses)
 	require.Equal(t, a.ID, items[0].account.ID, "different compact tiers cannot exchange positions")
 	svc.recentSessionSuccess().record(openAIRecentSessionKey{group, session, "gpt-test"}, a.ID, now.Add(2*time.Second))
 	held := map[int64]openAIAccountLatencyHoldSnapshot{a.ID: {Held: true}}
@@ -109,7 +109,7 @@ func TestOpenAILegacyReplacementSessionTriesNextSlot(t *testing.T) {
 	session := "replacement"
 	ranked := []accountWithLoad{{account: &accounts[1], loadInfo: &AccountLoadInfo{}}, {account: &accounts[2], loadInfo: &AccountLoadInfo{LoadRate: 20}}}
 	svc := &OpenAIGatewayService{cfg: cfg, accountRepo: schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}}}
-	svc.preferOpenAIReplacementSession(context.Background(), ranked, &group, session, "gpt-test", openAILegacyUpstreamRateOrder{}, false)
+	svc.preferOpenAIReplacementSession(context.Background(), ranked, &group, session, "gpt-test", openAILegacyUpstreamRateOrder{}, false, OpenAIEndpointCapabilityResponses)
 	first, second := ranked[0].account.ID, ranked[1].account.ID
 	acquired := []int64{}
 	svc.concurrencyService = NewConcurrencyService(schedulerTestConcurrencyCache{

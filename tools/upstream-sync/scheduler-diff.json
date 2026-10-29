@@ -657,12 +657,10 @@
           "(stickyAccountID > 0 || len(excludedIDs) > 0) &&",
           "!s.shareScheduling.shareSchedulingActive(derefGroupID(groupID))",
           "if replacementSession {",
-          "s.preferOpenAIReplacementSession(ctx, available, groupID, sessionHash, requestedModel, rateOrder, requireCompact)",
           "} else if !rateOrder.enabled && !stickySpillover && stickyAccountID == 0 {",
           "// preferOpenAIReplacementSession keeps a stable fallback order within the",
           "// lowest-load band of each priority. Rate and compact cohorts remain separate;",
           "// the caller still applies their ordering and the final latency-hold partition.",
-          "func (s *OpenAIGatewayService) preferOpenAIReplacementSession(ctx context.Context, available []accountWithLoad, groupID *int64, session, model string, rateOrder openAILegacyUpstreamRateOrder, compact bool) {",
           "type cohortKey struct {",
           "priority int",
           "rate     float64",
@@ -729,10 +727,25 @@
           "}",
           "recent := make(map[int64]time.Time, len(indices))",
           "now := time.Now()",
-          "outboundModel := resolveOpenAIAccountUpstreamModelForRequest(item.account, model, compact)",
           "recent[item.account.ID] = s.recentSessionSuccess().lastSuccess(openAIRecentSessionKey{derefGroupID(groupID), session, outboundModel}, item.account.ID, now)",
           "if !recent[a].Equal(recent[b]) {",
           "return recent[a].After(recent[b])"
+        ]
+      },
+      {
+        "block": "openai-recent-session-endpoint-model",
+        "note": "N4-1: pass the existing endpoint capability into E2; Chat/Messages use their actual ordinary mapping even for passthrough accounts, Responses keeps its existing compact/passthrough resolution. No candidate eligibility change.",
+        "removed": [],
+        "added": [
+          "}",
+          "s.preferOpenAIReplacementSession(ctx, available, groupID, sessionHash, requestedModel, rateOrder, requireCompact, requiredCapability)",
+          "func (s *OpenAIGatewayService) preferOpenAIReplacementSession(ctx context.Context, available []accountWithLoad, groupID *int64, session, model string, rateOrder openAILegacyUpstreamRateOrder, compact bool, capability OpenAIEndpointCapability) {",
+          "// Chat and Messages apply ordinary mapping even on passthrough accounts.",
+          "if capability == OpenAIEndpointCapabilityChatCompletions {",
+          "outboundModel = normalizeOpenAIModelForUpstream(item.account, resolveOpenAIForwardModel(item.account, model, \"\"))",
+          "var outboundModel string",
+          "} else {",
+          "outboundModel = resolveOpenAIAccountUpstreamModelForRequest(item.account, model, compact)"
         ]
       }
     ],
