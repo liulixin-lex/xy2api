@@ -28,3 +28,24 @@ exceptions:
     mitigation: "No zero-size custom generators in codebase; upgrade when nanoid releases fix"
     expires_on: "2026-10-13"
     owner: "security@your-domain"
+  - package: vue-i18n
+    advisory: "GHSA-83rm-6c8r-g728"
+    severity: high
+    reason: "escapeParameter is not configured in frontend/src/i18n/index.ts; existing translated v-html paths include static page-not-found text and HTML-escaped CLI comments"
+    mitigation: "Migrate to vue-i18n 11.4.14+ in a separate task; until then do not add escapeParameter or v-html with translated messages"
+    expires_on: "2026-11-27"
+    owner: "security@your-domain"
+  - package: "@intlify/core-base"
+    advisory: "GHSA-83rm-6c8r-g728"
+    severity: high
+    reason: "escapeParameter is not configured in frontend/src/i18n/index.ts; existing translated v-html paths include static page-not-found text and HTML-escaped CLI comments"
+    mitigation: "Migrate to vue-i18n 11.4.14+ in a separate task; until then do not add escapeParameter or v-html with translated messages"
+    expires_on: "2026-11-27"
+    owner: "security@your-domain"
+  - package: "@intlify/shared"
+    advisory: "GHSA-83rm-6c8r-g728"
+    severity: high
+    reason: "escapeParameter is not configured in frontend/src/i18n/index.ts; existing translated v-html paths include static page-not-found text and HTML-escaped CLI comments"
+    mitigation: "Migrate to vue-i18n 11.4.14+ in a separate task; until then do not add escapeParameter or v-html with translated messages"
+    expires_on: "2026-11-27"
+    owner: "security@your-domain"
