@@ -203,7 +203,8 @@
     "xy-upstream-balance",
     "xy-admin-operator-scope",
     "xy-responses-partial-usage",
-    "xy-responses-authoritative-failed-close"
+    "xy-responses-authoritative-failed-close",
+    "xy-recovery-observability"
   ],
   "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/92"
 }

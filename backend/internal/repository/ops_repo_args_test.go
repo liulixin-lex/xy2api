@@ -15,7 +15,7 @@ func TestOpsInsertErrorLogArgsPreservesExplicitZeroUpstreamStatus(t *testing.T) 
 	args := opsInsertErrorLogArgs(&service.OpsInsertErrorLogInput{UpstreamStatusCode: &zero})
 
 	// xy2api resilience: disconnect_stage and delivered_bytes (migration 275).
-	require.Len(t, args, 40)
+	require.Len(t, args, 42)
 	encoded, ok := args[27].(sql.NullInt64)
 	require.True(t, ok)
 	require.True(t, encoded.Valid)

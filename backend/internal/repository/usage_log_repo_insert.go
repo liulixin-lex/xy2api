@@ -87,6 +87,7 @@ var usageLogInsertArgTypes = [...]string{
 	"boolean",     // native_compaction_v2
 	"timestamptz", // created_at
 	"bigint",      // origin_group_id (xy2api resilience, migration 273)
+	"bigint",      // end_to_end_first_output_ms
 }
 
 const (
@@ -288,14 +289,15 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			session_id,
 			native_compaction_v2,
 			created_at,
-			origin_group_id
+			origin_group_id,
+			end_to_end_first_output_ms
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9,
 			$10, $11,
 			$12, $13, $14, $15,
 			$16, $17, $18, $19,
 			$20, $21, $22, $23, $24, $25,
-			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62, $63
+			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62, $63, $64
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 		RETURNING id, created_at
@@ -749,7 +751,8 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 			session_id,
 			native_compaction_v2,
 			created_at,
-			origin_group_id
+			origin_group_id,
+			end_to_end_first_output_ms
 		) AS (VALUES `)
 
 	// Each batch row prepends the synthetic input_index before the 60
@@ -845,7 +848,8 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				session_id,
 				native_compaction_v2,
 				created_at,
-				origin_group_id
+				origin_group_id,
+				end_to_end_first_output_ms
 			)
 			SELECT
 				user_id,
@@ -910,7 +914,8 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				session_id,
 				native_compaction_v2,
 				created_at,
-				origin_group_id
+				origin_group_id,
+				end_to_end_first_output_ms
 			FROM input
 			ON CONFLICT (request_id, api_key_id) DO NOTHING
 			RETURNING request_id, api_key_id, id, created_at
@@ -1015,7 +1020,8 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			session_id,
 			native_compaction_v2,
 			created_at,
-			origin_group_id
+			origin_group_id,
+			end_to_end_first_output_ms
 		) AS (VALUES `)
 
 	args := make([]any, 0, len(preparedList)*60)
@@ -1106,7 +1112,8 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			session_id,
 			native_compaction_v2,
 			created_at,
-			origin_group_id
+			origin_group_id,
+			end_to_end_first_output_ms
 		)
 		SELECT
 			user_id,
@@ -1171,7 +1178,8 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			session_id,
 			native_compaction_v2,
 			created_at,
-			origin_group_id
+			origin_group_id,
+			end_to_end_first_output_ms
 		FROM input
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`)
@@ -1244,14 +1252,15 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			session_id,
 			native_compaction_v2,
 			created_at,
-			origin_group_id
+			origin_group_id,
+			end_to_end_first_output_ms
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9,
 			$10, $11,
 			$12, $13, $14, $15,
 			$16, $17, $18, $19,
 			$20, $21, $22, $23, $24, $25,
-			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62, $63
+			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62, $63, $64
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`, prepared.args...)
@@ -1377,6 +1386,7 @@ func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {
 			log.NativeCompactionV2,
 			createdAt,
 			log.OriginGroupID, // origin_group_id
+			nullInt64(log.EndToEndFirstOutputMs),
 		},
 	}
 }

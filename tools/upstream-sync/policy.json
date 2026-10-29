@@ -2841,6 +2841,58 @@
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
       "value": "(!codexFailureTerminal || !sawBareError || sawResponseFailed)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, result != nil && result.SucceededForScheduling())"
+    },
+    {
+      "path": "backend/internal/handler/openai_chat_completions.go",
+      "value": "recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, result != nil && result.SucceededForScheduling())"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler.go",
+      "value": "recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, result != nil)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_responses.go",
+      "value": "recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, result != nil)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_chat_completions.go",
+      "value": "recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, result != nil)"
+    },
+    {
+      "path": "backend/internal/handler/gemini_v1beta_handler.go",
+      "value": "recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, result != nil)"
+    },
+    {
+      "path": "backend/internal/handler/ops_error_logger.go",
+      "value": "entry.RecoveryOutcome = recoveryOutcome(c)"
+    },
+    {
+      "path": "backend/internal/repository/ops_repo.go",
+      "value": "opsNullInt64KeepZero(input.EndToEndFirstOutputMs)"
+    },
+    {
+      "path": "backend/internal/repository/usage_log_repo_insert.go",
+      "value": "nullInt64(log.EndToEndFirstOutputMs)"
+    },
+    {
+      "path": "backend/internal/repository/usage_log_repo_query.go",
+      "value": "log.EndToEndFirstOutputMs = &v"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_usage.go",
+      "value": "usageLog.EndToEndFirstOutputMs = resilience.StateFrom(ctx).EndToEndFirstOutputMs()"
+    },
+    {
+      "path": "backend/internal/service/gateway_usage_billing.go",
+      "value": "resilience.StateFrom(ctx).EndToEndFirstOutputMs()"
+    },
+    {
+      "path": "backend/internal/service/openai_first_output_timeout.go",
+      "value": "AttemptElapsedMs: elapsed.Milliseconds(), TimeoutMs: timeout.Milliseconds()"
     }
   ],
   "forbidden_module_paths": [
@@ -2904,7 +2956,8 @@
     "xy-upstream-balance",
     "xy-admin-operator-scope",
     "xy-responses-partial-usage",
-    "xy-responses-authoritative-failed-close"
+    "xy-responses-authoritative-failed-close",
+    "xy-recovery-observability"
   ],
   "custom_patch_tests": [
     {
@@ -4831,6 +4884,21 @@
       "id": "xy-responses-authoritative-failed-close",
       "path": "backend/internal/service/openai_failed_terminal_close_test.go",
       "literal": "func TestOpenAIAuthoritativeFailedEndsBareErrorWait"
+    },
+    {
+      "id": "xy-recovery-observability",
+      "path": "backend/internal/service/recovery_observability_test.go",
+      "literal": "func TestEndToEndFirstOutputIncludesQueueAndFailedAttempt"
+    },
+    {
+      "id": "xy-recovery-observability",
+      "path": "backend/internal/handler/recovery_observability_test.go",
+      "literal": "func TestGeminiTimeoutSwitchThenCancelKeepsFinalOutcome"
+    },
+    {
+      "id": "xy-recovery-observability",
+      "path": "backend/internal/repository/recovery_observability_integration_test.go",
+      "literal": "func TestRecoveryObservabilityMigrationAndRoundTrip"
     }
   ]
 }

@@ -449,6 +449,20 @@ func (_c *UsageLogCreate) SetNillableDurationMs(v *int) *UsageLogCreate {
 	return _c
 }
 
+// SetEndToEndFirstOutputMs sets the "end_to_end_first_output_ms" field.
+func (_c *UsageLogCreate) SetEndToEndFirstOutputMs(v int64) *UsageLogCreate {
+	_c.mutation.SetEndToEndFirstOutputMs(v)
+	return _c
+}
+
+// SetNillableEndToEndFirstOutputMs sets the "end_to_end_first_output_ms" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableEndToEndFirstOutputMs(v *int64) *UsageLogCreate {
+	if v != nil {
+		_c.SetEndToEndFirstOutputMs(*v)
+	}
+	return _c
+}
+
 // SetFirstTokenMs sets the "first_token_ms" field.
 func (_c *UsageLogCreate) SetFirstTokenMs(v int) *UsageLogCreate {
 	_c.mutation.SetFirstTokenMs(v)
@@ -1078,6 +1092,10 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.DurationMs(); ok {
 		_spec.SetField(usagelog.FieldDurationMs, field.TypeInt, value)
 		_node.DurationMs = &value
+	}
+	if value, ok := _c.mutation.EndToEndFirstOutputMs(); ok {
+		_spec.SetField(usagelog.FieldEndToEndFirstOutputMs, field.TypeInt64, value)
+		_node.EndToEndFirstOutputMs = &value
 	}
 	if value, ok := _c.mutation.FirstTokenMs(); ok {
 		_spec.SetField(usagelog.FieldFirstTokenMs, field.TypeInt, value)
@@ -1839,6 +1857,30 @@ func (u *UsageLogUpsert) AddDurationMs(v int) *UsageLogUpsert {
 // ClearDurationMs clears the value of the "duration_ms" field.
 func (u *UsageLogUpsert) ClearDurationMs() *UsageLogUpsert {
 	u.SetNull(usagelog.FieldDurationMs)
+	return u
+}
+
+// SetEndToEndFirstOutputMs sets the "end_to_end_first_output_ms" field.
+func (u *UsageLogUpsert) SetEndToEndFirstOutputMs(v int64) *UsageLogUpsert {
+	u.Set(usagelog.FieldEndToEndFirstOutputMs, v)
+	return u
+}
+
+// UpdateEndToEndFirstOutputMs sets the "end_to_end_first_output_ms" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateEndToEndFirstOutputMs() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldEndToEndFirstOutputMs)
+	return u
+}
+
+// AddEndToEndFirstOutputMs adds v to the "end_to_end_first_output_ms" field.
+func (u *UsageLogUpsert) AddEndToEndFirstOutputMs(v int64) *UsageLogUpsert {
+	u.Add(usagelog.FieldEndToEndFirstOutputMs, v)
+	return u
+}
+
+// ClearEndToEndFirstOutputMs clears the value of the "end_to_end_first_output_ms" field.
+func (u *UsageLogUpsert) ClearEndToEndFirstOutputMs() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldEndToEndFirstOutputMs)
 	return u
 }
 
@@ -2789,6 +2831,34 @@ func (u *UsageLogUpsertOne) UpdateDurationMs() *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) ClearDurationMs() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearDurationMs()
+	})
+}
+
+// SetEndToEndFirstOutputMs sets the "end_to_end_first_output_ms" field.
+func (u *UsageLogUpsertOne) SetEndToEndFirstOutputMs(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetEndToEndFirstOutputMs(v)
+	})
+}
+
+// AddEndToEndFirstOutputMs adds v to the "end_to_end_first_output_ms" field.
+func (u *UsageLogUpsertOne) AddEndToEndFirstOutputMs(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddEndToEndFirstOutputMs(v)
+	})
+}
+
+// UpdateEndToEndFirstOutputMs sets the "end_to_end_first_output_ms" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateEndToEndFirstOutputMs() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateEndToEndFirstOutputMs()
+	})
+}
+
+// ClearEndToEndFirstOutputMs clears the value of the "end_to_end_first_output_ms" field.
+func (u *UsageLogUpsertOne) ClearEndToEndFirstOutputMs() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearEndToEndFirstOutputMs()
 	})
 }
 
@@ -3945,6 +4015,34 @@ func (u *UsageLogUpsertBulk) UpdateDurationMs() *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) ClearDurationMs() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearDurationMs()
+	})
+}
+
+// SetEndToEndFirstOutputMs sets the "end_to_end_first_output_ms" field.
+func (u *UsageLogUpsertBulk) SetEndToEndFirstOutputMs(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetEndToEndFirstOutputMs(v)
+	})
+}
+
+// AddEndToEndFirstOutputMs adds v to the "end_to_end_first_output_ms" field.
+func (u *UsageLogUpsertBulk) AddEndToEndFirstOutputMs(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddEndToEndFirstOutputMs(v)
+	})
+}
+
+// UpdateEndToEndFirstOutputMs sets the "end_to_end_first_output_ms" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateEndToEndFirstOutputMs() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateEndToEndFirstOutputMs()
+	})
+}
+
+// ClearEndToEndFirstOutputMs clears the value of the "end_to_end_first_output_ms" field.
+func (u *UsageLogUpsertBulk) ClearEndToEndFirstOutputMs() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearEndToEndFirstOutputMs()
 	})
 }
 

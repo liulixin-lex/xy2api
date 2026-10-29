@@ -104,6 +104,7 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			log.NativeCompactionV2,
 			createdAt,
 			sqlmock.AnyArg(), // origin_group_id
+			sqlmock.AnyArg(), // end_to_end_first_output_ms
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(99), createdAt))
 
@@ -200,6 +201,7 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			log.NativeCompactionV2,
 			createdAt,
 			sqlmock.AnyArg(), // origin_group_id
+			sqlmock.AnyArg(), // end_to_end_first_output_ms
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(100), createdAt))
 
@@ -281,8 +283,8 @@ func TestPrepareUsageLogInsert_PersistsNativeCompactionV2WithoutChangingRequestT
 
 	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
 	// created_at and origin_group_id follow native_compaction_v2.
-	require.Equal(t, "boolean", usageLogInsertArgTypes[len(usageLogInsertArgTypes)-3])
-	require.Equal(t, true, prepared.args[len(prepared.args)-3])
+	require.Equal(t, "boolean", usageLogInsertArgTypes[len(usageLogInsertArgTypes)-4])
+	require.Equal(t, true, prepared.args[len(prepared.args)-4])
 	require.Equal(t, int16(service.RequestTypeStream), prepared.args[30])
 	require.Equal(t, service.RequestTypeStream, log.RequestType)
 	require.True(t, log.Stream)
@@ -965,6 +967,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			false, // native_compaction_v2
 			now,
 			sql.NullInt64{}, // origin_group_id
+			sql.NullInt64{}, // end_to_end_first_output_ms
 		}})
 		require.NoError(t, err)
 		require.Equal(t, 2, log.ImageCount)
@@ -1046,6 +1049,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			false,             // native_compaction_v2
 			now,
 			sql.NullInt64{}, // origin_group_id
+			sql.NullInt64{}, // end_to_end_first_output_ms
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -1110,6 +1114,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			true,              // native_compaction_v2
 			now,
 			sql.NullInt64{}, // origin_group_id
+			sql.NullInt64{}, // end_to_end_first_output_ms
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -1175,6 +1180,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			false,             // native_compaction_v2
 			now,
 			sql.NullInt64{}, // origin_group_id
+			sql.NullInt64{}, // end_to_end_first_output_ms
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)

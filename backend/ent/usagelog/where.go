@@ -220,6 +220,11 @@ func DurationMs(v int) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldDurationMs, v))
 }
 
+// EndToEndFirstOutputMs applies equality check predicate on the "end_to_end_first_output_ms" field. It's identical to EndToEndFirstOutputMsEQ.
+func EndToEndFirstOutputMs(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldEndToEndFirstOutputMs, v))
+}
+
 // FirstTokenMs applies equality check predicate on the "first_token_ms" field. It's identical to FirstTokenMsEQ.
 func FirstTokenMs(v int) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldFirstTokenMs, v))
@@ -1733,6 +1738,56 @@ func DurationMsIsNil() predicate.UsageLog {
 // DurationMsNotNil applies the NotNil predicate on the "duration_ms" field.
 func DurationMsNotNil() predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNotNull(FieldDurationMs))
+}
+
+// EndToEndFirstOutputMsEQ applies the EQ predicate on the "end_to_end_first_output_ms" field.
+func EndToEndFirstOutputMsEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldEndToEndFirstOutputMs, v))
+}
+
+// EndToEndFirstOutputMsNEQ applies the NEQ predicate on the "end_to_end_first_output_ms" field.
+func EndToEndFirstOutputMsNEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldEndToEndFirstOutputMs, v))
+}
+
+// EndToEndFirstOutputMsIn applies the In predicate on the "end_to_end_first_output_ms" field.
+func EndToEndFirstOutputMsIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldEndToEndFirstOutputMs, vs...))
+}
+
+// EndToEndFirstOutputMsNotIn applies the NotIn predicate on the "end_to_end_first_output_ms" field.
+func EndToEndFirstOutputMsNotIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldEndToEndFirstOutputMs, vs...))
+}
+
+// EndToEndFirstOutputMsGT applies the GT predicate on the "end_to_end_first_output_ms" field.
+func EndToEndFirstOutputMsGT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldEndToEndFirstOutputMs, v))
+}
+
+// EndToEndFirstOutputMsGTE applies the GTE predicate on the "end_to_end_first_output_ms" field.
+func EndToEndFirstOutputMsGTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldEndToEndFirstOutputMs, v))
+}
+
+// EndToEndFirstOutputMsLT applies the LT predicate on the "end_to_end_first_output_ms" field.
+func EndToEndFirstOutputMsLT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldEndToEndFirstOutputMs, v))
+}
+
+// EndToEndFirstOutputMsLTE applies the LTE predicate on the "end_to_end_first_output_ms" field.
+func EndToEndFirstOutputMsLTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldEndToEndFirstOutputMs, v))
+}
+
+// EndToEndFirstOutputMsIsNil applies the IsNil predicate on the "end_to_end_first_output_ms" field.
+func EndToEndFirstOutputMsIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldEndToEndFirstOutputMs))
+}
+
+// EndToEndFirstOutputMsNotNil applies the NotNil predicate on the "end_to_end_first_output_ms" field.
+func EndToEndFirstOutputMsNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldEndToEndFirstOutputMs))
 }
 
 // FirstTokenMsEQ applies the EQ predicate on the "first_token_ms" field.

@@ -604,6 +604,14 @@ func sanitizeOpsUpstreamErrors(entry *OpsInsertErrorLogInput) error {
 		} else {
 			out.UpstreamResponseBody = ""
 		}
+		out.Effort = truncateString(sanitizeUpstreamErrorMessage(strings.TrimSpace(out.Effort)), 32)
+		out.BodyBytes = max(0, out.BodyBytes)
+		if out.AttemptElapsedMs < 0 {
+			out.AttemptElapsedMs = 0
+		}
+		if out.TimeoutMs < 0 {
+			out.TimeoutMs = 0
+		}
 		out.Kind = truncateString(strings.TrimSpace(out.Kind), 64)
 		out.Stage = truncateString(strings.TrimSpace(out.Stage), 64)
 		out.Scope = truncateString(strings.TrimSpace(out.Scope), 64)

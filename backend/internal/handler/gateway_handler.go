@@ -353,6 +353,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		for {
 			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, "", int64(0)) // Gemini 不使用会话限制
 			if err != nil {
+				recordSelectionExhausted(c.Request.Context())
 				if failoverClientGone(c) {
 					reqLog.Info("gateway.account_select_aborted_client_disconnected", zap.Error(err))
 					return
@@ -518,6 +519,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			} else {
 				result, err = h.geminiCompatService.Forward(requestCtx, c, account, body)
 			}
+			recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, result != nil)
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
 			}
@@ -691,6 +693,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			)
 			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), currentAPIKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, parsedReq.MetadataUserID, subject.UserID)
 			if err != nil {
+				recordSelectionExhausted(c.Request.Context())
 				if failoverClientGone(c) {
 					reqLog.Info("gateway.account_select_aborted_client_disconnected", zap.Error(err))
 					return
@@ -947,6 +950,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 清理回调引用，防止 failover 重试时旧回调被错误调用
 			attemptParsedReq.OnUpstreamAccepted = nil
 
+			recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, result != nil)
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
 			}
@@ -1939,6 +1943,7 @@ func (h *GatewayHandler) handleConcurrencyError(c *gin.Context, err error, slotT
 }
 
 func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, platform string, streamStarted bool) {
+	recordExhaustedRecovery(c, failoverErr)
 	statusCode := failoverErr.StatusCode
 	responseBody := failoverErr.ResponseBody
 	if service.IsOpenAISilentRefusalErrorBody(responseBody) {

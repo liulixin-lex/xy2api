@@ -80,6 +80,8 @@ const (
 	FieldStream = "stream"
 	// FieldDurationMs holds the string denoting the duration_ms field in the database.
 	FieldDurationMs = "duration_ms"
+	// FieldEndToEndFirstOutputMs holds the string denoting the end_to_end_first_output_ms field in the database.
+	FieldEndToEndFirstOutputMs = "end_to_end_first_output_ms"
 	// FieldFirstTokenMs holds the string denoting the first_token_ms field in the database.
 	FieldFirstTokenMs = "first_token_ms"
 	// FieldUserAgent holds the string denoting the user_agent field in the database.
@@ -193,6 +195,7 @@ var Columns = []string{
 	FieldBillingType,
 	FieldStream,
 	FieldDurationMs,
+	FieldEndToEndFirstOutputMs,
 	FieldFirstTokenMs,
 	FieldUserAgent,
 	FieldIPAddress,
@@ -463,6 +466,11 @@ func ByStream(opts ...sql.OrderTermOption) OrderOption {
 // ByDurationMs orders the results by the duration_ms field.
 func ByDurationMs(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldDurationMs, opts...).ToFunc()
+}
+
+// ByEndToEndFirstOutputMs orders the results by the end_to_end_first_output_ms field.
+func ByEndToEndFirstOutputMs(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldEndToEndFirstOutputMs, opts...).ToFunc()
 }
 
 // ByFirstTokenMs orders the results by the first_token_ms field.

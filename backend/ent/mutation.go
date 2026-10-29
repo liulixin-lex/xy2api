@@ -45096,86 +45096,88 @@ func (m *UsageCleanupTaskMutation) ResetEdge(name string) error {
 // UsageLogMutation represents an operation that mutates the UsageLog nodes in the graph.
 type UsageLogMutation struct {
 	config
-	op                           Op
-	typ                          string
-	id                           *int64
-	request_id                   *string
-	model                        *string
-	requested_model              *string
-	upstream_model               *string
-	upstream_response_model      *string
-	upstream_model_mismatch      *bool
-	channel_id                   *int64
-	addchannel_id                *int64
-	model_mapping_chain          *string
-	billing_tier                 *string
-	billing_mode                 *string
-	input_tokens                 *int
-	addinput_tokens              *int
-	output_tokens                *int
-	addoutput_tokens             *int
-	cache_creation_tokens        *int
-	addcache_creation_tokens     *int
-	cache_read_tokens            *int
-	addcache_read_tokens         *int
-	cache_creation_5m_tokens     *int
-	addcache_creation_5m_tokens  *int
-	cache_creation_1h_tokens     *int
-	addcache_creation_1h_tokens  *int
-	input_cost                   *float64
-	addinput_cost                *float64
-	output_cost                  *float64
-	addoutput_cost               *float64
-	cache_creation_cost          *float64
-	addcache_creation_cost       *float64
-	cache_read_cost              *float64
-	addcache_read_cost           *float64
-	total_cost                   *float64
-	addtotal_cost                *float64
-	actual_cost                  *float64
-	addactual_cost               *float64
-	rate_multiplier              *float64
-	addrate_multiplier           *float64
-	long_context_billing_applied *bool
-	account_rate_multiplier      *float64
-	addaccount_rate_multiplier   *float64
-	billing_type                 *int8
-	addbilling_type              *int8
-	stream                       *bool
-	duration_ms                  *int
-	addduration_ms               *int
-	first_token_ms               *int
-	addfirst_token_ms            *int
-	user_agent                   *string
-	ip_address                   *string
-	image_count                  *int
-	addimage_count               *int
-	image_size                   *string
-	image_input_size             *string
-	image_output_size            *string
-	image_size_source            *string
-	image_size_breakdown         *map[string]int
-	video_count                  *int
-	addvideo_count               *int
-	video_resolution             *string
-	video_duration_seconds       *int
-	addvideo_duration_seconds    *int
-	cache_ttl_overridden         *bool
-	created_at                   *time.Time
-	clearedFields                map[string]struct{}
-	user                         *int64
-	cleareduser                  bool
-	api_key                      *int64
-	clearedapi_key               bool
-	account                      *int64
-	clearedaccount               bool
-	group                        *int64
-	clearedgroup                 bool
-	subscription                 *int64
-	clearedsubscription          bool
-	done                         bool
-	oldValue                     func(context.Context) (*UsageLog, error)
-	predicates                   []predicate.UsageLog
+	op                            Op
+	typ                           string
+	id                            *int64
+	request_id                    *string
+	model                         *string
+	requested_model               *string
+	upstream_model                *string
+	upstream_response_model       *string
+	upstream_model_mismatch       *bool
+	channel_id                    *int64
+	addchannel_id                 *int64
+	model_mapping_chain           *string
+	billing_tier                  *string
+	billing_mode                  *string
+	input_tokens                  *int
+	addinput_tokens               *int
+	output_tokens                 *int
+	addoutput_tokens              *int
+	cache_creation_tokens         *int
+	addcache_creation_tokens      *int
+	cache_read_tokens             *int
+	addcache_read_tokens          *int
+	cache_creation_5m_tokens      *int
+	addcache_creation_5m_tokens   *int
+	cache_creation_1h_tokens      *int
+	addcache_creation_1h_tokens   *int
+	input_cost                    *float64
+	addinput_cost                 *float64
+	output_cost                   *float64
+	addoutput_cost                *float64
+	cache_creation_cost           *float64
+	addcache_creation_cost        *float64
+	cache_read_cost               *float64
+	addcache_read_cost            *float64
+	total_cost                    *float64
+	addtotal_cost                 *float64
+	actual_cost                   *float64
+	addactual_cost                *float64
+	rate_multiplier               *float64
+	addrate_multiplier            *float64
+	long_context_billing_applied  *bool
+	account_rate_multiplier       *float64
+	addaccount_rate_multiplier    *float64
+	billing_type                  *int8
+	addbilling_type               *int8
+	stream                        *bool
+	duration_ms                   *int
+	addduration_ms                *int
+	end_to_end_first_output_ms    *int64
+	addend_to_end_first_output_ms *int64
+	first_token_ms                *int
+	addfirst_token_ms             *int
+	user_agent                    *string
+	ip_address                    *string
+	image_count                   *int
+	addimage_count                *int
+	image_size                    *string
+	image_input_size              *string
+	image_output_size             *string
+	image_size_source             *string
+	image_size_breakdown          *map[string]int
+	video_count                   *int
+	addvideo_count                *int
+	video_resolution              *string
+	video_duration_seconds        *int
+	addvideo_duration_seconds     *int
+	cache_ttl_overridden          *bool
+	created_at                    *time.Time
+	clearedFields                 map[string]struct{}
+	user                          *int64
+	cleareduser                   bool
+	api_key                       *int64
+	clearedapi_key                bool
+	account                       *int64
+	clearedaccount                bool
+	group                         *int64
+	clearedgroup                  bool
+	subscription                  *int64
+	clearedsubscription           bool
+	done                          bool
+	oldValue                      func(context.Context) (*UsageLog, error)
+	predicates                    []predicate.UsageLog
 }
 
 var _ ent.Mutation = (*UsageLogMutation)(nil)
@@ -46963,6 +46965,76 @@ func (m *UsageLogMutation) ResetDurationMs() {
 	delete(m.clearedFields, usagelog.FieldDurationMs)
 }
 
+// SetEndToEndFirstOutputMs sets the "end_to_end_first_output_ms" field.
+func (m *UsageLogMutation) SetEndToEndFirstOutputMs(i int64) {
+	m.end_to_end_first_output_ms = &i
+	m.addend_to_end_first_output_ms = nil
+}
+
+// EndToEndFirstOutputMs returns the value of the "end_to_end_first_output_ms" field in the mutation.
+func (m *UsageLogMutation) EndToEndFirstOutputMs() (r int64, exists bool) {
+	v := m.end_to_end_first_output_ms
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldEndToEndFirstOutputMs returns the old "end_to_end_first_output_ms" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldEndToEndFirstOutputMs(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldEndToEndFirstOutputMs is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldEndToEndFirstOutputMs requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldEndToEndFirstOutputMs: %w", err)
+	}
+	return oldValue.EndToEndFirstOutputMs, nil
+}
+
+// AddEndToEndFirstOutputMs adds i to the "end_to_end_first_output_ms" field.
+func (m *UsageLogMutation) AddEndToEndFirstOutputMs(i int64) {
+	if m.addend_to_end_first_output_ms != nil {
+		*m.addend_to_end_first_output_ms += i
+	} else {
+		m.addend_to_end_first_output_ms = &i
+	}
+}
+
+// AddedEndToEndFirstOutputMs returns the value that was added to the "end_to_end_first_output_ms" field in this mutation.
+func (m *UsageLogMutation) AddedEndToEndFirstOutputMs() (r int64, exists bool) {
+	v := m.addend_to_end_first_output_ms
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearEndToEndFirstOutputMs clears the value of the "end_to_end_first_output_ms" field.
+func (m *UsageLogMutation) ClearEndToEndFirstOutputMs() {
+	m.end_to_end_first_output_ms = nil
+	m.addend_to_end_first_output_ms = nil
+	m.clearedFields[usagelog.FieldEndToEndFirstOutputMs] = struct{}{}
+}
+
+// EndToEndFirstOutputMsCleared returns if the "end_to_end_first_output_ms" field was cleared in this mutation.
+func (m *UsageLogMutation) EndToEndFirstOutputMsCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldEndToEndFirstOutputMs]
+	return ok
+}
+
+// ResetEndToEndFirstOutputMs resets all changes to the "end_to_end_first_output_ms" field.
+func (m *UsageLogMutation) ResetEndToEndFirstOutputMs() {
+	m.end_to_end_first_output_ms = nil
+	m.addend_to_end_first_output_ms = nil
+	delete(m.clearedFields, usagelog.FieldEndToEndFirstOutputMs)
+}
+
 // SetFirstTokenMs sets the "first_token_ms" field.
 func (m *UsageLogMutation) SetFirstTokenMs(i int) {
 	m.first_token_ms = &i
@@ -47848,7 +47920,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 47)
+	fields := make([]string, 0, 48)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -47947,6 +48019,9 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.duration_ms != nil {
 		fields = append(fields, usagelog.FieldDurationMs)
+	}
+	if m.end_to_end_first_output_ms != nil {
+		fields = append(fields, usagelog.FieldEndToEndFirstOutputMs)
 	}
 	if m.first_token_ms != nil {
 		fields = append(fields, usagelog.FieldFirstTokenMs)
@@ -48064,6 +48139,8 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.Stream()
 	case usagelog.FieldDurationMs:
 		return m.DurationMs()
+	case usagelog.FieldEndToEndFirstOutputMs:
+		return m.EndToEndFirstOutputMs()
 	case usagelog.FieldFirstTokenMs:
 		return m.FirstTokenMs()
 	case usagelog.FieldUserAgent:
@@ -48167,6 +48244,8 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldStream(ctx)
 	case usagelog.FieldDurationMs:
 		return m.OldDurationMs(ctx)
+	case usagelog.FieldEndToEndFirstOutputMs:
+		return m.OldEndToEndFirstOutputMs(ctx)
 	case usagelog.FieldFirstTokenMs:
 		return m.OldFirstTokenMs(ctx)
 	case usagelog.FieldUserAgent:
@@ -48435,6 +48514,13 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetDurationMs(v)
 		return nil
+	case usagelog.FieldEndToEndFirstOutputMs:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetEndToEndFirstOutputMs(v)
+		return nil
 	case usagelog.FieldFirstTokenMs:
 		v, ok := value.(int)
 		if !ok {
@@ -48592,6 +48678,9 @@ func (m *UsageLogMutation) AddedFields() []string {
 	if m.addduration_ms != nil {
 		fields = append(fields, usagelog.FieldDurationMs)
 	}
+	if m.addend_to_end_first_output_ms != nil {
+		fields = append(fields, usagelog.FieldEndToEndFirstOutputMs)
+	}
 	if m.addfirst_token_ms != nil {
 		fields = append(fields, usagelog.FieldFirstTokenMs)
 	}
@@ -48646,6 +48735,8 @@ func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedBillingType()
 	case usagelog.FieldDurationMs:
 		return m.AddedDurationMs()
+	case usagelog.FieldEndToEndFirstOutputMs:
+		return m.AddedEndToEndFirstOutputMs()
 	case usagelog.FieldFirstTokenMs:
 		return m.AddedFirstTokenMs()
 	case usagelog.FieldImageCount:
@@ -48782,6 +48873,13 @@ func (m *UsageLogMutation) AddField(name string, value ent.Value) error {
 		}
 		m.AddDurationMs(v)
 		return nil
+	case usagelog.FieldEndToEndFirstOutputMs:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddEndToEndFirstOutputMs(v)
+		return nil
 	case usagelog.FieldFirstTokenMs:
 		v, ok := value.(int)
 		if !ok {
@@ -48853,6 +48951,9 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	}
 	if m.FieldCleared(usagelog.FieldDurationMs) {
 		fields = append(fields, usagelog.FieldDurationMs)
+	}
+	if m.FieldCleared(usagelog.FieldEndToEndFirstOutputMs) {
+		fields = append(fields, usagelog.FieldEndToEndFirstOutputMs)
 	}
 	if m.FieldCleared(usagelog.FieldFirstTokenMs) {
 		fields = append(fields, usagelog.FieldFirstTokenMs)
@@ -48933,6 +49034,9 @@ func (m *UsageLogMutation) ClearField(name string) error {
 		return nil
 	case usagelog.FieldDurationMs:
 		m.ClearDurationMs()
+		return nil
+	case usagelog.FieldEndToEndFirstOutputMs:
+		m.ClearEndToEndFirstOutputMs()
 		return nil
 	case usagelog.FieldFirstTokenMs:
 		m.ClearFirstTokenMs()
@@ -49070,6 +49174,9 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldDurationMs:
 		m.ResetDurationMs()
+		return nil
+	case usagelog.FieldEndToEndFirstOutputMs:
+		m.ResetEndToEndFirstOutputMs()
 		return nil
 	case usagelog.FieldFirstTokenMs:
 		m.ResetFirstTokenMs()

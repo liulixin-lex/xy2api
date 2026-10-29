@@ -41,7 +41,8 @@ type deliveryWriter struct {
 	state *resilience.RequestState
 
 	// stream tells the opening events of an SSE response from its content.
-	stream sseDeliveryState
+	stream   sseDeliveryState
+	semantic semanticDeliveryState
 }
 
 // WriteHeader answers 503 instead of 502/504 to a request that came through
@@ -99,6 +100,7 @@ func (w *deliveryWriter) Write(data []byte) (int, error) {
 	w.written.Add(int64(n))
 	if n > 0 {
 		w.observeStream(data[:n])
+		w.observeSemanticOutput(data[:n])
 		w.noteFirstOutput(len(bytes.TrimSpace(data[:n])) > 0)
 	}
 	return n, err
@@ -111,6 +113,7 @@ func (w *deliveryWriter) WriteString(s string) (int, error) {
 		w.observeStream([]byte(s[:n]))
 	}
 	if n > 0 {
+		w.observeSemanticOutput([]byte(s[:n]))
 		w.noteFirstOutput(strings.TrimSpace(s[:n]) != "")
 	}
 	return n, err
