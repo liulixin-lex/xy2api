@@ -258,7 +258,7 @@
 - 依据：仓库外任务交接包的 `plan/FINAL_PLAN.md` v1.1；按 N1→N5 实施，每项独立本地提交。
 - 开始状态：`feat/recovery-optimization-20261029`，HEAD 与 origin/main 均为 `03fc67de3`，工作树干净。
 - 范围：原生 Responses 部分用量、权威 failed 后关流、端到端观测迁移、近期成功会话替补排序、热尝试输入下限；同步现行文档与上游登记，不新增开关或兜底。
-- 进度：N1 已接通原生 Forward 的部分结果返回，成功绑定与快照更新只在成功时执行；真实 Forward/handler 窄测试覆盖部分用量、读错、缺终态、drain、首输出前换号与取消，并验证较新暂停及 breaker 不被清除。提交后进行 N2。
+- 进度：N1 已接通原生 Forward 的部分结果返回，成功绑定与快照更新只在成功时执行；真实 Forward/handler 窄测试覆盖部分用量、读错、缺终态、drain、首输出前换号与取消，并验证较新暂停及 breaker 不被清除。N1 本地提交 `47d950eb5`，干净树 audit 通过。N2 已收窄三处 bare error 等待条件；新增 8 个表格分支验证权威 failed 及时返回与 bare-only EOF，相关既有终态测试及 N1+N2 定向 race 全过。下一步 N3（迁移 283、独立语义时间与 handler 结果分类）。
 - 交付：每批 N1+N2、N3、N4+N5 后追加仓库外 `implementation/REPORT.md` 并通知产品经理；未授权推送、PR、生产连接或部署。
 
 ### 20261021-channel-monitor-v1 — 渠道监控 v1 探测优化（PR #120 已合入 main，进入下一个版本；待真实上游验证；2026-10-22 DOCS 更新状态）

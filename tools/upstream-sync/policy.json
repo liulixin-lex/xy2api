@@ -2833,6 +2833,14 @@
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
       "value": "clientSawOutput:  clientSawOutput,"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "(!codexFailureTerminal || !sawBareError || sawResponseFailed)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "(!codexFailureTerminal || !sawBareError || sawResponseFailed)"
     }
   ],
   "forbidden_module_paths": [
@@ -2895,7 +2903,8 @@
     "xy-error-recovery-routing",
     "xy-upstream-balance",
     "xy-admin-operator-scope",
-    "xy-responses-partial-usage"
+    "xy-responses-partial-usage",
+    "xy-responses-authoritative-failed-close"
   ],
   "custom_patch_tests": [
     {
@@ -4817,6 +4826,11 @@
       "id": "xy-responses-partial-usage",
       "path": "backend/internal/handler/openai_native_partial_usage_test.go",
       "literal": "func TestOpenAINativeFailureBillsKnownPartialUsageOnce"
+    },
+    {
+      "id": "xy-responses-authoritative-failed-close",
+      "path": "backend/internal/service/openai_failed_terminal_close_test.go",
+      "literal": "func TestOpenAIAuthoritativeFailedEndsBareErrorWait"
     }
   ]
 }
