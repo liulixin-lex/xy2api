@@ -734,18 +734,19 @@
       },
       {
         "block": "openai-recent-session-endpoint-model",
-        "note": "N4-1: pass the existing endpoint capability into E2; Chat/Messages use their actual ordinary mapping even for passthrough accounts, Responses keeps its existing compact/passthrough resolution. No candidate eligibility change.",
+        "note": "N4-1/R1: distinguish the parsed inbound Responses protocol from minimum account capability; text Responses retains Chat fallback eligibility and Responses model resolution. Chat/Messages keep ordinary mapping.",
         "removed": [],
         "added": [
           "}",
           "s.preferOpenAIReplacementSession(ctx, available, groupID, sessionHash, requestedModel, rateOrder, requireCompact, requiredCapability)",
           "func (s *OpenAIGatewayService) preferOpenAIReplacementSession(ctx context.Context, available []accountWithLoad, groupID *int64, session, model string, rateOrder openAILegacyUpstreamRateOrder, compact bool, capability OpenAIEndpointCapability) {",
-          "// Chat and Messages apply ordinary mapping even on passthrough accounts.",
-          "if capability == OpenAIEndpointCapabilityChatCompletions {",
+          "// Text Responses also accepts Chat capability, but keeps Responses model rules.",
+          "if capability == OpenAIEndpointCapabilityChatCompletions && protocol != resilience.CapabilityProtocolResponses && !compact {",
           "outboundModel = normalizeOpenAIModelForUpstream(item.account, resolveOpenAIForwardModel(item.account, model, \"\"))",
           "var outboundModel string",
           "} else {",
-          "outboundModel = resolveOpenAIAccountUpstreamModelForRequest(item.account, model, compact)"
+          "outboundModel = resolveOpenAIAccountUpstreamModelForRequest(item.account, model, compact)",
+          "protocol, _, _ := resilience.CapabilityRequestFrom(ctx)"
         ]
       }
     ],

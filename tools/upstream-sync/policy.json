@@ -2969,6 +2969,10 @@
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
       "value": "if cyberHit || contextWindow || (isOpenAIDeterministicClientError(resp.StatusCode) && classifyUpstreamHTTP(resp.StatusCode, resp.Header, body, upstreamMsg).Category == resilience.CategoryClientError) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "if capability == OpenAIEndpointCapabilityChatCompletions && protocol != resilience.CapabilityProtocolResponses && !compact {"
     }
   ],
   "forbidden_module_paths": [
@@ -3039,7 +3043,8 @@
     "xy-openai-warm-input-floor",
     "xy-recovery-observability-precision",
     "xy-openai-recent-session-endpoint-model",
-    "xy-recovery-rejection-endpoints"
+    "xy-recovery-rejection-endpoints",
+    "xy-openai-recent-session-request-protocol"
   ],
   "custom_patch_tests": [
     {
@@ -5051,6 +5056,16 @@
       "id": "xy-recovery-rejection-endpoints",
       "path": "backend/internal/handler/recovery_observability_test.go",
       "literal": "func TestRecoveryOutcomeRejectionAcrossHandlers"
+    },
+    {
+      "id": "xy-openai-recent-session-request-protocol",
+      "path": "backend/internal/service/openai_recent_session_success_test.go",
+      "literal": "func TestOpenAIRecentSessionPassthroughModelsMatchEndpoints"
+    },
+    {
+      "id": "xy-openai-recent-session-request-protocol",
+      "path": "backend/internal/handler/openai_profit_slot_recheck_test.go",
+      "literal": "func TestOpenAIResponsesRequiredCapabilityForRequest"
     }
   ]
 }

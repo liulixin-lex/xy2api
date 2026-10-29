@@ -164,7 +164,7 @@ func TestOpenAIRecentSessionSelectionKeepsEligibility(t *testing.T) {
 }
 
 func TestOpenAIRecentSessionPassthroughModelsMatchEndpoints(t *testing.T) {
-	for _, protocol := range []string{"responses", "chat", "messages"} {
+	for _, protocol := range []string{"responses", "responses_text", "chat", "messages"} {
 		t.Run(protocol, func(t *testing.T) {
 			gin.SetMode(gin.TestMode)
 			withResilienceSettings(t, nil)
@@ -189,12 +189,21 @@ func TestOpenAIRecentSessionPassthroughModelsMatchEndpoints(t *testing.T) {
 			upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(stream))}}}
 			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
-			c.Request = httptest.NewRequest(http.MethodPost, "/v1/"+protocol, nil).WithContext(resilience.WithRequestState(context.Background(), resilience.NewRequestState()))
+			path := "/v1/" + protocol
+			ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+			if protocol == "responses_text" {
+				path = "/v1/responses"
+				ctx = resilience.WithCapabilityRequest(ctx, resilience.CapabilityProtocolResponses, true)
+			} else if protocol == "chat" {
+				path = "/v1/chat/completions"
+				ctx = resilience.WithCapabilityRequest(ctx, resilience.CapabilityProtocolChat, true)
+			}
+			c.Request = httptest.NewRequest(http.MethodPost, path, nil).WithContext(ctx)
 			InstallDeliveryTracking(c, time.Now())
 			var result *OpenAIForwardResult
 			var err error
 			switch protocol {
-			case "responses":
+			case "responses", "responses_text":
 				result, err = svc.Forward(c.Request.Context(), c, account, []byte(`{"model":"alias","stream":true,"input":"hi"}`))
 			case "chat":
 				result, err = svc.ForwardAsChatCompletions(c.Request.Context(), c, account, []byte(`{"model":"alias","stream":true,"messages":[{"role":"user","content":"hi"}]}`), "", "")
@@ -206,7 +215,7 @@ func TestOpenAIRecentSessionPassthroughModelsMatchEndpoints(t *testing.T) {
 			require.Len(t, upstream.requestBodies, 1)
 			sentModel := gjson.GetBytes(upstream.requestBodies[0], "model").String()
 			scheduleModel := result.UpstreamModel
-			if protocol == "responses" {
+			if protocol == "responses" || protocol == "responses_text" {
 				require.Empty(t, result.UpstreamModel, "unchanged passthrough model keeps the usage NULL contract")
 				scheduleModel = ResolveOpenAIAccountUpstreamModelForRequest(account, "alias", false)
 			}
@@ -216,17 +225,20 @@ func TestOpenAIRecentSessionPassthroughModelsMatchEndpoints(t *testing.T) {
 			st.SetRecoveryOutcome("completed")
 			svc.RecordOpenAIRecentSessionSuccess(c.Request.Context(), &group, session, account, scheduleModel, result)
 			require.False(t, svc.recentSessionSuccess().lastSuccess(openAIRecentSessionKey{group, session, sentModel}, account.ID, time.Now()).IsZero(), "write uses actual successful outbound model")
+			// Ordinary text Responses uses ChatCompletions as its minimum capability.
 			capability := OpenAIEndpointCapabilityChatCompletions
 			wantModel := "gpt-5.4"
 			if protocol == "responses" {
 				capability = OpenAIEndpointCapabilityResponses
+			}
+			if protocol == "responses" || protocol == "responses_text" {
 				wantModel = "alias"
 			}
 			require.Equal(t, wantModel, sentModel, "canonical outbound model is not mapped again")
 			items := []accountWithLoad{{account: other, loadInfo: &AccountLoadInfo{}}, {account: account, loadInfo: &AccountLoadInfo{LoadRate: 20}}}
 			svc.preferOpenAIReplacementSession(c.Request.Context(), items, &group, session, "alias", openAILegacyUpstreamRateOrder{}, false, capability)
 			require.Equal(t, account.ID, items[0].account.ID, "recent success must outrank the chosen HRW control winner")
-			if protocol != "responses" {
+			if protocol == "chat" || protocol == "messages" {
 				account.Credentials["model_mapping"] = map[string]any{"alias": "gpt-5.5"}
 				svc.preferOpenAIReplacementSession(c.Request.Context(), items, &group, session, "alias", openAILegacyUpstreamRateOrder{}, false, capability)
 				require.Equal(t, other.ID, items[0].account.ID, "changed outbound model must not reuse old history")

@@ -1619,6 +1619,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 // lowest-load band of each priority. Rate and compact cohorts remain separate;
 // the caller still applies their ordering and the final latency-hold partition.
 func (s *OpenAIGatewayService) preferOpenAIReplacementSession(ctx context.Context, available []accountWithLoad, groupID *int64, session, model string, rateOrder openAILegacyUpstreamRateOrder, compact bool, capability OpenAIEndpointCapability) {
+	protocol, _, _ := resilience.CapabilityRequestFrom(ctx)
 	type cohortKey struct {
 		priority int
 		rate     float64
@@ -1664,8 +1665,8 @@ func (s *OpenAIGatewayService) preferOpenAIReplacementSession(ctx context.Contex
 			scores[item.account.ID] = value
 			hashes[item.account.ID] = openAIReplacementSessionHash(derefGroupID(groupID), session, item.account.ID)
 			var outboundModel string
-			// Chat and Messages apply ordinary mapping even on passthrough accounts.
-			if capability == OpenAIEndpointCapabilityChatCompletions {
+			// Text Responses also accepts Chat capability, but keeps Responses model rules.
+			if capability == OpenAIEndpointCapabilityChatCompletions && protocol != resilience.CapabilityProtocolResponses && !compact {
 				outboundModel = normalizeOpenAIModelForUpstream(item.account, resolveOpenAIForwardModel(item.account, model, ""))
 			} else {
 				outboundModel = resolveOpenAIAccountUpstreamModelForRequest(item.account, model, compact)
