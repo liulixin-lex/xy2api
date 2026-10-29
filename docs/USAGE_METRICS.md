@@ -16,7 +16,9 @@
 
 用量明细仅展示适用的 Token 请求，排除图片输出、视频、非 Token 计费和 Live/未知请求类型；旧记录缺少请求类型或计费模式时仍允许按已有 Token 数据计算。输出或耗时不是有限正数时显示 `—`，不伪造 0 t/s。输出计数已经可能包含推理 Token，不再额外相加。显示开关继续生效（见“显示与公开”），不因上游组件更新而绕过设置。
 
-`first_token_ms` 与 `duration_ms` 都从最后一次（成功的）上游尝试开始计时，不含此前失败的尝试与换号等待；换过号的请求，客户端实际等待更长，各次尝试见运维错误记录的 `upstream_errors`。OpenAI 首字口径由设置 `openai_ttft_mode` 决定：`semantic`（缺省）把中转插入的伪保活帧也记为首个事件，与 0.3.0 一致；`visible` 只算真实输出（见 [网关韧性](GATEWAY_RESILIENCE.md) §3）。
+`first_token_ms` 与 `duration_ms` 都从最后一次上游尝试开始计时，不含此前失败的尝试与换号等待；输出后失败而保留的部分用量，同样从所属尝试开始计时；换过号的请求，客户端实际等待更长，各次尝试见运维错误记录的 `upstream_errors`。OpenAI 首字口径由设置 `openai_ttft_mode` 决定：`semantic`（缺省）把中转插入的伪保活帧也记为首个事件，与 0.3.0 一致；`visible` 只算真实输出（见 [网关韧性](GATEWAY_RESILIENCE.md) §3）。
+
+未发布：`usage_logs.end_to_end_first_output_ms` 从入站 delivery 初始化到首次成功写出的语义输出计时，包含排队、选号和先前失败尝试，不依赖请求预算；没有语义输出时为 NULL。错误帧、`[DONE]`、纯终态、开场与心跳均不算，终态中实际携带的内容可以算。正常的 `error: null` 等空占位字段不屏蔽真实内容；空内容数组与对象不算输出。旧 `first_token_ms` 及计费送达判据不变。新列仅落库，本轮不增加接口或页面。运维结果由实际完成或拒绝信号分类：OpenAI 原生/透传 Responses 与 Chat/Messages 的已知请求/策略拒绝均为 `terminal_rejection`；已明确报告客户端断开时，即使 context 尚未取消，`client_cancel` 也不被部分输出分类覆盖。
 
 运维中的 P5/P10/P50 是筛选范围内各条有效记录速率的分位数，Avg 是这些单次速率的算术平均；不把小时分位数平均成整个窗口的分位数。它们与全站吞吐量含义不同，样本仍沿用运维后端的筛选契约；明细额外保留本地的非 Token 计费排除规则。
 
@@ -89,3 +91,7 @@ OpenAI 原始总输入含缓存明细，在 `backend/internal/service/openai_gat
 - ranxi2001/sub2api [`usageTps.ts`](https://github.com/ranxi2001/sub2api/blob/1d2ed630e292eaaac95454c1786bf3b7e5ed0828/frontend/src/utils/usageTps.ts)：明确说明推理 Token、缓冲工具输出与 TTFT 分母不匹配的问题，并使用完整耗时。本项目采用官方的正输出样本条件和统一一位小数，未引入该二开项目的最少 2 Token 条件或速度分档。
 
 前端公式集中在 `frontend/src/utils/usageMetrics.ts`；上游的 `formatUsageOutputRate` 导入路径保留为同一实现的导出，避免两套算法再次分叉。定向测试覆盖单位、TTFT 独立性、无效/媒体样本、加权汇总、开关独立性、空区间和中英消息编译。
+
+## 迁移与回退
+
+未发布迁移 283 仅追加三个可空列：`usage_logs.end_to_end_first_output_ms`、`ops_error_logs.end_to_end_first_output_ms`（BIGINT）及 `ops_error_logs.recovery_outcome`（VARCHAR(32)）。无 DEFAULT、NOT NULL、索引或回填。PostgreSQL 18 不重写存量表，但 ALTER 会短暂取得 ACCESS EXCLUSIVE 锁，应避开长事务并预留迁移窗口。回退旧版本可保留三列；重新执行迁移幂等。合并前须再核对迁移编号是否被占用。

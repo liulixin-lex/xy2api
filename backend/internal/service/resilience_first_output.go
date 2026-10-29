@@ -109,13 +109,27 @@ func (s *OpenAIGatewayService) openAIFirstOutputTimeoutFor(ctx context.Context, 
 	}
 	tier := resilience.FirstOutputTier(resilience.Current(), model, reasoningEffort)
 	// A missing or mismatched profile is cold, but has no size floor.
-	if profileMatches && !profile.Warm {
-		tier = coldFirstOutputTier(tier, profile.BodyBytes)
+	if profileMatches {
+		if profile.Warm {
+			tier = warmFirstOutputTier(tier, profile.BodyBytes)
+		} else {
+			tier = coldFirstOutputTier(tier, profile.BodyBytes)
+		}
 	}
 	if attemptStart.IsZero() {
 		attemptStart = time.Now()
 	}
 	return b.AttemptTimeout(tier, resilienceLastCandidate(ctx, accountID), attemptStart)
+}
+
+func warmFirstOutputTier(tier time.Duration, bodyBytes int) time.Duration {
+	if bodyBytes >= 512*1024 && tier < 40*time.Second {
+		return 40 * time.Second
+	}
+	if bodyBytes >= 256*1024 && tier < 30*time.Second {
+		return 30 * time.Second
+	}
+	return tier
 }
 
 func coldFirstOutputTier(tier time.Duration, bodyBytes int) time.Duration {

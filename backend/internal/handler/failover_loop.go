@@ -283,6 +283,7 @@ func (s *FailoverState) HandleFailoverError(
 // 返回 FailoverExhausted 时，调用方应返回错误响应。
 // 返回 FailoverCanceled 时，调用方应直接 return。
 func (s *FailoverState) HandleSelectionExhausted(ctx context.Context) FailoverAction {
+	recordSelectionExhausted(ctx)
 	// 客户端已断开时选号失败是 context canceled 的必然结果，
 	// 不代表账号耗尽，直接按取消终止。
 	if ctx.Err() != nil {

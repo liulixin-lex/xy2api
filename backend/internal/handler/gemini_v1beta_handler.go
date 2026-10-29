@@ -523,10 +523,12 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, sessionKey, modelName, fs.FailedAccountIDs, "", int64(0)) // Gemini 不使用会话限制
 		if err != nil {
 			if failoverClientGone(c) {
+				recordSelectionExhausted(c.Request.Context())
 				reqLog.Info("gemini.account_select_aborted_client_disconnected", zap.Error(err))
 				return
 			}
 			if len(fs.FailedAccountIDs) == 0 {
+				recordSelectionExhausted(c.Request.Context())
 				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, modelName, modelName, service.PlatformGemini)
 				if !cls.ModelNotFound {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
@@ -677,6 +679,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		} else {
 			result, err = h.geminiCompatService.ForwardNative(requestCtx, c, account, modelName, action, stream, body)
 		}
+		recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, result != nil)
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
 		}
@@ -786,6 +789,7 @@ func parseGeminiModelAction(rest string) (model string, action string, err error
 }
 
 func (h *GatewayHandler) handleGeminiFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError) {
+	recordExhaustedRecovery(c, failoverErr)
 	if failoverErr == nil {
 		googleError(c, http.StatusBadGateway, "Upstream request failed")
 		return

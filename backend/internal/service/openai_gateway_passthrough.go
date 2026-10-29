@@ -591,6 +591,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	}
 
 	forwardResult := &OpenAIForwardResult{
+		PartialFailure:                partialErr != nil,
 		RequestID:                     resp.Header.Get("x-request-id"),
 		UpstreamHeaders:               resp.Header,
 		ResponseID:                    responseID,
@@ -1066,13 +1067,18 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	// context-window 超限是确定性请求失败（shouldFailoverOpenAIPassthroughResponse
 	// 已保证不切号），其文案对客户端可操作（如触发自动压缩）；在净化信封内保留
 	// 脱敏后的上游消息，而不是抹成通用文案。
-	if isOpenAIContextWindowError(upstreamMsg, body) && upstreamMsg != "" {
+	contextWindow := isOpenAIContextWindowError(upstreamMsg, body)
+	if contextWindow && upstreamMsg != "" {
 		writeOpenAIPassthroughErrorEnvelope(c, resp.StatusCode, resp.Header, upstreamMsg)
 	} else {
 		writeSanitizedOpenAIPassthroughError(c, resp.StatusCode, resp.Header)
 	}
 
-	return fmt.Errorf("upstream error: %d (client response sanitized)", resp.StatusCode)
+	err := fmt.Errorf("upstream error: %d (client response sanitized)", resp.StatusCode)
+	if cyberHit || contextWindow || (isOpenAIDeterministicClientError(resp.StatusCode) && classifyUpstreamHTTP(resp.StatusCode, resp.Header, body, upstreamMsg).Category == resilience.CategoryClientError) {
+		return &OpenAIRequestRejectionError{err}
+	}
+	return err
 }
 
 func isOpenAIPassthroughAllowedRequestHeader(lowerKey string, allowTimeoutHeaders bool) bool {
@@ -2453,9 +2459,8 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		// Terminal 事件（response.completed / [DONE] 等）随空行完整刷出后不再等上游
 		// EOF：上游在 keep-alive/HTTP2 复用连接上可能拖延关闭连接（观测到 8~46s 不等），
 		// 空等期间只能靠 keepalive 维持，白白拉长尾延迟。usage 已在 terminal 事件中解析。
-		// Codex bare error 序列（error 后可能跟 response.failed 或翻盘的 completed）
-		// 必须继续读取，不适用提前结束。
-		if (sawDone || sawTerminalEvent) && line == "" && (!codexFailureTerminal || !sawBareError) {
+		// Codex bare error 仅在尚未收全权威 failed 或 completed 时继续等待。
+		if (sawDone || sawTerminalEvent) && line == "" && (!codexFailureTerminal || !sawBareError || sawResponseFailed) {
 			return passthroughLineBreak
 		}
 		return passthroughLineContinue

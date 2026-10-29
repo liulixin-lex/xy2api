@@ -279,7 +279,16 @@ func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 	if planned {
 		reason = PlannedFirstOutputTimeoutReason
 	}
+	var warm *bool
+	bodyBytes := 0
+	if profile.AccountID == account.ID && !profile.AttemptStart.IsZero() {
+		warmValue := profile.Warm
+		warm = &warmValue
+		bodyBytes = profile.BodyBytes
+	}
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		Warm: warm, BodyBytes: bodyBytes, Effort: reasoningEffort,
+		AttemptElapsedMs: elapsed.Milliseconds(), TimeoutMs: timeout.Milliseconds(),
 		ProxyID:   proxyID,
 		ProxyName: proxyName,
 		Platform:  account.Platform, AccountID: account.ID, AccountName: account.Name,

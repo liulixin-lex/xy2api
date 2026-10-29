@@ -92,6 +92,8 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | 上游开场后、正文前失败（0.4.4） | 可重试的失败（过载、服务忙、断流、读错）换号，客户端只看到成功那次尝试的开场：Responses 只有一个 `response.created`（新账号的 id），Chat 只有一个 role 分块，Messages 只有一个 `message_start`。兼容转换推迟开场期间按流内心跳间隔写注释行 `:`（与原生 Responses 一致），心跳不算输出、不妨碍换号；心跳已提交 200 后再耗尽时，以协议终止帧结束。`response.incomplete`、内容拒绝、只有 usage 的空回答照常返回，不重放 |
 | 非流式请求被上游以“只接受流式”拒绝（0.4.4） | 例如 “This group only accepts streaming requests”：本请求换号，不计账号失败、不冷却；有效期 `capability.learn_ttl_seconds` 内，会因此失败的非流式请求暂不选该账号（范围见 §7）。`failure.decision_v2` 关闭时只学习，本请求照旧返回 400；本请求的失败尝试全部是这个理由时返回 503（不是 400），应答与上面“无可用账号”中仅流式一种相同；混有其他失败原因时按普通的耗尽处理。无号的负缓存按协议与流模式分开，能力阻断不计入快速失败，流式请求不受影响 |
 | Gateway 入站经 Anthropic 上游的 Responses 与 Chat（0.4.5） | `response.created` 与 Chat 的 role 分块推迟到第一个内容或终态（`stream.prelude_staging`）。此前上游的可重试失败（`overloaded_error` 等流内错误、断流、读错、停滞）换号，客户端只看到成功那次尝试的开场；首事件截止（Anthropic 档位）延长到第一个内容。暂存期间上游的 `ping` 与注释行、以及按流内心跳间隔的保活，立即写成注释行 `:`（Chat 的上游 `ping` 仍是 `: ping`），不算输出。不可重试的流内错误（如请求过长、内容拒绝）不重放，先写开场再写终止帧（`stream.strict_terminal` 关闭时按 0.4.4 丢弃该事件，流照常以完成结束）。`stream.strict_terminal`：上游流内错误不再被丢弃；输出后断流、读错或停滞时，Responses 以 `response.failed` 结束（此前什么都没写时前面补 `response.created`），Chat 以 `data: {"error":…}` 后跟 `[DONE]` 结束，不再合成 `response.completed` 或 `finish_reason`；`message_delta` 已给出 `stop_reason`、只缺 `message_stop` 的流视同完成。合成的 `response.failed` 按 `RetryAdviceEligible` 决定是否带重试时间。客户端在第一个内容前取消：关闭上游，不换号、不计费；恰在第一次写出的同时取消、暂存期已为取消关闭上游时，随后的读错按客户端断开处理（按已得用量计费，不写终止帧、不记流错误、不计账号失败）；输出后断开：读完上游、按用量计费。输出后异常结束（流内错误、缺终态、读错、停滞，含客户端断开后上游再出错）按已读到的用量计费一次（`message_start` 的输入与缓存 Token 等），与原生 Messages 相同。两个开关都关闭时回到 0.4.4 |
+| OpenAI Responses 权威失败终态（后续版本，未发布） | 原生同步、异步与透传流收到 bare `error` 时继续等待；后续完整的 `response.failed` 写出且用量解析完毕，立即结束流，不再等待上游 EOF 或停滞定时器。仅有 bare 错误后 EOF 时仍只合成一个 failed；原生流后续收到 completed 时仍以成功终态纠正，确定性错误码保持原样 |
+| OpenAI Responses 原生部分用量（后续版本，未发布） | 实际写出语义字节后遇到 `response.failed`、读错或缺终态时，保留上游已报告的部分用量，按现有规则只入账一次；客户端输出后离开仍继续读取用量。没有真实用量时不按字符估算 Token。零字节失败写或只写出开场不返回部分结果；首输出前换号仍不返回部分结果；部分记账通过明确的不完整标记阻止成功回报和 403 计数复位，不转为成功，不清除 breaker 或余额暂停，不建立成功绑定，也不追补历史账单 |
 | OpenAI Responses 透传（0.4.5，`stream.strict_terminal`） | 与原生路径相同的首输出截止（按推理档位，同时约束等待响应头）：截止前只有开场事件与心跳时换号（`first_output_timeout`）。停滞检测：输出前由截止接管，没有截止时换号；输出后以 `response.failed`（`stream_timeout`）结束。暂存期按流内心跳间隔写注释心跳 `:`，上游注释行立即透传，都不算输出；心跳写失败按客户端离开处理（不换号，截止到期也不换号，内容随后到来时读完用量）。客户端在第一个输出前取消时关闭上游，输出后断开则读完上游。关闭该开关时回到 0.4.4（不设截止与停滞检测，心跳由独立的保活协程写出）。不论开关：输出后断流（`response.failed`、缺终态、读错、停滞）按已读到的用量计费一次（以前不记），第一个输出前取消不计费 |
 | 心跳帧 | Responses / Chat 为 SSE 注释行 `:`；Anthropic 为 `event: ping`，0.4.12 起原生 Anthropic 与 API Key 直通在开场暂存期间写注释行 `: ping`（§4.9）。0.4.4 起排队等待并发槽位或用户消息队列时的心跳也按入站协议选择（以前 Responses 与 Chat 也会收到 Claude 风格的 ping） |
 | 经 CDN 的请求遇到 502/504 | 改为 503，正文不变，并带 `X-XY-Upstream-Status: 502/504`。Cloudflare 会把源站的 502/504 换成自己的纯文本页面，丢掉 JSON 错误、`Retry-After` 和请求 ID；503 原样透传。直连请求保持原状态码。运维错误记录仍记原始的 502/504 |
@@ -184,7 +186,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 
 **热与冷尝试**
 
-- 热尝试：会话粘性命中，选中的就是该会话的绑定账号，不是容量溢出时的临时借用，且本请求此前没有上游失败。截止为 `budget.first_output_timeout_seconds` 的档位（default 20 / high 25 / xhigh 30 / max 30 秒）。
+- 热尝试：会话粘性命中，选中的就是该会话的绑定账号，不是容量溢出时的临时借用，且本请求此前没有上游失败。截止取 `budget.first_output_timeout_seconds` 的档位（default 20 / high 25 / xhigh 30 / max 30 秒，模型自定义档位同样适用）与输入大小下限中较大者：请求体 ≥256 KiB 至少 30 秒，≥512 KiB 至少 40 秒。该下限是初值，仍受剩余预算与最后候选规则约束；后续按首字超时尝试落库的真实 warm、body_bytes 与 effort 校准（§5）。
 - 冷尝试：其余尝试，包括换号重试与同号重试、新会话首轮、会话迁移后首轮、不带会话标识的请求。截止取档位与请求体大小下限中较大者：请求体 ≥128 KiB 时至少 45 秒，≥256 KiB 时至少 75 秒。用 `budget.model_overrides` 设置了模型档位时，同样取较大者。
 - 非最后候选的截止不短于本请求到这次尝试开始时已耗费的时间，再受剩余预算约束：上游都慢时，被截断的尝试逐次放宽；快速失败不拉长下一次尝试。
 - 最后候选（末位兜底选中的账号、最后一次允许的尝试、组内唯一能服务该模型的账号）不按档位截断，只受剩余预算约束（缺省 240 秒）。判断“唯一”时，其他账号要通过本请求完整的选号资格（能力与 transport、隐私、利润门、母账号健康），HTTP 续链（`previous_response_id`）只算 OpenAI API Key 账号；软罚账号算替代，硬罚不算。缺能力的名义候选不会让唯一能服务的账号按档位被截断。
@@ -298,7 +300,8 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 **替补账号与会话绑定**
 
 - Messages 请求成功后刷新会话绑定时，用不随客户端断开而取消、3 秒限时的上下文。以前客户端在响应写完后立即断开，绑定可能写不进去，下一轮换到别的账号。
-- OpenAI 原版选号的负载感知路径（`gateway.scheduling.load_batch_enabled`，缺省开启）：会话的绑定账号不可用，或本请求已经换过号时，同一优先级、负载率不超过该优先级最低负载率加 20 个百分点的候选，先比完整的缓存证据，再按“分组 + 会话”的稳定哈希（HRW）排序，同一会话的替补稳定落在同一个账号上；超出这个负载窗口的候选位置不变。排在第一的账号没有空闲并发时依次试下一个，全部满时照旧排队或走末位兜底。费率排序、compact 分层、判慢期置后与派发前的复核不变；首次选号、不带会话的请求与份额分组不变。依据是生产 24 小时的缓存命中：换到本会话 60 分钟内用过的账号 64%，换到新账号 24%。哈希不知道会话用过哪些账号，只减少随机漂移，不保证命中率。
+- OpenAI 原版选号的负载感知路径（`gateway.scheduling.load_batch_enabled`，缺省开启）：会话的绑定账号不可用，或本请求已经换过号时，同一优先级、负载率不超过该优先级最低负载率加 20 个百分点、且费率与 compact 层级相同的候选，先按本会话近期成功时间降序，再比完整缓存证据、稳定哈希（HRW）和账号 ID。超出负载窗口的候选位置不变；费率排序、compact 分层、判慢期置后、模型硬门与排除集、派发前复核和抢槽仍优先。第一名无空位时依次试下一个，全部满时照旧排队或走末位兜底；健康 owner、无会话、首次选号及份额分组不变，续链与 WebSocket 规则不变。
+- 近期成功只登记完整完成且已送达语义输出的 HTTP Responses、Chat Completions 与 Messages 请求；失败、部分用量、取消、开场和空终态不登记。进程内 LRU 固定最多 16,384 个键，每键最多 3 个账号，只保存账号 ID 和成功时间，每个账号独立按 60 分钟过期，重启丢失。键为实际分组、稳定会话与实际出站规范模型；写入使用与成功调度回报一致的已解析出站模型（依次取结果模型、请求中的实际出站记录、既有账号解析），透传结果模型为空时仍保留原用量 NULL 契约，查询时按本次端点与每个候选的实际转发规则解析请求模型：Responses 沿用透传/compact 规则（普通文本即使最低账号能力为 Chat 也不改变该协议），Chat 与 Messages 即使账号开启透传也执行普通模型映射，已规范化的模型不再次映射。模型映射改变后旧历史自然不命中。不进 Redis，不改粘性绑定格式，不新增开关；近期成功只影响替补排序，不改变热/冷判定，替补尝试仍为冷尝试。
 
 **开关**：没有新增开关。余额暂停与阶梯随总开关与 `balance.enabled`（关闭后已写入的暂停照常到期，“恢复状态”照常清除）；硬类不同号重试随总开关；开场暂存随 `stream.prelude_staging`，`codex.response.metadata` 随 `stream.native_prelude_whitelist`；容量类改写、Codex 上限与 Gemini 耗尽改 503 随 `errors`。按分类换号、模型不可用的 30 分钟不可用、硬类耗尽后不清空排除集重选，以及其余几项属于路由、协议与记账修正，不受开关控制，见 §6。
 
@@ -320,6 +323,11 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
   - 账号列表与详情的 `capability_learned`（0.4.4）：`[{protocol, mode: "stream_only", expires_at}]`，没有记录时为空数组；`DELETE /api/v1/admin/accounts/:id/capability-learning` 清除。
 
 ### 5.2 计数项
+
+未发布观测：`usage_logs` 与既有 `ops_error_logs` 行新增可空 `end_to_end_first_output_ms`，从入站 delivery 初始化到首个成功送达的语义输出，包含排队和所有先前尝试；没有输出为 NULL。开场、心跳、真实错误、`[DONE]`、纯终态与空内容数组/对象不算；正常 `error: null` 等占位字段不排除真实内容，旧首字与计费判据不变。运维行另记 `recovery_outcome`，由 handler 按实际结果分类：`completed`、`post_output_failure`、`client_cancel`、`budget_exhausted`、`selection_exhausted`、`terminal_rejection`、`upstream_failure`。取消优先于之前的超时/换号；下游写失败已明确报告断开时，即使请求 context 尚未取消也保留 `client_cancel`。OpenAI 原生/透传 Responses 与 Chat/Messages 中已确定的请求或策略拒绝均记 `terminal_rejection`，由明确的拒绝信号传递，不根据最终 HTTP 状态或错误字符串推断；部分输出后上游失败仍是失败。只附在本来产生的行上，正常成功不新增运维行，不增加接口或前端展示。
+
+首字超时的现有失败尝试 JSON 另带 `warm`（缺失/false/true）、`body_bytes`、`effort`、`attempt_elapsed_ms`、`timeout_ms`，沿既有队列脱敏裁剪，不保存正文、不新增成功尝试事件。这些维度描述失败的那次尝试，不能套到随后成功的尝试上。迁移 283 的锁与回退要求见 [用量指标](USAGE_METRICS.md#迁移与回退)。
+
 
 | 计数 | 含义 |
 |---|---|
@@ -438,7 +446,7 @@ OpenAI 判慢降序与会话迁移的事件（0.4.9，见 §4.5）不带 `resili
 - 0.4.4 的可重放前缀与明确终止只覆盖 OpenAI Responses（含透传的开场判定）、Chat Completions 与 Messages 经 OpenAI 兼容转换、raw Chat 透传。以下路径仍按 0.4.3 的开场与终止行为：Gemini 原生与兼容转换、Bedrock、CN Anthropic 原生、Antigravity（T2）。0.4.5 补上 Gateway 入站经 Anthropic 上游的 Responses 与 Chat 反向转换，以及 OpenAI Responses 透传的首输出截止与停滞检测。0.4.12 补上原生 Anthropic 与 API Key 直通的开场暂存（§4.9）。
 - 0.4.12 起原生 Anthropic 与 API Key 直通在开场暂存期失败、已换号的尝试不向用户计费，也不产生该尝试的用量记录；上游可能已对这次尝试的输入计费，这部分成本由网关承担。以前原生 Anthropic 在 `message_start` 之后失败时，按它带的输入用量向用户计费并把错误返回客户端。
 - 余额暂停的升档与成功复位（§4.9）需要每次尝试的开始时间，Responses WebSocket 与 WS→HTTP 桥接还没有记录：这些路径上的余额不足照常暂停，但不升档，成功也不复位。HTTP 文本与图片入口已覆盖。
-- 替补账号的稳定哈希（§4.9）只在候选、负载窗口、费率与 compact 分层、缓存证据与判慢期都不变时保持同一个替补；负载波动跨过 20 个百分点的边界时，替补会换。
+- 替补账号的稳定哈希（§4.9）只在候选、负载窗口、费率与 compact 分层、近期成功记录、缓存证据与判慢期都不变时保持同一个替补；负载波动跨过 20 个百分点的边界时，替补会换。
 - 兼容转换推迟开场期间的注释心跳会提交 200，此后的失败只能以带内终止帧告知客户端（与原生 Responses 相同）。
 - 仅流式学习只认表中确定的结构码与文案（如 “only accepts streaming requests”、“stream must be true”）；其他措辞的同类拒绝仍按客户端错误返回。只覆盖 OpenAI 入站的 Responses 与 Chat 普通文本请求，以及 OpenAI、Grok 平台的账号；compact、图片、WebSocket、Messages 经 OpenAI 转换，以及 Gemini、CN、Bedrock 不学习、不过滤。只在上游协议与入站相同、上游流模式跟随客户端的路径上过滤；跨协议转换（如 Chat 转 Responses 上游）、按模型路由的路径与路由无法确定的 Grok OAuth Chat 不过滤。错误的 `param` 指向 `stream` 以外的参数，或请求体里本来就有这句话（例如写在提示词里）时不学习；`"param": null` 或空值不影响学习。学习结果存在账号 `extra`（`capability_learned_responses`、`capability_learned_chat`），绑定账号的上游配置：改了上游配置的账号不受旧记录影响；复制、创建、导入与导出账号都不带学习结果。
 - 0.4.4 容量判据收紧后，“Codex is at capacity”与非 503 上的 “servers are currently overloaded” 不再算容量降载，会让账号进入软冷却并计入会话失败；Grok 重试耗尽的原始 429 不再转成无号 503，客户端看到 429。

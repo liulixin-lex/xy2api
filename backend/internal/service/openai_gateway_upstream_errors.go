@@ -18,6 +18,12 @@ import (
 	"go.uber.org/zap"
 )
 
+// OpenAIRequestRejectionError marks a known request or policy rejection without
+// changing its client response or making it eligible for account failover.
+type OpenAIRequestRejectionError struct{ error }
+
+func (e *OpenAIRequestRejectionError) Unwrap() error { return e.error }
+
 func logOpenAIInstructionsRequiredDebug(
 	ctx context.Context,
 	c *gin.Context,
@@ -552,9 +558,9 @@ func (s *OpenAIGatewayService) handleErrorResponseCore(
 		}
 		c.Data(resp.StatusCode, contentType, body)
 		if cyberMsg == "" {
-			return nil, fmt.Errorf("openai cyber_policy: %d", resp.StatusCode)
+			return nil, &OpenAIRequestRejectionError{fmt.Errorf("openai cyber_policy: %d", resp.StatusCode)}
 		}
-		return nil, fmt.Errorf("openai cyber_policy: %s", cyberMsg)
+		return nil, &OpenAIRequestRejectionError{fmt.Errorf("openai cyber_policy: %s", cyberMsg)}
 	}
 	if account != nil && account.Platform == PlatformGrok && isGrokContentPolicyRejection(resp.StatusCode, body) {
 		clientMsg := grokContentPolicyClientMessage(body)
@@ -567,7 +573,7 @@ func (s *OpenAIGatewayService) handleErrorResponseCore(
 				"message": clientMsg,
 			},
 		})
-		return nil, fmt.Errorf("grok content policy rejection: %s", clientMsg)
+		return nil, &OpenAIRequestRejectionError{fmt.Errorf("grok content policy rejection: %s", clientMsg)}
 	}
 
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(body))
@@ -726,9 +732,9 @@ func (s *OpenAIGatewayService) handleErrorResponseCore(
 		clientMessage := SanitizeUpstreamErrorMessage(upstreamMsg)
 		writeOpenAIUpstreamClientError(c, resp.StatusCode, body, clientMessage)
 		if upstreamMsg == "" {
-			return nil, fmt.Errorf("upstream error: %d", resp.StatusCode)
+			return nil, &OpenAIRequestRejectionError{fmt.Errorf("upstream error: %d", resp.StatusCode)}
 		}
-		return nil, fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, upstreamMsg)
+		return nil, &OpenAIRequestRejectionError{fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, upstreamMsg)}
 	}
 
 	// Return appropriate error response
@@ -811,16 +817,16 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 		}
 		writeError(c, resp.StatusCode, "invalid_request_error", clientMsg)
 		if cyberMsg == "" {
-			return nil, fmt.Errorf("openai cyber_policy: %d", resp.StatusCode)
+			return nil, &OpenAIRequestRejectionError{fmt.Errorf("openai cyber_policy: %d", resp.StatusCode)}
 		}
-		return nil, fmt.Errorf("openai cyber_policy: %s", cyberMsg)
+		return nil, &OpenAIRequestRejectionError{fmt.Errorf("openai cyber_policy: %s", cyberMsg)}
 	}
 	if account != nil && account.Platform == PlatformGrok && isGrokContentPolicyRejection(resp.StatusCode, body) {
 		clientMsg := grokContentPolicyClientMessage(body)
 		setOpsUpstreamError(c, resp.StatusCode, clientMsg, truncateString(string(body), 2048))
 		MarkResponseCommitted(c)
 		writeError(c, http.StatusForbidden, "invalid_request_error", clientMsg)
-		return nil, fmt.Errorf("grok content policy rejection: %s", clientMsg)
+		return nil, &OpenAIRequestRejectionError{fmt.Errorf("grok content policy rejection: %s", clientMsg)}
 	}
 
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(body))
@@ -926,5 +932,9 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 	}
 
 	writeError(c, resp.StatusCode, errType, upstreamMsg)
-	return nil, fmt.Errorf("upstream error: %d %s", resp.StatusCode, upstreamMsg)
+	err := fmt.Errorf("upstream error: %d %s", resp.StatusCode, upstreamMsg)
+	if isOpenAIDeterministicClientError(resp.StatusCode) && classifyUpstreamHTTP(resp.StatusCode, resp.Header, body, upstreamMsg).Category == resilience.CategoryClientError {
+		return nil, &OpenAIRequestRejectionError{err}
+	}
+	return nil, err
 }

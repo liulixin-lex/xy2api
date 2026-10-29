@@ -188,7 +188,7 @@ func TestFirstOutputWarmToColdUsesSameAttemptStartAndColdFloor(t *testing.T) {
 	st.SetAttemptProfile(resilience.AttemptProfile{AccountID: 8, AttemptStart: start, Warm: false, BodyBytes: 256 * 1024})
 	cold := svc.openAIFirstOutputTimeoutFor(ctx, 8, "gpt-5.5", "", start)
 	coldAfterHeaders := svc.openAIFirstOutputTimeoutFor(ctx, 8, "gpt-5.5", "", start)
-	require.Equal(t, 20*time.Second, warm)
+	require.Equal(t, 30*time.Second, warm)
 	require.Equal(t, 75*time.Second, cold)
 	require.Equal(t, start.Add(warm), start.Add(warmAfterHeaders), "headers do not renew the warm deadline")
 	require.Equal(t, start.Add(cold), start.Add(coldAfterHeaders), "headers do not renew the cold deadline")

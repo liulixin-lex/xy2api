@@ -201,7 +201,17 @@
     "xy-resilience-coverage",
     "xy-error-recovery-routing",
     "xy-upstream-balance",
-    "xy-admin-operator-scope"
+    "xy-admin-operator-scope",
+    "xy-responses-partial-usage",
+    "xy-responses-authoritative-failed-close",
+    "xy-recovery-observability",
+    "xy-responses-partial-success-guard",
+    "xy-openai-recent-session-success",
+    "xy-openai-warm-input-floor",
+    "xy-recovery-observability-precision",
+    "xy-openai-recent-session-endpoint-model",
+    "xy-recovery-rejection-endpoints",
+    "xy-openai-recent-session-request-protocol"
   ],
   "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/92"
 }

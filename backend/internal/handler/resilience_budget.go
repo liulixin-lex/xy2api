@@ -46,6 +46,7 @@ func resilienceAttemptFailed(ctx context.Context, accountID int64, failoverErr *
 		resilienceReportAttemptFailure(ctx, accountID, failoverErr)
 	}
 	if resilienceContentRejected(failoverErr) {
+		resilience.StateFrom(ctx).SetRecoveryOutcome("terminal_rejection")
 		logger.FromContext(ctx).Info("resilience.content_policy_no_failover",
 			zap.Int64("account_id", accountID),
 			zap.Int("upstream_status", failoverErr.StatusCode),
@@ -69,6 +70,7 @@ func resilienceAttemptFailed(ctx context.Context, accountID int64, failoverErr *
 	if failoverErr != nil {
 		fields = append(fields, zap.Int("upstream_status", failoverErr.StatusCode))
 	}
+	resilience.StateFrom(ctx).SetRecoveryOutcome("budget_exhausted")
 	resilience.Count(resilience.MetricBudgetExhausted, resilience.StateFrom(ctx).GroupID(), accountID, b.Exhausted())
 	logger.FromContext(ctx).Warn("resilience.budget_exhausted", fields...)
 	return true

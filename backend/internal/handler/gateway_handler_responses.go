@@ -196,10 +196,12 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(requestCtx, apiKey.GroupID, sessionHash, reqModel, fs.FailedAccountIDs, "", int64(0))
 		if err != nil {
 			if failoverClientGone(c) {
+				recordSelectionExhausted(c.Request.Context())
 				reqLog.Info("gateway.responses.account_select_aborted_client_disconnected", zap.Error(err))
 				return
 			}
 			if len(fs.FailedAccountIDs) == 0 {
+				recordSelectionExhausted(c.Request.Context())
 				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, effectiveAPIKeyPlatform(c, apiKey))
 				cls = classifySelectionFailureError(err, cls)
 				if !cls.ModelNotFound {
@@ -303,6 +305,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			result, err = h.gatewayService.ForwardAsResponses(requestCtx, c, account, forwardBody, parsedReq)
 		}
 
+		recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, result != nil)
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
 		}

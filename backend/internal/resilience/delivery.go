@@ -34,13 +34,15 @@ func SetUndeliveredAbuseCheck(fn func(apiKeyID int64) bool) {
 
 // delivery is the client-delivery part of RequestState.
 type delivery struct {
-	mu       sync.Mutex
-	client   context.Context
-	started  time.Time
-	apiKeyID int64
-	probe    func() int64
-	stage    string
-	finished bool
+	mu              sync.Mutex
+	client          context.Context
+	started         time.Time
+	apiKeyID        int64
+	probe           func() int64
+	stage           string
+	finished        bool
+	semanticOutput  time.Time
+	recoveryOutcome string
 
 	once         sync.Once
 	disconnected bool
@@ -313,4 +315,54 @@ func UpstreamContextOnDisconnect(client, detached context.Context) context.Conte
 		time.AfterFunc(drain, cancel)
 	})
 	return ctx
+}
+
+// NoteSemanticOutput records the first usable output delivered to the client.
+// It is independent of the billing delivery probe and the attempt budget.
+func (s *RequestState) NoteSemanticOutput(at time.Time) {
+	if s == nil {
+		return
+	}
+	s.d.mu.Lock()
+	defer s.d.mu.Unlock()
+	if s.d.semanticOutput.IsZero() {
+		s.d.semanticOutput = at
+	}
+}
+
+// EndToEndFirstOutputMs includes queueing and all preceding attempts.
+func (s *RequestState) EndToEndFirstOutputMs() *int64 {
+	if s == nil {
+		return nil
+	}
+	s.d.mu.Lock()
+	defer s.d.mu.Unlock()
+	if s.d.started.IsZero() || s.d.semanticOutput.IsZero() {
+		return nil
+	}
+	ms := max(0, s.d.semanticOutput.Sub(s.d.started).Milliseconds())
+	return &ms
+}
+
+// SetRecoveryOutcome is called by handlers at their completion/error boundaries.
+func (s *RequestState) SetRecoveryOutcome(outcome string) {
+	if s == nil {
+		return
+	}
+	s.d.mu.Lock()
+	s.d.recoveryOutcome = outcome
+	s.d.mu.Unlock()
+}
+
+func (s *RequestState) RecoveryOutcome() *string {
+	if s == nil {
+		return nil
+	}
+	s.d.mu.Lock()
+	defer s.d.mu.Unlock()
+	if s.d.recoveryOutcome == "" {
+		return nil
+	}
+	outcome := s.d.recoveryOutcome
+	return &outcome
 }

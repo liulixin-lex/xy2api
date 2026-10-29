@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"log"
 	"net"
 	"net/http"
@@ -1681,6 +1682,8 @@ func applyOpsLatencyFieldsFromContext(c *gin.Context, entry *service.OpsInsertEr
 	entry.UpstreamLatencyMs = getContextLatencyMs(c, service.OpsUpstreamLatencyMsKey)
 	entry.ResponseLatencyMs = getContextLatencyMs(c, service.OpsResponseLatencyMsKey)
 	entry.TimeToFirstTokenMs = getContextLatencyMs(c, service.OpsTimeToFirstTokenMsKey)
+	entry.EndToEndFirstOutputMs = resilience.StateFrom(c.Request.Context()).EndToEndFirstOutputMs()
+	entry.RecoveryOutcome = recoveryOutcome(c)
 	applyResilienceDisconnectFields(c, entry)
 }
 

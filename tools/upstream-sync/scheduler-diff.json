@@ -657,12 +657,10 @@
           "(stickyAccountID > 0 || len(excludedIDs) > 0) &&",
           "!s.shareScheduling.shareSchedulingActive(derefGroupID(groupID))",
           "if replacementSession {",
-          "s.preferOpenAIReplacementSession(ctx, available, groupID, sessionHash, requestedModel, rateOrder, requireCompact)",
           "} else if !rateOrder.enabled && !stickySpillover && stickyAccountID == 0 {",
           "// preferOpenAIReplacementSession keeps a stable fallback order within the",
           "// lowest-load band of each priority. Rate and compact cohorts remain separate;",
           "// the caller still applies their ordering and the final latency-hold partition.",
-          "func (s *OpenAIGatewayService) preferOpenAIReplacementSession(ctx context.Context, available []accountWithLoad, groupID *int64, session, model string, rateOrder openAILegacyUpstreamRateOrder, compact bool) {",
           "type cohortKey struct {",
           "priority int",
           "rate     float64",
@@ -719,6 +717,36 @@
           "binary.LittleEndian.PutUint64(buf[:], uint64(accountID))",
           "_, _ = digest.Write(buf[:])",
           "return digest.Sum64() >> 11"
+        ]
+      },
+      {
+        "block": "openai-recent-session-success",
+        "note": "N4: recent delivered successful accounts precede cache evidence inside the existing E2 priority/load/rate/compact cohorts; candidate gates, hold partition, fresh checks and slot acquisition remain unchanged.",
+        "removed": [],
+        "added": [
+          "}",
+          "recent := make(map[int64]time.Time, len(indices))",
+          "now := time.Now()",
+          "recent[item.account.ID] = s.recentSessionSuccess().lastSuccess(openAIRecentSessionKey{derefGroupID(groupID), session, outboundModel}, item.account.ID, now)",
+          "if !recent[a].Equal(recent[b]) {",
+          "return recent[a].After(recent[b])"
+        ]
+      },
+      {
+        "block": "openai-recent-session-endpoint-model",
+        "note": "N4-1/R1: distinguish the parsed inbound Responses protocol from minimum account capability; text Responses retains Chat fallback eligibility and Responses model resolution. Chat/Messages keep ordinary mapping.",
+        "removed": [],
+        "added": [
+          "}",
+          "s.preferOpenAIReplacementSession(ctx, available, groupID, sessionHash, requestedModel, rateOrder, requireCompact, requiredCapability)",
+          "func (s *OpenAIGatewayService) preferOpenAIReplacementSession(ctx context.Context, available []accountWithLoad, groupID *int64, session, model string, rateOrder openAILegacyUpstreamRateOrder, compact bool, capability OpenAIEndpointCapability) {",
+          "// Text Responses also accepts Chat capability, but keeps Responses model rules.",
+          "if capability == OpenAIEndpointCapabilityChatCompletions && protocol != resilience.CapabilityProtocolResponses && !compact {",
+          "outboundModel = normalizeOpenAIModelForUpstream(item.account, resolveOpenAIForwardModel(item.account, model, \"\"))",
+          "var outboundModel string",
+          "} else {",
+          "outboundModel = resolveOpenAIAccountUpstreamModelForRequest(item.account, model, compact)",
+          "protocol, _, _ := resilience.CapabilityRequestFrom(ctx)"
         ]
       }
     ],

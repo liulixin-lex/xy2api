@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -34,6 +35,27 @@ type openaiStreamingResult struct {
 	imageCount       int
 	imageOutputSizes []string
 	searchCount      int
+	clientSawOutput  bool
+}
+
+// openAISemanticWriteTracker observes actual downstream writes, including a
+// partial write followed by an error. The first semantic data line owns a
+// range in the queued stream; opening and terminal frames never own it.
+type openAISemanticWriteTracker struct {
+	io.Writer
+	written       int64
+	semanticStart int64
+	semanticEnd   int64
+	sawOutput     bool
+}
+
+func (w *openAISemanticWriteTracker) Write(p []byte) (int, error) {
+	n, err := w.Writer.Write(p)
+	if n > 0 && w.semanticEnd > w.semanticStart && w.written < w.semanticEnd && w.written+int64(n) > w.semanticStart {
+		w.sawOutput = true
+	}
+	w.written += int64(n)
+	return n, err
 }
 
 type openaiNonStreamingResult struct {
@@ -125,7 +147,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	var firstTokenMs *int
 	ttftMode := s.openAITTFTMode(ctx)
 	firstOutputProgressObserved := false
-	bufferedWriter := bufio.NewWriterSize(w, 4*1024)
+	delivery := &openAISemanticWriteTracker{Writer: w}
+	bufferedWriter := bufio.NewWriterSize(delivery, 4*1024)
+	var queuedBytes int64
 	var firstOutputStage *openAIFirstOutputStage
 	if stageFirstOutput {
 		firstOutputStage = newDefaultOpenAIFirstOutputStage()
@@ -135,7 +159,8 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 		}()
 	}
-	writePendingString := func(value string) (int, error) {
+	writePendingString := func(value string) (n int, err error) {
+		defer func() { queuedBytes += int64(n) }()
 		if firstOutputStage != nil && !firstOutputStage.closed {
 			return firstOutputStage.WriteString(value)
 		}
@@ -149,7 +174,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	}
 	flushBuffered := func() error {
 		if firstOutputStage != nil && !firstOutputStage.closed {
-			if err := firstOutputStage.CommitTo(w); err != nil {
+			if err := firstOutputStage.CommitTo(delivery); err != nil {
 				return err
 			}
 		} else {
@@ -369,6 +394,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			imageCount:       imageCounter.Count(),
 			imageOutputSizes: imageCounter.Sizes(),
 			searchCount:      searchCounter,
+			clientSawOutput:  delivery.sawOutput,
 		}
 	}
 	flushPending := func(disconnectMessage string) {
@@ -734,6 +760,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 
 			// 写入客户端（客户端断开后继续 drain 上游）
 			if !clientDisconnected && !failureDelivered && !suppressCurrentEvent {
+				if delivery.semanticEnd == 0 && startsClientOutput && !openAIStreamEventTypeIsTerminal(eventType) {
+					delivery.semanticStart = queuedBytes
+					delivery.semanticEnd = queuedBytes + int64(len(line))
+				}
 				shouldFlush := queueDrained && (clientOutputStarted || startsClientOutput)
 				if firstTokenMs == nil && startsVisibleOutput {
 					// 保证首个 token 事件尽快出站，避免影响 TTFT。
@@ -844,9 +874,8 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				return resultWithUsage(), streamEarlyErr
 			}
 			// Terminal 事件完整写出后直接结束，不等上游 EOF（见下方异步循环同款说明）。
-			// Codex bare error 序列（error 后可能跟 response.failed 或翻盘的 completed）
-			// 必须继续读取，不适用提前结束。
-			if sawTerminalEvent && !eventInProgress && (!codexFailureTerminal || !sawBareError) {
+			// Codex bare error 仅在尚未收全权威 failed 或 completed 时继续等待。
+			if sawTerminalEvent && !eventInProgress && (!codexFailureTerminal || !sawBareError || sawResponseFailed) {
 				return finalizeStream()
 			}
 		}
@@ -931,9 +960,8 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			// Terminal 事件（response.completed 等）已完整写出后不再等上游 EOF：
 			// 上游在 keep-alive/HTTP2 复用连接上可能拖延关闭连接，空等期间只能
 			// 靠 keepalive 维持，白白拉长尾延迟。usage 已在 terminal 事件中解析。
-			// Codex bare error 序列（error 后可能跟 response.failed 或翻盘的 completed）
-			// 必须继续读取，不适用提前结束。
-			if sawTerminalEvent && !eventInProgress && (!codexFailureTerminal || !sawBareError) {
+			// Codex bare error 仅在尚未收全权威 failed 或 completed 时继续等待。
+			if sawTerminalEvent && !eventInProgress && (!codexFailureTerminal || !sawBareError || sawResponseFailed) {
 				_ = resp.Body.Close()
 				return finalizeStream()
 			}

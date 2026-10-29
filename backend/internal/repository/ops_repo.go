@@ -57,9 +57,11 @@ INSERT INTO ops_error_logs (
   created_at,
   api_key_prefix,
   disconnect_stage,
-  delivered_bytes
+  delivered_bytes,
+  end_to_end_first_output_ms,
+  recovery_outcome
 ) VALUES (
-  $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40
+  $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42
 )`
 
 func NewOpsRepository(db *sql.DB) service.OpsRepository {
@@ -171,6 +173,8 @@ func opsInsertErrorLogArgs(input *service.OpsInsertErrorLogInput) []any {
 		opsNullString(input.APIKeyPrefix),
 		opsNullString(input.DisconnectStage),
 		opsNullInt64KeepZero(input.DeliveredBytes),
+		opsNullInt64KeepZero(input.EndToEndFirstOutputMs),
+		opsNullString(input.RecoveryOutcome),
 	}
 }
 
@@ -463,6 +467,8 @@ SELECT
   e.upstream_latency_ms,
   e.response_latency_ms,
   e.time_to_first_token_ms,
+  e.end_to_end_first_output_ms,
+  e.recovery_outcome,
   COALESCE(e.api_key_prefix, ''),
   COALESCE(ak.name, ''),
   ak.deleted_at,
@@ -539,6 +545,8 @@ LIMIT 1`
 		&upstreamLatency,
 		&responseLatency,
 		&ttft,
+		&out.EndToEndFirstOutputMs,
+		&out.RecoveryOutcome,
 		&out.APIKeyPrefix,
 		&detailAPIKeyName,
 		&detailAPIKeyDeletedAt,
