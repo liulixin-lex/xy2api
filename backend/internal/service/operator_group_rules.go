@@ -164,7 +164,7 @@ func (s *adminServiceImpl) operatorGroupCreateRules(ctx context.Context, input *
 			return operatorFieldError(f.name)
 		}
 	}
-	if len(input.CopyAccountsFromGroupIDs) > 0 {
+	if len(input.CopyAccountsFromGroupIDs) > 0 && !sc.Can(operatoraccess.ModuleAccounts, operatoraccess.LevelManage) {
 		return operatorFieldError("copy_accounts_from_group_ids")
 	}
 	return nil
@@ -251,7 +251,7 @@ func (s *adminServiceImpl) operatorGroupUpdateRules(ctx context.Context, id int6
 			return operatorFieldError(f.name)
 		}
 	}
-	if len(input.CopyAccountsFromGroupIDs) > 0 {
+	if len(input.CopyAccountsFromGroupIDs) > 0 && !sc.Can(operatoraccess.ModuleAccounts, operatoraccess.LevelManage) {
 		return operatorFieldError("copy_accounts_from_group_ids")
 	}
 	return nil

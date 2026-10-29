@@ -76,9 +76,9 @@ import { useAdminPermission } from '@/composables/useAdminPermission'
 const props = defineProps<{ show: boolean; account: Account | null; anchorRect: DOMRect | null }>()
 const emit = defineEmits(['iq-run', 'iq-records', 'close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow'])
 const { t } = useI18n()
-const { canManage, has } = useAdminPermission('accounts')
-// Duplicate and Spark shadow place a new account into groups: they also need "Adjust balance".
-const canPlace = computed(() => canManage.value && has('users.balance_adjust'))
+const { canManage } = useAdminPermission('accounts')
+// Account management includes group placement by duplicate and Spark shadow.
+const canPlace = canManage
 const menuRef = ref<HTMLElement | null>(null)
 const { width: viewportWidth, height: viewportHeight } = useWindowSize()
 const viewportPadding = 8

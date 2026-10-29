@@ -97,14 +97,12 @@
 - 渠道绑定任意分组后，`account_stats_pricing_rules` 与 `apply_pricing_to_account_stats` 也需要 `users.balance_adjust`。没有开关时只能缺省或与已保存的有效值相同，否则在 `ChannelService.Update` 写入前返回 400 与字段名；新建时绑定分组同样检查。
 - 价格字段与“自由字段”两份清单覆盖输入结构的全部字段。`TestOperatorGroupFieldListCoversInputs` 与 `TestOperatorGroupFieldListCoversUpdateRequest` 在出现未归类字段时失败，因为漏掉一个价格字段就等于放行。
 
-**放置**
-- 把账号加入或移出分组需要 `users.balance_adjust`。把高价账号放进便宜分组，效果等于降价。具体覆盖：
-  - 账号的 `group_ids`；
-  - 平台默认分组（新建时设 `SkipDefaultGroupBind`）；
-  - 复制账号与 Spark 影子账号；
-  - 分组的 `copy_accounts_from_group_ids`；
-  - 删除仍有账号的分组：只走“必须为空”的删除路径。
-- 没有开关时只能新建专属分组：新的公开分组对所有用户可用，价格又由创建者决定。
+**放置**（2026-10-28，所有者决定）
+- 账号的 `group_ids`（新建、编辑、批量编辑）、复制账号与 Spark 影子账号只要求 `accounts:manage`，不另要求 `users.balance_adjust`。
+- 新建时未指定分组，与超级管理员一样绑定对应平台的默认分组；普通管理员不再设置 `SkipDefaultGroupBind`。
+- 分组的 `copy_accounts_from_group_ids`：在 `groups:manage` 基础上，有 `users.balance_adjust` 或 `accounts:manage` 任一即可；两者都没有时，新建和编辑均返回 400 `ADMIN_FIELD_FORBIDDEN`，字段为 `copy_accounts_from_group_ids`。
+- 已接受风险：所有者于 2026-10-28 接受把高价账号放进便宜分组等于降价的风险，与模型映射 E2/D12 同类；不增加新开关。
+- 其余资金规则保持：没有资金开关时只能新建专属分组，不能改变价格、公开专属分组、重新启用或设置新的回退分组（允许清除）；删除仍有账号的分组只走“必须为空”的删除路径。账号计费类 extra、渠道 `group_ids` 与用户分组授权也不变。
 - 删除账号属于 `accounts:manage`，可以删除仍绑定分组的账号并移除绑定，不另要求资金开关；这一操作不增加余额或提高价格。
 
 **目标用户**

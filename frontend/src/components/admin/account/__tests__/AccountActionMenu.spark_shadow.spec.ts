@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import AccountActionMenu from '../AccountActionMenu.vue'
 import type { Account } from '@/types'
+import { getActivePinia } from 'pinia'
+import { useAdminAccessStore } from '@/stores/adminAccess'
+import type { MeAccess } from '@/types/adminAccess'
 
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
@@ -49,6 +52,26 @@ const getBodyText = () => document.body.textContent ?? ''
 const getBodyButtons = () => Array.from(document.body.querySelectorAll('button'))
 
 describe('AccountActionMenu — spark shadow 按钮可见性', () => {
+  it.each(['manage', 'view'] as const)('allows duplicate and Spark shadow for account managers without a balance flag (%s)', async (level) => {
+    getActivePinia()!.state.value.auth = { user: { id: 7, role: 'operator' }, runMode: 'standard' }
+    const access = useAdminAccessStore()
+    access.access = { role: 'operator', is_super_admin: false, modules: { accounts: level }, flags: [], settings: {} as MeAccess['settings'], custom_menu_items: [] }
+    access.loaded = true
+    for (const action of ['duplicate', 'create-spark-shadow'] as const) {
+      const account = makeAccount(action === 'duplicate' ? { platform: 'anthropic', type: 'apikey' } : { platform: 'openai', type: 'oauth', parent_account_id: null })
+      const wrapper = mount(AccountActionMenu, { props: { show: true, account, anchorRect }, attachTo: document.body })
+      const label = action === 'duplicate' ? 'admin.accounts.duplicateAccount' : 'admin.accounts.createSparkShadow'
+      const button = getBodyButtons().find(b => b.textContent?.includes(label))
+      expect(!!button).toBe(level === 'manage')
+      if (button) {
+        button.click()
+        await wrapper.vm.$nextTick()
+        expect(wrapper.emitted(action)?.[0][0]).toMatchObject({ id: account.id })
+      }
+      wrapper.unmount()
+    }
+  })
+
   it('普通账号显示「复制账号」按钮', () => {
     const account = makeAccount({ platform: 'anthropic', type: 'apikey', parent_account_id: null })
     const wrapper = mount(AccountActionMenu, {

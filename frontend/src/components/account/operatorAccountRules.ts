@@ -49,7 +49,7 @@ function withoutKeys(value: unknown, keys: readonly string[]): unknown {
  * - Update with a locked network: no `proxy_id`, `type`, credential network keys or extra address keys.
  * - Create without the address flag: no address keys and no `proxy_id` (the platform default endpoint is used).
  * - Bulk: never any network key, flag or not.
- * - Without "Adjust balance": no `group_ids` and no billing extras.
+ * - Without "Adjust balance": no billing extras; account management includes group placement.
  */
 export function applyOperatorAccountPayloadRules<T extends Record<string, unknown>>(
   payload: T,
@@ -73,7 +73,6 @@ export function applyOperatorAccountPayloadRules<T extends Record<string, unknow
     }
   }
   if (!options.canAdjustBalance) {
-    delete out.group_ids
     if ('extra' in out) out.extra = withoutKeys(out.extra, OPERATOR_BILLING_EXTRA_KEYS)
   }
   if (mode === 'bulk') {

@@ -277,6 +277,15 @@
   4. 审查 P2-7（Anthropic 补选失败时可能泄漏槽位）是原有写法，未改；只有闭合 `</think>` 的上游可能被提前判答，写在文档已知局限。
 - 边界：未碰 δ、ε、RA-1 正在改的 handler、`resilience_*`、`GATEWAY_RESILIENCE.md`；`policy.json` 与它们的分支都有追加，合并时注意顺序。
 
+### 20261028-operator-account-groups — 普通管理员凭账号管理权限调整账号分组（2026-10-28 开始）
+
+- 请求（用户 2026-10-28，0.4.12 发布后）：给了普通管理员“账号管理”的管理权限，却不能给账号加入或取消分组。原因是 0.4.12 把账号放入或移出分组归到“用户管理 → 加减余额”（审查认为把高价账号放进便宜分组等于降价）。用户选定：有账号“管理”就能改分组，不加新开关。
+- 范围：账号新建、编辑、批量编辑、复制、影子账号、新建时绑定平台默认分组只要求 `accounts:manage`；分组表单的 `copy_accounts_from_group_ids` 改为有加减余额或账号管理任一即可。账号计费类 extra、分组价格、渠道绑定分组等其余规则不变。同步前端分组选择器、加减余额说明、`ADMIN_PERMISSIONS.md`、OpenSpec `operator-role-20261027` 与已接受风险。
+- 分支：`fix/operator-account-groups-20261028`（工作树 `xy2api-wt/operator-account-groups`，自 origin/main `03fc67de3`）。编码交 gpt-6.1-sol，只读审查交 gpt-6-astra；交接包在仓库外 `xy2api-handoff/operator-account-groups-20261028/`。
+- 状态（2026-10-28）：已推送，[PR #163](https://github.com/liulixin-lex/xy2api/pull/163) 已开，CI 结果以 GitHub 为准。gpt-6-astra 只读审查 READY（无 P0/P1/P2，建议的三处过期注释已改）。本机门禁与浏览器联调通过，见操作日志。
+- 停止点：PR CI 全绿后停止；合并、发版、部署需用户另行授权。无迁移、无新设置，回退到 0.4.12 即恢复旧规则。
+- 首轮 CI（2026-10-29）：`test` 因规则用例表仍以 `group_ids` 作 account_create 的拒绝样例而失败，已改用计费 extra，本机 service 全包 unit 通过；`frontend-security` 因新公告 GHSA-83rm-6c8r-g728（vue-i18n 9.x/10.x 无修复，仅 11.4.14 修复）失败，按用户决定在 `.github/audit-exceptions.yml` 加 30 天豁免（到期 2026-11-27）。后续：到期前把前端迁到 vue-i18n 11。
+
 ## 操作陷阱
 
 - 处理 Sub2API 同步只以 `docs/UPSTREAM_SYNC.md`、同步 Skill、policy 和脚本为准。`DEV_GUIDE.md` 的“Git 操作”曾写着直接 merge/rebase 上游 main，2026-10-17 已改为指向同步规范，这两条命令也登记为 `tools/docs_consistency.json` 的退役写法。
@@ -1208,3 +1217,19 @@ pnpm --dir frontend run build
 - 制品：6 个资产、201,250,293 字节双 SHA 一致；五平台源码 revision 与版本构建一致，均 `vcs.modified=false`；darwin_arm64 实际版本命令通过；GHCR 双架构、版本/源码/source 标签与全部稳定别名核验通过。未执行部署、安装演练或任何生产操作。
 - 记忆：本次将报错补救、上游余额、普通管理员和版本任务的交接/登记，以及普通管理员旧收尾日志和发布前版本速览原样追加归档；保留其他进行中任务与原有历史。正式标签不移动，发布后收尾只改记忆文件。
 - 后续：部署及生产观察另行授权；WS 余额阶梯等残留见现行文档与顶部摘要。Release 的旧 Node.js Action 弃用提示属后续维护项，不影响本次成功发布。
+
+### 2026-10-28 — 20261028-operator-account-groups — 修复并开 PR #163
+
+- 请求/目标：0.4.12 发布后用户反馈，普通管理员有“账号管理”管理权限却不能调整账号分组。用户选定：有账号管理（管理）就能改分组，不加开关。
+- 开始状态：自 origin/main `03fc67de3` 新建 `fix/operator-account-groups-20261028`（工作树 `xy2api-wt/operator-account-groups`），工作树干净。
+- 完成操作：原因是 0.4.12 契约把账号放组归到 `users.balance_adjust`。账号新建、编辑、批量编辑放开 `group_ids` 并恢复平台默认分组绑定；duplicate、shadow 去掉余额开关（目录与快照同步）；分组的 `copy_accounts_from_group_ids` 改为加减余额或账号管理任一。计费 extra、分组价格、渠道绑定等不变。前端选择器、分组弹窗、复制与影子操作、复制账号选择器、加减余额说明同步；`ADMIN_PERMISSIONS.md` 与 OpenSpec 记录已接受风险。编码由 gpt-6.1-sol 完成，gpt-6-astra 只读审查 READY。
+- 修改文件：`operator_account_rules.go`、`operator_group_rules.go`、`operatoraccess/catalog.go` 与 `testdata/pra_catalog.json`、相关 Go 测试；三个账号弹窗、`operatorAccountRules.ts`、`AccountActionMenu.vue`、`AccountsView.vue`、`GroupsView.vue`、zh/en `operatorAccess.ts` 及规格；`ADMIN_PERMISSIONS.md`、OpenSpec `operator-role-20261027`；本记忆。
+- 验证：build、gofmt、四种 vet、相关包 unit 与 `-race`、golangci-lint 0 issues；前端 lint、typecheck、相关 878 项、`make test-frontend` 917 项；文档一致性、`git diff --check`、干净树 `sync.py audit` 通过。本机浏览器以只有账号管理（管理）、分组管理（查看）的普通管理员改分组成功（`[2]`→`[3]`），复制账号继承分组。
+- 卡点/风险：无。已接受风险：账号管理者可把高价账号放进便宜分组，效果类似降价。
+- 下一步：等 PR #163 CI 全绿后停止；合并、发版、部署待用户授权。
+
+### 2026-10-29 — 20261028-operator-account-groups — 修复首轮 CI 失败
+
+- 完成操作：`TestEveryRuleHasAllowDenyAndBoundaryCases/account_create/deny` 仍用 `group_ids` 作拒绝样例，改为无加减余额时设置计费 extra（`cache_ttl_override_enabled`）。之前本机按 `-run` 筛选未覆盖该用例，本次 service 全包 unit 不筛选运行。vue-i18n 新公告 GHSA-83rm-6c8r-g728 使 `frontend-security` 失败（main 同样受影响）；用户选定在本 PR 加 30 天豁免。核实结果：未配置 `escapeParameter`；有两处 `v-html` 使用翻译文本（`CustomPageView` 的静态“页面不存在”、`UseKeyModal` 经 `escapeHtml` 的注释），均不含用户可控参数，豁免理由据实写明。
+- 验证：`go test -tags=unit ./internal/service/...` 全包、server/operatoraccess/handler unit、vet、gofmt、service 包 golangci-lint 通过；按 CI 参数复现 pnpm audit 后例外检查通过，相关工具单测 13 项与 tools 41 项、文档一致性通过。
+- 下一步：推送后等 CI 全绿即停止；vue-i18n 11 迁移在 2026-11-27 前另开任务。

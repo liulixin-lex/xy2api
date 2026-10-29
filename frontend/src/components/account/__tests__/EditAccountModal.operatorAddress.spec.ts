@@ -83,7 +83,7 @@ const GroupSelectorStub = defineComponent({
   name: 'GroupSelector',
   props: { modelValue: { type: Array, default: () => [] } },
   emits: ['update:modelValue'],
-  template: '<div data-testid="group-selector" />'
+  template: `<button type="button" data-testid="group-selector" @click="$emit('update:modelValue', [12])">groups</button>`
 })
 
 const NETWORK_CREDENTIAL_KEYS = ['base_url', 'api_base_urls', 'api_protocol', 'account_mode', 'aws_region']
@@ -281,15 +281,18 @@ describe('EditAccountModal for operators: upstream address and proxy', () => {
     expect(payload.extra ?? {}).not.toHaveProperty('custom_base_url_enabled')
   })
 
-  it('hides the group selector and billing extras without the balance flag', async () => {
-    seedOperator(['accounts.upstream_address'])
+  it('sends selected groups while hiding billing extras without the balance flag', async () => {
+    seedOperator([])
 
     const openai = mountModal(baseAccount({ extra: { openai_long_context_billing_enabled: true } }))
     await flushPromises()
-    expect(openai.find('[data-testid="group-selector"]').exists()).toBe(false)
+    expect(openai.find('[data-testid="group-selector"]').exists()).toBe(true)
+    await openai.get('[data-testid="group-selector"]').trigger('click')
     expect(openai.find('[data-testid="openai-long-context-billing-toggle"]').exists()).toBe(false)
     const payload = await submit(openai)
-    expect(payload).not.toHaveProperty('group_ids')
+    expect(payload.group_ids).toEqual([12])
+    expect(payload).not.toHaveProperty('proxy_id')
+    expect(payload.credentials ?? {}).not.toHaveProperty('base_url')
     expect(payload.extra ?? {}).not.toHaveProperty('openai_long_context_billing_enabled')
     openai.unmount()
 
@@ -301,7 +304,7 @@ describe('EditAccountModal for operators: upstream address and proxy', () => {
     await flushPromises()
     expect(anthropic.text()).not.toContain('admin.accounts.quotaControl.cacheTTLOverride.label')
     const anthropicPayload = await submit(anthropic)
-    expect(anthropicPayload).not.toHaveProperty('group_ids')
+    expect(anthropicPayload.group_ids).toEqual([11])
     expect(anthropicPayload.extra ?? {}).not.toHaveProperty('cache_ttl_override_enabled')
     expect(anthropicPayload.extra ?? {}).not.toHaveProperty('cache_ttl_override_target')
   })
