@@ -94,8 +94,17 @@ Without `orders.refund`, an operator MUST NOT refund, query refunds, retry fulfi
 - **THEN** the save is accepted and the price remains empty.
 
 #### Scenario: Account placement
-- **WHEN** an operator with `accounts: manage` and without `users.balance_adjust` creates an account with `group_ids`
-- **THEN** the response is 400 `ADMIN_FIELD_FORBIDDEN` with `metadata.field = "group_ids"`.
+- **WHEN** an operator with `accounts:manage` and without `users.balance_adjust` creates, updates or bulk-updates an account with `group_ids`
+- **THEN** the request succeeds and the requested bindings, including an empty list on update, are stored
+- **AND** creating an account without `group_ids` binds its platform default group exactly as for a super admin, if the group exists
+- **AND** duplicate and Spark shadow routes require account management without the balance flag
+- **AND** account billing extras and upstream address protections remain unchanged.
+
+#### Scenario: Copy accounts between groups
+- **WHEN** an operator with `groups:manage` creates or updates a group with `copy_accounts_from_group_ids`
+- **THEN** copying succeeds if the operator also has `accounts:manage` or `users.balance_adjust`
+- **AND** if neither is granted the response is 400 `ADMIN_FIELD_FORBIDDEN` with `metadata.field = "copy_accounts_from_group_ids"`
+- **AND** group prices, exclusivity, fallback and activation rules remain unchanged.
 
 #### Scenario: Create-and-redeem with a padded existing code
 - **WHEN** an operator with `users.balance_adjust` sends `POST /api/v1/admin/redeem-codes/create-and-redeem` with `code` set to an existing unused code padded with spaces

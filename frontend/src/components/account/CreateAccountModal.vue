@@ -3596,10 +3596,9 @@
           </div>
         </div>
 
-        <!-- Group Selection - 仅标准模式显示；放入分组需要“加减余额”权限 -->
-        <p v-if="!canAdjustBalance" class="input-hint" data-testid="account-ungrouped-hint">{{ t('admin.operatorAccess.accountUngroupedHint') }}</p>
+        <!-- Group Selection - 账号管理权限包含分组调整 -->
         <GroupSelector
-          v-if="canAdjustBalance"
+          v-if="canPlaceGroups"
           v-model="form.group_ids"
           :groups="groups"
           :platform="form.platform"
@@ -4178,10 +4177,11 @@ const emit = defineEmits<{
 const appStore = useAppStore()
 
 // 普通管理员（xy-admin-operator-scope）：没有“显示上游地址”时不设置地址和代理（使用平台默认地址），
-// 没有“加减余额”时不放入分组、不设置计费附加项。
+// 没有“加减余额”时不设置计费附加项；分组随账号管理权限。
 const access = useAdminAccessStore()
 const showUpstreamAddress = computed(() => access.can('accounts.upstream_address'))
 const canAdjustBalance = computed(() => access.can('users.balance_adjust'))
+const canPlaceGroups = computed(() => access.can('accounts:manage'))
 const operatorCreatePayload = <T extends object>(payload: T): T =>
   access.isOperator
     ? (applyOperatorAccountPayloadRules(payload as Record<string, unknown>, {

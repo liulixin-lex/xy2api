@@ -114,6 +114,7 @@ describe('OperatorPermissionsTable', () => {
       expect(hint.indexOf('关：')).toBeGreaterThan(0)
     }
     expect(wrapper.get('[data-test="operator-flag-row-accounts.upstream_address"]').text()).toContain('显示上游地址')
+    expect(wrapper.get('[data-test="operator-flag-row-users.balance_adjust"]').text()).not.toContain('把账号加入或移出分组')
   })
 
   it('writes one On and one Off sentence per flag in English', () => {
@@ -121,6 +122,7 @@ describe('OperatorPermissionsTable', () => {
 
     const hints = wrapper.findAll('[data-test="operator-flag-hint"]').map((hint) => hint.text())
     expect(hints).toHaveLength(ADMIN_FLAG_IDS.length)
+    expect(wrapper.get('[data-test="operator-flag-row-users.balance_adjust"]').text()).not.toContain('put accounts into or out of groups')
     for (const hint of hints) {
       expect(hint.startsWith('On: ')).toBe(true)
       expect(hint.split('On: ')).toHaveLength(2)

@@ -26,7 +26,7 @@ export default {
     flags: {
       balanceAdjust: {
         label: 'Adjust balance',
-        hint: 'On: can add or deduct balance, set an initial balance, grant and extend subscriptions, change group rates and plan prices, and put accounts into or out of groups. Off: can only view these.'
+        hint: 'On: can add or deduct balance, set an initial balance, grant and extend subscriptions, change group rates and plan prices. Off: can only view these.'
       },
       upstreamAddress: {
         label: 'Show upstream address',
@@ -50,7 +50,6 @@ export default {
     groupExclusiveHint: 'Without "Adjust balance", new groups must be exclusive.',
     searchByEmail: "Search by user email (must contain {'@'})",
     createNoSignupGrants: 'Without "Adjust balance", new users start at balance 0 and get no default subscription.',
-    accountUngroupedHint: 'Without "Adjust balance", new accounts join no group until someone with that permission assigns one.',
     monitorHeadersDropped: 'After changing the endpoint, provider or API mode, only the headers entered in this edit are kept.',
     templateApplySuperOnly: 'Only a super admin can apply a template that has headers or a body override.',
     addressNeedsFlag: 'Without "Show upstream address", you cannot set an upstream address. New accounts use the platform\'s default address.',

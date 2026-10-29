@@ -191,10 +191,10 @@ func operatorServiceRuleCase(t *testing.T, id, kind string) error {
 	case "account_create":
 		in := &CreateAccountInput{}
 		if deny {
-			in.GroupIDs = []int64{1}
+			in.Extra = map[string]any{"cache_ttl_override_enabled": true}
 		}
 		if boundary {
-			in.GroupIDs = []int64{}
+			in.Extra = map[string]any{"cache_ttl_override_enabled": false}
 		}
 		return s.operatorAccountCreateRules(ctx, in)
 	case "account_update":

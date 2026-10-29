@@ -226,14 +226,20 @@ func TestOperatorAccountBillingExtrasNeedFlag(t *testing.T) {
 }
 func TestOperatorAccountPlacementRules(t *testing.T) {
 	s := &adminServiceImpl{}
-	ctx := operatorRulesContext(s)
-	in := &CreateAccountInput{}
-	require.NoError(t, s.operatorAccountCreateRules(ctx, in))
-	require.True(t, in.SkipDefaultGroupBind)
-	operatorRuleError(t, s.operatorAccountCreateRules(ctx, &CreateAccountInput{GroupIDs: []int64{1}}), "ADMIN_FIELD_FORBIDDEN", "group_ids", "")
-	a := operatorStoredAccount()
-	require.NoError(t, s.operatorAccountUpdateRules(ctx, a, &UpdateAccountInput{GroupIDs: &[]int64{1, 1}}))
-	operatorRuleError(t, s.operatorAccountUpdateRules(ctx, a, &UpdateAccountInput{GroupIDs: &[]int64{}}), "ADMIN_FIELD_FORBIDDEN", "group_ids", "")
+	for _, flags := range [][]operatoraccess.Flag{nil, {operatoraccess.FlagUsersBalanceAdjust}} {
+		ctx := operatorRulesContext(s, flags...)
+		operatoraccess.ScopeFrom(ctx).Perms.Modules = map[operatoraccess.Module]operatoraccess.Level{operatoraccess.ModuleAccounts: operatoraccess.LevelManage}
+		for _, ids := range [][]int64{nil, {}, {2}} {
+			in := &CreateAccountInput{GroupIDs: ids}
+			require.NoError(t, s.operatorAccountCreateRules(ctx, in))
+			require.False(t, in.SkipDefaultGroupBind)
+			require.Equal(t, ids, in.GroupIDs)
+		}
+		for _, ids := range [][]int64{{1, 1}, {2}, {}} {
+			require.NoError(t, s.operatorAccountUpdateRules(ctx, operatorStoredAccount(), &UpdateAccountInput{GroupIDs: &ids}))
+			require.NoError(t, s.operatorAccountBulkRules(ctx, &BulkUpdateAccountsInput{GroupIDs: &ids}))
+		}
+	}
 }
 func TestOperatorBulkUpdateRules(t *testing.T) {
 	s := &adminServiceImpl{}

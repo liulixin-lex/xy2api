@@ -57,6 +57,7 @@ const DataTableStub = {
         <div :data-test="'select-' + row.id"><slot name="cell-select" :row="row" /></div>
         <div :data-test="'name-' + row.id"><slot name="cell-name" :row="row" :value="row.name" /></div>
         <div :data-test="'proxy-' + row.id"><slot name="cell-proxy" :row="row" /></div>
+        <div :data-test="'groups-' + row.id"><slot name="cell-groups" :row="row" /></div>
         <div :data-test="'balance-' + row.id"><slot name="cell-upstream_balance" :row="row" /></div>
       </div>
     </div>
@@ -75,8 +76,8 @@ function mountView() {
         HelpTooltip: { template: '<span><slot name="trigger" /></span>' },
         AccountColumnSettings: true,
         AccountPriorityCell: true,
-        AccountGroupsCellButton: true,
-        AccountGroupsDialog: true,
+        AccountGroupsCellButton: { emits: ['open'], template: '<button data-test="open-groups" @click="$emit(\'open\')">groups</button>' },
+        AccountGroupsDialog: { props: ['account'], template: '<div data-test="groups-dialog" :data-account-id="account?.id" />' },
         AccountTableActions: { template: '<div><slot name="after" /></div>' },
         AccountTableFilters: true,
         AccountBulkActionsBar: true,
@@ -200,6 +201,16 @@ describe('admin AccountsView for operators', () => {
     const selection = wrapper.findAll<HTMLInputElement>('[data-test^="select-"] input[type="checkbox"]')
     expect(selection).toHaveLength(3)
     expect(selection.every(input => input.element.disabled === (level === 'view'))).toBe(true)
+  })
+
+  it.each(['manage', 'view'] as const)('opens the groups dialog only with accounts manage, without the balance flag (%s)', async (level) => {
+    seedOperator({ accounts: level })
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-test="groups-1"] [data-test="open-groups"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="groups-dialog"]').exists()).toBe(level === 'manage')
+    if (level === 'manage') expect(wrapper.get('[data-test="groups-dialog"]').attributes('data-account-id')).toBe('1')
   })
 
   it('shows the account name as plain text when base_url is not returned', async () => {

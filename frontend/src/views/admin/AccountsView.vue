@@ -595,9 +595,9 @@ const { t, te } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const adminAccess = useAdminAccessStore()
-const { canManage, has, isSuperAdmin } = useAdminPermission('accounts')
-// Group placement (group dialog) also needs "Adjust balance".
-const canPlaceGroups = computed(() => canManage.value && has('users.balance_adjust'))
+const { canManage, isSuperAdmin } = useAdminPermission('accounts')
+// Account management includes placing accounts into groups and removing them.
+const canPlaceGroups = canManage
 const proxies = ref<AccountProxy[]>([])
 const groups = ref<AdminGroup[]>([])
 const groupCategories = useGroupCategoriesStore()

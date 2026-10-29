@@ -80,7 +80,10 @@ function mountModal() {
         ConfirmDialog: true,
         Select: true,
         ProxySelector: true,
-        GroupSelector: true,
+        GroupSelector: {
+          props: ['modelValue'], emits: ['update:modelValue'],
+          template: `<button type="button" data-testid="pick-groups" @click="$emit('update:modelValue', [11])">groups</button>`
+        },
         Icon: true
       }
     }
@@ -93,26 +96,26 @@ describe('BulkEditAccountModal for operators', () => {
     vi.mocked(adminAPI.accounts.checkMixedChannelRisk).mockReset().mockResolvedValue({ has_risk: false } as any)
   })
 
-  it('never sends proxy_id, base_url or group_ids for an operator without the flags', async () => {
+  it('sends group_ids but never proxy_id or base_url for an operator without the flags', async () => {
     seedOperator([])
     const wrapper = mountModal()
     await flushPromises()
 
     expect(wrapper.find('[data-testid="bulk-edit-base-url-section"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="bulk-edit-proxy-section"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="bulk-edit-groups-section"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="bulk-edit-groups-section"]').exists()).toBe(true)
     expect(wrapper.find('#bulk-edit-openai-long-context-billing-enabled').exists()).toBe(false)
 
     await wrapper.get('#bulk-edit-priority-enabled').setValue(true)
     await wrapper.get('#bulk-edit-priority').setValue(5)
-    // Values left over in hidden sections never leave the browser either.
+    // Hidden network fields are stripped while the visible group selector is saved.
     const vm = wrapper.vm as any
     vm.enableBaseUrl = true
     vm.baseUrl = 'https://relay.example.com/v1'
     vm.enableProxy = true
     vm.proxyId = 3
-    vm.enableGroups = true
-    vm.groupIds = [11]
+    await wrapper.get('#bulk-edit-groups-enabled').setValue(true)
+    await wrapper.get('[data-testid="pick-groups"]').trigger('click')
     await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
     await flushPromises()
 
@@ -121,7 +124,7 @@ describe('BulkEditAccountModal for operators', () => {
     expect(ids).toEqual([1, 2])
     expect(payload.priority).toBe(5)
     expect(payload).not.toHaveProperty('proxy_id')
-    expect(payload).not.toHaveProperty('group_ids')
+    expect(payload.group_ids).toEqual([11])
     expect(payload).not.toHaveProperty('base_url')
     expect(payload.credentials ?? {}).not.toHaveProperty('base_url')
     wrapper.unmount()
@@ -133,5 +136,6 @@ describe('BulkEditAccountModal for operators', () => {
     expect(flagHolder.find('[data-testid="bulk-edit-base-url-section"]').exists()).toBe(false)
     expect(flagHolder.find('[data-testid="bulk-edit-proxy-section"]').exists()).toBe(false)
     expect(flagHolder.find('[data-testid="bulk-edit-groups-section"]').exists()).toBe(true)
+    flagHolder.unmount()
   })
 })
