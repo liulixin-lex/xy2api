@@ -2832,7 +2832,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
-      "value": "clientSawOutput:  clientSawOutput,"
+      "value": "clientSawOutput:  delivery.sawOutput,"
     },
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
@@ -2893,6 +2893,22 @@
     {
       "path": "backend/internal/service/openai_first_output_timeout.go",
       "value": "AttemptElapsedMs: elapsed.Milliseconds(), TimeoutMs: timeout.Milliseconds()"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "firstOutputStage.CommitTo(delivery)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_usage.go",
+      "value": "if !result.PartialFailure {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "PartialFailure:                partialErr != nil,"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_service.go",
+      "value": "if r != nil && r.PartialFailure {"
     }
   ],
   "forbidden_module_paths": [
@@ -2957,7 +2973,8 @@
     "xy-admin-operator-scope",
     "xy-responses-partial-usage",
     "xy-responses-authoritative-failed-close",
-    "xy-recovery-observability"
+    "xy-recovery-observability",
+    "xy-responses-partial-success-guard"
   ],
   "custom_patch_tests": [
     {
@@ -4899,6 +4916,16 @@
       "id": "xy-recovery-observability",
       "path": "backend/internal/repository/recovery_observability_integration_test.go",
       "literal": "func TestRecoveryObservabilityMigrationAndRoundTrip"
+    },
+    {
+      "id": "xy-responses-partial-success-guard",
+      "path": "backend/internal/handler/openai_native_partial_usage_test.go",
+      "literal": "func TestOpenAINativePartialUsageRequiresDeliveredSemanticBytes"
+    },
+    {
+      "id": "xy-responses-partial-success-guard",
+      "path": "backend/internal/service/openai_native_partial_usage_test.go",
+      "literal": "func TestOpenAINativePartialUsageDoesNotResetSuccessState"
     }
   ]
 }

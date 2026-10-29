@@ -51,3 +51,50 @@ func TestOpenAINativeFailureBillsKnownPartialUsageOnce(t *testing.T) {
 func TestOpenAINativeCancelBeforeOutputBillsNothing(t *testing.T) {
 	testResponsesCancelBeforeOutputBillsNothing(t, false)
 }
+
+// A short write may commit the opening without reaching the queued content.
+type nativeLimitedWriter struct {
+	*httptest.ResponseRecorder
+	remaining int
+}
+
+func (w *nativeLimitedWriter) Write(p []byte) (int, error) {
+	n := len(p)
+	if n > w.remaining {
+		n = w.remaining
+	}
+	if n > 0 {
+		_, _ = w.ResponseRecorder.Write(p[:n])
+		w.remaining -= n
+	}
+	return n, io.ErrClosedPipe
+}
+
+func TestOpenAINativePartialUsageRequiresDeliveredSemanticBytes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withHandlerResilience(t, nil)
+	opening := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"r1\"}}\n\n"
+	output := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\",\"usage\":{\"input_tokens\":11,\"output_tokens\":2}}\n\n"
+	for _, tc := range []struct {
+		name        string
+		limit, rows int
+	}{
+		{"zero", 0, 0}, {"opening only", len(opening), 0},
+		{"partial content", len(opening) + strings.Index(output, "hello") + 2, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &gwUsageLogRepo{}
+			h := newResponsesUsageHandler(t, repo, &ptUsageUpstream{body: func() io.ReadCloser {
+				return io.NopCloser(io.MultiReader(strings.NewReader(opening+output), gwUsageReadError{context.DeadlineExceeded}))
+			}}, 0, false)
+			w := &nativeLimitedWriter{ResponseRecorder: httptest.NewRecorder(), remaining: tc.limit}
+			servePassthroughResponses(h, context.Background(), w)
+			require.Len(t, repo.recorded(), tc.rows)
+			require.Equal(t, tc.limit, w.Body.Len())
+			if tc.rows > 0 {
+				require.Equal(t, 11, repo.recorded()[0].InputTokens)
+				require.Equal(t, 2, repo.recorded()[0].OutputTokens)
+			}
+		})
+	}
+}

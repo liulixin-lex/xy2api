@@ -72,3 +72,107 @@ func TestOpenAINativePartialFailurePreservesPenalty(t *testing.T) {
 	require.True(t, resilience.IsBalancePause(repo.tempReason), repo.tempReason)
 	require.Zero(t, repo.clearCalls)
 }
+
+type nativeCancelOnOutput struct {
+	gin.ResponseWriter
+	cancel context.CancelFunc
+}
+
+func (w *nativeCancelOnOutput) Write(p []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(p)
+	if strings.Contains(string(p[:n]), "hello") {
+		w.cancel()
+	}
+	return n, err
+}
+
+type nativeDrainReadError struct{}
+
+func (nativeDrainReadError) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
+
+func TestOpenAINativePartialUsageDoesNotResetSuccessState(t *testing.T) {
+	for _, tc := range []struct {
+		name                                 string
+		newer, complete, cancelAfterComplete bool
+	}{
+		{name: "old balance tier"}, {name: "newer balance pause", newer: true},
+		{name: "complete", complete: true}, {name: "complete then client leaves", complete: true, cancelAfterComplete: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rl, repo, account, r := newPenaltyFixture(t, PlatformOpenAI)
+			account.Credentials = map[string]any{"api_key": "test-key", "base_url": "https://upstream.example"}
+			account.TempUnschedulableReason = resilience.BalancePauseReasonAtStep(2, "old balance failure")
+			repo.tempReason = account.TempUnschedulableReason
+			repo.tempUntil = time.Now().Add(-time.Minute)
+			account.TempUnschedulableUntil = &repo.tempUntil
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			st := resilience.NewRequestState()
+			st.SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: time.Now(), Model: "gpt-5.4", Stream: true})
+			ctx = resilience.WithRequestState(ctx, st)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
+			InstallDeliveryTracking(c, time.Now())
+			if !tc.complete {
+				c.Writer = &nativeCancelOnOutput{ResponseWriter: c.Writer, cancel: cancel}
+			}
+			stream := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\",\"usage\":{\"input_tokens\":11,\"output_tokens\":2}}\n\n"
+			var body io.Reader = io.MultiReader(strings.NewReader(stream), nativeDrainReadError{})
+			if tc.complete {
+				body = strings.NewReader(stream + "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":11,\"output_tokens\":2}}}\n\n")
+			}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, rateLimitService: rl, accountRepo: repo, resilience: r, httpUpstream: &queuedHTTPUpstreamStub{responses: []*http.Response{{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(body)}}}}
+			now := time.Now()
+			svc.getOpenAIAccountModelTransientState().recordFailure(account.ID, "gpt-5.4", now.Add(-time.Second))
+			svc.getOpenAIAccountModelTransientState().recordFailure(account.ID, "gpt-5.4", now)
+			if tc.newer {
+				repo.tempUntil = now.Add(time.Minute)
+				repo.tempReason = resilience.BalancePauseReasonAtStep(3, "new failure")
+			}
+			result, err := svc.Forward(ctx, c, account, []byte(`{"model":"gpt-5.4","stream":true,"input":"hi"}`))
+			require.NotNil(t, result)
+			require.Equal(t, !tc.complete, result.PartialFailure)
+			if tc.complete {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				require.True(t, st.ClientGone())
+				require.False(t, st.AccountFailed(account.ID), "cancel is not account failure")
+			}
+			if tc.cancelAfterComplete {
+				cancel()
+			}
+			usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+			bill := newOpenAIRecordUsageServiceForTest(usageRepo, nil, nil, nil)
+			counter := &partialUsage403Counter{}
+			rl.SetOpenAI403CounterCache(counter)
+			bill.rateLimitService = rl
+			bill.cfg.RunMode = config.RunModeSimple
+			bill.resilience = r
+			bill.accountRepo = repo
+			require.NoError(t, bill.RecordUsage(context.WithoutCancel(ctx), &OpenAIRecordUsageInput{Result: result, APIKey: &APIKey{ID: 912, Group: &Group{RateMultiplier: 1}}, User: &User{ID: 913}, Account: account}))
+			require.Equal(t, 1, usageRepo.calls)
+			require.Equal(t, 11, usageRepo.lastLog.InputTokens)
+			if tc.complete {
+				require.Equal(t, 1, counter.resets)
+				require.Equal(t, 1, repo.clearCalls)
+				require.Empty(t, repo.tempReason)
+			} else {
+				require.Zero(t, counter.resets)
+				require.Zero(t, repo.clearCalls)
+				require.True(t, resilience.IsBalancePause(repo.tempReason))
+				require.True(t, svc.getOpenAIAccountModelTransientState().isBlocked(account.ID, "gpt-5.4", time.Now()))
+			}
+		})
+	}
+}
+
+type partialUsage403Counter struct{ resets int }
+
+func (c *partialUsage403Counter) IncrementOpenAI403Count(context.Context, int64, int) (int64, error) {
+	return 2, nil
+}
+func (c *partialUsage403Counter) ResetOpenAI403Count(context.Context, int64) error {
+	c.resets++
+	return nil
+}
