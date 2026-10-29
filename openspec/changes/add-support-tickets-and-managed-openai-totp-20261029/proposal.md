@@ -5,6 +5,7 @@ XY2API 0.4.12 already has platform-user TOTP login, setup and disable, but it do
 ## What Changes
 
 - Add an opt-in website support-ticket feature with user conversations, admin triage, configurable categories/notice, unread badges, status changes, limits and abuse controls.
+- Add email/password/TOTP direct OpenAI login/import using a local worker and server-side session validation.
 - Add a dedicated managed OpenAI credential vault and administrator workflow for saving login credentials, rotating an account TOTP secret, reconciling an interrupted rotation, and explicitly exporting saved credentials.
 - Add an authenticated local worker contract for managed-account login and TOTP operations. Persist candidates before upstream activation and keep uncertain tasks locked for reconciliation.
 - Add localized user/admin pages, settings, API routes, migrations, tests, deployment notes and current docs.

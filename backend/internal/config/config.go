@@ -66,7 +66,12 @@ const DefaultUpstreamResponseReadMaxBytes int64 = 128 * 1024 * 1024
 // 可通过 gateway.models_list_read_max_bytes 配置项覆盖。
 const DefaultModelsListReadMaxBytes int64 = 8 * 1024 * 1024
 
+type OpenAITOTPConfig struct {
+	WorkerSecret string `mapstructure:"worker_secret"`
+}
+
 type Config struct {
+	OpenAITOTP              OpenAITOTPConfig              `mapstructure:"openai_totp"`
 	UsageExport             usageexport.Config            `mapstructure:"usage_export"`
 	Server                  ServerConfig                  `mapstructure:"server"`
 	Log                     LogConfig                     `mapstructure:"log"`
@@ -2418,6 +2423,8 @@ func setDefaults() {
 
 	// TOTP
 	viper.SetDefault("totp.encryption_key", "")
+	viper.SetDefault("openai_totp.worker_secret", "")
+	_ = viper.BindEnv("openai_totp.worker_secret", "XY2API_OPENAI_TOTP_WORKER_SECRET")
 
 	// Default
 	// Admin credentials are created via the setup flow (web wizard / CLI / AUTO_SETUP).

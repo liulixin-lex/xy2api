@@ -1,5 +1,8 @@
+import openaiTotp from './openaiTotp'
+
 export default {
     accounts: {
+      openaiTotp,
       stateTicket: {
         standbyAvailable: 'Standby ready',
         qualityTask: 'Checking quality',

@@ -216,6 +216,20 @@ func Redact(body []byte, rules []Redaction, s *Scope) ([]byte, error) {
 				}
 				scrubErrorValues(v, status)
 			}
+		case "support_ticket_author":
+			walkObjects(v, func(m map[string]any) {
+				user, ok := m["user"].(map[string]any)
+				if !ok {
+					return
+				}
+				for key := range user {
+					switch key {
+					case "id", "email", "username", "status", "deleted":
+					default:
+						delete(user, key)
+					}
+				}
+			})
 		case "api_key":
 			walkObjects(v, func(m map[string]any) {
 				if key, ok := m["key"].(string); ok {

@@ -182,6 +182,7 @@ func duplicateAccountExtra(value map[string]any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	delete(cloned, ManagedOpenAILoginMarkerExtraKey)
 	for key := range duplicateAccountDiscardedExtraKeys {
 		delete(cloned, key)
 	}
@@ -553,6 +554,7 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 }
 
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
+	input.Extra = managedOpenAICreateExtra(input)
 	if err := s.operatorAccountCreateRules(ctx, input); err != nil {
 		return nil, err
 	}
@@ -802,7 +804,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		normalizedExtra = MergeOpenAICodexTicketExtra(normalizedExtra, account.Extra)
 		normalizedExtra = MergeCapabilityLearningExtra(normalizedExtra, account.Extra)
 		normalizedExtra = prepareCodexFingerprintExtraForUpdate(account, normalizedExtra)
-		account.Extra = normalizedExtra
+		account.Extra = preserveManagedOpenAIImportMarker(normalizedExtra, account.Extra)
 		if account.Platform == PlatformAntigravity && wasOveragesEnabled && !account.IsOveragesEnabled() {
 			delete(account.Extra, "antigravity_credits_overages") // 清理旧版 overages 运行态
 			// 清除 AICredits 限流 key
@@ -1024,6 +1026,7 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 	if err := s.operatorAccountExtraRules(ctx, id, updates); err != nil {
 		return err
 	}
+	updates = preserveManagedOpenAIImportMarker(updates, nil)
 	updates = MergeCapabilityLearningExtra(updates, nil)
 	updates = MergeOpenAICodexTicketExtra(updates, nil)
 	updates = sanitizedCodexFingerprintExtraUpdates(updates)
@@ -1055,6 +1058,7 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
 	// Managed probe/session state may only enter through dedicated typed endpoints.
+	input.Extra = preserveManagedOpenAIImportMarker(input.Extra, nil)
 	input.Extra = MergeOpenAICodexTicketExtra(input.Extra, nil)
 	input.Extra = sanitizedCodexFingerprintExtraUpdates(input.Extra)
 	input.Extra = stripOpenAIAutoResetCreditManagedExtra(input.Extra, true)

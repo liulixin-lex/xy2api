@@ -97,7 +97,10 @@
             >
               <span v-if="item.iconSvg" class="h-5 w-5 flex-shrink-0 sidebar-svg-icon" v-html="sanitizeSvg(item.iconSvg)"></span>
               <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
-              <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
+              <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">
+                {{ item.label }}
+                <span v-if="item.badgeCount" class="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 text-[10px] font-semibold leading-5 text-white">{{ item.badgeCount > 99 ? '99+' : item.badgeCount }}</span>
+              </span>
             </router-link>
           </template>
         </div>
@@ -122,7 +125,10 @@
           >
             <span v-if="item.iconSvg" class="h-5 w-5 flex-shrink-0 sidebar-svg-icon" v-html="sanitizeSvg(item.iconSvg)"></span>
             <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
-            <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
+            <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">
+              {{ item.label }}
+              <span v-if="item.badgeCount" class="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 text-[10px] font-semibold leading-5 text-white">{{ item.badgeCount > 99 ? '99+' : item.badgeCount }}</span>
+            </span>
           </router-link>
         </div>
       </template>
@@ -142,7 +148,10 @@
           >
             <span v-if="item.iconSvg" class="h-5 w-5 flex-shrink-0 sidebar-svg-icon" v-html="sanitizeSvg(item.iconSvg)"></span>
             <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
-            <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
+            <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">
+              {{ item.label }}
+              <span v-if="item.badgeCount" class="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 text-[10px] font-semibold leading-5 text-white">{{ item.badgeCount > 99 ? '99+' : item.badgeCount }}</span>
+            </span>
           </router-link>
         </div>
       </template>
@@ -194,7 +203,7 @@ import { useSidebarActiveIndicator } from '@/composables/useSidebarActiveIndicat
 import { flattenNav, registerCommandEntries } from '@/composables/useCommandPalette'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
+import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore, useSupportTicketStore } from '@/stores'
 import { useAdminAccessStore } from '@/stores/adminAccess'
 import type { AdminModuleId } from '@/types/adminAccess'
 import VersionBadge from '@/components/common/VersionBadge.vue'
@@ -226,6 +235,7 @@ interface NavItem {
   featureFlag?: () => boolean | undefined
   /** Admin module that grants this entry (view level), or 'super_only'. */
   permission?: AdminModuleId | 'super_only'
+  badgeCount?: number
 }
 
 // applyFeatureFlags 递归过滤掉 featureFlag() === false 的节点（含子节点）。
@@ -271,6 +281,7 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 const onboardingStore = useOnboardingStore()
 const adminSettingsStore = useAdminSettingsStore()
+const supportTicketStore = useSupportTicketStore()
 const adminAccessStore = useAdminAccessStore()
 const { canUseBatchImage, refreshBatchImageAccess } = useBatchImageAccess()
 
@@ -746,6 +757,7 @@ const flagChannelMonitor = makeSidebarFlag(FeatureFlags.channelMonitor)
 const flagPayment = makeSidebarFlag(FeatureFlags.payment)
 const flagAvailableChannels = makeSidebarFlag(FeatureFlags.availableChannels)
 const flagSubscription = makeSidebarFlag(FeatureFlags.subscription)
+const flagSupportTickets = makeSidebarFlag(FeatureFlags.supportTickets)
 
 // 购买入口文案随站点计费模式切换：仅充值 → 「充值」，仅订阅 → 「订阅」，否则「充值/订阅」。
 const purchaseNavLabel = computed(() => {
@@ -786,6 +798,7 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     { path: '/orders', label: t('nav.myOrders'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagPayment },
     { path: '/redeem', label: t('nav.redeem'), icon: GiftIcon, hideInSimpleMode: true },
     { path: '/affiliate', label: t('nav.affiliate'), icon: UsersIcon, hideInSimpleMode: true, featureFlag: flagAffiliate },
+    ...(withDashboard ? [{ path: '/support-tickets', label: t('nav.supportTickets'), icon: TicketIcon, featureFlag: flagSupportTickets, badgeCount: supportTicketStore.userUnread }] : []),
     { path: '/profile', label: t('nav.profile'), icon: UserIcon },
     ...customMenuItemsForUser.value.map((item): NavItem => ({
       path: `/custom/${item.id}`,
@@ -849,6 +862,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/share-scheduling', label: t('nav.shareScheduling'), icon: ScaleIcon, permission: 'share_scheduling' },
     { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement, permission: 'super_only' },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon, permission: 'announcements' },
+    { path: '/admin/support-tickets', label: t('nav.supportTickets'), icon: TicketIcon, featureFlag: flagSupportTickets, permission: 'support_tickets', badgeCount: supportTicketStore.adminPending },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon, permission: 'proxies' },
     {
       path: '/admin/security-audit',

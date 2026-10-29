@@ -40,6 +40,10 @@
                 {{ t('admin.accounts.refreshToken') }}
               </button>
             </template>
+            <button v-if="auth.isAdmin && isOpenAIOAuthParent" data-test="manage-openai-totp" @click="$emit('manage-openai-totp', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-amber-600 hover:bg-gray-100 dark:hover:bg-dark-700">
+              <Icon name="shield" size="sm" />
+              {{ t('admin.accounts.openaiTotp.manageTitle') }}
+            </button>
             <button v-if="isOpenAIOAuthParent && canPlace" @click="$emit('create-spark-shadow', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-amber-600 hover:bg-gray-100 dark:hover:bg-dark-700">
               <Icon name="sparkles" size="sm" />
               {{ t('admin.accounts.createSparkShadow') }}
@@ -71,11 +75,13 @@ import { useI18n } from 'vue-i18n'
 import { Icon } from '@/components/icons'
 import type { Account } from '@/types'
 import { IQ_GATE_KEY_PREFIX } from './iqCheckPresentation'
+import { useAuthStore } from '@/stores/auth'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 
 const props = defineProps<{ show: boolean; account: Account | null; anchorRect: DOMRect | null }>()
-const emit = defineEmits(['iq-run', 'iq-records', 'close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow'])
+const emit = defineEmits(['iq-run', 'iq-records', 'close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow', 'manage-openai-totp'])
 const { t } = useI18n()
+const auth = useAuthStore()
 const { canManage, has } = useAdminPermission('accounts')
 // Duplicate and Spark shadow place a new account into groups: they also need "Adjust balance".
 const canPlace = computed(() => canManage.value && has('users.balance_adjust'))

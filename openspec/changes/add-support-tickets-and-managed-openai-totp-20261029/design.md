@@ -2,7 +2,7 @@
 
 “Platform TOTP” is the existing user's XY2API login second factor. “Managed OpenAI TOTP” is a separate email/password/TOTP credential used by an administrator's managed OpenAI OAuth parent account for upstream reauthentication. The two stores, APIs and user experiences remain separate.
 
-“Direct 2FA login/import” is an existing XY2API capability per the user's clarification. This change does not redesign it. The implementation must verify the current branch's exact entry point and reuse its account-creation integration when a managed credential is first saved.
+The user confirmed the existing feature is JSON import and authorized adding email/password/TOTP direct login/import in this change. A local worker obtains a fresh authenticated session, which is encrypted in a dedicated task record and imported on the server through the existing Codex session validation/account creation logic. The browser never receives the session tokens. Import completion must be idempotent and may not overwrite credentials for an account with an active rotation.
 
 ## Website support tickets
 
@@ -15,13 +15,14 @@
 ### User behavior
 
 - List/open/create/reply/close/reopen only the authenticated user's tickets. Repository queries include `user_id`; an unknown or foreign ID returns the same not-found response.
-- Enforce open-ticket and daily-create limits, per-user message rate limits, title/body/category bounds and a per-ticket user-message cap inside write transactions.
+- Enforce open-ticket and daily-create limits, per-user message rate limits, title/body/category bounds and a per-ticket conversation-length cap on user replies inside write transactions.
 - User messages put the ticket back in pending and mark it unread for admins. Opening a conversation clears the caller's unread marker only if the message count has not changed since read.
 - Ticket detail polls while visible and stops polling when unmounted.
 
 ### Admin behavior
 
-- Only full administrators manage tickets. Operator-scoped admins and observer/read-only account roles have no ticket access.
+- Full administrators have all ticket access. Creating or editing an operator exposes the `support_tickets` permission row: `view` permits list, summary and detail; `manage` additionally permits reply, status changes and deletion. Omitted permissions default to no access. Read-only operators have no mutation controls, and the backend enforces the same boundary.
+- Ticket settings remain full-administrator only. Managed OpenAI login credentials and TOTP management also remain full-administrator only.
 - List/filter/search, summary badge, inspect author context, reply with an explicit next status, set processing/closed state and delete.
 - Replies mark the ticket unread for its owner. Status and messages change atomically.
 - Support-ticket endpoints are placed behind the existing admin auth, permission and compliance middleware, and user endpoints behind existing authenticated user middleware and panel rate limits.

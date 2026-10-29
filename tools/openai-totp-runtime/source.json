@@ -1,0 +1,23 @@
+{
+  "source": "poxiao33/toSub2",
+  "commit": "8548397e89bf80e508eda64a87e0d556d43abc84",
+  "sha256": {
+    "src/cloudflare-ctf/cf_runtime.cjs": "1cf1aa6320c53e6fd52ac7ca1f94078e6eaa46e016f1945b770f91224f95b834",
+    "src/cloudflare-ctf/cloudflare_solver.py": "f396ef44383b4327acd091f140d2094627cfae3552b5b318bb0cfaee8e885a8c",
+    "src/cloudflare-ctf/sentinel_client.py": "0c92c06a37af623409a6f7eaae81b24906c44efd61cc7c71aea444962955819d",
+    "src/cloudflare-ctf/sentinel_dynamic.py": "99aa56e441263fbe993b477475b4004365538f119ee9fcc709660a8d21bd4cba",
+    "src/cloudflare-ctf/sentinel_runtime.cjs": "b70059355417143cde7049bdcbec29ab37b892720d10bfecd7ead0c1962cddc9",
+    "src/cloudflare-ctf/turnstile_runtime.cjs": "a8c2eb1086a9f290ad6a98df1365def9cdf8c4a5a7e596a891ab3982dc623af3",
+    "src/console-server.mjs": "d03f066b30d1c0a65b018700f50722979ba9ddd9238f0406e3b429fe0af32415",
+    "src/credential-store.mjs": "a6cbeb5c0d56cb843c56fccff9337b9152a2b4a9f08965f1a37f28675277247e",
+    "src/custom-sms.mjs": "921f61f526c6320e48de8d2286feda4b44ccba367cc83d603e42da6fbcfa77fc",
+    "src/luban-sms.mjs": "26dc2c78702f4f38c4e3db9379a973cff90e6a5fc425cdfce9aa5d7b60e8636b",
+    "src/mail-otp.mjs": "ec458b40b83e23595eeda899287b7bf15b7f4d554778e61f27ed3f4e9c6c9156",
+    "src/protocol-login.mjs": "b7e5ed0a4dcc2955607815f01ea291d1708c661af0796b19dc5dab23ff9c4752",
+    "src/sentinel-sdk.js": "4f8ef8d5870894fd0101fc40ff45ea13c0f8e25c71c2ba28e5df5baf98babbb5",
+    "src/sms-providers.mjs": "a36244fc47537e65d77b67be7d9aff07368d655eb29f380a173623a0e143c2e5",
+    "src/smsbower.mjs": "fe5d45470c6f86f3551d6af22363fb152fd2ae476bacf83c07395eeab4e77516",
+    "src/tls-transport.mjs": "817a71063a0d381fd697f189c731293174931dbbbbfceb9a1628f02621733074",
+    "src/tls_transport.py": "60d0369deb7df8701e0c2ca5082f0c6802540ace98ae6939ce94c2e26a087789"
+  }
+}

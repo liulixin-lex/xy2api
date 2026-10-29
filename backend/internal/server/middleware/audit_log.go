@@ -109,15 +109,20 @@ func truncateAuditExtraString(value string, limit int) string {
 
 // auditSensitiveReads 需要审计的敏感 GET 读取（method+FullPath → 动作名）。
 var auditSensitiveReads = map[string]string{
-	"GET /api/v1/admin/accounts/data":             "admin.accounts.export",
-	"GET /api/v1/admin/proxies/data":              "admin.proxies.export",
-	"GET /api/v1/admin/redeem-codes/export":       "admin.redeem_codes.export",
-	"GET /api/v1/admin/backups/:id/download-url":  "admin.backups.download",
-	"GET /api/v1/admin/settings/admin-api-key":    "admin.admin_api_key.read",
-	"GET /api/v1/admin/users/:id/api-keys":        "admin.users.api_keys.read",
-	"GET /api/v1/admin/groups/:id/api-keys":       "admin.groups.api_keys.read",
-	"GET /api/v1/admin/backups/s3-config":         "admin.backups.s3_config.read",
-	"GET /api/v1/admin/data-management/s3/config": "admin.data_management.s3_config.read",
+	"GET /api/v1/admin/accounts/:id/openai-totp":       "admin.accounts.openai_totp.read",
+	"GET /api/v1/admin/accounts/openai-login/:task_id": "admin.accounts.openai_login.read",
+	"GET /api/v1/admin/accounts/data":                  "admin.accounts.export",
+	"GET /api/v1/admin/proxies/data":                   "admin.proxies.export",
+	"GET /api/v1/admin/redeem-codes/export":            "admin.redeem_codes.export",
+	"GET /api/v1/admin/backups/:id/download-url":       "admin.backups.download",
+	"GET /api/v1/admin/settings/admin-api-key":         "admin.admin_api_key.read",
+	"GET /api/v1/admin/users/:id/api-keys":             "admin.users.api_keys.read",
+	"GET /api/v1/admin/groups/:id/api-keys":            "admin.groups.api_keys.read",
+	"GET /api/v1/admin/backups/s3-config":              "admin.backups.s3_config.read",
+	"GET /api/v1/admin/support-tickets":                "admin.support_tickets.list",
+	"GET /api/v1/admin/support-tickets/:id":            "admin.support_tickets.read",
+	"GET /api/v1/admin/support-tickets/summary":        "admin.support_tickets.summary.read",
+	"GET /api/v1/admin/data-management/s3/config":      "admin.data_management.s3_config.read",
 }
 
 // auditActionOverrides 变更类请求的动作名精确映射（未命中时自动推导）。
@@ -142,11 +147,29 @@ var auditActionOverrides = map[string]string{
 	"POST /api/v1/admin/prompt-audit/events/batch-delete":     "admin.prompt_audit.events.batch_delete",
 	"POST /api/v1/admin/prompt-audit/events/delete-preview":   "admin.prompt_audit.events.delete_preview",
 	"POST /api/v1/admin/prompt-audit/events/delete-by-filter": "admin.prompt_audit.events.filter_delete",
+	"POST /api/v1/support-tickets":                            "user.support_tickets.create",
+	"POST /api/v1/support-tickets/:id/messages":               "user.support_tickets.reply",
+	"POST /api/v1/support-tickets/:id/close":                  "user.support_tickets.close",
+	"POST /api/v1/support-tickets/:id/reopen":                 "user.support_tickets.reopen",
+	"POST /api/v1/admin/support-tickets/:id/messages":         "admin.support_tickets.reply",
+	"POST /api/v1/admin/support-tickets/:id/status":           "admin.support_tickets.status",
+	"DELETE /api/v1/admin/support-tickets/:id":                "admin.support_tickets.delete",
 }
 
 // auditBodyOmittedRoutes 请求体几乎整体由凭证构成的路由（如整块粘贴 auth JSON 的导入接口）。
 // 这类 body 的凭证内嵌在普通字符串值里，键级脱敏无法覆盖，整体不入库。
 var auditBodyOmittedRoutes = map[string]struct{}{
+	"PUT /api/v1/admin/accounts/:id/openai-totp":               {},
+	"POST /api/v1/admin/accounts/:id/openai-totp/rotate":       {},
+	"POST /api/v1/admin/accounts/:id/openai-totp/reconcile":    {},
+	"POST /api/v1/admin/accounts/:id/openai-totp/export":       {},
+	"POST /api/v1/admin/accounts/openai-login":                 {},
+	"POST /api/v1/admin/accounts/openai-login/:task_id/import": {},
+	"POST /api/v1/internal/openai-totp/claim":                  {},
+	"POST /api/v1/internal/openai-totp/:task_id/phase":         {},
+	"POST /api/v1/internal/openai-totp/:task_id/finish":        {},
+	"POST /api/v1/internal/openai-totp/recover":                {},
+
 	"PUT /api/v1/admin/accounts/:id/codex-ticket":               {},
 	"POST /api/v1/admin/accounts/:id/codex-ticket/harvest":      {},
 	"POST /api/v1/auth/passkey/login/finish":                    {},
@@ -159,6 +182,9 @@ var auditBodyOmittedRoutes = map[string]struct{}{
 	"POST /api/v1/admin/prompt-audit/events/batch-delete":       {},
 	"POST /api/v1/admin/prompt-audit/events/delete-preview":     {},
 	"POST /api/v1/admin/prompt-audit/events/delete-by-filter":   {},
+	"POST /api/v1/support-tickets":                              {},
+	"POST /api/v1/support-tickets/:id/messages":                 {},
+	"POST /api/v1/admin/support-tickets/:id/messages":           {},
 }
 
 // NewAuditLogMiddleware 创建审计中间件。
@@ -271,6 +297,11 @@ func NewAuditLogMiddleware(auditService *service.AuditLogService) AuditLogMiddle
 
 		// 请求头凭证掩码（仅保留首尾）。
 		entry.CredentialMasked = MaskedRequestCredential(c)
+		workerRequest := strings.HasPrefix(c.FullPath(), "/api/v1/internal/openai-totp/")
+		if workerRequest {
+			entry.UserAgent = ""
+			entry.CredentialMasked = ""
+		}
 
 		extra := map[string]any{}
 		if value, ok := c.Get(auditCtxKeyExtra); ok {
@@ -287,7 +318,7 @@ func NewAuditLogMiddleware(auditService *service.AuditLogService) AuditLogMiddle
 			}
 			extra["params"] = params
 		}
-		if q := service.RedactAuditQuery(c.Request.URL.RawQuery); q != "" {
+		if q := service.RedactAuditQuery(c.Request.URL.RawQuery); q != "" && !workerRequest {
 			extra["query"] = q
 		}
 		if len(extra) > 0 {

@@ -331,6 +331,8 @@
     "279_cache_northstar.sql": "58dc0c8572b7ecd1899db8f995d1f2795a40762a9d94e864ac6a8f377bc3447e",
     "280_drop_cache_northstar.sql": "da25329842bda08dbfe7cd8e050639b666bf318d84eb66f11495534811dc391b",
     "281_iq_targets.sql": "54c49823cfd3076f58bbcd3d1e2420421ed696db78f0d1f939983bcebe78dc6b",
-    "282_admin_operator_permissions.sql": "eeef08381e24d4a9d33af083b3b62b433d68ac505f1e9e196538c764124321f1"
+    "282_admin_operator_permissions.sql": "eeef08381e24d4a9d33af083b3b62b433d68ac505f1e9e196538c764124321f1",
+    "283_support_tickets.sql": "f6922eeafa4b54aaa410f10e8c4b717579f411d13fc4931cc304fd4f736285b1",
+    "284_openai_totp.sql": "17e20b225fa217870e9392469e39a54bc0190e278711a1d4b9ce1b0570bfbcb4"
   }
 }

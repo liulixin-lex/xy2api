@@ -17,6 +17,7 @@ const (
 	ModuleAccounts        Module = "accounts"
 	ModuleShareScheduling Module = "share_scheduling"
 	ModuleAnnouncements   Module = "announcements"
+	ModuleSupportTickets  Module = "support_tickets"
 	ModuleProxies         Module = "proxies"
 	ModuleSecurityAudit   Module = "security_audit"
 	ModuleRedeemCodes     Module = "redeem_codes"
@@ -28,9 +29,9 @@ const (
 	ModuleSubscriptions   Module = "subscriptions"
 )
 
-// Modules lists the 17 modules in DEV_PLAN 4.2 order (also the UI row order).
+// Modules lists the available permission modules in UI order.
 var Modules = []Module{ModuleDashboard, ModuleOps, ModuleUsers, ModuleGroups, ModuleChannels,
-	ModuleAccounts, ModuleShareScheduling, ModuleAnnouncements, ModuleProxies, ModuleSecurityAudit,
+	ModuleAccounts, ModuleShareScheduling, ModuleAnnouncements, ModuleSupportTickets, ModuleProxies, ModuleSecurityAudit,
 	ModuleRedeemCodes, ModulePromoCodes, ModuleAffiliates, ModuleOrders, ModuleUsage,
 	ModuleAuditLogs, ModuleSubscriptions}
 

@@ -80,3 +80,12 @@ describe('AppSidebar subscription feature flag', () => {
     expect(componentSource).toMatch(/path: '\/purchase'[^\n]*label: purchaseNavLabel\.value/)
   })
 })
+
+
+describe('AppSidebar support tickets feature flag', () => {
+  it('gates user and admin ticket entries and uses the dedicated permission boundary', () => {
+    expect(componentSource).toContain('const flagSupportTickets = makeSidebarFlag(FeatureFlags.supportTickets)')
+    expect(componentSource).toMatch(/path: '\/support-tickets'[^\n]*featureFlag: flagSupportTickets/)
+    expect(componentSource).toMatch(/path: '\/admin\/support-tickets'[^\n]*featureFlag: flagSupportTickets, permission: 'support_tickets'/)
+  })
+})

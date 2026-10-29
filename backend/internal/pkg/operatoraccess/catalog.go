@@ -75,6 +75,15 @@ var ServiceEnforcedFields = map[FieldRule]bool{
 }
 
 var catalog = map[string]Entry{
+	"GET /accounts/:id/openai-totp":               {Kind: KindSuperOnly},
+	"PUT /accounts/:id/openai-totp":               {Kind: KindSuperOnly},
+	"POST /accounts/:id/openai-totp/rotate":       {Kind: KindSuperOnly},
+	"POST /accounts/:id/openai-totp/reconcile":    {Kind: KindSuperOnly},
+	"POST /accounts/:id/openai-totp/export":       {Kind: KindSuperOnly},
+	"POST /accounts/openai-login":                 {Kind: KindSuperOnly},
+	"GET /accounts/openai-login/:task_id":         {Kind: KindSuperOnly},
+	"POST /accounts/openai-login/:task_id/import": {Kind: KindSuperOnly},
+
 	"GET /accounts":                                                            {Kind: KindModule, Module: "accounts", Level: LevelView, AnyOf: []Module{"channels", "groups", "usage"}, Redact: []Redaction{"account"}},
 	"POST /accounts":                                                           {Kind: KindModule, Module: "accounts", Level: LevelManage, Redact: []Redaction{"account"}, Fields: "account_create"},
 	"DELETE /accounts/:id":                                                     {Kind: KindModule, Module: "accounts", Level: LevelManage, Redact: []Redaction{"account"}},
@@ -176,6 +185,12 @@ var catalog = map[string]Entry{
 	"POST /affiliates/users/:user_id/withdraw":                                 {Kind: KindModule, Module: "affiliates", Level: LevelManage, Flags: []Flag{"orders.refund"}, Target: "user_path_user_id"},
 	"POST /affiliates/users/batch-rate":                                        {Kind: KindModule, Module: "affiliates", Level: LevelManage, Flags: []Flag{"users.balance_adjust"}, Target: "user_body_ids"},
 	"GET /affiliates/users/lookup":                                             {Kind: KindModule, Module: "affiliates", Level: LevelView},
+	"DELETE /support-tickets/:id":                                              {Kind: KindModule, Module: ModuleSupportTickets, Level: LevelManage, Redact: []Redaction{"support_ticket_author"}},
+	"GET /support-tickets":                                                     {Kind: KindModule, Module: ModuleSupportTickets, Level: LevelView, Redact: []Redaction{"support_ticket_author"}},
+	"GET /support-tickets/:id":                                                 {Kind: KindModule, Module: ModuleSupportTickets, Level: LevelView, Redact: []Redaction{"support_ticket_author"}},
+	"GET /support-tickets/summary":                                             {Kind: KindModule, Module: ModuleSupportTickets, Level: LevelView, Redact: []Redaction{"support_ticket_author"}},
+	"POST /support-tickets/:id/messages":                                       {Kind: KindModule, Module: ModuleSupportTickets, Level: LevelManage, Redact: []Redaction{"support_ticket_author"}},
+	"POST /support-tickets/:id/status":                                         {Kind: KindModule, Module: ModuleSupportTickets, Level: LevelManage, Redact: []Redaction{"support_ticket_author"}},
 	"GET /announcements":                                                       {Kind: KindModule, Module: "announcements", Level: LevelView},
 	"POST /announcements":                                                      {Kind: KindModule, Module: "announcements", Level: LevelManage},
 	"DELETE /announcements/:id":                                                {Kind: KindModule, Module: "announcements", Level: LevelManage},

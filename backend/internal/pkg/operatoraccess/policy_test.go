@@ -52,3 +52,18 @@ func TestWireSortsFlags(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, `{"modules":{},"flags":[]}`, string(raw))
 }
+
+func TestSupportTicketPermissionsDecodeAndLegacyDefault(t *testing.T) {
+	for _, level := range []string{"view", "manage"} {
+		p, err := DecodeWire([]byte(`{"modules":{"support_tickets":"` + level + `"},"flags":[]}`))
+		require.NoError(t, err)
+		require.True(t, p.Can(ModuleSupportTickets, LevelView))
+		require.Equal(t, level == "manage", p.Can(ModuleSupportTickets, LevelManage))
+		require.Equal(t, level, p.Wire().Modules["support_tickets"])
+	}
+	old, err := DecodeWire([]byte(`{"modules":{"users":"manage","accounts":"manage"},"flags":[]}`))
+	require.NoError(t, err)
+	require.False(t, old.Can(ModuleSupportTickets, LevelView))
+	require.NotContains(t, old.Wire().Modules, "support_tickets")
+	require.Len(t, Modules, 18)
+}

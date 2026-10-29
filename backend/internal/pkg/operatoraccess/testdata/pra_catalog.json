@@ -7607,5 +7607,213 @@
   "fields": null,
   "redact": [],
   "ws": false
+ },
+ {
+  "method": "DELETE",
+  "path": "/support-tickets/:id",
+  "group": "admin",
+  "reg": "registerSupportTicketRoutes",
+  "module": "support_tickets",
+  "level": "manage",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [
+   "support_ticket_author"
+  ],
+  "ws": false
+ },
+ {
+  "method": "GET",
+  "path": "/support-tickets",
+  "group": "admin",
+  "reg": "registerSupportTicketRoutes",
+  "module": "support_tickets",
+  "level": "view",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [
+   "support_ticket_author"
+  ],
+  "ws": false
+ },
+ {
+  "method": "GET",
+  "path": "/support-tickets/:id",
+  "group": "admin",
+  "reg": "registerSupportTicketRoutes",
+  "module": "support_tickets",
+  "level": "view",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [
+   "support_ticket_author"
+  ],
+  "ws": false
+ },
+ {
+  "method": "GET",
+  "path": "/support-tickets/summary",
+  "group": "admin",
+  "reg": "registerSupportTicketRoutes",
+  "module": "support_tickets",
+  "level": "view",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [
+   "support_ticket_author"
+  ],
+  "ws": false
+ },
+ {
+  "method": "POST",
+  "path": "/support-tickets/:id/messages",
+  "group": "admin",
+  "reg": "registerSupportTicketRoutes",
+  "module": "support_tickets",
+  "level": "manage",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [
+   "support_ticket_author"
+  ],
+  "ws": false
+ },
+ {
+  "method": "POST",
+  "path": "/support-tickets/:id/status",
+  "group": "admin",
+  "reg": "registerSupportTicketRoutes",
+  "module": "support_tickets",
+  "level": "manage",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [
+   "support_ticket_author"
+  ],
+  "ws": false
+ },
+ {
+  "method": "GET",
+  "path": "/accounts/:id/openai-totp",
+  "group": "admin",
+  "reg": "registerOpenAITOTPRoutes",
+  "module": null,
+  "level": "super_only",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [],
+  "ws": false
+ },
+ {
+  "method": "PUT",
+  "path": "/accounts/:id/openai-totp",
+  "group": "admin",
+  "reg": "registerOpenAITOTPRoutes",
+  "module": null,
+  "level": "super_only",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [],
+  "ws": false
+ },
+ {
+  "method": "POST",
+  "path": "/accounts/:id/openai-totp/rotate",
+  "group": "admin",
+  "reg": "registerOpenAITOTPRoutes",
+  "module": null,
+  "level": "super_only",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [],
+  "ws": false
+ },
+ {
+  "method": "POST",
+  "path": "/accounts/:id/openai-totp/reconcile",
+  "group": "admin",
+  "reg": "registerOpenAITOTPRoutes",
+  "module": null,
+  "level": "super_only",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [],
+  "ws": false
+ },
+ {
+  "method": "POST",
+  "path": "/accounts/:id/openai-totp/export",
+  "group": "admin",
+  "reg": "registerOpenAITOTPRoutes",
+  "module": null,
+  "level": "super_only",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [],
+  "ws": false
+ },
+ {
+  "method": "POST",
+  "path": "/accounts/openai-login",
+  "group": "admin",
+  "reg": "registerOpenAITOTPRoutes",
+  "module": null,
+  "level": "super_only",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [],
+  "ws": false
+ },
+ {
+  "method": "GET",
+  "path": "/accounts/openai-login/:task_id",
+  "group": "admin",
+  "reg": "registerOpenAITOTPRoutes",
+  "module": null,
+  "level": "super_only",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [],
+  "ws": false
+ },
+ {
+  "method": "POST",
+  "path": "/accounts/openai-login/:task_id/import",
+  "group": "admin",
+  "reg": "registerOpenAITOTPRoutes",
+  "module": null,
+  "level": "super_only",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [],
+  "ws": false
  }
 ]
