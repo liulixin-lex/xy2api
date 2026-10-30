@@ -12,6 +12,7 @@ export default {
       channels: '渠道管理',
       accounts: '账号管理',
       share_scheduling: '份额调度',
+      support_tickets: '工单处理',
       announcements: '公告',
       proxies: 'IP管理',
       security_audit: '安全审计',
@@ -46,6 +47,7 @@ export default {
       }
     },
     loadFailed: '加载普通管理员权限失败',
+    createdPermissionsPending: '账号已创建，权限尚未保存。请重试保存权限，或关闭后在编辑账号中配置。',
     createHint: '新建的普通管理员没有任何权限，请在编辑中设置。',
     groupExclusiveHint: '没有“加减余额”权限时，新分组只能是专属分组。',
     searchByEmail: "按用户邮箱搜索（需包含 {'@'}）",

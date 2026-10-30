@@ -35,7 +35,7 @@ export const ADMIN_PERMISSION_DENIED_EVENT = 'admin-permission-denied'
 /** A permission error refreshes `/me/access` at most once per this interval. */
 export const PERMISSION_DENIED_REFRESH_INTERVAL_MS = 60_000
 
-type AdminPageGate = 'opsMonitoring' | 'payment' | 'channelMonitor' | 'subscription' | 'riskControl' | 'affiliate'
+type AdminPageGate = 'opsMonitoring' | 'payment' | 'channelMonitor' | 'subscription' | 'riskControl' | 'affiliate' | 'supportTickets'
 
 /**
  * Public-settings switches that hide admin pages, with the value used while
@@ -47,6 +47,7 @@ export const ADMIN_PAGE_PUBLIC_GATES = {
   channelMonitor: { key: 'channel_monitor_enabled', whenUnset: true },
   subscription: { key: 'subscription_enabled', whenUnset: true },
   riskControl: { key: 'risk_control_enabled', whenUnset: false },
+  supportTickets: { key: 'support_ticket_enabled', whenUnset: false },
   affiliate: { key: 'affiliate_enabled', whenUnset: false }
 } as const satisfies Record<string, { key: keyof PublicSettings; whenUnset: boolean }>
 
@@ -84,6 +85,8 @@ export const ADMIN_PAGES_IN_SIDEBAR_ORDER: readonly AdminPageEntry[] = [
   { path: '/admin/share-scheduling', permission: 'share_scheduling' },
   { path: '/admin/plugins', permission: 'super_only' },
   { path: '/admin/announcements', permission: 'announcements' },
+  { path: '/admin/support-tickets', permission: 'support_tickets', gate: 'supportTickets' },
+  { path: '/admin/support-tickets/:id(\\d+)', permission: 'support_tickets', gate: 'supportTickets' },
   { path: '/admin/proxies', permission: 'proxies' },
   { path: '/admin/risk-control', permission: 'security_audit', gate: 'riskControl' },
   { path: '/admin/prompt-audit', permission: 'security_audit', gate: 'riskControl' },

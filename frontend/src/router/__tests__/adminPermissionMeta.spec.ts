@@ -165,6 +165,8 @@ describe('admin route permission meta', () => {
     }
     expect(findRoute('/admin/settings').meta?.permission).toBe('super_only')
     expect(findRoute('/admin/plugins').meta?.permission).toBe('super_only')
+    expect(findRoute('/admin/support-tickets').meta?.permission).toBe('support_tickets')
+    expect(findRoute('/admin/support-tickets/:id(\\d+)').meta?.permission).toBe('support_tickets')
   })
 
   it('sends an operator without the module to the first permitted admin page', async () => {
@@ -178,6 +180,19 @@ describe('admin route permission meta', () => {
     expect(allowed).toHaveBeenCalledOnce()
     expect(allowed).toHaveBeenCalledWith()
     expect(getMeAccessMock).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['view', 'manage'] as const)('allows ticket %s only when the module is granted', async level => {
+    appStore.cachedPublicSettings = { support_ticket_enabled: true }
+    seedOperator({ support_tickets: level })
+    expect(await runGuard('/admin/support-tickets')).toHaveBeenCalledWith()
+    expect(await runGuard('/admin/support-tickets/:id(\\d+)')).toHaveBeenCalledWith()
+  })
+
+  it('rejects ticket routes for existing operators without an explicit grant', async () => {
+    appStore.cachedPublicSettings = { support_ticket_enabled: true }
+    seedOperator({ accounts: 'manage' })
+    expect(await runGuard('/admin/support-tickets')).toHaveBeenCalledWith('/admin/accounts')
   })
 
   it('sends an operator with no admin page to the profile', async () => {

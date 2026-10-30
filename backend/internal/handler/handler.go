@@ -7,6 +7,7 @@ import (
 
 // AdminHandlers contains all admin-related HTTP handlers
 type AdminHandlers struct {
+	OpenAITOTP             *admin.OpenAITOTPHandler
 	OperatorAccess         *admin.OperatorAccessHandler
 	Dashboard              *admin.DashboardHandler
 	User                   *admin.UserHandler
@@ -74,6 +75,7 @@ type Handlers struct {
 	ModelPlaza       *ModelPlazaHandler
 	AsyncImage       *AsyncImageHandler
 	BatchImage       *BatchImageHandler
+	SupportTicket    *SupportTicketHandler
 }
 
 // BuildInfo contains build-time information

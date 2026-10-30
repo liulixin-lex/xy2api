@@ -1,3 +1,4 @@
+import supportTickets from './supportTickets'
 import usageExports from './usageExports'
 import landing from './landing'
 import common from './common'
@@ -8,6 +9,7 @@ import admin from './admin'
 import misc from './misc'
 
 export default {
+  ...supportTickets,
   usageExports,
   ...landing,
   ...common,

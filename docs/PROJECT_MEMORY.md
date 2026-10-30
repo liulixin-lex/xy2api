@@ -6,6 +6,13 @@
 
 ## 当前交接状态
 
+### 网站工单与 OpenAI 账号 2FA 登录/管理：PR #168 已创建（2026-10-30；未合并）
+
+- 代码提交 `569bc4759`，分支 `feat/support-tickets-2fa-20261029`。完成网站工单、新增/编辑普通管理员的工单查看/管理授权、OpenAI 邮箱/密码/TOTP 直接登录导入、专用凭据与密钥轮换/恢复/安全导出；按用户要求由 GPT 6.1-sol 编码。
+- 本地最终 Go 全量 unit、相关 race、隔离 PostgreSQL 五项、前端467文件3535项和构建、两端静态检查、embed构建、tools Python96项/Node12项、Wire/tidy幂等、文档/迁移/上游审计通过。新增迁移283/284，当前331项；详细记录已原样归档。
+- 用户授权后已推送，并于 2026-10-30 创建 [PR #168](https://github.com/liulixin-lex/xy2api/pull/168)，目标 `main`。`0e296b368` 的 push CI 七项作业成功，`shell` 未分配 runner、无执行步骤而取消；Security Scan 因既有 Vue I18n 依赖公告 `GHSA-83rm-6c8r-g728` 失败。新 PR 的检查以最新提交为准，未绕过检查或自动合并。
+- 未合并、发布、部署或执行真实OpenAI登录/MFA。工单默认关闭；2FA启用需匹配worker/runtime、固定加密密钥和持久恢复目录。现行说明：[工单](SUPPORT_TICKETS.md)、[OpenAI 2FA](OPENAI_TOTP.md)、[Worker部署](../deploy/OPENAI_TOTP_WORKER.md)。
+
 ### XY2API 0.4.13 正式发布完成（2026-10-29；未部署）
 
 - v0.4.13 于 2026-10-29T17:37:48Z 正式发布，非 draft、非 prerelease；版本 PR #166 固定 head `c179c4347` 的 18 项检查成功后常规合入 `66778769c`，annotated tag 对象 `e6104dae8` 指向该提交。功能 PR #163/#164 与交接 #165 已先合入，发布前完整查询无其他开放 PR。
@@ -1022,3 +1029,27 @@ pnpm --dir frontend run build
 - 验证：475 项韧性 race、16 项真实 Redis 缓存、4 项真实 PostgreSQL 计费必需测试零跳过通过，完整 unit/integration、安全与前端通过。五平台资产双 SHA、全部二进制源码身份、GHCR 双架构与稳定别名、原生全新/升级/回退/重升均核验；用户与 Key 数据保留，临时服务和数据已清理。不冒称执行了 Docker 镜像启动。
 - 收尾：已结束的 N1–N5、管理员分组和自身进行中记录及旧版本速览原样追加归档，保留其他任务与原归档前缀。两份记忆的纯文档收尾走 PR；标签不移动，最终 main 必须除记忆外与发布提交零差异。
 - 边界与下一步：本次不部署、不连接生产。vue-i18n 依赖迁移、上线后 N5 校准与既有明确暂缓事项继续按原边界处理；本地报告记录最终归档 PR、远端与工作树核验，不再为记下自身合并 SHA 递归创建收尾 PR。
+
+### 2026-10-29 — 20261029-support-tickets-2fa — 本地开发与验证完成
+
+- 请求/范围：对照 Sub2API 固定提交 `12a49ef4ef6a2f116389701ac8f1fe620f27bbf5`，补齐网站工单、OpenAI 邮箱/密码/TOTP 直接登录导入及托管密钥管理；用户追加普通管理员新建时可勾工单权限。GPT 6.1-sol 三路编码，主 agent 集成审查；平台用户原有TOTP不重复实现。
+- 完成：工单默认关闭、用户归属/并发上限、管理员view/manage权限表/菜单/接口/脱敏；创建授权部分失败只重试权限。2FA独立加密专表、full-admin与强制step-up、内部worker Bearer/短租约、候选日志fsync→数据库同步提交→激活、uncertain锁定/只验证恢复、安全导出与页面秘密清理。服务端登录导入只创建账号，内部随机marker防伪造/复制且可崩溃重入；活跃任务保护账号删除/身份编辑。
+- 文件/登记：新增迁移283/284及追加checksum，共331项；Wire真实生成；管理路由目录523条、权限模块18个；docs/OpenSpec/部署runbook、固定runtime源码与依赖、CI关键前端和worker mock门禁、`xy-support-tickets`与`xy-managed-openai-totp`具名补丁登记完成。
+- 验证：最终 `go test -tags=unit ./...` 全部通过（服务层368.204s）；相关六包race与真实隔离PG -race五项通过。前端全量467文件3535项、typecheck/eslint/生产build、Go lint 0 issues及embed构建通过。Python工具96项、Node日志/runner12项、固定runtime离线预检与假服务smoke通过；generate+tidy两轮哈希一致，迁移只追加校验、scheduler-diff、docs一致性、代码提交干净树audit通过。
+- 修复记录：首轮全量Go设置快照漏新字段、一次gofmt、工单异步竞态、失效任务队首阻塞、终态不可见、无候选verify_old、导入marker伪造均已修正并补回归；未绕过门禁。隔离PG已停止，保留仓外测试日志和三路报告。
+- Git/后续：代码本地提交 `569bc4759`；本次收尾仅文档/记忆归档。工作分支 `feat/support-tickets-2fa-20261029`。未push、PR、合并、发版或部署；产品版本与Sub2API兼容基线不变。真实OpenAI协议仅mock，后续启用须配置worker与持久恢复目录并在获授权环境验证真实账号。
+
+### 2026-10-30 — 20261030-support-tickets-2fa-pr — 已推送分支并创建 PR #168
+
+- 请求/目标：用户先授权推送功能分支，再明确要求创建 PR。2026-10-29 的推送已完成，本轮以 `main` 为目标创建 [PR #168](https://github.com/liulixin-lex/xy2api/pull/168)，状态 OPEN、非草稿。
+- 开始状态：分支 `feat/support-tickets-2fa-20261029`，HEAD `0e296b368` 与远端一致，工作树干净；原有三个提交包括方案 `811c7b07d`、功能 `569bc4759` 和验证记录 `0e296b368`。
+- 完成操作：PR 正文列出工单、普通管理员授权、OpenAI 2FA、迁移 283/284、部署前提及 mock 验证边界；补正顶部的推送与 PR 状态，保留先前操作日志原文。本轮只修改本记忆文件，不改产品代码。
+- 验证：2026-10-30 只读核实 [CI 40913579117](https://github.com/liulixin-lex/xy2api/actions/runs/40913579117) 七项作业成功，`shell` 的 runner_id 为 0、步骤为空且取消；[Security Scan 40913579111](https://github.com/liulixin-lex/xy2api/actions/runs/40913579111) 因 Vue I18n 及其传递依赖的高危公告失败。该分支没有修改前端依赖清单和锁文件；已通过的本地产品验证沿用前一条记录，本轮不重复运行长测试。
+- 卡点/下一步：创建后 GitHub 报 PR 与当前 `main` 存在合并冲突，需在合并前处理；最新 PR 检查仍待结果，既有依赖漏洞需修复。本轮未添加审计例外、合并、发布、部署或运行真实 OpenAI 登录/MFA。交接记录提交前执行文档一致性和 diff 检查，提交后核对远端分支与 PR HEAD。
+
+### 2026-10-30 — 20261030-release0414 — PR #168 集成冲突已处理
+
+- 业务冲突仅账号操作菜单：保留 #163 账号管理即可复制/影子的权限，新增 2FA 仅超级管理员入口；权限目录自动合并后核对原权限不变。provenance/policy 按三方变更并集保留，不恢复已退役 literal。
+- 已发布 330 条 SQL/checksum 原样保留；未发布工单与 2FA 顺延为 284、285，总计332，现行文档同步。两侧历史原文保留，旧迁移编号属于历史事实，本文追加更正。
+- 前端依赖未改；main 已有用户批准至 2026-11-27 的 vue-i18n 例外，新页面无翻译 HTML 或 escapeParameter，合入后按既有例外验证。
+- 下一步：专项验证及固定 HEAD 完整 CI，通过后合并与版本发布。

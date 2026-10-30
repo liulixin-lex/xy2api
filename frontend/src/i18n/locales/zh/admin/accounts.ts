@@ -1,5 +1,8 @@
+import openaiTotp from './openaiTotp'
+
 export default {
     accounts: {
+      openaiTotp,
       stateTicket: {
         standbyAvailable: '候补可用',
         qualityTask: '质量检测中',

@@ -33,6 +33,8 @@
 | [`GROUP_CATEGORIES.md`](GROUP_CATEGORIES.md) | 分组分类（管理端整理，不影响调度、计费和用户端） |
 | [`UPSTREAM_BALANCE.md`](UPSTREAM_BALANCE.md) | 账号页「上游余额」列：sub2api 与 new-api 的识别和口径、每分钟采集、对上游的影响、new-api 访问令牌 |
 | [`ADMIN_PERMISSIONS.md`](ADMIN_PERMISSIONS.md) | 普通管理员与后台权限：模块「查看 / 管理」、资金与数据开关、显示上游地址与网络设置、只有超级管理员能做的事、保护措施与原因码、迁移 282 与回退 |
+| [`SUPPORT_TICKETS.md`](SUPPORT_TICKETS.md) | 网站在线工单：功能开关、用户归属、管理员权限、消息限制与数据保留 |
+| [`OPENAI_TOTP.md`](OPENAI_TOTP.md) | OpenAI 账号 2FA 直接登录导入、专用加密凭据、轮换/恢复与安全导出；[Worker 部署](../deploy/OPENAI_TOTP_WORKER.md) |
 | [`CHANNEL_MONITOR_V1.md`](CHANNEL_MONITOR_V1.md) | 渠道监控 v1：判定口径（10 秒黄、30 秒红）、流式探测与请求形状、探测选号、调度可靠性 |
 | [`GROK_MONITOR_RESPONSES.md`](GROK_MONITOR_RESPONSES.md) | Grok 渠道监控的 Responses 模式（0.4.1 起，可选） |
 | [`ASYNC_IMAGE_TASKS.md`](ASYNC_IMAGE_TASKS.md) | 异步生图任务 |
@@ -90,4 +92,5 @@
 | [`stabilize-openai-iq-check`](../openspec/changes/stabilize-openai-iq-check/) | 智商检测稳定性 | 已完成；2026-10-27 起被按模型检测取代，见 `docs/OPENAI_IQ_CHECK.md` |
 | [`iq-detection-operations`](../openspec/changes/iq-detection-operations/) | 智商检测运营 | 已结束（线上验收按用户决定不再执行）；2026-10-27 起被按模型检测取代 |
 | [`add-openai-compatible-prompt-audit`](../openspec/changes/add-openai-compatible-prompt-audit/) | 提示词审计 | 上游 Sub2API 的变更，随同步引入 |
+| [`add-support-tickets-and-managed-openai-totp-20261029`](../openspec/changes/add-support-tickets-and-managed-openai-totp-20261029/) | 网站工单与托管 OpenAI 账号 TOTP 管理 | 本地开发与验证完成，含普通管理员工单授权；未推送、未发布，真实上游未验证 |
 | [`codex-manifest-pinned-accounts`](../openspec/changes/codex-manifest-pinned-accounts/) | Codex manifest 固定账号 | 上游 Sub2API 的变更，随同步引入 |

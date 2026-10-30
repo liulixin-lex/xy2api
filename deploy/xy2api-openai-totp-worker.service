@@ -1,0 +1,30 @@
+[Unit]
+Description=XY2API OpenAI login and TOTP worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=xy2api-totp
+Group=xy2api-totp
+WorkingDirectory=/opt/xy2api-totp/xy2api
+EnvironmentFile=/etc/xy2api/openai-totp-worker.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+UMask=0077
+StateDirectory=xy2api-totp
+StateDirectoryMode=0700
+ExecStartPre=/opt/xy2api-totp/venv/bin/python tools/openai_totp_worker.py --check
+ExecStart=/opt/xy2api-totp/venv/bin/python tools/openai_totp_worker.py
+Restart=on-failure
+RestartSec=10
+KillMode=control-group
+TimeoutStopSec=45
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/xy2api-totp
+LimitCORE=0
+
+[Install]
+WantedBy=multi-user.target

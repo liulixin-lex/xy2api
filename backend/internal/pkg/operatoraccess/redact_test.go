@@ -395,3 +395,14 @@ func TestScrubErrorStringsKeepsMachineCodes(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(raw), ErrorDetailHidden)
 }
+
+func TestSupportTicketAuthorRedactionKeepsNecessaryContext(t *testing.T) {
+	raw := []byte(`{"code":0,"data":{"ticket":{"id":1,"user":{"id":2,"email":"user@example.com","username":"user","status":"active","deleted":false,"balance":99,"created_at":"2026-10-29","credentials":{"secret":"private"}}},"messages":[{"body":"keep exact ticket text"}]}}`)
+	out, err := Redact(raw, []Redaction{"support_ticket_author"}, &Scope{})
+	require.NoError(t, err)
+	require.NotContains(t, string(out), "balance")
+	require.NotContains(t, string(out), "created_at")
+	require.NotContains(t, string(out), "private")
+	require.Contains(t, string(out), "user@example.com")
+	require.Contains(t, string(out), "keep exact ticket text")
+}
