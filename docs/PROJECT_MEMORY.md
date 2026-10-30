@@ -6,11 +6,12 @@
 
 ## 当前交接状态
 
-### 网站工单与 OpenAI 账号 2FA 登录/管理：本地完成（2026-10-29；未推送）
+### 网站工单与 OpenAI 账号 2FA 登录/管理：PR #168 已创建（2026-10-30；未合并）
 
 - 代码提交 `569bc4759`，分支 `feat/support-tickets-2fa-20261029`。完成网站工单、新增/编辑普通管理员的工单查看/管理授权、OpenAI 邮箱/密码/TOTP 直接登录导入、专用凭据与密钥轮换/恢复/安全导出；按用户要求由 GPT 6.1-sol 编码。
 - 本地最终 Go 全量 unit、相关 race、隔离 PostgreSQL 五项、前端467文件3535项和构建、两端静态检查、embed构建、tools Python96项/Node12项、Wire/tidy幂等、文档/迁移/上游审计通过。新增迁移283/284，当前331项；详细记录已原样归档。
-- 未推送、PR、发布、部署或真实OpenAI登录/MFA。工单默认关闭；2FA启用需匹配worker/runtime、固定加密密钥和持久恢复目录。现行说明：[工单](SUPPORT_TICKETS.md)、[OpenAI 2FA](OPENAI_TOTP.md)、[Worker部署](../deploy/OPENAI_TOTP_WORKER.md)。
+- 用户授权后已推送，并于 2026-10-30 创建 [PR #168](https://github.com/liulixin-lex/xy2api/pull/168)，目标 `main`。`0e296b368` 的 push CI 七项作业成功，`shell` 未分配 runner、无执行步骤而取消；Security Scan 因既有 Vue I18n 依赖公告 `GHSA-83rm-6c8r-g728` 失败。新 PR 的检查以最新提交为准，未绕过检查或自动合并。
+- 未合并、发布、部署或执行真实OpenAI登录/MFA。工单默认关闭；2FA启用需匹配worker/runtime、固定加密密钥和持久恢复目录。现行说明：[工单](SUPPORT_TICKETS.md)、[OpenAI 2FA](OPENAI_TOTP.md)、[Worker部署](../deploy/OPENAI_TOTP_WORKER.md)。
 
 ### XY2API 0.4.12 正式发布完成（2026-10-28；本轮未部署）
 
@@ -1223,3 +1224,11 @@ pnpm --dir frontend run build
 - 验证：最终 `go test -tags=unit ./...` 全部通过（服务层368.204s）；相关六包race与真实隔离PG -race五项通过。前端全量467文件3535项、typecheck/eslint/生产build、Go lint 0 issues及embed构建通过。Python工具96项、Node日志/runner12项、固定runtime离线预检与假服务smoke通过；generate+tidy两轮哈希一致，迁移只追加校验、scheduler-diff、docs一致性、代码提交干净树audit通过。
 - 修复记录：首轮全量Go设置快照漏新字段、一次gofmt、工单异步竞态、失效任务队首阻塞、终态不可见、无候选verify_old、导入marker伪造均已修正并补回归；未绕过门禁。隔离PG已停止，保留仓外测试日志和三路报告。
 - Git/后续：代码本地提交 `569bc4759`；本次收尾仅文档/记忆归档。工作分支 `feat/support-tickets-2fa-20261029`。未push、PR、合并、发版或部署；产品版本与Sub2API兼容基线不变。真实OpenAI协议仅mock，后续启用须配置worker与持久恢复目录并在获授权环境验证真实账号。
+
+### 2026-10-30 — 20261030-support-tickets-2fa-pr — 已推送分支并创建 PR #168
+
+- 请求/目标：用户先授权推送功能分支，再明确要求创建 PR。2026-10-29 的推送已完成，本轮以 `main` 为目标创建 [PR #168](https://github.com/liulixin-lex/xy2api/pull/168)，状态 OPEN、非草稿。
+- 开始状态：分支 `feat/support-tickets-2fa-20261029`，HEAD `0e296b368` 与远端一致，工作树干净；原有三个提交包括方案 `811c7b07d`、功能 `569bc4759` 和验证记录 `0e296b368`。
+- 完成操作：PR 正文列出工单、普通管理员授权、OpenAI 2FA、迁移 283/284、部署前提及 mock 验证边界；补正顶部的推送与 PR 状态，保留先前操作日志原文。本轮只修改本记忆文件，不改产品代码。
+- 验证：2026-10-30 只读核实 [CI 40913579117](https://github.com/liulixin-lex/xy2api/actions/runs/40913579117) 七项作业成功，`shell` 的 runner_id 为 0、步骤为空且取消；[Security Scan 40913579111](https://github.com/liulixin-lex/xy2api/actions/runs/40913579111) 因 Vue I18n 及其传递依赖的高危公告失败。该分支没有修改前端依赖清单和锁文件；已通过的本地产品验证沿用前一条记录，本轮不重复运行长测试。
+- 卡点/下一步：创建后 GitHub 报 PR 与当前 `main` 存在合并冲突，需在合并前处理；最新 PR 检查仍待结果，既有依赖漏洞需修复。本轮未添加审计例外、合并、发布、部署或运行真实 OpenAI 登录/MFA。交接记录提交前执行文档一致性和 diff 检查，提交后核对远端分支与 PR HEAD。
