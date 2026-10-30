@@ -188,3 +188,51 @@ func TestOllamaCloudUsageSessionRouteOmitsAuditBody(t *testing.T) {
 	require.Equal(t, "<credential-bearing body omitted>", logs[0].RequestBody)
 	require.NotContains(t, logs[0].RequestBody, "audit-canary")
 }
+
+func TestSupportTicketAuditRoutesRedactMessagesAndAuditAdminReads(t *testing.T) {
+	for _, route := range []string{
+		"POST /api/v1/support-tickets",
+		"POST /api/v1/support-tickets/:id/messages",
+		"POST /api/v1/admin/support-tickets/:id/messages",
+	} {
+		require.Contains(t, auditBodyOmittedRoutes, route)
+		require.NotEmpty(t, auditActionOverrides[route])
+	}
+	for _, route := range []string{
+		"GET /api/v1/admin/support-tickets",
+		"GET /api/v1/admin/support-tickets/:id",
+		"GET /api/v1/admin/support-tickets/summary",
+	} {
+		require.NotEmpty(t, auditSensitiveReads[route])
+	}
+}
+
+func TestOpenAITOTPAuditOmitsBodiesAndWorkerMetadata(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, key := range []string{"PUT /api/v1/admin/accounts/:id/openai-totp", "POST /api/v1/admin/accounts/:id/openai-totp/rotate", "POST /api/v1/admin/accounts/:id/openai-totp/reconcile", "POST /api/v1/admin/accounts/:id/openai-totp/export", "POST /api/v1/admin/accounts/openai-login", "POST /api/v1/admin/accounts/openai-login/:task_id/import", "POST /api/v1/internal/openai-totp/claim", "POST /api/v1/internal/openai-totp/:task_id/phase", "POST /api/v1/internal/openai-totp/:task_id/finish", "POST /api/v1/internal/openai-totp/recover"} {
+		require.Contains(t, auditBodyOmittedRoutes, key)
+	}
+	require.Contains(t, auditSensitiveReads, "GET /api/v1/admin/accounts/:id/openai-totp")
+	require.Contains(t, auditSensitiveReads, "GET /api/v1/admin/accounts/openai-login/:task_id")
+	repo := &auditCaptureRepository{}
+	svc := service.NewAuditLogService(repo, nil)
+	svc.Start()
+	r := gin.New()
+	r.Use(gin.HandlerFunc(NewAuditLogMiddleware(svc)))
+	r.POST("/api/v1/internal/openai-totp/:task_id/phase", func(c *gin.Context) { c.Status(200) })
+	req := httptest.NewRequest("POST", "/api/v1/internal/openai-totp/77/phase?arbitrary=canary-query", bytes.NewBufferString(`{"claim_token":"canary-token","secret":"canary-secret"}`))
+	req.Header.Set("Authorization", "Bearer canary-bearer")
+	req.Header.Set("User-Agent", "canary-agent")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	svc.Stop()
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	require.Len(t, repo.logs, 1)
+	entry := repo.logs[0]
+	require.Equal(t, "<credential-bearing body omitted>", entry.RequestBody)
+	require.Empty(t, entry.CredentialMasked)
+	require.Empty(t, entry.UserAgent)
+	require.NotContains(t, entry.Extra, "query")
+	require.Equal(t, map[string]string{"task_id": "77"}, entry.Extra["params"])
+}

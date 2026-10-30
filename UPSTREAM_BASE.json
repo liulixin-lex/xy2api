@@ -8,7 +8,7 @@
   "upstream_commit": "f2669c8cf62555cd92389b3f55920e9e6e7c6ff2",
   "merge_base": "0363b8cdba8cec3e2ba4b2dbd49c4481143fa55d",
   "fork_start": "dbfe5f545a2e88a6e9247d0e3723a9b206d5ebbc",
-  "xy2api_version": "0.4.13",
+  "xy2api_version": "0.4.14",
   "sub2api_compat_version": "0.2.15",
   "status": "resolved",
   "manual_resolutions": [
@@ -211,7 +211,9 @@
     "xy-recovery-observability-precision",
     "xy-openai-recent-session-endpoint-model",
     "xy-recovery-rejection-endpoints",
-    "xy-openai-recent-session-request-protocol"
+    "xy-openai-recent-session-request-protocol",
+    "xy-support-tickets",
+    "xy-managed-openai-totp"
   ],
   "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/92"
 }

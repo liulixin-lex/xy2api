@@ -12,6 +12,7 @@ export default {
       channels: 'Channels',
       accounts: 'Accounts',
       share_scheduling: 'Share scheduling',
+      support_tickets: 'Support tickets',
       announcements: 'Announcements',
       proxies: 'IP management',
       security_audit: 'Security audit',
@@ -46,6 +47,7 @@ export default {
       }
     },
     loadFailed: 'Failed to load operator permissions',
+    createdPermissionsPending: 'The account was created, but permissions have not been saved. Retry to save permissions or configure them in the edit dialog.',
     createHint: 'A new operator has no permissions. Set them in the edit dialog.',
     groupExclusiveHint: 'Without "Adjust balance", new groups must be exclusive.',
     searchByEmail: "Search by user email (must contain {'@'})",

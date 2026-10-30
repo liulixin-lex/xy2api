@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { getActivePinia } from 'pinia'
 import { reactive, ref } from 'vue'
 import type { MeAccess } from '@/types/adminAccess'
+import { useAdminAccessStore } from '@/stores/adminAccess'
 import { ADMIN_MODULE_IDS } from '@/types/adminAccess'
 
 const { getMeAccessMock, commandEntries, routeState } = vi.hoisted(() => ({
@@ -30,7 +31,8 @@ vi.mock('@/stores', () => ({
   useAuthStore: () => stores.auth,
   useAppStore: () => stores.app,
   useAdminSettingsStore: () => stores.adminSettings,
-  useOnboardingStore: () => ({ isCurrentStep: () => false, nextStep: vi.fn() })
+  useOnboardingStore: () => ({ isCurrentStep: () => false, nextStep: vi.fn() }),
+  useSupportTicketStore: () => ({ userUnread: 0, adminPending: 0 })
 }))
 
 vi.mock('@/stores/app', () => ({
@@ -178,6 +180,25 @@ describe('AppSidebar for operators', () => {
 
     expect(adminHrefs(wrapper)).toEqual([])
     expect(adminGroupLabels(wrapper)).toEqual([])
+  })
+
+
+  it.each(['view', 'manage'] as const)('shows ticket handling only to explicitly authorized %s operators', async level => {
+    const wrapper = setup('operator', { modules: { support_tickets: level } })
+    stores.app.cachedPublicSettings.support_ticket_enabled = true
+    await flushPromises()
+    expect(adminHrefs(wrapper)).toContain('/admin/support-tickets')
+    expect(commandEntries.getter!().map(entry => entry.path)).toContain('/admin/support-tickets')
+    stores.app.cachedPublicSettings.support_ticket_enabled = false
+    await flushPromises()
+    expect(adminHrefs(wrapper)).not.toContain('/admin/support-tickets')
+    wrapper.unmount()
+    useAdminAccessStore().reset()
+    const old = setup('operator', { modules: { accounts: 'manage' } })
+    stores.app.cachedPublicSettings.support_ticket_enabled = true
+    await flushPromises()
+    expect(adminHrefs(old)).not.toContain('/admin/support-tickets')
+    old.unmount()
   })
 
   it('never shows settings, plugins or custom admin items to operators', async () => {

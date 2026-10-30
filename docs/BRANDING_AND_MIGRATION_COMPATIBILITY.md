@@ -44,7 +44,7 @@
 
 ## 启动阻断防回归
 
-`backend/migrations/checksums.json` 固定校验当前全部 273 个已发布 migration，规范化算法与启动运行器相同：先按 UTF-8 解码并执行 `strings.TrimSpace`，再计算 SHA-256。
+`backend/migrations/checksums.json` 固定校验当前全部 331 个 migration，规范化算法与启动运行器相同：先按 UTF-8 解码并执行 `strings.TrimSpace`，再计算 SHA-256。
 
 `backend/migrations/branding_compatibility_test.go` 会校验 SQL 文件集合与 manifest 完全一致，并逐个比对 hash。任何品牌改造或上游同步导致既有 SQL 变化，都必须被视为数据兼容性回归；新 migration 只能追加 SQL 和新的 checksum 条目。
 

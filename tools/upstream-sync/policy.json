@@ -54,7 +54,8 @@
       "openspec/changes/gateway-resilience-v2-20261021/**",
       "openspec/changes/gateway-resilience-045-20261021/**",
       "openspec/changes/upstream-balance-20261027/**",
-      "openspec/changes/operator-role-20261027/**"
+      "openspec/changes/operator-role-20261027/**",
+      "openspec/changes/add-support-tickets-and-managed-openai-totp-20261029/**"
     ],
     "manual_merge": [
       "Makefile",
@@ -2973,6 +2974,62 @@
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
       "value": "if capability == OpenAIEndpointCapabilityChatCompletions && protocol != resilience.CapabilityProtocolResponses && !compact {"
+    },
+    {
+      "path": "backend/internal/server/routes/user.go",
+      "value": "tickets.POST(\"/:id/reopen\", h.SupportTicket.Reopen)"
+    },
+    {
+      "path": "backend/internal/server/routes/admin.go",
+      "value": "registerSupportTicketRoutes(admin, h)"
+    },
+    {
+      "path": "backend/internal/handler/wire.go",
+      "value": "NewSupportTicketHandler,"
+    },
+    {
+      "path": "backend/internal/service/setting_public.go",
+      "value": "SupportTicketEnabled:    settings[SettingKeySupportTicketEnabled] == \"true\","
+    },
+    {
+      "path": "frontend/src/router/index.ts",
+      "value": "requiresSupportTickets: true,"
+    },
+    {
+      "path": "frontend/src/utils/featureFlags.ts",
+      "value": "supportTickets:"
+    },
+    {
+      "path": "backend/internal/server/routes/admin.go",
+      "value": "registerOpenAITOTPRoutes(admin, h)"
+    },
+    {
+      "path": "backend/internal/handler/admin/openai_totp.go",
+      "value": "middleware.EnforceStepUpAlways(c, h.totp, h.users)"
+    },
+    {
+      "path": "backend/internal/service/wire.go",
+      "value": "NewOpenAITOTPService,"
+    },
+    {
+      "path": "backend/internal/handler/wire.go",
+      "value": "admin.NewOpenAITOTPHandler,"
+    },
+    {
+      "path": "backend/internal/pkg/operatoraccess/catalog.go",
+      "value": "ModuleSupportTickets, Level: LevelManage"
+    },
+    {
+      "path": "tools/openai_totp_worker.py",
+      "value": "class WorkerAPI:"
+    },
+    {
+      "path": "tools/openai_totp_journal.mjs",
+      "value": "cipher.setAAD(Buffer.from(String(id)))"
+    },
+    {
+      "path": "backend/internal/server/router.go",
+      "value": "routes.RegisterOpenAITOTPWorkerRoutes(v1, h, auditLog)"
     }
   ],
   "forbidden_module_paths": [
@@ -3044,7 +3101,9 @@
     "xy-recovery-observability-precision",
     "xy-openai-recent-session-endpoint-model",
     "xy-recovery-rejection-endpoints",
-    "xy-openai-recent-session-request-protocol"
+    "xy-openai-recent-session-request-protocol",
+    "xy-support-tickets",
+    "xy-managed-openai-totp"
   ],
   "custom_patch_tests": [
     {
@@ -5066,6 +5125,81 @@
       "id": "xy-openai-recent-session-request-protocol",
       "path": "backend/internal/handler/openai_profit_slot_recheck_test.go",
       "literal": "func TestOpenAIResponsesRequiredCapabilityForRequest"
+    },
+    {
+      "id": "xy-support-tickets",
+      "path": "backend/internal/service/support_ticket_test.go",
+      "literal": "func TestSupportTicketDisabledEverywhere(t *testing.T) {"
+    },
+    {
+      "id": "xy-support-tickets",
+      "path": "backend/internal/handler/support_ticket_handler_test.go",
+      "literal": "func TestSupportTicketHandlerUserFlow(t *testing.T) {"
+    },
+    {
+      "id": "xy-support-tickets",
+      "path": "backend/internal/server/middleware/admin_permission_test.go",
+      "literal": "func TestAdminPermissionSupportTicketsPermissionMatrix(t *testing.T) {"
+    },
+    {
+      "id": "xy-support-tickets",
+      "path": "backend/internal/repository/support_ticket_integration_test.go",
+      "literal": "func TestSupportTicketRepositoryLifecycle(t *testing.T) {"
+    },
+    {
+      "id": "xy-managed-openai-totp",
+      "path": "backend/internal/server/middleware/admin_permission_test.go",
+      "literal": "func TestAdminPermissionOpenAITOTPRequiresSuperAdmin(t *testing.T) {"
+    },
+    {
+      "id": "xy-managed-openai-totp",
+      "path": "tools/tests/test_openai_totp_rotation.py",
+      "literal": "def test_activation_requires_journal_fsync_then_database_ack_then_phase"
+    },
+    {
+      "id": "xy-managed-openai-totp",
+      "path": "tools/tests/test_openai_totp_worker.py",
+      "literal": "def test_heartbeat_thread_during_blocking_task_never_claims"
+    },
+    {
+      "id": "xy-support-tickets",
+      "path": "backend/internal/pkg/operatoraccess/policy_test.go",
+      "literal": "func TestSupportTicketPermissionsDecodeAndLegacyDefault(t *testing.T) {"
+    },
+    {
+      "id": "xy-managed-openai-totp",
+      "path": "backend/internal/service/openai_totp_test.go",
+      "literal": "func TestOpenAITOTPRotationUncertainRecoveryAndExport(t *testing.T) {"
+    },
+    {
+      "id": "xy-managed-openai-totp",
+      "path": "backend/internal/repository/openai_totp_integration_test.go",
+      "literal": "func TestOpenAITOTPRepositoryUncertainRecoveryAndAccountProtection(t *testing.T) {"
+    },
+    {
+      "id": "xy-managed-openai-totp",
+      "path": "backend/internal/repository/openai_totp_integration_test.go",
+      "literal": "func TestOpenAITOTPRepositoryLoginCrashMarkerReentry(t *testing.T) {"
+    },
+    {
+      "id": "xy-managed-openai-totp",
+      "path": "frontend/src/components/admin/account/__tests__/OpenAITotpDialogs.spec.ts",
+      "literal": "it('cancels pending step-up on close and never replays the write'"
+    },
+    {
+      "id": "xy-support-tickets",
+      "path": "frontend/src/components/admin/user/__tests__/UserCreateModal.permissions.spec.ts",
+      "literal": "retains the created user ID on partial failure, then retries permissions without creating another account"
+    },
+    {
+      "id": "xy-managed-openai-totp",
+      "path": "backend/internal/service/openai_totp_import_marker_test.go",
+      "literal": "func TestOpenAITOTPImportMarkerCannotBeForgedCopiedOrCleared(t *testing.T) {"
+    },
+    {
+      "id": "xy-managed-openai-totp",
+      "path": "backend/internal/handler/admin/openai_totp_test.go",
+      "literal": "func TestOpenAITOTPImportRejectsForgedAndCopiedMarkers(t *testing.T) {"
     }
   ]
 }

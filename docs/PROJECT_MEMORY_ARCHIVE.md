@@ -4886,3 +4886,45 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 上游：Sub2API v0.2.17 已发布、尚未同步（2026-10-17 定时检测；2026-10-19 定时同步的 prepare 失败），需按 [`UPSTREAM_SYNC.md`](UPSTREAM_SYNC.md) 另开任务。
 - 工具链：Go 以 `backend/go.mod` 为准（当前 1.27.3）；golangci-lint v2.14.0（与 CI 同版）。
 - 文档一致性：`python3 tools/check_docs_consistency.py`（CI 的 upstream-sync-audit 作业执行），规则在 `tools/docs_consistency.json`，改动时按 [`AGENTS.md`](../AGENTS.md)“变更同步”同步文档。
+
+
+<!-- 2026-10-29 工单与托管OpenAI 2FA本地开发完成；以下为收尾前交接/进行中/阶段日志原样归档。最终结果见主记忆同日收尾日志。 -->
+
+## 2026-10-29 — 工单与托管 OpenAI 2FA 开发交接（原文）
+
+### 网站工单与 OpenAI 账号 2FA 登录/管理（2026-10-29；代码完成，最终门禁中）
+
+- **范围**：新增在线工单；普通管理员新增/编辑时可勾选 support_tickets 查看/管理；OpenAI 邮箱/密码/TOTP 直接登录导入及专用凭据保存、轮换、恢复、安全导出。用户确认旧功能仅 JSON 导入，编码按要求由三名 GPT 6.1-sol 完成。
+- **已完成**：工单默认关闭、用户归属隔离、普通管理员权限/脱敏；2FA full-admin + 无条件 step-up、密文专表、短租约与持久日志、幂等只建新账号。迁移283/284只追加，当前331项checksum；前后端和独立worker接线、文档/补丁/CI均完成。
+- **已验证**：前端全量467文件3535项、typecheck/lint/build、后端embed构建/lint、定向unit/race、真实隔离PG五项、tools Python96项与Node12项、固定runtime离线预检和本地mock通过。首轮Go全量仅设置快照失败，已修复且定向通过；最终全量正在重跑。
+- **下一步**：完成最终Go全量、Wire/tidy幂等与干净树audit；更新收尾记录并保留本地审查提交。未推送、PR、发布、部署或操作真实账号。
+- **边界**：非公开OpenAI网页协议只验证mock；实际启用需要固定加密密钥、匹配worker/runtime与持久恢复目录，见 `docs/OPENAI_TOTP.md` 和 `deploy/OPENAI_TOTP_WORKER.md`。
+- **位置**：分支 `feat/support-tickets-2fa-20261029`；基线 `03fc67de3`，参考 Sub2API `12a49ef4ef6a2f116389701ac8f1fe620f27bbf5`。详细报告在仓外本任务artifacts目录。
+
+
+### 20261029-support-tickets-2fa — 对照 Sub2API 补齐在线工单与 OpenAI 账号 2FA 管理
+
+- **请求/目标**：用户要求查看 `ranxi2001/sub2api` 最新仓库，将 XY2API 已有能力以外的缺失功能补齐。2026-10-29 核实 Sub2API 默认分支 HEAD 为 `12a49ef4ef6a2f116389701ac8f1fe620f27bbf5`；XY2API 默认分支为 `03fc67de35d2515ab274a8045782c59a0cf22b52`。XY2API 已有自身用户的 TOTP 登录、绑定/停用；本任务聚焦网站工单和托管 OpenAI 账号 2FA 轮换/恢复/导出，不重复建用户登录第二因素。
+- **开始状态**：独立工作树 `<工作机 A>/xy2api-wt/support-tickets-2fa`，分支 `feat/support-tickets-2fa-20261029`，基于 origin/main `03fc67de3`，初始工作树干净。未推送、未开 PR。
+- **范围与约束**：工单默认关闭，后台可配分类/限制/提示；用户所有权在数据库读写层强制，管理员支持筛选、回复、状态和删除。托管 OpenAI 密码/TOTP 使用专用加密存储，不进入账号普通凭据 API；Worker 的轮换/导出接口必须鉴权，2FA 新候选在激活前经本地恢复日志和数据库密文确认，未知结果不能自动重新 enrollment。真实上游协议仅 mock，不操作生产或真实 OpenAI 账号。migration 只追加，需更新 checksum manifest、docs、upstream 补丁登记与测试。
+- **已完成**：全部三路编码与工单普通管理员授权、竞态修复；2FA候选双写/锁定/恢复、随机内部导入标记防伪/防复制、失败终态显示与poison队列恢复；docs/policy/CI完成。前端3535项与构建、后端定向unit/race/PG五项/lint/embed构建、tools96项和Node12项通过。
+- **事实更正**：基线 `03fc67de3` 只有平台用户 TOTP 和 OpenAI Session/PAT 导入，未发现 OpenAI 邮箱/密码/TOTP 直接登录导入。此前对“已确认入口”的口头表述不准确；用户已确认记错，现有只是 JSON 文件导入；本次已明确授权一并补齐直接登录导入。
+- **未完成**：最终Go全量重跑、Wire/tidy幂等、干净树audit与本地审查提交/交接收尾。没有已知未实现功能；不做推送或部署。
+- **卡点与风险**：上游 MFA 是非公开网页协议，真实账号行为未核验；本地 Go 1.27.3 和 pnpm 9 依赖可用。不能把代码存在视为验证通过。
+- **关键位置**：OpenSpec `add-support-tickets-and-managed-openai-totp-20261029/`；现行工单说明 `docs/SUPPORT_TICKETS.md`；Sub2API `docs/openai-2fa-rotation.md` 与工单代码作为参考。
+
+
+### 2026-10-29 — 20261029-support-tickets-2fa — 工单首轮验证与范围更正
+
+- 更正：用户确认现有是 JSON 文件导入，OpenAI 邮箱/密码/TOTP 直接登录导入不存在，明确授权本次一并补齐。用户指定 GPT 6.1-sol 承担编码，分为后端、worker与前端；主 agent 负责集成审查。
+- 完成：工单 Wire 真正生成，修复上游 observer 字段与 XY2API operator 接缝、路由测试权限桩、badge关闭/切账号迟到响应防护；新增真实管理员权限中间件拒绝用例。
+- 验证：工单相关五包 unit/race、前端typecheck与9文件59项测试、scheduler-diff通过。文档检查暂因新文档未进入索引失败，待登记后复验；未声称完整门禁通过。
+- 下一步：真实PG工单验证；三路2FA实现与测试、集成审查、文档/迁移/权限/审计/补丁登记。未推送或部署。
+
+### 2026-10-29 — 20261029-support-tickets-2fa — 工单授权范围追加
+
+- 用户追加：新增普通管理员时可以勾选工单处理权限，后续编辑也可调整。权限模块 support_tickets 分 view/manage，读取与写入分别校验；未授权或旧配置省略时默认拒绝。
+- 已通知 GPT 6.1-sol 后端与前端代理修改目录、权限模型、创建/编辑授权界面、菜单/路由/按钮与权限矩阵测试；同步现行文档和 OpenSpec。OpenAI 登录凭据与 2FA 管理仍仅超级管理员。
+- 工单真实 PostgreSQL 生命周期验证已通过；新增授权与并发、2FA 三路集成尚在进行，不代表完整门禁通过。
+
+<!-- 2026-10-29 工单与托管OpenAI 2FA原样归档结束。 -->

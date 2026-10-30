@@ -147,6 +147,36 @@ func TestAdminPermissionUnknownRouteDenied(t *testing.T) {
 	require.Equal(t, 403, w.Code)
 	require.Contains(t, w.Body.String(), `"required":"catalog"`)
 }
+
+func TestAdminPermissionSupportTicketsPermissionMatrix(t *testing.T) {
+	for _, key := range []string{"GET /support-tickets", "GET /support-tickets/summary", "GET /support-tickets/:id", "POST /support-tickets/:id/messages", "POST /support-tickets/:id/status", "DELETE /support-tickets/:id"} {
+		for _, level := range []operatoraccess.Level{operatoraccess.LevelNone, operatoraccess.LevelView, operatoraccess.LevelManage} {
+			t.Run(key+level.String(), func(t *testing.T) {
+				sc := permissionScope()
+				sc.Perms.Modules[operatoraccess.ModuleSupportTickets] = level
+				reached := false
+				w := permissionRequest(t, key, sc, "{}", func(c *gin.Context) { reached = true; c.Status(204) })
+				allowed := level == operatoraccess.LevelManage || (level == operatoraccess.LevelView && strings.HasPrefix(key, "GET "))
+				require.Equal(t, allowed, reached)
+				if allowed {
+					require.Equal(t, 204, w.Code)
+				} else {
+					require.Equal(t, 403, w.Code)
+					require.Contains(t, w.Body.String(), "ADMIN_PERMISSION_DENIED")
+				}
+			})
+		}
+	}
+}
+func TestAdminPermissionOpenAITOTPRequiresSuperAdmin(t *testing.T) {
+	for _, key := range []string{"GET /accounts/:id/openai-totp", "PUT /accounts/:id/openai-totp", "POST /accounts/:id/openai-totp/rotate", "POST /accounts/:id/openai-totp/reconcile", "POST /accounts/:id/openai-totp/export", "POST /accounts/openai-login", "GET /accounts/openai-login/:task_id", "POST /accounts/openai-login/:task_id/import"} {
+		reached := false
+		w := permissionRequest(t, key, permissionScope(), "{}", func(c *gin.Context) { reached = true; c.Status(204) })
+		require.False(t, reached, key)
+		require.Equal(t, 403, w.Code, key)
+		require.Contains(t, w.Body.String(), "SUPER_ADMIN_REQUIRED")
+	}
+}
 func TestAdminPermissionEmptyFullPathDenied(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)

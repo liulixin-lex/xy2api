@@ -229,7 +229,7 @@ func TestMeAccessSuperAdminGetsAllModulesAndFlags(t *testing.T) {
 	out, err := s.MeAccess(context.Background(), &User{ID: 2, Role: RoleAdmin})
 	require.NoError(t, err)
 	require.True(t, out.IsSuperAdmin)
-	require.Len(t, out.Modules, 17)
+	require.Len(t, out.Modules, 18)
 	for _, m := range operatoraccess.Modules {
 		require.Equal(t, "manage", out.Modules[string(m)])
 	}

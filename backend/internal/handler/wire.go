@@ -60,6 +60,7 @@ func ProvideAdminHandlers(
 	claudeResetCredits *service.ClaudeResetCreditService,
 	upstreamBalance *service.UpstreamBalanceService,
 	operatorAccessHandler *admin.OperatorAccessHandler,
+	openAITOTPHandler *admin.OpenAITOTPHandler,
 ) *AdminHandlers {
 	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)
 	accountHandler.SetOllamaCloudUsageService(ollamaCloudUsage)
@@ -69,6 +70,7 @@ func ProvideAdminHandlers(
 	accountHandler.SetClaudeResetCreditService(claudeResetCredits)
 	accountHandler.SetUpstreamBalanceService(upstreamBalance)
 	return &AdminHandlers{
+		OpenAITOTP:             openAITOTPHandler,
 		OperatorAccess:         operatorAccessHandler,
 		Dashboard:              dashboardHandler,
 		User:                   userHandler,
@@ -218,6 +220,7 @@ func ProvideHandlers(
 	modelPlazaHandler *ModelPlazaHandler,
 	asyncImageHandler *AsyncImageHandler,
 	batchImageHandler *BatchImageHandler,
+	supportTicketHandler *SupportTicketHandler,
 	_ *service.IdempotencyCoordinator,
 	_ *service.IdempotencyCleanupService,
 	_ *service.OpenAIQuotaAutoResetService,
@@ -245,6 +248,7 @@ func ProvideHandlers(
 		ModelPlaza:       modelPlazaHandler,
 		AsyncImage:       asyncImageHandler,
 		BatchImage:       batchImageHandler,
+		SupportTicket:    supportTicketHandler,
 	}
 }
 
@@ -272,6 +276,7 @@ var ProviderSet = wire.NewSet(
 	NewModelPlazaHandler,
 	NewAsyncImageHandler,
 	ProvideBatchImageHandler,
+	NewSupportTicketHandler,
 
 	// Admin handlers
 	admin.NewDashboardHandler,
@@ -279,6 +284,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewOperatorAccessHandler,
 	admin.NewGroupHandlerWithConfig,
 	admin.ProvideAccountHandler,
+	admin.NewOpenAITOTPHandler,
 	admin.ProvideAccountIQHandler,
 	admin.NewAnnouncementHandler,
 	admin.NewDataManagementHandler,

@@ -85,7 +85,17 @@ FRONTEND_CRITICAL_VITEST := \
 	src/views/admin/__tests__/GroupsView.operator.spec.ts \
 	src/components/admin/__tests__/accountToolPanels.readonly.spec.ts \
 	src/components/admin/monitor/__tests__/MonitorFormDialog.operator.spec.ts \
-	src/views/admin/__tests__/RiskControlView.spec.ts
+	src/views/admin/__tests__/RiskControlView.spec.ts \
+	src/api/admin/__tests__/openaiTotp.spec.ts \
+	src/components/admin/account/__tests__/OpenAITotpDialogs.spec.ts \
+	src/components/admin/user/__tests__/UserCreateModal.permissions.spec.ts \
+	src/features/support-tickets/__tests__/supportTickets.spec.ts \
+	src/features/support-tickets/__tests__/TicketComponents.spec.ts \
+	src/features/support-tickets/__tests__/SupportTicketRequests.spec.ts \
+	src/views/user/__tests__/SupportTicketsViews.spec.ts \
+	src/views/admin/__tests__/SupportTicketsAdmin.spec.ts \
+	src/stores/__tests__/supportTickets.spec.ts \
+	src/router/__tests__/feature-access.spec.ts
 
 # 一键编译前后端
 build: build-backend build-frontend

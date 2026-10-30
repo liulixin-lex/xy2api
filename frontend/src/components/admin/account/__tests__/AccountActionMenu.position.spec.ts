@@ -3,6 +3,8 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import AccountActionMenu from '../AccountActionMenu.vue'
 import type { Account } from '@/types'
 
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ isAdmin: false }) }))
+
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({ t: (key: string) => key })
 }))
