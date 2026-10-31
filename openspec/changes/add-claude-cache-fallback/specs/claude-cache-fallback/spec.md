@@ -56,3 +56,7 @@ The page MUST show a switch, searchable group selector and removable selections,
 #### Scenario: Retry directory load
 - **WHEN** group directory retrieval fails and is retried after edits
 - **THEN** the edited policy remains intact.
+
+#### Scenario: Save only the cache duration (2026-10-31)
+- **WHEN** the administrator changes only the Anthropic default TTL row in the same card and saves
+- **THEN** the request carries only `anthropic_cache_ttl_default`, the stored group policy is neither sent nor re-validated, and success is shown only after the response echoes the new value.

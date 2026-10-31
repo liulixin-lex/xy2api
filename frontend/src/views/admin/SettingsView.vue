@@ -5688,23 +5688,6 @@
                 </p>
               </div>
 
-              <div class="space-y-2">
-                <label for="anthropic-cache-ttl-default" class="input-label">
-                  {{ t("admin.settings.gatewayForwarding.anthropicCacheTTLDefault") }}
-                </label>
-                <Select
-                  id="anthropic-cache-ttl-default"
-                  v-model="form.anthropic_cache_ttl_default"
-                  :options="anthropicCacheTTLDefaultOptions"
-                  :aria-label="t('admin.settings.gatewayForwarding.anthropicCacheTTLDefault')"
-                  aria-describedby="anthropic-cache-ttl-default-hint"
-                  class="max-w-md"
-                />
-                <p id="anthropic-cache-ttl-default-hint" class="input-hint">
-                  {{ t("admin.settings.gatewayForwarding.anthropicCacheTTLDefaultHint") }}
-                </p>
-              </div>
-
               <!-- 客户端 dateline 归一化（仅 Anthropic OAuth/SetupToken） -->
               <div class="flex items-center justify-between">
                 <div>
@@ -9765,11 +9748,6 @@ const claudeOAuthSystemPromptBlockTypeOptions = computed(() => [
   },
 ]);
 
-const anthropicCacheTTLDefaultOptions = computed(() => [
-  { value: "5m", label: t("admin.settings.gatewayForwarding.anthropicCacheTTLDefault5m") },
-  { value: "1h", label: t("admin.settings.gatewayForwarding.anthropicCacheTTLDefault1h") },
-]);
-
 const claudeOAuthSystemPromptCacheTTLOptions = computed(() => [
   { value: "5m", label: t("admin.settings.gatewayForwarding.cacheTTL5m") },
   { value: "1h", label: t("admin.settings.gatewayForwarding.cacheTTL1h") },
@@ -9894,6 +9872,8 @@ type SettingsForm = Omit<
   | "wechat_connect_mp_enabled"
   | "wechat_connect_mobile_enabled"
   | "openai_oauth_scheduling_rate_multiplier"
+  // Edited and saved only by the Claude caching card.
+  | "anthropic_cache_ttl_default"
 > & {
   /** Form always binds a concrete boolean (SystemSettings marks this optional). */
   channel_monitor_hide_throughput: boolean;
@@ -10199,7 +10179,6 @@ const form = reactive<SettingsForm>({
   enable_claude_oauth_system_prompt_injection: true,
   claude_oauth_system_prompt: "",
   claude_oauth_system_prompt_blocks: defaultClaudeOAuthSystemPromptBlocks,
-  anthropic_cache_ttl_default: "5m" as "5m" | "1h",
   enable_client_dateline_normalization: true,
   enable_openai_session_uuid: true,
   antigravity_user_agent_version: "",
@@ -11865,8 +11844,6 @@ async function saveSettings() {
         ? form.claude_oauth_system_prompt
         : "",
       claude_oauth_system_prompt_blocks: claudeOAuthSystemPromptBlocksJSON,
-      anthropic_cache_ttl_default:
-        form.anthropic_cache_ttl_default,
       enable_client_dateline_normalization:
         form.enable_client_dateline_normalization,
       enable_openai_session_uuid: form.enable_openai_session_uuid,

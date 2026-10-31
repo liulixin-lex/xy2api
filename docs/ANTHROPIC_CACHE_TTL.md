@@ -1,8 +1,8 @@
 # Anthropic 缓存 TTL
 
-管理员在「设置 → 网关」选择 Anthropic 缓存默认 TTL：`5m`（默认）或 `1h`。用户在 API 密钥创建、编辑弹窗中选择自己的偏好。设置只影响当前已有构造器支持、且实际转给 Claude 的 Anthropic Messages 请求：原生 Messages、现有 Chat/Responses → Anthropic 转换、API Key 透传、OAuth/SetupToken，以及现有 Vertex 原生/转换路径。Bedrock 本轮仅覆盖原生 Messages（Bearer/SigV4）；Chat/Responses → Bedrock 没有对应转换构造器或 eventstream 解码器，不在本变更范围。该组合目前可能返回既有上游认证或通用转发错误，并非显式 unsupported 响应；新增 Bedrock 转换留待后续。
+管理员在「设置 → 网关 → Claude 缓存」卡片的「缓存时长（跟随全局的密钥）」一行选择默认 TTL：`5m`（默认）或 `1h`。这一行与「自动补缓存」共用卡片和保存按钮，保存只提交改动过的项，只改时长不会重新校验分组；「请求转发行为」卡片不再提交该设置（2026-10-31 起）。用户在 API 密钥创建、编辑弹窗中选择自己的偏好。设置只影响当前已有构造器支持、且实际转给 Claude 的 Anthropic Messages 请求：原生 Messages、现有 Chat/Responses → Anthropic 转换、API Key 透传、OAuth/SetupToken，以及现有 Vertex 原生/转换路径。Bedrock 本轮仅覆盖原生 Messages（Bearer/SigV4）；Chat/Responses → Bedrock 没有对应转换构造器或 eventstream 解码器，不在本变更范围。该组合目前可能返回既有上游认证或通用转发错误，并非显式 unsupported 响应；新增 Bedrock 转换留待后续。
 
-TTL 选项调整已有缓存声明的有效期；[Claude 自动缓存](CLAUDE_CACHE_FALLBACK.md) 按既有分组授权补断点；账号「缓存写入计费分类覆盖」只调整结算分类。三者各自配置，不会互相开启。
+TTL 选项调整已有缓存声明的有效期；[自动补缓存](CLAUDE_CACHE_FALLBACK.md) 按既有分组授权补断点；账号「缓存写入计费分类覆盖」只调整结算分类。三者各自配置，不会互相开启。
 
 ## API 密钥偏好
 
