@@ -43,9 +43,6 @@
       "docs/**",
       "frontend/**",
       "openspec/changes/add-claude-cache-fallback/**",
-      "openspec/changes/async-image-tasks-v2/**",
-      "openspec/changes/stabilize-openai-iq-check/**",
-      "openspec/changes/iq-detection-operations/**",
       "openspec/changes/replace-controlled-with-share-scheduling/**",
       "openspec/changes/gateway-resilience-20261015/**",
       "openspec/changes/simplify-share-scheduling-20261020/**",
@@ -53,8 +50,6 @@
       "tools/**",
       "openspec/changes/gateway-resilience-v2-20261021/**",
       "openspec/changes/gateway-resilience-045-20261021/**",
-      "openspec/changes/upstream-balance-20261027/**",
-      "openspec/changes/operator-role-20261027/**",
       "openspec/changes/add-support-tickets-and-managed-openai-totp-20261029/**",
       "openspec/changes/anthropic-cache-ttl-20261030/**"
     ],
@@ -3098,7 +3093,8 @@
     "frontend/src/components/common/ProxyAdBanner.vue",
     "assets/partners/logos/axisnow.jpg",
     "assets/partners/logos/cola-proxy.jpg",
-    "assets/partners/logos/ppdog.png"
+    "assets/partners/logos/ppdog.png",
+    "assets/partners"
   ],
   "custom_patches": [
     "legacy-config-path",

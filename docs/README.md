@@ -38,6 +38,7 @@
 | [`OPENAI_TOTP.md`](OPENAI_TOTP.md) | OpenAI 账号 2FA 直接登录导入、专用加密凭据、轮换/恢复与安全导出；[Worker 部署](../deploy/OPENAI_TOTP_WORKER.md) |
 | [`CHANNEL_MONITOR_V1.md`](CHANNEL_MONITOR_V1.md) | 渠道监控 v1：判定口径（10 秒黄、30 秒红）、流式探测与请求形状、探测选号、调度可靠性 |
 | [`GROK_MONITOR_RESPONSES.md`](GROK_MONITOR_RESPONSES.md) | Grok 渠道监控的 Responses 模式（0.4.1 起，可选） |
+| [`channel-monitor-v2-safe-defaults.md`](channel-monitor-v2-safe-defaults.md) | 渠道监控 V2 模式（`channel_monitor_mode` 可选）：安全默认值与回填设计 |
 | [`ASYNC_IMAGE_TASKS.md`](ASYNC_IMAGE_TASKS.md) | 异步生图任务 |
 | [`BATCH_IMAGE_MVP.md`](BATCH_IMAGE_MVP.md) | Gemini 批量生图 |
 | [`seedance-api.md`](seedance-api.md) | Seedance 原生视频 API |
@@ -51,7 +52,7 @@
 | [`FRONTEND_UX.md`](FRONTEND_UX.md) | 前端性能约定、动效系统与“减少动画”、命令面板等通用交互 |
 | [`legal/`](legal/) | 部署与运营合规承诺（中英文） |
 
-部署文档在 `deploy/`：[`README.md`](../deploy/README.md)、[`DOCKER.md`](../deploy/DOCKER.md)、[`EDGE_SECURITY.md`](../deploy/EDGE_SECURITY.md)（含 CDN 识别与可选的边缘标记）、[`APPLE_CONTAINER.md`](../deploy/APPLE_CONTAINER.md)、[`DATAMANAGEMENTD_CN.md`](../deploy/DATAMANAGEMENTD_CN.md)。工具说明见 [`tools/gateway-resilience/README.md`](../tools/gateway-resilience/README.md)、[`skills/`](../skills/)。
+部署文档在 `deploy/`：[`README.md`](../deploy/README.md)、[`DOCKER.md`](../deploy/DOCKER.md)、[`EDGE_SECURITY.md`](../deploy/EDGE_SECURITY.md)（含 CDN 识别与可选的边缘标记）、[`APPLE_CONTAINER.md`](../deploy/APPLE_CONTAINER.md)、[`OPENAI_TOTP_WORKER.md`](../deploy/OPENAI_TOTP_WORKER.md)。工具说明见 [`tools/gateway-resilience/README.md`](../tools/gateway-resilience/README.md)、[`skills/`](../skills/)。
 
 ## 设计、修复与同步记录
 
@@ -59,40 +60,27 @@
 
 | 文档 | 说明 |
 |---|---|
-| [`BILLING_INTEGRITY_REPAIR.md`](BILLING_INTEGRITY_REPAIR.md) | 计费完整性修复规范与验收（2026-10-07，来源清单 [`BILLING_INTEGRITY_PROVENANCE.json`](BILLING_INTEGRITY_PROVENANCE.json)） |
-| [`channel-monitor-v2-safe-defaults.md`](channel-monitor-v2-safe-defaults.md) | 渠道监控 V2 安全默认值与回填设计 |
-| [`SCHEDULING_ANALYSIS.md`](SCHEDULING_ANALYSIS.md) | 2026-10-09 调度现状分析与外部调研（份额调度的前置调研） |
 | [`UPSTREAM_SYNC_V0214.md`](UPSTREAM_SYNC_V0214.md) / [`UPSTREAM_SYNC_V0215.md`](UPSTREAM_SYNC_V0215.md) | Sub2API v0.2.9–v0.2.15 同步记录 |
-| [`upstream-sync/`](upstream-sync/) | 每次上游同步的文件矩阵与影响报告（`sync.py report` 生成） |
+| [`upstream-sync/`](upstream-sync/) | 上游同步的文件矩阵与影响报告（`sync.py report` 生成）；只保留与 `UPSTREAM_BASE.json` 对应的当前基线报告，更早的报告可从 Git 历史查阅 |
 | [`third-party/`](third-party/) | 第三方来源与许可说明 |
-| [`screenshots/`](screenshots/) | 文档引用的截图 |
 
-## 历史记录（已退役或被取代）
+## 历史记录
 
-| 文档 | 说明 |
-|---|---|
-| [`CONTROLLED_SCHEDULING.md`](CONTROLLED_SCHEDULING.md) / [`CONTROLLED_SCHEDULING_ACCEPTANCE.md`](CONTROLLED_SCHEDULING_ACCEPTANCE.md) | 智能可控调度，0.3.0 退役，由份额调度取代 |
-| [`ui-scheduling-dual-mode.md`](ui-scheduling-dual-mode.md) / [`ui-scheduling-one-click.md`](ui-scheduling-one-click.md) | 已退役调度方案的界面设计 |
-| [`IQ_RELIABILITY_IMPLEMENTATION.md`](IQ_RELIABILITY_IMPLEMENTATION.md) / [`IQ_CURRENT_HEALTH.md`](IQ_CURRENT_HEALTH.md) | 智商检测的早期实施记录与单模型“当前健康”实现，已被按模型检测取代；现行说明见 `OPENAI_IQ_CHECK.md` |
-| [`AUDIT_v0.0.10.md`](AUDIT_v0.0.10.md) | v0.0.10 本地代码审计 |
-| [`V021_ISSUE_SUMMARY.md`](V021_ISSUE_SUMMARY.md) / [`V021_RELIABILITY_FIX.md`](V021_RELIABILITY_FIX.md) / [`V021_REMEDIATION_PLAN.md`](V021_REMEDIATION_PLAN.md) / [`ISSUES_AND_CHANGES.md`](ISSUES_AND_CHANGES.md) | v0.2.1 可靠性修复记录 |
+已退役或被取代的设计与修复记录（可控调度、早期智商检测、v0.0.10 审计、v0.2.1 可靠性修复、计费完整性修复、调度前置调研等）已于 2026-10-31 从仓库删除，需要追溯时查 Git 历史；结论摘要在 [`PROJECT_MEMORY_ARCHIVE.md`](PROJECT_MEMORY_ARCHIVE.md)。
 
 ## OpenSpec 变更（`openspec/changes/`）
 
+已发布且由现行文档完整覆盖的变更（普通管理员角色、上游余额、异步生图 v2、早期智商检测两项）已于 2026-10-31 删除，可从 Git 历史查阅。
+
 | 变更 | 内容 | 状态 |
 |---|---|---|
-| [`anthropic-cache-ttl-20261030`](../openspec/changes/anthropic-cache-ttl-20261030/) | Anthropic TTL、Key 四态、usage/计费/预留及旧策略退役 | 本地实施中；未发布、未部署 |
-| [`operator-role-20261027`](../openspec/changes/operator-role-20261027/) | 普通管理员（`operator`）角色与逐人权限：权限目录与中间件、资金与放置开关、上游地址开关、脱敏、角色保护；叠加在 PR-B 之上 | 开发中（PR-A） |
-| [`upstream-balance-20261027`](../openspec/changes/upstream-balance-20261027/) | 账号页「上游余额」列与 new-api 访问令牌；中转的 kimi、deepseek 账号退出 CN 余额检查 | 开发中（PR-B） |
+| [`anthropic-cache-ttl-20261030`](../openspec/changes/anthropic-cache-ttl-20261030/) | Anthropic TTL、Key 四态、usage/计费/预留及旧策略退役 | 随 0.4.15 发布（PR #170）；生产未部署，真实供应商缓存收益未验证 |
 | [`gateway-resilience-045-20261021`](../openspec/changes/gateway-resilience-045-20261021/) | 网关韧性 0.4.5：RA-1 修复、OpenAI Responses 透传与 Gateway 入站经 Anthropic 上游的明确终止、审查遗留 P2 | 0.4.5、0.4.6 已发布（生产未部署）；后续待办见其 tasks §7 |
 | [`gateway-resilience-v2-20261021`](../openspec/changes/gateway-resilience-v2-20261021/) | 网关韧性第二期：可重放前缀与推迟开场、分类修正、失败帧重试提示、仅流式能力学习、事件字段 | 0.4.4 已发布；已知缺陷 RA-1 已在 0.4.5 修复（`gateway-resilience-045-20261021`）；`response.metadata` 的开场判据于 2026-10-22 修订（0.4.6，见 045 tasks 7.7）；浸泡见其 tasks |
 | [`simplify-share-scheduling-20261020`](../openspec/changes/simplify-share-scheduling-20261020/) | 精简份额调度：层级取账号优先级、权重取负载因子与自适应系数，每组只剩调度方式与会话保持 | 随 0.4.4 发布（PR #117） |
 | [`gateway-resilience-20261015`](../openspec/changes/gateway-resilience-20261015/) | 网关韧性 | 随 0.4.0 交付，0.4.1、0.4.2 跟进；部署与后续见其 tasks |
 | [`replace-controlled-with-share-scheduling`](../openspec/changes/replace-controlled-with-share-scheduling/) | 剔除可控调度、引入份额调度 | 0.3.0 已发布，默认关闭；份额规则由 `simplify-share-scheduling-20261020` 精简，影子运行不再执行 |
-| [`async-image-tasks-v2`](../openspec/changes/async-image-tasks-v2/) | 异步生图任务 v2 | 0.3.0 已发布 |
 | [`add-claude-cache-fallback`](../openspec/changes/add-claude-cache-fallback/) | Claude 自动缓存 | 0.2.4 起发布；真实上游账单核验未做 |
-| [`stabilize-openai-iq-check`](../openspec/changes/stabilize-openai-iq-check/) | 智商检测稳定性 | 已完成；2026-10-27 起被按模型检测取代，见 `docs/OPENAI_IQ_CHECK.md` |
-| [`iq-detection-operations`](../openspec/changes/iq-detection-operations/) | 智商检测运营 | 已结束（线上验收按用户决定不再执行）；2026-10-27 起被按模型检测取代 |
 | [`add-openai-compatible-prompt-audit`](../openspec/changes/add-openai-compatible-prompt-audit/) | 提示词审计 | 上游 Sub2API 的变更，随同步引入 |
-| [`add-support-tickets-and-managed-openai-totp-20261029`](../openspec/changes/add-support-tickets-and-managed-openai-totp-20261029/) | 网站工单与托管 OpenAI 账号 TOTP 管理 | 本地开发与验证完成，含普通管理员工单授权；未推送、未发布，真实上游未验证 |
+| [`add-support-tickets-and-managed-openai-totp-20261029`](../openspec/changes/add-support-tickets-and-managed-openai-totp-20261029/) | 网站工单与托管 OpenAI 账号 TOTP 管理 | 随 0.4.14 发布（PR #168）；真实 OpenAI 登录/MFA 未验证 |
 | [`codex-manifest-pinned-accounts`](../openspec/changes/codex-manifest-pinned-accounts/) | Codex manifest 固定账号 | 上游 Sub2API 的变更，随同步引入 |

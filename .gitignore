@@ -160,34 +160,17 @@ docs/*
 !docs/GPT61_SOL_SUPPORT.md
 !docs/OPENAI_FAST.md
 !docs/GPT61_SOL_PROVENANCE.json
-!docs/BILLING_INTEGRITY_REPAIR.md
-!docs/BILLING_INTEGRITY_PROVENANCE.json
-!docs/V021_RELIABILITY_FIX.md
-!docs/V021_ISSUE_SUMMARY.md
-!docs/V021_REMEDIATION_PLAN.md
-!docs/ISSUES_AND_CHANGES.md
 !docs/OPENAI_IQ_CHECK.md
-!docs/IQ_CURRENT_HEALTH.md
-!docs/CONTROLLED_SCHEDULING.md
-!docs/CONTROLLED_SCHEDULING_ACCEPTANCE.md
 !docs/account-scheduling.md
-!docs/SCHEDULING_ANALYSIS.md
 !docs/SHARE_SCHEDULING.md
 !docs/GATEWAY_RESILIENCE.md
-!docs/IQ_RELIABILITY_IMPLEMENTATION.md
 !docs/channel-monitor-v2-safe-defaults.md
 !docs/CHANNEL_MONITOR_V1.md
 !docs/GROK_MONITOR_RESPONSES.md
 !docs/upstream-sync/
 !docs/upstream-sync/**
-!docs/codex-credits.md
 !docs/legal/
 !docs/legal/*.md
-!docs/screenshots/
-docs/screenshots/*
-!docs/screenshots/mobile-account-actions-menu.png
-!docs/screenshots/codex-referral-dialog.png
-!docs/screenshots/codex-referral-success.png
 .serena/
 .codex/
 frontend/coverage/
@@ -201,9 +184,7 @@ issues/
 # 本地闭源插件开发目录及构建产物不进入 XY2API 仓库
 /plugins/
 
-!docs/ui-scheduling-dual-mode.md
 
-!docs/ui-scheduling-one-click.md
 !docs/openai-cache-reliability.md
 
 !docs/USAGE_METRICS.md
@@ -214,7 +195,6 @@ issues/
 # （tools/check_docs_consistency.py 检查已跟踪的 docs 文件都在白名单内、都已登记）。
 !docs/README.md
 !docs/PROJECT_MEMORY_ARCHIVE.md
-!docs/AUDIT_v0.0.10.md
 !docs/CLAUDE_CACHE_FALLBACK.md
 !docs/ANTHROPIC_CACHE_TTL.md
 !docs/CODEX_STATE.md
@@ -230,4 +210,3 @@ issues/
 !docs/seedance-api.md
 !docs/third-party/
 !docs/third-party/**
-!docs/screenshots/reasoning-effort-pricing.png

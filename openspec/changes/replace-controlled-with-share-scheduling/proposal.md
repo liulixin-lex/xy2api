@@ -10,7 +10,7 @@
 - **智能可控调度（controlled）**虽然有严格层级与层内 SWRR，但在分配上叠加了健康状态机、容量溢出、恢复爬坡、重试账本、故障域等自动机制，分配计数器随候选集合切换，完全没有会话亲和；每个请求都要多次访问 PostgreSQL，且模式读取失败会让所有网关请求返回 503；改动侵入 65 个非测试文件和整条上游 HTTP 链路，反复重写，维护与上游同步成本很高。
 - 两者都不给出“某账号为什么少拿了流量”的可追溯原因。
 
-详细分析、外部项目对比与仿真见 [`docs/SCHEDULING_ANALYSIS.md`](../../../docs/SCHEDULING_ANALYSIS.md) 与 [`simulation/RESULTS.md`](simulation/RESULTS.md)。2026-10-10 按“不降低缓存命中率与首字延迟”修订了亲和、溢出与回升规则，依据见 RESULTS 第二部分。
+详细分析与外部项目对比原记录在 `docs/SCHEDULING_ANALYSIS.md`（2026-10-31 删除，可从 Git 历史查阅），仿真见 [`simulation/RESULTS.md`](simulation/RESULTS.md)。2026-10-10 按“不降低缓存命中率与首字延迟”修订了亲和、溢出与回升规则，依据见 RESULTS 第二部分。
 
 ## 变更内容
 

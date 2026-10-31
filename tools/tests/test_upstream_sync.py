@@ -144,6 +144,7 @@ class UpstreamSyncTests(unittest.TestCase):
         absent = SYNC.load_policy()["required_absent_paths"]
         self.assertIn("assets/partners/logos/cola-proxy.jpg", absent)
         self.assertIn("assets/partners/logos/ppdog.png", absent)
+        self.assertIn("assets/partners", absent)
 
     def test_v025_conflicts_are_explicit_manual_merges(self):
         manual = SYNC.load_policy()["categories"]["manual_merge"]
