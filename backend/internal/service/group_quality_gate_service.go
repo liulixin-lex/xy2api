@@ -419,7 +419,7 @@ func (s *GroupQualityGateService) evaluate(ctx context.Context) error {
 			resetAt := accountGroupQualityResetAt(account)
 			reset := resetAt.After(s.processStartedAt) && !resetAt.Equal(previous.ResetAt)
 			if reset {
-				previous = groupQualityAccountState{State: "trial", TrialSince: resetAt, TrialObservedUntil: resetAt, Tier: GroupQualityGateTierTrial}
+				previous = groupQualityAccountState{State: "trial", TrialSince: resetAt, Tier: GroupQualityGateTierTrial}
 			}
 			previous.ResetAt = resetAt
 			pinned := policy.Enabled && containsInt64(policy.PinnedAccountIDs, account.ID)
@@ -433,8 +433,8 @@ func (s *GroupQualityGateService) evaluate(ctx context.Context) error {
 				if stale && !reset && previous.State != "ejected" {
 					metric = previousMember.Metric
 				}
-				// Even stale intervals are counted once. They cannot eject or promote
-				// until usage writes are fresh again.
+				// Count each request and failure once, including late writes. Stale
+				// observations cannot eject or promote until usage writes are fresh.
 				if previous.State == "trial" && observationErr == nil {
 					accumulateQualityTrial(&previous, byAccount[account.ID], now)
 				}
@@ -473,11 +473,11 @@ func (s *GroupQualityGateService) evaluate(ctx context.Context) error {
 	return observationErr
 }
 
-// accumulateQualityTrial consumes only the interval not consumed by a previous
-// round. Keeping at most 20 IDs makes long, low-traffic trials independent of the
-// bounded observation horizon, without counting cross-minute retries twice.
+// accumulateQualityTrial rescans the bounded window to include late writes.
+// Saved request and failure identities deduplicate repeated reads and retain
+// already-counted observations after they leave the window.
 func accumulateQualityTrial(state *groupQualityAccountState, observations []GroupQualityObservation, now time.Time) {
-	from := maxTime(state.TrialSince, state.TrialObservedUntil)
+	from := maxTime(state.TrialSince, now.Add(-125*time.Minute))
 	events := make([]GroupQualityObservation, 0)
 	for _, o := range observations {
 		if o.At.After(state.TrialSince) && !o.At.Before(from) && o.At.Before(now) && (o.Success || o.SoftFailure) {
@@ -491,7 +491,7 @@ func accumulateQualityTrial(state *groupQualityAccountState, observations []Grou
 		return events[i].At.Before(events[j].At)
 	})
 	state.TrialRequests = slices.Clone(state.TrialRequests)
-	seenFailures := map[string]bool{}
+	state.TrialFailures = slices.Clone(state.TrialFailures)
 	for _, event := range events {
 		id := event.RequestID
 		if id == "" {
@@ -503,13 +503,11 @@ func accumulateQualityTrial(state *groupQualityAccountState, observations []Grou
 			}
 			state.TrialRequests = append(state.TrialRequests, id)
 		}
-		failureKey := id + "\x00" + strconv.FormatInt(event.At.UnixMilli(), 10)
-		if event.SoftFailure && !seenFailures[failureKey] {
-			seenFailures[failureKey] = true
-			state.TrialSoftFailures++
+		failureKey := groupQualityTrialFailure{RequestID: event.RequestID, AccountID: event.AccountID, AtUnixMs: event.At.UnixMilli()}
+		if event.SoftFailure && !slices.Contains(state.TrialFailures, failureKey) {
+			state.TrialFailures = append(state.TrialFailures, failureKey)
 		}
 	}
-	state.TrialObservedUntil = now
 }
 
 func qualityValidStarts(now, processStart, resetAt time.Time, state groupQualityAccountState) (time.Time, time.Time, time.Time) {

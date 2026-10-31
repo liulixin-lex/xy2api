@@ -49,8 +49,13 @@ For each member of an enabled group, the evaluator MUST eject the account in tha
   - enough new data over a limit MUST eject the account for the next step;
   - enough new samples for every metric that triggered ejection, within 80% of every sample-ready limit, MUST make it healthy;
   - otherwise, including too little new data, the account MUST enter trial.
-- A trial account MUST be selectable and MUST be judged only on data since the trial started. Two soft failures within its first 20 requests, or meeting the ejection condition on that data, MUST eject it for the next step; 20 requests MUST promote it. Trial counts MUST accumulate from the trial start, however long the trial lasts. State MUST retain at most the first 20 distinct request IDs and their cumulative soft failures, consuming only intervals after the previous round; history MUST NOT be widened to the trial start.
+- A trial account MUST be selectable and MUST be judged only on data since the trial started. Two soft failures within its first 20 requests, or meeting the ejection condition on that data, MUST eject it for the next step; 20 requests MUST promote it. Trial counts MUST accumulate from the trial start, however long the trial lasts. Trial counting state MUST retain only two identity sets: at most the first 20 distinct request IDs and the soft-failure identities for those requests, keyed by (request_id, account_id, at_unix_ms). Every round MUST rescan from max(trial start, now minus 125 minutes), deduplicating against both saved sets so late writes still count. Counts MUST use the set sizes, retaining already-counted identities after they leave the window; history MUST NOT be widened to the trial start.
 - Ejection MUST affect only selection in that group and MUST NOT change `schedulable`, `temp_unschedulable` or group membership.
+
+#### Scenario: Late trial failure records
+
+- **WHEN** soft-failure records become visible three minutes after their attempts, while the account is still in trial with fewer than 20 requests
+- **THEN** repeated window scans count each request and failure once, and the second distinct soft failure ejects the account.
 
 #### Scenario: Repeated ejection backs off
 

@@ -216,21 +216,26 @@ func groupQualityReasons(p GroupQualityGatePolicy, m GroupQualityMetrics) []stri
 	return reasons
 }
 
+type groupQualityTrialFailure struct {
+	RequestID string
+	AccountID int64
+	AtUnixMs  int64
+}
+
 type groupQualityAccountState struct {
-	State              string
-	Reasons            []string
-	Strike             int
-	EjectedAt          time.Time
-	Until              time.Time
-	TrialSince         time.Time
-	Tier               int
-	TierAt             time.Time
-	LastEjectionEnd    time.Time
-	ResetAt            time.Time
-	Severity           float64
-	TrialRequests      []string // The first 20 distinct request IDs, retained across observation windows.
-	TrialSoftFailures  int64
-	TrialObservedUntil time.Time
+	State           string
+	Reasons         []string
+	Strike          int
+	EjectedAt       time.Time
+	Until           time.Time
+	TrialSince      time.Time
+	Tier            int
+	TierAt          time.Time
+	LastEjectionEnd time.Time
+	ResetAt         time.Time
+	Severity        float64
+	TrialRequests   []string // The first 20 distinct request IDs, retained across observation windows.
+	TrialFailures   []groupQualityTrialFailure
 }
 
 func groupQualityBackoff(strike int) time.Duration {
@@ -261,7 +266,7 @@ func evaluateGroupQualityMember(now time.Time, policy GroupQualityGatePolicy, me
 	if expired {
 		state.LastEjectionEnd = state.Until
 	}
-	trialFailed := state.State == "trial" && state.TrialSoftFailures >= 2
+	trialFailed := state.State == "trial" && len(state.TrialFailures) >= 2
 	if fresh && (metric.EjectionReady(policy) || trialFailed) {
 		state.Strike++
 		state.State = "ejected"
@@ -274,7 +279,7 @@ func evaluateGroupQualityMember(now time.Time, policy GroupQualityGatePolicy, me
 			state.Severity = math.Max(state.Severity, float64(metric.WarmTTFTP90Ms)/float64(policy.MaxWarmTTFTP90Ms))
 		}
 		if trialFailed {
-			state.Severity = math.Max(state.Severity, float64(state.TrialSoftFailures)/float64(len(state.TrialRequests))/policy.MaxErrorRate)
+			state.Severity = math.Max(state.Severity, float64(len(state.TrialFailures))/float64(len(state.TrialRequests))/policy.MaxErrorRate)
 			if !slices.Contains(state.Reasons, "error_rate") {
 				state.Reasons = append(state.Reasons, "error_rate")
 			}
@@ -283,8 +288,8 @@ func evaluateGroupQualityMember(now time.Time, policy GroupQualityGatePolicy, me
 		state.EjectedAt = now
 		state.Until = now.Add(groupQualityBackoff(state.Strike))
 		state.TierAt = time.Time{}
-		state.TrialRequests, state.TrialSoftFailures = nil, 0
-		state.TrialObservedUntil, state.TrialSince = time.Time{}, time.Time{}
+		state.TrialRequests, state.TrialFailures = nil, nil
+		state.TrialSince = time.Time{}
 		return state
 	}
 	if expired {
@@ -294,8 +299,8 @@ func evaluateGroupQualityMember(now time.Time, policy GroupQualityGatePolicy, me
 			state.State, state.Tier = "eligible", GroupQualityGateTierFast
 		} else {
 			state.State, state.Tier = "trial", GroupQualityGateTierTrial
-			state.TrialSince, state.TrialObservedUntil = now, now
-			state.TrialRequests, state.TrialSoftFailures = nil, 0
+			state.TrialSince = now
+			state.TrialRequests, state.TrialFailures = nil, nil
 		}
 		state.Reasons = nil
 		return state
@@ -304,8 +309,8 @@ func evaluateGroupQualityMember(now time.Time, policy GroupQualityGatePolicy, me
 		if !fresh || len(state.TrialRequests) < 20 {
 			return state
 		}
-		state.TrialRequests, state.TrialSoftFailures = nil, 0
-		state.TrialObservedUntil, state.TrialSince = time.Time{}, time.Time{}
+		state.TrialRequests, state.TrialFailures = nil, nil
+		state.TrialSince = time.Time{}
 	}
 	state.State = "eligible"
 	state.Reasons = nil
