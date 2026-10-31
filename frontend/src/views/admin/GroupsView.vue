@@ -2995,9 +2995,9 @@
               <p class="input-hint">{{ t("admin.groups.profitControl.minMarginHint") }}</p>
             </div>
           </div>
-          <!-- 利润门预览：按当前毛利率换算的上游倍率上限与能通过的成员数（成本口径为 OpenAI 实时成本） -->
+          <!-- 利润门预览：按当前毛利率换算的上游倍率上限与能通过的成员数（五个利润平台共用线上成本口径） -->
           <GroupProfitControlPreview
-            v-if="editForm.profit_control_enabled && editForm.platform === 'openai' && editingGroup"
+            v-if="editForm.profit_control_enabled && editingGroup"
             ref="editProfitPreviewRef"
             class="mb-3"
             :group-id="editingGroup.id"
