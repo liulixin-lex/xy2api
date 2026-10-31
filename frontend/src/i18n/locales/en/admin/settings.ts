@@ -13,7 +13,7 @@ export default {
       "ttl": "Cache duration (keys that follow the global default)",
       "ttl5m": "5 minutes",
       "ttl1h": "1 hour",
-      "ttlHint": "Keys set to follow the global default send every cache breakpoint, existing or added, with this duration. Keys created before the TTL feature default to “Do not override TTL”, keep the client's setting and are not affected; users can change this when editing a key. At official prices, cache writes cost about 1.25× base input for 5 minutes and 2× for 1 hour; 1 hour only pays off when the same conversation pauses 5–60 minutes.",
+      "ttlHint": "Keys set to follow the global default send every cache breakpoint, existing or added, with this duration. With 5 minutes, a 1-hour TTL the client set itself is also shortened to 5 minutes; to keep the client's setting, choose “Do not override TTL” on the key. Keys created before the TTL feature default to “Do not override TTL” and are not affected; users can change this when editing a key. At official prices, cache writes cost about 1.25× base input for 5 minutes and 2× for 1 hour; 1 hour only pays off when the same conversation pauses 5–60 minutes.",
       "save": "Save",
       "saved": "Saved. Other instances apply changes within about 60 seconds.",
       "loadFailed": "Could not load. Please retry.",

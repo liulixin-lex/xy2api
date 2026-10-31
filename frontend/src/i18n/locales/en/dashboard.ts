@@ -75,7 +75,7 @@ export default {
       '1h': 'Force 1-hour caching',
       duration: { '5m': '5 minutes', '1h': '1 hour' },
       summary: 'Claude TTL: {mode}',
-      hint: 'Applies only to Claude requests and sets the lifetime of existing cache breakpoints. Group settings determine whether missing breakpoints are added. No override keeps client settings. One-hour writes may cost more; actual caching and billing depend on upstream usage and site prices.'
+      hint: "Applies only to Claude requests and sets the lifetime of existing cache breakpoints. Group settings determine whether missing breakpoints are added. With 5 minutes (including following a 5-minute global default), a 1-hour TTL the client set itself is also shortened to 5 minutes; “Do not override TTL” keeps the client's setting. Cache writes cost about 1.25× base input for 5 minutes and 2× for 1 hour, and 1 hour only pays off when the same conversation pauses 5–60 minutes; actual caching and billing depend on upstream usage and site prices."
     },
     title: 'API Keys',
     description: 'Manage your API keys and access tokens',
