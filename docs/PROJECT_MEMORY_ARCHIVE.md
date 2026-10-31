@@ -4969,6 +4969,11 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 
 <!-- 2026-10-30 0.4.14 集成与发布原文归档结束。 -->
 
+### 2026-10-31 — 20261030-anthropic-cache-ttl — 发布状态更正
+
+- 原 Anthropic TTL 实施交接记录记载为等待提交；后续 PR #170 已合入，版本 PR #171 也已合入，annotated `v0.4.15` 正式发布，Release workflow `41175366074` 成功，五平台资产与 `checksums.txt` 已核验。
+- 既有 `v0.4.14` 标签保持不可变；迁移共333项，旧332项不变并追加286。真实供应商缓存命中率/收益仍未验证，生产未部署。
+
 ### 2026-10-30 — 20261030-anthropic-cache-ttl-implementation — 本地实施、审查与验收归档
 
 - 授权/边界：用户授权按 `.work/tasks/20261030-anthropic-cache-ttl/FINAL_PLAN.md` 本地实施，前后端与独立审查使用 Paseo Astra/xhigh，前端使用全局 Taste/Impeccable/GSAP；不做影子模式、生产试验、部署、提交、推送或 PR。基线为 `23b19fd9b`，既有记忆改动保留。
@@ -4978,3 +4983,36 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 审查：D报告 `.work/tasks/20261030-anthropic-cache-ttl/implementation/REVIEW.md`，确认别名高价预留、OAuth渠道映射/忽略遗留mapping、Fable/Mythos识别三项P1均已修复；无剩余P0/P1。
 - 验证：前端135项定向、typecheck/build/lint/design；隔离PG18/Redis40个顶层 `-race` 零跳过且自有数据0；Redis-only四态快照；service全量unit；TTL service race与相邻包race；整仓Go build；golangci-lint；韧性gate 84/281/90/2/18全通过且零跳过；scheduler-diff、迁移校验、临时index docs consistency、gofmt、diff-check通过。真实供应商物理缓存命中/收益未验证。
 - 工作树：未提交，保留本任务代码、文档/登记和此前记忆改动；用户后续授权提交时须在干净提交树运行 upstream-sync audit。本任务无业务遗留。
+
+## 2026-10-31 — 20261030-anthropic-cache-ttl — 发布收尾原文归档
+
+<!-- 当前交接状态原文 -->
+
+### Anthropic 缓存 TTL 实施（2026-10-31；PR #170/#171 已合并，v0.4.15 已发布）
+
+- 目标：按 `.work/tasks/20261030-anthropic-cache-ttl/FINAL_PLAN.md` 完整实施管理员默认 TTL、API Key 四态、最终出站统一处理、usage/计费/预留修复及前端/文档同步；保持精简，不做影子模式、生产操作或无关测试。
+- 起点：main `23b19fd9b`；已有本记忆与归档未提交改动必须保留。实施前已完整复读方案、代码基线和 Git 状态。
+- 分工：实际 Paseo A 负责最终 wire、协议/usage 转换与预留；B 负责 Key/Ent/迁移、鉴权、设置、usage 仓储与账单；C 负责前端、现行文档/OpenSpec/登记。三者已由运行元数据核实为 gpt-6-astra / xhigh；实施完成后另行独立 Astra 审查。主 Agent 负责接口契约、进度纠偏、门禁和收尾。
+- 约束：迁移只追加；不改生产、不做真实供应商缓存试验；不覆盖其他 Agent 既有改动；任何实现必须贯通最终 wire、计费与预留，不能只做表单开关。
+- 当前：PR #170 以合并提交 `d579bca2b3498d3fdd35b0e09dad37321558f348` 合入 main；版本 PR #171 以合并提交 `10fbc9c721cd7b4b11040ade04a59094a32cea90` 合入。annotated `v0.4.15`（tag object `0c318a0499851f3c8d31bdcb83428b73b1d04267`）已发布，Release workflow `41175366074` 成功，五平台资产与 checksums 已核验；现有 `v0.4.14` 标签保持不可变。迁移共333项，旧332项不变并追加286。真实供应商物理缓存能力与命中率未验证；尚未部署生产。
+
+<!-- 进行中的工作原文（任务已完成） -->
+
+### 20261030-anthropic-cache-ttl-implementation — 产品统筹与集成（已完成；2026-10-31）
+
+- 结果：PR #170 已合并，版本 PR #171 已合并，v0.4.15 已发布且资产 checksum 已核验；独立 Astra/xhigh 审查与全部验收完成。真实供应商与生产部署未执行。
+
+### 20261030-anthropic-cache-ttl-backend — 后端核心实施（已完成；2026-10-31）
+
+- 结果：A/B 后端路线已完成并交接，Key/迁移/鉴权/最终 wire/usage/预留/账单均已验收；详细内容随统筹任务归档。
+
+<!-- 发布收尾操作日志原文 -->
+
+### 2026-10-31 — 20261030-anthropic-cache-ttl — 提交、PR 与 v0.4.15 发布收尾
+
+- 请求/目标：用户授权提交、创建 PR 并发版；既有 `v0.4.14` 标签不可覆盖，因此保留其不可变状态，TTL 版本按 `v0.4.15` 发布。
+- 完成操作：PR #170（TTL 功能）已以 `d579bca2b3498d3fdd35b0e09dad37321558f348` 合入；版本 PR #171 已以 `10fbc9c721cd7b4b11040ade04a59094a32cea90` 合入；annotated tag `v0.4.15` 已推送并指向该合并提交，Release workflow `41175366074` 成功，Release 为正式版。
+- 验证：五平台资产与 `checksums.txt` 的 SHA-256 全部通过；Release 非 draft、非 prerelease，包含五个平台包和校验文件；tag 中程序版本为 `0.4.15`，迁移清单共333项并包含 `286_anthropic_cache_ttl.sql`。PR 与 Release CI 均已通过。
+- 修改文件：本次收尾仅更新本记忆文件；业务代码、版本文件、迁移和已发布标签未再修改。未部署生产，未验证真实供应商物理缓存命中率或收益；Telegram 通知因未配置凭据按 workflow 规则跳过。
+- 卡点/风险：无发布阻塞；生产部署、真实供应商缓存收益验证和后续上线观察仍需单独授权。
+- 下一步：无。保留 `v0.4.14` 与 `v0.4.15` 两个不可变正式标签。
