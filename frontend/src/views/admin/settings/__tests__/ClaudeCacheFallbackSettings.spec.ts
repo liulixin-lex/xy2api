@@ -18,7 +18,7 @@ describe('Claude cache group settings', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.groups.mockResolvedValue([{ id: 7, name: 'Claude', platform: 'anthropic' }, { id: 8, name: 'Mixed', platform: 'composite' }])
-    mocks.get.mockResolvedValue({ claude_cache_fallback_policy: { enabled: false, group_ids: [7] } })
+    mocks.get.mockResolvedValue({ claude_cache_fallback_policy: { enabled: false, group_ids: [7] }, anthropic_cache_ttl_default: '5m' })
     mocks.save.mockImplementation(async payload => payload)
   })
   it('saves only the switch and selected groups, including composite groups', async () => {
@@ -32,7 +32,7 @@ describe('Claude cache group settings', () => {
     expect(w.text()).toContain('claudeCacheFallback.saved')
   })
   it('requires a group only when enabled and can disable with an empty selection', async () => {
-    mocks.get.mockResolvedValue({ claude_cache_fallback_policy: { enabled: false, group_ids: [] } })
+    mocks.get.mockResolvedValue({ claude_cache_fallback_policy: { enabled: false, group_ids: [] }, anthropic_cache_ttl_default: '5m' })
     const w = mountSettings(); await flushPromises(); await w.get('[data-toggle]').trigger('click'); await save(w)
     expect(mocks.save).not.toHaveBeenCalled(); expect(w.text()).toContain('claudeCacheFallback.invalid')
     await w.get('[data-groups]').setValue('7'); await save(w)
@@ -52,12 +52,12 @@ describe('Claude cache group settings', () => {
     expect(w.text()).toContain('claudeCacheFallback.saveFailed'); expect(w.text()).not.toContain('claudeCacheFallback.saved')
   })
   it('does not expose save for an old backend and recovers by reload', async () => {
-    mocks.get.mockResolvedValueOnce({ claude_cache_fallback_policy: { enabled: true, rules: [] } })
+    mocks.get.mockResolvedValueOnce({ claude_cache_fallback_policy: { enabled: true, rules: [] }, anthropic_cache_ttl_default: '5m' })
     const w = mountSettings(); await flushPromises(); expect(button(w, 'save')).toBeUndefined()
     await button(w, 'reload').trigger('click'); await flushPromises(); expect(button(w, 'save')).toBeDefined()
   })
   it('can disable a saved group even when the group directory is unavailable', async () => {
-    mocks.get.mockResolvedValue({ claude_cache_fallback_policy: { enabled: true, group_ids: [99] } })
+    mocks.get.mockResolvedValue({ claude_cache_fallback_policy: { enabled: true, group_ids: [99] }, anthropic_cache_ttl_default: '5m' })
     mocks.groups.mockRejectedValue(new Error('unavailable'))
     const w = mountSettings(); await flushPromises(); await w.get('[data-toggle]').trigger('click'); await save(w)
     expect(mocks.save).toHaveBeenCalledWith({ claude_cache_fallback_policy: { enabled: false, group_ids: [99] } })
@@ -67,5 +67,42 @@ describe('Claude cache group settings', () => {
     const w = mountSettings(); await flushPromises(); await w.get('[data-toggle]').trigger('click')
     await button(w, 'reload').trigger('click'); await flushPromises(); await save(w)
     expect(mocks.save).toHaveBeenCalledWith({ claude_cache_fallback_policy: { enabled: true, group_ids: [7] } })
+  })
+  it('shows the stored duration and saves only the duration when only it changes', async () => {
+    mocks.get.mockResolvedValue({ claude_cache_fallback_policy: { enabled: false, group_ids: [7] }, anthropic_cache_ttl_default: '1h' })
+    const w = mountSettings(); await flushPromises()
+    expect(w.get('[data-ttl="1h"]').attributes('aria-pressed')).toBe('true')
+    expect(w.get('[data-ttl="5m"]').attributes('aria-pressed')).toBe('false')
+    await w.get('[data-ttl="5m"]').trigger('click'); await save(w)
+    expect(mocks.save).toHaveBeenCalledWith({ anthropic_cache_ttl_default: '5m' })
+    expect(button(w, 'save').attributes('disabled')).toBeDefined()
+    expect(w.text()).toContain('claudeCacheFallback.saved')
+  })
+  it('saves both rows in one request when both change', async () => {
+    const w = mountSettings(); await flushPromises()
+    await w.get('[data-toggle]').trigger('click'); await w.get('[data-ttl="1h"]').trigger('click'); await save(w)
+    expect(mocks.save).toHaveBeenCalledWith({ claude_cache_fallback_policy: { enabled: true, group_ids: [7] }, anthropic_cache_ttl_default: '1h' })
+  })
+  it('saves a duration change while the stored scope cannot be checked', async () => {
+    mocks.get.mockResolvedValue({ claude_cache_fallback_policy: { enabled: true, group_ids: [99] }, anthropic_cache_ttl_default: '5m' })
+    mocks.groups.mockRejectedValue(new Error('unavailable'))
+    const w = mountSettings(); await flushPromises(); await w.get('[data-ttl="1h"]').trigger('click'); await save(w)
+    expect(mocks.save).toHaveBeenCalledWith({ anthropic_cache_ttl_default: '1h' })
+  })
+  it('blocks the whole save when a changed scope is enabled without groups', async () => {
+    mocks.get.mockResolvedValue({ claude_cache_fallback_policy: { enabled: false, group_ids: [] }, anthropic_cache_ttl_default: '5m' })
+    const w = mountSettings(); await flushPromises()
+    await w.get('[data-toggle]').trigger('click'); await w.get('[data-ttl="1h"]').trigger('click'); await save(w)
+    expect(mocks.save).not.toHaveBeenCalled(); expect(w.text()).toContain('claudeCacheFallback.invalid')
+  })
+  it.each([{}, { anthropic_cache_ttl_default: '5m' }])('keeps the duration unsaved when the response does not echo it: %j', async result => {
+    mocks.save.mockResolvedValue(result)
+    const w = mountSettings(); await flushPromises(); await w.get('[data-ttl="1h"]').trigger('click'); await save(w)
+    expect(w.text()).toContain('claudeCacheFallback.saveFailed'); expect(button(w, 'save').attributes('disabled')).toBeUndefined()
+  })
+  it('does not expose save when the duration is missing from the settings response', async () => {
+    mocks.get.mockResolvedValueOnce({ claude_cache_fallback_policy: { enabled: false, group_ids: [7] } })
+    const w = mountSettings(); await flushPromises()
+    expect(button(w, 'save')).toBeUndefined(); expect(w.text()).toContain('claudeCacheFallback.loadFailed')
   })
 })

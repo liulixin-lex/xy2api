@@ -63,6 +63,14 @@
   - PR 1 `fix/usage-ttl-text-removal-20261031`：删除使用记录列表与 Token 悬浮详情里的策略与应用状态文字，接口字段保留，「TTL 明细未报告」保留。
   - PR 2 `feat/claude-cache-settings-card-20261031`：叠在 PR 1 上，把默认 TTL 移进「Claude 缓存」卡片（两行、一个保存，只提交改动字段），主表单不再提交 `anthropic_cache_ttl_default`。
   - 两个 PR 只开到 CI 全绿，不合并、不发版、不部署。
+  - 状态（2026-10-31T16:35Z 核实）：PR #175、#176 已开，两者 20 项 CI 全部通过、可合并，未合并。本地浏览器环境与截图在仓库外的交接目录（Claude 缓存 UI，2026-10-31），用完已停掉并清理数据。
+  - 2026-10-31 追加（#176）：用户对照参考仓库后选定先补文案。卡片「缓存时长」与 Key 弹窗提示写明：选 5 分钟（含跟随全局 5 分钟）时，客户端自己写的 1h 也改为 5m；Key 弹窗补写入价倍数与 1 小时适用间隔。
+  - 留给用户决定、本次未做：「跟随全局」改为只延长、不缩短（参考仓库原则，会改 0.4.15 行为；用户确认后再做，可替代原「全局加不覆写选项」）；客户端自己声明缓存时，余额预留是否恢复温会话折扣（0.4.15 起按冷写预留）；OAuth 系统提示块 TTL 下拉补说明；自动缓存分组选择器只列能到 Anthropic 的分组。
+- **20261031-tool-cache-markers**（2026-10-31 开始）：用户对照参考仓库 kiss-kedaya/sub2api 的 Anthropic 缓存 TTL 后，按建议顺序开工 P0/P1 后端项，叠在 #176 上单独开 PR，由 Claude 实现：
+  - Chat/Responses → Anthropic 转换保留工具结果（`role=tool`、`function_call_output`）上的缓存标记。现状丢标记，但仍按原始正文判定「客户端已声明」，自动补缓存不补、预留按冷写算。
+  - 仅转换路由：顶层 automatic 与末块显式 TTL 冲突时向长 TTL 调和（原生 `/v1/messages` 不变），与上一项同 PR，避免 off 模式 Key 出现新 400。
+  - 观测：策略 1h 已应用但上游只报 5m 时，结算日志标为降级；文档补运维查询，并写明官方 1h 不需要 beta、本站默认不加。
+  - 只开到 CI 全绿，不合并、不发版、不部署；真实上游实测需另行授权。
 
 ## 操作陷阱
 
@@ -267,3 +275,36 @@ pnpm --dir frontend run build
 - 验证：定向 vitest 9 个文件 93 项、前端全量 468 个文件 3548 项、CI 关键清单 95 个文件 1021 项（用 pnpm 9）、eslint、vue-tsc、`check_docs_consistency.py`、`sync.py audit`（干净提交）与 `scheduler-diff` 均通过。浏览器验证与 PR 2 合并进行，见 PR 2 记录。未改 Go，未跑后端门禁。
 - 卡点/风险：无。
 - 下一步：推送并开 PR，CI 全绿后停在 PR，由另一位作者合并；不发版、不部署。
+
+### 2026-10-31T14:30Z — 20261031-claude-cache-ui — PR 2：默认 TTL 移入「Claude 缓存」卡片，本地验证完成
+
+- 请求/目标：用户问两项设置是否冲突、是否合并、是否按分组。结论：不冲突，执行顺序为先补断点、再统一时长、最后做 4 槽与长 TTL 顺序修正；保留两项，放进同一张卡片；TTL 不按分组。用户选定实施。
+- 开始状态：叠在 PR 1 上，分支 `feat/claude-cache-settings-card-20261031`。
+- 完成操作：
+  - `ClaudeCacheFallbackSettings.vue` 改为两行加一个保存：第一行「自动补缓存」（开关与分组），第二行「缓存时长（跟随全局的密钥）」（5 分钟/1 小时两态按钮）。
+  - 保存只提交改动过的字段，并逐项核对回显；只改时长时不提交、也不校验分组策略（后端对省略字段保持原值）。
+  - `SettingsView.vue` 删掉原 TTL 下拉、选项、表单字段与提交字段，`SettingsForm` 不再含该字段，避免主表单用旧值覆盖。
+  - 中英文文案修正互相矛盾的说法（原卡片写「默认缓存 5 分钟」）。同步两份文档与两个 OpenSpec 变更，退役旧下拉的 id、选项名与 i18n 键（带命名空间，不误伤 KeysView 和后端的同名标识）。
+  - 窄屏下第二行改为上下排列。
+- 审查：四个维度分别查找、逐条反驳核验。确认 3 条低级别问题并已修复：旧后端测试夹具缺时长，导致策略校验没有被单独覆盖；退役正则漏了 `-hint` id；英文提示引用了已删除的标签名。驳回 2 条：模板字符串形式的退役，以及 Bedrock 旧模型不支持 TTL 的措辞。
+- 修改文件：上述两个组件及其 spec、`frontend/src/i18n/locales/{zh,en}/admin/settings.ts`、`docs/ANTHROPIC_CACHE_TTL.md`、`docs/CLAUDE_CACHE_FALLBACK.md`、两个 OpenSpec 变更、`tools/docs_consistency.json`、本记忆。
+- 验证：
+  - 卡片、设置页与 locale 定向测试 77 项；前端全量与 CI 关键清单（pnpm 9）；eslint、vue-tsc；`check_docs_consistency.py`。
+  - 本地后端连一次性 PostgreSQL 18 和 Redis，加 vite，用 playwright-core 和本机 Chrome 跑 20 项检查，全部通过：
+    - 管理员与用户使用记录不再出现 TTL 策略文字，1h 标签、读取占比和「TTL 明细未报告」仍在；
+    - 设置页只剩一张卡片；只改时长时请求只带 TTL，只改分组时只带策略，刷新后保持；
+    - 主表单保存（270 个字段）不含 TTL，后端值不变；
+    - 手机宽度无横向溢出，无页面错误。
+  - 未改 Go，未跑后端门禁。
+- 卡点/风险：无。合并顺序须先 PR 1，再 PR 2（PR 2 的 base 为 PR 1 分支）。
+- 下一步：推送两个分支并开 PR，CI 全绿后停下；不合并、不发版、不部署。用户待决事项见“进行中的工作”。
+
+### 2026-10-31T16:35Z — 20261031-claude-cache-ui — PR 2 追加：提示写明 5 分钟会缩短客户端的 1 小时
+
+- 请求/目标：用户对照参考仓库后同意建议顺序，第一项是在 #176 写明现有行为（只改文案）。
+- 开始状态：分支 `feat/claude-cache-settings-card-20261031`，HEAD `e1d523f3e`，与远端一致；#175、#176 均 OPEN、CI 全绿。
+- 完成操作：卡片「缓存时长（跟随全局的密钥）」提示与 Key 弹窗 `keys.cacheTTL.hint`（中英文）写明：选 5 分钟（含跟随全局 5 分钟）时，客户端自己写的 1 小时也改为 5 分钟，保留客户端设置要选「不覆写 TTL」；Key 弹窗补写入价倍数和 1 小时的适用间隔。`ANTHROPIC_CACHE_TTL.md` 的 inherit 行与 OpenSpec tasks 同步。不改行为、接口和控件。
+- 修改文件：`frontend/src/i18n/locales/{zh,en}/admin/settings.ts`、`frontend/src/i18n/locales/{zh,en}/dashboard.ts`、`docs/ANTHROPIC_CACHE_TTL.md`、`openspec/changes/anthropic-cache-ttl-20261030/tasks.md`、本记忆。
+- 验证：KeysView、卡片、设置页与 locale 定向 vitest 4 个文件 108 项、改动文件 eslint、vue-tsc、`check_docs_consistency.py`、`git diff --check` 通过。
+- 卡点/风险：无。若之后上线「跟随全局只延长、不缩短」，这两条提示要按新规则改。
+- 下一步：推送后等 #176 CI 全绿；后端项见 `20261031-tool-cache-markers`。
