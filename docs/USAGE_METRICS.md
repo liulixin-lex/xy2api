@@ -49,7 +49,7 @@ OpenAI 原始总输入含缓存明细，在 `backend/internal/service/openai_gat
 
 ## Anthropic TTL 策略与计费分类
 
-Key 的 TTL 选择与供应商实际 usage 独立。用量接口新增 `anthropic_cache_ttl_policy`（off/5m/1h）及 `anthropic_cache_ttl_applied`（boolean），历史与非目标出口为 NULL。列表仅在有策略记录时显示轻量文字，详情对 NULL 显示「未记录」。已应用表示最终能力清理后的请求有合法 ephemeral 声明且全部符合指定 TTL，原值已相同也算；不表示供应商采用 TTL 或缓存命中。off、无断点或未落实为 false，只取最终结算尝试，不继承失败尝试。
+Key 的 TTL 选择与供应商实际 usage 独立。用量接口新增 `anthropic_cache_ttl_policy`（off/5m/1h）及 `anthropic_cache_ttl_applied`（boolean），历史与非目标出口为 NULL。使用记录页面不显示这两个字段（2026-10-31 起），只由接口返回。已应用表示最终能力清理后的请求有合法 ephemeral 声明且全部符合指定 TTL，原值已相同也算；不表示供应商采用 TTL 或缓存命中。off、无断点或未落实为 false，只取最终结算尝试，不继承失败尝试。
 
 上游 5m/1h 桶及字段存在性贯通 Chat/Responses 转换：省略保留旧值、显式 0 清零、累计事件不相加。总量缺失可在内部由明确桶推导，总量明确为 0 不推导正数，也不回写供应商响应。完整桶分价；全部缺失与部分差额按基础写入价结算，详情显示「TTL 明细未报告」或「部分 TTL 明细未报告」；超过总量按既有确定性规则封顶并记录不一致。
 

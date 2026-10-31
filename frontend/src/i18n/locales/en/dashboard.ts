@@ -347,16 +347,8 @@ export default {
     costDetails: 'Cost Breakdown',
     tokenDetails: 'Token Breakdown',
     anthropicCacheTTL: {
-      policy: 'TTL policy',
-      off: 'No TTL override',
-      '5m': '5 minutes',
-      '1h': '1 hour',
-      applied: 'Applied',
-      notApplied: 'Not applied',
-      notRecorded: 'Not recorded',
       unknownDetail: 'TTL breakdown not reported',
-      partialDetail: 'Partial TTL breakdown not reported',
-      hint: 'Applied means the final request declarations match the policy. It does not confirm provider TTL or a cache hit. Not recorded includes historical records and non-target routes.'
+      partialDetail: 'Partial TTL breakdown not reported'
     },
     cacheTtlOverriddenHint: 'Cache write billing classification adjusted in the billing copy; does not measure actual cache efficiency',
     cacheTtlOverriddenLabel: 'Billing adjustment',

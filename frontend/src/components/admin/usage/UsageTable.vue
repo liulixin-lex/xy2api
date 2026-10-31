@@ -189,12 +189,6 @@
                   <span v-if="row.cache_ttl_overridden" :title="t('usage.cacheTtlOverriddenHint')" class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30 cursor-help">{{ t('usage.cacheTtlOverriddenLabel') }}</span>
                 </div>
               </div>
-              <p
-                v-if="row.anthropic_cache_ttl_policy != null"
-                data-testid="anthropic-cache-ttl-status"
-                class="text-xs text-gray-500 dark:text-gray-400"
-                :title="t('usage.anthropicCacheTTL.hint')"
-              >{{ t('usage.anthropicCacheTTL.policy') }}: {{ cacheTTLPolicyLabel(row) }} · {{ cacheTTLAppliedLabel(row) }}</p>
               <div v-if="props.showCacheHitRate && hasUsageTokenMetrics(row)" class="flex items-center gap-2 text-xs" :title="t('usage.cacheHitRateHint')">
                 <span data-testid="usage-cache-hit-rate" :aria-label="`${t('usage.cacheHitRate')}: ${formatCacheHitRate(row)}`" class="font-medium tabular-nums text-sky-600 dark:text-sky-400">{{ formatCacheHitRate(row) }}</span>
               </div>
@@ -399,10 +393,6 @@
               v-if="tokenTooltipData && tokenTooltipData.anthropic_cache_ttl_policy != null && tokenTooltipData.cache_creation_tokens > (tokenTooltipData.cache_creation_5m_tokens || 0) + (tokenTooltipData.cache_creation_1h_tokens || 0)"
               class="text-gray-300"
             >{{ t((tokenTooltipData.cache_creation_5m_tokens || 0) + (tokenTooltipData.cache_creation_1h_tokens || 0) > 0 ? 'usage.anthropicCacheTTL.partialDetail' : 'usage.anthropicCacheTTL.unknownDetail') }}</p>
-            <div v-if="tokenTooltipData" data-testid="anthropic-cache-ttl-detail" class="flex items-center justify-between gap-4">
-              <span class="text-gray-400">{{ t('usage.anthropicCacheTTL.policy') }}</span>
-              <span>{{ cacheTTLPolicyLabel(tokenTooltipData) }} · {{ cacheTTLAppliedLabel(tokenTooltipData) }}</span>
-            </div>
             <div v-if="tokenTooltipData && tokenTooltipData.cache_ttl_overridden" class="flex items-center justify-between gap-4">
               <span class="text-gray-400 flex items-center gap-1.5">
                 {{ t('usage.cacheTtlOverriddenLabel') }}
@@ -616,7 +606,7 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import IpGeoCell from '@/components/common/IpGeoCell.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { fetchBatch, getEntry } from '@/utils/ipGeoLookup'
-import type { AdminUsageLog, UsageLog } from '@/types'
+import type { AdminUsageLog } from '@/types'
 import type { Column } from '@/components/common/types'
 
 interface Props {
@@ -654,10 +644,6 @@ const emit = defineEmits<{
   ipGeoBatchFailed: []
 }>()
 const { t } = useI18n()
-const cacheTTLPolicyLabel = (row: Pick<UsageLog, 'anthropic_cache_ttl_policy'>) =>
-  t(row.anthropic_cache_ttl_policy == null ? 'usage.anthropicCacheTTL.notRecorded' : `usage.anthropicCacheTTL.${row.anthropic_cache_ttl_policy}`)
-const cacheTTLAppliedLabel = (row: Pick<UsageLog, 'anthropic_cache_ttl_applied'>) =>
-  t(row.anthropic_cache_ttl_applied == null ? 'usage.anthropicCacheTTL.notRecorded' : row.anthropic_cache_ttl_applied ? 'usage.anthropicCacheTTL.applied' : 'usage.anthropicCacheTTL.notApplied')
 
 const appStore = useAppStore()
 const copiedRequestId = ref<string | null>(null)
