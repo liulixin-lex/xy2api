@@ -548,7 +548,41 @@ type OpenAIGatewayService struct {
 	// shareScheduling 由 ProvideShareSchedulingService 注入；nil 时保持原版调度。
 	shareScheduling *ShareSchedulingService
 	// resilience is the xy2api gateway resilience runtime (optional).
-	resilience *ResilienceService
+	resilience           *ResilienceService
+	groupQualityGateView GroupQualityGateView
+}
+
+// SetGroupQualityGateView attaches the shared quality decision view during startup wiring.
+func (s *OpenAIGatewayService) SetGroupQualityGateView(view GroupQualityGateView) {
+	if s == nil {
+		return
+	}
+	s.groupQualityGateView = view
+}
+
+// GroupQualityGateView returns the shared quality decision view. A nil or
+// unconfigured service remains safe for callers and behaves as all groups ungated.
+func (s *OpenAIGatewayService) GroupQualityGateView() GroupQualityGateView {
+	if s == nil || s.groupQualityGateView == nil {
+		return emptyGroupQualityGateView{}
+	}
+	return s.groupQualityGateView
+}
+
+// RefreshServingPricingKey reloads only the pricing group's snapshot for a
+// long-lived request. The API key identity and serving group ID remain fixed.
+func (s *OpenAIGatewayService) RefreshServingPricingKey(ctx context.Context, apiKey *APIKey) *APIKey {
+	if s == nil || apiKey == nil || apiKey.GroupID == nil || *apiKey.GroupID <= 0 || s.schedulerSnapshot == nil {
+		return apiKey
+	}
+	group, err := s.schedulerSnapshot.GetGroupByIDLite(ctx, *apiKey.GroupID)
+	if err != nil || group == nil || group.ID != *apiKey.GroupID ||
+		(apiKey.Group != nil && (group.Platform != apiKey.Group.Platform || group.SubscriptionType != apiKey.Group.SubscriptionType)) {
+		return apiKey
+	}
+	clone := *apiKey
+	clone.Group = group
+	return &clone
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService

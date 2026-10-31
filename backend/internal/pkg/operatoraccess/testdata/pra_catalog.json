@@ -7811,5 +7811,47 @@
   "fields": null,
   "redact": [],
   "ws": false
+ } ,
+ {
+  "method": "GET",
+  "path": "/group-quality-gate/policies",
+  "group": "admin",
+  "reg": "registerGroupQualityGateRoutes",
+  "module": "accounts",
+  "level": "view",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [],
+  "ws": false
+ },
+ {
+  "method": "PUT",
+  "path": "/group-quality-gate/policies/:group_id",
+  "group": "admin",
+  "reg": "registerGroupQualityGateRoutes",
+  "module": "groups",
+  "level": "manage",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [],
+  "ws": false
+ },
+ {
+  "method": "GET",
+  "path": "/group-quality-gate/status",
+  "group": "admin",
+  "reg": "registerGroupQualityGateRoutes",
+  "module": "accounts",
+  "level": "view",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [],
+  "ws": false
  }
 ]

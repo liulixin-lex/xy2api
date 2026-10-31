@@ -50,6 +50,7 @@ func ProvideAdminHandlers(
 	shareSchedulingHandler *admin.ShareSchedulingHandler,
 	groupCategoryHandler *admin.GroupCategoryHandler,
 	resilienceHandler *admin.ResilienceHandler,
+	groupQualityGateHandler *admin.GroupQualityGateHandler,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
 	iqCheckService *service.IQCheckService,
 	accountIQHandler *admin.AccountIQHandler,
@@ -112,6 +113,7 @@ func ProvideAdminHandlers(
 		ShareScheduling:        shareSchedulingHandler,
 		GroupCategory:          groupCategoryHandler,
 		Resilience:             resilienceHandler,
+		GroupQualityGate:       groupQualityGateHandler,
 	}
 }
 
@@ -320,6 +322,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewShareSchedulingHandler,
 	admin.NewGroupCategoryHandler,
 	admin.NewResilienceHandler,
+	admin.NewGroupQualityGateHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,

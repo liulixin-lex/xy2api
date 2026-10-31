@@ -8,6 +8,8 @@ import (
 
 	coderws "github.com/coder/websocket"
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -283,11 +285,63 @@ func TestOpenAIWSTurnBillingAPIKeysKeepPreviousTurnUntilItIsRecorded(t *testing.
 	turn3 := &service.APIKey{ID: 3}
 	var keys openAIWSTurnBillingAPIKeys
 	require.Same(t, conn, keys.forTurn(1, conn), "a turn without BeforeTurn bills with the connection snapshot")
-	keys.set(2, turn2)
-	keys.set(3, turn3) // turn 3 starts before turn 2's usage is submitted
+	keys.set(2, turn2, turn2)
+	keys.set(3, turn3, turn3) // turn 3 starts before turn 2's usage is submitted
 	require.Same(t, turn2, keys.forTurn(2, conn))
 	require.Same(t, turn3, keys.forTurn(3, conn))
-	keys.set(4, conn)
+	keys.set(4, conn, conn)
 	require.Same(t, conn, keys.forTurn(2, conn), "only the current and previous turn are kept")
 	require.Len(t, keys.keys, 2)
+}
+
+func TestOpenAIWSTurnPricingAndAuthorizationSnapshotsStaySeparate(t *testing.T) {
+	originID, servingID := int64(10), int64(20)
+	originGroup := &service.Group{ID: originID, Platform: service.PlatformOpenAI, RateMultiplier: 1, Status: service.StatusActive, Hydrated: true}
+	servingGroup := &service.Group{ID: servingID, Platform: service.PlatformOpenAI, RateMultiplier: 3, Status: service.StatusActive, Hydrated: true}
+	user := &service.User{ID: 5}
+	origin := &service.APIKey{ID: 7, UserID: user.ID, GroupID: &originID, Group: originGroup, User: user}
+	serving := &service.APIKey{ID: 7, UserID: user.ID, GroupID: &servingID, Group: servingGroup, User: user}
+	state := resilience.NewRequestState()
+	require.True(t, state.MarkFallback(originID))
+	ctx := resilience.WithRequestState(context.Background(), state)
+	service.RememberAvailabilityFallbackOrigin(ctx, origin)
+	ctx = context.WithValue(ctx, ctxkey.Group, servingGroup)
+
+	var snapshots openAIWSTurnBillingAPIKeys
+	firstTurnCtx := snapshots.contextForTurn(ctx, 1, serving)
+	require.Same(t, origin, service.BillingAPIKey(firstTurnCtx, serving), "the passthrough first turn keeps the origin authorization snapshot")
+	snapshots.set(2, origin, serving)
+	turnCtx := snapshots.contextForTurn(ctx, 2, serving)
+	require.Same(t, origin, service.BillingAPIKey(turnCtx, serving), "authorization and limits keep the origin snapshot")
+	require.Same(t, serving, service.ServingPricingKey(turnCtx, serving), "pricing keeps the serving snapshot")
+	require.Same(t, servingGroup, service.ServingPricingGroup(turnCtx))
+
+	// A newer turn cannot mutate either snapshot while the prior usage task waits.
+	newOrigin := *origin
+	newOriginGroup := *originGroup
+	newOriginGroup.RateMultiplier = 0.8
+	newOrigin.Group = &newOriginGroup
+	newServing := *serving
+	newServingGroup := *servingGroup
+	newServingGroup.RateMultiplier = 4
+	newServing.Group = &newServingGroup
+	snapshots.set(3, &newOrigin, &newServing)
+	oldTurnCtx := snapshots.contextForTurn(ctx, 2, serving)
+	require.InDelta(t, 1.0, service.BillingAPIKey(oldTurnCtx, serving).Group.RateMultiplier, 1e-12)
+	require.InDelta(t, 3.0, service.ServingPricingKey(oldTurnCtx, serving).Group.RateMultiplier, 1e-12)
+	newTurnCtx := snapshots.contextForTurn(ctx, 3, serving)
+	require.InDelta(t, 0.8, service.BillingAPIKey(newTurnCtx, serving).Group.RateMultiplier, 1e-12)
+	require.InDelta(t, 4.0, service.ServingPricingKey(newTurnCtx, serving).Group.RateMultiplier, 1e-12)
+
+	latestServingGroup := *servingGroup
+	latestServingGroup.RateMultiplier = 5
+	beginSnapshots := openAIWSTurnBillingAPIKeys{refresh: func(_ context.Context, key *service.APIKey) *service.APIKey {
+		require.Equal(t, servingID, *key.GroupID, "begin refreshes the serving group independently")
+		return service.CloneAPIKeyWithGroup(key, &latestServingGroup)
+	}}
+	beginCtx := beginSnapshots.begin(ctx, nil, 2, serving)
+	require.Same(t, origin, service.BillingAPIKey(beginCtx, serving), "begin preserves origin authorization")
+	require.Equal(t, servingID, *service.ServingPricingKey(beginCtx, serving).GroupID)
+	require.InDelta(t, 5.0, service.ServingPricingGroup(beginCtx).RateMultiplier, 1e-12,
+		"begin refreshes the serving group's pricing snapshot")
 }

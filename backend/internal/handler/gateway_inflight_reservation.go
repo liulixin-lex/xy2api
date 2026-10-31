@@ -93,7 +93,8 @@ func reserveInflightBalanceCtx(
 	if billing == nil || estimator == nil || apiKey == nil || apiKey.User == nil || !billing.InflightReservationEnabled() {
 		return ctx, inflightNoop, nil
 	}
-	if apiKey.Group != nil && apiKey.Group.IsSubscriptionType() && subscription != nil {
+	authorizationKey := service.BillingAPIKey(ctx, apiKey)
+	if authorizationKey.Group != nil && authorizationKey.Group.IsSubscriptionType() && subscription != nil {
 		return ctx, inflightNoop, nil
 	}
 	estimate, priced := estimator.EstimateInflightReservation(ctx, apiKey, req)
@@ -103,7 +104,10 @@ func reserveInflightBalanceCtx(
 	if estimate <= 0 {
 		return ctx, inflightNoop, nil
 	}
-	res, err := billing.ReserveInflight(ctx, apiKey.User, apiKey.Group, subscription, estimate)
+	// The estimate is priced by the serving group. Reservation eligibility and
+	// the subscription exclusion use the authenticated origin group; the
+	// existing balance reservation remains user-scoped.
+	res, err := billing.ReserveInflight(ctx, apiKey.User, authorizationKey.Group, subscription, estimate)
 	if err != nil {
 		return ctx, inflightNoop, err
 	}

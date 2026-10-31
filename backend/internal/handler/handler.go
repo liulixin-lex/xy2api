@@ -49,6 +49,7 @@ type AdminHandlers struct {
 	ShareScheduling        *admin.ShareSchedulingHandler
 	GroupCategory          *admin.GroupCategoryHandler
 	Resilience             *admin.ResilienceHandler
+	GroupQualityGate       *admin.GroupQualityGateHandler
 }
 
 // Handlers contains all HTTP handlers

@@ -299,15 +299,15 @@ func batchImageOwnerFromContext(c *gin.Context) (service.BatchImageOwner, bool) 
 	if !ok || apiKey == nil || apiKey.ID <= 0 || apiKey.UserID <= 0 {
 		return service.BatchImageOwner{}, false
 	}
+	ctx := c.Request.Context()
+	servingKey := service.ServingPricingKey(ctx, apiKey)
+	authorizationKey := service.BillingAPIKey(ctx, apiKey)
 	owner := service.BatchImageOwner{
-		UserID:   apiKey.UserID,
-		APIKeyID: apiKey.ID,
-		GroupID:  apiKey.GroupID,
-	}
-	// xy2api resilience: an availability fallback group only serves the job;
-	// the group the request was made for prices and permits it.
-	if billing := service.BillingAPIKey(c.Request.Context(), apiKey); billing != apiKey {
-		owner.BillingGroupID = billing.GroupID
+		UserID:               apiKey.UserID,
+		APIKeyID:             apiKey.ID,
+		GroupID:              servingKey.GroupID,
+		AuthorizationGroupID: authorizationKey.GroupID,
+		PricingGroupID:       servingKey.GroupID,
 	}
 	return owner, true
 }

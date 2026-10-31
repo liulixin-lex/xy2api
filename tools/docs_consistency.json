@@ -130,6 +130,32 @@
       "pattern": "json:\"([a-z0-9_]+)\"",
       "match": "word",
       "doc": "openspec/changes/gateway-resilience-20261015/design.md"
+    },
+    {
+      "item": "group quality gate setting",
+      "sources": [
+        "backend/internal/service/domain_constants.go",
+        "backend/internal/service/**/*.go"
+      ],
+      "pattern": "SettingKeyGroupQualityGatePolicies|group_quality_gate_policies",
+      "doc": "docs/GROUP_QUALITY_GATE.md"
+    },
+    {
+      "item": "group quality gate API",
+      "sources": [
+        "backend/internal/server/routes/admin.go"
+      ],
+      "pattern": "group-quality-gate",
+      "match": "word",
+      "doc": "docs/GROUP_QUALITY_GATE.md"
+    },
+    {
+      "item": "group quality gate event",
+      "sources": [
+        "backend/internal/service/**/*.go"
+      ],
+      "pattern": "group_quality_gate\\.(?:eject|trial|recover|guard_hold|last_resort|evaluate_failed)",
+      "doc": "docs/GROUP_QUALITY_GATE.md"
     }
   ],
   "retired": [
@@ -354,6 +380,13 @@
       "reason": "2026-10-30 Anthropic cache TTL: per-key four-state policy replaces the OAuth-only global Boolean; declaration strip/rebuild and the per-attempt fallback helper were retired in favor of the shared final wire policy",
       "allowed": [
         "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
+    },
+    {
+      "pattern": "\\b(?:noteFallbackForcedFast|FreezeFallbackForcedFast|fallbackForcedFastChargesStandard|SetFallbackForcedFast|FallbackForcedFast|fallbackForcedFastKey|fallbackBillingGroup|BillingGroupID|billingGroupID)\\b",
+      "reason": "WP3-A fallback pricing uses the serving group directly and no longer tracks or adjusts fallback-specific forced-Fast billing state",
+      "allowed": [
         "docs/PROJECT_MEMORY_ARCHIVE.md"
       ]
     }
