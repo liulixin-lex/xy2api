@@ -77,6 +77,42 @@ func (r *groupQualityGateRepository) CompareAndSwapPolicies(ctx context.Context,
 	return next, nil
 }
 
+// LoadMembers loads only fields needed by quality and the shared resilience/profit
+// checks, in one query. It does not hydrate proxies or group objects.
+func (r *groupQualityGateRepository) LoadMembers(ctx context.Context, groupIDs []int64) (map[int64][]service.Account, error) {
+	out := make(map[int64][]service.Account, len(groupIDs))
+	if len(groupIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT ag.group_id, a.id, a.platform, a.type, a.status, a.schedulable,
+		       a.rate_multiplier, a.expires_at, a.auto_pause_on_expired,
+		       a.rate_limit_reset_at, a.overload_until, a.temp_unschedulable_until,
+		       COALESCE(a.temp_unschedulable_reason,''), COALESCE(a.extra,'{}'::jsonb)
+		FROM account_groups ag JOIN accounts a ON a.id = ag.account_id
+		WHERE ag.group_id = ANY($1) AND a.deleted_at IS NULL
+		ORDER BY ag.group_id, a.id`, pq.Array(groupIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var groupID int64
+		var a service.Account
+		var extra []byte
+		if err := rows.Scan(&groupID, &a.ID, &a.Platform, &a.Type, &a.Status, &a.Schedulable,
+			&a.RateMultiplier, &a.ExpiresAt, &a.AutoPauseOnExpired, &a.RateLimitResetAt,
+			&a.OverloadUntil, &a.TempUnschedulableUntil, &a.TempUnschedulableReason, &extra); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(extra, &a.Extra); err != nil {
+			return nil, fmt.Errorf("decode quality member extra: %w", err)
+		}
+		out[groupID] = append(out[groupID], a)
+	}
+	return out, rows.Err()
+}
+
 func (r *groupQualityGateRepository) LoadObservations(ctx context.Context, accountIDs []int64, from, to time.Time) ([]service.GroupQualityObservation, time.Time, error) {
 	if len(accountIDs) == 0 {
 		return nil, time.Now().UTC(), nil
@@ -98,7 +134,7 @@ func (r *groupQualityGateRepository) LoadObservations(ctx context.Context, accou
 		       COALESCE(cache_read_tokens, 0) AS cache_read_tokens,
 		       COALESCE(cache_creation_tokens, 0) AS cache_creation_tokens,
 		       LAG(created_at) OVER (PARTITION BY account_id, session_id ORDER BY created_at) AS previous_at
-			FROM usage_logs WHERE account_id = ANY($1) AND created_at >= $2 - INTERVAL '5 minutes' AND created_at < $3
+			FROM usage_logs WHERE account_id = ANY($1) AND created_at >= $2 AND created_at < $3
 		)
 		SELECT account_id, request_id, created_at, stream, first_token_ms, session_id,
 		       prompt_tokens, cache_read_tokens, cache_creation_tokens, TRUE,
@@ -150,24 +186,11 @@ func (r *groupQualityGateRepository) LoadObservations(ctx context.Context, accou
 	}
 	_ = rows.Close()
 	var observedAt time.Time
-	err = tx.QueryRowContext(ctx, `
-		SELECT GREATEST(
-			COALESCE((SELECT MAX(created_at) FROM usage_logs WHERE account_id = ANY($1) AND created_at >= $2 AND created_at < $3), 'epoch'::timestamptz),
-			COALESCE((SELECT MAX(e.created_at)
-				FROM ops_error_logs e
-				WHERE e.created_at >= $2 AND e.created_at < $3
-				  AND (e.account_id = ANY($1) OR EXISTS (
-					SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(e.upstream_errors)='array' THEN e.upstream_errors ELSE '[]'::jsonb END) ev
-					WHERE jsonb_typeof(ev->'account_id')='number' AND (ev->>'account_id')::bigint = ANY($1)
-				  ))), 'epoch'::timestamptz)
-		)`, pq.Array(accountIDs), from.UTC(), to.UTC()).Scan(&observedAt)
+	// A fresh error log must not hide stalled usage writes. Freshness is global,
+	// so an idle member does not make an otherwise healthy stream stale.
+	err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(created_at), $1) FROM usage_logs WHERE created_at < $1`, to.UTC()).Scan(&observedAt)
 	if err != nil {
 		return nil, time.Time{}, err
-	}
-	if observedAt.Equal(time.Unix(0, 0)) && len(out) == 0 {
-		// An account with no observations in the queried metric horizon is a
-		// valid no-sample case, not a stale sample.
-		observedAt = time.Now().UTC()
 	}
 	return out, observedAt, nil
 }

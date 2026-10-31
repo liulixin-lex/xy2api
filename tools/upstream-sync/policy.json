@@ -938,10 +938,6 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
-      "value": "if err == nil && !s.resilienceKeepOpenAISoftOwner(ctx, account, platform, requestedModel) {"
-    },
-    {
-      "path": "backend/internal/service/openai_gateway_scheduling.go",
       "value": "if s.resilienceKeepOpenAISoftOwner(ctx, account, platform, requestedModel) {"
     },
     {
@@ -1327,10 +1323,6 @@
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
       "value": "capabilitySelectionError(ctx, selectionErr)"
-    },
-    {
-      "path": "backend/internal/service/openai_gateway_scheduling.go",
-      "value": "if reason != resilience.ReasonCapabilityStreamOnly {"
     },
     {
       "path": "backend/internal/service/share_scheduling_openai.go",
@@ -2858,10 +2850,6 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
-      "value": "outboundModel = resolveOpenAIAccountUpstreamModelForRequest(item.account, model, compact)"
-    },
-    {
-      "path": "backend/internal/service/openai_gateway_scheduling.go",
       "value": "return recent[a].After(recent[b])"
     },
     {
@@ -2895,10 +2883,6 @@
     {
       "path": "backend/internal/handler/resilience_recovery_outcome.go",
       "value": "st.ClientGone() || (outcome != nil && *outcome == \"client_cancel\")"
-    },
-    {
-      "path": "backend/internal/service/openai_gateway_scheduling.go",
-      "value": "outboundModel = normalizeOpenAIModelForUpstream(item.account, resolveOpenAIForwardModel(item.account, model, \"\"))"
     },
     {
       "path": "backend/internal/handler/openai_gateway_handler.go",
@@ -3059,6 +3043,194 @@
     {
       "path": "backend/internal/handler/openai_gateway_handler.go",
       "value": "service.WithServingPricingKeySnapshot"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "if err == nil && account != nil && !isExcluded(accountID) && !s.resilienceKeepOpenAISoftOwner(ctx, account, platform, requestedModel) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "if reason != resilience.ReasonCapabilityStreamOnly && reason != \"group_quality_ejected\" {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "return resolveOpenAIAccountUpstreamModelForRequest(account, model, compact)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "return normalizeOpenAIModelForUpstream(account, resolveOpenAIForwardModel(account, model, \"\"))"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "func (s *OpenAIGatewayService) selectOpenAIStickyCapacity("
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "func openAICandidateLess("
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "groupQualityGateVeto(ctx, account)"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_forwarder_support.go",
+      "value": "ctx = withGroupQualityGateExempt(ctx)"
+    },
+    {
+      "path": "backend/internal/service/openai_profit_control.go",
+      "value": "ctx = s.withGroupQualityGate(ctx, groupID)"
+    },
+    {
+      "path": "backend/internal/service/share_scheduling_openai.go",
+      "value": "groupQualityGateVeto(ctx, acc)"
+    },
+    {
+      "path": "backend/internal/service/resilience_session.go",
+      "value": "attachSelectionProfitGate(gateCtx,"
+    },
+    {
+      "path": "backend/internal/service/gateway_service.go",
+      "value": "groupQualityGate *openAIGroupQualityGate"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "groupQualityTurnPinned.Store(service.OpenAIQualityTurnPinned(payload))"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "if NormalizeOpenAICompatiblePlatform(req.Platform) != PlatformOpenAI {"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "selection, err := s.service.selectOpenAIStickyCapacity(ctx, account, req)"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "AdvancedScheduler:       true,"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "return s.selectOpenAIStickyCapacity(ctx, account, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability, UseUpstreamTokenCost: useUpstreamTokenCost, SkipStickyCapacityRetry: err != nil})"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "func (s *OpenAIGatewayService) selectOpenAIStickyCapacityBorrow(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) (*AccountSelectionResult, error) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "func (s *OpenAIGatewayService) selectOpenAIStickyCapacityFallbackWait(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) (*AccountSelectionResult, error) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "selection, err := s.selectOpenAIStickyCapacityFallbackWait(ctx, account, req)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "func (s *OpenAIGatewayService) openAICandidateOrderForItems(groupID *int64, rates openAILegacyUpstreamRateOrder, items []accountWithLoad) openAICandidateOrder {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "func (s *OpenAIGatewayService) selectOpenAIStickyCapacityResult(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest, fallbackWait bool) (*AccountSelectionResult, error) {"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "SelectionAdmissionVetoLatest("
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "WithOpenAIQualityTurnExemption(turnCtx, turn == 1 || groupQualityTurnPinned.Load())"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "groupQualityTurnPinned.Store(service.OpenAIQualityTurnPinned(firstMessage))"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "// Legacy candidate admission reports group_quality_ejected through its filter stats.\n\tif vetoed, reason := groupQualityGateVeto(ctx, account); vetoed {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "// Legacy sticky admission rejects the owner before returning it to a caller.\n\tif vetoed, _ := groupQualityGateVeto(ctx, account); vetoed {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "// Legacy load-aware sticky admission must not retain an ejected owner.\n\t\t\tif vetoed, _ := groupQualityGateVeto(ctx, account); vetoed {"
+    },
+    {
+      "path": "backend/internal/service/openai_quality_routing.go",
+      "value": "borrowed, borrowErr := s.selectOpenAIStickyCapacityBorrow(ctx, selection.Account, OpenAIAccountScheduleRequest{"
+    },
+    {
+      "path": "backend/internal/service/openai_quality_routing.go",
+      "value": "if selection.StickyCapacitySpillover {\n\t\t\t\treturn selection, decision, nil"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "if (cfg.LoadBatchEnabled || req.AdvancedScheduler) && !groupQualityGateExempt(ctx) && !req.DisableStickyEscape && req.PreviousResponseID == \"\" {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "if NormalizeOpenAICompatiblePlatform(req.Platform) != PlatformOpenAI {\n\t\t\t\t\t\tselection, err := s.selectOpenAIStickyCapacityBorrow(ctx, account, req)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "return markStickySessionHit(markOpenAIStickySpillover(selection, spillover), !spillover), err"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "key.qualityTier = qualityTiers[item.account.ID]\n\t\t\tkey.nearCapacity = openAIAccountNearCapacity(item)"
+    },
+    {
+      "path": "backend/internal/service/openai_quality_routing.go",
+      "value": "borrowTiers := tiers[:2]"
+    },
+    {
+      "path": "backend/internal/service/openai_quality_routing.go",
+      "value": "for _, borrowPass := range borrowTiers {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "spillover := fresh.ID != account.ID"
+    },
+    {
+      "path": "backend/internal/service/group_member_servable.go",
+      "value": "cost, ok := openAISchedulingRate(acc, at, oauthRate)"
+    },
+    {
+      "path": "backend/internal/service/group_member_servable.go",
+      "value": "oauthRate = cachedOpenAIOAuthSchedulingRateMultiplier()"
+    },
+    {
+      "path": "backend/internal/service/openai_profit_control.go",
+      "value": "upstream, ok := openAIProfitGateCost(account, gate.pricingAt)"
+    },
+    {
+      "path": "backend/internal/service/resilience_fallback_group.go",
+      "value": "groupMemberServable(group, a, now, r.groupQualityGateView, nil)"
+    },
+    {
+      "path": "backend/internal/service/ops_account_availability.go",
+      "value": "groupMemberServable(grp, &acc, now, s.groupQualityGateView, nil)"
+    },
+    {
+      "path": "backend/internal/server/routes/admin.go",
+      "value": "groups.GET(\"/:id/profit-control-preview\", h.Admin.GroupQualityGate.ProfitControlPreview)"
+    },
+    {
+      "path": "backend/internal/service/profit_preview.go",
+      "value": "previewGroup.ProfitSafetyBuffer = 0"
+    },
+    {
+      "path": "backend/internal/service/group_member_servable.go",
+      "value": "isPlatformFilteredForSelection(acc, platform, platform == PlatformAnthropic || platform == PlatformGemini)"
+    },
+    {
+      "path": "backend/internal/service/wire.go",
+      "value": "loadOpenAIAdvancedSchedulerRuntimeSettings(context.Background(), settingRepo)"
+    },
+    {
+      "path": "backend/internal/service/profit_preview.go",
+      "value": "s.accountRepo.ListAllWithFilters(ctx, \"\", \"\", \"\", \"\", groupID, \"\")"
     }
   ],
   "forbidden_module_paths": [
@@ -3134,7 +3306,8 @@
     "xy-openai-recent-session-request-protocol",
     "xy-support-tickets",
     "xy-managed-openai-totp",
-    "xy-anthropic-cache-ttl"
+    "xy-anthropic-cache-ttl",
+    "xy-openai-group-quality-scheduling"
   ],
   "custom_patch_tests": [
     {
@@ -5291,6 +5464,91 @@
       "id": "xy-anthropic-cache-ttl",
       "path": "backend/internal/repository/anthropic_cache_ttl_integration_test.go",
       "literal": "func TestAnthropicCacheTTLAuthRedisRoundTrip(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_group_quality_scheduling_test.go",
+      "literal": "func TestOpenAIGroupQualityScheduling(t *testing.T)"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/handler/openai_profit_slot_recheck_test.go",
+      "literal": "quality veto/"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/handler/openai_gateway_handler_test.go",
+      "literal": "func TestOpenAIResponsesWebSocket_QualityPinnedTurnOneUsesAdmissionResult(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/handler/openai_gateway_handler_test.go",
+      "literal": "func TestOpenAIResponsesWebSocket_QualityGateDoesNotLeakPinnedExemptionToConnection(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/handler/openai_gateway_handler_test.go",
+      "literal": "func TestOpenAIResponsesWebSocket_QualityTurnAdmissionThroughHooks(t *testing.T)"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_group_quality_scheduling_test.go",
+      "literal": "Grok full owner escapes to an immediate free slot/"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_group_quality_scheduling_test.go",
+      "literal": "quality routing waits for healthy owner instead of borrowing avoided account/"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_group_quality_scheduling_test.go",
+      "literal": "quality borrow preserves near-capacity cohort/"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_group_quality_scheduling_test.go",
+      "literal": "queue full better alternative"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_group_quality_scheduling_test.go",
+      "literal": "pinned owner queue full remains a sticky fallback wait"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_group_test.go",
+      "literal": "func TestAvailabilityFallbackServableMembers("
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_group_test.go",
+      "literal": "func TestFallbackProfitControlPreview("
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestFallbackProfitTerminalUsesPricingAt("
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/openai_profit_control_test.go",
+      "literal": "func TestOpenAIProfitControlVetoReason("
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/handler/admin/group_handler_platform_test.go",
+      "literal": "func TestGroupProfitControlPreviewHandler("
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/repository/account_repo_schedulable_projection_test.go",
+      "literal": "func TestListOpsAccountsForStatsPreservesServabilityFields("
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/openai_scheduling_rate_fallback_test.go",
+      "literal": "func TestOpenAIOAuthSchedulingRateRuntimePreservesExplicitClear("
     }
   ]
 }

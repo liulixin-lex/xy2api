@@ -81,10 +81,12 @@ type OpenAIAccountScheduleRequest struct {
 	// DisableStickyEscape keeps task-owner lookups on their account even when
 	// generic sticky health or concurrency heuristics would prefer another.
 	DisableStickyEscape     bool
+	SkipStickyCapacityRetry bool
 	RequirePrivacySet       bool
 	PreviousResponseID      string
 	PreviousResponseCanMove bool
 	UseUpstreamTokenCost    bool
+	AdvancedScheduler       bool
 	RequestedModel          string
 	RequiredTransport       OpenAIUpstreamTransport
 	RequiredCapability      OpenAIEndpointCapability
@@ -441,7 +443,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 			return nil, decision, err
 		}
 		if selection != nil && selection.Account != nil {
-			compatible, _ := s.isAccountRequestCompatibleReason(ctx, selection.Account, req)
+			compatible, _ := s.isAccountRequestCompatibleReason(withGroupQualityGateExempt(ctx), selection.Account, req)
 			hasGroupMetadata := len(selection.Account.GroupIDs) > 0 || len(selection.Account.AccountGroups) > 0
 			groupCompatible := !hasGroupMetadata || openAIStickyAccountMatchesGroup(selection.Account, req.GroupID)
 			if hasGroupMetadata && s.service != nil {
@@ -471,7 +473,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		parentReq := req
 		parentReq.StickyAccountID = req.GuardianParentAccountID
 		parentReq.PreserveStickyBinding = true
-		selection, _, err := s.selectBySessionHash(ctx, parentReq)
+		selection, _, err := s.selectBySessionHash(withGroupQualityGateExempt(ctx), parentReq)
 		if err != nil {
 			return nil, decision, err
 		}
@@ -492,6 +494,10 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		if selection != nil && selection.Account != nil {
 			decision.Layer = openAIAccountScheduleLayerSessionSticky
 			decision.StickySessionHit = true
+			if selection.StickyCapacitySpillover {
+				decision.Layer = openAIAccountScheduleLayerLoadBalance
+				decision.StickySessionHit = false
+			}
 			decision.SelectedAccountID = selection.Account.ID
 			decision.SelectedAccountType = selection.Account.Type
 			return selection, decision, nil
@@ -549,15 +555,17 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	if accountID <= 0 {
 		return nil, false, nil
 	}
-	if req.ExcludedIDs != nil {
-		if _, excluded := req.ExcludedIDs[accountID]; excluded {
-			return nil, false, nil
-		}
-	}
-
 	account, err := s.service.getSchedulableAccount(ctx, accountID)
 	if err != nil || account == nil {
 		clearBinding()
+		return nil, false, nil
+	}
+	// Advanced sticky validation drops ejected owners so load balancing can rebind them.
+	if vetoed, _ := groupQualityGateVeto(ctx, account); vetoed {
+		clearBinding()
+		return nil, false, nil
+	}
+	if _, excluded := req.ExcludedIDs[accountID]; excluded {
 		return nil, false, nil
 	}
 	// xy2api resilience: a soft-penalised owner keeps the binding while this
@@ -623,28 +631,36 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		}), false, nil
 	}
 
-	cfg := s.service.schedulingConfig()
-	// WaitPlan.MaxConcurrency 使用 Concurrency（非 EffectiveLoadFactor），因为 WaitPlan 控制的是 Redis 实际并发槽位等待。
-	if s.service.concurrencyService != nil {
-		if escapeCfg.enabled && !req.DisableStickyEscape && acquireErr == nil && result != nil && !result.Acquired {
-			errorRate, ttft, _ := s.stats.snapshot(accountID)
-			slog.Info("sticky_escape_triggered",
-				"account_id", accountID,
-				"reason", "concurrency_full",
-				"error_rate", errorRate,
-				"ttft", ttft,
-			)
-			return nil, true, nil
+	if NormalizeOpenAICompatiblePlatform(req.Platform) != PlatformOpenAI {
+		if s.service.concurrencyService != nil {
+			if escapeCfg.enabled && !req.DisableStickyEscape && acquireErr == nil && result != nil && !result.Acquired {
+				errorRate, ttft, _ := s.stats.snapshot(accountID)
+				slog.Info("sticky_escape_triggered",
+					"account_id", accountID,
+					"reason", "concurrency_full",
+					"error_rate", errorRate,
+					"ttft", ttft,
+				)
+				return nil, true, nil
+			}
+			cfg := s.service.schedulingConfig()
+			return attachSelectionProfitGate(ctx, &AccountSelectionResult{
+				Account: account,
+				WaitPlan: &AccountWaitPlan{
+					AccountID: account.ID, MaxConcurrency: account.Concurrency,
+					Timeout: cfg.StickySessionWaitTimeout, MaxWaiting: cfg.StickySessionMaxWaiting,
+				},
+			}), false, nil
 		}
-		return attachSelectionProfitGate(ctx, &AccountSelectionResult{
-			Account: account,
-			WaitPlan: &AccountWaitPlan{
-				AccountID:      accountID,
-				MaxConcurrency: account.Concurrency,
-				Timeout:        cfg.StickySessionWaitTimeout,
-				MaxWaiting:     cfg.StickySessionMaxWaiting,
-			},
-		}), false, nil
+		return nil, false, nil
+	}
+
+	if s.service.concurrencyService != nil {
+		if acquireErr != nil {
+			req.SkipStickyCapacityRetry = true
+		}
+		selection, err := s.service.selectOpenAIStickyCapacity(ctx, account, req)
+		return selection, false, err
 	}
 	return nil, false, nil
 }
@@ -1890,6 +1906,11 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx con
 	if vetoed, reason := openAIProfitControlVetoReason(ctx, account); vetoed {
 		return false, reason
 	}
+	// Advanced candidate admission reports the shared reason through filter stats.
+	if vetoed, reason := groupQualityGateVeto(ctx, account); vetoed {
+		return false, reason
+	}
+
 	return true, ""
 }
 
@@ -1946,6 +1967,12 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerSettingRepo() SettingRepos
 }
 
 func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx context.Context) openAIAdvancedSchedulerRuntimeSettings {
+	return loadOpenAIAdvancedSchedulerRuntimeSettings(ctx, s.openAIAdvancedSchedulerSettingRepo())
+}
+
+// loadOpenAIAdvancedSchedulerRuntimeSettings also warms the shared settings at
+// startup, before background quality/operations checks or request scheduling.
+func loadOpenAIAdvancedSchedulerRuntimeSettings(ctx context.Context, repo SettingRepository) openAIAdvancedSchedulerRuntimeSettings {
 	if cached, ok := openAIAdvancedSchedulerSettingCache.Load().(*cachedOpenAIAdvancedSchedulerSetting); ok && cached != nil {
 		if time.Now().UnixNano() < cached.expiresAt {
 			return openAIAdvancedSchedulerRuntimeSettings{
@@ -1982,7 +2009,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 		subscriptionPriorityEnabled := false
 		lbTopKOverride := 0
 		weightOverrides := map[string]float64{}
-		if repo := s.openAIAdvancedSchedulerSettingRepo(); repo != nil {
+		if repo != nil {
 			dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), openAIAdvancedSchedulerSettingDBTimeout)
 			defer cancel()
 
@@ -2048,8 +2075,21 @@ func (s *OpenAIGatewayService) isOpenAILowUpstreamRatePriorityEnabled(ctx contex
 	return !settings.enabled && settings.lowUpstreamRatePriorityEnabled
 }
 
+// cachedOpenAIOAuthSchedulingRateMultiplier reads the shared runtime reference
+// without repository I/O. The scheduler settings loader refreshes this same
+// cache under openAIAdvancedSchedulerSettingSF; admin updates publish directly.
+// Before the first load use the existing default. Expiry never causes a cost
+// check to replace a configured reference with a default while refresh waits.
+func cachedOpenAIOAuthSchedulingRateMultiplier() *float64 {
+	if cached, ok := openAIAdvancedSchedulerSettingCache.Load().(*cachedOpenAIAdvancedSchedulerSetting); ok && cached != nil {
+		return cached.oauthSchedulingRateMultiplier
+	}
+	return parseOpenAIOAuthSchedulingRateMultiplier(nil)
+}
+
 func (s *OpenAIGatewayService) openAIOAuthSchedulingRateMultiplier(ctx context.Context) *float64 {
-	return s.openAIAdvancedSchedulerRuntimeSettings(ctx).oauthSchedulingRateMultiplier
+	s.openAIAdvancedSchedulerRuntimeSettings(ctx)
+	return cachedOpenAIOAuthSchedulingRateMultiplier()
 }
 
 func (s *OpenAIGatewayService) isOpenAIAdvancedSchedulerStickyWeightedEnabled(ctx context.Context) bool {
@@ -2389,7 +2429,7 @@ func (s *OpenAIGatewayService) selectLegacyAccountByPreviousResponse(
 	if s.checkChannelPricingRestriction(ctx, groupID, requestedModel) {
 		return nil, false, fmt.Errorf("%w supporting model: %s (channel pricing restriction)", ErrNoAvailableAccounts, requestedModel)
 	}
-	selection, err := s.selectAccountByPreviousResponseIDForCapability(ctx, groupID, previousResponseID, requestedModel, excludedIDs, requiredCapability, requireCompact)
+	selection, err := s.selectAccountByPreviousResponseIDForCapability(withGroupQualityGateExempt(ctx), groupID, previousResponseID, requestedModel, excludedIDs, requiredCapability, requireCompact)
 	if err != nil {
 		return nil, false, err
 	}
@@ -2398,7 +2438,7 @@ func (s *OpenAIGatewayService) selectLegacyAccountByPreviousResponse(
 	}
 	account := selection.Account
 	scheduler := &defaultOpenAIAccountScheduler{service: s, stats: newOpenAIAccountRuntimeStats()}
-	compatible, _ := scheduler.isAccountRequestCompatibleReason(ctx, account, OpenAIAccountScheduleRequest{
+	compatible, _ := scheduler.isAccountRequestCompatibleReason(withGroupQualityGateExempt(ctx), account, OpenAIAccountScheduleRequest{
 		GroupID:                 groupID,
 		Platform:                platform,
 		RequestedModel:          requestedModel,
@@ -2479,7 +2519,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 				return nil, decision, fmt.Errorf("%w supporting model: %s (channel pricing restriction)", ErrNoAvailableAccounts, requestedModel)
 			}
 			fallbackScheduler := &defaultOpenAIAccountScheduler{service: s, stats: newOpenAIAccountRuntimeStats()}
-			selection, _, err := fallbackScheduler.selectBySessionHash(ctx, OpenAIAccountScheduleRequest{
+			selection, _, err := fallbackScheduler.selectBySessionHash(withGroupQualityGateExempt(ctx), OpenAIAccountScheduleRequest{
 				GroupID:                 groupID,
 				Platform:                platform,
 				SessionHash:             sessionHash,
@@ -2596,6 +2636,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		PreviousResponseID:      previousResponseID,
 		PreviousResponseCanMove: previousResponseCanMove,
 		UseUpstreamTokenCost:    useUpstreamTokenCost,
+		AdvancedScheduler:       true,
 		RequestedModel:          requestedModel,
 		RequiredTransport:       requiredTransport,
 		RequiredCapability:      requiredCapability,

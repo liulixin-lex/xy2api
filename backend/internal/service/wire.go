@@ -820,6 +820,9 @@ func ProvideSettingService(settingRepo SettingRepository, groupRepo GroupReposit
 	svc.SetClaudeCacheGroupRepository(groupRepo)
 	svc.SetDefaultSubscriptionGroupReader(groupRepo)
 	svc.SetProxyRepository(proxyRepo)
+	// Load once even on instances that only evaluate quality or operations.
+	// The shared loader bounds repository reads with its existing DB timeout.
+	loadOpenAIAdvancedSchedulerRuntimeSettings(context.Background(), settingRepo)
 	if err := svc.LoadForwardedClientIPSettings(context.Background()); err != nil {
 		logger.LegacyPrintf("service.setting", "Warning: load forwarded client IP settings failed: %v", err)
 	}

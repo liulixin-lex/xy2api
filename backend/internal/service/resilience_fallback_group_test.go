@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
@@ -28,7 +29,13 @@ func (r *fallbackGroupRepo) GetByIDLite(_ context.Context, id int64) (*Group, er
 // groupAccountsRepo lists accounts per group.
 type groupAccountsRepo struct {
 	AccountRepository
-	byGroup map[int64][]Account
+	byGroup   map[int64][]Account
+	listedAll bool
+}
+
+func (r *groupAccountsRepo) ListAllWithFilters(_ context.Context, _, _, _, _ string, groupID int64, _ string) ([]Account, error) {
+	r.listedAll = true
+	return r.byGroup[groupID], nil
 }
 
 func (r *groupAccountsRepo) ListByGroup(_ context.Context, groupID int64) ([]Account, error) {
@@ -319,4 +326,156 @@ func TestFallbackReturnMovedKeyReturnsAfterThePrimaryIsStable(t *testing.T) {
 	remembered, _ := store.FallbackKey(ctx, 10, moved.ID)
 	require.False(t, remembered, "the key is forgotten")
 	require.Nil(t, r.AvailabilityFallbackGroup(ctx, moved), "and stays in the primary")
+}
+
+// B-stage fallback, operations and profit-preview decisions share the same
+// synthetic member rows; no model filter participates in the fallback decision.
+func TestAvailabilityFallbackServableMembers(t *testing.T) {
+	for _, tc := range []struct {
+		name                                             string
+		originCost, servingCost                          float64
+		originEjected, servingEjected, pinned, guardHeld bool
+		originSoft, unsupportedModel, composite          bool
+		mixedPlatform                                    string
+		wantMove                                         bool
+		wantOriginAvailable, wantServingAvailable        int64
+	}{
+		{name: "profit excludes the origin", originCost: 1, servingCost: 0.7, wantMove: true, wantServingAvailable: 1},
+		{name: "quality excludes the origin", originCost: 0.3, servingCost: 0.7, originEjected: true, wantMove: true, wantServingAvailable: 1},
+		{name: "cheap account soft penalized", originCost: 0.3, servingCost: 0.7, originSoft: true, wantMove: true, wantServingAvailable: 1},
+		{name: "origin supports a different model", originCost: 0.3, servingCost: 0.7, unsupportedModel: true, wantOriginAvailable: 1, wantServingAvailable: 1},
+		{name: "serving profit ceiling rejects", originCost: 1, servingCost: 1.6},
+		{name: "serving quality rejects", originCost: 1, servingCost: 0.7, servingEjected: true},
+		{name: "pinned but failing origin is servable", originCost: 0.3, servingCost: 0.7, originEjected: true, pinned: true, wantOriginAvailable: 1, wantServingAvailable: 1},
+		{name: "guard held origin is servable", originCost: 0.3, servingCost: 0.7, originEjected: true, guardHeld: true, wantOriginAvailable: 1, wantServingAvailable: 1},
+		{name: "composite preserves cross-platform availability with gates off", originCost: 0.3, servingCost: 0.7, composite: true, wantOriginAvailable: 1, wantServingAvailable: 1},
+		{name: "healthy mixed account keeps anthropic origin", originCost: 0.3, servingCost: 0.7, mixedPlatform: PlatformAnthropic, wantOriginAvailable: 1, wantServingAvailable: 1},
+		{name: "healthy mixed account keeps gemini origin", originCost: 0.3, servingCost: 0.7, mixedPlatform: PlatformGemini, wantOriginAvailable: 1, wantServingAvailable: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, _, repo, key := newFallbackFixture(t)
+			origin := key.Group
+			serving := r.fallbackGroups.(*fallbackGroupRepo).groups[20]
+			origin.RateMultiplier, origin.ProfitMinMargin, origin.ProfitControlEnabled = 1, 0.5, true
+			serving.RateMultiplier, serving.ProfitMinMargin, serving.ProfitControlEnabled = 2, 0.25, true
+			first, second := healthyAccount(1), healthyAccount(2)
+			first.RateMultiplier, second.RateMultiplier = &tc.originCost, &tc.servingCost
+			first.Type, second.Type = AccountTypeAPIKey, AccountTypeAPIKey
+			if tc.originSoft {
+				first.TempUnschedulableUntil = softAccount(1).TempUnschedulableUntil
+				first.TempUnschedulableReason = "transient:TRANSIENT HTTP 502"
+			}
+			if tc.unsupportedModel {
+				first.Credentials = map[string]any{"model_mapping": map[string]any{"other-model": "other-model"}}
+				require.False(t, first.IsModelSupported("requested-model"))
+			}
+			if tc.composite {
+				origin.Platform, serving.Platform = PlatformComposite, PlatformComposite
+				origin.ProfitControlEnabled, serving.ProfitControlEnabled = false, false
+			}
+			if tc.mixedPlatform != "" {
+				origin.Platform, serving.Platform = tc.mixedPlatform, tc.mixedPlatform
+				first.Platform, second.Platform = PlatformAntigravity, tc.mixedPlatform
+				first.Extra = map[string]any{"mixed_scheduling": true}
+			}
+			view := NewGroupQualityGateService(nil, nil, nil)
+			state := func(ejected, pinned, held bool) groupQualityMemberSnapshot {
+				name := "eligible"
+				if ejected {
+					name = "ejected"
+				}
+				return groupQualityMemberSnapshot{Result: GroupQualityMemberResult{State: name, Pinned: pinned, GuardHeld: held}, State: groupQualityAccountState{Until: time.Now().Add(time.Hour)}}
+			}
+			view.snapshot.Store(&groupQualitySnapshot{Members: map[int64]map[int64]groupQualityMemberSnapshot{
+				10: {1: state(tc.originEjected, tc.pinned, tc.guardHeld)},
+				20: {2: state(tc.servingEjected, false, false)},
+			}})
+			r.SetGroupQualityGateView(view)
+			repo.byGroup[10], repo.byGroup[20] = []Account{first}, []Account{second}
+			got := r.AvailabilityFallbackGroup(context.Background(), key)
+			if tc.wantMove {
+				require.NotNil(t, got)
+				require.Equal(t, int64(20), got.ID)
+				ctx := context.WithValue(context.Background(), ctxkey.Group, got)
+				gate := (&OpenAIGatewayService{}).resolveOpenAIProfitControlGate(ctx, &got.ID)
+				require.NotNil(t, gate)
+				require.InDelta(t, 1.5, gate.threshold, 1e-12, "fallback uses its own price and margin")
+				require.True(t, groupMemberServable(got, &second, time.Now(), view, nil))
+			} else {
+				require.Nil(t, got)
+			}
+			first.Groups, second.Groups = []*Group{origin}, []*Group{serving}
+			require.Equal(t, tc.composite || tc.originCost <= 0.5, groupMemberUsable(origin, &first, time.Now()), "guard denominator uses scheduler platform eligibility")
+			ops := &OpsService{accountRepo: &fallbackOpsAccounts{rows: []Account{first, second}}, groupQualityGateView: view}
+			_, stats, _, _, err := ops.GetAccountAvailabilityStats(context.Background(), "", nil)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantOriginAvailable, stats[10].AvailableCount)
+			require.Equal(t, tc.wantServingAvailable, stats[20].AvailableCount)
+		})
+	}
+}
+
+type fallbackOpsAccounts struct {
+	AccountRepository
+	rows []Account
+}
+
+func (r *fallbackOpsAccounts) ListOpsAccountsForStats(context.Context, string, *int64) ([]Account, error) {
+	return r.rows, nil
+}
+
+func TestFallbackProfitControlPreview(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		margin        float64
+		wantPassing   int
+		wantCeiling   float64
+		probeAge      time.Duration
+		mixedPlatform string
+	}{
+		{"request margin with zero buffer", 0.25, 3, 0.75, 0, ""},
+		{"zero margin", 0, 4, 1, 0, ""},
+		{"stricter margin", 0.9, 1, 0.1, 0, ""},
+		{"fresh probe changes passing count", 0.25, 4, 0.75, time.Minute, ""},
+		{"stale probe keeps stored rate", 0.25, 3, 0.75, 3 * time.Hour, ""},
+		{"mixed anthropic members", 0.25, 3, 0.75, 0, PlatformAnthropic},
+		{"mixed gemini members", 0.25, 3, 0.75, 0, PlatformGemini},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			group := &Group{ID: 10, Platform: PlatformOpenAI, RateMultiplier: 1, ProfitMinMargin: 0.5, ProfitSafetyBuffer: 0.4}
+			rows := make([]Account, 0, 7)
+			for i, rate := range []float64{0, 0.3, 0.75, 0.9, -1} {
+				a := healthyAccount(int64(i + 1))
+				a.RateMultiplier = floatPtr(rate)
+				rows = append(rows, a)
+			}
+			if tc.probeAge > 0 {
+				probe := upstreamCostTestAccount(4, UpstreamBillingProbeStatusOK, 0.1, time.Now().Add(-tc.probeAge), 30*time.Minute)
+				rows[3].Type, rows[3].Extra = AccountTypeAPIKey, probe.Extra
+			}
+			disabled := healthyAccount(6)
+			disabled.Schedulable = false
+			inactive := healthyAccount(8)
+			inactive.Status = StatusDisabled
+			rows = append(rows, disabled, softAccount(7), inactive)
+			if tc.mixedPlatform != "" {
+				group.Platform = tc.mixedPlatform
+				for i := range rows {
+					rows[i].Platform = PlatformAntigravity
+					rows[i].Extra = map[string]any{"mixed_scheduling": true}
+				}
+			}
+			repo := &groupAccountsRepo{byGroup: map[int64][]Account{10: rows}}
+			svc := NewGroupQualityGateService(nil, repo, &fallbackGroupRepo{groups: map[int64]*Group{10: group}})
+			got, err := svc.ProfitControlPreview(context.Background(), 10, &tc.margin)
+			require.NoError(t, err)
+			require.True(t, repo.listedAll, "members query must include inactive accounts")
+			require.Equal(t, 8, got.Members)
+			require.Equal(t, 5, got.Schedulable)
+			require.Equal(t, tc.wantPassing, got.Passing)
+			require.InDelta(t, tc.wantCeiling, got.Ceiling, 1e-12)
+			require.False(t, group.ProfitControlEnabled, "preview does not save the group")
+			require.Equal(t, 0.4, group.ProfitSafetyBuffer)
+		})
+	}
 }

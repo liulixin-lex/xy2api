@@ -1,7 +1,7 @@
 package service
 
 // 请求级定价与利润门回归：请求级 pricingAt 定价上下文、门复用（failover 阈值稳定）、
-// Responses 文本能力利润门、U 使用账号倍率且与探测新鲜度解耦、
+// Responses 文本能力利润门、U 采用 pricingAt 时刻的实时成本、
 // 用量记录定价时刻取值。
 
 import (
@@ -98,7 +98,7 @@ func TestProfitControl_PricingAtFixesDownstreamPeakFactor(t *testing.T) {
 	require.Equal(t, pricingAt, gate.pricingAt)
 }
 
-// U 只取账号倍率：探测快照内容和新鲜度不再直接参与利润判断。
+// pricingAt 早于探测接收时刻时不能使用未来探测，回到已校验的账号倍率。
 func TestProfitControl_UsesAccountRateInsteadOfProbeSnapshot(t *testing.T) {
 	gate := &openAIProfitControlGate{threshold: 0.5, pricingAt: time.Now().Add(-12 * time.Hour)}
 	ctx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, gate)
@@ -134,9 +134,12 @@ func TestProfitControl_ResponsesCapabilityUsesTextGateAtScheduler(t *testing.T) 
 	require.Nil(t, selection)
 }
 
-// 账号倍率缺失一律视为非法保守拒绝；手工或同步维护了倍率的任意账号类型都按
-// 同一阈值判断（OAuth 与 API Key 无差别）。
+// 账号倍率缺失一律视为非法保守拒绝；OAuth 参考倍率显式清空时，
+// 手工或同步维护的账号倍率继续按同一阈值判断。
 func TestProfitControl_AccountRateSemantics(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
+	openAIAdvancedSchedulerSettingCache.Store(&cachedOpenAIAdvancedSchedulerSetting{expiresAt: time.Now().Add(time.Hour).UnixNano()})
 	now := time.Now()
 	missing := upstreamCostTestOAuthAccount(2)
 	manualOAuth := profitControlTestAccountWithRate(upstreamCostTestOAuthAccount(3), 0.3)
@@ -154,7 +157,7 @@ func TestProfitControl_AccountRateSemantics(t *testing.T) {
 	require.Equal(t, openAIProfitFilterReasonInvalidAccountRate, reason)
 
 	vetoed, _ = openAIProfitControlVetoReason(gateCtx, manualOAuth)
-	require.False(t, vetoed, "手工维护的 OAuth 倍率应正常准入")
+	require.False(t, vetoed, "清空运行时参考倍率时 OAuth 使用手工倍率")
 
 	vetoed, reason = openAIProfitControlVetoReason(gateCtx, expensive)
 	require.True(t, vetoed)

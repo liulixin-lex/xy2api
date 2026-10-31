@@ -334,6 +334,7 @@ var catalog = map[string]Entry{
 	"GET /group-quality-gate/policies":                                         {Kind: KindModule, Module: "accounts", Level: LevelView},
 	"PUT /group-quality-gate/policies/:group_id":                               {Kind: KindModule, Module: "groups", Level: LevelManage},
 	"GET /group-quality-gate/status":                                           {Kind: KindModule, Module: "accounts", Level: LevelView},
+	"GET /groups/:id/profit-control-preview":                                   {Kind: KindModule, Module: "groups", Level: LevelView},
 	"GET /openai/accounts/:id/quota":                                           {Kind: KindModule, Module: "accounts", Level: LevelView, Redact: []Redaction{"account"}},
 	"POST /openai/accounts/:id/quota/refresh":                                  {Kind: KindModule, Module: "accounts", Level: LevelManage, Redact: []Redaction{"account"}},
 	"POST /openai/accounts/:id/referrals/invite":                               {Kind: KindModule, Module: "accounts", Level: LevelManage, Redact: []Redaction{"account"}},

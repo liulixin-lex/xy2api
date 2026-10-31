@@ -156,6 +156,15 @@
       ],
       "pattern": "group_quality_gate\\.(?:eject|trial|recover|guard_hold|last_resort|evaluate_failed)",
       "doc": "docs/GROUP_QUALITY_GATE.md"
+    },
+    {
+      "item": "group profit control preview API",
+      "sources": [
+        "backend/internal/server/routes/admin.go"
+      ],
+      "pattern": "profit-control-preview",
+      "match": "word",
+      "doc": "docs/GROUP_QUALITY_GATE.md"
     }
   ],
   "retired": [
@@ -387,6 +396,15 @@
       "pattern": "\\b(?:noteFallbackForcedFast|FreezeFallbackForcedFast|fallbackForcedFastChargesStandard|SetFallbackForcedFast|FallbackForcedFast|fallbackForcedFastKey|fallbackBillingGroup|BillingGroupID|billingGroupID)\\b",
       "reason": "WP3-A fallback pricing uses the serving group directly and no longer tracks or adjusts fallback-specific forced-Fast billing state",
       "allowed": [
+        "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
+    },
+    {
+      "pattern": "\\bisBetterAccount\\b",
+      "reason": "group quality scheduling replaces the separate legacy comparator with openAICandidateLess; the scheduler diff retains upstream deletion evidence",
+      "allowed": [
+        "tools/upstream-sync/scheduler-diff.json",
+        "docs/PROJECT_MEMORY.md",
         "docs/PROJECT_MEMORY_ARCHIVE.md"
       ]
     }

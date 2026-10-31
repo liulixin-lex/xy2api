@@ -472,3 +472,33 @@ func TestOpenAIRecordUsageUnderFallbackAppliesServingFastRules(t *testing.T) {
 		})
 	}
 }
+
+func TestFallbackProfitTerminalUsesPricingAt(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		hour     int
+		wantVeto bool
+	}{
+		{"upstream peak", 17, true}, {"upstream off peak", 19, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			at := time.Date(2026, 7, 13, tc.hour, 0, 0, 0, time.UTC)
+			latest := upstreamCostTestAccount(1, UpstreamBillingProbeStatusOK, 0.4, at.Add(-time.Minute), time.Hour)
+			latest.RateMultiplier = floatPtr(2)
+			latest.UpdatedAt = at
+			data := latest.Extra[UpstreamBillingProbeExtraKey].(map[string]any)["data"].(map[string]any)
+			data["peak_rate_enabled"], data["peak_start"], data["peak_end"] = true, "09:00", "18:00"
+			data["peak_rate_multiplier"], data["timezone"] = 2.0, "UTC"
+			selected := *latest
+			selected.Extra = nil
+			selected.RateMultiplier = floatPtr(0.1)
+			repo := &upstreamCostCountingAccountRepo{accounts: map[int64]*Account{1: latest}}
+			snapshot := NewSchedulerSnapshotService(nil, nil, repo, nil, nil)
+			ctx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{threshold: 0.5, pricingAt: at})
+			refreshed, vetoed, _ := profitControlVetoLatest(ctx, &selected, snapshot)
+			require.Equal(t, 1, repo.calls())
+			require.Equal(t, latest.Extra, refreshed.Extra)
+			require.Equal(t, tc.wantVeto, vetoed, "terminal check uses the gate pricing time on the refreshed account")
+		})
+	}
+}
