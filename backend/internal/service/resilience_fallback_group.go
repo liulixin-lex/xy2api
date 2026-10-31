@@ -81,7 +81,7 @@ func (r *ResilienceService) ConfigureFallbackGroups(accounts AccountRepository, 
 // AvailabilityFallbackGroup returns the group that must serve a request of
 // apiKey instead of its own group, or nil. Every request evaluates its own
 // group first:
-//   - no account of the group is free of penalties: the fallback group serves
+//   - no member of the group is servable: the fallback group serves
 //     (when it has such an account) and the key is remembered;
 //   - the group has been healthy for return_stable_seconds: the key returns;
 //   - the group recovered only recently: remembered keys stay in the
@@ -100,7 +100,7 @@ func (r *ResilienceService) AvailabilityFallbackGroup(ctx context.Context, apiKe
 	primary := apiKey.Group
 	now := time.Now()
 	ttl := time.Duration(cfg.FallbackGroup.BindingTTLSeconds) * time.Second
-	healthy := r.groupHasHealthyAccount(ctx, primary.ID, now)
+	healthy := r.groupHasHealthyAccount(ctx, primary.ID, now, primary)
 	if healthy && !r.fallbackMovedWithin(primary.ID, ttl, now) {
 		return nil
 	}
@@ -121,7 +121,7 @@ func (r *ResilienceService) AvailabilityFallbackGroup(ctx context.Context, apiKe
 	}
 	fallback := r.loadFallbackGroup(ctx, *primary.AvailabilityFallbackGroupID, now)
 	if fallback == nil || fallback.Status != StatusActive || fallback.Platform != primary.Platform ||
-		fallback.SubscriptionType == SubscriptionTypeSubscription || !r.groupHasHealthyAccount(ctx, fallback.ID, now) {
+		fallback.SubscriptionType == SubscriptionTypeSubscription || !r.groupHasHealthyAccount(ctx, fallback.ID, now, fallback) {
 		return nil
 	}
 	r.fallbackMoves.Store(primary.ID, now)
@@ -144,19 +144,34 @@ func (r *ResilienceService) fallbackMovedWithin(groupID int64, ttl time.Duration
 }
 
 // groupHasHealthyAccount reports whether a group has an active, schedulable
-// account without any hard or soft penalty.
-func (r *ResilienceService) groupHasHealthyAccount(ctx context.Context, groupID int64, now time.Time) bool {
+// member passing hard state, profit, soft penalty and group quality checks.
+func (r *ResilienceService) groupHasHealthyAccount(ctx context.Context, groupID int64, now time.Time, snapshots ...*Group) bool {
 	accounts, err := r.groupAccountsForLastResort(ctx, r.fallbackAccounts, groupID)
 	if err != nil {
 		// Unknown: keep the request in its own group.
 		return true
 	}
+	var group *Group
+	if len(snapshots) > 0 {
+		group = snapshots[0]
+	} else {
+		group = r.loadFallbackGroup(ctx, groupID, now)
+	}
+	if group == nil {
+		// A group read failure has the same fail-open behavior as the account
+		// listing failure above; do not create a new fallback decision.
+		return true
+	}
 	for i := range accounts {
 		a := &accounts[i]
-		if !a.IsActive() || !a.Schedulable {
+		// Composite availability remains group-wide across its member platforms.
+		if group.Platform == PlatformComposite {
+			if tier, _, _ := resiliencePenaltyOf(a, "", now); tier == resilience.TierNone {
+				return true
+			}
 			continue
 		}
-		if tier, _, _ := resiliencePenaltyOf(a, "", now); tier == resilience.TierNone {
+		if groupMemberServable(group, a, now, r.groupQualityGateView, nil) {
 			return true
 		}
 	}

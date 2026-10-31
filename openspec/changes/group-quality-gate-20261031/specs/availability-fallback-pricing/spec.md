@@ -103,6 +103,7 @@ Reservation ownership and counters MUST belong to the origin group.
 - The guard, the servable check and the preview MUST estimate with the group's default rate.
 - Enabling the profit gate MUST default the margin to 20%. The UI MUST hide the buffer and save it as 0.
 - `GET /api/v1/admin/groups/:id/profit-control-preview?margin=` MUST return member, schedulable and passing counts and the derived upstream rate ceiling at the current time. The UI MUST show the ceiling with the counts, show zero passing in red and ask for confirmation on save, and show one passing in yellow.
+- The preview MUST use the request margin (or the saved margin when omitted) and a zero safety buffer, without persisting either. Schedulable members exclude hard states and soft penalties; passing counts the subset admitted by profit alone, without quality ejection.
 - The margin MUST stay the configured quantity; the ceiling is derived and displayed, not stored.
 - The profit gate MUST NOT admit loss-making accounts, even when it blocks the whole group.
 

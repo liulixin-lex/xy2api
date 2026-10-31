@@ -7,17 +7,18 @@ package service
 //
 // 准入条件：
 //
-//	U(尝试时刻) <= D(pricingAt) × (1 − profit_min_margin − profit_safety_buffer)
+//	U(pricingAt) <= D(pricingAt) × (1 − profit_min_margin − profit_safety_buffer)
 //
 //   - D（用户售价倍率）固定在请求开始的 pricingAt：同一请求的全部 failover 与
 //     最终扣费共用同一 D（RecordUsage 的高峰因子同样取 pricingAt），一个请求
-//     不会中途变价。D 与计费完全同源：按请求真实计费分组（ctxkey.Group，即
-//     apiKey 自身分组；composite 请求为父分组）做 ResolveUserGroupRateMultiplier
+//     不会中途变价。D 与计费完全同源：按 ServingPricingGroup（兜底时为
+//     服务组；composite 请求为父分组）做 ResolveUserGroupRateMultiplier
 //     （用户-分组覆盖 ?? 分组默认）× Group.PeakMultiplierAt(pricingAt)，绝不在
 //     用户有覆盖时退回分组默认；开关与 margin/buffer 则始终取被调度
 //     openai/grok 分组。
-//   - U（上游成本倍率）取 accounts.rate_multiplier。倍率可以由运营者手工维护，
-//     也可以由上游倍率探测同步写回；利润门不再耦合探测协议、新鲜度或账号类型。
+//   - U（上游成本倍率）由 openAIProfitGateCost 统一解析：OpenAI API Key
+//     使用 pricingAt 时刻的新鲜探测（含上游高峰），否则用 accounts.rate_multiplier；
+//     OAuth 使用现有运行时参考倍率。终检沿用 pricingAt，不随等待时长跨峰变价。
 //     0 是合法的免费上游倍率；nil、负数、NaN、Inf 属于非法数据并保守拒绝。
 //
 // 装门点（gate 随 ctx 传播，请求内复用，覆盖等待/重试/failover/抢槽后终检）：
@@ -305,14 +306,11 @@ func openAIProfitControlVetoReason(ctx context.Context, account *Account) (bool,
 	if gate == nil || account == nil {
 		return false, ""
 	}
-	if account.RateMultiplier == nil ||
-		math.IsNaN(*account.RateMultiplier) ||
-		math.IsInf(*account.RateMultiplier, 0) ||
-		*account.RateMultiplier < 0 {
+	upstream, ok := openAIProfitGateCost(account, gate.pricingAt)
+	if !ok {
 		openAIProfitControlObserverInstance.recordVeto(gate.groupID, gate.platform, gate.threshold, openAIProfitFilterReasonInvalidAccountRate)
 		return true, openAIProfitFilterReasonInvalidAccountRate
 	}
-	upstream := *account.RateMultiplier
 	if profitControlOverThreshold(upstream, gate.threshold) {
 		openAIProfitControlObserverInstance.recordVeto(gate.groupID, gate.platform, gate.threshold, openAIProfitFilterReasonThreshold)
 		return true, openAIProfitFilterReasonThreshold

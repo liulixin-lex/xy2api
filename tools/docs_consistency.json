@@ -156,6 +156,15 @@
       ],
       "pattern": "group_quality_gate\\.(?:eject|trial|recover|guard_hold|last_resort|evaluate_failed)",
       "doc": "docs/GROUP_QUALITY_GATE.md"
+    },
+    {
+      "item": "group profit control preview API",
+      "sources": [
+        "backend/internal/server/routes/admin.go"
+      ],
+      "pattern": "profit-control-preview",
+      "match": "word",
+      "doc": "docs/GROUP_QUALITY_GATE.md"
     }
   ],
   "retired": [

@@ -2048,8 +2048,21 @@ func (s *OpenAIGatewayService) isOpenAILowUpstreamRatePriorityEnabled(ctx contex
 	return !settings.enabled && settings.lowUpstreamRatePriorityEnabled
 }
 
+// cachedOpenAIOAuthSchedulingRateMultiplier reads the shared runtime reference
+// without repository I/O. The scheduler settings loader refreshes this same
+// cache under openAIAdvancedSchedulerSettingSF; admin updates publish directly.
+// Before the first load use the existing default. Expiry never causes a cost
+// check to replace a configured reference with a default while refresh waits.
+func cachedOpenAIOAuthSchedulingRateMultiplier() *float64 {
+	if cached, ok := openAIAdvancedSchedulerSettingCache.Load().(*cachedOpenAIAdvancedSchedulerSetting); ok && cached != nil {
+		return cached.oauthSchedulingRateMultiplier
+	}
+	return parseOpenAIOAuthSchedulingRateMultiplier(nil)
+}
+
 func (s *OpenAIGatewayService) openAIOAuthSchedulingRateMultiplier(ctx context.Context) *float64 {
-	return s.openAIAdvancedSchedulerRuntimeSettings(ctx).oauthSchedulingRateMultiplier
+	s.openAIAdvancedSchedulerRuntimeSettings(ctx)
+	return cachedOpenAIOAuthSchedulingRateMultiplier()
 }
 
 func (s *OpenAIGatewayService) isOpenAIAdvancedSchedulerStickyWeightedEnabled(ctx context.Context) bool {

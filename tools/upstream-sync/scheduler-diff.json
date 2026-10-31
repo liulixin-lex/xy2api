@@ -367,6 +367,28 @@
           "if req.RequireCompact && s != nil && s.service != nil {",
           "}"
         ]
+      },
+      {
+        "block": "group-quality-profit-cost",
+        "note": "WP3-B: share the scheduler OAuth reference cache with profit checks, retaining the existing loader and singleflight; cost evaluation performs no settings I/O.",
+        "removed": [
+          "return s.openAIAdvancedSchedulerRuntimeSettings(ctx).oauthSchedulingRateMultiplier"
+        ],
+        "added": [
+          "// Before the first load use the existing default. Expiry never causes a cost",
+          "// cache under openAIAdvancedSchedulerSettingSF; admin updates publish directly.",
+          "// cachedOpenAIOAuthSchedulingRateMultiplier reads the shared runtime reference",
+          "// check to replace a configured reference with a default while refresh waits.",
+          "// without repository I/O. The scheduler settings loader refreshes this same",
+          "func cachedOpenAIOAuthSchedulingRateMultiplier() *float64 {",
+          "if cached, ok := openAIAdvancedSchedulerSettingCache.Load().(*cachedOpenAIAdvancedSchedulerSetting); ok && cached != nil {",
+          "return cached.oauthSchedulingRateMultiplier",
+          "return cachedOpenAIOAuthSchedulingRateMultiplier()",
+          "return parseOpenAIOAuthSchedulingRateMultiplier(nil)",
+          "s.openAIAdvancedSchedulerRuntimeSettings(ctx)",
+          "}",
+          "}"
+        ]
       }
     ],
     "backend/internal/service/openai_gateway_scheduling.go": [

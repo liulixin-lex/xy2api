@@ -119,6 +119,15 @@ func TestOpenAIOAuthSchedulingRateRuntimePreservesExplicitClear(t *testing.T) {
 			}
 			for i := 0; i < 2; i++ {
 				require.Equal(t, tt.want, svc.openAIOAuthSchedulingRateMultiplier(context.Background()))
+				account := upstreamCostTestOAuthAccount(1)
+				account.RateMultiplier = floatPtr(0.3)
+				want := 0.3
+				if tt.want != nil {
+					want = *tt.want
+				}
+				cost, ok := openAIProfitGateCost(account, time.Now())
+				require.True(t, ok)
+				require.Equal(t, want, cost, "profit gate shares the scheduler reference cache")
 			}
 		})
 	}

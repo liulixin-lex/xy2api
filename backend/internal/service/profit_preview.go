@@ -2,12 +2,16 @@ package service
 
 // 分组利润控制离线预演：使用生产只读导出的分组配置、账号倍率、探测状态、
 // 用户覆盖倍率与主力模型清单，复用线上 U/D/epsilon 语义推演准入。
-// 探测状态仅用于解释账号倍率来源是否健康，不影响准入结论。
+// 成本与线上利润门共用 openAIProfitGateCost，按预演时刻计算。
 
 import (
+	"context"
+	"errors"
 	"math"
 	"sort"
 	"time"
+
+	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 )
 
 const (
@@ -50,8 +54,10 @@ type ProfitPreviewAccountVerdict struct {
 	Platform    string   `json:"platform"`
 	Class       string   `json:"class"`
 	AccountRate *float64 `json:"account_rate,omitempty"`
-	RateSource  string   `json:"rate_source"`
-	Warnings    []string `json:"warnings,omitempty"`
+	// RateSource describes how the stored multiplier was maintained; AccountRate
+	// is the effective cost at evaluation time, including live scheduling signals.
+	RateSource string   `json:"rate_source"`
+	Warnings   []string `json:"warnings,omitempty"`
 	// RejectedUnderMinD 表示账号在最低有效 D（用户覆盖最坏口径）下会被排除。
 	RejectedUnderMinD bool `json:"rejected_under_min_d,omitempty"`
 	// SupportedModels 为该账号支持的主力模型子集。
@@ -170,12 +176,8 @@ func previewAccountProfitAdmission(
 		verdict.Warnings = append(verdict.Warnings, ProfitPreviewWarningManualRateOne)
 	}
 
-	validRate := account.RateMultiplier != nil &&
-		!math.IsNaN(*account.RateMultiplier) &&
-		!math.IsInf(*account.RateMultiplier, 0) &&
-		*account.RateMultiplier >= 0
+	rate, validRate := openAIProfitGateCost(account, evalAt)
 	if validRate {
-		rate := *account.RateMultiplier
 		verdict.AccountRate = &rate
 	}
 	switch {
@@ -183,11 +185,11 @@ func previewAccountProfitAdmission(
 		verdict.Class = ProfitPreviewClassAdmitted
 	case !validRate:
 		verdict.Class = ProfitPreviewClassRejectedInvalidRate
-	case profitControlOverThreshold(*account.RateMultiplier, thresholdDefault):
+	case profitControlOverThreshold(rate, thresholdDefault):
 		verdict.Class = ProfitPreviewClassRejectedThreshold
 	default:
 		verdict.Class = ProfitPreviewClassAdmitted
-		verdict.RejectedUnderMinD = profitControlOverThreshold(*account.RateMultiplier, thresholdMinD)
+		verdict.RejectedUnderMinD = profitControlOverThreshold(rate, thresholdMinD)
 	}
 	return verdict
 }
@@ -208,4 +210,64 @@ func profitPreviewProbeWarnings(account *Account, evalAt time.Time) []string {
 		}
 	}
 	return nil
+}
+
+// ProfitControlPreview is the compact group-level report used by the admin
+// group editor. The ceiling is a derived upstream-cost multiplier and is not
+// persisted.
+type ProfitControlPreview struct {
+	Members     int     `json:"members"`
+	Schedulable int     `json:"schedulable"`
+	Passing     int     `json:"passing"`
+	Ceiling     float64 `json:"ceiling"`
+}
+
+// ProfitControlPreview calculates the current group ceiling and member counts.
+// The request margin is used for this display-only calculation and the safety
+// buffer is deliberately zero; the stored group settings are not changed.
+func (s *GroupQualityGateService) ProfitControlPreview(ctx context.Context, groupID int64, margin *float64) (*ProfitControlPreview, error) {
+	if s == nil || s.groupRepo == nil || s.accountRepo == nil {
+		return nil, errors.New("group quality gate unavailable")
+	}
+	if groupID <= 0 {
+		return nil, infraerrors.BadRequest("INVALID_GROUP_ID", "invalid group id")
+	}
+	group, err := s.groupRepo.GetByIDLite(ctx, groupID)
+	if err != nil || group == nil {
+		if err != nil {
+			return nil, err
+		}
+		return nil, ErrGroupNotFound
+	}
+	effectiveMargin := group.ProfitMinMargin
+	if margin != nil {
+		effectiveMargin = *margin
+	}
+	if err := ValidateProfitControlConfig(group.Platform, true, effectiveMargin, 0); err != nil {
+		return nil, infraerrors.BadRequest("INVALID_PROFIT_CONTROL_CONFIG", err.Error())
+	}
+	previewGroup := *group
+	previewGroup.ProfitControlEnabled = true
+	previewGroup.ProfitMinMargin = effectiveMargin
+	previewGroup.ProfitSafetyBuffer = 0
+	now := time.Now()
+	ceiling, _ := groupProfitCeiling(&previewGroup, now)
+	accounts, err := s.accountRepo.ListByGroup(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
+	baseGroup := previewGroup
+	baseGroup.ProfitControlEnabled = false
+	out := &ProfitControlPreview{Members: len(accounts), Ceiling: ceiling}
+	for i := range accounts {
+		account := &accounts[i]
+		if !groupMemberServable(&baseGroup, account, now, nil, nil) {
+			continue
+		}
+		out.Schedulable++
+		if cost, ok := openAIProfitGateCost(account, now); ok && !profitControlOverThreshold(cost, ceiling) {
+			out.Passing++
+		}
+	}
+	return out, nil
 }

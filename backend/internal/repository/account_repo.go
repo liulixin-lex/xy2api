@@ -1330,6 +1330,13 @@ func (r *accountRepository) ListOpsAccountsForStats(ctx context.Context, platfor
 		Select(
 			dbaccount.FieldID,
 			dbaccount.FieldName,
+			// Shared servability requires the cost snapshot and hard-state fields.
+			dbaccount.FieldType,
+			dbaccount.FieldRateMultiplier,
+			dbaccount.FieldExtra,
+			dbaccount.FieldExpiresAt,
+			dbaccount.FieldAutoPauseOnExpired,
+			dbaccount.FieldTempUnschedulableReason,
 			dbaccount.FieldPlatform,
 			dbaccount.FieldConcurrency,
 			dbaccount.FieldLoadFactor,

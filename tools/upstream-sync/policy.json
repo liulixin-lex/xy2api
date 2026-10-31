@@ -3059,6 +3059,34 @@
     {
       "path": "backend/internal/handler/openai_gateway_handler.go",
       "value": "service.WithServingPricingKeySnapshot"
+    },
+    {
+      "path": "backend/internal/service/group_member_servable.go",
+      "value": "cost, ok := openAISchedulingRate(acc, at, oauthRate)"
+    },
+    {
+      "path": "backend/internal/service/group_member_servable.go",
+      "value": "oauthRate = cachedOpenAIOAuthSchedulingRateMultiplier()"
+    },
+    {
+      "path": "backend/internal/service/openai_profit_control.go",
+      "value": "upstream, ok := openAIProfitGateCost(account, gate.pricingAt)"
+    },
+    {
+      "path": "backend/internal/service/resilience_fallback_group.go",
+      "value": "groupMemberServable(group, a, now, r.groupQualityGateView, nil)"
+    },
+    {
+      "path": "backend/internal/service/ops_account_availability.go",
+      "value": "groupMemberServable(grp, &acc, now, s.groupQualityGateView, nil)"
+    },
+    {
+      "path": "backend/internal/server/routes/admin.go",
+      "value": "groups.GET(\"/:id/profit-control-preview\", h.Admin.GroupQualityGate.ProfitControlPreview)"
+    },
+    {
+      "path": "backend/internal/service/profit_preview.go",
+      "value": "previewGroup.ProfitSafetyBuffer = 0"
     }
   ],
   "forbidden_module_paths": [
@@ -5291,6 +5319,36 @@
       "id": "xy-anthropic-cache-ttl",
       "path": "backend/internal/repository/anthropic_cache_ttl_integration_test.go",
       "literal": "func TestAnthropicCacheTTLAuthRedisRoundTrip(t *testing.T) {"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_group_test.go",
+      "literal": "func TestAvailabilityFallbackServableMembers("
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_group_test.go",
+      "literal": "func TestFallbackProfitControlPreview("
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestFallbackProfitTerminalUsesPricingAt("
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/openai_profit_control_test.go",
+      "literal": "func TestOpenAIProfitControlVetoReason("
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/handler/admin/group_handler_platform_test.go",
+      "literal": "func TestGroupProfitControlPreviewHandler("
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/repository/account_repo_schedulable_projection_test.go",
+      "literal": "func TestListOpsAccountsForStatsPreservesServabilityFields("
     }
   ]
 }

@@ -7,14 +7,29 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
-// openAIProfitGateCost is the WP1 cost source. WP3 replaces the value source
-// with the fresh scheduling probe while preserving this validation contract.
-func openAIProfitGateCost(acc *Account, _ time.Time) (float64, bool) {
+// openAIProfitGateCost is the single real-time cost source used by the profit
+// gate, quality usability checks, fallback decisions and preview. The raw
+// stored multiplier is validated first: a fresh API-key probe may replace it,
+// while OAuth-like accounts use the scheduler's reference multiplier.
+func openAIProfitGateCost(acc *Account, at time.Time) (float64, bool) {
 	if acc == nil || acc.RateMultiplier == nil {
 		return 0, false
 	}
-	cost := *acc.RateMultiplier
-	if cost < 0 || math.IsNaN(cost) || math.IsInf(cost, 0) {
+	raw := *acc.RateMultiplier
+	if raw < 0 || math.IsNaN(raw) || math.IsInf(raw, 0) {
+		return 0, false
+	}
+	var oauthRate *float64
+	if acc.IsOpenAIOAuthLike() {
+		oauthRate = cachedOpenAIOAuthSchedulingRateMultiplier()
+	} else if !acc.IsOpenAIApiKey() {
+		// The shared profit gate also covers the other token platforms, which
+		// have no OpenAI scheduling-rate signal; their validated multiplier is
+		// already the live cost source.
+		return raw, true
+	}
+	cost, ok := openAISchedulingRate(acc, at, oauthRate)
+	if !ok || cost < 0 || math.IsNaN(cost) || math.IsInf(cost, 0) {
 		return 0, false
 	}
 	return cost, true
@@ -29,7 +44,7 @@ func groupProfitCeiling(group *Group, at time.Time) (float64, bool) {
 	if deduction < 0 || deduction >= 1 || math.IsNaN(deduction) || math.IsInf(deduction, 0) {
 		return 0, true
 	}
-	return group.RateMultiplier * group.PeakMultiplierAt(at) * (1 - deduction), true
+	return clampProfitControlThreshold(group.RateMultiplier * group.PeakMultiplierAt(at) * (1 - deduction)), true
 }
 
 // groupMemberUsable contains the hard eligibility rules shared by quality
@@ -51,7 +66,7 @@ func groupMemberUsable(group *Group, acc *Account, now time.Time) bool {
 	}
 	if ceiling, on := groupProfitCeiling(group, now); on {
 		cost, ok := openAIProfitGateCost(acc, now)
-		if !ok || cost > ceiling {
+		if !ok || profitControlOverThreshold(cost, ceiling) {
 			return false
 		}
 	}
