@@ -321,8 +321,8 @@
             />
           </template>
           <template #cell-groups="{ row }">
-            <AccountGroupsCellButton :groups="accountGroupsForRow(row)" :account-name="row.name" :quality="accountQualityCells.get(row.id)" :metrics="accountQualityMetrics(row.id)" @open="canPlaceGroups && (groupsDialogAccount = row)" />
-            <AccountQualityMetrics v-if="accountQualityMetrics(row.id)" :metrics="accountQualityMetrics(row.id)!" />
+            <AccountGroupsCellButton :groups="accountGroupsForRow(row)" :account-name="row.name" :quality="accountQualityCells.get(row.id)" @open="canPlaceGroups && (groupsDialogAccount = row)" />
+            <AccountQualityMetrics v-if="accountQualityMetrics(row.id)" :metrics="accountQualityMetrics(row.id)!" :limits="strictestQualityLimits(accountQualityCells.get(row.id))" />
           </template>
           <template #header-usage="{ column }">
             <div class="flex items-center">
@@ -563,7 +563,7 @@ import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCellButton from '@/components/admin/account/AccountGroupsCellButton.vue'
 import AccountQualityMetrics from '@/components/admin/account/AccountQualityMetrics.vue'
-import { buildAccountQualityCells } from '@/components/admin/account/groupQualityPresentation'
+import { buildAccountQualityCells, strictestQualityLimits } from '@/components/admin/account/groupQualityPresentation'
 import { useGroupQualityGateStatus } from '@/composables/useGroupQualityGateStatus'
 import AccountGroupsDialog from '@/components/admin/account/AccountGroupsDialog.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'

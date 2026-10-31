@@ -33,7 +33,7 @@ export interface UpdateGroupQualityGatePolicyResponse {
 export type GroupQualityGateState = 'eligible' | 'ejected' | 'trial'
 export type GroupQualityGateReason = 'error_rate' | 'warm_ttft'
 
-/** 按账号算一份、所有分组共用的完整窗口指标。 */
+/** 按账号算一份、所有分组共用的完整窗口指标，只用于账号行的指标显示。 */
 export interface GroupQualityAccountMetrics {
   calls: number
   soft_failures: number
@@ -42,6 +42,18 @@ export interface GroupQualityAccountMetrics {
   warm_ttft_p90_ms: number
   zero_cache_samples: number
   warm_zero_cache_rate: number
+}
+
+/**
+ * 本组判定实际使用的有效数据（有效起点之后）。计数始终是实际值；error_rate 为 null 表示未达判定条件
+ * （调用 < 20 或软失败 < 5），warm_ttft_p90_ms 为 null 表示续轮样本 < 10。
+ */
+export interface GroupQualityMemberMetrics {
+  calls: number
+  soft_failures: number
+  error_rate: number | null
+  warm_samples: number
+  warm_ttft_p90_ms: number | null
 }
 
 export interface GroupQualityGateAccountStatus {
@@ -58,7 +70,9 @@ export interface GroupQualityGateAccountStatus {
   /** 选号实际是否否决；固定与保底保留为 false */
   vetoed: boolean
   tier: number
-  /** 各项指标里最紧一项的 (1 − 实测 ÷ 上限)；所有指标样本都不足时为 null */
+  /** 本组判定实际使用的指标；悬停说明里的实测、上限与余量都取它 */
+  metrics: GroupQualityMemberMetrics
+  /** 按成员 metrics 里非 null 指标中最紧一项的 (1 − 实测 ÷ 上限)；全为 null 时为 null */
   headroom: number | null
 }
 

@@ -324,20 +324,24 @@
           </template>
 
           <template #cell-quality_gate="{ row }">
+            <!-- 两行窄格（同“账号数”列的可用/总量写法），列放在账号数前，1440px 宽时不被右侧固定的操作列遮住 -->
             <span
               v-if="qualityGateSummary(row.id)"
               data-testid="group-quality-summary"
-              class="whitespace-nowrap text-xs"
+              class="flex flex-col whitespace-nowrap text-xs leading-5 tabular-nums"
               :title="t('admin.groupQualityGate.summaryTitle', { trial: qualityGateSummary(row.id)!.trial })"
             >
-              <span class="text-gray-500 dark:text-gray-400">{{ t("admin.groupQualityGate.state.eligible") }}</span>
-              <span class="ml-1 font-medium text-emerald-700 dark:text-emerald-400">{{ qualityGateSummary(row.id)!.eligible }}</span>
-              <span class="mx-1 text-gray-400 dark:text-dark-500" aria-hidden="true">/</span>
-              <span class="text-gray-500 dark:text-gray-400">{{ t("admin.groupQualityGate.state.ejected") }}</span>
-              <span
-                class="ml-1 font-medium"
-                :class="qualityGateSummary(row.id)!.ejected > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-700 dark:text-gray-300'"
-              >{{ qualityGateSummary(row.id)!.ejected }}</span>
+              <span class="text-gray-500 dark:text-gray-400">
+                {{ t("admin.groupQualityGate.state.eligible") }}
+                <span class="ml-1 font-medium text-emerald-700 dark:text-emerald-400">{{ qualityGateSummary(row.id)!.eligible }}</span>
+              </span>
+              <span class="text-gray-500 dark:text-gray-400">
+                {{ t("admin.groupQualityGate.state.ejected") }}
+                <span
+                  class="ml-1 font-medium"
+                  :class="qualityGateSummary(row.id)!.ejected > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-700 dark:text-gray-300'"
+                >{{ qualityGateSummary(row.id)!.ejected }}</span>
+              </span>
             </span>
             <span
               v-else-if="qualityGateViews.get(row.id)?.kind === 'pending'"
@@ -4698,8 +4702,8 @@ const allColumns = computed<Column[]>(() => {
     { key: "rate_multiplier", label: t("admin.groups.columns.rateMultiplier"), sortable: true },
     { key: "is_exclusive", label: t("admin.groups.columns.type"), sortable: true },
     { key: "category", label: t("admin.groupCategories.column"), sortable: false },
-    basic[3],
     { key: "quality_gate", label: t("admin.groupQualityGate.column"), sortable: false },
+    basic[3],
     { key: "capacity", label: t("admin.groups.columns.capacity"), sortable: false },
     { key: "usage", label: t("admin.groups.columns.usage"), sortable: false },
     ...basic.slice(4),

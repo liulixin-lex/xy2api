@@ -166,37 +166,96 @@ export function qualityTooltipTop(
   return Math.max(margin, viewportHeight - margin - height)
 }
 
-/** 悬停说明：状态、原因、实测值与上限、余量。实测值是账号完整窗口的指标，所有分组共用。 */
+export interface QualityTooltipRow {
+  key: 'error_rate' | 'warm_ttft'
+  label: string
+  value: string
+  /** 灰色小字：未达判定条件等 */
+  note?: string
+  limit: string
+  over: boolean
+}
+
+export interface QualityTooltipBlock {
+  title: string
+  /** 最多一句短语：固定、保底保留，或等待评估、读取失败的下一步 */
+  note?: string
+  reasons: string[]
+  rows: QualityTooltipRow[]
+  /** 只在超线或接近上限（余量 < 20%，即恢复线以内）时出现 */
+  headroom?: { text: string; tone: 'danger' | 'warning' }
+  stale?: string
+}
+
+/** 余量低于恢复线（上限的 80%）时提示，正好对应“恢复需降到上限 80% 以下”。 */
+export const QUALITY_HEADROOM_WARN = 0.2
+
+/**
+ * 悬停说明里的一组：标题“分组 · 状态”、原因标签、指标 | 实测 | 上限 小表，余量只在超线或接近时出现。
+ * 实测取成员 metrics（本组判定实际使用的有效数据），与状态同一口径；账号行的紧凑指标仍是完整窗口。
+ */
 export function groupQualityTooltip(
   groupName: string,
   quality: GroupQualityCell,
-  metrics: GroupQualityAccountMetrics | undefined,
   t: Translate,
   clock: (iso: string) => string
-): string[] {
-  if (isGroupQualityNotice(quality)) return [t(prefix + 'tooltip.' + quality.kind, { group: groupName })]
-  const { status } = quality
-  const lines = [t(prefix + 'tooltip.state', { group: groupName, state: groupQualityStateLabel(quality, t, clock) })]
-  if (status.pinned) lines.push(t(prefix + 'tooltip.pinned'))
-  if (quality.kind === 'guard_held') lines.push(t(prefix + 'tooltip.guardHeld'))
-  if (status.state === 'ejected' && status.strikes > 0) lines.push(t(prefix + 'tooltip.strikes', { count: status.strikes }))
-  if (status.reasons.length) {
-    const reasons = status.reasons.map(reason => t(prefix + 'reason.' + reason)).join(t(prefix + 'listSeparator'))
-    lines.push(t(prefix + 'tooltip.reasons', { reasons }))
+): QualityTooltipBlock {
+  const title = (state: string) => t(prefix + 'tooltip.title', { group: groupName, state })
+  if (isGroupQualityNotice(quality)) {
+    return { title: title(groupQualityStateLabel(quality, t, clock)), note: t(prefix + 'tooltip.' + quality.kind), reasons: [], rows: [] }
   }
-  const errorLimit = formatQualityRate(quality.maxErrorRate)
-  const ttftLimit = formatQualitySeconds(quality.maxWarmTtftMs)
-  lines.push(metrics && metrics.calls > 0
-    ? t(prefix + 'tooltip.errorRate', { value: formatQualityRate(metrics.error_rate), limit: errorLimit })
-    : t(prefix + 'tooltip.errorRateNoData', { limit: errorLimit }))
-  lines.push(metrics && metrics.warm_samples > 0
-    ? t(prefix + 'tooltip.warmTtft', { value: formatQualitySeconds(metrics.warm_ttft_p90_ms), limit: ttftLimit })
-    : t(prefix + 'tooltip.warmTtftNoData', { limit: ttftLimit }))
-  lines.push(status.headroom == null
-    ? t(prefix + 'tooltip.headroomNoData')
-    : t(prefix + 'tooltip.headroom', { value: formatHeadroom(status.headroom) }))
-  if (quality.stale) lines.push(t(prefix + 'tooltip.stale'))
-  return lines
+  const { status } = quality
+  let state = groupQualityStateLabel(quality, t, clock)
+  if (status.state === 'ejected' && status.strikes > 1) state += t(prefix + 'tooltip.strikes', { count: status.strikes })
+  const metrics = status.metrics
+  const errorRow: QualityTooltipRow = { key: 'error_rate', label: t(prefix + 'tooltip.errorRate'), value: t(prefix + 'tooltip.noData'), limit: formatQualityRate(quality.maxErrorRate), over: false }
+  if (metrics?.error_rate != null) {
+    errorRow.value = formatQualityRate(metrics.error_rate)
+    errorRow.over = metrics.error_rate > quality.maxErrorRate
+  } else if (metrics && metrics.calls > 0) {
+    errorRow.value = formatQualityRate(metrics.soft_failures / metrics.calls)
+    errorRow.note = t(prefix + 'tooltip.belowThreshold')
+  }
+  const ttftRow: QualityTooltipRow = { key: 'warm_ttft', label: t(prefix + 'tooltip.warmTtft'), value: t(prefix + 'tooltip.noData'), limit: formatQualitySeconds(quality.maxWarmTtftMs), over: false }
+  if (metrics?.warm_ttft_p90_ms != null) {
+    ttftRow.value = formatQualitySeconds(metrics.warm_ttft_p90_ms)
+    ttftRow.over = metrics.warm_ttft_p90_ms > quality.maxWarmTtftMs
+  } else if (metrics && metrics.warm_samples > 0) {
+    ttftRow.value = t(prefix + 'tooltip.notEnoughSamples')
+  }
+  const block: QualityTooltipBlock = {
+    title: title(state),
+    note: status.pinned ? t(prefix + 'tooltip.pinned') : quality.kind === 'guard_held' ? t(prefix + 'tooltip.guardHeld') : undefined,
+    reasons: status.reasons.map(reason => t(prefix + 'reason.' + reason)),
+    rows: [errorRow, ttftRow]
+  }
+  if (status.headroom != null && status.headroom < QUALITY_HEADROOM_WARN) {
+    block.headroom = { text: t(prefix + 'tooltip.headroom', { value: formatHeadroom(status.headroom) }), tone: status.headroom < 0 ? 'danger' : 'warning' }
+  }
+  if (quality.stale) block.stale = t(prefix + 'tooltip.stale')
+  return block
+}
+
+/** 与后端判定条件一致：错误率要调用 ≥ 20 且软失败 ≥ 5，续轮首字要样本 ≥ 10，才算“超线”。 */
+export const QUALITY_MIN_CALLS = 20
+export const QUALITY_MIN_SOFT_FAILURES = 5
+export const QUALITY_MIN_WARM_SAMPLES = 10
+
+export interface QualityLimits {
+  maxErrorRate: number
+  maxWarmTtftMs: number
+}
+
+/** 账号所在已评估分组里最严的上限，用来给账号行的紧凑指标着色；没有已评估分组时返回 undefined。 */
+export function strictestQualityLimits(cells: Map<number, GroupQualityCell> | undefined): QualityLimits | undefined {
+  let limits: QualityLimits | undefined
+  for (const cell of cells?.values() ?? []) {
+    if (isGroupQualityNotice(cell)) continue
+    limits = limits
+      ? { maxErrorRate: Math.min(limits.maxErrorRate, cell.maxErrorRate), maxWarmTtftMs: Math.min(limits.maxWarmTtftMs, cell.maxWarmTtftMs) }
+      : { maxErrorRate: cell.maxErrorRate, maxWarmTtftMs: cell.maxWarmTtftMs }
+  }
+  return limits
 }
 
 export interface AccountQualityMetricItem {
@@ -206,27 +265,35 @@ export interface AccountQualityMetricItem {
   alert: boolean
 }
 
-/** 行内三项指标（紧凑写法，完整名称、时间窗与样本数在 title）；没有样本时显示“—”。零缓存率只在样本足够且超过 30% 时标红。 */
-export function accountQualityMetricItems(metrics: GroupQualityAccountMetrics, t: Translate): AccountQualityMetricItem[] {
-  const none = '—'
-  return [
-    {
+/**
+ * 账号行的紧凑指标（完整窗口）：只列有样本的项，完整名称、时间窗与样本数在 title。
+ * 错误率与首字在样本足够且超过所在分组最严上限时着色；零缓存率在样本 ≥ 20 且超过 30% 时着色。
+ */
+export function accountQualityMetricItems(metrics: GroupQualityAccountMetrics, t: Translate, limits?: QualityLimits): AccountQualityMetricItem[] {
+  const items: AccountQualityMetricItem[] = []
+  if (metrics.calls > 0) {
+    items.push({
       key: 'error_rate',
-      text: t(prefix + 'metrics.errorRate', { value: metrics.calls > 0 ? formatQualityRate(metrics.error_rate) : none }),
+      text: t(prefix + 'metrics.errorRate', { value: formatQualityRate(metrics.error_rate) }),
       title: t(prefix + 'metrics.errorRateTitle', { calls: metrics.calls, failures: metrics.soft_failures }),
-      alert: false
-    },
-    {
+      alert: !!limits && metrics.calls >= QUALITY_MIN_CALLS && metrics.soft_failures >= QUALITY_MIN_SOFT_FAILURES && metrics.error_rate > limits.maxErrorRate
+    })
+  }
+  if (metrics.warm_samples > 0) {
+    items.push({
       key: 'warm_ttft',
-      text: t(prefix + 'metrics.warmTtft', { value: metrics.warm_samples > 0 ? formatQualitySeconds(metrics.warm_ttft_p90_ms) : none }),
+      text: t(prefix + 'metrics.warmTtft', { value: formatQualitySeconds(metrics.warm_ttft_p90_ms) }),
       title: t(prefix + 'metrics.warmTtftTitle', { count: metrics.warm_samples }),
-      alert: false
-    },
-    {
+      alert: !!limits && metrics.warm_samples >= QUALITY_MIN_WARM_SAMPLES && metrics.warm_ttft_p90_ms > limits.maxWarmTtftMs
+    })
+  }
+  if (metrics.zero_cache_samples > 0) {
+    items.push({
       key: 'zero_cache',
-      text: t(prefix + 'metrics.zeroCache', { value: metrics.zero_cache_samples > 0 ? formatQualityRate(metrics.warm_zero_cache_rate) : none }),
+      text: t(prefix + 'metrics.zeroCache', { value: formatQualityRate(metrics.warm_zero_cache_rate) }),
       title: t(prefix + 'metrics.zeroCacheTitle', { count: metrics.zero_cache_samples }),
       alert: metrics.zero_cache_samples >= ZERO_CACHE_MIN_SAMPLES && metrics.warm_zero_cache_rate > ZERO_CACHE_ALERT_RATE
-    }
-  ]
+    })
+  }
+  return items
 }
