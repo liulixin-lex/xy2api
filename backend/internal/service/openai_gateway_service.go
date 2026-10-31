@@ -551,6 +551,22 @@ type OpenAIGatewayService struct {
 	resilience *ResilienceService
 }
 
+// RefreshServingPricingKey reloads only the pricing group's snapshot for a
+// long-lived request. The API key identity and serving group ID remain fixed.
+func (s *OpenAIGatewayService) RefreshServingPricingKey(ctx context.Context, apiKey *APIKey) *APIKey {
+	if s == nil || apiKey == nil || apiKey.GroupID == nil || *apiKey.GroupID <= 0 || s.schedulerSnapshot == nil {
+		return apiKey
+	}
+	group, err := s.schedulerSnapshot.GetGroupByIDLite(ctx, *apiKey.GroupID)
+	if err != nil || group == nil || group.ID != *apiKey.GroupID ||
+		(apiKey.Group != nil && (group.Platform != apiKey.Group.Platform || group.SubscriptionType != apiKey.Group.SubscriptionType)) {
+		return apiKey
+	}
+	clone := *apiKey
+	clone.Group = group
+	return &clone
+}
+
 // NewOpenAIGatewayService creates a new OpenAIGatewayService
 func NewOpenAIGatewayService(
 	accountRepo AccountRepository,

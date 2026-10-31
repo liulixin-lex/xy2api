@@ -14,11 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// An availability fallback group only routes a request. The user's price,
-// limits and permissions are those of the group the request was made for,
-// as if that group had served it (fallback-billing design §2.1, PM decision).
-// The fixtures move the user's group 10 to group 20, priced three times
-// higher.
+// Fallback requests use the serving group for prices and retain the
+// authenticated group for authorization and limits.
 
 type fallbackGroupRateRepoStub struct {
 	UserGroupRateRepository
@@ -42,6 +39,7 @@ func fallbackBillingFixture(platform string) (ctx context.Context, authenticated
 	st.MarkFallback(originID)
 	ctx = resilience.WithRequestState(context.Background(), st)
 	RememberAvailabilityFallbackOrigin(ctx, authenticated)
+	ctx = context.WithValue(ctx, ctxkey.Group, fallback)
 	return ctx, authenticated, moved
 }
 
@@ -59,14 +57,43 @@ func TestBillingAPIKeyIsTheKeyAsAuthenticated(t *testing.T) {
 	require.Nil(t, BillingAPIKey(ctx, nil))
 }
 
-func TestGatewayRecordUsageUnderFallbackBillsTheOriginGroup(t *testing.T) {
+type fallbackPricingGroupRepo struct {
+	GroupRepository
+	groups map[int64]*Group
+	ids    []int64
+}
+
+func (r *fallbackPricingGroupRepo) GetByIDLite(_ context.Context, id int64) (*Group, error) {
+	r.ids = append(r.ids, id)
+	return r.groups[id], nil
+}
+
+func TestRefreshServingPricingKeyUsesServingGroupID(t *testing.T) {
+	originID, servingID := int64(10), int64(20)
+	originGroup := &Group{ID: originID, Platform: PlatformOpenAI, RateMultiplier: 0.5, Status: StatusActive, Hydrated: true}
+	initialServingGroup := &Group{ID: servingID, Platform: PlatformOpenAI, RateMultiplier: 3, Status: StatusActive, Hydrated: true}
+	latestServingGroup := &Group{ID: servingID, Platform: PlatformOpenAI, RateMultiplier: 4, Status: StatusActive, Hydrated: true}
+	origin := &APIKey{ID: 7, GroupID: &originID, Group: originGroup}
+	serving := CloneAPIKeyWithGroup(origin, initialServingGroup)
+	groups := &fallbackPricingGroupRepo{groups: map[int64]*Group{originID: originGroup, servingID: latestServingGroup}}
+	svc := &OpenAIGatewayService{schedulerSnapshot: NewSchedulerSnapshotService(nil, nil, nil, groups, nil)}
+
+	refreshed := svc.RefreshServingPricingKey(context.Background(), serving)
+	require.NotSame(t, serving, refreshed)
+	require.Equal(t, []int64{servingID}, groups.ids, "refresh uses the connection's serving group ID")
+	require.Equal(t, servingID, *refreshed.GroupID)
+	require.Same(t, latestServingGroup, refreshed.Group)
+	require.InDelta(t, 3.0, serving.Group.RateMultiplier, 1e-12, "the connection snapshot is not mutated")
+}
+
+func TestGatewayRecordUsageUnderFallbackUsesServingGroupPrices(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		rates map[int64]float64
 		want  float64
 	}{
-		{"user_rate_of_the_origin_group", map[int64]float64{10: 0.5, 20: 2.0}, 0.5},
-		{"origin_group_rate", nil, 1.0},
+		{"user_rate_of_serving_group", map[int64]float64{10: 0.5, 20: 2.0}, 2.0},
+		{"serving_group_rate", nil, 3.0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, _, moved := fallbackBillingFixture(PlatformAnthropic)
@@ -97,14 +124,14 @@ func TestGatewayRecordUsageUnderFallbackBillsTheOriginGroup(t *testing.T) {
 	}
 }
 
-func TestOpenAIRecordUsageUnderFallbackBillsTheOriginGroup(t *testing.T) {
+func TestOpenAIRecordUsageUnderFallbackUsesServingGroupPrices(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		rates map[int64]float64
 		want  float64
 	}{
-		{"user_rate_of_the_origin_group", map[int64]float64{10: 0.5, 20: 2.0}, 0.5},
-		{"origin_group_rate", nil, 1.0},
+		{"user_rate_of_serving_group", map[int64]float64{10: 0.5, 20: 2.0}, 2.0},
+		{"serving_group_rate", nil, 3.0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, _, moved := fallbackBillingFixture(PlatformOpenAI)
@@ -133,32 +160,88 @@ func TestOpenAIRecordUsageUnderFallbackBillsTheOriginGroup(t *testing.T) {
 	}
 }
 
-// PM decision Q8: the serving group's ForceOpenAIFast decides the tier sent
-// upstream; billing follows the origin group's rules. The origin group does
-// not force Fast, so a downgraded response is billed at the observed tier.
-func TestOpenAIRecordUsageUnderFallbackAppliesTheOriginFastRules(t *testing.T) {
-	ctx, _, moved := fallbackBillingFixture(PlatformOpenAI)
-	moved.Group.ForceOpenAIFast = true
-	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
-	svc := newOpenAIRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, &fallbackGroupRateRepoStub{})
-	priority, observed := "priority", "default"
+func TestOpenAIRecordUsageUnderFallbackUsesServingImageAndVideoPrices(t *testing.T) {
+	for _, tc := range []struct {
+		name, platform string
+		wantTotal      float64
+		wantRate       float64
+	}{
+		{"image_unit_price_and_multiplier", PlatformOpenAI, 0.2, 2},
+		{"video_per_second_price_and_multiplier", PlatformGrok, 0.4, 1.5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, authenticated, moved := fallbackBillingFixture(tc.platform)
+			originImage, servingImage := 0.01, 0.2
+			originVideo, servingVideo := 0.01, 0.04
+			authenticated.Group.ImageRateIndependent = true
+			authenticated.Group.ImageRateMultiplier = 0.25
+			authenticated.Group.ImagePrice2K = &originImage
+			authenticated.Group.VideoRateIndependent = true
+			authenticated.Group.VideoRateMultiplier = 0.5
+			authenticated.Group.VideoPrice720P = &originVideo
+			moved.Group.ImageRateIndependent = true
+			moved.Group.ImageRateMultiplier = 2
+			moved.Group.ImagePrice2K = &servingImage
+			moved.Group.VideoRateIndependent = true
+			moved.Group.VideoRateMultiplier = 1.5
+			moved.Group.VideoPrice720P = &servingVideo
 
-	err := svc.RecordUsage(ctx, &OpenAIRecordUsageInput{
-		Result: &OpenAIForwardResult{
-			RequestID:                   "fallback_fast",
-			Usage:                       OpenAIUsage{InputTokens: 15, OutputTokens: 4},
-			Model:                       "gpt-5.1",
-			Duration:                    time.Second,
-			ServiceTier:                 &priority,
-			UpstreamResponseServiceTier: observed,
-		},
-		APIKey:  moved,
-		User:    moved.User,
-		Account: &Account{ID: 3001, Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
-	})
-	require.NoError(t, err)
-	require.NotNil(t, usageRepo.lastLog.ServiceTier)
-	require.Equal(t, "default", *usageRepo.lastLog.ServiceTier, "the origin group does not force Fast")
+			usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+			svc := newOpenAIRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, &fallbackGroupRateRepoStub{})
+			result := &OpenAIForwardResult{RequestID: "fallback_media_" + tc.name, Model: "gpt-image-1", Duration: time.Second}
+			if tc.platform == PlatformGrok {
+				result.Model = "grok-imagine-video"
+				result.VideoCount = 1
+				result.VideoResolution = "720p"
+				result.VideoDurationSeconds = 10
+			} else {
+				result.ImageCount = 1
+				result.ImageSize = "2K"
+			}
+			require.NoError(t, svc.RecordUsage(ctx, &OpenAIRecordUsageInput{
+				Result: result, APIKey: moved, User: moved.User,
+				Account: &Account{ID: 3010, Platform: tc.platform, Type: AccountTypeAPIKey},
+			}))
+			log := usageRepo.lastLog
+			require.NotNil(t, log)
+			require.InDelta(t, tc.wantTotal, log.TotalCost, 1e-12)
+			require.InDelta(t, tc.wantTotal*tc.wantRate, log.ActualCost, 1e-12)
+			require.InDelta(t, tc.wantRate, log.RateMultiplier, 1e-12)
+			require.Equal(t, int64(20), *log.GroupID)
+			require.Equal(t, int64(10), *log.OriginGroupID)
+		})
+	}
+}
+
+func TestOpenAIRecordUsageUnderFallbackUsesServingLongContextRule(t *testing.T) {
+	for _, tc := range []struct {
+		name                          string
+		originEnabled, servingEnabled bool
+		wantApplied                   bool
+	}{
+		{"serving_group_enabled", false, true, true},
+		{"only_origin_group_enabled", true, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, authenticated, moved := fallbackBillingFixture(PlatformOpenAI)
+			authenticated.Group.LongContextPricingEnabled = tc.originEnabled
+			moved.Group.LongContextPricingEnabled = tc.servingEnabled
+			usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+			svc := newOpenAIRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+			swapInOpenAILadderCatalog(t, svc)
+			require.NoError(t, svc.RecordUsage(ctx, &OpenAIRecordUsageInput{
+				Result: &OpenAIForwardResult{
+					RequestID: "fallback_long_context_" + tc.name,
+					Usage:     OpenAIUsage{InputTokens: 300000, OutputTokens: 2000},
+					Model:     "gpt-5.4-2026-03-05", Duration: time.Second,
+				},
+				APIKey: moved, User: moved.User,
+				Account: &Account{ID: 3021, Platform: PlatformOpenAI},
+			}))
+			require.NotNil(t, usageRepo.lastLog)
+			require.Equal(t, tc.wantApplied, usageRepo.lastLog.LongContextBillingApplied)
+		})
+	}
 }
 
 type fallbackRPMCacheStub struct {
@@ -194,8 +277,8 @@ func TestCheckBillingEligibilityUnderFallbackLimitsTheOriginGroup(t *testing.T) 
 	require.Equal(t, map[int64]int{10: 2}, cache.counts)
 }
 
-// The reservation estimate prices the request like its billing does.
-func TestInflightEstimateUnderFallbackPricesLikeTheOriginGroup(t *testing.T) {
+// The reservation estimate uses serving-group prices.
+func TestInflightEstimateUnderFallbackPricesLikeTheServingGroup(t *testing.T) {
 	ctx, authenticated, moved := fallbackBillingFixture(PlatformAnthropic)
 	svc := newInflightEstimateGateway(t, nil)
 	req := InflightEstimateRequest{Model: "claude-sonnet-4-5", BodyBytes: 4000, MaxTokens: 1000}
@@ -205,14 +288,12 @@ func TestInflightEstimateUnderFallbackPricesLikeTheOriginGroup(t *testing.T) {
 	asOrigin, _ := svc.EstimateInflightReservation(context.Background(), authenticated, req)
 	asServing, _ := svc.EstimateInflightReservation(context.Background(), moved, req)
 	require.Greater(t, asServing, asOrigin, "fixture: the serving group is dearer")
-	require.InDelta(t, asOrigin, underFallback, 1e-12)
+	require.InDelta(t, asServing, underFallback, 1e-12)
 }
 
-// PM decision Q9: the billing model is decided as the origin group would
-// decide it. Here the origin group's channel bills the channel-mapped model
-// (claude-sonnet-4-5); the serving group's channel maps the alias to another
-// model and bills the upstream model.
-func TestGatewayRecordUsageUnderFallbackResolvesTheBillingModelLikeTheOriginGroup(t *testing.T) {
+// Q9: the serving group's channel mapping decides the billing model and
+// the actual serving channel remains recorded on the usage row.
+func TestGatewayRecordUsageUnderFallbackResolvesTheBillingModelLikeTheServingGroup(t *testing.T) {
 	originChannel := Channel{ID: 1, Status: StatusActive, GroupIDs: []int64{10}, BillingModelSource: BillingModelSourceChannelMapped,
 		ModelMapping: map[string]map[string]string{"anthropic": {"my-alias": "claude-sonnet-4-5"}}}
 	servingChannel := Channel{ID: 2, Status: StatusActive, GroupIDs: []int64{20}, BillingModelSource: BillingModelSourceUpstream,
@@ -252,8 +333,8 @@ func TestGatewayRecordUsageUnderFallbackResolvesTheBillingModelLikeTheOriginGrou
 	asServing := record(context.Background(), moved, 20, "claude-opus-4-1")
 
 	require.NotEqual(t, asOrigin.TotalCost, asServing.TotalCost, "fixture: the two channels bill different models")
-	require.InDelta(t, asOrigin.TotalCost, underFallback.TotalCost, 1e-12)
-	require.InDelta(t, asOrigin.ActualCost, underFallback.ActualCost, 1e-12)
+	require.InDelta(t, asServing.TotalCost, underFallback.TotalCost, 1e-12)
+	require.InDelta(t, asServing.ActualCost, underFallback.ActualCost, 1e-12)
 	require.Equal(t, int64(2), *underFallback.ChannelID, "the serving channel stays recorded")
 }
 
@@ -302,21 +383,21 @@ func TestLiveOriginGroupIDComesFromTheRequestState(t *testing.T) {
 	require.Zero(t, liveOriginGroupID(context.Background()))
 }
 
-// Batch images: price and permission are the origin group's; the serving
-// group's accounts take the job.
-func TestBatchImageSubmitUnderFallbackPricesTheOriginGroup(t *testing.T) {
+// Batch image eligibility remains with the origin group while price and
+// serving accounts come from the fallback group.
+func TestBatchImageSubmitUnderFallbackSplitsAuthorizationAndPricing(t *testing.T) {
 	svc, repo, _, _, _ := newTestBatchImagePublicService(true)
 	origin, serving := int64(10), int64(20)
 	svc.GroupRepo = &publicBatchImageGroupRepo{groups: map[int64]*Group{
 		origin: {ID: origin, Platform: PlatformGemini, RateMultiplier: 1.0, AllowImageGeneration: true, AllowBatchImageGeneration: true,
 			BatchImageDiscountMultiplier: 1, BatchImageHoldMultiplier: 1},
-		serving: {ID: serving, Platform: PlatformGemini, RateMultiplier: 3.0, AllowImageGeneration: true, AllowBatchImageGeneration: false,
+		serving: {ID: serving, Platform: PlatformGemini, RateMultiplier: 3.0, AllowImageGeneration: true, AllowBatchImageGeneration: true,
 			BatchImageDiscountMultiplier: 1, BatchImageHoldMultiplier: 1},
 	}}
 
-	got, err := svc.Submit(context.Background(), BatchImageOwner{UserID: 11, APIKeyID: 22, GroupID: &serving, BillingGroupID: &origin}, validBatchImageSubmitRequest(), "")
+	got, err := svc.Submit(context.Background(), BatchImageOwner{UserID: 11, APIKeyID: 22, GroupID: &serving, AuthorizationGroupID: &origin, PricingGroupID: &serving}, validBatchImageSubmitRequest(), "")
 	require.NoError(t, err, "the origin group allows batch images")
-	require.InDelta(t, 1.0, repo.jobs[got.ID].GroupRateMultiplier, 1e-12)
+	require.InDelta(t, 3.0, repo.jobs[got.ID].GroupRateMultiplier, 1e-12)
 }
 
 // Users see their errors under their key's group, not a serving fallback
@@ -330,29 +411,25 @@ func TestUserErrorRequestShowsTheKeyGroup(t *testing.T) {
 	require.Equal(t, "GPT-企业专线", ToUserErrorRequest(e).GroupName, "a key without a group keeps the recorded group")
 }
 
-// PM ruling on Q8: priority that only the serving fallback group's forced
-// Fast caused, for a client that did not ask for it in a group that does not
-// force Fast, is charged at the standard tier. The platform bears the
-// difference: TotalCost and service_tier stay priority.
-func TestOpenAIRecordUsageUnderFallbackChargesForcedFastAtStandard(t *testing.T) {
+// The fallback group's Fast and Fast-at-standard rules are also the user's
+// pricing policy; the origin group's Fast setting has no pricing effect.
+func TestOpenAIRecordUsageUnderFallbackAppliesServingFastRules(t *testing.T) {
 	inputPrice, outputPrice, fastMultiplier := 0.001, 0.002, 3.0
 	standardTotal := 100*inputPrice + 50*outputPrice
 	for _, tc := range []struct {
-		name         string
-		body         string
-		originForces bool
-		wantActual   float64
+		name                    string
+		servingFree, originFree bool
+		wantActual              float64
 	}{
-		{"client_did_not_ask", `{"model":"gpt-5.6-sol"}`, false, standardTotal},
-		{"client_asked_standard", `{"model":"gpt-5.6-sol","service_tier":"default"}`, false, standardTotal},
-		{"client_asked_priority", `{"model":"gpt-5.6-sol","service_tier":"priority"}`, false, standardTotal * fastMultiplier},
-		{"origin_group_forces_fast", `{"model":"gpt-5.6-sol"}`, true, standardTotal * fastMultiplier},
+		{"serving_priority_price", false, true, standardTotal * fastMultiplier * 3},
+		{"serving_fast_at_standard", true, false, standardTotal * 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, authenticated, moved := fallbackBillingFixture(PlatformOpenAI)
 			moved.Group.ForceOpenAIFast = true
-			authenticated.Group.ForceOpenAIFast = tc.originForces
-			authenticated.Group.ModelPricing = []ChannelModelPricing{{
+			moved.Group.FreeOpenAIFast = tc.servingFree
+			authenticated.Group.FreeOpenAIFast = tc.originFree
+			moved.Group.ModelPricing = []ChannelModelPricing{{
 				Models: []string{"gpt-5.6-sol"}, BillingMode: BillingModeToken,
 				InputPrice: &inputPrice, OutputPrice: &outputPrice, FastMultiplier: &fastMultiplier,
 			}}
@@ -360,99 +437,20 @@ func TestOpenAIRecordUsageUnderFallbackChargesForcedFastAtStandard(t *testing.T)
 			usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 			svc := newOpenAIRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, &fallbackGroupRateRepoStub{})
 			svc.resolver = NewModelPricingResolver(nil, svc.billingService)
-
-			// The serving group's forced Fast rewrites the request.
-			body, err := svc.applyOpenAIFastPolicyToBody(context.WithValue(ctx, ctxkey.Group, moved.Group), account, "gpt-5.6-sol", []byte(tc.body))
-			require.NoError(t, err)
-			require.Contains(t, string(body), `"service_tier":"priority"`)
-
 			priority := "priority"
 			require.NoError(t, svc.RecordUsage(ctx, &OpenAIRecordUsageInput{
 				Result: &OpenAIForwardResult{
-					RequestID:                   "fallback_forced_fast_" + tc.name,
-					ServiceTier:                 &priority,
-					UpstreamResponseServiceTier: "priority",
-					Usage:                       OpenAIUsage{InputTokens: 100, OutputTokens: 50},
-					Model:                       "gpt-5.6-sol",
-					Duration:                    time.Second,
+					RequestID: "fallback_serving_fast_" + tc.name,
+					Usage:     OpenAIUsage{InputTokens: 100, OutputTokens: 50},
+					Model:     "gpt-5.6-sol", Duration: time.Second,
+					ServiceTier: &priority, UpstreamResponseServiceTier: priority,
 				},
-				APIKey:  moved,
-				User:    moved.User,
-				Account: account,
+				APIKey: moved, User: moved.User, Account: account,
 			}))
 			log := usageRepo.lastLog
 			require.NotNil(t, log)
-			require.Equal(t, "priority", *log.ServiceTier, "the tier actually served")
 			require.InDelta(t, standardTotal*fastMultiplier, log.TotalCost, 1e-10)
 			require.InDelta(t, tc.wantActual, log.ActualCost, 1e-10)
 		})
 	}
-}
-
-// A WebSocket connection keeps one request state: a later turn whose client
-// asks for priority is not charged at the standard tier because an earlier
-// turn was.
-func TestFallbackForcedFastFollowsTheLatestTurn(t *testing.T) {
-	ctx, _, moved := fallbackBillingFixture(PlatformOpenAI)
-	moved.Group.ForceOpenAIFast = true
-	account := &Account{ID: 3020, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
-	noteFallbackForcedFast(ctx, account, "")
-	require.True(t, fallbackForcedFastChargesStandard(ctx, "priority"))
-	noteFallbackForcedFast(ctx, account, "priority")
-	require.False(t, fallbackForcedFastChargesStandard(ctx, "priority"))
-	require.False(t, fallbackForcedFastChargesStandard(context.Background(), "priority"), "no fallback")
-}
-
-// A WebSocket turn's usage is recorded by an asynchronous task. The flag is
-// fixed when the task is created: if the next turn's response.create
-// rewrites the connection's flag while turn N's task still waits, turn N is
-// charged by its own value (fallback-billing review P2-1).
-func TestOpenAIRecordUsageChargesTheTurnFlagFixedWhenItsTaskWasCreated(t *testing.T) {
-	inputPrice, outputPrice, fastMultiplier := 0.001, 0.002, 3.0
-	standardTotal := 100*inputPrice + 50*outputPrice
-	for _, tc := range []struct {
-		name                 string
-		turnTier, nextTier   string
-		wantActualMultiplier float64
-	}{
-		{"turn_forced_next_asks_priority", "", "priority", 1},
-		{"turn_asks_priority_next_forced", "priority", "", fastMultiplier},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ctx, authenticated, moved := fallbackBillingFixture(PlatformOpenAI)
-			moved.Group.ForceOpenAIFast = true
-			authenticated.Group.ModelPricing = []ChannelModelPricing{{
-				Models: []string{"gpt-5.6-sol"}, BillingMode: BillingModeToken,
-				InputPrice: &inputPrice, OutputPrice: &outputPrice, FastMultiplier: &fastMultiplier,
-			}}
-			account := &Account{ID: 3020, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
-			usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
-			svc := newOpenAIRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, &fallbackGroupRateRepoStub{})
-			svc.resolver = NewModelPricingResolver(nil, svc.billingService)
-
-			noteFallbackForcedFast(ctx, account, tc.turnTier) // turn N's response.create
-			fixTurn := FreezeFallbackForcedFast(ctx)          // turn N's usage task is created
-			noteFallbackForcedFast(ctx, account, tc.nextTier) // turn N+1 arrives while it waits
-
-			priority := "priority"
-			require.NoError(t, svc.RecordUsage(fixTurn(ctx), &OpenAIRecordUsageInput{
-				Result: &OpenAIForwardResult{
-					RequestID:                   "fallback_ws_turn_" + tc.name,
-					ServiceTier:                 &priority,
-					UpstreamResponseServiceTier: "priority",
-					Usage:                       OpenAIUsage{InputTokens: 100, OutputTokens: 50},
-					Model:                       "gpt-5.6-sol",
-					Duration:                    time.Second,
-				},
-				APIKey:  moved,
-				User:    moved.User,
-				Account: account,
-			}))
-			log := usageRepo.lastLog
-			require.NotNil(t, log)
-			require.InDelta(t, standardTotal*fastMultiplier, log.TotalCost, 1e-10)
-			require.InDelta(t, standardTotal*tc.wantActualMultiplier, log.ActualCost, 1e-10)
-		})
-	}
-	require.Equal(t, context.Background(), FreezeFallbackForcedFast(context.Background())(context.Background()), "nothing to fix without a fallback")
 }

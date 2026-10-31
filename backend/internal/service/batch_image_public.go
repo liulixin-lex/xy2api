@@ -80,15 +80,22 @@ type BatchImageOwner struct {
 	APIKeyID int64
 	// GroupID is the group whose accounts serve the job.
 	GroupID *int64
-	// BillingGroupID is the group the request was made for when an
-	// availability fallback group serves it; it prices and permits the job.
-	BillingGroupID *int64
+	// AuthorizationGroupID is the origin group used for eligibility and limits.
+	AuthorizationGroupID *int64
+	// PricingGroupID is the serving group used for image prices and holds.
+	PricingGroupID *int64
 }
 
-// billingGroupID is the group that prices and permits the job.
-func (o BatchImageOwner) billingGroupID() *int64 {
-	if o.BillingGroupID != nil {
-		return o.BillingGroupID
+func (o BatchImageOwner) authorizationGroupID() *int64 {
+	if o.AuthorizationGroupID != nil {
+		return o.AuthorizationGroupID
+	}
+	return o.GroupID
+}
+
+func (o BatchImageOwner) pricingGroupID() *int64 {
+	if o.PricingGroupID != nil {
+		return o.PricingGroupID
 	}
 	return o.GroupID
 }
@@ -219,7 +226,7 @@ func (s *BatchImagePublicService) Submit(ctx context.Context, owner BatchImageOw
 	}
 	// 与 ListModels 使用同一鉴权谓词（AllowBatchImageGeneration + Platform==Gemini），
 	// 避免两个入口校验口径不一致留下防御纵深缺口。
-	if err := s.ensureGroupAllowsBatchImage(ctx, owner.billingGroupID()); err != nil {
+	if err := s.ensureGroupAllowsBatchImage(ctx, owner.authorizationGroupID()); err != nil {
 		return nil, err
 	}
 	requestHash := HashBatchImageSubmitRequest(normalized)
@@ -633,7 +640,7 @@ func (s *BatchImagePublicService) ListModels(ctx context.Context, owner BatchIma
 	if s.Pricing == nil {
 		return nil, ErrBatchImageSettlementPricingMissing
 	}
-	if err := s.ensureGroupAllowsBatchImage(ctx, owner.billingGroupID()); err != nil {
+	if err := s.ensureGroupAllowsBatchImage(ctx, owner.authorizationGroupID()); err != nil {
 		return nil, err
 	}
 
@@ -643,7 +650,7 @@ func (s *BatchImagePublicService) ListModels(ctx context.Context, owner BatchIma
 		if !ok || provider == nil {
 			continue
 		}
-		accounts, err := s.listCandidateAccounts(ctx, owner.GroupID, batchImageProviderPlatform(providerName))
+		accounts, err := s.listCandidateAccounts(ctx, owner.authorizationGroupID(), batchImageProviderPlatform(providerName))
 		if err != nil {
 			return nil, err
 		}
@@ -1014,7 +1021,7 @@ func (s *BatchImagePublicService) resolvePricingSnapshot(ctx context.Context, ow
 	groupMultiplier := 1.0
 	discountMultiplier := defaultBatchImageDiscountMultiplier
 	holdMultiplier := defaultBatchImageHoldMultiplier
-	if billingGroupID := owner.billingGroupID(); billingGroupID != nil && *billingGroupID > 0 {
+	if billingGroupID := owner.pricingGroupID(); billingGroupID != nil && *billingGroupID > 0 {
 		if s.GroupRepo == nil {
 			return nil, ErrBatchImageSettlementPricingMissing
 		}

@@ -65,10 +65,9 @@ func TestFallbackImageGenerationGateResponses(t *testing.T) {
 	}
 }
 
-// PM decision P2-2: the profit gate prices the request at the origin group's
-// rate (the price the user pays) while the margin stays the serving group's.
+// The profit gate and its user price use the serving group under fallback.
 // The fixture's origin group costs 1x, the fallback group 3x.
-func TestProfitControlPricesFallbackAtOriginGroup(t *testing.T) {
+func TestProfitControlPricesFallbackAtServingGroup(t *testing.T) {
 	t.Run("gateway", func(t *testing.T) {
 		ctx, _, moved := fallbackBillingFixture(PlatformAnthropic)
 		moved.Group.ProfitControlEnabled = true
@@ -81,7 +80,7 @@ func TestProfitControlPricesFallbackAtOriginGroup(t *testing.T) {
 		gate, _ := ctx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate)
 		require.NotNil(t, gate)
 		require.Equal(t, moved.Group.ID, gate.groupID, "margin and platform stay the serving group's")
-		require.InDelta(t, 1.0, gate.threshold, 1e-12, "the user pays the origin group's price")
+		require.InDelta(t, 3.0, gate.threshold, 1e-12, "the serving group sets the price")
 	})
 
 	t.Run("openai", func(t *testing.T) {
@@ -93,6 +92,6 @@ func TestProfitControlPricesFallbackAtOriginGroup(t *testing.T) {
 		gate := (&OpenAIGatewayService{}).resolveOpenAIProfitControlGate(ctx, moved.GroupID)
 		require.NotNil(t, gate)
 		require.Equal(t, moved.Group.ID, gate.groupID)
-		require.InDelta(t, 1.0, gate.threshold, 1e-12, "the user pays the origin group's price")
+		require.InDelta(t, 3.0, gate.threshold, 1e-12, "the serving group sets the price")
 	})
 }

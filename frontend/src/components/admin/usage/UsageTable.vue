@@ -119,8 +119,8 @@
 
         <template #cell-group="{ row }">
           <div class="flex flex-col items-start gap-1">
-            <span v-if="row.group" class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200">
-              {{ row.group.name }}
+            <span v-if="row.group || (showFallbackOrigin && row.origin_group_id)" class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200">
+              {{ showFallbackOrigin && row.origin_group_id ? (row.origin_group_name || `#${row.origin_group_id}`) : row.group?.name }}
             </span>
             <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
             <span
@@ -129,7 +129,7 @@
               class="text-xs text-amber-700 dark:text-amber-300"
               :title="t('admin.resilience.usage.fallbackTitle')"
             >
-              {{ t('admin.resilience.usage.fallback', { origin: row.origin_group_name || `#${row.origin_group_id}`, group: row.group?.name || `#${row.group_id}` }) }}
+              {{ t('admin.resilience.usage.fallback', { group: row.group?.name || `#${row.group_id}` }) }}
             </span>
           </div>
         </template>

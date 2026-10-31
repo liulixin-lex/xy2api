@@ -34,13 +34,15 @@ func fallbackMovedContext(t *testing.T) (*gin.Context, *service.APIKey) {
 	return c, authenticated
 }
 
-func TestBatchImageOwnerUnderFallbackCarriesTheBillingGroup(t *testing.T) {
+func TestBatchImageOwnerUnderFallbackCarriesAuthorizationAndPricingGroups(t *testing.T) {
 	c, _ := fallbackMovedContext(t)
 	owner, ok := batchImageOwnerFromContext(c)
 	require.True(t, ok)
 	require.Equal(t, int64(20), *owner.GroupID, "the serving group's accounts take the job")
-	require.NotNil(t, owner.BillingGroupID)
-	require.Equal(t, int64(10), *owner.BillingGroupID)
+	require.NotNil(t, owner.AuthorizationGroupID)
+	require.Equal(t, int64(10), *owner.AuthorizationGroupID)
+	require.NotNil(t, owner.PricingGroupID)
+	require.Equal(t, int64(20), *owner.PricingGroupID)
 }
 
 // The Responses WebSocket checks every response.create against the model

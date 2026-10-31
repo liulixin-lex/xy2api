@@ -170,14 +170,12 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		s.rateLimitService.ResetOpenAI403Counter(ctx, input.Account.ID)
 	}
 
-	// xy2api resilience: under an availability fallback the user's price
-	// follows the group the request was made for, including its Fast rules
-	// and how it picks the billing model (fallback-billing design §2.1, PM
-	// decisions Q8, Q9); the serving key keeps the usage row's group and the
-	// account-side cost.
+	// Price calculations use the serving-group snapshot. The authenticated
+	// key remains separate for authorization, limits and settlement ownership.
 	servedKey := input.APIKey
-	apiKey := BillingAPIKey(ctx, servedKey)
-	billingFields := billingChannelFields(ctx, s.channelService, servedKey, apiKey, input.ChannelUsageFields)
+	apiKey := ServingPricingKey(ctx, servedKey)
+	billingKey := BillingAPIKey(ctx, servedKey)
+	billingFields := input.ChannelUsageFields
 	user := input.User
 	account := input.Account
 	subscription := input.Subscription
@@ -310,12 +308,10 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		}
 	}
 
-	// Free Fast changes only the customer charge. Keep priority TotalCost and
-	// service_tier for upstream accounting, but evaluate ActualCost once more at
-	// the Standard tier using the same channel, peak, and long-context policy.
-	// xy2api resilience: priority that only a serving fallback group's forced
-	// Fast caused is charged like Free Fast (PM ruling on Q8).
-	if groupBillsOpenAIFastAtStandard(apiKey, billingAccount, serviceTier) || fallbackForcedFastChargesStandard(ctx, serviceTier) {
+	// The serving group's Free Fast policy changes only the customer charge.
+	// Keep priority TotalCost and service_tier for upstream accounting, but
+	// evaluate ActualCost at the Standard tier with the same pricing snapshot.
+	if groupBillsOpenAIFastAtStandard(apiKey, billingAccount, serviceTier) {
 		standardCost, standardErr := s.calculateOpenAIRecordUsageCost(
 			ctx,
 			result,
@@ -341,7 +337,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 
 	// Determine billing type
-	isSubscriptionBilling := subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
+	isSubscriptionBilling := subscription != nil && billingKey.Group != nil && billingKey.Group.IsSubscriptionType()
 	billingType := BillingTypeBalance
 	if isSubscriptionBilling {
 		billingType = BillingTypeSubscription
@@ -518,7 +514,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if resilienceUndeliveredUsage(ctx, usageLog, cost, accountRateMultiplier) {
 		return nil
 	}
-	simpleModeKeyRateLimitOnly := simpleModeKeyRateLimitBillingEnabled(s.cfg, apiKey)
+	simpleModeKeyRateLimitOnly := simpleModeKeyRateLimitBillingEnabled(s.cfg, billingKey)
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && !simpleModeKeyRateLimitOnly {
 		writeUsageLogAfterBilling(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 		logger.LegacyPrintf("service.openai_gateway", "[SIMPLE MODE] Usage recorded (not billed): user=%d, tokens=%d", usageLog.UserID, usageLog.TotalTokens())
@@ -531,13 +527,13 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	// cannot recover ForcePlatform there. Fall back for internal/test callers.
 	quotaPlatform := input.QuotaPlatform
 	if quotaPlatform == "" {
-		quotaPlatform = PlatformFromAPIKey(apiKey)
+		quotaPlatform = PlatformFromAPIKey(billingKey)
 	}
 
 	_, billingErr := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
 		Cost:                       cost,
 		User:                       user,
-		APIKey:                     apiKey,
+		APIKey:                     billingKey,
 		Account:                    account,
 		Subscription:               subscription,
 		RequestPayloadHash:         resolveUsageBillingPayloadFingerprint(ctx, input.RequestPayloadHash),
