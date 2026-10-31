@@ -356,6 +356,14 @@
         "docs/PROJECT_MEMORY.md",
         "docs/PROJECT_MEMORY_ARCHIVE.md"
       ]
+    },
+    {
+      "pattern": "anthropic-cache-ttl-(?:status|detail)(?![A-Za-z0-9_-])|cacheTTL(?:Policy|Applied)Label|usage\\.anthropicCacheTTL\\.(?:policy|off|5m|1h|applied|notApplied|notRecorded|hint)(?![A-Za-z0-9_])",
+      "reason": "2026-10-31: at the user's request the usage pages no longer show the key TTL policy and applied status (pre-0.4.15 keys are off, so nearly every row read 'not applied'); the API fields and the unreported TTL breakdown note stay",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
     }
   ],
   "private": [
