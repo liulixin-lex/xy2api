@@ -80,11 +80,23 @@ func (r *groupQualityGateRepository) CompareAndSwapPolicies(ctx context.Context,
 // LoadMembers loads only fields needed by quality and the shared resilience/profit
 // checks, in one query. It does not hydrate proxies or group objects.
 func (r *groupQualityGateRepository) LoadMembers(ctx context.Context, groupIDs []int64) (map[int64][]service.Account, error) {
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `SET LOCAL statement_timeout = '5s'`); err != nil {
+		return nil, err
+	}
+	return loadGroupQualityMembers(ctx, tx, groupIDs)
+}
+
+func loadGroupQualityMembers(ctx context.Context, tx *sql.Tx, groupIDs []int64) (map[int64][]service.Account, error) {
 	out := make(map[int64][]service.Account, len(groupIDs))
 	if len(groupIDs) == 0 {
 		return out, nil
 	}
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := tx.QueryContext(ctx, `
 		SELECT ag.group_id, a.id, a.platform, a.type, a.status, a.schedulable,
 		       a.rate_multiplier, a.expires_at, a.auto_pause_on_expired,
 		       a.rate_limit_reset_at, a.overload_until, a.temp_unschedulable_until,
@@ -114,9 +126,6 @@ func (r *groupQualityGateRepository) LoadMembers(ctx context.Context, groupIDs [
 }
 
 func (r *groupQualityGateRepository) LoadObservations(ctx context.Context, accountIDs []int64, from, to time.Time) ([]service.GroupQualityObservation, time.Time, error) {
-	if len(accountIDs) == 0 {
-		return nil, time.Now().UTC(), nil
-	}
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, time.Time{}, err
@@ -124,6 +133,13 @@ func (r *groupQualityGateRepository) LoadObservations(ctx context.Context, accou
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `SET LOCAL statement_timeout = '5s'`); err != nil {
 		return nil, time.Time{}, err
+	}
+	return loadGroupQualityObservations(ctx, tx, accountIDs, from, to)
+}
+
+func loadGroupQualityObservations(ctx context.Context, tx *sql.Tx, accountIDs []int64, from, to time.Time) ([]service.GroupQualityObservation, time.Time, error) {
+	if len(accountIDs) == 0 {
+		return nil, to.UTC(), nil
 	}
 	out := make([]service.GroupQualityObservation, 0)
 	rows, err := tx.QueryContext(ctx, `

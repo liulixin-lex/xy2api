@@ -273,8 +273,9 @@ func (s *GroupQualityGateService) Status(ctx context.Context, groupID *int64) (*
 			out.AccountMetrics[strconv.FormatInt(acc.ID, 10)] = metricView(metric)
 			member := snap.Members[group.ID][acc.ID]
 			if member.AccountID == 0 {
-				member = groupQualityMemberSnapshot{AccountID: acc.ID, Metric: metric, Result: GroupQualityMemberResult{Usable: groupMemberUsable(group, &acc, now), Passing: true, State: "eligible", Tier: GroupQualityGateTierFast}}
+				member = groupQualityMemberSnapshot{AccountID: acc.ID, Result: GroupQualityMemberResult{Usable: groupMemberUsable(group, &acc, now), Passing: true, State: "eligible", Tier: GroupQualityGateTierFast}}
 			}
+			effective := member.Metric
 			reasons := []string{}
 			if enabled {
 				if member.Result.State == "ejected" && len(member.State.Reasons) > 0 {
@@ -288,7 +289,6 @@ func (s *GroupQualityGateService) Status(ctx context.Context, groupID *int64) (*
 			ejected := state == "ejected" && (member.State.Until.IsZero() || now.Before(member.State.Until))
 			if state == "ejected" && !ejected {
 				state, tier = "trial", GroupQualityGateTierTrial
-				effective := member.Metric
 				// The ejection round's triggering window predates EjectedAt.
 				// Until a later evaluation supplies post-ejection data, it cannot
 				// determine passing after expiry.
@@ -299,7 +299,8 @@ func (s *GroupQualityGateService) Status(ctx context.Context, groupID *int64) (*
 				reasons = []string{}
 			}
 			vetoed := ejected && !member.Result.Pinned && !member.Result.GuardHeld
-			row := GroupQualityAccountView{AccountID: acc.ID, State: state, Strikes: member.State.Strike, Usable: member.Result.Usable, Passing: passing, GuardHeld: guardHeld, Pinned: member.Result.Pinned, Vetoed: vetoed, Tier: tier, Headroom: qualityHeadroom(policy, metric), Reasons: reasons}
+			decisionMetrics := qualityDecisionMetrics(effective)
+			row := GroupQualityAccountView{AccountID: acc.ID, State: state, Strikes: member.State.Strike, Usable: member.Result.Usable, Passing: passing, GuardHeld: guardHeld, Pinned: member.Result.Pinned, Vetoed: vetoed, Tier: tier, Headroom: qualityHeadroom(policy, decisionMetrics), Metrics: decisionMetrics, Reasons: reasons}
 			if ejected && !member.State.Until.IsZero() {
 				u := member.State.Until
 				row.Until = &u
@@ -323,13 +324,25 @@ func metricView(m GroupQualityMetrics) GroupQualityMetricView {
 	return GroupQualityMetricView{Calls: m.Calls, SoftFailures: m.SoftFailures, ErrorRate: m.ErrorRate(), WarmSamples: m.WarmSamples, WarmTTFTP90Ms: m.WarmTTFTP90Ms, ZeroCacheSamples: m.ZeroCacheSamples, WarmZeroCacheRate: m.WarmZeroCacheRate}
 }
 
-func qualityHeadroom(p GroupQualityGatePolicy, m GroupQualityMetrics) *float64 {
-	values := []float64{}
+func qualityDecisionMetrics(m GroupQualityMetrics) GroupQualityDecisionMetrics {
+	out := GroupQualityDecisionMetrics{Calls: m.Calls, SoftFailures: m.SoftFailures, WarmSamples: m.WarmSamples}
 	if m.Calls >= 20 && m.SoftFailures >= 5 {
-		values = append(values, 1-m.ErrorRate()/p.MaxErrorRate)
+		rate := m.ErrorRate()
+		out.ErrorRate = &rate
 	}
 	if m.WarmSamples >= 10 {
-		values = append(values, 1-float64(m.WarmTTFTP90Ms)/float64(p.MaxWarmTTFTP90Ms))
+		out.WarmTTFTP90Ms = &m.WarmTTFTP90Ms
+	}
+	return out
+}
+
+func qualityHeadroom(p GroupQualityGatePolicy, m GroupQualityDecisionMetrics) *float64 {
+	values := []float64{}
+	if m.ErrorRate != nil {
+		values = append(values, 1-*m.ErrorRate/p.MaxErrorRate)
+	}
+	if m.WarmTTFTP90Ms != nil {
+		values = append(values, 1-float64(*m.WarmTTFTP90Ms)/float64(p.MaxWarmTTFTP90Ms))
 	}
 	if len(values) == 0 {
 		return nil

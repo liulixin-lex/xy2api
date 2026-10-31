@@ -240,6 +240,14 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.evaluate(t, 5*time.Minute)
 			e.state(t, 1, "trial", 1, GroupQualityGateTierTrial)
 			e.state(t, 2, "eligible", 1, GroupQualityGateTierFast)
+			status, err := e.svc.Status(context.Background(), nil)
+			require.NoError(t, err)
+			row := status.Groups[0].Accounts[1]
+			require.EqualValues(t, 100, row.Metrics.Calls)
+			require.EqualValues(t, 8, row.Metrics.SoftFailures)
+			require.InDelta(t, 0.08, *row.Metrics.ErrorRate, 1e-9)
+			require.InDelta(t, 0.2, *row.Headroom, 1e-9)
+			require.Greater(t, status.AccountMetrics["2"].ErrorRate, 0.10, "full window still contains pre-ejection failures")
 			require.Contains(t, e.logs.String(), "group_quality_gate.recover")
 		}},
 		{"borderline ttft enters trial then promotes with cleared tier", func(t *testing.T, e *qualityTestEnv) {
@@ -296,6 +304,13 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.state(t, 1, "eligible", 0, GroupQualityGateTierFast)
 			require.Zero(t, e.member(1).Metric.Calls)
 			require.Equal(t, int64(20), e.svc.snapshot.Load().Metrics[1].Calls, "display retains full-window metrics")
+			status, err := e.svc.Status(context.Background(), nil)
+			require.NoError(t, err)
+			row := status.Groups[0].Accounts[0]
+			require.True(t, row.Passing)
+			require.Equal(t, GroupQualityDecisionMetrics{}, row.Metrics)
+			require.Nil(t, row.Headroom)
+			require.InDelta(t, 0.25, status.AccountMetrics["1"].ErrorRate, 1e-9)
 		}},
 		{"long idle trial stays bounded and accumulates older requests", func(t *testing.T, e *qualityTestEnv) {
 			e.reset(1, e.base.Add(-time.Minute))
@@ -505,6 +520,37 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 				require.Equal(t, want, e.svc.OrderTier(7, 1))
 			}
 		}},
+		{"status uses group effective metrics after reset and trial promotion", func(t *testing.T, e *qualityTestEnv) {
+			e.groups.groups = append(e.groups.groups, Group{ID: 8, Platform: PlatformOpenAI})
+			e.repo.policies.Groups["8"] = e.repo.policies.Groups["7"]
+			e.repo.members[8] = e.repo.members[7]
+			e.calls(1, e.base.Add(-time.Minute), 20, 5, 30000, false)
+			e.evaluate(t, 0)
+			e.reset(1, e.base.Add(30*time.Second))
+			e.evaluate(t, time.Minute)
+			e.calls(1, e.base.Add(90*time.Second), 10, 0, 8000, false)
+			e.evaluate(t, 2*time.Minute)
+			status, err := e.svc.Status(context.Background(), nil)
+			require.NoError(t, err)
+			for _, group := range status.Groups {
+				row := group.Accounts[0]
+				require.Equal(t, "trial", row.State)
+				require.EqualValues(t, 10, row.Metrics.Calls)
+				require.Zero(t, row.Metrics.SoftFailures)
+				require.Nil(t, row.Metrics.ErrorRate)
+				require.EqualValues(t, 10, row.Metrics.WarmSamples)
+				require.Equal(t, 8000, *row.Metrics.WarmTTFTP90Ms)
+				require.InDelta(t, 0.6, *row.Headroom, 1e-9)
+			}
+			require.EqualValues(t, 30, status.AccountMetrics["1"].Calls)
+			require.Equal(t, 30000, status.AccountMetrics["1"].WarmTTFTP90Ms)
+			e.calls(1, e.base.Add(150*time.Second), 10, 0, 0, false)
+			e.evaluate(t, 3*time.Minute)
+			status, err = e.svc.Status(context.Background(), nil)
+			require.NoError(t, err)
+			require.Equal(t, "eligible", status.Groups[0].Accounts[0].State)
+			require.InDelta(t, 0.6, *status.Groups[0].Accounts[0].Headroom, 1e-9)
+		}},
 		{"status arrays, summaries, effective expiry and headroom", func(t *testing.T, e *qualityTestEnv) {
 			e.accounts(1, 2, 3)
 			e.calls(1, e.base.Add(-time.Minute), 20, 5, 0, false)
@@ -518,11 +564,15 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			require.True(t, row.Passing)
 			require.NotNil(t, row.Reasons)
 			require.Empty(t, row.Reasons)
+			require.Equal(t, GroupQualityDecisionMetrics{}, row.Metrics, "expiry must not display the triggering window")
+			require.Nil(t, row.Headroom)
+			require.InDelta(t, 0.25, status.AccountMetrics["1"].ErrorRate, 1e-9)
 			require.Nil(t, status.Groups[0].Accounts[1].Headroom)
 			raw, err := json.Marshal(status)
 			require.NoError(t, err)
 			require.Contains(t, string(raw), `"headroom":null`)
 			require.Contains(t, string(raw), `"reasons":[]`)
+			require.Contains(t, string(raw), `"metrics":{"calls":0,"soft_failures":0,"error_rate":null,"warm_samples":0,"warm_ttft_p90_ms":null}`)
 			id := int64(8)
 			e.groups.groups = append(e.groups.groups, Group{ID: id, Platform: PlatformOpenAI})
 			e.repo.members[id] = e.repo.members[7]
@@ -594,11 +644,17 @@ func TestGroupQualityGatePolicyValidationAndStatusContract(t *testing.T) {
 	require.NotNil(t, status.AccountMetrics)
 	policy := defaultGroupQualityGatePolicy()
 	for _, m := range []GroupQualityMetrics{{}, {Calls: 19, SoftFailures: 5, WarmSamples: 9}, {Calls: 20, SoftFailures: 4}} {
-		require.Nil(t, qualityHeadroom(policy, m))
+		decision := qualityDecisionMetrics(m)
+		require.Equal(t, m.Calls, decision.Calls)
+		require.Equal(t, m.SoftFailures, decision.SoftFailures)
+		require.Equal(t, m.WarmSamples, decision.WarmSamples)
+		require.Nil(t, decision.ErrorRate)
+		require.Nil(t, decision.WarmTTFTP90Ms)
+		require.Nil(t, qualityHeadroom(policy, decision))
 	}
-	require.InDelta(t, 0, *qualityHeadroom(policy, GroupQualityMetrics{Calls: 50, SoftFailures: 5}), 1e-9)
-	require.InDelta(t, 0.5, *qualityHeadroom(policy, GroupQualityMetrics{WarmSamples: 10, WarmTTFTP90Ms: 10000}), 1e-9)
-	require.InDelta(t, -1.5, *qualityHeadroom(policy, GroupQualityMetrics{Calls: 20, SoftFailures: 5, WarmSamples: 10, WarmTTFTP90Ms: 10000}), 1e-9)
+	require.InDelta(t, 0, *qualityHeadroom(policy, qualityDecisionMetrics(GroupQualityMetrics{Calls: 50, SoftFailures: 5})), 1e-9)
+	require.InDelta(t, 0.5, *qualityHeadroom(policy, qualityDecisionMetrics(GroupQualityMetrics{WarmSamples: 10, WarmTTFTP90Ms: 10000})), 1e-9)
+	require.InDelta(t, -1.5, *qualityHeadroom(policy, qualityDecisionMetrics(GroupQualityMetrics{Calls: 20, SoftFailures: 5, WarmSamples: 10, WarmTTFTP90Ms: 10000})), 1e-9)
 }
 
 func TestGroupMemberServableUsesSharedResilienceAndProfitThreshold(t *testing.T) {

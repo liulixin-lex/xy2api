@@ -42,7 +42,9 @@
 
 状态接口的 `group_id` 可选。不带参数时返回全部已启用门槛的分组，`account_metrics` 覆盖这些分组的全部成员；带参数时只返回该组，即使未启用门槛也返回成员指标并标记 `enabled=false`。状态快照包含 `generated_at`、`stale`、账号指标、状态、熔断结束时间、原因、档位、可用、达标、固定、保底保留和实际否决结果。`groups`、`accounts`、`reasons` 始终是数组（空集合为 `[]`），`account_metrics` 始终是对象（空集合为 `{}`）。`summary.eligible` 是未被否决的成员数，包含试用、固定及保底保留；`summary.ejected` 是实际否决数；`summary.trial` 单独统计试用数，属于 eligible 的子集。
 
-`headroom` 是满足样本条件的指标中最小的 `1 − 实测值 / 上限`：负数表示超线，0 表示压线；错误率需总数 ≥20 且软失败 ≥5，首字需样本 ≥10。所有指标样本均不足时返回 `null`。`account_metrics` 与余量用于显示完整窗口，过期熔断的 `passing` 使用有效数据。策略校验失败沿用 `{code, message, reason, metadata}` 错误结构，`reason=INVALID_GROUP_QUALITY_GATE_POLICY`，`message` 说明具体字段约束或非成员账号，`metadata.field` 标出字段。
+每个 `groups[].accounts[]` 成员的 `metrics` 是本组判定实际使用的有效数据，包含 `calls`、`soft_failures`、`error_rate`、`warm_samples`、`warm_ttft_p90_ms`。`calls`、`soft_failures`、`warm_samples` 始终为实际计数；`error_rate=null` 表示总数 <20 或软失败 <5，未达判定条件；`warm_ttft_p90_ms=null` 表示续轮样本 <10。重启前、重置前及本组熔断结束前的旧数据按有效起点排除；过期熔断也不再显示触发熔断那轮的旧指标。
+
+`headroom` 只使用成员 `metrics` 中非 null 的 `error_rate` 与 `warm_ttft_p90_ms`，取最小的 `1 − 实测值 / 上限`：负数表示超线，0 表示压线；两项均为 null 时返回 `null`。状态、原因、实测、上限和余量按本组有效数据展示；顶层 `account_metrics` 保持完整窗口，供账号行显示，不能用于成员门槛的实测和余量。策略校验失败沿用 `{code, message, reason, metadata}` 错误结构，`reason=INVALID_GROUP_QUALITY_GATE_POLICY`，`message` 说明具体字段约束或非成员账号，`metadata.field` 标出字段。
 
 ## 恢复与观测
 
