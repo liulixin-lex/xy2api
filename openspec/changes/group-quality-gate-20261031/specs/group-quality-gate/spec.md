@@ -216,6 +216,8 @@ Gate state MUST live in process memory as an atomic snapshot and MUST be recompu
   - `GET /api/v1/admin/group-quality-gate/policies`
   - `PUT /api/v1/admin/group-quality-gate/policies/:group_id`
   - `GET /api/v1/admin/group-quality-gate/status`
+- The status endpoint MUST accept an optional `group_id`. Without it, the response MUST contain all enabled groups and metrics for every member of those groups. With it, the response MUST contain only that group, including member metrics when the gate is disabled and `enabled=false`.
+- A successful policy write MUST immediately invalidate this instance's policy cache. A newly enabled group MUST appear in status after the next evaluation round.
 - Reads MUST follow account-management permission. Writes MUST follow group-management permission and MUST be audited.
 - Events `group_quality_gate.eject`, `.trial`, `.recover`, `.guard_hold`, `.last_resort` and `.evaluate_failed` MUST be logged with group, account, metric, limit and duration.
 

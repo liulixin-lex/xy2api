@@ -930,7 +930,8 @@ var ProviderSet = wire.NewSet(
 	NewGroupCategoryService,
 	NewOperatorAccessService,
 	ProvideResilienceService,
-	NewEmptyGroupQualityGateView,
+	ProvideGroupQualityGateService,
+	wire.Bind(new(GroupQualityGateView), new(*GroupQualityGateService)),
 	ProvideAntigravityTokenProvider,
 	ProvideGrokTokenProvider,
 	ProvideOpenAITokenProvider,
@@ -1134,6 +1135,13 @@ func ProvideShareSchedulingService(repo ShareSchedulingRepository, store ShareSc
 	s.attachGateways(gateway, openai)
 	s.Start()
 	return s
+}
+
+// ProvideGroupQualityGateService starts the process-local quality evaluator.
+func ProvideGroupQualityGateService(repo GroupQualityGateRepository, accounts AccountRepository, groups GroupRepository) *GroupQualityGateService {
+	svc := NewGroupQualityGateService(repo, accounts, groups)
+	svc.Start()
+	return svc
 }
 
 // ProvideResilienceService creates the gateway resilience runtime, attaches
