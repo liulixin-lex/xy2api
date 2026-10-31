@@ -55,21 +55,22 @@ type AdminUser struct {
 }
 
 type APIKey struct {
-	ID          int64      `json:"id"`
-	UserID      int64      `json:"user_id"`
-	Key         string     `json:"key"`
-	Name        string     `json:"name"`
-	GroupID     *int64     `json:"group_id"`
-	Status      string     `json:"status"`
-	IPWhitelist []string   `json:"ip_whitelist"`
-	IPBlacklist []string   `json:"ip_blacklist"`
-	LastUsedAt  *time.Time `json:"last_used_at"`
-	LastUsedIP  *string    `json:"last_used_ip"`
-	Quota       float64    `json:"quota"`      // Quota limit in USD (0 = unlimited)
-	QuotaUsed   float64    `json:"quota_used"` // Used quota amount in USD
-	ExpiresAt   *time.Time `json:"expires_at"` // Expiration time (nil = never expires)
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	AnthropicCacheTTLMode string     `json:"anthropic_cache_ttl_mode"`
+	ID                    int64      `json:"id"`
+	UserID                int64      `json:"user_id"`
+	Key                   string     `json:"key"`
+	Name                  string     `json:"name"`
+	GroupID               *int64     `json:"group_id"`
+	Status                string     `json:"status"`
+	IPWhitelist           []string   `json:"ip_whitelist"`
+	IPBlacklist           []string   `json:"ip_blacklist"`
+	LastUsedAt            *time.Time `json:"last_used_at"`
+	LastUsedIP            *string    `json:"last_used_ip"`
+	Quota                 float64    `json:"quota"`      // Quota limit in USD (0 = unlimited)
+	QuotaUsed             float64    `json:"quota_used"` // Used quota amount in USD
+	ExpiresAt             *time.Time `json:"expires_at"` // Expiration time (nil = never expires)
+	CreatedAt             time.Time  `json:"created_at"`
+	UpdatedAt             time.Time  `json:"updated_at"`
 	// CurrentConcurrency is the real-time active request count for this API key.
 	CurrentConcurrency int `json:"current_concurrency"`
 
@@ -674,7 +675,9 @@ type UsageLog struct {
 	SessionID *string `json:"session_id,omitempty"`
 
 	// Cache TTL Override 标记
-	CacheTTLOverridden bool `json:"cache_ttl_overridden"`
+	AnthropicCacheTTLPolicy  *string `json:"anthropic_cache_ttl_policy"`
+	AnthropicCacheTTLApplied *bool   `json:"anthropic_cache_ttl_applied"`
+	CacheTTLOverridden       bool    `json:"cache_ttl_overridden"`
 
 	// BillingMode 计费模式：token/image
 	BillingMode *string `json:"billing_mode,omitempty"`

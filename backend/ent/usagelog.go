@@ -115,6 +115,10 @@ type UsageLog struct {
 	VideoResolution *string `json:"video_resolution,omitempty"`
 	// 提交时请求的视频时长（秒），按秒计费的乘数
 	VideoDurationSeconds *int `json:"video_duration_seconds,omitempty"`
+	// AnthropicCacheTTLPolicy holds the value of the "anthropic_cache_ttl_policy" field.
+	AnthropicCacheTTLPolicy *string `json:"anthropic_cache_ttl_policy,omitempty"`
+	// AnthropicCacheTTLApplied holds the value of the "anthropic_cache_ttl_applied" field.
+	AnthropicCacheTTLApplied *bool `json:"anthropic_cache_ttl_applied,omitempty"`
 	// CacheTTLOverridden holds the value of the "cache_ttl_overridden" field.
 	CacheTTLOverridden bool `json:"cache_ttl_overridden,omitempty"`
 	// CreatedAt holds the value of the "created_at" field.
@@ -204,13 +208,13 @@ func (*UsageLog) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case usagelog.FieldImageSizeBreakdown:
 			values[i] = new([]byte)
-		case usagelog.FieldUpstreamModelMismatch, usagelog.FieldLongContextBillingApplied, usagelog.FieldStream, usagelog.FieldCacheTTLOverridden:
+		case usagelog.FieldUpstreamModelMismatch, usagelog.FieldLongContextBillingApplied, usagelog.FieldStream, usagelog.FieldAnthropicCacheTTLApplied, usagelog.FieldCacheTTLOverridden:
 			values[i] = new(sql.NullBool)
 		case usagelog.FieldInputCost, usagelog.FieldOutputCost, usagelog.FieldCacheCreationCost, usagelog.FieldCacheReadCost, usagelog.FieldTotalCost, usagelog.FieldActualCost, usagelog.FieldRateMultiplier, usagelog.FieldAccountRateMultiplier:
 			values[i] = new(sql.NullFloat64)
 		case usagelog.FieldID, usagelog.FieldUserID, usagelog.FieldAPIKeyID, usagelog.FieldAccountID, usagelog.FieldChannelID, usagelog.FieldGroupID, usagelog.FieldSubscriptionID, usagelog.FieldInputTokens, usagelog.FieldOutputTokens, usagelog.FieldCacheCreationTokens, usagelog.FieldCacheReadTokens, usagelog.FieldCacheCreation5mTokens, usagelog.FieldCacheCreation1hTokens, usagelog.FieldBillingType, usagelog.FieldDurationMs, usagelog.FieldEndToEndFirstOutputMs, usagelog.FieldFirstTokenMs, usagelog.FieldImageCount, usagelog.FieldVideoCount, usagelog.FieldVideoDurationSeconds:
 			values[i] = new(sql.NullInt64)
-		case usagelog.FieldRequestID, usagelog.FieldModel, usagelog.FieldRequestedModel, usagelog.FieldUpstreamModel, usagelog.FieldUpstreamResponseModel, usagelog.FieldModelMappingChain, usagelog.FieldBillingTier, usagelog.FieldBillingMode, usagelog.FieldUserAgent, usagelog.FieldIPAddress, usagelog.FieldImageSize, usagelog.FieldImageInputSize, usagelog.FieldImageOutputSize, usagelog.FieldImageSizeSource, usagelog.FieldVideoResolution:
+		case usagelog.FieldRequestID, usagelog.FieldModel, usagelog.FieldRequestedModel, usagelog.FieldUpstreamModel, usagelog.FieldUpstreamResponseModel, usagelog.FieldModelMappingChain, usagelog.FieldBillingTier, usagelog.FieldBillingMode, usagelog.FieldUserAgent, usagelog.FieldIPAddress, usagelog.FieldImageSize, usagelog.FieldImageInputSize, usagelog.FieldImageOutputSize, usagelog.FieldImageSizeSource, usagelog.FieldVideoResolution, usagelog.FieldAnthropicCacheTTLPolicy:
 			values[i] = new(sql.NullString)
 		case usagelog.FieldCreatedAt:
 			values[i] = new(sql.NullTime)
@@ -535,6 +539,20 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 				_m.VideoDurationSeconds = new(int)
 				*_m.VideoDurationSeconds = int(value.Int64)
 			}
+		case usagelog.FieldAnthropicCacheTTLPolicy:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field anthropic_cache_ttl_policy", values[i])
+			} else if value.Valid {
+				_m.AnthropicCacheTTLPolicy = new(string)
+				*_m.AnthropicCacheTTLPolicy = value.String
+			}
+		case usagelog.FieldAnthropicCacheTTLApplied:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field anthropic_cache_ttl_applied", values[i])
+			} else if value.Valid {
+				_m.AnthropicCacheTTLApplied = new(bool)
+				*_m.AnthropicCacheTTLApplied = value.Bool
+			}
 		case usagelog.FieldCacheTTLOverridden:
 			if value, ok := values[i].(*sql.NullBool); !ok {
 				return fmt.Errorf("unexpected type %T for field cache_ttl_overridden", values[i])
@@ -787,6 +805,16 @@ func (_m *UsageLog) String() string {
 	builder.WriteString(", ")
 	if v := _m.VideoDurationSeconds; v != nil {
 		builder.WriteString("video_duration_seconds=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.AnthropicCacheTTLPolicy; v != nil {
+		builder.WriteString("anthropic_cache_ttl_policy=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.AnthropicCacheTTLApplied; v != nil {
+		builder.WriteString("anthropic_cache_ttl_applied=")
 		builder.WriteString(fmt.Sprintf("%v", *v))
 	}
 	builder.WriteString(", ")

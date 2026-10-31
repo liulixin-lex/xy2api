@@ -119,7 +119,7 @@ func TestForwardCountTokens_MimicPathKeepsClient1hBreakpointValid(t *testing.T) 
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil)
 	c.Request.Header.Set("User-Agent", "third-party-client/1.0")
 
-	// The mimic path adds a 5m breakpoint to tools[-1], ahead of the client's 1h one.
+	// Counting preserves client declarations without generating tool checkpoints.
 	body := []byte(`{"model":"claude-sonnet-4-6",` +
 		`"tools":[{"name":"probe","description":"d","input_schema":{"type":"object"}}],` +
 		`"messages":[{"role":"user","content":[{"type":"text","text":"Reply OK.","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}`)
@@ -150,7 +150,7 @@ func TestForwardCountTokens_MimicPathKeepsClient1hBreakpointValid(t *testing.T) 
 
 	require.NoError(t, svc.ForwardCountTokens(context.Background(), c, account, parsed))
 
-	require.True(t, gjson.GetBytes(upstream.lastBody, "tools.0.cache_control").Exists(),
-		"the mimic tools breakpoint should still be present")
+	require.False(t, gjson.GetBytes(upstream.lastBody, "tools.0.cache_control").Exists(),
+		"count_tokens must not generate cache checkpoints")
 	requireCacheTTLOrderAccepted(t, upstream.lastBody)
 }

@@ -204,6 +204,15 @@ func PrepareBedrockRequestBody(body []byte, modelID string, betaHeader string) (
 // PrepareBedrockRequestBodyWithTokens prepares a Bedrock request using pre-resolved beta tokens.
 // ccCompat 启用 CC 兼容模式时额外处理 thinking 类型转换和 tool_use.id 清理。
 func PrepareBedrockRequestBodyWithTokens(body []byte, modelID string, betaTokens []string, ccCompat bool) ([]byte, error) {
+	return prepareBedrockRequestBodyWithTokens(body, modelID, betaTokens, ccCompat, false)
+}
+
+// Keep deferred-tool metadata until the final attempt's breakpoint generation.
+func prepareBedrockRequestBodyWithTokens(body []byte, modelID string, betaTokens []string, ccCompat, keepToolCustom bool) ([]byte, error) {
+	if gjson.GetBytes(body, "cache_control").Exists() {
+		return nil, fmt.Errorf("bedrock InvokeModel does not support top-level cache_control; use block cache_control")
+	}
+	body = stripDeferredToolCacheControl(body)
 	var err error
 
 	betaTokens = filterBedrockBetaTokens(betaTokens)
@@ -268,7 +277,9 @@ func PrepareBedrockRequestBodyWithTokens(body []byte, modelID string, betaTokens
 	// 移除工具定义中的 custom 字段
 	// Claude Code (v2.1.69+) 在 tool 定义中发送 custom: {defer_loading: true}，
 	// Anthropic API 接受但 Bedrock 会拒绝并报 "Extra inputs are not permitted"
-	body = removeCustomFieldFromTools(body)
+	if !keepToolCustom {
+		body = removeCustomFieldFromTools(body)
+	}
 
 	// 清理 cache_control 中 Bedrock 不支持的字段
 	body = sanitizeBedrockCacheControl(body, modelID)
@@ -401,44 +412,10 @@ func isBedrockClaude45OrNewer(modelID string) bool {
 //   - ttl：仅 Claude 4.5+ 支持 "5m" 和 "1h"，旧模型需要移除
 func sanitizeBedrockCacheControl(body []byte, modelID string) []byte {
 	isClaude45 := isBedrockClaude45OrNewer(modelID)
-
-	// 清理 system 数组中的 cache_control
-	systemArr := gjson.GetBytes(body, "system")
-	if systemArr.Exists() && systemArr.IsArray() {
-		for i, item := range systemArr.Array() {
-			if !item.IsObject() {
-				continue
-			}
-			cc := item.Get("cache_control")
-			if !cc.Exists() || !cc.IsObject() {
-				continue
-			}
-			body = deleteCacheControlUnsupportedFields(body, fmt.Sprintf("system.%d.cache_control", i), cc, isClaude45)
-		}
-	}
-
-	// 清理 messages 中的 cache_control
-	messages := gjson.GetBytes(body, "messages")
-	if !messages.Exists() || !messages.IsArray() {
-		return body
-	}
-	for mi, msg := range messages.Array() {
-		if !msg.IsObject() {
-			continue
-		}
-		content := msg.Get("content")
-		if !content.Exists() || !content.IsArray() {
-			continue
-		}
-		for ci, block := range content.Array() {
-			if !block.IsObject() {
-				continue
-			}
-			cc := block.Get("cache_control")
-			if !cc.Exists() || !cc.IsObject() {
-				continue
-			}
-			body = deleteCacheControlUnsupportedFields(body, fmt.Sprintf("messages.%d.content.%d.cache_control", mi, ci), cc, isClaude45)
+	for _, path := range anthropicCacheControlPaths(body) {
+		cc := gjson.GetBytes(body, path)
+		if cc.IsObject() {
+			body = deleteCacheControlUnsupportedFields(body, path, cc, isClaude45)
 		}
 	}
 

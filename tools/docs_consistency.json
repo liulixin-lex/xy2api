@@ -352,6 +352,14 @@
         "frontend/src/components/admin/account/__tests__/IQCheck*",
         "docs/OPENAI_IQ_CHECK.md"
       ]
+    },
+    {
+      "pattern": "enable_anthropic_cache_ttl_1h_injection|[Aa]nthropicCacheTTL1hInjection|rewrite_message_cache_control|[Rr]ewriteMessageCacheControl|applyClaudeCacheFallbackForAttempt",
+      "reason": "2026-10-30 Anthropic cache TTL: per-key four-state policy replaces the OAuth-only global Boolean; declaration strip/rebuild and the per-attempt fallback helper were retired in favor of the shared final wire policy",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
     }
   ],
   "private": [

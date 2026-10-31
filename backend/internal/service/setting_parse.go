@@ -247,8 +247,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyAllowUngroupedKeyScheduling:                        "false",
 		SettingKeyOpenAILowUpstreamRatePriorityEnabled:               "false",
 		SettingKeyOpenAIOAuthSchedulingRateMultiplier:                "1",
-		SettingKeyEnableAnthropicCacheTTL1hInjection:                 "false",
-		SettingKeyRewriteMessageCacheControl:                         strconv.FormatBool(s.defaultRewriteMessageCacheControl()),
+		SettingKeyAnthropicCacheTTLDefault:                           "5m",
 		SettingKeyEnableClientDatelineNormalization:                  "true",
 		SettingKeyEnableOpenAISessionUUID:                            "true",
 		SettingKeyAntigravityUserAgentVersion:                        "",
@@ -899,12 +898,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	}
 	result.ClaudeOAuthSystemPrompt = settings[SettingKeyClaudeOAuthSystemPrompt]
 	result.ClaudeOAuthSystemPromptBlocks = settings[SettingKeyClaudeOAuthSystemPromptBlocks]
-	result.EnableAnthropicCacheTTL1hInjection = settings[SettingKeyEnableAnthropicCacheTTL1hInjection] == "true"
-	if v, ok := settings[SettingKeyRewriteMessageCacheControl]; ok && v != "" {
-		result.RewriteMessageCacheControl = v == "true"
-	} else {
-		result.RewriteMessageCacheControl = s.defaultRewriteMessageCacheControl()
-	}
+	result.AnthropicCacheTTLDefault = anthropicCacheTTLDefault(settings[SettingKeyAnthropicCacheTTLDefault])
 	if v, ok := settings[SettingKeyEnableClientDatelineNormalization]; ok && v != "" {
 		result.EnableClientDatelineNormalization = v == "true"
 	} else {

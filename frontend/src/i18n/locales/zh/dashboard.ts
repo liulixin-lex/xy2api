@@ -66,6 +66,17 @@ export default {
 
   // API Keys
   keys: {
+    cacheTTL: {
+      label: 'Anthropic 缓存 TTL',
+      inherit: '跟随全局',
+      inheritCurrent: '跟随全局（当前 {ttl}）',
+      off: '不覆写 TTL（保留客户端设置）',
+      '5m': '强制 5 分钟缓存',
+      '1h': '强制 1 小时缓存',
+      duration: { '5m': '5 分钟', '1h': '1 小时' },
+      summary: 'Claude TTL：{mode}',
+      hint: '仅对 Claude 请求生效，调整已有缓存断点的有效期。未声明缓存时，是否自动补充由分组设置决定；不覆写 TTL 会保留客户端设置。1 小时可能增加写入费用，实际缓存与计费以上游用量和本站价格为准。'
+    },
     title: 'API 密钥',
     description: '管理您的 API 密钥和访问令牌',
     searchPlaceholder: '搜索名称或Key...',
@@ -340,8 +351,20 @@ export default {
     description: '查看和分析您的 API 使用历史',
     costDetails: '费用明细',
     tokenDetails: 'Token 明细',
-    cacheTtlOverriddenHint: '缓存 TTL Override 已启用',
-    cacheTtlOverriddenLabel: 'TTL 替换',
+    anthropicCacheTTL: {
+      policy: 'TTL 策略',
+      off: '不覆写 TTL',
+      '5m': '5 分钟',
+      '1h': '1 小时',
+      applied: '已应用',
+      notApplied: '未应用',
+      notRecorded: '未记录',
+      unknownDetail: 'TTL 明细未报告',
+      partialDetail: '部分 TTL 明细未报告',
+      hint: '已应用仅表示最终请求中的缓存声明符合策略，不代表供应商采用该 TTL 或缓存命中。未记录包括历史记录与非目标出口。'
+    },
+    cacheTtlOverriddenHint: '缓存写入计费分类已调整；仅影响结算副本，不代表真实缓存效率',
+    cacheTtlOverriddenLabel: '计费调整',
     cacheTtlOverridden5m: '按 5m 计费',
     cacheTtlOverridden1h: '按 1h 计费',
     totalRequests: '总请求数',

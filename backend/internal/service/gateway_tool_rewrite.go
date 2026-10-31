@@ -183,8 +183,11 @@ type toolNameSpan struct {
 //
 // 响应侧 bytes.Replace 会连带还原假名 → 真名。
 func applyToolNameRewriteToBody(body []byte, rw *ToolNameRewrite) []byte {
+	return applyToolsLastCacheBreakpoint(rewriteToolNamesInBody(body, rw))
+}
+
+func rewriteToolNamesInBody(body []byte, rw *ToolNameRewrite) []byte {
 	if rw == nil || len(rw.Forward) == 0 {
-		body = applyToolsLastCacheBreakpoint(body)
 		return body
 	}
 
@@ -249,7 +252,6 @@ func applyToolNameRewriteToBody(body []byte, rw *ToolNameRewrite) []byte {
 		body = append(out, body[pos:]...)
 	}
 
-	body = applyToolsLastCacheBreakpoint(body)
 	return body
 }
 
@@ -297,6 +299,9 @@ func applyToolsLastCacheBreakpoint(body []byte) []byte {
 		return body
 	}
 
+	if len(anthropicCacheControlPaths(body)) >= maxCacheControlBlocks {
+		return body
+	}
 	raw := fmt.Sprintf(`{"type":"ephemeral","ttl":%q}`, claude.DefaultCacheControlTTL)
 	if next, err := sjson.SetRawBytes(body, fmt.Sprintf("tools.%d.cache_control", lastIdx), []byte(raw)); err == nil {
 		body = next

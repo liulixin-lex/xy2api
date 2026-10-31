@@ -6,9 +6,9 @@
 
 ## 补齐行为
 
-仅作用于实际转发为 Anthropic Messages 协议的请求，包括 API Key、OAuth/SetupToken、透传、Vertex 和 Bedrock。Chat Completions / Responses 请求转换为 Anthropic Messages 后也适用。分组中的 OpenAI/Gemini 等其他协议、`count_tokens` 保持原行为；这属于协议边界，不是模型或账号白名单。
+仅作用于当前已有构造器支持、且实际转发为 Anthropic Messages 协议的请求：Anthropic 原生 Messages（API Key、OAuth/SetupToken、透传）、现有 Vertex 原生/转换路径，以及 Bedrock 原生 Messages（Bearer/SigV4）。Chat Completions / Responses 仅在现有 Anthropic/Vertex 转换路径适用；Chat/Responses → Bedrock 缺少转换构造器及 eventstream 解码器，可能落入既有上游认证或通用转发错误，并非显式 unsupported，本轮不扩展该路径。分组中的 OpenAI/Gemini 等其他协议、`count_tokens` 保持原行为；这属于协议边界，不是模型或账号白名单。
 
-客户端原始请求在协议位置已经带 `cache_control` 时，本功能不再添加断点，包括 null 或非法声明。现有 OAuth 重写、协议转换及非法字段净化仍按原配置执行。本功能不自动开启旧的 OAuth 消息断点重写。
+客户端原始请求在协议位置已经带 `cache_control` 时，本功能不再添加断点，包括 null 或非法声明。协议转换及非法字段净化仍按既有规则执行。消息断点清理重建策略已退役，不会自动开启分组补断点。
 
 原始请求没有声明时，在完成现有处理及分组 system 注入后，按剩余断点额度依次尝试：
 
@@ -17,17 +17,17 @@
 3. tools 中最后一个非延迟加载工具。
 4. 至少四条消息时，倒数第二条 user 消息的最后一个可缓存块。
 
-已有网关/OAuth 断点保留并计入最多四个断点的额度。空文本、thinking、redacted_thinking 和未知块类型不会被标记。字符串内容转换为等价的 text 块，保持内容及顺序；变更只属于本次发送，不污染重试或换号使用的共享正文。
+已有网关/OAuth 断点及顶层 automatic 声明保留并共同计入最多四个断点的额度。空文本、thinking、redacted_thinking 和未知块类型不会被标记。字符串内容转换为等价的 text 块，保持内容及顺序；变更只属于本次发送，不污染重试或换号使用的共享正文。
 
-新断点使用 `{"type":"ephemeral"}`，即默认 5 分钟；不添加顶层自动缓存字段、不自动延长到 1 小时。已有 1 小时断点时，跳过会违反「长 TTL 在短 TTL 前」顺序的补齐位置。
+补断点生成 `{"type":"ephemeral"}`，即协议默认 5 分钟，不添加顶层自动缓存字段。随后由独立的 [Anthropic TTL 偏好](ANTHROPIC_CACHE_TTL.md) 统一已有断点；强制 1h 时包括本次补齐的断点。off 保留合法混合 TTL，继续遵守长 TTL 在短 TTL 之前的顺序和四槽约束。
 
 ## 范围与费用
 
 请求进入时冻结选中分组范围，发送前再检查当前开关和分组。中途开启不能扩大已预留请求的范围；关闭或移除分组会阻止后续补齐。账号须属于该有效分组；分组 fallback 不继承原分组的授权。
 
-首次缓存写入可能比普通输入更贵。余额预留取普通输入与配置的 5 分钟写入单价较高者，并考虑调度快照中的账号映射模型。预留沿用现有 token 估算、输出上限及倍率，可能暂时多占用余额，**不作为实际扣款**。
+首次缓存写入可能比普通输入更贵。余额预留结合冻结 TTL 策略、客户端声明及既有注入路径区分 5m/1h 冷写风险，取普通输入与本站对应 TTL 写入单价较高者，并考虑调度快照中的账号映射模型；冷写时不采用历史命中比例折扣。预留沿用现有 token 估算、输出上限及倍率，可能暂时多占用余额，**不作为实际扣款**。
 
-实际结算继续使用上游返回的普通输入、缓存写入/读取、5m/1h 明细与输出用量，执行原有定价和耐久结算。本功能不会根据请求里有缓存字段就假定命中、伪造 usage 或额外扣费。ForceCacheBilling 与 TTL 计费覆写仍按原配置执行；它们不由本功能开启。
+实际结算继续使用上游返回的普通输入、缓存写入/读取、5m/1h 明细与输出用量，执行原有定价和耐久结算。本功能不会根据请求里有缓存字段就假定命中、伪造 usage 或额外扣费。ForceCacheBilling 与账号「缓存写入计费分类覆盖」仍独立配置，只作用于结算副本，不反写上游响应；它们不由本功能开启。部分 TTL 桶的未知差额按基础写价结算，详见 [TTL 计费说明](ANTHROPIC_CACHE_TTL.md#用量计费与预留)。
 
 兼容网关接受声明不代表一定创建或命中缓存。最小缓存长度、前缀变化、间隔、账号路由及上游实现都会影响结果；需结合真实 `cache_creation_input_tokens` 和 `cache_read_input_tokens` 判断。不新增自动探测或遇到字段错误删字段重放。XY2API 的 usage 不能替代供应商或 NewAPI 的独立账单。
 

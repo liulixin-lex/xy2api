@@ -1560,10 +1560,10 @@ export default {
           hint: '启用后将在 15 分钟内固定 metadata.user_id 中的 session ID，使上游认为请求来自同一会话'
         },
         cacheTTLOverride: {
-          label: '缓存 TTL 强制替换',
-          hint: '将所有缓存创建 token 强制按指定的 TTL 类型（5分钟或1小时）计费',
-          target: '目标 TTL',
-          targetHint: '选择计费使用的 TTL 类型'
+          label: '缓存写入计费分类覆盖',
+          hint: '仅将结算副本中的缓存写入归为指定计费档，不改变请求 TTL 或上游响应。调整后的用量不代表真实缓存效率。',
+          target: '计费分类',
+          targetHint: '选择缓存写入使用的本站计费档'
         },
         customBaseUrl: {
           label: '自定义转发地址',

@@ -145,6 +145,26 @@ const baseImageRow = {
 }
 
 describe('admin UsageTable tooltip', () => {
+  it('distinguishes final request TTL application from absent history and provider usage', async () => {
+    const row = { ...baseImageRow, image_count: 0, billing_mode: 'token', model: 'claude-sonnet-5-5', cache_creation_tokens: 100 }
+    const wrapper = mount(UsageTable, {
+      props: { data: [
+        { ...row, request_id: 'applied', anthropic_cache_ttl_policy: '1h', anthropic_cache_ttl_applied: true },
+        { ...row, request_id: 'off', anthropic_cache_ttl_policy: 'off', anthropic_cache_ttl_applied: false },
+        { ...row, request_id: 'history', anthropic_cache_ttl_policy: null, anthropic_cache_ttl_applied: null },
+      ], loading: false, columns: [] },
+      global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+    const statuses = wrapper.findAll('[data-testid="anthropic-cache-ttl-status"]')
+    expect(statuses).toHaveLength(2)
+    expect(statuses[0].text()).toContain('usage.anthropicCacheTTL.1h · usage.anthropicCacheTTL.applied')
+    expect(statuses[1].text()).toContain('usage.anthropicCacheTTL.off · usage.anthropicCacheTTL.notApplied')
+    const history = wrapper.get('[data-request-id="history"]')
+    expect(history.find('[data-testid="anthropic-cache-ttl-status"]').exists()).toBe(false)
+    await history.get('.group.relative').trigger('mouseenter')
+    expect(wrapper.get('[data-testid="anthropic-cache-ttl-detail"]').text()).toContain('usage.anthropicCacheTTL.notRecorded')
+  })
+
   it('shows enabled average TPS using total duration and excludes media rows', () => {
     const row = { ...baseImageRow, image_count: 0, billing_mode: 'token', output_tokens: 1000, duration_ms: 20_000, first_token_ms: 10_000 }
     const wrapper = mount(UsageTable, {

@@ -181,6 +181,8 @@ func (UsageLog) Fields() []ent.Field {
 			Nillable().
 			Comment("提交时请求的视频时长（秒），按秒计费的乘数"),
 		// Cache TTL Override 标记（管理员强制替换了缓存 TTL 计费）
+		field.String("anthropic_cache_ttl_policy").MaxLen(3).Optional().Nillable(),
+		field.Bool("anthropic_cache_ttl_applied").Optional().Nillable(),
 		field.Bool("cache_ttl_overridden").
 			Default(false),
 

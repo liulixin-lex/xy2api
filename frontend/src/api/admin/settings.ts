@@ -642,9 +642,8 @@ export interface SystemSettings {
   enable_claude_oauth_system_prompt_injection: boolean;
   claude_oauth_system_prompt: string;
   claude_oauth_system_prompt_blocks: string;
-  enable_anthropic_cache_ttl_1h_injection: boolean;
+  anthropic_cache_ttl_default: "5m" | "1h";
   claude_cache_fallback_policy?: ClaudeCacheFallbackPolicy;
-  rewrite_message_cache_control: boolean;
   enable_client_dateline_normalization: boolean;
   enable_openai_session_uuid: boolean;
   antigravity_user_agent_version: string;
@@ -985,9 +984,8 @@ export interface UpdateSettingsRequest {
   enable_claude_oauth_system_prompt_injection?: boolean;
   claude_oauth_system_prompt?: string;
   claude_oauth_system_prompt_blocks?: string;
-  enable_anthropic_cache_ttl_1h_injection?: boolean;
+  anthropic_cache_ttl_default?: "5m" | "1h";
   claude_cache_fallback_policy?: ClaudeCacheFallbackPolicy;
-  rewrite_message_cache_control?: boolean;
   enable_client_dateline_normalization?: boolean;
   enable_openai_session_uuid?: boolean;
   antigravity_user_agent_version?: string;

@@ -228,6 +228,7 @@ func TestAPIContracts(t *testing.T) {
 					"id": 100,
 					"user_id": 1,
 					"key": "sk_custom_1234567890",
+ "anthropic_cache_ttl_mode": "inherit",
 					"name": "Key One",
 					"group_id": null,
 					"status": "active",
@@ -258,13 +259,14 @@ func TestAPIContracts(t *testing.T) {
 			setup: func(t *testing.T, deps *contractDeps) {
 				t.Helper()
 				deps.apiKeyRepo.MustSeed(&service.APIKey{
-					ID:        100,
-					UserID:    1,
-					Key:       "sk_custom_1234567890",
-					Name:      "Key One",
-					Status:    service.StatusActive,
-					CreatedAt: deps.now,
-					UpdatedAt: deps.now,
+					AnthropicCacheTTLMode: "off",
+					ID:                    100,
+					UserID:                1,
+					Key:                   "sk_custom_1234567890",
+					Name:                  "Key One",
+					Status:                service.StatusActive,
+					CreatedAt:             deps.now,
+					UpdatedAt:             deps.now,
 				})
 			},
 			method:     http.MethodGet,
@@ -279,6 +281,7 @@ func TestAPIContracts(t *testing.T) {
 							"id": 100,
 							"user_id": 1,
 							"key": "sk_custom_1234567890",
+ "anthropic_cache_ttl_mode": "off",
 							"name": "Key One",
 							"group_id": null,
 							"status": "active",
@@ -306,7 +309,8 @@ func TestAPIContracts(t *testing.T) {
 					"total": 1,
 					"page": 1,
 					"page_size": 10,
-					"pages": 1
+					"pages": 1,
+ "meta": {"anthropic_cache_ttl_default": "5m"}
 				}
 			}`,
 		},
@@ -630,6 +634,8 @@ func TestAPIContracts(t *testing.T) {
 							"image_size_breakdown": null,
 							"media_type": null,
 							"cache_ttl_overridden": false,
+ "anthropic_cache_ttl_policy": null,
+ "anthropic_cache_ttl_applied": null,
 							"created_at": "2025-01-02T03:04:05Z",
 							"user_agent": null
 						}
@@ -923,8 +929,7 @@ func TestAPIContracts(t *testing.T) {
 					"enable_claude_oauth_system_prompt_injection": true,
 					"claude_oauth_system_prompt": "",
 					"claude_oauth_system_prompt_blocks": "",
-					"enable_anthropic_cache_ttl_1h_injection": false,
-					"rewrite_message_cache_control": false,
+					"anthropic_cache_ttl_default": "5m",
 					"enable_client_dateline_normalization": true,
 					"enable_openai_session_uuid": true,
 					"antigravity_user_agent_version": "",
@@ -1250,8 +1255,7 @@ func TestAPIContracts(t *testing.T) {
 					"enable_claude_oauth_system_prompt_injection": true,
 					"claude_oauth_system_prompt": "",
 					"claude_oauth_system_prompt_blocks": "",
-					"enable_anthropic_cache_ttl_1h_injection": false,
-					"rewrite_message_cache_control": false,
+					"anthropic_cache_ttl_default": "5m",
 					"enable_client_dateline_normalization": true,
 					"enable_openai_session_uuid": true,
 					"antigravity_user_agent_version": "",
@@ -1523,7 +1527,7 @@ func newContractDeps(t *testing.T) *contractDeps {
 
 	adminService := service.NewAdminService(nil, userRepo, groupRepo, &accountRepo, proxyRepo, apiKeyRepo, redeemRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	authHandler := handler.NewAuthHandler(cfg, nil, userService, settingService, nil, redeemService, nil, nil)
-	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService)
+	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService, settingService)
 	usageHandler := handler.NewUsageHandler(usageService, apiKeyService, nil, nil)
 	adminSettingHandler := adminhandler.NewSettingHandler(settingService, nil, nil, nil, nil, nil, nil)
 	adminAccountHandler := adminhandler.NewAccountHandler(adminService, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)

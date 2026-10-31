@@ -169,61 +169,59 @@ func (s *SettingService) writeSettingsWithClaudeCache(ctx context.Context, updat
 	return nil
 }
 
-func claudeCacheAccountSupported(a *Account) bool {
-	return a != nil && a.Platform == PlatformAnthropic
-}
-
-// HasClaudeCacheControl checks only protocol locations; tool schema/input and
-// strings with the same spelling are user data. Exists includes JSON null.
-func HasClaudeCacheControl(body []byte) bool {
+// Visit only protocol declarations, never tool schemas, tool inputs or text.
+func visitClaudeCacheControl(body []byte, includeInvalid bool, visit func(gjson.Result)) {
 	root := gjson.ParseBytes(body)
-	if root.Get("cache_control").Exists() {
-		return true
-	}
-	found := false
-	blocks := func(list gjson.Result) {
-		if !list.IsArray() {
+	block := func(v gjson.Result) {
+		if !includeInvalid && (isDeferredLoadingTool(v) || v.Get("type").String() == "thinking" || v.Get("type").String() == "redacted_thinking") {
 			return
 		}
+		if cc := v.Get("cache_control"); cc.Exists() {
+			visit(cc)
+		}
+	}
+	block(root)
+	root.Get("system").ForEach(func(_, v gjson.Result) bool { block(v); return true })
+	root.Get("tools").ForEach(func(_, v gjson.Result) bool { block(v); block(v.Get("function")); return true })
+	for _, name := range []string{"messages", "input"} {
+		list := root.Get(name)
+		if !list.IsArray() {
+			continue
+		}
 		list.ForEach(func(_, v gjson.Result) bool {
-			if v.IsObject() && v.Get("cache_control").Exists() {
-				found = true
+			if name == "input" && !v.Get("role").Exists() && v.Get("type").String() != "message" {
+				return true
 			}
-			return !found
+			block(v)
+			if content := v.Get("content"); content.IsArray() {
+				content.ForEach(func(_, p gjson.Result) bool { block(p); return true })
+			}
+			return true
 		})
 	}
-	blocks(root.Get("system"))
-	if found {
-		return true
-	}
-	blocks(root.Get("tools"))
-	if found {
-		return true
-	}
-	messages := root.Get("messages")
-	if messages.IsArray() {
-		messages.ForEach(func(_, v gjson.Result) bool { blocks(v.Get("content")); return !found })
-	}
-	if found {
-		return true
-	}
-	// Chat tools use function.cache_control; Responses messages use input.
-	root.Get("tools").ForEach(func(_, v gjson.Result) bool {
-		if v.Get("function.cache_control").Exists() {
-			found = true
-		}
-		return !found
-	})
-	root.Get("input").ForEach(func(_, v gjson.Result) bool {
-		if v.Get("type").String() == "message" || v.Get("role").Exists() {
-			if v.Get("cache_control").Exists() {
-				found = true
-			}
-			blocks(v.Get("content"))
-		}
-		return !found
-	})
+}
+
+// Exists includes null: any client declaration suppresses automatic fallback.
+func HasClaudeCacheControl(body []byte) bool {
+	found := false
+	visitClaudeCacheControl(body, true, func(gjson.Result) { found = true })
 	return found
+}
+
+func declaredAnthropicCacheTTL(body []byte) string {
+	ttl := ""
+	visitClaudeCacheControl(body, false, func(cc gjson.Result) {
+		if cc.Get("type").String() != "ephemeral" {
+			return
+		}
+		value := cc.Get("ttl")
+		if value.String() == "1h" {
+			ttl = "1h"
+		} else if ttl == "" && (!value.Exists() || value.String() == "5m") {
+			ttl = "5m"
+		}
+	})
+	return ttl
 }
 
 type claudeCacheRequestKey struct{}
@@ -231,6 +229,7 @@ type claudeCacheAttemptKey struct{}
 type claudeCacheRequest struct {
 	keyID, groupID int64
 	declared       bool
+	cacheTTL       string
 	admitted       *cachedClaudeCachePolicy
 }
 type claudeCacheAttempt struct {
@@ -239,6 +238,8 @@ type claudeCacheAttempt struct {
 	account                *Account
 	decision               *ClaudeCacheFallbackDecision
 	cleanBody, patchedBody []byte
+	ttlPolicy              *string
+	ttlApplied             *bool
 }
 
 // ClaudeCacheFallbackDecision contains no request content or credentials.
@@ -255,17 +256,20 @@ type ClaudeCacheFallbackDecision struct {
 // Anthropic-compatible Chat/Responses handlers. Admission is frozen; a later enable cannot add costs to
 // an already reserved request. Final attempts also consult the current policy.
 func (s *GatewayService) WithClaudeCacheFallbackRequest(ctx context.Context, key *APIKey, body []byte) context.Context {
-	if key == nil || key.GroupID == nil {
+	ctx = s.withAnthropicCacheTTLPolicy(ctx, key)
+	if key == nil || ctx.Value(claudeCacheRequestKey{}) != nil {
 		return ctx
 	}
-	state := &claudeCacheRequest{keyID: key.ID, groupID: *key.GroupID, admitted: s.settingService.claudeCachePolicy(ctx)}
-	if state.admitted != nil && state.admitted.policy.includesGroup(state.groupID) {
-		state.declared = HasClaudeCacheControl(body)
+	state := &claudeCacheRequest{keyID: key.ID, admitted: s.settingService.claudeCachePolicy(ctx)}
+	if key.GroupID != nil {
+		state.groupID = *key.GroupID
 	}
+	state.declared = HasClaudeCacheControl(body)
+	state.cacheTTL = declaredAnthropicCacheTTL(body)
 	return context.WithValue(ctx, claudeCacheRequestKey{}, state)
 }
 
-func (s *GatewayService) applyClaudeCacheFallback(ctx context.Context, a *Account, body []byte, _ string) []byte {
+func (s *GatewayService) applyClaudeCacheFallback(ctx context.Context, a *Account, body []byte, model string) []byte {
 	attempt, _ := ctx.Value(claudeCacheAttemptKey{}).(*claudeCacheAttempt)
 	if attempt == nil {
 		return body
@@ -273,7 +277,7 @@ func (s *GatewayService) applyClaudeCacheFallback(ctx context.Context, a *Accoun
 	attempt.cleanBody, attempt.patchedBody = nil, nil
 	d := attempt.decision
 	d.Reason = "unsupported_route"
-	if !claudeCacheAccountSupported(a) {
+	if !anthropicCacheTTLApplicable(a, model) {
 		return body
 	}
 	d.AccountID = a.ID
@@ -327,6 +331,9 @@ func withoutClaudeCacheFallback(ctx context.Context, wire []byte) []byte {
 func addClaudeCacheFallbackBreakpoints(body []byte) []byte {
 	invalid, messages, tools, system := collectCacheControlPaths(body)
 	budget := maxCacheControlBlocks - len(invalid) - len(messages) - len(tools) - len(system)
+	if gjson.GetBytes(body, "cache_control").Exists() {
+		budget--
+	}
 	if budget <= 0 {
 		return body
 	}
@@ -407,7 +414,7 @@ func claudeCacheableBlock(block gjson.Result, path string) bool {
 		return false
 	}
 	if path == "tools" {
-		return block.Get("name").String() != "" && block.Get("defer_loading").Type != gjson.True
+		return block.Get("name").String() != "" && !isDeferredLoadingTool(block)
 	}
 	switch block.Get("type").String() {
 	case "text":
@@ -422,7 +429,7 @@ func claudeCacheableBlock(block gjson.Result, path string) bool {
 func (s *GatewayService) beginClaudeCacheAttempt(ctx context.Context, parsed *ParsedRequest, a *Account) (context.Context, *ClaudeCacheFallbackDecision) {
 	state, _ := ctx.Value(claudeCacheRequestKey{}).(*claudeCacheRequest)
 	if state == nil {
-		return ctx, nil
+		state = &claudeCacheRequest{}
 	}
 	gid := int64(0)
 	if parsed != nil && parsed.GroupID != nil {
@@ -479,30 +486,37 @@ func finishClaudeCacheAttempt(d *ClaudeCacheFallbackDecision, result *ForwardRes
 	slog.Info("gateway.claude_cache_fallback", "request_id", requestID, "api_key_id", d.APIKeyID, "group_id", d.GroupID, "account_id", d.AccountID, "model", model, "reason", d.Reason)
 }
 
-func logClaudeCacheBilling(result *ForwardResult, usage *UsageLog, forced, overridden bool, outcome string) {
+func logClaudeCacheBilling(ctx context.Context, result *ForwardResult, usage *UsageLog, forced, overridden bool, outcome string) {
 	d := result.ClaudeCacheFallback
-	if d == nil || d.Reason != "injected" {
+	if result.AnthropicCacheTTLPolicy == nil && (d == nil || d.Reason != "injected") {
 		return
 	}
-	raw := d.RawUsage
-	ttlStatus := "consistent"
-	if raw.CacheCreationInputTokens > 0 && raw.CacheCreation5mTokens+raw.CacheCreation1hTokens == 0 {
-		ttlStatus = "missing"
-	} else if raw.CacheCreationInputTokens != raw.CacheCreation5mTokens+raw.CacheCreation1hTokens {
-		ttlStatus = "inconsistent"
-	} else if raw.CacheCreation1hTokens > 0 {
-		ttlStatus = "reported_1h"
+	raw := result.Usage
+	if d != nil && d.rawUsageObserved {
+		raw = d.RawUsage
 	}
-	slog.Info("gateway.claude_cache_fallback.billing", "request_id", usage.RequestID, "api_key_id", d.APIKeyID, "group_id", d.GroupID, "account_id", d.AccountID,
+	ttlStatus := "consistent"
+	known := raw.CacheCreation5mTokens + raw.CacheCreation1hTokens
+	if raw.CacheCreationInputTokens > 0 && known == 0 {
+		ttlStatus = "missing"
+	} else if known < raw.CacheCreationInputTokens {
+		ttlStatus = "partial"
+	} else if known > raw.CacheCreationInputTokens {
+		ttlStatus = "inconsistent"
+	}
+	p := anthropicCacheTTLPolicyFrom(ctx)
+	policy, applied := "", false
+	if result.AnthropicCacheTTLPolicy != nil {
+		policy = *result.AnthropicCacheTTLPolicy
+	}
+	if result.AnthropicCacheTTLApplied != nil {
+		applied = *result.AnthropicCacheTTLApplied
+	}
+
+	slog.Info("gateway.claude_cache_fallback.billing", "request_id", usage.RequestID, "api_key_id", usage.APIKeyID, "group_id", usage.GroupID, "account_id", usage.AccountID,
+		"ttl_mode", p.mode, "ttl_source", p.source, "ttl_policy", policy, "ttl_applied", applied,
 		"raw_input", raw.InputTokens, "raw_output", raw.OutputTokens, "raw_cache_creation", raw.CacheCreationInputTokens, "raw_cache_read", raw.CacheReadInputTokens, "raw_5m", raw.CacheCreation5mTokens, "raw_1h", raw.CacheCreation1hTokens, "ttl_status", ttlStatus,
+		"raw_aggregate_present", raw.CacheCreationInputTokensPresent, "raw_5m_present", raw.CacheCreation5mTokensPresent, "raw_1h_present", raw.CacheCreation1hTokensPresent,
 		"billed_input", usage.InputTokens, "billed_output", usage.OutputTokens, "billed_cache_creation", usage.CacheCreationTokens, "billed_cache_read", usage.CacheReadTokens, "billed_5m", usage.CacheCreation5mTokens, "billed_1h", usage.CacheCreation1hTokens,
 		"force_cache_billing", forced, "ttl_override", overridden, "usage_id", usage.ID, "total_cost", usage.TotalCost, "actual_cost", usage.ActualCost, "settlement", outcome)
-}
-
-func (s *GatewayService) applyClaudeCacheFallbackForAttempt(ctx context.Context, body []byte, model string) []byte {
-	attempt, _ := ctx.Value(claudeCacheAttemptKey{}).(*claudeCacheAttempt)
-	if attempt == nil {
-		return body
-	}
-	return s.applyClaudeCacheFallback(ctx, attempt.account, body, model)
 }

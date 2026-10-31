@@ -417,7 +417,6 @@ func (s *GatewayService) applyClaudeCodeOAuthMimicryToBody(
 	//   1) messages cache：仅在配置开启时清除客户端断点并注入代理断点
 	//   2) tool rewrite：最后改 tools[*].name / tool_choice.name 并在 tools[-1]
 	//      上打断点；mapping 存入 gin.Context 供响应侧 bytes.Replace 还原。
-	body = s.rewriteMessageCacheControlIfEnabled(ctx, body)
 
 	if rw := buildToolNameRewriteFromBody(body); rw != nil {
 		body = applyToolNameRewriteToBody(body, rw)
@@ -931,6 +930,20 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expa
 		logger.LegacyPrintf("service.gateway", "Warning: failed to build default Claude OAuth system blocks: %v", blockErr)
 		return body
 	}
+	// Preserve every client checkpoint's slot before adding configured ones.
+	budget := maxCacheControlBlocks - len(anthropicCacheControlPaths(body))
+	for i, raw := range systemBlocks {
+		if !gjson.GetBytes(raw, "cache_control").Exists() {
+			continue
+		}
+		if budget > 0 {
+			budget--
+			continue
+		}
+		if next, err := sjson.DeleteBytes(raw, "cache_control"); err == nil {
+			systemBlocks[i] = next
+		}
+	}
 	out, ok := setJSONRawBytes(body, "system", buildJSONArrayRaw(systemBlocks))
 	if !ok {
 		logger.LegacyPrintf("service.gateway", "Warning: failed to set Claude Code system prompt")
@@ -995,7 +1008,7 @@ func collectCacheControlPaths(body []byte) (invalidThinking []cacheControlPath, 
 		system.ForEach(func(_, item gjson.Result) bool {
 			if item.Get("cache_control").Exists() {
 				path := fmt.Sprintf("system.%d.cache_control", sysIndex)
-				if item.Get("type").String() == "thinking" {
+				if item.Get("type").String() == "thinking" || item.Get("type").String() == "redacted_thinking" {
 					invalidThinking = append(invalidThinking, cacheControlPath{
 						path: path,
 						log:  "[Warning] Removed illegal cache_control from thinking block in system",
@@ -1019,7 +1032,7 @@ func collectCacheControlPaths(body []byte) (invalidThinking []cacheControlPath, 
 				content.ForEach(func(_, item gjson.Result) bool {
 					if item.Get("cache_control").Exists() {
 						path := fmt.Sprintf("messages.%d.content.%d.cache_control", msgIndex, contentIndex)
-						if item.Get("type").String() == "thinking" {
+						if item.Get("type").String() == "thinking" || item.Get("type").String() == "redacted_thinking" {
 							invalidThinking = append(invalidThinking, cacheControlPath{
 								path: path,
 								log:  fmt.Sprintf("[Warning] Removed illegal cache_control from thinking block in messages[%d].content[%d]", msgIndex, contentIndex),
@@ -1084,6 +1097,9 @@ func enforceCacheControlBlockLimit(body []byte) []byte {
 	}
 
 	count := len(messagePaths) + len(toolPaths) + len(systemPaths)
+	if gjson.GetBytes(body, "cache_control").Exists() {
+		count++
+	}
 	if count <= maxCacheControlBlocks {
 		if modified {
 			return out
@@ -1153,6 +1169,9 @@ func enforceCacheControlBlockLimit(body []byte) []byte {
 // written at the 1h rate, so the earlier breakpoints add no cache write cost.
 // Requests with a valid order are returned unchanged.
 func normalizeCacheControlTTLOrder(body []byte) []byte {
+	if anthropicAutomaticTailConflict(body) {
+		return body
+	}
 	_, messagePaths, toolPaths, systemPaths := collectCacheControlPaths(body)
 	paths := make([]string, 0, len(toolPaths)+len(systemPaths)+len(messagePaths)+1)
 	paths = append(paths, toolPaths...)
@@ -1183,70 +1202,19 @@ func normalizeCacheControlTTLOrder(body []byte) []byte {
 	return out
 }
 
-// injectAnthropicCacheControlTTL1h 将已有 ephemeral cache_control 块的 ttl 强制写为 1h。
-// 仅修改已经存在的 cache_control，不新增缓存断点。
-func injectAnthropicCacheControlTTL1h(body []byte) []byte {
-	return forceEphemeralCacheControlTTL(body, cacheTTLTarget1h)
-}
-
 func forceEphemeralCacheControlTTL(body []byte, ttl string) []byte {
 	if len(body) == 0 || ttl == "" {
 		return body
 	}
 	out := body
 	var paths []string
-	addPath := func(path string, value gjson.Result) {
-		cc := value.Get("cache_control")
-		if !cc.Exists() || cc.Get("type").String() != "ephemeral" {
-			return
+	for _, path := range anthropicCacheControlPaths(body) {
+		cc := gjson.GetBytes(body, path)
+		value := cc.Get("ttl")
+		validTTL := !value.Exists() || (value.Type == gjson.String && (value.String() == "5m" || value.String() == "1h"))
+		if validTTL && cc.Get("type").String() == "ephemeral" && value.String() != ttl {
+			paths = append(paths, path+".ttl")
 		}
-		if cc.Get("ttl").String() == ttl {
-			return
-		}
-		paths = append(paths, path+".cache_control.ttl")
-	}
-
-	if topCC := gjson.GetBytes(body, "cache_control"); topCC.Exists() && topCC.Get("type").String() == "ephemeral" && topCC.Get("ttl").String() != ttl {
-		paths = append(paths, "cache_control.ttl")
-	}
-
-	system := gjson.GetBytes(body, "system")
-	if system.IsArray() {
-		idx := -1
-		system.ForEach(func(_, block gjson.Result) bool {
-			idx++
-			addPath(fmt.Sprintf("system.%d", idx), block)
-			return true
-		})
-	}
-
-	messages := gjson.GetBytes(body, "messages")
-	if messages.IsArray() {
-		msgIdx := -1
-		messages.ForEach(func(_, msg gjson.Result) bool {
-			msgIdx++
-			content := msg.Get("content")
-			if !content.IsArray() {
-				return true
-			}
-			contentIdx := -1
-			content.ForEach(func(_, block gjson.Result) bool {
-				contentIdx++
-				addPath(fmt.Sprintf("messages.%d.content.%d", msgIdx, contentIdx), block)
-				return true
-			})
-			return true
-		})
-	}
-
-	tools := gjson.GetBytes(body, "tools")
-	if tools.IsArray() {
-		idx := -1
-		tools.ForEach(func(_, tool gjson.Result) bool {
-			idx++
-			addPath(fmt.Sprintf("tools.%d", idx), tool)
-			return true
-		})
 	}
 
 	for _, path := range paths {
@@ -1255,13 +1223,6 @@ func forceEphemeralCacheControlTTL(body []byte, ttl string) []byte {
 		}
 	}
 	return out
-}
-
-func (s *GatewayService) shouldInjectAnthropicCacheTTL1h(ctx context.Context, account *Account) bool {
-	if account == nil || !account.IsAnthropicOAuthOrSetupToken() || s == nil || s.settingService == nil {
-		return false
-	}
-	return s.settingService.IsAnthropicCacheTTL1hInjectionEnabled(ctx)
 }
 
 // shouldNormalizeClientDateline reports whether the request body's client

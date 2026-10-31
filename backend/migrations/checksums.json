@@ -334,6 +334,7 @@
     "282_admin_operator_permissions.sql": "eeef08381e24d4a9d33af083b3b62b433d68ac505f1e9e196538c764124321f1",
     "283_recovery_observability.sql": "0b01756c68187bd9cb88e2cfd89107ed85dbb5c2668b2a3212dfaee325127ca2",
     "284_support_tickets.sql": "f6922eeafa4b54aaa410f10e8c4b717579f411d13fc4931cc304fd4f736285b1",
-    "285_openai_totp.sql": "17e20b225fa217870e9392469e39a54bc0190e278711a1d4b9ce1b0570bfbcb4"
+    "285_openai_totp.sql": "17e20b225fa217870e9392469e39a54bc0190e278711a1d4b9ce1b0570bfbcb4",
+    "286_anthropic_cache_ttl.sql": "749f7d32e835fb0bde471739f3fb95c1e5d288155c733ce8d10d014244aee0fb"
   }
 }

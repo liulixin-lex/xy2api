@@ -55,7 +55,8 @@
       "openspec/changes/gateway-resilience-045-20261021/**",
       "openspec/changes/upstream-balance-20261027/**",
       "openspec/changes/operator-role-20261027/**",
-      "openspec/changes/add-support-tickets-and-managed-openai-totp-20261029/**"
+      "openspec/changes/add-support-tickets-and-managed-openai-totp-20261029/**",
+      "openspec/changes/anthropic-cache-ttl-20261030/**"
     ],
     "manual_merge": [
       "Makefile",
@@ -3030,6 +3031,62 @@
     {
       "path": "backend/internal/server/router.go",
       "value": "routes.RegisterOpenAITOTPWorkerRoutes(v1, h, auditLog)"
+    },
+    {
+      "path": "backend/internal/service/domain_constants.go",
+      "value": "SettingKeyAnthropicCacheTTLDefault = \"anthropic_cache_ttl_default\""
+    },
+    {
+      "path": "backend/internal/service/api_key_auth_cache.go",
+      "value": "`json:\"anthropic_cache_ttl_mode\"`"
+    },
+    {
+      "path": "backend/migrations/286_anthropic_cache_ttl.sql",
+      "value": "anthropic_cache_ttl_mode varchar(7) NOT NULL DEFAULT 'off'"
+    },
+    {
+      "path": "backend/migrations/286_anthropic_cache_ttl.sql",
+      "value": "ALTER COLUMN anthropic_cache_ttl_mode SET DEFAULT 'inherit'"
+    },
+    {
+      "path": "backend/internal/service/claude_cache_fallback.go",
+      "value": "ctx = s.withAnthropicCacheTTLPolicy(ctx, key)"
+    },
+    {
+      "path": "backend/internal/service/gateway_upstream_request.go",
+      "value": "body = s.finalizeAnthropicCache(ctx, account, body, modelID)"
+    },
+    {
+      "path": "backend/internal/service/gateway_upstream_request.go",
+      "value": "vertexBody = s.finalizeAnthropicCache(ctx, account, vertexBody, modelID)"
+    },
+    {
+      "path": "backend/internal/service/gateway_anthropic_passthrough.go",
+      "value": "body = s.finalizeAnthropicCache(ctx, account, body, gjson.GetBytes(body, \"model\").String())"
+    },
+    {
+      "path": "backend/internal/service/gateway_bedrock.go",
+      "value": "body = s.finalizeAnthropicCache(ctx, attempt.account, body, modelID)"
+    },
+    {
+      "path": "backend/internal/pkg/apicompat/anthropic_usage.go",
+      "value": "func MergeAnthropicCacheUsage(dst *AnthropicUsage, src AnthropicUsage)"
+    },
+    {
+      "path": "backend/internal/service/gateway_usage_billing.go",
+      "value": "settlementResult := *input.Result"
+    },
+    {
+      "path": "backend/internal/handler/dto/types.go",
+      "value": "`json:\"anthropic_cache_ttl_policy\"`"
+    },
+    {
+      "path": "backend/internal/handler/dto/types.go",
+      "value": "`json:\"anthropic_cache_ttl_applied\"`"
+    },
+    {
+      "path": "frontend/src/views/user/KeysView.vue",
+      "value": "anthropicCacheTTLDefault.value = response.meta?.anthropic_cache_ttl_default ?? null"
     }
   ],
   "forbidden_module_paths": [
@@ -3103,7 +3160,8 @@
     "xy-recovery-rejection-endpoints",
     "xy-openai-recent-session-request-protocol",
     "xy-support-tickets",
-    "xy-managed-openai-totp"
+    "xy-managed-openai-totp",
+    "xy-anthropic-cache-ttl"
   ],
   "custom_patch_tests": [
     {
@@ -5200,6 +5258,56 @@
       "id": "xy-managed-openai-totp",
       "path": "backend/internal/handler/admin/openai_totp_test.go",
       "literal": "func TestOpenAITOTPImportRejectsForgedAndCopiedMarkers(t *testing.T) {"
+    },
+    {
+      "id": "xy-anthropic-cache-ttl",
+      "path": "backend/internal/service/gateway_anthropic_cache_ttl_test.go",
+      "literal": "func TestAnthropicCacheTTLForwardWire(t *testing.T) {"
+    },
+    {
+      "id": "xy-anthropic-cache-ttl",
+      "path": "backend/internal/service/gateway_anthropic_cache_ttl_test.go",
+      "literal": "func TestAnthropicCacheTTLAttemptSnapshotWire(t *testing.T) {"
+    },
+    {
+      "id": "xy-anthropic-cache-ttl",
+      "path": "backend/internal/service/gateway_anthropic_cache_ttl_test.go",
+      "literal": "func TestAnthropicCacheTTLCountTokensWireDoesNotInject(t *testing.T) {"
+    },
+    {
+      "id": "xy-anthropic-cache-ttl",
+      "path": "backend/internal/service/gateway_anthropic_cache_ttl_test.go",
+      "literal": "func TestAnthropicCacheTTLUsagePresenceWire(t *testing.T) {"
+    },
+    {
+      "id": "xy-anthropic-cache-ttl",
+      "path": "backend/internal/service/gateway_anthropic_cache_ttl_billing_test.go",
+      "literal": "func TestAnthropicCacheTTLReservationAliasPriceUpperBound(t *testing.T) {"
+    },
+    {
+      "id": "xy-anthropic-cache-ttl",
+      "path": "backend/internal/service/claude_cache_fallback_test.go",
+      "literal": "func TestClaudeCacheAllAnthropicBuilders(t *testing.T) {"
+    },
+    {
+      "id": "xy-anthropic-cache-ttl",
+      "path": "backend/internal/service/anthropic_cache_ttl_data_test.go",
+      "literal": "func TestAnthropicCacheTTLKeyCreateUpdateValidation(t *testing.T) {"
+    },
+    {
+      "id": "xy-anthropic-cache-ttl",
+      "path": "backend/internal/service/anthropic_cache_ttl_data_test.go",
+      "literal": "func TestAnthropicCacheTTLCacheCreationCostConservation(t *testing.T) {"
+    },
+    {
+      "id": "xy-anthropic-cache-ttl",
+      "path": "backend/internal/repository/anthropic_cache_ttl_integration_test.go",
+      "literal": "func TestAnthropicCacheTTLMigrationAndRoundTrip(t *testing.T) {"
+    },
+    {
+      "id": "xy-anthropic-cache-ttl",
+      "path": "backend/internal/repository/anthropic_cache_ttl_integration_test.go",
+      "literal": "func TestAnthropicCacheTTLAuthRedisRoundTrip(t *testing.T) {"
     }
   ]
 }

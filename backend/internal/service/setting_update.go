@@ -107,6 +107,12 @@ func (s *SettingService) refreshCachedSettingsAfterWrite(ctx context.Context, se
 }
 
 func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, settings *SystemSettings) (map[string]string, error) {
+	if settings.AnthropicCacheTTLDefault == "" {
+		settings.AnthropicCacheTTLDefault = "5m"
+	}
+	if settings.AnthropicCacheTTLDefault != "5m" && settings.AnthropicCacheTTLDefault != "1h" {
+		return nil, infraerrors.BadRequest("INVALID_ANTHROPIC_CACHE_TTL_DEFAULT", "anthropic_cache_ttl_default must be 5m or 1h")
+	}
 	if err := s.validateDefaultSubscriptionGroups(ctx, settings.DefaultSubscriptions); err != nil {
 		return nil, err
 	}
@@ -516,8 +522,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 		return nil, err
 	}
 	updates[SettingKeyClaudeOAuthSystemPromptBlocks] = settings.ClaudeOAuthSystemPromptBlocks
-	updates[SettingKeyEnableAnthropicCacheTTL1hInjection] = strconv.FormatBool(settings.EnableAnthropicCacheTTL1hInjection)
-	updates[SettingKeyRewriteMessageCacheControl] = strconv.FormatBool(settings.RewriteMessageCacheControl)
+	updates[SettingKeyAnthropicCacheTTLDefault] = settings.AnthropicCacheTTLDefault
 	updates[SettingKeyEnableClientDatelineNormalization] = strconv.FormatBool(settings.EnableClientDatelineNormalization)
 	updates[SettingKeyEnableOpenAISessionUUID] = strconv.FormatBool(settings.EnableOpenAISessionUUID)
 	updates[SettingKeyAntigravityUserAgentVersion] = antigravity.NormalizeUserAgentVersion(settings.AntigravityUserAgentVersion)
@@ -764,8 +769,7 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		claudeOAuthSystemPromptInjection: settings.EnableClaudeOAuthSystemPromptInjection,
 		claudeOAuthSystemPrompt:          settings.ClaudeOAuthSystemPrompt,
 		claudeOAuthSystemPromptBlocks:    settings.ClaudeOAuthSystemPromptBlocks,
-		anthropicCacheTTL1hInjection:     settings.EnableAnthropicCacheTTL1hInjection,
-		rewriteMessageCacheControl:       settings.RewriteMessageCacheControl,
+		anthropicCacheTTLDefault:         settings.AnthropicCacheTTLDefault,
 		clientDatelineNormalization:      settings.EnableClientDatelineNormalization,
 		openAISessionUUID:                settings.EnableOpenAISessionUUID,
 		expiresAt:                        time.Now().Add(gatewayForwardingCacheTTL).UnixNano(),
@@ -856,10 +860,6 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		s.onUpdate() // Invalidate cache after settings update
 	}
 	s.notifyChannelMonitorRuntimeListeners()
-}
-
-func (s *SettingService) defaultRewriteMessageCacheControl() bool {
-	return false
 }
 
 func (s *SettingService) validateDefaultSubscriptionGroups(ctx context.Context, items []DefaultSubscriptionSetting) error {

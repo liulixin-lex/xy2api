@@ -4,7 +4,11 @@
  */
 
 import { apiClient } from './client'
-import type { ApiKey, CreateApiKeyRequest, UpdateApiKeyRequest, PaginatedResponse } from '@/types'
+import type { ApiKey, CreateApiKeyRequest, UpdateApiKeyRequest, PaginatedResponse, AnthropicCacheTTL, AnthropicCacheTTLMode } from '@/types'
+
+export interface ApiKeyListResponse extends PaginatedResponse<ApiKey> {
+  meta?: { anthropic_cache_ttl_default: AnthropicCacheTTL }
+}
 
 /**
  * List all API keys for current user
@@ -27,8 +31,8 @@ export async function list(
   options?: {
     signal?: AbortSignal
   }
-): Promise<PaginatedResponse<ApiKey>> {
-  const { data } = await apiClient.get<PaginatedResponse<ApiKey>>('/keys', {
+): Promise<ApiKeyListResponse> {
+  const { data } = await apiClient.get<ApiKeyListResponse>('/keys', {
     params: { page, page_size: pageSize, ...filters },
     signal: options?.signal
   })
@@ -55,6 +59,7 @@ export async function getById(id: number): Promise<ApiKey> {
  * @param quota - Optional quota limit in USD (0 = unlimited)
  * @param expiresInDays - Optional days until expiry (undefined = never expires)
  * @param rateLimitData - Optional rate limit fields
+ * @param anthropicCacheTTLMode - Optional Claude cache TTL preference (omitted = inherit)
  * @returns Created API key
  */
 export async function create(
@@ -65,9 +70,13 @@ export async function create(
   ipBlacklist?: string[],
   quota?: number,
   expiresInDays?: number,
-  rateLimitData?: { rate_limit_5h?: number; rate_limit_1d?: number; rate_limit_7d?: number }
+  rateLimitData?: { rate_limit_5h?: number; rate_limit_1d?: number; rate_limit_7d?: number },
+  anthropicCacheTTLMode?: AnthropicCacheTTLMode
 ): Promise<ApiKey> {
   const payload: CreateApiKeyRequest = { name }
+  if (anthropicCacheTTLMode !== undefined && anthropicCacheTTLMode !== 'inherit') {
+    payload.anthropic_cache_ttl_mode = anthropicCacheTTLMode
+  }
   if (groupId !== undefined) {
     payload.group_id = groupId
   }

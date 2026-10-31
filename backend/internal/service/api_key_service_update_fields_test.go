@@ -45,12 +45,14 @@ func TestAPIKeyUpdate_OnlyDeclaresRequestedColumns(t *testing.T) {
 	quota := 500.0
 	rateLimit := 42.0
 	whitelist := []string{"10.0.0.1"}
+	ttl := "1h"
 
 	tests := []struct {
 		name string
 		req  UpdateAPIKeyRequest
 		want APIKeyUpdateFields
 	}{
+		{name: "TTL only", req: UpdateAPIKeyRequest{AnthropicCacheTTLMode: &ttl}, want: APIKeyUpdateFields{AnthropicCacheTTLMode: true}},
 		{
 			name: "name only",
 			req:  UpdateAPIKeyRequest{Name: &name},

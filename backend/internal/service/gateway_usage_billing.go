@@ -820,7 +820,8 @@ func logResponseModelBillingApplied(component string, account *Account, requestI
 // recordUsageCore 是 RecordUsage 的核心实现。
 func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsageCoreInput) error {
 	s.resilience.NoteAccountSuccess(ctx, input.Account)
-	result := input.Result
+	settlementResult := *input.Result
+	result := &settlementResult
 	// xy2api resilience: under an availability fallback the user's price
 	// follows the group the request was made for, including how it picks the
 	// billing model (fallback-billing design §2.1); the serving key keeps the
@@ -848,7 +849,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	}
 
 	// Cache TTL Override: 确保计费时 token 分类与账号设置一致。
-	// 账号级设置优先；全局 1h 请求注入开启时，默认把 usage 计费归回 5m。
+	// 显式账号规则仅调整结算副本，不修改供应商用量或客户端响应。
 	cacheTTLOverridden := false
 	if overrideTarget, ok := s.resolveCacheTTLUsageOverrideTarget(ctx, account); ok {
 		applyCacheTTLOverride(&result.Usage, overrideTarget)
@@ -943,11 +944,12 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 			// Anthropic's input_tokens excludes cache_read and cache_creation (billed separately);
 			// OpenAI gateway uses actualInputTokens which also excludes cache_read for the same reason.
 			UsageTokens{
-				InputTokens:         result.Usage.InputTokens,
-				OutputTokens:        result.Usage.OutputTokens,
-				CacheCreationTokens: result.Usage.CacheCreationInputTokens,
-				CacheReadTokens:     result.Usage.CacheReadInputTokens,
-				ImageOutputTokens:   result.Usage.ImageOutputTokens,
+				InputTokens:                result.Usage.InputTokens,
+				OutputTokens:               result.Usage.OutputTokens,
+				CacheCreationTokens:        result.Usage.CacheCreationInputTokens,
+				CacheCreationTokensPresent: result.Usage.CacheCreationInputTokensPresent || result.Usage.CacheCreation5mTokensPresent || result.Usage.CacheCreation1hTokensPresent,
+				CacheReadTokens:            result.Usage.CacheReadInputTokens,
+				ImageOutputTokens:          result.Usage.ImageOutputTokens,
 			},
 			cost.TotalCost, pricingAt,
 			accountStatsLongContextPricingEnabled(nil),
@@ -963,7 +965,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 
 	cacheSettlementOutcome := "pending"
 	defer func() {
-		logClaudeCacheBilling(result, usageLog, input.ForceCacheBilling, cacheTTLOverridden, cacheSettlementOutcome)
+		logClaudeCacheBilling(ctx, input.Result, usageLog, input.ForceCacheBilling, cacheTTLOverridden, cacheSettlementOutcome)
 	}()
 	simpleModeKeyRateLimitOnly := simpleModeKeyRateLimitBillingEnabled(s.cfg, apiKey)
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && !simpleModeKeyRateLimitOnly {
@@ -1214,13 +1216,14 @@ func (s *GatewayService) calculateTokenCost(
 	pricingAt time.Time,
 ) *CostBreakdown {
 	tokens := UsageTokens{
-		InputTokens:           result.Usage.InputTokens,
-		OutputTokens:          result.Usage.OutputTokens,
-		CacheCreationTokens:   result.Usage.CacheCreationInputTokens,
-		CacheReadTokens:       result.Usage.CacheReadInputTokens,
-		CacheCreation5mTokens: result.Usage.CacheCreation5mTokens,
-		CacheCreation1hTokens: result.Usage.CacheCreation1hTokens,
-		ImageOutputTokens:     result.Usage.ImageOutputTokens,
+		InputTokens:                result.Usage.InputTokens,
+		OutputTokens:               result.Usage.OutputTokens,
+		CacheCreationTokens:        result.Usage.CacheCreationInputTokens,
+		CacheCreationTokensPresent: result.Usage.CacheCreationInputTokensPresent || result.Usage.CacheCreation5mTokensPresent || result.Usage.CacheCreation1hTokensPresent,
+		CacheReadTokens:            result.Usage.CacheReadInputTokens,
+		CacheCreation5mTokens:      result.Usage.CacheCreation5mTokens,
+		CacheCreation1hTokens:      result.Usage.CacheCreation1hTokens,
+		ImageOutputTokens:          result.Usage.ImageOutputTokens,
 	}
 
 	var resolved *ResolvedPricing
@@ -1315,6 +1318,8 @@ func (s *GatewayService) buildRecordUsageLog(
 		ImageSizeSource:          optionalTrimmedStringPtr(result.ImageSizeSource),
 		ImageSizeBreakdown:       result.ImageSizeBreakdown,
 		CacheTTLOverridden:       cacheTTLOverridden,
+		AnthropicCacheTTLPolicy:  result.AnthropicCacheTTLPolicy,
+		AnthropicCacheTTLApplied: result.AnthropicCacheTTLApplied,
 		ChannelID:                optionalInt64Ptr(input.ChannelID),
 		ModelMappingChain:        optionalTrimmedStringPtr(input.ModelMappingChain),
 		UserAgent:                optionalTrimmedStringPtr(input.UserAgent),

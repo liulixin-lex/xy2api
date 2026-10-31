@@ -38,6 +38,9 @@ const messages: Record<string, string> = {
   'common.refresh': 'Refresh',
   'common.status': 'Status',
   'keys.apiKey': 'API Key',
+  'keys.cacheTTL.inheritCurrent': 'Follow global (currently {ttl})',
+  'keys.cacheTTL.duration.5m': '5 minutes',
+  'keys.cacheTTL.duration.1h': '1 hour',
   'keys.allGroups': 'All Groups',
   'keys.allStatus': 'All Status',
   'keys.columnSettings': 'Column Settings',
@@ -103,7 +106,7 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => messages[key] ?? key,
+      t: (key: string, params?: Record<string, string>) => Object.entries(params ?? {}).reduce((text, [name, value]) => text.replace(`{${name}}`, value), messages[key] ?? key),
     }),
   }
 })
@@ -595,6 +598,44 @@ describe('user KeysView column settings', () => {
 
     beforeEach(() => {
       getAvailableGroups.mockResolvedValue(availableGroups)
+    })
+
+    it('shows the current global default and preserves a chosen TTL across group changes', async () => {
+      listKeys.mockResolvedValueOnce({ items: [], total: 0, pages: 0, meta: { anthropic_cache_ttl_default: '1h' } })
+      const wrapper = await openCreate()
+      await groupSelect(wrapper).vm.$emit('update:modelValue', 1)
+      const ttl = () => wrapper.findComponent('#key-form-cache-ttl')
+      expect(ttl().props('modelValue')).toBe('inherit')
+      expect(ttl().props('options')[0].label).toBe('Follow global (currently 1 hour)')
+      await ttl().vm.$emit('update:modelValue', '1h')
+      await chooseProvider(wrapper, 'openai')
+      await groupSelect(wrapper).vm.$emit('update:modelValue', 2)
+      expect(wrapper.find('[data-test="anthropic-cache-ttl-field"]').exists()).toBe(false)
+      await chooseProvider(wrapper, 'other')
+      for (const groupId of [10, 11, 12]) {
+        await groupSelect(wrapper).vm.$emit('update:modelValue', groupId)
+        expect(ttl().props('modelValue')).toBe('1h')
+      }
+      await wrapper.get('[data-tour="key-form-name"]').setValue('Claude key')
+      await wrapper.get('#key-form').trigger('submit')
+      expect(vi.mocked(keysAPI.create).mock.calls[0][8]).toBe('1h')
+    })
+
+    it('keeps the persisted off preference when editing and sends only an explicit TTL change', async () => {
+      const key = { ...createApiKey(), group_id: 1, anthropic_cache_ttl_mode: 'off' as const }
+      listKeys.mockResolvedValue({ items: [key], total: 1, pages: 1 })
+      updateKey.mockResolvedValue(key)
+      const wrapper = await mountView()
+      await getButtonByText(wrapper, 'common.edit').trigger('click')
+      const ttl = wrapper.findComponent('#key-form-cache-ttl')
+      expect(ttl.props('modelValue')).toBe('off')
+      await wrapper.get('#key-form').trigger('submit')
+      expect(updateKey.mock.calls[0][1]).not.toHaveProperty('anthropic_cache_ttl_mode')
+      await flushPromises()
+      await getButtonByText(wrapper, 'common.edit').trigger('click')
+      await wrapper.findComponent('#key-form-cache-ttl').vm.$emit('update:modelValue', '5m')
+      await wrapper.get('#key-form').trigger('submit')
+      expect(updateKey.mock.calls[1][1]).toHaveProperty('anthropic_cache_ttl_mode', '5m')
     })
 
     it('classifies all configured platforms and retains the complete table filter', async () => {

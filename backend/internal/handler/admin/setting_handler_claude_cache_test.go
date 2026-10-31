@@ -3,6 +3,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"github.com/liulixin-lex/xy2api/internal/handler/dto"
 	"github.com/liulixin-lex/xy2api/internal/service"
@@ -27,5 +28,22 @@ func TestClaudeCacheAdminPartialSaveAndValidation(t *testing.T) {
 		raw, err := json.Marshal(public)
 		require.NoError(t, err)
 		require.NotContains(t, string(raw), key)
+	}
+}
+
+func TestAnthropicCacheTTLDefaultAdminValidationAndSnapshot(t *testing.T) {
+	const key = service.SettingKeyAnthropicCacheTTLDefault
+	h, repo := newStepUpSwitchTestHandler(t, map[string]string{})
+	require.Equal(t, "5m", h.settingService.GetAnthropicCacheTTLDefault(context.Background()))
+	for _, value := range []string{"1h", "5m"} {
+		require.Equal(t, http.StatusOK, doUpdateSettings(t, h, map[string]any{key: value}, nil).Code)
+		require.Equal(t, value, repo.values[key])
+		require.Equal(t, value, h.settingService.GetAnthropicCacheTTLDefault(context.Background()))
+	}
+	require.Equal(t, http.StatusOK, doUpdateSettings(t, h, map[string]any{"site_name": "TTL fixture"}, nil).Code)
+	require.NotContains(t, repo.lastUpdates, key)
+	for _, invalid := range []any{"", "2h", "1H", nil, true} {
+		require.Equal(t, http.StatusBadRequest, doUpdateSettings(t, h, map[string]any{key: invalid}, nil).Code)
+		require.Equal(t, "5m", repo.values[key])
 	}
 }

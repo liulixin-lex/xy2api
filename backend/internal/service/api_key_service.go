@@ -24,16 +24,17 @@ import (
 )
 
 var (
-	ErrAPIKeyNotFound       = infraerrors.NotFound("API_KEY_NOT_FOUND", "api key not found")
-	ErrGroupNotAllowed      = infraerrors.Forbidden("GROUP_NOT_ALLOWED", "user is not allowed to bind this group")
-	ErrAPIKeyExists         = infraerrors.Conflict("API_KEY_EXISTS", "api key already exists")
-	ErrAPIKeyTooShort       = infraerrors.BadRequest("API_KEY_TOO_SHORT", "api key must be at least 16 characters")
-	ErrAPIKeyInvalidChars   = infraerrors.BadRequest("API_KEY_INVALID_CHARS", "api key can only contain letters, numbers, underscores, and hyphens")
-	ErrAPIKeyRateLimited    = infraerrors.TooManyRequests("API_KEY_RATE_LIMITED", "too many failed attempts, please try again later")
-	ErrAPIKeyCreateLimited  = infraerrors.TooManyRequests("API_KEY_CREATE_RATE_LIMITED", "too many api keys created recently, please try again later")
-	ErrAPIKeyCountExceeded  = infraerrors.Forbidden("API_KEY_COUNT_EXCEEDED", "api key count limit reached, please delete unused keys first")
-	ErrAPIKeyAuthOverloaded = infraerrors.ServiceUnavailable("API_KEY_AUTH_OVERLOADED", "api key authentication is temporarily overloaded")
-	ErrInvalidIPPattern     = infraerrors.BadRequest("INVALID_IP_PATTERN", "invalid IP or CIDR pattern")
+	ErrInvalidAnthropicCacheTTLMode = infraerrors.BadRequest("INVALID_ANTHROPIC_CACHE_TTL_MODE", "anthropic_cache_ttl_mode must be inherit, off, 5m or 1h")
+	ErrAPIKeyNotFound               = infraerrors.NotFound("API_KEY_NOT_FOUND", "api key not found")
+	ErrGroupNotAllowed              = infraerrors.Forbidden("GROUP_NOT_ALLOWED", "user is not allowed to bind this group")
+	ErrAPIKeyExists                 = infraerrors.Conflict("API_KEY_EXISTS", "api key already exists")
+	ErrAPIKeyTooShort               = infraerrors.BadRequest("API_KEY_TOO_SHORT", "api key must be at least 16 characters")
+	ErrAPIKeyInvalidChars           = infraerrors.BadRequest("API_KEY_INVALID_CHARS", "api key can only contain letters, numbers, underscores, and hyphens")
+	ErrAPIKeyRateLimited            = infraerrors.TooManyRequests("API_KEY_RATE_LIMITED", "too many failed attempts, please try again later")
+	ErrAPIKeyCreateLimited          = infraerrors.TooManyRequests("API_KEY_CREATE_RATE_LIMITED", "too many api keys created recently, please try again later")
+	ErrAPIKeyCountExceeded          = infraerrors.Forbidden("API_KEY_COUNT_EXCEEDED", "api key count limit reached, please delete unused keys first")
+	ErrAPIKeyAuthOverloaded         = infraerrors.ServiceUnavailable("API_KEY_AUTH_OVERLOADED", "api key authentication is temporarily overloaded")
+	ErrInvalidIPPattern             = infraerrors.BadRequest("INVALID_IP_PATTERN", "invalid IP or CIDR pattern")
 	// ErrAPIKeyExpired        = infraerrors.Forbidden("API_KEY_EXPIRED", "api key has expired")
 	ErrAPIKeyExpired = infraerrors.Forbidden("API_KEY_EXPIRED", "api key 已过期")
 	// ErrAPIKeyQuotaExhausted = infraerrors.TooManyRequests("API_KEY_QUOTA_EXHAUSTED", "api key quota exhausted")
@@ -64,11 +65,12 @@ const (
 // 若编辑 Key 时无条件整行回写，并发累计的配额与限流计数就会被旧快照覆盖。
 // 因此调用方必须显式声明要改的列。
 type APIKeyUpdateFields struct {
-	Name      bool
-	Status    bool
-	Quota     bool
-	GroupID   bool
-	ExpiresAt bool
+	AnthropicCacheTTLMode bool
+	Name                  bool
+	Status                bool
+	Quota                 bool
+	GroupID               bool
+	ExpiresAt             bool
 	// QuotaUsed 仅供"重置配额用量"路径声明；常规计费走 IncrementQuotaUsed。
 	QuotaUsed bool
 	// RateLimits 覆盖 rate_limit_5h / _1d / _7d 三个阈值。
@@ -212,11 +214,12 @@ type APIKeyAuthCacheInvalidator interface {
 
 // CreateAPIKeyRequest 创建API Key请求
 type CreateAPIKeyRequest struct {
-	Name        string   `json:"name"`
-	GroupID     *int64   `json:"group_id"`
-	CustomKey   *string  `json:"custom_key"`   // 可选的自定义key
-	IPWhitelist []string `json:"ip_whitelist"` // IP 白名单
-	IPBlacklist []string `json:"ip_blacklist"` // IP 黑名单
+	AnthropicCacheTTLMode *string  `json:"anthropic_cache_ttl_mode"`
+	Name                  string   `json:"name"`
+	GroupID               *int64   `json:"group_id"`
+	CustomKey             *string  `json:"custom_key"`   // 可选的自定义key
+	IPWhitelist           []string `json:"ip_whitelist"` // IP 白名单
+	IPBlacklist           []string `json:"ip_blacklist"` // IP 黑名单
 
 	// Quota fields
 	Quota         float64 `json:"quota"`           // Quota limit in USD (0 = unlimited)
@@ -230,11 +233,12 @@ type CreateAPIKeyRequest struct {
 
 // UpdateAPIKeyRequest 更新API Key请求
 type UpdateAPIKeyRequest struct {
-	Name        *string   `json:"name"`
-	GroupID     *int64    `json:"group_id"`
-	Status      *string   `json:"status"`
-	IPWhitelist *[]string `json:"ip_whitelist"` // IP 白名单（nil 不修改，空数组清空）
-	IPBlacklist *[]string `json:"ip_blacklist"` // IP 黑名单（nil 不修改，空数组清空）
+	AnthropicCacheTTLMode *string   `json:"anthropic_cache_ttl_mode"`
+	Name                  *string   `json:"name"`
+	GroupID               *int64    `json:"group_id"`
+	Status                *string   `json:"status"`
+	IPWhitelist           *[]string `json:"ip_whitelist"` // IP 白名单（nil 不修改，空数组清空）
+	IPBlacklist           *[]string `json:"ip_blacklist"` // IP 黑名单（nil 不修改，空数组清空）
 
 	// Quota fields
 	Quota           *float64   `json:"quota"`       // Quota limit in USD (nil = no change, 0 = unlimited)
@@ -257,6 +261,11 @@ func validateAPIKeyLimit(v float64) error {
 }
 
 func validateCreateAPIKeyRequest(req CreateAPIKeyRequest) error {
+	if req.AnthropicCacheTTLMode != nil {
+		if err := ValidateAnthropicCacheTTLMode(*req.AnthropicCacheTTLMode); err != nil {
+			return err
+		}
+	}
 	for _, v := range []float64{req.Quota, req.RateLimit5h, req.RateLimit1d, req.RateLimit7d} {
 		if err := validateAPIKeyLimit(v); err != nil {
 			return err
@@ -269,6 +278,11 @@ func validateCreateAPIKeyRequest(req CreateAPIKeyRequest) error {
 }
 
 func validateUpdateAPIKeyRequest(req UpdateAPIKeyRequest) error {
+	if req.AnthropicCacheTTLMode != nil {
+		if err := ValidateAnthropicCacheTTLMode(*req.AnthropicCacheTTLMode); err != nil {
+			return err
+		}
+	}
 	for _, v := range []*float64{req.Quota, req.RateLimit5h, req.RateLimit1d, req.RateLimit7d} {
 		if v != nil {
 			if err := validateAPIKeyLimit(*v); err != nil {
@@ -581,6 +595,11 @@ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIK
 		RateLimit7d: req.RateLimit7d,
 	}
 
+	apiKey.AnthropicCacheTTLMode = AnthropicCacheTTLModeInherit
+	if req.AnthropicCacheTTLMode != nil {
+		apiKey.AnthropicCacheTTLMode = *req.AnthropicCacheTTLMode
+	}
+
 	// Set expiration time if specified
 	if req.ExpiresInDays != nil && *req.ExpiresInDays > 0 {
 		expiresAt := time.Now().AddDate(0, 0, *req.ExpiresInDays)
@@ -835,6 +854,10 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 	originalStatus := apiKey.Status
 
 	// 更新字段
+	if req.AnthropicCacheTTLMode != nil {
+		apiKey.AnthropicCacheTTLMode = *req.AnthropicCacheTTLMode
+		fields.AnthropicCacheTTLMode = true
+	}
 	if req.Name != nil {
 		apiKey.Name = html.EscapeString(*req.Name)
 		fields.Name = true

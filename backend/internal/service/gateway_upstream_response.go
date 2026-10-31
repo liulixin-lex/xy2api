@@ -974,23 +974,6 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 
 		s.captureClaudeCacheRawUsageEvent(ctx, event)
 
-		// Cache TTL Override: 重写 SSE 事件中的 cache_creation 分类。
-		// 账号级设置优先；全局 1h 请求注入开启时，默认把 usage 计费归回 5m。
-		if overrideTarget, ok := s.resolveCacheTTLUsageOverrideTarget(ctx, account); ok {
-			if eventType == "message_start" {
-				if msg, ok := event["message"].(map[string]any); ok {
-					if u, ok := msg["usage"].(map[string]any); ok {
-						eventChanged = rewriteCacheCreationJSON(u, overrideTarget) || eventChanged
-					}
-				}
-			}
-			if eventType == "message_delta" {
-				if u, ok := event["usage"].(map[string]any); ok {
-					eventChanged = rewriteCacheCreationJSON(u, overrideTarget) || eventChanged
-				}
-			}
-		}
-
 		if needModelReplace {
 			if msg, ok := event["message"].(map[string]any); ok {
 				if model, ok := msg["model"].(string); ok && model == mappedModel {
@@ -1247,6 +1230,7 @@ func (s *GatewayService) parseSSEUsage(data string, usage *ClaudeUsage) {
 }
 
 type sseUsagePatch struct {
+	delta                    bool
 	inputTokens              int
 	hasInputTokens           bool
 	outputTokens             int
@@ -1266,77 +1250,29 @@ func (s *GatewayService) extractSSEUsagePatch(event map[string]any) *sseUsagePat
 		return nil
 	}
 
-	eventType, _ := event["type"].(string)
-	switch eventType {
+	var usageObj map[string]any
+	switch event["type"] {
 	case "message_start":
 		msg, _ := event["message"].(map[string]any)
-		usageObj, _ := msg["usage"].(map[string]any)
-		if len(usageObj) == 0 {
-			return nil
-		}
-
-		patch := &sseUsagePatch{}
-		patch.hasInputTokens = true
-		if v, ok := parseSSEUsageInt(usageObj["input_tokens"]); ok {
-			patch.inputTokens = v
-		}
-		patch.hasCacheCreationInput = true
-		if v, ok := parseSSEUsageInt(usageObj["cache_creation_input_tokens"]); ok {
-			patch.cacheCreationInputTokens = v
-		}
-		patch.hasCacheReadInput = true
-		if v, ok := parseSSEUsageInt(usageObj["cache_read_input_tokens"]); ok {
-			patch.cacheReadInputTokens = v
-		}
-		if cc, ok := usageObj["cache_creation"].(map[string]any); ok {
-			if v, exists := parseSSEUsageInt(cc["ephemeral_5m_input_tokens"]); exists {
-				patch.cacheCreation5mTokens = v
-				patch.hasCacheCreation5m = true
-			}
-			if v, exists := parseSSEUsageInt(cc["ephemeral_1h_input_tokens"]); exists {
-				patch.cacheCreation1hTokens = v
-				patch.hasCacheCreation1h = true
-			}
-		}
-		return patch
-
+		usageObj, _ = msg["usage"].(map[string]any)
 	case "message_delta":
-		usageObj, _ := event["usage"].(map[string]any)
-		if len(usageObj) == 0 {
-			return nil
-		}
-
-		patch := &sseUsagePatch{}
-		if v, ok := parseSSEUsageInt(usageObj["input_tokens"]); ok && v > 0 {
-			patch.inputTokens = v
-			patch.hasInputTokens = true
-		}
-		if v, ok := parseSSEUsageInt(usageObj["output_tokens"]); ok && v > 0 {
-			patch.outputTokens = v
-			patch.hasOutputTokens = true
-		}
-		if v, ok := parseSSEUsageInt(usageObj["cache_creation_input_tokens"]); ok && v > 0 {
-			patch.cacheCreationInputTokens = v
-			patch.hasCacheCreationInput = true
-		}
-		if v, ok := parseSSEUsageInt(usageObj["cache_read_input_tokens"]); ok && v > 0 {
-			patch.cacheReadInputTokens = v
-			patch.hasCacheReadInput = true
-		}
-		if cc, ok := usageObj["cache_creation"].(map[string]any); ok {
-			if v, exists := parseSSEUsageInt(cc["ephemeral_5m_input_tokens"]); exists {
-				patch.cacheCreation5mTokens = v
-				patch.hasCacheCreation5m = true
-			}
-			if v, exists := parseSSEUsageInt(cc["ephemeral_1h_input_tokens"]); exists {
-				patch.cacheCreation1hTokens = v
-				patch.hasCacheCreation1h = true
-			}
-		}
-		return patch
+		usageObj, _ = event["usage"].(map[string]any)
+	default:
+		return nil
 	}
-
-	return nil
+	if len(usageObj) == 0 {
+		return nil
+	}
+	p := &sseUsagePatch{delta: event["type"] == "message_delta"}
+	p.inputTokens, p.hasInputTokens = parseSSEUsageInt(usageObj["input_tokens"])
+	p.outputTokens, p.hasOutputTokens = parseSSEUsageInt(usageObj["output_tokens"])
+	p.cacheCreationInputTokens, p.hasCacheCreationInput = parseSSEUsageInt(usageObj["cache_creation_input_tokens"])
+	p.cacheReadInputTokens, p.hasCacheReadInput = parseSSEUsageInt(usageObj["cache_read_input_tokens"])
+	if cc, ok := usageObj["cache_creation"].(map[string]any); ok {
+		p.cacheCreation5mTokens, p.hasCacheCreation5m = parseSSEUsageInt(cc["ephemeral_5m_input_tokens"])
+		p.cacheCreation1hTokens, p.hasCacheCreation1h = parseSSEUsageInt(cc["ephemeral_1h_input_tokens"])
+	}
+	return p
 }
 
 func mergeSSEUsagePatch(usage *ClaudeUsage, patch *sseUsagePatch) {
@@ -1344,23 +1280,29 @@ func mergeSSEUsagePatch(usage *ClaudeUsage, patch *sseUsagePatch) {
 		return
 	}
 
-	if patch.hasInputTokens {
+	if patch.hasInputTokens && (!patch.delta || patch.inputTokens > 0) {
 		usage.InputTokens = patch.inputTokens
 	}
 	if patch.hasCacheCreationInput {
-		usage.CacheCreationInputTokens = patch.cacheCreationInputTokens
+		usage.CacheCreationInputTokens = max(patch.cacheCreationInputTokens, 0)
+		usage.CacheCreationInputTokensPresent = true
 	}
 	if patch.hasCacheReadInput {
 		usage.CacheReadInputTokens = patch.cacheReadInputTokens
 	}
-	if patch.hasOutputTokens {
+	if patch.hasOutputTokens && (!patch.delta || patch.outputTokens > 0) {
 		usage.OutputTokens = patch.outputTokens
 	}
 	if patch.hasCacheCreation5m {
-		usage.CacheCreation5mTokens = patch.cacheCreation5mTokens
+		usage.CacheCreation5mTokens = max(patch.cacheCreation5mTokens, 0)
+		usage.CacheCreation5mTokensPresent = true
 	}
 	if patch.hasCacheCreation1h {
-		usage.CacheCreation1hTokens = patch.cacheCreation1hTokens
+		usage.CacheCreation1hTokens = max(patch.cacheCreation1hTokens, 0)
+		usage.CacheCreation1hTokensPresent = true
+	}
+	if !usage.CacheCreationInputTokensPresent && (usage.CacheCreation5mTokensPresent || usage.CacheCreation1hTokensPresent) {
+		usage.CacheCreationInputTokens = usage.CacheCreation5mTokens + usage.CacheCreation1hTokens
 	}
 }
 
@@ -1394,58 +1336,24 @@ func parseSSEUsageInt(value any) (int, bool) {
 // applyCacheTTLOverride 将所有 cache creation tokens 归入指定的 TTL 类型。
 // target 为 "5m" 或 "1h"。返回 true 表示发生了变更。
 func applyCacheTTLOverride(usage *ClaudeUsage, target string) bool {
-	// Fallback: 如果只有聚合字段但无 5m/1h 明细，将聚合字段归入 5m 默认类别
-	if usage.CacheCreation5mTokens == 0 && usage.CacheCreation1hTokens == 0 && usage.CacheCreationInputTokens > 0 {
-		usage.CacheCreation5mTokens = usage.CacheCreationInputTokens
+	total := usage.CacheCreationInputTokens
+	if !usage.CacheCreationInputTokensPresent && total == 0 {
+		total = usage.CacheCreation5mTokens + usage.CacheCreation1hTokens
 	}
 
-	total := usage.CacheCreation5mTokens + usage.CacheCreation1hTokens
-	if total == 0 {
-		return false
-	}
 	switch target {
 	case "1h":
-		if usage.CacheCreation1hTokens == total {
+		if usage.CacheCreation1hTokens == total && usage.CacheCreation5mTokens == 0 {
 			return false // 已经全是 1h
 		}
 		usage.CacheCreation1hTokens = total
 		usage.CacheCreation5mTokens = 0
 	default: // "5m"
-		if usage.CacheCreation5mTokens == total {
+		if usage.CacheCreation5mTokens == total && usage.CacheCreation1hTokens == 0 {
 			return false // 已经全是 5m
 		}
 		usage.CacheCreation5mTokens = total
 		usage.CacheCreation1hTokens = 0
-	}
-	return true
-}
-
-// rewriteCacheCreationJSON 在 JSON usage 对象中重写 cache_creation 嵌套对象的 TTL 分类。
-// usageObj 是 usage JSON 对象（map[string]any）。
-func rewriteCacheCreationJSON(usageObj map[string]any, target string) bool {
-	ccObj, ok := usageObj["cache_creation"].(map[string]any)
-	if !ok {
-		return false
-	}
-	v5m, _ := parseSSEUsageInt(ccObj["ephemeral_5m_input_tokens"])
-	v1h, _ := parseSSEUsageInt(ccObj["ephemeral_1h_input_tokens"])
-	total := v5m + v1h
-	if total == 0 {
-		return false
-	}
-	switch target {
-	case "1h":
-		if v1h == total {
-			return false
-		}
-		ccObj["ephemeral_1h_input_tokens"] = float64(total)
-		ccObj["ephemeral_5m_input_tokens"] = float64(0)
-	default: // "5m"
-		if v5m == total {
-			return false
-		}
-		ccObj["ephemeral_5m_input_tokens"] = float64(total)
-		ccObj["ephemeral_1h_input_tokens"] = float64(0)
 	}
 	return true
 }
@@ -1457,9 +1365,7 @@ func (s *GatewayService) resolveCacheTTLUsageOverrideTarget(ctx context.Context,
 	if account.IsCacheTTLOverrideEnabled() {
 		return account.GetCacheTTLOverrideTarget(), true
 	}
-	if account.IsAnthropicOAuthOrSetupToken() && s != nil && s.settingService != nil && s.settingService.IsAnthropicCacheTTL1hInjectionEnabled(ctx) {
-		return cacheTTLTarget5m, true
-	}
+
 	return "", false
 }
 
@@ -1489,14 +1395,6 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
 
-	// 解析嵌套的 cache_creation 对象中的 5m/1h 明细
-	cc5m := gjson.GetBytes(body, "usage.cache_creation.ephemeral_5m_input_tokens")
-	cc1h := gjson.GetBytes(body, "usage.cache_creation.ephemeral_1h_input_tokens")
-	if cc5m.Exists() || cc1h.Exists() {
-		response.Usage.CacheCreation5mTokens = int(cc5m.Int())
-		response.Usage.CacheCreation1hTokens = int(cc1h.Int())
-	}
-
 	// 兼容 Kimi cached_tokens → cache_read_input_tokens
 	if response.Usage.CacheReadInputTokens == 0 {
 		cachedTokens := gjson.GetBytes(body, "usage.cached_tokens").Int()
@@ -1509,20 +1407,6 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 	}
 
 	captureClaudeCacheRawUsage(ctx, response.Usage)
-
-	// Cache TTL Override: 重写 non-streaming 响应中的 cache_creation 分类。
-	// 账号级设置优先；全局 1h 请求注入开启时，默认把 usage 计费归回 5m。
-	if overrideTarget, ok := s.resolveCacheTTLUsageOverrideTarget(ctx, account); ok {
-		if applyCacheTTLOverride(&response.Usage, overrideTarget) {
-			// 同步更新 body JSON 中的嵌套 cache_creation 对象
-			if newBody, err := sjson.SetBytes(body, "usage.cache_creation.ephemeral_5m_input_tokens", response.Usage.CacheCreation5mTokens); err == nil {
-				body = newBody
-			}
-			if newBody, err := sjson.SetBytes(body, "usage.cache_creation.ephemeral_1h_input_tokens", response.Usage.CacheCreation1hTokens); err == nil {
-				body = newBody
-			}
-		}
-	}
 
 	// 如果有模型映射，替换响应中的model字段
 	if originalModel != mappedModel {

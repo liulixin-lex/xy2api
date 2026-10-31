@@ -108,51 +108,52 @@ const (
 // APIKeyMutation represents an operation that mutates the APIKey nodes in the graph.
 type APIKeyMutation struct {
 	config
-	op                 Op
-	typ                string
-	id                 *int64
-	created_at         *time.Time
-	updated_at         *time.Time
-	deleted_at         *time.Time
-	key                *string
-	name               *string
-	status             *string
-	last_used_at       *time.Time
-	ip_whitelist       *[]string
-	appendip_whitelist []string
-	ip_blacklist       *[]string
-	appendip_blacklist []string
-	quota              *float64
-	addquota           *float64
-	quota_used         *float64
-	addquota_used      *float64
-	expires_at         *time.Time
-	rate_limit_5h      *float64
-	addrate_limit_5h   *float64
-	rate_limit_1d      *float64
-	addrate_limit_1d   *float64
-	rate_limit_7d      *float64
-	addrate_limit_7d   *float64
-	usage_5h           *float64
-	addusage_5h        *float64
-	usage_1d           *float64
-	addusage_1d        *float64
-	usage_7d           *float64
-	addusage_7d        *float64
-	window_5h_start    *time.Time
-	window_1d_start    *time.Time
-	window_7d_start    *time.Time
-	clearedFields      map[string]struct{}
-	user               *int64
-	cleareduser        bool
-	group              *int64
-	clearedgroup       bool
-	usage_logs         map[int64]struct{}
-	removedusage_logs  map[int64]struct{}
-	clearedusage_logs  bool
-	done               bool
-	oldValue           func(context.Context) (*APIKey, error)
-	predicates         []predicate.APIKey
+	op                       Op
+	typ                      string
+	id                       *int64
+	created_at               *time.Time
+	updated_at               *time.Time
+	deleted_at               *time.Time
+	key                      *string
+	name                     *string
+	anthropic_cache_ttl_mode *string
+	status                   *string
+	last_used_at             *time.Time
+	ip_whitelist             *[]string
+	appendip_whitelist       []string
+	ip_blacklist             *[]string
+	appendip_blacklist       []string
+	quota                    *float64
+	addquota                 *float64
+	quota_used               *float64
+	addquota_used            *float64
+	expires_at               *time.Time
+	rate_limit_5h            *float64
+	addrate_limit_5h         *float64
+	rate_limit_1d            *float64
+	addrate_limit_1d         *float64
+	rate_limit_7d            *float64
+	addrate_limit_7d         *float64
+	usage_5h                 *float64
+	addusage_5h              *float64
+	usage_1d                 *float64
+	addusage_1d              *float64
+	usage_7d                 *float64
+	addusage_7d              *float64
+	window_5h_start          *time.Time
+	window_1d_start          *time.Time
+	window_7d_start          *time.Time
+	clearedFields            map[string]struct{}
+	user                     *int64
+	cleareduser              bool
+	group                    *int64
+	clearedgroup             bool
+	usage_logs               map[int64]struct{}
+	removedusage_logs        map[int64]struct{}
+	clearedusage_logs        bool
+	done                     bool
+	oldValue                 func(context.Context) (*APIKey, error)
+	predicates               []predicate.APIKey
 }
 
 var _ ent.Mutation = (*APIKeyMutation)(nil)
@@ -529,6 +530,42 @@ func (m *APIKeyMutation) GroupIDCleared() bool {
 func (m *APIKeyMutation) ResetGroupID() {
 	m.group = nil
 	delete(m.clearedFields, apikey.FieldGroupID)
+}
+
+// SetAnthropicCacheTTLMode sets the "anthropic_cache_ttl_mode" field.
+func (m *APIKeyMutation) SetAnthropicCacheTTLMode(s string) {
+	m.anthropic_cache_ttl_mode = &s
+}
+
+// AnthropicCacheTTLMode returns the value of the "anthropic_cache_ttl_mode" field in the mutation.
+func (m *APIKeyMutation) AnthropicCacheTTLMode() (r string, exists bool) {
+	v := m.anthropic_cache_ttl_mode
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAnthropicCacheTTLMode returns the old "anthropic_cache_ttl_mode" field's value of the APIKey entity.
+// If the APIKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *APIKeyMutation) OldAnthropicCacheTTLMode(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAnthropicCacheTTLMode is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAnthropicCacheTTLMode requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAnthropicCacheTTLMode: %w", err)
+	}
+	return oldValue.AnthropicCacheTTLMode, nil
+}
+
+// ResetAnthropicCacheTTLMode resets all changes to the "anthropic_cache_ttl_mode" field.
+func (m *APIKeyMutation) ResetAnthropicCacheTTLMode() {
+	m.anthropic_cache_ttl_mode = nil
 }
 
 // SetStatus sets the "status" field.
@@ -1532,7 +1569,7 @@ func (m *APIKeyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *APIKeyMutation) Fields() []string {
-	fields := make([]string, 0, 23)
+	fields := make([]string, 0, 24)
 	if m.created_at != nil {
 		fields = append(fields, apikey.FieldCreatedAt)
 	}
@@ -1553,6 +1590,9 @@ func (m *APIKeyMutation) Fields() []string {
 	}
 	if m.group != nil {
 		fields = append(fields, apikey.FieldGroupID)
+	}
+	if m.anthropic_cache_ttl_mode != nil {
+		fields = append(fields, apikey.FieldAnthropicCacheTTLMode)
 	}
 	if m.status != nil {
 		fields = append(fields, apikey.FieldStatus)
@@ -1624,6 +1664,8 @@ func (m *APIKeyMutation) Field(name string) (ent.Value, bool) {
 		return m.Name()
 	case apikey.FieldGroupID:
 		return m.GroupID()
+	case apikey.FieldAnthropicCacheTTLMode:
+		return m.AnthropicCacheTTLMode()
 	case apikey.FieldStatus:
 		return m.Status()
 	case apikey.FieldLastUsedAt:
@@ -1679,6 +1721,8 @@ func (m *APIKeyMutation) OldField(ctx context.Context, name string) (ent.Value, 
 		return m.OldName(ctx)
 	case apikey.FieldGroupID:
 		return m.OldGroupID(ctx)
+	case apikey.FieldAnthropicCacheTTLMode:
+		return m.OldAnthropicCacheTTLMode(ctx)
 	case apikey.FieldStatus:
 		return m.OldStatus(ctx)
 	case apikey.FieldLastUsedAt:
@@ -1768,6 +1812,13 @@ func (m *APIKeyMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetGroupID(v)
+		return nil
+	case apikey.FieldAnthropicCacheTTLMode:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAnthropicCacheTTLMode(v)
 		return nil
 	case apikey.FieldStatus:
 		v, ok := value.(string)
@@ -2106,6 +2157,9 @@ func (m *APIKeyMutation) ResetField(name string) error {
 		return nil
 	case apikey.FieldGroupID:
 		m.ResetGroupID()
+		return nil
+	case apikey.FieldAnthropicCacheTTLMode:
+		m.ResetAnthropicCacheTTLMode()
 		return nil
 	case apikey.FieldStatus:
 		m.ResetStatus()
@@ -45162,6 +45216,8 @@ type UsageLogMutation struct {
 	video_resolution              *string
 	video_duration_seconds        *int
 	addvideo_duration_seconds     *int
+	anthropic_cache_ttl_policy    *string
+	anthropic_cache_ttl_applied   *bool
 	cache_ttl_overridden          *bool
 	created_at                    *time.Time
 	clearedFields                 map[string]struct{}
@@ -47679,6 +47735,104 @@ func (m *UsageLogMutation) ResetVideoDurationSeconds() {
 	delete(m.clearedFields, usagelog.FieldVideoDurationSeconds)
 }
 
+// SetAnthropicCacheTTLPolicy sets the "anthropic_cache_ttl_policy" field.
+func (m *UsageLogMutation) SetAnthropicCacheTTLPolicy(s string) {
+	m.anthropic_cache_ttl_policy = &s
+}
+
+// AnthropicCacheTTLPolicy returns the value of the "anthropic_cache_ttl_policy" field in the mutation.
+func (m *UsageLogMutation) AnthropicCacheTTLPolicy() (r string, exists bool) {
+	v := m.anthropic_cache_ttl_policy
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAnthropicCacheTTLPolicy returns the old "anthropic_cache_ttl_policy" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldAnthropicCacheTTLPolicy(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAnthropicCacheTTLPolicy is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAnthropicCacheTTLPolicy requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAnthropicCacheTTLPolicy: %w", err)
+	}
+	return oldValue.AnthropicCacheTTLPolicy, nil
+}
+
+// ClearAnthropicCacheTTLPolicy clears the value of the "anthropic_cache_ttl_policy" field.
+func (m *UsageLogMutation) ClearAnthropicCacheTTLPolicy() {
+	m.anthropic_cache_ttl_policy = nil
+	m.clearedFields[usagelog.FieldAnthropicCacheTTLPolicy] = struct{}{}
+}
+
+// AnthropicCacheTTLPolicyCleared returns if the "anthropic_cache_ttl_policy" field was cleared in this mutation.
+func (m *UsageLogMutation) AnthropicCacheTTLPolicyCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldAnthropicCacheTTLPolicy]
+	return ok
+}
+
+// ResetAnthropicCacheTTLPolicy resets all changes to the "anthropic_cache_ttl_policy" field.
+func (m *UsageLogMutation) ResetAnthropicCacheTTLPolicy() {
+	m.anthropic_cache_ttl_policy = nil
+	delete(m.clearedFields, usagelog.FieldAnthropicCacheTTLPolicy)
+}
+
+// SetAnthropicCacheTTLApplied sets the "anthropic_cache_ttl_applied" field.
+func (m *UsageLogMutation) SetAnthropicCacheTTLApplied(b bool) {
+	m.anthropic_cache_ttl_applied = &b
+}
+
+// AnthropicCacheTTLApplied returns the value of the "anthropic_cache_ttl_applied" field in the mutation.
+func (m *UsageLogMutation) AnthropicCacheTTLApplied() (r bool, exists bool) {
+	v := m.anthropic_cache_ttl_applied
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAnthropicCacheTTLApplied returns the old "anthropic_cache_ttl_applied" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldAnthropicCacheTTLApplied(ctx context.Context) (v *bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAnthropicCacheTTLApplied is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAnthropicCacheTTLApplied requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAnthropicCacheTTLApplied: %w", err)
+	}
+	return oldValue.AnthropicCacheTTLApplied, nil
+}
+
+// ClearAnthropicCacheTTLApplied clears the value of the "anthropic_cache_ttl_applied" field.
+func (m *UsageLogMutation) ClearAnthropicCacheTTLApplied() {
+	m.anthropic_cache_ttl_applied = nil
+	m.clearedFields[usagelog.FieldAnthropicCacheTTLApplied] = struct{}{}
+}
+
+// AnthropicCacheTTLAppliedCleared returns if the "anthropic_cache_ttl_applied" field was cleared in this mutation.
+func (m *UsageLogMutation) AnthropicCacheTTLAppliedCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldAnthropicCacheTTLApplied]
+	return ok
+}
+
+// ResetAnthropicCacheTTLApplied resets all changes to the "anthropic_cache_ttl_applied" field.
+func (m *UsageLogMutation) ResetAnthropicCacheTTLApplied() {
+	m.anthropic_cache_ttl_applied = nil
+	delete(m.clearedFields, usagelog.FieldAnthropicCacheTTLApplied)
+}
+
 // SetCacheTTLOverridden sets the "cache_ttl_overridden" field.
 func (m *UsageLogMutation) SetCacheTTLOverridden(b bool) {
 	m.cache_ttl_overridden = &b
@@ -47920,7 +48074,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 48)
+	fields := make([]string, 0, 50)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -48059,6 +48213,12 @@ func (m *UsageLogMutation) Fields() []string {
 	if m.video_duration_seconds != nil {
 		fields = append(fields, usagelog.FieldVideoDurationSeconds)
 	}
+	if m.anthropic_cache_ttl_policy != nil {
+		fields = append(fields, usagelog.FieldAnthropicCacheTTLPolicy)
+	}
+	if m.anthropic_cache_ttl_applied != nil {
+		fields = append(fields, usagelog.FieldAnthropicCacheTTLApplied)
+	}
 	if m.cache_ttl_overridden != nil {
 		fields = append(fields, usagelog.FieldCacheTTLOverridden)
 	}
@@ -48165,6 +48325,10 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.VideoResolution()
 	case usagelog.FieldVideoDurationSeconds:
 		return m.VideoDurationSeconds()
+	case usagelog.FieldAnthropicCacheTTLPolicy:
+		return m.AnthropicCacheTTLPolicy()
+	case usagelog.FieldAnthropicCacheTTLApplied:
+		return m.AnthropicCacheTTLApplied()
 	case usagelog.FieldCacheTTLOverridden:
 		return m.CacheTTLOverridden()
 	case usagelog.FieldCreatedAt:
@@ -48270,6 +48434,10 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldVideoResolution(ctx)
 	case usagelog.FieldVideoDurationSeconds:
 		return m.OldVideoDurationSeconds(ctx)
+	case usagelog.FieldAnthropicCacheTTLPolicy:
+		return m.OldAnthropicCacheTTLPolicy(ctx)
+	case usagelog.FieldAnthropicCacheTTLApplied:
+		return m.OldAnthropicCacheTTLApplied(ctx)
 	case usagelog.FieldCacheTTLOverridden:
 		return m.OldCacheTTLOverridden(ctx)
 	case usagelog.FieldCreatedAt:
@@ -48604,6 +48772,20 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetVideoDurationSeconds(v)
+		return nil
+	case usagelog.FieldAnthropicCacheTTLPolicy:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAnthropicCacheTTLPolicy(v)
+		return nil
+	case usagelog.FieldAnthropicCacheTTLApplied:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAnthropicCacheTTLApplied(v)
 		return nil
 	case usagelog.FieldCacheTTLOverridden:
 		v, ok := value.(bool)
@@ -48985,6 +49167,12 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	if m.FieldCleared(usagelog.FieldVideoDurationSeconds) {
 		fields = append(fields, usagelog.FieldVideoDurationSeconds)
 	}
+	if m.FieldCleared(usagelog.FieldAnthropicCacheTTLPolicy) {
+		fields = append(fields, usagelog.FieldAnthropicCacheTTLPolicy)
+	}
+	if m.FieldCleared(usagelog.FieldAnthropicCacheTTLApplied) {
+		fields = append(fields, usagelog.FieldAnthropicCacheTTLApplied)
+	}
 	return fields
 }
 
@@ -49067,6 +49255,12 @@ func (m *UsageLogMutation) ClearField(name string) error {
 		return nil
 	case usagelog.FieldVideoDurationSeconds:
 		m.ClearVideoDurationSeconds()
+		return nil
+	case usagelog.FieldAnthropicCacheTTLPolicy:
+		m.ClearAnthropicCacheTTLPolicy()
+		return nil
+	case usagelog.FieldAnthropicCacheTTLApplied:
+		m.ClearAnthropicCacheTTLApplied()
 		return nil
 	}
 	return fmt.Errorf("unknown UsageLog nullable field %s", name)
@@ -49213,6 +49407,12 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldVideoDurationSeconds:
 		m.ResetVideoDurationSeconds()
+		return nil
+	case usagelog.FieldAnthropicCacheTTLPolicy:
+		m.ResetAnthropicCacheTTLPolicy()
+		return nil
+	case usagelog.FieldAnthropicCacheTTLApplied:
+		m.ResetAnthropicCacheTTLApplied()
 		return nil
 	case usagelog.FieldCacheTTLOverridden:
 		m.ResetCacheTTLOverridden()

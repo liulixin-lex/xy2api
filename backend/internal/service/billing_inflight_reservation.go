@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"github.com/tidwall/gjson"
 	"math"
 	"net/http"
 	"strings"
@@ -329,11 +330,11 @@ const (
 
 // InflightEstimateRequest 单请求估算输入。
 type InflightEstimateRequest struct {
-	Model                string
-	ClaudeCacheColdWrite bool // Internal admission flag, never decoded from user JSON.
-	BodyBytes            int
-	MaxTokens            int
-	Kind                 InflightEstimateKind
+	Model                   string
+	ClaudeCacheColdWriteTTL string // Internal admission flag, never decoded from user JSON.
+	BodyBytes               int
+	MaxTokens               int
+	Kind                    InflightEstimateKind
 	// Units 按次/按张数量（<=0 视为 1）。
 	Units int
 	// SearchCalls 叠加的搜索次数（按分组 search_price_per_1k 计）。
@@ -542,10 +543,13 @@ func (d inflightEstimateDeps) estimateOne(ctx context.Context, apiKey *APIKey, m
 			return 0
 		}
 		inputPrice := pricing.InputPricePerToken
-		if req.ClaudeCacheColdWrite {
+		if req.ClaudeCacheColdWriteTTL != "" {
 			writePrice := pricing.CacheCreationPricePerToken
 			if pricing.SupportsCacheBreakdown && (pricing.CacheCreation5mPrice > 0 || pricing.CacheCreation1hPrice > 0) {
 				writePrice = pricing.CacheCreation5mPrice
+				if req.ClaudeCacheColdWriteTTL == "1h" {
+					writePrice = pricing.CacheCreation1hPrice
+				}
 			}
 			inputPrice = math.Max(inputPrice, writePrice)
 		} else if req.cacheRatio > 0 && pricing.CacheReadPricePerToken > 0 && pricing.CacheReadPricePerToken < inputPrice {
@@ -641,17 +645,30 @@ func (d inflightEstimateDeps) estimate(ctx context.Context, apiKey *APIKey, req 
 		if d.outputCap != nil {
 			req.outputCap = d.outputCap(req.Model)
 		}
-		if d.cacheRatio != nil && !req.ClaudeCacheColdWrite {
+		if d.cacheRatio != nil {
 			if ratio, ok := d.cacheRatio(ctx, apiKey.User.ID, req.SessionKey); ok {
 				req.cacheRatio = ratio
 			}
 		}
 	}
 	primary, fallbacks, upstreamInput := inflightBillingModelCandidates(ctx, d, apiKey, req.Model)
+	var mappedModels []string
+	actualClaude := isActualClaudeModel(upstreamInput)
+	if req.ClaudeCacheColdWriteTTL != "" && d.accountMappedModels != nil {
+		mappedModels = d.accountMappedModels(ctx, served, upstreamInput)
+		for _, m := range mappedModels {
+			actualClaude = actualClaude || isActualClaudeModel(m)
+		}
+	}
+
 	bestOf := func(models []string) float64 {
 		best := 0.0
 		for _, m := range models {
-			if c := d.estimateOne(ctx, apiKey, m, req, textRate, imageRate); c > best {
+			candidate := req
+			if !isActualClaudeModel(m) && (!actualClaude || (m != req.Model && m != upstreamInput)) {
+				candidate.ClaudeCacheColdWriteTTL = ""
+			}
+			if c := d.estimateOne(ctx, apiKey, m, candidate, textRate, imageRate); c > best {
 				best = c
 			}
 		}
@@ -661,14 +678,17 @@ func (d inflightEstimateDeps) estimate(ctx context.Context, apiKey *APIKey, req 
 	// composite 分组：计费侧除非别名有显式渠道价，否则按实际转发的具体模型计费；
 	// 别名本身可能命中家族模糊价（低估），因此与候选具体模型一起取最高。
 	composite := apiKey.Group != nil && apiKey.Group.Platform == PlatformComposite
-	if best <= 0 || composite || req.ClaudeCacheColdWrite {
+	if best <= 0 || composite || req.ClaudeCacheColdWriteTTL != "" {
 		// 与 billableModelWithFallback 同口径：首选模型无价时回退到实际转发模型。
 		if c := bestOf(fallbacks); c > best {
 			best = c
 		}
 		// 无价、composite 或缓存冷写预留均检查账号级映射（调度器快照），避免低估最终模型。
-		if (best <= 0 || composite || req.ClaudeCacheColdWrite) && d.accountMappedModels != nil {
-			if c := bestOf(d.accountMappedModels(ctx, served, upstreamInput)); c > best {
+		if (best <= 0 || composite || req.ClaudeCacheColdWriteTTL != "") && d.accountMappedModels != nil {
+			if mappedModels == nil {
+				mappedModels = d.accountMappedModels(ctx, served, upstreamInput)
+			}
+			if c := bestOf(mappedModels); c > best {
 				best = c
 			}
 		}
@@ -744,7 +764,32 @@ func (s *GatewayService) EstimateInflightReservation(ctx context.Context, apiKey
 	}
 	deps := s.inflightEstimateDeps()
 	state, _ := ctx.Value(claudeCacheRequestKey{}).(*claudeCacheRequest)
-	req.ClaudeCacheColdWrite = state != nil && !state.declared && state.admitted != nil && apiKey != nil && apiKey.GroupID != nil && *apiKey.GroupID == state.groupID && state.admitted.policy.includesGroup(state.groupID)
+	req.ClaudeCacheColdWriteTTL = ""
+	if state != nil {
+		req.ClaudeCacheColdWriteTTL = state.cacheTTL
+		fallback := !state.declared && state.admitted != nil && apiKey != nil && apiKey.GroupID != nil && *apiKey.GroupID == state.groupID && state.admitted.policy.includesGroup(state.groupID)
+		_, _, servingModel := inflightBillingModelCandidates(ctx, deps, apiKey, req.Model)
+		oauthInjection := s.claudeCacheOAuthInjectionPossible(ctx, apiKey, servingModel)
+		injection := fallback || oauthInjection
+		if oauthInjection && s.settingService != nil {
+			enabled, _, blocks := s.settingService.GetClaudeOAuthSystemPromptInjectionSettings(ctx)
+			if enabled {
+				if gjson.Get(blocks, "blocks").IsArray() {
+					blocks = gjson.Get(blocks, "blocks").Raw
+				}
+				if declaredAnthropicCacheTTL([]byte(`{"system":`+blocks+`}`)) == "1h" {
+					req.ClaudeCacheColdWriteTTL = "1h"
+				}
+			}
+		}
+		if req.ClaudeCacheColdWriteTTL != "" || injection {
+			if ttl := anthropicCacheTTLPolicyFrom(ctx).ttl; ttl == "5m" || ttl == "1h" {
+				req.ClaudeCacheColdWriteTTL = ttl
+			} else if req.ClaudeCacheColdWriteTTL == "" {
+				req.ClaudeCacheColdWriteTTL = "5m"
+			}
+		}
+	}
 	return deps.estimate(ctx, apiKey, req)
 }
 

@@ -676,3 +676,16 @@ gateway:
 **Cipher Suites (TLS 1.2):** `49195`, `49196`, `49199`, `49200` (ECDHE variants)
 
 **Curves:** `29` (X25519), `23` (P-256), `24` (P-384), `25` (P-521)
+
+## Anthropic 缓存 TTL 升级与回退
+
+此变更追加迁移 `286_anthropic_cache_ttl.sql`：存量 API Key 为 `off`、新建默认 `inherit`，管理员默认 5m；usage 增加两个可空观测字段，无回填或索引。旧 332 项迁移校验和不变。完整行为、API 与能力边界见 [Anthropic 缓存 TTL](../docs/ANTHROPIC_CACHE_TTL.md)。
+
+入口/供应商验收按现有构造器组合执行：Bedrock 仅支持本轮覆盖的原生 Messages（Bearer/SigV4）；Chat/Responses 转换仅验证已有 Anthropic/Vertex 路径。Chat/Responses → Bedrock 转换及 eventstream 解码不在本次升级范围；现有组合可能出现上游认证或通用转发错误，不应按显式 unsupported 响应理解。
+
+1. 升级前在旧版本管理端核对全局 1h 注入、消息断点重写、OAuth 隐式计费补贴和已有账号计费分类覆盖；备份数据库、settings 及应用数据。旧策略开启的部署先明确接受断点变化与新默认；需要保留补贴时使用已有账号显式计费分类覆盖，保留原有显式值。不能假设存量 off 对所有旧配置都等价。
+2. 低峰排空并停止旧实例后启动新版本执行迁移，避免混合版本接受不同语义的请求。按实际 PostgreSQL 版本、表规模及长事务评估 ALTER 表锁和新增约束扫描；预留迁移窗口，不修改已发布 SQL/checksum。
+3. 检查迁移记录、ready/health、Key 列表元信息和已有 Key 偏好；用授权测试 Key 验证创建 inherit、旧 Key off、修改后新请求生效及 usage NULL/值语义。无断点选 1h 不应凭空启用缓存；不以 applied 为上游 TTL/命中证明。
+4. 回退前停用新偏好入口，明确恢复旧版全局策略并排空新实例；保留新增列、数据库与账单数据，旧二进制可忽略列但不执行新 TTL 语义。不得删除列或重算历史账单，也不把可启动等同于行为等价。
+
+没有新增环境变量、反向代理要求或后台进程。部署与真实上游验证仍按操作授权执行；本地受控上游测试不证明所有中转的物理缓存能力。

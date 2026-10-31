@@ -1641,6 +1641,18 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 正式镜像已用全空 PostgreSQL、Redis 和 `/app/data` 卷完成首次安装：健康、setup completed、277 条 migration、1 个管理员、7 个 v0.2.0 新字段齐全。
 - RC/正式验证的临时容器、卷、网络和本次新拉取镜像已删除；原有 `<共存服务>` 容器、网络、卷和镜像未改动。已合并的记忆、同步、发布短期分支已在本地与远端删除。
 
+### 20261030-anthropic-cache-ttl — Anthropic 缓存 TTL 生产只读分析与联合方案设计（进行中）
+
+- 请求/范围：用户授权生产近 48 小时 Claude 缓存只读分析，与 Codex gpt-6-astra（xhigh）联合源码审查，参考 Anthropic 官方与 Sub2API；明确本轮只交最终方案，代码另行安排。目标为管理员设默认 5m/1h，用户创建/编辑 Claude API Key 可选跟随全局、不注入、强制 1h、强制 5m。
+- 起点：main `23b19fd9b`；既有本记忆未提交的账号分组方案记录完整保留。仅本地研究与记忆，不改业务、不推送、不部署；生产不发测试请求、不改数据或配置。
+- 进行中：源码链路、官方/外部实现研究、生产只读聚合；Astra 独立审查后共同收敛方案。证据与方案在本地 `.work/tasks/20261030-anthropic-cache-ttl/`，敏感主机信息不入跟踪文件。
+- 下一步：获取固定 48 小时窗口的缓存/延迟/成本/失败与会话数据，核实缺陷，输出精简可实施方案与验证边界。
+
+- 结项补充（2026-10-30）：本轮方案v1.0已完成。固定48小时窗口为10-28 15:22Z至10-30 15:22Z；11,767条Claude用量、42把活跃Key、7个上游账号，均为Anthropic APIKey。Token读取占比86.81%；1,466条TTL明细缺失/不足，兼容入口确定丢桶，4条partial未计49,022 Token。日志仅覆盖约3小时28分，不冒称完整48小时；usage与错误ID无法直接关联，不算成功率。
+- 最终裁决：管理员默认5m/1h（推荐5m）；Key inherit/off/5m/1h，off为不覆写TTL而非关闭缓存。当前部署存量全部off、新建inherit；统一最终wire、供应商能力清理后计算applied、attempt隔离、raw与billing副本分离、未知余量基础写价、1h冷写预留同批处理；正式退役旧message断点strip/rebuild，保留分组fallback权限与已有渠道报价，不改调度/粘性、不做影子/自动探测/历史回填。
+- 联合审查：按用户要求调用gpt-6-astra/xhigh，独立反方协议/成本审查并复读最终稿，无剩余阻断项。Astra纠正主agent“前方5m升1h扩大费用”的初稿判断，按官方最高1h位置不变撤销该定性，保留已有顺序保护；发现并补入余额预留。Sub2API固定v2.2.61/efea7f20d，参考但不导入代码。
+- 交付/边界：本地FINAL_PLAN、PRODUCTION_REPORT、Astra三轮报告及聚合SQL/证据；SSH已关闭，连接工具移至仓外私有目录，报告无连接信息。未实施业务代码、改生产、改价、推送或部署。后续实施先重查HEAD/迁移编号/鉴权版本与旧设置，再按最终方案完整交付。
+
 ## 操作日志（2026-09-04 至 2026-10-12）
 
 <!-- 按时间从旧到新追加。只追加更正，不静默改写。 -->
@@ -4956,3 +4968,13 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 文档一致性：`python3 tools/check_docs_consistency.py`（CI 的 upstream-sync-audit 作业执行），规则在 `tools/docs_consistency.json`，改动时按 [`AGENTS.md`](../AGENTS.md)“变更同步”同步文档。
 
 <!-- 2026-10-30 0.4.14 集成与发布原文归档结束。 -->
+
+### 2026-10-30 — 20261030-anthropic-cache-ttl-implementation — 本地实施、审查与验收归档
+
+- 授权/边界：用户授权按 `.work/tasks/20261030-anthropic-cache-ttl/FINAL_PLAN.md` 本地实施，前后端与独立审查使用 Paseo Astra/xhigh，前端使用全局 Taste/Impeccable/GSAP；不做影子模式、生产试验、部署、提交、推送或 PR。基线为 `23b19fd9b`，既有记忆改动保留。
+- 分工：A 负责最终 wire、协议/usage 转换与预留；B 负责 Key/Ent/迁移、鉴权、设置、usage 仓储与账单；C 负责前端、现行文档/OpenSpec、policy/provenance；D 负责独立 Astra/xhigh 静态审查。A/B/C/D 均已结束本任务。
+- 实施结果：管理员默认 `5m/1h`，Key `inherit/off/5m/1h`，迁移286存量off/新建inherit，鉴权快照v27；原生 Messages、API Key 透传、Chat/Responses→Anthropic、Vertex、原生 Bedrock 最终 wire 统一 TTL/能力清理/签名，count_tokens不注入；attempt正文隔离；usage presence/显式0、partial/over守恒、raw与结算副本分离；Fable/Mythos识别、别名报价和OAuth渠道映射冷写预留闭合。Chat/Responses→Bedrock为既有未显式拒绝组合，本轮未扩展并已写明边界。
+- 数据/UI/文档：Ent/Wire、Key四态鉴权与失效、usage全部写读路径、设置退役与严格校验、两处官方Sonnet5.5 fallback、前端四态/默认/usage提示、现行文档、部署回退说明、OpenSpec、retired、policy/provenance和required literals均同步。旧332项SQL/checksum不变，仅追加286。
+- 审查：D报告 `.work/tasks/20261030-anthropic-cache-ttl/implementation/REVIEW.md`，确认别名高价预留、OAuth渠道映射/忽略遗留mapping、Fable/Mythos识别三项P1均已修复；无剩余P0/P1。
+- 验证：前端135项定向、typecheck/build/lint/design；隔离PG18/Redis40个顶层 `-race` 零跳过且自有数据0；Redis-only四态快照；service全量unit；TTL service race与相邻包race；整仓Go build；golangci-lint；韧性gate 84/281/90/2/18全通过且零跳过；scheduler-diff、迁移校验、临时index docs consistency、gofmt、diff-check通过。真实供应商物理缓存命中/收益未验证。
+- 工作树：未提交，保留本任务代码、文档/登记和此前记忆改动；用户后续授权提交时须在干净提交树运行 upstream-sync audit。本任务无业务遗留。

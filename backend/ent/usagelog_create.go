@@ -623,6 +623,34 @@ func (_c *UsageLogCreate) SetNillableVideoDurationSeconds(v *int) *UsageLogCreat
 	return _c
 }
 
+// SetAnthropicCacheTTLPolicy sets the "anthropic_cache_ttl_policy" field.
+func (_c *UsageLogCreate) SetAnthropicCacheTTLPolicy(v string) *UsageLogCreate {
+	_c.mutation.SetAnthropicCacheTTLPolicy(v)
+	return _c
+}
+
+// SetNillableAnthropicCacheTTLPolicy sets the "anthropic_cache_ttl_policy" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableAnthropicCacheTTLPolicy(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetAnthropicCacheTTLPolicy(*v)
+	}
+	return _c
+}
+
+// SetAnthropicCacheTTLApplied sets the "anthropic_cache_ttl_applied" field.
+func (_c *UsageLogCreate) SetAnthropicCacheTTLApplied(v bool) *UsageLogCreate {
+	_c.mutation.SetAnthropicCacheTTLApplied(v)
+	return _c
+}
+
+// SetNillableAnthropicCacheTTLApplied sets the "anthropic_cache_ttl_applied" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableAnthropicCacheTTLApplied(v *bool) *UsageLogCreate {
+	if v != nil {
+		_c.SetAnthropicCacheTTLApplied(*v)
+	}
+	return _c
+}
+
 // SetCacheTTLOverridden sets the "cache_ttl_overridden" field.
 func (_c *UsageLogCreate) SetCacheTTLOverridden(v bool) *UsageLogCreate {
 	_c.mutation.SetCacheTTLOverridden(v)
@@ -939,6 +967,11 @@ func (_c *UsageLogCreate) check() error {
 			return &ValidationError{Name: "video_resolution", err: fmt.Errorf(`ent: validator failed for field "UsageLog.video_resolution": %w`, err)}
 		}
 	}
+	if v, ok := _c.mutation.AnthropicCacheTTLPolicy(); ok {
+		if err := usagelog.AnthropicCacheTTLPolicyValidator(v); err != nil {
+			return &ValidationError{Name: "anthropic_cache_ttl_policy", err: fmt.Errorf(`ent: validator failed for field "UsageLog.anthropic_cache_ttl_policy": %w`, err)}
+		}
+	}
 	if _, ok := _c.mutation.CacheTTLOverridden(); !ok {
 		return &ValidationError{Name: "cache_ttl_overridden", err: errors.New(`ent: missing required field "UsageLog.cache_ttl_overridden"`)}
 	}
@@ -1144,6 +1177,14 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.VideoDurationSeconds(); ok {
 		_spec.SetField(usagelog.FieldVideoDurationSeconds, field.TypeInt, value)
 		_node.VideoDurationSeconds = &value
+	}
+	if value, ok := _c.mutation.AnthropicCacheTTLPolicy(); ok {
+		_spec.SetField(usagelog.FieldAnthropicCacheTTLPolicy, field.TypeString, value)
+		_node.AnthropicCacheTTLPolicy = &value
+	}
+	if value, ok := _c.mutation.AnthropicCacheTTLApplied(); ok {
+		_spec.SetField(usagelog.FieldAnthropicCacheTTLApplied, field.TypeBool, value)
+		_node.AnthropicCacheTTLApplied = &value
 	}
 	if value, ok := _c.mutation.CacheTTLOverridden(); ok {
 		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
@@ -2109,6 +2150,42 @@ func (u *UsageLogUpsert) AddVideoDurationSeconds(v int) *UsageLogUpsert {
 // ClearVideoDurationSeconds clears the value of the "video_duration_seconds" field.
 func (u *UsageLogUpsert) ClearVideoDurationSeconds() *UsageLogUpsert {
 	u.SetNull(usagelog.FieldVideoDurationSeconds)
+	return u
+}
+
+// SetAnthropicCacheTTLPolicy sets the "anthropic_cache_ttl_policy" field.
+func (u *UsageLogUpsert) SetAnthropicCacheTTLPolicy(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldAnthropicCacheTTLPolicy, v)
+	return u
+}
+
+// UpdateAnthropicCacheTTLPolicy sets the "anthropic_cache_ttl_policy" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateAnthropicCacheTTLPolicy() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldAnthropicCacheTTLPolicy)
+	return u
+}
+
+// ClearAnthropicCacheTTLPolicy clears the value of the "anthropic_cache_ttl_policy" field.
+func (u *UsageLogUpsert) ClearAnthropicCacheTTLPolicy() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldAnthropicCacheTTLPolicy)
+	return u
+}
+
+// SetAnthropicCacheTTLApplied sets the "anthropic_cache_ttl_applied" field.
+func (u *UsageLogUpsert) SetAnthropicCacheTTLApplied(v bool) *UsageLogUpsert {
+	u.Set(usagelog.FieldAnthropicCacheTTLApplied, v)
+	return u
+}
+
+// UpdateAnthropicCacheTTLApplied sets the "anthropic_cache_ttl_applied" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateAnthropicCacheTTLApplied() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldAnthropicCacheTTLApplied)
+	return u
+}
+
+// ClearAnthropicCacheTTLApplied clears the value of the "anthropic_cache_ttl_applied" field.
+func (u *UsageLogUpsert) ClearAnthropicCacheTTLApplied() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldAnthropicCacheTTLApplied)
 	return u
 }
 
@@ -3125,6 +3202,48 @@ func (u *UsageLogUpsertOne) UpdateVideoDurationSeconds() *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) ClearVideoDurationSeconds() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearVideoDurationSeconds()
+	})
+}
+
+// SetAnthropicCacheTTLPolicy sets the "anthropic_cache_ttl_policy" field.
+func (u *UsageLogUpsertOne) SetAnthropicCacheTTLPolicy(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetAnthropicCacheTTLPolicy(v)
+	})
+}
+
+// UpdateAnthropicCacheTTLPolicy sets the "anthropic_cache_ttl_policy" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateAnthropicCacheTTLPolicy() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateAnthropicCacheTTLPolicy()
+	})
+}
+
+// ClearAnthropicCacheTTLPolicy clears the value of the "anthropic_cache_ttl_policy" field.
+func (u *UsageLogUpsertOne) ClearAnthropicCacheTTLPolicy() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearAnthropicCacheTTLPolicy()
+	})
+}
+
+// SetAnthropicCacheTTLApplied sets the "anthropic_cache_ttl_applied" field.
+func (u *UsageLogUpsertOne) SetAnthropicCacheTTLApplied(v bool) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetAnthropicCacheTTLApplied(v)
+	})
+}
+
+// UpdateAnthropicCacheTTLApplied sets the "anthropic_cache_ttl_applied" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateAnthropicCacheTTLApplied() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateAnthropicCacheTTLApplied()
+	})
+}
+
+// ClearAnthropicCacheTTLApplied clears the value of the "anthropic_cache_ttl_applied" field.
+func (u *UsageLogUpsertOne) ClearAnthropicCacheTTLApplied() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearAnthropicCacheTTLApplied()
 	})
 }
 
@@ -4309,6 +4428,48 @@ func (u *UsageLogUpsertBulk) UpdateVideoDurationSeconds() *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) ClearVideoDurationSeconds() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearVideoDurationSeconds()
+	})
+}
+
+// SetAnthropicCacheTTLPolicy sets the "anthropic_cache_ttl_policy" field.
+func (u *UsageLogUpsertBulk) SetAnthropicCacheTTLPolicy(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetAnthropicCacheTTLPolicy(v)
+	})
+}
+
+// UpdateAnthropicCacheTTLPolicy sets the "anthropic_cache_ttl_policy" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateAnthropicCacheTTLPolicy() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateAnthropicCacheTTLPolicy()
+	})
+}
+
+// ClearAnthropicCacheTTLPolicy clears the value of the "anthropic_cache_ttl_policy" field.
+func (u *UsageLogUpsertBulk) ClearAnthropicCacheTTLPolicy() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearAnthropicCacheTTLPolicy()
+	})
+}
+
+// SetAnthropicCacheTTLApplied sets the "anthropic_cache_ttl_applied" field.
+func (u *UsageLogUpsertBulk) SetAnthropicCacheTTLApplied(v bool) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetAnthropicCacheTTLApplied(v)
+	})
+}
+
+// UpdateAnthropicCacheTTLApplied sets the "anthropic_cache_ttl_applied" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateAnthropicCacheTTLApplied() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateAnthropicCacheTTLApplied()
+	})
+}
+
+// ClearAnthropicCacheTTLApplied clears the value of the "anthropic_cache_ttl_applied" field.
+func (u *UsageLogUpsertBulk) ClearAnthropicCacheTTLApplied() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearAnthropicCacheTTLApplied()
 	})
 }
 

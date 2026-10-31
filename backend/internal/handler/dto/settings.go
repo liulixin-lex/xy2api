@@ -209,8 +209,7 @@ type SystemSettings struct {
 	EnableClaudeOAuthSystemPromptInjection  bool   `json:"enable_claude_oauth_system_prompt_injection"`
 	ClaudeOAuthSystemPrompt                 string `json:"claude_oauth_system_prompt"`
 	ClaudeOAuthSystemPromptBlocks           string `json:"claude_oauth_system_prompt_blocks"`
-	EnableAnthropicCacheTTL1hInjection      bool   `json:"enable_anthropic_cache_ttl_1h_injection"`
-	RewriteMessageCacheControl              bool   `json:"rewrite_message_cache_control"`
+	AnthropicCacheTTLDefault                string `json:"anthropic_cache_ttl_default"`
 	EnableClientDatelineNormalization       bool   `json:"enable_client_dateline_normalization"`
 	EnableOpenAISessionUUID                 bool   `json:"enable_openai_session_uuid"`
 	AntigravityUserAgentVersion             string `json:"antigravity_user_agent_version"`

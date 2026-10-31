@@ -129,7 +129,7 @@ func TestPrepareUsageLogInsert_UpstreamRequestIDArgWiring(t *testing.T) {
 	})
 	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
 
-	idx := len(prepared.args) - 6 // end_to_end_first_output_ms follows origin_group_id
+	idx := len(prepared.args) - 8 // TTL policy/applied and end_to_end_first_output_ms follow origin_group_id
 	arg, ok := prepared.args[idx].(sql.NullString)
 	require.True(t, ok, "upstream_request_id arg should be sql.NullString, got %T", prepared.args[idx])
 	require.True(t, arg.Valid)

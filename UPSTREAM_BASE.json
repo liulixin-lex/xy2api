@@ -213,7 +213,8 @@
     "xy-recovery-rejection-endpoints",
     "xy-openai-recent-session-request-protocol",
     "xy-support-tickets",
-    "xy-managed-openai-totp"
+    "xy-managed-openai-totp",
+    "xy-anthropic-cache-ttl"
   ],
   "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/92"
 }

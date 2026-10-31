@@ -106,6 +106,10 @@ const (
 	FieldVideoResolution = "video_resolution"
 	// FieldVideoDurationSeconds holds the string denoting the video_duration_seconds field in the database.
 	FieldVideoDurationSeconds = "video_duration_seconds"
+	// FieldAnthropicCacheTTLPolicy holds the string denoting the anthropic_cache_ttl_policy field in the database.
+	FieldAnthropicCacheTTLPolicy = "anthropic_cache_ttl_policy"
+	// FieldAnthropicCacheTTLApplied holds the string denoting the anthropic_cache_ttl_applied field in the database.
+	FieldAnthropicCacheTTLApplied = "anthropic_cache_ttl_applied"
 	// FieldCacheTTLOverridden holds the string denoting the cache_ttl_overridden field in the database.
 	FieldCacheTTLOverridden = "cache_ttl_overridden"
 	// FieldCreatedAt holds the string denoting the created_at field in the database.
@@ -208,6 +212,8 @@ var Columns = []string{
 	FieldVideoCount,
 	FieldVideoResolution,
 	FieldVideoDurationSeconds,
+	FieldAnthropicCacheTTLPolicy,
+	FieldAnthropicCacheTTLApplied,
 	FieldCacheTTLOverridden,
 	FieldCreatedAt,
 }
@@ -289,6 +295,8 @@ var (
 	DefaultVideoCount int
 	// VideoResolutionValidator is a validator for the "video_resolution" field. It is called by the builders before save.
 	VideoResolutionValidator func(string) error
+	// AnthropicCacheTTLPolicyValidator is a validator for the "anthropic_cache_ttl_policy" field. It is called by the builders before save.
+	AnthropicCacheTTLPolicyValidator func(string) error
 	// DefaultCacheTTLOverridden holds the default value on creation for the "cache_ttl_overridden" field.
 	DefaultCacheTTLOverridden bool
 	// DefaultCreatedAt holds the default value on creation for the "created_at" field.
@@ -526,6 +534,16 @@ func ByVideoResolution(opts ...sql.OrderTermOption) OrderOption {
 // ByVideoDurationSeconds orders the results by the video_duration_seconds field.
 func ByVideoDurationSeconds(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldVideoDurationSeconds, opts...).ToFunc()
+}
+
+// ByAnthropicCacheTTLPolicy orders the results by the anthropic_cache_ttl_policy field.
+func ByAnthropicCacheTTLPolicy(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAnthropicCacheTTLPolicy, opts...).ToFunc()
+}
+
+// ByAnthropicCacheTTLApplied orders the results by the anthropic_cache_ttl_applied field.
+func ByAnthropicCacheTTLApplied(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAnthropicCacheTTLApplied, opts...).ToFunc()
 }
 
 // ByCacheTTLOverridden orders the results by the cache_ttl_overridden field.

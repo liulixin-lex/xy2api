@@ -186,15 +186,16 @@ func pricingWithPriorityMultiplier(base *ModelPricing, multiplier float64) *Mode
 
 // UsageTokens 使用的token数量
 type UsageTokens struct {
-	InputTokens           int
-	ImageInputTokens      int
-	ImageCacheReadTokens  int
-	OutputTokens          int
-	CacheCreationTokens   int
-	CacheReadTokens       int
-	CacheCreation5mTokens int
-	CacheCreation1hTokens int
-	ImageOutputTokens     int
+	InputTokens                int
+	ImageInputTokens           int
+	ImageCacheReadTokens       int
+	OutputTokens               int
+	CacheCreationTokensPresent bool // distinguishes an explicit aggregate zero from omitted usage
+	CacheCreationTokens        int
+	CacheReadTokens            int
+	CacheCreation5mTokens      int
+	CacheCreation1hTokens      int
+	ImageOutputTokens          int
 }
 
 // CostBreakdown 费用明细
@@ -439,7 +440,7 @@ func (s *BillingService) initFallbackPricing() {
 		InputPricePerToken:         2e-6,
 		OutputPricePerToken:        10e-6,
 		CacheCreationPricePerToken: 2.5e-6,
-		CacheReadPricePerToken:     0.2e-6,
+		CacheReadPricePerToken:     0.1e-6,
 		CacheCreation5mPrice:       2.5e-6,
 		CacheCreation1hPrice:       4e-6,
 		SupportsCacheBreakdown:     true,
@@ -1705,12 +1706,14 @@ func (s *BillingService) computeTokenBreakdown(
 func (s *BillingService) computeCacheCreationCost(pricing *ModelPricing, tokens UsageTokens, price, multiplier float64) float64 {
 	if pricing.SupportsCacheBreakdown && (pricing.CacheCreation5mPrice > 0 || pricing.CacheCreation1hPrice > 0) {
 		cacheCreation5mTokens, cacheCreation1hTokens := normalizeCacheCreationBreakdown(tokens)
-		if cacheCreation5mTokens == 0 && cacheCreation1hTokens == 0 && tokens.CacheCreationTokens > 0 {
-			// API 未返回 ephemeral 明细，回退到全部按 5m 单价计费
-			return float64(tokens.CacheCreationTokens) * pricing.CacheCreation5mPrice * multiplier
+		// Unreported TTL detail stays unclassified; bill the remainder at the base write price.
+		unknown := 0
+		if tokens.CacheCreationTokens > 0 {
+			// Sequential subtraction also avoids overflowing unbounded, omitted-aggregate details.
+			unknown = max(max(tokens.CacheCreationTokens-cacheCreation5mTokens, 0)-cacheCreation1hTokens, 0)
 		}
-		return float64(cacheCreation5mTokens)*pricing.CacheCreation5mPrice*multiplier +
-			float64(cacheCreation1hTokens)*pricing.CacheCreation1hPrice*multiplier
+		return (float64(cacheCreation5mTokens)*pricing.CacheCreation5mPrice +
+			float64(cacheCreation1hTokens)*pricing.CacheCreation1hPrice + float64(unknown)*pricing.CacheCreation5mPrice) * multiplier
 	}
 	return float64(tokens.CacheCreationTokens) * price * multiplier
 }
@@ -1721,6 +1724,9 @@ func normalizeCacheCreationBreakdown(tokens UsageTokens) (int, int) {
 	cacheCreation5mTokens := tokens.CacheCreation5mTokens
 	cacheCreation1hTokens := tokens.CacheCreation1hTokens
 	aggregate := tokens.CacheCreationTokens
+	if tokens.CacheCreationTokensPresent && aggregate <= 0 {
+		return 0, 0
+	}
 	if cacheCreation5mTokens < 0 {
 		cacheCreation5mTokens = 0
 	}

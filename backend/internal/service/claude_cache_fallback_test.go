@@ -96,7 +96,7 @@ func TestClaudeCacheScopeAndOriginalProtection(t *testing.T) {
 		{name: "address_path", mutate: func(_ *GatewayService, _ *APIKey, a *Account, _ *ParsedRequest) {
 			a.Credentials["base_url"] = "https://api.anthropic.com/other"
 		}, reason: "injected"},
-		{name: "mapping", mutate: func(_ *GatewayService, _ *APIKey, _ *Account, p *ParsedRequest) { p.Model = "unverified" }, reason: "injected"},
+		{name: "mapping", mutate: func(_ *GatewayService, _ *APIKey, _ *Account, p *ParsedRequest) { p.Model = "unverified" }, reason: "unsupported_route"},
 		{name: "group_fallback", mutate: func(_ *GatewayService, _ *APIKey, a *Account, p *ParsedRequest) {
 			gid := int64(8)
 			p.GroupID = &gid
@@ -158,7 +158,7 @@ func TestClaudeCacheForwardWire(t *testing.T) {
 			contentType := "application/json"
 			if stream {
 				contentType = "text/event-stream"
-				responseBody = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":" + responseBody + "}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5,\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+				responseBody = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":" + responseBody + "}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
 			}
 			upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {contentType}, "X-Request-Id": {"cache-wire"}}, Body: io.NopCloser(strings.NewReader(responseBody))}}
 			svc.httpUpstream = upstream
@@ -469,7 +469,7 @@ func TestClaudeCacheRemovalAtSend(t *testing.T) {
 	ctx := svc.WithClaudeCacheFallbackRequest(context.Background(), key, body)
 	svc.settingService.claudeCacheSnapshot.Store(&cachedClaudeCachePolicy{policy: ClaudeCacheFallbackPolicy{Enabled: true, GroupIDs: []int64{8}}, expiresAt: time.Now().Add(time.Minute)})
 	actx, d := svc.beginClaudeCacheAttempt(ctx, &ParsedRequest{GroupID: key.GroupID}, a)
-	require.Equal(t, body, svc.applyClaudeCacheFallback(actx, a, body, "arbitrary"))
+	require.Equal(t, body, svc.applyClaudeCacheFallback(actx, a, body, cacheTestModel))
 	require.Equal(t, "scope_mismatch", d.Reason)
 }
 
@@ -478,7 +478,8 @@ func TestClaudeCacheAllAnthropicBuilders(t *testing.T) {
 	for _, route := range []string{"apikey", "oauth", "setup-token", "passthrough", "vertex", "bedrock-bearer", "bedrock-sigv4"} {
 		t.Run(route, func(t *testing.T) {
 			svc, key, a := cacheFixture(t)
-			body := []byte(`{"model":"any-model","max_tokens":8,"system":"stable","messages":[{"role":"user","content":"hello"}]}`)
+			key.AnthropicCacheTTLMode = "1h"
+			body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":8,"system":"stable","messages":[{"role":"user","content":"hello"}]}`)
 			switch route {
 			case "oauth":
 				a.Type = AccountTypeOAuth
@@ -500,15 +501,15 @@ func TestClaudeCacheAllAnthropicBuilders(t *testing.T) {
 			case "passthrough":
 				req, _, err = svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(ctx, c, a, body, "fixture")
 			case "bedrock-bearer":
-				req, err = svc.buildUpstreamRequestBedrockAPIKey(ctx, body, "any-model", "us-east-1", false, "fixture")
+				req, err = svc.buildUpstreamRequestBedrockAPIKey(ctx, body, "claude-sonnet-4-5", "us-east-1", false, "fixture")
 			case "bedrock-sigv4":
-				req, err = svc.buildUpstreamRequestBedrock(ctx, body, "any-model", "us-east-1", false, NewBedrockSigner("fixture-id", "fixture-secret", "", "us-east-1"))
+				req, err = svc.buildUpstreamRequestBedrock(ctx, body, "claude-sonnet-4-5", "us-east-1", false, NewBedrockSigner("fixture-id", "fixture-secret", "", "us-east-1"))
 			default:
 				tokenType := "apikey"
 				if a.IsOAuth() {
 					tokenType = "oauth"
 				}
-				req, _, err = svc.buildUpstreamRequest(ctx, c, a, body, "fixture", tokenType, "any-model", false, false)
+				req, _, err = svc.buildUpstreamRequest(ctx, c, a, body, "fixture", tokenType, "claude-sonnet-4-5", false, false)
 			}
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, req.Body.Close()) })
@@ -517,10 +518,19 @@ func TestClaudeCacheAllAnthropicBuilders(t *testing.T) {
 			require.Equal(t, "ephemeral", gjson.GetBytes(wire, "messages.0.content.0.cache_control.type").String())
 			require.Equal(t, "ephemeral", gjson.GetBytes(wire, "system.0.cache_control.type").String())
 			require.False(t, gjson.GetBytes(wire, "cache_control").Exists())
+			require.True(t, anthropicCacheTTLApplied(wire, "1h"), string(wire))
 			require.Equal(t, "injected", d.Reason)
 			require.False(t, HasClaudeCacheControl(body))
 			if route == "bedrock-sigv4" {
 				require.Contains(t, req.Header.Get("Authorization"), "AWS4-HMAC-SHA256")
+				signedAt, err := time.Parse("20060102T150405Z", req.Header.Get("X-Amz-Date"))
+				require.NoError(t, err)
+				check := req.Clone(ctx)
+				check.Header = req.Header.Clone()
+				check.Header.Del("Authorization")
+				signer := NewBedrockSigner("fixture-id", "fixture-secret", "", "us-east-1")
+				require.NoError(t, signer.signer.SignHTTP(ctx, signer.credentials, check, sha256Hash(wire), "bedrock", "us-east-1", signedAt))
+				require.Equal(t, req.Header.Get("Authorization"), check.Header.Get("Authorization"), "SigV4 must use the final TTL bytes")
 			}
 		})
 	}
@@ -582,7 +592,7 @@ func TestClaudeCacheRawUsageBeforeOverrides(t *testing.T) {
 					a.Credentials["access_token"] = "fixture"
 					repo, ok := svc.settingService.settingRepo.(*gatewayTTLSettingRepo)
 					require.True(t, ok)
-					require.NoError(t, repo.Set(context.Background(), SettingKeyEnableAnthropicCacheTTL1hInjection, "true"))
+					require.NoError(t, repo.Set(context.Background(), SettingKeyAnthropicCacheTTLDefault, "1h"))
 				} else {
 					a.Type = AccountTypeSetupToken
 					a.Credentials["access_token"] = "fixture"
@@ -593,7 +603,7 @@ func TestClaudeCacheRawUsageBeforeOverrides(t *testing.T) {
 				contentType := "application/json"
 				if stream {
 					contentType = "text/event-stream"
-					response = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":" + response + "}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5,\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+					response = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":" + response + "}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
 				}
 				upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(response))}}
 				svc.httpUpstream = upstream
@@ -610,8 +620,8 @@ func TestClaudeCacheRawUsageBeforeOverrides(t *testing.T) {
 				require.Equal(t, "injected", result.ClaudeCacheFallback.Reason)
 				require.Equal(t, 50, result.ClaudeCacheFallback.RawUsage.CacheCreation5mTokens)
 				require.Equal(t, 150, result.ClaudeCacheFallback.RawUsage.CacheCreation1hTokens)
-				require.Equal(t, 200, result.Usage.CacheCreation5mTokens)
-				require.Zero(t, result.Usage.CacheCreation1hTokens)
+				require.Equal(t, 50, result.Usage.CacheCreation5mTokens)
+				require.Equal(t, 150, result.Usage.CacheCreation1hTokens)
 				require.Equal(t, 9000, result.ClaudeCacheFallback.RawUsage.CacheReadInputTokens)
 				tail := len(gjson.GetBytes(upstream.lastBody, "messages").Array()) - 1
 				require.GreaterOrEqual(t, tail, 0)

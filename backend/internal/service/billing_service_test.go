@@ -2081,7 +2081,11 @@ func TestNewModelPricingCatalogFallbackAndContext(t *testing.T) {
 				require.NoError(t, err)
 				require.InDelta(t, 100_000*2e-6, cost.InputCost, 1e-10)
 				require.InDelta(t, 400*2.5e-6+600*4e-6, cost.CacheCreationCost, 1e-10)
-				require.InDelta(t, 1000*0.2e-6, cost.CacheReadCost, 1e-10)
+				readPrice := 0.1e-6
+				if source == "catalog" {
+					readPrice = 0.2e-6
+				}
+				require.InDelta(t, 1000*readPrice, cost.CacheReadCost, 1e-10)
 				require.InDelta(t, 500*10e-6, cost.OutputCost, 1e-10)
 				require.False(t, cost.LongContextBillingApplied)
 			})

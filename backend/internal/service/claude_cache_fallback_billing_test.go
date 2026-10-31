@@ -13,6 +13,8 @@ func TestClaudeCacheColdWriteReservationCustomPrice(t *testing.T) {
 	fixture, key, _ := cacheFixture(t)
 	svc := newInflightEstimateGateway(t, nil)
 	svc.settingService = fixture.settingService
+	snap := &inflightSnapshotCacheStub{byBucket: map[string][]Account{inflightBucketKey(*key.GroupID, PlatformAnthropic): {{ID: 11, Platform: PlatformAnthropic, Type: AccountTypeAPIKey}}}}
+	attachInflightSnapshot(svc, snap)
 	input, output, write := 4e-6, 20e-6, 9e-6
 	key.Group.RateMultiplier = 1.2
 	key.Group.ModelPricing = []ChannelModelPricing{{Models: []string{cacheTestModel}, BillingMode: BillingModeToken, InputPrice: &input, OutputPrice: &output, CacheWritePrice: &write}}
@@ -37,7 +39,7 @@ func TestClaudeCacheColdWriteReservationCustomPrice(t *testing.T) {
 }
 
 func TestClaudeCacheActualUsageIndependentCost(t *testing.T) {
-	svc := &BillingService{fallbackPrices: map[string]*ModelPricing{cacheTestModel: {InputPricePerToken: 4e-6, OutputPricePerToken: 20e-6, CacheReadPricePerToken: .2e-6, SupportsCacheBreakdown: true, CacheCreation5mPrice: 5e-6, CacheCreation1hPrice: 8e-6}}}
+	svc := &BillingService{fallbackPrices: map[string]*ModelPricing{cacheTestModel: {InputPricePerToken: 4e-6, OutputPricePerToken: 20e-6, CacheReadPricePerToken: .2e-6, SupportsCacheBreakdown: true, CacheCreationPricePerToken: 5e-6, CacheCreation5mPrice: 5e-6, CacheCreation1hPrice: 8e-6}}}
 	for _, tc := range []struct {
 		name              string
 		total, five, hour int
