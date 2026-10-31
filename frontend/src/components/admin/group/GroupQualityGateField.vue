@@ -50,7 +50,12 @@
       </div>
 
       <fieldset class="mt-3">
-        <legend class="input-label">{{ t('admin.groupQualityGate.pinned') }}</legend>
+        <legend class="input-label">
+          {{ t('admin.groupQualityGate.pinned') }}
+          <span v-if="form.pinned_account_ids.length" class="ml-1 font-normal text-gray-500 dark:text-gray-400">
+            {{ t('admin.groupQualityGate.pinnedCount', { count: form.pinned_account_ids.length }) }}
+          </span>
+        </legend>
         <p v-if="membersState === 'loading'" class="text-sm text-gray-500 dark:text-gray-400">
           {{ t('admin.groupQualityGate.membersLoading') }}
         </p>
@@ -63,27 +68,39 @@
         <p v-else-if="!members.length" class="text-sm text-gray-500 dark:text-gray-400">
           {{ t('admin.groupQualityGate.membersEmpty') }}
         </p>
-        <div v-else class="flex max-h-40 flex-wrap gap-2 overflow-y-auto" data-testid="quality-gate-members">
-          <label
-            v-for="account in members"
-            :key="account.id"
-            :class="[
-              'inline-flex max-w-full cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1 text-sm transition-colors',
-              form.pinned_account_ids.includes(account.id)
-                ? 'border-primary-500 bg-primary-50 text-primary-700 dark:border-primary-400 dark:bg-primary-900/20 dark:text-primary-300'
-                : 'border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-dark-600 dark:text-gray-300 dark:hover:bg-dark-700'
-            ]"
-          >
-            <input
-              v-model="form.pinned_account_ids"
-              type="checkbox"
-              :value="account.id"
-              class="h-3.5 w-3.5 shrink-0 rounded border-gray-300 text-primary-500 focus:ring-primary-500 dark:border-dark-500"
-            />
-            <span class="truncate">{{ account.name }}</span>
-            <span class="shrink-0 text-xs text-gray-500 dark:text-gray-400">#{{ account.id }}</span>
-          </label>
-        </div>
+        <template v-else>
+          <input
+            v-if="members.length > MEMBER_SEARCH_MIN"
+            v-model="memberQuery"
+            type="search"
+            class="input mb-2 py-1.5 text-sm"
+            :placeholder="t('admin.groupQualityGate.pinnedSearch')"
+            :aria-label="t('admin.groupQualityGate.pinnedSearch')"
+            data-testid="quality-gate-member-search"
+          />
+          <div class="flex max-h-[5.5rem] flex-wrap gap-1.5 overflow-y-auto" data-testid="quality-gate-members">
+            <label
+              v-for="account in shownMembers"
+              :key="account.id"
+              :class="[
+                'inline-flex max-w-full cursor-pointer items-center gap-1 rounded-md border px-2 py-0.5 text-xs transition-colors',
+                form.pinned_account_ids.includes(account.id)
+                  ? 'border-primary-500 bg-primary-50 text-primary-700 dark:border-primary-400 dark:bg-primary-900/20 dark:text-primary-300'
+                  : 'border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-dark-600 dark:text-gray-300 dark:hover:bg-dark-700'
+              ]"
+            >
+              <input
+                v-model="form.pinned_account_ids"
+                type="checkbox"
+                :value="account.id"
+                class="h-3.5 w-3.5 shrink-0 rounded border-gray-300 text-primary-500 focus:ring-primary-500 dark:border-dark-500"
+              />
+              <span class="truncate">{{ account.name }}</span>
+              <span class="shrink-0 text-gray-500 dark:text-gray-400">#{{ account.id }}</span>
+            </label>
+            <p v-if="!shownMembers.length" class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.groupQualityGate.pinnedNoMatch') }}</p>
+          </div>
+        </template>
         <p class="input-hint">{{ t('admin.groupQualityGate.pinnedHint') }}</p>
       </fieldset>
     </div>
@@ -102,6 +119,7 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 import { useStateMotion } from '@/composables/useStateMotion'
 import type { GroupQualityGatePolicy } from '@/types/groupQualityGate'
 import {
+  pinnedCandidates,
   qualityGateFormToPolicy,
   qualityGatePoliciesEqual,
   qualityGatePolicyToForm,
@@ -120,6 +138,8 @@ const FIELDS: { key: QualityGateField; label: string; hint: string; min: string;
   { key: 'fast_warm_ttft_p90_seconds', label: 'admin.groupQualityGate.fastWarmTtft', hint: 'admin.groupQualityGate.fastWarmTtftHint', min: '1', max: '600' }
 ]
 const MEMBER_PAGE_SIZE = 1000
+// 成员多于这个数时显示搜索框；列表限高约三行，超出滚动，不把对话框撑高。
+const MEMBER_SEARCH_MIN = 8
 
 const props = defineProps<{ groupId: number }>()
 const emit = defineEmits<{
@@ -143,6 +163,9 @@ const form = reactive<QualityGateFormState>(qualityGatePolicyToForm(null))
 const members = ref<{ id: number; name: string }[]>([])
 const membersState = ref<'idle' | 'loading' | 'ready' | 'failed'>('idle')
 const membersError = ref('')
+const memberQuery = ref('')
+// 已固定的排在前面按打开对话框时的配置算，勾选时芯片不跳位。
+const shownMembers = computed(() => pinnedCandidates(members.value, loaded.pinned_account_ids, memberQuery.value))
 
 const touched = reactive(new Set<QualityGateField>())
 const submitted = ref(false)

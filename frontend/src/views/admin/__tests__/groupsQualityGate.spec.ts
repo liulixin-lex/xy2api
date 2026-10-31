@@ -5,6 +5,7 @@ import zh from "@/i18n/locales/zh/admin/groupQualityGate";
 import en from "@/i18n/locales/en/admin/groupQualityGate";
 
 import {
+  pinnedCandidates,
   qualityGateFormToPolicy,
   qualityGatePoliciesEqual,
   qualityGatePolicyToForm,
@@ -133,4 +134,18 @@ describe("qualityGateSaveFailureKey", () => {
       );
     },
   );
+});
+
+describe("pinnedCandidates", () => {
+  const members = [
+    { id: 101, name: "OpenAI-甲" },
+    { id: 102, name: "Codex Pro" },
+    { id: 103, name: "OpenAI-丙" },
+  ];
+  it("lists selected members first and filters by name or #id", () => {
+    expect(pinnedCandidates(members, [103], "").map((m) => m.id)).toEqual([103, 101, 102]);
+    expect(pinnedCandidates(members, [], "codex").map((m) => m.id)).toEqual([102]);
+    expect(pinnedCandidates(members, [], "#103").map((m) => m.id)).toEqual([103]);
+    expect(pinnedCandidates(members, [101], "openai").map((m) => m.id)).toEqual([101, 103]);
+  });
 });

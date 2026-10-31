@@ -27,9 +27,6 @@
           }) }}
         </template>
       </p>
-      <p v-if="level === 'danger'" class="mt-1 text-red-700 dark:text-red-400">
-        {{ t('admin.groups.profitControl.previewZeroHint') }}
-      </p>
     </template>
     <p v-else-if="errorMessage" class="text-gray-500 dark:text-gray-400">
       {{ t('admin.groups.profitControl.previewFailed', { message: errorMessage }) }}

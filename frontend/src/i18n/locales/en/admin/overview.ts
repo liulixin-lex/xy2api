@@ -1194,7 +1194,6 @@ export default {
         previewInvalid: 'Enter a valid margin to see the preview',
         previewFailed: 'Preview unavailable: {message}',
         previewEmpty: 'Equals an upstream multiplier ≤ {ceiling}; this group has no schedulable members',
-        previewZeroHint: 'No member passes at this margin, so requests to this group will go to the fallback chain. Saving asks for confirmation.',
         zeroPassConfirmTitle: 'No member passes the profit gate',
         zeroPassConfirmMessage: 'At this margin every schedulable member is above the upstream multiplier limit, so all requests will go to the fallback chain. Save anyway?',
         zeroPassConfirm: 'Save anyway'

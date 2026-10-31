@@ -12,8 +12,10 @@ import {
   groupQualityGateView,
   groupQualityStateLabel,
   groupQualityTooltip,
+  strictestQualityLimits,
   orderGroupsByQuality,
   qualityTooltipTop,
+  type GroupQualityCell,
   type GroupQualitySources
 } from '../groupQualityPresentation'
 
@@ -23,7 +25,8 @@ const clock = (iso: string) => `@${iso.slice(11, 16)}`
 
 const account = (overrides: Partial<GroupQualityGateAccountStatus> = {}): GroupQualityGateAccountStatus => ({
   account_id: 101, state: 'eligible', until: null, reasons: [], strikes: 0, usable: true, passing: true,
-  guard_held: false, pinned: false, vetoed: false, tier: 0, headroom: 0.4, ...overrides
+  guard_held: false, pinned: false, vetoed: false, tier: 0, headroom: 0.4,
+  metrics: { calls: 120, soft_failures: 2, error_rate: 0.017, warm_samples: 40, warm_ttft_p90_ms: 8000 }, ...overrides
 })
 const metrics = (overrides: Partial<GroupQualityAccountMetrics> = {}): GroupQualityAccountMetrics => ({
   calls: 180, soft_failures: 4, error_rate: 0.022, warm_samples: 64, warm_ttft_p90_ms: 7800,
@@ -158,62 +161,91 @@ describe('orderGroupsByQuality', () => {
 })
 
 describe('groupQualityTooltip', () => {
-  it('lists state, pin, strikes, reasons, measured values with limits and headroom', () => {
-    const quality = qualityOf(account({ state: 'ejected', until: '2026-11-01T14:20:00Z', pinned: true, strikes: 2, reasons: ['error_rate', 'warm_ttft'], headroom: -0.18 }))
-    expect(groupQualityTooltip('Codex', quality, metrics({ error_rate: 0.118, warm_ttft_p90_ms: 21500 }), i18nFor('zh').t, clock)).toEqual([
-      'Codex：熔断至 @14:20',
-      '固定账号：熔断时仍参与本组调度',
-      '连续熔断第 2 次',
-      '原因：错误率超线、续轮首字超线',
-      '错误率 11.8%，上限 10%',
-      '续轮首字 p90 21.5s，上限 20s',
-      '余量 -18%'
-    ])
+  const zh = i18nFor('zh').t
+  const cells = (block: ReturnType<typeof groupQualityTooltip>) => block.rows.map(row => [row.label, row.value, row.note ?? '', row.limit, row.over])
+
+  it('compresses an ejected group into a title, reason chips and a metric | measured | limit table', () => {
+    const block = groupQualityTooltip('Codex', qualityOf(account({
+      state: 'ejected', until: '2026-11-01T14:20:00Z', strikes: 2, reasons: ['error_rate', 'warm_ttft'], headroom: -0.18,
+      metrics: { calls: 150, soft_failures: 21, error_rate: 0.14, warm_samples: 52, warm_ttft_p90_ms: 31800 }
+    })), zh, clock)
+    expect(block.title).toBe('Codex · 熔断至 @14:20（第 2 次）')
+    expect(block.note).toBeUndefined()
+    expect(block.reasons).toEqual(['错误率超线', '续轮首字超线'])
+    expect(cells(block)).toEqual([['错误率', '14%', '', '10%', true], ['首字 p90', '31.8s', '', '20s', true]])
+    expect(block.headroom).toEqual({ text: '余量 -18%', tone: 'danger' })
   })
 
-  it('says when there is no data yet and when the evaluation is stale', () => {
-    const quality = qualityOf(account({ state: 'ejected', guard_held: true, headroom: null }), { stale: true })
-    expect(groupQualityTooltip('Codex', quality, metrics({ calls: 0, warm_samples: 0 }), i18nFor('en').t, clock)).toEqual([
-      'Codex: Held by floor guard',
-      'Over the limits, but kept in scheduling so the group keeps its minimum of usable accounts',
-      'Error rate: no data yet, limit 10%',
-      'Warm first-token p90: no data yet, limit 20s',
-      'Headroom: not enough samples',
-      'Evaluation data is more than 5 minutes old; the previous state is kept'
-    ])
+  it('shows the full window for ejected groups, floor guard included, and member metrics for eligible and trial', () => {
+    const postEjection = { calls: 4, soft_failures: 0, error_rate: null, warm_samples: 4, warm_ttft_p90_ms: null }
+    const window = metrics({ calls: 60, soft_failures: 0, error_rate: 0, warm_samples: 103, warm_ttft_p90_ms: 29200 })
+    const pinned = groupQualityTooltip('Codex', qualityOf(account({
+      state: 'ejected', pinned: true, strikes: 1, reasons: ['warm_ttft'], headroom: null, metrics: postEjection
+    })), zh, clock, window)
+    expect(pinned.measuredNote).toBe('熔断时窗口')
+    expect(cells(pinned)).toEqual([['错误率', '0%', '未达判定条件', '10%', false], ['首字 p90', '29.2s', '', '20s', true]])
+    expect(pinned.headroom).toEqual({ text: '余量 -46%', tone: 'danger' })
+    const held = groupQualityTooltip('Codex', qualityOf(account({ state: 'ejected', guard_held: true, strikes: 2, headroom: 0.5, metrics: postEjection })), zh, clock,
+      metrics({ calls: 224, soft_failures: 75, error_rate: 0.335, warm_samples: 148, warm_ttft_p90_ms: 8200 }))
+    expect([held.measuredNote, cells(held)[0][1], held.headroom?.text]).toEqual(['熔断时窗口', '33.5%', '余量 -235%'])
+    const trial = groupQualityTooltip('Codex', qualityOf(account({ state: 'trial', headroom: null, metrics: postEjection })), zh, clock, window)
+    expect([trial.measuredNote, cells(trial)[1][1], trial.headroom]).toEqual([undefined, '样本不足', undefined])
   })
 
-  it('tells zero headroom at the limit apart from not enough samples', () => {
-    const lastLine = (headroom: number | null) =>
-      groupQualityTooltip('Codex', qualityOf(account({ headroom })), metrics(), i18nFor('zh').t, clock).at(-1)
-    expect(lastLine(0)).toBe('余量 0%')
-    expect(lastLine(null)).toBe('余量：样本不足')
+  it('uses member metrics: below-threshold error ratio in grey, too few samples, no data; headroom only when close', () => {
+    const below = groupQualityTooltip('Codex', qualityOf(account({
+      headroom: 0.12, metrics: { calls: 12, soft_failures: 1, error_rate: null, warm_samples: 4, warm_ttft_p90_ms: null }
+    })), zh, clock)
+    expect(below.title).toBe('Codex · 合格')
+    expect(cells(below)).toEqual([['错误率', '8.3%', '未达判定条件', '10%', false], ['首字 p90', '样本不足', '', '20s', false]])
+    expect(below.headroom).toEqual({ text: '余量 12%', tone: 'warning' })
+    const empty = groupQualityTooltip('Codex', qualityOf(account({
+      headroom: null, metrics: { calls: 0, soft_failures: 0, error_rate: null, warm_samples: 0, warm_ttft_p90_ms: null }
+    })), zh, clock)
+    expect(cells(empty).map(row => row[1])).toEqual(['无数据', '无数据'])
+    expect(empty.headroom).toBeUndefined()
+    expect(groupQualityTooltip('Codex', qualityOf(account()), zh, clock).headroom).toBeUndefined()
   })
 
-  it('explains pending and failed notices in one line', () => {
-    expect(groupQualityTooltip('Codex', { kind: 'pending' }, metrics(), i18nFor('zh').t, clock)).toEqual(['Codex：门槛已开启，等待下一轮评估（每分钟一次）'])
-    expect(groupQualityTooltip('Codex', { kind: 'failed' }, undefined, i18nFor('zh').t, clock)).toEqual(['Codex：门槛状态读取失败，刷新列表后重试'])
+  it('keeps pinned and floor-guard notes to one short phrase, and flags stale data', () => {
+    expect(groupQualityTooltip('Codex', qualityOf(account({ state: 'ejected', pinned: true, strikes: 1 })), zh, clock).note).toBe('固定账号，熔断时仍调度')
+    const held = groupQualityTooltip('Codex', qualityOf(account({ state: 'ejected', guard_held: true, strikes: 1 }), { stale: true }), i18nFor('en').t, clock)
+    expect([held.title, held.note, held.stale]).toEqual(['Codex · Held by floor guard', 'Kept to hold the minimum of usable accounts', 'Not evaluated for 5+ min, previous state kept'])
+  })
+
+  it('gives pending and failed notices a title and a next step only', () => {
+    expect(groupQualityTooltip('Codex', { kind: 'pending' }, zh, clock)).toEqual({ title: 'Codex · 等待评估', note: '每分钟评估一次', reasons: [], rows: [] })
+    expect(groupQualityTooltip('Codex', { kind: 'failed' }, zh, clock)).toEqual({ title: 'Codex · 读取失败', note: '刷新列表后重试', reasons: [], rows: [] })
   })
 })
 
 describe('accountQualityMetricItems', () => {
-  const texts = (m: GroupQualityAccountMetrics) => accountQualityMetricItems(m, i18nFor('zh').t)
+  const limits = { maxErrorRate: 0.1, maxWarmTtftMs: 20000 }
+  const items = (m: GroupQualityAccountMetrics, l = limits) => accountQualityMetricItems(m, i18nFor('zh').t, l)
 
-  it('formats the three inline metrics', () => {
-    expect(texts(metrics()).map(item => item.text)).toEqual(['错误 2.2%', 'p90 7.8s', '零缓存 3%'])
-    expect(texts(metrics())[0].title).toBe('错误率（近 15 分钟）：180 次调用，软失败 4 次')
+  it('writes the three full-window metrics compactly and lists only those with samples', () => {
+    expect(items(metrics()).map(item => item.text)).toEqual(['错 2.2%', '首字 7.8s', '零缓存 3%'])
+    expect(items(metrics())[0].title).toBe('错误率（近 15 分钟）：180 次调用，软失败 4 次')
+    expect(items(metrics({ calls: 0, warm_samples: 0 })).map(item => item.key)).toEqual(['zero_cache'])
+    expect(items(metrics({ calls: 0, warm_samples: 0, zero_cache_samples: 0 }))).toEqual([])
   })
 
-  it('shows a dash for metrics without samples', () => {
-    expect(texts(metrics({ calls: 0, warm_samples: 0, zero_cache_samples: 0 })).map(item => item.text)).toEqual(['错误 —', 'p90 —', '零缓存 —'])
+  it('colours error rate and first token over the strictest group limit once samples are enough, and zero cache above 30%', () => {
+    const alerts = (m: Partial<GroupQualityAccountMetrics>) => items(metrics(m)).filter(item => item.alert).map(item => item.key)
+    expect(alerts({})).toEqual([])
+    expect(alerts({ calls: 150, soft_failures: 21, error_rate: 0.14, warm_ttft_p90_ms: 31800, warm_zero_cache_rate: 0.31, zero_cache_samples: 20 })).toEqual(['error_rate', 'warm_ttft', 'zero_cache'])
+    expect(alerts({ calls: 19, soft_failures: 5, error_rate: 0.26, warm_samples: 9, warm_ttft_p90_ms: 31800, zero_cache_samples: 19, warm_zero_cache_rate: 0.9 })).toEqual([])
+    expect(accountQualityMetricItems(metrics({ calls: 150, soft_failures: 21, error_rate: 0.14 }), i18nFor('zh').t).some(item => item.alert)).toBe(false)
   })
+})
 
-  it('flags zero cache above 30% only once there are at least 20 samples', () => {
-    const alert = (rate: number, samples: number) => texts(metrics({ warm_zero_cache_rate: rate, zero_cache_samples: samples }))[2].alert
-    expect(alert(0.31, 20)).toBe(true)
-    expect(alert(0.3, 40)).toBe(false)
-    expect(alert(0.9, 19)).toBe(false)
-    expect(texts(metrics()).filter(item => item.alert)).toEqual([])
+describe('strictestQualityLimits', () => {
+  it('takes the tightest limits among evaluated groups and ignores notices', () => {
+    const cell = (maxErrorRate: number, maxWarmTtftMs: number) => ({ ...qualityOf(account()), maxErrorRate, maxWarmTtftMs })
+    expect(strictestQualityLimits(new Map<number, GroupQualityCell>([[1, cell(0.1, 20000)], [2, cell(0.05, 30000)], [3, { kind: 'pending' }]])))
+      .toEqual({ maxErrorRate: 0.05, maxWarmTtftMs: 20000 })
+    expect(strictestQualityLimits(new Map<number, GroupQualityCell>([[3, { kind: 'pending' }]]))).toBeUndefined()
+    expect(strictestQualityLimits(undefined)).toBeUndefined()
   })
 })
 

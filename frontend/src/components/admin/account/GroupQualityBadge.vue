@@ -8,7 +8,7 @@
     ]"
   >
     <template v-if="pinned">
-      <span aria-hidden="true">📌</span>
+      <Icon name="lock" size="xs" class="shrink-0" aria-hidden="true" />
       <span class="sr-only">{{ t('admin.groupQualityGate.pinnedMark') }}</span>
     </template>
     <span class="min-w-0 truncate">{{ name }}</span>
@@ -19,6 +19,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import Icon from '@/components/icons/Icon.vue'
 import { formatDateTime } from '@/utils/format'
 import {
   GROUP_QUALITY_BADGE_CLASSES,

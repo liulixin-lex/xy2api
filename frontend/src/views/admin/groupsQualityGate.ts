@@ -111,3 +111,21 @@ export const qualityGateSaveFailureKey = (error: unknown): string =>
   (error as { status?: unknown }).status === 409
     ? "groupSavedGateConflict"
     : "groupSavedGateFailed";
+
+// 固定账号多选：按名称或 #ID 筛选（不区分大小写），已选的排在前面，其余保持原顺序。
+export const pinnedCandidates = <T extends { id: number; name: string }>(
+  members: T[],
+  pinned: number[],
+  query: string,
+): T[] => {
+  const needle = query.trim().toLowerCase().replace(/^#/, "");
+  const selected = new Set(pinned);
+  return members
+    .filter(
+      (member) =>
+        !needle ||
+        member.name.toLowerCase().includes(needle) ||
+        String(member.id).includes(needle),
+    )
+    .sort((a, b) => Number(selected.has(b.id)) - Number(selected.has(a.id)));
+};
