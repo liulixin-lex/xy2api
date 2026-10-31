@@ -27,15 +27,32 @@ func IsWindowExpired(windowStart *time.Time, duration time.Duration) bool {
 	return windowStart == nil || time.Since(*windowStart) >= duration
 }
 
+const (
+	AnthropicCacheTTLModeInherit = "inherit"
+	AnthropicCacheTTLModeOff     = "off"
+	AnthropicCacheTTLMode5m      = "5m"
+	AnthropicCacheTTLMode1h      = "1h"
+)
+
+func ValidateAnthropicCacheTTLMode(mode string) error {
+	switch mode {
+	case AnthropicCacheTTLModeInherit, AnthropicCacheTTLModeOff, AnthropicCacheTTLMode5m, AnthropicCacheTTLMode1h:
+		return nil
+	default:
+		return ErrInvalidAnthropicCacheTTLMode
+	}
+}
+
 type APIKey struct {
-	ID          int64
-	UserID      int64
-	Key         string
-	Name        string
-	GroupID     *int64
-	Status      string
-	IPWhitelist []string
-	IPBlacklist []string
+	AnthropicCacheTTLMode string
+	ID                    int64
+	UserID                int64
+	Key                   string
+	Name                  string
+	GroupID               *int64
+	Status                string
+	IPWhitelist           []string
+	IPBlacklist           []string
 	// 预编译的 IP 规则，用于认证热路径避免重复 ParseIP/ParseCIDR。
 	CompiledIPWhitelist *ip.CompiledIPRules `json:"-"`
 	CompiledIPBlacklist *ip.CompiledIPRules `json:"-"`

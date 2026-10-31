@@ -250,8 +250,7 @@ type UpdateSettingsRequest struct {
 	EnableClaudeOAuthSystemPromptInjection *bool   `json:"enable_claude_oauth_system_prompt_injection"`
 	ClaudeOAuthSystemPrompt                *string `json:"claude_oauth_system_prompt"`
 	ClaudeOAuthSystemPromptBlocks          *string `json:"claude_oauth_system_prompt_blocks"`
-	EnableAnthropicCacheTTL1hInjection     *bool   `json:"enable_anthropic_cache_ttl_1h_injection"`
-	RewriteMessageCacheControl             *bool   `json:"rewrite_message_cache_control"`
+	AnthropicCacheTTLDefault               *string `json:"anthropic_cache_ttl_default"`
 	EnableClientDatelineNormalization      *bool   `json:"enable_client_dateline_normalization"`
 	EnableOpenAISessionUUID                *bool   `json:"enable_openai_session_uuid"`
 	AntigravityUserAgentVersion            *string `json:"antigravity_user_agent_version"`
@@ -515,12 +514,21 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	if _, sent := sentFields[service.SettingKeyAnthropicCacheTTLDefault]; sent {
+		if req.AnthropicCacheTTLDefault == nil || (*req.AnthropicCacheTTLDefault != "5m" && *req.AnthropicCacheTTLDefault != "1h") {
+			response.BadRequest(c, "anthropic_cache_ttl_default must be 5m or 1h")
+			return
+		}
+	}
 	if err := service.ValidateStripePaymentTypes(req.PaymentEnabledTypes); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 	auditReq := settingsAuditRequest(req)
 	omitted := omittedSettingKeys(sentFields)
+	if _, sent := sentFields[service.SettingKeyAnthropicCacheTTLDefault]; !sent {
+		omitted[service.SettingKeyAnthropicCacheTTLDefault] = struct{}{}
+	}
 	if service.IsMaskedProxyURL(strings.TrimSpace(req.OpenAICodexTicketHarvestProxyURL)) {
 		omitted[service.SettingKeyOpenAICodexTicketHarvestProxyURL] = struct{}{}
 	}
@@ -1776,17 +1784,11 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.ClaudeOAuthSystemPromptBlocks
 		}(),
-		EnableAnthropicCacheTTL1hInjection: func() bool {
-			if req.EnableAnthropicCacheTTL1hInjection != nil {
-				return *req.EnableAnthropicCacheTTL1hInjection
+		AnthropicCacheTTLDefault: func() string {
+			if req.AnthropicCacheTTLDefault != nil {
+				return *req.AnthropicCacheTTLDefault
 			}
-			return previousSettings.EnableAnthropicCacheTTL1hInjection
-		}(),
-		RewriteMessageCacheControl: func() bool {
-			if req.RewriteMessageCacheControl != nil {
-				return *req.RewriteMessageCacheControl
-			}
-			return previousSettings.RewriteMessageCacheControl
+			return previousSettings.AnthropicCacheTTLDefault
 		}(),
 		EnableOpenAISessionUUID: func() bool {
 			if req.EnableOpenAISessionUUID != nil {
@@ -2435,8 +2437,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		EnableClaudeOAuthSystemPromptInjection:                 updatedSettings.EnableClaudeOAuthSystemPromptInjection,
 		ClaudeOAuthSystemPrompt:                                updatedSettings.ClaudeOAuthSystemPrompt,
 		ClaudeOAuthSystemPromptBlocks:                          updatedSettings.ClaudeOAuthSystemPromptBlocks,
-		EnableAnthropicCacheTTL1hInjection:                     updatedSettings.EnableAnthropicCacheTTL1hInjection,
-		RewriteMessageCacheControl:                             updatedSettings.RewriteMessageCacheControl,
+		AnthropicCacheTTLDefault:                               updatedSettings.AnthropicCacheTTLDefault,
 		EnableClientDatelineNormalization:                      updatedSettings.EnableClientDatelineNormalization,
 		EnableOpenAISessionUUID:                                updatedSettings.EnableOpenAISessionUUID,
 		AntigravityUserAgentVersion:                            updatedSettings.AntigravityUserAgentVersion,

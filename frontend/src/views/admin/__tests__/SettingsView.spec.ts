@@ -474,8 +474,7 @@ const baseSettingsResponse = {
   enable_claude_oauth_system_prompt_injection: true,
   claude_oauth_system_prompt: "",
   claude_oauth_system_prompt_blocks: "",
-  enable_anthropic_cache_ttl_1h_injection: false,
-  rewrite_message_cache_control: false,
+  anthropic_cache_ttl_default: "5m",
   enable_client_dateline_normalization: true,
   enable_openai_session_uuid: true,
   antigravity_user_agent_version: "",
@@ -1318,10 +1317,10 @@ describe("admin SettingsView payment visible method controls", () => {
     );
   });
 
-  it("submits Anthropic cache TTL injection gateway setting", async () => {
+  it("submits the selected Anthropic cache TTL default", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
-      enable_anthropic_cache_ttl_1h_injection: true,
+      anthropic_cache_ttl_default: "1h",
     });
 
     const wrapper = mountView();
@@ -1333,27 +1332,7 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(updateSettings).toHaveBeenCalledTimes(1);
     expect(updateSettings).toHaveBeenCalledWith(
       expect.objectContaining({
-        enable_anthropic_cache_ttl_1h_injection: true,
-      }),
-    );
-  });
-
-  it("submits message cache_control rewrite gateway setting", async () => {
-    getSettings.mockResolvedValueOnce({
-      ...baseSettingsResponse,
-      rewrite_message_cache_control: true,
-    });
-
-    const wrapper = mountView();
-
-    await flushPromises();
-    await wrapper.find("form").trigger("submit.prevent");
-    await flushPromises();
-
-    expect(updateSettings).toHaveBeenCalledTimes(1);
-    expect(updateSettings).toHaveBeenCalledWith(
-      expect.objectContaining({
-        rewrite_message_cache_control: true,
+        anthropic_cache_ttl_default: "1h",
       }),
     );
   });

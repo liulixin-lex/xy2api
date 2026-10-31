@@ -29,6 +29,8 @@ const (
 	FieldName = "name"
 	// FieldGroupID holds the string denoting the group_id field in the database.
 	FieldGroupID = "group_id"
+	// FieldAnthropicCacheTTLMode holds the string denoting the anthropic_cache_ttl_mode field in the database.
+	FieldAnthropicCacheTTLMode = "anthropic_cache_ttl_mode"
 	// FieldStatus holds the string denoting the status field in the database.
 	FieldStatus = "status"
 	// FieldLastUsedAt holds the string denoting the last_used_at field in the database.
@@ -102,6 +104,7 @@ var Columns = []string{
 	FieldKey,
 	FieldName,
 	FieldGroupID,
+	FieldAnthropicCacheTTLMode,
 	FieldStatus,
 	FieldLastUsedAt,
 	FieldIPWhitelist,
@@ -148,6 +151,10 @@ var (
 	KeyValidator func(string) error
 	// NameValidator is a validator for the "name" field. It is called by the builders before save.
 	NameValidator func(string) error
+	// DefaultAnthropicCacheTTLMode holds the default value on creation for the "anthropic_cache_ttl_mode" field.
+	DefaultAnthropicCacheTTLMode string
+	// AnthropicCacheTTLModeValidator is a validator for the "anthropic_cache_ttl_mode" field. It is called by the builders before save.
+	AnthropicCacheTTLModeValidator func(string) error
 	// DefaultStatus holds the default value on creation for the "status" field.
 	DefaultStatus string
 	// StatusValidator is a validator for the "status" field. It is called by the builders before save.
@@ -211,6 +218,11 @@ func ByName(opts ...sql.OrderTermOption) OrderOption {
 // ByGroupID orders the results by the group_id field.
 func ByGroupID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldGroupID, opts...).ToFunc()
+}
+
+// ByAnthropicCacheTTLMode orders the results by the anthropic_cache_ttl_mode field.
+func ByAnthropicCacheTTLMode(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAnthropicCacheTTLMode, opts...).ToFunc()
 }
 
 // ByStatus orders the results by the status field.

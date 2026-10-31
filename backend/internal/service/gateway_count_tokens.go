@@ -82,23 +82,13 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 			return err
 		}
 
-		if err := replaceBody(s.rewriteMessageCacheControlIfEnabled(ctx, body)); err != nil {
-			return err
-		}
 		if rw := buildToolNameRewriteFromBody(body); rw != nil {
-			if err := replaceBody(applyToolNameRewriteToBody(body, rw)); err != nil {
-				return err
-			}
-		} else {
-			if err := replaceBody(applyToolsLastCacheBreakpoint(body)); err != nil {
+			if err := replaceBody(rewriteToolNamesInBody(body, rw)); err != nil {
 				return err
 			}
 		}
-
-		// 4 块上限的兜底：其余四条出口都在自己的转发路径上调过一次，只有这里没有。
-		// 不再剥离客户端 system 断点之后，「客户端 system + 客户端 messages +
-		// 上面刚注入的 tools[-1]」可以直接顶到 5 块，而上游对超限是 400。
-		if err := replaceBody(enforceCacheControlLimit(body)); err != nil {
+		// 校验客户端现有声明; count_tokens never creates new cache checkpoints.
+		if err := replaceBody(stripDeferredToolCacheControl(body)); err != nil {
 			return err
 		}
 	}
@@ -523,7 +513,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 		body = syncBillingHeaderVersion(body, billingUA)
 	}
 
-	// === 计算最终 anthropic-beta header（先于 body sanitize 与 CCH 签名）===
+	// === 计算最终 anthropic-beta header（先于 body sanitize）===
 	// 顺序约束同 buildUpstreamRequest。
 	ctEffectiveDropSet := mergeDropSets(s.getBetaPolicyFilterSet(ctx, c, account, modelID))
 	finalBetaHeader, finalBetaShouldSet := s.computeFinalCountTokensAnthropicBeta(

@@ -22,6 +22,7 @@
 | [`account-scheduling.md`](account-scheduling.md) | 账号调度：日常开关、原版调度规则与 0.4.0 韧性规则 |
 | [`openai-cache-reliability.md`](openai-cache-reliability.md) | OpenAI 缓存计量与可靠性 |
 | [`CLAUDE_CACHE_FALLBACK.md`](CLAUDE_CACHE_FALLBACK.md) | Claude 自动缓存（按分组） |
+| [`ANTHROPIC_CACHE_TTL.md`](ANTHROPIC_CACHE_TTL.md) | Claude 缓存 TTL：管理员默认、Key 偏好、最终请求、计费与迁移 |
 | [`OPENAI_QUALITY_ROUTING.md`](OPENAI_QUALITY_ROUTING.md) | OpenAI 会话质量路由 |
 | [`OPENAI_IQ_CHECK.md`](OPENAI_IQ_CHECK.md) | OpenAI 智商检测：按“账号 × 模型”检测与冷却、参数化题目、自报模型识别、升级与回退 |
 | [`CODEX_STATE.md`](CODEX_STATE.md) | Codex STATE 与智商检测（按出站模型联动） |
@@ -80,6 +81,7 @@
 
 | 变更 | 内容 | 状态 |
 |---|---|---|
+| [`anthropic-cache-ttl-20261030`](../openspec/changes/anthropic-cache-ttl-20261030/) | Anthropic TTL、Key 四态、usage/计费/预留及旧策略退役 | 本地实施中；未发布、未部署 |
 | [`operator-role-20261027`](../openspec/changes/operator-role-20261027/) | 普通管理员（`operator`）角色与逐人权限：权限目录与中间件、资金与放置开关、上游地址开关、脱敏、角色保护；叠加在 PR-B 之上 | 开发中（PR-A） |
 | [`upstream-balance-20261027`](../openspec/changes/upstream-balance-20261027/) | 账号页「上游余额」列与 new-api 访问令牌；中转的 kimi、deepseek 账号退出 CN 余额检查 | 开发中（PR-B） |
 | [`gateway-resilience-045-20261021`](../openspec/changes/gateway-resilience-045-20261021/) | 网关韧性 0.4.5：RA-1 修复、OpenAI Responses 透传与 Gateway 入站经 Anthropic 上游的明确终止、审查遗留 P2 | 0.4.5、0.4.6 已发布（生产未部署）；后续待办见其 tasks §7 |

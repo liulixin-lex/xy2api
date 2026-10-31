@@ -120,6 +120,20 @@ func (_u *APIKeyUpdate) ClearGroupID() *APIKeyUpdate {
 	return _u
 }
 
+// SetAnthropicCacheTTLMode sets the "anthropic_cache_ttl_mode" field.
+func (_u *APIKeyUpdate) SetAnthropicCacheTTLMode(v string) *APIKeyUpdate {
+	_u.mutation.SetAnthropicCacheTTLMode(v)
+	return _u
+}
+
+// SetNillableAnthropicCacheTTLMode sets the "anthropic_cache_ttl_mode" field if the given value is not nil.
+func (_u *APIKeyUpdate) SetNillableAnthropicCacheTTLMode(v *string) *APIKeyUpdate {
+	if v != nil {
+		_u.SetAnthropicCacheTTLMode(*v)
+	}
+	return _u
+}
+
 // SetStatus sets the "status" field.
 func (_u *APIKeyUpdate) SetStatus(v string) *APIKeyUpdate {
 	_u.mutation.SetStatus(v)
@@ -555,6 +569,11 @@ func (_u *APIKeyUpdate) check() error {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "APIKey.name": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.AnthropicCacheTTLMode(); ok {
+		if err := apikey.AnthropicCacheTTLModeValidator(v); err != nil {
+			return &ValidationError{Name: "anthropic_cache_ttl_mode", err: fmt.Errorf(`ent: validator failed for field "APIKey.anthropic_cache_ttl_mode": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Status(); ok {
 		if err := apikey.StatusValidator(v); err != nil {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "APIKey.status": %w`, err)}
@@ -592,6 +611,9 @@ func (_u *APIKeyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(apikey.FieldName, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.AnthropicCacheTTLMode(); ok {
+		_spec.SetField(apikey.FieldAnthropicCacheTTLMode, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(apikey.FieldStatus, field.TypeString, value)
@@ -904,6 +926,20 @@ func (_u *APIKeyUpdateOne) SetNillableGroupID(v *int64) *APIKeyUpdateOne {
 // ClearGroupID clears the value of the "group_id" field.
 func (_u *APIKeyUpdateOne) ClearGroupID() *APIKeyUpdateOne {
 	_u.mutation.ClearGroupID()
+	return _u
+}
+
+// SetAnthropicCacheTTLMode sets the "anthropic_cache_ttl_mode" field.
+func (_u *APIKeyUpdateOne) SetAnthropicCacheTTLMode(v string) *APIKeyUpdateOne {
+	_u.mutation.SetAnthropicCacheTTLMode(v)
+	return _u
+}
+
+// SetNillableAnthropicCacheTTLMode sets the "anthropic_cache_ttl_mode" field if the given value is not nil.
+func (_u *APIKeyUpdateOne) SetNillableAnthropicCacheTTLMode(v *string) *APIKeyUpdateOne {
+	if v != nil {
+		_u.SetAnthropicCacheTTLMode(*v)
+	}
 	return _u
 }
 
@@ -1355,6 +1391,11 @@ func (_u *APIKeyUpdateOne) check() error {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "APIKey.name": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.AnthropicCacheTTLMode(); ok {
+		if err := apikey.AnthropicCacheTTLModeValidator(v); err != nil {
+			return &ValidationError{Name: "anthropic_cache_ttl_mode", err: fmt.Errorf(`ent: validator failed for field "APIKey.anthropic_cache_ttl_mode": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Status(); ok {
 		if err := apikey.StatusValidator(v); err != nil {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "APIKey.status": %w`, err)}
@@ -1409,6 +1450,9 @@ func (_u *APIKeyUpdateOne) sqlSave(ctx context.Context) (_node *APIKey, err erro
 	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(apikey.FieldName, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.AnthropicCacheTTLMode(); ok {
+		_spec.SetField(apikey.FieldAnthropicCacheTTLMode, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(apikey.FieldStatus, field.TypeString, value)

@@ -280,6 +280,16 @@ func VideoDurationSeconds(v int) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldVideoDurationSeconds, v))
 }
 
+// AnthropicCacheTTLPolicy applies equality check predicate on the "anthropic_cache_ttl_policy" field. It's identical to AnthropicCacheTTLPolicyEQ.
+func AnthropicCacheTTLPolicy(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldAnthropicCacheTTLPolicy, v))
+}
+
+// AnthropicCacheTTLApplied applies equality check predicate on the "anthropic_cache_ttl_applied" field. It's identical to AnthropicCacheTTLAppliedEQ.
+func AnthropicCacheTTLApplied(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldAnthropicCacheTTLApplied, v))
+}
+
 // CacheTTLOverridden applies equality check predicate on the "cache_ttl_overridden" field. It's identical to CacheTTLOverriddenEQ.
 func CacheTTLOverridden(v bool) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldCacheTTLOverridden, v))
@@ -2503,6 +2513,101 @@ func VideoDurationSecondsIsNil() predicate.UsageLog {
 // VideoDurationSecondsNotNil applies the NotNil predicate on the "video_duration_seconds" field.
 func VideoDurationSecondsNotNil() predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNotNull(FieldVideoDurationSeconds))
+}
+
+// AnthropicCacheTTLPolicyEQ applies the EQ predicate on the "anthropic_cache_ttl_policy" field.
+func AnthropicCacheTTLPolicyEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldAnthropicCacheTTLPolicy, v))
+}
+
+// AnthropicCacheTTLPolicyNEQ applies the NEQ predicate on the "anthropic_cache_ttl_policy" field.
+func AnthropicCacheTTLPolicyNEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldAnthropicCacheTTLPolicy, v))
+}
+
+// AnthropicCacheTTLPolicyIn applies the In predicate on the "anthropic_cache_ttl_policy" field.
+func AnthropicCacheTTLPolicyIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldAnthropicCacheTTLPolicy, vs...))
+}
+
+// AnthropicCacheTTLPolicyNotIn applies the NotIn predicate on the "anthropic_cache_ttl_policy" field.
+func AnthropicCacheTTLPolicyNotIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldAnthropicCacheTTLPolicy, vs...))
+}
+
+// AnthropicCacheTTLPolicyGT applies the GT predicate on the "anthropic_cache_ttl_policy" field.
+func AnthropicCacheTTLPolicyGT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldAnthropicCacheTTLPolicy, v))
+}
+
+// AnthropicCacheTTLPolicyGTE applies the GTE predicate on the "anthropic_cache_ttl_policy" field.
+func AnthropicCacheTTLPolicyGTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldAnthropicCacheTTLPolicy, v))
+}
+
+// AnthropicCacheTTLPolicyLT applies the LT predicate on the "anthropic_cache_ttl_policy" field.
+func AnthropicCacheTTLPolicyLT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldAnthropicCacheTTLPolicy, v))
+}
+
+// AnthropicCacheTTLPolicyLTE applies the LTE predicate on the "anthropic_cache_ttl_policy" field.
+func AnthropicCacheTTLPolicyLTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldAnthropicCacheTTLPolicy, v))
+}
+
+// AnthropicCacheTTLPolicyContains applies the Contains predicate on the "anthropic_cache_ttl_policy" field.
+func AnthropicCacheTTLPolicyContains(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContains(FieldAnthropicCacheTTLPolicy, v))
+}
+
+// AnthropicCacheTTLPolicyHasPrefix applies the HasPrefix predicate on the "anthropic_cache_ttl_policy" field.
+func AnthropicCacheTTLPolicyHasPrefix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasPrefix(FieldAnthropicCacheTTLPolicy, v))
+}
+
+// AnthropicCacheTTLPolicyHasSuffix applies the HasSuffix predicate on the "anthropic_cache_ttl_policy" field.
+func AnthropicCacheTTLPolicyHasSuffix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasSuffix(FieldAnthropicCacheTTLPolicy, v))
+}
+
+// AnthropicCacheTTLPolicyIsNil applies the IsNil predicate on the "anthropic_cache_ttl_policy" field.
+func AnthropicCacheTTLPolicyIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldAnthropicCacheTTLPolicy))
+}
+
+// AnthropicCacheTTLPolicyNotNil applies the NotNil predicate on the "anthropic_cache_ttl_policy" field.
+func AnthropicCacheTTLPolicyNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldAnthropicCacheTTLPolicy))
+}
+
+// AnthropicCacheTTLPolicyEqualFold applies the EqualFold predicate on the "anthropic_cache_ttl_policy" field.
+func AnthropicCacheTTLPolicyEqualFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEqualFold(FieldAnthropicCacheTTLPolicy, v))
+}
+
+// AnthropicCacheTTLPolicyContainsFold applies the ContainsFold predicate on the "anthropic_cache_ttl_policy" field.
+func AnthropicCacheTTLPolicyContainsFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContainsFold(FieldAnthropicCacheTTLPolicy, v))
+}
+
+// AnthropicCacheTTLAppliedEQ applies the EQ predicate on the "anthropic_cache_ttl_applied" field.
+func AnthropicCacheTTLAppliedEQ(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldAnthropicCacheTTLApplied, v))
+}
+
+// AnthropicCacheTTLAppliedNEQ applies the NEQ predicate on the "anthropic_cache_ttl_applied" field.
+func AnthropicCacheTTLAppliedNEQ(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldAnthropicCacheTTLApplied, v))
+}
+
+// AnthropicCacheTTLAppliedIsNil applies the IsNil predicate on the "anthropic_cache_ttl_applied" field.
+func AnthropicCacheTTLAppliedIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldAnthropicCacheTTLApplied))
+}
+
+// AnthropicCacheTTLAppliedNotNil applies the NotNil predicate on the "anthropic_cache_ttl_applied" field.
+func AnthropicCacheTTLAppliedNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldAnthropicCacheTTLApplied))
 }
 
 // CacheTTLOverriddenEQ applies the EQ predicate on the "cache_ttl_overridden" field.

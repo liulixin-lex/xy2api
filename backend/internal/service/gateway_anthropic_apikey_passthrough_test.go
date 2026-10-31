@@ -1292,7 +1292,8 @@ func TestGatewayService_ParseSSEUsagePassthrough_MessageStartFallbacks(t *testin
 
 	require.Equal(t, 12, usage.InputTokens)
 	require.Equal(t, 9, usage.CacheReadInputTokens, "应兼容 cached_tokens 字段")
-	require.Equal(t, 7, usage.CacheCreationInputTokens, "聚合字段为空时应从 5m/1h 明细回填")
+	require.Zero(t, usage.CacheCreationInputTokens, "明确 aggregate=0 不能被子桶推导覆盖")
+	require.True(t, usage.CacheCreationInputTokensPresent)
 	require.Equal(t, 3, usage.CacheCreation5mTokens)
 	require.Equal(t, 4, usage.CacheCreation1hTokens)
 }
@@ -1357,7 +1358,8 @@ func TestParseClaudeUsageFromResponseBody(t *testing.T) {
 		require.Equal(t, 21, got.InputTokens)
 		require.Equal(t, 34, got.OutputTokens)
 		require.Equal(t, 13, got.CacheReadInputTokens, "cache_read_input_tokens 为空时应回退 cached_tokens")
-		require.Equal(t, 13, got.CacheCreationInputTokens, "聚合字段为空时应由 5m/1h 回填")
+		require.Zero(t, got.CacheCreationInputTokens, "显式 aggregate=0 不应由子桶回填")
+		require.True(t, got.CacheCreationInputTokensPresent)
 		require.Equal(t, 5, got.CacheCreation5mTokens)
 		require.Equal(t, 8, got.CacheCreation1hTokens)
 	})

@@ -47,6 +47,14 @@ OpenAI 原始总输入含缓存明细，在 `backend/internal/service/openai_gat
 
 渠道监控的用户 API 会隐藏分子、分母等绝对流量；现有契约对无有效输入返回数值 0。该页面不能通过已隐藏的分母区分“无输入”和“有输入但未读取缓存”，本次仅统一其指标名称与说明，未更改此 API 或推测隐藏样本量。
 
+## Anthropic TTL 策略与计费分类
+
+Key 的 TTL 选择与供应商实际 usage 独立。用量接口新增 `anthropic_cache_ttl_policy`（off/5m/1h）及 `anthropic_cache_ttl_applied`（boolean），历史与非目标出口为 NULL。列表仅在有策略记录时显示轻量文字，详情对 NULL 显示「未记录」。已应用表示最终能力清理后的请求有合法 ephemeral 声明且全部符合指定 TTL，原值已相同也算；不表示供应商采用 TTL 或缓存命中。off、无断点或未落实为 false，只取最终结算尝试，不继承失败尝试。
+
+上游 5m/1h 桶及字段存在性贯通 Chat/Responses 转换：省略保留旧值、显式 0 清零、累计事件不相加。总量缺失可在内部由明确桶推导，总量明确为 0 不推导正数，也不回写供应商响应。完整桶分价；全部缺失与部分差额按基础写入价结算，详情显示「TTL 明细未报告」或「部分 TTL 明细未报告」；超过总量按既有确定性规则封顶并记录不一致。
+
+账号「缓存写入计费分类覆盖」和 ForceCacheBilling 只改结算副本，供应商响应保留原始语义；`cache_ttl_overridden` 显示「计费调整」。持久化桶可能经商业调整，不能当真实缓存效率。旧全局请求 TTL 自动降为 5m 计费的联动移除，不按 Key 偏好伪造供应商用量，不追补历史收费。价格、预留、事件与准确应用定义见 [Anthropic 缓存 TTL](ANTHROPIC_CACHE_TTL.md)。
+
 ## 显示与公开
 
 系统设置“功能开关 → 管理员使用记录”控制上面两项指标，只影响显示，不影响统计与计费。每项指标两个控件，各项互相独立：
@@ -95,3 +103,5 @@ OpenAI 原始总输入含缓存明细，在 `backend/internal/service/openai_gat
 ## 迁移与回退
 
 0.4.13 的迁移 283 仅追加三个可空列：`usage_logs.end_to_end_first_output_ms`、`ops_error_logs.end_to_end_first_output_ms`（BIGINT）及 `ops_error_logs.recovery_outcome`（VARCHAR(32)）。无 DEFAULT、NOT NULL、索引或回填。PostgreSQL 18 不重写存量表，但 ALTER 会短暂取得 ACCESS EXCLUSIVE 锁，应避开长事务并预留迁移窗口。回退旧版本可保留三列；重新执行迁移幂等。本次迁移编号 283 已与 main 核对，旧迁移及其校验和保持不变。
+
+Anthropic TTL 迁移 286 追加 Key 四态和 usage 两个可空观测列；已有 Key off、新建 inherit，无历史用量回填或索引。约束可能扫描 Key 表，ALTER 需要表锁，按低峰迁移；回退保留列但须明确恢复旧全局策略，详见 [TTL 迁移与回退](ANTHROPIC_CACHE_TTL.md#迁移与回退)。

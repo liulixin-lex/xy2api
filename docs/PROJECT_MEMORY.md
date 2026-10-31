@@ -6,6 +6,20 @@
 
 ## 当前交接状态
 
+### Anthropic 缓存 TTL 实施（2026-10-30；本地实施完成，待用户决定后续提交）
+
+- 目标：按 `.work/tasks/20261030-anthropic-cache-ttl/FINAL_PLAN.md` 完整实施管理员默认 TTL、API Key 四态、最终出站统一处理、usage/计费/预留修复及前端/文档同步；保持精简，不做影子模式、生产操作或无关测试。
+- 起点：main `23b19fd9b`；已有本记忆与归档未提交改动必须保留。实施前已完整复读方案、代码基线和 Git 状态。
+- 分工：实际 Paseo A 负责最终 wire、协议/usage 转换与预留；B 负责 Key/Ent/迁移、鉴权、设置、usage 仓储与账单；C 负责前端、现行文档/OpenSpec/登记。三者已由运行元数据核实为 gpt-6-astra / xhigh；实施完成后另行独立 Astra 审查。主 Agent 负责接口契约、进度纠偏、门禁和收尾。
+- 约束：迁移只追加；不改生产、不推送、不创建 PR/发布；不覆盖其他 Agent 既有改动；任何实现必须贯通最终 wire、计费与预留，不能只做表单开关。
+- 当前：本地代码、前端、文档与登记已完成，未提交/推送/部署。Key/鉴权 v27、迁移 286、Ent/Wire、usage 仓储、最终 wire、attempt 隔离、presence/明确0、计费副本和冷写预留均已闭合；独立 Paseo D（Astra/xhigh）报告无剩余 P0/P1。前端 135 项定向测试、typecheck/build/lint/设计检查通过；隔离 PG18/Redis 40 个顶层 `-race` 用例零跳过且自有数据零残留，Redis-only 四态快照通过；服务包全量 unit、TTL 相关 race、相邻包 race、golangci-lint、整仓 build、韧性 gate、scheduler-diff、迁移与文档一致性均通过。真实供应商物理缓存能力与命中率未验证；工作树保留本任务及此前记忆改动，等待用户决定是否提交。
+
+### Anthropic 缓存 TTL：生产只读分析与方案 v1.0 已交付（2026-10-30；未实施）
+
+- 生产已只读核实0.4.14；48小时11,767条Claude用量全部为APIKey，Token读取占比86.81%。旧1h开关不覆盖主体流量；发现TTL明细丢失、partial漏计及1h预留等接缝，均纳入方案。
+- 管理员默认5m/1h（推荐5m），Key四态；当前部署存量off、新建inherit，最终wire统一、usage/计费解耦。gpt-6-astra/xhigh独立反方及定稿复核完成；详见本地`.work/tasks/20261030-anthropic-cache-ttl/FINAL_PLAN.md`，登记原文与结项详情已归档。
+- 本轮仅方案及两份记忆，账号分组方案记录已在仓库中；未改业务/生产、推送或部署，SSH已关闭。代码另行安排。
+
 ### XY2API 0.4.14 正式发布完成（2026-10-30；未部署）
 
 - [v0.4.14](https://github.com/liulixin-lex/xy2api/releases/tag/v0.4.14) 正式发布于 `2026-10-30T07:29:36Z`；PR #168 固定 `584a58c2f` 全部20项检查通过后常规合入 `267f8577f`，annotated tag不可变，Release run `41019263782` 成功。发布前完整查询无其他开放PR。
@@ -290,6 +304,14 @@
 - 后续部署事项：升级后显式保存public备份范围；新目标先初始化所需扩展，production备份仍需在实际部署后验证。share默认关闭，实际影子/逐组启用与业务账单观察是部署后的流程。非阻断维护项：GoReleaser旧配置字段弃用提醒、前端依赖审计中未达high/critical阻断等级的告警；本次未借此扩展依赖升级。
 
 ## 进行中的工作
+
+### 20261030-anthropic-cache-ttl-implementation — 产品统筹与集成（已完成；2026-10-30）
+
+- 结果：本地实施、独立 Astra/xhigh 审查与全部验收完成；详细交接已归档至 `docs/PROJECT_MEMORY_ARCHIVE.md`。真实供应商与生产部署未执行，提交/推送待用户另行授权。
+
+### 20261030-anthropic-cache-ttl-backend — 后端核心实施（已完成；2026-10-30）
+
+- 结果：A/B 后端路线已完成并交接，Key/迁移/鉴权/最终 wire/usage/预留/账单均已验收；详细内容随统筹任务归档。
 
 ### 20261021-channel-monitor-v1 — 渠道监控 v1 探测优化（PR #120 已合入 main，进入下一个版本；待真实上游验证；2026-10-22 DOCS 更新状态）
 
@@ -1068,3 +1090,36 @@ pnpm --dir frontend run build
 - 发布：annotated v0.4.14固定合并提交，Release成功、非draft/prerelease；五平台附件双SHA、全部源码身份、双架构镜像与稳定别名独立核验。正式原生包全新/升级/回退/重升、工单与鉴权门禁通过，用户与Key指纹保持不变，临时资源清理。
 - 记忆：自身进行中登记及#168旧交接原样追加归档，原归档前缀完整保留；纯记忆收尾使用独立PR。最终main除两份记忆外须与发行源码相同，最终PR/main/tag状态写本地报告，避免递归收尾PR。
 - 后续边界：真实OpenAI网页协议需要获授权环境实测；2FA回退须先解决不确定任务、核实有效密钥并保留数据库及journal加密材料。N5校准、安全例外维护继续按既有边界处理；本次未部署生产。
+
+### 2026-10-30T15:10Z — 20261030-account-group-tiering — 生产只读分析与方案 v1.0，待确认
+
+- 请求/目标：用户要求查看线上 OpenAI 上游账号与分组分配情况，规划一套便捷、清晰的分组管理方案（可改代码）；随后明确只要最终网关改进方案。
+- 开始状态：main `23b19fd9b`，工作树干净。
+- 完成操作：经授权 SSH 只读查询生产（只读事务，未改数据或配置，SSH 已关闭）。核实生产实际运行 0.4.14 / `267f8577f`（更正顶部“最后一次只读核实为 0.4.12”，部署非本仓库 agent 操作）。发现：分组调整全靠手工逐个编辑，7 天约 550 次，按小时成功率反复进出高倍率组；账号 priority 全局、`account_groups.priority` 调度不读；利润门全部关闭；存在成本高于分组倍率的放置。方案为“分组声明质量门槛与成本上限、账号维护档位、系统对账生成 `account_groups`”，调度器不改，分 P0 配置、P1 矩阵与手工档位、P2 建议模式、P3 自动执行四阶段。
+- 修改文件：仅本记忆；方案与可复跑查询在本地 `.work/tasks/20261030-account-group-tiering/`。
+- 验证：无代码改动，未运行门禁。
+- 卡点/风险：待用户确认 PLAN §8 的 5 个决策点（档位门槛、最低毛利率与 67 组处理、托管范围、手工例外时长、是否开自动执行）。
+- 下一步：用户确认后按 PLAN 拆分实施（交其他 agent），先做 P0 配置项。
+
+### 2026-10-30 — 20261030-anthropic-cache-ttl — 生产只读分析与联合方案 v1.0 完成
+
+- 授权/起点：用户授权近48小时Claude缓存只读分析，与gpt-6-astra/xhigh互补审查，重点参考Sub2API；明确只交最终方案、代码另行安排。main `23b19fd9b`，既有账号分组方案记忆改动完整保留。
+- 生产：只读事务及查询超时内取固定窗口聚合，未读取请求正文/密钥，未改数据配置、重启或发业务测试；SSH已关闭。现场0.4.14/267f8577f、332迁移；11,767条usage、42活跃Key、7个Anthropic APIKey上游、Token读取占比86.81%、创建费占59.66%。日志只约3小时28分；会话完成间隔非缓存闲置期、错误ID不能直接关联，明确不作成功率或TTL收益因果承诺。
+- 审查/方案：管理员二态默认、Key四态、存量off/新建inherit；补齐鉴权字段与失效、最终wire/能力清理/签名、attempt隔离、转换TTL桶、partial余量、1h冷写预留、两项usage策略观测；正式退役旧消息断点重写，保留渠道自定价与账号显式商业覆盖。Astra反方纠正normalize升价误判，主agent撤回后保留顺序保护；最终复读无阻断项。官方/Sub2API v2.2.61固定快照、LiteLLM与New API取舍均记录。
+- 文件/验证：最终方案、生产报告、独立/窄复核/R2、SQL与聚合证据仅在本地任务目录；跟踪变更仅两份记忆，原登记原样归档并追加结项。未改业务代码，未运行产品测试；交付检查为聚合数字复算、资料/链接/JSON核验、文档一致性与diff检查。
+- 下一步/边界：本轮交付完成。实施另行安排，先重查HEAD、迁移编号、鉴权快照与目标旧设置；不自动改价、追补历史、扩大fallback或加入legacy双轨。未提交、推送、发PR、部署或修改生产。
+
+### 2026-10-30 — 20261030-anthropic-cache-ttl-implementation — 本地实施、审查与验收完成
+
+- 授权范围：按 FINAL_PLAN 完整实施本地代码、前端、文档与同步登记；不提交、推送、PR、发布、部署或生产操作。保留基线 `23b19fd9b` 及既有记忆改动。
+- 实施：管理员默认 `5m/1h`、Key `inherit/off/5m/1h`、迁移286（存量off/新建inherit）、鉴权v27、最终多出口 wire/attempt 隔离/count_tokens边界、usage presence/明确0、结算副本、1h冷写预留、Fable/Mythos/Bedrock能力边界、前端与文档/OpenSpec/policy/provenance 全部贯通。Chat/Responses→Bedrock既有不支持组合已在文档明确，本轮未扩展。
+- 审查：独立 Paseo Astra/xhigh 报告无剩余P0/P1；别名高价预留、OAuth渠道映射/忽略遗留mapping、Fable/Mythos识别三项P1已修复并回归。
+- 验证：前端135项定向、typecheck/build/lint/design；隔离PG18/Redis 40顶层-race零跳过且自有记录0；Redis-only四态快照-race；service全量unit；TTL相关service race、相邻包race；整仓build；golangci-lint；韧性gate 84/281/90/2/18全通过；scheduler-diff、迁移332项不变+286追加、临时index docs consistency、diff-check、gofmt均通过。
+- 边界：未验证真实供应商物理缓存命中/收益；未部署生产。工作树仍有本任务及既有记忆的未提交改动，等待用户后续提交授权。
+
+### 2026-10-30 — 20261030-anthropic-cache-ttl-implementation — 本地实施、审查与验收完成
+
+- 请求/范围：按 FINAL_PLAN 本地完成 Anthropic 缓存 TTL；前后端及独立审查使用 Astra/xhigh，前端使用 Taste/Impeccable/GSAP；不提交、推送、PR、发布、部署或生产操作。
+- 完成操作：协调 A/B/C/D；完成管理员/Key TTL、迁移286、鉴权v27、最终多出口 wire、attempt隔离、usage presence/明确0、结算副本、冷写预留、模型家族/Bedrock边界、前端、现行文档、OpenSpec、退役与 policy/provenance。独立审查发现的三项P1全部修复并回归。
+- 验证：前端135项、typecheck/build/lint/design；PG18/Redis隔离40顶层-race零跳过且自有记录0；Redis四态快照；service全量unit；TTL service race与相邻包race；整仓build；golangci-lint；韧性gate 84/281/90/2/18零跳过；scheduler-diff、迁移332不变+286追加、docs consistency、gofmt、diff-check通过。
+- 未完成/下一步：真实供应商物理缓存命中与收益未验证；未提交/推送/部署。若用户授权提交，先在干净提交树运行 upstream-sync audit；无需业务继续开发。

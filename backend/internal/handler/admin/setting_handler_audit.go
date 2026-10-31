@@ -476,11 +476,8 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.ClaudeOAuthSystemPromptBlocks != after.ClaudeOAuthSystemPromptBlocks {
 		changed = append(changed, "claude_oauth_system_prompt_blocks")
 	}
-	if before.EnableAnthropicCacheTTL1hInjection != after.EnableAnthropicCacheTTL1hInjection {
-		changed = append(changed, "enable_anthropic_cache_ttl_1h_injection")
-	}
-	if before.RewriteMessageCacheControl != after.RewriteMessageCacheControl {
-		changed = append(changed, "rewrite_message_cache_control")
+	if before.AnthropicCacheTTLDefault != after.AnthropicCacheTTLDefault {
+		changed = append(changed, "anthropic_cache_ttl_default")
 	}
 	if before.EnableOpenAISessionUUID != after.EnableOpenAISessionUUID {
 		changed = append(changed, "enable_openai_session_uuid")

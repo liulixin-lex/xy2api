@@ -32,6 +32,7 @@ func ChatCompletionsToResponses(req *ChatCompletionsRequest) (*ResponsesRequest,
 	}
 
 	out := &ResponsesRequest{
+		CacheControl:         req.CacheControl,
 		Model:                req.Model,
 		Instructions:         req.Instructions,
 		Input:                inputJSON,
@@ -126,6 +127,11 @@ func convertChatMessagesToResponsesInput(msgs []ChatMessage) ([]ResponsesInputIt
 		items, err := chatMessageToResponsesItems(m)
 		if err != nil {
 			return nil, err
+		}
+		for i := range items {
+			if items[i].Type == "message" {
+				items[i].CacheControl = m.CacheControl
+			}
 		}
 		out = append(out, items...)
 	}
@@ -265,6 +271,48 @@ func chatAssistantToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
 			return nil, err
 		}
 		items = append(items, ResponsesInputItem{Type: "message", Role: "assistant", Content: partsJSON})
+	}
+
+	// Preserve explicit assistant block checkpoints rather than flattening
+	// them into a single text field. The existing text conversion still handles
+	// thinking content, without making thinking itself cacheable.
+	var rawParts []json.RawMessage
+	if json.Unmarshal(m.Content, &rawParts) == nil {
+		hasCache := false
+		for _, raw := range rawParts {
+			var part ChatContentPart
+			if json.Unmarshal(raw, &part) == nil && part.CacheControl != nil {
+				hasCache = true
+			}
+		}
+		if hasCache {
+			var parts []ResponsesContentPart
+			if m.ReasoningContent != "" {
+				parts = append(parts, ResponsesContentPart{Type: "output_text", Text: "<thinking>" + m.ReasoningContent + "</thinking>"})
+			}
+			for _, raw := range rawParts {
+				var part ChatContentPart
+				if json.Unmarshal(raw, &part) != nil {
+					continue
+				}
+				text, _ := parseAssistantContent(append(append([]byte{'['}, raw...), ']'))
+				if text == "" {
+					continue
+				}
+				cc := part.CacheControl
+				if part.Type == "thinking" || part.Type == "redacted_thinking" || part.Type == "reasoning" {
+					cc = nil
+				}
+				parts = append(parts, ResponsesContentPart{Type: "output_text", Text: text, CacheControl: cc})
+			}
+			if len(parts) > 0 {
+				raw, err := json.Marshal(parts)
+				if err != nil {
+					return nil, err
+				}
+				items = []ResponsesInputItem{{Type: "message", Role: "assistant", Content: raw}}
+			}
+		}
 	}
 
 	// Emit one function_call item per tool_call.
@@ -448,6 +496,7 @@ func convertChatContentPartsToResponses(parts []ChatContentPart) []ResponsesCont
 			if p.Text != "" || len(p.PromptCacheBreakpoint) > 0 {
 				responseParts = append(responseParts, ResponsesContentPart{
 					PromptCacheBreakpoint: p.PromptCacheBreakpoint,
+					CacheControl:          p.CacheControl,
 					Type:                  "input_text",
 					Text:                  p.Text,
 				})
@@ -456,6 +505,7 @@ func convertChatContentPartsToResponses(parts []ChatContentPart) []ResponsesCont
 			if p.ImageURL != nil && p.ImageURL.URL != "" && !isEmptyBase64DataURI(p.ImageURL.URL) {
 				responseParts = append(responseParts, ResponsesContentPart{
 					PromptCacheBreakpoint: p.PromptCacheBreakpoint,
+					CacheControl:          p.CacheControl,
 					Type:                  "input_image",
 					ImageURL:              p.ImageURL.URL,
 				})
@@ -464,6 +514,7 @@ func convertChatContentPartsToResponses(parts []ChatContentPart) []ResponsesCont
 			if p.File != nil && (p.File.FileData != "" || p.File.FileID != "") {
 				responseParts = append(responseParts, ResponsesContentPart{
 					PromptCacheBreakpoint: p.PromptCacheBreakpoint,
+					CacheControl:          p.CacheControl,
 					Type:                  "input_file",
 					Filename:              p.File.Filename,
 					FileData:              p.File.FileData,
@@ -532,11 +583,23 @@ func convertChatToolsToResponses(tools []ChatTool, functions []ChatFunction) []R
 			continue
 		}
 		rt := ResponsesTool{
-			Type:        "function",
-			Name:        t.Function.Name,
-			Description: t.Function.Description,
-			Parameters:  t.Function.Parameters,
-			Strict:      defaultStrictFalse(t.Function.Strict),
+			CacheControl: t.CacheControl,
+			DeferLoading: t.DeferLoading,
+			Custom:       t.Custom,
+			Type:         "function",
+			Name:         t.Function.Name,
+			Description:  t.Function.Description,
+			Parameters:   t.Function.Parameters,
+			Strict:       defaultStrictFalse(t.Function.Strict),
+		}
+		if rt.CacheControl == nil {
+			rt.CacheControl = t.Function.CacheControl
+		}
+		if rt.DeferLoading == nil {
+			rt.DeferLoading = t.Function.DeferLoading
+		}
+		if len(rt.Custom) == 0 {
+			rt.Custom = t.Function.Custom
 		}
 		out = append(out, rt)
 	}

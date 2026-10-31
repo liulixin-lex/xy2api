@@ -66,6 +66,17 @@ export default {
 
   // API Keys
   keys: {
+    cacheTTL: {
+      label: 'Anthropic cache TTL',
+      inherit: 'Follow global default',
+      inheritCurrent: 'Follow global default (currently {ttl})',
+      off: 'Do not override TTL (keep client settings)',
+      '5m': 'Force 5-minute caching',
+      '1h': 'Force 1-hour caching',
+      duration: { '5m': '5 minutes', '1h': '1 hour' },
+      summary: 'Claude TTL: {mode}',
+      hint: 'Applies only to Claude requests and sets the lifetime of existing cache breakpoints. Group settings determine whether missing breakpoints are added. No override keeps client settings. One-hour writes may cost more; actual caching and billing depend on upstream usage and site prices.'
+    },
     title: 'API Keys',
     description: 'Manage your API keys and access tokens',
     searchPlaceholder: 'Search name or key...',
@@ -335,8 +346,20 @@ export default {
     description: 'View and analyze your API usage history',
     costDetails: 'Cost Breakdown',
     tokenDetails: 'Token Breakdown',
-    cacheTtlOverriddenHint: 'Cache TTL Override enabled',
-    cacheTtlOverriddenLabel: 'TTL Override',
+    anthropicCacheTTL: {
+      policy: 'TTL policy',
+      off: 'No TTL override',
+      '5m': '5 minutes',
+      '1h': '1 hour',
+      applied: 'Applied',
+      notApplied: 'Not applied',
+      notRecorded: 'Not recorded',
+      unknownDetail: 'TTL breakdown not reported',
+      partialDetail: 'Partial TTL breakdown not reported',
+      hint: 'Applied means the final request declarations match the policy. It does not confirm provider TTL or a cache hit. Not recorded includes historical records and non-target routes.'
+    },
+    cacheTtlOverriddenHint: 'Cache write billing classification adjusted in the billing copy; does not measure actual cache efficiency',
+    cacheTtlOverriddenLabel: 'Billing adjustment',
     cacheTtlOverridden5m: 'Billed as 5m',
     cacheTtlOverridden1h: 'Billed as 1h',
     totalRequests: 'Total Requests',

@@ -960,6 +960,46 @@ func (_u *UsageLogUpdate) ClearVideoDurationSeconds() *UsageLogUpdate {
 	return _u
 }
 
+// SetAnthropicCacheTTLPolicy sets the "anthropic_cache_ttl_policy" field.
+func (_u *UsageLogUpdate) SetAnthropicCacheTTLPolicy(v string) *UsageLogUpdate {
+	_u.mutation.SetAnthropicCacheTTLPolicy(v)
+	return _u
+}
+
+// SetNillableAnthropicCacheTTLPolicy sets the "anthropic_cache_ttl_policy" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableAnthropicCacheTTLPolicy(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetAnthropicCacheTTLPolicy(*v)
+	}
+	return _u
+}
+
+// ClearAnthropicCacheTTLPolicy clears the value of the "anthropic_cache_ttl_policy" field.
+func (_u *UsageLogUpdate) ClearAnthropicCacheTTLPolicy() *UsageLogUpdate {
+	_u.mutation.ClearAnthropicCacheTTLPolicy()
+	return _u
+}
+
+// SetAnthropicCacheTTLApplied sets the "anthropic_cache_ttl_applied" field.
+func (_u *UsageLogUpdate) SetAnthropicCacheTTLApplied(v bool) *UsageLogUpdate {
+	_u.mutation.SetAnthropicCacheTTLApplied(v)
+	return _u
+}
+
+// SetNillableAnthropicCacheTTLApplied sets the "anthropic_cache_ttl_applied" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableAnthropicCacheTTLApplied(v *bool) *UsageLogUpdate {
+	if v != nil {
+		_u.SetAnthropicCacheTTLApplied(*v)
+	}
+	return _u
+}
+
+// ClearAnthropicCacheTTLApplied clears the value of the "anthropic_cache_ttl_applied" field.
+func (_u *UsageLogUpdate) ClearAnthropicCacheTTLApplied() *UsageLogUpdate {
+	_u.mutation.ClearAnthropicCacheTTLApplied()
+	return _u
+}
+
 // SetCacheTTLOverridden sets the "cache_ttl_overridden" field.
 func (_u *UsageLogUpdate) SetCacheTTLOverridden(v bool) *UsageLogUpdate {
 	_u.mutation.SetCacheTTLOverridden(v)
@@ -1136,6 +1176,11 @@ func (_u *UsageLogUpdate) check() error {
 	if v, ok := _u.mutation.VideoResolution(); ok {
 		if err := usagelog.VideoResolutionValidator(v); err != nil {
 			return &ValidationError{Name: "video_resolution", err: fmt.Errorf(`ent: validator failed for field "UsageLog.video_resolution": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.AnthropicCacheTTLPolicy(); ok {
+		if err := usagelog.AnthropicCacheTTLPolicyValidator(v); err != nil {
+			return &ValidationError{Name: "anthropic_cache_ttl_policy", err: fmt.Errorf(`ent: validator failed for field "UsageLog.anthropic_cache_ttl_policy": %w`, err)}
 		}
 	}
 	if _u.mutation.UserCleared() && len(_u.mutation.UserIDs()) > 0 {
@@ -1413,6 +1458,18 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.VideoDurationSecondsCleared() {
 		_spec.ClearField(usagelog.FieldVideoDurationSeconds, field.TypeInt)
+	}
+	if value, ok := _u.mutation.AnthropicCacheTTLPolicy(); ok {
+		_spec.SetField(usagelog.FieldAnthropicCacheTTLPolicy, field.TypeString, value)
+	}
+	if _u.mutation.AnthropicCacheTTLPolicyCleared() {
+		_spec.ClearField(usagelog.FieldAnthropicCacheTTLPolicy, field.TypeString)
+	}
+	if value, ok := _u.mutation.AnthropicCacheTTLApplied(); ok {
+		_spec.SetField(usagelog.FieldAnthropicCacheTTLApplied, field.TypeBool, value)
+	}
+	if _u.mutation.AnthropicCacheTTLAppliedCleared() {
+		_spec.ClearField(usagelog.FieldAnthropicCacheTTLApplied, field.TypeBool)
 	}
 	if value, ok := _u.mutation.CacheTTLOverridden(); ok {
 		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
@@ -2510,6 +2567,46 @@ func (_u *UsageLogUpdateOne) ClearVideoDurationSeconds() *UsageLogUpdateOne {
 	return _u
 }
 
+// SetAnthropicCacheTTLPolicy sets the "anthropic_cache_ttl_policy" field.
+func (_u *UsageLogUpdateOne) SetAnthropicCacheTTLPolicy(v string) *UsageLogUpdateOne {
+	_u.mutation.SetAnthropicCacheTTLPolicy(v)
+	return _u
+}
+
+// SetNillableAnthropicCacheTTLPolicy sets the "anthropic_cache_ttl_policy" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableAnthropicCacheTTLPolicy(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetAnthropicCacheTTLPolicy(*v)
+	}
+	return _u
+}
+
+// ClearAnthropicCacheTTLPolicy clears the value of the "anthropic_cache_ttl_policy" field.
+func (_u *UsageLogUpdateOne) ClearAnthropicCacheTTLPolicy() *UsageLogUpdateOne {
+	_u.mutation.ClearAnthropicCacheTTLPolicy()
+	return _u
+}
+
+// SetAnthropicCacheTTLApplied sets the "anthropic_cache_ttl_applied" field.
+func (_u *UsageLogUpdateOne) SetAnthropicCacheTTLApplied(v bool) *UsageLogUpdateOne {
+	_u.mutation.SetAnthropicCacheTTLApplied(v)
+	return _u
+}
+
+// SetNillableAnthropicCacheTTLApplied sets the "anthropic_cache_ttl_applied" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableAnthropicCacheTTLApplied(v *bool) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetAnthropicCacheTTLApplied(*v)
+	}
+	return _u
+}
+
+// ClearAnthropicCacheTTLApplied clears the value of the "anthropic_cache_ttl_applied" field.
+func (_u *UsageLogUpdateOne) ClearAnthropicCacheTTLApplied() *UsageLogUpdateOne {
+	_u.mutation.ClearAnthropicCacheTTLApplied()
+	return _u
+}
+
 // SetCacheTTLOverridden sets the "cache_ttl_overridden" field.
 func (_u *UsageLogUpdateOne) SetCacheTTLOverridden(v bool) *UsageLogUpdateOne {
 	_u.mutation.SetCacheTTLOverridden(v)
@@ -2699,6 +2796,11 @@ func (_u *UsageLogUpdateOne) check() error {
 	if v, ok := _u.mutation.VideoResolution(); ok {
 		if err := usagelog.VideoResolutionValidator(v); err != nil {
 			return &ValidationError{Name: "video_resolution", err: fmt.Errorf(`ent: validator failed for field "UsageLog.video_resolution": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.AnthropicCacheTTLPolicy(); ok {
+		if err := usagelog.AnthropicCacheTTLPolicyValidator(v); err != nil {
+			return &ValidationError{Name: "anthropic_cache_ttl_policy", err: fmt.Errorf(`ent: validator failed for field "UsageLog.anthropic_cache_ttl_policy": %w`, err)}
 		}
 	}
 	if _u.mutation.UserCleared() && len(_u.mutation.UserIDs()) > 0 {
@@ -2993,6 +3095,18 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if _u.mutation.VideoDurationSecondsCleared() {
 		_spec.ClearField(usagelog.FieldVideoDurationSeconds, field.TypeInt)
+	}
+	if value, ok := _u.mutation.AnthropicCacheTTLPolicy(); ok {
+		_spec.SetField(usagelog.FieldAnthropicCacheTTLPolicy, field.TypeString, value)
+	}
+	if _u.mutation.AnthropicCacheTTLPolicyCleared() {
+		_spec.ClearField(usagelog.FieldAnthropicCacheTTLPolicy, field.TypeString)
+	}
+	if value, ok := _u.mutation.AnthropicCacheTTLApplied(); ok {
+		_spec.SetField(usagelog.FieldAnthropicCacheTTLApplied, field.TypeBool, value)
+	}
+	if _u.mutation.AnthropicCacheTTLAppliedCleared() {
+		_spec.ClearField(usagelog.FieldAnthropicCacheTTLApplied, field.TypeBool)
 	}
 	if value, ok := _u.mutation.CacheTTLOverridden(); ok {
 		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)

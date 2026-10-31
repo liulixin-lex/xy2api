@@ -127,17 +127,19 @@ func AnthropicToResponsesResponse(resp *AnthropicResponse) *ResponsesResponse {
 	}
 
 	// Usage
+	var normalized AnthropicUsage
+	MergeAnthropicCacheUsage(&normalized, resp.Usage)
 	// Anthropic's input_tokens excludes cache_read/cache_creation, while OpenAI
 	// Responses' input_tokens is the total including cached tokens. Add them back
 	// when converting so downstream consumers see OpenAI semantics.
 	totalInputTokens := resp.Usage.InputTokens +
 		resp.Usage.CacheReadInputTokens +
-		resp.Usage.CacheCreationInputTokens
+		normalized.CacheCreationInputTokens
 	out.Usage = &ResponsesUsage{
 		InputTokens:              totalInputTokens,
 		OutputTokens:             resp.Usage.OutputTokens,
 		TotalTokens:              totalInputTokens + resp.Usage.OutputTokens,
-		CacheCreationInputTokens: resp.Usage.CacheCreationInputTokens,
+		CacheCreationInputTokens: normalized.CacheCreationInputTokens,
 	}
 	if resp.Usage.CacheReadInputTokens > 0 {
 		out.Usage.InputTokensDetails = &ResponsesInputTokensDetails{
@@ -167,6 +169,7 @@ func anthropicStopReasonToResponsesStatus(stopReason string, blocks []AnthropicC
 // AnthropicEventToResponsesState tracks state for converting a sequence of
 // Anthropic SSE events into Responses SSE events.
 type AnthropicEventToResponsesState struct {
+	CacheUsage     AnthropicUsage
 	ResponseID     string
 	Model          string
 	Created        int64
@@ -289,15 +292,14 @@ func anthToResHandleMessageStart(evt *AnthropicStreamEvent, state *AnthropicEven
 		if state.Model == "" {
 			state.Model = evt.Message.Model
 		}
-		if evt.Message.Usage.InputTokens > 0 {
+		if evt.Message.Usage.InputTokensPresent || evt.Message.Usage.InputTokens > 0 {
 			state.InputTokens = evt.Message.Usage.InputTokens
 		}
-		if evt.Message.Usage.CacheReadInputTokens > 0 {
+		if evt.Message.Usage.CacheReadInputTokensPresent || evt.Message.Usage.CacheReadInputTokens > 0 {
 			state.CacheReadInputTokens = evt.Message.Usage.CacheReadInputTokens
 		}
-		if evt.Message.Usage.CacheCreationInputTokens > 0 {
-			state.CacheCreationInputTokens = evt.Message.Usage.CacheCreationInputTokens
-		}
+		MergeAnthropicCacheUsage(&state.CacheUsage, evt.Message.Usage)
+		state.CacheCreationInputTokens = state.CacheUsage.CacheCreationInputTokens
 	}
 
 	if state.CreatedSent {
@@ -551,16 +553,17 @@ func anthToResHandleContentBlockStop(evt *AnthropicStreamEvent, state *Anthropic
 
 func anthToResHandleMessageDelta(evt *AnthropicStreamEvent, state *AnthropicEventToResponsesState) []ResponsesStreamEvent {
 	if evt.Usage != nil {
-		state.OutputTokens = evt.Usage.OutputTokens
-		if evt.Usage.InputTokens > 0 {
+		if evt.Usage.OutputTokensPresent || evt.Usage.OutputTokens > 0 {
+			state.OutputTokens = evt.Usage.OutputTokens
+		}
+		if evt.Usage.InputTokensPresent || evt.Usage.InputTokens > 0 {
 			state.InputTokens = evt.Usage.InputTokens
 		}
-		if evt.Usage.CacheReadInputTokens > 0 {
+		if evt.Usage.CacheReadInputTokensPresent || evt.Usage.CacheReadInputTokens > 0 {
 			state.CacheReadInputTokens = evt.Usage.CacheReadInputTokens
 		}
-		if evt.Usage.CacheCreationInputTokens > 0 {
-			state.CacheCreationInputTokens = evt.Usage.CacheCreationInputTokens
-		}
+		MergeAnthropicCacheUsage(&state.CacheUsage, *evt.Usage)
+		state.CacheCreationInputTokens = state.CacheUsage.CacheCreationInputTokens
 	}
 	if evt.Delta != nil && evt.Delta.StopReason != "" {
 		state.StopReason = evt.Delta.StopReason

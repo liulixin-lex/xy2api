@@ -93,8 +93,16 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	if parsed == nil {
 		return nil, fmt.Errorf("parse request: empty request")
 	}
+	// Account-specific body normalization and cache generation belong to this
+	// attempt. A fresh BodyRef shares immutable bytes without copying the body.
+	attemptParsed := *parsed
+	attemptParsed.Body = NewRequestBodyRef(parsed.Body.Bytes())
+	parsed = &attemptParsed
 	ctx, cacheDecision := s.beginClaudeCacheAttempt(ctx, parsed, account)
-	defer func() { finishClaudeCacheAttempt(cacheDecision, result) }()
+	defer func() {
+		finishAnthropicCacheTTLAttempt(ctx, result)
+		finishClaudeCacheAttempt(cacheDecision, result)
+	}()
 	// API-key mappings and OAuth native IDs are resolved before mimicry.
 	validationModel := parsed.Model
 	if account != nil {
@@ -258,9 +266,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		// D/E/F: 可选 messages cache 策略 + 工具名混淆 + tools[-1] 断点
 		// 与 forward_as_chat_completions / forward_as_responses 路径对齐，
 		// 原生 /v1/messages 路径也走同一套可配置字段级改写。
-		if err := replaceBody(s.rewriteMessageCacheControlIfEnabled(ctx, body)); err != nil {
-			return nil, err
-		}
+
 		if rw := buildToolNameRewriteFromBody(body); rw != nil {
 			if err := replaceBody(applyToolNameRewriteToBody(body, rw)); err != nil {
 				return nil, err
@@ -328,12 +334,6 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		reqModel = mappedModel
 		parsed.Model = mappedModel
 		logger.LegacyPrintf("service.gateway", "Model mapping applied: %s -> %s (account: %s, source=%s)", originalModel, mappedModel, account.Name, mappingSource)
-	}
-
-	if s.shouldInjectAnthropicCacheTTL1h(ctx, account) {
-		if err := replaceBody(injectAnthropicCacheControlTTL1h(body)); err != nil {
-			return nil, err
-		}
 	}
 
 	// 获取凭证
@@ -420,7 +420,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		if err != nil {
 			return nil, err
 		}
-		// 记录本次实际发送的 wire body；只有请求成功后才写回 ParsedRequest，避免 400 retry 基于已签名 CCH 再改写。
+		// 记录本次实际发送的 wire body；只有请求成功后才写回 ParsedRequest，缓存变换仅用于本次出站。
 		lastWireBody = wireBody
 
 		// 发送请求

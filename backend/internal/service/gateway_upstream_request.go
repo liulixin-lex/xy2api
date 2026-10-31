@@ -21,8 +21,7 @@ import (
 func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token, tokenType, modelID string, reqStream bool, mimicClaudeCode bool) (*http.Request, []byte, error) {
 	body = stripDeferredToolCacheControl(body)
 	if account.Platform == PlatformAnthropic && account.Type == AccountTypeServiceAccount {
-		req, err := s.buildUpstreamRequestAnthropicVertex(ctx, c, account, body, token, modelID, reqStream)
-		return req, body, err
+		return s.buildUpstreamRequestAnthropicVertex(ctx, c, account, body, token, modelID, reqStream)
 	}
 
 	// 确定目标URL
@@ -94,17 +93,15 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		body = syncBillingHeaderVersion(body, billingUA)
 	}
 
-	// === 计算最终 anthropic-beta header（先于 body sanitize 与 CCH 签名）===
+	// === 计算最终 anthropic-beta header（先于 body sanitize）===
 	//
 	// 顺序约束：
 	//   1) 算 finalBeta（纯函数，不依赖 req.Header；mimicry 路径仅保留明确支持的
 	//      客户端兼容性 beta，其余使用固定列表）
 	//   2) 按 finalBeta 做能力维度 body sanitize（如 context-management beta 缺失 →
 	//      strip body.context_management，与 Bedrock 路径对称）
-	//   3) CCH 签名（必须使用 strip 后的 body，否则 hash 与最终 body 不一致 →
-	//      被 Anthropic 判 third-party）
-	//   4) NewRequest（body 至此最终敲定）
-	//   5) 透传白名单 / fingerprint / mimic header / 写入 finalBeta
+	//   3) 分组提示词、缓存断点与 TTL，得到最终 body
+	//   4) NewRequest 与最终 headers
 	policyFilterSet := s.getBetaPolicyFilterSet(ctx, c, account, modelID)
 	effectiveDropSet := mergeDropSets(policyFilterSet)
 	finalBetaHeader, finalBetaShouldSet := s.computeFinalAnthropicBeta(
@@ -132,7 +129,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	if err != nil {
 		return nil, nil, err
 	}
-	body = s.applyClaudeCacheFallback(ctx, account, body, modelID)
+	body = s.finalizeAnthropicCache(ctx, account, body, modelID)
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, err
@@ -280,10 +277,10 @@ func (s *GatewayService) buildUpstreamRequestAnthropicVertex(
 	token string,
 	modelID string,
 	reqStream bool,
-) (*http.Request, error) {
+) (*http.Request, []byte, error) {
 	vertexBody, err := buildVertexAnthropicRequestBody(body)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// 计算最终 outgoing anthropic-beta。Vertex AI 的 Anthropic 端点只接受一小撮
@@ -299,7 +296,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicVertex(
 	}
 	policy := s.evaluateBetaPolicy(ctx, clientBeta, account, modelID)
 	if policy.blockErr != nil {
-		return nil, policy.blockErr
+		return nil, nil, policy.blockErr
 	}
 	finalBeta := filterSonnet55ToolsetBeta(filterVertexBetaTokens(clientBeta, mergeDropSets(policy.filterSet)), vertexBody, modelID)
 
@@ -310,16 +307,16 @@ func (s *GatewayService) buildUpstreamRequestAnthropicVertex(
 	}
 	fullURL, err := buildVertexAnthropicURL(account.VertexProjectID(), account.VertexLocation(modelID), modelID, reqStream)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	vertexBody, err = ApplyGroupSystemPrompt(ctx, vertexBody, GroupPromptAnthropic)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	vertexBody = s.applyClaudeCacheFallback(ctx, account, vertexBody, modelID)
+	vertexBody = s.finalizeAnthropicCache(ctx, account, vertexBody, modelID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(vertexBody))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if c != nil && c.Request != nil {
@@ -357,7 +354,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicVertex(
 		"stream":     strconv.FormatBool(reqStream),
 	})
 
-	return req, nil
+	return req, vertexBody, nil
 }
 
 // getBetaHeader 处理anthropic-beta header

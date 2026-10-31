@@ -152,6 +152,11 @@
                 :title="t('keys.ipRestrictionEnabled')"
               />
             </div>
+            <p
+              v-if="groupSupportsAnthropicCacheTTL(row.group)"
+              class="mt-1 text-xs text-gray-500 dark:text-gray-400"
+              data-test="key-cache-ttl"
+            >{{ t('keys.cacheTTL.summary', { mode: cacheTTLLabel(row.anthropic_cache_ttl_mode ?? 'off') }) }}</p>
           </template>
 
           <template #cell-group="{ row }">
@@ -584,6 +589,19 @@
               />
             </template>
           </Select>
+        </div>
+
+        <div v-if="showAnthropicCacheTTL" data-test="anthropic-cache-ttl-field">
+          <label class="input-label" for="key-form-cache-ttl">{{ t('keys.cacheTTL.label') }}</label>
+          <Select
+            id="key-form-cache-ttl"
+            v-model="formData.anthropic_cache_ttl_mode"
+            :aria-label="t('keys.cacheTTL.label')"
+            aria-describedby="key-form-cache-ttl-hint"
+            :options="cacheTTLOptions"
+            match-trigger-width
+          />
+          <p id="key-form-cache-ttl-hint" class="input-hint">{{ t('keys.cacheTTL.hint') }}</p>
         </div>
 
         <!-- Custom Key Section (only for create) -->
@@ -1231,13 +1249,14 @@ import BulkEditKeysModal from '@/components/keys/BulkEditKeysModal.vue'
 	import GroupBadge from '@/components/common/GroupBadge.vue'
 	import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
 	import ExclusiveGroupTag from '@/components/common/ExclusiveGroupTag.vue'
-	import type { ApiKey, Group, PublicSettings, SubscriptionType, GroupPlatform, UpdateApiKeyRequest } from '@/types'
+	import type { ApiKey, Group, PublicSettings, SubscriptionType, GroupPlatform, UpdateApiKeyRequest, AnthropicCacheTTLMode, AnthropicCacheTTL } from '@/types'
 import type { Column } from '@/components/common/types'
 import type { BatchApiKeyUsageStats } from '@/api/usage'
 import { formatDateTime } from '@/utils/format'
 import { maskApiKey } from '@/utils/maskApiKey'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import { platformBadgeLightClass } from '@/utils/platformColors'
+import { groupSupportsAnthropicCacheTTL } from '@/utils/anthropicCacheTTL'
 import { KEY_GROUP_PROVIDERS, KEY_GROUP_PROVIDER_ICONS, getKeyGroupProvider, type KeyGroupProvider } from '@/utils/keyGroupProviders'
 import {
   CC_SWITCH_USAGE_SCRIPT,
@@ -1366,6 +1385,16 @@ const columns = computed<Column[]>(() =>
 )
 
 const apiKeys = ref<ApiKey[]>([])
+const anthropicCacheTTLDefault = ref<AnthropicCacheTTL | null>(null)
+const cacheTTLLabel = (mode: AnthropicCacheTTLMode = 'inherit') => {
+  if (mode !== 'inherit') return t(`keys.cacheTTL.${mode}`)
+  return anthropicCacheTTLDefault.value
+    ? t('keys.cacheTTL.inheritCurrent', { ttl: t(`keys.cacheTTL.duration.${anthropicCacheTTLDefault.value}`) })
+    : t('keys.cacheTTL.inherit')
+}
+const cacheTTLOptions = computed(() => (['inherit', 'off', '5m', '1h'] as const).map((value) => ({
+  value, label: cacheTTLLabel(value)
+})))
 const selectedIds = ref<number[]>([])
 const showBulkEditModal = ref(false)
 const selectedApiKeys = computed(() => apiKeys.value.filter((key) => selectedIds.value.includes(key.id)))
@@ -1441,6 +1470,7 @@ const setGroupButtonRef = (keyId: number, el: Element | ComponentPublicInstance 
 const formData = ref({
   name: '',
   group_id: null as number | null,
+  anthropic_cache_ttl_mode: 'inherit' as AnthropicCacheTTLMode,
   status: 'active' as 'active' | 'inactive',
   use_custom_key: false,
   custom_key: '',
@@ -1459,6 +1489,11 @@ const formData = ref({
   expiration_preset: '30' as '7' | '30' | '90' | 'custom',
   expiration_date: ''
 })
+
+const showAnthropicCacheTTL = computed(() => groupSupportsAnthropicCacheTTL(
+  groups.value.find((group) => group.id === formData.value.group_id) ??
+  (selectedKey.value?.group_id === formData.value.group_id ? selectedKey.value?.group : undefined)
+))
 
 // 自定义Key验证
 const customKeyError = computed(() => {
@@ -1620,6 +1655,7 @@ const loadApiKeys = async () => {
     })
     if (signal.aborted) return
     apiKeys.value = response.items
+    anthropicCacheTTLDefault.value = response.meta?.anthropic_cache_ttl_default ?? null
     handleSelectionChange(selectedIds.value)
     pagination.value.total = response.total
     pagination.value.pages = response.pages
@@ -1711,6 +1747,7 @@ const editKey = (key: ApiKey) => {
   formData.value = {
     name: key.name,
     group_id: key.group_id,
+    anthropic_cache_ttl_mode: key.anthropic_cache_ttl_mode ?? 'off',
     status: key.status === 'quota_exhausted' || key.status === 'expired' ? 'inactive' : key.status,
     use_custom_key: false,
     custom_key: '',
@@ -1876,6 +1913,9 @@ const handleSubmit = async () => {
         rate_limit_1d: rateLimitData.rate_limit_1d,
         rate_limit_7d: rateLimitData.rate_limit_7d,
       }
+      if (formData.value.anthropic_cache_ttl_mode !== (selectedKey.value.anthropic_cache_ttl_mode ?? 'off')) {
+        updates.anthropic_cache_ttl_mode = formData.value.anthropic_cache_ttl_mode
+      }
       if (shouldSubmitEditStatus(selectedKey.value, formData.value.status)) {
         updates.status = formData.value.status
       }
@@ -1891,7 +1931,8 @@ const handleSubmit = async () => {
         ipBlacklist,
         quota,
         expiresInDays,
-        rateLimitData
+        rateLimitData,
+        formData.value.anthropic_cache_ttl_mode
       )
       appStore.showSuccess(t('keys.keyCreatedSuccess'))
       // Only advance tour if active, on submit step, and creation succeeded
@@ -1937,6 +1978,7 @@ const closeModals = () => {
   formData.value = {
     name: '',
     group_id: null,
+    anthropic_cache_ttl_mode: 'inherit',
     status: 'active',
     use_custom_key: false,
     custom_key: '',

@@ -165,10 +165,10 @@ func TestEnforceCacheControlLimit_CountsToolsAndPreservesMessageAnchorsFirst(t *
 	require.False(t, gjson.GetBytes(result, "tools.0.cache_control").Exists())
 }
 
-func TestInjectAnthropicCacheControlTTL1h_OnlyUpdatesExistingEphemeralCacheControl(t *testing.T) {
+func TestForceEphemeralCacheControlTTL_OnlyUpdatesExistingDeclarations(t *testing.T) {
 	body := []byte(`{"alpha":1,"cache_control":{"type":"ephemeral"},"system":[{"type":"text","text":"sys","cache_control":{"type":"ephemeral","ttl":"5m"}},{"type":"text","text":"plain"}],"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral"}},{"type":"text","text":"non","cache_control":{"type":"persistent","ttl":"5m"}}]}],"tools":[{"name":"a","input_schema":{},"cache_control":{"type":"ephemeral"}}],"omega":2}`)
 
-	result := injectAnthropicCacheControlTTL1h(body)
+	result := forceEphemeralCacheControlTTL(body, "1h")
 	resultStr := string(result)
 
 	assertJSONTokenOrder(t, resultStr, `"alpha"`, `"cache_control"`, `"system"`, `"messages"`, `"tools"`, `"omega"`)
@@ -182,7 +182,7 @@ func TestInjectAnthropicCacheControlTTL1h_OnlyUpdatesExistingEphemeralCacheContr
 
 func TestGatewayCacheTTLGlobalSetting_TargetResolution(t *testing.T) {
 	repo := &gatewayTTLSettingRepo{data: map[string]string{
-		SettingKeyEnableAnthropicCacheTTL1hInjection: "true",
+		SettingKeyAnthropicCacheTTLDefault: "1h",
 	}}
 	gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{})
 	svc := &GatewayService{
@@ -191,8 +191,8 @@ func TestGatewayCacheTTLGlobalSetting_TargetResolution(t *testing.T) {
 	account := &Account{Platform: PlatformAnthropic, Type: AccountTypeOAuth}
 
 	target, ok := svc.resolveCacheTTLUsageOverrideTarget(context.Background(), account)
-	require.True(t, ok)
-	require.Equal(t, cacheTTLTarget5m, target)
+	require.False(t, ok)
+	require.Empty(t, target)
 
 	account.Extra = map[string]any{
 		"cache_ttl_override_enabled": true,
@@ -201,23 +201,4 @@ func TestGatewayCacheTTLGlobalSetting_TargetResolution(t *testing.T) {
 	target, ok = svc.resolveCacheTTLUsageOverrideTarget(context.Background(), account)
 	require.True(t, ok)
 	require.Equal(t, cacheTTLTarget1h, target)
-}
-
-func TestGatewayCacheTTLGlobalSetting_RequestInjectionScope(t *testing.T) {
-	repo := &gatewayTTLSettingRepo{data: map[string]string{
-		SettingKeyEnableAnthropicCacheTTL1hInjection: "true",
-	}}
-	gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{})
-	svc := &GatewayService{
-		settingService: NewSettingService(repo, &config.Config{}),
-	}
-
-	require.True(t, svc.shouldInjectAnthropicCacheTTL1h(context.Background(), &Account{Platform: PlatformAnthropic, Type: AccountTypeOAuth}))
-	require.True(t, svc.shouldInjectAnthropicCacheTTL1h(context.Background(), &Account{Platform: PlatformAnthropic, Type: AccountTypeSetupToken}))
-	require.False(t, svc.shouldInjectAnthropicCacheTTL1h(context.Background(), &Account{Platform: PlatformAnthropic, Type: AccountTypeAPIKey}))
-	require.False(t, svc.shouldInjectAnthropicCacheTTL1h(context.Background(), &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}))
-
-	repo.data[SettingKeyEnableAnthropicCacheTTL1hInjection] = "false"
-	gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{})
-	require.False(t, svc.shouldInjectAnthropicCacheTTL1h(context.Background(), &Account{Platform: PlatformAnthropic, Type: AccountTypeOAuth}))
 }

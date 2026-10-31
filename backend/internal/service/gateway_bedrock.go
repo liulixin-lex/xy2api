@@ -81,16 +81,25 @@ func (s *GatewayService) forwardBedrock(
 		betaHeader = c.GetHeader("anthropic-beta")
 	}
 
+	// Apply group prompt and final cache policy before Bedrock capability cleanup/signing.
+	var err error
+	body, err = ApplyGroupSystemPrompt(ctx, body, GroupPromptAnthropic)
+	if err != nil {
+		return nil, err
+	}
+	body = s.finalizeAnthropicCache(ctx, account, body, mappedModel)
+
 	// 准备请求体（注入 anthropic_version/anthropic_beta，移除 Bedrock 不支持的字段，清理 cache_control）
 	betaTokens, err := s.resolveBedrockBetaTokensForRequest(ctx, account, betaHeader, body, mappedModel)
 	if err != nil {
 		return nil, err
 	}
 
-	bedrockBody, err := PrepareBedrockRequestBodyWithTokens(body, mappedModel, betaTokens, false)
+	bedrockBody, err := prepareBedrockRequestBodyWithTokens(body, mappedModel, betaTokens, false, false)
 	if err != nil {
 		return nil, fmt.Errorf("prepare bedrock request body: %w", err)
 	}
+	ctx = context.WithValue(ctx, bedrockCacheFinalizedKey{}, true)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -344,11 +353,19 @@ func (s *GatewayService) buildUpstreamRequestBedrock(
 ) (*http.Request, error) {
 	targetURL := BuildBedrockURL(region, modelID, stream)
 
-	body, err := ApplyGroupSystemPrompt(ctx, body, GroupPromptAnthropic)
-	if err != nil {
-		return nil, err
+	if finalized, _ := ctx.Value(bedrockCacheFinalizedKey{}).(bool); !finalized {
+		var err error
+		body, err = ApplyGroupSystemPrompt(ctx, body, GroupPromptAnthropic)
+		if err != nil {
+			return nil, err
+		}
+		attempt, _ := ctx.Value(claudeCacheAttemptKey{}).(*claudeCacheAttempt)
+		if attempt != nil {
+			body = s.finalizeAnthropicCache(ctx, attempt.account, body, modelID)
+		} else {
+			body = sanitizeBedrockCacheControl(body, modelID)
+		}
 	}
-	body = s.applyClaudeCacheFallbackForAttempt(ctx, body, modelID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -376,11 +393,19 @@ func (s *GatewayService) buildUpstreamRequestBedrockAPIKey(
 ) (*http.Request, error) {
 	targetURL := BuildBedrockURL(region, modelID, stream)
 
-	body, err := ApplyGroupSystemPrompt(ctx, body, GroupPromptAnthropic)
-	if err != nil {
-		return nil, err
+	if finalized, _ := ctx.Value(bedrockCacheFinalizedKey{}).(bool); !finalized {
+		var err error
+		body, err = ApplyGroupSystemPrompt(ctx, body, GroupPromptAnthropic)
+		if err != nil {
+			return nil, err
+		}
+		attempt, _ := ctx.Value(claudeCacheAttemptKey{}).(*claudeCacheAttempt)
+		if attempt != nil {
+			body = s.finalizeAnthropicCache(ctx, attempt.account, body, modelID)
+		} else {
+			body = sanitizeBedrockCacheControl(body, modelID)
+		}
 	}
-	body = s.applyClaudeCacheFallbackForAttempt(ctx, body, modelID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err

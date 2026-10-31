@@ -1458,10 +1458,10 @@ export default {
           hint: 'When enabled, fixes the session ID in metadata.user_id for 15 minutes, making upstream think requests come from the same session'
         },
         cacheTTLOverride: {
-          label: 'Cache TTL Override',
-          hint: 'Force all cache creation tokens to be billed as the selected TTL tier (5m or 1h)',
-          target: 'Target TTL',
-          targetHint: 'Select the TTL tier for billing'
+          label: 'Cache write billing classification override',
+          hint: 'Classifies cache writes in the billing copy only. Does not change request TTL or upstream responses. Adjusted usage does not measure actual cache efficiency.',
+          target: 'Billing classification',
+          targetHint: 'Select the site billing tier for cache writes'
         },
         customBaseUrl: {
           label: 'Custom Relay URL',

@@ -1,12 +1,10 @@
 package service
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"testing"
 
-	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -176,81 +174,6 @@ func TestApplyToolsLastCacheBreakpoint_OnlyLiteralTrueIsDeferred(t *testing.T) {
 	for idx := 2; idx < 6; idx++ {
 		require.Equal(t, "ephemeral", gjson.GetBytes(out, fmt.Sprintf("tools.%d.cache_control.type", idx)).String())
 	}
-}
-
-func TestStripMessageCacheControl(t *testing.T) {
-	body := []byte(`{"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral"}}]}]}`)
-	out := stripMessageCacheControl(body)
-	require.False(t, gjson.GetBytes(out, "messages.0.content.0.cache_control").Exists())
-}
-
-func TestAddMessageCacheBreakpoints_LastMessageOnly(t *testing.T) {
-	body := []byte(`{"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`)
-	out := addMessageCacheBreakpoints(body)
-	require.Equal(t, "ephemeral", gjson.GetBytes(out, "messages.0.content.0.cache_control.type").String())
-	require.Equal(t, "5m", gjson.GetBytes(out, "messages.0.content.0.cache_control.ttl").String())
-}
-
-func TestAddMessageCacheBreakpoints_SecondToLastUserTurn(t *testing.T) {
-	// Parrot 不变量：messages ≥ 4 时才打第二个断点，且位置是"倒数第二个 user turn"。
-	body := []byte(`{"messages":[
-        {"role":"user","content":[{"type":"text","text":"q1"}]},
-        {"role":"assistant","content":[{"type":"text","text":"a1"}]},
-        {"role":"user","content":[{"type":"text","text":"q2"}]},
-        {"role":"assistant","content":[{"type":"text","text":"a2"}]}
-    ]}`)
-	out := addMessageCacheBreakpoints(body)
-	// 最后一条 assistant 被打断点
-	require.Equal(t, "ephemeral", gjson.GetBytes(out, "messages.3.content.0.cache_control.type").String())
-	// 倒数第二个 user turn = index 0（唯一另一个 user）
-	require.Equal(t, "ephemeral", gjson.GetBytes(out, "messages.0.content.0.cache_control.type").String())
-	// 其他不打断点
-	require.False(t, gjson.GetBytes(out, "messages.1.content.0.cache_control").Exists())
-	require.False(t, gjson.GetBytes(out, "messages.2.content.0.cache_control").Exists())
-}
-
-func TestAddMessageCacheBreakpoints_StringContentPromoted(t *testing.T) {
-	body := []byte(`{"messages":[{"role":"user","content":"hi"}]}`)
-	out := addMessageCacheBreakpoints(body)
-	// content 升级成数组
-	require.True(t, gjson.GetBytes(out, "messages.0.content").IsArray())
-	require.Equal(t, "text", gjson.GetBytes(out, "messages.0.content.0.type").String())
-	require.Equal(t, "hi", gjson.GetBytes(out, "messages.0.content.0.text").String())
-	require.Equal(t, "5m", gjson.GetBytes(out, "messages.0.content.0.cache_control.ttl").String())
-}
-
-func TestRewriteMessageCacheControlIfEnabled_DefaultKeepsClientAnchors(t *testing.T) {
-	body := []byte(`{"messages":[
-		{"role":"user","content":[{"type":"text","text":"stable","cache_control":{"type":"ephemeral","ttl":"1h"}}]},
-		{"role":"assistant","content":[{"type":"text","text":"ok"}]},
-		{"role":"user","content":[{"type":"text","text":"latest","cache_control":{"type":"ephemeral","ttl":"5m"}}]}
-	]}`)
-
-	out := (&GatewayService{}).rewriteMessageCacheControlIfEnabled(context.Background(), body)
-
-	require.JSONEq(t, string(body), string(out))
-	require.Equal(t, "1h", gjson.GetBytes(out, "messages.0.content.0.cache_control.ttl").String())
-	require.Equal(t, "5m", gjson.GetBytes(out, "messages.2.content.0.cache_control.ttl").String())
-}
-
-func TestRewriteMessageCacheControlIfEnabled_OptInPreservesLegacyRewrite(t *testing.T) {
-	body := []byte(`{"messages":[
-		{"role":"user","content":[{"type":"text","text":"stable","cache_control":{"type":"ephemeral","ttl":"1h"}}]},
-		{"role":"assistant","content":[{"type":"text","text":"ok"}]},
-		{"role":"user","content":[{"type":"text","text":"latest","cache_control":{"type":"ephemeral","ttl":"1h"}}]},
-		{"role":"assistant","content":[{"type":"text","text":"done"}]}
-	]}`)
-	repo := &gatewayTTLSettingRepo{data: map[string]string{
-		SettingKeyRewriteMessageCacheControl: "true",
-	}}
-	gatewayForwardingCache.Store(&cachedGatewayForwardingSettings{})
-	svc := &GatewayService{settingService: NewSettingService(repo, &config.Config{})}
-
-	out := svc.rewriteMessageCacheControlIfEnabled(context.Background(), body)
-
-	require.Equal(t, "5m", gjson.GetBytes(out, "messages.0.content.0.cache_control.ttl").String())
-	require.False(t, gjson.GetBytes(out, "messages.2.content.0.cache_control").Exists())
-	require.Equal(t, "5m", gjson.GetBytes(out, "messages.3.content.0.cache_control.ttl").String())
 }
 
 func TestBuildToolNameRewriteFromBody_ReverseOrderedByLengthDesc(t *testing.T) {

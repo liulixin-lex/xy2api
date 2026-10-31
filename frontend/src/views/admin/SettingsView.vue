@@ -5688,52 +5688,21 @@
                 </p>
               </div>
 
-              <!-- Anthropic Cache TTL 1h Injection -->
-              <div class="flex items-center justify-between">
-                <div>
-                  <label
-                    class="text-sm font-medium text-gray-700 dark:text-gray-300"
-                  >
-                    {{
-                      t(
-                        "admin.settings.gatewayForwarding.anthropicCacheTTL1hInjection",
-                      )
-                    }}
-                  </label>
-                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    {{
-                      t(
-                        "admin.settings.gatewayForwarding.anthropicCacheTTL1hInjectionHint",
-                      )
-                    }}
-                  </p>
-                </div>
-                <Toggle
-                  v-model="form.enable_anthropic_cache_ttl_1h_injection"
+              <div class="space-y-2">
+                <label for="anthropic-cache-ttl-default" class="input-label">
+                  {{ t("admin.settings.gatewayForwarding.anthropicCacheTTLDefault") }}
+                </label>
+                <Select
+                  id="anthropic-cache-ttl-default"
+                  v-model="form.anthropic_cache_ttl_default"
+                  :options="anthropicCacheTTLDefaultOptions"
+                  :aria-label="t('admin.settings.gatewayForwarding.anthropicCacheTTLDefault')"
+                  aria-describedby="anthropic-cache-ttl-default-hint"
+                  class="max-w-md"
                 />
-              </div>
-
-              <!-- messages cache_control 改写 -->
-              <div class="flex items-center justify-between">
-                <div>
-                  <label
-                    class="text-sm font-medium text-gray-700 dark:text-gray-300"
-                  >
-                    {{
-                      t(
-                        "admin.settings.gatewayForwarding.rewriteMessageCacheControl",
-                      )
-                    }}
-                  </label>
-                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    {{
-                      t(
-                        "admin.settings.gatewayForwarding.rewriteMessageCacheControlHint",
-                      )
-                    }}
-                  </p>
-                </div>
-                <Toggle v-model="form.rewrite_message_cache_control" />
+                <p id="anthropic-cache-ttl-default-hint" class="input-hint">
+                  {{ t("admin.settings.gatewayForwarding.anthropicCacheTTLDefaultHint") }}
+                </p>
               </div>
 
               <!-- 客户端 dateline 归一化（仅 Anthropic OAuth/SetupToken） -->
@@ -9796,6 +9765,11 @@ const claudeOAuthSystemPromptBlockTypeOptions = computed(() => [
   },
 ]);
 
+const anthropicCacheTTLDefaultOptions = computed(() => [
+  { value: "5m", label: t("admin.settings.gatewayForwarding.anthropicCacheTTLDefault5m") },
+  { value: "1h", label: t("admin.settings.gatewayForwarding.anthropicCacheTTLDefault1h") },
+]);
+
 const claudeOAuthSystemPromptCacheTTLOptions = computed(() => [
   { value: "5m", label: t("admin.settings.gatewayForwarding.cacheTTL5m") },
   { value: "1h", label: t("admin.settings.gatewayForwarding.cacheTTL1h") },
@@ -10225,8 +10199,7 @@ const form = reactive<SettingsForm>({
   enable_claude_oauth_system_prompt_injection: true,
   claude_oauth_system_prompt: "",
   claude_oauth_system_prompt_blocks: defaultClaudeOAuthSystemPromptBlocks,
-  enable_anthropic_cache_ttl_1h_injection: false,
-  rewrite_message_cache_control: false,
+  anthropic_cache_ttl_default: "5m" as "5m" | "1h",
   enable_client_dateline_normalization: true,
   enable_openai_session_uuid: true,
   antigravity_user_agent_version: "",
@@ -11892,9 +11865,8 @@ async function saveSettings() {
         ? form.claude_oauth_system_prompt
         : "",
       claude_oauth_system_prompt_blocks: claudeOAuthSystemPromptBlocksJSON,
-      enable_anthropic_cache_ttl_1h_injection:
-        form.enable_anthropic_cache_ttl_1h_injection,
-      rewrite_message_cache_control: form.rewrite_message_cache_control,
+      anthropic_cache_ttl_default:
+        form.anthropic_cache_ttl_default,
       enable_client_dateline_normalization:
         form.enable_client_dateline_normalization,
       enable_openai_session_uuid: form.enable_openai_session_uuid,

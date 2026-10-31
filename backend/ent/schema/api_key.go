@@ -3,6 +3,7 @@ package schema
 import (
 	"github.com/liulixin-lex/xy2api/ent/schema/mixins"
 	"github.com/liulixin-lex/xy2api/internal/domain"
+	"regexp"
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect"
@@ -44,6 +45,10 @@ func (APIKey) Fields() []ent.Field {
 		field.Int64("group_id").
 			Optional().
 			Nillable(),
+		field.String("anthropic_cache_ttl_mode").
+			Default("inherit").
+			MaxLen(7).
+			Match(regexp.MustCompile(`^(inherit|off|5m|1h)$`)),
 		field.String("status").
 			MaxLen(20).
 			Default(domain.StatusActive),

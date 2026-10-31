@@ -750,12 +750,16 @@ export interface CompositeRouteDecision {
   reason?: string
 }
 
+export type AnthropicCacheTTLMode = 'inherit' | 'off' | '5m' | '1h'
+export type AnthropicCacheTTL = '5m' | '1h'
+
 export interface ApiKey {
   id: number
   user_id: number
   key: string
   name: string
   group_id: number | null
+  anthropic_cache_ttl_mode?: AnthropicCacheTTLMode
   status: 'active' | 'inactive' | 'quota_exhausted' | 'expired'
   ip_whitelist: string[]
   ip_blacklist: string[]
@@ -784,6 +788,7 @@ export interface ApiKey {
 
 export interface CreateApiKeyRequest {
   name: string
+  anthropic_cache_ttl_mode?: AnthropicCacheTTLMode
   group_id?: number | null
   custom_key?: string // Optional custom API Key
   ip_whitelist?: string[]
@@ -797,6 +802,7 @@ export interface CreateApiKeyRequest {
 
 export interface UpdateApiKeyRequest {
   name?: string
+  anthropic_cache_ttl_mode?: AnthropicCacheTTLMode
   group_id?: number | null
   status?: 'active' | 'inactive'
   ip_whitelist?: string[]
@@ -1863,7 +1869,11 @@ export interface UsageLog {
   user_agent: string | null
   ip_address?: string | null
 
-  // Cache TTL Override
+  // 最终请求策略；历史与非目标出口为 null，不代表供应商实际缓存/命中。
+  anthropic_cache_ttl_policy?: 'off' | AnthropicCacheTTL | null
+  anthropic_cache_ttl_applied?: boolean | null
+
+  // Cache write billing classification override
   cache_ttl_overridden: boolean
 
   // 计费模式

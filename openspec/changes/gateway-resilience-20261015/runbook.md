@@ -34,6 +34,8 @@
 6. **余额文案**：缺省关键字已含 `insufficient user balance`。单独的 `billing_error` 类型不算余额（Sub2API 系中转把订阅失效、订阅额度、用户额度等计费前置失败都映射成它）；核查中发现新的余额文案时加入 `failure.balance_keywords_extra`，无需发版。
 7. 选择低峰时段：从生产数据看，北京时间凌晨（UTC 18:00–22:00）的请求量最低。
 
+8. 含 Anthropic TTL 迁移 286 的版本上线前，按 [TTL 升级与回退](../../../deploy/README.md#anthropic-缓存-ttl-升级与回退) 核对旧策略、存量 Key off/新建 inherit、表锁窗口与回退语义；本次不自动映射旧注入或计费补贴。
+
 ## 3. Caddy 配置
 
 ### 3.1 边缘标记（D12；0.4.1 起可选）

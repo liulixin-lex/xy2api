@@ -22,11 +22,12 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 	}
 
 	out := &AnthropicRequest{
-		Model:       req.Model,
-		Messages:    messages,
-		Temperature: req.Temperature,
-		TopP:        req.TopP,
-		Stream:      req.Stream,
+		CacheControl: req.CacheControl,
+		Model:        req.Model,
+		Messages:     messages,
+		Temperature:  req.Temperature,
+		TopP:         req.TopP,
+		Stream:       req.Stream,
 	}
 
 	if len(system) > 0 {
@@ -157,8 +158,10 @@ func mapResponsesEffortToAnthropic(effort string) string {
 // (for Anthropic's polymorphic system field) and a list of Anthropic messages.
 func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMessage, preserveThinking bool) (json.RawMessage, []AnthropicMessage, error) {
 	var systemParts []string
+	var systemBlocks []AnthropicContentBlock
 	if strings.TrimSpace(instructions) != "" {
 		systemParts = append(systemParts, strings.TrimSpace(instructions))
+		systemBlocks = append(systemBlocks, AnthropicContentBlock{Type: "text", Text: strings.TrimSpace(instructions)})
 	}
 
 	// Try as plain string input.
@@ -185,6 +188,16 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 			text := extractTextFromContent(item.Content)
 			if text != "" {
 				systemParts = append(systemParts, text)
+				converted, convErr := convertResponsesUserToAnthropicContent(item.Content)
+				if convErr != nil {
+					return nil, nil, convErr
+				}
+				var blocks []AnthropicContentBlock
+				if json.Unmarshal(converted, &blocks) != nil {
+					blocks = []AnthropicContentBlock{{Type: "text", Text: text}}
+				}
+				blocks = applyMessageCacheControl(blocks, item.CacheControl)
+				systemBlocks = append(systemBlocks, blocks...)
 			}
 
 		case item.Type == "function_call":
@@ -246,6 +259,7 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 			if err != nil {
 				return nil, nil, err
 			}
+			content = applyMessageCacheControlJSON(content, item.CacheControl)
 			// 内容里只有网关不认识的分片时，sanitize 会得到空串。Anthropic 拒收
 			// 空内容消息（"all messages must have non-empty content"），整条丢掉
 			// 比发一条必然 400 的消息更可用。
@@ -262,6 +276,7 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 			if err != nil {
 				return nil, nil, err
 			}
+			content = applyMessageCacheControlJSON(content, item.CacheControl)
 			// 同上：分片全不认识时会退化成单个空 text 块，而 Anthropic 拒收
 			// 空文本块（"text content blocks must contain non-whitespace text"）。
 			if anthropicContentIsEmpty(content) || anthropicContentIsOnlyBlankText(content) {
@@ -284,6 +299,7 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 			if err != nil {
 				return nil, nil, err
 			}
+			content = applyMessageCacheControlJSON(content, item.CacheControl)
 			if anthropicContentIsEmpty(content) {
 				continue
 			}
@@ -306,6 +322,12 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 	var system json.RawMessage
 	if len(systemParts) > 0 {
 		system, _ = json.Marshal(strings.Join(systemParts, "\n\n"))
+		for _, block := range systemBlocks {
+			if block.CacheControl != nil {
+				system, _ = json.Marshal(systemBlocks)
+				break
+			}
+		}
 	}
 
 	return system, messages, nil
@@ -542,24 +564,27 @@ func convertResponsesUserToAnthropicContent(raw json.RawMessage) (json.RawMessag
 		case "input_text", "text":
 			if p.Text != "" {
 				blocks = append(blocks, AnthropicContentBlock{
-					Type: "text",
-					Text: p.Text,
+					CacheControl: p.CacheControl,
+					Type:         "text",
+					Text:         p.Text,
 				})
 			}
 		case "input_image":
 			src := dataURIToAnthropicImageSource(p.ImageURL)
 			if src != nil {
 				blocks = append(blocks, AnthropicContentBlock{
-					Type:   "image",
-					Source: src,
+					CacheControl: p.CacheControl,
+					Type:         "image",
+					Source:       src,
 				})
 			}
 		case "input_file":
 			src := dataURIToAnthropicFileSource(p.FileData)
 			if src != nil {
 				blocks = append(blocks, AnthropicContentBlock{
-					Type:   "document",
-					Source: src,
+					CacheControl: p.CacheControl,
+					Type:         "document",
+					Source:       src,
 				})
 			}
 		}
@@ -596,8 +621,9 @@ func convertResponsesAssistantToAnthropicContent(raw json.RawMessage) (json.RawM
 		case "output_text", "text":
 			if p.Text != "" {
 				blocks = append(blocks, AnthropicContentBlock{
-					Type: "text",
-					Text: p.Text,
+					CacheControl: p.CacheControl,
+					Type:         "text",
+					Text:         p.Text,
 				})
 			}
 		}
@@ -701,28 +727,40 @@ func convertResponsesToAnthropicTools(tools []ResponsesTool) []AnthropicTool {
 		switch t.Type {
 		case "web_search", "google_search", "web_search_20250305":
 			out = append(out, AnthropicTool{
-				Type: "web_search_20250305",
-				Name: "web_search",
+				CacheControl: t.CacheControl,
+				DeferLoading: t.DeferLoading,
+				Custom:       t.Custom,
+				Type:         "web_search_20250305",
+				Name:         "web_search",
 			})
 		case "function":
 			out = append(out, AnthropicTool{
-				Name:        t.Name,
-				Description: t.Description,
-				InputSchema: normalizeAnthropicInputSchema(t.Parameters),
+				CacheControl: t.CacheControl,
+				DeferLoading: t.DeferLoading,
+				Custom:       t.Custom,
+				Name:         t.Name,
+				Description:  t.Description,
+				InputSchema:  normalizeAnthropicInputSchema(t.Parameters),
 			})
 		case "custom":
 			out = append(out, AnthropicTool{
-				Name:        t.Name,
-				Description: t.Description,
-				InputSchema: normalizeAnthropicInputSchema(t.Parameters),
+				CacheControl: t.CacheControl,
+				DeferLoading: t.DeferLoading,
+				Custom:       t.Custom,
+				Name:         t.Name,
+				Description:  t.Description,
+				InputSchema:  normalizeAnthropicInputSchema(t.Parameters),
 			})
 		default:
 			// Pass through unknown tool types
 			out = append(out, AnthropicTool{
-				Type:        t.Type,
-				Name:        t.Name,
-				Description: t.Description,
-				InputSchema: normalizeAnthropicInputSchema(t.Parameters),
+				CacheControl: t.CacheControl,
+				DeferLoading: t.DeferLoading,
+				Custom:       t.Custom,
+				Type:         t.Type,
+				Name:         t.Name,
+				Description:  t.Description,
+				InputSchema:  normalizeAnthropicInputSchema(t.Parameters),
 			})
 		}
 	}

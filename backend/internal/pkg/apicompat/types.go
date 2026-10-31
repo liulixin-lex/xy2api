@@ -18,17 +18,18 @@ import (
 
 // AnthropicRequest is the request body for POST /v1/messages.
 type AnthropicRequest struct {
-	Model       string             `json:"model"`
-	MaxTokens   int                `json:"max_tokens"`
-	System      json.RawMessage    `json:"system,omitempty"` // string or []AnthropicContentBlock
-	Messages    []AnthropicMessage `json:"messages"`
-	Tools       []AnthropicTool    `json:"tools,omitempty"`
-	Stream      bool               `json:"stream,omitempty"`
-	Temperature *float64           `json:"temperature,omitempty"`
-	TopP        *float64           `json:"top_p,omitempty"`
-	StopSeqs    []string           `json:"stop_sequences,omitempty"`
-	Thinking    *AnthropicThinking `json:"thinking,omitempty"`
-	ToolChoice  json.RawMessage    `json:"tool_choice,omitempty"`
+	CacheControl *AnthropicCacheControl `json:"cache_control,omitempty"`
+	Model        string                 `json:"model"`
+	MaxTokens    int                    `json:"max_tokens"`
+	System       json.RawMessage        `json:"system,omitempty"` // string or []AnthropicContentBlock
+	Messages     []AnthropicMessage     `json:"messages"`
+	Tools        []AnthropicTool        `json:"tools,omitempty"`
+	Stream       bool                   `json:"stream,omitempty"`
+	Temperature  *float64               `json:"temperature,omitempty"`
+	TopP         *float64               `json:"top_p,omitempty"`
+	StopSeqs     []string               `json:"stop_sequences,omitempty"`
+	Thinking     *AnthropicThinking     `json:"thinking,omitempty"`
+	ToolChoice   json.RawMessage        `json:"tool_choice,omitempty"`
 	// Metadata 会被原样透传给上游。OAuth/Claude-Code 路径依赖 metadata.user_id
 	// 参与上游的"是否为官方 Claude Code 请求"判定；如果经由本结构体重新序列化
 	// 时丢弃该字段，网关侧后续的 metadata 重写(ensureClaudeOAuthMetadataUserID/
@@ -120,6 +121,8 @@ type AnthropicImageSource struct {
 
 // AnthropicTool describes a tool available to the model.
 type AnthropicTool struct {
+	DeferLoading *bool                  `json:"defer_loading,omitempty"`
+	Custom       json.RawMessage        `json:"custom,omitempty"`
 	Type         string                 `json:"type,omitempty"` // e.g. "web_search_20250305" for server tools
 	Name         string                 `json:"name"`
 	Description  string                 `json:"description,omitempty"`
@@ -130,8 +133,10 @@ type AnthropicTool struct {
 // AnthropicCacheControl 对应 Anthropic API 的 cache_control 字段。
 // ttl 默认由调用方决定；本项目策略见 claude.DefaultCacheControlTTL。
 type AnthropicCacheControl struct {
-	Type string `json:"type"`          // "ephemeral"
-	TTL  string `json:"ttl,omitempty"` // "5m" / "1h" / 省略=默认 5m（由 Anthropic 判定）
+	Extra map[string]json.RawMessage `json:"-"`
+	Scope string                     `json:"scope,omitempty"`
+	Type  string                     `json:"type"`          // "ephemeral"
+	TTL   string                     `json:"ttl,omitempty"` // "5m" / "1h" / 省略=默认 5m（由 Anthropic 判定）
 }
 
 // AnthropicResponse is the non-streaming response from POST /v1/messages.
@@ -171,6 +176,12 @@ type AnthropicPromptTokensDetails struct {
 
 // AnthropicUsage holds token counts in Anthropic format.
 type AnthropicUsage struct {
+	InputTokensPresent              bool                    `json:"-"`
+	OutputTokensPresent             bool                    `json:"-"`
+	CacheReadInputTokensPresent     bool                    `json:"-"`
+	CacheCreationInputTokensPresent bool                    `json:"-"`
+	CacheCreation                   *AnthropicCacheCreation `json:"cache_creation,omitempty"`
+
 	InputTokens              int `json:"input_tokens"`
 	OutputTokens             int `json:"output_tokens"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
@@ -234,26 +245,27 @@ type AnthropicDelta struct {
 
 // ResponsesRequest is the request body for POST /v1/responses.
 type ResponsesRequest struct {
-	PromptCacheRetention string              `json:"prompt_cache_retention,omitempty"`
-	SafetyIdentifier     string              `json:"safety_identifier,omitempty"`
-	PromptCacheOptions   json.RawMessage     `json:"prompt_cache_options,omitempty"`
-	Model                string              `json:"model"`
-	Instructions         string              `json:"instructions,omitempty"`
-	Input                json.RawMessage     `json:"input"` // string or []ResponsesInputItem
-	MaxOutputTokens      *int                `json:"max_output_tokens,omitempty"`
-	Temperature          *float64            `json:"temperature,omitempty"`
-	TopP                 *float64            `json:"top_p,omitempty"`
-	Stream               bool                `json:"stream,omitempty"`
-	Tools                []ResponsesTool     `json:"tools,omitempty"`
-	Include              []string            `json:"include,omitempty"`
-	Store                *bool               `json:"store,omitempty"`
-	ParallelToolCalls    *bool               `json:"parallel_tool_calls,omitempty"`
-	Reasoning            *ResponsesReasoning `json:"reasoning,omitempty"`
-	Text                 *ResponsesText      `json:"text,omitempty"`
-	ToolChoice           json.RawMessage     `json:"tool_choice,omitempty"`
-	ServiceTier          string              `json:"service_tier,omitempty"`
-	PromptCacheKey       string              `json:"prompt_cache_key,omitempty"`
-	PreviousResponseID   string              `json:"previous_response_id,omitempty"`
+	CacheControl         *AnthropicCacheControl `json:"cache_control,omitempty"`
+	PromptCacheRetention string                 `json:"prompt_cache_retention,omitempty"`
+	SafetyIdentifier     string                 `json:"safety_identifier,omitempty"`
+	PromptCacheOptions   json.RawMessage        `json:"prompt_cache_options,omitempty"`
+	Model                string                 `json:"model"`
+	Instructions         string                 `json:"instructions,omitempty"`
+	Input                json.RawMessage        `json:"input"` // string or []ResponsesInputItem
+	MaxOutputTokens      *int                   `json:"max_output_tokens,omitempty"`
+	Temperature          *float64               `json:"temperature,omitempty"`
+	TopP                 *float64               `json:"top_p,omitempty"`
+	Stream               bool                   `json:"stream,omitempty"`
+	Tools                []ResponsesTool        `json:"tools,omitempty"`
+	Include              []string               `json:"include,omitempty"`
+	Store                *bool                  `json:"store,omitempty"`
+	ParallelToolCalls    *bool                  `json:"parallel_tool_calls,omitempty"`
+	Reasoning            *ResponsesReasoning    `json:"reasoning,omitempty"`
+	Text                 *ResponsesText         `json:"text,omitempty"`
+	ToolChoice           json.RawMessage        `json:"tool_choice,omitempty"`
+	ServiceTier          string                 `json:"service_tier,omitempty"`
+	PromptCacheKey       string                 `json:"prompt_cache_key,omitempty"`
+	PreviousResponseID   string                 `json:"previous_response_id,omitempty"`
 }
 
 // ResponsesReasoning configures reasoning effort in the Responses API.
@@ -271,6 +283,7 @@ type ResponsesText struct {
 // ResponsesInputItem is one item in the Responses API input array.
 // The Type field determines which other fields are populated.
 type ResponsesInputItem struct {
+	CacheControl *AnthropicCacheControl `json:"cache_control,omitempty"`
 	// Common
 	Type string `json:"type,omitempty"` // "message" for role-based messages
 
@@ -320,11 +333,12 @@ func (i *ResponsesInputItem) UnmarshalJSON(data []byte) error {
 
 // ResponsesContentPart is a typed content part in a Responses message.
 type ResponsesContentPart struct {
-	PromptCacheBreakpoint json.RawMessage `json:"prompt_cache_breakpoint,omitempty"`
-	Type                  string          `json:"type"` // "input_text" | "output_text" | "refusal" | "input_image" | "input_file"
-	Text                  string          `json:"text,omitempty"`
-	Refusal               string          `json:"refusal,omitempty"`   // type=refusal
-	ImageURL              string          `json:"image_url,omitempty"` // data URI for input_image
+	CacheControl          *AnthropicCacheControl `json:"cache_control,omitempty"`
+	PromptCacheBreakpoint json.RawMessage        `json:"prompt_cache_breakpoint,omitempty"`
+	Type                  string                 `json:"type"` // "input_text" | "output_text" | "refusal" | "input_image" | "input_file"
+	Text                  string                 `json:"text,omitempty"`
+	Refusal               string                 `json:"refusal,omitempty"`   // type=refusal
+	ImageURL              string                 `json:"image_url,omitempty"` // data URI for input_image
 
 	// input_file fields.
 	Filename string `json:"filename,omitempty"`
@@ -334,11 +348,14 @@ type ResponsesContentPart struct {
 
 // ResponsesTool describes a tool in the Responses API.
 type ResponsesTool struct {
-	Type        string          `json:"type"` // "function" | "custom" | "web_search" | "x_search" | "local_shell" etc.
-	Name        string          `json:"name,omitempty"`
-	Description string          `json:"description,omitempty"`
-	Parameters  json.RawMessage `json:"parameters,omitempty"`
-	Strict      *bool           `json:"strict,omitempty"`
+	DeferLoading *bool                  `json:"defer_loading,omitempty"`
+	Custom       json.RawMessage        `json:"custom,omitempty"`
+	CacheControl *AnthropicCacheControl `json:"cache_control,omitempty"`
+	Type         string                 `json:"type"` // "function" | "custom" | "web_search" | "x_search" | "local_shell" etc.
+	Name         string                 `json:"name,omitempty"`
+	Description  string                 `json:"description,omitempty"`
+	Parameters   json.RawMessage        `json:"parameters,omitempty"`
+	Strict       *bool                  `json:"strict,omitempty"`
 
 	// type=namespace 的子工具列表（tools 与 children 二选一，语义相同）。
 	Tools    []ResponsesTool `json:"tools,omitempty"`
@@ -643,26 +660,27 @@ type ResponsesStreamEvent struct {
 
 // ChatCompletionsRequest is the request body for POST /v1/chat/completions.
 type ChatCompletionsRequest struct {
-	PromptCacheKey       string             `json:"prompt_cache_key,omitempty"`
-	PromptCacheRetention string             `json:"prompt_cache_retention,omitempty"`
-	SafetyIdentifier     string             `json:"safety_identifier,omitempty"`
-	PromptCacheOptions   json.RawMessage    `json:"prompt_cache_options,omitempty"`
-	Model                string             `json:"model"`
-	Messages             []ChatMessage      `json:"messages"`
-	Instructions         string             `json:"instructions,omitempty"` // OpenAI Responses API compat
-	MaxTokens            *int               `json:"max_tokens,omitempty"`
-	MaxCompletionTokens  *int               `json:"max_completion_tokens,omitempty"`
-	Temperature          *float64           `json:"temperature,omitempty"`
-	TopP                 *float64           `json:"top_p,omitempty"`
-	Stream               bool               `json:"stream,omitempty"`
-	StreamOptions        *ChatStreamOptions `json:"stream_options,omitempty"`
-	Tools                []ChatTool         `json:"tools,omitempty"`
-	ParallelToolCalls    *bool              `json:"parallel_tool_calls,omitempty"`
-	ToolChoice           json.RawMessage    `json:"tool_choice,omitempty"`
-	ReasoningEffort      string             `json:"reasoning_effort,omitempty"` // "low" | "medium" | "high" | "xhigh"
-	ServiceTier          string             `json:"service_tier,omitempty"`
-	Stop                 json.RawMessage    `json:"stop,omitempty"` // string or []string
-	ResponseFormat       json.RawMessage    `json:"response_format,omitempty"`
+	CacheControl         *AnthropicCacheControl `json:"cache_control,omitempty"`
+	PromptCacheKey       string                 `json:"prompt_cache_key,omitempty"`
+	PromptCacheRetention string                 `json:"prompt_cache_retention,omitempty"`
+	SafetyIdentifier     string                 `json:"safety_identifier,omitempty"`
+	PromptCacheOptions   json.RawMessage        `json:"prompt_cache_options,omitempty"`
+	Model                string                 `json:"model"`
+	Messages             []ChatMessage          `json:"messages"`
+	Instructions         string                 `json:"instructions,omitempty"` // OpenAI Responses API compat
+	MaxTokens            *int                   `json:"max_tokens,omitempty"`
+	MaxCompletionTokens  *int                   `json:"max_completion_tokens,omitempty"`
+	Temperature          *float64               `json:"temperature,omitempty"`
+	TopP                 *float64               `json:"top_p,omitempty"`
+	Stream               bool                   `json:"stream,omitempty"`
+	StreamOptions        *ChatStreamOptions     `json:"stream_options,omitempty"`
+	Tools                []ChatTool             `json:"tools,omitempty"`
+	ParallelToolCalls    *bool                  `json:"parallel_tool_calls,omitempty"`
+	ToolChoice           json.RawMessage        `json:"tool_choice,omitempty"`
+	ReasoningEffort      string                 `json:"reasoning_effort,omitempty"` // "low" | "medium" | "high" | "xhigh"
+	ServiceTier          string                 `json:"service_tier,omitempty"`
+	Stop                 json.RawMessage        `json:"stop,omitempty"` // string or []string
+	ResponseFormat       json.RawMessage        `json:"response_format,omitempty"`
 
 	// Legacy function calling (deprecated but still supported)
 	Functions    []ChatFunction  `json:"functions,omitempty"`
@@ -676,14 +694,15 @@ type ChatStreamOptions struct {
 
 // ChatMessage is a single message in the Chat Completions conversation.
 type ChatMessage struct {
-	Role             string          `json:"role"` // "system" | "user" | "assistant" | "tool" | "function"
-	Content          json.RawMessage `json:"content,omitempty"`
-	Refusal          string          `json:"refusal,omitempty"`
-	ReasoningContent string          `json:"reasoning_content,omitempty"`
-	Reasoning        string          `json:"reasoning,omitempty"`
-	Name             string          `json:"name,omitempty"`
-	ToolCalls        []ChatToolCall  `json:"tool_calls,omitempty"`
-	ToolCallID       string          `json:"tool_call_id,omitempty"`
+	CacheControl     *AnthropicCacheControl `json:"cache_control,omitempty"`
+	Role             string                 `json:"role"` // "system" | "user" | "assistant" | "tool" | "function"
+	Content          json.RawMessage        `json:"content,omitempty"`
+	Refusal          string                 `json:"refusal,omitempty"`
+	ReasoningContent string                 `json:"reasoning_content,omitempty"`
+	Reasoning        string                 `json:"reasoning,omitempty"`
+	Name             string                 `json:"name,omitempty"`
+	ToolCalls        []ChatToolCall         `json:"tool_calls,omitempty"`
+	ToolCallID       string                 `json:"tool_call_id,omitempty"`
 
 	// Legacy function calling
 	FunctionCall *ChatFunctionCall `json:"function_call,omitempty"`
@@ -691,11 +710,12 @@ type ChatMessage struct {
 
 // ChatContentPart is a typed content part in a multi-modal message.
 type ChatContentPart struct {
-	PromptCacheBreakpoint json.RawMessage `json:"prompt_cache_breakpoint,omitempty"`
-	Type                  string          `json:"type"` // "text" | "image_url" | "file"
-	Text                  string          `json:"text,omitempty"`
-	ImageURL              *ChatImageURL   `json:"image_url,omitempty"`
-	File                  *ChatFile       `json:"file,omitempty"`
+	CacheControl          *AnthropicCacheControl `json:"cache_control,omitempty"`
+	PromptCacheBreakpoint json.RawMessage        `json:"prompt_cache_breakpoint,omitempty"`
+	Type                  string                 `json:"type"` // "text" | "image_url" | "file"
+	Text                  string                 `json:"text,omitempty"`
+	ImageURL              *ChatImageURL          `json:"image_url,omitempty"`
+	File                  *ChatFile              `json:"file,omitempty"`
 }
 
 // ChatImageURL contains the URL for an image content part.
@@ -713,8 +733,11 @@ type ChatFile struct {
 
 // ChatTool describes a tool available to the model.
 type ChatTool struct {
-	Type     string        `json:"type"` // "function" | "web_search" | "code_execution" | "x_search"
-	Function *ChatFunction `json:"function,omitempty"`
+	DeferLoading *bool                  `json:"defer_loading,omitempty"`
+	Custom       json.RawMessage        `json:"custom,omitempty"`
+	CacheControl *AnthropicCacheControl `json:"cache_control,omitempty"`
+	Type         string                 `json:"type"` // "function" | "web_search" | "code_execution" | "x_search"
+	Function     *ChatFunction          `json:"function,omitempty"`
 
 	// type=x_search
 	AllowedXHandles          []string `json:"allowed_x_handles,omitempty"`
@@ -727,10 +750,13 @@ type ChatTool struct {
 
 // ChatFunction describes a function tool definition.
 type ChatFunction struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	Parameters  json.RawMessage `json:"parameters,omitempty"`
-	Strict      *bool           `json:"strict,omitempty"`
+	DeferLoading *bool                  `json:"defer_loading,omitempty"`
+	Custom       json.RawMessage        `json:"custom,omitempty"`
+	CacheControl *AnthropicCacheControl `json:"cache_control,omitempty"`
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description,omitempty"`
+	Parameters   json.RawMessage        `json:"parameters,omitempty"`
+	Strict       *bool                  `json:"strict,omitempty"`
 }
 
 // ChatToolCall represents a tool call made by the assistant.

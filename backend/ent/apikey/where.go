@@ -90,6 +90,11 @@ func GroupID(v int64) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldGroupID, v))
 }
 
+// AnthropicCacheTTLMode applies equality check predicate on the "anthropic_cache_ttl_mode" field. It's identical to AnthropicCacheTTLModeEQ.
+func AnthropicCacheTTLMode(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldAnthropicCacheTTLMode, v))
+}
+
 // Status applies equality check predicate on the "status" field. It's identical to StatusEQ.
 func Status(v string) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldStatus, v))
@@ -468,6 +473,71 @@ func GroupIDIsNil() predicate.APIKey {
 // GroupIDNotNil applies the NotNil predicate on the "group_id" field.
 func GroupIDNotNil() predicate.APIKey {
 	return predicate.APIKey(sql.FieldNotNull(FieldGroupID))
+}
+
+// AnthropicCacheTTLModeEQ applies the EQ predicate on the "anthropic_cache_ttl_mode" field.
+func AnthropicCacheTTLModeEQ(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldAnthropicCacheTTLMode, v))
+}
+
+// AnthropicCacheTTLModeNEQ applies the NEQ predicate on the "anthropic_cache_ttl_mode" field.
+func AnthropicCacheTTLModeNEQ(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNEQ(FieldAnthropicCacheTTLMode, v))
+}
+
+// AnthropicCacheTTLModeIn applies the In predicate on the "anthropic_cache_ttl_mode" field.
+func AnthropicCacheTTLModeIn(vs ...string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldIn(FieldAnthropicCacheTTLMode, vs...))
+}
+
+// AnthropicCacheTTLModeNotIn applies the NotIn predicate on the "anthropic_cache_ttl_mode" field.
+func AnthropicCacheTTLModeNotIn(vs ...string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotIn(FieldAnthropicCacheTTLMode, vs...))
+}
+
+// AnthropicCacheTTLModeGT applies the GT predicate on the "anthropic_cache_ttl_mode" field.
+func AnthropicCacheTTLModeGT(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGT(FieldAnthropicCacheTTLMode, v))
+}
+
+// AnthropicCacheTTLModeGTE applies the GTE predicate on the "anthropic_cache_ttl_mode" field.
+func AnthropicCacheTTLModeGTE(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGTE(FieldAnthropicCacheTTLMode, v))
+}
+
+// AnthropicCacheTTLModeLT applies the LT predicate on the "anthropic_cache_ttl_mode" field.
+func AnthropicCacheTTLModeLT(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLT(FieldAnthropicCacheTTLMode, v))
+}
+
+// AnthropicCacheTTLModeLTE applies the LTE predicate on the "anthropic_cache_ttl_mode" field.
+func AnthropicCacheTTLModeLTE(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLTE(FieldAnthropicCacheTTLMode, v))
+}
+
+// AnthropicCacheTTLModeContains applies the Contains predicate on the "anthropic_cache_ttl_mode" field.
+func AnthropicCacheTTLModeContains(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldContains(FieldAnthropicCacheTTLMode, v))
+}
+
+// AnthropicCacheTTLModeHasPrefix applies the HasPrefix predicate on the "anthropic_cache_ttl_mode" field.
+func AnthropicCacheTTLModeHasPrefix(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldHasPrefix(FieldAnthropicCacheTTLMode, v))
+}
+
+// AnthropicCacheTTLModeHasSuffix applies the HasSuffix predicate on the "anthropic_cache_ttl_mode" field.
+func AnthropicCacheTTLModeHasSuffix(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldHasSuffix(FieldAnthropicCacheTTLMode, v))
+}
+
+// AnthropicCacheTTLModeEqualFold applies the EqualFold predicate on the "anthropic_cache_ttl_mode" field.
+func AnthropicCacheTTLModeEqualFold(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEqualFold(FieldAnthropicCacheTTLMode, v))
+}
+
+// AnthropicCacheTTLModeContainsFold applies the ContainsFold predicate on the "anthropic_cache_ttl_mode" field.
+func AnthropicCacheTTLModeContainsFold(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldContainsFold(FieldAnthropicCacheTTLMode, v))
 }
 
 // StatusEQ applies the EQ predicate on the "status" field.

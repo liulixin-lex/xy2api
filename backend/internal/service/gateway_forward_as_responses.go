@@ -38,7 +38,10 @@ func (s *GatewayService) ForwardAsResponses(
 ) (result *ForwardResult, err error) {
 	startTime := time.Now()
 	ctx, cacheDecision := s.beginClaudeCacheAttempt(ctx, parsed, account)
-	defer func() { finishClaudeCacheAttempt(cacheDecision, result) }()
+	defer func() {
+		finishAnthropicCacheTTLAttempt(ctx, result)
+		finishClaudeCacheAttempt(cacheDecision, result)
+	}()
 
 	normalizedBody, normalized, err := normalizeOpenAIResponsesLegacyIngress(body)
 	if err != nil {
@@ -325,17 +328,22 @@ func mergeAnthropicUsage(dst *ClaudeUsage, src apicompat.AnthropicUsage) {
 		// a total from an earlier event. Do not infer a subtraction merely because
 		// a later event contains cache buckets; that would corrupt providers whose
 		// stream uses independent input and cache fields.
+		// A later stream delta commonly carries input_tokens: 0 while its
+		// authoritative input count was already reported in message_start.
+		// Zero is meaningful for cache buckets, but must not erase that input
+		// count. Keep the existing value until a positive input total arrives.
 		if src.InputTokens > 0 {
 			dst.InputTokens = src.InputTokens
 		}
-		if cacheReadTokens > 0 {
+		if src.CacheReadInputTokensPresent || cacheReadTokens > 0 {
 			dst.CacheReadInputTokens = cacheReadTokens
 		}
 		if src.CacheCreationInputTokens > 0 {
 			dst.CacheCreationInputTokens = src.CacheCreationInputTokens
 		}
 	}
-	if src.OutputTokens > 0 {
+	mergeAnthropicCacheUsage(dst, src)
+	if src.OutputTokensPresent || src.OutputTokens > 0 {
 		dst.OutputTokens = src.OutputTokens
 	}
 }

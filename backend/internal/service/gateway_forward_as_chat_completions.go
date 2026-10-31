@@ -36,7 +36,10 @@ func (s *GatewayService) ForwardAsChatCompletions(
 ) (result *ForwardResult, err error) {
 	startTime := time.Now()
 	ctx, cacheDecision := s.beginClaudeCacheAttempt(ctx, parsed, account)
-	defer func() { finishClaudeCacheAttempt(cacheDecision, result) }()
+	defer func() {
+		finishAnthropicCacheTTLAttempt(ctx, result)
+		finishClaudeCacheAttempt(cacheDecision, result)
+	}()
 
 	// 1. Parse Chat Completions request
 	var ccReq apicompat.ChatCompletionsRequest
