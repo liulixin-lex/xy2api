@@ -772,6 +772,7 @@ func ProvideOpsService(
 	settingService *SettingService,
 	authCacheInvalidationWorker *AuthCacheInvalidationWorker,
 	apiKeyService *APIKeyService,
+	groupQualityGateView GroupQualityGateView,
 ) *OpsService {
 	svc := NewOpsService(
 		opsRepo,
@@ -794,6 +795,7 @@ func ProvideOpsService(
 	}
 	svc.authCacheInvalidationWorker = authCacheInvalidationWorker
 	svc.apiKeyService = apiKeyService
+	svc.SetGroupQualityGateView(groupQualityGateView)
 	svc.StartRuntimeSettingsRefresh(context.Background())
 	return svc
 }
@@ -928,6 +930,7 @@ var ProviderSet = wire.NewSet(
 	NewGroupCategoryService,
 	NewOperatorAccessService,
 	ProvideResilienceService,
+	NewEmptyGroupQualityGateView,
 	ProvideAntigravityTokenProvider,
 	ProvideGrokTokenProvider,
 	ProvideOpenAITokenProvider,
@@ -1136,7 +1139,18 @@ func ProvideShareSchedulingService(repo ShareSchedulingRepository, store ShareSc
 // ProvideResilienceService creates the gateway resilience runtime, attaches
 // it to the gateway services and starts the settings refresh. With no stored
 // settings every capability uses its documented default.
-func ProvideResilienceService(settingRepo SettingRepository, store ResilienceStore, repo ResilienceRepository, undelivered UndeliveredRepository, accounts AccountRepository, groups GroupRepository, rateLimit *RateLimitService, gateway *GatewayService, openai *OpenAIGatewayService) *ResilienceService {
+func ProvideResilienceService(
+	settingRepo SettingRepository,
+	store ResilienceStore,
+	repo ResilienceRepository,
+	undelivered UndeliveredRepository,
+	accounts AccountRepository,
+	groups GroupRepository,
+	rateLimit *RateLimitService,
+	gateway *GatewayService,
+	openai *OpenAIGatewayService,
+	groupQualityGateView GroupQualityGateView,
+) *ResilienceService {
 	s := NewResilienceService(settingRepo, store)
 	s.ConfigureOutputP99(repo)
 	s.ConfigureUndelivered(undelivered)
@@ -1146,6 +1160,8 @@ func ProvideResilienceService(settingRepo SettingRepository, store ResilienceSto
 	rateLimit.SetResilienceService(s)
 	gateway.resilience = s
 	openai.resilience = s
+	s.SetGroupQualityGateView(groupQualityGateView)
+	openai.SetGroupQualityGateView(groupQualityGateView)
 	s.pricingRestricted = func(ctx context.Context, groupID int64, model string) bool {
 		return gateway.checkChannelPricingRestriction(ctx, &groupID, model)
 	}

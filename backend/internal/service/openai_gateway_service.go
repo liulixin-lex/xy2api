@@ -548,7 +548,25 @@ type OpenAIGatewayService struct {
 	// shareScheduling 由 ProvideShareSchedulingService 注入；nil 时保持原版调度。
 	shareScheduling *ShareSchedulingService
 	// resilience is the xy2api gateway resilience runtime (optional).
-	resilience *ResilienceService
+	resilience           *ResilienceService
+	groupQualityGateView GroupQualityGateView
+}
+
+// SetGroupQualityGateView attaches the shared quality decision view during startup wiring.
+func (s *OpenAIGatewayService) SetGroupQualityGateView(view GroupQualityGateView) {
+	if s == nil {
+		return
+	}
+	s.groupQualityGateView = view
+}
+
+// GroupQualityGateView returns the shared quality decision view. A nil or
+// unconfigured service remains safe for callers and behaves as all groups ungated.
+func (s *OpenAIGatewayService) GroupQualityGateView() GroupQualityGateView {
+	if s == nil || s.groupQualityGateView == nil {
+		return emptyGroupQualityGateView{}
+	}
+	return s.groupQualityGateView
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService
