@@ -52,6 +52,7 @@ export default {
       metric: '指标',
       measured: '实测',
       limit: '上限',
+      ejectionWindow: '熔断时窗口',
       errorRate: '错误率',
       warmTtft: '首字 p90',
       noData: '无数据',

@@ -52,7 +52,9 @@
           <thead>
             <tr class="text-[11px] text-gray-400">
               <th scope="col" class="pb-0.5 text-left font-normal">{{ t('admin.groupQualityGate.tooltip.metric') }}</th>
-              <th scope="col" class="pb-0.5 text-right font-normal">{{ t('admin.groupQualityGate.tooltip.measured') }}</th>
+              <th scope="col" class="pb-0.5 text-right font-normal">
+                {{ t('admin.groupQualityGate.tooltip.measured') }}<span v-if="block.measuredNote" class="ml-1">{{ block.measuredNote }}</span>
+              </th>
               <th scope="col" class="pb-0.5 pl-3 text-right font-normal">{{ t('admin.groupQualityGate.tooltip.limit') }}</th>
             </tr>
           </thead>
@@ -80,6 +82,7 @@ import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupQualityBadge from './GroupQualityBadge.vue'
 import { formatDateTime } from '@/utils/format'
 import type { Group } from '@/types'
+import type { GroupQualityAccountMetrics } from '@/types/groupQualityGate'
 import {
   QUALITY_CLOCK,
   groupQualityTooltip,
@@ -89,7 +92,7 @@ import {
 } from './groupQualityPresentation'
 
 // 账号列表的分组单元格：整格是一个按钮，点开“编辑分组”弹窗；没有分组时显示“—”也能点。
-// 开启质量门槛的分组按状态着色，有问题的排在前面。门槛说明（状态、原因、本组判定用的实测与上限）
+// 开启质量门槛的分组按状态着色，有问题的排在前面。门槛说明（状态、原因、实测与上限）
 // 放在悬停和键盘聚焦都会出现的提示里，并作为按钮的补充描述给读屏。
 const TIP_WIDTH = 288
 const TIP_GAP = 6
@@ -99,6 +102,8 @@ const props = defineProps<{
   accountName: string
   /** groupId → 该账号在开启门槛的分组里的状态 */
   quality?: Map<number, GroupQualityCell>
+  /** 账号的完整窗口指标；熔断中的分组用它显示触发熔断的数据 */
+  metrics?: GroupQualityAccountMetrics
 }>()
 
 const emit = defineEmits<{
@@ -119,7 +124,7 @@ const hiddenCount = computed(() => Math.max(0, props.groups.length - maxVisible.
 const details = computed(() =>
   orderedGroups.value
     .filter((group) => props.quality?.has(group.id))
-    .map((group) => groupQualityTooltip(group.name, props.quality!.get(group.id)!, t, clock))
+    .map((group) => groupQualityTooltip(group.name, props.quality!.get(group.id)!, t, clock, props.metrics))
 )
 
 const trigger = ref<HTMLElement>()

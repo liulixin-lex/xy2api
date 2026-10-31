@@ -176,6 +176,22 @@ describe('groupQualityTooltip', () => {
     expect(block.headroom).toEqual({ text: '余量 -18%', tone: 'danger' })
   })
 
+  it('shows the full window for ejected groups, floor guard included, and member metrics for eligible and trial', () => {
+    const postEjection = { calls: 4, soft_failures: 0, error_rate: null, warm_samples: 4, warm_ttft_p90_ms: null }
+    const window = metrics({ calls: 60, soft_failures: 0, error_rate: 0, warm_samples: 103, warm_ttft_p90_ms: 29200 })
+    const pinned = groupQualityTooltip('Codex', qualityOf(account({
+      state: 'ejected', pinned: true, strikes: 1, reasons: ['warm_ttft'], headroom: null, metrics: postEjection
+    })), zh, clock, window)
+    expect(pinned.measuredNote).toBe('熔断时窗口')
+    expect(cells(pinned)).toEqual([['错误率', '0%', '未达判定条件', '10%', false], ['首字 p90', '29.2s', '', '20s', true]])
+    expect(pinned.headroom).toEqual({ text: '余量 -46%', tone: 'danger' })
+    const held = groupQualityTooltip('Codex', qualityOf(account({ state: 'ejected', guard_held: true, strikes: 2, headroom: 0.5, metrics: postEjection })), zh, clock,
+      metrics({ calls: 224, soft_failures: 75, error_rate: 0.335, warm_samples: 148, warm_ttft_p90_ms: 8200 }))
+    expect([held.measuredNote, cells(held)[0][1], held.headroom?.text]).toEqual(['熔断时窗口', '33.5%', '余量 -235%'])
+    const trial = groupQualityTooltip('Codex', qualityOf(account({ state: 'trial', headroom: null, metrics: postEjection })), zh, clock, window)
+    expect([trial.measuredNote, cells(trial)[1][1], trial.headroom]).toEqual([undefined, '样本不足', undefined])
+  })
+
   it('uses member metrics: below-threshold error ratio in grey, too few samples, no data; headroom only when close', () => {
     const below = groupQualityTooltip('Codex', qualityOf(account({
       headroom: 0.12, metrics: { calls: 12, soft_failures: 1, error_rate: null, warm_samples: 4, warm_ttft_p90_ms: null }

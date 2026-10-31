@@ -52,6 +52,7 @@ export default {
       metric: 'Metric',
       measured: 'Measured',
       limit: 'Limit',
+      ejectionWindow: 'at ejection',
       errorRate: 'Error rate',
       warmTtft: 'First token p90',
       noData: 'No data',

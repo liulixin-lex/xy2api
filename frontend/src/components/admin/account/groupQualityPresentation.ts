@@ -3,7 +3,8 @@ import type {
   GroupQualityGateAccountStatus,
   GroupQualityGateGroupStatus,
   GroupQualityGatePolicies,
-  GroupQualityGateStatus
+  GroupQualityGateStatus,
+  GroupQualityMemberMetrics
 } from '@/types/groupQualityGate'
 import { QUALITY_GATE_DEFAULTS } from '@/views/admin/groupsQualityGate'
 
@@ -182,6 +183,8 @@ export interface QualityTooltipBlock {
   note?: string
   reasons: string[]
   rows: QualityTooltipRow[]
+  /** “实测”表头旁的小字：熔断中改看完整窗口时标“熔断时窗口” */
+  measuredNote?: string
   /** 只在超线或接近上限（余量 < 20%，即恢复线以内）时出现 */
   headroom?: { text: string; tone: 'danger' | 'warning' }
   stale?: string
@@ -192,13 +195,15 @@ export const QUALITY_HEADROOM_WARN = 0.2
 
 /**
  * 悬停说明里的一组：标题“分组 · 状态”、原因标签、指标 | 实测 | 上限 小表，余量只在超线或接近时出现。
- * 实测取成员 metrics（本组判定实际使用的有效数据），与状态同一口径；账号行的紧凑指标仍是完整窗口。
+ * 合格、试用取成员 metrics 与后端余量（本组判定口径）。熔断中（含保底保留）成员 metrics 只计熔断后的数据，
+ * 刚熔断时多半样本不足，和原因对不上，所以改看账号的完整窗口（触发熔断的数据），余量也按它算。
  */
 export function groupQualityTooltip(
   groupName: string,
   quality: GroupQualityCell,
   t: Translate,
-  clock: (iso: string) => string
+  clock: (iso: string) => string,
+  fullWindow?: GroupQualityAccountMetrics
 ): QualityTooltipBlock {
   const title = (state: string) => t(prefix + 'tooltip.title', { group: groupName, state })
   if (isGroupQualityNotice(quality)) {
@@ -207,7 +212,9 @@ export function groupQualityTooltip(
   const { status } = quality
   let state = groupQualityStateLabel(quality, t, clock)
   if (status.state === 'ejected' && status.strikes > 1) state += t(prefix + 'tooltip.strikes', { count: status.strikes })
-  const metrics = status.metrics
+  const ejectionWindow = status.state === 'ejected' ? fullWindow : undefined
+  const metrics = ejectionWindow ? decisionMetricsFromWindow(ejectionWindow) : status.metrics
+  const headroom = ejectionWindow ? qualityHeadroom(metrics, quality) : status.headroom
   const errorRow: QualityTooltipRow = { key: 'error_rate', label: t(prefix + 'tooltip.errorRate'), value: t(prefix + 'tooltip.noData'), limit: formatQualityRate(quality.maxErrorRate), over: false }
   if (metrics?.error_rate != null) {
     errorRow.value = formatQualityRate(metrics.error_rate)
@@ -227,10 +234,11 @@ export function groupQualityTooltip(
     title: title(state),
     note: status.pinned ? t(prefix + 'tooltip.pinned') : quality.kind === 'guard_held' ? t(prefix + 'tooltip.guardHeld') : undefined,
     reasons: status.reasons.map(reason => t(prefix + 'reason.' + reason)),
-    rows: [errorRow, ttftRow]
+    rows: [errorRow, ttftRow],
+    measuredNote: ejectionWindow ? t(prefix + 'tooltip.ejectionWindow') : undefined
   }
-  if (status.headroom != null && status.headroom < QUALITY_HEADROOM_WARN) {
-    block.headroom = { text: t(prefix + 'tooltip.headroom', { value: formatHeadroom(status.headroom) }), tone: status.headroom < 0 ? 'danger' : 'warning' }
+  if (headroom != null && headroom < QUALITY_HEADROOM_WARN) {
+    block.headroom = { text: t(prefix + 'tooltip.headroom', { value: formatHeadroom(headroom) }), tone: headroom < 0 ? 'danger' : 'warning' }
   }
   if (quality.stale) block.stale = t(prefix + 'tooltip.stale')
   return block
@@ -244,6 +252,26 @@ export const QUALITY_MIN_WARM_SAMPLES = 10
 export interface QualityLimits {
   maxErrorRate: number
   maxWarmTtftMs: number
+}
+
+/** 完整窗口换成判定口径：样本未达判定条件的错误率、首字记为 null，与成员 metrics 一致。 */
+export function decisionMetricsFromWindow(metrics: GroupQualityAccountMetrics): GroupQualityMemberMetrics {
+  const errorReady = metrics.calls >= QUALITY_MIN_CALLS && metrics.soft_failures >= QUALITY_MIN_SOFT_FAILURES
+  return {
+    calls: metrics.calls,
+    soft_failures: metrics.soft_failures,
+    error_rate: errorReady ? metrics.error_rate : null,
+    warm_samples: metrics.warm_samples,
+    warm_ttft_p90_ms: metrics.warm_samples >= QUALITY_MIN_WARM_SAMPLES ? metrics.warm_ttft_p90_ms : null
+  }
+}
+
+/** 与后端同一算法：非 null 指标里最小的 1 − 实测 / 上限，全为 null 时为 null。 */
+function qualityHeadroom(metrics: GroupQualityMemberMetrics, limits: QualityLimits): number | null {
+  const values: number[] = []
+  if (metrics.error_rate != null) values.push(1 - metrics.error_rate / limits.maxErrorRate)
+  if (metrics.warm_ttft_p90_ms != null) values.push(1 - metrics.warm_ttft_p90_ms / limits.maxWarmTtftMs)
+  return values.length ? Math.min(...values) : null
 }
 
 /** 账号所在已评估分组里最严的上限，用来给账号行的紧凑指标着色；没有已评估分组时返回 undefined。 */

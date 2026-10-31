@@ -321,7 +321,7 @@
             />
           </template>
           <template #cell-groups="{ row }">
-            <AccountGroupsCellButton :groups="accountGroupsForRow(row)" :account-name="row.name" :quality="accountQualityCells.get(row.id)" @open="canPlaceGroups && (groupsDialogAccount = row)" />
+            <AccountGroupsCellButton :groups="accountGroupsForRow(row)" :account-name="row.name" :quality="accountQualityCells.get(row.id)" :metrics="accountQualityMetrics(row.id)" @open="canPlaceGroups && (groupsDialogAccount = row)" />
             <AccountQualityMetrics v-if="accountQualityMetrics(row.id)" :metrics="accountQualityMetrics(row.id)!" :limits="strictestQualityLimits(accountQualityCells.get(row.id))" />
           </template>
           <template #header-usage="{ column }">
