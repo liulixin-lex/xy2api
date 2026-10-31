@@ -27,7 +27,7 @@ Key 创建接口省略该字段采用 `inherit`；更新接口省略保持原值
 
 只访问顶层、tools、system 和 messages 内容块的协议字段，不递归改工具 schema、工具入参或用户数据。保留合法声明的类型、其他属性、内容和断点位置。缓存变换只属于当前尝试，不回写跨尝试的共享正文；同号重试、换号及兜底组重新判定实际出口。
 
-Chat/Responses 转换保留工具调用与结果上的缓存标记（2026-10-31 起）：Chat `role=tool`、旧版 `role=function` 消息的消息级标记，或其内容分片上最后一个标记，落在对应 `tool_result` 块；只含 `tool_calls` 的 assistant 消息级标记落在最后一个 `tool_use` 块，带文本的 assistant 仍标在文本块。Responses `function_call_output`（含降级后的 `custom_tool_call_output`、`tool_search_output`）以项级标记为准，否则取数组 `output` 中最后一个带标记的分片；`function_call` 的项级标记落在 `tool_use`。每个工具块只保留一个标记，`tool_result` 内容里不留嵌套副本。并行结果按调用顺序排列，标记留在各自结果上；孤立、重复或未应答的调用及结果按既有配对规则丢弃，标记随之丢弃。Chat 工具消息里的图片和文件仍不转发。Chat 工具标记只随 Anthropic 转换转发，不加入发往 OpenAI Responses 上游的请求；`/v1/responses` 入口的旧版 Chat 形状请求（`messages` 等）同样经这一共用转换，工具消息标记不转发。
+Chat/Responses 转换保留工具调用与结果上的缓存标记（2026-10-31 起）：Chat `role=tool`、旧版 `role=function` 消息的消息级标记，或其内容分片上最后一个标记，落在对应 `tool_result` 块；只含 `tool_calls` 的 assistant 消息级标记落在最后一个 `tool_use` 块，带文本的 assistant 仍标在文本块。Responses `function_call_output`（含降级后的 `custom_tool_call_output`）以项级标记为准，否则取数组 `output` 中最后一个带标记的分片；`tool_search_output` 的 `output` 降级时整体转成字符串，只认项级标记；`function_call` 的项级标记落在 `tool_use`。每个工具块只保留一个标记，`tool_result` 内容里不留嵌套副本。并行结果按调用顺序排列，标记留在各自结果上；孤立、重复或未应答的调用及结果按既有配对规则丢弃，标记随之丢弃。Chat 工具消息里的图片和文件仍不转发。Chat 工具标记只随 Anthropic 转换转发，不加入发往 OpenAI Responses 上游的请求；`/v1/responses` 入口的旧版 Chat 形状请求（`messages` 等）同样经这一共用转换，工具消息标记不转发。
 
 顶层 automatic 与显式断点共同占最多四个槽位。空间不足时不新增断点，不任意删除合法客户端声明；原生 Messages 的顶层与末块 TTL 冲突等剩余非法组合沿现有错误路径返回。Chat/Responses 转换出的请求（含 OpenAI 分组经 Anthropic 原生接口的转换）由网关构造：顶层 automatic 与末块显式标记一个为 1h、另一个为 5m 或省略时统一为 1h，再由顺序保护把之前的 ephemeral 断点提到 1h；其他 TTL 值原样转发（2026-10-31 起）。强制项先统一 TTL，`off` 保留合法混合 TTL，既有长 TTL 位于短 TTL 之前的顺序保护继续适用。官方的 20 块 lookback 意味着移动断点不等于必然破坏前缀命中。
 

@@ -27,7 +27,7 @@ Original protocol declarations MUST suppress fallback even when null or malforme
 - **AND** repeated application is idempotent and shared request bytes remain unchanged.
 
 #### Scenario: Converted tool-result declaration
-- **WHEN** a Chat tool message or a Responses tool call/output item carries cache_control on the item or on an array output part
+- **WHEN** a Chat tool message or a Responses tool call/output item carries cache_control on the item, or a function_call_output/custom_tool_call_output carries it on an array output part (tool_search_output counts only item-level markers because its output is stringified)
 - **THEN** the request counts as client-declared and the converted Anthropic request carries that marker on the corresponding tool_use/tool_result block, so no fallback checkpoint is added (2026-10-31 follow-up).
 
 #### Scenario: OAuth coexistence
