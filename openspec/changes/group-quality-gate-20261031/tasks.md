@@ -43,15 +43,82 @@ B 段（第二阶段，依赖 WP1）：
 
 ## WP4 前端（第一阶段桩数据，第二阶段联调）
 
-- [ ] 4.1 分组编辑框：质量门槛区块（只对 OpenAI 分组显示）、固定账号多选、两段保存与失败提示。
-- [ ] 4.2 利润门：默认 20%、隐藏安全缓冲；显示换算出的上游倍率上限与通过数。
-- [ ] 4.3 账号列表：门槛状态标签与三项指标；分组列表：门槛列。
-- [ ] 4.4 中英文案；只为新增的纯逻辑写单测。
+- [x] 4.1 分组编辑框：质量门槛区块（只对 OpenAI 分组显示）、固定账号多选、两段保存与失败提示。
+- [x] 4.2 利润门：默认 20%、隐藏安全缓冲；显示换算出的上游倍率上限与通过数。
+- [x] 4.3 账号列表：门槛状态标签与三项指标；分组列表：门槛列。
+- [x] 4.4 中英文案；只为新增的纯逻辑写单测。
 
 ## WP5 集成（第三阶段）
 
-- [ ] 5.1 按 WP1 → WP3-A → WP2 → WP3-B → WP4 的顺序合并，解决共享登记文件的冲突，重新生成 Wire。
+- [x] 5.1 按 WP1 → WP3-A → WP2 → WP3-B → WP4 的顺序合并，解决共享登记文件的冲突，重新生成 Wire。
 - [ ] 5.2 全量门禁：Go unit / integration、golangci-lint、scheduler-diff、前端 typecheck / lint / test / build、文档一致性；提交后在干净树上跑 audit。
-- [ ] 5.3 逐个对照 `specs/` 的场景验收，在本文件写明证据。
-- [ ] 5.4 确认没有新的部署前提，把升级即生效的变化写进发布说明。
-- [ ] 5.5 更新项目记忆，写交付报告与用户的升级配置清单，然后等待授权。
+- [x] 5.3 逐个对照 `specs/` 的场景验收，在本文件写明证据。
+- [x] 5.4 确认没有新的部署前提，把升级即生效的变化写进发布说明。
+- [x] 5.5 更新项目记忆，写交付报告与用户的升级配置清单，然后等待授权。
+
+## WP5 验证证据（2026-10-31）
+
+- 集成分支 `feat/gqg-wp5-integration`；后端基线 `be0c2629d`，具名补丁 provenance 修复 `c8d38c070`，WP4 `a2b0c70d4` 无冲突合并为 `8739f463b`。`git diff --exit-code be0c2629d 8739f463b -- backend` 通过，后端门禁适用于集成结果。
+- Go 1.27.3，`GOTOOLCHAIN=local GOMAXPROCS=2`；以下 Go/lint 命令从 `backend/` 执行。仓外原始日志、命令与通过事件在交接包 `integration/wp5/`；没有新增测试文件、放宽断言或产品兜底。
+- `go test -tags=unit -p=2 -timeout=20m -count=1 -json ./...`：67 包通过；service 383.103 秒，低于 8 分钟报告线。
+- 本机 `go test -tags=integration -overlay <仓外overlay.json> -timeout=20m -count=1 -json -skip '^(TestUpstreamV0214MigrationUpgrade|TestUpstreamV0215MigrationUpgrade|TestPgDumperRealPostgresBackupAndAtomicRestore)$' ./...`：59 包、7829 个顶层用例通过；repository 22.098 秒。overlay 仅替换 TestMain 和两个限流测试的环境创建段，临时 PostgreSQL/Redis 已清理；11 个既有 skip 已逐项记录。三项 Docker 专用测试未在本机运行；主持人的全仓真实 testcontainers 结果待补，因此 5.2 暂不勾选。
+- `go vet ./...`、`go vet -tags=unit ./...`、`go vet -tags=integration ./...`、`go vet -tags=e2e ./...`：全部通过。
+- `golangci-lint run --concurrency=2 --max-issues-per-linter=0 --max-same-issues=0 ./...`：0 issues。`python3 ../tools/gateway-resilience/ci_gate.py`：五包 84/284/90/2/18，共 478 项 `-race` 通过、0 SKIP。
+- `python3 tools/upstream-sync/sync.py scheduler-diff`、`python3 tools/check_docs_consistency.py`、`python3 -m unittest discover -s tools/tests -p 'test_*.py'`：通过，工具单测 96 项。
+- `go generate ./cmd/server`：Wire 生成源码无差异；工具产生的 `go.sum` 变化已恢复。policy/provenance 补丁集合一致、独立校验零错误。
+- `npx -y pnpm@9 --dir frontend install --frozen-lockfile --prefer-offline` 后，`npx -y pnpm@9 --dir frontend run typecheck`、`lint:check`、`test:run`、`build` 全通过；470 个文件、3607 项测试。
+- `python3 tools/upstream-sync/sync.py audit` 在 `8739f463b` 干净树通过，`node_modules` 是本工作树普通目录。最终文档提交后再审计并把固定 HEAD 写入仓外交付报告。
+- `git diff --exit-code 8b16126f8 HEAD -- deploy backend/internal/config backend/ent backend/migrations` 通过：无新部署前提、环境变量、Ent schema 或迁移。升级即生效、历史浮窗差异、已接受 P2 与用户配置见仓外 `implementation/RELEASE_NOTES_DRAFT.md`，配置依据为 `PLAN.md` §11。
+
+## 逐场景验收
+
+下表逐项核对源码与通过的既有测试。测试证据来自上述全量命令；代码核对补足并发锁、界面展示等结构性条件。没有把生产实测或 mock 浏览器冒烟当成真实供应商验证。测试名以仓库内 Go 函数或前端 spec 文件名定位。
+
+### group-quality-gate（23 个场景）
+
+| 场景 | 实现与验收证据 | 结果 |
+|---|---|---|
+| Concurrent edit | `UpdatePolicy` 版本检查；仓储 `CompareAndSwapPolicies` 事务内 `FOR UPDATE` 后比较版本；`TestGroupQualityGatePolicyValidationAndStatusContract` 验证重复旧版本失败、缓存失效；前端 `groupsQualityGate.spec.ts` 验证 409 提示 | 通过 |
+| Rate limits are not quality failures | `IsGroupQualitySoftFailure` 复用 `shareSoftFailureAttempt`；`TestShareSoftFailureAttempt` 的 rate limit / reset 行均为 false | 通过 |
+| Cold request excluded | 仓储 LAG 按账号/会话分区、间隔 ≤5 分钟；`TestGroupQualityGateRepositoryLoadsWarmMetricsAndDeduplicatesFailures` 的首请求与 6 分钟间隔不计续轮 | 通过 |
+| Late trial failure records | `accumulateQualityTrial` 重扫并以请求/失败身份去重；`TestGroupQualityGateEvaluation/trial_counts_failures_arriving_three_minutes_late_before_twenty_requests` | 通过 |
+| Repeated ejection backs off | `groupQualityBackoff`；`TestGroupQualityGateEvaluation/backoff_caps_at_thirty_minutes` 覆盖 5/10/20/30/30 | 通过 |
+| Stale data does not hold a recovered account | `qualityValidStarts` 及到期转试用；评估表 old samples / direct recovery requires original metric samples 行 | 通过 |
+| Borderline recovery | `RecoveryReady` 的 80% 与原触发项样本要求；评估表 borderline ttft 行验证转试用，old samples 行验证试用 2 次软失败再熔断 | 通过 |
+| Small group keeps two accounts | `applyQualityGuard` 目标 `min(max(2,(usable+1)/2),countable)`，严重度排序；评估表 guard ties 行覆盖 3 个可用保留 2 个，least severe 行核对严重度稳定 | 通过（代码条件与表用例组合） |
+| Single usable member | 评估表 single usable member retained 行，硬状态与利润失败不进入分母 | 通过 |
+| Pinned account outside the limits | 评估表 pinned failures excluded 行；固定不否决、不达标不计入保底，状态仍显示不达标 | 通过 |
+| Ejected sticky account | `TestOpenAIGroupQualityScheduling` 三路径 × 普通/原子缓存 × 排除集的 ejected sticky rebind 行，绑定改到新号 | 通过 |
+| Account ejected while waiting for a slot | `TestAcquireResponsesAccountSlotProfitRecheck/quality_veto` acquired/quick/queued 行：槽位释放一次、排队加减一次、排除后新号成功 | 通过 |
+| WebSocket continuation | `TestOpenAIResponsesWebSocket_QualityPinnedTurnOneUsesAdmissionResult` 与 `QualityTurnAdmissionThroughHooks` 的 previous response / incomplete tools 行 | 通过 |
+| WebSocket fresh turn | `TestOpenAIResponsesWebSocket_QualityTurnAdmissionThroughHooks/fresh_turn` 关闭码及重连文案；连接内不换号 | 通过 |
+| Cheap but slow account | `resolveGroupQualityTier` 与调度表 tier before priority and cost；实际 legacy 排序点复用比较器 | 通过 |
+| Trial account ordering | 调度表 trial after fast / trial before other；评估表试用档位与晋级清旧档位 | 通过 |
+| Non-caching account | 评估表 zero cache and fast line only affect tier, disabled groups too，20 样本降档而 19 样本不降档、不熔断 | 通过 |
+| Short wait keeps the cache | 调度表三路径 short retry：2 秒内获得原号且仅一个释放函数、不入队 | 通过 |
+| Saturated sticky account | 调度表三路径 borrow stable、质量路由/avoid 与在途稳定行：借用其他号、原绑定保持、近期成功/哈希稳定 | 通过 |
+| Low-rate priority off | 调度表 flag off retains original order；四个 legacy 排序点与 E2 的关闭分支保持原规则，WP2 定向复核已覆盖 | 通过 |
+| Metric query times out | 评估表 query failure preserves ejection and applies reset / stale suppresses ejection 行：无新熔断、旧熔断到期、重置可执行 | 通过 |
+| Administrator recovers an account | 评估表 manual reset clears all groups；`TestRateLimitService_RecoverAccountState_QualityGateResetOnlyWhenExplicit` 保留其他 extra 字段；只有 RecoverState 设置选项 | 通过 |
+| Successful test | 同一恢复测试调用 `RecoverAccountAfterSuccessfulTest`，断言不更新 extra；额度重置调用未启用质量重置选项 | 通过 |
+
+### availability-fallback-pricing（9 个场景）
+
+| 场景 | 实现与验收证据 | 结果 |
+|---|---|---|
+| Profit gate blocks the whole group | `groupMemberServable` 共用利润/质量判断；`TestAvailabilityFallbackServableMembers/profit_excludes_the_origin` 转入服务组 | 通过 |
+| Both gates off | `TestGroupMemberServableUsesSharedResilienceAndProfitThreshold`、`TestAvailabilityFallbackOnlySoftPenalties` 与 servable 表的 composite gates off 行；运维调用同一函数 | 通过 |
+| Fallback group with a higher rate | servable 表服务组上限与否决行；`TestProfitControlPricesFallbackAtServingGroup` 验证通用/OpenAI 两条利润售价取服务组用户覆盖 | 通过 |
+| Return to the origin group | `TestAvailabilityFallbackReturnAndFlapping`、两个 `TestFallbackReturn...` 保留 key 记忆、120 秒稳定回归与未迁移 key 立即回归 | 通过 |
+| Forced Fast in the fallback group | `TestOpenAIRecordUsageUnderFallbackAppliesServingFastRules`：priority、Fast-at-standard、强制 Fast 遇上游 default 均按服务组；预留/WS 双快照测试同步通过 | 通过 |
+| Model not allowed in the origin group | `TestResponsesWebSocketAllowlistUnderFallbackIsTheOriginGroup`；`BillingAPIKey`/原组 allowlist 链；批量图片与 messages 资格分离测试通过 | 通过 |
+| User views a fallback request | `TestUserUsageLogShowsTheCallerGroup` 隐藏服务组；`TestOpenAIRecordUsageUnderFallbackUsesServingGroupPrices` 等验证实际价格；`UsageTable.fallback.spec.ts` 验证管理员路径与用户隐藏 | 通过 |
+| Missing account cost | `openAIProfitGateCost` 先拒绝 nil；`TestOpenAIProfitControlVetoReason/nil_raw_rejects_even_with_probe`、共用成员函数 nil 用例 | 通过 |
+| Mixed and composite member eligibility | `groupMemberUsable` 复用调度平台资格；servable 表 composite/Anthropic/Gemini mixed、`TestFallbackProfitControlPreview` 两项 mixed 行 | 通过 |
+
+### WP4 与已接受边界
+
+- `groupsQualityGate.spec.ts` 覆盖单位换算、默认值、阈值与成员 ID 校验、409/失败提示；`groupsProfitControl.spec.ts` 覆盖默认 20%、旧缓冲并入毛利、零可调度中性与零通过确认；`groupQualityPresentation.spec.ts` 覆盖策略/状态组合、固定/保底、空指标与提示面板定位。
+- 实际组件核对：OpenAI 编辑框门槛、顺序保存、无价格权限剔除利润字段、五个平台利润预览；两张列表显示等待评估/读取失败及停用未生效状态；中英文 key 对齐。前端四门禁均通过。
+- WP4 浏览器冒烟采用本地 mock 与真实 API 结构，截图保存在仓外交接包。未代操作人接受管理合规承诺；不宣称真实管理后端浏览器联调完成。
+- 已接受限制（详见发布草稿）：Grok 异步视频跨组轮询计价、非调度实例 OAuth 参考值更新、入组重置转试用、确定性 fallback 排队、WS 分组查询与热路径探测 JSON 开销、利润预览使用已保存价格、触屏提示与宽表布局。

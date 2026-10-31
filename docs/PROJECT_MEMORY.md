@@ -6,25 +6,17 @@
 
 ## 当前交接状态
 
-### 分组质量门槛与兜底计费（2026-10-31T19:05Z 更新：后端集成门禁通过，待 WP4）
+### 分组质量门槛与兜底计费（2026-10-31T19:14Z 更新：实施完成，待补 Docker 证据及用户授权推送/PR/发版）
 
-- **背景**：运营靠手工维持“账号质量与分组倍率相匹配”，成员少的分组曾整组无号。生产只读依据与 7 天回放在本地 `.work/tasks/20261030-account-group-tiering/evidence/`。
-- **目标**（用户 2026-10-30～31 两轮逐题确认）：每组可开质量门槛（组内熔断、自动恢复、保底、固定账号）；快档排序与满载借用；利润门实时成本与预览；兜底触发计入两道门，兜底改回按兜底组计费（权限与限额仍按原组）。用户 13:40Z 追加：熔断账号要能自动恢复并重新加入分组；整个方案尽量保证高缓存命中；讨论分组设利润率还是上游倍率上限。
-- **要求与约束**：不做影子模式、观察期、分批上线和无用测试；不加迁移；跟踪文件不写账号名、站点名、成本、倍率与生产指标原值；推送、PR、合并、发版须用户授权（惯例交 Codex astra），不部署。
-- **已完成**：
-  - 方案 v3.2：本地 `PLAN.md`，astra 核签处理见 §14，用户追加要求见 §15。
-  - 仓库 OpenSpec [`group-quality-gate-20261031`](../openspec/changes/group-quality-gate-20261031/)：已登记目录与 ownership，经用户同意提交到本地基线分支 `feat/group-quality-gate-20261031`（v3.1 `07776536f`，v3.2 为其后一次提交），未推送。
-  - astra 对 v3、v3.1、v3.2 的核签都是有条件通过，意见全部并入。
-  - 本地派工包 `handoff/`：共同规则、跨包契约、代码地图、WP1–WP5。
-  - WP1/WP2/WP3 与审查修复已合入基线 `be0c2629d`；WP5 第一段后端门禁通过，unit service 383.103s，韧性 478 项 race 零跳过。具名补丁登记修复 `c8d38c070`；本机隔离集成环境已清理，Docker 全量集成另由主持人验证。
+- **背景**：减少手工分组维护，避免少成员组整组无号，并兼顾缓存命中。
+- **目标**：按用户批准的 v3.2 完成分组质量门槛、恢复/保底/固定账号、快档排序与满载借用、实时利润门、兜底服务组计费及管理界面。
+- **要求与约束**：无新迁移、影子模式或分批上线；仅本地集成。推送、PR、main 合并、发版待用户授权；不部署、不访问生产。
+- **已完成**：WP1–WP4 及审查修复已集成到 `feat/gqg-wp5-integration`；WP4 合并 `8739f463b`，后端保持 `be0c2629d`。后端本机门禁、前端 470 文件/3607 项及构建、Wire、干净树 audit 通过；32 个规格场景已逐项记录。发布草稿、配置清单与交付报告已写到仓外交接包；旧阶段详情原样移入记忆归档。
 - **未完成**（按顺序）：
-  1. 主持人通知后合并 WP4，完成前端门禁、干净树 audit、OpenSpec 场景对照、发布说明与最终交付；接收主持人的完整 Docker 集成结果；
-  2. 发布后由用户按 PLAN §11 一次配置。
-- **卡点与风险**：
-  - 兜底仍按组级判定、不看模型：原组有可服务账号、但都不支持所请求的模型时不兜底，与现状相同；
-  - 开利润门前，须补齐成本仍为默认 1.0 的账号；
-  - 新会话会偏向最便宜的快档账号，并发上限由用户配置；已用“避开负载 ≥80%”与“满载先等 2 秒”减轻对缓存的影响。
-- **关键位置**：`openspec/changes/group-quality-gate-20261031/`；本地 `.work/tasks/20261030-account-group-tiering/`（从 `README.md` 进入，派工从 `handoff/README.md` 开始）。
+  1. 接收主持人的全仓真实 Docker 集成结果（本机无 Docker，三项迁移/备份未执行），补齐 tasks 5.2 证据；
+  2. 用户授权后推送、PR、合并与发版；升级后按 `PLAN.md` §11 一次配置。
+- **卡点与风险**：Grok 异步视频跨组轮询价、非调度实例 OAuth 参考值刷新、固定排序的等待集中与热路径开销、预览按已保存价格、触屏提示等已接受限制见发布草稿。已有 OAuth 利润门和成本默认值须先核对；历史兜底金额不重算，旧行浮窗沿用新文案。
+- **关键位置**：[`group-quality-gate-20261031/tasks.md`](../openspec/changes/group-quality-gate-20261031/tasks.md)；仓外任务包 `implementation/WP5-report.md`、`implementation/RELEASE_NOTES_DRAFT.md`、`integration/wp5/`。
 
 ### 工作区精简与规范化（2026-10-31；本分支 PR 合并即完成）
 
@@ -110,14 +102,11 @@
   - WP3-B（兜底触发、实时成本、预览、可用数）开工；WP4 前端审查修复完成，开始联调。
   - 已知限制：Grok 异步视频待结算记录无生成时服务分组，跨组轮询时按轮询分组计价（需加字段，不在本变更）。
 
-### 20261031-group-quality-gate WP5 集成（2026-10-31T18:55Z 开始）
+### 20261031-group-quality-gate WP5 集成（2026-10-31T19:14Z：本地收尾完成）
 
-- 目标：在独立分支 `feat/gqg-wp5-integration` 完成后端全量门禁、具名补丁 provenance 登记；收到主持人合并 WP4 指令后再做前端集成、规格验收、发布说明和最终记忆。
-- 开始状态：HEAD `be0c2629d`，工作树干净；已含 WP1/WP2/WP3 与审查修复。本任务获授权维护自己的记忆条目。
-- 状态（2026-10-31T19:05Z）：第一段完成；unit 67 包通过，service 383.103s（低于 8 分钟）；本机 integration 59 包通过，四组 vet、全仓 lint（0 issues）、韧性 478 项 race 零跳过、调度差异、文档一致性、Python 96 项通过；Wire 重生成无源码差异，go.sum 工具副作用已恢复。
-- 修复与证据：`c8d38c070` 仅补具名补丁 provenance，policy/provenance 零错误；未改业务代码。命令、原始结果和既有 skip 清单保存在仓外 `integration/wp5/PHASE1.md` 及同目录日志。
-- 环境与未完成：本机仓外 overlay 只改 TestMain 与两项限流环境函数；临时 PostgreSQL/Redis 已停止并删除目录。三项迁移/备份 Docker 用例按主持人决定不做 overlay；完整 Docker 集成已由主持人在另一开发环境启动，结果待同步。
-- 第二段开始：主持人已授权合并 WP4 `a2b0c70d4`；从干净 HEAD `330194d39` 开始执行前端门禁、干净树 audit、规格验收、发布说明与最终交付。Docker 全量结果待主持人同步。仅本地提交，未推送、PR、main 合并、打标签、部署或连接生产。
+- 分支：`feat/gqg-wp5-integration`；补丁登记 `c8d38c070`，WP4 合并 `8739f463b`，无业务代码修复。旧详细登记已原样追加归档。
+- 完成：后端 unit service 383.103s、本机隔离 integration、四组 vet、lint、478 项 race 零跳过、Python 96 项、前端四门禁（470 文件/3607 项）、Wire 无差异及干净树 audit；32 场景验收、发布草稿、用户配置清单和交付报告齐备。
+- 未完成与下一步：主持人的完整 Docker 集成结果待补，tasks 5.2 保持未勾选；其余本地工作已完成。结果收到后补证，再等用户授权推送/PR/合并/发版。临时测试服务已清理，无生产操作。
 
 ## 操作陷阱
 
@@ -376,3 +365,13 @@ pnpm --dir frontend run build
 - 验证：`go test -tags=unit -p=2 -timeout=20m -count=1 -json ./...` 全通过（service 383.103s，低于 480s 报告线）；隔离 PostgreSQL/Redis 下 `go test -tags=integration -overlay <仓外文件> -timeout=20m -count=1 -json -skip <三项Docker专用用例> ./...` 通过（59 包，repository 22.098s）；`go vet` 默认/unit/integration/e2e 全通过；全仓 golangci-lint 两个 issues 上限均为 0，0 issues；`ci_gate.py` 五包 478 项 race、0 SKIP；scheduler-diff、docs consistency、Python 工具 96 项、diff 检查通过。Wire 重生成 `wire_gen.go` 无差异，工具产生的 go.sum 变化已恢复。
 - 卡点/风险：本机没有 Docker，按主持人决定排除两项旧版本迁移与一项备份用例；主持人已另起真实 testcontainers 全仓验证，待结果。集成另有 11 个既有显式跳过项（环境/平台/opt-in/已有 TODO），清单保存在仓外；未新增跳过。临时 PostgreSQL/Redis 进程已停止、数据目录已删除。
 - 下一步：接收 Docker 集成结果与 WP4 合并指令，执行第二段前端门禁、干净树 audit、逐场景验收、发布说明和最终记忆；不推送、PR、main 合并、标签或部署。
+
+### 2026-10-31T19:14Z — 20261031-group-quality-gate WP5 — 第二段本地集成与交付完成
+
+- 请求/目标：主持人授权合入 WP4 `a2b0c70d4`，完成前端门禁、干净树审计、逐场景验收、发布草稿、配置清单和记忆；Docker 全量结果另行同步。
+- 开始状态：`feat/gqg-wp5-integration` @ `330194d39`，工作树干净；后端第一段门禁已通过。
+- 完成操作：WP4 无冲突合并为 `8739f463b`，后端与 `be0c2629d` 完全相同；将 WP4 已接受的旧缓冲合入毛利、空组中性预览和界面状态同步到文档/design/spec；32 个 Scenario 全部对照实现与既有通过用例，tasks 4.x/5.x 更新。仓外发布草稿写明升级计费、历史浮窗、排序、OAuth 与全部已接受限制，配置按 PLAN §11；报告不超过 60 行。
+- 修改文件：WP4 前端 43 文件（合并）；`docs/GROUP_QUALITY_GATE.md`、`docs/README.md`、OpenSpec design/spec/tasks、两份记忆。旧顶部阶段状态与本人详细登记原样追加归档，其他 agent 条目及历史日志保留。
+- 验证：pnpm 9 frozen-lockfile 安装后 typecheck、lint:check、test:run（470 文件/3607 项）、build 全通过；`8739f463b` 干净树 `sync.py audit` 通过，node_modules 非软链接；文档一致性与 diff 检查通过。沿用后端第一段实际结果；部署/config/Ent/迁移目录相对功能基线无差异。最终文档提交后的固定 HEAD 审计结果记入仓外报告。
+- 卡点/风险：本机 overlay 集成的排除/skip 如前条日志；完整 Docker 结果未收到，tasks 5.2 仍未勾选。WP4 浏览器冒烟为本地 mock，未代操作人接受管理合规承诺、未宣称真实管理后端浏览器或供应商验证。无新增部署前提、无推送/PR/main 合并/标签/部署/生产连接。
+- 下一步：收到主持人 Docker 结果后补 tasks 5.2 与报告；再等待用户授权推送、PR、合并和发版。
