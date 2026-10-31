@@ -99,7 +99,7 @@ func (s *OpsService) GetAccountAvailabilityStats(ctx context.Context, platformFi
 			}
 			g := group[grp.ID]
 			g.TotalAccounts++
-			if isAvailable {
+			if groupMemberServable(grp, &acc, now, s.groupQualityGateView, nil) {
 				g.AvailableCount++
 			}
 			if isRateLimited {

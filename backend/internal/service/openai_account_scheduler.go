@@ -1967,6 +1967,12 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerSettingRepo() SettingRepos
 }
 
 func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx context.Context) openAIAdvancedSchedulerRuntimeSettings {
+	return loadOpenAIAdvancedSchedulerRuntimeSettings(ctx, s.openAIAdvancedSchedulerSettingRepo())
+}
+
+// loadOpenAIAdvancedSchedulerRuntimeSettings also warms the shared settings at
+// startup, before background quality/operations checks or request scheduling.
+func loadOpenAIAdvancedSchedulerRuntimeSettings(ctx context.Context, repo SettingRepository) openAIAdvancedSchedulerRuntimeSettings {
 	if cached, ok := openAIAdvancedSchedulerSettingCache.Load().(*cachedOpenAIAdvancedSchedulerSetting); ok && cached != nil {
 		if time.Now().UnixNano() < cached.expiresAt {
 			return openAIAdvancedSchedulerRuntimeSettings{
@@ -2003,7 +2009,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 		subscriptionPriorityEnabled := false
 		lbTopKOverride := 0
 		weightOverrides := map[string]float64{}
-		if repo := s.openAIAdvancedSchedulerSettingRepo(); repo != nil {
+		if repo != nil {
 			dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), openAIAdvancedSchedulerSettingDBTimeout)
 			defer cancel()
 
@@ -2069,8 +2075,21 @@ func (s *OpenAIGatewayService) isOpenAILowUpstreamRatePriorityEnabled(ctx contex
 	return !settings.enabled && settings.lowUpstreamRatePriorityEnabled
 }
 
+// cachedOpenAIOAuthSchedulingRateMultiplier reads the shared runtime reference
+// without repository I/O. The scheduler settings loader refreshes this same
+// cache under openAIAdvancedSchedulerSettingSF; admin updates publish directly.
+// Before the first load use the existing default. Expiry never causes a cost
+// check to replace a configured reference with a default while refresh waits.
+func cachedOpenAIOAuthSchedulingRateMultiplier() *float64 {
+	if cached, ok := openAIAdvancedSchedulerSettingCache.Load().(*cachedOpenAIAdvancedSchedulerSetting); ok && cached != nil {
+		return cached.oauthSchedulingRateMultiplier
+	}
+	return parseOpenAIOAuthSchedulingRateMultiplier(nil)
+}
+
 func (s *OpenAIGatewayService) openAIOAuthSchedulingRateMultiplier(ctx context.Context) *float64 {
-	return s.openAIAdvancedSchedulerRuntimeSettings(ctx).oauthSchedulingRateMultiplier
+	s.openAIAdvancedSchedulerRuntimeSettings(ctx)
+	return cachedOpenAIOAuthSchedulingRateMultiplier()
 }
 
 func (s *OpenAIGatewayService) isOpenAIAdvancedSchedulerStickyWeightedEnabled(ctx context.Context) bool {

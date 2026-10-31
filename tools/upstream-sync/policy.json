@@ -3191,6 +3191,46 @@
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
       "value": "spillover := fresh.ID != account.ID"
+    },
+    {
+      "path": "backend/internal/service/group_member_servable.go",
+      "value": "cost, ok := openAISchedulingRate(acc, at, oauthRate)"
+    },
+    {
+      "path": "backend/internal/service/group_member_servable.go",
+      "value": "oauthRate = cachedOpenAIOAuthSchedulingRateMultiplier()"
+    },
+    {
+      "path": "backend/internal/service/openai_profit_control.go",
+      "value": "upstream, ok := openAIProfitGateCost(account, gate.pricingAt)"
+    },
+    {
+      "path": "backend/internal/service/resilience_fallback_group.go",
+      "value": "groupMemberServable(group, a, now, r.groupQualityGateView, nil)"
+    },
+    {
+      "path": "backend/internal/service/ops_account_availability.go",
+      "value": "groupMemberServable(grp, &acc, now, s.groupQualityGateView, nil)"
+    },
+    {
+      "path": "backend/internal/server/routes/admin.go",
+      "value": "groups.GET(\"/:id/profit-control-preview\", h.Admin.GroupQualityGate.ProfitControlPreview)"
+    },
+    {
+      "path": "backend/internal/service/profit_preview.go",
+      "value": "previewGroup.ProfitSafetyBuffer = 0"
+    },
+    {
+      "path": "backend/internal/service/group_member_servable.go",
+      "value": "isPlatformFilteredForSelection(acc, platform, platform == PlatformAnthropic || platform == PlatformGemini)"
+    },
+    {
+      "path": "backend/internal/service/wire.go",
+      "value": "loadOpenAIAdvancedSchedulerRuntimeSettings(context.Background(), settingRepo)"
+    },
+    {
+      "path": "backend/internal/service/profit_preview.go",
+      "value": "s.accountRepo.ListAllWithFilters(ctx, \"\", \"\", \"\", \"\", groupID, \"\")"
     }
   ],
   "forbidden_module_paths": [
@@ -5474,6 +5514,41 @@
       "id": "xy-openai-group-quality-scheduling",
       "path": "backend/internal/service/openai_group_quality_scheduling_test.go",
       "literal": "pinned owner queue full remains a sticky fallback wait"
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_group_test.go",
+      "literal": "func TestAvailabilityFallbackServableMembers("
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_group_test.go",
+      "literal": "func TestFallbackProfitControlPreview("
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/resilience_fallback_billing_test.go",
+      "literal": "func TestFallbackProfitTerminalUsesPricingAt("
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/openai_profit_control_test.go",
+      "literal": "func TestOpenAIProfitControlVetoReason("
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/handler/admin/group_handler_platform_test.go",
+      "literal": "func TestGroupProfitControlPreviewHandler("
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/repository/account_repo_schedulable_projection_test.go",
+      "literal": "func TestListOpsAccountsForStatsPreservesServabilityFields("
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/openai_scheduling_rate_fallback_test.go",
+      "literal": "func TestOpenAIOAuthSchedulingRateRuntimePreservesExplicitClear("
     }
   ]
 }

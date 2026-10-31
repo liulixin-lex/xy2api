@@ -77,3 +77,29 @@ func (h *GroupQualityGateHandler) Status(c *gin.Context) {
 	}
 	response.Success(c, out)
 }
+
+func (h *GroupQualityGateHandler) ProfitControlPreview(c *gin.Context) {
+	if h == nil || h.svc == nil {
+		response.Error(c, http.StatusServiceUnavailable, "group quality gate unavailable")
+		return
+	}
+	groupID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || groupID <= 0 {
+		response.BadRequest(c, "Invalid group ID")
+		return
+	}
+	var margin *float64
+	if raw, ok := c.GetQuery("margin"); ok && raw != "" {
+		value, parseErr := strconv.ParseFloat(raw, 64)
+		if parseErr != nil {
+			response.BadRequest(c, "Invalid margin")
+			return
+		}
+		margin = &value
+	}
+	out, err := h.svc.ProfitControlPreview(c.Request.Context(), groupID, margin)
+	if response.ErrorFrom(c, err) {
+		return
+	}
+	response.Success(c, out)
+}

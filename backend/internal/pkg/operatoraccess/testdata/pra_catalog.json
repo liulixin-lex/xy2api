@@ -7811,7 +7811,7 @@
   "fields": null,
   "redact": [],
   "ws": false
- } ,
+ },
  {
   "method": "GET",
   "path": "/group-quality-gate/policies",
@@ -7846,6 +7846,20 @@
   "group": "admin",
   "reg": "registerGroupQualityGateRoutes",
   "module": "accounts",
+  "level": "view",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [],
+  "ws": false
+ },
+ {
+  "method": "GET",
+  "path": "/groups/:id/profit-control-preview",
+  "group": "admin",
+  "reg": "registerGroupRoutes",
+  "module": "groups",
   "level": "view",
   "any_of": [],
   "flags": [],

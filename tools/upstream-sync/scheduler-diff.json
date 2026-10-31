@@ -428,6 +428,43 @@
           "// Advanced candidate admission reports the shared reason through filter stats.",
           "AdvancedScheduler:       true,"
         ]
+      },
+      {
+        "block": "group-quality-profit-cost",
+        "note": "WP3-B: share the scheduler OAuth reference cache with profit checks, retaining the existing loader and singleflight; cost evaluation performs no settings I/O.",
+        "removed": [
+          "return s.openAIAdvancedSchedulerRuntimeSettings(ctx).oauthSchedulingRateMultiplier"
+        ],
+        "added": [
+          "// Before the first load use the existing default. Expiry never causes a cost",
+          "// cache under openAIAdvancedSchedulerSettingSF; admin updates publish directly.",
+          "// cachedOpenAIOAuthSchedulingRateMultiplier reads the shared runtime reference",
+          "// check to replace a configured reference with a default while refresh waits.",
+          "// without repository I/O. The scheduler settings loader refreshes this same",
+          "func cachedOpenAIOAuthSchedulingRateMultiplier() *float64 {",
+          "if cached, ok := openAIAdvancedSchedulerSettingCache.Load().(*cachedOpenAIAdvancedSchedulerSetting); ok && cached != nil {",
+          "return cached.oauthSchedulingRateMultiplier",
+          "return cachedOpenAIOAuthSchedulingRateMultiplier()",
+          "return parseOpenAIOAuthSchedulingRateMultiplier(nil)",
+          "s.openAIAdvancedSchedulerRuntimeSettings(ctx)",
+          "}",
+          "}"
+        ]
+      },
+      {
+        "block": "group-quality-profit-startup",
+        "note": "WP3-B review: warm the shared OAuth settings cache at startup using the existing bounded singleflight loader.",
+        "removed": [
+          "if repo := s.openAIAdvancedSchedulerSettingRepo(); repo != nil {"
+        ],
+        "added": [
+          "// loadOpenAIAdvancedSchedulerRuntimeSettings also warms the shared settings at",
+          "// startup, before background quality/operations checks or request scheduling.",
+          "func loadOpenAIAdvancedSchedulerRuntimeSettings(ctx context.Context, repo SettingRepository) openAIAdvancedSchedulerRuntimeSettings {",
+          "if repo != nil {",
+          "return loadOpenAIAdvancedSchedulerRuntimeSettings(ctx, s.openAIAdvancedSchedulerSettingRepo())",
+          "}"
+        ]
       }
     ],
     "backend/internal/service/openai_gateway_scheduling.go": [

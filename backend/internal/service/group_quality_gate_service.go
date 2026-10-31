@@ -3,14 +3,16 @@ package service
 import (
 	"context"
 	"errors"
-	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"log/slog"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 )
 
 const groupQualityEvaluationInterval = time.Minute
@@ -24,7 +26,7 @@ type groupQualityMemberSnapshot struct {
 
 type groupQualitySnapshot struct {
 	GeneratedAt time.Time
-	ObservedAt  time.Time
+	StaleSince  time.Time
 	Stale       bool
 	Policies    GroupQualityGatePolicies
 	Metrics     map[int64]GroupQualityMetrics
@@ -47,13 +49,14 @@ type GroupQualityGateService struct {
 	policyCache      atomic.Pointer[cachedGroupQualityPolicies]
 	runMu            sync.Mutex
 	processStartedAt time.Time
+	now              func() time.Time
 	cancel           context.CancelFunc
 	done             chan struct{}
 }
 
-// NewGroupQualityGateService creates the evaluator. Start performs the first evaluation synchronously.
+// NewGroupQualityGateService creates the evaluator. Start launches the first evaluation in its background loop.
 func NewGroupQualityGateService(policyRepo GroupQualityGateRepository, accountRepo AccountRepository, groupRepo GroupRepository) *GroupQualityGateService {
-	s := &GroupQualityGateService{policyRepo: policyRepo, accountRepo: accountRepo, groupRepo: groupRepo, processStartedAt: time.Now().UTC()}
+	s := &GroupQualityGateService{policyRepo: policyRepo, accountRepo: accountRepo, groupRepo: groupRepo, processStartedAt: time.Now().UTC(), now: time.Now}
 	s.snapshot.Store(&groupQualitySnapshot{GeneratedAt: time.Now().UTC(), Policies: GroupQualityGatePolicies{Groups: map[string]GroupQualityGatePolicy{}}, Metrics: map[int64]GroupQualityMetrics{}, Members: map[int64]map[int64]groupQualityMemberSnapshot{}})
 	return s
 }
@@ -65,9 +68,9 @@ func (s *GroupQualityGateService) Start() {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel, s.done = cancel, make(chan struct{})
-	_ = s.evaluate(ctx)
 	go func() {
 		defer close(s.done)
+		_ = s.evaluate(ctx)
 		t := time.NewTicker(groupQualityEvaluationInterval)
 		defer t.Stop()
 		for {
@@ -102,7 +105,7 @@ func (s *GroupQualityGateService) Vetoed(groupID, accountID int64) bool {
 	}
 	members := v.Members[groupID]
 	member, ok := members[accountID]
-	return ok && member.Result.State == "ejected" && (member.State.Until.IsZero() || time.Now().Before(member.State.Until)) && !member.Result.Pinned && !member.Result.GuardHeld
+	return ok && member.Result.State == "ejected" && (member.State.Until.IsZero() || s.now().Before(member.State.Until)) && !member.Result.Pinned && !member.Result.GuardHeld
 }
 
 func (s *GroupQualityGateService) OrderTier(groupID, accountID int64) int {
@@ -114,7 +117,7 @@ func (s *GroupQualityGateService) OrderTier(groupID, accountID int64) int {
 		return GroupQualityGateTierFast
 	}
 	if member, ok := v.Members[groupID][accountID]; ok {
-		if member.Result.State == "ejected" && !member.State.Until.IsZero() && !time.Now().Before(member.State.Until) {
+		if member.Result.State == "ejected" && !member.State.Until.IsZero() && !s.now().Before(member.State.Until) {
 			return GroupQualityGateTierTrial
 		}
 		return member.Result.Tier
@@ -150,7 +153,7 @@ func (s *GroupQualityGateService) loadPolicies(ctx context.Context) (GroupQualit
 func cloneGroupQualityGatePolicies(in GroupQualityGatePolicies) GroupQualityGatePolicies {
 	out := GroupQualityGatePolicies{Version: in.Version, Groups: make(map[string]GroupQualityGatePolicy, len(in.Groups))}
 	for id, policy := range in.Groups {
-		policy.PinnedAccountIDs = append([]int64(nil), policy.PinnedAccountIDs...)
+		policy.PinnedAccountIDs = append([]int64{}, policy.PinnedAccountIDs...)
 		out.Groups[id] = policy
 	}
 	return out
@@ -193,7 +196,7 @@ func (s *GroupQualityGateService) UpdatePolicy(ctx context.Context, groupID int6
 	}
 	policy = normalizeGroupQualityGatePolicy(policy)
 	if err := ValidateGroupQualityGatePolicy(policy, group, ids); err != nil {
-		return GroupQualityGatePolicies{}, ErrInvalidGroupQualityGatePolicy.WithCause(err)
+		return GroupQualityGatePolicies{}, err
 	}
 	s.policyMu.Lock()
 	defer s.policyMu.Unlock()
@@ -220,13 +223,13 @@ func (s *GroupQualityGateService) UpdatePolicy(ctx context.Context, groupID int6
 
 func (s *GroupQualityGateService) Status(ctx context.Context, groupID *int64) (*GroupQualityGateStatus, error) {
 	if s == nil {
-		return &GroupQualityGateStatus{AccountMetrics: map[string]GroupQualityMetricView{}}, nil
+		return &GroupQualityGateStatus{Groups: []GroupQualityGroupView{}, AccountMetrics: map[string]GroupQualityMetricView{}}, nil
 	}
 	snap := s.snapshot.Load()
 	if snap == nil {
 		snap = &groupQualitySnapshot{GeneratedAt: time.Now().UTC(), Policies: GroupQualityGatePolicies{Groups: map[string]GroupQualityGatePolicy{}}, Metrics: map[int64]GroupQualityMetrics{}, Members: map[int64]map[int64]groupQualityMemberSnapshot{}}
 	}
-	out := &GroupQualityGateStatus{GeneratedAt: snap.GeneratedAt, Stale: snap.Stale, AccountMetrics: map[string]GroupQualityMetricView{}}
+	out := &GroupQualityGateStatus{GeneratedAt: snap.GeneratedAt, Stale: snap.Stale, Groups: []GroupQualityGroupView{}, AccountMetrics: map[string]GroupQualityMetricView{}}
 	active, err := s.groupRepo.ListActive(ctx)
 	if err != nil {
 		return nil, err
@@ -264,20 +267,20 @@ func (s *GroupQualityGateService) Status(ctx context.Context, groupID *int64) (*
 			return nil, err
 		}
 		gv := GroupQualityGroupView{GroupID: group.ID, Enabled: enabled, FastWarmTTFTP90Ms: policy.FastWarmTTFTP90Ms, Accounts: make([]GroupQualityAccountView, 0, len(accounts))}
-		now := time.Now().UTC()
+		now := s.now().UTC()
 		for _, acc := range accounts {
 			metric := snap.Metrics[acc.ID]
 			out.AccountMetrics[strconv.FormatInt(acc.ID, 10)] = metricView(metric)
 			member := snap.Members[group.ID][acc.ID]
 			if member.AccountID == 0 {
-				member = groupQualityMemberSnapshot{AccountID: acc.ID, Metric: metric, Result: GroupQualityMemberResult{Usable: groupMemberUsable(group, &acc, time.Now()), Passing: true, State: "eligible", Tier: GroupQualityGateTierFast}}
+				member = groupQualityMemberSnapshot{AccountID: acc.ID, Metric: metric, Result: GroupQualityMemberResult{Usable: groupMemberUsable(group, &acc, now), Passing: true, State: "eligible", Tier: GroupQualityGateTierFast}}
 			}
-			reasons := []string(nil)
+			reasons := []string{}
 			if enabled {
 				if member.Result.State == "ejected" && len(member.State.Reasons) > 0 {
 					reasons = append(reasons, member.State.Reasons...)
 				} else {
-					reasons = qualityReasons(policy, metric)
+					reasons = groupQualityReasons(policy, member.Metric)
 				}
 			}
 			state, tier := member.Result.State, member.Result.Tier
@@ -285,8 +288,15 @@ func (s *GroupQualityGateService) Status(ctx context.Context, groupID *int64) (*
 			ejected := state == "ejected" && (member.State.Until.IsZero() || now.Before(member.State.Until))
 			if state == "ejected" && !ejected {
 				state, tier = "trial", GroupQualityGateTierTrial
-				passing, guardHeld = metric.Passing(policy), false
-				reasons = nil
+				effective := member.Metric
+				// The ejection round's triggering window predates EjectedAt.
+				// Until a later evaluation supplies post-ejection data, it cannot
+				// determine passing after expiry.
+				if !snap.GeneratedAt.After(member.State.EjectedAt) {
+					effective = GroupQualityMetrics{}
+				}
+				passing, guardHeld = !effective.EjectionReady(policy), false
+				reasons = []string{}
 			}
 			vetoed := ejected && !member.Result.Pinned && !member.Result.GuardHeld
 			row := GroupQualityAccountView{AccountID: acc.ID, State: state, Strikes: member.State.Strike, Usable: member.Result.Usable, Passing: passing, GuardHeld: guardHeld, Pinned: member.Result.Pinned, Vetoed: vetoed, Tier: tier, Headroom: qualityHeadroom(policy, metric), Reasons: reasons}
@@ -295,16 +305,12 @@ func (s *GroupQualityGateService) Status(ctx context.Context, groupID *int64) (*
 				row.Until = &u
 			}
 			gv.Accounts = append(gv.Accounts, row)
-			switch row.State {
-			case "trial":
+			if row.State == "trial" {
 				gv.Summary.Trial++
-			case "ejected":
-				if row.Vetoed {
-					gv.Summary.Ejected++
-				} else {
-					gv.Summary.Eligible++
-				}
-			default:
+			}
+			if row.Vetoed {
+				gv.Summary.Ejected++
+			} else {
 				gv.Summary.Eligible++
 			}
 		}
@@ -317,7 +323,7 @@ func metricView(m GroupQualityMetrics) GroupQualityMetricView {
 	return GroupQualityMetricView{Calls: m.Calls, SoftFailures: m.SoftFailures, ErrorRate: m.ErrorRate(), WarmSamples: m.WarmSamples, WarmTTFTP90Ms: m.WarmTTFTP90Ms, ZeroCacheSamples: m.ZeroCacheSamples, WarmZeroCacheRate: m.WarmZeroCacheRate}
 }
 
-func qualityHeadroom(p GroupQualityGatePolicy, m GroupQualityMetrics) float64 {
+func qualityHeadroom(p GroupQualityGatePolicy, m GroupQualityMetrics) *float64 {
 	values := []float64{}
 	if m.Calls >= 20 && m.SoftFailures >= 5 {
 		values = append(values, 1-m.ErrorRate()/p.MaxErrorRate)
@@ -326,7 +332,7 @@ func qualityHeadroom(p GroupQualityGatePolicy, m GroupQualityMetrics) float64 {
 		values = append(values, 1-float64(m.WarmTTFTP90Ms)/float64(p.MaxWarmTTFTP90Ms))
 	}
 	if len(values) == 0 {
-		return 0
+		return nil
 	}
 	out := values[0]
 	for _, v := range values[1:] {
@@ -334,39 +340,39 @@ func qualityHeadroom(p GroupQualityGatePolicy, m GroupQualityMetrics) float64 {
 			out = v
 		}
 	}
-	return out
-}
-
-func qualityReasons(p GroupQualityGatePolicy, m GroupQualityMetrics) []string {
-	return groupQualityReasons(p, m)
+	return &out
 }
 
 func (s *GroupQualityGateService) evaluate(ctx context.Context) error {
 	s.runMu.Lock()
 	defer s.runMu.Unlock()
-	now := time.Now().UTC()
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	now := s.now().UTC()
 	policies, err := s.loadPolicies(ctx)
 	if err != nil {
-		s.markFailed(err)
+		s.markFailed(now, err)
 		return err
 	}
 	groups, err := s.groupRepo.ListActive(ctx)
 	if err != nil {
-		s.markFailed(err)
+		s.markFailed(now, err)
 		return err
 	}
-	membersByGroup := map[int64][]Account{}
-	ids, seen := make([]int64, 0), map[int64]bool{}
+	// Disabled OpenAI groups still need fast/other ordering tiers.
+	groupIDs := make([]int64, 0, len(groups))
 	for _, group := range groups {
-		if group.Platform != PlatformOpenAI {
-			continue
+		if group.Platform == PlatformOpenAI {
+			groupIDs = append(groupIDs, group.ID)
 		}
-		accounts, e := s.accountRepo.ListAllWithFilters(ctx, "", "", "", "", group.ID, "")
-		if e != nil {
-			s.markFailed(e)
-			return e
-		}
-		membersByGroup[group.ID] = accounts
+	}
+	membersByGroup, err := s.policyRepo.LoadMembers(ctx, groupIDs)
+	if err != nil {
+		s.markFailed(now, err)
+		return err
+	}
+	ids, seen := make([]int64, 0), map[int64]bool{}
+	for _, accounts := range membersByGroup {
 		for _, account := range accounts {
 			if !seen[account.ID] {
 				seen[account.ID] = true
@@ -375,42 +381,35 @@ func (s *GroupQualityGateService) evaluate(ctx context.Context) error {
 		}
 	}
 	old := s.snapshot.Load()
-	from := now.Add(-2 * time.Hour)
-	for _, members := range old.Members {
-		for _, member := range members {
-			if member.State.State == "trial" && !member.State.TrialSince.IsZero() && member.State.TrialSince.Before(from) {
-				from = member.State.TrialSince
-			}
-		}
-	}
-	observations, observedAt, err := s.policyRepo.LoadObservations(ctx, ids, from.Add(-5*time.Minute), now)
-	if err != nil {
-		s.markFailed(err)
-		return err
-	}
-	if observedAt.Before(now.Add(-5*time.Minute)) || observedAt.After(now.Add(5*time.Minute)) {
-		s.markFailed(errors.New("metric data timestamp is stale"))
-		return errors.New("metric data timestamp is stale")
-	}
+	observations, observedAt, observationErr := s.policyRepo.LoadObservations(ctx, ids, now.Add(-125*time.Minute), now)
+	stale := observationErr != nil || observedAt.Before(now.Add(-5*time.Minute))
 	byAccount := make(map[int64][]GroupQualityObservation, len(ids))
 	for _, observation := range observations {
 		byAccount[observation.AccountID] = append(byAccount[observation.AccountID], observation)
 	}
 	fullMetrics := make(map[int64]GroupQualityMetrics, len(ids))
 	for _, id := range ids {
-		fullMetrics[id] = groupQualityMetricsFor(byAccount[id], now, now.Add(-15*time.Minute), now.Add(-30*time.Minute), now.Add(-2*time.Hour), time.Time{})
+		if stale {
+			fullMetrics[id] = old.Metrics[id]
+		} else {
+			fullMetrics[id] = groupQualityMetricsFor(byAccount[id], now, now.Add(-15*time.Minute), now.Add(-30*time.Minute), now.Add(-2*time.Hour))
+		}
 	}
-	next := &groupQualitySnapshot{GeneratedAt: now, ObservedAt: observedAt, Policies: policies, Metrics: fullMetrics, Members: make(map[int64]map[int64]groupQualityMemberSnapshot, len(membersByGroup))}
+	next := &groupQualitySnapshot{GeneratedAt: now, Stale: stale, Policies: policies, Metrics: fullMetrics, Members: make(map[int64]map[int64]groupQualityMemberSnapshot, len(membersByGroup))}
+	if stale {
+		reason := observationErr
+		if reason == nil {
+			reason = errors.New("usage data timestamp is stale")
+		}
+		next.StaleSince = qualityFailureSince(old, now, observedAt)
+		logGroupQualityFailure(old, now, next.StaleSince, reason)
+	}
 	for i := range groups {
 		group := &groups[i]
 		if group.Platform != PlatformOpenAI {
 			continue
 		}
-		policy, configured := policies.Groups[strconv.FormatInt(group.ID, 10)]
-		policy = normalizeGroupQualityGatePolicy(policy)
-		if !configured {
-			policy = defaultGroupQualityGatePolicy()
-		}
+		policy := normalizeGroupQualityGatePolicy(policies.Groups[strconv.FormatInt(group.ID, 10)])
 		accounts := membersByGroup[group.ID]
 		byID := make(map[int64]groupQualityMemberSnapshot, len(accounts))
 		for i := range accounts {
@@ -418,24 +417,33 @@ func (s *GroupQualityGateService) evaluate(ctx context.Context) error {
 			previousMember := old.Members[group.ID][account.ID]
 			previous := previousMember.State
 			resetAt := accountGroupQualityResetAt(account)
-			if resetAt.After(previous.ResetAt) {
-				previous = groupQualityAccountState{State: "trial", TrialSince: resetAt, ResetAt: resetAt, Tier: GroupQualityGateTierTrial, TierAt: resetAt}
+			reset := resetAt.After(s.processStartedAt) && !resetAt.Equal(previous.ResetAt)
+			if reset {
+				previous = groupQualityAccountState{State: "trial", TrialSince: resetAt, TrialObservedUntil: resetAt, Tier: GroupQualityGateTierTrial}
 			}
-			pinned := group.Platform == PlatformOpenAI && configured && policy.Enabled && containsInt64(policy.PinnedAccountIDs, account.ID)
+			previous.ResetAt = resetAt
+			pinned := policy.Enabled && containsInt64(policy.PinnedAccountIDs, account.ID)
 			usable := groupMemberUsable(group, account, now)
 			metric := fullMetrics[account.ID]
 			state := previous
 			passing := true
-			if group.Platform == PlatformOpenAI && configured && policy.Enabled {
+			if policy.Enabled {
 				errorStart, ttftStart, cacheStart := qualityValidStarts(now, s.processStartedAt, resetAt, previous)
-				trialStart := maxTime(previous.TrialSince, s.processStartedAt, resetAt)
-				metric = groupQualityMetricsFor(byAccount[account.ID], now, errorStart, ttftStart, cacheStart, trialStart)
-				state, _ = evaluateGroupQualityMember(now, policy, metric, previous, pinned)
-				passing = state.State != "ejected" && metric.Passing(policy)
+				metric = groupQualityMetricsFor(byAccount[account.ID], now, errorStart, ttftStart, cacheStart)
+				if stale && !reset && previous.State != "ejected" {
+					metric = previousMember.Metric
+				}
+				// Even stale intervals are counted once. They cannot eject or promote
+				// until usage writes are fresh again.
+				if previous.State == "trial" && observationErr == nil {
+					accumulateQualityTrial(&previous, byAccount[account.ID], now)
+				}
+				state = evaluateGroupQualityMember(now, policy, metric, previous, !stale)
+				passing = state.State != "ejected" && !metric.EjectionReady(policy)
 			} else {
-				state = groupQualityAccountState{State: "eligible", Tier: GroupQualityGateTierFast, TierAt: previous.TierAt, Strike: previous.Strike, LastEjected: previous.LastEjected, LastEjectionEnd: previous.LastEjectionEnd, ResetAt: resetAt}
+				state = groupQualityAccountState{State: "eligible", TierAt: previous.TierAt, Strike: previous.Strike, LastEjectionEnd: previous.LastEjectionEnd, ResetAt: resetAt}
 			}
-			tier := resolveGroupQualityTier(now, policy, metric, state, previous, configured && policy.Enabled, passing)
+			tier := resolveGroupQualityTier(now, policy, metric, state, previous, policy.Enabled, passing)
 			state.Tier = tier
 			if state.State == "ejected" || state.State == "trial" {
 				state.TierAt = time.Time{}
@@ -446,13 +454,14 @@ func (s *GroupQualityGateService) evaluate(ctx context.Context) error {
 			}
 			result := GroupQualityMemberResult{Usable: usable, Passing: passing, Pinned: pinned, State: state.State, Tier: tier}
 			byID[account.ID] = groupQualityMemberSnapshot{AccountID: account.ID, Metric: metric, State: state, Result: result}
-			logGroupQualityTransition(previous, state, group.ID, account.ID, policy, metric)
+			logGroupQualityTransition(previousMember.State, state, group.ID, account.ID, policy, metric)
 		}
-		if group.Platform == PlatformOpenAI && configured && policy.Enabled {
-			applyQualityGuard(accounts, byID, policy)
+		if policy.Enabled {
+			applyQualityGuard(byID, old.Members[group.ID])
 			for accountID, member := range byID {
 				if member.Result.GuardHeld && !old.Members[group.ID][accountID].Result.GuardHeld {
 					slog.Info("group_quality_gate.guard_hold", "group_id", group.ID, "account_id", accountID,
+						"severity", member.State.Severity,
 						"error_rate", member.Metric.ErrorRate(), "max_error_rate", policy.MaxErrorRate,
 						"warm_ttft_p90_ms", member.Metric.WarmTTFTP90Ms, "max_warm_ttft_p90_ms", policy.MaxWarmTTFTP90Ms)
 				}
@@ -461,7 +470,46 @@ func (s *GroupQualityGateService) evaluate(ctx context.Context) error {
 		next.Members[group.ID] = byID
 	}
 	s.snapshot.Store(next)
-	return nil
+	return observationErr
+}
+
+// accumulateQualityTrial consumes only the interval not consumed by a previous
+// round. Keeping at most 20 IDs makes long, low-traffic trials independent of the
+// bounded observation horizon, without counting cross-minute retries twice.
+func accumulateQualityTrial(state *groupQualityAccountState, observations []GroupQualityObservation, now time.Time) {
+	from := maxTime(state.TrialSince, state.TrialObservedUntil)
+	events := make([]GroupQualityObservation, 0)
+	for _, o := range observations {
+		if o.At.After(state.TrialSince) && !o.At.Before(from) && o.At.Before(now) && (o.Success || o.SoftFailure) {
+			events = append(events, o)
+		}
+	}
+	sort.SliceStable(events, func(i, j int) bool {
+		if events[i].At.Equal(events[j].At) {
+			return events[i].RequestID < events[j].RequestID
+		}
+		return events[i].At.Before(events[j].At)
+	})
+	state.TrialRequests = slices.Clone(state.TrialRequests)
+	seenFailures := map[string]bool{}
+	for _, event := range events {
+		id := event.RequestID
+		if id == "" {
+			id = "at:" + strconv.FormatInt(event.At.UnixMilli(), 10)
+		}
+		if !slices.Contains(state.TrialRequests, id) {
+			if len(state.TrialRequests) == 20 {
+				continue
+			}
+			state.TrialRequests = append(state.TrialRequests, id)
+		}
+		failureKey := id + "\x00" + strconv.FormatInt(event.At.UnixMilli(), 10)
+		if event.SoftFailure && !seenFailures[failureKey] {
+			seenFailures[failureKey] = true
+			state.TrialSoftFailures++
+		}
+	}
+	state.TrialObservedUntil = now
 }
 
 func qualityValidStarts(now, processStart, resetAt time.Time, state groupQualityAccountState) (time.Time, time.Time, time.Time) {
@@ -481,17 +529,10 @@ func qualityValidStarts(now, processStart, resetAt time.Time, state groupQuality
 	return errorStart, ttftStart, cacheStart
 }
 
-func groupQualityMetricsFor(observations []GroupQualityObservation, now, errorSince, ttftSince, cacheSince, trialSince time.Time) GroupQualityMetrics {
+func groupQualityMetricsFor(observations []GroupQualityObservation, now, errorSince, ttftSince, cacheSince time.Time) GroupQualityMetrics {
 	m := GroupQualityMetrics{}
 	seenFailures := map[string]bool{}
 	ttftValues := []int{}
-	type trialEvent struct {
-		at           time.Time
-		requestID    string
-		softFailures int64
-	}
-	trialRequests := map[string]trialEvent{}
-	seenTrialFailures := map[string]bool{}
 	zeroCount := 0
 	for _, o := range observations {
 		if o.At.After(now) {
@@ -519,25 +560,6 @@ func groupQualityMetricsFor(observations []GroupQualityObservation, now, errorSi
 				zeroCount++
 			}
 		}
-		if !trialSince.IsZero() && o.At.After(trialSince) && (o.Success || o.SoftFailure) {
-			requestID := o.RequestID
-			if requestID == "" {
-				requestID = "at:" + strconv.FormatInt(o.At.UnixMilli(), 10)
-			}
-			event, ok := trialRequests[requestID]
-			if !ok || o.At.Before(event.at) {
-				event.at = o.At
-			}
-			event.requestID = requestID
-			if o.SoftFailure {
-				failureKey := requestID + "\x00" + strconv.FormatInt(o.At.UnixMilli(), 10)
-				if !seenTrialFailures[failureKey] {
-					seenTrialFailures[failureKey] = true
-					event.softFailures++
-				}
-			}
-			trialRequests[requestID] = event
-		}
 	}
 	if len(ttftValues) > 0 {
 		sort.Ints(ttftValues)
@@ -552,23 +574,6 @@ func groupQualityMetricsFor(observations []GroupQualityObservation, now, errorSi
 	}
 	if m.ZeroCacheSamples > 0 {
 		m.WarmZeroCacheRate = float64(zeroCount) / float64(m.ZeroCacheSamples)
-	}
-	trialEvents := make([]trialEvent, 0, len(trialRequests))
-	for _, event := range trialRequests {
-		trialEvents = append(trialEvents, event)
-	}
-	sort.Slice(trialEvents, func(i, j int) bool {
-		if trialEvents[i].at.Equal(trialEvents[j].at) {
-			return trialEvents[i].requestID < trialEvents[j].requestID
-		}
-		return trialEvents[i].at.Before(trialEvents[j].at)
-	})
-	m.TrialRequests = int64(len(trialEvents))
-	for i, event := range trialEvents {
-		if i >= 20 {
-			break
-		}
-		m.TrialSoftFailures += event.softFailures
 	}
 	return m
 }
@@ -630,91 +635,78 @@ func logGroupQualityTransition(old, next groupQualityAccountState, groupID, acco
 	if next.State == "ejected" && (old.State != "ejected" || !old.Until.Equal(next.Until)) {
 		slog.Info("group_quality_gate.eject", "group_id", groupID, "account_id", accountID, "error_rate", metric.ErrorRate(), "max_error_rate", policy.MaxErrorRate, "warm_ttft_p90_ms", metric.WarmTTFTP90Ms, "max_warm_ttft_p90_ms", policy.MaxWarmTTFTP90Ms, "until", next.Until, "strikes", next.Strike)
 	}
-	if next.State == "trial" && old.State != "trial" {
+	if next.State == "trial" && (old.State != "trial" || !old.ResetAt.Equal(next.ResetAt)) {
 		slog.Info("group_quality_gate.trial", "group_id", groupID, "account_id", accountID, "error_rate", metric.ErrorRate(), "max_error_rate", policy.MaxErrorRate, "warm_ttft_p90_ms", metric.WarmTTFTP90Ms, "max_warm_ttft_p90_ms", policy.MaxWarmTTFTP90Ms)
 	}
-	if old.State == "ejected" && next.State != "ejected" {
+	if (old.State == "ejected" || old.State == "trial") && next.State == "eligible" {
 		slog.Info("group_quality_gate.recover", "group_id", groupID, "account_id", accountID, "error_rate", metric.ErrorRate(), "max_error_rate", policy.MaxErrorRate, "warm_ttft_p90_ms", metric.WarmTTFTP90Ms, "max_warm_ttft_p90_ms", policy.MaxWarmTTFTP90Ms, "state", next.State)
 	}
 }
 
-func applyQualityGuard(accounts []Account, members map[int64]groupQualityMemberSnapshot, policy GroupQualityGatePolicy) {
+func applyQualityGuard(members, previous map[int64]groupQualityMemberSnapshot) {
 	usable, countable, passing := 0, 0, 0
-	for _, a := range accounts {
-		m := members[a.ID]
-		if m.Result.Usable {
-			usable++
-			if !m.Result.Pinned || m.Result.Passing {
-				countable++
-			}
-			if m.Result.Passing || m.Result.GuardHeld {
-				passing++
-			}
-		}
-	}
-	target := groupQualityMaxInt(2, (usable+1)/2)
-	if target > countable {
-		target = countable
-	}
-	if passing >= target {
-		return
-	}
-	type candidate struct {
-		id    int64
-		score float64
-	}
-	candidates := []candidate{}
-	for _, a := range accounts {
-		m := members[a.ID]
-		if !m.Result.Usable || m.Result.Pinned || m.Result.State != "ejected" {
+	candidates := make([]int64, 0, len(members))
+	for id, m := range members {
+		if !m.Result.Usable {
 			continue
 		}
-		score := 0.0
-		if m.Metric.Calls >= 20 && m.Metric.SoftFailures >= 5 {
-			score = m.Metric.ErrorRate() / policy.MaxErrorRate
+		usable++
+		if m.Result.Pinned && !m.Result.Passing {
+			continue
 		}
-		if m.Metric.WarmSamples >= 10 {
-			score = math.Max(score, float64(m.Metric.WarmTTFTP90Ms)/float64(policy.MaxWarmTTFTP90Ms))
+		countable++
+		if m.Result.Passing {
+			passing++
+		} else if m.Result.State == "ejected" {
+			candidates = append(candidates, id)
 		}
-		candidates = append(candidates, candidate{a.ID, score})
 	}
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].score < candidates[j].score })
-	for _, c := range candidates {
+	target := min(max(2, (usable+1)/2), countable)
+	sort.SliceStable(candidates, func(i, j int) bool {
+		a, b := candidates[i], candidates[j]
+		if members[a].State.Severity != members[b].State.Severity {
+			return members[a].State.Severity < members[b].State.Severity
+		}
+		if previous[a].Result.GuardHeld != previous[b].Result.GuardHeld {
+			return previous[a].Result.GuardHeld
+		}
+		return a < b
+	})
+	for _, id := range candidates {
 		if passing >= target {
 			break
 		}
-		m := members[c.id]
+		m := members[id]
 		m.Result.GuardHeld = true
 		m.Result.Tier = GroupQualityGateTierOther
-		members[c.id] = m
+		members[id] = m
 		passing++
-	}
-	if passing < target {
-		for _, a := range accounts {
-			m := members[a.ID]
-			if m.Result.Usable && !m.Result.Pinned && !m.Result.Passing && !m.Result.GuardHeld {
-				m.Result.GuardHeld = true
-				members[a.ID] = m
-			}
-		}
 	}
 }
 
-func groupQualityMaxInt(a, b int) int {
-	if a > b {
-		return a
+func qualityFailureSince(old *groupQualitySnapshot, now, observedAt time.Time) time.Time {
+	if old.Stale {
+		return old.StaleSince
 	}
-	return b
+	if !observedAt.IsZero() {
+		return observedAt
+	}
+	return now
 }
-func (s *GroupQualityGateService) markFailed(err error) {
-	old := s.snapshot.Load()
-	if old == nil {
-		old = &groupQualitySnapshot{GeneratedAt: time.Now().UTC(), Policies: GroupQualityGatePolicies{Groups: map[string]GroupQualityGatePolicy{}}, Metrics: map[int64]GroupQualityMetrics{}, Members: map[int64]map[int64]groupQualityMemberSnapshot{}}
+
+func logGroupQualityFailure(old *groupQualitySnapshot, now, since time.Time, err error) {
+	if !old.Stale {
+		slog.Warn("group_quality_gate.evaluate_failed", "reason", err.Error(), "stale_duration", now.Sub(since))
 	}
+}
+
+func (s *GroupQualityGateService) markFailed(now time.Time, err error) {
+	old := s.snapshot.Load()
 	next := *old
 	next.Stale = true
+	next.StaleSince = qualityFailureSince(old, now, time.Time{})
 	s.snapshot.Store(&next)
-	slog.Warn("group_quality_gate.evaluate_failed", "error", err)
+	logGroupQualityFailure(old, now, next.StaleSince, err)
 }
 
 var _ GroupQualityGateView = (*GroupQualityGateService)(nil)
