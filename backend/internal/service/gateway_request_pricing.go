@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/pkg/timezone"
 )
 
@@ -20,12 +19,9 @@ func WithGatewayTokenRequestPricing(ctx context.Context) (context.Context, time.
 	}
 	pricingAt := timezone.Now()
 	ctx = context.WithValue(ctx, gatewayTokenRequestPricingAtCtxKey{}, pricingAt)
-	// 调度过程中可能因 fallback/composite 路由覆盖 ctxkey.Group；计费 D 仍必须
-	// 使用认证时刻的父分组，和最终 RecordUsage 的计费归属保持一致。
-	// 无号兜底时用户付的是原分组的价（PM P2-2），优先取原分组。
-	if group := fallbackBillingGroup(ctx); group != nil {
-		ctx = context.WithValue(ctx, gatewayTokenRequestBillingGroupCtxKey{}, group)
-	} else if group, ok := ctx.Value(ctxkey.Group).(*Group); ok && IsGroupContextValid(group) {
+	// Freeze the serving group at request entry so pricing and the profit gate
+	// use the same group throughout the request.
+	if group := ServingPricingGroup(ctx); group != nil {
 		ctx = context.WithValue(ctx, gatewayTokenRequestBillingGroupCtxKey{}, group)
 	}
 	return ctx, pricingAt

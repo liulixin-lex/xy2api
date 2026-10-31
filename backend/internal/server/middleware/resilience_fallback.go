@@ -14,8 +14,9 @@ import (
 // runs right after API-key authentication, so the system prompt, composite
 // routing and selection apply the fallback group. A request falls back at
 // most once. The fallback group only routes: the key as authenticated is
-// kept, and prices, limits and permissions, the model allow-list included,
-// stay those of the group the request was made for (service.BillingAPIKey).
+// kept, while limits and permissions, the model allow-list included, stay
+// those of the group the request was made for (service.BillingAPIKey). Prices
+// use the serving group (service.ServingPricingKey).
 // Model listings route nothing and describe the user's own group, so they
 // never move.
 func ResilienceAvailabilityFallback() gin.HandlerFunc {

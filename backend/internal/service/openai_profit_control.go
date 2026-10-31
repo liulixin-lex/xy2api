@@ -245,16 +245,11 @@ func (s *OpenAIGatewayService) resolveOpenAIProfitControlGate(ctx context.Contex
 	if !ok {
 		pricingAt = timezone.Now()
 	}
-	// D 与计费完全同源（RecordUsage 组合）：计费永远按 apiKey 自身分组
-	//（composite 请求即父分组）的"用户覆盖 ?? 分组默认 × 高峰因子"计算，
-	// 因此优先取认证中间件放入 ctx 的分组；ctx 中无有效分组（内部调用）时
-	// 退回调度分组组合，直连 openai 分组场景两者等价。
-	// 无号兜底时售价按原分组（计费 Key 的分组，PM P2-2）；成本仍按实际账号。
-	billingGroup := group
-	if origin := fallbackBillingGroup(ctx); origin != nil {
-		billingGroup = origin
-	} else if ctxGroup, ok := ctx.Value(ctxkey.Group).(*Group); ok && IsGroupContextValid(ctxGroup) {
-		billingGroup = ctxGroup
+	// D 与 RecordUsage 同源：使用入口固定的服务计价分组（组合请求即父组；
+	// 兜底时为兜底组）。内部调用缺少该快照时退回被调度分组。
+	billingGroup := ServingPricingGroup(ctx)
+	if billingGroup == nil {
+		billingGroup = group
 	}
 	downstream := billingGroup.RateMultiplier
 	if userID, _ := ctx.Value(ctxkey.UserID).(int64); userID > 0 {

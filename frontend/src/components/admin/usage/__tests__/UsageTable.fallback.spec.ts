@@ -68,8 +68,9 @@ describe('UsageTable availability fallback marker', () => {
     const markers = wrapper.findAll('[data-testid="usage-fallback-marker"]')
     expect(markers).toHaveLength(1)
     const marker = wrapper.get('[data-request-id="req-fallback"]').get('[data-testid="usage-fallback-marker"]')
-    expect(marker.text()).toBe('admin.resilience.usage.fallback:{"origin":"Main","group":"Backup"}')
+    expect(marker.text()).toBe('admin.resilience.usage.fallback:{"group":"Backup"}')
     expect(marker.attributes('title')).toBe('admin.resilience.usage.fallbackTitle')
+    expect(wrapper.get('[data-request-id="req-fallback"]').text()).toContain('Main')
   })
 
   it('never shows the fallback to users, even if an older server still sends the origin fields', () => {
@@ -79,9 +80,8 @@ describe('UsageTable availability fallback marker', () => {
     expect(wrapper.get('[data-request-id="req-plain"]').text()).toBe('Main')
   })
 
-  it.each([['zh', zh, '原分组'], ['en', en, 'original group']])('%s explains that the original group is billed', (_, messages, billed) => {
+  it.each([['zh', zh, '按兜底分组计费'], ['en', en, 'billed by the fallback group']])('%s explains fallback pricing', (_, messages, billed) => {
     const title = messages.resilience.usage.fallbackTitle
     expect(title).toContain(billed)
-    expect(title).not.toMatch(/按其倍率|at its rate/)
   })
 })

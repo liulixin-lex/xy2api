@@ -11,6 +11,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	middleware2 "github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
@@ -29,10 +31,12 @@ type countingEstimator struct {
 	calls  int
 	cost   float64
 	priced bool
+	key    *service.APIKey
 }
 
-func (e *countingEstimator) EstimateInflightReservation(context.Context, *service.APIKey, service.InflightEstimateRequest) (float64, bool) {
+func (e *countingEstimator) EstimateInflightReservation(_ context.Context, key *service.APIKey, _ service.InflightEstimateRequest) (float64, bool) {
 	e.calls++
+	e.key = key
 	return e.cost, e.priced
 }
 
@@ -79,6 +83,51 @@ func TestReserveInflightBalance_UnpricedPolicy(t *testing.T) {
 	cfg.Billing.InflightReservation.FailClosedOnUnpriced = true
 	_, err = reserveInflightBalance(newInflightTestGinContext(), billing, est, apiKey, nil, tokenInflightEstimate("unknown", nil))
 	require.ErrorIs(t, err, service.ErrBillingServiceUnavailable)
+}
+
+func TestReserveInflightFallbackUsesOriginOwnershipAndServingEstimate(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		originSubscription bool
+		wantReservation    bool
+	}{
+		{"origin_balance_uses_serving_estimate", false, true},
+		{"origin_subscription_does_not_reserve", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cache := newHandlerInflightCache(2)
+			cfg := &config.Config{}
+			cfg.Billing.InflightReservation = config.InflightReservationConfig{Enabled: true, TTLSeconds: 60}
+			billing := service.NewBillingCacheService(cache, nil, nil, nil, nil, nil, cfg, nil)
+			t.Cleanup(billing.Stop)
+
+			originID, servingID := int64(10), int64(20)
+			originGroup := &service.Group{ID: originID, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+			if tc.originSubscription {
+				originGroup.SubscriptionType = service.SubscriptionTypeSubscription
+			}
+			servingGroup := &service.Group{ID: servingID, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+			origin := &service.APIKey{ID: 7, User: &service.User{ID: 5}, GroupID: &originID, Group: originGroup}
+			serving := service.CloneAPIKeyWithGroup(origin, servingGroup)
+			state := resilience.NewRequestState()
+			require.True(t, state.MarkFallback(originID))
+			ctx := resilience.WithRequestState(context.Background(), state)
+			service.RememberAvailabilityFallbackOrigin(ctx, origin)
+			ctx = context.WithValue(ctx, ctxkey.Group, servingGroup)
+			estimator := &countingEstimator{cost: 0.75, priced: true}
+
+			_, done, err := reserveInflightBalanceCtx(ctx, billing, estimator, serving, &service.UserSubscription{}, tokenInflightEstimate("m", nil))
+			require.NoError(t, err)
+			require.Equal(t, tc.wantReservation, cache.count() == 1)
+			if tc.wantReservation {
+				require.Equal(t, 1, estimator.calls)
+				require.Same(t, serving, estimator.key, "the estimator receives the serving-group key")
+				done()
+			} else {
+				require.Zero(t, estimator.calls, "the origin subscription determines reservation eligibility")
+			}
+		})
+	}
 }
 
 // handlerInflightCache 内存版余额缓存 + 在途预留（语义同 Redis Lua）。
