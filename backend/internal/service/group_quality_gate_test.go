@@ -317,11 +317,38 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.repo.observations = append(e.repo.observations, e.repo.observations[0])
 			e.evaluate(t, time.Minute)
 			e.evaluate(t, 2*time.Minute)
-			require.EqualValues(t, 1, e.member(1).State.TrialSoftFailures)
+			require.Len(t, e.member(1).State.TrialFailures, 1)
 			require.Len(t, e.member(1).State.TrialRequests, 1)
 			e.calls(1, e.base.Add(4*time.Hour+time.Second), 1, 1, 0, false)
 			e.evaluate(t, 4*time.Hour+time.Minute)
 			e.state(t, 1, "ejected", 1, GroupQualityGateTierOther)
+		}},
+		{"trial counts failures arriving three minutes late before twenty requests", func(t *testing.T, e *qualityTestEnv) {
+			e.reset(1, e.base)
+			e.evaluate(t, 0)
+			e.calls(1, e.base.Add(30*time.Second), 10, 0, 0, false)
+			e.evaluate(t, time.Minute)
+			e.evaluate(t, 2*time.Minute)
+			require.Len(t, e.member(1).State.TrialRequests, 10)
+
+			// The attempt precedes its success, but the error log is written
+			// after the request ends, after two evaluation rounds have passed.
+			first := GroupQualityObservation{AccountID: 1, RequestID: e.repo.observations[0].RequestID, At: e.base.Add(10 * time.Second), SoftFailure: true}
+			e.repo.observations = append(e.repo.observations, first)
+			e.evaluate(t, 3*time.Minute)
+			require.Len(t, e.member(1).State.TrialFailures, 1)
+			require.Len(t, e.member(1).State.TrialRequests, 10, "a late attempt must not count its request twice")
+			old := e.svc.snapshot.Load()
+			e.repo.observations = append(e.repo.observations, first)
+			e.evaluate(t, 3*time.Minute+30*time.Second)
+			require.Len(t, e.member(1).State.TrialFailures, 1, "rescans and duplicate rows must not count a failure twice")
+
+			second := GroupQualityObservation{AccountID: 1, RequestID: e.repo.observations[1].RequestID, At: e.base.Add(20 * time.Second), SoftFailure: true}
+			e.repo.observations = append(e.repo.observations, second)
+			e.evaluate(t, 4*time.Minute)
+			e.state(t, 1, "ejected", 1, GroupQualityGateTierOther)
+			require.Less(t, e.member(1).Metric.Calls, int64(20), "the trial rule must eject before the normal error-rate minimum")
+			require.Len(t, old.Members[7][1].State.TrialFailures, 1, "published trial state must remain immutable")
 		}},
 		{"failures after first twenty requests do not fail trial", func(t *testing.T, e *qualityTestEnv) {
 			e.reset(1, e.base.Add(-time.Minute))
