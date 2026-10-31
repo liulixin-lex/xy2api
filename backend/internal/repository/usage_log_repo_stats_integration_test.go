@@ -60,6 +60,10 @@ func TestUsageLog_UpstreamModelMismatchFilterAndPartialIndex(t *testing.T) {
 	require.Len(t, trend, 1)
 	require.Equal(t, int64(1), trend[0].Requests)
 
+	// Refresh fixture statistics so index selection does not depend on when
+	// autovacuum analyzed rows from earlier tests in this package.
+	_, err = tx.ExecContext(ctx, "ANALYZE usage_logs")
+	require.NoError(t, err)
 	_, err = tx.ExecContext(ctx, "SET LOCAL enable_seqscan = off")
 	require.NoError(t, err)
 	assertPlanUsesIndex := func(query, indexName string, args ...any) {
