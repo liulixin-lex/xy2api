@@ -165,12 +165,14 @@ func TestMonitorProbeOpenAIIgnoresStickyBinding(t *testing.T) {
 		{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
 			Priority: 2, Concurrency: 1, GroupIDs: []int64{probeTestGroupID}},
 	}
-	t.Run("regular request waits for its bound account", func(t *testing.T) {
+	t.Run("regular request borrows and keeps its bound account", func(t *testing.T) {
 		svc, _, cache := newOpenAIProbeTestService(accounts, map[int64]int{1: 1}, map[string]int64{"openai:sess": 1})
 		selection := selectOpenAIForProbeTest(t, context.Background(), svc, "sess")
-		require.NotNil(t, selection.WaitPlan)
-		require.Equal(t, int64(1), selection.WaitPlan.AccountID)
-		require.Equal(t, 120*time.Second, selection.WaitPlan.Timeout)
+		require.True(t, selection.Acquired)
+		require.Nil(t, selection.WaitPlan)
+		require.Equal(t, int64(2), selection.Account.ID)
+		require.True(t, selection.StickyCapacitySpillover)
+		selection.ReleaseFunc()
 		require.Equal(t, map[string]int64{"openai:sess": 1}, cache.sessionBindings)
 	})
 	t.Run("probe takes the idle account and binds nothing", func(t *testing.T) {

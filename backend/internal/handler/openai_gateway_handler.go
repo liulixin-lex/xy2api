@@ -2442,7 +2442,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 	ctx := service.ContextWithSelectionProfitGate(c.Request.Context(), selection)
 	account := selection.Account
 	if selection.Acquired {
-		latest, vetoed, reason := h.gatewayService.ProfitControlVetoLatest(ctx, account)
+		latest, vetoed, reason := h.gatewayService.SelectionAdmissionVetoLatest(ctx, account)
 		if vetoed {
 			if selection.ReleaseFunc != nil {
 				selection.ReleaseFunc()
@@ -2481,7 +2481,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 	if fastAcquired {
 		// 分组利润控制：快速抢槽成功后终检。选号与抢槽之间账号
 		// 倍率可能刷新，越线则释放槽位交由调用方排除重选，不绑定粘连。
-		latest, vetoed, reason := h.gatewayService.ProfitControlVetoLatest(ctx, account)
+		latest, vetoed, reason := h.gatewayService.SelectionAdmissionVetoLatest(ctx, account)
 		if vetoed {
 			if fastReleaseFunc != nil {
 				fastReleaseFunc()
@@ -2539,7 +2539,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 	releaseWait()
 	// 分组利润控制：WaitPlan 排队成功后终检。排队期间账号倍率
 	// 可能上调，越线则释放槽位交由调用方排除重选，不绑定粘连。
-	latest, vetoed, reason := h.gatewayService.ProfitControlVetoLatest(ctx, account)
+	latest, vetoed, reason := h.gatewayService.SelectionAdmissionVetoLatest(ctx, account)
 	if vetoed {
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
@@ -2944,6 +2944,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	// 继续按建连时刻的谷价计费。生图意图只影响能力路由与图片计费，不关门。
 	// 建连时刻只用于选号/准入，不作为任何 turn 的计费定价时刻。
 	wsPricingCtx, _ := h.gatewayService.WithOpenAIRequestPricingContext(ctx, apiKey.GroupID)
+	wsPricingCtx = service.WithOpenAIQualityTurnExemption(wsPricingCtx, service.OpenAIQualityTurnPinned(firstMessage))
 	ctx = wsPricingCtx
 
 	for {
@@ -2998,7 +2999,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		accountReleaseFunc := selection.ReleaseFunc
 		if selection.Acquired {
 			// 调度器已抢槽路径同样终检：选号与抢槽之间账号倍率可能刷新。
-			latest, vetoed, reason := h.gatewayService.ProfitControlVetoLatest(admissionCtx, account)
+			latest, vetoed, reason := h.gatewayService.SelectionAdmissionVetoLatest(admissionCtx, account)
 			if vetoed {
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
@@ -3035,7 +3036,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			}
 			// 分组利润控制：WS 快速抢槽成功后终检，越线则释放
 			// 槽位、排除该账号重新选号，全池耗尽由下一轮选号关闭连接。
-			latest, vetoed, reason := h.gatewayService.ProfitControlVetoLatest(admissionCtx, account)
+			latest, vetoed, reason := h.gatewayService.SelectionAdmissionVetoLatest(admissionCtx, account)
 			if vetoed {
 				if fastReleaseFunc != nil {
 					fastReleaseFunc()
@@ -3122,6 +3123,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "billing check failed")
 			return
 		}
+		var groupQualityTurnPinned atomic.Bool
 		hooks := &service.OpenAIWSIngressHooks{
 			ClientLifecycleContext:      clientLifecycleCtx,
 			InitialRequestModel:         reqModel,
@@ -3131,6 +3133,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			ReasoningEffortMappings:     reasoningEffortMappings,
 			TurnStarted:                 recordTurnStart,
 			BeforeRequest: func(turn int, payload []byte, originalModel string) error {
+				groupQualityTurnPinned.Store(service.OpenAIQualityTurnPinned(payload))
 				c.Set(securityAuditWSTurnContextKey, turn)
 				service.BeginOpsStreamTurn(c, turn)
 				setCyberTurnBody(turn, payload)
@@ -3209,7 +3212,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// 无法中途换号）。本 turn 的准入与计费共用同一 pricingAt。
 				turnBillingCtx := turnBillingAPIKeys.begin(ctx, h.apiKeyService, turn, apiKey)
 				turnCtx, turnAt := h.gatewayService.WithOpenAITurnPricingContext(turnBillingCtx, apiKey.GroupID)
-				if _, vetoed, reason := h.gatewayService.ProfitControlVetoLatest(turnCtx, account); vetoed {
+				if _, vetoed, reason := h.gatewayService.SelectionAdmissionVetoLatest(service.WithOpenAIQualityTurnExemption(turnCtx, groupQualityTurnPinned.Load()), account); vetoed {
 					reqLog.Info("openai.websocket_turn_profit_vetoed",
 						zap.Int("turn", turn),
 						zap.Int64("account_id", account.ID),

@@ -105,6 +105,22 @@ the caller waits at most 50ms, with bounded concurrent synchronization workers.
 Redis outages preserve local protection but cannot provide immediate cross-instance
 consistency. In-flight upstream requests are not recalled.
 
+## Group Quality Gate and Saturation
+
+Group admission reads the shared `GroupQualityGateView` through the same install points as profit admission: request pricing contexts, defensive scheduler entries, the actual composite sub-group carried by the selection, and each WebSocket turn. Dedicated image/video, media, count_tokens, live and model catalog selections remain outside this gate. An unconfigured evaluator returns no veto and tier 0.
+
+`group_quality_ejected` is the common filter reason for legacy, advanced and share scheduling, including missing-bound share candidates and final verification. An ejected sticky owner is replaced and rebound. Short soft penalties preserve the owner. After acquiring a slot or completing an HTTP wait plan, `SelectionAdmissionVetoLatest` refreshes the account and checks profit and current group quality. A veto releases the slot and excludes the account before selecting again. The effective sub-group, continuation exemption and last-resort relaxation travel with the selection.
+
+Strong continuations (previous-response ownership, guardian parent affinity, and WS turns with `previous_response_id` or incomplete tools) are exempt from group quality admission, including DB rechecks. `BeforeRequest` captures the same pinned predicate as `AdvanceOpenAIQualityTurn`; `BeforeTurn` checks unpinned turns. A rejected turn closes with `StatusTryAgainLater` and “account is no longer eligible for this connection, please reconnect”; accounts never switch within that connection. Profit admission continues to apply.
+
+With legacy low-rate priority enabled, `openAICandidateLess` orders tier (fast 0, trial 1, other 2), priority, load ≥80% last, known/lower `openAISchedulingRate`, load, least recent use, then ID. An account with no concurrency cap or explicit load factor is neutral for the 80% key. E2 replacement only reorders a shared tier, cost and load band. With that setting off the original comparator and E2 cache-evidence order remain.
+
+All three sticky saturation paths (without LoadBatch, load-aware, advanced) share `selectOpenAIStickyCapacity`: retry the owner for up to 2 seconds without joining the queue, then exclude it and borrow an idle eligible account. Within the best comparator cohort, borrowing prefers recent session success and then the session's stable hash. Borrowing preserves the owner's binding. Only a group with no immediate slot yields the final owner WaitPlan; the handler counts it once and retains its existing timeout behavior. Strong continuations keep waiting on their required owner. Exactly one acquired slot and release function are handed to the caller.
+
+Integration pending: when the existing quality router owns a binding (Generation >0), its owner-only candidate pass still prevents saturation borrowing. That wrapper also needs to preserve the owner when a borrow succeeds; OpenSpec task 2.7 remains open for this integration.
+
+The existing last resort additionally relaxes quality ejection and emits `group_quality_gate.last_resort` with group and account IDs. It cannot relax profit, IQ, balance, authentication or unsupported-model restrictions. See [account scheduling](account-scheduling.md) and the [group quality design](../openspec/changes/group-quality-gate-20261031/design.md).
+
 ## Cache and Protocol Behavior
 
 Healthy requests keep their existing body, cache keys, and session headers.

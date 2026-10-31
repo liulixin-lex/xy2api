@@ -356,6 +356,15 @@
         "docs/PROJECT_MEMORY.md",
         "docs/PROJECT_MEMORY_ARCHIVE.md"
       ]
+    },
+    {
+      "pattern": "\\bisBetterAccount\\b",
+      "reason": "group quality scheduling replaces the separate legacy comparator with openAICandidateLess; the scheduler diff retains upstream deletion evidence",
+      "allowed": [
+        "tools/upstream-sync/scheduler-diff.json",
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
     }
   ],
   "private": [

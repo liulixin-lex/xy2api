@@ -702,7 +702,7 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, s.codexEffectiveConcurrency(ctx, acc.ID, acc.Concurrency))
 		if err == nil && result != nil && result.Acquired {
 			s.noteOpenAILastResort(ctx, req.GroupID, acc, c.recoverAt)
-			return attachSelectionProfitGate(ctx, &AccountSelectionResult{Account: acc, Acquired: true, ReleaseFunc: result.ReleaseFunc})
+			return attachSelectionProfitGate(gateCtx, &AccountSelectionResult{Account: acc, Acquired: true, ReleaseFunc: result.ReleaseFunc})
 		}
 	}
 	if len(verified) == 0 {
@@ -711,7 +711,7 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 	cfg := s.schedulingConfig()
 	acc := verified[0].account
 	s.noteOpenAILastResort(ctx, req.GroupID, acc, verified[0].recoverAt)
-	return attachSelectionProfitGate(ctx, &AccountSelectionResult{
+	return attachSelectionProfitGate(gateCtx, &AccountSelectionResult{
 		Account: acc,
 		WaitPlan: &AccountWaitPlan{
 			AccountID:      acc.ID,

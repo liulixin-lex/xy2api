@@ -974,7 +974,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
-      "value": "if err == nil && !s.resilienceKeepOpenAISoftOwner(ctx, account, platform, requestedModel) {"
+      "value": "if err == nil && account != nil && !isExcluded(accountID) && !s.resilienceKeepOpenAISoftOwner(ctx, account, platform, requestedModel) {"
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
@@ -1366,7 +1366,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
-      "value": "if reason != resilience.ReasonCapabilityStreamOnly {"
+      "value": "if reason != resilience.ReasonCapabilityStreamOnly && reason != \"group_quality_ejected\" {"
     },
     {
       "path": "backend/internal/service/share_scheduling_openai.go",
@@ -3083,6 +3083,42 @@
     {
       "path": "frontend/src/views/user/KeysView.vue",
       "value": "anthropicCacheTTLDefault.value = response.meta?.anthropic_cache_ttl_default ?? null"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "func (s *OpenAIGatewayService) selectOpenAIStickyCapacity("
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "func openAICandidateLess("
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "groupQualityGateVeto(ctx, account)"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_forwarder_support.go",
+      "value": "ctx = withGroupQualityGateExempt(ctx)"
+    },
+    {
+      "path": "backend/internal/service/openai_profit_control.go",
+      "value": "ctx = s.withGroupQualityGate(ctx, groupID)"
+    },
+    {
+      "path": "backend/internal/service/share_scheduling_openai.go",
+      "value": "groupQualityGateVeto(ctx, acc)"
+    },
+    {
+      "path": "backend/internal/service/resilience_session.go",
+      "value": "attachSelectionProfitGate(gateCtx,"
+    },
+    {
+      "path": "backend/internal/service/gateway_service.go",
+      "value": "groupQualityGate *openAIGroupQualityGate"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "groupQualityTurnPinned.Store(service.OpenAIQualityTurnPinned(payload))"
     }
   ],
   "forbidden_module_paths": [
@@ -3158,7 +3194,8 @@
     "xy-openai-recent-session-request-protocol",
     "xy-support-tickets",
     "xy-managed-openai-totp",
-    "xy-anthropic-cache-ttl"
+    "xy-anthropic-cache-ttl",
+    "xy-openai-group-quality-scheduling"
   ],
   "custom_patch_tests": [
     {
@@ -5305,6 +5342,16 @@
       "id": "xy-anthropic-cache-ttl",
       "path": "backend/internal/repository/anthropic_cache_ttl_integration_test.go",
       "literal": "func TestAnthropicCacheTTLAuthRedisRoundTrip(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_group_quality_scheduling_test.go",
+      "literal": "func TestOpenAIGroupQualityScheduling(t *testing.T)"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/handler/openai_profit_slot_recheck_test.go",
+      "literal": "quality veto/"
     }
   ]
 }
