@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/claude"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 type anthropicCacheTTLKey struct{}
@@ -175,47 +177,98 @@ func (s *GatewayService) claudeCacheOAuthInjectionPossible(ctx context.Context, 
 	return false
 }
 
-// Automatic caching and an explicit marker on its tail must agree. Preserve
-// conflicting client intent for the provider's ordinary validation response.
+// Automatic caching and an explicit marker on its tail must agree. Native
+// Messages bodies keep a conflict for the provider's ordinary validation
+// response; converted bodies reconcile first (enforceConvertedCacheControlLimit).
 func anthropicAutomaticTailConflict(body []byte) bool {
 	top := gjson.GetBytes(body, "cache_control")
 	if top.Get("type").String() != "ephemeral" {
 		return false
 	}
-	root := gjson.ParseBytes(body)
-	var tail gjson.Result
-	for _, path := range []string{"tools", "system"} {
-		root.Get(path).ForEach(func(_, block gjson.Result) bool {
-			if claudeCacheableBlock(block, path) {
-				tail = block
-			}
-			return true
-		})
-	}
-	root.Get("messages").ForEach(func(_, msg gjson.Result) bool {
-		content := msg.Get("content")
-		if content.Type == gjson.String && content.String() != "" {
-			tail = content
-		}
-		if content.IsArray() {
-			content.ForEach(func(_, block gjson.Result) bool {
-				if claudeCacheableBlock(block, "messages") {
-					tail = block
-				}
-				return true
-			})
-		}
-		return true
-	})
+	_, tail := anthropicAutomaticCacheTail(body)
 	cc := tail.Get("cache_control")
 	if cc.Get("type").String() != "ephemeral" {
 		return false
 	}
-	ttl := func(cc gjson.Result) string {
-		if v := cc.Get("ttl"); v.Exists() {
-			return v.String()
-		}
-		return "5m"
+	return anthropicCacheMarkerTTL(top) != anthropicCacheMarkerTTL(cc)
+}
+
+// anthropicAutomaticCacheTail returns the block that automatic caching
+// applies to: the last cacheable block across tools, system, then messages.
+// A non-empty string message is an unmarked tail and has no block path.
+func anthropicAutomaticCacheTail(body []byte) (string, gjson.Result) {
+	root := gjson.ParseBytes(body)
+	var path string
+	var tail gjson.Result
+	for _, field := range []string{"tools", "system"} {
+		index := 0
+		root.Get(field).ForEach(func(_, block gjson.Result) bool {
+			if claudeCacheableBlock(block, field) {
+				path, tail = fmt.Sprintf("%s.%d", field, index), block
+			}
+			index++
+			return true
+		})
 	}
-	return ttl(top) != ttl(cc)
+	msgIndex := 0
+	root.Get("messages").ForEach(func(_, msg gjson.Result) bool {
+		content := msg.Get("content")
+		if content.Type == gjson.String && content.String() != "" {
+			path, tail = "", content
+		}
+		if content.IsArray() {
+			blockIndex := 0
+			content.ForEach(func(_, block gjson.Result) bool {
+				if claudeCacheableBlock(block, "messages") {
+					path, tail = fmt.Sprintf("messages.%d.content.%d", msgIndex, blockIndex), block
+				}
+				blockIndex++
+				return true
+			})
+		}
+		msgIndex++
+		return true
+	})
+	return path, tail
+}
+
+func anthropicCacheMarkerTTL(cc gjson.Result) string {
+	if v := cc.Get("ttl"); v.Exists() {
+		return v.String()
+	}
+	return "5m"
+}
+
+// enforceConvertedCacheControlLimit is enforceCacheControlLimit for bodies the
+// gateway built from Chat Completions or Responses. Those requests cannot
+// express a tail TTL that differs from automatic caching on purpose, so a
+// 5m/1h disagreement resolves toward 1h instead of reaching the provider as a
+// 400. Native Messages bodies keep enforceCacheControlLimit and their conflict.
+func enforceConvertedCacheControlLimit(body []byte) []byte {
+	return normalizeCacheControlTTLOrder(reconcileAutomaticCacheTTL(enforceCacheControlBlockLimit(body)))
+}
+
+func reconcileAutomaticCacheTTL(body []byte) []byte {
+	top := gjson.GetBytes(body, "cache_control")
+	if top.Get("type").String() != "ephemeral" {
+		return body
+	}
+	path, tail := anthropicAutomaticCacheTail(body)
+	cc := tail.Get("cache_control")
+	if path == "" || cc.Get("type").String() != "ephemeral" {
+		return body
+	}
+	var target string
+	switch topTTL, tailTTL := anthropicCacheMarkerTTL(top), anthropicCacheMarkerTTL(cc); {
+	case topTTL == "5m" && tailTTL == cacheTTLTarget1h:
+		target = "cache_control.ttl"
+	case topTTL == cacheTTLTarget1h && tailTTL == "5m":
+		target = path + ".cache_control.ttl"
+	default:
+		return body
+	}
+	if out, err := sjson.SetBytes(body, target, cacheTTLTarget1h); err == nil {
+		return out
+	}
+	return body
 }

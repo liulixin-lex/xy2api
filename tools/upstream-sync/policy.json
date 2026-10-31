@@ -3082,6 +3082,46 @@
     {
       "path": "frontend/src/views/user/KeysView.vue",
       "value": "anthropicCacheTTLDefault.value = response.meta?.anthropic_cache_ttl_default ?? null"
+    },
+    {
+      "path": "backend/internal/pkg/apicompat/chatcompletions_to_responses.go",
+      "value": "applyChatMessageCacheControl(items, m)"
+    },
+    {
+      "path": "backend/internal/pkg/apicompat/chatcompletions_to_responses.go",
+      "value": "out.chatCacheControls = chatInputCacheControls(input)"
+    },
+    {
+      "path": "backend/internal/pkg/apicompat/responses_to_anthropic_request.go",
+      "value": "convertResponsesInputToAnthropic(req.Instructions, req.Input, isOpus55 || isSonnet55, req.chatCacheControls...)"
+    },
+    {
+      "path": "backend/internal/pkg/apicompat/responses_to_anthropic_request.go",
+      "value": "restoreChatCacheControls(items, chatCacheControls)"
+    },
+    {
+      "path": "backend/internal/pkg/apicompat/responses_to_anthropic_request.go",
+      "value": "block.CacheControl = responsesItemCacheControl(item)"
+    },
+    {
+      "path": "backend/internal/pkg/apicompat/responses_to_anthropic_request.go",
+      "value": "block.CacheControl = responsesToolOutputCacheControl(item)"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward_as_chat_completions.go",
+      "value": "anthropicBody = enforceConvertedCacheControlLimit(anthropicBody)"
+    },
+    {
+      "path": "backend/internal/service/gateway_forward_as_responses.go",
+      "value": "anthropicBody = enforceConvertedCacheControlLimit(anthropicBody)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_anthropic_native.go",
+      "value": "anthropicBody = enforceConvertedCacheControlLimit(anthropicBody)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_responses_anthropic_native.go",
+      "value": "anthropicBody = enforceConvertedCacheControlLimit(anthropicBody)"
     }
   ],
   "forbidden_module_paths": [
@@ -3157,7 +3197,8 @@
     "xy-openai-recent-session-request-protocol",
     "xy-support-tickets",
     "xy-managed-openai-totp",
-    "xy-anthropic-cache-ttl"
+    "xy-anthropic-cache-ttl",
+    "xy-converted-tool-cache-markers"
   ],
   "custom_patch_tests": [
     {
@@ -5304,6 +5345,31 @@
       "id": "xy-anthropic-cache-ttl",
       "path": "backend/internal/repository/anthropic_cache_ttl_integration_test.go",
       "literal": "func TestAnthropicCacheTTLAuthRedisRoundTrip(t *testing.T) {"
+    },
+    {
+      "id": "xy-converted-tool-cache-markers",
+      "path": "backend/internal/pkg/apicompat/anthropic_cache_test.go",
+      "literal": "func TestAnthropicCacheToolResultMarkers(t *testing.T) {"
+    },
+    {
+      "id": "xy-converted-tool-cache-markers",
+      "path": "backend/internal/pkg/apicompat/anthropic_cache_test.go",
+      "literal": "func TestAnthropicCacheToolResultMarkersAbsent(t *testing.T) {"
+    },
+    {
+      "id": "xy-converted-tool-cache-markers",
+      "path": "backend/internal/service/gateway_anthropic_cache_ttl_test.go",
+      "literal": "func TestAnthropicCacheConvertedToolMarkersWire(t *testing.T) {"
+    },
+    {
+      "id": "xy-converted-tool-cache-markers",
+      "path": "backend/internal/service/gateway_anthropic_cache_ttl_test.go",
+      "literal": "func TestAnthropicCacheConvertedAutomaticTTLWire(t *testing.T) {"
+    },
+    {
+      "id": "xy-converted-tool-cache-markers",
+      "path": "backend/internal/service/claude_cache_fallback_test.go",
+      "literal": "func TestClaudeCacheBillingLogDowngraded(t *testing.T) {"
     }
   ]
 }

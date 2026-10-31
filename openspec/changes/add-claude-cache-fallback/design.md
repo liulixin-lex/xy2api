@@ -10,7 +10,7 @@
 
 ## Admission 与发送
 
-Messages、Chat Completions、Responses 的 Anthropic handler 在重写前记录原始协议位置的 cache_control 存在性和 admission 分组快照。null/非法值也表示客户端声明；工具 schema/input 中同名业务数据不算。转换协议额外识别 function 工具及 input 消息位置。
+Messages、Chat Completions、Responses 的 Anthropic handler 在重写前记录原始协议位置的 cache_control 存在性和 admission 分组快照。null/非法值也表示客户端声明；工具 schema/input 中同名业务数据不算。转换协议额外识别 function 工具及 input 消息位置。2026-10-31 后续：Responses 工具调用/结果项的项级标记及 function_call_output、custom_tool_call_output 数组 output 分片标记也计为声明，这些项转换为 tool_use/tool_result 块时标记随之保留。
 
 每次账号尝试建立独立状态。发送前检查 admission 与当前快照都覆盖有效分组，且账号确实属于此组。中途开启不改变已预留的请求；关闭或移除组可阻止补齐，fallback 分组不继承原授权。ID、地址、调用 Key 和模型不再作细分匹配。
 

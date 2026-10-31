@@ -8,7 +8,7 @@
 
 仅作用于当前已有构造器支持、且实际转发为 Anthropic Messages 协议的请求：Anthropic 原生 Messages（API Key、OAuth/SetupToken、透传）、现有 Vertex 原生/转换路径，以及 Bedrock 原生 Messages（Bearer/SigV4）。Chat Completions / Responses 仅在现有 Anthropic/Vertex 转换路径适用；Chat/Responses → Bedrock 缺少转换构造器及 eventstream 解码器，可能落入既有上游认证或通用转发错误，并非显式 unsupported，本轮不扩展该路径。分组中的 OpenAI/Gemini 等其他协议、`count_tokens` 保持原行为；这属于协议边界，不是模型或账号白名单。
 
-客户端原始请求在协议位置已经带 `cache_control` 时，本功能不再添加断点，包括 null 或非法声明。协议转换及非法字段净化仍按既有规则执行。消息断点清理重建策略已退役，不会自动开启分组补断点。
+客户端原始请求在协议位置已经带 `cache_control` 时，本功能不再添加断点，包括 null 或非法声明。协议转换及非法字段净化仍按既有规则执行。消息断点清理重建策略已退役，不会自动开启分组补断点。Responses `input` 中工具调用与结果项（`function_call`、`custom_tool_call`、`tool_search_call`、`tool_search_output`、`function_call_output`、`custom_tool_call_output`）的项级标记，以及 `function_call_output`、`custom_tool_call_output` 数组 `output` 分片上的标记也算声明，这些项转换为 `tool_use`/`tool_result` 块时标记随之保留；Chat 工具消息上的标记原本就算声明，现在也随 Anthropic 转换转发（`/v1/responses` 的旧版 Chat 形状请求除外，2026-10-31 起）。
 
 原始请求没有声明时，在完成现有处理及分组 system 注入后，按剩余断点额度依次尝试：
 

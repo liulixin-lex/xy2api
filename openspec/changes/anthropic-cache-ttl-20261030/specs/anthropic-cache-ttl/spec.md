@@ -20,6 +20,10 @@ All currently supported actual Claude Messages route/provider combinations MUST 
 - **WHEN** a key forces 1h but the request has no cache declarations and no existing insertion path
 - **THEN** no cache breakpoint is created and applied is false.
 
+#### Scenario: Converted automatic and tail TTL disagree
+- **WHEN** a Chat/Responses request converted to Anthropic has top-level automatic cache_control and an explicit marker on the last cacheable block, one 1h and the other 5m or omitted, and the key does not force a TTL
+- **THEN** both become 1h and earlier ephemeral breakpoints are raised to 1h before sending; a native Messages body with the same conflict is forwarded unchanged (2026-10-31 follow-up).
+
 ### Requirement: Provider usage and billing remain distinct
 
 Internal conversions MUST preserve TTL buckets and presence for streaming and buffered responses. Omission MUST NOT clear prior values; explicit zero MUST clear; cumulative events MUST NOT be added. Missing aggregate MAY be derived internally, explicit zero MUST remain zero. Request policy MUST NOT invent usage. Unknown and partial remainder MUST use the base write price; inconsistent totals MUST be capped deterministically. Commercial overrides MUST affect a billing copy only, preserving upstream response semantics and adjustment attribution. Site explicit prices MUST take priority.
@@ -37,6 +41,10 @@ Existing reservation MUST account for possible 5m/1h cold writes and disable his
 
 - **WHEN** policy and applied are NULL
 - **THEN** the usage API returns both as null, meaning not recorded, without claiming a cache failure or disabled cache. The usage pages do not display policy or applied (removed 2026-10-31).
+
+#### Scenario: Provider downgrades 1h writes
+- **WHEN** the settling attempt has policy 1h, applied true, and the provider reports a consistent cache write with only 5m tokens
+- **THEN** the billing event reports ttl_status downgraded; missing, partial and inconsistent keep their status (2026-10-31 follow-up).
 
 ## REMOVED Requirements
 

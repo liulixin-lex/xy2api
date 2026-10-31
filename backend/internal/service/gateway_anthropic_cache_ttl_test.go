@@ -390,3 +390,149 @@ func TestAnthropicCacheTTLBedrockFinalCapabilitiesWire(t *testing.T) {
 	_, err := PrepareBedrockRequestBody([]byte(`{"cache_control":{"type":"ephemeral"}}`), "anthropic.claude-fable-5", "")
 	require.ErrorContains(t, err, "top-level cache_control")
 }
+
+// forwardCacheWire sends raw through a real Forward entrypoint and returns the
+// recorded upstream body.
+func forwardCacheWire(t *testing.T, route, mode, raw string) (*ForwardResult, []byte) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	svc, key, a := cacheFixture(t)
+	key.AnthropicCacheTTLMode = mode
+	upstream := ttlWireUpstream(true)
+	svc.httpUpstream = upstream
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/"+route, nil)
+	ctx := svc.WithClaudeCacheFallbackRequest(context.Background(), key, []byte(raw))
+	c.Request = c.Request.WithContext(ctx)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef([]byte(raw)), PlatformAnthropic)
+	require.NoError(t, err)
+	parsed.GroupID = key.GroupID
+	var result *ForwardResult
+	switch route {
+	case "chat":
+		result, err = svc.ForwardAsChatCompletions(ctx, c, a, []byte(raw), parsed)
+	case "responses":
+		result, err = svc.ForwardAsResponses(ctx, c, a, []byte(raw), parsed)
+	default:
+		result, err = svc.Forward(ctx, c, a, parsed)
+	}
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	return result, upstream.lastBody
+}
+
+const (
+	cacheWireCall     = `{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"probe","arguments":"{}"}}]}`
+	cacheWireCallItem = `{"type":"function_call","call_id":"call_1","name":"probe","arguments":"{}"}`
+)
+
+// Converted tool results keep the client's marker, so fallback reports
+// client_declared and injects nothing next to it.
+func TestAnthropicCacheConvertedToolMarkersWire(t *testing.T) {
+	raws := map[string]string{
+		"chat":      `{"model":"claude-sonnet-4-5","stream":true,"messages":[{"role":"system","content":"rules"},{"role":"user","content":"go"},` + cacheWireCall + `,{"role":"tool","tool_call_id":"call_1","content":"OK","cache_control":{"type":"ephemeral","ttl":"1h"}}]}`,
+		"responses": `{"model":"claude-sonnet-4-5","stream":true,"instructions":"rules","input":[{"type":"message","role":"user","content":"go"},` + cacheWireCallItem + `,{"type":"function_call_output","call_id":"call_1","output":"OK","cache_control":{"type":"ephemeral","ttl":"1h"}}]}`,
+	}
+	for _, route := range []string{"chat", "responses"} {
+		for _, mode := range []string{"off", "5m", "1h"} {
+			t.Run(route+"/"+mode, func(t *testing.T) {
+				result, wire := forwardCacheWire(t, route, mode, raws[route])
+				require.Equal(t, "client_declared", result.ClaudeCacheFallback.Reason)
+				require.Equal(t, []string{"messages.2.content.0.cache_control"}, anthropicCacheControlPaths(wire), string(wire))
+				require.Equal(t, "tool_result", gjson.GetBytes(wire, "messages.2.content.0.type").String())
+				wantTTL := mode
+				if mode == "off" {
+					wantTTL = "1h"
+				}
+				require.Equal(t, wantTTL, gjson.GetBytes(wire, "messages.2.content.0.cache_control.ttl").String())
+				require.Equal(t, mode != "off", *result.AnthropicCacheTTLApplied)
+			})
+		}
+	}
+	t.Run("responses/custom_tool_output_part", func(t *testing.T) {
+		raw := `{"model":"claude-sonnet-4-5","stream":true,"tools":[{"type":"custom","name":"apply_patch"}],"input":[{"type":"message","role":"user","content":"go"},{"type":"custom_tool_call","call_id":"call_1","name":"apply_patch","input":"patch"},{"type":"custom_tool_call_output","call_id":"call_1","output":[{"type":"input_text","text":"done","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}`
+		result, wire := forwardCacheWire(t, "responses", "off", raw)
+		require.Equal(t, "client_declared", result.ClaudeCacheFallback.Reason)
+		require.Equal(t, "1h", gjson.GetBytes(wire, "messages.2.content.0.cache_control.ttl").String(), string(wire))
+		require.False(t, gjson.GetBytes(wire, "messages.2.content.0.content.0.cache_control").Exists())
+	})
+	t.Run("chat/trim_keeps_tail", func(t *testing.T) {
+		messages := `{"role":"system","content":"rules","cache_control":{"type":"ephemeral","ttl":"1h"}},{"role":"user","content":"go"}`
+		for i := 1; i <= 4; i++ {
+			messages += fmt.Sprintf(`,{"role":"assistant","tool_calls":[{"id":"call_%d","type":"function","function":{"name":"probe","arguments":"{}"}}]},{"role":"tool","tool_call_id":"call_%d","content":"OK","cache_control":{"type":"ephemeral"}}`, i, i)
+		}
+		raw := `{"model":"claude-sonnet-4-5","stream":true,"cache_control":{"type":"ephemeral"},"messages":[` + messages + `]}`
+		result, wire := forwardCacheWire(t, "chat", "off", raw)
+		require.Equal(t, "client_declared", result.ClaudeCacheFallback.Reason)
+		require.Equal(t, []string{"system.0.cache_control", "messages.6.content.0.cache_control", "messages.8.content.0.cache_control", "cache_control"}, anthropicCacheControlPaths(wire), string(wire))
+		requireCacheTTLOrderAccepted(t, wire)
+	})
+}
+
+// Converted bodies reconcile automatic caching with the tail toward 1h;
+// native Messages bodies keep the conflict for the provider to reject.
+func TestAnthropicCacheConvertedAutomaticTTLWire(t *testing.T) {
+	upward := `{"model":"claude-sonnet-4-5","stream":true,"cache_control":{"type":"ephemeral"},"messages":[{"role":"system","content":[{"type":"text","text":"rules","cache_control":{"type":"ephemeral"}}]},{"role":"user","content":"go"},` + cacheWireCall + `,{"role":"tool","tool_call_id":"call_1","content":"OK","cache_control":{"type":"ephemeral","ttl":"1h"}}]}`
+	t.Run("chat_upward", func(t *testing.T) {
+		_, wire := forwardCacheWire(t, "chat", "off", upward)
+		for _, path := range []string{"cache_control", "system.0.cache_control", "messages.2.content.0.cache_control"} {
+			require.Equal(t, "1h", gjson.GetBytes(wire, path+".ttl").String(), path+" in "+string(wire))
+		}
+		require.False(t, anthropicAutomaticTailConflict(wire))
+		requireCacheTTLOrderAccepted(t, wire)
+	})
+	t.Run("responses_reverse", func(t *testing.T) {
+		raw := `{"model":"claude-sonnet-4-5","stream":true,"cache_control":{"type":"ephemeral","ttl":"1h"},"input":[{"type":"message","role":"user","content":"go"},` + cacheWireCallItem + `,{"type":"function_call_output","call_id":"call_1","output":"OK","cache_control":{"type":"ephemeral"}}]}`
+		_, wire := forwardCacheWire(t, "responses", "off", raw)
+		require.Equal(t, "1h", gjson.GetBytes(wire, "messages.2.content.0.cache_control.ttl").String(), string(wire))
+		require.Equal(t, "1h", gjson.GetBytes(wire, "cache_control.ttl").String())
+		require.False(t, anthropicAutomaticTailConflict(wire))
+	})
+	t.Run("native_unchanged", func(t *testing.T) {
+		raw := `{"model":"claude-sonnet-4-5","stream":true,"max_tokens":8,"cache_control":{"type":"ephemeral"},"messages":[{"role":"user","content":"go"},{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"probe","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"OK","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}`
+		_, wire := forwardCacheWire(t, "messages", "off", raw)
+		require.False(t, gjson.GetBytes(wire, "cache_control.ttl").Exists(), string(wire))
+		require.True(t, anthropicAutomaticTailConflict(wire))
+	})
+	t.Run("chat_upward_forced_5m", func(t *testing.T) {
+		result, wire := forwardCacheWire(t, "chat", "5m", upward)
+		paths := anthropicCacheControlPaths(wire)
+		require.Equal(t, []string{"system.0.cache_control", "messages.2.content.0.cache_control", "cache_control"}, paths, string(wire))
+		for _, path := range paths {
+			require.Equal(t, "5m", gjson.GetBytes(wire, path+".ttl").String(), path)
+		}
+		require.True(t, *result.AnthropicCacheTTLApplied)
+	})
+}
+
+func TestAnthropicCacheConvertedAutomaticTTL(t *testing.T) {
+	cases := []struct {
+		name, body string
+		changed    map[string]string
+	}{
+		{"upward_omitted", `{"cache_control":{"type":"ephemeral"},"messages":[{"role":"user","content":[{"type":"text","text":"a","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}`, map[string]string{"cache_control.ttl": "1h"}},
+		{"upward_5m", `{"cache_control":{"type":"ephemeral","ttl":"5m"},"system":[{"type":"text","text":"s","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":[{"type":"text","text":"a","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}`, map[string]string{"cache_control.ttl": "1h", "system.0.cache_control.ttl": "1h"}},
+		{"reverse", `{"cache_control":{"type":"ephemeral","ttl":"1h"},"messages":[{"role":"user","content":[{"type":"text","text":"a","cache_control":{"type":"ephemeral"}}]}]}`, map[string]string{"messages.0.content.0.cache_control.ttl": "1h"}},
+		{"thinking_skipped", `{"cache_control":{"type":"ephemeral"},"messages":[{"role":"assistant","content":[{"type":"text","text":"a","cache_control":{"type":"ephemeral","ttl":"1h"}},{"type":"thinking","thinking":"t","signature":"x"}]}]}`, map[string]string{"cache_control.ttl": "1h"}},
+		{"string_tail", `{"cache_control":{"type":"ephemeral","ttl":"5m"},"system":[{"type":"text","text":"s","cache_control":{"type":"ephemeral","ttl":"1h"}}],"messages":[{"role":"user","content":"hi"}]}`, nil},
+		{"invalid_ttl", `{"cache_control":{"type":"ephemeral","ttl":"10m"},"messages":[{"role":"user","content":[{"type":"text","text":"a","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}`, nil},
+		{"not_ephemeral", `{"cache_control":{"type":"persistent"},"messages":[{"role":"user","content":[{"type":"text","text":"a","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}`, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(tc.body)
+			out := enforceConvertedCacheControlLimit(body)
+			require.Equal(t, string(out), string(enforceConvertedCacheControlLimit(out)), "idempotent")
+			if tc.changed == nil {
+				require.Equal(t, tc.body, string(out))
+				return
+			}
+			require.Equal(t, tc.body, string(enforceCacheControlLimit(body)), "native bodies keep the conflict")
+			for path, ttl := range tc.changed {
+				require.Equal(t, ttl, gjson.GetBytes(out, path).String(), path)
+			}
+			require.False(t, anthropicAutomaticTailConflict(out))
+			requireCacheTTLOrderAccepted(t, out)
+		})
+	}
+}

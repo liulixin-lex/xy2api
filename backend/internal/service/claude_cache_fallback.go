@@ -190,6 +190,17 @@ func visitClaudeCacheControl(body []byte, includeInvalid bool, visit func(gjson.
 		}
 		list.ForEach(func(_, v gjson.Result) bool {
 			if name == "input" && !v.Get("role").Exists() && v.Get("type").String() != "message" {
+				// Converted tool items reach Anthropic as tool_use/tool_result
+				// blocks; output part markers are lifted onto the tool_result.
+				switch v.Get("type").String() {
+				case "function_call", "custom_tool_call", "tool_search_call", "tool_search_output":
+					block(v)
+				case "function_call_output", "custom_tool_call_output":
+					block(v)
+					if output := v.Get("output"); output.IsArray() {
+						output.ForEach(func(_, p gjson.Result) bool { block(p); return true })
+					}
+				}
 				return true
 			}
 			block(v)
@@ -495,15 +506,6 @@ func logClaudeCacheBilling(ctx context.Context, result *ForwardResult, usage *Us
 	if d != nil && d.rawUsageObserved {
 		raw = d.RawUsage
 	}
-	ttlStatus := "consistent"
-	known := raw.CacheCreation5mTokens + raw.CacheCreation1hTokens
-	if raw.CacheCreationInputTokens > 0 && known == 0 {
-		ttlStatus = "missing"
-	} else if known < raw.CacheCreationInputTokens {
-		ttlStatus = "partial"
-	} else if known > raw.CacheCreationInputTokens {
-		ttlStatus = "inconsistent"
-	}
 	p := anthropicCacheTTLPolicyFrom(ctx)
 	policy, applied := "", false
 	if result.AnthropicCacheTTLPolicy != nil {
@@ -512,6 +514,7 @@ func logClaudeCacheBilling(ctx context.Context, result *ForwardResult, usage *Us
 	if result.AnthropicCacheTTLApplied != nil {
 		applied = *result.AnthropicCacheTTLApplied
 	}
+	ttlStatus := claudeCacheTTLStatus(raw, policy, applied)
 
 	slog.Info("gateway.claude_cache_fallback.billing", "request_id", usage.RequestID, "api_key_id", usage.APIKeyID, "group_id", usage.GroupID, "account_id", usage.AccountID,
 		"ttl_mode", p.mode, "ttl_source", p.source, "ttl_policy", policy, "ttl_applied", applied,
@@ -519,4 +522,21 @@ func logClaudeCacheBilling(ctx context.Context, result *ForwardResult, usage *Us
 		"raw_aggregate_present", raw.CacheCreationInputTokensPresent, "raw_5m_present", raw.CacheCreation5mTokensPresent, "raw_1h_present", raw.CacheCreation1hTokensPresent,
 		"billed_input", usage.InputTokens, "billed_output", usage.OutputTokens, "billed_cache_creation", usage.CacheCreationTokens, "billed_cache_read", usage.CacheReadTokens, "billed_5m", usage.CacheCreation5mTokens, "billed_1h", usage.CacheCreation1hTokens,
 		"force_cache_billing", forced, "ttl_override", overridden, "usage_id", usage.ID, "total_cost", usage.TotalCost, "actual_cost", usage.ActualCost, "settlement", outcome)
+}
+
+// Report shape problems first. downgraded only refines a consistent report:
+// every final marker asked for 1h, yet the provider wrote 5m only.
+func claudeCacheTTLStatus(raw ClaudeUsage, policy string, applied bool) string {
+	known := raw.CacheCreation5mTokens + raw.CacheCreation1hTokens
+	switch {
+	case raw.CacheCreationInputTokens > 0 && known == 0:
+		return "missing"
+	case known < raw.CacheCreationInputTokens:
+		return "partial"
+	case known > raw.CacheCreationInputTokens:
+		return "inconsistent"
+	case policy == cacheTTLTarget1h && applied && raw.CacheCreation1hTokens == 0 && raw.CacheCreation5mTokens > 0:
+		return "downgraded"
+	}
+	return "consistent"
 }

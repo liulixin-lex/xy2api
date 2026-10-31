@@ -10,6 +10,7 @@
   - 2026-10-31 后续：按用户要求从使用记录列表与 Token 详情移除策略/applied 文字，接口字段与「TTL 明细未报告」提示保留。
 - [x] 2026-10-31 后续：管理员默认 TTL 移入「Claude 缓存」卡片（与自动补缓存同卡、只提交改动字段），主设置表单不再提交该字段。
   - 卡片与 Key 弹窗提示写明：选 5 分钟（含跟随全局 5 分钟）时，客户端自己写的 1h 也改为 5m；Key 弹窗补写入价倍数与 1 小时的适用间隔。
+- [x] 2026-10-31 后续：转换体顶层/末块 TTL 向 1h 调和、`ttl_status=downgraded`、1h 降级巡检 SQL 与 beta 说明；登记 `xy-converted-tool-cache-markers`。绑定测试 `TestAnthropicCacheConvertedAutomaticTTLWire`、`TestClaudeCacheBillingLogDowngraded` 及 apicompat/service/handler unit、相关 race、golangci-lint 通过。
 - [x] 前端定向表单/API/用量/i18n 回归 135 项和 typecheck 通过。
 - [x] 前端 build、改动文件 lint 和三个修改组件的 impeccable detect 通过。
 - [x] 后端相关 unit/race/lint，按实际改动验证。
