@@ -21,6 +21,13 @@ exceptions:
     mitigation: "Proxy configuration not user-controlled; upgrade when axios releases fix"
     expires_on: "2026-07-10"
     owner: "security@your-domain"
+  - package: follow-redirects
+    advisory: "GHSA-mrwp-f3q8-3g9p"
+    severity: high
+    reason: "The advisory's patched release is not published in the configured registry; browser Axios calls use known gateway endpoints and do not forward user-controlled custom credentials across redirects"
+    mitigation: "Keep the existing 1.16.1 override and upgrade immediately when a patched follow-redirects release is available"
+    expires_on: "2026-11-30"
+    owner: "security@your-domain"
   - package: nanoid
     advisory: "GHSA-2v37-7h3g-55p8"
     severity: high
