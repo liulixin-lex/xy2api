@@ -2342,7 +2342,7 @@ func (k *openAIWSTurnBillingAPIKeys) contextForTurn(ctx context.Context, turn in
 	serving := k.serving[turn]
 	k.mu.Unlock()
 	if key == nil {
-		key = conn
+		key = service.BillingAPIKey(ctx, conn)
 	}
 	if serving == nil {
 		serving = service.ServingPricingKey(ctx, key)

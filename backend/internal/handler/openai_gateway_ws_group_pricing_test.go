@@ -308,6 +308,8 @@ func TestOpenAIWSTurnPricingAndAuthorizationSnapshotsStaySeparate(t *testing.T) 
 	ctx = context.WithValue(ctx, ctxkey.Group, servingGroup)
 
 	var snapshots openAIWSTurnBillingAPIKeys
+	firstTurnCtx := snapshots.contextForTurn(ctx, 1, serving)
+	require.Same(t, origin, service.BillingAPIKey(firstTurnCtx, serving), "the passthrough first turn keeps the origin authorization snapshot")
 	snapshots.set(2, origin, serving)
 	turnCtx := snapshots.contextForTurn(ctx, 2, serving)
 	require.Same(t, origin, service.BillingAPIKey(turnCtx, serving), "authorization and limits keep the origin snapshot")
@@ -330,4 +332,16 @@ func TestOpenAIWSTurnPricingAndAuthorizationSnapshotsStaySeparate(t *testing.T) 
 	newTurnCtx := snapshots.contextForTurn(ctx, 3, serving)
 	require.InDelta(t, 0.8, service.BillingAPIKey(newTurnCtx, serving).Group.RateMultiplier, 1e-12)
 	require.InDelta(t, 4.0, service.ServingPricingKey(newTurnCtx, serving).Group.RateMultiplier, 1e-12)
+
+	latestServingGroup := *servingGroup
+	latestServingGroup.RateMultiplier = 5
+	beginSnapshots := openAIWSTurnBillingAPIKeys{refresh: func(_ context.Context, key *service.APIKey) *service.APIKey {
+		require.Equal(t, servingID, *key.GroupID, "begin refreshes the serving group independently")
+		return service.CloneAPIKeyWithGroup(key, &latestServingGroup)
+	}}
+	beginCtx := beginSnapshots.begin(ctx, nil, 2, serving)
+	require.Same(t, origin, service.BillingAPIKey(beginCtx, serving), "begin preserves origin authorization")
+	require.Equal(t, servingID, *service.ServingPricingKey(beginCtx, serving).GroupID)
+	require.InDelta(t, 5.0, service.ServingPricingGroup(beginCtx).RateMultiplier, 1e-12,
+		"begin refreshes the serving group's pricing snapshot")
 }

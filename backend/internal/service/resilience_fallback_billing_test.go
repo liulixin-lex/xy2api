@@ -4,12 +4,14 @@ package service
 
 import (
 	"context"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
+	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
@@ -88,15 +90,25 @@ func TestRefreshServingPricingKeyUsesServingGroupID(t *testing.T) {
 
 func TestGatewayRecordUsageUnderFallbackUsesServingGroupPrices(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		rates map[int64]float64
-		want  float64
+		name       string
+		rates      map[int64]float64
+		peak       bool
+		want       float64
+		wantActual float64
 	}{
-		{"user_rate_of_serving_group", map[int64]float64{10: 0.5, 20: 2.0}, 2.0},
-		{"serving_group_rate", nil, 3.0},
+		{"user_rate_of_serving_group", map[int64]float64{10: 0.5, 20: 2.0}, false, 2.0, 2.0},
+		{"serving_group_rate", nil, false, 3.0, 3.0},
+		{"serving_group_peak_rate", nil, true, 6.0, 6.0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, _, moved := fallbackBillingFixture(PlatformAnthropic)
+			if tc.peak {
+				moved.Group.SubscriptionType = SubscriptionTypeSubscription
+				moved.Group.PeakRateEnabled = true
+				moved.Group.PeakStart = "00:00"
+				moved.Group.PeakEnd = "23:59"
+				moved.Group.PeakRateMultiplier = 2.0
+			}
 			usageRepo := &openAIRecordUsageBestEffortLogRepoStub{}
 			svc := newGatewayRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
 			svc.userGroupRateRepo = &fallbackGroupRateRepoStub{rates: tc.rates}
@@ -109,15 +121,16 @@ func TestGatewayRecordUsageUnderFallbackUsesServingGroupPrices(t *testing.T) {
 					Model:     "claude-sonnet-4",
 					Duration:  time.Second,
 				},
-				APIKey:  moved,
-				User:    moved.User,
-				Account: &Account{ID: 1, Platform: PlatformAnthropic},
+				APIKey:    moved,
+				User:      moved.User,
+				Account:   &Account{ID: 1, Platform: PlatformAnthropic},
+				PricingAt: time.Now(),
 			})
 			require.NoError(t, err)
 			log := usageRepo.lastLog
 			require.NotNil(t, log)
 			require.InDelta(t, tc.want, log.RateMultiplier, 1e-12)
-			require.InDelta(t, log.TotalCost*tc.want, log.ActualCost, 1e-12)
+			require.InDelta(t, log.TotalCost*tc.wantActual, log.ActualCost, 1e-12)
 			require.Equal(t, int64(20), *log.GroupID, "group_id stays the serving group")
 			require.Equal(t, int64(10), *log.OriginGroupID)
 		})
@@ -391,13 +404,16 @@ func TestBatchImageSubmitUnderFallbackSplitsAuthorizationAndPricing(t *testing.T
 	svc.GroupRepo = &publicBatchImageGroupRepo{groups: map[int64]*Group{
 		origin: {ID: origin, Platform: PlatformGemini, RateMultiplier: 1.0, AllowImageGeneration: true, AllowBatchImageGeneration: true,
 			BatchImageDiscountMultiplier: 1, BatchImageHoldMultiplier: 1},
-		serving: {ID: serving, Platform: PlatformGemini, RateMultiplier: 3.0, AllowImageGeneration: true, AllowBatchImageGeneration: true,
+		serving: {ID: serving, Platform: PlatformGemini, RateMultiplier: 3.0, AllowImageGeneration: true, AllowBatchImageGeneration: false,
 			BatchImageDiscountMultiplier: 1, BatchImageHoldMultiplier: 1},
 	}}
 
-	got, err := svc.Submit(context.Background(), BatchImageOwner{UserID: 11, APIKeyID: 22, GroupID: &serving, AuthorizationGroupID: &origin, PricingGroupID: &serving}, validBatchImageSubmitRequest(), "")
-	require.NoError(t, err, "the origin group allows batch images")
-	require.InDelta(t, 3.0, repo.jobs[got.ID].GroupRateMultiplier, 1e-12)
+	_, err := svc.Submit(context.Background(), BatchImageOwner{UserID: 11, APIKeyID: 22, GroupID: &serving, AuthorizationGroupID: &origin, PricingGroupID: &serving}, validBatchImageSubmitRequest(), "")
+	require.ErrorIs(t, err, ErrBatchImageNoAccountAvailable, "a serving group without the capability is unavailable, not an origin permission error")
+	require.NotErrorIs(t, err, ErrBatchImageGroupDisabled)
+	require.Equal(t, http.StatusServiceUnavailable, infraerrors.Code(err))
+	require.NotContains(t, infraerrors.Message(err), "serving")
+	require.Empty(t, repo.jobs)
 }
 
 // Users see their errors under their key's group, not a serving fallback
@@ -419,10 +435,12 @@ func TestOpenAIRecordUsageUnderFallbackAppliesServingFastRules(t *testing.T) {
 	for _, tc := range []struct {
 		name                    string
 		servingFree, originFree bool
+		observed                string
 		wantActual              float64
 	}{
-		{"serving_priority_price", false, true, standardTotal * fastMultiplier * 3},
-		{"serving_fast_at_standard", true, false, standardTotal * 3},
+		{"serving_priority_price", false, true, "priority", standardTotal * fastMultiplier * 3},
+		{"serving_fast_at_standard", true, false, "priority", standardTotal * 3},
+		{"serving_forced_fast_upstream_default", false, false, "default", standardTotal * fastMultiplier * 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, authenticated, moved := fallbackBillingFixture(PlatformOpenAI)
@@ -443,7 +461,7 @@ func TestOpenAIRecordUsageUnderFallbackAppliesServingFastRules(t *testing.T) {
 					RequestID: "fallback_serving_fast_" + tc.name,
 					Usage:     OpenAIUsage{InputTokens: 100, OutputTokens: 50},
 					Model:     "gpt-5.6-sol", Duration: time.Second,
-					ServiceTier: &priority, UpstreamResponseServiceTier: priority,
+					ServiceTier: &priority, UpstreamResponseServiceTier: tc.observed,
 				},
 				APIKey: moved, User: moved.User, Account: account,
 			}))

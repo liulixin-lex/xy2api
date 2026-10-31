@@ -229,6 +229,9 @@ func (s *BatchImagePublicService) Submit(ctx context.Context, owner BatchImageOw
 	if err := s.ensureGroupAllowsBatchImage(ctx, owner.authorizationGroupID()); err != nil {
 		return nil, err
 	}
+	if err := s.ensureServingGroupAllowsBatchImage(ctx, owner.pricingGroupID()); err != nil {
+		return nil, err
+	}
 	requestHash := HashBatchImageSubmitRequest(normalized)
 	idempotencyKey = strings.TrimSpace(idempotencyKey)
 	if idempotencyKey != "" {
@@ -1016,21 +1019,35 @@ func (s *BatchImagePublicService) ensureGroupAllowsBatchImage(ctx context.Contex
 	return nil
 }
 
+func (s *BatchImagePublicService) ensureServingGroupAllowsBatchImage(ctx context.Context, groupID *int64) error {
+	if groupID == nil || *groupID <= 0 {
+		return nil
+	}
+	if s.GroupRepo == nil {
+		return ErrBatchImageSettlementPricingMissing
+	}
+	group, err := s.GroupRepo.GetByIDLite(ctx, *groupID)
+	if err != nil || group == nil {
+		return ErrBatchImageSettlementPricingMissing
+	}
+	if !group.AllowBatchImageGeneration || group.Platform != PlatformGemini {
+		return ErrBatchImageNoAccountAvailable
+	}
+	return nil
+}
+
 func (s *BatchImagePublicService) resolvePricingSnapshot(ctx context.Context, owner BatchImageOwner, req BatchImageSubmitRequest, provider string, account *Account) (*BatchImagePricingSnapshot, error) {
 	unit := -1.0
 	groupMultiplier := 1.0
 	discountMultiplier := defaultBatchImageDiscountMultiplier
 	holdMultiplier := defaultBatchImageHoldMultiplier
-	if billingGroupID := owner.pricingGroupID(); billingGroupID != nil && *billingGroupID > 0 {
+	if pricingGroupID := owner.pricingGroupID(); pricingGroupID != nil && *pricingGroupID > 0 {
 		if s.GroupRepo == nil {
 			return nil, ErrBatchImageSettlementPricingMissing
 		}
-		group, err := s.GroupRepo.GetByIDLite(ctx, *billingGroupID)
+		group, err := s.GroupRepo.GetByIDLite(ctx, *pricingGroupID)
 		if err != nil || group == nil {
 			return nil, ErrBatchImageSettlementPricingMissing
-		}
-		if !group.AllowBatchImageGeneration {
-			return nil, ErrBatchImageGroupDisabled
 		}
 		groupDefaultMultiplier := group.RateMultiplier
 		if groupDefaultMultiplier < 0 {

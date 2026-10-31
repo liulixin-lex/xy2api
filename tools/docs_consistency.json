@@ -356,6 +356,13 @@
         "docs/PROJECT_MEMORY.md",
         "docs/PROJECT_MEMORY_ARCHIVE.md"
       ]
+    },
+    {
+      "pattern": "\\b(?:noteFallbackForcedFast|FreezeFallbackForcedFast|fallbackForcedFastChargesStandard|SetFallbackForcedFast|FallbackForcedFast|fallbackForcedFastKey|fallbackBillingGroup|BillingGroupID|billingGroupID)\\b",
+      "reason": "WP3-A fallback pricing uses the serving group directly and no longer tracks or adjusts fallback-specific forced-Fast billing state",
+      "allowed": [
+        "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
     }
   ],
   "private": [
