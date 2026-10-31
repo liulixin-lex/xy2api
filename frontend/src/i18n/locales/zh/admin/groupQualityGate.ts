@@ -1,0 +1,66 @@
+export default {
+  groupQualityGate: {
+    title: '质量门槛',
+    hint: '按错误率与续轮首字，把不达标的账号暂时移出本组调度；到期先试用，恢复后自动回到调度。不改账号的可调度状态和分组成员。',
+    enable: '启用质量门槛',
+    disabledHint: '关闭时本组选号与现在完全一致。',
+    loading: '正在读取门槛配置…',
+    loadFailed: '读取门槛配置失败：{message}',
+    retry: '重试',
+    maxErrorRate: '错误率熔断线（%）',
+    maxErrorRateHint: '近 15 分钟软失败占比，默认 10%',
+    maxWarmTtft: '续轮首字熔断线（秒）',
+    maxWarmTtftHint: '近 30 分钟续轮首字 p90，默认 20 秒',
+    fastWarmTtft: '快档线（秒）',
+    fastWarmTtftHint: '低倍率优先开启时用于排序，默认 10 秒',
+    pinned: '固定账号',
+    pinnedHint: '固定账号熔断时仍参与本组调度，状态照常按真实指标显示。只能选本组成员。',
+    membersLoading: '正在读取本组成员…',
+    membersEmpty: '本组还没有 OpenAI 账号，加入成员后才能固定',
+    membersFailed: '读取本组成员失败：{message}',
+    errorRateRange: '错误率熔断线须大于 0 且不超过 100%',
+    maxTtftRange: '熔断线须大于 1 秒且不超过 600 秒',
+    fastTtftMin: '快档线不能小于 1 秒',
+    fastTtftBelowMax: '快档线须小于续轮首字熔断线',
+    fixErrors: '质量门槛的设置有误，请先修正',
+    groupSavedGateConflict: '分组已保存，门槛未保存：门槛配置已被其他人修改，请刷新后重新设置',
+    groupSavedGateFailed: '分组已保存，门槛未保存：{message}',
+    column: '门槛',
+    summaryTitle: '试用中 {trial} 个',
+    summaryFailed: '门槛状态读取失败',
+    pinnedMark: '固定',
+    state: {
+      eligible: '合格',
+      ejected: '熔断',
+      ejectedUntil: '熔断至 {time}',
+      trial: '试用',
+      guardHeld: '保底保留'
+    },
+    reason: {
+      error_rate: '错误率超线',
+      warm_ttft: '续轮首字超线'
+    },
+    listSeparator: '、',
+    tooltip: {
+      state: '{group}：{state}',
+      pinned: '固定账号：熔断时仍参与本组调度',
+      guardHeld: '指标超线，为保住本组最少可用账号仍参与调度',
+      strikes: '连续熔断第 {count} 次',
+      reasons: '原因：{reasons}',
+      errorRate: '错误率 {value}，上限 {limit}',
+      errorRateNoData: '错误率暂无数据，上限 {limit}',
+      warmTtft: '续轮首字 p90 {value}，上限 {limit}',
+      warmTtftNoData: '续轮首字 p90 暂无数据，上限 {limit}',
+      headroom: '余量 {value}',
+      stale: '评估数据超过 5 分钟没有更新，状态沿用上一轮'
+    },
+    metrics: {
+      errorRate: '错误率 {value}',
+      errorRateTitle: '近 15 分钟 {calls} 次调用，软失败 {failures} 次',
+      warmTtft: '续轮首字 p90 {value}',
+      warmTtftTitle: '近 30 分钟续轮流式样本 {count} 个',
+      zeroCache: '零缓存 {value}',
+      zeroCacheTitle: '近 2 小时续轮（提示 ≥ 2048 token）未读到缓存的占比，样本 {count} 个；超过 30% 不算快档'
+    }
+  }
+}

@@ -1181,15 +1181,19 @@ export default {
       },
       profitControl: {
         enable: '启用利润控制',
-        enabledHint: '调度时仅允许"账号倍率 ≤ 请求实际下游倍率 ×（1 − 最低毛利率 − 安全缓冲）"的账号进入候选池；账号倍率可手工维护或由探测同步，既有排序、粘性与熔断在合格账号间照常工作。图片/视频调度暂不参与。',
+        enabledHint: '调度时仅允许"账号倍率 ≤ 请求实际下游倍率 ×（1 − 最低毛利率）"的账号进入候选池；账号倍率可手工维护或由探测同步，既有排序、粘性与熔断在合格账号间照常工作。图片/视频调度暂不参与。',
         disabledHint: '关闭后调度不做利润过滤，账号倍率高于下游倍率的账号也会被选中，可能产生亏损请求。',
         minMargin: '最低毛利率（%）',
-        minMarginHint: '百分比输入，如 30 表示 30%；后端按小数存储',
-        safetyBuffer: '安全缓冲（%）',
-        safetyBufferHint: '与最低毛利率相加后从下游倍率中扣除，默认 0',
+        minMarginHint: '百分比输入，如 20 表示 20%；开启时默认 20%',
         marginRangeError: '最低毛利率应在 0 到 99.99 之间',
-        bufferRangeError: '安全缓冲应在 0 到 99.99 之间',
-        sumTooHigh: '最低毛利率与安全缓冲之和必须小于 100%，否则将排除全部账号'
+        preview: '相当于上游倍率 ≤ {ceiling}，{schedulable} 个可调度成员中 {passing} 个能通过',
+        previewLoading: '正在计算能通过的成员…',
+        previewInvalid: '填写有效的毛利率后显示预览',
+        previewFailed: '预览暂不可用：{message}',
+        previewZeroHint: '按这个毛利率没有成员能通过，本组请求将转入兜底链路；保存时需要确认。',
+        zeroPassConfirmTitle: '没有成员能通过利润门',
+        zeroPassConfirmMessage: '按当前毛利率，本组可调度成员的上游倍率都超过上限，请求会全部转入兜底链路处理。确定保存吗？',
+        zeroPassConfirm: '仍然保存'
       },
       modelAllowlist: {
         title: '模型白名单',

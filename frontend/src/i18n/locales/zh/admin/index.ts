@@ -10,6 +10,7 @@ import plugins from './plugins'
 import shareScheduling from './shareScheduling'
 import resilience from './resilience'
 import groupCategories from './groupCategories'
+import groupQualityGate from './groupQualityGate'
 import operatorAccess from './operatorAccess'
 
 export default {
@@ -25,5 +26,6 @@ export default {
   ...shareScheduling,
   ...resilience,
   ...groupCategories,
+  ...groupQualityGate,
   ...operatorAccess,
 }

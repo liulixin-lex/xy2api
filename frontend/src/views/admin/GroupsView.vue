@@ -323,6 +323,29 @@
             </div>
           </template>
 
+          <template #cell-quality_gate="{ row }">
+            <span
+              v-if="qualityGateSummaries.get(row.id)"
+              data-testid="group-quality-summary"
+              class="whitespace-nowrap text-xs"
+              :title="t('admin.groupQualityGate.summaryTitle', { trial: qualityGateSummaries.get(row.id)!.trial })"
+            >
+              <span class="text-gray-500 dark:text-gray-400">{{ t("admin.groupQualityGate.state.eligible") }}</span>
+              <span class="ml-1 font-medium text-emerald-700 dark:text-emerald-400">{{ qualityGateSummaries.get(row.id)!.eligible }}</span>
+              <span class="mx-1 text-gray-400 dark:text-dark-500" aria-hidden="true">/</span>
+              <span class="text-gray-500 dark:text-gray-400">{{ t("admin.groupQualityGate.state.ejected") }}</span>
+              <span
+                class="ml-1 font-medium"
+                :class="qualityGateSummaries.get(row.id)!.ejected > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-700 dark:text-gray-300'"
+              >{{ qualityGateSummaries.get(row.id)!.ejected }}</span>
+            </span>
+            <span
+              v-else
+              class="text-sm text-gray-400 dark:text-dark-500"
+              :title="qualityGateStatusFailed ? t('admin.groupQualityGate.summaryFailed') : undefined"
+            >—</span>
+          </template>
+
           <template #cell-capacity="{ row }">
             <GroupCapacityBadge
               v-if="capacityMap.get(row.id)"
@@ -1243,6 +1266,7 @@
               v-model="createForm.profit_control_enabled"
               type="checkbox"
               class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              @change="applyDefaultProfitMargin(createForm)"
             />
             <span>{{ t("admin.groups.profitControl.enable") }}</span>
           </label>
@@ -1258,30 +1282,18 @@
             class="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
             <div>
-              <label class="input-label">{{ t("admin.groups.profitControl.minMargin") }}</label>
+              <label for="create-profit-min-margin" class="input-label">{{ t("admin.groups.profitControl.minMargin") }}</label>
               <input
+                id="create-profit-min-margin"
                 v-model.number="createForm.profit_min_margin_percent"
                 type="number"
                 step="0.1"
                 min="0"
                 max="99.99"
                 class="input"
-                placeholder="0"
-                :title="t('admin.groups.profitControl.minMarginHint')"
+                :placeholder="String(DEFAULT_PROFIT_MIN_MARGIN_PERCENT)"
               />
-            </div>
-            <div>
-              <label class="input-label">{{ t("admin.groups.profitControl.safetyBuffer") }}</label>
-              <input
-                v-model.number="createForm.profit_safety_buffer_percent"
-                type="number"
-                step="0.1"
-                min="0"
-                max="99.99"
-                class="input"
-                placeholder="0"
-                :title="t('admin.groups.profitControl.safetyBufferHint')"
-              />
+              <p class="input-hint">{{ t("admin.groups.profitControl.minMarginHint") }}</p>
             </div>
           </div>
         </div>
@@ -2943,6 +2955,7 @@
               v-model="editForm.profit_control_enabled"
               type="checkbox"
               class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              @change="applyDefaultProfitMargin(editForm)"
             />
             <span>{{ t("admin.groups.profitControl.enable") }}</span>
           </label>
@@ -2958,8 +2971,9 @@
             class="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
             <div>
-              <label class="input-label">{{ t("admin.groups.profitControl.minMargin") }}</label>
+              <label for="edit-profit-min-margin" class="input-label">{{ t("admin.groups.profitControl.minMargin") }}</label>
               <input
+                id="edit-profit-min-margin"
                 :disabled="!canAdjustBalance"
                 v-model.number="editForm.profit_min_margin_percent"
                 type="number"
@@ -2967,26 +2981,27 @@
                 min="0"
                 max="99.99"
                 class="input"
-                placeholder="0"
-                :title="t('admin.groups.profitControl.minMarginHint')"
+                :placeholder="String(DEFAULT_PROFIT_MIN_MARGIN_PERCENT)"
               />
-            </div>
-            <div>
-              <label class="input-label">{{ t("admin.groups.profitControl.safetyBuffer") }}</label>
-              <input
-                :disabled="!canAdjustBalance"
-                v-model.number="editForm.profit_safety_buffer_percent"
-                type="number"
-                step="0.1"
-                min="0"
-                max="99.99"
-                class="input"
-                placeholder="0"
-                :title="t('admin.groups.profitControl.safetyBufferHint')"
-              />
+              <p class="input-hint">{{ t("admin.groups.profitControl.minMarginHint") }}</p>
             </div>
           </div>
+          <!-- 利润门预览：按当前毛利率换算的上游倍率上限与能通过的成员数（成本口径为 OpenAI 实时成本） -->
+          <GroupProfitControlPreview
+            v-if="editForm.profit_control_enabled && editForm.platform === 'openai' && editingGroup"
+            ref="editProfitPreviewRef"
+            class="mb-3"
+            :group-id="editingGroup.id"
+            :margin-percent="editForm.profit_min_margin_percent"
+          />
         </div>
+
+        <!-- 分组质量门槛（仅 openai 平台，仅编辑对话框；与分组分两次保存） -->
+        <GroupQualityGateField
+          v-if="editForm.platform === 'openai' && editingGroup && !authStore.isSimpleMode"
+          ref="editQualityGateRef"
+          :group-id="editingGroup.id"
+        />
 
         <!-- 支持的模型系列（仅 antigravity 平台） -->
         <div v-if="editForm.platform === 'antigravity'" class="border-t pt-4">
@@ -3889,6 +3904,17 @@
     />
 
     <ConfirmDialog
+      :show="showZeroPassProfitConfirm"
+      :title="t('admin.groups.profitControl.zeroPassConfirmTitle')"
+      :message="t('admin.groups.profitControl.zeroPassConfirmMessage')"
+      :confirm-text="t('admin.groups.profitControl.zeroPassConfirm')"
+      :cancel-text="t('common.cancel')"
+      :danger="true"
+      @confirm="settleZeroPassProfitConfirm(true)"
+      @cancel="settleZeroPassProfitConfirm(false)"
+    />
+
+    <ConfirmDialog
       :show="showUnsupportedLiveConfirm"
       :title="t('admin.groups.openaiLive.unsupportedTitle')"
       :message="t('admin.groups.openaiLive.unsupportedMessage')"
@@ -4419,6 +4445,9 @@ import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesMo
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
 import CodexManifestAccountsField from "@/components/admin/group/CodexManifestAccountsField.vue";
+import GroupProfitControlPreview from "@/components/admin/group/GroupProfitControlPreview.vue";
+import GroupQualityGateField from "@/components/admin/group/GroupQualityGateField.vue";
+import { useGroupQualityGateStatus } from "@/composables/useGroupQualityGateStatus";
 import LongContextPricingFields from "@/components/admin/group/LongContextPricingFields.vue";
 import GroupSystemPromptFields from "@/components/admin/group/GroupSystemPromptFields.vue";
 import GroupCategoryFilter from "@/components/admin/group/GroupCategoryFilter.vue";
@@ -4471,7 +4500,10 @@ import {
 import { createModelAllowlistCandidatesTracker } from "./modelAllowlistCandidates";
 import { normalizeSupportedModelScopesForPlatform } from "./groupsSupportedModelScopes";
 import {
+  DEFAULT_PROFIT_MIN_MARGIN_PERCENT,
+  PROFIT_SAFETY_BUFFER,
   isProfitControlPlatform,
+  profitMarginPercentOnEnable,
   profitPercentToDecimal,
   profitDecimalToPercent,
   validateProfitControlFormState,
@@ -4656,6 +4688,7 @@ const allColumns = computed<Column[]>(() => {
     { key: "is_exclusive", label: t("admin.groups.columns.type"), sortable: true },
     { key: "category", label: t("admin.groupCategories.column"), sortable: false },
     basic[3],
+    { key: "quality_gate", label: t("admin.groupQualityGate.column"), sortable: false },
     { key: "capacity", label: t("admin.groups.columns.capacity"), sortable: false },
     { key: "usage", label: t("admin.groups.columns.usage"), sortable: false },
     ...basic.slice(4),
@@ -4744,6 +4777,25 @@ const hasVisibleUsageSummaryConsumer = computed(
 );
 const hasVisibleCapacityColumn = computed(() => !authStore.isSimpleMode && isColumnVisible("capacity"));
 
+// 门槛列：开启质量门槛的分组显示“合格 n / 熔断 m”，关闭的显示“—”；可见时随列表刷新，最多 60 秒拉一次。
+const {
+  status: qualityGateStatus,
+  failed: qualityGateStatusFailed,
+  refresh: refreshQualityGateStatus,
+} = useGroupQualityGateStatus();
+const qualityGateSummaries = computed(() => {
+  const map = new Map<number, { eligible: number; ejected: number; trial: number }>();
+  for (const group of qualityGateStatus.value?.groups ?? []) {
+    if (group.enabled) map.set(group.group_id, group.summary);
+  }
+  return map;
+});
+const refreshQualityGateColumn = (force = false) => {
+  if (!authStore.isSimpleMode && isColumnVisible("quality_gate")) {
+    void refreshQualityGateStatus(force);
+  }
+};
+
 const toggleColumn = (key: string) => {
   const validKeys = getValidHiddenColumnKeys();
   if (!validKeys.has(key)) return;
@@ -4761,6 +4813,9 @@ const toggleColumn = (key: string) => {
   }
   if (wasHidden && key === "capacity") {
     loadCapacitySummary();
+  }
+  if (wasHidden && key === "quality_gate") {
+    refreshQualityGateColumn();
   }
 };
 
@@ -5107,6 +5162,8 @@ type CodexManifestAccountsFieldExpose = {
   resetValidation: () => void;
 };
 const editCodexManifestRef = ref<CodexManifestAccountsFieldExpose | null>(null);
+const editQualityGateRef = ref<InstanceType<typeof GroupQualityGateField> | null>(null);
+const editProfitPreviewRef = ref<InstanceType<typeof GroupProfitControlPreview> | null>(null);
 const createCodexManifestDefaults = (): CodexModelsManifestConfig => ({
   enabled: false,
   account_ids: [],
@@ -5205,7 +5262,6 @@ const createForm = reactive({
   // 分组利润控制（五个 token 平台）；界面按百分比输入，提交时转小数
   profit_control_enabled: false,
   profit_min_margin_percent: 0,
-  profit_safety_buffer_percent: 0,
   // Claude Code 客户端限制（仅 anthropic 平台使用）
   claude_code_only: false,
   fallback_group_id: null as number | null,
@@ -5575,7 +5631,6 @@ const editForm = reactive({
   // 分组利润控制（五个 token 平台）；界面按百分比输入，提交时转小数
   profit_control_enabled: false,
   profit_min_margin_percent: 0,
-  profit_safety_buffer_percent: 0,
   // Claude Code 客户端限制（仅 anthropic 平台使用）
   claude_code_only: false,
   fallback_group_id: null as number | null,
@@ -5860,6 +5915,7 @@ const loadGroups = async () => {
     if (hasVisibleCapacityColumn.value) {
       loadCapacitySummary();
     }
+    refreshQualityGateColumn();
   } catch (error: any) {
     if (
       signal.aborted ||
@@ -6045,7 +6101,6 @@ const closeCreateModal = () => {
   createForm.peak_rate_multiplier = 1.0;
   createForm.profit_control_enabled = false;
   createForm.profit_min_margin_percent = 0;
-  createForm.profit_safety_buffer_percent = 0;
   createForm.claude_code_only = false;
   createForm.fallback_group_id = null;
   createForm.fallback_group_id_on_invalid_request = null;
@@ -6098,6 +6153,29 @@ const normalizeRateMultiplier = (
 // 利润控制表单辅助（换算与校验逻辑见 groupsProfitControl.ts，便于单测）。
 const percentToDecimal = profitPercentToDecimal;
 const decimalToPercent = profitDecimalToPercent;
+
+// 管理员手动打开利润控制、且毛利率未填或为 0 时套用默认 20%；回显已保存的分组不经过这里。
+const applyDefaultProfitMargin = (form: ProfitControlFormState) => {
+  if (form.profit_control_enabled) {
+    form.profit_min_margin_percent = profitMarginPercentOnEnable(
+      form.profit_min_margin_percent,
+    );
+  }
+};
+
+// 利润门预览显示没有成员能通过时，保存前要求确认。
+const showZeroPassProfitConfirm = ref(false);
+let zeroPassProfitResolve: ((confirmed: boolean) => void) | null = null;
+const confirmZeroPassProfit = () =>
+  new Promise<boolean>((resolve) => {
+    zeroPassProfitResolve = resolve;
+    showZeroPassProfitConfirm.value = true;
+  });
+const settleZeroPassProfitConfirm = (confirmed: boolean) => {
+  showZeroPassProfitConfirm.value = false;
+  zeroPassProfitResolve?.(confirmed);
+  zeroPassProfitResolve = null;
+};
 
 const validateProfitControlForm = (form: ProfitControlFormState): boolean => {
   const errorKey = validateProfitControlFormState(form);
@@ -6208,12 +6286,9 @@ const handleCreateGroup = async () => {
         isProfitControlPlatform(createForm.platform) &&
         createForm.profit_control_enabled,
       profit_min_margin: percentToDecimal(createForm.profit_min_margin_percent),
-      profit_safety_buffer: percentToDecimal(
-        createForm.profit_safety_buffer_percent,
-      ),
+      profit_safety_buffer: PROFIT_SAFETY_BUFFER,
     };
     delete (requestData as Record<string, unknown>).profit_min_margin_percent;
-    delete (requestData as Record<string, unknown>).profit_safety_buffer_percent;
     // v-model.number 清空输入框时产生 ""，转为 null 让后端设为无限制
     const emptyToNull = (v: any) => (v === "" ? null : v);
     requestData.daily_limit_usd = emptyToNull(requestData.daily_limit_usd);
@@ -6349,9 +6424,6 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.profit_min_margin_percent = decimalToPercent(
     group.profit_min_margin ?? 0,
   );
-  editForm.profit_safety_buffer_percent = decimalToPercent(
-    group.profit_safety_buffer ?? 0,
-  );
   editForm.claude_code_only = group.claude_code_only || false;
   editForm.fallback_group_id = group.fallback_group_id;
   editForm.fallback_group_id_on_invalid_request =
@@ -6442,7 +6514,6 @@ const closeEditModal = () => {
   editForm.peak_rate_multiplier = 1.0;
   editForm.profit_control_enabled = false;
   editForm.profit_min_margin_percent = 0;
-  editForm.profit_safety_buffer_percent = 0;
   editForm.video_rate_independent = false;
   editForm.video_rate_multiplier = 1;
   editForm.video_price_480p = null;
@@ -6485,6 +6556,10 @@ const handleUpdateGroup = async () => {
   if (!validateProfitControlForm(editForm)) {
     return;
   }
+  if (editQualityGateRef.value && !editQualityGateRef.value.validate()) {
+    appStore.showError(t("admin.groupQualityGate.fixErrors"));
+    return;
+  }
   if (!validateGroupReasoningMultipliers(editForm.model_pricing)) return;
   // 模型白名单：开启且没有任何条目时阻止提交，与后端 400 对齐。
   if (
@@ -6507,6 +6582,16 @@ const handleUpdateGroup = async () => {
 
   submitting.value = true;
   try {
+    // 利润门在保存后会挡住全部成员时先确认；简洁模式与无权改价格的管理员提交时不带利润字段，不用确认。
+    if (
+      !authStore.isSimpleMode &&
+      canAdjustBalance.value &&
+      editProfitPreviewRef.value &&
+      (await editProfitPreviewRef.value.blocksAllMembers()) &&
+      !(await confirmZeroPassProfit())
+    ) {
+      return;
+    }
     // 转换 fallback_group_id: null -> 0 (后端使用 0 表示清除)
     const payload = {
       ...editForm,
@@ -6579,12 +6664,9 @@ const handleUpdateGroup = async () => {
         isProfitControlPlatform(editForm.platform) &&
         editForm.profit_control_enabled,
       profit_min_margin: percentToDecimal(editForm.profit_min_margin_percent),
-      profit_safety_buffer: percentToDecimal(
-        editForm.profit_safety_buffer_percent,
-      ),
+      profit_safety_buffer: PROFIT_SAFETY_BUFFER,
     };
     delete (payload as Record<string, unknown>).profit_min_margin_percent;
-    delete (payload as Record<string, unknown>).profit_safety_buffer_percent;
     // v-model.number 清空输入框时产生 ""，转为 null 让后端设为无限制
     const emptyToNull = (v: any) => (v === "" ? null : v);
     payload.daily_limit_usd = emptyToNull(payload.daily_limit_usd);
@@ -6649,10 +6731,16 @@ const handleUpdateGroup = async () => {
           system_prompt_config: editForm.system_prompt_config,
         }
       : payload;
-    await adminAPI.groups.update(editingGroup.value.id, requestData);
-    if ((await editCategoryFieldRef.value?.save(editingGroup.value.id)) !== false) appStore.showSuccess(t("admin.groups.groupUpdated"));
+    const groupId = editingGroup.value.id;
+    await adminAPI.groups.update(groupId, requestData);
+    // 分组之后再存分类与门槛；它们失败时各自提示“分组已保存，…未保存”。
+    const categoriesSaved = (await editCategoryFieldRef.value?.save(groupId)) !== false;
+    const qualityGate = editQualityGateRef.value;
+    const qualityGateSaved = (await qualityGate?.save(groupId)) !== false;
+    if (categoriesSaved && qualityGateSaved) appStore.showSuccess(t("admin.groups.groupUpdated"));
     closeEditModal();
     loadGroups();
+    if (qualityGate && qualityGateSaved) refreshQualityGateColumn(true);
   } catch (error: any) {
     appStore.showError(
       extractApiErrorMessage(error, t("admin.groups.failedToUpdate")),
@@ -6980,7 +7068,6 @@ watch(
     if (!isProfitControlPlatform(newVal)) {
       createForm.profit_control_enabled = false;
       createForm.profit_min_margin_percent = 0;
-      createForm.profit_safety_buffer_percent = 0;
     }
     createForm.max_reasoning_effort = normalizeReasoningEffortForPlatform(
       newVal,
@@ -7037,7 +7124,6 @@ watch(
     if (!isProfitControlPlatform(newVal)) {
       editForm.profit_control_enabled = false;
       editForm.profit_min_margin_percent = 0;
-      editForm.profit_safety_buffer_percent = 0;
     }
     editForm.max_reasoning_effort = normalizeReasoningEffortForPlatform(
       newVal,
