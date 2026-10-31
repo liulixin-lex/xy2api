@@ -26,9 +26,9 @@ Metrics MUST be computed per account and shared by every group. The evaluator MU
   - Soft failures are upstream attempts classified TRANSIENT (first-output timeout, 5xx, stream break, connection error), plus unclassified `request_error` attempts that have no status and were not canceled, deduplicated by request, account and attempt time.
   - 429, balance, auth, request errors, client cancel, capacity shedding and unsupported model MUST NOT count.
 - Warm TTFT p90 (30 minutes) MUST use successful streaming requests whose previous request in the same session on the same account was at most 5 minutes earlier, judged only with at least 10 samples. First-output timeouts count only toward the error rate.
-- Warm zero-cache rate (2 hours; warm requests with at least 2048 prompt tokens; at least 20 samples) MUST be display-only.
+- Warm zero-cache rate (2 hours; warm requests with at least 2048 prompt tokens; at least 20 samples) MUST NOT eject. It MUST only affect ordering: above 30%, the account is not in the fast tier.
 
-When an account has `group_quality_reset_at`, only data after that time MUST count.
+Decisions for a group and account MUST use only data after the latest of: the window start, the account's `group_quality_reset_at`, the end of the account's last ejection in that group, and the process start. Data from before an ejection MUST NOT count once that ejection has ended, including after a restart.
 
 #### Scenario: Rate limits are not quality failures
 
@@ -45,17 +45,22 @@ When an account has `group_quality_reset_at`, only data after that time MUST cou
 For each member of an enabled group, the evaluator MUST eject the account in that group when its error rate or warm TTFT p90 exceeds the group's limit with enough samples.
 
 - Ejection lasts 5, 10, 20, then 30 minutes (cap) for consecutive strikes. The strike count MUST reset after 2 hours without ejection.
-- On expiry:
-  - an account still over a limit MUST be ejected for the next step;
-  - an account with enough samples within 80% of every limit MUST become healthy;
-  - any other account MUST enter trial.
-- A trial account MUST be selectable. Two soft failures within its first 20 requests, or meeting the ejection condition, MUST eject it for the next step; 20 requests MUST promote it.
+- On expiry, only data since the ejection started MUST count:
+  - enough new data over a limit MUST eject the account for the next step;
+  - enough new data within 80% of every limit MUST make it healthy;
+  - otherwise, including too little new data, the account MUST enter trial.
+- A trial account MUST be selectable and MUST be judged only on data since the trial started. Two soft failures within its first 20 requests, or meeting the ejection condition on that data, MUST eject it for the next step; 20 requests MUST promote it. Trial counts MUST accumulate from the trial start, however long the trial lasts.
 - Ejection MUST affect only selection in that group and MUST NOT change `schedulable`, `temp_unschedulable` or group membership.
 
 #### Scenario: Repeated ejection backs off
 
 - **WHEN** an account's first ejection expires while it is still over the limit
 - **THEN** its second ejection lasts 10 minutes, and a third would last 20 minutes.
+
+#### Scenario: Stale data does not hold a recovered account
+
+- **WHEN** an account ejected for slow first tokens gets no traffic during its 5-minute ejection
+- **THEN** at expiry it enters trial instead of being ejected again on the samples from before the ejection.
 
 #### Scenario: Borderline recovery
 
@@ -141,20 +146,49 @@ The following rules MUST apply around the veto:
 
 ### Requirement: Ordering and saturation
 
-With low-rate priority enabled, candidates MUST be ordered by fast tier, `Account.Priority`, cost (`openAISchedulingRate`), load, least recent use, then ID. With it disabled, fast tier and cost MUST NOT take part.
+With low-rate priority enabled, candidates MUST be ordered by tier, `Account.Priority`, load at or above 80% last, cost (`openAISchedulingRate`), load, least recent use, then ID. With it disabled, the order MUST stay exactly as before.
 
-- Fast tier means warm TTFT p90 at or below the group's fast-tier line (10000 ms without a policy). Accounts without data MUST count as fast. With too few samples, the last tier MUST be kept for up to 6 hours.
-- Every legacy sort point MUST use this one comparator. E2 replacement MUST only reorder within the same fast tier, cost and load band.
-- When a sticky account cannot get a slot, the request MUST borrow an idle eligible account in the group without changing the binding. It MUST wait for the best account only when no account has an immediate slot. Strong continuations MUST keep waiting for their own account.
+- Tier 0 holds healthy fast accounts. Fast means:
+  - warm TTFT p90 at or below the group's fast-tier line (10000 ms without a policy);
+  - and a warm zero-cache rate not above 30%; this condition is ignored with fewer than 20 zero-cache samples.
+  - Accounts without TTFT data MUST count as fast. With too few TTFT samples, the last tier MUST be kept for up to 6 hours.
+- Tier 1 holds trial accounts, whatever their previous tier. When an ejection ends, the account's remembered tier in that group MUST be cleared; after promotion, too few TTFT samples count as no data, not as the pre-ejection tier.
+- Tier 2 holds every other account: slow, non-caching, guard-held, and pinned outside the limits.
+- Groups without an enabled gate MUST use only tiers 0 and 2. Without an evaluator, every account is in tier 0.
+- Load is (in flight + waiting) ÷ concurrency cap. Accounts with neither a concurrency cap nor a load factor MUST be neutral for the 80% key.
+- Every legacy sort point MUST use this one comparator. E2 replacement MUST only reorder within the same tier, cost and load band.
+
+When a sticky account cannot get a slot:
+
+1. The scheduler MUST retry that account's slot for up to 2 seconds, honoring cancellation, without entering the wait queue. A slot gained this way MUST come with exactly one release function.
+2. Otherwise it MUST exclude the bound account for this selection and borrow an idle eligible account in the group without changing the binding. All three saturation paths (legacy without load batch, load-aware, advanced) MUST pick the borrowed account in the same session-stable order: the best tier and cost band first, then the account this session last succeeded on, then a per-session hash. Repeated borrows for a session therefore land on the same account.
+3. Only when no account has an immediate slot MUST it return the final wait plan for the bound account, as before. The wait queue MUST count that plan once.
+
+Strong continuations MUST keep waiting for their own account.
 
 #### Scenario: Cheap but slow account
 
 - **WHEN** low-rate priority is on, the cheapest account is above the fast-tier line and a pricier account is below it
 - **THEN** new sessions go to the pricier fast account.
 
+#### Scenario: Trial account ordering
+
+- **WHEN** low-rate priority is on and a trial account is cheaper than a healthy fast account
+- **THEN** new sessions go to the healthy fast account first, and to the trial account before any tier-2 account.
+
+#### Scenario: Non-caching account
+
+- **WHEN** an account's warm zero-cache rate is above 30% with at least 20 samples
+- **THEN** it is in tier 2 for new sessions and is not ejected for it.
+
+#### Scenario: Short wait keeps the cache
+
+- **WHEN** the bound account is at its concurrency cap and frees a slot within 2 seconds
+- **THEN** the request is served by the bound account.
+
 #### Scenario: Saturated sticky account
 
-- **WHEN** the bound account is at its concurrency cap and another eligible account is idle
+- **WHEN** the bound account stays at its cap for 2 seconds and another eligible account is idle
 - **THEN** the idle account serves the request and the session stays bound to the original account.
 
 #### Scenario: Low-rate priority off
