@@ -19,7 +19,7 @@ Each group MUST have an optional policy in the `group_quality_gate_policies` set
 
 ### Requirement: Account-level metrics
 
-Metrics MUST be computed per account and shared by every group. The evaluator MUST query them in a read-only transaction once at startup and then every 60 seconds, and MUST NOT write statistics on the request path.
+Metrics MUST be computed per account and shared by every group. The evaluator MUST query them in a read-only transaction once at startup and then every 60 seconds, and MUST NOT write statistics on the request path. The first round MUST run in the background loop without blocking service assembly; every round MUST have a 30-second overall timeout. Membership MUST be loaded in one query without proxy/group hydration, including disabled OpenAI groups for ordering tiers. Observation history MUST stay bounded to the latest 2 hours and 5 minutes.
 
 - Error rate (15 minutes) MUST be soft failures / (successes + soft failures), judged only with at least 20 calls and 5 soft failures.
   - Successes come from usage records.
@@ -47,9 +47,9 @@ For each member of an enabled group, the evaluator MUST eject the account in tha
 - Ejection lasts 5, 10, 20, then 30 minutes (cap) for consecutive strikes. The strike count MUST reset after 2 hours without ejection.
 - On expiry, only data since the ejection started MUST count:
   - enough new data over a limit MUST eject the account for the next step;
-  - enough new data within 80% of every limit MUST make it healthy;
+  - enough new samples for every metric that triggered ejection, within 80% of every sample-ready limit, MUST make it healthy;
   - otherwise, including too little new data, the account MUST enter trial.
-- A trial account MUST be selectable and MUST be judged only on data since the trial started. Two soft failures within its first 20 requests, or meeting the ejection condition on that data, MUST eject it for the next step; 20 requests MUST promote it. Trial counts MUST accumulate from the trial start, however long the trial lasts.
+- A trial account MUST be selectable and MUST be judged only on data since the trial started. Two soft failures within its first 20 requests, or meeting the ejection condition on that data, MUST eject it for the next step; 20 requests MUST promote it. Trial counts MUST accumulate from the trial start, however long the trial lasts. State MUST retain at most the first 20 distinct request IDs and their cumulative soft failures, consuming only intervals after the previous round; history MUST NOT be widened to the trial start.
 - Ejection MUST affect only selection in that group and MUST NOT change `schedulable`, `temp_unschedulable` or group membership.
 
 #### Scenario: Repeated ejection backs off
@@ -79,7 +79,7 @@ The evaluator MUST report, per group and member, separate facts instead of one B
 The guard and the request path MUST use them as follows:
 
 - After each evaluation, usable members that are passing or guard-held MUST number at least max(2, ⌈usable members / 2⌉), capped at the number of countable members: usable members other than pinned accounts outside the limits. When the target cannot be met, every countable member MUST stay selectable.
-- Below that floor, the evaluator MUST keep the least-bad ejected accounts as guard-held and log `group_quality_gate.guard_hold`. This MUST also apply to groups that have a fallback group.
+- Below that floor, the evaluator MUST keep the least-bad ejected accounts using severity captured at ejection; ties MUST prefer previous guard holders and then account ID for stable selection. The evaluator MUST log `group_quality_gate.guard_hold`. This MUST also apply to groups that have a fallback group.
 - When no other candidate is selectable at request time, the existing last resort MUST relax quality ejection only and log `group_quality_gate.last_resort`. The profit gate, IQ, balance, auth and unsupported-model checks MUST NOT be relaxed.
 - Pinned accounts MUST never be vetoed and MUST still obey every other rule. A pinned account outside the limits MUST NOT count toward the floor.
 
@@ -198,7 +198,7 @@ Strong continuations MUST keep waiting for their own account.
 
 ### Requirement: State and evaluation failure
 
-Gate state MUST live in process memory as an atomic snapshot and MUST be recomputed in the first round after a restart. When a query fails or the data is more than 5 minutes old, the evaluator MUST keep the previous state, MUST NOT add ejections and MUST log `group_quality_gate.evaluate_failed`. Existing ejections MUST still expire on time.
+Gate state MUST live in process memory as an atomic snapshot and MUST be recomputed in the first round after a restart. Freshness MUST use only the latest usage row globally (no rows means no samples), never error-log timestamps. When a query fails or usage data is more than 5 minutes old, the evaluator MUST retain previous metrics and MUST NOT add ejections, including trial failures. Existing ejections MUST still expire into trial and manual resets MUST still apply when members can be loaded. Each stale period MUST log `group_quality_gate.evaluate_failed` only once, with reason and stale duration.
 
 #### Scenario: Metric query times out
 
@@ -210,13 +210,15 @@ Gate state MUST live in process memory as an atomic snapshot and MUST be recompu
 - Only the admin "recover state" action (`POST /api/v1/admin/accounts/:id/recover-state`) MAY write `accounts.extra.group_quality_reset_at`. It MUST do so through an explicit recovery option.
   - The successful-test recovery and the OpenAI quota-reset workflow also call the same recovery routine. They MUST NOT write it.
   - The write MUST merge into `extra` without dropping other keys. If it fails after earlier cleanup succeeded, the action MUST return an error, and a retry MUST be safe.
-  - Within the next evaluation, the account's ejections in all groups MUST be cleared, its strikes reset and the account placed in trial.
+  - A reset timestamp newly appearing or changing during this process MUST clear the account's ejections in all groups, reset its strikes and place it in trial within the next evaluation. Historical resets at or before process start MUST only bound data, never reapply trial after restart.
 - "Test" MUST NOT affect the gate, and no buttons are added.
 - The admin API MUST provide:
   - `GET /api/v1/admin/group-quality-gate/policies`
   - `PUT /api/v1/admin/group-quality-gate/policies/:group_id`
   - `GET /api/v1/admin/group-quality-gate/status`
 - The status endpoint MUST accept an optional `group_id`. Without it, the response MUST contain all enabled groups and metrics for every member of those groups. With it, the response MUST contain only that group, including member metrics when the gate is disabled and `enabled=false`.
+- Status arrays MUST be arrays even when empty; account_metrics MUST be an object. Headroom MUST be null if every metric lacks sufficient samples. Summary eligible MUST count all non-vetoed members including trial, pinned and guard-held; trial is a subset. Expired ejection passing MUST use effective metrics. Policy validation errors MUST expose specific messages with the existing reason/metadata structure.
+- Manual resets and expiry into trial MUST log trial; trial promotion and direct recovery MUST log recover.
 - A successful policy write MUST immediately invalidate this instance's policy cache. A newly enabled group MUST appear in status after the next evaluation round.
 - Reads MUST follow account-management permission. Writes MUST follow group-management permission and MUST be audited.
 - Events `group_quality_gate.eject`, `.trial`, `.recover`, `.guard_hold`, `.last_resort` and `.evaluate_failed` MUST be logged with group, account, metric, limit and duration.
