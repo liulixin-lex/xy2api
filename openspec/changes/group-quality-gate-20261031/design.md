@@ -203,7 +203,7 @@ key 记忆、稳定 120 秒后回原组、每个请求最多兜底一次，都�
 
 状态接口的 `group_id` 为可选参数。不带参数时只返回所有已启用门槛的分组，`account_metrics` 覆盖这些分组的全部成员；带参数时只返回指定分组，即使门槛未启用也返回其全部成员指标并标记 `enabled=false`。策略写入成功后本实例策略缓存立即失效；新启用的分组在下一轮评估后才出现在状态响应中。
 
-状态数组 `groups/accounts/reasons` 返回 `[]` 而非 null，`account_metrics` 返回对象；每个 `groups[].accounts[].metrics` 返回本组判定实际使用的有效指标 `{calls, soft_failures, error_rate, warm_samples, warm_ttft_p90_ms}`。计数字段始终是实际值；错误率未达判定条件（总数 <20 或软失败 <5）时 `error_rate=null`，续轮样本 <10 时 `warm_ttft_p90_ms=null`。`headroom` 只按这两项非 null 指标计算最紧余量，两项均为 null 时为 null；过期熔断不能再使用触发轮的旧数据。`account_metrics` 保持完整窗口，状态/原因/实测/上限/余量使用成员有效数据。`summary.eligible` 计未否决成员（含试用、固定、保底），`trial` 是其中试用数；过期熔断的 passing 使用有效数据。策略校验 400 的 message 给出具体原因，reason 保持 `INVALID_GROUP_QUALITY_GATE_POLICY`，metadata.field 指向字段。
+状态数组 `groups/accounts/reasons` 返回 `[]` 而非 null，`account_metrics` 返回对象；每个 `groups[].accounts[].metrics` 返回本组判定实际使用的有效指标 `{calls, soft_failures, error_rate, warm_samples, warm_ttft_p90_ms}`。计数字段始终是实际值；错误率未达判定条件（总数 <20 或软失败 <5）时 `error_rate=null`，续轮样本 <10 时 `warm_ttft_p90_ms=null`。`headroom` 只按这两项非 null 指标计算最紧余量，两项均为 null 时为 null；过期熔断不能再使用触发轮的旧数据。`account_metrics` 保持完整窗口。合格/试用提示的实测和余量使用成员有效数据；熔断中（含保底保留）提示取同一快照的完整窗口，标“熔断时窗口”，按相同判定门槛与公式在前端算余量，不新增冻结历史快照。余量仅在 <20% 时显示；未达判定条件的错误率比值注明条件不足、不标红。`summary.eligible` 计未否决成员（含试用、固定、保底），`trial` 是其中试用数；过期熔断的 passing 使用有效数据。策略校验 400 的 message 给出具体原因，reason 保持 `INVALID_GROUP_QUALITY_GATE_POLICY`，metadata.field 指向字段。
 
 读接口跟随账号管理权限，策略写入与预览跟随分组管理权限，写操作进审计。
 

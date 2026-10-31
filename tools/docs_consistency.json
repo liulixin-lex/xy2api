@@ -407,6 +407,21 @@
         "docs/PROJECT_MEMORY.md",
         "docs/PROJECT_MEMORY_ARCHIVE.md"
       ]
+    },
+    {
+      "pattern": "admin\\.groupQualityGate\\.(?:listSeparator|metrics\\.label|tooltip\\.(?:state|reasons|errorRateNoData|warmTtftNoData|headroomNoData))\\b|admin\\.groups\\.profitControl\\.previewZeroHint\\b",
+      "reason": "WP4 compact quality views replace the prose tooltip and redundant preview explanation with metric rows and a single-line preview",
+      "allowed": [
+        "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
+    },
+    {
+      "pattern": "\\b(?:listSeparator|errorRateNoData|warmTtftNoData|headroomNoData|previewZeroHint)\\b",
+      "reason": "Removed locale properties from the compact group quality UI; full translation-key paths are checked repository-wide separately",
+      "paths": [
+        "frontend/src/i18n/locales/*/admin/groupQualityGate.ts",
+        "frontend/src/i18n/locales/*/admin/overview.ts"
+      ]
     }
   ],
   "private": [

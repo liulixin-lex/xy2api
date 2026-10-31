@@ -51,23 +51,26 @@ B 段（第二阶段，依赖 WP1）：
 ## WP5 集成（第三阶段）
 
 - [x] 5.1 按 WP1 → WP3-A → WP2 → WP3-B → WP4 的顺序合并，解决共享登记文件的冲突，重新生成 Wire。
-- [ ] 5.2 全量门禁：Go unit / integration、golangci-lint、scheduler-diff、前端 typecheck / lint / test / build、文档一致性；提交后在干净树上跑 audit。
+- [x] 5.2 全量门禁：Go unit / integration、golangci-lint、scheduler-diff、前端 typecheck / lint / test / build、文档一致性；提交后在干净树上跑 audit。
 - [x] 5.3 逐个对照 `specs/` 的场景验收，在本文件写明证据。
 - [x] 5.4 确认没有新的部署前提，把升级即生效的变化写进发布说明。
 - [x] 5.5 更新项目记忆，写交付报告与用户的升级配置清单，然后等待授权。
 
 ## WP5 验证证据（2026-10-31）
 
-- 集成分支 `feat/gqg-wp5-integration`；后端基线 `be0c2629d`，具名补丁 provenance 修复 `c8d38c070`，WP4 `a2b0c70d4` 无冲突合并为 `8739f463b`。`git diff --exit-code be0c2629d 8739f463b -- backend` 通过，后端门禁适用于集成结果。
+- 集成分支 `feat/gqg-wp5-integration`；初始后端基线 `be0c2629d`，provenance 修复 `c8d38c070`；WP1 `6c26a11f2` 合并为 `a958a61af`，索引计划夹具修正 `8aa768168`；WP4 最终 `27f7cf861` 合并为 `56d557149`。`git diff --exit-code 8aa768168 HEAD -- backend` 通过，最终 Docker 后端结果适用于集成树。
 - Go 1.27.3，`GOTOOLCHAIN=local GOMAXPROCS=2`；以下 Go/lint 命令从 `backend/` 执行。仓外原始日志、命令与通过事件在交接包 `integration/wp5/`；没有新增测试文件、放宽断言或产品兜底。
 - `go test -tags=unit -p=2 -timeout=20m -count=1 -json ./...`：67 包通过；service 383.103 秒，低于 8 分钟报告线。
-- 本机 `go test -tags=integration -overlay <仓外overlay.json> -timeout=20m -count=1 -json -skip '^(TestUpstreamV0214MigrationUpgrade|TestUpstreamV0215MigrationUpgrade|TestPgDumperRealPostgresBackupAndAtomicRestore)$' ./...`：59 包、7829 个顶层用例通过；repository 22.098 秒。overlay 仅替换 TestMain 和两个限流测试的环境创建段，临时 PostgreSQL/Redis 已清理；11 个既有 skip 已逐项记录。三项 Docker 专用测试未在本机运行；主持人的全仓真实 testcontainers 结果待补，因此 5.2 暂不勾选。
+- 本机 `go test -tags=integration -overlay <仓外overlay.json> -timeout=20m -count=1 -json -skip '^(TestUpstreamV0214MigrationUpgrade|TestUpstreamV0215MigrationUpgrade|TestPgDumperRealPostgresBackupAndAtomicRestore)$' ./...`：59 包、7829 个顶层用例通过；repository 22.098 秒。overlay 仅替换 TestMain 和两个限流测试的环境创建段，临时 PostgreSQL/Redis 已清理；11 个既有 skip 已逐项记录。三项 Docker 专用测试未在本机运行，现已由下述真实 Docker 全仓验证覆盖。
+- 后续影响包 `go test -tags=unit -p=2 -timeout=20m -count=1 -json ./internal/service ./internal/repository` 通过（service 378.725 秒、repository 16.967 秒）；本机隔离仓储 integration 782 个顶层用例通过（22.355 秒），包含质量事务隔离和修复后的索引计划测试。lint、scheduler-diff、docs 一致性复验通过。
+- 主持人回传测试主机真实 Docker 结果：源码 `8aa768168`，抽查计划测试与质量服务文件 SHA-256 与提交一致；`go test -tags=integration ./... -count=1 -p 2 -timeout=40m`：60 个包 ok、58 个无测试、0 FAIL/panic；repository 91.3 秒、service 175.3 秒、migrations 通过，两项旧版本迁移与备份恢复用例通过。完整命令没有人为排除三项 Docker 用例，不把无测试包或既有 skip 表述为测试通过数。
+- 历史对照：`be0c2629d` 的 Docker 全仓 59/60 包通过，唯一失败为 `TestUsageLog_UpstreamModelMismatchFilterAndPartialIndex` 的索引选择断言；新夹具改变包内时机、规划器受 autovacuum ANALYZE 时机影响。WP1 事务隔离后仍可复现；`8aa768168` 在同一事务中显式 `ANALYZE usage_logs`，保持索引断言不变，主持人定向整包 2/2 与最终全仓通过。
 - `go vet ./...`、`go vet -tags=unit ./...`、`go vet -tags=integration ./...`、`go vet -tags=e2e ./...`：全部通过。
 - `golangci-lint run --concurrency=2 --max-issues-per-linter=0 --max-same-issues=0 ./...`：0 issues。`python3 ../tools/gateway-resilience/ci_gate.py`：五包 84/284/90/2/18，共 478 项 `-race` 通过、0 SKIP。
 - `python3 tools/upstream-sync/sync.py scheduler-diff`、`python3 tools/check_docs_consistency.py`、`python3 -m unittest discover -s tools/tests -p 'test_*.py'`：通过，工具单测 96 项。
 - `go generate ./cmd/server`：Wire 生成源码无差异；工具产生的 `go.sum` 变化已恢复。policy/provenance 补丁集合一致、独立校验零错误。
-- `npx -y pnpm@9 --dir frontend install --frozen-lockfile --prefer-offline` 后，`npx -y pnpm@9 --dir frontend run typecheck`、`lint:check`、`test:run`、`build` 全通过；470 个文件、3607 项测试。
-- `python3 tools/upstream-sync/sync.py audit` 在 `8739f463b` 干净树通过，`node_modules` 是本工作树普通目录。最终文档提交后再审计并把固定 HEAD 写入仓外交付报告。
+- `npx -y pnpm@9 --dir frontend install --frozen-lockfile --prefer-offline` 后，`npx -y pnpm@9 --dir frontend run typecheck`、`lint:check`、`test:run`、`build` 全通过；最终 470 个文件、3609 项测试（此前 `a2b0c70d4` 为 3607 项）。
+- `python3 tools/upstream-sync/sync.py audit` 在首轮 `8739f463b` / `9e1da6234` 及最终前端合并 `56d557149` 的干净树通过，`node_modules` 是本工作树普通目录。最终文档提交后的固定 HEAD 审计写入仓外交付报告。
 - `git diff --exit-code 8b16126f8 HEAD -- deploy backend/internal/config backend/ent backend/migrations` 通过：无新部署前提、环境变量、Ent schema 或迁移。升级即生效、历史浮窗差异、已接受 P2 与用户配置见仓外 `implementation/RELEASE_NOTES_DRAFT.md`，配置依据为 `PLAN.md` §11。
 
 ## 逐场景验收
@@ -119,6 +122,6 @@ B 段（第二阶段，依赖 WP1）：
 ### WP4 与已接受边界
 
 - `groupsQualityGate.spec.ts` 覆盖单位换算、默认值、阈值与成员 ID 校验、409/失败提示；`groupsProfitControl.spec.ts` 覆盖默认 20%、旧缓冲并入毛利、零可调度中性与零通过确认；`groupQualityPresentation.spec.ts` 覆盖策略/状态组合、固定/保底、空指标与提示面板定位。
-- 实际组件核对：OpenAI 编辑框门槛、顺序保存、无价格权限剔除利润字段、五个平台利润预览；两张列表显示等待评估/读取失败及停用未生效状态；中英文 key 对齐。前端四门禁均通过。
-- WP4 浏览器冒烟采用本地 mock 与真实 API 结构，截图保存在仓外交接包。未代操作人接受管理合规承诺；不宣称真实管理后端浏览器联调完成。
+- 实际组件核对：OpenAI 编辑框门槛、固定账号芯片/搜索、顺序保存、无价格权限剔除利润字段、五个平台单行利润预览；门槛列前移、两张列表显示等待评估/读取失败及停用未生效状态；中英文 key 对齐。合格/试用提示取成员有效 metrics/headroom，熔断中取完整窗口并注明“熔断时窗口”；低样本不标红，余量仅 <20% 显示。前端四门禁均通过。
+- WP4 最终浏览器冒烟已使用合成的最终后端与真实隔离 PostgreSQL/Redis；用户授权在临时实例接受合规承诺。编辑/固定账号保存、利润预览、门槛列、兜底用量与六类状态提示通过，控制台零错误；截图 `implementation/WP4-screens/real-1..5` 在仓外，环境已清理。先前 mock 是首轮历史验证，不代表最终验证范围。
 - 已接受限制（详见发布草稿）：Grok 异步视频跨组轮询计价、非调度实例 OAuth 参考值更新、入组重置转试用、确定性 fallback 排队、WS 分组查询与热路径探测 JSON 开销、利润预览使用已保存价格、触屏提示与宽表布局。

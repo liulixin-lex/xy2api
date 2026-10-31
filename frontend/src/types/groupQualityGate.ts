@@ -33,7 +33,7 @@ export interface UpdateGroupQualityGatePolicyResponse {
 export type GroupQualityGateState = 'eligible' | 'ejected' | 'trial'
 export type GroupQualityGateReason = 'error_rate' | 'warm_ttft'
 
-/** 按账号算一份、所有分组共用的完整窗口指标，只用于账号行的指标显示。 */
+/** 按账号算一份、所有分组共用的完整窗口指标，供账号行和熔断中提示显示。 */
 export interface GroupQualityAccountMetrics {
   calls: number
   soft_failures: number
@@ -70,7 +70,7 @@ export interface GroupQualityGateAccountStatus {
   /** 选号实际是否否决；固定与保底保留为 false */
   vetoed: boolean
   tier: number
-  /** 本组判定实际使用的指标；悬停说明里的实测、上限与余量都取它 */
+  /** 本组判定实际使用的指标；合格/试用提示使用它，熔断中提示改看完整窗口 */
   metrics: GroupQualityMemberMetrics
   /** 按成员 metrics 里非 null 指标中最紧一项的 (1 − 实测 ÷ 上限)；全为 null 时为 null */
   headroom: number | null
