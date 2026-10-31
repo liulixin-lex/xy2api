@@ -177,7 +177,9 @@ export function groupQualityTooltip(
   lines.push(metrics && metrics.warm_samples > 0
     ? t(prefix + 'tooltip.warmTtft', { value: formatQualitySeconds(metrics.warm_ttft_p90_ms), limit: ttftLimit })
     : t(prefix + 'tooltip.warmTtftNoData', { limit: ttftLimit }))
-  lines.push(t(prefix + 'tooltip.headroom', { value: formatHeadroom(status.headroom) }))
+  lines.push(status.headroom == null
+    ? t(prefix + 'tooltip.headroomNoData')
+    : t(prefix + 'tooltip.headroom', { value: formatHeadroom(status.headroom) }))
   if (quality.stale) lines.push(t(prefix + 'tooltip.stale'))
   return lines
 }

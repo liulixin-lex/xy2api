@@ -171,15 +171,22 @@ describe('groupQualityTooltip', () => {
   })
 
   it('says when there is no data yet and when the evaluation is stale', () => {
-    const quality = qualityOf(account({ state: 'ejected', guard_held: true, headroom: 0 }), { stale: true })
+    const quality = qualityOf(account({ state: 'ejected', guard_held: true, headroom: null }), { stale: true })
     expect(groupQualityTooltip('Codex', quality, metrics({ calls: 0, warm_samples: 0 }), i18nFor('en').t, clock)).toEqual([
       'Codex: Held by floor guard',
       'Over the limits, but kept in scheduling so the group keeps its minimum of usable accounts',
       'Error rate: no data yet, limit 10%',
       'Warm first-token p90: no data yet, limit 20s',
-      'Headroom 0%',
+      'Headroom: not enough samples',
       'Evaluation data is more than 5 minutes old; the previous state is kept'
     ])
+  })
+
+  it('tells zero headroom at the limit apart from not enough samples', () => {
+    const lastLine = (headroom: number | null) =>
+      groupQualityTooltip('Codex', qualityOf(account({ headroom })), metrics(), i18nFor('zh').t, clock).at(-1)
+    expect(lastLine(0)).toBe('余量 0%')
+    expect(lastLine(null)).toBe('余量：样本不足')
   })
 
   it('explains pending and failed notices in one line', () => {

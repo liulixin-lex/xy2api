@@ -58,8 +58,8 @@ export interface GroupQualityGateAccountStatus {
   /** 选号实际是否否决；固定与保底保留为 false */
   vetoed: boolean
   tier: number
-  /** 各项指标里最紧一项的 (1 − 实测 ÷ 上限) */
-  headroom: number
+  /** 各项指标里最紧一项的 (1 − 实测 ÷ 上限)；所有指标样本都不足时为 null */
+  headroom: number | null
 }
 
 export interface GroupQualityGateGroupStatus {

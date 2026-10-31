@@ -53,6 +53,7 @@ export default {
       warmTtft: 'Warm first-token p90 {value}, limit {limit}',
       warmTtftNoData: 'Warm first-token p90: no data yet, limit {limit}',
       headroom: 'Headroom {value}',
+      headroomNoData: 'Headroom: not enough samples',
       stale: 'Evaluation data is more than 5 minutes old; the previous state is kept',
       pending: '{group}: gate is on, awaiting the next evaluation (every minute)',
       failed: '{group}: could not load gate status. Reload the list to retry.'

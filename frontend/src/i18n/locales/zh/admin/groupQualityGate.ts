@@ -53,6 +53,7 @@ export default {
       warmTtft: '续轮首字 p90 {value}，上限 {limit}',
       warmTtftNoData: '续轮首字 p90 暂无数据，上限 {limit}',
       headroom: '余量 {value}',
+      headroomNoData: '余量：样本不足',
       stale: '评估数据超过 5 分钟没有更新，状态沿用上一轮',
       pending: '{group}：门槛已开启，等待下一轮评估（每分钟一次）',
       failed: '{group}：门槛状态读取失败，刷新列表后重试'
