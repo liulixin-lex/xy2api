@@ -1946,6 +1946,12 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerSettingRepo() SettingRepos
 }
 
 func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx context.Context) openAIAdvancedSchedulerRuntimeSettings {
+	return loadOpenAIAdvancedSchedulerRuntimeSettings(ctx, s.openAIAdvancedSchedulerSettingRepo())
+}
+
+// loadOpenAIAdvancedSchedulerRuntimeSettings also warms the shared settings at
+// startup, before background quality/operations checks or request scheduling.
+func loadOpenAIAdvancedSchedulerRuntimeSettings(ctx context.Context, repo SettingRepository) openAIAdvancedSchedulerRuntimeSettings {
 	if cached, ok := openAIAdvancedSchedulerSettingCache.Load().(*cachedOpenAIAdvancedSchedulerSetting); ok && cached != nil {
 		if time.Now().UnixNano() < cached.expiresAt {
 			return openAIAdvancedSchedulerRuntimeSettings{
@@ -1982,7 +1988,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 		subscriptionPriorityEnabled := false
 		lbTopKOverride := 0
 		weightOverrides := map[string]float64{}
-		if repo := s.openAIAdvancedSchedulerSettingRepo(); repo != nil {
+		if repo != nil {
 			dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), openAIAdvancedSchedulerSettingDBTimeout)
 			defer cancel()
 

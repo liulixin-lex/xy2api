@@ -389,6 +389,21 @@
           "}",
           "}"
         ]
+      },
+      {
+        "block": "group-quality-profit-startup",
+        "note": "WP3-B review: warm the shared OAuth settings cache at startup using the existing bounded singleflight loader.",
+        "removed": [
+          "if repo := s.openAIAdvancedSchedulerSettingRepo(); repo != nil {"
+        ],
+        "added": [
+          "// loadOpenAIAdvancedSchedulerRuntimeSettings also warms the shared settings at",
+          "// startup, before background quality/operations checks or request scheduling.",
+          "func loadOpenAIAdvancedSchedulerRuntimeSettings(ctx context.Context, repo SettingRepository) openAIAdvancedSchedulerRuntimeSettings {",
+          "if repo != nil {",
+          "return loadOpenAIAdvancedSchedulerRuntimeSettings(ctx, s.openAIAdvancedSchedulerSettingRepo())",
+          "}"
+        ]
       }
     ],
     "backend/internal/service/openai_gateway_scheduling.go": [

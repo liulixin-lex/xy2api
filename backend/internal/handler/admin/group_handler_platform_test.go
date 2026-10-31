@@ -101,7 +101,7 @@ func (profitPreviewGroups) GetByIDLite(_ context.Context, id int64) (*service.Gr
 
 type profitPreviewAccounts struct{ service.AccountRepository }
 
-func (profitPreviewAccounts) ListByGroup(context.Context, int64) ([]service.Account, error) {
+func (profitPreviewAccounts) ListAllWithFilters(context.Context, string, string, string, string, int64, string) ([]service.Account, error) {
 	rate := 1.0
 	return []service.Account{{ID: 1, Platform: service.PlatformOpenAI, Status: service.StatusActive, Schedulable: true, RateMultiplier: &rate}}, nil
 }

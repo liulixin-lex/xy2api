@@ -3087,6 +3087,18 @@
     {
       "path": "backend/internal/service/profit_preview.go",
       "value": "previewGroup.ProfitSafetyBuffer = 0"
+    },
+    {
+      "path": "backend/internal/service/group_member_servable.go",
+      "value": "isPlatformFilteredForSelection(acc, platform, platform == PlatformAnthropic || platform == PlatformGemini)"
+    },
+    {
+      "path": "backend/internal/service/wire.go",
+      "value": "loadOpenAIAdvancedSchedulerRuntimeSettings(context.Background(), settingRepo)"
+    },
+    {
+      "path": "backend/internal/service/profit_preview.go",
+      "value": "s.accountRepo.ListAllWithFilters(ctx, \"\", \"\", \"\", \"\", groupID, \"\")"
     }
   ],
   "forbidden_module_paths": [
@@ -5349,6 +5361,11 @@
       "id": "xy-fallback-group-user-invisible",
       "path": "backend/internal/repository/account_repo_schedulable_projection_test.go",
       "literal": "func TestListOpsAccountsForStatsPreservesServabilityFields("
+    },
+    {
+      "id": "xy-fallback-group-user-invisible",
+      "path": "backend/internal/service/openai_scheduling_rate_fallback_test.go",
+      "literal": "func TestOpenAIOAuthSchedulingRateRuntimePreservesExplicitClear("
     }
   ]
 }

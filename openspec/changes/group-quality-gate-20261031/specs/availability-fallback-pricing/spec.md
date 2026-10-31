@@ -97,13 +97,14 @@ Reservation ownership and counters MUST belong to the origin group.
 ### Requirement: Profit gate cost and price
 
 - The profit gate cost MUST be `openAISchedulingRate` frozen at the gate's pricing time. That is a fresh probe value including the upstream peak; otherwise the account's `rate_multiplier`; for OAuth accounts, the existing runtime reference rate.
+- Startup settings loading MUST warm the existing OAuth reference cache with the shared bounded loader, including instances that never run OpenAI scheduling. Profit checks MUST remain cache-only.
 - A nil, negative, NaN or infinite raw multiplier MUST be rejected and MUST NOT default to 1.0. Zero remains a valid free rate.
 - The price MUST come from the pricing group, matching billing. Under fallback that is the fallback group; otherwise the key's group, which is the parent for composite requests. The price is the user's override or the group rate, times that group's peak factor.
 - The switch, margin and buffer MUST come from the scheduled group.
 - The guard, the servable check and the preview MUST estimate with the group's default rate.
 - Enabling the profit gate MUST default the margin to 20%. The UI MUST hide the buffer and save it as 0.
 - `GET /api/v1/admin/groups/:id/profit-control-preview?margin=` MUST return member, schedulable and passing counts and the derived upstream rate ceiling at the current time. The UI MUST show the ceiling with the counts, show zero passing in red and ask for confirmation on save, and show one passing in yellow.
-- The preview MUST use the request margin (or the saved margin when omitted) and a zero safety buffer, without persisting either. Schedulable members exclude hard states and soft penalties; passing counts the subset admitted by profit alone, without quality ejection.
+- The preview MUST use the request margin (or the saved margin when omitted) and a zero safety buffer, without persisting either. The member count includes disabled members. Schedulable members exclude hard states and soft penalties; passing counts the subset admitted by profit alone, without quality ejection.
 - The margin MUST stay the configured quantity; the ceiling is derived and displayed, not stored.
 - The profit gate MUST NOT admit loss-making accounts, even when it blocks the whole group.
 
@@ -111,6 +112,11 @@ Reservation ownership and counters MUST belong to the origin group.
 
 - **WHEN** an account's raw `rate_multiplier` is nil and no fresh probe value exists
 - **THEN** the profit gate rejects the account instead of treating its cost as 1.0.
+
+#### Scenario: Mixed and composite member eligibility
+
+- **WHEN** a group contains healthy concrete-platform members, including mixed-scheduling Antigravity members in Anthropic/Gemini groups or concrete members in a composite group
+- **THEN** fallback, operations counts, the guard denominator and preview reuse scheduler platform eligibility without excluding those members solely for platform inequality. With both gates disabled, composite availability stays consistent with the previous version.
 
 ## REMOVED Requirements
 

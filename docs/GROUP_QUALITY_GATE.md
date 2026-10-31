@@ -36,9 +36,11 @@
 
 利润门成本统一由 `openAIProfitGateCost` 计算。先校验原始 `rate_multiplier`：nil、负数、NaN、Inf 拒绝，0 合法。OpenAI API Key 使用定价时刻的新鲜探测（含上游高峰），过期或缺失时使用账号倍率；OAuth 使用现有运行时参考倍率，显式清空参考倍率时使用账号倍率。其他 token 平台沿用已校验的账号倍率。请求和抢槽后终检都使用同一个 `pricingAt`；等待期间刷新账号快照，但不改定价时刻。
 
-OAuth 成本检查只读现有调度设置缓存，不查询数据库。缓存首次加载前使用既有默认值；过期后沿用最后发布值，由原设置加载器（共用 singleflight 与查询超时）或管理端设置更新刷新。
+OAuth 成本检查只读现有调度设置缓存，不查询数据库。启动设置加载流程会预热一次，使用原加载器的 singleflight 与查询超时；不运行 OpenAI 调度的实例也会加载已保存的参考倍率。缓存过期后沿用最后发布值，由原设置加载器或管理端设置更新刷新。
 
 售价使用服务计价分组的用户覆盖倍率或默认倍率，再乘该组高峰；开关、毛利率和安全缓冲使用被调度分组。`groupProfitCeiling` 按分组默认倍率估算保底、兜底与运维可服务数，不针对特定用户。运维分组可用账号数、`group_available_accounts` 与 `group_available_ratio` 告警都由 `groupMemberServable` 计数；固定但不达标的账号免于质量否决，只要其他条件满足就计入。平台总数和账号级状态展示保持原口径。
+
+成员平台资格复用调度器规则：同平台成员可用；Anthropic/Gemini 组也接受已启用混合调度的 Antigravity 成员；组合组接受其成员的具体平台。兜底触发、运维可用数、保底分母与利润预览采用同一资格规则，两道门都关闭时不会因平台不同而漏算这些成员。
 
 ## 管理接口
 
@@ -53,13 +55,17 @@ OAuth 成本检查只读现有调度设置缓存，不查询数据库。缓存�
 
 `headroom` 是满足样本条件的指标中最小的 `1 − 实测值 / 上限`：负数表示超线，0 表示压线；错误率需总数 ≥20 且软失败 ≥5，首字需样本 ≥10。所有指标样本均不足时返回 `null`。`account_metrics` 与余量用于显示完整窗口，过期熔断的 `passing` 使用有效数据。策略校验失败沿用 `{code, message, reason, metadata}` 错误结构，`reason=INVALID_GROUP_QUALITY_GATE_POLICY`，`message` 说明具体字段约束或非成员账号，`metadata.field` 标出字段。
 
-利润门预览返回 `{members, schedulable, passing, ceiling}`：成员数、排除硬状态与软罚后的可调度数、其中通过利润门的数量，以及换算的上游倍率上限。预览不计质量熔断，便于单独评估利润设置；`margin` 范围 `[0,1)`，省略时使用保存值，安全缓冲按 0。上限与成本在同一当前时刻计算，即使利润门尚未开启也可预览；不保存任何配置。非法参数或不支持利润门的平台返回 400，分组不存在返回 404。
+利润门预览返回 `{members, schedulable, passing, ceiling}`：全部成员数（含停用成员）、排除硬状态与软罚后的可调度数、其中通过利润门的数量，以及换算的上游倍率上限。预览不计质量熔断，便于单独评估利润设置；`margin` 范围 `[0,1)`，省略时使用保存值，安全缓冲按 0。上限与成本在同一当前时刻计算，即使利润门尚未开启也可预览；不保存任何配置。非法参数或不支持利润门的平台返回 400，分组不存在返回 404。
 
 ## 恢复与观测
 
 只有 `POST /api/v1/admin/accounts/:id/recover-state` 通过 `AccountRecoveryOptions.ResetGroupQualityGate` 写入 `accounts.extra.group_quality_reset_at`，写入使用 JSONB 合并，不丢失其他字段。进程运行期间新出现或变化的重置时刻，在下一轮评估清除该账号所有分组的熔断、清零次数并转试用；早于或等于进程启动的历史重置只作为数据起点，不在重启后重新转试用。成功测试恢复和 OpenAI 额度重置不设置该选项。
 
 手动重置与熔断到期转试用记录 `trial`；试用转合格、到期直接合格记录 `recover`。事件使用统一前缀：`group_quality_gate.eject`、`group_quality_gate.trial`、`group_quality_gate.recover`、`group_quality_gate.guard_hold`、`group_quality_gate.last_resort`、`group_quality_gate.evaluate_failed`。
+
+## 升级说明
+
+本版本起，OpenAI OAuth 账号的利润门成本从各账号的 `rate_multiplier` 改为全局 OAuth 调度参考倍率（默认 1.0）；显式清空参考倍率才使用账号倍率。原始账号倍率仍须合法。已开启利润门且含 OAuth 成员的分组，上线前应核对全局参考倍率与利润上限；新口径可能减少可服务成员并触发兜底或无可用账号。账号侧用量成本与扣费记录的倍率口径不因此改变。
 
 ## 回退
 

@@ -101,24 +101,33 @@ func TestOpenAIOAuthSchedulingRateRuntimePreservesExplicitClear(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	for _, tt := range []struct {
-		name   string
-		values map[string]string
-		want   *float64
+		name    string
+		values  map[string]string
+		want    *float64
+		startup bool
 	}{
-		{"absent", map[string]string{}, floatPtr(1)},
-		{"cleared", map[string]string{SettingKeyOpenAIOAuthSchedulingRateMultiplier: ""}, nil},
-		{"zero", map[string]string{SettingKeyOpenAIOAuthSchedulingRateMultiplier: "0"}, floatPtr(0)},
-		{"override", map[string]string{SettingKeyOpenAIOAuthSchedulingRateMultiplier: "0.7"}, floatPtr(0.7)},
+		{"absent", map[string]string{}, floatPtr(1), false},
+		{"cleared", map[string]string{SettingKeyOpenAIOAuthSchedulingRateMultiplier: ""}, nil, false},
+		{"zero", map[string]string{SettingKeyOpenAIOAuthSchedulingRateMultiplier: "0"}, floatPtr(0), false},
+		{"override", map[string]string{SettingKeyOpenAIOAuthSchedulingRateMultiplier: "0.7"}, floatPtr(0.7), false},
+		{"unloaded cache warms at startup without scheduling", map[string]string{SettingKeyOpenAIOAuthSchedulingRateMultiplier: "0.2", SettingKeyCodexCLIOnlyEngineFingerprintSignals: "[]"}, floatPtr(0.2), true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			resetOpenAIAdvancedSchedulerSettingCacheForTest()
+			repo := &openAIAdvancedSchedulerSettingRepoStub{values: tt.values}
+			if tt.startup {
+				require.Equal(t, floatPtr(1), cachedOpenAIOAuthSchedulingRateMultiplier())
+				ProvideSettingService(repo, nil, nil, nil, nil)
+			}
 			svc := &OpenAIGatewayService{
 				rateLimitService: &RateLimitService{settingService: &SettingService{
-					settingRepo: &openAIAdvancedSchedulerSettingRepoStub{values: tt.values},
+					settingRepo: repo,
 				}},
 			}
 			for i := 0; i < 2; i++ {
-				require.Equal(t, tt.want, svc.openAIOAuthSchedulingRateMultiplier(context.Background()))
+				if !tt.startup {
+					require.Equal(t, tt.want, svc.openAIOAuthSchedulingRateMultiplier(context.Background()))
+				}
 				account := upstreamCostTestOAuthAccount(1)
 				account.RateMultiplier = floatPtr(0.3)
 				want := 0.3

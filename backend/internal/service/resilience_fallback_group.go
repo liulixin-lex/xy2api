@@ -164,13 +164,6 @@ func (r *ResilienceService) groupHasHealthyAccount(ctx context.Context, groupID 
 	}
 	for i := range accounts {
 		a := &accounts[i]
-		// Composite availability remains group-wide across its member platforms.
-		if group.Platform == PlatformComposite {
-			if tier, _, _ := resiliencePenaltyOf(a, "", now); tier == resilience.TierNone {
-				return true
-			}
-			continue
-		}
 		if groupMemberServable(group, a, now, r.groupQualityGateView, nil) {
 			return true
 		}

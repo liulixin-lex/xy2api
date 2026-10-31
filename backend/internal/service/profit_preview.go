@@ -252,7 +252,7 @@ func (s *GroupQualityGateService) ProfitControlPreview(ctx context.Context, grou
 	previewGroup.ProfitSafetyBuffer = 0
 	now := time.Now()
 	ceiling, _ := groupProfitCeiling(&previewGroup, now)
-	accounts, err := s.accountRepo.ListByGroup(ctx, groupID)
+	accounts, err := s.accountRepo.ListAllWithFilters(ctx, "", "", "", "", groupID, "")
 	if err != nil {
 		return nil, err
 	}

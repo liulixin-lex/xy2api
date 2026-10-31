@@ -29,7 +29,13 @@ func (r *fallbackGroupRepo) GetByIDLite(_ context.Context, id int64) (*Group, er
 // groupAccountsRepo lists accounts per group.
 type groupAccountsRepo struct {
 	AccountRepository
-	byGroup map[int64][]Account
+	byGroup   map[int64][]Account
+	listedAll bool
+}
+
+func (r *groupAccountsRepo) ListAllWithFilters(_ context.Context, _, _, _, _ string, groupID int64, _ string) ([]Account, error) {
+	r.listedAll = true
+	return r.byGroup[groupID], nil
 }
 
 func (r *groupAccountsRepo) ListByGroup(_ context.Context, groupID int64) ([]Account, error) {
@@ -330,6 +336,7 @@ func TestAvailabilityFallbackServableMembers(t *testing.T) {
 		originCost, servingCost                          float64
 		originEjected, servingEjected, pinned, guardHeld bool
 		originSoft, unsupportedModel, composite          bool
+		mixedPlatform                                    string
 		wantMove                                         bool
 		wantOriginAvailable, wantServingAvailable        int64
 	}{
@@ -341,7 +348,9 @@ func TestAvailabilityFallbackServableMembers(t *testing.T) {
 		{name: "serving quality rejects", originCost: 1, servingCost: 0.7, servingEjected: true},
 		{name: "pinned but failing origin is servable", originCost: 0.3, servingCost: 0.7, originEjected: true, pinned: true, wantOriginAvailable: 1, wantServingAvailable: 1},
 		{name: "guard held origin is servable", originCost: 0.3, servingCost: 0.7, originEjected: true, guardHeld: true, wantOriginAvailable: 1, wantServingAvailable: 1},
-		{name: "composite preserves cross-platform availability", originCost: 0.3, servingCost: 0.7, composite: true},
+		{name: "composite preserves cross-platform availability with gates off", originCost: 0.3, servingCost: 0.7, composite: true, wantOriginAvailable: 1, wantServingAvailable: 1},
+		{name: "healthy mixed account keeps anthropic origin", originCost: 0.3, servingCost: 0.7, mixedPlatform: PlatformAnthropic, wantOriginAvailable: 1, wantServingAvailable: 1},
+		{name: "healthy mixed account keeps gemini origin", originCost: 0.3, servingCost: 0.7, mixedPlatform: PlatformGemini, wantOriginAvailable: 1, wantServingAvailable: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r, _, repo, key := newFallbackFixture(t)
@@ -363,6 +372,11 @@ func TestAvailabilityFallbackServableMembers(t *testing.T) {
 			if tc.composite {
 				origin.Platform, serving.Platform = PlatformComposite, PlatformComposite
 				origin.ProfitControlEnabled, serving.ProfitControlEnabled = false, false
+			}
+			if tc.mixedPlatform != "" {
+				origin.Platform, serving.Platform = tc.mixedPlatform, tc.mixedPlatform
+				first.Platform, second.Platform = PlatformAntigravity, tc.mixedPlatform
+				first.Extra = map[string]any{"mixed_scheduling": true}
 			}
 			view := NewGroupQualityGateService(nil, nil, nil)
 			state := func(ejected, pinned, held bool) groupQualityMemberSnapshot {
@@ -391,6 +405,7 @@ func TestAvailabilityFallbackServableMembers(t *testing.T) {
 				require.Nil(t, got)
 			}
 			first.Groups, second.Groups = []*Group{origin}, []*Group{serving}
+			require.Equal(t, tc.composite || tc.originCost <= 0.5, groupMemberUsable(origin, &first, time.Now()), "guard denominator uses scheduler platform eligibility")
 			ops := &OpsService{accountRepo: &fallbackOpsAccounts{rows: []Account{first, second}}, groupQualityGateView: view}
 			_, stats, _, _, err := ops.GetAccountAvailabilityStats(context.Background(), "", nil)
 			require.NoError(t, err)
@@ -411,17 +426,20 @@ func (r *fallbackOpsAccounts) ListOpsAccountsForStats(context.Context, string, *
 
 func TestFallbackProfitControlPreview(t *testing.T) {
 	for _, tc := range []struct {
-		name        string
-		margin      float64
-		wantPassing int
-		wantCeiling float64
-		probeAge    time.Duration
+		name          string
+		margin        float64
+		wantPassing   int
+		wantCeiling   float64
+		probeAge      time.Duration
+		mixedPlatform string
 	}{
-		{"request margin with zero buffer", 0.25, 3, 0.75, 0},
-		{"zero margin", 0, 4, 1, 0},
-		{"stricter margin", 0.9, 1, 0.1, 0},
-		{"fresh probe changes passing count", 0.25, 4, 0.75, time.Minute},
-		{"stale probe keeps stored rate", 0.25, 3, 0.75, 3 * time.Hour},
+		{"request margin with zero buffer", 0.25, 3, 0.75, 0, ""},
+		{"zero margin", 0, 4, 1, 0, ""},
+		{"stricter margin", 0.9, 1, 0.1, 0, ""},
+		{"fresh probe changes passing count", 0.25, 4, 0.75, time.Minute, ""},
+		{"stale probe keeps stored rate", 0.25, 3, 0.75, 3 * time.Hour, ""},
+		{"mixed anthropic members", 0.25, 3, 0.75, 0, PlatformAnthropic},
+		{"mixed gemini members", 0.25, 3, 0.75, 0, PlatformGemini},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			group := &Group{ID: 10, Platform: PlatformOpenAI, RateMultiplier: 1, ProfitMinMargin: 0.5, ProfitSafetyBuffer: 0.4}
@@ -437,11 +455,22 @@ func TestFallbackProfitControlPreview(t *testing.T) {
 			}
 			disabled := healthyAccount(6)
 			disabled.Schedulable = false
-			rows = append(rows, disabled, softAccount(7))
-			svc := NewGroupQualityGateService(nil, &groupAccountsRepo{byGroup: map[int64][]Account{10: rows}}, &fallbackGroupRepo{groups: map[int64]*Group{10: group}})
+			inactive := healthyAccount(8)
+			inactive.Status = StatusDisabled
+			rows = append(rows, disabled, softAccount(7), inactive)
+			if tc.mixedPlatform != "" {
+				group.Platform = tc.mixedPlatform
+				for i := range rows {
+					rows[i].Platform = PlatformAntigravity
+					rows[i].Extra = map[string]any{"mixed_scheduling": true}
+				}
+			}
+			repo := &groupAccountsRepo{byGroup: map[int64][]Account{10: rows}}
+			svc := NewGroupQualityGateService(nil, repo, &fallbackGroupRepo{groups: map[int64]*Group{10: group}})
 			got, err := svc.ProfitControlPreview(context.Background(), 10, &tc.margin)
 			require.NoError(t, err)
-			require.Equal(t, 7, got.Members)
+			require.True(t, repo.listedAll, "members query must include inactive accounts")
+			require.Equal(t, 8, got.Members)
 			require.Equal(t, 5, got.Schedulable)
 			require.Equal(t, tc.wantPassing, got.Passing)
 			require.InDelta(t, tc.wantCeiling, got.Ceiling, 1e-12)

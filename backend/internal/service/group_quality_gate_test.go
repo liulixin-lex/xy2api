@@ -391,6 +391,10 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			group.RateMultiplier = 1.25
 			group.ProfitMinMargin = 0.2
 			accounts := e.repo.members[7]
+			// This case exercises stored costs; OAuth uses the global reference.
+			for i := range accounts {
+				accounts[i].Type = AccountTypeAPIKey
+			}
 			accounts[1].Status = StatusDisabled
 			accounts[2].Schedulable = false
 			accounts[3].TempUnschedulableUntil = groupQualityTimePtr(e.base.Add(time.Hour))
