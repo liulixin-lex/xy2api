@@ -10,7 +10,7 @@
 
 转换/映射/正文/system/既有补断点 → 一套 TTL 处理 → 供应商能力清理 → 计算 applied → 签名发送。以真实出口及规范化 Claude 模型判定，不能因分组或兼容端点而污染其他模型。入口与供应商按现有构造器组合适用：Anthropic 原生/透传及 Chat/Responses → Anthropic；Vertex 已支持的原生/转换路径；Bedrock 原生 Messages（Bearer/SigV4）。Chat/Responses → Bedrock 没有转换构造器或 eventstream 解码器，可能落入既有上游认证/通用转发错误而非显式 unsupported；本变更不新增该转换。`count_tokens` 不覆写或补断点，其他供应商出口不适用。
 
-只遍历协议位置，不递归业务 JSON。顶层 automatic 计入四槽，新增断点预留槽位；不任意删合法声明。强制统一后再保护合法性；off 保留客户端合法混合 TTL，保留既有顺序保护。deferred/thinking 不注入。Bedrock legacy automatic 能力边界明确，清理后不再补回。缓存变换只作用当前尝试，跨号/同号重试/兜底不继承前次 wire。
+只遍历协议位置，不递归业务 JSON。顶层 automatic 计入四槽，新增断点预留槽位；不任意删合法声明。强制统一后再保护合法性；off 保留客户端合法混合 TTL，保留既有顺序保护。deferred/thinking 不注入。Bedrock legacy automatic 能力边界明确，清理后不再补回。缓存变换只作用当前尝试，跨号/同号重试/兜底不继承前次 wire。2026-10-31 后续：Chat/Responses 转换体在四槽裁剪后、顺序保护前把顶层 automatic 与末块显式标记的 5m/1h 不一致统一为 1h；原生 Messages 不变。
 
 ## 财务与观测
 
@@ -20,7 +20,7 @@
 
 在现有预留输入区分无冷写风险/5m/1h，覆盖客户端断点及既有注入可能性；冷写取对应本站写价与输入价较高者并禁用历史缓存折扣，无断点且无注入路径不提高预留。最终收费仍取实际 usage 和商业规则。
 
-usage 新增可空 policy/applied：policy=off/5m/1h；applied 为最终能力清理后有合法声明且全部匹配指定 TTL，即使字节未改也 true；off/无声明/未落实 false；非目标及历史 NULL。只使用结算尝试。使用记录页面不显示 policy/applied（2026-10-31 后续变更：0.4.15 曾在列表与详情显示，存量 off Key 每行都是「未应用」，按用户要求移除），接口照常返回，NULL 为未记录；已应用不等于供应商生效或命中。复用结构化事件记录有限枚举和原始数字，不新增日志服务。
+usage 新增可空 policy/applied：policy=off/5m/1h；applied 为最终能力清理后有合法声明且全部匹配指定 TTL，即使字节未改也 true；off/无声明/未落实 false；非目标及历史 NULL。只使用结算尝试。使用记录页面不显示 policy/applied（2026-10-31 后续变更：0.4.15 曾在列表与详情显示，存量 off Key 每行都是「未应用」，按用户要求移除），接口照常返回，NULL 为未记录；已应用不等于供应商生效或命中。复用结构化事件记录有限枚举和原始数字，不新增日志服务。2026-10-31 后续：结算事件 ttl_status 增加 downgraded（策略 1h 且已应用、供应商只报 5m 写入），形状类状态优先。
 
 ## 升级与回退
 

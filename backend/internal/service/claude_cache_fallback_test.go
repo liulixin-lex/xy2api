@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -457,10 +458,29 @@ func TestClaudeCacheConvertedProtocolDeclarations(t *testing.T) {
 		`{"tools":[{"type":"function","function":{"name":"tool","cache_control":null}}]}`,
 		`{"input":[{"role":"user","content":[{"type":"input_text","text":"hi","cache_control":null}]}]}`,
 		`{"input":[{"type":"message","role":"user","content":"hi","cache_control":null}]}`,
+		`{"input":[{"type":"custom_tool_call_output","call_id":"c","output":[{"type":"input_text","text":"ok","cache_control":null}]}]}`,
+		`{"input":[{"type":"tool_search_output","call_id":"c","cache_control":{"type":"ephemeral"}}]}`,
 	} {
 		require.True(t, HasClaudeCacheControl([]byte(raw)), raw)
 	}
-	require.False(t, HasClaudeCacheControl([]byte(`{"input":[{"type":"function_call_output","output":{"cache_control":null}}]}`)))
+	// Tool items convert to tool_use/tool_result blocks that keep these markers.
+	for raw, ttl := range map[string]string{
+		`{"input":[{"type":"function_call_output","call_id":"c","output":"ok","cache_control":{"type":"ephemeral","ttl":"1h"}}]}`:                                "1h",
+		`{"input":[{"type":"function_call_output","call_id":"c","output":[{"type":"input_text","text":"ok","cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}`: "1h",
+		`{"input":[{"type":"function_call","call_id":"c","name":"probe","arguments":"{}","cache_control":{"type":"ephemeral"}}]}`:                                "5m",
+		`{"messages":[{"role":"tool","tool_call_id":"c","content":"ok","cache_control":{"type":"ephemeral","ttl":"1h"}}]}`:                                       "1h",
+	} {
+		require.True(t, HasClaudeCacheControl([]byte(raw)), raw)
+		require.Equal(t, ttl, declaredAnthropicCacheTTL([]byte(raw)), raw)
+	}
+	for _, raw := range []string{
+		`{"input":[{"type":"function_call_output","output":{"cache_control":null}}]}`,
+		`{"input":[{"type":"tool_search_output","call_id":"c","output":[{"cache_control":{"type":"ephemeral"}}]}]}`,
+		`{"input":[{"type":"reasoning","encrypted_content":"x","cache_control":{"type":"ephemeral"}}]}`,
+		`{"input":[{"type":"function_call_output","call_id":"c","output":"{\"cache_control\":{\"type\":\"ephemeral\"}}"}]}`,
+	} {
+		require.False(t, HasClaudeCacheControl([]byte(raw)), raw)
+	}
 }
 
 func TestClaudeCacheRemovalAtSend(t *testing.T) {
@@ -634,4 +654,69 @@ func TestClaudeCacheRawUsageBeforeOverrides(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestClaudeCacheTTLStatus(t *testing.T) {
+	for _, tc := range []struct {
+		created, five, hour int
+		policy              string
+		applied             bool
+		want                string
+	}{
+		{0, 0, 0, "1h", true, "consistent"},
+		{1000, 1000, 0, "1h", true, "downgraded"},
+		{1000, 0, 1000, "1h", true, "consistent"},
+		{1000, 400, 600, "1h", true, "consistent"},
+		{1000, 1000, 0, "1h", false, "consistent"},
+		{1000, 1000, 0, "5m", true, "consistent"},
+		{1000, 1000, 0, "off", false, "consistent"},
+		{1000, 0, 0, "1h", true, "missing"},
+		{1000, 600, 0, "1h", true, "partial"},
+		{1000, 1200, 0, "1h", true, "inconsistent"},
+		{0, 10, 0, "1h", true, "inconsistent"},
+	} {
+		usage := ClaudeUsage{CacheCreationInputTokens: tc.created, CacheCreation5mTokens: tc.five, CacheCreation1hTokens: tc.hour}
+		require.Equal(t, tc.want, claudeCacheTTLStatus(usage, tc.policy, tc.applied), "%+v", tc)
+	}
+}
+
+type claudeCacheLogRecorder struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (h *claudeCacheLogRecorder) Enabled(context.Context, slog.Level) bool { return true }
+func (h *claudeCacheLogRecorder) WithAttrs([]slog.Attr) slog.Handler       { return h }
+func (h *claudeCacheLogRecorder) WithGroup(string) slog.Handler            { return h }
+func (h *claudeCacheLogRecorder) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, r.Clone())
+	return nil
+}
+
+// Settlement contexts carry no TTL policy; the status must use the result's.
+func TestClaudeCacheBillingLogDowngraded(t *testing.T) {
+	recorder := &claudeCacheLogRecorder{}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(recorder))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	policy, applied := "1h", true
+	result := &ForwardResult{AnthropicCacheTTLPolicy: &policy, AnthropicCacheTTLApplied: &applied, Usage: ClaudeUsage{CacheCreationInputTokens: 1000, CacheCreation5mTokens: 1000}}
+	logClaudeCacheBilling(context.Background(), result, &UsageLog{}, false, false, "ok")
+	recorder.mu.Lock()
+	defer recorder.mu.Unlock()
+	attrs := map[string]string{}
+	for _, r := range recorder.records {
+		if r.Message != "gateway.claude_cache_fallback.billing" {
+			continue
+		}
+		r.Attrs(func(a slog.Attr) bool {
+			attrs[a.Key] = a.Value.String()
+			return true
+		})
+	}
+	require.Equal(t, "downgraded", attrs["ttl_status"])
+	require.Equal(t, "1h", attrs["ttl_policy"])
+	require.Equal(t, "true", attrs["ttl_applied"])
 }

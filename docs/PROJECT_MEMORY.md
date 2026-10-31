@@ -71,6 +71,12 @@
   - 仅转换路由：顶层 automatic 与末块显式 TTL 冲突时向长 TTL 调和（原生 `/v1/messages` 不变），与上一项同 PR，避免 off 模式 Key 出现新 400。
   - 观测：策略 1h 已应用但上游只报 5m 时，结算日志标为降级；文档补运维查询，并写明官方 1h 不需要 beta、本站默认不加。
   - 只开到 CI 全绿，不合并、不发版、不部署；真实上游实测需另行授权。
+  - 状态（2026-10-31T19:40Z）：分支 `fix/tool-cache-markers-20261031`（叠在 #176 上）已本地实现并验证，见操作日志；具名补丁 `xy-converted-tool-cache-markers`。合并顺序 #175 → #176 → 本 PR。
+  - 发现、留给用户决定（本 PR 不改）：
+    - 0.4.15 起 `ChatCompletionsToResponses` 会把 Chat 请求里的顶层、消息、分片、工具 `cache_control` 写进发往 OpenAI/Grok 的 Responses 请求（0.4.14 不发）。严格上游可能对未知字段返回 400；0.4.15 尚未部署，建议另开小 PR 在 OpenAI 出口去掉。本 PR 的工具标记已改用内部字段，不扩大这一范围。
+    - 原始声明识别仍漏 Responses `additional_tools`、Codex `namespace` 子工具、无 type 的内容项上的标记（既有问题）；`/v1/responses` 旧版 Chat 形状请求的工具标记不转发。
+    - 结算日志 `ttl_mode`/`ttl_source` 在生产恒为 off/unrecorded：`usageRecordContext` 不复制策略 context（既有问题）。
+    - 「跟随全局只延长、不缩短」待用户确认。
 
 ## 操作陷阱
 
@@ -308,3 +314,18 @@ pnpm --dir frontend run build
 - 验证：KeysView、卡片、设置页与 locale 定向 vitest 4 个文件 108 项、改动文件 eslint、vue-tsc、`check_docs_consistency.py`、`git diff --check` 通过。
 - 卡点/风险：无。若之后上线「跟随全局只延长、不缩短」，这两条提示要按新规则改。
 - 下一步：推送后等 #176 CI 全绿；后端项见 `20261031-tool-cache-markers`。
+
+### 2026-10-31T19:40Z — 20261031-tool-cache-markers — 转换路由保留工具缓存标记，本地验证完成
+
+- 请求/目标：用户对照参考仓库 kiss-kedaya/sub2api 后同意建议顺序：先修 Chat/Responses → Anthropic 丢工具结果缓存标记，同 PR 做转换路由的顶层/末块 TTL 调和与 1h 降级观测；「只延长不缩短」另待确认。
+- 开始状态：从 #176 分支 `2fa64cc18` 新建 worktree，分支 `fix/tool-cache-markers-20261031`。
+- 完成操作：
+  - 多 agent 只读梳理转换链、finalize、观测、参考提交 `aefe48ebf`/`8025f5aad` 与治理规则后定稿设计，3 路挑错；主协调补充：Chat 工具标记只经内部字段带给 Anthropic 转换，不写进发往 OpenAI 的 Responses 请求。
+  - apicompat：Chat `role=tool`/`role=function` 标记（消息级，否则最后一个带标记分片）落 `tool_result`，只含 `tool_calls` 的 assistant 标记落最后一个 `tool_use`；Responses `function_call_output` 取项级或数组 `output` 最后一个分片标记，`function_call` 落 `tool_use`；无嵌套副本。Chat 中转经 JSON，内部字段按 input 位置对齐恢复，长度不符则不恢复。
+  - service：4 个转换出口改用 `enforceConvertedCacheControlLimit`，顶层 automatic 与末块显式 5m/1h 不一致时统一为 1h（双向）；原生 Messages、透传、Bedrock、count_tokens 不变。原始声明识别覆盖 Responses 工具项；结算日志 `ttl_status` 增加 `downgraded`，策略取自结算结果。
+  - 文档：`ANTHROPIC_CACHE_TTL.md`（工具标记规则、beta 说明、`ttl_status` 取值、1h 降级巡检 SQL）、`CLAUDE_CACHE_FALLBACK.md`、两个 OpenSpec 变更的 dated 后续；policy 与 `UPSTREAM_BASE.json` 登记具名补丁。
+- 审查：Claude 三个维度（wire 正确性与路由隔离、转换与声明一致性、测试/治理/文档）查找并逐条反驳核验，2 条均为设计内的已知取舍，驳回；gpt-6-astra（xhigh，只读快照）报 1 条小问题：`tool_search_output` 输出会被转成字符串，文档不应承诺分片标记，已收窄文档与 OpenSpec。
+- 修改文件：apicompat `types.go`、`anthropic_cache_control.go`、`chatcompletions_to_responses.go`、`responses_to_anthropic_request.go`；service `claude_cache_fallback.go`、`gateway_anthropic_cache_ttl.go` 及 4 个转换出口；测试 `anthropic_cache_test.go`、`claude_cache_fallback_test.go`、`gateway_anthropic_cache_ttl_test.go`、新增 `anthropic_native_cache_ttl_test.go`（unit）；上述文档、OpenSpec、`tools/upstream-sync/policy.json`、`UPSTREAM_BASE.json`、本记忆。
+- 验证：gofmt；`go build ./...`；apicompat/service/handler 在四种 tag 下 vet；`go test -tags=unit` apicompat/service（372s）/handler（56s）全过；无 tag 的缓存测试 34 个顶层用例；相关 `-race` 53 个顶层用例零跳过；golangci-lint v2.14.0 0 issues；`check_docs_consistency.py`；tools 单测 96 项；干净提交上 `sync.py audit` 与 `scheduler-diff` 通过。临时回退实现后新测试按预期失败（只锁现状的守卫用例除外）。未做真实上游验证。
+- 卡点/风险：真实 Anthropic/Vertex/OAuth 对 `tool_result`/`tool_use` 标记的接受与命中、Kimi 等 Anthropic 兼容上游的接受度未验证；只给工具结果打标记的 Responses 客户端不再触发分组补缓存（改为 `client_declared`）。发现的既有问题见“进行中的工作”。
+- 下一步：推送并以 #176 分支为 base 开 PR，CI 全绿后停下；不合并、不发版、不部署。
