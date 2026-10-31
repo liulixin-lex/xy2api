@@ -13,6 +13,7 @@ import {
   groupQualityStateLabel,
   groupQualityTooltip,
   orderGroupsByQuality,
+  qualityTooltipTop,
   type GroupQualitySources
 } from '../groupQualityPresentation'
 
@@ -213,5 +214,15 @@ describe('accountQualityMetricItems', () => {
     expect(alert(0.3, 40)).toBe(false)
     expect(alert(0.9, 19)).toBe(false)
     expect(texts(metrics()).filter(item => item.alert)).toEqual([])
+  })
+})
+
+describe('qualityTooltipTop', () => {
+  const trigger = { top: 500, bottom: 540 }
+  it('places the tooltip below, then above, then pinned inside the viewport by its real height', () => {
+    expect(qualityTooltipTop(trigger, 200, 900)).toBe(546)
+    expect(qualityTooltipTop(trigger, 420, 900)).toBe(74)
+    expect(qualityTooltipTop(trigger, 600, 900)).toBe(292)
+    expect(qualityTooltipTop(trigger, 1000, 900)).toBe(8)
   })
 })

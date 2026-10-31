@@ -36,6 +36,7 @@
       v-if="details.length"
       v-show="tipOpen"
       :id="tooltipId"
+      ref="tip"
       role="tooltip"
       data-testid="account-groups-quality-tooltip"
       class="pointer-events-none fixed z-50 w-72 rounded-lg bg-gray-900 p-3 text-xs leading-relaxed text-gray-100 shadow-lg dark:bg-dark-800"
@@ -49,7 +50,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, useId } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupQualityBadge from './GroupQualityBadge.vue'
@@ -61,6 +62,7 @@ import {
   accountQualityMetricItems,
   groupQualityTooltip,
   orderGroupsByQuality,
+  qualityTooltipTop,
   type GroupQualityCell
 } from './groupQualityPresentation'
 
@@ -102,19 +104,22 @@ const details = computed(() => {
 })
 
 const trigger = ref<HTMLElement>()
+const tip = ref<HTMLElement>()
 const tipOpen = ref(false)
 const tipStyle = ref<Record<string, string>>({})
 
-function openTip() {
+async function openTip() {
   const rect = trigger.value?.getBoundingClientRect()
   if (!details.value.length || !rect) return
   const left = `${Math.max(8, Math.min(rect.left, window.innerWidth - TIP_WIDTH - 8))}px`
-  // 下方放不下时放到上方。
-  tipStyle.value = window.innerHeight - rect.bottom < 240
-    ? { left, top: `${rect.top - TIP_GAP}px`, transform: 'translateY(-100%)' }
-    : { left, top: `${rect.bottom + TIP_GAP}px` }
+  // 先隐藏着渲染出来量高度，再按实际高度放到下方或上方，长提示不会超出视口。
+  tipStyle.value = { left, top: `${rect.bottom + TIP_GAP}px`, visibility: 'hidden' }
   tipOpen.value = true
   window.addEventListener('scroll', closeTip, true)
+  await nextTick()
+  if (!tipOpen.value) return
+  const top = qualityTooltipTop(rect, tip.value?.offsetHeight ?? 0, window.innerHeight, TIP_GAP)
+  tipStyle.value = { left, top: `${top}px` }
 }
 
 function closeTip() {

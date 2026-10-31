@@ -151,6 +151,21 @@ export const formatQualityRate = (rate: number) => `${Math.round(rate * 1000) / 
 export const formatQualitySeconds = (ms: number) => `${Math.round(ms / 100) / 10}s`
 const formatHeadroom = (headroom: number) => `${Math.round(headroom * 100)}%`
 
+/** 提示面板的纵向位置：下方放得下放下方，否则放上方；两边都放不下时贴住视口底部，且不超出顶部。 */
+export function qualityTooltipTop(
+  trigger: { top: number; bottom: number },
+  height: number,
+  viewportHeight: number,
+  gap = 6,
+  margin = 8
+): number {
+  const below = trigger.bottom + gap
+  if (below + height <= viewportHeight - margin) return below
+  const above = trigger.top - gap - height
+  if (above >= margin) return above
+  return Math.max(margin, viewportHeight - margin - height)
+}
+
 /** 悬停说明：状态、原因、实测值与上限、余量。实测值是账号完整窗口的指标，所有分组共用。 */
 export function groupQualityTooltip(
   groupName: string,
