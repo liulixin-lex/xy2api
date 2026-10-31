@@ -81,10 +81,12 @@ type OpenAIAccountScheduleRequest struct {
 	// DisableStickyEscape keeps task-owner lookups on their account even when
 	// generic sticky health or concurrency heuristics would prefer another.
 	DisableStickyEscape     bool
+	SkipStickyCapacityRetry bool
 	RequirePrivacySet       bool
 	PreviousResponseID      string
 	PreviousResponseCanMove bool
 	UseUpstreamTokenCost    bool
+	AdvancedScheduler       bool
 	RequestedModel          string
 	RequiredTransport       OpenAIUpstreamTransport
 	RequiredCapability      OpenAIEndpointCapability
@@ -558,6 +560,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		clearBinding()
 		return nil, false, nil
 	}
+	// Advanced sticky validation drops ejected owners so load balancing can rebind them.
 	if vetoed, _ := groupQualityGateVeto(ctx, account); vetoed {
 		clearBinding()
 		return nil, false, nil
@@ -628,9 +631,33 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		}), false, nil
 	}
 
+	if NormalizeOpenAICompatiblePlatform(req.Platform) != PlatformOpenAI {
+		if s.service.concurrencyService != nil {
+			if escapeCfg.enabled && !req.DisableStickyEscape && acquireErr == nil && result != nil && !result.Acquired {
+				errorRate, ttft, _ := s.stats.snapshot(accountID)
+				slog.Info("sticky_escape_triggered",
+					"account_id", accountID,
+					"reason", "concurrency_full",
+					"error_rate", errorRate,
+					"ttft", ttft,
+				)
+				return nil, true, nil
+			}
+			cfg := s.service.schedulingConfig()
+			return attachSelectionProfitGate(ctx, &AccountSelectionResult{
+				Account: account,
+				WaitPlan: &AccountWaitPlan{
+					AccountID: account.ID, MaxConcurrency: account.Concurrency,
+					Timeout: cfg.StickySessionWaitTimeout, MaxWaiting: cfg.StickySessionMaxWaiting,
+				},
+			}), false, nil
+		}
+		return nil, false, nil
+	}
+
 	if s.service.concurrencyService != nil {
 		if acquireErr != nil {
-			return nil, false, acquireErr
+			req.SkipStickyCapacityRetry = true
 		}
 		selection, err := s.service.selectOpenAIStickyCapacity(ctx, account, req)
 		return selection, false, err
@@ -1879,6 +1906,7 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx con
 	if vetoed, reason := openAIProfitControlVetoReason(ctx, account); vetoed {
 		return false, reason
 	}
+	// Advanced candidate admission reports the shared reason through filter stats.
 	if vetoed, reason := groupQualityGateVeto(ctx, account); vetoed {
 		return false, reason
 	}
@@ -2589,6 +2617,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		PreviousResponseID:      previousResponseID,
 		PreviousResponseCanMove: previousResponseCanMove,
 		UseUpstreamTokenCost:    useUpstreamTokenCost,
+		AdvancedScheduler:       true,
 		RequestedModel:          requestedModel,
 		RequiredTransport:       requiredTransport,
 		RequiredCapability:      requiredCapability,

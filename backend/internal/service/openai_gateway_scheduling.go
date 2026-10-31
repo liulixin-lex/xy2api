@@ -528,6 +528,7 @@ func openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx context.Con
 			return reason
 		}
 	}
+	// Legacy candidate admission reports group_quality_ejected through its filter stats.
 	if vetoed, reason := groupQualityGateVeto(ctx, account); vetoed {
 		return reason
 	}
@@ -1051,6 +1052,7 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 		return nil
 	}
 
+	// Legacy sticky admission rejects the owner before returning it to a caller.
 	if vetoed, _ := groupQualityGateVeto(ctx, account); vetoed {
 		_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 		return nil
@@ -1171,12 +1173,17 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 		rateOrder = newOpenAILegacyUpstreamRateOrder(eligible, time.Now(), s.openAIOAuthSchedulingRateMultiplier(ctx))
 		rateOrder.enabled = true
 	}
+	orderItems := make([]accountWithLoad, len(eligible))
+	for i, account := range eligible {
+		orderItems[i] = accountWithLoad{account: account}
+	}
+	order := s.openAICandidateOrderForItems(groupID, rateOrder, orderItems)
 	sort.SliceStable(eligible, func(i, j int) bool {
 		a, b := eligible[i], eligible[j]
 		if requireCompact && compactTiers[a.ID] != compactTiers[b.ID] {
 			return compactTiers[a.ID] > compactTiers[b.ID]
 		}
-		return openAICandidateLess(accountWithLoad{account: a}, accountWithLoad{account: b}, s.openAICandidateOrder(groupID, rateOrder))
+		return openAICandidateLess(accountWithLoad{account: a}, accountWithLoad{account: b}, order)
 	})
 	eligible = s.partitionOpenAILatencyHeldAccounts(ctx, eligible, requestedModel, requireCompact)
 	return eligible[0], compactBlocked, filterStats
@@ -1242,10 +1249,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			return markStickySessionHit(selection, stickyHit), selectErr
 		}
 		if stickyHit && s.concurrencyService != nil {
-			if err != nil {
-				return nil, err
-			}
-			return s.selectOpenAIStickyCapacity(ctx, account, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability, UseUpstreamTokenCost: useUpstreamTokenCost})
+			return s.selectOpenAIStickyCapacity(ctx, account, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability, UseUpstreamTokenCost: useUpstreamTokenCost, SkipStickyCapacityRetry: err != nil})
 		}
 
 		selection, selectErr := s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
@@ -1278,6 +1282,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		accountID := stickyAccountID
 		if accountID > 0 {
 			account, err := s.getSchedulableAccount(ctx, accountID)
+			// Legacy load-aware sticky admission must not retain an ejected owner.
 			if vetoed, _ := groupQualityGateVeto(ctx, account); vetoed {
 				_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 				account = nil
@@ -1310,10 +1315,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 							return markStickySessionHit(selection, true), nil
 						}
 
-						if err != nil {
-							return nil, err
-						}
-						return s.selectOpenAIStickyCapacity(ctx, account, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability, UseUpstreamTokenCost: useUpstreamTokenCost})
+						return s.selectOpenAIStickyCapacity(ctx, account, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability, UseUpstreamTokenCost: useUpstreamTokenCost, SkipStickyCapacityRetry: err != nil})
 					}
 				}
 			}
@@ -1403,13 +1405,18 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			return nil, false, nil
 		}
 
-		order := s.openAICandidateOrder(groupID, rateOrder)
+		availableItems := append([]accountWithLoad(nil), available...)
+		order := s.openAICandidateOrderForItems(groupID, rateOrder, availableItems)
 		sort.SliceStable(available, func(i, j int) bool { return openAICandidateLess(available[i], available[j], order) })
 		if !rateOrder.enabled {
 			shuffleWithinSortGroups(available)
 		}
 		if replacementSession {
-			s.preferOpenAIReplacementSession(ctx, available, groupID, sessionHash, requestedModel, rateOrder, requireCompact, requiredCapability)
+			if rateOrder.enabled {
+				s.preferOpenAIReplacementSessionWithTiers(ctx, available, groupID, sessionHash, requestedModel, rateOrder, requireCompact, requiredCapability, order.tiers)
+			} else {
+				s.preferOpenAIReplacementSession(ctx, available, groupID, sessionHash, requestedModel, rateOrder, requireCompact, requiredCapability)
+			}
 		} else if !rateOrder.enabled && stickyAccountID == 0 {
 			s.preferCacheCandidates(ctx, available, requestedModel)
 		}
@@ -1545,16 +1552,26 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	return nil, ErrNoAvailableAccounts
 }
 
-// preferOpenAIReplacementSession keeps a stable fallback order within the
-// lowest-load band of each priority. Rate and compact cohorts remain separate;
-// the caller still applies their ordering and the final latency-hold partition.
+func (s *OpenAIGatewayService) preferOpenAIReplacementSessionWithTiers(ctx context.Context, available []accountWithLoad, groupID *int64, session, model string, rateOrder openAILegacyUpstreamRateOrder, compact bool, capability OpenAIEndpointCapability, qualityTiers map[int64]int) {
+	if rateOrder.enabled && qualityTiers == nil {
+		qualityTiers = make(map[int64]int, len(available))
+		view := s.GroupQualityGateView()
+		for _, item := range available {
+			qualityTiers[item.account.ID] = view.OrderTier(derefGroupID(groupID), item.account.ID)
+		}
+	}
+	s.preferOpenAISessionOrder(ctx, available, groupID, session, model, rateOrder, compact, capability, false, qualityTiers)
+}
+
+// preferOpenAIReplacementSession handles the rate-neutral path, which has no
+// quality tier table to reuse.
 func (s *OpenAIGatewayService) preferOpenAIReplacementSession(ctx context.Context, available []accountWithLoad, groupID *int64, session, model string, rateOrder openAILegacyUpstreamRateOrder, compact bool, capability OpenAIEndpointCapability) {
-	s.preferOpenAISessionOrder(ctx, available, groupID, session, model, rateOrder, compact, capability, false)
+	s.preferOpenAIReplacementSessionWithTiers(ctx, available, groupID, session, model, rateOrder, compact, capability, nil)
 }
 
 // preferOpenAISessionOrder extracts the session-stable order for borrowing.
 // Existing E2 cache evidence is retained when low-rate priority is off.
-func (s *OpenAIGatewayService) preferOpenAISessionOrder(ctx context.Context, available []accountWithLoad, groupID *int64, session, model string, rateOrder openAILegacyUpstreamRateOrder, compact bool, capability OpenAIEndpointCapability, borrowing bool) {
+func (s *OpenAIGatewayService) preferOpenAISessionOrder(ctx context.Context, available []accountWithLoad, groupID *int64, session, model string, rateOrder openAILegacyUpstreamRateOrder, compact bool, capability OpenAIEndpointCapability, borrowing bool, qualityTiers map[int64]int) {
 	protocol, _, _ := resilience.CapabilityRequestFrom(ctx)
 	type cohortKey struct {
 		priority     int
@@ -1568,8 +1585,10 @@ func (s *OpenAIGatewayService) preferOpenAISessionOrder(ctx context.Context, ava
 		key := cohortKey{priority: item.account.Priority}
 		if rateOrder.enabled {
 			key.rate, key.known = rateOrder.rates[item.account.ID]
-			key.qualityTier = s.GroupQualityGateView().OrderTier(derefGroupID(groupID), item.account.ID)
-			key.nearCapacity = openAIAccountNearCapacity(item)
+			key.qualityTier = qualityTiers[item.account.ID]
+			if !borrowing {
+				key.nearCapacity = openAIAccountNearCapacity(item)
+			}
 		}
 		if compact {
 			key.tier = openAICompactSupportTier(item.account)
@@ -1592,7 +1611,7 @@ func (s *OpenAIGatewayService) preferOpenAISessionOrder(ctx context.Context, ava
 	cohorts := make(map[cohortKey][]int)
 	for i, item := range available {
 		key := keyOf(item)
-		if item.loadInfo.LoadRate <= minLoad[loadKeyOf(item)]+20 {
+		if borrowing || item.loadInfo.LoadRate <= minLoad[loadKeyOf(item)]+20 {
 			cohorts[key] = append(cohorts[key], i)
 		}
 	}
@@ -1615,13 +1634,7 @@ func (s *OpenAIGatewayService) preferOpenAISessionOrder(ctx context.Context, ava
 				scores[item.account.ID] = value
 			}
 			hashes[item.account.ID] = openAIReplacementSessionHash(derefGroupID(groupID), session, item.account.ID)
-			var outboundModel string
-			// Text Responses also accepts Chat capability, but keeps Responses model rules.
-			if capability == OpenAIEndpointCapabilityChatCompletions && protocol != resilience.CapabilityProtocolResponses && !compact {
-				outboundModel = normalizeOpenAIModelForUpstream(item.account, resolveOpenAIForwardModel(item.account, model, ""))
-			} else {
-				outboundModel = resolveOpenAIAccountUpstreamModelForRequest(item.account, model, compact)
-			}
+			outboundModel := openAIReplacementSessionModel(item.account, model, compact, capability, protocol)
 			recent[item.account.ID] = s.recentSessionSuccess().lastSuccess(openAIRecentSessionKey{derefGroupID(groupID), session, outboundModel}, item.account.ID, now)
 		}
 		sort.SliceStable(items, func(i, j int) bool {
@@ -1641,6 +1654,14 @@ func (s *OpenAIGatewayService) preferOpenAISessionOrder(ctx context.Context, ava
 			available[index] = items[i]
 		}
 	}
+}
+
+func openAIReplacementSessionModel(account *Account, model string, compact bool, capability OpenAIEndpointCapability, protocol string) string {
+	// Text Responses also accepts Chat capability, but keeps Responses model rules.
+	if capability == OpenAIEndpointCapabilityChatCompletions && protocol != resilience.CapabilityProtocolResponses && !compact {
+		return normalizeOpenAIModelForUpstream(account, resolveOpenAIForwardModel(account, model, ""))
+	}
+	return resolveOpenAIAccountUpstreamModelForRequest(account, model, compact)
 }
 
 // Same fixed xxhash inputs as sharesched.hrwUniform: group salt, session key,
@@ -1977,7 +1998,6 @@ func groupQualityGateVeto(ctx context.Context, account *Account) (bool, string) 
 		return false, ""
 	}
 	if resilienceLastResortGate(ctx) || gate.lastResort {
-		slog.Info("group_quality_gate.last_resort", "group_id", gate.groupID, "account_id", account.ID)
 		return false, ""
 	}
 	return true, "group_quality_ejected"
@@ -2030,9 +2050,14 @@ func WithOpenAIQualityTurnExemption(ctx context.Context, pinned bool) context.Co
 
 type openAICandidateOrder struct {
 	rates   openAILegacyUpstreamRateOrder
-	view    GroupQualityGateView
 	groupID int64
+	tiers   map[int64]int
 }
+
+var (
+	openAIStickyCapacityRetryDuration = 2 * time.Second
+	openAIStickyCapacityRetryInitial  = 50 * time.Millisecond
+)
 
 func openAIAccountNearCapacity(item accountWithLoad) bool {
 	a := item.account
@@ -2043,7 +2068,7 @@ func openAIAccountNearCapacity(item accountWithLoad) bool {
 // it keeps the previous priority/load/LRU order and its stable ties.
 func openAICandidateLess(a, b accountWithLoad, order openAICandidateOrder) bool {
 	if order.rates.enabled {
-		at, bt := order.view.OrderTier(order.groupID, a.account.ID), order.view.OrderTier(order.groupID, b.account.ID)
+		at, bt := order.tiers[a.account.ID], order.tiers[b.account.ID]
 		if at != bt {
 			return at < bt
 		}
@@ -2076,10 +2101,25 @@ func openAICandidateLess(a, b accountWithLoad, order openAICandidateOrder) bool 
 	return order.rates.enabled && a.account.ID < b.account.ID
 }
 func (s *OpenAIGatewayService) openAICandidateOrder(groupID *int64, rates openAILegacyUpstreamRateOrder) openAICandidateOrder {
-	return openAICandidateOrder{rates: rates, view: s.GroupQualityGateView(), groupID: derefGroupID(groupID)}
+	return openAICandidateOrder{rates: rates, groupID: derefGroupID(groupID)}
+}
+func (s *OpenAIGatewayService) openAICandidateOrderForItems(groupID *int64, rates openAILegacyUpstreamRateOrder, items []accountWithLoad) openAICandidateOrder {
+	order := s.openAICandidateOrder(groupID, rates)
+	if rates.enabled {
+		order.tiers = make(map[int64]int, len(items))
+		view := s.GroupQualityGateView()
+		for _, item := range items {
+			order.tiers[item.account.ID] = view.OrderTier(order.groupID, item.account.ID)
+		}
+	}
+	return order
 }
 func (s *OpenAIGatewayService) sortOpenAIAccounts(accounts []*Account, groupID *int64, rates openAILegacyUpstreamRateOrder) {
-	order := s.openAICandidateOrder(groupID, rates)
+	items := make([]accountWithLoad, len(accounts))
+	for i, account := range accounts {
+		items[i] = accountWithLoad{account: account}
+	}
+	order := s.openAICandidateOrderForItems(groupID, rates, items)
 	sort.SliceStable(accounts, func(i, j int) bool {
 		return openAICandidateLess(accountWithLoad{account: accounts[i]}, accountWithLoad{account: accounts[j]}, order)
 	})
@@ -2093,44 +2133,93 @@ func (s *OpenAIGatewayService) sortOpenAIAccounts(accounts []*Account, groupID *
 func (s *OpenAIGatewayService) selectOpenAIStickyCapacity(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) (*AccountSelectionResult, error) {
 	cfg := s.schedulingConfig()
 	wait := func() (*AccountSelectionResult, error) {
+		if s.concurrencyService != nil {
+			waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, account.ID)
+			if waitingCount >= cfg.StickySessionMaxWaiting {
+				if !groupQualityGateExempt(ctx) && !req.DisableStickyEscape && req.PreviousResponseID == "" {
+					selection, err := s.selectOpenAIStickyCapacityFallbackWait(ctx, account, req)
+					if err != nil || selection != nil {
+						return markOpenAIStickySpillover(selection, true), err
+					}
+				}
+				selection, err := s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
+					AccountID: account.ID, MaxConcurrency: account.Concurrency,
+					Timeout: cfg.FallbackWaitTimeout, MaxWaiting: cfg.FallbackMaxWaiting,
+				})
+				return markOpenAIStickySpillover(selection, true), err
+			}
+		}
 		selection, err := s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{AccountID: account.ID, MaxConcurrency: account.Concurrency, Timeout: cfg.StickySessionWaitTimeout, MaxWaiting: cfg.StickySessionMaxWaiting})
 		return markStickySessionHit(selection, true), err
 	}
-	if groupQualityGateExempt(ctx) || req.DisableStickyEscape || req.PreviousResponseID != "" || NormalizeOpenAICompatiblePlatform(req.Platform) != PlatformOpenAI {
+	if groupQualityGateExempt(ctx) || req.DisableStickyEscape || req.PreviousResponseID != "" || req.SkipStickyCapacityRetry || NormalizeOpenAICompatiblePlatform(req.Platform) != PlatformOpenAI {
 		return wait()
 	}
-	retryUntil := time.Now().Add(2 * time.Second)
-	deadline := time.NewTimer(time.Until(retryUntil))
-	defer deadline.Stop()
-	tick := time.NewTicker(50 * time.Millisecond)
-	defer tick.Stop()
-retry:
+	retryUntil := time.Now().Add(openAIStickyCapacityRetryDuration)
+	retryDelay := openAIStickyCapacityRetryInitial
 	for {
+		delay := retryDelay
+		if remaining := time.Until(retryUntil); remaining < delay {
+			delay = remaining
+		}
+		if delay <= 0 {
+			break
+		}
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return nil, ctx.Err()
-		case <-deadline.C:
-			break retry
-		case <-tick.C:
-			if !time.Now().Before(retryUntil) {
-				break retry
-			}
+		case <-timer.C:
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
 			result, err := s.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency)
 			if err != nil {
-				return nil, err
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				return wait()
 			}
 			if result != nil && result.Acquired {
 				selection, err := s.newAcquiredSelectionResult(ctx, account, result.ReleaseFunc)
 				return markStickySessionHit(selection, true), err
 			}
 		}
+		if retryDelay < 200*time.Millisecond {
+			retryDelay *= 2
+			if retryDelay > 200*time.Millisecond {
+				retryDelay = 200 * time.Millisecond
+			}
+		}
 	}
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
+	selection, err := s.selectOpenAIStickyCapacityBorrow(ctx, account, req)
+	if err != nil || selection != nil {
+		return selection, err
+	}
+	return wait()
+}
+
+// selectOpenAIStickyCapacityBorrow tries only immediately available spillover
+// accounts. It deliberately does not wait on the sticky owner or create a wait
+// plan; callers that layer additional admission tiers can finish those tiers
+// before deciding whether the owner should receive the final wait plan.
+func (s *OpenAIGatewayService) selectOpenAIStickyCapacityBorrow(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) (*AccountSelectionResult, error) {
+	return s.selectOpenAIStickyCapacityResult(ctx, account, req, false)
+}
+
+func (s *OpenAIGatewayService) selectOpenAIStickyCapacityFallbackWait(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) (*AccountSelectionResult, error) {
+	return s.selectOpenAIStickyCapacityResult(ctx, account, req, true)
+}
+
+func (s *OpenAIGatewayService) selectOpenAIStickyCapacityResult(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest, fallbackWait bool) (*AccountSelectionResult, error) {
+	if account == nil {
+		return nil, nil
+	}
+	cfg := s.schedulingConfig()
 	accounts, err := s.listSchedulableAccounts(ctx, req.GroupID, req.Platform)
 	if err != nil {
 		return nil, err
@@ -2140,7 +2229,7 @@ retry:
 	loadRequests := make([]AccountWithConcurrency, 0, len(accounts))
 	for i := range accounts {
 		acc := &accounts[i]
-		if acc.ID == account.ID {
+		if !fallbackWait && acc.ID == account.ID {
 			continue
 		}
 		if _, excluded := req.ExcludedIDs[acc.ID]; excluded {
@@ -2152,8 +2241,10 @@ retry:
 		candidates = append(candidates, accountWithLoad{account: acc, loadInfo: &AccountLoadInfo{AccountID: acc.ID}})
 		loadRequests = append(loadRequests, AccountWithConcurrency{ID: acc.ID, MaxConcurrency: acc.EffectiveLoadFactor()})
 	}
-	if cfg.LoadBatchEnabled && s.concurrencyService != nil && len(loadRequests) > 0 {
+	var loadMap map[int64]*AccountLoadInfo
+	if !fallbackWait && (cfg.LoadBatchEnabled || req.AdvancedScheduler) && s.concurrencyService != nil && len(loadRequests) > 0 {
 		if loads, err := s.concurrencyService.GetAccountsLoadBatch(ctx, loadRequests); err == nil {
+			loadMap = loads
 			for i := range candidates {
 				if load := loads[candidates[i].account.ID]; load != nil {
 					candidates[i].loadInfo = load
@@ -2162,7 +2253,7 @@ retry:
 		}
 	}
 	rates := openAILegacyUpstreamRateOrder{}
-	if req.UseUpstreamTokenCost && s.isOpenAILowUpstreamRatePriorityEnabled(ctx) {
+	if !req.AdvancedScheduler && req.UseUpstreamTokenCost && s.isOpenAILowUpstreamRatePriorityEnabled(ctx) {
 		ptrs := make([]*Account, 0, len(candidates))
 		for _, item := range candidates {
 			ptrs = append(ptrs, item.account)
@@ -2170,9 +2261,75 @@ retry:
 		rates = newOpenAILegacyUpstreamRateOrder(ptrs, time.Now(), s.openAIOAuthSchedulingRateMultiplier(ctx))
 		rates.enabled = true
 	}
-	order := s.openAICandidateOrder(req.GroupID, rates)
-	sort.SliceStable(candidates, func(i, j int) bool { return openAICandidateLess(candidates[i], candidates[j], order) })
-	s.preferOpenAISessionOrder(ctx, candidates, req.GroupID, req.SessionHash, req.RequestedModel, rates, req.RequireCompact, req.RequiredCapability, true)
+	order := s.openAICandidateOrderForItems(req.GroupID, rates, candidates)
+	if req.AdvancedScheduler && !fallbackWait {
+		filtered := make([]*Account, 0, len(candidates))
+		for _, item := range candidates {
+			filtered = append(filtered, item.account)
+		}
+		advanced := &defaultOpenAIAccountScheduler{service: s, stats: s.openaiAccountStats}
+		plan := advanced.buildOpenAIAccountLoadPlan(ctx, req, filtered, loadMap)
+		positions := make(map[int64]int, len(plan.selectionOrder))
+		for i, candidate := range plan.selectionOrder {
+			positions[candidate.account.ID] = i
+		}
+		sort.SliceStable(candidates, func(i, j int) bool {
+			if req.RequireCompact {
+				left, right := openAICompactSupportTier(candidates[i].account), openAICompactSupportTier(candidates[j].account)
+				if left != right {
+					return left > right
+				}
+			}
+			left, leftOK := positions[candidates[i].account.ID]
+			right, rightOK := positions[candidates[j].account.ID]
+			if leftOK != rightOK {
+				return leftOK
+			}
+			if leftOK && left != right {
+				return left < right
+			}
+			return openAICandidateLess(candidates[i], candidates[j], order)
+		})
+	} else {
+		sort.SliceStable(candidates, func(i, j int) bool {
+			if req.RequireCompact {
+				left, right := openAICompactSupportTier(candidates[i].account), openAICompactSupportTier(candidates[j].account)
+				if left != right {
+					return left > right
+				}
+			}
+			return openAICandidateLess(candidates[i], candidates[j], order)
+		})
+	}
+	if !fallbackWait {
+		// Reuse the same recent-success/hash ordering in all saturation paths.
+		// The advanced scheduler's cost cohorts follow its own cost weight.
+		sessionRates := rates
+		if req.AdvancedScheduler && req.UseUpstreamTokenCost && s.openAIWSSchedulerWeightsForRequest(ctx).UpstreamCost > 0 {
+			ptrs := make([]*Account, 0, len(candidates))
+			for _, item := range candidates {
+				ptrs = append(ptrs, item.account)
+			}
+			sessionRates = newOpenAILegacyUpstreamRateOrder(ptrs, time.Now(), s.openAIOAuthSchedulingRateMultiplier(ctx))
+			sessionRates.enabled = true
+		}
+		s.preferOpenAISessionOrder(ctx, candidates, req.GroupID, req.SessionHash, req.RequestedModel, sessionRates, req.RequireCompact, req.RequiredCapability, true, order.tiers)
+	}
+	candidates = s.partitionOpenAILatencyHeldLoad(ctx, candidates, req.RequestedModel, req.RequireCompact)
+	if fallbackWait {
+		for _, item := range candidates {
+			fresh := s.recheckSelectedOpenAIAccountFromDB(ctx, item.account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
+			if fresh == nil || !gate.isAccountRequestCompatible(ctx, fresh, req) || !gate.isAccountTransportCompatible(fresh, req.RequiredTransport) {
+				continue
+			}
+			selection, err := s.newSelectionResult(ctx, fresh, false, nil, &AccountWaitPlan{
+				AccountID: fresh.ID, MaxConcurrency: fresh.Concurrency,
+				Timeout: cfg.FallbackWaitTimeout, MaxWaiting: cfg.FallbackMaxWaiting,
+			})
+			return markOpenAIStickySpillover(selection, true), err
+		}
+		return nil, nil
+	}
 	for _, item := range candidates {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -2183,12 +2340,15 @@ retry:
 		}
 		result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
 		if err != nil {
-			return nil, err
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return nil, nil
 		}
 		if result != nil && result.Acquired {
 			selection, err := s.newAcquiredSelectionResult(ctx, fresh, result.ReleaseFunc)
 			return markOpenAIStickySpillover(selection, true), err
 		}
 	}
-	return wait()
+	return nil, nil
 }
