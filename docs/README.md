@@ -24,6 +24,7 @@
 | [`CLAUDE_CACHE_FALLBACK.md`](CLAUDE_CACHE_FALLBACK.md) | Claude 自动缓存（按分组） |
 | [`ANTHROPIC_CACHE_TTL.md`](ANTHROPIC_CACHE_TTL.md) | Claude 缓存 TTL：管理员默认、Key 偏好、最终请求、计费与迁移 |
 | [`OPENAI_QUALITY_ROUTING.md`](OPENAI_QUALITY_ROUTING.md) | OpenAI 会话质量路由 |
+| [`GROUP_QUALITY_GATE.md`](GROUP_QUALITY_GATE.md) | OpenAI 分组质量门槛、指标、保底、管理接口与恢复 |
 | [`OPENAI_IQ_CHECK.md`](OPENAI_IQ_CHECK.md) | OpenAI 智商检测：按“账号 × 模型”检测与冷却、参数化题目、自报模型识别、升级与回退 |
 | [`CODEX_STATE.md`](CODEX_STATE.md) | Codex STATE 与智商检测（按出站模型联动） |
 | [`CODEX_STATE_RELIABILITY.md`](CODEX_STATE_RELIABILITY.md) | STATE 可靠性控制与策略 |

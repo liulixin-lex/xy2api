@@ -139,6 +139,7 @@ func provideCleanup(
 	pluginManager *service.PluginManager,
 	shareScheduling *service.ShareSchedulingService,
 	resilienceSvc *service.ResilienceService,
+	groupQualityGate *service.GroupQualityGateService,
 	imageTasks *service.ImageTaskService,
 	asyncImage *handler.AsyncImageHandler,
 ) func() {
@@ -163,6 +164,7 @@ func provideCleanup(
 
 		// 应用层清理步骤可并行执行，基础设施资源（Redis/Ent）最后按顺序关闭。
 		parallelSteps := []cleanupStep{
+			{"GroupQualityGateService", func() error { groupQualityGate.Stop(); return nil }},
 			{"UsageBillingRecoveryService", func() error {
 				billingRecovery.Stop()
 				return nil

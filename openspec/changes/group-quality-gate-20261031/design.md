@@ -195,6 +195,8 @@ key 记忆、稳定 120 秒后回原组、每个请求最多兜底一次，都�
 - `GET /api/v1/admin/group-quality-gate/status`
 - `GET /api/v1/admin/groups/:id/profit-control-preview`（返回成员数、可调度数、通过数与换算上限）
 
+状态接口的 `group_id` 为可选参数。不带参数时只返回所有已启用门槛的分组，`account_metrics` 覆盖这些分组的全部成员；带参数时只返回指定分组，即使门槛未启用也返回其全部成员指标并标记 `enabled=false`。策略写入成功后本实例策略缓存立即失效；新启用的分组在下一轮评估后才出现在状态响应中。
+
 读接口跟随账号管理权限，策略写入与预览跟随分组管理权限，写操作进审计。
 
 **日志事件**：`group_quality_gate.eject`、`.trial`、`.recover`、`.guard_hold`、`.last_resort`、`.evaluate_failed`。

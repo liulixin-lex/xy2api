@@ -108,6 +108,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		nil,                         // pluginManager
 		nil,                         // shareScheduling
 		nil,                         // resilience
+		nil,                         // groupQualityGate
 		&service.ImageTaskService{}, // imageTasks
 		handler.NewAsyncImageHandler(nil, nil, nil), // asyncImage
 	)
