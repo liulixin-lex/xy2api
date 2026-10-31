@@ -36,13 +36,7 @@ func groupProfitCeiling(group *Group, at time.Time) (float64, bool) {
 // guard, fallback and operations. Soft resilience penalties are intentionally
 // left to groupMemberServable.
 func groupMemberUsable(group *Group, acc *Account, now time.Time) bool {
-	if group == nil || acc == nil || acc.Platform != group.Platform || !acc.IsActive() || !acc.Schedulable {
-		return false
-	}
-	if acc.AutoPauseOnExpired && acc.ExpiresAt != nil && !now.Before(*acc.ExpiresAt) {
-		return false
-	}
-	if acc.Status == StatusError || acc.IsAPIKeyOrBedrock() && acc.IsQuotaExceeded() {
+	if group == nil || acc == nil || acc.Platform != group.Platform {
 		return false
 	}
 	tier, _, _ := resiliencePenaltyOf(acc, "", now)

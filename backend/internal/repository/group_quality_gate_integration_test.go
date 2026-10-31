@@ -28,11 +28,28 @@ func TestGroupQualityGateRepositoryLoadsWarmMetricsAndDeduplicatesFailures(t *te
 	t.Cleanup(func() {
 		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM ops_error_logs WHERE request_id LIKE $1`, fmt.Sprintf("quality-%d%%", suffix))
 		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM usage_logs WHERE user_id=$1`, userID)
+		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM account_groups WHERE account_id=$1`, accountID)
 		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM accounts WHERE id=$1`, accountID)
 		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM api_keys WHERE id=$1`, keyID)
 		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM users WHERE id=$1`, userID)
 		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM groups WHERE id=$1`, groupID)
 	})
+
+	_, err := integrationDB.ExecContext(ctx, `INSERT INTO account_groups(account_id,group_id,priority) VALUES($1,$2,0)`, accountID, groupID)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET rate_multiplier=0.75, extra=$2::jsonb, temp_unschedulable_until=$3, temp_unschedulable_reason='balance:exhausted' WHERE id=$1`, accountID, `{"group_quality_reset_at":"2026-11-01T00:00:00Z","quota_limit":10}`, now.Add(time.Hour))
+	require.NoError(t, err)
+	repo := &groupQualityGateRepository{db: integrationDB}
+	members, err := repo.LoadMembers(ctx, []int64{groupID})
+	require.NoError(t, err)
+	require.Len(t, members[groupID], 1)
+	member := members[groupID][0]
+	require.Equal(t, accountID, member.ID)
+	require.Equal(t, 0.75, *member.RateMultiplier)
+	require.Equal(t, "balance:exhausted", member.TempUnschedulableReason)
+	require.Equal(t, "2026-11-01T00:00:00Z", member.Extra["group_quality_reset_at"])
+	require.Nil(t, member.Proxy)
+	require.Empty(t, member.Groups)
 
 	firstAt, warmAt := now.Add(-2*time.Minute), now.Add(-time.Minute)
 	for i, at := range []time.Time{firstAt, warmAt} {
@@ -57,10 +74,11 @@ func TestGroupQualityGateRepositoryLoadsWarmMetricsAndDeduplicatesFailures(t *te
 		require.NoError(t, err)
 	}
 
-	repo := &groupQualityGateRepository{db: integrationDB}
 	observations, observedAt, err := repo.LoadObservations(ctx, []int64{accountID}, now.Add(-2*time.Hour), now.Add(time.Second))
 	require.NoError(t, err)
-	require.True(t, observedAt.After(now.Add(-5*time.Minute)), "recent metric writes keep the observation set fresh")
+	var latestUsage time.Time
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT MAX(created_at) FROM usage_logs WHERE created_at < $1`, now.Add(time.Second)).Scan(&latestUsage))
+	require.WithinDuration(t, latestUsage, observedAt, time.Millisecond, "fresh error rows must not hide stale usage writes")
 	successes, softFailures, warmSamples, zeroCacheSamples := 0, 0, 0, 0
 	var warmTTFT []int
 	for _, observation := range observations {

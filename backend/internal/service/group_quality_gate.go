@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"time"
+
+	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 )
 
 // GroupQualityGateTier values are used when low-upstream-rate priority is enabled.
@@ -52,7 +54,7 @@ func normalizeGroupQualityGatePolicy(p GroupQualityGatePolicy) GroupQualityGateP
 	if p.FastWarmTTFTP90Ms == 0 {
 		p.FastWarmTTFTP90Ms = d.FastWarmTTFTP90Ms
 	}
-	ids := append([]int64(nil), p.PinnedAccountIDs...)
+	ids := append([]int64{}, p.PinnedAccountIDs...)
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	p.PinnedAccountIDs = ids[:0]
 	for _, id := range ids {
@@ -67,13 +69,19 @@ func normalizeGroupQualityGatePolicy(p GroupQualityGatePolicy) GroupQualityGateP
 func ValidateGroupQualityGatePolicy(policy GroupQualityGatePolicy, group *Group, memberIDs []int64) error {
 	policy = normalizeGroupQualityGatePolicy(policy)
 	if policy.Enabled && (group == nil || group.Platform != PlatformOpenAI) {
-		return errors.New("quality gate can only be enabled for OpenAI groups")
+		return invalidGroupQualityPolicy("enabled", "quality gate can only be enabled for OpenAI groups")
 	}
 	if policy.MaxErrorRate <= 0 || policy.MaxErrorRate > 1 || math.IsNaN(policy.MaxErrorRate) || math.IsInf(policy.MaxErrorRate, 0) {
-		return errors.New("max_error_rate must be in (0,1]")
+		return invalidGroupQualityPolicy("max_error_rate", "max_error_rate must be in (0,1]")
 	}
-	if policy.FastWarmTTFTP90Ms < 1000 || policy.FastWarmTTFTP90Ms >= policy.MaxWarmTTFTP90Ms || policy.MaxWarmTTFTP90Ms > 600000 {
-		return errors.New("warm TTFT thresholds are invalid")
+	if policy.FastWarmTTFTP90Ms < 1000 {
+		return invalidGroupQualityPolicy("fast_warm_ttft_p90_ms", "fast_warm_ttft_p90_ms must be at least 1000 ms")
+	}
+	if policy.MaxWarmTTFTP90Ms > 600000 {
+		return invalidGroupQualityPolicy("max_warm_ttft_p90_ms", "max_warm_ttft_p90_ms must not exceed 600000 ms")
+	}
+	if policy.FastWarmTTFTP90Ms >= policy.MaxWarmTTFTP90Ms {
+		return invalidGroupQualityPolicy("max_warm_ttft_p90_ms", "max_warm_ttft_p90_ms must be greater than fast_warm_ttft_p90_ms")
 	}
 	members := map[int64]bool{}
 	for _, id := range memberIDs {
@@ -81,10 +89,14 @@ func ValidateGroupQualityGatePolicy(policy GroupQualityGatePolicy, group *Group,
 	}
 	for _, id := range policy.PinnedAccountIDs {
 		if !members[id] {
-			return fmt.Errorf("pinned account %d is not a group member", id)
+			return invalidGroupQualityPolicy("pinned_account_ids", fmt.Sprintf("pinned account %d is not a member of group %d", id, group.ID))
 		}
 	}
 	return nil
+}
+
+func invalidGroupQualityPolicy(field, message string) error {
+	return infraerrors.BadRequest(ErrInvalidGroupQualityGatePolicy.Reason, message).WithMetadata(map[string]string{"field": field})
 }
 
 // GroupQualityMetrics is the account-level metric snapshot used by the evaluator.
@@ -95,8 +107,6 @@ type GroupQualityMetrics struct {
 	WarmTTFTP90Ms     int
 	ZeroCacheSamples  int64
 	WarmZeroCacheRate float64
-	TrialRequests     int64
-	TrialSoftFailures int64
 }
 
 // GroupQualityObservation is a persisted success or upstream-attempt event.
@@ -128,6 +138,7 @@ func IsGroupQualitySoftFailure(kind string, statusCode int, category, message st
 type GroupQualityGateRepository interface {
 	LoadPolicies(context.Context) (GroupQualityGatePolicies, error)
 	CompareAndSwapPolicies(context.Context, int, GroupQualityGatePolicies) (GroupQualityGatePolicies, error)
+	LoadMembers(context.Context, []int64) (map[int64][]Account, error)
 	LoadObservations(context.Context, []int64, time.Time, time.Time) ([]GroupQualityObservation, time.Time, error)
 }
 
@@ -179,7 +190,7 @@ type GroupQualityAccountView struct {
 	Pinned    bool       `json:"pinned"`
 	Vetoed    bool       `json:"vetoed"`
 	Tier      int        `json:"tier"`
-	Headroom  float64    `json:"headroom"`
+	Headroom  *float64   `json:"headroom"`
 }
 
 func (m GroupQualityMetrics) ErrorRate() float64 {
@@ -205,28 +216,21 @@ func groupQualityReasons(p GroupQualityGatePolicy, m GroupQualityMetrics) []stri
 	return reasons
 }
 
-func (m GroupQualityMetrics) Passing(p GroupQualityGatePolicy) bool {
-	if m.Calls >= 20 && m.SoftFailures >= 5 && m.ErrorRate() > p.MaxErrorRate {
-		return false
-	}
-	if m.WarmSamples >= 10 && m.WarmTTFTP90Ms > p.MaxWarmTTFTP90Ms {
-		return false
-	}
-	return true
-}
-
 type groupQualityAccountState struct {
-	State           string
-	Reasons         []string
-	Strike          int
-	EjectedAt       time.Time
-	Until           time.Time
-	TrialSince      time.Time
-	Tier            int
-	TierAt          time.Time
-	LastEjected     time.Time
-	LastEjectionEnd time.Time
-	ResetAt         time.Time
+	State              string
+	Reasons            []string
+	Strike             int
+	EjectedAt          time.Time
+	Until              time.Time
+	TrialSince         time.Time
+	Tier               int
+	TierAt             time.Time
+	LastEjectionEnd    time.Time
+	ResetAt            time.Time
+	Severity           float64
+	TrialRequests      []string // The first 20 distinct request IDs, retained across observation windows.
+	TrialSoftFailures  int64
+	TrialObservedUntil time.Time
 }
 
 func groupQualityBackoff(strike int) time.Duration {
@@ -242,100 +246,80 @@ func groupQualityBackoff(strike int) time.Duration {
 	}
 }
 
-func evaluateGroupQualityMember(now time.Time, policy GroupQualityGatePolicy, metric GroupQualityMetrics, previous groupQualityAccountState, _ bool) (groupQualityAccountState, bool) {
-	strikeWindowElapsed := previous.State == "ejected" && !previous.Until.IsZero() && !now.Before(previous.Until) && now.Sub(previous.Until) >= 2*time.Hour
-	strikeWindowElapsed = strikeWindowElapsed || previous.State != "ejected" && !previous.LastEjectionEnd.IsZero() && now.Sub(previous.LastEjectionEnd) >= 2*time.Hour
-	if previous.Strike > 0 && strikeWindowElapsed {
-		previous.Strike = 0
+func evaluateGroupQualityMember(now time.Time, policy GroupQualityGatePolicy, metric GroupQualityMetrics, state groupQualityAccountState, fresh bool) groupQualityAccountState {
+	end := state.LastEjectionEnd
+	if state.State == "ejected" {
+		end = state.Until
 	}
-	if previous.State == "ejected" && now.Before(previous.Until) {
-		return previous, false
+	if !end.IsZero() && now.Sub(end) >= 2*time.Hour {
+		state.Strike = 0
 	}
-	if previous.State == "ejected" && !now.Before(previous.Until) {
-		previous.LastEjectionEnd = previous.Until
-		if metric.EjectionReady(policy) {
-			previous.Strike++
-			previous.State = "ejected"
-			previous.Reasons = groupQualityReasons(policy, metric)
-			previous.Tier = GroupQualityGateTierOther
-			previous.EjectedAt = now
-			previous.LastEjected = now
-			previous.Until = now.Add(groupQualityBackoff(previous.Strike))
-			previous.TierAt = time.Time{}
-			return previous, false
+	if state.State == "ejected" && now.Before(state.Until) {
+		return state
+	}
+	expired := state.State == "ejected"
+	if expired {
+		state.LastEjectionEnd = state.Until
+	}
+	trialFailed := state.State == "trial" && state.TrialSoftFailures >= 2
+	if fresh && (metric.EjectionReady(policy) || trialFailed) {
+		state.Strike++
+		state.State = "ejected"
+		state.Reasons = groupQualityReasons(policy, metric)
+		state.Severity = 0
+		if metric.Calls >= 20 && metric.SoftFailures >= 5 {
+			state.Severity = metric.ErrorRate() / policy.MaxErrorRate
 		}
-		if metric.RecoveryReady(policy) {
-			previous.State = "eligible"
-			previous.Reasons = nil
-			previous.TrialSince = time.Time{}
-			previous.Until = time.Time{}
-			previous.Tier = GroupQualityGateTierFast
-			previous.TierAt = now
-			return previous, true
+		if metric.WarmSamples >= 10 {
+			state.Severity = math.Max(state.Severity, float64(metric.WarmTTFTP90Ms)/float64(policy.MaxWarmTTFTP90Ms))
 		}
-		previous.State = "trial"
-		previous.Reasons = nil
-		previous.TrialSince = now
-		previous.Until = time.Time{}
-		previous.Tier = GroupQualityGateTierTrial
-		previous.TierAt = now
-		return previous, true
-	}
-	if previous.State == "trial" {
-		if metric.TrialSoftFailures >= 2 || metric.EjectionReady(policy) {
-			previous.Strike++
-			previous.State = "ejected"
-			previous.Reasons = groupQualityReasons(policy, metric)
-			previous.Tier = GroupQualityGateTierOther
-			previous.EjectedAt = now
-			previous.LastEjected = now
-			previous.Until = now.Add(groupQualityBackoff(previous.Strike))
-			previous.TierAt = time.Time{}
-			return previous, false
+		if trialFailed {
+			state.Severity = math.Max(state.Severity, float64(state.TrialSoftFailures)/float64(len(state.TrialRequests))/policy.MaxErrorRate)
+			if !slices.Contains(state.Reasons, "error_rate") {
+				state.Reasons = append(state.Reasons, "error_rate")
+			}
 		}
-		if metric.TrialRequests >= 20 {
-			previous.State = "eligible"
-			previous.Reasons = nil
-			previous.TrialSince = time.Time{}
-			previous.Until = time.Time{}
-			previous.Tier = GroupQualityGateTierFast
-			previous.TierAt = now
+		state.Tier = GroupQualityGateTierOther
+		state.EjectedAt = now
+		state.Until = now.Add(groupQualityBackoff(state.Strike))
+		state.TierAt = time.Time{}
+		state.TrialRequests, state.TrialSoftFailures = nil, 0
+		state.TrialObservedUntil, state.TrialSince = time.Time{}, time.Time{}
+		return state
+	}
+	if expired {
+		state.Until = time.Time{}
+		state.TierAt = time.Time{}
+		if fresh && metric.RecoveryReady(policy, state.Reasons) {
+			state.State, state.Tier = "eligible", GroupQualityGateTierFast
+		} else {
+			state.State, state.Tier = "trial", GroupQualityGateTierTrial
+			state.TrialSince, state.TrialObservedUntil = now, now
+			state.TrialRequests, state.TrialSoftFailures = nil, 0
 		}
-		return previous, true
+		state.Reasons = nil
+		return state
 	}
-	if metric.EjectionReady(policy) {
-		previous.Strike++
-		previous.State = "ejected"
-		previous.Reasons = groupQualityReasons(policy, metric)
-		previous.Tier = GroupQualityGateTierOther
-		previous.EjectedAt = now
-		previous.LastEjected = now
-		previous.Until = now.Add(groupQualityBackoff(previous.Strike))
-		previous.TierAt = time.Time{}
-		return previous, false
+	if state.State == "trial" {
+		if !fresh || len(state.TrialRequests) < 20 {
+			return state
+		}
+		state.TrialRequests, state.TrialSoftFailures = nil, 0
+		state.TrialObservedUntil, state.TrialSince = time.Time{}, time.Time{}
 	}
-	previous.State = "eligible"
-	previous.Reasons = nil
-	previous.Until = time.Time{}
-	return previous, true
+	state.State = "eligible"
+	state.Reasons = nil
+	state.Until = time.Time{}
+	return state
 }
 
-func (m GroupQualityMetrics) RecoveryReady(p GroupQualityGatePolicy) bool {
-	// Recovery needs a full denominator, but it does not require the
-	// ejection soft-failure minimum again.  An account with 20 fresh calls and
-	// a rate at or below 80% of the limit is healthy enough to leave ejection.
-	errorReady := m.Calls >= 20
-	ttftReady := m.WarmSamples >= 10
-	if !errorReady && !ttftReady {
+func (m GroupQualityMetrics) RecoveryReady(p GroupQualityGatePolicy, reasons []string) bool {
+	errorReady, ttftReady := m.Calls >= 20, m.WarmSamples >= 10
+	if !errorReady && !ttftReady || slices.Contains(reasons, "error_rate") && !errorReady || slices.Contains(reasons, "warm_ttft") && !ttftReady {
 		return false
 	}
-	if errorReady && m.ErrorRate() > p.MaxErrorRate*0.8 {
-		return false
-	}
-	if ttftReady && float64(m.WarmTTFTP90Ms) > float64(p.MaxWarmTTFTP90Ms)*0.8 {
-		return false
-	}
-	return true
+	return (!errorReady || m.ErrorRate() <= p.MaxErrorRate*0.8) &&
+		(!ttftReady || float64(m.WarmTTFTP90Ms) <= float64(p.MaxWarmTTFTP90Ms)*0.8)
 }
 
 // GroupQualityMemberResult keeps the independent quality and availability facts for a group member.
