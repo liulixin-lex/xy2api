@@ -5,6 +5,7 @@ import {
   formatProfitCeiling,
   profitDecimalToPercent,
   profitMarginPercentOnEnable,
+  profitMarginPercentFromGroup,
   profitPercentToDecimal,
   profitPreviewLevel,
   validateProfitControlFormState,
@@ -151,12 +152,28 @@ describe("profitMarginPercentOnEnable", () => {
   });
 });
 
+describe("profitMarginPercentFromGroup", () => {
+  it("folds a stored safety buffer into the margin so the effective ceiling is unchanged", () => {
+    expect(profitMarginPercentFromGroup(0.2, 0.05)).toBe(25);
+    expect(profitMarginPercentFromGroup(0.1, 0.2)).toBe(30);
+    expect(profitMarginPercentFromGroup(0.3333, 0.1)).toBe(43.33);
+    expect(profitMarginPercentFromGroup(0.2, 0)).toBe(20);
+    expect(profitMarginPercentFromGroup(undefined, null)).toBe(0);
+    // 回显后再按缓冲 0 提交，m' + 0 与原来的 m + b 相同。
+    expect(profitPercentToDecimal(profitMarginPercentFromGroup(0.6, 0.3999))).toBe(0.9999);
+  });
+});
+
 describe("profitPreviewLevel", () => {
-  it("is red when nobody passes, yellow for exactly one, normal otherwise", () => {
-    expect(profitPreviewLevel(0)).toBe("danger");
-    expect(profitPreviewLevel(1)).toBe("warning");
-    expect(profitPreviewLevel(2)).toBe("normal");
-    expect(profitPreviewLevel(11)).toBe("normal");
+  it("is red when schedulable members exist but none pass, yellow for exactly one, normal otherwise", () => {
+    expect(profitPreviewLevel({ schedulable: 11, passing: 0 })).toBe("danger");
+    expect(profitPreviewLevel({ schedulable: 11, passing: 1 })).toBe("warning");
+    expect(profitPreviewLevel({ schedulable: 11, passing: 2 })).toBe("normal");
+    expect(profitPreviewLevel({ schedulable: 1, passing: 1 })).toBe("warning");
+  });
+
+  it("is neutral when the group has no schedulable members", () => {
+    expect(profitPreviewLevel({ schedulable: 0, passing: 0 })).toBe("empty");
   });
 });
 

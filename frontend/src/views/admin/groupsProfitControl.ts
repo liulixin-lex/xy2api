@@ -34,6 +34,13 @@ export const isProfitControlPlatform = (platform: string): boolean =>
 // 安全缓冲不再在界面显示，提交时固定为 0，上限只由毛利率决定。
 export const PROFIT_SAFETY_BUFFER = 0;
 
+// 编辑回显：把已存的安全缓冲并入毛利率，保存时缓冲提交 0，实际生效的上限 D×(1−m−b) 不变。
+// 旧校验保证两者之和 < 1。
+export const profitMarginPercentFromGroup = (
+  margin: number | null | undefined,
+  buffer: number | null | undefined,
+): number => profitDecimalToPercent((margin ?? 0) + (buffer ?? 0));
+
 // 开启利润控制时的默认毛利率（%）。只在管理员手动打开开关、且当前毛利率未填或为 0 时套用，
 // 不改写已保存分组的配置。
 export const DEFAULT_PROFIT_MIN_MARGIN_PERCENT = 20;
@@ -70,12 +77,17 @@ export const validateProfitControlFormState = (
   return null;
 };
 
-// 利润门预览的提示等级：没有成员能通过为红字并在保存时要求确认，只剩 1 个为黄字。
-export type ProfitPreviewLevel = "danger" | "warning" | "normal";
+// 利润门预览的提示等级：有可调度成员但没有一个能通过为红字并在保存时要求确认，只剩 1 个为黄字；
+// 本组没有可调度成员时与毛利率无关，显示中性提示，不要求确认。
+export type ProfitPreviewLevel = "empty" | "danger" | "warning" | "normal";
 
-export const profitPreviewLevel = (passing: number): ProfitPreviewLevel => {
-  if (passing <= 0) return "danger";
-  if (passing === 1) return "warning";
+export const profitPreviewLevel = (preview: {
+  schedulable: number;
+  passing: number;
+}): ProfitPreviewLevel => {
+  if (preview.schedulable <= 0) return "empty";
+  if (preview.passing <= 0) return "danger";
+  if (preview.passing === 1) return "warning";
   return "normal";
 };
 

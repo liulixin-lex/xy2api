@@ -73,6 +73,7 @@ vi.mock('@/api/admin', () => ({
     },
     groupQualityGate: {
       getStatus: getQualityGateStatus,
+      getPolicies: vi.fn().mockResolvedValue({ version: 0, groups: {} }),
     },
   },
 }))

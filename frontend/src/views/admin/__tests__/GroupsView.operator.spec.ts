@@ -17,6 +17,10 @@ const api = vi.hoisted(() => ({
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
+    groupQualityGate: {
+      getStatus: vi.fn().mockResolvedValue({ generated_at: '', stale: false, account_metrics: {}, groups: [] }),
+      getPolicies: vi.fn().mockResolvedValue({ version: 0, groups: {} }),
+    },
     groups: {
       list: api.listGroups,
       getAll: vi.fn().mockResolvedValue([]),

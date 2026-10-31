@@ -3,14 +3,17 @@ import { createI18n } from 'vue-i18n'
 import { baseCompile } from '@intlify/message-compiler'
 import zh from '@/i18n/locales/zh/admin/groupQualityGate'
 import en from '@/i18n/locales/en/admin/groupQualityGate'
-import type { GroupQualityAccountMetrics, GroupQualityGateAccountStatus, GroupQualityGateStatus } from '@/types/groupQualityGate'
+import type { GroupQualityAccountMetrics, GroupQualityGateAccountStatus, GroupQualityGatePolicies, GroupQualityGateStatus } from '@/types/groupQualityGate'
 import {
   GROUP_QUALITY_BADGE_CLASSES,
   accountQualityMetricItems,
+  buildAccountQualityCells,
   buildAccountQualityIndex,
+  groupQualityGateView,
   groupQualityStateLabel,
   groupQualityTooltip,
-  orderGroupsByQuality
+  orderGroupsByQuality,
+  type GroupQualitySources
 } from '../groupQualityPresentation'
 
 const messageCompiler = (message: unknown) => new Function('return ' + baseCompile(String(message), { mode: 'normal' }).code)()
@@ -35,6 +38,53 @@ const status = (accounts: GroupQualityGateAccountStatus[], overrides: Partial<Gr
 })
 const qualityOf = (row: GroupQualityGateAccountStatus, extra: Partial<GroupQualityGateStatus> = {}) =>
   buildAccountQualityIndex(status([row], extra), null).get(row.account_id)!.get(7)!
+const policy = (enabled: boolean) => ({ enabled, max_error_rate: 0.1, max_warm_ttft_p90_ms: 20000, fast_warm_ttft_p90_ms: 10000, pinned_account_ids: [] })
+const policies = (groups: Record<string, boolean>): GroupQualityGatePolicies =>
+  ({ version: 3, groups: Object.fromEntries(Object.entries(groups).map(([id, enabled]) => [id, policy(enabled)])) })
+const sources = (overrides: Partial<GroupQualitySources> = {}): GroupQualitySources =>
+  ({ policies: policies({ 7: true, 8: false }), policiesFailed: false, status: status([account()]), statusFailed: false, ...overrides })
+
+describe('groupQualityGateView (policy × status)', () => {
+  const openai = (id: number) => ({ id, platform: 'openai' })
+  it.each([
+    ['policy on, evaluated', openai(7), sources(), 'evaluated'],
+    ['policy on, not in status yet', openai(9), sources({ policies: policies({ 9: true }) }), 'pending'],
+    ['policy on, status still lists it as disabled', openai(8), sources({ policies: policies({ 8: true }) }), 'pending'],
+    ['policy off, status still lists it as enabled', openai(7), sources({ policies: policies({ 7: false }) }), 'off'],
+    ['no policy entry', openai(9), sources(), 'off'],
+    ['policy on, status failed', openai(7), sources({ statusFailed: true }), 'failed'],
+    ['policy off, status failed', openai(8), sources({ statusFailed: true }), 'off'],
+    ['policies failed', openai(7), sources({ policiesFailed: true }), 'failed'],
+    ['not loaded yet', openai(7), sources({ policies: null, status: null }), 'loading'],
+    ['policy on, status not loaded yet', openai(7), sources({ status: null }), 'loading'],
+    ['non-OpenAI group even when loading failed', { id: 7, platform: 'anthropic' }, sources({ policiesFailed: true }), 'off']
+  ] as const)('%s → %s', (_name, group, src, kind) => {
+    expect(groupQualityGateView(group, src).kind).toBe(kind)
+  })
+
+  it('carries the evaluated summary', () => {
+    const view = groupQualityGateView(openai(7), sources())
+    expect(view.kind === 'evaluated' && view.group.summary).toEqual({ eligible: 1, ejected: 0, trial: 0 })
+  })
+})
+
+describe('buildAccountQualityCells', () => {
+  const groups = [{ id: 7, platform: 'openai' }, { id: 8, platform: 'openai' }, { id: 9, platform: 'openai' }, { id: 10, platform: 'gemini' }]
+  const kinds = (src: GroupQualitySources, accountId = 101) =>
+    Object.fromEntries([...buildAccountQualityCells(src)(accountId, groups)].map(([id, cell]) => [id, cell.kind]))
+
+  it('uses the evaluated state, pending for new groups and new members, nothing for gates that are off', () => {
+    const src = sources({ policies: policies({ 7: true, 8: false, 9: true }) })
+    expect(kinds(src)).toEqual({ 7: 'eligible', 9: 'pending' })
+    expect(kinds(src, 202)).toEqual({ 7: 'pending', 9: 'pending' })
+  })
+
+  it('marks gated groups as failed when loading failed and shows nothing while loading', () => {
+    expect(kinds(sources({ statusFailed: true }))).toEqual({ 7: 'failed' })
+    expect(kinds(sources({ policiesFailed: true }))).toEqual({ 7: 'failed', 8: 'failed', 9: 'failed' })
+    expect(kinds(sources({ policies: null, status: null }))).toEqual({})
+  })
+})
 
 describe('buildAccountQualityIndex', () => {
   it('indexes only enabled groups, keyed by account then group', () => {
@@ -68,9 +118,15 @@ describe('state labels and colours', () => {
     ['zh', { state: 'trial' }, '试用'],
     ['zh', { state: 'ejected', guard_held: true, until: '2026-11-01T14:20:00Z' }, '保底保留'],
     ['en', { state: 'ejected', until: '2026-11-01T14:20:00Z' }, 'Ejected until @14:20'],
-    ['en', { state: 'ejected', guard_held: true }, 'Kept for floor']
+    ['en', { state: 'ejected', guard_held: true }, 'Held by floor guard']
   ] as const)('%s %j → %s', (locale, row, label) => {
     expect(groupQualityStateLabel(qualityOf(account(row)), i18nFor(locale).t, clock)).toBe(label)
+  })
+
+  it('labels the neutral notices', () => {
+    expect(groupQualityStateLabel({ kind: 'pending' }, i18nFor('zh').t, clock)).toBe('等待评估')
+    expect(groupQualityStateLabel({ kind: 'failed' }, i18nFor('zh').t, clock)).toBe('读取失败')
+    expect(groupQualityStateLabel({ kind: 'pending' }, i18nFor('en').t, clock)).toBe('Awaiting evaluation')
   })
 
   it('colours each kind with its own palette', () => {
@@ -78,19 +134,23 @@ describe('state labels and colours', () => {
     expect(GROUP_QUALITY_BADGE_CLASSES.ejected).toContain('red')
     expect(GROUP_QUALITY_BADGE_CLASSES.trial).toContain('amber')
     expect(GROUP_QUALITY_BADGE_CLASSES.guard_held).toContain('sky')
+    expect(GROUP_QUALITY_BADGE_CLASSES.pending).toContain('gray')
+    expect(GROUP_QUALITY_BADGE_CLASSES.failed).toContain('gray')
   })
 })
 
 describe('orderGroupsByQuality', () => {
-  it('puts ejected, then guard-held, then trial first and keeps the original order otherwise', () => {
-    const groups = [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }]
+  it('puts ejected, guard-held, trial, failed, pending first and keeps the original order otherwise', () => {
+    const groups = [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }, { id: 6 }, { id: 7 }]
     const quality = new Map([
       [2, qualityOf(account({ state: 'trial' }))],
       [3, qualityOf(account())],
       [4, qualityOf(account({ state: 'ejected' }))],
-      [5, qualityOf(account({ state: 'ejected', guard_held: true }))]
+      [5, qualityOf(account({ state: 'ejected', guard_held: true }))],
+      [6, { kind: 'pending' as const }],
+      [7, { kind: 'failed' as const }]
     ])
-    expect(orderGroupsByQuality(groups, quality).map(group => group.id)).toEqual([4, 5, 2, 3, 1])
+    expect(orderGroupsByQuality(groups, quality).map(group => group.id)).toEqual([4, 5, 2, 7, 6, 3, 1])
     expect(orderGroupsByQuality(groups, undefined)).toBe(groups)
   })
 })
@@ -112,7 +172,7 @@ describe('groupQualityTooltip', () => {
   it('says when there is no data yet and when the evaluation is stale', () => {
     const quality = qualityOf(account({ state: 'ejected', guard_held: true, headroom: 0 }), { stale: true })
     expect(groupQualityTooltip('Codex', quality, metrics({ calls: 0, warm_samples: 0 }), i18nFor('en').t, clock)).toEqual([
-      'Codex: Kept for floor',
+      'Codex: Held by floor guard',
       'Over the limits, but kept in scheduling so the group keeps its minimum of usable accounts',
       'Error rate: no data yet, limit 10%',
       'Warm first-token p90: no data yet, limit 20s',
@@ -120,18 +180,23 @@ describe('groupQualityTooltip', () => {
       'Evaluation data is more than 5 minutes old; the previous state is kept'
     ])
   })
+
+  it('explains pending and failed notices in one line', () => {
+    expect(groupQualityTooltip('Codex', { kind: 'pending' }, metrics(), i18nFor('zh').t, clock)).toEqual(['Codex：门槛已开启，等待下一轮评估（每分钟一次）'])
+    expect(groupQualityTooltip('Codex', { kind: 'failed' }, undefined, i18nFor('zh').t, clock)).toEqual(['Codex：门槛状态读取失败，刷新列表后重试'])
+  })
 })
 
 describe('accountQualityMetricItems', () => {
   const texts = (m: GroupQualityAccountMetrics) => accountQualityMetricItems(m, i18nFor('zh').t)
 
   it('formats the three inline metrics', () => {
-    expect(texts(metrics()).map(item => item.text)).toEqual(['错误率 2.2%', '续轮首字 p90 7.8s', '零缓存 3%'])
-    expect(texts(metrics())[0].title).toBe('近 15 分钟 180 次调用，软失败 4 次')
+    expect(texts(metrics()).map(item => item.text)).toEqual(['错误 2.2%', 'p90 7.8s', '零缓存 3%'])
+    expect(texts(metrics())[0].title).toBe('错误率（近 15 分钟）：180 次调用，软失败 4 次')
   })
 
   it('shows a dash for metrics without samples', () => {
-    expect(texts(metrics({ calls: 0, warm_samples: 0, zero_cache_samples: 0 })).map(item => item.text)).toEqual(['错误率 —', '续轮首字 p90 —', '零缓存 —'])
+    expect(texts(metrics({ calls: 0, warm_samples: 0, zero_cache_samples: 0 })).map(item => item.text)).toEqual(['错误 —', 'p90 —', '零缓存 —'])
   })
 
   it('flags zero cache above 30% only once there are at least 20 samples', () => {

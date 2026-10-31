@@ -14,13 +14,18 @@
         ref="line"
         data-testid="profit-control-preview-line"
         :data-level="level"
-        :class="['transition-opacity duration-150', LEVEL_CLASSES[level], { 'opacity-60': loading }]"
+        :class="[LEVEL_CLASSES[level], { 'opacity-60': loading }]"
       >
-        {{ t('admin.groups.profitControl.preview', {
-          ceiling: formatProfitCeiling(preview.ceiling),
-          schedulable: preview.schedulable,
-          passing: preview.passing
-        }) }}
+        <template v-if="level === 'empty'">
+          {{ t('admin.groups.profitControl.previewEmpty', { ceiling: formatProfitCeiling(preview.ceiling) }) }}
+        </template>
+        <template v-else>
+          {{ t('admin.groups.profitControl.preview', {
+            ceiling: formatProfitCeiling(preview.ceiling),
+            schedulable: preview.schedulable,
+            passing: preview.passing
+          }) }}
+        </template>
       </p>
       <p v-if="level === 'danger'" class="mt-1 text-red-700 dark:text-red-400">
         {{ t('admin.groups.profitControl.previewZeroHint') }}
@@ -55,6 +60,7 @@ import {
 const PREVIEW_DEBOUNCE_MS = 400
 
 const LEVEL_CLASSES: Record<ProfitPreviewLevel, string> = {
+  empty: 'text-gray-600 dark:text-gray-300',
   danger: 'font-medium text-red-700 dark:text-red-400',
   warning: 'font-medium text-amber-700 dark:text-amber-400',
   normal: 'text-gray-600 dark:text-gray-300'
@@ -87,7 +93,7 @@ const marginDecimal = computed(() => {
   return decimal < 1 ? decimal : null
 })
 
-const level = computed(() => profitPreviewLevel(preview.value?.passing ?? 0))
+const level = computed(() => (preview.value ? profitPreviewLevel(preview.value) : 'normal'))
 
 async function fetchPreview(margin: number) {
   clearTimeout(timer)
@@ -135,12 +141,12 @@ onUnmounted(() => {
   controller?.abort()
 })
 
-/** 保存前调用：取与当前毛利率一致的预览，返回是否没有成员能通过。预览失败不拦截保存。 */
+/** 保存前调用：取与当前毛利率一致的预览，返回是否有可调度成员却没有一个能通过。预览失败不拦截保存。 */
 async function blocksAllMembers(): Promise<boolean> {
   const margin = marginDecimal.value
   if (margin === null) return false
   if (previewMargin !== margin || loading.value) await fetchPreview(margin)
-  return previewMargin === margin && preview.value?.passing === 0
+  return previewMargin === margin && !!preview.value && profitPreviewLevel(preview.value) === 'danger'
 }
 
 defineExpose({ blocksAllMembers })

@@ -325,24 +325,33 @@
 
           <template #cell-quality_gate="{ row }">
             <span
-              v-if="qualityGateSummaries.get(row.id)"
+              v-if="qualityGateSummary(row.id)"
               data-testid="group-quality-summary"
               class="whitespace-nowrap text-xs"
-              :title="t('admin.groupQualityGate.summaryTitle', { trial: qualityGateSummaries.get(row.id)!.trial })"
+              :title="t('admin.groupQualityGate.summaryTitle', { trial: qualityGateSummary(row.id)!.trial })"
             >
               <span class="text-gray-500 dark:text-gray-400">{{ t("admin.groupQualityGate.state.eligible") }}</span>
-              <span class="ml-1 font-medium text-emerald-700 dark:text-emerald-400">{{ qualityGateSummaries.get(row.id)!.eligible }}</span>
+              <span class="ml-1 font-medium text-emerald-700 dark:text-emerald-400">{{ qualityGateSummary(row.id)!.eligible }}</span>
               <span class="mx-1 text-gray-400 dark:text-dark-500" aria-hidden="true">/</span>
               <span class="text-gray-500 dark:text-gray-400">{{ t("admin.groupQualityGate.state.ejected") }}</span>
               <span
                 class="ml-1 font-medium"
-                :class="qualityGateSummaries.get(row.id)!.ejected > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-700 dark:text-gray-300'"
-              >{{ qualityGateSummaries.get(row.id)!.ejected }}</span>
+                :class="qualityGateSummary(row.id)!.ejected > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-700 dark:text-gray-300'"
+              >{{ qualityGateSummary(row.id)!.ejected }}</span>
             </span>
             <span
-              v-else
+              v-else-if="qualityGateViews.get(row.id)?.kind === 'pending'"
+              data-testid="group-quality-pending"
+              class="whitespace-nowrap text-xs text-gray-500 dark:text-gray-400"
+            >{{ t("admin.groupQualityGate.state.pending") }}</span>
+            <span
+              v-else-if="qualityGateViews.get(row.id)?.kind === 'failed'"
+              data-testid="group-quality-failed"
+              class="whitespace-nowrap text-xs text-red-600 dark:text-red-400"
+            >{{ t("admin.groupQualityGate.state.failed") }}</span>
+            <span
+              v-else-if="qualityGateViews.get(row.id)?.kind === 'off'"
               class="text-sm text-gray-400 dark:text-dark-500"
-              :title="qualityGateStatusFailed ? t('admin.groupQualityGate.summaryFailed') : undefined"
             >—</span>
           </template>
 
@@ -3001,6 +3010,7 @@
           v-if="editForm.platform === 'openai' && editingGroup && !authStore.isSimpleMode"
           ref="editQualityGateRef"
           :group-id="editingGroup.id"
+          @saved="applyQualityGatePolicy"
         />
 
         <!-- 支持的模型系列（仅 antigravity 平台） -->
@@ -4448,6 +4458,7 @@ import CodexManifestAccountsField from "@/components/admin/group/CodexManifestAc
 import GroupProfitControlPreview from "@/components/admin/group/GroupProfitControlPreview.vue";
 import GroupQualityGateField from "@/components/admin/group/GroupQualityGateField.vue";
 import { useGroupQualityGateStatus } from "@/composables/useGroupQualityGateStatus";
+import { groupQualityGateView } from "@/components/admin/account/groupQualityPresentation";
 import LongContextPricingFields from "@/components/admin/group/LongContextPricingFields.vue";
 import GroupSystemPromptFields from "@/components/admin/group/GroupSystemPromptFields.vue";
 import GroupCategoryFilter from "@/components/admin/group/GroupCategoryFilter.vue";
@@ -4503,9 +4514,9 @@ import {
   DEFAULT_PROFIT_MIN_MARGIN_PERCENT,
   PROFIT_SAFETY_BUFFER,
   isProfitControlPlatform,
+  profitMarginPercentFromGroup,
   profitMarginPercentOnEnable,
   profitPercentToDecimal,
-  profitDecimalToPercent,
   validateProfitControlFormState,
   type ProfitControlFormState,
 } from "./groupsProfitControl";
@@ -4777,22 +4788,23 @@ const hasVisibleUsageSummaryConsumer = computed(
 );
 const hasVisibleCapacityColumn = computed(() => !authStore.isSimpleMode && isColumnVisible("capacity"));
 
-// 门槛列：开启质量门槛的分组显示“合格 n / 熔断 m”，关闭的显示“—”；可见时随列表刷新，最多 60 秒拉一次。
+// 门槛列，开没开以策略为准：已评估显示“合格 n / 熔断 m”，刚开还没评估显示“等待评估”，
+// 关闭显示“—”，读取失败明文提示。可见时随列表刷新，最多 60 秒拉一次。
 const {
-  status: qualityGateStatus,
-  failed: qualityGateStatusFailed,
+  sources: qualityGateSources,
   refresh: refreshQualityGateStatus,
+  applyPolicy: applyQualityGatePolicy,
 } = useGroupQualityGateStatus();
-const qualityGateSummaries = computed(() => {
-  const map = new Map<number, { eligible: number; ejected: number; trial: number }>();
-  for (const group of qualityGateStatus.value?.groups ?? []) {
-    if (group.enabled) map.set(group.group_id, group.summary);
-  }
-  return map;
-});
-const refreshQualityGateColumn = (force = false) => {
+const qualityGateViews = computed(
+  () => new Map(groups.value.map((group) => [group.id, groupQualityGateView(group, qualityGateSources.value)])),
+);
+const qualityGateSummary = (groupId: number) => {
+  const view = qualityGateViews.value.get(groupId);
+  return view?.kind === "evaluated" ? view.group.summary : undefined;
+};
+const refreshQualityGateColumn = () => {
   if (!authStore.isSimpleMode && isColumnVisible("quality_gate")) {
-    void refreshQualityGateStatus(force);
+    void refreshQualityGateStatus();
   }
 };
 
@@ -6152,7 +6164,6 @@ const normalizeRateMultiplier = (
 
 // 利润控制表单辅助（换算与校验逻辑见 groupsProfitControl.ts，便于单测）。
 const percentToDecimal = profitPercentToDecimal;
-const decimalToPercent = profitDecimalToPercent;
 
 // 管理员手动打开利润控制、且毛利率未填或为 0 时套用默认 20%；回显已保存的分组不经过这里。
 const applyDefaultProfitMargin = (form: ProfitControlFormState) => {
@@ -6421,8 +6432,9 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.peak_end = group.peak_end ?? "";
   editForm.peak_rate_multiplier = group.peak_rate_multiplier ?? 1.0;
   editForm.profit_control_enabled = group.profit_control_enabled ?? false;
-  editForm.profit_min_margin_percent = decimalToPercent(
-    group.profit_min_margin ?? 0,
+  editForm.profit_min_margin_percent = profitMarginPercentFromGroup(
+    group.profit_min_margin,
+    group.profit_safety_buffer,
   );
   editForm.claude_code_only = group.claude_code_only || false;
   editForm.fallback_group_id = group.fallback_group_id;
@@ -6735,12 +6747,10 @@ const handleUpdateGroup = async () => {
     await adminAPI.groups.update(groupId, requestData);
     // 分组之后再存分类与门槛；它们失败时各自提示“分组已保存，…未保存”。
     const categoriesSaved = (await editCategoryFieldRef.value?.save(groupId)) !== false;
-    const qualityGate = editQualityGateRef.value;
-    const qualityGateSaved = (await qualityGate?.save(groupId)) !== false;
+    const qualityGateSaved = (await editQualityGateRef.value?.save(groupId)) !== false;
     if (categoriesSaved && qualityGateSaved) appStore.showSuccess(t("admin.groups.groupUpdated"));
     closeEditModal();
     loadGroups();
-    if (qualityGate && qualityGateSaved) refreshQualityGateColumn(true);
   } catch (error: any) {
     appStore.showError(
       extractApiErrorMessage(error, t("admin.groups.failedToUpdate")),

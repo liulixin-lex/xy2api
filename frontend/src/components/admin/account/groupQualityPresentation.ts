@@ -1,6 +1,7 @@
 import type {
   GroupQualityAccountMetrics,
   GroupQualityGateAccountStatus,
+  GroupQualityGateGroupStatus,
   GroupQualityGatePolicies,
   GroupQualityGateStatus
 } from '@/types/groupQualityGate'
@@ -23,6 +24,37 @@ export interface AccountGroupQuality {
   maxWarmTtftMs: number
   stale: boolean
 }
+
+/** 策略与状态分别读取；失败标志只表示最近一次读取失败。 */
+export interface GroupQualitySources {
+  policies: GroupQualityGatePolicies | null
+  policiesFailed: boolean
+  status: GroupQualityGateStatus | null
+  statusFailed: boolean
+}
+
+export type GroupQualityGateView =
+  | { kind: 'loading' | 'off' | 'pending' | 'failed' }
+  | { kind: 'evaluated'; group: GroupQualityGateGroupStatus }
+
+/**
+ * 分组的门槛显示状态，开没开以策略为准：非 OpenAI 或策略关 → off（也覆盖刚关、状态还没更新的情况）；
+ * 读取失败 → failed；策略开但状态里还没有这个组（刚开、等下一轮评估）→ pending。
+ */
+export function groupQualityGateView(group: { id: number; platform: string }, sources: GroupQualitySources): GroupQualityGateView {
+  if (group.platform !== 'openai') return { kind: 'off' }
+  if (sources.policiesFailed) return { kind: 'failed' }
+  if (!sources.policies) return { kind: 'loading' }
+  if (!sources.policies.groups[String(group.id)]?.enabled) return { kind: 'off' }
+  if (sources.statusFailed) return { kind: 'failed' }
+  if (!sources.status) return { kind: 'loading' }
+  const evaluated = sources.status.groups.find(item => item.group_id === group.id && item.enabled)
+  return evaluated ? { kind: 'evaluated', group: evaluated } : { kind: 'pending' }
+}
+
+/** 评估结果之外的两种中性状态：等待评估、读取失败。 */
+export type GroupQualityNoticeKind = 'pending' | 'failed'
+export type GroupQualityCell = AccountGroupQuality | { kind: GroupQualityNoticeKind }
 
 /** accountId → groupId → 门槛状态。只收开启门槛的分组；上限取策略，零值或缺省取默认。 */
 export function buildAccountQualityIndex(
@@ -50,39 +82,65 @@ export function buildAccountQualityIndex(
   return index
 }
 
-const KIND_RANK: Record<GroupQualityBadgeKind, number> = { ejected: 0, guard_held: 1, trial: 2, eligible: 3 }
+/**
+ * 账号所在各分组的门槛单元（groupId → 单元），规则同分组列表的门槛列。策略关或还在加载的分组不放进来，
+ * 显示普通标签；分组已评估但还没有这个账号（刚加入）时为等待评估。
+ */
+export function buildAccountQualityCells(sources: GroupQualitySources) {
+  const evaluated = buildAccountQualityIndex(sources.status, sources.policies)
+  const views = new Map<number, GroupQualityGateView>()
+  return (accountId: number, groups: { id: number; platform: string }[]): Map<number, GroupQualityCell> => {
+    const cells = new Map<number, GroupQualityCell>()
+    for (const group of groups) {
+      let view = views.get(group.id)
+      if (!view) views.set(group.id, (view = groupQualityGateView(group, sources)))
+      if (view.kind === 'pending' || view.kind === 'failed') cells.set(group.id, { kind: view.kind })
+      else if (view.kind === 'evaluated') cells.set(group.id, evaluated.get(accountId)?.get(group.id) ?? { kind: 'pending' })
+    }
+    return cells
+  }
+}
+
+const KIND_RANK: Record<GroupQualityCell['kind'], number> = { ejected: 0, guard_held: 1, trial: 2, failed: 3, pending: 4, eligible: 5 }
 
 /** 有问题的分组排前面，免得账号列表只显示前几个标签时把熔断藏进 +N；同档保持原顺序。 */
-export function orderGroupsByQuality<T extends { id: number }>(groups: T[], quality?: Map<number, AccountGroupQuality>): T[] {
+export function orderGroupsByQuality<T extends { id: number }>(groups: T[], quality?: Map<number, GroupQualityCell>): T[] {
   if (!quality?.size) return groups
   const rank = (group: T) => {
     const kind = quality.get(group.id)?.kind
-    return kind ? KIND_RANK[kind] : 4
+    return kind ? KIND_RANK[kind] : 6
   }
   return groups.map((group, order) => ({ group, order, rank: rank(group) }))
     .sort((a, b) => a.rank - b.rank || a.order - b.order)
     .map(item => item.group)
 }
 
-/** 与全局 badge-success / danger / warning 同一套色板。 */
-export const GROUP_QUALITY_BADGE_CLASSES: Record<GroupQualityBadgeKind, string> = {
+/** 与全局 badge-success / danger / warning / gray 同一套色板。 */
+export const GROUP_QUALITY_BADGE_CLASSES: Record<GroupQualityCell['kind'], string> = {
   eligible: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
   ejected: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
   trial: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
-  guard_held: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400'
+  guard_held: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400',
+  pending: 'bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-dark-300',
+  failed: 'bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-dark-300'
 }
+
+export const isGroupQualityNotice = (cell: GroupQualityCell): cell is { kind: GroupQualityNoticeKind } =>
+  cell.kind === 'pending' || cell.kind === 'failed'
 
 /** formatDateTime options for the hh:mm ejection end. */
 export const QUALITY_CLOCK: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit', hour12: false }
 
-const STATE_KEYS: Record<GroupQualityBadgeKind, string> = { eligible: 'eligible', ejected: 'ejected', trial: 'trial', guard_held: 'guardHeld' }
+const STATE_KEYS: Record<GroupQualityCell['kind'], string> = {
+  eligible: 'eligible', ejected: 'ejected', trial: 'trial', guard_held: 'guardHeld', pending: 'pending', failed: 'failed'
+}
 
-/** 标签上的状态文字：合格 / 熔断至 hh:mm / 试用 / 保底保留。 */
-export function groupQualityStateLabel(quality: AccountGroupQuality, t: Translate, clock: (iso: string) => string): string {
-  if (quality.kind === 'ejected' && quality.status.until) {
-    return t(prefix + 'state.ejectedUntil', { time: clock(quality.status.until) })
+/** 标签上的状态文字：合格 / 熔断至 hh:mm / 试用 / 保底保留 / 等待评估 / 读取失败。 */
+export function groupQualityStateLabel(cell: GroupQualityCell, t: Translate, clock: (iso: string) => string): string {
+  if (cell.kind === 'ejected' && cell.status.until) {
+    return t(prefix + 'state.ejectedUntil', { time: clock(cell.status.until) })
   }
-  return t(prefix + 'state.' + STATE_KEYS[quality.kind])
+  return t(prefix + 'state.' + STATE_KEYS[cell.kind])
 }
 
 export const formatQualityRate = (rate: number) => `${Math.round(rate * 1000) / 10}%`
@@ -92,11 +150,12 @@ const formatHeadroom = (headroom: number) => `${Math.round(headroom * 100)}%`
 /** 悬停说明：状态、原因、实测值与上限、余量。实测值是账号完整窗口的指标，所有分组共用。 */
 export function groupQualityTooltip(
   groupName: string,
-  quality: AccountGroupQuality,
+  quality: GroupQualityCell,
   metrics: GroupQualityAccountMetrics | undefined,
   t: Translate,
   clock: (iso: string) => string
 ): string[] {
+  if (isGroupQualityNotice(quality)) return [t(prefix + 'tooltip.' + quality.kind, { group: groupName })]
   const { status } = quality
   const lines = [t(prefix + 'tooltip.state', { group: groupName, state: groupQualityStateLabel(quality, t, clock) })]
   if (status.pinned) lines.push(t(prefix + 'tooltip.pinned'))
@@ -126,7 +185,7 @@ export interface AccountQualityMetricItem {
   alert: boolean
 }
 
-/** 行内三项指标；没有样本时显示“—”。零缓存率只在样本足够且超过 30% 时标红。 */
+/** 行内三项指标（紧凑写法，完整名称、时间窗与样本数在 title）；没有样本时显示“—”。零缓存率只在样本足够且超过 30% 时标红。 */
 export function accountQualityMetricItems(metrics: GroupQualityAccountMetrics, t: Translate): AccountQualityMetricItem[] {
   const none = '—'
   return [

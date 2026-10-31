@@ -32,7 +32,7 @@
             :id="`${uid}-${field.key}`"
             v-model.number="form[field.key]"
             type="number"
-            :step="field.step"
+            step="any"
             :min="field.min"
             :max="field.max"
             class="input"
@@ -100,6 +100,7 @@ import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { useStateMotion } from '@/composables/useStateMotion'
+import type { GroupQualityGatePolicy } from '@/types/groupQualityGate'
 import {
   qualityGateFormToPolicy,
   qualityGatePoliciesEqual,
@@ -112,14 +113,18 @@ import {
 
 // 分组编辑框里的“质量门槛”区块（只对 OpenAI 分组显示）。门槛策略与分组分开保存：
 // 父组件先存分组，再调用 save()；失败只提示“分组已保存，门槛未保存”，不抛错。
-const FIELDS: { key: QualityGateField; label: string; hint: string; step: string; min: string; max: string }[] = [
-  { key: 'max_error_rate_percent', label: 'admin.groupQualityGate.maxErrorRate', hint: 'admin.groupQualityGate.maxErrorRateHint', step: '0.1', min: '0.1', max: '100' },
-  { key: 'max_warm_ttft_p90_seconds', label: 'admin.groupQualityGate.maxWarmTtft', hint: 'admin.groupQualityGate.maxWarmTtftHint', step: '1', min: '2', max: '600' },
-  { key: 'fast_warm_ttft_p90_seconds', label: 'admin.groupQualityGate.fastWarmTtft', hint: 'admin.groupQualityGate.fastWarmTtftHint', step: '1', min: '1', max: '599' }
+// 原生 min/max 只放外边界、step 为 any，浏览器不会拦下 7.5 秒这类合法值，具体规则由 validateQualityGateForm 判定。
+const FIELDS: { key: QualityGateField; label: string; hint: string; min: string; max: string }[] = [
+  { key: 'max_error_rate_percent', label: 'admin.groupQualityGate.maxErrorRate', hint: 'admin.groupQualityGate.maxErrorRateHint', min: '0', max: '100' },
+  { key: 'max_warm_ttft_p90_seconds', label: 'admin.groupQualityGate.maxWarmTtft', hint: 'admin.groupQualityGate.maxWarmTtftHint', min: '1', max: '600' },
+  { key: 'fast_warm_ttft_p90_seconds', label: 'admin.groupQualityGate.fastWarmTtft', hint: 'admin.groupQualityGate.fastWarmTtftHint', min: '1', max: '600' }
 ]
 const MEMBER_PAGE_SIZE = 1000
 
 const props = defineProps<{ groupId: number }>()
+const emit = defineEmits<{
+  saved: [groupId: number, version: number, policy: GroupQualityGatePolicy]
+}>()
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -216,6 +221,7 @@ async function save(groupId: number): Promise<boolean> {
     const result = await adminAPI.groupQualityGate.updatePolicy(groupId, { expected_version: version, policy })
     version = result.version
     loaded = qualityGatePolicyToForm(result.policy)
+    emit('saved', groupId, result.version, result.policy)
     return true
   } catch (error) {
     appStore.showWarning(t(`admin.groupQualityGate.${qualityGateSaveFailureKey(error)}`, {

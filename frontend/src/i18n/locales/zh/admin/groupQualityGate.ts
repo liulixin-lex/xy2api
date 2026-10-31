@@ -3,7 +3,7 @@ export default {
     title: '质量门槛',
     hint: '按错误率与续轮首字，把不达标的账号暂时移出本组调度；到期先试用，恢复后自动回到调度。不改账号的可调度状态和分组成员。',
     enable: '启用质量门槛',
-    disabledHint: '关闭时本组选号与现在完全一致。',
+    disabledHint: '关闭门槛后，本组选号不受质量门槛影响。',
     loading: '正在读取门槛配置…',
     loadFailed: '读取门槛配置失败：{message}',
     retry: '重试',
@@ -27,14 +27,15 @@ export default {
     groupSavedGateFailed: '分组已保存，门槛未保存：{message}',
     column: '门槛',
     summaryTitle: '试用中 {trial} 个',
-    summaryFailed: '门槛状态读取失败',
     pinnedMark: '固定',
     state: {
       eligible: '合格',
       ejected: '熔断',
       ejectedUntil: '熔断至 {time}',
       trial: '试用',
-      guardHeld: '保底保留'
+      guardHeld: '保底保留',
+      pending: '等待评估',
+      failed: '读取失败'
     },
     reason: {
       error_rate: '错误率超线',
@@ -52,15 +53,18 @@ export default {
       warmTtft: '续轮首字 p90 {value}，上限 {limit}',
       warmTtftNoData: '续轮首字 p90 暂无数据，上限 {limit}',
       headroom: '余量 {value}',
-      stale: '评估数据超过 5 分钟没有更新，状态沿用上一轮'
+      stale: '评估数据超过 5 分钟没有更新，状态沿用上一轮',
+      pending: '{group}：门槛已开启，等待下一轮评估（每分钟一次）',
+      failed: '{group}：门槛状态读取失败，刷新列表后重试'
     },
     metrics: {
-      errorRate: '错误率 {value}',
-      errorRateTitle: '近 15 分钟 {calls} 次调用，软失败 {failures} 次',
-      warmTtft: '续轮首字 p90 {value}',
-      warmTtftTitle: '近 30 分钟续轮流式样本 {count} 个',
+      label: '门槛',
+      errorRate: '错误 {value}',
+      errorRateTitle: '错误率（近 15 分钟）：{calls} 次调用，软失败 {failures} 次',
+      warmTtft: 'p90 {value}',
+      warmTtftTitle: '续轮首字 p90（近 30 分钟）：流式样本 {count} 个',
       zeroCache: '零缓存 {value}',
-      zeroCacheTitle: '近 2 小时续轮（提示 ≥ 2048 token）未读到缓存的占比，样本 {count} 个；超过 30% 不算快档'
+      zeroCacheTitle: '续轮零缓存率（近 2 小时，提示 ≥ 2048 token）：样本 {count} 个；超过 30% 不算快档'
     }
   }
 }

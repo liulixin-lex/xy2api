@@ -3,7 +3,7 @@ export default {
     title: 'Quality gate',
     hint: 'Takes accounts whose error rate or warm first-token latency exceed the limits out of this group\'s scheduling for a while. When the ejection ends they return on trial, then fully. Account schedulability and group membership are not changed.',
     enable: 'Enable quality gate',
-    disabledHint: 'While off, account selection in this group works exactly as before.',
+    disabledHint: 'While the gate is off, it does not affect account selection in this group.',
     loading: 'Loading gate settings…',
     loadFailed: 'Could not load gate settings: {message}',
     retry: 'Retry',
@@ -11,7 +11,7 @@ export default {
     maxErrorRateHint: 'Soft failures in the last 15 minutes. Default 10%',
     maxWarmTtft: 'Warm first-token limit (s)',
     maxWarmTtftHint: 'Warm first-token p90 over 30 minutes. Default 20 s',
-    fastWarmTtft: 'Fast tier line (s)',
+    fastWarmTtft: 'Fast tier threshold (s)',
     fastWarmTtftHint: 'Used for ordering when low-rate priority is on. Default 10 s',
     pinned: 'Pinned accounts',
     pinnedHint: 'Pinned accounts keep serving this group while ejected; their state still reflects real metrics. Only members of this group can be pinned.',
@@ -27,14 +27,15 @@ export default {
     groupSavedGateFailed: 'The group was saved, but the gate was not: {message}',
     column: 'Gate',
     summaryTitle: '{trial} on trial',
-    summaryFailed: 'Could not load gate status',
     pinnedMark: 'Pinned',
     state: {
       eligible: 'OK',
       ejected: 'Ejected',
       ejectedUntil: 'Ejected until {time}',
       trial: 'Trial',
-      guardHeld: 'Kept for floor'
+      guardHeld: 'Held by floor guard',
+      pending: 'Awaiting evaluation',
+      failed: 'Load failed'
     },
     reason: {
       error_rate: 'error rate over limit',
@@ -52,15 +53,18 @@ export default {
       warmTtft: 'Warm first-token p90 {value}, limit {limit}',
       warmTtftNoData: 'Warm first-token p90: no data yet, limit {limit}',
       headroom: 'Headroom {value}',
-      stale: 'Evaluation data is more than 5 minutes old; the previous state is kept'
+      stale: 'Evaluation data is more than 5 minutes old; the previous state is kept',
+      pending: '{group}: gate is on, awaiting the next evaluation (every minute)',
+      failed: '{group}: could not load gate status. Reload the list to retry.'
     },
     metrics: {
-      errorRate: 'Errors {value}',
-      errorRateTitle: '{calls} calls in the last 15 minutes, {failures} soft failures',
-      warmTtft: 'Warm TTFT p90 {value}',
-      warmTtftTitle: '{count} warm streaming samples in the last 30 minutes',
-      zeroCache: 'Zero cache {value}',
-      zeroCacheTitle: 'Share of warm requests (prompt ≥ 2048 tokens) in the last 2 hours that read no cache, {count} samples. Above 30% the account is not fast tier.'
+      label: 'Gate',
+      errorRate: 'Err {value}',
+      errorRateTitle: 'Error rate (last 15 min): {calls} calls, {failures} soft failures',
+      warmTtft: 'p90 {value}',
+      warmTtftTitle: 'Warm first-token p90 (last 30 min): {count} streaming samples',
+      zeroCache: 'No cache {value}',
+      zeroCacheTitle: 'Warm zero-cache rate (last 2 h, prompt ≥ 2048 tokens): {count} samples. Above 30% the account is not fast tier.'
     }
   }
 }

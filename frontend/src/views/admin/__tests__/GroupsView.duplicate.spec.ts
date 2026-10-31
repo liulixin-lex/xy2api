@@ -32,6 +32,10 @@ const authState = vi.hoisted(() => ({ isSimpleMode: false }))
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
+    groupQualityGate: {
+      getStatus: vi.fn().mockResolvedValue({ generated_at: '', stale: false, account_metrics: {}, groups: [] }),
+      getPolicies: vi.fn().mockResolvedValue({ version: 0, groups: {} }),
+    },
     groups: {
       list: listGroups,
       duplicate: duplicateGroup,

@@ -1190,6 +1190,7 @@ export default {
         previewLoading: '正在计算能通过的成员…',
         previewInvalid: '填写有效的毛利率后显示预览',
         previewFailed: '预览暂不可用：{message}',
+        previewEmpty: '相当于上游倍率 ≤ {ceiling}；本组暂无可调度成员',
         previewZeroHint: '按这个毛利率没有成员能通过，本组请求将转入兜底链路；保存时需要确认。',
         zeroPassConfirmTitle: '没有成员能通过利润门',
         zeroPassConfirmMessage: '按当前毛利率，本组可调度成员的上游倍率都超过上限，请求会全部转入兜底链路处理。确定保存吗？',
