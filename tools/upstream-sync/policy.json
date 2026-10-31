@@ -3187,6 +3187,34 @@
     {
       "path": "backend/internal/service/openai_quality_routing.go",
       "value": "if selection.StickyCapacitySpillover {\n\t\t\t\treturn selection, decision, nil"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "if (cfg.LoadBatchEnabled || req.AdvancedScheduler) && !groupQualityGateExempt(ctx) && !req.DisableStickyEscape && req.PreviousResponseID == \"\" {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "if NormalizeOpenAICompatiblePlatform(req.Platform) != PlatformOpenAI {\n\t\t\t\t\t\tselection, err := s.selectOpenAIStickyCapacityBorrow(ctx, account, req)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "return markStickySessionHit(markOpenAIStickySpillover(selection, spillover), !spillover), err"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "key.qualityTier = qualityTiers[item.account.ID]\n\t\t\tkey.nearCapacity = openAIAccountNearCapacity(item)"
+    },
+    {
+      "path": "backend/internal/service/openai_quality_routing.go",
+      "value": "borrowTiers := tiers[:2]"
+    },
+    {
+      "path": "backend/internal/service/openai_quality_routing.go",
+      "value": "for _, borrowPass := range borrowTiers {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "spillover := fresh.ID != account.ID"
     }
   ],
   "forbidden_module_paths": [
@@ -5435,6 +5463,31 @@
       "id": "xy-openai-group-quality-scheduling",
       "path": "backend/internal/handler/openai_gateway_handler_test.go",
       "literal": "func TestOpenAIResponsesWebSocket_QualityTurnAdmissionThroughHooks(t *testing.T)"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_group_quality_scheduling_test.go",
+      "literal": "Grok full owner escapes to an immediate free slot/"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_group_quality_scheduling_test.go",
+      "literal": "quality routing waits for healthy owner instead of borrowing avoided account/"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_group_quality_scheduling_test.go",
+      "literal": "quality borrow preserves near-capacity cohort/"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_group_quality_scheduling_test.go",
+      "literal": "queue full better alternative"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_group_quality_scheduling_test.go",
+      "literal": "pinned owner queue full remains a sticky fallback wait"
     }
   ]
 }

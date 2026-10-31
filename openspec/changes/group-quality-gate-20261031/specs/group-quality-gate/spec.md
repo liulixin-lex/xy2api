@@ -161,10 +161,12 @@ With low-rate priority enabled, candidates MUST be ordered by tier, `Account.Pri
 When a sticky account cannot get a slot:
 
 1. The scheduler MUST retry that account's slot for up to 2 seconds, honoring cancellation, without entering the wait queue. A slot gained this way MUST come with exactly one release function.
-2. Otherwise it MUST exclude the bound account for this selection and borrow an idle eligible account in the group without changing the binding. All three saturation paths (legacy without load batch, load-aware, advanced) MUST pick the borrowed account in the same session-stable order: the best tier and cost band first, then the account this session last succeeded on, then a per-session hash. Repeated borrows for a session therefore land on the same account.
-3. Only when no account has an immediate slot MUST it return the final wait plan for the bound account, as before. The wait queue MUST count that plan once.
+2. Otherwise it MUST exclude the bound account for this selection and borrow an idle eligible account in the group without changing the binding. All three saturation paths (legacy without load batch, load-aware, advanced) MUST pick the borrowed account in the same session-stable order: the best tier and cost band first, then the account this session last succeeded on, then a per-session hash. Borrowing MAY remove the minimum-load-plus-20 restriction, but MUST preserve the active ≥80% load cohort, tier, priority, cost and compact boundaries. Repeated borrows within an unchanged cohort therefore land on the same account.
+3. Only when no eligible account has an immediate slot MUST it return the final wait plan for the bound account, as before. When the sticky queue is full, fallback timeout and queue limits MUST apply: legacy without LoadBatch MUST wait on the owner; load-aware and advanced selection MAY choose the best Layer 3 candidate. Only a different selected account MUST be marked as spillover. Waiting on the owner MUST retain sticky-hit and first-output timeout semantics. The wait queue MUST count that plan once.
 
-Strong continuations MUST keep waiting for their own account.
+Strong continuations MUST keep waiting for their own account. Non-OpenAI legacy load-aware selection MUST try immediate free slots before fallback waiting once its sticky queue is full.
+
+When existing quality routing owns a healthy saturated account, borrowing and fallback waiting MUST use only the otherProvider and otherAccount tiers. They MUST NOT use the later passes that forgive avoided accounts; those remain available for ordinary routing when the owner is unusable.
 
 #### Scenario: Cheap but slow account
 

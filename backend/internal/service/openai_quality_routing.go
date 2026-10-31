@@ -830,6 +830,9 @@ func (s *OpenAIGatewayService) selectAccountWithQualityRouting(
 	}
 	// A replacement stays sticky even when an old provider's cooldown expires.
 	tiers := qualityExclusionTiers(accounts, state, excluded)
+	// Saturation may use other providers/accounts, but must not enter the
+	// later passes that forgive an avoided account. Those require an unusable owner.
+	borrowTiers := tiers[:2]
 	stickyBindingPass := false
 	if state.Binding > 0 {
 		if _, skip := excluded[state.Binding]; !skip {
@@ -853,10 +856,9 @@ func (s *OpenAIGatewayService) selectAccountWithQualityRouting(
 		if selectErr == nil && selection != nil && selection.Account != nil {
 			if stickyBindingPass && passIndex == 0 && selection.WaitPlan != nil && selection.WaitPlan.AccountID == state.Binding {
 				// The owner-only pass has already performed the shared two-second
-				// retry. Try the shared spillover candidate logic for every quality
-				// avoidance tier while retaining the caller's exclusions. The owner
-				// alone receives the final wait plan if no tier has a free account.
-				for _, borrowPass := range tiers[1:] {
+				// retry. Try only the two non-forgiving quality tiers, retaining
+				// the caller's exclusions and the healthy owner's binding.
+				for _, borrowPass := range borrowTiers {
 					borrowExcluded := cloneExcludedAccountIDs(borrowPass)
 					if borrowExcluded == nil {
 						borrowExcluded = make(map[int64]struct{})
@@ -879,8 +881,16 @@ func (s *OpenAIGatewayService) selectAccountWithQualityRouting(
 					decision.SelectedAccountType = borrowed.Account.Type
 					return borrowed, decision, nil
 				}
-				if selection.StickyCapacitySpillover {
-					for _, borrowPass := range tiers[1:] {
+				cfg := s.schedulingConfig()
+				fallbackAcrossPool := (cfg.LoadBatchEnabled || s.isOpenAIAdvancedSchedulerEnabled(ctx)) && s.concurrencyService != nil
+				waitingCount := 0
+				if fallbackAcrossPool {
+					// Re-read after borrowing: queue pressure can change during the
+					// attempts. This does not increment or join a waiting queue.
+					waitingCount, _ = s.concurrencyService.GetAccountWaitingCount(ctx, state.Binding)
+				}
+				if fallbackAcrossPool && waitingCount >= cfg.StickySessionMaxWaiting {
+					for _, borrowPass := range borrowTiers {
 						borrowExcluded := cloneExcludedAccountIDs(borrowPass)
 						if borrowExcluded == nil {
 							borrowExcluded = make(map[int64]struct{})
@@ -895,8 +905,10 @@ func (s *OpenAIGatewayService) selectAccountWithQualityRouting(
 							return nil, OpenAIAccountScheduleDecision{}, fallbackErr
 						}
 						if fallback != nil && fallback.Account != nil {
-							decision.Layer = openAIAccountScheduleLayerLoadBalance
-							decision.StickySessionHit = false
+							if fallback.StickyCapacitySpillover {
+								decision.Layer = openAIAccountScheduleLayerLoadBalance
+								decision.StickySessionHit = false
+							}
 							decision.SelectedAccountID = fallback.Account.ID
 							decision.SelectedAccountType = fallback.Account.Type
 							return fallback, decision, nil

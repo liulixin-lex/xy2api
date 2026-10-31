@@ -244,13 +244,14 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 	}
 
 	for _, path := range []string{"no load batch", "load aware", "advanced"} {
-		for _, scenario := range []string{"short retry", "borrow stable", "queue full", "cancel"} {
+		for _, scenario := range []string{"short retry", "borrow stable", "queue full", "queue full better alternative", "cancel"} {
 			cases = append(cases, testCase{path + "/" + scenario, func(t *testing.T) {
 				svc, cache, _ := env(path == "advanced", path != "no load batch")
 				gid := int64(groupID)
 				cache.sessionBindings["openai:session"] = 1
-				conc := &qualityCapacityCache{start: time.Now(), allBusy: scenario == "queue full"}
-				if scenario == "queue full" {
+				queueFull := scenario == "queue full" || scenario == "queue full better alternative"
+				conc := &qualityCapacityCache{start: time.Now(), allBusy: queueFull}
+				if queueFull {
 					conc.waitCount = svc.schedulingConfig().StickySessionMaxWaiting
 				}
 				if scenario == "short retry" {
@@ -260,8 +261,11 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 				repo, ok := svc.accountRepo.(schedulerTestOpenAIAccountRepo)
 				require.True(t, ok)
 				for i := range repo.accounts {
-					if scenario != "queue full" {
+					if !queueFull {
 						repo.accounts[i].Priority = 0
+					}
+					if scenario == "queue full better alternative" && repo.accounts[i].ID == 1 {
+						repo.accounts[i].Priority = 9
 					}
 				}
 				svc.accountRepo = repo
@@ -277,7 +281,7 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 					count = 2
 				}
 				for i := 0; i < count; i++ {
-					selection, _, err := svc.SelectAccountWithScheduler(ctx, &gid, "", "session", "gpt-test", nil, OpenAIUpstreamTransportAny, false)
+					selection, decision, err := svc.SelectAccountWithScheduler(ctx, &gid, "", "session", "gpt-test", nil, OpenAIUpstreamTransportAny, false)
 					if scenario == "cancel" {
 						require.ErrorIs(t, err, context.DeadlineExceeded)
 						require.Nil(t, selection)
@@ -285,12 +289,19 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 					}
 					require.NoError(t, err)
 					require.NotNil(t, selection)
-					if scenario == "queue full" {
+					if queueFull {
+						wantID := int64(1)
+						if scenario == "queue full better alternative" && path != "no load batch" {
+							wantID = 2
+						}
 						require.False(t, selection.Acquired)
-						require.Equal(t, int64(1), selection.WaitPlan.AccountID, "fallback ranks the full pool, including the best owner")
+						require.Equal(t, wantID, selection.WaitPlan.AccountID)
 						require.Nil(t, selection.ReleaseFunc)
 						require.Equal(t, svc.schedulingConfig().FallbackMaxWaiting, selection.WaitPlan.MaxWaiting)
-						require.True(t, selection.StickyCapacitySpillover)
+						require.Equal(t, svc.schedulingConfig().FallbackWaitTimeout, selection.WaitPlan.Timeout)
+						require.Equal(t, wantID != 1, selection.StickyCapacitySpillover)
+						require.Equal(t, wantID == 1, decision.StickySessionHit)
+						require.Equal(t, wantID == 1, selection.stickySessionHit)
 					} else {
 						require.True(t, selection.Acquired)
 						require.NotNil(t, selection.ReleaseFunc)
@@ -308,7 +319,7 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 						selection.ReleaseFunc()
 						require.Equal(t, int64(i+1), conc.releases.Load())
 					}
-					if scenario == "queue full" {
+					if queueFull {
 						require.Equal(t, int64(1), conc.waits.Load())
 					} else {
 						require.Zero(t, conc.waits.Load())
@@ -333,26 +344,79 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 			require.Equal(t, svc.schedulingConfig().StickySessionMaxWaiting, selection.WaitPlan.MaxWaiting)
 		}})
 	}
-	cases = append(cases, testCase{"non OpenAI sticky full retains advanced concurrency escape", func(t *testing.T) {
-		svc, cache, _ := env(true, true)
-		gid := int64(groupID)
-		cache.sessionBindings["openai:session"] = 1
+	for _, advanced := range []bool{true, false} {
+		cases = append(cases, testCase{"Grok full owner escapes to an immediate free slot/advanced=" + strconv.FormatBool(advanced), func(t *testing.T) {
+			svc, cache, _ := env(advanced, true)
+			gid := int64(groupID)
+			cache.sessionBindings["openai:session"] = 1
+			repo, ok := svc.accountRepo.(schedulerTestOpenAIAccountRepo)
+			require.True(t, ok)
+			for i := range repo.accounts {
+				repo.accounts[i].Platform = PlatformGrok
+				repo.accounts[i].Credentials = map[string]any{"model_mapping": map[string]any{"grok-4": "grok-4"}}
+			}
+			svc.accountRepo = repo
+			svc.concurrencyService = NewConcurrencyService(&qualityCapacityCache{start: time.Now(), waitCount: svc.schedulingConfig().StickySessionMaxWaiting})
+			selection, _, err := svc.SelectAccountWithSchedulerForCapability(context.Background(), &gid, "", "session", "grok-4", nil,
+				OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, false, true, PlatformGrok)
+			require.NoError(t, err)
+			require.NotNil(t, selection)
+			require.True(t, selection.Acquired)
+			require.Equal(t, int64(2), selection.Account.ID)
+			require.Nil(t, selection.WaitPlan)
+			selection.ReleaseFunc()
+		}})
+	}
+	for _, path := range []string{"no load batch", "load aware", "advanced"} {
+		for _, queueFull := range []bool{false, true} {
+			cases = append(cases, testCase{"quality routing waits for healthy owner instead of borrowing avoided account/" + path + "/queueFull=" + strconv.FormatBool(queueFull), func(t *testing.T) {
+				svc, _, conc := qualityBorrowEnv(path)
+				if queueFull {
+					conc.waitCount = svc.schedulingConfig().StickySessionMaxWaiting
+				}
+				repo, ok := svc.accountRepo.(schedulerTestOpenAIAccountRepo)
+				require.True(t, ok)
+				for i := range repo.accounts {
+					repo.accounts[i].Credentials = map[string]any{}
+					repo.accounts[i].Credentials["base_url"] = "https://quality-" + strconv.FormatInt(repo.accounts[i].ID, 10) + ".example"
+				}
+				svc.accountRepo = repo
+				now := time.Now().UnixMilli()
+				q := &openAIQualityRequest{scope: "quality-avoid-borrow-" + path, group: groupID, apiID: 94, session: "avoid-session", model: "gpt-test", loaded: true,
+					state: OpenAIQualityState{Generation: 1, Owner: 1, Binding: 1, Avoid: map[string]OpenAIQualityAvoid{
+						"3": {Provider: qualityProvider(&repo.accounts[2]), At: now, Until: now + 60000},
+					}}}
+				ctx := context.WithValue(withOpenAIQualityRouting(context.Background()), openAIQualityContextKey{}, q)
+				gid := groupID
+				selection, decision, err := svc.SelectAccountWithScheduler(ctx, &gid, "", q.session, q.model, map[int64]struct{}{2: {}}, OpenAIUpstreamTransportAny, false)
+				require.NoError(t, err)
+				require.NotNil(t, selection.WaitPlan)
+				require.Equal(t, int64(1), selection.Account.ID)
+				require.False(t, selection.Acquired)
+				require.Nil(t, selection.ReleaseFunc)
+				require.False(t, selection.StickyCapacitySpillover)
+				require.True(t, decision.StickySessionHit)
+				require.Equal(t, int64(1), q.state.Binding)
+				if queueFull {
+					require.Equal(t, svc.schedulingConfig().FallbackMaxWaiting, selection.WaitPlan.MaxWaiting)
+				} else {
+					require.Equal(t, svc.schedulingConfig().StickySessionMaxWaiting, selection.WaitPlan.MaxWaiting)
+				}
+			}})
+		}
+	}
+	cases = append(cases, testCase{"pinned owner queue full remains a sticky fallback wait", func(t *testing.T) {
+		svc, _, conc := qualityBorrowEnv("advanced")
+		conc.waitCount = svc.schedulingConfig().StickySessionMaxWaiting
 		repo, ok := svc.accountRepo.(schedulerTestOpenAIAccountRepo)
 		require.True(t, ok)
-		for i := range repo.accounts {
-			repo.accounts[i].Platform = PlatformGrok
-			repo.accounts[i].Credentials = map[string]any{"model_mapping": map[string]any{"grok-4": "grok-4"}}
-		}
-		svc.accountRepo = repo
-		svc.concurrencyService = NewConcurrencyService(&qualityCapacityCache{start: time.Now()})
-		selection, _, err := svc.SelectAccountWithSchedulerForCapability(context.Background(), &gid, "", "session", "grok-4", nil,
-			OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, false, true, PlatformGrok)
+		gid := groupID
+		selection, err := svc.selectOpenAIStickyCapacity(withGroupQualityGateExempt(context.Background()), &repo.accounts[0], OpenAIAccountScheduleRequest{GroupID: &gid, Platform: PlatformOpenAI, SessionHash: "pinned", RequestedModel: "gpt-test", AdvancedScheduler: true})
 		require.NoError(t, err)
-		require.NotNil(t, selection)
-		require.True(t, selection.Acquired)
-		require.Equal(t, int64(2), selection.Account.ID)
-		require.Nil(t, selection.WaitPlan)
-		selection.ReleaseFunc()
+		require.Equal(t, int64(1), selection.WaitPlan.AccountID)
+		require.Equal(t, svc.schedulingConfig().FallbackMaxWaiting, selection.WaitPlan.MaxWaiting)
+		require.False(t, selection.StickyCapacitySpillover)
+		require.True(t, selection.stickySessionHit)
 	}})
 	for _, path := range []string{"no load batch", "load aware", "advanced"} {
 		path := path
@@ -423,7 +487,7 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 				}
 				require.Equal(t, int64(1), q.state.Binding)
 				if i == 0 && path != "no load batch" {
-					conc.loadRates = map[int64]int{1: 0, 2: 0, 3: 0, selection.Account.ID: 95}
+					conc.loadRates = map[int64]int{1: 0, 2: 0, 3: 0, selection.Account.ID: 50}
 				}
 				if i == 0 {
 					firstRelease = selection.ReleaseFunc
@@ -436,43 +500,53 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 		}})
 	}
 	for _, path := range []string{"no load batch", "load aware", "advanced"} {
-		cases = append(cases, testCase{"quality borrow prefers recent success across the load band/" + path, func(t *testing.T) {
-			resetOpenAIAdvancedSchedulerSettingCacheForTest()
-			defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
-			svc, _, conc := qualityBorrowEnv(path)
-			settings := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
-				openAIAdvancedSchedulerSettingKey:              strconv.FormatBool(path == "advanced"),
-				SettingKeyOpenAILowUpstreamRatePriorityEnabled: "true",
-			}}
-			svc.rateLimitService = &RateLimitService{settingService: NewSettingService(settings, svc.cfg)}
-			repo, ok := svc.accountRepo.(schedulerTestOpenAIAccountRepo)
-			require.True(t, ok)
-			for i := range repo.accounts {
-				repo.accounts[i].Priority = 0
-			}
-			recent := profitControlWSAccount(4, 0.2, time.Now())
-			recent.GroupIDs = []int64{groupID}
-			recent.Priority = 0
-			moreExpensive := profitControlWSAccount(5, 0.8, time.Now())
-			moreExpensive.GroupIDs = []int64{groupID}
-			moreExpensive.Priority = 0
-			repo.accounts = append(repo.accounts, recent, moreExpensive)
-			svc.accountRepo = repo
-			conc.loadRates = map[int64]int{1: 0, 2: 0, 3: 95, 4: 0, 5: 0}
-			session := "quality-recent-success-session"
-			svc.recentSessionSuccess().record(openAIRecentSessionKey{groupID, session, "gpt-test"}, 3, time.Now())
-			q := &openAIQualityRequest{scope: "quality-borrow-recent", group: groupID, apiID: 93, session: session, model: "gpt-test", loaded: true,
-				state: OpenAIQualityState{Generation: 1, Owner: 1, Binding: 1}}
-			ctx := context.WithValue(withOpenAIQualityRouting(context.Background()), openAIQualityContextKey{}, q)
-			gid := groupID
-			selection, _, err := svc.selectAccountWithQualityRouting(ctx, &gid, "", session, "gpt-test", nil,
-				OpenAIUpstreamTransportAny, "", "", false, PlatformOpenAI, false, true)
-			require.NoError(t, err)
-			require.NotNil(t, selection)
-			require.Equal(t, int64(3), selection.Account.ID, "recent success must outrank load-band ordering in the same priority and cost cohort")
-			require.True(t, selection.StickyCapacitySpillover)
-			selection.ReleaseFunc()
-		}})
+		loads := []int{50}
+		if path == "load aware" {
+			loads = append(loads, 80, 95)
+		}
+		for _, load := range loads {
+			cases = append(cases, testCase{"quality borrow preserves near-capacity cohort/" + path + "/load=" + strconv.Itoa(load), func(t *testing.T) {
+				resetOpenAIAdvancedSchedulerSettingCacheForTest()
+				defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+				svc, _, conc := qualityBorrowEnv(path)
+				settings := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
+					openAIAdvancedSchedulerSettingKey:              strconv.FormatBool(path == "advanced"),
+					SettingKeyOpenAILowUpstreamRatePriorityEnabled: "true",
+				}}
+				svc.rateLimitService = &RateLimitService{settingService: NewSettingService(settings, svc.cfg)}
+				repo, ok := svc.accountRepo.(schedulerTestOpenAIAccountRepo)
+				require.True(t, ok)
+				for i := range repo.accounts {
+					repo.accounts[i].Priority = 0
+				}
+				recent := profitControlWSAccount(4, 0.2, time.Now())
+				recent.GroupIDs = []int64{groupID}
+				recent.Priority = 0
+				moreExpensive := profitControlWSAccount(5, 0.8, time.Now())
+				moreExpensive.GroupIDs = []int64{groupID}
+				moreExpensive.Priority = 0
+				repo.accounts = append(repo.accounts, recent, moreExpensive)
+				svc.accountRepo = repo
+				conc.loadRates = map[int64]int{1: 0, 2: 0, 3: load, 4: 0, 5: 0}
+				session := "quality-recent-success-session"
+				svc.recentSessionSuccess().record(openAIRecentSessionKey{groupID, session, "gpt-test"}, 3, time.Now())
+				q := &openAIQualityRequest{scope: "quality-borrow-recent", group: groupID, apiID: 93, session: session, model: "gpt-test", loaded: true,
+					state: OpenAIQualityState{Generation: 1, Owner: 1, Binding: 1}}
+				ctx := context.WithValue(withOpenAIQualityRouting(context.Background()), openAIQualityContextKey{}, q)
+				gid := groupID
+				selection, _, err := svc.selectAccountWithQualityRouting(ctx, &gid, "", session, "gpt-test", nil,
+					OpenAIUpstreamTransportAny, "", "", false, PlatformOpenAI, false, true)
+				require.NoError(t, err)
+				require.NotNil(t, selection)
+				if path == "load aware" && load >= 80 {
+					require.Contains(t, []int64{2, 4}, selection.Account.ID, "recent success must stay inside the best near-capacity and cost cohort")
+				} else {
+					require.Equal(t, int64(3), selection.Account.ID, "recent success outranks only the +20 load band inside the same cohort")
+				}
+				require.True(t, selection.StickyCapacitySpillover)
+				selection.ReleaseFunc()
+			}})
+		}
 	}
 	cases = append(cases, testCase{"last resort retains profit and hard gates", func(t *testing.T) {
 		svc, _, view := env(false, false)

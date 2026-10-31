@@ -1586,9 +1586,7 @@ func (s *OpenAIGatewayService) preferOpenAISessionOrder(ctx context.Context, ava
 		if rateOrder.enabled {
 			key.rate, key.known = rateOrder.rates[item.account.ID]
 			key.qualityTier = qualityTiers[item.account.ID]
-			if !borrowing {
-				key.nearCapacity = openAIAccountNearCapacity(item)
-			}
+			key.nearCapacity = openAIAccountNearCapacity(item)
 		}
 		if compact {
 			key.tier = openAICompactSupportTier(item.account)
@@ -2136,17 +2134,25 @@ func (s *OpenAIGatewayService) selectOpenAIStickyCapacity(ctx context.Context, a
 		if s.concurrencyService != nil {
 			waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, account.ID)
 			if waitingCount >= cfg.StickySessionMaxWaiting {
-				if !groupQualityGateExempt(ctx) && !req.DisableStickyEscape && req.PreviousResponseID == "" {
+				if (cfg.LoadBatchEnabled || req.AdvancedScheduler) && !groupQualityGateExempt(ctx) && !req.DisableStickyEscape && req.PreviousResponseID == "" {
+					// Non-OpenAI legacy selection reaches Layer 2 only after the
+					// sticky queue fills; try its immediate slots before Layer 3.
+					if NormalizeOpenAICompatiblePlatform(req.Platform) != PlatformOpenAI {
+						selection, err := s.selectOpenAIStickyCapacityBorrow(ctx, account, req)
+						if err != nil || selection != nil {
+							return selection, err
+						}
+					}
 					selection, err := s.selectOpenAIStickyCapacityFallbackWait(ctx, account, req)
 					if err != nil || selection != nil {
-						return markOpenAIStickySpillover(selection, true), err
+						return selection, err
 					}
 				}
 				selection, err := s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
 					AccountID: account.ID, MaxConcurrency: account.Concurrency,
 					Timeout: cfg.FallbackWaitTimeout, MaxWaiting: cfg.FallbackMaxWaiting,
 				})
-				return markOpenAIStickySpillover(selection, true), err
+				return markStickySessionHit(selection, true), err
 			}
 		}
 		selection, err := s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{AccountID: account.ID, MaxConcurrency: account.Concurrency, Timeout: cfg.StickySessionWaitTimeout, MaxWaiting: cfg.StickySessionMaxWaiting})
@@ -2326,7 +2332,8 @@ func (s *OpenAIGatewayService) selectOpenAIStickyCapacityResult(ctx context.Cont
 				AccountID: fresh.ID, MaxConcurrency: fresh.Concurrency,
 				Timeout: cfg.FallbackWaitTimeout, MaxWaiting: cfg.FallbackMaxWaiting,
 			})
-			return markOpenAIStickySpillover(selection, true), err
+			spillover := fresh.ID != account.ID
+			return markStickySessionHit(markOpenAIStickySpillover(selection, spillover), !spillover), err
 		}
 		return nil, nil
 	}
