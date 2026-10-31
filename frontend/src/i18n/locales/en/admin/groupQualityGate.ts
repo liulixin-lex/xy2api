@@ -1,0 +1,71 @@
+export default {
+  groupQualityGate: {
+    title: 'Quality gate',
+    hint: 'Takes accounts whose error rate or warm first-token latency exceed the limits out of this group\'s scheduling for a while. When the ejection ends they return on trial, then fully. Account schedulability and group membership are not changed.',
+    enable: 'Enable quality gate',
+    disabledHint: 'While the gate is off, it does not affect account selection in this group.',
+    loading: 'Loading gate settings…',
+    loadFailed: 'Could not load gate settings: {message}',
+    retry: 'Retry',
+    maxErrorRate: 'Error rate limit (%)',
+    maxErrorRateHint: 'Soft failures in the last 15 minutes. Default 10%',
+    maxWarmTtft: 'Warm first-token limit (s)',
+    maxWarmTtftHint: 'Warm first-token p90 over 30 minutes. Default 20 s',
+    fastWarmTtft: 'Fast tier threshold (s)',
+    fastWarmTtftHint: 'Used for ordering when low-rate priority is on. Default 10 s',
+    pinned: 'Pinned accounts',
+    pinnedHint: 'Pinned accounts keep serving this group while ejected; their state still reflects real metrics. Only members of this group can be pinned.',
+    membersLoading: 'Loading group members…',
+    membersEmpty: 'This group has no OpenAI accounts yet. Add members to pin them.',
+    membersFailed: 'Could not load group members: {message}',
+    errorRateRange: 'The error rate limit must be above 0 and at most 100%',
+    maxTtftRange: 'The limit must be above 1 s and at most 600 s',
+    fastTtftMin: 'The fast tier line must be at least 1 s',
+    fastTtftBelowMax: 'The fast tier line must be below the warm first-token limit',
+    fixErrors: 'Fix the quality gate settings first',
+    groupSavedGateConflict: 'The group was saved, but the gate was not: someone else changed the gate settings. Refresh and set them again.',
+    groupSavedGateFailed: 'The group was saved, but the gate was not: {message}',
+    column: 'Gate',
+    summaryTitle: '{trial} on trial',
+    pinnedMark: 'Pinned',
+    state: {
+      eligible: 'OK',
+      ejected: 'Ejected',
+      ejectedUntil: 'Ejected until {time}',
+      trial: 'Trial',
+      guardHeld: 'Held by floor guard',
+      pending: 'Awaiting evaluation',
+      failed: 'Load failed'
+    },
+    reason: {
+      error_rate: 'error rate over limit',
+      warm_ttft: 'warm first token over limit'
+    },
+    listSeparator: ', ',
+    tooltip: {
+      state: '{group}: {state}',
+      pinned: 'Pinned: keeps serving this group while ejected',
+      guardHeld: 'Over the limits, but kept in scheduling so the group keeps its minimum of usable accounts',
+      strikes: 'Ejection {count} in a row',
+      reasons: 'Reason: {reasons}',
+      errorRate: 'Error rate {value}, limit {limit}',
+      errorRateNoData: 'Error rate: no data yet, limit {limit}',
+      warmTtft: 'Warm first-token p90 {value}, limit {limit}',
+      warmTtftNoData: 'Warm first-token p90: no data yet, limit {limit}',
+      headroom: 'Headroom {value}',
+      headroomNoData: 'Headroom: not enough samples',
+      stale: 'Evaluation data is more than 5 minutes old; the previous state is kept',
+      pending: '{group}: gate is on, awaiting the next evaluation (every minute)',
+      failed: '{group}: could not load gate status. Reload the list to retry.'
+    },
+    metrics: {
+      label: 'Gate',
+      errorRate: 'Err {value}',
+      errorRateTitle: 'Error rate (last 15 min): {calls} calls, {failures} soft failures',
+      warmTtft: 'p90 {value}',
+      warmTtftTitle: 'Warm first-token p90 (last 30 min): {count} streaming samples',
+      zeroCache: 'No cache {value}',
+      zeroCacheTitle: 'Warm zero-cache rate (last 2 h, prompt ≥ 2048 tokens): {count} samples. Above 30% the account is not fast tier.'
+    }
+  }
+}

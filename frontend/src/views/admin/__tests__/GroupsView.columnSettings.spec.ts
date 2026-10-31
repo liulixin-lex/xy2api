@@ -11,6 +11,7 @@ const {
   getUsageSummary,
   getCapacitySummary,
   getLiveCapability,
+  getQualityGateStatus,
   listAccounts,
   showError,
   showSuccess,
@@ -25,6 +26,7 @@ const {
   getUsageSummary: vi.fn(),
   getCapacitySummary: vi.fn(),
   getLiveCapability: vi.fn(),
+  getQualityGateStatus: vi.fn(),
   listAccounts: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
@@ -68,6 +70,10 @@ vi.mock('@/api/admin', () => ({
     },
     accounts: {
       list: listAccounts,
+    },
+    groupQualityGate: {
+      getStatus: getQualityGateStatus,
+      getPolicies: vi.fn().mockResolvedValue({ version: 0, groups: {} }),
     },
   },
 }))
@@ -272,6 +278,7 @@ describe('admin GroupsView column settings', () => {
     getModelAllowlistCandidates.mockResolvedValue([])
     getUsageSummary.mockResolvedValue([])
     getCapacitySummary.mockResolvedValue([])
+    getQualityGateStatus.mockResolvedValue({ generated_at: '2026-11-01T00:00:00Z', stale: false, account_metrics: {}, groups: [] })
     getLiveCapability.mockResolvedValue({ supported: false })
     listAccounts.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
     isCurrentStep.mockReturnValue(false)
@@ -310,6 +317,7 @@ describe('admin GroupsView column settings', () => {
       'is_exclusive',
       'category',
       'account_count',
+      'quality_gate',
       'capacity',
       'usage',
       'status',
@@ -337,6 +345,7 @@ describe('admin GroupsView column settings', () => {
       'is_exclusive',
       'category',
       'account_count',
+      'quality_gate',
       'status',
       'actions',
     ])
@@ -356,6 +365,7 @@ describe('admin GroupsView column settings', () => {
       'is_exclusive',
       'category',
       'account_count',
+      'quality_gate',
       'capacity',
       'status',
       'actions',
@@ -380,6 +390,7 @@ describe('admin GroupsView column settings', () => {
       'is_exclusive',
       'category',
       'account_count',
+      'quality_gate',
       'capacity',
       'status',
       'actions',
@@ -404,6 +415,7 @@ describe('admin GroupsView column settings', () => {
       'is_exclusive',
       'category',
       'account_count',
+      'quality_gate',
       'capacity',
       'usage',
       'status',

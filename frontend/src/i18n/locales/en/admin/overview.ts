@@ -1184,15 +1184,20 @@ export default {
       },
       profitControl: {
         enable: 'Enable profit control',
-        enabledHint: 'Scheduling only admits accounts whose account multiplier ≤ the request\'s effective downstream multiplier × (1 − min margin − safety buffer). Account multipliers may be maintained manually or synchronized from probes; existing ordering, stickiness and breakers keep working among qualified accounts. Image/video scheduling is not covered yet.',
+        enabledHint: 'Scheduling only admits accounts whose account multiplier ≤ the request\'s effective downstream multiplier × (1 − min margin). Account multipliers may be maintained manually or synchronized from probes; existing ordering, stickiness and breakers keep working among qualified accounts. Image/video scheduling is not covered yet.',
         disabledHint: 'When disabled, scheduling does no profit filtering: accounts whose account multiplier exceeds the downstream multiplier can still be selected, which may produce loss-making requests.',
         minMargin: 'Min gross margin (%)',
-        minMarginHint: 'Percent input, e.g. 30 means 30%; stored as a decimal on the backend',
-        safetyBuffer: 'Safety buffer (%)',
-        safetyBufferHint: 'Added to min margin and deducted from the downstream multiplier; defaults to 0',
+        minMarginHint: 'Percent input, e.g. 20 means 20%. Defaults to 20% when turned on',
         marginRangeError: 'Min gross margin must be between 0 and 99.99',
-        bufferRangeError: 'Safety buffer must be between 0 and 99.99',
-        sumTooHigh: 'Min gross margin plus safety buffer must be less than 100%, otherwise every account would be excluded'
+        preview: 'Equals an upstream multiplier ≤ {ceiling}; {passing} of {schedulable} schedulable members pass',
+        previewLoading: 'Counting members that pass…',
+        previewInvalid: 'Enter a valid margin to see the preview',
+        previewFailed: 'Preview unavailable: {message}',
+        previewEmpty: 'Equals an upstream multiplier ≤ {ceiling}; this group has no schedulable members',
+        previewZeroHint: 'No member passes at this margin, so requests to this group will go to the fallback chain. Saving asks for confirmation.',
+        zeroPassConfirmTitle: 'No member passes the profit gate',
+        zeroPassConfirmMessage: 'At this margin every schedulable member is above the upstream multiplier limit, so all requests will go to the fallback chain. Save anyway?',
+        zeroPassConfirm: 'Save anyway'
       },
       modelAllowlist: {
         title: 'Model Allowlist',

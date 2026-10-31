@@ -6,6 +6,7 @@
 import dashboardAPI from './dashboard'
 import usersAPI from './users'
 import groupsAPI from './groups'
+import groupQualityGateAPI from './groupQualityGate'
 import accountsAPI from './accounts'
 import proxiesAPI from './proxies'
 import redeemAPI from './redeem'
@@ -47,6 +48,7 @@ export const adminAPI = {
   dashboard: dashboardAPI,
   users: usersAPI,
   groups: groupsAPI,
+  groupQualityGate: groupQualityGateAPI,
   accounts: accountsAPI,
   proxies: proxiesAPI,
   redeem: redeemAPI,
@@ -86,6 +88,7 @@ export {
   dashboardAPI,
   usersAPI,
   groupsAPI,
+  groupQualityGateAPI,
   accountsAPI,
   proxiesAPI,
   redeemAPI,

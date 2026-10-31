@@ -117,7 +117,7 @@
 - 状态（2026-10-31T19:05Z）：第一段完成；unit 67 包通过，service 383.103s（低于 8 分钟）；本机 integration 59 包通过，四组 vet、全仓 lint（0 issues）、韧性 478 项 race 零跳过、调度差异、文档一致性、Python 96 项通过；Wire 重生成无源码差异，go.sum 工具副作用已恢复。
 - 修复与证据：`c8d38c070` 仅补具名补丁 provenance，policy/provenance 零错误；未改业务代码。命令、原始结果和既有 skip 清单保存在仓外 `integration/wp5/PHASE1.md` 及同目录日志。
 - 环境与未完成：本机仓外 overlay 只改 TestMain 与两项限流环境函数；临时 PostgreSQL/Redis 已停止并删除目录。三项迁移/备份 Docker 用例按主持人决定不做 overlay；完整 Docker 集成已由主持人在另一开发环境启动，结果待同步。
-- 下一步：等待通知合并 WP4 后执行第二段；本轮未做前端门禁、最终 audit、规格验收与发布说明。仅本地提交，未推送、PR、main 合并、打标签、部署或连接生产。
+- 第二段开始：主持人已授权合并 WP4 `a2b0c70d4`；从干净 HEAD `330194d39` 开始执行前端门禁、干净树 audit、规格验收、发布说明与最终交付。Docker 全量结果待主持人同步。仅本地提交，未推送、PR、main 合并、打标签、部署或连接生产。
 
 ## 操作陷阱
 
