@@ -40,9 +40,13 @@ export type GroupQualityGateView =
 /**
  * 分组的门槛显示状态，开没开以策略为准：非 OpenAI 或策略关 → off（也覆盖刚关、状态还没更新的情况）；
  * 读取失败 → failed；策略开但状态里还没有这个组（刚开、等下一轮评估）→ pending。
+ * 评估器与 status 只看启用的分组，停用分组的门槛不生效，按 off 显示，免得一直“等待评估”。
  */
-export function groupQualityGateView(group: { id: number; platform: string }, sources: GroupQualitySources): GroupQualityGateView {
-  if (group.platform !== 'openai') return { kind: 'off' }
+export function groupQualityGateView(
+  group: { id: number; platform: string; status?: string },
+  sources: GroupQualitySources
+): GroupQualityGateView {
+  if (group.platform !== 'openai' || group.status === 'inactive') return { kind: 'off' }
   if (sources.policiesFailed) return { kind: 'failed' }
   if (!sources.policies) return { kind: 'loading' }
   if (!sources.policies.groups[String(group.id)]?.enabled) return { kind: 'off' }

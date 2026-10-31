@@ -57,7 +57,8 @@ describe('groupQualityGateView (policy × status)', () => {
     ['policies failed', openai(7), sources({ policiesFailed: true }), 'failed'],
     ['not loaded yet', openai(7), sources({ policies: null, status: null }), 'loading'],
     ['policy on, status not loaded yet', openai(7), sources({ status: null }), 'loading'],
-    ['non-OpenAI group even when loading failed', { id: 7, platform: 'anthropic' }, sources({ policiesFailed: true }), 'off']
+    ['non-OpenAI group even when loading failed', { id: 7, platform: 'anthropic' }, sources({ policiesFailed: true }), 'off'],
+    ['inactive group is never evaluated', { id: 9, platform: 'openai', status: 'inactive' }, sources({ policies: policies({ 9: true }) }), 'off']
   ] as const)('%s → %s', (_name, group, src, kind) => {
     expect(groupQualityGateView(group, src).kind).toBe(kind)
   })
