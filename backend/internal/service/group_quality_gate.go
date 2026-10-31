@@ -177,20 +177,31 @@ type GroupQualitySummaryView struct {
 	Trial    int `json:"trial"`
 }
 
+// GroupQualityDecisionMetrics contains effective metrics used for a group decision.
+// Counts remain visible; derived metrics are nil until their decision thresholds are met.
+type GroupQualityDecisionMetrics struct {
+	Calls         int64    `json:"calls"`
+	SoftFailures  int64    `json:"soft_failures"`
+	ErrorRate     *float64 `json:"error_rate"`
+	WarmSamples   int64    `json:"warm_samples"`
+	WarmTTFTP90Ms *int     `json:"warm_ttft_p90_ms"`
+}
+
 // GroupQualityAccountView contains the quality decision for a group member.
 type GroupQualityAccountView struct {
-	AccountID int64      `json:"account_id"`
-	State     string     `json:"state"`
-	Until     *time.Time `json:"until,omitempty"`
-	Reasons   []string   `json:"reasons"`
-	Strikes   int        `json:"strikes"`
-	Usable    bool       `json:"usable"`
-	Passing   bool       `json:"passing"`
-	GuardHeld bool       `json:"guard_held"`
-	Pinned    bool       `json:"pinned"`
-	Vetoed    bool       `json:"vetoed"`
-	Tier      int        `json:"tier"`
-	Headroom  *float64   `json:"headroom"`
+	AccountID int64                       `json:"account_id"`
+	State     string                      `json:"state"`
+	Until     *time.Time                  `json:"until,omitempty"`
+	Reasons   []string                    `json:"reasons"`
+	Strikes   int                         `json:"strikes"`
+	Usable    bool                        `json:"usable"`
+	Passing   bool                        `json:"passing"`
+	GuardHeld bool                        `json:"guard_held"`
+	Pinned    bool                        `json:"pinned"`
+	Vetoed    bool                        `json:"vetoed"`
+	Tier      int                         `json:"tier"`
+	Headroom  *float64                    `json:"headroom"`
+	Metrics   GroupQualityDecisionMetrics `json:"metrics"`
 }
 
 func (m GroupQualityMetrics) ErrorRate() float64 {
