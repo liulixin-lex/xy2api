@@ -6,13 +6,13 @@
 
 ## 当前交接状态
 
-### Anthropic 缓存 TTL 实施（2026-10-30；本地实施完成，待用户决定后续提交）
+### Anthropic 缓存 TTL 实施（2026-10-31；PR #170 已合并，版本发布准备中）
 
 - 目标：按 `.work/tasks/20261030-anthropic-cache-ttl/FINAL_PLAN.md` 完整实施管理员默认 TTL、API Key 四态、最终出站统一处理、usage/计费/预留修复及前端/文档同步；保持精简，不做影子模式、生产操作或无关测试。
 - 起点：main `23b19fd9b`；已有本记忆与归档未提交改动必须保留。实施前已完整复读方案、代码基线和 Git 状态。
 - 分工：实际 Paseo A 负责最终 wire、协议/usage 转换与预留；B 负责 Key/Ent/迁移、鉴权、设置、usage 仓储与账单；C 负责前端、现行文档/OpenSpec/登记。三者已由运行元数据核实为 gpt-6-astra / xhigh；实施完成后另行独立 Astra 审查。主 Agent 负责接口契约、进度纠偏、门禁和收尾。
 - 约束：迁移只追加；不改生产、不推送、不创建 PR/发布；不覆盖其他 Agent 既有改动；任何实现必须贯通最终 wire、计费与预留，不能只做表单开关。
-- 当前：本地代码、前端、文档与登记已完成，未提交/推送/部署。Key/鉴权 v27、迁移 286、Ent/Wire、usage 仓储、最终 wire、attempt 隔离、presence/明确0、计费副本和冷写预留均已闭合；独立 Paseo D（Astra/xhigh）报告无剩余 P0/P1。前端 135 项定向测试、typecheck/build/lint/设计检查通过；隔离 PG18/Redis 40 个顶层 `-race` 用例零跳过且自有数据零残留，Redis-only 四态快照通过；服务包全量 unit、TTL 相关 race、相邻包 race、golangci-lint、整仓 build、韧性 gate、scheduler-diff、迁移与文档一致性均通过。真实供应商物理缓存能力与命中率未验证；工作树保留本任务及此前记忆改动，等待用户决定是否提交。
+- 当前：PR #170 已以合并提交 `d579bca2b3498d3fdd35b0e09dad37321558f348` 合入 main；两套 CI 与安全检查全部通过。现有 `v0.4.14` 标签保持不可变，本次 TTL 版本准备为 `v0.4.15`。真实供应商物理缓存能力与命中率未验证；尚未部署生产。
 
 ### Anthropic 缓存 TTL：生产只读分析与方案 v1.0 已交付（2026-10-30；未实施）
 
@@ -307,7 +307,7 @@
 
 ### 20261030-anthropic-cache-ttl-implementation — 产品统筹与集成（已完成；2026-10-30）
 
-- 结果：本地实施、独立 Astra/xhigh 审查与全部验收完成；详细交接已归档至 `docs/PROJECT_MEMORY_ARCHIVE.md`。真实供应商与生产部署未执行，提交/推送待用户另行授权。
+- 结果：PR #170 已合并，独立 Astra/xhigh 审查与全部验收完成；真实供应商与生产部署未执行。
 
 ### 20261030-anthropic-cache-ttl-backend — 后端核心实施（已完成；2026-10-30）
 
