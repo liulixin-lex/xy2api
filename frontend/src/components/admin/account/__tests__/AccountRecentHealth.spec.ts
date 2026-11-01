@@ -19,17 +19,26 @@ const mountHealth = (health: Record<string, unknown> | null) =>
   })
 
 describe('AccountRecentHealth', () => {
-  it('shows the recent error count beside the status as a new-tab link to the account error requests', () => {
+  it('labels the recent error count under the status as a new-tab link to the account error requests', () => {
     const wrapper = mountHealth({ first_token_avg_ms: null, first_token_samples: 0, recent_errors: 7 })
     const link = wrapper.get('[data-test="recent-errors"]')
+    const lines = wrapper.findAll('[data-test]').map(node => node.attributes('data-test'))
 
     expect(wrapper.get('[data-test="status"]').text()).toBe('正常')
-    expect(link.text()).toBe('7')
+    expect(lines.indexOf('recent-errors')).toBe(lines.indexOf('status') + 1)
+    expect(link.text()).toBe('admin.accounts.recentErrors:{"count":7}')
     expect(link.attributes('href')).toBe('/admin/usage?tab=errors&account_id=42')
     expect(link.attributes('target')).toBe('_blank')
     expect(link.attributes('rel')).toBe('noopener')
     expect(link.classes()).toContain('text-red-600')
     expect(link.attributes('title')).toBe('admin.accounts.recentErrorsTitle:{"count":7}')
+  })
+
+  it('colours a few recent errors amber and five or more red', () => {
+    const tone = (recent_errors: number) => mountHealth({ first_token_avg_ms: null, first_token_samples: 0, recent_errors }).get('[data-test="recent-errors"]').classes()
+    expect(tone(1)).toContain('text-amber-600')
+    expect(tone(4)).toContain('text-amber-600')
+    expect(tone(5)).toContain('text-red-600')
   })
 
   it('shows the 3-minute first token average under the status, coloured by latency band', () => {
@@ -59,7 +68,8 @@ describe('AccountRecentHealth', () => {
 
     expect(lines.indexOf('cache-read-ratio')).toBe(lines.indexOf('first-token-avg') + 1)
     expect(ratio.text()).toBe('admin.accounts.cacheReadRatio:{"value":"62.3%"}')
-    expect(ratio.classes()).toEqual(expect.arrayContaining(['text-sky-600', 'dark:text-sky-400']))
+    // Reference data, not a status: neutral grey rather than a status colour.
+    expect(ratio.classes()).toEqual(expect.arrayContaining(['text-gray-500', 'dark:text-gray-400']))
     expect(ratio.attributes('title')).toBe('admin.accounts.cacheReadRatioTitle:{"count":12}')
   })
 

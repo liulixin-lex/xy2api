@@ -254,7 +254,7 @@
               <span v-else class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
               <span
                 v-if="accountDisplayEmail(row)"
-                class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px]"
+                class="max-w-[9rem] truncate text-xs text-gray-500 dark:text-gray-400"
                 :title="accountDisplayEmail(row) + (row.parent_chatgpt_account_id ? ' · ' + row.parent_chatgpt_account_id : '')"
               >
                 {{ accountDisplayEmail(row) }}
@@ -293,6 +293,12 @@
               </div>
             </div>
           </template>
+          <template #header-capacity="{ column }">
+            <div class="flex items-center gap-1">
+              <span>{{ column.label }}</span>
+              <HelpTooltip :content="t('admin.accounts.capacityHint')" width-class="w-72" />
+            </div>
+          </template>
           <template #cell-capacity="{ row }">
             <AccountCapacityCell :account="row" />
           </template>
@@ -321,7 +327,7 @@
             />
           </template>
           <template #cell-groups="{ row }">
-            <AccountGroupsCellButton :groups="accountGroupsForRow(row)" :account-name="row.name" :quality="accountQualityCells.get(row.id)" :metrics="accountQualityMetrics(row.id)" @open="canPlaceGroups && (groupsDialogAccount = row)" />
+            <AccountGroupsCellButton :groups="accountGroupsForRow(row)" :account-name="row.name" :account-platform="row.platform" :quality="accountQualityCells.get(row.id)" :metrics="accountQualityMetrics(row.id)" @open="canPlaceGroups && (groupsDialogAccount = row)" />
             <AccountQualityMetrics v-if="accountQualityMetrics(row.id)" :metrics="accountQualityMetrics(row.id)!" :limits="strictestQualityLimits(accountQualityCells.get(row.id))" />
           </template>
           <template #header-usage="{ column }">
@@ -335,6 +341,7 @@
               :account="row"
               :today-stats="todayStatsByAccountId[String(row.id)] ?? null"
               :today-stats-loading="todayStatsLoading"
+              :hide-today-stats="!hiddenColumns.has('today_stats')"
               :manual-refresh-token="usageManualRefreshToken"
               :batched-usage="usageBatchByAccountId[String(row.id)] ?? null"
               :batched-usage-error="usageBatchErrorByAccountId[String(row.id)] ?? null"

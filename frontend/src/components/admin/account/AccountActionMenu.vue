@@ -11,54 +11,62 @@
       >
         <div class="py-1">
           <template v-if="account">
-            <button v-if="canManage" @click="$emit('test', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-dark-700">
-              <Icon name="play" size="sm" class="text-green-500" :stroke-width="2" />
+            <!-- 三组：检测与查看 → 账号操作 → 恢复；文字统一中性色，图标统一灰色 -->
+            <button v-if="canManage" :class="ITEM" @click="$emit('test', account); $emit('close')">
+              <Icon name="play" size="sm" :class="ICON" />
               {{ t('admin.accounts.testConnection') }}
             </button>
-            <button v-if="canManage && account.platform === 'openai'" @click="$emit('iq-run', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-blue-600 hover:bg-gray-100 dark:hover:bg-dark-700">{{ t('admin.accounts.iqRun') }}</button>
-            <button v-if="account.platform === 'openai'" @click="$emit('iq-records', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-dark-700">{{ t('admin.accounts.iqRecords') }}</button>
-            <button @click="$emit('stats', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-dark-700">
-              <Icon name="chart" size="sm" class="text-indigo-500" />
-              {{ t('admin.accounts.viewStats') }}
-            </button>
-            <button @click="$emit('schedule', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-dark-700">
-              <Icon name="clock" size="sm" class="text-orange-500" />
+            <button :class="ITEM" @click="$emit('schedule', account); $emit('close')">
+              <Icon name="clock" size="sm" :class="ICON" />
               {{ t('admin.scheduledTests.schedule') }}
             </button>
-            <button v-if="canDuplicate && canPlace" @click="$emit('duplicate', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-dark-700">
-              <Icon name="copy" size="sm" class="text-sky-500" />
+            <button v-if="canManage && account.platform === 'openai'" :class="ITEM" @click="$emit('iq-run', account); $emit('close')">
+              <Icon name="beaker" size="sm" :class="ICON" />
+              {{ t('admin.accounts.iqRun') }}
+            </button>
+            <button v-if="account.platform === 'openai'" :class="ITEM" @click="$emit('iq-records', account); $emit('close')">
+              <Icon name="document" size="sm" :class="ICON" />
+              {{ t('admin.accounts.iqRecords') }}
+            </button>
+            <button :class="ITEM" @click="$emit('stats', account); $emit('close')">
+              <Icon name="chart" size="sm" :class="ICON" />
+              {{ t('admin.accounts.viewStats') }}
+            </button>
+            <div v-if="hasAccountActions" :class="DIVIDER"></div>
+            <button v-if="canDuplicate && canPlace" :class="ITEM" @click="$emit('duplicate', account); $emit('close')">
+              <Icon name="copy" size="sm" :class="ICON" />
               {{ t('admin.accounts.duplicateAccount') }}
             </button>
             <!-- 影子账号不持凭据:重授权/刷新 token 对其无效(后端拒绝),故隐藏(外审 G4)。 -->
-            <template v-if="canManage && (account.type === 'oauth' || account.type === 'setup-token') && !isShadow">
-              <button @click="$emit('reauth', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-blue-600 hover:bg-gray-100 dark:hover:bg-dark-700">
-                <Icon name="link" size="sm" />
+            <template v-if="canRenewCredentials">
+              <button :class="ITEM" @click="$emit('reauth', account); $emit('close')">
+                <Icon name="link" size="sm" :class="ICON" />
                 {{ t('admin.accounts.reAuthorize') }}
               </button>
-              <button @click="$emit('refresh-token', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-purple-600 hover:bg-gray-100 dark:hover:bg-dark-700">
-                <Icon name="refresh" size="sm" />
+              <button :class="ITEM" @click="$emit('refresh-token', account); $emit('close')">
+                <Icon name="refresh" size="sm" :class="ICON" />
                 {{ t('admin.accounts.refreshToken') }}
               </button>
             </template>
-            <button v-if="auth.isAdmin && isOpenAIOAuthParent" data-test="manage-openai-totp" @click="$emit('manage-openai-totp', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-amber-600 hover:bg-gray-100 dark:hover:bg-dark-700">
-              <Icon name="shield" size="sm" />
+            <button v-if="auth.isAdmin && isOpenAIOAuthParent" data-test="manage-openai-totp" :class="ITEM" @click="$emit('manage-openai-totp', account); $emit('close')">
+              <Icon name="key" size="sm" :class="ICON" />
               {{ t('admin.accounts.openaiTotp.manageTitle') }}
             </button>
-            <button v-if="isOpenAIOAuthParent && canPlace" @click="$emit('create-spark-shadow', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-amber-600 hover:bg-gray-100 dark:hover:bg-dark-700">
-              <Icon name="sparkles" size="sm" />
+            <button v-if="isOpenAIOAuthParent && canPlace" :class="ITEM" @click="$emit('create-spark-shadow', account); $emit('close')">
+              <Icon name="sparkles" size="sm" :class="ICON" />
               {{ t('admin.accounts.createSparkShadow') }}
             </button>
-            <button v-if="canManage && supportsPrivacy" @click="$emit('set-privacy', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-emerald-600 hover:bg-gray-100 dark:hover:bg-dark-700">
-              <Icon name="shield" size="sm" />
+            <button v-if="canManage && supportsPrivacy" :class="ITEM" @click="$emit('set-privacy', account); $emit('close')">
+              <Icon name="shield" size="sm" :class="ICON" />
               {{ t('admin.accounts.setPrivacy') }}
             </button>
-            <div v-if="canManage && hasRecoverableState" class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
-            <button v-if="canManage && hasRecoverableState" @click="$emit('recover-state', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-emerald-600 hover:bg-gray-100 dark:hover:bg-dark-700">
-              <Icon name="sync" size="sm" />
+            <div v-if="canManage && (hasRecoverableState || hasQuotaLimit)" :class="DIVIDER"></div>
+            <button v-if="canManage && hasRecoverableState" :class="ITEM" @click="$emit('recover-state', account); $emit('close')">
+              <Icon name="sync" size="sm" :class="ICON" />
               {{ t('admin.accounts.recoverState') }}
             </button>
-            <button v-if="canManage && hasQuotaLimit" @click="$emit('reset-quota', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-teal-600 hover:bg-gray-100 dark:hover:bg-dark-700">
-              <Icon name="refresh" size="sm" />
+            <button v-if="canManage && hasQuotaLimit" :class="ITEM" @click="$emit('reset-quota', account); $emit('close')">
+              <Icon name="dollar" size="sm" :class="ICON" />
               {{ t('admin.accounts.resetQuota') }}
             </button>
           </template>
@@ -118,6 +126,10 @@ const updatePosition = () => {
 watch([menuRef, () => props.anchorRect, viewportWidth, viewportHeight], updatePosition, { flush: 'post' })
 useResizeObserver(menuRef, updatePosition)
 
+const ITEM = 'flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700'
+const ICON = 'shrink-0 text-gray-400 dark:text-gray-500'
+const DIVIDER = 'my-1 border-t border-gray-100 dark:border-dark-700'
+
 const canDuplicate = computed(() => {
   if (!props.account || props.account.parent_account_id != null) return false
   return ['apikey', 'upstream', 'bedrock', 'service_account'].includes(props.account.type)
@@ -148,6 +160,15 @@ const isShadow = computed(() => props.account?.parent_account_id != null)
 // A "parent" OpenAI OAuth account is one that is NOT itself a shadow (parent_account_id == null)
 const isOpenAIOAuthParent = computed(() => isOpenAIOAuth.value && !isShadow.value)
 const supportsPrivacy = computed(() => (isAntigravityOAuth.value || isOpenAIOAuth.value) && !isShadow.value)
+const canRenewCredentials = computed(() => canManage.value && (props.account?.type === 'oauth' || props.account?.type === 'setup-token') && !isShadow.value)
+// 第二组（账号操作）有任一项时才画分隔线。
+const hasAccountActions = computed(() =>
+  (canDuplicate.value && canPlace.value) ||
+  canRenewCredentials.value ||
+  (auth.isAdmin && isOpenAIOAuthParent.value) ||
+  (isOpenAIOAuthParent.value && canPlace.value) ||
+  (canManage.value && supportsPrivacy.value)
+)
 const hasQuotaLimit = computed(() => {
   return (props.account?.type === 'apikey' || props.account?.type === 'bedrock') && (
     (props.account?.quota_limit ?? 0) > 0 ||

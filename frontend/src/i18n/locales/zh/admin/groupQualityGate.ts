@@ -64,6 +64,14 @@ export default {
       pending: '每分钟评估一次',
       failed: '刷新列表后重试'
     },
+    indicator: {
+      attention: '质量门槛：{count} 个分组异常',
+      ok: '质量门槛：无异常'
+    },
+    panel: {
+      eligible: '合格 {count}',
+      window: '账号整体'
+    },
     metrics: {
       errorRate: '错 {value}',
       errorRateTitle: '错误率（近 15 分钟）：{calls} 次调用，软失败 {failures} 次',

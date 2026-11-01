@@ -8,8 +8,8 @@
       <span v-if="index" class="mx-1 text-gray-300 dark:text-dark-500" aria-hidden="true">·</span>
       <span
         :data-metric="item.key"
-        :data-alert="item.alert || undefined"
-        :class="item.alert ? 'font-semibold text-red-600 dark:text-red-400' : undefined"
+        data-alert="true"
+        class="font-semibold text-red-600 dark:text-red-400"
         :title="item.title"
       >{{ item.text }}</span>
     </template>
@@ -22,9 +22,10 @@ import { useI18n } from 'vue-i18n'
 import type { GroupQualityAccountMetrics } from '@/types/groupQualityGate'
 import { accountQualityMetricItems, type QualityLimits } from './groupQualityPresentation'
 
-// 账号完整窗口的三项指标压成一行：只列有样本的项，超过所在分组最严上限的项着色。
+// 分组单元格下方的指标行只在异常时出现：只列超过所在分组最严上限（零缓存为 30%）的项。
+// 三项指标的完整一行在分组门槛面板底部。
 const props = defineProps<{ metrics: GroupQualityAccountMetrics; limits?: QualityLimits }>()
 
 const { t } = useI18n()
-const items = computed(() => accountQualityMetricItems(props.metrics, t, props.limits))
+const items = computed(() => accountQualityMetricItems(props.metrics, t, props.limits).filter(item => item.alert))
 </script>

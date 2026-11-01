@@ -1,17 +1,17 @@
 <template>
+  <!-- 状态在上，下面依次是近期错误、首字、缓存率三行近期健康数据，各自带文字标签 -->
   <div class="flex flex-col items-start gap-1">
-    <div class="flex items-center gap-1.5">
-      <slot />
-      <a
-        v-if="recentErrors > 0"
-        :href="errorsHref"
-        target="_blank"
-        rel="noopener"
-        data-test="recent-errors"
-        class="rounded px-1 text-[11px] font-semibold leading-4 tabular-nums text-red-600 transition-colors hover:bg-red-50 hover:underline dark:text-red-400 dark:hover:bg-red-900/20"
-        :title="t('admin.accounts.recentErrorsTitle', { count: recentErrors })"
-      >{{ recentErrors }}</a>
-    </div>
+    <slot />
+    <a
+      v-if="recentErrors > 0"
+      :href="errorsHref"
+      target="_blank"
+      rel="noopener"
+      data-test="recent-errors"
+      class="text-[11px] font-medium leading-4 tabular-nums hover:underline"
+      :class="recentErrors >= RECENT_ERRORS_DANGER ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'"
+      :title="t('admin.accounts.recentErrorsTitle', { count: recentErrors })"
+    >{{ t('admin.accounts.recentErrors', { count: recentErrors }) }}</a>
     <span
       v-if="firstTokenAvgMs != null"
       data-test="first-token-avg"
@@ -22,7 +22,7 @@
     <span
       v-if="cacheRatio != null"
       data-test="cache-read-ratio"
-      class="text-[11px] leading-4 tabular-nums text-sky-600 dark:text-sky-400"
+      class="text-[11px] leading-4 tabular-nums text-gray-500 dark:text-gray-400"
       :title="t('admin.accounts.cacheReadRatioTitle', { count: health?.cache_samples ?? 0 })"
     >{{ t('admin.accounts.cacheReadRatio', { value: cacheRatio.toFixed(1) + '%' }) }}</span>
   </div>
@@ -42,9 +42,12 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
+// 近 10 分钟的错误请求数：1–4 次黄色，5 次及以上红色；0 不显示。
+const RECENT_ERRORS_DANGER = 5
 const recentErrors = computed(() => props.health?.recent_errors ?? 0)
 const firstTokenAvgMs = computed(() => props.health?.first_token_avg_ms ?? null)
 // 近 30 分钟三项 Token 先求和再算比例，口径同使用记录的“缓存读取占比”；三项之和为 0 时为 null，不显示。
+// 这是参考数据而非状态，用中性灰；状态色只留给错误数和首字延迟分档。
 const cacheRatio = computed(() => (props.health ? cacheReadRatio(props.health) : null))
 
 // 现有的“使用记录 → 错误请求”页，UsageView 读取 tab 与 account_id 并筛选该账号。

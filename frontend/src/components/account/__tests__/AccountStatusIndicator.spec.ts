@@ -59,6 +59,8 @@ describe('AccountStatusIndicator', () => {
     const wrapper = mount(AccountStatusIndicator, { props: { account }, global: { stubs: { Icon: true } } })
     const gates = wrapper.findAll('[data-testid="iq-gate"]').map(gate => gate.text())
     expect(gates).toEqual([expect.stringContaining('admin.accounts.iqRecheckAt'), expect.stringContaining('admin.accounts.iqRecheckPending')])
+    // The chip uses the IQ column's short model name; the full outbound model is in its title.
+    expect(wrapper.findAll('[data-testid="iq-gate"]').map(gate => gate.attributes('title'))).toEqual(['admin.accounts.iqGateModel', 'admin.accounts.iqGateModel'])
     expect(wrapper.text()).not.toContain('admin.accounts.status.modelRateLimitedUntil')
     expect(wrapper.text()).toContain('admin.accounts.status.paused')
     wrapper.unmount()

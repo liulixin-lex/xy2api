@@ -536,7 +536,7 @@
       <!-- Usage data or unlimited flow -->
       <div class="space-y-1">
         <div
-          v-if="showGeminiTodayStats && todayStats"
+          v-if="showGeminiTodayStats && shownTodayStats"
           class="mb-0.5 flex items-center"
         >
           <div class="flex items-center gap-1.5 text-[9px] text-gray-500 dark:text-gray-400">
@@ -550,7 +550,7 @@
               A ${{ formatKeyCost }}
             </span>
             <span
-              v-if="todayStats.user_cost != null"
+              v-if="shownTodayStats.user_cost != null"
               class="rounded bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800"
               :title="t('usage.userBilled')"
             >
@@ -559,7 +559,7 @@
           </div>
         </div>
         <div
-          v-else-if="showGeminiTodayStats && todayStatsLoading"
+          v-else-if="showGeminiTodayStats && shownTodayStatsLoading"
           class="mb-0.5 flex items-center gap-1"
         >
           <div class="h-3 w-10 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
@@ -624,7 +624,7 @@
       />
       <!-- Today stats row (requests, tokens, cost, user_cost) -->
       <div
-        v-if="todayStats"
+        v-if="shownTodayStats"
         class="mb-0.5 flex items-center"
       >
         <div class="flex items-center gap-1.5 text-[9px] text-gray-500 dark:text-gray-400">
@@ -638,7 +638,7 @@
             A ${{ formatKeyCost }}
           </span>
           <span
-            v-if="todayStats.user_cost != null"
+            v-if="shownTodayStats.user_cost != null"
             class="rounded bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800"
             :title="t('usage.userBilled')"
           >
@@ -648,7 +648,7 @@
       </div>
       <!-- Loading skeleton for today stats -->
       <div
-        v-else-if="todayStatsLoading"
+        v-else-if="shownTodayStatsLoading"
         class="mb-0.5 flex items-center gap-1"
       >
         <div class="h-3 w-10 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
@@ -680,7 +680,7 @@
 
       <!-- No data at all -->
       <div
-        v-if="!todayStats && !todayStatsLoading && !hasApiKeyQuota && !account.ollama_cloud_usage?.eligible && !account.opencode_go_usage?.eligible"
+        v-if="!shownTodayStats && !shownTodayStatsLoading && !hasApiKeyQuota && !account.ollama_cloud_usage?.eligible && !account.opencode_go_usage?.eligible"
         class="text-xs text-gray-400"
       >-</div>
     </div>
@@ -720,6 +720,8 @@ const props = withDefaults(
     account: Account
     todayStats?: WindowStats | null
     todayStatsLoading?: boolean
+    /** 今日统计列可见时为 true：今日数据由该列显示，这里不重复 */
+    hideTodayStats?: boolean
     manualRefreshToken?: number
     batchedUsage?: AccountUsageInfo | null
     batchedUsageError?: string | null
@@ -729,6 +731,7 @@ const props = withDefaults(
   {
     todayStats: null,
     todayStatsLoading: false,
+    hideTodayStats: false,
     manualRefreshToken: 0,
     batchedUsage: null,
     batchedUsageError: null,
@@ -805,6 +808,10 @@ const cnBalanceCellVisible = computed(() => cnBalanceCellVisibleFn(props.account
 const cnBalanceInUpstreamColumn = computed(() => cnBalanceShownInUpstreamColumn(props.account))
 
 const isBatchManaged = computed(() => typeof props.requestBatchedUsage === 'function')
+
+// API Key 等账号的今日数据与“今日统计”列相同；该列可见时这里不再重复，隐藏时照旧显示。
+const shownTodayStats = computed(() => (props.hideTodayStats ? null : props.todayStats))
+const shownTodayStatsLoading = computed(() => !props.hideTodayStats && props.todayStatsLoading)
 
 const showGeminiTodayStats = computed(() => {
   return props.account.platform === 'gemini' && props.account.type === 'service_account'

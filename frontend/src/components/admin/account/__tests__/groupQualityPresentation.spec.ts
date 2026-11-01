@@ -10,6 +10,7 @@ import {
   buildAccountQualityCells,
   buildAccountQualityIndex,
   groupQualityGateView,
+  groupQualityPanel,
   groupQualityStateLabel,
   groupQualityTooltip,
   strictestQualityLimits,
@@ -216,6 +217,36 @@ describe('groupQualityTooltip', () => {
   it('gives pending and failed notices a title and a next step only', () => {
     expect(groupQualityTooltip('Codex', { kind: 'pending' }, zh, clock)).toEqual({ title: 'Codex · 等待评估', note: '每分钟评估一次', reasons: [], rows: [] })
     expect(groupQualityTooltip('Codex', { kind: 'failed' }, zh, clock)).toEqual({ title: 'Codex · 读取失败', note: '刷新列表后重试', reasons: [], rows: [] })
+  })
+})
+
+describe('groupQualityPanel', () => {
+  const zh = i18nFor('zh').t
+  const named = (...ids: number[]) => ids.map(id => ({ id, name: String.fromCharCode(64 + id) }))
+
+  it('expands groups that need attention, keeps notices to one line and folds eligible groups into one summary', () => {
+    const quality = new Map<number, GroupQualityCell>([
+      [1, qualityOf(account({ state: 'trial', headroom: null }))],
+      [2, qualityOf(account({ state: 'ejected', until: '2026-11-01T14:20:00Z', strikes: 1, reasons: ['error_rate'] }), { stale: true })],
+      [3, qualityOf(account({ pinned: true }))],
+      [4, qualityOf(account({ headroom: 0.12 }))],
+      [5, { kind: 'pending' }]
+    ])
+    const panel = groupQualityPanel(orderGroupsByQuality(named(1, 2, 3, 4, 5), quality), quality, zh, clock)!
+    expect([panel.attention, panel.attentionCount]).toEqual(['ejected', 2])
+    expect(panel.blocks.map(block => block.title)).toEqual(['B · 熔断至 @14:20', 'A · 试用', 'E · 等待评估'])
+    expect(panel.blocks[0].rows).toHaveLength(2)
+    expect(panel.eligible).toEqual([{ name: 'C', pinned: true }, { name: 'D', pinned: false, headroom: { text: '余量 12%', tone: 'warning' } }])
+    expect(panel.stale).toBe('评估超过 5 分钟未更新，沿用上一轮')
+  })
+
+  it('takes the most severe attention kind whatever the order, stays grey otherwise, and is null without gated groups', () => {
+    const held = new Map<number, GroupQualityCell>([[1, qualityOf(account({ state: 'trial' }))], [2, qualityOf(account({ state: 'ejected', guard_held: true }))]])
+    expect(groupQualityPanel(named(1, 2), held, zh, clock)!.attention).toBe('guard_held')
+    const calm = groupQualityPanel(named(1, 2), new Map<number, GroupQualityCell>([[1, qualityOf(account())], [2, { kind: 'failed' }]]), zh, clock)!
+    expect([calm.attention, calm.attentionCount, calm.blocks.map(block => block.title), calm.eligible.map(item => item.name), calm.stale])
+      .toEqual([null, 0, ['B · 读取失败'], ['A'], undefined])
+    expect(groupQualityPanel(named(9), new Map(), zh, clock)).toBeNull()
   })
 })
 
