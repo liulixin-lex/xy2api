@@ -49,8 +49,22 @@ For each member of an enabled group, the evaluator MUST eject the account in tha
   - enough new data over a limit MUST eject the account for the next step;
   - enough new samples for every metric that triggered ejection, within 80% of every sample-ready limit, MUST make it healthy;
   - otherwise, including too little new data, the account MUST enter trial.
+- A trial entered on expiry MUST start at the ejection end, not at the evaluation that notices it.
 - A trial account MUST be selectable and MUST be judged only on data since the trial started. Two soft failures within its first 20 requests, or meeting the ejection condition on that data, MUST eject it for the next step; 20 requests MUST promote it. Trial counts MUST accumulate from the trial start, however long the trial lasts. Trial counting state MUST retain only two identity sets: at most the first 20 distinct request IDs and the soft-failure identities for those requests, keyed by (request_id, account_id, at_unix_ms). Every round MUST rescan from max(trial start, now minus 125 minutes), deduplicating against both saved sets so late writes still count. Counts MUST use the set sizes, retaining already-counted identities after they leave the window; history MUST NOT be widened to the trial start.
 - Ejection MUST affect only selection in that group and MUST NOT change `schedulable`, `temp_unschedulable` or group membership.
+- A member that leaves the group, or whose group is disabled, MUST keep its strikes, ejection state and last ejection end for two hours after the ejection ended; rejoining within that time MUST resume them unless a newer manual reset exists.
+- Disabling the gate MUST stop vetoes on the saving instance immediately and MUST treat an ongoing ejection as ended at that moment, so re-enabling never ejects on pre-ejection data.
+- In the error-rate window, a request that has both a usage row and a soft failure on the same account MUST count as one call and one soft failure. Error rows MUST be matched to usage rows by the usage request ID format (`client:` / `local:`).
+
+#### Scenario: Joining a group after a manual reset
+
+- **WHEN** an account recovered by an admin earlier in this process later joins another group
+- **THEN** it is evaluated as a regular member from its reset time and does not enter trial in the new group.
+
+#### Scenario: Rejoining after an ejection
+
+- **WHEN** an account leaves a group shortly after its ejection ended and rejoins within two hours
+- **THEN** pre-ejection data does not count and its strike count is kept.
 
 #### Scenario: Late trial failure records
 
@@ -217,7 +231,7 @@ Gate state MUST live in process memory as an atomic snapshot and MUST be recompu
 - Only the admin "recover state" action (`POST /api/v1/admin/accounts/:id/recover-state`) MAY write `accounts.extra.group_quality_reset_at`. It MUST do so through an explicit recovery option.
   - The successful-test recovery and the OpenAI quota-reset workflow also call the same recovery routine. They MUST NOT write it.
   - The write MUST merge into `extra` without dropping other keys. If it fails after earlier cleanup succeeded, the action MUST return an error, and a retry MUST be safe.
-  - A reset timestamp newly appearing or changing during this process MUST clear the account's ejections in all groups, reset its strikes and place it in trial within the next evaluation. Historical resets at or before process start MUST only bound data, never reapply trial after restart.
+  - A reset timestamp newly appearing or changing during this process MUST clear the account's ejections in all groups it belongs to at that time, reset its strikes and place it in trial within the next evaluation. A reset MUST apply once per account; groups the account joins later MUST NOT treat it as new. Historical resets at or before process start MUST only bound data, never reapply trial after restart.
 - "Test" MUST NOT affect the gate, and no buttons are added.
 - The admin API MUST provide:
   - `GET /api/v1/admin/group-quality-gate/policies`

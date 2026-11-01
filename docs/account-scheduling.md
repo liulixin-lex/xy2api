@@ -27,8 +27,10 @@
 - 原版低倍率优先开启时，统一比较器 `openAICandidateLess` 按档位（合格快档 0 → 试用 1 → 其他 2）→ Priority → 负载 ≥80% 排后 → 成本（已知优先、低者优先）→ 负载 → 最近使用 → ID 排序。成本取 `openAISchedulingRate`；不限并发且未设置负载因子的账号在 80% 项上中性。E2 只在同档位、成本与负载带内重排。关闭低倍率优先时保留原有优先级、负载、LRU 和 E2 缓存证据排序。**部署说明**：开启低倍率优先且账号优先级不同的配置，排序会从成本优先变为优先级先于成本。
 - 原版无 LoadBatch、负载感知和高级调度的粘性账号满载时，短间隔退避重试原号最多 2 秒，尊重请求取消且不入队。仍满则排除原号，在比较键确定的最优档内，优先借用本会话最近成功的账号，否则按会话固定哈希顺序抢即时空位，绑定保留原号。
 - 旧质量路由已接管绑定时，只在 otherProvider / otherAccount 两个层级借用或选择 fallback 等待号，保留真实请求排除集，不进入逐个放行坏号的层级；只有坏号空闲时仍等健康原号。同一比较档内重复借用保持稳定，临时借用不写回质量绑定。
+- WebSocket 后续 turn 抢不到账号槽时，先用同一退避（50→100→200ms，最多 2 秒，不入队、尊重取消）短等，仍满才以 1013 “account is busy, please retry later” 关闭；用户并发上限不足时仍立即关闭。该短等对所有经 Responses WebSocket 接入的平台生效。
+- WebSocket 连接每个 turn 成功后续期（分组, 会话）绑定，每连接最多每 5 分钟一次（TTL 更短时为 TTL/2）。只续不建，只在绑定仍指向本连接账号时续；借用连接、无会话哈希和质量路由接管的会话不续。TTL 取 `gateway.openai_ws.sticky_session_ttl_seconds`（默认 3600），份额调度组用份额 TTL。连续工作超过 TTL 后重连仍回到原账号。
 - 全组没有合格的即时空位才返回最终 WaitPlan；队列未满时等待原号，队列已满时使用 fallback 等待时限与队列上限：无 LoadBatch 路径仍等原号，负载感知与高级调度按 Layer 3 选择比较器最优账号。非 OpenAI 原版负载感知路径的原号队列满时，先尝试 Layer 2 的即时空位，再进入 fallback 等待。只有选中账号不同于原号才标记 spillover；原号上的 fallback 等待仍为粘性命中，保持首输出截止口径。处理器仍只为最终 WaitPlan 加减一次排队计数。强续接继续等待原账号。
-- 末位兜底在既有软罚放宽之外只放宽质量熔断；只有最终被选中的账号确实处于质量熔断时，才记录一次 `group_quality_gate.last_resort`（含 `group_id`、`account_id`）。利润门、智商、余额、鉴权、模型支持都不能被放宽。
+- 末位兜底在既有软罚放宽之外只放宽质量熔断；只有最终被选中的账号确实处于质量熔断时，才记录一次 `group_quality_gate.last_resort`（含 `group_id`、`account_id`）。利润门、智商、余额、鉴权、模型支持都不能被放宽。利润门或质量门槛的终检否决用尽重选预算时，客户端收到 503 “No available accounts: all candidates rejected by group admission policy”，错误码不变。
 
 门槛规则与实现契约见 [OpenAI 质量路由](OPENAI_QUALITY_ROUTING.md) 和 [本次 OpenSpec](../openspec/changes/group-quality-gate-20261031/design.md)。
 
