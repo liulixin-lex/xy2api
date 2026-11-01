@@ -13,6 +13,7 @@ export default {
     },
     bubble: {
       open: 'Contact support',
+      label: 'Support',
       close: 'Close support panel',
     },
     widget: {

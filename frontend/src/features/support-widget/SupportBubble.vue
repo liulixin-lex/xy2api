@@ -13,10 +13,13 @@
     <Icon v-if="expanded" name="x" size="lg" />
     <span
       v-else
-      class="text-[17px] font-extrabold leading-none tracking-tighter [text-shadow:0_1px_1px_rgb(0_0_0/0.18)] sm:text-[19px]"
+      class="flex flex-col items-center [text-shadow:0_1px_1px_rgb(0_0_0/0.18)]"
       aria-hidden="true"
       data-testid="support-bubble-mark"
-    >GG</span>
+    >
+      <span class="text-[15px] font-extrabold leading-none tracking-tighter sm:text-[17px]">GG</span>
+      <span class="mt-[3px] whitespace-nowrap text-[9px] font-semibold leading-none" data-testid="support-bubble-label">{{ t('supportChat.bubble.label') }}</span>
+    </span>
     <span
       v-if="badge > 0"
       class="absolute -right-0.5 -top-0.5 inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 text-[10px] font-semibold leading-5 text-white ring-2 ring-white dark:ring-dark-900"

@@ -285,3 +285,11 @@ pnpm --dir frontend run build
 - 验证：前端 lint、typecheck、i18n、484 文件 3770 项、build 通过；文档一致性通过；本地栈按浅色／深色、桌面／手机、收起／打开逐一截图确认。
 - 卡点/风险：无。此前「推送并开 PR」已完成（#181），仍由另一位作者合并。
 - 下一步：推送本次提交，等待 CI；发版与部署另行授权。
+
+### 2026-11-01 — 20261031-support-chat-widget — 气泡「GG」下方加小字
+
+- 请求/目标：用户要求在「GG」下面加一行「在线客服」小字。
+- 完成操作：`SupportBubble.vue` 在 GG 下加 9px 小字，文案走新 i18n 键 `supportChat.bubble.label`（zh「在线客服」，en「Support」；最初的「Live chat」在手机尺寸下贴近圆边，改短）；规格补断言；`SUPPORT_TICKETS.md` 同步。实测 Chrome 中文环境不会放大小字，56px 与 52px 气泡内文字块上下居中，最远角距圆心 23px，小于半径 26px。
+- 验证：前端 lint、typecheck、i18n、test、build 与文档一致性见提交；浅色／深色、桌面／手机、中文／英文逐一截图确认。
+- 卡点/风险：无。
+- 下一步：推送并等待 CI；合并仍由另一位作者负责。

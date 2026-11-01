@@ -13,6 +13,7 @@ export default {
     },
     bubble: {
       open: '联系客服',
+      label: '在线客服',
       close: '收起客服面板',
     },
     widget: {
