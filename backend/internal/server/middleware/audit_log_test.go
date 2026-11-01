@@ -207,6 +207,13 @@ func TestSupportTicketAuditRoutesRedactMessagesAndAuditAdminReads(t *testing.T) 
 	}
 }
 
+func TestSupportChatAuditRoutes(t *testing.T) {
+	require.NotContains(t, auditSensitiveReads, "GET /api/v1/admin/support-chats/summary")
+	require.Contains(t, auditSensitiveReads, "GET /api/v1/admin/support-tickets/summary")
+	require.Contains(t, auditBodyOmittedRoutes, "POST /api/v1/support-chat/messages")
+	require.Contains(t, auditBodyOmittedRoutes, "POST /api/v1/admin/support-chats/:id/messages")
+}
+
 func TestOpenAITOTPAuditOmitsBodiesAndWorkerMetadata(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, key := range []string{"PUT /api/v1/admin/accounts/:id/openai-totp", "POST /api/v1/admin/accounts/:id/openai-totp/rotate", "POST /api/v1/admin/accounts/:id/openai-totp/reconcile", "POST /api/v1/admin/accounts/:id/openai-totp/export", "POST /api/v1/admin/accounts/openai-login", "POST /api/v1/admin/accounts/openai-login/:task_id/import", "POST /api/v1/internal/openai-totp/claim", "POST /api/v1/internal/openai-totp/:task_id/phase", "POST /api/v1/internal/openai-totp/:task_id/finish", "POST /api/v1/internal/openai-totp/recover"} {

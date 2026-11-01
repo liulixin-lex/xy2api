@@ -165,7 +165,8 @@ func (r *supportTicketRepository) GetTicket(ctx context.Context, id, ownerID int
 	if err != nil {
 		return nil, nil, err
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT m.id, m.author_role, COALESCE(NULLIF(a.username, ''), a.email, ''), m.body, m.created_at
+	rows, err := r.db.QueryContext(ctx, `SELECT m.id, m.author_role, COALESCE(NULLIF(a.username, ''), a.email, ''),
+		CASE WHEN m.author_role = 'admin' THEN m.author_user_id END, m.body, m.created_at
 		FROM support_ticket_messages m LEFT JOIN users a ON a.id = m.author_user_id
 		WHERE m.ticket_id = $1 ORDER BY m.id`, id)
 	if err != nil {
@@ -175,9 +176,11 @@ func (r *supportTicketRepository) GetTicket(ctx context.Context, id, ownerID int
 	messages := []service.SupportTicketMessage{}
 	for rows.Next() {
 		var message service.SupportTicketMessage
-		if err := rows.Scan(&message.ID, &message.AuthorRole, &message.AuthorName, &message.Body, &message.CreatedAt); err != nil {
+		var staffID sql.NullInt64
+		if err := rows.Scan(&message.ID, &message.AuthorRole, &message.AuthorName, &staffID, &message.Body, &message.CreatedAt); err != nil {
 			return nil, nil, err
 		}
+		message.StaffID = staffID.Int64
 		messages = append(messages, message)
 	}
 	return ticket, messages, rows.Err()

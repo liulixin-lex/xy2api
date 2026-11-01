@@ -2,7 +2,7 @@
   <AppLayout>
     <div class="mx-auto max-w-4xl space-y-4">
       <router-link
-        to="/support-tickets"
+        to="/support-tickets?tab=tickets"
         class="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
       >
         <Icon name="arrowLeft" size="sm" />

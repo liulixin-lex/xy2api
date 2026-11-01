@@ -168,6 +168,24 @@ func TestAdminPermissionSupportTicketsPermissionMatrix(t *testing.T) {
 		}
 	}
 }
+
+func TestAdminPermissionSupportChatsPermissionMatrix(t *testing.T) {
+	viewRoutes := []string{"GET /support-chats", "GET /support-chats/summary", "GET /support-chats/:id", "GET /support-chats/:id/messages", "POST /support-chats/:id/read", "GET /support-chats/images/:id"}
+	manageRoutes := []string{"POST /support-chats/:id/messages", "POST /support-chats/:id/status", "POST /support-chats/:id/block", "DELETE /support-chats/:id/messages/:message_id", "DELETE /support-chats/:id"}
+	for _, key := range append(viewRoutes, manageRoutes...) {
+		sc := permissionScope()
+		sc.Perms.Modules[operatoraccess.ModuleSupportTickets] = operatoraccess.LevelView
+		reached := false
+		w := permissionRequest(t, key, sc, "{}", func(c *gin.Context) { reached = true; c.Status(204) })
+		allowed := strings.HasPrefix(key, "GET ") || strings.HasPrefix(key, "POST /support-chats/:id/read")
+		require.Equal(t, allowed, reached, key)
+		if allowed {
+			require.Equal(t, 204, w.Code, key)
+		} else {
+			require.Equal(t, 403, w.Code, key)
+		}
+	}
+}
 func TestAdminPermissionOpenAITOTPRequiresSuperAdmin(t *testing.T) {
 	for _, key := range []string{"GET /accounts/:id/openai-totp", "PUT /accounts/:id/openai-totp", "POST /accounts/:id/openai-totp/rotate", "POST /accounts/:id/openai-totp/reconcile", "POST /accounts/:id/openai-totp/export", "POST /accounts/openai-login", "GET /accounts/openai-login/:task_id", "POST /accounts/openai-login/:task_id/import"} {
 		reached := false
@@ -317,6 +335,31 @@ func TestAdminPermissionRedactsJSONOnly(t *testing.T) {
 	require.Contains(t, w.Body.String(), "ADMIN_REDACTION_FAILED")
 	require.NotContains(t, w.Body.String(), "hidden.example")
 }
+
+func TestAdminPermissionRedactsSupportChatUserCards(t *testing.T) {
+	scope := permissionScope()
+	for _, route := range []string{"GET /support-chats", "GET /support-chats/:id"} {
+		response := permissionRequest(t, route, scope, "", func(c *gin.Context) {
+			c.JSON(200, gin.H{
+				"data": gin.H{
+					"items": []gin.H{{"user": gin.H{
+						"id": 42, "email": "user@example.com", "username": "user", "status": "active", "deleted": false,
+						"balance": 99, "created_at": "2026-01-01T00:00:00Z",
+					}}},
+					"user": gin.H{
+						"id": 42, "email": "user@example.com", "username": "user", "status": "active", "deleted": false,
+						"balance": 99, "created_at": "2026-01-01T00:00:00Z",
+					},
+				},
+			})
+		})
+		require.Equal(t, 200, response.Code)
+		require.NotContains(t, response.Body.String(), `"balance"`)
+		require.NotContains(t, response.Body.String(), `"created_at"`)
+		require.Contains(t, response.Body.String(), `"email":"user@example.com"`)
+	}
+}
+
 func TestAdminPermissionScrubsSSEErrorEvents(t *testing.T) {
 	errors := []string{"Post https://h.example/x: timeout", "Invalid base URL: invalid url: h.example:8080", "lookup h.example: no such host", "x509: certificate is valid for a.example, not h.example", "dial tcp 203.0.113.5:443: connect: connection refused"}
 	for _, flag := range []bool{false, true} {

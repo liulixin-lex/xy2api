@@ -68,6 +68,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.StepUpEnabled != after.StepUpEnabled {
 		changed = append(changed, "step_up_enabled")
 	}
+	if before.SupportChatEnabled != after.SupportChatEnabled {
+		changed = append(changed, service.SettingKeySupportChatEnabled)
+	}
 	if before.SupportTicketEnabled != after.SupportTicketEnabled {
 		changed = append(changed, service.SettingKeySupportTicketEnabled)
 	}
@@ -890,5 +893,7 @@ func stringSetting(value *string, fallback string) string {
 }
 
 func equalSupportTicketConfig(a, b service.SupportTicketConfig) bool {
-	return a.MaxOpenPerUser == b.MaxOpenPerUser && a.Notice == b.Notice && equalStringSlice(a.Categories, b.Categories)
+	return a.MaxOpenPerUser == b.MaxOpenPerUser && a.Notice == b.Notice &&
+		a.ChatWelcome == b.ChatWelcome && a.ChatImageRetentionDays == b.ChatImageRetentionDays &&
+		equalStringSlice(a.Categories, b.Categories)
 }

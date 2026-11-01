@@ -1,17 +1,25 @@
 <script setup lang="ts">
 import { RouterView, useRouter, useRoute } from 'vue-router'
-import { computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { computed, defineAsyncComponent, onMounted, onBeforeUnmount, watch } from 'vue'
 import Toast from '@/components/common/Toast.vue'
 import NavigationProgress from '@/components/common/NavigationProgress.vue'
 import AdminComplianceDialog from '@/components/admin/AdminComplianceDialog.vue'
-import { resolveRouteDocumentTitle } from '@/router/title'
+import { applyDocumentTitle, resolveRouteDocumentTitle, setDocumentTitleBadge } from '@/router/title'
 import AnnouncementPopup from '@/components/common/AnnouncementPopup.vue'
-import { useAppStore, useAuthStore, useSubscriptionStore, useAnnouncementStore, useAdminComplianceStore, useAdminSettingsStore, useSupportTicketStore } from '@/stores'
+import { useAppStore, useAuthStore, useSubscriptionStore, useAnnouncementStore, useAdminComplianceStore, useAdminSettingsStore, useSupportTicketStore, useSupportChatStore } from '@/stores'
 import { getSetupStatus } from '@/api/setup'
 import { updateFavicon } from '@/utils/branding'
 import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'
 import { useAdminAccessStore } from '@/stores/adminAccess'
 import { resolveSiteBillingMode } from '@/utils/siteBillingMode'
+import { shouldShowSupportWidget } from '@/features/support-widget/supportWidgetVisibility'
+import { useSupportBadges } from '@/features/support-chat/useSupportBadges'
+import { useSupportStaffAlerts } from '@/features/support-chat/useSupportStaffAlerts'
+import { useSupportChatIdentityReset } from '@/features/support-chat/useSupportChatIdentityReset'
+import { useMediaQuery } from '@vueuse/core'
+
+// Floating support chat; its chunk only loads when the bubble is shown.
+const SupportWidget = defineAsyncComponent(() => import('@/features/support-widget/SupportWidget.vue'))
 
 const router = useRouter()
 const route = useRoute()
@@ -21,18 +29,46 @@ const subscriptionStore = useSubscriptionStore()
 const announcementStore = useAnnouncementStore()
 const adminComplianceStore = useAdminComplianceStore()
 const supportTicketStore = useSupportTicketStore()
+const supportChatStore = useSupportChatStore()
 const ticketAdminAccess = useAdminAccessStore()
 const adminSettingsStore = useAdminSettingsStore()
+const { staffBadge } = useSupportBadges()
+const supportStaffAlerts = useSupportStaffAlerts()
+
+// lg+: the sidebar is fixed, so a mobileOpen left over from the drawer means nothing there.
+const isDesktop = useMediaQuery('(min-width: 1024px)')
+// Clear the drawer flag on reaching lg+, so going back below lg neither reopens
+// the drawer nor unmounts the widget (and a draft in it).
+watch(isDesktop, (desktop) => {
+  if (desktop) appStore.setMobileOpen(false)
+})
+const supportWidgetVisible = computed(() => shouldShowSupportWidget({
+  chatEnabled: isFeatureFlagEnabled(FeatureFlags.supportChat),
+  canAccessAdmin: authStore.canAccessAdmin,
+  backendMode: appStore.backendModeEnabled,
+  mobileOpen: appStore.mobileOpen,
+  desktop: isDesktop.value,
+  hiddenByRoute: route.meta.hideSupportWidget === true,
+}))
 
 function updateDocumentTitle() {
   const customMenuItems = [
     ...(appStore.cachedPublicSettings?.custom_menu_items ?? []),
     ...(authStore.isAdmin ? adminSettingsStore.customMenuItems : []),
   ]
-  document.title = resolveRouteDocumentTitle(route, appStore.siteName, customMenuItems, {
+  applyDocumentTitle(resolveRouteDocumentTitle(route, appStore.siteName, customMenuItems, {
     billingMode: resolveSiteBillingMode(appStore.cachedPublicSettings),
-  })
+  }))
 }
+
+// Staff see 「(N) 」 in the tab title: waiting chats plus pending tickets.
+watch(
+  () => (supportStaffAlerts.enabled.value ? staffBadge.value : 0),
+  (count) => {
+    setDocumentTitleBadge(count)
+    updateDocumentTitle()
+  }
+)
 
 // Watch for site settings changes and update favicon/title
 watch(
@@ -137,6 +173,7 @@ watch(
       announcementStore.reset()
       adminComplianceStore.reset()
       supportTicketStore.reset()
+      supportChatStore.reset()
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   },
@@ -150,6 +187,9 @@ watch(
     void supportTicketStore.refresh(true)
   }
 )
+
+// The chat belongs to one signed-in user; drop it (and its image URLs) when the id, role or chat switch changes.
+useSupportChatIdentityReset()
 
 // Route change trigger (throttled by store)
 router.afterEach(() => {
@@ -191,5 +231,6 @@ onMounted(async () => {
   <RouterView />
   <Toast />
   <AnnouncementPopup />
+  <SupportWidget v-if="supportWidgetVisible" />
   <AdminComplianceDialog />
 </template>

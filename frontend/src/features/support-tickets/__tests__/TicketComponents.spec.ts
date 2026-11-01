@@ -48,10 +48,12 @@ describe('ticket message body', () => {
 describe('ticket conversation', () => {
   const messages = [message(1, 'user'), message(2, 'admin', { author_name: 'root' })]
 
-  it('names the sides from the user point of view', () => {
-    const wrapper = mount(TicketConversation, { props: { messages, viewer: 'user' } })
+  it('names the sides from the user point of view, staff only by account id', () => {
+    const wrapper = mount(TicketConversation, { props: { messages: [...messages, message(3, 'admin', { staff_id: 4 })], viewer: 'user' } })
     const rows = wrapper.findAll('[data-testid="ticket-message"]')
-    expect(rows.map((row) => row.get('[data-testid="ticket-message-author"]').text())).toEqual(['supportTickets.detail.you', 'supportTickets.detail.staff'])
+    expect(rows.map((row) => row.get('[data-testid="ticket-message-author"]').text()))
+      .toEqual(['supportTickets.detail.you', 'supportTickets.detail.staff', 'supportTickets.detail.staffWithId:{"id":4}'])
+    expect(wrapper.text()).not.toContain('root')
     expect(rows[0].classes()).toContain('justify-end')
     expect(rows[1].classes()).toContain('justify-start')
   })

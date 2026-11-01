@@ -235,6 +235,7 @@ type SystemSettings struct {
 
 	// Support tickets ("网站工单") switch + form config
 	SupportTicketEnabled bool                `json:"support_ticket_enabled"`
+	SupportChatEnabled   bool                `json:"support_chat_enabled"`
 	SupportTicket        SupportTicketConfig `json:"support_ticket_config"`
 
 	// Claude Code version check
@@ -428,6 +429,7 @@ type PublicSettings struct {
 
 	// Support tickets ("网站工单") feature switch
 	SupportTicketEnabled bool `json:"support_ticket_enabled"`
+	SupportChatEnabled   bool `json:"support_chat_enabled"`
 
 	// Affiliate (邀请返利) feature toggle
 	AffiliateEnabled bool `json:"affiliate_enabled"`

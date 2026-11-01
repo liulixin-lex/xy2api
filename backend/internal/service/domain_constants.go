@@ -580,6 +580,9 @@ const (
 	// are kept. Defaults to false (opt-in feature).
 	SettingKeySupportTicketEnabled = "support_ticket_enabled"
 
+	// SettingKeySupportChatEnabled gates the online support chat independently.
+	SettingKeySupportChatEnabled = "support_chat_enabled"
+
 	// SettingKeyUpstreamBillingProbeSettings stores the global enable switch and interval
 	// for probing remote XY2API API-key billing metadata.
 	SettingKeyUpstreamBillingProbeSettings = "upstream_billing_probe_settings"

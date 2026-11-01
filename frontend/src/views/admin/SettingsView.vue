@@ -7499,7 +7499,49 @@
               </div>
               <Toggle id="support-ticket-enabled" v-model="form.support_ticket_enabled" />
             </div>
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <label for="support-chat-enabled" class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.features.supportTickets.chatEnabled') }}
+                </label>
+                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.features.supportTickets.chatEnabledHint') }}
+                </p>
+              </div>
+              <Toggle id="support-chat-enabled" v-model="form.support_chat_enabled" data-testid="support-chat-enabled" />
+            </div>
             <template v-if="form.support_ticket_enabled">
+              <div class="space-y-1">
+                <label for="support-chat-welcome" class="input-label">{{ t('admin.settings.features.supportTickets.chatWelcome') }}</label>
+                <textarea
+                  id="support-chat-welcome"
+                  v-model="form.support_ticket_config.chat_welcome"
+                  rows="3"
+                  class="input"
+                  :maxlength="SUPPORT_CHAT_WELCOME_MAX"
+                  :placeholder="t('admin.settings.features.supportTickets.chatWelcomePlaceholder')"
+                  data-testid="support-chat-welcome"
+                ></textarea>
+                <p class="text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.features.supportTickets.chatWelcomeHint', { max: SUPPORT_CHAT_WELCOME_MAX }) }}
+                </p>
+              </div>
+              <div class="space-y-1">
+                <label for="support-chat-retention" class="input-label">{{ t('admin.settings.features.supportTickets.chatRetention') }}</label>
+                <input
+                  id="support-chat-retention"
+                  v-model.number="form.support_ticket_config.chat_image_retention_days"
+                  class="input w-40"
+                  type="number"
+                  :min="SUPPORT_CHAT_RETENTION_MIN_DAYS"
+                  :max="SUPPORT_CHAT_RETENTION_MAX_DAYS"
+                  step="1"
+                  data-testid="support-chat-retention"
+                />
+                <p class="text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.features.supportTickets.chatRetentionHint', { min: SUPPORT_CHAT_RETENTION_MIN_DAYS, max: SUPPORT_CHAT_RETENTION_MAX_DAYS, default: SUPPORT_CHAT_RETENTION_DEFAULT_DAYS }) }}
+                </p>
+              </div>
               <div>
                 <span class="input-label">{{ t('admin.settings.features.supportTickets.categories') }}</span>
                 <div class="space-y-2" data-testid="support-ticket-categories">
@@ -9166,6 +9208,12 @@ import {
   SUPPORT_TICKET_MAX_OPEN_LIMIT,
   SUPPORT_TICKET_NOTICE_MAX,
 } from "@/api/supportTickets";
+import {
+  SUPPORT_CHAT_RETENTION_DEFAULT_DAYS,
+  SUPPORT_CHAT_RETENTION_MAX_DAYS,
+  SUPPORT_CHAT_RETENTION_MIN_DAYS,
+  SUPPORT_CHAT_WELCOME_MAX,
+} from "@/api/supportChat";
 import Select, { type SelectOption } from "@/components/common/Select.vue";
 import {
   SITE_BILLING_MODES,
@@ -10229,9 +10277,16 @@ const form = reactive<SettingsForm>({
   model_plaza_description: '',
   // Plugin management menu visibility; plugin runtime is unaffected.
   plugin_management_enabled: false,
-  // Support tickets (网站工单) switch + form config
+  // Customer support (客户服务) switch + form config
   support_ticket_enabled: false,
-  support_ticket_config: { categories: [] as string[], max_open_per_user: 5, notice: '' },
+  support_ticket_config: {
+    categories: [] as string[],
+    max_open_per_user: 5,
+    notice: '',
+    chat_welcome: '',
+    chat_image_retention_days: SUPPORT_CHAT_RETENTION_DEFAULT_DAYS as number,
+  },
+  support_chat_enabled: false,
   // Affiliate (邀请返利) feature switch
   affiliate_enabled: false,
   // Allow user view error requests
@@ -11984,7 +12039,11 @@ async function saveSettings() {
         categories: form.support_ticket_config.categories.map((category) => category.trim()).filter(Boolean),
         max_open_per_user: Number(form.support_ticket_config.max_open_per_user) || 5,
         notice: form.support_ticket_config.notice,
+        chat_welcome: form.support_ticket_config.chat_welcome ?? '',
+        chat_image_retention_days:
+          Number(form.support_ticket_config.chat_image_retention_days) || SUPPORT_CHAT_RETENTION_DEFAULT_DAYS,
       },
+      support_chat_enabled: form.support_chat_enabled,
       // Affiliate (邀请返利) feature switch
       affiliate_enabled: form.affiliate_enabled,
       allow_user_view_error_requests: form.allow_user_view_error_requests,

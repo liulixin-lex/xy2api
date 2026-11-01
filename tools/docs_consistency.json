@@ -439,6 +439,13 @@
         "docs/PROJECT_MEMORY_ARCHIVE.md",
         "frontend/src/views/admin/__tests__/SettingsView.spec.ts"
       ]
+    },
+    {
+      "pattern": "在线工单|网站工单|工单处理",
+      "reason": "2026-10-31: the menu, settings card and permission label were renamed 客户服务 when the support chat widget was added; the ticket feature and its identifiers (support_tickets, nav.supportTickets, support_ticket_enabled) stay, so the rule only reads the zh locale files",
+      "paths": [
+        "frontend/src/i18n/locales/zh/**"
+      ]
     }
   ],
   "private": [

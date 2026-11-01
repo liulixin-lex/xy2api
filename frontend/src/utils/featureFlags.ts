@@ -139,6 +139,12 @@ export const FeatureFlags = {
     mode: 'opt-in',
     label: 'Support Tickets',
   }),
+  // Effective value: the backend sends true only when the ticket switch is on too.
+  supportChat: defineFlag({
+    key: 'support_chat_enabled',
+    mode: 'opt-in',
+    label: 'Support Chat',
+  }),
 } as const
 
 export type RegisteredFeatureFlag = keyof typeof FeatureFlags

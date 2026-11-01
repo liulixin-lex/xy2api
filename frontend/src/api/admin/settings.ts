@@ -767,9 +767,10 @@ export interface SystemSettings {
   model_plaza_description: string;
   plugin_management_enabled: boolean;
 
-  // Support tickets (网站工单) switch + form config
+  // Customer support (客户服务): ticket switch + form config, and the chat switch
   support_ticket_enabled: boolean;
   support_ticket_config: SupportTicketConfig;
+  support_chat_enabled: boolean;
 
   // Affiliate (邀请返利) feature switch
   affiliate_enabled: boolean;
@@ -1091,9 +1092,10 @@ export interface UpdateSettingsRequest {
   model_plaza_description?: string;
   plugin_management_enabled?: boolean;
 
-  // Support tickets (网站工单) switch + form config
+  // Customer support (客户服务): ticket switch + form config, and the chat switch
   support_ticket_enabled?: boolean;
   support_ticket_config?: SupportTicketConfig;
+  support_chat_enabled?: boolean;
 
   // Affiliate (邀请返利) feature switch
   affiliate_enabled?: boolean;

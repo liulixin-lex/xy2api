@@ -13,8 +13,9 @@ import { useNavigationLoadingState } from '@/composables/useNavigationLoading'
 import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
-import { resolveRouteDocumentTitle } from './title'
+import { applyDocumentTitle, resolveRouteDocumentTitle } from './title'
 import { isChunkLoadError, recoverFromChunkLoadError } from '@/utils/chunkLoadError'
+import { routeHidesSupportWidget } from '@/features/support-widget/supportWidgetVisibility'
 
 /**
  * Route definitions with lazy loading
@@ -817,6 +818,11 @@ const routes: RouteRecordRaw[] = [
   }
 ]
 
+// The floating support bubble stays off sign-in, payment, setup, 客户服务 and admin pages.
+for (const route of routes) {
+  if (routeHidesSupportWidget(route.path)) route.meta = { ...route.meta, hideSupportWidget: true }
+}
+
 /**
  * Create router instance
  */
@@ -906,7 +912,7 @@ router.beforeEach(async (to, _from, next) => {
     ...(appStore.cachedPublicSettings?.custom_menu_items ?? []),
     ...(authStore.isAdmin ? adminSettingsStore.customMenuItems : []),
   ]
-  document.title = resolveRouteDocumentTitle(to, appStore.siteName, customMenuItems)
+  applyDocumentTitle(resolveRouteDocumentTitle(to, appStore.siteName, customMenuItems))
 
   // Check if route requires authentication
   const requiresAuth = to.meta.requiresAuth !== false // Default to true
@@ -1051,7 +1057,7 @@ router.beforeEach(async (to, _from, next) => {
     return
   }
 
-  // 网站工单是 opt-in 开关：设置加载成功且未开启时拦截直达。
+  // 客户服务是 opt-in 开关：设置加载成功且未开启时拦截直达。
   if (
     to.meta.requiresSupportTickets &&
     appStore.publicSettingsLoaded &&

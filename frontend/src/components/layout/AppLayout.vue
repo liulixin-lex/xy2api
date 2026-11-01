@@ -26,7 +26,7 @@
 
 <script setup lang="ts">
 import '@/styles/onboarding.css'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useAppStore } from '@/stores'
 import { useAuthStore } from '@/stores/auth'
 import { useOnboardingTour } from '@/composables/useOnboardingTour'
@@ -52,6 +52,12 @@ const onboardingStore = useOnboardingStore()
 
 onMounted(() => {
   onboardingStore.setReplayCallback(replayTour)
+  // The floating support bubble keeps its left edge right of this sidebar.
+  appStore.registerSidebarLayout()
+})
+
+onBeforeUnmount(() => {
+  appStore.unregisterSidebarLayout()
 })
 
 defineExpose({ replayTour })

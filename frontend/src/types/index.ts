@@ -284,8 +284,10 @@ export interface PublicSettings {
   model_plaza_enabled: boolean
   model_plaza_require_auth: boolean
   plugin_management_enabled: boolean
-  /** Opt-in support tickets (sidebar「网站工单」for users and admins). */
+  /** Opt-in support tickets (sidebar「客户服务」for users and admins). */
   support_ticket_enabled?: boolean
+  /** Effective support chat: the ticket switch and the chat switch are both on (opt-in). */
+  support_chat_enabled?: boolean
   service_quota_enabled: boolean
   affiliate_enabled: boolean
   allow_user_view_error_requests?: boolean

@@ -406,6 +406,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		ModelPlazaDescription:   settings.ModelPlazaDescription,
 
 		SupportTicketEnabled: settings.SupportTicketEnabled,
+		SupportChatEnabled:   settings.SupportChatEnabled,
 		SupportTicket:        settings.SupportTicket,
 
 		AffiliateEnabled: settings.AffiliateEnabled,

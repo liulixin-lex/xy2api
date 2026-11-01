@@ -68,6 +68,8 @@ func TestSupportTicketRepositoryLifecycle(t *testing.T) {
 	require.Equal(t, 2, ticket.MessageCount)
 	require.Equal(t, service.SupportTicketRoleAdmin, ticket.LastMessageRole)
 	require.Equal(t, "root", messages[1].AuthorName)
+	require.Equal(t, admin.ID, messages[1].StaffID)
+	require.Zero(t, messages[0].StaffID)
 	unread, err := repo.CountUnread(ctx, alice.ID)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), unread)

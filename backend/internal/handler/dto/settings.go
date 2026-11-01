@@ -347,6 +347,7 @@ type SystemSettings struct {
 
 	// Support tickets ("网站工单") switch + form config
 	SupportTicketEnabled bool                        `json:"support_ticket_enabled"`
+	SupportChatEnabled   bool                        `json:"support_chat_enabled"`
 	SupportTicket        service.SupportTicketConfig `json:"support_ticket_config"`
 
 	// 风控中心功能开关
@@ -460,6 +461,7 @@ type PublicSettings struct {
 	PluginManagementEnabled bool `json:"plugin_management_enabled"`
 
 	SupportTicketEnabled bool `json:"support_ticket_enabled"`
+	SupportChatEnabled   bool `json:"support_chat_enabled"`
 
 	AffiliateEnabled bool `json:"affiliate_enabled"`
 
