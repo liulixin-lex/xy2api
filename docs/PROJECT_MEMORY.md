@@ -59,7 +59,10 @@
 
 ## 进行中的工作
 
-（无）
+- **20261031-claude-cache-ui**（2026-10-31 开始）：用户要求去掉使用记录里的「TTL 策略: 不覆写 TTL · 未应用」文字，并询问「Anthropic 缓存默认 TTL」与「Claude 自动缓存」是否冲突、是否合并、是否按分组。分析结论：两者没有冲突（先补断点、再统一时长、最后做 4 槽与长 TTL 顺序修正），建议保留两项、放进同一张卡片，TTL 不按分组。用户选定分两个 PR，均为纯前端、不改接口与存储，由 Claude 直接实现：
+  - PR 1 `fix/usage-ttl-text-removal-20261031`：删除使用记录列表与 Token 悬浮详情里的策略与应用状态文字，接口字段保留，「TTL 明细未报告」保留。
+  - PR 2 `feat/claude-cache-settings-card-20261031`：叠在 PR 1 上，把默认 TTL 移进「Claude 缓存」卡片（两行、一个保存，只提交改动字段），主表单不再提交 `anthropic_cache_ttl_default`。
+  - 两个 PR 只开到 CI 全绿，不合并、不发版、不部署。
 
 ## 操作陷阱
 
@@ -254,3 +257,13 @@ pnpm --dir frontend run build
 - 验证：`check_docs_consistency.py` ok；`sync.py scheduler-diff` 与白名单一致；`tools/tests` 96 项与 pnpm 例外检查单测通过；`git diff --check` 通过。`sync.py audit` 在提交后的干净树运行，结果见 PR。未运行 Go/前端门禁：没有改动 Go、前端源码或依赖。
 - 卡点/风险：删除的文件仍在 Git 历史中，未改写历史；`.work/` 已删内容不可恢复（用户选择直接删除）。之前给用户的计数“102 个远端分支”多算了 main，实际为 101 个。
 - 下一步：PR CI 全绿后常规合并并删除本分支。未结事项见顶部，其中新增两项待用户决定：3 个含未合入提交的远端分支、`tools/gateway-resilience/` 发布演练脚手架；另有 `.github/SECURITY.md` 报告渠道应改为本仓库。
+
+### 2026-10-31T14:12Z — 20261031-claude-cache-ui — PR 1：使用记录去掉 TTL 策略文字，本地验证完成
+
+- 请求/目标：用户截图显示使用记录 TOKEN 列每行都有「TTL 策略: 不覆写 TTL · 未应用」，要求去掉。同时询问「Anthropic 缓存默认 TTL」与「Claude 自动缓存」的关系；只读分析与用户决定见“进行中的工作”，PR 2 另记。
+- 开始状态：main `874560eb9`（0.4.15 之后），新 worktree，分支 `fix/usage-ttl-text-removal-20261031`。
+- 完成操作：`UsageTable.vue` 删掉列表那一行、Token 悬浮详情的策略行和两个标签函数（管理员与用户使用记录共用这个组件）。保留缓存读取占比、1h 与「计费调整」标签、「TTL 明细未报告」提示，以及接口字段 `anthropic_cache_ttl_policy/applied`。中英文删除 8 个不再使用的 `usage.anthropicCacheTTL.*` 键。原测试改写为反向断言，并确认它在旧组件上会失败。同步 `ANTHROPIC_CACHE_TTL.md`、`USAGE_METRICS.md` 和 OpenSpec design/spec/tasks，在 `docs_consistency.json` 退役 testid、函数名与键名（正则逐项核对：命中全部旧名，不误伤保留的键和字段）。
+- 修改文件：`frontend/src/components/admin/usage/UsageTable.vue` 及其 spec、`frontend/src/i18n/locales/{zh,en}/dashboard.ts`、上述文档、`tools/docs_consistency.json`、本记忆。
+- 验证：定向 vitest 9 个文件 93 项、前端全量 468 个文件 3548 项、CI 关键清单 95 个文件 1021 项（用 pnpm 9）、eslint、vue-tsc、`check_docs_consistency.py`、`sync.py audit`（干净提交）与 `scheduler-diff` 均通过。浏览器验证与 PR 2 合并进行，见 PR 2 记录。未改 Go，未跑后端门禁。
+- 卡点/风险：无。
+- 下一步：推送并开 PR，CI 全绿后停在 PR，由另一位作者合并；不发版、不部署。

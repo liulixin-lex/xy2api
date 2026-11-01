@@ -36,7 +36,7 @@ Existing reservation MUST account for possible 5m/1h cold writes and disable his
 #### Scenario: Historical record
 
 - **WHEN** policy and applied are NULL
-- **THEN** details show not recorded, without claiming a cache failure or disabled cache.
+- **THEN** the usage API returns both as null, meaning not recorded, without claiming a cache failure or disabled cache. The usage pages do not display policy or applied (removed 2026-10-31).
 
 ## REMOVED Requirements
 

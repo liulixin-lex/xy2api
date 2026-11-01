@@ -7,6 +7,7 @@
 - [x] 临时真实 PostgreSQL 迁移与 Key/usage 单批往返，旧数据/已发布 checksum 不变。
 - [x] Key 表单四态/当前全局默认/切组保留、列表轻量文字；管理员二态与中英文计费分类文案。
 - [x] 用量策略/applied 显示、历史 NULL 及未知明细提示，不承诺上游命中。
+  - 2026-10-31 后续：按用户要求从使用记录列表与 Token 详情移除策略/applied 文字，接口字段与「TTL 明细未报告」提示保留。
 - [x] 前端定向表单/API/用量/i18n 回归 135 项和 typecheck 通过。
 - [x] 前端 build、改动文件 lint 和三个修改组件的 impeccable detect 通过。
 - [x] 后端相关 unit/race/lint，按实际改动验证。

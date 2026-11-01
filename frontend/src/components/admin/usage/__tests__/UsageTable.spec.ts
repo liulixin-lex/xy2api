@@ -145,7 +145,7 @@ const baseImageRow = {
 }
 
 describe('admin UsageTable tooltip', () => {
-  it('distinguishes final request TTL application from absent history and provider usage', async () => {
+  it('does not show the key TTL policy or applied status in the cell or token tooltip', async () => {
     const row = { ...baseImageRow, image_count: 0, billing_mode: 'token', model: 'claude-sonnet-5-5', cache_creation_tokens: 100 }
     const wrapper = mount(UsageTable, {
       props: { data: [
@@ -155,14 +155,15 @@ describe('admin UsageTable tooltip', () => {
       ], loading: false, columns: [] },
       global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
     })
-    const statuses = wrapper.findAll('[data-testid="anthropic-cache-ttl-status"]')
-    expect(statuses).toHaveLength(2)
-    expect(statuses[0].text()).toContain('usage.anthropicCacheTTL.1h · usage.anthropicCacheTTL.applied')
-    expect(statuses[1].text()).toContain('usage.anthropicCacheTTL.off · usage.anthropicCacheTTL.notApplied')
-    const history = wrapper.get('[data-request-id="history"]')
-    expect(history.find('[data-testid="anthropic-cache-ttl-status"]').exists()).toBe(false)
-    await history.get('.group.relative').trigger('mouseenter')
-    expect(wrapper.get('[data-testid="anthropic-cache-ttl-detail"]').text()).toContain('usage.anthropicCacheTTL.notRecorded')
+    // Only the billing note about unreported provider TTL buckets may use this namespace.
+    const policyText = /usage\.anthropicCacheTTL\.(?!unknownDetail|partialDetail)/
+    expect(wrapper.text()).not.toMatch(policyText)
+    for (const id of ['applied', 'off', 'history']) {
+      await wrapper.get(`[data-request-id="${id}"]`).get('.group.relative').trigger('mouseenter')
+      expect(wrapper.text()).not.toMatch(policyText)
+    }
+    await wrapper.get('[data-request-id="off"]').get('.group.relative').trigger('mouseenter')
+    expect(wrapper.text()).toContain('usage.anthropicCacheTTL.unknownDetail')
   })
 
   it('shows enabled average TPS using total duration and excludes media rows', () => {

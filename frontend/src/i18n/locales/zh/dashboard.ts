@@ -352,16 +352,8 @@ export default {
     costDetails: '费用明细',
     tokenDetails: 'Token 明细',
     anthropicCacheTTL: {
-      policy: 'TTL 策略',
-      off: '不覆写 TTL',
-      '5m': '5 分钟',
-      '1h': '1 小时',
-      applied: '已应用',
-      notApplied: '未应用',
-      notRecorded: '未记录',
       unknownDetail: 'TTL 明细未报告',
-      partialDetail: '部分 TTL 明细未报告',
-      hint: '已应用仅表示最终请求中的缓存声明符合策略，不代表供应商采用该 TTL 或缓存命中。未记录包括历史记录与非目标出口。'
+      partialDetail: '部分 TTL 明细未报告'
     },
     cacheTtlOverriddenHint: '缓存写入计费分类已调整；仅影响结算副本，不代表真实缓存效率',
     cacheTtlOverriddenLabel: '计费调整',
