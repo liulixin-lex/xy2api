@@ -1,12 +1,16 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -79,6 +83,45 @@ func TestRecordCyberPolicyIfMarked_ForwardSuccessSkipsUsageLog(t *testing.T) {
 		h.recordCyberPolicyIfMarked(c, nil, nil, nil, "gpt-5", false /* forwardErrored=false */, nil, service.ChannelUsageFields{}, "")
 	})
 	require.True(t, c.GetBool(cyberPolicyRecordedKey))
+}
+
+// Under an availability fallback the cyber usage row, written from a detached
+// goroutine, keeps the origin group and prices by the serving group.
+func TestRecordCyberPolicyUsageUnderFallbackKeepsOriginGroup(t *testing.T) {
+	originID, servingID := int64(10), int64(20)
+	originGroup := &service.Group{ID: originID, Platform: service.PlatformOpenAI, RateMultiplier: 1, Status: service.StatusActive, Hydrated: true}
+	servingGroup := &service.Group{ID: servingID, Platform: service.PlatformOpenAI, RateMultiplier: 3, Status: service.StatusActive, Hydrated: true}
+	origin := &service.APIKey{ID: 7, UserID: 5, GroupID: &originID, Group: originGroup, User: &service.User{ID: 5, Status: service.StatusActive}}
+	moved := service.CloneAPIKeyWithGroup(origin, servingGroup)
+	state := resilience.NewRequestState()
+	require.True(t, state.MarkFallback(originID))
+	reqCtx := resilience.WithRequestState(context.Background(), state)
+	service.RememberAvailabilityFallbackOrigin(reqCtx, origin)
+
+	cfg := &config.Config{}
+	cfg.RunMode = config.RunModeSimple
+	cfg.Default.RateMultiplier = 1
+	usageRepo := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
+	billingCache := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billingCache.Stop)
+	h := &OpenAIGatewayHandler{gatewayService: service.NewOpenAIGatewayService(nil, usageRepo, nil, nil, nil, nil, nil, cfg, nil, nil,
+		service.NewBillingService(cfg, nil), nil, billingCache, nil, &service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil)}
+
+	c := newTestGinContext()
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil).WithContext(reqCtx)
+	service.MarkOpsCyberPolicy(c, service.CyberPolicyMark{Message: "flagged", UpstreamStatus: 400, UpstreamInTok: 15, UpstreamOutTok: 4})
+	account := &service.Account{ID: 3001, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey}
+	h.recordCyberPolicyIfMarked(c, moved, account, nil, "gpt-5.1", true, nil, service.ChannelUsageFields{}, "")
+
+	select {
+	case log := <-usageRepo.created:
+		require.Equal(t, servingID, *log.GroupID)
+		require.NotNil(t, log.OriginGroupID, "the origin group stays on the row so users never see the fallback group")
+		require.Equal(t, originID, *log.OriginGroupID)
+		require.InDelta(t, 3.0, log.RateMultiplier, 1e-12, "the serving group prices the row")
+	case <-time.After(3 * time.Second):
+		t.Fatal("cyber usage row was not written")
+	}
 }
 
 // TestClearCyberPolicyTurnState verifies F1 at the handler level: after a turn

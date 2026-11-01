@@ -2019,6 +2019,8 @@ type openAIResponsesWSUsageLogCase struct {
 	accountRateMultiplier *float64
 	qualityView           service.GroupQualityGateView
 	gatewayCache          service.GatewayCache
+	// acquireAccountSlot 非 nil 时决定每次账号抢槽是否成功（默认总成功）。
+	acquireAccountSlot func() bool
 	// firstFrameCloseExpected：首帧即被拒（连接被 1008 关闭），不期待任何响应帧。
 	firstFrameCloseExpected bool
 	// secondTurnCloseExpected：第二个 turn 被拒（连接被 1008 关闭）。
@@ -2075,6 +2077,44 @@ func TestOpenAIResponsesWebSocket_QualityPinnedTurnOneUsesAdmissionResult(t *tes
 	})
 	require.Len(t, got.logs, 1, "the selected pinned account must not be re-vetoed on ingress turn 1")
 	require.Len(t, got.upstreamPayloads, 1)
+}
+
+// 后续 turn 的账号满载先短等（≤2 秒）再以 1013 要求重连。
+func TestOpenAIResponsesWebSocket_LaterTurnShortWaitsForBusyAccount(t *testing.T) {
+	for _, row := range []struct {
+		name      string
+		busyTries int32 // 第二个 turn 前若干次抢槽失败；-1 表示一直满
+	}{
+		{"slot frees during the wait", 3},
+		{"still full after the wait", -1},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			var secondTurn atomic.Bool
+			var tries atomic.Int32
+			start := time.Now()
+			got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+				firstPayload:              `{"type":"response.create","model":"gpt-5.1","input":"first"}`,
+				secondPayload:             `{"type":"response.create","model":"gpt-5.1","input":"next"}`,
+				afterFirstUpstreamRequest: func(*service.ChannelService) error { secondTurn.Store(true); return nil },
+				acquireAccountSlot: func() bool {
+					if !secondTurn.Load() {
+						return true
+					}
+					n := tries.Add(1)
+					return row.busyTries >= 0 && n > row.busyTries
+				},
+				secondTurnCloseExpected: row.busyTries < 0, closeStatus: coderws.StatusTryAgainLater,
+				closeReason: "account is busy, please retry later",
+			})
+			if row.busyTries >= 0 {
+				require.Len(t, got.logs, 2, "the turn continues once the slot frees")
+				require.Equal(t, row.busyTries+1, tries.Load())
+				return
+			}
+			require.GreaterOrEqual(t, time.Since(start), 2*time.Second, "1013 only after the short wait")
+			require.Greater(t, tries.Load(), int32(5), "the full account is retried with backoff")
+		})
+	}
 }
 
 type wsTurnQualityView struct{ veto atomic.Bool }
@@ -3197,7 +3237,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 			return true, nil
 		},
 		acquireAccountSlotFn: func(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
-			return true, nil
+			return tc.acquireAccountSlot == nil || tc.acquireAccountSlot(), nil
 		},
 	}
 	h := &OpenAIGatewayHandler{
