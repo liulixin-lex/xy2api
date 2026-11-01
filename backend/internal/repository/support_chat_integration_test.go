@@ -123,6 +123,7 @@ func TestSupportChatRepositoryLifecycle(t *testing.T) {
 	t.Run("read cursor monotonic clamped and unread scoped", testSupportChatReadCursor)
 	t.Run("newest before and after paging", testSupportChatPaging)
 	t.Run("tombstone keeps row and purges image", testSupportChatTombstone)
+	t.Run("user recall window, staff recall and staff identity", testSupportChatRecall)
 	t.Run("image ownership and admin access", testSupportChatImageOwnership)
 	t.Run("list filters ordering keywords preview and cards", testSupportChatListChats)
 	t.Run("summary counters and revision", testSupportChatSummary)
@@ -420,6 +421,7 @@ func testSupportChatWaitingSince(t *testing.T) {
 	}
 	require.NotNil(t, staffMessage)
 	require.Equal(t, fixture.admin.Email, staffMessage.AuthorName)
+	require.Equal(t, fixture.admin.ID, staffMessage.StaffID)
 	lastUserID := chat.LastUserMessageID
 	require.NoError(t, fixture.repo.SetStatus(context.Background(), service.SupportChatStatusInput{ChatID: chat.ID, Status: service.SupportChatStatusResolved, LastSeenMessageID: lastUserID}))
 	chat, err = fixture.repo.GetUserChat(context.Background(), fixture.user.ID)
@@ -560,8 +562,113 @@ func testSupportChatTombstone(t *testing.T) {
 	}
 	require.NotNil(t, tombstone)
 	require.True(t, tombstone.Deleted)
+	require.False(t, tombstone.Recalled, "staff removing a user's message is a delete, not a recall")
 	require.Empty(t, tombstone.Body)
 	require.Nil(t, tombstone.Image)
+}
+
+func testSupportChatRecall(t *testing.T) {
+	ctx := context.Background()
+	fixture := newSupportChatFixture(t)
+	message := sendSupportChatImage(t, fixture, "pasted sk-secret", "recall-image")
+	before := mustGetSupportChat(t, fixture.repo, fixture.user.ID)
+	require.NotNil(t, before.WaitingSince)
+
+	// A user takes back a fresh message: text and image go, and the wait it started ends.
+	recalled, err := fixture.repo.RecallMessage(ctx, before.ID, message.ID, service.SupportChatRecallWindow)
+	require.NoError(t, err)
+	require.True(t, recalled.Deleted)
+	require.True(t, recalled.Recalled)
+	require.Empty(t, recalled.Body)
+	require.Nil(t, recalled.Image)
+	var dataNull bool
+	var deletedBy string
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT data IS NULL FROM support_chat_images WHERE id=$1`, message.Image.ID).Scan(&dataNull))
+	require.True(t, dataNull)
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT deleted_by_role FROM support_chat_messages WHERE id=$1`, message.ID).Scan(&deletedBy))
+	require.Equal(t, service.SupportChatRoleUser, deletedBy)
+	after := mustGetSupportChat(t, fixture.repo, fixture.user.ID)
+	require.Nil(t, after.WaitingSince)
+	require.Equal(t, before.ContentVersion+1, after.ContentVersion)
+	require.Equal(t, before.Revision+1, after.Revision)
+	again, err := fixture.repo.RecallMessage(ctx, before.ID, message.ID, service.SupportChatRecallWindow)
+	require.NoError(t, err)
+	require.True(t, again.Recalled)
+	require.Equal(t, after.ContentVersion, mustGetSupportChat(t, fixture.repo, fixture.user.ID).ContentVersion, "a repeated recall changes nothing")
+	detail, err := fixture.repo.GetChat(ctx, before.ID, true)
+	require.NoError(t, err)
+	require.Equal(t, "recalled", detail.PreviewKind)
+	listed, _, err := fixture.repo.ListChats(ctx, service.SupportChatListFilter{Filter: "all", Keyword: fixture.user.Email, Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	require.Equal(t, "recalled", listed[0].PreviewKind)
+
+	// Users cannot recall staff messages or messages of another chat.
+	staff := sendSupportChatStaffText(t, fixture, "staff reply", "recall-staff")
+	require.Equal(t, fixture.admin.ID, staff.StaffID, "the send result names the staff account")
+	_, err = fixture.repo.RecallMessage(ctx, before.ID, staff.ID, service.SupportChatRecallWindow)
+	require.ErrorIs(t, err, service.ErrSupportChatMessageNotFound)
+	other := newSupportChatFixture(t)
+	foreign := sendSupportChatText(t, other, "not yours", "recall-foreign")
+	_, err = fixture.repo.RecallMessage(ctx, before.ID, foreign.ID, service.SupportChatRecallWindow)
+	require.ErrorIs(t, err, service.ErrSupportChatMessageNotFound)
+
+	// Staff removing a staff message reads as a recall.
+	staffGone, err := fixture.repo.DeleteMessage(ctx, before.ID, staff.ID)
+	require.NoError(t, err)
+	require.True(t, staffGone.Recalled)
+
+	// Past the window the message stays; a wait kept open by an older message continues from it.
+	first := sendSupportChatText(t, fixture, "first", "recall-first")
+	second := sendSupportChatText(t, fixture, "second", "recall-second")
+	_, err = integrationDB.ExecContext(ctx, `UPDATE support_chat_messages SET created_at=created_at-INTERVAL '3 minutes' WHERE id=$1`, first.ID)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE support_chats SET waiting_since=waiting_since-INTERVAL '3 minutes' WHERE id=$1`, before.ID)
+	require.NoError(t, err)
+	waiting := mustGetSupportChat(t, fixture.repo, fixture.user.ID).WaitingSince
+	require.NotNil(t, waiting)
+	_, err = fixture.repo.RecallMessage(ctx, before.ID, first.ID, service.SupportChatRecallWindow)
+	require.ErrorIs(t, err, service.ErrSupportChatRecallExpired)
+	_, err = fixture.repo.RecallMessage(ctx, before.ID, second.ID, service.SupportChatRecallWindow)
+	require.NoError(t, err)
+	stillWaiting := mustGetSupportChat(t, fixture.repo, fixture.user.ID).WaitingSince
+	require.NotNil(t, stillWaiting)
+	require.True(t, waiting.Equal(*stillWaiting))
+
+	// created_at is transaction-start time, so a later message (by id) can carry an
+	// earlier timestamp than the one that started the wait. Recalling the starter
+	// must not end the wait while that message is unanswered.
+	sendSupportChatStaffText(t, fixture, "answer both", "recall-answer")
+	starter := sendSupportChatText(t, fixture, "starter", "recall-starter")
+	raced := sendSupportChatText(t, fixture, "raced", "recall-raced")
+	_, err = integrationDB.ExecContext(ctx, `UPDATE support_chat_messages SET created_at=(SELECT created_at FROM support_chat_messages WHERE id=$1)-INTERVAL '1 second' WHERE id=$2`, starter.ID, raced.ID)
+	require.NoError(t, err)
+	startedAt := mustGetSupportChat(t, fixture.repo, fixture.user.ID).WaitingSince
+	require.NotNil(t, startedAt)
+	_, err = fixture.repo.RecallMessage(ctx, before.ID, starter.ID, service.SupportChatRecallWindow)
+	require.NoError(t, err)
+	afterRace := mustGetSupportChat(t, fixture.repo, fixture.user.ID).WaitingSince
+	require.NotNil(t, afterRace, "the raced message is still unanswered")
+	require.True(t, startedAt.Equal(*afterRace))
+	_, err = fixture.repo.RecallMessage(ctx, before.ID, raced.ID, service.SupportChatRecallWindow)
+	require.NoError(t, err)
+	require.Nil(t, mustGetSupportChat(t, fixture.repo, fixture.user.ID).WaitingSince, "nothing unanswered is left")
+
+	// Users see the staff account id but never the staff name.
+	visible := sendSupportChatStaffText(t, fixture, "visible reply", "recall-visible")
+	items, _, _, err := fixture.repo.ListMessages(ctx, service.SupportChatMessagePageInput{ChatID: before.ID, OwnerID: fixture.user.ID, Limit: 50})
+	require.NoError(t, err)
+	byID := make(map[int64]service.SupportChatMessage, len(items))
+	for _, item := range items {
+		byID[item.ID] = item
+	}
+	require.Equal(t, fixture.admin.ID, byID[visible.ID].StaffID)
+	require.Empty(t, byID[visible.ID].AuthorName)
+	require.True(t, byID[staff.ID].Recalled)
+	require.Equal(t, fixture.admin.ID, byID[staff.ID].StaffID)
+	require.True(t, byID[message.ID].Recalled)
+	require.Zero(t, byID[message.ID].StaffID)
+	require.False(t, byID[first.ID].Deleted)
 }
 
 func testSupportChatImageOwnership(t *testing.T) {

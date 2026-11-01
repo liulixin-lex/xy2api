@@ -39,10 +39,14 @@ export interface SupportChatMessage {
   /** null when deleted or text-only. */
   image: SupportChatImageRef | null
   deleted: boolean
+  /** Deleted by its own side: a user recall, or staff removing a staff message. */
+  recalled?: boolean
   client_msg_id?: string
   created_at: string
   /** Admin views only, staff messages only. */
   author_name?: string
+  /** Staff messages only: the staff account id, the only staff detail users see. */
+  staff_id?: number
 }
 
 export interface SupportChatThreadPage {
@@ -123,7 +127,7 @@ export interface SupportChatAdminItem {
   last_message_id: number
   /** Up to 80 runes of the last message body; '' for image-only, deleted or none. */
   preview: string
-  preview_kind: 'text' | 'image' | 'deleted' | 'none'
+  preview_kind: 'text' | 'image' | 'deleted' | 'recalled' | 'none'
   unread: boolean
   message_count: number
   blocked: boolean
@@ -205,6 +209,14 @@ export function sendMyChatMessage(request: SupportChatSendRequest): Promise<Supp
 
 export async function markMyChatRead(lastMessageId: number): Promise<{ read_message_id: number }> {
   const { data } = await apiClient.post<{ read_message_id: number }>('/support-chat/read', { last_message_id: lastMessageId })
+  return data
+}
+
+/** Users can recall their own message for SUPPORT_CHAT_RECALL_WINDOW_MS after sending it. */
+export const SUPPORT_CHAT_RECALL_WINDOW_MS = 2 * 60 * 1000
+
+export async function recallMyChatMessage(messageId: number): Promise<{ message: SupportChatMessage }> {
+  const { data } = await apiClient.delete<{ message: SupportChatMessage }>(`/support-chat/messages/${messageId}`)
   return data
 }
 

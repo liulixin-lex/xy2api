@@ -7,18 +7,25 @@ import { CHAT_POLL_FAST_MS, createChatThread, useChatThreadPolling, type ChatThr
 import SupportChatThread from '../SupportChatThread.vue'
 import SupportChatImage from '../SupportChatImage.vue'
 import SupportChatComposer from '../SupportChatComposer.vue'
+import SupportChatConversation from '../SupportChatConversation.vue'
 
 const mocks = vi.hoisted(() => ({
   fetchMyChatImage: vi.fn(), fetchAdminChatImage: vi.fn(), compressImage: vi.fn(), error: vi.fn(),
+  recallMyChatMessage: vi.fn(), listMyChatMessages: vi.fn(), getMyChat: vi.fn(), markMyChatRead: vi.fn(),
+  auth: { isAuthenticated: true, canAccessAdmin: false, user: { id: 42 } },
 }))
 vi.mock('vue-i18n', async () => ({
   ...(await vi.importActual<typeof import('vue-i18n')>('vue-i18n')),
   useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => (params ? `${key}:${JSON.stringify(params)}` : key) }),
 }))
-vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError: mocks.error, showSuccess: vi.fn() }) }))
+vi.mock('@/stores/app', () => ({
+  useAppStore: () => ({ showError: mocks.error, showSuccess: vi.fn(), cachedPublicSettings: { support_ticket_enabled: true, support_chat_enabled: true } }),
+}))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => mocks.auth }))
 vi.mock('@/api/supportChat', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/supportChat')>()),
   fetchMyChatImage: mocks.fetchMyChatImage, fetchAdminChatImage: mocks.fetchAdminChatImage,
+  recallMyChatMessage: mocks.recallMyChatMessage, listMyChatMessages: mocks.listMyChatMessages, getMyChat: mocks.getMyChat, markMyChatRead: mocks.markMyChatRead,
 }))
 vi.mock('../compressImage', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../compressImage')>()),
@@ -48,25 +55,78 @@ describe('chat thread', () => {
     return thread
   }
 
-  it('names the sides, hides deleted content and shows the read receipt on my last message', async () => {
+  it('names staff only by account id, words each removal and never shows users read state', async () => {
     const thread = await threadWith([
       message(1, { author_role: 'user' }),
-      message(2, { author_name: 'root' }),
-      message(3, { deleted: true, body: '' }),
+      message(2, { author_name: 'root', staff_id: 4 }),
+      message(3, { deleted: true, recalled: true, body: '', staff_id: 4 }),
       message(4, { author_role: 'system', body: '会话已标记为已解决' }),
       message(5, { author_role: 'user', body: 'thanks' }),
-    ], { peer_read_message_id: 5 })
+      message(6, { author_role: 'user', deleted: true, recalled: true, body: '' }),
+      message(7, { author_role: 'user', deleted: true, body: '' }),
+      message(8, { body: 'no id' }),
+    ], { peer_read_message_id: 8 })
     const wrapper = mount(SupportChatThread, { props: { thread, viewer: 'user', imageScope: 'user', welcome: '你好' }, global: { stubs } })
     expect(wrapper.get('[data-testid="chat-welcome"]').text()).toBe('你好')
     const authors = wrapper.findAll('[data-testid="chat-message-author"]').map((node) => node.text())
-    expect(authors).toEqual(['supportChat.you', 'supportChat.staff', 'supportChat.staff', 'supportChat.you'])
+    const staff4 = 'supportChat.staffWithId:{"id":4}'
+    expect(authors).toEqual(['supportChat.you', staff4, staff4, 'supportChat.you', 'supportChat.you', 'supportChat.you', 'supportChat.staff'])
     expect(wrapper.text()).not.toContain('root')
-    expect(wrapper.get('[data-testid="chat-message-deleted"]').text()).toBe('supportChat.deleted')
+    expect(wrapper.findAll('[data-testid="chat-message-deleted"]').map((node) => node.text()))
+      .toEqual(['supportChat.recalledByStaff', 'supportChat.recalledBySelf', 'supportChat.deleted'])
     expect(wrapper.get('[data-testid="chat-system"]').text()).toContain('会话已标记为已解决')
-    const receipts = wrapper.findAll('[data-testid="chat-receipt"]')
-    expect(receipts).toHaveLength(1)
-    expect(receipts[0].text()).toBe('supportChat.read')
+    expect(wrapper.find('[data-testid="chat-receipt"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="chat-message-delete"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="chat-message-recall"]').exists()).toBe(false)
+  })
+
+  it('offers users a recall on their own messages for two minutes', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-10-31T00:01:00Z'))
+      const thread = await threadWith([
+        message(1, { author_role: 'user', created_at: '2026-10-31T00:00:00Z' }),
+        message(2, { author_role: 'user', created_at: '2026-10-30T23:50:00Z' }),
+        message(3, { created_at: '2026-10-31T00:00:30Z', staff_id: 4 }),
+      ])
+      const wrapper = mount(SupportChatThread, { props: { thread, viewer: 'user', imageScope: 'user', canRecall: true }, global: { stubs } })
+      const recall = wrapper.findAll('[data-testid="chat-message-recall"]')
+      expect(recall).toHaveLength(1)
+      // Visible without hover on touch screens.
+      expect(recall[0].classes()).toContain('[@media(hover:none)]:opacity-100')
+      await recall[0].trigger('click')
+      expect(wrapper.emitted('recall')?.[0][0]).toMatchObject({ id: 1 })
+      // A message the server refused to recall loses its button at once.
+      await wrapper.setProps({ recallExpiredIds: new Set([1]) })
+      expect(wrapper.find('[data-testid="chat-message-recall"]').exists()).toBe(false)
+      await wrapper.setProps({ recallExpiredIds: new Set() })
+      vi.advanceTimersByTime(70_000)
+      await flushPromises()
+      expect(wrapper.find('[data-testid="chat-message-recall"]').exists()).toBe(false)
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('times the recall window by the server clock when the local clock runs ahead', async () => {
+    vi.useFakeTimers()
+    try {
+      // The local clock is five minutes ahead of the server.
+      vi.setSystemTime(new Date('2026-10-31T00:05:00Z'))
+      const send = vi.fn().mockResolvedValue({ message: message(9, { author_role: 'user', body: 'hi', created_at: '2026-10-31T00:00:00Z' }), duplicate: false, chat_id: 1 })
+      const thread = await threadWith([], {}, send)
+      const wrapper = mount(SupportChatThread, { props: { thread, viewer: 'user', imageScope: 'user', canRecall: true }, global: { stubs } })
+      await thread.send('hi')
+      await flushPromises()
+      expect(wrapper.findAll('[data-testid="chat-message-recall"]')).toHaveLength(1)
+      vi.advanceTimersByTime(130_000)
+      await flushPromises()
+      expect(wrapper.find('[data-testid="chat-message-recall"]').exists()).toBe(false)
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('offers a resend with the same client id and no automatic retry', async () => {
@@ -112,13 +172,59 @@ describe('chat thread', () => {
     expect(receipts().filter(([, state]) => state).map(([, state]) => state)).toEqual(['read', 'read', 'read', 'read'])
   })
 
-  it('lets staff delete messages and shows which staff member wrote', async () => {
-    const thread = createChatThread({ list: vi.fn().mockResolvedValue(page([message(1, { author_role: 'user' }), message(2, { author_name: 'root' })])), send: vi.fn(), markRead: vi.fn() }, { viewer: 'admin' })
+  it('lets staff delete user messages, recall staff messages and shows which staff member wrote', async () => {
+    const items = [
+      message(1, { author_role: 'user' }),
+      message(2, { author_name: 'root', staff_id: 4 }),
+      message(3, { staff_id: 5 }),
+      message(4, { author_role: 'user', deleted: true, recalled: true, body: '' }),
+      message(5, { deleted: true, recalled: true, body: '', author_name: 'root', staff_id: 4 }),
+    ]
+    const thread = createChatThread({ list: vi.fn().mockResolvedValue(page(items)), send: vi.fn(), markRead: vi.fn() }, { viewer: 'admin' })
     await thread.load()
     const wrapper = mount(SupportChatThread, { props: { thread, viewer: 'admin', imageScope: 'admin', canDelete: true }, global: { stubs } })
-    expect(wrapper.findAll('[data-testid="chat-message-author"]').map((node) => node.text())).toEqual(['supportChat.user', 'root'])
+    expect(wrapper.findAll('[data-testid="chat-message-author"]').map((node) => node.text()))
+      .toEqual(['supportChat.user', 'root', 'supportChat.staffWithId:{"id":5}', 'supportChat.user', 'root'])
+    expect(wrapper.findAll('[data-testid="chat-message-deleted"]').map((node) => node.text()))
+      .toEqual(['supportChat.recalledByUser', 'supportChat.recalledByStaff'])
+    // Staff delete user messages and recall staff messages, at any age.
+    expect(wrapper.findAll('[data-testid="chat-message-delete"]')).toHaveLength(1)
+    expect(wrapper.findAll('[data-testid="chat-message-recall"]').map((node) => node.text())).toEqual(['supportChat.admin.recall', 'supportChat.admin.recall'])
     await wrapper.findAll('[data-testid="chat-message-delete"]')[0].trigger('click')
-    expect(wrapper.emitted('delete')?.[0][0]).toMatchObject({ id: 1 })
+    await wrapper.findAll('[data-testid="chat-message-recall"]')[1].trigger('click')
+    expect(wrapper.emitted('delete')?.map(([value]) => (value as SupportChatMessage).id)).toEqual([1, 3])
+  })
+})
+
+describe('user conversation recall', () => {
+  it('recalls through the API, shows the tombstone and reports a late recall', async () => {
+    const sent = message(11, { author_role: 'user', body: 'sk-oops', created_at: new Date().toISOString() })
+    mocks.getMyChat.mockResolvedValue({ chat: null, unread_count: 0, ticket_unread_count: 0, welcome: 'hi' })
+    mocks.listMyChatMessages.mockResolvedValue(page([sent], { chat_id: 3 }))
+    mocks.markMyChatRead.mockResolvedValue({ read_message_id: 11 })
+    const wrapper = mount(SupportChatConversation, { props: { active: true }, global: { stubs: { ...stubs, SupportChatComposer: true } } })
+    await flushPromises()
+    mocks.recallMyChatMessage.mockRejectedValueOnce({ status: 409, reason: 'SUPPORT_CHAT_RECALL_EXPIRED' })
+    await wrapper.get('[data-testid="chat-message-recall"]').trigger('click')
+    await flushPromises()
+    expect(mocks.error).toHaveBeenCalledWith(expect.stringContaining('supportChat.errors.SUPPORT_CHAT_RECALL_EXPIRED'))
+    // The refused message keeps no recall button.
+    expect(wrapper.find('[data-testid="chat-message-recall"]').exists()).toBe(false)
+    wrapper.unmount()
+    useSupportChatStore().reset()
+
+    const fresh = message(12, { author_role: 'user', body: 'sk-oops', created_at: new Date().toISOString() })
+    mocks.listMyChatMessages.mockResolvedValue(page([fresh], { chat_id: 3 }))
+    const again = mount(SupportChatConversation, { props: { active: true }, global: { stubs: { ...stubs, SupportChatComposer: true } } })
+    await flushPromises()
+    mocks.recallMyChatMessage.mockResolvedValueOnce({ message: { ...fresh, body: '', deleted: true, recalled: true } })
+    await again.get('[data-testid="chat-message-recall"]').trigger('click')
+    await flushPromises()
+    expect(mocks.recallMyChatMessage).toHaveBeenLastCalledWith(12)
+    expect(again.get('[data-testid="chat-message-deleted"]').text()).toBe('supportChat.recalledBySelf')
+    expect(again.text()).not.toContain('sk-oops')
+    again.unmount()
+    useSupportChatStore().reset()
   })
 })
 

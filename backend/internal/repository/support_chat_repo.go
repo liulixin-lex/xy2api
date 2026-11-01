@@ -20,7 +20,7 @@ func NewSupportChatRepository(db *sql.DB) service.SupportChatRepository {
 
 const supportChatCols = `c.id,c.user_id,c.status,c.waiting_since,c.last_message_at,c.last_message_role,c.last_message_id,c.last_user_message_id,c.last_staff_message_id,c.user_read_message_id,c.staff_read_message_id,c.message_count,c.revision,c.content_version,c.blocked_at,c.blocked_reason,c.resolved_at,c.created_at,c.updated_at`
 
-const supportChatMessageSelect = `SELECT m.id,m.author_role,m.body,m.image_id,m.client_msg_id,m.deleted_at,m.created_at,CASE WHEN m.author_role='admin' THEN COALESCE(NULLIF(a.username,''),a.email,'') ELSE '' END AS author_name,i.content_type,i.width,i.height,i.byte_size,(i.purged_at IS NOT NULL OR i.data IS NULL) FROM support_chat_messages m LEFT JOIN users a ON a.id=m.author_user_id LEFT JOIN support_chat_images i ON i.id=m.image_id `
+const supportChatMessageSelect = `SELECT m.id,m.author_role,m.body,m.image_id,m.client_msg_id,m.deleted_at,m.deleted_by_role,m.created_at,CASE WHEN m.author_role='admin' THEN COALESCE(NULLIF(a.username,''),a.email,'') ELSE '' END AS author_name,CASE WHEN m.author_role='admin' THEN m.author_user_id END AS staff_id,i.content_type,i.width,i.height,i.byte_size,(i.purged_at IS NOT NULL OR i.data IS NULL) FROM support_chat_messages m LEFT JOIN users a ON a.id=m.author_user_id LEFT JOIN support_chat_images i ON i.id=m.image_id `
 
 type chatRow struct {
 	c                     service.SupportChat
@@ -55,7 +55,9 @@ type nullableSupportChatMessage struct {
 	message     service.SupportChatMessage
 	imageID     sql.NullInt64
 	clientMsgID sql.NullString
+	deletedBy   string
 	authorName  sql.NullString
+	staffID     sql.NullInt64
 	deletedAt   sql.NullTime
 	contentType sql.NullString
 	width       sql.NullInt64
@@ -74,8 +76,10 @@ func scanSupportChatMessage(row interface{ Scan(...any) error }, admin bool) (*s
 		&scanned.imageID,
 		&scanned.clientMsgID,
 		&scanned.deletedAt,
+		&scanned.deletedBy,
 		&scanned.message.CreatedAt,
 		&scanned.authorName,
+		&scanned.staffID,
 		&scanned.contentType,
 		&scanned.width,
 		&scanned.height,
@@ -86,7 +90,9 @@ func scanSupportChatMessage(row interface{ Scan(...any) error }, admin bool) (*s
 	}
 	scanned.message.ClientMsgID = scanned.clientMsgID.String
 	scanned.message.AuthorName = scanned.authorName.String
+	scanned.message.StaffID = scanned.staffID.Int64
 	scanned.message.Deleted = scanned.deletedAt.Valid
+	scanned.message.Recalled = scanned.message.Deleted && scanned.deletedBy == scanned.message.AuthorRole
 	if !admin {
 		scanned.message.AuthorName = ""
 	}
@@ -128,13 +134,16 @@ func (r *supportChatRepository) GetChat(ctx context.Context, id int64, withUser 
 	var body sql.NullString
 	var deleted sql.NullTime
 	var imageID sql.NullInt64
-	err = r.db.QueryRowContext(ctx, `SELECT body,deleted_at,image_id FROM support_chat_messages WHERE chat_id=$1 ORDER BY id DESC LIMIT 1`, id).Scan(&body, &deleted, &imageID)
+	var recalled bool
+	err = r.db.QueryRowContext(ctx, `SELECT body,deleted_at,image_id,deleted_by_role=author_role FROM support_chat_messages WHERE chat_id=$1 ORDER BY id DESC LIMIT 1`, id).Scan(&body, &deleted, &imageID, &recalled)
 	if errors.Is(err, sql.ErrNoRows) {
 		x.c.PreviewKind = "none"
 	} else if err != nil {
 		return nil, err
 	}
-	if deleted.Valid {
+	if deleted.Valid && recalled {
+		x.c.PreviewKind = "recalled"
+	} else if deleted.Valid {
 		x.c.PreviewKind = "deleted"
 	} else if strings.TrimSpace(body.String) != "" {
 		x.c.PreviewKind = "text"
@@ -201,7 +210,7 @@ func (r *supportChatRepository) ListChats(ctx context.Context, in service.Suppor
 	q := `SELECT ` + supportChatCols + `,
 		u.id,COALESCE(u.email,''),COALESCE(u.username,''),COALESCE(u.status,''),
 		COALESCE(u.balance,0)::float8,(u.deleted_at IS NOT NULL),u.created_at,
-		lm.body,lm.deleted_at,lm.image_id` + from + order + " LIMIT " + arg(in.PageSize) + " OFFSET " + arg((in.Page-1)*in.PageSize)
+		lm.body,lm.deleted_at,lm.image_id,COALESCE(lm.deleted_by_role=lm.author_role,false)` + from + order + " LIMIT " + arg(in.PageSize) + " OFFSET " + arg((in.Page-1)*in.PageSize)
 	rows, err := r.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, 0, err
@@ -225,10 +234,11 @@ func scanChatWithUser(row interface{ Scan(...any) error }) (*chatRow, error) {
 	var userCreatedAt sql.NullTime
 	var previewBody sql.NullString
 	var previewDeleted sql.NullTime
+	var previewRecalled bool
 	var previewImage sql.NullInt64
 	if err := row.Scan(
 		&x.c.ID, &x.c.UserID, &x.c.Status, &x.wait, &x.c.LastMessageAt, &x.c.LastMessageRole, &x.c.LastMessageID, &x.lastUser, &x.lastStaff, &x.userRead, &x.staffRead, &x.c.MessageCount, &x.c.Revision, &x.c.ContentVersion, &x.block, &x.reason, &x.resolved, &x.c.CreatedAt, &x.c.UpdatedAt,
-		&user.ID, &user.Email, &user.Username, &user.Status, &user.Balance, &user.Deleted, &userCreatedAt, &previewBody, &previewDeleted, &previewImage,
+		&user.ID, &user.Email, &user.Username, &user.Status, &user.Balance, &user.Deleted, &userCreatedAt, &previewBody, &previewDeleted, &previewImage, &previewRecalled,
 	); err != nil {
 		return nil, err
 	}
@@ -250,7 +260,9 @@ func scanChatWithUser(row interface{ Scan(...any) error }) (*chatRow, error) {
 	x.c.User = &user
 	x.c.UserReadMessageID = x.userRead
 	x.c.StaffReadMessageID = x.staffRead
-	if previewDeleted.Valid {
+	if previewDeleted.Valid && previewRecalled {
+		x.c.PreviewKind = "recalled"
+	} else if previewDeleted.Valid {
 		x.c.PreviewKind = "deleted"
 	} else if strings.TrimSpace(previewBody.String) != "" {
 		x.c.PreviewKind = "text"
@@ -409,6 +421,9 @@ func (r *supportChatRepository) SendMessage(ctx context.Context, in service.Supp
 	m.AuthorRole = in.AuthorRole
 	m.Body = in.Body
 	m.ClientMsgID = in.ClientMsgID
+	if in.AuthorRole == service.SupportChatRoleAdmin {
+		m.StaffID = in.AuthorUserID
+	}
 	if in.Image != nil {
 		imageID64, _ := imageID.(int64)
 		m.Image = &service.SupportChatImage{ID: imageID64, ContentType: in.Image.ContentType, Width: in.Image.Width, Height: in.Image.Height, ByteSize: len(in.Image.Data)}
@@ -555,6 +570,65 @@ func (r *supportChatRepository) DeleteMessage(ctx context.Context, cid, mid int6
 		return nil, err
 	}
 	return &m, nil
+}
+
+// RecallMessage removes the user's own message like a staff delete (body and
+// image bytes go), records the user as remover and ends a wait that no remaining
+// user message keeps open. The age check uses the database clock.
+func (r *supportChatRepository) RecallMessage(ctx context.Context, cid, mid int64, window time.Duration) (*service.SupportChatMessage, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err = lockSupportChatRow(ctx, tx, cid); err != nil {
+		return nil, err
+	}
+	var role string
+	var deleted, fresh bool
+	err = tx.QueryRowContext(ctx, `SELECT author_role,deleted_at IS NOT NULL,created_at>=NOW()-$3*INTERVAL '1 second' FROM support_chat_messages WHERE id=$1 AND chat_id=$2`, mid, cid, int64(window/time.Second)).Scan(&role, &deleted, &fresh)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && role != service.SupportChatRoleUser) {
+		return nil, service.ErrSupportChatMessageNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !deleted {
+		if !fresh {
+			return nil, service.ErrSupportChatRecallExpired
+		}
+		var imageID sql.NullInt64
+		if err = tx.QueryRowContext(ctx, `UPDATE support_chat_messages SET body='',deleted_at=NOW(),deleted_by_role='user' WHERE id=$1 RETURNING image_id`, mid).Scan(&imageID); err != nil {
+			return nil, err
+		}
+		if imageID.Valid {
+			if _, err = tx.ExecContext(ctx, `UPDATE support_chat_images SET data=NULL,purged_at=COALESCE(purged_at,NOW()) WHERE id=$1`, imageID.Int64); err != nil {
+				return nil, err
+			}
+		}
+		// waiting_since is the created_at of the user message that started the wait.
+		// created_at is transaction-start time, so order the unanswered messages by
+		// id (lock order) from that starter on: the wait ends when none of them is
+		// left, and otherwise starts no earlier than before.
+		if _, err = tx.ExecContext(ctx, `UPDATE support_chats c SET content_version=content_version+1,revision=revision+1,updated_at=NOW(),
+			waiting_since=CASE WHEN c.waiting_since IS NULL THEN NULL ELSE (
+				SELECT CASE WHEN COUNT(*)=0 THEN NULL ELSE GREATEST(c.waiting_since,MIN(m.created_at)) END
+				FROM support_chat_messages m
+				WHERE m.chat_id=c.id AND m.author_role='user' AND m.deleted_at IS NULL
+					AND m.id>=(SELECT MIN(s.id) FROM support_chat_messages s WHERE s.chat_id=c.id AND s.author_role='user' AND s.created_at>=c.waiting_since)
+			) END
+			WHERE c.id=$1`, cid); err != nil {
+			return nil, err
+		}
+	}
+	message, err := scanSupportChatMessage(tx.QueryRowContext(ctx, supportChatMessageSelect+`WHERE m.id=$1`, mid), false)
+	if err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return message, nil
 }
 func (r *supportChatRepository) DeleteChat(ctx context.Context, id int64) error {
 	tx, err := r.db.BeginTx(ctx, nil)

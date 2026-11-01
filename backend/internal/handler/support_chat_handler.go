@@ -80,6 +80,21 @@ func (h *SupportChatHandler) Send(c *gin.Context) {
 	}
 	supportChatRespond(c, gin.H{"message": m, "duplicate": dup, "chat_id": chatID}, e)
 }
+
+// Recall takes back one of the caller's own messages shortly after it was sent.
+func (h *SupportChatHandler) Recall(c *gin.Context) {
+	uid, ok := supportChatCaller(c)
+	if !ok {
+		return
+	}
+	mid, e := strconv.ParseInt(c.Param("id"), 10, 64)
+	if e != nil || mid <= 0 {
+		response.BadRequest(c, "invalid message id")
+		return
+	}
+	v, err := h.service.Recall(c.Request.Context(), uid, mid)
+	supportChatRespond(c, gin.H{"message": v}, err)
+}
 func (h *SupportChatHandler) Read(c *gin.Context) {
 	uid, ok := supportChatCaller(c)
 	if !ok {

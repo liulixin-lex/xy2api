@@ -66,6 +66,25 @@ Staff with manage permission MUST be able to delete a single message (body and i
 - **WHEN** staff block a user and then delete that user's conversation
 - **THEN** all messages and images are removed, the user's client clears the old thread, and the user's next message is still rejected as blocked.
 
+### Requirement: Two-way recall and staff identity
+
+Users MUST be able to recall their own message within 2 minutes of sending it, judged by the database clock; later attempts MUST fail with 409 `SUPPORT_CHAT_RECALL_EXPIRED` and other people's messages MUST look not found. Staff with manage permission MUST be able to recall staff messages at any time. A recall MUST clear the text and image like a delete and mark the message `recalled`. User-facing responses MUST name staff only by account id (`staff_id`), MUST NOT carry staff names or e-mail addresses, and MUST NOT reveal how far staff have read.
+
+#### Scenario: User takes back a pasted key
+
+- **WHEN** a user recalls a message one minute after sending it
+- **THEN** both sides show a recall notice, the text and image are gone, and a wait started only by that message ends.
+
+#### Scenario: Late recall
+
+- **WHEN** a user tries to recall a message three minutes after sending it
+- **THEN** the server answers 409 `SUPPORT_CHAT_RECALL_EXPIRED` and the message stays.
+
+#### Scenario: Staff identity
+
+- **WHEN** staff account 7 answers a chat or a ticket
+- **THEN** the user sees 「客服 #7」 and no response to the user contains that account's username or e-mail.
+
 ### Requirement: Quiet alerts and audited reads
 
 Staff alerts MUST poll only a counts-only summary that is not audited. Conversation lists, details, message reads and image reads MUST be audited, except incremental polls that return no messages and read-cursor reports.

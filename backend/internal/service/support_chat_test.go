@@ -30,9 +30,11 @@ func (s supportChatTestSettings) GetSupportChatRuntime(context.Context) (Support
 }
 
 type supportChatTestRepo struct {
-	chat  *SupportChat
-	err   error
-	calls int
+	chat         *SupportChat
+	err          error
+	calls        int
+	recallChat   int64
+	recallWindow time.Duration
 }
 
 func (r *supportChatTestRepo) GetUserChat(context.Context, int64) (*SupportChat, error) {
@@ -75,6 +77,11 @@ func (r *supportChatTestRepo) DeleteMessage(context.Context, int64, int64) (*Sup
 	return nil, r.err
 }
 func (r *supportChatTestRepo) DeleteChat(context.Context, int64) error { r.calls++; return r.err }
+func (r *supportChatTestRepo) RecallMessage(_ context.Context, chatID, messageID int64, window time.Duration) (*SupportChatMessage, error) {
+	r.calls++
+	r.recallChat, r.recallWindow = chatID, window
+	return &SupportChatMessage{ID: messageID, AuthorRole: SupportChatRoleUser, Deleted: true, Recalled: true}, r.err
+}
 func (r *supportChatTestRepo) GetImage(context.Context, int64, int64, bool) (*SupportChatImageResult, error) {
 	r.calls++
 	return nil, r.err
@@ -124,8 +131,24 @@ func TestSupportChatDisabledEverywhere(t *testing.T) {
 	require.ErrorIs(t, err, ErrSupportChatDisabled)
 	_, err = svc.AdminDeleteMessage(ctx, 1, 1)
 	require.ErrorIs(t, err, ErrSupportChatDisabled)
+	_, err = svc.Recall(ctx, 1, 1)
+	require.ErrorIs(t, err, ErrSupportChatDisabled)
 	require.ErrorIs(t, svc.AdminDeleteChat(ctx, 1), ErrSupportChatDisabled)
 	require.Zero(t, repo.calls)
+}
+
+func TestSupportChatRecallUsesTheCallersChat(t *testing.T) {
+	ctx := context.Background()
+	repo := &supportChatTestRepo{}
+	svc := NewSupportChatServiceWithSettings(repo, supportChatTestSettings{runtime: SupportChatRuntime{Enabled: true}}, nil)
+	_, err := svc.Recall(ctx, 42, 5)
+	require.ErrorIs(t, err, ErrSupportChatMessageNotFound, "no chat yet means nothing to recall")
+	repo.chat = &SupportChat{ID: 9, UserID: 42}
+	m, err := svc.Recall(ctx, 42, 5)
+	require.NoError(t, err)
+	require.True(t, m.Recalled)
+	require.Equal(t, int64(9), repo.recallChat)
+	require.Equal(t, 2*time.Minute, repo.recallWindow)
 }
 
 func TestSupportChatValidationAndMetadata(t *testing.T) {
@@ -142,7 +165,7 @@ func TestSupportChatValidationAndMetadata(t *testing.T) {
 func TestSupportChatCursorViewerMapping(t *testing.T) {
 	chat := &SupportChat{ID: 1, UserReadMessageID: 7, StaffReadMessageID: 9}
 	require.Equal(t, int64(7), mapChatViewer(chat, false).ReadMessageID)
-	require.Equal(t, int64(9), chat.PeerReadMessageID)
+	require.Zero(t, chat.PeerReadMessageID, "users never learn how far staff have read")
 	require.Equal(t, int64(9), mapChatViewer(chat, true).ReadMessageID)
 	require.Equal(t, int64(7), chat.PeerReadMessageID)
 }

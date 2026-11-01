@@ -336,6 +336,7 @@
     "284_support_tickets.sql": "f6922eeafa4b54aaa410f10e8c4b717579f411d13fc4931cc304fd4f736285b1",
     "285_openai_totp.sql": "17e20b225fa217870e9392469e39a54bc0190e278711a1d4b9ce1b0570bfbcb4",
     "286_anthropic_cache_ttl.sql": "749f7d32e835fb0bde471739f3fb95c1e5d288155c733ce8d10d014244aee0fb",
-    "287_support_chat.sql": "90aa4fede4bc4fcea0152157e97453b0200f9469a45b26d8f2f03a901b465413"
+    "287_support_chat.sql": "90aa4fede4bc4fcea0152157e97453b0200f9469a45b26d8f2f03a901b465413",
+    "288_support_chat_user_recall.sql": "c0a5f9112906c7a89751c35b2869a10cb2c4fef086729c590b431eea206c8e64"
   }
 }

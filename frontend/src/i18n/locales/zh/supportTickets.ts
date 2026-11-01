@@ -55,6 +55,7 @@ export default {
       createdAt: '提交于 {time}',
       you: '我',
       staff: '客服',
+      staffWithId: '客服 #{id}',
       user: '用户',
       replyPlaceholder: '补充说明或回复客服…',
       adminReplyPlaceholder: '回复用户…',

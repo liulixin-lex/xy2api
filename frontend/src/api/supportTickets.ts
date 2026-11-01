@@ -54,6 +54,8 @@ export interface SupportTicketMessage {
   author_role: SupportTicketRole
   /** Which admin replied; admin views only. */
   author_name?: string
+  /** Staff messages only: the replying admin's account id, the only staff detail users see. */
+  staff_id?: number
   body: string
   created_at: string
 }

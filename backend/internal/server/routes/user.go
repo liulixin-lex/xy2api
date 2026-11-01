@@ -148,6 +148,7 @@ func RegisterUserRoutes(
 			chat.GET("", h.SupportChat.Summary)
 			chat.GET("/messages", h.SupportChat.Messages)
 			chat.POST("/messages", h.SupportChat.Send)
+			chat.DELETE("/messages/:id", h.SupportChat.Recall)
 			chat.POST("/read", h.SupportChat.Read)
 			chat.GET("/images/:id", h.SupportChat.Image)
 		}

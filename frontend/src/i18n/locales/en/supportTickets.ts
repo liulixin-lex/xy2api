@@ -55,6 +55,7 @@ export default {
       createdAt: 'Opened {time}',
       you: 'You',
       staff: 'Support',
+      staffWithId: 'Support #{id}',
       user: 'User',
       replyPlaceholder: 'Add details or answer support…',
       adminReplyPlaceholder: 'Answer the user…',

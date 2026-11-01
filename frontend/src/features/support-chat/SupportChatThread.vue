@@ -40,9 +40,29 @@
             <span class="font-medium text-gray-700 dark:text-gray-200" data-testid="chat-message-author">{{ authorLabel(message) }}</span>
             <time :datetime="message.created_at">{{ formatDateTimeToMinute(message.created_at) }}</time>
             <button
-              v-if="canDelete && !message.deleted"
+              v-if="recallable(message)"
               type="button"
-              class="rounded p-0.5 text-gray-400 opacity-100 hover:text-red-600 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
+              class="rounded px-1 font-medium text-gray-500 opacity-100 hover:text-red-600 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100 [@media(hover:none)]:opacity-100 dark:text-gray-400"
+              :title="t('supportChat.recallMessage')"
+              data-testid="chat-message-recall"
+              @click="emit('recall', message)"
+            >
+              {{ t('supportChat.recall') }}
+            </button>
+            <button
+              v-else-if="canDelete && !message.deleted && message.author_role === 'admin'"
+              type="button"
+              class="rounded px-1 font-medium text-gray-500 opacity-100 hover:text-red-600 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100 [@media(hover:none)]:opacity-100 dark:text-gray-400"
+              :title="t('supportChat.admin.recallMessage')"
+              data-testid="chat-message-recall"
+              @click="emit('delete', message)"
+            >
+              {{ t('supportChat.admin.recall') }}
+            </button>
+            <button
+              v-else-if="canDelete && !message.deleted"
+              type="button"
+              class="rounded p-0.5 text-gray-400 opacity-100 hover:text-red-600 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
               :title="t('supportChat.admin.deleteMessage')"
               :aria-label="t('supportChat.admin.deleteMessage')"
               data-testid="chat-message-delete"
@@ -55,7 +75,8 @@
             v-if="message.deleted"
             class="rounded-2xl border border-dashed border-gray-200 px-3 py-2 text-sm italic text-gray-400 dark:border-dark-600 dark:text-gray-500"
             data-testid="chat-message-deleted"
-          >{{ t('supportChat.deleted') }}</div>
+            :data-recalled="message.recalled ? 'true' : undefined"
+          >{{ deletedText(message) }}</div>
           <div v-else class="space-y-2 rounded-2xl px-3 py-2" :class="bubbleClass(message)">
             <SupportChatImage v-if="message.image" :image="message.image" :scope="imageScope" />
             <TicketMessageBody v-if="message.body" :text="message.body" />
@@ -67,7 +88,7 @@
             data-testid="chat-receipt"
             :data-state="isRead(message) ? 'read' : 'unread'"
           >
-            <Icon v-if="viewer === 'admin' && isRead(message)" name="check" size="xs" />
+            <Icon v-if="isRead(message)" name="check" size="xs" />
             {{ receiptText(message) }}
           </p>
         </div>
@@ -102,11 +123,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import TicketMessageBody from '@/features/support-tickets/TicketMessageBody.vue'
-import type { SupportChatMessage } from '@/api/supportChat'
+import { SUPPORT_CHAT_RECALL_WINDOW_MS, type SupportChatMessage } from '@/api/supportChat'
 import type { SupportChatImageScope } from '@/stores/supportChat'
 import { formatDateTimeToMinute } from '@/utils/format'
 import type { ChatThread, PendingChatMessage } from './chatThread'
@@ -124,21 +145,17 @@ const props = defineProps<{
   welcome?: string
   emptyText?: string
   canDelete?: boolean
+  /** The viewer may recall their own messages within the recall window (users). */
+  canRecall?: boolean
+  /** Messages the server already refused to recall (too old). */
+  recallExpiredIds?: ReadonlySet<number>
 }>()
-const emit = defineEmits<{ (e: 'delete', message: SupportChatMessage): void }>()
+const emit = defineEmits<{ (e: 'delete', message: SupportChatMessage): void; (e: 'recall', message: SupportChatMessage): void }>()
 const { t } = useI18n()
 
 const scroller = ref<HTMLElement | null>(null)
 const state = computed(() => props.thread.state)
 const errorText = computed(() => supportChatErrorMessage(state.value.error, t, 'supportChat.loadFailed'))
-const lastMineId = computed(() => {
-  for (let index = state.value.messages.length - 1; index >= 0; index--) {
-    const message = state.value.messages[index]
-    if (isMine(message) && !message.deleted) return message.id
-  }
-  return 0
-})
-
 function isMine(message: SupportChatMessage) {
   return props.viewer === 'user' ? message.author_role === 'user' : message.author_role === 'admin'
 }
@@ -147,20 +164,38 @@ function isRead(message: SupportChatMessage) {
   return message.id <= state.value.peerReadId
 }
 
-// Staff see the state of every message they sent; users only see it on their last one.
+// Only staff see whether their messages were read; users never see read state.
 function showReceipt(message: SupportChatMessage) {
-  if (!isMine(message) || message.deleted) return false
-  return props.viewer === 'admin' || message.id === lastMineId.value
+  return props.viewer === 'admin' && isMine(message) && !message.deleted
 }
 
 function receiptText(message: SupportChatMessage) {
-  if (isRead(message)) return t('supportChat.read')
-  return props.viewer === 'admin' ? t('supportChat.unread') : t('supportChat.delivered')
+  return isRead(message) ? t('supportChat.read') : t('supportChat.unread')
 }
 
 function receiptClass(message: SupportChatMessage) {
-  if (props.viewer === 'admin' && isRead(message)) return 'text-primary-600 dark:text-primary-400'
-  return 'text-gray-400'
+  return isRead(message) ? 'text-primary-600 dark:text-primary-400' : 'text-gray-400'
+}
+
+// A recalled message was taken back by its own side; otherwise staff removed a user's message.
+function deletedText(message: SupportChatMessage) {
+  if (!message.recalled) return t('supportChat.deleted')
+  if (message.author_role !== 'user') return t('supportChat.recalledByStaff')
+  return props.viewer === 'user' ? t('supportChat.recalledBySelf') : t('supportChat.recalledByUser')
+}
+
+// The recall button shows while the message is young enough by the server clock;
+// the server has the final say.
+const now = ref(Date.now())
+let clock: ReturnType<typeof setInterval> | undefined
+function recallable(message: SupportChatMessage) {
+  if (!props.canRecall || message.deleted || !isMine(message) || props.recallExpiredIds?.has(message.id)) return false
+  return now.value - state.value.clockSkewMs - Date.parse(message.created_at) < SUPPORT_CHAT_RECALL_WINDOW_MS
+}
+
+// Users see only the staff account id, never a staff name or email.
+function staffLabel(message: SupportChatMessage) {
+  return message.staff_id ? t('supportChat.staffWithId', { id: message.staff_id }) : t('supportChat.staff')
 }
 
 function rowClass(message: SupportChatMessage) {
@@ -175,8 +210,11 @@ function bubbleClass(message: SupportChatMessage) {
 }
 
 function authorLabel(message: SupportChatMessage) {
-  if (props.viewer === 'user') return message.author_role === 'user' ? t('supportChat.you') : t('supportChat.staff')
-  if (message.author_role === 'admin') return message.author_name || t('supportChat.staff')
+  if (props.viewer === 'user') {
+    if (message.author_role === 'user') return t('supportChat.you')
+    return message.author_role === 'admin' ? staffLabel(message) : t('supportChat.staff')
+  }
+  if (message.author_role === 'admin') return message.author_name || staffLabel(message)
   if (message.author_role === 'bot') return t('supportChat.bot')
   return t('supportChat.user')
 }
@@ -218,5 +256,11 @@ watch(
   },
 )
 
-onMounted(() => nextTick(scrollToBottom))
+onMounted(() => {
+  void nextTick(scrollToBottom)
+  if (props.canRecall) clock = setInterval(() => (now.value = Date.now()), 10_000)
+})
+onBeforeUnmount(() => {
+  if (clock) clearInterval(clock)
+})
 </script>

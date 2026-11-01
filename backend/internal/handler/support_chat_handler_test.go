@@ -67,6 +67,12 @@ func (r *supportChatHandlerRepo) DeleteMessage(context.Context, int64, int64) (*
 	return &service.SupportChatMessage{}, nil
 }
 func (r *supportChatHandlerRepo) DeleteChat(context.Context, int64) error { return nil }
+func (r *supportChatHandlerRepo) RecallMessage(_ context.Context, chatID, messageID int64, _ time.Duration) (*service.SupportChatMessage, error) {
+	if chatID != r.chat.ID {
+		return nil, service.ErrSupportChatMessageNotFound
+	}
+	return &service.SupportChatMessage{ID: messageID, AuthorRole: service.SupportChatRoleUser, Deleted: true, Recalled: true}, nil
+}
 func (r *supportChatHandlerRepo) GetImage(context.Context, int64, int64, bool) (*service.SupportChatImageResult, error) {
 	if r.image != nil {
 		return r.image, nil
@@ -95,6 +101,8 @@ func TestSupportChatHandlerUserFlow(t *testing.T) {
 	})
 	r.POST("/api/v1/support-chat/messages", h.Send)
 	r.GET("/api/v1/support-chat/messages", h.Messages)
+	r.DELETE("/api/v1/support-chat/messages/:id", h.Recall)
+	r.GET("/api/v1/support-chat", h.Summary)
 	// Before the first message the page carries chat_id 0.
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/support-chat/messages", nil)
 	w := httptest.NewRecorder()
@@ -133,6 +141,25 @@ func TestSupportChatHandlerUserFlow(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &pageEnvelope))
 	require.Equal(t, int64(1), pageEnvelope.Data.ChatID)
+
+	// Staff have read everything, but users never learn it.
+	repo.chat.StaffReadMessageID = repo.chat.LastMessageID
+	for _, path := range []string{"/api/v1/support-chat/messages", "/api/v1/support-chat"} {
+		w = httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		require.Equal(t, http.StatusOK, w.Code, path)
+		require.NotContains(t, w.Body.String(), `"peer_read_message_id":1`, path)
+		require.Contains(t, w.Body.String(), `"peer_read_message_id":0`, path)
+	}
+
+	// The user recalls their own message.
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/api/v1/support-chat/messages/1", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), `"recalled":true`)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/api/v1/support-chat/messages/x", nil))
+	require.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func supportChatPNG(t *testing.T) []byte {

@@ -160,6 +160,7 @@ var auditActionOverrides = map[string]string{
 	"DELETE /api/v1/admin/support-tickets/:id":                    "admin.support_tickets.delete",
 	"POST /api/v1/support-chat/messages":                          "user.support_chats.send",
 	"POST /api/v1/support-chat/read":                              "user.support_chats.read",
+	"DELETE /api/v1/support-chat/messages/:id":                    "user.support_chats.recall",
 	"POST /api/v1/admin/support-chats/:id/messages":               "admin.support_chats.reply",
 	"POST /api/v1/admin/support-chats/:id/status":                 "admin.support_chats.status",
 	"POST /api/v1/admin/support-chats/:id/block":                  "admin.support_chats.block",

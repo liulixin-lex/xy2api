@@ -2958,6 +2958,10 @@
       "value": "chat.POST(\"/messages\", h.SupportChat.Send)"
     },
     {
+      "path": "backend/internal/server/routes/user.go",
+      "value": "chat.DELETE(\"/messages/:id\", h.SupportChat.Recall)"
+    },
+    {
       "path": "backend/internal/handler/wire.go",
       "value": "NewSupportChatHandler,"
     },

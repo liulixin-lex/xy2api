@@ -40,12 +40,17 @@ function isMine(message: SupportTicketMessage) {
   return message.author_role === props.viewer
 }
 
+// Users see only the staff account id, never a staff name or email.
+function staffLabel(message: SupportTicketMessage) {
+  return message.staff_id ? t('supportTickets.detail.staffWithId', { id: message.staff_id }) : t('supportTickets.detail.staff')
+}
+
 function authorLabel(message: SupportTicketMessage) {
   if (props.viewer === 'user') {
-    return message.author_role === 'user' ? t('supportTickets.detail.you') : t('supportTickets.detail.staff')
+    return message.author_role === 'user' ? t('supportTickets.detail.you') : staffLabel(message)
   }
   return message.author_role === 'admin'
-    ? message.author_name || t('supportTickets.detail.staff')
+    ? message.author_name || staffLabel(message)
     : t('supportTickets.detail.user')
 }
 </script>

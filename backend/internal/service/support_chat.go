@@ -30,7 +30,10 @@ const (
 	SupportChatImageMaxPixels      = 16777216
 	SupportChatBlockReasonMaxRunes = 200
 	supportChatDefaultPageSize     = 30
-	supportChatMaxPageSize         = 50
+	// SupportChatRecallWindow is how long users can recall their own message.
+	// Staff can recall or delete messages at any time.
+	SupportChatRecallWindow = 2 * time.Minute
+	supportChatMaxPageSize  = 50
 )
 
 var (
@@ -49,6 +52,7 @@ var (
 	ErrSupportChatBlocked         = infraerrors.Forbidden("SUPPORT_CHAT_BLOCKED", "support chat is blocked")
 	ErrSupportChatChanged         = infraerrors.Conflict("SUPPORT_CHAT_CHANGED", "support chat changed")
 	ErrSupportChatStatusInvalid   = infraerrors.BadRequest("SUPPORT_CHAT_STATUS_INVALID", "invalid support chat status")
+	ErrSupportChatRecallExpired   = infraerrors.Conflict("SUPPORT_CHAT_RECALL_EXPIRED", "the message can no longer be recalled")
 )
 
 // Kept local so the service package does not depend on net/http just for codes.
@@ -66,14 +70,21 @@ type SupportChatImage struct {
 	Purged      bool   `json:"purged"`
 }
 type SupportChatMessage struct {
-	ID          int64             `json:"id"`
-	AuthorRole  string            `json:"author_role"`
-	Body        string            `json:"body"`
-	Image       *SupportChatImage `json:"image"`
-	Deleted     bool              `json:"deleted"`
-	ClientMsgID string            `json:"client_msg_id,omitempty"`
-	CreatedAt   time.Time         `json:"created_at"`
-	AuthorName  string            `json:"author_name,omitempty"`
+	ID         int64             `json:"id"`
+	AuthorRole string            `json:"author_role"`
+	Body       string            `json:"body"`
+	Image      *SupportChatImage `json:"image"`
+	Deleted    bool              `json:"deleted"`
+	// Recalled marks a deleted message that its own side took back (a user
+	// recall, or staff removing a staff message) rather than staff removing a
+	// user's message.
+	Recalled    bool      `json:"recalled,omitempty"`
+	ClientMsgID string    `json:"client_msg_id,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	AuthorName  string    `json:"author_name,omitempty"`
+	// StaffID is the account id of the staff member who wrote an admin
+	// message. Users see only this id, never the staff name or email.
+	StaffID int64 `json:"staff_id,omitempty"`
 	// ChatID is set on send results only; the handler returns it beside the message.
 	ChatID int64 `json:"-"`
 }
@@ -188,6 +199,9 @@ type SupportChatRepository interface {
 	SetStatus(context.Context, SupportChatStatusInput) error
 	SetBlocked(context.Context, SupportChatBlockInput) error
 	DeleteMessage(context.Context, int64, int64) (*SupportChatMessage, error)
+	// RecallMessage removes a user's own message in the chat if it is not
+	// older than the window; a message that is already deleted is returned as is.
+	RecallMessage(ctx context.Context, chatID, messageID int64, window time.Duration) (*SupportChatMessage, error)
 	DeleteChat(context.Context, int64) error
 	GetImage(context.Context, int64, int64, bool) (*SupportChatImageResult, error)
 	Summary(context.Context) (SupportChatSummary, error)
@@ -216,12 +230,13 @@ func NewSupportChatServiceWithSettings(repo SupportChatRepository, settings supp
 }
 
 // mapChatViewer applies the cursor orientation required by the API viewer.
+// Users never learn how far staff have read, so their peer cursor stays 0.
 func mapChatViewer(chat *SupportChat, admin bool) *SupportChat {
 	if chat == nil {
 		return nil
 	}
 	chat.ReadMessageID = chat.UserReadMessageID
-	chat.PeerReadMessageID = chat.StaffReadMessageID
+	chat.PeerReadMessageID = 0
 	if admin {
 		chat.ReadMessageID = chat.StaffReadMessageID
 		chat.PeerReadMessageID = chat.UserReadMessageID
@@ -453,6 +468,22 @@ func (s *SupportChatService) AdminBlock(ctx context.Context, in SupportChatBlock
 		return nil, err
 	}
 	return mapChatViewer(c, true), nil
+}
+
+// Recall lets a user take back one of their own messages within SupportChatRecallWindow.
+// Blocked users can still recall, so a pasted secret can always be taken back.
+func (s *SupportChatService) Recall(ctx context.Context, uid, mid int64) (*SupportChatMessage, error) {
+	if err := s.enabled(ctx, false); err != nil {
+		return nil, err
+	}
+	c, err := s.repo.GetUserChat(ctx, uid)
+	if errors.Is(err, ErrSupportChatNotFound) {
+		return nil, ErrSupportChatMessageNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.RecallMessage(ctx, c.ID, mid, SupportChatRecallWindow)
 }
 func (s *SupportChatService) AdminDeleteMessage(ctx context.Context, cid, mid int64) (*SupportChatMessage, error) {
 	if err := s.enabled(ctx, false); err != nil {

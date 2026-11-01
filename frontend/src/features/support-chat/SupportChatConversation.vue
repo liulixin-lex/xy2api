@@ -5,6 +5,9 @@
       viewer="user"
       image-scope="user"
       :welcome="store.welcome"
+      can-recall
+      :recall-expired-ids="recallExpired"
+      @recall="onRecall"
     />
     <p
       v-if="thread.state.blocked"
@@ -16,24 +19,39 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { recallMyChatMessage, type SupportChatMessage } from '@/api/supportChat'
+import { useAppStore } from '@/stores/app'
 import { useSupportChatStore } from '@/stores/supportChat'
 import { useChatThreadPolling } from './chatThread'
 import type { CompressedImage } from './compressImage'
 import SupportChatComposer from './SupportChatComposer.vue'
 import SupportChatThread from './SupportChatThread.vue'
+import { supportChatErrorMessage } from './supportChat'
 
 // active: the conversation is on screen; it polls and reports reads only then.
 const props = defineProps<{ active: boolean }>()
 const { t } = useI18n()
 const store = useSupportChatStore()
+const appStore = useAppStore()
 const thread = store.userThread()
+const recallExpired = reactive(new Set<number>())
 
 useChatThreadPolling(thread, computed(() => props.active))
 
 function onSend(payload: { body: string; image: CompressedImage | null }) {
   void thread.send(payload.body, payload.image)
+}
+
+async function onRecall(message: SupportChatMessage) {
+  try {
+    const result = await recallMyChatMessage(message.id)
+    thread.replace(result.message)
+  } catch (err) {
+    if ((err as { reason?: string } | null)?.reason === 'SUPPORT_CHAT_RECALL_EXPIRED') recallExpired.add(message.id)
+    appStore.showError(supportChatErrorMessage(err, t))
+  }
 }
 
 onMounted(() => {

@@ -145,6 +145,25 @@ describe('admin chat inbox', () => {
     await flushPromises()
     expect(mocks.deleteAdminChatMessage).toHaveBeenCalledWith(7, 1)
     expect(wrapper.find('[data-testid="chat-message-deleted"]').exists()).toBe(true)
+    expect(mocks.success).toHaveBeenLastCalledWith('supportChat.admin.messageDeleted')
+
+    // A staff message is recalled, with recall wording.
+    mocks.deleteAdminChatMessage.mockResolvedValueOnce({ message: message(2, { author_role: 'admin', author_name: 'root', deleted: true, recalled: true, body: '' }) })
+    await wrapper.get('[data-testid="chat-message-recall"]').trigger('click')
+    expect(wrapper.get('[data-testid="confirm"]').text()).toContain('supportChat.admin.recallConfirm')
+    await wrapper.get('[data-testid="confirm-yes"]').trigger('click')
+    await flushPromises()
+    expect(mocks.deleteAdminChatMessage).toHaveBeenLastCalledWith(7, 2)
+    expect(mocks.success).toHaveBeenLastCalledWith('supportChat.admin.messageRecalled')
+    expect(wrapper.findAll('[data-testid="chat-message-deleted"]').map((node) => node.text())).toEqual(['supportChat.deleted', 'supportChat.recalledByStaff'])
+  })
+
+  it('previews a recalled last message as recalled', async () => {
+    mocks.listAdminChats.mockResolvedValue({ items: [chat(7, { preview_kind: 'recalled', preview: '' }), chat(8, { preview_kind: 'deleted', preview: '' })], total: 2, page: 1, page_size: 20, pages: 1 })
+    const wrapper = mount(AdminSupportChatInbox, { global: { stubs } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('supportChat.admin.previewRecalled')
+    expect(wrapper.text()).toContain('supportChat.admin.previewDeleted')
   })
 
   it('hides every manage control from view-only operators', async () => {
@@ -153,7 +172,7 @@ describe('admin chat inbox', () => {
     const wrapper = mount(AdminSupportChatInbox, { global: { stubs } })
     await flushPromises()
     expect(wrapper.findAll('[data-testid="chat-message"]')).toHaveLength(3)
-    for (const id of ['chat-composer', 'chat-resolve', 'chat-block', 'chat-delete', 'chat-message-delete']) {
+    for (const id of ['chat-composer', 'chat-resolve', 'chat-block', 'chat-delete', 'chat-message-delete', 'chat-message-recall']) {
       expect(wrapper.find(`[data-testid="${id}"]`).exists(), id).toBe(false)
     }
   })

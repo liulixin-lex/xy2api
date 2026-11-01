@@ -144,9 +144,9 @@
 
     <ConfirmDialog
       :show="!!confirm"
-      :title="confirm?.kind === 'chat' ? t('supportChat.admin.deleteChatTitle') : t('supportChat.admin.deleteMessageTitle')"
-      :message="confirm?.kind === 'chat' ? t('supportChat.admin.deleteChatConfirm') : t('supportChat.admin.deleteMessageConfirm')"
-      :confirm-text="t('supportChat.admin.confirmDelete')"
+      :title="confirmText.title"
+      :message="confirmText.message"
+      :confirm-text="confirmText.action"
       danger
       @confirm="runConfirm"
       @cancel="confirm = null"
@@ -208,6 +208,15 @@ const chats = ref<SupportChatAdminItem[]>([])
 const detail = ref<SupportChatAdminItem | null>(null)
 const busy = ref(false)
 const confirm = ref<Confirm | null>(null)
+// Removing a staff message is a recall; removing a user message is a delete.
+const confirmText = computed(() => {
+  const value = confirm.value
+  if (value?.kind === 'chat') return { title: t('supportChat.admin.deleteChatTitle'), message: t('supportChat.admin.deleteChatConfirm'), action: t('supportChat.admin.confirmDelete') }
+  if (value?.kind === 'message' && value.message.author_role === 'admin') {
+    return { title: t('supportChat.admin.recallTitle'), message: t('supportChat.admin.recallConfirm'), action: t('supportChat.admin.recall') }
+  }
+  return { title: t('supportChat.admin.deleteMessageTitle'), message: t('supportChat.admin.deleteMessageConfirm'), action: t('supportChat.admin.confirmDelete') }
+})
 const now = ref(Date.now())
 const wide = ref(true)
 let keywordTimer: ReturnType<typeof setTimeout> | undefined
@@ -243,6 +252,7 @@ const filterOptions = computed<Array<{ value: SupportChatAdminFilter; label: str
 
 function previewText(chat: SupportChatAdminItem) {
   if (chat.preview_kind === 'image') return t('supportChat.admin.previewImage')
+  if (chat.preview_kind === 'recalled') return t('supportChat.admin.previewRecalled')
   if (chat.preview_kind === 'deleted') return t('supportChat.admin.previewDeleted')
   if (chat.preview_kind === 'none') return t('supportChat.admin.previewNone')
   return chat.preview
@@ -391,7 +401,7 @@ async function runConfirm() {
     if (pending.kind === 'message') {
       const result = await deleteAdminChatMessage(id, pending.message.id)
       if (id === selectedId.value) thread.replace(result.message)
-      appStore.showSuccess(t('supportChat.admin.messageDeleted'))
+      appStore.showSuccess(t(pending.message.author_role === 'admin' ? 'supportChat.admin.messageRecalled' : 'supportChat.admin.messageDeleted'))
     } else {
       await deleteAdminChat(id)
       appStore.showSuccess(t('supportChat.admin.chatDeleted'))

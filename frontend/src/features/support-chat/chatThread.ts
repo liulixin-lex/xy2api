@@ -46,6 +46,11 @@ export interface ChatThreadState {
   error: unknown
   /** Date.now() of the last poll that brought a new message (polling back-off). */
   lastNewAt: number
+  /**
+   * Local clock minus server clock, measured on this session's own sends (0 until
+   * the first one). Lets the recall window follow the server clock.
+   */
+  clockSkewMs: number
 }
 
 export interface ChatThreadOptions {
@@ -76,6 +81,7 @@ function initialState(): ChatThreadState {
     loadingOlder: false,
     error: null,
     lastNewAt: 0,
+    clockSkewMs: 0,
   }
 }
 
@@ -345,6 +351,10 @@ export function createChatThread(source: ChatThreadSource, options: ChatThreadOp
       // On a replacement the reload sets the id once the new window is in, so a
       // failed reload still leaves the next poll a mismatch to act on.
       if (result.chat_id && !replaced) chatId = result.chat_id
+      if (!result.duplicate) {
+        const createdAt = Date.parse(result.message.created_at)
+        if (Number.isFinite(createdAt)) state.clockSkewMs = Date.now() - createdAt
+      }
       insert(result.message)
       dropPending(item.client_msg_id)
       if (replaced) void reload()
