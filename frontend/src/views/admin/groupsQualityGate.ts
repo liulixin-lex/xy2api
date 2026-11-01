@@ -103,14 +103,44 @@ export const validateQualityGateForm = (
   return errors;
 };
 
-// 门槛保存在分组之后进行，失败时分组已经保存。409 是版本冲突（别人先改了），提示刷新；
+const errorStatus = (error: unknown): unknown =>
+  typeof error === "object" && error !== null ? (error as { status?: unknown }).status : undefined;
+
+// 门槛保存在分组之后进行，失败时分组已经保存。409 是版本冲突（别人先改了），重新读取版本后提示确认再存；
 // 其他错误带上后端信息。返回 i18n key（相对 admin.groupQualityGate 前缀）。
 export const qualityGateSaveFailureKey = (error: unknown): string =>
-  typeof error === "object" &&
-  error !== null &&
-  (error as { status?: unknown }).status === 409
-    ? "groupSavedGateConflict"
-    : "groupSavedGateFailed";
+  errorStatus(error) === 409 ? "groupSavedGateConflict" : "groupSavedGateFailed";
+
+export type QualityGateRejectedField = QualityGateField | "pinned_account_ids";
+
+const POLICY_FIELD_TO_FORM: Record<string, QualityGateRejectedField> = {
+  max_error_rate: "max_error_rate_percent",
+  max_warm_ttft_p90_ms: "max_warm_ttft_p90_seconds",
+  fast_warm_ttft_p90_ms: "fast_warm_ttft_p90_seconds",
+  pinned_account_ids: "pinned_account_ids",
+};
+
+// 后端 400 在 metadata.field 里给出被拒的策略字段，换成要标红的表单项；开关等没有输入框的字段返回 undefined。
+export const qualityGateRejectedField = (error: unknown): QualityGateRejectedField | undefined => {
+  if (errorStatus(error) !== 400) return undefined;
+  const field = (error as { metadata?: { field?: unknown } }).metadata?.field;
+  return typeof field === "string" ? POLICY_FIELD_TO_FORM[field] : undefined;
+};
+
+type MemberChip = { id: number; name: string };
+
+// 成员只取一页。总数大于已加载数时列表不完整：没加载到的已固定 ID 照常保留并按 #ID 显示为芯片，
+// 保存时不裁剪（memberIds 为 undefined）；只有确知完整成员列表时才去掉已不在组内的 ID。
+export const pinnedMemberScope = (
+  members: MemberChip[],
+  total: number,
+  pinned: number[],
+): { candidates: MemberChip[]; memberIds?: ReadonlySet<number> } => {
+  const loadedIds = new Set(members.map((member) => member.id));
+  if (total <= members.length) return { candidates: members, memberIds: loadedIds };
+  const unloaded = [...new Set(pinned)].filter((id) => !loadedIds.has(id)).map((id) => ({ id, name: "" }));
+  return { candidates: [...members, ...unloaded] };
+};
 
 // 固定账号多选：按名称或 #ID 筛选（不区分大小写），已选的排在前面，其余保持原顺序。
 export const pinnedCandidates = <T extends { id: number; name: string }>(

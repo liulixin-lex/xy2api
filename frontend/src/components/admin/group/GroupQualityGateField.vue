@@ -6,6 +6,7 @@
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.groupQualityGate.hint') }}</p>
       </div>
       <Toggle
+        v-if="canViewAccounts"
         data-testid="quality-gate-toggle"
         :aria-label="t('admin.groupQualityGate.enable')"
         :model-value="form.enabled"
@@ -15,7 +16,10 @@
       />
     </div>
 
-    <p v-if="loadState === 'loading'" class="text-xs text-gray-500 dark:text-gray-400">
+    <p v-if="!canViewAccounts" data-testid="quality-gate-no-access" class="text-xs text-gray-500 dark:text-gray-400">
+      {{ t('admin.groupQualityGate.needsAccountView') }}
+    </p>
+    <p v-else-if="loadState === 'loading'" class="text-xs text-gray-500 dark:text-gray-400">
       {{ t('admin.groupQualityGate.loading') }}
     </p>
     <p v-else-if="loadState === 'failed'" role="alert" class="text-xs text-red-600 dark:text-red-400">
@@ -36,14 +40,17 @@
             :min="field.min"
             :max="field.max"
             class="input"
-            :class="{ 'input-error': visibleErrors[field.key] }"
-            :aria-invalid="visibleErrors[field.key] ? 'true' : undefined"
+            :class="{ 'input-error': visibleErrors[field.key] || rejected?.field === field.key }"
+            :aria-invalid="visibleErrors[field.key] || rejected?.field === field.key ? 'true' : undefined"
             :aria-describedby="`${uid}-${field.key}-note`"
             :data-testid="`quality-gate-${field.key}`"
             @blur="touched.add(field.key)"
           />
           <p v-if="visibleErrors[field.key]" :id="`${uid}-${field.key}-note`" class="input-error-text" role="alert">
             {{ t(`admin.groupQualityGate.${visibleErrors[field.key]}`) }}
+          </p>
+          <p v-else-if="rejected?.field === field.key" :id="`${uid}-${field.key}-note`" class="input-error-text" role="alert">
+            {{ rejected.message }}
           </p>
           <p v-else :id="`${uid}-${field.key}-note`" class="input-hint">{{ t(field.hint) }}</p>
         </div>
@@ -65,7 +72,7 @@
             {{ t('admin.groupQualityGate.retry') }}
           </button>
         </p>
-        <p v-else-if="!members.length" class="text-sm text-gray-500 dark:text-gray-400">
+        <p v-else-if="!memberScope.candidates.length" class="text-sm text-gray-500 dark:text-gray-400">
           {{ t('admin.groupQualityGate.membersEmpty') }}
         </p>
         <template v-else>
@@ -95,13 +102,14 @@
                 :value="account.id"
                 class="h-3.5 w-3.5 shrink-0 rounded border-gray-300 text-primary-500 focus:ring-primary-500 dark:border-dark-500"
               />
-              <span class="truncate">{{ account.name }}</span>
+              <span v-if="account.name" class="truncate">{{ account.name }}</span>
               <span class="shrink-0 text-gray-500 dark:text-gray-400">#{{ account.id }}</span>
             </label>
             <p v-if="!shownMembers.length" class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.groupQualityGate.pinnedNoMatch') }}</p>
           </div>
         </template>
-        <p class="input-hint">{{ t('admin.groupQualityGate.pinnedHint') }}</p>
+        <p v-if="rejected?.field === 'pinned_account_ids'" class="input-error-text" role="alert">{{ rejected.message }}</p>
+        <p v-else class="input-hint">{{ t('admin.groupQualityGate.pinnedHint') }}</p>
       </fieldset>
     </div>
     <p v-else class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.groupQualityGate.disabledHint') }}</p>
@@ -115,22 +123,27 @@ import { gsap } from 'gsap'
 import Toggle from '@/components/common/Toggle.vue'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
+import { useAdminPermission } from '@/composables/useAdminPermission'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { useStateMotion } from '@/composables/useStateMotion'
 import type { GroupQualityGatePolicy } from '@/types/groupQualityGate'
 import {
   pinnedCandidates,
+  pinnedMemberScope,
   qualityGateFormToPolicy,
   qualityGatePoliciesEqual,
   qualityGatePolicyToForm,
+  qualityGateRejectedField,
   qualityGateSaveFailureKey,
   validateQualityGateForm,
   type QualityGateField,
-  type QualityGateFormState
+  type QualityGateFormState,
+  type QualityGateRejectedField
 } from '@/views/admin/groupsQualityGate'
 
 // 分组编辑框里的“质量门槛”区块（只对 OpenAI 分组显示）。门槛策略与分组分开保存：
-// 父组件先存分组，再调用 save()；失败只提示“分组已保存，门槛未保存”，不抛错。
+// 父组件先存分组，再调用 save()；失败只提示“分组已保存，门槛未保存”，不抛错，表单保留给用户修正后再存。
+// 读策略与成员需要账号查看权限，没有时不发请求，只显示一行说明。
 // 原生 min/max 只放外边界、step 为 any，浏览器不会拦下 7.5 秒这类合法值，具体规则由 validateQualityGateForm 判定。
 const FIELDS: { key: QualityGateField; label: string; hint: string; min: string; max: string }[] = [
   { key: 'max_error_rate_percent', label: 'admin.groupQualityGate.maxErrorRate', hint: 'admin.groupQualityGate.maxErrorRateHint', min: '0', max: '100' },
@@ -148,6 +161,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const { canView: canViewAccounts } = useAdminPermission('accounts')
 const uid = useId()
 
 const root = ref<HTMLElement>()
@@ -161,11 +175,14 @@ let loaded = qualityGatePolicyToForm(null)
 const form = reactive<QualityGateFormState>(qualityGatePolicyToForm(null))
 
 const members = ref<{ id: number; name: string }[]>([])
+const membersTotal = ref(0)
 const membersState = ref<'idle' | 'loading' | 'ready' | 'failed'>('idle')
 const membersError = ref('')
 const memberQuery = ref('')
+// 成员列表不完整时，没加载到的已固定账号也列为芯片且保存时不裁剪。
+const memberScope = computed(() => pinnedMemberScope(members.value, membersTotal.value, loaded.pinned_account_ids))
 // 已固定的排在前面按打开对话框时的配置算，勾选时芯片不跳位。
-const shownMembers = computed(() => pinnedCandidates(members.value, loaded.pinned_account_ids, memberQuery.value))
+const shownMembers = computed(() => pinnedCandidates(memberScope.value.candidates, loaded.pinned_account_ids, memberQuery.value))
 
 const touched = reactive(new Set<QualityGateField>())
 const submitted = ref(false)
@@ -178,14 +195,22 @@ const visibleErrors = computed(() => {
   return shown
 })
 
+// 上次保存被后端 400 拒绝的字段与原因，改动表单后清除。
+const rejected = ref<{ field: QualityGateRejectedField; message: string } | null>(null)
+watch(form, () => { rejected.value = null }, { deep: true })
+
 const resetForm = (next: QualityGateFormState) => Object.assign(form, next, { pinned_account_ids: [...next.pinned_account_ids] })
+
+async function readPolicy() {
+  const policies = await adminAPI.groupQualityGate.getPolicies()
+  version = policies.version
+  loaded = qualityGatePolicyToForm(policies.groups[String(props.groupId)])
+}
 
 async function load() {
   loadState.value = 'loading'
   try {
-    const policies = await adminAPI.groupQualityGate.getPolicies()
-    version = policies.version
-    loaded = qualityGatePolicyToForm(policies.groups[String(props.groupId)])
+    await readPolicy()
     resetForm(loaded)
     loadState.value = 'ready'
   } catch (error) {
@@ -199,6 +224,7 @@ async function loadMembers() {
   try {
     const page = await adminAPI.accounts.list(1, MEMBER_PAGE_SIZE, { group: String(props.groupId), platform: 'openai', lite: '1' })
     members.value = page.items.map((account) => ({ id: account.id, name: account.name }))
+    membersTotal.value = page.total
     membersState.value = 'ready'
   } catch (error) {
     membersError.value = extractApiErrorMessage(error, t('common.unknownError'))
@@ -225,7 +251,7 @@ async function setEnabled(enabled: boolean) {
 }
 
 onMounted(() => {
-  void load()
+  if (canViewAccounts.value) void load()
 })
 
 /** 保存分组前调用；没读到配置时不拦截（也不会保存）。 */
@@ -234,10 +260,13 @@ function validate(): boolean {
   return loadState.value !== 'ready' || Object.keys(errors.value).length === 0
 }
 
-/** 分组保存成功后调用；没有改动不发请求。失败时提示并返回 false。 */
+/**
+ * 分组保存成功后调用；没有改动不发请求。失败时提示并返回 false，表单保留：
+ * 409 重新读取版本（输入不动），用户确认后再存；400 标出 metadata.field 对应的字段。
+ */
 async function save(groupId: number): Promise<boolean> {
   if (loadState.value !== 'ready') return true
-  const memberIds = membersState.value === 'ready' ? new Set(members.value.map((account) => account.id)) : undefined
+  const memberIds = membersState.value === 'ready' ? memberScope.value.memberIds : undefined
   const policy = qualityGateFormToPolicy(form, memberIds)
   if (qualityGatePoliciesEqual(policy, qualityGateFormToPolicy(loaded, memberIds))) return true
   try {
@@ -247,9 +276,14 @@ async function save(groupId: number): Promise<boolean> {
     emit('saved', groupId, result.version, result.policy)
     return true
   } catch (error) {
-    appStore.showWarning(t(`admin.groupQualityGate.${qualityGateSaveFailureKey(error)}`, {
-      message: extractApiErrorMessage(error, t('common.unknownError'))
-    }))
+    let failure = error
+    if (qualityGateSaveFailureKey(error) === 'groupSavedGateConflict') {
+      await readPolicy().catch((readError) => { failure = readError })
+    }
+    const message = extractApiErrorMessage(failure, t('common.unknownError'))
+    const field = qualityGateRejectedField(failure)
+    rejected.value = field ? { field, message } : null
+    appStore.showWarning(t(`admin.groupQualityGate.${qualityGateSaveFailureKey(failure)}`, { message }))
     return false
   }
 }

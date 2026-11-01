@@ -1187,7 +1187,7 @@ export default {
         enabledHint: 'Scheduling only admits accounts whose account multiplier ≤ the request\'s effective downstream multiplier × (1 − min margin). Account multipliers may be maintained manually or synchronized from probes; existing ordering, stickiness and breakers keep working among qualified accounts. Image/video scheduling is not covered yet.',
         disabledHint: 'When disabled, scheduling does no profit filtering: accounts whose account multiplier exceeds the downstream multiplier can still be selected, which may produce loss-making requests.',
         minMargin: 'Min gross margin (%)',
-        minMarginHint: 'Percent input, e.g. 20 means 20%. Defaults to 20% when turned on',
+        minMarginHint: 'Percent input, e.g. 20 means 20%. Leave empty for the 20% default',
         marginRangeError: 'Min gross margin must be between 0 and 99.99',
         preview: 'Equals an upstream multiplier ≤ {ceiling}; {passing} of {schedulable} schedulable members pass',
         previewLoading: 'Counting members that pass…',

@@ -6,9 +6,11 @@ import en from "@/i18n/locales/en/admin/groupQualityGate";
 
 import {
   pinnedCandidates,
+  pinnedMemberScope,
   qualityGateFormToPolicy,
   qualityGatePoliciesEqual,
   qualityGatePolicyToForm,
+  qualityGateRejectedField,
   qualityGateSaveFailureKey,
   validateQualityGateForm,
   type QualityGateFormState,
@@ -121,6 +123,7 @@ describe("qualityGateSaveFailureKey", () => {
     const text = i18nFor("zh").t(`admin.groupQualityGate.${key}`);
     expect(text).toContain("分组已保存，门槛未保存");
     expect(text).toContain("刷新");
+    expect(text).toContain("再次保存");
     expect(i18nFor("en").t(`admin.groupQualityGate.${key}`)).toContain("Refresh");
   });
 
@@ -134,6 +137,45 @@ describe("qualityGateSaveFailureKey", () => {
       );
     },
   );
+});
+
+describe("qualityGateRejectedField", () => {
+  it.each([
+    ["max_error_rate", "max_error_rate_percent"],
+    ["max_warm_ttft_p90_ms", "max_warm_ttft_p90_seconds"],
+    ["fast_warm_ttft_p90_ms", "fast_warm_ttft_p90_seconds"],
+    ["pinned_account_ids", "pinned_account_ids"],
+  ])("maps a 400 on %s to the form field to highlight", (field, formField) => {
+    expect(qualityGateRejectedField({ status: 400, message: "x", metadata: { field } })).toBe(formField);
+  });
+
+  it("returns nothing for fields without an input, other statuses and missing metadata", () => {
+    expect(qualityGateRejectedField({ status: 400, metadata: { field: "enabled" } })).toBeUndefined();
+    expect(qualityGateRejectedField({ status: 400 })).toBeUndefined();
+    expect(qualityGateRejectedField({ status: 409, metadata: { field: "max_error_rate" } })).toBeUndefined();
+    expect(qualityGateRejectedField(null)).toBeUndefined();
+  });
+});
+
+describe("pinnedMemberScope", () => {
+  const loaded = [
+    { id: 101, name: "OpenAI-甲" },
+    { id: 102, name: "Codex Pro" },
+  ];
+
+  it("drops pinned ids that left the group only when the member list is complete", () => {
+    const scope = pinnedMemberScope(loaded, 2, [101, 999]);
+    expect(scope.candidates).toEqual(loaded);
+    expect(qualityGateFormToPolicy(form({ pinned_account_ids: [101, 999] }), scope.memberIds).pinned_account_ids).toEqual([101]);
+  });
+
+  it("keeps and lists by #ID the pinned accounts beyond a truncated member page", () => {
+    const scope = pinnedMemberScope(loaded, 1500, [1203, 101, 1203]);
+    expect(scope.memberIds).toBeUndefined();
+    expect(scope.candidates).toEqual([...loaded, { id: 1203, name: "" }]);
+    expect(qualityGateFormToPolicy(form({ pinned_account_ids: [1203, 101] }), scope.memberIds).pinned_account_ids).toEqual([101, 1203]);
+    expect(pinnedCandidates(scope.candidates, [1203], "#1203").map((m) => m.id)).toEqual([1203]);
+  });
 });
 
 describe("pinnedCandidates", () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_PROFIT_MIN_MARGIN_PERCENT,
+  effectiveProfitMarginPercent,
   formatProfitCeiling,
   profitDecimalToPercent,
   profitMarginPercentOnEnable,
@@ -99,7 +100,7 @@ describe("validateProfitControlFormState", () => {
     ).toBeNull();
   });
 
-  it("treats empty inputs as zero", () => {
+  it("treats empty inputs as the 20% default", () => {
     expect(
       validateProfitControlFormState(
         formState({ profit_min_margin_percent: "" }),
@@ -138,6 +139,24 @@ describe("validateProfitControlFormState", () => {
         formState({ profit_min_margin_percent: 99.99 }),
       ),
     ).toBeNull();
+  });
+});
+
+describe("effectiveProfitMarginPercent", () => {
+  it("submits and previews an empty margin as the 20% default, keeping an explicit 0", () => {
+    for (const empty of ["", "  ", null, undefined]) {
+      expect(effectiveProfitMarginPercent(empty)).toBe(20);
+      expect(profitPercentToDecimal(effectiveProfitMarginPercent(empty))).toBe(0.2);
+    }
+    expect(effectiveProfitMarginPercent(0)).toBe(0);
+    expect(effectiveProfitMarginPercent("0")).toBe(0);
+    expect(profitPercentToDecimal(effectiveProfitMarginPercent(0))).toBe(0);
+    expect(effectiveProfitMarginPercent(35)).toBe(35);
+    expect(effectiveProfitMarginPercent("12.5")).toBe(12.5);
+    expect(Number.isNaN(effectiveProfitMarginPercent("abc"))).toBe(true);
+    expect(
+      validateProfitControlFormState(formState({ profit_min_margin_percent: "abc" })),
+    ).toBe("marginRangeError");
   });
 });
 
