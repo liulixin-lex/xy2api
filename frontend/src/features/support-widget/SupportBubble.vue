@@ -1,7 +1,7 @@
 <template>
   <button
     type="button"
-    class="fixed left-0 top-0 z-[45] flex touch-none select-none items-center justify-center rounded-full bg-primary-600 text-white shadow-lg shadow-primary-600/30 hover:bg-primary-700 focus:outline-none focus-visible:ring-4 focus-visible:ring-primary-300 dark:shadow-black/40"
+    class="fixed left-0 top-0 z-[45] flex touch-none select-none items-center justify-center rounded-full bg-gradient-to-br from-primary-600 to-primary-700 text-white shadow-lg shadow-primary-700/30 hover:brightness-110 focus:outline-none focus-visible:ring-4 focus-visible:ring-primary-300 dark:from-primary-600 dark:to-primary-800 dark:shadow-primary-500/25 dark:ring-1 dark:ring-primary-300/40 dark:focus-visible:ring-4 dark:focus-visible:ring-primary-400/70"
     :class="bubble.dragging.value ? 'cursor-grabbing' : 'cursor-pointer'"
     :style="bubble.style.value"
     :aria-label="expanded ? t('supportChat.bubble.close') : t('supportChat.bubble.open')"
@@ -10,7 +10,13 @@
     v-on="bubble.handlers"
     @click="onClick"
   >
-    <Icon :name="expanded ? 'x' : 'chat'" size="lg" />
+    <Icon v-if="expanded" name="x" size="lg" />
+    <span
+      v-else
+      class="text-[17px] font-extrabold leading-none tracking-tighter [text-shadow:0_1px_1px_rgb(0_0_0/0.18)] sm:text-[19px]"
+      aria-hidden="true"
+      data-testid="support-bubble-mark"
+    >GG</span>
     <span
       v-if="badge > 0"
       class="absolute -right-0.5 -top-0.5 inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 text-[10px] font-semibold leading-5 text-white ring-2 ring-white dark:ring-dark-900"

@@ -126,6 +126,20 @@ describe('support widget for users', () => {
     wrapper.unmount()
   })
 
+  it('shows the GG mark while collapsed and a close icon while open', async () => {
+    setAuth(true)
+    const wrapper = mountWidget()
+    const bubble = wrapper.get('[data-testid="support-bubble"]')
+    expect(wrapper.get('[data-testid="support-bubble-mark"]').text()).toBe('GG')
+    expect(wrapper.get('[data-testid="support-bubble-mark"]').attributes('aria-hidden')).toBe('true')
+    expect(bubble.attributes('aria-expanded')).toBe('false')
+    await bubble.trigger('click')
+    expect(wrapper.find('[data-testid="support-bubble-mark"]').exists()).toBe(false)
+    expect(bubble.get('icon-stub').attributes('name')).toBe('x')
+    expect(bubble.attributes('aria-expanded')).toBe('true')
+    wrapper.unmount()
+  })
+
   it('closes on Esc unless a dialog is open or the key was handled', async () => {
     setAuth(true)
     const wrapper = mountWidget()
