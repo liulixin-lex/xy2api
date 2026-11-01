@@ -474,6 +474,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 
 	// Support tickets switch + form config
 	updates[SettingKeySupportTicketEnabled] = strconv.FormatBool(settings.SupportTicketEnabled)
+	updates[SettingKeySupportChatEnabled] = strconv.FormatBool(settings.SupportChatEnabled)
 	ticketConfig, ticketConfigErr := NormalizeSupportTicketConfig(settings.SupportTicket)
 	if ticketConfigErr != nil {
 		return nil, infraerrors.BadRequest("INVALID_SUPPORT_TICKET_CONFIG", ticketConfigErr.Error())

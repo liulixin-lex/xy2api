@@ -12,7 +12,7 @@ export default {
       channels: '渠道管理',
       accounts: '账号管理',
       share_scheduling: '份额调度',
-      support_tickets: '工单处理',
+      support_tickets: '客户服务',
       announcements: '公告',
       proxies: 'IP管理',
       security_audit: '安全审计',

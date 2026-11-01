@@ -142,6 +142,7 @@ func provideCleanup(
 	groupQualityGate *service.GroupQualityGateService,
 	imageTasks *service.ImageTaskService,
 	asyncImage *handler.AsyncImageHandler,
+	supportChatPurge *service.SupportChatImagePurgeService,
 ) func() {
 	return func() {
 		// Async image tasks run in this process. Let them finish (bounded by
@@ -165,6 +166,12 @@ func provideCleanup(
 		// 应用层清理步骤可并行执行，基础设施资源（Redis/Ent）最后按顺序关闭。
 		parallelSteps := []cleanupStep{
 			{"GroupQualityGateService", func() error { groupQualityGate.Stop(); return nil }},
+			{"SupportChatImagePurgeService", func() error {
+				if supportChatPurge != nil {
+					supportChatPurge.Stop()
+				}
+				return nil
+			}},
 			{"UsageBillingRecoveryService", func() error {
 				billingRecovery.Stop()
 				return nil

@@ -390,7 +390,7 @@ func TestSupportTicketRuntimeReadsSwitchAndConfig(t *testing.T) {
 	s := &SettingService{settingRepo: repo}
 	runtime, err := s.GetSupportTicketRuntime(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, SupportTicketRuntime{Enabled: true, Config: SupportTicketConfig{Categories: []string{"其他"}, MaxOpenPerUser: 2, Notice: "n"}}, runtime)
+	require.Equal(t, SupportTicketRuntime{Enabled: true, Config: SupportTicketConfig{Categories: []string{"其他"}, MaxOpenPerUser: 2, Notice: "n", ChatImageRetentionDays: SupportChatDefaultImageRetentionDays}}, runtime)
 
 	repo.values[SettingKeySupportTicketEnabled] = "1"
 	runtime, err = s.GetSupportTicketRuntime(context.Background())

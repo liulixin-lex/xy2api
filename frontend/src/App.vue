@@ -1,17 +1,23 @@
 <script setup lang="ts">
 import { RouterView, useRouter, useRoute } from 'vue-router'
-import { computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { computed, defineAsyncComponent, onMounted, onBeforeUnmount, watch } from 'vue'
 import Toast from '@/components/common/Toast.vue'
 import NavigationProgress from '@/components/common/NavigationProgress.vue'
 import AdminComplianceDialog from '@/components/admin/AdminComplianceDialog.vue'
-import { resolveRouteDocumentTitle } from '@/router/title'
+import { applyDocumentTitle, resolveRouteDocumentTitle, setDocumentTitleBadge } from '@/router/title'
 import AnnouncementPopup from '@/components/common/AnnouncementPopup.vue'
-import { useAppStore, useAuthStore, useSubscriptionStore, useAnnouncementStore, useAdminComplianceStore, useAdminSettingsStore, useSupportTicketStore } from '@/stores'
+import { useAppStore, useAuthStore, useSubscriptionStore, useAnnouncementStore, useAdminComplianceStore, useAdminSettingsStore, useSupportTicketStore, useSupportChatStore } from '@/stores'
 import { getSetupStatus } from '@/api/setup'
 import { updateFavicon } from '@/utils/branding'
 import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'
 import { useAdminAccessStore } from '@/stores/adminAccess'
 import { resolveSiteBillingMode } from '@/utils/siteBillingMode'
+import { shouldShowSupportWidget } from '@/features/support-widget/supportWidgetVisibility'
+import { useSupportBadges } from '@/features/support-chat/useSupportBadges'
+import { useSupportStaffAlerts } from '@/features/support-chat/useSupportStaffAlerts'
+
+// Floating support chat; its chunk only loads when the bubble is shown.
+const SupportWidget = defineAsyncComponent(() => import('@/features/support-widget/SupportWidget.vue'))
 
 const router = useRouter()
 const route = useRoute()
@@ -21,18 +27,38 @@ const subscriptionStore = useSubscriptionStore()
 const announcementStore = useAnnouncementStore()
 const adminComplianceStore = useAdminComplianceStore()
 const supportTicketStore = useSupportTicketStore()
+const supportChatStore = useSupportChatStore()
 const ticketAdminAccess = useAdminAccessStore()
 const adminSettingsStore = useAdminSettingsStore()
+const { staffBadge } = useSupportBadges()
+const supportStaffAlerts = useSupportStaffAlerts()
+
+const supportWidgetVisible = computed(() => shouldShowSupportWidget({
+  chatEnabled: isFeatureFlagEnabled(FeatureFlags.supportChat),
+  canAccessAdmin: authStore.canAccessAdmin,
+  backendMode: appStore.backendModeEnabled,
+  mobileOpen: appStore.mobileOpen,
+  hiddenByRoute: route.meta.hideSupportWidget === true,
+}))
 
 function updateDocumentTitle() {
   const customMenuItems = [
     ...(appStore.cachedPublicSettings?.custom_menu_items ?? []),
     ...(authStore.isAdmin ? adminSettingsStore.customMenuItems : []),
   ]
-  document.title = resolveRouteDocumentTitle(route, appStore.siteName, customMenuItems, {
+  applyDocumentTitle(resolveRouteDocumentTitle(route, appStore.siteName, customMenuItems, {
     billingMode: resolveSiteBillingMode(appStore.cachedPublicSettings),
-  })
+  }))
 }
+
+// Staff see 「(N) 」 in the tab title: waiting chats plus pending tickets.
+watch(
+  () => (supportStaffAlerts.enabled.value ? staffBadge.value : 0),
+  (count) => {
+    setDocumentTitleBadge(count)
+    updateDocumentTitle()
+  }
+)
 
 // Watch for site settings changes and update favicon/title
 watch(
@@ -137,6 +163,7 @@ watch(
       announcementStore.reset()
       adminComplianceStore.reset()
       supportTicketStore.reset()
+      supportChatStore.reset()
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   },
@@ -149,6 +176,12 @@ watch(
     supportTicketStore.reset()
     void supportTicketStore.refresh(true)
   }
+)
+
+// The chat belongs to one signed-in user; drop it (and its image URLs) on any identity or switch change.
+watch(
+  () => [authStore.user?.id, authStore.user?.role, appStore.cachedPublicSettings?.support_chat_enabled],
+  () => supportChatStore.reset()
 )
 
 // Route change trigger (throttled by store)
@@ -191,5 +224,6 @@ onMounted(async () => {
   <RouterView />
   <Toast />
   <AnnouncementPopup />
+  <SupportWidget v-if="supportWidgetVisible" />
   <AdminComplianceDialog />
 </template>

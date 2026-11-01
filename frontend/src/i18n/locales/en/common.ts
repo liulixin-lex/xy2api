@@ -181,7 +181,7 @@ export default {
   nav: {
     dashboard: 'Dashboard',
     announcements: 'Announcements',
-    supportTickets: 'Support Tickets',
+    supportTickets: 'Customer Support',
     apiKeys: 'API Keys',
     batchImage: 'Batch Images',
     usage: 'Usage',

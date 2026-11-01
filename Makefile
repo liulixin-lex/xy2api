@@ -95,7 +95,19 @@ FRONTEND_CRITICAL_VITEST := \
 	src/views/user/__tests__/SupportTicketsViews.spec.ts \
 	src/views/admin/__tests__/SupportTicketsAdmin.spec.ts \
 	src/stores/__tests__/supportTickets.spec.ts \
-	src/router/__tests__/feature-access.spec.ts
+	src/router/__tests__/feature-access.spec.ts \
+	src/api/__tests__/supportChat.spec.ts \
+	src/stores/__tests__/supportChat.spec.ts \
+	src/features/support-chat/__tests__/compressImage.spec.ts \
+	src/features/support-chat/__tests__/supportBadges.spec.ts \
+	src/features/support-chat/__tests__/useSupportStaffAlerts.spec.ts \
+	src/features/support-chat/__tests__/SupportChatComponents.spec.ts \
+	src/features/support-chat/__tests__/AdminSupportChatInbox.spec.ts \
+	src/features/support-widget/__tests__/snapBubble.spec.ts \
+	src/features/support-widget/__tests__/supportWidgetVisibility.spec.ts \
+	src/features/support-widget/__tests__/SupportWidget.spec.ts \
+	src/features/support-widget/__tests__/SupportWidgetTickets.spec.ts \
+	src/views/user/__tests__/SupportHubTabs.spec.ts
 
 # 一键编译前后端
 build: build-backend build-frontend

@@ -79,6 +79,7 @@ func RegisterAdminRoutes(
 		// 公告管理
 		registerAnnouncementRoutes(admin, h)
 		registerSupportTicketRoutes(admin, h)
+		registerSupportChatRoutes(admin, h)
 
 		// OpenAI OAuth
 		registerOpenAIOAuthRoutes(admin, h)
@@ -169,6 +170,24 @@ func registerGroupQualityGateRoutes(admin *gin.RouterGroup, h *handler.Handlers)
 	gate.GET("/policies", h.Admin.GroupQualityGate.Policies)
 	gate.PUT("/policies/:group_id", h.Admin.GroupQualityGate.UpdatePolicy)
 	gate.GET("/status", h.Admin.GroupQualityGate.Status)
+}
+
+func registerSupportChatRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	if h == nil || h.SupportChat == nil {
+		return
+	}
+	chats := admin.Group("/support-chats")
+	chats.GET("", h.SupportChat.AdminList)
+	chats.GET("/summary", h.SupportChat.AdminSummary)
+	chats.GET("/images/:id", h.SupportChat.AdminImage)
+	chats.GET("/:id", h.SupportChat.AdminGet)
+	chats.GET("/:id/messages", h.SupportChat.AdminMessages)
+	chats.POST("/:id/messages", h.SupportChat.AdminSend)
+	chats.POST("/:id/read", h.SupportChat.AdminRead)
+	chats.POST("/:id/status", h.SupportChat.AdminStatus)
+	chats.POST("/:id/block", h.SupportChat.AdminBlock)
+	chats.DELETE("/:id/messages/:message_id", h.SupportChat.AdminDeleteMessage)
+	chats.DELETE("/:id", h.SupportChat.AdminDelete)
 }
 
 func registerPromptAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers) {

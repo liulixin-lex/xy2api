@@ -380,6 +380,7 @@ export const useAppStore = defineStore('app', () => {
         model_plaza_require_auth: false,
         plugin_management_enabled: false,
         support_ticket_enabled: false,
+        support_chat_enabled: false,
         risk_control_enabled: false,
         service_quota_enabled: false,
         affiliate_enabled: false,

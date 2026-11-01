@@ -406,3 +406,12 @@ func TestSupportTicketAuthorRedactionKeepsNecessaryContext(t *testing.T) {
 	require.Contains(t, string(out), "user@example.com")
 	require.Contains(t, string(out), "keep exact ticket text")
 }
+
+func TestSupportChatOperatorResponsesRedactUserCard(t *testing.T) {
+	body := []byte(`{"data":{"items":[{"user":{"id":42,"email":"user@example.com","balance":12.5,"created_at":"2026-01-01T00:00:00Z"}}]}}`)
+	redacted, err := Redact(body, []Redaction{"support_ticket_author"}, &Scope{})
+	require.NoError(t, err)
+	require.NotContains(t, string(redacted), `"balance"`)
+	require.NotContains(t, string(redacted), `"created_at"`)
+	require.Contains(t, string(redacted), `"email"`)
+}

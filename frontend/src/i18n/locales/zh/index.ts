@@ -1,4 +1,5 @@
 import supportTickets from './supportTickets'
+import supportChat from './supportChat'
 import usageExports from './usageExports'
 import landing from './landing'
 import common from './common'
@@ -10,6 +11,7 @@ import misc from './misc'
 
 export default {
   ...supportTickets,
+  ...supportChat,
   usageExports,
   ...landing,
   ...common,

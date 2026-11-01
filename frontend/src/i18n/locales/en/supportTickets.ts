@@ -1,9 +1,9 @@
-/** Support tickets (users open them, admins answer) */
+/** Tickets inside Customer Support (users open them, admins answer) */
 export default {
   supportTickets: {
-    title: 'Support Tickets',
-    description: 'Open a ticket when something goes wrong; admins answer here.',
-    adminDescription: 'Read and answer the tickets users open.',
+    title: 'Customer Support',
+    description: 'Chat with support or open a ticket when something goes wrong; support answers here.',
+    adminDescription: 'Answer user chats and tickets.',
     newTicket: 'New ticket',
     refresh: 'Refresh',
     status: {
@@ -104,9 +104,10 @@ export default {
       deletedUser: 'Deleted user',
       copyEmail: 'Copy email',
       emailCopied: 'Email copied',
+      viewUsage: 'View usage',
     },
     errors: {
-      SUPPORT_TICKET_DISABLED: 'Support tickets are turned off',
+      SUPPORT_TICKET_DISABLED: 'Customer support is turned off',
       SUPPORT_TICKET_NOT_FOUND: 'The ticket does not exist or was deleted',
       SUPPORT_TICKET_CLOSED: 'The ticket is closed; reopen it first',
       SUPPORT_TICKET_NOT_CLOSED: 'Only a closed ticket can be reopened',

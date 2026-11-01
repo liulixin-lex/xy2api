@@ -1,5 +1,5 @@
 /**
- * Support tickets ("网站工单") — user and admin endpoints.
+ * Support tickets (part of 「客户服务」) — user and admin endpoints.
  * Every call answers SUPPORT_TICKET_DISABLED (403) while the feature switch is off.
  */
 
@@ -76,11 +76,15 @@ export interface SupportTicketAdminSummary {
   categories: string[]
 }
 
-/** Admin settings card (系统设置 → 功能 → 网站工单). */
+/** Admin settings card (系统设置 → 功能 → 客户服务). */
 export interface SupportTicketConfig {
   categories: string[]
   max_open_per_user: number
   notice: string
+  /** Shown at the top of the support chat; up to 300 characters. */
+  chat_welcome?: string
+  /** Days before chat images are purged; 0 means the default 90, otherwise 7–3650. */
+  chat_image_retention_days?: number
 }
 
 export interface CreateSupportTicketRequest {

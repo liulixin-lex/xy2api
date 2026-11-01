@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
-import { PURCHASE_ROUTE_NAME, resolveDocumentTitle, resolveRouteDocumentTitle, resolveRouteMetaKeys } from '@/router/title'
+import {
+  applyDocumentTitle,
+  PURCHASE_ROUTE_NAME,
+  resolveDocumentTitle,
+  resolveRouteDocumentTitle,
+  resolveRouteMetaKeys,
+  setDocumentTitleBadge,
+  withTitleBadge,
+} from '@/router/title'
 
 // 语言包在测试环境是懒加载的，这里只提供本文件用到的几个 key，其余原样返回 key（触发 meta.title 回退）。
 vi.mock('@/i18n', () => {
@@ -118,5 +126,35 @@ describe('resolveRouteDocumentTitle 站点类型', () => {
   it('充值 & 订阅时保留原标题', () => {
     const title = resolveRouteDocumentTitle(purchaseRoute, 'EzouAPI', [], { billingMode: 'recharge_and_subscription' })
     expect(title).toBe('充值/订阅 - EzouAPI')
+  })
+})
+
+describe('staff badge title prefix', () => {
+  it('prefixes 「(N) 」 only while there is something waiting', () => {
+    expect(withTitleBadge('客户服务 - XY2API', 0)).toBe('客户服务 - XY2API')
+    expect(withTitleBadge('客户服务 - XY2API', 3)).toBe('(3) 客户服务 - XY2API')
+    expect(withTitleBadge('Dashboard - XY2API', 120)).toBe('(99+) Dashboard - XY2API')
+  })
+
+  it('is applied by the single title writer and cleared again', () => {
+    setDocumentTitleBadge(2)
+    applyDocumentTitle(resolveDocumentTitle('Usage Records', 'My Site'))
+    expect(document.title).toBe('(2) Usage Records - My Site')
+    setDocumentTitleBadge(0)
+    applyDocumentTitle(resolveDocumentTitle('Usage Records', 'My Site'))
+    expect(document.title).toBe('Usage Records - My Site')
+    setDocumentTitleBadge(-4)
+    expect(withTitleBadge('x')).toBe('x')
+  })
+
+  it('is used by the router guard, App.vue and the locale switch', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { resolve } = await import('node:path')
+    const root = resolve(__dirname, '../..')
+    for (const file of ['router/index.ts', 'App.vue', 'i18n/index.ts']) {
+      const source = readFileSync(resolve(root, file), 'utf8')
+      expect(source, file).toContain('applyDocumentTitle(resolveRouteDocumentTitle(')
+      expect(source, file).not.toMatch(/document\.title = resolveRouteDocumentTitle/)
+    }
   })
 })

@@ -52,7 +52,8 @@
       "openspec/changes/gateway-resilience-045-20261021/**",
       "openspec/changes/add-support-tickets-and-managed-openai-totp-20261029/**",
       "openspec/changes/anthropic-cache-ttl-20261030/**",
-      "openspec/changes/group-quality-gate-20261031/**"
+      "openspec/changes/group-quality-gate-20261031/**",
+      "openspec/changes/add-support-chat-widget-20261031/**"
     ],
     "manual_merge": [
       "Makefile",
@@ -2945,6 +2946,34 @@
       "value": "ModuleSupportTickets, Level: LevelManage"
     },
     {
+      "path": "frontend/src/App.vue",
+      "value": "<SupportWidget v-if=\"supportWidgetVisible\" />"
+    },
+    {
+      "path": "backend/internal/server/routes/admin.go",
+      "value": "registerSupportChatRoutes(admin, h)"
+    },
+    {
+      "path": "backend/internal/server/routes/user.go",
+      "value": "chat.POST(\"/messages\", h.SupportChat.Send)"
+    },
+    {
+      "path": "backend/internal/handler/wire.go",
+      "value": "NewSupportChatHandler,"
+    },
+    {
+      "path": "backend/internal/service/wire.go",
+      "value": "NewSupportChatService,"
+    },
+    {
+      "path": "backend/internal/repository/support_chat_repo.go",
+      "value": "func lockSupportChatRow(ctx context.Context, tx *sql.Tx, id int64) (*chatRow, error) {"
+    },
+    {
+      "path": "backend/internal/service/setting_public.go",
+      "value": "SupportChatEnabled:      settings[SettingKeySupportTicketEnabled] == \"true\" && settings[SettingKeySupportChatEnabled] == \"true\","
+    },
+    {
       "path": "tools/openai_totp_worker.py",
       "value": "class WorkerAPI:"
     },
@@ -3372,7 +3401,8 @@
     "xy-managed-openai-totp",
     "xy-anthropic-cache-ttl",
     "xy-openai-group-quality-scheduling",
-    "xy-converted-tool-cache-markers"
+    "xy-converted-tool-cache-markers",
+    "xy-support-chat"
   ],
   "custom_patch_tests": [
     {
@@ -5649,6 +5679,31 @@
       "id": "xy-converted-tool-cache-markers",
       "path": "backend/internal/service/claude_cache_fallback_test.go",
       "literal": "func TestClaudeCacheBillingLogDowngraded(t *testing.T) {"
+    },
+    {
+      "id": "xy-support-chat",
+      "path": "backend/internal/service/support_chat_test.go",
+      "literal": "func TestSupportChatDisabledEverywhere(t *testing.T) {"
+    },
+    {
+      "id": "xy-support-chat",
+      "path": "backend/internal/handler/support_chat_handler_test.go",
+      "literal": "func TestSupportChatHandlerUserFlow(t *testing.T) {"
+    },
+    {
+      "id": "xy-support-chat",
+      "path": "backend/internal/server/middleware/admin_permission_test.go",
+      "literal": "func TestAdminPermissionSupportChatsPermissionMatrix(t *testing.T) {"
+    },
+    {
+      "id": "xy-support-chat",
+      "path": "backend/internal/repository/support_chat_integration_test.go",
+      "literal": "func TestSupportChatRepositoryLifecycle(t *testing.T) {"
+    },
+    {
+      "id": "xy-support-chat",
+      "path": "frontend/src/features/support-widget/__tests__/supportWidgetVisibility.spec.ts",
+      "literal": "it('shows only when every condition holds'"
     }
   ]
 }

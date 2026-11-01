@@ -111,6 +111,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		nil,                         // groupQualityGate
 		&service.ImageTaskService{}, // imageTasks
 		handler.NewAsyncImageHandler(nil, nil, nil), // asyncImage
+		nil, // supportChatPurge
 	)
 
 	require.NotPanics(t, func() {

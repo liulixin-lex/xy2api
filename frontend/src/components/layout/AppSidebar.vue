@@ -203,7 +203,8 @@ import { useSidebarActiveIndicator } from '@/composables/useSidebarActiveIndicat
 import { flattenNav, registerCommandEntries } from '@/composables/useCommandPalette'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore, useSupportTicketStore } from '@/stores'
+import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
+import { useSupportBadges } from '@/features/support-chat/useSupportBadges'
 import { useAdminAccessStore } from '@/stores/adminAccess'
 import type { AdminModuleId } from '@/types/adminAccess'
 import VersionBadge from '@/components/common/VersionBadge.vue'
@@ -281,7 +282,8 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 const onboardingStore = useOnboardingStore()
 const adminSettingsStore = useAdminSettingsStore()
-const supportTicketStore = useSupportTicketStore()
+// Sidebar badges show ticket + chat totals.
+const supportBadges = useSupportBadges()
 const adminAccessStore = useAdminAccessStore()
 const { canUseBatchImage, refreshBatchImageAccess } = useBatchImageAccess()
 
@@ -798,7 +800,7 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     { path: '/orders', label: t('nav.myOrders'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagPayment },
     { path: '/redeem', label: t('nav.redeem'), icon: GiftIcon, hideInSimpleMode: true },
     { path: '/affiliate', label: t('nav.affiliate'), icon: UsersIcon, hideInSimpleMode: true, featureFlag: flagAffiliate },
-    ...(withDashboard ? [{ path: '/support-tickets', label: t('nav.supportTickets'), icon: TicketIcon, featureFlag: flagSupportTickets, badgeCount: supportTicketStore.userUnread }] : []),
+    ...(withDashboard ? [{ path: '/support-tickets', label: t('nav.supportTickets'), icon: TicketIcon, featureFlag: flagSupportTickets, badgeCount: supportBadges.userBadge.value }] : []),
     { path: '/profile', label: t('nav.profile'), icon: UserIcon },
     ...customMenuItemsForUser.value.map((item): NavItem => ({
       path: `/custom/${item.id}`,
@@ -862,7 +864,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/share-scheduling', label: t('nav.shareScheduling'), icon: ScaleIcon, permission: 'share_scheduling' },
     { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement, permission: 'super_only' },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon, permission: 'announcements' },
-    { path: '/admin/support-tickets', label: t('nav.supportTickets'), icon: TicketIcon, featureFlag: flagSupportTickets, permission: 'support_tickets', badgeCount: supportTicketStore.adminPending },
+    { path: '/admin/support-tickets', label: t('nav.supportTickets'), icon: TicketIcon, featureFlag: flagSupportTickets, permission: 'support_tickets', badgeCount: supportBadges.staffBadge.value },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon, permission: 'proxies' },
     {
       path: '/admin/security-audit',

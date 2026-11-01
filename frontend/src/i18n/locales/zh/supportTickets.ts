@@ -1,9 +1,9 @@
-/** 网站工单（用户提交、管理员回复） */
+/** 客户服务里的工单（用户提交、管理员回复） */
 export default {
   supportTickets: {
-    title: '网站工单',
-    description: '遇到问题可以在这里提交工单，管理员会在这里回复你。',
-    adminDescription: '查看和回复用户提交的工单。',
+    title: '客户服务',
+    description: '遇到问题可以在线联系客服，或者提交工单，客服会在这里回复你。',
+    adminDescription: '回复用户的在线消息和工单。',
     newTicket: '提交工单',
     refresh: '刷新',
     status: {
@@ -104,9 +104,10 @@ export default {
       deletedUser: '已删除的用户',
       copyEmail: '复制邮箱',
       emailCopied: '邮箱已复制',
+      viewUsage: '查看用量',
     },
     errors: {
-      SUPPORT_TICKET_DISABLED: '网站工单没有开启',
+      SUPPORT_TICKET_DISABLED: '客户服务没有开启',
       SUPPORT_TICKET_NOT_FOUND: '工单不存在或已被删除',
       SUPPORT_TICKET_CLOSED: '工单已关闭，请先重新打开',
       SUPPORT_TICKET_NOT_CLOSED: '只有已关闭的工单可以重新打开',

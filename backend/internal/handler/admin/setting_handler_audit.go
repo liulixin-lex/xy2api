@@ -68,6 +68,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.StepUpEnabled != after.StepUpEnabled {
 		changed = append(changed, "step_up_enabled")
 	}
+	if before.SupportChatEnabled != after.SupportChatEnabled {
+		changed = append(changed, service.SettingKeySupportChatEnabled)
+	}
 	if before.SupportTicketEnabled != after.SupportTicketEnabled {
 		changed = append(changed, service.SettingKeySupportTicketEnabled)
 	}
