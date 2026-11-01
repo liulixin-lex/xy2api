@@ -46,6 +46,7 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 import { useStateMotion } from '@/composables/useStateMotion'
 import type { GroupProfitControlPreview } from '@/types/groupQualityGate'
 import {
+  effectiveProfitMarginPercent,
   formatProfitCeiling,
   profitPercentToDecimal,
   profitPreviewLevel,
@@ -82,9 +83,9 @@ let controller: AbortController | null = null
 let timer: ReturnType<typeof setTimeout> | undefined
 let seq = 0
 
-// 与提交校验一致：0 ≤ 毛利率 < 100%，否则不预览。
+// 与提交校验一致：留空按默认 20%，0 ≤ 毛利率 < 100%，否则不预览。
 const marginDecimal = computed(() => {
-  const percent = Number(props.marginPercent || 0)
+  const percent = effectiveProfitMarginPercent(props.marginPercent)
   if (!Number.isFinite(percent) || percent < 0) return null
   const decimal = profitPercentToDecimal(percent)
   return decimal < 1 ? decimal : null

@@ -4517,6 +4517,7 @@ import { normalizeSupportedModelScopesForPlatform } from "./groupsSupportedModel
 import {
   DEFAULT_PROFIT_MIN_MARGIN_PERCENT,
   PROFIT_SAFETY_BUFFER,
+  effectiveProfitMarginPercent,
   isProfitControlPlatform,
   profitMarginPercentFromGroup,
   profitMarginPercentOnEnable,
@@ -4630,6 +4631,8 @@ const canAdjustBalance = computed(() => has("users.balance_adjust"));
 const adminAccess = useAdminAccessStore();
 // 复制账号还可由账号管理权限授权，分组管理权限仍由页面控制。
 const canCopyAccounts = computed(() => canAdjustBalance.value || adminAccess.can("accounts:manage"));
+// 质量门槛的策略与状态读取需要账号查看权限；没有时不显示门槛列、不请求。
+const canViewQualityGate = computed(() => adminAccess.can("accounts:view"));
 // Catalog §2.2.1 and R8-4: omit protected fields, including normalized NULL prices.
 const operatorGroupPriceFields = [
   "platform",
@@ -4702,7 +4705,9 @@ const allColumns = computed<Column[]>(() => {
     { key: "rate_multiplier", label: t("admin.groups.columns.rateMultiplier"), sortable: true },
     { key: "is_exclusive", label: t("admin.groups.columns.type"), sortable: true },
     { key: "category", label: t("admin.groupCategories.column"), sortable: false },
-    { key: "quality_gate", label: t("admin.groupQualityGate.column"), sortable: false },
+    ...(canViewQualityGate.value
+      ? [{ key: "quality_gate", label: t("admin.groupQualityGate.column"), sortable: false }]
+      : []),
     basic[3],
     { key: "capacity", label: t("admin.groups.columns.capacity"), sortable: false },
     { key: "usage", label: t("admin.groups.columns.usage"), sortable: false },
@@ -4807,7 +4812,7 @@ const qualityGateSummary = (groupId: number) => {
   return view?.kind === "evaluated" ? view.group.summary : undefined;
 };
 const refreshQualityGateColumn = () => {
-  if (!authStore.isSimpleMode && isColumnVisible("quality_gate")) {
+  if (!authStore.isSimpleMode && canViewQualityGate.value && isColumnVisible("quality_gate")) {
     void refreshQualityGateStatus();
   }
 };
@@ -6166,8 +6171,9 @@ const normalizeRateMultiplier = (
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1;
 };
 
-// 利润控制表单辅助（换算与校验逻辑见 groupsProfitControl.ts，便于单测）。
-const percentToDecimal = profitPercentToDecimal;
+// 利润控制表单辅助（换算与校验逻辑见 groupsProfitControl.ts，便于单测）。毛利率留空按默认 20% 提交。
+const profitMarginToDecimal = (value: ProfitControlFormState["profit_min_margin_percent"]) =>
+  profitPercentToDecimal(effectiveProfitMarginPercent(value));
 
 // 管理员手动打开利润控制、且毛利率未填或为 0 时套用默认 20%；回显已保存的分组不经过这里。
 const applyDefaultProfitMargin = (form: ProfitControlFormState) => {
@@ -6300,7 +6306,7 @@ const handleCreateGroup = async () => {
       profit_control_enabled:
         isProfitControlPlatform(createForm.platform) &&
         createForm.profit_control_enabled,
-      profit_min_margin: percentToDecimal(createForm.profit_min_margin_percent),
+      profit_min_margin: profitMarginToDecimal(createForm.profit_min_margin_percent),
       profit_safety_buffer: PROFIT_SAFETY_BUFFER,
     };
     delete (requestData as Record<string, unknown>).profit_min_margin_percent;
@@ -6511,7 +6517,11 @@ const handleEdit = async (group: AdminGroup) => {
   showEditModal.value = true;
 };
 
+// 本次编辑已保存的分组请求（JSON），门槛保存失败后再次保存时据此跳过未改动的分组。
+let savedEditGroupRequestKey: string | null = null;
+
 const closeEditModal = () => {
+  savedEditGroupRequestKey = null;
   editModelRoutingRules.value.forEach((rule) => {
     accountSearchRunner.clearKey(getEditRuleSearchKey(rule));
   });
@@ -6598,16 +6608,6 @@ const handleUpdateGroup = async () => {
 
   submitting.value = true;
   try {
-    // 利润门在保存后会挡住全部成员时先确认；简洁模式与无权改价格的管理员提交时不带利润字段，不用确认。
-    if (
-      !authStore.isSimpleMode &&
-      canAdjustBalance.value &&
-      editProfitPreviewRef.value &&
-      (await editProfitPreviewRef.value.blocksAllMembers()) &&
-      !(await confirmZeroPassProfit())
-    ) {
-      return;
-    }
     // 转换 fallback_group_id: null -> 0 (后端使用 0 表示清除)
     const payload = {
       ...editForm,
@@ -6679,7 +6679,7 @@ const handleUpdateGroup = async () => {
       profit_control_enabled:
         isProfitControlPlatform(editForm.platform) &&
         editForm.profit_control_enabled,
-      profit_min_margin: percentToDecimal(editForm.profit_min_margin_percent),
+      profit_min_margin: profitMarginToDecimal(editForm.profit_min_margin_percent),
       profit_safety_buffer: PROFIT_SAFETY_BUFFER,
     };
     delete (payload as Record<string, unknown>).profit_min_margin_percent;
@@ -6748,13 +6748,30 @@ const handleUpdateGroup = async () => {
         }
       : payload;
     const groupId = editingGroup.value.id;
-    await adminAPI.groups.update(groupId, requestData);
+    // 门槛保存失败时对话框保留，再次保存时分组没改就不重复提交（也不再做利润门确认）。
+    const groupRequestKey = JSON.stringify(requestData);
+    if (groupRequestKey !== savedEditGroupRequestKey) {
+      // 利润门在保存后会挡住全部成员时先确认；简洁模式与无权改价格的管理员提交时不带利润字段，不用确认。
+      if (
+        !authStore.isSimpleMode &&
+        canAdjustBalance.value &&
+        editProfitPreviewRef.value &&
+        (await editProfitPreviewRef.value.blocksAllMembers()) &&
+        !(await confirmZeroPassProfit())
+      ) {
+        return;
+      }
+      await adminAPI.groups.update(groupId, requestData);
+      savedEditGroupRequestKey = groupRequestKey;
+    }
     // 分组之后再存分类与门槛；它们失败时各自提示“分组已保存，…未保存”。
     const categoriesSaved = (await editCategoryFieldRef.value?.save(groupId)) !== false;
     const qualityGateSaved = (await editQualityGateRef.value?.save(groupId)) !== false;
-    if (categoriesSaved && qualityGateSaved) appStore.showSuccess(t("admin.groups.groupUpdated"));
-    closeEditModal();
     loadGroups();
+    // 门槛未保存时保留对话框与门槛输入，修正或确认后再次保存。
+    if (!qualityGateSaved) return;
+    if (categoriesSaved) appStore.showSuccess(t("admin.groups.groupUpdated"));
+    closeEditModal();
   } catch (error: any) {
     appStore.showError(
       extractApiErrorMessage(error, t("admin.groups.failedToUpdate")),

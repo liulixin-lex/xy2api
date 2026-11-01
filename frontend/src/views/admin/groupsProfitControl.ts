@@ -54,6 +54,15 @@ export const profitMarginPercentOnEnable = (
     : DEFAULT_PROFIT_MIN_MARGIN_PERCENT;
 };
 
+// 毛利率框留空（v-model.number 清空得到 ""）按默认 20% 处理，与占位一致；显式填 0 仍是 0。
+// 校验、提交与预览都经过这里，三处口径相同。
+export const effectiveProfitMarginPercent = (
+  value: number | string | null | undefined,
+): number =>
+  value === null || value === undefined || String(value).trim() === ""
+    ? DEFAULT_PROFIT_MIN_MARGIN_PERCENT
+    : Number(value);
+
 // 提交前校验：毛利率 ∈ [0,1)（否则上限 <= 0，所有可核价账号都会被排除）。
 // 返回 null 表示通过，否则返回错误信息的 i18n key（相对 admin.groups.profitControl 前缀）。
 // 仅支持平台且开关开启时才校验。
@@ -67,7 +76,7 @@ export const validateProfitControlFormState = (
   if (!isProfitControlPlatform(form.platform) || !form.profit_control_enabled) {
     return null;
   }
-  const marginPercent = Number(form.profit_min_margin_percent || 0);
+  const marginPercent = effectiveProfitMarginPercent(form.profit_min_margin_percent);
   if (!Number.isFinite(marginPercent) || marginPercent < 0) {
     return "marginRangeError";
   }
