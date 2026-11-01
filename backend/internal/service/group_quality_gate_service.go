@@ -839,4 +839,14 @@ func (s *GroupQualityGateService) markFailed(now time.Time, err error) {
 	logGroupQualityFailure(old, now, next.StaleSince, err)
 }
 
+// Enabled reports whether the latest evaluation ran with the group's gate
+// enabled. It reads only the in-process snapshot.
+func (s *GroupQualityGateService) Enabled(groupID int64) bool {
+	if s == nil {
+		return false
+	}
+	v := s.snapshot.Load()
+	return v != nil && v.Policies.Groups[strconv.FormatInt(groupID, 10)].Enabled
+}
+
 var _ GroupQualityGateView = (*GroupQualityGateService)(nil)

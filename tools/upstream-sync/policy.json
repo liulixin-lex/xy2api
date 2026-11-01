@@ -3110,7 +3110,31 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
-      "value": "return s.selectOpenAIStickyCapacity(ctx, account, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability, UseUpstreamTokenCost: useUpstreamTokenCost, SkipStickyCapacityRetry: err != nil})"
+      "value": "return s.selectOpenAIStickyCapacity(ctx, account, openAILegacyStickyCapacityRequest(ctx, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability, UseUpstreamTokenCost: useUpstreamTokenCost, SkipStickyCapacityRetry: err != nil}))"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "ctx = withOpenAILegacyStickyCapacity(ctx, requiredTransport, requiredImageCapability)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "if loadMap[item.account.ID] != nil && (item.loadInfo.LoadRate >= 100 || item.account.Concurrency > 0 && item.loadInfo.CurrentConcurrency >= item.account.Concurrency) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "result, attempted, err := gate.tryAcquireOpenAIAccountSlot(ctx, item.account.ID, item.account.Concurrency, budget)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "account, transient := s.recheckOpenAIStickyOwnerFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "account, transient = s.recheckOpenAIStickyOwnerFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "_ = s.refreshStickySessionTTL(ctx, groupID, sessionHash, s.openAIStickyBindingTTL(groupID), stickyAccountID)"
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
@@ -5514,6 +5538,16 @@
       "id": "xy-openai-group-quality-scheduling",
       "path": "backend/internal/service/openai_group_quality_scheduling_test.go",
       "literal": "pinned owner queue full remains a sticky fallback wait"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_group_quality_scheduling_test.go",
+      "literal": "borrow skips known full and queued accounts/"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_group_quality_scheduling_test.go",
+      "literal": "legacy WS borrow skips an idle account without WS within one short wait"
     },
     {
       "id": "xy-fallback-group-user-invisible",

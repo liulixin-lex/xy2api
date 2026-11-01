@@ -370,7 +370,7 @@
       },
       {
         "block": "group-quality-scheduling",
-        "note": "WP2: quality admission and continuation exemptions; legacy comparator with precomputed tiers; shared bounded sticky retry and recent-success/hash borrowing with compact/latency cohorts; queue-full fallback preserves bindings; non-OpenAI advanced concurrency escape is unchanged. E2 call/model helpers moved by this patch retain their endpoint model mapping.",
+        "note": "WP2: quality admission and continuation exemptions; legacy comparator with precomputed tiers; shared bounded sticky retry and recent-success/hash borrowing with compact/latency cohorts; queue-full fallback preserves bindings; non-OpenAI advanced concurrency escape is unchanged. E2 call/model helpers moved by this patch retain their endpoint model mapping. FX-B: the legacy compatibility loop passes its transport and image requirements to sticky borrowing.",
         "removed": [
           "compatible, _ := s.isAccountRequestCompatibleReason(ctx, selection.Account, req)",
           "selection, _, err := s.selectBySessionHash(ctx, parentReq)",
@@ -426,7 +426,8 @@
           "if s.service.concurrencyService != nil {",
           "req.SkipStickyCapacityRetry = true",
           "// Advanced candidate admission reports the shared reason through filter stats.",
-          "AdvancedScheduler:       true,"
+          "AdvancedScheduler:       true,",
+          "ctx = withOpenAILegacyStickyCapacity(ctx, requiredTransport, requiredImageCapability)"
         ]
       },
       {
@@ -477,16 +478,6 @@
           "s.AttachOpenAIQualityRouting(c, currentHash, body)",
           "}",
           "s.AttachOpenAIQualityRouting(c, currentHash, body)"
-        ]
-      },
-      {
-        "block": "share-binding-ttl",
-        "note": "Share groups write bindings with the policy TTL so idle time can be derived; other groups keep the original TTL.",
-        "removed": [],
-        "added": [
-          "}",
-          "if shareTTL, ok := s.shareScheduling.shareBindingTTL(derefGroupID(groupID)); ok {",
-          "ttl = shareTTL"
         ]
       },
       {
@@ -574,7 +565,6 @@
           "_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)",
           "_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)",
           "_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)",
-          "_ = s.refreshStickySessionTTL(ctx, groupID, sessionHash, openaiStickySessionTTL, accountID)",
           "func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, useUpstreamTokenCost bool) (selection *AccountSelectionResult, selectionErr error) {",
           "if cache, atomic := s.cache.(OpenAIStickyAtomicCache); atomic && openAIAtomicStickySession(sessionHash) && NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !s.qualityOwnsSticky(ctx, groupID, sessionHash) && ctx.Value(openAIStickyReconciledKey{}) == nil {",
           "initialOwner, _ := s.getStickySessionAccountID(ctx, groupID, sessionHash)",
@@ -597,7 +587,6 @@
           "_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)",
           "_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)",
           "_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)",
-          "_ = s.refreshStickySessionTTL(ctx, groupID, sessionHash, openaiStickySessionTTL, stickyAccountID)",
           "s.preferCacheCandidates(ctx, available, requestedModel)",
           "selection, err := s.newSelectionResult(ctx, fresh, false, nil, &AccountWaitPlan{"
         ]
@@ -819,7 +808,7 @@
       },
       {
         "block": "group-quality-scheduling",
-        "note": "WP2: quality admission and continuation exemptions; legacy comparator with precomputed tiers; shared bounded sticky retry and recent-success/hash borrowing with compact/latency cohorts; queue-full fallback preserves bindings; non-OpenAI advanced concurrency escape is unchanged. E2 call/model helpers moved by this patch retain their endpoint model mapping. N1/N3/N4/N5: non-OpenAI queue-full immediate acquisition precedes fallback, borrowing retains the active 80% cohort, no-load-batch fallback stays on the owner, and spillover is recorded only for another account.",
+        "note": "WP2: quality admission and continuation exemptions; legacy comparator with precomputed tiers; shared bounded sticky retry and recent-success/hash borrowing with compact/latency cohorts; queue-full fallback preserves bindings; non-OpenAI advanced concurrency escape is unchanged. E2 call/model helpers moved by this patch retain their endpoint model mapping. N1/N3/N4/N5: non-OpenAI queue-full immediate acquisition precedes fallback, borrowing retains the active 80% cohort, no-load-batch fallback stays on the owner, and spillover is recorded only for another account. FX-B: borrowing skips accounts known to be full or queued, acquires before the DB recheck under the shared probe limit, and keeps the owner's wait plan on a listing error; legacy borrowing receives the compatibility loop's transport and image requirements and one short retry per selection; renewals use the binding TTL (configured or share TTL, extracted from BindStickySession together with the former share-binding-ttl lines); a failed sticky-owner DB read skips the owner without deleting its binding (the DB recheck is split so the read error is visible).",
         "removed": [
           "account, err := s.getSchedulableAccount(ctx, accountID)",
           "if err != nil {",
@@ -921,7 +910,13 @@
           "sortAccountsByPriorityAndLastUsed(candidates, false)",
           "sort.SliceStable(candidates, func(i, j int) bool {",
           "return rateOrder.compare(candidates[i], candidates[j]) < 0",
-          "}"
+          "}",
+          "ttl := openaiStickySessionTTL",
+          "if s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.StickySessionTTLSeconds > 0 {",
+          "ttl = time.Duration(s.cfg.Gateway.OpenAIWS.StickySessionTTLSeconds) * time.Second",
+          "return s.setStickySessionAccountID(ctx, groupID, sessionHash, accountID, ttl)",
+          "account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)",
+          "account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)"
         ],
         "added": [
           "}",
@@ -999,7 +994,6 @@
           "if err != nil {",
           "if err != nil {",
           "if err != nil {",
-          "if err != nil {",
           "if vetoed, _ := groupQualityGateVeto(ctx, account); vetoed {",
           "if vetoed, _ := groupQualityGateVeto(ctx, account); vetoed {",
           "_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)",
@@ -1009,7 +1003,6 @@
           "rateOrder.enabled = true",
           "return",
           "if stickyHit && s.concurrencyService != nil {",
-          "return nil, err",
           "if accountID > 0 {",
           "account = nil",
           "if err == nil && account != nil && !isExcluded(accountID) && !s.resilienceKeepOpenAISoftOwner(ctx, account, platform, requestedModel) {",
@@ -1178,7 +1171,6 @@
           "if ctx.Err() != nil {",
           "result, err := s.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency)",
           "if result != nil && result.Acquired {",
-          "if result != nil && result.Acquired {",
           "selection, err := s.newAcquiredSelectionResult(ctx, account, result.ReleaseFunc)",
           "accounts, err := s.listSchedulableAccounts(ctx, req.GroupID, req.Platform)",
           "gate := &defaultOpenAIAccountScheduler{service: s, stats: newOpenAIAccountRuntimeStats()}",
@@ -1203,7 +1195,6 @@
           "rates.enabled = true",
           "fresh := s.recheckSelectedOpenAIAccountFromDB(ctx, item.account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)",
           "if fresh == nil || !gate.isAccountRequestCompatible(ctx, fresh, req) || !gate.isAccountTransportCompatible(fresh, req.RequiredTransport) {",
-          "result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)",
           "selection, err := s.newAcquiredSelectionResult(ctx, fresh, result.ReleaseFunc)",
           "return markOpenAIStickySpillover(selection, true), err",
           "}",
@@ -1243,10 +1234,8 @@
           "}",
           "}",
           "}",
-          "return s.selectOpenAIStickyCapacity(ctx, account, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability, UseUpstreamTokenCost: useUpstreamTokenCost, SkipStickyCapacityRetry: err != nil})",
           "// Legacy load-aware sticky admission must not retain an ejected owner.",
           "}",
-          "return s.selectOpenAIStickyCapacity(ctx, account, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability, UseUpstreamTokenCost: useUpstreamTokenCost, SkipStickyCapacityRetry: err != nil})",
           "availableItems := append([]accountWithLoad(nil), available...)",
           "order := s.openAICandidateOrderForItems(groupID, rateOrder, availableItems)",
           "if rateOrder.enabled {",
@@ -1409,7 +1398,55 @@
           "return selection, err",
           "return markStickySessionHit(selection, true), err",
           "spillover := fresh.ID != account.ID",
-          "return markStickySessionHit(markOpenAIStickySpillover(selection, spillover), !spillover), err"
+          "return markStickySessionHit(markOpenAIStickySpillover(selection, spillover), !spillover), err",
+          "}",
+          "}",
+          "}",
+          "}",
+          "}",
+          "}",
+          "}",
+          "return nil",
+          "return s.setStickySessionAccountID(ctx, groupID, sessionHash, accountID, s.openAIStickyBindingTTL(groupID))",
+          "account, transient := s.recheckOpenAIStickyOwnerFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)",
+          "if transient {",
+          "_ = s.refreshStickySessionTTL(ctx, groupID, sessionHash, s.openAIStickyBindingTTL(groupID), accountID)",
+          "return s.selectOpenAIStickyCapacity(ctx, account, openAILegacyStickyCapacityRequest(ctx, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability, UseUpstreamTokenCost: useUpstreamTokenCost, SkipStickyCapacityRetry: err != nil}))",
+          "return s.selectOpenAIStickyCapacity(ctx, account, openAILegacyStickyCapacityRequest(ctx, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability, UseUpstreamTokenCost: useUpstreamTokenCost, SkipStickyCapacityRetry: err != nil}))",
+          "var transient bool",
+          "account, transient = s.recheckOpenAIStickyOwnerFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)",
+          "if !transient {",
+          "_ = s.refreshStickySessionTTL(ctx, groupID, sessionHash, s.openAIStickyBindingTTL(groupID), stickyAccountID)",
+          "continue",
+          "continue",
+          "continue",
+          "return s.recheckLatestOpenAIAccount(ctx, latest, groupID, platform, requestedModel, requireCompact, requiredCapability)",
+          "// recheckLatestOpenAIAccount applies the DB recheck to an account just read.",
+          "func (s *OpenAIGatewayService) recheckLatestOpenAIAccount(ctx context.Context, latest *Account, groupID *int64, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) *Account {",
+          "return nil, ctx.Err()",
+          "return nil, ctx.Err()",
+          "return nil, nil",
+          "// Like a slot error, a failed listing leaves the owner's wait plan.",
+          "slog.Warn(\"openai_sticky_capacity_list_failed\", \"group_id\", derefGroupID(req.GroupID), \"account_id\", account.ID, \"error\", err)",
+          "// Borrowing acquires before the DB recheck, as Layer 2 of the advanced",
+          "// scheduler does, and shares its probe limit.",
+          "budget := newOpenAISelectionProbeBudget()",
+          "budget.enableLimit()",
+          "// A known full or queued account is skipped without probing.",
+          "if loadMap[item.account.ID] != nil && (item.loadInfo.LoadRate >= 100 || item.account.Concurrency > 0 && item.loadInfo.CurrentConcurrency >= item.account.Concurrency) {",
+          "// An exhausted probe budget or a slot error leaves the owner's wait plan.",
+          "result, attempted, err := gate.tryAcquireOpenAIAccountSlot(ctx, item.account.ID, item.account.Concurrency, budget)",
+          "if !attempted || err != nil {",
+          "if !attempted || err != nil {",
+          "if result == nil || !result.Acquired {",
+          "if result == nil || !result.Acquired {",
+          "if !gate.consumeOpenAISelectionDBRecheck(budget) {",
+          "result.ReleaseFunc()",
+          "result.ReleaseFunc()",
+          "result.ReleaseFunc()",
+          "if fresh != nil && fresh.Concurrency != item.account.Concurrency {",
+          "// The slot was taken under a stale limit; take it under the current one.",
+          "result, attempted, err = gate.tryAcquireOpenAIAccountSlot(ctx, fresh.ID, fresh.Concurrency, budget)"
         ]
       }
     ],
