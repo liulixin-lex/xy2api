@@ -1,39 +1,54 @@
 <template>
-  <button
-    ref="trigger"
-    type="button"
-    data-testid="account-groups-cell"
-    class="-mx-1 flex max-w-56 flex-wrap items-center gap-1 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 dark:hover:bg-dark-700"
-    :aria-label="t('admin.groupCategories.editAccountGroupsAria', { name: accountName })"
-    :aria-describedby="details.length ? tooltipId : undefined"
-    :title="!details.length && groups.length ? groups.map((group) => group.name).join('、') : undefined"
-    @click="emit('open')"
-    @mouseenter="openTip"
-    @mouseleave="closeTip"
-    @focus="openTip"
-    @blur="closeTip"
-    @keydown.esc="closeTip"
-  >
-    <template v-if="groups.length">
-      <template v-for="group in visibleGroups" :key="group.id">
-        <GroupQualityBadge v-if="quality?.get(group.id)" :name="group.name" :quality="quality.get(group.id)!" />
-        <GroupBadge
-          v-else
-          :name="group.name"
-          :platform="group.platform"
-          :subscription-type="group.subscription_type"
-          :rate-multiplier="group.rate_multiplier"
-          :show-rate="false"
-          class="max-w-24"
-        />
+  <!-- 门槛小标识在最前，各行的标识上下对齐，扫一眼就能看出哪些账号需要关注 -->
+  <div class="flex max-w-64 items-start gap-1.5">
+    <button
+      v-if="panel"
+      ref="trigger"
+      type="button"
+      data-testid="group-quality-indicator"
+      :data-state="panel.attention ?? 'none'"
+      class="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 dark:hover:bg-dark-700"
+      :class="GROUP_QUALITY_INDICATOR_CLASSES[panel.attention ?? 'none']"
+      :aria-label="panel.attentionCount ? t('admin.groupQualityGate.indicator.attention', { count: panel.attentionCount }) : t('admin.groupQualityGate.indicator.ok')"
+      :aria-describedby="tooltipId"
+      @mouseenter="scheduleOpen"
+      @mouseleave="closeTip"
+      @focus="openOnKeyboardFocus"
+      @blur="closeTip"
+      @click="openTip"
+      @keydown.esc="closeTip"
+    >
+      <Icon :name="panel.attention ? 'exclamationTriangle' : 'shield'" size="sm" class="h-3.5 w-3.5" aria-hidden="true" />
+    </button>
+    <button
+      type="button"
+      data-testid="account-groups-cell"
+      class="-mx-1 flex min-w-0 max-w-56 flex-wrap items-center gap-1 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 dark:hover:bg-dark-700"
+      :aria-label="t('admin.groupCategories.editAccountGroupsAria', { name: accountName })"
+      :title="groups.length ? groups.map((group) => group.name).join('、') : undefined"
+      @click="emit('open')"
+    >
+      <template v-if="groups.length">
+        <template v-for="group in visibleGroups" :key="group.id">
+          <GroupQualityBadge v-if="attentionOf(group.id)" :name="group.name" :quality="attentionOf(group.id)!" />
+          <GroupBadge
+            v-else
+            :name="group.name"
+            :platform="group.platform"
+            :subscription-type="group.subscription_type"
+            :rate-multiplier="group.rate_multiplier"
+            :show-rate="false"
+            class="max-w-24"
+          />
+        </template>
+        <span v-if="hiddenCount > 0" class="whitespace-nowrap text-xs font-medium text-gray-500 dark:text-gray-400">+{{ hiddenCount }}</span>
       </template>
-      <span v-if="hiddenCount > 0" class="whitespace-nowrap text-xs font-medium text-gray-500 dark:text-gray-400">+{{ hiddenCount }}</span>
-    </template>
-    <span v-else class="text-sm text-gray-400 dark:text-dark-500">—</span>
-  </button>
+      <span v-else class="text-sm text-gray-400 dark:text-dark-500">—</span>
+    </button>
+  </div>
   <Teleport to="body">
     <div
-      v-if="details.length"
+      v-if="panel"
       v-show="tipOpen"
       :id="tooltipId"
       ref="tip"
@@ -42,7 +57,7 @@
       class="pointer-events-none fixed z-50 w-72 rounded-lg bg-gray-900 p-3 text-xs leading-relaxed text-gray-100 shadow-lg dark:bg-dark-800"
       :style="tipStyle"
     >
-      <div v-for="(block, index) in details" :key="index" :class="index ? 'mt-2.5 border-t border-white/10 pt-2.5' : undefined">
+      <div v-for="(block, index) in panel.blocks" :key="index" data-testid="quality-panel-block" :class="index ? 'mt-2.5 border-t border-white/10 pt-2.5' : undefined">
         <p class="font-medium text-white">{{ block.title }}</p>
         <p v-if="block.note" class="text-gray-400">{{ block.note }}</p>
         <div v-if="block.reasons.length" class="mt-1 flex flex-wrap gap-1">
@@ -69,8 +84,21 @@
           </tbody>
         </table>
         <p v-if="block.headroom" class="mt-1" :class="block.headroom.tone === 'danger' ? 'text-red-300' : 'text-amber-300'">{{ block.headroom.text }}</p>
-        <p v-if="block.stale" class="mt-1 text-amber-300">{{ block.stale }}</p>
       </div>
+      <div v-if="panel.eligible.length" data-testid="quality-panel-eligible" :class="panel.blocks.length ? 'mt-2.5 border-t border-white/10 pt-2.5' : undefined">
+        <p class="font-medium text-white">{{ t('admin.groupQualityGate.panel.eligible', { count: panel.eligible.length }) }}</p>
+        <p class="text-gray-300">
+          <template v-for="(item, index) in panel.eligible" :key="item.name">
+            <span v-if="index" aria-hidden="true">、</span>
+            <span><template v-if="item.pinned"><Icon name="lock" size="xs" class="mr-0.5 inline-block align-[-1px] text-gray-400" aria-hidden="true" /><span class="sr-only">{{ t('admin.groupQualityGate.pinnedMark') }}</span></template>{{ item.name }}<span v-if="item.headroom" class="ml-1 whitespace-nowrap" :class="item.headroom.tone === 'danger' ? 'text-red-300' : 'text-amber-300'">{{ item.headroom.text }}</span></span>
+          </template>
+        </p>
+      </div>
+      <p v-if="windowItems.length" data-testid="quality-panel-window" class="mt-2.5 flex flex-wrap gap-x-2 border-t border-white/10 pt-2 tabular-nums text-gray-400">
+        <span>{{ t('admin.groupQualityGate.panel.window') }}</span>
+        <span v-for="item in windowItems" :key="item.key" class="whitespace-nowrap" :class="item.alert ? 'font-semibold text-red-300' : 'text-gray-200'">{{ item.text }}</span>
+      </p>
+      <p v-if="panel.stale" class="mt-1 text-amber-300">{{ panel.stale }}</p>
     </div>
   </Teleport>
 </template>
@@ -78,24 +106,32 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { gsap } from 'gsap'
 import GroupBadge from '@/components/common/GroupBadge.vue'
+import Icon from '@/components/icons/Icon.vue'
 import GroupQualityBadge from './GroupQualityBadge.vue'
 import { formatDateTime } from '@/utils/format'
+import { isReducedMotion } from '@/composables/useMotionPreference'
 import type { Group } from '@/types'
 import type { GroupQualityAccountMetrics } from '@/types/groupQualityGate'
 import {
+  GROUP_QUALITY_INDICATOR_CLASSES,
   QUALITY_CLOCK,
-  groupQualityTooltip,
+  accountQualityMetricItems,
+  groupQualityPanel,
+  isGroupQualityAttention,
   orderGroupsByQuality,
   qualityTooltipTop,
+  strictestQualityLimits,
   type GroupQualityCell
 } from './groupQualityPresentation'
 
-// 账号列表的分组单元格：整格是一个按钮，点开“编辑分组”弹窗；没有分组时显示“—”也能点。
-// 开启质量门槛的分组按状态着色，有问题的排在前面。门槛说明（状态、原因、实测与上限）
-// 放在悬停和键盘聚焦都会出现的提示里，并作为按钮的补充描述给读屏。
+// 账号列表的分组单元格。分组标签是一个按钮，点开“编辑分组”；没有分组时显示“—”也能点。
+// 只有熔断、保底保留、试用的分组用带状态的标签，合格组显示普通标签。开启门槛时标签后有一个小标识，
+// 只有悬停、键盘聚焦或点按它才弹出门槛面板：需关注的分组逐组展开，合格组合并成一行，底部是账号完整窗口指标。
 const TIP_WIDTH = 288
 const TIP_GAP = 6
+const HOVER_DELAY_MS = 120
 
 const props = defineProps<{
   groups: Group[]
@@ -114,41 +150,87 @@ const { t } = useI18n()
 const tooltipId = useId()
 const clock = (iso: string) => formatDateTime(iso, QUALITY_CLOCK)
 
-// 有门槛标签时最多显示 2 个（门槛标签更宽），加上一行指标，单元格不超过 3 行。
-const maxVisible = computed(() => (props.quality?.size ? 2 : 3))
 const orderedGroups = computed(() => orderGroupsByQuality(props.groups, props.quality))
+const attentionOf = (groupId: number) => {
+  const cell = props.quality?.get(groupId)
+  return cell && isGroupQualityAttention(cell) ? cell : undefined
+}
+const panel = computed(() => (props.quality?.size ? groupQualityPanel(orderedGroups.value, props.quality, t, clock, props.metrics) : null))
+const windowItems = computed(() => (props.metrics ? accountQualityMetricItems(props.metrics, t, strictestQualityLimits(props.quality)) : []))
+
+// 带状态的标签更宽：有需关注的分组时最多显示 2 个，否则 3 个。需关注的排在前面，不会被收进 +N。
+const maxVisible = computed(() => (panel.value?.attentionCount ? 2 : 3))
 const visibleGroups = computed(() => orderedGroups.value.slice(0, maxVisible.value))
 const hiddenCount = computed(() => Math.max(0, props.groups.length - maxVisible.value))
-
-// 每个门槛分组一段（含收进 +N 的）。
-const details = computed(() =>
-  orderedGroups.value
-    .filter((group) => props.quality?.has(group.id))
-    .map((group) => groupQualityTooltip(group.name, props.quality!.get(group.id)!, t, clock, props.metrics))
-)
 
 const trigger = ref<HTMLElement>()
 const tip = ref<HTMLElement>()
 const tipOpen = ref(false)
 const tipStyle = ref<Record<string, string>>({})
+let hoverTimer: ReturnType<typeof setTimeout> | undefined
+let motion: gsap.Context | undefined
+
+// 悬停稍作停顿再打开，鼠标划过表格时不会接连弹出。
+function scheduleOpen() {
+  clearTimeout(hoverTimer)
+  hoverTimer = setTimeout(openTip, HOVER_DELAY_MS)
+}
+
+// 鼠标点按也会先触发 focus；只有键盘聚焦（:focus-visible）才立即打开，点按交给 click。
+function openOnKeyboardFocus(event: FocusEvent) {
+  const target = event.target as HTMLElement
+  let keyboard = true
+  try {
+    keyboard = target.matches(':focus-visible')
+  } catch {
+    // 不支持 :focus-visible 的环境按键盘聚焦处理
+  }
+  if (keyboard) void openTip()
+}
 
 async function openTip() {
+  clearTimeout(hoverTimer)
   const rect = trigger.value?.getBoundingClientRect()
-  if (!details.value.length || !rect) return
+  if (tipOpen.value || !panel.value || !rect) return
   const left = `${Math.max(8, Math.min(rect.left, window.innerWidth - TIP_WIDTH - 8))}px`
-  // 先隐藏着渲染出来量高度，再按实际高度放到下方或上方，长提示不会超出视口。
+  // 先隐藏着渲染出来量高度，再按实际高度放到下方或上方，长面板不会超出视口。
   tipStyle.value = { left, top: `${rect.bottom + TIP_GAP}px`, visibility: 'hidden' }
   tipOpen.value = true
   window.addEventListener('scroll', closeTip, true)
+  document.addEventListener('pointerdown', closeOnOutside, true)
   await nextTick()
   if (!tipOpen.value) return
   const top = qualityTooltipTop(rect, tip.value?.offsetHeight ?? 0, window.innerHeight, TIP_GAP)
   tipStyle.value = { left, top: `${top}px` }
+  await nextTick()
+  playEnter(top >= rect.bottom ? -4 : 4)
+}
+
+// 唯一的动效：面板从标识方向淡入 4px。减少动画（系统或站内设置）时直接显示；收起不做动画。
+function playEnter(fromY: number) {
+  const el = tip.value
+  if (!el || !tipOpen.value || isReducedMotion()) return
+  motion ??= gsap.context(() => {})
+  motion.add(() => gsap.fromTo(el, { autoAlpha: 0, y: fromY }, { autoAlpha: 1, y: 0, duration: 0.16, ease: 'power2.out', clearProps: 'opacity,visibility,transform' }))
+}
+
+function closeOnOutside(event: PointerEvent) {
+  if (!trigger.value?.contains(event.target as Node)) closeTip()
+}
+
+// 收起或卸载时还原进行中的动画和内联样式。
+function stopMotion() {
+  motion?.revert()
+  motion = undefined
 }
 
 function closeTip() {
+  clearTimeout(hoverTimer)
+  if (!tipOpen.value) return
+  stopMotion()
   tipOpen.value = false
   window.removeEventListener('scroll', closeTip, true)
+  document.removeEventListener('pointerdown', closeOnOutside, true)
 }
 
 onBeforeUnmount(closeTip)

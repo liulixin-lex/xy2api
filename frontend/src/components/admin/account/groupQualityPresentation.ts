@@ -244,6 +244,72 @@ export function groupQualityTooltip(
   return block
 }
 
+/** 需要关注的状态：熔断（含固定且熔断）、保底保留、试用。合格、等待评估、读取失败都不算。 */
+export type GroupQualityAttentionKind = 'ejected' | 'guard_held' | 'trial'
+export const isGroupQualityAttention = (cell: GroupQualityCell): cell is AccountGroupQuality & { kind: GroupQualityAttentionKind } =>
+  cell.kind === 'ejected' || cell.kind === 'guard_held' || cell.kind === 'trial'
+
+/** 分组列小标识的颜色：最严重的需关注状态，与状态标签同一色板；没有需关注的分组时为灰色。 */
+export const GROUP_QUALITY_INDICATOR_CLASSES: Record<GroupQualityAttentionKind | 'none', string> = {
+  ejected: 'text-red-600 dark:text-red-400',
+  guard_held: 'text-sky-600 dark:text-sky-400',
+  trial: 'text-amber-600 dark:text-amber-400',
+  none: 'text-gray-400 hover:text-gray-600 dark:text-dark-400 dark:hover:text-gray-300'
+}
+
+export interface QualityEligibleItem {
+  name: string
+  pinned: boolean
+  /** 只在接近或超过上限（余量 < 20%）时出现 */
+  headroom?: { text: string; tone: 'danger' | 'warning' }
+}
+
+export interface QualityPanel {
+  /** 最严重的需关注状态；没有时为 null */
+  attention: GroupQualityAttentionKind | null
+  attentionCount: number
+  /** 需关注的分组逐组展开，其后是等待评估、读取失败 */
+  blocks: QualityTooltipBlock[]
+  /** 合格分组合并成一行 */
+  eligible: QualityEligibleItem[]
+  /** 评估数据过期，整个面板只提示一次 */
+  stale?: string
+}
+
+/**
+ * 分组列门槛面板：groups 按 orderGroupsByQuality 排好时，各段依次是需关注 → 读取失败 → 等待评估；
+ * 只收开启门槛的分组。合格组不展开指标表，只列名称、固定标记与接近上限的余量。
+ */
+export function groupQualityPanel(
+  groups: { id: number; name: string }[],
+  quality: Map<number, GroupQualityCell>,
+  t: Translate,
+  clock: (iso: string) => string,
+  fullWindow?: GroupQualityAccountMetrics
+): QualityPanel | null {
+  const panel: QualityPanel = { attention: null, attentionCount: 0, blocks: [], eligible: [] }
+  let stale = false
+  for (const group of groups) {
+    const cell = quality.get(group.id)
+    if (!cell) continue
+    if (!isGroupQualityNotice(cell)) stale ||= cell.stale
+    if (cell.kind === 'eligible') {
+      const { headroom } = groupQualityTooltip(group.name, cell, t, clock)
+      panel.eligible.push({ name: group.name, pinned: cell.status.pinned, ...(headroom ? { headroom } : {}) })
+      continue
+    }
+    if (isGroupQualityAttention(cell)) {
+      if (!panel.attention || KIND_RANK[cell.kind] < KIND_RANK[panel.attention]) panel.attention = cell.kind
+      panel.attentionCount++
+    }
+    // 各段的过期提示不单独显示，由面板底部统一提示一次。
+    panel.blocks.push(groupQualityTooltip(group.name, cell, t, clock, fullWindow))
+  }
+  if (!panel.blocks.length && !panel.eligible.length) return null
+  if (stale) panel.stale = t(prefix + 'tooltip.stale')
+  return panel
+}
+
 /** 与后端判定条件一致：错误率要调用 ≥ 20 且软失败 ≥ 5，续轮首字要样本 ≥ 10，才算“超线”。 */
 export const QUALITY_MIN_CALLS = 20
 export const QUALITY_MIN_SOFT_FAILURES = 5

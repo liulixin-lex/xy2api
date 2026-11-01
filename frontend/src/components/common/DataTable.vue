@@ -1137,14 +1137,33 @@ defineExpose({
   pointer-events: none;
 }
 
-/* 暗色模式阴影 */
+/* 暗色模式阴影：深色底上 0.2 几乎看不见，被固定列盖住的内容会像被截断 */
 .dark .is-scrollable :deep(.sticky-col-left::after),
 .dark .is-scrollable :deep(.sticky-col-left-second::after) {
-  background: linear-gradient(to right, rgba(0, 0, 0, 0.2), transparent);
+  background: linear-gradient(to right, rgba(0, 0, 0, 0.45), transparent);
 }
 
 .dark .is-scrollable :deep(.sticky-col-right::before) {
-  background: linear-gradient(to left, rgba(0, 0, 0, 0.2), transparent);
+  background: linear-gradient(to left, rgba(0, 0, 0, 0.45), transparent);
+}
+
+/* 可横向滚动时，固定列靠滚动区一侧加 1px 分隔线，表头与表体连成一条，表明内容在下面、可以滚动 */
+.is-scrollable :deep(.sticky-col-left),
+.is-scrollable :deep(.sticky-col-left-second) {
+  box-shadow: inset -1px 0 0 theme('colors.gray.200');
+}
+
+.is-scrollable :deep(.sticky-col-right) {
+  box-shadow: inset 1px 0 0 theme('colors.gray.200');
+}
+
+.dark .is-scrollable :deep(.sticky-col-left),
+.dark .is-scrollable :deep(.sticky-col-left-second) {
+  box-shadow: inset -1px 0 0 theme('colors.dark.700');
+}
+
+.dark .is-scrollable :deep(.sticky-col-right) {
+  box-shadow: inset 1px 0 0 theme('colors.dark.700');
 }
 </style>
 

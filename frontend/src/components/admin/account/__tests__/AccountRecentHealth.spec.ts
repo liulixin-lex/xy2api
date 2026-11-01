@@ -59,7 +59,8 @@ describe('AccountRecentHealth', () => {
 
     expect(lines.indexOf('cache-read-ratio')).toBe(lines.indexOf('first-token-avg') + 1)
     expect(ratio.text()).toBe('admin.accounts.cacheReadRatio:{"value":"62.3%"}')
-    expect(ratio.classes()).toEqual(expect.arrayContaining(['text-sky-600', 'dark:text-sky-400']))
+    // Reference data, not a status: neutral grey rather than a status colour.
+    expect(ratio.classes()).toEqual(expect.arrayContaining(['text-gray-500', 'dark:text-gray-400']))
     expect(ratio.attributes('title')).toBe('admin.accounts.cacheReadRatioTitle:{"count":12}')
   })
 

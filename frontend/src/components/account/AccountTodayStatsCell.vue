@@ -36,14 +36,14 @@
       <div class="flex items-center gap-1">
         <span class="text-gray-500 dark:text-gray-400">{{ t('usage.accountBilled') }}:</span>
         <span class="font-medium text-emerald-600 dark:text-emerald-400">{{
-          formatCurrency(props.stats.cost)
+          formatUsd(props.stats.cost)
         }}</span>
       </div>
       <!-- Cost (User/API Key) -->
       <div v-if="props.stats.user_cost != null" class="flex items-center gap-1">
         <span class="text-gray-500 dark:text-gray-400">{{ t('usage.userBilled') }}:</span>
         <span class="font-medium text-gray-700 dark:text-gray-300">{{
-          formatCurrency(props.stats.user_cost)
+          formatUsd(props.stats.user_cost)
         }}</span>
       </div>
     </div>
@@ -56,7 +56,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import type { WindowStats } from '@/types'
-import { formatNumber, formatCurrency } from '@/utils/format'
+import { formatNumber } from '@/utils/format'
 
 const props = withDefaults(
   defineProps<{
@@ -72,6 +72,9 @@ const props = withDefaults(
 )
 
 const { t } = useI18n()
+
+// 与本页用量窗口、上游余额同一写法“$12.34”，不随界面语言变成“US$”；不足 1 美分时保留 6 位。
+const formatUsd = (amount: number): string => `$${amount.toFixed(amount > 0 && amount < 0.01 ? 6 : 2)}`
 
 // Format large token numbers (e.g., 1234567 -> 1.23M)
 const formatTokens = (tokens: number): string => {

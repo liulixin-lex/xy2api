@@ -293,6 +293,12 @@
               </div>
             </div>
           </template>
+          <template #header-capacity="{ column }">
+            <div class="flex items-center gap-1">
+              <span>{{ column.label }}</span>
+              <HelpTooltip :content="t('admin.accounts.capacityHint')" width-class="w-72" />
+            </div>
+          </template>
           <template #cell-capacity="{ row }">
             <AccountCapacityCell :account="row" />
           </template>
@@ -335,6 +341,7 @@
               :account="row"
               :today-stats="todayStatsByAccountId[String(row.id)] ?? null"
               :today-stats-loading="todayStatsLoading"
+              :hide-today-stats="!hiddenColumns.has('today_stats')"
               :manual-refresh-token="usageManualRefreshToken"
               :batched-usage="usageBatchByAccountId[String(row.id)] ?? null"
               :batched-usage-error="usageBatchErrorByAccountId[String(row.id)] ?? null"

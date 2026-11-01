@@ -279,7 +279,6 @@ export default {
       iqStates: { idle: '等待下轮', queued: '排队中', running: '检测中', paused: '已暂停' },
       iqPausedBecause: '自动检测已暂停：{reason}。处理后手动检测一次即可恢复。',
       iqGateActive: '降智 · 冷却中',
-      iqCooling: '冷却中',
       iqExplain: { gate: '该账号暂不接收这个模型的请求，其他模型照常；复检 3 题全对后恢复。', smart: '检测通过，正常参与调度。', degraded: '最近一轮判定为降智。', unknown: '暂无有效结论，不影响调度。', off: '未开启自动检测，仍可手动检测。' },
       iqRecheckAt: '下次复检 {time}',
       iqRecheckPending: '等待复检',
@@ -495,6 +494,7 @@ export default {
         ungrouped: '未分组',
         hint: '显示格式为“分组名 / 基础分 / 粘性加分”。基础分按当前筛选条件限定的候选账号计算，包含优先级、负载、排队、错误率、首包延迟、重置窗口、额度余量、计费倍率等因子；粘性加分只在开启粘性加权时用于 previous_response_id 或 session_hash。分数越大越优先。'
       },
+      capacityHint: '第一个徽标是并发：当前 / 上限；按分组筛选时第三个绿色数字是本分组内的当前并发。其余徽标按账号设置出现：5h 窗口费用、活跃会话、RPM，以及 D / W / 总额度。',
       usageWindowsHint: '“5h / 7d”是上游账号（如 OpenAI ChatGPT、Claude）官方的滚动用量窗口限制，由上游对账号设定，并非 xy2api 配置，也与你映射的模型无关。窗口滚动到期后用量会自动重置，无法在 xy2api 端解除该限制。',
       ollamaCloud: {
         title: 'Ollama Cloud 用量',

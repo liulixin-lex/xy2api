@@ -1679,6 +1679,22 @@ describe('AccountUsageCell', () => {
     expect(prepaidOnly.text()).not.toContain('8.00/0')
   })
 
+  it('Key 账号在“今日统计”列可见时不重复今日数据，只留短横线', async () => {
+		const wrapper = mount(AccountUsageCell, {
+		  props: {
+		    account: makeAccount({ id: 3002, platform: 'anthropic', type: 'apikey' }),
+		    todayStats: { requests: 12, tokens: 3400, cost: 1.2, standard_cost: 1.2, user_cost: 2.4 },
+		    hideTodayStats: true
+		  },
+		  global: { stubs: { UsageProgressBar: true, AccountQuotaInfo: true } }
+		})
+
+		await flushPromises()
+
+		expect(wrapper.text()).not.toContain('req')
+		expect(wrapper.text().trim()).toBe('-')
+  })
+
   it('Key 账号在 today stats loading 时显示骨架屏', async () => {
 		const wrapper = mount(AccountUsageCell, {
 		  props: {

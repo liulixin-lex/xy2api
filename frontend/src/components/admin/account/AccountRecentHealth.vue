@@ -22,7 +22,7 @@
     <span
       v-if="cacheRatio != null"
       data-test="cache-read-ratio"
-      class="text-[11px] leading-4 tabular-nums text-sky-600 dark:text-sky-400"
+      class="text-[11px] leading-4 tabular-nums text-gray-500 dark:text-gray-400"
       :title="t('admin.accounts.cacheReadRatioTitle', { count: health?.cache_samples ?? 0 })"
     >{{ t('admin.accounts.cacheReadRatio', { value: cacheRatio.toFixed(1) + '%' }) }}</span>
   </div>
@@ -45,6 +45,7 @@ const { t } = useI18n()
 const recentErrors = computed(() => props.health?.recent_errors ?? 0)
 const firstTokenAvgMs = computed(() => props.health?.first_token_avg_ms ?? null)
 // 近 30 分钟三项 Token 先求和再算比例，口径同使用记录的“缓存读取占比”；三项之和为 0 时为 null，不显示。
+// 这是参考数据而非状态，用中性灰；状态色只留给错误数和首字延迟分档。
 const cacheRatio = computed(() => (props.health ? cacheReadRatio(props.health) : null))
 
 // 现有的“使用记录 → 错误请求”页，UsageView 读取 tab 与 account_id 并筛选该账号。

@@ -281,7 +281,6 @@ export default {
       iqStates: { idle: 'Waiting for next round', queued: 'Queued', running: 'Checking', paused: 'Paused' },
       iqPausedBecause: 'Automatic checks paused: {reason}. Run one manual check after fixing it to resume.',
       iqGateActive: 'Degraded · cooling down',
-      iqCooling: 'cooling down',
       iqExplain: { gate: 'This account takes no requests for this model; other models keep serving. It recovers after a recheck answers all 3 questions correctly.', smart: 'Passed; the model is scheduled normally.', degraded: 'The latest round was judged degraded.', unknown: 'No valid verdict yet; scheduling is not affected.', off: 'Automatic checks are off; manual checks still work.' },
       iqRecheckAt: 'Next recheck {time}',
       iqRecheckPending: 'Recheck pending',
@@ -649,6 +648,7 @@ export default {
         ungrouped: 'Ungrouped',
         hint: 'Displayed as "group / base score / sticky bonus". The base score is computed within the current filtered candidate set and includes priority, load, queue depth, error rate, first-token latency, reset window, quota headroom, billing rate, and related factors. The sticky bonus applies only when sticky weighting is enabled for previous_response_id or session_hash. Higher scores are preferred.'
       },
+      capacityHint: 'The first badge is concurrency: current / limit. When the list is filtered to a group, a third green number shows the current concurrency in that group. Other badges appear per account settings: 5h window cost, active sessions, RPM, and D / W / total quota.',
       usageWindowsHint: '"5h / 7d" are the upstream account\'s official rolling usage windows (e.g. OpenAI ChatGPT, Claude). They are imposed by the upstream provider on the account itself — not configured by xy2api, and unrelated to the models you map. Usage resets automatically once each window rolls over, and the limit cannot be lifted from within xy2api.',
       ollamaCloud: {
         title: 'Ollama Cloud usage',

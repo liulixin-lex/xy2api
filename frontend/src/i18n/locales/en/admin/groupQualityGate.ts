@@ -64,6 +64,14 @@ export default {
       pending: 'Evaluated every minute',
       failed: 'Reload the list to retry'
     },
+    indicator: {
+      attention: 'Quality gate: {count} groups need attention',
+      ok: 'Quality gate: no issues'
+    },
+    panel: {
+      eligible: 'Eligible {count}',
+      window: 'Account overall'
+    },
     metrics: {
       errorRate: 'Err {value}',
       errorRateTitle: 'Error rate (last 15 min): {calls} calls, {failures} soft failures',
