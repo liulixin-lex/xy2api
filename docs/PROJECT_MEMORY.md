@@ -6,6 +6,16 @@
 
 ## 当前交接状态
 
+### 客户服务：悬浮在线客服与工单整合（2026-11-01 更新：实施、两轮审查修复与本地验证完成，开 PR）
+
+- **背景**：0.4.14 的在线工单只能异步沟通、只能发文字；用户要求加全站悬浮在线客服，工单并入，左侧菜单「在线工单」改名「客户服务」。
+- **目标**（2026-10-31 用户确认）：圆形气泡可拖动、松手靠边、默认右下角；点开可直接给客服发消息或建工单；访客能看到气泡，登录后才能聊天；聊天可发图，选图或粘贴时前端自动压缩；只做后台内提醒；首版不做 AI，只预留 `bot` 角色。
+- **要求与约束**：交付止于 PR、CI 全绿，不合并、不发版、不部署；「在线客服」开关默认关闭，升级后不自动出现气泡；工单的表、接口和 `xy-support-tickets` 的 literal 不动。
+- **已完成**：分支 `feat/support-chat-widget-20261031` 基于 0.4.16 的 main（`dcd47423e`），两个提交：功能本体与审查修复。包括迁移 287、后端、前端、文档、OpenSpec 和具名补丁 `xy-support-chat`。审查：gpt-6-astra 四轮只读审查加 Claude 多维审查与逐条反驳式核验，确认 30 项缺陷并修复 29 项（未修 1 项见卡点），另补 2 处测试空缺。全量门禁和本地栈端到端（接口 49 项、浏览器 34 项）通过，见操作日志。
+- **未完成**：1. 推送、开 PR、CI 全绿；2. 由另一位作者合并。发版与部署另行授权。
+- **卡点与风险**：无阻塞。聊天图片进入数据库备份，用「图片保留天数」控制体积；轮询在生产环境的负载未实测。未修：气泡（z-45）拖到右上角时会盖住顶栏用户菜单的右缘（降低层级会被页面浮层盖住，留待取舍）。既有问题（不在本变更）：`App.vue` 的工单 watcher 用数组 getter，登录用户每次刷新资料都会重置工单 store。
+- **关键位置**：OpenSpec `add-support-chat-widget-20261031`、[`SUPPORT_TICKETS.md`](SUPPORT_TICKETS.md)；契约、派工记录、端到端脚本和截图在仓库外的交接目录（客户服务，2026-10-31）。
+
 ### 版本与环境速览（2026-11-01 更新）
 
 - 最新正式版 XY2API v0.4.16（2026-11-01），Sub2API 兼容基线 0.2.15，迁移共 333 项（最后为 286）。
@@ -51,7 +61,7 @@
 - **工单与 2FA**：真实 OpenAI 网页登录/MFA 只有 mock；启用 2FA 须部署 Worker、固定运行时和加密恢复目录，回退前须解决不确定任务并保留密钥与恢复日志。
 - **安全与依赖**：vue-i18n 安全例外 2026-11-27 到期前处理；两台主机的 SSH 密码曾出现在对话中，建议改用密钥并更换；生产 settings 中的明文代理凭据建议轮换；`.github/SECURITY.md` 仍指向上游 Sub2API 的报告渠道，应改为本仓库（该文件未分类，改动需同时登记 `policy.json`）。
 - **待用户决定**：Codex 历史联网搜索导致 502（2026-10-17 诊断，原文已归档）——恢复映射或调整白名单，代码改进前先核实 0.4.0 的 `resilience_web_search_replay` 是否覆盖 apikey 中转账号；XY-image 0.0.17 先交接并经用户确认；远端保留的 3 个含未合入提交的分支（`feat/native-stream-recovery-20260930`、`fix/native-stream-concurrency-20261001`、`fix/signature-retry-preserve-tool-result-media`）是否删除；`tools/gateway-resilience/` 下 `staging/`、`fault-upstream/`、`cdn-sim/` 发布演练脚手架 0.4.6 后未再使用，是否删除。
-- **测试稳定性**：CI 偶发 `TestCompatPreludeCommentHeartbeatStillAllowsFailover/enabled` 等心跳计时用例；2026-10-28 已放宽一组截止时间，其余未定位。
+- **测试稳定性**：CI 偶发 `TestCompatPreludeCommentHeartbeatStillAllowsFailover/enabled` 等心跳计时用例；2026-10-28 已放宽一组截止时间，其余未定位。`TestGatewayServiceRecordUsage_PeakRateAffectsTokenModeImageOutputTokens` 与 OpenAI 同名用例把峰值时段写成 00:00–23:59，而判定区间是 `[PeakStart, PeakEnd)`，在 23:59 那一分钟运行会失败（2026-10-31 本地遇到，干净 main 相同）。
 - **仓库外环境收尾**：测试服务器的候选镜像、浸泡与演练目录、`xy2api_upgrade` 库按 staging-validation §11 清理；预上线主机的两份切换前备份在正式部署后删除。
 
 ## 进行中的工作
@@ -62,6 +72,7 @@
 - 开始状态：分支 `feat/support-chat-widget-20261031`，基于 origin/main `874560eb9`，独立工作树，干净。
 - 方案要点：聊天单独建 `support_chat_*` 表（迁移 287），工单表与接口不动；沿用 `support_tickets` 权限模块与 `support_ticket_enabled` 总开关，新增 `support_chat_enabled` 子开关（默认关闭，升级不自动出现气泡）；自适应轮询（不做 WS/SSE）；图片前端压缩后存数据库并鉴权读取，按保留天数清理；客服可删除消息、删除会话、禁言。
 - 分工：设计/契约/文档/OpenSpec/policy 由主 agent；后端 gpt-6.1-sol，前端 Opus，漏洞审查 gpt-6-astra。交付止于 PR，不合并、不发版、不部署。
+- 状态（2026-11-01）：见顶部「客户服务」小节与操作日志。
 
 ## 操作陷阱
 
@@ -256,3 +267,13 @@ pnpm --dir frontend run build
 - 修改文件：发布后的收尾仅两份记忆。分组方案、实施/复审/修复轮、缓存 PR 与本次发版的原始交接/登记/日志原样追加归档，既有归档前缀不变；仍未结事项保留顶部；已合并 #173 的工作区精简顶部交接也原样归档。收尾 PR 需全绿后普通合并；最终结果写本地报告，避免递归记忆 PR。
 - 卡点/风险：无发布阻塞。升级监控确认、一次性配置、缓存量化、真实上游验证和已接受限制仍保留；生产状态未重新核实。
 - 下一步：收尾 PR 合并后删除本次已合并远端分支；本地分支/worktree 留给主持人。标签保持不可变，main 除两份记忆外须与发行源码一致。
+
+### 2026-11-01 — 20261031-support-chat-widget — 实施、两轮审查修复与本地验证完成，开 PR
+
+- 请求/目标：用户 2026-10-31 要求全站悬浮在线客服（拖动、靠边、默认右下角），可直接发消息或建工单，在线工单并入并改名「客户服务」；方案经用户批准，交付止于 PR。
+- 开始状态：分支 `feat/support-chat-widget-20261031`，基于 `874560eb9` 开发；期间 main 合入 #175–#179 并发布 0.4.16，本分支 rebase 到 `dcd47423e`（10 个列表类冲突手工合并，权限目录 527 + 11 = 538，迁移 287 仍空闲）。
+- 完成操作：契约、文档、OpenSpec、policy 由主 agent；后端 gpt-6.1-sol 三轮实现加一轮审查修复；前端 Opus 实现并经两路复核与修复。审查：gpt-6-astra 四轮只读审查；Claude 五个维度独立审查，每条由反驳式核验确认（20 项全部成立，多数降级，修 19 项）；修复后又经四个维度复核（5 项）、astra 三轮复核（4 项）和两次 Claude 反驳式复核（1 项缺陷、2 处测试空缺），均已修复。第一轮修复都带测试；之后每处修复都核对过单独去掉时测试会失败。未补测试 1 处：`SendMessage` 唯一约束冲突的回退分支在用户 advisory 锁和会话行锁下无法触达，需故障注入。主要修复：`App.vue` 聊天 watcher 每分钟重置 store、删除被禁言会话解除禁言、删除消息不清图片数据、卸载后轮询残留、图片可被共用浏览器缓存跨账号读取、chunked JSON 超限与尾随数据、purge 关停误报、各种会话替换与旧摘要竞态（最后改为接口返回 `chat_id`，客户端按会话 id 判断）、员工在用户页看到聊天页签。
+- 修改文件：迁移 287 与 checksum；后端 service/repository/handler/routes/Wire/权限目录/审计/设置；前端气泡与面板、聊天组件与 store、收件箱与提醒、客户服务页、设置卡片、zh/en；`SUPPORT_TICKETS.md`、`ADMIN_PERMISSIONS.md`、`BACKUP_RELIABILITY.md`、`README.md`、OpenSpec、`docs_consistency.json`、`policy.json`、`UPSTREAM_BASE.json`、`Makefile`。
+- 验证：后端 build、vet（三种标签）、Wire 再生成一致、全量 unit、仓储集成（本地 PostgreSQL，`-race`）、golangci-lint 0 问题；前端 lint、typecheck、i18n、484 文件 3769 项、build；文档一致性、`git diff --check`；干净树 `sync.py audit` 通过；本地栈接口 49 项、浏览器 34 项全部通过。CI 结果见 PR。
+- 卡点/风险：见顶部「客户服务」小节（气泡与用户菜单重叠未修；既有工单 watcher 问题；生产轮询负载未实测）。
+- 下一步：推送并开 PR，CI 全绿后交另一位作者合并；发版与部署另行授权。仓库外的端到端环境与审查快照工作树在 PR 开出后清理。

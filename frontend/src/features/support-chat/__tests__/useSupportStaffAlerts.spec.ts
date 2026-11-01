@@ -133,11 +133,13 @@ describe('staff support alerts', () => {
     expect(FakeNotification.instances).toHaveLength(0) // baseline
     await vi.advanceTimersByTimeAsync(STAFF_SUMMARY_VISIBLE_MS)
     expect(FakeNotification.instances).toHaveLength(1)
-    expect(FakeNotification.instances[0].options).toMatchObject({ tag: 'xy2-support-chat' })
+    // renotify: Chromium re-alerts for a same-tag replacement instead of swapping it silently.
+    expect(FakeNotification.instances[0].options).toMatchObject({ tag: 'xy2-support-chat', renotify: true })
     await vi.advanceTimersByTimeAsync(STAFF_SUMMARY_VISIBLE_MS)
     expect(FakeNotification.instances).toHaveLength(1)
     await vi.advanceTimersByTimeAsync(STAFF_SUMMARY_VISIBLE_MS)
     expect(FakeNotification.instances).toHaveLength(2)
+    expect(FakeNotification.instances[1].options).toMatchObject({ tag: 'xy2-support-chat', renotify: true })
     expect(localStorage.getItem('support_alert_last_id:1')).toBe('13')
 
     const focus = vi.spyOn(window, 'focus').mockImplementation(() => undefined)
@@ -165,6 +167,67 @@ describe('staff support alerts', () => {
     await flushPromises()
     expect(FakeNotification.instances).toHaveLength(0)
     reloaded.unmount()
+  })
+
+  it('claims each new message under a per-user Web Lock so tabs polling together alert once', async () => {
+    await enableNotifications()
+    // Model two renderer processes: a localStorage write becomes visible to other
+    // readers only later (here: when the writer releases the lock).
+    const committed = new Map<string, string>()
+    const unpublished = new Map<string, string>()
+    const key = 'support_alert_last_id:1'
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation((name: string) => (name === key ? committed.get(name) ?? null : null))
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation((name: string, value: string) => { unpublished.set(name, value) })
+    const names: string[] = []
+    let queue: Promise<unknown> = Promise.resolve()
+    const request = vi.fn((name: string, callback: () => unknown) => {
+      names.push(name)
+      const run = queue.then(async () => {
+        const result = await callback()
+        for (const [k, v] of unpublished) committed.set(k, v)
+        unpublished.clear()
+        return result
+      })
+      queue = run.catch(() => undefined)
+      return run
+    })
+    vi.stubGlobal('navigator', { ...navigator, locks: { request } })
+
+    mocks.getAdminChatSummary.mockResolvedValue(summary(10))
+    const first = mountAlerts()
+    const second = mountAlerts()
+    await flushPromises()
+    expect(FakeNotification.instances).toHaveLength(0) // both baselines
+    mocks.getAdminChatSummary.mockResolvedValue(summary(12))
+    await vi.advanceTimersByTimeAsync(STAFF_SUMMARY_VISIBLE_MS)
+    expect(mocks.getAdminChatSummary).toHaveBeenCalledTimes(4)
+    expect(FakeNotification.instances).toHaveLength(1)
+    expect(names.every((name) => name === 'support_alert:1')).toBe(true)
+    expect(committed.get(key)).toBe('12')
+    first.unmount()
+    second.unmount()
+  })
+
+  it('does not claim or alert when the poller is torn down while it waits for the lock', async () => {
+    await enableNotifications()
+    let gated = false
+    let release!: () => void
+    const request = vi.fn(async (_name: string, callback: () => unknown) => {
+      if (gated) await new Promise<void>((resolve) => { release = resolve })
+      return callback()
+    })
+    vi.stubGlobal('navigator', { ...navigator, locks: { request } })
+    mocks.getAdminChatSummary.mockResolvedValueOnce(summary(10)).mockResolvedValueOnce(summary(12))
+    const wrapper = mountAlerts()
+    await flushPromises() // baseline 10
+    gated = true
+    await vi.advanceTimersByTimeAsync(STAFF_SUMMARY_VISIBLE_MS)
+    expect(request).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+    release()
+    await flushPromises()
+    expect(FakeNotification.instances).toHaveLength(0)
+    expect(localStorage.getItem('support_alert_last_id:1')).toBeNull()
   })
 
   it('stays silent and makes no request without view permission or with chat off', async () => {

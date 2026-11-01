@@ -8,14 +8,17 @@ export interface SupportWidgetVisibilityInput {
   /** Admins and operators answer chats; they never see the bubble. */
   canAccessAdmin: boolean
   backendMode: boolean
-  /** The mobile sidebar drawer is open. */
+  /** appStore.mobileOpen: the mobile sidebar drawer is open. Only counts below lg. */
   mobileOpen: boolean
+  /** Viewport is lg (1024px) or wider; there the drawer does not exist and a stale mobileOpen is ignored. */
+  desktop: boolean
   /** route.meta.hideSupportWidget */
   hiddenByRoute: boolean
 }
 
 export function shouldShowSupportWidget(input: SupportWidgetVisibilityInput): boolean {
-  return input.chatEnabled && !input.canAccessAdmin && !input.backendMode && !input.mobileOpen && !input.hiddenByRoute
+  const drawerOpen = input.mobileOpen && !input.desktop
+  return input.chatEnabled && !input.canAccessAdmin && !input.backendMode && !drawerOpen && !input.hiddenByRoute
 }
 
 const HIDDEN_PATHS = ['/login', '/register', '/email-verify', '/forgot-password', '/reset-password', '/setup']

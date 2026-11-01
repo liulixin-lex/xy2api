@@ -11,7 +11,7 @@ const api = vi.hoisted(() => ({
 }))
 const state = vi.hoisted(() => ({
   auth: null as null | { isAuthenticated: boolean; canAccessAdmin: boolean; user: { id: number } | null },
-  app: null as null | { contactInfo: string; sidebarCollapsed: boolean; cachedPublicSettings: Record<string, unknown> },
+  app: null as null | { contactInfo: string; sidebarCollapsed: boolean; sidebarLayouts: number; cachedPublicSettings: Record<string, unknown> },
   route: { fullPath: '/pricing?plan=pro', meta: { requiresAuth: false } as Record<string, unknown> },
   motion: { value: false },
 }))
@@ -56,8 +56,9 @@ beforeEach(() => {
   sessionStorage.clear()
   document.body.className = ''
   setAuth(false)
+  state.route.meta = { requiresAuth: false }
   state.motion.value = false
-  state.app = reactive({ contactInfo: '微信：xy2-support\nQQ 群：123', sidebarCollapsed: false, cachedPublicSettings: { support_chat_enabled: true, support_ticket_enabled: true } })
+  state.app = reactive({ contactInfo: '微信：xy2-support\nQQ 群：123', sidebarCollapsed: false, sidebarLayouts: 0, cachedPublicSettings: { support_chat_enabled: true, support_ticket_enabled: true } })
   api.getMyChat.mockResolvedValue({ chat: null, unread_count: 1, ticket_unread_count: 2, welcome: 'hi' })
 })
 
@@ -141,6 +142,79 @@ describe('support widget for users', () => {
     expect(wrapper.find('[data-testid="support-panel"]').exists()).toBe(true)
     await panel.trigger('keydown', { key: 'Escape' })
     expect(wrapper.find('[data-testid="support-panel"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('ignores the Esc that cancels an IME composition', async () => {
+    setAuth(true)
+    const wrapper = mountWidget()
+    await wrapper.get('[data-testid="support-bubble"]').trigger('click')
+    const panel = wrapper.get('[data-testid="support-panel"]')
+    // macOS Chrome/Edge: isComposing; Safari: composition already ended but keyCode 229.
+    panel.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true, cancelable: true }))
+    await flushPromises()
+    expect(wrapper.find('[data-testid="support-panel"]').exists()).toBe(true)
+    panel.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 229, bubbles: true, cancelable: true }))
+    await flushPromises()
+    expect(wrapper.find('[data-testid="support-panel"]').exists()).toBe(true)
+    await panel.trigger('keydown', { key: 'Escape' })
+    expect(wrapper.find('[data-testid="support-panel"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('stops the summary timer for good when unmounted during a summary read', async () => {
+    vi.useFakeTimers()
+    setAuth(true)
+    const wrapper = mountWidget()
+    await flushPromises()
+    expect(api.getMyChat).toHaveBeenCalledTimes(1)
+    let resolve!: (value: unknown) => void
+    api.getMyChat.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(api.getMyChat).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+    resolve({ chat: null, unread_count: 0, ticket_unread_count: 0, welcome: 'hi' })
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(5 * 60_000)
+    expect(api.getMyChat).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('support bubble left inset', () => {
+  let width: number
+  beforeEach(() => {
+    width = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', { value: 1280, configurable: true, writable: true })
+    localStorage.setItem(BUBBLE_STORAGE_KEY, JSON.stringify({ side: 'left', topRatio: 1 }))
+  })
+  afterEach(() => {
+    Object.defineProperty(window, 'innerWidth', { value: width, configurable: true, writable: true })
+  })
+  const x = (wrapper: ReturnType<typeof mountWidget>) =>
+    Number(/translate3d\((-?\d+)px/.exec(wrapper.get('[data-testid="support-bubble"]').attributes('style') ?? '')?.[1])
+
+  it('sits right of the sidebar whenever a layout renders it, whatever the route meta says', async () => {
+    setAuth(true)
+    state.route.meta = { requiresAuth: false } // e.g. /model-plaza?embedded=1 inside AppLayout
+    state.app!.sidebarLayouts = 1
+    const wrapper = mountWidget()
+    expect(x(wrapper)).toBe(272)
+    state.app!.sidebarCollapsed = true
+    await flushPromises()
+    expect(x(wrapper)).toBe(88)
+    wrapper.unmount()
+  })
+
+  it('uses the plain edge without a rendered sidebar, also for signed-in users', async () => {
+    setAuth(true)
+    state.route.meta = {} // e.g. the 404 page: protected, no AppLayout
+    const wrapper = mountWidget()
+    expect(x(wrapper)).toBe(16)
+    state.app!.sidebarLayouts = 1
+    Object.defineProperty(window, 'innerWidth', { value: 900, configurable: true, writable: true })
+    window.dispatchEvent(new Event('resize'))
+    await flushPromises()
+    expect(x(wrapper)).toBe(16) // below lg the sidebar is a drawer
     wrapper.unmount()
   })
 })

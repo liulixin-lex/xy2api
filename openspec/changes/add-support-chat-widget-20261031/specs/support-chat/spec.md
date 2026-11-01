@@ -49,12 +49,17 @@ The server MUST accept only JPEG, PNG and WebP detected by content, at most 1.5 
 
 ### Requirement: Staff moderation and privacy
 
-Staff with manage permission MUST be able to delete a single message (body and image removed, row kept), delete a whole conversation, and block or unblock a user from chat. Operators MUST NOT receive user balance or registration time. Message bodies MUST NOT be written to the audit log.
+Staff with manage permission MUST be able to delete a single message (body and image removed, row kept), delete a whole conversation (a block on that user survives the deletion), and block or unblock a user from chat. Operators MUST NOT receive user balance or registration time. Message bodies MUST NOT be written to the audit log.
 
 #### Scenario: Leaked API key
 
 - **WHEN** staff delete a message containing a pasted key
 - **THEN** both sides show 「该消息已删除」 after their next poll and the text is no longer returned by any endpoint.
+
+#### Scenario: Deleting a blocked user's conversation
+
+- **WHEN** staff block a user and then delete that user's conversation
+- **THEN** all messages and images are removed, the user's client clears the old thread, and the user's next message is still rejected as blocked.
 
 ### Requirement: Quiet alerts and audited reads
 

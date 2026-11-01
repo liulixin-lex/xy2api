@@ -15,6 +15,8 @@ import { resolveSiteBillingMode } from '@/utils/siteBillingMode'
 import { shouldShowSupportWidget } from '@/features/support-widget/supportWidgetVisibility'
 import { useSupportBadges } from '@/features/support-chat/useSupportBadges'
 import { useSupportStaffAlerts } from '@/features/support-chat/useSupportStaffAlerts'
+import { useSupportChatIdentityReset } from '@/features/support-chat/useSupportChatIdentityReset'
+import { useMediaQuery } from '@vueuse/core'
 
 // Floating support chat; its chunk only loads when the bubble is shown.
 const SupportWidget = defineAsyncComponent(() => import('@/features/support-widget/SupportWidget.vue'))
@@ -33,11 +35,19 @@ const adminSettingsStore = useAdminSettingsStore()
 const { staffBadge } = useSupportBadges()
 const supportStaffAlerts = useSupportStaffAlerts()
 
+// lg+: the sidebar is fixed, so a mobileOpen left over from the drawer means nothing there.
+const isDesktop = useMediaQuery('(min-width: 1024px)')
+// Clear the drawer flag on reaching lg+, so going back below lg neither reopens
+// the drawer nor unmounts the widget (and a draft in it).
+watch(isDesktop, (desktop) => {
+  if (desktop) appStore.setMobileOpen(false)
+})
 const supportWidgetVisible = computed(() => shouldShowSupportWidget({
   chatEnabled: isFeatureFlagEnabled(FeatureFlags.supportChat),
   canAccessAdmin: authStore.canAccessAdmin,
   backendMode: appStore.backendModeEnabled,
   mobileOpen: appStore.mobileOpen,
+  desktop: isDesktop.value,
   hiddenByRoute: route.meta.hideSupportWidget === true,
 }))
 
@@ -178,11 +188,8 @@ watch(
   }
 )
 
-// The chat belongs to one signed-in user; drop it (and its image URLs) on any identity or switch change.
-watch(
-  () => [authStore.user?.id, authStore.user?.role, appStore.cachedPublicSettings?.support_chat_enabled],
-  () => supportChatStore.reset()
-)
+// The chat belongs to one signed-in user; drop it (and its image URLs) when the id, role or chat switch changes.
+useSupportChatIdentityReset()
 
 // Route change trigger (throttled by store)
 router.afterEach(() => {

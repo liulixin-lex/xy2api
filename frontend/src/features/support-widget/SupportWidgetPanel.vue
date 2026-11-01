@@ -143,8 +143,10 @@ function setTab(value: string) {
   tab.value = value === 'tickets' ? 'tickets' : 'chat'
 }
 
-/** Esc closes the panel unless something inside handled it or a dialog is open on top. */
+/** Esc closes the panel unless an IME is composing, something inside handled it or a dialog is open on top. */
 function onEscape(event: KeyboardEvent) {
+  // Esc that cancels an IME candidate (macOS Chrome: isComposing; Safari: keyCode 229 only) keeps the draft.
+  if (event.isComposing || event.keyCode === 229) return
   if (event.defaultPrevented || document.body.classList.contains('modal-open')) return
   event.preventDefault()
   emit('close')

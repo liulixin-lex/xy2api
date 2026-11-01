@@ -893,5 +893,7 @@ func stringSetting(value *string, fallback string) string {
 }
 
 func equalSupportTicketConfig(a, b service.SupportTicketConfig) bool {
-	return a.MaxOpenPerUser == b.MaxOpenPerUser && a.Notice == b.Notice && equalStringSlice(a.Categories, b.Categories)
+	return a.MaxOpenPerUser == b.MaxOpenPerUser && a.Notice == b.Notice &&
+		a.ChatWelcome == b.ChatWelcome && a.ChatImageRetentionDays == b.ChatImageRetentionDays &&
+		equalStringSlice(a.Categories, b.Categories)
 }

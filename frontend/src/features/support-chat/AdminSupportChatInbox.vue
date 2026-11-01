@@ -248,9 +248,10 @@ function previewText(chat: SupportChatAdminItem) {
   return chat.preview
 }
 
-async function loadList() {
+/** true when this read was still the newest list read and `chats` now holds its rows. */
+async function loadList(): Promise<boolean> {
   const request = requests.begin()
-  if (!request) return
+  if (!request) return false
   try {
     const result = await listAdminChats({
       filter: filter.value,
@@ -258,11 +259,13 @@ async function loadList() {
       page: page.value,
       page_size: pageSize,
     })
-    if (!request.current()) return
+    if (!request.current()) return false
     chats.value = result.items
     total.value = result.total
+    return true
   } catch (err) {
     if (request.current()) appStore.showError(supportChatErrorMessage(err, t, 'supportChat.loadFailed'))
+    return false
   } finally {
     request.finish()
   }
@@ -327,12 +330,13 @@ function onSend(payload: { body: string; image: CompressedImage | null }) {
   void thread.send(payload.body, payload.image)
 }
 
-/** The newest user message on screen; the server refuses to resolve when a newer one arrived. */
-function lastSeenUserMessageId(): number {
-  for (let index = thread.state.messages.length - 1; index >= 0; index--) {
-    if (thread.state.messages[index].author_role === 'user') return thread.state.messages[index].id
-  }
-  return 0
+/**
+ * The thread's poll cursor: every message up to it was fetched by GET. The server
+ * refuses to resolve when a user message newer than this exists. Not the newest
+ * loaded id: our own POSTed reply can be newer than a user message not polled yet.
+ */
+function lastSeenMessageId(): number {
+  return thread.cursor()
 }
 
 async function act(action: () => Promise<SupportChatAdminItem>, successKey: string) {
@@ -342,6 +346,8 @@ async function act(action: () => Promise<SupportChatAdminItem>, successKey: stri
   try {
     const result = await action()
     if (id !== selectedId.value) return
+    // Drop older detail reads still in flight; they predate this action.
+    detailSequence++
     detail.value = result
     appStore.showSuccess(t(successKey))
     void loadList()
@@ -361,12 +367,12 @@ async function act(action: () => Promise<SupportChatAdminItem>, successKey: stri
 
 function resolve() {
   const id = selectedId.value
-  return act(() => setAdminChatStatus(id, 'resolved', lastSeenUserMessageId()), 'supportChat.admin.resolved')
+  return act(() => setAdminChatStatus(id, 'resolved', lastSeenMessageId()), 'supportChat.admin.resolved')
 }
 
 function reopen() {
   const id = selectedId.value
-  return act(() => setAdminChatStatus(id, 'open', lastSeenUserMessageId()), 'supportChat.admin.reopened')
+  return act(() => setAdminChatStatus(id, 'open', lastSeenMessageId()), 'supportChat.admin.reopened')
 }
 
 function toggleBlocked() {
@@ -410,13 +416,18 @@ function onVisibility() {
 // The App-level poller refreshes the summary; the inbox only refetches when something changed.
 // List rows carry the same fields as the detail, so the open chat is taken from the
 // refreshed list and the audited detail read only runs when it is not on this page.
+// A row from a list read that a later read superseded (the one act() starts, or a
+// newer version bump's) may be stale, so it is never copied; the detail read runs instead.
 watch(() => chatStore.adminSummary?.version, async (version, old) => {
   if (version === undefined || old === undefined || version === old) return
-  await loadList()
+  const sequence = detailSequence
+  const fresh = await loadList()
   const id = selectedId.value
   if (!id) return
   void thread.poll()
-  const row = chats.value.find((chat) => chat.id === id)
+  // An action or another detail read wrote detail meanwhile.
+  if (sequence !== detailSequence) return
+  const row = fresh ? chats.value.find((chat) => chat.id === id) : undefined
   if (row) {
     // Invalidate an older detail read still in flight.
     detailSequence++

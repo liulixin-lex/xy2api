@@ -20,7 +20,7 @@ func NewSupportChatRepository(db *sql.DB) service.SupportChatRepository {
 
 const supportChatCols = `c.id,c.user_id,c.status,c.waiting_since,c.last_message_at,c.last_message_role,c.last_message_id,c.last_user_message_id,c.last_staff_message_id,c.user_read_message_id,c.staff_read_message_id,c.message_count,c.revision,c.content_version,c.blocked_at,c.blocked_reason,c.resolved_at,c.created_at,c.updated_at`
 
-const supportChatMessageSelect = `SELECT m.id,m.author_role,m.body,m.image_id,m.client_msg_id,m.deleted_at,m.created_at,CASE WHEN m.author_role='admin' THEN COALESCE(a.username,a.email,'') ELSE '' END AS author_name,i.content_type,i.width,i.height,i.byte_size,(i.purged_at IS NOT NULL OR i.data IS NULL) FROM support_chat_messages m LEFT JOIN users a ON a.id=m.author_user_id LEFT JOIN support_chat_images i ON i.id=m.image_id `
+const supportChatMessageSelect = `SELECT m.id,m.author_role,m.body,m.image_id,m.client_msg_id,m.deleted_at,m.created_at,CASE WHEN m.author_role='admin' THEN COALESCE(NULLIF(a.username,''),a.email,'') ELSE '' END AS author_name,i.content_type,i.width,i.height,i.byte_size,(i.purged_at IS NOT NULL OR i.data IS NULL) FROM support_chat_messages m LEFT JOIN users a ON a.id=m.author_user_id LEFT JOIN support_chat_images i ON i.id=m.image_id `
 
 type chatRow struct {
 	c                     service.SupportChat
@@ -130,7 +130,7 @@ func (r *supportChatRepository) GetChat(ctx context.Context, id int64, withUser 
 	var imageID sql.NullInt64
 	err = r.db.QueryRowContext(ctx, `SELECT body,deleted_at,image_id FROM support_chat_messages WHERE chat_id=$1 ORDER BY id DESC LIMIT 1`, id).Scan(&body, &deleted, &imageID)
 	if errors.Is(err, sql.ErrNoRows) {
-		// A chat with no messages has no preview.
+		x.c.PreviewKind = "none"
 	} else if err != nil {
 		return nil, err
 	}
@@ -355,6 +355,7 @@ func (r *supportChatRepository) SendMessage(ctx context.Context, in service.Supp
 			if scanErr != nil {
 				return nil, false, scanErr
 			}
+			message.ChatID = row.c.ID
 			return message, true, nil
 		}
 	}
@@ -400,6 +401,7 @@ func (r *supportChatRepository) SendMessage(ctx context.Context, in service.Supp
 			if readErr != nil {
 				return nil, false, readErr
 			}
+			duplicate.ChatID = row.c.ID
 			return duplicate, true, nil
 		}
 		return nil, false, err
@@ -426,6 +428,7 @@ func (r *supportChatRepository) SendMessage(ctx context.Context, in service.Supp
 	if err = tx.Commit(); err != nil {
 		return nil, false, err
 	}
+	m.ChatID = row.c.ID
 	return &m, false, nil
 }
 
@@ -502,13 +505,27 @@ func (r *supportChatRepository) DeleteMessage(ctx context.Context, cid, mid int6
 		return nil, err
 	}
 	var m service.SupportChatMessage
-	err = tx.QueryRowContext(ctx, `UPDATE support_chat_messages SET body='',deleted_at=NOW(),deleted_by_role='admin' WHERE id=$1 AND chat_id=$2 AND deleted_at IS NULL RETURNING id`, mid, cid).Scan(&m.ID)
+	var imageID sql.NullInt64
+	err = tx.QueryRowContext(ctx, `UPDATE support_chat_messages SET body='',deleted_at=NOW(),deleted_by_role='admin' WHERE id=$1 AND chat_id=$2 AND deleted_at IS NULL RETURNING id,image_id`, mid, cid).Scan(&m.ID, &imageID)
 	if errors.Is(err, sql.ErrNoRows) {
-		message, scanErr := scanSupportChatMessage(tx.QueryRowContext(ctx, supportChatMessageSelect+`WHERE m.id=$1 AND m.chat_id=$2`, mid, cid), true)
-		if errors.Is(scanErr, sql.ErrNoRows) {
+		var existingImageID sql.NullInt64
+		err = tx.QueryRowContext(ctx, `SELECT image_id FROM support_chat_messages WHERE id=$1 AND chat_id=$2 AND deleted_at IS NOT NULL`, mid, cid).Scan(&existingImageID)
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, service.ErrSupportChatMessageNotFound
 		}
+		if err != nil {
+			return nil, err
+		}
+		if existingImageID.Valid {
+			if _, err = tx.ExecContext(ctx, `UPDATE support_chat_images SET data=NULL,purged_at=COALESCE(purged_at,NOW()) WHERE id=$1`, existingImageID.Int64); err != nil {
+				return nil, err
+			}
+		}
+		message, scanErr := scanSupportChatMessage(tx.QueryRowContext(ctx, supportChatMessageSelect+`WHERE m.id=$1 AND m.chat_id=$2`, mid, cid), true)
 		if scanErr != nil {
+			if errors.Is(scanErr, sql.ErrNoRows) {
+				return nil, service.ErrSupportChatMessageNotFound
+			}
 			return nil, scanErr
 		}
 		if err = tx.Commit(); err != nil {
@@ -519,18 +536,16 @@ func (r *supportChatRepository) DeleteMessage(ctx context.Context, cid, mid int6
 	if err != nil {
 		return nil, err
 	}
+	if imageID.Valid {
+		if _, err = tx.ExecContext(ctx, `UPDATE support_chat_images SET data=NULL,purged_at=COALESCE(purged_at,NOW()) WHERE id=$1`, imageID.Int64); err != nil {
+			return nil, err
+		}
+	}
 	message, scanErr := scanSupportChatMessage(tx.QueryRowContext(ctx, supportChatMessageSelect+`WHERE m.id=$1`, mid), true)
 	if scanErr != nil {
 		return nil, scanErr
 	}
 	m = *message
-	if message.Image != nil {
-		_, err = tx.ExecContext(ctx, `UPDATE support_chat_images SET data=NULL,purged_at=COALESCE(purged_at,NOW()) WHERE id=$1`, message.Image.ID)
-		if err != nil {
-			return nil, err
-		}
-		m.Image = nil
-	}
 	_, err = tx.ExecContext(ctx, `UPDATE support_chats SET content_version=content_version+1,revision=revision+1,updated_at=NOW() WHERE id=$1`, cid)
 	if err != nil {
 		return nil, err
@@ -542,15 +557,32 @@ func (r *supportChatRepository) DeleteMessage(ctx context.Context, cid, mid int6
 	return &m, nil
 }
 func (r *supportChatRepository) DeleteChat(ctx context.Context, id int64) error {
-	res, err := r.db.ExecContext(ctx, `DELETE FROM support_chats WHERE id=$1`, id)
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
+	defer func() { _ = tx.Rollback() }()
+	var userID, revision int64
+	var blockedAt sql.NullTime
+	var blockedReason string
+	err = tx.QueryRowContext(ctx, `SELECT user_id,blocked_at,blocked_reason,revision FROM support_chats WHERE id=$1 FOR UPDATE`, id).Scan(&userID, &blockedAt, &blockedReason, &revision)
+	if errors.Is(err, sql.ErrNoRows) {
 		return service.ErrSupportChatNotFound
 	}
-	return nil
+	if err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM support_chats WHERE id=$1`, id); err != nil {
+		return err
+	}
+	if blockedAt.Valid {
+		// revision+1 keeps the staff summary version (SUM(revision)) moving, even
+		// when the deleted row was itself an untouched placeholder.
+		if _, err = tx.ExecContext(ctx, `INSERT INTO support_chats(user_id,status,blocked_at,blocked_reason,revision) VALUES($1,'resolved',$2,$3,$4)`, userID, blockedAt.Time, blockedReason, revision+1); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 func (r *supportChatRepository) GetImage(ctx context.Context, id, owner int64, admin bool) (*service.SupportChatImageResult, error) {
 	q := `SELECT i.id,i.content_type,i.width,i.height,i.byte_size,i.data,i.purged_at,c.user_id,m.deleted_at FROM support_chat_images i JOIN support_chats c ON c.id=i.chat_id LEFT JOIN support_chat_messages m ON m.image_id=i.id WHERE i.id=$1`

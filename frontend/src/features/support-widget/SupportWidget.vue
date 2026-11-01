@@ -12,7 +12,6 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
 import { useAppStore, useAuthStore, useSupportChatStore } from '@/stores'
 import { useSupportBadges } from '@/features/support-chat/useSupportBadges'
 import SupportBubble from './SupportBubble.vue'
@@ -29,7 +28,6 @@ const SIDEBAR_COLLAPSED_PX = 72
 
 // Mounted by App.vue only while supportWidgetVisibility says so. Guests see the
 // bubble and a login prompt; they never call a /support-chat endpoint.
-const route = useRoute()
 const auth = useAuthStore()
 const app = useAppStore()
 const chatStore = useSupportChatStore()
@@ -37,9 +35,9 @@ const { userBadge } = useSupportBadges()
 
 const open = ref(false)
 const viewportWidth = ref(window.innerWidth)
-// On desktop pages with the sidebar the left edge sits right of it.
+// On desktop, while a layout renders the app sidebar, the left edge sits right of it.
 const leftInset = computed(() => {
-  if (viewportWidth.value < DESKTOP_PX || !auth.isAuthenticated || route.meta.requiresAuth === false) return 0
+  if (viewportWidth.value < DESKTOP_PX || app.sidebarLayouts === 0) return 0
   return app.sidebarCollapsed ? SIDEBAR_COLLAPSED_PX : SIDEBAR_WIDTH_PX
 })
 const bubble = useFloatingBubble(leftInset)
@@ -47,6 +45,8 @@ const badge = computed(() => (auth.isAuthenticated ? userBadge.value : 0))
 // While the panel is open the conversation polls messages itself.
 const conversationVisible = computed(() => open.value)
 let timer: ReturnType<typeof setTimeout> | undefined
+// Set on unmount: a summary read still in flight then must not arm another timer.
+let disposed = false
 
 function stopTimer() {
   if (timer) clearTimeout(timer)
@@ -56,17 +56,17 @@ function stopTimer() {
 /** Collapsed bubble: GET /support-chat every 60s, every 15s for 10 minutes after the user sent something. */
 function scheduleSummary() {
   stopTimer()
-  if (!auth.isAuthenticated || document.visibilityState === 'hidden') return
+  if (disposed || !auth.isAuthenticated || document.visibilityState === 'hidden') return
   const recentlySent = chatStore.lastSentAt > 0 && Date.now() - chatStore.lastSentAt < WIDGET_FAST_WINDOW_MS
   timer = setTimeout(async () => {
     timer = undefined
     if (!conversationVisible.value) await chatStore.refreshSummary()
-    scheduleSummary()
+    if (!disposed) scheduleSummary()
   }, recentlySent ? WIDGET_SUMMARY_AFTER_SEND_MS : WIDGET_SUMMARY_MS)
 }
 
 function refreshNow() {
-  if (!auth.isAuthenticated) return
+  if (disposed || !auth.isAuthenticated) return
   void chatStore.refreshSummary()
   scheduleSummary()
 }
@@ -110,6 +110,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  disposed = true
   stopTimer()
   document.removeEventListener('visibilitychange', onVisibility)
   window.removeEventListener('resize', onResize)

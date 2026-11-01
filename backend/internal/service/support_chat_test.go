@@ -11,6 +11,8 @@ import (
 	"image"
 	"image/jpeg"
 	"image/png"
+	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
@@ -198,4 +200,75 @@ func TestSupportChatImageValidationTable(t *testing.T) {
 	}
 }
 
+type blockingSupportChatPurgeRepo struct {
+	*supportChatTestRepo
+	started  chan struct{}
+	canceled chan struct{}
+	once     sync.Once
+}
+
+func (r *blockingSupportChatPurgeRepo) PurgeImages(ctx context.Context, _ int, _ time.Time) (int64, int64, error) {
+	r.once.Do(func() { close(r.started) })
+	<-ctx.Done()
+	close(r.canceled)
+	// lib/pq reports an in-flight cancel as its own error, not context.Canceled,
+	// after earlier batches already committed.
+	return 500, 50000, errors.New("pq: canceling statement due to user request")
+}
+
+func TestSupportChatImagePurgeStopCancelsInFlightRun(t *testing.T) {
+	var logs bytes.Buffer
+	var logsMu sync.Mutex
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&lockedWriter{w: &logs, mu: &logsMu}, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	repo := &blockingSupportChatPurgeRepo{
+		supportChatTestRepo: &supportChatTestRepo{},
+		started:             make(chan struct{}),
+		canceled:            make(chan struct{}),
+	}
+	service := NewSupportChatImagePurgeService(repo, nil, nil, nil)
+	service.settings = supportChatTestSettings{runtime: SupportChatRuntime{Enabled: true, Config: SupportTicketConfig{ChatImageRetentionDays: 90}}}
+	service.initialDelay = time.Millisecond
+	service.Start()
+	t.Cleanup(service.Stop)
+	select {
+	case <-repo.started:
+	case <-time.After(time.Second):
+		t.Fatal("purge did not start")
+	}
+	stopped := make(chan struct{})
+	go func() {
+		service.Stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not cancel the in-flight purge")
+	}
+	select {
+	case <-repo.canceled:
+	default:
+		t.Fatal("purge repository did not observe cancellation")
+	}
+	logsMu.Lock()
+	out := logs.String()
+	logsMu.Unlock()
+	require.Contains(t, out, "support chat image purge interrupted by shutdown")
+	require.Contains(t, out, "rows=500")
+	require.NotContains(t, out, "level=WARN")
+}
+
 var _ = errors.Is
+
+type lockedWriter struct {
+	w  *bytes.Buffer
+	mu *sync.Mutex
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
+}

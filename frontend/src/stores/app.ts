@@ -19,6 +19,8 @@ export const useAppStore = defineStore('app', () => {
 
   const sidebarCollapsed = ref<boolean>(false)
   const mobileOpen = ref<boolean>(false)
+  /** Mounted layouts that render the app sidebar (AppLayout); > 0 while it is on screen. A counter so route-change mount/unmount order cannot leave it wrong. */
+  const sidebarLayouts = ref<number>(0)
   const sidebarScrollTop = ref<number>(0)
   const loading = ref<boolean>(false)
   const toasts = ref<Toast[]>([])
@@ -85,6 +87,15 @@ export const useAppStore = defineStore('app', () => {
    */
   function setMobileOpen(open: boolean): void {
     mobileOpen.value = open
+  }
+
+  /** AppLayout calls these on mount/unmount, so others know whether the sidebar is rendered. */
+  function registerSidebarLayout(): void {
+    sidebarLayouts.value++
+  }
+
+  function unregisterSidebarLayout(): void {
+    sidebarLayouts.value = Math.max(0, sidebarLayouts.value - 1)
   }
 
   /**
@@ -447,6 +458,7 @@ export const useAppStore = defineStore('app', () => {
     // State
     sidebarCollapsed,
     mobileOpen,
+    sidebarLayouts,
     sidebarScrollTop,
     loading,
     toasts,
@@ -480,6 +492,8 @@ export const useAppStore = defineStore('app', () => {
     setSidebarCollapsed,
     toggleMobileSidebar,
     setMobileOpen,
+    registerSidebarLayout,
+    unregisterSidebarLayout,
     setLoading,
     showToast,
     showSuccess,

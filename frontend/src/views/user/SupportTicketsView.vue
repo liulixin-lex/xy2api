@@ -28,7 +28,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import MyTicketList from '@/features/support-tickets/MyTicketList.vue'
 import SupportChatConversation from '@/features/support-chat/SupportChatConversation.vue'
 import SupportTabs from '@/features/support-chat/SupportTabs.vue'
-import { useSupportChatStore, useSupportTicketStore } from '@/stores'
+import { useAuthStore, useSupportChatStore, useSupportTicketStore } from '@/stores'
 import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'
 
 type HubTab = 'chat' | 'tickets'
@@ -40,7 +40,9 @@ const router = useRouter()
 const chatStore = useSupportChatStore()
 const ticketStore = useSupportTicketStore()
 
-const chatEnabled = computed(() => isFeatureFlagEnabled(FeatureFlags.supportChat))
+const authStore = useAuthStore()
+// Staff answer chats in the admin inbox; like the bubble, the user chat is not theirs.
+const chatEnabled = computed(() => isFeatureFlagEnabled(FeatureFlags.supportChat) && !authStore.canAccessAdmin)
 const tab = computed<HubTab>(() => {
   if (!chatEnabled.value) return 'tickets'
   return route.query?.tab === 'tickets' ? 'tickets' : 'chat'

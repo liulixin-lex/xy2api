@@ -46,6 +46,8 @@ export interface SupportChatMessage {
 }
 
 export interface SupportChatThreadPage {
+  /** The chat this page belongs to (the requested chat on the admin side; 0 when the user has no chat). */
+  chat_id?: number
   /** Always ascending by id. */
   items: SupportChatMessage[]
   /** after_id: newer remain; before_id or none: older remain. */
@@ -95,6 +97,8 @@ export interface SupportChatSendRequest {
 export interface SupportChatSendResult {
   message: SupportChatMessage
   duplicate: boolean
+  /** The chat the message went into (user side). */
+  chat_id?: number
 }
 
 export interface SupportChatUserCard {

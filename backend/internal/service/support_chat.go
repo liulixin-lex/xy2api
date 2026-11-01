@@ -74,6 +74,8 @@ type SupportChatMessage struct {
 	ClientMsgID string            `json:"client_msg_id,omitempty"`
 	CreatedAt   time.Time         `json:"created_at"`
 	AuthorName  string            `json:"author_name,omitempty"`
+	// ChatID is set on send results only; the handler returns it beside the message.
+	ChatID int64 `json:"-"`
 }
 type SupportChat struct {
 	ID                 int64              `json:"id"`
@@ -103,6 +105,8 @@ type SupportChat struct {
 	StaffReadMessageID int64              `json:"-"`
 }
 type SupportChatThreadPage struct {
+	// ChatID is 0 when the user has no chat; a different id means the chat was replaced.
+	ChatID            int64                `json:"chat_id"`
 	Items             []SupportChatMessage `json:"items"`
 	HasMore           bool                 `json:"has_more"`
 	Status            string               `json:"status"`
@@ -319,6 +323,7 @@ func (s *SupportChatService) Messages(ctx context.Context, in SupportChatMessage
 	}
 	p := &SupportChatThreadPage{Items: items, HasMore: more}
 	if c != nil {
+		p.ChatID = in.ChatID
 		p.Status = c.Status
 		p.Blocked = c.Blocked
 		mapChatViewer(c, in.Admin)

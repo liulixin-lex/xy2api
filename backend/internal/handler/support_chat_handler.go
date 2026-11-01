@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -73,7 +74,11 @@ func (h *SupportChatHandler) Send(c *gin.Context) {
 	in.AuthorRole = service.SupportChatRoleUser
 	in.AuthorUserID = uid
 	m, dup, e := h.service.Send(c.Request.Context(), in)
-	supportChatRespond(c, gin.H{"message": m, "duplicate": dup}, e)
+	var chatID int64
+	if m != nil {
+		chatID = m.ChatID
+	}
+	supportChatRespond(c, gin.H{"message": m, "duplicate": dup, "chat_id": chatID}, e)
 }
 func (h *SupportChatHandler) Read(c *gin.Context) {
 	uid, ok := supportChatCaller(c)
@@ -264,7 +269,18 @@ func parseSupportChatSend(c *gin.Context) (service.SupportChatSendInput, bool) {
 			Body        string `json:"body"`
 			ClientMsgID string `json:"client_msg_id"`
 		}
-		if c.ShouldBindJSON(&req) != nil {
+		// Read the whole capped body: a decoder would stop after the first JSON
+		// value and leave oversized trailing data unread and unrejected.
+		raw, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			if _, tooLarge := extractMaxBytesError(err); tooLarge {
+				response.ErrorFrom(c, service.ErrSupportChatImageTooLarge)
+			} else {
+				response.BadRequest(c, "invalid request body")
+			}
+			return in, false
+		}
+		if json.Unmarshal(raw, &req) != nil {
 			response.BadRequest(c, "invalid request body")
 			return in, false
 		}
@@ -305,7 +321,7 @@ func writeSupportChatImage(c *gin.Context, v *service.SupportChatImageResult) {
 	c.Header("Content-Type", v.Image.ContentType)
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.Header("Content-Security-Policy", "sandbox")
-	c.Header("Cache-Control", "private, max-age=86400")
+	c.Header("Cache-Control", "private, no-store")
 	c.Header("Content-Disposition", "inline")
 	c.Data(http.StatusOK, v.Image.ContentType, v.Data)
 }

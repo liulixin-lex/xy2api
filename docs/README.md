@@ -75,7 +75,7 @@
 
 | 变更 | 内容 | 状态 |
 |---|---|---|
-| [`add-support-chat-widget-20261031`](../openspec/changes/add-support-chat-widget-20261031/) | 客户服务：悬浮在线客服气泡、会话与图片、客服收件箱与提醒，工单并入 | 开发中（分支 `feat/support-chat-widget-20261031`），未发布 |
+| [`add-support-chat-widget-20261031`](../openspec/changes/add-support-chat-widget-20261031/) | 客户服务：悬浮在线客服气泡、会话与图片、客服收件箱与提醒，工单并入 | 实施与本地验证完成，分支 `feat/support-chat-widget-20261031` 开 PR 待合并；未发布 |
 | [`group-quality-gate-20261031`](../openspec/changes/group-quality-gate-20261031/) | 分组质量门槛、排序与满载借用、利润门实时成本、兜底改回按兜底组计费 | 实施、集成与门禁完成；待用户授权推送/PR/发版（未发布） |
 | [`anthropic-cache-ttl-20261030`](../openspec/changes/anthropic-cache-ttl-20261030/) | Anthropic TTL、Key 四态、usage/计费/预留及旧策略退役 | 随 0.4.15 发布（PR #170）；生产未部署，真实供应商缓存收益未验证 |
 | [`gateway-resilience-045-20261021`](../openspec/changes/gateway-resilience-045-20261021/) | 网关韧性 0.4.5：RA-1 修复、OpenAI Responses 透传与 Gateway 入站经 Anthropic 上游的明确终止、审查遗留 P2 | 0.4.5、0.4.6 已发布（生产未部署）；后续待办见其 tasks §7 |

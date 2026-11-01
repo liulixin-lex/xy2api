@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   replace: vi.fn(),
   route: null as null | { query: Record<string, string> },
   app: { cachedPublicSettings: {} as Record<string, unknown> },
+  auth: { canAccessAdmin: false },
 }))
 vi.mock('vue-i18n', async () => ({
   ...(await vi.importActual<typeof import('vue-i18n')>('vue-i18n')),
@@ -19,6 +20,7 @@ vi.mock('vue-router', async () => ({
   useRouter: () => ({ replace: mocks.replace }),
 }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => mocks.app }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => mocks.auth }))
 
 const stubs = {
   AppLayout: { template: '<div><slot /></div>' },
@@ -33,6 +35,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.route = reactive({ query: {} })
   mocks.app.cachedPublicSettings = { support_ticket_enabled: true, support_chat_enabled: true }
+  mocks.auth.canAccessAdmin = false
 })
 
 describe('客户服务 page tabs (user)', () => {
@@ -53,6 +56,15 @@ describe('客户服务 page tabs (user)', () => {
     mocks.route!.query = { tab: 'chat' }
     const wrapper = mount(UserSupportView, { global: { stubs } })
     expect(wrapper.find('[role="tablist"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="my-ticket-list"]').exists()).toBe(true)
+  })
+
+  it('shows staff only the tickets: they answer chats in the admin inbox', () => {
+    mocks.auth.canAccessAdmin = true
+    mocks.route!.query = { tab: 'chat' }
+    const wrapper = mount(UserSupportView, { global: { stubs } })
+    expect(wrapper.find('[role="tablist"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="conversation"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="my-ticket-list"]').exists()).toBe(true)
   })
 })

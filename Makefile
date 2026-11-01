@@ -107,7 +107,9 @@ FRONTEND_CRITICAL_VITEST := \
 	src/features/support-widget/__tests__/supportWidgetVisibility.spec.ts \
 	src/features/support-widget/__tests__/SupportWidget.spec.ts \
 	src/features/support-widget/__tests__/SupportWidgetTickets.spec.ts \
-	src/views/user/__tests__/SupportHubTabs.spec.ts
+	src/views/user/__tests__/SupportHubTabs.spec.ts \
+	src/features/support-chat/__tests__/useSupportChatIdentityReset.spec.ts \
+	src/components/layout/__tests__/AppLayout.sidebarFlag.spec.ts
 
 # 一键编译前后端
 build: build-backend build-frontend

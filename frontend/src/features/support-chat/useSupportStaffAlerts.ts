@@ -13,6 +13,7 @@ export const SUPPORT_ALERT_SOUND_KEY = 'support_alert_sound'
 export const SUPPORT_ALERT_NOTIFY_KEY = 'support_alert_notify'
 export const SUPPORT_ALERT_LAST_ID_PREFIX = 'support_alert_last_id:'
 const NOTIFICATION_TAG = 'xy2-support-chat'
+export const SUPPORT_ALERT_LOCK_PREFIX = 'support_alert:'
 const CHAT_INBOX_PATH = '/admin/support-tickets?tab=chats'
 
 function readFlag(key: string): boolean {
@@ -151,7 +152,9 @@ export function watchStaffSummaryFast(): () => void {
  * summary (15s visible, 60s hidden, 4s while the inbox is open), keeps the
  * sidebar/title counts current, and alerts when latest_user_message_id grows.
  * The first poll is the baseline; a per-user localStorage "last alerted id"
- * (synced by the storage event) keeps several tabs from alerting twice.
+ * (synced by the storage event) keeps several tabs from alerting twice. When
+ * Web Locks exist, the read-compare-write of that id runs under a per-user lock
+ * so tabs that poll at the same moment claim each new message only once.
  */
 export function useSupportStaffAlerts() {
   const { t } = useI18n()
@@ -184,10 +187,15 @@ export function useSupportStaffAlerts() {
   function notify() {
     if (!notifyEnabled.value || !notificationsSupported() || Notification.permission !== 'granted') return
     try {
-      const notification = new Notification(t('supportChat.alerts.notificationTitle'), {
+      // Same tag keeps one entry; renotify makes Chromium show the banner and play
+      // the OS sound again instead of replacing the old notification silently.
+      // lib.dom has no renotify field yet, hence the widened type.
+      const options: NotificationOptions & { renotify?: boolean } = {
         body: t('supportChat.alerts.notificationBody'),
         tag: NOTIFICATION_TAG,
-      })
+        renotify: true,
+      }
+      const notification = new Notification(t('supportChat.alerts.notificationTitle'), options)
       notification.onclick = () => {
         window.focus()
         void router.push(CHAT_INBOX_PATH)
@@ -198,15 +206,16 @@ export function useSupportStaffAlerts() {
     }
   }
 
-  function checkAlert(latest: number) {
+  /** Read-compare-write of the last alerted id; true when this tab owns the alert for `latest`. */
+  function claimAlert(latest: number): boolean {
     const stored = storedLastAlerted()
     if (baseline === null) {
       baseline = Math.max(latest, stored)
-      return
+      return false
     }
     if (latest <= baseline || latest <= stored) {
       baseline = Math.max(baseline, latest, stored)
-      return
+      return false
     }
     baseline = latest
     try {
@@ -214,6 +223,25 @@ export function useSupportStaffAlerts() {
     } catch {
       // Without storage each tab alerts on its own.
     }
+    return true
+  }
+
+  /** Claims under a per-user Web Lock when available, so tabs in other processes cannot claim the same id. */
+  async function checkAlert(latest: number, version: number) {
+    const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined
+    const stillCurrent = () => version === generation && enabled.value
+    let claimed = false
+    if (locks && typeof locks.request === 'function') {
+      try {
+        // restart() may reset the baseline while this waits for the lock.
+        claimed = await locks.request(`${SUPPORT_ALERT_LOCK_PREFIX}${auth.user?.id ?? 0}`, () => stillCurrent() && claimAlert(latest))
+      } catch {
+        claimed = stillCurrent() && claimAlert(latest)
+      }
+    } else {
+      claimed = claimAlert(latest)
+    }
+    if (!claimed || !stillCurrent()) return
     if (soundEnabled.value) beep()
     notify()
   }
@@ -240,7 +268,7 @@ export function useSupportStaffAlerts() {
       if (version !== generation || !enabled.value) return
       chatStore.setAdminSummary(summary)
       ticketStore.setAdminPending(summary.ticket_pending)
-      checkAlert(summary.latest_user_message_id)
+      await checkAlert(summary.latest_user_message_id, version)
     } catch {
       // Try again on the next tick.
     }

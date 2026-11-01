@@ -48,6 +48,9 @@ func sendSupportChatMessage(t *testing.T, repo service.SupportChatRepository, in
 	message, duplicate, err := repo.SendMessage(context.Background(), input)
 	require.NoError(t, err)
 	require.False(t, duplicate)
+	var chatID int64
+	require.NoError(t, integrationDB.QueryRowContext(context.Background(), `SELECT chat_id FROM support_chat_messages WHERE id=$1`, message.ID).Scan(&chatID))
+	require.Equal(t, chatID, message.ChatID)
 	return message
 }
 
@@ -285,6 +288,7 @@ func testSupportChatClientIDDuplicate(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, duplicate)
 	require.Equal(t, first.ID, second.ID)
+	require.Equal(t, first.ChatID, second.ChatID)
 	require.Equal(t, first.Image.ID, second.Image.ID)
 	var imageRows int
 	require.NoError(t, integrationDB.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM support_chat_images WHERE chat_id=(SELECT chat_id FROM support_chat_messages WHERE id=$1)`, first.ID).Scan(&imageRows))
@@ -405,6 +409,17 @@ func testSupportChatWaitingSince(t *testing.T) {
 	chat, err = fixture.repo.GetUserChat(context.Background(), fixture.user.ID)
 	require.NoError(t, err)
 	require.Nil(t, chat.WaitingSince)
+	adminMessages, _, _, err := fixture.repo.ListMessages(context.Background(), service.SupportChatMessagePageInput{ChatID: chat.ID, Admin: true, Limit: 30})
+	require.NoError(t, err)
+	var staffMessage *service.SupportChatMessage
+	for index := range adminMessages {
+		if adminMessages[index].ClientMsgID == "waiting-staff" {
+			staffMessage = &adminMessages[index]
+			break
+		}
+	}
+	require.NotNil(t, staffMessage)
+	require.Equal(t, fixture.admin.Email, staffMessage.AuthorName)
 	lastUserID := chat.LastUserMessageID
 	require.NoError(t, fixture.repo.SetStatus(context.Background(), service.SupportChatStatusInput{ChatID: chat.ID, Status: service.SupportChatStatusResolved, LastSeenMessageID: lastUserID}))
 	chat, err = fixture.repo.GetUserChat(context.Background(), fixture.user.ID)
@@ -519,6 +534,10 @@ func testSupportChatTombstone(t *testing.T) {
 	deleted, err := fixture.repo.DeleteMessage(context.Background(), chatBefore.ID, message.ID)
 	require.NoError(t, err)
 	require.True(t, deleted.Deleted)
+	var imageDataNull, imagePurged bool
+	require.NoError(t, integrationDB.QueryRowContext(context.Background(), `SELECT data IS NULL,purged_at IS NOT NULL FROM support_chat_images WHERE id=$1`, message.Image.ID).Scan(&imageDataNull, &imagePurged))
+	require.True(t, imageDataNull)
+	require.True(t, imagePurged)
 	chatAfter, err := fixture.repo.GetUserChat(context.Background(), fixture.user.ID)
 	require.NoError(t, err)
 	require.Equal(t, chatBefore.UserReadMessageID, chatAfter.UserReadMessageID)
@@ -727,6 +746,84 @@ func testSupportChatDeletes(t *testing.T) {
 	require.NoError(t, integrationDB.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM support_chat_images WHERE chat_id=$1`, chat.ID).Scan(&rows))
 	require.Zero(t, rows)
 	require.NotZero(t, message.Image.ID)
+	blockedUser := mustCreateUser(t, testEntClient(t), &service.User{Email: "support-chat-blocked-delete-" + uuid.NewString() + "@example.com"})
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), `DELETE FROM users WHERE id=$1`, blockedUser.ID)
+	})
+	blockedFixture := &supportChatFixture{repo: fixture.repo, user: blockedUser, admin: fixture.admin}
+	blockedMessage := sendSupportChatImage(t, blockedFixture, "blocked content", "blocked-delete-image")
+	blockedChat, err := fixture.repo.GetUserChat(context.Background(), blockedUser.ID)
+	require.NoError(t, err)
+	require.NoError(t, fixture.repo.SetBlocked(context.Background(), service.SupportChatBlockInput{ChatID: blockedChat.ID, Blocked: true, Reason: "abuse"}))
+	require.NoError(t, fixture.repo.DeleteChat(context.Background(), blockedChat.ID))
+	_, _, err = fixture.repo.SendMessage(context.Background(), service.SupportChatSendInput{UserID: blockedUser.ID, AuthorUserID: blockedUser.ID, AuthorRole: service.SupportChatRoleUser, ClientMsgID: "blocked-after-delete", Body: "blocked"})
+	require.ErrorIs(t, err, service.ErrSupportChatBlocked)
+	placeholder, err := fixture.repo.GetUserChat(context.Background(), blockedUser.ID)
+	require.NoError(t, err)
+	require.Equal(t, service.SupportChatStatusResolved, placeholder.Status)
+	require.Zero(t, placeholder.LastMessageID)
+	require.True(t, placeholder.Blocked)
+	adminDetail, err := fixture.repo.GetChat(context.Background(), placeholder.ID, true)
+	require.NoError(t, err)
+	require.Equal(t, "none", adminDetail.PreviewKind)
+	adminMessages, hasMore, _, err := fixture.repo.ListMessages(context.Background(), service.SupportChatMessagePageInput{ChatID: placeholder.ID, Admin: true, Limit: 30})
+	require.NoError(t, err)
+	require.Empty(t, adminMessages)
+	require.False(t, hasMore)
+	readCursor, err := fixture.repo.MarkRead(context.Background(), placeholder.ID, true, 999)
+	require.NoError(t, err)
+	require.Zero(t, readCursor)
+	allChats, _, err := fixture.repo.ListChats(context.Background(), service.SupportChatListFilter{Filter: "all", Keyword: blockedUser.Email, Page: 1, PageSize: 30})
+	require.NoError(t, err)
+	require.Len(t, allChats, 1)
+	require.Equal(t, placeholder.ID, allChats[0].ID)
+	require.Equal(t, "none", allChats[0].PreviewKind)
+	waitingChats, _, err := fixture.repo.ListChats(context.Background(), service.SupportChatListFilter{Filter: "waiting", Keyword: blockedUser.Email, Page: 1, PageSize: 30})
+	require.NoError(t, err)
+	require.Empty(t, waitingChats)
+	resolvedChats, _, err := fixture.repo.ListChats(context.Background(), service.SupportChatListFilter{Filter: "resolved", Keyword: blockedUser.Email, Page: 1, PageSize: 30})
+	require.NoError(t, err)
+	require.Len(t, resolvedChats, 1)
+	require.Equal(t, placeholder.ID, resolvedChats[0].ID)
+	summaryBefore, err := fixture.repo.Summary(context.Background())
+	require.NoError(t, err)
+	require.NoError(t, fixture.repo.SetStatus(context.Background(), service.SupportChatStatusInput{ChatID: placeholder.ID, Status: service.SupportChatStatusOpen, LastSeenMessageID: 0}))
+	require.NoError(t, fixture.repo.SetStatus(context.Background(), service.SupportChatStatusInput{ChatID: placeholder.ID, Status: service.SupportChatStatusResolved, LastSeenMessageID: 0}))
+	summaryAfter, err := fixture.repo.Summary(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, summaryBefore.ChatWaiting, summaryAfter.ChatWaiting)
+	var oldRows int
+	require.NoError(t, integrationDB.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM support_chat_messages WHERE id=$1`, blockedMessage.ID).Scan(&oldRows))
+	require.Zero(t, oldRows)
+	require.NoError(t, integrationDB.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM support_chat_images WHERE chat_id=$1`, blockedChat.ID).Scan(&oldRows))
+	require.Zero(t, oldRows)
+	// Deleting a blocked placeholder again, even an untouched one, moves the summary version.
+	require.NoError(t, fixture.repo.DeleteChat(context.Background(), placeholder.ID))
+	placeholder = mustGetSupportChat(t, fixture.repo, blockedUser.ID)
+	require.True(t, placeholder.Blocked)
+	versionBefore, err := fixture.repo.Summary(context.Background())
+	require.NoError(t, err)
+	require.NoError(t, fixture.repo.DeleteChat(context.Background(), placeholder.ID))
+	placeholder = mustGetSupportChat(t, fixture.repo, blockedUser.ID)
+	require.True(t, placeholder.Blocked)
+	versionAfter, err := fixture.repo.Summary(context.Background())
+	require.NoError(t, err)
+	require.NotEqual(t, versionBefore.Version, versionAfter.Version)
+	require.NoError(t, fixture.repo.SetBlocked(context.Background(), service.SupportChatBlockInput{ChatID: placeholder.ID, Blocked: false}))
+	accepted := sendSupportChatMessage(t, fixture.repo, service.SupportChatSendInput{UserID: blockedUser.ID, AuthorUserID: blockedUser.ID, AuthorRole: service.SupportChatRoleUser, ClientMsgID: "unblocked-after-delete", Body: "accepted"})
+	require.Equal(t, placeholder.ID, mustGetSupportChat(t, fixture.repo, blockedUser.ID).ID)
+	require.Equal(t, placeholder.ID, accepted.ChatID)
+	require.NotZero(t, accepted.ID)
+	noRowUser := mustCreateUser(t, testEntClient(t), &service.User{Email: "support-chat-unblocked-delete-" + uuid.NewString() + "@example.com"})
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), `DELETE FROM users WHERE id=$1`, noRowUser.ID)
+	})
+	createSupportChatForUser(t, noRowUser)
+	noRowChat, err := fixture.repo.GetUserChat(context.Background(), noRowUser.ID)
+	require.NoError(t, err)
+	require.NoError(t, fixture.repo.DeleteChat(context.Background(), noRowChat.ID))
+	_, err = fixture.repo.GetUserChat(context.Background(), noRowUser.ID)
+	require.ErrorIs(t, err, service.ErrSupportChatNotFound)
 
 	rawUser := mustCreateUser(t, testEntClient(t), &service.User{Email: "support-chat-raw-" + uuid.NewString() + "@example.com"})
 	t.Cleanup(func() {
@@ -742,6 +839,13 @@ func testSupportChatDeletes(t *testing.T) {
 	require.Zero(t, rows)
 	require.NoError(t, integrationDB.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM support_chat_images WHERE chat_id=$1`, rawChat.ID).Scan(&rows))
 	require.Zero(t, rows)
+}
+
+func mustGetSupportChat(t *testing.T, repo service.SupportChatRepository, userID int64) *service.SupportChat {
+	t.Helper()
+	chat, err := repo.GetUserChat(context.Background(), userID)
+	require.NoError(t, err)
+	return chat
 }
 
 func testSupportChatPurge(t *testing.T) {

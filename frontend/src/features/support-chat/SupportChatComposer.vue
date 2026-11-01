@@ -133,8 +133,28 @@ function imageFrom(list: DataTransferItemList | FileList | null | undefined): Fi
   return null
 }
 
+/**
+ * A browser's "Copy image" (Firefox) also writes the image URL as text/plain and
+ * an <img> as text/html. That text is only a label for the image, not content
+ * the user wants to type.
+ */
+function isImageLabel(data: DataTransfer, text: string): boolean {
+  if (!/^(https?|data|blob|file):\S+$/i.test(text)) return false
+  if (data.types?.includes('text/rtf')) return false
+  const html = data.getData('text/html')
+  if (!html) return true
+  return /<img\b/i.test(html) && !html.replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]*>/g, '').trim()
+}
+
 function onPaste(event: ClipboardEvent) {
-  const file = imageFrom(event.clipboardData?.items) ?? imageFrom(event.clipboardData?.files)
+  const data = event.clipboardData
+  // Office apps (Excel, PowerPoint, OneNote) put a bitmap of the selection next
+  // to the text: any text wins and pastes normally; only a text-less clipboard
+  // (or one whose text is just the copied image's URL, or the copied file's own
+  // name as Finder writes it) attaches its image.
+  const text = data?.getData('text/plain').trim() ?? ''
+  const file = imageFrom(data?.items) ?? imageFrom(data?.files)
+  if (data && text && !isImageLabel(data, text) && text !== file?.name) return
   if (!file) return
   event.preventDefault()
   void useFile(file)

@@ -16,7 +16,7 @@ vi.mock('vue-router', () => ({
   }),
 }))
 
-const visible: SupportWidgetVisibilityInput = { chatEnabled: true, canAccessAdmin: false, backendMode: false, mobileOpen: false, hiddenByRoute: false }
+const visible: SupportWidgetVisibilityInput = { chatEnabled: true, canAccessAdmin: false, backendMode: false, mobileOpen: false, desktop: false, hiddenByRoute: false }
 
 describe('support widget visibility', () => {
   it('shows only when every condition holds', () => {
@@ -35,6 +35,13 @@ describe('support widget visibility', () => {
       blockers.forEach((blocker, index) => { if (mask & (1 << index)) Object.assign(input, blocker) })
       expect(shouldShowSupportWidget(input)).toBe(false)
     }
+  })
+
+  it('counts the mobile drawer only below lg, so a stale mobileOpen cannot hide the bubble on desktop', () => {
+    expect(shouldShowSupportWidget({ ...visible, mobileOpen: true, desktop: false })).toBe(false)
+    expect(shouldShowSupportWidget({ ...visible, mobileOpen: true, desktop: true })).toBe(true)
+    expect(shouldShowSupportWidget({ ...visible, mobileOpen: false, desktop: true })).toBe(true)
+    expect(shouldShowSupportWidget({ ...visible, mobileOpen: true, desktop: true, hiddenByRoute: true })).toBe(false)
   })
 
   it.each([
