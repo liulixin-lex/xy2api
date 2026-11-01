@@ -4,7 +4,7 @@
 
 设置 `anthropic_cache_ttl_default` 仅 5m/1h，默认 5m。Key `anthropic_cache_ttl_mode` 为 inherit/off/5m/1h；创建省略继承，更新省略不变，非法或显式空值 400。贯穿 Ent、仓储、鉴权最小投影与版本化 Redis/L1 快照；单字段更新不能覆盖并发 quota/usage。沿用既有失效机制。
 
-列表只新增 `meta.anthropic_cache_ttl_default`，分页不变。入站、余额预留前冻结解析后策略；修改 Key 或全局设置不改变在途请求及重试。前端沿用宽弹窗与 Select，显示当前全局值，只在公开平台契约可到 Claude 的分组显示，切组保留偏好。
+列表只新增 `meta.anthropic_cache_ttl_default`，分页不变。入站、余额预留前冻结解析后策略；修改 Key 或全局设置不改变在途请求及重试。前端沿用宽弹窗与 Select，显示当前全局值，只在公开平台契约可到 Claude 的分组显示，切组保留偏好。2026-10-31 后续变更：管理员默认值从「请求转发行为」移到「Claude 缓存」卡片，作为「自动补缓存」下方的 5 分钟/1 小时两态按钮，卡片只提交改动字段，主表单不再提交 `anthropic_cache_ttl_default`；存储与接口不变。
 
 ## 最终出站
 

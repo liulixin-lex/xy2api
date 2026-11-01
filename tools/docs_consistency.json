@@ -364,6 +364,15 @@
         "docs/PROJECT_MEMORY.md",
         "docs/PROJECT_MEMORY_ARCHIVE.md"
       ]
+    },
+    {
+      "pattern": "gatewayForwarding\\.anthropicCacheTTLDefault|anthropicCacheTTLDefaultOptions|anthropic-cache-ttl-default(?:-hint)?(?![A-Za-z0-9_-])|claudeCacheFallback\\.cost(?![A-Za-z0-9_])",
+      "reason": "2026-10-31: the administrator Anthropic TTL default moved from the request forwarding card into the Claude caching card next to automatic caching; the main settings form must not edit or submit it again. The backend setting, the API field and the key list meta keep their names",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md",
+        "frontend/src/views/admin/__tests__/SettingsView.spec.ts"
+      ]
     }
   ],
   "private": [
