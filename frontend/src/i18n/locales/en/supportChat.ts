@@ -40,6 +40,7 @@ export default {
     resend: 'Resend',
     discard: 'Remove',
     read: 'Read',
+    unread: 'Unread',
     delivered: 'Sent',
     deleted: 'This message was deleted',
     retry: 'Retry',

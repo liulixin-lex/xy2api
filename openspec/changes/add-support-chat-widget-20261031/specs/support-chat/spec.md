@@ -38,6 +38,11 @@ A repeated `client_msg_id` in the same conversation MUST return the stored messa
 - **WHEN** the client resends a message whose first attempt was stored
 - **THEN** exactly one message exists and the client shows it as delivered.
 
+#### Scenario: Staff see which replies were read
+
+- **WHEN** staff send two replies and the user then opens the conversation
+- **THEN** both replies show 「未读」 in the admin inbox until the user's read cursor passes them, then 「已读」 after the next poll.
+
 ### Requirement: Image messages
 
 The server MUST accept only JPEG, PNG and WebP detected by content, at most 1.5 MiB, 4096 pixels per side and 16,777,216 pixels, and MUST derive the stored content type itself. Images MUST be readable only by the conversation owner and by staff with view permission, with `nosniff` and a sandbox CSP. Purged or deleted images MUST return 410. The retention job MUST purge images older than the configured days even while the switch is off and MUST skip a cycle when it cannot read the configuration.

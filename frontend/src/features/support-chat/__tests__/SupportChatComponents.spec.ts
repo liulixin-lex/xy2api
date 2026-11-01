@@ -88,6 +88,30 @@ describe('chat thread', () => {
     expect(wrapper.findAll('[data-testid="chat-message"]')).toHaveLength(1)
   })
 
+  it('shows staff whether the user has read each staff message', async () => {
+    const list = vi.fn().mockResolvedValue(page([
+      message(1, { author_role: 'user' }),
+      message(2, { author_name: 'root' }),
+      message(3, { author_name: 'ops' }),
+      message(4, { deleted: true, body: '' }),
+      message(5, { author_name: 'root' }),
+      message(6, { author_role: 'user' }),
+      message(7, { author_name: 'root' }),
+    ], { peer_read_message_id: 3 }))
+    const thread = createChatThread({ list, send: vi.fn(), markRead: vi.fn() }, { viewer: 'admin' })
+    await thread.load()
+    const wrapper = mount(SupportChatThread, { props: { thread, viewer: 'admin', imageScope: 'admin' }, global: { stubs } })
+    const receipts = () => wrapper.findAll('[data-testid="chat-message"]').map((row) => [row.attributes('data-id'), row.find('[data-testid="chat-receipt"]').exists() ? row.get('[data-testid="chat-receipt"]').attributes('data-state') : null])
+    expect(receipts()).toEqual([['1', null], ['2', 'read'], ['3', 'read'], ['4', null], ['5', 'unread'], ['6', null], ['7', 'unread']])
+    expect(wrapper.findAll('[data-testid="chat-receipt"]').map((node) => node.text())).toEqual(['supportChat.read', 'supportChat.read', 'supportChat.unread', 'supportChat.unread'])
+
+    // The user reads on: the next poll carries the moved cursor and every staff message turns read.
+    list.mockResolvedValue(page([], { peer_read_message_id: 7 }))
+    await thread.poll()
+    await flushPromises()
+    expect(receipts().filter(([, state]) => state).map(([, state]) => state)).toEqual(['read', 'read', 'read', 'read'])
+  })
+
   it('lets staff delete messages and shows which staff member wrote', async () => {
     const thread = createChatThread({ list: vi.fn().mockResolvedValue(page([message(1, { author_role: 'user' }), message(2, { author_name: 'root' })])), send: vi.fn(), markRead: vi.fn() }, { viewer: 'admin' })
     await thread.load()

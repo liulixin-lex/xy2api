@@ -40,6 +40,7 @@ export default {
     resend: '重发',
     discard: '删除',
     read: '已读',
+    unread: '未读',
     delivered: '已发送',
     deleted: '该消息已删除',
     retry: '重试',

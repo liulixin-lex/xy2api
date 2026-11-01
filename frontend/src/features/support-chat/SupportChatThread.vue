@@ -60,8 +60,15 @@
             <SupportChatImage v-if="message.image" :image="message.image" :scope="imageScope" />
             <TicketMessageBody v-if="message.body" :text="message.body" />
           </div>
-          <p v-if="message.id === lastMineId" class="mt-1 text-right text-[11px] text-gray-400" data-testid="chat-receipt">
-            {{ message.id <= state.peerReadId ? t('supportChat.read') : t('supportChat.delivered') }}
+          <p
+            v-if="showReceipt(message)"
+            class="mt-1 flex items-center justify-end gap-0.5 text-[11px]"
+            :class="receiptClass(message)"
+            data-testid="chat-receipt"
+            :data-state="isRead(message) ? 'read' : 'unread'"
+          >
+            <Icon v-if="viewer === 'admin' && isRead(message)" name="check" size="xs" />
+            {{ receiptText(message) }}
           </p>
         </div>
       </li>
@@ -134,6 +141,26 @@ const lastMineId = computed(() => {
 
 function isMine(message: SupportChatMessage) {
   return props.viewer === 'user' ? message.author_role === 'user' : message.author_role === 'admin'
+}
+
+function isRead(message: SupportChatMessage) {
+  return message.id <= state.value.peerReadId
+}
+
+// Staff see the state of every message they sent; users only see it on their last one.
+function showReceipt(message: SupportChatMessage) {
+  if (!isMine(message) || message.deleted) return false
+  return props.viewer === 'admin' || message.id === lastMineId.value
+}
+
+function receiptText(message: SupportChatMessage) {
+  if (isRead(message)) return t('supportChat.read')
+  return props.viewer === 'admin' ? t('supportChat.unread') : t('supportChat.delivered')
+}
+
+function receiptClass(message: SupportChatMessage) {
+  if (props.viewer === 'admin' && isRead(message)) return 'text-primary-600 dark:text-primary-400'
+  return 'text-gray-400'
 }
 
 function rowClass(message: SupportChatMessage) {
