@@ -100,6 +100,7 @@ var ProviderSet = wire.NewSet(
 	NewAnnouncementRepository,
 	NewAnnouncementReadRepository,
 	NewSupportTicketRepository,
+	NewSupportChatRepository,
 	NewOpenAITOTPRepository,
 	NewUsageLogRepository,
 	NewGroupQualityGateRepository,

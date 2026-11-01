@@ -143,6 +143,15 @@ func RegisterUserRoutes(
 				tickets.POST("/:id/reopen", h.SupportTicket.Reopen)
 			}
 		}
+		if h.SupportChat != nil {
+			chat := authenticated.Group("/support-chat")
+			chat.GET("", h.SupportChat.Summary)
+			chat.GET("/messages", h.SupportChat.Messages)
+			chat.POST("/messages", h.SupportChat.Send)
+			chat.DELETE("/messages/:id", h.SupportChat.Recall)
+			chat.POST("/read", h.SupportChat.Read)
+			chat.GET("/images/:id", h.SupportChat.Image)
+		}
 
 		// 卡密兑换
 		redeem := authenticated.Group("/redeem")

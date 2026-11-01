@@ -24,6 +24,23 @@ export function resolveDocumentTitle(routeTitle: unknown, siteName?: string, tit
   return normalizedSiteName
 }
 
+let titleBadgeCount = 0
+
+/** Waiting chats + pending tickets for staff; App.vue keeps it current, 0 for everyone else. */
+export function setDocumentTitleBadge(count: number) {
+  titleBadgeCount = Math.max(0, Math.floor(count) || 0)
+}
+
+/** Adds the 「(N) 」 prefix. No flashing: the title only changes when the count does. */
+export function withTitleBadge(title: string, count = titleBadgeCount): string {
+  return count > 0 ? `(${count > 99 ? '99+' : count}) ${title}` : title
+}
+
+/** The single document.title write used by App.vue, the router guard and the locale switch. */
+export function applyDocumentTitle(title: string) {
+  document.title = withTitleBadge(title)
+}
+
 export interface RouteTitleOptions {
   /**
    * 站点计费模式（见 utils/billingMode.ts）。/purchase 的标题与描述随之切换：

@@ -32,7 +32,8 @@ vi.mock('@/stores', () => ({
   useAppStore: () => stores.app,
   useAdminSettingsStore: () => stores.adminSettings,
   useOnboardingStore: () => ({ isCurrentStep: () => false, nextStep: vi.fn() }),
-  useSupportTicketStore: () => ({ userUnread: 0, adminPending: 0 })
+  useSupportTicketStore: () => ({ userUnread: 0, adminPending: 0 }),
+  useSupportChatStore: () => ({ userChatUnread: 0, adminChatWaiting: 0 })
 }))
 
 vi.mock('@/stores/app', () => ({

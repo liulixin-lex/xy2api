@@ -95,7 +95,7 @@ func supportTicketFixture() *supportTicketRepoFake {
 			LastMessageAt: time.Unix(1_790_000_000, 0)},
 		messages: []SupportTicketMessage{
 			{ID: 1, AuthorRole: SupportTicketRoleUser, AuthorName: "alice", Body: "help"},
-			{ID: 2, AuthorRole: SupportTicketRoleAdmin, AuthorName: "root-admin", Body: "on it"},
+			{ID: 2, AuthorRole: SupportTicketRoleAdmin, AuthorName: "root-admin", StaffID: 3, Body: "on it"},
 		},
 	}
 }
@@ -160,6 +160,7 @@ func TestSupportTicketCreateValidatesAndCleans(t *testing.T) {
 	require.Equal(t, SupportTicketLimits{MaxOpen: 3, MessagesPerMinute: SupportTicketMessagesPerMinute, TicketsPerDay: SupportTicketTicketsPerDay}, in.Limits)
 	require.Nil(t, detail.Ticket.User, "users never get the admin view of themselves")
 	require.Empty(t, detail.Messages[1].AuthorName, "admin names stay private")
+	require.Equal(t, int64(3), detail.Messages[1].StaffID, "users see only the staff account id")
 
 	for name, tc := range map[string]struct {
 		req SupportTicketCreateRequest
@@ -390,7 +391,7 @@ func TestSupportTicketRuntimeReadsSwitchAndConfig(t *testing.T) {
 	s := &SettingService{settingRepo: repo}
 	runtime, err := s.GetSupportTicketRuntime(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, SupportTicketRuntime{Enabled: true, Config: SupportTicketConfig{Categories: []string{"其他"}, MaxOpenPerUser: 2, Notice: "n"}}, runtime)
+	require.Equal(t, SupportTicketRuntime{Enabled: true, Config: SupportTicketConfig{Categories: []string{"其他"}, MaxOpenPerUser: 2, Notice: "n", ChatImageRetentionDays: SupportChatDefaultImageRetentionDays}}, runtime)
 
 	repo.values[SettingKeySupportTicketEnabled] = "1"
 	runtime, err = s.GetSupportTicketRuntime(context.Background())

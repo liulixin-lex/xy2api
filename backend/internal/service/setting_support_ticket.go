@@ -13,6 +13,11 @@ import (
 const SettingKeySupportTicketConfig = "support_ticket_config"
 
 const (
+	SupportChatDefaultImageRetentionDays = 90
+	SupportChatMinImageRetentionDays     = 7
+	SupportChatMaxImageRetentionDays     = 3650
+	SupportChatWelcomeMaxRunes           = 300
+
 	SupportTicketMaxCategories     = 20
 	SupportTicketCategoryMaxRunes  = 32
 	SupportTicketDefaultMaxOpen    = 5
@@ -25,15 +30,18 @@ const (
 // users pick from (none means the form has no category), how many unclosed
 // tickets one user may hold, and a note shown above the form.
 type SupportTicketConfig struct {
-	Categories     []string `json:"categories"`
-	MaxOpenPerUser int      `json:"max_open_per_user"`
-	Notice         string   `json:"notice"`
+	Categories             []string `json:"categories"`
+	MaxOpenPerUser         int      `json:"max_open_per_user"`
+	Notice                 string   `json:"notice"`
+	ChatWelcome            string   `json:"chat_welcome"`
+	ChatImageRetentionDays int      `json:"chat_image_retention_days"`
 }
 
 func DefaultSupportTicketConfig() SupportTicketConfig {
 	return SupportTicketConfig{
-		Categories:     strings.Split(supportTicketDefaultCategories, ","),
-		MaxOpenPerUser: SupportTicketDefaultMaxOpen,
+		Categories:             strings.Split(supportTicketDefaultCategories, ","),
+		MaxOpenPerUser:         SupportTicketDefaultMaxOpen,
+		ChatImageRetentionDays: SupportChatDefaultImageRetentionDays,
 	}
 }
 
@@ -71,6 +79,16 @@ func NormalizeSupportTicketConfig(cfg SupportTicketConfig) (SupportTicketConfig,
 	if utf8.RuneCountInString(cfg.Notice) > SupportTicketNoticeMaxRunes {
 		return cfg, fmt.Errorf("the ticket notice must be at most %d characters", SupportTicketNoticeMaxRunes)
 	}
+	cfg.ChatWelcome = cleanSupportTicketText(cfg.ChatWelcome)
+	if utf8.RuneCountInString(cfg.ChatWelcome) > SupportChatWelcomeMaxRunes {
+		return cfg, fmt.Errorf("the chat welcome must be at most %d characters", SupportChatWelcomeMaxRunes)
+	}
+	if cfg.ChatImageRetentionDays == 0 {
+		cfg.ChatImageRetentionDays = SupportChatDefaultImageRetentionDays
+	}
+	if cfg.ChatImageRetentionDays < SupportChatMinImageRetentionDays || cfg.ChatImageRetentionDays > SupportChatMaxImageRetentionDays {
+		return cfg, fmt.Errorf("chat image retention days must be %d–%d", SupportChatMinImageRetentionDays, SupportChatMaxImageRetentionDays)
+	}
 	return cfg, nil
 }
 
@@ -92,6 +110,11 @@ type SupportTicketRuntime struct {
 	Config  SupportTicketConfig
 }
 
+type SupportChatRuntime struct {
+	Enabled bool
+	Config  SupportTicketConfig
+}
+
 var errSupportTicketSettingsUnavailable = errors.New("support ticket settings unavailable")
 
 // GetSupportTicketRuntime reads the switch and config straight from the settings
@@ -109,6 +132,22 @@ func (s *SettingService) GetSupportTicketRuntime(ctx context.Context) (SupportTi
 		return SupportTicketRuntime{}, err
 	}
 	return SupportTicketRuntime{Enabled: vals[SettingKeySupportTicketEnabled] == "true", Config: cfg}, nil
+}
+
+// GetSupportChatRuntime reads both switches and fails closed on any settings error.
+func (s *SettingService) GetSupportChatRuntime(ctx context.Context) (SupportChatRuntime, error) {
+	if s == nil || s.settingRepo == nil {
+		return SupportChatRuntime{}, errSupportTicketSettingsUnavailable
+	}
+	vals, err := s.settingRepo.GetMultiple(ctx, []string{SettingKeySupportTicketEnabled, SettingKeySupportChatEnabled, SettingKeySupportTicketConfig})
+	if err != nil {
+		return SupportChatRuntime{}, err
+	}
+	cfg, err := parseSupportTicketConfig(vals[SettingKeySupportTicketConfig])
+	if err != nil {
+		return SupportChatRuntime{}, err
+	}
+	return SupportChatRuntime{Enabled: vals[SettingKeySupportTicketEnabled] == "true" && vals[SettingKeySupportChatEnabled] == "true", Config: cfg}, nil
 }
 
 // cleanSupportTicketText normalizes user text for storage: invalid UTF-8 is

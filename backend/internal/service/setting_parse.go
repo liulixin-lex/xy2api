@@ -218,6 +218,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 
 		// Support tickets (default disabled; opt-in). A missing config means the defaults.
 		SettingKeySupportTicketEnabled: "false",
+		SettingKeySupportChatEnabled:   "false",
 
 		// Affiliate (邀请返利) feature (default disabled; opt-in)
 		SettingKeyAffiliateEnabled:              "false",
@@ -854,6 +855,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	// Support tickets (default: disabled; strict true). A corrupt config is shown as the
 	// defaults so the admin page still loads; the runtime reader fails closed on it.
 	result.SupportTicketEnabled = settings[SettingKeySupportTicketEnabled] == "true"
+	result.SupportChatEnabled = settings[SettingKeySupportChatEnabled] == "true"
 	result.SupportTicket = DefaultSupportTicketConfig()
 	if ticketConfig, err := parseSupportTicketConfig(settings[SettingKeySupportTicketConfig]); err == nil {
 		result.SupportTicket = ticketConfig

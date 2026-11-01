@@ -60,10 +60,16 @@ declare module 'vue-router' {
     requiresRiskControl?: boolean
 
     /**
-     * Whether the support ticket (网站工单) switch must be on
+     * Whether the support ticket (客户服务) switch must be on
      * @default false
      */
     requiresSupportTickets?: boolean
+
+    /**
+     * Hide the floating support chat bubble on this page
+     * @default false
+     */
+    hideSupportWidget?: boolean
 
     /**
      * 是否要求订阅功能开关（subscription_enabled，opt-out）未被显式关闭

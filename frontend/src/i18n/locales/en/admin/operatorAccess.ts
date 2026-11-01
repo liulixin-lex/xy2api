@@ -12,7 +12,7 @@ export default {
       channels: 'Channels',
       accounts: 'Accounts',
       share_scheduling: 'Share scheduling',
-      support_tickets: 'Support tickets',
+      support_tickets: 'Customer support',
       announcements: 'Announcements',
       proxies: 'IP management',
       security_audit: 'Security audit',

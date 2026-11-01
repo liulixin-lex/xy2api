@@ -85,11 +85,13 @@ type SupportTicketUser struct {
 }
 
 // SupportTicketMessage is one entry of the conversation. AuthorName names the
-// admin who replied and is only sent to admins.
+// admin who replied and is only sent to admins; users see only StaffID, the
+// replying admin's account id.
 type SupportTicketMessage struct {
 	ID         int64     `json:"id"`
 	AuthorRole string    `json:"author_role"`
 	AuthorName string    `json:"author_name,omitempty"`
+	StaffID    int64     `json:"staff_id,omitempty"`
 	Body       string    `json:"body"`
 	CreatedAt  time.Time `json:"created_at"`
 }

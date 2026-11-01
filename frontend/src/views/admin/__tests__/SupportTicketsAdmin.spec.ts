@@ -153,7 +153,7 @@ describe('admin ticket detail', () => {
     await wrapper.get('[data-testid="confirm-yes"]').trigger('click')
     await flushPromises()
     expect(mocks.deleteTicket).toHaveBeenCalledWith(7)
-    expect(mocks.push).toHaveBeenCalledWith('/admin/support-tickets')
+    expect(mocks.push).toHaveBeenCalledWith('/admin/support-tickets?tab=tickets')
   })
 
   it('flags a deleted author', async () => {

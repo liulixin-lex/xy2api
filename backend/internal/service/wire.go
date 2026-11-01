@@ -904,6 +904,8 @@ var ProviderSet = wire.NewSet(
 	ProvideUsageBillingRecoveryService,
 	NewAnnouncementService,
 	NewSupportTicketService,
+	NewSupportChatService,
+	ProvideSupportChatImagePurgeService,
 	NewOpenAITOTPService,
 	NewAdminService,
 	NewGatewayService,

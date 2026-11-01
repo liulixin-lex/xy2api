@@ -366,9 +366,12 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	supportTicketRepository := repository.NewSupportTicketRepository(db)
 	supportTicketService := service.NewSupportTicketService(supportTicketRepository, settingService)
 	supportTicketHandler := handler.NewSupportTicketHandler(supportTicketService)
+	supportChatRepository := repository.NewSupportChatRepository(db)
+	supportChatService := service.NewSupportChatService(supportChatRepository, settingService, supportTicketService)
+	supportChatHandler := handler.NewSupportChatHandler(supportChatService)
 	idempotencyCleanupService := service.ProvideIdempotencyCleanupService(idempotencyRepository, configConfig)
 	openAIQuotaAutoResetService := service.ProvideOpenAIQuotaAutoResetService(accountRepository, openAIQuotaService, rateLimitService, idempotencyCoordinator, auditLogService, settingService, leaderLockCache)
-	handlers := handler.ProvideHandlers(usageExportHandler, authHandler, userHandler, apiKeyHandler, usageHandler, redeemHandler, subscriptionHandler, announcementHandler, channelMonitorUserHandler, channelMonitorV2Handler, adminHandlers, gatewayHandler, openAIGatewayHandler, handlerSettingHandler, totpHandler, passkeyHandler, handlerPaymentHandler, paymentWebhookHandler, availableChannelHandler, modelPlazaHandler, asyncImageHandler, batchImageHandler, supportTicketHandler, idempotencyCoordinator, idempotencyCleanupService, openAIQuotaAutoResetService)
+	handlers := handler.ProvideHandlers(usageExportHandler, authHandler, userHandler, apiKeyHandler, usageHandler, redeemHandler, subscriptionHandler, announcementHandler, channelMonitorUserHandler, channelMonitorV2Handler, adminHandlers, gatewayHandler, openAIGatewayHandler, handlerSettingHandler, totpHandler, passkeyHandler, handlerPaymentHandler, paymentWebhookHandler, availableChannelHandler, modelPlazaHandler, asyncImageHandler, batchImageHandler, supportTicketHandler, supportChatHandler, idempotencyCoordinator, idempotencyCleanupService, openAIQuotaAutoResetService)
 	jwtAuthMiddleware := middleware.NewJWTAuthMiddleware(authService, userService, settingService, auditLogService)
 	optionalJWTAuthMiddleware := middleware.NewOptionalJWTAuthMiddleware(authService, userService, settingService, auditLogService)
 	adminAuthMiddleware := middleware.NewAdminAuthMiddleware(authService, userService, settingService, auditLogService, operatorAccessService)
@@ -397,7 +400,8 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	channelMonitorRunner := service.ProvideChannelMonitorRunner(channelMonitorService, settingService, channelMonitorQuotaFetcher)
 	channelMonitorV2Aggregator := service.ProvideChannelMonitorV2Aggregator(channelMonitorV2Repository, db, settingService)
 	userPlatformQuotaUsageFlusher := service.ProvideUserPlatformQuotaUsageFlusher(configConfig, billingCache, serviceUserPlatformQuotaRepository, timingWheelService)
-	v := provideCleanup(engine, client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, opsService, opsIngressRejectAggregator, apiKeyService, authCacheInvalidationWorker, schedulerSnapshotService, tokenRefreshService, accountExpiryService, cnProviderBalanceCheckService, openAICodexVersionSyncService, claudeCodeVersionSyncService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, batchImageCleanupService, batchImageWorkerRuntime, pricingService, emailQueueService, billingCacheService, usageBillingRecoveryService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, channelMonitorV2Aggregator, userPlatformQuotaUsageFlusher, upstreamBillingProbeService, iqCheckService, ollamaCloudUsageService, openCodeGoUsageService, upstreamBalanceService, auditLogService, openAIQuotaAutoResetService, promptService, pluginManager, shareSchedulingService, resilienceService, groupQualityGateService, imageTaskService, asyncImageHandler)
+	supportChatImagePurgeService := service.ProvideSupportChatImagePurgeService(supportChatRepository, settingService, leaderLockCache, db)
+	v := provideCleanup(engine, client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, opsService, opsIngressRejectAggregator, apiKeyService, authCacheInvalidationWorker, schedulerSnapshotService, tokenRefreshService, accountExpiryService, cnProviderBalanceCheckService, openAICodexVersionSyncService, claudeCodeVersionSyncService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, batchImageCleanupService, batchImageWorkerRuntime, pricingService, emailQueueService, billingCacheService, usageBillingRecoveryService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, channelMonitorV2Aggregator, userPlatformQuotaUsageFlusher, upstreamBillingProbeService, iqCheckService, ollamaCloudUsageService, openCodeGoUsageService, upstreamBalanceService, auditLogService, openAIQuotaAutoResetService, promptService, pluginManager, shareSchedulingService, resilienceService, groupQualityGateService, imageTaskService, asyncImageHandler, supportChatImagePurgeService)
 	application := &Application{
 		Server:        httpServer,
 		PromptAudit:   promptService,
@@ -494,6 +498,7 @@ func provideCleanup(
 	groupQualityGate *service.GroupQualityGateService,
 	imageTasks *service.ImageTaskService,
 	asyncImage *handler.AsyncImageHandler,
+	supportChatPurge *service.SupportChatImagePurgeService,
 ) func() {
 	return func() {
 
@@ -514,6 +519,12 @@ func provideCleanup(
 
 		parallelSteps := []cleanupStep{
 			{"GroupQualityGateService", func() error { groupQualityGate.Stop(); return nil }},
+			{"SupportChatImagePurgeService", func() error {
+				if supportChatPurge != nil {
+					supportChatPurge.Stop()
+				}
+				return nil
+			}},
 			{"UsageBillingRecoveryService", func() error {
 				billingRecovery.Stop()
 				return nil

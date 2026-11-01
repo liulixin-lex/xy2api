@@ -372,6 +372,7 @@ type UpdateSettingsRequest struct {
 
 	// Support tickets switch + form config
 	SupportTicketEnabled *bool                        `json:"support_ticket_enabled"`
+	SupportChatEnabled   *bool                        `json:"support_chat_enabled"`
 	SupportTicket        *service.SupportTicketConfig `json:"support_ticket_config"`
 
 	// Affiliate (邀请返利) feature switch
@@ -2084,6 +2085,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.PluginManagementEnabled
 		}(),
+		SupportChatEnabled: func() bool {
+			if req.SupportChatEnabled != nil {
+				return *req.SupportChatEnabled
+			}
+			return previousSettings.SupportChatEnabled
+		}(),
 		SupportTicketEnabled: func() bool {
 			if req.SupportTicketEnabled != nil {
 				return *req.SupportTicketEnabled
@@ -2546,6 +2553,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		PluginManagementEnabled: updatedSettings.PluginManagementEnabled,
 
 		SupportTicketEnabled: updatedSettings.SupportTicketEnabled,
+		SupportChatEnabled:   updatedSettings.SupportChatEnabled,
 		SupportTicket:        updatedSettings.SupportTicket,
 
 		AffiliateEnabled: updatedSettings.AffiliateEnabled,
