@@ -1,6 +1,6 @@
 # Claude 自动缓存
 
-在管理后台「设置 → 网关」打开「Claude 自动缓存」，从下拉框选择适用分组并保存即可。支持选择多个分组；选中分组下所有账号、调用 Key 和模型均纳入，无需填写规则名称、上游地址或模型名单。
+在管理后台「设置 → 网关 → Claude 缓存」卡片打开「自动补缓存」，从下拉框选择适用分组并保存即可。同一卡片的「缓存时长（跟随全局的密钥）」一行设置 [Anthropic 缓存 TTL](ANTHROPIC_CACHE_TTL.md) 的管理员默认值；保存只提交改动过的项，只改时长不会重新校验分组。支持选择多个分组；选中分组下所有账号、调用 Key 和模型均纳入，无需填写规则名称、上游地址或模型名单。
 
 默认关闭。旧版精确规则升级后仅保留其分组选择，开关自动视为关闭；需要管理员重新开启并保存，才采用新的分组范围。保存配置不调用上游，也不预热缓存。
 
@@ -8,7 +8,7 @@
 
 仅作用于当前已有构造器支持、且实际转发为 Anthropic Messages 协议的请求：Anthropic 原生 Messages（API Key、OAuth/SetupToken、透传）、现有 Vertex 原生/转换路径，以及 Bedrock 原生 Messages（Bearer/SigV4）。Chat Completions / Responses 仅在现有 Anthropic/Vertex 转换路径适用；Chat/Responses → Bedrock 缺少转换构造器及 eventstream 解码器，可能落入既有上游认证或通用转发错误，并非显式 unsupported，本轮不扩展该路径。分组中的 OpenAI/Gemini 等其他协议、`count_tokens` 保持原行为；这属于协议边界，不是模型或账号白名单。
 
-客户端原始请求在协议位置已经带 `cache_control` 时，本功能不再添加断点，包括 null 或非法声明。协议转换及非法字段净化仍按既有规则执行。消息断点清理重建策略已退役，不会自动开启分组补断点。
+客户端原始请求在协议位置已经带 `cache_control` 时，本功能不再添加断点，包括 null 或非法声明。协议转换及非法字段净化仍按既有规则执行。消息断点清理重建策略已退役，不会自动开启分组补断点。Responses `input` 中工具调用与结果项（`function_call`、`custom_tool_call`、`tool_search_call`、`tool_search_output`、`function_call_output`、`custom_tool_call_output`）的项级标记，以及 `function_call_output`、`custom_tool_call_output` 数组 `output` 分片上的标记也算声明，这些项转换为 `tool_use`/`tool_result` 块时标记随之保留；Chat 工具消息上的标记原本就算声明，现在也随 Anthropic 转换转发（`/v1/responses` 的旧版 Chat 形状请求除外，2026-10-31 起）。
 
 原始请求没有声明时，在完成现有处理及分组 system 注入后，按剩余断点额度依次尝试：
 

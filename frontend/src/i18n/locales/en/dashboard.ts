@@ -75,7 +75,7 @@ export default {
       '1h': 'Force 1-hour caching',
       duration: { '5m': '5 minutes', '1h': '1 hour' },
       summary: 'Claude TTL: {mode}',
-      hint: 'Applies only to Claude requests and sets the lifetime of existing cache breakpoints. Group settings determine whether missing breakpoints are added. No override keeps client settings. One-hour writes may cost more; actual caching and billing depend on upstream usage and site prices.'
+      hint: "Applies only to Claude requests and sets the lifetime of existing cache breakpoints. Group settings determine whether missing breakpoints are added. With 5 minutes (including following a 5-minute global default), a 1-hour TTL the client set itself is also shortened to 5 minutes; “Do not override TTL” keeps the client's setting. Cache writes cost about 1.25× base input for 5 minutes and 2× for 1 hour, and 1 hour only pays off when the same conversation pauses 5–60 minutes; actual caching and billing depend on upstream usage and site prices."
     },
     title: 'API Keys',
     description: 'Manage your API keys and access tokens',
@@ -347,16 +347,8 @@ export default {
     costDetails: 'Cost Breakdown',
     tokenDetails: 'Token Breakdown',
     anthropicCacheTTL: {
-      policy: 'TTL policy',
-      off: 'No TTL override',
-      '5m': '5 minutes',
-      '1h': '1 hour',
-      applied: 'Applied',
-      notApplied: 'Not applied',
-      notRecorded: 'Not recorded',
       unknownDetail: 'TTL breakdown not reported',
-      partialDetail: 'Partial TTL breakdown not reported',
-      hint: 'Applied means the final request declarations match the policy. It does not confirm provider TTL or a cache hit. Not recorded includes historical records and non-target routes.'
+      partialDetail: 'Partial TTL breakdown not reported'
     },
     cacheTtlOverriddenHint: 'Cache write billing classification adjusted in the billing copy; does not measure actual cache efficiency',
     cacheTtlOverriddenLabel: 'Billing adjustment',

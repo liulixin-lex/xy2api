@@ -266,6 +266,9 @@ type ResponsesRequest struct {
 	ServiceTier          string                 `json:"service_tier,omitempty"`
 	PromptCacheKey       string                 `json:"prompt_cache_key,omitempty"`
 	PreviousResponseID   string                 `json:"previous_response_id,omitempty"`
+
+	// Chat tool/function markers by Input index, for the Anthropic converter only.
+	chatCacheControls []*AnthropicCacheControl
 }
 
 // ResponsesReasoning configures reasoning effort in the Responses API.
@@ -303,6 +306,8 @@ type ResponsesInputItem struct {
 	// type=function_call_output
 	Output    string `json:"output,omitempty"`
 	outputRaw json.RawMessage
+	// Chat tool/function markers carried to the Anthropic converter only; not part of the Responses wire.
+	chatCacheControl *AnthropicCacheControl
 }
 
 func (i *ResponsesInputItem) UnmarshalJSON(data []byte) error {

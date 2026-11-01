@@ -10,7 +10,7 @@
 
 ## Admission 与发送
 
-Messages、Chat Completions、Responses 的 Anthropic handler 在重写前记录原始协议位置的 cache_control 存在性和 admission 分组快照。null/非法值也表示客户端声明；工具 schema/input 中同名业务数据不算。转换协议额外识别 function 工具及 input 消息位置。
+Messages、Chat Completions、Responses 的 Anthropic handler 在重写前记录原始协议位置的 cache_control 存在性和 admission 分组快照。null/非法值也表示客户端声明；工具 schema/input 中同名业务数据不算。转换协议额外识别 function 工具及 input 消息位置。2026-10-31 后续：Responses 工具调用/结果项的项级标记及 function_call_output、custom_tool_call_output 数组 output 分片标记也计为声明，这些项转换为 tool_use/tool_result 块时标记随之保留。
 
 每次账号尝试建立独立状态。发送前检查 admission 与当前快照都覆盖有效分组，且账号确实属于此组。中途开启不改变已预留的请求；关闭或移除组可阻止补齐，fallback 分组不继承原授权。ID、地址、调用 Key 和模型不再作细分匹配。
 
@@ -37,3 +37,5 @@ API Key、OAuth/SetupToken、透传、Vertex 和 Bedrock 的 Anthropic builder �
 ## 界面
 
 沿用设置卡片与通用 Select/Toggle。选择分组后以可移除标签显示，已选项不重复出现；支持搜索。只展示范围一句话、费用一句话及保存状态。保留加载/目录失败重试、失败草稿、删除组停用、旧后端/忽略响应失败处理；目录重试不覆盖已编辑内容。中英文及移动端一致。
+
+2026-10-31 后续变更：卡片改名「Claude 缓存」，第一行为「自动补缓存」（开关与分组），第二行为 Anthropic TTL 的管理员默认值（5 分钟/1 小时两态按钮，原在「请求转发行为」卡片）。一个保存按钮只提交改动过的字段，分别核对回显；只改时长时不提交、也不校验分组策略。`claude_cache_fallback_policy` 结构不变。

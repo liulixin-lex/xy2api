@@ -83,7 +83,8 @@
 
 - 授权：用户明确要求分组质量门槛及全部开放 PR 合入 main，然后正式发布 0.4.16；不部署、不连接生产。
 - 起点：main `874560eb9`，功能分支 `7f61f7917`，主工作树干净；独立发布 worktree 使用 `chore/release-0416-integration`，保留原本地分支与工作树。
-- 当前：只开放 #175–#177；#175 已常规合并为 `2bc8c76a8`。#176 改 base main 并合入新基线后 head 为 `46d2caa6a`，等待全量 CI。
+- 当前：#175 / #176 固定 head 全部 20 项检查成功后常规合并为 `2bc8c76a8` / `94021b6a2`。#177 已合入 main，固定 head `5297b1499` 等待 CI；其源码树与原 head 完全相同。功能集成已提前保留双方治理登记与记忆，四处治理冲突按三方变化解决；功能 PR 等 #177 合入 main 后再创建。
+- 本地复验：Go build、unit vet、apicompat/service 缓存与兜底联动测试、前端 typecheck/lint/470 文件 3624 项测试/build、docs 与 scheduler-diff 均通过；已发布迁移校验和及兼容基线不变。提交后运行干净树 audit。
 - 下一步：依次合并 #176/#177；功能分支合入最新 main、复验并创建 PR；独立版本 PR、annotated tag、Release 资产及镜像核验；最后用纯记忆 PR 原样归档已完成任务。
 - 边界：普通 merge、固定完整 head SHA、所有检查通过；不改已发布迁移或校验和，不包含私有环境资料。
 
@@ -133,6 +134,26 @@
 
 - 范围：按 `reviews/fix_round_decisions_20261101.md` 修复，四个包各用独立 worktree，从基线切 `feat/gqg-fx-*`。各包 agent 不改本文件，由主持人维护。
 - 状态：完成。四包已合入并通过全量门禁（见顶部）。修复 worktree `gqg-fx-a..d` 与分支保留到发版；生产数据待用户本地提供。
+
+- **20261031-claude-cache-ui**（2026-10-31 开始）：用户要求去掉使用记录里的「TTL 策略: 不覆写 TTL · 未应用」文字，并询问「Anthropic 缓存默认 TTL」与「Claude 自动缓存」是否冲突、是否合并、是否按分组。分析结论：两者没有冲突（先补断点、再统一时长、最后做 4 槽与长 TTL 顺序修正），建议保留两项、放进同一张卡片，TTL 不按分组。用户选定分两个 PR，均为纯前端、不改接口与存储，由 Claude 直接实现：
+  - PR 1 `fix/usage-ttl-text-removal-20261031`：删除使用记录列表与 Token 悬浮详情里的策略与应用状态文字，接口字段保留，「TTL 明细未报告」保留。
+  - PR 2 `feat/claude-cache-settings-card-20261031`：叠在 PR 1 上，把默认 TTL 移进「Claude 缓存」卡片（两行、一个保存，只提交改动字段），主表单不再提交 `anthropic_cache_ttl_default`。
+  - 两个 PR 只开到 CI 全绿，不合并、不发版、不部署。
+  - 状态（2026-10-31T16:35Z 核实）：PR #175、#176 已开，两者 20 项 CI 全部通过、可合并，未合并。本地浏览器环境与截图在仓库外的交接目录（Claude 缓存 UI，2026-10-31），用完已停掉并清理数据。
+  - 2026-10-31 追加（#176）：用户对照参考仓库后选定先补文案。卡片「缓存时长」与 Key 弹窗提示写明：选 5 分钟（含跟随全局 5 分钟）时，客户端自己写的 1h 也改为 5m；Key 弹窗补写入价倍数与 1 小时适用间隔。
+  - 留给用户决定、本次未做：「跟随全局」改为只延长、不缩短（参考仓库原则，会改 0.4.15 行为；用户确认后再做，可替代原「全局加不覆写选项」）；客户端自己声明缓存时，余额预留是否恢复温会话折扣（0.4.15 起按冷写预留）；OAuth 系统提示块 TTL 下拉补说明；自动缓存分组选择器只列能到 Anthropic 的分组。
+- **20261031-tool-cache-markers**（2026-10-31 开始）：用户对照参考仓库 kiss-kedaya/sub2api 的 Anthropic 缓存 TTL 后，按建议顺序开工 P0/P1 后端项，叠在 #176 上单独开 PR，由 Claude 实现：
+  - Chat/Responses → Anthropic 转换保留工具结果（`role=tool`、`function_call_output`）上的缓存标记。现状丢标记，但仍按原始正文判定「客户端已声明」，自动补缓存不补、预留按冷写算。
+  - 仅转换路由：顶层 automatic 与末块显式 TTL 冲突时向长 TTL 调和（原生 `/v1/messages` 不变），与上一项同 PR，避免 off 模式 Key 出现新 400。
+  - 观测：策略 1h 已应用但上游只报 5m 时，结算日志标为降级；文档补运维查询，并写明官方 1h 不需要 beta、本站默认不加。
+  - 只开到 CI 全绿，不合并、不发版、不部署；真实上游实测需另行授权。
+  - 状态（2026-10-31T19:40Z）：分支 `fix/tool-cache-markers-20261031`（叠在 #176 上）已本地实现并验证，见操作日志；具名补丁 `xy-converted-tool-cache-markers`。合并顺序 #175 → #176 → 本 PR。
+  - 发现、留给用户决定（本 PR 不改）：
+    - 0.4.15 起 `ChatCompletionsToResponses` 会把 Chat 请求里的顶层、消息、分片、工具 `cache_control` 写进发往 OpenAI/Grok 的 Responses 请求（0.4.14 不发）。严格上游可能对未知字段返回 400；0.4.15 尚未部署，建议另开小 PR 在 OpenAI 出口去掉。本 PR 的工具标记已改用内部字段，不扩大这一范围。
+    - 原始声明识别仍漏 Responses `additional_tools`、Codex `namespace` 子工具、无 type 的内容项上的标记（既有问题）；`/v1/responses` 旧版 Chat 形状请求的工具标记不转发。
+    - 结算日志 `ttl_mode`/`ttl_source` 在生产恒为 off/unrecorded：`usageRecordContext` 不复制策略 context（既有问题）。
+    - 「跟随全局只延长、不缩短」待用户确认。
+
 
 ## 操作陷阱
 
@@ -440,3 +461,71 @@ pnpm --dir frontend run build
 - 验证：见顶部“已完成（修复轮）”；全部在 `a3e241353` 上运行。
 - 卡点/风险：生产 `ops_monitoring_enabled` 未核实（关闭则错误率门槛失效）；缓存收益未量化。
 - 下一步：用户授权推送、PR、合并与发版；不部署。
+
+### 2026-10-31T14:12Z — 20261031-claude-cache-ui — PR 1：使用记录去掉 TTL 策略文字，本地验证完成
+
+- 请求/目标：用户截图显示使用记录 TOKEN 列每行都有「TTL 策略: 不覆写 TTL · 未应用」，要求去掉。同时询问「Anthropic 缓存默认 TTL」与「Claude 自动缓存」的关系；只读分析与用户决定见“进行中的工作”，PR 2 另记。
+- 开始状态：main `874560eb9`（0.4.15 之后），新 worktree，分支 `fix/usage-ttl-text-removal-20261031`。
+- 完成操作：`UsageTable.vue` 删掉列表那一行、Token 悬浮详情的策略行和两个标签函数（管理员与用户使用记录共用这个组件）。保留缓存读取占比、1h 与「计费调整」标签、「TTL 明细未报告」提示，以及接口字段 `anthropic_cache_ttl_policy/applied`。中英文删除 8 个不再使用的 `usage.anthropicCacheTTL.*` 键。原测试改写为反向断言，并确认它在旧组件上会失败。同步 `ANTHROPIC_CACHE_TTL.md`、`USAGE_METRICS.md` 和 OpenSpec design/spec/tasks，在 `docs_consistency.json` 退役 testid、函数名与键名（正则逐项核对：命中全部旧名，不误伤保留的键和字段）。
+- 修改文件：`frontend/src/components/admin/usage/UsageTable.vue` 及其 spec、`frontend/src/i18n/locales/{zh,en}/dashboard.ts`、上述文档、`tools/docs_consistency.json`、本记忆。
+- 验证：定向 vitest 9 个文件 93 项、前端全量 468 个文件 3548 项、CI 关键清单 95 个文件 1021 项（用 pnpm 9）、eslint、vue-tsc、`check_docs_consistency.py`、`sync.py audit`（干净提交）与 `scheduler-diff` 均通过。浏览器验证与 PR 2 合并进行，见 PR 2 记录。未改 Go，未跑后端门禁。
+- 卡点/风险：无。
+- 下一步：推送并开 PR，CI 全绿后停在 PR，由另一位作者合并；不发版、不部署。
+
+### 2026-10-31T14:30Z — 20261031-claude-cache-ui — PR 2：默认 TTL 移入「Claude 缓存」卡片，本地验证完成
+
+- 请求/目标：用户问两项设置是否冲突、是否合并、是否按分组。结论：不冲突，执行顺序为先补断点、再统一时长、最后做 4 槽与长 TTL 顺序修正；保留两项，放进同一张卡片；TTL 不按分组。用户选定实施。
+- 开始状态：叠在 PR 1 上，分支 `feat/claude-cache-settings-card-20261031`。
+- 完成操作：
+  - `ClaudeCacheFallbackSettings.vue` 改为两行加一个保存：第一行「自动补缓存」（开关与分组），第二行「缓存时长（跟随全局的密钥）」（5 分钟/1 小时两态按钮）。
+  - 保存只提交改动过的字段，并逐项核对回显；只改时长时不提交、也不校验分组策略（后端对省略字段保持原值）。
+  - `SettingsView.vue` 删掉原 TTL 下拉、选项、表单字段与提交字段，`SettingsForm` 不再含该字段，避免主表单用旧值覆盖。
+  - 中英文文案修正互相矛盾的说法（原卡片写「默认缓存 5 分钟」）。同步两份文档与两个 OpenSpec 变更，退役旧下拉的 id、选项名与 i18n 键（带命名空间，不误伤 KeysView 和后端的同名标识）。
+  - 窄屏下第二行改为上下排列。
+- 审查：四个维度分别查找、逐条反驳核验。确认 3 条低级别问题并已修复：旧后端测试夹具缺时长，导致策略校验没有被单独覆盖；退役正则漏了 `-hint` id；英文提示引用了已删除的标签名。驳回 2 条：模板字符串形式的退役，以及 Bedrock 旧模型不支持 TTL 的措辞。
+- 修改文件：上述两个组件及其 spec、`frontend/src/i18n/locales/{zh,en}/admin/settings.ts`、`docs/ANTHROPIC_CACHE_TTL.md`、`docs/CLAUDE_CACHE_FALLBACK.md`、两个 OpenSpec 变更、`tools/docs_consistency.json`、本记忆。
+- 验证：
+  - 卡片、设置页与 locale 定向测试 77 项；前端全量与 CI 关键清单（pnpm 9）；eslint、vue-tsc；`check_docs_consistency.py`。
+  - 本地后端连一次性 PostgreSQL 18 和 Redis，加 vite，用 playwright-core 和本机 Chrome 跑 20 项检查，全部通过：
+    - 管理员与用户使用记录不再出现 TTL 策略文字，1h 标签、读取占比和「TTL 明细未报告」仍在；
+    - 设置页只剩一张卡片；只改时长时请求只带 TTL，只改分组时只带策略，刷新后保持；
+    - 主表单保存（270 个字段）不含 TTL，后端值不变；
+    - 手机宽度无横向溢出，无页面错误。
+  - 未改 Go，未跑后端门禁。
+- 卡点/风险：无。合并顺序须先 PR 1，再 PR 2（PR 2 的 base 为 PR 1 分支）。
+- 下一步：推送两个分支并开 PR，CI 全绿后停下；不合并、不发版、不部署。用户待决事项见“进行中的工作”。
+
+### 2026-10-31T16:35Z — 20261031-claude-cache-ui — PR 2 追加：提示写明 5 分钟会缩短客户端的 1 小时
+
+- 请求/目标：用户对照参考仓库后同意建议顺序，第一项是在 #176 写明现有行为（只改文案）。
+- 开始状态：分支 `feat/claude-cache-settings-card-20261031`，HEAD `e1d523f3e`，与远端一致；#175、#176 均 OPEN、CI 全绿。
+- 完成操作：卡片「缓存时长（跟随全局的密钥）」提示与 Key 弹窗 `keys.cacheTTL.hint`（中英文）写明：选 5 分钟（含跟随全局 5 分钟）时，客户端自己写的 1 小时也改为 5 分钟，保留客户端设置要选「不覆写 TTL」；Key 弹窗补写入价倍数和 1 小时的适用间隔。`ANTHROPIC_CACHE_TTL.md` 的 inherit 行与 OpenSpec tasks 同步。不改行为、接口和控件。
+- 修改文件：`frontend/src/i18n/locales/{zh,en}/admin/settings.ts`、`frontend/src/i18n/locales/{zh,en}/dashboard.ts`、`docs/ANTHROPIC_CACHE_TTL.md`、`openspec/changes/anthropic-cache-ttl-20261030/tasks.md`、本记忆。
+- 验证：KeysView、卡片、设置页与 locale 定向 vitest 4 个文件 108 项、改动文件 eslint、vue-tsc、`check_docs_consistency.py`、`git diff --check` 通过。
+- 卡点/风险：无。若之后上线「跟随全局只延长、不缩短」，这两条提示要按新规则改。
+- 下一步：推送后等 #176 CI 全绿；后端项见 `20261031-tool-cache-markers`。
+
+### 2026-10-31T19:40Z — 20261031-tool-cache-markers — 转换路由保留工具缓存标记，本地验证完成
+
+- 请求/目标：用户对照参考仓库 kiss-kedaya/sub2api 后同意建议顺序：先修 Chat/Responses → Anthropic 丢工具结果缓存标记，同 PR 做转换路由的顶层/末块 TTL 调和与 1h 降级观测；「只延长不缩短」另待确认。
+- 开始状态：从 #176 分支 `2fa64cc18` 新建 worktree，分支 `fix/tool-cache-markers-20261031`。
+- 完成操作：
+  - 多 agent 只读梳理转换链、finalize、观测、参考提交 `aefe48ebf`/`8025f5aad` 与治理规则后定稿设计，3 路挑错；主协调补充：Chat 工具标记只经内部字段带给 Anthropic 转换，不写进发往 OpenAI 的 Responses 请求。
+  - apicompat：Chat `role=tool`/`role=function` 标记（消息级，否则最后一个带标记分片）落 `tool_result`，只含 `tool_calls` 的 assistant 标记落最后一个 `tool_use`；Responses `function_call_output` 取项级或数组 `output` 最后一个分片标记，`function_call` 落 `tool_use`；无嵌套副本。Chat 中转经 JSON，内部字段按 input 位置对齐恢复，长度不符则不恢复。
+  - service：4 个转换出口改用 `enforceConvertedCacheControlLimit`，顶层 automatic 与末块显式 5m/1h 不一致时统一为 1h（双向）；原生 Messages、透传、Bedrock、count_tokens 不变。原始声明识别覆盖 Responses 工具项；结算日志 `ttl_status` 增加 `downgraded`，策略取自结算结果。
+  - 文档：`ANTHROPIC_CACHE_TTL.md`（工具标记规则、beta 说明、`ttl_status` 取值、1h 降级巡检 SQL）、`CLAUDE_CACHE_FALLBACK.md`、两个 OpenSpec 变更的 dated 后续；policy 与 `UPSTREAM_BASE.json` 登记具名补丁。
+- 审查：Claude 三个维度（wire 正确性与路由隔离、转换与声明一致性、测试/治理/文档）查找并逐条反驳核验，2 条均为设计内的已知取舍，驳回；gpt-6-astra（xhigh，只读快照）报 1 条小问题：`tool_search_output` 输出会被转成字符串，文档不应承诺分片标记，已收窄文档与 OpenSpec。
+- 修改文件：apicompat `types.go`、`anthropic_cache_control.go`、`chatcompletions_to_responses.go`、`responses_to_anthropic_request.go`；service `claude_cache_fallback.go`、`gateway_anthropic_cache_ttl.go` 及 4 个转换出口；测试 `anthropic_cache_test.go`、`claude_cache_fallback_test.go`、`gateway_anthropic_cache_ttl_test.go`、新增 `anthropic_native_cache_ttl_test.go`（unit）；上述文档、OpenSpec、`tools/upstream-sync/policy.json`、`UPSTREAM_BASE.json`、本记忆。
+- 验证：gofmt；`go build ./...`；apicompat/service/handler 在四种 tag 下 vet；`go test -tags=unit` apicompat/service（372s）/handler（56s）全过；无 tag 的缓存测试 34 个顶层用例；相关 `-race` 53 个顶层用例零跳过；golangci-lint v2.14.0 0 issues；`check_docs_consistency.py`；tools 单测 96 项；干净提交上 `sync.py audit` 与 `scheduler-diff` 通过。临时回退实现后新测试按预期失败（只锁现状的守卫用例除外）。未做真实上游验证。
+- 卡点/风险：真实 Anthropic/Vertex/OAuth 对 `tool_result`/`tool_use` 标记的接受与命中、Kimi 等 Anthropic 兼容上游的接受度未验证；只给工具结果打标记的 Responses 客户端不再触发分组补缓存（改为 `client_declared`）。发现的既有问题见“进行中的工作”。
+- 下一步：推送并以 #176 分支为 base 开 PR，CI 全绿后停下；不合并、不发版、不部署。
+
+### 2026-11-01 — 20261101-release0416 — 叠加 PR 与功能分支集成复验
+
+- 请求/目标：执行用户授权的全部开放 PR 合并与 0.4.16 发布；只在独立 worktree 操作，不部署、不连接生产。
+- 开始状态：main `874560eb9`、功能基线 `7f61f7917`，主工作树干净并保持不动。
+- 完成操作：#175 固定 head 全绿后合并 `2bc8c76a8`；#176 改 base main 并合入基线，固定 `46d2caa6a` 全部 20 项成功后合并 `94021b6a2`。#177 用指定身份合入新 main 为 `5297b1499`，源码树不变，CI 等待中。功能分支预集成 #177，四处冲突仅治理/记忆，保留两侧新增条目与全部任务/日志，已被功能退役的旧契约不恢复。
+- 修改文件：整合 #175–#177 的现有代码、文档及登记；本轮独立修改仅三方治理合并与记忆状态。
+- 验证：Go build、unit vet、缓存与兜底联动用例；pnpm 9 frozen 安装、typecheck、lint、470 文件/3624 项测试及 build；文档一致性、scheduler-diff、diff-check 通过。两份补丁集合均 63 项且一致；已发布迁移/checksum、兼容版本与部署配置无变化。干净提交 audit 随后执行。
+- 卡点/风险：等待 #177 固定 head CI；真实供应商与生产未验证；升级前监控确认及既有已接受限制保留。
+- 下一步：#177 合并后把实际 main 合入功能分支并核对源码树，提交功能 PR、版本 PR，标签发布与资产核验，最后归档。

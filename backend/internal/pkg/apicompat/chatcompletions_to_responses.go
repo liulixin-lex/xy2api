@@ -45,6 +45,7 @@ func ChatCompletionsToResponses(req *ChatCompletionsRequest) (*ResponsesRequest,
 		SafetyIdentifier:     req.SafetyIdentifier,
 		ParallelToolCalls:    req.ParallelToolCalls,
 	}
+	out.chatCacheControls = chatInputCacheControls(input)
 
 	// Reasoning models (gpt-5.x) do not accept sampling parameters.
 	// See isReasoningModel in anthropic_to_responses.go.
@@ -128,11 +129,7 @@ func convertChatMessagesToResponsesInput(msgs []ChatMessage) ([]ResponsesInputIt
 		if err != nil {
 			return nil, err
 		}
-		for i := range items {
-			if items[i].Type == "message" {
-				items[i].CacheControl = m.CacheControl
-			}
-		}
+		applyChatMessageCacheControl(items, m)
 		out = append(out, items...)
 	}
 	return out, nil

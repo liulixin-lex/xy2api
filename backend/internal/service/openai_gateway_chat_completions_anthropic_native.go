@@ -97,7 +97,7 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaNativeAnthropic(
 	// 与 /v1/messages 直通路径相同的 pre-filter。
 	anthropicBody = StripEmptyTextBlocks(anthropicBody)
 	anthropicBody = FilterWebSearchHistoryBlocks(anthropicBody, upstreamModel)
-	anthropicBody = enforceCacheControlLimit(anthropicBody)
+	anthropicBody = enforceConvertedCacheControlLimit(anthropicBody)
 
 	apiKey := strings.TrimSpace(account.GetOpenAIProtocolAPIKey())
 	if apiKey == "" {

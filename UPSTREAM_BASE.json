@@ -215,7 +215,8 @@
     "xy-support-tickets",
     "xy-managed-openai-totp",
     "xy-anthropic-cache-ttl",
-    "xy-openai-group-quality-scheduling"
+    "xy-openai-group-quality-scheduling",
+    "xy-converted-tool-cache-markers"
   ],
   "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/92"
 }

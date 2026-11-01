@@ -422,6 +422,23 @@
         "frontend/src/i18n/locales/*/admin/groupQualityGate.ts",
         "frontend/src/i18n/locales/*/admin/overview.ts"
       ]
+    },
+    {
+      "pattern": "anthropic-cache-ttl-(?:status|detail)(?![A-Za-z0-9_-])|cacheTTL(?:Policy|Applied)Label|usage\\.anthropicCacheTTL\\.(?:policy|off|5m|1h|applied|notApplied|notRecorded|hint)(?![A-Za-z0-9_])",
+      "reason": "2026-10-31: at the user's request the usage pages no longer show the key TTL policy and applied status (pre-0.4.15 keys are off, so nearly every row read 'not applied'); the API fields and the unreported TTL breakdown note stay",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
+    },
+    {
+      "pattern": "gatewayForwarding\\.anthropicCacheTTLDefault|anthropicCacheTTLDefaultOptions|anthropic-cache-ttl-default(?:-hint)?(?![A-Za-z0-9_-])|claudeCacheFallback\\.cost(?![A-Za-z0-9_])",
+      "reason": "2026-10-31: the administrator Anthropic TTL default moved from the request forwarding card into the Claude caching card next to automatic caching; the main settings form must not edit or submit it again. The backend setting, the API field and the key list meta keep their names",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md",
+        "frontend/src/views/admin/__tests__/SettingsView.spec.ts"
+      ]
     }
   ],
   "private": [

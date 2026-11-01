@@ -1317,7 +1317,7 @@ describe("admin SettingsView payment visible method controls", () => {
     );
   });
 
-  it("submits the selected Anthropic cache TTL default", async () => {
+  it("leaves the Anthropic cache TTL default to the Claude cache card", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
       anthropic_cache_ttl_default: "1h",
@@ -1326,15 +1326,13 @@ describe("admin SettingsView payment visible method controls", () => {
     const wrapper = mountView();
 
     await flushPromises();
+    expect(wrapper.find("#anthropic-cache-ttl-default").exists()).toBe(false);
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
 
+    // The card saves this field on its own; the main form must not overwrite it with a stale value.
     expect(updateSettings).toHaveBeenCalledTimes(1);
-    expect(updateSettings).toHaveBeenCalledWith(
-      expect.objectContaining({
-        anthropic_cache_ttl_default: "1h",
-      }),
-    );
+    expect(updateSettings.mock.calls[0][0]).not.toHaveProperty("anthropic_cache_ttl_default");
   });
 
   it("submits Claude OAuth system prompt injection gateway settings", async () => {

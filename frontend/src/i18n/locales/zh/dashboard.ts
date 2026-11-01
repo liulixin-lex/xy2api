@@ -75,7 +75,7 @@ export default {
       '1h': '强制 1 小时缓存',
       duration: { '5m': '5 分钟', '1h': '1 小时' },
       summary: 'Claude TTL：{mode}',
-      hint: '仅对 Claude 请求生效，调整已有缓存断点的有效期。未声明缓存时，是否自动补充由分组设置决定；不覆写 TTL 会保留客户端设置。1 小时可能增加写入费用，实际缓存与计费以上游用量和本站价格为准。'
+      hint: '仅对 Claude 请求生效，调整已有缓存断点的有效期。未声明缓存时，是否自动补充由分组设置决定。选 5 分钟（含跟随全局且全局为 5 分钟）时，客户端自己写的 1 小时也会改成 5 分钟；不覆写 TTL 会保留客户端设置。缓存写入约为普通输入的 1.25 倍（5 分钟）或 2 倍（1 小时），1 小时只在同一对话间隔 5–60 分钟时划算；实际缓存与计费以上游用量和本站价格为准。'
     },
     title: 'API 密钥',
     description: '管理您的 API 密钥和访问令牌',
@@ -352,16 +352,8 @@ export default {
     costDetails: '费用明细',
     tokenDetails: 'Token 明细',
     anthropicCacheTTL: {
-      policy: 'TTL 策略',
-      off: '不覆写 TTL',
-      '5m': '5 分钟',
-      '1h': '1 小时',
-      applied: '已应用',
-      notApplied: '未应用',
-      notRecorded: '未记录',
       unknownDetail: 'TTL 明细未报告',
-      partialDetail: '部分 TTL 明细未报告',
-      hint: '已应用仅表示最终请求中的缓存声明符合策略，不代表供应商采用该 TTL 或缓存命中。未记录包括历史记录与非目标出口。'
+      partialDetail: '部分 TTL 明细未报告'
     },
     cacheTtlOverriddenHint: '缓存写入计费分类已调整；仅影响结算副本，不代表真实缓存效率',
     cacheTtlOverriddenLabel: '计费调整',
