@@ -11,12 +11,14 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"github.com/liulixin-lex/xy2api/internal/pkg/response"
 	"github.com/stretchr/testify/require"
@@ -130,6 +132,10 @@ func newQualityTestEnv(t *testing.T) *qualityTestEnv {
 	e := &qualityTestEnv{repo: r, groups: g, base: base, now: base}
 	e.svc = NewGroupQualityGateService(r, &qualityTestAccounts{repo: r}, g)
 	e.svc.processStartedAt = base.Add(-time.Hour)
+	// Like the process start, the unevaluated snapshot follows the fake clock.
+	initial := *e.svc.snapshot.Load()
+	initial.GeneratedAt = e.svc.processStartedAt
+	e.svc.snapshot.Store(&initial)
 	e.svc.now = func() time.Time { return e.now }
 	e.accounts(1)
 	oldLogger := slog.Default()
@@ -248,7 +254,7 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			require.InDelta(t, 0.08, *row.Metrics.ErrorRate, 1e-9)
 			require.InDelta(t, 0.2, *row.Headroom, 1e-9)
 			require.Greater(t, status.AccountMetrics["2"].ErrorRate, 0.10, "full window still contains pre-ejection failures")
-			require.Contains(t, e.logs.String(), "group_quality_gate.recover")
+			require.Contains(t, e.logs.String(), `"level":"WARN","msg":"group_quality_gate.recover","group_id":7,"account_id":2,"from":"ejected","to":"eligible","reason":"ejection_expired","strike":1`)
 		}},
 		{"borderline ttft enters trial then promotes with cleared tier", func(t *testing.T, e *qualityTestEnv) {
 			e.calls(1, e.base.Add(-time.Minute), 20, 0, 25000, false)
@@ -259,7 +265,7 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.calls(1, e.base.Add(6*time.Minute), 20, 0, 0, false)
 			e.evaluate(t, 7*time.Minute)
 			e.state(t, 1, "eligible", 1, GroupQualityGateTierFast)
-			require.Contains(t, e.logs.String(), "group_quality_gate.recover")
+			require.Contains(t, e.logs.String(), `"level":"WARN","msg":"group_quality_gate.recover","group_id":7,"account_id":1,"from":"trial","to":"eligible","reason":"trial_passed","strike":1`)
 		}},
 		{"old samples expire and two trial failures eject", func(t *testing.T, e *qualityTestEnv) {
 			e.calls(1, e.base.Add(-time.Minute), 20, 5, 0, false)
@@ -270,6 +276,9 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.calls(1, e.base.Add(6*time.Minute), 2, 2, 0, false)
 			e.evaluate(t, 7*time.Minute)
 			e.state(t, 1, "ejected", 2, GroupQualityGateTierOther)
+			logs := e.logs.String()
+			require.Contains(t, logs, `"level":"WARN","msg":"group_quality_gate.trial","group_id":7,"account_id":1,"from":"ejected","to":"trial","reason":"ejection_expired","strike":1`)
+			require.Contains(t, logs, `"level":"WARN","msg":"group_quality_gate.eject","group_id":7,"account_id":1,"from":"trial","to":"ejected","reason":"error_rate","strike":2`)
 		}},
 		{"two hours without ejection resets strikes", func(t *testing.T, e *qualityTestEnv) {
 			e.calls(1, e.base.Add(-time.Minute), 20, 5, 0, false)
@@ -293,7 +302,96 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			require.Equal(t, "trial", e.svc.snapshot.Load().Members[8][1].State.State)
 			require.Zero(t, e.member(1).Metric.Calls)
 			require.Equal(t, 2, e.repo.memberLoads, "one member query per round, regardless of group count")
-			require.Contains(t, e.logs.String(), "group_quality_gate.trial")
+			for _, group := range []string{"7", "8"} {
+				require.Contains(t, e.logs.String(), `"level":"WARN","msg":"group_quality_gate.trial","group_id":`+group+`,"account_id":1,"from":"ejected","to":"trial","reason":"manual_reset","strike":0`)
+			}
+		}},
+		{"joining a group after an applied reset does not start a stale trial", func(t *testing.T, e *qualityTestEnv) {
+			e.accounts(1, 2, 3, 4)
+			e.groups.groups = append(e.groups.groups, Group{ID: 8, Platform: PlatformOpenAI})
+			e.repo.policies.Groups["8"] = e.repo.policies.Groups["7"]
+			e.repo.members[8] = slices.Clone(e.repo.members[7][1:])
+			e.evaluate(t, 0)
+			e.reset(1, e.base.Add(30*time.Second))
+			e.evaluate(t, time.Minute)
+			e.calls(1, e.base.Add(90*time.Second), 20, 0, 0, false)
+			e.evaluate(t, 2*time.Minute)
+			e.state(t, 1, "eligible", 0, GroupQualityGateTierFast)
+			// Two failures in 40 calls stay below the normal rule but would
+			// fail a trial counted from the old reset.
+			e.calls(1, e.base.Add(4*time.Hour-100*time.Minute), 40, 2, 0, false)
+			e.repo.members[8] = append(e.repo.members[8], e.repo.members[7][0])
+			e.evaluate(t, 4*time.Hour)
+			require.Equal(t, "eligible", e.svc.snapshot.Load().Members[8][1].State.State)
+			require.False(t, e.svc.Vetoed(8, 1))
+		}},
+		{"rejoining after an ejection ended ignores pre-ejection data", func(t *testing.T, e *qualityTestEnv) {
+			e.accounts(1, 2, 3, 4)
+			e.calls(1, e.base.Add(-time.Minute), 20, 5, 0, false)
+			e.evaluate(t, 0)
+			e.evaluate(t, 5*time.Minute)
+			e.state(t, 1, "trial", 1, GroupQualityGateTierTrial)
+			members := e.repo.members[7]
+			e.repo.members[7] = members[1:]
+			e.evaluate(t, 6*time.Minute)
+			e.repo.members[7] = members
+			e.evaluate(t, 7*time.Minute)
+			e.state(t, 1, "trial", 1, GroupQualityGateTierTrial)
+			require.Zero(t, e.member(1).Metric.Calls)
+			require.False(t, e.svc.Vetoed(7, 1))
+		}},
+		{"expiry trial starts when the ejection ended", func(t *testing.T, e *qualityTestEnv) {
+			e.calls(1, e.base.Add(-time.Minute), 20, 5, 0, false)
+			e.evaluate(t, 0)
+			e.calls(1, e.base.Add(5*time.Minute+10*time.Second), 2, 2, 0, false)
+			e.evaluate(t, 5*time.Minute+30*time.Second)
+			e.state(t, 1, "trial", 1, GroupQualityGateTierTrial)
+			require.Equal(t, e.base.Add(5*time.Minute), e.member(1).State.TrialSince)
+			e.evaluate(t, 6*time.Minute+30*time.Second)
+			e.state(t, 1, "ejected", 2, GroupQualityGateTierOther)
+		}},
+		{"disabling the gate stops vetoes at once and re-enabling ignores ejection data", func(t *testing.T, e *qualityTestEnv) {
+			e.accounts(1, 2, 3, 4)
+			e.calls(1, e.base.Add(-time.Minute), 20, 5, 0, false)
+			e.evaluate(t, 0)
+			require.True(t, e.svc.Vetoed(7, 1))
+			policy := e.repo.policies.Groups["7"]
+			policy.Enabled = false
+			_, err := e.svc.UpdatePolicy(context.Background(), 7, e.repo.policies.Version, policy)
+			require.NoError(t, err)
+			require.False(t, e.svc.Vetoed(7, 1), "no veto before the next evaluation")
+			e.evaluate(t, time.Minute)
+			policy.Enabled = true
+			_, err = e.svc.UpdatePolicy(context.Background(), 7, e.repo.policies.Version, policy)
+			require.NoError(t, err)
+			e.evaluate(t, 2*time.Minute)
+			e.state(t, 1, "eligible", 1, GroupQualityGateTierFast)
+		}},
+		{"broken streams count once and failure IDs match usage IDs", func(t *testing.T, e *qualityTestEnv) {
+			e.accounts(1, 2)
+			broken := func(accountID int64, at time.Time, clientRequestID, requestID string) {
+				ctx := context.WithValue(context.Background(), ctxkey.RequestID, requestID)
+				if clientRequestID != "" {
+					ctx = context.WithValue(ctx, ctxkey.ClientRequestID, clientRequestID)
+				}
+				e.repo.observations = append(e.repo.observations,
+					GroupQualityObservation{AccountID: accountID, RequestID: GroupQualityErrorRequestID(clientRequestID, requestID), At: at, SoftFailure: true},
+					GroupQualityObservation{AccountID: accountID, RequestID: resolveUsageBillingRequestID(ctx, "resp_upstream"), At: at.Add(time.Second), Success: true})
+			}
+			// 40 calls plus 5 broken streams: 5/45 exceeds 10%, 5/50 would not.
+			e.calls(1, e.base.Add(-time.Minute), 40, 0, 0, false)
+			for i, id := range []string{"c0", "c1", "c2", "", ""} {
+				broken(1, e.base.Add(-30*time.Second+time.Duration(i)*time.Millisecond), id, fmt.Sprintf("r%d", i))
+			}
+			e.reset(2, e.base.Add(-time.Minute))
+			e.evaluate(t, 0)
+			require.EqualValues(t, 45, e.member(1).Metric.Calls)
+			require.EqualValues(t, 5, e.member(1).Metric.SoftFailures)
+			e.state(t, 1, "ejected", 1, GroupQualityGateTierOther)
+			broken(2, e.base.Add(10*time.Second), "c5", "r5")
+			e.evaluate(t, time.Minute)
+			require.Len(t, e.member(2).State.TrialRequests, 1, "the trial counts the broken stream as one request")
+			require.Len(t, e.member(2).State.TrialFailures, 1)
 		}},
 		{"restart ignores historical reset and observations", func(t *testing.T, e *qualityTestEnv) {
 			e.reset(1, e.base.Add(-7*24*time.Hour))
@@ -638,7 +736,9 @@ func TestGroupQualityGatePolicyValidationAndStatusContract(t *testing.T) {
 	require.NotNil(t, e.svc.policyCache.Load())
 	_, err = e.svc.UpdatePolicy(context.Background(), 7, 0, GroupQualityGatePolicy{Enabled: true})
 	require.NoError(t, err)
-	require.Nil(t, e.svc.policyCache.Load())
+	saved := e.svc.policyCache.Load().value
+	require.Equal(t, 1, saved.Version, "the saved policy replaces the cache at once")
+	require.Equal(t, normalizeGroupQualityGatePolicy(GroupQualityGatePolicy{Enabled: true}), saved.Groups["7"])
 	_, err = e.svc.UpdatePolicy(context.Background(), 7, 0, GroupQualityGatePolicy{})
 	require.ErrorIs(t, err, ErrGroupQualityGateVersionConflict)
 	var nilService *GroupQualityGateService
