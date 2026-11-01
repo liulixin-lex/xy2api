@@ -27,9 +27,13 @@ Key 创建接口省略该字段采用 `inherit`；更新接口省略保持原值
 
 只访问顶层、tools、system 和 messages 内容块的协议字段，不递归改工具 schema、工具入参或用户数据。保留合法声明的类型、其他属性、内容和断点位置。缓存变换只属于当前尝试，不回写跨尝试的共享正文；同号重试、换号及兜底组重新判定实际出口。
 
-顶层 automatic 与显式断点共同占最多四个槽位。空间不足时不新增断点，不任意删除合法客户端声明；顶层和末块 TTL 冲突等剩余非法组合沿现有错误路径返回。强制项先统一 TTL，`off` 保留合法混合 TTL，既有长 TTL 位于短 TTL 之前的顺序保护继续适用。官方的 20 块 lookback 意味着移动断点不等于必然破坏前缀命中。
+Chat/Responses 转换保留工具调用与结果上的缓存标记（2026-10-31 起）：Chat `role=tool`、旧版 `role=function` 消息的消息级标记，或其内容分片上最后一个标记，落在对应 `tool_result` 块；只含 `tool_calls` 的 assistant 消息级标记落在最后一个 `tool_use` 块，带文本的 assistant 仍标在文本块。Responses `function_call_output`（含降级后的 `custom_tool_call_output`）以项级标记为准，否则取数组 `output` 中最后一个带标记的分片；`tool_search_output` 的 `output` 降级时整体转成字符串，只认项级标记；`function_call` 的项级标记落在 `tool_use`。每个工具块只保留一个标记，`tool_result` 内容里不留嵌套副本。并行结果按调用顺序排列，标记留在各自结果上；孤立、重复或未应答的调用及结果按既有配对规则丢弃，标记随之丢弃。Chat 工具消息里的图片和文件仍不转发。Chat 工具标记只随 Anthropic 转换转发，不加入发往 OpenAI Responses 上游的请求；`/v1/responses` 入口的旧版 Chat 形状请求（`messages` 等）同样经这一共用转换，工具消息标记不转发。
+
+顶层 automatic 与显式断点共同占最多四个槽位。空间不足时不新增断点，不任意删除合法客户端声明；原生 Messages 的顶层与末块 TTL 冲突等剩余非法组合沿现有错误路径返回。Chat/Responses 转换出的请求（含 OpenAI 分组经 Anthropic 原生接口的转换）由网关构造：顶层 automatic 与末块显式标记一个为 1h、另一个为 5m 或省略时统一为 1h，再由顺序保护把之前的 ephemeral 断点提到 1h；其他 TTL 值原样转发（2026-10-31 起）。强制项先统一 TTL，`off` 保留合法混合 TTL，既有长 TTL 位于短 TTL 之前的顺序保护继续适用。官方的 20 块 lookback 意味着移动断点不等于必然破坏前缀命中。
 
 thinking、redacted_thinking、空文本和延迟加载工具不能新增缓存标记。旧 Bedrock integration 不支持顶层 automatic；模型支持 1h 不等于 integration 支持所有声明。能力清理后的字段不会在签名前补回。`/messages/count_tokens` 不运行 TTL 覆写或补断点，不创建、刷新缓存，也不承诺已应用 TTL。转到其他供应商的请求不应用 Claude TTL。
+
+官方 1h 缓存只需 `{"type":"ephemeral","ttl":"1h"}`，不需要 `extended-cache-ttl-2025-04-11` beta。XY2API 默认不添加该 beta，只在 OAuth/SetupToken 模拟 Claude Code 时随固定 beta 列表发送；API Key 与透传账号原样转发客户端 beta，Vertex/Bedrock 的 beta 白名单不含它。
 
 ## 用量、计费与预留
 
@@ -62,7 +66,48 @@ thinking、redacted_thinking、空文本和延迟加载工具不能新增缓存�
 
 使用记录页面（用户与管理员）不显示这两个字段：0.4.15 曾在列表和 Token 详情显示「TTL 策略 · 已应用/未应用」，升级前创建的 Key 为 off，几乎每行都是「不覆写 TTL · 未应用」，没有排障价值，2026-10-31 按用户要求移除。接口仍原样返回两个字段，NULL 表示未记录，不等于未应用。供应商 TTL 明细缺失或部分缺失时，Token 详情仍显示相应计费提示。「已应用」仅描述最终请求，不证明供应商采用 TTL 或缓存命中；不从读取 Token 反推 TTL，也不继承失败尝试的观测。
 
-诊断复用现有缓存/结算结构化事件，记录策略来源、最终策略和应用结果、供应商 aggregate/raw5m/raw1h、缺失/不一致及计费覆盖，避免记录正文或凭据；具体事件以实现所在服务的既有日志入口为准。账单桶可能经商业覆盖，两列策略并非完整财务账本。上线观察应排除覆盖影响，按模型/账号/入口/策略比较读取占比、创建费用、TTL 明细完整率、长上下文 TTFT 与端到端首输出。
+诊断复用现有结构化事件，不记录正文或凭据：`gateway.claude_cache_fallback` 记录补断点原因；结算事件 `gateway.claude_cache_fallback.billing` 记录最终策略 `ttl_policy`、应用结果 `ttl_applied`、供应商 aggregate/raw5m/raw1h 及字段是否出现、计费覆盖与结算结果。`ttl_status` 取第一个成立的值：`missing`（有创建量但无 TTL 明细）、`partial`（明细之和小于总量）、`inconsistent`（明细之和大于总量）、`downgraded`（策略 1h 且已应用，供应商只报 5m 写入，2026-10-31 起），否则为 `consistent`。`downgraded` 说明供应商或中转没有按 1h 写入；官方 1h 不需要额外 beta，不要靠加 beta 处理。判断策略以 `ttl_policy` 为准。账单桶可能经商业覆盖，两列策略并非完整财务账本。上线观察应排除覆盖影响，按模型/账号/入口/策略比较读取占比、创建费用、TTL 明细完整率、长上下文 TTFT 与端到端首输出。
+
+### 1h 降级巡检
+
+在生产主机的数据库上按账号统计策略 1h 且已应用、供应商却只报 5m 写入的请求。启用「缓存写入计费分类覆盖」的行会改写 5m/1h 桶，查询排除这些行。需要按模型或入口拆分时，把 `u.model`、`u.inbound_endpoint` 加入 `s` 和 `GROUP BY`。
+
+```sql
+WITH s AS (
+  SELECT
+    u.account_id,
+    u.created_at >= now() - interval '24 hours'                  AS d1,
+    u.cache_creation_tokens > 0                                  AS wrote,
+    u.cache_creation_5m_tokens > 0 AND u.cache_creation_1h_tokens = 0
+      AND u.cache_creation_5m_tokens = u.cache_creation_tokens  AS downgraded,
+    u.cache_creation_tokens > 0
+      AND u.cache_creation_5m_tokens + u.cache_creation_1h_tokens = 0 AS missing,
+    u.cache_creation_5m_tokens AS c5m,
+    u.cache_creation_1h_tokens AS c1h
+  FROM usage_logs u
+  WHERE u.created_at >= now() - interval '7 days'
+    AND u.anthropic_cache_ttl_policy = '1h'
+    AND u.anthropic_cache_ttl_applied IS TRUE
+    AND u.cache_ttl_overridden IS FALSE
+)
+SELECT
+  s.account_id,
+  acc.name                                                     AS account_name,
+  count(*) FILTER (WHERE d1 AND wrote)                         AS writes_24h,
+  count(*) FILTER (WHERE d1 AND downgraded)                    AS downgraded_24h,
+  count(*) FILTER (WHERE wrote)                                AS writes_7d,
+  count(*) FILTER (WHERE downgraded)                           AS downgraded_7d,
+  count(*) FILTER (WHERE missing)                              AS ttl_missing_7d,
+  round(100.0 * count(*) FILTER (WHERE downgraded)
+        / nullif(count(*) FILTER (WHERE wrote), 0), 1)         AS downgraded_pct_7d,
+  sum(c5m)                                                     AS creation_5m_7d,
+  sum(c1h)                                                     AS creation_1h_7d
+FROM s
+LEFT JOIN accounts acc ON acc.id = s.account_id
+GROUP BY s.account_id, acc.name
+HAVING count(*) FILTER (WHERE wrote) > 0
+ORDER BY downgraded_7d DESC, writes_7d DESC;
+```
 
 ## 迁移与回退
 

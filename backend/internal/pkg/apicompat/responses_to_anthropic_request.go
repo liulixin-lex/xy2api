@@ -16,7 +16,7 @@ import (
 func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, error) {
 	isOpus55 := claude.IsOpus55(req.Model)
 	isSonnet55 := claude.IsSonnet55(req.Model)
-	system, messages, err := convertResponsesInputToAnthropic(req.Instructions, req.Input, isOpus55 || isSonnet55)
+	system, messages, err := convertResponsesInputToAnthropic(req.Instructions, req.Input, isOpus55 || isSonnet55, req.chatCacheControls...)
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +156,8 @@ func mapResponsesEffortToAnthropic(effort string) string {
 // convertResponsesInputToAnthropic extracts system prompt and messages from
 // a Responses API instructions + input array. Returns the system as raw JSON
 // (for Anthropic's polymorphic system field) and a list of Anthropic messages.
-func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMessage, preserveThinking bool) (json.RawMessage, []AnthropicMessage, error) {
+// chatCacheControls are ResponsesRequest.chatCacheControls, aligned with input.
+func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMessage, preserveThinking bool, chatCacheControls ...*AnthropicCacheControl) (json.RawMessage, []AnthropicMessage, error) {
 	var systemParts []string
 	var systemBlocks []AnthropicContentBlock
 	if strings.TrimSpace(instructions) != "" {
@@ -179,6 +180,7 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 	if err := json.Unmarshal(inputRaw, &items); err != nil {
 		return nil, nil, fmt.Errorf("parse responses input: %w", err)
 	}
+	restoreChatCacheControls(items, chatCacheControls)
 
 	var messages []AnthropicMessage
 
@@ -212,6 +214,7 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 				Name:  item.Name,
 				Input: input,
 			}
+			block.CacheControl = responsesItemCacheControl(item)
 			blockJSON, _ := json.Marshal([]AnthropicContentBlock{block})
 			messages = append(messages, AnthropicMessage{
 				Role:    "assistant",
@@ -226,6 +229,7 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 				ToolUseID: fromResponsesCallIDToAnthropic(item.CallID),
 				Content:   contentJSON,
 			}
+			block.CacheControl = responsesToolOutputCacheControl(item)
 			blockJSON, _ := json.Marshal([]AnthropicContentBlock{block})
 			messages = append(messages, AnthropicMessage{
 				Role:    "user",

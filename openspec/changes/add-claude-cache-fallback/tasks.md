@@ -82,3 +82,7 @@
 ## 9. 与 Anthropic TTL 同卡（2026-10-31）
 
 - [x] 卡片改名「Claude 缓存」，管理员默认 TTL 移入同卡第二行，保存只提交改动字段；主设置表单不再提交 `anthropic_cache_ttl_default`。前端定向测试覆盖只改时长、两项同存、分组不可核对时只改时长、启用无分组拦截与回显不一致。
+
+## 10. 转换路由工具标记（2026-10-31）
+
+- [x] 2026-10-31 后续：Chat/Responses 工具结果与调用标记落到 tool_result/tool_use，嵌套副本上提；Chat 工具标记不进入 OpenAI Responses 请求；原始声明识别同步覆盖 Responses 工具项，预留口径不变。绑定测试 `TestAnthropicCacheToolResultMarkers`、`TestAnthropicCacheToolResultMarkersAbsent`、`TestAnthropicCacheConvertedToolMarkersWire` 及 apicompat/service/handler unit、相关 race、golangci-lint 通过；真实上游验证仍归上方未完成项。
