@@ -20,7 +20,8 @@ The fallback trigger, the ops group availability count and its alert MUST all us
 #### Scenario: Both gates off
 
 - **WHEN** neither the quality gate nor the profit gate is enabled for a group
-- **THEN** its available account count equals the previous release.
+- **THEN** its available account count equals its servable members: platform-eligible under the scheduler's rules (including mixed-scheduling and composite members), free of hard states and free of soft penalties
+- **AND** the count MAY be lower than the previous release, which ignored hard states such as exhausted quota and platform eligibility.
 
 ### Requirement: Fallback decision and selection
 
