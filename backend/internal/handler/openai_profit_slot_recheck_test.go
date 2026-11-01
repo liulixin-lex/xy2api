@@ -24,7 +24,28 @@ import (
 type profitCountingConcurrencyCache struct {
 	fakeConcurrencyCache
 	accountReleases atomic.Int64
+	attempts        atomic.Int64
+	waitAdds        atomic.Int64
+	waitRemoves     atomic.Int64
+	queued          bool
 }
+
+func (c *profitCountingConcurrencyCache) AcquireAccountSlot(context.Context, int64, int, string) (bool, error) {
+	return c.attempts.Add(1) > 1 || !c.queued, nil
+}
+func (c *profitCountingConcurrencyCache) IncrementAccountWaitCount(context.Context, int64, int) (bool, error) {
+	c.waitAdds.Add(1)
+	return true, nil
+}
+func (c *profitCountingConcurrencyCache) DecrementAccountWaitCount(context.Context, int64) error {
+	c.waitRemoves.Add(1)
+	return nil
+}
+
+type slotQualityView struct{}
+
+func (slotQualityView) Vetoed(_, accountID int64) bool { return accountID == 1 }
+func (slotQualityView) OrderTier(int64, int64) int     { return 0 }
 
 func (c *profitCountingConcurrencyCache) ReleaseAccountSlot(context.Context, int64, string) error {
 	c.accountReleases.Add(1)
@@ -138,6 +159,45 @@ func TestAcquireResponsesAccountSlotProfitRecheck(t *testing.T) {
 		require.NotNil(t, release)
 		release()
 	})
+	for _, path := range []string{"acquired", "quick", "queued"} {
+		t.Run("quality veto/"+path, func(t *testing.T) {
+			qualityGateway := &service.OpenAIGatewayService{}
+			qualityGateway.SetGroupQualityGateView(slotQualityView{})
+			cache := &profitCountingConcurrencyCache{queued: path == "queued"}
+			h := newHandler(cache)
+			h.gatewayService = qualityGateway
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest("POST", "/v1/responses", nil).WithContext(profitSlotTestContext(t, qualityGateway, groupID, false))
+			selection := newSelection(profitSlotTestAccount(1, 0.3))
+			if path == "acquired" {
+				selection.Acquired = true
+				selection.ReleaseFunc = func() { cache.accountReleases.Add(1) }
+			}
+			started := false
+			release, result := h.acquireResponsesAccountSlot(c, &groupID, "", selection, false, &started, zap.NewNop())
+			require.Equal(t, openAISlotAcquireProfitVetoed, result)
+			require.Nil(t, release)
+			require.Zero(t, w.Body.Len())
+			require.Equal(t, int64(1), cache.accountReleases.Load())
+			excluded := map[int64]struct{}{}
+			count := 0
+			require.True(t, recordOpenAIProfitVeto(excluded, 1, &count))
+			require.Contains(t, excluded, int64(1))
+			if path == "queued" {
+				require.Equal(t, int64(1), cache.waitAdds.Load())
+				require.Equal(t, int64(1), cache.waitRemoves.Load())
+			} else {
+				require.Zero(t, cache.waitAdds.Load())
+			}
+			release, result = h.acquireResponsesAccountSlot(c, &groupID, "", newSelection(profitSlotTestAccount(2, 0.3)), false, &started, zap.NewNop())
+			require.Equal(t, openAISlotAcquireOK, result)
+			require.NotNil(t, release)
+			release()
+			require.Equal(t, int64(2), cache.accountReleases.Load())
+		})
+	}
+
 }
 
 func TestOpenAIResponsesRequiredCapabilityForRequest(t *testing.T) {

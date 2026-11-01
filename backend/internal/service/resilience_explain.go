@@ -177,7 +177,8 @@ func (r *ResilienceService) Explain(ctx context.Context, groupID int64, sessionH
 }
 
 // Keep the default, group-wide fallback explanation. An explicit request mode
-// additionally excludes learned capabilities in both the source and fallback.
+// additionally excludes learned capabilities in both the source and fallback;
+// otherwise it uses the fallback's own member decision.
 func (r *ResilienceService) explainGroupHasHealthyAccount(ctx context.Context, groupID int64, model string, now time.Time) bool {
 	if _, _, scoped := resilience.CapabilityRequestFrom(ctx); !scoped {
 		return r.groupHasHealthyAccount(ctx, groupID, now)
@@ -186,12 +187,13 @@ func (r *ResilienceService) explainGroupHasHealthyAccount(ctx context.Context, g
 	if err != nil {
 		return true // Preserve the existing unknown-state fallback policy.
 	}
+	group := r.loadFallbackGroup(ctx, groupID, now)
+	if group == nil {
+		return true // Same fail-open policy as groupHasHealthyAccount.
+	}
 	for i := range accounts {
 		account := &accounts[i]
-		if !account.IsActive() || !account.Schedulable || account.CapabilityExclusion(ctx, model, now) != nil {
-			continue
-		}
-		if tier, _, _ := resiliencePenaltyOf(account, model, now); tier == resilience.TierNone {
+		if account.CapabilityExclusion(ctx, model, now) == nil && groupMemberServable(group, account, now, r.groupQualityGateView, nil) {
 			return true
 		}
 	}

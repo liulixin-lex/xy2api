@@ -27,6 +27,8 @@ type rateLimitClearRepoStub struct {
 	clearAntigravityErr       error
 	clearModelRateLimitErr    error
 	clearTempUnschedulableErr error
+	updateExtraCalls          int
+	updateExtraErr            error
 }
 
 func (r *rateLimitClearRepoStub) GetByID(ctx context.Context, id int64) (*Account, error) {
@@ -60,6 +62,20 @@ func (r *rateLimitClearRepoStub) ClearModelRateLimits(ctx context.Context, id in
 func (r *rateLimitClearRepoStub) ClearTempUnschedulable(ctx context.Context, id int64) error {
 	r.clearTempUnschedCalls++
 	return r.clearTempUnschedulableErr
+}
+
+func (r *rateLimitClearRepoStub) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
+	r.updateExtraCalls++
+	if r.updateExtraErr != nil {
+		return r.updateExtraErr
+	}
+	if r.getByIDAccount.Extra == nil {
+		r.getByIDAccount.Extra = map[string]any{}
+	}
+	for key, value := range updates {
+		r.getByIDAccount.Extra[key] = value
+	}
+	return nil
 }
 
 type tempUnschedCacheRecorder struct {
@@ -306,4 +322,23 @@ func TestRateLimitService_RecoverAccountState_InvalidatesOAuthTokenOnErrorRecove
 	require.Equal(t, 1, repo.clearErrorCalls)
 	require.Len(t, invalidator.accounts, 1)
 	require.Equal(t, int64(21), invalidator.accounts[0].ID)
+}
+
+func TestRateLimitService_RecoverAccountState_QualityGateResetOnlyWhenExplicit(t *testing.T) {
+	repo := &rateLimitClearRepoStub{getByIDAccount: &Account{ID: 42, Status: StatusActive, Schedulable: true, Extra: map[string]any{"keep": "value"}}}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	_, err := svc.RecoverAccountState(context.Background(), 42, AccountRecoveryOptions{ResetGroupQualityGate: true})
+	require.NoError(t, err)
+	require.Equal(t, 1, repo.updateExtraCalls)
+	resetAt, ok := repo.getByIDAccount.Extra["group_quality_reset_at"].(string)
+	require.True(t, ok)
+	_, err = time.Parse(time.RFC3339, resetAt)
+	require.NoError(t, err)
+	require.Equal(t, "value", repo.getByIDAccount.Extra["keep"], "the JSONB merge must preserve existing extra fields")
+
+	testRepo := &rateLimitClearRepoStub{getByIDAccount: &Account{ID: 43, Status: StatusActive, Schedulable: true, Extra: map[string]any{"keep": "value"}}}
+	testSvc := NewRateLimitService(testRepo, nil, &config.Config{}, nil, nil)
+	_, err = testSvc.RecoverAccountAfterSuccessfulTest(context.Background(), 43)
+	require.NoError(t, err)
+	require.Zero(t, testRepo.updateExtraCalls, "successful account tests must not reset quality gate state")
 }

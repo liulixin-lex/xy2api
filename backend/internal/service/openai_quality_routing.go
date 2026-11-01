@@ -830,6 +830,10 @@ func (s *OpenAIGatewayService) selectAccountWithQualityRouting(
 	}
 	// A replacement stays sticky even when an old provider's cooldown expires.
 	tiers := qualityExclusionTiers(accounts, state, excluded)
+	// Saturation may use other providers/accounts, but must not enter the
+	// later passes that forgive an avoided account. Those require an unusable owner.
+	borrowTiers := tiers[:2]
+	stickyBindingPass := false
 	if state.Binding > 0 {
 		if _, skip := excluded[state.Binding]; !skip {
 			if bad, exists := state.Avoid[strconv.FormatInt(state.Binding, 10)]; !exists || bad.Until <= time.Now().UnixMilli() {
@@ -843,12 +847,79 @@ func (s *OpenAIGatewayService) selectAccountWithQualityRouting(
 					}
 				}
 				tiers = append([]map[int64]struct{}{bound}, tiers...)
+				stickyBindingPass = true
 			}
 		}
 	}
-	for _, pass := range tiers {
+	for passIndex, pass := range tiers {
 		selection, decision, selectErr := selectPass(pass)
 		if selectErr == nil && selection != nil && selection.Account != nil {
+			if stickyBindingPass && passIndex == 0 && selection.WaitPlan != nil && selection.WaitPlan.AccountID == state.Binding {
+				// The owner-only pass has already performed the shared two-second
+				// retry. Try only the two non-forgiving quality tiers, retaining
+				// the caller's exclusions and the healthy owner's binding.
+				for _, borrowPass := range borrowTiers {
+					borrowExcluded := cloneExcludedAccountIDs(borrowPass)
+					if borrowExcluded == nil {
+						borrowExcluded = make(map[int64]struct{})
+					}
+					borrowExcluded[state.Binding] = struct{}{}
+					borrowed, borrowErr := s.selectOpenAIStickyCapacityBorrow(ctx, selection.Account, OpenAIAccountScheduleRequest{
+						GroupID: group, Platform: platform, SessionHash: session, RequestedModel: model,
+						RequiredTransport: transport, RequiredCapability: capability, RequireCompact: compact,
+						ExcludedIDs: borrowExcluded, UseUpstreamTokenCost: useCost, AdvancedScheduler: s.isOpenAIAdvancedSchedulerEnabled(ctx),
+					})
+					if borrowErr != nil {
+						return nil, OpenAIAccountScheduleDecision{}, borrowErr
+					}
+					if borrowed == nil || borrowed.Account == nil {
+						continue
+					}
+					decision.Layer = openAIAccountScheduleLayerLoadBalance
+					decision.StickySessionHit = false
+					decision.SelectedAccountID = borrowed.Account.ID
+					decision.SelectedAccountType = borrowed.Account.Type
+					return borrowed, decision, nil
+				}
+				cfg := s.schedulingConfig()
+				fallbackAcrossPool := (cfg.LoadBatchEnabled || s.isOpenAIAdvancedSchedulerEnabled(ctx)) && s.concurrencyService != nil
+				waitingCount := 0
+				if fallbackAcrossPool {
+					// Re-read after borrowing: queue pressure can change during the
+					// attempts. This does not increment or join a waiting queue.
+					waitingCount, _ = s.concurrencyService.GetAccountWaitingCount(ctx, state.Binding)
+				}
+				if fallbackAcrossPool && waitingCount >= cfg.StickySessionMaxWaiting {
+					for _, borrowPass := range borrowTiers {
+						borrowExcluded := cloneExcludedAccountIDs(borrowPass)
+						if borrowExcluded == nil {
+							borrowExcluded = make(map[int64]struct{})
+						}
+						fallback, fallbackErr := s.selectOpenAIStickyCapacityFallbackWait(ctx, selection.Account, OpenAIAccountScheduleRequest{
+							GroupID: group, Platform: platform, SessionHash: session, RequestedModel: model,
+							RequiredTransport: transport, RequiredCapability: capability, RequireCompact: compact,
+							ExcludedIDs: borrowExcluded, UseUpstreamTokenCost: useCost,
+							AdvancedScheduler: s.isOpenAIAdvancedSchedulerEnabled(ctx),
+						})
+						if fallbackErr != nil {
+							return nil, OpenAIAccountScheduleDecision{}, fallbackErr
+						}
+						if fallback != nil && fallback.Account != nil {
+							if fallback.StickyCapacitySpillover {
+								decision.Layer = openAIAccountScheduleLayerLoadBalance
+								decision.StickySessionHit = false
+							}
+							decision.SelectedAccountID = fallback.Account.ID
+							decision.SelectedAccountType = fallback.Account.Type
+							return fallback, decision, nil
+						}
+					}
+				}
+				return selection, decision, nil
+			}
+			if selection.StickyCapacitySpillover {
+				return selection, decision, nil
+			}
 			id := selection.Account.ID
 			st := s.qualityUpdate(scope, OpenAIQualityChange{Kind: "bind", Generation: state.Generation, PreviousBinding: state.Binding, AccountID: id, Now: time.Now().UnixMilli()})
 			q.mu.Lock()

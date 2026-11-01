@@ -3,17 +3,15 @@ package service
 import (
 	"context"
 
+	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
-// xy2api resilience: an availability fallback group only routes a request.
-// The user's price, permissions and limits are those the group the request
-// was made for would have applied had it served the request; the fallback
-// group decides who serves it and how. Costs on the serving account stay with
-// that account.
+type billingAPIKeySnapshotKey struct{}
+type servingPricingKeySnapshotKey struct{}
 
-// RememberAvailabilityFallbackOrigin keeps the API key as authenticated, with
-// its own group, for a request moved to an availability fallback group.
+// RememberAvailabilityFallbackOrigin keeps the authenticated API key and its
+// origin group for authorization and limit checks after a fallback move.
 func RememberAvailabilityFallbackOrigin(ctx context.Context, apiKey *APIKey) {
 	if apiKey == nil {
 		return
@@ -21,12 +19,17 @@ func RememberAvailabilityFallbackOrigin(ctx context.Context, apiKey *APIKey) {
 	resilience.StateFrom(ctx).SetFallbackOrigin(apiKey)
 }
 
-// BillingAPIKey returns the key whose group prices, permits and limits the
-// request: the key as authenticated when an availability fallback group
-// serves it, otherwise apiKey itself.
+// BillingAPIKey returns the authenticated key used for authorization and
+// limits. It intentionally remains the origin key when a fallback serves the
+// request.
 func BillingAPIKey(ctx context.Context, apiKey *APIKey) *APIKey {
 	if apiKey == nil {
 		return nil
+	}
+	if ctx != nil {
+		if snapshot, ok := ctx.Value(billingAPIKeySnapshotKey{}).(*APIKey); ok && snapshot != nil && snapshot.ID == apiKey.ID {
+			return snapshot
+		}
 	}
 	st := resilience.StateFrom(ctx)
 	origin, ok := st.FallbackOrigin().(*APIKey)
@@ -36,28 +39,91 @@ func BillingAPIKey(ctx context.Context, apiKey *APIKey) *APIKey {
 	return origin
 }
 
+// WithBillingAPIKeySnapshot freezes the origin authorization snapshot for a
+// delayed usage task or a WebSocket turn.
+func WithBillingAPIKeySnapshot(ctx context.Context, apiKey *APIKey) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if apiKey == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, billingAPIKeySnapshotKey{}, apiKey)
+}
+
+// ServingPricingKey returns the key snapshot used for all price calculations.
+// During fallback it follows the serving group in the request context; when a
+// delayed caller still carries the authenticated key, a serving-group clone is
+// created without changing the authorization identity.
+func ServingPricingKey(ctx context.Context, apiKey *APIKey) *APIKey {
+	if apiKey == nil || ctx == nil {
+		return apiKey
+	}
+	if snapshot, ok := ctx.Value(servingPricingKeySnapshotKey{}).(*APIKey); ok && snapshot != nil && snapshot.ID == apiKey.ID {
+		return snapshot
+	}
+	st := resilience.StateFrom(ctx)
+	origin, ok := st.FallbackOrigin().(*APIKey)
+	if !ok || origin == nil || origin.ID != apiKey.ID || origin.GroupID == nil || *origin.GroupID != st.OriginGroupID() {
+		return apiKey
+	}
+	group, _ := ctx.Value(ctxkey.Group).(*Group)
+	if !IsGroupContextValid(group) {
+		return apiKey
+	}
+	if apiKey.GroupID != nil && *apiKey.GroupID == group.ID && apiKey.Group == group {
+		return apiKey
+	}
+	return CloneAPIKeyWithGroup(apiKey, group)
+}
+
+// WithServingPricingKeySnapshot freezes the serving pricing key for one
+// delayed usage task or WebSocket turn.
+func WithServingPricingKeySnapshot(ctx context.Context, apiKey *APIKey) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if apiKey == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, servingPricingKeySnapshotKey{}, apiKey)
+}
+
+// ServingPricingGroup returns the request's serving group, including the
+// fallback group installed by middleware.
+func ServingPricingGroup(ctx context.Context) *Group {
+	if ctx == nil {
+		return nil
+	}
+	if key, ok := ctx.Value(servingPricingKeySnapshotKey{}).(*APIKey); ok && key != nil && IsGroupContextValid(key.Group) {
+		return key.Group
+	}
+	group, _ := ctx.Value(ctxkey.Group).(*Group)
+	if IsGroupContextValid(group) {
+		return group
+	}
+	return nil
+}
+
 // GroupGate is the verdict of a group capability flag on a request.
 type GroupGate uint8
 
 const (
 	GroupGateAllowed GroupGate = iota
-	// GroupGateDenied: the key's own group refuses; answered as the
-	// permission error that group gives when it serves the request.
+	// GroupGateDenied is the origin group's permission error.
 	GroupGateDenied
-	// GroupGateNoAccount: the key's own group allows it but the availability
-	// fallback group serving the request does not; answered as no available
-	// account, without naming the fallback group.
+	// GroupGateNoAccount means the origin allows the capability but the
+	// serving group does not; callers answer with a generic no-account error.
 	GroupGateNoAccount
 )
 
 // FallbackGroupGate applies a group capability flag under an availability
-// fallback (PM decision P2-3): eligibility follows the group the key belongs
-// to, capability the group that serves the request.
+// fallback: eligibility follows the origin key, capability the serving key.
 func FallbackGroupGate(ctx context.Context, apiKey *APIKey, allows func(*APIKey) bool) GroupGate {
 	if !allows(BillingAPIKey(ctx, apiKey)) {
 		return GroupGateDenied
 	}
-	if !allows(apiKey) {
+	if !allows(ServingPricingKey(ctx, apiKey)) {
 		return GroupGateNoAccount
 	}
 	return GroupGateAllowed
@@ -66,93 +132,4 @@ func FallbackGroupGate(ctx context.Context, apiKey *APIKey, allows func(*APIKey)
 // ImageGenerationGate is FallbackGroupGate for allow_image_generation.
 func ImageGenerationGate(ctx context.Context, apiKey *APIKey) GroupGate {
 	return FallbackGroupGate(ctx, apiKey, func(key *APIKey) bool { return GroupAllowsImageGeneration(apiKeyGroup(key)) })
-}
-
-// fallbackBillingGroup is the group whose price the user pays when the
-// request was moved to an availability fallback group, or nil.
-func fallbackBillingGroup(ctx context.Context) *Group {
-	st := resilience.StateFrom(ctx)
-	origin, ok := st.FallbackOrigin().(*APIKey)
-	if !ok || origin == nil || origin.GroupID == nil || *origin.GroupID != st.OriginGroupID() || !IsGroupContextValid(origin.Group) {
-		return nil
-	}
-	return origin.Group
-}
-
-// billingChannelFields returns the channel fields that decide the billing
-// model. Under an availability fallback they are what the origin group's
-// channel resolves for the requested model (PM decision Q9): a requested or
-// channel-mapped billing model follows the origin group's channel, and with
-// no origin mapping the origin group's default source applies. The serving
-// group's mapping only routed the request; its channel stays on the usage
-// row for the account-side records.
-func billingChannelFields(ctx context.Context, channels *ChannelService, served, billing *APIKey, fields ChannelUsageFields) ChannelUsageFields {
-	if billing == served || billing == nil || billing.GroupID == nil || fields.OriginalModel == "" {
-		return fields
-	}
-	mapping := ChannelMappingResult{MappedModel: fields.OriginalModel}
-	if channels != nil {
-		mapping = channels.ResolveChannelMapping(ctx, *billing.GroupID, fields.OriginalModel)
-	}
-	out := fields
-	out.BillingModelSource = mapping.BillingModelSource
-	out.ChannelMappedModel = fields.OriginalModel
-	if mapping.Mapped {
-		out.ChannelMappedModel = mapping.MappedModel
-	}
-	return out
-}
-
-// noteFallbackForcedFast is called where a group's forced Fast rewrites a
-// request to priority. When the request is under an availability fallback,
-// its client did not ask for priority and its own group does not force
-// Fast, only the fallback made it priority: the user is charged the standard
-// tier and the platform bears the difference (PM ruling on Q8).
-func noteFallbackForcedFast(ctx context.Context, account *Account, clientTier string) {
-	st := resilience.StateFrom(ctx)
-	origin, ok := st.FallbackOrigin().(*APIKey)
-	if !ok || origin == nil {
-		return
-	}
-	// A WebSocket connection keeps one state across turns: each forced
-	// rewrite records its own outcome.
-	switch normalizeBillingServiceTier(clientTier) {
-	case OpenAIFastTierPriority, "fast":
-		st.SetFallbackForcedFast(false)
-	default:
-		st.SetFallbackForcedFast(!groupForcesOpenAIFast(origin.Group, account))
-	}
-}
-
-// fallbackForcedFastKey carries a turn's flag fixed by FreezeFallbackForcedFast.
-type fallbackForcedFastKey struct{}
-
-// FreezeFallbackForcedFast fixes the flag noteFallbackForcedFast recorded for
-// the current WebSocket turn when that turn's usage task is created. The
-// connection's request state follows the latest turn, so by the time the
-// asynchronous task runs, the next response.create may have rewritten it.
-// The returned function applies the fixed value to the task's context.
-func FreezeFallbackForcedFast(ctx context.Context) func(context.Context) context.Context {
-	st := resilience.StateFrom(ctx)
-	if origin, ok := st.FallbackOrigin().(*APIKey); !ok || origin == nil {
-		return func(taskCtx context.Context) context.Context { return taskCtx }
-	}
-	forced := st.FallbackForcedFast()
-	return func(taskCtx context.Context) context.Context {
-		return context.WithValue(taskCtx, fallbackForcedFastKey{}, forced)
-	}
-}
-
-// fallbackForcedFastChargesStandard reports a priority request whose
-// priority only the serving fallback group's forced Fast caused. A value
-// fixed for an asynchronous turn record wins over the connection's state.
-func fallbackForcedFastChargesStandard(ctx context.Context, serviceTier string) bool {
-	switch normalizeBillingServiceTier(serviceTier) {
-	case OpenAIFastTierPriority, "fast":
-		if forced, ok := ctx.Value(fallbackForcedFastKey{}).(bool); ok {
-			return forced
-		}
-		return resilience.StateFrom(ctx).FallbackForcedFast()
-	}
-	return false
 }

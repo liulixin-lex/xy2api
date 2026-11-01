@@ -52,9 +52,10 @@ const (
 	maxProfitVetoAttempts = 10
 )
 
-// profitVetoExhaustedMessage 是利润否决次数耗尽时返回给客户端的文案。
-// 语义上等同于「无可用账号」：候选账号都不满足分组的利润约束。
-const profitVetoExhaustedMessage = "No available accounts: all candidates rejected by group profit control"
+// profitVetoExhaustedMessage 是准入终检否决次数耗尽时返回给客户端的文案。
+// 语义上等同于「无可用账号」：候选账号都被分组准入策略（利润门或质量门槛）
+// 否决。两类否决共用同一预算，文案保持中性，不暴露具体策略。
+const profitVetoExhaustedMessage = "No available accounts: all candidates rejected by group admission policy"
 
 func sameAccountRetryDelayFor(failoverErr *service.UpstreamFailoverError, retryCount int) time.Duration {
 	if failoverErr == nil {

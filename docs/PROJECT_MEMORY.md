@@ -6,6 +6,26 @@
 
 ## 当前交接状态
 
+### 分组质量门槛与兜底计费（2026-11-01T06:30Z 更新：修复轮完成并通过全量门禁，用户已授权 0.4.16 发布）
+
+- **背景**：减少手工分组维护，避免少成员组整组无号，并兼顾缓存命中。
+- **目标**：按用户批准方案实现质量门槛、恢复/保底/固定、排序与满载借用、实时利润门、兜底服务组计费及精简后的管理界面。
+- **要求与约束**：无新迁移或部署前提；本地集成已完成。用户已授权推送、PR、main 合并及 0.4.16 发版；不部署、不访问生产。
+- **已完成**：`feat/gqg-wp5-integration` 已合 WP1 `6c26a11f2` 与最终 WP4 `27f7cf861`（合并 `56d557149`）；后端固定为 `8aa768168`。本机 unit/影响包复验、测试主机完整 Docker integration（60 包、0 FAIL/panic）、前端 470 文件/3609 项及构建、lint/文档/Wire/审计通过。32 场景与 tasks 5.x 全部收齐，发布草稿、配置清单与最终交付报告齐备。
+- **已完成（复审，21:35Z）**：对 `231cc5a91` 做五路只读复审与缓存专项分析，主持人逐条回读核实。
+- **已完成（定范围，11-01T03:40Z）**：用户授权主持人自行取舍。合并执行会话遗留与复审结论后决定：修 F1–F5、P2-1/2/4/6/7/8/10/13/14/15、Q1/Q2/Q3/Q6、Q7 与 D1（均收窄），其余写文档或不做（Q4、P2-9、P2-11 代码、D3–D8、C1–C7）。理由见仓外 `reviews/fix_round_decisions_20261101.md`。
+- **已完成（修复轮，11-01T06:30Z）**：FX-A/B/C/D 逐包审查后合入基线（`b3eb4379c`、`244353e34`、`bb644aaac`、`77100e80e`），文档与 OpenSpec 同步（tasks 6.1–6.5）。`a3e241353` 全量门禁通过：unit 67 包、韧性 race 478 项零跳过、lint 0、vet 四标签、scheduler-diff、docs、Python 96 项、前端 470 文件/3617 项与构建、干净树 audit；测试主机 Docker 全仓集成 60 包、0 FAIL（源码抽查一致，已清理）。
+- **未完成**（按顺序）：
+  1. 执行已授权的推送、PR、合并和 0.4.16 发版；
+  2. 升级前确认生产 `ops_monitoring_enabled` 已开启；升级后按 `PLAN.md` §11 一次配置；
+  3. 可选：用户本地执行 C1–C7 只读量化后，再定是否调大会话绑定 TTL（D3）。
+- **卡点与风险**：
+  - 复审的 F1–F5 已全部修复并验证；不做项（Q4、P2-9、P2-11 代码、D3–D8）及执行期已接受限制见发布草稿与取舍文件。
+  - 错误率依赖运维监控写 `ops_error_logs`，监控关闭时只剩首字门槛，升级前须确认。
+  - 生产只读数据（`ops_monitoring_enabled`、韧性会话开关、C1–C7 缓存量化）待用户在其本地终端执行后提供摘要；本会话不再访问生产（11-01 两次被安全机制拦截）。修复轮不依赖这些数据。
+  - 原有已接受限制见发布草稿。
+- **关键位置**：[`group-quality-gate-20261031/tasks.md`](../openspec/changes/group-quality-gate-20261031/tasks.md)；仓外 `reviews/post_impl_review_20261031.md`（复审清单、缓存分析、只读 SQL 草稿；复现用例在 `reviews/post_impl_repro/`）、`implementation/WP5-report.md`、`implementation/RELEASE_NOTES_DRAFT.md`。
+
 ### 工作区精简与规范化（2026-10-31；本分支 PR 合并即完成）
 
 - 仓库：删除 85 个跟踪文件（跟踪内容约 71.5 MiB → 61.4 MiB）：已退役或被取代的历史文档 15 个、旧上游同步报告 11 个（只留与基线对应的 `v0.2.15.json`）、已发布且有现行文档的 OpenSpec 变更 5 个、违反无赞助政策的 `assets/partners/`（同时登记 `required_absent_paths`）、失效的 `deploy/Makefile` 与 datamanagementd 部署文件（后端该功能是废弃桩）。目录、白名单、`docs_consistency.json`、`policy.json` 与引用同步更新；不改业务代码、迁移、标签与发布产物。
@@ -16,7 +36,7 @@
 ### 版本与环境速览（2026-10-31 更新）
 
 - 最新正式版 XY2API v0.4.15（2026-10-31），Sub2API 兼容基线 0.2.15，迁移共 333 项（最后为 286）。
-- 生产：2026-10-30 只读核实运行 0.4.14 / `267f8577f`（部署非本仓库 agent 操作）；0.4.15 未部署。部署与上线观察每次单独授权，外部状态以重新核实为准。
+- 生产：2026-10-31 只读核实已在线更新到 0.4.15 / `10fbc9c72`（当日 14:33 CST，部署非本仓库 agent 操作；容器镜像标签仍显示 0.4.11，版本以启动日志为准）。部署与上线观察每次单独授权，外部状态以重新核实为准。
 - 预上线主机仍运行 0.4.2 的浸泡候选 `0ad63fab7`，换成正式镜像需要授权。
 - 上游：Sub2API v0.2.17 已发布、尚未同步（2026-10-19 定时同步的 prepare 失败），需按 [`UPSTREAM_SYNC.md`](UPSTREAM_SYNC.md) 另开任务。
 - 工具链：Go 以 `backend/go.mod` 为准（当前 1.27.3）；golangci-lint v2.14.0（与 CI 同版）。
@@ -49,15 +69,71 @@
 
 ### 未结事项（2026-10-31 汇总；动手前重新核实）
 
-- **部署与上线观察**：0.4.15 未部署；Anthropic TTL 的真实供应商缓存命中率与收益未验证；0.4.9 的过渡开关与 fast_fail 待上线 7 天后复核；智商检测参数化题未做真实上游校准，旧结构待上线观察 7 天后删除，单账号“不降智”分组需运维加第 2 个账号；N5 阈值须上线后校准；0.4.12 上线约四小时的只读观察未证明首字与缓存全面改善（样本小，不作因果归因）。
+- **部署与上线观察**：0.4.15 已于 2026-10-31 在线更新上线（非本仓库 agent 操作），上线观察未做；Anthropic TTL 的真实供应商缓存命中率与收益未验证；0.4.9 的过渡开关与 fast_fail 待上线 7 天后复核；智商检测参数化题未做真实上游校准，旧结构待上线观察 7 天后删除，单账号“不降智”分组需运维加第 2 个账号；N5 阈值须上线后校准；0.4.12 上线约四小时的只读观察未证明首字与缓存全面改善（样本小，不作因果归因）。
 - **功能遗留**：WS 余额阶梯与复位暂缓；Anthropic 暂存失败尝试的上游成本由网关承担；非 OpenAI breaker 为进程内状态，多实例各自计数；迁移的空位预检有抢槽竞态；管理端保存过设置的部署 Gemini 截止仍为 90 秒；0.4.5 OpenSpec tasks §7 的 7.2/7.3/7.5/7.6；渠道监控 v1 待真实上游验证（兼容矩阵、推理模型响应时间）与审查 P2-7；无号兜底 INC-P2-1（WebSocket 快照毫秒级窗口，不阻断）。
 - **工单与 2FA**：真实 OpenAI 网页登录/MFA 只有 mock；启用 2FA 须部署 Worker、固定运行时和加密恢复目录，回退前须解决不确定任务并保留密钥与恢复日志。
 - **安全与依赖**：vue-i18n 安全例外 2026-11-27 到期前处理；两台主机的 SSH 密码曾出现在对话中，建议改用密钥并更换；生产 settings 中的明文代理凭据建议轮换；`.github/SECURITY.md` 仍指向上游 Sub2API 的报告渠道，应改为本仓库（该文件未分类，改动需同时登记 `policy.json`）。
-- **待用户决定**：账号分组档位化方案 v1.0（本地 `.work/tasks/20261030-account-group-tiering/`，PLAN §8 五个决策点）；Codex 历史联网搜索导致 502（2026-10-17 诊断，原文已归档）——恢复映射或调整白名单，代码改进前先核实 0.4.0 的 `resilience_web_search_replay` 是否覆盖 apikey 中转账号；XY-image 0.0.17 先交接并经用户确认；远端保留的 3 个含未合入提交的分支（`feat/native-stream-recovery-20260930`、`fix/native-stream-concurrency-20261001`、`fix/signature-retry-preserve-tool-result-media`）是否删除；`tools/gateway-resilience/` 下 `staging/`、`fault-upstream/`、`cdn-sim/` 发布演练脚手架 0.4.6 后未再使用，是否删除。
+- **待用户决定**：Codex 历史联网搜索导致 502（2026-10-17 诊断，原文已归档）——恢复映射或调整白名单，代码改进前先核实 0.4.0 的 `resilience_web_search_replay` 是否覆盖 apikey 中转账号；XY-image 0.0.17 先交接并经用户确认；远端保留的 3 个含未合入提交的分支（`feat/native-stream-recovery-20260930`、`fix/native-stream-concurrency-20261001`、`fix/signature-retry-preserve-tool-result-media`）是否删除；`tools/gateway-resilience/` 下 `staging/`、`fault-upstream/`、`cdn-sim/` 发布演练脚手架 0.4.6 后未再使用，是否删除。
 - **测试稳定性**：CI 偶发 `TestCompatPreludeCommentHeartbeatStillAllowsFailover/enabled` 等心跳计时用例；2026-10-28 已放宽一组截止时间，其余未定位。
 - **仓库外环境收尾**：测试服务器的候选镜像、浸泡与演练目录、`xy2api_upgrade` 库按 staging-validation §11 清理；预上线主机的两份切换前备份在正式部署后删除。
 
 ## 进行中的工作
+
+### 20261101-release0416 — PR 集成与正式发布（进行中）
+
+- 授权：用户明确要求分组质量门槛及全部开放 PR 合入 main，然后正式发布 0.4.16；不部署、不连接生产。
+- 起点：main `874560eb9`，功能分支 `7f61f7917`，主工作树干净；独立发布 worktree 使用 `chore/release-0416-integration`，保留原本地分支与工作树。
+- 当前：#175 / #176 固定 head 全部 20 项检查成功后常规合并为 `2bc8c76a8` / `94021b6a2`。#177 已合入 main，固定 head `5297b1499` 等待 CI；其源码树与原 head 完全相同。功能集成已提前保留双方治理登记与记忆，四处治理冲突按三方变化解决；功能 PR 等 #177 合入 main 后再创建。
+- 本地复验：Go build、unit vet、apicompat/service 缓存与兜底联动测试、前端 typecheck/lint/470 文件 3624 项测试/build、docs 与 scheduler-diff 均通过；已发布迁移校验和及兼容基线不变。提交后运行干净树 audit。
+- 下一步：依次合并 #176/#177；功能分支合入最新 main、复验并创建 PR；独立版本 PR、annotated tag、Release 资产及镜像核验；最后用纯记忆 PR 原样归档已完成任务。
+- 边界：普通 merge、固定完整 head SHA、所有检查通过；不改已发布迁移或校验和，不包含私有环境资料。
+
+### 20261030-account-group-tiering v3（2026-10-31 开始；Claude 主持，Opus 红队与 Codex gpt-6-astra 协作）
+
+- 目标：按用户构想做“分组质量门槛”，不要影子模式、观察期和无用测试；只出方案，用户确认前不改代码。当前状态、未完成与卡点见顶部“分组质量门槛与兜底计费”。
+- 范围：生产只读核实；过程稿、证据、三路评审都在本地 `.work/tasks/20261030-account-group-tiering/`。
+- 状态（2026-10-31 12:55Z）：两轮逐题确认与四轮三路讨论完成，用户决定已全部写入方案 v3（`PLAN.md`，v2、v1.0 移入 `archive/`）。13:14Z：OpenSpec 与派工包已备好，等 astra 核签。未改代码、未改生产。
+- 状态更新（2026-10-31；第四轮）：用户已明确兜底时由服务组 F 决定利润门与价格，API Key 所属组 G 保持权限/限额边界；用户侧仍显示 G，管理端 usage 行改为 G 主标签并保留 F 路径提示。正在只读核验历史、计费与展示链路并修订 `reviews/round4_astra.md`；未改业务代码、未访问生产。
+- v3 要点：
+  - 质量门槛默认错误率 10%、续轮首字 p90 20 秒，各组相同；
+  - 熔断 5→30 分钟、80% 恢复、试用；熔断改绑；
+  - 保底 max(2, 可用一半)；固定账号；“恢复状态”顺带重置；
+  - 排序（v3.2）：档位（合格快档 → 试用 → 其他，零缓存率 >30% 不算快档）→ 优先级 → 负载 ≥80% 排后 → 成本；满载先等 2 秒，再借用同会话稳定的替补账号；
+  - 熔断不移出分组；判定只用有效数据（熔断前旧数据在熔断结束后、以及重启前的数据都不计入）；
+  - 利润门用实时成本，默认毛利率 20%，界面显示换算出的上游倍率上限与通过数；
+  - 兜底触发计入两道门，到兜底组按兜底组规则选号并**改回按兜底组计费**（权限与限额仍按原组）；
+  - 管理端用量显示原组加兜底路径；可用数计入两道门。
+  - 不做零缓存门槛、分组级 `require_iq`、保本放行。成员关系与并发上限由用户自行配置。
+- 已作废的过程结论：
+  - v2 里“431 上游不支持缓存”有误，实际是监控小请求；
+  - astra 第三轮回放误用 10 秒熔断线，已按用户口径重跑 `sim/replay_round3_claude.py`。
+
+### 20261031-group-quality-gate 实施（2026-10-31T15:30Z 开始；Claude 主持派工与监督）
+
+- 目标：按 OpenSpec `group-quality-gate-20261031` 与本地 `handoff/` 实施 WP1–WP5。后端由 Codex gpt-6-astra（xhigh）执行，前端由 Claude Opus 5.5（xhigh）执行，审查与红队由 Opus 5.5（xhigh）执行。
+- 分支：各包从基线 `feat/group-quality-gate-20261031` 切出 `feat/gqg-wp<N>-*`，各用独立 worktree；主持人把通过审查的包合入基线，WP5 做最终集成。
+- 协调约定：各工作包 agent 不改本文件，由主持人在基线上维护；交付报告与审查写在本地 `implementation/`、`reviews/`。
+- 状态（2026-10-31T17:40Z）：
+  - 基线 `c249ff211` 已合入 WP1 接口骨架、WP3-A（兜底按服务组计费，审查有条件通过、P2 已修）与 WP1 核心（审查进行中，问题在 WP1 分支修复后再合）。
+  - WP2 调度首轮审查不通过（WS turn 1 续链循环、连接级豁免泄漏、非 OpenAI 粘性逃逸与排队满回退被删），修复中，并补完旧质量路由下的满载借用（2.7）。
+  - WP3-B（兜底触发、实时成本、预览、可用数）开工；WP4 前端审查修复完成，开始联调。
+  - 已知限制：Grok 异步视频待结算记录无生成时服务分组，跨组轮询时按轮询分组计价（需加字段，不在本变更）。
+
+### 20261031-group-quality-gate WP5 集成（2026-10-31T20:06Z：完成，待授权）
+
+- 分支 `feat/gqg-wp5-integration`：WP1 合入 `a958a61af`；索引计划测试显式 ANALYZE 修正 `8aa768168`；最终 WP4 合并 `56d557149`，后端零差异。阶段详情已原样归档。
+- 门禁与交付：影响包 unit service 378.725s、repository 16.967s；本机仓储集成通过；测试主机 Docker 全仓 60 包通过；前端四门禁 470 文件/3609 项通过。tasks 5.x/32 场景、最终显示口径、发布说明和配置清单已收齐，最终文档提交的干净树审计见仓外报告。
+- 下一步：无实施阻塞，等待用户授权推送/PR/合并/发版；测试环境已清理，未部署或连接生产。
+
+### 20261031-group-quality-gate 实施后复审（2026-10-31T20:40Z 开始，21:35Z 复审完成；Claude 主持）
+
+- 范围：对基线 `231cc5a91` 做五路只读审查，分别为 WP1 核心、WP2 调度、WP3 计费、前端、缓存端到端。结论、复现与 SQL 草稿见顶部“关键位置”。
+- 状态：复审完成，等用户确定修复范围；修复轮实施交其他 agent。没有改业务代码、推送或连接生产。
+
+### 20261101-group-quality-gate 修复轮（2026-11-01T03:40Z 开始；Claude 主持）
+
+- 范围：按 `reviews/fix_round_decisions_20261101.md` 修复，四个包各用独立 worktree，从基线切 `feat/gqg-fx-*`。各包 agent 不改本文件，由主持人维护。
+- 状态：完成。四包已合入并通过全量门禁（见顶部）。修复 worktree `gqg-fx-a..d` 与分支保留到发版；生产数据待用户本地提供。
 
 - **20261031-claude-cache-ui**（2026-10-31 开始）：用户要求去掉使用记录里的「TTL 策略: 不覆写 TTL · 未应用」文字，并询问「Anthropic 缓存默认 TTL」与「Claude 自动缓存」是否冲突、是否合并、是否按分组。分析结论：两者没有冲突（先补断点、再统一时长、最后做 4 槽与长 TTL 顺序修正），建议保留两项、放进同一张卡片，TTL 不按分组。用户选定分两个 PR，均为纯前端、不改接口与存储，由 Claude 直接实现：
   - PR 1 `fix/usage-ttl-text-removal-20261031`：删除使用记录列表与 Token 悬浮详情里的策略与应用状态文字，接口字段保留，「TTL 明细未报告」保留。
@@ -77,6 +153,7 @@
     - 原始声明识别仍漏 Responses `additional_tools`、Codex `namespace` 子工具、无 type 的内容项上的标记（既有问题）；`/v1/responses` 旧版 Chat 形状请求的工具标记不转发。
     - 结算日志 `ttl_mode`/`ttl_source` 在生产恒为 off/unrecorded：`usageRecordContext` 不复制策略 context（既有问题）。
     - 「跟随全局只延长、不缩短」待用户确认。
+
 
 ## 操作陷阱
 
@@ -272,6 +349,119 @@ pnpm --dir frontend run build
 - 卡点/风险：删除的文件仍在 Git 历史中，未改写历史；`.work/` 已删内容不可恢复（用户选择直接删除）。之前给用户的计数“102 个远端分支”多算了 main，实际为 101 个。
 - 下一步：PR CI 全绿后常规合并并删除本分支。未结事项见顶部，其中新增两项待用户决定：3 个含未合入提交的远端分支、`tools/gateway-resilience/` 发布演练脚手架；另有 `.github/SECURITY.md` 报告渠道应改为本仓库。
 
+### 2026-10-31T10:30Z — 20261030-account-group-tiering v2 — 方案定稿，待用户确认
+
+- 请求/目标：用户提出新构想：账号可进全部分组；每个分组设首字、缓存、错误率阈值；组内熔断、自动停用与恢复、打分。要求结合生产数据与各类 AI 网关做法，给出精简开发方案，并与 Codex gpt-6-astra（xhigh）互补讨论。要求不做影子模式、无用测试和兜底。
+- 开始状态：main `874560eb9`，工作树干净。
+- 完成操作：
+  - 经授权 SSH 只读查询生产（只读事务），结束后关闭 SSH 通道。
+  - 核实生产已在线更新到 0.4.15，已更正顶部状态。
+  - 核实所有分组实际走原版调度；利润门、低倍率优先、API Key 健康熔断均关闭。
+  - 7 天人工运维量：改分组 549 次、停启调度 276 次、恢复 135 次、测试 233 次。
+  - 50 组 10-30 的 394 次无号 503：组内无可调度成员，人工加入 355 后恢复。
+  - 发现续轮口径能把上游缓存与首字从调度影响中剥离出来，例如 431 续轮零缓存率为 100%。
+  - Codex 独立评审代码与回放，并对定稿核签（有条件通过），修正项已全部并入。双方分歧与取舍记录在 PLAN §8。
+- 修改文件：仅本记忆（顶部生产版本、未结事项、进行中条目）。方案与证据在本地 `.work/tasks/20261030-account-group-tiering/`，v1.0 原文改名为 `PLAN_v1.0.md` 保留。
+- 验证：`python3 tools/check_docs_consistency.py` ok。无代码改动，未运行其他门禁。
+- 卡点/风险：等待用户确认 PLAN §9。成本为默认 1.0 的账号需先补真实成本，才能开利润门。
+- 下一步：用户确认后交实施 agent，按 PLAN §4 和 §5 执行；部署另行授权。
+
+### 2026-10-31T12:32Z — 20261030-account-group-tiering — 第四轮 Astra 核验完成
+
+- 请求/目标：用户更新兜底决策，要求沿用第四轮代码/数据评审，补查原组计费的 Git 历史、F 计费完整改点与用户/管理员可见字段。
+- 开始状态：`main` @ `874560eb9`；工作树已有 `docs/PROJECT_MEMORY.md` 改动，核实为此前交接状态更新；未覆盖其他改动。
+- 完成操作：仅读本地源码、Git 历史和已导出回放；核实 v0.4.0/#100 首次把路由与计费移至 F，v0.4.6/#125 引入现行 G 计费口径；写入 round4 Astra 评审，包括 G/F 计价/授权拆分、WS 每 turn、用户价显示风险、管理员 usage 路径、四个 fallback mapping 回放结果。未访问生产、未改业务代码或模拟脚本。
+- 修改文件：`.work/tasks/20261030-account-group-tiering/reviews/round4_astra.md`；本文件仅更新该任务状态并追加本条日志。
+- 验证：`git diff --check` 通过；评审 73 行，低于 120 行；未运行业务测试。
+- 卡点/风险：用户指定用户 UI 保持 G，但 usage 会展示 F 的 `rate_multiplier/actual_cost`，尚未决定是否加不含 F 名称的解释文案。
+- 下一步：将评审交主持人综合；后续若实施，拆分 G entitlement 与 F pricing，部署另需授权。
+
+### 2026-10-31T13:14Z — 20261030-account-group-tiering v3 — 方案定稿，OpenSpec 与派工包就绪
+
+- 请求/目标：用户完成第二轮逐题确认（含兜底改回按兜底组计费、用户侧扣费如实显示、成员与并发自行配置），要求写好最终方案后规范工作区、分类放好开发资料，以便派 agent 群实施。
+- 开始状态：main `874560eb9`；工作树仅有本记忆的未提交改动（本任务此前的登记）。
+- 完成操作：
+  - 用户决定汇总为方案 v3（本地 `PLAN.md`）；按用户口径重跑熔断节奏回放（`sim/replay_round3_claude.py`），astra 第三轮回放误用 10 秒熔断线，已作废；
+  - 新增 OpenSpec `group-quality-gate-20261031`（proposal、design、tasks、两份 spec），不含生产数据；登记 `docs/README.md` 与 `policy.json` ownership；
+  - 本地任务目录分为 `handoff/`（派工）、`implementation/`、`reviews/`、`sim/`、`evidence/`、`archive/`（v2、v1.0 与作废回放）；派工包引用的函数与文件已逐一核实存在。
+- 修改文件：`openspec/changes/group-quality-gate-20261031/**`（新增）、`docs/README.md`、`tools/upstream-sync/policy.json`、本记忆。
+- 验证：临时 index 纳入新目录后 `check_docs_consistency.py` ok（真实 index 不变）；`git diff --check` 通过。无代码改动，未运行其他门禁。
+- 卡点/风险：astra 对 v3 的核签未完成；基线分支未创建，提交须用户同意。
+- 下一步：并入核签意见；经同意后提交到本地基线分支；用户派工。
+
+### 2026-10-31T14:10Z — 20261030-account-group-tiering v3.2 — 方案定稿，提交本地基线分支
+
+- 请求/目标：用户同意提交本地基线分支；追加要求为熔断账号自动恢复并重新加入、尽量保证高缓存命中，并讨论利润率与上游倍率上限，随后对 Q1–Q5 全部同意。
+- 开始状态：main `874560eb9`，工作树为本任务的记忆改动与未跟踪的 OpenSpec 目录。
+- 完成操作：
+  - astra 核签 v3（有条件通过），逐条核实后并入：兜底时序描述、计价双身份、装门范围与利润门相同、WS 续链豁免、分层保底与可服务、恢复状态显式选项（核实“测试”与额度重置也调用该函数）、OpenAI 分组限定。
+  - astra 复核 v3.1：补“模型不支持不触发兜底”用例与保底封顶后，提交 `07776536f`。
+  - 按用户追加要求修订为 v3.2：有效数据口径修正、试用档位、满载先等 2 秒、新会话避开负载 ≥80%、零缓存率降档、利润率加显示换算上限。
+  - astra 复核 v3.2：补进程启动起点、试用累计计数、档位记忆清除、三条满载路径共用同会话稳定顺序、不限并发账号负载中性。
+- 修改文件：`openspec/changes/group-quality-gate-20261031/**`、`docs/README.md`、`tools/upstream-sync/policy.json`、本记忆；本地 `PLAN.md`、`handoff/`、`reviews/`。
+- 验证：`check_docs_consistency.py` ok；`git diff --check` 通过；`07776536f` 提交后在干净树上 `sync.py audit` 通过；入库文件没有账号、站点、成本与生产指标。未运行 Go 与前端门禁：没有代码改动。
+- 卡点/风险：见顶部“分组质量门槛与兜底计费”。
+- 下一步：用户按 `handoff/README.md` 派实施 agent；推送、PR、合并、发版另行授权。
+
+### 2026-10-31T19:05Z — 20261031-group-quality-gate WP5 — 第一段后端门禁完成
+
+- 请求/目标：在已审查后端基线上完成全量门禁和具名补丁登记；第一段结束后交回主持人，等通知合并 WP4。
+- 开始状态：`feat/gqg-wp5-integration` @ `be0c2629d`，工作树干净。
+- 完成操作：核对交接契约与各包审查；补齐唯一新增具名补丁 `xy-openai-group-quality-scheduling` 的 provenance（`c8d38c070`），两份补丁集合一致；未改业务实现、测试断言或测试入口。
+- 修改文件：`UPSTREAM_BASE.json`、本记忆；完整命令、门禁结果、overlay 与日志在仓外交接包 `integration/wp5/`。
+- 验证：`go test -tags=unit -p=2 -timeout=20m -count=1 -json ./...` 全通过（service 383.103s，低于 480s 报告线）；隔离 PostgreSQL/Redis 下 `go test -tags=integration -overlay <仓外文件> -timeout=20m -count=1 -json -skip <三项Docker专用用例> ./...` 通过（59 包，repository 22.098s）；`go vet` 默认/unit/integration/e2e 全通过；全仓 golangci-lint 两个 issues 上限均为 0，0 issues；`ci_gate.py` 五包 478 项 race、0 SKIP；scheduler-diff、docs consistency、Python 工具 96 项、diff 检查通过。Wire 重生成 `wire_gen.go` 无差异，工具产生的 go.sum 变化已恢复。
+- 卡点/风险：本机没有 Docker，按主持人决定排除两项旧版本迁移与一项备份用例；主持人已另起真实 testcontainers 全仓验证，待结果。集成另有 11 个既有显式跳过项（环境/平台/opt-in/已有 TODO），清单保存在仓外；未新增跳过。临时 PostgreSQL/Redis 进程已停止、数据目录已删除。
+- 下一步：接收 Docker 集成结果与 WP4 合并指令，执行第二段前端门禁、干净树 audit、逐场景验收、发布说明和最终记忆；不推送、PR、main 合并、标签或部署。
+
+### 2026-10-31T19:14Z — 20261031-group-quality-gate WP5 — 第二段本地集成与交付完成
+
+- 请求/目标：主持人授权合入 WP4 `a2b0c70d4`，完成前端门禁、干净树审计、逐场景验收、发布草稿、配置清单和记忆；Docker 全量结果另行同步。
+- 开始状态：`feat/gqg-wp5-integration` @ `330194d39`，工作树干净；后端第一段门禁已通过。
+- 完成操作：WP4 无冲突合并为 `8739f463b`，后端与 `be0c2629d` 完全相同；将 WP4 已接受的旧缓冲合入毛利、空组中性预览和界面状态同步到文档/design/spec；32 个 Scenario 全部对照实现与既有通过用例，tasks 4.x/5.x 更新。仓外发布草稿写明升级计费、历史浮窗、排序、OAuth 与全部已接受限制，配置按 PLAN §11；报告不超过 60 行。
+- 修改文件：WP4 前端 43 文件（合并）；`docs/GROUP_QUALITY_GATE.md`、`docs/README.md`、OpenSpec design/spec/tasks、两份记忆。旧顶部阶段状态与本人详细登记原样追加归档，其他 agent 条目及历史日志保留。
+- 验证：pnpm 9 frozen-lockfile 安装后 typecheck、lint:check、test:run（470 文件/3607 项）、build 全通过；`8739f463b` 干净树 `sync.py audit` 通过，node_modules 非软链接；文档一致性与 diff 检查通过。沿用后端第一段实际结果；部署/config/Ent/迁移目录相对功能基线无差异。最终文档提交后的固定 HEAD 审计结果记入仓外报告。
+- 卡点/风险：本机 overlay 集成的排除/skip 如前条日志；完整 Docker 结果未收到，tasks 5.2 仍未勾选。WP4 浏览器冒烟为本地 mock，未代操作人接受管理合规承诺、未宣称真实管理后端浏览器或供应商验证。无新增部署前提、无推送/PR/main 合并/标签/部署/生产连接。
+- 下一步：收到主持人 Docker 结果后补 tasks 5.2 与报告；再等待用户授权推送、PR、合并和发版。
+
+### 2026-10-31T20:06Z — 20261031-group-quality-gate WP5 — 最终集成与完整门禁收齐
+
+- 请求/目标：合 WP1 成员有效指标与事务隔离，独立修复 Docker 暴露的既有索引计划测试，再合用户要求的精简 WP4；收齐最终 Docker 证据、文档和记忆。
+- 开始状态：`feat/gqg-wp5-integration` @ `9e1da6234`，工作树干净；随后按新增指令继续执行最终 WP4。
+- 完成操作：WP1 `6c26a11f2` 合为 `a958a61af`；`8aa768168` 仅在计划测试事务内加 `ANALYZE usage_logs`，消除 autovacuum ANALYZE 时机依赖，索引断言未改；WP4 `27f7cf861` 合为 `56d557149`，backend 与 `8aa768168` 零差异。成员 metrics/headroom、熔断中完整窗口显示、紧凑提示/芯片与列顺序同步现行文档、OpenSpec、注释及退役键登记。
+- 修改文件：WP1 合并 8 文件、WP4 合并 17 个前端文件；计划测试、现行文档/目录、OpenSpec design/spec/tasks、类型注释、docs_consistency、两份记忆。仓外交付报告与发布草稿覆盖计费/历史文案、界面/指标、测试稳定性、配置清单与限制，报告少于 60 行；其他 agent 事项和历史日志保留。
+- 验证：service/repository unit 378.725s/16.967s；本机隔离仓储 integration 782 顶层用例通过（22.355s），临时服务已清理。主持人测试主机对源码 `8aa768168`（抽查两文件 SHA-256 一致）执行 `go test -tags=integration ./... -count=1 -p 2 -timeout=40m`：60 包 ok、58 无测试、0 FAIL/panic，repository 91.3s、service 175.3s、migrations 及旧版本迁移/备份均通过。原 `be0c2629d` 的唯一计划断言失败已消除。lint 0 issues、scheduler-diff/docs/diff 检查通过；最终前端 typecheck/lint/test/build 全通过（470 文件/3609 项），`56d557149` 干净树 audit 通过；最终文档提交审计固定 HEAD 记仓外报告。
+- 卡点/风险：无实施或门禁阻塞。WP4 真实隔离后端冒烟已获用户临时实例合规承诺授权并通过，合成数据与环境已清理；此前 mock 验证为历史阶段，不再是最终联调限制。真实上游/生产未测试；已接受限制保留在发布说明。
+- 下一步：交用户授权推送、PR、合并与发版；未推送、未改 main、未打标签、未部署或连接生产。
+
+### 2026-10-31T21:35Z — 20261031-group-quality-gate 复审 — 实施后复审与缓存分析完成，待用户定修复范围
+
+- 请求/目标：用户要求对已完成的实施再审查一遍，并分析缓存还能如何更高效、稳定、命中率更高。
+- 开始状态：`feat/group-quality-gate-20261031` @ `231cc5a91`，工作树干净；生产 SSH 控制通道未开，未连生产。
+- 完成操作：
+  - 五路并行只读审查：WP1 核心、WP2 调度、WP3 计费、前端、缓存端到端（含官方缓存文档）。
+  - 主持人回读代码核实全部 P0/P1 与缓存关键结论。
+  - 结论：发版前须修 F1–F5，其中 F3、F4 为满载回归，升级即生效；另有约 16 项 P2。
+  - 缓存：网关不改缓存键与会话头，损失主要来自换号和切组。
+    - 主要缺口：WS 长连接不续期绑定、WS 后续 turn 满载立即关闭、判慢迁移 10 秒线、续期 TTL 写死 1 小时、E2 不覆盖 WS。
+    - 整理了 7 项快赢、D1–D8 决策和 C1–C7 只读量化查询。
+- 修改文件：本文件（顶部状态、进行中登记、本条日志）。仓外新增 `reviews/post_impl_review_20261031.md` 与 `reviews/post_impl_repro/`；本机记忆更正零缓存口径。
+- 验证：三处复现用例均以 `-overlay` 临时运行，未进工作树：F1 输出计价组为原组；F2 新入组误熔断；F3、F4 借用探测与重复短等。本条未改代码，未重跑门禁。
+- 卡点/风险：修复前不宜发版。错误率依赖运维监控写 `ops_error_logs`，升级前须确认生产已开启。量化缓存收益需用户在对话中重新提供 SSH 访问。
+- 下一步：等用户确认修复范围（F1–F5 加选定的 P2、Q1–Q7）及 D1/D2 后，写修复派工包交其他 agent，修复后重跑门禁，再等发版授权。
+
+### 2026-11-01T06:30Z — 20261101-group-quality-gate 修复轮 — 完成，待授权发版
+
+- 请求/目标：用户要求回顾执行会话（WP1–WP5 及审查子 agent）与复审会话的结论，自行判断哪些需要执行并完成。
+- 开始状态：`feat/group-quality-gate-20261031` @ `231cc5a91`，工作树有复审会话未提交的本文件改动（已保留并提交 `bc423a38c`）。
+- 完成操作：
+  - 取舍：修 F1–F5 与选定 P2、缓存小改动（Q1/Q2/Q3/Q6、收窄的 Q7 与 D1）；执行期 WP1 审查曾接受的“入组带重置转试用”升为 F2 必修；Q4、P2-9、P2-11 代码、D3–D8 不做。理由见仓外 `reviews/fix_round_decisions_20261101.md`。
+  - 四个修复包各用独立 worktree 由子 agent 实施，主持人逐包回读代码审查后合入；文档、OpenSpec 与发布草稿由主持人同步（可用数新口径、运维监控前提、利润门“绕开再回流”）。
+  - 生产只读访问在本会话两次被安全机制拦截，未取得生产数据；改为待用户本地执行。
+- 修改文件：质量核心、调度、WS/handler、前端相关源码与既有测试文件；`policy.json`、`scheduler-diff.json`；`docs/GROUP_QUALITY_GATE.md`、`docs/account-scheduling.md`、`docs/GATEWAY_RESILIENCE.md`、OpenSpec design/spec/tasks；本文件。
+- 验证：见顶部“已完成（修复轮）”；全部在 `a3e241353` 上运行。
+- 卡点/风险：生产 `ops_monitoring_enabled` 未核实（关闭则错误率门槛失效）；缓存收益未量化。
+- 下一步：用户授权推送、PR、合并与发版；不部署。
+
 ### 2026-10-31T14:12Z — 20261031-claude-cache-ui — PR 1：使用记录去掉 TTL 策略文字，本地验证完成
 
 - 请求/目标：用户截图显示使用记录 TOKEN 列每行都有「TTL 策略: 不覆写 TTL · 未应用」，要求去掉。同时询问「Anthropic 缓存默认 TTL」与「Claude 自动缓存」的关系；只读分析与用户决定见“进行中的工作”，PR 2 另记。
@@ -329,3 +519,13 @@ pnpm --dir frontend run build
 - 验证：gofmt；`go build ./...`；apicompat/service/handler 在四种 tag 下 vet；`go test -tags=unit` apicompat/service（372s）/handler（56s）全过；无 tag 的缓存测试 34 个顶层用例；相关 `-race` 53 个顶层用例零跳过；golangci-lint v2.14.0 0 issues；`check_docs_consistency.py`；tools 单测 96 项；干净提交上 `sync.py audit` 与 `scheduler-diff` 通过。临时回退实现后新测试按预期失败（只锁现状的守卫用例除外）。未做真实上游验证。
 - 卡点/风险：真实 Anthropic/Vertex/OAuth 对 `tool_result`/`tool_use` 标记的接受与命中、Kimi 等 Anthropic 兼容上游的接受度未验证；只给工具结果打标记的 Responses 客户端不再触发分组补缓存（改为 `client_declared`）。发现的既有问题见“进行中的工作”。
 - 下一步：推送并以 #176 分支为 base 开 PR，CI 全绿后停下；不合并、不发版、不部署。
+
+### 2026-11-01 — 20261101-release0416 — 叠加 PR 与功能分支集成复验
+
+- 请求/目标：执行用户授权的全部开放 PR 合并与 0.4.16 发布；只在独立 worktree 操作，不部署、不连接生产。
+- 开始状态：main `874560eb9`、功能基线 `7f61f7917`，主工作树干净并保持不动。
+- 完成操作：#175 固定 head 全绿后合并 `2bc8c76a8`；#176 改 base main 并合入基线，固定 `46d2caa6a` 全部 20 项成功后合并 `94021b6a2`。#177 用指定身份合入新 main 为 `5297b1499`，源码树不变，CI 等待中。功能分支预集成 #177，四处冲突仅治理/记忆，保留两侧新增条目与全部任务/日志，已被功能退役的旧契约不恢复。
+- 修改文件：整合 #175–#177 的现有代码、文档及登记；本轮独立修改仅三方治理合并与记忆状态。
+- 验证：Go build、unit vet、缓存与兜底联动用例；pnpm 9 frozen 安装、typecheck、lint、470 文件/3624 项测试及 build；文档一致性、scheduler-diff、diff-check 通过。两份补丁集合均 63 项且一致；已发布迁移/checksum、兼容版本与部署配置无变化。干净提交 audit 随后执行。
+- 卡点/风险：等待 #177 固定 head CI；真实供应商与生产未验证；升级前监控确认及既有已接受限制保留。
+- 下一步：#177 合并后把实际 main 合入功能分支并核对源码树，提交功能 PR、版本 PR，标签发布与资产核验，最后归档。

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	dbent "github.com/liulixin-lex/xy2api/ent"
@@ -79,4 +80,41 @@ func TestListSchedulableAccountLoadsUsesSingleProjectionQuery(t *testing.T) {
 	_, orderClause, hasOrder := strings.Cut(normalized, " ORDER BY ")
 	require.True(t, hasOrder, "projection query must preserve schedulable account order: %s", normalized)
 	require.Contains(t, orderClause, `"priority" ASC`)
+}
+
+func TestListOpsAccountsForStatsPreservesServabilityFields(t *testing.T) {
+	var projection string
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(expected, actual string) error {
+		if expected == "ops members" {
+			projection = actual
+		}
+		return nil
+	})))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+	t.Cleanup(func() { _ = client.Close() })
+	repo := newAccountRepositoryWithSQL(client, db, nil)
+	expiry := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	mock.ExpectQuery("ops members").WillReturnRows(sqlmock.NewRows([]string{"id", "type", "platform", "status", "schedulable", "rate_multiplier", "extra", "expires_at", "auto_pause_on_expired", "temp_unschedulable_reason"}).AddRow(1, "apikey", "openai", "active", true, 0.4, `{"quota_limit":5,"quota_used":5,"upstream_billing_probe":{"status":"ok"}}`, expiry, true, "balance:exhausted"))
+	mock.ExpectQuery("member bindings").WillReturnRows(sqlmock.NewRows([]string{"account_id", "group_id"}).AddRow(1, 10))
+	mock.ExpectQuery("group settings").WillReturnRows(sqlmock.NewRows([]string{"id", "platform", "profit_control_enabled", "rate_multiplier", "profit_min_margin"}).AddRow(10, "openai", true, 2, 0.2))
+	rows, err := repo.ListOpsAccountsForStats(context.Background(), "", nil)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "apikey", rows[0].Type)
+	require.Equal(t, 0.4, *rows[0].RateMultiplier)
+	require.True(t, rows[0].IsQuotaExceeded())
+	require.NotNil(t, rows[0].Extra["upstream_billing_probe"])
+	require.True(t, rows[0].AutoPauseOnExpired)
+	require.True(t, expiry.Equal(*rows[0].ExpiresAt))
+	require.Equal(t, "balance:exhausted", rows[0].TempUnschedulableReason)
+	require.Len(t, rows[0].Groups, 1)
+	require.True(t, rows[0].Groups[0].ProfitControlEnabled)
+	selectClause, _, _ := strings.Cut(projection, " FROM ")
+	for _, field := range []string{"type", "rate_multiplier", "extra", "expires_at", "auto_pause_on_expired", "temp_unschedulable_reason"} {
+		require.Contains(t, selectClause, `"`+field+`"`)
+	}
+	require.NotContains(t, selectClause, "credentials")
+	require.NoError(t, mock.ExpectationsWereMet())
 }

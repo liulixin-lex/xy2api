@@ -822,13 +822,12 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	s.resilience.NoteAccountSuccess(ctx, input.Account)
 	settlementResult := *input.Result
 	result := &settlementResult
-	// xy2api resilience: under an availability fallback the user's price
-	// follows the group the request was made for, including how it picks the
-	// billing model (fallback-billing design §2.1); the serving key keeps the
-	// usage row's group and the account-side cost.
+	// Price calculations use the serving-group snapshot. The authenticated
+	// key remains separate for authorization, limits and settlement ownership.
 	servedKey := input.APIKey
-	apiKey := BillingAPIKey(ctx, servedKey)
-	billingFields := billingChannelFields(ctx, s.channelService, servedKey, apiKey, input.ChannelUsageFields)
+	apiKey := ServingPricingKey(ctx, servedKey)
+	billingKey := BillingAPIKey(ctx, servedKey)
+	billingFields := input.ChannelUsageFields
 	user := input.User
 	account := input.Account
 	subscription := input.Subscription
@@ -924,7 +923,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	}
 
 	// 判断计费方式：订阅模式 vs 余额模式
-	isSubscriptionBilling := subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
+	isSubscriptionBilling := subscription != nil && billingKey.Group != nil && billingKey.Group.IsSubscriptionType()
 	billingType := BillingTypeBalance
 	if isSubscriptionBilling {
 		billingType = BillingTypeSubscription
@@ -967,7 +966,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	defer func() {
 		logClaudeCacheBilling(ctx, input.Result, usageLog, input.ForceCacheBilling, cacheTTLOverridden, cacheSettlementOutcome)
 	}()
-	simpleModeKeyRateLimitOnly := simpleModeKeyRateLimitBillingEnabled(s.cfg, apiKey)
+	simpleModeKeyRateLimitOnly := simpleModeKeyRateLimitBillingEnabled(s.cfg, billingKey)
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && !simpleModeKeyRateLimitOnly {
 		writeUsageLogAfterBilling(ctx, s.usageLogRepo, usageLog, "service.gateway")
 		cacheSettlementOutcome = "usage_only"
@@ -981,7 +980,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	// 缺省（未设置）时回退到分组平台，保持对其它调用方的兼容。
 	quotaPlatform := input.QuotaPlatform
 	if quotaPlatform == "" {
-		quotaPlatform = PlatformFromAPIKey(apiKey)
+		quotaPlatform = PlatformFromAPIKey(billingKey)
 		if quotaPlatform == PlatformComposite && account != nil {
 			quotaPlatform = account.Platform
 		}
@@ -990,7 +989,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	_, billingErr := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
 		Cost:                       cost,
 		User:                       user,
-		APIKey:                     apiKey,
+		APIKey:                     billingKey,
 		Account:                    account,
 		Subscription:               subscription,
 		RequestPayloadHash:         resolveUsageBillingPayloadFingerprint(ctx, input.RequestPayloadHash),

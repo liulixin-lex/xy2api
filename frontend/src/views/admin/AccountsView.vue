@@ -321,7 +321,8 @@
             />
           </template>
           <template #cell-groups="{ row }">
-            <AccountGroupsCellButton :groups="accountGroupsForRow(row)" :account-name="row.name" @open="canPlaceGroups && (groupsDialogAccount = row)" />
+            <AccountGroupsCellButton :groups="accountGroupsForRow(row)" :account-name="row.name" :quality="accountQualityCells.get(row.id)" :metrics="accountQualityMetrics(row.id)" @open="canPlaceGroups && (groupsDialogAccount = row)" />
+            <AccountQualityMetrics v-if="accountQualityMetrics(row.id)" :metrics="accountQualityMetrics(row.id)!" :limits="strictestQualityLimits(accountQualityCells.get(row.id))" />
           </template>
           <template #header-usage="{ column }">
             <div class="flex items-center">
@@ -561,6 +562,9 @@ import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.
 import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCellButton from '@/components/admin/account/AccountGroupsCellButton.vue'
+import AccountQualityMetrics from '@/components/admin/account/AccountQualityMetrics.vue'
+import { buildAccountQualityCells, strictestQualityLimits } from '@/components/admin/account/groupQualityPresentation'
+import { useGroupQualityGateStatus } from '@/composables/useGroupQualityGateStatus'
 import AccountGroupsDialog from '@/components/admin/account/AccountGroupsDialog.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
 import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
@@ -823,6 +827,17 @@ const hasPendingListSync = ref(false)
 // 状态列的近期健康度（近 3 分钟首字平均、近 10 分钟错误请求数），与今日统计一样按当前页批量拉取。
 const recentHealthByAccountId = ref<Record<string, AccountRecentHealthStats>>({})
 let recentHealthReqSeq = 0
+// 分组列的质量门槛状态与三项指标，跨页共用一份；分组列可见时随列表刷新，最多 60 秒拉一次。
+// 规则同分组列表的门槛列：策略开但未评估为“等待评估”，读取失败明文提示，策略关显示普通标签。
+const { sources: groupQualitySources, refresh: refreshGroupQualityStatus } = useGroupQualityGateStatus()
+const accountQualityCells = computed(() => {
+  const cellsFor = buildAccountQualityCells(groupQualitySources.value)
+  return new Map(accounts.value.map(account => [account.id, cellsFor(account.id, accountGroupsForRow(account))]))
+})
+const accountQualityMetrics = (accountId: number) => groupQualitySources.value.status?.account_metrics[String(accountId)]
+const refreshGroupQuality = () => {
+  if (!hiddenColumns.has('groups')) void refreshGroupQualityStatus()
+}
 const todayStatsByAccountId = ref<Record<string, WindowStats>>({})
 const todayStatsLoading = ref(false)
 const todayStatsError = ref<string | null>(null)
@@ -1193,6 +1208,7 @@ const toggleColumn = (key: string) => {
     })
   }
   if (key === 'status' && wasHidden) void refreshRecentHealthBatch()
+  if (key === 'groups' && wasHidden) refreshGroupQuality()
   if (key === 'upstream_balance' && wasHidden) void refreshUpstreamBalances()
   if (key === 'scheduler_score') {
     // The server only returns scheduler scores when this column is visible, so reload the current page immediately.
@@ -1321,6 +1337,7 @@ const load = async (options: AccountLoadOptions = {}) => {
   requestParams.lite = '1'
   await baseLoad()
   void refreshRecentHealthBatch()
+  refreshGroupQuality()
   if (options.refreshTodayStats !== false) await refreshTodayStatsBatch()
 }
 
@@ -1331,6 +1348,7 @@ const reload = async () => {
   pendingTodayStatsRefresh.value = false
   await baseReload()
   void refreshRecentHealthBatch()
+  refreshGroupQuality()
   void refreshShareColumn()
   await refreshTodayStatsBatch()
 }
@@ -1814,6 +1832,7 @@ const refreshAccountsIncrementally = async () => {
     upstreamBillingNow.value = Date.now()
 
     void refreshRecentHealthBatch()
+    refreshGroupQuality()
     await refreshTodayStatsBatch()
   } catch (error) {
     console.error('Auto refresh failed:', error)

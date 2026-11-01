@@ -65,10 +65,9 @@ func TestFallbackImageGenerationGateResponses(t *testing.T) {
 	}
 }
 
-// PM decision P2-2: the profit gate prices the request at the origin group's
-// rate (the price the user pays) while the margin stays the serving group's.
-// The fixture's origin group costs 1x, the fallback group 3x.
-func TestProfitControlPricesFallbackAtOriginGroup(t *testing.T) {
+// The profit gate and its user price use the serving group under fallback.
+// The fixture's origin group costs 1x; the serving group's user override is 2x.
+func TestProfitControlPricesFallbackAtServingGroup(t *testing.T) {
 	t.Run("gateway", func(t *testing.T) {
 		ctx, _, moved := fallbackBillingFixture(PlatformAnthropic)
 		moved.Group.ProfitControlEnabled = true
@@ -76,12 +75,15 @@ func TestProfitControlPricesFallbackAtOriginGroup(t *testing.T) {
 		// The fallback middleware already pointed the request's group at the
 		// serving group when the token request froze its pricing.
 		ctx = context.WithValue(ctx, ctxkey.Group, moved.Group)
+		ctx = context.WithValue(ctx, ctxkey.UserID, int64(5))
 		ctx, _ = WithGatewayTokenRequestPricing(ctx)
-		ctx = (&GatewayService{}).withGatewayProfitControlGate(ctx, moved.GroupID)
+		gateway := &GatewayService{userGroupRateResolver: newUserGroupRateResolver(
+			&fallbackGroupRateRepoStub{rates: map[int64]float64{moved.Group.ID: 2.0}}, nil, time.Minute, nil, "test")}
+		ctx = gateway.withGatewayProfitControlGate(ctx, moved.GroupID)
 		gate, _ := ctx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate)
 		require.NotNil(t, gate)
 		require.Equal(t, moved.Group.ID, gate.groupID, "margin and platform stay the serving group's")
-		require.InDelta(t, 1.0, gate.threshold, 1e-12, "the user pays the origin group's price")
+		require.InDelta(t, 2.0, gate.threshold, 1e-12, "the serving group's user override sets the price")
 	})
 
 	t.Run("openai", func(t *testing.T) {
@@ -89,10 +91,13 @@ func TestProfitControlPricesFallbackAtOriginGroup(t *testing.T) {
 		moved.Group.ProfitControlEnabled = true
 		moved.Group.SubscriptionType = SubscriptionTypeStandard
 		ctx = context.WithValue(ctx, ctxkey.Group, moved.Group)
+		ctx = context.WithValue(ctx, ctxkey.UserID, int64(5))
 		ctx = context.WithValue(ctx, openAIPricingAtCtxKey{}, time.Now())
-		gate := (&OpenAIGatewayService{}).resolveOpenAIProfitControlGate(ctx, moved.GroupID)
+		gateway := &OpenAIGatewayService{userGroupRateResolver: newUserGroupRateResolver(
+			&fallbackGroupRateRepoStub{rates: map[int64]float64{moved.Group.ID: 2.0}}, nil, time.Minute, nil, "test")}
+		gate := gateway.resolveOpenAIProfitControlGate(ctx, moved.GroupID)
 		require.NotNil(t, gate)
 		require.Equal(t, moved.Group.ID, gate.groupID)
-		require.InDelta(t, 1.0, gate.threshold, 1e-12, "the user pays the origin group's price")
+		require.InDelta(t, 2.0, gate.threshold, 1e-12, "the serving group's user override sets the price")
 	})
 }

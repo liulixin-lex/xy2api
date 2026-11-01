@@ -28,10 +28,7 @@ func (s *GatewayService) withGatewayProfitControlGate(ctx context.Context, group
 	}
 
 	pricingAt, _ := gatewayTokenRequestPricingAtFromContext(ctx)
-	billingGroup := fallbackBillingGroup(ctx)
-	if billingGroup == nil {
-		billingGroup = gatewayTokenRequestBillingGroupFromContext(ctx)
-	}
+	billingGroup := gatewayTokenRequestBillingGroupFromContext(ctx)
 	if billingGroup == nil {
 		if ctxGroup, ok := ctx.Value(ctxkey.Group).(*Group); ok && IsGroupContextValid(ctxGroup) {
 			billingGroup = ctxGroup

@@ -592,7 +592,8 @@ type AccountSelectionResult struct {
 	// profitGate 携带本次选号真实生效的利润门（无门为 nil）。门安装在调度栈的
 	// 局部 ctx 上，handler 必须经 ContextWithSelectionProfitGate 重放后才能在
 	// 调度栈之外做抢槽后终检与准入后粘性绑定。
-	profitGate *openAIProfitControlGate
+	profitGate       *openAIProfitControlGate
+	groupQualityGate *openAIGroupQualityGate
 	// shareBinding 是份额调度推迟到 handler 准入后执行的绑定写入（nil 表示无）。
 	shareBinding *shareBindingIntent
 }

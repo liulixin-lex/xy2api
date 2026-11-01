@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_PROFIT_MIN_MARGIN_PERCENT,
+  effectiveProfitMarginPercent,
+  formatProfitCeiling,
   profitDecimalToPercent,
+  profitMarginPercentOnEnable,
+  profitMarginPercentFromGroup,
   profitPercentToDecimal,
+  profitPreviewLevel,
   validateProfitControlFormState,
   type ProfitControlFormState,
 } from "../groupsProfitControl";
@@ -13,7 +19,6 @@ const formState = (
   platform: "openai",
   profit_control_enabled: true,
   profit_min_margin_percent: 30,
-  profit_safety_buffer_percent: 0,
   ...overrides,
 });
 
@@ -69,18 +74,7 @@ describe("validateProfitControlFormState", () => {
     expect(validateProfitControlFormState(formState())).toBeNull();
     expect(
       validateProfitControlFormState(
-        formState({
-          profit_min_margin_percent: 0,
-          profit_safety_buffer_percent: 0,
-        }),
-      ),
-    ).toBeNull();
-    expect(
-      validateProfitControlFormState(
-        formState({
-          profit_min_margin_percent: 60,
-          profit_safety_buffer_percent: 39.99,
-        }),
+        formState({ profit_min_margin_percent: 0 }),
       ),
     ).toBeNull();
   });
@@ -106,18 +100,15 @@ describe("validateProfitControlFormState", () => {
     ).toBeNull();
   });
 
-  it("treats empty inputs as zero", () => {
+  it("treats empty inputs as the 20% default", () => {
     expect(
       validateProfitControlFormState(
-        formState({
-          profit_min_margin_percent: "",
-          profit_safety_buffer_percent: null,
-        }),
+        formState({ profit_min_margin_percent: "" }),
       ),
     ).toBeNull();
   });
 
-  it("rejects out-of-range margin and buffer", () => {
+  it("rejects out-of-range margin", () => {
     expect(
       validateProfitControlFormState(
         formState({ profit_min_margin_percent: 100 }),
@@ -128,27 +119,6 @@ describe("validateProfitControlFormState", () => {
         formState({ profit_min_margin_percent: -1 }),
       ),
     ).toBe("marginRangeError");
-    expect(
-      validateProfitControlFormState(
-        formState({ profit_safety_buffer_percent: 100 }),
-      ),
-    ).toBe("bufferRangeError");
-    expect(
-      validateProfitControlFormState(
-        formState({ profit_safety_buffer_percent: -0.1 }),
-      ),
-    ).toBe("bufferRangeError");
-  });
-
-  it("rejects margin plus buffer reaching 100 percent", () => {
-    expect(
-      validateProfitControlFormState(
-        formState({
-          profit_min_margin_percent: 60,
-          profit_safety_buffer_percent: 40,
-        }),
-      ),
-    ).toBe("sumTooHigh");
   });
 
   // 上界按换算后的小数判定：99.999% 会被 profitPercentToDecimal 四舍五入
@@ -160,14 +130,6 @@ describe("validateProfitControlFormState", () => {
         formState({ profit_min_margin_percent: 99.999 }),
       ),
     ).toBe("marginRangeError");
-    expect(
-      validateProfitControlFormState(
-        formState({
-          profit_min_margin_percent: 0,
-          profit_safety_buffer_percent: 99.999,
-        }),
-      ),
-    ).toBe("bufferRangeError");
   });
 
   it("still accepts the largest percent that survives the rounding", () => {
@@ -177,5 +139,69 @@ describe("validateProfitControlFormState", () => {
         formState({ profit_min_margin_percent: 99.99 }),
       ),
     ).toBeNull();
+  });
+});
+
+describe("effectiveProfitMarginPercent", () => {
+  it("submits and previews an empty margin as the 20% default, keeping an explicit 0", () => {
+    for (const empty of ["", "  ", null, undefined]) {
+      expect(effectiveProfitMarginPercent(empty)).toBe(20);
+      expect(profitPercentToDecimal(effectiveProfitMarginPercent(empty))).toBe(0.2);
+    }
+    expect(effectiveProfitMarginPercent(0)).toBe(0);
+    expect(effectiveProfitMarginPercent("0")).toBe(0);
+    expect(profitPercentToDecimal(effectiveProfitMarginPercent(0))).toBe(0);
+    expect(effectiveProfitMarginPercent(35)).toBe(35);
+    expect(effectiveProfitMarginPercent("12.5")).toBe(12.5);
+    expect(Number.isNaN(effectiveProfitMarginPercent("abc"))).toBe(true);
+    expect(
+      validateProfitControlFormState(formState({ profit_min_margin_percent: "abc" })),
+    ).toBe("marginRangeError");
+  });
+});
+
+describe("profitMarginPercentOnEnable", () => {
+  it("fills the 20% default only when the margin is empty or zero", () => {
+    expect(DEFAULT_PROFIT_MIN_MARGIN_PERCENT).toBe(20);
+    for (const empty of [0, "", null, undefined, "abc", -5]) {
+      expect(profitMarginPercentOnEnable(empty)).toBe(20);
+    }
+    expect(profitMarginPercentOnEnable(35)).toBe(35);
+    expect(profitMarginPercentOnEnable("12.5")).toBe("12.5");
+  });
+});
+
+describe("profitMarginPercentFromGroup", () => {
+  it("folds a stored safety buffer into the margin so the effective ceiling is unchanged", () => {
+    expect(profitMarginPercentFromGroup(0.2, 0.05)).toBe(25);
+    expect(profitMarginPercentFromGroup(0.1, 0.2)).toBe(30);
+    expect(profitMarginPercentFromGroup(0.3333, 0.1)).toBe(43.33);
+    expect(profitMarginPercentFromGroup(0.2, 0)).toBe(20);
+    expect(profitMarginPercentFromGroup(undefined, null)).toBe(0);
+    // 回显后再按缓冲 0 提交，m' + 0 与原来的 m + b 相同。
+    expect(profitPercentToDecimal(profitMarginPercentFromGroup(0.6, 0.3999))).toBe(0.9999);
+  });
+});
+
+describe("profitPreviewLevel", () => {
+  it("is red when schedulable members exist but none pass, yellow for exactly one, normal otherwise", () => {
+    expect(profitPreviewLevel({ schedulable: 11, passing: 0 })).toBe("danger");
+    expect(profitPreviewLevel({ schedulable: 11, passing: 1 })).toBe("warning");
+    expect(profitPreviewLevel({ schedulable: 11, passing: 2 })).toBe("normal");
+    expect(profitPreviewLevel({ schedulable: 1, passing: 1 })).toBe("warning");
+  });
+
+  it("is neutral when the group has no schedulable members", () => {
+    expect(profitPreviewLevel({ schedulable: 0, passing: 0 })).toBe("empty");
+  });
+});
+
+describe("formatProfitCeiling", () => {
+  it("keeps at most four decimals without trailing zeros", () => {
+    expect(formatProfitCeiling(0.176)).toBe("0.176");
+    expect(formatProfitCeiling(0.17600000001)).toBe("0.176");
+    expect(formatProfitCeiling(0.123456)).toBe("0.1235");
+    expect(formatProfitCeiling(1.6)).toBe("1.6");
+    expect(formatProfitCeiling(0)).toBe("0");
   });
 });

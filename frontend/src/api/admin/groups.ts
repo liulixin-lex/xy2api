@@ -15,6 +15,7 @@ import type {
   UpdateGroupRequest,
   PaginatedResponse
 } from '@/types'
+import type { GroupProfitControlPreview } from '@/types/groupQualityGate'
 
 export interface LiveCapability {
   supported: boolean
@@ -471,6 +472,21 @@ export async function getCapacitySummary(): Promise<
   return data
 }
 
+/**
+ * 利润门预览：按给定毛利率（小数）与当前时刻换算上游倍率上限，并统计可调度成员中能通过的数量。
+ */
+export async function getProfitControlPreview(
+  id: number,
+  margin: number,
+  options?: { signal?: AbortSignal }
+): Promise<GroupProfitControlPreview> {
+  const { data } = await apiClient.get<GroupProfitControlPreview>(
+    `/admin/groups/${id}/profit-control-preview`,
+    { params: { margin }, signal: options?.signal }
+  )
+  return data
+}
+
 export const groupsAPI = {
   list,
   getAll,
@@ -499,7 +515,8 @@ export const groupsAPI = {
   batchSetGroupRPMOverrides,
   updateSortOrder,
   getUsageSummary,
-  getCapacitySummary
+  getCapacitySummary,
+  getProfitControlPreview
 }
 
 export default groupsAPI

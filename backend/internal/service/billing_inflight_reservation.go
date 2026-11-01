@@ -628,10 +628,10 @@ func (d inflightEstimateDeps) estimate(ctx context.Context, apiKey *APIKey, req 
 	if apiKey == nil || apiKey.User == nil {
 		return 0, false
 	}
-	// xy2api resilience: priced like the billing of the request, by the group
-	// it was made for; account mappings come from the serving group.
+	// Price estimates use the serving-group key; reservation and authorization
+	// decisions remain with the authenticated key in the handler.
+	apiKey = ServingPricingKey(ctx, apiKey)
 	served := apiKey
-	apiKey = BillingAPIKey(ctx, apiKey)
 	if req.Model == "" || (req.Kind == InflightEstimateAudio && req.AudioUnits <= 0) {
 		// 非计量请求（媒体状态查询、custom-voices 等）：无需预留，也不算「无法定价」。
 		return 0, true

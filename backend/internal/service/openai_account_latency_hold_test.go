@@ -143,6 +143,7 @@ func TestMigrateOpenAILatencyHeldOwnerRequiresFreshCapacity(t *testing.T) {
 		load        *AccountLoadInfo
 		loadErr     error
 		warm        bool
+		gate        string
 		migrate     bool
 	}{
 		{name: "full despite cached free slot", concurrency: 1, load: &AccountLoadInfo{CurrentConcurrency: 1}, warm: true},
@@ -151,6 +152,8 @@ func TestMigrateOpenAILatencyHeldOwnerRequiresFreshCapacity(t *testing.T) {
 		{name: "free slot despite load percentage", concurrency: 2, load: &AccountLoadInfo{CurrentConcurrency: 1, LoadRate: 100}, migrate: true},
 		{name: "unlimited", load: &AccountLoadInfo{CurrentConcurrency: 100}, migrate: true},
 		{name: "unlimited missing load"},
+		{name: "quality gate enabled keeps the session", concurrency: 2, load: &AccountLoadInfo{}, gate: "on"},
+		{name: "quality gate disabled still migrates", concurrency: 2, load: &AccountLoadInfo{}, gate: "off", migrate: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			group := int64(79)
@@ -170,6 +173,11 @@ func TestMigrateOpenAILatencyHeldOwnerRequiresFreshCapacity(t *testing.T) {
 			svc := &OpenAIGatewayService{
 				cache: sticky, cfg: &config.Config{RunMode: config.RunModeStandard}, concurrencyService: concurrency,
 				accountRepo: schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: []Account{owner, alternative}}},
+			}
+			if tc.gate != "" {
+				view := NewGroupQualityGateService(nil, nil, nil)
+				view.snapshot.Store(&groupQualitySnapshot{Policies: GroupQualityGatePolicies{Groups: map[string]GroupQualityGatePolicy{"79": {Enabled: tc.gate == "on"}}}})
+				svc.SetGroupQualityGateView(view)
 			}
 			now := time.Now()
 			for i := 0; i < openAIAccountLatencyMinSamples; i++ {

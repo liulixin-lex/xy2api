@@ -71,6 +71,7 @@ func RegisterAdminRoutes(
 
 		// 网关韧性
 		registerResilienceRoutes(admin, h)
+		registerGroupQualityGateRoutes(admin, h)
 
 		// 分组分类
 		registerGroupCategoryRoutes(admin, h)
@@ -161,6 +162,13 @@ func RegisterAdminRoutes(
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
 	}
+}
+
+func registerGroupQualityGateRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	gate := admin.Group("/group-quality-gate")
+	gate.GET("/policies", h.Admin.GroupQualityGate.Policies)
+	gate.PUT("/policies/:group_id", h.Admin.GroupQualityGate.UpdatePolicy)
+	gate.GET("/status", h.Admin.GroupQualityGate.Status)
 }
 
 func registerPromptAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
@@ -367,6 +375,7 @@ func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		groups.GET("/live-capability", h.Admin.Group.GetLiveCapability)
 		groups.PUT("/sort-order", h.Admin.Group.UpdateSortOrder)
 		groups.GET("/:id/model-allowlist-candidates", h.Admin.Group.GetGroupModelAllowlistCandidates)
+		groups.GET("/:id/profit-control-preview", h.Admin.GroupQualityGate.ProfitControlPreview)
 		groups.GET("/:id/composite-routes", h.Admin.Group.ListCompositeRoutes)
 		groups.POST("/:id/composite-routes", h.Admin.Group.CreateCompositeRoute)
 		groups.POST("/:id/composite-routes/preview", h.Admin.Group.PreviewCompositeRoute)

@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -2015,6 +2017,10 @@ type openAIResponsesWSUsageLogCase struct {
 	apiKeyCredential string
 	// accountRateMultiplier 覆盖账号倍率（利润门测试用）。
 	accountRateMultiplier *float64
+	qualityView           service.GroupQualityGateView
+	gatewayCache          service.GatewayCache
+	// acquireAccountSlot 非 nil 时决定每次账号抢槽是否成功（默认总成功）。
+	acquireAccountSlot func() bool
 	// firstFrameCloseExpected：首帧即被拒（连接被 1008 关闭），不期待任何响应帧。
 	firstFrameCloseExpected bool
 	// secondTurnCloseExpected：第二个 turn 被拒（连接被 1008 关闭）。
@@ -2027,6 +2033,131 @@ type openAIResponsesWSUsageLogResult struct {
 	upstreamFirstPayload []byte
 	upstreamPayloads     [][]byte
 	clientEvents         [][]byte
+}
+
+type wsQualityPinnedGatewayCache struct {
+	service.GatewayCache
+	bindings map[string]int64
+}
+
+func (c *wsQualityPinnedGatewayCache) GetSessionAccountID(_ context.Context, _ int64, key string) (int64, error) {
+	if accountID := c.bindings[key]; accountID > 0 {
+		return accountID, nil
+	}
+	return 0, service.ErrStickySessionNotFound
+}
+func (c *wsQualityPinnedGatewayCache) SetSessionAccountID(_ context.Context, _ int64, key string, accountID int64, _ time.Duration) error {
+	c.bindings[key] = accountID
+	return nil
+}
+func (*wsQualityPinnedGatewayCache) RefreshSessionTTL(context.Context, int64, string, time.Duration) error {
+	return nil
+}
+func (c *wsQualityPinnedGatewayCache) DeleteSessionAccountID(_ context.Context, _ int64, key string) error {
+	delete(c.bindings, key)
+	return nil
+}
+
+type wsPinnedQualityView struct{}
+
+func (wsPinnedQualityView) Vetoed(_, accountID int64) bool { return accountID == 9901 }
+func (wsPinnedQualityView) OrderTier(int64, int64) int     { return 0 }
+
+func wsResponseAccountCacheKey(responseID string) string {
+	digest := sha256.Sum256([]byte(responseID))
+	return "openai:response:" + hex.EncodeToString(digest[:])
+}
+
+func TestOpenAIResponsesWebSocket_QualityPinnedTurnOneUsesAdmissionResult(t *testing.T) {
+	responseID := "resp_quality_turn_one"
+	cache := &wsQualityPinnedGatewayCache{bindings: map[string]int64{wsResponseAccountCacheKey(responseID): 9901}}
+	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+		firstPayload: `{"type":"response.create","model":"gpt-5.1","previous_response_id":"` + responseID + `"}`,
+		gatewayCache: cache, qualityView: wsPinnedQualityView{}, ingressMode: service.OpenAIWSIngressModeCtxPool,
+	})
+	require.Len(t, got.logs, 1, "the selected pinned account must not be re-vetoed on ingress turn 1")
+	require.Len(t, got.upstreamPayloads, 1)
+}
+
+// 后续 turn 的账号满载先短等（≤2 秒）再以 1013 要求重连。
+func TestOpenAIResponsesWebSocket_LaterTurnShortWaitsForBusyAccount(t *testing.T) {
+	for _, row := range []struct {
+		name      string
+		busyTries int32 // 第二个 turn 前若干次抢槽失败；-1 表示一直满
+	}{
+		{"slot frees during the wait", 3},
+		{"still full after the wait", -1},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			var secondTurn atomic.Bool
+			var tries atomic.Int32
+			start := time.Now()
+			got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+				firstPayload:              `{"type":"response.create","model":"gpt-5.1","input":"first"}`,
+				secondPayload:             `{"type":"response.create","model":"gpt-5.1","input":"next"}`,
+				afterFirstUpstreamRequest: func(*service.ChannelService) error { secondTurn.Store(true); return nil },
+				acquireAccountSlot: func() bool {
+					if !secondTurn.Load() {
+						return true
+					}
+					n := tries.Add(1)
+					return row.busyTries >= 0 && n > row.busyTries
+				},
+				secondTurnCloseExpected: row.busyTries < 0, closeStatus: coderws.StatusTryAgainLater,
+				closeReason: "account is busy, please retry later",
+			})
+			if row.busyTries >= 0 {
+				require.Len(t, got.logs, 2, "the turn continues once the slot frees")
+				require.Equal(t, row.busyTries+1, tries.Load())
+				return
+			}
+			require.GreaterOrEqual(t, time.Since(start), 2*time.Second, "1013 only after the short wait")
+			require.Greater(t, tries.Load(), int32(5), "the full account is retried with backoff")
+		})
+	}
+}
+
+type wsTurnQualityView struct{ veto atomic.Bool }
+
+func (v *wsTurnQualityView) Vetoed(_, accountID int64) bool {
+	return accountID == 9901 && v.veto.Load()
+}
+func (*wsTurnQualityView) OrderTier(int64, int64) int { return 0 }
+
+func TestOpenAIResponsesWebSocket_QualityTurnAdmissionThroughHooks(t *testing.T) {
+	for _, row := range []struct {
+		name, payload string
+		veto          bool
+	}{
+		{"fresh turn", `{"type":"response.create","model":"gpt-5.1","input":"next"}`, true},
+		{"previous response turn", `{"type":"response.create","model":"gpt-5.1","previous_response_id":"resp_usage_e2e_1"}`, false},
+		{"incomplete tools turn", `{"type":"response.create","model":"gpt-5.1","input":[{"type":"function_call_output","call_id":"c1","output":"ok"}]}`, false},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			view := &wsTurnQualityView{}
+			got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+				firstPayload:  `{"type":"response.create","model":"gpt-5.1","input":"first"}`,
+				secondPayload: row.payload, ingressMode: service.OpenAIWSIngressModeCtxPool,
+				qualityView:               view,
+				afterFirstUpstreamRequest: func(*service.ChannelService) error { view.veto.Store(true); return nil },
+				secondTurnCloseExpected:   row.veto, closeStatus: coderws.StatusTryAgainLater,
+				closeReason: "account is no longer eligible for this connection, please reconnect",
+			})
+			if !row.veto {
+				require.Len(t, got.upstreamPayloads, 2)
+			}
+		})
+	}
+}
+
+func TestOpenAIResponsesWebSocket_QualityGateDoesNotLeakPinnedExemptionToConnection(t *testing.T) {
+	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+		firstPayload:      `{"type":"response.create","model":"gpt-5.1","previous_response_id":"resp_unknown_quality_owner"}`,
+		group:             &service.Group{ID: 4201, Platform: service.PlatformComposite, Status: service.StatusActive},
+		compositeResolver: compositeWSResolver(service.PlatformOpenAI, service.CompositeRouteEndpointResponses, "gpt-5.1"),
+		qualityView:       wsPinnedQualityView{}, firstFrameCloseExpected: true, closeStatus: coderws.StatusTryAgainLater, closeReason: "no available account",
+	})
+	require.Empty(t, got.logs, "a connection-level pinned exemption must not admit an ejected candidate after a previous-response miss")
 }
 
 type openAIWSUsageHandlerAccountRepoStub struct {
@@ -3080,7 +3211,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		nil,
 		nil,
 		nil,
-		nil,
+		tc.gatewayCache,
 		cfg,
 		nil,
 		nil,
@@ -3097,13 +3228,16 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		nil,
 		nil, // userPlatformQuotaRepo
 	)
+	if tc.qualityView != nil {
+		gatewaySvc.SetGroupQualityGateView(tc.qualityView)
+	}
 
 	cache := &concurrencyCacheMock{
 		acquireUserSlotFn: func(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error) {
 			return true, nil
 		},
 		acquireAccountSlotFn: func(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
-			return true, nil
+			return tc.acquireAccountSlot == nil || tc.acquireAccountSlot(), nil
 		},
 	}
 	h := &OpenAIGatewayHandler{

@@ -35,6 +35,7 @@ func TestPreviewProfitAdmissionUsesAccountRatesAndPreinitializesModels(t *testin
 		1.0,
 	)
 	expensive.Name = "expensive"
+	expensive.Credentials = map[string]any{"model_mapping": map[string]any{"gpt-sol": "gpt-sol"}}
 
 	invalid := upstreamCostTestOAuthAccount(4)
 	invalid.Name = "invalid"
@@ -64,11 +65,11 @@ func TestPreviewProfitAdmissionUsesAccountRatesAndPreinitializesModels(t *testin
 	require.True(t, byID[cheap.ID].RejectedUnderMinD)
 
 	require.Equal(t, ProfitPreviewClassAdmitted, byID[boundary.ID].Class, "U == 阈值按 epsilon 语义准入")
-	require.Equal(t, ProfitPreviewClassRejectedThreshold, byID[expensive.ID].Class)
+	require.Equal(t, ProfitPreviewClassAdmitted, byID[expensive.ID].Class)
 	require.Contains(t, byID[expensive.ID].Warnings, ProfitPreviewWarningManualRateOne)
 	require.Equal(t, ProfitPreviewClassRejectedInvalidRate, byID[invalid.ID].Class)
 
-	require.Equal(t, 2, report.RemainingByModel["gpt-sol"])
+	require.Equal(t, 3, report.RemainingByModel["gpt-sol"])
 	require.Equal(t, 1, report.RemainingByModel["gpt-luna"])
 	require.Equal(t, 0, report.RemainingByModel["gpt-no-account"])
 	_, present := report.RemainingByModel["gpt-no-account"]
@@ -113,10 +114,10 @@ func TestPreviewProfitAdmissionAssumeEnabled(t *testing.T) {
 	for _, verdict := range withAssume.Verdicts {
 		byID[verdict.AccountID] = verdict
 	}
-	require.Equal(t, ProfitPreviewClassAdmitted, byID[cheapAccount.ID].Class,
-		"账号倍率 0.2 <= 阈值 0.5，探测快照的高倍率不参与准入判断")
-	require.Equal(t, ProfitPreviewClassRejectedThreshold, byID[expensiveAccount.ID].Class,
-		"账号倍率 0.9 > 阈值 0.5，探测快照的低倍率不能替代账号倍率")
+	require.Equal(t, ProfitPreviewClassRejectedThreshold, byID[cheapAccount.ID].Class,
+		"新鲜探测 0.9 > 阈值 0.5，覆盖账号保存倍率 0.2")
+	require.Equal(t, ProfitPreviewClassAdmitted, byID[expensiveAccount.ID].Class,
+		"新鲜探测 0.2 <= 阈值 0.5，覆盖账号保存倍率 0.9")
 }
 
 func TestPreviewProfitAdmissionSupportsFivePlatforms(t *testing.T) {

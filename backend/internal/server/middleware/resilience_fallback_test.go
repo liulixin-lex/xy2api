@@ -68,8 +68,8 @@ func TestAvailabilityFallbackMiddlewareMovesKey(t *testing.T) {
 	fallback := &service.Group{ID: 20, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
 	svc := service.NewResilienceService(nil, &fbStore{keys: map[int64]bool{}})
 	svc.ConfigureFallbackGroups(&fbAccountRepo{byGroup: map[int64][]service.Account{
-		10: {{ID: 1, Status: service.StatusActive, Schedulable: true, TempUnschedulableUntil: &until, TempUnschedulableReason: "balance:exhausted: x"}},
-		20: {{ID: 2, Status: service.StatusActive, Schedulable: true}},
+		10: {{ID: 1, Platform: service.PlatformOpenAI, Status: service.StatusActive, Schedulable: true, TempUnschedulableUntil: &until, TempUnschedulableReason: "balance:exhausted: x"}},
+		20: {{ID: 2, Platform: service.PlatformOpenAI, Status: service.StatusActive, Schedulable: true}},
 	}}, &fbGroupRepo{groups: map[int64]*service.Group{10: primary, 20: fallback}})
 	service.SetResilienceInstance(svc)
 	t.Cleanup(func() { service.SetResilienceInstance(nil) })
@@ -107,8 +107,8 @@ func installFallbackFixture(t *testing.T) (primary *service.Group) {
 	fallback := &service.Group{ID: 20, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
 	svc := service.NewResilienceService(nil, &fbStore{keys: map[int64]bool{}})
 	svc.ConfigureFallbackGroups(&fbAccountRepo{byGroup: map[int64][]service.Account{
-		10: {{ID: 1, Status: service.StatusActive, Schedulable: true, TempUnschedulableUntil: &until, TempUnschedulableReason: "balance:exhausted: x"}},
-		20: {{ID: 2, Status: service.StatusActive, Schedulable: true}},
+		10: {{ID: 1, Platform: service.PlatformOpenAI, Status: service.StatusActive, Schedulable: true, TempUnschedulableUntil: &until, TempUnschedulableReason: "balance:exhausted: x"}},
+		20: {{ID: 2, Platform: service.PlatformOpenAI, Status: service.StatusActive, Schedulable: true}},
 	}}, &fbGroupRepo{groups: map[int64]*service.Group{10: primary, 20: fallback}})
 	service.SetResilienceInstance(svc)
 	t.Cleanup(func() { service.SetResilienceInstance(nil) })

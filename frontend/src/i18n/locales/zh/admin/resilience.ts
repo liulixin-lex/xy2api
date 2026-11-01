@@ -203,8 +203,8 @@ export default {
       clearFailed: '清除仅流式状态失败'
     },
     usage: {
-      fallback: '兜底：{origin} → {group}',
-      fallbackTitle: '原分组无可用账号，由兜底分组承接；按原分组计费，用户只看到原分组'
+      fallback: '兜底 → {group}',
+      fallbackTitle: '原分组无可用账号，由兜底分组承接；按兜底分组计费，用户只看到原分组'
     }
   }
 }
