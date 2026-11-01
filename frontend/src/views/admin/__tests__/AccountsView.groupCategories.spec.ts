@@ -200,7 +200,10 @@ describe('admin AccountsView group categories', () => {
     expect(updateAccount).toHaveBeenCalledTimes(1)
     expect(updateAccount).toHaveBeenCalledWith(7, { group_ids: [3, 1, 2] })
     expect(wrapper.find('[data-test="account-groups-dialog"]').exists()).toBe(false)
-    expect(wrapper.get('[data-account-name="acc-7"]').text()).toContain('Beta')
+    // 第三个分组收进“+1”，完整名单在单元格的 title 里
+    const cell = wrapper.get('[data-account-name="acc-7"] [data-testid="account-groups-cell"]')
+    expect(cell.text()).toContain('+1')
+    expect(cell.attributes('title')).toBe('Gamma、Alpha、Beta')
     wrapper.unmount()
   })
 

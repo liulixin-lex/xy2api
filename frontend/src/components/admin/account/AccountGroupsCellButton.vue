@@ -29,19 +29,22 @@
       @click="emit('open')"
     >
       <template v-if="groups.length">
-        <template v-for="group in visibleGroups" :key="group.id">
-          <GroupQualityBadge v-if="attentionOf(group.id)" :name="group.name" :quality="attentionOf(group.id)!" />
+        <!-- “+N”跟最后一个标签放在一起，换行时不会单独落到一行 -->
+        <span v-for="(group, index) in visibleGroups" :key="group.id" class="inline-flex min-w-0 max-w-full items-center gap-1">
+          <GroupQualityBadge v-if="attentionOf(group.id)" :name="group.name" :quality="attentionOf(group.id)!" :title="group.name" />
           <GroupBadge
             v-else
             :name="group.name"
             :platform="group.platform"
+            :show-platform-icon="group.platform !== accountPlatform"
             :subscription-type="group.subscription_type"
             :rate-multiplier="group.rate_multiplier"
             :show-rate="false"
-            class="max-w-24"
+            :title="group.name"
+            class="max-w-40"
           />
-        </template>
-        <span v-if="hiddenCount > 0" class="whitespace-nowrap text-xs font-medium text-gray-500 dark:text-gray-400">+{{ hiddenCount }}</span>
+          <span v-if="hiddenCount > 0 && index === visibleGroups.length - 1" class="whitespace-nowrap text-xs font-medium text-gray-500 dark:text-gray-400">+{{ hiddenCount }}</span>
+        </span>
       </template>
       <span v-else class="text-sm text-gray-400 dark:text-dark-500">—</span>
     </button>
@@ -136,6 +139,8 @@ const HOVER_DELAY_MS = 120
 const props = defineProps<{
   groups: Group[]
   accountName: string
+  /** 账号平台；分组平台与之相同时不再重复显示平台图标 */
+  accountPlatform?: string
   /** groupId → 该账号在开启门槛的分组里的状态 */
   quality?: Map<number, GroupQualityCell>
   /** 账号的完整窗口指标；熔断中的分组用它显示触发熔断的数据 */
@@ -158,10 +163,10 @@ const attentionOf = (groupId: number) => {
 const panel = computed(() => (props.quality?.size ? groupQualityPanel(orderedGroups.value, props.quality, t, clock, props.metrics) : null))
 const windowItems = computed(() => (props.metrics ? accountQualityMetricItems(props.metrics, t, strictestQualityLimits(props.quality)) : []))
 
-// 带状态的标签更宽：有需关注的分组时最多显示 2 个，否则 3 个。需关注的排在前面，不会被收进 +N。
-const maxVisible = computed(() => (panel.value?.attentionCount ? 2 : 3))
-const visibleGroups = computed(() => orderedGroups.value.slice(0, maxVisible.value))
-const hiddenCount = computed(() => Math.max(0, props.groups.length - maxVisible.value))
+// 最多显示 2 个标签，名称尽量完整，其余收进 +N（按钮 title 列出全部分组）；需关注的排在前面，不会被收进 +N。
+const MAX_VISIBLE = 2
+const visibleGroups = computed(() => orderedGroups.value.slice(0, MAX_VISIBLE))
+const hiddenCount = computed(() => Math.max(0, props.groups.length - MAX_VISIBLE))
 
 const trigger = ref<HTMLElement>()
 const tip = ref<HTMLElement>()

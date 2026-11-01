@@ -1,17 +1,17 @@
 <template>
+  <!-- 状态在上，下面依次是近期错误、首字、缓存率三行近期健康数据，各自带文字标签 -->
   <div class="flex flex-col items-start gap-1">
-    <div class="flex items-center gap-1.5">
-      <slot />
-      <a
-        v-if="recentErrors > 0"
-        :href="errorsHref"
-        target="_blank"
-        rel="noopener"
-        data-test="recent-errors"
-        class="rounded px-1 text-[11px] font-semibold leading-4 tabular-nums text-red-600 transition-colors hover:bg-red-50 hover:underline dark:text-red-400 dark:hover:bg-red-900/20"
-        :title="t('admin.accounts.recentErrorsTitle', { count: recentErrors })"
-      >{{ recentErrors }}</a>
-    </div>
+    <slot />
+    <a
+      v-if="recentErrors > 0"
+      :href="errorsHref"
+      target="_blank"
+      rel="noopener"
+      data-test="recent-errors"
+      class="text-[11px] font-medium leading-4 tabular-nums hover:underline"
+      :class="recentErrors >= RECENT_ERRORS_DANGER ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'"
+      :title="t('admin.accounts.recentErrorsTitle', { count: recentErrors })"
+    >{{ t('admin.accounts.recentErrors', { count: recentErrors }) }}</a>
     <span
       v-if="firstTokenAvgMs != null"
       data-test="first-token-avg"
@@ -42,6 +42,8 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
+// 近 10 分钟的错误请求数：1–4 次黄色，5 次及以上红色；0 不显示。
+const RECENT_ERRORS_DANGER = 5
 const recentErrors = computed(() => props.health?.recent_errors ?? 0)
 const firstTokenAvgMs = computed(() => props.health?.first_token_avg_ms ?? null)
 // 近 30 分钟三项 Token 先求和再算比例，口径同使用记录的“缓存读取占比”；三项之和为 0 时为 null，不显示。

@@ -7,7 +7,7 @@
     <button type="button" class="grid min-h-8 grid-cols-[auto_auto] content-center items-center gap-x-1.5 gap-y-0.5 whitespace-nowrap rounded px-1 py-1 text-left text-xs leading-4 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:bg-dark-700" :title="t('admin.accounts.iqRecords')" :aria-label="t('admin.accounts.iqOpenRecords', { status: tags.map(tag => `${tag.name} ${tag.state}`).join(', ') || t('admin.accounts.iqOff') })" @click="$emit('records')">
       <span v-if="!tags.length" class="col-span-2 text-gray-500 dark:text-dark-400">{{ t('admin.accounts.iqOff') }}</span>
       <span v-for="tag in visibleTags" :key="tag.model" class="contents" data-testid="iq-target-tag">
-        <span class="max-w-[6rem] truncate text-gray-500 dark:text-dark-400" data-part="name">{{ tag.name }}</span>
+        <span class="max-w-[5rem] truncate text-gray-500 dark:text-dark-400" :title="tag.model" data-part="name">{{ tag.name }}</span>
         <span class="inline-flex items-center gap-1 font-medium" :class="IQ_TONE_CLASSES[tag.tone]" data-part="state">
           <Icon v-if="tag.spinning" name="refresh" size="xs" class="animate-spin opacity-70" aria-hidden="true" />{{ tag.state }}
         </span>

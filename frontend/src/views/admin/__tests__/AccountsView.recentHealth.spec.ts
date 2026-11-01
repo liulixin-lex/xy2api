@@ -42,7 +42,7 @@ vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
   return {
     ...actual,
-    useI18n: () => ({ t: (key: string) => key })
+    useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => (params ? `${key}:${JSON.stringify(params)}` : key) })
   }
 })
 
@@ -113,7 +113,7 @@ describe('admin AccountsView recent health in the status column', () => {
     })
   })
 
-  it('asks for the visible accounts and shows errors beside and first token under the status', async () => {
+  it('asks for the visible accounts and shows labelled errors and first token under the status', async () => {
     const wrapper = mountView()
     await flushPromises()
 
@@ -122,7 +122,7 @@ describe('admin AccountsView recent health in the status column', () => {
     const busy = wrapper.get('[data-test="status-1"]')
     expect(busy.get('[data-test="status-badge"]').text()).toBe('active')
     const errors = busy.get('[data-test="recent-errors"]')
-    expect(errors.text()).toBe('4')
+    expect(errors.text()).toBe('admin.accounts.recentErrors:{"count":4}')
     expect(errors.attributes('href')).toBe('/admin/usage?tab=errors&account_id=1')
     expect(errors.attributes('target')).toBe('_blank')
     expect(busy.get('[data-test="first-token-avg"]').exists()).toBe(true)

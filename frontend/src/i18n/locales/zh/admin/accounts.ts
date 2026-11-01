@@ -178,6 +178,7 @@ export default {
       viewColumns: '列显示',
       dragToReorderColumns: '拖动调整列顺序',
       resetColumnOrder: '恢复默认列顺序',
+      recentErrors: '近期错误 {count}',
       recentErrorsTitle: '最近 10 分钟 {count} 次错误请求，点击在新标签页查看',
       firstTokenAvg: '首字 {value}',
       firstTokenAvgTitle: '最近 3 分钟 {count} 次请求的首字平均时间',

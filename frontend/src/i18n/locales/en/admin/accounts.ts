@@ -178,6 +178,7 @@ export default {
       viewColumns: 'Columns',
       dragToReorderColumns: 'Drag to reorder columns',
       resetColumnOrder: 'Reset column order',
+      recentErrors: 'Recent errors {count}',
       recentErrorsTitle: '{count} failed requests in the last 10 minutes. Click to open them in a new tab.',
       firstTokenAvg: 'TTFT {value}',
       firstTokenAvgTitle: 'Average time to first token over {count} requests in the last 3 minutes',

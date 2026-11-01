@@ -6,7 +6,7 @@
     ]"
   >
     <!-- Platform logo -->
-    <PlatformIcon v-if="platform" :platform="platform" size="sm" />
+    <PlatformIcon v-if="platform && showPlatformIcon" :platform="platform" size="sm" />
     <!-- Group name -->
     <span class="truncate">{{ name }}</span>
     <!-- Right side label -->
@@ -52,6 +52,8 @@ interface Props {
    * 只关心费率、不关心有效期的场景）。
    */
   alwaysShowRate?: boolean
+  /** 平台图标；所在位置已表明平台时（如账号自己的分组）可关闭，平台主题色不变 */
+  showPlatformIcon?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -60,7 +62,8 @@ const props = withDefaults(defineProps<Props>(), {
   daysRemaining: null,
   userRateMultiplier: null,
   peakRateEnabled: false,
-  alwaysShowRate: false
+  alwaysShowRate: false,
+  showPlatformIcon: true
 })
 
 const { t } = useI18n()

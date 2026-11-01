@@ -1,85 +1,106 @@
 <template>
-  <div class="flex items-center gap-2">
-    <!-- Rate Limit Display (429) - Two-line layout -->
-    <div v-if="isRateLimited" class="flex flex-col items-center gap-1">
-      <span class="badge text-xs badge-warning">{{ t('admin.accounts.status.rateLimited') }}</span>
-      <span class="text-[11px] text-gray-400 dark:text-gray-500">{{ rateLimitResumeText }}</span>
-    </div>
-
-    <!-- Overload Display (529) - Two-line layout -->
-    <div v-else-if="isOverloaded" class="flex flex-col items-center gap-1">
-      <span class="badge text-xs badge-danger">{{ t('admin.accounts.status.overloaded') }}</span>
-      <span class="text-[11px] text-gray-400 dark:text-gray-500">{{ overloadCountdown }}</span>
-    </div>
-
-    <!-- Main Status Badge (shown when not rate limited/overloaded) -->
-    <template v-else>
-      <div v-if="isTempUnschedulable" class="flex flex-col items-center gap-1">
-        <button
-          type="button"
-          :class="['badge text-xs', statusClass, 'cursor-pointer']"
-          :title="t('admin.accounts.status.viewTempUnschedDetails')"
-          @click="handleTempUnschedClick"
-        >
-          {{ statusText }}
-        </button>
-        <span class="max-w-[180px] text-center text-[11px] leading-4 text-gray-500 dark:text-gray-400">
-          {{ tempUnschedRecoveryText }}
-        </span>
+  <!-- 第一行是状态徽标及其附带的小标记；模型级限流与降智冷却竖排在下方，列宽不随它们横向变宽 -->
+  <div class="flex flex-col items-start gap-1">
+    <div class="flex items-center gap-2">
+      <!-- Rate Limit Display (429) - Two-line layout -->
+      <div v-if="isRateLimited" class="flex flex-col items-center gap-1">
+        <span class="badge text-xs badge-warning">{{ t('admin.accounts.status.rateLimited') }}</span>
+        <span class="text-[11px] text-gray-400 dark:text-gray-500">{{ rateLimitResumeText }}</span>
       </div>
-      <span v-else :class="['badge text-xs', statusClass]">
-        {{ statusText }}
-      </span>
-    </template>
 
-    <!-- Error Info Indicator -->
-    <div v-if="hasError && account.error_message" class="group/error relative">
-      <svg
-        class="h-4 w-4 cursor-help text-red-500 transition-colors hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-        stroke-width="2"
-      >
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"
-        />
-      </svg>
-      <!-- Tooltip - 向下显示 -->
-      <div
-        class="invisible absolute left-0 top-full z-[100] mt-1.5 min-w-[200px] max-w-[300px] rounded-lg bg-gray-800 px-3 py-2 text-xs text-white opacity-0 shadow-xl transition-all duration-200 group-hover/error:visible group-hover/error:opacity-100 dark:bg-gray-900"
-      >
-        <div class="whitespace-pre-wrap break-words leading-relaxed text-gray-300">
-          {{ account.error_message }}
+      <!-- Overload Display (529) - Two-line layout -->
+      <div v-else-if="isOverloaded" class="flex flex-col items-center gap-1">
+        <span class="badge text-xs badge-danger">{{ t('admin.accounts.status.overloaded') }}</span>
+        <span class="text-[11px] text-gray-400 dark:text-gray-500">{{ overloadCountdown }}</span>
+      </div>
+
+      <!-- Main Status Badge (shown when not rate limited/overloaded) -->
+      <template v-else>
+        <div v-if="isTempUnschedulable" class="flex flex-col items-center gap-1">
+          <button
+            type="button"
+            :class="['badge text-xs', statusClass, 'cursor-pointer']"
+            :title="t('admin.accounts.status.viewTempUnschedDetails')"
+            @click="handleTempUnschedClick"
+          >
+            {{ statusText }}
+          </button>
+          <span class="max-w-[180px] text-center text-[11px] leading-4 text-gray-500 dark:text-gray-400">
+            {{ tempUnschedRecoveryText }}
+          </span>
         </div>
-        <!-- 上方小三角 -->
+        <span v-else :class="['badge text-xs', statusClass]">
+          {{ statusText }}
+        </span>
+      </template>
+
+      <!-- Error Info Indicator -->
+      <div v-if="hasError && account.error_message" class="group/error relative">
+        <svg
+          class="h-4 w-4 cursor-help text-red-500 transition-colors hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"
+          />
+        </svg>
+        <!-- Tooltip - 向下显示 -->
         <div
-          class="absolute bottom-full left-3 border-[6px] border-transparent border-b-gray-800 dark:border-b-gray-900"
-        ></div>
+          class="invisible absolute left-0 top-full z-[100] mt-1.5 min-w-[200px] max-w-[300px] rounded-lg bg-gray-800 px-3 py-2 text-xs text-white opacity-0 shadow-xl transition-all duration-200 group-hover/error:visible group-hover/error:opacity-100 dark:bg-gray-900"
+        >
+          <div class="whitespace-pre-wrap break-words leading-relaxed text-gray-300">
+            {{ account.error_message }}
+          </div>
+          <!-- 上方小三角 -->
+          <div
+            class="absolute bottom-full left-3 border-[6px] border-transparent border-b-gray-800 dark:border-b-gray-900"
+          ></div>
+        </div>
+      </div>
+
+      <!-- Rate Limit Indicator (429) -->
+      <div v-if="isRateLimited" class="group relative">
+        <span
+          class="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+        >
+          <Icon name="exclamationTriangle" size="xs" :stroke-width="2" />
+          429
+        </span>
+        <!-- Tooltip -->
+        <div
+          class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-56 -translate-x-1/2 whitespace-normal rounded bg-gray-900 px-3 py-2 text-center text-xs leading-relaxed text-white opacity-0 transition-opacity group-hover:opacity-100 dark:bg-gray-700"
+        >
+          {{ t('admin.accounts.status.rateLimitedUntil', { time: formatDateTime(account.rate_limit_reset_at) }) }}
+          <div
+            class="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700"
+          ></div>
+        </div>
+      </div>
+
+      <!-- Overload Indicator (529) -->
+      <div v-if="isOverloaded" class="group relative">
+        <span
+          class="inline-flex items-center gap-1 rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400"
+        >
+          <Icon name="exclamationTriangle" size="xs" :stroke-width="2" />
+          529
+        </span>
+        <!-- Tooltip -->
+        <div
+          class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-56 -translate-x-1/2 whitespace-normal rounded bg-gray-900 px-3 py-2 text-center text-xs leading-relaxed text-white opacity-0 transition-opacity group-hover:opacity-100 dark:bg-gray-700"
+        >
+          {{ t('admin.accounts.status.overloadedUntil', { time: formatTime(account.overload_until) }) }}
+          <div
+            class="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700"
+          ></div>
+        </div>
       </div>
     </div>
-
-    <!-- Rate Limit Indicator (429) -->
-    <div v-if="isRateLimited" class="group relative">
-      <span
-        class="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-      >
-        <Icon name="exclamationTriangle" size="xs" :stroke-width="2" />
-        429
-      </span>
-      <!-- Tooltip -->
-      <div
-        class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-56 -translate-x-1/2 whitespace-normal rounded bg-gray-900 px-3 py-2 text-center text-xs leading-relaxed text-white opacity-0 transition-opacity group-hover:opacity-100 dark:bg-gray-700"
-      >
-        {{ t('admin.accounts.status.rateLimitedUntil', { time: formatDateTime(account.rate_limit_reset_at) }) }}
-        <div
-          class="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700"
-        ></div>
-      </div>
-    </div>
-
     <!-- Model Status Indicators (普通限流 / 超量请求中) -->
     <div
       v-if="activeModelStatuses.length > 0"
@@ -139,29 +160,11 @@
 
     <!-- IQ gates: fail-closed per-model cooldowns, shown apart from ordinary rate limits -->
     <div v-if="iqGates.length" class="flex flex-col gap-1">
-      <span v-for="gate in iqGates" :key="gate.model" class="inline-flex flex-col rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400" data-testid="iq-gate">
-        <span>{{ t('admin.accounts.iqGateCooling', { model: gate.model }) }}</span>
+      <span v-for="gate in iqGates" :key="gate.model" class="inline-flex flex-col rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400" :title="t('admin.accounts.iqGateModel', { model: gate.model })" data-testid="iq-gate">
+        <!-- 内置模型用智商列同样的短名（Astra / Sol），完整出站模型名在 title -->
+        <span>{{ t('admin.accounts.iqGateCooling', { model: iqModelLabel(gate.model) }) }}</span>
         <span class="text-[10px] font-normal opacity-80">{{ new Date(gate.reset_at) > new Date() ? t('admin.accounts.iqRecheckAt', { time: formatDateTime(gate.reset_at, IQ_CLOCK) }) : t('admin.accounts.iqRecheckPending') }}</span>
       </span>
-    </div>
-
-    <!-- Overload Indicator (529) -->
-    <div v-if="isOverloaded" class="group relative">
-      <span
-        class="inline-flex items-center gap-1 rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400"
-      >
-        <Icon name="exclamationTriangle" size="xs" :stroke-width="2" />
-        529
-      </span>
-      <!-- Tooltip -->
-      <div
-        class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-56 -translate-x-1/2 whitespace-normal rounded bg-gray-900 px-3 py-2 text-center text-xs leading-relaxed text-white opacity-0 transition-opacity group-hover:opacity-100 dark:bg-gray-700"
-      >
-        {{ t('admin.accounts.status.overloadedUntil', { time: formatTime(account.overload_until) }) }}
-        <div
-          class="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700"
-        ></div>
-      </div>
     </div>
   </div>
 </template>
@@ -172,7 +175,7 @@ import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import type { Account } from '@/types'
 import { formatCountdown, formatDateTime, formatDateTimeToMinute, formatCountdownWithSuffix, formatTime } from '@/utils/format'
-import { IQ_GATE_KEY_PREFIX, IQ_CLOCK, iqGateEntries } from '@/components/admin/account/iqCheckPresentation'
+import { IQ_GATE_KEY_PREFIX, IQ_CLOCK, iqGateEntries, iqModelLabel } from '@/components/admin/account/iqCheckPresentation'
 
 const { t } = useI18n()
 
