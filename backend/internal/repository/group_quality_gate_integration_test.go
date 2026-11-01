@@ -59,9 +59,10 @@ func TestGroupQualityGateRepositoryLoadsWarmMetricsAndDeduplicatesFailures(t *te
 	event := map[string]any{"account_id": accountID, "at_unix_ms": atMillis, "kind": "failover", "upstream_status_code": 502, "resilience_category": "TRANSIENT", "message": "synthetic failure"}
 	raw, err := json.Marshal([]any{event})
 	require.NoError(t, err)
+	clientRequestID := fmt.Sprintf("quality-%d-client", suffix)
 	for range 2 {
-		_, err := tx.ExecContext(ctx, `INSERT INTO ops_error_logs(request_id,error_phase,error_type,status_code,group_id,created_at,upstream_errors)
-			VALUES($1,'upstream','upstream_error',502,$2,$3,$4::jsonb)`, fmt.Sprintf("quality-%d-failure", suffix), groupID, now, string(raw))
+		_, err := tx.ExecContext(ctx, `INSERT INTO ops_error_logs(request_id,client_request_id,error_phase,error_type,status_code,group_id,created_at,upstream_errors)
+			VALUES($1,$2,'upstream','upstream_error',502,$3,$4,$5::jsonb)`, fmt.Sprintf("quality-%d-failure", suffix), clientRequestID, groupID, now, string(raw))
 		require.NoError(t, err)
 	}
 
@@ -78,6 +79,7 @@ func TestGroupQualityGateRepositoryLoadsWarmMetricsAndDeduplicatesFailures(t *te
 		}
 		if observation.SoftFailure {
 			softFailures++
+			require.Equal(t, "client:"+clientRequestID, observation.RequestID, "failure IDs use the usage_logs request ID format")
 		}
 		if observation.Warm && observation.Success && observation.Streaming && observation.FirstTokenMs > 0 {
 			warmSamples++

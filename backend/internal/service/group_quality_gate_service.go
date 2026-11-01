@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"maps"
 	"math"
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,6 +33,13 @@ type groupQualitySnapshot struct {
 	Policies    GroupQualityGatePolicies
 	Metrics     map[int64]GroupQualityMetrics
 	Members     map[int64]map[int64]groupQualityMemberSnapshot
+	// Resets holds the in-process manual reset already applied to each account;
+	// a reset applies once to all of the account's groups, not again on joining.
+	Resets map[int64]time.Time
+	// Departed keeps the state of (group, account) pairs absent from the latest
+	// membership until two hours after their ejection ended, so leaving and
+	// rejoining a group keeps strikes and ejection history. Not shown in status.
+	Departed map[int64]map[int64]groupQualityAccountState
 }
 
 type cachedGroupQualityPolicies struct {
@@ -105,7 +114,16 @@ func (s *GroupQualityGateService) Vetoed(groupID, accountID int64) bool {
 	}
 	members := v.Members[groupID]
 	member, ok := members[accountID]
-	return ok && member.Result.State == "ejected" && (member.State.Until.IsZero() || s.now().Before(member.State.Until)) && !member.Result.Pinned && !member.Result.GuardHeld
+	ejected := ok && member.Result.State == "ejected" && (member.State.Until.IsZero() || s.now().Before(member.State.Until)) && !member.Result.Pinned && !member.Result.GuardHeld
+	if !ejected {
+		return false
+	}
+	// Disabling the gate takes effect at once: UpdatePolicy stores the saved
+	// policy in the in-memory cache, read here without I/O.
+	if cached := s.policyCache.Load(); cached != nil && !cached.value.Groups[strconv.FormatInt(groupID, 10)].Enabled {
+		return false
+	}
+	return true
 }
 
 func (s *GroupQualityGateService) OrderTier(groupID, accountID int64) int {
@@ -216,8 +234,9 @@ func (s *GroupQualityGateService) UpdatePolicy(ctx context.Context, groupID int6
 	if err != nil {
 		return updated, err
 	}
-	// A newly-enabled group enters status only after the next regular evaluation.
-	s.policyCache.Store(nil)
+	// Vetoed sees the saved policy at once; a newly-enabled group enters status
+	// only after the next regular evaluation.
+	s.policyCache.Store(&cachedGroupQualityPolicies{value: normalizeGroupQualityGatePolicies(cloneGroupQualityGatePolicies(updated)), expiresAt: time.Now().Add(30 * time.Second)})
 	return updated, nil
 }
 
@@ -408,7 +427,10 @@ func (s *GroupQualityGateService) evaluate(ctx context.Context) error {
 			fullMetrics[id] = groupQualityMetricsFor(byAccount[id], now, now.Add(-15*time.Minute), now.Add(-30*time.Minute), now.Add(-2*time.Hour))
 		}
 	}
-	next := &groupQualitySnapshot{GeneratedAt: now, Stale: stale, Policies: policies, Metrics: fullMetrics, Members: make(map[int64]map[int64]groupQualityMemberSnapshot, len(membersByGroup))}
+	next := &groupQualitySnapshot{GeneratedAt: now, Stale: stale, Policies: policies, Metrics: fullMetrics, Members: make(map[int64]map[int64]groupQualityMemberSnapshot, len(membersByGroup)), Resets: maps.Clone(old.Resets)}
+	if next.Resets == nil {
+		next.Resets = map[int64]time.Time{}
+	}
 	if stale {
 		reason := observationErr
 		if reason == nil {
@@ -427,12 +449,25 @@ func (s *GroupQualityGateService) evaluate(ctx context.Context) error {
 		byID := make(map[int64]groupQualityMemberSnapshot, len(accounts))
 		for i := range accounts {
 			account := &accounts[i]
-			previousMember := old.Members[group.ID][account.ID]
-			previous := previousMember.State
 			resetAt := accountGroupQualityResetAt(account)
-			reset := resetAt.After(s.processStartedAt) && !resetAt.Equal(previous.ResetAt)
+			previousMember, known := old.Members[group.ID][account.ID]
+			// A rejoining member keeps its history unless a reset happened since.
+			if departed, ok := old.Departed[group.ID][account.ID]; !known && ok && departed.ResetAt.Equal(resetAt) {
+				previousMember.State, known = departed, true
+			}
+			previous := previousMember.State
+			reset := resetAt.After(s.processStartedAt) && !resetAt.Equal(old.Resets[account.ID])
+			if resetAt.After(s.processStartedAt) {
+				next.Resets[account.ID] = resetAt
+			}
 			if reset {
-				previous = groupQualityAccountState{State: "trial", TrialSince: resetAt, Tier: GroupQualityGateTierTrial}
+				// A member without a previous record has no trial data from
+				// before the previous round.
+				since := resetAt
+				if !known {
+					since = maxTime(resetAt, old.GeneratedAt)
+				}
+				previous = groupQualityAccountState{State: "trial", TrialSince: since, Tier: GroupQualityGateTierTrial}
 			}
 			previous.ResetAt = resetAt
 			pinned := policy.Enabled && containsInt64(policy.PinnedAccountIDs, account.ID)
@@ -454,7 +489,16 @@ func (s *GroupQualityGateService) evaluate(ctx context.Context) error {
 				state = evaluateGroupQualityMember(now, policy, metric, previous, !stale)
 				passing = state.State != "ejected" && !metric.EjectionReady(policy)
 			} else {
-				state = groupQualityAccountState{State: "eligible", TierAt: previous.TierAt, Strike: previous.Strike, LastEjectionEnd: previous.LastEjectionEnd, ResetAt: resetAt}
+				// Disabling the gate ends an ejection now, so its trigger data
+				// cannot count again when the gate is re-enabled.
+				end := previous.LastEjectionEnd
+				if previous.State == "ejected" {
+					end = previous.Until
+					if now.Before(end) {
+						end = now
+					}
+				}
+				state = groupQualityAccountState{State: "eligible", TierAt: previous.TierAt, Strike: previous.Strike, LastEjectionEnd: end, ResetAt: resetAt}
 			}
 			tier := resolveGroupQualityTier(now, policy, metric, state, previous, policy.Enabled, passing)
 			state.Tier = tier
@@ -467,7 +511,7 @@ func (s *GroupQualityGateService) evaluate(ctx context.Context) error {
 			}
 			result := GroupQualityMemberResult{Usable: usable, Passing: passing, Pinned: pinned, State: state.State, Tier: tier}
 			byID[account.ID] = groupQualityMemberSnapshot{AccountID: account.ID, Metric: metric, State: state, Result: result}
-			logGroupQualityTransition(previousMember.State, state, group.ID, account.ID, policy, metric)
+			logGroupQualityTransition(previousMember.State, state, reset, group.ID, account.ID, policy, metric)
 		}
 		if policy.Enabled {
 			applyQualityGuard(byID, old.Members[group.ID])
@@ -482,8 +526,42 @@ func (s *GroupQualityGateService) evaluate(ctx context.Context) error {
 		}
 		next.Members[group.ID] = byID
 	}
+	next.Departed = departedGroupQualityMembers(old, next.Members, now)
 	s.snapshot.Store(next)
 	return observationErr
+}
+
+// departedGroupQualityMembers carries absent members' states while their
+// strikes and last ejection end still affect evaluation (two hours).
+func departedGroupQualityMembers(old *groupQualitySnapshot, current map[int64]map[int64]groupQualityMemberSnapshot, now time.Time) map[int64]map[int64]groupQualityAccountState {
+	out := map[int64]map[int64]groupQualityAccountState{}
+	keep := func(groupID, accountID int64, state groupQualityAccountState) {
+		if _, present := current[groupID][accountID]; present {
+			return
+		}
+		end := state.LastEjectionEnd
+		if state.State == "ejected" {
+			end = state.Until
+		}
+		if end.IsZero() || now.Sub(end) >= 2*time.Hour {
+			return
+		}
+		if out[groupID] == nil {
+			out[groupID] = map[int64]groupQualityAccountState{}
+		}
+		out[groupID][accountID] = state
+	}
+	for groupID, members := range old.Members {
+		for accountID, member := range members {
+			keep(groupID, accountID, member.State)
+		}
+	}
+	for groupID, members := range old.Departed {
+		for accountID, state := range members {
+			keep(groupID, accountID, state)
+		}
+	}
+	return out
 }
 
 // accumulateQualityTrial rescans the bounded window to include late writes.
@@ -543,6 +621,18 @@ func qualityValidStarts(now, processStart, resetAt time.Time, state groupQuality
 func groupQualityMetricsFor(observations []GroupQualityObservation, now, errorSince, ttftSince, cacheSince time.Time) GroupQualityMetrics {
 	m := GroupQualityMetrics{}
 	seenFailures := map[string]bool{}
+	// A usage row of a request that also soft-failed on the same account (a
+	// broken stream) is not a successful call. Empty IDs cannot be matched.
+	type requestKey struct {
+		accountID int64
+		requestID string
+	}
+	failedRequests := map[requestKey]bool{}
+	for _, o := range observations {
+		if o.SoftFailure && o.RequestID != "" {
+			failedRequests[requestKey{o.AccountID, o.RequestID}] = true
+		}
+	}
 	ttftValues := []int{}
 	zeroCount := 0
 	for _, o := range observations {
@@ -557,7 +647,7 @@ func groupQualityMetricsFor(observations []GroupQualityObservation, now, errorSi
 					m.Calls++
 					m.SoftFailures++
 				}
-			} else {
+			} else if o.RequestID == "" || !failedRequests[requestKey{o.AccountID, o.RequestID}] {
 				m.Calls++
 			}
 		}
@@ -642,16 +732,45 @@ func resolveGroupQualityTier(now time.Time, policy GroupQualityGatePolicy, metri
 	return GroupQualityGateTierOther
 }
 
-func logGroupQualityTransition(old, next groupQualityAccountState, groupID, accountID int64, policy GroupQualityGatePolicy, metric GroupQualityMetrics) {
-	if next.State == "ejected" && (old.State != "ejected" || !old.Until.Equal(next.Until)) {
-		slog.Info("group_quality_gate.eject", "group_id", groupID, "account_id", accountID, "error_rate", metric.ErrorRate(), "max_error_rate", policy.MaxErrorRate, "warm_ttft_p90_ms", metric.WarmTTFTP90Ms, "max_warm_ttft_p90_ms", policy.MaxWarmTTFTP90Ms, "until", next.Until, "strikes", next.Strike)
+// logGroupQualityTransition writes one Warn event per state transition, so
+// account moves can be traced in the ops system log.
+func logGroupQualityTransition(old, next groupQualityAccountState, reset bool, groupID, accountID int64, policy GroupQualityGatePolicy, metric GroupQualityMetrics) {
+	from := old.State
+	if from == "" {
+		from = "eligible"
 	}
-	if next.State == "trial" && (old.State != "trial" || !old.ResetAt.Equal(next.ResetAt)) {
-		slog.Info("group_quality_gate.trial", "group_id", groupID, "account_id", accountID, "error_rate", metric.ErrorRate(), "max_error_rate", policy.MaxErrorRate, "warm_ttft_p90_ms", metric.WarmTTFTP90Ms, "max_warm_ttft_p90_ms", policy.MaxWarmTTFTP90Ms)
+	var reason string
+	switch {
+	case !policy.Enabled:
+		if from == "eligible" {
+			return
+		}
+		reason = "gate_disabled"
+	case next.State == "ejected":
+		if old.State == "ejected" && old.Until.Equal(next.Until) {
+			return
+		}
+		reason = strings.Join(next.Reasons, ",")
+	case reset:
+		reason = "manual_reset"
+	case from == next.State:
+		return
+	case from == "ejected":
+		reason = "ejection_expired"
+	default:
+		reason = "trial_passed"
 	}
-	if (old.State == "ejected" || old.State == "trial") && next.State == "eligible" {
-		slog.Info("group_quality_gate.recover", "group_id", groupID, "account_id", accountID, "error_rate", metric.ErrorRate(), "max_error_rate", policy.MaxErrorRate, "warm_ttft_p90_ms", metric.WarmTTFTP90Ms, "max_warm_ttft_p90_ms", policy.MaxWarmTTFTP90Ms, "state", next.State)
+	attrs := []any{"group_id", groupID, "account_id", accountID, "from", from, "to", next.State, "reason", reason, "strike", next.Strike,
+		"error_rate", metric.ErrorRate(), "max_error_rate", policy.MaxErrorRate, "warm_ttft_p90_ms", metric.WarmTTFTP90Ms, "max_warm_ttft_p90_ms", policy.MaxWarmTTFTP90Ms}
+	event := "group_quality_gate.recover"
+	switch next.State {
+	case "ejected":
+		event = "group_quality_gate.eject"
+		attrs = append(attrs, "until", next.Until)
+	case "trial":
+		event = "group_quality_gate.trial"
 	}
+	slog.Warn(event, attrs...)
 }
 
 func applyQualityGuard(members, previous map[int64]groupQualityMemberSnapshot) {

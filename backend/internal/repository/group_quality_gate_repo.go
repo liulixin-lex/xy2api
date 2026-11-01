@@ -174,7 +174,7 @@ func loadGroupQualityObservations(ctx context.Context, tx *sql.Tx, accountIDs []
 	_ = rows.Close()
 	rows, err = tx.QueryContext(ctx, `
 		SELECT DISTINCT ON (COALESCE(e.request_id, ''), (ev->>'account_id')::bigint, COALESCE((ev->>'at_unix_ms')::bigint, (EXTRACT(EPOCH FROM e.created_at)*1000)::bigint))
-		       COALESCE(e.request_id, ''), (ev->>'account_id')::bigint,
+		       COALESCE(e.request_id, ''), COALESCE(e.client_request_id, ''), (ev->>'account_id')::bigint,
 		       to_timestamp(COALESCE((ev->>'at_unix_ms')::bigint, (EXTRACT(EPOCH FROM e.created_at)*1000)::bigint)/1000.0),
 		       COALESCE(ev->>'kind',''), CASE WHEN jsonb_typeof(ev->'upstream_status_code')='number' THEN (ev->>'upstream_status_code')::int ELSE 0 END,
 		       COALESCE(ev->>'resilience_category',''), COALESCE(ev->>'message','')
@@ -187,10 +187,13 @@ func loadGroupQualityObservations(ctx context.Context, tx *sql.Tx, accountIDs []
 	}
 	for rows.Next() {
 		var o service.GroupQualityObservation
-		if err := rows.Scan(&o.RequestID, &o.AccountID, &o.At, &o.Kind, &o.StatusCode, &o.Category, &o.Message); err != nil {
+		var clientRequestID string
+		if err := rows.Scan(&o.RequestID, &clientRequestID, &o.AccountID, &o.At, &o.Kind, &o.StatusCode, &o.Category, &o.Message); err != nil {
 			_ = rows.Close()
 			return nil, time.Time{}, err
 		}
+		// Match the usage_logs request ID of the same request.
+		o.RequestID = service.GroupQualityErrorRequestID(clientRequestID, o.RequestID)
 		o.SoftFailure = service.IsGroupQualitySoftFailure(o.Kind, o.StatusCode, o.Category, o.Message)
 		if o.SoftFailure {
 			out = append(out, o)

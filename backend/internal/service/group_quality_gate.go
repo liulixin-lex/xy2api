@@ -6,6 +6,7 @@ import (
 	"math"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
@@ -132,6 +133,19 @@ type GroupQualityObservation struct {
 // IsGroupQualitySoftFailure keeps the health classifier aligned with share scheduling.
 func IsGroupQualitySoftFailure(kind string, statusCode int, category, message string) bool {
 	return shareSoftFailureAttempt(ShareSchedulingUpstreamAttempt{AccountID: 1, Kind: kind, StatusCode: statusCode, Category: category, Message: message})
+}
+
+// GroupQualityErrorRequestID maps an ops error row's IDs to the usage_logs
+// request ID written by resolveUsageBillingRequestID, so a request's usage row
+// and its upstream failures share one identity.
+func GroupQualityErrorRequestID(clientRequestID, requestID string) string {
+	if id := strings.TrimSpace(clientRequestID); id != "" {
+		return "client:" + id
+	}
+	if id := strings.TrimSpace(requestID); id != "" {
+		return "local:" + id
+	}
+	return ""
 }
 
 // GroupQualityGateRepository persists the policy setting and reads bounded metric history.
@@ -310,7 +324,7 @@ func evaluateGroupQualityMember(now time.Time, policy GroupQualityGatePolicy, me
 			state.State, state.Tier = "eligible", GroupQualityGateTierFast
 		} else {
 			state.State, state.Tier = "trial", GroupQualityGateTierTrial
-			state.TrialSince = now
+			state.TrialSince = state.LastEjectionEnd
 			state.TrialRequests, state.TrialFailures = nil, nil
 		}
 		state.Reasons = nil
