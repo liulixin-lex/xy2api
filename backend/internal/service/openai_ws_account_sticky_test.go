@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"maps"
 	"testing"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/sharesched"
 	"github.com/stretchr/testify/require"
 )
 
@@ -389,6 +391,80 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_CapabilityMismat
 	boundAccountID, getErr := store.GetResponseAccount(ctx, groupID, "resp_prev_capability")
 	require.NoError(t, getErr)
 	require.Equal(t, account.ID, boundAccountID)
+}
+
+// wsStickyRenewCache records TTL refreshes; a refresh never creates a key.
+type wsStickyRenewCache struct {
+	stubGatewayCache
+	refreshed map[string]time.Duration
+}
+
+func (c *wsStickyRenewCache) RefreshSessionTTL(_ context.Context, _ int64, key string, ttl time.Duration) error {
+	c.refreshed[key] = ttl
+	return nil
+}
+
+func TestOpenAIWSStickyRenewalExtendsOnlyItsOwnBinding(t *testing.T) {
+	groupID := int64(23)
+	const session, key = "v2:ws-renew", "openai:v2:ws-renew"
+	for _, row := range []struct {
+		name      string
+		owner     int64 // 0: no binding
+		spillover bool
+		share     bool
+		want      time.Duration // 0: not renewed
+	}{
+		{name: "still owned", owner: 7, want: 2 * time.Hour},
+		{name: "share group uses the share TTL", owner: 7, share: true, want: sharesched.BindingTTL},
+		{name: "rebound elsewhere", owner: 8},
+		{name: "expired binding is not recreated"},
+		{name: "spillover connection", owner: 7, spillover: true},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			bindings := map[string]int64{}
+			if row.owner > 0 {
+				bindings[key] = row.owner
+			}
+			before := maps.Clone(bindings)
+			cache := &wsStickyRenewCache{stubGatewayCache: stubGatewayCache{sessionBindings: bindings}, refreshed: map[string]time.Duration{}}
+			cfg := &config.Config{}
+			cfg.Gateway.OpenAIWS.StickySessionTTLSeconds = 7200
+			svc := &OpenAIGatewayService{cache: cache, cfg: cfg}
+			if row.share {
+				policy := sharesched.DefaultPolicy()
+				policy.Scheduler = sharesched.SchedulerShare
+				svc.shareScheduling = NewShareSchedulingService(nil, nil, nil)
+				svc.shareScheduling.state.Store(&shareSchedulingState{settings: ShareSchedulingSettings{Enabled: true},
+					groups: map[int64]*shareGroupPolicy{groupID: {groupID: groupID, version: 1, policy: policy}}})
+			}
+			renewal := svc.NewOpenAIWSStickyRenewal(&groupID, session, 7, row.spillover)
+			require.NoError(t, renewal.TurnSucceeded(context.Background()))
+			require.Empty(t, cache.refreshed, "renewal is throttled right after the admission bind")
+			if renewal != nil {
+				renewal.renewedAt.Store(time.Now().Add(-openAIWSStickyRenewInterval).UnixNano())
+			}
+			require.NoError(t, renewal.TurnSucceeded(context.Background()))
+			if row.want > 0 {
+				require.Equal(t, map[string]time.Duration{key: row.want}, cache.refreshed)
+			} else {
+				require.Empty(t, cache.refreshed)
+			}
+			require.Equal(t, before, cache.sessionBindings, "renewal never writes a binding")
+		})
+	}
+}
+
+func TestWaitOpenAIStickyCapacityStopsWithTheContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	tries := 0
+	acquired, err := WaitOpenAIStickyCapacity(ctx, func() (bool, error) {
+		tries++
+		cancel()
+		return false, nil
+	})
+	require.False(t, acquired)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, 1, tries, "a cancelled wait does not retry")
 }
 
 func newOpenAIWSV2TestConfig() *config.Config {

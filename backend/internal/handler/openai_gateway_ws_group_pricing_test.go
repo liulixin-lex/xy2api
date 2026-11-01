@@ -310,6 +310,12 @@ func TestOpenAIWSTurnPricingAndAuthorizationSnapshotsStaySeparate(t *testing.T) 
 	var snapshots openAIWSTurnBillingAPIKeys
 	firstTurnCtx := snapshots.contextForTurn(ctx, 1, serving)
 	require.Same(t, origin, service.BillingAPIKey(firstTurnCtx, serving), "the passthrough first turn keeps the origin authorization snapshot")
+	// The usage task runs on a detached ctx that keeps the resilience state
+	// but not the request's serving group.
+	detachedFirstTurnCtx := snapshots.contextForTurn(resilience.WithRequestState(context.Background(), state), 1, serving)
+	require.Same(t, origin, service.BillingAPIKey(detachedFirstTurnCtx, serving))
+	require.Equal(t, servingID, *service.ServingPricingKey(detachedFirstTurnCtx, serving).GroupID,
+		"the passthrough first turn is priced by the serving group on the detached usage ctx")
 	snapshots.set(2, origin, serving)
 	turnCtx := snapshots.contextForTurn(ctx, 2, serving)
 	require.Same(t, origin, service.BillingAPIKey(turnCtx, serving), "authorization and limits keep the origin snapshot")

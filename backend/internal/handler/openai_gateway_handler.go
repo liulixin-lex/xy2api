@@ -2345,7 +2345,10 @@ func (k *openAIWSTurnBillingAPIKeys) contextForTurn(ctx context.Context, turn in
 		key = service.BillingAPIKey(ctx, conn)
 	}
 	if serving == nil {
-		serving = service.ServingPricingKey(ctx, key)
+		// A turn without BeforeTurn (passthrough turn 1) is priced by the
+		// connection key like begin and forTurn: a detached usage ctx has no
+		// serving group, so pricing from the origin key would bill the origin.
+		serving = service.ServingPricingKey(ctx, conn)
 	}
 	return service.WithServingPricingKeySnapshot(service.WithBillingAPIKeySnapshot(ctx, key), serving)
 }
@@ -3077,6 +3080,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				reqLog.Warn("openai.websocket_bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}
 		}
+		// Successful turns renew the binding the connection still owns.
+		stickyRenewal := h.gatewayService.NewOpenAIWSStickyRenewal(apiKey.GroupID, sessionHash, account.ID, selection.StickyCapacitySpillover)
 
 		token, _, err := h.gatewayService.GetRequestCredential(ctx, c, account)
 		if err != nil {
@@ -3248,7 +3253,14 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if !userAcquired {
 					return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "too many concurrent requests, please retry later", nil)
 				}
-				accountReleaseFunc, accountAcquired, err := h.concurrencyHelper.TryAcquireAccountSlot(ctx, account.ID, accountMaxConcurrency)
+				// A full account gets the sticky short wait before the client
+				// is asked to reconnect; the user's own limit above does not.
+				var accountReleaseFunc func()
+				accountAcquired, err := service.WaitOpenAIStickyCapacity(ctx, func() (bool, error) {
+					release, acquired, acquireErr := h.concurrencyHelper.TryAcquireAccountSlot(ctx, account.ID, accountMaxConcurrency)
+					accountReleaseFunc = release
+					return acquired, acquireErr
+				})
 				if err != nil {
 					if userReleaseFunc != nil {
 						userReleaseFunc()
@@ -3371,6 +3383,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 						)
 					}
 				})
+				if turnErr == nil {
+					if err := stickyRenewal.TurnSucceeded(ctx); err != nil {
+						reqLog.Debug("openai.websocket_sticky_session_renew_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+					}
+				}
 			},
 		}
 
@@ -4661,8 +4678,11 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 			cancel()
 		}
 	}
+	// Under an availability fallback the usage row keeps the origin group for
+	// limits and display and prices by the serving group, like regular usage.
+	requestState := resilience.StateFrom(requestCtx)
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(resilience.WithRequestState(context.Background(), requestState), 30*time.Second)
 		defer cancel()
 		if cmSvc != nil {
 			cmSvc.RecordCyberPolicyEvent(ctx, service.CyberPolicyRecordInput{
