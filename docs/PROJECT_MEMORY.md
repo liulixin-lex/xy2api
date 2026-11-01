@@ -28,6 +28,7 @@
     - F5：毛利率框清空后提交 0%。
   - F3、F4 为升级即生效的回归，与开关无关。
   - 错误率依赖运维监控写 `ops_error_logs`，监控关闭时只剩首字门槛，升级前须确认。
+  - 生产只读数据（`ops_monitoring_enabled`、韧性会话开关、C1–C7 缓存量化）待用户在其本地终端执行后提供摘要；本会话不再访问生产（11-01 两次被安全机制拦截）。修复轮不依赖这些数据。
   - 原有已接受限制见发布草稿。
 - **关键位置**：[`group-quality-gate-20261031/tasks.md`](../openspec/changes/group-quality-gate-20261031/tasks.md)；仓外 `reviews/post_impl_review_20261031.md`（复审清单、缓存分析、只读 SQL 草稿；复现用例在 `reviews/post_impl_repro/`）、`implementation/WP5-report.md`、`implementation/RELEASE_NOTES_DRAFT.md`。
 
@@ -129,7 +130,7 @@
 ### 20261101-group-quality-gate 修复轮（2026-11-01T03:40Z 开始；Claude 主持）
 
 - 范围：按 `reviews/fix_round_decisions_20261101.md` 修复，四个包各用独立 worktree，从基线切 `feat/gqg-fx-*`。各包 agent 不改本文件，由主持人维护。
-- 状态：派工中。
+- 状态：FX-D 前端已审查合入（`77100e80e`，前端四门禁 3617 项通过）；FX-A/B/C 开发中。生产数据待用户提供。
 
 ## 操作陷阱
 
