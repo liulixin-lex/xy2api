@@ -191,7 +191,7 @@ func (s *OpenAIGatewayService) recordOpenAIAccountLatencySample(account *Account
 	state := s.getOpenAIAccountLatencyHoldState()
 	entry, started, triggerSamples, triggerSlowFraction := state.record(account.ID, openAIAccountModelTransientModel(canonicalModel), sample, now)
 	if started {
-		logger.L().Info("openai_account_latency_hold_started",
+		logger.L().Warn("openai_account_latency_hold_started",
 			zap.Int64("account_id", account.ID),
 			zap.String("model", openAIAccountModelTransientModel(canonicalModel)),
 			zap.Float64("sample_count", triggerSamples),
@@ -290,6 +290,10 @@ func (s *OpenAIGatewayService) migrateOpenAILatencyHeldOwner(ctx context.Context
 	}
 	state := s.getOpenAIAccountLatencyHoldState()
 	if state == nil || state.latestHoldUntilUnixNano.Load() <= time.Now().UnixNano() {
+		return stickyAccountID
+	}
+	// A quality-gated group rebinds slow sessions by ejection instead.
+	if view, ok := s.GroupQualityGateView().(interface{ Enabled(groupID int64) bool }); ok && view.Enabled(derefGroupID(groupID)) {
 		return stickyAccountID
 	}
 	now := time.Now()

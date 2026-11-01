@@ -404,6 +404,9 @@ func TestAvailabilityFallbackServableMembers(t *testing.T) {
 			} else {
 				require.Nil(t, got)
 			}
+			explained, err := r.Explain(resilience.WithCapabilityRequest(context.Background(), resilience.CapabilityProtocolResponses, false), 10, "", "")
+			require.NoError(t, err)
+			require.Equal(t, tc.wantMove, explained.FallbackGroup.WouldMove, "a request-mode explanation uses the fallback member decision")
 			first.Groups, second.Groups = []*Group{origin}, []*Group{serving}
 			require.Equal(t, tc.composite || tc.originCost <= 0.5, groupMemberUsable(origin, &first, time.Now()), "guard denominator uses scheduler platform eligibility")
 			ops := &OpsService{accountRepo: &fallbackOpsAccounts{rows: []Account{first, second}}, groupQualityGateView: view}

@@ -29,12 +29,15 @@ type qualityCapacityCache struct {
 	allBusy       bool
 	waitCount     int
 	loadRates     map[int64]int
+	current       map[int64]int
 	acquireErrors map[int64]error
+	acquired      []int64
 	releases      atomic.Int64
 	waits         atomic.Int64
 }
 
 func (c *qualityCapacityCache) AcquireAccountSlot(_ context.Context, id int64, _ int, _ string) (bool, error) {
+	c.acquired = append(c.acquired, id)
 	if err := c.acquireErrors[id]; err != nil {
 		return false, err
 	}
@@ -51,9 +54,48 @@ func (c *qualityCapacityCache) GetAccountWaitingCount(context.Context, int64) (i
 func (c *qualityCapacityCache) GetAccountsLoadBatch(_ context.Context, accounts []AccountWithConcurrency) (map[int64]*AccountLoadInfo, error) {
 	loads := make(map[int64]*AccountLoadInfo, len(accounts))
 	for _, account := range accounts {
-		loads[account.ID] = &AccountLoadInfo{AccountID: account.ID, LoadRate: c.loadRates[account.ID]}
+		loads[account.ID] = &AccountLoadInfo{AccountID: account.ID, LoadRate: c.loadRates[account.ID], CurrentConcurrency: c.current[account.ID]}
 	}
 	return loads, nil
+}
+
+func (c *qualityCapacityCache) borrowProbes() []int64 {
+	var probes []int64
+	for _, id := range c.acquired {
+		if id != 1 {
+			probes = append(probes, id)
+		}
+	}
+	return probes
+}
+
+type ttlRecordingCache struct {
+	*schedulerTestGatewayCache
+	refreshed []time.Duration
+}
+
+func (c *ttlRecordingCache) RefreshSessionTTL(_ context.Context, _ int64, _ string, ttl time.Duration) error {
+	c.refreshed = append(c.refreshed, ttl)
+	return nil
+}
+
+type failingAccountRepo struct {
+	schedulerTestOpenAIAccountRepo
+	ownerReadErr, listErr error
+}
+
+func (r failingAccountRepo) GetByID(ctx context.Context, id int64) (*Account, error) {
+	if id == 1 && r.ownerReadErr != nil {
+		return nil, r.ownerReadErr
+	}
+	return r.schedulerTestOpenAIAccountRepo.GetByID(ctx, id)
+}
+
+func (r failingAccountRepo) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]Account, error) {
+	if r.listErr != nil {
+		return nil, r.listErr
+	}
+	return r.schedulerTestOpenAIAccountRepo.ListSchedulableByGroupIDAndPlatform(ctx, groupID, platform)
 }
 
 // WP2's scenario table uses only the frozen view contract, never evaluator internals.
@@ -402,6 +444,127 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 				} else {
 					require.Equal(t, svc.schedulingConfig().StickySessionMaxWaiting, selection.WaitPlan.MaxWaiting)
 				}
+			}})
+		}
+	}
+	for _, path := range []string{"load aware", "advanced"} {
+		for _, idle := range []bool{false, true} {
+			cases = append(cases, testCase{"borrow skips known full and queued accounts/" + path + "/idle=" + strconv.FormatBool(idle), func(t *testing.T) {
+				svc, cache, conc := qualityBorrowEnv(path)
+				cache.sessionBindings["openai:session"] = 1
+				// 2 has a queue; 3 has every slot in use despite its load rate.
+				conc.loadRates, conc.current = map[int64]int{2: 150, 3: 50}, map[int64]int{3: 2}
+				if idle {
+					repo, ok := svc.accountRepo.(schedulerTestOpenAIAccountRepo)
+					require.True(t, ok)
+					free := profitControlWSAccount(4, 0.2, time.Now())
+					free.GroupIDs, free.Priority = []int64{groupID}, 4
+					repo.accounts = append(repo.accounts, free)
+					svc.accountRepo = repo
+				}
+				gid := groupID
+				selection, _, err := svc.SelectAccountWithScheduler(context.Background(), &gid, "", "session", "gpt-test", nil, OpenAIUpstreamTransportAny, false)
+				require.NoError(t, err)
+				require.NotNil(t, selection)
+				if idle {
+					require.Equal(t, int64(4), selection.Account.ID)
+					require.True(t, selection.StickyCapacitySpillover)
+					require.Equal(t, []int64{4}, conc.borrowProbes())
+					selection.ReleaseFunc()
+				} else {
+					require.NotNil(t, selection.WaitPlan)
+					require.Equal(t, int64(1), selection.WaitPlan.AccountID)
+					require.Empty(t, conc.borrowProbes(), "a full group must not be probed account by account")
+				}
+				require.Equal(t, int64(1), cache.sessionBindings["openai:session"])
+			}})
+		}
+	}
+	for _, queueFull := range []bool{false, true} {
+		cases = append(cases, testCase{"borrow listing error keeps the owner wait plan/queueFull=" + strconv.FormatBool(queueFull), func(t *testing.T) {
+			svc, _, conc := qualityBorrowEnv("load aware")
+			want := svc.schedulingConfig().StickySessionMaxWaiting
+			if queueFull {
+				conc.waitCount, want = want, svc.schedulingConfig().FallbackMaxWaiting
+			}
+			repo, ok := svc.accountRepo.(schedulerTestOpenAIAccountRepo)
+			require.True(t, ok)
+			svc.accountRepo = failingAccountRepo{schedulerTestOpenAIAccountRepo: repo, listErr: errors.New("database unavailable")}
+			gid := groupID
+			selection, err := svc.selectOpenAIStickyCapacity(context.Background(), &repo.accounts[0], OpenAIAccountScheduleRequest{GroupID: &gid, Platform: PlatformOpenAI, SessionHash: "session", RequestedModel: "gpt-test"})
+			require.NoError(t, err)
+			require.NotNil(t, selection.WaitPlan)
+			require.Equal(t, int64(1), selection.WaitPlan.AccountID)
+			require.Equal(t, want, selection.WaitPlan.MaxWaiting)
+			require.Empty(t, conc.borrowProbes())
+		}})
+	}
+	cases = append(cases, testCase{"legacy WS borrow skips an idle account without WS within one short wait", func(t *testing.T) {
+		svc, cache, conc := qualityBorrowEnv("load aware")
+		cache.sessionBindings["openai:session"] = 1
+		repo, ok := svc.accountRepo.(schedulerTestOpenAIAccountRepo)
+		require.True(t, ok)
+		repo.accounts[1].Extra["openai_apikey_responses_websockets_v2_enabled"] = false
+		svc.accountRepo = repo
+		gid := groupID
+		selection, _, err := svc.SelectAccountWithSchedulerForCapability(context.Background(), &gid, "", "session", "gpt-test", nil,
+			OpenAIUpstreamTransportResponsesWebsocketV2, OpenAIEndpointCapabilityResponses, false, false, true, PlatformOpenAI)
+		require.NoError(t, err)
+		require.Equal(t, int64(3), selection.Account.ID)
+		require.True(t, selection.StickyCapacitySpillover)
+		require.Equal(t, []int64{3}, conc.borrowProbes(), "the incompatible account is not borrowed")
+		require.Equal(t, int64(3), conc.acquired[len(conc.acquired)-1], "the owner is not retried a second time")
+		require.Equal(t, int64(1), cache.sessionBindings["openai:session"])
+		selection.ReleaseFunc()
+	}})
+	for _, path := range []string{"no load batch", "load aware"} {
+		for _, seconds := range []int{0, 7200} {
+			cases = append(cases, testCase{"sticky renewal uses the binding TTL/" + path + "/seconds=" + strconv.Itoa(seconds), func(t *testing.T) {
+				svc, cache, _ := env(false, path != "no load batch")
+				svc.cfg.Gateway.OpenAIWS.StickySessionTTLSeconds = seconds
+				cache.sessionBindings["openai:session"] = 1
+				ttls := &ttlRecordingCache{schedulerTestGatewayCache: cache}
+				svc.cache = ttls
+				gid := groupID
+				selection, _, err := svc.SelectAccountWithScheduler(context.Background(), &gid, "", "session", "gpt-test", nil, OpenAIUpstreamTransportAny, false)
+				require.NoError(t, err)
+				require.Equal(t, int64(1), selection.Account.ID)
+				want := time.Hour
+				if seconds > 0 {
+					want = time.Duration(seconds) * time.Second
+				}
+				require.Equal(t, []time.Duration{want}, ttls.refreshed)
+				selection.ReleaseFunc()
+			}})
+		}
+	}
+	for _, path := range []string{"no load batch", "load aware"} {
+		for _, readErr := range []error{errors.New("database unavailable"), ErrAccountNotFound} {
+			cases = append(cases, testCase{"sticky DB recheck read error/" + path + "/" + readErr.Error(), func(t *testing.T) {
+				svc, cache, _ := env(false, path != "no load batch")
+				repo, ok := svc.accountRepo.(schedulerTestOpenAIAccountRepo)
+				require.True(t, ok)
+				byID, snapshot := map[int64]*Account{}, []*Account{}
+				for i := range repo.accounts {
+					byID[repo.accounts[i].ID] = &repo.accounts[i]
+					snapshot = append(snapshot, &repo.accounts[i])
+				}
+				svc.schedulerSnapshot = &SchedulerSnapshotService{cache: &openAISnapshotCacheStub{snapshotAccounts: snapshot, accountsByID: byID}}
+				svc.accountRepo = failingAccountRepo{schedulerTestOpenAIAccountRepo: repo, ownerReadErr: readErr}
+				session := "v2:session"
+				svc.cache = &atomicStickyTestCache{GatewayCache: cache, bindings: map[string]int64{svc.openAISessionCacheKey(session): 1}}
+				gid := groupID
+				selection, _, err := svc.SelectAccountWithScheduler(context.Background(), &gid, "", session, "gpt-test", nil, OpenAIUpstreamTransportAny, false)
+				require.NoError(t, err)
+				require.NotEqual(t, int64(1), selection.Account.ID)
+				owner, err := svc.getStickySessionAccountID(context.Background(), &gid, session)
+				require.NoError(t, err)
+				if errors.Is(readErr, ErrAccountNotFound) {
+					require.Equal(t, selection.Account.ID, owner, "a missing owner loses its binding")
+				} else {
+					require.Equal(t, int64(1), owner, "a failed read skips the owner once and keeps its binding")
+				}
+				selection.ReleaseFunc()
 			}})
 		}
 	}

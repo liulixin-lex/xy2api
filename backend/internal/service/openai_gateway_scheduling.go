@@ -291,14 +291,7 @@ func (s *OpenAIGatewayService) BindStickySession(ctx context.Context, groupID *i
 	if !resilienceBindAllowed(ctx, accountID) {
 		return nil
 	}
-	ttl := openaiStickySessionTTL
-	if s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.StickySessionTTLSeconds > 0 {
-		ttl = time.Duration(s.cfg.Gateway.OpenAIWS.StickySessionTTLSeconds) * time.Second
-	}
-	if shareTTL, ok := s.shareScheduling.shareBindingTTL(derefGroupID(groupID)); ok {
-		ttl = shareTTL
-	}
-	return s.setStickySessionAccountID(ctx, groupID, sessionHash, accountID, ttl)
+	return s.setStickySessionAccountID(ctx, groupID, sessionHash, accountID, s.openAIStickyBindingTTL(groupID))
 }
 
 // SelectAccount selects an OpenAI account with sticky session support
@@ -1085,7 +1078,10 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 		_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 		return nil
 	}
-	account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
+	account, transient := s.recheckOpenAIStickyOwnerFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
+	if transient {
+		return nil
+	}
 	if account == nil || !s.openAIAccountMatchesSchedulingGroup(account, groupID) {
 		_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 		return nil
@@ -1098,7 +1094,7 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 
 	// 刷新会话 TTL 并返回账号
 	// Refresh session TTL and return account
-	_ = s.refreshStickySessionTTL(ctx, groupID, sessionHash, openaiStickySessionTTL, accountID)
+	_ = s.refreshStickySessionTTL(ctx, groupID, sessionHash, s.openAIStickyBindingTTL(groupID), accountID)
 	return account
 }
 
@@ -1249,7 +1245,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			return markStickySessionHit(selection, stickyHit), selectErr
 		}
 		if stickyHit && s.concurrencyService != nil {
-			return s.selectOpenAIStickyCapacity(ctx, account, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability, UseUpstreamTokenCost: useUpstreamTokenCost, SkipStickyCapacityRetry: err != nil})
+			return s.selectOpenAIStickyCapacity(ctx, account, openAILegacyStickyCapacityRequest(ctx, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability, UseUpstreamTokenCost: useUpstreamTokenCost, SkipStickyCapacityRetry: err != nil}))
 		}
 
 		selection, selectErr := s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
@@ -1293,9 +1289,12 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 					_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 				}
 				if !clearSticky && isOpenAICompatibleAccountEligibleForRequest(ctx, account, platform, requestedModel, false, requiredCapability) {
-					account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
+					var transient bool
+					account, transient = s.recheckOpenAIStickyOwnerFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
 					if account == nil {
-						_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
+						if !transient {
+							_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
+						}
 					} else if !s.openAIAccountMatchesSchedulingGroup(account, groupID) {
 						_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 					} else if s.isOpenAIAccountRequestRuntimeBlocked(account, requestedModel, requireCompact) {
@@ -1311,11 +1310,11 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 							if selectErr != nil {
 								return nil, selectErr
 							}
-							_ = s.refreshStickySessionTTL(ctx, groupID, sessionHash, openaiStickySessionTTL, stickyAccountID)
+							_ = s.refreshStickySessionTTL(ctx, groupID, sessionHash, s.openAIStickyBindingTTL(groupID), stickyAccountID)
 							return markStickySessionHit(selection, true), nil
 						}
 
-						return s.selectOpenAIStickyCapacity(ctx, account, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability, UseUpstreamTokenCost: useUpstreamTokenCost, SkipStickyCapacityRetry: err != nil})
+						return s.selectOpenAIStickyCapacity(ctx, account, openAILegacyStickyCapacityRequest(ctx, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability, UseUpstreamTokenCost: useUpstreamTokenCost, SkipStickyCapacityRetry: err != nil}))
 					}
 				}
 			}
@@ -1812,6 +1811,11 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 	if err != nil || latest == nil {
 		return nil
 	}
+	return s.recheckLatestOpenAIAccount(ctx, latest, groupID, platform, requestedModel, requireCompact, requiredCapability)
+}
+
+// recheckLatestOpenAIAccount applies the DB recheck to an account just read.
+func (s *OpenAIGatewayService) recheckLatestOpenAIAccount(ctx context.Context, latest *Account, groupID *int64, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) *Account {
 	if !s.openAIAccountMatchesSchedulingGroup(latest, groupID) {
 		return nil
 	}
@@ -2228,7 +2232,12 @@ func (s *OpenAIGatewayService) selectOpenAIStickyCapacityResult(ctx context.Cont
 	cfg := s.schedulingConfig()
 	accounts, err := s.listSchedulableAccounts(ctx, req.GroupID, req.Platform)
 	if err != nil {
-		return nil, err
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		// Like a slot error, a failed listing leaves the owner's wait plan.
+		slog.Warn("openai_sticky_capacity_list_failed", "group_id", derefGroupID(req.GroupID), "account_id", account.ID, "error", err)
+		return nil, nil
 	}
 	gate := &defaultOpenAIAccountScheduler{service: s, stats: newOpenAIAccountRuntimeStats()}
 	candidates := make([]accountWithLoad, 0, len(accounts))
@@ -2337,25 +2346,48 @@ func (s *OpenAIGatewayService) selectOpenAIStickyCapacityResult(ctx context.Cont
 		}
 		return nil, nil
 	}
+	// Borrowing acquires before the DB recheck, as Layer 2 of the advanced
+	// scheduler does, and shares its probe limit.
+	budget := newOpenAISelectionProbeBudget()
+	budget.enableLimit()
 	for _, item := range candidates {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		fresh := s.recheckSelectedOpenAIAccountFromDB(ctx, item.account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
-		if fresh == nil || !gate.isAccountRequestCompatible(ctx, fresh, req) || !gate.isAccountTransportCompatible(fresh, req.RequiredTransport) {
+		// A known full or queued account is skipped without probing.
+		if loadMap[item.account.ID] != nil && (item.loadInfo.LoadRate >= 100 || item.account.Concurrency > 0 && item.loadInfo.CurrentConcurrency >= item.account.Concurrency) {
 			continue
 		}
-		result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
+		// An exhausted probe budget or a slot error leaves the owner's wait plan.
+		result, attempted, err := gate.tryAcquireOpenAIAccountSlot(ctx, item.account.ID, item.account.Concurrency, budget)
+		if !attempted || err != nil {
+			return nil, ctx.Err()
+		}
+		if result == nil || !result.Acquired {
+			continue
+		}
+		if !gate.consumeOpenAISelectionDBRecheck(budget) {
+			result.ReleaseFunc()
 			return nil, nil
 		}
-		if result != nil && result.Acquired {
-			selection, err := s.newAcquiredSelectionResult(ctx, fresh, result.ReleaseFunc)
-			return markOpenAIStickySpillover(selection, true), err
+		fresh := s.recheckSelectedOpenAIAccountFromDB(ctx, item.account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
+		if fresh != nil && fresh.Concurrency != item.account.Concurrency {
+			// The slot was taken under a stale limit; take it under the current one.
+			result.ReleaseFunc()
+			result, attempted, err = gate.tryAcquireOpenAIAccountSlot(ctx, fresh.ID, fresh.Concurrency, budget)
+			if !attempted || err != nil {
+				return nil, ctx.Err()
+			}
+			if result == nil || !result.Acquired {
+				continue
+			}
 		}
+		if fresh == nil || !gate.isAccountRequestCompatible(ctx, fresh, req) || !gate.isAccountTransportCompatible(fresh, req.RequiredTransport) {
+			result.ReleaseFunc()
+			continue
+		}
+		selection, err := s.newAcquiredSelectionResult(ctx, fresh, result.ReleaseFunc)
+		return markOpenAIStickySpillover(selection, true), err
 	}
 	return nil, nil
 }

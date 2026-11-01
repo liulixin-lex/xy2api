@@ -2548,6 +2548,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		if preserveGuardianParentBinding {
 			legacySessionHash = ""
 		}
+		ctx = withOpenAILegacyStickyCapacity(ctx, requiredTransport, requiredImageCapability)
 		if requiredTransport == OpenAIUpstreamTransportAny || requiredTransport == OpenAIUpstreamTransportHTTPSSE {
 			effectiveExcludedIDs := cloneExcludedAccountIDs(excludedIDs)
 			for {
