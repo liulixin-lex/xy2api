@@ -16,9 +16,9 @@
 
 用量明细仅展示适用的 Token 请求，排除图片输出、视频、非 Token 计费和 Live/未知请求类型；旧记录缺少请求类型或计费模式时仍允许按已有 Token 数据计算。输出或耗时不是有限正数时显示 `—`，不伪造 0 t/s。输出计数已经可能包含推理 Token，不再额外相加。显示开关继续生效（见“显示与公开”），不因上游组件更新而绕过设置。
 
-`first_token_ms` 与 `duration_ms` 都从最后一次上游尝试开始计时，不含此前失败的尝试与换号等待；输出后失败而保留的部分用量，同样从所属尝试开始计时；换过号的请求，客户端实际等待更长，各次尝试见运维错误记录的 `upstream_errors`。OpenAI 首字口径由设置 `openai_ttft_mode` 决定：`semantic`（缺省）把中转插入的伪保活帧也记为首个事件，与 0.3.0 一致；`visible` 只算真实输出（见 [网关韧性](GATEWAY_RESILIENCE.md) §3）。
+`first_token_ms` 与 `duration_ms` 都从最后一次上游尝试开始计时，不含此前失败的尝试与换号等待；输出后失败而保留的部分用量，同样从所属尝试开始计时；换过号的请求，客户端实际等待更长，各次尝试见运维错误记录的 `upstream_errors`。OpenAI 首字口径由设置 `openai_ttft_mode` 决定：`semantic`（缺省）把中转插入的伪保活帧也记为首个事件，与 0.3.0 一致；`visible` 只算真实输出（见 [网关韧性](GATEWAY_RESILIENCE.md) §3）。该设置决定 `first_token_ms`，影响用量记录、账号列表近期首字、运维看板和健康分、渠道监控里显示的首字，以及高级调度的首 token 评分；[分组质量门槛](GROUP_QUALITY_GATE.md) 的续轮首字改读下文的 `end_to_end_first_output_ms`（为 0 时回落到 `first_token_ms`），不受该设置影响。
 
-未发布：`usage_logs.end_to_end_first_output_ms` 从入站 delivery 初始化到首次成功写出的语义输出计时，包含排队、选号和先前失败尝试，不依赖请求预算；没有语义输出时为 NULL。错误帧、`[DONE]`、纯终态、开场与心跳均不算，终态中实际携带的内容可以算。正常的 `error: null` 等空占位字段不屏蔽真实内容；空内容数组与对象不算输出。旧 `first_token_ms` 及计费送达判据不变。新列仅落库，本轮不增加接口或页面。运维结果由实际完成或拒绝信号分类：OpenAI 原生/透传 Responses 与 Chat/Messages 的已知请求/策略拒绝均为 `terminal_rejection`；已明确报告客户端断开时，即使 context 尚未取消，`client_cancel` 也不被部分输出分类覆盖。
+`usage_logs.end_to_end_first_output_ms` 从入站 delivery 初始化到首次成功写出的语义输出计时，包含排队、选号和先前失败尝试，不依赖请求预算；没有语义输出时为 NULL。错误帧、`[DONE]`、纯终态、开场与心跳均不算，终态中实际携带的内容可以算。正常的 `error: null` 等空占位字段不屏蔽真实内容；空内容数组与对象不算输出。旧 `first_token_ms` 及计费送达判据不变。新列不增加接口或页面，分组质量门槛的续轮首字读取它。运维结果由实际完成或拒绝信号分类：OpenAI 原生/透传 Responses 与 Chat/Messages 的已知请求/策略拒绝均为 `terminal_rejection`；已明确报告客户端断开时，即使 context 尚未取消，`client_cancel` 也不被部分输出分类覆盖。
 
 运维中的 P5/P10/P50 是筛选范围内各条有效记录速率的分位数，Avg 是这些单次速率的算术平均；不把小时分位数平均成整个窗口的分位数。它们与全站吞吐量含义不同，样本仍沿用运维后端的筛选契约；明细额外保留本地的非 Token 计费排除规则。
 

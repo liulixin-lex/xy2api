@@ -53,7 +53,8 @@
       "openspec/changes/add-support-tickets-and-managed-openai-totp-20261029/**",
       "openspec/changes/anthropic-cache-ttl-20261030/**",
       "openspec/changes/group-quality-gate-20261031/**",
-      "openspec/changes/add-support-chat-widget-20261031/**"
+      "openspec/changes/add-support-chat-widget-20261031/**",
+      "openspec/changes/group-quality-gate-v2-20261102/**"
     ],
     "manual_merge": [
       "Makefile",

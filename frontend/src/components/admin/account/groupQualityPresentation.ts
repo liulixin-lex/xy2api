@@ -23,6 +23,9 @@ export interface AccountGroupQuality {
   status: GroupQualityGateAccountStatus
   maxErrorRate: number
   maxWarmTtftMs: number
+  /** 本组策略快档线与实时快档线（组内最快 + 4s 封顶；无最快值时为 null） */
+  fastWarmTtftMs: number
+  effectiveFastWarmTtftMs: number | null
   stale: boolean
 }
 
@@ -80,6 +83,8 @@ export function buildAccountQualityIndex(
         status: account,
         maxErrorRate,
         maxWarmTtftMs,
+        fastWarmTtftMs: group.fast_warm_ttft_p90_ms,
+        effectiveFastWarmTtftMs: group.effective_fast_warm_ttft_p90_ms,
         stale: status!.stale
       })
     }
@@ -140,12 +145,23 @@ const STATE_KEYS: Record<GroupQualityCell['kind'], string> = {
   eligible: 'eligible', ejected: 'ejected', trial: 'trial', guard_held: 'guardHeld', pending: 'pending', failed: 'failed'
 }
 
-/** 标签上的状态文字：合格 / 熔断至 hh:mm / 试用 / 保底保留 / 等待评估 / 读取失败。 */
+/** 标签上的状态文字：合格 / 熔断至 hh:mm / 观察至 hh:mm / 保底保留 / 等待评估 / 读取失败。 */
 export function groupQualityStateLabel(cell: GroupQualityCell, t: Translate, clock: (iso: string) => string): string {
-  if (cell.kind === 'ejected' && cell.status.until) {
-    return t(prefix + 'state.ejectedUntil', { time: clock(cell.status.until) })
+  if ((cell.kind === 'ejected' || cell.kind === 'trial') && cell.status.until) {
+    return t(prefix + `state.${cell.kind}Until`, { time: clock(cell.status.until) })
   }
   return t(prefix + 'state.' + STATE_KEYS[cell.kind])
+}
+
+/**
+ * 档位与本组实时快档线，一行说清“未超快档线却不在快档”：快档 / 其他档，实时快档线 n s；
+ * 组内没有样本足够的成员时实时快档线等于策略快档线，并注明原因。
+ */
+export function groupQualityTierText(quality: AccountGroupQuality, t: Translate): string {
+  const tier = t(prefix + (quality.status.tier === 0 ? 'tooltip.tierFast' : 'tooltip.tierOther'))
+  const effective = quality.effectiveFastWarmTtftMs
+  const line = formatQualitySeconds(effective ?? quality.fastWarmTtftMs)
+  return t(prefix + (effective == null ? 'tooltip.fastLineNoBest' : 'tooltip.fastLine'), { tier, line })
 }
 
 export const formatQualityRate = (rate: number) => `${Math.round(rate * 1000) / 10}%`
@@ -185,6 +201,8 @@ export interface QualityTooltipBlock {
   rows: QualityTooltipRow[]
   /** “实测”表头旁的小字：熔断中改看完整窗口时标“熔断时窗口” */
   measuredNote?: string
+  /** 观察中：档位与实时快档线（熔断、保底保留总在其他档，不显示） */
+  tier?: string
   /** 只在超线或接近上限（余量 < 20%，即恢复线以内）时出现 */
   headroom?: { text: string; tone: 'danger' | 'warning' }
   stale?: string
@@ -195,7 +213,7 @@ export const QUALITY_HEADROOM_WARN = 0.2
 
 /**
  * 悬停说明里的一组：标题“分组 · 状态”、原因标签、指标 | 实测 | 上限 小表，余量只在超线或接近时出现。
- * 合格、试用取成员 metrics 与后端余量（本组判定口径）。熔断中（含保底保留）成员 metrics 只计熔断后的数据，
+ * 合格、观察中取成员 metrics 与后端余量（本组判定口径）。熔断中（含保底保留）成员 metrics 只计熔断后的数据，
  * 刚熔断时多半样本不足，和原因对不上，所以改看账号的完整窗口（触发熔断的数据），余量也按它算。
  */
 export function groupQualityTooltip(
@@ -235,7 +253,8 @@ export function groupQualityTooltip(
     note: status.pinned ? t(prefix + 'tooltip.pinned') : quality.kind === 'guard_held' ? t(prefix + 'tooltip.guardHeld') : undefined,
     reasons: status.reasons.map(reason => t(prefix + 'reason.' + reason)),
     rows: [errorRow, ttftRow],
-    measuredNote: ejectionWindow ? t(prefix + 'tooltip.ejectionWindow') : undefined
+    measuredNote: ejectionWindow ? t(prefix + 'tooltip.ejectionWindow') : undefined,
+    tier: quality.kind === 'trial' ? groupQualityTierText(quality, t) : undefined
   }
   if (headroom != null && headroom < QUALITY_HEADROOM_WARN) {
     block.headroom = { text: t(prefix + 'tooltip.headroom', { value: formatHeadroom(headroom) }), tone: headroom < 0 ? 'danger' : 'warning' }
@@ -244,7 +263,7 @@ export function groupQualityTooltip(
   return block
 }
 
-/** 需要关注的状态：熔断（含固定且熔断）、保底保留、试用。合格、等待评估、读取失败都不算。 */
+/** 需要关注的状态：熔断（含固定且熔断）、保底保留、观察中。合格、等待评估、读取失败都不算。 */
 export type GroupQualityAttentionKind = 'ejected' | 'guard_held' | 'trial'
 export const isGroupQualityAttention = (cell: GroupQualityCell): cell is AccountGroupQuality & { kind: GroupQualityAttentionKind } =>
   cell.kind === 'ejected' || cell.kind === 'guard_held' || cell.kind === 'trial'
@@ -260,6 +279,8 @@ export const GROUP_QUALITY_INDICATOR_CLASSES: Record<GroupQualityAttentionKind |
 export interface QualityEligibleItem {
   name: string
   pinned: boolean
+  /** 档位与实时快档线 */
+  tier: string
   /** 只在接近或超过上限（余量 < 20%）时出现 */
   headroom?: { text: string; tone: 'danger' | 'warning' }
 }
@@ -270,7 +291,7 @@ export interface QualityPanel {
   attentionCount: number
   /** 需关注的分组逐组展开，其后是等待评估、读取失败 */
   blocks: QualityTooltipBlock[]
-  /** 合格分组合并成一行 */
+  /** 合格分组，每组一行：名称、档位与实时快档线 */
   eligible: QualityEligibleItem[]
   /** 评估数据过期，整个面板只提示一次 */
   stale?: string
@@ -278,7 +299,7 @@ export interface QualityPanel {
 
 /**
  * 分组列门槛面板：groups 按 orderGroupsByQuality 排好时，各段依次是需关注 → 读取失败 → 等待评估；
- * 只收开启门槛的分组。合格组不展开指标表，只列名称、固定标记与接近上限的余量。
+ * 只收开启门槛的分组。合格组不展开指标表，只列名称、固定标记、档位与实时快档线、接近上限的余量。
  */
 export function groupQualityPanel(
   groups: { id: number; name: string }[],
@@ -295,7 +316,7 @@ export function groupQualityPanel(
     if (!isGroupQualityNotice(cell)) stale ||= cell.stale
     if (cell.kind === 'eligible') {
       const { headroom } = groupQualityTooltip(group.name, cell, t, clock)
-      panel.eligible.push({ name: group.name, pinned: cell.status.pinned, ...(headroom ? { headroom } : {}) })
+      panel.eligible.push({ name: group.name, pinned: cell.status.pinned, tier: groupQualityTierText(cell, t), ...(headroom ? { headroom } : {}) })
       continue
     }
     if (isGroupQualityAttention(cell)) {

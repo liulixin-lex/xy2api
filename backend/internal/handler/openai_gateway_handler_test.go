@@ -2062,6 +2062,10 @@ type wsPinnedQualityView struct{}
 
 func (wsPinnedQualityView) Vetoed(_, accountID int64) bool { return accountID == 9901 }
 func (wsPinnedQualityView) OrderTier(int64, int64) int     { return 0 }
+func (wsPinnedQualityView) Enabled(int64) bool             { return false }
+func (wsPinnedQualityView) SlowerThanFastLine(int64, int64) (int, int, bool) {
+	return 0, 0, false
+}
 
 func wsResponseAccountCacheKey(responseID string) string {
 	digest := sha256.Sum256([]byte(responseID))
@@ -2123,6 +2127,10 @@ func (v *wsTurnQualityView) Vetoed(_, accountID int64) bool {
 	return accountID == 9901 && v.veto.Load()
 }
 func (*wsTurnQualityView) OrderTier(int64, int64) int { return 0 }
+func (*wsTurnQualityView) Enabled(int64) bool         { return false }
+func (*wsTurnQualityView) SlowerThanFastLine(int64, int64) (int, int, bool) {
+	return 0, 0, false
+}
 
 func TestOpenAIResponsesWebSocket_QualityTurnAdmissionThroughHooks(t *testing.T) {
 	for _, row := range []struct {

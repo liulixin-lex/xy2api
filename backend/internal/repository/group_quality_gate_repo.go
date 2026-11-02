@@ -144,7 +144,7 @@ func loadGroupQualityObservations(ctx context.Context, tx *sql.Tx, accountIDs []
 	out := make([]service.GroupQualityObservation, 0)
 	rows, err := tx.QueryContext(ctx, `
 		WITH history AS (
-			SELECT account_id, COALESCE(request_id, '') AS request_id, created_at, stream, COALESCE(first_token_ms,0) AS first_token_ms,
+			SELECT account_id, COALESCE(request_id, '') AS request_id, created_at, stream, COALESCE(NULLIF(end_to_end_first_output_ms,0), first_token_ms, 0) AS first_output_ms,
 		       COALESCE(session_id,'') AS session_id,
 		       COALESCE(input_tokens, 0) + COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0) AS prompt_tokens,
 		       COALESCE(cache_read_tokens, 0) AS cache_read_tokens,
@@ -152,7 +152,7 @@ func loadGroupQualityObservations(ctx context.Context, tx *sql.Tx, accountIDs []
 		       LAG(created_at) OVER (PARTITION BY account_id, session_id ORDER BY created_at) AS previous_at
 			FROM usage_logs WHERE account_id = ANY($1) AND created_at >= $2 AND created_at < $3
 		)
-		SELECT account_id, request_id, created_at, stream, first_token_ms, session_id,
+		SELECT account_id, request_id, created_at, stream, first_output_ms, session_id,
 		       prompt_tokens, cache_read_tokens, cache_creation_tokens, TRUE,
 		       session_id <> '' AND previous_at IS NOT NULL AND created_at - previous_at <= INTERVAL '5 minutes'
 		FROM history`, pq.Array(accountIDs), from.UTC(), to.UTC())
@@ -161,7 +161,7 @@ func loadGroupQualityObservations(ctx context.Context, tx *sql.Tx, accountIDs []
 	}
 	for rows.Next() {
 		var o service.GroupQualityObservation
-		if err := rows.Scan(&o.AccountID, &o.RequestID, &o.At, &o.Streaming, &o.FirstTokenMs, &o.SessionID, &o.PromptTokens, &o.CacheReadTokens, &o.CacheCreationTokens, &o.Success, &o.Warm); err != nil {
+		if err := rows.Scan(&o.AccountID, &o.RequestID, &o.At, &o.Streaming, &o.FirstOutputMs, &o.SessionID, &o.PromptTokens, &o.CacheReadTokens, &o.CacheCreationTokens, &o.Success, &o.Warm); err != nil {
 			_ = rows.Close()
 			return nil, time.Time{}, err
 		}

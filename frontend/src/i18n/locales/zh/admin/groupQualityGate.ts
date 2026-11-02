@@ -1,7 +1,7 @@
 export default {
   groupQualityGate: {
     title: '质量门槛',
-    hint: '超线账号暂时移出本组调度，到期先试用；快档线用于低倍率优先排序。',
+    hint: '超线账号暂时移出本组调度，到期后观察 30 分钟；快档线用于低倍率优先排序和门槛组慢号迁出。',
     enable: '启用质量门槛',
     disabledHint: '关闭门槛后，本组选号不受质量门槛影响。',
     loading: '正在读取门槛配置…',
@@ -10,10 +10,10 @@ export default {
     retry: '重试',
     maxErrorRate: '错误率熔断线（%）',
     maxErrorRateHint: '默认 10%',
-    maxWarmTtft: '续轮首字熔断线（秒）',
+    maxWarmTtft: '续轮可见首字熔断线（秒）',
     maxWarmTtftHint: '默认 20 秒',
     fastWarmTtft: '快档线（秒）',
-    fastWarmTtftHint: '默认 10 秒',
+    fastWarmTtftHint: '默认 10 秒；实际不高于组内最快 + 4 秒',
     pinned: '固定账号',
     pinnedHint: '熔断时仍参与本组调度',
     pinnedCount: '已选 {count}',
@@ -25,25 +25,26 @@ export default {
     errorRateRange: '错误率熔断线须大于 0 且不超过 100%',
     maxTtftRange: '熔断线须大于 1 秒且不超过 600 秒',
     fastTtftMin: '快档线不能小于 1 秒',
-    fastTtftBelowMax: '快档线须小于续轮首字熔断线',
+    fastTtftBelowMax: '快档线须小于续轮可见首字熔断线',
     fixErrors: '质量门槛的设置有误，请先修正',
     groupSavedGateConflict: '分组已保存，门槛未保存：门槛配置已被其他人修改，已刷新版本，请确认后再次保存',
     groupSavedGateFailed: '分组已保存，门槛未保存：{message}',
     column: '门槛',
-    summaryTitle: '试用中 {trial} 个',
+    summaryTitle: '观察中 {trial} 个',
     pinnedMark: '固定',
     state: {
       eligible: '合格',
       ejected: '熔断',
       ejectedUntil: '熔断至 {time}',
-      trial: '试用',
+      trial: '观察中',
+      trialUntil: '观察至 {time}',
       guardHeld: '保底保留',
       pending: '等待评估',
       failed: '读取失败'
     },
     reason: {
       error_rate: '错误率超线',
-      warm_ttft: '续轮首字超线'
+      warm_ttft: '续轮可见首字超线'
     },
     tooltip: {
       title: '{group} · {state}',
@@ -55,7 +56,11 @@ export default {
       limit: '上限',
       ejectionWindow: '熔断时窗口',
       errorRate: '错误率',
-      warmTtft: '首字 p90',
+      warmTtft: '可见首字 p90',
+      tierFast: '快档',
+      tierOther: '其他档',
+      fastLine: '{tier}，实时快档线 {line}',
+      fastLineNoBest: '{tier}，实时快档线 {line}（组内暂无足够样本）',
       noData: '无数据',
       notEnoughSamples: '样本不足',
       belowThreshold: '未达判定条件',
@@ -75,8 +80,8 @@ export default {
     metrics: {
       errorRate: '错 {value}',
       errorRateTitle: '错误率（近 15 分钟）：{calls} 次调用，软失败 {failures} 次',
-      warmTtft: '首字 {value}',
-      warmTtftTitle: '续轮首字 p90（近 30 分钟）：流式样本 {count} 个',
+      warmTtft: '可见首字 {value}',
+      warmTtftTitle: '续轮用户可见首字 p90（近 30 分钟）：流式样本 {count} 个',
       zeroCache: '零缓存 {value}',
       zeroCacheTitle: '续轮零缓存率（近 2 小时，提示 ≥ 2048 token）：样本 {count} 个；超过 30% 不算快档'
     }

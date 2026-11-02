@@ -727,7 +727,7 @@ func (s *OpenAIGatewayService) noteOpenAILastResort(ctx context.Context, groupID
 		gate, _ := ctx.Value(groupQualityGateContextKey{}).(*openAIGroupQualityGate)
 		if gate != nil && gate.service != nil && !gate.exempt && !groupQualityGateExempt(ctx) &&
 			gate.service.GroupQualityGateView().Vetoed(gate.groupID, account.ID) {
-			slog.Info("group_quality_gate.last_resort", "group_id", gate.groupID, "account_id", account.ID)
+			slog.Warn("group_quality_gate.last_resort", "group_id", gate.groupID, "account_id", account.ID)
 		}
 	}
 	resilience.StateFrom(ctx).SetLastResort(account.ID)
