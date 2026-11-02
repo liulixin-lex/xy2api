@@ -503,7 +503,7 @@
     <ScheduledTestsPanel v-if="schedulePanelMounted" :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" :readonly="!canManage" @close="closeSchedulePanel" />
     <IQCheckResultsModal v-if="iqRecordsAccount" :show="true" :account="iqRecordsAccount" @close="iqRecordsAccount = null" @updated="handleIQSummaryUpdated" />
     <AccountGroupsDialog v-if="groupsDialogAccount" :account="groupsDialogAccount" :groups="groups" @close="groupsDialogAccount = null" @updated="handleAccountUpdated" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @iq-run="handleRunIQCheck" @iq-records="iqRecordsAccount = $event" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @manage-openai-totp="handleManageOpenAITotp" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" :quality-recoverable="menuQualityRecoverable" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @iq-run="handleRunIQCheck" @iq-records="iqRecordsAccount = $event" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @manage-openai-totp="handleManageOpenAITotp" />
     <OpenAILoginImportDialog v-if="authStore.isAdmin && showOpenAILogin" :show="showOpenAILogin" :proxies="proxies" :groups="groups" @close="showOpenAILogin = false" @imported="handleDataImported" />
     <OpenAITotpDialog v-if="authStore.isAdmin && openAITotpAccount" :show="true" :account="openAITotpAccount" @close="openAITotpAccount = null" />
     <SyncFromCrsModal v-if="syncModalMounted" :show="showSync" @close="showSync = false" @synced="handleCrsSynced" />
@@ -577,7 +577,7 @@ import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCellButton from '@/components/admin/account/AccountGroupsCellButton.vue'
 import AccountQualityMetrics from '@/components/admin/account/AccountQualityMetrics.vue'
-import { buildAccountQualityCells, strictestQualityLimits } from '@/components/admin/account/groupQualityPresentation'
+import { buildAccountQualityCells, isGroupQualityAttention, strictestQualityLimits } from '@/components/admin/account/groupQualityPresentation'
 import { useGroupQualityGateStatus } from '@/composables/useGroupQualityGateStatus'
 import AccountGroupsDialog from '@/components/admin/account/AccountGroupsDialog.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
@@ -848,6 +848,9 @@ const accountQualityCells = computed(() => {
   const cellsFor = buildAccountQualityCells(groupQualitySources.value)
   return new Map(accounts.value.map(account => [account.id, cellsFor(account.id, accountGroupsForRow(account))]))
 })
+// 账号在任一已加载的门槛分组里需关注（熔断、保底保留、观察中）时，菜单提供“恢复状态”。
+const qualityRecoverableFor = (id: number) => [...(accountQualityCells.value.get(id)?.values() ?? [])].some(isGroupQualityAttention)
+const menuQualityRecoverable = computed(() => (menu.acc ? qualityRecoverableFor(menu.acc.id) : false))
 const accountQualityMetrics = (accountId: number) => groupQualitySources.value.status?.account_metrics[String(accountId)]
 const refreshGroupQuality = () => {
   if (!hiddenColumns.has('groups')) void refreshGroupQualityStatus()
@@ -2803,11 +2806,13 @@ const handleRefresh = async (a: Account) => {
   }
 }
 const handleRecoverState = async (a: Account) => {
+  // 门槛状态由评估器每分钟更新，恢复后面板要到下一轮才变为观察中，提示里说明。
+  const gated = qualityRecoverableFor(a.id)
   try {
     const updated = await adminAPI.accounts.recoverState(a.id)
     patchAccountInList(updated)
     enterAutoRefreshSilentWindow()
-    appStore.showSuccess(t('admin.accounts.recoverStateSuccess'))
+    appStore.showSuccess(t(gated ? 'admin.accounts.recoverStateSuccessGate' : 'admin.accounts.recoverStateSuccess'))
   } catch (error: any) {
     console.error('Failed to recover account state:', error)
     appStore.showError(error?.message || t('admin.accounts.recoverStateFailed'))

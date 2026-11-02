@@ -27,12 +27,13 @@ type groupQualityMemberSnapshot struct {
 }
 
 type groupQualitySnapshot struct {
-	GeneratedAt time.Time
-	StaleSince  time.Time
-	Stale       bool
-	Policies    GroupQualityGatePolicies
-	Metrics     map[int64]GroupQualityMetrics
-	Members     map[int64]map[int64]groupQualityMemberSnapshot
+	GeneratedAt        time.Time
+	StaleSince         time.Time
+	Stale              bool
+	Policies           GroupQualityGatePolicies
+	Metrics            map[int64]GroupQualityMetrics
+	Members            map[int64]map[int64]groupQualityMemberSnapshot
+	EffectiveFastLines map[int64]*int
 	// Resets holds the in-process manual reset already applied to each account;
 	// a reset applies once to all of the account's groups, not again on joining.
 	Resets map[int64]time.Time
@@ -134,13 +135,35 @@ func (s *GroupQualityGateService) OrderTier(groupID, accountID int64) int {
 	if v == nil {
 		return GroupQualityGateTierFast
 	}
-	if member, ok := v.Members[groupID][accountID]; ok {
+	groupMembers, groupPresent := v.Members[groupID]
+	if !groupPresent {
+		return GroupQualityGateTierFast
+	}
+	if member, ok := groupMembers[accountID]; ok {
 		if member.Result.State == "ejected" && !member.State.Until.IsZero() && !s.now().Before(member.State.Until) {
-			return GroupQualityGateTierTrial
+			return GroupQualityGateTierOther
 		}
 		return member.Result.Tier
 	}
-	return GroupQualityGateTierFast
+	return GroupQualityGateTierOther
+}
+
+func (s *GroupQualityGateService) SlowerThanFastLine(groupID, accountID int64) (warmTTFTP90Ms, fastWarmTTFTP90Ms int, migrate bool) {
+	if s == nil || !s.Enabled(groupID) {
+		return 0, 0, false
+	}
+	snap := s.snapshot.Load()
+	if snap == nil || snap.Members[groupID] == nil {
+		return 0, 0, false
+	}
+	policy := snap.Policies.Groups[strconv.FormatInt(groupID, 10)]
+	policy = normalizeGroupQualityGatePolicy(policy)
+	member, ok := snap.Members[groupID][accountID]
+	if !ok || member.Result.Pinned || (member.Result.State != "eligible" && member.Result.State != "trial") || member.Metric.WarmSamples < 10 {
+		return member.Metric.WarmTTFTP90Ms, policy.FastWarmTTFTP90Ms, false
+	}
+	warmTTFTP90Ms, fastWarmTTFTP90Ms = member.Metric.WarmTTFTP90Ms, policy.FastWarmTTFTP90Ms
+	return warmTTFTP90Ms, fastWarmTTFTP90Ms, warmTTFTP90Ms > fastWarmTTFTP90Ms
 }
 
 func (s *GroupQualityGateService) Policies(ctx context.Context) (GroupQualityGatePolicies, error) {
@@ -285,14 +308,18 @@ func (s *GroupQualityGateService) Status(ctx context.Context, groupID *int64) (*
 		if err != nil {
 			return nil, err
 		}
-		gv := GroupQualityGroupView{GroupID: group.ID, Enabled: enabled, FastWarmTTFTP90Ms: policy.FastWarmTTFTP90Ms, Accounts: make([]GroupQualityAccountView, 0, len(accounts))}
+		gv := GroupQualityGroupView{GroupID: group.ID, Enabled: enabled, FastWarmTTFTP90Ms: policy.FastWarmTTFTP90Ms, EffectiveFastWarmTTFTP90Ms: snap.EffectiveFastLines[group.ID], Accounts: make([]GroupQualityAccountView, 0, len(accounts))}
 		now := s.now().UTC()
 		for _, acc := range accounts {
 			metric := snap.Metrics[acc.ID]
 			out.AccountMetrics[strconv.FormatInt(acc.ID, 10)] = metricView(metric)
 			member := snap.Members[group.ID][acc.ID]
 			if member.AccountID == 0 {
-				member = groupQualityMemberSnapshot{AccountID: acc.ID, Result: GroupQualityMemberResult{Usable: groupMemberUsable(group, &acc, now), Passing: true, State: "eligible", Tier: GroupQualityGateTierFast}}
+				missingTier := GroupQualityGateTierFast
+				if snap.Members[group.ID] != nil {
+					missingTier = GroupQualityGateTierOther
+				}
+				member = groupQualityMemberSnapshot{AccountID: acc.ID, Result: GroupQualityMemberResult{Usable: groupMemberUsable(group, &acc, now), Passing: true, State: "eligible", Tier: missingTier}}
 			}
 			effective := member.Metric
 			reasons := []string{}
@@ -307,7 +334,7 @@ func (s *GroupQualityGateService) Status(ctx context.Context, groupID *int64) (*
 			passing, guardHeld := member.Result.Passing, member.Result.GuardHeld
 			ejected := state == "ejected" && (member.State.Until.IsZero() || now.Before(member.State.Until))
 			if state == "ejected" && !ejected {
-				state, tier = "trial", GroupQualityGateTierTrial
+				state, tier = "trial", GroupQualityGateTierOther
 				// The ejection round's triggering window predates EjectedAt.
 				// Until a later evaluation supplies post-ejection data, it cannot
 				// determine passing after expiry.
@@ -323,6 +350,15 @@ func (s *GroupQualityGateService) Status(ctx context.Context, groupID *int64) (*
 			if ejected && !member.State.Until.IsZero() {
 				u := member.State.Until
 				row.Until = &u
+			} else if state == "trial" {
+				trialSince := member.State.TrialSince
+				if member.Result.State == "ejected" {
+					trialSince = member.State.Until
+				}
+				if !trialSince.IsZero() {
+					u := trialSince.Add(groupQualityTrialDuration)
+					row.Until = &u
+				}
 			}
 			gv.Accounts = append(gv.Accounts, row)
 			if row.State == "trial" {
@@ -427,7 +463,11 @@ func (s *GroupQualityGateService) evaluate(ctx context.Context) error {
 			fullMetrics[id] = groupQualityMetricsFor(byAccount[id], now, now.Add(-15*time.Minute), now.Add(-30*time.Minute), now.Add(-2*time.Hour))
 		}
 	}
-	next := &groupQualitySnapshot{GeneratedAt: now, Stale: stale, Policies: policies, Metrics: fullMetrics, Members: make(map[int64]map[int64]groupQualityMemberSnapshot, len(membersByGroup)), Resets: maps.Clone(old.Resets)}
+	next := &groupQualitySnapshot{
+		GeneratedAt: now, Stale: stale, Policies: policies, Metrics: fullMetrics,
+		Members:            make(map[int64]map[int64]groupQualityMemberSnapshot, len(membersByGroup)),
+		EffectiveFastLines: make(map[int64]*int, len(groups)), Resets: maps.Clone(old.Resets),
+	}
 	if next.Resets == nil {
 		next.Resets = map[int64]time.Time{}
 	}
@@ -447,6 +487,17 @@ func (s *GroupQualityGateService) evaluate(ctx context.Context) error {
 		policy := normalizeGroupQualityGatePolicy(policies.Groups[strconv.FormatInt(group.ID, 10)])
 		accounts := membersByGroup[group.ID]
 		byID := make(map[int64]groupQualityMemberSnapshot, len(accounts))
+		type memberEvaluation struct {
+			accountID   int64
+			previousLog groupQualityAccountState
+			reset       bool
+			metric      GroupQualityMetrics
+			state       groupQualityAccountState
+			usable      bool
+			passing     bool
+			pinned      bool
+		}
+		evaluations := make([]memberEvaluation, 0, len(accounts))
 		for i := range accounts {
 			account := &accounts[i]
 			resetAt := accountGroupQualityResetAt(account)
@@ -463,11 +514,13 @@ func (s *GroupQualityGateService) evaluate(ctx context.Context) error {
 			if reset {
 				// A member without a previous record has no trial data from
 				// before the previous round.
+				memory := previous
 				since := resetAt
 				if !known {
 					since = maxTime(resetAt, old.GeneratedAt)
 				}
-				previous = groupQualityAccountState{State: "trial", TrialSince: since, Tier: GroupQualityGateTierTrial}
+				previous = groupQualityAccountState{State: "trial", TrialSince: since, Tier: GroupQualityGateTierOther,
+					DataTier: memory.DataTier, TierAt: memory.TierAt, FastAt: memory.FastAt}
 			}
 			previous.ResetAt = resetAt
 			pinned := policy.Enabled && containsInt64(policy.PinnedAccountIDs, account.ID)
@@ -498,26 +551,52 @@ func (s *GroupQualityGateService) evaluate(ctx context.Context) error {
 						end = now
 					}
 				}
-				state = groupQualityAccountState{State: "eligible", TierAt: previous.TierAt, Strike: previous.Strike, LastEjectionEnd: end, ResetAt: resetAt}
+				state = groupQualityAccountState{State: "eligible", TierAt: previous.TierAt, DataTier: previous.DataTier, FastAt: previous.FastAt,
+					Strike: previous.Strike, LastEjectionEnd: end, ResetAt: resetAt}
 			}
-			tier := resolveGroupQualityTier(now, policy, metric, state, previous, policy.Enabled, passing)
-			state.Tier = tier
-			if state.State == "ejected" || state.State == "trial" {
-				state.TierAt = time.Time{}
-			} else if metric.WarmSamples == 0 || metric.WarmSamples >= 10 || metric.ZeroCacheSamples >= 20 && metric.WarmZeroCacheRate > 0.30 || previous.TierAt.IsZero() || now.Sub(previous.TierAt) > 6*time.Hour || previous.State == "ejected" || previous.State == "trial" {
+			evaluations = append(evaluations, memberEvaluation{
+				accountID: account.ID, previousLog: previousMember.State, reset: reset,
+				metric: metric, state: state, usable: usable, passing: passing, pinned: pinned,
+			})
+		}
+		var bestWarmTTFTP90Ms *int
+		for _, evaluation := range evaluations {
+			if !evaluation.usable || evaluation.state.State == "ejected" || evaluation.metric.WarmSamples < 10 {
+				continue
+			}
+			if bestWarmTTFTP90Ms == nil || evaluation.metric.WarmTTFTP90Ms < *bestWarmTTFTP90Ms {
+				value := evaluation.metric.WarmTTFTP90Ms
+				bestWarmTTFTP90Ms = &value
+			}
+		}
+		fastLine := policy.FastWarmTTFTP90Ms
+		if bestWarmTTFTP90Ms != nil {
+			fastLine = min(fastLine, *bestWarmTTFTP90Ms+groupQualityFastLineMarginMs)
+			line := fastLine
+			next.EffectiveFastLines[group.ID] = &line
+		}
+		for _, evaluation := range evaluations {
+			state := evaluation.state
+			dataBased := !stale && (evaluation.metric.WarmSamples >= 10 || groupQualityZeroCacheCondition(evaluation.metric))
+			if dataBased {
+				state.DataTier = groupQualityTierFromData(evaluation.metric, fastLine)
 				state.TierAt = now
-			} else {
-				state.TierAt = previous.TierAt
+				if state.DataTier == GroupQualityGateTierFast {
+					state.FastAt = now
+				}
 			}
-			result := GroupQualityMemberResult{Usable: usable, Passing: passing, Pinned: pinned, State: state.State, Tier: tier}
-			byID[account.ID] = groupQualityMemberSnapshot{AccountID: account.ID, Metric: metric, State: state, Result: result}
-			logGroupQualityTransition(previousMember.State, state, reset, group.ID, account.ID, policy, metric)
+			tier := resolveGroupQualityTier(now, evaluation.metric, state, policy.Enabled, evaluation.passing)
+			state.Tier = tier
+			result := GroupQualityMemberResult{Usable: evaluation.usable, Passing: evaluation.passing, Pinned: evaluation.pinned, State: state.State, Tier: tier}
+			logGroupQualityTransition(evaluation.previousLog, state, evaluation.reset, group.ID, evaluation.accountID, policy, evaluation.metric)
+			state.TrialEndReason = ""
+			byID[evaluation.accountID] = groupQualityMemberSnapshot{AccountID: evaluation.accountID, Metric: evaluation.metric, State: state, Result: result}
 		}
 		if policy.Enabled {
 			applyQualityGuard(byID, old.Members[group.ID])
 			for accountID, member := range byID {
 				if member.Result.GuardHeld && !old.Members[group.ID][accountID].Result.GuardHeld {
-					slog.Info("group_quality_gate.guard_hold", "group_id", group.ID, "account_id", accountID,
+					slog.Warn("group_quality_gate.guard_hold", "group_id", group.ID, "account_id", accountID,
 						"severity", member.State.Severity,
 						"error_rate", member.Metric.ErrorRate(), "max_error_rate", policy.MaxErrorRate,
 						"warm_ttft_p90_ms", member.Metric.WarmTTFTP90Ms, "max_warm_ttft_p90_ms", policy.MaxWarmTTFTP90Ms)
@@ -531,8 +610,8 @@ func (s *GroupQualityGateService) evaluate(ctx context.Context) error {
 	return observationErr
 }
 
-// departedGroupQualityMembers carries absent members' states while their
-// strikes and last ejection end still affect evaluation (two hours).
+// departedGroupQualityMembers retains state for two hours after the last
+// ejection end or data-based tier decision.
 func departedGroupQualityMembers(old *groupQualitySnapshot, current map[int64]map[int64]groupQualityMemberSnapshot, now time.Time) map[int64]map[int64]groupQualityAccountState {
 	out := map[int64]map[int64]groupQualityAccountState{}
 	keep := func(groupID, accountID int64, state groupQualityAccountState) {
@@ -542,6 +621,9 @@ func departedGroupQualityMembers(old *groupQualitySnapshot, current map[int64]ma
 		end := state.LastEjectionEnd
 		if state.State == "ejected" {
 			end = state.Until
+		}
+		if state.TierAt.After(end) {
+			end = state.TierAt
 		}
 		if end.IsZero() || now.Sub(end) >= 2*time.Hour {
 			return
@@ -651,9 +733,9 @@ func groupQualityMetricsFor(observations []GroupQualityObservation, now, errorSi
 				m.Calls++
 			}
 		}
-		if !ttftSince.IsZero() && o.At.After(ttftSince) && o.Success && o.Warm && o.Streaming && o.FirstTokenMs > 0 {
+		if !ttftSince.IsZero() && o.At.After(ttftSince) && o.Success && o.Warm && o.Streaming && o.FirstOutputMs > 0 {
 			m.WarmSamples++
-			ttftValues = append(ttftValues, o.FirstTokenMs)
+			ttftValues = append(ttftValues, o.FirstOutputMs)
 		}
 		if !cacheSince.IsZero() && o.At.After(cacheSince) && o.Success && o.Warm && o.PromptTokens >= 2048 {
 			m.ZeroCacheSamples++
@@ -701,32 +783,34 @@ func accountGroupQualityResetAt(account *Account) time.Time {
 	return t.UTC()
 }
 
-func resolveGroupQualityTier(now time.Time, policy GroupQualityGatePolicy, metric GroupQualityMetrics, state, previous groupQualityAccountState, enabled, passing bool) int {
-	if enabled && state.State == "trial" {
-		return GroupQualityGateTierTrial
-	}
-	if enabled && (state.State == "ejected" || !passing) {
+func groupQualityZeroCacheCondition(metric GroupQualityMetrics) bool {
+	return metric.ZeroCacheSamples >= 20 && metric.WarmZeroCacheRate > 0.30
+}
+
+func groupQualityTierFromData(metric GroupQualityMetrics, fastLine int) int {
+	if groupQualityZeroCacheCondition(metric) {
 		return GroupQualityGateTierOther
 	}
-	if metric.ZeroCacheSamples >= 20 && metric.WarmZeroCacheRate > 0.30 {
-		return GroupQualityGateTierOther
-	}
-	if metric.WarmSamples == 0 {
+	if metric.WarmSamples >= 10 && metric.WarmTTFTP90Ms <= fastLine {
 		return GroupQualityGateTierFast
 	}
-	if metric.WarmSamples < 10 {
-		if !enabled {
-			if previous.Tier == GroupQualityGateTierOther && !previous.TierAt.IsZero() && now.Sub(previous.TierAt) <= 6*time.Hour {
-				return GroupQualityGateTierOther
-			}
-			return GroupQualityGateTierFast
-		}
-		if previous.State == "ejected" || previous.State == "trial" || previous.TierAt.IsZero() || now.Sub(previous.TierAt) > 6*time.Hour {
-			return GroupQualityGateTierFast
-		}
-		return previous.Tier
+	return GroupQualityGateTierOther
+}
+
+func resolveGroupQualityTier(now time.Time, metric GroupQualityMetrics, state groupQualityAccountState, enabled, passing bool) int {
+	if state.State == "ejected" || enabled && !passing {
+		return GroupQualityGateTierOther
 	}
-	if metric.WarmTTFTP90Ms <= policy.FastWarmTTFTP90Ms {
+	if groupQualityZeroCacheCondition(metric) {
+		return GroupQualityGateTierOther
+	}
+	if metric.WarmSamples >= 10 {
+		return state.DataTier
+	}
+	if !state.TierAt.IsZero() && now.Sub(state.TierAt) <= groupQualityTierHold {
+		return state.DataTier
+	}
+	if !state.FastAt.IsZero() && now.Sub(state.FastAt) <= groupQualityFastRetest {
 		return GroupQualityGateTierFast
 	}
 	return GroupQualityGateTierOther
@@ -758,7 +842,7 @@ func logGroupQualityTransition(old, next groupQualityAccountState, reset bool, g
 	case from == "ejected":
 		reason = "ejection_expired"
 	default:
-		reason = "trial_passed"
+		reason = next.TrialEndReason
 	}
 	attrs := []any{"group_id", groupID, "account_id", accountID, "from", from, "to", next.State, "reason", reason, "strike", next.Strike,
 		"error_rate", metric.ErrorRate(), "max_error_rate", policy.MaxErrorRate, "warm_ttft_p90_ms", metric.WarmTTFTP90Ms, "max_warm_ttft_p90_ms", policy.MaxWarmTTFTP90Ms}
@@ -809,6 +893,7 @@ func applyQualityGuard(members, previous map[int64]groupQualityMemberSnapshot) {
 		m := members[id]
 		m.Result.GuardHeld = true
 		m.Result.Tier = GroupQualityGateTierOther
+		m.State.Tier = GroupQualityGateTierOther
 		members[id] = m
 		passing++
 	}
@@ -846,7 +931,13 @@ func (s *GroupQualityGateService) Enabled(groupID int64) bool {
 		return false
 	}
 	v := s.snapshot.Load()
-	return v != nil && v.Policies.Groups[strconv.FormatInt(groupID, 10)].Enabled
+	if v == nil || !v.Policies.Groups[strconv.FormatInt(groupID, 10)].Enabled {
+		return false
+	}
+	if cached := s.policyCache.Load(); cached != nil && !cached.value.Groups[strconv.FormatInt(groupID, 10)].Enabled {
+		return false
+	}
+	return true
 }
 
 var _ GroupQualityGateView = (*GroupQualityGateService)(nil)

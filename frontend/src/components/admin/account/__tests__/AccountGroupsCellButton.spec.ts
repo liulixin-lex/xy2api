@@ -28,6 +28,8 @@ const cell = (state: GroupQualityGateAccountStatus['state'], patch: Partial<Grou
   },
   maxErrorRate: 0.1,
   maxWarmTtftMs: 20000,
+  fastWarmTtftMs: 10000,
+  effectiveFastWarmTtftMs: null,
   stale: false
 })
 

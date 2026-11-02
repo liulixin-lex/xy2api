@@ -5,9 +5,9 @@ export interface GroupQualityGatePolicy {
   enabled: boolean
   /** 错误率熔断线，取值 (0, 1] */
   max_error_rate: number
-  /** 续轮首字 p90 熔断线（毫秒），≤ 600000 */
+  /** 续轮用户可见首字 p90 熔断线（毫秒），≤ 600000 */
   max_warm_ttft_p90_ms: number
-  /** 快档线（毫秒），只用于排序，≥ 1000 且小于熔断线 */
+  /** 快档线（毫秒），只用于排序，≥ 1000 且小于熔断线；实际取它与组内最快 + 4s 中较小者 */
   fast_warm_ttft_p90_ms: number
   /** 固定账号，必须是本组成员 */
   pinned_account_ids: number[]
@@ -59,7 +59,7 @@ export interface GroupQualityMemberMetrics {
 export interface GroupQualityGateAccountStatus {
   account_id: number
   state: GroupQualityGateState
-  /** 熔断到期时刻（UTC RFC3339），只在 ejected 时有值 */
+  /** UTC RFC3339：ejected 时为熔断到期时刻，trial（观察中）时为观察结束时刻 */
   until?: string | null
   reasons: GroupQualityGateReason[]
   strikes: number
@@ -69,8 +69,9 @@ export interface GroupQualityGateAccountStatus {
   pinned: boolean
   /** 选号实际是否否决；固定与保底保留为 false */
   vetoed: boolean
-  tier: number
-  /** 本组判定实际使用的指标；合格/试用提示使用它，熔断中提示改看完整窗口 */
+  /** 排序档位：0 快档，2 其他 */
+  tier: 0 | 2
+  /** 本组判定实际使用的指标；合格/观察中提示使用它，熔断中提示改看完整窗口 */
   metrics: GroupQualityMemberMetrics
   /** 按成员 metrics 里非 null 指标中最紧一项的 (1 − 实测 ÷ 上限)；全为 null 时为 null */
   headroom: number | null
@@ -80,7 +81,9 @@ export interface GroupQualityGateGroupStatus {
   group_id: number
   enabled: boolean
   fast_warm_ttft_p90_ms: number
-  /** eligible：未否决的成员数；ejected：否决数；trial：试用数 */
+  /** 本组实时快档线 = min(快档线, 组内最快 + 4s)；组内没有样本足够的可用成员时为 null */
+  effective_fast_warm_ttft_p90_ms: number | null
+  /** eligible：未否决的成员数；ejected：否决数；trial：观察中的成员数 */
   summary: { eligible: number; ejected: number; trial: number }
   accounts: GroupQualityGateAccountStatus[]
 }

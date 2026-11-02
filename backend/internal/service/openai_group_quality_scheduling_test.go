@@ -21,6 +21,10 @@ type schedulingQualityView struct {
 
 func (v *schedulingQualityView) Vetoed(g, a int64) bool   { return v.veto[[2]int64{g, a}] }
 func (v *schedulingQualityView) OrderTier(_, a int64) int { return v.tiers[a] }
+func (*schedulingQualityView) Enabled(int64) bool         { return false }
+func (*schedulingQualityView) SlowerThanFastLine(int64, int64) (int, int, bool) {
+	return 0, 0, false
+}
 
 type qualityCapacityCache struct {
 	schedulerTestConcurrencyCache

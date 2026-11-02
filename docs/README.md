@@ -76,7 +76,8 @@
 | 变更 | 内容 | 状态 |
 |---|---|---|
 | [`add-support-chat-widget-20261031`](../openspec/changes/add-support-chat-widget-20261031/) | 客户服务：悬浮在线客服气泡、会话与图片、客服收件箱与提醒，工单并入 | 实施与本地验证完成，分支 `feat/support-chat-widget-20261031` 开 PR 待合并；未发布 |
-| [`group-quality-gate-20261031`](../openspec/changes/group-quality-gate-20261031/) | 分组质量门槛、排序与满载借用、利润门实时成本、兜底改回按兜底组计费 | 实施、集成与门禁完成；待用户授权推送/PR/发版（未发布） |
+| [`group-quality-gate-v2-20261102`](../openspec/changes/group-quality-gate-v2-20261102/) | 分组质量门槛第二版：按用户可见首字判定、两档排序与实时快档线、限时观察与恢复入口、门槛组慢号迁出 | 实施、双路红队审查与本地门禁完成（分支 `feat/group-quality-gate-v2-20261102`）；待 PR，未发布 |
+| [`group-quality-gate-20261031`](../openspec/changes/group-quality-gate-20261031/) | 分组质量门槛、排序与满载借用、利润门实时成本、兜底改回按兜底组计费 | 随 0.4.16 发布；首字口径、档位、试用与门槛组迁移由 `group-quality-gate-v2-20261102` 修订 |
 | [`anthropic-cache-ttl-20261030`](../openspec/changes/anthropic-cache-ttl-20261030/) | Anthropic TTL、Key 四态、usage/计费/预留及旧策略退役 | 随 0.4.15 发布（PR #170）；生产未部署，真实供应商缓存收益未验证 |
 | [`gateway-resilience-045-20261021`](../openspec/changes/gateway-resilience-045-20261021/) | 网关韧性 0.4.5：RA-1 修复、OpenAI Responses 透传与 Gateway 入站经 Anthropic 上游的明确终止、审查遗留 P2 | 0.4.5、0.4.6 已发布（生产未部署）；后续待办见其 tasks §7 |
 | [`gateway-resilience-v2-20261021`](../openspec/changes/gateway-resilience-v2-20261021/) | 网关韧性第二期：可重放前缀与推迟开场、分类修正、失败帧重试提示、仅流式能力学习、事件字段 | 0.4.4 已发布；已知缺陷 RA-1 已在 0.4.5 修复（`gateway-resilience-045-20261021`）；`response.metadata` 的开场判据于 2026-10-22 修订（0.4.6，见 045 tasks 7.7）；浸泡见其 tasks |

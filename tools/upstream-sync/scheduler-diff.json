@@ -334,7 +334,7 @@
       },
       {
         "block": "ttft-sticky-migration-guard",
-        "note": "OpenAI TTFT health routing: on the legacy path, requests carrying previous_response_id or needing a non-HTTP transport (WebSocket) are marked so a latency-held sticky owner is never migrated away from them.",
+        "note": "OpenAI TTFT health routing: on the legacy path, requests carrying previous_response_id or needing a non-HTTP transport (WebSocket) are marked so a sticky owner is never migrated away from them, by the latency hold or by the quality-gate migration.",
         "removed": [],
         "added": [
           "ctx = withOpenAIStickyMigrationGuard(ctx, previousResponseID, requiredTransport)"
@@ -668,10 +668,10 @@
       },
       {
         "block": "ttft-latency-hold-migration",
-        "note": "OpenAI TTFT health routing: when the sticky owner is in a latency hold and the group has a usable account that is not, the binding is removed under an owner check and selection continues without the sticky owner, so the normal bind path rebinds the session once. Single-account groups and all-held groups keep the binding.",
+        "note": "OpenAI TTFT health routing: when the sticky owner is in a latency hold and the group has a usable account that is not, the binding is removed under an owner check and selection continues without the sticky owner, so the normal bind path rebinds the session once. Single-account groups and all-held groups keep the binding. In a group with the quality gate enabled, low-rate priority in effect and no share scheduling, the gate decides instead: a bound member whose warm visible TTFT p90 exceeds the policy fast line is unbound when a tier-0, unvetoed member has a free slot, independent of the latency hold (group-quality-gate-v2).",
         "removed": [],
         "added": [
-          "stickyAccountID = s.migrateOpenAILatencyHeldOwner(ctx, groupID, platform, sessionHash, requestedModel, stickyAccountID, excludedIDs, requireCompact, requiredCapability)"
+          "stickyAccountID = s.migrateOpenAILatencyHeldOwner(ctx, groupID, platform, sessionHash, requestedModel, stickyAccountID, excludedIDs, requireCompact, requiredCapability, preferLowUpstreamRate)"
         ]
       },
       {
