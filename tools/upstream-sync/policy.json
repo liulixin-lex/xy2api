@@ -4008,7 +4008,7 @@
     {
       "id": "xy-account-recent-health",
       "path": "frontend/src/views/admin/__tests__/AccountsView.recentHealth.spec.ts",
-      "literal": "asks for the visible accounts and shows labelled errors and first token under the status"
+      "literal": "asks for the visible accounts and shows labelled errors and first token in their own column"
     },
     {
       "id": "xy-account-recent-health",

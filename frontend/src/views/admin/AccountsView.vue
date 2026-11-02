@@ -303,10 +303,17 @@
             <AccountCapacityCell :account="row" />
           </template>
           <template #cell-status="{ row }">
-            <AccountRecentHealth :account-id="row.id" :health="recentHealthByAccountId[String(row.id)] ?? null">
-              <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
-            </AccountRecentHealth>
+            <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
             <AccountStreamOnlyBadge :account="row" @cleared="patchAccountInList($event as Account)" />
+          </template>
+          <template #header-recent_health="{ column }">
+            <div class="flex items-center gap-1">
+              <span>{{ column.label }}</span>
+              <HelpTooltip :content="t('admin.accounts.recentHealthHint')" width-class="w-72" />
+            </div>
+          </template>
+          <template #cell-recent_health="{ row }">
+            <AccountRecentHealth :account-id="row.id" :health="recentHealthByAccountId[String(row.id)] ?? null" />
           </template>
           <template #header-schedulable="{ column }"><div class="flex items-center gap-1"><span>{{ column.label }}</span><HelpTooltip :content="t('admin.accounts.schedulableHint')" width-class="w-72" /></div></template>
           <template #cell-schedulable="{ row }">
@@ -1058,7 +1065,7 @@ const refreshTodayStatsBatch = async () => {
 }
 
 const refreshRecentHealthBatch = async () => {
-  if (hiddenColumns.has('status')) return
+  if (hiddenColumns.has('recent_health')) return
   const accountIDs = accounts.value.map(account => account.id)
   const reqSeq = ++recentHealthReqSeq
   if (accountIDs.length === 0) {
@@ -1217,7 +1224,7 @@ const toggleColumn = (key: string) => {
       console.error('Failed to load account today stats after showing column:', error)
     })
   }
-  if (key === 'status' && wasHidden) void refreshRecentHealthBatch()
+  if (key === 'recent_health' && wasHidden) void refreshRecentHealthBatch()
   if (key === 'groups' && wasHidden) refreshGroupQuality()
   if (key === 'upstream_balance' && wasHidden) void refreshUpstreamBalances()
   if (key === 'scheduler_score') {
@@ -2169,6 +2176,7 @@ const allColumns = computed(() => {
     { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false },
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
+    { key: 'recent_health', label: t('admin.accounts.columns.recentHealth'), sortable: false },
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
     { key: 'iq_check', label: t('admin.accounts.iqCheck'), sortable: false }
   ]

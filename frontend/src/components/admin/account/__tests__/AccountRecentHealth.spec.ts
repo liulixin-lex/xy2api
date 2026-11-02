@@ -14,18 +14,16 @@ vi.mock('vue-i18n', async () => {
 
 const mountHealth = (health: Record<string, unknown> | null) =>
   mount(AccountRecentHealth, {
-    props: { accountId: 42, health: health as never },
-    slots: { default: '<span data-test="status">正常</span>' }
+    props: { accountId: 42, health: health as never }
   })
 
 describe('AccountRecentHealth', () => {
-  it('labels the recent error count under the status as a new-tab link to the account error requests', () => {
-    const wrapper = mountHealth({ first_token_avg_ms: null, first_token_samples: 0, recent_errors: 7 })
+  it('puts the labelled recent error count first, as a new-tab link to the account error requests', () => {
+    const wrapper = mountHealth({ first_token_avg_ms: 850, first_token_samples: 3, recent_errors: 7 })
     const link = wrapper.get('[data-test="recent-errors"]')
     const lines = wrapper.findAll('[data-test]').map(node => node.attributes('data-test'))
 
-    expect(wrapper.get('[data-test="status"]').text()).toBe('正常')
-    expect(lines.indexOf('recent-errors')).toBe(lines.indexOf('status') + 1)
+    expect(lines).toEqual(['recent-errors', 'first-token-avg'])
     expect(link.text()).toBe('admin.accounts.recentErrors:{"count":7}')
     expect(link.attributes('href')).toBe('/admin/usage?tab=errors&account_id=42')
     expect(link.attributes('target')).toBe('_blank')
@@ -41,7 +39,7 @@ describe('AccountRecentHealth', () => {
     expect(tone(5)).toContain('text-red-600')
   })
 
-  it('shows the 3-minute first token average under the status, coloured by latency band', () => {
+  it('shows the 3-minute first token average, coloured by latency band', () => {
     const fast = mountHealth({ first_token_avg_ms: 850, first_token_samples: 3, recent_errors: 0 })
     const average = fast.get('[data-test="first-token-avg"]')
     expect(average.text()).toBe('admin.accounts.firstTokenAvg:{"value":"850ms"}')
@@ -101,10 +99,10 @@ describe('AccountRecentHealth', () => {
     expect(wrapper.find('[data-test="cache-read-ratio"]').exists()).toBe(false)
   })
 
-  it('shows only the status when there were no requests or errors', () => {
+  it('shows a dash when there were no requests or errors', () => {
     for (const health of [null, { first_token_avg_ms: null, first_token_samples: 0, recent_errors: 0 }]) {
       const wrapper = mountHealth(health)
-      expect(wrapper.get('[data-test="status"]').exists()).toBe(true)
+      expect(wrapper.text()).toBe('-')
       expect(wrapper.find('[data-test="recent-errors"]').exists()).toBe(false)
       expect(wrapper.find('[data-test="first-token-avg"]').exists()).toBe(false)
       expect(wrapper.find('[data-test="cache-read-ratio"]').exists()).toBe(false)
