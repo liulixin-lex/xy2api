@@ -26,11 +26,12 @@ func TestIsOpenAIEncryptedContentRejectionPayloadCoversHTTPAndInband(t *testing.
 		[]byte(`{"response":{"error":{"code":"encrypted_context_invalid"}}}`),
 		[]byte(`{"response":{"error":{"message":"encrypted content hydration failed"}}}`),
 		[]byte(`{"error":{"message":"{\"error\":{\"code\":\"invalid_encrypted_content\",\"message\":\"neutral\"}}"}}`),
-		[]byte(`{"response":{"error":{"message":"{\"error\":{\"code\":\"invalid_encrypted_content\",\"message\":\"neutral\"}}"}}`),
 	} {
 		require.True(t, isOpenAIEncryptedContentRejectionPayload(payload))
 	}
 	require.False(t, isOpenAIEncryptedContentRejectionPayload([]byte(`{"error":{"message":"encrypted payload rejected"}}`)))
+	require.False(t, isOpenAIEncryptedContentRejectionPayload([]byte(`{"response":{"error":{"message":"{\"error\":{\"code\":\"invalid_encrypted_content\",\"message\":\"neutral\"}}"}}`)))
+	require.False(t, isOpenAIEncryptedContentRejectionPayload([]byte(`{"error":{"code":"upstream_error","message":"{\"error\":{\"code\":\"invalid_encrypted_content\",\"message\":\"neutral\"}}"}}`)))
 }
 
 func TestOpenAIEncryptedContentRepairBodyHonorsPrefixesAndPreservesOpaqueItems(t *testing.T) {
@@ -168,6 +169,18 @@ func TestOpenAIEncryptedContentNativeHTTPAndInbandOpsCategory(t *testing.T) {
 			require.Empty(t, events[0].UpstreamResponseBody)
 		})
 	}
+	withResilienceSettings(t, nil)
+	payload := []byte(`{"error":{"code":"upstream_error","message":"{\"error\":{\"code\":\"invalid_encrypted_content\",\"message\":\"neutral\"}}"}}`)
+	require.False(t, isOpenAIEncryptedContentRejectionPayload(payload))
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	account := &Account{ID: 11, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	c, _ := newOpenAIUpstreamErrorTestContext(t)
+	svc.recordOpenAIStreamUpstreamError(c, account, false, "rid", "stream_failed", payload, "neutral")
+	raw, ok := c.Get(OpsUpstreamErrorsKey)
+	require.True(t, ok)
+	events := raw.([]*OpsUpstreamErrorEvent)
+	require.Len(t, events, 1)
+	require.Equal(t, string(resilience.CategoryTransient), events[0].ResilienceCategory)
 }
 
 func TestForwardAsChatCompletions_EncryptedContentDoesNotFailoverOrTempUnschedule(t *testing.T) {
