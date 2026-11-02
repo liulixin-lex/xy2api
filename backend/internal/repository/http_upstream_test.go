@@ -54,7 +54,8 @@ func TestHTTPUpstreamRecordsOpsSendBoundaryAtBothTransportEntrypoints(t *testing
 		request, err := http.NewRequestWithContext(resilience.WithRequestState(context.Background(), state), http.MethodGet, server.URL, nil)
 		require.NoError(t, err)
 
-		response, err := NewHTTPUpstream(nil).DoWithTLS(request, "", 625, 1, &tlsfingerprint.Profile{Name: "test"})
+		// The test server certificate is untrusted; the boundary is recorded before the send either way.
+		response, _ := NewHTTPUpstream(nil).DoWithTLS(request, "", 625, 1, &tlsfingerprint.Profile{Name: "test"})
 		if response != nil {
 			require.NoError(t, response.Body.Close())
 		}
