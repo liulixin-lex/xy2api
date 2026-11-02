@@ -586,6 +586,101 @@ func TestForwardAlphaSearchAPIKeyEndpointNotFoundFailsOver(t *testing.T) {
 	require.Empty(t, recorder.Body.String())
 }
 
+func TestForwardAlphaSearchAPIKeyUnsupportedEndpointBadRequestFailsOverWithoutAccountError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
+	repo := &alphaSearchAccountStateRepo{}
+	cfg := &config.Config{}
+	service := &OpenAIGatewayService{
+		cfg: cfg,
+		httpUpstream: &httpUpstreamRecorder{responses: []*http.Response{
+			newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, `{"error":{"message":"We do not support the requested endpoint for this account"}}`),
+			newOpenAIRejectedFieldTestResponse(http.StatusOK, `{"output":"search result"}`),
+		}},
+		accountRepo:      repo,
+		rateLimitService: NewRateLimitService(repo, nil, cfg, nil, nil),
+	}
+	first := &Account{
+		ID:       47,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key":  "sk-first",
+			"base_url": "https://first.example",
+		},
+	}
+	second := &Account{
+		ID:       48,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key":  "sk-second",
+			"base_url": "https://second.example",
+		},
+	}
+	firstContext, _ := newOpenAIAlphaSearchTestContext(body)
+
+	result, err := service.ForwardAlphaSearch(context.Background(), firstContext, first, body)
+
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusBadRequest, failoverErr.StatusCode)
+	require.Zero(t, repo.setErrorCalls)
+	require.Empty(t, repo.lastError)
+	require.False(t, firstContext.Writer.Written())
+
+	secondContext, recorder := newOpenAIAlphaSearchTestContext(body)
+	result, err = service.ForwardAlphaSearch(context.Background(), secondContext, second, body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.JSONEq(t, `{"output":"search result"}`, recorder.Body.String())
+}
+
+func TestForwardAlphaSearchAPIKeyBadRequestWithGenericEncryptedWordingDoesNotFailOver(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
+	repo := &alphaSearchAccountStateRepo{}
+	cfg := &config.Config{}
+	upstream := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(
+		http.StatusBadRequest,
+		`{"error":{"message":"encrypted request could not be processed"}}`,
+	)}
+	service := &OpenAIGatewayService{
+		cfg:              cfg,
+		httpUpstream:     upstream,
+		accountRepo:      repo,
+		rateLimitService: NewRateLimitService(repo, nil, cfg, nil, nil),
+	}
+	account := &Account{
+		ID:       49,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key":  "sk-test",
+			"base_url": "https://relay.example",
+		},
+	}
+	c, recorder := newOpenAIAlphaSearchTestContext(body)
+
+	result, err := service.ForwardAlphaSearch(context.Background(), c, account, body)
+
+	require.NoError(t, err)
+	require.Nil(t, result)
+	require.Len(t, upstream.requests, 1)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Zero(t, repo.setErrorCalls)
+}
+
+func newOpenAIAlphaSearchTestContext(body []byte) (*gin.Context, *httptest.ResponseRecorder) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	return c, recorder
+}
+
 // OAuth 账号的 chatgpt.com 端点固定存在，404 保持原有透传行为不变。
 func TestForwardAlphaSearchOAuthNotFoundPassesThrough(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -650,9 +745,12 @@ func TestIsOpenAIAlphaSearchEndpointUnsupported(t *testing.T) {
 	apiKey := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 	oauth := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 
-	require.True(t, isOpenAIAlphaSearchEndpointUnsupported(apiKey, http.StatusNotFound))
-	require.True(t, isOpenAIAlphaSearchEndpointUnsupported(apiKey, http.StatusMethodNotAllowed))
-	require.False(t, isOpenAIAlphaSearchEndpointUnsupported(apiKey, http.StatusBadRequest))
-	require.False(t, isOpenAIAlphaSearchEndpointUnsupported(oauth, http.StatusNotFound))
-	require.False(t, isOpenAIAlphaSearchEndpointUnsupported(nil, http.StatusNotFound))
+	require.True(t, isOpenAIAlphaSearchEndpointUnsupported(apiKey, http.StatusNotFound, nil))
+	require.True(t, isOpenAIAlphaSearchEndpointUnsupported(apiKey, http.StatusMethodNotAllowed, nil))
+	require.True(t, isOpenAIAlphaSearchEndpointUnsupported(apiKey, http.StatusBadRequest, []byte(`{"error":{"message":"Please do not support the requested endpoint"}}`)))
+	require.True(t, isOpenAIAlphaSearchEndpointUnsupported(apiKey, http.StatusBadRequest, []byte(`{"error":{"message":"not encrypted history or tool items"}}`)))
+	require.False(t, isOpenAIAlphaSearchEndpointUnsupported(apiKey, http.StatusBadRequest, []byte(`{"error":{"message":"encrypted request"}}`)))
+	require.False(t, isOpenAIAlphaSearchEndpointUnsupported(apiKey, http.StatusBadRequest, nil))
+	require.False(t, isOpenAIAlphaSearchEndpointUnsupported(oauth, http.StatusNotFound, nil))
+	require.False(t, isOpenAIAlphaSearchEndpointUnsupported(nil, http.StatusNotFound, nil))
 }

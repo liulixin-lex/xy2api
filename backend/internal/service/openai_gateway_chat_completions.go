@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -389,14 +390,18 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
-	defer func() {
-		if watchdog, ok := resp.Body.(*codexTicketWatchdogBody); ok {
-			_ = watchdog.closeWithCancel(cancelUpstream)
-			return
-		}
-		cancelUpstream()
-		_ = resp.Body.Close()
-	}()
+	var closeAttemptOnce sync.Once
+	closeAttempt := func() {
+		closeAttemptOnce.Do(func() {
+			if watchdog, ok := resp.Body.(*codexTicketWatchdogBody); ok {
+				_ = watchdog.closeWithCancel(cancelUpstream)
+				return
+			}
+			cancelUpstream()
+			_ = resp.Body.Close()
+		})
+	}
+	defer closeAttempt()
 
 	// 8. Handle error response with failover
 	if resp.StatusCode >= 400 {
@@ -407,7 +412,19 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 			if err := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); err != nil {
 				return nil, fmt.Errorf("agent identity task recovery failed: %w", err)
 			}
+			closeAttempt()
 			return s.forwardAsChatCompletions(markAgentIdentityTaskRecoveryTried(ctx), c, account, body, promptCacheKey, defaultMappedModel, compatPromptCacheTenantIsolated)
+		}
+		if retryBody, reason, changed, repairErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, respBody); repairErr == nil &&
+			changed && openAIResponsesRejectedFieldRetryStateForRequest(c, body).Allow(retryBody) {
+			closeAttempt()
+			logger.L().Info("resilience.request_repair_replay",
+				zap.Int64("account_id", account.ID),
+				zap.String("kind", reason),
+				zap.String("form", "http"),
+				zap.String("path", "chat"),
+			)
+			return s.forwardAsChatCompletions(ctx, c, account, retryBody, promptCacheKey, defaultMappedModel, compatPromptCacheTenantIsolated)
 		}
 		if account.Type == AccountTypeAPIKey &&
 			!account.routesByModel() &&
