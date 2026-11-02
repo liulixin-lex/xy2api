@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
 
@@ -118,6 +119,39 @@ func TestForwardAsAnthropic_StreamingBareErrorAfterOutputIsVisible(t *testing.T)
 	require.Contains(t, clientStream, "mixed tools failed")
 	require.NotContains(t, clientStream, "event: message_stop")
 	require.NotContains(t, err.Error(), "missing terminal event")
+}
+
+func TestForwardAsAnthropic_MessagesConversionAddsPostOutputReadFailureAttempt(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-5.4","max_tokens":32,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	state := resilience.NewRequestState()
+	c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
+
+	stream := "event: response.created\n" +
+		`data: {"type":"response.created","response":{"id":"resp_partial","object":"response","model":"gpt-5.4","status":"in_progress","output":[]}}` + "\n\n" +
+		"event: response.output_text.delta\n" +
+		`data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"partial"}` + "\n\n"
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       &openAIStreamReadThenErrorCloser{reader: strings.NewReader(stream), err: io.ErrUnexpectedEOF},
+	}}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+	account := rawChatCompletionsTestAccount()
+
+	_, err := svc.ForwardAsAnthropic(c.Request.Context(), c, account, body, "", "")
+	require.Error(t, err)
+	require.Contains(t, recorder.Body.String(), `"text":"partial"`)
+	MergeOpsPostOutputFailureEvents(c)
+	events := opsUpstreamEventsForTest(t, c)
+	require.Len(t, events, 1)
+	require.Equal(t, "stream_failed", events[0].Kind)
+	require.Equal(t, "stream_read_error", events[0].Reason)
+	require.Equal(t, string(resilience.CategoryTransient), events[0].ResilienceCategory)
 }
 
 func TestForwardAsAnthropic_StreamingBareErrorBeforeOutputFailsOver(t *testing.T) {

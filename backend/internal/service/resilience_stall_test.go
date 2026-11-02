@@ -52,6 +52,11 @@ func TestStallDetectedWithinFiveSecondsAfterOutput(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	state := resilience.NewRequestState()
+	c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
+	InstallDeliveryTracking(c, time.Now())
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	RecordOpsUpstreamSendBoundary(c.Request.Context(), account.ID)
 	pr, pw := io.Pipe()
 	defer func() { _ = pw.Close() }()
 	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: pr}
@@ -60,11 +65,17 @@ func TestStallDetectedWithinFiveSecondsAfterOutput(t *testing.T) {
 		_, _ = pw.Write([]byte("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n"))
 	}()
 	start := time.Now()
-	_, err := svc.handleStreamingResponse(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "m", "m", false)
+	_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, account, time.Now(), "m", "m", false)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "stream data interval timeout")
 	require.Less(t, time.Since(start), 3*time.Second)
 	require.Contains(t, rec.Body.String(), "stream_timeout")
+	MergeOpsPostOutputFailureEvents(c)
+	events := opsUpstreamEventsForTest(t, c)
+	require.Len(t, events, 1)
+	require.Equal(t, "stall", events[0].Reason)
+	require.Equal(t, string(resilience.CategoryStall), events[0].ResilienceCategory)
+	require.True(t, state.FirstOutputNoted())
 }
 
 func TestStallCountsForTheSessionOnce(t *testing.T) {

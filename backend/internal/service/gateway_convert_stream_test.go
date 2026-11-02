@@ -311,6 +311,9 @@ func TestGatewayConvertBreakAfterContentEndsWithProtocolTerminal(t *testing.T) {
 			t.Run(path.name+"/"+tc.name, func(t *testing.T) {
 				w := newGWWriter()
 				c := gwContext(gwPathURL(path.name), w)
+				state := resilience.NewRequestState()
+				c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
+				RecordOpsUpstreamSendBoundary(c.Request.Context(), gwTestAccount().ID)
 				up := newGWUpstream(nil)
 				done := gwRun(path, gwConvertService(0, 0), c, up.response(nil))
 				up.send(t, gwMsgStart, gwTextStart, gwTextDelta)
@@ -326,6 +329,17 @@ func TestGatewayConvertBreakAfterContentEndsWithProtocolTerminal(t *testing.T) {
 				require.Contains(t, body, "hello")
 				requireProtocolTerminal(t, path.name, body)
 				require.True(t, IsResponseCommitted(c), "the handler must not append a second terminal")
+				if tc.name != "retryable_error_event" {
+					MergeOpsPostOutputFailureEvents(c)
+					events := opsUpstreamEventsForTest(t, c)
+					require.Len(t, events, 1)
+					if tc.name == "read_error" {
+						require.Equal(t, "stream_read_error", events[0].Reason)
+					} else {
+						require.Equal(t, "missing_terminal", events[0].Reason)
+					}
+					require.Equal(t, string(resilience.CategoryTransient), events[0].ResilienceCategory)
+				}
 			})
 		}
 	}

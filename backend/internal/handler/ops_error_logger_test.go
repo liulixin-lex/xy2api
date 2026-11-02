@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	middleware2 "github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
@@ -2433,6 +2434,33 @@ func TestOpsErrorLoggerMiddleware_RecordsClientClosedAfterUpstreamFailure(t *tes
 	require.Equal(t, 524, *job.entry.UpstreamStatusCode)
 }
 
+func TestOpsErrorLoggerMiddleware_RecordsConfirmedPostOutputFailureWhenClientCancels(t *testing.T) {
+	setupOpsErrorLogTestQueue(t, 2)
+	gin.SetMode(gin.TestMode)
+	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	router := gin.New()
+	router.Use(OpsErrorLoggerMiddleware(ops))
+	router.POST("/v1/responses", func(c *gin.Context) {
+		addPostOutputOpsFactForHandlerTest(c, resilience.CategoryTransient, "stream_read_error")
+		cancel()
+		failoverClientGone(c)
+	})
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx))
+	require.Equal(t, statusClientClosedRequest, recorder.Code)
+	require.Equal(t, int64(1), OpsErrorLogQueueLength(), "a confirmed upstream failure keeps a later client close in the error log")
+	job := <-opsErrorLogQueue
+	require.Equal(t, statusClientClosedRequest, job.entry.StatusCode)
+	require.Equal(t, "upstream", job.entry.ErrorPhase)
+	require.Equal(t, "provider", job.entry.ErrorOwner)
+	events, err := service.ParseOpsUpstreamErrors(*job.entry.UpstreamErrorsJSON)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	require.Equal(t, "stream_read_error", events[0].Reason)
+}
+
 func TestOpsErrorLoggerMiddleware_RecordsClientClosedWhenIgnoreContextCanceledDisabled(t *testing.T) {
 	setupOpsErrorLogTestQueue(t, 2)
 	gin.SetMode(gin.TestMode)
@@ -2445,4 +2473,95 @@ func TestOpsErrorLoggerMiddleware_RecordsClientClosedWhenIgnoreContextCanceledDi
 	require.Equal(t, int64(1), OpsErrorLogQueueLength())
 	job := <-opsErrorLogQueue
 	require.Equal(t, statusClientClosedRequest, job.entry.StatusCode)
+}
+
+func TestOpsErrorLoggerMergesPostOutputFactBeforeClassification(t *testing.T) {
+	tests := []struct {
+		name       string
+		writeError func(*gin.Context)
+		wantStatus int
+	}{
+		{
+			name: "regular terminal error",
+			writeError: func(c *gin.Context) {
+				c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{
+					"type": "upstream_error", "message": "stream ended after output",
+				}})
+			},
+			wantStatus: http.StatusBadGateway,
+		},
+		{
+			name: "explicit in-band stream error",
+			writeError: func(c *gin.Context) {
+				service.MarkOpsStreamFailure(c, "upstream_error", "", "stream ended after output", http.StatusBadGateway)
+				c.Status(http.StatusOK)
+			},
+			wantStatus: http.StatusBadGateway,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			setupOpsErrorLogTestQueue(t, 2)
+			gin.SetMode(gin.TestMode)
+			ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			router := gin.New()
+			router.Use(OpsErrorLoggerMiddleware(ops))
+			router.POST("/v1/responses", func(c *gin.Context) {
+				addPostOutputOpsFactForHandlerTest(c, resilience.CategoryTransient, "stream_read_error")
+				tc.writeError(c)
+			})
+
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+			require.Equal(t, int64(1), OpsErrorLogQueueLength())
+			job := <-opsErrorLogQueue
+			entry := job.entry
+			require.Equal(t, tc.wantStatus, entry.StatusCode)
+			require.Equal(t, "upstream_error", entry.ErrorType)
+			require.Equal(t, "upstream", entry.ErrorPhase)
+			require.Equal(t, "provider", entry.ErrorOwner)
+			require.Equal(t, "upstream_http", entry.ErrorSource)
+			require.False(t, entry.IsBusinessLimited)
+			require.Equal(t, classifyOpsSeverity(entry.ErrorType, tc.wantStatus), entry.Severity)
+			require.NotNil(t, entry.UpstreamErrorsJSON)
+			events, err := service.ParseOpsUpstreamErrors(*entry.UpstreamErrorsJSON)
+			require.NoError(t, err)
+			require.Len(t, events, 1)
+			require.Equal(t, "stream_failed", events[0].Kind)
+			require.Equal(t, "stream_read_error", events[0].Reason)
+			require.Zero(t, events[0].UpstreamStatusCode)
+			require.NotContains(t, *entry.UpstreamErrorsJSON, "upstream_status_code")
+		})
+	}
+}
+
+func TestOpsErrorLoggerRequestScopedErrorDoesNotMergePostOutputFact(t *testing.T) {
+	setupOpsErrorLogTestQueue(t, 2)
+	gin.SetMode(gin.TestMode)
+	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	router := gin.New()
+	router.Use(OpsErrorLoggerMiddleware(ops))
+	router.POST("/v1/responses", func(c *gin.Context) {
+		addPostOutputOpsFactForHandlerTest(c, resilience.CategoryTransient, "stream_read_error")
+		service.MarkOpsStreamErrorValue(c, service.OpsStreamError{
+			ErrType: "invalid_request_error", Message: "request-scoped refusal", IntendedStatus: http.StatusBadRequest, RequestScoped: true,
+		})
+		c.Status(http.StatusOK)
+	})
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+	require.Equal(t, int64(1), OpsErrorLogQueueLength())
+	job := <-opsErrorLogQueue
+	require.True(t, job.entry.IsBusinessLimited)
+	require.Nil(t, job.entry.UpstreamErrorsJSON)
+}
+
+func addPostOutputOpsFactForHandlerTest(c *gin.Context, category resilience.Category, reason string) {
+	state := resilience.NewRequestState()
+	c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
+	state.RecordPostOutputFailureFact(resilience.PostOutputFailureFact{
+		AccountID: 626, Platform: "openai", AccountName: "test-account", ProxyName: "direct/no_proxy",
+		AtUnixMs: 1790000000123, Reason: reason, Category: category, Message: "upstream stream broke after output",
+	})
 }

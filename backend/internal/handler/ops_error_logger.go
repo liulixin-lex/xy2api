@@ -1156,6 +1156,7 @@ func recordOpsErrorAfterRequest(c *gin.Context, ops *service.OpsService, w *opsC
 		}
 	}
 
+	service.MergeOpsPostOutputFailureEvents(c)
 	// Skip logging if a passthrough rule with skip_monitoring=true matched.
 	if shouldSkipFinalOpsFailure(c) {
 		return
@@ -1454,8 +1455,12 @@ func opsStreamErrorsAllRequestScoped(streamErrs []service.OpsStreamError) bool {
 }
 
 func logOpsStreamErrorValue(c *gin.Context, ops *service.OpsService, wireStatus int, streamErr service.OpsStreamError) {
+	if streamErr.SkipMonitoring {
+		return
+	}
+	service.MergeOpsPostOutputFailureEvents(c)
 	// 命中 skip_monitoring=true 透传规则的请求跳过落库，与其它分支一致。
-	if streamErr.SkipMonitoring || (streamErr.Turn == 0 && !streamErr.RequestScoped && shouldSkipFinalOpsFailure(c)) {
+	if streamErr.Turn == 0 && !streamErr.RequestScoped && shouldSkipFinalOpsFailure(c) {
 		return
 	}
 

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -190,6 +191,9 @@ func BeginOpsStreamTurn(c *gin.Context, turn int) {
 	c.Set(OpsUpstreamErrorMessageKey, "")
 	c.Set(OpsUpstreamErrorDetailKey, "")
 	c.Set(OpsGatewayTerminalStatusKey, 0)
+	if c.Request != nil {
+		resilience.StateFrom(c.Request.Context()).ResetPostOutputOpsTracking()
+	}
 }
 
 func MarkOpsGatewayTerminalStatus(c *gin.Context, statusCode int) {
@@ -515,8 +519,140 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
 	evCopy := ev
 	existing = append(existing, &evCopy)
 	c.Set(OpsUpstreamErrorsKey, existing)
+	if c.Request != nil {
+		resilience.StateFrom(c.Request.Context()).RecordOpsUpstreamEvent()
+	}
 
 	checkSkipMonitoringForUpstreamEvent(c, &evCopy)
+}
+
+// RecordOpsUpstreamSendBoundary records the current upstream-event sequence
+// before one real HTTP send for accountID.
+func RecordOpsUpstreamSendBoundary(ctx context.Context, accountID int64) {
+	resilience.StateFrom(ctx).MarkOpsUpstreamSendBoundary(accountID)
+}
+
+// MergeOpsPostOutputFailureEvents adds confirmed HTTP stream failures to the
+// request's upstream event context before log classification.
+func MergeOpsPostOutputFailureEvents(c *gin.Context) {
+	if c == nil || c.Request == nil || GetOpenAIClientTransport(c) == OpenAIClientTransportWS {
+		return
+	}
+	if value, ok := c.Get(OpsStreamTurnKey); ok {
+		if turn, ok := value.(int); ok && turn > 0 {
+			return
+		}
+	}
+	if streamErr, ok := GetOpsStreamError(c); ok && streamErr.RequestScoped {
+		return
+	}
+
+	st := resilience.StateFrom(c.Request.Context())
+	facts := st.TakePostOutputFailureFacts()
+	if len(facts) == 0 {
+		return
+	}
+	events := currentOpsUpstreamEvents(c)
+	for _, fact := range facts {
+		if !validPostOutputFailureFact(fact) {
+			continue
+		}
+		sequence := st.OpsUpstreamEventSequence()
+		aligned := sequence == uint64(len(events))
+		if postOutputAttemptHasEvent(events, fact, sequence, aligned) {
+			continue
+		}
+
+		message := strings.TrimSpace(fact.Message)
+		if message == "" {
+			message = "upstream stream broke after output"
+		}
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			AtUnixMs:           fact.AtUnixMs,
+			Platform:           fact.Platform,
+			AccountID:          fact.AccountID,
+			AccountName:        fact.AccountName,
+			ProxyID:            fact.ProxyID,
+			ProxyName:          fact.ProxyName,
+			Kind:               "stream_failed",
+			Reason:             fact.Reason,
+			Message:            message,
+			ResilienceCategory: string(fact.Category),
+		})
+		events = currentOpsUpstreamEvents(c)
+	}
+}
+
+func currentOpsUpstreamEvents(c *gin.Context) []*OpsUpstreamErrorEvent {
+	if c == nil {
+		return nil
+	}
+	if value, ok := c.Get(OpsUpstreamErrorsKey); ok {
+		if events, ok := value.([]*OpsUpstreamErrorEvent); ok {
+			return events
+		}
+	}
+	return nil
+}
+
+func validPostOutputFailureFact(fact resilience.PostOutputFailureFact) bool {
+	if fact.AccountID <= 0 || fact.AtUnixMs <= 0 {
+		return false
+	}
+	switch fact.Reason {
+	case "stream_read_error", "missing_terminal":
+		return fact.Category == resilience.CategoryTransient
+	case "stall":
+		return fact.Category == resilience.CategoryStall
+	default:
+		return false
+	}
+}
+
+func postOutputAttemptHasEvent(events []*OpsUpstreamErrorEvent, fact resilience.PostOutputFailureFact, sequence uint64, aligned bool) bool {
+	if !fact.HasSendBoundary || !aligned || fact.SendBoundary > sequence {
+		for _, event := range events {
+			if event != nil && event.AccountID == fact.AccountID {
+				return true
+			}
+		}
+		return false
+	}
+	through := fact.ThroughEventSequence
+	if through < fact.SendBoundary || through > sequence {
+		return false
+	}
+	for i := fact.SendBoundary; i < through; i++ {
+		if i >= uint64(len(events)) {
+			break
+		}
+		if event := events[i]; event != nil && event.AccountID == fact.AccountID {
+			return true
+		}
+	}
+	return false
+}
+
+func recordPostOutputFailureFact(ctx context.Context, account *Account, reason string, category resilience.Category, at time.Time) {
+	if account == nil || at.IsZero() {
+		return
+	}
+	st := resilience.StateFrom(ctx)
+	if st == nil {
+		return
+	}
+	proxyID, proxyName := opsUpstreamProxyAttribution(account)
+	st.RecordPostOutputFailureFact(resilience.PostOutputFailureFact{
+		AccountID:   account.ID,
+		AccountName: account.Name,
+		Platform:    account.Platform,
+		ProxyID:     proxyID,
+		ProxyName:   proxyName,
+		AtUnixMs:    at.UnixMilli(),
+		Reason:      reason,
+		Category:    category,
+		Message:     "upstream stream broke after output",
+	})
 }
 
 // opsUpstreamProxyAttribution derives both attribution fields from one

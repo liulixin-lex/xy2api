@@ -95,6 +95,33 @@ type RequestState struct {
 	// streamFailures maps an account to its latest failed attempt that the
 	// stream handler already reported (design §7.6).
 	streamFailures map[int64]any
+
+	// opsUpstreamEventSequence mirrors append-only OpsUpstreamErrorsKey
+	// entries for this request. Send boundaries use this sequence instead of
+	// timestamps so retries in the same millisecond remain distinguishable.
+	opsUpstreamEventSequence  uint64
+	opsUpstreamSendBoundaries map[int64]uint64
+	postOutputFailureFacts    []PostOutputFailureFact
+}
+
+// PostOutputFailureFact is a request-local snapshot of a stream failure that
+// the resilience layer confirmed after client-visible output.
+type PostOutputFailureFact struct {
+	AccountID       int64
+	AccountName     string
+	Platform        string
+	ProxyID         *int64
+	ProxyName       string
+	AtUnixMs        int64
+	Reason          string
+	Category        Category
+	Message         string
+	SendBoundary    uint64
+	HasSendBoundary bool
+	// ThroughEventSequence is the append-only event sequence at the moment
+	// this fact was recorded. Events appended by later attempts are outside
+	// this failure's deduplication interval.
+	ThroughEventSequence uint64
 }
 
 // preludeTrace is storage shared with prelude_trace.go. Its accessors live
@@ -274,6 +301,99 @@ func (s *RequestState) StreamFailureReported(accountID int64) bool {
 	defer s.mu.Unlock()
 	_, ok := s.streamFailures[accountID]
 	return ok
+}
+
+// RecordOpsUpstreamEvent advances the append-only upstream event sequence.
+func (s *RequestState) RecordOpsUpstreamEvent() uint64 {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	s.opsUpstreamEventSequence++
+	sequence := s.opsUpstreamEventSequence
+	s.mu.Unlock()
+	return sequence
+}
+
+// MarkOpsUpstreamSendBoundary snapshots the current upstream event sequence
+// immediately before an HTTP send for accountID.
+func (s *RequestState) MarkOpsUpstreamSendBoundary(accountID int64) {
+	if s == nil || accountID <= 0 {
+		return
+	}
+	s.mu.Lock()
+	if s.opsUpstreamSendBoundaries == nil {
+		s.opsUpstreamSendBoundaries = make(map[int64]uint64)
+	}
+	s.opsUpstreamSendBoundaries[accountID] = s.opsUpstreamEventSequence
+	s.mu.Unlock()
+}
+
+// OpsUpstreamSendBoundary returns the latest send boundary for accountID.
+func (s *RequestState) OpsUpstreamSendBoundary(accountID int64) (uint64, bool) {
+	if s == nil || accountID <= 0 {
+		return 0, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sequence, ok := s.opsUpstreamSendBoundaries[accountID]
+	return sequence, ok
+}
+
+// OpsUpstreamEventSequence returns the number of upstream events appended
+// during this request (or WebSocket turn).
+func (s *RequestState) OpsUpstreamEventSequence() uint64 {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.opsUpstreamEventSequence
+}
+
+// RecordPostOutputFailureFact stores the latest send boundary with a confirmed
+// post-output failure snapshot.
+func (s *RequestState) RecordPostOutputFailureFact(fact PostOutputFailureFact) {
+	if s == nil || fact.AccountID <= 0 {
+		return
+	}
+	s.mu.Lock()
+	if boundary, ok := s.opsUpstreamSendBoundaries[fact.AccountID]; ok {
+		fact.SendBoundary = boundary
+		fact.HasSendBoundary = true
+	}
+	fact.ThroughEventSequence = s.opsUpstreamEventSequence
+	if fact.ProxyID != nil {
+		proxyID := *fact.ProxyID
+		fact.ProxyID = &proxyID
+	}
+	s.postOutputFailureFacts = append(s.postOutputFailureFacts, fact)
+	s.mu.Unlock()
+}
+
+// TakePostOutputFailureFacts returns and clears the pending request-local
+// facts so repeated logging paths cannot append them twice.
+func (s *RequestState) TakePostOutputFailureFacts() []PostOutputFailureFact {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	facts := append([]PostOutputFailureFact(nil), s.postOutputFailureFacts...)
+	s.postOutputFailureFacts = nil
+	s.mu.Unlock()
+	return facts
+}
+
+// ResetPostOutputOpsTracking clears only the supplement's request-local state.
+func (s *RequestState) ResetPostOutputOpsTracking() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.opsUpstreamEventSequence = 0
+	s.opsUpstreamSendBoundaries = nil
+	s.postOutputFailureFacts = nil
+	s.mu.Unlock()
 }
 
 // TurnFailed reports whether MarkTurnFailed was called.

@@ -221,6 +221,9 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 	if !service.HTTPUpstreamSingleAttempt(req.Context()) {
 		client = httpClientWithGrokAccessDeniedFallback(client)
 	}
+	if req != nil {
+		service.RecordOpsUpstreamSendBoundary(req.Context(), accountID)
+	}
 	resp, err := doUpstreamRequest(client, req)
 	if err != nil {
 		s.recordOpenAIHTTP2Failure(profile, entry.protocolMode, entry.proxyKey, err)
@@ -283,6 +286,9 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 	client := s.httpClientForUpstreamRequest(entry.client, req)
 	if !service.HTTPUpstreamSingleAttempt(req.Context()) {
 		client = httpClientWithGrokAccessDeniedFallback(client)
+	}
+	if req != nil {
+		service.RecordOpsUpstreamSendBoundary(req.Context(), accountID)
 	}
 	resp, err := doUpstreamRequest(client, req)
 	if err != nil {

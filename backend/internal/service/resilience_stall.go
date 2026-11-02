@@ -62,6 +62,7 @@ func noteResilienceStall(ctx context.Context, rl *RateLimitService, account *Acc
 	if account == nil || !resilience.Current().StallOn() {
 		return
 	}
+	failureAt := time.Now()
 	st := resilience.StateFrom(ctx)
 	st.MarkAccountFailed(account.ID)
 	// The 200 of a stalled stream must not end the conversation's failed-turn
@@ -69,10 +70,18 @@ func noteResilienceStall(ctx context.Context, rl *RateLimitService, account *Acc
 	st.MarkTurnFailed()
 	if !st.StreamFailureReported(account.ID) && st.ReportStreamFailure(account.ID, nil) {
 		st.SessionFailure(ctx, account.ID, resilience.CategoryStall)
+		if st.FirstOutputNoted() {
+			recordPostOutputFailureFact(ctx, account, "stall", resilience.CategoryStall, failureAt)
+		}
 	}
 	groupID := st.GroupID()
 	resilience.Count(resilience.MetricStall, groupID, account.ID, account.Platform)
-	slog.Warn("resilience.stall", "group_id", groupID, "account_id", account.ID, "platform", account.Platform)
+	slog.Warn("resilience.stall", append(resilience.EventFields(ctx),
+		"group_id", groupID,
+		"account_id", account.ID,
+		"platform", account.Platform,
+		"at_unix_ms", failureAt.UnixMilli(),
+	)...)
 	if rl == nil {
 		return
 	}

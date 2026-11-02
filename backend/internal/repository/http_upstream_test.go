@@ -2,6 +2,7 @@ package repository
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -18,10 +19,50 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/tlsfingerprint"
 	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
+
+func TestHTTPUpstreamRecordsOpsSendBoundaryAtBothTransportEntrypoints(t *testing.T) {
+	t.Run("Do", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		t.Cleanup(server.Close)
+		state := resilience.NewRequestState()
+		state.RecordOpsUpstreamEvent()
+		request, err := http.NewRequestWithContext(resilience.WithRequestState(context.Background(), state), http.MethodGet, server.URL, nil)
+		require.NoError(t, err)
+
+		response, err := NewHTTPUpstream(nil).Do(request, "", 624, 1)
+		require.NoError(t, err)
+		require.NoError(t, response.Body.Close())
+		boundary, ok := state.OpsUpstreamSendBoundary(624)
+		require.True(t, ok)
+		require.Equal(t, uint64(1), boundary)
+	})
+
+	t.Run("DoWithTLS", func(t *testing.T) {
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		t.Cleanup(server.Close)
+		state := resilience.NewRequestState()
+		state.RecordOpsUpstreamEvent()
+		request, err := http.NewRequestWithContext(resilience.WithRequestState(context.Background(), state), http.MethodGet, server.URL, nil)
+		require.NoError(t, err)
+
+		response, err := NewHTTPUpstream(nil).DoWithTLS(request, "", 625, 1, &tlsfingerprint.Profile{Name: "test"})
+		if response != nil {
+			require.NoError(t, response.Body.Close())
+		}
+		boundary, ok := state.OpsUpstreamSendBoundary(625)
+		require.True(t, ok)
+		require.Equal(t, uint64(1), boundary)
+	})
+}
 
 func TestHTTPUpstreamDoCanDisableRedirectsPerRequest(t *testing.T) {
 	var redirectedCalls atomic.Int64
