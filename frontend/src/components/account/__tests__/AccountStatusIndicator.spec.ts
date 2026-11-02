@@ -51,16 +51,13 @@ function makeAccount(overrides: Partial<Account>): Account {
 }
 
 describe('AccountStatusIndicator', () => {
-  it('IQ 降智冷却按模型单独显示，不计入普通限流，过期后仍保持', () => {
+  it('IQ 降智冷却不计入普通限流，也不在状态列显示（由智商检测列显示）', () => {
     const account = makeAccount({ platform: 'openai', schedulable: false, extra: { model_rate_limits: {
       'iq:gpt-6-astra': { rate_limited_at: '2026-10-27T00:00:00Z', rate_limit_reset_at: '2099-10-27T08:05:00Z' },
       'iq:gpt-6.1-sol': { rate_limited_at: '2026-10-27T00:00:00Z', rate_limit_reset_at: '2000-01-01T00:00:00Z' }
     } } })
     const wrapper = mount(AccountStatusIndicator, { props: { account }, global: { stubs: { Icon: true } } })
-    const gates = wrapper.findAll('[data-testid="iq-gate"]').map(gate => gate.text())
-    expect(gates).toEqual([expect.stringContaining('admin.accounts.iqRecheckAt'), expect.stringContaining('admin.accounts.iqRecheckPending')])
-    // The chip uses the IQ column's short model name; the full outbound model is in its title.
-    expect(wrapper.findAll('[data-testid="iq-gate"]').map(gate => gate.attributes('title'))).toEqual(['admin.accounts.iqGateModel', 'admin.accounts.iqGateModel'])
+    expect(wrapper.text()).not.toContain('iqRecheck')
     expect(wrapper.text()).not.toContain('admin.accounts.status.modelRateLimitedUntil')
     expect(wrapper.text()).toContain('admin.accounts.status.paused')
     wrapper.unmount()

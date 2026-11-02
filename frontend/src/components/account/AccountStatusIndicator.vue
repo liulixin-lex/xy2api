@@ -1,5 +1,5 @@
 <template>
-  <!-- 第一行是状态徽标及其附带的小标记；模型级限流与降智冷却竖排在下方，列宽不随它们横向变宽 -->
+  <!-- 第一行是状态徽标及其附带的小标记；模型级限流竖排在下方，列宽不随它们横向变宽。降智冷却在智商检测列显示。 -->
   <div class="flex flex-col items-start gap-1">
     <div class="flex items-center gap-2">
       <!-- Rate Limit Display (429) - Two-line layout -->
@@ -158,14 +158,6 @@
       </div>
     </div>
 
-    <!-- IQ gates: fail-closed per-model cooldowns, shown apart from ordinary rate limits -->
-    <div v-if="iqGates.length" class="flex flex-col gap-1">
-      <span v-for="gate in iqGates" :key="gate.model" class="inline-flex flex-col rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400" :title="t('admin.accounts.iqGateModel', { model: gate.model })" data-testid="iq-gate">
-        <!-- 内置模型用智商列同样的短名（Astra / Sol），完整出站模型名在 title -->
-        <span>{{ t('admin.accounts.iqGateCooling', { model: iqModelLabel(gate.model) }) }}</span>
-        <span class="text-[10px] font-normal opacity-80">{{ new Date(gate.reset_at) > new Date() ? t('admin.accounts.iqRecheckAt', { time: formatDateTime(gate.reset_at, IQ_CLOCK) }) : t('admin.accounts.iqRecheckPending') }}</span>
-      </span>
-    </div>
   </div>
 </template>
 
@@ -175,7 +167,7 @@ import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import type { Account } from '@/types'
 import { formatCountdown, formatDateTime, formatDateTimeToMinute, formatCountdownWithSuffix, formatTime } from '@/utils/format'
-import { IQ_GATE_KEY_PREFIX, IQ_CLOCK, iqGateEntries, iqModelLabel } from '@/components/admin/account/iqCheckPresentation'
+import { IQ_GATE_KEY_PREFIX } from '@/components/admin/account/iqCheckPresentation'
 
 const { t } = useI18n()
 
@@ -186,8 +178,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'show-temp-unsched', account: Account): void
 }>()
-
-const iqGates = computed(() => iqGateEntries(props.account.extra as Record<string, unknown> | undefined))
 
 // Computed: is rate limited (429)
 const isRateLimited = computed(() => {

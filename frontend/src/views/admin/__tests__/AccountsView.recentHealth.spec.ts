@@ -51,8 +51,9 @@ const DataTableStub = {
   props: ['columns', 'data'],
   template: `
     <div>
-      <div v-for="row in data" :key="row.id" :data-test="'status-' + row.id">
-        <slot name="cell-status" :row="row" />
+      <div v-for="row in data" :key="row.id">
+        <div :data-test="'status-' + row.id"><slot name="cell-status" :row="row" /></div>
+        <div :data-test="'recent-' + row.id"><slot name="cell-recent_health" :row="row" /></div>
       </div>
     </div>
   `
@@ -93,7 +94,7 @@ function mountView() {
   })
 }
 
-describe('admin AccountsView recent health in the status column', () => {
+describe('admin AccountsView recent health column', () => {
   beforeEach(() => {
     localStorage.clear()
     listAccounts.mockReset().mockResolvedValue({
@@ -113,21 +114,23 @@ describe('admin AccountsView recent health in the status column', () => {
     })
   })
 
-  it('asks for the visible accounts and shows labelled errors and first token under the status', async () => {
+  it('asks for the visible accounts and shows labelled errors and first token in their own column', async () => {
     const wrapper = mountView()
     await flushPromises()
 
     expect(getBatchRecentHealth).toHaveBeenCalledWith([1, 2])
 
-    const busy = wrapper.get('[data-test="status-1"]')
-    expect(busy.get('[data-test="status-badge"]').text()).toBe('active')
+    const status = wrapper.get('[data-test="status-1"]')
+    expect(status.get('[data-test="status-badge"]').text()).toBe('active')
+    expect(status.find('[data-test="recent-errors"]').exists()).toBe(false)
+    const busy = wrapper.get('[data-test="recent-1"]')
     const errors = busy.get('[data-test="recent-errors"]')
     expect(errors.text()).toBe('admin.accounts.recentErrors:{"count":4}')
     expect(errors.attributes('href')).toBe('/admin/usage?tab=errors&account_id=1')
     expect(errors.attributes('target')).toBe('_blank')
     expect(busy.get('[data-test="first-token-avg"]').exists()).toBe(true)
 
-    const quiet = wrapper.get('[data-test="status-2"]')
+    const quiet = wrapper.get('[data-test="recent-2"]')
     expect(quiet.find('[data-test="recent-errors"]').exists()).toBe(false)
     expect(quiet.find('[data-test="first-token-avg"]').exists()).toBe(false)
   })
@@ -152,8 +155,8 @@ describe('admin AccountsView recent health in the status column', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    expect(wrapper.find('[data-test="status-1"] [data-test="cache-read-ratio"]').exists()).toBe(true)
-    expect(wrapper.get('[data-test="status-2"]').find('[data-test="cache-read-ratio"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="recent-1"] [data-test="cache-read-ratio"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="recent-2"]').find('[data-test="cache-read-ratio"]').exists()).toBe(false)
   })
 
   describe('after the table loader reloads rows', () => {
@@ -209,8 +212,8 @@ describe('admin AccountsView recent health in the status column', () => {
     })
   })
 
-  it('skips the request while the status column is hidden', async () => {
-    localStorage.setItem('account-hidden-columns', JSON.stringify(['status']))
+  it('skips the request while the recent health column is hidden', async () => {
+    localStorage.setItem('account-hidden-columns', JSON.stringify(['recent_health']))
     localStorage.setItem('account-hidden-columns-version', 'scheduler-score-hidden-by-default')
     mountView()
     await flushPromises()

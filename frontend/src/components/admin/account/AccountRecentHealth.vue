@@ -1,7 +1,6 @@
 <template>
-  <!-- 状态在上，下面依次是近期错误、首字、缓存率三行近期健康数据，各自带文字标签 -->
-  <div class="flex flex-col items-start gap-1">
-    <slot />
+  <!-- “近期表现”列：依次是近期错误、首字、缓存率，各自带文字标签；三项都没有数据时显示短横线 -->
+  <div v-if="recentErrors > 0 || firstTokenAvgMs != null || cacheRatio != null" class="flex flex-col items-start gap-1">
     <a
       v-if="recentErrors > 0"
       :href="errorsHref"
@@ -26,6 +25,7 @@
       :title="t('admin.accounts.cacheReadRatioTitle', { count: health?.cache_samples ?? 0 })"
     >{{ t('admin.accounts.cacheReadRatio', { value: cacheRatio.toFixed(1) + '%' }) }}</span>
   </div>
+  <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
 </template>
 
 <script setup lang="ts">
