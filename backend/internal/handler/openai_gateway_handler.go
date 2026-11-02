@@ -659,7 +659,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	if h.rejectIfCyberSessionBlocked(c, apiKey, sessionHashBody, reqModel, cyberBlockFormatResponses) {
 		return
 	}
-	c.Request = c.Request.WithContext(service.WithOpenAIGuardianParentAffinity(
+	c.Request = c.Request.WithContext(h.gatewayService.WithOpenAIGuardianParentAffinity(
 		c.Request.Context(), c, sessionHashBody, reqModel,
 	))
 	requireCompact := legacyCompact
@@ -2875,7 +2875,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		firstMessage,
 		openAIWSIngressFallbackSessionSeed(subject.UserID, apiKey.ID, apiKey.GroupID),
 	)
-	ctx = service.WithOpenAIGuardianParentAffinity(ctx, c, firstMessage, reqModel)
+	ctx = h.gatewayService.WithOpenAIGuardianParentAffinity(ctx, c, firstMessage, reqModel)
 	ctx = service.CopyOpenAIQualityRoutingContext(ctx, c.Request.Context())
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0

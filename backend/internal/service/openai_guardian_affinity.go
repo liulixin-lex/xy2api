@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"strings"
 
@@ -22,21 +23,29 @@ type openAIGuardianParentAffinity struct {
 	legacySessionHash  string
 }
 
-// WithOpenAIGuardianParentAffinity records a Codex review request's parent
-// thread as a routing hint. The hint is resolved against the current group's
-// sticky-session namespace later; client headers never carry an account ID.
-func WithOpenAIGuardianParentAffinity(ctx context.Context, c *gin.Context, body []byte, requestedModel string) context.Context {
-	if ctx == nil || c == nil || !strings.EqualFold(strings.TrimSpace(requestedModel), codexAutoReviewModel) {
+// WithOpenAIGuardianParentAffinity records parent-thread affinity for Codex
+// sub-agents: automatic reviews and child threads carrying encrypted agent_message.
+// The hint is resolved against the current group's sticky-session namespace
+// later; client headers never carry an account ID.
+func (s *OpenAIGatewayService) WithOpenAIGuardianParentAffinity(ctx context.Context, c *gin.Context, body []byte, requestedModel string) context.Context {
+	if ctx == nil || c == nil {
 		return ctx
 	}
 
+	encryptedAgentMessage := openAIRequestHasEncryptedAgentMessage(body)
+	reviewModel := strings.EqualFold(strings.TrimSpace(requestedModel), codexAutoReviewModel)
+	if !reviewModel && !encryptedAgentMessage {
+		return ctx
+	}
 	headerMetadata := c.GetHeader(codexTurnMetadataHeader)
-	bodyMetadata := openAIRequestPayloadView(body).Get("client_metadata.x-codex-turn-metadata").String()
-	if !hasUnambiguousOpenAICodexReviewSubagent(
+	payload := openAIRequestPayloadView(body)
+	bodyMetadata := payload.Get("client_metadata.x-codex-turn-metadata").String()
+	review := reviewModel && hasUnambiguousOpenAICodexReviewSubagent(
 		c.GetHeader(openAISubagentHeader),
 		codexSubagentKindFromMetadata(headerMetadata),
 		codexSubagentKindFromMetadata(bodyMetadata),
-	) {
+	)
+	if !review && !encryptedAgentMessage {
 		return ctx
 	}
 
@@ -45,6 +54,7 @@ func WithOpenAIGuardianParentAffinity(ctx context.Context, c *gin.Context, body 
 		strings.TrimSpace(c.GetHeader(codexParentThreadIDHeader)),
 		codexParentThreadIDFromMetadata(headerMetadata),
 		codexParentThreadIDFromMetadata(bodyMetadata),
+		strings.TrimSpace(payload.Get("client_metadata.x-codex-parent-thread-id").String()),
 	} {
 		if candidate == "" {
 			continue
@@ -58,7 +68,7 @@ func WithOpenAIGuardianParentAffinity(ctx context.Context, c *gin.Context, body 
 		return ctx
 	}
 
-	currentHash, legacyHash := deriveOpenAISessionHashes(parentID)
+	currentHash, legacyHash := s.openAISessionHashesForSeed(c, body, parentID)
 	if currentHash == "" {
 		return ctx
 	}
@@ -66,6 +76,23 @@ func WithOpenAIGuardianParentAffinity(ctx context.Context, c *gin.Context, body 
 		currentSessionHash: currentHash,
 		legacySessionHash:  legacyHash,
 	})
+}
+
+func openAIRequestHasEncryptedAgentMessage(body []byte) bool {
+	if !bytes.Contains(body, []byte(`"agent_message"`)) {
+		return false
+	}
+	for _, item := range openAIRequestPayloadView(body).Get("input").Array() {
+		if item.Get("type").String() != "agent_message" {
+			continue
+		}
+		for _, part := range item.Get("content").Array() {
+			if part.Get("type").String() == "encrypted_content" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func codexParentThreadIDFromMetadata(raw string) string {

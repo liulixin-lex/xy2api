@@ -133,6 +133,16 @@ func grokPreviousResponseSessionSeed(body []byte) string {
 	return "grok-prev-resp:" + id
 }
 
+func (s *OpenAIGatewayService) openAISessionHashesForSeed(c *gin.Context, body []byte, seed string) (current, legacy string) {
+	seed = s.scopedOpenAISessionSeed(c, body, seed)
+	current, legacy = deriveOpenAISessionHashes(seed)
+	if strings.HasPrefix(seed, "openai-routing-v2:") {
+		current = "v2:" + current
+		legacy = ""
+	}
+	return current, legacy
+}
+
 // GenerateExplicitSessionHash generates a sticky-session hash only from explicit
 // client session signals. It intentionally skips content-derived fallback and is
 // used by stateless endpoints such as /v1/images.
@@ -145,12 +155,7 @@ func (s *OpenAIGatewayService) GenerateExplicitSessionHash(c *gin.Context, body 
 		return ""
 	}
 
-	sessionID = s.scopedOpenAISessionSeed(c, body, sessionID)
-	currentHash, legacyHash := deriveOpenAISessionHashes(sessionID)
-	if strings.HasPrefix(sessionID, "openai-routing-v2:") {
-		currentHash = "v2:" + currentHash
-		legacyHash = ""
-	}
+	currentHash, legacyHash := s.openAISessionHashesForSeed(c, body, sessionID)
 	c.Set(openAICacheSessionGinKey, currentHash)
 	if c.Request != nil {
 		if diagnostic := s.newCacheDiagnostic(c, body, "ingress"); diagnostic != nil {
@@ -198,12 +203,7 @@ func (s *OpenAIGatewayService) GenerateSessionHash(c *gin.Context, body []byte) 
 		sessionID = grokStickyAffinitySeed(sessionID, body)
 	}
 
-	sessionID = s.scopedOpenAISessionSeed(c, body, sessionID)
-	currentHash, legacyHash := deriveOpenAISessionHashes(sessionID)
-	if strings.HasPrefix(sessionID, "openai-routing-v2:") {
-		currentHash = "v2:" + currentHash
-		legacyHash = ""
-	}
+	currentHash, legacyHash := s.openAISessionHashesForSeed(c, body, sessionID)
 	c.Set(openAICacheSessionGinKey, currentHash)
 	if c.Request != nil {
 		if diagnostic := s.newCacheDiagnostic(c, body, "ingress"); diagnostic != nil {

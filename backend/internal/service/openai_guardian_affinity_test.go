@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -56,7 +57,7 @@ func guardianAffinityTestContext(t *testing.T, model, subagent, parentHeader, me
 	if metadata != "" {
 		c.Request.Header.Set(codexTurnMetadataHeader, metadata)
 	}
-	return WithOpenAIGuardianParentAffinity(context.Background(), c, nil, model)
+	return (&OpenAIGatewayService{}).WithOpenAIGuardianParentAffinity(context.Background(), c, nil, model)
 }
 
 func TestWithOpenAIGuardianParentAffinity_RequiresUnambiguousReviewLineage(t *testing.T) {
@@ -84,7 +85,7 @@ func TestWithOpenAIGuardianParentAffinity_RequiresUnambiguousReviewLineage(t *te
 		c, _ := gin.CreateTestContext(rec)
 		c.Request = httptest.NewRequest(http.MethodGet, "/openai/v1/responses", nil)
 		body := []byte(`{"type":"response.create","response":{"model":"codex-auto-review","client_metadata":{"x-codex-turn-metadata":"{\"parent_thread_id\":\"` + parentID + `\",\"subagent_kind\":\"guardian\"}"}}}`)
-		ctx := WithOpenAIGuardianParentAffinity(context.Background(), c, body, codexAutoReviewModel)
+		ctx := (&OpenAIGatewayService{}).WithOpenAIGuardianParentAffinity(context.Background(), c, body, codexAutoReviewModel)
 		affinity, ok := openAIGuardianParentAffinityFromContext(ctx)
 		require.True(t, ok)
 		require.Equal(t, wantHash, affinity.currentSessionHash)
@@ -100,6 +101,119 @@ func TestWithOpenAIGuardianParentAffinity_RequiresUnambiguousReviewLineage(t *te
 		t.Run(name, func(t *testing.T) {
 			_, ok := openAIGuardianParentAffinityFromContext(ctx)
 			require.False(t, ok)
+		})
+	}
+}
+
+func TestWithOpenAIGuardianParentAffinity_MatchesScopedParentSession(t *testing.T) {
+	const parentID = "parent-thread"
+	svc := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "affinity-test-secret"}}}
+	for _, tc := range []struct {
+		name  string
+		model string
+	}{
+		{name: "existing review lineage", model: codexAutoReviewModel},
+		{name: "encrypted child lineage", model: "gpt-5.4"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			parent := cacheTestContext(1, 10)
+			parent.Request.Header.Set("session_id", parentID)
+			parent.Request.Header.Del("session-id")
+			parentBody := []byte(`{"model":"` + tc.model + `","input":"parent request"}`)
+			want := svc.GenerateSessionHash(parent, parentBody)
+			require.True(t, strings.HasPrefix(want, "v2:"))
+
+			child := cacheTestContext(1, 10)
+			child.Request.Header.Set(openAISubagentHeader, "guardian")
+			child.Request.Header.Set(codexParentThreadIDHeader, parentID)
+			body := []byte(`{"model":"` + tc.model + `","client_metadata":{"x-codex-parent-thread-id":"` + parentID + `"},"input":[{"type":"agent_message","content":[{"type":"encrypted_content","encrypted_content":"ciphertext"}]}]}`)
+			ctx := svc.WithOpenAIGuardianParentAffinity(child.Request.Context(), child, body, tc.model)
+			affinity, ok := openAIGuardianParentAffinityFromContext(ctx)
+			require.True(t, ok)
+			require.Equal(t, want, affinity.currentSessionHash, "parent affinity must use the parent's scoped session hash")
+			require.Empty(t, affinity.legacySessionHash)
+		})
+	}
+}
+
+func TestWithOpenAIGuardianParentAffinity_EncryptedAgentMessage(t *testing.T) {
+	const parentID = "parent-thread"
+	const encryptedInput = `[{"type":"agent_message","content":[{"type":"input_text","text":"task"},{"type":"encrypted_content","encrypted_content":"ciphertext"}]}]`
+	for _, tc := range []struct {
+		name         string
+		input        string
+		parentHeader string
+		turnMetadata string
+		envelope     bool
+		want         bool
+	}{
+		{name: "encrypted agent message", input: encryptedInput, want: true},
+		{name: "websocket envelope", input: encryptedInput, envelope: true, want: true},
+		{name: "no encrypted fragment", input: `[{"type":"agent_message","content":[{"type":"input_text","text":"task"}]}]`},
+		{name: "encrypted non-agent message", input: `[{"type":"message","content":[{"type":"encrypted_content","encrypted_content":"ciphertext"}]}]`},
+		{name: "ordinary request", input: `"task"`},
+		{name: "matching candidates", input: encryptedInput, parentHeader: parentID, turnMetadata: `{"parent_thread_id":"parent-thread"}`, want: true},
+		{name: "conflicting parent header", input: encryptedInput, parentHeader: "other-parent"},
+		{name: "conflicting turn metadata", input: encryptedInput, turnMetadata: `{"parent_thread_id":"other-parent"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			c.Request.Header.Set(codexParentThreadIDHeader, tc.parentHeader)
+			c.Request.Header.Set(codexTurnMetadataHeader, tc.turnMetadata)
+			body := []byte(`{"model":"gpt-5.4","client_metadata":{"x-codex-parent-thread-id":"` + parentID + `"},"input":` + tc.input + `}`)
+			if tc.envelope {
+				body = append(append([]byte(`{"type":"response.create","response":`), body...), '}')
+			}
+			ctx := (&OpenAIGatewayService{}).WithOpenAIGuardianParentAffinity(c.Request.Context(), c, body, "gpt-5.4")
+			affinity, ok := openAIGuardianParentAffinityFromContext(ctx)
+			require.Equal(t, tc.want, ok)
+			if tc.want {
+				current, legacy := deriveOpenAISessionHashes(parentID)
+				require.Equal(t, current, affinity.currentSessionHash)
+				require.Equal(t, legacy, affinity.legacySessionHash)
+			} else {
+				require.Equal(t, c.Request.Context(), ctx)
+			}
+		})
+	}
+}
+
+func TestWithOpenAIGuardianParentAffinity_PreservesRequestState(t *testing.T) {
+	svc := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "affinity-test-secret"}}}
+	for _, attached := range []bool{false, true} {
+		t.Run(map[bool]string{false: "without quality state", true: "with quality state"}[attached], func(t *testing.T) {
+			c := cacheTestContext(1, 10)
+			c.Request = c.Request.WithContext(withOpenAIQualityRouting(c.Request.Context()))
+			body := []byte(`{"model":"gpt-6-sol","client_metadata":{"x-codex-parent-thread-id":"parent-thread"},"input":[{"type":"agent_message","content":[{"type":"encrypted_content","encrypted_content":"ciphertext"}]}]}`)
+			childHash := "child-session-hash"
+			if attached {
+				childHash = svc.GenerateSessionHash(c, body)
+				require.NotNil(t, qualityRequest(c.Request.Context()))
+			} else {
+				c.Set(openAICacheSessionGinKey, childHash)
+			}
+			c.Request = c.Request.WithContext(withOpenAILegacySessionHash(c.Request.Context(), "child-legacy-hash"))
+			beforeRequest := c.Request
+			beforeQuality := qualityRequest(c.Request.Context())
+			beforeKeys := make(map[string]any, len(c.Keys))
+			for key, value := range c.Keys {
+				beforeKeys[key] = value
+			}
+
+			ctx := svc.WithOpenAIGuardianParentAffinity(c.Request.Context(), c, body, "gpt-6-sol")
+			_, ok := openAIGuardianParentAffinityFromContext(ctx)
+			require.True(t, ok)
+			require.Same(t, beforeRequest, c.Request)
+			require.Equal(t, beforeKeys, c.Keys)
+			require.Equal(t, childHash, c.GetString(openAICacheSessionGinKey))
+			require.Equal(t, "child-legacy-hash", openAILegacySessionHashFromContext(ctx))
+			if beforeQuality == nil {
+				require.Nil(t, qualityRequest(ctx))
+			} else {
+				require.Same(t, beforeQuality, qualityRequest(ctx))
+				require.Equal(t, childHash, qualityRequest(ctx).session)
+			}
 		})
 	}
 }
