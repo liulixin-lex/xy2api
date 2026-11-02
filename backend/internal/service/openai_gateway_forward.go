@@ -1173,7 +1173,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				body = retryBody
 				requestView = newOpenAIRequestView(body)
 				reqBody = nil
-				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying non-WSv2 request after %s (account: %s)", reason, account.Name)
+				logger.FromContext(ctx).Info("resilience.request_repair_replay",
+					zap.Int64("account_id", account.ID), zap.String("kind", reason), zap.String("form", "http"))
 				continue
 			}
 			if retryBody, fallbackModel, retry := s.prepareOpenAICompactFallbackRetry(

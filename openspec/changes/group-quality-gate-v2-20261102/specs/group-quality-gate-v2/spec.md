@@ -113,7 +113,7 @@ In a group whose gate is enabled, the scheduler MUST remove a session's binding 
 
 - **Bound account**: a member of the group that is not ejected and not pinned, with at least 10 warm samples and a warm p90 above the group's policy fast line (not the effective fast line).
 - **Target**: at least one other member that is in tier 0 in this group, is not vetoed, is eligible for this request (existing eligibility, channel restriction, latency hold, parent health, runtime block and profit-gate checks) and has a free slot by real-time load.
-- **Request**: not a strong continuation (`previous_response_id`, guardian parent, or a WebSocket turn pinned to its chain); session failover rebinding is on; the session is not owned by OpenAI quality routing; the group is not under share scheduling; and low-rate priority is in effect for this selection, since only then do the tiers steer normal selection to tier 0.
+- **Request**: not a strong continuation (`previous_response_id`, Codex sub-agent parent-thread affinity, or a WebSocket turn pinned to its chain); session failover rebinding is on; the session is not owned by OpenAI quality routing; the group is not under share scheduling; and low-rate priority is in effect for this selection, since only then do the tiers steer normal selection to tier 0.
 
 The check MUST run at the call site of the 0.4.9 migration, in the original load-aware selection.
 

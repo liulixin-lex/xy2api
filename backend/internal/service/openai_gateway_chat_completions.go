@@ -418,7 +418,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		if retryBody, reason, changed, repairErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, respBody); repairErr == nil &&
 			changed && openAIResponsesRejectedFieldRetryStateForRequest(c, body).Allow(retryBody) {
 			closeAttempt()
-			logger.L().Info("resilience.request_repair_replay",
+			logger.FromContext(ctx).Info("resilience.request_repair_replay",
 				zap.Int64("account_id", account.ID),
 				zap.String("kind", reason),
 				zap.String("form", "http"),

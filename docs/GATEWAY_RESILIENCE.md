@@ -103,8 +103,9 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | 中转站插入的 `SSE-Keep-Alive` 空 delta 帧；0.4.4 起还包括 `response.created` 之前、`delta` 为空字符串或只有空白的 delta（第一个非空 delta 之后的空白属于正文，照常转发） | 直接丢弃，不转发、不算首输出（openai-python 遇到会报错，网关也会因此提前放弃换号）；但算上游存活，不会因此被判停滞。`response.created` 之前的非空 delta 是真实内容，照常立即输出，计入 `pre_created_delta`。缺省首字口径（`openai_ttft_mode=semantic`）下，用量记录的首字时间仍从第一帧算起，与 0.3.0 一致；`visible` 口径不算这类帧 |
 | Claude 请求分发到 GPT 中转时，中转站拒绝续链（`previous_response_id`）并返回笼统的 4xx | 去掉续链按完整历史重放一次，并对该会话在该账号上关闭续链。0.4.2 起只认指向续链的应答：404/409、提到上一响应的文案，或 400/422 上的笼统中转文案（单独的 “Upstream request failed”、“could not be processed”、没有文案）；指名其他参数的错误（如 `temperature` 越界）、上下文超长、内容审核、图片、模型不存在等照常返回，不重放。按笼统文案猜测的重放计入请求预算的尝试次数，预算用尽时不重放 |
 | 上游内容安全拒绝（如智谱 `request_check_blocked`、`content_policy_violation`） | 400 `invalid_request_error`，`code: content_policy_violation`，附脱敏后的上游原文；不重试、不换号，账号不受罚。只关闭 `errors` 时回到 0.3.0 的 502 文案。0.5.1：code 或 type 为 `content_policy`，以及 400、403、451 上的“内容政策”文案也按内容安全拒绝处理，带账号措辞（封禁、organization 等）的照旧；403 上的这类文案以前判为鉴权失败并罚号，总开关开启时不再罚号。运维记录标为业务限制，见 §5.1 |
-| 上游无法解密或校验请求中的加密内容（0.5.1） | code 为 `invalid_encrypted_content`、`encrypted_context_invalid`，或文案为 encrypted content 加 “could not be verified”“could not be decrypted”“hydration failed” 之一、“encrypted function output content could not be decrypted”、“could not validate encrypted continuation context”，密文通常来自别的账号。按请求级处理：不随机换号，不罚号（临时不可调度规则与自定义错误码也不作用于它），不计会话失败与分组质量门槛的软失败；与上下文超长一样不受总开关影响。OpenAI 原生 Responses 在第一个内容之前遇到它时，若点名的是 reasoning（`rs_`）或 compaction（`cmp_`）条目，或没有点名条目但剥离确实改变了请求体，就删掉 reasoning 的 `encrypted_content`、丢弃带密文的 compaction 后同号重放一次；HTTP 400、502 与带内 `response.failed` 在同一账号尝试内合计一次。`agent_message`（`amsg_`）与 function output 的密文是正文，不剥离，原错误照常返回。Codex 子 agent 优先回到父线程的账号，见 §4.10 |
-| 上游明确点名的请求兼容问题（0.5.1） | 上游明确拒绝（结构化 code、param，或 “Unsupported parameter: X” 文案）时，删除请求顶层已有的 `top_p`、`metadata`、`temperature`、`frequency_penalty`、`presence_penalty`（原有 `max_output_tokens`、`truncation`）；输出上限、停止条件、模板、用量选项、缓存保留与身份类字段被拒时照原样返回。裸名 `prompt_cache_breakpoint` 只删 `input[i]` 与 `input[i].content[j]` 两层协议位置，不进入工具参数、输出或用户 JSON。`tool_search_call` 的 `arguments` 被拒为非对象时，只有字符串能严格解析为 JSON 对象才改成对象（保留原始字节），同一请求内满足条件的同类条目一并转换，其余照原样返回。修复后同号重放，每个请求合计最多 6 次，同一请求体不重放第二次；HTTP 与原生 Responses 第一个内容之前的带内 `response.failed` 都适用，Chat Completions 路径同样适用；不认识的 400 照旧返回。Codex Alpha Search 的 API Key 账号返回 404、405，或返回 400 且消息含 `do not support the requested endpoint`、`not encrypted history or tool items` 时，按端点不支持换号，不写账号错误状态 |
+| 上游无法解密或校验请求中的加密内容（0.5.1） | code 为 `invalid_encrypted_content`、`encrypted_context_invalid`，或文案为 encrypted content 加 “could not be verified”“could not be decrypted”“hydration failed” 之一、“encrypted function output content could not be decrypted”、“could not validate encrypted continuation context”，密文通常来自别的账号。按请求级处理：不随机换号，不罚 OpenAI 账号（临时不可调度规则与自定义错误码也不作用于它），不计会话失败与分组质量门槛的软失败；与上下文超长一样不受总开关影响。OpenAI 原生 Responses 在第一个内容之前遇到它时，若点名的是 reasoning（`rs_`）或 compaction（`cmp_`）条目，或没有点名条目但剥离确实改变了请求体，就删掉 reasoning 的 `encrypted_content`、丢弃带密文的 compaction 后同号重放一次；HTTP 400、502 与带内 `response.failed` 在同一账号尝试内合计一次。`agent_message`（`amsg_`）与 function output 的密文是正文，不剥离。不能剥离或不再重放时按请求级失败返回：HTTP 保持原状态（400 带原文，502 为通用文案），带内照常写出原 `response.failed`。Codex 子 agent 优先回到父线程的账号，见 §4.10 |
+| 上游明确点名的请求兼容问题（0.5.1） | 上游明确拒绝（结构化 code、param，或 “Unsupported parameter: X” 文案）时，删除请求顶层已有的 `top_p`、`metadata`、`temperature`、`frequency_penalty`、`presence_penalty`（原有 `max_output_tokens`、`truncation`）；输出上限、停止条件、模板、用量选项、缓存保留与身份类字段被拒时照原样返回。裸名 `prompt_cache_breakpoint` 只删 `input[i]` 与 `input[i].content[j]` 两层协议位置，不进入工具参数、输出或用户 JSON。`tool_search_call` 的 `arguments` 被拒为非对象时，只有字符串能严格解析为 JSON 对象才改成对象（保留原始字节），同一请求内满足条件的同类条目一并转换，其余照原样返回。修复后同号重放，每个请求合计最多 6 次，同一账号尝试内同一请求体不重放第二次；HTTP 与原生 Responses 第一个内容之前的带内 `response.failed` 都适用，Chat Completions 路径的 HTTP 错误同样适用；不认识的 400 照旧返回 |
+| Codex Alpha Search 的端点不支持（0.5.1） | API Key 账号返回 404、405，或返回 400 且消息含 `do not support the requested endpoint`、`not encrypted history or tool items` 时，按端点不支持换号，不写账号错误状态；所有候选都这样失败时按换号耗尽返回 502 |
 | Anthropic 中转在流内报 `rate_limit_error`（如并发上限） | 输出前可换号；耗尽时 429 带 `Retry-After`，不再是 502“访问被禁止”。`overloaded_error` 耗尽时为 503 `api_error`（0.4.12，见下一行；以前为 529），`api_error` 为 502 |
 | Anthropic 协议下网关自身的无号与瞬时失败（0.4.4） | 错误 `type` 统一为 `api_error`（含只有 code 的错误体），状态码与正文不变。0.4.12 起上游的容量降载（`overloaded_error`、529）换号耗尽后也返回 503 `api_error`，消息里内嵌的 `overloaded_error` 字样一并改写；已提交的流写 `event: error`，类型同样为 `api_error`。覆盖 Gateway 与 OpenAI→Messages 的耗尽出口、错误透传规则的提前返回、原生 Anthropic 与 API Key 直通的流内终止。Claude Code 把任何 `overloaded_error` 当作 529 计数，连续 3 次就停止或切换模型；以前上游真实返回的 `overloaded_error` 会原样到达客户端。运维记录的分类仍为 `CAPACITY_SHED`，原始响应体保留；限流、权限与回合封顶的语义不变。关闭 `errors` 时不做这两项改写，回到 0.4.3 |
 | OpenAI Responses 本地合成的失败（0.4.12） | 网关在原生 Responses 流里自己判定的失败（上游单行超长、输出后读错、停滞）以 `response.failed` 结束（`server_error`，沿用本响应的 id、递增的序号与已得用量），可重试时带 `error.headers.retry-after`，随后关闭上游。以前写顶层 `event: error`，Codex 会忽略它、只在断流后报错，原因与重试时间丢失。上游自己发出的错误事件照原样处理 |
@@ -311,25 +312,25 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 
 ### 4.10 报错补漏（0.5.1）
 
-0.5.0 之后的 OpenAI 报错复盘里，有四类失败可以在网关内化解或改正口径：订阅共享额度用尽、加密内容跨号、内容安全拒绝的运维口径、上游已点名的请求兼容问题。本版只补这四处，不加开关，不改请求预算、首输出档位与上游传输。客户端可见的行为逐项见 §3。
+0.5.0 之后的 OpenAI 报错复盘里，以下几类失败可以在网关内化解或改正口径。本版不加开关，不新增预算参数，不改首输出档位与上游传输。客户端可见的行为逐项见 §3。
 
 **订阅共享额度用尽**
 
-- `subscription_sharing_usage_limit_exceeded` 与文案 “subscription sharing usage limit” 归入余额不足：HTTP 形态换号并进入余额暂停阶梯（§4.9）。以前 502 形态按瞬时失败只冷却该模型，同一账号被反复撞上；带内形态按 400 直接返回，Codex 收到后中断。
+- `subscription_sharing_usage_limit_exceeded` 与文案 “subscription sharing usage limit” 归入余额不足：HTTP 形态换号并进入余额暂停阶梯（§4.9）。以前 502 形态按瞬时失败只冷却该模型，同一账号被反复撞上；带内形态不换号、不暂停，`response.failed` 原样写给客户端（运维记为 400），Codex 按未知错误重连 5 次，每次都落回同一账号。
 - OpenAI 流内事件只认结构化的余额码，覆盖全部余额码（以前带内 `insufficient_quota` 换号但不暂停）：第一个内容之前换号并暂停；之后不重放，只暂停，不计会话失败与输出后软冷却。换号时保留上游原始载荷，没有关键词的余额码在换号循环里同样按余额处理。
 
 **加密内容跨号**
 
 - 判据统一见 §3，HTTP、中转包成 502 的形态与带内事件都按请求级处理。账号副作用的三个入口（OpenAI 账号错误处理、错误策略检查、通用上游错误处理）在匹配临时不可调度规则与自定义错误码之前早退，Chat 等兼容入口与 count_tokens 也经过这三个入口。
 - Codex 子 agent 的父线程亲和：以前只用于 Codex 自动审查（模型 `codex-auto-review`）；现在输入里有 `agent_message` 条目、且其 `content` 带 `encrypted_content` 片段的子线程，也优先选父线程的粘性账号，因为只有父线程的账号能解开这段任务正文。父线程 ID 取自请求头、turn metadata 与请求体的 `client_metadata.x-codex-parent-thread-id`，非空候选不一致时放弃，不接受客户端指定账号。HTTP 与 WebSocket 首帧共用这一规则。
-- 父线程的会话键与普通请求一样按 API Key、分组、模型加作用域。以前直接对父线程 ID 求哈希，查不到 routing v2 起加了作用域的绑定，自动审查的亲和实际没有生效。
+- 父线程的会话键与普通请求一样按 API Key、分组、模型加作用域。以前直接对父线程 ID 求哈希，查不到 routing v2 起加了作用域的绑定，自动审查的亲和实际没有生效。修正后，模型相同的子 agent 能命中父绑定；自动审查（`codex-auto-review`）因模型不同仍查不到，见 §7。
 - 父号选择仍遵守排除集、能力、隐私与利润门；分组质量门槛的豁免只用于命中的父号那一次粘性选择。父号不可用时普通选号，不带豁免，也不改写父线程的绑定。计算父线程哈希不改子请求的会话、质量路由与 lineage 状态。这只降低同模型、同 API Key、同分组且父绑定仍在时的跨号，边界见 §7。
 - 同号剥离重放见 §3。HTTP 与带内都消耗本请求预算的一次原地重试（与 web_search 补声明相同），预算不足时不重放、原错误照常返回。带内重放与 web_search 补声明同一结构：在第一个内容之前收到可修复的拒绝时，先在本地算出新请求体，预算许可后才关闭这次响应、按新请求体重新发起；被拒字段的带内修复同样走这条路径。
 
 **内容安全拒绝的运维口径**
 
 - 运维记录的业务限制以前只在没有上游错误上下文时才判，上游内容拒绝因此全部计入 SLA。现在按本次终态判断：终态出口改写了 type 或 code 时由出口打标记；否则用原始的 type、code，以及最后一次上游的状态与原文，调用同一份韧性分类，只认内容安全拒绝。普通 400 与上游 5xx 仍计入 SLA，见 §5.1。
-- 分类表补 `content_policy` 码与“内容政策”文案。`invalid_prompt`（“flagged as potentially violating our usage policy”）不在此列：400 仍计入 SLA，被中转包成 502 时仍按瞬时失败换号。
+- 分类表补 `content_policy` 码与“内容政策”文案。`invalid_prompt`（“flagged as potentially violating our usage policy”）不在此列：仍计入 SLA，被中转包成 502 时仍换号。
 
 **请求兼容类 400**
 
@@ -337,7 +338,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 
 **运维记录与分组质量门槛**
 
-- 运维错误记录里每次尝试的 `resilience_category` 按完整上游载荷计算（原生与兼容路径的终态、带内事件），与换号决策一致；只有 code 的加密拒绝不再按文案记成 `TRANSIENT`。
+- 运维错误记录里每次尝试的 `resilience_category` 按完整上游载荷计算（原生与兼容路径的终态、带内事件），与换号决策一致，也与换号尝试的记录（此前已按完整载荷）一致；只有 code 的加密拒绝不再按文案记成 `TRANSIENT`，被中转包成 502 的 `invalid_prompt` 等请求错误也按载荷记为 `CLIENT_ERROR`。
 - 分组质量门槛只把 `TRANSIENT`、`FIRST_OUTPUT_TIMEOUT`、`STALL` 计为软失败，额度用尽（`BALANCE`）与加密拒绝（`CLIENT_ERROR`）从此不再计入。
 
 **开关**：没有新增开关。余额暂停随总开关与 `balance.enabled`（关闭时流内余额码照样换号，只是不暂停）；内容拒绝不罚号随总开关（关闭时 403 按原处理）；总开关关闭时 `resilience_category` 为空（现有语义）。加密拒绝的请求级处理、同号剥离重放、被拒字段修复、Alpha Search 换号与父线程亲和不受开关控制，见 §6。
@@ -409,7 +410,7 @@ info 级，只写应用标准输出（量大，明细已有计数或未送达表
 - `transient_cooldown`、`transient_lifted`、`undelivered_cleanup`；
 - `content_policy_refusal`（上游内容安全拒绝，含账号、平台、状态与截断的上游原文）、`content_policy_no_failover`（换号循环因内容安全拒绝结束）；
 - `web_search_replay`（补 web_search 声明后同号重放）、`web_search_declaration_learned`（重放成功，该账号 6 小时内同类请求直接补声明）；
-- `request_repair_replay`（0.5.1）：网关修好上游点名的问题后同号重放（§3、§4.10），含 `account_id`、`kind`（`encrypted_content` 或被拒字段的原因）与 `form`（`http` 或 `inband`）；Chat Completions 路径另带 `path=chat`。不记请求体；
+- `request_repair_replay`（0.5.1）：网关修好上游点名的问题后同号重放（§3、§4.10），覆盖 OpenAI 原生 Responses 的 HTTP 与带内修复、Chat Completions 路径的被拒字段修复；透传与 WebSocket 路径的被拒字段重放沿用原有日志。含 `account_id`、`kind`（`encrypted_content` 或被拒字段的原因）与 `form`（`http` 或 `inband`）；Chat Completions 路径另带 `path=chat`。不记请求体；
 - `pre_created_delta`（0.4.4）：上游在 `response.created` 之前发出非空 delta，含 `group_id`、`account_id` 与 `bytes`（只记字节数，不记内容）；
 - `capability_learned`（0.4.4）：账号被学为仅流式，含 `account_id`、`protocol`、`expires_at`；
 - `model_breaker`（0.4.9）：非 OpenAI 账号×模型新设一段冷却（§4.6），含 `account_id`、`platform`、`model`、`failure_streak`、`cooldown`；同轮内不再升级的失败不记。
@@ -468,7 +469,7 @@ OpenAI 判慢降序与会话迁移的事件（0.4.9，见 §4.5）不带 `resili
 | OpenAI Responses 透传的有界暂存（0.4.5） | 第一个输出前的开场事件改用原生路径的暂存（8 MiB 上限，超过 64 KiB 写入已解除链接的临时文件），超出上限时换号；以前在内存中不设上限 |
 | Gemini 5xx 与 408 交给通用错误处理（0.4.9） | 以前 Gemini 只把 401、403、529 交给通用错误处理，其余非 429 直接返回；现在 5xx 与 408 也交给它，账号的临时不可调度规则与原版对 5xx 的处理同样生效，自定义错误码未命中时仍跳过。模型级冷却（§4.6）仍随总开关 |
 | 报错后的路由、出口与绑定（0.4.12） | 余额不足、模型不可用与 402 `deactivated_workspace` 在各平台换号，明确的模型不可用让该账号对该模型 30 分钟不可用，这几类耗尽后不清空排除集重选；原生 Responses 本地失败写 `response.failed`；Messages 的 Claude Code 专属拒绝返回 403；在途预留的 429 标为业务限制；排队与并发上限的 429 带 `Retry-After: 5`；客户端错误消息去掉上游标识；成功后的会话绑定不随客户端断开取消；OpenAI 原版选号的替补按会话稳定哈希排序。见 §3、§4.9 |
-| 报错补漏（0.5.1） | 加密内容拒绝按请求级处理（不换号、不罚号，临时不可调度规则与自定义错误码不作用于它）与同号剥离重放；被拒字段修复，含 Chat 路径与带内形态；Alpha Search 能力类 400 换号；Codex 子 agent 的父线程亲和及其会话键作用域修正；流内余额码换号（暂停仍随 `balance.enabled`），见 §4.10 |
+| 报错补漏（0.5.1） | 加密内容拒绝按请求级处理（不换号、不罚号，临时不可调度规则与自定义错误码不作用于它）与同号剥离重放；被拒字段修复，含 Chat 路径与带内形态；Alpha Search 能力类 400 换号；Codex 子 agent 的父线程亲和及其会话键作用域修正；流内余额码换号（暂停仍随总开关与 `balance.enabled`）；上游内容安全拒绝在运维记录中标为业务限制，见 §4.10 |
 | 上传中断记 499 | 读请求体时连接中断造成的 400 在运维记录里记为 499 |
 | §9.8 续链被拒整轮重放 | Claude 请求分发到 GPT 中转、续链以笼统 4xx 被拒时去掉续链重放一次并关闭该会话续链（0.4.2 收窄判定，见 §3） |
 | `/ready` 就绪检查 | 检查数据库与 Redis，见 §2.2（0.4.2） |
@@ -504,7 +505,7 @@ OpenAI 判慢降序与会话迁移的事件（0.4.9，见 §4.5）不带 `resili
 - 韧性设置的保存没有版本校验：两位管理员基于旧页面先后保存时，后保存的覆盖先保存的（份额策略有版本校验）。单管理员维护时无影响；多人维护时保存前先刷新页面。
 - 未送达的计数按“开场事件之后是否写出过内容”判定，Gemini 原生流等不带这些开场事件的路径，第一个数据块即算送达。
 - Codex 子 agent 的父线程亲和（§4.10）按本次请求的模型查父绑定：子线程与父线程模型不同时（自动审查即如此）查不到。父线程已迁号或绑定过期、父号在输出前失败后换到的号解不开、历史密文来自多个账号时，仍按请求级失败结束。
-- 带内的请求修复重放（加密剥离与被拒字段，§3）只接入 OpenAI 原生 Responses 路径；Responses 透传与 WebSocket 不做带内修复，WebSocket 沿用自身的加密恢复。
+- 带内的请求修复重放（加密剥离与被拒字段，§3）只接入 OpenAI 原生 Responses 路径；Chat Completions、Messages、Responses 透传与 WS HTTP 桥不做带内修复（Chat 只修 HTTP 被拒字段），HTTP 加密剥离同样只在原生路径；WebSocket 沿用自身的加密恢复。
 
 ## 8. 与份额调度的关系
 

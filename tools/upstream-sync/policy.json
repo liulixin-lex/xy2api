@@ -3453,6 +3453,38 @@
     {
       "path": "backend/internal/service/openai_ws_forwarder_support.go",
       "value": "if resilience.IsEncryptedContentRejection(codeRaw, msgRaw) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "invalidEncryptedContentError := isOpenAIEncryptedContentRejectionPayload(respBody) || resilience.IsEncryptedContentRejection(upstreamCode, upstreamMsg)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "(resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusBadGateway) &&"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "nextBody, changed, repairErr := openAIEncryptedContentRepairBody(body, upstreamMsg)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "if changed && resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(account.ID, false, time.Now()) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "if kind == resilience.ReasonEncryptedContent {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "zap.Int64(\"account_id\", account.ID), zap.String(\"kind\", reason), zap.String(\"form\", \"http\"))"
+    },
+    {
+      "path": "backend/internal/service/ops_upstream_context.go",
+      "value": "OpsUpstreamContentPolicyKey = \"ops_upstream_content_policy\""
+    },
+    {
+      "path": "backend/internal/service/ops_upstream_context.go",
+      "value": "func MarkOpsUpstreamContentPolicy(c *gin.Context) {"
     }
   ],
   "forbidden_module_paths": [
@@ -4913,6 +4945,11 @@
       "id": "xy-error-recovery-routing",
       "path": "backend/internal/service/openai_encrypted_content_rejection_test.go",
       "literal": "func TestForwardOpenAIRequestRepairRetries502EncryptedRejection"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_alpha_search_test.go",
+      "literal": "func TestIsOpenAIAlphaSearchEndpointUnsupported"
     },
     {
       "id": "xy-upstream-balance",
