@@ -1156,7 +1156,7 @@
     },
     {
       "path": "backend/internal/handler/gateway_handler_responses.go",
-      "value": "writeResponsesFailedSSEWithOpening(c, errType, explicitCode, message, gatewayStreamHasOnlyHeartbeats(c))"
+      "value": "writeResponsesFailedSSEWithOpeningStatus(c, status, errType, explicitCode, message, gatewayStreamHasOnlyHeartbeats(c))"
     },
     {
       "path": "backend/internal/handler/gateway_handler_responses.go",
@@ -1213,6 +1213,10 @@
     {
       "path": "backend/internal/handler/openai_gateway_handler.go",
       "value": "failoverErr.IsCapabilityStreamOnly()"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "writeResponsesFailedSSEWithStatus(c, status, errType, code, message)"
     },
     {
       "path": "backend/internal/handler/openai_chat_completions.go",
@@ -3329,6 +3333,226 @@
     {
       "path": "backend/internal/service/openai_gateway_responses_anthropic_native.go",
       "value": "anthropicBody = enforceConvertedCacheControlLimit(anthropicBody)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "return resilience.IsBalanceCode(openAIStreamFailedEventErrorCode(payload))"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "return statusCode, s.handleOpenAIAccountUpstreamError(ctx, account, statusCode, headers, payload, model)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "|| openAIStreamBalanceFailure(payload)"
+    },
+    {
+      "path": "backend/internal/service/resilience_post_output.go",
+      "value": "case resilience.CategoryClientError, resilience.CategoryClientCancel, resilience.CategoryBalance:"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_upstream_errors.go",
+      "value": "MarkOpsUpstreamContentPolicy(c)"
+    },
+    {
+      "path": "backend/internal/handler/resilience_errors.go",
+      "value": "service.MarkOpsUpstreamContentPolicy(c)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, respBody)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "changed && openAIResponsesRejectedFieldRetryStateForRequest(c, body).Allow(retryBody)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "closeAttemptOnce.Do(func()"
+    },
+    {
+      "path": "backend/internal/service/openai_alpha_search.go",
+      "value": "unsupportedEndpoint := isOpenAIAlphaSearchEndpointUnsupported(account, resp.StatusCode, respBody)"
+    },
+    {
+      "path": "backend/internal/service/openai_alpha_search.go",
+      "value": "shouldApplyOpenAIAlphaSearchAccountErrorSideEffects(resp.StatusCode) && !unsupportedEndpoint"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "currentHash, legacyHash := s.openAISessionHashesForSeed(c, body, sessionID)"
+    },
+    {
+      "path": "backend/internal/service/openai_guardian_affinity.go",
+      "value": "encryptedAgentMessage := openAIRequestHasEncryptedAgentMessage(body)"
+    },
+    {
+      "path": "backend/internal/service/openai_guardian_affinity.go",
+      "value": "payload.Get(\"client_metadata.x-codex-parent-thread-id\").String()"
+    },
+    {
+      "path": "backend/internal/service/openai_guardian_affinity.go",
+      "value": "currentHash, legacyHash := s.openAISessionHashesForSeed(c, body, parentID)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "c.Request = c.Request.WithContext(h.gatewayService.WithOpenAIGuardianParentAffinity("
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "ctx = h.gatewayService.WithOpenAIGuardianParentAffinity(ctx, c, firstMessage, reqModel)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "requestRepair := armOpenAIRequestRepair(c, account, rejectedFieldRetryState)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "requestRepair.setBody(body)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "requestRepair.encryptedTried = true"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "markEncryptedLineage(body)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "s.openAIRequestRepairAfterSignal(ctx, c, account, resp, err)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "newOpenAIRequestRepairSignal(ctx, c, account, dataBytes, failedMessage)"
+    },
+    {
+      "path": "backend/internal/service/openai_account_runtime_block_fastpath.go",
+      "value": "account.Platform == PlatformOpenAI && isOpenAIEncryptedContentRejectionPayload(responseBody)"
+    },
+    {
+      "path": "backend/internal/service/ratelimit_service.go",
+      "value": "account.Platform == PlatformOpenAI && isOpenAIEncryptedContentRejectionPayload(responseBody)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "if isOpenAIEncryptedContentRejectionPayload(payload) || resilience.IsEncryptedContentRejection(\"\", message) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "event.ResilienceCategory = opsResilienceCategory(&classifiedEvent)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_upstream_errors.go",
+      "value": "if isOpenAIEncryptedContentRejectionPayload(upstreamBody) || resilience.IsEncryptedContentRejection(\"\", upstreamMsg) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_upstream_errors.go",
+      "value": "ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, body, upstreamMsg),"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_forwarder_support.go",
+      "value": "if resilience.IsEncryptedContentRejection(codeRaw, msgRaw) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "invalidEncryptedContentError := isOpenAIEncryptedContentRejectionPayload(respBody) || resilience.IsEncryptedContentRejection(upstreamCode, upstreamMsg)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "(resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusBadGateway) &&"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "nextBody, changed, repairErr := openAIEncryptedContentRepairBody(body, upstreamMsg)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "if changed && resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(account.ID, false, time.Now()) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "if kind == resilience.ReasonEncryptedContent {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "zap.Int64(\"account_id\", account.ID), zap.String(\"kind\", reason), zap.String(\"form\", \"http\"))"
+    },
+    {
+      "path": "backend/internal/service/ops_upstream_context.go",
+      "value": "OpsUpstreamContentPolicyKey = \"ops_upstream_content_policy\""
+    },
+    {
+      "path": "backend/internal/service/ops_upstream_context.go",
+      "value": "func MarkOpsUpstreamContentPolicy(c *gin.Context) {"
+    },
+    {
+      "path": "backend/internal/handler/ops_error_logger.go",
+      "value": "isBusinessLimited = isBusinessLimited || opsContentPolicyRefusal(c, parsed.ErrorType, parsed.Code, parsed.Message, status)"
+    },
+    {
+      "path": "backend/internal/handler/ops_error_logger.go",
+      "value": "isBusinessLimited = isBusinessLimited || opsContentPolicyRefusal(c, streamErr.ErrType, streamErr.Code, streamErr.Message, classifyStatus)"
+    },
+    {
+      "path": "backend/internal/handler/ops_error_logger.go",
+      "value": "entry.IsBusinessLimited = entry.IsBusinessLimited || opsContentPolicyRefusal(nil, streamErr.ErrType, streamErr.Code, message, status)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "if statusCode != http.StatusTooManyRequests && openAIStreamBalanceFailure(payload) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "value": "return s.handleChatCompletionsErrorResponseAfterAccountHandling(resp, c, account, billingModel)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "value": "ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, respBody, upstreamMsg, account),"
+    },
+    {
+      "path": "backend/internal/handler/openai_alpha_search.go",
+      "value": "if failoverErr.Reason != service.OpenAIAlphaSearchE5001Reason {"
+    },
+    {
+      "path": "backend/internal/handler/openai_alpha_search.go",
+      "value": "if result != nil {\n\t\t\t\th.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, requestedModel, false, result), true, nil)"
+    },
+    {
+      "path": "backend/internal/service/ops_upstream_context.go",
+      "value": "c.Set(OpsGatewayTerminalStatusKey, 0)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "if service.IsGrokTemporaryUnavailable422Failover(failoverErr) {\n\t\tstatus, errType, errMsg = http.StatusServiceUnavailable, \"upstream_error\", \"Upstream service temporarily unavailable\""
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "if service.IsGrokTemporaryUnavailable422Failover(failoverErr) {\n\t\tstatus, errType, errMsg = http.StatusServiceUnavailable, \"api_error\", \"Upstream service temporarily unavailable\""
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_grok_chat_bridge.go",
+      "value": "return s.handleChatCompletionsErrorResponseAfterAccountHandling(resp, c, account, billingModel)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler.go",
+      "value": "writeResponsesFailedSSEWithStatus(c, status, errType, code, message)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_responses.go",
+      "value": "writeResponsesFailedSSEWithOpeningStatus(c, status, errType, explicitCode, translatedMessage, gatewayStreamHasOnlyHeartbeats(c))"
+    },
+    {
+      "path": "backend/internal/handler/stream_error_event.go",
+      "value": "handled, wrote := writeResponsesFailedSSEWithOpeningResult(c, errType, code, message, forceOpening)"
+    },
+    {
+      "path": "backend/internal/service/openai_alpha_search.go",
+      "value": "// an attempt classification because no upstream error was returned.\n\t\tif resp.StatusCode >= http.StatusBadRequest {"
+    },
+    {
+      "path": "backend/internal/service/openai_alpha_search.go",
+      "value": "c.Data(resp.StatusCode, contentType, respBody)\n\t\tif resp.StatusCode >= http.StatusBadRequest {"
     }
   ],
   "forbidden_module_paths": [
@@ -4626,6 +4850,221 @@
       "literal": "func TestGeminiTemporaryFailoverExhaustionReturnsRetryable503"
     },
     {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/resilience/classify_test.go",
+      "literal": "func TestClassifySpecScenarios"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/resilience/classify_test.go",
+      "literal": "func TestClassifyContentPolicyRefusal"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_stream_balance_failure_test.go",
+      "literal": "func TestOpenAIStreamBalanceFailureUsesStructuredCode"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_stream_balance_failure_test.go",
+      "literal": "func TestOpenAIStreamSubscriptionSharingPausesAccount"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_stream_balance_failure_test.go",
+      "literal": "func TestOpenAIStreamSubscriptionSharingAfterOutputOnlyPauses"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_stream_balance_failure_test.go",
+      "literal": "func TestOpenAIStreamBalanceFailoverPreservesStructuredCode"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/openai_subscription_sharing_failover_test.go",
+      "literal": "func TestOpenAIResponsesSubscriptionSharingFailsOverBeforeOutput"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/resilience_content_policy_test.go",
+      "literal": "func TestOpenAICompatContentPolicyMarksRewrittenTerminal"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/ops_error_logger_test.go",
+      "literal": "func TestOpsErrorLoggerHTTPContentPolicyUsesTerminalSignals"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/ops_error_logger_test.go",
+      "literal": "func TestOpsErrorLoggerStreamContentPolicyPreservesRawType"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_responses_rejected_field_retry_test.go",
+      "literal": "func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyHandlesExplicitOptionalParameterRejections"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_responses_rejected_field_retry_test.go",
+      "literal": "func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRemovesNestedPromptCacheBreakpointOnlyAtProtocolLocations"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_responses_rejected_field_retry_test.go",
+      "literal": "func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyConvertsToolSearchArgumentsObjects"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_responses_rejected_field_retry_test.go",
+      "literal": "func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyDoesNotGuessToolSearchArguments"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_responses_rejected_field_retry_test.go",
+      "literal": "func TestOpenAIGatewayService_ChatCompletionsRetriesRejectedTopP"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_alpha_search_test.go",
+      "literal": "func TestForwardAlphaSearchAPIKeyUnsupportedEndpointBadRequestFailsOverWithoutAccountError"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_alpha_search_test.go",
+      "literal": "func TestForwardAlphaSearchAPIKeyBadRequestWithGenericEncryptedWordingDoesNotFailOver"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_guardian_affinity_test.go",
+      "literal": "func TestWithOpenAIGuardianParentAffinity_MatchesScopedParentSession"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_guardian_affinity_test.go",
+      "literal": "func TestWithOpenAIGuardianParentAffinity_EncryptedAgentMessage"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_guardian_affinity_test.go",
+      "literal": "func TestWithOpenAIGuardianParentAffinity_PreservesRequestState"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/resilience/classify_test.go",
+      "literal": "func TestIsEncryptedContentRejection"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/resilience/classify_test.go",
+      "literal": "func TestClassifyEncryptedContentIsClientError"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_encrypted_content_rejection_test.go",
+      "literal": "func TestIsOpenAIEncryptedContentRejectionPayloadCoversHTTPAndInband"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_encrypted_content_rejection_test.go",
+      "literal": "func TestOpenAIEncryptedContentRepairBodyHonorsPrefixesAndPreservesOpaqueItems"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_encrypted_content_rejection_test.go",
+      "literal": "func TestOpenAIEncryptedContentRoutingAndOpsCategory"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_encrypted_content_rejection_test.go",
+      "literal": "func TestClassifyOpenAIWSErrorEventUsesEncryptedContentRejection"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_encrypted_content_rejection_test.go",
+      "literal": "func TestOpenAIEncryptedContentAccountSideEffectsExitBeforePolicies"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_encrypted_content_rejection_test.go",
+      "literal": "func TestOpenAIEncryptedContentNativeHTTPAndInbandOpsCategory"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_encrypted_content_rejection_test.go",
+      "literal": "func TestForwardAsChatCompletions_EncryptedContentDoesNotFailoverOrTempUnschedule"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_encrypted_content_rejection_test.go",
+      "literal": "func TestForwardOpenAIRequestRepairReplaysInbandRejection"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_encrypted_content_rejection_test.go",
+      "literal": "func TestForwardOpenAIRequestRepairDoesNotReplayUnrepairableOrExhausted"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_encrypted_content_rejection_test.go",
+      "literal": "func TestForwardOpenAIRequestRepairHTTPAndInbandShareEncryptedRetry"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_encrypted_content_rejection_test.go",
+      "literal": "func TestForwardOpenAIRequestRepairRetries502EncryptedRejection"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_alpha_search_test.go",
+      "literal": "func TestIsOpenAIAlphaSearchEndpointUnsupported"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/grok_upstream_failure_test.go",
+      "literal": "func TestGrokTemporaryUnavailable422UsesOneTransientClassifier"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/grok_error_registration_test.go",
+      "literal": "func TestGrokRawChatErrorRegistersOnceAndSkipsCompatSideEffects"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_alpha_search_test.go",
+      "literal": "func TestForwardAlphaSearchE5001ServerErrorFailsOverWithoutAccountMutation"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_alpha_search_test.go",
+      "literal": "func TestForwardAlphaSearchPATFallbackNon2xxRecordsOneHTTPError"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/ops_error_logger_test.go",
+      "literal": "func TestOpsErrorLoggerMiddleware_GatewayTerminalUsesWrittenStatus"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/ops_error_logger_test.go",
+      "literal": "func TestOpsGatewayTerminalStatusUsesFirstWrittenTerminal"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/openai_gateway_handler_test.go",
+      "literal": "func TestOpenAIAlphaSearchE5001ExhaustionReturnsGatewayFailure"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/ops_error_logger_test.go",
+      "literal": "func TestOpsErrorLoggerMiddleware_PassThroughResponseFailedStillInfersStatus"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/ops_error_logger_test.go",
+      "literal": "func TestOpsErrorLoggerWebSocketTurnContentPolicyUsesTurnSnapshot"
+    },
+    {
       "id": "xy-upstream-balance",
       "path": "frontend/src/components/account/__tests__/UpstreamBalanceCell.spec.ts",
       "literal": "shows the dollar amount and greys it out after three minutes without an update"
@@ -5709,6 +6148,41 @@
       "id": "xy-support-chat",
       "path": "frontend/src/features/support-widget/__tests__/supportWidgetVisibility.spec.ts",
       "literal": "it('shows only when every condition holds'"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/openai_gateway_credential_failover_loop_test.go",
+      "literal": "func TestGrokTemporaryUnavailable422ExhaustionReturns503AndKeepsAttempt"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/grok_error_registration_test.go",
+      "literal": "t.Run(\"responses bridge\", func(t *testing.T) {"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_alpha_search_test.go",
+      "literal": "func TestForwardAlphaSearchRedirectPassthroughDoesNotRecordHTTPError"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/stream_error_event_test.go",
+      "literal": "func TestGatewayHandleStreamingAwareError_ResponsesStreamingEmitsResponseFailed"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/resilience_compat_queue_error_test.go",
+      "literal": "func TestCompatibleQueueErrorsEndInInboundProtocol"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/openai_gateway_credential_failover_test.go",
+      "literal": "func TestResponsesFailoverExhaustedAfterForwardedTerminalMarksOpsWithoutDuplicateFrame"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/ops_error_logger_test.go",
+      "literal": "func TestLogOpsStreamError_RecordsOneFailurePerWebSocketTurn"
     }
   ]
 }

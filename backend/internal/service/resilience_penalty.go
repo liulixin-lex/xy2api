@@ -72,9 +72,12 @@ func classifyUpstreamOutcome(outcome resilience.Outcome) resilience.Result {
 
 // opsHTTPResilienceCategory retains header-only reset evidence before the
 // response is reduced to the optional scrubbed ops body.
-func opsHTTPResilienceCategory(status int, headers http.Header, body []byte, message string) string {
+func opsHTTPResilienceCategory(status int, headers http.Header, body []byte, message string, accounts ...*Account) string {
 	if !resilience.Current().FailureOn() {
 		return ""
+	}
+	if len(accounts) > 0 && isGrokTemporaryUnavailable422(accounts[0], status, body) {
+		return string(resilience.CategoryTransient)
 	}
 	category := classifyUpstreamHTTP(status, headers, body, message).Category
 	if category == resilience.CategoryFirstOutputTimeout {
@@ -442,6 +445,12 @@ func ClassifyFailoverError(e *UpstreamFailoverError) resilience.Result {
 	}
 	if e.IsCredentialFailure() {
 		return resilience.Result{Category: resilience.CategoryAuth, Reason: "credential_failure"}
+	}
+	if e.Reason == OpenAIAlphaSearchE5001Reason {
+		return resilience.Result{Category: resilience.CategoryTransient, Reason: string(OpenAIAlphaSearchE5001Reason)}
+	}
+	if isGrokTemporaryUnavailable422Failover(e) {
+		return resilience.Result{Category: resilience.CategoryTransient, Reason: "grok_service_temporarily_unavailable"}
 	}
 	msg := strings.TrimSpace(extractUpstreamErrorMessage(e.ResponseBody))
 	result := classifyUpstreamHTTP(e.StatusCode, e.ResponseHeaders, e.ResponseBody, msg)

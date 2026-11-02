@@ -500,7 +500,7 @@
       },
       {
         "block": "openai-cache-reliability",
-        "note": "XY2API 0.2.6 GPT prompt cache reliability (PR #86): tenant-scoped v2 session seeds and cache diagnostics at session hashing, atomic sticky claims with owner-checked delete and refresh, cache-scored candidate preference, and sticky capacity spillover marking. Share scheduling groups return from their hook before these paths.",
+        "note": "XY2API 0.2.6 GPT prompt cache reliability (PR #86): tenant-scoped v2 session seeds and cache diagnostics at session hashing, atomic sticky claims with owner-checked delete and refresh, cache-scored candidate preference, and sticky capacity spillover marking. Share scheduling groups return from their hook before these paths. 0.5.1: GenerateSessionHash and GenerateExplicitSessionHash share openAISessionHashesForSeed (scope, hash, v2 prefix; computes only), which Codex sub-agent parent-thread affinity also uses so parent lookups hit scoped bindings.",
         "removed": [
           "_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)",
           "_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)",
@@ -516,16 +516,14 @@
           "_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)",
           "_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)",
           "_ = s.refreshStickySessionTTL(ctx, groupID, sessionHash, openaiStickySessionTTL)",
-          "return s.newSelectionResult(ctx, fresh, false, nil, &AccountWaitPlan{"
+          "return s.newSelectionResult(ctx, fresh, false, nil, &AccountWaitPlan{",
+          "currentHash, legacyHash := deriveOpenAISessionHashes(sessionID)",
+          "currentHash, legacyHash := deriveOpenAISessionHashes(sessionID)"
         ],
         "added": [
           "if c == nil {",
           "return \"\"",
           "}",
-          "sessionID = s.scopedOpenAISessionSeed(c, body, sessionID)",
-          "if strings.HasPrefix(sessionID, \"openai-routing-v2:\") {",
-          "currentHash = \"v2:\" + currentHash",
-          "legacyHash = \"\"",
           "}",
           "c.Set(openAICacheSessionGinKey, currentHash)",
           "if c.Request != nil {",
@@ -533,10 +531,6 @@
           "c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), openAICacheDiagnosticKey{}, diagnostic))",
           "}",
           "}",
-          "sessionID = s.scopedOpenAISessionSeed(c, body, sessionID)",
-          "if strings.HasPrefix(sessionID, \"openai-routing-v2:\") {",
-          "currentHash = \"v2:\" + currentHash",
-          "legacyHash = \"\"",
           "}",
           "c.Set(openAICacheSessionGinKey, currentHash)",
           "if c.Request != nil {",
@@ -588,7 +582,16 @@
           "_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)",
           "_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)",
           "s.preferCacheCandidates(ctx, available, requestedModel)",
-          "selection, err := s.newSelectionResult(ctx, fresh, false, nil, &AccountWaitPlan{"
+          "selection, err := s.newSelectionResult(ctx, fresh, false, nil, &AccountWaitPlan{",
+          "current = \"v2:\" + current",
+          "current, legacy = deriveOpenAISessionHashes(seed)",
+          "currentHash, legacyHash := s.openAISessionHashesForSeed(c, body, sessionID)",
+          "currentHash, legacyHash := s.openAISessionHashesForSeed(c, body, sessionID)",
+          "func (s *OpenAIGatewayService) openAISessionHashesForSeed(c *gin.Context, body []byte, seed string) (current, legacy string) {",
+          "if strings.HasPrefix(seed, \"openai-routing-v2:\") {",
+          "legacy = \"\"",
+          "return current, legacy",
+          "seed = s.scopedOpenAISessionSeed(c, body, seed)"
         ]
       },
       {

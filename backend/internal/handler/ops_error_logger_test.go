@@ -565,6 +565,85 @@ func TestOpsErrorLoggerMiddleware_StreamFailureUsesTerminalErrorOverAttemptConte
 	require.Equal(t, "input exceeds the context window", *job.entry.UpstreamErrorMessage)
 }
 
+func TestOpsErrorLoggerMiddleware_GatewayTerminalUsesWrittenStatus(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, streamStarted := range []bool{false, true} {
+		name := "JSON"
+		if streamStarted {
+			name = "SSE"
+		}
+		t.Run(name, func(t *testing.T) {
+			setupOpsErrorLogTestQueue(t, 2)
+			ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			router := gin.New()
+			router.Use(OpsErrorLoggerMiddleware(ops))
+			router.POST("/v1/responses", func(c *gin.Context) {
+				upstreamStatus := http.StatusRequestEntityTooLarge
+				if streamStarted {
+					upstreamStatus = http.StatusBadRequest
+				}
+				service.SetOpsUpstreamError(c, upstreamStatus, "upstream attempt", "")
+				(&OpenAIGatewayHandler{}).handleStreamingAwareError(
+					c, http.StatusRequestEntityTooLarge, "invalid_request_error", "Request payload is too large", streamStarted,
+				)
+			})
+
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+
+			wantWireStatus := http.StatusRequestEntityTooLarge
+			if streamStarted {
+				wantWireStatus = http.StatusOK
+			}
+			require.Equal(t, wantWireStatus, recorder.Code)
+			require.Equal(t, int64(1), OpsErrorLogQueueLength())
+			job := <-opsErrorLogQueue
+			require.Equal(t, http.StatusRequestEntityTooLarge, job.entry.StatusCode)
+			require.NotNil(t, job.entry.UpstreamStatusCode)
+			require.Equal(t, http.StatusRequestEntityTooLarge, *job.entry.UpstreamStatusCode)
+		})
+	}
+}
+
+func TestOpsGatewayTerminalStatusUsesFirstWrittenTerminal(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	handler := &OpenAIGatewayHandler{}
+
+	handler.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", "bad request", true)
+	handler.handleStreamingAwareError(c, http.StatusRequestEntityTooLarge, "invalid_request_error", "too large", true)
+
+	status, ok := service.OpsGatewayTerminalStatus(c)
+	require.True(t, ok)
+	require.Equal(t, http.StatusBadRequest, status)
+	require.Equal(t, 1, strings.Count(recorder.Body.String(), "event: response.failed"))
+}
+
+func TestOpsErrorLoggerMiddleware_PassThroughResponseFailedStillInfersStatus(t *testing.T) {
+	setupOpsErrorLogTestQueue(t, 2)
+	gin.SetMode(gin.TestMode)
+
+	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	router := gin.New()
+	router.Use(OpsErrorLoggerMiddleware(ops))
+	router.POST("/v1/responses", func(c *gin.Context) {
+		service.SetOpsUpstreamError(c, http.StatusRequestEntityTooLarge, "upstream terminal", "")
+		c.Status(http.StatusOK)
+		_, _ = c.Writer.WriteString("event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"invalid_request\",\"message\":\"bad request\"}}}\n\n")
+	})
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+
+	require.Equal(t, int64(1), OpsErrorLogQueueLength())
+	job := <-opsErrorLogQueue
+	require.Equal(t, http.StatusBadRequest, job.entry.StatusCode)
+	require.NotNil(t, job.entry.UpstreamStatusCode)
+	require.Equal(t, http.StatusBadRequest, *job.entry.UpstreamStatusCode)
+}
+
 func TestOpsErrorLoggerMiddleware_PrefersContextRequestID(t *testing.T) {
 	setupOpsErrorLogTestQueue(t, 2)
 	gin.SetMode(gin.TestMode)
@@ -731,9 +810,15 @@ func TestLogOpsStreamError_RecordsOneFailurePerWebSocketTurn(t *testing.T) {
 	service.SetOpenAIClientTransport(c, service.OpenAIClientTransportWS)
 
 	service.BeginOpsStreamTurn(c, 1)
+	service.MarkOpsGatewayTerminalStatus(c, http.StatusTooManyRequests)
+	status, marked := service.OpsGatewayTerminalStatus(c)
+	require.True(t, marked)
+	require.Equal(t, http.StatusTooManyRequests, status)
 	service.MarkOpsStreamFailure(c, "rate_limit_error", "rate_limit_exceeded", "turn one failed", http.StatusTooManyRequests)
 	service.MarkOpsStreamError(c, "upstream_error", "generic duplicate for turn one", http.StatusBadGateway)
 	service.BeginOpsStreamTurn(c, 2)
+	_, marked = service.OpsGatewayTerminalStatus(c)
+	require.False(t, marked)
 	service.MarkOpsStreamFailure(c, "permission_error", "permission_denied", "turn two failed", http.StatusForbidden)
 
 	streamErrors := service.GetOpsStreamErrors(c)
@@ -901,6 +986,119 @@ func TestClassifyOpsLocalModelConfigurationRequiresMarkerAndReason(t *testing.T)
 	require.False(t, limited)
 	require.Equal(t, "provider", owner)
 	require.Equal(t, "upstream_http", source)
+}
+
+func TestOpsErrorLoggerHTTPContentPolicyUsesTerminalSignals(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		path    string
+		status  int
+		errType string
+		code    string
+		message string
+		rewrite bool
+		limited bool
+	}{
+		{"image code", "/v1/images/generations", 400, "invalid_request_error", "content_policy_violation", "Request blocked.", false, true},
+		{"raw HTTP type", "/v1/responses", 400, "content_policy", "", "Request blocked.", false, true},
+		{"rewritten terminal", "/v1/responses", 400, "invalid_request_error", "", "Request blocked.", true, true},
+		{"Chinese policy wording", "/v1/images/generations", 400, "invalid_request_error", "400", "请求可能违反了我们的内容政策", false, true},
+		{"safety system wording", "/v1/images/generations", 400, "invalid_request_error", "", "Your request was rejected by the safety system", false, true},
+		{"ordinary bad request", "/v1/responses", 400, "invalid_request_error", "", "Unknown parameter", false, false},
+		{"ordinary upstream failure", "/v1/responses", 502, "upstream_error", "", "Upstream request failed", false, false},
+		{"account policy ban", "/v1/responses", 403, "permission_error", "", "organization has been disabled for policy violation", false, false},
+		{"invalid prompt boundary", "/v1/responses", 400, "invalid_request_error", "invalid_prompt", "Invalid prompt: your prompt was flagged as potentially violating our usage policy", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupOpsErrorLogTestQueue(t, 1)
+			gin.SetMode(gin.TestMode)
+			ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			router := gin.New()
+			router.Use(OpsErrorLoggerMiddleware(ops))
+			router.POST(tc.path, func(c *gin.Context) {
+				service.SetOpsUpstreamError(c, tc.status, tc.message, "")
+				if tc.rewrite {
+					message, rejected := resilienceContentRejection(c, &service.UpstreamFailoverError{
+						StatusCode:   tc.status,
+						ResponseBody: []byte(`{"error":{"code":"content_policy_violation","message":"Request blocked."}}`),
+					})
+					require.True(t, rejected)
+					c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": message}})
+					return
+				}
+				c.JSON(tc.status, gin.H{"error": gin.H{"type": tc.errType, "code": tc.code, "message": tc.message}})
+			})
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, tc.path, nil))
+
+			require.Equal(t, tc.status, recorder.Code)
+			require.Len(t, opsErrorLogQueue, 1)
+			entry := (<-opsErrorLogQueue).entry
+			require.Equal(t, tc.limited, entry.IsBusinessLimited)
+			require.Equal(t, "upstream", entry.ErrorPhase)
+			require.Equal(t, "provider", entry.ErrorOwner)
+			require.Equal(t, "upstream_http", entry.ErrorSource)
+			if tc.errType == "content_policy" {
+				require.Equal(t, "api_error", entry.ErrorType, "only the business-limit decision uses the raw type")
+			}
+		})
+	}
+}
+
+func TestOpsErrorLoggerStreamContentPolicyPreservesRawType(t *testing.T) {
+	setupOpsErrorLogTestQueue(t, 1)
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	service.SetOpsUpstreamError(c, http.StatusBadRequest, "Request blocked.", "")
+	service.MarkOpsStreamFailure(c, "content_policy", "", "Request blocked.", http.StatusBadRequest)
+
+	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	logOpsStreamError(c, ops, http.StatusOK)
+
+	require.Len(t, opsErrorLogQueue, 1)
+	entry := (<-opsErrorLogQueue).entry
+	require.True(t, entry.IsBusinessLimited)
+	require.Equal(t, "api_error", entry.ErrorType)
+	require.Equal(t, "upstream", entry.ErrorPhase)
+	require.Equal(t, "provider", entry.ErrorOwner)
+	require.Equal(t, "upstream_http", entry.ErrorSource)
+}
+
+func TestOpsErrorLoggerWebSocketTurnContentPolicyUsesTurnSnapshot(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		errType string
+		status  int
+		message string
+		limited bool
+	}{
+		{"content policy snapshot", "content_policy", http.StatusBadRequest, "Request blocked.", true},
+		{"ordinary upstream snapshot", "upstream_error", http.StatusBadGateway, "Upstream request failed", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupOpsErrorLogTestQueue(t, 1)
+			gin.SetMode(gin.TestMode)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			service.SetOpsUpstreamError(c, http.StatusBadGateway, "Request blocked.", "")
+			service.MarkOpsUpstreamContentPolicy(c)
+
+			ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			logOpsStreamErrorValue(c, ops, http.StatusOK, service.OpsStreamError{
+				ErrType:         tc.errType,
+				Message:         tc.message,
+				IntendedStatus:  tc.status,
+				Turn:            1,
+				UpstreamStatus:  tc.status,
+				UpstreamMessage: tc.message,
+			})
+
+			require.Len(t, opsErrorLogQueue, 1)
+			entry := (<-opsErrorLogQueue).entry
+			require.Equal(t, tc.limited, entry.IsBusinessLimited)
+		})
+	}
 }
 
 func TestOpsErrorLoggerMiddleware_LocalModelConfigurationFields(t *testing.T) {

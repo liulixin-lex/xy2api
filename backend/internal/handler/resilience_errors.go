@@ -84,6 +84,7 @@ func resilienceContentRejection(c *gin.Context, failoverErr *service.UpstreamFai
 	suppressResilienceRetryAdvice(c, "content_rejection")
 	upstreamMsg := service.SanitizeUpstreamErrorMessage(strings.TrimSpace(service.ExtractUpstreamErrorMessage(failoverErr.ResponseBody)))
 	service.SetOpsUpstreamError(c, failoverErr.StatusCode, upstreamMsg, "")
+	service.MarkOpsUpstreamContentPolicy(c)
 	message := strings.TrimSpace(upstreamURLPattern.ReplaceAllString(upstreamMsg, "[url]"))
 	if message == "" {
 		return contentRejectionFallbackMessage, true

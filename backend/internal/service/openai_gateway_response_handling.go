@@ -609,6 +609,11 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 						streamEarlyErr = replayErr
 						return
 					}
+					if repairErr := newOpenAIRequestRepairSignal(ctx, c, account, dataBytes, failedMessage); repairErr != nil {
+						sawFailedEvent = true
+						streamEarlyErr = repairErr
+						return
+					}
 				}
 				if outputStarted && !cyberHit {
 					if codexFailureTerminal && eventType == "error" {

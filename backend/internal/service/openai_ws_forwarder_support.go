@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -766,8 +767,7 @@ func classifyOpenAIWSErrorEventFromRaw(codeRaw, errTypeRaw, msgRaw string) (stri
 	if strings.Contains(msg, "connection limit") && strings.Contains(msg, "websocket") {
 		return "ws_connection_limit_reached", true
 	}
-	if strings.Contains(msg, "invalid_encrypted_content") ||
-		(strings.Contains(msg, "encrypted content") && strings.Contains(msg, "could not be verified")) {
+	if resilience.IsEncryptedContentRejection(codeRaw, msgRaw) {
 		return "invalid_encrypted_content", true
 	}
 	if strings.Contains(msg, "previous_response_not_found") ||

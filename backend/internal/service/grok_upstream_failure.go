@@ -29,7 +29,8 @@ const (
 	// GrokFailureCompatibility represents a request-history/body-shape that is
 	// incompatible with the selected account or upstream replay contract. It
 	// is account-independent: fail over, but never quarantine the pool.
-	GrokFailureCompatibility GrokUpstreamFailureClass = "compatibility_error"
+	GrokFailureCompatibility        GrokUpstreamFailureClass = "compatibility_error"
+	GrokFailureTransientUnavailable GrokUpstreamFailureClass = "transient_service_unavailable"
 )
 
 // GrokUpstreamFailureDecision is a pure classification result. Callers map it
@@ -69,7 +70,14 @@ var (
 //  7. validation / client errors without quota language → no cool
 //
 // Content-policy 403s must be filtered by the caller before invoking this.
-func classifyGrokUpstreamFailure(statusCode int, responseBody []byte, requestedModel string) GrokUpstreamFailureDecision {
+func classifyGrokUpstreamFailure(account *Account, statusCode int, responseBody []byte, requestedModel string) GrokUpstreamFailureDecision {
+	if isGrokTemporaryUnavailable422(account, statusCode, responseBody) {
+		return GrokUpstreamFailureDecision{
+			Class:          GrokFailureTransientUnavailable,
+			ShouldFailover: true,
+			Reason:         "Service temporarily unavailable",
+		}
+	}
 	text, code, low := grokUpstreamErrorCorpus(statusCode, responseBody)
 	model := extractGrokFailureModel(text, responseBody, requestedModel)
 	actual, limit, hasTokens := parseGrokTokenPair(text)
@@ -392,7 +400,7 @@ func grokRetryableOnSameAccount(account *Account, statusCode int, responseBody [
 	if account == nil || !account.IsGrok() {
 		return false
 	}
-	decision := classifyGrokUpstreamFailure(statusCode, responseBody, "")
+	decision := classifyGrokUpstreamFailure(account, statusCode, responseBody, "")
 	switch decision.Class {
 	case GrokFailureFreeUsage, GrokFailureBilling, GrokFailureCompatibility:
 		// Quota/entitlement exhaustion is account state, not transient
@@ -410,7 +418,7 @@ func grokSameAccountRetryMetadata(account *Account, statusCode int, responseBody
 	if !grokRetryableOnSameAccount(account, statusCode, responseBody) {
 		return false, 0, time.Time{}, 0
 	}
-	decision := classifyGrokUpstreamFailure(statusCode, responseBody, "")
+	decision := classifyGrokUpstreamFailure(account, statusCode, responseBody, "")
 	if decision.Class != GrokFailureModelCapacity {
 		return true, 0, time.Time{}, 0
 	}
@@ -426,8 +434,8 @@ func grokSameAccountRetryMetadata(account *Account, statusCode int, responseBody
 // marking them would hide healthy sibling credentials while the bounded
 // same-account retry is still in progress. Ordinary 429s and free-usage
 // exhaustion retain the existing quota/team isolation behavior.
-func shouldMarkGrokTeamModelRateLimit(statusCode int, responseBody []byte) bool {
-	decision := classifyGrokUpstreamFailure(statusCode, responseBody, "")
+func shouldMarkGrokTeamModelRateLimit(account *Account, statusCode int, responseBody []byte) bool {
+	decision := classifyGrokUpstreamFailure(account, statusCode, responseBody, "")
 	if decision.Class == GrokFailureModelCapacity {
 		return false
 	}

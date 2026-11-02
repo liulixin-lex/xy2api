@@ -2,6 +2,7 @@ package service
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -16,12 +17,21 @@ import (
 
 const maxOpenAIResponsesRejectedFieldRetries = 6
 
+var openAIResponsesRejectedOptionalTopLevelFields = [...]string{
+	"top_p",
+	"metadata",
+	"temperature",
+	"frequency_penalty",
+	"presence_penalty",
+}
+
 var (
 	openAIResponsesRejectedNamespaceParamPattern  = regexp.MustCompile(`(?i)^input\[(\d+)\]\.namespace$`)
 	openAIResponsesRejectedStatusParamPattern     = regexp.MustCompile(`(?i)^input\[(\d+)\]\.status$`)
 	openAIResponsesRejectedContentParamPattern    = regexp.MustCompile(`(?i)^input\[(\d+)\]\.content$`)
 	openAIResponsesRejectedCacheParamPattern      = regexp.MustCompile(`(?i)^input\[(\d+)\]\.prompt_cache_breakpoint$`)
-	openAIResponsesRejectedMessageParamPattern    = regexp.MustCompile(`(?i)(?:unknown|unsupported)[ _-]+parameter\s*(?::|=|is)?\s*["']?(max_output_tokens|truncation|input\[\d+\]\.(?:namespace|status))(?:["']|\b)`)
+	openAIResponsesRejectedMessageParamPattern    = regexp.MustCompile(`(?i)(?:unknown|unsupported)[ _-]+parameter\s*(?::|=|is)?\s*["']?(max_output_tokens|truncation|top_p|metadata|temperature|frequency_penalty|presence_penalty|input\[\d+\]\.(?:namespace|status))(?:["']|\b)`)
+	openAIResponsesRejectedArgumentsParamPattern  = regexp.MustCompile(`(?i)^input\[(\d+)\]\.arguments$`)
 	openAIResponsesInvalidTypeMessageParamPattern = regexp.MustCompile(`(?i)invalid[ _-]+type\s+for\s+["']?(input\[\d+\]\.content)(?:["']|\b)[^\n]*\b(?:got|received)\s+null\b`)
 	openAIResponsesMaxZeroContentMessagePattern   = regexp.MustCompile(`(?i)invalid\s+["']?(input\[\d+\]\.content)["']?\s*:\s*array too long\.[^\n]*maximum length 0\b`)
 	openAIResponsesCacheModelRejectionPattern     = regexp.MustCompile(`(?i)["']?(prompt_cache_breakpoint|input\[\d+\]\.prompt_cache_breakpoint)["']?\s+is\s+not\s+supported\s+on\s+this\s+model\b`)
@@ -148,6 +158,9 @@ func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, respon
 		if index, ok := openAIResponsesRejectedCacheIndex(cacheParam); ok {
 			return removeOpenAIResponsesRejectedCacheAtIndex(body, index)
 		}
+		if cacheParam == "prompt_cache_breakpoint" {
+			return removeNestedOpenAIResponsesPromptCacheBreakpoints(body)
+		}
 	}
 	if isExplicitOpenAIResponsesFieldRejection(code, message) {
 		messageParam := openAIResponsesRejectedParamFromMessage(message)
@@ -176,6 +189,21 @@ func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, respon
 				return nil, "", false, fmt.Errorf("delete rejected truncation: %w", err)
 			}
 			return retryBody, "truncation parameter rejection", true, nil
+		}
+		for _, field := range openAIResponsesRejectedOptionalTopLevelFields {
+			if param != field || !gjson.GetBytes(body, field).Exists() {
+				continue
+			}
+			retryBody, err := sjson.DeleteBytes(body, field)
+			if err != nil {
+				return nil, "", false, fmt.Errorf("delete rejected %s: %w", field, err)
+			}
+			return retryBody, field + " parameter rejection", true, nil
+		}
+	}
+	if code == "invalid_type" && strings.Contains(message, "expected an object") {
+		if index, ok := openAIResponsesRejectedInputIndex(openAIResponsesRejectedArgumentsParamPattern, param); ok {
+			return convertOpenAIResponsesToolSearchCallArguments(body, index)
 		}
 	}
 
@@ -257,6 +285,107 @@ func openAIResponsesRejectedContentIndex(param string) (int, bool) {
 
 func openAIResponsesRejectedCacheIndex(param string) (int, bool) {
 	return openAIResponsesRejectedInputIndex(openAIResponsesRejectedCacheParamPattern, param)
+}
+
+func removeNestedOpenAIResponsesPromptCacheBreakpoints(body []byte) ([]byte, string, bool, error) {
+	input := gjson.GetBytes(body, "input")
+	if !input.IsArray() {
+		return nil, "", false, nil
+	}
+
+	retryBody := body
+	removed := false
+	for inputIndex, item := range input.Array() {
+		if !item.IsObject() {
+			continue
+		}
+		itemPath := fmt.Sprintf("input.%d", inputIndex)
+		inputFieldPath := itemPath + ".prompt_cache_breakpoint"
+		if gjson.GetBytes(retryBody, inputFieldPath).Exists() {
+			next, err := sjson.DeleteBytes(retryBody, inputFieldPath)
+			if err != nil {
+				return nil, "", false, fmt.Errorf("delete prompt_cache_breakpoint at input[%d]: %w", inputIndex, err)
+			}
+			retryBody = next
+			removed = true
+		}
+		content := item.Get("content")
+		if !content.IsArray() {
+			continue
+		}
+		for contentIndex, contentItem := range content.Array() {
+			if !contentItem.IsObject() {
+				continue
+			}
+			contentFieldPath := fmt.Sprintf("%s.content.%d.prompt_cache_breakpoint", itemPath, contentIndex)
+			if !gjson.GetBytes(retryBody, contentFieldPath).Exists() {
+				continue
+			}
+			next, err := sjson.DeleteBytes(retryBody, contentFieldPath)
+			if err != nil {
+				return nil, "", false, fmt.Errorf("delete prompt_cache_breakpoint at input[%d].content[%d]: %w", inputIndex, contentIndex, err)
+			}
+			retryBody = next
+			removed = true
+		}
+	}
+	if !removed {
+		return nil, "", false, nil
+	}
+	return retryBody, "nested prompt_cache_breakpoint rejection", true, nil
+}
+
+func convertOpenAIResponsesToolSearchCallArguments(body []byte, rejectedIndex int) ([]byte, string, bool, error) {
+	input := gjson.GetBytes(body, "input")
+	if !input.IsArray() {
+		return nil, "", false, nil
+	}
+	items := input.Array()
+	if rejectedIndex < 0 || rejectedIndex >= len(items) {
+		return nil, "", false, nil
+	}
+	rejected := items[rejectedIndex]
+	if !rejected.IsObject() || strings.TrimSpace(rejected.Get("type").String()) != "tool_search_call" {
+		return nil, "", false, nil
+	}
+	if _, ok := openAIResponsesJSONStringObjectArguments(rejected.Get("arguments")); !ok {
+		return nil, "", false, nil
+	}
+
+	retryBody := body
+	for inputIndex, item := range items {
+		if !item.IsObject() || strings.TrimSpace(item.Get("type").String()) != "tool_search_call" {
+			continue
+		}
+		arguments := item.Get("arguments")
+		rawArguments, ok := openAIResponsesJSONStringObjectArguments(arguments)
+		if !ok {
+			continue
+		}
+		path := fmt.Sprintf("input.%d.arguments", inputIndex)
+		next, err := sjson.SetRawBytes(retryBody, path, rawArguments)
+		if err != nil {
+			return nil, "", false, fmt.Errorf("convert tool_search_call arguments at input[%d]: %w", inputIndex, err)
+		}
+		retryBody = next
+	}
+	return retryBody, "tool_search_call arguments object rejection", true, nil
+}
+
+func openAIResponsesJSONStringObjectArguments(arguments gjson.Result) (json.RawMessage, bool) {
+	if !arguments.Exists() || arguments.Type != gjson.String {
+		return nil, false
+	}
+	trimmed := strings.TrimSpace(arguments.String())
+	if !strings.HasPrefix(trimmed, "{") {
+		return nil, false
+	}
+	var object map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &object); err != nil || object == nil {
+		return nil, false
+	}
+	// Validate through a map, but preserve the decoded bytes and their numbers.
+	return json.RawMessage(trimmed), true
 }
 
 func openAIResponsesRejectedInputIndex(pattern *regexp.Regexp, param string) (int, bool) {

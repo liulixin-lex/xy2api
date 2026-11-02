@@ -46,6 +46,9 @@ func TestCompatibleQueueErrorsEndInInboundProtocol(t *testing.T) {
 							h.responsesErrorResponse(c, failure.status, failure.kind, "queue failure")
 							failed := requireCreatedThenFailed(t, rec.Body.String())
 							require.Equal(t, "queue failure", failed.Get("error.message").String())
+							status, ok := service.OpsGatewayTerminalStatus(c)
+							require.True(t, ok)
+							require.Equal(t, failure.status, status)
 						} else {
 							h.chatCompletionsErrorResponse(c, failure.status, failure.kind, "queue failure")
 							events := parseSSEEvents(rec.Body.String())
@@ -59,6 +62,14 @@ func TestCompatibleQueueErrorsEndInInboundProtocol(t *testing.T) {
 			}
 		}
 	}
+	t.Run("terminal write fails", func(t *testing.T) {
+		c, rec := newGinContextForEndpoint(t, EndpointResponses)
+		c.Writer = &compatDisconnectedWriter{ResponseWriter: c.Writer}
+		require.True(t, writeResponsesFailedSSEWithOpeningStatus(c, http.StatusBadGateway, "upstream_error", "", "upstream gone", true))
+		_, marked := service.OpsGatewayTerminalStatus(c)
+		require.False(t, marked)
+		require.Empty(t, rec.Body.String())
+	})
 }
 
 func boolName(v bool) string {

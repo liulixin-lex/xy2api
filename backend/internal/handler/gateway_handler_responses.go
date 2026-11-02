@@ -406,7 +406,7 @@ func (h *GatewayHandler) responsesErrorResponse(c *gin.Context, status int, code
 	// inbound protocol even when resilience switches are off.
 	if c.Writer.Written() {
 		service.MarkOpsStreamError(c, code, message, status)
-		writeResponsesFailedSSEWithOpening(c, errType, explicitCode, message, gatewayStreamHasOnlyHeartbeats(c))
+		writeResponsesFailedSSEWithOpeningStatus(c, status, errType, explicitCode, message, gatewayStreamHasOnlyHeartbeats(c))
 		return
 	}
 	if !beginResilienceTerminal(c) {
@@ -464,7 +464,7 @@ func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastEr
 		service.MarkOpsStreamError(c, code, message, status)
 		if c != nil && c.Writer != nil && (c.Writer.Size() <= 0 || gatewayStreamHasOnlyHeartbeats(c)) {
 			errType, explicitCode, translatedMessage := resilienceTranslateError(c, status, code, "", message)
-			writeResponsesFailedSSEWithOpening(c, errType, explicitCode, translatedMessage, gatewayStreamHasOnlyHeartbeats(c))
+			writeResponsesFailedSSEWithOpeningStatus(c, status, errType, explicitCode, translatedMessage, gatewayStreamHasOnlyHeartbeats(c))
 		}
 		return
 	}

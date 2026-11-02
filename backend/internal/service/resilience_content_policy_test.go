@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
@@ -68,4 +69,20 @@ func TestClassifyFailoverErrorContentPolicy(t *testing.T) {
 	res = ClassifyFailoverError(&UpstreamFailoverError{StatusCode: http.StatusForbidden, ResponseBody: []byte(`{"error":{"message":"forbidden"}}`)})
 	require.Equal(t, resilience.CategoryAuth, res.Category)
 	require.False(t, res.ContentPolicy())
+}
+
+func TestOpenAICompatContentPolicyMarksRewrittenTerminal(t *testing.T) {
+	withResilienceSettings(t, nil)
+	c, recorder := newOpenAIUpstreamErrorTestContext(t)
+	svc := &OpenAIGatewayService{}
+	writeError := func(c *gin.Context, status int, errType, message string) {
+		c.JSON(status, gin.H{"error": gin.H{"type": errType, "message": message}})
+	}
+	_, err := svc.handleCompatErrorResponse(newOpenAIUpstreamErrorResponse(http.StatusBadRequest,
+		`{"error":{"code":"content_policy_violation","message":"Request blocked."}}`), c, newOpenAIUpstreamErrorTestAccount(), writeError, false)
+
+	require.Error(t, err)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.JSONEq(t, `{"error":{"type":"invalid_request_error","message":"Request blocked."}}`, recorder.Body.String())
+	require.True(t, c.GetBool(OpsUpstreamContentPolicyKey))
 }

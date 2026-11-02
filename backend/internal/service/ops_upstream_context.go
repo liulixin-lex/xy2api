@@ -3,13 +3,14 @@ package service
 import (
 	"encoding/json"
 	"errors"
-	"github.com/liulixin-lex/xy2api/internal/resilience"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -17,11 +18,13 @@ import (
 // Gin context keys used by Ops error logger for capturing upstream error details.
 // These keys are set by gateway services and consumed by handler/ops_error_logger.go.
 const (
-	OpsUpstreamStatusCodeKey   = "ops_upstream_status_code"
-	OpsUpstreamErrorMessageKey = "ops_upstream_error_message"
-	OpsUpstreamErrorDetailKey  = "ops_upstream_error_detail"
-	OpsUpstreamErrorsKey       = "ops_upstream_errors"
-	OpsUpstreamModelKey        = "ops_upstream_model"
+	OpsUpstreamStatusCodeKey    = "ops_upstream_status_code"
+	OpsUpstreamErrorMessageKey  = "ops_upstream_error_message"
+	OpsUpstreamErrorDetailKey   = "ops_upstream_error_detail"
+	OpsUpstreamErrorsKey        = "ops_upstream_errors"
+	OpsUpstreamModelKey         = "ops_upstream_model"
+	OpsUpstreamContentPolicyKey = "ops_upstream_content_policy"
+	OpsGatewayTerminalStatusKey = "ops_gateway_terminal_status"
 
 	// Optional stage latencies (milliseconds) for troubleshooting and alerting.
 	OpsAuthLatencyMsKey      = "ops_auth_latency_ms"
@@ -186,6 +189,25 @@ func BeginOpsStreamTurn(c *gin.Context, turn int) {
 	c.Set(OpsUpstreamStatusCodeKey, 0)
 	c.Set(OpsUpstreamErrorMessageKey, "")
 	c.Set(OpsUpstreamErrorDetailKey, "")
+	c.Set(OpsGatewayTerminalStatusKey, 0)
+}
+
+func MarkOpsGatewayTerminalStatus(c *gin.Context, statusCode int) {
+	if c != nil && statusCode >= http.StatusBadRequest && statusCode <= 599 {
+		c.Set(OpsGatewayTerminalStatusKey, statusCode)
+	}
+}
+
+func OpsGatewayTerminalStatus(c *gin.Context) (int, bool) {
+	if c == nil {
+		return 0, false
+	}
+	statusCode, ok := c.Get(OpsGatewayTerminalStatusKey)
+	if !ok {
+		return 0, false
+	}
+	status, ok := statusCode.(int)
+	return status, ok && status >= http.StatusBadRequest && status <= 599
 }
 
 // MarkOpsStreamError 记录一次就地 SSE 错误，供 ops 日志采集。
@@ -359,6 +381,13 @@ func GetOpsStreamErrors(c *gin.Context) []OpsStreamError {
 // original upstream status code before mapping it to a client-facing code.
 func SetOpsUpstreamError(c *gin.Context, upstreamStatusCode int, upstreamMessage, upstreamDetail string) {
 	setOpsUpstreamError(c, upstreamStatusCode, upstreamMessage, upstreamDetail)
+}
+
+// MarkOpsUpstreamContentPolicy preserves a terminal refusal when its code or type is rewritten.
+func MarkOpsUpstreamContentPolicy(c *gin.Context) {
+	if c != nil {
+		c.Set(OpsUpstreamContentPolicyKey, true)
+	}
 }
 
 func setOpsUpstreamError(c *gin.Context, upstreamStatusCode int, upstreamMessage, upstreamDetail string) {

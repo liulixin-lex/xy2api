@@ -1329,7 +1329,7 @@ func (s *OpenAIGatewayService) handleGrokMediaErrorResponse(
 	}
 
 	kind := "http_error"
-	if s.shouldFailoverGrokUpstreamError(resp.StatusCode, body) {
+	if s.shouldFailoverGrokUpstreamError(account, resp.StatusCode, body) {
 		kind = "failover"
 	}
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -1341,12 +1341,13 @@ func (s *OpenAIGatewayService) handleGrokMediaErrorResponse(
 		UpstreamStatusCode: resp.StatusCode,
 		UpstreamRequestID:  requestIDHeader,
 		Kind:               kind,
+		ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, body, upstreamMsg, account),
 		Message:            upstreamMsg,
 		Detail:             upstreamDetail,
 	})
 	if kind == "failover" {
 		retryable, retryDelay, retryDeadline, retryMax := grokSameAccountRetryMetadata(account, resp.StatusCode, body)
-		return nil, &UpstreamFailoverError{
+		return nil, annotateUpstreamFailoverAccount(&UpstreamFailoverError{
 			StatusCode:               resp.StatusCode,
 			ResponseBody:             body,
 			ResponseHeaders:          resp.Header.Clone(),
@@ -1355,7 +1356,7 @@ func (s *OpenAIGatewayService) handleGrokMediaErrorResponse(
 			SameAccountRetryDelay:    retryDelay,
 			SameAccountRetryDeadline: retryDeadline,
 			SameAccountRetryMax:      retryMax,
-		}
+		}, account)
 	}
 
 	MarkResponseCommitted(c)

@@ -4105,7 +4105,7 @@ func TestHandleCompatErrorResponseCyberPolicyEarlyReturn(t *testing.T) {
 		gotStatus, gotType, gotMsg = statusCode, errType, message
 	}
 	// cyber 命中应早返回(写兼容错误 + 不冷却账号)，而非落到通用 "Upstream request failed"。
-	_, err := svc.handleCompatErrorResponse(resp, c, &Account{ID: 1, Platform: PlatformOpenAI, Name: "a"}, writeError)
+	_, err := svc.handleCompatErrorResponse(resp, c, &Account{ID: 1, Platform: PlatformOpenAI, Name: "a"}, writeError, false)
 	require.Error(t, err)
 	require.Equal(t, http.StatusBadRequest, gotStatus)
 	require.Equal(t, "invalid_request_error", gotType)

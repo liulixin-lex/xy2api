@@ -81,8 +81,8 @@ func TestExhaustedRetryHintCountsRequestOnlyOnce(t *testing.T) {
 func TestResponsesTerminalWriterFinalizesOnce(t *testing.T) {
 	withHandlerResilience(t, nil)
 	c, rec := newGinContextForEndpoint(t, EndpointResponses)
-	require.True(t, writeResponsesFailedSSE(c, "api_error", "", "first"))
+	require.True(t, writeResponsesFailedSSEWithStatus(c, http.StatusBadGateway, "api_error", "", "first"))
 	before := rec.Body.String()
-	require.True(t, writeResponsesFailedSSE(c, "api_error", "", "second"))
+	require.True(t, writeResponsesFailedSSEWithStatus(c, http.StatusBadGateway, "api_error", "", "second"))
 	require.Equal(t, before, rec.Body.String())
 }

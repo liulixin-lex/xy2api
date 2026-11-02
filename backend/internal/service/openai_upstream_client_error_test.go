@@ -158,7 +158,7 @@ func TestHandleErrorResponse_MatchesCompatSiblingForDeterministic400(t *testing.
 	}
 	_, compatErr := svc.handleCompatErrorResponse(
 		newOpenAIUpstreamErrorResponse(http.StatusBadRequest, openAIInvalidFunctionParametersBody),
-		compatCtx, newOpenAIUpstreamErrorTestAccount(), writeError,
+		compatCtx, newOpenAIUpstreamErrorTestAccount(), writeError, false,
 	)
 	require.Error(t, compatErr)
 

@@ -124,7 +124,9 @@ func writeChatCompletionsErrorSSE(c *gin.Context, errType, code, message string,
 	}
 	if _, err := fmt.Fprintf(c.Writer, "data: %s\n\ndata: [DONE]\n\n", payload); err != nil {
 		_ = c.Error(err)
+		return true
 	}
+	service.MarkOpsGatewayTerminalStatus(c, status)
 	flusher.Flush()
 	return true
 }

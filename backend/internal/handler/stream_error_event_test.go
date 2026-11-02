@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
+	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -248,6 +249,9 @@ func TestGatewayHandleStreamingAwareError_ResponsesStreamingEmitsResponseFailed(
 	// xy2api resilience (design §7.6): committed upstream failures use server_error.
 	assert.Equal(t, "server_error", errObj["code"])
 	assert.Equal(t, "upstream gone", errObj["message"])
+	status, ok := service.OpsGatewayTerminalStatus(c)
+	require.True(t, ok)
+	require.Equal(t, http.StatusBadGateway, status)
 }
 
 func TestGatewayAdmissionError_SynchronousIncludesGatewayCode(t *testing.T) {

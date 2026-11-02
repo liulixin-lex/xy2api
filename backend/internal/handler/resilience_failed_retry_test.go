@@ -40,7 +40,7 @@ func TestResponsesFailedRetryAdvice(t *testing.T) {
 			c.Request = c.Request.WithContext(resilience.WithRetryAdvice(c.Request.Context(), tc.advice))
 			c.Header("Retry-After", "30")
 			c.Set(ginKeyResilienceRetryAfter, 30)
-			require.True(t, writeResponsesFailedSSE(c, tc.typ, tc.code, "Busy. Please try again in 30s."))
+			require.True(t, writeResponsesFailedSSEWithStatus(c, http.StatusBadGateway, tc.typ, tc.code, "Busy. Please try again in 30s."))
 			_, body := parseResponsesFailedSSE(t, rec.Body.String())
 			if tc.want != "" {
 				require.Equal(t, map[string]any{"retry-after": tc.want}, body["headers"])

@@ -87,10 +87,38 @@ func (r Result) StatusOnly() bool { return strings.HasPrefix(r.Reason, "status_"
 // content-safety refusal of the request.
 const ReasonContentPolicy = "content_policy"
 
+// ReasonEncryptedContent is the reason of a CLIENT_ERROR caused by upstream
+// rejecting encrypted request content it cannot decrypt or verify.
+const ReasonEncryptedContent = "encrypted_content"
+
 // ContentPolicy reports an upstream content-safety refusal: the request
 // content is refused, so the same request fails on this and every other
 // account, and the account is not at fault.
 func (r Result) ContentPolicy() bool { return r.Reason == ReasonContentPolicy }
+
+// IsEncryptedContentRejection reports an upstream refusal of encrypted
+// content it cannot decrypt or verify. Matching is intentionally narrow so a
+// bare mention of encryption in an unrelated error does not affect routing.
+func IsEncryptedContentRejection(code, message string) bool {
+	code = strings.ToLower(strings.TrimSpace(code))
+	if code == "invalid_encrypted_content" || code == "encrypted_context_invalid" {
+		return true
+	}
+	message = strings.ToLower(strings.TrimSpace(message))
+	if message == "" {
+		return false
+	}
+	if strings.Contains(message, "encrypted function output content could not be decrypted") {
+		return true
+	}
+	if strings.Contains(message, "could not validate encrypted continuation context") {
+		return true
+	}
+	return strings.Contains(message, "encrypted content") &&
+		(strings.Contains(message, "could not be verified") ||
+			strings.Contains(message, "could not be decrypted") ||
+			strings.Contains(message, "hydration failed"))
+}
 
 // Hard reports whether the category puts the account in a hard state.
 func (r Result) Hard() bool {
@@ -148,14 +176,21 @@ func (c Category) SoftCooldown() bool {
 const inspectLimit = 8 << 10
 
 var defaultBalanceCodes = map[string]struct{}{
-	"insufficient_quota":             {},
-	"insufficient_user_quota":        {},
-	"pre_consume_token_quota_failed": {},
-	"credit_balance_exhausted":       {},
-	"insufficient_balance":           {},
-	"insufficient_credit":            {},
-	"insufficient_credits":           {},
-	"billing_hard_limit_reached":     {},
+	"insufficient_quota":                        {},
+	"insufficient_user_quota":                   {},
+	"pre_consume_token_quota_failed":            {},
+	"credit_balance_exhausted":                  {},
+	"insufficient_balance":                      {},
+	"insufficient_credit":                       {},
+	"insufficient_credits":                      {},
+	"billing_hard_limit_reached":                {},
+	"subscription_sharing_usage_limit_exceeded": {},
+}
+
+// IsBalanceCode reports whether code identifies exhausted upstream balance.
+func IsBalanceCode(code string) bool {
+	_, ok := defaultBalanceCodes[strings.ToLower(strings.TrimSpace(code))]
+	return ok
 }
 
 // defaultBalanceKeywords are matched case-insensitively against the error
@@ -175,6 +210,7 @@ var defaultBalanceKeywords = []string{
 	"no enough balance",
 	"not enough balance",
 	"balance exhausted",
+	"subscription sharing usage limit",
 	// new-api / one-api relays (token or user quota used up, pre-charge
 	// refused); without these a 403 reads as an auth failure.
 	"quota is not enough",
@@ -214,6 +250,7 @@ var clientErrorCodes = map[string]struct{}{
 // refusal; they are checked before clientErrorCodes. cyber_policy and
 // bio_policy keep their own handling.
 var contentPolicyCodes = map[string]struct{}{
+	"content_policy":           {},
 	"content_policy_violation": {},
 	"content_filter":           {},
 	"request_check_blocked":    {}, // Zhipu preflight safety check (403)
@@ -233,6 +270,7 @@ var contentPolicyKeywords = []string{
 	"content filtering",
 	"安全策略",
 	"内容安全",
+	"内容政策",
 	"敏感内容",
 	"敏感词",
 	"敏感话题",
@@ -465,6 +503,9 @@ func classify(o Outcome, extraBalanceKeywords []string, decisionV2 bool) Result 
 	// streams).
 	if contentPolicyCode(code, typ, lowerBody) {
 		return Result{Category: CategoryClientError, Reason: ReasonContentPolicy}
+	}
+	if IsEncryptedContentRejection(code, text) {
+		return Result{Category: CategoryClientError, Reason: ReasonEncryptedContent}
 	}
 	if IsModelUnsupportedResponse(status, body) {
 		return Result{Category: CategoryModelUnsupported, Reason: "model_message"}

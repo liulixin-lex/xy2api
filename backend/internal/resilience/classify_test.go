@@ -31,6 +31,21 @@ func TestClassifySpecScenarios(t *testing.T) {
 			want: CategoryBalance,
 		},
 		{
+			name: "stream subscription sharing exhausted",
+			in:   Outcome{Source: SourceStreamEvent, StatusCode: 200, Code: "subscription_sharing_usage_limit_exceeded", Type: "invalid_request_error", Message: "Request blocked."},
+			want: CategoryBalance,
+		},
+		{
+			name: "HTTP subscription sharing exhausted wording",
+			in:   Outcome{StatusCode: 502, Body: []byte(`{"error":{"message":"The ChatGPT user has reached their Subscription Sharing usage limit.","type":"upstream_error"}}`)},
+			want: CategoryBalance,
+		},
+		{
+			name: "subscription sharing unsupported capability stays client error",
+			in:   Outcome{StatusCode: 400, Code: "subscription_sharing_unsupported_capability", Type: "invalid_request_error"},
+			want: CategoryClientError,
+		},
+		{
 			// Spec: busy message inside a stream.
 			name: "stream busy",
 			in:   Outcome{Source: SourceStreamEvent, StatusCode: 200, Message: "The service is busy. Please retry later."},
@@ -211,6 +226,43 @@ func TestClassifySpecScenarios(t *testing.T) {
 	}
 }
 
+func TestIsEncryptedContentRejection(t *testing.T) {
+	tests := []struct {
+		name, code, message string
+		want                bool
+	}{
+		{"invalid code", "invalid_encrypted_content", "", true},
+		{"context code", "encrypted_context_invalid", "", true},
+		{"hydration", "", "The encrypted content could not be verified because encrypted content hydration failed", true},
+		{"function output", "", "Encrypted function output content could not be decrypted or decoded", true},
+		{"continuation", "", "could not validate encrypted continuation context", true},
+		{"bare word", "", "encrypted payload rejected", false},
+		{"ordinary", "invalid_request_error", "bad request", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsEncryptedContentRejection(tc.code, tc.message); got != tc.want {
+				t.Fatalf("IsEncryptedContentRejection(%q, %q) = %v, want %v", tc.code, tc.message, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestClassifyEncryptedContentIsClientError(t *testing.T) {
+	for _, tc := range []Outcome{
+		{Source: SourceStreamEvent, StatusCode: 502, Code: "invalid_encrypted_content", Message: "neutral"},
+		{Source: SourceHTTP, StatusCode: 502, Message: "encrypted content hydration failed and could not be verified"},
+	} {
+		result := Classify(tc, nil)
+		if result.Category != CategoryClientError || result.Reason != ReasonEncryptedContent {
+			t.Fatalf("Classify(%+v) = %+v, want encrypted client error", tc, result)
+		}
+		if result.Category.SwitchAccount() || result.Category.AccountScoped() {
+			t.Fatalf("encrypted content category must not switch or scope to an account: %+v", result)
+		}
+	}
+}
+
 func TestIsModelUnsupportedResponseUsesRestrictedStructuredMessages(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -374,6 +426,9 @@ func TestClassifyContentPolicyRefusal(t *testing.T) {
 	// their categories.
 	zhipu := []byte(`{"code":"request_check_blocked","message":"Request rejected by preflight safety checks"}`)
 	refusals := []Outcome{
+		{Source: SourceStreamEvent, StatusCode: 200, Code: "content_policy", Message: "Request blocked."},
+		{Source: SourceStreamEvent, StatusCode: 200, Type: "content_policy", Message: "Request blocked."},
+		{StatusCode: 403, Message: "请求可能违反了我们的内容政策"},
 		// Zhipu preflight check, code at the top level of the body.
 		{StatusCode: 403, Message: "Request rejected by preflight safety checks", Body: zhipu},
 		{StatusCode: 403, Body: zhipu},

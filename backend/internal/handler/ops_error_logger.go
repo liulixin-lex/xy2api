@@ -1131,6 +1131,11 @@ func recordOpsErrorAfterRequest(c *gin.Context, ops *service.OpsService, w *opsC
 			parsed = terminal
 		}
 	}
+	if parsed.StreamFailure {
+		if statusCode, ok := service.OpsGatewayTerminalStatus(c); ok {
+			parsed.StatusCode = statusCode
+		}
+	}
 	if status < 400 {
 		if parsed.StreamFailure {
 			status = inferStreamFailureStatus(c, parsed)
@@ -1200,6 +1205,7 @@ func recordOpsErrorAfterRequest(c *gin.Context, ops *service.OpsService, w *opsC
 	normalizedType := normalizeOpsErrorType(parsed.ErrorType, parsed.Code)
 
 	phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(c, normalizedType, parsed.Message, parsed.Code, status)
+	isBusinessLimited = isBusinessLimited || opsContentPolicyRefusal(c, parsed.ErrorType, parsed.Code, parsed.Message, status)
 
 	entry := &service.OpsInsertErrorLogInput{
 		RequestID:       requestID,
@@ -1474,6 +1480,9 @@ func logOpsStreamErrorValue(c *gin.Context, ops *service.OpsService, wireStatus 
 		errorSource = classifyOpsErrorSource(phase, streamErr.Message)
 	} else {
 		phase, isBusinessLimited, errorOwner, errorSource = classifyOpsErrorLog(c, normalizedType, streamErr.Message, streamErr.Code, classifyStatus)
+		if streamErr.Turn == 0 {
+			isBusinessLimited = isBusinessLimited || opsContentPolicyRefusal(c, streamErr.ErrType, streamErr.Code, streamErr.Message, classifyStatus)
+		}
 	}
 	recordedStatus := wireStatus
 	if streamErr.IntendedStatus >= 400 && (streamErr.CountTowardsSLA || streamErr.RequestScoped) {
@@ -1574,6 +1583,15 @@ func logOpsStreamErrorValue(c *gin.Context, ops *service.OpsService, wireStatus 
 	}
 	if streamErr.Turn > 0 && !streamErr.RequestScoped {
 		applyOpsStreamErrorSnapshot(entry, streamErr)
+		status := classifyStatus
+		if entry.UpstreamStatusCode != nil && *entry.UpstreamStatusCode > 0 {
+			status = *entry.UpstreamStatusCode
+		}
+		message := streamErr.Message
+		if entry.UpstreamErrorMessage != nil && strings.TrimSpace(*entry.UpstreamErrorMessage) != "" {
+			message = *entry.UpstreamErrorMessage
+		}
+		entry.IsBusinessLimited = entry.IsBusinessLimited || opsContentPolicyRefusal(nil, streamErr.ErrType, streamErr.Code, message, status)
 	}
 
 	if apiKey != nil {
@@ -2264,6 +2282,23 @@ func classifyOpsErrorLog(c *gin.Context, errType, message, code string, status i
 	errorOwner = classifyOpsErrorOwner(phase, message)
 	errorSource = classifyOpsErrorSource(phase, message)
 	return phase, isBusinessLimited, errorOwner, errorSource
+}
+
+func opsContentPolicyRefusal(c *gin.Context, rawErrType, code, message string, status int) bool {
+	if c != nil {
+		if c.GetBool(service.OpsUpstreamContentPolicyKey) {
+			return true
+		}
+		if upstreamStatus, ok := getContextInt64(c, service.OpsUpstreamStatusCodeKey); ok && upstreamStatus > 0 {
+			status = int(upstreamStatus)
+		}
+		if upstreamMessage := strings.TrimSpace(c.GetString(service.OpsUpstreamErrorMessageKey)); upstreamMessage != "" {
+			message = upstreamMessage
+		}
+	}
+	return resilience.ClassifyWithSettings(resilience.Outcome{
+		Source: resilience.SourceHTTP, StatusCode: status, Code: code, Type: rawErrType, Message: message,
+	}, resilience.Current()).ContentPolicy()
 }
 
 func classifyOpsIsBusinessLimited(errType, phase, code string, status int, message string, localClientAuthError ...bool) bool {

@@ -219,7 +219,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		}
 		if account.Platform == PlatformGrok {
 			kind := "http_error"
-			if s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody) {
+			if s.shouldFailoverGrokUpstreamError(account, resp.StatusCode, respBody) {
 				kind = "failover"
 			}
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -229,16 +229,18 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 				AccountID:          account.ID,
 				AccountName:        account.Name,
 				UpstreamStatusCode: resp.StatusCode,
-				ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, respBody, upstreamMsg),
+				ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, respBody, upstreamMsg, account),
 				UpstreamRequestID:  firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id")),
 				Kind:               kind,
 				Message:            upstreamMsg,
 			})
 			s.handleGrokAccountUpstreamError(withGrokTeamRateLimitModel(ctx, upstreamModel), account, resp.StatusCode, resp.Header, respBody)
-			if s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody) {
+			if s.shouldFailoverGrokUpstreamError(account, resp.StatusCode, respBody) {
 				retryable, retryDelay, retryDeadline, retryMax := grokSameAccountRetryMetadata(account, resp.StatusCode, respBody)
 				return nil, &UpstreamFailoverError{
 					StatusCode:               resp.StatusCode,
+					UpstreamPlatform:         account.Platform,
+					UpstreamAccountType:      account.Type,
 					ResponseBody:             respBody,
 					ResponseHeaders:          resp.Header.Clone(),
 					RetryableOnSameAccount:   retryable,
@@ -248,7 +250,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 					SameAccountRetryMax:      retryMax,
 				}
 			}
-			return s.handleChatCompletionsErrorResponse(resp, c, account, billingModel)
+			return s.handleChatCompletionsErrorResponseAfterAccountHandling(resp, c, account, billingModel)
 		}
 		if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel); foErr != nil {
 			return nil, foErr

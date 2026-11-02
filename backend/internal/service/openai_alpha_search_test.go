@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -283,6 +284,146 @@ func TestForwardAlphaSearchAPIKeyMapsModelAndPassesThroughError(t *testing.T) {
 	require.Equal(t, "Bearer sk-test", upstream.lastReq.Header.Get("Authorization"))
 	require.Equal(t, "upstream-5.6", gjson.GetBytes(upstream.lastBody, "model").String())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "commands.search_query").IsArray())
+	raw, ok := c.Get(OpsUpstreamErrorsKey)
+	require.True(t, ok)
+	events, typed := raw.([]*OpsUpstreamErrorEvent)
+	require.True(t, typed)
+	require.Len(t, events, 1)
+	require.Equal(t, "http_error", events[0].Kind)
+	require.Equal(t, http.StatusBadRequest, events[0].UpstreamStatusCode)
+	require.Equal(t, string(resilience.CategoryClientError), events[0].ResilienceCategory)
+}
+
+func TestForwardAlphaSearchRedirectPassthroughDoesNotRecordHTTPError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, patFallback := range []bool{false, true} {
+		name := "API Key"
+		if patFallback {
+			name = "PAT fallback"
+		}
+		t.Run(name, func(t *testing.T) {
+			body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusFound,
+				Header:     http.Header{"Location": []string{"https://example.invalid/search"}},
+				Body:       io.NopCloser(strings.NewReader("redirect")),
+			}}
+			service := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			account := &Account{
+				ID:       89,
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeAPIKey,
+				Credentials: map[string]any{
+					"api_key":  "sk-test",
+					"base_url": "https://compat.example",
+				},
+			}
+			if patFallback {
+				account.Type = AccountTypeOAuth
+				account.Credentials = map[string]any{
+					"access_token":       "at-test-token",
+					"auth_mode":          OpenAIAuthModePersonalAccessToken,
+					"chatgpt_account_id": "chatgpt-account",
+				}
+			}
+
+			result, err := service.ForwardAlphaSearch(context.Background(), c, account, body)
+			require.NoError(t, err)
+			require.Nil(t, result)
+			require.Equal(t, http.StatusFound, recorder.Code)
+			_, recorded := c.Get(OpsUpstreamErrorsKey)
+			require.False(t, recorded)
+		})
+	}
+}
+
+func TestForwardAlphaSearchE5001ServerErrorFailsOverWithoutAccountMutation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
+	upstreamBody := `{"error":{"code":"E5001","type":"server_error","message":"We do not support the requested endpoint"}}`
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}, "x-request-id": []string{"alpha-e5001"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+	}}
+	repo := &alphaSearchAccountStateRepo{}
+	cfg := &config.Config{}
+	service := &OpenAIGatewayService{
+		cfg:              cfg,
+		httpUpstream:     upstream,
+		accountRepo:      repo,
+		rateLimitService: NewRateLimitService(repo, nil, cfg, nil, nil),
+	}
+	account := &Account{
+		ID:       87,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key":  "sk-test",
+			"base_url": "https://compat.example",
+		},
+	}
+
+	result, err := service.ForwardAlphaSearch(context.Background(), c, account, body)
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusBadRequest, failoverErr.StatusCode)
+	require.Equal(t, resilience.CategoryTransient, ClassifyFailoverError(failoverErr).Category)
+	require.Zero(t, repo.setErrorCalls)
+	require.False(t, c.Writer.Written())
+	raw, ok := c.Get(OpsUpstreamErrorsKey)
+	require.True(t, ok)
+	events, typed := raw.([]*OpsUpstreamErrorEvent)
+	require.True(t, typed)
+	require.Len(t, events, 1)
+	require.Equal(t, "failover", events[0].Kind)
+	require.Equal(t, http.StatusBadRequest, events[0].UpstreamStatusCode)
+	require.Equal(t, string(resilience.CategoryTransient), events[0].ResilienceCategory)
+}
+
+func TestForwardAlphaSearchPATFallbackNon2xxRecordsOneHTTPError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
+	upstreamBody := `{"error":{"type":"invalid_request_error","message":"bad search"}}`
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}, "x-request-id": []string{"alpha-pat-error"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+	}}
+	service := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{
+		ID:          88,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token":       "at-test-token",
+			"auth_mode":          OpenAIAuthModePersonalAccessToken,
+			"chatgpt_account_id": "chatgpt-account",
+		},
+	}
+
+	result, err := service.ForwardAlphaSearch(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.Nil(t, result)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	raw, ok := c.Get(OpsUpstreamErrorsKey)
+	require.True(t, ok)
+	events, typed := raw.([]*OpsUpstreamErrorEvent)
+	require.True(t, typed)
+	require.Len(t, events, 1)
+	require.Equal(t, "http_error", events[0].Kind)
+	require.Equal(t, http.StatusBadRequest, events[0].UpstreamStatusCode)
 }
 
 func TestForwardAlphaSearchReturnsFailoverBeforeWriting(t *testing.T) {
@@ -586,6 +727,101 @@ func TestForwardAlphaSearchAPIKeyEndpointNotFoundFailsOver(t *testing.T) {
 	require.Empty(t, recorder.Body.String())
 }
 
+func TestForwardAlphaSearchAPIKeyUnsupportedEndpointBadRequestFailsOverWithoutAccountError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
+	repo := &alphaSearchAccountStateRepo{}
+	cfg := &config.Config{}
+	service := &OpenAIGatewayService{
+		cfg: cfg,
+		httpUpstream: &httpUpstreamRecorder{responses: []*http.Response{
+			newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, `{"error":{"message":"We do not support the requested endpoint for this account"}}`),
+			newOpenAIRejectedFieldTestResponse(http.StatusOK, `{"output":"search result"}`),
+		}},
+		accountRepo:      repo,
+		rateLimitService: NewRateLimitService(repo, nil, cfg, nil, nil),
+	}
+	first := &Account{
+		ID:       47,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key":  "sk-first",
+			"base_url": "https://first.example",
+		},
+	}
+	second := &Account{
+		ID:       48,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key":  "sk-second",
+			"base_url": "https://second.example",
+		},
+	}
+	firstContext, _ := newOpenAIAlphaSearchTestContext(body)
+
+	result, err := service.ForwardAlphaSearch(context.Background(), firstContext, first, body)
+
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusBadRequest, failoverErr.StatusCode)
+	require.Zero(t, repo.setErrorCalls)
+	require.Empty(t, repo.lastError)
+	require.False(t, firstContext.Writer.Written())
+
+	secondContext, recorder := newOpenAIAlphaSearchTestContext(body)
+	result, err = service.ForwardAlphaSearch(context.Background(), secondContext, second, body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.JSONEq(t, `{"output":"search result"}`, recorder.Body.String())
+}
+
+func TestForwardAlphaSearchAPIKeyBadRequestWithGenericEncryptedWordingDoesNotFailOver(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
+	repo := &alphaSearchAccountStateRepo{}
+	cfg := &config.Config{}
+	upstream := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(
+		http.StatusBadRequest,
+		`{"error":{"message":"encrypted request could not be processed"}}`,
+	)}
+	service := &OpenAIGatewayService{
+		cfg:              cfg,
+		httpUpstream:     upstream,
+		accountRepo:      repo,
+		rateLimitService: NewRateLimitService(repo, nil, cfg, nil, nil),
+	}
+	account := &Account{
+		ID:       49,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key":  "sk-test",
+			"base_url": "https://relay.example",
+		},
+	}
+	c, recorder := newOpenAIAlphaSearchTestContext(body)
+
+	result, err := service.ForwardAlphaSearch(context.Background(), c, account, body)
+
+	require.NoError(t, err)
+	require.Nil(t, result)
+	require.Len(t, upstream.requests, 1)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Zero(t, repo.setErrorCalls)
+}
+
+func newOpenAIAlphaSearchTestContext(body []byte) (*gin.Context, *httptest.ResponseRecorder) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	return c, recorder
+}
+
 // OAuth 账号的 chatgpt.com 端点固定存在，404 保持原有透传行为不变。
 func TestForwardAlphaSearchOAuthNotFoundPassesThrough(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -650,9 +886,12 @@ func TestIsOpenAIAlphaSearchEndpointUnsupported(t *testing.T) {
 	apiKey := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 	oauth := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 
-	require.True(t, isOpenAIAlphaSearchEndpointUnsupported(apiKey, http.StatusNotFound))
-	require.True(t, isOpenAIAlphaSearchEndpointUnsupported(apiKey, http.StatusMethodNotAllowed))
-	require.False(t, isOpenAIAlphaSearchEndpointUnsupported(apiKey, http.StatusBadRequest))
-	require.False(t, isOpenAIAlphaSearchEndpointUnsupported(oauth, http.StatusNotFound))
-	require.False(t, isOpenAIAlphaSearchEndpointUnsupported(nil, http.StatusNotFound))
+	require.True(t, isOpenAIAlphaSearchEndpointUnsupported(apiKey, http.StatusNotFound, nil))
+	require.True(t, isOpenAIAlphaSearchEndpointUnsupported(apiKey, http.StatusMethodNotAllowed, nil))
+	require.True(t, isOpenAIAlphaSearchEndpointUnsupported(apiKey, http.StatusBadRequest, []byte(`{"error":{"message":"Please do not support the requested endpoint"}}`)))
+	require.True(t, isOpenAIAlphaSearchEndpointUnsupported(apiKey, http.StatusBadRequest, []byte(`{"error":{"message":"not encrypted history or tool items"}}`)))
+	require.False(t, isOpenAIAlphaSearchEndpointUnsupported(apiKey, http.StatusBadRequest, []byte(`{"error":{"message":"encrypted request"}}`)))
+	require.False(t, isOpenAIAlphaSearchEndpointUnsupported(apiKey, http.StatusBadRequest, nil))
+	require.False(t, isOpenAIAlphaSearchEndpointUnsupported(oauth, http.StatusNotFound, nil))
+	require.False(t, isOpenAIAlphaSearchEndpointUnsupported(nil, http.StatusNotFound, nil))
 }
