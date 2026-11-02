@@ -45,7 +45,7 @@ type responsesFailedEvent struct {
 	Response       responsesFailedBody `json:"response"`
 }
 
-// writeResponsesFailedSSE emits a `response.failed` SSE event in the OpenAI
+// writeResponsesFailedSSEWithStatus emits a `response.failed` SSE event in the OpenAI
 // Responses API protocol after the stream has already started.
 //
 // 必要性：一旦 SSE 头和任意数据（例如等待槽位时的 ping comment）已经 flush，
@@ -61,26 +61,17 @@ type responsesFailedEvent struct {
 // 返回 false 表示 writer 不支持 Flusher，无法以 SSE 形式回报错误；
 // 此时 caller 也无法回退到 JSON（HTTP 200 已固化），通常意味着连接已经损坏，
 // 应当让请求处理函数 return，由上层关闭连接。
-func writeResponsesFailedSSE(c *gin.Context, errType, code, message string) bool {
-	return writeResponsesFailedSSEWithOpening(c, errType, code, message, false)
-}
-
 func writeResponsesFailedSSEWithStatus(c *gin.Context, status int, errType, code, message string) bool {
 	return writeResponsesFailedSSEWithOpeningStatus(c, status, errType, code, message, false)
 }
 
+// forceOpening covers queue pings on compatible ingress, including when
+// resilience is disabled or delivery tracking was not installed.
 func writeResponsesFailedSSEWithOpeningStatus(c *gin.Context, status int, errType, code, message string, forceOpening bool) bool {
 	handled, wrote := writeResponsesFailedSSEWithOpeningResult(c, errType, code, message, forceOpening)
 	if wrote {
 		service.MarkOpsGatewayTerminalStatus(c, status)
 	}
-	return handled
-}
-
-// forceOpening covers queue pings on compatible ingress, including when
-// resilience is disabled or delivery tracking was not installed.
-func writeResponsesFailedSSEWithOpening(c *gin.Context, errType, code, message string, forceOpening bool) bool {
-	handled, _ := writeResponsesFailedSSEWithOpeningResult(c, errType, code, message, forceOpening)
 	return handled
 }
 

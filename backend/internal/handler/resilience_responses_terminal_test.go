@@ -105,7 +105,7 @@ func TestQueuePingsThenResponsesFailure(t *testing.T) {
 		require.NoError(t, err)
 		recordGatewayStreamHeartbeat(c, n)
 
-		require.True(t, writeResponsesFailedSSE(c, "api_error", "", "no account"))
+		require.True(t, writeResponsesFailedSSEWithStatus(c, http.StatusBadGateway, "api_error", "", "no account"))
 		if enabled {
 			requireCreatedThenFailed(t, rec.Body.String())
 			continue
@@ -126,7 +126,7 @@ func TestResponsesFailureAfterUpstreamEventsAddsNoCreated(t *testing.T) {
 	_, err := c.Writer.WriteString("event: response.created\ndata: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp_up\",\"status\":\"in_progress\"}}\n\n")
 	require.NoError(t, err)
 
-	require.True(t, writeResponsesFailedSSE(c, "api_error", "", "stream broke"))
+	require.True(t, writeResponsesFailedSSEWithStatus(c, http.StatusBadGateway, "api_error", "", "stream broke"))
 	events := parseSSEEvents(rec.Body.String())
 	require.Len(t, events, 2, rec.Body.String())
 	require.Equal(t, "resp_up", gjson.Get(events[0].data, "response.id").String(), "the upstream's own response.created")
