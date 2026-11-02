@@ -1136,6 +1136,7 @@ func recordOpsErrorAfterRequest(c *gin.Context, ops *service.OpsService, w *opsC
 			parsed.StatusCode = statusCode
 		}
 	}
+	service.MergeOpsPostOutputFailureEvents(c)
 	if status < 400 {
 		if parsed.StreamFailure {
 			status = inferStreamFailureStatus(c, parsed)
@@ -1156,7 +1157,6 @@ func recordOpsErrorAfterRequest(c *gin.Context, ops *service.OpsService, w *opsC
 		}
 	}
 
-	service.MergeOpsPostOutputFailureEvents(c)
 	// Skip logging if a passthrough rule with skip_monitoring=true matched.
 	if shouldSkipFinalOpsFailure(c) {
 		return

@@ -2435,30 +2435,55 @@ func TestOpsErrorLoggerMiddleware_RecordsClientClosedAfterUpstreamFailure(t *tes
 }
 
 func TestOpsErrorLoggerMiddleware_RecordsConfirmedPostOutputFailureWhenClientCancels(t *testing.T) {
-	setupOpsErrorLogTestQueue(t, 2)
 	gin.SetMode(gin.TestMode)
-	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	router := gin.New()
-	router.Use(OpsErrorLoggerMiddleware(ops))
-	router.POST("/v1/responses", func(c *gin.Context) {
-		addPostOutputOpsFactForHandlerTest(c, resilience.CategoryTransient, "stream_read_error")
-		cancel()
-		failoverClientGone(c)
-	})
+	for _, tc := range []struct {
+		name        string
+		writeOutput bool
+		wantStatus  int
+	}{
+		{name: "not submitted", wantStatus: statusClientClosedRequest},
+		{name: "already output", writeOutput: true, wantStatus: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupOpsErrorLogTestQueue(t, 2)
+			ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			ctx, cancel := context.WithCancel(context.Background())
+			router := gin.New()
+			router.Use(OpsErrorLoggerMiddleware(ops))
+			router.POST("/v1/responses", func(c *gin.Context) {
+				if tc.writeOutput {
+					c.Header("Content-Type", "text/event-stream")
+					_, err := c.Writer.WriteString("data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n")
+					require.NoError(t, err)
+					c.Writer.Flush()
+				}
+				addPostOutputOpsFactForHandlerTest(c, resilience.CategoryTransient, "stream_read_error")
+				cancel()
+				failoverClientGone(c)
+			})
 
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx))
-	require.Equal(t, statusClientClosedRequest, recorder.Code)
-	require.Equal(t, int64(1), OpsErrorLogQueueLength(), "a confirmed upstream failure keeps a later client close in the error log")
-	job := <-opsErrorLogQueue
-	require.Equal(t, statusClientClosedRequest, job.entry.StatusCode)
-	require.Equal(t, "upstream", job.entry.ErrorPhase)
-	require.Equal(t, "provider", job.entry.ErrorOwner)
-	events, err := service.ParseOpsUpstreamErrors(*job.entry.UpstreamErrorsJSON)
-	require.NoError(t, err)
-	require.Len(t, events, 1)
-	require.Equal(t, "stream_read_error", events[0].Reason)
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx))
+			require.Equal(t, tc.wantStatus, recorder.Code)
+			if tc.writeOutput {
+				require.Contains(t, recorder.Body.String(), "response.output_text.delta")
+			}
+			require.Equal(t, int64(1), OpsErrorLogQueueLength(), "a confirmed upstream failure keeps a later client close in the error log")
+			job := <-opsErrorLogQueue
+			require.Equal(t, tc.wantStatus, job.entry.StatusCode)
+			require.Equal(t, "upstream", job.entry.ErrorPhase)
+			require.Equal(t, "provider", job.entry.ErrorOwner)
+			require.Equal(t, "upstream_http", job.entry.ErrorSource)
+			events, err := service.ParseOpsUpstreamErrors(*job.entry.UpstreamErrorsJSON)
+			require.NoError(t, err)
+			require.Len(t, events, 1)
+			require.Equal(t, int64(626), events[0].AccountID)
+			require.Equal(t, "stream_failed", events[0].Kind)
+			require.Equal(t, "stream_read_error", events[0].Reason)
+			require.Equal(t, string(resilience.CategoryTransient), events[0].ResilienceCategory)
+			require.Zero(t, events[0].UpstreamStatusCode)
+		})
+	}
 }
 
 func TestOpsErrorLoggerMiddleware_RecordsClientClosedWhenIgnoreContextCanceledDisabled(t *testing.T) {

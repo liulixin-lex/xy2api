@@ -554,19 +554,12 @@ func MergeOpsPostOutputFailureEvents(c *gin.Context) {
 	}
 	events := currentOpsUpstreamEvents(c)
 	for _, fact := range facts {
-		if !validPostOutputFailureFact(fact) {
-			continue
-		}
 		sequence := st.OpsUpstreamEventSequence()
 		aligned := sequence == uint64(len(events))
 		if postOutputAttemptHasEvent(events, fact, sequence, aligned) {
 			continue
 		}
 
-		message := strings.TrimSpace(fact.Message)
-		if message == "" {
-			message = "upstream stream broke after output"
-		}
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 			AtUnixMs:           fact.AtUnixMs,
 			Platform:           fact.Platform,
@@ -576,7 +569,7 @@ func MergeOpsPostOutputFailureEvents(c *gin.Context) {
 			ProxyName:          fact.ProxyName,
 			Kind:               "stream_failed",
 			Reason:             fact.Reason,
-			Message:            message,
+			Message:            fact.Message,
 			ResilienceCategory: string(fact.Category),
 		})
 		events = currentOpsUpstreamEvents(c)
@@ -595,20 +588,6 @@ func currentOpsUpstreamEvents(c *gin.Context) []*OpsUpstreamErrorEvent {
 	return nil
 }
 
-func validPostOutputFailureFact(fact resilience.PostOutputFailureFact) bool {
-	if fact.AccountID <= 0 || fact.AtUnixMs <= 0 {
-		return false
-	}
-	switch fact.Reason {
-	case "stream_read_error", "missing_terminal":
-		return fact.Category == resilience.CategoryTransient
-	case "stall":
-		return fact.Category == resilience.CategoryStall
-	default:
-		return false
-	}
-}
-
 func postOutputAttemptHasEvent(events []*OpsUpstreamErrorEvent, fact resilience.PostOutputFailureFact, sequence uint64, aligned bool) bool {
 	if !fact.HasSendBoundary || !aligned || fact.SendBoundary > sequence {
 		for _, event := range events {
@@ -618,10 +597,7 @@ func postOutputAttemptHasEvent(events []*OpsUpstreamErrorEvent, fact resilience.
 		}
 		return false
 	}
-	for i := fact.SendBoundary; i < sequence; i++ {
-		if i >= uint64(len(events)) {
-			break
-		}
+	for i := fact.SendBoundary; i < uint64(len(events)); i++ {
 		if event := events[i]; event != nil && event.AccountID == fact.AccountID {
 			return true
 		}

@@ -3557,11 +3557,15 @@
     },
     {
       "path": "backend/internal/repository/http_upstream.go",
-      "value": "service.RecordOpsUpstreamSendBoundary(req.Context(), accountID)"
+      "value": "service.RecordOpsUpstreamSendBoundary(req.Context(), accountID)\n\t}\n\tresp, err := doUpstreamRequest(client, req)\n\tif err != nil {\n\t\ts.recordOpenAIHTTP2Failure("
+    },
+    {
+      "path": "backend/internal/repository/http_upstream.go",
+      "value": "service.RecordOpsUpstreamSendBoundary(req.Context(), accountID)\n\t}\n\tresp, err := doUpstreamRequest(client, req)\n\tif err != nil {\n\t\tatomic.AddInt64(&entry.inFlight, -1)"
     },
     {
       "path": "backend/internal/handler/ops_error_logger.go",
-      "value": "\tservice.MergeOpsPostOutputFailureEvents(c)\n\t// Skip logging if a passthrough rule with skip_monitoring=true matched."
+      "value": "\tservice.MergeOpsPostOutputFailureEvents(c)\n\tif status < 400 {"
     },
     {
       "path": "backend/internal/handler/ops_error_logger.go",
@@ -3574,6 +3578,10 @@
     {
       "path": "backend/internal/service/ops_upstream_context.go",
       "value": "resilience.StateFrom(c.Request.Context()).ResetPostOutputOpsTracking()"
+    },
+    {
+      "path": "backend/internal/service/plugin_runtime.go",
+      "value": "RecordOpsUpstreamSendBoundary(ctx, account.ID)\n\tif err := stream.Send(&pluginv1.ForwardRequest{Frame: &pluginv1.ForwardRequest_Start"
     },
     {
       "path": "backend/internal/service/resilience_post_output.go",
