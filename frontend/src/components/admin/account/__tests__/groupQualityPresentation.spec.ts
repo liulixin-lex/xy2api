@@ -12,6 +12,7 @@ import {
   groupQualityGateView,
   groupQualityPanel,
   groupQualityStateLabel,
+  groupQualityTierText,
   groupQualityTooltip,
   strictestQualityLimits,
   orderGroupsByQuality,
@@ -36,8 +37,8 @@ const metrics = (overrides: Partial<GroupQualityAccountMetrics> = {}): GroupQual
 const status = (accounts: GroupQualityGateAccountStatus[], overrides: Partial<GroupQualityGateStatus> = {}): GroupQualityGateStatus => ({
   generated_at: '2026-11-01T00:00:00Z', stale: false, account_metrics: {},
   groups: [
-    { group_id: 7, enabled: true, fast_warm_ttft_p90_ms: 10000, summary: { eligible: 1, ejected: 0, trial: 0 }, accounts },
-    { group_id: 8, enabled: false, fast_warm_ttft_p90_ms: 10000, summary: { eligible: 0, ejected: 0, trial: 0 }, accounts }
+    { group_id: 7, enabled: true, fast_warm_ttft_p90_ms: 10000, effective_fast_warm_ttft_p90_ms: 7300, summary: { eligible: 1, ejected: 0, trial: 0 }, accounts },
+    { group_id: 8, enabled: false, fast_warm_ttft_p90_ms: 10000, effective_fast_warm_ttft_p90_ms: null, summary: { eligible: 0, ejected: 0, trial: 0 }, accounts }
   ],
   ...overrides
 })
@@ -121,7 +122,9 @@ describe('state labels and colours', () => {
     ['zh', { state: 'eligible' }, '合格'],
     ['zh', { state: 'ejected', until: '2026-11-01T14:20:00Z' }, '熔断至 @14:20'],
     ['zh', { state: 'ejected' }, '熔断'],
-    ['zh', { state: 'trial' }, '试用'],
+    ['zh', { state: 'trial' }, '观察中'],
+    ['zh', { state: 'trial', until: '2026-11-01T14:50:00Z' }, '观察至 @14:50'],
+    ['en', { state: 'trial', until: '2026-11-01T14:50:00Z' }, 'Observing until @14:50'],
     ['zh', { state: 'ejected', guard_held: true, until: '2026-11-01T14:20:00Z' }, '保底保留'],
     ['en', { state: 'ejected', until: '2026-11-01T14:20:00Z' }, 'Ejected until @14:20'],
     ['en', { state: 'ejected', guard_held: true }, 'Held by floor guard']
@@ -172,8 +175,8 @@ describe('groupQualityTooltip', () => {
     })), zh, clock)
     expect(block.title).toBe('Codex · 熔断至 @14:20（第 2 次）')
     expect(block.note).toBeUndefined()
-    expect(block.reasons).toEqual(['错误率超线', '续轮首字超线'])
-    expect(cells(block)).toEqual([['错误率', '14%', '', '10%', true], ['首字 p90', '31.8s', '', '20s', true]])
+    expect(block.reasons).toEqual(['错误率超线', '续轮可见首字超线'])
+    expect(cells(block)).toEqual([['错误率', '14%', '', '10%', true], ['可见首字 p90', '31.8s', '', '20s', true]])
     expect(block.headroom).toEqual({ text: '余量 -18%', tone: 'danger' })
   })
 
@@ -184,7 +187,7 @@ describe('groupQualityTooltip', () => {
       state: 'ejected', pinned: true, strikes: 1, reasons: ['warm_ttft'], headroom: null, metrics: postEjection
     })), zh, clock, window)
     expect(pinned.measuredNote).toBe('熔断时窗口')
-    expect(cells(pinned)).toEqual([['错误率', '0%', '未达判定条件', '10%', false], ['首字 p90', '29.2s', '', '20s', true]])
+    expect(cells(pinned)).toEqual([['错误率', '0%', '未达判定条件', '10%', false], ['可见首字 p90', '29.2s', '', '20s', true]])
     expect(pinned.headroom).toEqual({ text: '余量 -46%', tone: 'danger' })
     const held = groupQualityTooltip('Codex', qualityOf(account({ state: 'ejected', guard_held: true, strikes: 2, headroom: 0.5, metrics: postEjection })), zh, clock,
       metrics({ calls: 224, soft_failures: 75, error_rate: 0.335, warm_samples: 148, warm_ttft_p90_ms: 8200 }))
@@ -198,7 +201,7 @@ describe('groupQualityTooltip', () => {
       headroom: 0.12, metrics: { calls: 12, soft_failures: 1, error_rate: null, warm_samples: 4, warm_ttft_p90_ms: null }
     })), zh, clock)
     expect(below.title).toBe('Codex · 合格')
-    expect(cells(below)).toEqual([['错误率', '8.3%', '未达判定条件', '10%', false], ['首字 p90', '样本不足', '', '20s', false]])
+    expect(cells(below)).toEqual([['错误率', '8.3%', '未达判定条件', '10%', false], ['可见首字 p90', '样本不足', '', '20s', false]])
     expect(below.headroom).toEqual({ text: '余量 12%', tone: 'warning' })
     const empty = groupQualityTooltip('Codex', qualityOf(account({
       headroom: null, metrics: { calls: 0, soft_failures: 0, error_rate: null, warm_samples: 0, warm_ttft_p90_ms: null }
@@ -220,6 +223,17 @@ describe('groupQualityTooltip', () => {
   })
 })
 
+describe('groupQualityTierText', () => {
+  it('shows the tier with the current fast line, or the policy line with a note when the group has no best value', () => {
+    const zh = i18nFor('zh').t
+    expect(groupQualityTierText(qualityOf(account({ tier: 2 })), zh)).toBe('其他档，实时快档线 7.3s')
+    const noBest = qualityOf(account(), { groups: [{ group_id: 7, enabled: true, fast_warm_ttft_p90_ms: 10000, effective_fast_warm_ttft_p90_ms: null, summary: { eligible: 1, ejected: 0, trial: 0 }, accounts: [account()] }] })
+    expect(groupQualityTierText(noBest, zh)).toBe('快档，实时快档线 10s（组内暂无足够样本）')
+    expect(groupQualityTooltip('Codex', qualityOf(account({ state: 'trial', tier: 2 })), zh, clock).tier).toBe('其他档，实时快档线 7.3s')
+    expect(groupQualityTooltip('Codex', qualityOf(account({ state: 'ejected' })), zh, clock).tier).toBeUndefined()
+  })
+})
+
 describe('groupQualityPanel', () => {
   const zh = i18nFor('zh').t
   const named = (...ids: number[]) => ids.map(id => ({ id, name: String.fromCharCode(64 + id) }))
@@ -234,9 +248,10 @@ describe('groupQualityPanel', () => {
     ])
     const panel = groupQualityPanel(orderGroupsByQuality(named(1, 2, 3, 4, 5), quality), quality, zh, clock)!
     expect([panel.attention, panel.attentionCount]).toEqual(['ejected', 2])
-    expect(panel.blocks.map(block => block.title)).toEqual(['B · 熔断至 @14:20', 'A · 试用', 'E · 等待评估'])
+    expect(panel.blocks.map(block => block.title)).toEqual(['B · 熔断至 @14:20', 'A · 观察中', 'E · 等待评估'])
     expect(panel.blocks[0].rows).toHaveLength(2)
-    expect(panel.eligible).toEqual([{ name: 'C', pinned: true }, { name: 'D', pinned: false, headroom: { text: '余量 12%', tone: 'warning' } }])
+    const fast = '快档，实时快档线 7.3s'
+    expect(panel.eligible).toEqual([{ name: 'C', pinned: true, tier: fast }, { name: 'D', pinned: false, tier: fast, headroom: { text: '余量 12%', tone: 'warning' } }])
     expect(panel.stale).toBe('评估超过 5 分钟未更新，沿用上一轮')
   })
 
@@ -255,7 +270,7 @@ describe('accountQualityMetricItems', () => {
   const items = (m: GroupQualityAccountMetrics, l = limits) => accountQualityMetricItems(m, i18nFor('zh').t, l)
 
   it('writes the three full-window metrics compactly and lists only those with samples', () => {
-    expect(items(metrics()).map(item => item.text)).toEqual(['错 2.2%', '首字 7.8s', '零缓存 3%'])
+    expect(items(metrics()).map(item => item.text)).toEqual(['错 2.2%', '可见首字 7.8s', '零缓存 3%'])
     expect(items(metrics())[0].title).toBe('错误率（近 15 分钟）：180 次调用，软失败 4 次')
     expect(items(metrics({ calls: 0, warm_samples: 0 })).map(item => item.key)).toEqual(['zero_cache'])
     expect(items(metrics({ calls: 0, warm_samples: 0, zero_cache_samples: 0 }))).toEqual([])

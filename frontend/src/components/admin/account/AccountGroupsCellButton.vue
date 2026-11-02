@@ -87,14 +87,13 @@
           </tbody>
         </table>
         <p v-if="block.headroom" class="mt-1" :class="block.headroom.tone === 'danger' ? 'text-red-300' : 'text-amber-300'">{{ block.headroom.text }}</p>
+        <p v-if="block.tier" data-testid="quality-panel-tier" class="mt-1 text-gray-400">{{ block.tier }}</p>
       </div>
       <div v-if="panel.eligible.length" data-testid="quality-panel-eligible" :class="panel.blocks.length ? 'mt-2.5 border-t border-white/10 pt-2.5' : undefined">
         <p class="font-medium text-white">{{ t('admin.groupQualityGate.panel.eligible', { count: panel.eligible.length }) }}</p>
-        <p class="text-gray-300">
-          <template v-for="(item, index) in panel.eligible" :key="item.name">
-            <span v-if="index" aria-hidden="true">、</span>
-            <span><template v-if="item.pinned"><Icon name="lock" size="xs" class="mr-0.5 inline-block align-[-1px] text-gray-400" aria-hidden="true" /><span class="sr-only">{{ t('admin.groupQualityGate.pinnedMark') }}</span></template>{{ item.name }}<span v-if="item.headroom" class="ml-1 whitespace-nowrap" :class="item.headroom.tone === 'danger' ? 'text-red-300' : 'text-amber-300'">{{ item.headroom.text }}</span></span>
-          </template>
+        <!-- 每组一行：名称（固定、余量）后接灰色的档位与实时快档线 -->
+        <p v-for="item in panel.eligible" :key="item.name" class="text-gray-300">
+          <template v-if="item.pinned"><Icon name="lock" size="xs" class="mr-0.5 inline-block align-[-1px] text-gray-400" aria-hidden="true" /><span class="sr-only">{{ t('admin.groupQualityGate.pinnedMark') }}</span></template>{{ item.name }}<span v-if="item.headroom" class="ml-1 whitespace-nowrap" :class="item.headroom.tone === 'danger' ? 'text-red-300' : 'text-amber-300'">{{ item.headroom.text }}</span><span class="ml-1 text-gray-400">{{ item.tier }}</span>
         </p>
       </div>
       <p v-if="windowItems.length" data-testid="quality-panel-window" class="mt-2.5 flex flex-wrap gap-x-2 border-t border-white/10 pt-2 tabular-nums text-gray-400">
@@ -130,8 +129,8 @@ import {
 } from './groupQualityPresentation'
 
 // 账号列表的分组单元格。分组标签是一个按钮，点开“编辑分组”；没有分组时显示“—”也能点。
-// 只有熔断、保底保留、试用的分组用带状态的标签，合格组显示普通标签。开启门槛时标签后有一个小标识，
-// 只有悬停、键盘聚焦或点按它才弹出门槛面板：需关注的分组逐组展开，合格组合并成一行，底部是账号完整窗口指标。
+// 只有熔断、保底保留、观察中的分组用带状态的标签，合格组显示普通标签。开启门槛时标签后有一个小标识，
+// 只有悬停、键盘聚焦或点按它才弹出门槛面板：需关注的分组逐组展开，合格组每组一行（含档位与实时快档线），底部是账号完整窗口指标。
 const TIP_WIDTH = 288
 const TIP_GAP = 6
 const HOVER_DELAY_MS = 120

@@ -1091,6 +1091,7 @@ export default {
       recoverState: '恢复状态',
       recoverStateHint: '用于恢复错误、限流和临时不可调度等可恢复状态。',
       recoverStateSuccess: '账号状态已恢复',
+      recoverStateSuccessGate: '账号状态已恢复；分组门槛将在下一轮评估（约 1 分钟）后更新为观察中',
       recoverStateFailed: '恢复账号状态失败',
       fallbackActive: '已回退',
       fallbackActiveTip: '原代理 {origin} 已到期，当前使用备用代理',

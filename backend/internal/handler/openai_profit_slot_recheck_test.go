@@ -46,6 +46,10 @@ type slotQualityView struct{}
 
 func (slotQualityView) Vetoed(_, accountID int64) bool { return accountID == 1 }
 func (slotQualityView) OrderTier(int64, int64) int     { return 0 }
+func (slotQualityView) Enabled(int64) bool             { return false }
+func (slotQualityView) SlowerThanFastLine(int64, int64) (int, int, bool) {
+	return 0, 0, false
+}
 
 func (c *profitCountingConcurrencyCache) ReleaseAccountSlot(context.Context, int64, string) error {
 	c.accountReleases.Add(1)

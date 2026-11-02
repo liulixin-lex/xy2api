@@ -219,7 +219,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 - 迁移前按实时负载确认至少一个这样的替代账号有空闲并发（并发上限不大于 0 视为不限）；负载查询失败、缺项或全部满载时保留原绑定，不白白丢掉缓存。这只降低白迁移的概率，确认之后空位仍可能被其他请求抢走。
 - 单账号分组，或组内其他账号都在判慢期时，保留原绑定，不迁移。整体拥塞时不会成批迁移。
 - 质量路由钉住的会话、带 `previous_response_id` 的请求与 WebSocket 不迁移。
-- 开启分组质量门槛的分组不做会话迁移（按最近一次评估判断），慢账号交给质量门槛的续轮首字 p90 熔断改绑；判慢降序仍然生效。未开门槛的分组保持本节行为。
+- 开启分组质量门槛的分组不用本节的判慢迁移，改按门槛判据迁出：绑定账号的续轮可见首字 p90 超过策略快档线、有快档成员此刻有空位，且本次选号开启低倍率优先，见[分组质量门槛](GROUP_QUALITY_GATE.md)。判慢降序仍然生效。未开门槛的分组保持本节行为。
 
 **范围与回退**
 
@@ -452,7 +452,7 @@ OpenAI 判慢降序与会话迁移的事件（0.4.9，见 §4.5）不带 `resili
 - 兼容转换推迟开场期间的注释心跳会提交 200，此后的失败只能以带内终止帧告知客户端（与原生 Responses 相同）。
 - 仅流式学习只认表中确定的结构码与文案（如 “only accepts streaming requests”、“stream must be true”）；其他措辞的同类拒绝仍按客户端错误返回。只覆盖 OpenAI 入站的 Responses 与 Chat 普通文本请求，以及 OpenAI、Grok 平台的账号；compact、图片、WebSocket、Messages 经 OpenAI 转换，以及 Gemini、CN、Bedrock 不学习、不过滤。只在上游协议与入站相同、上游流模式跟随客户端的路径上过滤；跨协议转换（如 Chat 转 Responses 上游）、按模型路由的路径与路由无法确定的 Grok OAuth Chat 不过滤。错误的 `param` 指向 `stream` 以外的参数，或请求体里本来就有这句话（例如写在提示词里）时不学习；`"param": null` 或空值不影响学习。学习结果存在账号 `extra`（`capability_learned_responses`、`capability_learned_chat`），绑定账号的上游配置：改了上游配置的账号不受旧记录影响；复制、创建、导入与导出账号都不带学习结果。
 - 0.4.4 容量判据收紧后，“Codex is at capacity”与非 503 上的 “servers are currently overloaded” 不再算容量降载，会让账号进入软冷却并计入会话失败；Grok 重试耗尽的原始 429 不再转成无号 503，客户端看到 429。
-- 0.4.4、0.4.5 把 `response.metadata` 算作输出（0.4.6 修复，见 §1）：OpenAI Codex 后端过载时先发 created、in_progress、`response.metadata`，再发 `server_is_overloaded`。这两个版本不换号，错误直接到客户端，日志为 `gateway.failover_suppressed_after_semantic_output`；没有开关能绕过。0.4.3 也同样不换号。0.4.6 起 `response.metadata` 也不再解除首输出截止：发了它之后只有心跳、超过档位（180/200/220 秒）仍无正文的尝试会换号，而以前只要不断有心跳就一直等到正文。缺省的语义首字时间 `first_token_ms` 仍从 `response.metadata` 起算，看不出这类请求离截止还有多远；需要时用 `openai_ttft_mode=visible`。关闭 `stream.native_prelude_whitelist` 回到以前的行为。0.4.9起热尝试的档位为 20/25/30/30 秒，冷尝试另有下限，见 §4.5；`codex.rate_limits` 同样判为开场事件。
+- 0.4.4、0.4.5 把 `response.metadata` 算作输出（0.4.6 修复，见 §1）：OpenAI Codex 后端过载时先发 created、in_progress、`response.metadata`，再发 `server_is_overloaded`。这两个版本不换号，错误直接到客户端，日志为 `gateway.failover_suppressed_after_semantic_output`；没有开关能绕过。0.4.3 也同样不换号。0.4.6 起 `response.metadata` 也不再解除首输出截止：发了它之后只有心跳、超过档位（180/200/220 秒）仍无正文的尝试会换号，而以前只要不断有心跳就一直等到正文。开场白名单开启时，缺省的语义首字时间 `first_token_ms` 也不从 `response.metadata` 起算（它与其他开场事件一样算元数据）。关闭 `stream.native_prelude_whitelist` 回到以前的行为。0.4.9起热尝试的档位为 20/25/30/30 秒，冷尝试另有下限，见 §4.5；`codex.rate_limits` 同样判为开场事件。
 - 0.4.4 的已知缺陷 RA-1（0.4.5 已修复，见 §3“上游给出的等待时间”）：耗尽由上游带 `Retry-After` 的容量失败造成、且组里没有已受罚的账号时，0.4.4 合成的 `response.failed` 不带 `error.headers.retry-after`，正文也不再附 “try again in Ns”（0.4.3 的正文有）。仍在运行 0.4.4 时，需要 0.4.3 的正文可以把 `errors.failed_frame_retry_after` 设为 false。
 - 原生 Responses 路径上，上游在 `response.created` 之前发出的非空 delta 照常先转发（网关不重排上游的真实内容），这类上游下严格 SDK 仍可能报 “Expected to have received response.created”。
 - 仅流式学习记录绑定账号凭据：OAuth 类账号刷新令牌后会重新学习一次。学习粒度是“账号 + 协议”，不分模型：中转只对某个模型要求流式时，该账号所有模型的非流式请求都会被跳过，可以在账号列表手动清除。

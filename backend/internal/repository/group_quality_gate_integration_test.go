@@ -44,8 +44,12 @@ func TestGroupQualityGateRepositoryLoadsWarmMetricsAndDeduplicatesFailures(t *te
 
 	firstAt, warmAt := now.Add(-2*time.Minute), now.Add(-time.Minute)
 	for i, at := range []time.Time{firstAt, warmAt} {
-		_, err := tx.ExecContext(ctx, `INSERT INTO usage_logs(user_id,api_key_id,account_id,group_id,request_id,model,stream,first_token_ms,session_id,input_tokens,cache_read_tokens,cache_creation_tokens,created_at)
-			VALUES($1,$2,$3,$4,$5,'gpt-test',TRUE,$6,'session-quality',2048,0,0,$7)`, userID, keyID, accountID, groupID, fmt.Sprintf("quality-%d-success-%d", suffix, i), 1200+i*100, at)
+		firstOutputMs := 0
+		if i == 1 {
+			firstOutputMs = 14000
+		}
+		_, err := tx.ExecContext(ctx, `INSERT INTO usage_logs(user_id,api_key_id,account_id,group_id,request_id,model,stream,first_token_ms,end_to_end_first_output_ms,session_id,input_tokens,cache_read_tokens,cache_creation_tokens,created_at)
+			VALUES($1,$2,$3,$4,$5,'gpt-test',TRUE,$6,$7,'session-quality',2048,0,0,$8)`, userID, keyID, accountID, groupID, fmt.Sprintf("quality-%d-success-%d", suffix, i), 1200+i*100, firstOutputMs, at)
 		require.NoError(t, err)
 	}
 	// A six-minute gap is not a warm continuation and must not enter either warm metric.
@@ -72,18 +76,22 @@ func TestGroupQualityGateRepositoryLoadsWarmMetricsAndDeduplicatesFailures(t *te
 	require.NoError(t, tx.QueryRowContext(ctx, `SELECT MAX(created_at) FROM usage_logs WHERE created_at < $1`, now.Add(time.Second)).Scan(&latestUsage))
 	require.WithinDuration(t, latestUsage, observedAt, time.Millisecond, "fresh error rows must not hide stale usage writes")
 	successes, softFailures, warmSamples, zeroCacheSamples := 0, 0, 0, 0
+	var fallbackFirstOutputMs int
 	var warmTTFT []int
 	for _, observation := range observations {
 		if observation.Success {
 			successes++
 		}
+		if observation.RequestID == fmt.Sprintf("quality-%d-success-0", suffix) {
+			fallbackFirstOutputMs = observation.FirstOutputMs
+		}
 		if observation.SoftFailure {
 			softFailures++
 			require.Equal(t, "client:"+clientRequestID, observation.RequestID, "failure IDs use the usage_logs request ID format")
 		}
-		if observation.Warm && observation.Success && observation.Streaming && observation.FirstTokenMs > 0 {
+		if observation.Warm && observation.Success && observation.Streaming && observation.FirstOutputMs > 0 {
 			warmSamples++
-			warmTTFT = append(warmTTFT, observation.FirstTokenMs)
+			warmTTFT = append(warmTTFT, observation.FirstOutputMs)
 		}
 		if observation.Warm && observation.Success && observation.PromptTokens >= 2048 {
 			zeroCacheSamples++
@@ -93,7 +101,8 @@ func TestGroupQualityGateRepositoryLoadsWarmMetricsAndDeduplicatesFailures(t *te
 	require.Equal(t, 4, successes)
 	require.Equal(t, 1, softFailures, "two persisted copies of one upstream attempt must deduplicate")
 	require.Equal(t, 1, warmSamples, "only the request following a same-session request within five minutes is warm")
-	require.Equal(t, []int{1300}, warmTTFT)
+	require.Equal(t, []int{14000}, warmTTFT, "the end-to-end first output takes precedence over the semantic first token")
+	require.Equal(t, 1200, fallbackFirstOutputMs, "a zero end-to-end value falls back to the semantic first token")
 	require.Equal(t, 1, zeroCacheSamples)
 
 	var committedUsage, committedErrors, committedAccounts int

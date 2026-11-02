@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"math"
 	"strings"
 	"sync"
@@ -284,31 +285,38 @@ func (s *OpenAIGatewayService) openAIAccountLatencyHoldSnapshotForAccounts(accou
 	return result
 }
 
-func (s *OpenAIGatewayService) migrateOpenAILatencyHeldOwner(ctx context.Context, groupID *int64, platform, sessionHash, requestedModel string, stickyAccountID int64, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability) int64 {
+func (s *OpenAIGatewayService) migrateOpenAILatencyHeldOwner(ctx context.Context, groupID *int64, platform, sessionHash, requestedModel string, stickyAccountID int64, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, preferLowUpstreamRate bool) int64 {
 	if stickyAccountID <= 0 || openAINoStickyMigration(ctx) || s == nil || !resilience.Current().SessionOn() || s.qualityOwnsSticky(ctx, groupID, sessionHash) {
-		return stickyAccountID
-	}
-	state := s.getOpenAIAccountLatencyHoldState()
-	if state == nil || state.latestHoldUntilUnixNano.Load() <= time.Now().UnixNano() {
-		return stickyAccountID
-	}
-	// A quality-gated group rebinds slow sessions by ejection instead.
-	if view, ok := s.GroupQualityGateView().(interface{ Enabled(groupID int64) bool }); ok && view.Enabled(derefGroupID(groupID)) {
 		return stickyAccountID
 	}
 	now := time.Now()
 	ownerSnapshot := openAIAccountLatencyHoldSnapshot{}
 	var ownerAccount *Account
-	ok := false
-	if account, err := s.getSchedulableAccount(ctx, stickyAccountID); err != nil || account == nil {
-		return stickyAccountID
+	qualityView := s.GroupQualityGateView()
+	gateMigration := false
+	var warmTTFTP90Ms, fastWarmTTFTP90Ms int
+	if qualityView.Enabled(derefGroupID(groupID)) {
+		if !preferLowUpstreamRate || s.shareScheduling.shareSchedulingActive(derefGroupID(groupID)) {
+			return stickyAccountID
+		}
+		warmTTFTP90Ms, fastWarmTTFTP90Ms, gateMigration = qualityView.SlowerThanFastLine(derefGroupID(groupID), stickyAccountID)
+		if !gateMigration {
+			return stickyAccountID
+		}
 	} else {
+		state := s.getOpenAIAccountLatencyHoldState()
+		if state == nil || state.latestHoldUntilUnixNano.Load() <= now.UnixNano() {
+			return stickyAccountID
+		}
+		account, err := s.getSchedulableAccount(ctx, stickyAccountID)
+		if err != nil || account == nil {
+			return stickyAccountID
+		}
 		ownerAccount = account
 		ownerSnapshot = s.openAIAccountLatencyHoldSnapshot(account, canonicalOpenAIAccountSchedulingModel(account, requestedModel), now)
-		ok = ownerSnapshot.Held
-	}
-	if !ok {
-		return stickyAccountID
+		if !ownerSnapshot.Held {
+			return stickyAccountID
+		}
 	}
 	accounts, err := s.listSchedulableAccounts(ctx, groupID, NormalizeOpenAICompatiblePlatform(platform))
 	if err != nil {
@@ -340,6 +348,9 @@ func (s *OpenAIGatewayService) migrateOpenAILatencyHeldOwner(ctx context.Context
 		if vetoed, _ := openAIProfitControlVetoReason(ctx, candidate); vetoed {
 			continue
 		}
+		if gateMigration && (qualityView.OrderTier(derefGroupID(groupID), candidate.ID) != GroupQualityGateTierFast || qualityView.Vetoed(derefGroupID(groupID), candidate.ID)) {
+			continue
+		}
 		alternatives = append(alternatives, candidate)
 		loadRequests = append(loadRequests, AccountWithConcurrency{ID: candidate.ID, MaxConcurrency: candidate.Concurrency})
 	}
@@ -361,6 +372,11 @@ func (s *OpenAIGatewayService) migrateOpenAILatencyHeldOwner(ctx context.Context
 			continue
 		}
 		resilience.StateFrom(ctx).ClearKeptStickyIfOwner(stickyAccountID)
+		if gateMigration {
+			slog.Warn("group_quality_gate.migrate", "group_id", derefGroupID(groupID), "account_id", stickyAccountID,
+				"warm_ttft_p90_ms", warmTTFTP90Ms, "fast_warm_ttft_p90_ms", fastWarmTTFTP90Ms)
+			return 0
+		}
 		logger.L().Info("openai_account_latency_sticky_migrated",
 			zap.Int64("from_account_id", stickyAccountID),
 			zap.Int64("alternative_account_id", candidate.ID),

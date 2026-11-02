@@ -154,7 +154,7 @@
       "sources": [
         "backend/internal/service/**/*.go"
       ],
-      "pattern": "group_quality_gate\\.(?:eject|trial|recover|guard_hold|last_resort|evaluate_failed)",
+      "pattern": "group_quality_gate\\.(?:eject|trial|recover|guard_hold|last_resort|migrate|evaluate_failed)",
       "doc": "docs/GROUP_QUALITY_GATE.md"
     },
     {
@@ -445,6 +445,16 @@
       "reason": "2026-10-31: the menu, settings card and permission label were renamed 客户服务 when the support chat widget was added; the ticket feature and its identifiers (support_tickets, nav.supportTickets, support_ticket_enabled) stay, so the rule only reads the zh locale files",
       "paths": [
         "frontend/src/i18n/locales/zh/**"
+      ]
+    },
+    {
+      "pattern": "GroupQualityGateTierTrial",
+      "reason": "2026-11-02 group quality gate v2: the trial ordering tier was removed; trial is a bounded observation ordered by the two-tier rule and the API tier is only 0 or 2",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md",
+        "openspec/changes/group-quality-gate-20261031/**",
+        "openspec/changes/group-quality-gate-v2-20261102/**"
       ]
     }
   ],

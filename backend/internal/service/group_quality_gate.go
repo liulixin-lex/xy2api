@@ -14,15 +14,18 @@ import (
 
 // GroupQualityGateTier values are used when low-upstream-rate priority is enabled.
 const (
-	GroupQualityGateTierFast = iota
-	GroupQualityGateTierTrial
-	GroupQualityGateTierOther
+	GroupQualityGateTierFast  = 0
+	GroupQualityGateTierOther = 2
 )
 
 const (
 	groupQualityDefaultErrorRate = 0.10
 	groupQualityDefaultEjectMs   = 20000
 	groupQualityDefaultFastMs    = 10000
+	groupQualityFastLineMarginMs = 4000
+	groupQualityTrialDuration    = 30 * time.Minute
+	groupQualityTierHold         = 30 * time.Minute
+	groupQualityFastRetest       = 6 * time.Hour
 )
 
 // GroupQualityGatePolicy configures quality evaluation for one group.
@@ -124,7 +127,7 @@ type GroupQualityObservation struct {
 	SessionID           string
 	Warm                bool
 	Streaming           bool
-	FirstTokenMs        int
+	FirstOutputMs       int
 	PromptTokens        int64
 	CacheReadTokens     int64
 	CacheCreationTokens int64
@@ -177,11 +180,12 @@ type GroupQualityMetricView struct {
 
 // GroupQualityGroupView is one group's status row.
 type GroupQualityGroupView struct {
-	GroupID           int64                     `json:"group_id"`
-	Enabled           bool                      `json:"enabled"`
-	FastWarmTTFTP90Ms int                       `json:"fast_warm_ttft_p90_ms"`
-	Summary           GroupQualitySummaryView   `json:"summary"`
-	Accounts          []GroupQualityAccountView `json:"accounts"`
+	GroupID                    int64                     `json:"group_id"`
+	Enabled                    bool                      `json:"enabled"`
+	FastWarmTTFTP90Ms          int                       `json:"fast_warm_ttft_p90_ms"`
+	EffectiveFastWarmTTFTP90Ms *int                      `json:"effective_fast_warm_ttft_p90_ms"`
+	Summary                    GroupQualitySummaryView   `json:"summary"`
+	Accounts                   []GroupQualityAccountView `json:"accounts"`
 }
 
 // GroupQualitySummaryView summarizes the selected group members.
@@ -255,12 +259,15 @@ type groupQualityAccountState struct {
 	Until           time.Time
 	TrialSince      time.Time
 	Tier            int
+	DataTier        int
 	TierAt          time.Time
+	FastAt          time.Time
 	LastEjectionEnd time.Time
 	ResetAt         time.Time
 	Severity        float64
 	TrialRequests   []string // The first 20 distinct request IDs, retained across observation windows.
 	TrialFailures   []groupQualityTrialFailure
+	TrialEndReason  string // Set only for the round that ends a trial; consumed by transition logging.
 }
 
 func groupQualityBackoff(strike int) time.Duration {
@@ -312,18 +319,16 @@ func evaluateGroupQualityMember(now time.Time, policy GroupQualityGatePolicy, me
 		state.Tier = GroupQualityGateTierOther
 		state.EjectedAt = now
 		state.Until = now.Add(groupQualityBackoff(state.Strike))
-		state.TierAt = time.Time{}
 		state.TrialRequests, state.TrialFailures = nil, nil
 		state.TrialSince = time.Time{}
 		return state
 	}
 	if expired {
 		state.Until = time.Time{}
-		state.TierAt = time.Time{}
 		if fresh && metric.RecoveryReady(policy, state.Reasons) {
 			state.State, state.Tier = "eligible", GroupQualityGateTierFast
 		} else {
-			state.State, state.Tier = "trial", GroupQualityGateTierTrial
+			state.State, state.Tier = "trial", GroupQualityGateTierOther
 			state.TrialSince = state.LastEjectionEnd
 			state.TrialRequests, state.TrialFailures = nil, nil
 		}
@@ -331,8 +336,14 @@ func evaluateGroupQualityMember(now time.Time, policy GroupQualityGatePolicy, me
 		return state
 	}
 	if state.State == "trial" {
-		if !fresh || len(state.TrialRequests) < 20 {
+		passed := fresh && len(state.TrialRequests) >= 20
+		elapsed := !state.TrialSince.IsZero() && now.Sub(state.TrialSince) >= groupQualityTrialDuration
+		if !passed && !elapsed {
 			return state
+		}
+		state.TrialEndReason = "trial_elapsed"
+		if passed {
+			state.TrialEndReason = "trial_passed"
 		}
 		state.TrialRequests, state.TrialFailures = nil, nil
 		state.TrialSince = time.Time{}
@@ -369,6 +380,10 @@ type GroupQualityGateView interface {
 	Vetoed(groupID, accountID int64) bool
 	// OrderTier returns the account's ordering tier for a group.
 	OrderTier(groupID, accountID int64) int
+	// Enabled reports whether the quality gate is currently enabled for a group.
+	Enabled(groupID int64) bool
+	// SlowerThanFastLine reports a migration-eligible bound account and its metrics.
+	SlowerThanFastLine(groupID, accountID int64) (warmTTFTP90Ms, fastWarmTTFTP90Ms int, ok bool)
 }
 
 type emptyGroupQualityGateView struct{}
@@ -376,6 +391,12 @@ type emptyGroupQualityGateView struct{}
 func (emptyGroupQualityGateView) Vetoed(int64, int64) bool { return false }
 
 func (emptyGroupQualityGateView) OrderTier(int64, int64) int { return GroupQualityGateTierFast }
+
+func (emptyGroupQualityGateView) Enabled(int64) bool { return false }
+
+func (emptyGroupQualityGateView) SlowerThanFastLine(int64, int64) (int, int, bool) {
+	return 0, 0, false
+}
 
 // NewEmptyGroupQualityGateView creates the safe view used until the evaluator is installed.
 func NewEmptyGroupQualityGateView() GroupQualityGateView {
