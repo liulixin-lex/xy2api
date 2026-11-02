@@ -350,6 +350,25 @@ func TestOpenAIEnsureForwardErrorResponse_ResponsesRouteAfterWrittenEmitsRespons
 	assert.Contains(t, body, "Upstream request failed")
 }
 
+func TestOpenAIAlphaSearchE5001ExhaustionReturnsGatewayFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", nil)
+	failure := &service.UpstreamFailoverError{
+		StatusCode:   http.StatusBadRequest,
+		ResponseBody: []byte(`{"error":{"code":"E5001","type":"server_error","message":"busy"}}`),
+		Reason:       service.OpenAIAlphaSearchE5001Reason,
+	}
+
+	(&OpenAIGatewayHandler{}).handleFailoverExhausted(c, failure, false)
+
+	require.Contains(t, []int{http.StatusBadGateway, http.StatusServiceUnavailable}, recorder.Code)
+	value, ok := c.Get(service.OpsUpstreamStatusCodeKey)
+	require.True(t, ok)
+	require.Equal(t, http.StatusBadRequest, value)
+}
+
 func TestOpenAIEnsureForwardErrorResponse_AfterDeltaAppendsSingleValidResponseFailed(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()

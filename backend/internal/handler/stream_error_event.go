@@ -65,15 +65,28 @@ func writeResponsesFailedSSE(c *gin.Context, errType, code, message string) bool
 	return writeResponsesFailedSSEWithOpening(c, errType, code, message, false)
 }
 
+func writeResponsesFailedSSEWithStatus(c *gin.Context, status int, errType, code, message string) bool {
+	handled, wrote := writeResponsesFailedSSEWithOpeningResult(c, errType, code, message, false)
+	if wrote {
+		service.MarkOpsGatewayTerminalStatus(c, status)
+	}
+	return handled
+}
+
 // forceOpening covers queue pings on compatible ingress, including when
 // resilience is disabled or delivery tracking was not installed.
 func writeResponsesFailedSSEWithOpening(c *gin.Context, errType, code, message string, forceOpening bool) bool {
+	handled, _ := writeResponsesFailedSSEWithOpeningResult(c, errType, code, message, forceOpening)
+	return handled
+}
+
+func writeResponsesFailedSSEWithOpeningResult(c *gin.Context, errType, code, message string, forceOpening bool) (bool, bool) {
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
-		return false
+		return false, false
 	}
 	if !beginResilienceTerminal(c) {
-		return true
+		return true, false
 	}
 
 	id, createdAt, model := synthesizeResponseID(c), time.Now().Unix(), requestModel(c)
@@ -105,15 +118,15 @@ func writeResponsesFailedSSEWithOpening(c *gin.Context, errType, code, message s
 	})
 	if err != nil {
 		_ = c.Error(err)
-		return true
+		return true, false
 	}
 
 	if _, err := fmt.Fprintf(c.Writer, "%sevent: response.failed\ndata: %s\n\n", opening, payload); err != nil {
 		_ = c.Error(err)
-		return true
+		return true, false
 	}
 	flusher.Flush()
-	return true
+	return true, true
 }
 
 // inboundIsResponses 判断当前请求是否落在任意 Responses 路由上

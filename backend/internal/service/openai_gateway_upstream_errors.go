@@ -391,7 +391,7 @@ func (s *OpenAIGatewayService) newOpenAIAccountFailoverErrorWithClassificationHe
 		failoverErr.SameAccountRetryDeadline = s.openAIOAuth429RetryDeadline(account)
 		failoverErr.SameAccountRetryDelay = openAIOAuth429SameAccountRetryDelay(responseHeaders, failoverErr.SameAccountRetryDeadline)
 	}
-	return failoverErr
+	return annotateUpstreamFailoverAccount(failoverErr, account)
 }
 
 const (
@@ -811,6 +811,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 	c *gin.Context,
 	account *Account,
 	writeError compatErrorWriter,
+	accountErrorAlreadyHandled bool,
 	requestedModel ...string,
 ) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
@@ -890,19 +891,21 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 	// Check custom error codes — if the account does not handle this status,
 	// return a generic error without exposing upstream details.
 	if !account.ShouldHandleErrorCode(resp.StatusCode) {
-		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-			ProxyID:            opsUpstreamProxyID(account),
-			ProxyName:          opsUpstreamProxyName(account),
-			Platform:           account.Platform,
-			AccountID:          account.ID,
-			AccountName:        account.Name,
-			UpstreamStatusCode: resp.StatusCode,
-			UpstreamRequestID:  resp.Header.Get("x-request-id"),
-			Kind:               "http_error",
-			ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, body, upstreamMsg),
-			Message:            upstreamMsg,
-			Detail:             upstreamDetail,
-		})
+		if !accountErrorAlreadyHandled {
+			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+				ProxyID:            opsUpstreamProxyID(account),
+				ProxyName:          opsUpstreamProxyName(account),
+				Platform:           account.Platform,
+				AccountID:          account.ID,
+				AccountName:        account.Name,
+				UpstreamStatusCode: resp.StatusCode,
+				UpstreamRequestID:  resp.Header.Get("x-request-id"),
+				Kind:               "http_error",
+				ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, body, upstreamMsg),
+				Message:            upstreamMsg,
+				Detail:             upstreamDetail,
+			})
+		}
 		markContentPolicy()
 		MarkResponseCommitted(c)
 		writeError(c, http.StatusInternalServerError, "api_error", "Upstream gateway error")
@@ -917,26 +920,31 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 	if len(requestedModel) > 0 {
 		modelForCooldown = requestedModel[0]
 	}
-	shouldDisable := s.handleOpenAIAccountUpstreamError(
-		c.Request.Context(), account, resp.StatusCode, resp.Header, body, modelForCooldown,
-	)
+	shouldDisable := false
+	if !accountErrorAlreadyHandled {
+		shouldDisable = s.handleOpenAIAccountUpstreamError(
+			c.Request.Context(), account, resp.StatusCode, resp.Header, body, modelForCooldown,
+		)
+	}
 	kind := "http_error"
 	if shouldDisable {
 		kind = "failover"
 	}
-	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-		ProxyID:            opsUpstreamProxyID(account),
-		ProxyName:          opsUpstreamProxyName(account),
-		Platform:           account.Platform,
-		AccountID:          account.ID,
-		AccountName:        account.Name,
-		UpstreamStatusCode: resp.StatusCode,
-		UpstreamRequestID:  resp.Header.Get("x-request-id"),
-		Kind:               kind,
-		ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, body, upstreamMsg),
-		Message:            upstreamMsg,
-		Detail:             upstreamDetail,
-	})
+	if !accountErrorAlreadyHandled {
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			ProxyID:            opsUpstreamProxyID(account),
+			ProxyName:          opsUpstreamProxyName(account),
+			Platform:           account.Platform,
+			AccountID:          account.ID,
+			AccountName:        account.Name,
+			UpstreamStatusCode: resp.StatusCode,
+			UpstreamRequestID:  resp.Header.Get("x-request-id"),
+			Kind:               kind,
+			ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, body, upstreamMsg),
+			Message:            upstreamMsg,
+			Detail:             upstreamDetail,
+		})
+	}
 	if shouldDisable {
 		return nil, &UpstreamFailoverError{
 			StatusCode:             resp.StatusCode,

@@ -172,7 +172,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 			upstreamMsg = fmt.Sprintf("xAI upstream returned status %d", resp.StatusCode)
 		}
 		kind := "http_error"
-		if s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody) {
+		if s.shouldFailoverGrokUpstreamError(account, resp.StatusCode, respBody) {
 			kind = "failover"
 		}
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -183,7 +183,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 			AccountName:        account.Name,
 			UpstreamStatusCode: resp.StatusCode,
 			UpstreamRequestID:  firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id")),
-			ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, respBody, upstreamMsg),
+			ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, respBody, upstreamMsg, account),
 			Kind:               kind,
 			Message:            upstreamMsg,
 		})
@@ -191,13 +191,15 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 		s.handleGrokAccountUpstreamError(errCtx, account, resp.StatusCode, resp.Header, respBody)
 		// Quota/rate-limit responses stamp the team+model overlay. Capacity is
 		// request pressure and must not hide sibling accounts.
-		if shouldMarkGrokTeamModelRateLimit(resp.StatusCode, respBody) {
+		if shouldMarkGrokTeamModelRateLimit(account, resp.StatusCode, respBody) {
 			markGrokTeamModelRateLimit(account, upstreamModel, resolveGrokTeamRateLimitUntil(time.Now().Add(grokTeamRateLimitDefaultTTL), time.Now()))
 		}
-		if s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody) {
+		if s.shouldFailoverGrokUpstreamError(account, resp.StatusCode, respBody) {
 			retryable, retryDelay, retryDeadline, retryMax := grokSameAccountRetryMetadata(account, resp.StatusCode, respBody)
 			return nil, &UpstreamFailoverError{
 				StatusCode:               resp.StatusCode,
+				UpstreamPlatform:         account.Platform,
+				UpstreamAccountType:      account.Type,
 				ResponseBody:             respBody,
 				ResponseHeaders:          resp.Header.Clone(),
 				RetryableOnSameAccount:   retryable,
@@ -1426,7 +1428,7 @@ func (s *OpenAIGatewayService) describeGrokComposerImage(
 			upstreamMsg = fmt.Sprintf("xAI image bridge upstream returned status %d", resp.StatusCode)
 		}
 		kind := "http_error"
-		if s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody) {
+		if s.shouldFailoverGrokUpstreamError(account, resp.StatusCode, respBody) {
 			kind = "failover"
 		}
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -1437,15 +1439,17 @@ func (s *OpenAIGatewayService) describeGrokComposerImage(
 			AccountName:        account.Name,
 			UpstreamStatusCode: resp.StatusCode,
 			UpstreamRequestID:  firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id")),
-			ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, respBody, upstreamMsg),
+			ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, respBody, upstreamMsg, account),
 			Kind:               kind,
 			Message:            upstreamMsg,
 		})
 		s.handleGrokAccountUpstreamError(withGrokTeamRateLimitModel(ctx, grokComposerImageBridgeVisionModel), account, resp.StatusCode, resp.Header, respBody)
-		if s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody) {
+		if s.shouldFailoverGrokUpstreamError(account, resp.StatusCode, respBody) {
 			retryable, retryDelay, retryDeadline, retryMax := grokSameAccountRetryMetadata(account, resp.StatusCode, respBody)
 			return "", OpenAIUsage{}, &UpstreamFailoverError{
 				StatusCode:               resp.StatusCode,
+				UpstreamPlatform:         account.Platform,
+				UpstreamAccountType:      account.Type,
 				ResponseBody:             respBody,
 				ResponseHeaders:          resp.Header.Clone(),
 				RetryableOnSameAccount:   retryable,
@@ -2035,7 +2039,7 @@ func (s *OpenAIGatewayService) handleGrokAccountUpstreamError(ctx context.Contex
 		return
 	}
 	now := time.Now()
-	decision := classifyGrokUpstreamFailure(statusCode, responseBody, grokRequestedModelFromCtx(ctx))
+	decision := classifyGrokUpstreamFailure(account, statusCode, responseBody, grokRequestedModelFromCtx(ctx))
 	snapshot := parseGrokQuotaSnapshot(headers, statusCode, now)
 	stampGrokQuotaSnapshotForPlan(account, snapshot, grokRequestedModelFromCtx(ctx))
 	// Capacity 429 is model pressure, not account quota exhaustion. Keep the

@@ -79,7 +79,7 @@ func TestOpenAICompatContentPolicyMarksRewrittenTerminal(t *testing.T) {
 		c.JSON(status, gin.H{"error": gin.H{"type": errType, "message": message}})
 	}
 	_, err := svc.handleCompatErrorResponse(newOpenAIUpstreamErrorResponse(http.StatusBadRequest,
-		`{"error":{"code":"content_policy_violation","message":"Request blocked."}}`), c, newOpenAIUpstreamErrorTestAccount(), writeError)
+		`{"error":{"code":"content_policy_violation","message":"Request blocked."}}`), c, newOpenAIUpstreamErrorTestAccount(), writeError, false)
 
 	require.Error(t, err)
 	require.Equal(t, http.StatusBadRequest, recorder.Code)

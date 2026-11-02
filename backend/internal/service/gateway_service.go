@@ -700,12 +700,16 @@ type GatewayFailureReason string
 
 const PlannedFirstOutputTimeoutReason GatewayFailureReason = "planned_first_output_timeout"
 
+const OpenAIAlphaSearchE5001Reason GatewayFailureReason = "openai_alpha_search_e5001_server_error"
+
 // UpstreamFailoverError indicates an upstream or credential error that may
 // trigger account failover. Additive metadata keeps existing composite literals
 // source-compatible and preserves their legacy retry-next-account behavior.
 type UpstreamFailoverError struct {
 	cause                           error // Original read failure, never included in client-facing text.
 	PreDispatchSelectionInvalidated bool  // Candidate lost admission before any upstream call.
+	UpstreamPlatform                string
+	UpstreamAccountType             string
 	StatusCode                      int
 	ResponseBody                    []byte        // 上游响应体，用于错误透传规则匹配
 	ResponseHeaders                 http.Header   // 上游响应头，用于透传 cf-ray/cf-mitigated/content-type 等诊断信息
@@ -722,6 +726,14 @@ type UpstreamFailoverError struct {
 	NextAccountAction               NextAccountAction
 	ClientStatusCode                int
 	ClientMessage                   string
+}
+
+func annotateUpstreamFailoverAccount(failoverErr *UpstreamFailoverError, account *Account) *UpstreamFailoverError {
+	if failoverErr != nil && account != nil {
+		failoverErr.UpstreamPlatform = account.Platform
+		failoverErr.UpstreamAccountType = account.Type
+	}
+	return failoverErr
 }
 
 func (e *UpstreamFailoverError) Error() string {

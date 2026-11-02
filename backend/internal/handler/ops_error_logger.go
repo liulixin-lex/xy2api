@@ -1131,6 +1131,11 @@ func recordOpsErrorAfterRequest(c *gin.Context, ops *service.OpsService, w *opsC
 			parsed = terminal
 		}
 	}
+	if parsed.StreamFailure {
+		if statusCode, ok := service.OpsGatewayTerminalStatus(c); ok {
+			parsed.StatusCode = statusCode
+		}
+	}
 	if status < 400 {
 		if parsed.StreamFailure {
 			status = inferStreamFailureStatus(c, parsed)

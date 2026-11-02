@@ -1215,6 +1215,10 @@
       "value": "failoverErr.IsCapabilityStreamOnly()"
     },
     {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "writeResponsesFailedSSEWithStatus(c, status, errType, code, message)"
+    },
+    {
       "path": "backend/internal/handler/openai_chat_completions.go",
       "value": "installResilienceRetryAdvice(c, h.gatewayService, apiKey, reqModel)"
     },
@@ -4962,6 +4966,46 @@
       "id": "xy-error-recovery-routing",
       "path": "backend/internal/service/openai_alpha_search_test.go",
       "literal": "func TestIsOpenAIAlphaSearchEndpointUnsupported"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/grok_upstream_failure_test.go",
+      "literal": "func TestGrokTemporaryUnavailable422UsesOneTransientClassifier"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/grok_error_registration_test.go",
+      "literal": "func TestGrokRawChatErrorRegistersOnceAndSkipsCompatSideEffects"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_alpha_search_test.go",
+      "literal": "func TestForwardAlphaSearchE5001ServerErrorFailsOverWithoutAccountMutation"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_alpha_search_test.go",
+      "literal": "func TestForwardAlphaSearchPATFallbackNon2xxRecordsOneHTTPError"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/ops_error_logger_test.go",
+      "literal": "func TestOpsErrorLoggerMiddleware_GatewayTerminalUsesWrittenStatus"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/ops_error_logger_test.go",
+      "literal": "func TestOpsGatewayTerminalStatusUsesFirstWrittenTerminal"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/openai_gateway_handler_test.go",
+      "literal": "func TestOpenAIAlphaSearchE5001ExhaustionReturnsGatewayFailure"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/ops_error_logger_test.go",
+      "literal": "func TestOpsErrorLoggerMiddleware_PassThroughResponseFailedStillInfersStatus"
     },
     {
       "id": "xy-error-recovery-routing",

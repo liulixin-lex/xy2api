@@ -199,8 +199,8 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		service.SetOpsLatencyMs(c, service.OpsResponseLatencyMsKey, time.Since(forwardStart).Milliseconds())
 
 		if err == nil {
-			h.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, requestedModel, false, result), true, nil)
 			if result != nil {
+				h.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, requestedModel, false, result), true, nil)
 				h.recordAlphaSearchUsage(c, apiKey, account, subscription, channelMapping, requestedModel, body, result, subject.UserID)
 			}
 			return
@@ -220,7 +220,9 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			return
 		}
 
-		h.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, requestedModel, false, result), false, nil, err)
+		if failoverErr.Reason != service.OpenAIAlphaSearchE5001Reason {
+			h.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, requestedModel, false, result), false, nil, err)
+		}
 		if c.Writer.Size() != writerSizeBeforeForward {
 			h.handleFailoverExhausted(c, failoverErr, true)
 			return

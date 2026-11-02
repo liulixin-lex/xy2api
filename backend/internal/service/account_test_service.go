@@ -1197,7 +1197,7 @@ func (s *AccountTestService) observeGrokTestResponse(ctx context.Context, accoun
 	if isGrokContentPolicyRejection(resp.StatusCode, responseBody) {
 		return
 	}
-	decision := classifyGrokUpstreamFailure(resp.StatusCode, responseBody, "")
+	decision := classifyGrokUpstreamFailure(account, resp.StatusCode, responseBody, "")
 	if decision.Class == GrokFailureFreeUsage {
 		if resetAt, limited := grokRateLimitResetAtForAccount(account, snapshot, now); limited && resetAt.After(now) {
 			persistGrokRateLimit(ctx, s.accountRepo, account, resetAt)

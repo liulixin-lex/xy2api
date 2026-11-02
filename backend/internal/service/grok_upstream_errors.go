@@ -198,9 +198,12 @@ func grokContentPolicyClientMessage(responseBody []byte) string {
 // account and be returned to the caller instead of consuming the account pool.
 // Free-usage / empty-output / billing bodies also failover even when the HTTP
 // status alone would not (e.g. 400 with free-usage-exhausted).
-func (s *OpenAIGatewayService) shouldFailoverGrokUpstreamError(statusCode int, responseBody []byte) bool {
+func (s *OpenAIGatewayService) shouldFailoverGrokUpstreamError(account *Account, statusCode int, responseBody []byte) bool {
 	if isGrokContentPolicyRejection(statusCode, responseBody) {
 		return false
+	}
+	if isGrokTemporaryUnavailable422(account, statusCode, responseBody) {
+		return true
 	}
 	if isOpenAIRequestBodyTooLargeError(statusCode, extractUpstreamErrorMessage(responseBody), responseBody) {
 		return true
@@ -214,12 +217,42 @@ func (s *OpenAIGatewayService) shouldFailoverGrokUpstreamError(statusCode int, r
 	if isGrokDecoderCompatibilityError(statusCode, responseBody) {
 		return true
 	}
-	decision := classifyGrokUpstreamFailure(statusCode, responseBody, "")
+	decision := classifyGrokUpstreamFailure(account, statusCode, responseBody, "")
 	switch decision.Class {
-	case GrokFailureFreeUsage, GrokFailureEmptyUpstream, GrokFailureBilling, GrokFailureModelCapacity, GrokFailureCompatibility:
+	case GrokFailureFreeUsage, GrokFailureEmptyUpstream, GrokFailureBilling, GrokFailureModelCapacity, GrokFailureCompatibility, GrokFailureTransientUnavailable:
 		return decision.ShouldFailover
 	}
 	return s.shouldFailoverUpstreamError(statusCode)
+}
+
+func isGrokTemporaryUnavailable422(account *Account, statusCode int, responseBody []byte) bool {
+	return account != nil && account.Platform == PlatformGrok && account.Type == AccountTypeAPIKey &&
+		isGrokTemporaryUnavailable422Shape(statusCode, responseBody)
+}
+
+func isGrokTemporaryUnavailable422Shape(statusCode int, responseBody []byte) bool {
+	if statusCode != http.StatusUnprocessableEntity || len(responseBody) == 0 {
+		return false
+	}
+	errNode := gjson.GetBytes(responseBody, "error")
+	return errNode.Type == gjson.JSON &&
+		strings.TrimSpace(errNode.Get("type").String()) == "api_error" &&
+		strings.TrimSpace(errNode.Get("message").String()) == "Service temporarily unavailable" &&
+		grokRequestErrorFieldAbsent(errNode.Get("code")) &&
+		grokRequestErrorFieldAbsent(errNode.Get("param"))
+}
+
+func grokRequestErrorFieldAbsent(value gjson.Result) bool {
+	if !value.Exists() || value.Type == gjson.Null {
+		return true
+	}
+	return value.Type == gjson.String && strings.TrimSpace(value.String()) == ""
+}
+
+func isGrokTemporaryUnavailable422Failover(failoverErr *UpstreamFailoverError) bool {
+	return failoverErr != nil && failoverErr.UpstreamPlatform == PlatformGrok &&
+		failoverErr.UpstreamAccountType == AccountTypeAPIKey &&
+		isGrokTemporaryUnavailable422Shape(failoverErr.StatusCode, failoverErr.ResponseBody)
 }
 
 func shouldFailoverClassifiedUpstreamError(statusCode int, headers http.Header, responseBody []byte) bool {

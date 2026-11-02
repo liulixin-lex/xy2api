@@ -565,6 +565,84 @@ func TestOpsErrorLoggerMiddleware_StreamFailureUsesTerminalErrorOverAttemptConte
 	require.Equal(t, "input exceeds the context window", *job.entry.UpstreamErrorMessage)
 }
 
+func TestOpsErrorLoggerMiddleware_GatewayTerminalUsesWrittenStatus(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, streamStarted := range []bool{false, true} {
+		name := "JSON"
+		if streamStarted {
+			name = "SSE"
+		}
+		t.Run(name, func(t *testing.T) {
+			setupOpsErrorLogTestQueue(t, 2)
+			ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			router := gin.New()
+			router.Use(OpsErrorLoggerMiddleware(ops))
+			router.POST("/v1/responses", func(c *gin.Context) {
+				upstreamStatus := http.StatusRequestEntityTooLarge
+				if streamStarted {
+					upstreamStatus = http.StatusBadRequest
+				}
+				service.SetOpsUpstreamError(c, upstreamStatus, "upstream attempt", "")
+				(&OpenAIGatewayHandler{}).handleStreamingAwareError(
+					c, http.StatusRequestEntityTooLarge, "invalid_request_error", "Request payload is too large", streamStarted,
+				)
+			})
+
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+
+			wantWireStatus := http.StatusRequestEntityTooLarge
+			if streamStarted {
+				wantWireStatus = http.StatusOK
+			}
+			require.Equal(t, wantWireStatus, recorder.Code)
+			require.Equal(t, int64(1), OpsErrorLogQueueLength())
+			job := <-opsErrorLogQueue
+			require.Equal(t, http.StatusRequestEntityTooLarge, job.entry.StatusCode)
+			require.NotNil(t, job.entry.UpstreamStatusCode)
+			require.Equal(t, http.StatusRequestEntityTooLarge, *job.entry.UpstreamStatusCode)
+		})
+	}
+}
+
+func TestOpsGatewayTerminalStatusUsesFirstWrittenTerminal(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	handler := &OpenAIGatewayHandler{}
+
+	handler.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", "bad request", true)
+	handler.handleStreamingAwareError(c, http.StatusRequestEntityTooLarge, "invalid_request_error", "too large", true)
+
+	status, ok := service.OpsGatewayTerminalStatus(c)
+	require.True(t, ok)
+	require.Equal(t, http.StatusBadRequest, status)
+}
+
+func TestOpsErrorLoggerMiddleware_PassThroughResponseFailedStillInfersStatus(t *testing.T) {
+	setupOpsErrorLogTestQueue(t, 2)
+	gin.SetMode(gin.TestMode)
+
+	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	router := gin.New()
+	router.Use(OpsErrorLoggerMiddleware(ops))
+	router.POST("/v1/responses", func(c *gin.Context) {
+		service.SetOpsUpstreamError(c, http.StatusRequestEntityTooLarge, "upstream terminal", "")
+		c.Status(http.StatusOK)
+		_, _ = c.Writer.WriteString("event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"invalid_request\",\"message\":\"bad request\"}}}\n\n")
+	})
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+
+	require.Equal(t, int64(1), OpsErrorLogQueueLength())
+	job := <-opsErrorLogQueue
+	require.Equal(t, http.StatusBadRequest, job.entry.StatusCode)
+	require.NotNil(t, job.entry.UpstreamStatusCode)
+	require.Equal(t, http.StatusBadRequest, *job.entry.UpstreamStatusCode)
+}
+
 func TestOpsErrorLoggerMiddleware_PrefersContextRequestID(t *testing.T) {
 	setupOpsErrorLogTestQueue(t, 2)
 	gin.SetMode(gin.TestMode)

@@ -128,7 +128,7 @@ func TestGrokContentPolicy403DoesNotMutateOrFailover(t *testing.T) {
 	require.Zero(t, repo.rateLimitedCalls)
 	require.Zero(t, repo.updateCalls)
 	require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
-	require.False(t, svc.shouldFailoverGrokUpstreamError(http.StatusForbidden, body))
+	require.False(t, svc.shouldFailoverGrokUpstreamError(account, http.StatusForbidden, body))
 
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
@@ -216,7 +216,7 @@ func TestGrokContentPolicy403SharedErrorFallbackDoesNotMutate(t *testing.T) {
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body:       io.NopCloser(strings.NewReader(string(body))),
 	}
-	_, err = svc.handleCompatErrorResponse(resp, c, account, writeChatCompletionsError, "grok-4.5")
+	_, err = svc.handleCompatErrorResponse(resp, c, account, writeChatCompletionsError, false, "grok-4.5")
 	require.Error(t, err)
 	require.Equal(t, http.StatusForbidden, recorder.Code)
 	require.Contains(t, recorder.Body.String(), "invalid_request_error")
@@ -309,7 +309,7 @@ func TestGrokPermissionDeniedContentRefusalDoesNotMutateOrFailover(t *testing.T)
 	require.Zero(t, repo.rateLimitedCalls)
 	require.Zero(t, repo.updateCalls)
 	require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
-	require.False(t, svc.shouldFailoverGrokUpstreamError(http.StatusForbidden, body))
+	require.False(t, svc.shouldFailoverGrokUpstreamError(account, http.StatusForbidden, body))
 }
 
 func TestHandleGrokAccountUpstreamErrorEntitlement403KeepsDefaultCooldown(t *testing.T) {
@@ -357,7 +357,7 @@ func TestHandleGrokAccountUpstreamErrorDefaultCooldownsRespectPoolMode(t *testin
 			require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
 			require.Nil(t, account.TempUnschedulableUntil)
 			require.Empty(t, account.TempUnschedulableReason)
-			require.True(t, svc.shouldFailoverGrokUpstreamError(statusCode, body))
+			require.True(t, svc.shouldFailoverGrokUpstreamError(account, statusCode, body))
 		})
 	}
 

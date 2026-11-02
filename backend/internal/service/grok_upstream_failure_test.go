@@ -8,8 +8,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
+
+func grokFailureAPIKeyAccount() *Account {
+	return &Account{Platform: PlatformGrok, Type: AccountTypeAPIKey}
+}
 
 func TestClassifyGrokUpstreamFailure_FreeUsage(t *testing.T) {
 	cases := []struct {
@@ -35,7 +40,7 @@ func TestClassifyGrokUpstreamFailure_FreeUsage(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			d := classifyGrokUpstreamFailure(tc.status, []byte(tc.body), "grok-4.5")
+			d := classifyGrokUpstreamFailure(grokFailureAPIKeyAccount(), tc.status, []byte(tc.body), "grok-4.5")
 			require.Equal(t, GrokFailureFreeUsage, d.Class)
 			require.True(t, d.ShouldCooldown)
 			require.True(t, d.ShouldFailover)
@@ -46,7 +51,7 @@ func TestClassifyGrokUpstreamFailure_FreeUsage(t *testing.T) {
 }
 
 func TestClassifyGrokUpstreamFailure_EmptyUpstream(t *testing.T) {
-	d := classifyGrokUpstreamFailure(http.StatusBadGateway, []byte(`empty model output: no content/tool_calls`), "grok-4.5")
+	d := classifyGrokUpstreamFailure(grokFailureAPIKeyAccount(), http.StatusBadGateway, []byte(`empty model output: no content/tool_calls`), "grok-4.5")
 	require.Equal(t, GrokFailureEmptyUpstream, d.Class)
 	require.True(t, d.ShouldCooldown)
 	require.True(t, d.ShouldFailover)
@@ -55,7 +60,7 @@ func TestClassifyGrokUpstreamFailure_EmptyUpstream(t *testing.T) {
 }
 
 func TestClassifyGrokUpstreamFailure_ModelCapacityUsesShortCooldown(t *testing.T) {
-	d := classifyGrokUpstreamFailure(http.StatusTooManyRequests,
+	d := classifyGrokUpstreamFailure(grokFailureAPIKeyAccount(), http.StatusTooManyRequests,
 		[]byte(`{"error":{"message":"The model is currently at capacity due to high demand"}}`), "grok-4.6")
 	require.Equal(t, GrokFailureModelCapacity, d.Class)
 	require.Equal(t, time.Minute, d.Cooldown)
@@ -63,14 +68,14 @@ func TestClassifyGrokUpstreamFailure_ModelCapacityUsesShortCooldown(t *testing.T
 }
 
 func TestClassifyGrokUpstreamFailure_Billing(t *testing.T) {
-	d := classifyGrokUpstreamFailure(http.StatusForbidden, []byte(`{"code":"personal-team-blocked:spending-limit","error":"spending limit reached"}`), "")
+	d := classifyGrokUpstreamFailure(grokFailureAPIKeyAccount(), http.StatusForbidden, []byte(`{"code":"personal-team-blocked:spending-limit","error":"spending limit reached"}`), "")
 	require.Equal(t, GrokFailureBilling, d.Class)
 	require.True(t, d.ShouldCooldown)
 	require.True(t, d.ShouldFailover)
 }
 
 func TestClassifyGrokUpstreamFailure_GrokSubscriptionRequiredIsBilling(t *testing.T) {
-	d := classifyGrokUpstreamFailure(http.StatusPaymentRequired,
+	d := classifyGrokUpstreamFailure(grokFailureAPIKeyAccount(), http.StatusPaymentRequired,
 		[]byte(`{"error":{"message":"You have run out of credits or need a Grok subscription"}}`), "grok-4.6")
 	require.Equal(t, GrokFailureBilling, d.Class)
 	require.True(t, d.ShouldFailover)
@@ -98,13 +103,13 @@ func TestGrokRetryableOnSameAccount_CapacityAndRateLimit(t *testing.T) {
 }
 
 func TestShouldMarkGrokTeamModelRateLimit_ExcludesCapacity(t *testing.T) {
-	require.False(t, shouldMarkGrokTeamModelRateLimit(http.StatusTooManyRequests,
+	require.False(t, shouldMarkGrokTeamModelRateLimit(grokFailureAPIKeyAccount(), http.StatusTooManyRequests,
 		[]byte(`{"error":{"message":"The model is currently at capacity due to high demand"}}`)))
-	require.True(t, shouldMarkGrokTeamModelRateLimit(http.StatusTooManyRequests,
+	require.True(t, shouldMarkGrokTeamModelRateLimit(grokFailureAPIKeyAccount(), http.StatusTooManyRequests,
 		[]byte(`{"error":{"message":"rate limit exceeded"}}`)))
-	require.True(t, shouldMarkGrokTeamModelRateLimit(http.StatusBadRequest,
+	require.True(t, shouldMarkGrokTeamModelRateLimit(grokFailureAPIKeyAccount(), http.StatusBadRequest,
 		[]byte(`{"error":{"code":"subscription:free-usage-exhausted"}}`)))
-	require.False(t, shouldMarkGrokTeamModelRateLimit(http.StatusBadRequest,
+	require.False(t, shouldMarkGrokTeamModelRateLimit(grokFailureAPIKeyAccount(), http.StatusBadRequest,
 		[]byte(`{"error":{"message":"invalid request"}}`)))
 }
 
@@ -126,7 +131,7 @@ func TestGrokSameAccountRetryMetadata_CapacityDeadline(t *testing.T) {
 }
 
 func TestClassifyGrokUpstreamFailure_ValidationNoCool(t *testing.T) {
-	d := classifyGrokUpstreamFailure(http.StatusBadRequest, []byte(`{"error":{"message":"invalid tool schema"}}`), "")
+	d := classifyGrokUpstreamFailure(grokFailureAPIKeyAccount(), http.StatusBadRequest, []byte(`{"error":{"message":"invalid tool schema"}}`), "")
 	require.Equal(t, GrokFailureNone, d.Class)
 	require.False(t, d.ShouldCooldown)
 	require.False(t, d.ShouldFailover)
@@ -134,7 +139,7 @@ func TestClassifyGrokUpstreamFailure_ValidationNoCool(t *testing.T) {
 
 func TestClassifyGrokUpstreamFailure_FreeUsageWinsOver5xx(t *testing.T) {
 	// Proxy may rewrite free-usage into synthetic 502; body must win.
-	d := classifyGrokUpstreamFailure(http.StatusBadGateway, []byte(`subscription:free-usage-exhausted for model grok-4.3`), "grok-4.3")
+	d := classifyGrokUpstreamFailure(grokFailureAPIKeyAccount(), http.StatusBadGateway, []byte(`subscription:free-usage-exhausted for model grok-4.3`), "grok-4.3")
 	require.Equal(t, GrokFailureFreeUsage, d.Class)
 	require.NotEqual(t, GrokFailureServer, d.Class)
 }
@@ -145,7 +150,7 @@ func TestClassifyGrokUpstreamFailure_CompatibilityDoesNotCooldown(t *testing.T) 
 		`{"code":"compaction_decode_error","message":"invalid response history"}`,
 	}
 	for _, body := range cases {
-		d := classifyGrokUpstreamFailure(http.StatusUnprocessableEntity, []byte(body), "grok-4.6")
+		d := classifyGrokUpstreamFailure(grokFailureAPIKeyAccount(), http.StatusUnprocessableEntity, []byte(body), "grok-4.6")
 		require.Equal(t, GrokFailureCompatibility, d.Class, body)
 		require.True(t, d.ShouldFailover, body)
 		require.False(t, d.ShouldCooldown, body)
@@ -156,14 +161,14 @@ func TestClassifyGrokUpstreamFailure_CompatibilityDoesNotCooldown(t *testing.T) 
 func TestClassifyGrokUpstreamFailure_CompatibilityRequiresClientError(t *testing.T) {
 	body := []byte(`{"error":{"message":"upstream failed while handling the compaction blob"}}`)
 	for _, status := range []int{http.StatusBadGateway, http.StatusInternalServerError} {
-		d := classifyGrokUpstreamFailure(status, body, "grok-4.6")
+		d := classifyGrokUpstreamFailure(grokFailureAPIKeyAccount(), status, body, "grok-4.6")
 		require.NotEqual(t, GrokFailureCompatibility, d.Class)
 		require.True(t, d.ShouldCooldown)
 	}
 }
 
 func TestClassifyGrokUpstreamFailure_GenericShapeErrorDoesNotFailover(t *testing.T) {
-	d := classifyGrokUpstreamFailure(http.StatusBadRequest,
+	d := classifyGrokUpstreamFailure(grokFailureAPIKeyAccount(), http.StatusBadRequest,
 		[]byte(`{"error":{"message":"data did not match any variant of the untagged enum content"}}`), "grok-4.6")
 	require.NotEqual(t, GrokFailureCompatibility, d.Class)
 	require.False(t, d.ShouldFailover)
@@ -172,19 +177,95 @@ func TestClassifyGrokUpstreamFailure_GenericShapeErrorDoesNotFailover(t *testing
 func TestShouldFailoverGrokUpstreamError_FreeUsageBody(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	body := []byte(`{"error":{"code":"subscription:free-usage-exhausted","message":"free usage exhausted"}}`)
-	require.True(t, svc.shouldFailoverGrokUpstreamError(http.StatusBadRequest, body))
+	require.True(t, svc.shouldFailoverGrokUpstreamError(grokFailureAPIKeyAccount(), http.StatusBadRequest, body))
 }
 
 func TestShouldFailoverGrokUpstreamError_CompatibilityBody(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	body := []byte(`{"error":{"message":"Could not decode the compaction blob"}}`)
-	require.True(t, svc.shouldFailoverGrokUpstreamError(http.StatusUnprocessableEntity, body))
+	require.True(t, svc.shouldFailoverGrokUpstreamError(grokFailureAPIKeyAccount(), http.StatusUnprocessableEntity, body))
+}
+
+func TestGrokTemporaryUnavailable422UsesOneTransientClassifier(t *testing.T) {
+	withResilienceSettings(t, nil)
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		want   bool
+	}{
+		{
+			name:   "exact service error",
+			status: http.StatusUnprocessableEntity,
+			body:   `{"error":{"type":"api_error","message":"Service temporarily unavailable"}}`,
+			want:   true,
+		},
+		{
+			name:   "request code present",
+			status: http.StatusUnprocessableEntity,
+			body:   `{"error":{"type":"api_error","code":"invalid_request_error","message":"Service temporarily unavailable"}}`,
+		},
+		{
+			name:   "request param present",
+			status: http.StatusUnprocessableEntity,
+			body:   `{"error":{"type":"api_error","param":"messages","message":"Service temporarily unavailable"}}`,
+		},
+		{
+			name:   "non-string request code present",
+			status: http.StatusUnprocessableEntity,
+			body:   `{"error":{"type":"api_error","code":0,"message":"Service temporarily unavailable"}}`,
+		},
+		{
+			name:   "wrong error type",
+			status: http.StatusUnprocessableEntity,
+			body:   `{"error":{"type":"invalid_request_error","message":"Service temporarily unavailable"}}`,
+		},
+		{
+			name:   "wrong status and request error type",
+			status: http.StatusBadRequest,
+			body:   `{"error":{"type":"invalid_request_error","message":"Service temporarily unavailable"}}`,
+		},
+		{
+			name:   "message is not exact",
+			status: http.StatusUnprocessableEntity,
+			body:   `{"error":{"type":"api_error","message":"Service temporarily unavailable right now"}}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := []byte(tt.body)
+			account := grokFailureAPIKeyAccount()
+			got := (&OpenAIGatewayService{}).shouldFailoverGrokUpstreamError(account, tt.status, body)
+			require.Equal(t, tt.want, got)
+			if tt.want {
+				d := classifyGrokUpstreamFailure(account, tt.status, body, "")
+				require.Equal(t, GrokFailureTransientUnavailable, d.Class)
+				require.True(t, d.ShouldFailover)
+				require.False(t, d.ShouldCooldown)
+				failure := annotateUpstreamFailoverAccount(
+					&UpstreamFailoverError{StatusCode: tt.status, ResponseBody: body}, account,
+				)
+				require.Equal(t, resilience.CategoryTransient, ClassifyFailoverError(failure).Category)
+				require.Equal(t, string(resilience.CategoryTransient), opsHTTPResilienceCategory(tt.status, nil, body, "", account))
+			}
+		})
+	}
+
+	body := []byte(`{"error":{"type":"api_error","message":"Service temporarily unavailable"}}`)
+	require.False(t, (&OpenAIGatewayService{}).shouldFailoverGrokUpstreamError(&Account{Platform: PlatformGrok, Type: AccountTypeOAuth}, http.StatusUnprocessableEntity, body))
+	require.False(t, (&OpenAIGatewayService{}).shouldFailoverGrokUpstreamError(&Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, http.StatusUnprocessableEntity, body))
+	otherPlatformFailure := annotateUpstreamFailoverAccount(
+		&UpstreamFailoverError{StatusCode: http.StatusUnprocessableEntity, ResponseBody: body},
+		&Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
+	)
+	require.Equal(t, resilience.CategoryClientError, ClassifyFailoverError(otherPlatformFailure).Category)
 }
 
 func TestShouldFailoverGrokUpstreamError_ContentPolicyStillNoFailover(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	body := []byte(`{"error":{"code":"new_sensitive","message":"text is sensitive"}}`)
-	require.False(t, svc.shouldFailoverGrokUpstreamError(http.StatusForbidden, body))
+	require.False(t, svc.shouldFailoverGrokUpstreamError(grokFailureAPIKeyAccount(), http.StatusForbidden, body))
 }
 
 func TestHandleGrokAccountUpstreamError_FreeUsageBodyCoolsAccount(t *testing.T) {

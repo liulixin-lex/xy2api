@@ -336,6 +336,16 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 
 - 见 §3。被拒字段修复以前只接入原生、透传与两条 WebSocket 路径，现在补上 Chat Completions 路径与原生 Responses 的带内形态；Chat 路径在重放前先关闭上一次响应、取消它的上游请求。
 
+**Grok 与 alpha search**
+
+- Grok API Key 账号只有在 HTTP 422、`error.type=api_error`、`error.message` 完整等于 `Service temporarily unavailable`，且 `error.code` 与 `error.param` 均为空时，才按瞬时失败使用现有换号预算。原始尝试状态保留为 422；同形的 OAuth、其他平台响应、带请求错误字段的载荷，以及 400 请求错误不适用。
+- alpha search 的 API Key 账号只有在 `/v1/alpha/search` 返回 HTTP 400 且载荷为 `error.code=E5001`、`error.type=server_error` 时进入现有换号预算；文案不参与判定。账号状态与全局调度健康不因该信号更新，耗尽后返回 502/503，尝试事件保留上游 400。API Key 上游以 404/405，或 HTTP 400 的两个能力提示（“do not support the requested endpoint”、“not encrypted history or tool items”）表示不支持 alpha search 时，仍按端点能力换号，不能和 E5001 分类混为一类。
+- alpha search 两个原样透传非 2xx 的出口只登记 `http_error` 尝试，不报账号成功，也不执行计费；尝试类别按完整上游状态、响应头与载荷计算。
+
+**流式终态状态**
+
+- 网关实际写出 `response.failed` 或 Chat 终止帧后，运维记录优先采用该终态对应的网关状态；writer 未能写出终态时不设置此状态。没有本网关终态状态时，仍按 SSE code/type 推断。上游原样转发的终态不带本网关状态，继续按原规则推断。
+
 **运维记录与分组质量门槛**
 
 - 运维错误记录里每次尝试的 `resilience_category` 按完整上游载荷计算（原生与兼容路径的终态、带内事件），与换号决策一致，也与换号尝试的记录（此前已按完整载荷）一致；只有 code 的加密拒绝不再按文案记成 `TRANSIENT`，被中转包成 502 的 `invalid_prompt` 等请求错误也按载荷记为 `CLIENT_ERROR`。
@@ -352,6 +362,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 - 账号列表：余额不足暂停显示为临时不可调度，原因以 `balance:` 开头并附上游原文；“恢复状态”立即放回。欠费但暂时不用的账号，关掉调度即可。
 - 仅流式学习（0.4.4）：被学为只接受流式的账号在账号列表的状态列下方显示“仅流式（自动学习，剩余 X 小时）”，悬停说明涉及的协议，点“清除”即可；清除后非流式请求可以再选它。选号解释中被跳过的账号显示原因 `capability_stream_only`，恢复时间即学习记录的到期时间。
 - 运维错误详情：每次上游失败带失败分类 `resilience_category`（如 `BALANCE`、`TRANSIENT`、`CAPACITY_SHED`）。0.5.1 起按完整上游载荷计算（含只有 code 的错误与带内事件），与换号决策一致。
+- 流式终态：本网关实际写出的 `response.failed` 与 Chat 终止帧，其网关状态优先于 SSE code/type 推断，并用于运维行的状态与上游状态字段；没有写出本网关终态时不设置该状态。上游原样转发的终态仍按 code/type 推断，不读取之前尝试写入的上游状态。
 - 运维看板的 SLA（0.4.9）：选号阶段找不到可用账号的失败（无号 503，阶段 `routing`）计入 SLA，不再标为业务限制；余额、用户并发、本地模型配置等业务限制不变。只影响升级后写入的记录，见 [用量指标口径](USAGE_METRICS.md#运维看板的-sla)。0.5.1 起上游内容安全拒绝（按韧性分类判定）标为业务限制，不计入 SLA（§4.10）。
 - 告警：不新增余额类指标。RC 的迁移 276 预置过两条余额告警规则，由迁移 277 删除。
 - 接口：

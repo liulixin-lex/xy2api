@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 )
 
@@ -91,6 +92,16 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 
 	if resp.StatusCode >= http.StatusBadRequest {
 		upstreamMessage := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
+		if isOpenAIAlphaSearchE5001ServerError(account, resp.StatusCode, respBody) {
+			failoverErr := &UpstreamFailoverError{
+				StatusCode:      resp.StatusCode,
+				ResponseBody:    respBody,
+				ResponseHeaders: resp.Header.Clone(),
+				Reason:          OpenAIAlphaSearchE5001Reason,
+			}
+			recordOpenAIAlphaSearchErrorAttempt(c, account, resp, respBody, upstreamMessage, "failover", failoverErr)
+			return nil, failoverErr
+		}
 		unsupportedEndpoint := isOpenAIAlphaSearchEndpointUnsupported(account, resp.StatusCode, respBody)
 		if s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMessage, respBody) ||
 			unsupportedEndpoint {
@@ -126,6 +137,7 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	c.Data(resp.StatusCode, contentType, respBody)
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		// 非 2xx（错误/重定向）已原样透传给客户端：不是一次成功的搜索，不计费。
+		recordOpenAIAlphaSearchErrorAttempt(c, account, resp, respBody, extractUpstreamErrorMessage(respBody), "http_error", nil)
 		return nil, nil
 	}
 	return &OpenAIForwardResult{
@@ -201,6 +213,7 @@ func (s *OpenAIGatewayService) forwardAlphaSearchViaResponsesWebSearch(
 			contentType = "application/json"
 		}
 		c.Data(resp.StatusCode, contentType, respBody)
+		recordOpenAIAlphaSearchErrorAttempt(c, account, resp, respBody, extractUpstreamErrorMessage(respBody), "http_error", nil)
 		return nil, nil
 	}
 
@@ -453,6 +466,41 @@ func stripOpenAIAlphaSearchResponsesHeaders(headers http.Header) {
 	} {
 		headers.Del(key)
 	}
+}
+
+func isOpenAIAlphaSearchE5001ServerError(account *Account, statusCode int, responseBody []byte) bool {
+	if account == nil || account.Platform != PlatformOpenAI || account.Type != AccountTypeAPIKey || statusCode != http.StatusBadRequest {
+		return false
+	}
+	return gjson.GetBytes(responseBody, "error.code").String() == "E5001" &&
+		gjson.GetBytes(responseBody, "error.type").String() == "server_error"
+}
+
+func recordOpenAIAlphaSearchErrorAttempt(
+	c *gin.Context,
+	account *Account,
+	resp *http.Response,
+	responseBody []byte,
+	message string,
+	kind string,
+	failoverErr *UpstreamFailoverError,
+) {
+	category := opsHTTPResilienceCategory(resp.StatusCode, resp.Header, responseBody, message)
+	if failoverErr != nil && resilience.Current().FailureOn() {
+		category = string(ClassifyFailoverError(failoverErr).Category)
+	}
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		ProxyID:            opsUpstreamProxyID(account),
+		ProxyName:          opsUpstreamProxyName(account),
+		Platform:           account.Platform,
+		AccountID:          account.ID,
+		AccountName:        account.Name,
+		UpstreamStatusCode: resp.StatusCode,
+		UpstreamRequestID:  resp.Header.Get("x-request-id"),
+		Kind:               kind,
+		ResilienceCategory: category,
+		Message:            message,
+	})
 }
 
 func openAIAlphaSearchInboundHeader(c *gin.Context, key string) string {

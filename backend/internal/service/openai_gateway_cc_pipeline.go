@@ -117,7 +117,7 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 		shouldFailover = tempUnscheduled
 	}
 	if account != nil && account.Platform == PlatformGrok {
-		shouldFailover = s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody)
+		shouldFailover = s.shouldFailoverGrokUpstreamError(account, resp.StatusCode, respBody)
 	}
 	if account != nil && account.Platform == PlatformGrok {
 		s.handleGrokAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
@@ -140,7 +140,7 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 		AccountID:          account.ID,
 		AccountName:        account.Name,
 		UpstreamStatusCode: resp.StatusCode,
-		ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, respBody, upstreamMsg),
+		ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, respBody, upstreamMsg, account),
 		UpstreamRequestID:  resp.Header.Get("x-request-id"),
 		Kind:               "failover",
 		Message:            upstreamMsg,

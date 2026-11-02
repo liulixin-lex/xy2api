@@ -539,7 +539,16 @@ func (s *OpenAIGatewayService) handleChatCompletionsErrorResponse(
 	account *Account,
 	requestedModel ...string,
 ) (*OpenAIForwardResult, error) {
-	return s.handleCompatErrorResponse(resp, c, account, writeChatCompletionsError, requestedModel...)
+	return s.handleCompatErrorResponse(resp, c, account, writeChatCompletionsError, false, requestedModel...)
+}
+
+func (s *OpenAIGatewayService) handleChatCompletionsErrorResponseAfterAccountHandling(
+	resp *http.Response,
+	c *gin.Context,
+	account *Account,
+	requestedModel ...string,
+) (*OpenAIForwardResult, error) {
+	return s.handleCompatErrorResponse(resp, c, account, writeChatCompletionsError, true, requestedModel...)
 }
 
 // handleChatBufferedStreamingResponse reads all Responses SSE events from the
