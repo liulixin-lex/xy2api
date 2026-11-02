@@ -17,11 +17,12 @@ import (
 // Gin context keys used by Ops error logger for capturing upstream error details.
 // These keys are set by gateway services and consumed by handler/ops_error_logger.go.
 const (
-	OpsUpstreamStatusCodeKey   = "ops_upstream_status_code"
-	OpsUpstreamErrorMessageKey = "ops_upstream_error_message"
-	OpsUpstreamErrorDetailKey  = "ops_upstream_error_detail"
-	OpsUpstreamErrorsKey       = "ops_upstream_errors"
-	OpsUpstreamModelKey        = "ops_upstream_model"
+	OpsUpstreamStatusCodeKey    = "ops_upstream_status_code"
+	OpsUpstreamErrorMessageKey  = "ops_upstream_error_message"
+	OpsUpstreamErrorDetailKey   = "ops_upstream_error_detail"
+	OpsUpstreamErrorsKey        = "ops_upstream_errors"
+	OpsUpstreamModelKey         = "ops_upstream_model"
+	OpsUpstreamContentPolicyKey = "ops_upstream_content_policy"
 
 	// Optional stage latencies (milliseconds) for troubleshooting and alerting.
 	OpsAuthLatencyMsKey      = "ops_auth_latency_ms"
@@ -359,6 +360,13 @@ func GetOpsStreamErrors(c *gin.Context) []OpsStreamError {
 // original upstream status code before mapping it to a client-facing code.
 func SetOpsUpstreamError(c *gin.Context, upstreamStatusCode int, upstreamMessage, upstreamDetail string) {
 	setOpsUpstreamError(c, upstreamStatusCode, upstreamMessage, upstreamDetail)
+}
+
+// MarkOpsUpstreamContentPolicy preserves a terminal refusal when its code or type is rewritten.
+func MarkOpsUpstreamContentPolicy(c *gin.Context) {
+	if c != nil {
+		c.Set(OpsUpstreamContentPolicyKey, true)
+	}
 }
 
 func setOpsUpstreamError(c *gin.Context, upstreamStatusCode int, upstreamMessage, upstreamDetail string) {

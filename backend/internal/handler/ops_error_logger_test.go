@@ -821,7 +821,7 @@ func TestClassifyOpsNoAvailableAccountsCountsTowardSLA(t *testing.T) {
 	markOpsRoutingCapacityLimited(c)
 
 	errType := normalizeOpsErrorType("api_error", "")
-	phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(c, errType, message, "", http.StatusServiceUnavailable)
+	phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(c, errType, errType, message, "", http.StatusServiceUnavailable)
 
 	require.Equal(t, "api_error", errType)
 	require.Equal(t, "routing", phase)
@@ -839,7 +839,7 @@ func TestClassifyOpsRoutingCapacityMarkerCountsTowardSLA(t *testing.T) {
 
 	phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(
 		c,
-		"api_error",
+		"api_error", "api_error",
 		"Service temporarily unavailable",
 		"",
 		http.StatusServiceUnavailable,
@@ -859,6 +859,7 @@ func TestClassifyOpsLocalModelConfigurationRejection(t *testing.T) {
 
 	phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(
 		c,
+		"model_not_found",
 		"model_not_found",
 		"Model \"gpt-missing\" is not supported by any configured account in this group",
 		"",
@@ -881,7 +882,7 @@ func TestClassifyOpsLocalModelConfigurationOverridesStaleUpstreamMarkers(t *test
 		UpstreamStatusCode: http.StatusUnauthorized,
 	}})
 
-	phase, limited, owner, source := classifyOpsErrorLog(c, "model_not_found", "unsupported configured model", "", http.StatusNotFound)
+	phase, limited, owner, source := classifyOpsErrorLog(c, "model_not_found", "model_not_found", "unsupported configured model", "", http.StatusNotFound)
 
 	require.Equal(t, "routing", phase)
 	require.True(t, limited)
@@ -895,12 +896,89 @@ func TestClassifyOpsLocalModelConfigurationRequiresMarkerAndReason(t *testing.T)
 	c.Set(service.OpsClientBusinessLimitedReasonKey, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
 	c.Set(service.OpsUpstreamStatusCodeKey, http.StatusBadGateway)
 
-	phase, limited, owner, source := classifyOpsErrorLog(c, "upstream_error", "provider failed", "", http.StatusBadGateway)
+	phase, limited, owner, source := classifyOpsErrorLog(c, "upstream_error", "upstream_error", "provider failed", "", http.StatusBadGateway)
 
 	require.Equal(t, "upstream", phase)
 	require.False(t, limited)
 	require.Equal(t, "provider", owner)
 	require.Equal(t, "upstream_http", source)
+}
+
+func TestOpsErrorLoggerHTTPContentPolicyUsesTerminalSignals(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		path    string
+		status  int
+		errType string
+		code    string
+		message string
+		rewrite bool
+		limited bool
+	}{
+		{"image code", "/v1/images/generations", 400, "invalid_request_error", "content_policy_violation", "Request blocked.", false, true},
+		{"raw HTTP type", "/v1/responses", 400, "content_policy", "", "Request blocked.", false, true},
+		{"rewritten terminal", "/v1/responses", 400, "invalid_request_error", "", "Request blocked.", true, true},
+		{"Chinese policy wording", "/v1/images/generations", 400, "invalid_request_error", "400", "请求可能违反了我们的内容政策", false, true},
+		{"safety system wording", "/v1/images/generations", 400, "invalid_request_error", "", "Your request was rejected by the safety system", false, true},
+		{"ordinary bad request", "/v1/responses", 400, "invalid_request_error", "", "Unknown parameter", false, false},
+		{"ordinary upstream failure", "/v1/responses", 502, "upstream_error", "", "Upstream request failed", false, false},
+		{"account policy ban", "/v1/responses", 403, "permission_error", "", "organization has been disabled for policy violation", false, false},
+		{"invalid prompt boundary", "/v1/responses", 400, "invalid_request_error", "invalid_prompt", "Invalid prompt: your prompt was flagged as potentially violating our usage policy", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupOpsErrorLogTestQueue(t, 1)
+			gin.SetMode(gin.TestMode)
+			ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			router := gin.New()
+			router.Use(OpsErrorLoggerMiddleware(ops))
+			router.POST(tc.path, func(c *gin.Context) {
+				service.SetOpsUpstreamError(c, tc.status, tc.message, "")
+				if tc.rewrite {
+					message, rejected := resilienceContentRejection(c, &service.UpstreamFailoverError{
+						StatusCode:   tc.status,
+						ResponseBody: []byte(`{"error":{"code":"content_policy_violation","message":"Request blocked."}}`),
+					})
+					require.True(t, rejected)
+					c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": message}})
+					return
+				}
+				c.JSON(tc.status, gin.H{"error": gin.H{"type": tc.errType, "code": tc.code, "message": tc.message}})
+			})
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, tc.path, nil))
+
+			require.Equal(t, tc.status, recorder.Code)
+			require.Len(t, opsErrorLogQueue, 1)
+			entry := (<-opsErrorLogQueue).entry
+			require.Equal(t, tc.limited, entry.IsBusinessLimited)
+			require.Equal(t, "upstream", entry.ErrorPhase)
+			require.Equal(t, "provider", entry.ErrorOwner)
+			require.Equal(t, "upstream_http", entry.ErrorSource)
+			if tc.errType == "content_policy" {
+				require.Equal(t, "api_error", entry.ErrorType, "only the business-limit decision uses the raw type")
+			}
+		})
+	}
+}
+
+func TestOpsErrorLoggerStreamContentPolicyPreservesRawType(t *testing.T) {
+	setupOpsErrorLogTestQueue(t, 1)
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	service.SetOpsUpstreamError(c, http.StatusBadRequest, "Request blocked.", "")
+	service.MarkOpsStreamFailure(c, "content_policy", "", "Request blocked.", http.StatusBadRequest)
+
+	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	logOpsStreamError(c, ops, http.StatusOK)
+
+	require.Len(t, opsErrorLogQueue, 1)
+	entry := (<-opsErrorLogQueue).entry
+	require.True(t, entry.IsBusinessLimited)
+	require.Equal(t, "api_error", entry.ErrorType)
+	require.Equal(t, "upstream", entry.ErrorPhase)
+	require.Equal(t, "provider", entry.ErrorOwner)
+	require.Equal(t, "upstream_http", entry.ErrorSource)
 }
 
 func TestOpsErrorLoggerMiddleware_LocalModelConfigurationFields(t *testing.T) {
@@ -1074,7 +1152,7 @@ func TestClassifyOpsAuthClientErrorsExcludedFromSLA(t *testing.T) {
 			c, _ := gin.CreateTestContext(rec)
 
 			errType := normalizeOpsErrorType(tt.errType, tt.code)
-			phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(c, errType, tt.message, tt.code, tt.status)
+			phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(c, errType, errType, tt.message, tt.code, tt.status)
 
 			wantErrType := "api_error"
 			if tt.errType == "permission_error" {
@@ -1342,7 +1420,7 @@ func TestClassifyOpsLocalBusinessLimitErrorsExcludedFromSLA(t *testing.T) {
 			c, _ := gin.CreateTestContext(rec)
 
 			errType := normalizeOpsErrorType(tt.errType, tt.code)
-			phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(c, errType, tt.message, tt.code, tt.status)
+			phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(c, errType, errType, tt.message, tt.code, tt.status)
 
 			require.Equal(t, tt.wantErrType, errType)
 			require.Equal(t, tt.wantPhase, phase)
@@ -1360,7 +1438,7 @@ func TestClassifyOpsIPRestrictionAccessDeniedExcludedFromSLA(t *testing.T) {
 	service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonIPRestriction)
 
 	errType := normalizeOpsErrorType("api_error", "ACCESS_DENIED")
-	phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(c, errType, "Access denied", "ACCESS_DENIED", http.StatusForbidden)
+	phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(c, errType, errType, "Access denied", "ACCESS_DENIED", http.StatusForbidden)
 
 	require.Equal(t, "api_error", errType)
 	require.Equal(t, "auth", phase)
@@ -1376,7 +1454,7 @@ func TestClassifyOpsClientBusinessLimitedMarkerExcludesCustomPolicyDenialFromSLA
 	service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
 
 	errType := normalizeOpsErrorType("invalid_request_error", "")
-	phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(c, errType, "custom admin policy message", "", http.StatusBadRequest)
+	phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(c, errType, errType, "custom admin policy message", "", http.StatusBadRequest)
 
 	require.Equal(t, "invalid_request_error", errType)
 	require.Equal(t, "auth", phase)
@@ -1391,7 +1469,7 @@ func TestClassifyOpsOtherErrorsStillCountForSLA(t *testing.T) {
 	c, _ := gin.CreateTestContext(rec)
 
 	errType := normalizeOpsErrorType("api_error", "INTERNAL_ERROR")
-	phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(c, errType, "Failed to validate API key", "INTERNAL_ERROR", http.StatusInternalServerError)
+	phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(c, errType, errType, "Failed to validate API key", "INTERNAL_ERROR", http.StatusInternalServerError)
 
 	require.Equal(t, "api_error", errType)
 	require.Equal(t, "internal", phase)
@@ -1416,7 +1494,7 @@ func TestClassifyOpsUnsupportedModelCountsTowardSLA(t *testing.T) {
 			markOpsRoutingCapacityLimited(c)
 
 			errType := normalizeOpsErrorType("api_error", "")
-			phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(c, errType, message, "", http.StatusServiceUnavailable)
+			phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(c, errType, errType, message, "", http.StatusServiceUnavailable)
 
 			require.Equal(t, "api_error", errType)
 			require.Equal(t, "routing", phase)
@@ -1434,7 +1512,7 @@ func TestClassifyOpsUnmarkedNoAvailableTextStillCountsForSLA(t *testing.T) {
 
 	phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(
 		c,
-		"api_error",
+		"api_error", "api_error",
 		"No available accounts",
 		"",
 		http.StatusServiceUnavailable,
@@ -1578,7 +1656,7 @@ func TestClassifyOpsUpstreamAuthTextStillCountsForSLA(t *testing.T) {
 
 			phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(
 				c,
-				"api_error",
+				"api_error", "api_error",
 				tt.message,
 				tt.code,
 				tt.status,
@@ -1600,7 +1678,7 @@ func TestClassifyOpsUpstreamNoAvailableTextStillCountsForSLA(t *testing.T) {
 
 	phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(
 		c,
-		"api_error",
+		"api_error", "api_error",
 		"No available accounts",
 		"",
 		http.StatusServiceUnavailable,
@@ -1966,7 +2044,7 @@ func TestClassifyOpsIngressModelNotAllowedKeepsRequestPhase(t *testing.T) {
 
 	phase, isBusinessLimited, errorOwner, errorSource := classifyOpsErrorLog(
 		c,
-		"not_found_error",
+		"not_found_error", "not_found_error",
 		`Model "gpt-4.1" is not available for this group`,
 		"model_not_found",
 		http.StatusNotFound,
@@ -1986,6 +2064,7 @@ func TestClassifyOpsLocalModelConfigurationWithoutIngressMarkStaysRouting(t *tes
 
 	phase, isBusinessLimited, errorOwner, _ := classifyOpsErrorLog(
 		c,
+		"model_not_found",
 		"model_not_found",
 		"Model \"gpt-missing\" is not supported by any configured account in this group",
 		"",

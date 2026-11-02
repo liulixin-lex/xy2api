@@ -1642,12 +1642,19 @@ func applyOpenAIStreamFailedErrorPassthroughRule(
 	)
 }
 
+func openAIStreamBalanceFailure(payload []byte) bool {
+	return resilience.IsBalanceCode(openAIStreamFailedEventErrorCode(payload))
+}
+
 func openAIStreamFailedEventShouldFailover(payload []byte, message string) bool {
 	if hit, _, _ := detectOpenAICyberPolicy(payload); hit {
 		return false
 	}
 	if isOpenAIContextWindowError(message, payload) {
 		return false
+	}
+	if openAIStreamBalanceFailure(payload) {
+		return true
 	}
 	if isOpenAIUpstreamAccessStateError(message, payload) {
 		return true
@@ -1701,6 +1708,9 @@ func openAIStreamErrorEventShouldFailover(payload []byte, message string) bool {
 	if isOpenAIContextWindowError(message, payload) {
 		return false
 	}
+	if openAIStreamBalanceFailure(payload) {
+		return true
+	}
 	if isOpenAIUpstreamAccessStateError(message, payload) {
 		return true
 	}
@@ -1739,6 +1749,13 @@ func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffectsWithC
 	canonicalModel ...string,
 ) (int, bool) {
 	statusCode := openAIStreamFailureStatus(payload, message)
+	if openAIStreamBalanceFailure(payload) {
+		model := firstNonEmpty(canonicalModel...)
+		if model == "" {
+			model = firstNonEmpty(gjson.GetBytes(payload, "model").String(), gjson.GetBytes(payload, "response.model").String())
+		}
+		return statusCode, s.handleOpenAIAccountUpstreamError(ctx, account, statusCode, headers, payload, model)
+	}
 	switch statusCode {
 	case http.StatusForbidden:
 		if !openAIStream403AccountFailure(payload, message) {
@@ -1879,11 +1896,11 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverErrorWithModel(
 		classificationHeaders = nil
 	}
 	failoverErr := s.newOpenAIAccountFailoverErrorWithClassificationHeaders(account, statusCode, headers, classificationHeaders, payload, message, shouldDisable, retryableOnSameAccount)
-	if failoverErr.IsCredentialFailure() || failoverErr.RequestScopedTransient {
+	if failoverErr.IsCredentialFailure() || failoverErr.RequestScopedTransient || openAIStreamBalanceFailure(payload) {
 		return failoverErr
 	}
 	// Preserve the existing generic envelope for unclassified stream failures;
-	// only typed access/capacity failures need the original payload downstream.
+	// only typed access/capacity/balance failures need the original payload downstream.
 	failoverErr.ResponseBody = body
 	return failoverErr
 }

@@ -148,14 +148,21 @@ func (c Category) SoftCooldown() bool {
 const inspectLimit = 8 << 10
 
 var defaultBalanceCodes = map[string]struct{}{
-	"insufficient_quota":             {},
-	"insufficient_user_quota":        {},
-	"pre_consume_token_quota_failed": {},
-	"credit_balance_exhausted":       {},
-	"insufficient_balance":           {},
-	"insufficient_credit":            {},
-	"insufficient_credits":           {},
-	"billing_hard_limit_reached":     {},
+	"insufficient_quota":                        {},
+	"insufficient_user_quota":                   {},
+	"pre_consume_token_quota_failed":            {},
+	"credit_balance_exhausted":                  {},
+	"insufficient_balance":                      {},
+	"insufficient_credit":                       {},
+	"insufficient_credits":                      {},
+	"billing_hard_limit_reached":                {},
+	"subscription_sharing_usage_limit_exceeded": {},
+}
+
+// IsBalanceCode reports whether code identifies exhausted upstream balance.
+func IsBalanceCode(code string) bool {
+	_, ok := defaultBalanceCodes[strings.ToLower(strings.TrimSpace(code))]
+	return ok
 }
 
 // defaultBalanceKeywords are matched case-insensitively against the error
@@ -175,6 +182,7 @@ var defaultBalanceKeywords = []string{
 	"no enough balance",
 	"not enough balance",
 	"balance exhausted",
+	"subscription sharing usage limit",
 	// new-api / one-api relays (token or user quota used up, pre-charge
 	// refused); without these a 403 reads as an auth failure.
 	"quota is not enough",
@@ -214,6 +222,7 @@ var clientErrorCodes = map[string]struct{}{
 // refusal; they are checked before clientErrorCodes. cyber_policy and
 // bio_policy keep their own handling.
 var contentPolicyCodes = map[string]struct{}{
+	"content_policy":           {},
 	"content_policy_violation": {},
 	"content_filter":           {},
 	"request_check_blocked":    {}, // Zhipu preflight safety check (403)
@@ -233,6 +242,7 @@ var contentPolicyKeywords = []string{
 	"content filtering",
 	"安全策略",
 	"内容安全",
+	"内容政策",
 	"敏感内容",
 	"敏感词",
 	"敏感话题",

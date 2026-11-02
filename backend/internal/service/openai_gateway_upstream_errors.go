@@ -565,6 +565,9 @@ func (s *OpenAIGatewayService) handleErrorResponseCore(
 	if account != nil && account.Platform == PlatformGrok && isGrokContentPolicyRejection(resp.StatusCode, body) {
 		clientMsg := grokContentPolicyClientMessage(body)
 		setOpsUpstreamError(c, resp.StatusCode, clientMsg, truncateString(string(body), 2048))
+		if classifyUpstreamHTTP(resp.StatusCode, resp.Header, body, clientMsg).ContentPolicy() {
+			MarkOpsUpstreamContentPolicy(c)
+		}
 		writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 		MarkResponseCommitted(c)
 		c.JSON(http.StatusForbidden, gin.H{
@@ -587,6 +590,11 @@ func (s *OpenAIGatewayService) handleErrorResponseCore(
 		upstreamDetail = truncateString(string(body), maxBytes)
 	}
 	setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, upstreamDetail)
+	markContentPolicy := func() {
+		if classifyUpstreamHTTP(resp.StatusCode, resp.Header, body, upstreamMsg).ContentPolicy() {
+			MarkOpsUpstreamContentPolicy(c)
+		}
+	}
 	logOpenAIInstructionsRequiredDebug(ctx, c, account, resp.StatusCode, upstreamMsg, requestBody, body)
 
 	if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
@@ -632,6 +640,7 @@ func (s *OpenAIGatewayService) handleErrorResponseCore(
 		"upstream_error",
 		"Upstream request failed",
 	); matched {
+		markContentPolicy()
 		MarkResponseCommitted(c)
 		c.JSON(status, gin.H{
 			"error": gin.H{
@@ -664,6 +673,7 @@ func (s *OpenAIGatewayService) handleErrorResponseCore(
 				Detail:             upstreamDetail,
 			})
 		}
+		markContentPolicy()
 		MarkResponseCommitted(c)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": gin.H{
@@ -716,6 +726,7 @@ func (s *OpenAIGatewayService) handleErrorResponseCore(
 		}
 	}
 
+	markContentPolicy()
 	MarkResponseCommitted(c)
 
 	// 上游 400 是确定性的请求错误：同一份请求体换账号、重试多少次都会失败。归一成
@@ -824,6 +835,9 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 	if account != nil && account.Platform == PlatformGrok && isGrokContentPolicyRejection(resp.StatusCode, body) {
 		clientMsg := grokContentPolicyClientMessage(body)
 		setOpsUpstreamError(c, resp.StatusCode, clientMsg, truncateString(string(body), 2048))
+		if classifyUpstreamHTTP(resp.StatusCode, resp.Header, body, clientMsg).ContentPolicy() {
+			MarkOpsUpstreamContentPolicy(c)
+		}
 		MarkResponseCommitted(c)
 		writeError(c, http.StatusForbidden, "invalid_request_error", clientMsg)
 		return nil, &OpenAIRequestRejectionError{fmt.Errorf("grok content policy rejection: %s", clientMsg)}
@@ -844,12 +858,18 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 		upstreamDetail = truncateString(string(body), maxBytes)
 	}
 	setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, upstreamDetail)
+	markContentPolicy := func() {
+		if classifyUpstreamHTTP(resp.StatusCode, resp.Header, body, upstreamMsg).ContentPolicy() {
+			MarkOpsUpstreamContentPolicy(c)
+		}
+	}
 
 	// Apply error passthrough rules
 	if status, errType, errMsg, matched := applyErrorPassthroughRule(
 		c, account.Platform, resp.StatusCode, body,
 		http.StatusBadGateway, "api_error", "Upstream request failed",
 	); matched {
+		markContentPolicy()
 		MarkResponseCommitted(c)
 		writeError(c, status, errType, errMsg)
 		if upstreamMsg == "" {
@@ -876,6 +896,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 			Message:            upstreamMsg,
 			Detail:             upstreamDetail,
 		})
+		markContentPolicy()
 		MarkResponseCommitted(c)
 		writeError(c, http.StatusInternalServerError, "api_error", "Upstream gateway error")
 		if upstreamMsg == "" {
@@ -916,6 +937,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 		}
 	}
 
+	markContentPolicy()
 	MarkResponseCommitted(c)
 
 	// Map status code to error type and write response

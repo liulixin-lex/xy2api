@@ -106,7 +106,11 @@ func (s *RateLimitService) notePostOutputFailure(ctx context.Context, account *A
 // resiliencePostOutputCounts reports whether a classified failure after
 // output is a failure of the account.
 func resiliencePostOutputCounts(res resilience.Result) bool {
-	return res.Category != resilience.CategoryClientError && res.Category != resilience.CategoryClientCancel
+	switch res.Category {
+	case resilience.CategoryClientError, resilience.CategoryClientCancel, resilience.CategoryBalance:
+		return false
+	}
+	return true
 }
 
 // openAIPostOutputEventCounts decides whether an OpenAI failure event
