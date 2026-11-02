@@ -133,7 +133,7 @@
 
 以下请求保持原版行为：
 
-- OpenAI `previous_response_id` 续链、guardian 父账号等协议强续接（份额分组中记为协议续接）；
+- OpenAI `previous_response_id` 续链、Codex 子 agent 的父线程账号（自动审查与携带加密 `agent_message` 的子线程，见[网关韧性](GATEWAY_RESILIENCE.md) §4.10）等协议强续接（份额分组中记为协议续接）；
 - OpenAI compact 请求、图片请求，以及质量路由已持有的会话；
 - AI Studio 元数据接口与 `count_tokens`；
 - 未分组账号（组 0）：不能在页面配置，始终使用原版调度。
