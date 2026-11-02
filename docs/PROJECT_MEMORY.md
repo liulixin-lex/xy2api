@@ -101,7 +101,7 @@
 - 推送与 PR（11-02 用户授权，[PR #185](https://github.com/liulixin-lex/xy2api/pull/185)）：记忆按用户选择脱敏后随本 PR 提交——未提交部分中的生产分组号、账号号与经营比例改为代称或定性说法（门槛组 A–E、枢纽号等，对照只在本地交接包 `handoff/aliases.md`）。PR 分支已含主工作区截至 11-02 10:00 UTC 的这两份记忆；PR 合并后，主工作区先把之后新增的本地条目与 main 对比保留，再丢弃其余本地改动并拉取 main。
 - CI（11-02 10:40 UTC，head `cf0a2ee0e`）：test、golangci-lint、frontend、upstream-sync-audit、两项 security 等 9 项通过；`shell`（macos-15，只检查部署脚本，本 PR 未改）两次都未分到 runner（runner_id 0、0 步、约 15 分钟后取消），与 PR #168 当时现象相同，属 CI 基础设施问题，合并前需重跑通过或由用户确认 Actions 的 macOS 额度。
 
-### 20261102-gate-error-volume — 门槛错误率熔断的体量偏差评估（方案已批准，实施中）
+### 20261102-gate-error-volume — 门槛错误率熔断的体量偏差评估（已实施，PR 待合并，随 0.5.1 发布）
 
 - 来源：用户 2026-11-02 提问。现在按请求数百分比算错误率，大号报错率被压低，无法熔断，但报错请求已经很多。要求 Claude 与 astra 深入分析，给出最终方案。HTTP/1.1 改动暂不做。
 - 材料：本地 `.work/tasks/20261102-gate-error-volume/`，含 README、`evidence/`（11-01 12:00 起的生产只读导出，不入库）、`sim/`、`reviews/`、`PLAN.md`、`handoff/`。
@@ -122,7 +122,20 @@
   - 分支 `fix/gate-post-output-attempts-20261102`，叠在 P0（PR #187）之上，在仓外独立工作树。
   - 分工：Codex gpt-6.1-sol xhigh 两个子 agent。F 负责代码与测试，G 负责 OpenSpec `gate-post-output-attempts-20261102` 与四份现行文档。`docs/README.md` 与 `policy.json` 由主持人登记。
   - 主持人复核纠正 1 处：F 起初只在“发送边界到事实发生时”这一段查同账号事件，与规格不符。规格要求边界之后到请求结束有同账号事件就不补。HTTP 流出字后不会再对同一账号发起真实请求，所以有上界反而可能重复补记。F 已改，并确认不存在这样的路径。
-  - 门禁：四种构建标签 vet、文档一致性、scheduler-diff、干净树 audit 通过。`-race` 回归与第 3 轮红队（astra 逻辑、Opus 规格；同时确认 P0 第 2 轮修复）进行中。
+  - 红队第 3 轮（astra 逻辑、Opus 规格；同时确认 P0 第 2 轮修复）：
+    - astra 阻断 1 项：已输出且快层已确认失败后，客户端才取消时，状态仍为 200，日志层在分流时提前返回，补项丢失。已把合并调用提前到状态分流之前，取消测试分“未提交”“已输出”两种。
+    - 采纳 astra 建议：插件转发路径不经过 repository 出口，在发出 Forward 前补记发送边界。
+    - 采纳 Opus 建议：
+      - 文档改正“流错误快照”“开关”“停滞事件字段”“渠道监控桶名”四处；
+      - `http_upstream.go` 两处钩子分别登记唯一的多行字面量；
+      - 删去补项文案兜底与事实校验这两处投机兜底；
+      - P0 的 Grok Messages 入口用尽也返回 503。
+  - 门禁（变基到 P0 head `56d589f4d` 后）：
+    - `go build`；`go vet` 四种标签；
+    - handler 全包 `-race`、相关 service 与 repository 定向 `-race`；
+    - 文档一致性、scheduler-diff、干净树 audit。
+    - 变基前的改动包全量 `-race` 只有既有的邮箱绑定用例失败。
+  - PR：分支已推送，PR base 先设为 P0 分支；P0（#187）合并后改为 main，同步 main 后合并。
 
 ### 20261102-gpt-error-review — GPT 一周报错复盘与韧性优化方案（已实施，PR #187 待合并，随 0.5.1 发布）
 
@@ -793,3 +806,27 @@ pnpm --dir frontend run build
   - 第 3 轮红队无阻断且 CI 通过后合并 #186、#187；
   - 门槛漏记补齐变基到 main，开 PR、合并；
   - 发布 0.5.1。
+
+### 2026-11-02 22:00 UTC — 20261102-gate-error-volume — 输出后断流补记实施与三轮复核完成，开 PR
+
+- 请求/目标：按本地交接包实施“输出后断流补记为失败尝试（含归因修正）”，随 0.5.1 发布；不部署。
+- 开始状态：P0 集成分支 head `91999fbd0`；从它拉出 `fix/gate-post-output-attempts-20261102`，之后两次变基到 P0 新 head。
+- 完成操作：
+  - F 实现，内容见进行中的工作：
+    - 请求级事件序号与按账号的发送边界；
+    - 输出后失败事实；
+    - 日志层先合并、再归因；
+    - WS 隔离。
+  - G 写 OpenSpec `gate-post-output-attempts-20261102` 与四份现行文档。
+  - 主持人纠正去重区间，登记 `docs/README.md` 与 `policy.json`（含 OpenSpec 归属）。
+  - 第 3 轮红队的阻断项与采纳的建议均已修复。
+- 修改文件：`resilience/state.go`、`service/ops_upstream_context.go`、`service/resilience_post_output.go`、`service/resilience_stall.go`、`service/plugin_runtime.go`、`repository/http_upstream.go`、`handler/ops_error_logger.go` 及测试；`GATEWAY_RESILIENCE.md`、`USAGE_METRICS.md`、`GROUP_QUALITY_GATE.md`、`SHARE_SCHEDULING.md`、`docs/README.md`、OpenSpec、`policy.json`、本记忆。
+- 验证：见进行中的工作的“门禁”。
+- 卡点/风险：
+  - WS 不补记，维持现状；
+  - 拿不到发送边界时保守少记；
+  - 上线后上游错误率与告警会因归因口径上升，不代表质量变差。
+- 下一步：
+  - #187 合并后，本 PR 改 base 为 main，同步并合并；
+  - 发布 0.5.1；
+  - 上线后按本地 `sql/post_release_verify.sql` 只读验收，需要用户在会话内授权。
