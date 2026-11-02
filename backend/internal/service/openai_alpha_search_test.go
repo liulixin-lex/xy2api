@@ -293,6 +293,52 @@ func TestForwardAlphaSearchAPIKeyMapsModelAndPassesThroughError(t *testing.T) {
 	require.Equal(t, string(resilience.CategoryClientError), events[0].ResilienceCategory)
 }
 
+func TestForwardAlphaSearchRedirectPassthroughDoesNotRecordHTTPError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, patFallback := range []bool{false, true} {
+		name := "API Key"
+		if patFallback {
+			name = "PAT fallback"
+		}
+		t.Run(name, func(t *testing.T) {
+			body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusFound,
+				Header:     http.Header{"Location": []string{"https://example.invalid/search"}},
+				Body:       io.NopCloser(strings.NewReader("redirect")),
+			}}
+			service := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			account := &Account{
+				ID:       89,
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeAPIKey,
+				Credentials: map[string]any{
+					"api_key":  "sk-test",
+					"base_url": "https://compat.example",
+				},
+			}
+			if patFallback {
+				account.Type = AccountTypeOAuth
+				account.Credentials = map[string]any{
+					"access_token":       "at-test-token",
+					"auth_mode":          OpenAIAuthModePersonalAccessToken,
+					"chatgpt_account_id": "chatgpt-account",
+				}
+			}
+
+			result, err := service.ForwardAlphaSearch(context.Background(), c, account, body)
+			require.NoError(t, err)
+			require.Nil(t, result)
+			require.Equal(t, http.StatusFound, recorder.Code)
+			_, recorded := c.Get(OpsUpstreamErrorsKey)
+			require.False(t, recorded)
+		})
+	}
+}
+
 func TestForwardAlphaSearchE5001ServerErrorFailsOverWithoutAccountMutation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)

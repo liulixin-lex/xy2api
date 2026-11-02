@@ -201,6 +201,12 @@ func TestGrokTemporaryUnavailable422UsesOneTransientClassifier(t *testing.T) {
 			want:   true,
 		},
 		{
+			name:   "exact service error with top-level quota marker",
+			status: http.StatusUnprocessableEntity,
+			body:   `{"code":"subscription:free-usage-exhausted","error":{"type":"api_error","message":"Service temporarily unavailable"}}`,
+			want:   true,
+		},
+		{
 			name:   "request code present",
 			status: http.StatusUnprocessableEntity,
 			body:   `{"error":{"type":"api_error","code":"invalid_request_error","message":"Service temporarily unavailable"}}`,
@@ -243,6 +249,7 @@ func TestGrokTemporaryUnavailable422UsesOneTransientClassifier(t *testing.T) {
 				require.Equal(t, GrokFailureTransientUnavailable, d.Class)
 				require.True(t, d.ShouldFailover)
 				require.False(t, d.ShouldCooldown)
+				require.False(t, shouldMarkGrokTeamModelRateLimit(account, tt.status, body))
 				failure := annotateUpstreamFailoverAccount(
 					&UpstreamFailoverError{StatusCode: tt.status, ResponseBody: body}, account,
 				)

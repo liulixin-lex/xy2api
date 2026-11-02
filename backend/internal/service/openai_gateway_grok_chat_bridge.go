@@ -650,7 +650,7 @@ func (s *OpenAIGatewayService) forwardGrokChatCompletionsViaResponses(
 				SameAccountRetryMax:      retryMax,
 			}
 		}
-		return s.handleChatCompletionsErrorResponse(resp, c, account, billingModel)
+		return s.handleChatCompletionsErrorResponseAfterAccountHandling(resp, c, account, billingModel)
 	}
 
 	s.updateGrokUsageFromResponse(withGrokTeamRateLimitModel(ctx, upstreamModel), account, resp.Header, resp.StatusCode)

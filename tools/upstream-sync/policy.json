@@ -1156,7 +1156,7 @@
     },
     {
       "path": "backend/internal/handler/gateway_handler_responses.go",
-      "value": "writeResponsesFailedSSEWithOpening(c, errType, explicitCode, message, gatewayStreamHasOnlyHeartbeats(c))"
+      "value": "writeResponsesFailedSSEWithOpeningStatus(c, status, errType, explicitCode, message, gatewayStreamHasOnlyHeartbeats(c))"
     },
     {
       "path": "backend/internal/handler/gateway_handler_responses.go",
@@ -3501,6 +3501,54 @@
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
       "value": "if statusCode != http.StatusTooManyRequests && openAIStreamBalanceFailure(payload) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "value": "return s.handleChatCompletionsErrorResponseAfterAccountHandling(resp, c, account, billingModel)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
+      "value": "ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, respBody, upstreamMsg, account),"
+    },
+    {
+      "path": "backend/internal/handler/openai_alpha_search.go",
+      "value": "if failoverErr.Reason != service.OpenAIAlphaSearchE5001Reason {"
+    },
+    {
+      "path": "backend/internal/handler/openai_alpha_search.go",
+      "value": "if result != nil {\n\t\t\t\th.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, requestedModel, false, result), true, nil)"
+    },
+    {
+      "path": "backend/internal/service/ops_upstream_context.go",
+      "value": "c.Set(OpsGatewayTerminalStatusKey, 0)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "if service.IsGrokTemporaryUnavailable422Failover(failoverErr) {\n\t\tstatus, errType, errMsg = http.StatusServiceUnavailable, \"upstream_error\", \"Upstream service temporarily unavailable\""
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_grok_chat_bridge.go",
+      "value": "return s.handleChatCompletionsErrorResponseAfterAccountHandling(resp, c, account, billingModel)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler.go",
+      "value": "writeResponsesFailedSSEWithStatus(c, status, errType, code, message)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_responses.go",
+      "value": "writeResponsesFailedSSEWithOpeningStatus(c, status, errType, explicitCode, translatedMessage, gatewayStreamHasOnlyHeartbeats(c))"
+    },
+    {
+      "path": "backend/internal/handler/stream_error_event.go",
+      "value": "handled, wrote := writeResponsesFailedSSEWithOpeningResult(c, errType, code, message, forceOpening)"
+    },
+    {
+      "path": "backend/internal/service/openai_alpha_search.go",
+      "value": "// an attempt classification because no upstream error was returned.\n\t\tif resp.StatusCode >= http.StatusBadRequest {"
+    },
+    {
+      "path": "backend/internal/service/openai_alpha_search.go",
+      "value": "c.Data(resp.StatusCode, contentType, respBody)\n\t\tif resp.StatusCode >= http.StatusBadRequest {"
     }
   ],
   "forbidden_module_paths": [
@@ -6096,6 +6144,41 @@
       "id": "xy-support-chat",
       "path": "frontend/src/features/support-widget/__tests__/supportWidgetVisibility.spec.ts",
       "literal": "it('shows only when every condition holds'"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/openai_gateway_credential_failover_loop_test.go",
+      "literal": "func TestGrokTemporaryUnavailable422ExhaustionReturns503AndKeepsAttempt"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/grok_error_registration_test.go",
+      "literal": "t.Run(\"responses bridge\", func(t *testing.T) {"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_alpha_search_test.go",
+      "literal": "func TestForwardAlphaSearchRedirectPassthroughDoesNotRecordHTTPError"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/stream_error_event_test.go",
+      "literal": "func TestGatewayHandleStreamingAwareError_ResponsesStreamingEmitsResponseFailed"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/resilience_compat_queue_error_test.go",
+      "literal": "func TestCompatibleQueueErrorsEndInInboundProtocol"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/openai_gateway_credential_failover_test.go",
+      "literal": "func TestResponsesFailoverExhaustedAfterForwardedTerminalMarksOpsWithoutDuplicateFrame"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/ops_error_logger_test.go",
+      "literal": "func TestLogOpsStreamError_RecordsOneFailurePerWebSocketTurn"
     }
   ]
 }

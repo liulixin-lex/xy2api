@@ -66,7 +66,11 @@ func writeResponsesFailedSSE(c *gin.Context, errType, code, message string) bool
 }
 
 func writeResponsesFailedSSEWithStatus(c *gin.Context, status int, errType, code, message string) bool {
-	handled, wrote := writeResponsesFailedSSEWithOpeningResult(c, errType, code, message, false)
+	return writeResponsesFailedSSEWithOpeningStatus(c, status, errType, code, message, false)
+}
+
+func writeResponsesFailedSSEWithOpeningStatus(c *gin.Context, status int, errType, code, message string, forceOpening bool) bool {
+	handled, wrote := writeResponsesFailedSSEWithOpeningResult(c, errType, code, message, forceOpening)
 	if wrote {
 		service.MarkOpsGatewayTerminalStatus(c, status)
 	}

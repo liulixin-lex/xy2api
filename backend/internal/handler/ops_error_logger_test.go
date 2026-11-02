@@ -618,6 +618,7 @@ func TestOpsGatewayTerminalStatusUsesFirstWrittenTerminal(t *testing.T) {
 	status, ok := service.OpsGatewayTerminalStatus(c)
 	require.True(t, ok)
 	require.Equal(t, http.StatusBadRequest, status)
+	require.Equal(t, 1, strings.Count(recorder.Body.String(), "event: response.failed"))
 }
 
 func TestOpsErrorLoggerMiddleware_PassThroughResponseFailedStillInfersStatus(t *testing.T) {
@@ -809,9 +810,15 @@ func TestLogOpsStreamError_RecordsOneFailurePerWebSocketTurn(t *testing.T) {
 	service.SetOpenAIClientTransport(c, service.OpenAIClientTransportWS)
 
 	service.BeginOpsStreamTurn(c, 1)
+	service.MarkOpsGatewayTerminalStatus(c, http.StatusTooManyRequests)
+	status, marked := service.OpsGatewayTerminalStatus(c)
+	require.True(t, marked)
+	require.Equal(t, http.StatusTooManyRequests, status)
 	service.MarkOpsStreamFailure(c, "rate_limit_error", "rate_limit_exceeded", "turn one failed", http.StatusTooManyRequests)
 	service.MarkOpsStreamError(c, "upstream_error", "generic duplicate for turn one", http.StatusBadGateway)
 	service.BeginOpsStreamTurn(c, 2)
+	_, marked = service.OpsGatewayTerminalStatus(c)
+	require.False(t, marked)
 	service.MarkOpsStreamFailure(c, "permission_error", "permission_denied", "turn two failed", http.StatusForbidden)
 
 	streamErrors := service.GetOpsStreamErrors(c)

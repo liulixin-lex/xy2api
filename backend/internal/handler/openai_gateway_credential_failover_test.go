@@ -184,6 +184,8 @@ func TestResponsesFailoverExhaustedAfterForwardedTerminalMarksOpsWithoutDuplicat
 	streamErr, ok := service.GetOpsStreamError(c)
 	require.True(t, ok)
 	require.Equal(t, "official failure", streamErr.Message)
+	_, marked := service.OpsGatewayTerminalStatus(c)
+	require.False(t, marked, "an upstream terminal must retain its existing inference")
 
 	markerRecorder := httptest.NewRecorder()
 	markerContext, _ := gin.CreateTestContext(markerRecorder)
@@ -196,6 +198,9 @@ func TestResponsesFailoverExhaustedAfterForwardedTerminalMarksOpsWithoutDuplicat
 	require.True(t, ok)
 	require.Equal(t, http.StatusTooManyRequests, streamErr.IntendedStatus)
 	require.Equal(t, "rate_limit_error", streamErr.ErrType)
+	status, marked := service.OpsGatewayTerminalStatus(markerContext)
+	require.True(t, marked)
+	require.Equal(t, http.StatusTooManyRequests, status)
 
 	heartbeatRecorder := httptest.NewRecorder()
 	heartbeatContext, _ := gin.CreateTestContext(heartbeatRecorder)
@@ -208,6 +213,9 @@ func TestResponsesFailoverExhaustedAfterForwardedTerminalMarksOpsWithoutDuplicat
 	}, true)
 	require.True(t, strings.HasPrefix(heartbeatRecorder.Body.String(), heartbeat))
 	require.Equal(t, 1, strings.Count(heartbeatRecorder.Body.String(), "event: response.failed"))
+	status, marked = service.OpsGatewayTerminalStatus(heartbeatContext)
+	require.True(t, marked)
+	require.Equal(t, http.StatusBadGateway, status)
 }
 
 func TestGatewayChatInferenceExhaustionRestoresRetryAfter(t *testing.T) {

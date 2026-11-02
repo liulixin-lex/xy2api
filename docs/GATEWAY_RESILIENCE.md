@@ -84,6 +84,8 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | 余额被在途请求占用 | 429，`rate_limit_error` / `concurrent_balance_reserved`，`Retry-After` 约 5 秒。0.4.12 起运维记录标为业务限制（含 Responses WebSocket），以前记为上游失败 |
 | 排队已满或并发槽位已满（0.4.12） | 429 带 `Retry-After: 5`；已提交的 Responses 流在 `errors.failed_frame_retry_after` 开启时写在 `response.failed` 的 `error.headers.retry-after`；已有 `Retry-After` 或重试被抑制时不改。覆盖 Gateway、OpenAI 与 Gemini 入口、图片并发与 Live。Codex 收到不带 `Retry-After` 的 429 会直接放弃，以前这几个出口不带。API Key 额度、权限与回合封顶等终态 429 仍不带 |
 | 上游余额不足 | 本请求换号（0.4.12 起各平台都换，不再先在同一账号上重试），耗尽时普通用户看到 503；账号暂停期间单号分组的 503 带 `Retry-After`（暂停剩余时间，2–30 秒）；管理员在账号列表看到临时不可调度，原因 `balance:exhausted[step=N]: <证据摘要>`（N 为暂停档位，见 §4.9）。管理员配置的错误透传规则命中时按规则返回。0.5.1：含订阅共享额度用尽（`subscription_sharing_usage_limit_exceeded`）；OpenAI 流内事件的余额码（`response.error.code` 或 `error.code`，不看正文）同样在第一个内容之前换号并暂停，之后不重放，只暂停账号，不计会话失败与输出后软冷却，见 §4.10 |
+| Grok API Key 精确 422 | 仅 `api_error` 且文案完整等于 `Service temporarily unavailable`、没有请求错误 `code`/`param` 时换号；预算耗尽返回 503，运维尝试保留上游 422 并记为 `TRANSIENT` |
+| alpha search E5001 | API Key 的 alpha search HTTP 400 且 `error.code=E5001`、`error.type=server_error` 时换号；预算耗尽默认返回 502，回合封顶时为 503，运维尝试保留上游 400 并记为 `TRANSIENT`；不执行账号副作用或全局调度失败上报 |
 | 上游报告模型不可用（0.4.12） | 400 或 404 的错误消息为 `unknown provider for model`、`unknown model`、`model not found`、`model is not supported` 之一，且没有更具体的错误码、`type` 或 `param` 时（数值错误码等于本次 400 或 404 时不算更具体），或带结构化的模型错误码时：本请求换号，该账号对该模型 30 分钟不可用（见 §4.9）。无错误码、消息提到 model 的其他 404 仍按模型不可用分类并换号，但不设 30 分钟不可用。换号耗尽时按入站协议原有的错误映射返回，不保证原样的状态码与正文 |
 | 首包前心跳已提交后失败 | 不再改写状态码，改为协议终止帧：Responses 为 `response.failed`（`rate_limit_exceeded` 或 `server_error`），客户端此前只收到心跳时前面先补同一响应的 `response.created`（openai-python 等严格 SDK 要求流以它开始）；Chat 为 `data: {"error":{…,"status":N}}` 后跟 `[DONE]`；Anthropic 为 `event: error` |
 | 合成 `response.failed` 的重试时间（0.4.4） | `errors.failed_frame_retry_after` 开启时写在 `error.headers.retry-after`（Codex 从这里读）：本请求还有健康账号时为 1 秒；组内没有健康账号、能算出最早恢复时间时为 2–10 秒，正文 “try again in Ns” 的 N 相同；恢复时间未知时不带（0.4.3 缺省提示 30 秒）；回合封顶、用户自身余额不足、内容拒绝不带，并去掉正文里的重试句（上游账号余额不足会换号，不算）；配置拒绝、鉴权类错误与其他不可重试的原因（模型不存在、`billing_service_error` 等，只有 429 与 5xx 才可能带）不给重试建议。重试建议只在实际写出 `response.failed` 时计算，以普通 JSON 结束的无号与耗尽出口不再计算（0.4.5）。HTTP 头尚未提交时同步改写 `Retry-After`。关闭时不带 `error.headers`，正文同 0.4.3（用户余额不足与内容拒绝仍不带重试时间，这两项只受 `errors.enabled` 控制） |
@@ -338,13 +340,13 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 
 **Grok 与 alpha search**
 
-- Grok API Key 账号只有在 HTTP 422、`error.type=api_error`、`error.message` 完整等于 `Service temporarily unavailable`，且 `error.code` 与 `error.param` 均为空时，才按瞬时失败使用现有换号预算。原始尝试状态保留为 422；同形的 OAuth、其他平台响应、带请求错误字段的载荷，以及 400 请求错误不适用。
-- alpha search 的 API Key 账号只有在 `/v1/alpha/search` 返回 HTTP 400 且载荷为 `error.code=E5001`、`error.type=server_error` 时进入现有换号预算；文案不参与判定。账号状态与全局调度健康不因该信号更新，耗尽后返回 502/503，尝试事件保留上游 400。API Key 上游以 404/405，或 HTTP 400 的两个能力提示（“do not support the requested endpoint”、“not encrypted history or tool items”）表示不支持 alpha search 时，仍按端点能力换号，不能和 E5001 分类混为一类。
-- alpha search 两个原样透传非 2xx 的出口只登记 `http_error` 尝试，不报账号成功，也不执行计费；尝试类别按完整上游状态、响应头与载荷计算。
+- Grok API Key 账号只有在 HTTP 422、`error.type=api_error`、`error.message` 完整等于 `Service temporarily unavailable`，且 `error.code` 与 `error.param` 均为空时，才按瞬时失败使用现有换号预算。原始尝试状态保留为 422；同形的 OAuth、其他平台响应、带请求错误字段的载荷，以及 400 请求错误不适用；预算耗尽返回 503。管理员配置的错误透传规则仍优先。
+- alpha search 的 API Key 账号只有在 `/v1/alpha/search` 返回 HTTP 400 且载荷为 `error.code=E5001`、`error.type=server_error` 时进入现有换号预算；文案不参与判定。账号状态与全局调度健康不因该信号更新，耗尽后默认返回 502，回合封顶时为 503，尝试事件保留上游 400。API Key 上游以 404/405，或 HTTP 400 的两个能力提示（“do not support the requested endpoint”、“not encrypted history or tool items”）表示不支持 alpha search 时，仍按端点能力换号，不能和 E5001 分类混为一类。
+- alpha search 两个原样透传非 2xx 的出口都不报账号成功，也不执行计费；只有 HTTP 状态 ≥ 400 时登记一条 `http_error` 尝试，类别按完整上游状态、响应头与载荷计算，3xx 不登记错误尝试。
 
 **流式终态状态**
 
-- 网关实际写出 `response.failed` 或 Chat 终止帧后，运维记录优先采用该终态对应的网关状态；writer 未能写出终态时不设置此状态。没有本网关终态状态时，仍按 SSE code/type 推断。上游原样转发的终态不带本网关状态，继续按原规则推断。
+- 网关实际写出 `response.failed`（含 Gateway 入站的兼容 Responses）或 Chat 终止帧后，运维记录优先采用该终态对应的网关状态；writer 未能写出终态时不设置此状态，重复终态不覆盖先前已写出的状态，WebSocket 下一回合清除旧状态。没有本网关终态状态时，仍按 SSE code/type 推断。上游原样转发的终态不带本网关状态，继续按原规则推断。
 
 **运维记录与分组质量门槛**
 
@@ -480,7 +482,7 @@ OpenAI 判慢降序与会话迁移的事件（0.4.9，见 §4.5）不带 `resili
 | OpenAI Responses 透传的有界暂存（0.4.5） | 第一个输出前的开场事件改用原生路径的暂存（8 MiB 上限，超过 64 KiB 写入已解除链接的临时文件），超出上限时换号；以前在内存中不设上限 |
 | Gemini 5xx 与 408 交给通用错误处理（0.4.9） | 以前 Gemini 只把 401、403、529 交给通用错误处理，其余非 429 直接返回；现在 5xx 与 408 也交给它，账号的临时不可调度规则与原版对 5xx 的处理同样生效，自定义错误码未命中时仍跳过。模型级冷却（§4.6）仍随总开关 |
 | 报错后的路由、出口与绑定（0.4.12） | 余额不足、模型不可用与 402 `deactivated_workspace` 在各平台换号，明确的模型不可用让该账号对该模型 30 分钟不可用，这几类耗尽后不清空排除集重选；原生 Responses 本地失败写 `response.failed`；Messages 的 Claude Code 专属拒绝返回 403；在途预留的 429 标为业务限制；排队与并发上限的 429 带 `Retry-After: 5`；客户端错误消息去掉上游标识；成功后的会话绑定不随客户端断开取消；OpenAI 原版选号的替补按会话稳定哈希排序。见 §3、§4.9 |
-| 报错补漏（0.5.1） | 加密内容拒绝按请求级处理（不换号、不罚号，临时不可调度规则与自定义错误码不作用于它）与同号剥离重放；被拒字段修复，含 Chat 路径与带内形态；Alpha Search 能力类 400 换号；Codex 子 agent 的父线程亲和及其会话键作用域修正；流内余额码换号（暂停仍随总开关与 `balance.enabled`）；上游内容安全拒绝在运维记录中标为业务限制，见 §4.10 |
+| 报错补漏（0.5.1） | 加密内容拒绝按请求级处理（不换号、不罚号，临时不可调度规则与自定义错误码不作用于它）与同号剥离重放；被拒字段修复，含 Chat 路径与带内形态；Alpha Search 能力类 400 换号；Grok 精确 422 换号并在耗尽时返回 503；alpha search E5001 换号并在耗尽时默认返回 502（回合封顶时为 503）；alpha 非 2xx 不计成功，只有 HTTP 状态 ≥ 400 时登记错误尝试；Codex 子 agent 的父线程亲和及其会话键作用域修正；流内余额码换号（暂停仍随总开关与 `balance.enabled`）；上游内容安全拒绝在运维记录中标为业务限制，见 §4.10。Grok 精确 422 与 E5001 换号、alpha 非 2xx 的成功上报修正及网关终态状态记录不受韧性总开关回退；尝试事件的 `resilience_category` 仍随总开关。 |
 | 上传中断记 499 | 读请求体时连接中断造成的 400 在运维记录里记为 499 |
 | §9.8 续链被拒整轮重放 | Claude 请求分发到 GPT 中转、续链以笼统 4xx 被拒时去掉续链重放一次并关闭该会话续链（0.4.2 收窄判定，见 §3） |
 | `/ready` 就绪检查 | 检查数据库与 Redis，见 §2.2（0.4.2） |

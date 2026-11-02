@@ -63,7 +63,7 @@ func TestGrokRawChatErrorRegistersOnceAndSkipsCompatSideEffects(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			body := []byte(`{"model":"grok-4.5","messages":[{"role":"user","content":"hello"}],"stream":false}`)
-			repo := &grokQuotaAccountRepo{}
+			repo := &modelNotFoundAccountRepoStub{}
 			account := rawChatCompletionsTestAccount()
 			account.Platform = PlatformGrok
 			account.Credentials["temp_unschedulable_enabled"] = true
@@ -93,10 +93,49 @@ func TestGrokRawChatErrorRegistersOnceAndSkipsCompatSideEffects(t *testing.T) {
 
 			_, err := service.forwardAsRawChatCompletions(context.Background(), c, account, body, "")
 			require.Error(t, err)
-			require.Zero(t, repo.tempUnschedCalls)
+			require.Zero(t, repo.tempCalls)
+			require.Empty(t, repo.modelRateLimitCalls)
 			raw, ok := c.Get(OpsUpstreamErrorsKey)
 			require.True(t, ok)
 			require.Len(t, raw.([]*OpsUpstreamErrorEvent), 1)
 		})
 	}
+
+	t.Run("responses bridge", func(t *testing.T) {
+		body := []byte(`{"model":"grok-4.5","messages":[{"role":"user","content":"hello"}],"stream":false}`)
+		repo := &modelNotFoundAccountRepoStub{}
+		account := grokChatBridgeTestAccount(102)
+		account.Credentials["temp_unschedulable_enabled"] = true
+		account.Credentials["temp_unschedulable_rules"] = []any{map[string]any{
+			"error_code":       float64(http.StatusBadRequest),
+			"keywords":         []any{"bad request"},
+			"duration_minutes": float64(1),
+		}}
+		upstream := &httpUpstreamRecorder{resp: &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","message":"bad request"}}`)),
+		}}
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+		c.Set("api_key", &APIKey{ID: 10201})
+		svc := &OpenAIGatewayService{
+			cfg:               rawChatCompletionsTestConfig(),
+			httpUpstream:      upstream,
+			grokTokenProvider: NewGrokTokenProvider(repo, nil),
+			accountRepo:       repo,
+			rateLimitService:  NewRateLimitService(repo, nil, nil, nil, nil),
+		}
+
+		_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
+		require.Error(t, err)
+		require.Zero(t, repo.tempCalls)
+		require.Empty(t, repo.modelRateLimitCalls)
+		require.Equal(t, http.StatusBadRequest, recorder.Code)
+		require.True(t, strings.HasSuffix(upstream.lastReq.URL.Path, "/responses"))
+		raw, ok := c.Get(OpsUpstreamErrorsKey)
+		require.True(t, ok)
+		require.Len(t, raw.([]*OpsUpstreamErrorEvent), 1)
+	})
 }

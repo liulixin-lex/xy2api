@@ -3820,6 +3820,9 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 
 	// 使用默认的错误映射
 	status, errType, errMsg := h.mapUpstreamError(statusCode)
+	if service.IsGrokTemporaryUnavailable422Failover(failoverErr) {
+		status, errType, errMsg = http.StatusServiceUnavailable, "upstream_error", "Upstream service temporarily unavailable"
+	}
 	status, errType, errMsg = resilienceCapacityExhausted(c, failoverErr, status, errType, errMsg)
 	status = applyExhaustedRetryHint(c, h.gatewayService, status)
 	h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)

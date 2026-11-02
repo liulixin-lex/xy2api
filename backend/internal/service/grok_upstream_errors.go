@@ -255,6 +255,12 @@ func isGrokTemporaryUnavailable422Failover(failoverErr *UpstreamFailoverError) b
 		isGrokTemporaryUnavailable422Shape(failoverErr.StatusCode, failoverErr.ResponseBody)
 }
 
+// IsGrokTemporaryUnavailable422Failover identifies the transient Grok API-key
+// signal whose exhausted client response is service unavailable.
+func IsGrokTemporaryUnavailable422Failover(failoverErr *UpstreamFailoverError) bool {
+	return isGrokTemporaryUnavailable422Failover(failoverErr)
+}
+
 func shouldFailoverClassifiedUpstreamError(statusCode int, headers http.Header, responseBody []byte) bool {
 	result := classifyUpstreamHTTP(statusCode, headers, responseBody, "")
 	switch result.Category {

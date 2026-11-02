@@ -136,8 +136,11 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	}
 	c.Data(resp.StatusCode, contentType, respBody)
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		// 非 2xx（错误/重定向）已原样透传给客户端：不是一次成功的搜索，不计费。
-		recordOpenAIAlphaSearchErrorAttempt(c, account, resp, respBody, extractUpstreamErrorMessage(respBody), "http_error", nil)
+		// HTTP errors are facts for ops; redirects remain a passthrough without
+		// an attempt classification because no upstream error was returned.
+		if resp.StatusCode >= http.StatusBadRequest {
+			recordOpenAIAlphaSearchErrorAttempt(c, account, resp, respBody, extractUpstreamErrorMessage(respBody), "http_error", nil)
+		}
 		return nil, nil
 	}
 	return &OpenAIForwardResult{
@@ -213,7 +216,9 @@ func (s *OpenAIGatewayService) forwardAlphaSearchViaResponsesWebSearch(
 			contentType = "application/json"
 		}
 		c.Data(resp.StatusCode, contentType, respBody)
-		recordOpenAIAlphaSearchErrorAttempt(c, account, resp, respBody, extractUpstreamErrorMessage(respBody), "http_error", nil)
+		if resp.StatusCode >= http.StatusBadRequest {
+			recordOpenAIAlphaSearchErrorAttempt(c, account, resp, respBody, extractUpstreamErrorMessage(respBody), "http_error", nil)
+		}
 		return nil, nil
 	}
 
