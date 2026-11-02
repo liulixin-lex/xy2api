@@ -54,7 +54,8 @@
       "openspec/changes/anthropic-cache-ttl-20261030/**",
       "openspec/changes/group-quality-gate-20261031/**",
       "openspec/changes/add-support-chat-widget-20261031/**",
-      "openspec/changes/group-quality-gate-v2-20261102/**"
+      "openspec/changes/group-quality-gate-v2-20261102/**",
+      "openspec/changes/gate-post-output-attempts-20261102/**"
     ],
     "manual_merge": [
       "Makefile",
@@ -3553,6 +3554,34 @@
     {
       "path": "backend/internal/service/openai_alpha_search.go",
       "value": "c.Data(resp.StatusCode, contentType, respBody)\n\t\tif resp.StatusCode >= http.StatusBadRequest {"
+    },
+    {
+      "path": "backend/internal/repository/http_upstream.go",
+      "value": "service.RecordOpsUpstreamSendBoundary(req.Context(), accountID)"
+    },
+    {
+      "path": "backend/internal/handler/ops_error_logger.go",
+      "value": "\tservice.MergeOpsPostOutputFailureEvents(c)\n\t// Skip logging if a passthrough rule with skip_monitoring=true matched."
+    },
+    {
+      "path": "backend/internal/handler/ops_error_logger.go",
+      "value": "if streamErr.SkipMonitoring {\n\t\treturn\n\t}\n\tservice.MergeOpsPostOutputFailureEvents(c)"
+    },
+    {
+      "path": "backend/internal/service/ops_upstream_context.go",
+      "value": "resilience.StateFrom(c.Request.Context()).RecordOpsUpstreamEvent()"
+    },
+    {
+      "path": "backend/internal/service/ops_upstream_context.go",
+      "value": "resilience.StateFrom(c.Request.Context()).ResetPostOutputOpsTracking()"
+    },
+    {
+      "path": "backend/internal/service/resilience_post_output.go",
+      "value": "recordPostOutputFailureFact(ctx, account, kind, resilience.CategoryTransient, time.Now())"
+    },
+    {
+      "path": "backend/internal/service/resilience_stall.go",
+      "value": "recordPostOutputFailureFact(ctx, account, \"stall\", resilience.CategoryStall, failureAt)"
     }
   ],
   "forbidden_module_paths": [
@@ -6183,6 +6212,61 @@
       "id": "xy-error-recovery-routing",
       "path": "backend/internal/handler/ops_error_logger_test.go",
       "literal": "func TestLogOpsStreamError_RecordsOneFailurePerWebSocketTurn"
+    },
+    {
+      "id": "xy-recovery-observability",
+      "path": "backend/internal/repository/http_upstream_test.go",
+      "literal": "func TestHTTPUpstreamRecordsOpsSendBoundaryAtBothTransportEntrypoints"
+    },
+    {
+      "id": "xy-recovery-observability",
+      "path": "backend/internal/service/ops_upstream_context_test.go",
+      "literal": "func TestOpsPostOutputMergeUsesSendBoundaryWhenTimestampsMatch"
+    },
+    {
+      "id": "xy-recovery-observability",
+      "path": "backend/internal/service/ops_upstream_context_test.go",
+      "literal": "func TestBeginOpsStreamTurnClearsOnlyPostOutputOpsState"
+    },
+    {
+      "id": "xy-recovery-observability",
+      "path": "backend/internal/service/openai_compact_fallback_test.go",
+      "literal": "func TestOpenAIGatewayForwardCompactReplayUsesFreshOpsSendBoundary"
+    },
+    {
+      "id": "xy-recovery-observability",
+      "path": "backend/internal/service/resilience_post_output_test.go",
+      "literal": "func TestPostOutputFailureAddsOneOpsAttemptAfterConfirmedHTTPFailure"
+    },
+    {
+      "id": "xy-recovery-observability",
+      "path": "backend/internal/service/resilience_post_output_test.go",
+      "literal": "func TestPostOutputStallAddsOpsAttemptOnlyAfterVisibleOutput"
+    },
+    {
+      "id": "xy-recovery-observability",
+      "path": "backend/internal/service/resilience_post_output_test.go",
+      "literal": "func TestPostOutputFailureOpsMergeKeepsExistingCategoriesAndUsesConservativeFallback"
+    },
+    {
+      "id": "xy-recovery-observability",
+      "path": "backend/internal/service/resilience_post_output_test.go",
+      "literal": "func TestPostOutputOpsFactsKeepP0ExclusionsAndCancellation"
+    },
+    {
+      "id": "xy-recovery-observability",
+      "path": "backend/internal/handler/ops_error_logger_test.go",
+      "literal": "func TestOpsErrorLoggerMergesPostOutputFactBeforeClassification"
+    },
+    {
+      "id": "xy-recovery-observability",
+      "path": "backend/internal/handler/ops_error_logger_test.go",
+      "literal": "func TestOpsErrorLoggerRequestScopedErrorDoesNotMergePostOutputFact"
+    },
+    {
+      "id": "xy-recovery-observability",
+      "path": "backend/internal/handler/ops_error_logger_test.go",
+      "literal": "func TestOpsErrorLoggerMiddleware_RecordsConfirmedPostOutputFailureWhenClientCancels"
     }
   ]
 }
