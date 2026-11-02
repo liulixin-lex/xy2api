@@ -14,8 +14,8 @@ import {
 const DRAG_THRESHOLD_PX = 4
 const EDGE_MARGIN_PX = 16
 const HEADER_HEIGHT_PX = 64
-export const BUBBLE_SIZE_PX = 56
-export const BUBBLE_SIZE_SMALL_PX = 52
+export const BUBBLE_SIZE_PX = 60
+export const BUBBLE_SIZE_SMALL_PX = 56
 const SMALL_SCREEN_PX = 640
 
 function readSafeAreas(): { top: number; bottom: number } {

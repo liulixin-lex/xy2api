@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { reactive } from 'vue'
+import { nextTick, reactive, ref } from 'vue'
 import SupportWidget from '../SupportWidget.vue'
 import { BUBBLE_STORAGE_KEY } from '../snapBubble'
 import { SUPPORT_WIDGET_REOPEN_KEY } from '../supportWidgetVisibility'
@@ -13,7 +13,7 @@ const state = vi.hoisted(() => ({
   auth: null as null | { isAuthenticated: boolean; canAccessAdmin: boolean; user: { id: number } | null },
   app: null as null | { contactInfo: string; sidebarCollapsed: boolean; sidebarLayouts: number; cachedPublicSettings: Record<string, unknown> },
   route: { fullPath: '/pricing?plan=pro', meta: { requiresAuth: false } as Record<string, unknown> },
-  motion: { value: false },
+  motion: { value: false } as { value: boolean },
 }))
 vi.mock('vue-i18n', async () => ({
   ...(await vi.importActual<typeof import('vue-i18n')>('vue-i18n')),
@@ -25,7 +25,7 @@ vi.mock('vue-router', async () => ({
 }))
 vi.mock('@/api/supportChat', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/api/supportChat')>()), ...api }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => state.auth }))
-// Read once when the bubble mounts; set it before mounting.
+// A real ref, reset in beforeEach, so components that read it reactively follow changes.
 vi.mock('@/composables/useMotionPreference', () => ({ useMotionPreference: () => ({ reducedMotion: state.motion }) }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => state.app }))
 
@@ -57,7 +57,7 @@ beforeEach(() => {
   document.body.className = ''
   setAuth(false)
   state.route.meta = { requiresAuth: false }
-  state.motion.value = false
+  state.motion = ref(false)
   state.app = reactive({ contactInfo: '微信：xy2-support\nQQ 群：123', sidebarCollapsed: false, sidebarLayouts: 0, cachedPublicSettings: { support_chat_enabled: true, support_ticket_enabled: true } })
   api.getMyChat.mockResolvedValue({ chat: null, unread_count: 1, ticket_unread_count: 2, welcome: 'hi' })
 })
@@ -133,9 +133,11 @@ describe('support widget for users', () => {
     expect(wrapper.get('[data-testid="support-bubble-mark"]').text()).toContain('GG')
     expect(wrapper.get('[data-testid="support-bubble-label"]').text()).toBe('supportChat.bubble.label')
     expect(wrapper.get('[data-testid="support-bubble-mark"]').attributes('aria-hidden')).toBe('true')
+    expect(wrapper.get('[data-testid="support-bubble-halo"]').attributes('aria-hidden')).toBe('true')
     expect(bubble.attributes('aria-expanded')).toBe('false')
     await bubble.trigger('click')
     expect(wrapper.find('[data-testid="support-bubble-mark"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="support-bubble-halo"]').exists()).toBe(false)
     expect(bubble.get('icon-stub').attributes('name')).toBe('x')
     expect(bubble.attributes('aria-expanded')).toBe('true')
     wrapper.unmount()
@@ -260,10 +262,24 @@ describe('support bubble drag', () => {
     wrapper.unmount()
   })
 
-  it('has no transition when reduced motion is on', () => {
+  it('has no transition and no spinning halo when reduced motion is on', () => {
     state.motion.value = true
     const wrapper = mountWidget()
     expect(wrapper.get('[data-testid="support-bubble"]').attributes('style')).toContain('transition: none')
+    expect(wrapper.find('[data-testid="support-bubble-halo"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="support-bubble-mark"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('drops and restores the halo when reduced motion is switched while the bubble is shown', async () => {
+    const wrapper = mountWidget()
+    expect(wrapper.find('[data-testid="support-bubble-halo"]').exists()).toBe(true)
+    state.motion.value = true
+    await nextTick()
+    expect(wrapper.find('[data-testid="support-bubble-halo"]').exists()).toBe(false)
+    state.motion.value = false
+    await nextTick()
+    expect(wrapper.find('[data-testid="support-bubble-halo"]').exists()).toBe(true)
     wrapper.unmount()
   })
 })
