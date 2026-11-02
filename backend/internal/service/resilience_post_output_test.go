@@ -198,7 +198,7 @@ func TestPostOutputFailureOpsMergeKeepsExistingCategoriesAndUsesConservativeFall
 		require.Equal(t, "earlier attempt", events[0].Message)
 	})
 
-	t.Run("later event is outside the confirmed failure", func(t *testing.T) {
+	t.Run("event after the fact still deduplicates", func(t *testing.T) {
 		c, ctx, st := newPostOutputOpsTestContext(t, OpenAIClientTransportHTTP)
 		RecordOpsUpstreamSendBoundary(ctx, account.ID)
 		st.RecordPostOutputFailureFact(resilience.PostOutputFailureFact{
@@ -212,10 +212,8 @@ func TestPostOutputFailureOpsMergeKeepsExistingCategoriesAndUsesConservativeFall
 		MergeOpsPostOutputFailureEvents(c)
 
 		events := opsUpstreamEventsForTest(t, c)
-		require.Len(t, events, 2)
+		require.Len(t, events, 1)
 		require.Equal(t, "http_error", events[0].Kind)
-		require.Equal(t, "stream_failed", events[1].Kind)
-		require.Equal(t, "stream_read_error", events[1].Reason)
 	})
 
 }

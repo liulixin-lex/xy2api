@@ -118,10 +118,6 @@ type PostOutputFailureFact struct {
 	Message         string
 	SendBoundary    uint64
 	HasSendBoundary bool
-	// ThroughEventSequence is the append-only event sequence at the moment
-	// this fact was recorded. Events appended by later attempts are outside
-	// this failure's deduplication interval.
-	ThroughEventSequence uint64
 }
 
 // preludeTrace is storage shared with prelude_trace.go. Its accessors live
@@ -362,7 +358,6 @@ func (s *RequestState) RecordPostOutputFailureFact(fact PostOutputFailureFact) {
 		fact.SendBoundary = boundary
 		fact.HasSendBoundary = true
 	}
-	fact.ThroughEventSequence = s.opsUpstreamEventSequence
 	if fact.ProxyID != nil {
 		proxyID := *fact.ProxyID
 		fact.ProxyID = &proxyID

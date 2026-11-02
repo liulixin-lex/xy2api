@@ -618,11 +618,7 @@ func postOutputAttemptHasEvent(events []*OpsUpstreamErrorEvent, fact resilience.
 		}
 		return false
 	}
-	through := fact.ThroughEventSequence
-	if through < fact.SendBoundary || through > sequence {
-		return false
-	}
-	for i := fact.SendBoundary; i < through; i++ {
+	for i := fact.SendBoundary; i < sequence; i++ {
 		if i >= uint64(len(events)) {
 			break
 		}
