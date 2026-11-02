@@ -3355,10 +3355,6 @@
       "value": "service.MarkOpsUpstreamContentPolicy(c)"
     },
     {
-      "path": "backend/internal/handler/ops_error_logger.go",
-      "value": "if opsContentPolicyRefusal(c, rawErrType, code, message, status) {"
-    },
-    {
       "path": "backend/internal/service/openai_gateway_chat_completions.go",
       "value": "normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, respBody)"
     },
@@ -3485,6 +3481,22 @@
     {
       "path": "backend/internal/service/ops_upstream_context.go",
       "value": "func MarkOpsUpstreamContentPolicy(c *gin.Context) {"
+    },
+    {
+      "path": "backend/internal/handler/ops_error_logger.go",
+      "value": "isBusinessLimited = isBusinessLimited || opsContentPolicyRefusal(c, parsed.ErrorType, parsed.Code, parsed.Message, status)"
+    },
+    {
+      "path": "backend/internal/handler/ops_error_logger.go",
+      "value": "isBusinessLimited = isBusinessLimited || opsContentPolicyRefusal(c, streamErr.ErrType, streamErr.Code, streamErr.Message, classifyStatus)"
+    },
+    {
+      "path": "backend/internal/handler/ops_error_logger.go",
+      "value": "entry.IsBusinessLimited = entry.IsBusinessLimited || opsContentPolicyRefusal(nil, streamErr.ErrType, streamErr.Code, message, status)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "if statusCode != http.StatusTooManyRequests && openAIStreamBalanceFailure(payload) {"
     }
   ],
   "forbidden_module_paths": [
@@ -4950,6 +4962,11 @@
       "id": "xy-error-recovery-routing",
       "path": "backend/internal/service/openai_alpha_search_test.go",
       "literal": "func TestIsOpenAIAlphaSearchEndpointUnsupported"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/ops_error_logger_test.go",
+      "literal": "func TestOpsErrorLoggerWebSocketTurnContentPolicyUsesTurnSnapshot"
     },
     {
       "id": "xy-upstream-balance",
