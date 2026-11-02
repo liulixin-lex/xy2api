@@ -45,6 +45,12 @@ func TestOpenAIStreamSubscriptionSharingPausesAccount(t *testing.T) {
 	require.Equal(t, http.StatusBadGateway, status)
 	require.True(t, disabled)
 	requireBalancePause(t, repo, 5*time.Minute)
+
+	status429Payload := []byte(`{"type":"response.failed","status":429,"response":{"status":"failed","error":{"code":"subscription_sharing_usage_limit_exceeded","type":"invalid_request_error","message":"The ChatGPT user has reached their Subscription Sharing usage limit."}}}`)
+	status, disabled = svc.handleOpenAIStreamTerminalAccountSideEffectsWithContext(context.Background(), nil, account, status429Payload, extractOpenAISSEErrorMessage(status429Payload), http.Header{"x-codex-primary-reset-at": []string{"2099-01-01T00:00:00Z"}}, "gpt-test")
+	require.Equal(t, http.StatusTooManyRequests, status)
+	require.True(t, disabled)
+	requireBalancePause(t, repo, 5*time.Minute)
 }
 
 func TestOpenAIStreamSubscriptionSharingAfterOutputOnlyPauses(t *testing.T) {

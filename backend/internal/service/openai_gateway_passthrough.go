@@ -1755,7 +1755,7 @@ func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffectsWithC
 	canonicalModel ...string,
 ) (int, bool) {
 	statusCode := openAIStreamFailureStatus(payload, message)
-	if openAIStreamBalanceFailure(payload) {
+	if statusCode != http.StatusTooManyRequests && openAIStreamBalanceFailure(payload) {
 		model := firstNonEmpty(canonicalModel...)
 		if model == "" {
 			model = firstNonEmpty(gjson.GetBytes(payload, "model").String(), gjson.GetBytes(payload, "response.model").String())
