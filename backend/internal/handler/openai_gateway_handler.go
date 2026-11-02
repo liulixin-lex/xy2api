@@ -1776,6 +1776,9 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 		statusCode = failoverErr.StatusCode
 	}
 	status, errType, errMsg := h.mapUpstreamError(statusCode)
+	if service.IsGrokTemporaryUnavailable422Failover(failoverErr) {
+		status, errType, errMsg = http.StatusServiceUnavailable, "api_error", "Upstream service temporarily unavailable"
+	}
 	write(status, errType, errMsg)
 }
 

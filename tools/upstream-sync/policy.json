@@ -3527,6 +3527,10 @@
       "value": "if service.IsGrokTemporaryUnavailable422Failover(failoverErr) {\n\t\tstatus, errType, errMsg = http.StatusServiceUnavailable, \"upstream_error\", \"Upstream service temporarily unavailable\""
     },
     {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "if service.IsGrokTemporaryUnavailable422Failover(failoverErr) {\n\t\tstatus, errType, errMsg = http.StatusServiceUnavailable, \"api_error\", \"Upstream service temporarily unavailable\""
+    },
+    {
       "path": "backend/internal/service/openai_gateway_grok_chat_bridge.go",
       "value": "return s.handleChatCompletionsErrorResponseAfterAccountHandling(resp, c, account, billingModel)"
     },

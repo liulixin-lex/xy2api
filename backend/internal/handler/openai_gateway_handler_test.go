@@ -363,7 +363,7 @@ func TestOpenAIAlphaSearchE5001ExhaustionReturnsGatewayFailure(t *testing.T) {
 
 	(&OpenAIGatewayHandler{}).handleFailoverExhausted(c, failure, false)
 
-	require.Contains(t, []int{http.StatusBadGateway, http.StatusServiceUnavailable}, recorder.Code)
+	require.Equal(t, http.StatusBadGateway, recorder.Code)
 	value, ok := c.Get(service.OpsUpstreamStatusCodeKey)
 	require.True(t, ok)
 	require.Equal(t, http.StatusBadRequest, value)

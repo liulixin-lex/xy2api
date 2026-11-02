@@ -410,36 +410,50 @@ func (u *grokCredentialHandlerUpstream) requests() ([]string, []string) {
 func TestGrokTemporaryUnavailable422ExhaustionReturns503AndKeepsAttempt(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	withHandlerResilience(t, nil)
-	h, repo, upstream, router, cleanup := newGrokCredentialFailoverHandler(t, "temporary_unavailable_422")
-	defer cleanup()
-	for i := range repo.accounts {
-		repo.accounts[i].Type = service.AccountTypeAPIKey
-		repo.accounts[i].Credentials = map[string]any{"api_key": "test-key", "base_url": "https://upstream.example"}
-	}
-	upstream.failureStatus = map[int64]int{801: http.StatusUnprocessableEntity, 802: http.StatusUnprocessableEntity}
-	upstream.failureBody = `{"error":{"type":"api_error","message":"Service temporarily unavailable"}}`
-	var attempts []*service.OpsUpstreamErrorEvent
-	router.POST(EndpointChatCompletions, func(c *gin.Context) {
-		h.ChatCompletions(c)
-		raw, ok := c.Get(service.OpsUpstreamErrorsKey)
-		require.True(t, ok)
-		attempts = raw.([]*service.OpsUpstreamErrorEvent)
-		require.Equal(t, http.StatusUnprocessableEntity, c.GetInt(service.OpsUpstreamStatusCodeKey))
-	})
-	recorder := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, EndpointChatCompletions,
-		strings.NewReader(`{"model":"grok-4.5","messages":[{"role":"user","content":"hello"}],"stream":false}`))
-	req.Header.Set("Content-Type", "application/json")
+	for _, endpoint := range []string{EndpointChatCompletions, EndpointMessages} {
+		t.Run(endpoint, func(t *testing.T) {
+			h, repo, upstream, router, cleanup := newGrokCredentialFailoverHandler(t, "temporary_unavailable_422")
+			defer cleanup()
+			for i := range repo.accounts {
+				repo.accounts[i].Type = service.AccountTypeAPIKey
+				repo.accounts[i].Credentials = map[string]any{"api_key": "test-key", "base_url": "https://upstream.example"}
+			}
+			upstream.failureStatus = map[int64]int{801: http.StatusUnprocessableEntity, 802: http.StatusUnprocessableEntity}
+			upstream.failureBody = `{"error":{"type":"api_error","message":"Service temporarily unavailable"}}`
+			var attempts []*service.OpsUpstreamErrorEvent
+			router.POST(endpoint, func(c *gin.Context) {
+				if endpoint == EndpointMessages {
+					h.Messages(c)
+				} else {
+					h.ChatCompletions(c)
+				}
+				raw, ok := c.Get(service.OpsUpstreamErrorsKey)
+				require.True(t, ok)
+				attempts = raw.([]*service.OpsUpstreamErrorEvent)
+				if endpoint == EndpointChatCompletions {
+					require.Equal(t, http.StatusUnprocessableEntity, c.GetInt(service.OpsUpstreamStatusCodeKey))
+				}
+			})
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, endpoint,
+				strings.NewReader(`{"model":"grok-4.5","max_tokens":32,"messages":[{"role":"user","content":"hello"}],"stream":false}`))
+			req.Header.Set("Content-Type", "application/json")
 
-	router.ServeHTTP(recorder, req)
+			router.ServeHTTP(recorder, req)
 
-	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
-	require.Equal(t, []int64{801, 802}, upstream.accountHits())
-	require.Len(t, attempts, 2)
-	for _, attempt := range attempts {
-		require.Equal(t, http.StatusUnprocessableEntity, attempt.UpstreamStatusCode)
-		require.Equal(t, "TRANSIENT", attempt.ResilienceCategory)
-		require.Equal(t, "failover", attempt.Kind)
+			require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+			if endpoint == EndpointMessages {
+				require.Contains(t, recorder.Body.String(), `"type":"api_error"`)
+				require.Contains(t, recorder.Body.String(), "Upstream service temporarily unavailable")
+			}
+			require.Equal(t, []int64{801, 802}, upstream.accountHits())
+			require.Len(t, attempts, 2)
+			for _, attempt := range attempts {
+				require.Equal(t, http.StatusUnprocessableEntity, attempt.UpstreamStatusCode)
+				require.Equal(t, "TRANSIENT", attempt.ResilienceCategory)
+				require.Equal(t, "failover", attempt.Kind)
+			}
+		})
 	}
 }
 
