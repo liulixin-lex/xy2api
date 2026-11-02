@@ -16,6 +16,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai_compat"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
 )
 
 // Forward forwards request to OpenAI API
@@ -774,6 +775,16 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 		}
 	}
+	markEncryptedLineage := func(src []byte) {
+		invalidDigests := collectOpenAIEncryptedContentDigestsRaw(src)
+		if len(invalidDigests) == 0 {
+			return
+		}
+		if lineageSessionHash == "" {
+			lineageSessionHash = s.GenerateSessionHash(c, lineageEntryBody)
+		}
+		s.markOpenAIWSInvalidEncryptedContentLineage(lineageGroupID, lineageSessionHash, invalidDigests)
+	}
 	imageBillingModel := ""
 	imageSizeTier := ""
 	imageInputSize := ""
@@ -1054,11 +1065,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if webSearchReplay.declaredUpFront() {
 		body, requestView, reqBody = webSearchBody, newOpenAIRequestView(webSearchBody), nil
 	}
-	httpInvalidEncryptedContentRetryTried := false
 	compactModelFallbackRetried := false
 	agentTaskRecoveryTried := false
 	rejectedFieldRetryState := openAIResponsesRejectedFieldRetryStateForRequest(c, body)
+	requestRepair := armOpenAIRequestRepair(c, account, rejectedFieldRetryState)
 	for {
+		requestRepair.setBody(body)
 		// Build upstream request
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 		var headerGuard *openAIFirstOutputHeaderGuard
@@ -1137,34 +1149,23 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			respBody = s.redactAgentIdentitySensitiveBody(ctx, account, respBody)
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
-			invalidEncryptedContentError := upstreamCode == "invalid_encrypted_content" ||
-				(upstreamCode == "thinking_signature_invalid" &&
-					strings.Contains(upstreamMsg, "The encrypted content") &&
-					strings.Contains(upstreamMsg, "could not be verified") &&
-					strings.Contains(upstreamMsg, "could not be decrypted or parsed"))
-			if !httpInvalidEncryptedContentRetryTried && resp.StatusCode == http.StatusBadRequest && invalidEncryptedContentError {
-				decoded, decodeErr := ensureReqBody()
-				if decodeErr != nil {
-					return nil, decodeErr
+			invalidEncryptedContentError := isOpenAIEncryptedContentRejectionPayload(respBody) || resilience.IsEncryptedContentRejection(upstreamCode, upstreamMsg)
+			if requestRepair != nil && !requestRepair.encryptedTried &&
+				(resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusBadGateway) &&
+				invalidEncryptedContentError {
+				nextBody, changed, repairErr := openAIEncryptedContentRepairBody(body, upstreamMsg)
+				if repairErr != nil {
+					return nil, fmt.Errorf("prepare invalid_encrypted_content retry body: %w", repairErr)
 				}
-				invalidDigests := collectOpenAIEncryptedContentDigestsRaw(lineageEntryBody)
-				if trimOpenAIEncryptedReasoningItems(decoded) {
-					body, err = marshalOpenAIUpstreamJSON(decoded)
-					if err != nil {
-						return nil, fmt.Errorf("serialize invalid_encrypted_content retry body: %w", err)
-					}
-					if len(invalidDigests) > 0 {
-						if lineageSessionHash == "" {
-							lineageSessionHash = s.GenerateSessionHash(c, lineageEntryBody)
-						}
-						s.markOpenAIWSInvalidEncryptedContentLineage(lineageGroupID, lineageSessionHash, invalidDigests)
-					}
-					httpInvalidEncryptedContentRetryTried = true
+				if changed && resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(account.ID, false, time.Now()) {
+					markEncryptedLineage(body)
+					body, requestView, reqBody = nextBody, newOpenAIRequestView(nextBody), nil
+					requestRepair.encryptedTried = true
 					rejectedFieldRetryState.remember(body)
-					logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying non-WSv2 request once after invalid_encrypted_content (account: %s)", account.Name)
+					logger.FromContext(ctx).Info("resilience.request_repair_replay",
+						zap.Int64("account_id", account.ID), zap.String("kind", resilience.ReasonEncryptedContent), zap.String("form", "http"))
 					continue
 				}
-				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Skip non-WSv2 invalid_encrypted_content retry because encrypted reasoning items are missing (account: %s)", account.Name)
 			}
 			if retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, respBody); retryErr != nil {
 				return nil, fmt.Errorf("normalize rejected Responses field retry body: %w", retryErr)
@@ -1263,6 +1264,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				if next, replayErr := s.openAIWebSearchReplayAfterSignal(ctx, c, account, webSearchReplay, body, resp, err); replayErr != nil {
 					return nil, replayErr
 				} else if next != nil {
+					body, requestView, reqBody = next, newOpenAIRequestView(next), nil
+					continue
+				}
+				if next, kind, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, resp, err); ok {
+					if kind == resilience.ReasonEncryptedContent {
+						markEncryptedLineage(body)
+					}
 					body, requestView, reqBody = next, newOpenAIRequestView(next), nil
 					continue
 				}

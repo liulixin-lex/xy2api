@@ -226,6 +226,43 @@ func TestClassifySpecScenarios(t *testing.T) {
 	}
 }
 
+func TestIsEncryptedContentRejection(t *testing.T) {
+	tests := []struct {
+		name, code, message string
+		want                bool
+	}{
+		{"invalid code", "invalid_encrypted_content", "", true},
+		{"context code", "encrypted_context_invalid", "", true},
+		{"hydration", "", "The encrypted content could not be verified because encrypted content hydration failed", true},
+		{"function output", "", "Encrypted function output content could not be decrypted or decoded", true},
+		{"continuation", "", "could not validate encrypted continuation context", true},
+		{"bare word", "", "encrypted payload rejected", false},
+		{"ordinary", "invalid_request_error", "bad request", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsEncryptedContentRejection(tc.code, tc.message); got != tc.want {
+				t.Fatalf("IsEncryptedContentRejection(%q, %q) = %v, want %v", tc.code, tc.message, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestClassifyEncryptedContentIsClientError(t *testing.T) {
+	for _, tc := range []Outcome{
+		{Source: SourceStreamEvent, StatusCode: 502, Code: "invalid_encrypted_content", Message: "neutral"},
+		{Source: SourceHTTP, StatusCode: 502, Message: "encrypted content hydration failed and could not be verified"},
+	} {
+		result := Classify(tc, nil)
+		if result.Category != CategoryClientError || result.Reason != ReasonEncryptedContent {
+			t.Fatalf("Classify(%+v) = %+v, want encrypted client error", tc, result)
+		}
+		if result.Category.SwitchAccount() || result.Category.AccountScoped() {
+			t.Fatalf("encrypted content category must not switch or scope to an account: %+v", result)
+		}
+	}
+}
+
 func TestIsModelUnsupportedResponseUsesRestrictedStructuredMessages(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

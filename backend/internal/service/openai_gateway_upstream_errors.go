@@ -267,6 +267,9 @@ func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(account *Acc
 	if isOpenAIContextWindowError(upstreamMsg, upstreamBody) {
 		return false
 	}
+	if isOpenAIEncryptedContentRejectionPayload(upstreamBody) || resilience.IsEncryptedContentRejection("", upstreamMsg) {
+		return false
+	}
 	if isOpenAIHTTPUpstreamAccessStateError(statusCode, upstreamMsg, upstreamBody) {
 		return true
 	}
@@ -618,6 +621,7 @@ func (s *OpenAIGatewayService) handleErrorResponseCore(
 			UpstreamStatusCode: resp.StatusCode,
 			UpstreamRequestID:  resp.Header.Get("x-request-id"),
 			Kind:               "failover",
+			ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, body, upstreamMsg),
 			Message:            upstreamMsg,
 			Detail:             upstreamDetail,
 		})
@@ -669,6 +673,7 @@ func (s *OpenAIGatewayService) handleErrorResponseCore(
 				UpstreamStatusCode: resp.StatusCode,
 				UpstreamRequestID:  resp.Header.Get("x-request-id"),
 				Kind:               "http_error",
+				ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, body, upstreamMsg),
 				Message:            upstreamMsg,
 				Detail:             upstreamDetail,
 			})
@@ -714,6 +719,7 @@ func (s *OpenAIGatewayService) handleErrorResponseCore(
 			UpstreamStatusCode: resp.StatusCode,
 			UpstreamRequestID:  resp.Header.Get("x-request-id"),
 			Kind:               kind,
+			ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, body, upstreamMsg),
 			Message:            upstreamMsg,
 			Detail:             upstreamDetail,
 		})
@@ -893,6 +899,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 			UpstreamStatusCode: resp.StatusCode,
 			UpstreamRequestID:  resp.Header.Get("x-request-id"),
 			Kind:               "http_error",
+			ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, body, upstreamMsg),
 			Message:            upstreamMsg,
 			Detail:             upstreamDetail,
 		})
@@ -926,6 +933,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 		UpstreamStatusCode: resp.StatusCode,
 		UpstreamRequestID:  resp.Header.Get("x-request-id"),
 		Kind:               kind,
+		ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, body, upstreamMsg),
 		Message:            upstreamMsg,
 		Detail:             upstreamDetail,
 	})

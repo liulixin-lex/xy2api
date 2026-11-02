@@ -1653,6 +1653,9 @@ func openAIStreamFailedEventShouldFailover(payload []byte, message string) bool 
 	if isOpenAIContextWindowError(message, payload) {
 		return false
 	}
+	if isOpenAIEncryptedContentRejectionPayload(payload) || resilience.IsEncryptedContentRejection("", message) {
+		return false
+	}
 	if openAIStreamBalanceFailure(payload) {
 		return true
 	}
@@ -1706,6 +1709,9 @@ func openAIStreamErrorEventShouldFailover(payload []byte, message string) bool {
 		return false
 	}
 	if isOpenAIContextWindowError(message, payload) {
+		return false
+	}
+	if isOpenAIEncryptedContentRejectionPayload(payload) || resilience.IsEncryptedContentRejection("", message) {
 		return false
 	}
 	if openAIStreamBalanceFailure(payload) {
@@ -1838,6 +1844,9 @@ func (s *OpenAIGatewayService) recordOpenAIStreamUpstreamError(
 			event.AccountID = account.ID
 			event.AccountName = account.Name
 		}
+		classifiedEvent := event
+		classifiedEvent.UpstreamResponseBody = string(payload)
+		event.ResilienceCategory = opsResilienceCategory(&classifiedEvent)
 		appendOpsUpstreamError(c, event)
 	}
 	return message

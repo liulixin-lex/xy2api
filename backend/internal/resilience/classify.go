@@ -87,10 +87,38 @@ func (r Result) StatusOnly() bool { return strings.HasPrefix(r.Reason, "status_"
 // content-safety refusal of the request.
 const ReasonContentPolicy = "content_policy"
 
+// ReasonEncryptedContent is the reason of a CLIENT_ERROR caused by upstream
+// rejecting encrypted request content it cannot decrypt or verify.
+const ReasonEncryptedContent = "encrypted_content"
+
 // ContentPolicy reports an upstream content-safety refusal: the request
 // content is refused, so the same request fails on this and every other
 // account, and the account is not at fault.
 func (r Result) ContentPolicy() bool { return r.Reason == ReasonContentPolicy }
+
+// IsEncryptedContentRejection reports an upstream refusal of encrypted
+// content it cannot decrypt or verify. Matching is intentionally narrow so a
+// bare mention of encryption in an unrelated error does not affect routing.
+func IsEncryptedContentRejection(code, message string) bool {
+	code = strings.ToLower(strings.TrimSpace(code))
+	if code == "invalid_encrypted_content" || code == "encrypted_context_invalid" {
+		return true
+	}
+	message = strings.ToLower(strings.TrimSpace(message))
+	if message == "" {
+		return false
+	}
+	if strings.Contains(message, "encrypted function output content could not be decrypted") {
+		return true
+	}
+	if strings.Contains(message, "could not validate encrypted continuation context") {
+		return true
+	}
+	return strings.Contains(message, "encrypted content") &&
+		(strings.Contains(message, "could not be verified") ||
+			strings.Contains(message, "could not be decrypted") ||
+			strings.Contains(message, "hydration failed"))
+}
 
 // Hard reports whether the category puts the account in a hard state.
 func (r Result) Hard() bool {
@@ -475,6 +503,9 @@ func classify(o Outcome, extraBalanceKeywords []string, decisionV2 bool) Result 
 	// streams).
 	if contentPolicyCode(code, typ, lowerBody) {
 		return Result{Category: CategoryClientError, Reason: ReasonContentPolicy}
+	}
+	if IsEncryptedContentRejection(code, text) {
+		return Result{Category: CategoryClientError, Reason: ReasonEncryptedContent}
 	}
 	if IsModelUnsupportedResponse(status, body) {
 		return Result{Category: CategoryModelUnsupported, Reason: "model_message"}
