@@ -632,27 +632,65 @@ export async function getBatchTodayStats(accountIds: number[]): Promise<BatchTod
   return data
 }
 
-/** 账号列表“状态”列的近期健康度；首字无样本时 first_token_avg_ms 为 null。 */
-export interface AccountRecentHealth {
-  first_token_avg_ms: number | null
-  first_token_samples: number
-  recent_errors: number
-  // 近 30 分钟三项 Token 之和，前端按 cacheReadRatio 算缓存读取占比
-  input_tokens: number
-  cache_creation_tokens: number
-  cache_read_tokens: number
-  cache_samples: number
+/** 失败：最近 200 次请求（限 60 分钟）里的供应商侧软失败尝试，口径同分组质量门槛。 */
+export interface AccountRecentFailureStats {
+  calls: number
+  failures: number
+  // Wilson 95% 区间，0–1
+  wilson_low: number
+  wilson_high: number
+  first_output_timeouts: number
+  stream_failures: number
+  other_failures: number
+  span_seconds: number
 }
+
+/** 首字：最近 50 个严格续轮流式请求（限 2 小时）的可见首字。 */
+export interface AccountRecentFirstOutputStats {
+  samples: number
+  p50_ms: number
+  p90_ms: number
+  // 可见首字 ≥10s 的占比，0–1
+  slow_share: number
+  span_seconds: number
+}
+
+/** 缓存：最近 50 个前后两轮提示都 ≥2048 Token 的严格续轮（限 2 小时），按本轮读取 ÷ 上一轮提示分四档。 */
+export interface AccountRecentCacheStats {
+  samples: number
+  // kept = mid + full
+  kept: number
+  zero: number
+  partial: number
+  mid: number
+  full: number
+  read_tokens: number
+  prompt_tokens: number
+  span_seconds: number
+}
+
+/** 账号列表“近期表现”列；某项没有样本时为 null，三项都没有时账号可能不在 stats 里。 */
+export interface AccountRecentHealth {
+  failure: AccountRecentFailureStats | null
+  first_output: AccountRecentFirstOutputStats | null
+  cache: AccountRecentCacheStats | null
+}
+
+/** 列表一侧的批量加载状态，不是接口字段。 */
+export type AccountRecentHealthLoadState = 'loading' | 'loaded' | 'failed'
 
 export interface BatchRecentHealthResponse {
   stats: Record<string, AccountRecentHealth>
-  first_token_window_seconds: number
-  errors_window_seconds: number
-  cache_window_seconds: number
+  failure_max_events: number
+  failure_max_age_seconds: number
+  sample_max: number
+  sample_max_age_seconds: number
+  min_display_samples: number
+  min_color_samples: number
 }
 
 /**
- * 批量获取账号近 3 分钟首字平均、近 10 分钟错误请求数（口径同“使用记录 → 错误请求”页）与近 30 分钟缓存 Token
+ * 批量获取账号近期表现：失败（最近 200 次 / 60 分钟）、续轮首字与缓存保持（最近 50 个 / 2 小时）
  * @param accountIds - 账号 ID 列表（最多 1000 个）
  */
 export async function getBatchRecentHealth(accountIds: number[]): Promise<BatchRecentHealthResponse> {

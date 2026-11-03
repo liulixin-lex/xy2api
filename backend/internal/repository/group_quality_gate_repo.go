@@ -172,7 +172,29 @@ func loadGroupQualityObservations(ctx context.Context, tx *sql.Tx, accountIDs []
 		return nil, time.Time{}, err
 	}
 	_ = rows.Close()
-	rows, err = tx.QueryContext(ctx, `
+	errorObservations, err := loadGroupQualityErrorObservations(ctx, tx, accountIDs, from, to)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	out = append(out, errorObservations...)
+	var observedAt time.Time
+	// A fresh error log must not hide stalled usage writes. Freshness is global,
+	// so an idle member does not make an otherwise healthy stream stale.
+	err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(created_at), $1) FROM usage_logs WHERE created_at < $1`, to.UTC()).Scan(&observedAt)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	return out, observedAt, nil
+}
+
+func loadGroupQualityErrorObservations(ctx context.Context, tx interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, accountIDs []int64, from, to time.Time) ([]service.GroupQualityObservation, error) {
+	if len(accountIDs) == 0 {
+		return nil, nil
+	}
+	out := make([]service.GroupQualityObservation, 0)
+	rows, err := tx.QueryContext(ctx, `
 		SELECT DISTINCT ON (COALESCE(e.request_id, ''), (ev->>'account_id')::bigint, COALESCE((ev->>'at_unix_ms')::bigint, (EXTRACT(EPOCH FROM e.created_at)*1000)::bigint))
 		       COALESCE(e.request_id, ''), COALESCE(e.client_request_id, ''), (ev->>'account_id')::bigint,
 		       to_timestamp(COALESCE((ev->>'at_unix_ms')::bigint, (EXTRACT(EPOCH FROM e.created_at)*1000)::bigint)/1000.0),
@@ -183,16 +205,15 @@ func loadGroupQualityObservations(ctx context.Context, tx *sql.Tx, accountIDs []
 		  AND jsonb_typeof(ev->'account_id')='number' AND (ev->>'account_id')::bigint = ANY($1)
 		ORDER BY COALESCE(e.request_id, ''), (ev->>'account_id')::bigint, COALESCE((ev->>'at_unix_ms')::bigint, (EXTRACT(EPOCH FROM e.created_at)*1000)::bigint), e.id`, pq.Array(accountIDs), from.UTC(), to.UTC())
 	if err != nil {
-		return nil, time.Time{}, err
+		return nil, err
 	}
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var o service.GroupQualityObservation
 		var clientRequestID string
 		if err := rows.Scan(&o.RequestID, &clientRequestID, &o.AccountID, &o.At, &o.Kind, &o.StatusCode, &o.Category, &o.Message); err != nil {
-			_ = rows.Close()
-			return nil, time.Time{}, err
+			return nil, err
 		}
-		// Match the usage_logs request ID of the same request.
 		o.RequestID = service.GroupQualityErrorRequestID(clientRequestID, o.RequestID)
 		o.SoftFailure = service.IsGroupQualitySoftFailure(o.Kind, o.StatusCode, o.Category, o.Message)
 		if o.SoftFailure {
@@ -200,16 +221,7 @@ func loadGroupQualityObservations(ctx context.Context, tx *sql.Tx, accountIDs []
 		}
 	}
 	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return nil, time.Time{}, err
+		return nil, err
 	}
-	_ = rows.Close()
-	var observedAt time.Time
-	// A fresh error log must not hide stalled usage writes. Freshness is global,
-	// so an idle member does not make an otherwise healthy stream stale.
-	err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(created_at), $1) FROM usage_logs WHERE created_at < $1`, to.UTC()).Scan(&observedAt)
-	if err != nil {
-		return nil, time.Time{}, err
-	}
-	return out, observedAt, nil
+	return out, nil
 }

@@ -76,7 +76,7 @@
 | 变更 | 内容 | 状态 |
 |---|---|---|
 | [`add-support-chat-widget-20261031`](../openspec/changes/add-support-chat-widget-20261031/) | 客户服务：悬浮在线客服气泡、会话与图片、客服收件箱与提醒，工单并入 | 随 0.5.0 发布（PR #181） |
-| [`gate-post-output-attempts-20261102`](../openspec/changes/gate-post-output-attempts-20261102/) | 门槛漏记补齐：HTTP 输出后由快层确认的断流与停滞补记为上游失败尝试，按发送边界去重，归因改为上游 | 随 0.5.1 发布（PR #188）；上线后只读验收见其 tasks 与 `GATEWAY_RESILIENCE.md` §4.11 |
+| [`gate-post-output-attempts-20261102`](../openspec/changes/gate-post-output-attempts-20261102/) | 门槛漏记补齐：HTTP 输出后由快层确认的断流、停滞与带内失败事件补记为上游失败尝试，按发送边界去重并沿直接登记分类 | 基础变更随 0.5.1 发布（PR #188）；§4 带内失败补漏待发布；上线后只读验收见其 tasks 与 `GATEWAY_RESILIENCE.md` §4.11 |
 | [`group-quality-gate-v2-20261102`](../openspec/changes/group-quality-gate-v2-20261102/) | 分组质量门槛第二版：按用户可见首字判定、两档排序与实时快档线、限时观察与恢复入口、门槛组慢号迁出 | 随 0.5.1 发布（PR #185）；上线 24 小时复核与可用账号数告警见其 tasks |
 | [`group-quality-gate-20261031`](../openspec/changes/group-quality-gate-20261031/) | 分组质量门槛、排序与满载借用、利润门实时成本、兜底改回按兜底组计费 | 随 0.4.16 发布；首字口径、档位、试用与门槛组迁移由 `group-quality-gate-v2-20261102` 修订 |
 | [`anthropic-cache-ttl-20261030`](../openspec/changes/anthropic-cache-ttl-20261030/) | Anthropic TTL、Key 四态、usage/计费/预留及旧策略退役 | 随 0.4.15 发布（PR #170）；生产未部署，真实供应商缓存收益未验证 |

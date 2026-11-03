@@ -62,6 +62,10 @@ const (
 // (see resilience.RequestState.ReportStreamFailure); later signals of the
 // same attempt are ignored.
 func noteResiliencePostOutputFailure(ctx context.Context, rl *RateLimitService, account *Account, attempt any, kind string) {
+	noteResiliencePostOutputFailureWithCategory(ctx, rl, account, attempt, kind, resilience.CategoryTransient)
+}
+
+func noteResiliencePostOutputFailureWithCategory(ctx context.Context, rl *RateLimitService, account *Account, attempt any, kind string, factCategory resilience.Category) {
 	if account == nil || !resilience.Current().FailureOn() {
 		return
 	}
@@ -70,8 +74,8 @@ func noteResiliencePostOutputFailure(ctx context.Context, rl *RateLimitService, 
 	if !st.ReportStreamFailure(account.ID, attempt) {
 		return
 	}
-	if kind == postOutputReadError || kind == postOutputNoTerminal {
-		recordPostOutputFailureFact(ctx, account, kind, resilience.CategoryTransient, time.Now())
+	if kind == postOutputEvent || kind == postOutputReadError || kind == postOutputNoTerminal {
+		recordPostOutputFailureFact(ctx, account, kind, factCategory, time.Now())
 	}
 	st.SessionFailure(ctx, account.ID, resilience.CategoryTransient)
 	// The 200 that carried the failure must not end the conversation's
@@ -143,7 +147,8 @@ func (s *OpenAIGatewayService) resilienceOpenAIFailedAfterOutput(ctx context.Con
 		(account.Platform == PlatformGrok && isGrokContentPolicyRejection(http.StatusForbidden, payload)) {
 		return
 	}
-	noteResiliencePostOutputFailure(ctx, s.rateLimitService, account, attempt, postOutputEvent)
+	_, category := openAIStreamFailureStatusAndCategory(postOutputEvent, payload, message)
+	noteResiliencePostOutputFailureWithCategory(ctx, s.rateLimitService, account, attempt, postOutputEvent, category)
 }
 
 // resilienceOpenAIWSFailedAfterOutput is resilienceOpenAIFailedAfterOutput
@@ -201,7 +206,7 @@ func (s *GatewayService) resilienceAnthropicFailedAfterOutput(ctx context.Contex
 	if !resiliencePostOutputCounts(res) {
 		return
 	}
-	noteResiliencePostOutputFailure(ctx, s.rateLimitService, account, resp, postOutputEvent)
+	noteResiliencePostOutputFailureWithCategory(ctx, s.rateLimitService, account, resp, postOutputEvent, res.Category)
 }
 
 // postOutputTracker keeps the recent failures after output per account
