@@ -3601,7 +3601,11 @@
     },
     {
       "path": "backend/internal/service/gateway_scheduling.go",
-      "value": "s.partitionAnthropicLatencyHeldLoad(candidates, latencyModel)"
+      "value": "routingAvailable = s.partitionAnthropicLatencyHeldLoad(routingAvailable, latencyModel)"
+    },
+    {
+      "path": "backend/internal/service/gateway_scheduling.go",
+      "value": "candidates = s.partitionAnthropicLatencyHeldAccounts(candidates, latencyModel)"
     },
     {
       "path": "backend/internal/service/gateway_scheduling.go",
