@@ -97,8 +97,9 @@ func TestAnthropicLatencyStaleReaderPreservesNewGeneration(t *testing.T) {
 
 	// Reproduce a reader that passed its first generation checks before the
 	// complete off/on publication, while the service reset marker still says N.
-	staleSnapshot := svc.anthropicLatencyHoldSnapshotForGeneration(account, "model", now, staleGeneration)
-	require.False(t, staleSnapshot.Held, "a reader that crosses disable/re-enable must not return the old hold")
+	state, active := svc.anthropicLatencyStateForGeneration(staleGeneration)
+	staleHeld := active && state.snapshot(account.ID, "model", now).Held
+	require.False(t, staleHeld, "a reader that crosses disable/re-enable must not return the old hold")
 	require.Equal(t, staleGeneration, svc.anthropicLatencyHoldReset.Load(), "the stale fast path must not reset state")
 
 	// Initialize the new generation and accumulate both hold and cooldown state.
@@ -109,7 +110,7 @@ func TestAnthropicLatencyStaleReaderPreservesNewGeneration(t *testing.T) {
 
 	// A reader carries N across the complete off/on publication while the
 	// service state itself is still at N. The stale snapshot must be rejected.
-	staleSnapshot = svc.anthropicLatencyHoldSnapshotForGeneration(account, "model", now, staleGeneration)
+	staleSnapshot := svc.anthropicLatencyHoldSnapshotForGeneration(account, "model", now, staleGeneration)
 	require.False(t, staleSnapshot.Held, "a result read under a stale generation must be rejected")
 	require.Equal(t, currentGeneration, svc.anthropicLatencyHoldReset.Load(), "a stale result read must not roll/reset the service generation")
 	require.True(t, svc.anthropicLatencyHoldSnapshot(account, "model", now).Held, "new-generation hold must survive the stale reader")
