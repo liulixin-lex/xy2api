@@ -92,20 +92,28 @@ func TestAnthropicLatencyStaleReaderPreservesNewGeneration(t *testing.T) {
 	off.AnthropicLatencyHold.Enabled = false
 	resilience.Publish(off)
 	resilience.Publish(on)
-	anthropicTestSamples(svc, account, "model", 11*time.Second, 5, now)
-	svc.noteAnthropicStickyMigration(probeTestGroupID, "sess", now)
 	currentGeneration := resilience.AnthropicLatencyHoldGeneration()
 	require.Greater(t, currentGeneration, staleGeneration)
 
-	// The reader observed N before waiting for a writer that reached N+1.
-	state, active := svc.anthropicLatencyStateForGeneration(staleGeneration)
-	require.True(t, active)
-	require.NotNil(t, state)
-	require.Equal(t, currentGeneration, svc.anthropicLatencyHoldReset.Load())
-	require.True(t, svc.anthropicStickyMigrationCoolingDown(probeTestGroupID, "sess", now))
+	// Reproduce a reader that passed its first generation checks before the
+	// complete off/on publication, while the service reset marker still says N.
+	staleSnapshot := svc.anthropicLatencyHoldSnapshotForGeneration(account, "model", now, staleGeneration)
+	require.False(t, staleSnapshot.Held, "a reader that crosses disable/re-enable must not return the old hold")
+	require.Equal(t, staleGeneration, svc.anthropicLatencyHoldReset.Load(), "the stale fast path must not reset state")
+
+	// Initialize the new generation and accumulate both hold and cooldown state.
 	require.False(t, svc.anthropicLatencyHoldSnapshot(account, "model", now).Held)
-	anthropicTestSamples(svc, account, "model", 11*time.Second, 1, now)
-	require.True(t, svc.anthropicLatencyHoldSnapshot(account, "model", now).Held, "new-generation samples must survive the stale reader")
+	anthropicTestSamples(svc, account, "model", 11*time.Second, 6, now)
+	svc.noteAnthropicStickyMigration(probeTestGroupID, "sess", now)
+	require.True(t, svc.anthropicLatencyHoldSnapshot(account, "model", now).Held)
+
+	// A reader carries N across the complete off/on publication while the
+	// service state itself is still at N. The stale snapshot must be rejected.
+	staleSnapshot = svc.anthropicLatencyHoldSnapshotForGeneration(account, "model", now, staleGeneration)
+	require.False(t, staleSnapshot.Held, "a result read under a stale generation must be rejected")
+	require.Equal(t, currentGeneration, svc.anthropicLatencyHoldReset.Load(), "a stale result read must not roll/reset the service generation")
+	require.True(t, svc.anthropicLatencyHoldSnapshot(account, "model", now).Held, "new-generation hold must survive the stale reader")
+	require.True(t, svc.anthropicStickyMigrationCoolingDown(probeTestGroupID, "sess", now), "new-generation cooldown must survive the stale reader")
 }
 
 func TestAnthropicLatencyMigrationCooldownCapacity(t *testing.T) {
