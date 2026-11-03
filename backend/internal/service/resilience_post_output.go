@@ -70,7 +70,7 @@ func noteResiliencePostOutputFailure(ctx context.Context, rl *RateLimitService, 
 	if !st.ReportStreamFailure(account.ID, attempt) {
 		return
 	}
-	if kind == postOutputReadError || kind == postOutputNoTerminal {
+	if kind == postOutputEvent || kind == postOutputReadError || kind == postOutputNoTerminal {
 		recordPostOutputFailureFact(ctx, account, kind, resilience.CategoryTransient, time.Now())
 	}
 	st.SessionFailure(ctx, account.ID, resilience.CategoryTransient)

@@ -4,12 +4,22 @@
 
 ### Requirement: 确认后的 HTTP 失败补记
 
-系统 MUST 仅为已向客户端输出可见内容、且快层实际计入账号失败的 HTTP 尝试补记缺失的上游事件。读流出错、缺终态分别使用 `stream_read_error`、`missing_terminal` 和 `TRANSIENT`；出字后停滞使用 `stall` 和 `STALL`。开场元数据和心跳不算可见内容。客户端取消或上下文结束若先于快层确认，及请求级拒绝、出字前停滞或快层未计入的事件 MUST NOT 补记；快层确认失败后客户端才取消（最终响应仍可能为 HTTP 200）时 MUST 照常补记。
+系统 MUST 仅为已向客户端输出可见内容、且快层实际计入账号失败的 HTTP 尝试补记缺失的上游事件。读流出错、缺终态、带内失败事件分别使用 `stream_read_error`、`missing_terminal`、`stream_failed`，均为 `TRANSIENT`；出字后停滞使用 `stall` 和 `STALL`。开场元数据和心跳不算可见内容。客户端取消或上下文结束若先于快层确认，及请求级拒绝、出字前停滞或快层未计入的事件 MUST NOT 补记；快层确认失败后客户端才取消（最终响应仍可能为 HTTP 200）时 MUST 照常补记。
 
 #### Scenario: 输出后读流中断
 
 - **WHEN** HTTP 流送出内容后读流出错，快层确认账号失败，且本次发送后没有同账号事件
 - **THEN** 运维记录包含一条 `stream_failed` 尝试，原因为 `stream_read_error`，类别为 `TRANSIENT`，带真实失败时刻和非空安全消息，不虚构上游状态。
+
+#### Scenario: 输出后带内失败事件
+
+- **WHEN** HTTP 流送出内容后收到带内失败事件，快层确认账号失败，且本次发送后没有同账号事件
+- **THEN** 运维记录包含一条 `stream_failed` 尝试，原因为 `stream_failed`，类别为 `TRANSIENT`，消息为安全的带内失败提示，不含上游原文。
+
+#### Scenario: 带内失败已有直接登记
+
+- **WHEN** 输出后带内失败已直接登记同账号事件（例如 `response.failed`），之后在写运维记录前合并失败事实
+- **THEN** 按发送边界去重，保留直接登记的事件，不追加第二条。
 
 #### Scenario: 同次尝试已有分类
 

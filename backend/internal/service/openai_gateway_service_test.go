@@ -2131,6 +2131,60 @@ func TestOpenAIStreamingResponseFailedAfterOutputSanitizesVerboseResponseForClie
 	require.NotContains(t, body, `"usage"`)
 }
 
+func TestOpenAIStreamingInBandFailuresCreateOrReuseOpsAttempt(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	originalSettings := *resilience.Current()
+	resilience.Publish(resilience.Defaults())
+	t.Cleanup(func() { resilience.Publish(originalSettings) })
+
+	tests := []struct {
+		name        string
+		passthrough bool
+		accountType string
+		terminal    string
+		wantReason  string
+	}{
+		{name: "native oauth bare error at eof", accountType: AccountTypeOAuth, wantReason: postOutputEvent},
+		{name: "native api key bare error at eof", accountType: AccountTypeAPIKey, wantReason: postOutputEvent},
+		{name: "passthrough oauth bare error at eof", passthrough: true, accountType: AccountTypeOAuth, wantReason: postOutputEvent},
+		{name: "native direct response.failed after bare error is not duplicated", accountType: AccountTypeOAuth, terminal: "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_failed\",\"status\":\"failed\",\"error\":{\"code\":\"server_error\",\"message\":\"temporary upstream failure\"}}}\n\n"},
+		{name: "passthrough direct response.failed after bare error is not duplicated", passthrough: true, accountType: AccountTypeOAuth, terminal: "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_failed\",\"status\":\"failed\",\"error\":{\"code\":\"server_error\",\"message\":\"temporary upstream failure\"}}}\n\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			account := &Account{ID: 630, Name: "test-account", Platform: PlatformOpenAI, Type: tt.accountType}
+			c, ctx, _ := newPostOutputOpsTestContext(t, OpenAIClientTransportHTTP)
+			RecordOpsUpstreamSendBoundary(ctx, account.ID)
+			service := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}}
+			body := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n" +
+				"event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"server_error\",\"code\":\"server_error\",\"message\":\"temporary upstream failure\"}}\n\n" + tt.terminal
+			response := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}
+			if tt.passthrough {
+				_, err := service.handleStreamingResponsePassthrough(ctx, response, c, account, time.Now(), "model", "model")
+				require.Error(t, err)
+			} else {
+				_, err := service.handleStreamingResponse(ctx, response, c, account, time.Now(), "model", "model")
+				require.Error(t, err)
+			}
+			require.True(t, c.Writer.Written(), "the stream should have delivered output")
+			MergeOpsPostOutputFailureEvents(c)
+
+			events := opsUpstreamEventsForTest(t, c)
+			require.Len(t, events, 1)
+			require.Equal(t, account.ID, events[0].AccountID)
+			require.Equal(t, "stream_failed", events[0].Kind)
+			require.Equal(t, string(resilience.CategoryTransient), events[0].ResilienceCategory)
+			if tt.wantReason != "" {
+				require.Equal(t, tt.wantReason, events[0].Reason)
+				require.Equal(t, "upstream reported a failure after output", events[0].Message)
+			} else {
+				require.NotEqual(t, "upstream reported a failure after output", events[0].Message, "the directly registered event should win")
+			}
+		})
+	}
+}
+
 func TestOpenAIStreamingContextWindowResponseFailedBeforeOutputPassesThrough(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{

@@ -6249,6 +6249,16 @@
     {
       "id": "xy-recovery-observability",
       "path": "backend/internal/service/resilience_post_output_test.go",
+      "literal": "func TestPostOutputFailureAddsOneOpsAttemptForInBandEvent"
+    },
+    {
+      "id": "xy-recovery-observability",
+      "path": "backend/internal/service/openai_gateway_service_test.go",
+      "literal": "func TestOpenAIStreamingInBandFailuresCreateOrReuseOpsAttempt"
+    },
+    {
+      "id": "xy-recovery-observability",
+      "path": "backend/internal/service/resilience_post_output_test.go",
       "literal": "func TestPostOutputStallAddsOpsAttemptOnlyAfterVisibleOutput"
     },
     {
