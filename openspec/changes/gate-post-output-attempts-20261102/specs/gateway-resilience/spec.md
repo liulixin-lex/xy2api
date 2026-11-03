@@ -4,7 +4,7 @@
 
 ### Requirement: 确认后的 HTTP 失败补记
 
-系统 MUST 仅为已向客户端输出可见内容、且快层实际计入账号失败的 HTTP 尝试补记缺失的上游事件。读流出错、缺终态分别使用 `stream_read_error`、`missing_terminal` 和 `TRANSIENT`；出字后停滞使用 `stall` 和 `STALL`；带内失败事件使用 `stream_failed`，类别 MUST 与同载荷直接登记采用相同的状态及类别规则，`RATE_LIMIT`、`CAPACITY_SHED` 等非软失败类别 MUST NOT 计入门槛或份额软失败。OpenAI 快层的会话失败、冷却与失败计数仍使用 `TRANSIENT`。开场元数据和心跳不算可见内容。对读流出错与缺终态，客户端取消或上下文结束若先于快层确认，则 MUST NOT 补记；客户端离开后若上游仍在读取并实际送达带内失败事件，MUST 照常补记，与直接登记的 `response.failed` 一致。请求级拒绝、出字前停滞或快层未计入的事件 MUST NOT 补记。
+系统 MUST 仅为已向客户端输出可见内容、且快层实际计入账号失败的 HTTP 尝试补记缺失的上游事件。读流出错、缺终态分别使用 `stream_read_error`、`missing_terminal` 和 `TRANSIENT`；出字后停滞使用 `stall` 和 `STALL`；带内失败事件使用 `stream_failed`，类别 MUST 与同载荷直接登记采用相同的状态及类别规则，`RATE_LIMIT`、`CAPACITY_SHED` 等非软失败类别 MUST NOT 计入门槛或份额软失败。OpenAI 快层的会话失败、冷却与失败计数仍使用 `TRANSIENT`。开场元数据和心跳不算可见内容。对读流出错、缺终态与停滞，客户端取消或上下文结束若先于快层确认，则 MUST NOT 补记；快层确认失败后客户端才取消（最终响应仍可能为 HTTP 200）时 MUST 照常补记；客户端离开后若上游仍在读取并实际送达带内失败事件，MUST 照常补记，与直接登记的 `response.failed` 一致。请求级拒绝、出字前停滞或快层未计入的事件 MUST NOT 补记。
 
 #### Scenario: 输出后读流中断
 
