@@ -119,7 +119,8 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		}
 
 		resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{
-			AccountID: account.ID, Model: input.OriginalModel, AttemptStart: time.Now(), Stream: input.RequestStream, BodyBytes: len(wireBody),
+			AccountID: account.ID, Model: openAIAccountModelTransientModel(input.RequestModel), AttemptStart: time.Now(),
+			Warm: anthropicAttemptWarmFromContext(ctx) && attempt == 1, Stream: input.RequestStream, BodyBytes: len(wireBody),
 		})
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 		if err != nil {

@@ -147,6 +147,7 @@ let disposed = false
 const sections: SectionDef[] = [
   { key: 'session', get: (s) => s.session.enabled, set: (s, v) => { s.session.enabled = v } },
   { key: 'lastResort', get: (s) => s.last_resort.enabled, set: (s, v) => { s.last_resort.enabled = v } },
+  { key: 'anthropicLatencyHold', get: (s) => s.anthropic_latency_hold.enabled, set: (s, v) => { s.anthropic_latency_hold.enabled = v } },
   { key: 'balance', get: (s) => s.balance.enabled, set: (s, v) => { s.balance.enabled = v } },
   { key: 'budget', get: (s) => s.budget.enabled, set: (s, v) => { s.budget.enabled = v } },
   { key: 'failure', get: (s) => s.failure.decision_v2, set: (s, v) => { s.failure.decision_v2 = v } },
@@ -210,7 +211,7 @@ function isSettings(value: unknown): value is Settings {
   if (!value || typeof value !== 'object') return false
   const s = value as Partial<Settings>
   return typeof s.enabled === 'boolean' && !!s.budget && !!s.keepalive && !!s.errors && !!s.disconnect &&
-    !!s.fallback_group && !!s.reservation && !!s.session && !!s.last_resort && !!s.balance && !!s.stall &&
+    !!s.fallback_group && !!s.reservation && !!s.session && !!s.last_resort && !!s.anthropic_latency_hold && !!s.balance && !!s.stall &&
     !!s.failure && !!s.stream && !!s.capability
 }
 

@@ -16,15 +16,18 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/claude"
 	"github.com/liulixin-lex/xy2api/internal/pkg/tlsfingerprint"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
 
 type anthropicHTTPUpstreamRecorder struct {
-	lastReq  *http.Request
-	lastBody []byte
-	resp     *http.Response
-	err      error
+	lastReq   *http.Request
+	lastBody  []byte
+	resp      *http.Response
+	responses []*http.Response
+	profiles  []resilience.AttemptProfile
+	err       error
 }
 
 func newAnthropicAPIKeyAccountForTest() *Account {
@@ -54,8 +57,18 @@ func (u *anthropicHTTPUpstreamRecorder) Do(req *http.Request, proxyURL string, a
 		_ = req.Body.Close()
 		req.Body = io.NopCloser(bytes.NewReader(b))
 	}
+	if req != nil {
+		if state := resilience.StateFrom(req.Context()); state != nil {
+			u.profiles = append(u.profiles, state.AttemptProfile())
+		}
+	}
 	if u.err != nil {
 		return nil, u.err
+	}
+	if len(u.responses) > 0 {
+		resp := u.responses[0]
+		u.responses = u.responses[1:]
+		return resp, nil
 	}
 	return u.resp, nil
 }
@@ -187,6 +200,62 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardStreamPreservesBodyAnd
 	require.NotContains(t, rec.Body.String(), `"cache_read_input_tokens":7`, "透传输出不应被网关改写")
 	require.Equal(t, 7, result.Usage.CacheReadInputTokens, "计费 usage 解析应保留 cached_tokens 兼容")
 	require.Empty(t, rec.Header().Get("Set-Cookie"), "响应头应经过安全过滤")
+}
+
+func TestGatewayService_AnthropicPassthroughAttemptProfileUsesMappedModelAndOnlyFirstRetryIsWarm(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name        string
+		passthrough bool
+	}{
+		{name: "passthrough", passthrough: true},
+		{name: "native", passthrough: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			body := []byte(`{"model":"model-alias","max_tokens":32,"stream":true,"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`)
+			parsed := &ParsedRequest{Body: NewRequestBodyRef(body), Model: "model-alias", Stream: true}
+			sse := strings.Join([]string{
+				`data: {"type":"message_start","message":{"id":"msg_test","type":"message","role":"assistant","content":[],"usage":{"input_tokens":1}}}`,
+				"",
+				`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+				"",
+				`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}`,
+				"",
+				`data: {"type":"content_block_stop","index":0}`,
+				"",
+				`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}`,
+				"",
+				`data: {"type":"message_stop"}`,
+				"", "",
+			}, "\n")
+			upstream := &anthropicHTTPUpstreamRecorder{responses: []*http.Response{
+				{StatusCode: 529, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"type":"overloaded_error","message":"retry"}}`))},
+				{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(sse))},
+			}}
+			cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+			svc := &GatewayService{cfg: cfg, responseHeaderFilter: compileResponseHeaderFilter(cfg), httpUpstream: upstream,
+				rateLimitService: &RateLimitService{}, deferredService: &DeferredService{}}
+			account := newAnthropicAPIKeyAccountForTest()
+			account.Extra["anthropic_passthrough"] = tc.passthrough
+			account.Credentials["model_mapping"] = map[string]any{"model-alias": "mapped-model"}
+			account.Credentials["custom_error_codes_enabled"] = true
+			account.Credentials["custom_error_codes"] = []any{float64(400)}
+			state := resilience.NewRequestState()
+			ctx := resilience.WithRequestState(context.Background(), state)
+			ctx = WithAnthropicAttemptWarm(ctx, &AccountSelectionResult{stickySessionHit: true}, false)
+			result, err := svc.Forward(ctx, c, account, parsed)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Len(t, upstream.profiles, 2)
+			require.Equal(t, "mapped-model", upstream.profiles[0].Model)
+			require.True(t, upstream.profiles[0].Warm)
+			require.Equal(t, "mapped-model", upstream.profiles[1].Model)
+			require.False(t, upstream.profiles[1].Warm)
+		})
+	}
 }
 
 func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardCountTokensPreservesBody(t *testing.T) {

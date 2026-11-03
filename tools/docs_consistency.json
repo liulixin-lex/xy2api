@@ -127,9 +127,27 @@
       "sources": [
         "backend/internal/resilience/settings.go"
       ],
-      "pattern": "json:\"([a-z0-9_]+)\"",
+      "pattern": "json:\"((?!anthropic_latency_hold\")[a-z0-9_]+)\"",
       "match": "word",
       "doc": "openspec/changes/gateway-resilience-20261015/design.md"
+    },
+    {
+      "item": "Claude latency hold event",
+      "sources": [
+        "backend/internal/service/anthropic_account_latency_hold.go"
+      ],
+      "pattern": "slog\\.(?:Warn|Info)\\(\"(anthropic_account_latency_[a-z_]+)\"",
+      "match": "word",
+      "doc": "docs/GATEWAY_RESILIENCE.md"
+    },
+    {
+      "item": "Claude latency hold setting",
+      "sources": [
+        "backend/internal/resilience/settings.go"
+      ],
+      "pattern": "json:\"(anthropic_latency_hold)\"",
+      "match": "word",
+      "doc": "docs/GATEWAY_RESILIENCE.md"
     },
     {
       "item": "group quality gate setting",

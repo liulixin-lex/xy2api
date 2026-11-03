@@ -14,6 +14,7 @@ function settings(): Settings {
     failure: { transient_cooldown_seconds: 30, retry_after_cap_seconds: 30, balance_keywords_extra: [], decision_v2: true },
     session: { enabled: true, streak_threshold: 2, streak_window_seconds: 300, avoid_seconds: 600 },
     last_resort: { enabled: true },
+    anthropic_latency_hold: { enabled: true },
     balance: { enabled: true, pause_seconds: 300 },
     budget: {
       enabled: true, max_attempts: 4, pre_output_budget_seconds: 240,
@@ -88,6 +89,17 @@ describe('gateway resilience settings', () => {
     await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
     expect(mocks.save).toHaveBeenCalledTimes(1)
     expect(w.text()).toContain('admin.resilience.settings.invalidNumber')
+  })
+
+  it('saves the Claude latency hold switch from its own card', async () => {
+    const w = mountSettings(); await flushPromises()
+    const card = w.get('[data-testid="resilience-card-anthropicLatencyHold"]')
+    expect(card.text()).toContain('admin.resilience.settings.sections.anthropicLatencyHoldHint')
+    await card.get('[data-testid="resilience-section-anthropicLatencyHold"]').trigger('click')
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    const expected = settings()
+    expected.anthropic_latency_hold.enabled = false
+    expect(mocks.save).toHaveBeenCalledWith(expected)
   })
 
   it('disables the sections while the master switch is off', async () => {

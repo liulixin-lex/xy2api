@@ -27,6 +27,7 @@ func TestUpdateResilienceSettingsLeavesTheLiveSnapshotAlone(t *testing.T) {
 	orig := *resilience.Current()
 	t.Cleanup(func() { resilience.Publish(orig) })
 	start := resilience.Defaults()
+	start.AnthropicLatencyHold.Enabled = false
 	start.Budget.ModelOverrides = map[string]int{"gpt-a": 200, "gpt-b": 210}
 	resilience.Publish(start)
 	live := resilience.Current()
@@ -52,6 +53,7 @@ func TestUpdateResilienceSettingsLeavesTheLiveSnapshotAlone(t *testing.T) {
 	require.Equal(t, http.StatusOK, code)
 	require.Equal(t, map[string]int{"gpt-b": 215}, resilience.Current().Budget.ModelOverrides)
 	require.Equal(t, 100, resilience.Current().Stall.TextStallSeconds)
+	require.False(t, resilience.Current().AnthropicLatencyHold.Enabled)
 
 	// The balance section is the switch and the pause; fields of the
 	// removed balance states are unknown and rejected.

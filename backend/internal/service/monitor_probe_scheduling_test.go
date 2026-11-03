@@ -32,6 +32,7 @@ type probeSlotCache struct {
 	inFlight map[int64]int
 	waiting  map[int64]int
 	tried    map[int64]int
+	loadErr  error
 }
 
 func newProbeSlotCache(inFlight map[int64]int) *probeSlotCache {
@@ -66,6 +67,9 @@ func (c *probeSlotCache) GetAccountWaitingCount(_ context.Context, accountID int
 func (c *probeSlotCache) GetAccountsLoadBatch(_ context.Context, accounts []AccountWithConcurrency) (map[int64]*AccountLoadInfo, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.loadErr != nil {
+		return nil, c.loadErr
+	}
 	out := make(map[int64]*AccountLoadInfo, len(accounts))
 	for _, acc := range accounts {
 		current, waiting := c.inFlight[acc.ID], c.waiting[acc.ID]

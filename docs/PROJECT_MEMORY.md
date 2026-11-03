@@ -68,6 +68,28 @@
 
 ## 进行中的工作
 
+- **20261103-claude-ttft-routing**（2026-11-03 05:10 UTC 开始，Claude 主持）：Claude（Anthropic）30 天首字与组内路由只读分析（gpt-6-astra xhigh 反方三轮签字），用户批准后实施 Claude 判慢让位与粘性迁出。本地 `.work/tasks/20261103-claude-ttft-routing/`（不入库）：`FINAL.md` 是方案，§7 记实施期变更；`implementation/` 存简报、红队报告与缓存回放。
+  - 13:40 UTC 状态：PR #193 已开（分支 `feat/claude-latency-hold-20261103`，已同步 main `af1642909`），CI 通过后合并。发版与部署另行授权。
+  - 关键事实：
+    - Claude 选号不看延迟，顺序为门控 → 粘性 → 账号自身优先级 → 负载率 → LRU。分组成员上的优先级只影响列表顺序。
+    - 负载率按 load_factor 取整计算。load_factor 设得很大时，在途少于 10 恒为 0，会形成静态偏好。
+    - 页面首字从末次尝试开始计时，第一个内容 delta 就算（含空 delta 和签名 delta），已是最宽口径。端到端首输出另计。
+    - OpenAI 判慢规则回放到 Claude 能分辨慢时段：被判慢号页面黄约 48%，同期同池其他号约 11%。但这些请求 93–98% 属于热会话，收益要靠迁出。
+  - 实施要点（见 `GATEWAY_RESILIENCE.md` §4.5）：
+    - 样本：尝试开始 → 首个语义输出，只采原生与透传路径上成功的流式粘性热尝试；按账号与出站模型计数。
+    - 后排：只在同优先级段内后排。
+    - 迁出：目标对齐 OpenAI（准入、同优先级、未判慢、新鲜空槽）。用户决定去掉“≥6 个新鲜样本”，原因是生产流量集中，其他号样本不足。
+    - 冷却：每分组+会话 30 分钟迁出冷却。用户要求缓存不降太多；回放显示悲观情况下 Max 命中率降幅从 1.5–3.4 个百分点压到 0.5–1.1 个百分点，基线 95.2%。
+    - 开关：`anthropic_latency_hold`，缺省开，关闭即失效，重开不复活。
+    - 边界：负载批量选号关闭时不生效；判慢与冷却都在进程内。
+  - 配置建议（管理员执行）：
+    - C1：清掉 Max 两组中一个站点两个号的 load_factor 偏置，宜在上线前或同时做，否则迁出几乎都落到该站点。
+    - C2：Kiro 两组各补一个其他站点的账号；补齐后自动参与让位与迁出，没有按组开关。
+    - C3：运营确认 Max 的可用性兜底组。
+  - 下一步：
+    1. 合并 PR #193。
+    2. 发版与部署另行授权。
+    3. 上线 7 天按 `FINAL.md` §3、§7 只读验收，需会话内授权。迁出可归因的额外缓存写入超过 Max 组同期上下文 1.5 个百分点，或冷却下仍出现 30 分钟内二次迁出，即关开关回退。
 - **20261103-recent-health-metrics**（2026-11-03 06:36 UTC 开始，Claude 主持，gpt-6-astra xhigh 反方）：用户授权只读连接生产，分析账号管理页“近期表现”列（错误数、首字、缓存率）的计算口径与数据来源，找出让数字偏离账号真实表现的特殊情况，提出优化方案。只读，不改代码与生产配置；复用已开的 SSH 复用连接，不关闭他人的连接。本地 `.work/tasks/20261103-recent-health-metrics/`（不入库）。
   - 08:30 UTC 状态：联合定稿（astra 三轮，签字无阻断），入口为本地 `FINAL.md`，**待用户批准**，未改代码。09:20 UTC 按用户追问（样本量、比率与次数、P90 与平均、缓存统计方式）更新为第 2 版。
   - 现行口径：
@@ -724,3 +746,83 @@ pnpm --dir frontend run build
   - 生产只读 EXPLAIN：用量查询 86ms，软失败查询 1ms。
 - 卡点/风险：英文表头说明的顶部余量小（见进行中的工作）；上线依赖补记修复。
 - 下一步：用户授权后推送并开 PR，排在补记修复之后合并；上线后只读复核。
+
+### 2026-11-03 06:42 UTC — 20261103-claude-ttft-routing — Claude 30 天首字与组内路由分析，联合方案定稿（只读，待批准）
+
+- 请求/目标：用户授权只读连接生产，分析最近 30 天 Claude 请求：使用记录首字与下游首字如何更快、组内路由如何挑最快的号、能否借鉴 OpenAI 分组配置、还有哪些可靠的进一步方案；与风格相反的 astra（xhigh）讨论后给出最佳方案。
+- 开始状态：main `764e406c1`，工作树只有两份记忆文件的既有改动（保留）；生产 0.5.1；复用其他会话已开的 SSH 复用连接（未关闭）。
+- 完成操作：
+  - 经只读包装脚本导出 31 天 Anthropic 分组的用量、运维错误、系统事件与账号（本地，不入库），用 DuckDB 离线分析；子 agent 梳理 Claude 选号与首字打点代码。
+  - astra 三轮质询：
+    - 第 1 轮：发现 load_factor 偏置；阻断主持方对无对照数据的外推，以及原样扩门槛。
+    - 第 2 轮：要求只在同优先级段内后排，并补全热会话标记、出站模型与迁出准入。
+    - 第 3 轮：修正签名错误的因果措辞、开关回退契约与收益表述后签字。
+  - 主持方补两项回放：判慢让位规则回放，以及签名错误与换站的关联；据后者驳回“带签名思考的请求不得迁出”。
+- 修改文件：仅本记忆。未改代码，未写生产。
+- 验证：`python3 tools/check_docs_consistency.py`。
+- 卡点/风险：
+  - 回放的对照非随机，只给方向，不承诺净提速。
+  - 迁出的缓存与签名代价要按实际迁出事件验收。
+  - 分析期间有人在改 Max 号的优先级（05:08 与 05:44 快照不同），配置建议以 05:44 快照为准。
+- 下一步：见进行中的工作“20261103-claude-ttft-routing”。
+
+### 2026-11-03 08:57 UTC — 20261103-claude-latency-hold-redteam-astra-r1 — 只读审查完成
+
+- 请求/目标：按 `implementation/BRIEF.md`、`FINAL.md` §3 与 `implementation/REDTEAM.md` A 节，对提交 `35cdde366` 相对 `764e406c1` 做只读正确性与契约审查；不改审查对象代码、不提交。
+- 开始状态：主工作区 `main` 在 `764e406c1`，仅 `docs/PROJECT_MEMORY.md` 与归档已有未提交改动（保留）；目标 detached 树 clean。
+- 完成操作：复核排序阶段、迁出准入与 owner 删除、warm/语义样本/出站模型、设置与同步登记；报告写入任务本地 `implementation/redteam_astra_r1.md`。发现关闭 load-batch 选择或缺少并发服务时普通选号绕过 Claude 判慢状态的一项 P1。
+- 修改文件：仅主工作区记忆文件；本地审查报告在 `.work/tasks/20261103-claude-ttft-routing/implementation/redteam_astra_r1.md`。未改代码。
+- 验证：目标树 `python3 tools/check_docs_consistency.py` → `documentation consistency: ok`；`python3 tools/upstream-sync/sync.py scheduler-diff` → `original scheduler diff matches the reviewed allowlist`；`git diff 764e406c1 35cdde366 --check` 通过。未运行 Go 测试/编译，避免占用实施中的 service 包编译资源。
+- 卡点/风险：无 P0 阻断；1 项 P1 见报告。
+- 下一步：实施方评估并处理报告中的 P1，再复审修复。
+
+### 2026-11-03 11:08 UTC — 20261103-claude-latency-hold-redteam-astra-r2 — 只读审查完成，签字
+
+- 请求/目标：按 `implementation/BRIEF.md`、`FINAL.md` §7 与红队 A 范围，只读审查 `7a282cca4` 相对 `35cdde366` 的增量；不改目标代码、不提交。
+- 开始状态：主工作区 `main` 在 `764e406c1`；`docs/PROJECT_MEMORY.md` 与归档文件有其他任务的既有未提交改动，保留。目标为 detached `7a282cca4`；审查中短暂看到的容量条件未提交改动在收尾时已消失，目标工作树干净。
+- 完成操作：核对无锁 generation 读取/复位、30 分钟迁出冷却与容量淘汰、准入及路由集合、owner compare-delete 与预取、前端开关和文档同步；报告写入 `.work/tasks/20261103-claude-ttft-routing/implementation/redteam_astra_r2.md`。未改目标代码。
+- 发现：无 P0，按用户要求签字；报告含 1 项 P1、2 项 P2、1 项 P3。
+- 验证：`python3 tools/upstream-sync/sync.py scheduler-diff` → `original scheduler diff matches the reviewed allowlist`；`python3 tools/check_docs_consistency.py` → `documentation consistency: ok`；`git diff --check 35cdde366 7a282cca4` 通过。未运行 Go 测试/编译，遵守资源限制并以代码审查为主。
+- 卡点/风险：无阻断；建议修复代数读方可回写旧 reset、owner changed 后继续使用旧预取 ID，并补迁出成功冷却登记/容量淘汰测试。设置页提示建议补充 30 分钟冷却。
+- 下一步：实施方评估报告发现并修复后，按需复审。
+
+### 2026-11-03 11:40 UTC — 20261103-claude-latency-hold-redteam-astra-r3 — 三项修复定向复核
+
+- 请求/目标：只读审查 `4f21d8a61` 对 r2 的 P1 与两项 P2 修复，不扩展范围。
+- 开始状态：主工作区 `main` `764e406c1`，保留项目记忆既有修改；目标 detached `23db41ff1` 干净。
+- 完成操作：复核代数读路径、owner 补读后的两条粘性路径，以及真实迁出冷却登记与有界淘汰测试。结果追加至 `.work/tasks/20261103-claude-ttft-routing/implementation/redteam_astra_r2.md` 的“r3 复核”。
+- 发现：两个 P2 已闭合。P1 仍存在入口第二次代数校验与 helper 快速返回之间的窗口；用 Go overlay 对真实实现做交错回归，确定性复现旧 hold 返回。无需靠 race 才能触发。
+- 验证：定向四项 service unit tests `-p 1` 通过；overlay 复现测试失败，证明缺口；`git diff --check 4f21d8a61^ 4f21d8a61` 通过。目标树保持只读且干净。
+- 卡点/风险：P1 尚未闭合，暂不签字；具体最小修法与复现命令见报告 r3 节。其他实现未审。
+- 下一步：修复最终快照返回前的 generation/settings 校验并补该交错回归后，再复核此项。
+
+### 2026-11-03 13:20 UTC — 20261103-claude-latency-hold-redteam-astra-r4 — 最终定向复核，签字
+
+- 请求/目标：只读复核 `23db41ff1..737e7c7e4` 对 r3 P1 的修复；重跑原 overlay，并证明新回归能在旧实现上行为失败；不扩展范围。
+- 开始状态：主工作区 `main` `e89522a89`，保留两份记忆的其他任务既有修改；目标 detached `737e7c7e4` 干净。
+- 完成操作：核对快照、活动判断、两条 partition、迁出 owner 及其调用方的最终 generation 校验；未发现漏校验入口、新增锁或新的数据竞争。结果与可复现命令已追加至本地 `.work/tasks/20261103-claude-ttft-routing/implementation/redteam_astra_r2.md` 的“r4 最终复核：签字”。
+- 修改文件：仅记忆、归档与本地任务报告/overlay 证据；未改审查对象代码、未提交。
+- 验证：原 r3 overlay 新实现 PASS、旧实现 FAIL；正式新回归新实现 PASS，旧实现第 102 行旧 hold 断言 FAIL。旧正式回归仅 overlay 实现文件，为旧版本缺失名称补未触达的兼容 helper，原函数不变；非编译失败。Go 均 `GOTOOLCHAIN=local`、`-p 1 -tags=unit -count=1`，未加 race；目标增量 `git diff --check` 通过。
+- 卡点/风险：r3 P1 已闭合，本轮无新发现；没有扩展至其他部分或执行全包/race 测试。
+- 下一步：本轮审查完成，交回主持方；推送、PR、合并与部署不在本次范围。
+
+### 2026-11-03 13:20 UTC — 20261103-claude-ttft-routing — Claude 判慢让位与粘性迁出实施完成，两路红队签字（未推送）
+
+- 请求/目标：用户批准按本地 `FINAL.md` 第 3 节开发：把 OpenAI 判慢让位移植到 Claude，含同优先级段内后排、粘性迁出与独立开关 `anthropic_latency_hold`。配置项 C1–C3 由管理员处理。追加要求：缓存时长与命中率不能降太多。
+- 开始状态：main `764e406c1`；Paseo 工作树分支 `feat/claude-latency-hold-20261103`；主工作区只有两份记忆文件的既有改动（保留）。
+- 完成操作：
+  - 分工：Claude 主持；后端 gpt-6.1-sol xhigh；前端 Opus 5.5 high；红队 gpt-6-astra xhigh、Opus 5.5 xhigh。
+  - 过程：后端实现后，主持自审，纠正热路径全局锁和迁出前置判断顺序；两路红队共四轮。
+  - 用户决定：迁出目标对齐 OpenAI，去掉“≥6 个新鲜样本”。
+  - 缓存保护：按离线回放加每会话 30 分钟迁出冷却。
+  - 收口问题：变异测试补强；落后读方与关→开交错的代数竞态；属主比较失败后改按当前绑定继续；负载批量选号关闭时不生效，写入文档。
+- 修改文件：`backend/internal/{resilience,service,handler,repository}`（新增 `anthropic_account_latency_hold.go` 及测试）、`docs/GATEWAY_RESILIENCE.md`、`docs/account-scheduling.md`、`tools/docs_consistency.json`、`tools/upstream-sync/{policy,scheduler-diff}.json`、前端韧性设置页、API 类型与中英文案，共 28 个文件。
+- 验证：
+  - 后端：定向测试（-race）、build、四种 vet、golangci-lint 0 问题、文档一致性、scheduler-diff、`git diff --check`；`ci_gate.py` 共 485 项，0 跳过。
+  - 前端：lint、typecheck、vitest 485 个文件 3790 项、build。
+  - 与 origin/main 试合并后，build、vet、定向测试均通过。
+- 卡点/风险：
+  - 回放是非随机、基于历史分配的，只说明方向和量级。
+  - 让位、冷却都在进程内，多实例各自计算。
+  - Kiro 补第二站点后会自动参与迁出。
+- 下一步：见进行中的工作“20261103-claude-ttft-routing”13:20 条目。

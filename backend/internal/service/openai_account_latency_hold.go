@@ -222,6 +222,14 @@ func (s *OpenAIGatewayService) partitionOpenAILatencyHeldLoad(_ context.Context,
 }
 
 func partitionLatencyHeld[T any](items []T, accountOf func(T) *Account, held map[int64]openAIAccountLatencyHoldSnapshot, compact bool) []T {
+	var segmentKey func(*Account) int
+	if compact {
+		segmentKey = openAICompactSupportTier
+	}
+	return partitionLatencyHeldSegments(items, accountOf, held, segmentKey)
+}
+
+func partitionLatencyHeldSegments[T any](items []T, accountOf func(T) *Account, held map[int64]openAIAccountLatencyHoldSnapshot, segmentKey func(*Account) int) []T {
 	if len(items) < 2 || len(held) == 0 {
 		return items
 	}
@@ -238,15 +246,15 @@ func partitionLatencyHeld[T any](items []T, accountOf func(T) *Account, held map
 		}
 		return append(healthy, heldItems...)
 	}
-	if !compact {
+	if segmentKey == nil {
 		return partition(items)
 	}
 	result := make([]T, 0, len(items))
 	start := 0
 	for start < len(items) {
-		tier := openAICompactSupportTier(accountOf(items[start]))
+		tier := segmentKey(accountOf(items[start]))
 		end := start + 1
-		for end < len(items) && openAICompactSupportTier(accountOf(items[end])) == tier {
+		for end < len(items) && segmentKey(accountOf(items[end])) == tier {
 			end++
 		}
 		result = append(result, partition(items[start:end])...)

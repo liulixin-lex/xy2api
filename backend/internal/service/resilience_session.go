@@ -448,7 +448,8 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 		if reason, _ := gates.candidateReason(gateCtx, candidate, acc.ID == owner, now); reason != "" {
 			continue
 		}
-		cands = append(cands, lastResortCandidate{account: candidate, recoverAt: recoverAt})
+		held := platform == PlatformAnthropic && s.anthropicLatencyHoldSnapshot(&acc, anthropicLatencyModel(ctx, requestedModel), now).Held
+		cands = append(cands, lastResortCandidate{account: candidate, recoverAt: recoverAt, held: held})
 	}
 	// Take the first candidate with a free slot; when all are busy, wait
 	// for the best one.
