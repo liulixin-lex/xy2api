@@ -6,9 +6,9 @@
 
 ## 当前交接状态
 
-### 版本与环境速览（2026-11-02：0.5.1 版本准备）
+### 版本与环境速览（2026-11-03：0.5.1 已发布）
 
-- 当前准备产品版本 XY2API v0.5.1；最新正式版为 v0.5.0（2026-11-01），Sub2API 兼容基线 0.2.15，迁移共 333 项（最后为 288，0.5.1 无新迁移）。
+- 当前产品版本 XY2API v0.5.1（2026-11-03 正式发布），Sub2API 兼容基线 0.2.15，迁移共 333 项（最后为 288，0.5.1 无新迁移）。
 - 生产：2026-11-02 05:03 UTC 核实运行 0.5.0（应用于 04:51 UTC 重启后健康），0.5.1 未部署（部署另行授权）；`ops_monitoring_enabled=true`，质量门策略 version 9，五个 OpenAI 门槛组（A–E）均启用质量门槛与利润门。门槛进程内状态已复位；后续仍按新请求评估。外部状态以重新核实为准。
 - 预上线主机仍运行 0.4.2 的浸泡候选 `0ad63fab7`，换成正式镜像需要授权。
 - 上游：Sub2API v0.2.17 已发布、尚未同步（2026-10-19 定时同步的 prepare 失败），需按 [`UPSTREAM_SYNC.md`](UPSTREAM_SYNC.md) 另开任务。
@@ -22,7 +22,7 @@
 
 | 版本 | 日期 | 发布提交（相关 PR） | 主要内容 | 迁移 |
 |---|---|---|---|---|
-| 0.5.1 | 2026-11-02 | 准备中（#184、#185、#186、#187、#188；版本 PR 待合并） | 分组质量门槛第二版（用户可见首字、两档与档位记忆、限时观察、慢号迁出）；GPT 报错补漏（订阅共享额度、加密内容、内容拒绝口径、请求兼容 400、Grok 与 alpha search 收尾）；输出后断流补记为上游失败尝试并改归因；账号页状态列与客服气泡样式。见 [`GATEWAY_RESILIENCE.md`](GATEWAY_RESILIENCE.md)、[`GROUP_QUALITY_GATE.md`](GROUP_QUALITY_GATE.md)、[`USAGE_METRICS.md`](USAGE_METRICS.md) | — |
+| 0.5.1 | 2026-11-03 | `afaef43b0`（#184、#185、#186、#187、#188、#189） | 分组质量门槛第二版（用户可见首字、两档与档位记忆、限时观察、慢号迁出）；GPT 报错补漏（订阅共享额度、加密内容、内容拒绝口径、请求兼容 400、Grok 与 alpha search 收尾）；输出后断流补记为上游失败尝试并改归因；账号页状态列与客服气泡样式。见 [`GATEWAY_RESILIENCE.md`](GATEWAY_RESILIENCE.md)、[`GROUP_QUALITY_GATE.md`](GROUP_QUALITY_GATE.md)、[`USAGE_METRICS.md`](USAGE_METRICS.md) | — |
 | 0.5.0 | 2026-11-01 | `84e610681`（#181、#182、#183） | 悬浮在线客服与客户服务工单整合；账号管理页精简与信息层级优化 | 287、288 |
 | 0.4.16 | 2026-11-01 | `dcd47423e`（#175、#176、#177、#178、#179） | 分组质量门槛、兜底服务组计费、满载借用与 WS 粘性；Claude 缓存卡片、用量文案和工具缓存标记，见 [`GROUP_QUALITY_GATE.md`](GROUP_QUALITY_GATE.md)、[`ANTHROPIC_CACHE_TTL.md`](ANTHROPIC_CACHE_TTL.md) | — |
 | 0.4.15 | 2026-10-31 | `10fbc9c72`（#170、#171） | Anthropic 缓存 TTL：管理员默认 5m/1h、API Key 四态、最终出站统一、usage/计费/预留解耦，见 [`ANTHROPIC_CACHE_TTL.md`](ANTHROPIC_CACHE_TTL.md) | 286 |
@@ -68,19 +68,7 @@
 
 ## 进行中的工作
 
-### 20261102-release0501 — 0.5.1 发版（进行中）
-
-- 请求：用户授权合并远端全部开放 PR 并发布 0.5.1；不部署。
-- 已完成：
-  - #184–#188 已普通合并（main `ed06fa369`）；
-  - 版本 PR 改了 `backend/cmd/server/VERSION`、`UPSTREAM_BASE.json`，更新了 `docs/README.md` 中 OpenSpec 的状态；
-  - 本文件已按归档规范整理：已结束任务的交接、登记与 0.4.16 及更早的日志原样移入归档。
-- 未完成：
-  1. 版本 PR 合并；
-  2. annotated tag `v0.5.1` 打在合并提交上，正文为发布说明；
-  3. 核验 Release workflow、五平台制品、SHA-256 清单与 GHCR 镜像；
-  4. 记忆收尾：填写发布提交，归档本条。
-- 卡点与风险：CI 的 macOS `shell` 作业常常分不到托管机器，排队约 15 分钟后被取消，需要重跑；main 要求分支与 main 同步，PR 只能逐个合并。
+（无）
 
 ## 操作陷阱
 
@@ -89,6 +77,7 @@
 - `sync.py audit` 强制要求干净工作树。实时更新本文件会产生改动；需要最终上游审计时，应先审查并提交本文件和同批变更，再在干净提交上运行 audit。
 - 本地执行 `prepare` 若遇到清单外冲突，会 abort merge，但脚本在 abort 前已经写出 report 文件，可能留下未跟踪/已修改报告；失败后先检查 `git status`，不要误以为工作树自动恢复完全干净。
 - `tools/upstream-sync/policy.json` 的 `xy_owned` 范围较宽（包括大部分 `backend/internal/**`、`frontend/**`、`docs/**`）。audit 通过只证明差异被分类、固定契约与具名补丁仍在、migration/provenance 合法，不等于所有二开语义已经自动审查；重叠文件仍需人工核对。
+- `git tag -a -F <文件>` 默认按注释删掉以 `#` 开头的行，发布说明的 `##` 小标题会丢失。打 tag 时加 `--cleanup=verbatim`。v0.5.1 的 tag 因此丢了小标题，已在 Release 正文补回，tag 本身未改。
 - GoReleaser 的稳定别名（`latest`、主版本、次版本）现用 `skip_push: auto`，prerelease 不再改写它们（v0.3.0-rc.1、v0.4.0-rc.1 发布后均核实未动）。早期 v0.0.7 RC 曾短暂改写别名，正式发布后已恢复。
 - GitHub Actions 在本次 RC/正式 Release 中提示 `docker/login-action@v3`、`docker/setup-buildx-action@v3`、`docker/setup-qemu-action@v3` 的 Node.js 20 runtime 已弃用，Runner 强制切到 Node.js 24 后仍成功；这是后续 Action 版本维护项，不是本次发布阻塞。
 - 本机门禁要包括 golangci-lint（版本见 `tools/docs_consistency.json` 的 pins，本机需自行安装），运行时加 `--max-issues-per-linter=0 --max-same-issues=0`：CI 注释只显示同类问题的前几条，照注释逐条修会漏（2026-10-28 PR #151 遇到）。
@@ -624,3 +613,21 @@ pnpm --dir frontend run build
 - 验证：`python3 tools/check_docs_consistency.py`、干净树 `sync.py audit`；版本 PR 的 CI 进行中。
 - 卡点/风险：无。
 - 下一步：合并版本 PR，打 `v0.5.1`，核验 Release，记忆收尾。
+
+### 2026-11-03 01:05 UTC — 20261102-release0501 — v0.5.1 正式发布与记忆收尾
+
+- 请求/目标：完成 0.5.1 发布；不部署。
+- 开始状态：版本 PR #189 合并为 main `afaef43b0`。
+- 完成操作：
+  - 在 `afaef43b0` 上打 annotated tag `v0.5.1`，tag 正文为发布说明。
+  - Release workflow `41554355840` 全部成功（verify-version、build-frontend、release）。
+  - 核验 Release：
+    - 正式发布，非 draft、非 prerelease；
+    - 五平台包与 `checksums.txt`，linux_amd64 包的 SHA-256 一致；
+    - GHCR 的 `0.5.1`、`0.5`、`latest` 指向同一索引，含 linux/amd64、linux/arm64。
+  - tag 正文的 `##` 小标题被 git 当注释删掉，已在 Release 正文补回，并把 PR 引用改为 #189（见操作陷阱）。
+  - 删除本地已合并分支与仓外工作树；主工作区的未提交记忆核对已全部进入 main 后丢弃，主工作区快进到 main，备份在本地 `.work/tasks/20261102-release0501/backup/`。
+- 修改文件：本文件与归档。
+- 验证：Release 制品与镜像核验如上；`python3 tools/check_docs_consistency.py`。
+- 卡点/风险：0.5.1 未部署。部署与上线后的只读复核（门槛第二版 24 小时、门槛漏记补齐 V1–V6、GPT 报错补漏 7 天）需要用户另行授权，见未结事项。
+- 下一步：无。
