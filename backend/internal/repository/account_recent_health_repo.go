@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/lib/pq"
@@ -13,76 +12,93 @@ import (
 
 var _ service.AccountRecentHealthBatchReader = (*usageLogRepository)(nil)
 
-// GetAccountRecentHealthBatch 为账号列表“状态”列批量统计近期首字平均、错误请求数和近 30 分钟的
-// 三类输入 Token 合计。
-//
-// 两张表都是请求日志，放在用量日志仓储里，账号处理器不必再注入运维仓储。错误数复用
-// “错误请求”页的 WHERE（buildOpsErrorLogsWhere，View=all），保证与该页筛选该账号后的条数一致：
-// 例如只算 status>=400 的客户可见错误，不算已恢复的上游健康记录。
-func (r *usageLogRepository) GetAccountRecentHealthBatch(ctx context.Context, accountIDs []int64, firstTokenSince, errorsSince, cacheSince time.Time) (map[int64]service.AccountRecentHealth, error) {
-	result := make(map[int64]service.AccountRecentHealth, len(accountIDs))
+type recentHealthTxExecutor interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func (r *usageLogRepository) GetAccountRecentHealthBatch(ctx context.Context, accountIDs []int64, now time.Time) (map[int64][]service.GroupQualityObservation, error) {
+	result := make(map[int64][]service.GroupQualityObservation, len(accountIDs))
 	if len(accountIDs) == 0 {
 		return result, nil
 	}
-
-	// 一次扫描近 30 分钟（仍走 idx_usage_logs_account_created_at）：首字只算 firstTokenSince 之后的
-	// 样本（FILTER），Token 按整段求和。窗口内没有首字样本时 AVG 为 NULL。
-	rows, err := r.sql.QueryContext(ctx, `
-		SELECT account_id,
-			(AVG(first_token_ms) FILTER (WHERE created_at >= $3))::float8,
-			COUNT(first_token_ms) FILTER (WHERE created_at >= $3),
-			COALESCE(SUM(input_tokens), 0),
-			COALESCE(SUM(cache_creation_tokens), 0),
-			COALESCE(SUM(cache_read_tokens), 0),
-			COUNT(*)
-		FROM usage_logs
-		WHERE account_id = ANY($1) AND created_at >= $2
-		GROUP BY account_id`,
-		pq.Array(accountIDs), cacheSince.UTC(), firstTokenSince.UTC())
-	if err != nil {
-		return nil, fmt.Errorf("query account recent usage: %w", err)
+	var tx recentHealthTxExecutor
+	var rollback func()
+	if r.db != nil {
+		sqlTx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+		if err != nil {
+			return nil, err
+		}
+		tx = sqlTx
+		rollback = func() { _ = sqlTx.Rollback() }
+	} else {
+		// Integration suites pass an existing rollback transaction as the SQL executor.
+		tx = r.sql
 	}
-	defer func() { _ = rows.Close() }()
+	if rollback != nil {
+		defer rollback()
+	}
+	if _, err := tx.ExecContext(ctx, `SET LOCAL statement_timeout = '2s'`); err != nil {
+		return nil, err
+	}
+
+	from := now.Add(-service.AccountRecentHistoryWindow).UTC()
+	to := now.UTC()
+	// Failed placeholders stay in LAG history but are not returned: one on another account breaks the
+	// continuation; one on the same account keeps it, and its zero prompt keeps the next row out of cache samples.
+	rows, err := tx.QueryContext(ctx, `
+		WITH history AS MATERIALIZED (
+			SELECT id, account_id, api_key_id, group_id, COALESCE(request_id, '') AS request_id,
+			       created_at, stream, model,
+			       (actual_cost > 0 OR output_tokens > 0) AS is_success,
+			       COALESCE(NULLIF(end_to_end_first_output_ms, 0), first_token_ms, 0) AS first_output_ms,
+			       COALESCE(session_id, '') AS session_id,
+			       COALESCE(input_tokens, 0) + COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0) AS prompt_tokens,
+			       COALESCE(cache_read_tokens, 0) AS cache_read_tokens,
+			       LAG(account_id) OVER session_order AS previous_account_id,
+			       LAG(model) OVER session_order AS previous_model,
+			       LAG(created_at) OVER session_order AS previous_at,
+			       LAG(COALESCE(input_tokens, 0) + COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0)) OVER session_order AS previous_prompt_tokens
+			FROM usage_logs
+			WHERE created_at >= $1 AND created_at < $2
+			WINDOW session_order AS (
+				PARTITION BY api_key_id, COALESCE(origin_group_id, group_id), session_id
+				ORDER BY created_at, id
+			)
+		)
+		SELECT account_id, request_id, created_at, stream, first_output_ms, session_id,
+		       prompt_tokens, cache_read_tokens,
+		       COALESCE(session_id <> '' AND previous_account_id = account_id AND previous_model = model AND previous_at IS NOT NULL AND created_at - previous_at <= INTERVAL '5 minutes', FALSE),
+		       COALESCE(previous_prompt_tokens, 0), TRUE
+		FROM history
+		WHERE account_id = ANY($3) AND is_success
+		ORDER BY account_id, created_at, id`, from, to, pq.Array(accountIDs))
+	if err != nil {
+		return nil, fmt.Errorf("query account recent usage observations: %w", err)
+	}
 	for rows.Next() {
-		var accountID int64
-		var avg sql.NullFloat64
-		var health service.AccountRecentHealth
-		if err := rows.Scan(&accountID, &avg, &health.FirstTokenSamples,
-			&health.InputTokens, &health.CacheCreationTokens, &health.CacheReadTokens, &health.CacheSamples); err != nil {
-			return nil, fmt.Errorf("scan account recent usage: %w", err)
+		var o service.GroupQualityObservation
+		if err := rows.Scan(&o.AccountID, &o.RequestID, &o.At, &o.Streaming, &o.FirstOutputMs, &o.SessionID,
+			&o.PromptTokens, &o.CacheReadTokens, &o.StrictContinuation, &o.PreviousPromptTokens, &o.Success); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("scan account recent usage observation: %w", err)
 		}
-		if avg.Valid && health.FirstTokenSamples > 0 {
-			rounded := int64(math.Round(avg.Float64))
-			health.FirstTokenAvgMs = &rounded
-		}
-		result[accountID] = health
+		result[o.AccountID] = append(result[o.AccountID], o)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("query account recent usage: %w", err)
+		_ = rows.Close()
+		return nil, fmt.Errorf("query account recent usage observations: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 
-	where, args := buildOpsErrorLogsWhere(&service.OpsErrorLogFilter{View: "all", StartTime: &errorsSince})
-	args = append(args, pq.Array(accountIDs))
-	errorRows, err := r.sql.QueryContext(ctx,
-		"SELECT e.account_id, COUNT(*) FROM ops_error_logs e "+where+
-			fmt.Sprintf(" AND e.account_id = ANY($%d) GROUP BY e.account_id", len(args)),
-		args...)
+	errors, err := loadGroupQualityErrorObservations(ctx, tx, accountIDs, now.Add(-service.AccountRecentFailureWindow), to)
 	if err != nil {
-		return nil, fmt.Errorf("query account recent errors: %w", err)
+		return nil, fmt.Errorf("query account recent soft failures: %w", err)
 	}
-	defer func() { _ = errorRows.Close() }()
-	for errorRows.Next() {
-		var accountID int64
-		var count int
-		if err := errorRows.Scan(&accountID, &count); err != nil {
-			return nil, fmt.Errorf("scan account recent errors: %w", err)
-		}
-		health := result[accountID]
-		health.RecentErrors = count
-		result[accountID] = health
-	}
-	if err := errorRows.Err(); err != nil {
-		return nil, fmt.Errorf("query account recent errors: %w", err)
+	for _, observation := range errors {
+		result[observation.AccountID] = append(result[observation.AccountID], observation)
 	}
 	return result, nil
 }

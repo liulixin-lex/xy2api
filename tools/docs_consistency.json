@@ -456,6 +456,40 @@
         "openspec/changes/group-quality-gate-20261031/**",
         "openspec/changes/group-quality-gate-v2-20261102/**"
       ]
+    },
+    {
+      "pattern": "\\b(?:first_token_avg_ms|first_token_samples|recent_errors|cache_samples|first_token_window_seconds|errors_window_seconds|cache_window_seconds)\\b",
+      "reason": "recent-health v2 removed the old account-list response fields and window declarations; only migration/history and explicit assertions that the fields are absent may name them",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md",
+        "docs/USAGE_METRICS.md",
+        "backend/internal/handler/admin/account_handler_recent_health_test.go"
+      ]
+    },
+    {
+      "pattern": "\\bAccountRecent(?:FirstToken|Errors|Cache)Window\\b",
+      "reason": "recent-health v2 replaced the three duration constants with sample and age limits",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
+    },
+    {
+      "pattern": "admin\\.accounts\\.(?:recentErrors|recentErrorsTitle|firstTokenAvg|firstTokenAvgTitle|cacheReadRatio|cacheReadRatioTitle)\\b",
+      "reason": "recent-health v2 replaced the old account-list locale labels with failure, visible first-output and cache-kept labels",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
+    },
+    {
+      "pattern": "TestGetAccountRecentHealthBatchMatchesTheErrorRequestsPage",
+      "reason": "recent-health v2 changed this repository test from error-page parity to strict continuation and soft-failure deduplication",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
     }
   ],
   "private": [

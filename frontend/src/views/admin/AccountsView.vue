@@ -309,11 +309,11 @@
           <template #header-recent_health="{ column }">
             <div class="flex items-center gap-1">
               <span>{{ column.label }}</span>
-              <HelpTooltip :content="t('admin.accounts.recentHealthHint')" width-class="w-72" />
+              <HelpTooltip :content="t('admin.accounts.recentHealthHint')" width-class="w-96 whitespace-pre-line" />
             </div>
           </template>
           <template #cell-recent_health="{ row }">
-            <AccountRecentHealth :account-id="row.id" :health="recentHealthByAccountId[String(row.id)] ?? null" />
+            <AccountRecentHealth :account-id="row.id" :platform="row.platform" :health="recentHealthByAccountId[String(row.id)] ?? null" :load-state="recentHealthLoadState" />
           </template>
           <template #header-schedulable="{ column }"><div class="flex items-center gap-1"><span>{{ column.label }}</span><HelpTooltip :content="t('admin.accounts.schedulableHint')" width-class="w-72" /></div></template>
           <template #cell-schedulable="{ row }">
@@ -565,7 +565,7 @@ import AccountTableFilters from '@/components/admin/account/AccountTableFilters.
 import AccountColumnSettings from '@/components/admin/account/AccountColumnSettings.vue'
 import AccountRecentHealth from '@/components/admin/account/AccountRecentHealth.vue'
 import AccountStreamOnlyBadge from '@/components/admin/account/AccountStreamOnlyBadge.vue'
-import type { AccountRecentHealth as AccountRecentHealthStats } from '@/api/admin/accounts'
+import type { AccountRecentHealth as AccountRecentHealthStats, AccountRecentHealthLoadState } from '@/api/admin/accounts'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 import IQCheckCell from '@/components/account/IQCheckCell.vue'
 import { IQ_BUILTIN_MODELS, iqAccountVerdict, iqRunSummary } from '@/components/admin/account/iqCheckPresentation'
@@ -838,8 +838,10 @@ const autoRefreshFetching = ref(false)
 const AUTO_REFRESH_SILENT_WINDOW_MS = 15000
 const autoRefreshSilentUntil = ref(0)
 const hasPendingListSync = ref(false)
-// 状态列的近期健康度（近 3 分钟首字平均、近 10 分钟错误请求数），与今日统计一样按当前页批量拉取。
+// “近期表现”列的失败、续轮首字与缓存保持，与今日统计一样按当前页批量拉取。
+// 加载状态让短横线区分“已加载但该账号没有数据”与“加载中/加载失败”。
 const recentHealthByAccountId = ref<Record<string, AccountRecentHealthStats>>({})
+const recentHealthLoadState = ref<AccountRecentHealthLoadState>('loading')
 let recentHealthReqSeq = 0
 // 分组列的质量门槛状态与三项指标，跨页共用一份；分组列可见时随列表刷新，最多 60 秒拉一次。
 // 规则同分组列表的门槛列：策略开但未评估为“等待评估”，读取失败明文提示，策略关显示普通标签。
@@ -1070,14 +1072,18 @@ const refreshRecentHealthBatch = async () => {
   const reqSeq = ++recentHealthReqSeq
   if (accountIDs.length === 0) {
     recentHealthByAccountId.value = {}
+    recentHealthLoadState.value = 'loaded'
     return
   }
+  recentHealthLoadState.value = 'loading'
   try {
     const result = await adminAPI.accounts.getBatchRecentHealth(accountIDs)
     if (reqSeq !== recentHealthReqSeq) return
     recentHealthByAccountId.value = result.stats ?? {}
+    recentHealthLoadState.value = 'loaded'
   } catch (error) {
     if (reqSeq !== recentHealthReqSeq) return
+    recentHealthLoadState.value = 'failed'
     console.error('Failed to load account recent health:', error)
   }
 }

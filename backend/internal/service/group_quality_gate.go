@@ -115,22 +115,24 @@ type GroupQualityMetrics struct {
 
 // GroupQualityObservation is a persisted success or upstream-attempt event.
 type GroupQualityObservation struct {
-	AccountID           int64
-	RequestID           string
-	At                  time.Time
-	Success             bool
-	SoftFailure         bool
-	Kind                string
-	StatusCode          int
-	Category            string
-	Message             string
-	SessionID           string
-	Warm                bool
-	Streaming           bool
-	FirstOutputMs       int
-	PromptTokens        int64
-	CacheReadTokens     int64
-	CacheCreationTokens int64
+	AccountID            int64
+	RequestID            string
+	At                   time.Time
+	Success              bool
+	SoftFailure          bool
+	Kind                 string
+	StatusCode           int
+	Category             string
+	Message              string
+	SessionID            string
+	Warm                 bool
+	StrictContinuation   bool
+	Streaming            bool
+	FirstOutputMs        int
+	PromptTokens         int64
+	PreviousPromptTokens int64
+	CacheReadTokens      int64
+	CacheCreationTokens  int64
 }
 
 // IsGroupQualitySoftFailure keeps the health classifier aligned with share scheduling.
