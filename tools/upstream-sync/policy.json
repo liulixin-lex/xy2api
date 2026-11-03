@@ -1077,7 +1077,7 @@
     },
     {
       "path": "frontend/src/views/admin/AccountsView.vue",
-      "value": "<AccountRecentHealth :account-id=\"row.id\""
+      "value": "<AccountRecentHealth :account-id=\"row.id\" :platform=\"row.platform\""
     },
     {
       "path": "frontend/src/views/admin/AccountsView.vue",
@@ -1785,19 +1785,19 @@
     },
     {
       "path": "frontend/src/api/admin/accounts.ts",
-      "value": "cache_window_seconds: number"
+      "value": "failure_max_events: number"
     },
     {
       "path": "frontend/src/api/admin/accounts.ts",
-      "value": "cache_read_tokens: number"
+      "value": "read_tokens: number"
     },
     {
       "path": "frontend/src/api/admin/accounts.ts",
-      "value": "input_tokens: number"
+      "value": "prompt_tokens: number"
     },
     {
       "path": "frontend/src/api/admin/accounts.ts",
-      "value": "cache_creation_tokens: number"
+      "value": "kept: number"
     },
     {
       "path": "frontend/src/api/admin/groups.ts",
@@ -1809,11 +1809,11 @@
     },
     {
       "path": "frontend/src/i18n/locales/zh/admin/accounts.ts",
-      "value": "cacheReadRatio: '缓存率 {value}'"
+      "value": "recentCacheTitleTokens: 'Token 读取占比 {value}（按计费 Token 桶，用于看成本）'"
     },
     {
       "path": "frontend/src/i18n/locales/en/admin/accounts.ts",
-      "value": "cacheReadRatio: 'Cache {value}'"
+      "value": "recentCacheTitleTokens: 'Token read share {value} (billing token buckets, for cost)'"
     },
     {
       "path": "backend/internal/handler/admin/group_handler.go",
@@ -4043,12 +4043,27 @@
     {
       "id": "xy-account-recent-health",
       "path": "backend/internal/repository/account_recent_health_repo_integration_test.go",
-      "literal": "func (s *UsageLogRepoSuite) TestGetAccountRecentHealthBatchMatchesTheErrorRequestsPage"
+      "literal": "func (s *UsageLogRepoSuite) TestGetAccountRecentHealthBatchUsesStrictContinuationAndDeduplicatesFailures"
     },
     {
       "id": "xy-account-recent-health",
       "path": "backend/internal/handler/admin/account_handler_recent_health_test.go",
       "literal": "func TestGetBatchRecentHealthReturnsStatsKeyedByAccountAndCachesThem"
+    },
+    {
+      "id": "xy-account-recent-health",
+      "path": "backend/internal/service/account_recent_health_test.go",
+      "literal": "func TestAccountRecentHealthFor_Table"
+    },
+    {
+      "id": "xy-account-recent-health",
+      "path": "frontend/src/components/admin/account/__tests__/AccountRecentHealth.spec.ts",
+      "literal": "never colours the cache line for Gemini, which caches implicitly"
+    },
+    {
+      "id": "xy-account-recent-health",
+      "path": "frontend/src/views/admin/__tests__/AccountsView.recentHealth.spec.ts",
+      "literal": "passes the row platform so a Gemini cache line stays uncoloured"
     },
     {
       "id": "xy-account-recent-health",

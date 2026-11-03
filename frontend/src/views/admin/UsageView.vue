@@ -347,7 +347,7 @@ const applyRouteQueryFilters = () => {
   granularity.value = getGranularityForRange(startDate.value, endDate.value)
 }
 
-// 账号列表“错误请求数”跳转（?tab=errors&account_id=）带来的账号筛选：回显账号名。
+// 账号列表“近期表现”失败行跳转（?tab=errors&account_id=）带来的账号筛选：回显账号名。
 const loadRouteAccountFilterLabel = async () => {
   const requestedAccountId = filters.value.account_id
   if (!requestedAccountId) return

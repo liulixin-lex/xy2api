@@ -100,17 +100,30 @@ describe('admin AccountsView recent health column', () => {
     listAccounts.mockReset().mockResolvedValue({
       items: [
         { id: 1, name: 'busy', platform: 'openai', type: 'apikey', status: 'active', schedulable: true },
-        { id: 2, name: 'quiet', platform: 'openai', type: 'apikey', status: 'active', schedulable: true }
+        { id: 2, name: 'quiet', platform: 'openai', type: 'apikey', status: 'active', schedulable: true },
+        { id: 3, name: 'implicit', platform: 'gemini', type: 'apikey', status: 'active', schedulable: true }
       ],
-      total: 2,
+      total: 3,
       page: 1,
       page_size: 20,
       pages: 1
     })
+    const cache = { samples: 50, kept: 30, zero: 10, partial: 10, mid: 5, full: 25, read_tokens: 500, prompt_tokens: 1000, span_seconds: 1800 }
     getBatchRecentHealth.mockReset().mockResolvedValue({
-      stats: { '1': { first_token_avg_ms: 1200, first_token_samples: 6, recent_errors: 4 } },
-      first_token_window_seconds: 180,
-      errors_window_seconds: 600
+      stats: {
+        '1': {
+          failure: { calls: 200, failures: 30, wilson_low: 0.107, wilson_high: 0.205, first_output_timeouts: 10, stream_failures: 15, other_failures: 5, span_seconds: 1500 },
+          first_output: { samples: 50, p50_ms: 4000, p90_ms: 12_000, slow_share: 0.12, span_seconds: 3000 },
+          cache
+        },
+        '3': { failure: null, first_output: null, cache }
+      },
+      failure_max_events: 200,
+      failure_max_age_seconds: 3600,
+      sample_max: 50,
+      sample_max_age_seconds: 7200,
+      min_display_samples: 20,
+      min_color_samples: 50
     })
   })
 
@@ -118,45 +131,49 @@ describe('admin AccountsView recent health column', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    expect(getBatchRecentHealth).toHaveBeenCalledWith([1, 2])
+    expect(getBatchRecentHealth).toHaveBeenCalledWith([1, 2, 3])
 
     const status = wrapper.get('[data-test="status-1"]')
     expect(status.get('[data-test="status-badge"]').text()).toBe('active')
-    expect(status.find('[data-test="recent-errors"]').exists()).toBe(false)
+    expect(status.find('[data-test="recent-failures"]').exists()).toBe(false)
     const busy = wrapper.get('[data-test="recent-1"]')
-    const errors = busy.get('[data-test="recent-errors"]')
-    expect(errors.text()).toBe('admin.accounts.recentErrors:{"count":4}')
-    expect(errors.attributes('href')).toBe('/admin/usage?tab=errors&account_id=1')
-    expect(errors.attributes('target')).toBe('_blank')
-    expect(busy.get('[data-test="first-token-avg"]').exists()).toBe(true)
+    const failures = busy.get('[data-test="recent-failures"]')
+    expect(failures.text()).toBe('admin.accounts.recentFailureRate:{"failures":30,"calls":200,"rate":"15.0%"}')
+    expect(failures.attributes('href')).toBe('/admin/usage?tab=errors&account_id=1')
+    expect(failures.attributes('target')).toBe('_blank')
+    expect(busy.get('[data-test="recent-first-output"]').text()).toBe('admin.accounts.recentFirstOutputP90:{"value":"12.0s"}')
 
     const quiet = wrapper.get('[data-test="recent-2"]')
-    expect(quiet.find('[data-test="recent-errors"]').exists()).toBe(false)
-    expect(quiet.find('[data-test="first-token-avg"]').exists()).toBe(false)
+    expect(quiet.find('[data-test="recent-failures"]').exists()).toBe(false)
+    expect(quiet.find('[data-test="recent-first-output"]').exists()).toBe(false)
+    expect(quiet.get('[data-test="recent-empty"]').text()).toBe('-')
+    expect(quiet.get('[data-test="recent-empty"]').attributes('title')).toBe('admin.accounts.recentHealthEmptyTitle')
   })
 
-  it('shows the 30-minute cache read share under the first token', async () => {
-    getBatchRecentHealth.mockResolvedValue({
-      stats: {
-        '1': {
-          first_token_avg_ms: 1200,
-          first_token_samples: 6,
-          recent_errors: 0,
-          input_tokens: 300,
-          cache_creation_tokens: 77,
-          cache_read_tokens: 623,
-          cache_samples: 9
-        }
-      },
-      first_token_window_seconds: 180,
-      errors_window_seconds: 600,
-      cache_window_seconds: 1800
-    })
+  it('only explains an empty dash after the batch loaded, and says so while loading or after a failure', async () => {
+    let finish!: (value: unknown) => void
+    getBatchRecentHealth.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    const wrapper = mountView()
+    await flushPromises()
+    const dashTitle = () => wrapper.get('[data-test="recent-2"] [data-test="recent-empty"]').attributes('title')
+    expect(dashTitle()).toBe('admin.accounts.recentHealthLoadingTitle')
+
+    finish({ stats: {} })
+    await flushPromises()
+    expect(dashTitle()).toBe('admin.accounts.recentHealthEmptyTitle')
+
+    getBatchRecentHealth.mockRejectedValueOnce(new Error('boom'))
+    wrapper.getComponent({ name: 'Pagination' }).vm.$emit('update:page', 1)
+    await flushPromises()
+    expect(dashTitle()).toBe('admin.accounts.recentHealthFailedTitle')
+  })
+
+  it('passes the row platform so a Gemini cache line stays uncoloured', async () => {
     const wrapper = mountView()
     await flushPromises()
 
-    expect(wrapper.find('[data-test="recent-1"] [data-test="cache-read-ratio"]').exists()).toBe(true)
-    expect(wrapper.get('[data-test="recent-2"]').find('[data-test="cache-read-ratio"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="recent-1"] [data-test="recent-cache"]').classes()).toContain('text-red-600')
+    expect(wrapper.get('[data-test="recent-3"] [data-test="recent-cache"]').classes()).toContain('text-gray-500')
   })
 
   describe('after the table loader reloads rows', () => {

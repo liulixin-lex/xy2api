@@ -114,7 +114,7 @@ describe('admin AccountsView stream-only state in the status column', () => {
       page_size: 20,
       pages: 1
     })
-    getBatchRecentHealth.mockReset().mockResolvedValue({ stats: {}, first_token_window_seconds: 180, errors_window_seconds: 600 })
+    getBatchRecentHealth.mockReset().mockResolvedValue({ stats: {} })
     clearCapabilityLearning.mockReset().mockResolvedValue(undefined)
   })
 
