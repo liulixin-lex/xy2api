@@ -4,12 +4,37 @@
 
 ### Requirement: 确认后的 HTTP 失败补记
 
-系统 MUST 仅为已向客户端输出可见内容、且快层实际计入账号失败的 HTTP 尝试补记缺失的上游事件。读流出错、缺终态分别使用 `stream_read_error`、`missing_terminal` 和 `TRANSIENT`；出字后停滞使用 `stall` 和 `STALL`。开场元数据和心跳不算可见内容。客户端取消或上下文结束若先于快层确认，及请求级拒绝、出字前停滞或快层未计入的事件 MUST NOT 补记；快层确认失败后客户端才取消（最终响应仍可能为 HTTP 200）时 MUST 照常补记。
+系统 MUST 仅为已向客户端输出可见内容、且快层实际计入账号失败的 HTTP 尝试补记缺失的上游事件。读流出错、缺终态分别使用 `stream_read_error`、`missing_terminal` 和 `TRANSIENT`；出字后停滞使用 `stall` 和 `STALL`；带内失败事件使用 `stream_failed`，类别 MUST 与同载荷直接登记采用相同的状态及类别规则，`RATE_LIMIT`、`CAPACITY_SHED` 等非软失败类别 MUST NOT 计入门槛或份额软失败。OpenAI 快层的会话失败、冷却与失败计数仍使用 `TRANSIENT`。开场元数据和心跳不算可见内容。对读流出错、缺终态与停滞，客户端取消或上下文结束若先于快层确认，则 MUST NOT 补记；快层确认失败后客户端才取消（最终响应仍可能为 HTTP 200）时 MUST 照常补记；客户端离开后若上游仍在读取并实际送达带内失败事件，MUST 照常补记，与直接登记的 `response.failed` 一致。请求级拒绝、出字前停滞或快层未计入的事件 MUST NOT 补记。
 
 #### Scenario: 输出后读流中断
 
 - **WHEN** HTTP 流送出内容后读流出错，快层确认账号失败，且本次发送后没有同账号事件
 - **THEN** 运维记录包含一条 `stream_failed` 尝试，原因为 `stream_read_error`，类别为 `TRANSIENT`，带真实失败时刻和非空安全消息，不虚构上游状态。
+
+#### Scenario: 输出后带内限流失败
+
+- **WHEN** HTTP 流送出内容后收到带内限流失败事件，快层确认账号失败，且本次发送后没有同账号事件
+- **THEN** 运维记录包含一条 `stream_failed` 尝试，原因为 `stream_failed`，类别为 `RATE_LIMIT`，不计入门槛或份额软失败。
+
+#### Scenario: 输出后带内瞬时失败
+
+- **WHEN** HTTP 流送出内容后收到带内瞬时失败事件，快层确认账号失败，且本次发送后没有同账号事件
+- **THEN** 运维记录包含一条 `stream_failed` 尝试，原因为 `stream_failed`，类别为 `TRANSIENT`，消息为安全的带内失败提示，不含上游原文。
+
+#### Scenario: 延迟确认的裸错误
+
+- **WHEN** OAuth 类账号在输出后收到裸 `error`，快层等待终态或停滞条件后才确认失败
+- **THEN** 补项的失败时刻为快层确认时刻，而非裸错误事件到达时刻。
+
+#### Scenario: 客户端离开后收到带内失败
+
+- **WHEN** 客户端在已有输出后离开，而上游读取继续并随后送达带内失败事件
+- **THEN** 快层仍确认上游实际报告的失败，并补记该尝试。
+
+#### Scenario: 带内失败已有直接登记
+
+- **WHEN** 输出后带内失败已直接登记同账号事件（例如 `response.failed`），之后在写运维记录前合并失败事实
+- **THEN** 按发送边界去重，保留直接登记的事件，不追加第二条。
 
 #### Scenario: 同次尝试已有分类
 
