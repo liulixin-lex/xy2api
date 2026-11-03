@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"log/slog"
-	"math"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
@@ -11,6 +10,16 @@ import (
 
 type anthropicAttemptWarmKey struct{}
 type anthropicLatencyModelKey struct{}
+
+const (
+	anthropicStickyMigrationCooldown = 30 * time.Minute
+	anthropicStickyMigrationMax      = 16_384
+)
+
+type anthropicStickyMigrationKey struct {
+	groupID     int64
+	sessionHash string
+}
 
 // WithAnthropicLatencyModel supplies the channel-mapped model for hold lookups.
 func WithAnthropicLatencyModel(ctx context.Context, model string) context.Context {
@@ -47,6 +56,7 @@ func (s *GatewayService) getAnthropicLatencyHoldStateLocked(generation uint64) *
 		state.entries = make(map[openAIAccountModelKey]openAIAccountLatencyHoldEntry)
 		state.latestHoldUntilUnixNano.Store(0)
 		state.mu.Unlock()
+		s.anthropicStickyMigration = nil
 		s.anthropicLatencyHoldReset.Store(generation)
 	}
 	return state
@@ -60,7 +70,7 @@ func (s *GatewayService) anthropicLatencyStateForRead() (*openAIAccountLatencyHo
 	}
 	generation := resilience.AnthropicLatencyHoldGeneration()
 	settings := resilience.Current()
-	if !settings.AnthropicLatencyHoldOn() || resilience.AnthropicLatencyHoldGeneration() != generation {
+	if !settings.AnthropicLatencyHoldOn() {
 		return nil, false
 	}
 	state := s.anthropicLatencyHold.Load()
@@ -69,18 +79,10 @@ func (s *GatewayService) anthropicLatencyStateForRead() (*openAIAccountLatencyHo
 	}
 	if s.anthropicLatencyHoldReset.Load() != generation {
 		s.anthropicLatencyHoldMu.Lock()
-		latestGeneration := resilience.AnthropicLatencyHoldGeneration()
-		latestSettings := resilience.Current()
-		if latestSettings.AnthropicLatencyHoldOn() && latestGeneration == generation {
+		if s.anthropicLatencyHoldReset.Load() != generation {
 			state = s.getAnthropicLatencyHoldStateLocked(generation)
 		}
 		s.anthropicLatencyHoldMu.Unlock()
-		if !latestSettings.AnthropicLatencyHoldOn() || latestGeneration != generation || s.anthropicLatencyHoldReset.Load() != generation {
-			return nil, false
-		}
-	}
-	if resilience.AnthropicLatencyHoldGeneration() != generation || !resilience.Current().AnthropicLatencyHoldOn() {
-		return nil, false
 	}
 	return state, true
 }
@@ -151,35 +153,68 @@ func (s *GatewayService) anthropicLatencyHoldSnapshotForOutboundModel(account *A
 	return state.snapshot(account.ID, openAIAccountModelTransientModel(model), now)
 }
 
-func (s *GatewayService) anthropicLatencyFreshSampleCount(account *Account, requestedModel string, now time.Time) float64 {
-	if s == nil || account == nil {
-		return 0
-	}
-	model, _ := resolveAnthropicOutboundModel(account, requestedModel)
-	key, ok := openAIAccountModelTransientKey(account.ID, model)
-	if !ok {
-		return 0
-	}
-	state, active := s.anthropicLatencyStateForRead()
-	if !active {
-		return 0
-	}
-	state.mu.Lock()
-	defer state.mu.Unlock()
-	entry, exists := state.entries[key]
-	if !exists || entry.lastSample.IsZero() {
-		return 0
-	}
-	age := now.Sub(entry.lastSample)
-	if age <= 0 {
-		return entry.weightedSamples
-	}
-	return entry.weightedSamples * math.Exp(-float64(age)/float64(openAIAccountLatencyHoldDecayTau))
-}
-
 func (s *GatewayService) anthropicLatencyHoldActive() bool {
 	state, active := s.anthropicLatencyStateForRead()
 	return active && state.latestHoldUntilUnixNano.Load() > time.Now().UnixNano()
+}
+
+func (s *GatewayService) anthropicStickyMigrationCoolingDown(groupID int64, sessionHash string, now time.Time) bool {
+	if sessionHash == "" {
+		return false
+	}
+	state, active := s.anthropicLatencyStateForRead()
+	if !active || state == nil {
+		return false
+	}
+	key := anthropicStickyMigrationKey{groupID: groupID, sessionHash: sessionHash}
+	s.anthropicLatencyHoldMu.Lock()
+	defer s.anthropicLatencyHoldMu.Unlock()
+	generation := resilience.AnthropicLatencyHoldGeneration()
+	if !resilience.Current().AnthropicLatencyHoldOn() {
+		return false
+	}
+	if s.anthropicLatencyHoldReset.Load() != generation {
+		s.getAnthropicLatencyHoldStateLocked(generation)
+	}
+	last, ok := s.anthropicStickyMigration[key]
+	if !ok {
+		return false
+	}
+	if now.Sub(last) >= anthropicStickyMigrationCooldown {
+		delete(s.anthropicStickyMigration, key)
+		return false
+	}
+	return true
+}
+
+func (s *GatewayService) noteAnthropicStickyMigration(groupID int64, sessionHash string, at time.Time) {
+	if s == nil || sessionHash == "" {
+		return
+	}
+	s.anthropicLatencyHoldMu.Lock()
+	defer s.anthropicLatencyHoldMu.Unlock()
+	generation := resilience.AnthropicLatencyHoldGeneration()
+	if !resilience.Current().AnthropicLatencyHoldOn() || s.anthropicLatencyHoldReset.Load() != generation {
+		return
+	}
+	if s.anthropicStickyMigration == nil {
+		s.anthropicStickyMigration = make(map[anthropicStickyMigrationKey]time.Time)
+	}
+	key := anthropicStickyMigrationKey{groupID: groupID, sessionHash: sessionHash}
+	if _, exists := s.anthropicStickyMigration[key]; !exists && len(s.anthropicStickyMigration) >= anthropicStickyMigrationMax {
+		var oldestKey anthropicStickyMigrationKey
+		var oldest time.Time
+		found := false
+		for candidateKey, migratedAt := range s.anthropicStickyMigration {
+			if !found || migratedAt.Before(oldest) {
+				oldestKey, oldest, found = candidateKey, migratedAt, true
+			}
+		}
+		if found {
+			delete(s.anthropicStickyMigration, oldestKey)
+		}
+	}
+	s.anthropicStickyMigration[key] = at
 }
 
 func (s *GatewayService) partitionAnthropicLatencyHeldAccounts(accounts []*Account, requestedModel string) []*Account {
@@ -262,24 +297,19 @@ func (s *GatewayService) migrateAnthropicLatencyHeldOwner(ctx context.Context, g
 	if len(routingIDs) > 0 && !containsInt64(routingIDs, stickyID) {
 		return stickyID, false
 	}
+	if s.anthropicStickyMigrationCoolingDown(derefGroupID(groupID), sessionHash, time.Now()) {
+		return keep("cooldown")
+	}
 	var targets []*Account
-	insufficientSamples := false
 	for _, candidate := range accounts {
-		if candidate.ID == stickyID || candidate.Priority != owner.Priority || !eligible(candidate, false) ||
-			(len(routingIDs) > 0 && !containsInt64(routingIDs, candidate.ID)) ||
+		if candidate.ID == stickyID || candidate.Priority != owner.Priority ||
+			(len(routingIDs) > 0 && !containsInt64(routingIDs, candidate.ID)) || !eligible(candidate, false) ||
 			s.anthropicLatencyHoldSnapshot(candidate, requestedModel, time.Now()).Held {
-			continue
-		}
-		if s.anthropicLatencyFreshSampleCount(candidate, requestedModel, time.Now()) < float64(openAIAccountLatencyMinSamples) {
-			insufficientSamples = true
 			continue
 		}
 		targets = append(targets, candidate)
 	}
 	if len(targets) == 0 {
-		if insufficientSamples {
-			return keep("insufficient_samples")
-		}
 		return keep("no_target")
 	}
 	if s.concurrencyService == nil {
@@ -313,6 +343,7 @@ func (s *GatewayService) migrateAnthropicLatencyHeldOwner(ctx context.Context, g
 	if err != nil || !deleted {
 		return keep("owner_changed")
 	}
+	s.noteAnthropicStickyMigration(derefGroupID(groupID), sessionHash, time.Now())
 	resilience.StateFrom(ctx).ClearKeptStickyIfOwner(stickyID)
 	model, _ := resolveAnthropicOutboundModel(owner, requestedModel)
 	slog.Warn("anthropic_account_latency_sticky_migrated", "platform", PlatformAnthropic, "group_id", derefGroupID(groupID),

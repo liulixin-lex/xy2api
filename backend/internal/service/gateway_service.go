@@ -846,6 +846,7 @@ type GatewayService struct {
 	anthropicLatencyHoldMu    sync.Mutex
 	anthropicLatencyHold      atomic.Pointer[openAIAccountLatencyHoldState]
 	anthropicLatencyHoldReset atomic.Uint64
+	anthropicStickyMigration  map[anthropicStickyMigrationKey]time.Time
 }
 
 // NewGatewayService creates a new GatewayService

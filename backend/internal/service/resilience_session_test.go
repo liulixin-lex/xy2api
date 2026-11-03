@@ -99,6 +99,17 @@ func TestGatewayLastResortPrefersHighestTierThenSoonest(t *testing.T) {
 	result, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", "claude-sonnet-4", nil, "", 0)
 	require.NoError(t, err)
 	require.Equal(t, int64(23), result.Account.ID, "priority 1 first, then the soonest end of the penalty")
+
+	// A live Claude latency hold defers the earlier recovery account within
+	// this priority tier; the last-resort selector must populate held itself.
+	st := resilience.NewRequestState()
+	ctx := resilience.WithRequestState(context.Background(), st)
+	account := &Account{ID: 23, Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
+	anthropicTestSamples(svc, account, "claude-sonnet-4", 11*time.Second, 6, time.Now())
+	group := &Group{ID: groupID, Platform: PlatformAnthropic, Status: StatusActive, Hydrated: true}
+	result = svc.resilienceGatewayLastResort(ctx, group, &groupID, "", "claude-sonnet-4", nil, nil)
+	require.NotNil(t, result)
+	require.Equal(t, int64(22), result.Account.ID, "a held account must follow a non-held same-priority candidate")
 }
 
 func TestLastResortTakesAFreeSlotBeforeWaiting(t *testing.T) {

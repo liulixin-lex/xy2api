@@ -48,18 +48,24 @@ func TestAnthropicLatencySwitchReset(t *testing.T) {
 	now := time.Now()
 	anthropicTestSamples(svc, a, "model", 11*time.Second, 6, now)
 	require.True(t, svc.anthropicLatencyHoldSnapshot(a, "model", now).Held)
+	svc.noteAnthropicStickyMigration(probeTestGroupID, "sess", now)
 	off := on
 	off.AnthropicLatencyHold.Enabled = false
 	resilience.Publish(off)
 	resilience.Publish(on)
 	require.False(t, svc.anthropicLatencyHoldSnapshot(a, "model", now).Held)
-	require.Zero(t, svc.anthropicLatencyFreshSampleCount(a, "model", now))
+	require.False(t, svc.anthropicStickyMigrationCoolingDown(probeTestGroupID, "sess", now), "disable/re-enable clears migration cooldowns")
+	anthropicTestSamples(svc, a, "model", 11*time.Second, 5, now)
+	require.False(t, svc.anthropicLatencyHoldSnapshot(a, "model", now).Held)
+	anthropicTestSamples(svc, a, "model", 11*time.Second, 1, now)
+	require.True(t, svc.anthropicLatencyHoldSnapshot(a, "model", now).Held)
 	resilience.Publish(off)
 	anthropicTestSamples(svc, a, "model", time.Second, 7, now)
 	resilience.Publish(on)
-	require.Zero(t, svc.anthropicLatencyFreshSampleCount(a, "model", now))
-	anthropicTestSamples(svc, a, "model", time.Second, 1, now)
-	require.Equal(t, float64(1), svc.anthropicLatencyFreshSampleCount(a, "model", now))
+	anthropicTestSamples(svc, a, "model", 11*time.Second, 5, now)
+	require.False(t, svc.anthropicLatencyHoldSnapshot(a, "model", now).Held)
+	anthropicTestSamples(svc, a, "model", 11*time.Second, 1, now)
+	require.True(t, svc.anthropicLatencyHoldSnapshot(a, "model", now).Held)
 }
 
 func TestAnthropicLatencyAttemptGates(t *testing.T) {
@@ -77,9 +83,8 @@ func TestAnthropicLatencyAttemptGates(t *testing.T) {
 		{"spillover", &AccountSelectionResult{stickySessionHit: true, StickyCapacitySpillover: true}, false, false, true, true, false},
 		{"prior failure", &AccountSelectionResult{stickySessionHit: true}, true, false, true, true, false},
 		{"same account failure", &AccountSelectionResult{stickySessionHit: true}, false, true, true, true, false},
-		{"conversion", &AccountSelectionResult{stickySessionHit: true}, false, false, false, true, false},
+		{"non-streaming", &AccountSelectionResult{stickySessionHit: true}, false, false, false, true, false},
 		{"no semantic output", &AccountSelectionResult{stickySessionHit: true}, false, false, true, false, false},
-		{"after migration", &AccountSelectionResult{}, false, false, true, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := &GatewayService{}
@@ -91,6 +96,8 @@ func TestAnthropicLatencyAttemptGates(t *testing.T) {
 			ctx = WithAnthropicAttemptWarm(ctx, tc.selection, tc.failure)
 			start := time.Now().Add(-20 * time.Second)
 			st.SetAttemptProfile(resilience.AttemptProfile{AccountID: 1, Model: model, AttemptStart: start, Warm: anthropicAttemptWarmFromContext(ctx), Stream: tc.stream})
+			expectedWarm := tc.selection != nil && tc.selection.stickySessionHit && !tc.selection.StickyCapacitySpillover && !tc.failure
+			require.Equal(t, expectedWarm, st.AttemptProfile().Warm, "warm derives from sticky selection and prior-failure state")
 			st.NoteFirstOutput(start.Add(time.Second))
 			if tc.output {
 				st.NoteSemanticOutput(start.Add(12 * time.Second))
@@ -99,21 +106,8 @@ func TestAnthropicLatencyAttemptGates(t *testing.T) {
 				st.MarkAccountFailed(1)
 			}
 			svc.ReportAnthropicAttemptSuccess(ctx, account, &ForwardResult{})
-			state := svc.anthropicLatencyHold.Load()
-			if state == nil {
-				require.False(t, tc.want)
-				return
-			}
-			key, _ := openAIAccountModelTransientKey(1, "outbound")
-			state.mu.Lock()
-			entry := state.entries[key]
-			state.mu.Unlock()
-			if tc.want {
-				require.Equal(t, float64(1), entry.weightedSamples)
-				require.Equal(t, float64(1), entry.weightedSlow)
-			} else {
-				require.Zero(t, entry.weightedSamples)
-			}
+			anthropicTestSamples(svc, account, "outbound", 11*time.Second, 5, start.Add(20*time.Second))
+			require.Equal(t, tc.want, svc.anthropicLatencyHoldSnapshot(account, "alias", start.Add(20*time.Second)).Held)
 		})
 	}
 }
@@ -126,9 +120,9 @@ func TestAnthropicLatencyOrdering(t *testing.T) {
 	now := time.Now()
 	accounts := []*Account{{ID: 1, Priority: 1, Type: AccountTypeAPIKey}, {ID: 2, Priority: 1, Type: AccountTypeAPIKey}, {ID: 3, Priority: 2, Type: AccountTypeAPIKey}}
 	anthropicTestSamples(svc, accounts[0], "model", 11*time.Second, 6, now)
-	for _, name := range []string{"model routing", "layer 2", "layer 3"} {
+	for _, name := range []string{"account segment partition", "load segment partition"} {
 		t.Run(name, func(t *testing.T) {
-			if name == "layer 2" {
+			if name == "load segment partition" {
 				items := []accountWithLoad{{account: accounts[0]}, {account: accounts[1]}, {account: accounts[2]}}
 				got := svc.partitionAnthropicLatencyHeldLoad(items, "model")
 				require.Equal(t, []int64{2, 1, 3}, []int64{got[0].account.ID, got[1].account.ID, got[2].account.ID})
@@ -148,12 +142,12 @@ func TestAnthropicLatencyMigration(t *testing.T) {
 	old := *resilience.Current()
 	t.Cleanup(func() { resilience.Publish(old) })
 	for _, tc := range []struct {
-		name                                                             string
-		targetHeld, insufficient, full, priority, deleteFail, sessionOff bool
-		migrated                                                         bool
-		reason                                                           string
+		name                                                                                                     string
+		targetHeld, full, priority, deleteFail, sessionOff, rejectEligible, routeMiss, cooldown, expiredCooldown bool
+		migrated                                                                                                 bool
+		reason                                                                                                   string
 	}{
-		{name: "healthy", migrated: true, reason: "latency_hold"}, {name: "held", targetHeld: true, reason: "no_target"}, {name: "insufficient", insufficient: true, reason: "insufficient_samples"}, {name: "full", full: true, reason: "no_free_slot"}, {name: "priority", priority: true, reason: "no_target"}, {name: "delete failure", deleteFail: true, reason: "owner_changed"}, {name: "session off", sessionOff: true, reason: "session_off"},
+		{name: "healthy", migrated: true, reason: "latency_hold"}, {name: "held target", targetHeld: true, reason: "no_target"}, {name: "no free slot", full: true, reason: "no_free_slot"}, {name: "different priority", priority: true, reason: "no_target"}, {name: "delete failure", deleteFail: true, reason: "owner_changed"}, {name: "session off", sessionOff: true, reason: "session_off"}, {name: "admission rejected", rejectEligible: true, reason: "no_target"}, {name: "outside routed set", routeMiss: true, reason: "no_target"}, {name: "migration cooldown", cooldown: true, reason: "cooldown"}, {name: "expired migration cooldown", expiredCooldown: true, migrated: true, reason: "latency_hold"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			settings := resilience.Defaults()
@@ -173,19 +167,29 @@ func TestAnthropicLatencyMigration(t *testing.T) {
 			svc.cache = cache
 			now := time.Now()
 			anthropicTestSamples(svc, &accounts[0], "model", 11*time.Second, 6, now)
-			if !tc.insufficient {
-				duration := time.Second
-				if tc.targetHeld {
-					duration = 11 * time.Second
-				}
-				anthropicTestSamples(svc, &accounts[1], "model", duration, 7, now)
+			duration := time.Second
+			if tc.targetHeld {
+				duration = 11 * time.Second
 			}
+			anthropicTestSamples(svc, &accounts[1], "model", duration, 7, now)
 			held := svc.anthropicLatencyHoldSnapshot(&accounts[0], "model", now)
+			if tc.cooldown {
+				svc.noteAnthropicStickyMigration(probeTestGroupID, "sess", now)
+			}
+			if tc.expiredCooldown {
+				svc.noteAnthropicStickyMigration(probeTestGroupID, "sess", now.Add(-anthropicStickyMigrationCooldown-time.Second))
+			}
 			var logs bytes.Buffer
 			previous := slog.Default()
 			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
 			t.Cleanup(func() { slog.SetDefault(previous) })
-			id, migrated := svc.migrateAnthropicLatencyHeldOwner(context.Background(), nil, "sess", "model", 1, []*Account{&accounts[0], &accounts[1]}, nil, nil, func(*Account, bool) bool { return true }, held)
+			routingIDs := []int64(nil)
+			if tc.routeMiss {
+				routingIDs = []int64{1}
+			}
+			eligible := func(*Account, bool) bool { return !tc.rejectEligible }
+			groupID := probeTestGroupID
+			id, migrated := svc.migrateAnthropicLatencyHeldOwner(context.Background(), &groupID, "sess", "model", 1, []*Account{&accounts[0], &accounts[1]}, routingIDs, nil, eligible, held)
 			require.Equal(t, tc.migrated, migrated)
 			require.Contains(t, logs.String(), `"reason":"`+tc.reason+`"`)
 			if tc.migrated {
@@ -203,21 +207,72 @@ func TestAnthropicLatencySelectionMigratesAndRebinds(t *testing.T) {
 	old := *resilience.Current()
 	t.Cleanup(func() { resilience.Publish(old) })
 	resilience.Publish(resilience.Defaults())
-	accounts := probeTestAccounts(PlatformAnthropic)
-	accounts[1].Priority = accounts[0].Priority
-	svc, _, base := newGatewayProbeTestService(accounts, map[int64]int{}, map[string]int64{"sess": 1}, nil)
-	cache := &anthropicTestCache{mockGatewayCacheForPlatform: base}
-	svc.cache = cache
-	now := time.Now()
-	anthropicTestSamples(svc, &accounts[0], "mapped-model", 11*time.Second, 6, now)
-	anthropicTestSamples(svc, &accounts[1], "mapped-model", time.Second, 7, now)
-	ctx := WithAnthropicLatencyModel(context.Background(), "mapped-model")
-	result := selectGatewayForProbeTest(t, ctx, svc, "sess", "model")
-	require.Equal(t, int64(2), result.Account.ID)
-	require.Equal(t, int64(2), cache.sessionBindings["sess"])
-	require.Equal(t, 1, cache.deletes)
-	require.False(t, result.stickySessionHit)
-	if result.ReleaseFunc != nil {
-		result.ReleaseFunc()
+	for _, tc := range []struct {
+		name       string
+		bound      int64
+		route      []int64
+		batchError bool
+		full       bool
+		want       int64
+		wantSticky bool
+	}{
+		{name: "held sticky owner yields despite adverse LRU", bound: 1, want: 2},
+		{name: "healthy sticky owner is marked hot", bound: 2, want: 2, wantSticky: true},
+		{name: "routed migration and ordering", bound: 1, route: []int64{1, 3}, want: 3},
+		{name: "batch load error retains deferral", batchError: true, want: 2},
+		{name: "all full waits for healthy same-tier account", full: true, want: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			accounts := probeTestAccounts(PlatformAnthropic)
+			accounts = append(accounts, Account{ID: 3, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
+				Priority: 2, Concurrency: 4, LoadFactor: intPtr(1), GroupIDs: []int64{probeTestGroupID}, AccountGroups: []AccountGroup{{GroupID: probeTestGroupID}}})
+			accounts[1].Priority = accounts[0].Priority
+			if len(tc.route) > 0 {
+				accounts[2].Priority = accounts[0].Priority
+			}
+			older, newer := time.Now().Add(-time.Minute), time.Now()
+			accounts[0].LastUsedAt, accounts[1].LastUsedAt = &older, &newer
+			var group *Group
+			if len(tc.route) > 0 {
+				group = &Group{ID: probeTestGroupID, Platform: PlatformAnthropic, Status: StatusActive, Hydrated: true,
+					ModelRoutingEnabled: true, ModelRouting: map[string][]int64{"model": tc.route}}
+			}
+			inFlight := map[int64]int{}
+			if tc.full {
+				inFlight[1], inFlight[2], inFlight[3] = 2, 4, 4
+			}
+			bindings := map[string]int64{}
+			if tc.bound > 0 {
+				bindings["sess"] = tc.bound
+			}
+			svc, slots, base := newGatewayProbeTestService(accounts, inFlight, bindings, group)
+			cache := &anthropicTestCache{mockGatewayCacheForPlatform: base}
+			svc.cache = cache
+			if tc.batchError {
+				slots.loadErr = errors.New("load batch failed")
+			}
+			now := time.Now()
+			anthropicTestSamples(svc, &accounts[0], "model", 11*time.Second, 6, now)
+			result := selectGatewayForProbeTest(t, context.Background(), svc, "sess", "model")
+			require.Equal(t, tc.want, result.Account.ID)
+			require.Equal(t, tc.wantSticky, result.stickySessionHit)
+			if tc.bound == 1 && !tc.batchError && !tc.full {
+				require.Equal(t, int64(tc.want), cache.sessionBindings["sess"])
+				require.Equal(t, 1, cache.deletes)
+				require.False(t, result.stickySessionHit)
+			}
+			if tc.full {
+				require.NotNil(t, result.WaitPlan)
+				require.Equal(t, int64(2), result.WaitPlan.AccountID)
+				require.NotEqual(t, int64(3), result.WaitPlan.AccountID, "must not pass a lower priority candidate")
+			}
+			if tc.batchError {
+				require.True(t, result.Acquired)
+				require.NotEqual(t, int64(1), result.Account.ID)
+			}
+			if result.ReleaseFunc != nil {
+				result.ReleaseFunc()
+			}
+		})
 	}
 }
