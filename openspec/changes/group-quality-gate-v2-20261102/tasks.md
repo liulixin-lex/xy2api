@@ -70,7 +70,7 @@
 
 - [x] 4.1 后端：在 `backend/` 下运行 `go test ./internal/service/... ./internal/repository/...`（仓储集成用例需要 Docker），以及按 pins 版本运行 golangci-lint（`--max-issues-per-linter=0 --max-same-issues=0`）。
 - [x] 4.2 前端：`npx -y pnpm@9 --dir frontend run lint:check`、`typecheck`、`test:run`、`build`。
-- [ ] 4.3 开 PR，正文列出规格场景与验证结果；不合并、不发版、不部署（发版按惯例交给 astra）。
+- [x] 4.3 开 PR，正文列出规格场景与验证结果；不合并、不发版、不部署（发版按惯例交给 astra）。
 - [ ] 4.4 上线 24 小时后按 design §7 复核（本地交接包里有回放脚本）。
 
 ## 5 运维（用户在管理端配置，不随代码交付）
