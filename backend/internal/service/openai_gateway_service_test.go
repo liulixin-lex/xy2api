@@ -2138,17 +2138,22 @@ func TestOpenAIStreamingInBandFailuresCreateOrReuseOpsAttempt(t *testing.T) {
 	t.Cleanup(func() { resilience.Publish(originalSettings) })
 
 	tests := []struct {
-		name        string
-		passthrough bool
-		accountType string
-		terminal    string
-		wantReason  string
+		name         string
+		passthrough  bool
+		accountType  string
+		errorPayload string
+		terminal     string
+		wantReason   string
+		wantCategory resilience.Category
+		softFailure  bool
 	}{
-		{name: "native oauth bare error at eof", accountType: AccountTypeOAuth, wantReason: postOutputEvent},
-		{name: "native api key bare error at eof", accountType: AccountTypeAPIKey, wantReason: postOutputEvent},
-		{name: "passthrough oauth bare error at eof", passthrough: true, accountType: AccountTypeOAuth, wantReason: postOutputEvent},
-		{name: "native direct response.failed after bare error is not duplicated", accountType: AccountTypeOAuth, terminal: "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_failed\",\"status\":\"failed\",\"error\":{\"code\":\"server_error\",\"message\":\"temporary upstream failure\"}}}\n\n"},
-		{name: "passthrough direct response.failed after bare error is not duplicated", passthrough: true, accountType: AccountTypeOAuth, terminal: "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_failed\",\"status\":\"failed\",\"error\":{\"code\":\"server_error\",\"message\":\"temporary upstream failure\"}}}\n\n"},
+		{name: "native oauth bare error at eof", accountType: AccountTypeOAuth, wantReason: postOutputEvent, softFailure: true},
+		{name: "native api key bare error at eof", accountType: AccountTypeAPIKey, wantReason: postOutputEvent, softFailure: true},
+		{name: "passthrough oauth bare error at eof", passthrough: true, accountType: AccountTypeOAuth, wantReason: postOutputEvent, softFailure: true},
+		{name: "native api key rate limit bare error is not a soft failure", accountType: AccountTypeAPIKey, errorPayload: `{"type":"error","error":{"type":"rate_limit_error","code":"rate_limit_exceeded","message":"Too many requests"}}`, wantReason: postOutputEvent, wantCategory: resilience.CategoryRateLimit},
+		{name: "native api key capacity bare error is not a soft failure", accountType: AccountTypeAPIKey, errorPayload: `{"type":"error","error":{"type":"server_error","code":"server_is_overloaded","message":"Upstream capacity is overloaded"}}`, wantReason: postOutputEvent, wantCategory: resilience.CategoryCapacityShed},
+		{name: "native direct response.failed after bare error is not duplicated", accountType: AccountTypeOAuth, terminal: "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_failed\",\"status\":\"failed\",\"error\":{\"code\":\"server_error\",\"message\":\"temporary upstream failure\"}}}\n\n", softFailure: true},
+		{name: "passthrough direct response.failed after bare error is not duplicated", passthrough: true, accountType: AccountTypeOAuth, terminal: "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_failed\",\"status\":\"failed\",\"error\":{\"code\":\"server_error\",\"message\":\"temporary upstream failure\"}}}\n\n", softFailure: true},
 	}
 
 	for _, tt := range tests {
@@ -2157,8 +2162,12 @@ func TestOpenAIStreamingInBandFailuresCreateOrReuseOpsAttempt(t *testing.T) {
 			c, ctx, _ := newPostOutputOpsTestContext(t, OpenAIClientTransportHTTP)
 			RecordOpsUpstreamSendBoundary(ctx, account.ID)
 			service := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}}
+			errorPayload := tt.errorPayload
+			if errorPayload == "" {
+				errorPayload = `{"type":"error","error":{"type":"server_error","code":"server_error","message":"temporary upstream failure"}}`
+			}
 			body := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n" +
-				"event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"server_error\",\"code\":\"server_error\",\"message\":\"temporary upstream failure\"}}\n\n" + tt.terminal
+				"event: error\ndata: " + errorPayload + "\n\n" + tt.terminal
 			response := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}
 			if tt.passthrough {
 				_, err := service.handleStreamingResponsePassthrough(ctx, response, c, account, time.Now(), "model", "model")
@@ -2174,12 +2183,19 @@ func TestOpenAIStreamingInBandFailuresCreateOrReuseOpsAttempt(t *testing.T) {
 			require.Len(t, events, 1)
 			require.Equal(t, account.ID, events[0].AccountID)
 			require.Equal(t, "stream_failed", events[0].Kind)
-			require.Equal(t, string(resilience.CategoryTransient), events[0].ResilienceCategory)
+			wantCategory := tt.wantCategory
+			if wantCategory == "" {
+				wantCategory = resilience.CategoryTransient
+			}
+			require.Equal(t, string(wantCategory), events[0].ResilienceCategory)
+			require.Equal(t, tt.softFailure, IsGroupQualitySoftFailure(events[0].Kind, events[0].UpstreamStatusCode, events[0].ResilienceCategory, events[0].Message))
 			if tt.wantReason != "" {
 				require.Equal(t, tt.wantReason, events[0].Reason)
 				require.Equal(t, "upstream reported a failure after output", events[0].Message)
 			} else {
-				require.NotEqual(t, "upstream reported a failure after output", events[0].Message, "the directly registered event should win")
+				require.Empty(t, events[0].Reason, "the directly registered event should win")
+				require.NotZero(t, events[0].UpstreamStatusCode)
+				require.Equal(t, "temporary upstream failure", events[0].Message)
 			}
 		})
 	}

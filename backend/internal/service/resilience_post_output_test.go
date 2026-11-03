@@ -175,7 +175,9 @@ func TestPostOutputFailureAddsOneOpsAttemptForInBandEvent(t *testing.T) {
 		events := opsUpstreamEventsForTest(t, c)
 		require.Len(t, events, 1)
 		require.Equal(t, "stream_failed", events[0].Kind)
-		require.NotEqual(t, "upstream reported a failure after output", events[0].Message)
+		require.Empty(t, events[0].Reason)
+		require.NotZero(t, events[0].UpstreamStatusCode)
+		require.Equal(t, "direct response.failed event", events[0].Message)
 	})
 }
 

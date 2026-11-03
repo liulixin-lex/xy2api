@@ -1536,6 +1536,21 @@ func openAIStreamFailureStatus(payload []byte, message string) int {
 	return http.StatusBadGateway
 }
 
+func openAIStreamFailureStatusAndCategory(kind string, payload []byte, message string) (int, resilience.Category) {
+	message = sanitizeUpstreamErrorMessage(strings.TrimSpace(message))
+	if message == "" {
+		message = "OpenAI upstream response failed"
+	}
+	statusCode := openAIStreamFailureStatus(payload, message)
+	category := opsResilienceCategory(&OpsUpstreamErrorEvent{
+		Kind:                 kind,
+		UpstreamStatusCode:   statusCode,
+		Message:              message,
+		UpstreamResponseBody: string(payload),
+	})
+	return statusCode, resilience.Category(category)
+}
+
 // openAIStreamCredentialAuthFailure distinguishes credential failures from
 // request/content permission denials carried inside an HTTP 200 stream. Do not
 // infer credential health from free-form 403 messages: providers also use
@@ -1817,7 +1832,7 @@ func (s *OpenAIGatewayService) recordOpenAIStreamUpstreamError(
 	if message == "" {
 		message = "OpenAI upstream response failed"
 	}
-	statusCode := openAIStreamFailureStatus(payload, message)
+	statusCode, category := openAIStreamFailureStatusAndCategory(kind, payload, message)
 	detail := ""
 	if len(payload) > 0 && s != nil && s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
 		maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
@@ -1844,9 +1859,7 @@ func (s *OpenAIGatewayService) recordOpenAIStreamUpstreamError(
 			event.AccountID = account.ID
 			event.AccountName = account.Name
 		}
-		classifiedEvent := event
-		classifiedEvent.UpstreamResponseBody = string(payload)
-		event.ResilienceCategory = opsResilienceCategory(&classifiedEvent)
+		event.ResilienceCategory = string(category)
 		appendOpsUpstreamError(c, event)
 	}
 	return message
