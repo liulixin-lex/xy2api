@@ -3441,7 +3441,11 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
-      "value": "event.ResilienceCategory = opsResilienceCategory(&classifiedEvent)"
+      "value": "statusCode, category := openAIStreamFailureStatusAndCategory(kind, payload, message)"
+    },
+    {
+      "path": "backend/internal/service/resilience_post_output.go",
+      "value": "_, category := openAIStreamFailureStatusAndCategory(postOutputEvent, payload, message)"
     },
     {
       "path": "backend/internal/service/openai_gateway_upstream_errors.go",
@@ -3585,7 +3589,7 @@
     },
     {
       "path": "backend/internal/service/resilience_post_output.go",
-      "value": "recordPostOutputFailureFact(ctx, account, kind, resilience.CategoryTransient, time.Now())"
+      "value": "recordPostOutputFailureFact(ctx, account, kind, factCategory, time.Now())"
     },
     {
       "path": "backend/internal/service/resilience_stall.go",
@@ -6260,6 +6264,16 @@
       "id": "xy-recovery-observability",
       "path": "backend/internal/service/resilience_post_output_test.go",
       "literal": "func TestPostOutputFailureAddsOneOpsAttemptAfterConfirmedHTTPFailure"
+    },
+    {
+      "id": "xy-recovery-observability",
+      "path": "backend/internal/service/resilience_post_output_test.go",
+      "literal": "func TestPostOutputFailureAddsOneOpsAttemptForInBandEvent"
+    },
+    {
+      "id": "xy-recovery-observability",
+      "path": "backend/internal/service/openai_gateway_service_test.go",
+      "literal": "func TestOpenAIStreamingInBandFailuresCreateOrReuseOpsAttempt"
     },
     {
       "id": "xy-recovery-observability",

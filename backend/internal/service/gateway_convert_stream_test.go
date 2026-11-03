@@ -329,10 +329,13 @@ func TestGatewayConvertBreakAfterContentEndsWithProtocolTerminal(t *testing.T) {
 				require.Contains(t, body, "hello")
 				requireProtocolTerminal(t, path.name, body)
 				require.True(t, IsResponseCommitted(c), "the handler must not append a second terminal")
-				if tc.name != "retryable_error_event" {
-					MergeOpsPostOutputFailureEvents(c)
-					events := opsUpstreamEventsForTest(t, c)
-					require.Len(t, events, 1)
+				MergeOpsPostOutputFailureEvents(c)
+				events := opsUpstreamEventsForTest(t, c)
+				require.Len(t, events, 1)
+				if tc.name == "retryable_error_event" {
+					require.Equal(t, "stream_error", events[0].Kind)
+					require.Equal(t, string(resilience.CategoryCapacityShed), events[0].ResilienceCategory)
+				} else {
 					if tc.name == "read_error" {
 						require.Equal(t, "stream_read_error", events[0].Reason)
 					} else {

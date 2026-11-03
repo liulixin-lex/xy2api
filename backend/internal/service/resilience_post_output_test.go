@@ -141,6 +141,46 @@ func TestPostOutputFailureAddsOneOpsAttemptAfterConfirmedHTTPFailure(t *testing.
 	}
 }
 
+func TestPostOutputFailureAddsOneOpsAttemptForInBandEvent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withResilienceSettings(t, nil)
+	account := &Account{ID: 629, Name: "test-account", Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+	t.Run("missing direct event is supplemented", func(t *testing.T) {
+		c, ctx, _ := newPostOutputOpsTestContext(t, OpenAIClientTransportHTTP)
+		RecordOpsUpstreamSendBoundary(ctx, account.ID)
+
+		noteResiliencePostOutputFailure(ctx, nil, account, &http.Response{}, postOutputEvent)
+		MergeOpsPostOutputFailureEvents(c)
+
+		events := opsUpstreamEventsForTest(t, c)
+		require.Len(t, events, 1)
+		require.Equal(t, account.ID, events[0].AccountID)
+		require.Equal(t, "stream_failed", events[0].Kind)
+		require.Equal(t, "stream_failed", events[0].Reason)
+		require.Equal(t, string(resilience.CategoryTransient), events[0].ResilienceCategory)
+		require.Equal(t, "upstream reported a failure after output", events[0].Message)
+	})
+
+	t.Run("direct event after boundary wins", func(t *testing.T) {
+		c, ctx, _ := newPostOutputOpsTestContext(t, OpenAIClientTransportHTTP)
+		RecordOpsUpstreamSendBoundary(ctx, account.ID)
+		noteResiliencePostOutputFailure(ctx, nil, account, &http.Response{}, postOutputEvent)
+		service := &OpenAIGatewayService{}
+		service.recordOpenAIStreamUpstreamError(c, account, false, "rid-response-failed", "stream_failed",
+			[]byte(`{"type":"response.failed","response":{"error":{"code":"server_error","message":"direct response.failed event"}}}`),
+			"direct response.failed event")
+		MergeOpsPostOutputFailureEvents(c)
+
+		events := opsUpstreamEventsForTest(t, c)
+		require.Len(t, events, 1)
+		require.Equal(t, "stream_failed", events[0].Kind)
+		require.Empty(t, events[0].Reason)
+		require.NotZero(t, events[0].UpstreamStatusCode)
+		require.Equal(t, "direct response.failed event", events[0].Message)
+	})
+}
+
 func TestPostOutputStallAddsOpsAttemptOnlyAfterVisibleOutput(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	withResilienceSettings(t, nil)
