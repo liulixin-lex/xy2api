@@ -70,19 +70,27 @@ func (s *GatewayService) anthropicLatencyStateForRead() (*openAIAccountLatencyHo
 	}
 	generation := resilience.AnthropicLatencyHoldGeneration()
 	settings := resilience.Current()
-	if !settings.AnthropicLatencyHoldOn() {
+	if !settings.AnthropicLatencyHoldOn() || generation != resilience.AnthropicLatencyHoldGeneration() {
 		return nil, false
 	}
+	return s.anthropicLatencyStateForGeneration(generation)
+}
+
+func (s *GatewayService) anthropicLatencyStateForGeneration(generation uint64) (*openAIAccountLatencyHoldState, bool) {
 	state := s.anthropicLatencyHold.Load()
 	if state == nil {
 		return nil, false
 	}
 	if s.anthropicLatencyHoldReset.Load() != generation {
 		s.anthropicLatencyHoldMu.Lock()
-		if s.anthropicLatencyHoldReset.Load() != generation {
-			state = s.getAnthropicLatencyHoldStateLocked(generation)
+		defer s.anthropicLatencyHoldMu.Unlock()
+		// A reader can wait behind a reset and new samples. Only the current
+		// generation may reset state after acquiring the lock.
+		generation = resilience.AnthropicLatencyHoldGeneration()
+		if !resilience.Current().AnthropicLatencyHoldOn() {
+			return nil, false
 		}
-		s.anthropicLatencyHoldMu.Unlock()
+		state = s.getAnthropicLatencyHoldStateLocked(generation)
 	}
 	return state, true
 }
@@ -340,8 +348,17 @@ func (s *GatewayService) migrateAnthropicLatencyHeldOwner(ctx context.Context, g
 		return keep("owner_changed")
 	}
 	deleted, err := cache.DeleteSessionAccountIDIfOwnerAndReport(ctx, derefGroupID(groupID), sessionHash, stickyID)
-	if err != nil || !deleted {
+	if err != nil {
 		return keep("owner_changed")
+	}
+	if !deleted {
+		keep("owner_changed")
+		resilience.StateFrom(ctx).ClearKeptStickyIfOwner(stickyID)
+		currentOwner, readErr := s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+		if readErr == nil && currentOwner > 0 && currentOwner != stickyID {
+			return currentOwner, false
+		}
+		return 0, false
 	}
 	s.noteAnthropicStickyMigration(derefGroupID(groupID), sessionHash, time.Now())
 	resilience.StateFrom(ctx).ClearKeptStickyIfOwner(stickyID)

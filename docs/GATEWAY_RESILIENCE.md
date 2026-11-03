@@ -227,7 +227,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 - 单账号分组，或组内其他账号都在判慢期时，保留原绑定，不迁移。整体拥塞时不会成批迁移。
 - 质量路由钉住的会话、带 `previous_response_id` 的请求与 WebSocket 不迁移。
 - 开启分组质量门槛的分组不用本节的判慢迁移，改按门槛判据迁出：绑定账号的续轮可见首字 p90 超过策略快档线、有快档成员此刻有空位，且本次选号开启低倍率优先，见[分组质量门槛](GROUP_QUALITY_GATE.md)。判慢降序仍然生效。未开门槛的分组保持本节行为。
-- Claude 迁出目标须通过正常候选准入、与 owner 同优先级且未判慢，并由新鲜负载快照确认空槽；模型路由内的迁出只考虑路由集合。属主比较删除失败、负载查询失败或没有合格目标时保留绑定。每个分组+会话成功迁出后 30 分钟内不再迁出，命中冷却时保留绑定并记 `cooldown`；冷却状态在进程内维护，多实例各自计算。迁出后正常选号并改绑，首轮按冷尝试。
+- Claude 迁出目标须通过正常候选准入、与 owner 同优先级且未判慢，并由新鲜负载快照确认空槽；模型路由内的迁出只考虑路由集合。属主删除出错、负载查询失败或没有合格目标时保留绑定；属主比较确认绑定已变时重新读取绑定，按新 owner 继续，读不到则正常选号。每个分组+会话成功迁出后 30 分钟内不再迁出，命中冷却时保留绑定并记 `cooldown`；冷却状态在进程内维护，多实例各自计算。迁出后正常选号并改绑，首轮按冷尝试。
 
 **范围与回退**
 
@@ -466,7 +466,7 @@ OpenAI 判慢降序与会话迁移的事件（0.4.9，见 §4.5）不带 `resili
 | `openai_account_latency_sticky_migrated` | 会话从判慢期的账号解除绑定；`from_account_id`、`alternative_account_id`（证明同组有健康替代的账号，不一定是本次最终选中的账号）、`model`（原绑定账号的实际出站模型，与上一项一致） |
 | `anthropic_account_latency_hold_started` | Warn；Claude 账号进入判慢期，字段与 OpenAI 对应事件相同，另含 `platform` |
 | `anthropic_account_latency_sticky_migrated` | Warn；属主比较删除成功；含 `group_id`、`model`（最终出站模型）、`from_account_id`、`alternative_account_id`（证明同段存在合格替代，不一定是最终选中的账号）、脱敏 `session` 和 `latency_hold` 原因 |
-| `anthropic_account_latency_sticky_kept` | Info；含 `group_id`、`model`、`from_account_id`、`alternative_account_id`、`reason`、脱敏 `session`。原因：`session_off`、`no_target`、`no_free_slot`、`owner_changed`、`cooldown`；`no_free_slot` 包含新鲜负载查询失败或并发服务缺失，`owner_changed` 包含属主删除出错或缓存不支持属主比较删除 |
+| `anthropic_account_latency_sticky_kept` | Info；含 `group_id`、`model`、`from_account_id`、`alternative_account_id`、`reason`、脱敏 `session`。原因：`session_off`、`no_target`、`no_free_slot`、`owner_changed`、`cooldown`；`no_free_slot` 包含新鲜负载查询失败或并发服务缺失。`owner_changed` 表示本请求未删除绑定：删除出错或缓存不支持属主比较删除时保留 owner，比较确认绑定已变时重新读取并使用新 owner，读不到则正常选号 |
 
 慢失败冷却沿用 `openai_model_transient_state`（warn 级），字段 `account_id`、`model`（实际出站模型）、`failure_streak`（普通瞬时失败的连续次数）、`cooldown_ms`（本次施加的冷却，没有冷却时为 0）、`block_scope`（`account_model`）、`slow_streak`（连续慢失败次数）。每次计划内截止记一条，带 `reason` 为 `planned_first_output_timeout`；API Key 账号普通瞬时失败的那条不带 `reason`，`slow_streak` 为 0（连续计数已被打断）。计划内截止本身看计数 `first_output_timeout` 与运维记录中 Reason 为 `first_output_timeout` 的尝试。
 
