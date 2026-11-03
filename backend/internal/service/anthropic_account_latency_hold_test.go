@@ -99,7 +99,7 @@ func TestAnthropicLatencyAttemptGates(t *testing.T) {
 				st.MarkAccountFailed(1)
 			}
 			svc.ReportAnthropicAttemptSuccess(ctx, account, &ForwardResult{})
-			state := svc.anthropicLatencyHold
+			state := svc.anthropicLatencyHold.Load()
 			if state == nil {
 				require.False(t, tc.want)
 				return

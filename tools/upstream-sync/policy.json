@@ -3602,6 +3602,18 @@
     {
       "path": "backend/internal/service/gateway_scheduling.go",
       "value": "layer2CandidateEligibility := func(account *Account, sticky bool) (bool, bool) {"
+    },
+    {
+      "path": "backend/internal/service/gateway_scheduling.go",
+      "value": "&& s.anthropicLatencyHoldActive() {"
+    },
+    {
+      "path": "backend/internal/service/gateway_scheduling.go",
+      "value": "if held.Held && !shouldClearStickySession(owner, requestedModel) && layer2Eligible(owner, true) {"
+    },
+    {
+      "path": "backend/internal/service/gateway_scheduling.go",
+      "value": "s.anthropicLatencyHoldSnapshotForOutboundModel(candidate.account, model, time.Now())"
     }
   ],
   "forbidden_module_paths": [

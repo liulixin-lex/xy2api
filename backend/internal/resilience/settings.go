@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"sync"
 	"sync/atomic"
 )
 
@@ -455,8 +454,7 @@ func (s *Settings) OutputP99CapOn() bool { return s.master() && s.Reservation.Ou
 func (s *Settings) FailureOn() bool { return s.master() }
 
 var current atomic.Pointer[Settings]
-var anthropicLatencyHoldReset atomic.Uint64
-var publishMu sync.Mutex
+var anthropicLatencyHoldGen atomic.Uint64
 
 func init() {
 	d := Defaults()
@@ -470,22 +468,15 @@ func Current() *Settings { return current.Load() }
 // Publish replaces the process-wide snapshot. It stores a deep copy, so the
 // caller keeps no reference into the shared maps and slices.
 func Publish(s Settings) {
-	publishMu.Lock()
-	defer publishMu.Unlock()
 	s = s.Clone()
-	if !s.AnthropicLatencyHoldOn() {
-		anthropicLatencyHoldReset.Add(1)
-	}
 	current.Store(&s)
+	if !s.AnthropicLatencyHoldOn() {
+		anthropicLatencyHoldGen.Add(1)
+	}
 }
 
-// WithAnthropicLatencyHoldSnapshot serializes sample updates with settings
-// publication and supplies the current reset generation.
-func WithAnthropicLatencyHoldSnapshot(fn func(settings *Settings, reset uint64)) {
-	publishMu.Lock()
-	defer publishMu.Unlock()
-	fn(current.Load(), anthropicLatencyHoldReset.Load())
-}
+// AnthropicLatencyHoldGeneration changes whenever a disabled snapshot is published.
+func AnthropicLatencyHoldGeneration() uint64 { return anthropicLatencyHoldGen.Load() }
 
 // Clone returns a deep copy. The published snapshot is read by every request
 // without locks, so anything that changes a copy (decoding a PUT body into

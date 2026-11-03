@@ -844,8 +844,8 @@ type GatewayService struct {
 	// resilience is the xy2api gateway resilience runtime (optional).
 	resilience                *ResilienceService
 	anthropicLatencyHoldMu    sync.Mutex
-	anthropicLatencyHold      *openAIAccountLatencyHoldState
-	anthropicLatencyHoldReset uint64
+	anthropicLatencyHold      atomic.Pointer[openAIAccountLatencyHoldState]
+	anthropicLatencyHoldReset atomic.Uint64
 }
 
 // NewGatewayService creates a new GatewayService

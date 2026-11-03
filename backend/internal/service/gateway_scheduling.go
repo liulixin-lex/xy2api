@@ -377,12 +377,13 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			}
 		}
 
-		if platform == PlatformAnthropic && sessionHash != "" && stickyAccountID > 0 && containsInt64(routingAccountIDs, stickyAccountID) {
-			if owner := accountByID[stickyAccountID]; owner != nil && !isExcluded(stickyAccountID) &&
-				!shouldClearStickySession(owner, requestedModel) && layer2Eligible(owner, true) {
+		if platform == PlatformAnthropic && sessionHash != "" && stickyAccountID > 0 && containsInt64(routingAccountIDs, stickyAccountID) && s.anthropicLatencyHoldActive() {
+			if owner := accountByID[stickyAccountID]; owner != nil && !isExcluded(stickyAccountID) {
 				held := s.anthropicLatencyHoldSnapshot(owner, latencyModel, time.Now())
-				stickyAccountID, _ = s.migrateAnthropicLatencyHeldOwner(ctx, groupID, sessionHash, latencyModel, stickyAccountID,
-					gatewayAccountsAsPointers(accounts), routingAccountIDs, excludedIDs, layer2Eligible, held)
+				if held.Held && !shouldClearStickySession(owner, requestedModel) && layer2Eligible(owner, true) {
+					stickyAccountID, _ = s.migrateAnthropicLatencyHeldOwner(ctx, groupID, sessionHash, latencyModel, stickyAccountID,
+						gatewayAccountsAsPointers(accounts), routingAccountIDs, excludedIDs, layer2Eligible, held)
+				}
 			}
 		}
 
@@ -575,12 +576,13 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	}
 
 	// ============ Layer 1.5: 粘性会话（仅在无模型路由配置时生效） ============
-	if platform == PlatformAnthropic && len(routingAccountIDs) == 0 && sessionHash != "" && stickyAccountID > 0 {
-		if owner := accountByID[stickyAccountID]; owner != nil && !isExcluded(stickyAccountID) &&
-			!shouldClearStickySession(owner, requestedModel) && layer2Eligible(owner, true) {
+	if platform == PlatformAnthropic && len(routingAccountIDs) == 0 && sessionHash != "" && stickyAccountID > 0 && s.anthropicLatencyHoldActive() {
+		if owner := accountByID[stickyAccountID]; owner != nil && !isExcluded(stickyAccountID) {
 			held := s.anthropicLatencyHoldSnapshot(owner, latencyModel, time.Now())
-			stickyAccountID, _ = s.migrateAnthropicLatencyHeldOwner(ctx, groupID, sessionHash, latencyModel, stickyAccountID,
-				gatewayAccountsAsPointers(accounts), nil, excludedIDs, layer2Eligible, held)
+			if held.Held && !shouldClearStickySession(owner, requestedModel) && layer2Eligible(owner, true) {
+				stickyAccountID, _ = s.migrateAnthropicLatencyHeldOwner(ctx, groupID, sessionHash, latencyModel, stickyAccountID,
+					gatewayAccountsAsPointers(accounts), nil, excludedIDs, layer2Eligible, held)
+			}
 		}
 	}
 	if len(routingAccountIDs) == 0 && sessionHash != "" && stickyAccountID > 0 && !isExcluded(stickyAccountID) {
@@ -776,17 +778,15 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			// 1. 取优先级最小的集合
 			candidates := filterByMinPriority(available)
 			if platform == PlatformAnthropic && s.anthropicLatencyHoldActive() {
-				ordered := s.partitionAnthropicLatencyHeldLoad(candidates, latencyModel)
-				healthy := make([]accountWithLoad, 0, len(ordered))
-				for _, candidate := range ordered {
-					if !s.anthropicLatencyHoldSnapshot(candidate.account, latencyModel, time.Now()).Held {
+				healthy := make([]accountWithLoad, 0, len(candidates))
+				for _, candidate := range candidates {
+					model, _ := resolveAnthropicOutboundModel(candidate.account, latencyModel)
+					if !s.anthropicLatencyHoldSnapshotForOutboundModel(candidate.account, model, time.Now()).Held {
 						healthy = append(healthy, candidate)
 					}
 				}
 				if len(healthy) > 0 {
 					candidates = healthy
-				} else {
-					candidates = ordered
 				}
 			}
 			// 2. （可选）use-it-or-lose-it：优先选用会话窗口最早重置的账号

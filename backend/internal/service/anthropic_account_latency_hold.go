@@ -35,40 +35,82 @@ func anthropicAttemptWarmFromContext(ctx context.Context) bool {
 	return warm
 }
 
-func (s *GatewayService) getAnthropicLatencyHoldStateLocked(reset uint64) *openAIAccountLatencyHoldState {
-	if s.anthropicLatencyHold == nil {
-		s.anthropicLatencyHold = newOpenAIAccountLatencyHoldState(openAIModelTransientDefaultMax)
-		s.anthropicLatencyHoldReset = reset
+func (s *GatewayService) getAnthropicLatencyHoldStateLocked(generation uint64) *openAIAccountLatencyHoldState {
+	state := s.anthropicLatencyHold.Load()
+	if state == nil {
+		state = newOpenAIAccountLatencyHoldState(openAIModelTransientDefaultMax)
+		s.anthropicLatencyHold.Store(state)
+		s.anthropicLatencyHoldReset.Store(generation)
 	}
-	if reset != s.anthropicLatencyHoldReset {
-		s.anthropicLatencyHold.mu.Lock()
-		s.anthropicLatencyHold.entries = make(map[openAIAccountModelKey]openAIAccountLatencyHoldEntry)
-		s.anthropicLatencyHold.latestHoldUntilUnixNano.Store(0)
-		s.anthropicLatencyHold.mu.Unlock()
-		s.anthropicLatencyHoldReset = reset
+	if generation != s.anthropicLatencyHoldReset.Load() {
+		state.mu.Lock()
+		state.entries = make(map[openAIAccountModelKey]openAIAccountLatencyHoldEntry)
+		state.latestHoldUntilUnixNano.Store(0)
+		state.mu.Unlock()
+		s.anthropicLatencyHoldReset.Store(generation)
 	}
-	return s.anthropicLatencyHold
+	return state
+}
+
+// anthropicLatencyStateForRead reads generation before settings. The second
+// generation read rejects a concurrent disable/re-enable publication.
+func (s *GatewayService) anthropicLatencyStateForRead() (*openAIAccountLatencyHoldState, bool) {
+	if s == nil {
+		return nil, false
+	}
+	generation := resilience.AnthropicLatencyHoldGeneration()
+	settings := resilience.Current()
+	if !settings.AnthropicLatencyHoldOn() || resilience.AnthropicLatencyHoldGeneration() != generation {
+		return nil, false
+	}
+	state := s.anthropicLatencyHold.Load()
+	if state == nil {
+		return nil, false
+	}
+	if s.anthropicLatencyHoldReset.Load() != generation {
+		s.anthropicLatencyHoldMu.Lock()
+		latestGeneration := resilience.AnthropicLatencyHoldGeneration()
+		latestSettings := resilience.Current()
+		if latestSettings.AnthropicLatencyHoldOn() && latestGeneration == generation {
+			state = s.getAnthropicLatencyHoldStateLocked(generation)
+		}
+		s.anthropicLatencyHoldMu.Unlock()
+		if !latestSettings.AnthropicLatencyHoldOn() || latestGeneration != generation || s.anthropicLatencyHoldReset.Load() != generation {
+			return nil, false
+		}
+	}
+	if resilience.AnthropicLatencyHoldGeneration() != generation || !resilience.Current().AnthropicLatencyHoldOn() {
+		return nil, false
+	}
+	return state, true
 }
 
 func (s *GatewayService) recordAnthropicAccountLatencySample(account *Account, model string, sample time.Duration, now time.Time) {
 	if s == nil || account == nil {
 		return
 	}
-	resilience.WithAnthropicLatencyHoldSnapshot(func(settings *resilience.Settings, reset uint64) {
-		if !settings.AnthropicLatencyHoldOn() {
-			return
-		}
-		s.anthropicLatencyHoldMu.Lock()
-		defer s.anthropicLatencyHoldMu.Unlock()
-		state := s.getAnthropicLatencyHoldStateLocked(reset)
-		entry, started, count, fraction := state.record(account.ID, openAIAccountModelTransientModel(model), sample, now)
-		if started {
-			slog.Warn("anthropic_account_latency_hold_started", "platform", account.Platform,
-				"account_id", account.ID, "model", openAIAccountModelTransientModel(model),
-				"sample_count", count, "slow_fraction", fraction,
-				"hold_seconds", int(openAIAccountLatencyHoldDuration/time.Second), "hold_until", entry.holdUntil)
-		}
-	})
+	s.anthropicLatencyHoldMu.Lock()
+	defer s.anthropicLatencyHoldMu.Unlock()
+	generation := resilience.AnthropicLatencyHoldGeneration()
+	settings := resilience.Current()
+	if !settings.AnthropicLatencyHoldOn() || resilience.AnthropicLatencyHoldGeneration() != generation {
+		return
+	}
+	state := s.getAnthropicLatencyHoldStateLocked(generation)
+	entry, started, count, fraction := state.record(account.ID, openAIAccountModelTransientModel(model), sample, now)
+	// If disable/re-enable raced with the write, discard all evidence from the
+	// prior generation before it can be observed by a later request.
+	latestGeneration := resilience.AnthropicLatencyHoldGeneration()
+	if latestGeneration != generation || !resilience.Current().AnthropicLatencyHoldOn() {
+		s.getAnthropicLatencyHoldStateLocked(latestGeneration)
+		return
+	}
+	if started {
+		slog.Warn("anthropic_account_latency_hold_started", "platform", account.Platform,
+			"account_id", account.ID, "model", openAIAccountModelTransientModel(model),
+			"sample_count", count, "slow_fraction", fraction,
+			"hold_seconds", int(openAIAccountLatencyHoldDuration/time.Second), "hold_until", entry.holdUntil)
+	}
 }
 
 func (s *GatewayService) recordAnthropicAttemptSuccess(ctx context.Context, account *Account) {
@@ -95,17 +137,18 @@ func (s *GatewayService) anthropicLatencyHoldSnapshot(account *Account, requeste
 		return openAIAccountLatencyHoldSnapshot{}
 	}
 	model, _ := resolveAnthropicOutboundModel(account, requestedModel)
-	var snapshot openAIAccountLatencyHoldSnapshot
-	resilience.WithAnthropicLatencyHoldSnapshot(func(settings *resilience.Settings, reset uint64) {
-		if !settings.AnthropicLatencyHoldOn() {
-			return
-		}
-		s.anthropicLatencyHoldMu.Lock()
-		defer s.anthropicLatencyHoldMu.Unlock()
-		state := s.getAnthropicLatencyHoldStateLocked(reset)
-		snapshot = state.snapshot(account.ID, openAIAccountModelTransientModel(model), now)
-	})
-	return snapshot
+	return s.anthropicLatencyHoldSnapshotForOutboundModel(account, model, now)
+}
+
+func (s *GatewayService) anthropicLatencyHoldSnapshotForOutboundModel(account *Account, model string, now time.Time) openAIAccountLatencyHoldSnapshot {
+	if account == nil {
+		return openAIAccountLatencyHoldSnapshot{}
+	}
+	state, active := s.anthropicLatencyStateForRead()
+	if !active {
+		return openAIAccountLatencyHoldSnapshot{}
+	}
+	return state.snapshot(account.ID, openAIAccountModelTransientModel(model), now)
 }
 
 func (s *GatewayService) anthropicLatencyFreshSampleCount(account *Account, requestedModel string, now time.Time) float64 {
@@ -117,44 +160,26 @@ func (s *GatewayService) anthropicLatencyFreshSampleCount(account *Account, requ
 	if !ok {
 		return 0
 	}
-	var samples float64
-	resilience.WithAnthropicLatencyHoldSnapshot(func(settings *resilience.Settings, reset uint64) {
-		if !settings.AnthropicLatencyHoldOn() {
-			return
-		}
-		s.anthropicLatencyHoldMu.Lock()
-		defer s.anthropicLatencyHoldMu.Unlock()
-		state := s.getAnthropicLatencyHoldStateLocked(reset)
-		state.mu.Lock()
-		defer state.mu.Unlock()
-		entry, exists := state.entries[key]
-		if !exists || entry.lastSample.IsZero() {
-			return
-		}
-		age := now.Sub(entry.lastSample)
-		if age <= 0 {
-			samples = entry.weightedSamples
-			return
-		}
-		samples = entry.weightedSamples * math.Exp(-float64(age)/float64(openAIAccountLatencyHoldDecayTau))
-	})
-	return samples
+	state, active := s.anthropicLatencyStateForRead()
+	if !active {
+		return 0
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	entry, exists := state.entries[key]
+	if !exists || entry.lastSample.IsZero() {
+		return 0
+	}
+	age := now.Sub(entry.lastSample)
+	if age <= 0 {
+		return entry.weightedSamples
+	}
+	return entry.weightedSamples * math.Exp(-float64(age)/float64(openAIAccountLatencyHoldDecayTau))
 }
 
 func (s *GatewayService) anthropicLatencyHoldActive() bool {
-	if s == nil {
-		return false
-	}
-	active := false
-	resilience.WithAnthropicLatencyHoldSnapshot(func(settings *resilience.Settings, reset uint64) {
-		if !settings.AnthropicLatencyHoldOn() {
-			return
-		}
-		s.anthropicLatencyHoldMu.Lock()
-		defer s.anthropicLatencyHoldMu.Unlock()
-		active = s.getAnthropicLatencyHoldStateLocked(reset).latestHoldUntilUnixNano.Load() > time.Now().UnixNano()
-	})
-	return active
+	state, active := s.anthropicLatencyStateForRead()
+	return active && state.latestHoldUntilUnixNano.Load() > time.Now().UnixNano()
 }
 
 func (s *GatewayService) partitionAnthropicLatencyHeldAccounts(accounts []*Account, requestedModel string) []*Account {
@@ -166,7 +191,8 @@ func (s *GatewayService) partitionAnthropicLatencyHeldAccounts(accounts []*Accou
 	}
 	held := make(map[int64]openAIAccountLatencyHoldSnapshot, len(accounts))
 	for _, account := range accounts {
-		if snap := s.anthropicLatencyHoldSnapshot(account, requestedModel, time.Now()); snap.Held {
+		model, _ := resolveAnthropicOutboundModel(account, requestedModel)
+		if snap := s.anthropicLatencyHoldSnapshotForOutboundModel(account, model, time.Now()); snap.Held {
 			held[account.ID] = snap
 		}
 	}
@@ -185,14 +211,11 @@ func (s *GatewayService) partitionAnthropicLatencyHeldLoad(items []accountWithLo
 	if !s.anthropicLatencyHoldActive() {
 		return items
 	}
-	accounts := make([]*Account, 0, len(items))
+	held := make(map[int64]openAIAccountLatencyHoldSnapshot, len(items))
 	for _, item := range items {
-		accounts = append(accounts, item.account)
-	}
-	held := make(map[int64]openAIAccountLatencyHoldSnapshot, len(accounts))
-	for _, account := range accounts {
-		if snap := s.anthropicLatencyHoldSnapshot(account, requestedModel, time.Now()); snap.Held {
-			held[account.ID] = snap
+		model, _ := resolveAnthropicOutboundModel(item.account, requestedModel)
+		if snap := s.anthropicLatencyHoldSnapshotForOutboundModel(item.account, model, time.Now()); snap.Held {
+			held[item.account.ID] = snap
 		}
 	}
 	return partitionLatencyHeldSegments(items, func(item accountWithLoad) *Account { return item.account }, held, func(account *Account) int {
