@@ -66,10 +66,12 @@ return tonumber(current)
 `)
 
 var deleteOpenAIStickyAccountScript = redis.NewScript(`
-if redis.call('GET', KEYS[1]) == ARGV[1] then
+local current = redis.call('GET', KEYS[1])
+if current == ARGV[1] then
   redis.call('DEL', KEYS[1])
+  return 1
 end
-return 1
+return 0
 `)
 
 func (c *gatewayCache) ClaimSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration, promote bool) (int64, error) {
@@ -86,7 +88,13 @@ func (c *gatewayCache) ClaimSessionAccountID(ctx context.Context, groupID int64,
 }
 
 func (c *gatewayCache) DeleteSessionAccountIDIfOwner(ctx context.Context, groupID int64, sessionHash string, owner int64) error {
-	return deleteOpenAIStickyAccountScript.Run(ctx, c.rdb, []string{buildSessionKey(groupID, sessionHash)}, owner).Err()
+	_, err := c.DeleteSessionAccountIDIfOwnerAndReport(ctx, groupID, sessionHash, owner)
+	return err
+}
+
+func (c *gatewayCache) DeleteSessionAccountIDIfOwnerAndReport(ctx context.Context, groupID int64, sessionHash string, owner int64) (bool, error) {
+	deleted, err := deleteOpenAIStickyAccountScript.Run(ctx, c.rdb, []string{buildSessionKey(groupID, sessionHash)}, owner).Int64()
+	return deleted == 1, err
 }
 
 var _ service.OpenAIStickyAtomicCache = (*gatewayCache)(nil)

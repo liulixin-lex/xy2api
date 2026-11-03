@@ -38,6 +38,7 @@ func TestC0DefaultsAndGates(t *testing.T) {
 	require.True(t, s.CodexRetryAfterCapOn())
 	require.True(t, s.StreamOnlyLearningOn())
 	require.True(t, s.StreamOnlyFailoverOn())
+	require.True(t, s.AnthropicLatencyHoldOn())
 
 	s.Enabled = false
 	require.False(t, s.PreludeStagingOn())
@@ -48,6 +49,7 @@ func TestC0DefaultsAndGates(t *testing.T) {
 	require.False(t, s.CodexRetryAfterCapOn())
 	require.False(t, s.StreamOnlyLearningOn())
 	require.False(t, s.StreamOnlyFailoverOn())
+	require.False(t, s.AnthropicLatencyHoldOn())
 
 	s = Defaults()
 	s.Failure.DecisionV2 = false
@@ -97,6 +99,7 @@ func TestC0LegacySettingsKeepNewSwitchDefaults(t *testing.T) {
 	require.Equal(t, 57, s.Failure.TransientCooldownSeconds)
 	require.Equal(t, 90, s.Budget.ModelOverrides["example-model"])
 	require.False(t, s.Session.Enabled)
+	require.True(t, s.AnthropicLatencyHoldOn())
 	require.True(t, s.Stream.PreludeStaging)
 	require.True(t, s.Stream.NativePreludeWhitelist)
 	require.True(t, s.Stream.StrictTerminal)

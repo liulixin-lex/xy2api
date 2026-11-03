@@ -330,6 +330,16 @@ func (s *RequestState) NoteSemanticOutput(at time.Time) {
 	}
 }
 
+// SemanticOutputAt returns the first usable output delivered to the client.
+func (s *RequestState) SemanticOutputAt() time.Time {
+	if s == nil {
+		return time.Time{}
+	}
+	s.d.mu.Lock()
+	defer s.d.mu.Unlock()
+	return s.d.semanticOutput
+}
+
 // EndToEndFirstOutputMs includes queueing and all preceding attempts.
 func (s *RequestState) EndToEndFirstOutputMs() *int64 {
 	if s == nil {

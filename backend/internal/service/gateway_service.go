@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -841,7 +842,10 @@ type GatewayService struct {
 	// shareScheduling 由 ProvideShareSchedulingService 注入；nil 时保持原版调度。
 	shareScheduling *ShareSchedulingService
 	// resilience is the xy2api gateway resilience runtime (optional).
-	resilience *ResilienceService
+	resilience                *ResilienceService
+	anthropicLatencyHoldMu    sync.Mutex
+	anthropicLatencyHold      *openAIAccountLatencyHoldState
+	anthropicLatencyHoldReset uint64
 }
 
 // NewGatewayService creates a new GatewayService

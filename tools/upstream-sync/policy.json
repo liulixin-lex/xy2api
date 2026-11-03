@@ -3590,6 +3590,18 @@
     {
       "path": "backend/internal/service/resilience_stall.go",
       "value": "recordPostOutputFailureFact(ctx, account, \"stall\", resilience.CategoryStall, failureAt)"
+    },
+    {
+      "path": "backend/internal/service/gateway_scheduling.go",
+      "value": "s.migrateAnthropicLatencyHeldOwner(ctx, groupID, sessionHash, latencyModel, stickyAccountID,"
+    },
+    {
+      "path": "backend/internal/service/gateway_scheduling.go",
+      "value": "s.partitionAnthropicLatencyHeldLoad(candidates, latencyModel)"
+    },
+    {
+      "path": "backend/internal/service/gateway_scheduling.go",
+      "value": "layer2CandidateEligibility := func(account *Account, sticky bool) (bool, bool) {"
     }
   ],
   "forbidden_module_paths": [

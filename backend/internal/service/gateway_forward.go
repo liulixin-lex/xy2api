@@ -141,7 +141,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		passthroughBody := parsed.Body.Bytes()
 		passthroughModel := parsed.Model
 		if passthroughModel != "" {
-			if mappedModel := account.GetMappedModel(passthroughModel); mappedModel != passthroughModel {
+			if mappedModel, _ := resolveAnthropicOutboundModel(account, passthroughModel); mappedModel != passthroughModel {
 				passthroughBody = s.replaceModelInBody(passthroughBody, mappedModel)
 				logger.LegacyPrintf("service.gateway", "Passthrough model mapping: %s -> %s (account: %s)", parsed.Model, mappedModel, account.Name)
 				passthroughModel = mappedModel
@@ -296,38 +296,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		return nil, err
 	}
 
-	// 应用模型映射：
-	// - APIKey 账号：使用账号级别的显式映射（如果配置），否则透传原始模型名
-	// - OAuth/SetupToken 账号：使用 Anthropic 标准映射（短ID → 长ID）
-	mappedModel := reqModel
-	mappingSource := ""
-	if account.Type == AccountTypeAPIKey {
-		mappedModel = account.GetMappedModel(reqModel)
-		if mappedModel != reqModel {
-			mappingSource = "account"
-		}
-	}
-	if mappingSource == "" && account.Platform == PlatformAnthropic && account.Type == AccountTypeServiceAccount {
-		if candidate, matched := account.ResolveMappedModel(reqModel); matched {
-			mappedModel = candidate
-			mappingSource = "account"
-		} else {
-			normalized := normalizeVertexAnthropicModelID(claude.NormalizeModelID(reqModel))
-			if normalized != reqModel {
-				mappedModel = normalized
-				mappingSource = "vertex"
-			}
-		}
-	}
-	if mappingSource == "" && account.Platform == PlatformAnthropic && account.Type != AccountTypeAPIKey {
-		normalized := claude.NormalizeModelID(reqModel)
-		if normalized != reqModel {
-			mappedModel = normalized
-			mappingSource = "prefix"
-		}
-	}
+	// 应用模型映射；同时供 Claude 判慢键解析复用。
+	mappedModel, mappingSource := resolveAnthropicOutboundModel(account, reqModel)
 	if mappedModel != reqModel {
-		// 替换请求体中的模型名
 		if err := replaceBody(s.replaceModelInBody(body, mappedModel)); err != nil {
 			return nil, err
 		}
@@ -398,6 +369,10 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	hardClassifiedFailure := false
 	lastWireBody := body
 	retryStart := time.Now()
+	attemptModel := originalModel
+	if account.Platform == PlatformAnthropic {
+		attemptModel = openAIAccountModelTransientModel(reqModel)
+	}
 	// xy2api resilience: the first-event guard of the attempt in flight; an
 	// attempt that is retried releases its guard when the next one starts.
 	var activeFirstEvent *firstEventGuard
@@ -425,7 +400,8 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 
 		// 发送请求
 		resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{
-			AccountID: account.ID, Model: originalModel, AttemptStart: time.Now(), Stream: reqStream, BodyBytes: len(wireBody),
+			AccountID: account.ID, Model: attemptModel, AttemptStart: time.Now(),
+			Warm: anthropicAttemptWarmFromContext(ctx) && attempt == 1, Stream: reqStream, BodyBytes: len(wireBody),
 		})
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
 		if err != nil {
@@ -447,6 +423,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				_ = resp.Body.Close()
 
 				if s.shouldRectifySignatureError(ctx, account, respBody, reqModel) {
+					profile := resilience.StateFrom(ctx).AttemptProfile()
+					profile.Warm = false
+					resilience.StateFrom(ctx).SetAttemptProfile(profile)
 					appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 						ProxyID:            opsUpstreamProxyID(account),
 						ProxyName:          opsUpstreamProxyName(account),
@@ -1062,4 +1041,36 @@ func (s *GatewayService) isStickyAccountUpstreamRestricted(ctx context.Context, 
 		return false
 	}
 	return s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel)
+}
+
+// resolveAnthropicOutboundModel is shared by native forwarding and latency routing.
+func resolveAnthropicOutboundModel(account *Account, requestedModel string) (string, string) {
+	mappedModel := requestedModel
+	mappingSource := ""
+	if account.Type == AccountTypeAPIKey {
+		mappedModel = account.GetMappedModel(requestedModel)
+		if mappedModel != requestedModel {
+			mappingSource = "account"
+		}
+	}
+	if mappingSource == "" && account.Platform == PlatformAnthropic && account.Type == AccountTypeServiceAccount {
+		if candidate, matched := account.ResolveMappedModel(requestedModel); matched {
+			mappedModel = candidate
+			mappingSource = "account"
+		} else {
+			normalized := normalizeVertexAnthropicModelID(claude.NormalizeModelID(requestedModel))
+			if normalized != requestedModel {
+				mappedModel = normalized
+				mappingSource = "vertex"
+			}
+		}
+	}
+	if mappingSource == "" && account.Platform == PlatformAnthropic && account.Type != AccountTypeAPIKey {
+		normalized := claude.NormalizeModelID(requestedModel)
+		if normalized != requestedModel {
+			mappedModel = normalized
+			mappingSource = "prefix"
+		}
+	}
+	return mappedModel, mappingSource
 }

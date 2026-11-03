@@ -99,6 +99,7 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 // metadataUserID: 用于客户端亲和调度，从中提取客户端 ID
 // xy2apiUserID: 系统用户 ID，用于二维亲和调度
 func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, xy2apiUserID int64) (result *AccountSelectionResult, err error) {
+	latencyModel := anthropicLatencyModel(ctx, requestedModel)
 	sessionHash = monitorProbeSessionHash(ctx, sessionHash)
 	// 调试日志：记录调度入口参数
 	excludedIDsList := make([]int64, 0, len(excludedIDs))
@@ -269,6 +270,23 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	isChannelRestricted := func(account *Account) bool {
 		return needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel)
 	}
+	layer2CandidateEligibility := func(account *Account, sticky bool) (bool, bool) {
+		if account == nil || isExcluded(account.ID) || !s.isAccountSchedulableForSelection(account) ||
+			!s.isGatewayAccountProfitEligible(ctx, account) || !s.isAccountAllowedForPlatform(account, platform, useMixed) ||
+			(requestedModel != "" && !s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) {
+			return false, false
+		}
+		if isChannelRestricted(account) {
+			return false, true
+		}
+		return s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) &&
+			s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, sticky) &&
+			s.isAccountSchedulableForRPM(ctx, account, sticky), false
+	}
+	layer2Eligible := func(account *Account, sticky bool) bool {
+		eligible, _ := layer2CandidateEligibility(account, sticky)
+		return eligible
+	}
 
 	// 获取模型路由配置（anthropic / openai 目标平台；composite 分组按目标平台判断）
 	var routingAccountIDs []int64
@@ -359,6 +377,15 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			}
 		}
 
+		if platform == PlatformAnthropic && sessionHash != "" && stickyAccountID > 0 && containsInt64(routingAccountIDs, stickyAccountID) {
+			if owner := accountByID[stickyAccountID]; owner != nil && !isExcluded(stickyAccountID) &&
+				!shouldClearStickySession(owner, requestedModel) && layer2Eligible(owner, true) {
+				held := s.anthropicLatencyHoldSnapshot(owner, latencyModel, time.Now())
+				stickyAccountID, _ = s.migrateAnthropicLatencyHeldOwner(ctx, groupID, sessionHash, latencyModel, stickyAccountID,
+					gatewayAccountsAsPointers(accounts), routingAccountIDs, excludedIDs, layer2Eligible, held)
+			}
+		}
+
 		if len(routingCandidates) > 0 {
 			// 1.5. 在路由账号范围内检查粘性会话
 			if sessionHash != "" && stickyAccountID > 0 {
@@ -402,7 +429,9 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 									if s.debugModelRoutingEnabled() {
 										logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] routed sticky hit: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), stickyAccountID)
 									}
-									return s.newSelectionResult(ctx, stickyAccount, true, result.ReleaseFunc, nil)
+									selection, selectionErr := s.newSelectionResult(ctx, stickyAccount, true, result.ReleaseFunc, nil)
+									markAnthropicStickyHit(selection, platform)
+									return selection, selectionErr
 								}
 							}
 
@@ -417,12 +446,14 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 										// 必须走 newSelectionResult 以 hydrate 账号凭证：
 										// 调度快照中的账号是精简版（OAuth token 等被剥离），
 										// 直接返回会导致后续转发缺少凭证而鉴权失败。
-										return s.newSelectionResult(ctx, stickyAccount, false, nil, &AccountWaitPlan{
+										selection, selectionErr := s.newSelectionResult(ctx, stickyAccount, false, nil, &AccountWaitPlan{
 											AccountID:      stickyAccountID,
 											MaxConcurrency: stickyAccount.Concurrency,
 											Timeout:        cfg.StickySessionWaitTimeout,
 											MaxWaiting:     cfg.StickySessionMaxWaiting,
 										})
+										markAnthropicStickyHit(selection, platform)
+										return selection, selectionErr
 									}
 								} else {
 									stickyCacheMissReason = "wait_queue_full"
@@ -497,6 +528,9 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					}
 				})
 				shuffleWithinSortGroups(routingAvailable)
+				if platform == PlatformAnthropic {
+					routingAvailable = s.partitionAnthropicLatencyHeldLoad(routingAvailable, latencyModel)
+				}
 
 				// 4. 尝试获取槽位
 				for _, item := range routingAvailable {
@@ -541,6 +575,14 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	}
 
 	// ============ Layer 1.5: 粘性会话（仅在无模型路由配置时生效） ============
+	if platform == PlatformAnthropic && len(routingAccountIDs) == 0 && sessionHash != "" && stickyAccountID > 0 {
+		if owner := accountByID[stickyAccountID]; owner != nil && !isExcluded(stickyAccountID) &&
+			!shouldClearStickySession(owner, requestedModel) && layer2Eligible(owner, true) {
+			held := s.anthropicLatencyHoldSnapshot(owner, latencyModel, time.Now())
+			stickyAccountID, _ = s.migrateAnthropicLatencyHeldOwner(ctx, groupID, sessionHash, latencyModel, stickyAccountID,
+				gatewayAccountsAsPointers(accounts), nil, excludedIDs, layer2Eligible, held)
+		}
+	}
 	if len(routingAccountIDs) == 0 && sessionHash != "" && stickyAccountID > 0 && !isExcluded(stickyAccountID) {
 		accountID := stickyAccountID
 		if accountID > 0 && !isExcluded(accountID) {
@@ -605,7 +647,9 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 							if s.cache != nil {
 								_ = s.cache.RefreshSessionTTL(ctx, derefGroupID(groupID), sessionHash, stickySessionTTL)
 							}
-							return s.newSelectionResult(ctx, account, true, result.ReleaseFunc, nil)
+							selection, selectionErr := s.newSelectionResult(ctx, account, true, result.ReleaseFunc, nil)
+							markAnthropicStickyHit(selection, platform)
+							return selection, selectionErr
 						}
 					} else {
 						slog.Debug("sticky.layer1_5_no_routing_slot_busy",
@@ -625,12 +669,14 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 								"session", shortSessionHash(sessionHash),
 								"result", "wait_plan",
 							)
-							return s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
+							selection, selectionErr := s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
 								AccountID:      accountID,
 								MaxConcurrency: account.Concurrency,
 								Timeout:        cfg.StickySessionWaitTimeout,
 								MaxWaiting:     cfg.StickySessionMaxWaiting,
 							})
+							markAnthropicStickyHit(selection, platform)
+							return selection, selectionErr
 						}
 					}
 				} else if !clearSticky {
@@ -673,41 +719,11 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	channelRestrictedCount := 0
 	for i := range accounts {
 		acc := &accounts[i]
-		if isExcluded(acc.ID) {
-			continue
-		}
-		// Scheduler snapshots can be temporarily stale (bucket rebuild is throttled);
-		// re-check schedulability here so recently rate-limited/overloaded accounts
-		// are not selected again before the bucket is rebuilt.
-		if !s.isAccountSchedulableForSelection(acc) {
-			continue
-		}
-		if !s.isGatewayAccountProfitEligible(ctx, acc) {
-			continue
-		}
-		if !s.isAccountAllowedForPlatform(acc, platform, useMixed) {
-			continue
-		}
-		if requestedModel != "" && !s.isModelSupportedByAccountWithContext(ctx, acc, requestedModel) {
-			continue
-		}
-		if isChannelRestricted(acc) {
-			channelRestrictedCount++
-			continue
-		}
-		if !s.isAccountSchedulableForModelSelection(ctx, acc, requestedModel) {
-			continue
-		}
-		// 配额检查
-		if !s.isAccountSchedulableForQuota(acc) {
-			continue
-		}
-		// 窗口费用检查（非粘性会话路径）
-		if !s.isAccountSchedulableForWindowCost(ctx, acc, false) {
-			continue
-		}
-		// RPM 检查（非粘性会话路径）
-		if !s.isAccountSchedulableForRPM(ctx, acc, false) {
+		eligible, channelRestricted := layer2CandidateEligibility(acc, false)
+		if !eligible {
+			if channelRestricted {
+				channelRestrictedCount++
+			}
 			continue
 		}
 		candidates = append(candidates, acc)
@@ -759,6 +775,20 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		for len(available) > 0 {
 			// 1. 取优先级最小的集合
 			candidates := filterByMinPriority(available)
+			if platform == PlatformAnthropic && s.anthropicLatencyHoldActive() {
+				ordered := s.partitionAnthropicLatencyHeldLoad(candidates, latencyModel)
+				healthy := make([]accountWithLoad, 0, len(ordered))
+				for _, candidate := range ordered {
+					if !s.anthropicLatencyHoldSnapshot(candidate.account, latencyModel, time.Now()).Held {
+						healthy = append(healthy, candidate)
+					}
+				}
+				if len(healthy) > 0 {
+					candidates = healthy
+				} else {
+					candidates = ordered
+				}
+			}
 			// 2. （可选）use-it-or-lose-it：优先选用会话窗口最早重置的账号
 			if cfg.PreferSoonestReset {
 				candidates = filterBySoonestReset(candidates)
@@ -801,6 +831,9 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 
 	// ============ Layer 3: 兜底排队 ============
 	s.sortCandidatesForFallback(candidates, preferOAuth, cfg.FallbackSelectionMode)
+	if platform == PlatformAnthropic {
+		candidates = s.partitionAnthropicLatencyHeldAccounts(candidates, latencyModel)
+	}
 	for _, acc := range candidates {
 		// 会话数量限制检查（等待计划也需要占用会话配额）
 		if !s.checkAndRegisterSession(ctx, acc, sessionHash) {
@@ -816,9 +849,18 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	return nil, ErrNoAvailableAccounts
 }
 
+func gatewayAccountsAsPointers(accounts []Account) []*Account {
+	result := make([]*Account, len(accounts))
+	for i := range accounts {
+		result[i] = &accounts[i]
+	}
+	return result
+}
+
 func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates []*Account, groupID *int64, sessionHash, requestedModel string, preferOAuth bool) (*AccountSelectionResult, bool, error) {
 	ordered := append([]*Account(nil), candidates...)
 	sortAccountsByPriorityAndLastUsed(ordered, preferOAuth)
+	ordered = s.partitionAnthropicLatencyHeldAccounts(ordered, anthropicLatencyModel(ctx, requestedModel))
 
 	for _, acc := range ordered {
 		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, acc.Concurrency)

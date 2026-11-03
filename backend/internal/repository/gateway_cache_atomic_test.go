@@ -90,6 +90,28 @@ func TestOpenAICacheStickyAtomic(t *testing.T) {
 	require.Equal(t, other, loaded, "stale cleanup cannot delete a later owner")
 }
 
+func TestAnthropicStickyDeleteIfOwner(t *testing.T) {
+	client := redis.NewClient(&redis.Options{Addr: miniredis.RunT(t).Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	cache, ok := NewGatewayCache(client).(*gatewayCache)
+	require.True(t, ok)
+	ctx := context.Background()
+	const session = "claude-session"
+	require.NoError(t, cache.SetSessionAccountID(ctx, 1, session, 42, time.Hour))
+	deleted, err := cache.DeleteSessionAccountIDIfOwnerAndReport(ctx, 1, session, 41)
+	require.NoError(t, err)
+	require.False(t, deleted)
+	owner, err := cache.GetSessionAccountID(ctx, 1, session)
+	require.NoError(t, err)
+	require.EqualValues(t, 42, owner)
+	deleted, err = cache.DeleteSessionAccountIDIfOwnerAndReport(ctx, 1, session, 42)
+	require.NoError(t, err)
+	require.True(t, deleted)
+	deleted, err = cache.DeleteSessionAccountIDIfOwnerAndReport(ctx, 1, session, 42)
+	require.NoError(t, err)
+	require.False(t, deleted)
+}
+
 func TestOpenAICacheUnadmittedReservationExpires(t *testing.T) {
 	addr := os.Getenv("SCHEDULING_TEST_REDIS_ADDR")
 	var fixture *miniredis.Miniredis

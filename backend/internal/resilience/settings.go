@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 )
 
@@ -19,20 +20,21 @@ const SettingKey = "gateway_resilience_settings"
 // switch restores the pre-resilience behavior; newer child switches restore
 // the behavior preceding their own introduction.
 type Settings struct {
-	Enabled       bool                `json:"enabled"`
-	Failure       FailureSettings     `json:"failure"`
-	Session       SessionSettings     `json:"session"`
-	LastResort    SwitchSettings      `json:"last_resort"`
-	Balance       BalanceSettings     `json:"balance"`
-	Budget        BudgetSettings      `json:"budget"`
-	Keepalive     KeepaliveSettings   `json:"keepalive"`
-	Stall         StallSettings       `json:"stall"`
-	Disconnect    DisconnectSettings  `json:"disconnect"`
-	Errors        ErrorSettings       `json:"errors"`
-	FallbackGroup FallbackSettings    `json:"fallback_group"`
-	Reservation   ReservationSettings `json:"reservation"`
-	Stream        StreamSettings      `json:"stream"`
-	Capability    CapabilitySettings  `json:"capability"`
+	Enabled              bool                `json:"enabled"`
+	Failure              FailureSettings     `json:"failure"`
+	Session              SessionSettings     `json:"session"`
+	AnthropicLatencyHold SwitchSettings      `json:"anthropic_latency_hold"`
+	LastResort           SwitchSettings      `json:"last_resort"`
+	Balance              BalanceSettings     `json:"balance"`
+	Budget               BudgetSettings      `json:"budget"`
+	Keepalive            KeepaliveSettings   `json:"keepalive"`
+	Stall                StallSettings       `json:"stall"`
+	Disconnect           DisconnectSettings  `json:"disconnect"`
+	Errors               ErrorSettings       `json:"errors"`
+	FallbackGroup        FallbackSettings    `json:"fallback_group"`
+	Reservation          ReservationSettings `json:"reservation"`
+	Stream               StreamSettings      `json:"stream"`
+	Capability           CapabilitySettings  `json:"capability"`
 }
 
 // StreamSettings controls stream protocol staging and terminal recognition.
@@ -178,11 +180,12 @@ type ReservationSettings struct {
 // Defaults returns the documented default settings (design §10).
 func Defaults() Settings {
 	return Settings{
-		Enabled:    true,
-		Failure:    FailureSettings{TransientCooldownSeconds: 30, RetryAfterCapSeconds: 120, BalanceKeywordsExtra: []string{}, DecisionV2: true},
-		Session:    SessionSettings{Enabled: true, StreakThreshold: 2, StreakWindowSeconds: 600, AvoidSeconds: 600},
-		LastResort: SwitchSettings{Enabled: true},
-		Balance:    BalanceSettings{Enabled: true, PauseSeconds: 300},
+		Enabled:              true,
+		Failure:              FailureSettings{TransientCooldownSeconds: 30, RetryAfterCapSeconds: 120, BalanceKeywordsExtra: []string{}, DecisionV2: true},
+		Session:              SessionSettings{Enabled: true, StreakThreshold: 2, StreakWindowSeconds: 600, AvoidSeconds: 600},
+		LastResort:           SwitchSettings{Enabled: true},
+		AnthropicLatencyHold: SwitchSettings{Enabled: true},
+		Balance:              BalanceSettings{Enabled: true, PauseSeconds: 300},
 		// Of attempts still silent at 20s in 48 h of production data, about half
 		// remained silent at 30s and one tenth at 60s; fresh attempts on healthy
 		// accounts produced a first byte within seconds. The last candidate is
@@ -372,6 +375,9 @@ func (s *Settings) master() bool { return s != nil && s.Enabled }
 // SessionOn reports whether session failure handling is active.
 func (s *Settings) SessionOn() bool { return s.master() && s.Session.Enabled }
 
+// AnthropicLatencyHoldOn controls Claude latency samples, ordering and migration.
+func (s *Settings) AnthropicLatencyHoldOn() bool { return s.master() && s.AnthropicLatencyHold.Enabled }
+
 // LastResortOn reports whether last-resort soft selection is active.
 func (s *Settings) LastResortOn() bool { return s.master() && s.LastResort.Enabled }
 
@@ -449,6 +455,8 @@ func (s *Settings) OutputP99CapOn() bool { return s.master() && s.Reservation.Ou
 func (s *Settings) FailureOn() bool { return s.master() }
 
 var current atomic.Pointer[Settings]
+var anthropicLatencyHoldReset atomic.Uint64
+var publishMu sync.Mutex
 
 func init() {
 	d := Defaults()
@@ -462,8 +470,21 @@ func Current() *Settings { return current.Load() }
 // Publish replaces the process-wide snapshot. It stores a deep copy, so the
 // caller keeps no reference into the shared maps and slices.
 func Publish(s Settings) {
+	publishMu.Lock()
+	defer publishMu.Unlock()
 	s = s.Clone()
+	if !s.AnthropicLatencyHoldOn() {
+		anthropicLatencyHoldReset.Add(1)
+	}
 	current.Store(&s)
+}
+
+// WithAnthropicLatencyHoldSnapshot serializes sample updates with settings
+// publication and supplies the current reset generation.
+func WithAnthropicLatencyHoldSnapshot(fn func(settings *Settings, reset uint64)) {
+	publishMu.Lock()
+	defer publishMu.Unlock()
+	fn(current.Load(), anthropicLatencyHoldReset.Load())
 }
 
 // Clone returns a deep copy. The published snapshot is read by every request

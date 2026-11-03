@@ -692,7 +692,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				zap.Bool("has_bound_session", hasBoundSession),
 				zap.Int("failed_account_count", len(fs.FailedAccountIDs)),
 			)
-			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), currentAPIKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, parsedReq.MetadataUserID, subject.UserID)
+			selectionCtx := c.Request.Context()
+			if channelMapping.Mapped {
+				selectionCtx = service.WithAnthropicLatencyModel(selectionCtx, channelMapping.MappedModel)
+			}
+			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(selectionCtx, currentAPIKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, parsedReq.MetadataUserID, subject.UserID)
 			if err != nil {
 				if failoverClientGone(c) {
 					recordSelectionExhausted(c.Request.Context())
@@ -930,6 +934,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			c.Set("parsed_request", attemptParsedReq)
 			var result *service.ForwardResult
 			requestCtx := c.Request.Context()
+			requestCtx = service.WithAnthropicAttemptWarm(requestCtx, selection,
+				fs.SwitchCount > 0 || fs.SameAccountRetryCount[account.ID] > 0 || fallbackUsed)
 			if fs.SwitchCount > 0 {
 				requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())
 			}
@@ -1162,6 +1168,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 			}
 
+			h.gatewayService.ReportAnthropicAttemptSuccess(requestCtx, account, result)
 			submitForwardUsage(result)
 			// 转发成功，会话槽保持既有空闲超时语义
 			upstreamServedSession = true
