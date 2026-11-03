@@ -21,6 +21,8 @@ export interface GatewayResilienceSettings {
   }
   session: { enabled: boolean; streak_threshold: number; streak_window_seconds: number; avoid_seconds: number }
   last_resort: { enabled: boolean }
+  /** Claude accounts slow to first output on follow-up turns rank last within their priority. */
+  anthropic_latency_hold: { enabled: boolean }
   balance: { enabled: boolean; pause_seconds: number }
   budget: {
     enabled: boolean
