@@ -70,6 +70,9 @@ func noteResiliencePostOutputFailure(ctx context.Context, rl *RateLimitService, 
 	if !st.ReportStreamFailure(account.ID, attempt) {
 		return
 	}
+	if kind == postOutputReadError || kind == postOutputNoTerminal {
+		recordPostOutputFailureFact(ctx, account, kind, resilience.CategoryTransient, time.Now())
+	}
 	st.SessionFailure(ctx, account.ID, resilience.CategoryTransient)
 	// The 200 that carried the failure must not end the conversation's
 	// failed-turn streak (design §9.7).

@@ -55,7 +55,7 @@
 ### 未结事项（2026-10-31 汇总；动手前重新核实）
 
 - **分组质量门槛第二版（2026-11-02 批准）**：实施、双路红队与本地门禁完成，已合并 [PR #185](https://github.com/liulixin-lex/xy2api/pull/185)（2026-11-02，随 0.5.1 发布），见进行中的工作“20261102-group-quality-gate-v2”。可用账号数告警（号池只有 1–2 个号的五个组，组号见本地交接包）待用户在管理端配置。
-- **GPT 报错补漏（2026-11-02 已批准；WP1–WP4、WP6 已实施，[PR #187](https://github.com/liulixin-lex/xy2api/pull/187) 待合并，随 0.5.1 发布）**：订阅共享额度、加密内容跨号、内容拒绝口径、请求兼容类 400 四项，加第 7 版的 400 收尾（WP6），合成一个 PR，叠在 #185 上同期发版；小号池组的兜底分组与告警由管理员在管理端配置。用户追加的 HTTP/1.1 与 HTTP/2 深挖结论（astra 第 8 轮收窄）：本版保持 HTTP/2；现有数据不足以证明改 HTTP/1.1 有净收益，维持暂缓。400 深挖的最大来源是一个旧版 LiteLLM 客户端，需管理员联系该 Key 的用户升级。实施交接包在本地 `.work/tasks/20261102-gpt-error-review/handoff/README.md`，见进行中的工作“20261102-gpt-error-review”。
+- **GPT 报错补漏（2026-11-02 已批准；WP1–WP4、WP6 已合并 [PR #187](https://github.com/liulixin-lex/xy2api/pull/187)，随 0.5.1 发布）**：订阅共享额度、加密内容跨号、内容拒绝口径、请求兼容类 400 四项，加第 7 版的 400 收尾（WP6），合成一个 PR，叠在 #185 上同期发版；小号池组的兜底分组与告警由管理员在管理端配置。用户追加的 HTTP/1.1 与 HTTP/2 深挖结论（astra 第 8 轮收窄）：本版保持 HTTP/2；现有数据不足以证明改 HTTP/1.1 有净收益，维持暂缓。400 深挖的最大来源是一个旧版 LiteLLM 客户端，需管理员联系该 Key 的用户升级。实施交接包在本地 `.work/tasks/20261102-gpt-error-review/handoff/README.md`，见进行中的工作“20261102-gpt-error-review”。
 - **0.4.16 升级配置与量化**：本次只发布、未部署或连接生产。升级前由用户确认 `ops_monitoring_enabled` 开启，补齐真实成本、核对 OAuth 参考倍率，按目标组配置利润门/质量门槛/固定账号、成员关系、并发、优先级与可用数告警。错误率依赖运维日志；C1–C7 缓存量化及是否调整会话绑定 TTL 仍待用户自行执行与决策。
 - **0.4.16 已接受边界**：质量状态进程内、多实例各自计算且重启重新积累；Grok 异步视频跨组轮询仍按轮询组计价；批量图片用量不记分组；非调度实例 OAuth 参考倍率可能需重启刷新；利润预览按已保存价格；高流量指标查询与热路径缓存等优化暂缓。完整边界见 v0.4.16 Release 与现行调度文档。
 - **Claude 缓存后续**：真实供应商工具缓存标记接受度、物理命中和收益未验证；“跟随全局只延长、不缩短”、客户端声明缓存时恢复温会话预留折扣、OAuth 系统提示 TTL 说明及分组选择器资格待决定。既有 OpenAI/Grok 出站缓存字段、`additional_tools`/namespace 等声明识别、旧 Chat 形状 Responses 工具标记与 `ttl_mode`/`ttl_source` 上下文传递仍待独立处理；本版未扩展这些行为。
@@ -108,7 +108,7 @@
 - 推送与 PR（11-02 用户授权，[PR #185](https://github.com/liulixin-lex/xy2api/pull/185)）：记忆按用户选择脱敏后随本 PR 提交——未提交部分中的生产分组号、账号号与经营比例改为代称或定性说法（门槛组 A–E、枢纽号等，对照只在本地交接包 `handoff/aliases.md`）。PR 分支已含主工作区截至 11-02 10:00 UTC 的这两份记忆；PR 合并后，主工作区先把之后新增的本地条目与 main 对比保留，再丢弃其余本地改动并拉取 main。
 - CI（11-02 10:40 UTC，head `cf0a2ee0e`）：test、golangci-lint、frontend、upstream-sync-audit、两项 security 等 9 项通过；`shell`（macos-15，只检查部署脚本，本 PR 未改）两次都未分到 runner（runner_id 0、0 步、约 15 分钟后取消），与 PR #168 当时现象相同，属 CI 基础设施问题，合并前需重跑通过或由用户确认 Actions 的 macOS 额度。
 
-### 20261102-gate-error-volume — 门槛错误率熔断的体量偏差评估（方案已批准，实施中）
+### 20261102-gate-error-volume — 门槛错误率熔断的体量偏差评估（已实施，[PR #188](https://github.com/liulixin-lex/xy2api/pull/188) 待合并，随 0.5.1 发布）
 
 - 来源：用户 2026-11-02 提问。现在按请求数百分比算错误率，大号报错率被压低，无法熔断，但报错请求已经很多。要求 Claude 与 astra 深入分析，给出最终方案。HTTP/1.1 改动暂不做。
 - 材料：本地 `.work/tasks/20261102-gate-error-volume/`，含 README、`evidence/`（11-01 12:00 起的生产只读导出，不入库）、`sim/`、`reviews/`、`PLAN.md`、`handoff/`。
@@ -129,9 +129,22 @@
   - 分支 `fix/gate-post-output-attempts-20261102`，叠在 P0（PR #187）之上，在仓外独立工作树。
   - 分工：Codex gpt-6.1-sol xhigh 两个子 agent。F 负责代码与测试，G 负责 OpenSpec `gate-post-output-attempts-20261102` 与四份现行文档。`docs/README.md` 与 `policy.json` 由主持人登记。
   - 主持人复核纠正 1 处：F 起初只在“发送边界到事实发生时”这一段查同账号事件，与规格不符。规格要求边界之后到请求结束有同账号事件就不补。HTTP 流出字后不会再对同一账号发起真实请求，所以有上界反而可能重复补记。F 已改，并确认不存在这样的路径。
-  - 门禁：四种构建标签 vet、文档一致性、scheduler-diff、干净树 audit 通过。`-race` 回归与第 3 轮红队（astra 逻辑、Opus 规格；同时确认 P0 第 2 轮修复）进行中。
+  - 红队第 3 轮（astra 逻辑、Opus 规格；同时确认 P0 第 2 轮修复）：
+    - astra 阻断 1 项：已输出且快层已确认失败后，客户端才取消时，状态仍为 200，日志层在分流时提前返回，补项丢失。已把合并调用提前到状态分流之前，取消测试分“未提交”“已输出”两种。
+    - 采纳 astra 建议：插件转发路径不经过 repository 出口，在发出 Forward 前补记发送边界。
+    - 采纳 Opus 建议：
+      - 文档改正“流错误快照”“开关”“停滞事件字段”“渠道监控桶名”四处；
+      - `http_upstream.go` 两处钩子分别登记唯一的多行字面量；
+      - 删去补项文案兜底与事实校验这两处投机兜底；
+      - P0 的 Grok Messages 入口用尽也返回 503。
+  - 门禁（变基到 P0 head `56d589f4d` 后）：
+    - `go build`；`go vet` 四种标签；
+    - handler 全包 `-race`、相关 service 与 repository 定向 `-race`；
+    - 文档一致性、scheduler-diff、干净树 audit。
+    - 变基前的改动包全量 `-race` 只有既有的邮箱绑定用例失败。
+  - PR：[#188](https://github.com/liulixin-lex/xy2api/pull/188)。#187 合并后改为以 main 为 base，同步 main 后合并。CI 期间 golangci-lint 报出 P0 两个已无调用方的 Responses 终态写出函数、三处测试未检查类型断言，以及本分支一处无效赋值，均已修复；本机装了与 CI 同版本的 golangci-lint（v2.14.0）复验。
 
-### 20261102-gpt-error-review — GPT 一周报错复盘与韧性优化方案（已实施，PR #187 待合并，随 0.5.1 发布）
+### 20261102-gpt-error-review — GPT 一周报错复盘与韧性优化方案（已合并 #187，随 0.5.1 发布）
 
 - 请求：用户 2026-11-02 授权只读连接生产，分析最近一周 GPT（OpenAI 平台）报错的构成；核实网关韧性、补救、重试与路由是否已化解，以及用户端表现（客户端显示重连还是直接中断）；结合 main 与开放 PR 的最新代码，提出进一步可靠的优化方案。Claude 主持，gpt-6-astra xhigh 反方独立研究并交叉讨论，产出联合方案。
 - 开始状态：main `84e610681`（v0.5.0），工作树仅有既有两份记忆的未提交改动（保留不动）；开放 PR #184、#185。
@@ -833,3 +846,27 @@ pnpm --dir frontend run build
   - 第 3 轮红队无阻断且 CI 通过后合并 #186、#187；
   - 门槛漏记补齐变基到 main，开 PR、合并；
   - 发布 0.5.1。
+
+### 2026-11-02 22:00 UTC — 20261102-gate-error-volume — 输出后断流补记实施与三轮复核完成，开 PR
+
+- 请求/目标：按本地交接包实施“输出后断流补记为失败尝试（含归因修正）”，随 0.5.1 发布；不部署。
+- 开始状态：P0 集成分支 head `91999fbd0`；从它拉出 `fix/gate-post-output-attempts-20261102`，之后两次变基到 P0 新 head。
+- 完成操作：
+  - F 实现，内容见进行中的工作：
+    - 请求级事件序号与按账号的发送边界；
+    - 输出后失败事实；
+    - 日志层先合并、再归因；
+    - WS 隔离。
+  - G 写 OpenSpec `gate-post-output-attempts-20261102` 与四份现行文档。
+  - 主持人纠正去重区间，登记 `docs/README.md` 与 `policy.json`（含 OpenSpec 归属）。
+  - 第 3 轮红队的阻断项与采纳的建议均已修复。
+- 修改文件：`resilience/state.go`、`service/ops_upstream_context.go`、`service/resilience_post_output.go`、`service/resilience_stall.go`、`service/plugin_runtime.go`、`repository/http_upstream.go`、`handler/ops_error_logger.go` 及测试；`GATEWAY_RESILIENCE.md`、`USAGE_METRICS.md`、`GROUP_QUALITY_GATE.md`、`SHARE_SCHEDULING.md`、`docs/README.md`、OpenSpec、`policy.json`、本记忆。
+- 验证：见进行中的工作的“门禁”。
+- 卡点/风险：
+  - WS 不补记，维持现状；
+  - 拿不到发送边界时保守少记；
+  - 上线后上游错误率与告警会因归因口径上升，不代表质量变差。
+- 下一步：
+  - #187 合并后，本 PR 改 base 为 main，同步并合并；
+  - 发布 0.5.1；
+  - 上线后按本地 `sql/post_release_verify.sql` 只读验收，需要用户在会话内授权。

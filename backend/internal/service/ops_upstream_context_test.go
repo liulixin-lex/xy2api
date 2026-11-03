@@ -2,13 +2,37 @@ package service
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
+
+func opsUpstreamEventsForTest(t *testing.T, c *gin.Context) []*OpsUpstreamErrorEvent {
+	t.Helper()
+	value, ok := c.Get(OpsUpstreamErrorsKey)
+	require.True(t, ok)
+	events, ok := value.([]*OpsUpstreamErrorEvent)
+	require.True(t, ok)
+	return events
+}
+
+func newPostOutputOpsTestContext(t *testing.T, transport OpenAIClientTransport) (*gin.Context, context.Context, *resilience.RequestState) {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	st := resilience.NewRequestState()
+	request = request.WithContext(resilience.WithRequestState(request.Context(), st))
+	c.Request = request
+	c.Set(OpsUpstreamErrorsKey, []*OpsUpstreamErrorEvent{})
+	SetOpenAIClientTransport(c, transport)
+	return c, request.Context(), st
+}
 
 func TestSafeUpstreamURL(t *testing.T) {
 	tests := []struct {
@@ -95,6 +119,55 @@ func TestOpsUpstreamErrorEventKeepsExplicitProxySnapshotPerAttempt(t *testing.T)
 	require.NotContains(t, *encoded, "old-proxy.example")
 	require.NotContains(t, *encoded, "proxy-user")
 	require.NotContains(t, *encoded, "proxy-secret")
+}
+
+func TestOpsPostOutputMergeUsesSendBoundaryWhenTimestampsMatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, ctx, st := newPostOutputOpsTestContext(t, OpenAIClientTransportHTTP)
+	const accountID = int64(622)
+	const atUnixMs = int64(1790000000123)
+
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		AtUnixMs: atUnixMs, AccountID: accountID, Platform: PlatformOpenAI,
+		Kind: "http_error", Message: "earlier same-account attempt", ResilienceCategory: "TRANSIENT",
+	})
+	RecordOpsUpstreamSendBoundary(ctx, accountID)
+	st.RecordPostOutputFailureFact(resilience.PostOutputFailureFact{
+		AccountID: accountID, Platform: PlatformOpenAI, ProxyName: opsProxyNameDirect,
+		AtUnixMs: atUnixMs, Reason: "stream_read_error", Category: resilience.CategoryTransient,
+		Message: "upstream stream broke after output",
+	})
+
+	MergeOpsPostOutputFailureEvents(c)
+	MergeOpsPostOutputFailureEvents(c)
+	events := opsUpstreamEventsForTest(t, c)
+	require.Len(t, events, 2)
+	require.Equal(t, atUnixMs, events[0].AtUnixMs)
+	require.Equal(t, atUnixMs, events[1].AtUnixMs, "timestamps cannot distinguish retry boundaries")
+	require.Equal(t, "earlier same-account attempt", events[0].Message)
+	require.Equal(t, "stream_failed", events[1].Kind)
+	require.Equal(t, "stream_read_error", events[1].Reason)
+}
+
+func TestBeginOpsStreamTurnClearsOnlyPostOutputOpsState(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, ctx, st := newPostOutputOpsTestContext(t, OpenAIClientTransportWS)
+	const accountID = int64(623)
+	RecordOpsUpstreamSendBoundary(ctx, accountID)
+	st.MarkAccountFailed(accountID)
+	st.ReportStreamFailure(accountID, 1)
+	st.RecordPostOutputFailureFact(resilience.PostOutputFailureFact{
+		AccountID: accountID, AtUnixMs: 1790000000123, Reason: "stall", Category: resilience.CategoryStall,
+	})
+
+	BeginOpsStreamTurn(c, 1)
+	require.Empty(t, st.TakePostOutputFailureFacts())
+	_, hasBoundary := st.OpsUpstreamSendBoundary(accountID)
+	require.False(t, hasBoundary)
+	require.True(t, st.AccountFailed(accountID))
+	require.True(t, st.StreamFailureReported(accountID))
+	MergeOpsPostOutputFailureEvents(c)
+	require.Empty(t, opsUpstreamEventsForTest(t, c))
 }
 
 func TestOpsUpstreamProxyFieldAccessors(t *testing.T) {

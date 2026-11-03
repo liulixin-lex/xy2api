@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -79,12 +80,15 @@ func TestPluginRuntimeIntegration(t *testing.T) {
 	require.NoError(t, err)
 	request.Header.Set("Content-Type", "application/json")
 	account := &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1}
+	requestCtx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
 	require.True(t, runtime.beginRequest())
-	response, err := runtime.roundTrip(context.Background(), request, "", account)
+	response, err := runtime.roundTrip(requestCtx, request, "", account)
 	if err != nil {
 		runtime.finishRequest()
 	}
 	require.NoError(t, err)
+	_, hasBoundary := resilience.StateFrom(requestCtx).OpsUpstreamSendBoundary(account.ID)
+	assert.True(t, hasBoundary)
 	body, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusCreated, response.StatusCode)

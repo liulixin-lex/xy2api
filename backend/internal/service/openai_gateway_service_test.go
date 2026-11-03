@@ -18,6 +18,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/model"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -1751,6 +1752,9 @@ func TestOpenAIStreamingPostOutputDisconnectQuarantinesSharedProxyWithoutSameStr
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
 		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		state := resilience.NewRequestState()
+		c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
+		RecordOpsUpstreamSendBoundary(c.Request.Context(), account.ID)
 		resp := &http.Response{
 			StatusCode: http.StatusOK,
 			Body: &openAIStreamReadThenErrorCloser{
@@ -1769,6 +1773,11 @@ func TestOpenAIStreamingPostOutputDisconnectQuarantinesSharedProxyWithoutSameStr
 		var failoverErr *UpstreamFailoverError
 		require.False(t, errors.As(err, &failoverErr), "post-output disconnect must not fail over inside the same stream")
 		require.Contains(t, rec.Body.String(), "partial")
+		MergeOpsPostOutputFailureEvents(c)
+		events := opsUpstreamEventsForTest(t, c)
+		require.Len(t, events, 1)
+		require.Equal(t, "stream_read_error", events[0].Reason)
+		require.Equal(t, string(resilience.CategoryTransient), events[0].ResilienceCategory)
 	}
 
 	scheduler := &defaultOpenAIAccountScheduler{service: svc}
@@ -2470,6 +2479,9 @@ func TestOpenAIStreamingMissingTerminalEventReturnsIncompleteError(t *testing.T)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+	state := resilience.NewRequestState()
+	c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
+	RecordOpsUpstreamSendBoundary(c.Request.Context(), 1)
 
 	pr, pw := io.Pipe()
 	resp := &http.Response{
@@ -2488,6 +2500,11 @@ func TestOpenAIStreamingMissingTerminalEventReturnsIncompleteError(t *testing.T)
 	if err == nil || !strings.Contains(err.Error(), "missing terminal event") {
 		t.Fatalf("expected missing terminal event error, got %v", err)
 	}
+	MergeOpsPostOutputFailureEvents(c)
+	events := opsUpstreamEventsForTest(t, c)
+	require.Len(t, events, 1)
+	require.Equal(t, "missing_terminal", events[0].Reason)
+	require.Equal(t, string(resilience.CategoryTransient), events[0].ResilienceCategory)
 }
 
 func TestOpenAIStreamingPassthroughMissingTerminalEventReturnsIncompleteError(t *testing.T) {
@@ -2502,6 +2519,9 @@ func TestOpenAIStreamingPassthroughMissingTerminalEventReturnsIncompleteError(t 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+	state := resilience.NewRequestState()
+	c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
+	RecordOpsUpstreamSendBoundary(c.Request.Context(), 1)
 
 	pr, pw := io.Pipe()
 	resp := &http.Response{
@@ -2520,6 +2540,10 @@ func TestOpenAIStreamingPassthroughMissingTerminalEventReturnsIncompleteError(t 
 	if err == nil || !strings.Contains(err.Error(), "missing terminal event") {
 		t.Fatalf("expected missing terminal event error, got %v", err)
 	}
+	MergeOpsPostOutputFailureEvents(c)
+	events := opsUpstreamEventsForTest(t, c)
+	require.Len(t, events, 1)
+	require.Equal(t, "missing_terminal", events[0].Reason)
 }
 
 func TestOpenAIStreamingPassthroughPostOutputDisconnectQuarantinesSharedProxy(t *testing.T) {

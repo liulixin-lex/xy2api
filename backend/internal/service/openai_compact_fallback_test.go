@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -419,6 +420,52 @@ func TestOpenAIGatewayForwardRetriesStreamingCompactFailureBeforeOutput(t *testi
 	require.Equal(t, "gpt-5.4", gjson.GetBytes(upstream.bodies[1], "model").String())
 	require.NotContains(t, recorder.Body.String(), "context_length_exceeded")
 	require.Contains(t, recorder.Body.String(), "response.completed")
+}
+
+func TestOpenAIGatewayForwardCompactReplayUsesFreshOpsSendBoundary(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-5.5","stream":true,"instructions":"compact-test","input":[{"type":"message","role":"user","content":"hello"},{"type":"compaction_trigger"}]}`)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Body = io.NopCloser(bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	state := resilience.NewRequestState()
+	c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
+	MarkOpenAINativeCompactionV2(c)
+
+	firstFailure := "event: response.failed\n" +
+		`data: {"type":"response.failed","response":{"status":"failed","error":{"code":"context_length_exceeded","message":"context window exceeded"}}}` + "\n\n"
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(firstFailure))},
+		{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: &openAIStreamReadThenErrorCloser{
+			reader: strings.NewReader("event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n"),
+			err:    io.ErrUnexpectedEOF,
+		}},
+	}}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Gateway: config.GatewayConfig{OpenAICompactModel: "gpt-5.4", MaxLineSize: defaultMaxLineSize}},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID: 1, Name: "openai-oauth", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"},
+		Status:      StatusActive, Schedulable: true,
+	}
+
+	_, err := svc.Forward(c.Request.Context(), c, account, body)
+	require.Error(t, err)
+	require.Len(t, upstream.requests, 2)
+	boundary, ok := state.OpsUpstreamSendBoundary(account.ID)
+	require.True(t, ok)
+	require.Equal(t, uint64(1), boundary)
+	MergeOpsPostOutputFailureEvents(c)
+	events := opsUpstreamEventsForTest(t, c)
+	require.Len(t, events, 2)
+	require.Equal(t, "retry", events[0].Kind)
+	require.Equal(t, "compact_model_fallback", events[0].Reason)
+	require.Equal(t, "stream_failed", events[1].Kind)
+	require.Equal(t, "stream_read_error", events[1].Reason)
 }
 
 func TestOpenAIGatewayForwardDoesNotRecurseWhenCompactFallbackAlsoFails(t *testing.T) {

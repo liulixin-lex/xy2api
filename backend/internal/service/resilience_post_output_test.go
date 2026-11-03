@@ -103,6 +103,167 @@ func TestPostOutputFailureCountsOncePerAttempt(t *testing.T) {
 	require.Len(t, rec.of(account.ID), 2)
 }
 
+func TestPostOutputFailureAddsOneOpsAttemptAfterConfirmedHTTPFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withResilienceSettings(t, nil)
+
+	account := &Account{ID: 619, Name: "test-account", Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	for _, tc := range []struct {
+		name   string
+		cause  error
+		reason string
+	}{
+		{name: "read error", cause: io.ErrUnexpectedEOF, reason: postOutputReadError},
+		{name: "missing terminal", reason: postOutputNoTerminal},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, ctx, st := newPostOutputOpsTestContext(t, OpenAIClientTransportHTTP)
+			RecordOpsUpstreamSendBoundary(ctx, account.ID)
+			attempt := &http.Response{}
+			before := postOutputMetric(account.ID, tc.reason)
+
+			resilienceStreamBrokenAfterOutput(ctx, nil, account, attempt, tc.cause, true)
+			resilienceStreamBrokenAfterOutput(ctx, nil, account, attempt, nil, true)
+			MergeOpsPostOutputFailureEvents(c)
+			MergeOpsPostOutputFailureEvents(c)
+
+			events := opsUpstreamEventsForTest(t, c)
+			require.Len(t, events, 1)
+			require.Equal(t, account.ID, events[0].AccountID)
+			require.Equal(t, "stream_failed", events[0].Kind)
+			require.Equal(t, tc.reason, events[0].Reason)
+			require.Equal(t, string(resilience.CategoryTransient), events[0].ResilienceCategory)
+			require.NotEmpty(t, events[0].Message)
+			require.Zero(t, events[0].UpstreamStatusCode)
+			require.Equal(t, before+1, postOutputMetric(account.ID, tc.reason))
+			require.True(t, st.AccountFailed(account.ID))
+		})
+	}
+}
+
+func TestPostOutputStallAddsOpsAttemptOnlyAfterVisibleOutput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withResilienceSettings(t, nil)
+	account := &Account{ID: 620, Name: "test-account", Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
+
+	c, ctx, st := newPostOutputOpsTestContext(t, OpenAIClientTransportHTTP)
+	RecordOpsUpstreamSendBoundary(ctx, account.ID)
+	st.NoteFirstOutput(time.Now())
+	noteResilienceStall(ctx, nil, account)
+	MergeOpsPostOutputFailureEvents(c)
+
+	events := opsUpstreamEventsForTest(t, c)
+	require.Len(t, events, 1)
+	require.Equal(t, "stall", events[0].Reason)
+	require.Equal(t, string(resilience.CategoryStall), events[0].ResilienceCategory)
+
+	preOutputContext, preOutputCtx, _ := newPostOutputOpsTestContext(t, OpenAIClientTransportHTTP)
+	noteResilienceStall(preOutputCtx, nil, account)
+	MergeOpsPostOutputFailureEvents(preOutputContext)
+	require.Empty(t, opsUpstreamEventsForTest(t, preOutputContext))
+}
+
+func TestPostOutputFailureOpsMergeKeepsExistingCategoriesAndUsesConservativeFallback(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withResilienceSettings(t, nil)
+	account := &Account{ID: 621, Name: "test-account", Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+
+	t.Run("event after boundary wins", func(t *testing.T) {
+		c, ctx, _ := newPostOutputOpsTestContext(t, OpenAIClientTransportHTTP)
+		RecordOpsUpstreamSendBoundary(ctx, account.ID)
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			AccountID: account.ID, Platform: account.Platform, Kind: "stream_failed", Reason: "balance_exhausted", Message: "balance exhausted",
+			ResilienceCategory: string(resilience.CategoryBalance),
+		})
+		resilienceStreamBrokenAfterOutput(ctx, nil, account, &http.Response{}, io.ErrUnexpectedEOF, true)
+		MergeOpsPostOutputFailureEvents(c)
+
+		events := opsUpstreamEventsForTest(t, c)
+		require.Len(t, events, 1)
+		require.Equal(t, "stream_failed", events[0].Kind)
+		require.Equal(t, "balance_exhausted", events[0].Reason)
+		require.Equal(t, string(resilience.CategoryBalance), events[0].ResilienceCategory)
+	})
+
+	t.Run("missing boundary avoids duplicates", func(t *testing.T) {
+		c, ctx, _ := newPostOutputOpsTestContext(t, OpenAIClientTransportHTTP)
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			AccountID: account.ID, Platform: account.Platform, Kind: "http_error", Message: "earlier attempt",
+		})
+		resilienceStreamBrokenAfterOutput(ctx, nil, account, &http.Response{}, io.ErrUnexpectedEOF, true)
+		MergeOpsPostOutputFailureEvents(c)
+
+		events := opsUpstreamEventsForTest(t, c)
+		require.Len(t, events, 1)
+		require.Equal(t, "earlier attempt", events[0].Message)
+	})
+
+	t.Run("event after the fact still deduplicates", func(t *testing.T) {
+		c, ctx, st := newPostOutputOpsTestContext(t, OpenAIClientTransportHTTP)
+		RecordOpsUpstreamSendBoundary(ctx, account.ID)
+		st.RecordPostOutputFailureFact(resilience.PostOutputFailureFact{
+			AccountID: account.ID, Platform: account.Platform, ProxyName: opsProxyNameDirect,
+			AtUnixMs: time.Now().UnixMilli(), Reason: "stream_read_error", Category: resilience.CategoryTransient,
+			Message: "upstream stream broke after output",
+		})
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			AccountID: account.ID, Platform: account.Platform, Kind: "http_error", Message: "later attempt event",
+		})
+		MergeOpsPostOutputFailureEvents(c)
+
+		events := opsUpstreamEventsForTest(t, c)
+		require.Len(t, events, 1)
+		require.Equal(t, "http_error", events[0].Kind)
+	})
+
+}
+
+func TestPostOutputOpsFactsKeepP0ExclusionsAndCancellation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withResilienceSettings(t, nil)
+	account := &Account{ID: 628, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	svc := &OpenAIGatewayService{}
+
+	for _, tc := range []struct {
+		name    string
+		payload string
+	}{
+		{
+			name:    "output-after balance",
+			payload: `{"type":"response.failed","response":{"error":{"code":"billing_hard_limit_reached","type":"invalid_request_error","message":"Request blocked."}}}`,
+		},
+		{
+			name:    "encrypted refusal",
+			payload: `{"type":"response.failed","response":{"error":{"code":"invalid_encrypted_content","type":"invalid_request_error","message":"Request blocked."}}}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, ctx, st := newPostOutputOpsTestContext(t, OpenAIClientTransportHTTP)
+			svc.resilienceOpenAIFailedAfterOutput(ctx, account, &http.Response{}, []byte(tc.payload), "Request blocked.", true)
+			MergeOpsPostOutputFailureEvents(c)
+			require.Empty(t, opsUpstreamEventsForTest(t, c))
+			require.False(t, st.AccountFailed(account.ID))
+		})
+	}
+
+	t.Run("client canceled before read failure", func(t *testing.T) {
+		c, ctx, _ := newPostOutputOpsTestContext(t, OpenAIClientTransportHTTP)
+		canceled, cancel := context.WithCancel(ctx)
+		cancel()
+		resilienceStreamBrokenAfterOutput(canceled, nil, account, &http.Response{}, io.ErrUnexpectedEOF, true)
+		MergeOpsPostOutputFailureEvents(c)
+		require.Empty(t, opsUpstreamEventsForTest(t, c))
+	})
+
+	t.Run("failure switch disabled", func(t *testing.T) {
+		withResilienceSettings(t, func(settings *resilience.Settings) { settings.Enabled = false })
+		c, ctx, _ := newPostOutputOpsTestContext(t, OpenAIClientTransportHTTP)
+		resilienceStreamBrokenAfterOutput(ctx, nil, account, &http.Response{}, io.ErrUnexpectedEOF, true)
+		MergeOpsPostOutputFailureEvents(c)
+		require.Empty(t, opsUpstreamEventsForTest(t, c))
+	})
+}
+
 func TestPostOutputFailureStreakRebindsSession(t *testing.T) {
 	// R2: a session bound to an account that fails after output moves away
 	// on the second failure instead of staying for ten.

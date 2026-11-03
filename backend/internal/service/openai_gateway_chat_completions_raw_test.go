@@ -17,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai_compat"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -702,6 +703,8 @@ func TestForwardAsRawChatCompletions_TruncatedStreamAfterOutputFailsRequest(t *t
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
+	state := resilience.NewRequestState()
+	c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
 
 	upstreamBody := strings.Join([]string{
 		`data: {"id":"chatcmpl_cut","object":"chat.completion.chunk","model":"deepseek-v4-pro","choices":[{"index":0,"delta":{"content":"half an ans"},"finish_reason":null}]}`,
@@ -718,7 +721,8 @@ func TestForwardAsRawChatCompletions_TruncatedStreamAfterOutputFailsRequest(t *t
 		httpUpstream: upstream,
 	}
 
-	result, err := svc.forwardAsRawChatCompletions(context.Background(), c, rawChatCompletionsTestAccount(), body, "")
+	account := rawChatCompletionsTestAccount()
+	result, err := svc.forwardAsRawChatCompletions(c.Request.Context(), c, account, body, "")
 	require.Error(t, err)
 	require.NotNil(t, result, "已收字节的用量仍需带回，供 ops 记录首 token 时延")
 	var failoverErr *UpstreamFailoverError
@@ -739,6 +743,10 @@ func TestForwardAsRawChatCompletions_TruncatedStreamAfterOutputFailsRequest(t *t
 	require.Equal(t, "http_error", events[0].Kind)
 	require.Nil(t, events[0].ProxyID)
 	require.Equal(t, opsProxyNameDirect, events[0].ProxyName)
+	MergeOpsPostOutputFailureEvents(c)
+	events = opsUpstreamEventsForTest(t, c)
+	require.Len(t, events, 1, "the source event already represents this attempt")
+	require.Equal(t, "http_error", events[0].Kind)
 }
 
 // 截断 failover 事件必须带上本次传输真实使用的托管代理快照。
