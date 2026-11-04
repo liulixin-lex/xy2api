@@ -3,304 +3,277 @@ import { createI18n } from 'vue-i18n'
 import { baseCompile } from '@intlify/message-compiler'
 import zh from '@/i18n/locales/zh/admin/groupQualityGate'
 import en from '@/i18n/locales/en/admin/groupQualityGate'
-import type { GroupQualityAccountMetrics, GroupQualityGateAccountStatus, GroupQualityGatePolicies, GroupQualityGateStatus } from '@/types/groupQualityGate'
+import type {
+  GroupQualityGateAccountStatus,
+  GroupQualityGateGroupStatus,
+  GroupQualityGatePolicies,
+  GroupQualityGateStatus
+} from '@/types/groupQualityGate'
 import {
   GROUP_QUALITY_BADGE_CLASSES,
-  accountQualityMetricItems,
+  accountQualityAlertItems,
+  activeLatencyHold,
   buildAccountQualityCells,
   buildAccountQualityIndex,
+  groupQualityBlock,
   groupQualityGateView,
   groupQualityPanel,
   groupQualityStateLabel,
-  groupQualityTierText,
-  groupQualityTooltip,
-  strictestQualityLimits,
+  groupQualitySummaryTitle,
   orderGroupsByQuality,
+  qualityDimensionRows,
   qualityTooltipTop,
+  type AccountGroupQuality,
   type GroupQualityCell,
   type GroupQualitySources
 } from '../groupQualityPresentation'
 
 const messageCompiler = (message: unknown) => new Function('return ' + baseCompile(String(message), { mode: 'normal' }).code)()
 const i18nFor = (locale: string) => createI18n({ messageCompiler, legacy: false, locale, messages: { zh: { admin: zh }, en: { admin: en } } }).global
+const zhT = i18nFor('zh').t
 const clock = (iso: string) => `@${iso.slice(11, 16)}`
+const NOW = Date.parse('2026-11-04T10:00:00Z')
 
+// design §5.3 的示例形状。
 const account = (overrides: Partial<GroupQualityGateAccountStatus> = {}): GroupQualityGateAccountStatus => ({
-  account_id: 101, state: 'eligible', until: null, reasons: [], strikes: 0, usable: true, passing: true,
-  guard_held: false, pinned: false, vetoed: false, tier: 0, headroom: 0.4,
-  metrics: { calls: 120, soft_failures: 2, error_rate: 0.017, warm_samples: 40, warm_ttft_p90_ms: 8000 }, ...overrides
-})
-const metrics = (overrides: Partial<GroupQualityAccountMetrics> = {}): GroupQualityAccountMetrics => ({
-  calls: 180, soft_failures: 4, error_rate: 0.022, warm_samples: 64, warm_ttft_p90_ms: 7800,
-  zero_cache_samples: 40, warm_zero_cache_rate: 0.03, ...overrides
-})
-const status = (accounts: GroupQualityGateAccountStatus[], overrides: Partial<GroupQualityGateStatus> = {}): GroupQualityGateStatus => ({
-  generated_at: '2026-11-01T00:00:00Z', stale: false, account_metrics: {},
-  groups: [
-    { group_id: 7, enabled: true, fast_warm_ttft_p90_ms: 10000, effective_fast_warm_ttft_p90_ms: 7300, summary: { eligible: 1, ejected: 0, trial: 0 }, accounts },
-    { group_id: 8, enabled: false, fast_warm_ttft_p90_ms: 10000, effective_fast_warm_ttft_p90_ms: null, summary: { eligible: 0, ejected: 0, trial: 0 }, accounts }
-  ],
+  account_id: 101,
+  status: 'passing',
+  tier: 0,
+  pinned: false,
+  latency_hold: null,
+  ttft: { state: 'pass', value: 9800, factor: 1.08, samples: 23, sessions: 6, bad_until: null },
+  error: { state: 'pass', value: 0.04, samples: 80, failures: 3, wilson_low: 0.013, wilson_high: 0.105, bad_until: null },
+  cache: { state: 'pass', value: 0.82, samples: 24, wilson_low: 0.62, wilson_high: 0.93, bad_until: null },
   ...overrides
 })
-const qualityOf = (row: GroupQualityGateAccountStatus, extra: Partial<GroupQualityGateStatus> = {}) =>
-  buildAccountQualityIndex(status([row], extra), null).get(row.account_id)!.get(7)!
-const policy = (enabled: boolean) => ({ enabled, max_error_rate: 0.1, max_warm_ttft_p90_ms: 20000, fast_warm_ttft_p90_ms: 10000, pinned_account_ids: [] })
-const policies = (groups: Record<string, boolean>): GroupQualityGatePolicies =>
-  ({ version: 3, groups: Object.fromEntries(Object.entries(groups).map(([id, enabled]) => [id, policy(enabled)])) })
-const sources = (overrides: Partial<GroupQualitySources> = {}): GroupQualitySources =>
-  ({ policies: policies({ 7: true, 8: false }), policiesFailed: false, status: status([account()]), statusFailed: false, ...overrides })
+const group = (accounts: GroupQualityGateAccountStatus[], overrides: Partial<GroupQualityGateGroupStatus> = {}): GroupQualityGateGroupStatus => ({
+  group_id: 18,
+  enabled: true,
+  policy: { enabled: true, max_ttft_p90_seconds: 15, max_error_rate: 0.1, min_cache_keep_rate: 0.5, strict: false },
+  expected_p90_ms: 9100,
+  expected_samples: 87,
+  summary: { passing: 3, unknown: 2, retest: 1, failing: 1, pinned: 0 },
+  accounts,
+  ...overrides
+})
+const status = (groups: GroupQualityGateGroupStatus[], overrides: Partial<GroupQualityGateStatus> = {}): GroupQualityGateStatus => ({
+  generated_at: '2026-11-04T10:00:00Z', stale: false, groups, ...overrides
+})
+const policies = (ids: number[], enabled = true): GroupQualityGatePolicies => ({
+  version: 3,
+  groups: Object.fromEntries(ids.map(id => [String(id), {
+    enabled: !enabled,
+    v3: { enabled, max_ttft_p90_seconds: 15, max_error_rate: 0.1, min_cache_keep_rate: 0.5, strict: false }
+  }]))
+})
+const sources = (overrides: Partial<GroupQualitySources> = {}): GroupQualitySources => ({
+  policies: policies([18]), policiesFailed: false, status: status([group([account()])]), statusFailed: false, ...overrides
+})
+const cellOf = (acc: GroupQualityGateAccountStatus, grp: Partial<GroupQualityGateGroupStatus> = {}, stale = false): AccountGroupQuality => {
+  const g = group([acc], grp)
+  return { kind: acc.status, account: acc, group: g, stale }
+}
 
-describe('groupQualityGateView (policy × status)', () => {
-  const openai = (id: number) => ({ id, platform: 'openai' })
-  it.each([
-    ['policy on, evaluated', openai(7), sources(), 'evaluated'],
-    ['policy on, not in status yet', openai(9), sources({ policies: policies({ 9: true }) }), 'pending'],
-    ['policy on, status still lists it as disabled', openai(8), sources({ policies: policies({ 8: true }) }), 'pending'],
-    ['policy off, status still lists it as enabled', openai(7), sources({ policies: policies({ 7: false }) }), 'off'],
-    ['no policy entry', openai(9), sources(), 'off'],
-    ['policy on, status failed', openai(7), sources({ statusFailed: true }), 'failed'],
-    ['policy off, status failed', openai(8), sources({ statusFailed: true }), 'off'],
-    ['policies failed', openai(7), sources({ policiesFailed: true }), 'failed'],
-    ['not loaded yet', openai(7), sources({ policies: null, status: null }), 'loading'],
-    ['policy on, status not loaded yet', openai(7), sources({ status: null }), 'loading'],
-    ['non-OpenAI group even when loading failed', { id: 7, platform: 'anthropic' }, sources({ policiesFailed: true }), 'off'],
-    ['inactive group is never evaluated', { id: 9, platform: 'openai', status: 'inactive' }, sources({ policies: policies({ 9: true }) }), 'off']
-  ] as const)('%s → %s', (_name, group, src, kind) => {
-    expect(groupQualityGateView(group, src).kind).toBe(kind)
+describe('groupQualityGateView', () => {
+  const openai = { id: 18, platform: 'openai' }
+
+  it('follows the v3 switch, not the v2 one', () => {
+    expect(groupQualityGateView(openai, sources()).kind).toBe('evaluated')
+    // v2 开、v3 关：按关闭显示。
+    expect(groupQualityGateView(openai, sources({ policies: policies([18], false) })).kind).toBe('off')
+    expect(groupQualityGateView(openai, sources({ policies: { version: 1, groups: {} } })).kind).toBe('off')
   })
 
-  it('carries the evaluated summary', () => {
-    const view = groupQualityGateView(openai(7), sources())
-    expect(view.kind === 'evaluated' && view.group.summary).toEqual({ eligible: 1, ejected: 0, trial: 0 })
+  it('is off for other platforms and inactive groups, failed or loading while reads are not done', () => {
+    expect(groupQualityGateView({ id: 18, platform: 'anthropic' }, sources()).kind).toBe('off')
+    expect(groupQualityGateView({ ...openai, status: 'inactive' }, sources()).kind).toBe('off')
+    expect(groupQualityGateView(openai, sources({ policiesFailed: true })).kind).toBe('failed')
+    expect(groupQualityGateView(openai, sources({ statusFailed: true })).kind).toBe('failed')
+    expect(groupQualityGateView(openai, sources({ policies: null })).kind).toBe('loading')
+    expect(groupQualityGateView(openai, sources({ status: status([]) })).kind).toBe('pending')
   })
 })
 
-describe('buildAccountQualityCells', () => {
-  const groups = [{ id: 7, platform: 'openai' }, { id: 8, platform: 'openai' }, { id: 9, platform: 'openai' }, { id: 10, platform: 'gemini' }]
-  const kinds = (src: GroupQualitySources, accountId = 101) =>
-    Object.fromEntries([...buildAccountQualityCells(src)(accountId, groups)].map(([id, cell]) => [id, cell.kind]))
-
-  it('uses the evaluated state, pending for new groups and new members, nothing for gates that are off', () => {
-    const src = sources({ policies: policies({ 7: true, 8: false, 9: true }) })
-    expect(kinds(src)).toEqual({ 7: 'eligible', 9: 'pending' })
-    expect(kinds(src, 202)).toEqual({ 7: 'pending', 9: 'pending' })
+describe('buildAccountQualityIndex / buildAccountQualityCells', () => {
+  it('keys each account by group with its own status, group standard and composition', () => {
+    const index = buildAccountQualityIndex(status([group([account({ status: 'unknown' })]), group([account()], { group_id: 47, enabled: false })], { stale: true }))
+    const cell = index.get(101)!.get(18)!
+    expect(cell.kind).toBe('unknown')
+    expect(cell.group.expected_p90_ms).toBe(9100)
+    expect(cell.stale).toBe(true)
+    expect(index.get(101)!.has(47)).toBe(false)
   })
 
-  it('marks gated groups as failed when loading failed and shows nothing while loading', () => {
-    expect(kinds(sources({ statusFailed: true }))).toEqual({ 7: 'failed' })
-    expect(kinds(sources({ policiesFailed: true }))).toEqual({ 7: 'failed', 8: 'failed', 9: 'failed' })
-    expect(kinds(sources({ policies: null, status: null }))).toEqual({})
-  })
-})
-
-describe('buildAccountQualityIndex', () => {
-  it('indexes only enabled groups, keyed by account then group', () => {
-    const index = buildAccountQualityIndex(status([account()]), null)
-    expect([...index.keys()]).toEqual([101])
-    expect([...index.get(101)!.keys()]).toEqual([7])
-    expect(buildAccountQualityIndex(null, null).size).toBe(0)
-  })
-
-  it('maps guard-held accounts to their own kind and keeps the raw state for the rest', () => {
-    expect(qualityOf(account({ state: 'ejected', guard_held: true })).kind).toBe('guard_held')
-    expect(qualityOf(account({ state: 'ejected', pinned: true })).kind).toBe('ejected')
-    expect(qualityOf(account({ state: 'trial' })).kind).toBe('trial')
-    expect(qualityOf(account()).kind).toBe('eligible')
-  })
-
-  it('takes limits from the policy and falls back to the defaults for missing or zero fields', () => {
-    const policies = { version: 3, groups: { 7: { enabled: true, max_error_rate: 0.2, max_warm_ttft_p90_ms: 0, fast_warm_ttft_p90_ms: 10000, pinned_account_ids: [] } } }
-    const quality = buildAccountQualityIndex(status([account()]), policies).get(101)!.get(7)!
-    expect(quality.maxErrorRate).toBe(0.2)
-    expect(quality.maxWarmTtftMs).toBe(20000)
-    expect(qualityOf(account())).toMatchObject({ maxErrorRate: 0.1, maxWarmTtftMs: 20000 })
+  it('marks a new member of an evaluated group as pending and leaves gate-off groups out', () => {
+    const cellsFor = buildAccountQualityCells(sources())
+    const cells = cellsFor(202, [{ id: 18, platform: 'openai' }, { id: 25, platform: 'openai' }])
+    expect(cells.get(18)).toEqual({ kind: 'pending' })
+    expect(cells.has(25)).toBe(false)
   })
 })
 
 describe('state labels and colours', () => {
   it.each([
-    ['zh', { state: 'eligible' }, '合格'],
-    ['zh', { state: 'ejected', until: '2026-11-01T14:20:00Z' }, '熔断至 @14:20'],
-    ['zh', { state: 'ejected' }, '熔断'],
-    ['zh', { state: 'trial' }, '观察中'],
-    ['zh', { state: 'trial', until: '2026-11-01T14:50:00Z' }, '观察至 @14:50'],
-    ['en', { state: 'trial', until: '2026-11-01T14:50:00Z' }, 'Observing until @14:50'],
-    ['zh', { state: 'ejected', guard_held: true, until: '2026-11-01T14:20:00Z' }, '保底保留'],
-    ['en', { state: 'ejected', until: '2026-11-01T14:20:00Z' }, 'Ejected until @14:20'],
-    ['en', { state: 'ejected', guard_held: true }, 'Held by floor guard']
-  ] as const)('%s %j → %s', (locale, row, label) => {
-    expect(groupQualityStateLabel(qualityOf(account(row)), i18nFor(locale).t, clock)).toBe(label)
+    ['passing', '达标', 'Passing'],
+    ['unknown', '未知', 'Unknown'],
+    ['retest', '待复测', 'Retest'],
+    ['failing', '不达标', 'Failing'],
+    ['pinned', '固定', 'Pinned'],
+    ['pending', '等待评估', 'Awaiting evaluation'],
+    ['failed', '读取失败', 'Load failed']
+  ] as const)('labels %s', (kind, zhLabel, enLabel) => {
+    const cell = { kind } as GroupQualityCell
+    expect(groupQualityStateLabel(cell, zhT)).toBe(zhLabel)
+    expect(groupQualityStateLabel(cell, i18nFor('en').t)).toBe(enLabel)
   })
 
-  it('labels the neutral notices', () => {
-    expect(groupQualityStateLabel({ kind: 'pending' }, i18nFor('zh').t, clock)).toBe('等待评估')
-    expect(groupQualityStateLabel({ kind: 'failed' }, i18nFor('zh').t, clock)).toBe('读取失败')
-    expect(groupQualityStateLabel({ kind: 'pending' }, i18nFor('en').t, clock)).toBe('Awaiting evaluation')
+  it('never shows an unknown account as passing', () => {
+    const unknown = cellOf(account({ status: 'unknown', cache: { ...account().cache, state: 'none' } }))
+    expect(groupQualityStateLabel(unknown, zhT)).toBe('未知')
+    expect(GROUP_QUALITY_BADGE_CLASSES.unknown).not.toBe(GROUP_QUALITY_BADGE_CLASSES.passing)
+    expect(GROUP_QUALITY_BADGE_CLASSES.unknown).not.toContain('emerald')
+    expect(groupQualityBlock('主力', unknown, zhT, clock).title).toBe('主力 · 未知')
+    // 只有确实三维达标的才在面板里写“达标”。
+    expect(groupQualityBlock('主力', unknown, zhT, clock).title).not.toContain('达标')
   })
 
-  it('colours each kind with its own palette', () => {
-    expect(GROUP_QUALITY_BADGE_CLASSES.eligible).toContain('emerald')
-    expect(GROUP_QUALITY_BADGE_CLASSES.ejected).toContain('red')
-    expect(GROUP_QUALITY_BADGE_CLASSES.trial).toContain('amber')
-    expect(GROUP_QUALITY_BADGE_CLASSES.guard_held).toContain('sky')
-    expect(GROUP_QUALITY_BADGE_CLASSES.pending).toContain('gray')
-    expect(GROUP_QUALITY_BADGE_CLASSES.failed).toContain('gray')
+  it('shows a pinned account as pinned with its actual dimension states', () => {
+    const pinned = cellOf(account({ status: 'pinned', pinned: true, error: { ...account().error, state: 'fail', value: 0.2 } }))
+    const block = groupQualityBlock('企业', pinned, zhT, clock)
+    expect(block.title).toBe('企业 · 固定')
+    expect(block.note).toContain('质量档固定为 0 档')
+    expect(block.rows.find(row => row.key === 'error')).toMatchObject({ state: 'fail', stateLabel: '不达标', value: '20%' })
   })
 })
 
-describe('orderGroupsByQuality', () => {
-  it('puts ejected, guard-held, trial, failed, pending first and keeps the original order otherwise', () => {
-    const groups = [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }, { id: 6 }, { id: 7 }]
-    const quality = new Map([
-      [2, qualityOf(account({ state: 'trial' }))],
-      [3, qualityOf(account())],
-      [4, qualityOf(account({ state: 'ejected' }))],
-      [5, qualityOf(account({ state: 'ejected', guard_held: true }))],
-      [6, { kind: 'pending' as const }],
-      [7, { kind: 'failed' as const }]
+describe('qualityDimensionRows', () => {
+  it('shows state, value, samples and the group standard for each dimension', () => {
+    const rows = qualityDimensionRows(cellOf(account({ cache: { ...account().cache, state: 'none', samples: 14 } })), zhT)
+    expect(rows.map(row => [row.key, row.stateLabel, row.value, row.detail, row.samples, row.limit])).toEqual([
+      ['ttft', '达标', '9.8s', '系数 ×1.08', '23 · 6 会话', '≤ 15s'],
+      ['error', '达标', '4%', '区间 1.3–10.5%', '3/80', '≤ 10%'],
+      ['cache', '无结论', '82%', '区间 62–93%', '14', '≥ 50%']
     ])
-    expect(orderGroupsByQuality(groups, quality).map(group => group.id)).toEqual([4, 5, 2, 7, 6, 3, 1])
-    expect(orderGroupsByQuality(groups, undefined)).toBe(groups)
+  })
+
+  it('says the group has too few samples when e_G is unavailable, keeping the account factor', () => {
+    const quality = cellOf(account({ ttft: { state: 'none', value: null, factor: 1.3, samples: 15, sessions: 4, bad_until: null } }), { expected_p90_ms: null, expected_samples: 12 })
+    const ttft = qualityDimensionRows(quality, zhT)[0]
+    expect(ttft).toMatchObject({ state: 'none', stateLabel: '无结论', value: '本组样本不足', detail: '系数 ×1.30' })
+    const block = groupQualityBlock('低价', quality, zhT, clock)
+    expect(block.composition).toEqual({ text: '首字：本组样本不足（12/50 条）', insufficient: true })
+    expect(qualityDimensionRows(quality, i18nFor('en').t)[0].value).toBe('Group too thin')
+  })
+
+  it('uses a dash for a dimension without statistics', () => {
+    const rows = qualityDimensionRows(cellOf(account({ error: { state: 'none', value: null, samples: 0, failures: 0, wilson_low: null, wilson_high: null, bad_until: null } })), zhT)
+    expect(rows[1]).toMatchObject({ value: '—', detail: undefined, samples: '0/0' })
   })
 })
 
-describe('groupQualityTooltip', () => {
-  const zh = i18nFor('zh').t
-  const cells = (block: ReturnType<typeof groupQualityTooltip>) => block.rows.map(row => [row.label, row.value, row.note ?? '', row.limit, row.over])
-
-  it('compresses an ejected group into a title, reason chips and a metric | measured | limit table', () => {
-    const block = groupQualityTooltip('Codex', qualityOf(account({
-      state: 'ejected', until: '2026-11-01T14:20:00Z', strikes: 2, reasons: ['error_rate', 'warm_ttft'], headroom: -0.18,
-      metrics: { calls: 150, soft_failures: 21, error_rate: 0.14, warm_samples: 52, warm_ttft_p90_ms: 31800 }
-    })), zh, clock)
-    expect(block.title).toBe('Codex · 熔断至 @14:20（第 2 次）')
-    expect(block.note).toBeUndefined()
-    expect(block.reasons).toEqual(['错误率超线', '续轮可见首字超线'])
-    expect(cells(block)).toEqual([['错误率', '14%', '', '10%', true], ['可见首字 p90', '31.8s', '', '20s', true]])
-    expect(block.headroom).toEqual({ text: '余量 -18%', tone: 'danger' })
+describe('groupQualityBlock', () => {
+  it('lists the bad memory of each dimension that still has one', () => {
+    const quality = cellOf(account({
+      status: 'retest', tier: 1,
+      ttft: { ...account().ttft, state: 'none', bad_until: '2026-11-04T11:20:00Z' },
+      cache: { ...account().cache, bad_until: '2026-11-04T11:42:00Z' }
+    }), { policy: { enabled: true, max_ttft_p90_seconds: 10, max_error_rate: 0.08, min_cache_keep_rate: 0.5, strict: true } })
+    const block = groupQualityBlock('企业', quality, zhT, clock)
+    expect(block.title).toBe('企业 · 待复测')
+    expect(block.strict).toBe(true)
+    expect(block.badMemory).toBe('坏记忆：首字至 @11:20、缓存至 @11:42')
+    expect(block.composition).toEqual({ text: '本组构成 P90 9.1s（87 条）', insufficient: false })
   })
 
-  it('shows the full window for ejected groups, floor guard included, and member metrics for eligible and trial', () => {
-    const postEjection = { calls: 4, soft_failures: 0, error_rate: null, warm_samples: 4, warm_ttft_p90_ms: null }
-    const window = metrics({ calls: 60, soft_failures: 0, error_rate: 0, warm_samples: 103, warm_ttft_p90_ms: 29200 })
-    const pinned = groupQualityTooltip('Codex', qualityOf(account({
-      state: 'ejected', pinned: true, strikes: 1, reasons: ['warm_ttft'], headroom: null, metrics: postEjection
-    })), zh, clock, window)
-    expect(pinned.measuredNote).toBe('熔断时窗口')
-    expect(cells(pinned)).toEqual([['错误率', '0%', '未达判定条件', '10%', false], ['可见首字 p90', '29.2s', '', '20s', true]])
-    expect(pinned.headroom).toEqual({ text: '余量 -46%', tone: 'danger' })
-    const held = groupQualityTooltip('Codex', qualityOf(account({ state: 'ejected', guard_held: true, strikes: 2, headroom: 0.5, metrics: postEjection })), zh, clock,
-      metrics({ calls: 224, soft_failures: 75, error_rate: 0.335, warm_samples: 148, warm_ttft_p90_ms: 8200 }))
-    expect([held.measuredNote, cells(held)[0][1], held.headroom?.text]).toEqual(['熔断时窗口', '33.5%', '余量 -235%'])
-    const trial = groupQualityTooltip('Codex', qualityOf(account({ state: 'trial', headroom: null, metrics: postEjection })), zh, clock, window)
-    expect([trial.measuredNote, cells(trial)[1][1], trial.headroom]).toEqual([undefined, '样本不足', undefined])
-  })
-
-  it('uses member metrics: below-threshold error ratio in grey, too few samples, no data; headroom only when close', () => {
-    const below = groupQualityTooltip('Codex', qualityOf(account({
-      headroom: 0.12, metrics: { calls: 12, soft_failures: 1, error_rate: null, warm_samples: 4, warm_ttft_p90_ms: null }
-    })), zh, clock)
-    expect(below.title).toBe('Codex · 合格')
-    expect(cells(below)).toEqual([['错误率', '8.3%', '未达判定条件', '10%', false], ['可见首字 p90', '样本不足', '', '20s', false]])
-    expect(below.headroom).toEqual({ text: '余量 12%', tone: 'warning' })
-    const empty = groupQualityTooltip('Codex', qualityOf(account({
-      headroom: null, metrics: { calls: 0, soft_failures: 0, error_rate: null, warm_samples: 0, warm_ttft_p90_ms: null }
-    })), zh, clock)
-    expect(cells(empty).map(row => row[1])).toEqual(['无数据', '无数据'])
-    expect(empty.headroom).toBeUndefined()
-    expect(groupQualityTooltip('Codex', qualityOf(account()), zh, clock).headroom).toBeUndefined()
-  })
-
-  it('keeps pinned and floor-guard notes to one short phrase, and flags stale data', () => {
-    expect(groupQualityTooltip('Codex', qualityOf(account({ state: 'ejected', pinned: true, strikes: 1 })), zh, clock).note).toBe('固定账号，熔断时仍调度')
-    const held = groupQualityTooltip('Codex', qualityOf(account({ state: 'ejected', guard_held: true, strikes: 1 }), { stale: true }), i18nFor('en').t, clock)
-    expect([held.title, held.note, held.stale]).toEqual(['Codex · Held by floor guard', 'Kept to hold the minimum of usable accounts', 'Not evaluated for 5+ min, previous state kept'])
-  })
-
-  it('gives pending and failed notices a title and a next step only', () => {
-    expect(groupQualityTooltip('Codex', { kind: 'pending' }, zh, clock)).toEqual({ title: 'Codex · 等待评估', note: '每分钟评估一次', reasons: [], rows: [] })
-    expect(groupQualityTooltip('Codex', { kind: 'failed' }, zh, clock)).toEqual({ title: 'Codex · 读取失败', note: '刷新列表后重试', reasons: [], rows: [] })
+  it('explains the pending and failed notices', () => {
+    expect(groupQualityBlock('主力', { kind: 'pending' }, zhT, clock)).toMatchObject({ title: '主力 · 等待评估', note: '每分钟评估一次', rows: [] })
+    expect(groupQualityBlock('主力', { kind: 'failed' }, zhT, clock)).toMatchObject({ title: '主力 · 读取失败', note: '刷新列表后重试' })
   })
 })
 
-describe('groupQualityTierText', () => {
-  it('shows the tier with the current fast line, or the policy line with a note when the group has no best value', () => {
-    const zh = i18nFor('zh').t
-    expect(groupQualityTierText(qualityOf(account({ tier: 2 })), zh)).toBe('其他档，实时快档线 7.3s')
-    const noBest = qualityOf(account(), { groups: [{ group_id: 7, enabled: true, fast_warm_ttft_p90_ms: 10000, effective_fast_warm_ttft_p90_ms: null, summary: { eligible: 1, ejected: 0, trial: 0 }, accounts: [account()] }] })
-    expect(groupQualityTierText(noBest, zh)).toBe('快档，实时快档线 10s（组内暂无足够样本）')
-    expect(groupQualityTooltip('Codex', qualityOf(account({ state: 'trial', tier: 2 })), zh, clock).tier).toBe('其他档，实时快档线 7.3s')
-    expect(groupQualityTooltip('Codex', qualityOf(account({ state: 'ejected' })), zh, clock).tier).toBeUndefined()
+describe('latency hold', () => {
+  const hold = (until: string, models: string[]) => ({ until, models })
+
+  it('merges models and takes the latest end across groups', () => {
+    const cells = [
+      cellOf(account({ latency_hold: hold('2026-11-04T10:06:00Z', ['gpt-5.5']) })),
+      cellOf(account({ latency_hold: hold('2026-11-04T10:12:00Z', ['gpt-5.5', 'gpt-5.4']) }))
+    ]
+    expect(activeLatencyHold(cells, NOW)).toEqual({ until: '2026-11-04T10:12:00.000Z', models: ['gpt-5.5', 'gpt-5.4'] })
+  })
+
+  it('drops an expired hold without ever saying recovered', () => {
+    const expired = new Map<number, GroupQualityCell>([[18, cellOf(account({ latency_hold: hold('2026-11-04T09:59:00Z', ['gpt-5.5']) }))]])
+    expect(activeLatencyHold(expired.values(), NOW)).toBeNull()
+    const panel = groupQualityPanel([{ id: 18, name: '主力' }], expired, zhT, clock, NOW)!
+    expect(panel.latencyHold).toBeUndefined()
+    expect(panel.indicator).toBe('none')
+    expect(JSON.stringify(panel)).not.toMatch(/恢复|recovered/i)
+    expect(accountQualityAlertItems(expired, zhT, clock, NOW)).toEqual([])
+  })
+
+  it('states that the end of a hold only lifts the ordering', () => {
+    const quality = new Map<number, GroupQualityCell>([[18, cellOf(account({ latency_hold: hold('2026-11-04T10:12:00Z', ['gpt-5.5']) }))]])
+    const panel = groupQualityPanel([{ id: 18, name: '主力' }], quality, zhT, clock, NOW)!
+    expect(panel.indicator).toBe('hold')
+    expect(panel.latencyHold).toEqual({ text: '判慢让位：gpt-5.5，后排至 @10:12', note: '到期只解除后排，不改变门槛状态' })
+    expect(JSON.stringify(panel)).not.toContain('已恢复')
   })
 })
 
 describe('groupQualityPanel', () => {
-  const zh = i18nFor('zh').t
-  const named = (...ids: number[]) => ids.map(id => ({ id, name: String.fromCharCode(64 + id) }))
-
-  it('expands groups that need attention, keeps notices to one line and folds eligible groups into one summary', () => {
+  it('orders blocks by severity, counts attention and flags stale data once', () => {
+    const groups = [{ id: 1, name: 'A' }, { id: 2, name: 'B' }, { id: 3, name: 'C' }, { id: 4, name: 'D' }]
     const quality = new Map<number, GroupQualityCell>([
-      [1, qualityOf(account({ state: 'trial', headroom: null }))],
-      [2, qualityOf(account({ state: 'ejected', until: '2026-11-01T14:20:00Z', strikes: 1, reasons: ['error_rate'] }), { stale: true })],
-      [3, qualityOf(account({ pinned: true }))],
-      [4, qualityOf(account({ headroom: 0.12 }))],
-      [5, { kind: 'pending' }]
+      [1, cellOf(account())],
+      [2, cellOf(account({ status: 'unknown' }), {}, true)],
+      [3, cellOf(account({ status: 'failing', tier: 2 }))],
+      [4, cellOf(account({ status: 'retest', tier: 1 }))]
     ])
-    const panel = groupQualityPanel(orderGroupsByQuality(named(1, 2, 3, 4, 5), quality), quality, zh, clock)!
-    expect([panel.attention, panel.attentionCount]).toEqual(['ejected', 2])
-    expect(panel.blocks.map(block => block.title)).toEqual(['B · 熔断至 @14:20', 'A · 观察中', 'E · 等待评估'])
-    expect(panel.blocks[0].rows).toHaveLength(2)
-    const fast = '快档，实时快档线 7.3s'
-    expect(panel.eligible).toEqual([{ name: 'C', pinned: true, tier: fast }, { name: 'D', pinned: false, tier: fast, headroom: { text: '余量 12%', tone: 'warning' } }])
-    expect(panel.stale).toBe('评估超过 5 分钟未更新，沿用上一轮')
+    const panel = groupQualityPanel(orderGroupsByQuality(groups, quality), quality, zhT, clock, NOW)!
+    expect(panel.blocks.map(block => block.title)).toEqual(['C · 不达标', 'D · 待复测', 'B · 未知', 'A · 达标'])
+    expect(panel.indicator).toBe('failing')
+    expect(panel.attentionCount).toBe(2)
+    expect(panel.stale).toContain('数据陈旧')
   })
 
-  it('takes the most severe attention kind whatever the order, stays grey otherwise, and is null without gated groups', () => {
-    const held = new Map<number, GroupQualityCell>([[1, qualityOf(account({ state: 'trial' }))], [2, qualityOf(account({ state: 'ejected', guard_held: true }))]])
-    expect(groupQualityPanel(named(1, 2), held, zh, clock)!.attention).toBe('guard_held')
-    const calm = groupQualityPanel(named(1, 2), new Map<number, GroupQualityCell>([[1, qualityOf(account())], [2, { kind: 'failed' }]]), zh, clock)!
-    expect([calm.attention, calm.attentionCount, calm.blocks.map(block => block.title), calm.eligible.map(item => item.name), calm.stale])
-      .toEqual([null, 0, ['B · 读取失败'], ['A'], undefined])
-    expect(groupQualityPanel(named(9), new Map(), zh, clock)).toBeNull()
+  it('returns null when no group of the account has the gate on', () => {
+    expect(groupQualityPanel([{ id: 1, name: 'A' }], new Map(), zhT, clock, NOW)).toBeNull()
   })
 })
 
-describe('accountQualityMetricItems', () => {
-  const limits = { maxErrorRate: 0.1, maxWarmTtftMs: 20000 }
-  const items = (m: GroupQualityAccountMetrics, l = limits) => accountQualityMetricItems(m, i18nFor('zh').t, l)
-
-  it('writes the three full-window metrics compactly and lists only those with samples', () => {
-    expect(items(metrics()).map(item => item.text)).toEqual(['错 2.2%', '可见首字 7.8s', '零缓存 3%'])
-    expect(items(metrics())[0].title).toBe('错误率（近 15 分钟）：180 次调用，软失败 4 次')
-    expect(items(metrics({ calls: 0, warm_samples: 0 })).map(item => item.key)).toEqual(['zero_cache'])
-    expect(items(metrics({ calls: 0, warm_samples: 0, zero_cache_samples: 0 }))).toEqual([])
+describe('accountQualityAlertItems', () => {
+  it('lists only failing dimensions, taking the worst first token across groups, and an active hold', () => {
+    const quality = new Map<number, GroupQualityCell>([
+      [1, cellOf(account({ status: 'failing', ttft: { ...account().ttft, state: 'fail', value: 18200 } }))],
+      [2, cellOf(account({ status: 'failing', ttft: { ...account().ttft, state: 'fail', value: 21000 }, latency_hold: { until: '2026-11-04T10:12:00Z', models: ['gpt-5.5'] } }))],
+      [3, { kind: 'pending' }]
+    ])
+    const items = accountQualityAlertItems(quality, zhT, clock, NOW)
+    expect(items.map(item => [item.key, item.text, item.tone])).toEqual([
+      ['ttft', '首字 21s', 'danger'],
+      ['latency_hold', '判慢至 @10:12', 'warning']
+    ])
+    expect(items[0].title).toBe('首字在 2 个门槛分组不达标')
   })
 
-  it('colours error rate and first token over the strictest group limit once samples are enough, and zero cache above 30%', () => {
-    const alerts = (m: Partial<GroupQualityAccountMetrics>) => items(metrics(m)).filter(item => item.alert).map(item => item.key)
-    expect(alerts({})).toEqual([])
-    expect(alerts({ calls: 150, soft_failures: 21, error_rate: 0.14, warm_ttft_p90_ms: 31800, warm_zero_cache_rate: 0.31, zero_cache_samples: 20 })).toEqual(['error_rate', 'warm_ttft', 'zero_cache'])
-    expect(alerts({ calls: 19, soft_failures: 5, error_rate: 0.26, warm_samples: 9, warm_ttft_p90_ms: 31800, zero_cache_samples: 19, warm_zero_cache_rate: 0.9 })).toEqual([])
-    expect(accountQualityMetricItems(metrics({ calls: 150, soft_failures: 21, error_rate: 0.14 }), i18nFor('zh').t).some(item => item.alert)).toBe(false)
+  it('is empty for passing and unknown accounts', () => {
+    const quality = new Map<number, GroupQualityCell>([[1, cellOf(account())], [2, cellOf(account({ status: 'unknown', cache: { ...account().cache, state: 'none' } }))]])
+    expect(accountQualityAlertItems(quality, zhT, clock, NOW)).toEqual([])
   })
 })
 
-describe('strictestQualityLimits', () => {
-  it('takes the tightest limits among evaluated groups and ignores notices', () => {
-    const cell = (maxErrorRate: number, maxWarmTtftMs: number) => ({ ...qualityOf(account()), maxErrorRate, maxWarmTtftMs })
-    expect(strictestQualityLimits(new Map<number, GroupQualityCell>([[1, cell(0.1, 20000)], [2, cell(0.05, 30000)], [3, { kind: 'pending' }]])))
-      .toEqual({ maxErrorRate: 0.05, maxWarmTtftMs: 20000 })
-    expect(strictestQualityLimits(new Map<number, GroupQualityCell>([[3, { kind: 'pending' }]]))).toBeUndefined()
-    expect(strictestQualityLimits(undefined)).toBeUndefined()
+describe('groupQualitySummaryTitle', () => {
+  it('lists the five counts and the group composition', () => {
+    expect(groupQualitySummaryTitle(group([]), zhT)).toBe('达标 3 · 未知 2 · 待复测 1 · 不达标 1 · 固定 0；本组构成 P90 9.1s（87 条）')
+    expect(groupQualitySummaryTitle(group([], { expected_p90_ms: null, expected_samples: 30 }), zhT)).toContain('本组样本不足（30/50 条）')
   })
 })
 
 describe('qualityTooltipTop', () => {
-  const trigger = { top: 500, bottom: 540 }
-  it('places the tooltip below, then above, then pinned inside the viewport by its real height', () => {
-    expect(qualityTooltipTop(trigger, 200, 900)).toBe(546)
-    expect(qualityTooltipTop(trigger, 420, 900)).toBe(74)
-    expect(qualityTooltipTop(trigger, 600, 900)).toBe(292)
-    expect(qualityTooltipTop(trigger, 1000, 900)).toBe(8)
+  it('places the panel below, above, or pinned to the viewport', () => {
+    expect(qualityTooltipTop({ top: 100, bottom: 120 }, 200, 800)).toBe(126)
+    expect(qualityTooltipTop({ top: 700, bottom: 720 }, 200, 800)).toBe(494)
+    expect(qualityTooltipTop({ top: 100, bottom: 120 }, 900, 800)).toBe(8)
   })
 })

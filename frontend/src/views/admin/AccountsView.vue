@@ -334,8 +334,8 @@
             />
           </template>
           <template #cell-groups="{ row }">
-            <AccountGroupsCellButton :groups="accountGroupsForRow(row)" :account-name="row.name" :account-platform="row.platform" :quality="accountQualityCells.get(row.id)" :metrics="accountQualityMetrics(row.id)" @open="canPlaceGroups && (groupsDialogAccount = row)" />
-            <AccountQualityMetrics v-if="accountQualityMetrics(row.id)" :metrics="accountQualityMetrics(row.id)!" :limits="strictestQualityLimits(accountQualityCells.get(row.id))" />
+            <AccountGroupsCellButton :groups="accountGroupsForRow(row)" :account-name="row.name" :account-platform="row.platform" :quality="accountQualityCells.get(row.id)" @open="canPlaceGroups && (groupsDialogAccount = row)" />
+            <AccountQualityMetrics :quality="accountQualityCells.get(row.id)" />
           </template>
           <template #header-usage="{ column }">
             <div class="flex items-center">
@@ -577,7 +577,7 @@ import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCellButton from '@/components/admin/account/AccountGroupsCellButton.vue'
 import AccountQualityMetrics from '@/components/admin/account/AccountQualityMetrics.vue'
-import { buildAccountQualityCells, isGroupQualityAttention, strictestQualityLimits } from '@/components/admin/account/groupQualityPresentation'
+import { buildAccountQualityCells, isGroupQualityAttention } from '@/components/admin/account/groupQualityPresentation'
 import { useGroupQualityGateStatus } from '@/composables/useGroupQualityGateStatus'
 import AccountGroupsDialog from '@/components/admin/account/AccountGroupsDialog.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
@@ -843,17 +843,16 @@ const hasPendingListSync = ref(false)
 const recentHealthByAccountId = ref<Record<string, AccountRecentHealthStats>>({})
 const recentHealthLoadState = ref<AccountRecentHealthLoadState>('loading')
 let recentHealthReqSeq = 0
-// 分组列的质量门槛状态与三项指标，跨页共用一份；分组列可见时随列表刷新，最多 60 秒拉一次。
+// 分组列的质量门槛状态（每组三维），跨页共用一份；分组列可见时随列表刷新，最多 60 秒拉一次。
 // 规则同分组列表的门槛列：策略开但未评估为“等待评估”，读取失败明文提示，策略关显示普通标签。
 const { sources: groupQualitySources, refresh: refreshGroupQualityStatus } = useGroupQualityGateStatus()
 const accountQualityCells = computed(() => {
   const cellsFor = buildAccountQualityCells(groupQualitySources.value)
   return new Map(accounts.value.map(account => [account.id, cellsFor(account.id, accountGroupsForRow(account))]))
 })
-// 账号在任一已加载的门槛分组里需关注（熔断、保底保留、观察中）时，菜单提供“恢复状态”。
+// 账号在任一已加载的门槛分组里需关注（不达标、待复测）时，菜单提供“恢复状态”。
 const qualityRecoverableFor = (id: number) => [...(accountQualityCells.value.get(id)?.values() ?? [])].some(isGroupQualityAttention)
 const menuQualityRecoverable = computed(() => (menu.acc ? qualityRecoverableFor(menu.acc.id) : false))
-const accountQualityMetrics = (accountId: number) => groupQualitySources.value.status?.account_metrics[String(accountId)]
 const refreshGroupQuality = () => {
   if (!hiddenColumns.has('groups')) void refreshGroupQualityStatus()
 }
@@ -2812,7 +2811,7 @@ const handleRefresh = async (a: Account) => {
   }
 }
 const handleRecoverState = async (a: Account) => {
-  // 门槛状态由评估器每分钟更新，恢复后面板要到下一轮才变为观察中，提示里说明。
+  // 门槛状态由评估器每分钟更新，恢复后面板要到下一轮才按“从未测过”显示，提示里说明。
   const gated = qualityRecoverableFor(a.id)
   try {
     const updated = await adminAPI.accounts.recoverState(a.id)

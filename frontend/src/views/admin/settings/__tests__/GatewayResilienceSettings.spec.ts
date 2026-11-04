@@ -12,9 +12,10 @@ function settings(): Settings {
   return {
     enabled: true,
     failure: { transient_cooldown_seconds: 30, retry_after_cap_seconds: 30, balance_keywords_extra: [], decision_v2: true },
-    session: { enabled: true, streak_threshold: 2, streak_window_seconds: 300, avoid_seconds: 600 },
+    session: { enabled: true, streak_threshold: 2, streak_window_seconds: 300, avoid_seconds: 600, post_output_rebind: true },
     last_resort: { enabled: true },
     anthropic_latency_hold: { enabled: true },
+    same_site_hold: { enabled: true },
     balance: { enabled: true, pause_seconds: 300 },
     budget: {
       enabled: true, max_attempts: 4, pre_output_budget_seconds: 240,
@@ -100,6 +101,33 @@ describe('gateway resilience settings', () => {
     const expected = settings()
     expected.anthropic_latency_hold.enabled = false
     expect(mocks.save).toHaveBeenCalledWith(expected)
+  })
+
+  it('saves the same-site hold switch from its own card', async () => {
+    const w = mountSettings(); await flushPromises()
+    const card = w.get('[data-testid="resilience-card-sameSiteHold"]')
+    expect(card.text()).toContain('admin.resilience.settings.sections.sameSiteHoldHint')
+    await card.get('[data-testid="resilience-section-sameSiteHold"]').trigger('click')
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    const expected = settings()
+    expected.same_site_hold.enabled = false
+    expect(mocks.save).toHaveBeenCalledWith(expected)
+  })
+
+  it('keeps the post-output rebind switch in the session card and greys it out with session handling', async () => {
+    const w = mountSettings(); await flushPromises()
+    const card = w.get('[data-testid="resilience-card-session"]')
+    expect(card.text()).toContain('admin.resilience.settings.switches.postOutputRebindHint')
+    const rebind = card.get('[data-testid="resilience-switch-postOutputRebind"]')
+    expect(rebind.attributes('disabled')).toBeUndefined()
+    await rebind.trigger('click')
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    const expected = settings()
+    expected.session.post_output_rebind = false
+    expect(mocks.save).toHaveBeenCalledWith(expected)
+
+    await card.get('[data-testid="resilience-section-session"]').trigger('click')
+    expect(card.get('[data-testid="resilience-switch-postOutputRebind"]').attributes('disabled')).toBeDefined()
   })
 
   it('disables the sections while the master switch is off', async () => {

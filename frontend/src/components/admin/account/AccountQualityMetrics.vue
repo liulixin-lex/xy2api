@@ -8,8 +8,9 @@
       <span v-if="index" class="mx-1 text-gray-300 dark:text-dark-500" aria-hidden="true">·</span>
       <span
         :data-metric="item.key"
-        data-alert="true"
-        class="whitespace-nowrap font-semibold text-red-600 dark:text-red-400"
+        :data-tone="item.tone"
+        class="whitespace-nowrap font-semibold"
+        :class="item.tone === 'danger' ? 'text-red-600 dark:text-red-400' : 'text-amber-700 dark:text-amber-400'"
         :title="item.title"
       >{{ item.text }}</span>
     </template>
@@ -19,13 +20,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { GroupQualityAccountMetrics } from '@/types/groupQualityGate'
-import { accountQualityMetricItems, type QualityLimits } from './groupQualityPresentation'
+import { formatDateTime } from '@/utils/format'
+import { QUALITY_CLOCK, accountQualityAlertItems, type GroupQualityCell } from './groupQualityPresentation'
 
-// 分组单元格下方的指标行只在异常时出现：只列超过所在分组最严上限（零缓存为 30%）的项。
-// 三项指标的完整一行在分组门槛面板底部。三项同时超线时英文约 253px，放不下就整项换行，不裁掉。
-const props = defineProps<{ metrics: GroupQualityAccountMetrics; limits?: QualityLimits }>()
+// 分组单元格下方的提示行只在异常时出现：某维在任一门槛分组里不达标时列出该维数值，判慢让位时列出到期时刻。
+// 各组三维的完整状态在分组门槛面板里。
+const props = defineProps<{ quality?: Map<number, GroupQualityCell> }>()
 
 const { t } = useI18n()
-const items = computed(() => accountQualityMetricItems(props.metrics, t, props.limits).filter(item => item.alert))
+const clock = (iso: string) => formatDateTime(iso, QUALITY_CLOCK)
+const items = computed(() => accountQualityAlertItems(props.quality, t, clock))
 </script>
