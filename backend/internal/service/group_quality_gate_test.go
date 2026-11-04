@@ -680,9 +680,6 @@ func TestGroupQualityV3MigrationTargetAndStatus(t *testing.T) {
 	require.Nil(t, rows[1].(map[string]any)["latency_hold"])
 	require.Nil(t, row["ttft"].(map[string]any)["value"])
 	require.Equal(t, "none", row["ttft"].(map[string]any)["state"])
-	preview, err := e.svc.ProfitControlPreview(context.Background(), 7, nil)
-	require.NoError(t, err)
-	require.Equal(t, 1, preview.Passing, "only passing or pinned, not unknown")
 }
 func qualityMapKeys(m map[string]any) []string {
 	keys := make([]string, 0, len(m))

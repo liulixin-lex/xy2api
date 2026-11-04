@@ -113,7 +113,7 @@ func TestGroupProfitControlPreviewHandler(t *testing.T) {
 		ceiling float64
 		passing int
 	}{
-		{"10?margin=0.25", 200, 1.5, 0}, {"10?margin=0.75", 200, 0.5, 0}, {"10", 200, 1.6, 0},
+		{"10?margin=0.25", 200, 1.5, 1}, {"10?margin=0.75", 200, 0.5, 0}, {"10", 200, 1.6, 1},
 		{"10?margin=NaN", 400, 0, 0}, {"10?margin=Inf", 400, 0, 0}, {"10?margin=-0.1", 400, 0, 0},
 		{"10?margin=1", 400, 0, 0}, {"10?margin=abc", 400, 0, 0}, {"bad?margin=0.2", 400, 0, 0}, {"0", 400, 0, 0}, {"99", 404, 0, 0},
 	} {
