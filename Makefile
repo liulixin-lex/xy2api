@@ -48,6 +48,10 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/admin/group/__tests__/GroupCategoryField.spec.ts \
 	src/components/admin/group/__tests__/GroupCategoryFilter.spec.ts \
 	src/components/admin/account/__tests__/AccountGroupsCellButton.spec.ts \
+	src/components/admin/account/__tests__/groupQualityPresentation.spec.ts \
+	src/components/admin/group/__tests__/GroupQualityGateField.spec.ts \
+	src/views/admin/__tests__/groupsQualityGate.spec.ts \
+	src/views/admin/settings/__tests__/GatewayResilienceSettings.spec.ts \
 	src/components/admin/account/__tests__/AccountGroupsDialog.spec.ts \
 	src/components/admin/group/__tests__/GroupCategoryTabs.spec.ts \
 	src/components/admin/account/__tests__/AccountTableFilters.groupCategories.spec.ts \
