@@ -40,7 +40,7 @@ export default {
         outputP99: 'Output P99 cap',
         outputP99Hint: 'In-flight reservations cap output tokens at the model\'s 7-day P99 (at least 1024).',
         collaborationPlaintext: 'Collaboration messages in plaintext',
-        collaborationPlaintextHint: 'Eligible new Codex collaboration messages (spawn_agent, send_message, followup_task) are delivered in plaintext when the upstream returns no ciphertext and the gateway does not veto them, which reduces conversation errors caused by a different ciphertext issuer after switching accounts. Applies only to Codex client requests over native Responses HTTP, on accounts that also have "Collaboration messages in plaintext" on; WebSocket, compaction, passthrough and other paths are unaffected. Only new collaboration messages change and existing conversation history is not repaired; turning it off restores new requests at once.'
+        collaborationPlaintextHint: 'Eligible new Codex collaboration messages (spawn_agent, send_message, followup_task) are delivered in plaintext when the upstream returns no ciphertext and the gateway does not veto them, which reduces conversation errors caused by a different ciphertext issuer after switching accounts. Applies only to Codex client requests over native Responses HTTP, on accounts that also have "Collaboration messages in plaintext" on; WebSocket, compaction, passthrough and other paths are unaffected. Only new collaboration messages change and existing conversation history is not repaired; turning it off stops it for new conversations; conversations that already used it may be rejected by some upstreams and need a new conversation.'
       },
       fields: {
         balancePause: 'Initial pause (s)',
@@ -118,7 +118,11 @@ export default {
         stall: 'Stalled streams',
         post_output_failure: 'Upstream failures after output',
         pre_created_delta: 'Content before created',
-        relay_keepalive: 'Relay keep-alive frames'
+        relay_keepalive: 'Relay keep-alive frames',
+        collab_plaintext: 'Collaboration plaintext attempts',
+        collab_call: 'Collaboration tool calls (by encrypted args state)',
+        collab_call_action: 'Collaboration tool call actions',
+        state_rejection: 'Conversation state rejections'
       }
     },
     undelivered: {
