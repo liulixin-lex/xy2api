@@ -519,6 +519,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
+	c.Request = c.Request.WithContext(service.WithOpenAIEncryptedContentMigrationGuard(c.Request.Context(), body))
 	previousResponseID := strings.TrimSpace(gjson.GetBytes(body, "previous_response_id").String())
 	if previousResponseID != "" {
 		previousResponseIDKind := service.ClassifyOpenAIPreviousResponseIDKind(previousResponseID)
@@ -2972,7 +2973,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		}
 		reqLog.Debug("openai.websocket_account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
 		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForCapability(
-			ctx,
+			service.WithOpenAIEncryptedContentMigrationGuard(ctx, wsAttemptMessage),
 			apiKey.GroupID,
 			previousResponseID,
 			sessionHash,
@@ -3234,6 +3235,12 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// 无法中途换号）。本 turn 的准入与计费共用同一 pricingAt。
 				turnBillingCtx := turnBillingAPIKeys.begin(ctx, h.apiKeyService, turn, apiKey)
 				turnCtx, turnAt := h.gatewayService.WithOpenAITurnPricingContext(turnBillingCtx, apiKey.GroupID)
+				// BeforeRequest saves the current payload for native and passthrough
+				// turns; use that snapshot without retaining a guard from a prior turn.
+				cyberTurnBodiesMu.Lock()
+				turnBody := cyberTurnBodies[turn]
+				cyberTurnBodiesMu.Unlock()
+				turnCtx = service.WithOpenAIEncryptedContentMigrationGuard(turnCtx, turnBody)
 				turnAdmissionCtx := service.WithOpenAIQualityTurnExemption(turnCtx, turn == 1 || groupQualityTurnPinned.Load())
 				if _, vetoed, reason := h.gatewayService.SelectionAdmissionVetoLatest(turnAdmissionCtx, account); vetoed {
 					reqLog.Info("openai.websocket_turn_profit_vetoed",

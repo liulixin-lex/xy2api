@@ -3445,6 +3445,26 @@
       "value": "ctx = h.gatewayService.WithOpenAIGuardianParentAffinity(ctx, c, firstMessage, reqModel)"
     },
     {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "c.Request = c.Request.WithContext(service.WithOpenAIEncryptedContentMigrationGuard(c.Request.Context(), body))"
+    },
+    {
+      "path": "backend/internal/handler/openai_chat_completions.go",
+      "value": "c.Request = c.Request.WithContext(service.WithOpenAIEncryptedContentMigrationGuard(c.Request.Context(), body))"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "service.WithOpenAIEncryptedContentMigrationGuard(ctx, wsAttemptMessage)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "turnCtx = service.WithOpenAIEncryptedContentMigrationGuard(turnCtx, turnBody)"
+    },
+    {
+      "path": "backend/internal/service/openai_guardian_affinity.go",
+      "value": "func WithOpenAIEncryptedContentMigrationGuard(ctx context.Context, body []byte) context.Context"
+    },
+    {
       "path": "backend/internal/service/openai_gateway_forward.go",
       "value": "requestRepair := armOpenAIRequestRepair(c, account, rejectedFieldRetryState)"
     },
@@ -6445,6 +6465,21 @@
       "id": "xy-openai-group-quality-scheduling",
       "path": "backend/internal/service/openai_gate_v3_test.go",
       "literal": "func TestGateV3MigrationRechecksOnlyOrderedFreeCandidates(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_encrypted_migration_test.go",
+      "literal": "func TestOpenAIRequestHasEncryptedState(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_encrypted_migration_test.go",
+      "literal": "func TestWithOpenAIEncryptedContentMigrationGuard(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_encrypted_migration_test.go",
+      "literal": "func TestEncryptedStateKeepsStickyOwnerAcrossSchedulers(t *testing.T) {"
     },
     {
       "id": "xy-openai-group-quality-scheduling",

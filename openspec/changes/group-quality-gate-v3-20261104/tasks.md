@@ -42,6 +42,7 @@
 - [x] 3.7 文档：`GATEWAY_RESILIENCE.md` §4.5、`account-scheduling.md`；`policy.json` 与 `scheduler-diff.json`；规格 `specs/openai-scheduling/spec.md`。
 
 - [x] 3.8 红队 A-01/A-02/A-03 与 B11：共享同站暂停不保留软罚绑定、共享档内判慢、已知预测位置细排与比较器传递性、判慢 Warn 字段回归。
+- [x] 3.9 后端丁：协作消息／工具输出密文片段复用续链迁出保护；HTTP Responses（含透传）及 Responses 形状的 Chat Completions 选号前、WS 首帧选号及逐 turn 准入接入；结构识别、旧调度／高级调度／nil scheduler 回退的迁出对照与失败排除回归；现行文档与规格同步。
 
 ## 4 前端（WP8）
 
