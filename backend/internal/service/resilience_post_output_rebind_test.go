@@ -36,6 +36,59 @@ func sessionRebindMetric(accountID int64, reason string) int64 {
 	return total
 }
 
+func TestPostOutputRebindOnlyOpenAIAccounts(t *testing.T) {
+	for _, tc := range []struct {
+		platform string
+		failures int
+		reason   string
+	}{
+		{PlatformOpenAI, 1, "post_output_first_failure"},
+		{PlatformAnthropic, 2, "resil_failure_streak"},
+		{PlatformGrok, 2, "resil_failure_streak"},
+	} {
+		t.Run(tc.platform, func(t *testing.T) {
+			for _, kind := range []string{postOutputEvent, postOutputReadError, postOutputNoTerminal} {
+				t.Run(kind, func(t *testing.T) {
+					withResilienceSettings(t, nil)
+					sink, restore := captureStructuredLog(t)
+					defer restore()
+					account := &Account{ID: 907, Platform: tc.platform, Type: AccountTypeAPIKey}
+					cache := &mockGatewayCacheForPlatform{sessionBindings: map[string]int64{"sess": account.ID}}
+					gw := &GatewayService{cache: cache, resilience: NewResilienceService(nil, newMemResilienceStore())}
+					group := int64(25)
+					for failure := 1; failure <= tc.failures; failure++ {
+						ctx := postOutputRequest(gw.gatewaySessionRecorder())
+						attempt := &http.Response{}
+						switch kind {
+						case postOutputEvent:
+							noteResiliencePostOutputFailure(ctx, nil, account, attempt, kind)
+						case postOutputReadError:
+							resilienceStreamBrokenAfterOutput(ctx, nil, account, attempt, io.ErrUnexpectedEOF, true)
+						case postOutputNoTerminal:
+							resilienceStreamBrokenAfterOutput(ctx, nil, account, attempt, nil, true)
+						}
+						st := resilience.StateFrom(ctx)
+						require.True(t, st.AccountFailed(account.ID), "all platforms still record the account failure")
+						events := gateV3LogFields(sink, "resilience.session_rebind")
+						if failure < tc.failures {
+							require.Equal(t, account.ID, cache.sessionBindings["sess"], "non-OpenAI first failure keeps the binding")
+							require.False(t, st.Avoided(account.ID))
+							require.Empty(t, gw.resilience.sessionAvoid(ctx, &group, "sess"))
+							require.Empty(t, events)
+							continue
+						}
+						require.NotContains(t, cache.sessionBindings, "sess")
+						require.True(t, st.Avoided(account.ID))
+						require.Contains(t, gw.resilience.sessionAvoid(ctx, &group, "sess"), account.ID)
+						require.Len(t, events, 1)
+						require.Equal(t, tc.reason, events[0]["reason"])
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestPostOutputRebindThreeEntrypointsOncePerRequest(t *testing.T) {
 	for _, kind := range []string{postOutputEvent, postOutputReadError, postOutputNoTerminal} {
 		t.Run(kind, func(t *testing.T) {

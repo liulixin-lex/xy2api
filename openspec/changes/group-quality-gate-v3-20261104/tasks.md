@@ -16,7 +16,7 @@
 ## 1 后端甲：数据列与网关韧性（WP1、WP6、WP7）
 
 - [x] 1.1 `usage_logs.attempt_first_output_ms`：迁移 289、checksum、ent 生成、写入（OpenAI `RecordUsage`、通用 `buildRecordUsageLog`）、插入与读取、固定参数位置的测试。定向单测及四条入库路径的 PostgreSQL 往返验证通过。
-- [x] 1.2 P1-B：`session.post_output_rebind` 开关与输出后首次失败改绑；HTTP 同一失败去重、WebSocket 每个 turn 各一次，质量路由绑定不越权删除且保留末位兜底。
+- [x] 1.2 P1-B：`session.post_output_rebind` 开关与仅 OpenAI 账号输出后首次失败改绑；HTTP 同一失败去重、WebSocket 每个 turn 各一次，质量路由绑定不越权删除且保留末位兜底。红队 B1：Anthropic、Grok 等其他平台保持原连击规则，已补平台边界回归。
 - [x] 1.3 同站断流暂停：`same_site_hold.enabled` 开关、独立进程内跟踪器、选号跳过与软罚末位兜底；普通与高级选号在暂停后改绑，普通瞬时软罚仍保留绑定。
 - [x] 1.4 文档：`USAGE_METRICS.md`、`GATEWAY_RESILIENCE.md`（会话行、P1-B、同站暂停、§5.3 事件）、`gateway-resilience-20261015/design.md` §10、部署 runbook 的开关位置；规格 `specs/gateway-resilience/spec.md`。
   - WP1、WP6、WP7 文档与契约登记已同步；近期表现保持端到端首字及回退口径，门槛 v3 速度只读新列、错误维排除首字截止。资源限制下仅运行定向测试，lint 与全量门禁由集成方统一执行。

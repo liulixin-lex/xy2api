@@ -2830,6 +2830,10 @@
     },
     {
       "path": "backend/internal/service/resilience_post_output.go",
+      "value": "if confirmedPostOutput && account.Platform == PlatformOpenAI {"
+    },
+    {
+      "path": "backend/internal/service/resilience_post_output.go",
       "value": "rl.resilience.noteOpenAISameSiteStreamFailure(account, at)"
     },
     {
