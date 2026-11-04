@@ -410,7 +410,7 @@ HTTP 流已向客户端输出可见内容后，快层确认账号发生读流出
 
 流式、JSON、SSE→JSON 共用本次尝试的冻结 plan，不跨请求继承。不改 IDs、arguments、output 正文或输入中的密文片段；instructions 的已改写结构化回声对称恢复。错误信封按 JSON 字符串解码后匹配别名（含转义），只重写含别名的字符串，其余字节不变；非 JSON 错误体按字面替换。非 2xx HTTP 错误体和 SSE type=error 的完整错误信封均覆盖；所有 JSON 响应/事件的顶层 error 与 response.error 也会还原，包括 HTTP 200 失败 JSON。歧义载体仍本地终止（未提交 502、已提交协议终态），不泄漏私有名、不经 failover 重放。applied 尝试的 UpstreamFailoverError.ResponseBody 与非空 ClientMessage 在返回 handler 前已还原，因此换号耗尽后 handler 侧的错误透传规则按规范名匹配，服务侧按原始错误匹配；规则关键词不应包含私有别名。内部运维日志（如 openai.forward_failed）保留上游原文，可能含私有别名，仅供诊断，不下发客户端。nil plan 不改字节。
 
-已知限制：模型生成的正文（包括协作消息的 message 正文和输出文本）可能引用私有工具地址，如 collaboration-xy.send_message。按红线网关不改写正文；子 agent 在 P1′ 下看到的正是同名别名工具，协议 namespace/name 仍正确还原。发版前真实上游的 12 次 P1′ c1 中出现 1 次（astra），该次父子闭环正常，功能未受影响；这不属于协议身份还原失败。
+已知限制：模型生成的正文（包括协作消息的 message 正文和输出文本）可能引用私有工具地址，如 collaboration-xy.send_message。按红线网关不改写正文；子 agent 在 P1′ 下看到的正是同名别名工具，协议 namespace/name 仍正确还原。发版前真实上游一轮中出现 1 次（astra 父 agent 的委派说明），该次父子闭环正常，功能未受影响；这不属于协议身份还原失败。
 
 schema 兼容：工具 schema 清理器对精确名为 collaboration 的整个 namespace 跳过递归修复，包含 wait/list；其他工具的 null type、object union、null required、lookaround 修复不变。normalizeCodexTools 不递归 namespace。改动前清理器对真实 Codex 0.166 fixture 的顶层与 Lite additional_tools 声明均逐字节不变；该样本在 P1′ 关闭时没有额外变化。对原本需修复的其它 collaboration schema，豁免仍会让其保持原样，此行为独立于开关。
 

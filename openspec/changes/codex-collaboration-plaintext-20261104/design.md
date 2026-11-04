@@ -26,7 +26,7 @@
 
 已改写的 instructions / response.instructions 结构化回声按本次 plan 对称恢复。ErrorBody 仅 applied 时按 JSON 字符串解码后匹配别名（含转义），只重新编码含别名的字符串，其余字节不变；非 JSON 错误体按字面替换。非 2xx HTTP 与 SSE type=error 的完整错误信封处理；所有 JSON 响应/事件中非 null 的顶层 error 与 response.error 均处理，包括 HTTP 200 status=failed。根或 response 的重复 error 键仍报错并本地终止；不修改 output、arguments 或用户正文。Forward 协作收尾还原 UpstreamFailoverError.ResponseBody/非空 ClientMessage，确保换号耗尽出口只见规范身份。服务侧分类/观测与错误规则使用原始错误；返回 handler 后，其耗尽路径的错误透传规则按规范名匹配，规则关键词不应包含私有别名（R3-A-4 接受的兼容变化）。内部运维日志如 openai.forward_failed 可保留上游原文/私有名，仅供诊断，不下发客户端；nil plan 零改写。
 
-正文边界：模型生成的协作 message 正文或输出文本可能引用私有工具地址，按红线不对正文改写。P1′ 子 agent 看到同名别名工具，协议身份仍恢复为规范 namespace/name；发版前真实上游 12 次 P1′ c1 中出现 1 次（astra），该次父子闭环正常、功能未受影响，不将其计作协议身份泄漏。
+正文边界：模型生成的协作 message 正文或输出文本可能引用私有工具地址，按红线不对正文改写。P1′ 子 agent 看到同名别名工具，协议身份仍恢复为规范 namespace/name；发版前真实上游一轮中出现 1 次（astra 父 agent 的委派说明），该次父子闭环正常、功能未受影响，不将其计作协议身份泄漏。
 
 ## 4. schema 兼容
 
