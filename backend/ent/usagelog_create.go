@@ -463,6 +463,20 @@ func (_c *UsageLogCreate) SetNillableEndToEndFirstOutputMs(v *int64) *UsageLogCr
 	return _c
 }
 
+// SetAttemptFirstOutputMs sets the "attempt_first_output_ms" field.
+func (_c *UsageLogCreate) SetAttemptFirstOutputMs(v int64) *UsageLogCreate {
+	_c.mutation.SetAttemptFirstOutputMs(v)
+	return _c
+}
+
+// SetNillableAttemptFirstOutputMs sets the "attempt_first_output_ms" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableAttemptFirstOutputMs(v *int64) *UsageLogCreate {
+	if v != nil {
+		_c.SetAttemptFirstOutputMs(*v)
+	}
+	return _c
+}
+
 // SetFirstTokenMs sets the "first_token_ms" field.
 func (_c *UsageLogCreate) SetFirstTokenMs(v int) *UsageLogCreate {
 	_c.mutation.SetFirstTokenMs(v)
@@ -1129,6 +1143,10 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.EndToEndFirstOutputMs(); ok {
 		_spec.SetField(usagelog.FieldEndToEndFirstOutputMs, field.TypeInt64, value)
 		_node.EndToEndFirstOutputMs = &value
+	}
+	if value, ok := _c.mutation.AttemptFirstOutputMs(); ok {
+		_spec.SetField(usagelog.FieldAttemptFirstOutputMs, field.TypeInt64, value)
+		_node.AttemptFirstOutputMs = &value
 	}
 	if value, ok := _c.mutation.FirstTokenMs(); ok {
 		_spec.SetField(usagelog.FieldFirstTokenMs, field.TypeInt, value)
@@ -1922,6 +1940,30 @@ func (u *UsageLogUpsert) AddEndToEndFirstOutputMs(v int64) *UsageLogUpsert {
 // ClearEndToEndFirstOutputMs clears the value of the "end_to_end_first_output_ms" field.
 func (u *UsageLogUpsert) ClearEndToEndFirstOutputMs() *UsageLogUpsert {
 	u.SetNull(usagelog.FieldEndToEndFirstOutputMs)
+	return u
+}
+
+// SetAttemptFirstOutputMs sets the "attempt_first_output_ms" field.
+func (u *UsageLogUpsert) SetAttemptFirstOutputMs(v int64) *UsageLogUpsert {
+	u.Set(usagelog.FieldAttemptFirstOutputMs, v)
+	return u
+}
+
+// UpdateAttemptFirstOutputMs sets the "attempt_first_output_ms" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateAttemptFirstOutputMs() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldAttemptFirstOutputMs)
+	return u
+}
+
+// AddAttemptFirstOutputMs adds v to the "attempt_first_output_ms" field.
+func (u *UsageLogUpsert) AddAttemptFirstOutputMs(v int64) *UsageLogUpsert {
+	u.Add(usagelog.FieldAttemptFirstOutputMs, v)
+	return u
+}
+
+// ClearAttemptFirstOutputMs clears the value of the "attempt_first_output_ms" field.
+func (u *UsageLogUpsert) ClearAttemptFirstOutputMs() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldAttemptFirstOutputMs)
 	return u
 }
 
@@ -2936,6 +2978,34 @@ func (u *UsageLogUpsertOne) UpdateEndToEndFirstOutputMs() *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) ClearEndToEndFirstOutputMs() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearEndToEndFirstOutputMs()
+	})
+}
+
+// SetAttemptFirstOutputMs sets the "attempt_first_output_ms" field.
+func (u *UsageLogUpsertOne) SetAttemptFirstOutputMs(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetAttemptFirstOutputMs(v)
+	})
+}
+
+// AddAttemptFirstOutputMs adds v to the "attempt_first_output_ms" field.
+func (u *UsageLogUpsertOne) AddAttemptFirstOutputMs(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddAttemptFirstOutputMs(v)
+	})
+}
+
+// UpdateAttemptFirstOutputMs sets the "attempt_first_output_ms" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateAttemptFirstOutputMs() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateAttemptFirstOutputMs()
+	})
+}
+
+// ClearAttemptFirstOutputMs clears the value of the "attempt_first_output_ms" field.
+func (u *UsageLogUpsertOne) ClearAttemptFirstOutputMs() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearAttemptFirstOutputMs()
 	})
 }
 
@@ -4162,6 +4232,34 @@ func (u *UsageLogUpsertBulk) UpdateEndToEndFirstOutputMs() *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) ClearEndToEndFirstOutputMs() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearEndToEndFirstOutputMs()
+	})
+}
+
+// SetAttemptFirstOutputMs sets the "attempt_first_output_ms" field.
+func (u *UsageLogUpsertBulk) SetAttemptFirstOutputMs(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetAttemptFirstOutputMs(v)
+	})
+}
+
+// AddAttemptFirstOutputMs adds v to the "attempt_first_output_ms" field.
+func (u *UsageLogUpsertBulk) AddAttemptFirstOutputMs(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddAttemptFirstOutputMs(v)
+	})
+}
+
+// UpdateAttemptFirstOutputMs sets the "attempt_first_output_ms" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateAttemptFirstOutputMs() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateAttemptFirstOutputMs()
+	})
+}
+
+// ClearAttemptFirstOutputMs clears the value of the "attempt_first_output_ms" field.
+func (u *UsageLogUpsertBulk) ClearAttemptFirstOutputMs() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearAttemptFirstOutputMs()
 	})
 }
 

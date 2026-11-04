@@ -15,10 +15,11 @@
 
 ## 1 后端甲：数据列与网关韧性（WP1、WP6、WP7）
 
-- [ ] 1.1 `usage_logs.attempt_first_output_ms`：迁移 289、checksum、ent 生成、写入（OpenAI `RecordUsage`、通用 `buildRecordUsageLog`）、插入与读取、固定参数位置的测试。
+- [x] 1.1 `usage_logs.attempt_first_output_ms`：迁移 289、checksum、ent 生成、写入（OpenAI `RecordUsage`、通用 `buildRecordUsageLog`）、插入与读取、固定参数位置的测试。定向单测及四条入库路径的 PostgreSQL 往返验证通过。
 - [ ] 1.2 P1-B：`session.post_output_rebind` 开关与输出后首次失败改绑。
 - [ ] 1.3 同站断流暂停：`same_site_hold.enabled` 开关、进程内跟踪器、选号硬跳过与末位兜底。
 - [ ] 1.4 文档：`USAGE_METRICS.md`、`GATEWAY_RESILIENCE.md`（会话行、P1-B、同站暂停、§5.3 事件）、`gateway-resilience-20261015/design.md` §10、部署 runbook 的开关位置；规格 `specs/gateway-resilience/spec.md`。
+  - WP1 的字段、迁移与回退说明，以及尝试级首字规格已完成；WP6、WP7 文档待第二步。
 
 ## 2 后端乙：v3 评估器、策略与状态（WP2）
 

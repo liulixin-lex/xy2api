@@ -20,6 +20,8 @@
 
 `usage_logs.end_to_end_first_output_ms` 从入站 delivery 初始化到首次成功写出的语义输出计时，包含排队、选号和先前失败尝试，不依赖请求预算；没有语义输出时为 NULL。错误帧、`[DONE]`、纯终态、开场与心跳均不算，终态中实际携带的内容可以算。正常的 `error: null` 等空占位字段不屏蔽真实内容；空内容数组与对象不算输出。旧 `first_token_ms` 及计费送达判据不变。新列不增加接口或页面，分组质量门槛与账号列表近期表现的续轮首字都读取它。运维结果由实际完成或拒绝信号分类：OpenAI 原生/透传 Responses 与 Chat/Messages 的已知请求/策略拒绝均为 `terminal_rejection`；已明确报告客户端断开时，即使 context 尚未取消，`client_cancel` 也不被部分输出分类覆盖。
 
+`usage_logs.attempt_first_output_ms` 记录最终尝试的可见首字，计算为该请求的 `SemanticOutputAt − AttemptStart`（毫秒）。语义输出判定与 `end_to_end_first_output_ms` 完全相同，仅起点不同：不含排队、选号与此前失败尝试的等待。缺少尝试起点、没有语义输出，或语义输出早于当前尝试时为 NULL；可计算的 0 毫秒保留为 0。OpenAI `RecordUsage` 与通用网关 `buildRecordUsageLog` 两条用量写入路径采集，运维错误日志不写该列。Go 字段为 `UsageLog.AttemptFirstOutputMs *int64`，取值方法为韧性请求状态的 `AttemptFirstOutputMs()`。本列不进入用户端或管理端接口，校准与验收直接查库；供门槛 v3 的速度样本使用，现有 `first_token_ms`、`end_to_end_first_output_ms`、近期表现查询与判慢采样口径不变。
+
 运维中的 P5/P10/P50 是筛选范围内各条有效记录速率的分位数，Avg 是这些单次速率的算术平均；不把小时分位数平均成整个窗口的分位数。它们与全站吞吐量含义不同，样本仍沿用运维后端的筛选契约；明细额外保留本地的非 Token 计费排除规则。
 
 ## 缓存读取占比
@@ -129,3 +131,5 @@ Key 的 TTL 选择与供应商实际 usage 独立。用量接口新增 `anthropi
 0.4.13 的迁移 283 仅追加三个可空列：`usage_logs.end_to_end_first_output_ms`、`ops_error_logs.end_to_end_first_output_ms`（BIGINT）及 `ops_error_logs.recovery_outcome`（VARCHAR(32)）。无 DEFAULT、NOT NULL、索引或回填。PostgreSQL 18 不重写存量表，但 ALTER 会短暂取得 ACCESS EXCLUSIVE 锁，应避开长事务并预留迁移窗口。回退旧版本可保留三列；重新执行迁移幂等。本次迁移编号 283 已与 main 核对，旧迁移及其校验和保持不变。
 
 Anthropic TTL 迁移 286 追加 Key 四态和 usage 两个可空观测列；已有 Key off、新建 inherit，无历史用量回填或索引。约束可能扫描 Key 表，ALTER 需要表锁，按低峰迁移；回退保留列但须明确恢复旧全局策略，详见 [TTL 迁移与回退](ANTHROPIC_CACHE_TTL.md#迁移与回退)。
+
+门槛 v3 的迁移 289（`289_usage_log_attempt_first_output.sql`）仅追加 `usage_logs.attempt_first_output_ms BIGINT NULL`，无 DEFAULT、无 NOT NULL、无索引、不回填。ALTER 会短暂取得 ACCESS EXCLUSIVE 锁，应在低峰避开长事务执行；迁移使用 `ADD COLUMN IF NOT EXISTS`，重复执行幂等。旧版本忽略该列，回退时可保留，无需删除数据或改写迁移校验和。新列从升级后开始采集；上线后 48 小时核对 OpenAI 成功流式请求的非空率（目标 ≥95%），以及它与判慢样本、端到端首字的差异。

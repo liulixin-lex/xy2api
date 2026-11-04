@@ -82,6 +82,8 @@ const (
 	FieldDurationMs = "duration_ms"
 	// FieldEndToEndFirstOutputMs holds the string denoting the end_to_end_first_output_ms field in the database.
 	FieldEndToEndFirstOutputMs = "end_to_end_first_output_ms"
+	// FieldAttemptFirstOutputMs holds the string denoting the attempt_first_output_ms field in the database.
+	FieldAttemptFirstOutputMs = "attempt_first_output_ms"
 	// FieldFirstTokenMs holds the string denoting the first_token_ms field in the database.
 	FieldFirstTokenMs = "first_token_ms"
 	// FieldUserAgent holds the string denoting the user_agent field in the database.
@@ -200,6 +202,7 @@ var Columns = []string{
 	FieldStream,
 	FieldDurationMs,
 	FieldEndToEndFirstOutputMs,
+	FieldAttemptFirstOutputMs,
 	FieldFirstTokenMs,
 	FieldUserAgent,
 	FieldIPAddress,
@@ -479,6 +482,11 @@ func ByDurationMs(opts ...sql.OrderTermOption) OrderOption {
 // ByEndToEndFirstOutputMs orders the results by the end_to_end_first_output_ms field.
 func ByEndToEndFirstOutputMs(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldEndToEndFirstOutputMs, opts...).ToFunc()
+}
+
+// ByAttemptFirstOutputMs orders the results by the attempt_first_output_ms field.
+func ByAttemptFirstOutputMs(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAttemptFirstOutputMs, opts...).ToFunc()
 }
 
 // ByFirstTokenMs orders the results by the first_token_ms field.

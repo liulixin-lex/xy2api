@@ -2821,16 +2821,32 @@
       "value": "nullInt64(log.EndToEndFirstOutputMs)"
     },
     {
+      "path": "backend/internal/repository/usage_log_repo_insert.go",
+      "value": "nullInt64(log.AttemptFirstOutputMs)"
+    },
+    {
       "path": "backend/internal/repository/usage_log_repo_query.go",
       "value": "log.EndToEndFirstOutputMs = &v"
+    },
+    {
+      "path": "backend/internal/repository/usage_log_repo_query.go",
+      "value": "log.AttemptFirstOutputMs = &v"
     },
     {
       "path": "backend/internal/service/openai_gateway_usage.go",
       "value": "usageLog.EndToEndFirstOutputMs = resilience.StateFrom(ctx).EndToEndFirstOutputMs()"
     },
     {
+      "path": "backend/internal/service/openai_gateway_usage.go",
+      "value": "usageLog.AttemptFirstOutputMs = resilience.StateFrom(ctx).AttemptFirstOutputMs()"
+    },
+    {
       "path": "backend/internal/service/gateway_usage_billing.go",
       "value": "resilience.StateFrom(ctx).EndToEndFirstOutputMs()"
+    },
+    {
+      "path": "backend/internal/service/gateway_usage_billing.go",
+      "value": "resilience.StateFrom(ctx).AttemptFirstOutputMs()"
     },
     {
       "path": "backend/internal/service/openai_first_output_timeout.go",
