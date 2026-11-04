@@ -43,14 +43,14 @@ func TestWithOpenAIEncryptedContentMigrationGuard(t *testing.T) {
 		// The existing parent-thread affinity still only recognizes agent_message.
 		require.False(t, openAIRequestHasEncryptedAgentMessage([]byte(`{"input":[{"type":"function_call_output","output":[{"type":"encrypted_content"}]}]}`)))
 	})
-	t.Run("WebSocket second turn", func(t *testing.T) {
+	t.Run("WebSocket connection first frames", func(t *testing.T) {
 		for _, tc := range []struct {
 			body string
 			want bool
 		}{
-			{`{"type":"response.create","input":"first turn"}`, false},
+			{`{"type":"response.create","input":"first connection"}`, false},
 			{`{"type":"response.create","response":{"input":[{"type":"function_call_output","output":[{"type":"encrypted_content"}]}]}}`, true},
-			{`{"type":"response.create","input":"third turn"}`, false},
+			{`{"type":"response.create","input":"third connection"}`, false},
 		} {
 			ctx := WithOpenAIEncryptedContentMigrationGuard(base, []byte(tc.body))
 			require.Equal(t, tc.want, openAINoStickyMigration(ctx))

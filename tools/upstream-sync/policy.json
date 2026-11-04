@@ -3457,10 +3457,6 @@
       "value": "service.WithOpenAIEncryptedContentMigrationGuard(ctx, wsAttemptMessage)"
     },
     {
-      "path": "backend/internal/handler/openai_gateway_handler.go",
-      "value": "turnCtx = service.WithOpenAIEncryptedContentMigrationGuard(turnCtx, turnBody)"
-    },
-    {
       "path": "backend/internal/service/openai_guardian_affinity.go",
       "value": "func WithOpenAIEncryptedContentMigrationGuard(ctx context.Context, body []byte) context.Context"
     },

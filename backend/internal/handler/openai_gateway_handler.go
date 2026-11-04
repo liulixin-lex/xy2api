@@ -3235,12 +3235,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// 无法中途换号）。本 turn 的准入与计费共用同一 pricingAt。
 				turnBillingCtx := turnBillingAPIKeys.begin(ctx, h.apiKeyService, turn, apiKey)
 				turnCtx, turnAt := h.gatewayService.WithOpenAITurnPricingContext(turnBillingCtx, apiKey.GroupID)
-				// BeforeRequest saves the current payload for native and passthrough
-				// turns; use that snapshot without retaining a guard from a prior turn.
-				cyberTurnBodiesMu.Lock()
-				turnBody := cyberTurnBodies[turn]
-				cyberTurnBodiesMu.Unlock()
-				turnCtx = service.WithOpenAIEncryptedContentMigrationGuard(turnCtx, turnBody)
 				turnAdmissionCtx := service.WithOpenAIQualityTurnExemption(turnCtx, turn == 1 || groupQualityTurnPinned.Load())
 				if _, vetoed, reason := h.gatewayService.SelectionAdmissionVetoLatest(turnAdmissionCtx, account); vetoed {
 					reqLog.Info("openai.websocket_turn_profit_vetoed",

@@ -229,7 +229,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 - 迁移前按实时负载确认至少一个这样的替代账号有空闲并发（并发上限不大于 0 视为不限）；负载查询失败、缺项或全部满载时保留原绑定，不白白丢掉缓存。这只降低白迁移的概率，确认之后空位仍可能被其他请求抢走。
 - 单账号分组，或组内其他账号都在判慢期时，保留原绑定，不迁移。整体拥塞时不会成批迁移。
 - 质量路由钉住的会话、带 `previous_response_id` 的请求与 WebSocket 不迁移。
-- 带协作或工具输出密文片段的请求同样不做软迁移：`input[]` 中的 `agent_message.content[]` 或数组形态的 `function_call_output.output[]` 含 `type=encrypted_content` 时，由 `WithOpenAIEncryptedContentMigrationGuard` 设置与续链相同的保护，跳过质量迁出、判慢迁出及其低倍率目标改道。HTTP Responses（含透传）以及接受 Responses 形状 `input[]` 的 Chat Completions 在选号前设置，WebSocket 首帧选号与每轮准入分别设置。reasoning／compaction 的顶层密文不在此列；硬准入、失败换号、P1-B、同站暂停、新会话放置、利润门和旧粘性逃逸照常。
+- 带协作或工具输出密文片段的请求同样不做软迁移：`input[]` 中的 `agent_message.content[]` 或数组形态的 `function_call_output.output[]` 含 `type=encrypted_content` 时，由 `WithOpenAIEncryptedContentMigrationGuard` 设置与续链相同的保护，跳过质量迁出、判慢迁出及其低倍率目标改道。HTTP Responses（含透传）以及接受 Responses 形状 `input[]` 的 Chat Completions 在选号前设置，WebSocket 首帧选号前设置（连接内不重选号，客户端重连后的新连接首帧照样判定）。reasoning／compaction 的顶层密文不在此列；硬准入、失败换号、P1-B、同站暂停、新会话放置、利润门和旧粘性逃逸照常。
 - 开启门槛的 OpenAI 分组在原版和高级调度共用统一迁出：绑定号为 2 档或本模型判慢，且有满足恢复线、未判慢、硬准入及空位条件的目标时，先占目标槽位、再 CAS 原子改绑。候选先经过快照与批量空位过滤，再按档内顺序逐个 DB 复核和占槽；全部候选失败或 CAS 失败时保留原绑定，满载候选不做逐号 DB 复核；成功后同组同会话冷却 5 分钟（进程内 LRU，16384 键），失败类改绑不受限。续链、WebSocket、质量路由所有权与固定续轮豁免；固定账号只免质量降档，不免判慢迁出。详见[调度顺序](account-scheduling.md)与[分组质量门槛](GROUP_QUALITY_GATE.md)。
 - Claude 迁出目标须通过正常候选准入、与 owner 同优先级且未判慢，并由新鲜负载快照确认空槽；模型路由内的迁出只考虑路由集合。属主删除出错、负载查询失败或没有合格目标时保留绑定；属主比较确认绑定已变时重新读取绑定，按新 owner 继续，读不到则正常选号。每个分组+会话成功迁出后 30 分钟内不再迁出，命中冷却时保留绑定并记 `cooldown`；冷却状态在进程内维护，多实例各自计算。迁出后正常选号并改绑，首轮按冷尝试。
 
