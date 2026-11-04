@@ -980,6 +980,32 @@ describe('EditAccountModal', () => {
     )
   })
 
+  it('loads the collaboration plaintext toggle and clears it from extra when switched off', async () => {
+    const account = buildAccount()
+    account.extra = { openai_collaboration_plaintext: true }
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    const toggle = wrapper.get('[data-testid="edit-openai-collaboration-plaintext-toggle"]')
+    expect(toggle.attributes('aria-checked')).toBe('true')
+
+    await toggle.trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('openai_collaboration_plaintext')
+
+    updateAccountMock.mockClear()
+    account.extra = {}
+    const off = mountModal(account)
+    await off.get('[data-testid="edit-openai-collaboration-plaintext-toggle"]').trigger('click')
+    await off.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_collaboration_plaintext).toBe(true)
+  })
+
   it('writes the upstream request id header into extra only when it changes', async () => {
     const account = buildAccount()
     account.extra = { openai_compact_mode: 'force_on' }

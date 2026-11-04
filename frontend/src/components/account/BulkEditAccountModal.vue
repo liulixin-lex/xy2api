@@ -137,6 +137,61 @@
         </div>
       </div>
 
+      <!-- OpenAI Codex 协作消息明文化（OAuth/API Key；批量关闭显式写 false） -->
+      <div
+        v-if="allOpenAIPassthroughCapable"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="mb-3 flex items-center justify-between">
+          <div class="flex-1 pr-4">
+            <label
+              id="bulk-edit-openai-collaboration-plaintext-label"
+              class="input-label mb-0"
+              for="bulk-edit-openai-collaboration-plaintext-enabled"
+            >
+              {{ t('admin.accounts.openai.collaborationPlaintext') }}
+            </label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.collaborationPlaintextDesc') }}
+            </p>
+          </div>
+          <input
+            v-model="enableOpenAICollaborationPlaintext"
+            id="bulk-edit-openai-collaboration-plaintext-enabled"
+            type="checkbox"
+            aria-controls="bulk-edit-openai-collaboration-plaintext-body"
+            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </div>
+        <div
+          id="bulk-edit-openai-collaboration-plaintext-body"
+          :class="!enableOpenAICollaborationPlaintext && 'pointer-events-none opacity-50'"
+          role="group"
+          aria-labelledby="bulk-edit-openai-collaboration-plaintext-label"
+        >
+          <button
+            id="bulk-edit-openai-collaboration-plaintext-toggle"
+            type="button"
+            role="switch"
+            :disabled="!enableOpenAICollaborationPlaintext"
+            :aria-checked="openaiCollaborationPlaintextEnabled"
+            aria-labelledby="bulk-edit-openai-collaboration-plaintext-label"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              openaiCollaborationPlaintextEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+            @click="openaiCollaborationPlaintextEnabled = !openaiCollaborationPlaintextEnabled"
+          >
+            <span
+              :class="[
+                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                openaiCollaborationPlaintextEnabled ? 'translate-x-5' : 'translate-x-0'
+              ]"
+            />
+          </button>
+        </div>
+      </div>
+
       <!-- OpenAI API long-context billing (a price field: needs "Adjust balance" for operators) -->
       <div
         v-if="canAdjustBalance && allOpenAIPassthroughCapable"
@@ -1677,6 +1732,7 @@ const enableStatus = ref(false)
 const enableGroups = ref(false)
 const enableOpenAIPassthrough = ref(false)
 const enableOpenAIFlattenNamespaces = ref(false)
+const enableOpenAICollaborationPlaintext = ref(false)
 const enableOpenAILongContextBilling = ref(false)
 const enableOpenAIEndpointCapabilities = ref(false)
 const enableOpenAIResponsesMode = ref(false)
@@ -1713,6 +1769,7 @@ const groupIds = ref<number[]>([])
 const openaiPassthroughEnabled = ref(false)
 // Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
+const openaiCollaborationPlaintextEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>([
   'chat_completions',
@@ -2008,6 +2065,12 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     extra.openai_responses_flatten_namespaces = openaiFlattenNamespacesEnabled.value
   }
 
+  // 批量更新按键合并 extra，关闭必须显式写 false，删键无法清除已开启的账号
+  if (enableOpenAICollaborationPlaintext.value && allOpenAIPassthroughCapable.value) {
+    const extra = ensureExtra()
+    extra.openai_collaboration_plaintext = openaiCollaborationPlaintextEnabled.value
+  }
+
   if (applyOpenAILongContextBilling) {
     const extra = ensureExtra()
     extra.openai_long_context_billing_enabled = openAILongContextBillingEnabled.value
@@ -2225,6 +2288,7 @@ const handleSubmit = async () => {
     enableBaseUrl.value ||
     enableOpenAIPassthrough.value ||
     enableOpenAIFlattenNamespaces.value ||
+    (enableOpenAICollaborationPlaintext.value && allOpenAIPassthroughCapable.value) ||
     (enableOpenAILongContextBilling.value && allOpenAIPassthroughCapable.value) ||
     (enableOpenAIEndpointCapabilities.value && allOpenAIAPIKey.value) ||
     (enableOpenAIResponsesMode.value && allOpenAIAPIKey.value) ||
@@ -2391,6 +2455,7 @@ watch(
       enableGroups.value = false
       enableOpenAIPassthrough.value = false
       enableOpenAIFlattenNamespaces.value = false
+      enableOpenAICollaborationPlaintext.value = false
       enableOpenAILongContextBilling.value = false
       enableOpenAIEndpointCapabilities.value = false
       enableOpenAIResponsesMode.value = false
@@ -2411,6 +2476,7 @@ watch(
       baseUrl.value = ''
       openaiPassthroughEnabled.value = false
       openaiFlattenNamespacesEnabled.value = false
+      openaiCollaborationPlaintextEnabled.value = false
       openAILongContextBillingEnabled.value = false
       openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
       openAIResponsesMode.value = 'auto'
