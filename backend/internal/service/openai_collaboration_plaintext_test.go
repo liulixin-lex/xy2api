@@ -289,12 +289,25 @@ func TestCollaborationForwardContinuityBeforeNormalization(t *testing.T) {
 			require.Equal(t, []byte(body), raw)
 			upstream := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(200, `{"id":"r1","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)}
 			c := collabTestContext()
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(previous) })
 			_, err := newOpenAIRejectedFieldTestService(upstream).Forward(context.Background(), c, account, []byte(body))
 			require.NoError(t, err)
 			require.Len(t, upstream.bodies, 1)
 			stats, ok := openAICodexCollabAttempt(c)
 			require.True(t, ok)
 			require.False(t, stats.Applied, "map normalization cannot wash out an original protocol/schema conflict")
+			if tc.accountEnabled {
+				require.Equal(t, codexCollabConflict, stats.Outcome)
+				require.Equal(t, "account", openAICollaborationAttempt(c).eligibilitySource)
+				require.Equal(t, 1, strings.Count(logs.String(), `"msg":"resilience.collab_plaintext"`))
+			} else {
+				require.Equal(t, codexCollabUnsupported, stats.Outcome)
+				require.Empty(t, openAICollaborationAttempt(c).eligibilitySource)
+				require.NotContains(t, logs.String(), `"msg":"resilience.collab_plaintext"`)
+			}
 			if tc.name == "history_marker" {
 				require.Equal(t, "[]", gjson.GetBytes(upstream.lastBody, "input.0.encrypted_function_args").Raw)
 			}

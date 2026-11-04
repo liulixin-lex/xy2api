@@ -71,6 +71,8 @@
 - [x] R4-A-2：拆分只读 plan 与 edits 应用，原始入口复用全部检查；developer/system 片段先验重复键再过滤 type，现有表增加两个回归。
 - [x] R4-A-2 全部协作定向测试、vet、CI lint 与 docs consistency。
 - [x] R4-A-2 提交后干净树 audit。
+- [x] R4b-B-1：资格通过时保留原始 conflict/account 观测与 Warn；现有归一化表覆盖四行冲突及账号关闭时的 unsupported，原始状态排除仍为 unsupported。
+- [x] R4b-B-2：明确关闭时只跳过入口原始 plan 检查、只观测照旧；同步原始 conflict 例外与 invalid 归为 unsupported 的告警边界。
 
 ## 集成与验收（PM）
 

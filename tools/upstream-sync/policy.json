@@ -3863,7 +3863,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_forward.go",
-      "value": "!collabRawBlocked && openAICollaborationEligible"
+      "value": "armOpenAICollaboration(c, body, upstreamModel, !collabRawBlocked && collabEligible)"
     },
     {
       "path": "backend/internal/service/openai_gateway_forward.go",
@@ -3915,7 +3915,11 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_forward.go",
-      "value": "_, rawPlan, _ := planCodexCollaborationPlaintext(body)"
+      "value": "_, rawPlan, rawOutcome := planCodexCollaborationPlaintext(body)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "collabAttempt.outcome, collabAttempt.eligibilitySource = codexCollabConflict, \"account\""
     },
     {
       "path": "backend/internal/service/openai_collaboration_plaintext.go",

@@ -18,9 +18,11 @@ The gateway SHALL default collaboration_plaintext.enabled to false and models to
 
 - **GIVEN** the original bytes fail any check required by the atomic transform, including store:true, a nonempty previous_response_id, unsupported shapes, conflicts, or ambiguous root/protocol-container/schema/developer/system text fields
 - **WHEN** compatibility normalization changes/removes these fields or collapses duplicate keys
-- **THEN** P1′ SHALL remain unsupported and SHALL NOT transform the declaration.
+- **THEN** P1′ SHALL NOT obtain a plan or transform the declaration.
+- **AND** if all eligibility gates pass and the original planning outcome is conflict, the attempt SHALL report outcome=conflict and eligibility=account and emit the existing warning. Original invalid outcomes (invalid or duplicate-key root objects), store/previous exclusions and unsupported shapes SHALL remain outcome=unsupported without a warning caused by that exclusion; failed eligibility gates SHALL remain unsupported.
 - **AND** original checks SHALL run only when raw bytes contain the literal `"collaboration"`; otherwise no plan SHALL be granted, even if normalization later materializes an escaped declaration. The original bytes SHALL pass the same complete read-only planning checks used by the transform before a plan can be granted. Developer/system content fragments SHALL be checked for duplicate keys before filtering by type. Eligibility and continuity SHALL be frozen before normalization and SHALL NOT be recomputed from the rewritten body.
 - **AND** non-string tool_choice, dotted/dunder request histories and Chat function shapes SHALL remain unsupported; only absent or auto/none/required tool_choice is supported.
+- **AND** when the master/feature switch is off or the model list is empty, entry SHALL skip original planning checks while existing observe-only statistics remain active.
 
 #### Scenario: Frozen response restoration
 
