@@ -529,7 +529,8 @@ func departedGroupQualityMembers(old *groupQualitySnapshot, current map[int64]ma
 }
 
 func logGroupQualityTier(old, next groupQualityMemberSnapshot, groupID int64) {
-	if old.Tier == next.Tier {
+	// The initial snapshot establishes a tier; it is not a transition from 0.
+	if old.AccountID == 0 || old.Tier == next.Tier {
 		return
 	}
 	dimension, value := "unknown", (*float64)(nil)

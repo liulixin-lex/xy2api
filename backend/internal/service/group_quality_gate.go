@@ -300,7 +300,7 @@ func voteGroupQualityDimension(s groupQualityDimensionState, now time.Time, vali
 	vote := ""
 	if fail {
 		vote = "fail"
-	} else if pass && (!(s.state() == "fail" || s.hasBad(now)) || recovered) {
+	} else if pass && ((s.state() != "fail" && !s.hasBad(now)) || recovered) {
 		vote = "pass"
 	}
 	if vote == "" {
