@@ -4,7 +4,7 @@
 
 ### Requirement: Gated collaboration plaintext channel
 
-The gateway SHALL default collaboration_plaintext.enabled to false and models to an empty array. The gateway SHALL apply the atomic namespace transform only to declared collaboration tools on eligible native Responses HTTP requests using the final mapped model and an enabled OpenAI account. API Key and OAuth SHALL both be supported. WS, passthrough, compact, bridge and flatten routes SHALL remain unmodified by P1′.
+The gateway SHALL default collaboration_plaintext.enabled to false and models to an empty array. The gateway SHALL apply the atomic namespace transform only to declared collaboration tools on eligible native Responses HTTP requests using the final mapped model and an enabled OpenAI account. API Key and OAuth SHALL both be wired, while OAuth MUST remain disabled until separately prechecked. WS, passthrough, compact, bridge and flatten routes SHALL remain unmodified by P1′.
 
 #### Scenario: Eligible outbound declaration
 
@@ -14,12 +14,21 @@ The gateway SHALL default collaboration_plaintext.enabled to false and models to
 - **AND** it SHALL update exact functions.collaboration. references only in top-level instructions and developer/system message text, recording DevTextRewrites
 - **AND** historical encrypted items, IDs, arguments, user messages and tool outputs SHALL remain unchanged.
 
+#### Scenario: Original state exclusions
+
+- **GIVEN** the original request has store:true or a nonempty previous_response_id
+- **WHEN** OAuth compatibility normalization changes or removes these fields
+- **THEN** P1′ SHALL remain unsupported and SHALL NOT transform the declaration.
+- **AND** non-string tool_choice, dotted/dunder request histories and Chat function shapes SHALL remain unsupported; only absent or auto/none/required tool_choice is supported.
+
 #### Scenario: Frozen response restoration
 
 - **GIVEN** an applied plan for this attempt
 - **WHEN** a stream, JSON or aggregated SSE response arrives after settings change
 - **THEN** the original plan SHALL restore the canonical namespace and bare leaf name
 - **AND** nonempty encrypted evidence SHALL veto adding an empty encrypted_function_args marker.
+- **AND** known instructions echoes SHALL restore only the exact references rewritten by this plan.
+- **AND** final HTTP and SSE error message/param fields SHALL restore exact private identities, with original errors retained for classification, observations and retry decisions.
 
 #### Scenario: Unsafe restoration
 
@@ -33,7 +42,13 @@ The schema sanitizer SHALL skip the entire exact collaboration namespace. Other 
 
 ### Requirement: Bounded collaboration observations
 
-The gateway SHALL report attempt outcome/model, EFA marginal counts and action marginal counts separately. It SHALL deduplicate logical calls and retain earlier nonempty evidence. Warnings SHALL contain only metadata and counts.
+The gateway SHALL report attempt outcome/model, EFA marginal counts and action marginal counts separately. It SHALL deduplicate logical calls and retain earlier nonempty evidence. Calls/EFA SHALL count only the three message tools, excluding wait/list/interrupt. Observe-only calls SHALL expose msg=opaque|text shape counts for valid string messages. Statistics SHALL publish only at arm and finish, before P0 reads final attempt facts. Applied attempts returning an error SHALL warn with upstream_status and headers_committed. Warnings SHALL contain only metadata and counts.
+
+Long-window acceptance SHALL use persistent state_rejection.collab_plaintext events and usage_logs grouped by account/model/UA as an approximate request denominator, without claiming exact eligible message coverage. Single-instance counters retain at most one hour and SHALL only support gray-release sampling.
+
+### Requirement: Rollout and rollback constraints
+
+Operators SHALL keep accounts within the same upstream site consistently configured and precheck every model in the global list per site. Switching configuration can invalidate the ongoing prompt prefix once from the declaration onward. Existing sessions MAY be rejected after disabling P1′; affected users MUST start a new session. This change SHALL NOT introduce session continuity state. Codex version changes SHALL trigger state-rejection sampling by client_version.
 
 ### Requirement: P0 state rejection classification
 

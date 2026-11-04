@@ -3,9 +3,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
@@ -135,6 +137,90 @@ func TestCollaborationForwardAPIKeyAndOAuth(t *testing.T) {
 			require.False(t, ok)
 		})
 	}
+}
+
+func TestCollaborationForwardPreservesOriginalStateExclusions(t *testing.T) {
+	for _, oauth := range []bool{false, true} {
+		for _, state := range []string{`"store":true`, `"previous_response_id":"resp_previous"`} {
+			t.Run(map[bool]string{false: "apikey", true: "oauth"}[oauth]+"/"+state, func(t *testing.T) {
+				enableCollabTest(t)
+				response := `{"id":"resp_1","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`
+				upstream := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(200, response)}
+				svc := newOpenAIRejectedFieldTestService(upstream)
+				a := newOpenAIRejectedFieldTestAccount()
+				if oauth {
+					a = newOpenAIOAuthNamespaceTestAccount()
+				}
+				if a.Extra == nil {
+					a.Extra = map[string]any{}
+				}
+				a.Extra["openai_collaboration_plaintext"] = true
+				body := []byte(strings.Replace(collabWiringBody, "{", "{"+state+",", 1))
+				c := collabTestContext()
+				_, err := svc.Forward(context.Background(), c, a, body)
+				require.NoError(t, err)
+				require.Len(t, upstream.bodies, 1)
+				require.Equal(t, "collaboration", gjson.GetBytes(upstream.lastBody, "tools.0.name").String())
+				require.True(t, gjson.GetBytes(upstream.lastBody, "tools.0.tools.0.parameters.properties.message.encrypted").Bool())
+				stats, ok := openAICodexCollabAttempt(c)
+				require.True(t, ok)
+				require.False(t, stats.Applied)
+				require.Equal(t, codexCollabUnsupported, stats.Outcome)
+				if oauth {
+					require.False(t, gjson.GetBytes(upstream.lastBody, "store").Bool(), "retain OAuth store compatibility")
+					require.False(t, gjson.GetBytes(upstream.lastBody, "previous_response_id").Exists(), "retain OAuth previous-response compatibility")
+				}
+			})
+		}
+	}
+}
+
+func TestCollaborationForwardAppliedHTTPFailureWarn(t *testing.T) {
+	enableCollabTest(t)
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	upstream := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(400, `{"error":{"type":"invalid_request_error","code":"invalid_function","message":"Unknown function collaboration-xy.send_message"}}`)}
+	svc := newOpenAIRejectedFieldTestService(upstream)
+	a := newOpenAIRejectedFieldTestAccount()
+	a.Extra["openai_collaboration_plaintext"] = true
+	c := collabTestContext()
+	_, err := svc.Forward(context.Background(), c, a, []byte(collabWiringBody))
+	require.Error(t, err)
+	require.Len(t, upstream.bodies, 1)
+	var events []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+		var event map[string]any
+		require.NoError(t, json.Unmarshal([]byte(line), &event))
+		if event["msg"] == "resilience.collab_plaintext" {
+			events = append(events, event)
+		}
+	}
+	require.Len(t, events, 1)
+	require.Equal(t, true, events[0]["applied"])
+	require.Equal(t, "applied", events[0]["outcome"])
+	require.Equal(t, float64(400), events[0]["upstream_status"])
+	require.Equal(t, true, events[0]["headers_committed"])
+	eventJSON, err := json.Marshal(events[0])
+	require.NoError(t, err)
+	require.NotContains(t, string(eventJSON), "Unknown function")
+	require.NotContains(t, string(eventJSON), "collaboration-xy")
+}
+
+func TestCollaborationPublishesOnlyAtAttemptBoundaries(t *testing.T) {
+	c := collabTestContext()
+	_, attempt := armOpenAICollaboration(c, []byte(collabWiringBody), "gpt-5.4", true)
+	_, err := restoreOpenAICollaboration(c, "response.output_item.done", []byte(`{"type":"response.output_item.done","item":`+collabWiringCall+`}`), true)
+	require.NoError(t, err)
+	stats, ok := openAICodexCollabAttempt(c)
+	require.True(t, ok)
+	require.Zero(t, stats.Calls, "frames update the restorer, not the published snapshot")
+	attempt.finish(context.Background(), c, &Account{ID: 918273646}, nil)
+	stats, ok = openAICodexCollabAttempt(c)
+	require.True(t, ok)
+	require.Equal(t, 1, stats.Calls)
+	require.Equal(t, 1, stats.MarkerAdded)
 }
 
 func TestCollaborationThreeResponseExits(t *testing.T) {
@@ -286,7 +372,7 @@ func TestCollaborationMarginalCounters(t *testing.T) {
 	_, err := restoreOpenAICollaboration(c, "", []byte(`{"output":[`+collabWiringCall+`]}`), false)
 	require.NoError(t, err)
 	a := &Account{ID: 918273645, Platform: PlatformOpenAI}
-	attempt.finish(context.Background(), c, a)
+	attempt.finish(context.Background(), c, a, nil)
 	labels := map[string]map[string]int64{}
 	for _, row := range resilience.Snapshot(time.Minute) {
 		if row.AccountID != a.ID {

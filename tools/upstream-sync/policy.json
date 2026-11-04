@@ -3856,6 +3856,22 @@
     {
       "path": "backend/internal/handler/resilience_failover.go",
       "value": "service.ClassifyFailoverError(err).StateFamily != resilience.StateNone"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "!collabStatefulRequest && openAICollaborationEligible"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "collabAttempt.finish(ctx, c, account, forwardErr)"
+    },
+    {
+      "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
+      "value": "func TestCollaborationForwardPreservesOriginalStateExclusions"
+    },
+    {
+      "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
+      "value": "func TestCollaborationForwardAppliedHTTPFailureWarn"
     }
   ],
   "forbidden_module_paths": [

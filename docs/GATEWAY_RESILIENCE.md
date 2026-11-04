@@ -404,13 +404,17 @@ HTTP 流已向客户端输出可见内容后，快层确认账号发生读流出
 
 ### 4.14 Codex 协作消息明文通道（P1′）
 
-管理端网关韧性中的 `collaboration_plaintext.enabled` 默认关闭；`models` 是经过验证的实际出站模型清单，模型映射之后再匹配（去首尾空白、不分大小写精确匹配）。账号页的 `extra.openai_collaboration_plaintext` 仅布尔 true 生效；单账号关闭删除键、批量关闭写 false 都表示关闭。全局总开关、功能开关、模型、账号及 Codex UA/originator 全部满足才转换；ForceCodexCLI 不绕过真实客户端门。API Key 和 OAuth 均适用，仅原生 Responses HTTP，WS、透传、compact、协议桥接、摊平账号不转换。
+管理端网关韧性中的 `collaboration_plaintext.enabled` 默认关闭；`models` 是经过验证的实际出站模型清单，模型映射之后再匹配（去首尾空白、不分大小写精确匹配）。账号页的 `extra.openai_collaboration_plaintext` 仅布尔 true 生效；单账号关闭删除键、批量关闭写 false 都表示关闭。全局总开关、功能开关、模型、账号及 Codex UA/originator 全部满足才转换；ForceCodexCLI 不绕过真实客户端门。代码同时接通 API Key 与 OAuth，仅原生 Responses HTTP；预检仅覆盖 API Key 中转站，OAuth 未预检，验证前不要在 OAuth 账号开启。WS、透传、compact、协议桥接、摊平账号不转换。原始请求含 store:true 或非空 previous_response_id 时也不转换；此排除在 OAuth 归一化之前冻结。outcome=unsupported 同时涵盖资格门未满足、这些状态字段与不支持的形态，当前不区分细项。
 
-请求声明 collaboration 命名空间时，先判冲突再原子改名为 collaboration-xy，只删 spawn_agent/send_message/followup_task 的 message.encrypted。仅 applied 时，把顶层 instructions 与 developer/system 消息的文本（字符串或 input_text.text）里精确的 functions.collaboration. 同步替换成 functions.collaboration-xy.，避免寻址示例与声明失配；用户消息、工具输出和参数不替换。DevTextRewrites 记录本次精确字面串的实际替换次数，仅作为异常 Warn 的字段，不单独触发 Warn、不新增指标。回程三种身份回声统一恢复 namespace=collaboration 和裸叶名，仅符合声明、message 为非空明文且没有密文否决的消息调用补 encrypted_function_args:[]。非空标记、gAAAA 前缀或无空白长 base64 等可疑形态否决补标记；早先非空证据持续到该尝试结束。wait/list 等同 namespace 工具只恢复名字；未知私有叶名恢复身份、计 uncovered、不补标记。
+请求声明 collaboration 命名空间时，先判冲突再原子改名为 collaboration-xy，只删 spawn_agent/send_message/followup_task 的 message.encrypted。tool_choice 仅支持缺省或 auto/none/required 字符串；对象选择、点号/双下划线请求历史身份、Chat 嵌套 function 形态均 unsupported、原样不转换。仅 applied 时，把顶层 instructions 与 developer/system 消息的文本（字符串或 input_text.text）里精确的 functions.collaboration. 同步替换成 functions.collaboration-xy.，避免寻址示例与声明失配；用户消息、工具输出和参数不替换。DevTextRewrites 记录本次精确字面串的实际替换次数，仅作为异常 Warn 的字段，不单独触发 Warn、不新增指标。回程三种身份回声统一恢复 namespace=collaboration 和裸叶名，仅符合声明、message 为非空明文且没有密文否决的消息调用补 encrypted_function_args:[]。非空标记、gAAAA 前缀或无空白长 base64 等可疑形态否决补标记；早先非空证据持续到该尝试结束。wait/list 等同 namespace 工具只恢复名字；未知私有叶名恢复身份、计 uncovered、不补标记。
 
-流式、JSON、SSE→JSON 共用本次尝试的冻结 plan，不跨请求继承。恢复身份不安全时本地终止：未提交返回 502、已提交发送协议终态，不下发私有名，不经 failover 重放。不改 IDs、arguments、output 正文或输入历史，已有密文历史不修复。上游拒绝沿用原有错误路径，不靠拒绝文案触发转换。
+流式、JSON、SSE→JSON 共用本次尝试的冻结 plan，不跨请求继承。恢复身份不安全时本地终止：未提交返回 502、已提交发送协议终态，不下发私有名，不经 failover 重放。不改 IDs、arguments、output 正文或输入历史，已有密文历史不修复。上游拒绝沿用原有分类、修复与重试判断，不靠拒绝文案触发转换；仅在写给客户端前恢复 error.message/param、response.error.message/param 中的确切私有身份，状态码、type 与 code 不变。instructions 的已改写结构化回声也按冻结 plan 对称恢复。
 
 schema 兼容：工具 schema 清理器对精确名为 collaboration 的整个 namespace 跳过递归修复，包含 wait/list；其他工具的 null type、object union、null required、lookaround 修复不变。normalizeCodexTools 不递归 namespace。改动前清理器对真实 Codex 0.166 fixture 的顶层与 Lite additional_tools 声明均逐字节不变；该样本在 P1′ 关闭时没有额外变化。对原本需修复的其它 collaboration schema，豁免仍会让其保持原样，此行为独立于开关。
+
+灰度范围：已验证站为 d0c7a8 / c2a95e / b672e6，模型为 gpt-6.1-sol / gpt-6-astra，客户端为 Codex 0.166。同站账号须统一配置；账号开关表示该站对全局清单内全部模型均已验证，新增模型前须逐站补验。混池会使会话在启用与未启用的账号之间切换，不能据此承诺连续性。账号开关的运维口径是只控制新会话是否启用；当前代码按每次请求判定，未为已有会话记忆启用状态。开→关续轮实测：d0c7a8、c2a95e 通过，b672e6 的账号 470 两次返回 cyber_policy。部分上游会拒绝已用 P1′ 的历史，此时需新开会话；会话连续性方案仍待用户决定，本轮没有新增保障。
+
+提示缓存：持续启用且输入相同时，变换后的前缀稳定；开/关（含总开关、账号开关或模型清单变化）会使进行中会话下一请求从工具声明处起失效一次，之后同态稳定。真实 Codex 0.166 的 58,104 字节样本中，首个差异在字节 19,695，位于 input[0] additional_tools 的 [46, 25,018) 区间；不据此推算其它会话的精确失效率。反复切换会重复失效，建议低峰、整站切换。
 
 完整契约与验收见 [OpenSpec design](../openspec/changes/codex-collaboration-plaintext-20261104/design.md)。
 
@@ -458,7 +462,9 @@ schema 兼容：工具 schema 清理器对精确名为 collaboration 的整个 n
 | `relay_keepalive` | 从上游流中丢弃的中转伪保活帧（按账号；0.4.4 起含 `response.created` 之前的空 delta） |
 | `pre_created_delta` | 上游在 `response.created` 之前发出的非空 delta（按分组、账号、平台，0.4.4；每次尝试至多计一次）；照常输出，用来观察这类中转的规模 |
 
-`collab_plaintext` 按 outcome、实际出站 model 统计尝试（label 编码为 `outcome=<值>;model=<值>`）；`collab_call` 按 `efa=absent|empty|nonempty` 统计逻辑调用；`collab_call_action` 按 `action=marker_added|vetoed|contradicted|uncovered` 统计动作。后两者是独立边际计数，不代表联合分布，流式多事件不重复计同一调用。
+`collab_plaintext` 按 outcome、实际出站 model 统计尝试（label 编码为 `outcome=<值>;model=<值>`）；`collab_call` 按 `efa=absent|empty|nonempty` 统计三个消息工具的逻辑调用（Calls/EFA 分母不含 wait/list/interrupt）；只观测模式另以 `msg=opaque|text` 记录有效字符串 message 的可疑/文本形态，缺失或无效 message 不计入这两项；`collab_call_action` 按 `action=marker_added|vetoed|contradicted|uncovered` 统计动作。EFA、message 形态与 action 是独立边际计数，不代表联合分布，流式多事件不重复计同一调用。message 形态仅为诊断，不证明可投递。
+
+48 小时/7 天验收的持久化来源为 resilience.state_rejection 事件中的 collab_plaintext 标识，以及 usage_logs 按账号、模型和客户端 UA 汇总的请求量。usage_logs 只能近似合格流量，无法精确得出“符合资格的新协作投递”分母，不应把近似请求量当精确覆盖率。进程计数仅保留当前实例最近 1 小时，可作灰度抽查；多实例须分别采集，不以它替代长期验收。
 
 ### 5.3 日志事件
 
@@ -466,7 +472,7 @@ schema 兼容：工具 schema 清理器对精确名为 collaboration 的整个 n
 
 warn 级，进入运维页“系统日志”（`ops_system_logs`）：
 
-- `resilience.collab_plaintext`：仅 conflict/invalid、vetoed/contradicted/uncovered 非零或恢复报错；含 account_id、group_id、model、client_version、outcome 与各计数，不存正文/参数/密文/原始恢复错误。
+- `resilience.collab_plaintext`：conflict/invalid、vetoed/contradicted/uncovered 非零、恢复报错，或 applied 后本次 Forward 失败时记录；含 account_id、group_id、model、client_version、outcome、applied、upstream_status（无响应时为 0）、headers_committed 与各计数（含 msg_opaque/msg_text、dev_text_rewrites）。正常提示替换不单独触发 Warn，不存正文/参数/密文/原始错误。
 
 - `balance_paused`（含账号、暂停时长与上游原文；0.4.12 起另含档位 `step`）；
 - `session_rebind`（P1-B 原因 `post_output_first_failure`，普通连击原因 `resil_failure_streak`，含会话哈希前缀、组、账号、类别、避开时长）、`last_resort`；
@@ -527,7 +533,7 @@ OpenAI 判慢降序与会话迁移的事件（见 §4.5）不带 `resilience.` �
 
 ## 6. 回退
 
-协作消息明文通道：关闭 `collaboration_plaintext.enabled` 或目标账号开关即停止新尝试转换；已经发出的尝试继续按冻结 plan 还原。清空 models 可阻止所有模型进入。无需重启、不重标已有历史；schema 豁免不随开关回退。
+协作消息明文通道：关闭 `collaboration_plaintext.enabled`、目标账号开关或清空 models 后，新会话不再启用；当前按请求判定，已发出的尝试继续按冻结 plan 还原。已有历史不重标，不能保证已使用会话的连续性：开→关续轮实测 d0c7a8、c2a95e 通过，b672e6 的账号 470 两次 cyber_policy，遇此拒绝需新开会话。会话连续性方案待用户决定。切换使下一请求从工具声明处起提示缓存失效一次，建议低峰、整站切换并保持同站账号一致。OAuth 尚未预检，不在验证前启用。无需重启；schema 豁免不随开关回退。
 
 - 单项关闭：在“网关韧性”卡中关闭对应能力，即时生效。各能力关闭后的行为见 runbook §6。0.4.4 新增的开关关闭后回到 0.4.3 的对应行为，不是 0.3.0（两处小例外：关闭 `failure.decision_v2` 后分类输入的证据补全仍保留，见下表；关闭 `errors.failed_frame_retry_after` 后用户余额不足与内容拒绝仍不带重试时间，见 §3）；关闭 `capability.stream_only_learning` 后已学到的记录不删除，按到期时间自然过期，期间重新开启仍然生效。
 - 状态拒绝的请求级分类、不换号与不罚号，以及 `state_rejection` 观测不受总开关影响，无新增设置。有限修复仍沿用原有触发条件与预算。

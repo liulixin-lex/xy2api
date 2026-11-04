@@ -22,6 +22,11 @@ import (
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, forwardErr error) {
 	defer beginOpenAIStateRejectionAttempt(ctx, c, account, body)(&forwardErr)
+	// Freeze client state exclusions before OAuth compatibility filters rewrite
+	// store or discard previous_response_id.
+	previousResponse := gjson.GetBytes(body, "previous_response_id")
+	collabStatefulRequest := gjson.GetBytes(body, "store").Bool() ||
+		(previousResponse.Exists() && previousResponse.Type != gjson.Null && strings.TrimSpace(previousResponse.String()) != "")
 	// Reset before any early return so failover attempts never inherit a plan.
 	c.Set(openAICollabResponseKey, nil)
 	c.Set(codexCollabAttemptContextKey, nil)
@@ -1054,8 +1059,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 	// Native Responses HTTP only; each attempt freezes its own restore plan.
 	collabBody, collabAttempt := armOpenAICollaboration(c, body, upstreamModel,
-		openAICollaborationEligible(c, account, upstreamModel, wsDecision.Transport, passthroughEnabled, compactPath, compatMessagesBridge))
-	defer collabAttempt.finish(ctx, c, account)
+		!collabStatefulRequest && openAICollaborationEligible(c, account, upstreamModel, wsDecision.Transport, passthroughEnabled, compactPath, compatMessagesBridge))
+	defer func() { collabAttempt.finish(ctx, c, account, forwardErr) }()
 	if !bytes.Equal(collabBody, body) {
 		body, requestView, reqBody = collabBody, newOpenAIRequestView(collabBody), nil
 	}
@@ -1110,6 +1115,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		// Send request
 		upstreamStart := time.Now()
 		resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+		if collabAttempt != nil {
+			collabAttempt.upstreamStatus = 0
+			if resp != nil {
+				collabAttempt.upstreamStatus = resp.StatusCode
+			}
+		}
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if headerGuard != nil && headerGuard.stopHeaderWait() {
 			if resp != nil && resp.Body != nil {

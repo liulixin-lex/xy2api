@@ -55,11 +55,12 @@ func declaresOpenAICollaboration(body []byte) bool {
 }
 
 type openAICollabAttempt struct {
-	restorer      *codexCollabRestorer
-	outcome       codexCollabOutcome
-	model         string
-	applied       bool
-	restoreFailed bool
+	restorer       *codexCollabRestorer
+	outcome        codexCollabOutcome
+	model          string
+	applied        bool
+	restoreFailed  bool
+	upstreamStatus int
 }
 
 func armOpenAICollaboration(c *gin.Context, body []byte, model string, eligible bool) ([]byte, *openAICollabAttempt) {
@@ -105,7 +106,6 @@ func restoreOpenAICollaboration(c *gin.Context, event string, body []byte, strea
 	} else {
 		out, err = a.restorer.ResponseJSON(body)
 	}
-	a.publish(c)
 	if err != nil {
 		a.restoreFailed = true
 		// A local, non-failover error: never include unsafe upstream bytes.
@@ -114,7 +114,7 @@ func restoreOpenAICollaboration(c *gin.Context, event string, body []byte, strea
 	return out, nil
 }
 
-func (a *openAICollabAttempt) finish(ctx context.Context, c *gin.Context, account *Account) {
+func (a *openAICollabAttempt) finish(ctx context.Context, c *gin.Context, account *Account, forwardErr error) {
 	if a == nil {
 		return
 	}
@@ -132,7 +132,7 @@ func (a *openAICollabAttempt) finish(ctx context.Context, c *gin.Context, accoun
 			resilience.Count(count.name, group, account.ID, count.label)
 		}
 	}
-	if s.Outcome == codexCollabConflict || s.Outcome == codexCollabInvalid || s.Vetoed+s.Contradicted+s.Uncovered > 0 || a.restoreFailed {
+	if s.Outcome == codexCollabConflict || s.Outcome == codexCollabInvalid || s.Vetoed+s.Contradicted+s.Uncovered > 0 || a.restoreFailed || (a.applied && forwardErr != nil) {
 		fields := resilience.EventFields(ctx)
 		for i := 0; i+1 < len(fields); i += 2 {
 			if fields[i] == "model" {
@@ -140,6 +140,7 @@ func (a *openAICollabAttempt) finish(ctx context.Context, c *gin.Context, accoun
 			}
 		}
 		fields = append(fields, "account_id", account.ID, "group_id", group, "client_version", codexClientVersionFromUA(c.GetHeader("User-Agent")), "outcome", string(s.Outcome), "applied", s.Applied, "dev_text_rewrites", s.DevTextRewrites, "calls", s.Calls, "efa_absent", s.EFAAbsent, "efa_empty", s.EFAEmpty, "efa_nonempty", s.EFANonEmpty, "marker_added", s.MarkerAdded, "vetoed", s.Vetoed, "contradicted", s.Contradicted, "uncovered", s.Uncovered, "restore_failed", a.restoreFailed)
+		fields = append(fields, "upstream_status", a.upstreamStatus, "headers_committed", IsResponseCommitted(c) || c.Writer.Written())
 		slog.Warn("resilience.collab_plaintext", fields...)
 	}
 }
