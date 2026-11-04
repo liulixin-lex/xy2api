@@ -16,7 +16,13 @@
 
 ## P0 状态族（C）
 
-- [ ] 由 P0 工作包补充实现、观测与定向验证任务。
+- [x] 统一 ClassifyStateRejection、Result.StateFamily 与请求级类型标识，保留 v3 窄边界。
+- [x] 接入 HTTP/SSE、账号副作用、WS 与 handler 的换号/罚号守卫，独立于设置与请求预算。
+- [x] 定向验证六个家族、分类优先级、近似反例与 Encrypted 恒等旧谓词。
+- [x] 定向验证修复边界，保留 v3 输出后状态拒绝回归用例，确认 S2/S6 可修复与 S1/S3/S4 正文不变。
+- [x] 接入 state_rejection 观测、最终规则与协作 Applied/计数、协议位置片段 census 及已有 upstream_errors 的 state_family。
+- [x] 同步现行文档与上游钩子登记；P0 定向测试、文档一致性与干净树同步审计通过。
+- [x] 合入共享 OpenSpec 骨架，补全 P0 design/spec/tasks 并运行本次文档一致性检查；集成全量门禁仍由 PM 验收。
 
 ## 集成与验收（PM）
 
