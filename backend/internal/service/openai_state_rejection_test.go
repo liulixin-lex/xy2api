@@ -149,7 +149,9 @@ func TestOpenAIStateRejectionObservationFinalAttemptFacts(t *testing.T) {
 	require.Equal(t, float64(3), event["collab_calls"])
 	require.Equal(t, float64(42), event["rule_id"])
 	require.Equal(t, float64(1), event["frag_other"])
-	require.GreaterOrEqual(t, event["error_ms"].(float64), float64(1000))
+	errorMS, ok := event["error_ms"].(float64)
+	require.True(t, ok)
+	require.GreaterOrEqual(t, errorMS, float64(1000))
 	require.NotContains(t, logs.String(), "secret body")
 }
 

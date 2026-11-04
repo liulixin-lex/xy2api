@@ -34,7 +34,8 @@ func ClassifyStateRejection(code, typ, message string) StateRejection {
 	relay := code == "client_tool_continuation_unavailable" || (code == "" &&
 		(strings.Contains(message, "opaque conversation state") || strings.Contains(message, "unrecognized conversation state")))
 	conversation := strings.Contains(message, "encrypted content is invalid for this conversation")
-	if !relay && !r.Encrypted && !(code == "" && conversation) {
+	requestScoped := relay || r.Encrypted || (code == "" && conversation)
+	if !requestScoped {
 		return r
 	}
 	switch {
