@@ -13,6 +13,8 @@ export default {
         lastResortHint: '没有健康账号时，在软罚账号中按优先级与冷却结束时间依次找空闲的继续服务，全部占满才排队（单账号分组不再整组不可用）。',
         anthropicLatencyHold: 'Claude 慢号后排',
         anthropicLatencyHoldHint: 'Claude 账号在会话续轮中首个有效输出（不含开场、心跳与空帧）持续偏慢，即近 5 分钟内 ≥10 秒的占 35% 以上时，3 分钟内该模型的请求在同一优先级内把它排到后面，不剔除、不跨优先级；已在它上面的会话，若同优先级有未判慢且有空闲并发的账号则迁出（解除绑定后按正常选号改绑，需开启“会话失败改绑”），同一会话 30 分钟内最多迁出一次。关闭即停止后排与迁出，已迁出的会话不迁回；重新开启后只按新样本判断。',
+        sameSiteHold: '同站断流暂停',
+        sameSiteHoldHint: '同一上游站点 60 秒内有 ≥2 个账号断流（读流出错、输出后缺终态；中转在流内报告的错误不算）时，只暂停这些账号 5 分钟，同站其他账号不受影响；组内没有其他可用账号时仍可作末位兜底。关闭后不再新建暂停，已有暂停同时失效。',
         balance: '余额不足暂停',
         balanceHint: '上游余额不足的账号暂停调度，到期后由真实请求重试；账号列表的“恢复状态”可立即放回。',
         budget: '请求预算',
@@ -58,6 +60,8 @@ export default {
         learnTtlHint: '默认 21600（6 小时），到期自动恢复；修改只影响之后新学到的记录。也可在账号列表的状态列手动清除。'
       },
       switches: {
+        postOutputRebind: '输出后首次失败即改绑',
+        postOutputRebindHint: '已开始输出后失败（流内 response.failed、读流出错、缺终态）第一次发生就换号，并在回避期内避开该号；输出前失败仍按连续失败阈值改绑。依赖“会话失败改绑”开启。',
         preludeStaging: '兼容转换推迟开场',
         preludeStagingHint: 'Chat 与 Messages 的兼容转换等到首个正文或终态再写开场事件（role 块、message_start）；上游开场后、正文前失败时可以换号。关闭后回到 0.4.3 行为。',
         nativePreludeWhitelist: '原生 Responses 开场白名单扩展',
