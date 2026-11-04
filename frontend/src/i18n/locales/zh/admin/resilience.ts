@@ -41,7 +41,7 @@ export default {
         outputP99Hint: '在途预留的输出 Token 取模型近 7 天 P99（下限 1024）。',
         collaborationPlaintext: '协作消息明文化',
         collaborationPlaintextHint: '符合条件的新 Codex 协作消息（spawn_agent、send_message、followup_task）在上游未返回密文、网关未否决时以明文投递，减少换号后的协作会话报错。不修复已有会话历史。',
-        collaborationPlaintextScope: '生效条件：Codex 客户端经原生 Responses HTTP 请求、模型在下方清单内，且账号开关开启，或 API Key 账号上的会话已有协作明文历史。',
+        collaborationPlaintextScope: '生效条件：Codex 客户端经原生 Responses HTTP 请求、模型在下方清单内，且账号开关开启，或 API Key 账号上的会话历史已带协作明文标记（会话连续性）。',
         collaborationPlaintextOff: '关闭后，后续请求停止转换，进行中的响应仍会还原；已用过的会话在部分上游可能被拒绝，需新开会话。'
       },
       fields: {
