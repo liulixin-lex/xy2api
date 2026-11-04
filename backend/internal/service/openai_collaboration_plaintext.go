@@ -33,8 +33,8 @@ func openAICollaborationEligible(c *gin.Context, a *Account, model string, trans
 		resilience.Current().CollaborationPlaintextModel(model)
 }
 
-// Inspect only protocol-level calls and their top-level message argument, never
-// nested user JSON or tool output. This client-declared signal is not authorization.
+// Inspect only the explicit protocol marker, never arguments or tool output.
+// This client-declared signal is not authorization.
 func openAICollaborationContinuity(body []byte) bool {
 	for _, item := range gjson.GetBytes(body, "input").Array() {
 		if item.Get("type").String() != "function_call" || item.Get("namespace").String() != codexCollaborationNamespace {
@@ -43,21 +43,7 @@ func openAICollaborationContinuity(body []byte) bool {
 		if _, ok := codexCollabMessageTools[item.Get("name").String()]; !ok {
 			continue
 		}
-		if efa := item.Get("encrypted_function_args"); efa.Exists() {
-			if efa.IsArray() && len(efa.Array()) == 0 {
-				return true
-			}
-			continue
-		}
-		arguments := item.Get("arguments")
-		if arguments.Type != gjson.String || !gjson.Valid(arguments.String()) {
-			continue
-		}
-		parsed := gjson.Parse(arguments.String())
-		if !parsed.IsObject() || !codexCollabUniqueObject(parsed) {
-			continue
-		}
-		if message := parsed.Get("message"); message.Type == gjson.String && !openAICodexCollabMessageLooksOpaque(message.String()) {
+		if efa := item.Get("encrypted_function_args"); efa.Exists() && efa.IsArray() && len(efa.Array()) == 0 {
 			return true
 		}
 	}
@@ -92,6 +78,7 @@ type openAICollabAttempt struct {
 	model             string
 	applied           bool
 	restoreFailed     bool
+	clientRejected    bool
 	upstreamStatus    int
 	eligibilitySource string
 }
@@ -194,7 +181,7 @@ func (a *openAICollabAttempt) finish(ctx context.Context, c *gin.Context, accoun
 			resilience.Count(count.name, group, account.ID, count.label)
 		}
 	}
-	upstreamRejected := a.applied && forwardErr != nil && a.upstreamStatus >= http.StatusBadRequest && a.upstreamStatus < http.StatusInternalServerError && a.upstreamStatus != http.StatusTooManyRequests
+	upstreamRejected := a.applied && forwardErr != nil && a.clientRejected
 	if s.Outcome == codexCollabConflict || s.Outcome == codexCollabInvalid || s.Vetoed+s.Contradicted+s.Uncovered > 0 || a.restoreFailed || upstreamRejected {
 		fields := resilience.EventFields(ctx)
 		for i := 0; i+1 < len(fields); i += 2 {
@@ -203,7 +190,7 @@ func (a *openAICollabAttempt) finish(ctx context.Context, c *gin.Context, accoun
 			}
 		}
 		fields = append(fields, "account_id", account.ID, "group_id", group, "client_version", codexClientVersionFromUA(c.GetHeader("User-Agent")), "outcome", string(s.Outcome), "applied", s.Applied, "dev_text_rewrites", s.DevTextRewrites, "calls", s.Calls, "efa_absent", s.EFAAbsent, "efa_empty", s.EFAEmpty, "efa_nonempty", s.EFANonEmpty, "marker_added", s.MarkerAdded, "vetoed", s.Vetoed, "contradicted", s.Contradicted, "uncovered", s.Uncovered, "restore_failed", a.restoreFailed)
-		fields = append(fields, "upstream_status", a.upstreamStatus, "headers_committed", IsResponseCommitted(c) || c.Writer.Written(), "eligibility", a.eligibilitySource, "msg_opaque", s.MsgOpaque, "msg_text", s.MsgText)
+		fields = append(fields, "upstream_status", a.upstreamStatus, "in_band", a.clientRejected && a.upstreamStatus == http.StatusOK, "headers_committed", IsResponseCommitted(c) || c.Writer.Written(), "eligibility", a.eligibilitySource, "msg_opaque", s.MsgOpaque, "msg_text", s.MsgText)
 		slog.Warn("resilience.collab_plaintext", fields...)
 	}
 }

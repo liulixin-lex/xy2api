@@ -3863,7 +3863,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_forward.go",
-      "value": "!collabStatefulRequest && openAICollaborationEligible"
+      "value": "!collabRawBlocked && openAICollaborationEligible"
     },
     {
       "path": "backend/internal/service/openai_gateway_forward.go",
@@ -3879,7 +3879,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_forward.go",
-      "value": "account.IsOpenAIApiKey() && !account.IsOpenAICollaborationPlaintextEnabled() && openAICollaborationContinuity(body)"
+      "value": "account.IsOpenAIApiKey() && !account.IsOpenAICollaborationPlaintextEnabled() && collabRawContinuity"
     },
     {
       "path": "backend/internal/service/openai_gateway_upstream_errors.go",
@@ -3919,7 +3919,7 @@
     },
     {
       "path": "backend/internal/service/openai_collaboration_plaintext.go",
-      "value": "efa := item.Get(\"encrypted_function_args\"); efa.Exists()"
+      "value": "efa := item.Get(\"encrypted_function_args\"); efa.Exists() && efa.IsArray() && len(efa.Array()) == 0"
     },
     {
       "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
@@ -3936,6 +3936,26 @@
     {
       "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
       "value": "func TestCollaborationForwardFailoverErrorRestoration"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "bytes.Contains(body, []byte(`\"collaboration\"`))"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "!codexCollabRequestContainersUnique(originalCollabRoot)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "a.clientRejected = a.clientRejected ||"
+    },
+    {
+      "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
+      "value": "func TestCollaborationForwardContinuityBeforeNormalization"
+    },
+    {
+      "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
+      "value": "func TestCollaborationForwardEscapedDeclarationRemainsObserveOnly"
     }
   ],
   "forbidden_module_paths": [
