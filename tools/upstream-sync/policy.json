@@ -3956,6 +3956,14 @@
     {
       "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
       "value": "func TestCollaborationForwardEscapedDeclarationRemainsObserveOnly"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "!codexCollabUnambiguousJSON(ns.node)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "collabAttempt.clientRejected = resp.StatusCode < 500 && resp.StatusCode != 429 && classifyUpstreamHTTP(resp.StatusCode, resp.Header, respBody, upstreamMsg).Category == resilience.CategoryClientError"
     }
   ],
   "forbidden_module_paths": [

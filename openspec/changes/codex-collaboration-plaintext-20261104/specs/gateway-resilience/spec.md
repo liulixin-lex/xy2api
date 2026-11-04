@@ -16,7 +16,7 @@ The gateway SHALL default collaboration_plaintext.enabled to false and models to
 
 #### Scenario: Original state exclusions
 
-- **GIVEN** the original request has store:true, a nonempty previous_response_id or ambiguous root/protocol-container keys
+- **GIVEN** the original request has store:true, a nonempty previous_response_id or ambiguous root/protocol-container keys, including recursive duplicate keys within complete collaboration namespace schemas
 - **WHEN** compatibility normalization changes/removes these fields or collapses duplicate keys
 - **THEN** P1′ SHALL remain unsupported and SHALL NOT transform the declaration.
 - **AND** original checks SHALL run only when raw bytes contain the literal `"collaboration"`; otherwise no plan SHALL be granted, even if normalization later materializes an escaped declaration. Continuity SHALL be frozen before normalization and SHALL NOT be recomputed from the rewritten body.

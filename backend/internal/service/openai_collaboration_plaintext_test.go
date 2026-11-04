@@ -257,25 +257,49 @@ func TestCollaborationForwardContinuity(t *testing.T) {
 }
 
 func TestCollaborationForwardContinuityBeforeNormalization(t *testing.T) {
-	enableCollabTest(t)
-	account := newOpenAIRejectedFieldTestAccount()
-	account.Extra["openai_collaboration_plaintext"] = false
-	item := `{"type":"function_call","namespace":"collaboration","name":"send_message","call_id":"fc_old","arguments":"{\"message\":\"hello world\"}","encrypted_function_args":["message"],"encrypted_function_args":[]}`
-	body := []byte(strings.Replace(collabWiringBody, `"input":"hello"`, `"input":[`+item+`],"text":{"format":{"type":"json_schema","name":"sample","schema":{"type":"object","minProperties":1,"properties":{"x":{"type":"string"}}}}}`, 1))
-	require.False(t, openAICollaborationContinuity(body))
-	raw, plan, outcome := applyCodexCollaborationPlaintext(body)
-	require.Equal(t, codexCollabConflict, outcome)
-	require.Nil(t, plan)
-	require.Equal(t, body, raw)
-	upstream := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(200, `{"id":"r1","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)}
-	c := collabTestContext()
-	_, err := newOpenAIRejectedFieldTestService(upstream).Forward(context.Background(), c, account, body)
-	require.NoError(t, err)
-	stats, ok := openAICodexCollabAttempt(c)
-	require.True(t, ok)
-	require.False(t, stats.Applied, "map normalization cannot wash out an original protocol conflict")
-	require.Equal(t, "[]", gjson.GetBytes(upstream.lastBody, "input.0.encrypted_function_args").Raw)
-	require.Equal(t, "collaboration", gjson.GetBytes(upstream.lastBody, "tools.0.name").String())
+	for _, tc := range []struct {
+		name, encrypted string
+		wantEncrypted   bool
+	}{
+		{name: "history_marker", wantEncrypted: true},
+		{name: "schema_false_true", encrypted: `"encrypted":false,"encrypted":true`, wantEncrypted: true},
+		{name: "schema_true_false", encrypted: `"encrypted":true,"encrypted":false`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			enableCollabTest(t)
+			account := newOpenAIRejectedFieldTestAccount()
+			account.Extra["openai_collaboration_plaintext"] = tc.encrypted != ""
+			body := collabWiringBody
+			if tc.encrypted == "" {
+				item := `{"type":"function_call","namespace":"collaboration","name":"send_message","call_id":"fc_old","arguments":"{\"message\":\"hello world\"}","encrypted_function_args":["message"],"encrypted_function_args":[]}`
+				body = strings.Replace(body, `"input":"hello"`, `"input":[`+item+`]`, 1)
+			} else {
+				body = strings.Replace(body, `"encrypted":true`, tc.encrypted, 1)
+			}
+			body = strings.Replace(body, "{", `{"text":{"format":{"type":"json_schema","name":"sample","schema":{"type":"object","minProperties":1,"properties":{"x":{"type":"string"}}}}},`, 1)
+			require.True(t, json.Valid([]byte(body)))
+			require.False(t, openAICollaborationContinuity([]byte(body)))
+			raw, plan, outcome := applyCodexCollaborationPlaintext([]byte(body))
+			require.Equal(t, codexCollabConflict, outcome)
+			require.Nil(t, plan)
+			require.Equal(t, []byte(body), raw)
+			upstream := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(200, `{"id":"r1","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)}
+			c := collabTestContext()
+			_, err := newOpenAIRejectedFieldTestService(upstream).Forward(context.Background(), c, account, []byte(body))
+			require.NoError(t, err)
+			require.Len(t, upstream.bodies, 1)
+			stats, ok := openAICodexCollabAttempt(c)
+			require.True(t, ok)
+			require.False(t, stats.Applied, "map normalization cannot wash out an original protocol/schema conflict")
+			if tc.encrypted == "" {
+				require.Equal(t, "[]", gjson.GetBytes(upstream.lastBody, "input.0.encrypted_function_args").Raw)
+			}
+			require.Equal(t, "collaboration", gjson.GetBytes(upstream.lastBody, "tools.0.name").String())
+			encrypted := gjson.GetBytes(upstream.lastBody, "tools.0.tools.0.parameters.properties.message.encrypted")
+			require.True(t, encrypted.Exists(), "P1′ must not strip the normalized schema marker")
+			require.Equal(t, tc.wantEncrypted, encrypted.Bool())
+		})
+	}
 }
 
 func TestCollaborationForwardEscapedDeclarationRemainsObserveOnly(t *testing.T) {
