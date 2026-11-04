@@ -40,7 +40,7 @@ export default {
         outputP99: 'Output P99 cap',
         outputP99Hint: 'In-flight reservations cap output tokens at the model\'s 7-day P99 (at least 1024).',
         collaborationPlaintext: 'Collaboration messages in plaintext',
-        collaborationPlaintextHint: 'New Codex collaboration messages (spawn_agent, send_message, followup_task) travel in plaintext instead of relying on upstream-issued ciphertext. Applies only to Codex client requests over native Responses HTTP, on accounts that also have "Collaboration messages in plaintext" on; WebSocket, compaction, passthrough and other paths are unaffected. Only new collaboration messages change and existing conversation history is not repaired; turning it off restores new requests at once.'
+        collaborationPlaintextHint: 'Eligible new Codex collaboration messages (spawn_agent, send_message, followup_task) are delivered in plaintext when the upstream returns no ciphertext and the gateway does not veto them, which reduces conversation errors caused by a different ciphertext issuer after switching accounts. Applies only to Codex client requests over native Responses HTTP, on accounts that also have "Collaboration messages in plaintext" on; WebSocket, compaction, passthrough and other paths are unaffected. Only new collaboration messages change and existing conversation history is not repaired; turning it off restores new requests at once.'
       },
       fields: {
         balancePause: 'Initial pause (s)',

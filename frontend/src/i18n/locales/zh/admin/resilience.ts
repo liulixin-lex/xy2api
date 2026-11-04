@@ -40,7 +40,7 @@ export default {
         outputP99: '输出 P99 上限',
         outputP99Hint: '在途预留的输出 Token 取模型近 7 天 P99（下限 1024）。',
         collaborationPlaintext: '协作消息明文化',
-        collaborationPlaintextHint: '新的 Codex 协作消息（spawn_agent、send_message、followup_task）改走明文，不再依赖上游签发的密文。仅对 Codex 客户端经原生 Responses HTTP 的请求生效，且需同时开启账号的“协作消息明文化”开关；WebSocket、压缩、透传等其他路径不受影响。只影响新的协作消息，不修复已有会话历史；关闭后新请求立即恢复原样。'
+        collaborationPlaintextHint: '符合条件的新 Codex 协作消息（spawn_agent、send_message、followup_task）以明文投递（上游未返回密文且网关未否决时），减少换号后因密文签发方不同导致的会话报错。仅对 Codex 客户端经原生 Responses HTTP 的请求生效，且需同时开启账号的“协作消息明文化”开关；WebSocket、压缩、透传等其他路径不受影响。只影响新的协作消息，不修复已有会话历史；关闭后新请求立即恢复原样。'
       },
       fields: {
         balancePause: '首次暂停时长（秒）',
