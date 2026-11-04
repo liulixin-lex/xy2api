@@ -24,7 +24,7 @@
 
 流、JSON、SSE→JSON 三出口都恢复；聚合前先观察各帧，保证早先密文证据保留。无法安全恢复身份（无效 JSON、身份歧义）则本地终止：未提交发 502，已提交写协议终态，不把私有名或原始错误下发，不返回 FailoverError 重放。applied 的 SSE 无法聚合成最终 JSON 时同样本地终止。只观测解析失败保留原字节，不制造新中断。
 
-已改写的 instructions / response.instructions 结构化回声按本次 plan 对称恢复；其余正文不改。ErrorBody 仅在 applied 时对错误信封的原始字节替换字面别名 collaboration-xy→collaboration；非 2xx HTTP 整个错误 body 与 SSE type=error 整段 data 均处理，因此覆盖扁平与重复 message/param。response.failed 只替换 response.error 的原始值；response 对象中 error 键重复时返回错误，按现有提交门禁安全终止，不处理 output/arguments。HTTP 与错误透传规则在最终客户端写出前恢复，分类、有限修复、观测与重试判据仍使用原错误，不新增换号；HTTP 状态保持既有行为，nil plan 零改写。
+已改写的 instructions / response.instructions 结构化回声按本次 plan 对称恢复；其余正文不改。ErrorBody 仅在 applied 时对错误信封的原始字节替换字面别名 collaboration-xy→collaboration；非 2xx HTTP 整个错误 body 与 SSE type=error 整段 data 均处理，因此覆盖扁平与重复 message/param。response.failed 只替换 response.error 的原始值；response 对象中 error 键重复时返回错误，按现有提交门禁安全终止，不处理 output/arguments。HTTP 与错误透传规则在最终客户端写出前恢复，分类、有限修复、观测与重试判据仍使用原错误，不新增换号；HTTP 状态保持既有行为，nil plan 零改写。Forward 的协作收尾 defer 对 applied 尝试返回的 UpstreamFailoverError.ResponseBody 与非空 ClientMessage 统一调用 ErrorBody，使换号耗尽的 handler 出口也只见规范名；不修改 handler。服务侧分类/观测已使用原始错误，最后执行的 P0 及 handler 判据不依赖私有别名；只观测尝试的错误字节完全不变。
 
 ## 4. schema 兼容
 

@@ -3924,6 +3924,18 @@
     {
       "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
       "value": "func TestCollaborationAttemptWarnExcludesTransientFailures"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "failover.ResponseBody = collabAttempt.restorer.ErrorBody(failover.ResponseBody)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "failover.ClientMessage = string(collabAttempt.restorer.ErrorBody([]byte(failover.ClientMessage)))"
+    },
+    {
+      "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
+      "value": "func TestCollaborationForwardFailoverErrorRestoration"
     }
   ],
   "forbidden_module_paths": [

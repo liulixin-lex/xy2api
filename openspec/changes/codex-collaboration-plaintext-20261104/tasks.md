@@ -43,6 +43,12 @@
 - [x] r2 B 定向测试、vet、CI lint 与文档一致性。
 - [x] r2 B 提交后的干净树审计。
 
+## 第三轮 PM 自审修复
+
+- [x] R3-PM-1：Forward 收尾统一还原 applied 的换号错误体/消息，handler 不改，正式 applied/只观测表驱动回归。
+- [x] r3 B 定向测试、vet、CI lint 与文档一致性。
+- [x] r3 B 提交后干净树审计。
+
 ## 集成与验收（PM）
 
 - [x] API Key 三站 × 两模型预检 2a/2b。

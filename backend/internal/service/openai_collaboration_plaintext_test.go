@@ -338,6 +338,42 @@ func TestCollaborationForwardHTTPErrorRestoration(t *testing.T) {
 	}
 }
 
+func TestCollaborationForwardFailoverErrorRestoration(t *testing.T) {
+	const message = "Our servers are currently overloaded. Retry collaboration-xy.send_message later."
+	const body = " {\"error\":{\"type\":\"service_unavailable_error\",\"code\":\"server_is_overloaded\",\"message\":\"" + message + "\",\"param\":\"collaboration-xy.send_message\"}}\n"
+	for _, tc := range []struct {
+		name    string
+		applied bool
+	}{
+		{name: "applied", applied: true},
+		{name: "observe_only"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			enableCollabTest(t)
+			upstream := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(http.StatusServiceUnavailable, body)}
+			account := newOpenAIRejectedFieldTestAccount()
+			account.Extra["openai_collaboration_plaintext"] = tc.applied
+			c := collabTestContext()
+			_, err := newOpenAIRejectedFieldTestService(upstream).Forward(context.Background(), c, account, []byte(collabWiringBody))
+			var failover *UpstreamFailoverError
+			require.ErrorAs(t, err, &failover)
+			require.Len(t, upstream.bodies, 1)
+			require.Equal(t, http.StatusServiceUnavailable, failover.StatusCode)
+			require.True(t, failover.IsOpenAICapacityShed(), "restoration must preserve the failover classification")
+			expectedBody, expectedMessage := body, message
+			if tc.applied {
+				expectedBody = strings.ReplaceAll(body, "collaboration-xy", "collaboration")
+				expectedMessage = strings.ReplaceAll(message, "collaboration-xy", "collaboration")
+			}
+			require.Equal(t, []byte(expectedBody), failover.ResponseBody)
+			require.Equal(t, expectedMessage, failover.ClientMessage)
+			events := currentOpsUpstreamEvents(c)
+			require.NotEmpty(t, events)
+			require.Equal(t, message, events[0].Message, "service observations retain the raw error")
+		})
+	}
+}
+
 func TestCollaborationForwardAppliedHTTPFailureWarn(t *testing.T) {
 	for _, source := range []string{"account", "continuity"} {
 		t.Run(source, func(t *testing.T) {

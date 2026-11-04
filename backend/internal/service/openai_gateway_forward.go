@@ -1066,7 +1066,18 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if collabContinuity && collabAttempt != nil && collabAttempt.eligibilitySource != "" {
 		collabAttempt.eligibilitySource = "continuity"
 	}
-	defer func() { collabAttempt.finish(ctx, c, account, forwardErr) }()
+	defer func() {
+		collabAttempt.finish(ctx, c, account, forwardErr)
+		var failover *UpstreamFailoverError
+		if collabAttempt != nil && collabAttempt.applied && errors.As(forwardErr, &failover) {
+			// Service classification/observations used the raw error; later P0 and
+			// handler predicates do not depend on this private namespace alias.
+			failover.ResponseBody = collabAttempt.restorer.ErrorBody(failover.ResponseBody)
+			if failover.ClientMessage != "" {
+				failover.ClientMessage = string(collabAttempt.restorer.ErrorBody([]byte(failover.ClientMessage)))
+			}
+		}
+	}()
 	if !bytes.Equal(collabBody, body) {
 		body, requestView, reqBody = collabBody, newOpenAIRequestView(collabBody), nil
 	}

@@ -28,7 +28,8 @@ The gateway SHALL default collaboration_plaintext.enabled to false and models to
 - **THEN** the original plan SHALL restore the canonical namespace and bare leaf name
 - **AND** nonempty encrypted evidence SHALL veto adding an empty encrypted_function_args marker.
 - **AND** known instructions echoes SHALL restore only the exact references rewritten by this plan.
-- **AND** final non-2xx HTTP error envelopes and SSE type=error data SHALL replace the literal private alias in raw bytes, including flat and duplicate fields; response.failed SHALL replace only the raw response.error value, terminating locally if the response.error carrier is duplicated. Original errors SHALL remain the source for classification, observations and retry decisions; nil plans SHALL not rewrite.
+- **AND** final non-2xx HTTP error envelopes and SSE type=error data SHALL replace the literal private alias in raw bytes, including flat and duplicate fields; response.failed SHALL replace only the raw response.error value, terminating locally if the response.error carrier is duplicated. Original errors SHALL remain the source for service classification and observations; nil plans SHALL not rewrite.
+- **AND** before Forward returns an applied attempt’s UpstreamFailoverError, its ResponseBody and nonempty ClientMessage SHALL be restored through ErrorBody so exhausted-failover handler exits receive canonical identities. Observe-only errors SHALL retain their original bytes; subsequent P0/handler classification and retry behavior SHALL remain unchanged.
 
 #### Scenario: Unsafe restoration
 
