@@ -371,14 +371,10 @@ func groupQualityStatus(s groupQualityAccountState, tier int, pinned bool) strin
 // GroupQualityGateView exposes the immutable decision view consumed by scheduling,
 // fallback availability and operations availability.
 type GroupQualityGateView interface {
-	// Vetoed reports whether quality state currently excludes an account from a group.
-	Vetoed(groupID, accountID int64) bool
 	// OrderTier returns the account's ordering tier for a group.
 	OrderTier(groupID, accountID int64) int
 	// Enabled reports whether the quality gate is currently enabled for a group.
 	Enabled(groupID int64) bool
-	// SlowerThanFastLine reports a migration-eligible bound account and its metrics.
-	SlowerThanFastLine(groupID, accountID int64) (warmTTFTP90Ms, fastWarmTTFTP90Ms int, ok bool)
 	// MigrationTarget reports whether the account meets the quality part of the
 	// v3 migration-target rule for the group. Pinned accounts get no exception.
 	MigrationTarget(groupID, accountID int64) bool
@@ -389,15 +385,9 @@ type GroupQualityGateView interface {
 
 type emptyGroupQualityGateView struct{}
 
-func (emptyGroupQualityGateView) Vetoed(int64, int64) bool { return false }
-
 func (emptyGroupQualityGateView) OrderTier(int64, int64) int { return GroupQualityGateTierPass }
 
 func (emptyGroupQualityGateView) Enabled(int64) bool { return false }
-
-func (emptyGroupQualityGateView) SlowerThanFastLine(int64, int64) (int, int, bool) {
-	return 0, 0, false
-}
 
 func (emptyGroupQualityGateView) MigrationTarget(int64, int64) bool { return false }
 

@@ -10,25 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liulixin-lex/xy2api/internal/sharesched"
 	"github.com/stretchr/testify/require"
 )
-
-type schedulingQualityView struct {
-	veto  map[[2]int64]bool
-	tiers map[int64]int
-}
-
-func (v *schedulingQualityView) Vetoed(g, a int64) bool   { return v.veto[[2]int64{g, a}] }
-func (v *schedulingQualityView) OrderTier(_, a int64) int { return v.tiers[a] }
-func (*schedulingQualityView) Enabled(int64) bool         { return false }
-func (*schedulingQualityView) SlowerThanFastLine(int64, int64) (int, int, bool) {
-	return 0, 0, false
-}
-
-func (*schedulingQualityView) MigrationTarget(int64, int64) bool { return false }
-
-func (*schedulingQualityView) ExpectedP90Ms(int64, int64) (int, bool) { return 0, false }
 
 type qualityCapacityCache struct {
 	schedulerTestConcurrencyCache
@@ -137,7 +120,7 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 			accounts = append(accounts, acc)
 		}
 		cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{}}
-		view := &schedulingQualityView{veto: map[[2]int64]bool{}, tiers: map[int64]int{}}
+		view := &schedulingQualityView{tiers: map[int64]int{}}
 		svc := &OpenAIGatewayService{accountRepo: schedulerTestOpenAIAccountRepo{accounts: accounts}, cfg: cfg, cache: cache, rateLimitService: newOpenAIAdvancedSchedulerRateLimitService(strconv.FormatBool(advanced)), concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{})}
 		svc.SetGroupQualityGateView(view)
 		return svc, cache, view
@@ -148,62 +131,11 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 		svc.concurrencyService = NewConcurrencyService(conc)
 		return svc, cache, conc
 	}
-	for _, entry := range []string{"legacy text", "advanced text", "WS capability", "compact", "public load awareness", "composite child gate", "model catalog", "dedicated image suppressed"} {
-		cases = append(cases, testCase{entry, func(t *testing.T) {
-			svc, _, view := env(entry == "advanced text", entry == "public load awareness")
-			view.veto[[2]int64{groupID, 1}] = true
-			gid := int64(groupID)
-			ctx := context.Background()
-			var selection *AccountSelectionResult
-			var err error
-			switch entry {
-			case "public load awareness":
-				selection, err = svc.SelectAccountWithLoadAwareness(ctx, &gid, "", "gpt-test", nil)
-			case "model catalog":
-				acc, e := svc.SelectAccountForModel(ctx, &gid, "", "gpt-test")
-				err = e
-				selection = &AccountSelectionResult{Account: acc}
-			case "dedicated image suppressed":
-				selection, _, err = svc.SelectAccountWithScheduler(WithOpenAIProfitControlSuppressed(ctx), &gid, "", "", "gpt-test", nil, OpenAIUpstreamTransportAny, false)
-			case "WS capability":
-				selection, _, err = svc.SelectAccountWithSchedulerForCapability(ctx, &gid, "", "", "gpt-test", nil, OpenAIUpstreamTransportResponsesWebsocketV2, OpenAIEndpointCapabilityResponses, false, false, true, PlatformOpenAI)
-			case "composite child gate":
-				parent := int64(8)
-				resolver := NewCompositeRouteResolver(compositeRouteRepoStub{routes: []CompositeModelRoute{{
-					GroupID: parent, PublicModel: "gpt-test", MatchType: CompositeRouteMatchExact,
-					TargetPlatform: PlatformOpenAI, UpstreamModel: "gpt-test", Endpoint: CompositeRouteEndpointResponses, Enabled: true,
-				}}})
-				route, resolveErr := resolver.Resolve(ctx, parent, "gpt-test", CompositeRouteEndpointResponses)
-				require.NoError(t, resolveErr)
-				require.True(t, route.Matched)
-				ctx = WithCompositeRouteDecision(ctx, route)
-				ctx, _ = svc.WithOpenAIRequestPricingContext(ctx, &parent)
-				fallthrough
-			default:
-				selection, _, err = svc.SelectAccountWithScheduler(ctx, &gid, "", "", "gpt-test", nil, OpenAIUpstreamTransportAny, entry == "compact")
-			}
-			require.NoError(t, err)
-			require.NotNil(t, selection)
-			require.NotNil(t, selection.Account)
-			if entry == "model catalog" || entry == "dedicated image suppressed" {
-				require.Equal(t, int64(1), selection.Account.ID)
-			} else {
-				require.NotEqual(t, int64(1), selection.Account.ID)
-				require.Equal(t, groupID, selection.groupQualityGate.groupID)
-				view.veto[[2]int64{groupID, selection.Account.ID}] = true
-				_, vetoed, reason := svc.SelectionAdmissionVetoLatest(ContextWithSelectionProfitGate(context.Background(), selection), selection.Account)
-				require.True(t, vetoed)
-				require.Equal(t, "group_quality_ejected", reason)
-			}
-			if selection.ReleaseFunc != nil {
-				selection.ReleaseFunc()
-			}
-		}})
-	}
 	cases = append(cases, testCase{"previous_response exemption survives DB recheck and admission", func(t *testing.T) {
 		svc, _, view := env(false, false)
 		gid := int64(groupID)
-		view.veto[[2]int64{groupID, 1}] = true
+		view.enabled = true
+		view.tiers[1] = GroupQualityGateTierFail
 		svc.openaiWSStateStore = NewOpenAIWSStateStore(&stubGatewayCache{})
 		require.NoError(t, svc.openaiWSStateStore.BindResponseAccount(context.Background(), groupID, "resp_previous", 1, time.Hour))
 		selection, err := svc.SelectAccountByPreviousResponseID(context.Background(), &gid, "resp_previous", "gpt-test", nil, false)
@@ -221,7 +153,8 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 		gid := int64(groupID)
 		parentID := "22222222-2222-4222-8222-222222222222"
 		cache.sessionBindings["openai:"+DeriveSessionHashFromSeed(parentID)] = 1
-		view.veto[[2]int64{groupID, 1}] = true
+		view.enabled = true
+		view.tiers[1] = GroupQualityGateTierFail
 		ctx := guardianAffinityTestContext(t, codexAutoReviewModel, "guardian", parentID, "")
 		selection, decision, err := svc.SelectAccountWithScheduler(ctx, &gid, "", "guardian-child-session", codexAutoReviewModel, nil, OpenAIUpstreamTransportAny, false)
 		require.NoError(t, err)
@@ -231,67 +164,6 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 		require.False(t, vetoed)
 		selection.ReleaseFunc()
 	}})
-	for _, entry := range []string{"share ordinary", "share missing bound", "share final verification"} {
-		cases = append(cases, testCase{entry, func(t *testing.T) {
-			e := newOpenAIShareTestEnv(t, twoAccountPolicy(), 1, 2)
-			gid := int64(shareTestGroupID)
-			view := &schedulingQualityView{veto: map[[2]int64]bool{{gid, 1}: true}}
-			e.svc.SetGroupQualityGateView(view)
-			ctx := e.svc.withGroupQualityGate(context.Background(), &gid)
-			in := openAIShareSelection{groupID: &gid, platform: PlatformOpenAI, model: "gpt-5.1"}
-			if entry == "share final verification" {
-				acc, reason := e.svc.verifyOpenAIShareAccount(ctx, in, e.account(1))
-				require.Nil(t, acc)
-				require.Equal(t, sharesched.Reason("group_quality_ejected"), reason)
-				return
-			}
-			if entry == "share missing bound" {
-				e.svc.schedulerSnapshot = &SchedulerSnapshotService{cache: &openAISnapshotCacheStub{snapshotAccounts: []*Account{e.account(2)}, accountsByID: map[int64]*Account{1: e.account(1), 2: e.account(2)}}}
-			}
-			cands, _, stats, err := e.svc.shareOpenAICandidates(ctx, in, 1)
-			require.NoError(t, err)
-			found := false
-			for _, c := range cands {
-				if c.AccountID == 1 {
-					found = true
-					require.False(t, c.Eligible)
-					require.Equal(t, sharesched.Reason("group_quality_ejected"), c.Reason)
-				}
-			}
-			require.True(t, found)
-			require.Contains(t, stats.summary(""), "group_quality_ejected=1")
-		}})
-	}
-	for _, path := range []string{"no load batch", "load aware", "advanced"} {
-		for _, atomicCache := range []bool{false, true} {
-			for _, excludedOwner := range []bool{false, true} {
-				cases = append(cases, testCase{path + "/ejected sticky rebind/atomic=" + strconv.FormatBool(atomicCache) + "/excluded=" + strconv.FormatBool(excludedOwner), func(t *testing.T) {
-					svc, cache, view := env(path == "advanced", path != "no load batch")
-					gid := int64(groupID)
-					session := "session"
-					if atomicCache {
-						session = "v2:session"
-						svc.cache = &atomicStickyTestCache{GatewayCache: cache, bindings: map[string]int64{svc.openAISessionCacheKey(session): 1}}
-					} else {
-						cache.sessionBindings["openai:"+session] = 1
-					}
-					view.veto[[2]int64{groupID, 1}] = true
-					var excluded map[int64]struct{}
-					if excludedOwner {
-						excluded = map[int64]struct{}{1: {}}
-					}
-					selection, _, err := svc.SelectAccountWithScheduler(context.Background(), &gid, "", session, "gpt-test", excluded, OpenAIUpstreamTransportAny, false)
-					require.NoError(t, err)
-					require.NotEqual(t, int64(1), selection.Account.ID)
-					require.NoError(t, svc.BindStickySessionAfterProfitAdmission(ContextWithSelectionProfitGate(context.Background(), selection), &gid, session, selection.Account.ID))
-					owner, err := svc.getStickySessionAccountID(context.Background(), &gid, session)
-					require.NoError(t, err)
-					require.Equal(t, selection.Account.ID, owner)
-					selection.ReleaseFunc()
-				}})
-			}
-		}
-	}
 
 	for _, path := range []string{"no load batch", "load aware", "advanced"} {
 		for _, scenario := range []string{"short retry", "borrow stable", "queue full", "queue full better alternative", "cancel"} {
@@ -721,12 +593,11 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 	}
 	cases = append(cases, testCase{"last resort retains profit and hard gates", func(t *testing.T) {
 		svc, _, view := env(false, false)
-		view.veto[[2]int64{groupID, 1}] = true
+		view.enabled = true
+		view.tiers[1] = GroupQualityGateTierFail
 		gid := int64(groupID)
 		ctx := svc.withGroupQualityGate(withResilienceLastResortGate(context.Background()), &gid)
 		acc := profitControlWSAccount(1, 0.8, time.Now())
-		veto, _ := groupQualityGateVeto(ctx, &acc)
-		require.False(t, veto)
 		ctx = context.WithValue(ctx, openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{groupID: gid, threshold: 0.5})
 		_, veto, reason := svc.SelectionAdmissionVetoLatest(ctx, &acc)
 		require.True(t, veto)
@@ -748,7 +619,7 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 		{name: "capacity before cost", low: true, al: 80, bl: 0, ar: 0.1, br: 0.9, want: false},
 		{name: "cost before load", low: true, al: 50, bl: 0, ar: 0.1, br: 0.9, want: true},
 		{name: "unlimited neutral", low: true, al: 90, bl: 0, ar: 0.1, br: 0.9, unlimited: true, want: true},
-		{name: "flag off retains original order", low: false, at: 2, bt: 0, al: 0, bl: 50, ar: 0.9, br: 0.1, want: true},
+		{name: "tiers independent of low rate", low: false, at: 2, bt: 0, al: 0, bl: 50, ar: 0.9, br: 0.1, want: false},
 		{name: "no data fast then ID", low: true, ar: 0.2, br: 0.2, want: true},
 	} {
 		cases = append(cases, testCase{row.name, func(t *testing.T) {

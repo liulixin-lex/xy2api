@@ -138,3 +138,40 @@ func TestOpenAICacheUnadmittedReservationExpires(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 2, owner)
 }
+
+func TestGateV3CacheCompareAndSwapBinding(t *testing.T) {
+	addr := os.Getenv("SCHEDULING_TEST_REDIS_ADDR")
+	if addr == "" {
+		addr = miniredis.RunT(t).Addr()
+	}
+	client := redis.NewClient(&redis.Options{Addr: addr})
+	t.Cleanup(func() { _ = client.Close() })
+	cache := NewGatewayCache(client)
+	cas, ok := cache.(service.OpenAIStickyRebindCache)
+	require.True(t, ok)
+	ctx := context.Background()
+	group := int64(-1011)
+	for _, prefix := range []string{"openai:v2:", "openai:"} {
+		key := prefix + uuid.NewString()
+		t.Cleanup(func() { _ = client.Del(ctx, buildSessionKey(group, key)).Err() })
+		require.NoError(t, cache.SetSessionAccountID(ctx, group, key, 1, time.Minute))
+		changed, err := cas.CompareAndSwapSessionAccountID(ctx, group, key, 9, 2, time.Hour)
+		require.NoError(t, err)
+		require.False(t, changed)
+		owner, err := cache.GetSessionAccountID(ctx, group, key)
+		require.NoError(t, err)
+		require.Equal(t, int64(1), owner)
+		changed, err = cas.CompareAndSwapSessionAccountID(ctx, group, key, 1, 2, time.Hour)
+		require.NoError(t, err)
+		require.True(t, changed)
+		changed, err = cas.CompareAndSwapSessionAccountID(ctx, group, key, 1, 3, time.Hour)
+		require.NoError(t, err)
+		require.False(t, changed)
+		owner, err = cache.GetSessionAccountID(ctx, group, key)
+		require.NoError(t, err)
+		require.Equal(t, int64(2), owner)
+		ttl, err := client.PTTL(ctx, buildSessionKey(group, key)).Result()
+		require.NoError(t, err)
+		require.Greater(t, ttl, 59*time.Minute)
+	}
+}

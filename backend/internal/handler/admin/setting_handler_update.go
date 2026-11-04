@@ -278,6 +278,8 @@ type UpdateSettingsRequest struct {
 
 	// OpenAI account scheduling
 	OpenAILowUpstreamRatePriorityEnabled               *bool    `json:"openai_low_upstream_rate_priority_enabled"`
+	OpenAILowUpstreamRatePriorityScope                 *string  `json:"openai_low_upstream_rate_priority_scope"`
+	OpenAILowUpstreamRatePriorityGroupIDs              *[]int64 `json:"openai_low_upstream_rate_priority_group_ids"`
 	OpenAIOAuthSchedulingRateMultiplier                *float64 `json:"openai_oauth_scheduling_rate_multiplier"`
 	OpenAIAdvancedSchedulerEnabled                     *bool    `json:"openai_advanced_scheduler_enabled"`
 	OpenAIAdvancedSchedulerStickyWeightedEnabled       *bool    `json:"openai_advanced_scheduler_sticky_weighted_enabled"`
@@ -1898,6 +1900,18 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.OpenAILowUpstreamRatePriorityEnabled
 		}(),
+		OpenAILowUpstreamRatePriorityScope: func() string {
+			if req.OpenAILowUpstreamRatePriorityScope != nil {
+				return *req.OpenAILowUpstreamRatePriorityScope
+			}
+			return previousSettings.OpenAILowUpstreamRatePriorityScope
+		}(),
+		OpenAILowUpstreamRatePriorityGroupIDs: func() []int64 {
+			if req.OpenAILowUpstreamRatePriorityGroupIDs != nil {
+				return *req.OpenAILowUpstreamRatePriorityGroupIDs
+			}
+			return previousSettings.OpenAILowUpstreamRatePriorityGroupIDs
+		}(),
 		OpenAIOAuthSchedulingRateMultiplier: func() *float64 {
 			// Omitted fields preserve the override; explicit null clears it.
 			if _, sent := sentFields[service.SettingKeyOpenAIOAuthSchedulingRateMultiplier]; sent {
@@ -2469,6 +2483,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		PaymentVisibleMethodAlipayEnabled:                      updatedSettings.PaymentVisibleMethodAlipayEnabled,
 		PaymentVisibleMethodWxpayEnabled:                       updatedSettings.PaymentVisibleMethodWxpayEnabled,
 		OpenAILowUpstreamRatePriorityEnabled:                   updatedSettings.OpenAILowUpstreamRatePriorityEnabled,
+		OpenAILowUpstreamRatePriorityScope:                     updatedSettings.OpenAILowUpstreamRatePriorityScope,
+		OpenAILowUpstreamRatePriorityGroupIDs:                  updatedSettings.OpenAILowUpstreamRatePriorityGroupIDs,
 		OpenAIOAuthSchedulingRateMultiplier:                    updatedSettings.OpenAIOAuthSchedulingRateMultiplier,
 		OpenAIAdvancedSchedulerEnabled:                         updatedSettings.OpenAIAdvancedSchedulerEnabled,
 		OpenAIAdvancedSchedulerStickyWeightedEnabled:           updatedSettings.OpenAIAdvancedSchedulerStickyWeightedEnabled,

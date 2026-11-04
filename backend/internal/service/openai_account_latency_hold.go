@@ -2,8 +2,8 @@ package service
 
 import (
 	"context"
-	"log/slog"
 	"math"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,11 +15,12 @@ import (
 )
 
 const (
-	openAIAccountLatencyHoldDecayTau  = 5 * time.Minute
-	openAIAccountLatencyHoldDuration  = 3 * time.Minute
-	openAIAccountLatencySlowThreshold = 10 * time.Second
-	openAIAccountLatencyMinSamples    = 6
-	openAIAccountLatencySlowFraction  = 0.35
+	openAIAccountLatencyHoldDecayTau     = 5 * time.Minute
+	openAIAccountLatencyHoldDuration     = 3 * time.Minute
+	openAIAccountLatencySlowThreshold    = 10 * time.Second
+	openAIAccountLatencyMinSamples       = 6
+	openAIAccountLatencySlowFraction     = 0.30
+	openAIAccountLatencyEscalationWindow = 30 * time.Minute
 )
 
 type openAIAccountLatencyHoldEntry struct {
@@ -27,10 +28,13 @@ type openAIAccountLatencyHoldEntry struct {
 	weightedSlow    float64
 	lastSample      time.Time
 	holdUntil       time.Time
+	lastHoldEnd     time.Time
+	level           int
 	lastTouched     time.Time
 }
 
 type openAIAccountLatencyHoldState struct {
+	migration               openAIQualityMigrationState
 	mu                      sync.Mutex
 	entries                 map[openAIAccountModelKey]openAIAccountLatencyHoldEntry
 	maxEntries              int
@@ -72,6 +76,10 @@ func withOpenAIStickyMigrationGuard(ctx context.Context, previousResponseID stri
 }
 
 func (s *openAIAccountLatencyHoldState) record(accountID int64, model string, sample time.Duration, now time.Time) (openAIAccountLatencyHoldEntry, bool, float64, float64) {
+	return s.recordWithPolicy(accountID, model, sample, now, openAIAccountLatencySlowFraction, true)
+}
+
+func (s *openAIAccountLatencyHoldState) recordWithPolicy(accountID int64, model string, sample time.Duration, now time.Time, threshold float64, escalate bool) (openAIAccountLatencyHoldEntry, bool, float64, float64) {
 	key, ok := openAIAccountModelTransientKey(accountID, model)
 	if s == nil || !ok || sample < 0 {
 		return openAIAccountLatencyHoldEntry{}, false, 0, 0
@@ -109,8 +117,17 @@ func (s *openAIAccountLatencyHoldState) record(accountID int64, model string, sa
 		triggerSlowFraction = entry.weightedSlow / entry.weightedSamples
 	}
 	if entry.holdUntil.IsZero() || !now.Before(entry.holdUntil) {
-		if entry.weightedSamples >= float64(openAIAccountLatencyMinSamples) && triggerSlowFraction >= openAIAccountLatencySlowFraction {
-			entry.holdUntil = now.Add(openAIAccountLatencyHoldDuration)
+		if entry.weightedSamples >= float64(openAIAccountLatencyMinSamples) && triggerSlowFraction >= threshold {
+			if escalate && !entry.lastHoldEnd.IsZero() && now.Sub(entry.lastHoldEnd) <= openAIAccountLatencyEscalationWindow {
+				entry.level++
+			} else {
+				entry.level = 1
+			}
+			if entry.level > 4 {
+				entry.level = 4
+			}
+			entry.holdUntil = now.Add(openAIAccountLatencyHoldDurationForLevel(entry.level))
+			entry.lastHoldEnd = entry.holdUntil
 			for {
 				old := s.latestHoldUntilUnixNano.Load()
 				if old >= entry.holdUntil.UnixNano() || s.latestHoldUntilUnixNano.CompareAndSwap(old, entry.holdUntil.UnixNano()) {
@@ -197,20 +214,54 @@ func (s *OpenAIGatewayService) recordOpenAIAccountLatencySample(account *Account
 			zap.String("model", openAIAccountModelTransientModel(canonicalModel)),
 			zap.Float64("sample_count", triggerSamples),
 			zap.Float64("slow_fraction", triggerSlowFraction),
-			zap.Int("hold_seconds", int(openAIAccountLatencyHoldDuration/time.Second)),
+			zap.Int("hold_seconds", int(openAIAccountLatencyHoldDurationForLevel(entry.level)/time.Second)),
+			zap.Int("level", entry.level),
 			zap.Time("hold_until", entry.holdUntil),
 		)
 	}
 }
 
-func (s *OpenAIGatewayService) partitionOpenAILatencyHeldAccounts(_ context.Context, accounts []*Account, requestedModel string, compact bool) []*Account {
+func openAIAccountLatencyHoldDurationForLevel(level int) time.Duration {
+	if level >= 4 {
+		return 15 * time.Minute
+	}
+	if level < 1 {
+		level = 1
+	}
+	return openAIAccountLatencyHoldDuration * time.Duration(1<<(level-1))
+}
+
+// OpenAIAccountLatencyHoldStatus exposes only active holds for the status API.
+func (s *OpenAIGatewayService) OpenAIAccountLatencyHoldStatus(accountID int64, now time.Time) (until time.Time, models []string) {
+	if s == nil || accountID <= 0 || !resilience.Current().Enabled {
+		return
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	state := s.getOpenAIAccountLatencyHoldState()
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	for key, entry := range state.entries {
+		if key.AccountID == accountID && now.Before(entry.holdUntil) {
+			models = append(models, key.Model)
+			if entry.holdUntil.After(until) {
+				until = entry.holdUntil
+			}
+		}
+	}
+	sort.Strings(models)
+	return
+}
+
+func (s *OpenAIGatewayService) partitionOpenAILatencyHeldAccounts(ctx context.Context, accounts []*Account, requestedModel string, compact bool, groupIDs ...*int64) []*Account {
 	if s == nil || !resilience.Current().Enabled || s.getOpenAIAccountLatencyHoldState().latestHoldUntilUnixNano.Load() <= time.Now().UnixNano() {
 		return accounts
 	}
-	return partitionLatencyHeld(accounts, func(account *Account) *Account { return account }, s.openAIAccountLatencyHoldSnapshotForAccounts(accounts, requestedModel), compact)
+	return partitionLatencyHeldSegments(accounts, func(account *Account) *Account { return account }, s.openAIAccountLatencyHoldSnapshotForAccounts(accounts, requestedModel), s.openAIQualitySegmentKey(ctx, compact, groupIDs...))
 }
 
-func (s *OpenAIGatewayService) partitionOpenAILatencyHeldLoad(_ context.Context, items []accountWithLoad, requestedModel string, compact bool) []accountWithLoad {
+func (s *OpenAIGatewayService) partitionOpenAILatencyHeldLoad(ctx context.Context, items []accountWithLoad, requestedModel string, compact bool, groupIDs ...*int64) []accountWithLoad {
 	if s == nil || !resilience.Current().Enabled || s.getOpenAIAccountLatencyHoldState().latestHoldUntilUnixNano.Load() <= time.Now().UnixNano() {
 		return items
 	}
@@ -218,7 +269,7 @@ func (s *OpenAIGatewayService) partitionOpenAILatencyHeldLoad(_ context.Context,
 	for _, item := range items {
 		accounts = append(accounts, item.account)
 	}
-	return partitionLatencyHeld(items, func(item accountWithLoad) *Account { return item.account }, s.openAIAccountLatencyHoldSnapshotForAccounts(accounts, requestedModel), compact)
+	return partitionLatencyHeldSegments(items, func(item accountWithLoad) *Account { return item.account }, s.openAIAccountLatencyHoldSnapshotForAccounts(accounts, requestedModel), s.openAIQualitySegmentKey(ctx, compact, groupIDs...))
 }
 
 func partitionLatencyHeld[T any](items []T, accountOf func(T) *Account, held map[int64]openAIAccountLatencyHoldSnapshot, compact bool) []T {
@@ -264,7 +315,7 @@ func partitionLatencyHeldSegments[T any](items []T, accountOf func(T) *Account, 
 }
 
 func (s *OpenAIGatewayService) openAIAccountLatencyHoldSnapshotForAccounts(accounts []*Account, requestedModel string) map[int64]openAIAccountLatencyHoldSnapshot {
-	if s == nil || len(accounts) == 0 {
+	if s == nil || len(accounts) == 0 || !resilience.Current().Enabled {
 		return nil
 	}
 	latest := s.getOpenAIAccountLatencyHoldState().latestHoldUntilUnixNano.Load()
@@ -293,42 +344,32 @@ func (s *OpenAIGatewayService) openAIAccountLatencyHoldSnapshotForAccounts(accou
 	return result
 }
 
-func (s *OpenAIGatewayService) migrateOpenAILatencyHeldOwner(ctx context.Context, groupID *int64, platform, sessionHash, requestedModel string, stickyAccountID int64, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, preferLowUpstreamRate bool) int64 {
+func (s *OpenAIGatewayService) migrateOpenAILatencyHeldOwner(ctx context.Context, groupID *int64, platform, sessionHash, requestedModel string, stickyAccountID int64, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, preferLowUpstreamRate bool) (int64, *AccountSelectionResult) {
 	if stickyAccountID <= 0 || openAINoStickyMigration(ctx) || s == nil || !resilience.Current().SessionOn() || s.qualityOwnsSticky(ctx, groupID, sessionHash) {
-		return stickyAccountID
+		return stickyAccountID, nil
 	}
 	now := time.Now()
 	ownerSnapshot := openAIAccountLatencyHoldSnapshot{}
 	var ownerAccount *Account
-	qualityView := s.GroupQualityGateView()
-	gateMigration := false
-	var warmTTFTP90Ms, fastWarmTTFTP90Ms int
-	if qualityView.Enabled(derefGroupID(groupID)) {
-		if !preferLowUpstreamRate || s.shareScheduling.shareSchedulingActive(derefGroupID(groupID)) {
-			return stickyAccountID
-		}
-		warmTTFTP90Ms, fastWarmTTFTP90Ms, gateMigration = qualityView.SlowerThanFastLine(derefGroupID(groupID), stickyAccountID)
-		if !gateMigration {
-			return stickyAccountID
-		}
-	} else {
-		state := s.getOpenAIAccountLatencyHoldState()
-		if state == nil || state.latestHoldUntilUnixNano.Load() <= now.UnixNano() {
-			return stickyAccountID
-		}
-		account, err := s.getSchedulableAccount(ctx, stickyAccountID)
-		if err != nil || account == nil {
-			return stickyAccountID
-		}
-		ownerAccount = account
-		ownerSnapshot = s.openAIAccountLatencyHoldSnapshot(account, canonicalOpenAIAccountSchedulingModel(account, requestedModel), now)
-		if !ownerSnapshot.Held {
-			return stickyAccountID
-		}
+	if s.GroupQualityGateView().Enabled(derefGroupID(groupID)) {
+		return s.migrateOpenAIQualityOwner(ctx, groupID, platform, sessionHash, requestedModel, stickyAccountID, excludedIDs, requireCompact, requiredCapability, preferLowUpstreamRate, now)
+	}
+	state := s.getOpenAIAccountLatencyHoldState()
+	if state == nil || state.latestHoldUntilUnixNano.Load() <= now.UnixNano() {
+		return stickyAccountID, nil
+	}
+	account, err := s.getSchedulableAccount(ctx, stickyAccountID)
+	if err != nil || account == nil {
+		return stickyAccountID, nil
+	}
+	ownerAccount = account
+	ownerSnapshot = s.openAIAccountLatencyHoldSnapshot(account, canonicalOpenAIAccountSchedulingModel(account, requestedModel), now)
+	if !ownerSnapshot.Held {
+		return stickyAccountID, nil
 	}
 	accounts, err := s.listSchedulableAccounts(ctx, groupID, NormalizeOpenAICompatiblePlatform(platform))
 	if err != nil {
-		return stickyAccountID
+		return stickyAccountID, nil
 	}
 	needsUpstreamCheck := s.needsUpstreamChannelRestrictionCheck(ctx, groupID)
 	alternatives := make([]*Account, 0, len(accounts))
@@ -356,9 +397,6 @@ func (s *OpenAIGatewayService) migrateOpenAILatencyHeldOwner(ctx context.Context
 		if vetoed, _ := openAIProfitControlVetoReason(ctx, candidate); vetoed {
 			continue
 		}
-		if gateMigration && (qualityView.OrderTier(derefGroupID(groupID), candidate.ID) != GroupQualityGateTierPass || qualityView.Vetoed(derefGroupID(groupID), candidate.ID)) {
-			continue
-		}
 		alternatives = append(alternatives, candidate)
 		loadRequests = append(loadRequests, AccountWithConcurrency{ID: candidate.ID, MaxConcurrency: candidate.Concurrency})
 	}
@@ -366,7 +404,7 @@ func (s *OpenAIGatewayService) migrateOpenAILatencyHeldOwner(ctx context.Context
 	if s.concurrencyService != nil {
 		loads, err = s.concurrencyService.GetAccountsLoadBatchFresh(ctx, loadRequests)
 		if err != nil {
-			return stickyAccountID
+			return stickyAccountID, nil
 		}
 	}
 	for _, candidate := range alternatives {
@@ -380,19 +418,14 @@ func (s *OpenAIGatewayService) migrateOpenAILatencyHeldOwner(ctx context.Context
 			continue
 		}
 		resilience.StateFrom(ctx).ClearKeptStickyIfOwner(stickyAccountID)
-		if gateMigration {
-			slog.Warn("group_quality_gate.migrate", "group_id", derefGroupID(groupID), "account_id", stickyAccountID,
-				"warm_ttft_p90_ms", warmTTFTP90Ms, "fast_warm_ttft_p90_ms", fastWarmTTFTP90Ms)
-			return 0
-		}
 		logger.L().Info("openai_account_latency_sticky_migrated",
 			zap.Int64("from_account_id", stickyAccountID),
 			zap.Int64("alternative_account_id", candidate.ID),
 			zap.String("model", canonicalOpenAIAccountSchedulingModel(ownerAccount, requestedModel)),
 		)
-		return 0
+		return 0, nil
 	}
-	return stickyAccountID
+	return stickyAccountID, nil
 }
 
 func (s *OpenAIGatewayService) openAIAccountLatencyHoldSnapshot(account *Account, canonicalModel string, now time.Time) openAIAccountLatencyHoldSnapshot {

@@ -2,6 +2,7 @@ package admin
 
 import (
 	"log/slog"
+	"reflect"
 
 	"github.com/liulixin-lex/xy2api/internal/handler/dto"
 	"github.com/liulixin-lex/xy2api/internal/server/middleware"
@@ -526,6 +527,12 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.OpenAILowUpstreamRatePriorityEnabled != after.OpenAILowUpstreamRatePriorityEnabled {
 		changed = append(changed, "openai_low_upstream_rate_priority_enabled")
+	}
+	if before.OpenAILowUpstreamRatePriorityScope != after.OpenAILowUpstreamRatePriorityScope {
+		changed = append(changed, "openai_low_upstream_rate_priority_scope")
+	}
+	if !reflect.DeepEqual(before.OpenAILowUpstreamRatePriorityGroupIDs, after.OpenAILowUpstreamRatePriorityGroupIDs) {
+		changed = append(changed, "openai_low_upstream_rate_priority_group_ids")
 	}
 	if !equalNullableFloat(before.OpenAIOAuthSchedulingRateMultiplier, after.OpenAIOAuthSchedulingRateMultiplier) {
 		changed = append(changed, "openai_oauth_scheduling_rate_multiplier")

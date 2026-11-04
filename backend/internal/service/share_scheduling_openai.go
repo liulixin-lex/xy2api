@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -114,7 +115,8 @@ func (s *OpenAIGatewayService) selectAccountWithShareScheduling(ctx context.Cont
 		newResult: func(acc *Account, acquired bool, release func(), wait *AccountWaitPlan) (*AccountSelectionResult, error) {
 			return attachSelectionProfitGate(ctx, &AccountSelectionResult{Account: acc, Acquired: acquired, ReleaseFunc: release, WaitPlan: wait}), nil
 		}}
-	out, d := exec.run(&rec, req, cands, nil)
+	d := s.orderOpenAIShareQuality(in.groupID, sharesched.Plan(req, cands))
+	out := exec.serve(d)
 	for _, c := range cands {
 		if c.Eligible && !c.Excluded {
 			decision.CandidateCount++
@@ -183,7 +185,7 @@ func (s *OpenAIGatewayService) shareOpenAILastResort(ctx context.Context, gp *sh
 		newResult: func(acc *Account, acquired bool, release func(), wait *AccountWaitPlan) (*AccountSelectionResult, error) {
 			return attachSelectionProfitGate(withResilienceLastResortGate(ctx), &AccountSelectionResult{Account: acc, Acquired: acquired, ReleaseFunc: release, WaitPlan: wait}), nil
 		}}
-	out := exec.serve(round.plan(shareReq))
+	out := exec.serve(s.orderOpenAIShareQuality(req.GroupID, round.plan(shareReq)))
 	if out == nil || out.err != nil || out.result == nil {
 		return nil
 	}
@@ -286,12 +288,7 @@ func (s *OpenAIGatewayService) shareOpenAICandidates(ctx context.Context, in ope
 	if boundID > 0 && accounts[boundID] == nil {
 		if _, excluded := in.excluded[boundID]; !excluded {
 			if acc := gates.lookup(boundID); acc != nil && acc.Platform == in.platform && s.openAIAccountMatchesSchedulingGroup(acc, in.groupID) {
-				if vetoed, reason := groupQualityGateVeto(ctx, acc); vetoed {
-					c := s.shareScheduling.shareCandidate(derefGroupID(in.groupID), acc, now)
-					c.Eligible, c.Reason = false, sharesched.Reason(reason)
-					cands = append(cands, c)
-					stats.exclude(reason)
-				} else if c, ok := s.shareScheduling.shareMissingBoundCandidate(derefGroupID(in.groupID), acc, in.model, now, s.resilienceOpenAIPenaltyOf); ok {
+				if c, ok := s.shareScheduling.shareMissingBoundCandidate(derefGroupID(in.groupID), acc, in.model, now, s.resilienceOpenAIPenaltyOf); ok {
 					cands = append(cands, c)
 				}
 			}
@@ -303,21 +300,12 @@ func (s *OpenAIGatewayService) shareOpenAICandidates(ctx context.Context, in ope
 // verifyOpenAIShareAccount re-reads a planned account from the snapshot and
 // the database, exactly as the original scheduler does before serving.
 func (s *OpenAIGatewayService) verifyOpenAIShareAccount(ctx context.Context, in openAIShareSelection, acc *Account) (*Account, sharesched.Reason) {
-	if vetoed, reason := groupQualityGateVeto(ctx, acc); vetoed {
-		return nil, sharesched.Reason(reason)
-	}
 	fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, in.platform, in.model, false, in.capability)
 	if fresh != nil {
 		fresh = s.recheckSelectedOpenAIAccountFromDB(ctx, fresh, in.groupID, in.platform, in.model, false, in.capability)
 	}
 	if fresh == nil {
-		if vetoed, reason := groupQualityGateVeto(ctx, acc); vetoed {
-			return nil, sharesched.Reason(reason)
-		}
 		return nil, sharesched.ReasonIneligible
-	}
-	if vetoed, reason := groupQualityGateVeto(ctx, fresh); vetoed {
-		return nil, sharesched.Reason(reason)
 	}
 	if reason := s.newOpenAIShareGates(ctx, in).requestReason(fresh, time.Now()); reason != "" {
 		return nil, reason
@@ -366,9 +354,6 @@ func (g *openAIShareGates) lookup(id int64) *Account {
 // scheduler's soft restrictions pass as in the original last resort: short
 // per-model rate limits and in-memory runtime blocks.
 func (g *openAIShareGates) candidateReason(acc *Account, now time.Time) (sharesched.Reason, time.Time) {
-	if vetoed, reason := groupQualityGateVeto(g.ctx, acc); vetoed {
-		return sharesched.Reason(reason), time.Time{}
-	}
 	if !acc.IsSchedulable() {
 		reason, end := shareAccountStateReason(acc, now)
 		return reason, shareSoftRecovery(acc, g.in.model, now, g.s.resilienceOpenAIPenaltyOf, end)
@@ -384,8 +369,6 @@ func (g *openAIShareGates) candidateReason(acc *Account, now time.Time) (sharesc
 		return reason, shareSoftRecovery(acc, g.in.model, now, g.s.resilienceOpenAIPenaltyOf, end)
 	case strings.HasPrefix(reason, "quota_auto_pause"):
 		return sharesched.ReasonQuotaAutoPause, time.Time{}
-	case reason == "group_quality_ejected":
-		return sharesched.Reason(reason), time.Time{}
 	case reason == "platform_mismatch":
 		return sharesched.ReasonPlatformMismatch, time.Time{}
 	case reason == "capability_mismatch" || reason == resilience.ReasonCapabilityStreamOnly:
@@ -432,4 +415,26 @@ func (g *openAIShareGates) requestReason(acc *Account, now time.Time) sharesched
 		}
 	}
 	return ""
+}
+
+// Preserve an admitted sticky owner; only new placement and spill candidates
+// are quality ordered. Share scheduling does not perform quality migration.
+func (s *OpenAIGatewayService) orderOpenAIShareQuality(groupID *int64, d sharesched.Decision) sharesched.Decision {
+	view := s.GroupQualityGateView()
+	if !view.Enabled(derefGroupID(groupID)) || len(d.Steps) < 2 {
+		return d
+	}
+	start := 0
+	if d.Bound > 0 && d.Steps[0].AccountID == d.Bound {
+		start = 1
+	}
+	steps := d.Steps[start:]
+	sort.SliceStable(steps, func(i, j int) bool {
+		return view.OrderTier(derefGroupID(groupID), steps[i].AccountID) < view.OrderTier(derefGroupID(groupID), steps[j].AccountID)
+	})
+	if start == 0 {
+		d.Target = d.Steps[0].AccountID
+		d.Ideal = d.Target
+	}
+	return d
 }

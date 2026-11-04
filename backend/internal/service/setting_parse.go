@@ -247,6 +247,8 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		// 分组隔离（默认不允许未分组 Key 调度）
 		SettingKeyAllowUngroupedKeyScheduling:                        "false",
 		SettingKeyOpenAILowUpstreamRatePriorityEnabled:               "false",
+		SettingKeyOpenAILowUpstreamRatePriorityScope:                 "all",
+		SettingKeyOpenAILowUpstreamRatePriorityGroupIDs:              "[]",
 		SettingKeyOpenAIOAuthSchedulingRateMultiplier:                "1",
 		SettingKeyAnthropicCacheTTLDefault:                           "5m",
 		SettingKeyEnableClientDatelineNormalization:                  "true",
@@ -967,6 +969,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.PaymentVisibleMethodAlipayEnabled = settings[SettingPaymentVisibleMethodAlipayEnabled] == "true"
 	result.PaymentVisibleMethodWxpayEnabled = settings[SettingPaymentVisibleMethodWxpayEnabled] == "true"
 	result.OpenAILowUpstreamRatePriorityEnabled = settings[SettingKeyOpenAILowUpstreamRatePriorityEnabled] == "true"
+	result.OpenAILowUpstreamRatePriorityScope, result.OpenAILowUpstreamRatePriorityGroupIDs = parseOpenAILowUpstreamRateScope(settings)
 	result.OpenAIOAuthSchedulingRateMultiplier = parseOpenAIOAuthSchedulingRateMultiplier(settings)
 	result.OpenAIAdvancedSchedulerEnabled = settings[openAIAdvancedSchedulerSettingKey] == "true"
 	result.OpenAIAdvancedSchedulerStickyWeightedEnabled = settings[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled] == "true"
@@ -1392,4 +1395,23 @@ func normalizeTablePreferences(defaultPageSize int, options []int) (int, []int) 
 	}
 
 	return defaultPageSize, normalizedOptions
+}
+
+func parseOpenAILowUpstreamRateScope(values map[string]string) (string, []int64) {
+	scope := strings.TrimSpace(values[SettingKeyOpenAILowUpstreamRatePriorityScope])
+	if scope != "groups" {
+		scope = "all"
+	}
+	ids := []int64{}
+	_ = json.Unmarshal([]byte(values[SettingKeyOpenAILowUpstreamRatePriorityGroupIDs]), &ids)
+	seen := make(map[int64]bool)
+	out := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if id > 0 && !seen[id] {
+			out = append(out, id)
+			seen[id] = true
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return scope, out
 }

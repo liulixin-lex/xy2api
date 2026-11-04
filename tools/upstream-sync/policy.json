@@ -3106,7 +3106,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
-      "value": "if reason != resilience.ReasonCapabilityStreamOnly && reason != \"group_quality_ejected\" {"
+      "value": "if reason != resilience.ReasonCapabilityStreamOnly {"
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
@@ -3126,7 +3126,7 @@
     },
     {
       "path": "backend/internal/service/openai_account_scheduler.go",
-      "value": "groupQualityGateVeto(ctx, account)"
+      "value": "pools := s.service.openAIQualityPools(req.GroupID, filtered, req.RequestedModel)"
     },
     {
       "path": "backend/internal/service/openai_ws_forwarder_support.go",
@@ -3138,7 +3138,7 @@
     },
     {
       "path": "backend/internal/service/share_scheduling_openai.go",
-      "value": "groupQualityGateVeto(ctx, acc)"
+      "value": "d := s.orderOpenAIShareQuality(in.groupID, sharesched.Plan(req, cands))"
     },
     {
       "path": "backend/internal/service/resilience_session.go",
@@ -3226,15 +3226,15 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
-      "value": "// Legacy candidate admission reports group_quality_ejected through its filter stats.\n\tif vetoed, reason := groupQualityGateVeto(ctx, account); vetoed {"
+      "value": "if view.Enabled(order.groupID) {"
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
-      "value": "// Legacy sticky admission rejects the owner before returning it to a caller.\n\tif vetoed, _ := groupQualityGateVeto(ctx, account); vetoed {"
+      "value": "stickyAccountID, migrated = s.migrateOpenAILatencyHeldOwner("
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
-      "value": "// Legacy load-aware sticky admission must not retain an ejected owner.\n\t\t\tif vetoed, _ := groupQualityGateVeto(ctx, account); vetoed {"
+      "value": "if order.tiers != nil {"
     },
     {
       "path": "backend/internal/service/openai_quality_routing.go",
@@ -3258,7 +3258,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
-      "value": "key.qualityTier = qualityTiers[item.account.ID]\n\t\t\tkey.nearCapacity = openAIAccountNearCapacity(item)"
+      "value": "qualityTier: qualityTiers[item.account.ID], held: held[item.account.ID].Held"
     },
     {
       "path": "backend/internal/service/openai_quality_routing.go",
@@ -3639,6 +3639,30 @@
     {
       "path": "backend/internal/service/gateway_scheduling.go",
       "value": "s.anthropicLatencyHoldSnapshotForOutboundModel(candidate.account, model, time.Now())"
+    },
+    {
+      "path": "backend/internal/service/openai_quality_migration.go",
+      "value": "cache.CompareAndSwapSessionAccountID("
+    },
+    {
+      "path": "backend/internal/service/openai_quality_migration.go",
+      "value": "cooldown.note(key, time.Now())"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "req.StickyAccountID, migrated = s.service.migrateOpenAILatencyHeldOwner("
+    },
+    {
+      "path": "backend/internal/service/anthropic_account_latency_hold.go",
+      "value": "state.recordWithPolicy(account.ID, openAIAccountModelTransientModel(model), sample, now, 0.35, false)"
+    },
+    {
+      "path": "backend/internal/service/openai_account_latency_hold.go",
+      "value": "s.recordWithPolicy(accountID, model, sample, now, openAIAccountLatencySlowFraction, true)"
+    },
+    {
+      "path": "backend/internal/repository/gateway_cache.go",
+      "value": "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end"
     }
   ],
   "forbidden_module_paths": [
@@ -6113,7 +6137,7 @@
     {
       "id": "xy-openai-group-quality-scheduling",
       "path": "backend/internal/handler/openai_profit_slot_recheck_test.go",
-      "literal": "quality veto/"
+      "literal": "quality does not veto/"
     },
     {
       "id": "xy-openai-group-quality-scheduling",
@@ -6122,8 +6146,8 @@
     },
     {
       "id": "xy-openai-group-quality-scheduling",
-      "path": "backend/internal/handler/openai_gateway_handler_test.go",
-      "literal": "func TestOpenAIResponsesWebSocket_QualityGateDoesNotLeakPinnedExemptionToConnection(t *testing.T) {"
+      "path": "backend/internal/service/openai_gate_v3_test.go",
+      "literal": "func TestGateV3Migration(t *testing.T) {"
     },
     {
       "id": "xy-openai-group-quality-scheduling",
@@ -6349,6 +6373,41 @@
       "id": "xy-recovery-observability",
       "path": "backend/internal/handler/ops_error_logger_test.go",
       "literal": "func TestOpsErrorLoggerMiddleware_RecordsConfirmedPostOutputFailureWhenClientCancels"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_gate_v3_test.go",
+      "literal": "func TestGateV3FiveLatencyPartitionPaths(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_gate_v3_test.go",
+      "literal": "func TestGateV3AdvancedPoolsAndShare(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_gate_v3_test.go",
+      "literal": "func TestGateV3LowRateScope(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_gate_v3_test.go",
+      "literal": "func TestGateV3AdvancedMigration(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_gate_v3_test.go",
+      "literal": "func TestGateV3LatencyEscalation(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_gate_v3_test.go",
+      "literal": "func TestGateV3LatencyBoundariesAndClaudeUnchanged(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/repository/gateway_cache_atomic_test.go",
+      "literal": "func TestGateV3CacheCompareAndSwapBinding(t *testing.T) {"
     }
   ]
 }

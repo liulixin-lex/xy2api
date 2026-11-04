@@ -243,6 +243,8 @@ type SystemSettings struct {
 
 	// OpenAI account scheduling
 	OpenAILowUpstreamRatePriorityEnabled                   bool     `json:"openai_low_upstream_rate_priority_enabled"`
+	OpenAILowUpstreamRatePriorityScope                     string   `json:"openai_low_upstream_rate_priority_scope"`
+	OpenAILowUpstreamRatePriorityGroupIDs                  []int64  `json:"openai_low_upstream_rate_priority_group_ids"`
 	OpenAIOAuthSchedulingRateMultiplier                    *float64 `json:"openai_oauth_scheduling_rate_multiplier"`
 	OpenAIAdvancedSchedulerEnabled                         bool     `json:"openai_advanced_scheduler_enabled"`
 	OpenAIAdvancedSchedulerStickyWeightedEnabled           bool     `json:"openai_advanced_scheduler_sticky_weighted_enabled"`

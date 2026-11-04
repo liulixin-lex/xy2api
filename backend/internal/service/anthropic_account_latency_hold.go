@@ -120,7 +120,7 @@ func (s *GatewayService) recordAnthropicAccountLatencySample(account *Account, m
 		return
 	}
 	state := s.getAnthropicLatencyHoldStateLocked(generation)
-	entry, started, count, fraction := state.record(account.ID, openAIAccountModelTransientModel(model), sample, now)
+	entry, started, count, fraction := state.recordWithPolicy(account.ID, openAIAccountModelTransientModel(model), sample, now, 0.35, false)
 	// If disable/re-enable raced with the write, discard all evidence from the
 	// prior generation before it can be observed by a later request.
 	latestGeneration := resilience.AnthropicLatencyHoldGeneration()

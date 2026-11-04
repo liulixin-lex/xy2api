@@ -341,11 +341,11 @@ func TestAvailabilityFallbackServableMembers(t *testing.T) {
 		wantOriginAvailable, wantServingAvailable        int64
 	}{
 		{name: "profit excludes the origin", originCost: 1, servingCost: 0.7, wantMove: true, wantServingAvailable: 1},
-		{name: "quality excludes the origin", originCost: 0.3, servingCost: 0.7, originEjected: true, wantMove: true, wantServingAvailable: 1},
+		{name: "quality does not exclude origin", originCost: 0.3, servingCost: 0.7, originEjected: true, wantOriginAvailable: 1, wantServingAvailable: 1},
 		{name: "cheap account soft penalized", originCost: 0.3, servingCost: 0.7, originSoft: true, wantMove: true, wantServingAvailable: 1},
 		{name: "origin supports a different model", originCost: 0.3, servingCost: 0.7, unsupportedModel: true, wantOriginAvailable: 1, wantServingAvailable: 1},
 		{name: "serving profit ceiling rejects", originCost: 1, servingCost: 1.6},
-		{name: "serving quality rejects", originCost: 1, servingCost: 0.7, servingEjected: true},
+		{name: "serving quality remains available", originCost: 1, servingCost: 0.7, servingEjected: true, wantMove: true, wantServingAvailable: 1},
 		{name: "pinned but failing origin is servable", originCost: 0.3, servingCost: 0.7, originEjected: true, pinned: true, wantOriginAvailable: 1, wantServingAvailable: 1},
 		{name: "guard held origin is servable", originCost: 0.3, servingCost: 0.7, originEjected: true, guardHeld: true, wantOriginAvailable: 1, wantServingAvailable: 1},
 		{name: "composite preserves cross-platform availability with gates off", originCost: 0.3, servingCost: 0.7, composite: true, wantOriginAvailable: 1, wantServingAvailable: 1},
@@ -378,18 +378,13 @@ func TestAvailabilityFallbackServableMembers(t *testing.T) {
 				first.Platform, second.Platform = PlatformAntigravity, tc.mixedPlatform
 				first.Extra = map[string]any{"mixed_scheduling": true}
 			}
-			view := NewGroupQualityGateService(nil, nil, nil)
-			state := func(ejected, pinned, held bool) groupQualityMemberSnapshot {
-				name := "eligible"
-				if ejected {
-					name = "ejected"
-				}
-				return groupQualityMemberSnapshot{Result: GroupQualityMemberResult{State: name, Pinned: pinned, GuardHeld: held}, State: groupQualityAccountState{Until: time.Now().Add(time.Hour)}}
+			view := &schedulingQualityView{enabled: true, tiers: map[int64]int{}}
+			if tc.originEjected {
+				view.tiers[1] = GroupQualityGateTierFail
 			}
-			view.snapshot.Store(&groupQualitySnapshot{Members: map[int64]map[int64]groupQualityMemberSnapshot{
-				10: {1: state(tc.originEjected, tc.pinned, tc.guardHeld)},
-				20: {2: state(tc.servingEjected, false, false)},
-			}})
+			if tc.servingEjected {
+				view.tiers[2] = GroupQualityGateTierFail
+			}
 			r.SetGroupQualityGateView(view)
 			repo.byGroup[10], repo.byGroup[20] = []Account{first}, []Account{second}
 			got := r.AvailabilityFallbackGroup(context.Background(), key)
