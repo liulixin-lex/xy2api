@@ -22,21 +22,13 @@ import (
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, forwardErr error) {
 	defer beginOpenAIStateRejectionAttempt(ctx, c, account, body)(&forwardErr)
-	// Freeze original protocol facts only for literal collaboration candidates,
-	// before compatibility normalization can collapse keys or introduce a declaration.
+	// Run the same complete checks on original bytes without applying edits;
+	// requests that cannot obtain a raw plan cannot gain one after normalization.
 	collabRawBlocked, collabRawContinuity := true, false
 	if bytes.Contains(body, []byte(`"collaboration"`)) {
-		originalCollabRoot := gjson.ParseBytes(body)
-		previousResponse := originalCollabRoot.Get("previous_response_id")
-		collabRawBlocked = !codexCollabUniqueObject(originalCollabRoot) || !codexCollabRequestContainersUnique(originalCollabRoot) || originalCollabRoot.Get("store").Bool() ||
-			(previousResponse.Exists() && previousResponse.Type != gjson.Null && strings.TrimSpace(previousResponse.String()) != "")
-		for _, ns := range codexCollabFindNamespaces(originalCollabRoot) {
-			if !codexCollabUnambiguousJSON(ns.node) {
-				collabRawBlocked = true
-				break
-			}
-		}
-		collabRawContinuity = !collabRawBlocked && openAICollaborationContinuity(body)
+		_, rawPlan, _ := planCodexCollaborationPlaintext(body)
+		collabRawBlocked = rawPlan == nil
+		collabRawContinuity = rawPlan != nil && openAICollaborationContinuity(body)
 	}
 	defer func() { s.finishCacheDiagnostic(c, body, result) }()
 	if c != nil {

@@ -4,7 +4,7 @@
 
 `gateway_resilience_settings.collaboration_plaintext` 缺省 `{ "enabled": false, "models": [] }`。models 最多 16 条，每条去首尾空白后 1–128 字符；去空白后按不分大小写判重，保留第一项，nil 归一为 []。读取、发布和 Clone 均隔离集合。
 
-所有门同时满足才转换：韧性总开关、功能开关、最终映射后的出站模型精确命中清单、OpenAI 账号资格（`extra.openai_collaboration_plaintext` 为布尔 true 或下述连续性产物）、真实 Codex UA/originator、入站 HTTP 且原生 Responses HTTP 出站、非透传/compact/桥接/摊平账号。ForceCodexCLI 不绕过客户端门。API Key 与 OAuth 接线均支持，但预检仅覆盖 API Key 中转站，OAuth 验证前不开启。入口先用 bytes.Contains 检查原始字节中的字面 `"collaboration"`，只有命中才解析并冻结原始根键、协议容器唯一性（包括协作命名空间声明的完整 schema，递归检查重复键）、store/previous 排除与连续性。原始请求任何位置都没有该字面时 collabRawBlocked=true，即使转义声明之后归一化也只观测；原始字节任意位置含字面时，照常在原始 JSON 解码后的值上判定（包括转义声明），不影响歧义检查。命中但有歧义或状态排除时同样禁止 plan。决策点只读 collabRawBlocked 与原始连续性结果，不因 map 重建或 OAuth 改字段而改变资格；被排除请求只观测 outcome=unsupported。unsupported 当前合并资格门未满足、原始状态/根键排除与不支持形态，不另细分原因。
+所有门同时满足才转换：韧性总开关、功能开关、最终映射后的出站模型精确命中清单、OpenAI 账号资格（`extra.openai_collaboration_plaintext` 为布尔 true 或下述连续性产物）、真实 Codex UA/originator、入站 HTTP 且原生 Responses HTTP 出站、非透传/compact/桥接/摊平账号。ForceCodexCLI 不绕过客户端门。API Key 与 OAuth 接线均支持，但预检仅覆盖 API Key 中转站，OAuth 验证前不开启。入口先用 bytes.Contains 检查原始字节中的字面 `"collaboration"`，命中后调用 planCodexCollaborationPlaintext 在原始字节上执行与改写相同的全部检查，只计算 plan/edit 列表、不应用 edits，并冻结能否取得 plan 与连续性。原样拿不到 plan 的请求，归一化后也不转换；覆盖根/协议容器、完整协作 schema、developer/system 文本片段重复键与歧义、私有名冲突、store/previous 排除及不支持形态。developer/system 数组中的每个片段先检查唯一键，再按 type 过滤；用户消息和工具输出不递归检查。原始请求任何位置都没有该字面时 collabRawBlocked=true，即使转义声明之后归一化也只观测；原始字节任意位置含字面时，照常在原始 JSON 解码后的值上判定（包括转义声明），不影响歧义检查。命中但有歧义或状态排除时同样禁止 plan。决策点只读 collabRawBlocked 与原始连续性结果，不因 map 重建或 OAuth 改字段而改变资格；被排除请求只观测 outcome=unsupported。unsupported 当前合并资格门未满足、原始状态/根键排除与不支持形态，不另细分原因。
 
 只在 tools 或 input[type=additional_tools].tools 声明 collaboration namespace 时挂本次尝试的还原器；不合格请求只观测、不改字节，无声明不挂。非原生提前分流不进入该转换。每次从不可变请求体重新派生 plan；不使用 codexToolNameSessionKey 跨请求继承。设置热变更只影响新尝试，在途 plan 保持冻结。
 
@@ -12,7 +12,7 @@
 
 ## 2. 原子出站变换（核心契约）
 
-`applyCodexCollaborationPlaintext` 先全量校验冲突，再原子将 namespace 节点 collaboration 改成 collaboration-xy，并只删 spawn_agent/send_message/followup_task 的 parameters.properties.message.encrypted。不得只删标记、不改名。tool_choice 仅接受缺省或 auto/none/required 字符串，其余原样 unsupported，不做出站选择器改写；请求侧点号/双下划线历史身份与 Chat 嵌套 function 形态均 unsupported。协议容器与身份字段先校验重复键，歧义不得部分改写；applied 时同步把顶层 instructions 字符串与 input[] 的 message(role=developer/system)正文（字符串或 input_text.text）中精确的 functions.collaboration. 替换为 functions.collaboration-xy.，保证开发者提示的寻址示例与声明一致。该范围由预检自然选工具对照暴露后 PM 追加裁决，用户消息/工具输出/参数不在替换范围。历史 agent_message、function_call_output、call_id/item_id、arguments 与 output 正文不改。
+`applyCodexCollaborationPlaintext` 先调用只读 planCodexCollaborationPlaintext 取得通过全部检查的 plan/edits，再逐条应用 edits，失败保留原始体；原子将 namespace 节点 collaboration 改成 collaboration-xy，并只删 spawn_agent/send_message/followup_task 的 parameters.properties.message.encrypted。不得只删标记、不改名。tool_choice 仅接受缺省或 auto/none/required 字符串，其余原样 unsupported，不做出站选择器改写；请求侧点号/双下划线历史身份与 Chat 嵌套 function 形态均 unsupported。协议容器与身份字段先校验重复键，歧义不得部分改写；applied 时同步把顶层 instructions 字符串与 input[] 的 message(role=developer/system)正文（字符串或 input_text.text）中精确的 functions.collaboration. 替换为 functions.collaboration-xy.，保证开发者提示的寻址示例与声明一致。该范围由预检自然选工具对照暴露后 PM 追加裁决，用户消息/工具输出/参数不在替换范围。历史 agent_message、function_call_output、call_id/item_id、arguments 与 output 正文不改。
 
 返回 outcome=applied|absent|conflict|unsupported|invalid；非 applied 保持原字节、plan=nil。`newCodexCollabRestorer(plan)` 每次尝试创建；nil plan 只观测。`SSEData` / `ResponseJSON` / `ErrorBody` / `Stats` 是三条回程出口共享的契约。
 
