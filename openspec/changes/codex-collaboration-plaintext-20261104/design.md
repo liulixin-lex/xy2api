@@ -40,7 +40,19 @@ EFA 与 action 不增加联合字段，不做 EFA×action 联合标签。追加 
 
 ## 6. P0 状态族识别与观测
 
-由 P0 工作包补充识别、错误规则优先级与 state_rejection 事件契约。
+请求级决策与有限修复分离。`ClassifyStateRejection(code, type, message)` 保留 v3 窄边界：专用 `client_tool_continuation_unavailable` code 或旧 `IsEncryptedContentRejection(code, message)` 命中；其余仅 code 为空时允许 S1 完整短语 `opaque conversation state` / `unrecognized conversation state` 和 S2 完整短语 `encrypted content is invalid for this conversation`。type 本身不作为证据。非空 server/rate-limit code 不因 S1/S2 文案降成请求错误；旧加密解密/校验拒绝仍优先。`Encrypted` 恒等旧谓词结果，仅用于诊断，不扩展修复资格。
+
+分类命中统一为 `CLIENT_ERROR`，`Result.StateFamily` 按识别优先级区分 `relay_state`、`conversation_invalid`、`function_output`、`agent_message`、`reasoning`、`other_encrypted` 六个家族。旧加密谓词命中时 reason 保持 `encrypted_content`，其余使用 `conversation_state`。
+
+原生/透传 HTTP、SSE failed/error、Chat/Messages 公共路由、WS 与账号副作用入口、handler 兜底共用该分类。状态拒绝不换号、不罚号，不计会话连击、门槛与份额健康软失败、输出后冷却或 P1-B；handler 在请求预算之前终止恢复，独立于韧性总开关。余额/额度、限流、模型与容量恢复分支保持原有分类和行为。
+
+HTTP/带内 rs/cmp 有限剥离、WS 恢复判据与预算、输出提交门禁继续使用原有修复条件。S2/S6 加原本可修复的 rs/cmp 仍可同号有界重放；S1/S3/S4 加旁路 reasoning 不借机删除协作或工具正文，也不重放。语义输出后不重放、改绑、冷却或增加会话失败，保留真实 usage 与既有错误归因。透传 HTTP 的客户端错误信封与文案保持既有行为。
+
+新增默认观测 Warn 事件 `resilience.state_rejection` 与 `state_rejection` 计数（label 为家族），只记录标识、元数据与计数。原生/透传在 Forward 收尾 defer 汇总最终失败，每次至多一次；最终成功不计状态拒绝。事件含请求关联、`family`、`encrypted`、`path`、`stage`、`headers_committed`、`error_ms`、`client_version` 与片段计数。gin `ops_error_passthrough_rule_id` 每尝试清零、实际规则命中时更新，最终事件读取 `rule_id`。`collab_plaintext` 取最终统计的 Applied，另附 Calls、EFAAbsent/Empty/NonEmpty、MarkerAdded、Vetoed、Contradicted、Uncovered；统计必须在 Forward 返回前写完，P0 defer 最先注册、最后执行。
+
+桥接/WS 在既有判断点直接观测，不带规则字段。按 PM 裁决，WS 处罚 helper 不扩签名或四条调用链；事件 `stage=unknown`，省略 `headers_committed`、`client_version` 与片段计数，不从连接累计 DeliveredBytes 推断 post_output。WS 的观测字段因此不完整。
+
+片段 census 只扫描协议位置：agent_message.content[] / function_call_output.output[] 中的 encrypted_content 片段及其他 input 项顶层 encrypted_content，支持合法 Unicode 转义；不递归 arguments、工具字符串输出或用户 JSON。不存请求/错误正文、密文或参数；原始错误 code 在现场参与分类，不依赖可选正文日志。已有 `upstream_errors` 只补 `state_family`，不为观测制造新的尝试归因事件。
 
 ## 7. 启用与回退
 

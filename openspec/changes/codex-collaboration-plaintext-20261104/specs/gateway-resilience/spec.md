@@ -37,4 +37,68 @@ The gateway SHALL report attempt outcome/model, EFA marginal counts and action m
 
 ### Requirement: P0 state rejection classification
 
-P0 工作包将在集成后补充本节场景与状态族识别细节。
+The gateway SHALL classify state rejections as request scoped CLIENT_ERROR results with a StateFamily of relay_state, conversation_invalid, function_output, agent_message, reasoning or other_encrypted. Classification SHALL preserve the v3 narrow boundary and SHALL remain separate from repair eligibility. State rejection handling SHALL apply to native and passthrough HTTP, SSE failed/error events, Chat/Messages shared routes, WS/account side effects and handler recovery independently of resilience settings.
+
+#### Scenario: Dedicated code and narrow message fallback
+
+- **WHEN** the code is client_tool_continuation_unavailable or the existing IsEncryptedContentRejection predicate matches
+- **THEN** the rejection SHALL be request scoped
+- **AND** otherwise only an empty code SHALL permit the complete phrases opaque conversation state, unrecognized conversation state or encrypted content is invalid for this conversation as fallback evidence
+- **AND** a nonempty server/rate-limit code with only those fallback phrases SHALL retain its existing classification; type alone SHALL NOT establish a state rejection.
+
+#### Scenario: Preserve encrypted classification and repair predicates
+
+- **WHEN** a state rejection is classified
+- **THEN** Encrypted SHALL equal IsEncryptedContentRejection(code, message)
+- **AND** the reason SHALL remain encrypted_content for an existing encrypted match and SHALL be conversation_state for other state matches
+- **AND** HTTP/in-band repair and WS recovery SHALL continue to use their original predicates, budgets and output commit gates.
+
+#### Scenario: Request rejection stops account recovery
+
+- **GIVEN** a classified state rejection, including when the resilience master switch is disabled or no request budget is configured
+- **WHEN** an account recovery or penalty decision is reached
+- **THEN** the gateway SHALL stop failover before consuming recovery budget
+- **AND** SHALL NOT penalize the account, increment session failure or threshold/share soft-failure state, apply post-output cooldown, or trigger P1-B.
+
+#### Scenario: Preserve bounded repair without stripping unrelated content
+
+- **GIVEN** S2/S6 and reasoning/compaction state already eligible for repair
+- **WHEN** the existing repair gate permits replay
+- **THEN** the gateway SHALL retain its bounded same-account repair
+- **AND** S1/S3/S4 with unrelated reasoning SHALL leave collaboration/tool content intact and SHALL NOT replay through state classification.
+
+#### Scenario: State rejection after semantic output
+
+- **WHEN** a state rejection follows semantic output
+- **THEN** the gateway SHALL NOT replay, rebind the account, cool down the account or increment session failure
+- **AND** actual usage and existing error attribution SHALL remain intact.
+
+#### Scenario: Final attempt observation without body storage
+
+- **WHEN** a native or passthrough Forward attempt terminates with a state rejection
+- **THEN** the gateway SHALL emit at most one resilience.state_rejection event and increment state_rejection with the family label
+- **AND** the event SHALL include request correlation, family, encrypted, path, stage, headers_committed, error_ms, client_version and protocol-position fragment counts
+- **AND** it SHALL read the final rule_id and collaboration Applied/Calls/EFAAbsent/EFAEmpty/EFANonEmpty/MarkerAdded/Vetoed/Contradicted/Uncovered statistics after all attempt statistics have been written
+- **AND** collab_plaintext SHALL equal Applied; rule state SHALL reset per attempt and update only on an actual rule match
+- **AND** a final successful attempt SHALL NOT emit a state rejection observation.
+
+#### Scenario: Bounded census and existing error attribution
+
+- **WHEN** state rejection observations and existing upstream_errors are recorded
+- **THEN** the new observation SHALL store only identifiers, metadata and counts, without request/error bodies, ciphertext or arguments
+- **AND** the census SHALL inspect only protocol-defined encrypted_content positions, including valid Unicode escapes, without recursively scanning arguments, tool output strings or user JSON
+- **AND** classification SHALL use the original error code without depending on optional body logging
+- **AND** state_family SHALL be attached only to existing upstream_errors; observation SHALL NOT create additional attempt attribution events.
+
+#### Scenario: Partial WS observations
+
+- **WHEN** a WS penalty helper identifies a state rejection
+- **THEN** it SHALL return before account side effects and emit the available state rejection metadata without expanding helper signatures or the four call paths
+- **AND** stage SHALL be unknown; headers_committed, client_version and fragment counts SHALL be omitted
+- **AND** cumulative DeliveredBytes SHALL NOT imply post_output; bridge and WS observations SHALL omit rule_id.
+
+#### Scenario: Preserve other recovery and passthrough behavior
+
+- **WHEN** balance/quota, rate-limit, unsupported-model or capacity outcomes do not match the state classifier
+- **THEN** their existing classifications and recovery branches SHALL remain intact
+- **AND** P0 SHALL preserve the existing passthrough HTTP client error envelope and wording.

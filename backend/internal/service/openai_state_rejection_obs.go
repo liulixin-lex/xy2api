@@ -182,7 +182,8 @@ func openAIStateFragmentOpaqueLike(value string) bool {
 		return false
 	}
 	for _, ch := range value {
-		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch == '=') {
+		isBase64URLChar := (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch == '='
+		if !isBase64URLChar {
 			return false
 		}
 	}
