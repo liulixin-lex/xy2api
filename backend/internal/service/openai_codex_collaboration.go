@@ -507,7 +507,44 @@ func (r *codexCollabRestorer) ErrorBody(body []byte) []byte {
 	if r == nil || r.plan == nil {
 		return body
 	}
-	return bytes.ReplaceAll(body, []byte(codexCollaborationNamespaceAlias), []byte(codexCollaborationNamespace))
+	if !json.Valid(body) {
+		return bytes.ReplaceAll(body, []byte(codexCollaborationNamespaceAlias), []byte(codexCollaborationNamespace))
+	}
+	var out []byte
+	last := 0
+	for i := 0; i < len(body); i++ {
+		if body[i] != '"' {
+			continue
+		}
+		start := i
+		for i++; i < len(body); i++ {
+			if body[i] == '\\' {
+				i++
+			} else if body[i] == '"' {
+				break
+			}
+		}
+		var value string
+		if err := json.Unmarshal(body[start:i+1], &value); err != nil {
+			return body
+		}
+		if !strings.Contains(value, codexCollaborationNamespaceAlias) {
+			continue
+		}
+		var encoded bytes.Buffer
+		encoder := json.NewEncoder(&encoded)
+		encoder.SetEscapeHTML(false)
+		if err := encoder.Encode(strings.ReplaceAll(value, codexCollaborationNamespaceAlias, codexCollaborationNamespace)); err != nil {
+			return body
+		}
+		out = append(out, body[last:start]...)
+		out = append(out, bytes.TrimSuffix(encoded.Bytes(), []byte("\n"))...)
+		last = i + 1
+	}
+	if out == nil {
+		return body
+	}
+	return append(out, body[last:]...)
 }
 
 func (r *codexCollabRestorer) Stats() codexCollabStats {
@@ -534,14 +571,23 @@ func (r *codexCollabRestorer) transform(body []byte, eventType string, streaming
 		eventType = root.Get("type").String()
 	}
 	if streaming && (eventType == "error" || (eventType != "response.failed" && root.Get("type").String() == "error")) {
+		if r.plan != nil && (!codexCollabUniqueErrorKey(root) || !codexCollabUniqueObject(root.Get("response"))) {
+			return nil, errors.New("ambiguous collaboration response error")
+		}
 		return r.ErrorBody(body), nil
 	}
 	if r.plan != nil && (!codexCollabUniqueObject(root) || !codexCollabUniqueObject(root.Get("response"))) {
 		return nil, errors.New("ambiguous collaboration response JSON fields")
 	}
-	if streaming && r.plan != nil && (eventType == "response.failed" || root.Get("type").String() == "response.failed") {
-		value := root.Get("response.error")
-		if value.Exists() {
+	if r.plan != nil {
+		values := []gjson.Result{root.Get("error"), root.Get("response.error")}
+		if values[0].Index < values[1].Index {
+			values[0], values[1] = values[1], values[0]
+		}
+		for _, value := range values {
+			if !value.Exists() || value.Type == gjson.Null {
+				continue
+			}
 			start, end := value.Index, value.Index+len(value.Raw)
 			restored := r.ErrorBody(body[start:end])
 			changed := make([]byte, 0, len(body)-len(value.Raw)+len(restored))
@@ -566,6 +612,17 @@ func (r *codexCollabRestorer) transform(body []byte, eventType string, streaming
 		}
 	}
 	return r.restoreResponseEchoes(updated, root)
+}
+
+func codexCollabUniqueErrorKey(root gjson.Result) bool {
+	count := 0
+	root.ForEach(func(key, _ gjson.Result) bool {
+		if key.String() == "error" {
+			count++
+		}
+		return count < 2
+	})
+	return count < 2
 }
 
 func codexCollabResponseItems(root gjson.Result, eventType string, streaming bool) ([]codexCollabItem, error) {

@@ -344,12 +344,18 @@ func TestCollaborationForwardFailoverErrorRestoration(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		applied bool
+		escaped bool
 	}{
 		{name: "applied", applied: true},
+		{name: "applied_escaped", applied: true, escaped: true},
 		{name: "observe_only"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			enableCollabTest(t)
+			body := body
+			if tc.escaped {
+				body = strings.ReplaceAll(body, "collaboration-xy", `collaboration\u002dxy`)
+			}
 			upstream := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(http.StatusServiceUnavailable, body)}
 			account := newOpenAIRejectedFieldTestAccount()
 			account.Extra["openai_collaboration_plaintext"] = tc.applied
@@ -363,10 +369,15 @@ func TestCollaborationForwardFailoverErrorRestoration(t *testing.T) {
 			expectedBody, expectedMessage := body, message
 			if tc.applied {
 				expectedBody = strings.ReplaceAll(body, "collaboration-xy", "collaboration")
+				expectedBody = strings.ReplaceAll(expectedBody, `collaboration\u002dxy`, "collaboration")
 				expectedMessage = strings.ReplaceAll(message, "collaboration-xy", "collaboration")
 			}
 			require.Equal(t, []byte(expectedBody), failover.ResponseBody)
 			require.Equal(t, expectedMessage, failover.ClientMessage)
+			if tc.escaped {
+				require.NotContains(t, gjson.GetBytes(failover.ResponseBody, "error.message").String(), "collaboration-xy")
+				require.NotContains(t, gjson.GetBytes(failover.ResponseBody, "error.param").String(), "collaboration-xy")
+			}
 			events := currentOpsUpstreamEvents(c)
 			require.NotEmpty(t, events)
 			require.Equal(t, message, events[0].Message, "service observations retain the raw error")
