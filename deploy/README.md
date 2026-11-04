@@ -717,3 +717,9 @@ gateway:
 - 回滚期间如在旧版保存任何门槛策略，所有分组的 `v3` 子对象都会丢失；再升级时按 v2 继承启用状态（v2 已关闭的组即为关闭）。
 - 本版同时带上 0.5.1 之后已合入、未发布的改动（输出后带内失败补记、近期表现第 2 版、Claude 判慢让位），回滚到上一个版本时一并退回；7 天对照的变化也包含它们。
 - 质量状态、迁出冷却与判慢递增都在进程内，重启清空。迁移与回退细节见 [用量指标](../docs/USAGE_METRICS.md#迁移与回退)。
+
+### Codex 协作消息明文通道
+
+前后端须同版。`collaboration_plaintext.enabled` 默认 false、models 默认 []；完成目标实际出站模型的预检后，在“系统设置 → 网关 → 网关韧性”配置已验证模型与功能开关，再打开目标 OpenAI 账号的协作明文开关。API Key/OAuth 均可，仅原生 Responses HTTP；WS、compact、透传、桥接、摊平不转换。不新增环境变量，不需要重启。
+
+回退时关闭功能或账号开关，只影响后续尝试，在途还原按冻结 plan 完成；已有历史不改。观察 collab_plaintext、collab_call、collab_call_action 及异常 resilience.collab_plaintext。schema 整节点豁免属于独立兼容变化，范围与真实样本核对见 [网关韧性 §4.14](../docs/GATEWAY_RESILIENCE.md#414-codex-协作消息明文通道p1)。

@@ -3,7 +3,7 @@
 xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失败：上游抖动、单号分组整体不可用、CDN 空闲超时切断、客户端断开后的误计费，以及缺少重试指引的 5xx。0.4.2 修正了两份生产就绪审查（2026-10-19）核实的问题，改动见 tasks“0.4.2”小节。0.4.4 是第二期：上游开场后、正文前的失败可以换号，分类只把真正的容量信号算作降载，失败帧按情况带重试时间，自动识别只接受流式的账号（方案 `openspec/changes/gateway-resilience-v2-20261021/`）。0.4.5 修复 0.4.4 的已知缺陷 RA-1，补齐 W1.2 的其余三条路径（OpenAI Responses 透传，以及 Gateway 入站经 Anthropic 上游的 Responses 与 Chat），并修复审查遗留的 P2（方案 `openspec/changes/gateway-resilience-045-20261021/`）。0.4.6 至 0.4.11 已发布，本文按 0.4.12 的行为描述，0.4.6 起的改动随文标注版本。0.4.9 的改动：OpenAI 首输出截止分热、冷尝试，计划内截止与慢失败冷却，判慢降序与会话迁移（见 §4.5）；`codex.rate_limits` 判为开场事件（见 §1）；无号 503 计入 SLA（见 §5.1）；首包前心跳按尝试恢复（见 §1）；无号 `Retry-After` 与失败帧共用恢复估算（见 §3）；非 OpenAI 账号的模型级冷却（见 §4.6）；Gemini 文本尝试截止（见 §4.7）。0.4.12 改进报错后的补救与路由：模型不可用与余额不足在各平台换号，余额暂停逐级加长，原生 Anthropic 与 API Key 直通在第一个内容前失败也能换号，客户端可见的错误按 Codex 与 Claude Code 的重试规则给出（见 §4.9）。升级须知见 §6。
 
 - 方案与决策记录：`openspec/changes/gateway-resilience-20261015/`（proposal、design、tasks、runbook、staging-validation）；0.4.4 的改动见 `openspec/changes/gateway-resilience-v2-20261021/`。
-- 全部能力由一份 JSON 设置控制，缺省全部开启，修改无需重启。关闭总开关后韧性能力全部停用、调度与错误处理按 0.3.0 逻辑运行；但有几项缺陷修复不受开关控制，见 §6。0.4.4 新增的开关单独关闭时回到 0.4.3 的对应行为，见 §4.2 与 §6。
+- 全部能力由一份 JSON 设置控制，除协作消息明文通道默认关闭外，缺省开启，修改无需重启。关闭总开关后韧性能力全部停用、调度与错误处理按 0.3.0 逻辑运行；但有几项缺陷修复不受开关控制，见 §6。0.4.4 新增的开关单独关闭时回到 0.4.3 的对应行为，见 §4.2 与 §6。
 - 本文面向运维与管理员，说明行为、配置、部署前提、观测与回退。
 
 ## 1. 能力一览
@@ -131,6 +131,8 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 |---|---|---|
 | `session.post_output_rebind` | true | 布尔；仅 OpenAI 账号，依赖 `session.enabled` 与总开关 |
 | `same_site_hold.enabled` | true | 布尔；依赖总开关 |
+| `collaboration_plaintext.enabled` | false | 布尔；依赖总开关与模型/账号资格，见 §4.14 |
+| `collaboration_plaintext.models` | `[]` | 最多 16 条；每条去空白后 1–128 字符；trim 后不分大小写去重，nil 返回 [] |
 | `budget.max_attempts` | 4 | 1–10 |
 | `budget.pre_output_budget_seconds` | 240 | 60–290 |
 | `budget.first_output_timeout_seconds` | default 20 / high 25 / xhigh 30 / max 30（0.4.9起，按生产 48 小时流式首字分布约 p97 校准；是热尝试的档位，冷尝试另有下限，见 §4.5；0.4.8 及以前为 180/180/200/220） | 5–预算 |
@@ -398,6 +400,18 @@ HTTP 流已向客户端输出可见内容后，快层确认账号发生读流出
 
 `same_site_hold.enabled` 缺省为 true。关闭后不建立新暂停，已有暂停在检查时立即失效；重新开启从新样本开始。跟踪器在韧性服务内独立保存，不复用代理断流熔断；进程重启清空，各实例独立。Warn 事件为 `resilience.same_site_hold`，每个账号每次暂停一条，只记主机名 SHA-256 的前 16 个十六进制字符，不记录明文主机名。
 
+### 4.14 Codex 协作消息明文通道（P1′）
+
+管理端网关韧性中的 `collaboration_plaintext.enabled` 默认关闭；`models` 是经过验证的实际出站模型清单，模型映射之后再匹配（去首尾空白、不分大小写精确匹配）。账号页的 `extra.openai_collaboration_plaintext` 仅布尔 true 生效；单账号关闭删除键、批量关闭写 false 都表示关闭。全局总开关、功能开关、模型、账号及 Codex UA/originator 全部满足才转换；ForceCodexCLI 不绕过真实客户端门。API Key 和 OAuth 均适用，仅原生 Responses HTTP，WS、透传、compact、协议桥接、摊平账号不转换。
+
+请求声明 collaboration 命名空间时，先判冲突再原子改名为 collaboration-xy，只删 spawn_agent/send_message/followup_task 的 message.encrypted。仅 applied 时，把顶层 instructions 与 developer/system 消息的文本（字符串或 input_text.text）里精确的 functions.collaboration. 同步替换成 functions.collaboration-xy.，避免寻址示例与声明失配；用户消息、工具输出和参数不替换。DevTextRewrites 记录本次精确字面串的实际替换次数，不新增指标。回程三种身份回声统一恢复 namespace=collaboration 和裸叶名，仅符合声明、message 为非空明文且没有密文否决的消息调用补 encrypted_function_args:[]。非空标记、gAAAA 前缀或无空白长 base64 等可疑形态否决补标记；早先非空证据持续到该尝试结束。wait/list 等同 namespace 工具只恢复名字；未知私有叶名恢复身份、计 uncovered、不补标记。
+
+流式、JSON、SSE→JSON 共用本次尝试的冻结 plan，不跨请求继承。恢复身份不安全时本地终止：未提交返回 502、已提交发送协议终态，不下发私有名，不经 failover 重放。不改 IDs、arguments、output 正文或输入历史，已有密文历史不修复。上游拒绝沿用原有错误路径，不靠拒绝文案触发转换。
+
+schema 兼容：工具 schema 清理器对精确名为 collaboration 的整个 namespace 跳过递归修复，包含 wait/list；其他工具的 null type、object union、null required、lookaround 修复不变。normalizeCodexTools 不递归 namespace。改动前清理器对真实 Codex 0.166 fixture 的顶层与 Lite additional_tools 声明均逐字节不变；该样本在 P1′ 关闭时没有额外变化。对原本需修复的其它 collaboration schema，豁免仍会让其保持原样，此行为独立于开关。
+
+完整契约与验收见 [OpenSpec design](../openspec/changes/codex-collaboration-plaintext-20261104/design.md)。
+
 ## 5. 观测
 
 ### 5.1 管理端
@@ -441,11 +455,15 @@ HTTP 流已向客户端输出可见内容后，快层确认账号发生读流出
 | `relay_keepalive` | 从上游流中丢弃的中转伪保活帧（按账号；0.4.4 起含 `response.created` 之前的空 delta） |
 | `pre_created_delta` | 上游在 `response.created` 之前发出的非空 delta（按分组、账号、平台，0.4.4；每次尝试至多计一次）；照常输出，用来观察这类中转的规模 |
 
+`collab_plaintext` 按 outcome、实际出站 model 统计尝试（label 编码为 `outcome=<值>;model=<值>`）；`collab_call` 按 `efa=absent|empty|nonempty` 统计逻辑调用；`collab_call_action` 按 `action=marker_added|vetoed|contradicted|uncovered` 统计动作。后两者是独立边际计数，不代表联合分布，流式多事件不重复计同一调用。
+
 ### 5.3 日志事件
 
 结构化日志的消息固定为事件名（前缀 `resilience.`），细节在字段中。
 
 warn 级，进入运维页“系统日志”（`ops_system_logs`）：
+
+- `resilience.collab_plaintext`：仅 conflict/invalid、vetoed/contradicted/uncovered 非零或恢复报错；含 account_id、group_id、model、client_version、outcome 与各计数，不存正文/参数/密文/原始恢复错误。
 
 - `balance_paused`（含账号、暂停时长与上游原文；0.4.12 起另含档位 `step`）；
 - `session_rebind`（P1-B 原因 `post_output_first_failure`，普通连击原因 `resil_failure_streak`，含会话哈希前缀、组、账号、类别、避开时长）、`last_resort`；
@@ -504,6 +522,8 @@ OpenAI 判慢降序与会话迁移的事件（见 §4.5）不带 `resilience.` �
 慢失败冷却沿用 `openai_model_transient_state`（warn 级），字段 `account_id`、`model`（实际出站模型）、`failure_streak`（普通瞬时失败的连续次数）、`cooldown_ms`（本次施加的冷却，没有冷却时为 0）、`block_scope`（`account_model`）、`slow_streak`（连续慢失败次数）。每次计划内截止记一条，带 `reason` 为 `planned_first_output_timeout`；API Key 账号普通瞬时失败的那条不带 `reason`，`slow_streak` 为 0（连续计数已被打断）。计划内截止本身看计数 `first_output_timeout` 与运维记录中 Reason 为 `first_output_timeout` 的尝试。
 
 ## 6. 回退
+
+协作消息明文通道：关闭 `collaboration_plaintext.enabled` 或目标账号开关即停止新尝试转换；已经发出的尝试继续按冻结 plan 还原。清空 models 可阻止所有模型进入。无需重启、不重标已有历史；schema 豁免不随开关回退。
 
 - 单项关闭：在“网关韧性”卡中关闭对应能力，即时生效。各能力关闭后的行为见 runbook §6。0.4.4 新增的开关关闭后回到 0.4.3 的对应行为，不是 0.3.0（两处小例外：关闭 `failure.decision_v2` 后分类输入的证据补全仍保留，见下表；关闭 `errors.failed_frame_retry_after` 后用户余额不足与内容拒绝仍不带重试时间，见 §3）；关闭 `capability.stream_only_learning` 后已学到的记录不删除，按到期时间自然过期，期间重新开启仍然生效。
 - 整体关闭：关闭总开关，韧性能力全部停用，调度与错误处理按 0.3.0 逻辑运行。份额分组随之回到 0.3.0 的软溢出规则（300 秒内结束的状态都只临时借用、不改绑，余额暂停不特殊处理），健康降权与恢复爬升停用，见 [份额调度](SHARE_SCHEDULING.md)。

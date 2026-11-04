@@ -122,6 +122,7 @@ const (
 	openAIResponsesToolSchemaInputItem
 	openAIResponsesToolSchemaToolCarrier
 	openAIResponsesToolSchemaTypeProbe
+	openAIResponsesToolSchemaNamespaceProbe
 	openAIResponsesToolSchemaFunction
 	openAIResponsesToolSchema
 	openAIResponsesToolSchemaArray
@@ -136,11 +137,13 @@ type openAIResponsesToolSchemaEdit struct {
 }
 
 type openAIResponsesToolSchemaParser struct {
-	body      []byte
-	pos       int
-	options   openAIResponsesToolSchemaOptions
-	edits     []openAIResponsesToolSchemaEdit
-	probeType string
+	body               []byte
+	pos                int
+	options            openAIResponsesToolSchemaOptions
+	edits              []openAIResponsesToolSchemaEdit
+	probeType          string
+	probeNamespace     bool
+	probeCollaboration bool
 }
 
 func sanitizeOpenAIResponsesToolSchemas(
@@ -201,6 +204,17 @@ func (p *openAIResponsesToolSchemaParser) parseValue(
 		case "additional_tools":
 			context = openAIResponsesToolSchemaToolCarrier
 		default:
+			context = openAIResponsesToolSchemaSkip
+		}
+	}
+	if context == openAIResponsesToolSchemaTool && p.body[p.pos] == '{' {
+		probe := openAIResponsesToolSchemaParser{body: p.body, pos: p.pos}
+		if err := probe.parseValue(openAIResponsesToolSchemaNamespaceProbe, false, depth); err != nil {
+			return err
+		}
+		// Reserved collaboration schemas must remain exact even when the
+		// plaintext channel is disabled. Other namespaces retain all repairs.
+		if probe.probeNamespace && probe.probeCollaboration {
 			context = openAIResponsesToolSchemaSkip
 		}
 	}
@@ -266,6 +280,16 @@ func (p *openAIResponsesToolSchemaParser) parseObject(
 		if context == openAIResponsesToolSchemaTypeProbe && openAIResponsesJSONStringEquals(key, "type") {
 			if value, ok := decodeOpenAIResponsesJSONStringValue(p.body[valueStart:valueEnd]); ok {
 				p.probeType = strings.TrimSpace(value)
+			}
+		}
+		if context == openAIResponsesToolSchemaNamespaceProbe {
+			// Compare raw JSON strings so ordinary tools incur no per-tool
+			// string allocation while checking for this one reserved node.
+			if openAIResponsesJSONStringEquals(key, "type") {
+				p.probeNamespace = openAIResponsesJSONStringEquals(p.body[valueStart:valueEnd], "namespace")
+			}
+			if openAIResponsesJSONStringEquals(key, "name") {
+				p.probeCollaboration = openAIResponsesJSONStringEquals(p.body[valueStart:valueEnd], codexCollaborationNamespace)
 			}
 		}
 		if (context == openAIResponsesToolSchemaTool || context == openAIResponsesToolSchemaFunction) &&

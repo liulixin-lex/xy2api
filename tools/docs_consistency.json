@@ -201,6 +201,15 @@
       "pattern": "profit-control-preview",
       "match": "word",
       "doc": "docs/GROUP_QUALITY_GATE.md"
+    },
+    {
+      "item": "OpenAI collaboration account switch",
+      "sources": [
+        "backend/internal/service/openai_collaboration_plaintext.go"
+      ],
+      "pattern": "\"(openai_collaboration_plaintext)\"",
+      "match": "word",
+      "doc": "docs/GATEWAY_RESILIENCE.md"
     }
   ],
   "retired": [

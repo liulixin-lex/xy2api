@@ -21,6 +21,9 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, forwardErr error) {
+	// Reset before any early return so failover attempts never inherit a plan.
+	c.Set(openAICollabResponseKey, nil)
+	c.Set(codexCollabAttemptContextKey, nil)
 	defer func() { s.finishCacheDiagnostic(c, body, result) }()
 	if c != nil {
 		c.Set("openai_cache_diagnostic", nil)
@@ -1048,6 +1051,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return nil, wsErr
 	}
 
+	// Native Responses HTTP only; each attempt freezes its own restore plan.
+	collabBody, collabAttempt := armOpenAICollaboration(c, body, upstreamModel,
+		openAICollaborationEligible(c, account, upstreamModel, wsDecision.Transport, passthroughEnabled, compactPath, compatMessagesBridge))
+	defer collabAttempt.finish(ctx, c, account)
+	if !bytes.Equal(collabBody, body) {
+		body, requestView, reqBody = collabBody, newOpenAIRequestView(collabBody), nil
+	}
 	reasoningEffort := extractOpenAIReasoningEffortFromBody(body, upstreamModel, billingModel, originalModel)
 	// 国产模型默认 effort 补充：此处 reqModel 已被 mapping 重写为 billingModel。
 	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, body, reqModel)

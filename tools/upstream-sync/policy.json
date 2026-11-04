@@ -56,7 +56,8 @@
       "openspec/changes/add-support-chat-widget-20261031/**",
       "openspec/changes/group-quality-gate-v2-20261102/**",
       "openspec/changes/gate-post-output-attempts-20261102/**",
-      "openspec/changes/group-quality-gate-v3-20261104/**"
+      "openspec/changes/group-quality-gate-v3-20261104/**",
+      "openspec/changes/codex-collaboration-plaintext-20261104/**"
     ],
     "manual_merge": [
       "Makefile",
@@ -3743,6 +3744,46 @@
     {
       "path": "backend/internal/service/share_scheduling_openai.go",
       "value": "if gates.sameSiteHeld(acc, now)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "armOpenAICollaboration(c, body, upstreamModel,"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "restoreOpenAICollaboration(c, eventType, restoredData, true)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "restoreOpenAICollaboration(c, \"\", body, false)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "restoreOpenAICollaboration(c, \"\", restoredBody, false)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "_, collabErr = restoreOpenAICollaboration(c, event, data, true)"
+    },
+    {
+      "path": "backend/internal/service/openai_responses_tool_schema.go",
+      "value": "probe.probeNamespace && probe.probeCollaboration"
+    },
+    {
+      "path": "backend/internal/service/openai_collaboration_schema_test.go",
+      "value": "func TestCollaborationSchemaReservedNamespaceUntouched"
+    },
+    {
+      "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
+      "value": "func TestCollaborationForwardAPIKeyAndOAuth"
+    },
+    {
+      "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
+      "value": "func TestCollaborationThreeResponseExits"
+    },
+    {
+      "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
+      "value": "func TestCollaborationRestoreErrorLocalTermination"
     }
   ],
   "forbidden_module_paths": [

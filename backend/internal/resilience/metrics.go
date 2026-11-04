@@ -59,6 +59,9 @@ func resilienceEventFields(ctx context.Context, preOutput bool) []any {
 
 // Metric names.
 const (
+	MetricCollabPlaintext    = "collab_plaintext"
+	MetricCollabCall         = "collab_call"
+	MetricCollabCallAction   = "collab_call_action"
 	MetricKeepaliveCommitted = "keepalive_committed"
 	MetricPreCreatedDelta    = "pre_created_delta"
 	MetricFirstOutputTimeout = "first_output_timeout"
