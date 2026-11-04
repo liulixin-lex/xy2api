@@ -156,6 +156,21 @@ func TestCodexCollabApplyAtomicRejections(t *testing.T) {
 		{"private tool choice", func(t *testing.T, b []byte) []byte {
 			return codexCollabTestSet(t, b, "tool_choice", json.RawMessage(`{"type":"allowed_tools","tools":[{"type":"function","function":{"name":"collaboration-xy__spawn_agent"}}]}`))
 		}, codexCollabConflict},
+		{"private instructions", func(t *testing.T, b []byte) []byte {
+			return codexCollabTestSet(t, b, "instructions", "to=functions.collaboration-xy.spawn_agent")
+		}, codexCollabConflict},
+		{"private developer example", func(t *testing.T, b []byte) []byte {
+			return codexCollabTestSet(t, b, "input.-1", json.RawMessage(`{"type":"message","role":"developer","content":"to=functions.collaboration-xy.spawn_agent"}`))
+		}, codexCollabConflict},
+		{"private system example", func(t *testing.T, b []byte) []byte {
+			return codexCollabTestSet(t, b, "input.-1", json.RawMessage(`{"type":"message","role":"system","content":[{"type":"input_text","text":"to=functions.collaboration-xy.spawn_agent"}]}`))
+		}, codexCollabConflict},
+		{"ambiguous developer content", func(t *testing.T, b []byte) []byte {
+			return codexCollabTestSet(t, b, "input.-1", json.RawMessage(`{"type":"message","role":"developer","content":"functions.collaboration.spawn_agent","content":"other"}`))
+		}, codexCollabConflict},
+		{"ambiguous system text", func(t *testing.T, b []byte) []byte {
+			return codexCollabTestSet(t, b, "input.-1", json.RawMessage(`{"type":"message","role":"system","content":[{"type":"input_text","text":"functions.collaboration.spawn_agent","text":"other"}]}`))
+		}, codexCollabConflict},
 		{"different schema", func(t *testing.T, b []byte) []byte {
 			altered := codexCollabTestSet(t, []byte(codexCollabTestNamespace), "tools.0.parameters.properties.message.type", "number")
 			return codexCollabTestSet(t, b, "tools", []json.RawMessage{altered})
@@ -178,7 +193,9 @@ func TestCodexCollabApplyAtomicRejections(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			request := tt.edit(t, codexCollabTestRequest())
+			request := codexCollabTestSet(t, codexCollabTestRequest(), "instructions", "to=functions.collaboration.spawn_agent")
+			request = codexCollabTestSet(t, request, "input.-1", json.RawMessage(`{"type":"message","role":"developer","content":"to=functions.collaboration.send_message"}`))
+			request = tt.edit(t, request)
 			original := bytes.Clone(request)
 			out, plan, outcome := applyCodexCollaborationPlaintext(request)
 			require.Equal(t, tt.outcome, outcome)
@@ -187,6 +204,75 @@ func TestCodexCollabApplyAtomicRejections(t *testing.T) {
 			require.Equal(t, original, request)
 		})
 	}
+}
+
+func TestCodexCollabApplyDeveloperText(t *testing.T) {
+	const original = "to=functions.collaboration.spawn_agent"
+	const alias = "to=functions.collaboration-xy.spawn_agent"
+	tests := []struct {
+		name, item, path, text, want string
+		rewrites                     int
+	}{
+		{"instructions", "", "instructions", original, alias, 1},
+		{"developer string", `{"type":"message","role":"developer","content":""}`, "input.1.content", original, alias, 1},
+		{"system string", `{"type":"message","role":"system","content":""}`, "input.1.content", original, alias, 1},
+		{"developer input text", `{"type":"message","role":"developer","content":[{"type":"input_text","text":""}]}`, "input.1.content.0.text", original, alias, 1},
+		{"system input text", `{"type":"message","role":"system","content":[{"type":"input_text","text":""}]}`, "input.1.content.0.text", original, alias, 1},
+		{"multiple examples", "", "instructions", original + "\nfunctions.collaboration.send_message", alias + "\nfunctions.collaboration-xy.send_message", 2},
+		{"exact literal only", "", "instructions", "Functions.collaboration.spawn_agent functions.Collaboration.spawn_agent collaboration.spawn_agent functions.collaboration__spawn_agent", "Functions.collaboration.spawn_agent functions.Collaboration.spawn_agent collaboration.spawn_agent functions.collaboration__spawn_agent", 0},
+		{"user string", `{"type":"message","role":"user","content":""}`, "input.1.content", original, original, 0},
+		{"assistant input text", `{"type":"message","role":"assistant","content":[{"type":"input_text","text":""}]}`, "input.1.content.0.text", original, original, 0},
+		{"message type required", `{"role":"developer","content":""}`, "input.1.content", original, original, 0},
+		{"output text excluded", `{"type":"message","role":"developer","content":[{"type":"output_text","text":""}]}`, "input.1.content.0.text", original, original, 0},
+		{"tool output excluded", `{"type":"function_call_output","output":""}`, "input.1.output", original, original, 0},
+		{"arguments excluded", `{"type":"function_call","namespace":"collaboration","name":"spawn_agent","arguments":""}`, "input.1.arguments", original, original, 0},
+		{"historical encrypted text excluded", `{"type":"agent_message","content":[{"type":"encrypted_content","encrypted_content":""}]}`, "input.1.content.0.encrypted_content", original, original, 0},
+		{"user private text excluded", `{"type":"message","role":"user","content":""}`, "input.1.content", alias, alias, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := codexCollabTestRequest()
+			if tt.item != "" {
+				request = codexCollabTestSet(t, request, "input.-1", json.RawMessage(tt.item))
+			}
+			request = codexCollabTestSet(t, request, tt.path, tt.text)
+			originalRequest := bytes.Clone(request)
+			out, plan, outcome := applyCodexCollaborationPlaintext(request)
+			require.Equal(t, codexCollabApplied, outcome)
+			require.Equal(t, originalRequest, request)
+			require.Equal(t, tt.want, gjson.GetBytes(out, tt.path).String())
+			if tt.rewrites == 0 {
+				require.Equal(t, gjson.GetBytes(request, tt.path).Raw, gjson.GetBytes(out, tt.path).Raw)
+			}
+			r := newCodexCollabRestorer(plan)
+			require.Equal(t, tt.rewrites, r.Stats().DevTextRewrites)
+			// Incoming natural language is opaque, and response processing does
+			// not count the outbound prompt rewrites a second time.
+			response := []byte(`{"output":[{"type":"message","content":[{"type":"output_text","text":"functions.collaboration-xy.spawn_agent"}]}]}`)
+			restored, err := r.ResponseJSON(response)
+			require.NoError(t, err)
+			require.Equal(t, response, restored)
+			require.Equal(t, tt.rewrites, r.Stats().DevTextRewrites)
+		})
+	}
+}
+
+func TestCodexCollabApplyDeveloperTextCombined(t *testing.T) {
+	request := codexCollabTestRequest()
+	for _, role := range []string{"developer", "system"} {
+		request = codexCollabTestSet(t, request, "input.-1", json.RawMessage(`{"type":"message","role":"`+role+`","content":[{"type":"input_text","text":"functions.collaboration.spawn_agent"},{"type":"input_image","image_url":"functions.collaboration.send_message"}]}`))
+	}
+	request = codexCollabTestSet(t, request, "instructions", "functions.collaboration.followup_task")
+	out, plan, outcome := applyCodexCollaborationPlaintext(request)
+	require.Equal(t, codexCollabApplied, outcome)
+	require.Equal(t, 3, newCodexCollabRestorer(plan).Stats().DevTextRewrites)
+	for _, path := range []string{"input.1.content.0.text", "input.2.content.0.text", "instructions"} {
+		require.Contains(t, gjson.GetBytes(out, path).String(), "functions.collaboration-xy.")
+	}
+	for _, path := range []string{"input.1.content.1", "input.2.content.1"} {
+		require.Equal(t, gjson.GetBytes(request, path).Raw, gjson.GetBytes(out, path).Raw)
+	}
+	require.Zero(t, newCodexCollabRestorer(nil).Stats().DevTextRewrites)
 }
 
 func TestCodexCollabRestorerCanonicalEchoes(t *testing.T) {

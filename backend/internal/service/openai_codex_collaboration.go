@@ -39,9 +39,10 @@ const (
 type codexCollabPlan struct {
 	// tools are the function names declared by the transformed namespace.
 	// messageTools contains only tools whose encrypted marker was removed.
-	tools          map[string]struct{}
-	messageTools   map[string]struct{}
-	extraEncrypted map[string]bool
+	tools           map[string]struct{}
+	messageTools    map[string]struct{}
+	extraEncrypted  map[string]bool
+	devTextRewrites int
 }
 
 type codexCollabRestorer struct {
@@ -79,6 +80,7 @@ type codexCollabStats struct {
 	Calls                                        int
 	EFAAbsent, EFAEmpty, EFANonEmpty             int
 	MarkerAdded, Vetoed, Contradicted, Uncovered int
+	DevTextRewrites                              int
 }
 
 type codexCollabNamespace struct {
@@ -126,6 +128,10 @@ func applyCodexCollaborationPlaintext(body []byte) (out []byte, plan *codexColla
 	if codexCollabHasPrivateName(root) {
 		return body, nil, codexCollabConflict
 	}
+	textEdits, textRewrites, err := codexCollabDeveloperTextEdits(root)
+	if err != nil {
+		return body, nil, codexCollabConflict
+	}
 
 	canonicalSchema, err := codexCollabCanonicalJSON(namespaces[0].node.Raw)
 	if err != nil || !namespaces[0].tools.IsArray() {
@@ -155,11 +161,12 @@ func applyCodexCollaborationPlaintext(body []byte) (out []byte, plan *codexColla
 	}
 
 	newPlan := &codexCollabPlan{
-		tools:          make(map[string]struct{}),
-		messageTools:   make(map[string]struct{}),
-		extraEncrypted: make(map[string]bool),
+		tools:           make(map[string]struct{}),
+		messageTools:    make(map[string]struct{}),
+		extraEncrypted:  make(map[string]bool),
+		devTextRewrites: textRewrites,
 	}
-	var edits []codexCollabJSONEdit
+	edits := textEdits
 	for _, namespace := range namespaces {
 		edits = append(edits, codexCollabJSONEdit{path: namespace.path + ".name", value: codexCollaborationNamespaceAlias})
 		declared := make(map[string]struct{})
@@ -223,6 +230,64 @@ func applyCodexCollaborationPlaintext(body []byte) (out []byte, plan *codexColla
 		}
 	}
 	return changed, newPlan, codexCollabApplied
+}
+
+// Only these system prompt carriers may have tool-address examples rewritten.
+// User messages, historical tool payloads, and other text stay opaque.
+func codexCollabDeveloperTextEdits(root gjson.Result) ([]codexCollabJSONEdit, int, error) {
+	const original = "functions.collaboration."
+	const alias = "functions.collaboration-xy."
+	var edits []codexCollabJSONEdit
+	rewrites := 0
+	appendText := func(node gjson.Result, path string) error {
+		if node.Type != gjson.String {
+			return nil
+		}
+		text := node.String()
+		if strings.Contains(text, codexCollaborationNamespaceAlias) {
+			return errors.New("private collaboration namespace in system prompt")
+		}
+		if count := strings.Count(text, original); count > 0 {
+			edits = append(edits, codexCollabJSONEdit{path: path, value: strings.ReplaceAll(text, original, alias)})
+			rewrites += count
+		}
+		return nil
+	}
+	if err := appendText(root.Get("instructions"), "instructions"); err != nil {
+		return nil, 0, err
+	}
+	for index, item := range root.Get("input").Array() {
+		if item.Get("type").String() != "message" {
+			continue
+		}
+		role := item.Get("role").String()
+		if role != "developer" && role != "system" {
+			continue
+		}
+		if !codexCollabUniqueObject(item) {
+			return nil, 0, errors.New("ambiguous collaboration system message")
+		}
+		path := fmt.Sprintf("input.%d.content", index)
+		content := item.Get("content")
+		if err := appendText(content, path); err != nil {
+			return nil, 0, err
+		}
+		if !content.IsArray() {
+			continue
+		}
+		for partIndex, part := range content.Array() {
+			if part.Get("type").String() != "input_text" {
+				continue
+			}
+			if !codexCollabUniqueObject(part) {
+				return nil, 0, errors.New("ambiguous collaboration system text")
+			}
+			if err := appendText(part.Get("text"), fmt.Sprintf("%s.%d.text", path, partIndex)); err != nil {
+				return nil, 0, err
+			}
+		}
+	}
+	return edits, rewrites, nil
 }
 
 func codexCollabFindNamespaces(root gjson.Result) []codexCollabNamespace {
@@ -451,6 +516,7 @@ func newCodexCollabRestorer(plan *codexCollabPlan) *codexCollabRestorer {
 	}
 	r.stats.Outcome = codexCollabApplied
 	r.stats.Applied = true
+	r.stats.DevTextRewrites = plan.devTextRewrites
 	return r
 }
 
