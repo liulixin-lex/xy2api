@@ -720,10 +720,11 @@ gateway:
 
 ### Codex 协作消息明文通道
 
-前后端须同版。`collaboration_plaintext.enabled` 默认 false、models 默认 []，不新增环境变量、不需要重启。代码接通 API Key/OAuth 的原生 Responses HTTP；预检只覆盖 API Key 中转站 d0c7a8 / c2a95e / b672e6 × gpt-6.1-sol / gpt-6-astra、Codex 0.166，OAuth 未预检，验证前不要启用。WS、compact、透传、桥接、摊平不转换；原始 store:true、非空 previous_response_id、根对象重复键与不支持形态也不转换；入口先冻结原始根键与状态排除，不因 OAuth 归一化解除。
+前后端同版；默认关闭，不新增环境变量、无需重启。资格、schema 兼容与缓存代价见 [网关韧性 §4.14](../docs/GATEWAY_RESILIENCE.md#414-codex-协作消息明文通道p1)。按以下顺序执行：
 
-启用前逐站验证清单内全部实际出站模型，再在“系统设置 → 网关 → 网关韧性”配置 models/enabled，统一打开同站账号开关。账号开关表示该站对清单内全部模型已验证；新增模型须先逐站补验。账号开关只控制新会话开始启用的位置。声明 collaboration，且 input 顶层历史存在三个消息工具之一的 function_call（namespace=collaboration），该调用满足 EFA=[] 或“EFA 完全缺失、arguments 字符串可解析为顶层键唯一的合法 JSON 对象、message 为未命中可疑密文判定的顶层字符串”时，存量会话在任何其它资格合格的 API Key 账号继续启用；仍受总开关/功能、模型清单、Codex UA、原生 HTTP、非摊平和原始 store/previous 排除约束。EFA 非空、null 或其它类型不满足连续性。只检查这些协议字段及 arguments 顶层 message，不递归正文，也不新增服务端会话状态。信号由客户端声明，自带 [] 或符合条件的 message 历史也会触发，因此不是授权/账号隔离边界，eligibility=continuity 不证明历史由网关产生。关 API Key 账号开关不能隔离存量连续性流量，灰度池指该会话路由可达的全部账号，包含兜底分组与满载借用目标，须排除其中未验证的 API Key 账号。OAuth 不适用连续性，只能由管理员显式开账号开关，验证前不要开启；同组/可达路由中的关闭开关 OAuth 对存量会话形成开→关形态，验证前应排除。会话中途切到清单外模型（包括映射后的清单外模型）等于硬回退。持续启用时同态前缀稳定；改变转换状态的开/关（包括清单变更）使进行中会话下一请求从工具声明处起提示缓存失效一次；账号软回退保持存量会话的前缀，建议低峰、整站切换。真实 0.166 的 58,104 字节样本首个差异在 19,695，位于 input[0] additional_tools，不能泛化成其它会话的固定失效率。
-
-**软回退**：关闭账号开关，新会话不再启用；满足协议条件的会话继续转换；连续性信号可由客户端自带，不是账号隔离措施。**硬回退**：关闭韧性总开关、功能开关或清空 models，所有新尝试停止转换；在途还原按冻结 plan 完成。全停用开→关续轮实测：d0c7a8、c2a95e 通过，b672e6 的账号 470 两次 cyber_policy（OpenAI provider）。非 OpenAI provider 会删除历史 EFA，新增 message 条件覆盖该形态；开→关在 c2a95e、d0c7a8 两个目标模型已闭环，b672e6 补跑持续 503、没有该形态的结论。硬回退后已用会话在这类上游可能被拒绝，需新开会话，不能承诺无中断。已有历史正文不改，schema 整节点豁免独立于开关，见 [网关韧性 §4.14](../docs/GATEWAY_RESILIENCE.md#414-codex-协作消息明文通道p1)。
-
-观察 collab_plaintext（资格通过时 eligibility=account/continuity）、collab_call（EFA 与只观测 msg 形态的独立计数）、collab_call_action 和 resilience.collab_plaintext 失败 Warn（applied 失败且上游 HTTP 4xx、排除 429；5xx/网络/断流不单独触发；原有恢复错误与异常计数独立触发）。48h/7d 以持久化 state_rejection 的 collab_plaintext 标识与 usage_logs 按账号/模型/UA 的近似请求量核对，后者不是精确协作投递分母；进程指标只有单实例最近 1h，仅供灰度抽查。Codex 新版本发布后，按 client_version 抽检状态族拒绝分布，再扩大验证版本范围。
+1. **列出完整可达账号池。** 在“分组管理 → 编辑”记录目标分组及“无号兜底分组”，沿兜底链继续展开。到“账号管理”按这些分组逐一筛选，列出 API Key/OAuth 账号、所属站、模型映射和调度状态。满载借用从相应分组候选成员中选择，因此纳入整组成员（含低优先级和临时停用账号），不要只列当前粘性号或高份额号；可用“分组管理 → 流量分配”核对完整成员。
+2. **逐站逐模型核验并隔离。** 预检范围为 d0c7a8 / c2a95e / b672e6 × gpt-6.1-sol / gpt-6-astra、Codex 0.166。账号开关表示该站对清单内全部实际出站模型已验证；新增模型先补验。未验证 API Key 账号须从可达池排除，OAuth 尚未预检、也不支持连续性，验证前排除其路由。
+3. **配置全局清单与开关。** 在“系统设置 → 网关 → 网关韧性”配置 collaboration_plaintext.models 和 enabled，确认韧性总开关开启。先确认账号开关均关；只配置全局不因 EFA 缺失的自然明文历史启动转换。连续性只认原始历史中的显式 []，它可由客户端声明，不是授权或账号隔离边界。
+4. **整站启用新会话。** 在账号管理统一打开已验证站的目标账号开关，使用真实 Codex 原生 Responses HTTP 验证父子调用和续轮。避开高峰；WS、compact、透传、桥接、摊平、原始 store/previous 或协议歧义都不进入 P1′。
+5. **抽查计数与拒绝。** 运维“网关韧性”查看 collab_plaintext 的 outcome/eligibility、collab_call 与 collab_call_action；系统日志查 resilience.collab_plaintext 的 upstream_status/in_band。只对现有分类中的客户端拒绝告警（带内输出前拒绝为 HTTP 200、in_band=true），账号/余额、429/5xx 不单独触发。48h/7d 用持久 state_rejection 标识与 usage_logs 账号/模型/UA 请求量近似核对，单实例 1h 计数只供抽查。Codex 升级后按 client_version 复核。
+6. **按客户端选择回退。** 软回退关账号开关：新会话停止启用，保留 [] 的合格 API Key 会话继续。provider 名非 OpenAI 的 Codex 删除历史 EFA，没有连续性，关账号开关等同硬回退；开→关在 c2a95e/d0c7a8 已通过，b672e6 补跑持续 503、无结论。硬回退关总开关/功能或清空 models，所有后续请求停止转换、在途继续还原；OpenAI provider 在 b672e6 账号 470 已出现两次 cyber_policy，存量会话可能需新开。落到关闭开关的 OAuth 或切换到清单外模型也形成开→关；转换状态改变会从工具声明处使下一请求提示缓存失效一次。

@@ -188,7 +188,7 @@ func TestCollaborationForwardContinuity(t *testing.T) {
 		masterOff, modelOff, flatten, noDeclaration, oauth, wantApplied bool
 	}{
 		{name: "existing_history_account_off", item: history, wantApplied: true},
-		{name: "custom_provider_plaintext", item: customProviderHistory, wantApplied: true},
+		{name: "custom_provider_plaintext", item: customProviderHistory},
 		{name: "custom_provider_opaque", item: strings.Replace(customProviderHistory, "old plaintext", "gAAAAopaque", 1)},
 		{name: "custom_provider_base64", item: strings.Replace(customProviderHistory, "old plaintext", strings.Repeat("A", 256), 1)},
 		{name: "custom_provider_invalid_arguments", item: strings.Replace(customProviderHistory, `\"old plaintext\"}`, `\"old plaintext\"`, 1)},
@@ -256,6 +256,47 @@ func TestCollaborationForwardContinuity(t *testing.T) {
 	}
 }
 
+func TestCollaborationForwardContinuityBeforeNormalization(t *testing.T) {
+	enableCollabTest(t)
+	account := newOpenAIRejectedFieldTestAccount()
+	account.Extra["openai_collaboration_plaintext"] = false
+	item := `{"type":"function_call","namespace":"collaboration","name":"send_message","call_id":"fc_old","arguments":"{\"message\":\"hello world\"}","encrypted_function_args":["message"],"encrypted_function_args":[]}`
+	body := []byte(strings.Replace(collabWiringBody, `"input":"hello"`, `"input":[`+item+`],"text":{"format":{"type":"json_schema","name":"sample","schema":{"type":"object","minProperties":1,"properties":{"x":{"type":"string"}}}}}`, 1))
+	require.False(t, openAICollaborationContinuity(body))
+	raw, plan, outcome := applyCodexCollaborationPlaintext(body)
+	require.Equal(t, codexCollabConflict, outcome)
+	require.Nil(t, plan)
+	require.Equal(t, body, raw)
+	upstream := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(200, `{"id":"r1","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)}
+	c := collabTestContext()
+	_, err := newOpenAIRejectedFieldTestService(upstream).Forward(context.Background(), c, account, body)
+	require.NoError(t, err)
+	stats, ok := openAICodexCollabAttempt(c)
+	require.True(t, ok)
+	require.False(t, stats.Applied, "map normalization cannot wash out an original protocol conflict")
+	require.Equal(t, "[]", gjson.GetBytes(upstream.lastBody, "input.0.encrypted_function_args").Raw)
+	require.Equal(t, "collaboration", gjson.GetBytes(upstream.lastBody, "tools.0.name").String())
+}
+
+func TestCollaborationForwardEscapedDeclarationRemainsObserveOnly(t *testing.T) {
+	enableCollabTest(t)
+	account := newOpenAIRejectedFieldTestAccount()
+	account.Extra["openai_collaboration_plaintext"] = true
+	body := strings.Replace(collabWiringBody, `"collaboration"`, `"collaborat\u0069on"`, 1)
+	body = strings.Replace(body, `"input":"hello"`, `"input":"hello","text":{"format":{"type":"json_schema","name":"sample","schema":{"type":"object","minProperties":1,"properties":{"x":{"type":"string"}}}}}`, 1)
+	require.NotContains(t, body, `"collaboration"`)
+	upstream := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(200, `{"id":"r1","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)}
+	c := collabTestContext()
+	_, err := newOpenAIRejectedFieldTestService(upstream).Forward(context.Background(), c, account, []byte(body))
+	require.NoError(t, err)
+	stats, ok := openAICodexCollabAttempt(c)
+	require.True(t, ok)
+	require.False(t, stats.Applied)
+	require.Equal(t, codexCollabUnsupported, stats.Outcome)
+	require.Contains(t, string(upstream.lastBody), `"name":"collaboration"`, "compatibility normalization materialized the literal declaration")
+	require.True(t, gjson.GetBytes(upstream.lastBody, "tools.0.tools.0.parameters.properties.message.encrypted").Bool())
+}
+
 func TestCollaborationAttemptWarnExcludesTransientFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name                                       string
@@ -263,8 +304,9 @@ func TestCollaborationAttemptWarnExcludesTransientFailures(t *testing.T) {
 		success, inactive, restoreFailed, wantWarn bool
 	}{
 		{name: "bad_request", status: 400, wantWarn: true},
-		{name: "authentication", status: 401, wantWarn: true},
-		{name: "forbidden", status: 403, wantWarn: true},
+		{name: "authentication", status: 401},
+		{name: "balance", status: 402},
+		{name: "forbidden", status: 403},
 		{name: "rate_limited", status: 429},
 		{name: "overloaded", status: 503},
 		{name: "server_error", status: 500},
@@ -282,6 +324,7 @@ func TestCollaborationAttemptWarnExcludesTransientFailures(t *testing.T) {
 			c := collabTestContext()
 			_, attempt := armOpenAICollaboration(c, []byte(collabWiringBody), "gpt-5.4", !tc.inactive)
 			attempt.upstreamStatus = tc.status
+			attempt.clientRejected = tc.status >= 400 && tc.status < 500 && tc.status != 429 && classifyUpstreamHTTP(tc.status, nil, nil, "").Category == resilience.CategoryClientError
 			attempt.restoreFailed = tc.restoreFailed
 			var err error
 			if !tc.success {
@@ -386,49 +429,71 @@ func TestCollaborationForwardFailoverErrorRestoration(t *testing.T) {
 }
 
 func TestCollaborationForwardAppliedHTTPFailureWarn(t *testing.T) {
-	for _, source := range []string{"account", "continuity"} {
-		t.Run(source, func(t *testing.T) {
+	for i, tc := range []struct {
+		name, source string
+		inBand       bool
+		status       int
+		wantWarn     bool
+	}{
+		{name: "account", source: "account", status: 400, wantWarn: true},
+		{name: "continuity", source: "continuity", status: 400, wantWarn: true},
+		{name: "in_band", source: "account", inBand: true, status: 200, wantWarn: true},
+		{name: "balance", source: "account", status: 402},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			enableCollabTest(t)
 			var logs bytes.Buffer
 			previous := slog.Default()
 			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
 			t.Cleanup(func() { slog.SetDefault(previous) })
-			upstream := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(400, `{"error":{"type":"invalid_request_error","code":"invalid_function","message":"Unknown function collaboration-xy.send_message"}}`)}
+			upstream := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(tc.status, `{"error":{"type":"invalid_request_error","code":"invalid_function","message":"Unknown function collaboration-xy.send_message"}}`)}
 			svc := newOpenAIRejectedFieldTestService(upstream)
 			a := newOpenAIRejectedFieldTestAccount()
-			a.Extra["openai_collaboration_plaintext"] = source == "account"
-			a.ID = 918273648
-			if source == "continuity" {
-				a.ID++
-			}
+			a.Extra["openai_collaboration_plaintext"] = tc.source == "account"
+			a.ID = 918273648 + int64(i)
 			c := collabTestContext()
 			body := collabWiringBody
-			if source == "continuity" {
+			if tc.source == "continuity" {
 				body = strings.Replace(body, `"input":"hello"`, `"input":[{"type":"function_call","namespace":"collaboration","name":"send_message","call_id":"fc_old","arguments":"{}","encrypted_function_args":[]}]`, 1)
+			}
+			status := tc.status
+			if tc.inBand {
+				status = http.StatusOK
+				body = strings.Replace(body, "{", `{"stream":true,`, 1)
+				upstream.resp = newOpenAIRejectedFieldTestResponse(status, "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"type\":\"invalid_request_error\",\"code\":\"invalid_function\",\"message\":\"Unknown function collaboration-xy.send_message\"}}}\n\n")
+				upstream.resp.Header.Set("Content-Type", "text/event-stream")
 			}
 			_, err := svc.Forward(context.Background(), c, a, []byte(body))
 			require.Error(t, err)
 			require.Len(t, upstream.bodies, 1)
 			var events []map[string]any
 			for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+				if strings.TrimSpace(line) == "" {
+					continue
+				}
 				var event map[string]any
 				require.NoError(t, json.Unmarshal([]byte(line), &event))
 				if event["msg"] == "resilience.collab_plaintext" {
 					events = append(events, event)
 				}
 			}
+			if !tc.wantWarn {
+				require.Empty(t, events)
+				return
+			}
 			require.Len(t, events, 1)
 			require.Equal(t, true, events[0]["applied"])
-			require.Equal(t, source, events[0]["eligibility"])
+			require.Equal(t, tc.source, events[0]["eligibility"])
 			var count int64
 			for _, row := range resilience.Snapshot(time.Minute) {
-				if row.AccountID == a.ID && row.Name == resilience.MetricCollabPlaintext && row.Label == "outcome=applied;model=gpt-5.4;eligibility="+source {
+				if row.AccountID == a.ID && row.Name == resilience.MetricCollabPlaintext && row.Label == "outcome=applied;model=gpt-5.4;eligibility="+tc.source {
 					count += row.Count
 				}
 			}
 			require.Equal(t, int64(1), count)
 			require.Equal(t, "applied", events[0]["outcome"])
-			require.Equal(t, float64(400), events[0]["upstream_status"])
+			require.Equal(t, float64(status), events[0]["upstream_status"])
+			require.Equal(t, tc.inBand, events[0]["in_band"])
 			require.Equal(t, true, events[0]["headers_committed"])
 			eventJSON, err := json.Marshal(events[0])
 			require.NoError(t, err)

@@ -22,12 +22,16 @@ import (
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, forwardErr error) {
 	defer beginOpenAIStateRejectionAttempt(ctx, c, account, body)(&forwardErr)
-	// Freeze root ambiguity and state exclusions before OAuth compatibility
-	// filters collapse duplicate keys, rewrite store or discard previous_response_id.
-	originalCollabRoot := gjson.ParseBytes(body)
-	previousResponse := originalCollabRoot.Get("previous_response_id")
-	collabStatefulRequest := !codexCollabUniqueObject(originalCollabRoot) || originalCollabRoot.Get("store").Bool() ||
-		(previousResponse.Exists() && previousResponse.Type != gjson.Null && strings.TrimSpace(previousResponse.String()) != "")
+	// Freeze original protocol facts only for literal collaboration candidates,
+	// before compatibility normalization can collapse keys or introduce a declaration.
+	collabRawBlocked, collabRawContinuity := true, false
+	if bytes.Contains(body, []byte(`"collaboration"`)) {
+		originalCollabRoot := gjson.ParseBytes(body)
+		previousResponse := originalCollabRoot.Get("previous_response_id")
+		collabRawBlocked = !codexCollabUniqueObject(originalCollabRoot) || !codexCollabRequestContainersUnique(originalCollabRoot) || originalCollabRoot.Get("store").Bool() ||
+			(previousResponse.Exists() && previousResponse.Type != gjson.Null && strings.TrimSpace(previousResponse.String()) != "")
+		collabRawContinuity = !collabRawBlocked && openAICollaborationContinuity(body)
+	}
 	defer func() { s.finishCacheDiagnostic(c, body, result) }()
 	if c != nil {
 		// Reset before any early return so failover attempts never inherit a plan.
@@ -1059,10 +1063,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	// Native Responses HTTP only; each attempt freezes its own restore plan.
-	declaresCollab := declaresOpenAICollaboration(body)
-	collabContinuity := declaresCollab && account.IsOpenAIApiKey() && !account.IsOpenAICollaborationPlaintextEnabled() && openAICollaborationContinuity(body)
+	collabContinuity := account.IsOpenAIApiKey() && !account.IsOpenAICollaborationPlaintextEnabled() && collabRawContinuity
 	collabBody, collabAttempt := armOpenAICollaboration(c, body, upstreamModel,
-		!collabStatefulRequest && openAICollaborationEligible(c, account, upstreamModel, wsDecision.Transport, passthroughEnabled, compactPath, compatMessagesBridge, collabContinuity))
+		!collabRawBlocked && openAICollaborationEligible(c, account, upstreamModel, wsDecision.Transport, passthroughEnabled, compactPath, compatMessagesBridge, collabContinuity))
 	if collabContinuity && collabAttempt != nil && collabAttempt.eligibilitySource != "" {
 		collabAttempt.eligibilitySource = "continuity"
 	}
@@ -1239,6 +1242,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			} else if next != nil {
 				body, requestView, reqBody = next, newOpenAIRequestView(next), nil
 				continue
+			}
+			if collabAttempt != nil && collabAttempt.applied {
+				collabAttempt.clientRejected = resp.StatusCode < 500 && resp.StatusCode != 429 && classifyUpstreamHTTP(resp.StatusCode, resp.Header, respBody, upstreamMsg).Category == resilience.CategoryClientError
 			}
 			if s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody) {
 				upstreamDetail := ""
