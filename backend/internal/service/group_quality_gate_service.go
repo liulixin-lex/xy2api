@@ -115,10 +115,6 @@ func (s *GroupQualityGateService) Stop() {
 }
 
 // Temporary compatibility stubs; the scheduling work package removes callers.
-func (s *GroupQualityGateService) Vetoed(int64, int64) bool { return false }
-func (s *GroupQualityGateService) SlowerThanFastLine(int64, int64) (int, int, bool) {
-	return 0, 0, false
-}
 
 func (s *GroupQualityGateService) policy(groupID int64) GroupQualityGatePolicy {
 	p := GroupQualityGatePolicy{}

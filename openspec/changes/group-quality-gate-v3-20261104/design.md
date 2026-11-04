@@ -144,7 +144,8 @@ type GroupQualityGateView interface {
 - `status`：`passing`（三维都是 `pass`）、`unknown`（0 档但有维 `none`）、`retest`（1 档）、`failing`（2 档）、`pinned`（固定账号）。`unknown` 不得显示为达标。
 - 维度 `state`：`pass`、`fail`、`none`。`value`：首字为预计 P90 毫秒，错误为失败率，缓存为保持率点估计；没有统计时为 null。`factor` 为 GM30。`bad_until` = 最后一次 `fail` + 2 小时，坏记忆已清除时为 null。
 - `latency_hold`：该账号正在判慢让位的模型与最晚到期时刻，没有时为 null。到期不得显示为“已恢复”。
-- `GET /admin/groups/:id/profit-control-preview` 形状不变，`passing` 改为本组 `status` 为 `passing` 或 `pinned` 的成员数。
+- `GET /admin/groups/:id/profit-control-preview` 不变：`passing` 仍是通过利润门的成员数，与质量门槛无关。
+- 策略校验失败的 400 在 `metadata.field` 中用 `v3.<字段>`（如 `v3.max_error_rate`）。
 
 ### 5.4 系统设置：低倍率优先范围
 
