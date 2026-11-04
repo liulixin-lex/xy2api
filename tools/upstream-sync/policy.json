@@ -55,7 +55,8 @@
       "openspec/changes/group-quality-gate-20261031/**",
       "openspec/changes/add-support-chat-widget-20261031/**",
       "openspec/changes/group-quality-gate-v2-20261102/**",
-      "openspec/changes/gate-post-output-attempts-20261102/**"
+      "openspec/changes/gate-post-output-attempts-20261102/**",
+      "openspec/changes/group-quality-gate-v3-20261104/**"
     ],
     "manual_merge": [
       "Makefile",

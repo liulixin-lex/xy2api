@@ -129,23 +129,28 @@ func (s *GroupQualityGateService) Vetoed(groupID, accountID int64) bool {
 
 func (s *GroupQualityGateService) OrderTier(groupID, accountID int64) int {
 	if s == nil {
-		return GroupQualityGateTierFast
+		return GroupQualityGateTierPass
 	}
 	v := s.snapshot.Load()
 	if v == nil {
-		return GroupQualityGateTierFast
+		return GroupQualityGateTierPass
 	}
 	groupMembers, groupPresent := v.Members[groupID]
 	if !groupPresent {
-		return GroupQualityGateTierFast
+		return GroupQualityGateTierPass
 	}
 	if member, ok := groupMembers[accountID]; ok {
 		if member.Result.State == "ejected" && !member.State.Until.IsZero() && !s.now().Before(member.State.Until) {
-			return GroupQualityGateTierOther
+			return GroupQualityGateTierFail
 		}
 		return member.Result.Tier
 	}
-	return GroupQualityGateTierOther
+	return GroupQualityGateTierFail
+}
+
+// MigrationTarget is implemented by the v3 evaluator.
+func (s *GroupQualityGateService) MigrationTarget(groupID, accountID int64) bool {
+	return false
 }
 
 func (s *GroupQualityGateService) SlowerThanFastLine(groupID, accountID int64) (warmTTFTP90Ms, fastWarmTTFTP90Ms int, migrate bool) {
@@ -315,9 +320,9 @@ func (s *GroupQualityGateService) Status(ctx context.Context, groupID *int64) (*
 			out.AccountMetrics[strconv.FormatInt(acc.ID, 10)] = metricView(metric)
 			member := snap.Members[group.ID][acc.ID]
 			if member.AccountID == 0 {
-				missingTier := GroupQualityGateTierFast
+				missingTier := GroupQualityGateTierPass
 				if snap.Members[group.ID] != nil {
-					missingTier = GroupQualityGateTierOther
+					missingTier = GroupQualityGateTierFail
 				}
 				member = groupQualityMemberSnapshot{AccountID: acc.ID, Result: GroupQualityMemberResult{Usable: groupMemberUsable(group, &acc, now), Passing: true, State: "eligible", Tier: missingTier}}
 			}
@@ -334,7 +339,7 @@ func (s *GroupQualityGateService) Status(ctx context.Context, groupID *int64) (*
 			passing, guardHeld := member.Result.Passing, member.Result.GuardHeld
 			ejected := state == "ejected" && (member.State.Until.IsZero() || now.Before(member.State.Until))
 			if state == "ejected" && !ejected {
-				state, tier = "trial", GroupQualityGateTierOther
+				state, tier = "trial", GroupQualityGateTierFail
 				// The ejection round's triggering window predates EjectedAt.
 				// Until a later evaluation supplies post-ejection data, it cannot
 				// determine passing after expiry.
@@ -519,7 +524,7 @@ func (s *GroupQualityGateService) evaluate(ctx context.Context) error {
 				if !known {
 					since = maxTime(resetAt, old.GeneratedAt)
 				}
-				previous = groupQualityAccountState{State: "trial", TrialSince: since, Tier: GroupQualityGateTierOther,
+				previous = groupQualityAccountState{State: "trial", TrialSince: since, Tier: GroupQualityGateTierFail,
 					DataTier: memory.DataTier, TierAt: memory.TierAt, FastAt: memory.FastAt}
 			}
 			previous.ResetAt = resetAt
@@ -581,7 +586,7 @@ func (s *GroupQualityGateService) evaluate(ctx context.Context) error {
 			if dataBased {
 				state.DataTier = groupQualityTierFromData(evaluation.metric, fastLine)
 				state.TierAt = now
-				if state.DataTier == GroupQualityGateTierFast {
+				if state.DataTier == GroupQualityGateTierPass {
 					state.FastAt = now
 				}
 			}
@@ -789,20 +794,20 @@ func groupQualityZeroCacheCondition(metric GroupQualityMetrics) bool {
 
 func groupQualityTierFromData(metric GroupQualityMetrics, fastLine int) int {
 	if groupQualityZeroCacheCondition(metric) {
-		return GroupQualityGateTierOther
+		return GroupQualityGateTierFail
 	}
 	if metric.WarmSamples >= 10 && metric.WarmTTFTP90Ms <= fastLine {
-		return GroupQualityGateTierFast
+		return GroupQualityGateTierPass
 	}
-	return GroupQualityGateTierOther
+	return GroupQualityGateTierFail
 }
 
 func resolveGroupQualityTier(now time.Time, metric GroupQualityMetrics, state groupQualityAccountState, enabled, passing bool) int {
 	if state.State == "ejected" || enabled && !passing {
-		return GroupQualityGateTierOther
+		return GroupQualityGateTierFail
 	}
 	if groupQualityZeroCacheCondition(metric) {
-		return GroupQualityGateTierOther
+		return GroupQualityGateTierFail
 	}
 	if metric.WarmSamples >= 10 {
 		return state.DataTier
@@ -811,9 +816,9 @@ func resolveGroupQualityTier(now time.Time, metric GroupQualityMetrics, state gr
 		return state.DataTier
 	}
 	if !state.FastAt.IsZero() && now.Sub(state.FastAt) <= groupQualityFastRetest {
-		return GroupQualityGateTierFast
+		return GroupQualityGateTierPass
 	}
-	return GroupQualityGateTierOther
+	return GroupQualityGateTierFail
 }
 
 // logGroupQualityTransition writes one Warn event per state transition, so
@@ -892,8 +897,8 @@ func applyQualityGuard(members, previous map[int64]groupQualityMemberSnapshot) {
 		}
 		m := members[id]
 		m.Result.GuardHeld = true
-		m.Result.Tier = GroupQualityGateTierOther
-		m.State.Tier = GroupQualityGateTierOther
+		m.Result.Tier = GroupQualityGateTierFail
+		m.State.Tier = GroupQualityGateTierFail
 		members[id] = m
 		passing++
 	}

@@ -51,6 +51,8 @@ func (slotQualityView) SlowerThanFastLine(int64, int64) (int, int, bool) {
 	return 0, 0, false
 }
 
+func (slotQualityView) MigrationTarget(int64, int64) bool { return false }
+
 func (c *profitCountingConcurrencyCache) ReleaseAccountSlot(context.Context, int64, string) error {
 	c.accountReleases.Add(1)
 	return nil

@@ -241,14 +241,14 @@ func TestMigrateOpenAILatencyHeldOwnerGroupQualityGate(t *testing.T) {
 			gatePolicy := defaultGroupQualityGatePolicy()
 			gatePolicy.Enabled = true
 			gatePolicy.PinnedAccountIDs = nil
-			ownerResult := GroupQualityMemberResult{Usable: true, Passing: true, State: "eligible", Tier: GroupQualityGateTierOther, Pinned: tc.pinned}
+			ownerResult := GroupQualityMemberResult{Usable: true, Passing: true, State: "eligible", Tier: GroupQualityGateTierFail, Pinned: tc.pinned}
 			effectiveFastLine := 7000
 			gate := NewGroupQualityGateService(nil, nil, nil)
 			gate.snapshot.Store(&groupQualitySnapshot{
 				Policies: GroupQualityGatePolicies{Groups: map[string]GroupQualityGatePolicy{"77": gatePolicy}},
 				Members: map[int64]map[int64]groupQualityMemberSnapshot{groupID: {
 					ownerID: {AccountID: ownerID, Metric: GroupQualityMetrics{WarmSamples: 10, WarmTTFTP90Ms: tc.warmP90}, State: groupQualityAccountState{State: "eligible"}, Result: ownerResult},
-					fastID:  {AccountID: fastID, Metric: GroupQualityMetrics{WarmSamples: 10, WarmTTFTP90Ms: 3000}, State: groupQualityAccountState{State: "eligible"}, Result: GroupQualityMemberResult{Usable: true, Passing: true, State: "eligible", Tier: GroupQualityGateTierFast}},
+					fastID:  {AccountID: fastID, Metric: GroupQualityMetrics{WarmSamples: 10, WarmTTFTP90Ms: 3000}, State: groupQualityAccountState{State: "eligible"}, Result: GroupQualityMemberResult{Usable: true, Passing: true, State: "eligible", Tier: GroupQualityGateTierPass}},
 				}},
 				EffectiveFastLines: map[int64]*int{groupID: &effectiveFastLine},
 			})

@@ -356,7 +356,7 @@ func (s *OpenAIGatewayService) migrateOpenAILatencyHeldOwner(ctx context.Context
 		if vetoed, _ := openAIProfitControlVetoReason(ctx, candidate); vetoed {
 			continue
 		}
-		if gateMigration && (qualityView.OrderTier(derefGroupID(groupID), candidate.ID) != GroupQualityGateTierFast || qualityView.Vetoed(derefGroupID(groupID), candidate.ID)) {
+		if gateMigration && (qualityView.OrderTier(derefGroupID(groupID), candidate.ID) != GroupQualityGateTierPass || qualityView.Vetoed(derefGroupID(groupID), candidate.ID)) {
 			continue
 		}
 		alternatives = append(alternatives, candidate)

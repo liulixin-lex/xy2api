@@ -12,10 +12,12 @@ import (
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 )
 
-// GroupQualityGateTier values are used when low-upstream-rate priority is enabled.
+// GroupQualityGateTier values order an enabled group's candidates: tier 0
+// (passing or unknown), tier 1 (retest) and tier 2 (failing).
 const (
-	GroupQualityGateTierFast  = 0
-	GroupQualityGateTierOther = 2
+	GroupQualityGateTierPass   = 0
+	GroupQualityGateTierRetest = 1
+	GroupQualityGateTierFail   = 2
 )
 
 const (
@@ -318,7 +320,7 @@ func evaluateGroupQualityMember(now time.Time, policy GroupQualityGatePolicy, me
 				state.Reasons = append(state.Reasons, "error_rate")
 			}
 		}
-		state.Tier = GroupQualityGateTierOther
+		state.Tier = GroupQualityGateTierFail
 		state.EjectedAt = now
 		state.Until = now.Add(groupQualityBackoff(state.Strike))
 		state.TrialRequests, state.TrialFailures = nil, nil
@@ -328,9 +330,9 @@ func evaluateGroupQualityMember(now time.Time, policy GroupQualityGatePolicy, me
 	if expired {
 		state.Until = time.Time{}
 		if fresh && metric.RecoveryReady(policy, state.Reasons) {
-			state.State, state.Tier = "eligible", GroupQualityGateTierFast
+			state.State, state.Tier = "eligible", GroupQualityGateTierPass
 		} else {
-			state.State, state.Tier = "trial", GroupQualityGateTierOther
+			state.State, state.Tier = "trial", GroupQualityGateTierFail
 			state.TrialSince = state.LastEjectionEnd
 			state.TrialRequests, state.TrialFailures = nil, nil
 		}
@@ -386,19 +388,24 @@ type GroupQualityGateView interface {
 	Enabled(groupID int64) bool
 	// SlowerThanFastLine reports a migration-eligible bound account and its metrics.
 	SlowerThanFastLine(groupID, accountID int64) (warmTTFTP90Ms, fastWarmTTFTP90Ms int, ok bool)
+	// MigrationTarget reports whether the account meets the quality part of the
+	// v3 migration-target rule for the group. Pinned accounts get no exception.
+	MigrationTarget(groupID, accountID int64) bool
 }
 
 type emptyGroupQualityGateView struct{}
 
 func (emptyGroupQualityGateView) Vetoed(int64, int64) bool { return false }
 
-func (emptyGroupQualityGateView) OrderTier(int64, int64) int { return GroupQualityGateTierFast }
+func (emptyGroupQualityGateView) OrderTier(int64, int64) int { return GroupQualityGateTierPass }
 
 func (emptyGroupQualityGateView) Enabled(int64) bool { return false }
 
 func (emptyGroupQualityGateView) SlowerThanFastLine(int64, int64) (int, int, bool) {
 	return 0, 0, false
 }
+
+func (emptyGroupQualityGateView) MigrationTarget(int64, int64) bool { return false }
 
 // NewEmptyGroupQualityGateView creates the safe view used until the evaluator is installed.
 func NewEmptyGroupQualityGateView() GroupQualityGateView {

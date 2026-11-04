@@ -230,7 +230,7 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			elapsed := time.Duration(0)
 			for i, duration := range []time.Duration{5, 10, 20, 30, 30} {
 				e.evaluate(t, elapsed)
-				e.state(t, 1, "ejected", i+1, GroupQualityGateTierOther)
+				e.state(t, 1, "ejected", i+1, GroupQualityGateTierFail)
 				require.Equal(t, duration*time.Minute, e.member(1).State.Until.Sub(e.now))
 				elapsed += duration * time.Minute
 				e.calls(1, e.base.Add(elapsed-time.Minute), 20, 5, 0, false)
@@ -244,8 +244,8 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.calls(1, e.base.Add(time.Minute), 20, 0, 0, false)
 			e.calls(2, e.base.Add(time.Minute), 100, 8, 0, false)
 			e.evaluate(t, 5*time.Minute)
-			e.state(t, 1, "trial", 1, GroupQualityGateTierOther)
-			e.state(t, 2, "eligible", 1, GroupQualityGateTierOther)
+			e.state(t, 1, "trial", 1, GroupQualityGateTierFail)
+			e.state(t, 2, "eligible", 1, GroupQualityGateTierFail)
 			status, err := e.svc.Status(context.Background(), nil)
 			require.NoError(t, err)
 			row := status.Groups[0].Accounts[1]
@@ -261,21 +261,21 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.evaluate(t, 0)
 			e.calls(1, e.base.Add(time.Minute), 10, 0, 18000, false)
 			e.evaluate(t, 5*time.Minute)
-			e.state(t, 1, "trial", 1, GroupQualityGateTierOther)
+			e.state(t, 1, "trial", 1, GroupQualityGateTierFail)
 			e.calls(1, e.base.Add(6*time.Minute), 20, 0, 0, false)
 			e.evaluate(t, 7*time.Minute)
-			e.state(t, 1, "eligible", 1, GroupQualityGateTierOther)
+			e.state(t, 1, "eligible", 1, GroupQualityGateTierFail)
 			require.Contains(t, e.logs.String(), `"level":"WARN","msg":"group_quality_gate.recover","group_id":7,"account_id":1,"from":"trial","to":"eligible","reason":"trial_passed","strike":1`)
 		}},
 		{"old samples expire and two trial failures eject", func(t *testing.T, e *qualityTestEnv) {
 			e.calls(1, e.base.Add(-time.Minute), 20, 5, 0, false)
 			e.evaluate(t, 0)
 			e.evaluate(t, 5*time.Minute)
-			e.state(t, 1, "trial", 1, GroupQualityGateTierOther)
+			e.state(t, 1, "trial", 1, GroupQualityGateTierFail)
 			require.Zero(t, e.member(1).Metric.Calls)
 			e.calls(1, e.base.Add(6*time.Minute), 2, 2, 0, false)
 			e.evaluate(t, 7*time.Minute)
-			e.state(t, 1, "ejected", 2, GroupQualityGateTierOther)
+			e.state(t, 1, "ejected", 2, GroupQualityGateTierFail)
 			logs := e.logs.String()
 			require.Contains(t, logs, `"level":"WARN","msg":"group_quality_gate.trial","group_id":7,"account_id":1,"from":"ejected","to":"trial","reason":"ejection_expired","strike":1`)
 			require.Contains(t, logs, `"level":"WARN","msg":"group_quality_gate.eject","group_id":7,"account_id":1,"from":"trial","to":"ejected","reason":"error_rate","strike":2`)
@@ -285,10 +285,10 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.evaluate(t, 0)
 			e.evaluate(t, 5*time.Minute)
 			e.evaluate(t, 125*time.Minute)
-			e.state(t, 1, "eligible", 0, GroupQualityGateTierOther)
+			e.state(t, 1, "eligible", 0, GroupQualityGateTierFail)
 			e.calls(1, e.base.Add(126*time.Minute), 20, 5, 0, false)
 			e.evaluate(t, 127*time.Minute)
-			e.state(t, 1, "ejected", 1, GroupQualityGateTierOther)
+			e.state(t, 1, "ejected", 1, GroupQualityGateTierFail)
 		}},
 		{"manual reset clears all groups and old metrics", func(t *testing.T, e *qualityTestEnv) {
 			e.groups.groups = append(e.groups.groups, Group{ID: 8, Platform: PlatformOpenAI})
@@ -298,7 +298,7 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.evaluate(t, 0)
 			e.reset(1, e.base.Add(30*time.Second))
 			e.evaluate(t, time.Minute)
-			e.state(t, 1, "trial", 0, GroupQualityGateTierOther)
+			e.state(t, 1, "trial", 0, GroupQualityGateTierFail)
 			require.Equal(t, "trial", e.svc.snapshot.Load().Members[8][1].State.State)
 			require.Zero(t, e.member(1).Metric.Calls)
 			require.Equal(t, 2, e.repo.memberLoads, "one member query per round, regardless of group count")
@@ -316,7 +316,7 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.evaluate(t, time.Minute)
 			e.calls(1, e.base.Add(90*time.Second), 20, 0, 0, false)
 			e.evaluate(t, 2*time.Minute)
-			e.state(t, 1, "eligible", 0, GroupQualityGateTierOther)
+			e.state(t, 1, "eligible", 0, GroupQualityGateTierFail)
 			// Two failures in 40 calls stay below the normal rule but would
 			// fail a trial counted from the old reset.
 			e.calls(1, e.base.Add(4*time.Hour-100*time.Minute), 40, 2, 0, false)
@@ -330,13 +330,13 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.calls(1, e.base.Add(-time.Minute), 20, 5, 0, false)
 			e.evaluate(t, 0)
 			e.evaluate(t, 5*time.Minute)
-			e.state(t, 1, "trial", 1, GroupQualityGateTierOther)
+			e.state(t, 1, "trial", 1, GroupQualityGateTierFail)
 			members := e.repo.members[7]
 			e.repo.members[7] = members[1:]
 			e.evaluate(t, 6*time.Minute)
 			e.repo.members[7] = members
 			e.evaluate(t, 7*time.Minute)
-			e.state(t, 1, "trial", 1, GroupQualityGateTierOther)
+			e.state(t, 1, "trial", 1, GroupQualityGateTierFail)
 			require.Zero(t, e.member(1).Metric.Calls)
 			require.False(t, e.svc.Vetoed(7, 1))
 		}},
@@ -345,10 +345,10 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.evaluate(t, 0)
 			e.calls(1, e.base.Add(5*time.Minute+10*time.Second), 2, 2, 0, false)
 			e.evaluate(t, 5*time.Minute+30*time.Second)
-			e.state(t, 1, "trial", 1, GroupQualityGateTierOther)
+			e.state(t, 1, "trial", 1, GroupQualityGateTierFail)
 			require.Equal(t, e.base.Add(5*time.Minute), e.member(1).State.TrialSince)
 			e.evaluate(t, 6*time.Minute+30*time.Second)
-			e.state(t, 1, "ejected", 2, GroupQualityGateTierOther)
+			e.state(t, 1, "ejected", 2, GroupQualityGateTierFail)
 		}},
 		{"disabling the gate stops vetoes at once and re-enabling ignores ejection data", func(t *testing.T, e *qualityTestEnv) {
 			e.accounts(1, 2, 3, 4)
@@ -365,7 +365,7 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			_, err = e.svc.UpdatePolicy(context.Background(), 7, e.repo.policies.Version, policy)
 			require.NoError(t, err)
 			e.evaluate(t, 2*time.Minute)
-			e.state(t, 1, "eligible", 1, GroupQualityGateTierOther)
+			e.state(t, 1, "eligible", 1, GroupQualityGateTierFail)
 		}},
 		{"broken streams count once and failure IDs match usage IDs", func(t *testing.T, e *qualityTestEnv) {
 			e.accounts(1, 2)
@@ -387,7 +387,7 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.evaluate(t, 0)
 			require.EqualValues(t, 45, e.member(1).Metric.Calls)
 			require.EqualValues(t, 5, e.member(1).Metric.SoftFailures)
-			e.state(t, 1, "ejected", 1, GroupQualityGateTierOther)
+			e.state(t, 1, "ejected", 1, GroupQualityGateTierFail)
 			broken(2, e.base.Add(10*time.Second), "c5", "r5")
 			e.evaluate(t, time.Minute)
 			require.Len(t, e.member(2).State.TrialRequests, 1, "the trial counts the broken stream as one request")
@@ -399,7 +399,7 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.calls(1, e.base.Add(-time.Minute), 20, 5, 0, false)
 			e.evaluate(t, 0)
 			e.evaluate(t, time.Minute)
-			e.state(t, 1, "eligible", 0, GroupQualityGateTierOther)
+			e.state(t, 1, "eligible", 0, GroupQualityGateTierFail)
 			require.Zero(t, e.member(1).Metric.Calls)
 			require.Equal(t, int64(20), e.svc.snapshot.Load().Metrics[1].Calls, "display retains full-window metrics")
 			status, err := e.svc.Status(context.Background(), nil)
@@ -416,11 +416,11 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.calls(1, e.base.Add(time.Second), 20, 2, 0, false)
 			e.repo.observedAt = e.base.Add(-10 * time.Minute)
 			e.evaluate(t, 2*time.Minute)
-			e.state(t, 1, "trial", 0, GroupQualityGateTierOther)
+			e.state(t, 1, "trial", 0, GroupQualityGateTierFail)
 			require.Len(t, e.member(1).State.TrialRequests, 20)
 			require.Len(t, e.member(1).State.TrialFailures, 2)
 			e.evaluate(t, 31*time.Minute)
-			e.state(t, 1, "eligible", 0, GroupQualityGateTierOther)
+			e.state(t, 1, "eligible", 0, GroupQualityGateTierFail)
 			require.Empty(t, e.member(1).State.TrialEndReason, "the one-round log reason must not persist in the snapshot")
 			require.Contains(t, e.logs.String(), `"msg":"group_quality_gate.recover","group_id":7,"account_id":1,"from":"trial","to":"eligible","reason":"trial_elapsed"`)
 		}},
@@ -435,7 +435,7 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			require.Len(t, e.member(1).State.TrialRequests, 1)
 			e.calls(1, e.base.Add(4*time.Hour+time.Second), 1, 1, 0, false)
 			e.evaluate(t, 4*time.Hour+time.Minute)
-			e.state(t, 1, "ejected", 1, GroupQualityGateTierOther)
+			e.state(t, 1, "ejected", 1, GroupQualityGateTierFail)
 		}},
 		{"trial counts failures arriving three minutes late before twenty requests", func(t *testing.T, e *qualityTestEnv) {
 			e.reset(1, e.base)
@@ -460,7 +460,7 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			second := GroupQualityObservation{AccountID: 1, RequestID: e.repo.observations[1].RequestID, At: e.base.Add(20 * time.Second), SoftFailure: true}
 			e.repo.observations = append(e.repo.observations, second)
 			e.evaluate(t, 4*time.Minute)
-			e.state(t, 1, "ejected", 1, GroupQualityGateTierOther)
+			e.state(t, 1, "ejected", 1, GroupQualityGateTierFail)
 			require.Less(t, e.member(1).Metric.Calls, int64(20), "the trial rule must eject before the normal error-rate minimum")
 			require.Len(t, old.Members[7][1].State.TrialFailures, 1, "published trial state must remain immutable")
 		}},
@@ -470,7 +470,7 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.calls(1, e.base.Add(time.Second), 20, 0, 0, false)
 			e.calls(1, e.base.Add(2*time.Second), 2, 2, 0, false)
 			e.evaluate(t, time.Minute)
-			e.state(t, 1, "eligible", 0, GroupQualityGateTierOther)
+			e.state(t, 1, "eligible", 0, GroupQualityGateTierFail)
 		}},
 		{"guard retains least severe despite post-ejection data", func(t *testing.T, e *qualityTestEnv) {
 			e.accounts(5, 4, 3, 2, 1)
@@ -565,18 +565,18 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.calls(2, e.base.Add(time.Second), 20, 5, 0, false)
 			e.reset(3, e.base.Add(30*time.Second))
 			e.evaluate(t, time.Minute)
-			e.state(t, 2, "eligible", 0, GroupQualityGateTierOther)
-			e.state(t, 3, "trial", 0, GroupQualityGateTierOther)
+			e.state(t, 2, "eligible", 0, GroupQualityGateTierFail)
+			e.state(t, 3, "trial", 0, GroupQualityGateTierFail)
 			e.calls(3, e.base.Add(2*time.Minute), 2, 2, 0, false)
 			e.evaluate(t, 5*time.Minute)
-			e.state(t, 1, "trial", 1, GroupQualityGateTierOther)
-			e.state(t, 3, "trial", 0, GroupQualityGateTierOther)
+			e.state(t, 1, "trial", 1, GroupQualityGateTierFail)
+			e.state(t, 3, "trial", 0, GroupQualityGateTierFail)
 			require.Equal(t, 1, strings.Count(e.logs.String(), "group_quality_gate.evaluate_failed"))
 			require.Contains(t, e.logs.String(), "stale_duration")
 			require.Contains(t, e.logs.String(), "usage data timestamp is stale")
 			e.repo.observedAt = time.Time{}
 			e.evaluate(t, 6*time.Minute)
-			e.state(t, 3, "ejected", 1, GroupQualityGateTierOther)
+			e.state(t, 3, "ejected", 1, GroupQualityGateTierFail)
 			require.False(t, e.svc.snapshot.Load().Stale)
 		}},
 		{"query failure preserves ejection and applies reset", func(t *testing.T, e *qualityTestEnv) {
@@ -588,11 +588,11 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.repo.observationErr = errors.New("synthetic query timeout")
 			e.reset(2, e.base.Add(30*time.Second))
 			e.evaluate(t, time.Minute)
-			e.state(t, 1, "ejected", 1, GroupQualityGateTierOther)
-			e.state(t, 2, "trial", 0, GroupQualityGateTierOther)
+			e.state(t, 1, "ejected", 1, GroupQualityGateTierFail)
+			e.state(t, 2, "trial", 0, GroupQualityGateTierFail)
 			e.repo.observations = nil
 			e.evaluate(t, 5*time.Minute)
-			e.state(t, 1, "trial", 1, GroupQualityGateTierOther)
+			e.state(t, 1, "trial", 1, GroupQualityGateTierFail)
 		}},
 		{"zero cache and fast line only affect tier, disabled groups too", func(t *testing.T, e *qualityTestEnv) {
 			e.accounts(1, 2, 3)
@@ -604,10 +604,10 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.evaluate(t, 0)
 			e.evaluate(t, time.Minute)
 			for _, id := range []int64{1, 2} {
-				e.state(t, id, "eligible", 0, GroupQualityGateTierOther)
-				require.Equal(t, GroupQualityGateTierOther, e.svc.OrderTier(8, id))
+				e.state(t, id, "eligible", 0, GroupQualityGateTierFail)
+				require.Equal(t, GroupQualityGateTierFail, e.svc.OrderTier(8, id))
 			}
-			e.state(t, 3, "eligible", 0, GroupQualityGateTierFast)
+			e.state(t, 3, "eligible", 0, GroupQualityGateTierPass)
 			status, err := e.svc.Status(context.Background(), nil)
 			require.NoError(t, err)
 			require.Equal(t, 10000, *status.Groups[0].EffectiveFastWarmTTFTP90Ms, "best+4000 is capped at the policy line")
@@ -618,9 +618,9 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.calls(2, e.base.Add(-time.Minute), 10, 0, 7300, false)
 			e.calls(3, e.base.Add(-time.Minute), 10, 0, 7301, false)
 			e.evaluate(t, 0)
-			e.state(t, 1, "eligible", 0, GroupQualityGateTierFast)
-			e.state(t, 2, "eligible", 0, GroupQualityGateTierFast)
-			e.state(t, 3, "eligible", 0, GroupQualityGateTierOther)
+			e.state(t, 1, "eligible", 0, GroupQualityGateTierPass)
+			e.state(t, 2, "eligible", 0, GroupQualityGateTierPass)
+			e.state(t, 3, "eligible", 0, GroupQualityGateTierFail)
 			status, err := e.svc.Status(context.Background(), nil)
 			require.NoError(t, err)
 			require.Equal(t, 7300, *status.Groups[0].EffectiveFastWarmTTFTP90Ms)
@@ -630,15 +630,15 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.calls(1, e.base.Add(-time.Minute), 20, 5, 5000, false)
 			e.evaluate(t, 0)
 			first := e.member(1).State
-			require.Equal(t, GroupQualityGateTierFast, first.DataTier)
+			require.Equal(t, GroupQualityGateTierPass, first.DataTier)
 			require.Equal(t, e.base, first.TierAt)
 			require.Equal(t, e.base, first.FastAt)
-			e.state(t, 1, "ejected", 1, GroupQualityGateTierOther)
+			e.state(t, 1, "ejected", 1, GroupQualityGateTierFail)
 			e.evaluate(t, 5*time.Minute)
-			e.state(t, 1, "trial", 1, GroupQualityGateTierFast)
+			e.state(t, 1, "trial", 1, GroupQualityGateTierPass)
 			e.calls(1, e.base.Add(5*time.Minute+10*time.Second), 20, 2, 0, false)
 			e.evaluate(t, 6*time.Minute)
-			e.state(t, 1, "ejected", 2, GroupQualityGateTierOther)
+			e.state(t, 1, "ejected", 2, GroupQualityGateTierFail)
 		}},
 		{"migrated slow member is retested after thirty minutes", func(t *testing.T, e *qualityTestEnv) {
 			e.calls(1, e.base.Add(-35*time.Minute), 10, 0, 5000, false)
@@ -647,17 +647,17 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			require.False(t, fastAt.IsZero())
 			e.calls(1, e.base.Add(-time.Minute), 10, 0, 15000, false)
 			e.evaluate(t, 0)
-			require.Equal(t, GroupQualityGateTierOther, e.member(1).State.DataTier)
+			require.Equal(t, GroupQualityGateTierFail, e.member(1).State.DataTier)
 			require.Equal(t, fastAt, e.member(1).State.FastAt)
 			e.repo.observations = nil
 			e.evaluate(t, 29*time.Minute)
-			e.state(t, 1, "eligible", 0, GroupQualityGateTierOther)
+			e.state(t, 1, "eligible", 0, GroupQualityGateTierFail)
 			e.evaluate(t, 31*time.Minute)
-			e.state(t, 1, "eligible", 0, GroupQualityGateTierFast)
+			e.state(t, 1, "eligible", 0, GroupQualityGateTierPass)
 		}},
 		{"member without a recent fast decision stays in tier two", func(t *testing.T, e *qualityTestEnv) {
 			e.evaluate(t, 0)
-			e.state(t, 1, "eligible", 0, GroupQualityGateTierOther)
+			e.state(t, 1, "eligible", 0, GroupQualityGateTierFail)
 			require.True(t, e.member(1).State.TierAt.IsZero())
 			require.True(t, e.member(1).State.FastAt.IsZero())
 		}},
@@ -665,19 +665,19 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.calls(1, e.base.Add(-2*time.Minute), 10, 0, 5000, false)
 			e.evaluate(t, 0)
 			e.evaluate(t, 29*time.Minute)
-			e.state(t, 1, "eligible", 0, GroupQualityGateTierFast)
-			require.Equal(t, GroupQualityGateTierFast, e.member(1).State.DataTier)
+			e.state(t, 1, "eligible", 0, GroupQualityGateTierPass)
+			require.Equal(t, GroupQualityGateTierPass, e.member(1).State.DataTier)
 		}},
 		{"first-output ejection records tier two through expiry", func(t *testing.T, e *qualityTestEnv) {
 			e.calls(1, e.base.Add(-time.Minute), 10, 0, 25000, false)
 			e.evaluate(t, 0)
 			first := e.member(1).State
-			require.Equal(t, GroupQualityGateTierOther, first.DataTier)
+			require.Equal(t, GroupQualityGateTierFail, first.DataTier)
 			require.Equal(t, e.base, first.TierAt)
-			e.state(t, 1, "ejected", 1, GroupQualityGateTierOther)
+			e.state(t, 1, "ejected", 1, GroupQualityGateTierFail)
 			e.evaluate(t, 5*time.Minute)
-			e.state(t, 1, "trial", 1, GroupQualityGateTierOther)
-			require.Equal(t, GroupQualityGateTierOther, e.member(1).State.DataTier)
+			e.state(t, 1, "trial", 1, GroupQualityGateTierFail)
+			require.Equal(t, GroupQualityGateTierFail, e.member(1).State.DataTier)
 		}},
 		{"rejoining within two hours retains a never-ejected fast member", func(t *testing.T, e *qualityTestEnv) {
 			e.calls(1, e.base.Add(-time.Minute), 10, 0, 5000, false)
@@ -687,7 +687,7 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.evaluate(t, 30*time.Minute)
 			e.repo.members[7] = []Account{account}
 			e.evaluate(t, time.Hour)
-			e.state(t, 1, "eligible", 0, GroupQualityGateTierFast)
+			e.state(t, 1, "eligible", 0, GroupQualityGateTierPass)
 		}},
 		{"rejoining after two hours does not retain a never-ejected tier", func(t *testing.T, e *qualityTestEnv) {
 			e.calls(1, e.base.Add(-time.Minute), 10, 0, 5000, false)
@@ -697,7 +697,7 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.evaluate(t, 2*time.Hour)
 			e.repo.members[7] = []Account{account}
 			e.evaluate(t, 2*time.Hour+time.Minute)
-			e.state(t, 1, "eligible", 0, GroupQualityGateTierOther)
+			e.state(t, 1, "eligible", 0, GroupQualityGateTierFail)
 		}},
 		{"stale observations do not extend fast tier memory beyond six hours", func(t *testing.T, e *qualityTestEnv) {
 			e.calls(1, e.base.Add(-time.Minute), 10, 0, 5000, false)
@@ -714,7 +714,7 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.repo.observationErr = nil
 			e.repo.observations = nil
 			e.evaluate(t, 7*time.Hour+time.Minute)
-			e.state(t, 1, "eligible", 0, GroupQualityGateTierOther)
+			e.state(t, 1, "eligible", 0, GroupQualityGateTierFail)
 		}},
 		{"insufficient samples retain fast tier for six hours", func(t *testing.T, e *qualityTestEnv) {
 			e.calls(1, e.base.Add(-time.Minute), 10, 0, 10000, false)
@@ -723,9 +723,9 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 				at := time.Duration(i) * 30 * time.Minute
 				e.calls(1, e.base.Add(at-time.Second), 1, 0, 8000, false)
 				e.evaluate(t, at)
-				want := GroupQualityGateTierFast
+				want := GroupQualityGateTierPass
 				if i == 13 {
-					want = GroupQualityGateTierOther
+					want = GroupQualityGateTierFail
 				}
 				require.Equal(t, want, e.svc.OrderTier(7, 1))
 			}
@@ -771,7 +771,7 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			require.Equal(t, GroupQualitySummaryView{Eligible: 3, Trial: 1}, status.Groups[0].Summary)
 			row := status.Groups[0].Accounts[0]
 			require.Equal(t, "trial", row.State)
-			require.Equal(t, GroupQualityGateTierOther, row.Tier)
+			require.Equal(t, GroupQualityGateTierFail, row.Tier)
 			require.Equal(t, e.base.Add(35*time.Minute), *row.Until, "expired ejection displays its original end plus the observation period")
 			require.True(t, row.Passing)
 			require.NotNil(t, row.Reasons)
@@ -780,9 +780,9 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			require.Nil(t, row.Headroom)
 			require.Nil(t, status.Groups[0].EffectiveFastWarmTTFTP90Ms)
 			for _, account := range status.Groups[0].Accounts[1:] {
-				require.Equal(t, GroupQualityGateTierOther, account.Tier, "members without a data-based tier decision are in tier 2")
+				require.Equal(t, GroupQualityGateTierFail, account.Tier, "members without a data-based tier decision are in tier 2")
 			}
-			require.Equal(t, GroupQualityGateTierFast, e.svc.OrderTier(999, 1), "groups absent from the evaluator retain the ungrouped default")
+			require.Equal(t, GroupQualityGateTierPass, e.svc.OrderTier(999, 1), "groups absent from the evaluator retain the ungrouped default")
 			require.InDelta(t, 0.25, status.AccountMetrics["1"].ErrorRate, 1e-9)
 			require.Nil(t, status.Groups[0].Accounts[1].Headroom)
 			raw, err := json.Marshal(status)
@@ -794,8 +794,8 @@ func TestGroupQualityGateEvaluation(t *testing.T) {
 			e.repo.members[7] = append(e.repo.members[7], Account{ID: 4, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true})
 			status, err = e.svc.Status(context.Background(), nil)
 			require.NoError(t, err)
-			require.Equal(t, GroupQualityGateTierOther, status.Groups[0].Accounts[3].Tier, "a member added after the snapshot defaults to tier 2")
-			require.Equal(t, GroupQualityGateTierOther, e.svc.OrderTier(7, 4))
+			require.Equal(t, GroupQualityGateTierFail, status.Groups[0].Accounts[3].Tier, "a member added after the snapshot defaults to tier 2")
+			require.Equal(t, GroupQualityGateTierFail, e.svc.OrderTier(7, 4))
 			id := int64(8)
 			e.groups.groups = append(e.groups.groups, Group{ID: id, Platform: PlatformOpenAI})
 			e.repo.members[id] = e.repo.members[7]
