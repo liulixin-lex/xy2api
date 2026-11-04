@@ -259,15 +259,21 @@ func (s *GroupQualityGateService) ProfitControlPreview(ctx context.Context, grou
 	baseGroup := previewGroup
 	baseGroup.ProfitControlEnabled = false
 	out := &ProfitControlPreview{Members: len(accounts), Ceiling: ceiling}
+	snapshot := s.snapshot.Load()
 	for i := range accounts {
 		account := &accounts[i]
+		if snapshot != nil && s.Enabled(groupID) {
+			if member, ok := snapshot.Members[groupID][account.ID]; ok {
+				status := groupQualityStatus(member.State, member.Tier, member.Pinned)
+				if status == "passing" || status == "pinned" {
+					out.Passing++
+				}
+			}
+		}
 		if !groupMemberServable(&baseGroup, account, now, nil, nil) {
 			continue
 		}
 		out.Schedulable++
-		if cost, ok := openAIProfitGateCost(account, now); ok && !profitControlOverThreshold(cost, ceiling) {
-			out.Passing++
-		}
 	}
 	return out, nil
 }

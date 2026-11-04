@@ -2,18 +2,15 @@ package service
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
 	"math"
-	"slices"
-	"sort"
 	"strings"
 	"time"
 
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 )
 
-// GroupQualityGateTier values order an enabled group's candidates: tier 0
-// (passing or unknown), tier 1 (retest) and tier 2 (failing).
+// GroupQualityGateTier orders candidates only within enabled OpenAI groups.
 const (
 	GroupQualityGateTierPass   = 0
 	GroupQualityGateTierRetest = 1
@@ -21,22 +18,67 @@ const (
 )
 
 const (
-	groupQualityDefaultErrorRate = 0.10
-	groupQualityDefaultEjectMs   = 20000
-	groupQualityDefaultFastMs    = 10000
-	groupQualityFastLineMarginMs = 4000
-	groupQualityTrialDuration    = 30 * time.Minute
-	groupQualityTierHold         = 30 * time.Minute
-	groupQualityFastRetest       = 6 * time.Hour
+	groupQualityBadMemory         = 2 * time.Hour
+	groupQualityAccountWindow     = 30 * time.Minute
+	groupQualityBaselineWindow    = 2 * time.Hour
+	groupQualityCompositionWindow = 6 * time.Hour
 )
 
-// GroupQualityGatePolicy configures quality evaluation for one group.
+// GroupQualityGatePolicy preserves the legacy policy for version rollback.
+// Only V3 is writable by this version; legacyFields also preserves absent/null
+// fields, unknown fields, numeric encodings and the pinned ID order.
 type GroupQualityGatePolicy struct {
+	Enabled           bool                      `json:"enabled"`
+	MaxErrorRate      float64                   `json:"max_error_rate"`
+	MaxWarmTTFTP90Ms  int                       `json:"max_warm_ttft_p90_ms"`
+	FastWarmTTFTP90Ms int                       `json:"fast_warm_ttft_p90_ms"`
+	PinnedAccountIDs  []int64                   `json:"pinned_account_ids"`
+	V3                *GroupQualityGateV3Policy `json:"v3,omitempty"`
+	legacyFields      map[string]json.RawMessage
+}
+
+// GroupQualityGateV3Policy contains the independently stored v3 standards.
+type GroupQualityGateV3Policy struct {
 	Enabled           bool    `json:"enabled"`
+	MaxTTFTP90Seconds int     `json:"max_ttft_p90_seconds"`
 	MaxErrorRate      float64 `json:"max_error_rate"`
-	MaxWarmTTFTP90Ms  int     `json:"max_warm_ttft_p90_ms"`
-	FastWarmTTFTP90Ms int     `json:"fast_warm_ttft_p90_ms"`
-	PinnedAccountIDs  []int64 `json:"pinned_account_ids"`
+	MinCacheKeepRate  float64 `json:"min_cache_keep_rate"`
+	Strict            bool    `json:"strict"`
+}
+
+func (p *GroupQualityGatePolicy) UnmarshalJSON(data []byte) error {
+	type plain GroupQualityGatePolicy
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	delete(fields, "v3")
+	*p = GroupQualityGatePolicy(decoded)
+	p.legacyFields = fields
+	return nil
+}
+
+func (p GroupQualityGatePolicy) MarshalJSON() ([]byte, error) {
+	if p.legacyFields == nil {
+		type plain GroupQualityGatePolicy
+		return json.Marshal(plain(p))
+	}
+	fields := make(map[string]json.RawMessage, len(p.legacyFields)+1)
+	for k, v := range p.legacyFields {
+		fields[k] = v
+	}
+	if p.V3 != nil {
+		raw, err := json.Marshal(p.V3)
+		if err != nil {
+			return nil, err
+		}
+		fields["v3"] = raw
+	}
+	return json.Marshal(fields)
 }
 
 // GroupQualityGatePolicies is the versioned setting payload.
@@ -46,57 +88,36 @@ type GroupQualityGatePolicies struct {
 }
 
 func defaultGroupQualityGatePolicy() GroupQualityGatePolicy {
-	return GroupQualityGatePolicy{MaxErrorRate: groupQualityDefaultErrorRate, MaxWarmTTFTP90Ms: groupQualityDefaultEjectMs, FastWarmTTFTP90Ms: groupQualityDefaultFastMs}
+	return normalizeGroupQualityGatePolicy(GroupQualityGatePolicy{})
 }
 
 func normalizeGroupQualityGatePolicy(p GroupQualityGatePolicy) GroupQualityGatePolicy {
-	d := defaultGroupQualityGatePolicy()
-	if p.MaxErrorRate == 0 {
-		p.MaxErrorRate = d.MaxErrorRate
-	}
-	if p.MaxWarmTTFTP90Ms == 0 {
-		p.MaxWarmTTFTP90Ms = d.MaxWarmTTFTP90Ms
-	}
-	if p.FastWarmTTFTP90Ms == 0 {
-		p.FastWarmTTFTP90Ms = d.FastWarmTTFTP90Ms
-	}
-	ids := append([]int64{}, p.PinnedAccountIDs...)
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	p.PinnedAccountIDs = ids[:0]
-	for _, id := range ids {
-		if len(p.PinnedAccountIDs) == 0 || p.PinnedAccountIDs[len(p.PinnedAccountIDs)-1] != id {
-			p.PinnedAccountIDs = append(p.PinnedAccountIDs, id)
-		}
+	if p.V3 == nil {
+		p.V3 = &GroupQualityGateV3Policy{Enabled: p.Enabled, MaxTTFTP90Seconds: 15, MaxErrorRate: .10, MinCacheKeepRate: .50}
+	} else {
+		value := *p.V3
+		p.V3 = &value
 	}
 	return p
 }
 
-// ValidateGroupQualityGatePolicy checks the setting independent of HTTP.
-func ValidateGroupQualityGatePolicy(policy GroupQualityGatePolicy, group *Group, memberIDs []int64) error {
-	policy = normalizeGroupQualityGatePolicy(policy)
-	if policy.Enabled && (group == nil || group.Platform != PlatformOpenAI) {
-		return invalidGroupQualityPolicy("enabled", "quality gate can only be enabled for OpenAI groups")
+// ValidateGroupQualityGatePolicy validates only the writable v3 subobject.
+func ValidateGroupQualityGatePolicy(p GroupQualityGatePolicy, group *Group, _ []int64) error {
+	if p.V3 == nil {
+		return invalidGroupQualityPolicy("v3", "policy.v3 is required")
 	}
-	if policy.MaxErrorRate <= 0 || policy.MaxErrorRate > 1 || math.IsNaN(policy.MaxErrorRate) || math.IsInf(policy.MaxErrorRate, 0) {
-		return invalidGroupQualityPolicy("max_error_rate", "max_error_rate must be in (0,1]")
+	v := p.V3
+	if v.Enabled && (group == nil || group.Platform != PlatformOpenAI) {
+		return invalidGroupQualityPolicy("v3.enabled", "quality gate can only be enabled for OpenAI groups")
 	}
-	if policy.FastWarmTTFTP90Ms < 1000 {
-		return invalidGroupQualityPolicy("fast_warm_ttft_p90_ms", "fast_warm_ttft_p90_ms must be at least 1000 ms")
+	if v.MaxTTFTP90Seconds < 5 || v.MaxTTFTP90Seconds > 60 {
+		return invalidGroupQualityPolicy("v3.max_ttft_p90_seconds", "max_ttft_p90_seconds must be an integer from 5 to 60")
 	}
-	if policy.MaxWarmTTFTP90Ms > 600000 {
-		return invalidGroupQualityPolicy("max_warm_ttft_p90_ms", "max_warm_ttft_p90_ms must not exceed 600000 ms")
+	if math.IsNaN(v.MaxErrorRate) || math.IsInf(v.MaxErrorRate, 0) || v.MaxErrorRate < .05 || v.MaxErrorRate > .50 {
+		return invalidGroupQualityPolicy("v3.max_error_rate", "max_error_rate must be from 0.05 to 0.50")
 	}
-	if policy.FastWarmTTFTP90Ms >= policy.MaxWarmTTFTP90Ms {
-		return invalidGroupQualityPolicy("max_warm_ttft_p90_ms", "max_warm_ttft_p90_ms must be greater than fast_warm_ttft_p90_ms")
-	}
-	members := map[int64]bool{}
-	for _, id := range memberIDs {
-		members[id] = true
-	}
-	for _, id := range policy.PinnedAccountIDs {
-		if !members[id] {
-			return invalidGroupQualityPolicy("pinned_account_ids", fmt.Sprintf("pinned account %d is not a member of group %d", id, group.ID))
-		}
+	if math.IsNaN(v.MinCacheKeepRate) || math.IsInf(v.MinCacheKeepRate, 0) || v.MinCacheKeepRate < .50 || v.MinCacheKeepRate > .70 {
+		return invalidGroupQualityPolicy("v3.min_cache_keep_rate", "min_cache_keep_rate must be from 0.50 to 0.70")
 	}
 	return nil
 }
@@ -105,46 +126,50 @@ func invalidGroupQualityPolicy(field, message string) error {
 	return infraerrors.BadRequest(ErrInvalidGroupQualityGatePolicy.Reason, message).WithMetadata(map[string]string{"field": field})
 }
 
-// GroupQualityMetrics is the account-level metric snapshot used by the evaluator.
-type GroupQualityMetrics struct {
-	Calls             int64
-	SoftFailures      int64
-	WarmSamples       int64
-	WarmTTFTP90Ms     int
-	ZeroCacheSamples  int64
-	WarmZeroCacheRate float64
-}
-
-// GroupQualityObservation is a persisted success or upstream-attempt event.
+// GroupQualityObservation is a persisted usage row or upstream attempt.
+// The legacy FirstOutputMs is used by recent health; v3 exclusively consumes
+// AttemptFirstOutputMs. ResetAt truncates even baseline contributors outside
+// currently enabled groups.
 type GroupQualityObservation struct {
+	ID                   int64
 	AccountID            int64
+	APIKeyID             int64
+	GroupID              int64
 	RequestID            string
 	At                   time.Time
+	PreviousAt           time.Time
+	ResetAt              time.Time
 	Success              bool
+	Failed               bool
 	SoftFailure          bool
 	Kind                 string
 	StatusCode           int
 	Category             string
 	Message              string
 	SessionID            string
-	Warm                 bool
 	StrictContinuation   bool
 	Streaming            bool
 	FirstOutputMs        int
+	AttemptFirstOutputMs *int64
+	Model                string
+	ReasoningEffort      string
 	PromptTokens         int64
 	PreviousPromptTokens int64
 	CacheReadTokens      int64
 	CacheCreationTokens  int64
 }
 
-// IsGroupQualitySoftFailure keeps the health classifier aligned with share scheduling.
+// IsGroupQualitySoftFailure is the shared legacy classifier also used by
+// recent health. V3 excludes first-output cutoffs separately.
 func IsGroupQualitySoftFailure(kind string, statusCode int, category, message string) bool {
 	return shareSoftFailureAttempt(ShareSchedulingUpstreamAttempt{AccountID: 1, Kind: kind, StatusCode: statusCode, Category: category, Message: message})
 }
 
-// GroupQualityErrorRequestID maps an ops error row's IDs to the usage_logs
-// request ID written by resolveUsageBillingRequestID, so a request's usage row
-// and its upstream failures share one identity.
+func groupQualityV3SoftFailure(o GroupQualityObservation) bool {
+	return o.SoftFailure && o.Kind != "first_output_timeout" && o.Category != "FIRST_OUTPUT_TIMEOUT"
+}
+
+// GroupQualityErrorRequestID aligns errors with usage billing request IDs.
 func GroupQualityErrorRequestID(clientRequestID, requestID string) string {
 	if id := strings.TrimSpace(clientRequestID); id != "" {
 		return "client:" + id
@@ -155,7 +180,10 @@ func GroupQualityErrorRequestID(clientRequestID, requestID string) string {
 	return ""
 }
 
-// GroupQualityGateRepository persists the policy setting and reads bounded metric history.
+// GroupQualityGateRepository persists policies and reads bounded observations.
+// LoadObservations returns all OpenAI baseline/composition contributors, plus
+// the requested members' attempt events; filtering members before LAG would
+// silently turn an account switch into a strict continuation.
 type GroupQualityGateRepository interface {
 	LoadPolicies(context.Context) (GroupQualityGatePolicies, error)
 	CompareAndSwapPolicies(context.Context, int, GroupQualityGatePolicies) (GroupQualityGatePolicies, error)
@@ -163,218 +191,181 @@ type GroupQualityGateRepository interface {
 	LoadObservations(context.Context, []int64, time.Time, time.Time) ([]GroupQualityObservation, time.Time, error)
 }
 
-// GroupQualityGateStatus is the admin API response for one evaluation snapshot.
+// GroupQualityGateStatus matches the v3 admin contract.
 type GroupQualityGateStatus struct {
-	GeneratedAt    time.Time                         `json:"generated_at"`
-	Stale          bool                              `json:"stale"`
-	AccountMetrics map[string]GroupQualityMetricView `json:"account_metrics"`
-	Groups         []GroupQualityGroupView           `json:"groups"`
+	GeneratedAt time.Time               `json:"generated_at"`
+	Stale       bool                    `json:"stale"`
+	Groups      []GroupQualityGroupView `json:"groups"`
 }
 
-// GroupQualityMetricView contains display metrics for one account.
-type GroupQualityMetricView struct {
-	Calls             int64   `json:"calls"`
-	SoftFailures      int64   `json:"soft_failures"`
-	ErrorRate         float64 `json:"error_rate"`
-	WarmSamples       int64   `json:"warm_samples"`
-	WarmTTFTP90Ms     int     `json:"warm_ttft_p90_ms"`
-	ZeroCacheSamples  int64   `json:"zero_cache_samples"`
-	WarmZeroCacheRate float64 `json:"warm_zero_cache_rate"`
-}
-
-// GroupQualityGroupView is one group's status row.
 type GroupQualityGroupView struct {
-	GroupID                    int64                     `json:"group_id"`
-	Enabled                    bool                      `json:"enabled"`
-	FastWarmTTFTP90Ms          int                       `json:"fast_warm_ttft_p90_ms"`
-	EffectiveFastWarmTTFTP90Ms *int                      `json:"effective_fast_warm_ttft_p90_ms"`
-	Summary                    GroupQualitySummaryView   `json:"summary"`
-	Accounts                   []GroupQualityAccountView `json:"accounts"`
+	GroupID         int64                     `json:"group_id"`
+	Enabled         bool                      `json:"enabled"`
+	Policy          GroupQualityGateV3Policy  `json:"policy"`
+	ExpectedP90Ms   *float64                  `json:"expected_p90_ms"`
+	ExpectedSamples int                       `json:"expected_samples"`
+	Summary         GroupQualitySummaryView   `json:"summary"`
+	Accounts        []GroupQualityAccountView `json:"accounts"`
 }
 
-// GroupQualitySummaryView summarizes the selected group members.
 type GroupQualitySummaryView struct {
-	Eligible int `json:"eligible"`
-	Ejected  int `json:"ejected"`
-	Trial    int `json:"trial"`
+	Passing int `json:"passing"`
+	Unknown int `json:"unknown"`
+	Retest  int `json:"retest"`
+	Failing int `json:"failing"`
+	Pinned  int `json:"pinned"`
 }
 
-// GroupQualityDecisionMetrics contains effective metrics used for a group decision.
-// Counts remain visible; derived metrics are nil until their decision thresholds are met.
-type GroupQualityDecisionMetrics struct {
-	Calls         int64    `json:"calls"`
-	SoftFailures  int64    `json:"soft_failures"`
-	ErrorRate     *float64 `json:"error_rate"`
-	WarmSamples   int64    `json:"warm_samples"`
-	WarmTTFTP90Ms *int     `json:"warm_ttft_p90_ms"`
+type GroupQualityTTFTView struct {
+	State    string     `json:"state"`
+	Value    *float64   `json:"value"`
+	Factor   *float64   `json:"factor"`
+	Samples  int        `json:"samples"`
+	Sessions int        `json:"sessions"`
+	BadUntil *time.Time `json:"bad_until"`
 }
 
-// GroupQualityAccountView contains the quality decision for a group member.
+type GroupQualityErrorView struct {
+	State      string     `json:"state"`
+	Value      *float64   `json:"value"`
+	Samples    int        `json:"samples"`
+	Failures   int        `json:"failures"`
+	WilsonLow  *float64   `json:"wilson_low"`
+	WilsonHigh *float64   `json:"wilson_high"`
+	BadUntil   *time.Time `json:"bad_until"`
+}
+
+type GroupQualityCacheView struct {
+	State      string     `json:"state"`
+	Value      *float64   `json:"value"`
+	Samples    int        `json:"samples"`
+	WilsonLow  *float64   `json:"wilson_low"`
+	WilsonHigh *float64   `json:"wilson_high"`
+	BadUntil   *time.Time `json:"bad_until"`
+}
+
+type GroupQualityLatencyHoldView struct {
+	Until  time.Time `json:"until"`
+	Models []string  `json:"models"`
+}
+
 type GroupQualityAccountView struct {
-	AccountID int64                       `json:"account_id"`
-	State     string                      `json:"state"`
-	Until     *time.Time                  `json:"until,omitempty"`
-	Reasons   []string                    `json:"reasons"`
-	Strikes   int                         `json:"strikes"`
-	Usable    bool                        `json:"usable"`
-	Passing   bool                        `json:"passing"`
-	GuardHeld bool                        `json:"guard_held"`
-	Pinned    bool                        `json:"pinned"`
-	Vetoed    bool                        `json:"vetoed"`
-	Tier      int                         `json:"tier"`
-	Headroom  *float64                    `json:"headroom"`
-	Metrics   GroupQualityDecisionMetrics `json:"metrics"`
+	AccountID   int64                        `json:"account_id"`
+	Status      string                       `json:"status"`
+	Tier        int                          `json:"tier"`
+	Pinned      bool                         `json:"pinned"`
+	LatencyHold *GroupQualityLatencyHoldView `json:"latency_hold"`
+	TTFT        GroupQualityTTFTView         `json:"ttft"`
+	Error       GroupQualityErrorView        `json:"error"`
+	Cache       GroupQualityCacheView        `json:"cache"`
 }
 
-func (m GroupQualityMetrics) ErrorRate() float64 {
-	if m.Calls <= 0 {
-		return 0
+type groupQualityDimensionState struct {
+	State    string
+	Vote     string
+	Votes    int
+	LastVote time.Time
+	LastFail time.Time
+}
+
+func (s groupQualityDimensionState) state() string {
+	if s.State == "" {
+		return "none"
 	}
-	return float64(m.SoftFailures) / float64(m.Calls)
+	return s.State
 }
-
-func (m GroupQualityMetrics) EjectionReady(p GroupQualityGatePolicy) bool {
-	return (m.Calls >= 20 && m.SoftFailures >= 5 && m.ErrorRate() > p.MaxErrorRate) ||
-		(m.WarmSamples >= 10 && m.WarmTTFTP90Ms > p.MaxWarmTTFTP90Ms)
+func (s groupQualityDimensionState) hasBad(now time.Time) bool {
+	return !s.LastFail.IsZero() && !now.After(s.LastFail.Add(groupQualityBadMemory))
 }
-
-func groupQualityReasons(p GroupQualityGatePolicy, m GroupQualityMetrics) []string {
-	reasons := make([]string, 0, 2)
-	if m.Calls >= 20 && m.SoftFailures >= 5 && m.ErrorRate() > p.MaxErrorRate {
-		reasons = append(reasons, "error_rate")
+func (s groupQualityDimensionState) badUntil() *time.Time {
+	if s.LastFail.IsZero() {
+		return nil
 	}
-	if m.WarmSamples >= 10 && m.WarmTTFTP90Ms > p.MaxWarmTTFTP90Ms {
-		reasons = append(reasons, "warm_ttft")
-	}
-	return reasons
+	until := s.LastFail.Add(groupQualityBadMemory)
+	return &until
 }
 
-type groupQualityTrialFailure struct {
-	RequestID string
-	AccountID int64
-	AtUnixMs  int64
+// A missing observation sets none and breaks the vote streak, but keeps the
+// dimension's bad memory. A stale evaluation must not call this function.
+func voteGroupQualityDimension(s groupQualityDimensionState, now time.Time, valid, fail, pass, recovered bool) groupQualityDimensionState {
+	minute := now.Truncate(time.Minute)
+	if !s.LastVote.IsZero() && !minute.After(s.LastVote) {
+		return s
+	}
+	s.LastVote = minute
+	if !valid {
+		s.State, s.Vote, s.Votes = "none", "", 0
+		return s
+	}
+	vote := ""
+	if fail {
+		vote = "fail"
+	} else if pass && (!(s.state() == "fail" || s.hasBad(now)) || recovered) {
+		vote = "pass"
+	}
+	if vote == "" {
+		s.Vote, s.Votes = "", 0
+	} else {
+		if s.Vote != vote {
+			s.Vote, s.Votes = vote, 0
+		}
+		s.Votes = min(s.Votes+1, 2)
+		if s.Votes == 2 {
+			s.State = vote
+			if vote == "pass" {
+				s.LastFail = time.Time{}
+			}
+		}
+	}
+	if s.state() == "fail" {
+		s.LastFail = now
+	}
+	return s
 }
 
 type groupQualityAccountState struct {
-	State           string
-	Reasons         []string
-	Strike          int
-	EjectedAt       time.Time
-	Until           time.Time
-	TrialSince      time.Time
-	Tier            int
-	DataTier        int
-	TierAt          time.Time
-	FastAt          time.Time
-	LastEjectionEnd time.Time
-	ResetAt         time.Time
-	Severity        float64
-	TrialRequests   []string // The first 20 distinct request IDs, retained across observation windows.
-	TrialFailures   []groupQualityTrialFailure
-	TrialEndReason  string // Set only for the round that ends a trial; consumed by transition logging.
+	TTFT    groupQualityDimensionState
+	Error   groupQualityDimensionState
+	Cache   groupQualityDimensionState
+	ResetAt time.Time
 }
 
-func groupQualityBackoff(strike int) time.Duration {
-	switch strike {
-	case 1:
-		return 5 * time.Minute
-	case 2:
-		return 10 * time.Minute
-	case 3:
-		return 20 * time.Minute
-	default:
-		return 30 * time.Minute
-	}
+func (s groupQualityAccountState) dimensions() [3]groupQualityDimensionState {
+	return [3]groupQualityDimensionState{s.TTFT, s.Error, s.Cache}
 }
 
-func evaluateGroupQualityMember(now time.Time, policy GroupQualityGatePolicy, metric GroupQualityMetrics, state groupQualityAccountState, fresh bool) groupQualityAccountState {
-	end := state.LastEjectionEnd
-	if state.State == "ejected" {
-		end = state.Until
+func groupQualityTier(s groupQualityAccountState, p GroupQualityGateV3Policy, pinned bool, now time.Time) int {
+	if !p.Enabled || pinned {
+		return GroupQualityGateTierPass
 	}
-	if !end.IsZero() && now.Sub(end) >= 2*time.Hour {
-		state.Strike = 0
-	}
-	if state.State == "ejected" && now.Before(state.Until) {
-		return state
-	}
-	expired := state.State == "ejected"
-	if expired {
-		state.LastEjectionEnd = state.Until
-	}
-	trialFailed := state.State == "trial" && len(state.TrialFailures) >= 2
-	if fresh && (metric.EjectionReady(policy) || trialFailed) {
-		state.Strike++
-		state.State = "ejected"
-		state.Reasons = groupQualityReasons(policy, metric)
-		state.Severity = 0
-		if metric.Calls >= 20 && metric.SoftFailures >= 5 {
-			state.Severity = metric.ErrorRate() / policy.MaxErrorRate
+	tier := GroupQualityGateTierPass
+	for _, d := range s.dimensions() {
+		if d.state() == "fail" {
+			return GroupQualityGateTierFail
 		}
-		if metric.WarmSamples >= 10 {
-			state.Severity = math.Max(state.Severity, float64(metric.WarmTTFTP90Ms)/float64(policy.MaxWarmTTFTP90Ms))
+		if d.state() == "none" && (p.Strict || d.hasBad(now)) {
+			tier = GroupQualityGateTierRetest
 		}
-		if trialFailed {
-			state.Severity = math.Max(state.Severity, float64(len(state.TrialFailures))/float64(len(state.TrialRequests))/policy.MaxErrorRate)
-			if !slices.Contains(state.Reasons, "error_rate") {
-				state.Reasons = append(state.Reasons, "error_rate")
-			}
-		}
-		state.Tier = GroupQualityGateTierFail
-		state.EjectedAt = now
-		state.Until = now.Add(groupQualityBackoff(state.Strike))
-		state.TrialRequests, state.TrialFailures = nil, nil
-		state.TrialSince = time.Time{}
-		return state
 	}
-	if expired {
-		state.Until = time.Time{}
-		if fresh && metric.RecoveryReady(policy, state.Reasons) {
-			state.State, state.Tier = "eligible", GroupQualityGateTierPass
-		} else {
-			state.State, state.Tier = "trial", GroupQualityGateTierFail
-			state.TrialSince = state.LastEjectionEnd
-			state.TrialRequests, state.TrialFailures = nil, nil
-		}
-		state.Reasons = nil
-		return state
-	}
-	if state.State == "trial" {
-		passed := fresh && len(state.TrialRequests) >= 20
-		elapsed := !state.TrialSince.IsZero() && now.Sub(state.TrialSince) >= groupQualityTrialDuration
-		if !passed && !elapsed {
-			return state
-		}
-		state.TrialEndReason = "trial_elapsed"
-		if passed {
-			state.TrialEndReason = "trial_passed"
-		}
-		state.TrialRequests, state.TrialFailures = nil, nil
-		state.TrialSince = time.Time{}
-	}
-	state.State = "eligible"
-	state.Reasons = nil
-	state.Until = time.Time{}
-	return state
+	return tier
 }
 
-func (m GroupQualityMetrics) RecoveryReady(p GroupQualityGatePolicy, reasons []string) bool {
-	errorReady, ttftReady := m.Calls >= 20, m.WarmSamples >= 10
-	if !errorReady && !ttftReady || slices.Contains(reasons, "error_rate") && !errorReady || slices.Contains(reasons, "warm_ttft") && !ttftReady {
-		return false
+func groupQualityStatus(s groupQualityAccountState, tier int, pinned bool) string {
+	if pinned {
+		return "pinned"
 	}
-	return (!errorReady || m.ErrorRate() <= p.MaxErrorRate*0.8) &&
-		(!ttftReady || float64(m.WarmTTFTP90Ms) <= float64(p.MaxWarmTTFTP90Ms)*0.8)
-}
-
-// GroupQualityMemberResult keeps the independent quality and availability facts for a group member.
-type GroupQualityMemberResult struct {
-	Usable    bool
-	Passing   bool
-	Pinned    bool
-	GuardHeld bool
-	State     string
-	Tier      int
+	if tier == GroupQualityGateTierFail {
+		return "failing"
+	}
+	if tier == GroupQualityGateTierRetest {
+		return "retest"
+	}
+	for _, d := range s.dimensions() {
+		if d.state() != "pass" {
+			return "unknown"
+		}
+	}
+	return "passing"
 }
 
 // GroupQualityGateView exposes the immutable decision view consumed by scheduling,
