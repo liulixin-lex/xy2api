@@ -170,6 +170,44 @@ func (e *qualityTestEnv) member(id int64) groupQualityMemberSnapshot {
 	return e.svc.snapshot.Load().Members[7][id]
 }
 
+func TestGroupQualityV3TierEventLifecycle(t *testing.T) {
+	e := newQualityTestEnv(t)
+	e.accounts(1, 2, 3)
+	policy := e.repo.policies.Groups["7"]
+	policy.V3.Strict = true
+	e.repo.policies.Groups["7"] = policy
+	e.evaluate(t, 0)
+	for _, accountID := range []int64{1, 2, 3} {
+		require.Equal(t, GroupQualityGateTierRetest, e.svc.OrderTier(7, accountID))
+	}
+	require.Empty(t, e.logs.String(), "first evaluation must not invent a tier transition")
+
+	e.events(1, e.base.Add(10*time.Second), 20, 5)
+	e.evaluate(t, time.Minute)
+	require.Equal(t, GroupQualityGateTierRetest, e.svc.OrderTier(7, 1))
+	require.Empty(t, e.logs.String(), "one failing vote does not change the tier")
+	e.evaluate(t, 2*time.Minute)
+	require.Equal(t, GroupQualityGateTierFail, e.svc.OrderTier(7, 1))
+	lines := strings.Split(strings.TrimSpace(e.logs.String()), "\n")
+	require.Len(t, lines, 1, "one established tier change emits one event")
+	var event map[string]any
+	require.NoError(t, json.Unmarshal([]byte(lines[0]), &event))
+	require.Equal(t, "WARN", event["level"])
+	require.Equal(t, "group_quality_gate.tier", event["msg"])
+	require.Equal(t, float64(1), event["account_id"])
+	require.Equal(t, float64(7), event["group_id"])
+	for _, field := range []string{"from_tier", "to_tier", "dimension", "value"} {
+		require.Contains(t, event, field)
+	}
+	require.Equal(t, float64(GroupQualityGateTierRetest), event["from_tier"])
+	require.Equal(t, float64(GroupQualityGateTierFail), event["to_tier"])
+	require.Equal(t, "error", event["dimension"])
+	require.Equal(t, .25, event["value"])
+	logged := e.logs.String()
+	e.evaluate(t, 3*time.Minute)
+	require.Equal(t, logged, e.logs.String(), "an unchanged tier must not repeat the event")
+}
+
 func TestGroupQualityV3PolicyCompatibility(t *testing.T) {
 	e := newQualityTestEnv(t)
 	raw := `{"version":9,"groups":{"7":{"enabled":true,"max_error_rate":0.1700,"max_warm_ttft_p90_ms":31000,"fast_warm_ttft_p90_ms":9000,"pinned_account_ids":[9,1,9],"extension":null},"8":{"enabled":false,"pinned_account_ids":null}}}`
@@ -673,13 +711,25 @@ func TestGroupQualityV3MigrationTargetAndStatus(t *testing.T) {
 	var obj map[string]any
 	require.NoError(t, json.Unmarshal(data, &obj))
 	require.ElementsMatch(t, []string{"generated_at", "stale", "groups"}, qualityMapKeys(obj))
-	rows := obj["groups"].([]any)[0].(map[string]any)["accounts"].([]any)
-	row := rows[0].(map[string]any)
+	groups, ok := obj["groups"].([]any)
+	require.True(t, ok)
+	require.Len(t, groups, 1)
+	group, ok := groups[0].(map[string]any)
+	require.True(t, ok)
+	rows, ok := group["accounts"].([]any)
+	require.True(t, ok)
+	require.Len(t, rows, 3)
+	row, ok := rows[0].(map[string]any)
+	require.True(t, ok)
 	require.ElementsMatch(t, []string{"account_id", "status", "tier", "pinned", "latency_hold", "ttft", "error", "cache"}, qualityMapKeys(row))
 	require.NotNil(t, row["latency_hold"])
-	require.Nil(t, rows[1].(map[string]any)["latency_hold"])
-	require.Nil(t, row["ttft"].(map[string]any)["value"])
-	require.Equal(t, "none", row["ttft"].(map[string]any)["state"])
+	pinnedRow, ok := rows[1].(map[string]any)
+	require.True(t, ok)
+	require.Nil(t, pinnedRow["latency_hold"])
+	ttft, ok := row["ttft"].(map[string]any)
+	require.True(t, ok)
+	require.Nil(t, ttft["value"])
+	require.Equal(t, "none", ttft["state"])
 }
 func qualityMapKeys(m map[string]any) []string {
 	keys := make([]string, 0, len(m))

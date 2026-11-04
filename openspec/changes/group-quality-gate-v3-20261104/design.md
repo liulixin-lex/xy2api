@@ -170,7 +170,7 @@ type GroupQualityGateView interface {
 
 | 事件 | 何时 | `extra` 字段 |
 |---|---|---|
-| `group_quality_gate.tier`（新增） | 账号在某组档位改变 | `account_id`、`group_id`、`from_tier`、`to_tier`、`dimension`、`value` |
+| `group_quality_gate.tier`（新增） | 已有前一成员快照时，账号在某组档位改变；首次评估不记 | `account_id`、`group_id`、`from_tier`、`to_tier`、`dimension`、`value` |
 | `group_quality_gate.migrate`（沿用） | 质量迁出成功 | `session_hash`（前缀）、`group_id`、`from_account_id`、`to_account_id`、`trigger`（`tier` 或 `latency_hold`） |
 | `group_quality_gate.last_resort`、`group_quality_gate.evaluate_failed` | 沿用 | 沿用 |
 | `openai_account_latency_hold_started`（沿用） | 判慢开始 | 现有字段，加 `hold_seconds`、`level` |

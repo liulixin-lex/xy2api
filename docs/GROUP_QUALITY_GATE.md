@@ -123,7 +123,7 @@ e_G 使用本组最近 6 小时的成功严格续轮，请求形状先匹配当�
 
 `latency_hold` 提供仍在让位的模型列表与最晚到期时间 `{until, models}`；未接入查询或没有有效让位时为 null。到期只移除让位标记，不显示“已恢复”。`SetLatencyHoldLookup` 由装配层接入判慢查询。`ExpectedP90Ms` 为调度提供 GM30 × e_G 的整数毫秒预测，缺少任一值则不可用；`MigrationTarget` 只返回目标的质量条件，硬准入与槽位由选号负责。
 
-利润预览保持 `{members, schedulable, passing, ceiling}` 形状：成员总数、原可调度口径、该组状态为 passing 或 pinned 的成员数、价格换算上限。passing 不把未知算达标，也不再表示利润准入数量。margin 仍为 `[0,1)`，省略用保存值，预览安全缓冲为 0，不保存配置。
+利润预览保持 `{members, schedulable, passing, ceiling}` 形状：成员总数、可调度成员数、其中通过利润门的成员数、价格换算上限。`passing` 与质量门槛无关，不按质量状态或固定账号标记计数。margin 仍为 `[0,1)`，省略用保存值，预览安全缓冲为 0，不保存配置。
 
 ## 事件与验收
 
@@ -131,15 +131,17 @@ e_G 使用本组最近 6 小时的成功严格续轮，请求形状先匹配当�
 
 | 事件 | 时机 | 字段 |
 |---|---|---|
-| `group_quality_gate.tier` | 每次账号在组内档位改变 | `account_id`、`group_id`、`from_tier`、`to_tier`、`dimension`、`value` |
+| `group_quality_gate.tier` | 已有前一成员快照时，每次组内档位改变；首次评估不记 | `account_id`、`group_id`、`from_tier`、`to_tier`、`dimension`、`value` |
 | `group_quality_gate.migrate` | 每次成功质量迁出 | `session_hash` 前缀、`group_id`、`from_account_id`、`to_account_id`、`trigger`（`tier`／`latency_hold`） |
 | `group_quality_gate.last_resort` | 既有末位兜底 | 沿用既有字段 |
 | `group_quality_gate.evaluate_failed` | 每个连续陈旧或失败期间首次 | `reason`、`stale_duration` |
 
-旧的硬熔断、退避、观察期、快档记忆、六小时快档重测和质量保底逻辑及其专有事件已退役。统计每日质量迁出（判慢触发单列）、本组样本不足、没有合格目标、各档分布；判慢及急性保护事件见 [网关韧性](GATEWAY_RESILIENCE.md)。
+旧的硬熔断、退避、观察期、快档记忆、六小时快档重测和质量保底逻辑及其专有事件已退役。每日质量迁出按事件统计，判慢触发单列；档位分布结合状态接口与事件分析。首次评估只建立快照，不记档位变化事件；按事件重建时须按进程启动分段，非固定账号在普通组从 0 档、严格组从 1 档开始，固定账号始终为 0 档。
+
+本批次不提供“本组样本不足占比”和“无合格目标占比”的直接计数。前者用 `usage_logs` 按 e_G 的窗口、严格续轮和当前 B1 匹配规则离线重算；后者按 `group_quality_gate.tier` 与 `openai_account_latency_hold_started` 事件重建档位和判慢状态，作离线近似。事件不包含当时的全部目标资格和空位，近似结果不能视为线上实际无目标比例。判慢及急性保护事件见 [网关韧性](GATEWAY_RESILIENCE.md)。
 
 ## 升级与回滚
 
-迁移 289 为 `usage_logs` 添加可空 BIGINT `attempt_first_output_ms`，无缺省、无索引、不回填；ALTER 需短暂表锁，按低峰执行。v3 与写入新列的代码、设置和前端同版上线。参数在 [部署 runbook](../deploy/README.md#group-quality-gate-v3-upgrade) 设置；上线后 48 小时核对新列非空率（OpenAI 成功流式目标 ≥95%）、与端到端首字／判慢样本的差异、档位分布与迁出数量。生产核对必须另行授权。
+迁移 289 为 `usage_logs` 添加可空 BIGINT `attempt_first_output_ms`，无缺省、无索引、不回填；ALTER 需短暂表锁，按低峰执行。v3 与写入新列的代码、设置和前端同版上线。参数在 [部署 runbook](../deploy/README.md#门槛-v3-升级与回退) 设置；上线后 48 小时核对新列非空率（OpenAI 成功流式目标 ≥95%）、与端到端首字／判慢样本的差异、档位分布与迁出数量。生产核对必须另行授权。
 
 旧策略字段不被新版写入，因此回滚到 0.5.1 时仍用原 v2 配置；旧版忽略 v3 子对象与新列，列可保留。只建立过 v3 的组在旧版视为未启用；旧版保存会丢弃 v3，再升级时重新按“没有子对象”继承。低倍率优先若设为指定分组，回滚前先决定旧全局开关。关闭新版组门槛立即让该组回到无质量档排序；P1-B 与同站暂停分别用韧性开关回退。按版本回滚的验收线及七天对照见 [v3 tasks](../openspec/changes/group-quality-gate-v3-20261104/tasks.md)。

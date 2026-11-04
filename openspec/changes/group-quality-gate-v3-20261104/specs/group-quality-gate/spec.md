@@ -75,8 +75,9 @@ Departure state MUST survive for two hours after departure; restart clears it.
 Status JSON MUST conform to design §5.3, including null unavailable values,
 empty arrays, independent dimension sample counts, bad-until times, group
 composition and disjoint summaries. A live lookup supplies current latency
-holds; absent or expired holds MUST be null. Profit preview keeps its response
-shape but passing counts only passing or pinned group members.
+holds; absent or expired holds MUST be null. Profit preview MUST retain its
+response shape and existing meaning: passing counts schedulable members that
+pass the profit gate, independently of quality-gate states or pinned status.
 
 ExpectedP90Ms MUST expose the available prediction to scheduling. Migration
 Target MUST reject any current failing dimension, including pinned members.
@@ -85,7 +86,15 @@ failure or bad memory. Strict targets additionally require valid error/cache
 statistics within 80% Y and at least Z; two established pass votes are not an
 additional prerequisite. Scheduling checks capacity and hard admission.
 
-Every tier change MUST emit one Warn group_quality_gate.tier with account,
-group, previous/new tier and reason dimension/value. Warn migrate, last_resort
-and evaluate_failed remain. The former hard-exclusion state machine, backoff,
-observation period, fast-tier memory and floor guard MUST be removed.
+Once a prior member snapshot exists, every tier change MUST emit one Warn
+group_quality_gate.tier with account, group, previous/new tier and reason
+dimension/value. The first evaluation MUST NOT emit a tier-change event.
+Warn migrate, last_resort and evaluate_failed remain. The former hard-exclusion
+state machine, backoff, observation period, fast-tier memory and floor guard
+MUST be removed.
+
+Insufficient group composition and absence of qualified migration targets have
+no direct counters in this release. Acceptance MUST estimate the former offline
+from usage_logs using the e_G rules, and approximate the latter from tier and
+latency-hold-start events. These approximations MUST NOT be presented as exact
+online target availability measurements.
