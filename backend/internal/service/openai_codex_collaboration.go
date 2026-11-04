@@ -501,66 +501,13 @@ func (r *codexCollabRestorer) ResponseJSON(body []byte) ([]byte, error) {
 	return r.transform(body, "response.json", false)
 }
 
-// ErrorBody restores only protocol error text; callers retain the original body
-// for classification and logging. Malformed or ambiguous bodies stay untouched.
+// ErrorBody restores the error envelope while callers retain the original bytes
+// for classification and logging.
 func (r *codexCollabRestorer) ErrorBody(body []byte) []byte {
-	if r == nil || r.plan == nil || !json.Valid(body) {
+	if r == nil || r.plan == nil {
 		return body
 	}
-	root := gjson.ParseBytes(body)
-	if !root.IsObject() || !codexCollabUniqueObject(root) || !codexCollabUniqueObject(root.Get("response")) {
-		return body
-	}
-	changed := body
-	for _, base := range []string{"error", "response.error"} {
-		object := root.Get(base)
-		if !codexCollabUniqueObject(object) {
-			return body
-		}
-		for _, field := range []string{"message", "param"} {
-			path := base + "." + field
-			value := root.Get(path)
-			if value.Type != gjson.String {
-				continue
-			}
-			restored := codexCollabRestoreErrorText(value.String())
-			if restored != value.String() {
-				var err error
-				changed, err = sjson.SetBytes(changed, path, restored)
-				if err != nil {
-					return body
-				}
-			}
-		}
-	}
-	return changed
-}
-
-func codexCollabRestoreErrorText(value string) string {
-	const alias = codexCollaborationNamespaceAlias
-	var out strings.Builder
-	for start := 0; start < len(value); {
-		index := strings.Index(value[start:], alias)
-		if index < 0 {
-			_, _ = out.WriteString(value[start:])
-			break
-		}
-		index += start
-		end := index + len(alias)
-		boundary := func(b byte) bool {
-			return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '_' || b == '-'
-		}
-		beforeOK := index == 0 || !boundary(value[index-1])
-		afterOK := end == len(value) || !boundary(value[end]) || strings.HasPrefix(value[end:], "__")
-		_, _ = out.WriteString(value[start:index])
-		if beforeOK && afterOK {
-			_, _ = out.WriteString(codexCollaborationNamespace)
-		} else {
-			_, _ = out.WriteString(alias)
-		}
-		start = end
-	}
-	return out.String()
+	return bytes.ReplaceAll(body, []byte(codexCollaborationNamespaceAlias), []byte(codexCollaborationNamespace))
 }
 
 func (r *codexCollabRestorer) Stats() codexCollabStats {
@@ -583,14 +530,25 @@ func (r *codexCollabRestorer) transform(body []byte, eventType string, streaming
 		return nil, errors.New("invalid collaboration response JSON")
 	}
 	root := gjson.ParseBytes(body)
-	if r.plan != nil && (!codexCollabUniqueObject(root) || !codexCollabUniqueObject(root.Get("response"))) {
-		return nil, errors.New("ambiguous collaboration response JSON fields")
-	}
 	if eventType == "" {
 		eventType = root.Get("type").String()
 	}
-	if streaming && (eventType == "error" || eventType == "response.failed" || root.Get("type").String() == "error" || root.Get("type").String() == "response.failed") {
-		body = r.ErrorBody(body)
+	if streaming && (eventType == "error" || (eventType != "response.failed" && root.Get("type").String() == "error")) {
+		return r.ErrorBody(body), nil
+	}
+	if r.plan != nil && (!codexCollabUniqueObject(root) || !codexCollabUniqueObject(root.Get("response"))) {
+		return nil, errors.New("ambiguous collaboration response JSON fields")
+	}
+	if streaming && r.plan != nil && (eventType == "response.failed" || root.Get("type").String() == "response.failed") {
+		value := root.Get("response.error")
+		if value.Exists() {
+			start, end := value.Index, value.Index+len(value.Raw)
+			restored := r.ErrorBody(body[start:end])
+			changed := make([]byte, 0, len(body)-len(value.Raw)+len(restored))
+			changed = append(changed, body[:start]...)
+			changed = append(changed, restored...)
+			body = append(changed, body[end:]...)
+		}
 		root = gjson.ParseBytes(body)
 	}
 	items, err := codexCollabResponseItems(root, eventType, streaming)
