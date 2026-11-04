@@ -1,0 +1,18 @@
+name: Apple container tests (manual)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apple-container:
+    runs-on: macos-15
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check Apple container lifecycle with offline fixtures
+        run: |
+          /bin/bash -n deploy/apple-container.sh
+          /bin/bash deploy/tests/apple-container-test.sh

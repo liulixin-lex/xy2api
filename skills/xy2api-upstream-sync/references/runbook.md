@@ -118,7 +118,7 @@ git diff --check
 - Go unit、integration、race-sensitive、build、golangci-lint；
 - 前端 frozen install、lint、typecheck、完整 Vitest、生产构建；
 - 后端和前端安全扫描；
-- Windows 插件归档、macOS/Linux 部署脚本；
+- Windows 插件归档、Linux 部署脚本；Apple 部署脚本变更另跑手动 macOS 离线生命周期测试（不阻塞 Linux 发版）；
 - pricing、Codex、WebSocket、数据库重试、插件协议和兼容不变量专项测试。
 
 生成源变化时，用 `backend/go.mod` 声明的 Go 版本运行 `make generate`，之后要求 `git status --porcelain` 为空。未改变生成源时无需反复生成。
