@@ -18,8 +18,14 @@ The global switch MUST retain its prior prerequisites (advanced off and upstream
 ### Requirement: Unified migration retains an exact target
 Both legacy and advanced scheduling in enabled groups MUST share one migration implementation. A tier-2 or latency-held owner triggers migration unless protocol ownership, routing ownership or pinned-turn guards prohibit it. Fixed accounts remain subject to latency-triggered migration. The view's `MigrationTarget` is authoritative for quality eligibility; hard admission, no latency hold and fresh capacity are also required.
 
-#### Scenario: Target slot or owner changes
-- **WHEN** the chosen target cannot acquire a slot, or the atomic owner-to-target CAS fails/errors
+#### Scenario: Recheck only candidates that can serve
+- **WHEN** migration evaluates candidates
+- **THEN** it first filters snapshots by quality, latency hold and request compatibility, filters full candidates using one fresh batch load query, then follows the in-tier order for individual DB rechecks and slot acquisition.
+- **WHEN** the first candidate fails its DB recheck or slot acquisition
+- **THEN** the next candidate is tried; the first candidate passing both becomes the target. Untried and full candidates MUST NOT receive per-candidate DB rechecks. If all fail, the original binding is retained.
+
+#### Scenario: Target owner changes
+- **WHEN** the atomic owner-to-target CAS fails/errors
 - **THEN** migration stops, its slot is released if held, no cooldown/event is recorded, and migration does not delete the original binding.
 - **WHEN** the cache lacks CAS support
 - **THEN** migration is abandoned; delete-and-claim is forbidden for both modern and legacy session keys.

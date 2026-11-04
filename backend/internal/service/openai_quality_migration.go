@@ -98,6 +98,7 @@ func (s *OpenAIGatewayService) migrateOpenAIQualityOwner(ctx context.Context, gr
 	}
 	gate := &defaultOpenAIAccountScheduler{service: s}
 	req := OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: session, RequestedModel: model, RequireCompact: compact, RequiredCapability: capability}
+	req.RequirePrivacySet = s.openAIGroupRequiresPrivacySet(ctx, groupID)
 	if capacity, _ := ctx.Value(openAILegacyStickyCapacityKey{}).(*openAILegacyStickyCapacity); capacity != nil {
 		req.RequiredTransport, req.RequiredImageCapability = capacity.transport, capacity.image
 	}
@@ -114,12 +115,13 @@ func (s *OpenAIGatewayService) migrateOpenAIQualityOwner(ctx context.Context, gr
 		if !view.MigrationTarget(key.groupID, a.ID) || s.openAIAccountLatencyHoldSnapshot(a, canonicalOpenAIAccountSchedulingModel(a, model), now).Held {
 			continue
 		}
-		fresh := s.recheckSelectedOpenAIAccountFromDB(ctx, a, groupID, platform, model, compact, capability)
-		if fresh == nil || !s.openAIAccountMatchesSchedulingGroup(fresh, groupID) || !gate.isAccountRequestCompatible(ctx, fresh, req) || !gate.isAccountTransportCompatible(fresh, req.RequiredTransport) {
+		// Filter the scheduling snapshot before querying loads. A full pool must
+		// not cause a per-account DB recheck on every migration attempt.
+		if !isOpenAICompatibleAccountEligibleForRequest(ctx, a, platform, model, compact, capability, s) || !s.openAIAccountMatchesSchedulingGroup(a, groupID) || !gate.isAccountRequestCompatible(ctx, a, req) || !gate.isAccountTransportCompatible(a, req.RequiredTransport) {
 			continue
 		}
-		candidates = append(candidates, accountWithLoad{account: fresh})
-		loadsReq = append(loadsReq, AccountWithConcurrency{ID: fresh.ID, MaxConcurrency: fresh.EffectiveLoadFactor()})
+		candidates = append(candidates, accountWithLoad{account: a})
+		loadsReq = append(loadsReq, AccountWithConcurrency{ID: a.ID, MaxConcurrency: a.EffectiveLoadFactor()})
 	}
 	if len(candidates) == 0 {
 		return owner, nil
@@ -162,27 +164,34 @@ func (s *OpenAIGatewayService) migrateOpenAIQualityOwner(ctx context.Context, gr
 		}
 		shuffleOpenAIWithinQualityGroups(candidates, order.tiers, nil)
 	}
-	target := candidates[0].account
-	slot, err := s.tryAcquireAccountSlot(ctx, target.ID, target.Concurrency)
-	if err != nil || slot == nil || !slot.Acquired {
-		return owner, nil
+	for _, candidate := range candidates {
+		if ctx.Err() != nil || !view.Enabled(key.groupID) {
+			return owner, nil
+		}
+		target := s.recheckSelectedOpenAIAccountFromDB(ctx, candidate.account, groupID, platform, model, compact, capability)
+		if target == nil || !gate.isAccountRequestCompatible(ctx, target, req) || !gate.isAccountTransportCompatible(target, req.RequiredTransport) {
+			continue
+		}
+		slot, err := s.tryAcquireAccountSlot(ctx, target.ID, target.Concurrency)
+		if err != nil || slot == nil || !slot.Acquired {
+			continue
+		}
+		// The DB-rechecked account is already hydrated; do not replace it with
+		// an older snapshot while building the acquired result.
+		latest, veto, _ := s.SelectionAdmissionVetoLatest(ctx, target)
+		if veto || latest == nil || !view.Enabled(key.groupID) || !view.MigrationTarget(key.groupID, target.ID) || s.openAIAccountLatencyHoldSnapshot(target, canonicalOpenAIAccountSchedulingModel(target, model), time.Now()).Held {
+			slot.ReleaseFunc()
+			continue
+		}
+		changed, err := cache.CompareAndSwapSessionAccountID(ctx, key.groupID, s.openAISessionCacheKey(session), owner, target.ID, s.openAIStickyBindingTTL(groupID))
+		if err != nil || !changed {
+			slot.ReleaseFunc()
+			return owner, nil
+		}
+		resilience.StateFrom(ctx).ClearKeptStickyIfOwner(owner)
+		cooldown.note(key, time.Now())
+		slog.Warn("group_quality_gate.migrate", "session_hash", shortSessionHash(session), "group_id", key.groupID, "from_account_id", owner, "to_account_id", target.ID, "trigger", trigger)
+		return target.ID, attachSelectionProfitGate(ctx, &AccountSelectionResult{Account: latest, Acquired: true, ReleaseFunc: slot.ReleaseFunc})
 	}
-	selection, err := s.newAcquiredSelectionResult(ctx, target, slot.ReleaseFunc)
-	if err != nil {
-		return owner, nil
-	}
-	latest, veto, _ := s.SelectionAdmissionVetoLatest(ctx, selection.Account)
-	if veto || latest == nil || !view.Enabled(key.groupID) || !view.MigrationTarget(key.groupID, target.ID) || s.openAIAccountLatencyHoldSnapshot(target, canonicalOpenAIAccountSchedulingModel(target, model), time.Now()).Held {
-		slot.ReleaseFunc()
-		return owner, nil
-	}
-	changed, err := cache.CompareAndSwapSessionAccountID(ctx, key.groupID, s.openAISessionCacheKey(session), owner, target.ID, s.openAIStickyBindingTTL(groupID))
-	if err != nil || !changed {
-		slot.ReleaseFunc()
-		return owner, nil
-	}
-	resilience.StateFrom(ctx).ClearKeptStickyIfOwner(owner)
-	cooldown.note(key, time.Now())
-	slog.Warn("group_quality_gate.migrate", "session_hash", shortSessionHash(session), "group_id", key.groupID, "from_account_id", owner, "to_account_id", target.ID, "trigger", trigger)
-	return target.ID, selection
+	return owner, nil
 }

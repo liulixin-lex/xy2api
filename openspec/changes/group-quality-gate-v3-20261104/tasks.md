@@ -36,7 +36,7 @@
 - [x] 3.2 分档与低倍率优先脱钩；判慢分区五个调用点按“档 × 判慢”分段；打散、会话偏好、缓存偏好、借用路径不越档。
 - [x] 3.3 低倍率优先按组范围（设置键、解析、写入、缓存刷新、运行时判断）。
 - [x] 3.4 高级调度按“档 × 判慢”分池；共享调度按档排序。
-- [x] 3.5 统一迁出：触发、豁免、目标条件、显式绑定、5 分钟冷却、`group_quality_gate.migrate` 字段。
+- [x] 3.5 统一迁出：触发、豁免、目标条件、显式绑定、5 分钟冷却、`group_quality_gate.migrate` 字段；快照与批量空位过滤后按序 DB 复核/占槽，满载与未尝试候选不做逐号 DB 复核。
 - [x] 3.6 判慢参数：30%、3/6/12/15 分钟递增、30 分钟重置；事件加 `hold_seconds`、`level`；为状态接口提供按账号的判慢查询。
 - [x] 3.7 文档：`GATEWAY_RESILIENCE.md` §4.5、`account-scheduling.md`；`policy.json` 与 `scheduler-diff.json`；规格 `specs/openai-scheduling/spec.md`。
 

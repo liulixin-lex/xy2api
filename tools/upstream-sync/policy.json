@@ -6408,6 +6408,11 @@
       "id": "xy-openai-group-quality-scheduling",
       "path": "backend/internal/repository/gateway_cache_atomic_test.go",
       "literal": "func TestGateV3CacheCompareAndSwapBinding(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_gate_v3_test.go",
+      "literal": "func TestGateV3MigrationRechecksOnlyOrderedFreeCandidates(t *testing.T) {"
     }
   ]
 }

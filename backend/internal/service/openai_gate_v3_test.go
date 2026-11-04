@@ -454,3 +454,77 @@ func TestGateV3MigrationCooldownLRU(t *testing.T) {
 	require.True(t, state.coolingDown(openAIQualityMigrationKey{1, "session"}, now))
 	require.False(t, state.coolingDown(openAIQualityMigrationKey{1, "session"}, now.Add(5*time.Minute)))
 }
+
+type gateV3MigrationDBRepo struct {
+	upstreamCostCountingAccountRepo
+	readIDs []int64
+}
+
+func (r *gateV3MigrationDBRepo) GetByID(ctx context.Context, id int64) (*Account, error) {
+	r.readIDs = append(r.readIDs, id)
+	return r.upstreamCostCountingAccountRepo.GetByID(ctx, id)
+}
+
+func TestGateV3MigrationRechecksOnlyOrderedFreeCandidates(t *testing.T) {
+	for _, tc := range []struct {
+		name                                                 string
+		rejectFirstDB, rejectAllDB, rejectFirstSlot, allFull bool
+		wantID                                               int64
+		wantReads, wantAcquires                              []int64
+	}{
+		{name: "first DB recheck fails, second qualifies", rejectFirstDB: true, wantID: 3, wantReads: []int64{2, 3}, wantAcquires: []int64{3}},
+		{name: "first qualifies, later candidates are not read", wantID: 2, wantReads: []int64{2}, wantAcquires: []int64{2}},
+		{name: "first slot fills, second qualifies", rejectFirstSlot: true, wantID: 3, wantReads: []int64{2, 3}, wantAcquires: []int64{2, 3}},
+		{name: "all full, no candidate DB reads", allFull: true, wantID: 1},
+		{name: "all DB rechecks fail, retain owner", rejectAllDB: true, wantID: 1, wantReads: []int64{2, 3, 4}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			group := int64(7)
+			const session = "v2:migration-db-order"
+			snapshot := &openAISnapshotCacheStub{accountsByID: map[int64]*Account{}}
+			repo := &gateV3MigrationDBRepo{upstreamCostCountingAccountRepo: upstreamCostCountingAccountRepo{accounts: map[int64]*Account{}}}
+			loads := map[int64]*AccountLoadInfo{}
+			for id := int64(1); id <= 4; id++ {
+				a := gateV3Account(id, int(id))
+				snapshot.snapshotAccounts = append(snapshot.snapshotAccounts, &a)
+				snapshot.accountsByID[id] = &a
+				fresh := a
+				fresh.UpdatedAt = time.Now()
+				if id > 1 {
+					fresh.Concurrency = 8
+				}
+				if tc.rejectAllDB || tc.rejectFirstDB && id == 2 {
+					fresh.Schedulable = false
+				}
+				repo.accounts[id] = &fresh
+				loads[id] = &AccountLoadInfo{}
+				if tc.allFull {
+					loads[id].CurrentConcurrency = 10
+				}
+			}
+			cache := &gateV3RebindCache{atomicStickyTestCache: &atomicStickyTestCache{bindings: map[string]int64{"openai:" + session: 1}}}
+			var acquired []int64
+			concurrency := NewConcurrencyService(schedulerTestConcurrencyCache{loadMap: loads, acquiredIDs: &acquired, acquireResults: map[int64]bool{2: !tc.rejectFirstSlot}})
+			svc := &OpenAIGatewayService{cfg: newSchedulerTestOpenAIWSV2Config(), cache: cache, accountRepo: repo, schedulerSnapshot: &SchedulerSnapshotService{cache: snapshot}, concurrencyService: concurrency}
+			svc.SetGroupQualityGateView(&schedulingQualityView{enabled: true, tiers: map[int64]int{1: 2}, targets: map[int64]bool{2: true, 3: true, 4: true}})
+			owner, selection := svc.migrateOpenAILatencyHeldOwner(context.Background(), &group, PlatformOpenAI, session, "gpt-test", 1, nil, false, "", false)
+			require.Equal(t, tc.wantID, owner)
+			require.Equal(t, tc.wantReads, repo.readIDs, "only attempted candidates may receive a DB recheck")
+			require.LessOrEqual(t, repo.calls(), len(tc.wantReads))
+			require.Equal(t, tc.wantAcquires, acquired)
+			bound, err := cache.GetSessionAccountID(context.Background(), group, "openai:"+session)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantID, bound)
+			if tc.wantID == 1 {
+				require.Nil(t, selection)
+				require.Zero(t, cache.calls)
+				require.False(t, svc.getOpenAIAccountLatencyHoldState().migration.coolingDown(openAIQualityMigrationKey{group, session}, time.Now()))
+			} else {
+				require.NotNil(t, selection)
+				require.Equal(t, 8, selection.Account.Concurrency, "return the DB-rechecked account, not the stale snapshot")
+				require.Equal(t, 1, cache.calls)
+				selection.ReleaseFunc()
+			}
+		})
+	}
+}
