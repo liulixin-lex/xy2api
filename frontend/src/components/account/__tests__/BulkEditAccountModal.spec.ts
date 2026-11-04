@@ -335,6 +335,31 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
+  it('OpenAI 批量编辑关闭协作消息明文化时显式写 false', async () => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['openai'],
+      selectedTypes: ['oauth', 'apikey']
+    })
+
+    // 只勾选、不拨开关：提交关闭，必须写 false 而不是删键（批量更新按键合并 extra）
+    await wrapper.get('#bulk-edit-openai-collaboration-plaintext-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      extra: { openai_collaboration_plaintext: false }
+    })
+  })
+
+  it('协作消息明文化开关不对非 OpenAI 选择展示', async () => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['anthropic'],
+      selectedTypes: ['oauth']
+    })
+
+    expect(wrapper.find('#bulk-edit-openai-collaboration-plaintext-enabled').exists()).toBe(false)
+  })
+
   it('namespace 摊平开关不对 setup-token 等非 OAuth 选择展示', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],
