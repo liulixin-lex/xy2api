@@ -258,19 +258,23 @@ func TestCollaborationForwardContinuity(t *testing.T) {
 
 func TestCollaborationForwardContinuityBeforeNormalization(t *testing.T) {
 	for _, tc := range []struct {
-		name, encrypted string
-		wantEncrypted   bool
+		name, encrypted, input        string
+		wantEncrypted, accountEnabled bool
 	}{
 		{name: "history_marker", wantEncrypted: true},
-		{name: "schema_false_true", encrypted: `"encrypted":false,"encrypted":true`, wantEncrypted: true},
-		{name: "schema_true_false", encrypted: `"encrypted":true,"encrypted":false`},
+		{name: "schema_false_true", encrypted: `"encrypted":false,"encrypted":true`, wantEncrypted: true, accountEnabled: true},
+		{name: "schema_true_false", encrypted: `"encrypted":true,"encrypted":false`, accountEnabled: true},
+		{name: "developer_text_duplicate", input: `{"type":"message","role":"developer","content":[{"type":"input_text","text":"functions.collaboration-xy.send_message","text":"functions.collaboration.send_message"}]}`, accountEnabled: true, wantEncrypted: true},
+		{name: "system_type_duplicate", input: `{"type":"message","role":"system","content":[{"type":"other","type":"input_text","text":"functions.collaboration.send_message"}]}`, accountEnabled: true, wantEncrypted: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			enableCollabTest(t)
 			account := newOpenAIRejectedFieldTestAccount()
-			account.Extra["openai_collaboration_plaintext"] = tc.encrypted != ""
+			account.Extra["openai_collaboration_plaintext"] = tc.accountEnabled
 			body := collabWiringBody
-			if tc.encrypted == "" {
+			if tc.input != "" {
+				body = strings.Replace(body, `"input":"hello"`, `"input":[`+tc.input+`]`, 1)
+			} else if tc.encrypted == "" {
 				item := `{"type":"function_call","namespace":"collaboration","name":"send_message","call_id":"fc_old","arguments":"{\"message\":\"hello world\"}","encrypted_function_args":["message"],"encrypted_function_args":[]}`
 				body = strings.Replace(body, `"input":"hello"`, `"input":[`+item+`]`, 1)
 			} else {
@@ -291,7 +295,7 @@ func TestCollaborationForwardContinuityBeforeNormalization(t *testing.T) {
 			stats, ok := openAICodexCollabAttempt(c)
 			require.True(t, ok)
 			require.False(t, stats.Applied, "map normalization cannot wash out an original protocol/schema conflict")
-			if tc.encrypted == "" {
+			if tc.name == "history_marker" {
 				require.Equal(t, "[]", gjson.GetBytes(upstream.lastBody, "input.0.encrypted_function_args").Raw)
 			}
 			require.Equal(t, "collaboration", gjson.GetBytes(upstream.lastBody, "tools.0.name").String())

@@ -3915,7 +3915,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_forward.go",
-      "value": "!codexCollabUniqueObject(originalCollabRoot)"
+      "value": "_, rawPlan, _ := planCodexCollaborationPlaintext(body)"
     },
     {
       "path": "backend/internal/service/openai_collaboration_plaintext.go",
@@ -3943,7 +3943,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_forward.go",
-      "value": "!codexCollabRequestContainersUnique(originalCollabRoot)"
+      "value": "collabRawBlocked = rawPlan == nil"
     },
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
@@ -3959,7 +3959,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_forward.go",
-      "value": "!codexCollabUnambiguousJSON(ns.node)"
+      "value": "collabRawContinuity = rawPlan != nil && openAICollaborationContinuity(body)"
     },
     {
       "path": "backend/internal/service/openai_gateway_forward.go",

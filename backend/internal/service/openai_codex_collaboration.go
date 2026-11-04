@@ -109,65 +109,86 @@ type codexCollabJSONEdit struct {
 // removes the encryption marker from only the three supported message tools.
 // All checks run before edits are applied so failures leave body untouched.
 func applyCodexCollaborationPlaintext(body []byte) (out []byte, plan *codexCollabPlan, outcome codexCollabOutcome) {
+	edits, newPlan, outcome := planCodexCollaborationPlaintext(body)
+	if newPlan == nil {
+		return body, nil, outcome
+	}
+	var err error
+	changed := append([]byte(nil), body...)
+	for _, edit := range edits {
+		if edit.delete {
+			changed, err = sjson.DeleteBytes(changed, edit.path)
+		} else {
+			changed, err = sjson.SetBytes(changed, edit.path, edit.value)
+		}
+		if err != nil {
+			return body, nil, codexCollabInvalid
+		}
+	}
+	return changed, newPlan, codexCollabApplied
+}
+
+// planCodexCollaborationPlaintext runs all atomic checks without editing body.
+func planCodexCollaborationPlaintext(body []byte) ([]codexCollabJSONEdit, *codexCollabPlan, codexCollabOutcome) {
 	if !json.Valid(body) || !gjson.ParseBytes(body).IsObject() {
-		return body, nil, codexCollabInvalid
+		return nil, nil, codexCollabInvalid
 	}
 	root := gjson.ParseBytes(body)
 	if !codexCollabUniqueObject(root) {
-		return body, nil, codexCollabInvalid
+		return nil, nil, codexCollabInvalid
 	}
 	if previous := root.Get("previous_response_id"); previous.Exists() && previous.Type != gjson.Null && strings.TrimSpace(previous.String()) != "" {
-		return body, nil, codexCollabUnsupported
+		return nil, nil, codexCollabUnsupported
 	}
 	if root.Get("store").Bool() {
-		return body, nil, codexCollabUnsupported
+		return nil, nil, codexCollabUnsupported
 	}
 	if !codexCollabRequestContainersUnique(root) {
-		return body, nil, codexCollabConflict
+		return nil, nil, codexCollabConflict
 	}
 	if codexCollabUnsupportedShape(root) {
-		return body, nil, codexCollabUnsupported
+		return nil, nil, codexCollabUnsupported
 	}
 
 	namespaces := codexCollabFindNamespaces(root)
 	if len(namespaces) == 0 {
-		return body, nil, codexCollabAbsent
+		return nil, nil, codexCollabAbsent
 	}
 	if codexCollabHasPrivateName(root) {
-		return body, nil, codexCollabConflict
+		return nil, nil, codexCollabConflict
 	}
 	textEdits, textRewrites, err := codexCollabDeveloperTextEdits(root)
 	if err != nil {
-		return body, nil, codexCollabConflict
+		return nil, nil, codexCollabConflict
 	}
 
 	if !namespaces[0].tools.IsArray() {
-		return body, nil, codexCollabConflict
+		return nil, nil, codexCollabConflict
 	}
 	if len(namespaces) > 1 {
 		canonicalSchema, err := codexCollabCanonicalJSON(namespaces[0].node.Raw)
 		if err != nil {
-			return body, nil, codexCollabConflict
+			return nil, nil, codexCollabConflict
 		}
 		for _, namespace := range namespaces[1:] {
 			candidate, err := codexCollabCanonicalJSON(namespace.node.Raw)
 			if !namespace.tools.IsArray() || err != nil || !bytes.Equal(candidate, canonicalSchema) {
-				return body, nil, codexCollabConflict
+				return nil, nil, codexCollabConflict
 			}
 		}
 	}
 	for _, namespace := range namespaces {
 		if !codexCollabUnambiguousJSON(namespace.node) {
-			return body, nil, codexCollabConflict
+			return nil, nil, codexCollabConflict
 		}
 	}
 	for _, item := range root.Get("input").Array() {
 		if item.Get("type").String() == "function_call" && !codexCollabUniqueObject(item) {
-			return body, nil, codexCollabConflict
+			return nil, nil, codexCollabConflict
 		}
 	}
 	if !codexCollabUnambiguousJSON(root.Get("tool_choice")) {
-		return body, nil, codexCollabConflict
+		return nil, nil, codexCollabConflict
 	}
 
 	newPlan := &codexCollabPlan{
@@ -184,12 +205,12 @@ func applyCodexCollaborationPlaintext(body []byte) (out []byte, plan *codexColla
 			name := tool.Get("name").String()
 			if tool.Get("name").Type != gjson.String || name == "" {
 				if tool.Get("type").String() == "function" {
-					return body, nil, codexCollabConflict
+					return nil, nil, codexCollabConflict
 				}
 				continue
 			}
 			if _, duplicate := declared[name]; duplicate {
-				return body, nil, codexCollabConflict
+				return nil, nil, codexCollabConflict
 			}
 			declared[name] = struct{}{}
 			if strings.TrimSpace(tool.Get("type").String()) != "function" {
@@ -202,16 +223,16 @@ func applyCodexCollaborationPlaintext(body []byte) (out []byte, plan *codexColla
 			toolPath := fmt.Sprintf("%s.tools.%d", namespace.path, index)
 			message := tool.Get("parameters.properties.message")
 			if !tool.Get("parameters").IsObject() || !tool.Get("parameters.properties").IsObject() || !message.IsObject() || message.Get("type").Type != gjson.String || message.Get("type").String() != "string" {
-				return body, nil, codexCollabConflict
+				return nil, nil, codexCollabConflict
 			}
 			for _, keyword := range []string{"anyOf", "oneOf", "allOf", "$ref"} {
 				if message.Get(keyword).Exists() || tool.Get("parameters").Get(keyword).Exists() {
-					return body, nil, codexCollabConflict
+					return nil, nil, codexCollabConflict
 				}
 			}
 			encrypted := message.Get("encrypted")
 			if encrypted.Exists() && encrypted.Type != gjson.True && encrypted.Type != gjson.False {
-				return body, nil, codexCollabConflict
+				return nil, nil, codexCollabConflict
 			}
 			if encrypted.Bool() {
 				edits = append(edits, codexCollabJSONEdit{path: toolPath + ".parameters.properties.message.encrypted", delete: true})
@@ -228,18 +249,7 @@ func applyCodexCollaborationPlaintext(body []byte) (out []byte, plan *codexColla
 	}
 	edits = append(edits, codexCollabReferenceEdits(root)...)
 
-	changed := append([]byte(nil), body...)
-	for _, edit := range edits {
-		if edit.delete {
-			changed, err = sjson.DeleteBytes(changed, edit.path)
-		} else {
-			changed, err = sjson.SetBytes(changed, edit.path, edit.value)
-		}
-		if err != nil {
-			return body, nil, codexCollabInvalid
-		}
-	}
-	return changed, newPlan, codexCollabApplied
+	return edits, newPlan, codexCollabApplied
 }
 
 func codexCollabRequestContainersUnique(root gjson.Result) bool {
@@ -340,11 +350,11 @@ func codexCollabDeveloperTextEdits(root gjson.Result) ([]codexCollabJSONEdit, in
 			continue
 		}
 		for partIndex, part := range content.Array() {
-			if part.Get("type").String() != "input_text" {
-				continue
-			}
 			if !codexCollabUniqueObject(part) {
 				return nil, 0, errors.New("ambiguous collaboration system text")
+			}
+			if part.Get("type").String() != "input_text" {
+				continue
 			}
 			if err := appendText(part.Get("text"), fmt.Sprintf("%s.%d.text", path, partIndex)); err != nil {
 				return nil, 0, err
