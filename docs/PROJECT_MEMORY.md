@@ -96,7 +96,7 @@
 - **工单与 2FA**：真实 OpenAI 网页登录/MFA 只有 mock；启用 2FA 须部署 Worker、固定运行时和加密恢复目录，回退前须解决不确定任务并保留密钥与恢复日志。
 - **安全与依赖**：vue-i18n 安全例外 2026-11-27 到期前处理；两台主机的 SSH 密码曾出现在对话中，建议改用密钥并更换；生产 settings 中的明文代理凭据建议轮换；`.github/SECURITY.md` 仍指向上游 Sub2API 的报告渠道，应改为本仓库（该文件未分类，改动需同时登记 `policy.json`）。
 - **待用户决定**：Codex 历史联网搜索导致 502（2026-10-17 诊断，原文已归档）——恢复映射或调整白名单，代码改进前先核实 0.4.0 的 `resilience_web_search_replay` 是否覆盖 apikey 中转账号；XY-image 0.0.17 先交接并经用户确认；远端保留的 3 个含未合入提交的分支（`feat/native-stream-recovery-20260930`、`fix/native-stream-concurrency-20261001`、`fix/signature-retry-preserve-tool-result-media`）是否删除；`tools/gateway-resilience/` 下 `staging/`、`fault-upstream/`、`cdn-sim/` 发布演练脚手架 0.4.6 后未再使用，是否删除。
-- **测试稳定性**：CI 偶发 `TestCompatPreludeCommentHeartbeatStillAllowsFailover/enabled` 等心跳计时用例；2026-10-28 已放宽一组截止时间，其余未定位。`TestGatewayServiceRecordUsage_PeakRateAffectsTokenModeImageOutputTokens` 与 OpenAI 同名用例把峰值时段写成 00:00–23:59，而判定区间是 `[PeakStart, PeakEnd)`，在 23:59 那一分钟运行会失败（2026-10-31 本地遇到，干净 main 相同）。`-race` 下两条用例偶发数据竞争，都在测试代码里，干净 main 同样能复现（2026-11-02）：`TestAuthServiceBindEmailIdentity_AllowsOnlyOneConcurrentAliasVariant` 是测试替身的竞争，10 次约 2 次；`TestRecordCyberPolicyEvent_RuntimeSnapshotRefreshFailureKeepsStaleScope` 在构造函数启动后台 worker 之后才改 `runtimeCacheTTL`。
+- **测试稳定性**：CI 偶发 `TestCompatPreludeCommentHeartbeatStillAllowsFailover/enabled` 等心跳计时用例；2026-10-28 已放宽一组截止时间，其余未定位。`TestGatewayServiceRecordUsage_PeakRateAffectsTokenModeImageOutputTokens` 与 OpenAI 同名用例把峰值时段写成 00:00–23:59，而判定区间是 `[PeakStart, PeakEnd)`，在 23:59 那一分钟运行会失败（2026-10-31 本地遇到，干净 main 相同）。`-race` 下两条用例偶发数据竞争，都在测试代码里，干净 main 同样能复现（2026-11-02）：`TestAuthServiceBindEmailIdentity_AllowsOnlyOneConcurrentAliasVariant` 是测试替身的竞争，10 次约 2 次；`TestRecordCyberPolicyEvent_RuntimeSnapshotRefreshFailureKeepsStaleScope` 在构造函数启动后台 worker 之后才改 `runtimeCacheTTL`。`TestGatewayConvertCancelBeforeOutputBillsNothing` 偶发 3 秒超时（2026-11-04，记忆 PR #198 的 push CI）。原因在测试替身：上游 body 是 `io.NopCloser(pipe)`，客户端取消时关 body 不起作用，只有 `cancel()` 抢在读循环处理完首个事件之前才能通过。在 `cancel()` 前加 200ms 延迟可稳定复现。生产不受影响：真实 body 是 `cancelOnCloseBody`，`Close` 会先取消本次请求，阻塞中的读随即返回。修法：让替身的 `Close` 关闭 pipe。
 - **仓库外环境收尾**：测试服务器的候选镜像、浸泡与演练目录、`xy2api_upgrade` 库按 staging-validation §11 清理；预上线主机的两份切换前备份在正式部署后删除。
 
 ## 进行中的工作
@@ -1346,5 +1346,5 @@ pnpm --dir frontend run build
   - 版本表补登 0.5.2 行：0.5.2 发版 agent 的发版后记录只留在共享工作区，没有提交。
 - 修改文件：本文件与 `PROJECT_MEMORY_ARCHIVE.md`。
 - 验证：`check_docs_consistency.py`、干净树 `sync.py audit`；CI。
-- 卡点/风险：Release 前端构建内存临界，见“未结事项”。
+- 卡点/风险：Release 前端构建内存临界；本 PR 的 push CI 遇到一次测试替身竞态导致的偶发失败，根因已定位、与 0.5.3 无关。两项都见“未结事项”。
 - 下一步：部署与灰度待用户授权，见“未结事项”。
