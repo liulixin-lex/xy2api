@@ -4,7 +4,7 @@
 
 `gateway_resilience_settings.collaboration_plaintext` 缺省 `{ "enabled": false, "models": [] }`。models 最多 16 条，每条去首尾空白后 1–128 字符；去空白后按不分大小写判重，保留第一项，nil 归一为 []。读取、发布和 Clone 均隔离集合。
 
-所有门同时满足才转换：韧性总开关、功能开关、最终映射后的出站模型精确命中清单、OpenAI 账号资格（`extra.openai_collaboration_plaintext` 为布尔 true 或下述连续性产物）、真实 Codex UA/originator、入站 HTTP 且原生 Responses HTTP 出站、非透传/compact/桥接/摊平账号。ForceCodexCLI 不绕过客户端门。API Key 与 OAuth 接线均支持，但预检仅覆盖 API Key 中转站，OAuth 验证前不开启。入口先用 bytes.Contains 检查原始字节中的字面 `"collaboration"`，只有命中才解析并冻结原始根键、协议容器唯一性、store/previous 排除与连续性。未命中时 collabRawBlocked=true；命中但有歧义或状态排除时同样禁止 plan。决策点只读 collabRawBlocked 与原始连续性结果，不因 map 重建、OAuth 改字段或转义声明被归一化而改变资格；此类请求只观测 outcome=unsupported。unsupported 当前合并资格门未满足、原始状态/根键排除与不支持形态，不另细分原因。
+所有门同时满足才转换：韧性总开关、功能开关、最终映射后的出站模型精确命中清单、OpenAI 账号资格（`extra.openai_collaboration_plaintext` 为布尔 true 或下述连续性产物）、真实 Codex UA/originator、入站 HTTP 且原生 Responses HTTP 出站、非透传/compact/桥接/摊平账号。ForceCodexCLI 不绕过客户端门。API Key 与 OAuth 接线均支持，但预检仅覆盖 API Key 中转站，OAuth 验证前不开启。入口先用 bytes.Contains 检查原始字节中的字面 `"collaboration"`，只有命中才解析并冻结原始根键、协议容器唯一性（包括协作命名空间声明的完整 schema，递归检查重复键）、store/previous 排除与连续性。原始请求任何位置都没有该字面时 collabRawBlocked=true，即使转义声明之后归一化也只观测；原始字节任意位置含字面时，照常在原始 JSON 解码后的值上判定（包括转义声明），不影响歧义检查。命中但有歧义或状态排除时同样禁止 plan。决策点只读 collabRawBlocked 与原始连续性结果，不因 map 重建或 OAuth 改字段而改变资格；被排除请求只观测 outcome=unsupported。unsupported 当前合并资格门未满足、原始状态/根键排除与不支持形态，不另细分原因。
 
 只在 tools 或 input[type=additional_tools].tools 声明 collaboration namespace 时挂本次尝试的还原器；不合格请求只观测、不改字节，无声明不挂。非原生提前分流不进入该转换。每次从不可变请求体重新派生 plan；不使用 codexToolNameSessionKey 跨请求继承。设置热变更只影响新尝试，在途 plan 保持冻结。
 
@@ -25,6 +25,8 @@
 流、JSON、SSE→JSON 三出口都恢复；聚合前先观察各帧，保证早先密文证据保留。无法安全恢复身份（无效 JSON、身份歧义）则本地终止：未提交发 502，已提交写协议终态，不把私有名或原始错误下发，不返回 FailoverError 重放。applied 的 SSE 无法聚合成最终 JSON 时同样本地终止。只观测解析失败保留原字节，不制造新中断。
 
 已改写的 instructions / response.instructions 结构化回声按本次 plan 对称恢复。ErrorBody 仅 applied 时按 JSON 字符串解码后匹配别名（含转义），只重新编码含别名的字符串，其余字节不变；非 JSON 错误体按字面替换。非 2xx HTTP 与 SSE type=error 的完整错误信封处理；所有 JSON 响应/事件中非 null 的顶层 error 与 response.error 均处理，包括 HTTP 200 status=failed。根或 response 的重复 error 键仍报错并本地终止；不修改 output、arguments 或用户正文。Forward 协作收尾还原 UpstreamFailoverError.ResponseBody/非空 ClientMessage，确保换号耗尽出口只见规范身份。服务侧分类/观测与错误规则使用原始错误；返回 handler 后，其耗尽路径的错误透传规则按规范名匹配，规则关键词不应包含私有别名（R3-A-4 接受的兼容变化）。内部运维日志如 openai.forward_failed 可保留上游原文/私有名，仅供诊断，不下发客户端；nil plan 零改写。
+
+正文边界：模型生成的协作 message 正文或输出文本可能引用私有工具地址，按红线不对正文改写。P1′ 子 agent 看到同名别名工具，协议身份仍恢复为规范 namespace/name；发版前真实上游 12 次 P1′ c1 中出现 1 次（astra），该次父子闭环正常、功能未受影响，不将其计作协议身份泄漏。
 
 ## 4. schema 兼容
 

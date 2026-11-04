@@ -30,6 +30,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		previousResponse := originalCollabRoot.Get("previous_response_id")
 		collabRawBlocked = !codexCollabUniqueObject(originalCollabRoot) || !codexCollabRequestContainersUnique(originalCollabRoot) || originalCollabRoot.Get("store").Bool() ||
 			(previousResponse.Exists() && previousResponse.Type != gjson.Null && strings.TrimSpace(previousResponse.String()) != "")
+		for _, ns := range codexCollabFindNamespaces(originalCollabRoot) {
+			if !codexCollabUnambiguousJSON(ns.node) {
+				collabRawBlocked = true
+				break
+			}
+		}
 		collabRawContinuity = !collabRawBlocked && openAICollaborationContinuity(body)
 	}
 	defer func() { s.finishCacheDiagnostic(c, body, result) }()

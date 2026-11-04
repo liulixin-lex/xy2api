@@ -723,8 +723,8 @@ gateway:
 前后端同版；默认关闭，不新增环境变量、无需重启。资格、schema 兼容与缓存代价见 [网关韧性 §4.14](../docs/GATEWAY_RESILIENCE.md#414-codex-协作消息明文通道p1)。按以下顺序执行：
 
 1. **列出完整可达账号池。** 在“分组管理 → 编辑”记录目标分组及“无号兜底分组”，沿兜底链继续展开。到“账号管理”按这些分组逐一筛选，列出 API Key/OAuth 账号、所属站、模型映射和调度状态。满载借用从相应分组候选成员中选择，因此纳入整组成员（含低优先级和临时停用账号），不要只列当前粘性号或高份额号；可用“分组管理 → 流量分配”核对完整成员。
-2. **逐站逐模型核验并隔离。** 预检范围为 d0c7a8 / c2a95e / b672e6 × gpt-6.1-sol / gpt-6-astra、Codex 0.166。账号开关表示该站对清单内全部实际出站模型已验证；新增模型先补验。未验证 API Key 账号须从可达池排除，OAuth 尚未预检、也不支持连续性，验证前排除其路由。
-3. **配置全局清单与开关。** 在“系统设置 → 网关 → 网关韧性”配置 collaboration_plaintext.models 和 enabled，确认韧性总开关开启。先确认账号开关均关；只配置全局不因 EFA 缺失的自然明文历史启动转换。连续性只认原始历史中的显式 []，它可由客户端声明，不是授权或账号隔离边界。
+2. **逐站逐模型核验并隔离。** 预检范围为 d0c7a8 / c2a95e / b672e6 × gpt-6.1-sol / gpt-6-astra、Codex 0.166。账号开关表示该站对清单内全部实际出站模型已验证；新增模型先补验。未验证 API Key 账号须从可达池排除，OAuth 尚未预检、也不支持连续性，验证前排除其路由。全局开启后，满足其余资格的连续性对所有分组的 API Key 账号生效；已用 P1′ 的 Key 若改绑到含未验证站的分组，其保留 [] 的会话也会在未验证站被转换，灰度期间避免此类改绑。
+3. **配置全局清单与开关。** 在“系统设置 → 网关服务 → 网关韧性”配置 collaboration_plaintext.models 和 enabled，确认韧性总开关开启。先确认账号开关均关；只配置全局不因 EFA 缺失的自然明文历史启动转换。连续性只认原始历史中的显式 []，它可由客户端声明，不是授权或账号隔离边界。
 4. **整站启用新会话。** 在账号管理统一打开已验证站的目标账号开关，使用真实 Codex 原生 Responses HTTP 验证父子调用和续轮。避开高峰；WS、compact、透传、桥接、摊平、原始 store/previous 或协议歧义都不进入 P1′。
-5. **抽查计数与拒绝。** 运维“网关韧性”查看 collab_plaintext 的 outcome/eligibility、collab_call 与 collab_call_action；系统日志查 resilience.collab_plaintext 的 upstream_status/in_band。只对现有分类中的客户端拒绝告警（带内输出前拒绝为 HTTP 200、in_band=true），账号/余额、429/5xx 不单独触发。48h/7d 用持久 state_rejection 标识与 usage_logs 账号/模型/UA 请求量近似核对，单实例 1h 计数只供抽查。Codex 升级后按 client_version 复核。
+5. **抽查计数与拒绝。** 运维“网关韧性”查看 collab_plaintext 的 outcome/eligibility、collab_call 与 collab_call_action；系统日志查 resilience.collab_plaintext 的 upstream_status/in_band。只对现有分类中的客户端拒绝告警（带内输出前拒绝为 HTTP 200、in_band=true），账号/余额、429/5xx 不单独触发。Warn 不带拒绝原因；按 request_id 关联运维错误日志，查看分类和上游原文。48h/7d 用持久 state_rejection 标识与 usage_logs 账号/模型/UA 请求量近似核对，单实例 1h 计数只供抽查。Codex 升级后按 client_version 复核。
 6. **按客户端选择回退。** 软回退关账号开关：新会话停止启用，保留 [] 的合格 API Key 会话继续。provider 名非 OpenAI 的 Codex 删除历史 EFA，没有连续性，关账号开关等同硬回退；开→关在 c2a95e/d0c7a8 已通过，b672e6 补跑持续 503、无结论。硬回退关总开关/功能或清空 models，所有后续请求停止转换、在途继续还原；OpenAI provider 在 b672e6 账号 470 已出现两次 cyber_policy，存量会话可能需新开。落到关闭开关的 OAuth 或切换到清单外模型也形成开→关；转换状态改变会从工具声明处使下一请求提示缓存失效一次。
