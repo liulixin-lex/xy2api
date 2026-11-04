@@ -72,6 +72,12 @@ export interface GatewayResilienceSettings {
   stream: { prelude_staging: boolean; native_prelude_whitelist: boolean; strict_terminal: boolean }
   /** 0.4.4: learn accounts that only accept streaming requests (W6). */
   capability: { stream_only_learning: boolean; learn_ttl_seconds: number }
+  /**
+   * Codex collaboration messages in plaintext: native Responses HTTP from the Codex client only,
+   * and only on accounts with extra.openai_collaboration_plaintext. `models` are the verified
+   * outbound models after mapping (at most 16, 1 to 128 characters each, no duplicates).
+   */
+  collaboration_plaintext: { enabled: boolean; models: string[] }
 }
 
 export interface GatewayResilienceSettingsResponse {

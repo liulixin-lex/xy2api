@@ -38,7 +38,9 @@ export default {
         cacheAware: '缓存感知预留',
         cacheAwareHint: '在途预留按会话最近一次的缓存读比例估算输入费用。',
         outputP99: '输出 P99 上限',
-        outputP99Hint: '在途预留的输出 Token 取模型近 7 天 P99（下限 1024）。'
+        outputP99Hint: '在途预留的输出 Token 取模型近 7 天 P99（下限 1024）。',
+        collaborationPlaintext: '协作消息明文化',
+        collaborationPlaintextHint: '新的 Codex 协作消息（spawn_agent、send_message、followup_task）改走明文，不再依赖上游签发的密文。仅对 Codex 客户端经原生 Responses HTTP 的请求生效，且需同时开启账号的“协作消息明文化”开关；WebSocket、压缩、透传等其他路径不受影响。只影响新的协作消息，不修复已有会话历史；关闭后新请求立即恢复原样。'
       },
       fields: {
         balancePause: '首次暂停时长（秒）',
@@ -57,7 +59,10 @@ export default {
         codexRetryAfterCap: 'Codex Retry-After 上限（秒）',
         codexRetryAfterCapHint: 'Codex 客户端遇到无号或配置拒绝时，Retry-After 的上限（秒），0 表示关闭。需要“错误语义与防风暴”开启。',
         learnTtl: '学习结果有效期（秒）',
-        learnTtlHint: '默认 21600（6 小时），到期自动恢复；修改只影响之后新学到的记录。也可在账号列表的状态列手动清除。'
+        learnTtlHint: '默认 21600（6 小时），到期自动恢复；修改只影响之后新学到的记录。也可在账号列表的状态列手动清除。',
+        collaborationModels: '已验证模型',
+        collaborationModelsHint: '每行一个，按模型映射后的实际出站模型匹配（不区分大小写）。最多 16 个，每个不超过 128 个字符，重复项自动合并；不在清单中的模型不转换。',
+        collaborationModelsEmpty: '清单为空，开关打开也不会转换任何请求。'
       },
       switches: {
         postOutputRebind: '输出后首次失败即改绑',
@@ -81,7 +86,9 @@ export default {
       saveFailed: '保存失败',
       loadFailed: '无法读取网关韧性设置。',
       reload: '重新加载',
-      invalidNumber: '{field} 需为 {min}–{max} 之间的整数'
+      invalidNumber: '{field} 需为 {min}–{max} 之间的整数',
+      invalidCollaborationModelsCount: '已验证模型最多 {max} 个',
+      invalidCollaborationModelLength: '每个已验证模型不超过 {max} 个字符'
     },
     panel: {
       title: '网关韧性',
