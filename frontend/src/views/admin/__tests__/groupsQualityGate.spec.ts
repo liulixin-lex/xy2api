@@ -142,8 +142,7 @@ describe("qualityGateSaveFailureKey", () => {
 
 describe("qualityGateRejectedField", () => {
   it.each([
-    ["max_ttft_p90_seconds", "max_ttft_p90_seconds"],
-    ["max_error_rate", "max_error_rate_percent"],
+    ["v3.max_ttft_p90_seconds", "max_ttft_p90_seconds"],
     ["v3.max_error_rate", "max_error_rate_percent"],
     ["v3.min_cache_keep_rate", "min_cache_keep_rate_percent"],
   ])("maps a 400 on %s to the form field to highlight", (field, formField) => {
@@ -152,9 +151,11 @@ describe("qualityGateRejectedField", () => {
 
   it("returns nothing for fields without an input, other statuses and missing metadata", () => {
     expect(qualityGateRejectedField({ status: 400, metadata: { field: "v3.strict" } })).toBeUndefined();
+    // 只认 “v3.<字段>”；裸字段名与 v2 字段不再映射。
+    expect(qualityGateRejectedField({ status: 400, metadata: { field: "max_error_rate" } })).toBeUndefined();
     expect(qualityGateRejectedField({ status: 400, metadata: { field: "pinned_account_ids" } })).toBeUndefined();
     expect(qualityGateRejectedField({ status: 400 })).toBeUndefined();
-    expect(qualityGateRejectedField({ status: 409, metadata: { field: "max_error_rate" } })).toBeUndefined();
+    expect(qualityGateRejectedField({ status: 409, metadata: { field: "v3.max_error_rate" } })).toBeUndefined();
     expect(qualityGateRejectedField(null)).toBeUndefined();
   });
 });

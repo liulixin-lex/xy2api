@@ -91,15 +91,17 @@ describe('AccountGroupsCellButton', () => {
     }
     const panel = () => document.querySelector<HTMLElement>('[data-testid="account-groups-quality-tooltip"]')!
 
-    it('badges only failing and retest groups and opens the panel only from the small indicator', async () => {
+    it('badges failing, retest and unknown groups and opens the panel only from the small indicator', async () => {
       const wrapper = mountGated(new Map([
         [1, cell('passing')],
         [2, cell('failing', { error: { state: 'fail', value: 0.2, samples: 60, failures: 12, wilson_low: 0.12, wilson_high: 0.31, bad_until: '2026-11-04T12:00:00Z' } })],
         [3, cell('unknown', { cache: { state: 'none', value: null, samples: 4, wilson_low: null, wilson_high: null, bad_until: null } })]
       ]))
-      expect(wrapper.findAll('[data-testid="group-quality-badge"]').map(badge => badge.attributes('data-state'))).toEqual(['failing'])
-      // 未知组排在达标组前面，显示普通标签，不带“达标”；达标组收进 +1。
-      expect(wrapper.findAll('[data-test="badge"]').map(badge => badge.text())).toEqual(['Group 3'])
+      // 未知组排在达标组前面，用灰色状态标签（不用平台色），悬停说明暂按 0 档；达标组收进 +1。
+      const badges = wrapper.findAll('[data-testid="group-quality-badge"]')
+      expect(badges.map(badge => badge.attributes('data-state'))).toEqual(['failing', 'unknown'])
+      expect(badges[1].attributes('title')).toBe('admin.groupQualityGate.unknownBadgeTitle:{"group":"Group 3"}')
+      expect(wrapper.find('[data-test="badge"]').exists()).toBe(false)
       expect(wrapper.text()).toContain('+1')
       const indicator = wrapper.get('[data-testid="group-quality-indicator"]')
       expect(indicator.attributes('data-state')).toBe('failing')

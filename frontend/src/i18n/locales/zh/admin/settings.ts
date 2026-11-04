@@ -1362,9 +1362,9 @@ export default {
         title: 'OpenAI 实验调度策略',
         description: '默认关闭。开启后仅影响本网关在 OpenAI 账号间的实验性调度选择逻辑，不代表上游 OpenAI 官方能力。',
         lowRatePriorityTitle: '低倍率优先',
-        lowRatePriorityDescription: '开启后优先选择计费倍率较低的账号；倍率相同时，再比较账号优先级和当前负载等。启用实验调度策略后，此开关不生效。',
+        lowRatePriorityDescription: '开启后，候选账号依次按优先级 → 接近满载的置后 → 计费倍率（低的在前）→ 同倍率按预计首字（快的在前）→ 负载 → 最近使用排序。本组开了质量门槛时，先按质量档排序，以上顺序只在同一档内生效。启用实验调度策略后，此开关不生效。',
         lowRatePriorityScopeTitle: '适用范围',
-        lowRatePriorityScopeDescription: '选“指定分组”时，只在所选的 OpenAI 分组内按倍率排序。开了质量门槛的分组只在同一质量档内按倍率排序，不跨档。',
+        lowRatePriorityScopeDescription: '选“指定分组”时，只在所选的 OpenAI 分组内按倍率排序；其他分组沿用优先级 → 负载 → 最近使用的顺序。',
         lowRatePriorityScope: {
           all: '全部分组',
           groups: '指定分组'

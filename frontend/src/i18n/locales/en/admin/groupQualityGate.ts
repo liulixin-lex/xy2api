@@ -25,6 +25,7 @@ export default {
     column: 'Gate',
     summaryTitle: '{counts}; {composition}',
     groupSamplesShort: 'Too few group samples',
+    unknownBadgeTitle: '{group} · Unknown: not enough samples yet, ranked as tier 0 for now',
     pinnedMark: 'Pinned',
     state: {
       passing: 'Passing',

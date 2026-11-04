@@ -95,15 +95,15 @@ export const qualityGateSaveFailureKey = (error: unknown): string =>
   errorStatus(error) === 409 ? "groupSavedGateConflict" : "groupSavedGateFailed";
 
 const POLICY_FIELD_TO_FORM: Record<string, QualityGateField> = {
-  max_ttft_p90_seconds: "max_ttft_p90_seconds",
-  max_error_rate: "max_error_rate_percent",
-  min_cache_keep_rate: "min_cache_keep_rate_percent",
+  "v3.max_ttft_p90_seconds": "max_ttft_p90_seconds",
+  "v3.max_error_rate": "max_error_rate_percent",
+  "v3.min_cache_keep_rate": "min_cache_keep_rate_percent",
 };
 
-// 后端 400 在 metadata.field 里给出被拒的 v3 字段（带不带 “v3.” 前缀都认），换成要标红的表单项；
+// 后端 400 在 metadata.field 里给出被拒的 v3 字段（“v3.<字段>”），换成要标红的表单项；
 // 开关等没有输入框的字段返回 undefined。
 export const qualityGateRejectedField = (error: unknown): QualityGateField | undefined => {
   if (errorStatus(error) !== 400) return undefined;
   const field = (error as { metadata?: { field?: unknown } }).metadata?.field;
-  return typeof field === "string" ? POLICY_FIELD_TO_FORM[field.replace(/^v3\./, "")] : undefined;
+  return typeof field === "string" ? POLICY_FIELD_TO_FORM[field] : undefined;
 };

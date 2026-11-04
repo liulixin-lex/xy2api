@@ -25,6 +25,7 @@ export default {
     column: '门槛',
     summaryTitle: '{counts}；{composition}',
     groupSamplesShort: '本组样本不足',
+    unknownBadgeTitle: '{group} · 未知：样本不足，暂按 0 档参与排序',
     pinnedMark: '固定',
     state: {
       passing: '达标',

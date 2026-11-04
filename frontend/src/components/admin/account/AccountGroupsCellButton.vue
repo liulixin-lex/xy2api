@@ -31,7 +31,12 @@
       <template v-if="groups.length">
         <!-- “+N”跟最后一个标签放在一起，换行时不会单独落到一行 -->
         <span v-for="(group, index) in visibleGroups" :key="group.id" class="inline-flex min-w-0 max-w-full items-center gap-1">
-          <GroupQualityBadge v-if="attentionOf(group.id)" :name="group.name" :quality="attentionOf(group.id)!" :title="group.name" />
+          <GroupQualityBadge
+            v-if="statusBadgeOf(group.id)"
+            :name="group.name"
+            :quality="statusBadgeOf(group.id)!"
+            :title="statusBadgeOf(group.id)!.kind === 'unknown' ? t('admin.groupQualityGate.unknownBadgeTitle', { group: group.name }) : group.name"
+          />
           <GroupBadge
             v-else
             :name="group.name"
@@ -138,7 +143,7 @@ import {
 } from './groupQualityPresentation'
 
 // 账号列表的分组单元格。分组标签是一个按钮，点开“编辑分组”；没有分组时显示“—”也能点。
-// 只有不达标、待复测的分组用带状态的标签，其余显示普通标签（未知不会显示成达标）。开启门槛时标签前有一个小标识，
+// 不达标、待复测与未知的分组用带状态的标签（未知为灰色），达标、固定与未开门槛的组显示普通标签。开启门槛时标签前有一个小标识，
 // 只有悬停、键盘聚焦或点按它才弹出门槛面板：每个门槛分组一段（状态、本组构成、三维小表、坏记忆），底部是判慢让位。
 const TIP_WIDTH = 352
 const TIP_GAP = 6
@@ -175,9 +180,10 @@ const tooltipId = useId()
 const clock = (iso: string) => formatDateTime(iso, QUALITY_CLOCK)
 
 const orderedGroups = computed(() => orderGroupsByQuality(props.groups, props.quality))
-const attentionOf = (groupId: number) => {
+// 带状态的标签：不达标、待复测，以及门槛组里的未知（灰色，不用平台色，免得看起来像达标）。
+const statusBadgeOf = (groupId: number) => {
   const cell = props.quality?.get(groupId)
-  return cell && isGroupQualityAttention(cell) ? cell : undefined
+  return cell && (isGroupQualityAttention(cell) || cell.kind === 'unknown') ? cell : undefined
 }
 const panel = computed(() => (props.quality?.size ? groupQualityPanel(orderedGroups.value, props.quality, t, clock) : null))
 const indicatorLabel = computed(() => {

@@ -1368,9 +1368,9 @@ export default {
         title: 'OpenAI experimental scheduler policy',
         description: "Disabled by default. When enabled, this only changes the gateway's experimental account-selection policy for OpenAI traffic; it does not indicate an upstream OpenAI capability.",
         lowRatePriorityTitle: 'Prefer lower rates',
-        lowRatePriorityDescription: 'When enabled, accounts with lower billing rates are preferred. If rates are equal, account priority, current load, and other scheduling factors are considered. This switch is ignored when the experimental scheduler is enabled.',
+        lowRatePriorityDescription: 'When enabled, candidate accounts are ordered by priority → nearly full accounts last → billing rate (lower first) → predicted first token at equal rates (faster first) → load → least recently used. In groups with a quality gate, accounts are first ordered by quality tier and this order applies within each tier. This switch is ignored when the experimental scheduler is enabled.',
         lowRatePriorityScopeTitle: 'Applies to',
-        lowRatePriorityScopeDescription: 'With "Selected groups", accounts are ordered by rate only in the chosen OpenAI groups. Groups with a quality gate order by rate only within each quality tier, never across tiers.',
+        lowRatePriorityScopeDescription: 'With "Selected groups", accounts are ordered by rate only in the chosen OpenAI groups; other groups keep the priority → load → least recently used order.',
         lowRatePriorityScope: {
           all: 'All groups',
           groups: 'Selected groups'
