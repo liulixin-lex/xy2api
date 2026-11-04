@@ -8,6 +8,10 @@ Apple `container` support is intended for local development and operator-managed
 
 Apple `container` 1.1 does not provide restart policies, automatic startup, workload health scheduling, a Docker API socket, or full Compose orchestration. `apple-container.sh` supplies ordered startup and readiness checks when you invoke it. Inside the application container, a small supervisor relaunches the XY2API process after the Web UI requests a restart; it does not restart stopped containers or the stack itself.
 
+## Script Validation
+
+The required CI `shell` job runs on Ubuntu and checks deployment-script syntax and Linux deployment policies. Apple-specific lifecycle tests remain available through the manually triggered **Apple container tests (manual)** workflow on macOS, or locally with `/bin/bash deploy/tests/apple-container-test.sh`. They use offline `container` and `curl` fixtures with native macOS `stat` and `plutil`; they do not start real containers or validate the Apple runtime. These optional macOS tests do not block Linux releases. Run them when changing the Apple deployment script; real runtime validation still requires a supported Mac.
+
 ## Requirements
 
 - A Mac with Apple silicon

@@ -6,20 +6,20 @@
 
 ## 当前交接状态
 
-- **门槛 v3 实施（2026-11-04 13:50 UTC；用户授权后已推送并开 PR #194，等 CI）**：分支 `feat/gate-v3-20261104`，基于 origin/main `c89f8e66d`。合并、发版、部署各需单独授权。
+- **门槛 v3 实施（2026-11-04 14:50 UTC；PR #194 已合并，main `746ec14fc`；用户授权发版 0.5.2，版本准备中，未部署）**：分支 `feat/gate-v3-20261104`，CI 20 项全绿（pull_request 运行里 macOS `shell` 因排不到机器被取消，重跑后通过）。0.5.2 包含 #191–#194，迁移新增 289。部署需单独授权。
   - 范围：门槛 v3、判慢让位、P1-B、同站暂停、`usage_logs.attempt_first_output_ms`（迁移 289）、低倍率优先分组范围、前端；另含用户追加的会话状态两条约束：
     - 带密文片段的请求不软迁移，P1-B 退回连击规则，WS 增量轮沿用标记；
     - 状态族拒绝不触发 P1-B，不计冷却与连击。
   - 这两条约束的最终形态以 `045523185` 为准（会话状态任务记的 `93762008a` 之后，又按红队第 3 轮补了 P1-B 回退与判定收窄）。
   - 门禁：最终头全部通过（lint 0、vet、unit 68 包、`ci_gate.py` -race 0 跳过、Docker 集成 60 包），文档一致性、干净树 `sync.py audit`、scheduler-diff 也通过；前端沿用 `1830baba1` 的全量门禁结果，之后前端代码无变化。
   - 两路红队三轮均签字，无 P0/P1。
-  - 待用户：合并、发版、部署各需单独授权。上线后按 runbook 逐组启用（升级继承关闭），并做 48 小时与 7 天核对。详见“进行中的工作”。
+  - 待用户：部署需单独授权。上线后按 runbook 逐组启用（升级继承关闭），并做 48 小时与 7 天核对。详见“进行中的工作”。
 - **Codex 本地 400 配置咨询（2026-11-04）**：已核对指定调查会话与本机 0.166.0；本地可关闭子 agent 或以本地模型目录改用 V1 来减少新协作密文，不修复已有坏历史，也不覆盖中转内部状态错误。未改客户端配置与生产；登记原文已归档。
-- **会话状态归属类报错（2026-11-04；方案定稿，astra r13 已签字，待用户批准与分派）**：入口 `.work/tasks/20261104-encrypted-state-breaks/FINAL_v3.md`（设计）＋`HANDOFF_FINAL.md`（功能区工作包交接，交其它主 agent 分派）＋`precheck/RESULT.md`。只读，未改代码与生产配置。
+- **会话状态归属类报错（2026-11-04；方案定稿，用户已批准定稿，astra r15 已签字闭合）**：入口 `.work/tasks/20261104-encrypted-state-breaks/FINAL_v3.md`（设计）＋`HANDOFF_FINAL.md`（功能区工作包交接，交其它主 agent 分派）＋`precheck/RESULT.md`。只读，未改代码与生产配置。
   - **结论**：去协作工具 `message.encrypted` 不改名→OpenAI 硬 400（保留工具 schema 校验）；网关侧明文化须"改命名空间节点名+回程还原"，为业界唯一源头修复（CLIProxyAPI MIT、codex2api 等；`research/*`）。本仓库已有骨架 `openai_codex_tool_names.go`（`python`→`python__sub2api`，会话级持久、覆盖 OAuth 原生/透传/WS 两路）可扩展，#4978 针对"摊平"、走"改命名空间"避开。
-  - **两层**：Tier 0（A 只 S2 真 400+响应头未提交才写、E 已落地 `93762008a`、P0 观测）可即做；Tier 1（P1′ 改命名空间+还原成规范 `{namespace:collaboration,裸名}`+补 `encrypted_function_args:[]` 带密文否决+不改历史、冲突先判后原子、首版原生 HTTP 同接 API Key/OAuth，WS/compact 二期）须预检 2a(HTTP 同目标对照)/2b(端到端真实 Codex 验证补不补 `[]`) 通过 + 两路红队后一个 PR。
-  - **评审**：astra r4–r13（r10 的 B1–B6、r11 首版范围收敛原生 HTTP、r12 清理旧绝对结论，r13 核对 SHA-256 一致后签字 `reviews/astra_r13.md`）。签字仅确认方案与交接文档闭合，**预检/实施/红队/上线验收均未过**。
-  - **待用户**：是否授权 A 上生产、是否立 Tier 1、预检 2a/2b 授权。测试 Key（分组 57）用户自建、本会话只在环境变量用未落盘。
+  - **两层（用户 2026-11-04 定稿）**：Tier 0 = E 已落地 `93762008a`（随 v3 发版）+ **A（S2 真 400）暂缓不上生产**（保留备用，过渡期 S2 维持现状、用户接受代价）；**Tier 1 立项**（P1′ 改命名空间+还原成规范 `{namespace:collaboration,裸名}`+补 `encrypted_function_args:[]` 带密文否决+不改历史、冲突先判后原子、首版原生 HTTP 同接 API Key/OAuth、WS/compact 二期），**P0 观测并入 Tier 1 的 PR**（观测默认开、P1′ 默认关）。执行序：预检 2a/2b 两步都过 → 一个 PR → 两路红队 → 发版前端到端 → 灰度；立项不越过预检门禁。
+  - **评审**：astra r4–r15（r10 的 B1–B6、r11 首版范围收敛原生 HTTP、r12 清理旧绝对结论，r13 核对 SHA-256 签机制/红线 `reviews/astra_r13.md`）；用户定稿后的范围变更（A暂缓/P0并入/Tier1立项，仅改范围排期、机制/红线/§8 逐字未动）r14 复核发现回退措辞冲突、已按其原句改定，**r15 核对新哈希（FINAL_v3 `ec3a4b32…`、HANDOFF `1ec8a9da…`）后闭合签字** `reviews/astra_r15.md`。签字仅确认方案与交接文档闭合，**预检/实施/红队/上线验收均未过**。
+  - **用户已定、待授权**：A 暂缓、P0 并入 Tier 1、Tier 1 立项已定；**待授权**预检 2a/2b（测试号/测试服务器）、推送/PR/合并/发版/灰度。测试 Key（分组 57）用户自建、本会话只在环境变量用未落盘。
   - 详见“进行中的工作”与本日志。
 - **Claude 判慢让位红队 A r4（2026-11-03 13:20 UTC）**：`737e7c7e4` 的 r3 P1 已闭合，签字已追加至本地 `implementation/redteam_astra_r2.md`；原 overlay 与正式回归均新过旧失败，目标树干净。登记已原样归档；只读复核未改代码、未提交。
 
@@ -89,6 +89,17 @@
 
 ## 进行中的工作
 
+- **20261104-release0502-handoff**（2026-11-04 17:22 UTC，发版接力）：用户再次授权继续 0.5.2 发版（包含 #191–#194，新增迁移 289），不部署生产。
+  - 版本 PR #195：head `2d41304954e51cf62809cbf38ac8a44cd6fa34ff`，base `746ec14fc`；除两个 macOS `shell` 检查取消外均通过，GitHub Actions 事故已恢复。
+  - 下一步：只重跑取消的检查；全绿后固定 head 普通合并，annotated `v0.5.2` 指向合并提交（正文保留 Markdown），等待 Release 并核验原生包、校验和及镜像。
+  - 保留主工作区和其它工作树的既有改动；此次只在版本工作树维护发版记忆。部署及生产配置不在授权范围。
+  - 17:40 UTC：用户授权 Linux 优先、可用备用开发机执行发布验证。把必需 `shell` job 迁到 Ubuntu，保留 Apple 脚本语法检查及全部 Linux 部署策略测试；Apple 专属生命周期测试转为独立手动 macOS workflow。镜像仍为 Linux 双架构，原生包继续交叉编译。备用开发机首次连接超时，短重试后可用 GitHub Ubuntu runner 完成。
+
+- **20261104-collab-plaintext-impl**（2026-11-04 14:35 UTC 开始，Claude 主持与集成）：按本地 `.work/tasks/20261104-encrypted-state-breaks/` 的 `FINAL_v3.md` 与 `HANDOFF_FINAL.md` 实施 Tier 1（P0 状态族识别与观测，默认开；P1′ 协作消息明文通道，默认关）。本地实施记录在同目录 `implementation/`（不入库）。
+  - 集成分支 `feat/collab-plaintext-20261104`（Paseo 工作树 `collab-integration`），基于 PR #194 头 `c96a488fb`；#194 合入后 rebase 到 main。
+  - 分工（用户 11-04 指定）：后端 gpt-6-astra xhigh 三路并行，前端 Opus high，预检 2a/2b 脚本 Opus xhigh；红队 astra xhigh 与 Opus xhigh 两路。
+  - 门禁：预检 2a/2b 两步都过，P1′ 才进 PR；任一不过，P1′ 首版不发并回报用户。授权：生产只读。推送、PR、合并、发版、部署、灰度未授权。
+
 - **20261104-gate-v3-impl**（2026-11-04 09:35 UTC 开始，Claude 主持与集成）：按本地 `.work/tasks/20261103-gpt-errors-gate-cache/` 的 `PLAN_T2_FINAL.md` 与 `HANDOFF.md` 实施门槛 v3、判慢让位与急性保护，一次开发、一次发版。本地实施记录在同目录 `implementation/`（不入库）。
   - 集成分支 `feat/gate-v3-20261104`（Paseo 工作树 `gate-v3-integration`，基于 origin/main `c89f8e66d`）。契约提交 `f9edba129`：档位常量改名为 `GroupQualityGateTierPass`/`Retest`/`Fail`，门槛视图加 `MigrationTarget`，OpenSpec `group-quality-gate-v3-20261104`（design §5 为各路共用的接口契约）。
   - 分工（用户 11-04 指定）：后端 gpt-6-astra xhigh 三路并行（甲 WP1/6/7，乙 WP2，丙 WP3/4/5），前端 Opus high（WP8），发版前只读核对 WP10；红队 astra xhigh 与 Opus xhigh 两路。各路在集成分支的子分支开发，由主持方合入。
@@ -115,6 +126,8 @@
     - 卡点：等待用户授权。
     - 下一步：用户授权后推送分支并开 PR，等 CI 全绿后再等合并授权。
   - 13:50 UTC：用户授权推送并开 PR。记忆文件按主工作区的版本带入；与 origin/main 三方核对后确认，主工作区版本已包含 origin 的全部更新。已推送并开 PR #194。合并、发版、部署未授权。
+  - 14:38 UTC：CI 20 项全绿（pull_request 运行里 macOS `shell` 排队超时被取消，单独重跑后通过）。用户授权后按头提交 `c96a488fb` 合并 PR #194，得到 main `746ec14fc`。未发版、未部署。本地 main 工作区有其他任务未提交的记忆改动，没有拉取。
+  - 14:50 UTC：用户授权发版 0.5.2。版本准备分支 `chore/release-0.5.2`：VERSION、`UPSTREAM_BASE.json`、`docs/README.md` 的 OpenSpec 状态。合并后在合并提交上打 annotated tag `v0.5.2`。不部署。
 
 - **20261103-claude-ttft-routing**（2026-11-03 05:10 UTC 开始，Claude 主持）：Claude（Anthropic）30 天首字与组内路由只读分析（gpt-6-astra xhigh 反方三轮签字），用户批准后实施 Claude 判慢让位与粘性迁出。本地 `.work/tasks/20261103-claude-ttft-routing/`（不入库）：`FINAL.md` 是方案，§7 记实施期变更；`implementation/` 存简报、红队报告与缓存回放。
   - 14:07 UTC 状态：**PR #193 已合并**，合并提交为 main `c89f8e66d`；CI 20 项全部通过（首轮 upstream-sync-audit 因 `policy.json` 旧字面量失败，`607402d71` 修复）。未发版、未部署，均需另行授权。
@@ -208,12 +221,12 @@
     - 下次发版要注意：现在主用的是新实例，原 compose 描述的是已停止的旧实例。
     - 本地报告 `handoff/bluegreen_h1_report.md`。
     - 待办：1 小时速查（13:19 UTC）；明天 12:30 UTC 起跑同时段 24 小时验收（`scripts/h1_trial_verify_samehours.sql`）。
-- **20261104-encrypted-state-breaks**（2026-11-04 07:45 UTC 开始，Claude 主持，gpt-6-astra xhigh 反方；方案定稿、astra r13 已签字，待用户批准与分派）：用户授权只读连接生产。第一阶段分析截图报错；09:35 UTC 起扩大到最近一周全部 400，要求检索成熟网关方案、与 astra 深入讨论、规划能明确解决问题的方案；用户最终要求按最佳方案写成功能区工作包，交其它主 agent 分派执行。只读，未改代码与生产配置。本地 `.work/tasks/20261104-encrypted-state-breaks/`（不入库），入口 `FINAL_v3.md`（设计）+`HANDOFF_FINAL.md`（工作包交接）。FINAL_v2 方案细节与更早过程登记已原样归档。
+- **20261104-encrypted-state-breaks**（2026-11-04 07:45 UTC 开始，Claude 主持，gpt-6-astra xhigh 反方；方案定稿、用户已批准定稿 A暂缓/P0并入Tier1/Tier1立项，astra r15 已签字闭合）：用户授权只读连接生产。第一阶段分析截图报错；09:35 UTC 起扩大到最近一周全部 400，要求检索成熟网关方案、与 astra 深入讨论、规划能明确解决问题的方案；用户最终要求按最佳方案写成功能区工作包，交其它主 agent 分派执行。只读，未改代码与生产配置。本地 `.work/tasks/20261104-encrypted-state-breaks/`（不入库），入口 `FINAL_v3.md`（设计）+`HANDOFF_FINAL.md`（工作包交接）。FINAL_v2 方案细节与更早过程登记已原样归档。
   - 一周事实（10-28 至 11-04 09:50 UTC）：OpenAI 最终 400 共 2,043；0.5.1 后状态族 837/1,004（83%）。S1 中转状态 452（442 输出后失败，Codex 重连多能恢复）。S2–S4 按文案归类共 311（**可能涉及** Codex 多 agent v2 协作片段，但具体来源与验证域尚待确认——不等于 311 全是协作密文）。生产 64 个 OpenAI 号全非透传；错误透传规则表为空。
   - 预检实测（12:30 UTC，用户授权测试 Key+临时分组 57，经网关跨 3 站）：保留标记→`gAAAA…` 密文无 `encrypted_function_args`；去 `message.encrypted` 不改名→gpt-6.1-sol 收 OpenAI 原文 400「reserved…must match the configured schema」，gpt-6-astra 被中转包 400。→ 去标记不改名不可行，须"改命名空间节点名+回程还原"（本轮所查实现里唯一源头修复，CLIProxyAPI MIT、codex2api 等；`research/*`）。详见 `precheck/RESULT.md`（测试 Key 只在环境变量用、未落盘）。
-  - 最终方案两层（FINAL_v3，取代 FINAL_v2）：Tier 0（A 只 S2 真 400+响应头未提交才写、E 已落地 `93762008a`、P0 观测）即做；Tier 1（P1′ 扩展本仓库已有改名+还原骨架 `openai_codex_tool_names.go` 到 `collaboration` 命名空间，还原成规范 `{namespace:collaboration,裸名}`+补 `encrypted_function_args:[]` 带密文否决+不改历史、冲突先判后原子，首版原生 HTTP 同接 API Key/OAuth、WS/compact 二期）须预检 2a(HTTP 同目标对照)/2b(端到端真实 Codex) + 两路红队后一个 PR。不做：按格式改写存量密文、占位/信封/改 id、首版摘要索引、S1 重放。
-  - 评审：astra r4–r13 签字（r10 的 B1–B6、r11 首版范围收敛原生 HTTP、r12 清理旧绝对结论，r13 核对两文件 SHA-256 一致后签字 `reviews/astra_r13.md`）。签字仅确认方案与交接文档闭合，**预检/实施/红队/上线验收均未过**。
-  - 下一步/待用户：交接包交其它主 agent 分派；用户决定 A（改生产需授权）是否现做、P0 是否先行、Tier 1 是否立项并授权预检 2a/2b（测试号/测试服务器）。E 随 v3 发版。用户侧 V1/关闭子 agent 指引无法联系用户、留文档。
+  - 最终方案两层（FINAL_v3，取代 FINAL_v2；用户 2026-11-04 定稿）：Tier 0 = E 已落地 `93762008a`（随 v3 发版）+ **A（S2 真 400）暂缓不上生产**（保留备用、过渡期 S2 维持现状）；**Tier 1 立项**（P1′ 扩展本仓库已有改名+还原骨架 `openai_codex_tool_names.go` 到 `collaboration` 命名空间，还原成规范 `{namespace:collaboration,裸名}`+补 `encrypted_function_args:[]` 带密文否决+不改历史、冲突先判后原子，首版原生 HTTP 同接 API Key/OAuth、WS/compact 二期），**P0 观测并入 Tier 1 的 PR**（默认开、P1′ 默认关）；执行序：预检 2a/2b 两步过 → 一个 PR（P0+P1′）→ 两路红队 → 发版前端到端 → 灰度。不做：按格式改写存量密文、占位/信封/改 id、首版摘要索引、S1 重放。
+  - 评审：astra r4–r15（r10 的 B1–B6、r11 首版范围收敛原生 HTTP、r12 清理旧绝对结论，r13 核对 SHA-256 签机制/红线 `reviews/astra_r13.md`）；用户定稿后的范围变更（A暂缓/P0并入/Tier1立项，仅改范围排期、机制/红线/§8 逐字未动）r14 复核发现回退措辞冲突、已按其原句改定，r15 核对新哈希后闭合签字 `reviews/astra_r15.md`。签字仅确认方案与交接文档闭合，**预检/实施/红队/上线验收均未过**。
+  - 用户已定：A 暂缓、P0 并入 Tier 1、Tier 1 立项。下一步：交接包交其它主 agent 分派；**待授权**预检 2a/2b（测试号/测试服务器）、推送/PR/合并/发版/灰度。E 随 v3 发版。用户侧 V1/关闭子 agent 指引无法联系用户、留文档。
 - **20261103-recent-health-metrics**（2026-11-03 06:36 UTC 开始，Claude 主持，gpt-6-astra xhigh 反方）：用户授权只读连接生产，分析账号管理页“近期表现”列（错误数、首字、缓存率）的计算口径与数据来源，找出让数字偏离账号真实表现的特殊情况，提出优化方案。只读，不改代码与生产配置；复用已开的 SSH 复用连接，不关闭他人的连接。本地 `.work/tasks/20261103-recent-health-metrics/`（不入库）。
   - 08:30 UTC 状态：联合定稿（astra 三轮，签字无阻断），入口为本地 `FINAL.md`，**待用户批准**，未改代码。09:20 UTC 按用户追问（样本量、比率与次数、P90 与平均、缓存统计方式）更新为第 2 版。
   - 现行口径：
@@ -1251,3 +1264,16 @@ pnpm --dir frontend run build
 - 更正：本任务 13:20 UTC 日志的“已有真密文各家都救不回”“改名+还原是唯一”等绝对措辞，按 astra r12 已在定稿中收窄为限定表述；日志为历史记录不改写，以 `FINAL_v3.md` 定稿为准。
 - 卡点/风险：签字仅确认方案与交接文档闭合，预检 2a/2b、实施回归、两路红队、上线验收均未过，后续按定稿门禁执行。
 - 下一步：交接包交其它主 agent 分派；用户决定 A（改生产需授权）是否现做、P0 是否先行、Tier 1 是否立项并授权预检 2a/2b。
+
+### 2026-11-04 14:15 UTC — 20261104-encrypted-state-breaks — 用户定稿决策并入、astra r14–r15 复核签字（只读）
+
+- 请求/目标：用户就定稿做出 4 项范围/排期决策，据此改定两份文档并取得 astra 对范围变更的最终确认。
+- 开始状态：承接本任务 r13 签字版（FINAL_v3 `e8b1b82b…`、HANDOFF `8480e6f2…`）；两份记忆文件有其他任务未提交改动，予以保留。
+- 用户决策（2026-11-04）：① A（S2 真 400 规则）暂缓、不上生产（保留备用，过渡期 S2 维持现状、用户接受代价）；② P0 并入 Tier 1 的 PR（观测默认开、P1′ 默认关）；③ Tier 1 立项；④ E 随 v3 发版。
+- 完成操作：
+  - 改定 FINAL_v3（标题/状态→定稿；§0 建议→定稿决策；§5 Tier 0 改为"已落地 E + 暂缓 A"、P0 移入新增 §5.0；§9 待决→已定）与 HANDOFF（Stream 0 标注 E 无待办/A 暂缓/P0 并入 Stream 2；门禁与顺序改为预检为第一步→一个 PR→红队）。机制 §5.1–5.4、红线、边界 §8 逐字未动。
+  - astra r14 复核：发现我把"预检不过"的回退误写成"直接启用暂缓的 A"，与"A 暂缓不上生产"冲突（且启用 A 属改生产需授权）。已按 r14 原句改定：预检不过→P1′ 首版不发、Tier 0 维持现状并回报用户；启用 A 须另行取得授权。并把各处"可随时启用 A"补上"改生产需授权"。
+  - astra r15 核对新哈希（FINAL_v3 `ec3a4b3269227f0b823e4859b54c1dbba8533d934b3ba7738b2b43713aeb00ca`、HANDOFF `1ec8a9da929be0e9d51b361153aabb96a4477067bc1d5c2797ca40fb0c2c133b`）后闭合签字（`reviews/astra_r15.md`）。签名溯源写入 HANDOFF 开头；因文件不能内含自身哈希，权威哈希只记在 astra_r13/r15.md，交付物不再改动以保持与 r15 签字字节一致。
+- 修改文件：`docs/PROJECT_MEMORY.md`（交接、进行中、本条）；本地任务目录（不入库）。未改代码、生产配置，未调用生产模型。
+- 卡点/风险：A 暂缓=Tier 1 上线前 S2 无新增止血（用户接受）；签字只确认文档闭合，预检 2a/2b、实施、红队、上线验收均未过。
+- 下一步：两份文档可交下一个主 agent 分派；第一步预检 2a/2b（需测试号/测试服务器授权），推送/PR/合并/发版/灰度各需单独授权。
