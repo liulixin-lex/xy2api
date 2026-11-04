@@ -82,6 +82,8 @@
             <div class="min-w-0">
               <p class="font-medium text-gray-900 dark:text-white">{{ t('admin.resilience.settings.sections.collaborationPlaintext') }}</p>
               <p class="mt-1 max-w-prose text-xs text-gray-500 dark:text-dark-400">{{ t('admin.resilience.settings.sections.collaborationPlaintextHint') }}</p>
+              <p class="mt-1 max-w-prose text-xs text-gray-500 dark:text-dark-400">{{ t('admin.resilience.settings.sections.collaborationPlaintextScope') }}</p>
+              <p class="mt-1 max-w-prose text-xs text-gray-500 dark:text-dark-400">{{ t('admin.resilience.settings.sections.collaborationPlaintextOff') }}</p>
             </div>
             <Toggle
               v-model="draft.collaboration_plaintext.enabled"
