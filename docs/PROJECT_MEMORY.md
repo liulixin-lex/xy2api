@@ -89,6 +89,12 @@
 
 ## 进行中的工作
 
+- **20261104-release0502-handoff**（2026-11-04 17:22 UTC，发版接力）：用户再次授权继续 0.5.2 发版（包含 #191–#194，新增迁移 289），不部署生产。
+  - 版本 PR #195：head `2d41304954e51cf62809cbf38ac8a44cd6fa34ff`，base `746ec14fc`；除两个 macOS `shell` 检查取消外均通过，GitHub Actions 事故已恢复。
+  - 下一步：只重跑取消的检查；全绿后固定 head 普通合并，annotated `v0.5.2` 指向合并提交（正文保留 Markdown），等待 Release 并核验原生包、校验和及镜像。
+  - 保留主工作区和其它工作树的既有改动；此次只在版本工作树维护发版记忆。部署及生产配置不在授权范围。
+  - 17:40 UTC：用户授权 Linux 优先、可用备用开发机执行发布验证。把必需 `shell` job 迁到 Ubuntu，保留 Apple 脚本语法检查及全部 Linux 部署策略测试；Apple 专属生命周期测试转为独立手动 macOS workflow。镜像仍为 Linux 双架构，原生包继续交叉编译。备用开发机首次连接超时，短重试后可用 GitHub Ubuntu runner 完成。
+
 - **20261104-collab-plaintext-impl**（2026-11-04 14:35 UTC 开始，Claude 主持与集成）：按本地 `.work/tasks/20261104-encrypted-state-breaks/` 的 `FINAL_v3.md` 与 `HANDOFF_FINAL.md` 实施 Tier 1（P0 状态族识别与观测，默认开；P1′ 协作消息明文通道，默认关）。本地实施记录在同目录 `implementation/`（不入库）。
   - 集成分支 `feat/collab-plaintext-20261104`（Paseo 工作树 `collab-integration`），基于 PR #194 头 `c96a488fb`；#194 合入后 rebase 到 main。
   - 分工（用户 11-04 指定）：后端 gpt-6-astra xhigh 三路并行，前端 Opus high，预检 2a/2b 脚本 Opus xhigh；红队 astra xhigh 与 Opus xhigh 两路。
