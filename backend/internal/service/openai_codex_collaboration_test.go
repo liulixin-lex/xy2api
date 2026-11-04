@@ -77,8 +77,8 @@ func TestCodexCollabApplyDeclarationsAndOpaqueHistory(t *testing.T) {
 			}
 			history := []byte(`[
 {"type":"function_call","namespace":"collaboration","name":"spawn_agent","call_id":"collaboration-xy.keep","id":"collaboration.keep","arguments":"{ \"message\": \"gAAAA_cipher\", \"name\": \"collaboration-xy.spawn_agent\" }","encrypted_function_args":["message"]},
-{"type":"function_call","name":"collaboration.send_message","call_id":"call_2","arguments":"{\"message\":\"hi\"}"},
-{"type":"function_call","name":"collaboration__followup_task","call_id":"call_3","arguments":"{\"message\":\"hi\"}"},
+{"type":"function_call","namespace":"collaboration","name":"send_message","call_id":"call_2","arguments":"{\"message\":\"hi\"}"},
+{"type":"function_call","namespace":"collaboration","name":"followup_task","call_id":"call_3","arguments":"{\"message\":\"hi\"}"},
 {"type":"agent_message","content":[ {"type":"encrypted_content","encrypted_content":"gAAAA_original"} ]},
 {"type":"function_call_output","call_id":"call_1","output":[ { "type":"encrypted_content", "encrypted_content":"old", "name":"collaboration-xy.spawn_agent" } ]},
 {"role":"developer","content":"to=functions.collaboration.spawn_agent remains unchanged"}
@@ -87,7 +87,7 @@ func TestCodexCollabApplyDeclarationsAndOpaqueHistory(t *testing.T) {
 			for _, item := range gjson.ParseBytes(history).Array() {
 				request = codexCollabTestSet(t, request, "input.-1", json.RawMessage(item.Raw))
 			}
-			request = codexCollabTestSet(t, request, "tool_choice", json.RawMessage(`{"type":"allowed_tools","tools":[{"type":"function","namespace":"collaboration","name":"spawn_agent"},{"type":"function","name":"collaboration.send_message"},{"type":"function","function":{"name":"collaboration__followup_task"}}]}`))
+			request = codexCollabTestSet(t, request, "tool_choice", "auto")
 			original := bytes.Clone(request)
 			out, plan, outcome := applyCodexCollaborationPlaintext(request)
 			require.Equal(t, codexCollabApplied, outcome)
@@ -103,8 +103,8 @@ func TestCodexCollabApplyDeclarationsAndOpaqueHistory(t *testing.T) {
 				require.Equal(t, "collaboration-xy", gjson.GetBytes(out, "tools.0.name").String())
 			}
 			require.Equal(t, "collaboration-xy", gjson.GetBytes(out, fmt.Sprintf("input.%d.namespace", start)).String())
-			require.Equal(t, "collaboration-xy.send_message", gjson.GetBytes(out, fmt.Sprintf("input.%d.name", start+1)).String())
-			require.Equal(t, "collaboration-xy__followup_task", gjson.GetBytes(out, fmt.Sprintf("input.%d.name", start+2)).String())
+			require.Equal(t, "collaboration-xy", gjson.GetBytes(out, fmt.Sprintf("input.%d.namespace", start+1)).String())
+			require.Equal(t, "collaboration-xy", gjson.GetBytes(out, fmt.Sprintf("input.%d.namespace", start+2)).String())
 			for i := 0; i < 3; i++ {
 				for _, field := range []string{"arguments", "id", "call_id", "encrypted_function_args"} {
 					path := fmt.Sprintf("input.%d.%s", start+i, field)
@@ -115,9 +115,7 @@ func TestCodexCollabApplyDeclarationsAndOpaqueHistory(t *testing.T) {
 				path := fmt.Sprintf("input.%d", start+i)
 				require.Equal(t, gjson.GetBytes(request, path).Raw, gjson.GetBytes(out, path).Raw, path)
 			}
-			require.Equal(t, "collaboration-xy", gjson.GetBytes(out, "tool_choice.tools.0.namespace").String())
-			require.Equal(t, "collaboration-xy.send_message", gjson.GetBytes(out, "tool_choice.tools.1.name").String())
-			require.Equal(t, "collaboration-xy__followup_task", gjson.GetBytes(out, "tool_choice.tools.2.function.name").String())
+			require.Equal(t, "auto", gjson.GetBytes(out, "tool_choice").String())
 		})
 	}
 }
@@ -155,7 +153,7 @@ func TestCodexCollabApplyAtomicRejections(t *testing.T) {
 		}, codexCollabConflict},
 		{"private tool choice", func(t *testing.T, b []byte) []byte {
 			return codexCollabTestSet(t, b, "tool_choice", json.RawMessage(`{"type":"allowed_tools","tools":[{"type":"function","function":{"name":"collaboration-xy__spawn_agent"}}]}`))
-		}, codexCollabConflict},
+		}, codexCollabUnsupported},
 		{"private instructions", func(t *testing.T, b []byte) []byte {
 			return codexCollabTestSet(t, b, "instructions", "to=functions.collaboration-xy.spawn_agent")
 		}, codexCollabConflict},
@@ -273,6 +271,136 @@ func TestCodexCollabApplyDeveloperTextCombined(t *testing.T) {
 		require.Equal(t, gjson.GetBytes(request, path).Raw, gjson.GetBytes(out, path).Raw)
 	}
 	require.Zero(t, newCodexCollabRestorer(nil).Stats().DevTextRewrites)
+}
+
+func TestCodexCollabRequestProtocolRejections(t *testing.T) {
+	tests := []struct {
+		name, body string
+		outcome    codexCollabOutcome
+	}{
+		{"duplicate additional tools", `{"input":[{"type":"additional_tools","tools":[` + codexCollabTestNamespace + `],"tools":[{"type":"namespace","name":"collaboration-xy","tools":[]}]}]}`, codexCollabConflict},
+		{"duplicate type", `{"input":[{"type":"additional_tools","type":"message","tools":[` + codexCollabTestNamespace + `]}]}`, codexCollabConflict},
+		{"duplicate tool identity", `{"tools":[` + codexCollabTestNamespace + `,{"type":"namespace","name":"other","name":"collaboration-xy","tools":[]}]}`, codexCollabConflict},
+		{"duplicate choice", `{"tools":[` + codexCollabTestNamespace + `],"tool_choice":{"name":"a","name":"b"}}`, codexCollabConflict},
+		{"object choice", `{"tools":[` + codexCollabTestNamespace + `],"tool_choice":{"type":"allowed_tools","tools":[]}}`, codexCollabUnsupported},
+		{"unsupported choice string", `{"tools":[` + codexCollabTestNamespace + `],"tool_choice":"collaboration"}`, codexCollabUnsupported},
+		{"root functions", `{"tools":[` + codexCollabTestNamespace + `],"functions":[]}`, codexCollabUnsupported},
+		{"nested declaration", `{"tools":[` + codexCollabTestNamespace + `,{"type":"function","function":{"namespace":"collaboration-xy","name":"spawn_agent"}}]}`, codexCollabUnsupported},
+		{"nested history", `{"tools":[` + codexCollabTestNamespace + `],"input":[{"type":"function_call","function":{"namespace":"collaboration-xy","name":"spawn_agent"}}]}`, codexCollabUnsupported},
+		{"dotted history", `{"tools":[` + codexCollabTestNamespace + `],"input":[{"type":"function_call","name":"collaboration.spawn_agent"}]}`, codexCollabUnsupported},
+		{"flat history", `{"tools":[` + codexCollabTestNamespace + `],"input":[{"type":"function_call","name":"collaboration__spawn_agent"}]}`, codexCollabUnsupported},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := []byte(tt.body)
+			out, plan, outcome := applyCodexCollaborationPlaintext(body)
+			require.Equal(t, tt.outcome, outcome)
+			require.Nil(t, plan)
+			require.Equal(t, body, out)
+		})
+	}
+	for _, choice := range []string{"auto", "none", "required"} {
+		body := codexCollabTestSet(t, codexCollabTestRequest(), "tool_choice", choice)
+		out, _, outcome := applyCodexCollaborationPlaintext(body)
+		require.Equal(t, codexCollabApplied, outcome)
+		require.Equal(t, choice, gjson.GetBytes(out, "tool_choice").String())
+	}
+}
+
+func TestCodexCollabPromptAndIdentityEchoes(t *testing.T) {
+	request := codexCollabTestSet(t, codexCollabTestRequest(), "instructions", "Call functions.collaboration.send_message")
+	_, plan, outcome := applyCodexCollaborationPlaintext(request)
+	require.Equal(t, codexCollabApplied, outcome)
+	for _, tt := range []struct{ name, event, body, path string }{
+		{"json", "", `{"instructions":"Call functions.collaboration-xy.send_message","output":[]}`, "instructions"},
+		{"created", "response.created", `{"type":"response.created","response":{"instructions":"Call functions.collaboration-xy.send_message","output":[]}}`, "response.instructions"},
+		{"in progress", "response.in_progress", `{"type":"response.in_progress","response":{"instructions":"Call functions.collaboration-xy.send_message","output":[]}}`, "response.instructions"},
+		{"completed", "response.completed", `{"type":"response.completed","response":{"instructions":"Call functions.collaboration-xy.send_message","output":[]}}`, "response.instructions"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			r := newCodexCollabRestorer(plan)
+			var out []byte
+			var err error
+			if tt.event == "" {
+				out, err = r.ResponseJSON([]byte(tt.body))
+			} else {
+				out, err = r.SSEData(tt.event, []byte(tt.body))
+			}
+			require.NoError(t, err)
+			require.Equal(t, "Call functions.collaboration.send_message", gjson.GetBytes(out, tt.path).String())
+			observed, err := newCodexCollabRestorer(nil).ResponseJSON([]byte(tt.body))
+			require.NoError(t, err)
+			require.Equal(t, []byte(tt.body), observed)
+		})
+	}
+	for _, body := range []string{
+		`{"output":[],"tools":[{"type":"namespace","name":"collaboration-xy","name":"collaboration-xy","tools":[]}]}`,
+		`{"output":[],"tool_choice":{"type":"function","namespace":"collaboration-xy","namespace":"collaboration-xy","name":"spawn_agent"}}`,
+		`{"output":[{"type":"namespace","name":"collaboration-xy","name":"collaboration-xy"}]}`,
+		`{"output":[{"type":"message","type":"namespace","name":"collaboration-xy"}]}`,
+	} {
+		r := newCodexCollabRestorer(plan)
+		out, err := r.ResponseJSON([]byte(body))
+		require.Error(t, err)
+		require.Nil(t, out)
+		out, err = r.SSEData("response.completed", []byte(body))
+		require.Error(t, err)
+		require.Nil(t, out)
+	}
+	unchanged := []byte(`{"instructions":"functions.collaboration-xy.spawn_agent","output":[]}`)
+	out, err := newCodexCollabRestorer(codexCollabTestPlan(t)).ResponseJSON(unchanged)
+	require.NoError(t, err)
+	require.Equal(t, unchanged, out)
+}
+
+func TestCodexCollabMessageOnlyStats(t *testing.T) {
+	for _, tt := range []struct {
+		name, message string
+		opaque, text  int
+	}{
+		{"opaque", "gAAAAABpZm9vYmFyYmF6cXV4cXV1eHF1dXhxdXV4cXV1eA==", 1, 0},
+		{"text", "please review the diff", 0, 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			items := []string{}
+			for i, name := range []string{"spawn_agent", "wait_agent", "list_agents"} {
+				item := codexCollabTestItem(t, name, "collaboration", `{"message":"`+tt.message+`"}`)
+				item = codexCollabTestSet(t, item, "id", fmt.Sprintf("item_%d", i))
+				item = codexCollabTestSet(t, item, "call_id", fmt.Sprintf("call_%d", i))
+				items = append(items, string(item))
+			}
+			body := []byte(`{"output":[` + strings.Join(items, ",") + `]}`)
+			r := newCodexCollabRestorer(nil)
+			out, err := r.ResponseJSON(body)
+			require.NoError(t, err)
+			require.Equal(t, body, out)
+			_, err = r.ResponseJSON(body)
+			require.NoError(t, err)
+			require.Equal(t, 1, r.Stats().Calls)
+			require.Equal(t, 1, r.Stats().EFAAbsent)
+			require.Equal(t, tt.opaque, r.Stats().MsgOpaque)
+			require.Equal(t, tt.text, r.Stats().MsgText)
+			applied := newCodexCollabRestorer(codexCollabTestPlan(t))
+			_, err = applied.ResponseJSON([]byte(strings.ReplaceAll(string(body), `"namespace":"collaboration"`, `"namespace":"collaboration-xy"`)))
+			require.NoError(t, err)
+			require.Equal(t, 1, applied.Stats().Calls)
+			require.Equal(t, 1, applied.Stats().EFAAbsent)
+			require.Zero(t, applied.Stats().MsgText+applied.Stats().MsgOpaque)
+		})
+	}
+}
+
+func TestCodexCollabObserveMessageStreamEvidence(t *testing.T) {
+	r := newCodexCollabRestorer(nil)
+	for _, args := range []string{`{`, `{}`, `{"message":42}`, `{"message":"working text"}`, `{"message":"gAAAAcipher"}`, `{"message":"working text"}`} {
+		item := codexCollabTestItem(t, "send_message", "collaboration", args)
+		out, err := r.SSEData("response.output_item.done", []byte(`{"output_index":0,"item":`+string(item)+`}`))
+		require.NoError(t, err)
+		require.NotEmpty(t, out)
+	}
+	require.Equal(t, 1, r.Stats().Calls)
+	require.Equal(t, 1, r.Stats().MsgOpaque)
+	require.Zero(t, r.Stats().MsgText)
 }
 
 func TestCodexCollabRestorerCanonicalEchoes(t *testing.T) {
@@ -444,10 +572,10 @@ func TestCodexCollabRestorerUncoveredAndNonMessageTools(t *testing.T) {
 		name, typ        string
 		calls, uncovered int
 	}{
-		{"wait_agent", "function_call", 1, 0},
-		{"list_agents", "function_call", 1, 0},
+		{"wait_agent", "function_call", 0, 0},
+		{"list_agents", "function_call", 0, 0},
 		{"spawn_agent", "custom_tool_call", 0, 1},
-		{"undeclared", "function_call", 1, 1},
+		{"undeclared", "function_call", 0, 1},
 		{"undeclared", "custom_tool_call", 0, 1},
 	}
 	for _, tt := range tests {
@@ -552,7 +680,7 @@ func TestCodexCollabRestorerObserveOnly(t *testing.T) {
 	out, err := r.ResponseJSON(body)
 	require.NoError(t, err)
 	require.Equal(t, body, out)
-	require.Equal(t, codexCollabStats{Outcome: codexCollabAbsent, Calls: 3, EFAAbsent: 1, EFAEmpty: 1, EFANonEmpty: 1}, r.Stats())
+	require.Equal(t, codexCollabStats{Outcome: codexCollabAbsent, Calls: 3, EFAAbsent: 1, EFAEmpty: 1, EFANonEmpty: 1, MsgText: 3}, r.Stats())
 	for _, invalid := range []string{`not-json`, `{"item":`, "[DONE]"} {
 		out, err = r.SSEData("", []byte(invalid))
 		require.NoError(t, err)

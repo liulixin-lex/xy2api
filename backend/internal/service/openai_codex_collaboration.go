@@ -63,6 +63,7 @@ type codexCollabItemState struct {
 	tool                 string
 	itemType             string
 	efaKind              codexCollabMarkerDecision
+	messageKind          int
 }
 
 type codexCollabMarkerDecision uint8
@@ -81,6 +82,7 @@ type codexCollabStats struct {
 	EFAAbsent, EFAEmpty, EFANonEmpty             int
 	MarkerAdded, Vetoed, Contradicted, Uncovered int
 	DevTextRewrites                              int
+	MsgOpaque, MsgText                           int
 }
 
 type codexCollabNamespace struct {
@@ -120,6 +122,12 @@ func applyCodexCollaborationPlaintext(body []byte) (out []byte, plan *codexColla
 	if root.Get("store").Bool() {
 		return body, nil, codexCollabUnsupported
 	}
+	if !codexCollabRequestContainersUnique(root) {
+		return body, nil, codexCollabConflict
+	}
+	if codexCollabUnsupportedShape(root) {
+		return body, nil, codexCollabUnsupported
+	}
 
 	namespaces := codexCollabFindNamespaces(root)
 	if len(namespaces) == 0 {
@@ -133,17 +141,19 @@ func applyCodexCollaborationPlaintext(body []byte) (out []byte, plan *codexColla
 		return body, nil, codexCollabConflict
 	}
 
-	canonicalSchema, err := codexCollabCanonicalJSON(namespaces[0].node.Raw)
-	if err != nil || !namespaces[0].tools.IsArray() {
+	if !namespaces[0].tools.IsArray() {
 		return body, nil, codexCollabConflict
 	}
-	for _, namespace := range namespaces[1:] {
-		if !namespace.tools.IsArray() {
+	if len(namespaces) > 1 {
+		canonicalSchema, err := codexCollabCanonicalJSON(namespaces[0].node.Raw)
+		if err != nil {
 			return body, nil, codexCollabConflict
 		}
-		candidate, err := codexCollabCanonicalJSON(namespace.node.Raw)
-		if err != nil || !bytes.Equal(candidate, canonicalSchema) {
-			return body, nil, codexCollabConflict
+		for _, namespace := range namespaces[1:] {
+			candidate, err := codexCollabCanonicalJSON(namespace.node.Raw)
+			if !namespace.tools.IsArray() || err != nil || !bytes.Equal(candidate, canonicalSchema) {
+				return body, nil, codexCollabConflict
+			}
 		}
 	}
 	for _, namespace := range namespaces {
@@ -230,6 +240,60 @@ func applyCodexCollaborationPlaintext(body []byte) (out []byte, plan *codexColla
 		}
 	}
 	return changed, newPlan, codexCollabApplied
+}
+
+func codexCollabRequestContainersUnique(root gjson.Result) bool {
+	var checkTools func(gjson.Result) bool
+	checkTools = func(tools gjson.Result) bool {
+		for _, tool := range tools.Array() {
+			if !codexCollabUniqueObject(tool) || !checkTools(tool.Get("tools")) {
+				return false
+			}
+		}
+		return true
+	}
+	if !checkTools(root.Get("tools")) || !codexCollabUnambiguousJSON(root.Get("tool_choice")) {
+		return false
+	}
+	for _, item := range root.Get("input").Array() {
+		if !codexCollabUniqueObject(item) || !checkTools(item.Get("tools")) {
+			return false
+		}
+	}
+	return true
+}
+
+func codexCollabUnsupportedShape(root gjson.Result) bool {
+	if choice := root.Get("tool_choice"); choice.Exists() && (choice.Type != gjson.String || (choice.String() != "auto" && choice.String() != "none" && choice.String() != "required")) {
+		return true
+	}
+	if root.Get("functions").Exists() {
+		return true
+	}
+	var chatTools func(gjson.Result) bool
+	chatTools = func(tools gjson.Result) bool {
+		for _, tool := range tools.Array() {
+			if tool.Get("function").Exists() || chatTools(tool.Get("tools")) {
+				return true
+			}
+		}
+		return false
+	}
+	if chatTools(root.Get("tools")) {
+		return true
+	}
+	for _, item := range root.Get("input").Array() {
+		if item.Get("function").Exists() || chatTools(item.Get("tools")) {
+			return true
+		}
+		if item.Get("type").String() == "function_call" {
+			name := item.Get("name").String()
+			if strings.HasPrefix(name, codexCollaborationNamespace+".") || strings.HasPrefix(name, codexCollaborationNamespace+"__") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Only these system prompt carriers may have tool-address examples rewritten.
@@ -332,7 +396,7 @@ func codexCollabHasPrivateName(root gjson.Result) bool {
 			if typ == "namespace" && name == codexCollaborationNamespaceAlias {
 				return true
 			}
-			if (typ == "function" || typ == "custom") && (codexCollabHasAliasPrefix(name) || codexCollabHasAliasPrefix(tool.Get("function.name").String()) || tool.Get("namespace").String() == codexCollaborationNamespaceAlias) {
+			if (typ == "function" || typ == "custom") && (codexCollabHasAliasPrefix(name) || tool.Get("namespace").String() == codexCollaborationNamespaceAlias) {
 				return true
 			}
 			if typ == "namespace" && scanTools(tool.Get("tools")) {
@@ -351,116 +415,25 @@ func codexCollabHasPrivateName(root gjson.Result) bool {
 			if typ == "additional_tools" && scanTools(item.Get("tools")) {
 				return true
 			}
-			if (typ == "function_call" || typ == "custom_tool_call") && (item.Get("namespace").String() == codexCollaborationNamespaceAlias || codexCollabHasAliasPrefix(item.Get("name").String()) || codexCollabHasAliasPrefix(item.Get("function.name").String())) {
+			if (typ == "function_call" || typ == "custom_tool_call") && (item.Get("namespace").String() == codexCollaborationNamespaceAlias || codexCollabHasAliasPrefix(item.Get("name").String())) {
 				return true
 			}
 		}
-	}
-	if functions := root.Get("functions"); functions.IsArray() {
-		for _, function := range functions.Array() {
-			if codexCollabHasAliasPrefix(function.Get("name").String()) {
-				return true
-			}
-		}
-	}
-	return codexCollabToolChoiceHasAlias(root.Get("tool_choice"))
-}
-
-func codexCollabToolChoiceHasAlias(choice gjson.Result) bool {
-	if !choice.Exists() {
-		return false
-	}
-	if choice.Type == gjson.String {
-		return choice.String() == codexCollaborationNamespaceAlias || codexCollabHasAliasPrefix(choice.String())
-	}
-	if choice.IsArray() {
-		for _, child := range choice.Array() {
-			if codexCollabToolChoiceHasAlias(child) {
-				return true
-			}
-		}
-		return false
-	}
-	if !choice.IsObject() {
-		return false
-	}
-	if choice.Get("namespace").String() == codexCollaborationNamespaceAlias || choice.Get("name").String() == codexCollaborationNamespaceAlias || codexCollabHasAliasPrefix(choice.Get("name").String()) {
-		return true
-	}
-	tools := choice.Get("tools")
-	if codexCollabToolChoiceHasAlias(choice.Get("function")) {
-		return true
-	}
-	if codexCollabToolChoiceHasAlias(tools) {
-		return true
 	}
 	return false
 }
 
 func codexCollabReferenceEdits(root gjson.Result) []codexCollabJSONEdit {
 	var edits []codexCollabJSONEdit
-	appendIdentityEdits := func(object gjson.Result, path string, allowNamespace bool) {
-		if allowNamespace && object.Get("namespace").String() == codexCollaborationNamespace {
-			edits = append(edits, codexCollabJSONEdit{path: path + ".namespace", value: codexCollaborationNamespaceAlias})
-		}
-		if name := object.Get("name"); name.Type == gjson.String {
-			if rewritten, ok := codexCollabAliasName(name.String()); ok {
-				edits = append(edits, codexCollabJSONEdit{path: path + ".name", value: rewritten})
-			}
-		}
-	}
 	input := root.Get("input")
 	if input.IsArray() {
 		for index, item := range input.Array() {
-			if strings.TrimSpace(item.Get("type").String()) == "function_call" {
-				appendIdentityEdits(item, fmt.Sprintf("input.%d", index), true)
-				if function := item.Get("function"); function.IsObject() {
-					appendIdentityEdits(function, fmt.Sprintf("input.%d.function", index), true)
-				}
+			if item.Get("type").String() == "function_call" && item.Get("namespace").String() == codexCollaborationNamespace {
+				edits = append(edits, codexCollabJSONEdit{path: fmt.Sprintf("input.%d.namespace", index), value: codexCollaborationNamespaceAlias})
 			}
 		}
-	}
-	toolChoice := root.Get("tool_choice")
-	var walkChoice func(gjson.Result, string)
-	walkChoice = func(node gjson.Result, path string) {
-		switch {
-		case node.IsArray():
-			for index, child := range node.Array() {
-				walkChoice(child, fmt.Sprintf("%s.%d", path, index))
-			}
-		case node.IsObject():
-			appendIdentityEdits(node, path, true)
-			if node.Get("type").String() == "namespace" && node.Get("name").String() == codexCollaborationNamespace {
-				edits = append(edits, codexCollabJSONEdit{path: path + ".name", value: codexCollaborationNamespaceAlias})
-			}
-			if function := node.Get("function"); function.IsObject() {
-				walkChoice(function, path+".function")
-			}
-			if tools := node.Get("tools"); tools.Exists() {
-				walkChoice(tools, path+".tools")
-			}
-		case node.Type == gjson.String:
-			if node.String() == codexCollaborationNamespace {
-				edits = append(edits, codexCollabJSONEdit{path: path, value: codexCollaborationNamespaceAlias})
-			} else if alias, ok := codexCollabAliasName(node.String()); ok {
-				edits = append(edits, codexCollabJSONEdit{path: path, value: alias})
-			}
-		}
-	}
-	if toolChoice.Exists() {
-		walkChoice(toolChoice, "tool_choice")
 	}
 	return edits
-}
-
-func codexCollabAliasName(name string) (string, bool) {
-	for _, separator := range []string{".", "__"} {
-		prefix := codexCollaborationNamespace + separator
-		if strings.HasPrefix(name, prefix) {
-			return codexCollaborationNamespaceAlias + separator + strings.TrimPrefix(name, prefix), true
-		}
-	}
-	return name, false
 }
 
 func codexCollabRestoreAliasName(name string) (string, bool) {
@@ -482,12 +455,6 @@ func codexCollabCanonicalJSON(raw string) ([]byte, error) {
 	decoder.UseNumber()
 	var value any
 	if err := decoder.Decode(&value); err != nil {
-		return nil, err
-	}
-	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return nil, errors.New("multiple JSON values")
-		}
 		return nil, err
 	}
 	return json.Marshal(value)
@@ -575,7 +542,7 @@ func codexCollabRestoreErrorText(value string) string {
 	for start := 0; start < len(value); {
 		index := strings.Index(value[start:], alias)
 		if index < 0 {
-			out.WriteString(value[start:])
+			_, _ = out.WriteString(value[start:])
 			break
 		}
 		index += start
@@ -585,11 +552,11 @@ func codexCollabRestoreErrorText(value string) string {
 		}
 		beforeOK := index == 0 || !boundary(value[index-1])
 		afterOK := end == len(value) || !boundary(value[end]) || strings.HasPrefix(value[end:], "__")
-		out.WriteString(value[start:index])
+		_, _ = out.WriteString(value[start:index])
 		if beforeOK && afterOK {
-			out.WriteString(codexCollaborationNamespace)
+			_, _ = out.WriteString(codexCollaborationNamespace)
 		} else {
-			out.WriteString(alias)
+			_, _ = out.WriteString(alias)
 		}
 		start = end
 	}
@@ -679,6 +646,9 @@ func codexCollabResponseItems(root gjson.Result, eventType string, streaming boo
 }
 
 func (r *codexCollabRestorer) restoreItem(body []byte, item codexCollabItem) ([]byte, error) {
+	if r.plan != nil && !codexCollabUniqueObject(item.result) {
+		return nil, errors.New("ambiguous collaboration item fields")
+	}
 	itemType := item.result.Get("type").String()
 	if r.plan != nil && itemType == "namespace" && item.result.Get("name").String() == codexCollaborationNamespaceAlias {
 		return sjson.SetBytes(body, codexCollabPath(item.path, "name"), codexCollaborationNamespace)
@@ -686,19 +656,17 @@ func (r *codexCollabRestorer) restoreItem(body []byte, item codexCollabItem) ([]
 	if itemType != "function_call" && itemType != "custom_tool_call" && !item.argumentsEvent {
 		return body, nil
 	}
-	if r.plan != nil && !codexCollabUniqueObject(item.result) {
-		return nil, errors.New("ambiguous collaboration item fields")
-	}
 	nameValue, namespaceValue := item.result.Get("name"), item.result.Get("namespace")
 	name, namespace := nameValue.String(), namespaceValue.String()
 	bareName, aliasName := codexCollabRestoreAliasName(name)
 	aliasNamespace := namespace == codexCollaborationNamespaceAlias
 	canonical := namespace == codexCollaborationNamespace
 	if r.plan == nil {
-		if canonical && itemType == "function_call" {
+		if _, messageTool := codexCollabMessageTools[name]; canonical && itemType == "function_call" && messageTool {
 			state, err := r.itemState(item)
 			if err == nil {
 				r.countFunctionItem(state, item.result.Get("encrypted_function_args"))
+				r.observeMessage(state, item.result.Get("arguments"))
 			}
 		}
 		return body, nil
@@ -769,12 +737,44 @@ func (r *codexCollabRestorer) restoreItem(body []byte, item codexCollabItem) ([]
 		r.noteUncovered(state)
 		return updated, nil
 	}
-	r.countFunctionItem(state, item.result.Get("encrypted_function_args"))
+	if _, messageTool := codexCollabMessageTools[toolName]; messageTool {
+		r.countFunctionItem(state, item.result.Get("encrypted_function_args"))
+	}
 	_, mayPatch := r.plan.messageTools[toolName]
 	if !known || !mayPatch || !item.countFinal {
 		return updated, nil
 	}
 	return r.patchFunctionItem(updated, item, state)
+}
+
+func (r *codexCollabRestorer) observeMessage(state *codexCollabItemState, arguments gjson.Result) {
+	if arguments.Type != gjson.String || !json.Valid([]byte(arguments.String())) {
+		return
+	}
+	parsed := gjson.Parse(arguments.String())
+	if !parsed.IsObject() || !codexCollabUniqueObject(parsed) {
+		return
+	}
+	message := parsed.Get("message")
+	if message.Type != gjson.String {
+		return
+	}
+	kind := 1
+	if openAICodexCollabMessageLooksOpaque(message.String()) {
+		kind = 2
+	}
+	if state.messageKind == kind || state.messageKind == 2 {
+		return
+	}
+	if state.messageKind == 1 {
+		r.stats.MsgText--
+	}
+	state.messageKind = kind
+	if kind == 2 {
+		r.stats.MsgOpaque++
+	} else {
+		r.stats.MsgText++
+	}
 }
 
 func codexCollabPath(parent, field string) string {
@@ -1069,6 +1069,16 @@ func (r *codexCollabRestorer) restoreResponseEchoes(body []byte, root gjson.Resu
 		return body, nil
 	}
 	var edits []codexCollabJSONEdit
+	if r.plan.devTextRewrites > 0 {
+		for _, path := range []string{"instructions", "response.instructions"} {
+			if value := root.Get(path); value.Type == gjson.String {
+				restored := strings.ReplaceAll(value.String(), "functions.collaboration-xy.", "functions.collaboration.")
+				if restored != value.String() {
+					edits = append(edits, codexCollabJSONEdit{path: path, value: restored})
+				}
+			}
+		}
+	}
 	// Only response tool declarations and tool_choice are identity-bearing
 	// echoes. Arbitrary prose, arguments, input, and output values are opaque.
 	for _, rootPath := range []string{"tools", "response.tools"} {
@@ -1101,6 +1111,9 @@ func codexCollabCollectEchoEdits(tools gjson.Result, path string, edits *[]codex
 		return nil
 	}
 	for index, tool := range tools.Array() {
+		if !codexCollabUniqueObject(tool) {
+			return errors.New("ambiguous collaboration tool echo")
+		}
 		toolPath := fmt.Sprintf("%s.%d", path, index)
 		if tool.Get("type").String() == "namespace" {
 			if tool.Get("name").String() == codexCollaborationNamespaceAlias {
@@ -1140,6 +1153,9 @@ func codexCollabCollectChoiceEchoEdits(choice gjson.Result, path string, edits *
 	}
 	if !choice.IsObject() {
 		return nil
+	}
+	if !codexCollabUniqueObject(choice) {
+		return errors.New("ambiguous collaboration tool choice echo")
 	}
 	namespace := choice.Get("namespace").String()
 	if namespace == codexCollaborationNamespaceAlias {
