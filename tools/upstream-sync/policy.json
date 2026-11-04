@@ -2211,7 +2211,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
-      "value": "buildOpenAIResponseFailedSSE(ctx, responseID, originalModel, source, message)"
+      "value": "buildOpenAIResponseFailedSSEForClient(ctx, c, responseID, originalModel, source, message)"
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
@@ -3876,6 +3876,42 @@
     {
       "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
       "value": "func TestCollaborationForwardAppliedHTTPFailureWarn"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "account.IsOpenAIApiKey() && !account.IsOpenAICollaborationPlaintextEnabled() && openAICollaborationContinuity(body)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_upstream_errors.go",
+      "value": "restoreOpenAICollaborationError(c, body)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_upstream_errors.go",
+      "value": "writeOpenAICollaborationErrorJSON(c, status, gin.H{"
+    },
+    {
+      "path": "backend/internal/service/openai_upstream_client_error.go",
+      "value": "writeOpenAICollaborationErrorJSON(c, statusCode, gin.H{\"error\": errorPayload})"
+    },
+    {
+      "path": "backend/internal/service/openai_stream_rule_error.go",
+      "value": "restoreOpenAICollaborationError(c, body)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "buildOpenAIResponseFailedSSEForClient(ctx, c, responseID, originalModel, bareErrorPayload, failedMessage)"
+    },
+    {
+      "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
+      "value": "func TestCollaborationForwardContinuity"
+    },
+    {
+      "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
+      "value": "func TestCollaborationForwardHTTPErrorRestoration"
+    },
+    {
+      "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
+      "value": "func TestCollaborationForwardPublishesFinalStatsBeforeP0"
     }
   ],
   "forbidden_module_paths": [

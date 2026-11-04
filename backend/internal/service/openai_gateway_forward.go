@@ -1058,8 +1058,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	// Native Responses HTTP only; each attempt freezes its own restore plan.
+	declaresCollab := declaresOpenAICollaboration(body)
+	collabContinuity := declaresCollab && account.IsOpenAIApiKey() && !account.IsOpenAICollaborationPlaintextEnabled() && openAICollaborationContinuity(body)
 	collabBody, collabAttempt := armOpenAICollaboration(c, body, upstreamModel,
-		!collabStatefulRequest && openAICollaborationEligible(c, account, upstreamModel, wsDecision.Transport, passthroughEnabled, compactPath, compatMessagesBridge))
+		!collabStatefulRequest && openAICollaborationEligible(c, account, upstreamModel, wsDecision.Transport, passthroughEnabled, compactPath, compatMessagesBridge, collabContinuity))
+	if collabContinuity && collabAttempt != nil && collabAttempt.eligibilitySource != "" {
+		collabAttempt.eligibilitySource = "continuity"
+	}
 	defer func() { collabAttempt.finish(ctx, c, account, forwardErr) }()
 	if !bytes.Equal(collabBody, body) {
 		body, requestView, reqBody = collabBody, newOpenAIRequestView(collabBody), nil

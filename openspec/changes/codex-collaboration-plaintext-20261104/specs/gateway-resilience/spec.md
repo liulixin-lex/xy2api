@@ -4,7 +4,7 @@
 
 ### Requirement: Gated collaboration plaintext channel
 
-The gateway SHALL default collaboration_plaintext.enabled to false and models to an empty array. The gateway SHALL apply the atomic namespace transform only to declared collaboration tools on eligible native Responses HTTP requests using the final mapped model and an enabled OpenAI account. API Key and OAuth SHALL both be wired, while OAuth MUST remain disabled until separately prechecked. WS, passthrough, compact, bridge and flatten routes SHALL remain unmodified by P1′.
+The gateway SHALL default collaboration_plaintext.enabled to false and models to an empty array. The gateway SHALL apply the atomic namespace transform only to declared collaboration tools on eligible native Responses HTTP requests using the final mapped model and an OpenAI account with its switch enabled or continuity eligibility. API Key and OAuth SHALL both be wired, while OAuth MUST remain disabled until separately prechecked. WS, passthrough, compact, bridge and flatten routes SHALL remain unmodified by P1′.
 
 #### Scenario: Eligible outbound declaration
 
@@ -36,6 +36,15 @@ The gateway SHALL default collaboration_plaintext.enabled to false and models to
 - **THEN** the gateway SHALL terminate locally under the existing commit gate
 - **AND** SHALL NOT disclose private names or replay via failover.
 
+#### Scenario: Continuity and soft rollback
+
+- **GIVEN** the request declares collaboration and a top-level input item has type=function_call, namespace=collaboration, one of the three message tool names and encrypted_function_args=[]
+- **WHEN** the selected API Key account switch is off
+- **THEN** the gateway SHALL treat the account gate as satisfied and report eligibility=continuity, without relaxing any other gate or scanning nested prose.
+- **AND** OAuth with its account switch off SHALL remain observe-only even with matching history; OAuth SHALL require explicit administrator opt-in after separate prechecks.
+- **AND** a new session lacking that product SHALL remain unmodified; an enabled account SHALL report eligibility=account.
+- **AND** disabling the master/feature switch, clearing models or an original store:true/nonempty previous_response_id SHALL still prevent conversion.
+
 ### Requirement: Preserve reserved collaboration schema
 
 The schema sanitizer SHALL skip the entire exact collaboration namespace. Other tools SHALL retain existing compatibility repairs regardless of the plaintext feature switch.
@@ -48,7 +57,7 @@ Long-window acceptance SHALL use persistent state_rejection.collab_plaintext eve
 
 ### Requirement: Rollout and rollback constraints
 
-Operators SHALL keep accounts within the same upstream site consistently configured and precheck every model in the global list per site. Switching configuration can invalidate the ongoing prompt prefix once from the declaration onward. Existing sessions MAY be rejected after disabling P1′; affected users MUST start a new session. This change SHALL NOT introduce session continuity state. Codex version changes SHALL trigger state-rejection sampling by client_version.
+Operators SHALL keep accounts within the same upstream site consistently configured and precheck every model in the global list per site. Switching configuration can invalidate the ongoing prompt prefix once from the declaration onward. Existing sessions MAY be rejected after hard rollback; affected users MUST start a new session. The account switch SHALL provide soft rollback for new sessions while existing product-bearing sessions continue on otherwise eligible API Key accounts. Disabling master/feature or clearing models SHALL provide hard rollback for all new attempts. No server-side session storage SHALL be introduced; unvalidated API Key accounts MUST be excluded from the gray-release pool rather than relying on their account switch to stop continuity traffic. Codex version changes SHALL trigger state-rejection sampling by client_version.
 
 ### Requirement: P0 state rejection classification
 

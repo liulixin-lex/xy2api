@@ -19,7 +19,7 @@ func writeOpenAIStreamRuleError(ctx context.Context, c *gin.Context, status int,
 	committed := StopOpenAICompactSSEKeepaliveCommitted(c)
 	if !committed && !c.Writer.Written() {
 		c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
-		c.JSON(status, gin.H{
+		writeOpenAICollaborationErrorJSON(c, status, gin.H{
 			"error": gin.H{
 				"type":    errType,
 				"message": message,
@@ -29,7 +29,7 @@ func writeOpenAIStreamRuleError(ctx context.Context, c *gin.Context, status int,
 	}
 	MarkOpsStreamError(c, errType, message, status)
 	body, _ := json.Marshal(map[string]any{"error": map[string]any{"type": errType, "code": errType, "message": message}})
-	if _, err := c.Writer.Write(preOutputTerminalFrame(ctx, PreOutputProtocolResponses, status, body)); err == nil {
+	if _, err := c.Writer.Write(preOutputTerminalFrame(ctx, PreOutputProtocolResponses, status, restoreOpenAICollaborationError(c, body))); err == nil {
 		c.Writer.Flush()
 	}
 }
