@@ -30,6 +30,13 @@
 - **AND** 同请求的重复信号 SHALL 不重复改绑
 - **AND** 输出前失败 SHALL 仍按原有连击阈值（缺省 2）处理
 
+#### Scenario: 会话状态族拒绝不惩罚账号
+
+- **WHEN** HTTP SSE 或 WebSocket 在输出后收到 S1（中转会话状态）、S2（会话密文无效）、S3（加密函数输出无法解密）、S4（`for item amsg_`）或其他加密内容拒绝
+- **THEN** 无论是否带 `invalid_request_error` 包装，无论是裸 `error`、`response.failed` 或二者先后出现，系统 SHALL 保留原绑定，不触发 P1-B 或会话避开，不计账号输出后冷却，也不增加会话连击
+- **AND** 请求最终失败、运维记录与真实用量 SHALL 照常保留，输出前分类与换号规则 SHALL 保持不变
+- **AND** 读流出错与缺终态等真实断流 SHALL 继续触发 P1-B
+
 #### Scenario: 非 OpenAI 账号保持原连击规则
 
 - **WHEN** Anthropic、Grok 或其他非 OpenAI 平台的账号发生输出后失败

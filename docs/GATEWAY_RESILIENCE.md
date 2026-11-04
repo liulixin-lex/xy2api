@@ -373,6 +373,8 @@ HTTP 流已向客户端输出可见内容后，快层确认账号发生读流出
 
 `session.post_output_rebind` 缺省为 true，**仅 OpenAI 账号**生效，以最终上游账号的平台（`PlatformOpenAI`）为准。Anthropic、Grok 等其他平台的输出后失败仍按原连击规则处理。仅已确认输出后的流内失败事件（例如 `response.failed`）、读流出错、缺终态携带专用会话失败信号；沿用 `ReportStreamFailure` 的 attempt 标识去重：HTTP 请求内同一失败只立即改绑一次，WebSocket 连接按 turn 计，每个 turn 可各触发一次。动作复用现有连击改绑：按属主删除绑定、加入会话避开、标记会话、把账号加入本请求的避开集合。避开时长沿用 `session.avoid_seconds`，缺省 600 秒。输出前失败仍需达到 `session.streak_threshold`（缺省 2），不降低全局阈值；客户端取消、客户端错误和内容安全拒绝仍不罚号。
 
+会话状态族拒绝属于请求级问题：S1（`CLIENT_TOOL_CONTINUATION_UNAVAILABLE`、`opaque conversation state` 或 `unrecognized conversation state`）、S2（`invalid_encrypted_content` 或 `invalid for this conversation`）、S3（加密函数输出无法解密）、S4（`for item amsg_`）及其他加密内容拒绝，不触发 P1-B 改绑或会话避开，不计账号输出后冷却，也不增加会话连击。HTTP SSE 与 WebSocket 都适用，不依赖 `invalid_request_error` 包装，裸 `error`、`response.failed` 或二者先后出现都不计。这只排除账号健康与改绑动作，请求的最终失败、运维记录与真实用量照常保留；输出前分类与换号规则不变，读流出错和缺终态等真实断流仍触发 P1-B。
+
 质量路由持有的绑定不越权删除；会话避开集合在进入质量路由之前并入排除集，因此有其他正常候选时下一请求不再选出错号。组内只剩该号时仍保留现有末位兜底。绑定已换成其他属主时，沿用现有 owner 校验；非 `v2:` OpenAI 会话键仍沿用原有删除语义。关闭该开关回到原有输出后失败连击逻辑；关闭 `session.enabled` 时 P1-B 一并失效。
 
 事件沿用 Warn `resilience.session_rebind`，`reason=post_output_first_failure`；`session_rebind` 计数使用同一原因。普通连击的原因仍为 `resil_failure_streak`。

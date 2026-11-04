@@ -132,8 +132,11 @@ func resiliencePostOutputCounts(res resilience.Result) bool {
 // (response.failed, error) after output is a failure of the account: it
 // must be what would have switched accounts before output (not a cyber or
 // content-policy refusal, an exceeded context or another request error) and
-// carry no structured client error code.
+// carry no structured client error code or conversation-state rejection.
 func openAIPostOutputEventCounts(payload []byte, message string) bool {
+	if openAIConversationStateRejection(payload, message) {
+		return false
+	}
 	if !openAIStreamFailedEventShouldFailover(payload, message) {
 		return false
 	}
@@ -146,6 +149,20 @@ func openAIPostOutputEventCounts(payload []byte, message string) bool {
 		Code:       openAIStreamFailedEventErrorCode(payload),
 		Message:    message,
 	}, resilience.Current()))
+}
+
+// openAIConversationStateRejection is a post-output-only guard until the
+// unified state-family classifier replaces it; pre-output routing is unchanged.
+func openAIConversationStateRejection(payload []byte, message string) bool {
+	code := openAIStreamFailedEventErrorCode(payload)
+	if code == "client_tool_continuation_unavailable" || resilience.IsEncryptedContentRejection(code, message) {
+		return true
+	}
+	message = strings.ToLower(message)
+	return strings.Contains(message, "opaque conversation state") ||
+		strings.Contains(message, "unrecognized conversation state") ||
+		strings.Contains(message, "invalid for this conversation") ||
+		strings.Contains(message, "for item amsg_")
 }
 
 // resilienceOpenAIFailedAfterOutput reports an OpenAI failure event that
