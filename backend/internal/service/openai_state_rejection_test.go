@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"log/slog"
 	"net/http"
 	"testing"
@@ -18,6 +19,22 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+func captureOpenAIObservationLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var logs bytes.Buffer
+	previous := slog.Default()
+	previousWriter, previousFlags := log.Writer(), log.Flags()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	log.SetOutput(previousWriter)
+	log.SetFlags(previousFlags)
+	t.Cleanup(func() {
+		slog.SetDefault(previous)
+		log.SetOutput(previousWriter)
+		log.SetFlags(previousFlags)
+	})
+	return &logs
+}
 
 func TestOpenAIStateRejectionAllDecisionEntrances(t *testing.T) {
 	for _, enabled := range []bool{true, false} {
@@ -113,10 +130,7 @@ func TestOpenAIEncryptedFragmentCensus(t *testing.T) {
 
 func TestOpenAIStateRejectionObservationFinalAttemptFacts(t *testing.T) {
 	withResilienceSettings(t, func(s *resilience.Settings) { s.Enabled = false })
-	var logs bytes.Buffer
-	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
-	t.Cleanup(func() { slog.SetDefault(previous) })
+	logs := captureOpenAIObservationLogs(t)
 	req := newWebSearchReplayRequest(t)
 	account := webSearchReplayAccount(false)
 	st := resilience.StateFrom(req.ctx)
@@ -156,10 +170,7 @@ func TestOpenAIStateRejectionObservationFinalAttemptFacts(t *testing.T) {
 }
 
 func TestOpenAIWSStateRejectionObservationUsesUnknownStage(t *testing.T) {
-	var logs bytes.Buffer
-	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
-	t.Cleanup(func() { slog.SetDefault(previous) })
+	logs := captureOpenAIObservationLogs(t)
 	account := &Account{ID: 10, Platform: PlatformOpenAI}
 	require.True(t, noteOpenAIWSStateRejection(context.Background(), account, []byte(`{"response":{"error":{"code":"client_tool_continuation_unavailable"}}}`)))
 	var event map[string]any
@@ -176,10 +187,7 @@ func TestOpenAIStateRejectionForwardObservationHooks(t *testing.T) {
 		for _, stream := range []bool{false, true} {
 			t.Run("passthrough_"+fmtBool(passthrough)+"/stream_"+fmtBool(stream), func(t *testing.T) {
 				withResilienceSettings(t, nil)
-				var logs bytes.Buffer
-				previous := slog.Default()
-				slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
-				t.Cleanup(func() { slog.SetDefault(previous) })
+				logs := captureOpenAIObservationLogs(t)
 				req := newWebSearchReplayRequest(t)
 				account := webSearchReplayAccount(passthrough)
 				response := newOpenAIUpstreamErrorResponse(502, `{"error":{"code":"client_tool_continuation_unavailable","message":"opaque conversation state"}}`)
@@ -239,10 +247,7 @@ func TestOpenAIStateRejectionRecoverableRouting(t *testing.T) {
 }
 
 func TestOpenAIStateRejectionFinalSuccessIsNotCounted(t *testing.T) {
-	var logs bytes.Buffer
-	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
-	t.Cleanup(func() { slog.SetDefault(previous) })
+	logs := captureOpenAIObservationLogs(t)
 	req := newWebSearchReplayRequest(t)
 	account := webSearchReplayAccount(false)
 	finish := beginOpenAIStateRejectionAttempt(req.ctx, req.c, account, []byte(encryptedRepairRequestBody))

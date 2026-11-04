@@ -3,11 +3,9 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
@@ -34,6 +32,33 @@ func enableCollabTest(t *testing.T) {
 	withResilienceSettings(t, func(s *resilience.Settings) {
 		s.CollaborationPlaintext = resilience.CollaborationPlaintextSettings{Enabled: true, Models: []string{"gpt-5.4"}}
 	})
+}
+
+func collaborationMetricDelta(accountID int64) func() map[string]map[string]int64 {
+	// Repeated test runs share the process-wide counters.
+	before := map[resilience.MetricKey]int64{}
+	for _, row := range resilience.Snapshot(resilience.MetricsRetention) {
+		if row.AccountID == accountID {
+			before[row.MetricKey] = row.Count
+		}
+	}
+	return func() map[string]map[string]int64 {
+		labels := map[string]map[string]int64{}
+		for _, row := range resilience.Snapshot(resilience.MetricsRetention) {
+			if row.AccountID != accountID {
+				continue
+			}
+			delta := row.Count - before[row.MetricKey]
+			if delta == 0 {
+				continue
+			}
+			if labels[row.Name] == nil {
+				labels[row.Name] = map[string]int64{}
+			}
+			labels[row.Name][row.Label] += delta
+		}
+		return labels
+	}
 }
 
 func TestCollaborationAccountSwitch(t *testing.T) {
@@ -289,10 +314,7 @@ func TestCollaborationForwardContinuityBeforeNormalization(t *testing.T) {
 			require.Equal(t, []byte(body), raw)
 			upstream := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(200, `{"id":"r1","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)}
 			c := collabTestContext()
-			var logs bytes.Buffer
-			previous := slog.Default()
-			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
-			t.Cleanup(func() { slog.SetDefault(previous) })
+			logs := captureOpenAIObservationLogs(t)
 			_, err := newOpenAIRejectedFieldTestService(upstream).Forward(context.Background(), c, account, []byte(body))
 			require.NoError(t, err)
 			require.Len(t, upstream.bodies, 1)
@@ -358,10 +380,7 @@ func TestCollaborationAttemptWarnExcludesTransientFailures(t *testing.T) {
 		{name: "local_restore_failure_still_warns", status: 200, restoreFailed: true, wantWarn: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var logs bytes.Buffer
-			previous := slog.Default()
-			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
-			t.Cleanup(func() { slog.SetDefault(previous) })
+			logs := captureOpenAIObservationLogs(t)
 			c := collabTestContext()
 			_, attempt := armOpenAICollaboration(c, []byte(collabWiringBody), "gpt-5.4", !tc.inactive)
 			attempt.upstreamStatus = tc.status
@@ -483,15 +502,13 @@ func TestCollaborationForwardAppliedHTTPFailureWarn(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			enableCollabTest(t)
-			var logs bytes.Buffer
-			previous := slog.Default()
-			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
-			t.Cleanup(func() { slog.SetDefault(previous) })
+			logs := captureOpenAIObservationLogs(t)
 			upstream := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(tc.status, `{"error":{"type":"invalid_request_error","code":"invalid_function","message":"Unknown function collaboration-xy.send_message"}}`)}
 			svc := newOpenAIRejectedFieldTestService(upstream)
 			a := newOpenAIRejectedFieldTestAccount()
 			a.Extra["openai_collaboration_plaintext"] = tc.source == "account"
 			a.ID = 918273648 + int64(i)
+			metricDelta := collaborationMetricDelta(a.ID)
 			c := collabTestContext()
 			body := collabWiringBody
 			if tc.source == "continuity" {
@@ -525,13 +542,7 @@ func TestCollaborationForwardAppliedHTTPFailureWarn(t *testing.T) {
 			require.Len(t, events, 1)
 			require.Equal(t, true, events[0]["applied"])
 			require.Equal(t, tc.source, events[0]["eligibility"])
-			var count int64
-			for _, row := range resilience.Snapshot(time.Minute) {
-				if row.AccountID == a.ID && row.Name == resilience.MetricCollabPlaintext && row.Label == "outcome=applied;model=gpt-5.4;eligibility="+tc.source {
-					count += row.Count
-				}
-			}
-			require.Equal(t, int64(1), count)
+			require.Equal(t, int64(1), metricDelta()[resilience.MetricCollabPlaintext]["outcome=applied;model=gpt-5.4;eligibility="+tc.source])
 			require.Equal(t, "applied", events[0]["outcome"])
 			require.Equal(t, float64(status), events[0]["upstream_status"])
 			require.Equal(t, tc.inBand, events[0]["in_band"])
@@ -562,10 +573,7 @@ func TestCollaborationPublishesOnlyAtAttemptBoundaries(t *testing.T) {
 
 func TestCollaborationForwardPublishesFinalStatsBeforeP0(t *testing.T) {
 	enableCollabTest(t)
-	var logs bytes.Buffer
-	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
-	t.Cleanup(func() { slog.SetDefault(previous) })
+	logs := captureOpenAIObservationLogs(t)
 	body := "data: {\"type\":\"response.output_item.done\",\"item\":" + collabWiringCall + "}\n\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_1\",\"error\":{\"code\":\"client_tool_continuation_unavailable\",\"message\":\"Unknown function collaboration-xy.send_message\"}}}\n\n"
 	resp := newOpenAIRejectedFieldTestResponse(200, body)
 	resp.Header.Set("Content-Type", "text/event-stream")
@@ -736,28 +744,22 @@ func TestCollaborationForwardRestoreFailureDoesNotReplay(t *testing.T) {
 }
 
 func TestCollaborationMarginalCounters(t *testing.T) {
+	a := &Account{ID: 918273645, Platform: PlatformOpenAI}
+	metricDelta := collaborationMetricDelta(a.ID)
 	c := collabTestContext()
 	_, attempt := armOpenAICollaboration(c, []byte(collabWiringBody), "gpt-5.4", true)
 	_, err := restoreOpenAICollaboration(c, "", []byte(`{"output":[`+collabWiringCall+`]}`), false)
 	require.NoError(t, err)
-	a := &Account{ID: 918273645, Platform: PlatformOpenAI}
 	attempt.finish(context.Background(), c, a, nil)
-	labels := map[string]map[string]int64{}
-	for _, row := range resilience.Snapshot(time.Minute) {
-		if row.AccountID != a.ID {
-			continue
-		}
-		if labels[row.Name] == nil {
-			labels[row.Name] = map[string]int64{}
-		}
-		labels[row.Name][row.Label] += row.Count
-	}
+	labels := metricDelta()
 	require.Equal(t, map[string]int64{"outcome=applied;model=gpt-5.4;eligibility=account": 1}, labels[resilience.MetricCollabPlaintext])
 	require.Equal(t, map[string]int64{"efa=absent": 1}, labels[resilience.MetricCollabCall])
 	require.Equal(t, map[string]int64{"action=marker_added": 1}, labels[resilience.MetricCollabCallAction])
 }
 
 func TestCollaborationObserveMessageCounters(t *testing.T) {
+	a := &Account{ID: 918273647, Platform: PlatformOpenAI}
+	metricDelta := collaborationMetricDelta(a.ID)
 	c := collabTestContext()
 	_, attempt := armOpenAICollaboration(c, []byte(collabWiringBody), "gpt-5.4", false)
 	body := []byte(`{"output":[
@@ -770,18 +772,11 @@ func TestCollaborationObserveMessageCounters(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, body, out)
 	}
-	a := &Account{ID: 918273647, Platform: PlatformOpenAI}
 	attempt.finish(context.Background(), c, a, nil)
 	stats, ok := openAICodexCollabAttempt(c)
 	require.True(t, ok)
 	require.Equal(t, 2, stats.Calls)
-	labels := map[string]int64{}
-	for _, row := range resilience.Snapshot(time.Minute) {
-		if row.AccountID == a.ID && row.Name == resilience.MetricCollabCall {
-			labels[row.Label] += row.Count
-		}
-	}
-	require.Equal(t, map[string]int64{"efa=absent": 2, "msg=opaque": 1, "msg=text": 1}, labels)
+	require.Equal(t, map[string]int64{"efa=absent": 2, "msg=opaque": 1, "msg=text": 1}, metricDelta()[resilience.MetricCollabCall])
 }
 
 func TestCollaborationStreamErrorExitsRestoreIdentity(t *testing.T) {
