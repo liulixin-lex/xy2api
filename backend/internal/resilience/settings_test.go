@@ -20,6 +20,28 @@ func TestCloneSharesNothing(t *testing.T) {
 	require.Empty(t, s.Failure.BalanceKeywordsExtra)
 }
 
+func TestGateV3ProtectionSettings(t *testing.T) {
+	legacy, err := Parse(`{"session":{"enabled":true}}`)
+	require.NoError(t, err)
+	require.True(t, legacy.PostOutputRebindOn())
+	require.True(t, legacy.SameSiteHoldOn())
+	off, err := Parse(`{"session":{"post_output_rebind":false},"same_site_hold":{"enabled":false}}`)
+	require.NoError(t, err)
+	require.False(t, off.PostOutputRebindOn())
+	require.False(t, off.SameSiteHoldOn())
+	cloned := off.Clone()
+	require.False(t, cloned.PostOutputRebindOn())
+	require.False(t, cloned.SameSiteHoldOn())
+	legacy.Session.Enabled = false
+	require.False(t, legacy.PostOutputRebindOn())
+	require.True(t, legacy.SameSiteHoldOn(), "same-site holds do not depend on session handling")
+	legacy.Enabled = false
+	require.False(t, legacy.SameSiteHoldOn())
+	var absent *Settings
+	require.False(t, absent.PostOutputRebindOn())
+	require.False(t, absent.SameSiteHoldOn())
+}
+
 func TestC0DefaultsAndGates(t *testing.T) {
 	s := Defaults()
 	require.True(t, s.Stream.PreludeStaging)

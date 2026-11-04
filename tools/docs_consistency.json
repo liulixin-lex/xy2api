@@ -103,6 +103,15 @@
   ],
   "contracts": [
     {
+      "item": "post-output session rebind reason",
+      "sources": [
+        "backend/internal/service/resilience_session.go"
+      ],
+      "pattern": "\"(post_output_first_failure)\"",
+      "match": "word",
+      "doc": "docs/GATEWAY_RESILIENCE.md"
+    },
+    {
       "item": "usage attempt first output column",
       "sources": [
         "backend/ent/schema/usage_log.go"

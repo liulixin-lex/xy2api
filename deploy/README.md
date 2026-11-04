@@ -4,12 +4,6 @@ This directory contains files for deploying XY2API on Linux servers and Apple-si
 
 Before upgrading the group Fast policy, review [OpenAI group Fast](../docs/OPENAI_FAST.md): enabled group overrides now take precedence over global filtering or blocking and use Fast pricing. Restore any compensating group rate increase separately to avoid charging it twice. No database migration is required for this policy change.
 
-## Group quality v3 scheduling upgrade and rollback
-
-Deploy backend and frontend together so the settings API and editor agree on the new fields. In System Settings → Gateway, low upstream-rate priority defaults to scope `all`; scope `groups` with an empty group list disables it. Advanced scheduling and requests without upstream token costing still do not use low-rate priority. See [account scheduling](../docs/account-scheduling.md).
-
-Before rolling back to 0.5.1, decide whether the old global low-rate switch should be on or off: that version ignores the new scope and group list. Quality migration and latency escalation are in-process and clear on restart. A successful quality migration is observable as Warn `group_quality_gate.migrate`; the source and target are recorded, and the same group/session cannot quality-migrate again for five minutes. Failure-driven rebinding remains independent of that cooldown.
-
 ## Deployment Methods
 
 | Method | Best For | Setup Wizard |
@@ -685,39 +679,28 @@ gateway:
 
 没有新增环境变量、反向代理要求或后台进程。部署与真实上游验证仍按操作授权执行；本地受控上游测试不证明所有中转的物理缓存能力。
 
-## Group quality gate v3 upgrade
+## 门槛 v3 升级与回退
 
-Deploy the v3 backend and frontend together. Migration 289 adds nullable
-`usage_logs.attempt_first_output_ms` without a default, index or backfill;
-allow for the short ALTER table lock during a low-traffic window. Confirm
-`ops_monitoring_enabled` before enabling quality evaluation. See
-[the quality-gate guide](../docs/GROUP_QUALITY_GATE.md) for sample definitions,
-state transitions and the rollback contract.
+前后端须同版升级：门槛策略、系统设置与网关韧性设置的管理接口都会拒绝未知字段。迁移 289 给 `usage_logs` 加可空列 `attempt_first_output_ms`（无默认值、无索引、不回填），ALTER 会短暂锁表，按低峰执行。启用质量评估前确认 `ops_monitoring_enabled` 已开启。统计口径、状态与回滚契约见 [分组质量门槛](../docs/GROUP_QUALITY_GATE.md)，选号与迁出见 [账号调度](../docs/account-scheduling.md)，急性保护见 [网关韧性](../docs/GATEWAY_RESILIENCE.md#412-p1-b输出后首次失败改绑)。
 
-After upgrading, set the approved group policies in the group editor:
+**升级后配置**（发版前核对报告须经用户确认）。分组没有 `v3` 子对象时继承 v2 的启用状态；v2 已关闭的组升级后仍关闭，需要在分组编辑里逐组设置并启用：
 
-| Group | Enabled | P90 limit | Error ceiling | Cache floor | Strict |
+| 分组 | 启用 | 首字上限 | 错误上限 | 缓存下限 | 严格模式 |
 |---|---|---|---|---|---|
-| 53 | yes | 10 seconds | 8% | 50% | yes |
-| 18, 47, 50 | yes | 15 seconds | 10% | 50% | no |
-| 83 | yes | 20 seconds | 10% | 50% | no |
-| 25, 72, 20, 78 | no | defaults | defaults | defaults | no |
+| 53 | 是 | 10 秒 | 8% | 50% | 是 |
+| 18、47、50 | 是 | 15 秒 | 10% | 50% | 否 |
+| 83 | 是 | 20 秒 | 10% | 50% | 否 |
+| 25、72、20、78 | 否 | — | — | — | — |
 
-Keep low upstream rate priority scoped to all groups. Enable the resilience
-session option `session.post_output_rebind` and `same_site_hold.enabled`.
-These values are the approved initial configuration; the pre-release
-calibration report still requires user confirmation before release. Do not
-change production configuration as part of a code-only deployment rehearsal.
+- 低倍率优先：“系统设置 → 网关”中范围保持“全部分组”。选“指定分组”但集合为空等于关闭；高级调度开启或不使用上游 token 成本时仍不生效。
+- 急性保护：“系统设置 → 网关 → 网关韧性”中，P1-B 在会话失败改绑卡（`session.post_output_rebind`），同站断流暂停在对应开关卡（`same_site_hold.enabled`），也可在高级 JSON 中编辑。两项缺省开启，经现有设置发布机制热生效，不需要重启或新增环境变量。
+  - P1-B：输出后首次失败立即改绑，避开时长沿用 `session.avoid_seconds`（缺省 600 秒）。关闭后回到原有连击规则；关闭 `session.enabled` 时一并停用。
+  - 同站暂停：同站至少 2 个 OpenAI 账号在 60 秒内断流，只暂停断流账号 300 秒，保留末位兜底。关闭后已有暂停立即失效，重开不复活。
+- 不要在只做代码部署演练时改生产配置。
 
-The process starts with unknown quality and rebuilds evidence from new
-requests. At 48 hours, check the new column's coverage (at least 95% of OpenAI
-successful streams), tier distribution, insufficient group composition and
-migrations. Run the seven-day acceptance checks in the
-[v3 tasks](../openspec/changes/group-quality-gate-v3-20261104/tasks.md).
-Production inspection and deployment require separate authorization.
+**上线后**：进程从“未知”开始用新请求重建证据（约 30 分钟，低流量组更久）。48 小时核对新列覆盖率（OpenAI 成功流式请求 ≥95%）、档位分布、“本组样本不足”占比与迁出次数（Warn `group_quality_gate.migrate`，同组同会话 5 分钟内不再质量迁出；失败类改绑不受此限）；7 天验收见 [v3 tasks](../openspec/changes/group-quality-gate-v3-20261104/tasks.md)。生产查看与部署需另行授权。
 
-For a binary rollback, retain the nullable column. Version 0.5.1 ignores it
-and the `v3` policy subobject; the original v2 fields remain unchanged. If low
-upstream rate priority used a selected-group scope, decide the old global
-switch setting before rollback. The two acute-protection options can be
-turned off independently in gateway resilience settings.
+**回滚**：
+- 单项不达标先关对应设置：某组关闭 v3，或关闭两个急性保护开关，都立即生效。
+- 版本回滚使用匹配的旧版前后端，保留新列；0.5.1 忽略新列与 `v3` 子对象，按原 v2 字段运行（v2 字段未被改动）。低倍率优先若选了部分分组，回滚前先决定旧版全局开关开还是关，旧版只认全局开关。
+- 质量状态、迁出冷却与判慢递增都在进程内，重启清空。迁移与回退细节见 [用量指标](../docs/USAGE_METRICS.md#迁移与回退)。

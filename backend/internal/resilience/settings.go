@@ -23,6 +23,7 @@ type Settings struct {
 	Failure              FailureSettings     `json:"failure"`
 	Session              SessionSettings     `json:"session"`
 	AnthropicLatencyHold SwitchSettings      `json:"anthropic_latency_hold"`
+	SameSiteHold         SwitchSettings      `json:"same_site_hold"`
 	LastResort           SwitchSettings      `json:"last_resort"`
 	Balance              BalanceSettings     `json:"balance"`
 	Budget               BudgetSettings      `json:"budget"`
@@ -65,6 +66,7 @@ type FailureSettings struct {
 // SessionSettings tunes session failure handling.
 type SessionSettings struct {
 	Enabled             bool `json:"enabled"`
+	PostOutputRebind    bool `json:"post_output_rebind"`
 	StreakThreshold     int  `json:"streak_threshold"`
 	StreakWindowSeconds int  `json:"streak_window_seconds"`
 	AvoidSeconds        int  `json:"avoid_seconds"`
@@ -181,9 +183,10 @@ func Defaults() Settings {
 	return Settings{
 		Enabled:              true,
 		Failure:              FailureSettings{TransientCooldownSeconds: 30, RetryAfterCapSeconds: 120, BalanceKeywordsExtra: []string{}, DecisionV2: true},
-		Session:              SessionSettings{Enabled: true, StreakThreshold: 2, StreakWindowSeconds: 600, AvoidSeconds: 600},
+		Session:              SessionSettings{Enabled: true, PostOutputRebind: true, StreakThreshold: 2, StreakWindowSeconds: 600, AvoidSeconds: 600},
 		LastResort:           SwitchSettings{Enabled: true},
 		AnthropicLatencyHold: SwitchSettings{Enabled: true},
+		SameSiteHold:         SwitchSettings{Enabled: true},
 		Balance:              BalanceSettings{Enabled: true, PauseSeconds: 300},
 		// Of attempts still silent at 20s in 48 h of production data, about half
 		// remained silent at 30s and one tenth at 60s; fresh attempts on healthy
@@ -374,6 +377,12 @@ func (s *Settings) master() bool { return s != nil && s.Enabled }
 // SessionOn reports whether session failure handling is active.
 func (s *Settings) SessionOn() bool { return s.master() && s.Session.Enabled }
 
+// PostOutputRebindOn enables immediate session rebind after output failure.
+func (s *Settings) PostOutputRebindOn() bool { return s.SessionOn() && s.Session.PostOutputRebind }
+
+// SameSiteHoldOn enables correlated OpenAI transport-failure holds.
+func (s *Settings) SameSiteHoldOn() bool { return s.master() && s.SameSiteHold.Enabled }
+
 // AnthropicLatencyHoldOn controls Claude latency samples, ordering and migration.
 func (s *Settings) AnthropicLatencyHoldOn() bool { return s.master() && s.AnthropicLatencyHold.Enabled }
 
@@ -455,6 +464,7 @@ func (s *Settings) FailureOn() bool { return s.master() }
 
 var current atomic.Pointer[Settings]
 var anthropicLatencyHoldGen atomic.Uint64
+var sameSiteHoldGen atomic.Uint64
 
 func init() {
 	d := Defaults()
@@ -473,7 +483,13 @@ func Publish(s Settings) {
 	if !s.AnthropicLatencyHoldOn() {
 		anthropicLatencyHoldGen.Add(1)
 	}
+	if !s.SameSiteHoldOn() {
+		sameSiteHoldGen.Add(1)
+	}
 }
+
+// SameSiteHoldGeneration invalidates existing holds and samples on disable.
+func SameSiteHoldGeneration() uint64 { return sameSiteHoldGen.Load() }
 
 // AnthropicLatencyHoldGeneration changes whenever a disabled snapshot is published.
 func AnthropicLatencyHoldGeneration() uint64 { return anthropicLatencyHoldGen.Load() }

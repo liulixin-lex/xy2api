@@ -24,9 +24,10 @@ import (
 // branch that recognises an upstream failure after output reports it here,
 // once per attempt:
 //
-//   - the session counts it as TRANSIENT toward its failure streak (§4.1),
-//     which rebinds the session and avoids the account (§4.2). Wording that
-//     is request scoped before output (overloaded, CAPACITY_SHED) says after
+//   - the session counts it as TRANSIENT and, with P1-B enabled, immediately
+//     rebinds once per attempt (per WebSocket turn); otherwise it uses the
+//     failure streak. Wording that is request scoped before output
+//     (overloaded, CAPACITY_SHED) says after
 //     output that this account is unreliable right now;
 //   - the account counts it in a per-process sliding window; three failures
 //     within 60 s put it into the transient soft cooldown (§3.4), which only
@@ -61,23 +62,25 @@ const (
 // after output reached the client. attempt identifies the upstream attempt
 // (see resilience.RequestState.ReportStreamFailure); later signals of the
 // same attempt are ignored.
-func noteResiliencePostOutputFailure(ctx context.Context, rl *RateLimitService, account *Account, attempt any, kind string) {
-	noteResiliencePostOutputFailureWithCategory(ctx, rl, account, attempt, kind, resilience.CategoryTransient)
+func noteResiliencePostOutputFailure(ctx context.Context, rl *RateLimitService, account *Account, attempt any, kind string) bool {
+	return noteResiliencePostOutputFailureWithCategory(ctx, rl, account, attempt, kind, resilience.CategoryTransient)
 }
 
-func noteResiliencePostOutputFailureWithCategory(ctx context.Context, rl *RateLimitService, account *Account, attempt any, kind string, factCategory resilience.Category) {
+func noteResiliencePostOutputFailureWithCategory(ctx context.Context, rl *RateLimitService, account *Account, attempt any, kind string, factCategory resilience.Category) bool {
 	if account == nil || !resilience.Current().FailureOn() {
-		return
+		return false
 	}
 	st := resilience.StateFrom(ctx)
 	st.MarkAccountFailed(account.ID)
 	if !st.ReportStreamFailure(account.ID, attempt) {
-		return
+		return false
 	}
 	if kind == postOutputEvent || kind == postOutputReadError || kind == postOutputNoTerminal {
 		recordPostOutputFailureFact(ctx, account, kind, factCategory, time.Now())
+		st.SessionFailureAfterOutput(ctx, account.ID, resilience.CategoryTransient)
+	} else {
+		st.SessionFailure(ctx, account.ID, resilience.CategoryTransient)
 	}
-	st.SessionFailure(ctx, account.ID, resilience.CategoryTransient)
 	// The 200 that carried the failure must not end the conversation's
 	// failed-turn streak (design §9.7).
 	st.MarkTurnFailed()
@@ -92,6 +95,7 @@ func noteResiliencePostOutputFailureWithCategory(ctx context.Context, rl *RateLi
 		"failures", failures,
 		"cooldown", cooled,
 	)...)
+	return true
 }
 
 // notePostOutputFailure counts a failure after output of the account and
@@ -183,7 +187,11 @@ func resilienceStreamBrokenAfterOutput(ctx context.Context, rl *RateLimitService
 	if cause != nil {
 		kind = postOutputReadError
 	}
-	noteResiliencePostOutputFailure(ctx, rl, account, attempt, kind)
+	at := time.Now()
+	recorded := noteResiliencePostOutputFailure(ctx, rl, account, attempt, kind)
+	if recorded && rl != nil && rl.resilience != nil && account.IsOpenAI() {
+		rl.resilience.noteOpenAISameSiteStreamFailure(account, at)
+	}
 }
 
 // resilienceAnthropicFailedAfterOutput reports an Anthropic error event
