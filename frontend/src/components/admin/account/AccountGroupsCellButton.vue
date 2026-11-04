@@ -6,10 +6,10 @@
       ref="trigger"
       type="button"
       data-testid="group-quality-indicator"
-      :data-state="panel.attention ?? 'none'"
+      :data-state="panel.indicator"
       class="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 dark:hover:bg-dark-700"
-      :class="GROUP_QUALITY_INDICATOR_CLASSES[panel.attention ?? 'none']"
-      :aria-label="panel.attentionCount ? t('admin.groupQualityGate.indicator.attention', { count: panel.attentionCount }) : t('admin.groupQualityGate.indicator.ok')"
+      :class="GROUP_QUALITY_INDICATOR_CLASSES[panel.indicator]"
+      :aria-label="indicatorLabel"
       :aria-describedby="tooltipId"
       @mouseenter="scheduleOpen"
       @mouseleave="closeTip"
@@ -18,7 +18,7 @@
       @click="openTip"
       @keydown.esc="closeTip"
     >
-      <Icon :name="panel.attention ? 'exclamationTriangle' : 'shield'" size="sm" class="h-3.5 w-3.5" aria-hidden="true" />
+      <Icon :name="INDICATOR_ICONS[panel.indicator]" size="sm" class="h-3.5 w-3.5" aria-hidden="true" />
     </button>
     <button
       type="button"
@@ -57,50 +57,60 @@
       ref="tip"
       role="tooltip"
       data-testid="account-groups-quality-tooltip"
-      class="pointer-events-none fixed z-50 w-72 rounded-lg bg-gray-900 p-3 text-xs leading-relaxed text-gray-100 shadow-lg dark:bg-dark-800"
+      class="pointer-events-none fixed z-50 w-[22rem] rounded-lg bg-gray-900 p-3 text-xs leading-relaxed text-gray-100 shadow-lg dark:bg-dark-800"
       :style="tipStyle"
     >
-      <div v-for="(block, index) in panel.blocks" :key="index" data-testid="quality-panel-block" :class="index ? 'mt-2.5 border-t border-white/10 pt-2.5' : undefined">
-        <p class="font-medium text-white">{{ block.title }}</p>
+      <div
+        v-for="(block, index) in panel.blocks"
+        :key="index"
+        data-testid="quality-panel-block"
+        :data-state="block.kind"
+        :class="index ? 'mt-2.5 border-t border-white/10 pt-2.5' : undefined"
+      >
+        <p class="flex items-baseline justify-between gap-2">
+          <span class="min-w-0 font-medium text-white">{{ block.title }}</span>
+          <span v-if="block.strict" class="shrink-0 rounded bg-white/10 px-1.5 text-[11px] leading-4 text-gray-300">{{ t('admin.groupQualityGate.tooltip.strict') }}</span>
+        </p>
         <p v-if="block.note" class="text-gray-400">{{ block.note }}</p>
-        <div v-if="block.reasons.length" class="mt-1 flex flex-wrap gap-1">
-          <span v-for="reason in block.reasons" :key="reason" class="rounded bg-red-500/20 px-1.5 text-[11px] leading-4 text-red-200">{{ reason }}</span>
-        </div>
+        <p
+          v-if="block.composition"
+          data-testid="quality-panel-composition"
+          :data-insufficient="block.composition.insufficient || undefined"
+          :class="block.composition.insufficient ? 'text-amber-300' : 'text-gray-400'"
+        >{{ block.composition.text }}</p>
         <table v-if="block.rows.length" class="mt-1.5 w-full tabular-nums">
           <thead>
             <tr class="text-[11px] text-gray-400">
-              <th scope="col" class="pb-0.5 text-left font-normal">{{ t('admin.groupQualityGate.tooltip.metric') }}</th>
-              <th scope="col" class="pb-0.5 text-right font-normal">
-                {{ t('admin.groupQualityGate.tooltip.measured') }}<span v-if="block.measuredNote" class="ml-1">{{ block.measuredNote }}</span>
-              </th>
-              <th scope="col" class="pb-0.5 pl-3 text-right font-normal">{{ t('admin.groupQualityGate.tooltip.limit') }}</th>
+              <th scope="col" class="pb-0.5 text-left font-normal">{{ t('admin.groupQualityGate.tooltip.dimension') }}</th>
+              <th scope="col" class="pb-0.5 pl-2 text-left font-normal">{{ t('admin.groupQualityGate.tooltip.stateColumn') }}</th>
+              <th scope="col" class="pb-0.5 pl-2 text-right font-normal">{{ t('admin.groupQualityGate.tooltip.measured') }}</th>
+              <th scope="col" class="pb-0.5 pl-2 text-right font-normal">{{ t('admin.groupQualityGate.tooltip.samples') }}</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in block.rows" :key="row.key" :data-metric="row.key" :data-over="row.over || undefined">
-              <td class="pr-2 text-gray-300">{{ row.label }}</td>
-              <td class="whitespace-nowrap text-right" :class="row.over ? 'font-semibold text-red-300' : 'text-gray-100'">
-                {{ row.value }}<span v-if="row.note" class="ml-1 text-[11px] font-normal text-gray-400">{{ row.note }}</span>
+            <tr v-for="row in block.rows" :key="row.key" :data-metric="row.key" :data-state="row.state" class="align-top">
+              <td class="whitespace-nowrap pb-1 text-gray-300">
+                {{ row.label }}
+                <span class="block text-[11px] leading-4 text-gray-400">{{ t('admin.groupQualityGate.tooltip.limitValue', { limit: row.limit }) }}</span>
               </td>
-              <td class="whitespace-nowrap pl-3 text-right text-gray-300">{{ row.limit }}</td>
+              <td class="whitespace-nowrap pl-2" :class="DIMENSION_STATE_CLASSES[row.state]">{{ row.stateLabel }}</td>
+              <td class="pl-2 text-right" :class="row.state === 'fail' ? 'font-semibold text-red-300' : 'text-gray-100'">
+                {{ row.value }}
+                <span v-if="row.detail" class="block whitespace-nowrap text-[11px] font-normal leading-4 text-gray-400">{{ row.detail }}</span>
+              </td>
+              <td class="whitespace-nowrap pl-2 text-right text-gray-400">{{ row.samples }}</td>
             </tr>
           </tbody>
         </table>
-        <p v-if="block.headroom" class="mt-1" :class="block.headroom.tone === 'danger' ? 'text-red-300' : 'text-amber-300'">{{ block.headroom.text }}</p>
-        <p v-if="block.tier" data-testid="quality-panel-tier" class="mt-1 text-gray-400">{{ block.tier }}</p>
+        <p v-if="block.badMemory" data-testid="quality-panel-bad-memory" class="mt-1 text-amber-300">{{ block.badMemory }}</p>
       </div>
-      <div v-if="panel.eligible.length" data-testid="quality-panel-eligible" :class="panel.blocks.length ? 'mt-2.5 border-t border-white/10 pt-2.5' : undefined">
-        <p class="font-medium text-white">{{ t('admin.groupQualityGate.panel.eligible', { count: panel.eligible.length }) }}</p>
-        <!-- 每组一行：名称（固定、余量）后接灰色的档位与实时快档线 -->
-        <p v-for="item in panel.eligible" :key="item.name" class="text-gray-300">
-          <template v-if="item.pinned"><Icon name="lock" size="xs" class="mr-0.5 inline-block align-[-1px] text-gray-400" aria-hidden="true" /><span class="sr-only">{{ t('admin.groupQualityGate.pinnedMark') }}</span></template>{{ item.name }}<span v-if="item.headroom" class="ml-1 whitespace-nowrap" :class="item.headroom.tone === 'danger' ? 'text-red-300' : 'text-amber-300'">{{ item.headroom.text }}</span><span class="ml-1 text-gray-400">{{ item.tier }}</span>
+      <div v-if="panel.latencyHold" data-testid="quality-panel-latency-hold" class="mt-2.5 border-t border-white/10 pt-2">
+        <p class="flex items-center gap-1 text-amber-300">
+          <Icon name="clock" size="xs" class="shrink-0" aria-hidden="true" />{{ panel.latencyHold.text }}
         </p>
+        <p class="text-gray-400">{{ panel.latencyHold.note }}</p>
       </div>
-      <p v-if="windowItems.length" data-testid="quality-panel-window" class="mt-2.5 flex flex-wrap gap-x-2 border-t border-white/10 pt-2 tabular-nums text-gray-400">
-        <span>{{ t('admin.groupQualityGate.panel.window') }}</span>
-        <span v-for="item in windowItems" :key="item.key" class="whitespace-nowrap" :class="item.alert ? 'font-semibold text-red-300' : 'text-gray-200'">{{ item.text }}</span>
-      </p>
-      <p v-if="panel.stale" class="mt-1 text-amber-300">{{ panel.stale }}</p>
+      <p v-if="panel.stale" class="mt-2 text-amber-300">{{ panel.stale }}</p>
     </div>
   </Teleport>
 </template>
@@ -115,25 +125,37 @@ import GroupQualityBadge from './GroupQualityBadge.vue'
 import { formatDateTime } from '@/utils/format'
 import { isReducedMotion } from '@/composables/useMotionPreference'
 import type { Group } from '@/types'
-import type { GroupQualityAccountMetrics } from '@/types/groupQualityGate'
+import type { GroupQualityDimensionState } from '@/types/groupQualityGate'
 import {
   GROUP_QUALITY_INDICATOR_CLASSES,
   QUALITY_CLOCK,
-  accountQualityMetricItems,
   groupQualityPanel,
   isGroupQualityAttention,
   orderGroupsByQuality,
   qualityTooltipTop,
-  strictestQualityLimits,
-  type GroupQualityCell
+  type GroupQualityCell,
+  type GroupQualityIndicatorKind
 } from './groupQualityPresentation'
 
 // 账号列表的分组单元格。分组标签是一个按钮，点开“编辑分组”；没有分组时显示“—”也能点。
-// 只有熔断、保底保留、观察中的分组用带状态的标签，合格组显示普通标签。开启门槛时标签后有一个小标识，
-// 只有悬停、键盘聚焦或点按它才弹出门槛面板：需关注的分组逐组展开，合格组每组一行（含档位与实时快档线），底部是账号完整窗口指标。
-const TIP_WIDTH = 288
+// 只有不达标、待复测的分组用带状态的标签，其余显示普通标签（未知不会显示成达标）。开启门槛时标签前有一个小标识，
+// 只有悬停、键盘聚焦或点按它才弹出门槛面板：每个门槛分组一段（状态、本组构成、三维小表、坏记忆），底部是判慢让位。
+const TIP_WIDTH = 352
 const TIP_GAP = 6
 const HOVER_DELAY_MS = 120
+
+const INDICATOR_ICONS = {
+  failing: 'exclamationTriangle',
+  retest: 'exclamationTriangle',
+  hold: 'clock',
+  none: 'shield'
+} as const satisfies Record<GroupQualityIndicatorKind, string>
+
+const DIMENSION_STATE_CLASSES: Record<GroupQualityDimensionState, string> = {
+  pass: 'text-emerald-300',
+  fail: 'font-semibold text-red-300',
+  none: 'text-gray-400'
+}
 
 const props = defineProps<{
   groups: Group[]
@@ -142,8 +164,6 @@ const props = defineProps<{
   accountPlatform?: string
   /** groupId → 该账号在开启门槛的分组里的状态 */
   quality?: Map<number, GroupQualityCell>
-  /** 账号的完整窗口指标；熔断中的分组用它显示触发熔断的数据 */
-  metrics?: GroupQualityAccountMetrics
 }>()
 
 const emit = defineEmits<{
@@ -159,8 +179,13 @@ const attentionOf = (groupId: number) => {
   const cell = props.quality?.get(groupId)
   return cell && isGroupQualityAttention(cell) ? cell : undefined
 }
-const panel = computed(() => (props.quality?.size ? groupQualityPanel(orderedGroups.value, props.quality, t, clock, props.metrics) : null))
-const windowItems = computed(() => (props.metrics ? accountQualityMetricItems(props.metrics, t, strictestQualityLimits(props.quality)) : []))
+const panel = computed(() => (props.quality?.size ? groupQualityPanel(orderedGroups.value, props.quality, t, clock) : null))
+const indicatorLabel = computed(() => {
+  const current = panel.value
+  if (!current) return ''
+  if (current.attentionCount) return t('admin.groupQualityGate.indicator.attention', { count: current.attentionCount })
+  return t(current.indicator === 'hold' ? 'admin.groupQualityGate.indicator.hold' : 'admin.groupQualityGate.indicator.ok')
+})
 
 // 最多显示 2 个标签，名称尽量完整，其余收进 +N（按钮 title 列出全部分组）；需关注的排在前面，不会被收进 +N。
 const MAX_VISIBLE = 2

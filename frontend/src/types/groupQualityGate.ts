@@ -1,19 +1,32 @@
-// 分组质量门槛与利润门预览的接口类型。字段名与 group-quality-gate-20261031 的接口契约一致，不得改名。
+// 分组质量门槛与利润门预览的接口类型。字段名与 group-quality-gate-v3-20261104 的接口契约（design §5.2、§5.3）一致，不得改名。
 
-/** 每组门槛策略；分组没有条目时视为 enabled=false。 */
-export interface GroupQualityGatePolicy {
+/** 每组 v3 门槛设置。界面里错误与缓存按百分比输入，接口里是 0–1 小数。 */
+export interface GroupQualityGateV3Policy {
   enabled: boolean
-  /** 错误率熔断线，取值 (0, 1] */
+  /** 首字上限 X：本组 P90 首字不超过此值，5–60 的整数（秒） */
+  max_ttft_p90_seconds: number
+  /** 错误上限 Y：0.05–0.50 */
   max_error_rate: number
-  /** 续轮用户可见首字 p90 熔断线（毫秒），≤ 600000 */
-  max_warm_ttft_p90_ms: number
-  /** 快档线（毫秒），只用于排序，≥ 1000 且小于熔断线；实际取它与组内最快 + 4s 中较小者 */
-  fast_warm_ttft_p90_ms: number
-  /** 固定账号，必须是本组成员 */
-  pinned_account_ids: number[]
+  /** 缓存下限 Z：0.50–0.70 */
+  min_cache_keep_rate: number
+  /** 严格模式：未知的号一律放 1 档 */
+  strict: boolean
 }
 
-/** GET /admin/group-quality-gate/policies */
+/**
+ * 每组门槛策略。v2 字段只为回滚保留：界面不展示、不编辑，保存时原样回传，服务端也只取 v3。
+ * GET 总会填好生效的 v3（没有 v3 子对象时启用状态继承 v2，其余取缺省值）。
+ */
+export interface GroupQualityGatePolicy {
+  enabled?: boolean
+  max_error_rate?: number
+  max_warm_ttft_p90_ms?: number
+  fast_warm_ttft_p90_ms?: number
+  pinned_account_ids?: number[]
+  v3: GroupQualityGateV3Policy
+}
+
+/** GET /admin/group-quality-gate/policies；分组没有条目时视为未启用。 */
 export interface GroupQualityGatePolicies {
   version: number
   groups: Record<string, GroupQualityGatePolicy>
@@ -30,61 +43,71 @@ export interface UpdateGroupQualityGatePolicyResponse {
   policy: GroupQualityGatePolicy
 }
 
-export type GroupQualityGateState = 'eligible' | 'ejected' | 'trial'
-export type GroupQualityGateReason = 'error_rate' | 'warm_ttft'
+/** 账号在本组的状态：达标、未知（0 档但有维无结论）、待复测（1 档）、不达标（2 档）、固定。 */
+export type GroupQualityGateAccountState = 'passing' | 'unknown' | 'retest' | 'failing' | 'pinned'
+export type GroupQualityGateTier = 0 | 1 | 2
+/** 维度状态：达标、不达标、无结论。 */
+export type GroupQualityDimensionState = 'pass' | 'fail' | 'none'
 
-/** 按账号算一份、所有分组共用的完整窗口指标，供账号行和熔断中提示显示。 */
-export interface GroupQualityAccountMetrics {
-  calls: number
-  soft_failures: number
-  error_rate: number
-  warm_samples: number
-  warm_ttft_p90_ms: number
-  zero_cache_samples: number
-  warm_zero_cache_rate: number
+interface GroupQualityDimensionBase {
+  state: GroupQualityDimensionState
+  samples: number
+  /** UTC RFC3339：最后一次不达标 + 2 小时；坏记忆已清除时为 null */
+  bad_until: string | null
 }
 
-/**
- * 本组判定实际使用的有效数据（有效起点之后）。计数始终是实际值；error_rate 为 null 表示未达判定条件
- * （调用 < 20 或软失败 < 5），warm_ttft_p90_ms 为 null 表示续轮样本 < 10。
- */
-export interface GroupQualityMemberMetrics {
-  calls: number
-  soft_failures: number
-  error_rate: number | null
-  warm_samples: number
-  warm_ttft_p90_ms: number | null
+export interface GroupQualityTtftDimension extends GroupQualityDimensionBase {
+  /** 预计 P90（毫秒）= GM30 × 本组 e_G；没有统计时为 null */
+  value: number | null
+  /** 速度系数 GM30 */
+  factor: number | null
+  sessions: number
+}
+
+export interface GroupQualityRateDimension extends GroupQualityDimensionBase {
+  /** 错误维为失败率，缓存维为保持率点估计；没有统计时为 null */
+  value: number | null
+  wilson_low: number | null
+  wilson_high: number | null
+}
+
+export interface GroupQualityErrorDimension extends GroupQualityRateDimension {
+  failures: number
+}
+
+export interface GroupQualityLatencyHold {
+  /** 判慢让位的最晚到期时刻；到期只解除后排，不代表已恢复 */
+  until: string
+  models: string[]
 }
 
 export interface GroupQualityGateAccountStatus {
   account_id: number
-  state: GroupQualityGateState
-  /** UTC RFC3339：ejected 时为熔断到期时刻，trial（观察中）时为观察结束时刻 */
-  until?: string | null
-  reasons: GroupQualityGateReason[]
-  strikes: number
-  usable: boolean
-  passing: boolean
-  guard_held: boolean
+  status: GroupQualityGateAccountState
+  tier: GroupQualityGateTier
   pinned: boolean
-  /** 选号实际是否否决；固定与保底保留为 false */
-  vetoed: boolean
-  /** 排序档位：0 快档，2 其他 */
-  tier: 0 | 2
-  /** 本组判定实际使用的指标；合格/观察中提示使用它，熔断中提示改看完整窗口 */
-  metrics: GroupQualityMemberMetrics
-  /** 按成员 metrics 里非 null 指标中最紧一项的 (1 − 实测 ÷ 上限)；全为 null 时为 null */
-  headroom: number | null
+  latency_hold: GroupQualityLatencyHold | null
+  ttft: GroupQualityTtftDimension
+  error: GroupQualityErrorDimension
+  cache: GroupQualityRateDimension
+}
+
+export interface GroupQualityGateSummary {
+  passing: number
+  unknown: number
+  retest: number
+  failing: number
+  pinned: number
 }
 
 export interface GroupQualityGateGroupStatus {
   group_id: number
   enabled: boolean
-  fast_warm_ttft_p90_ms: number
-  /** 本组实时快档线 = min(快档线, 组内最快 + 4s)；组内没有样本足够的可用成员时为 null */
-  effective_fast_warm_ttft_p90_ms: number | null
-  /** eligible：未否决的成员数；ejected：否决数；trial：观察中的成员数 */
-  summary: { eligible: number; ejected: number; trial: number }
+  policy: GroupQualityGateV3Policy
+  /** 本组构成 P90 e_G（毫秒）；不足 50 条时为 null，首字维显示“本组样本不足” */
+  expected_p90_ms: number | null
+  expected_samples: number
+  summary: GroupQualityGateSummary
   accounts: GroupQualityGateAccountStatus[]
 }
 
@@ -92,7 +115,6 @@ export interface GroupQualityGateGroupStatus {
 export interface GroupQualityGateStatus {
   generated_at: string
   stale: boolean
-  account_metrics: Record<string, GroupQualityAccountMetrics>
   groups: GroupQualityGateGroupStatus[]
 }
 

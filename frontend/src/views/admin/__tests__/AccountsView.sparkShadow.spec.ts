@@ -34,7 +34,7 @@ const {
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     groupQualityGate: {
-      getStatus: vi.fn().mockResolvedValue({ generated_at: '', stale: false, account_metrics: {}, groups: [] }),
+      getStatus: vi.fn().mockResolvedValue({ generated_at: '', stale: false, groups: [] }),
       getPolicies: vi.fn().mockResolvedValue({ version: 0, groups: {} }),
     },
     accounts: {

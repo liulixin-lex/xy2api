@@ -2,7 +2,7 @@ import { mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import AccountGroupsCellButton from '../AccountGroupsCellButton.vue'
 import type { Group } from '@/types'
-import type { GroupQualityGateAccountStatus } from '@/types/groupQualityGate'
+import type { GroupQualityGateAccountStatus, GroupQualityGateGroupStatus } from '@/types/groupQualityGate'
 import type { GroupQualityCell } from '../groupQualityPresentation'
 
 vi.mock('vue-i18n', async () => {
@@ -20,18 +20,22 @@ const mountCell = (groups: Group[]) => mount(AccountGroupsCellButton, {
   props: { groups, accountName: 'acc-1' },
   global: { stubs: { GroupBadge: GroupBadgeStub } }
 })
-const cell = (state: GroupQualityGateAccountStatus['state'], patch: Partial<GroupQualityGateAccountStatus> = {}): GroupQualityCell => ({
-  kind: state,
-  status: {
-    account_id: 1, state, until: null, reasons: [], strikes: 0, usable: true, passing: true, guard_held: false, pinned: false,
-    vetoed: false, tier: 0, headroom: 0.4, metrics: { calls: 0, soft_failures: 0, error_rate: null, warm_samples: 0, warm_ttft_p90_ms: null }, ...patch
-  },
-  maxErrorRate: 0.1,
-  maxWarmTtftMs: 20000,
-  fastWarmTtftMs: 10000,
-  effectiveFastWarmTtftMs: null,
-  stale: false
-})
+const cell = (kind: GroupQualityGateAccountStatus['status'], patch: Partial<GroupQualityGateAccountStatus> = {}, groupPatch: Partial<GroupQualityGateGroupStatus> = {}): GroupQualityCell => {
+  const account: GroupQualityGateAccountStatus = {
+    account_id: 1, status: kind, tier: kind === 'failing' ? 2 : kind === 'retest' ? 1 : 0, pinned: kind === 'pinned', latency_hold: null,
+    ttft: { state: 'pass', value: 9800, factor: 1.08, samples: 23, sessions: 6, bad_until: null },
+    error: { state: 'pass', value: 0.04, samples: 80, failures: 3, wilson_low: 0.013, wilson_high: 0.105, bad_until: null },
+    cache: { state: 'pass', value: 0.82, samples: 24, wilson_low: 0.62, wilson_high: 0.93, bad_until: null },
+    ...patch
+  }
+  const group: GroupQualityGateGroupStatus = {
+    group_id: 1, enabled: true,
+    policy: { enabled: true, max_ttft_p90_seconds: 15, max_error_rate: 0.1, min_cache_keep_rate: 0.5, strict: false },
+    expected_p90_ms: 9100, expected_samples: 87, summary: { passing: 1, unknown: 0, retest: 0, failing: 0, pinned: 0 }, accounts: [account],
+    ...groupPatch
+  }
+  return { kind, account, group, stale: false }
+}
 
 describe('AccountGroupsCellButton', () => {
   it('is a single button with up to 2 badges, each titled with its full name, and a plain +N', async () => {
@@ -87,12 +91,18 @@ describe('AccountGroupsCellButton', () => {
     }
     const panel = () => document.querySelector<HTMLElement>('[data-testid="account-groups-quality-tooltip"]')!
 
-    it('shows plain badges for eligible groups and opens the panel only from the small indicator', async () => {
-      const wrapper = mountGated(new Map([[1, cell('eligible')], [2, cell('ejected', { reasons: ['error_rate'] })]]))
-      expect(wrapper.findAll('[data-testid="group-quality-badge"]').map(badge => badge.attributes('data-state'))).toEqual(['ejected'])
-      expect(wrapper.findAll('[data-test="badge"]').map(badge => badge.text())).toEqual(['Group 1'])
+    it('badges only failing and retest groups and opens the panel only from the small indicator', async () => {
+      const wrapper = mountGated(new Map([
+        [1, cell('passing')],
+        [2, cell('failing', { error: { state: 'fail', value: 0.2, samples: 60, failures: 12, wilson_low: 0.12, wilson_high: 0.31, bad_until: '2026-11-04T12:00:00Z' } })],
+        [3, cell('unknown', { cache: { state: 'none', value: null, samples: 4, wilson_low: null, wilson_high: null, bad_until: null } })]
+      ]))
+      expect(wrapper.findAll('[data-testid="group-quality-badge"]').map(badge => badge.attributes('data-state'))).toEqual(['failing'])
+      // 未知组排在达标组前面，显示普通标签，不带“达标”；达标组收进 +1。
+      expect(wrapper.findAll('[data-test="badge"]').map(badge => badge.text())).toEqual(['Group 3'])
+      expect(wrapper.text()).toContain('+1')
       const indicator = wrapper.get('[data-testid="group-quality-indicator"]')
-      expect(indicator.attributes('data-state')).toBe('ejected')
+      expect(indicator.attributes('data-state')).toBe('failing')
       expect(indicator.attributes('aria-label')).toBe('admin.groupQualityGate.indicator.attention:{"count":1}')
 
       await wrapper.get('[data-testid="account-groups-cell"]').trigger('mouseenter')
@@ -101,20 +111,43 @@ describe('AccountGroupsCellButton', () => {
       await indicator.trigger('click')
       await new Promise(resolve => setTimeout(resolve))
       expect(panel().style.display).not.toBe('none')
-      expect(panel().querySelectorAll('[data-testid="quality-panel-block"]')).toHaveLength(1)
-      expect(panel().querySelector('[data-testid="quality-panel-eligible"]')!.textContent).toContain('Group 1')
+      const blocks = [...panel().querySelectorAll<HTMLElement>('[data-testid="quality-panel-block"]')]
+      expect(blocks.map(block => block.dataset.state)).toEqual(['failing', 'unknown', 'passing'])
+      const errorRow = blocks[0].querySelector<HTMLElement>('[data-metric="error"]')!
+      expect(errorRow.dataset.state).toBe('fail')
+      expect(errorRow.textContent).toContain('20%')
+      expect(errorRow.textContent).toContain('12/60')
+      expect(blocks[0].querySelector('[data-testid="quality-panel-bad-memory"]')).not.toBeNull()
+      expect(blocks[1].querySelector<HTMLElement>('[data-metric="cache"]')!.dataset.state).toBe('none')
 
       await indicator.trigger('keydown', { key: 'Escape' })
       expect(panel().style.display).toBe('none')
       wrapper.unmount()
     })
 
-    it('keeps the indicator grey when every gated group is eligible', () => {
-      const wrapper = mountGated(new Map([[1, cell('eligible')], [3, cell('eligible', { pinned: true })]]))
-      const indicator = wrapper.get('[data-testid="group-quality-indicator"]')
-      expect([indicator.attributes('data-state'), indicator.attributes('aria-label')]).toEqual(['none', 'admin.groupQualityGate.indicator.ok'])
-      expect(wrapper.find('[data-testid="group-quality-badge"]').exists()).toBe(false)
+    it('flags too few group samples on the first-token row', async () => {
+      const wrapper = mountGated(new Map([[1, cell('unknown', { ttft: { state: 'none', value: null, factor: null, samples: 12, sessions: 2, bad_until: null } }, { expected_p90_ms: null, expected_samples: 20 })]]))
+      await wrapper.get('[data-testid="group-quality-indicator"]').trigger('click')
+      await new Promise(resolve => setTimeout(resolve))
+      const composition = panel().querySelector<HTMLElement>('[data-testid="quality-panel-composition"]')!
+      expect(composition.dataset.insufficient).toBe('true')
+      expect(panel().querySelector('[data-metric="ttft"]')!.textContent).toContain('admin.groupQualityGate.tooltip.groupSamplesShort')
       wrapper.unmount()
+    })
+
+    it('keeps the indicator grey when nothing needs attention and turns it into a clock during a latency hold', () => {
+      const quiet = mountGated(new Map([[1, cell('passing')], [3, cell('pinned')]]))
+      const indicator = quiet.get('[data-testid="group-quality-indicator"]')
+      expect([indicator.attributes('data-state'), indicator.attributes('aria-label')]).toEqual(['none', 'admin.groupQualityGate.indicator.ok'])
+      expect(quiet.find('[data-testid="group-quality-badge"]').exists()).toBe(false)
+      quiet.unmount()
+
+      const until = new Date(Date.now() + 5 * 60_000).toISOString()
+      const held = mountGated(new Map([[1, cell('passing', { latency_hold: { until, models: ['gpt-5.5'] } })]]))
+      const heldIndicator = held.get('[data-testid="group-quality-indicator"]')
+      expect([heldIndicator.attributes('data-state'), heldIndicator.attributes('aria-label')]).toEqual(['hold', 'admin.groupQualityGate.indicator.hold'])
+      expect(document.querySelector('[data-testid="quality-panel-latency-hold"]')).not.toBeNull()
+      held.unmount()
     })
   })
 })

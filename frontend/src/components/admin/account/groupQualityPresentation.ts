@@ -1,31 +1,22 @@
 import type {
-  GroupQualityAccountMetrics,
+  GroupQualityDimensionState,
+  GroupQualityGateAccountState,
   GroupQualityGateAccountStatus,
   GroupQualityGateGroupStatus,
   GroupQualityGatePolicies,
   GroupQualityGateStatus,
-  GroupQualityMemberMetrics
+  GroupQualityLatencyHold
 } from '@/types/groupQualityGate'
-import { QUALITY_GATE_DEFAULTS } from '@/views/admin/groupsQualityGate'
 
 type Translate = (key: string, params?: Record<string, string | number>) => string
+type Clock = (iso: string) => string
 const prefix = 'admin.groupQualityGate.'
 
-/** 续轮零缓存率超过 30% 的账号不算快档；样本不足 20 时后端不看，列表也不标红。 */
-export const ZERO_CACHE_ALERT_RATE = 0.3
-export const ZERO_CACHE_MIN_SAMPLES = 20
-
-/** 保底保留单独成档：它处于熔断，但为保住本组最少可用账号仍参与调度。 */
-export type GroupQualityBadgeKind = 'eligible' | 'ejected' | 'trial' | 'guard_held'
-
+/** 账号在一个开启门槛的分组里的评估结果；分组带着本组标准与本组构成 e_G。 */
 export interface AccountGroupQuality {
-  kind: GroupQualityBadgeKind
-  status: GroupQualityGateAccountStatus
-  maxErrorRate: number
-  maxWarmTtftMs: number
-  /** 本组策略快档线与实时快档线（组内最快 + 4s 封顶；无最快值时为 null） */
-  fastWarmTtftMs: number
-  effectiveFastWarmTtftMs: number | null
+  kind: GroupQualityGateAccountState
+  account: GroupQualityGateAccountStatus
+  group: GroupQualityGateGroupStatus
   stale: boolean
 }
 
@@ -42,7 +33,7 @@ export type GroupQualityGateView =
   | { kind: 'evaluated'; group: GroupQualityGateGroupStatus }
 
 /**
- * 分组的门槛显示状态，开没开以策略为准：非 OpenAI 或策略关 → off（也覆盖刚关、状态还没更新的情况）；
+ * 分组的门槛显示状态，开没开以策略的 v3 为准：非 OpenAI 或策略关 → off（也覆盖刚关、状态还没更新的情况）；
  * 读取失败 → failed；策略开但状态里还没有这个组（刚开、等下一轮评估）→ pending。
  * 评估器与 status 只看启用的分组，停用分组的门槛不生效，按 off 显示，免得一直“等待评估”。
  */
@@ -53,7 +44,7 @@ export function groupQualityGateView(
   if (group.platform !== 'openai' || group.status === 'inactive') return { kind: 'off' }
   if (sources.policiesFailed) return { kind: 'failed' }
   if (!sources.policies) return { kind: 'loading' }
-  if (!sources.policies.groups[String(group.id)]?.enabled) return { kind: 'off' }
+  if (!sources.policies.groups[String(group.id)]?.v3?.enabled) return { kind: 'off' }
   if (sources.statusFailed) return { kind: 'failed' }
   if (!sources.status) return { kind: 'loading' }
   const evaluated = sources.status.groups.find(item => item.group_id === group.id && item.enabled)
@@ -64,29 +55,15 @@ export function groupQualityGateView(
 export type GroupQualityNoticeKind = 'pending' | 'failed'
 export type GroupQualityCell = AccountGroupQuality | { kind: GroupQualityNoticeKind }
 
-/** accountId → groupId → 门槛状态。只收开启门槛的分组；上限取策略，零值或缺省取默认。 */
-export function buildAccountQualityIndex(
-  status: GroupQualityGateStatus | null,
-  policies: GroupQualityGatePolicies | null
-): Map<number, Map<number, AccountGroupQuality>> {
+/** accountId → groupId → 门槛状态。只收开启门槛的分组。 */
+export function buildAccountQualityIndex(status: GroupQualityGateStatus | null): Map<number, Map<number, AccountGroupQuality>> {
   const index = new Map<number, Map<number, AccountGroupQuality>>()
   for (const group of status?.groups ?? []) {
     if (!group.enabled) continue
-    const policy = policies?.groups[String(group.group_id)]
-    const maxErrorRate = policy && policy.max_error_rate > 0 ? policy.max_error_rate : QUALITY_GATE_DEFAULTS.max_error_rate
-    const maxWarmTtftMs = policy && policy.max_warm_ttft_p90_ms > 0 ? policy.max_warm_ttft_p90_ms : QUALITY_GATE_DEFAULTS.max_warm_ttft_p90_ms
     for (const account of group.accounts) {
       let byGroup = index.get(account.account_id)
       if (!byGroup) index.set(account.account_id, (byGroup = new Map()))
-      byGroup.set(group.group_id, {
-        kind: account.guard_held ? 'guard_held' : account.state,
-        status: account,
-        maxErrorRate,
-        maxWarmTtftMs,
-        fastWarmTtftMs: group.fast_warm_ttft_p90_ms,
-        effectiveFastWarmTtftMs: group.effective_fast_warm_ttft_p90_ms,
-        stale: status!.stale
-      })
+      byGroup.set(group.group_id, { kind: account.status, account, group, stale: status!.stale })
     }
   }
   return index
@@ -97,7 +74,7 @@ export function buildAccountQualityIndex(
  * 显示普通标签；分组已评估但还没有这个账号（刚加入）时为等待评估。
  */
 export function buildAccountQualityCells(sources: GroupQualitySources) {
-  const evaluated = buildAccountQualityIndex(sources.status, sources.policies)
+  const evaluated = buildAccountQualityIndex(sources.status)
   const views = new Map<number, GroupQualityGateView>()
   return (accountId: number, groups: { id: number; platform: string }[]): Map<number, GroupQualityCell> => {
     const cells = new Map<number, GroupQualityCell>()
@@ -111,26 +88,30 @@ export function buildAccountQualityCells(sources: GroupQualitySources) {
   }
 }
 
-const KIND_RANK: Record<GroupQualityCell['kind'], number> = { ejected: 0, guard_held: 1, trial: 2, failed: 3, pending: 4, eligible: 5 }
+const KIND_RANK: Record<GroupQualityCell['kind'], number> = { failing: 0, retest: 1, failed: 2, pending: 3, unknown: 4, pinned: 5, passing: 6 }
 
-/** 有问题的分组排前面，免得账号列表只显示前几个标签时把熔断藏进 +N；同档保持原顺序。 */
+/** 有问题的分组排前面，免得账号列表只显示前几个标签时把不达标藏进 +N；同档保持原顺序。 */
 export function orderGroupsByQuality<T extends { id: number }>(groups: T[], quality?: Map<number, GroupQualityCell>): T[] {
   if (!quality?.size) return groups
   const rank = (group: T) => {
     const kind = quality.get(group.id)?.kind
-    return kind ? KIND_RANK[kind] : 6
+    return kind ? KIND_RANK[kind] : 7
   }
   return groups.map((group, order) => ({ group, order, rank: rank(group) }))
     .sort((a, b) => a.rank - b.rank || a.order - b.order)
     .map(item => item.group)
 }
 
-/** 与全局 badge-success / danger / warning / gray 同一套色板。 */
+/**
+ * 与全局 badge-success / danger / warning / gray 同一套色板。未知与等待评估同为灰色：
+ * 0 档里的未知号照常参与调度，但不能看起来像达标。
+ */
 export const GROUP_QUALITY_BADGE_CLASSES: Record<GroupQualityCell['kind'], string> = {
-  eligible: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
-  ejected: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
-  trial: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
-  guard_held: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400',
+  passing: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+  unknown: 'bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-dark-300',
+  retest: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+  failing: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+  pinned: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400',
   pending: 'bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-dark-300',
   failed: 'bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-dark-300'
 }
@@ -138,35 +119,18 @@ export const GROUP_QUALITY_BADGE_CLASSES: Record<GroupQualityCell['kind'], strin
 export const isGroupQualityNotice = (cell: GroupQualityCell): cell is { kind: GroupQualityNoticeKind } =>
   cell.kind === 'pending' || cell.kind === 'failed'
 
-/** formatDateTime options for the hh:mm ejection end. */
+/** formatDateTime options for hh:mm. */
 export const QUALITY_CLOCK: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit', hour12: false }
 
-const STATE_KEYS: Record<GroupQualityCell['kind'], string> = {
-  eligible: 'eligible', ejected: 'ejected', trial: 'trial', guard_held: 'guardHeld', pending: 'pending', failed: 'failed'
-}
-
-/** 标签上的状态文字：合格 / 熔断至 hh:mm / 观察至 hh:mm / 保底保留 / 等待评估 / 读取失败。 */
-export function groupQualityStateLabel(cell: GroupQualityCell, t: Translate, clock: (iso: string) => string): string {
-  if ((cell.kind === 'ejected' || cell.kind === 'trial') && cell.status.until) {
-    return t(prefix + `state.${cell.kind}Until`, { time: clock(cell.status.until) })
-  }
-  return t(prefix + 'state.' + STATE_KEYS[cell.kind])
-}
-
-/**
- * 档位与本组实时快档线，一行说清“未超快档线却不在快档”：快档 / 其他档，实时快档线 n s；
- * 组内没有样本足够的成员时实时快档线等于策略快档线，并注明原因。
- */
-export function groupQualityTierText(quality: AccountGroupQuality, t: Translate): string {
-  const tier = t(prefix + (quality.status.tier === 0 ? 'tooltip.tierFast' : 'tooltip.tierOther'))
-  const effective = quality.effectiveFastWarmTtftMs
-  const line = formatQualitySeconds(effective ?? quality.fastWarmTtftMs)
-  return t(prefix + (effective == null ? 'tooltip.fastLineNoBest' : 'tooltip.fastLine'), { tier, line })
+/** 标签上的状态文字：达标 / 未知 / 待复测 / 不达标 / 固定 / 等待评估 / 读取失败。 */
+export function groupQualityStateLabel(cell: GroupQualityCell, t: Translate): string {
+  return t(prefix + 'state.' + cell.kind)
 }
 
 export const formatQualityRate = (rate: number) => `${Math.round(rate * 1000) / 10}%`
 export const formatQualitySeconds = (ms: number) => `${Math.round(ms / 100) / 10}s`
-const formatHeadroom = (headroom: number) => `${Math.round(headroom * 100)}%`
+const formatFactor = (factor: number) => `×${(Math.round(factor * 100) / 100).toFixed(2)}`
+const formatInterval = (low: number, high: number) => `${Math.round(low * 1000) / 10}–${formatQualityRate(high)}`
 
 /** 提示面板的纵向位置：下方放得下放下方，否则放上方；两边都放不下时贴住视口底部，且不超出顶部。 */
 export function qualityTooltipTop(
@@ -183,232 +147,228 @@ export function qualityTooltipTop(
   return Math.max(margin, viewportHeight - margin - height)
 }
 
-export interface QualityTooltipRow {
-  key: 'error_rate' | 'warm_ttft'
+export type QualityDimensionKey = 'ttft' | 'error' | 'cache'
+
+export interface QualityDimensionRow {
+  key: QualityDimensionKey
   label: string
+  state: GroupQualityDimensionState
+  stateLabel: string
+  /** 首字为预计 P90，错误为失败率，缓存为保持率；没有统计为“—”，首字维 e_G 不可用时为“本组样本不足” */
   value: string
-  /** 灰色小字：未达判定条件等 */
-  note?: string
+  /** 灰色小字：首字的速度系数，错误与缓存的 Wilson 区间（只展示，不参与判定） */
+  detail?: string
+  samples: string
+  /** 本组标准：≤ X、≤ Y、≥ Z */
   limit: string
-  over: boolean
 }
-
-export interface QualityTooltipBlock {
-  title: string
-  /** 最多一句短语：固定、保底保留，或等待评估、读取失败的下一步 */
-  note?: string
-  reasons: string[]
-  rows: QualityTooltipRow[]
-  /** “实测”表头旁的小字：熔断中改看完整窗口时标“熔断时窗口” */
-  measuredNote?: string
-  /** 观察中：档位与实时快档线（熔断、保底保留总在其他档，不显示） */
-  tier?: string
-  /** 只在超线或接近上限（余量 < 20%，即恢复线以内）时出现 */
-  headroom?: { text: string; tone: 'danger' | 'warning' }
-  stale?: string
-}
-
-/** 余量低于恢复线（上限的 80%）时提示，正好对应“恢复需降到上限 80% 以下”。 */
-export const QUALITY_HEADROOM_WARN = 0.2
 
 /**
- * 悬停说明里的一组：标题“分组 · 状态”、原因标签、指标 | 实测 | 上限 小表，余量只在超线或接近时出现。
- * 合格、观察中取成员 metrics 与后端余量（本组判定口径）。熔断中（含保底保留）成员 metrics 只计熔断后的数据，
- * 刚熔断时多半样本不足，和原因对不上，所以改看账号的完整窗口（触发熔断的数据），余量也按它算。
+ * 每维一行：状态、数值、样本数与本组标准。首字维在本组构成 e_G 不可用时显示“本组样本不足”，
+ * 不借用其他组的构成；速度系数照常显示，它属于账号本身。
  */
-export function groupQualityTooltip(
-  groupName: string,
-  quality: GroupQualityCell,
-  t: Translate,
-  clock: (iso: string) => string,
-  fullWindow?: GroupQualityAccountMetrics
-): QualityTooltipBlock {
-  const title = (state: string) => t(prefix + 'tooltip.title', { group: groupName, state })
-  if (isGroupQualityNotice(quality)) {
-    return { title: title(groupQualityStateLabel(quality, t, clock)), note: t(prefix + 'tooltip.' + quality.kind), reasons: [], rows: [] }
-  }
-  const { status } = quality
-  let state = groupQualityStateLabel(quality, t, clock)
-  if (status.state === 'ejected' && status.strikes > 1) state += t(prefix + 'tooltip.strikes', { count: status.strikes })
-  const ejectionWindow = status.state === 'ejected' ? fullWindow : undefined
-  const metrics = ejectionWindow ? decisionMetricsFromWindow(ejectionWindow) : status.metrics
-  const headroom = ejectionWindow ? qualityHeadroom(metrics, quality) : status.headroom
-  const errorRow: QualityTooltipRow = { key: 'error_rate', label: t(prefix + 'tooltip.errorRate'), value: t(prefix + 'tooltip.noData'), limit: formatQualityRate(quality.maxErrorRate), over: false }
-  if (metrics?.error_rate != null) {
-    errorRow.value = formatQualityRate(metrics.error_rate)
-    errorRow.over = metrics.error_rate > quality.maxErrorRate
-  } else if (metrics && metrics.calls > 0) {
-    errorRow.value = formatQualityRate(metrics.soft_failures / metrics.calls)
-    errorRow.note = t(prefix + 'tooltip.belowThreshold')
-  }
-  const ttftRow: QualityTooltipRow = { key: 'warm_ttft', label: t(prefix + 'tooltip.warmTtft'), value: t(prefix + 'tooltip.noData'), limit: formatQualitySeconds(quality.maxWarmTtftMs), over: false }
-  if (metrics?.warm_ttft_p90_ms != null) {
-    ttftRow.value = formatQualitySeconds(metrics.warm_ttft_p90_ms)
-    ttftRow.over = metrics.warm_ttft_p90_ms > quality.maxWarmTtftMs
-  } else if (metrics && metrics.warm_samples > 0) {
-    ttftRow.value = t(prefix + 'tooltip.notEnoughSamples')
-  }
-  const block: QualityTooltipBlock = {
-    title: title(state),
-    note: status.pinned ? t(prefix + 'tooltip.pinned') : quality.kind === 'guard_held' ? t(prefix + 'tooltip.guardHeld') : undefined,
-    reasons: status.reasons.map(reason => t(prefix + 'reason.' + reason)),
-    rows: [errorRow, ttftRow],
-    measuredNote: ejectionWindow ? t(prefix + 'tooltip.ejectionWindow') : undefined,
-    tier: quality.kind === 'trial' ? groupQualityTierText(quality, t) : undefined
-  }
-  if (headroom != null && headroom < QUALITY_HEADROOM_WARN) {
-    block.headroom = { text: t(prefix + 'tooltip.headroom', { value: formatHeadroom(headroom) }), tone: headroom < 0 ? 'danger' : 'warning' }
-  }
-  if (quality.stale) block.stale = t(prefix + 'tooltip.stale')
-  return block
+export function qualityDimensionRows(quality: AccountGroupQuality, t: Translate): QualityDimensionRow[] {
+  const { account, group } = quality
+  const { policy } = group
+  const stateLabel = (state: GroupQualityDimensionState) => t(prefix + 'dimension.' + state)
+  const none = t(prefix + 'tooltip.noData')
+  const { ttft, error, cache } = account
+  const ttftValue = group.expected_p90_ms == null
+    ? t(prefix + 'tooltip.groupSamplesShort')
+    : ttft.value == null ? none : formatQualitySeconds(ttft.value)
+  const interval = (low: number | null, high: number | null) => (low != null && high != null ? t(prefix + 'tooltip.interval', { range: formatInterval(low, high) }) : undefined)
+  return [
+    {
+      key: 'ttft',
+      label: t(prefix + 'tooltip.ttft'),
+      state: ttft.state,
+      stateLabel: stateLabel(ttft.state),
+      value: ttftValue,
+      detail: ttft.factor != null ? t(prefix + 'tooltip.factor', { value: formatFactor(ttft.factor) }) : undefined,
+      samples: t(prefix + 'tooltip.ttftSamples', { samples: ttft.samples, sessions: ttft.sessions }),
+      limit: `≤ ${policy.max_ttft_p90_seconds}s`
+    },
+    {
+      key: 'error',
+      label: t(prefix + 'tooltip.errorRate'),
+      state: error.state,
+      stateLabel: stateLabel(error.state),
+      value: error.value == null ? none : formatQualityRate(error.value),
+      detail: interval(error.wilson_low, error.wilson_high),
+      samples: `${error.failures}/${error.samples}`,
+      limit: `≤ ${formatQualityRate(policy.max_error_rate)}`
+    },
+    {
+      key: 'cache',
+      label: t(prefix + 'tooltip.cacheKeep'),
+      state: cache.state,
+      stateLabel: stateLabel(cache.state),
+      value: cache.value == null ? none : formatQualityRate(cache.value),
+      detail: interval(cache.wilson_low, cache.wilson_high),
+      samples: String(cache.samples),
+      limit: `≥ ${formatQualityRate(policy.min_cache_keep_rate)}`
+    }
+  ]
 }
 
-/** 需要关注的状态：熔断（含固定且熔断）、保底保留、观察中。合格、等待评估、读取失败都不算。 */
-export type GroupQualityAttentionKind = 'ejected' | 'guard_held' | 'trial'
-export const isGroupQualityAttention = (cell: GroupQualityCell): cell is AccountGroupQuality & { kind: GroupQualityAttentionKind } =>
-  cell.kind === 'ejected' || cell.kind === 'guard_held' || cell.kind === 'trial'
+/** 本组构成 e_G 一行：“本组构成 P90 9.1s（87 条）”，不足 50 条时“本组样本不足（12/50 条）”。 */
+export function groupCompositionText(group: GroupQualityGateGroupStatus, t: Translate): { text: string; insufficient: boolean } {
+  if (group.expected_p90_ms == null) {
+    return { text: t(prefix + 'tooltip.groupSamplesInsufficient', { count: group.expected_samples }), insufficient: true }
+  }
+  return { text: t(prefix + 'tooltip.composition', { value: formatQualitySeconds(group.expected_p90_ms), count: group.expected_samples }), insufficient: false }
+}
 
-/** 分组列小标识的颜色：最严重的需关注状态，与状态标签同一色板；没有需关注的分组时为灰色。 */
-export const GROUP_QUALITY_INDICATOR_CLASSES: Record<GroupQualityAttentionKind | 'none', string> = {
-  ejected: 'text-red-600 dark:text-red-400',
-  guard_held: 'text-sky-600 dark:text-sky-400',
-  trial: 'text-amber-600 dark:text-amber-400',
+export interface QualityGroupBlock {
+  kind: GroupQualityCell['kind']
+  title: string
+  strict?: boolean
+  /** 一句短语：固定账号的含义，或等待评估、读取失败的下一步 */
+  note?: string
+  composition?: { text: string; insufficient: boolean }
+  rows: QualityDimensionRow[]
+  /** 各维坏记忆的到期时刻，只列还在的 */
+  badMemory?: string
+}
+
+const DIMENSION_KEYS: QualityDimensionKey[] = ['ttft', 'error', 'cache']
+
+/** 悬停面板里的一组：标题“分组 · 状态”、本组构成、三维小表与坏记忆。 */
+export function groupQualityBlock(groupName: string, quality: GroupQualityCell, t: Translate, clock: Clock): QualityGroupBlock {
+  const title = t(prefix + 'tooltip.title', { group: groupName, state: groupQualityStateLabel(quality, t) })
+  if (isGroupQualityNotice(quality)) {
+    return { kind: quality.kind, title, note: t(prefix + 'tooltip.' + quality.kind), rows: [] }
+  }
+  const bad = DIMENSION_KEYS
+    .filter(key => quality.account[key].bad_until)
+    .map(key => t(prefix + 'tooltip.badMemoryItem', { dimension: t(prefix + 'dimensionName.' + key), time: clock(quality.account[key].bad_until!) }))
+  return {
+    kind: quality.kind,
+    title,
+    strict: quality.group.policy.strict || undefined,
+    note: quality.kind === 'pinned' ? t(prefix + 'tooltip.pinned') : undefined,
+    composition: groupCompositionText(quality.group, t),
+    rows: qualityDimensionRows(quality, t),
+    ...(bad.length ? { badMemory: t(prefix + 'tooltip.badMemory', { items: bad.join(t(prefix + 'tooltip.separator')) }) } : {})
+  }
+}
+
+/** 需要关注的状态：不达标、待复测。未知、固定、达标、等待评估、读取失败都不算。 */
+export type GroupQualityAttentionKind = 'failing' | 'retest'
+export const isGroupQualityAttention = (cell: GroupQualityCell): cell is AccountGroupQuality & { kind: GroupQualityAttentionKind } =>
+  cell.kind === 'failing' || cell.kind === 'retest'
+
+/**
+ * 判慢让位按账号 × 模型，与分组无关：各组条目里取模型并集与最晚到期。已经到期的不显示，
+ * 也不提示“已恢复”——到期只解除后排，门槛状态不变。
+ */
+export function activeLatencyHold(cells: Iterable<GroupQualityCell> | undefined, now = Date.now()): GroupQualityLatencyHold | null {
+  let until = 0
+  const models = new Set<string>()
+  for (const cell of cells ?? []) {
+    if (isGroupQualityNotice(cell)) continue
+    const hold = cell.account.latency_hold
+    const at = hold ? Date.parse(hold.until) : NaN
+    if (!hold || !(at > now)) continue
+    until = Math.max(until, at)
+    hold.models.forEach(model => models.add(model))
+  }
+  return until ? { until: new Date(until).toISOString(), models: [...models] } : null
+}
+
+export const latencyHoldText = (hold: GroupQualityLatencyHold, t: Translate, clock: Clock) =>
+  t(prefix + 'latencyHold.text', { models: hold.models.join(t(prefix + 'tooltip.separator')), time: clock(hold.until) })
+
+/** 分组列小标识的颜色：最严重的需关注状态，与状态标签同一色板；只有判慢让位时为琥珀色时钟；都没有时为灰色。 */
+export type GroupQualityIndicatorKind = GroupQualityAttentionKind | 'hold' | 'none'
+export const GROUP_QUALITY_INDICATOR_CLASSES: Record<GroupQualityIndicatorKind, string> = {
+  failing: 'text-red-600 dark:text-red-400',
+  retest: 'text-amber-600 dark:text-amber-400',
+  hold: 'text-amber-600 dark:text-amber-400',
   none: 'text-gray-400 hover:text-gray-600 dark:text-dark-400 dark:hover:text-gray-300'
 }
 
-export interface QualityEligibleItem {
-  name: string
-  pinned: boolean
-  /** 档位与实时快档线 */
-  tier: string
-  /** 只在接近或超过上限（余量 < 20%）时出现 */
-  headroom?: { text: string; tone: 'danger' | 'warning' }
-}
-
 export interface QualityPanel {
-  /** 最严重的需关注状态；没有时为 null */
-  attention: GroupQualityAttentionKind | null
+  indicator: GroupQualityIndicatorKind
   attentionCount: number
-  /** 需关注的分组逐组展开，其后是等待评估、读取失败 */
-  blocks: QualityTooltipBlock[]
-  /** 合格分组，每组一行：名称、档位与实时快档线 */
-  eligible: QualityEligibleItem[]
-  /** 评估数据过期，整个面板只提示一次 */
+  /** 按 orderGroupsByQuality 排好：需关注 → 读取失败 → 等待评估 → 未知 → 固定 → 达标 */
+  blocks: QualityGroupBlock[]
+  /** 判慢让位（账号级），到期时刻与“到期只解除后排”的说明 */
+  latencyHold?: { text: string; note: string }
+  /** 评估数据陈旧，整个面板只提示一次 */
   stale?: string
 }
 
-/**
- * 分组列门槛面板：groups 按 orderGroupsByQuality 排好时，各段依次是需关注 → 读取失败 → 等待评估；
- * 只收开启门槛的分组。合格组不展开指标表，只列名称、固定标记、档位与实时快档线、接近上限的余量。
- */
+/** 分组列门槛面板：只收开启门槛的分组，每组一段；判慢让位与数据陈旧在面板底部各提示一次。 */
 export function groupQualityPanel(
   groups: { id: number; name: string }[],
   quality: Map<number, GroupQualityCell>,
   t: Translate,
-  clock: (iso: string) => string,
-  fullWindow?: GroupQualityAccountMetrics
+  clock: Clock,
+  now = Date.now()
 ): QualityPanel | null {
-  const panel: QualityPanel = { attention: null, attentionCount: 0, blocks: [], eligible: [] }
+  const panel: QualityPanel = { indicator: 'none', attentionCount: 0, blocks: [] }
+  let attention: GroupQualityAttentionKind | null = null
   let stale = false
   for (const group of groups) {
     const cell = quality.get(group.id)
     if (!cell) continue
     if (!isGroupQualityNotice(cell)) stale ||= cell.stale
-    if (cell.kind === 'eligible') {
-      const { headroom } = groupQualityTooltip(group.name, cell, t, clock)
-      panel.eligible.push({ name: group.name, pinned: cell.status.pinned, tier: groupQualityTierText(cell, t), ...(headroom ? { headroom } : {}) })
-      continue
-    }
     if (isGroupQualityAttention(cell)) {
-      if (!panel.attention || KIND_RANK[cell.kind] < KIND_RANK[panel.attention]) panel.attention = cell.kind
+      if (!attention || KIND_RANK[cell.kind] < KIND_RANK[attention]) attention = cell.kind
       panel.attentionCount++
     }
-    // 各段的过期提示不单独显示，由面板底部统一提示一次。
-    panel.blocks.push(groupQualityTooltip(group.name, cell, t, clock, fullWindow))
+    panel.blocks.push(groupQualityBlock(group.name, cell, t, clock))
   }
-  if (!panel.blocks.length && !panel.eligible.length) return null
+  if (!panel.blocks.length) return null
+  const hold = activeLatencyHold(quality.values(), now)
+  if (hold) panel.latencyHold = { text: latencyHoldText(hold, t, clock), note: t(prefix + 'latencyHold.note') }
+  panel.indicator = attention ?? (hold ? 'hold' : 'none')
   if (stale) panel.stale = t(prefix + 'tooltip.stale')
   return panel
 }
 
-/** 与后端判定条件一致：错误率要调用 ≥ 20 且软失败 ≥ 5，续轮首字要样本 ≥ 10，才算“超线”。 */
-export const QUALITY_MIN_CALLS = 20
-export const QUALITY_MIN_SOFT_FAILURES = 5
-export const QUALITY_MIN_WARM_SAMPLES = 10
-
-export interface QualityLimits {
-  maxErrorRate: number
-  maxWarmTtftMs: number
-}
-
-/** 完整窗口换成判定口径：样本未达判定条件的错误率、首字记为 null，与成员 metrics 一致。 */
-export function decisionMetricsFromWindow(metrics: GroupQualityAccountMetrics): GroupQualityMemberMetrics {
-  const errorReady = metrics.calls >= QUALITY_MIN_CALLS && metrics.soft_failures >= QUALITY_MIN_SOFT_FAILURES
-  return {
-    calls: metrics.calls,
-    soft_failures: metrics.soft_failures,
-    error_rate: errorReady ? metrics.error_rate : null,
-    warm_samples: metrics.warm_samples,
-    warm_ttft_p90_ms: metrics.warm_samples >= QUALITY_MIN_WARM_SAMPLES ? metrics.warm_ttft_p90_ms : null
-  }
-}
-
-/** 与后端同一算法：非 null 指标里最小的 1 − 实测 / 上限，全为 null 时为 null。 */
-function qualityHeadroom(metrics: GroupQualityMemberMetrics, limits: QualityLimits): number | null {
-  const values: number[] = []
-  if (metrics.error_rate != null) values.push(1 - metrics.error_rate / limits.maxErrorRate)
-  if (metrics.warm_ttft_p90_ms != null) values.push(1 - metrics.warm_ttft_p90_ms / limits.maxWarmTtftMs)
-  return values.length ? Math.min(...values) : null
-}
-
-/** 账号所在已评估分组里最严的上限，用来给账号行的紧凑指标着色；没有已评估分组时返回 undefined。 */
-export function strictestQualityLimits(cells: Map<number, GroupQualityCell> | undefined): QualityLimits | undefined {
-  let limits: QualityLimits | undefined
-  for (const cell of cells?.values() ?? []) {
-    if (isGroupQualityNotice(cell)) continue
-    limits = limits
-      ? { maxErrorRate: Math.min(limits.maxErrorRate, cell.maxErrorRate), maxWarmTtftMs: Math.min(limits.maxWarmTtftMs, cell.maxWarmTtftMs) }
-      : { maxErrorRate: cell.maxErrorRate, maxWarmTtftMs: cell.maxWarmTtftMs }
-  }
-  return limits
-}
-
-export interface AccountQualityMetricItem {
-  key: 'error_rate' | 'warm_ttft' | 'zero_cache'
+export interface AccountQualityAlertItem {
+  key: QualityDimensionKey | 'latency_hold'
   text: string
   title: string
-  alert: boolean
+  tone: 'danger' | 'warning'
 }
 
 /**
- * 账号行的紧凑指标（完整窗口）：只列有样本的项，完整名称、时间窗与样本数在 title。
- * 错误率与首字在样本足够且超过所在分组最严上限时着色；零缓存率在样本 ≥ 20 且超过 30% 时着色。
+ * 账号行分组单元格下方的紧凑提示，只在异常时出现：某维在任一门槛分组里当前不达标时列出该维数值
+ * （首字取各组预计 P90 最高者），以及正在判慢让位的到期时刻。
  */
-export function accountQualityMetricItems(metrics: GroupQualityAccountMetrics, t: Translate, limits?: QualityLimits): AccountQualityMetricItem[] {
-  const items: AccountQualityMetricItem[] = []
-  if (metrics.calls > 0) {
+export function accountQualityAlertItems(
+  quality: Map<number, GroupQualityCell> | undefined,
+  t: Translate,
+  clock: Clock,
+  now = Date.now()
+): AccountQualityAlertItem[] {
+  const cells = [...(quality?.values() ?? [])].filter((cell): cell is AccountGroupQuality => !isGroupQualityNotice(cell))
+  const items: AccountQualityAlertItem[] = []
+  for (const key of DIMENSION_KEYS) {
+    const failing = cells.filter(cell => cell.account[key].state === 'fail')
+    if (!failing.length) continue
+    const values = failing.map(cell => cell.account[key].value).filter((value): value is number => value != null)
+    const value = values.length ? (key === 'ttft' ? formatQualitySeconds(Math.max(...values)) : formatQualityRate(values[0])) : t(prefix + 'tooltip.noData')
     items.push({
-      key: 'error_rate',
-      text: t(prefix + 'metrics.errorRate', { value: formatQualityRate(metrics.error_rate) }),
-      title: t(prefix + 'metrics.errorRateTitle', { calls: metrics.calls, failures: metrics.soft_failures }),
-      alert: !!limits && metrics.calls >= QUALITY_MIN_CALLS && metrics.soft_failures >= QUALITY_MIN_SOFT_FAILURES && metrics.error_rate > limits.maxErrorRate
+      key,
+      text: t(prefix + 'alert.' + key, { value }),
+      title: t(prefix + 'alert.title', { dimension: t(prefix + 'dimensionName.' + key), count: failing.length }),
+      tone: 'danger'
     })
   }
-  if (metrics.warm_samples > 0) {
-    items.push({
-      key: 'warm_ttft',
-      text: t(prefix + 'metrics.warmTtft', { value: formatQualitySeconds(metrics.warm_ttft_p90_ms) }),
-      title: t(prefix + 'metrics.warmTtftTitle', { count: metrics.warm_samples }),
-      alert: !!limits && metrics.warm_samples >= QUALITY_MIN_WARM_SAMPLES && metrics.warm_ttft_p90_ms > limits.maxWarmTtftMs
-    })
-  }
-  if (metrics.zero_cache_samples > 0) {
-    items.push({
-      key: 'zero_cache',
-      text: t(prefix + 'metrics.zeroCache', { value: formatQualityRate(metrics.warm_zero_cache_rate) }),
-      title: t(prefix + 'metrics.zeroCacheTitle', { count: metrics.zero_cache_samples }),
-      alert: metrics.zero_cache_samples >= ZERO_CACHE_MIN_SAMPLES && metrics.warm_zero_cache_rate > ZERO_CACHE_ALERT_RATE
-    })
+  const hold = activeLatencyHold(cells, now)
+  if (hold) {
+    items.push({ key: 'latency_hold', text: t(prefix + 'alert.latencyHold', { time: clock(hold.until) }), title: latencyHoldText(hold, t, clock), tone: 'warning' })
   }
   return items
+}
+
+/** 分组列门槛摘要的悬停说明：五类成员数与本组构成，例如“达标 3 · 未知 2 · 待复测 1 · 不达标 1 · 固定 0；本组构成 P90 9.1s（87 条）”。 */
+export function groupQualitySummaryTitle(group: GroupQualityGateGroupStatus, t: Translate): string {
+  const kinds: GroupQualityGateAccountState[] = ['passing', 'unknown', 'retest', 'failing', 'pinned']
+  const counts = kinds.map(kind => `${t(prefix + 'state.' + kind)} ${group.summary[kind]}`).join(' · ')
+  return t(prefix + 'summaryTitle', { counts, composition: groupCompositionText(group, t).text })
 }

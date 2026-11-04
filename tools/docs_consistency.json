@@ -476,6 +476,22 @@
       ]
     },
     {
+      "pattern": "\\b(?:strictestQualityLimits|decisionMetricsFromWindow|accountQualityMetricItems|groupQualityTierText|groupQualityTooltip|QUALITY_HEADROOM_WARN|ZERO_CACHE_ALERT_RATE|ZERO_CACHE_MIN_SAMPLES|pinnedMemberScope|pinnedCandidates|qualityGatePoliciesEqual|qualityGateFormToPolicy|GroupQualityAccountMetrics|GroupQualityMemberMetrics|GroupQualityBadgeKind|GroupQualityGateReason)\\b",
+      "reason": "2026-11-04 group quality gate v3 (WP8): the admin UI edits only the v3 sub-object and shows per-group tiers with three dimensions; the v2 breaker, fast-line, guard, headroom, zero-cache and pinned-editing helpers and types were removed",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
+    },
+    {
+      "pattern": "admin\\.groupQualityGate\\.(?:state\\.(?:eligible|ejected|ejectedUntil|trial|trialUntil|guardHeld)|reason\\.|panel\\.|metrics\\.|tooltip\\.(?:tierFast|tierOther|fastLine|fastLineNoBest|strikes|guardHeld|ejectionWindow|headroom|warmTtft|belowThreshold|notEnoughSamples)\\b|pinned(?:Hint|Count|Search|NoMatch)\\b|members(?:Loading|Empty|Failed)\\b|errorRateRange\\b|fastTtftMin\\b|fastTtftBelowMax\\b|maxWarmTtft|fastWarmTtft)",
+      "reason": "2026-11-04 group quality gate v3 (WP8): the v2 breaker, observation, guard, fast-line and pinned-editing wording was removed with the v2 UI; v3 shows passing/unknown/retest/failing/pinned and per-dimension states",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
+    },
+    {
       "pattern": "\\b(?:first_token_avg_ms|first_token_samples|recent_errors|cache_samples|first_token_window_seconds|errors_window_seconds|cache_window_seconds)\\b",
       "reason": "recent-health v2 removed the old account-list response fields and window declarations; only migration/history and explicit assertions that the fields are absent may name them",
       "allowed": [

@@ -20,10 +20,8 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
-import { formatDateTime } from '@/utils/format'
 import {
   GROUP_QUALITY_BADGE_CLASSES,
-  QUALITY_CLOCK,
   groupQualityStateLabel,
   isGroupQualityNotice,
   type GroupQualityCell
@@ -37,8 +35,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
-const clock = (iso: string) => formatDateTime(iso, QUALITY_CLOCK)
 
-const pinned = computed(() => !isGroupQualityNotice(props.quality) && props.quality.status.pinned)
-const stateLabel = computed(() => groupQualityStateLabel(props.quality, t, clock))
+const pinned = computed(() => !isGroupQualityNotice(props.quality) && props.quality.account.pinned)
+const stateLabel = computed(() => groupQualityStateLabel(props.quality, t))
 </script>
