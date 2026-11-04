@@ -2834,6 +2834,10 @@
     },
     {
       "path": "backend/internal/service/resilience_post_output.go",
+      "value": "if openAIConversationStateRejection(payload, message) {"
+    },
+    {
+      "path": "backend/internal/service/resilience_post_output.go",
       "value": "rl.resilience.noteOpenAISameSiteStreamFailure(account, at)"
     },
     {

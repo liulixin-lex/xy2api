@@ -20,6 +20,7 @@
 - [x] 1.3 同站断流暂停：`same_site_hold.enabled` 开关、独立进程内跟踪器、选号跳过与软罚末位兜底；普通与高级选号在暂停后改绑，普通瞬时软罚仍保留绑定。
 - [x] 1.4 文档：`USAGE_METRICS.md`、`GATEWAY_RESILIENCE.md`（会话行、P1-B、同站暂停、§5.3 事件）、`gateway-resilience-20261015/design.md` §10、部署 runbook 的开关位置；规格 `specs/gateway-resilience/spec.md`。
   - WP1、WP6、WP7 文档与契约登记已同步；近期表现保持端到端首字及回退口径，门槛 v3 速度只读新列、错误维排除首字截止。资源限制下仅运行定向测试，lint 与全量门禁由集成方统一执行。
+- [x] 1.5 会话状态约束 2：输出后局部过滤 S1–S4 及其他加密内容拒绝，不触发 P1-B、输出后冷却或会话连击；覆盖有无包装、裸 error / response.failed / 二者先后、HTTP SSE / WS，并保留真实断流对照及最终失败、运维、用量语义。
 
 ## 2 后端乙：v3 评估器、策略与状态（WP2）
 
