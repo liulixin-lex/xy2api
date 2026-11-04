@@ -22,7 +22,8 @@ Both legacy and advanced scheduling in enabled groups MUST share one migration i
 - **WHEN** an HTTP Responses request (including passthrough), a Responses-shaped Chat Completions request or a WebSocket first frame has an `input[]` item whose type is `agent_message` with an `encrypted_content` part in `content[]`, or `function_call_output` with an `encrypted_content` part in array-valued `output`
 - **THEN** it receives the same no-sticky-migration context guard as a continuation before selection; quality migration, latency migration and their low-rate target redirects retain the owner. Legacy, advanced and nil-scheduler fallback paths preserve the guard. WebSocket connections do not reselect accounts within a connection; after a client reconnects, the new connection's first frame is evaluated again before account selection.
 - **AND** reasoning/compaction top-level ciphertext and string-valued tool output do not trigger this guard; parent-thread affinity still only recognizes `agent_message`. Standard Chat Completions `messages` and Messages conversions do not contain these input structures and remain unchanged.
-- **AND** hard admission, failure-driven switching (including P1-B and same-site pauses), new-session placement, profit control and existing sticky escape rules remain unchanged.
+- **AND** P1-B SHALL use the legacy failure streak for requests carrying these encrypted parts; other failure-driven switching, same-site pauses, hard admission, new-session placement, profit control and existing sticky escape rules remain unchanged.
+- **AND** matching SHALL use decoded JSON structure, including Unicode-escaped type values; malformed JSON SHALL not match.
 
 #### Scenario: Recheck only candidates that can serve
 - **WHEN** migration evaluates candidates

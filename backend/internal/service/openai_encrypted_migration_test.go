@@ -14,6 +14,7 @@ func TestOpenAIRequestHasEncryptedState(t *testing.T) {
 		want       bool
 	}{
 		{"agent message", `{"input":[{"type":"agent_message","content":[{"type":"encrypted_content","encrypted_content":"anything"}]}]}`, true},
+		{"escaped encrypted type", `{"input":[{"type":"agent_message","content":[{"type":"\u0065ncrypted_content","data":"opaque"}]}]}`, true},
 		{"tool output array", `{"input":[{"type":"function_call_output","output":[{"type":"encrypted_content"}]}]}`, true},
 		{"tool output string", `{"input":[{"type":"function_call_output","output":"encrypted_content"}]}`, false},
 		{"reasoning", `{"input":[{"type":"reasoning","encrypted_content":"ciphertext"}]}`, false},

@@ -810,27 +810,27 @@
     },
     {
       "path": "backend/internal/service/openai_ws_http_bridge.go",
-      "value": "s.resilienceOpenAIWSFailedAfterOutput(ctx, account, resp, eventType, upstreamMessage, wroteDownstream, officialOpenAIResponses)"
+      "value": "s.resilienceOpenAIWSFailedAfterOutput(postOutputCtx, account, resp, eventType, upstreamMessage, wroteDownstream, officialOpenAIResponses)"
     },
     {
       "path": "backend/internal/service/openai_ws_http_bridge.go",
-      "value": "s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, bareErrorPayload, bareErrorMessage, wroteDownstream)"
+      "value": "s.resilienceOpenAIFailedAfterOutput(postOutputCtx, account, resp, bareErrorPayload, bareErrorMessage, wroteDownstream)"
     },
     {
       "path": "backend/internal/service/openai_ws_http_bridge.go",
-      "value": "resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, err, wroteDownstream && !clientDisconnected)"
+      "value": "resilienceStreamBrokenAfterOutput(postOutputCtx, s.rateLimitService, account, resp, err, wroteDownstream && !clientDisconnected)"
     },
     {
       "path": "backend/internal/service/openai_ws_http_bridge.go",
-      "value": "resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, nil, wroteDownstream && !clientDisconnected)"
+      "value": "resilienceStreamBrokenAfterOutput(postOutputCtx, s.rateLimitService, account, resp, nil, wroteDownstream && !clientDisconnected)"
     },
     {
       "path": "backend/internal/service/openai_ws_forwarder_ingress.go",
-      "value": "s.resilienceOpenAIWSFailedAfterOutput(ctx, account, turn, eventType, upstreamMessage, wroteDownstream, account.IsOpenAIOAuthLike())"
+      "value": "s.resilienceOpenAIWSFailedAfterOutput(postOutputCtx, account, turn, eventType, upstreamMessage, wroteDownstream, account.IsOpenAIOAuthLike())"
     },
     {
       "path": "backend/internal/service/openai_ws_v2_passthrough_adapter.go",
-      "value": "s.resilienceOpenAIWSFailedAfterOutput(ctx, account, int(completedTurns.Load())+1, eventType, payload, wroteDownstream, true)"
+      "value": "s.resilienceOpenAIWSFailedAfterOutput(postOutputCtx, account, int(completedTurns.Load())+1, eventType, payload, wroteDownstream, true)"
     },
     {
       "path": "backend/internal/service/gateway_upstream_response.go",
@@ -2830,11 +2830,31 @@
     },
     {
       "path": "backend/internal/service/resilience_post_output.go",
-      "value": "if confirmedPostOutput && account.Platform == PlatformOpenAI {"
+      "value": "if confirmedPostOutput && account.Platform == PlatformOpenAI && !openAIEncryptedContentRebindGuarded(ctx) {"
     },
     {
       "path": "backend/internal/service/resilience_post_output.go",
       "value": "if openAIConversationStateRejection(payload, message) {"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_forwarder_ingress.go",
+      "value": "postOutputCtx := withOpenAIEncryptedContentTurnGuard(ctx, openAIRequestHasEncryptedState(payload))"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_http_bridge.go",
+      "value": "postOutputCtx := withOpenAIEncryptedContentTurnGuard(ctx, openAIRequestHasEncryptedState(payload))"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_v2_passthrough_adapter.go",
+      "value": "turnHasEncryptedContent.Store(openAIRequestHasEncryptedState(originalFirstClientMessage))"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_v2_passthrough_adapter.go",
+      "value": "turnHasEncryptedContent.Store(openAIRequestHasEncryptedState(originalPayload))"
+    },
+    {
+      "path": "backend/internal/service/resilience_post_output.go",
+      "value": "return context.WithValue(ctx, openAINoStickyMigrationKey{}, encrypted)"
     },
     {
       "path": "backend/internal/service/resilience_post_output.go",

@@ -969,6 +969,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 	var rejectedFieldRetryState *openAIResponsesRejectedFieldRetryState
 	sendAndRelay := func(turn int, lease *openAIWSConnLease, payload []byte, payloadBytes int, originalModel string, imageBillingModel string, imageSizeTier string, imageInputSize string, requestedReasoningEffort *string) (*OpenAIForwardResult, error) {
+		postOutputCtx := withOpenAIEncryptedContentTurnGuard(ctx, openAIRequestHasEncryptedState(payload))
 		responseModelObserver := s.qualityObserver(ctx, account, gjson.GetBytes(payload, "model").String())
 		if lease == nil {
 			return nil, errors.New("upstream websocket lease is nil")
@@ -1060,7 +1061,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if eventType == "error" || eventType == "response.failed" {
 				markOpenAICyberPolicyEvent(c, upstreamMessage, http.StatusOK, &usage)
 			}
-			s.resilienceOpenAIWSFailedAfterOutput(ctx, account, turn, eventType, upstreamMessage, wroteDownstream, account.IsOpenAIOAuthLike())
+			s.resilienceOpenAIWSFailedAfterOutput(postOutputCtx, account, turn, eventType, upstreamMessage, wroteDownstream, account.IsOpenAIOAuthLike())
 			if eventType == "error" {
 				s.handleOpenAIWSErrorEventTransientFailure(ctx, account, mappedModel, lease.HandshakeHeaders(), upstreamMessage)
 				errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(upstreamMessage)

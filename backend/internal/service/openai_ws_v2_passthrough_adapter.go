@@ -975,6 +975,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 
 	var upstreamRelayConn openaiwsv2.FrameConn = relayUpstreamFrameConn
 	completedTurns := atomic.Int32{}
+	var turnHasEncryptedContent atomic.Bool
+	turnHasEncryptedContent.Store(openAIRequestHasEncryptedState(originalFirstClientMessage))
 	turnLifecycle := newOpenAIWSPassthroughTurnLifecycle(true)
 	var acceptedTurnStartedAt atomic.Pointer[time.Time]
 	clientFrameConn := &openAIWSClientFrameConn{
@@ -1169,6 +1171,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				SetOpsUpstreamModel(c, actualModel)
 				responseCreateAtCopy := responseCreateAt
 				acceptedTurnStartedAt.Store(&responseCreateAtCopy)
+				turnHasEncryptedContent.Store(openAIRequestHasEncryptedState(originalPayload))
 				acceptedTurn = true
 			}
 			return out, blocked, policyErr
@@ -1361,10 +1364,13 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				if eventType == "response.created" {
 					failureAccountSideEffectsApplied = false
 				}
-				if (eventType == "error" || eventType == "response.failed") && markOpenAIWSV2PassthroughCyberPolicy(c, payload) {
-					return nil
+				if eventType == "error" || eventType == "response.failed" {
+					if markOpenAIWSV2PassthroughCyberPolicy(c, payload) {
+						return nil
+					}
+					postOutputCtx := withOpenAIEncryptedContentTurnGuard(ctx, turnHasEncryptedContent.Load())
+					s.resilienceOpenAIWSFailedAfterOutput(postOutputCtx, account, int(completedTurns.Load())+1, eventType, payload, wroteDownstream, true)
 				}
-				s.resilienceOpenAIWSFailedAfterOutput(ctx, account, int(completedTurns.Load())+1, eventType, payload, wroteDownstream, true)
 				errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(payload)
 				isPreOutputRateLimit := eventType == "error" && !wroteDownstream && isOpenAIWSRateLimitError(errCodeRaw, errTypeRaw, errMsgRaw)
 				if (eventType == "error" || eventType == "response.failed") && !failureAccountSideEffectsApplied && !isPreOutputRateLimit {
