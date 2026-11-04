@@ -2079,12 +2079,8 @@ func (c *wsQualityPinnedGatewayCache) DeleteSessionAccountID(_ context.Context, 
 
 type wsPinnedQualityView struct{}
 
-func (wsPinnedQualityView) Vetoed(_, accountID int64) bool { return accountID == 9901 }
-func (wsPinnedQualityView) OrderTier(int64, int64) int     { return 0 }
-func (wsPinnedQualityView) Enabled(int64) bool             { return false }
-func (wsPinnedQualityView) SlowerThanFastLine(int64, int64) (int, int, bool) {
-	return 0, 0, false
-}
+func (wsPinnedQualityView) OrderTier(int64, int64) int { return 2 }
+func (wsPinnedQualityView) Enabled(int64) bool         { return true }
 
 func (wsPinnedQualityView) MigrationTarget(int64, int64) bool { return false }
 
@@ -2144,16 +2140,15 @@ func TestOpenAIResponsesWebSocket_LaterTurnShortWaitsForBusyAccount(t *testing.T
 	}
 }
 
-type wsTurnQualityView struct{ veto atomic.Bool }
+type wsTurnQualityView struct{ failing atomic.Bool }
 
-func (v *wsTurnQualityView) Vetoed(_, accountID int64) bool {
-	return accountID == 9901 && v.veto.Load()
+func (v *wsTurnQualityView) OrderTier(int64, int64) int {
+	if v.failing.Load() {
+		return 2
+	}
+	return 0
 }
-func (*wsTurnQualityView) OrderTier(int64, int64) int { return 0 }
-func (*wsTurnQualityView) Enabled(int64) bool         { return false }
-func (*wsTurnQualityView) SlowerThanFastLine(int64, int64) (int, int, bool) {
-	return 0, 0, false
-}
+func (*wsTurnQualityView) Enabled(int64) bool { return true }
 
 func (*wsTurnQualityView) MigrationTarget(int64, int64) bool { return false }
 
@@ -2162,11 +2157,10 @@ func (*wsTurnQualityView) ExpectedP90Ms(int64, int64) (int, bool) { return 0, fa
 func TestOpenAIResponsesWebSocket_QualityTurnAdmissionThroughHooks(t *testing.T) {
 	for _, row := range []struct {
 		name, payload string
-		veto          bool
 	}{
-		{"fresh turn", `{"type":"response.create","model":"gpt-5.1","input":"next"}`, true},
-		{"previous response turn", `{"type":"response.create","model":"gpt-5.1","previous_response_id":"resp_usage_e2e_1"}`, false},
-		{"incomplete tools turn", `{"type":"response.create","model":"gpt-5.1","input":[{"type":"function_call_output","call_id":"c1","output":"ok"}]}`, false},
+		{"fresh turn", `{"type":"response.create","model":"gpt-5.1","input":"next"}`},
+		{"previous response turn", `{"type":"response.create","model":"gpt-5.1","previous_response_id":"resp_usage_e2e_1"}`},
+		{"incomplete tools turn", `{"type":"response.create","model":"gpt-5.1","input":[{"type":"function_call_output","call_id":"c1","output":"ok"}]}`},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			view := &wsTurnQualityView{}
@@ -2174,25 +2168,13 @@ func TestOpenAIResponsesWebSocket_QualityTurnAdmissionThroughHooks(t *testing.T)
 				firstPayload:  `{"type":"response.create","model":"gpt-5.1","input":"first"}`,
 				secondPayload: row.payload, ingressMode: service.OpenAIWSIngressModeCtxPool,
 				qualityView:               view,
-				afterFirstUpstreamRequest: func(*service.ChannelService) error { view.veto.Store(true); return nil },
-				secondTurnCloseExpected:   row.veto, closeStatus: coderws.StatusTryAgainLater,
+				afterFirstUpstreamRequest: func(*service.ChannelService) error { view.failing.Store(true); return nil },
+				secondTurnCloseExpected:   false, closeStatus: coderws.StatusTryAgainLater,
 				closeReason: "account is no longer eligible for this connection, please reconnect",
 			})
-			if !row.veto {
-				require.Len(t, got.upstreamPayloads, 2)
-			}
+			require.Len(t, got.upstreamPayloads, 2, "quality degradation never closes an admitted WebSocket")
 		})
 	}
-}
-
-func TestOpenAIResponsesWebSocket_QualityGateDoesNotLeakPinnedExemptionToConnection(t *testing.T) {
-	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-		firstPayload:      `{"type":"response.create","model":"gpt-5.1","previous_response_id":"resp_unknown_quality_owner"}`,
-		group:             &service.Group{ID: 4201, Platform: service.PlatformComposite, Status: service.StatusActive},
-		compositeResolver: compositeWSResolver(service.PlatformOpenAI, service.CompositeRouteEndpointResponses, "gpt-5.1"),
-		qualityView:       wsPinnedQualityView{}, firstFrameCloseExpected: true, closeStatus: coderws.StatusTryAgainLater, closeReason: "no available account",
-	})
-	require.Empty(t, got.logs, "a connection-level pinned exemption must not admit an ejected candidate after a previous-response miss")
 }
 
 type openAIWSUsageHandlerAccountRepoStub struct {

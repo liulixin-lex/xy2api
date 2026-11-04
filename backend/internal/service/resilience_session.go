@@ -727,7 +727,8 @@ func (s *OpenAIGatewayService) noteOpenAILastResort(ctx context.Context, groupID
 	if account != nil && account.IsOpenAI() {
 		gate, _ := ctx.Value(groupQualityGateContextKey{}).(*openAIGroupQualityGate)
 		if gate != nil && gate.service != nil && !gate.exempt && !groupQualityGateExempt(ctx) &&
-			gate.service.GroupQualityGateView().Vetoed(gate.groupID, account.ID) {
+			gate.service.GroupQualityGateView().Enabled(gate.groupID) &&
+			gate.service.GroupQualityGateView().OrderTier(gate.groupID, account.ID) == GroupQualityGateTierFail {
 			slog.Warn("group_quality_gate.last_resort", "group_id", gate.groupID, "account_id", account.ID)
 		}
 	}

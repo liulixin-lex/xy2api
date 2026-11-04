@@ -322,6 +322,8 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		PaymentVisibleMethodAlipayEnabled:                      settings.PaymentVisibleMethodAlipayEnabled,
 		PaymentVisibleMethodWxpayEnabled:                       settings.PaymentVisibleMethodWxpayEnabled,
 		OpenAILowUpstreamRatePriorityEnabled:                   settings.OpenAILowUpstreamRatePriorityEnabled,
+		OpenAILowUpstreamRatePriorityScope:                     settings.OpenAILowUpstreamRatePriorityScope,
+		OpenAILowUpstreamRatePriorityGroupIDs:                  settings.OpenAILowUpstreamRatePriorityGroupIDs,
 		OpenAIOAuthSchedulingRateMultiplier:                    settings.OpenAIOAuthSchedulingRateMultiplier,
 		OpenAIAdvancedSchedulerEnabled:                         settings.OpenAIAdvancedSchedulerEnabled,
 		OpenAIAdvancedSchedulerStickyWeightedEnabled:           settings.OpenAIAdvancedSchedulerStickyWeightedEnabled,

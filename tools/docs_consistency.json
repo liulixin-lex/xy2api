@@ -517,6 +517,16 @@
         "docs/PROJECT_MEMORY.md",
         "docs/PROJECT_MEMORY_ARCHIVE.md"
       ]
+    },
+    {
+      "pattern": "\\b(?:groupQualityGateVeto|group_quality_ejected)\\b",
+      "reason": "Group quality v3 uses ordering and guarded migration, never a quality admission veto.",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md",
+        "openspec/changes/group-quality-gate-20261031/**",
+        "openspec/changes/group-quality-gate-v2-20261102/**"
+      ]
     }
   ],
   "private": [

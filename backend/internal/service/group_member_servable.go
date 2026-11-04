@@ -77,10 +77,11 @@ func groupMemberUsable(group *Group, acc *Account, now time.Time) bool {
 	return true
 }
 
-// groupMemberServable is the single soft-state/quality decision used by WP2/WP3.
+// groupMemberServable is the shared runtime availability decision. Quality
+// tiers affect ordering and migration, never member availability.
 // A nil penalty function uses the default resiliencePenaltyOf classifier; it
 // never skips soft-penalty checks.
-func groupMemberServable(group *Group, acc *Account, now time.Time, view GroupQualityGateView, penalty func(*Account, time.Time) resilience.PenaltyTier) bool {
+func groupMemberServable(group *Group, acc *Account, now time.Time, _ GroupQualityGateView, penalty func(*Account, time.Time) resilience.PenaltyTier) bool {
 	if !groupMemberUsable(group, acc, now) {
 		return false
 	}
@@ -91,9 +92,6 @@ func groupMemberServable(group *Group, acc *Account, now time.Time, view GroupQu
 		}
 	}
 	if penalty(acc, now) != resilience.TierNone {
-		return false
-	}
-	if view != nil && view.Vetoed(group.ID, acc.ID) {
 		return false
 	}
 	return true

@@ -4,6 +4,12 @@ This directory contains files for deploying XY2API on Linux servers and Apple-si
 
 Before upgrading the group Fast policy, review [OpenAI group Fast](../docs/OPENAI_FAST.md): enabled group overrides now take precedence over global filtering or blocking and use Fast pricing. Restore any compensating group rate increase separately to avoid charging it twice. No database migration is required for this policy change.
 
+## Group quality v3 scheduling upgrade and rollback
+
+Deploy backend and frontend together so the settings API and editor agree on the new fields. In System Settings → Gateway, low upstream-rate priority defaults to scope `all`; scope `groups` with an empty group list disables it. Advanced scheduling and requests without upstream token costing still do not use low-rate priority. See [account scheduling](../docs/account-scheduling.md).
+
+Before rolling back to 0.5.1, decide whether the old global low-rate switch should be on or off: that version ignores the new scope and group list. Quality migration and latency escalation are in-process and clear on restart. A successful quality migration is observable as Warn `group_quality_gate.migrate`; the source and target are recorded, and the same group/session cannot quality-migrate again for five minutes. Failure-driven rebinding remains independent of that cooldown.
+
 ## Deployment Methods
 
 | Method | Best For | Setup Wizard |
