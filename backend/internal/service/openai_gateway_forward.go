@@ -25,7 +25,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	// Run the same complete checks on original bytes without applying edits;
 	// requests that cannot obtain a raw plan cannot gain one after normalization.
 	collabRawBlocked, collabRawContinuity := true, false
-	if bytes.Contains(body, []byte(`"collaboration"`)) {
+	if resilience.Current().CollaborationPlaintextOn() && bytes.Contains(body, []byte(`"collaboration"`)) {
 		_, rawPlan, _ := planCodexCollaborationPlaintext(body)
 		collabRawBlocked = rawPlan == nil
 		collabRawContinuity = rawPlan != nil && openAICollaborationContinuity(body)

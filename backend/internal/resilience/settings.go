@@ -409,10 +409,15 @@ func (s *Settings) PostOutputRebindOn() bool { return s.SessionOn() && s.Session
 // SameSiteHoldOn enables correlated OpenAI transport-failure holds.
 func (s *Settings) SameSiteHoldOn() bool { return s.master() && s.SameSiteHold.Enabled }
 
+// CollaborationPlaintextOn reports whether any final model can use the channel.
+func (s *Settings) CollaborationPlaintextOn() bool {
+	return s.master() && s.CollaborationPlaintext.Enabled && len(s.CollaborationPlaintext.Models) > 0
+}
+
 // CollaborationPlaintextModel matches the final upstream model exactly after
 // trimming whitespace and ignoring case. Empty lists never authorize a model.
 func (s *Settings) CollaborationPlaintextModel(model string) bool {
-	if !s.master() || !s.CollaborationPlaintext.Enabled {
+	if !s.CollaborationPlaintextOn() {
 		return false
 	}
 	model = strings.TrimSpace(model)
