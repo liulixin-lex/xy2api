@@ -27,7 +27,7 @@ func TestClassifyStateRejection(t *testing.T) {
 		{"", "details redacted", StateNone},
 	} {
 		t.Run(tc.code+"/"+tc.message, func(t *testing.T) {
-			r := ClassifyStateRejection(tc.code, "", tc.message)
+			r := ClassifyStateRejection(tc.code, tc.message)
 			if r.Family != tc.family || r.RequestScoped() != (tc.family != StateNone) {
 				t.Fatalf("got %+v, want %q", r, tc.family)
 			}

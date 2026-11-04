@@ -27,7 +27,7 @@ func (r StateRejection) RequestScoped() bool { return r.Family != StateNone }
 // ClassifyStateRejection preserves the v3 guard: dedicated codes and the
 // existing encrypted rejection predicate win; only an absent code permits
 // the two narrow conversation-state message fallbacks. Type is not evidence.
-func ClassifyStateRejection(code, typ, message string) StateRejection {
+func ClassifyStateRejection(code, message string) StateRejection {
 	r := StateRejection{Encrypted: IsEncryptedContentRejection(code, message)}
 	code = strings.ToLower(strings.TrimSpace(code))
 	message = strings.ToLower(message)
