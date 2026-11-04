@@ -105,6 +105,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
 	c.Request = c.Request.WithContext(service.WithRequestReplaySafety(c.Request.Context(), body, false))
+	c.Request = c.Request.WithContext(service.WithOpenAIEncryptedContentMigrationGuard(c.Request.Context(), body))
 	setOpsRequestContext(c, reqModel, reqStream)
 	installResilienceRetryAdvice(c, h.gatewayService, apiKey, reqModel)
 	if !service.IsExplicitImageGenerationIntent("/v1/chat/completions", reqModel, body) {

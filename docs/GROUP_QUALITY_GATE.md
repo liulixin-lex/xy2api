@@ -98,6 +98,8 @@ e_G 使用本组最近 6 小时的成功严格续轮，请求形状先匹配当�
 
 绑定号为 2 档或本模型正在判慢时可触发统一质量迁出；续链、WebSocket、指定传输、既有迁出保护和质量路由持有的绑定继续豁免。固定号不因质量降档，但判慢仍可迁出。
 
+带协作或工具输出密文片段的请求同样不做软迁移：`input[]` 内的 `agent_message.content[]` 或数组形态 `function_call_output.output[]` 含 `type=encrypted_content` 时，适用与续链相同的迁出保护；reasoning／compaction 顶层密文不算。硬准入与失败类改绑仍按原规则执行，详见[网关韧性](GATEWAY_RESILIENCE.md)。
+
 目标必须通过硬准入、未判慢、有空位，并满足质量条件：
 
 - 任何维当前 fail 的账号都不能成为目标，包括固定号。
