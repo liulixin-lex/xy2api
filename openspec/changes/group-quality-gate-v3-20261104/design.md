@@ -120,7 +120,7 @@ type GroupQualityGateView interface {
   "generated_at": "RFC3339",
   "stale": false,
   "groups": [{
-    "group_id": 18,
+    "group_id": 7,
     "enabled": true,
     "policy": { "enabled": true, "max_ttft_p90_seconds": 15, "max_error_rate": 0.10, "min_cache_keep_rate": 0.50, "strict": false },
     "expected_p90_ms": 9100,
