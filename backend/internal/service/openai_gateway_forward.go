@@ -21,8 +21,21 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, forwardErr error) {
+	defer beginOpenAIStateRejectionAttempt(ctx, c, account, body)(&forwardErr)
+	// Run the same complete checks on original bytes without applying edits;
+	// requests that cannot obtain a raw plan cannot gain one after normalization.
+	collabRawBlocked, collabRawContinuity, collabRawConflict := true, false, false
+	if resilience.Current().CollaborationPlaintextOn() && bytes.Contains(body, []byte(`"collaboration"`)) {
+		_, rawPlan, rawOutcome := planCodexCollaborationPlaintext(body)
+		collabRawBlocked = rawPlan == nil
+		collabRawContinuity = rawPlan != nil && openAICollaborationContinuity(body)
+		collabRawConflict = rawOutcome == codexCollabConflict
+	}
 	defer func() { s.finishCacheDiagnostic(c, body, result) }()
 	if c != nil {
+		// Reset before any early return so failover attempts never inherit a plan.
+		c.Set(openAICollabResponseKey, nil)
+		c.Set(codexCollabAttemptContextKey, nil)
 		c.Set("openai_cache_diagnostic", nil)
 	}
 	// Validate the original request before compatibility filters can discard an
@@ -1048,6 +1061,33 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return nil, wsErr
 	}
 
+	// Native Responses HTTP only; each attempt freezes its own restore plan.
+	collabContinuity := account.IsOpenAIApiKey() && !account.IsOpenAICollaborationPlaintextEnabled() && collabRawContinuity
+	collabEligible := openAICollaborationEligible(c, account, upstreamModel, wsDecision.Transport, passthroughEnabled, compactPath, compatMessagesBridge, collabContinuity)
+	collabBody, collabAttempt := armOpenAICollaboration(c, body, upstreamModel, !collabRawBlocked && collabEligible)
+	// Raw conflicts stay visible as conflict for eligible traffic instead of a generic exclusion.
+	if collabAttempt != nil && collabEligible && collabRawConflict {
+		collabAttempt.outcome, collabAttempt.eligibilitySource = codexCollabConflict, "account"
+		collabAttempt.publish(c)
+	}
+	if collabContinuity && collabAttempt != nil && collabAttempt.eligibilitySource != "" {
+		collabAttempt.eligibilitySource = "continuity"
+	}
+	defer func() {
+		collabAttempt.finish(ctx, c, account, forwardErr)
+		var failover *UpstreamFailoverError
+		if collabAttempt != nil && collabAttempt.applied && errors.As(forwardErr, &failover) {
+			// Service classification/observations used the raw error; later P0 and
+			// handler predicates do not depend on this private namespace alias.
+			failover.ResponseBody = collabAttempt.restorer.ErrorBody(failover.ResponseBody)
+			if failover.ClientMessage != "" {
+				failover.ClientMessage = string(collabAttempt.restorer.ErrorBody([]byte(failover.ClientMessage)))
+			}
+		}
+	}()
+	if !bytes.Equal(collabBody, body) {
+		body, requestView, reqBody = collabBody, newOpenAIRequestView(collabBody), nil
+	}
 	reasoningEffort := extractOpenAIReasoningEffortFromBody(body, upstreamModel, billingModel, originalModel)
 	// 国产模型默认 effort 补充：此处 reqModel 已被 mapping 重写为 billingModel。
 	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, body, reqModel)
@@ -1099,6 +1139,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		// Send request
 		upstreamStart := time.Now()
 		resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+		if collabAttempt != nil {
+			collabAttempt.upstreamStatus = 0
+			if resp != nil {
+				collabAttempt.upstreamStatus = resp.StatusCode
+			}
+		}
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if headerGuard != nil && headerGuard.stopHeaderWait() {
 			if resp != nil && resp.Body != nil {
@@ -1200,6 +1246,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			} else if next != nil {
 				body, requestView, reqBody = next, newOpenAIRequestView(next), nil
 				continue
+			}
+			if collabAttempt != nil && collabAttempt.applied {
+				collabAttempt.clientRejected = resp.StatusCode < 500 && resp.StatusCode != 429 && classifyUpstreamHTTP(resp.StatusCode, resp.Header, respBody, upstreamMsg).Category == resilience.CategoryClientError
 			}
 			if s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody) {
 				upstreamDetail := ""

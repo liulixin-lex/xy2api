@@ -201,6 +201,30 @@
       "pattern": "profit-control-preview",
       "match": "word",
       "doc": "docs/GROUP_QUALITY_GATE.md"
+    },
+    {
+      "item": "OpenAI collaboration account switch",
+      "sources": [
+        "backend/internal/service/openai_collaboration_plaintext.go"
+      ],
+      "pattern": "\"(openai_collaboration_plaintext)\"",
+      "match": "word",
+      "doc": "docs/GATEWAY_RESILIENCE.md"
+    },
+    {
+      "item": "OpenAI request state rejection observability",
+      "sources": [
+        "backend/internal/service/openai_state_rejection_obs.go",
+        "backend/internal/service/error_passthrough_runtime.go",
+        "backend/internal/service/ops_upstream_context.go",
+        "backend/internal/resilience/state_rejection.go"
+      ],
+      "exclude": [
+        "*_test.go"
+      ],
+      "pattern": "\"((?:resilience\\.state_rejection|ops_error_passthrough_rule_id|relay_state|conversation_invalid|function_output|agent_message|reasoning|other_encrypted))\"",
+      "match": "word",
+      "doc": "docs/GATEWAY_RESILIENCE.md"
     }
   ],
   "retired": [

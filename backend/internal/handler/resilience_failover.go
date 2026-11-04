@@ -27,3 +27,8 @@ func resilienceContentRejected(failoverErr *service.UpstreamFailoverError) bool 
 	return failoverErr != nil && resilience.Current().FailureOn() &&
 		service.ClassifyFailoverError(failoverErr).ContentPolicy()
 }
+
+// State refusals terminate recovery even when resilience settings are off.
+func resilienceStateRejected(err *service.UpstreamFailoverError) bool {
+	return err != nil && service.ClassifyFailoverError(err).StateFamily != resilience.StateNone
+}

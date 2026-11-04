@@ -76,6 +76,50 @@
             </li>
           </ul>
         </div>
+
+        <div class="rounded-xl border border-gray-200 p-4 lg:col-span-2 dark:border-dark-600" data-testid="resilience-card-collaborationPlaintext">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="font-medium text-gray-900 dark:text-white">{{ t('admin.resilience.settings.sections.collaborationPlaintext') }}</p>
+              <p class="mt-1 max-w-prose text-xs text-gray-500 dark:text-dark-400">{{ t('admin.resilience.settings.sections.collaborationPlaintextHint') }}</p>
+              <p class="mt-1 max-w-prose text-xs text-gray-500 dark:text-dark-400">{{ t('admin.resilience.settings.sections.collaborationPlaintextScope') }}</p>
+              <p class="mt-1 max-w-prose text-xs text-gray-500 dark:text-dark-400">{{ t('admin.resilience.settings.sections.collaborationPlaintextOff') }}</p>
+            </div>
+            <Toggle
+              v-model="draft.collaboration_plaintext.enabled"
+              :disabled="saving || !draft.enabled"
+              :aria-label="t('admin.resilience.settings.sections.collaborationPlaintext')"
+              data-testid="resilience-section-collaborationPlaintext"
+            />
+          </div>
+          <div class="mt-3 max-w-xl">
+            <div class="flex items-baseline justify-between gap-3">
+              <label for="resilience-collaborationModels" class="input-label">{{ t('admin.resilience.settings.fields.collaborationModels') }}</label>
+              <span
+                class="text-xs tabular-nums"
+                :class="draft.collaboration_plaintext.models.length > COLLAB_MODELS_MAX ? 'text-red-700 dark:text-red-300' : 'text-gray-500 dark:text-dark-400'"
+                data-testid="resilience-collaborationModels-count"
+              >{{ draft.collaboration_plaintext.models.length }}/{{ COLLAB_MODELS_MAX }}</span>
+            </div>
+            <textarea
+              id="resilience-collaborationModels"
+              v-model="collabModelsText"
+              rows="3"
+              class="input font-mono text-xs"
+              :disabled="saving"
+              spellcheck="false"
+              autocomplete="off"
+              aria-describedby="resilience-collaborationModels-hint"
+              data-testid="resilience-field-collaborationModels"
+            />
+            <p id="resilience-collaborationModels-hint" class="input-hint">{{ t('admin.resilience.settings.fields.collaborationModelsHint') }}</p>
+            <p
+              v-if="draft.enabled && draft.collaboration_plaintext.enabled && !draft.collaboration_plaintext.models.length"
+              class="mt-1 text-xs text-amber-700 dark:text-amber-300"
+              data-testid="resilience-collaborationModels-empty"
+            >{{ t('admin.resilience.settings.fields.collaborationModelsEmpty') }}</p>
+          </div>
+        </div>
       </div>
 
       <details class="border-t border-gray-100 pt-5 dark:border-dark-700" @toggle="onAdvancedToggle">
@@ -99,7 +143,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import { adminAPI } from '@/api/admin'
@@ -142,7 +186,12 @@ const baseline = ref('')
 const advancedText = ref('')
 const loading = ref(false), saving = ref(false), loaded = ref(false), loadFailed = ref(false), saved = ref(false)
 const error = ref('')
+const collabModelsText = ref('')
 let disposed = false
+
+// Mirrors resilience.CollaborationPlaintextSettings validation; the server stays authoritative.
+const COLLAB_MODELS_MAX = 16
+const COLLAB_MODEL_MAX_CHARS = 128
 
 const sections: SectionDef[] = [
   { key: 'session', get: (s) => s.session.enabled, set: (s, v) => { s.session.enabled = v } },
@@ -205,6 +254,29 @@ const edgesText = computed({
   }
 })
 
+// One model per line (commas also split). The text stays as typed; the draft gets the
+// trimmed list without blanks or case-insensitive duplicates, since matching ignores case.
+function parseCollabModels(text: string): string[] {
+  const seen = new Set<string>()
+  const models: string[] = []
+  for (const raw of text.split(/[\n,]/)) {
+    const model = raw.trim()
+    const key = model.toLowerCase()
+    if (!model || seen.has(key)) continue
+    seen.add(key)
+    models.push(model)
+  }
+  return models
+}
+
+watch(collabModelsText, (text) => {
+  if (draft.value) draft.value.collaboration_plaintext.models = parseCollabModels(text)
+})
+
+function syncCollabModelsText() {
+  collabModelsText.value = draft.value?.collaboration_plaintext.models.join('\n') ?? ''
+}
+
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
@@ -214,13 +286,14 @@ function isSettings(value: unknown): value is Settings {
   const s = value as Partial<Settings>
   return typeof s.enabled === 'boolean' && !!s.budget && !!s.keepalive && !!s.errors && !!s.disconnect &&
     !!s.fallback_group && !!s.reservation && !!s.session && !!s.last_resort && !!s.anthropic_latency_hold && !!s.same_site_hold && !!s.balance && !!s.stall &&
-    !!s.failure && !!s.stream && !!s.capability
+    !!s.failure && !!s.stream && !!s.capability && Array.isArray(s.collaboration_plaintext?.models)
 }
 
 function accept(settings: Settings, defaultSettings?: Settings) {
   draft.value = clone(settings)
   baseline.value = JSON.stringify(draft.value)
   advancedText.value = JSON.stringify(draft.value, null, 2)
+  syncCollabModelsText()
   if (defaultSettings) defaults.value = clone(defaultSettings)
 }
 
@@ -242,6 +315,7 @@ function applyAdvanced() {
     const parsed: unknown = JSON.parse(advancedText.value)
     if (!isSettings(parsed)) throw new Error('shape')
     draft.value = clone(parsed)
+    syncCollabModelsText()
   } catch {
     error.value = t('admin.resilience.settings.invalidJson')
   }
@@ -251,6 +325,7 @@ function resetDefaults() {
   if (!defaults.value) return
   draft.value = clone(defaults.value)
   advancedText.value = JSON.stringify(draft.value, null, 2)
+  syncCollabModelsText()
 }
 
 function validate(settings: Settings): string {
@@ -261,6 +336,14 @@ function validate(settings: Settings): string {
         field: t(`admin.resilience.settings.fields.${field.key}`), min: field.min, max: field.max
       })
     }
+  }
+  const models = settings.collaboration_plaintext.models
+  if (models.length > COLLAB_MODELS_MAX) {
+    return t('admin.resilience.settings.invalidCollaborationModelsCount', { max: COLLAB_MODELS_MAX })
+  }
+  const tooLong = models.find((model) => [...model].length > COLLAB_MODEL_MAX_CHARS)
+  if (tooLong !== undefined) {
+    return t('admin.resilience.settings.invalidCollaborationModelLength', { max: COLLAB_MODEL_MAX_CHARS })
   }
   return ''
 }

@@ -360,7 +360,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			"sequence_number": nextFailureSequence,
 			"error":           gin.H{"type": "server_error", "code": "server_error", "status_code": http.StatusInternalServerError},
 		})
-		frame := buildOpenAIResponseFailedSSE(ctx, responseID, originalModel, source, message)
+		frame := buildOpenAIResponseFailedSSEForClient(ctx, c, responseID, originalModel, source, message)
 		if eventInProgress {
 			frame = "\n" + frame
 		}
@@ -421,7 +421,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 		if codexFailureTerminal && sawBareError && !sawResponseFailed && !clientDisconnected {
 			applyAttemptResponseHeaders()
-			if _, err := writePendingString(buildOpenAIResponseFailedSSE(ctx, responseID, originalModel, bareErrorPayload, failedMessage)); err != nil {
+			if _, err := writePendingString(buildOpenAIResponseFailedSSEForClient(ctx, c, responseID, originalModel, bareErrorPayload, failedMessage)); err != nil {
 				handlePendingWriteError(err)
 			} else {
 				failureDelivered = true
@@ -615,6 +615,11 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 						return
 					}
 				}
+				captureOpenAIStateRejection(c, account, dataBytes, failedMessage, "native_sse", outputStarted, nil)
+				if a := openAICollaborationAttempt(c); a != nil && a.applied && !outputStarted && resp.StatusCode == http.StatusOK {
+					status := openAIStreamFailedEventSemanticStatus(dataBytes, failedMessage)
+					a.clientRejected = a.clientRejected || (status >= 400 && status < 500 && status != 429 && classifyUpstreamHTTP(status, nil, dataBytes, failedMessage).Category == resilience.CategoryClientError)
+				}
 				if outputStarted && !cyberHit {
 					if codexFailureTerminal && eventType == "error" {
 						// OpenAI commonly follows a bare error with response.failed.
@@ -711,6 +716,12 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				return
 			}
 			restoredData = restoreCodexToolNamesFromSSEContext(c, restoredData, eventType)
+			restoredData, restoreErr = restoreOpenAICollaboration(c, eventType, restoredData, true)
+			if restoreErr != nil {
+				writeOpenAIStreamRuleError(ctx, c, http.StatusBadGateway, "upstream_error", openAICollabRestoreMessage)
+				streamEarlyErr = restoreErr
+				return
+			}
 			if !bytes.Equal(restoredData, dataBytes) {
 				dataBytes = restoredData
 				data = string(restoredData)
@@ -1694,6 +1705,10 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		if bodyLooksLikeSSE {
 			return s.handleSSEToJSON(resp, c, account, body, originalModel, mappedModel)
 		}
+		if attempt := openAICollaborationAttempt(c); attempt != nil && attempt.applied {
+			attempt.restoreFailed = true
+			return nil, s.writeOpenAINonStreamingProtocolError(resp, c, openAICollabRestoreMessage)
+		}
 		return nil, fmt.Errorf("parse response: invalid json response")
 	}
 	usage := &usageValue
@@ -1716,6 +1731,10 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		return nil, fmt.Errorf("restore OpenAI namespace response: %w", err)
 	}
 	body = restoreCodexToolNamesFromContext(c, body)
+	body, err = restoreOpenAICollaboration(c, "", body, false)
+	if err != nil {
+		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, openAICollabRestoreMessage)
+	}
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	// Codex 协议要求 /responses/compact JSON 响应携带 x-codex-turn-state
 	// （codex-api/src/endpoint/compact.rs 从响应头捕获），显式回传。
@@ -1765,6 +1784,19 @@ func bodyHasSSEFraming(body []byte) bool {
 
 func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Context, account *Account, body []byte, originalModel, mappedModel string) (*openaiNonStreamingResult, error) {
 	bodyText := string(body)
+	// Observe earlier markers before reconstructing the terminal response.
+	// Keep the raw frames for aggregation; only the final JSON is delivered.
+	var collabErr error
+	if openAICollaborationAttempt(c) != nil {
+		forEachOpenAISSEFrame(bodyText, func(event string, data []byte) {
+			if collabErr == nil {
+				_, collabErr = restoreOpenAICollaboration(c, event, data, true)
+			}
+		})
+		if collabErr != nil {
+			return nil, s.writeOpenAINonStreamingProtocolError(resp, c, openAICollabRestoreMessage)
+		}
+	}
 	terminalType, terminalPayload, terminalOK := extractOpenAISSETerminalEvent(bodyText)
 	if terminalOK && (terminalType == "response.failed" || terminalType == "error") {
 		msg := extractOpenAISSEErrorMessage(terminalPayload)
@@ -1816,8 +1848,16 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 			return nil, fmt.Errorf("restore OpenAI namespace response: %w", restoreErr)
 		}
 		restoredBody = restoreCodexToolNamesFromContext(c, restoredBody)
+		restoredBody, restoreErr = restoreOpenAICollaboration(c, "", restoredBody, false)
+		if restoreErr != nil {
+			return nil, s.writeOpenAINonStreamingProtocolError(resp, c, openAICollabRestoreMessage)
+		}
 		body = restoredBody
 	} else {
+		if attempt := openAICollaborationAttempt(c); attempt != nil && attempt.applied {
+			attempt.restoreFailed = true
+			return nil, s.writeOpenAINonStreamingProtocolError(resp, c, openAICollabRestoreMessage)
+		}
 		if originalModel != mappedModel {
 			bodyText = s.replaceModelInSSEBody(bodyText, mappedModel, originalModel)
 		}
@@ -1878,6 +1918,10 @@ func extractOpenAISSEErrorMessage(payload []byte) string {
 }
 
 func buildOpenAIResponseFailedSSE(ctx context.Context, responseID, model string, source []byte, fallbackMessage string) string {
+	return buildOpenAIResponseFailedSSEForClient(ctx, nil, responseID, model, source, fallbackMessage)
+}
+
+func buildOpenAIResponseFailedSSEForClient(ctx context.Context, c *gin.Context, responseID, model string, source []byte, fallbackMessage string) string {
 	responseID = strings.TrimSpace(responseID)
 	if responseID == "" {
 		responseID = "resp_" + strings.ReplaceAll(uuid.NewString(), "-", "")
@@ -1933,7 +1977,7 @@ func buildOpenAIResponseFailedSSE(ctx context.Context, responseID, model string,
 		// All values above are JSON primitives, so this is only a defensive fallback.
 		payload = []byte(`{"type":"response.failed","response":{"status":"failed","output":[],"error":{"code":"upstream_error","message":"Upstream response failed"}}}`)
 	}
-	return "event: response.failed\ndata: " + string(payload) + "\n\n"
+	return "event: response.failed\ndata: " + string(restoreOpenAICollaborationError(c, payload)) + "\n\n"
 }
 
 func sanitizeOpenAIResponseFailedEventForClient(payload []byte, eventType string, clientOutputStarted bool) ([]byte, bool) {
@@ -2022,7 +2066,7 @@ func (s *OpenAIGatewayService) writeOpenAINonStreamingProtocolError(resp *http.R
 	}
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
-	c.JSON(http.StatusBadGateway, gin.H{
+	writeOpenAICollaborationErrorJSON(c, http.StatusBadGateway, gin.H{
 		"error": gin.H{
 			"type":    "upstream_error",
 			"message": message,

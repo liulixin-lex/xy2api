@@ -76,6 +76,10 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	defaultMappedModel string,
 	compatPromptCacheTenantIsolated bool,
 ) (*OpenAIForwardResult, error) {
+	if c != nil {
+		c.Set(openAIStateRejectionBodyKey, body)
+		defer c.Set(openAIStateRejectionBodyKey, nil)
+	}
 	var cacheControlErr error
 	body, cacheControlErr = normalizeOpenAICacheControls(account, body)
 	if cacheControlErr != nil {
@@ -602,6 +606,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 			return nil, fmt.Errorf("openai cyber_policy: %s", msg)
 		}
 		message := openAICompatFailedResponseMessage(finalResponse)
+		captureOpenAIStateRejection(c, account, payload, message, "chat", false, nil)
 		if openAIStreamFailedEventShouldFailover(payload, message) {
 			return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, payload, message, upstreamModel, resp.Header)
 		}
@@ -916,6 +921,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				}
 				return true
 			}
+			captureOpenAIStateRejection(c, account, payloadBytes, message, "chat", clientOutputStarted, nil)
 			shouldFailover := openAIStreamFailedEventShouldFailover(payloadBytes, message)
 			if strings.TrimSpace(event.Type) == "error" {
 				shouldFailover = openAIStreamErrorEventShouldFailover(payloadBytes, message)

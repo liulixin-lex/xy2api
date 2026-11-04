@@ -71,7 +71,8 @@ type Outcome struct {
 
 // Result is the classification of an Outcome.
 type Result struct {
-	Category Category
+	Category    Category
+	StateFamily StateFamily
 	// RetryAfter is the delay the upstream asked for, zero when none.
 	RetryAfter time.Duration
 	// Reason is a short stable machine reason such as "balance_keyword".
@@ -504,8 +505,12 @@ func classify(o Outcome, extraBalanceKeywords []string, decisionV2 bool) Result 
 	if contentPolicyCode(code, typ, lowerBody) {
 		return Result{Category: CategoryClientError, Reason: ReasonContentPolicy}
 	}
-	if IsEncryptedContentRejection(code, text) {
-		return Result{Category: CategoryClientError, Reason: ReasonEncryptedContent}
+	if rej := ClassifyStateRejection(code, text); rej.RequestScoped() {
+		reason := ReasonConversationState
+		if rej.Encrypted {
+			reason = ReasonEncryptedContent
+		}
+		return Result{Category: CategoryClientError, Reason: reason, StateFamily: rej.Family}
 	}
 	if IsModelUnsupportedResponse(status, body) {
 		return Result{Category: CategoryModelUnsupported, Reason: "model_message"}

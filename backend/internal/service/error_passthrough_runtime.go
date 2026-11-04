@@ -2,6 +2,8 @@ package service
 
 import "github.com/gin-gonic/gin"
 
+const OpsErrorPassthroughRuleIDKey = "ops_error_passthrough_rule_id"
+
 const errorPassthroughServiceContextKey = "error_passthrough_service"
 
 // BindErrorPassthroughService 将错误透传服务绑定到请求上下文，供 service 层在非 failover 场景下复用规则。
@@ -51,6 +53,7 @@ func applyErrorPassthroughRule(
 		return status, errType, errMsg, false
 	}
 
+	c.Set(OpsErrorPassthroughRuleIDKey, rule.ID)
 	status = upstreamStatus
 	if !rule.PassthroughCode && rule.ResponseCode != nil {
 		status = *rule.ResponseCode

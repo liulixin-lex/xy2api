@@ -38,7 +38,11 @@ export default {
         cacheAware: 'Cache-aware reservations',
         cacheAwareHint: 'In-flight reservations price input with the session\'s latest cache-read share.',
         outputP99: 'Output P99 cap',
-        outputP99Hint: 'In-flight reservations cap output tokens at the model\'s 7-day P99 (at least 1024).'
+        outputP99Hint: 'In-flight reservations cap output tokens at the model\'s 7-day P99 (at least 1024).',
+        collaborationPlaintext: 'Collaboration messages in plaintext',
+        collaborationPlaintextHint: 'Eligible new Codex collaboration messages (spawn_agent, send_message, followup_task) are delivered in plaintext when the upstream returns no ciphertext and the gateway does not veto them, reducing collaboration errors after account switches. Existing conversation history is not repaired.',
+        collaborationPlaintextScope: 'Applies when a Codex client uses native Responses HTTP, the model is listed below, and the account switch is on, or the conversation on an API key account already carries the plaintext collaboration marker (session continuity).',
+        collaborationPlaintextOff: 'Turning it off stops conversion for later requests while responses in progress are still restored; conversations that already used it may be rejected by some upstreams and need a new conversation.'
       },
       fields: {
         balancePause: 'Initial pause (s)',
@@ -57,7 +61,10 @@ export default {
         codexRetryAfterCap: 'Codex Retry-After cap (s)',
         codexRetryAfterCapHint: 'Upper bound (s) of Retry-After when a Codex client meets no available account or a configuration rejection; 0 turns it off. Needs "Error semantics and storm protection" on.',
         learnTtl: 'Learned state lifetime (s)',
-        learnTtlHint: 'Default 21600 (6 hours); it clears itself when it expires, and a change applies only to states learned afterwards. It can also be cleared by hand in the status column of the account list.'
+        learnTtlHint: 'Default 21600 (6 hours); it clears itself when it expires, and a change applies only to states learned afterwards. It can also be cleared by hand in the status column of the account list.',
+        collaborationModels: 'Verified models',
+        collaborationModelsHint: 'One per line, matched against the actual outbound model after model mapping (case-insensitive). Up to 16, each at most 128 characters; duplicates are merged. Models not listed are left unchanged.',
+        collaborationModelsEmpty: 'The list is empty, so no request is converted even with the switch on.'
       },
       switches: {
         postOutputRebind: 'Rebind on the first failure after output',
@@ -81,7 +88,9 @@ export default {
       saveFailed: 'Save failed',
       loadFailed: 'Could not load the gateway resilience settings.',
       reload: 'Reload',
-      invalidNumber: '{field} must be an integer between {min} and {max}'
+      invalidNumber: '{field} must be an integer between {min} and {max}',
+      invalidCollaborationModelsCount: 'Verified models: at most {max}',
+      invalidCollaborationModelLength: 'Each verified model must be at most {max} characters'
     },
     panel: {
       title: 'Gateway Resilience',
@@ -111,7 +120,11 @@ export default {
         stall: 'Stalled streams',
         post_output_failure: 'Upstream failures after output',
         pre_created_delta: 'Content before created',
-        relay_keepalive: 'Relay keep-alive frames'
+        relay_keepalive: 'Relay keep-alive frames',
+        collab_plaintext: 'Collaboration plaintext attempts',
+        collab_call: 'Collaboration tool calls (by encrypted args state)',
+        collab_call_action: 'Collaboration tool call actions',
+        state_rejection: 'Conversation state rejections'
       }
     },
     undelivered: {

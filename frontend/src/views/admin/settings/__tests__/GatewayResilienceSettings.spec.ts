@@ -39,7 +39,8 @@ function settings(): Settings {
     fallback_group: { enabled: true, return_stable_seconds: 120, binding_ttl_seconds: 600 },
     reservation: { cache_aware_estimate: true, output_p99_cap: true },
     stream: { prelude_staging: true, native_prelude_whitelist: true, strict_terminal: true },
-    capability: { stream_only_learning: true, learn_ttl_seconds: 21600 }
+    capability: { stream_only_learning: true, learn_ttl_seconds: 21600 },
+    collaboration_plaintext: { enabled: false, models: [] }
   }
 }
 
@@ -130,10 +131,46 @@ describe('gateway resilience settings', () => {
     expect(card.get('[data-testid="resilience-switch-postOutputRebind"]').attributes('disabled')).toBeDefined()
   })
 
+  it('saves collaboration plaintext with a trimmed, de-duplicated model list and reloads it', async () => {
+    const w = mountSettings(); await flushPromises()
+    const card = w.get('[data-testid="resilience-card-collaborationPlaintext"]')
+    for (const key of ['Hint', 'Scope', 'Off']) expect(card.text()).toContain(`admin.resilience.settings.sections.collaborationPlaintext${key}`)
+    await card.get('[data-testid="resilience-section-collaborationPlaintext"]').trigger('click')
+    expect(card.find('[data-testid="resilience-collaborationModels-empty"]').exists()).toBe(true)
+    const models = card.get<HTMLTextAreaElement>('[data-testid="resilience-field-collaborationModels"]')
+    await models.setValue(' gpt-6.1-sol \n\nGPT-6.1-SOL\ngpt-6-astra\n')
+    expect(card.get('[data-testid="resilience-collaborationModels-count"]').text()).toBe('2/16')
+    expect(models.element.value).toBe(' gpt-6.1-sol \n\nGPT-6.1-SOL\ngpt-6-astra\n')
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    const expected = settings()
+    expected.collaboration_plaintext = { enabled: true, models: ['gpt-6.1-sol', 'gpt-6-astra'] }
+    expect(mocks.save).toHaveBeenCalledWith(expected)
+    expect(models.element.value).toBe('gpt-6.1-sol\ngpt-6-astra')
+    expect(card.find('[data-testid="resilience-collaborationModels-empty"]').exists()).toBe(false)
+  })
+
+  it('rejects more than 16 or over-long verified models before saving', async () => {
+    const w = mountSettings(); await flushPromises()
+    const models = w.get('[data-testid="resilience-field-collaborationModels"]')
+    await models.setValue(Array.from({ length: 17 }, (_, i) => `model-${i}`).join('\n'))
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    expect(w.text()).toContain('admin.resilience.settings.invalidCollaborationModelsCount')
+
+    await models.setValue('x'.repeat(129))
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    expect(w.text()).toContain('admin.resilience.settings.invalidCollaborationModelLength')
+    expect(mocks.save).not.toHaveBeenCalled()
+
+    await models.setValue('x'.repeat(128))
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    expect(mocks.save).toHaveBeenCalledTimes(1)
+  })
+
   it('disables the sections while the master switch is off', async () => {
     const w = mountSettings(); await flushPromises()
     await w.get('[data-testid="resilience-enabled"]').trigger('click')
     expect(w.get('[data-testid="resilience-section-budget"]').attributes('disabled')).toBeDefined()
+    expect(w.get('[data-testid="resilience-section-collaborationPlaintext"]').attributes('disabled')).toBeDefined()
   })
 
   it('rejects an out-of-range number before saving', async () => {
@@ -148,9 +185,11 @@ describe('gateway resilience settings', () => {
     const w = mountSettings(); await flushPromises()
     const next = settings()
     next.stall.text_stall_seconds = 90
+    next.collaboration_plaintext.models = ['gpt-6-astra']
     await w.get('[data-testid="resilience-json"]').setValue(JSON.stringify(next))
     await w.get('[data-testid="resilience-apply-json"]').trigger('click')
     expect((w.get('[data-testid="resilience-field-textStall"]').element as HTMLInputElement).value).toBe('90')
+    expect((w.get('[data-testid="resilience-field-collaborationModels"]').element as HTMLTextAreaElement).value).toBe('gpt-6-astra')
     await w.get('[data-testid="resilience-json"]').setValue('{"enabled":true}')
     await w.get('[data-testid="resilience-apply-json"]').trigger('click')
     expect(w.text()).toContain('admin.resilience.settings.invalidJson')

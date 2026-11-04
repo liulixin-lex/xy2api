@@ -6,6 +6,42 @@
 
 ## 当前交接状态
 
+- **Codex 协作消息明文通道与状态族观测实施（20261104-collab-plaintext-impl；2026-11-04 20:17 UTC；集成完成，用户已授权 PR、合并与发版 0.5.3，部署与灰度未授权）**
+  - **背景**：“会话状态归属类报错”方案定稿后（见下一条），用户 11-04 指定 Claude 主持实施 Tier 1：P0 状态族请求级识别与观测（默认开）＋ P1′ 协作消息明文通道（默认关）。
+  - **目标**：用户追加要求是严格审查每个子 agent、逻辑闭合、精简（不加无用测试、兜底或影子模式），最终达到可上线。用户 11-04 选定“会话连续性”：历史协作调用的 `encrypted_function_args` 恰为 `[]` 时视同账号开关满足，仅限 API Key。
+  - **要求与约束**：
+    - 生产只读；测试 Key 只放环境变量。
+    - 用户 11-04 19:30 UTC 授权：确认具备上线条件后开 PR、合并并发版 0.5.3（macOS 没有机器时改用备用开发机）。部署、灰度与生产配置变更仍要单独授权。
+  - **已完成**：
+    - 集成分支 `feat/collab-plaintext-20261104` 已合入 origin/main 0.5.2，最终代码头 `9c0245a78`。
+    - 预检 2a/2b 通过：d0c7a8、c2a95e、b672e6 × gpt-6.1-sol、gpt-6-astra，Codex 0.166。
+    - 两路红队四轮均签字，无遗留 P0/P1。
+    - 门禁全部通过：
+      - 本机（`9c0245a78`）：vet、unit 67 个包、ci_gate -race 0 跳过、lint 0；
+      - 备用开发机（`da7ec7c62`，之后只改 unit 测试）：Linux unit 68 个包、Docker integration 60 个包；
+      - 前端（`ff4fc83a1`，与最终头的前端树相同）：lint、typecheck、vitest、build；
+      - docs consistency 与干净树 sync audit。
+    - 发版前真实端到端（`da7ec7c62` 构建，之后只改了测试；`deb7c5f4b` 上也跑过一轮）：
+      - d0c7a8、c2a95e 两个模型的父子委派与续轮都闭环；
+      - 关开关续轮：OpenAI provider 按连续性闭环，非 OpenAI provider 只观测；
+      - Warn、state_rejection、本地还原错误均为 0；
+      - c2 子 agent 两个模型闭环；
+      - b672e6 的生产账号不可调度，上游返回 502/503，没有结论。
+  - **未完成**（按顺序）：
+    1. 推送并开 PR（描述在本地 `implementation/PR_BODY.md`），CI 全绿后普通合并；
+    2. `chore(release): prepare 0.5.3` PR 合并后，在合并提交上打 annotated tag `v0.5.3`（发版说明在本地 `implementation/RELEASE_NOTES_0.5.3.md`），核验 Release 附件、校验和与 GHCR 镜像；
+    3. 发版后用记忆 PR 补版本表并归档本任务；
+    4. 部署需单独授权；
+    5. 灰度按 `deploy/README.md` 六步执行，先开 d0c7a8、c2a95e；b672e6 待用户决定；OAuth 验证前不开；
+    6. 上线后按 `GATEWAY_RESILIENCE.md` §4.14 的口径做 48 小时与 7 天核对。
+  - **卡点与风险**：
+    - b672e6 的开→关续轮在账号 470 上两次遇到 cyber_policy，472 端到端无结论。
+    - provider 名不是 OpenAI 的 Codex 没有连续性，关账号开关对它等同硬回退。
+    - 模型写在正文里的私有别名不改写，是已知限制。
+  - **关键位置**：
+    - 本地 `.work/tasks/20261104-encrypted-state-breaks/implementation/`：STATUS.md、BRIEF_*、红队报告、门禁日志、PR_BODY.md；
+    - 同目录 `e2e/`：发版前端到端脚本与报告；
+    - Paseo 工作树 `collab-integration`。
 - **门槛 v3 实施（2026-11-04 14:50 UTC；PR #194 已合并，main `746ec14fc`；用户授权发版 0.5.2，版本准备中，未部署）**：分支 `feat/gate-v3-20261104`，CI 20 项全绿（pull_request 运行里 macOS `shell` 因排不到机器被取消，重跑后通过）。0.5.2 包含 #191–#194，迁移新增 289。部署需单独授权。
   - 范围：门槛 v3、判慢让位、P1-B、同站暂停、`usage_logs.attempt_first_output_ms`（迁移 289）、低倍率优先分组范围、前端；另含用户追加的会话状态两条约束：
     - 带密文片段的请求不软迁移，P1-B 退回连击规则，WS 增量轮沿用标记；
@@ -21,6 +57,7 @@
   - **评审**：astra r4–r15（r10 的 B1–B6、r11 首版范围收敛原生 HTTP、r12 清理旧绝对结论，r13 核对 SHA-256 签机制/红线 `reviews/astra_r13.md`）；用户定稿后的范围变更（A暂缓/P0并入/Tier1立项，仅改范围排期、机制/红线/§8 逐字未动）r14 复核发现回退措辞冲突、已按其原句改定，**r15 核对新哈希（FINAL_v3 `ec3a4b32…`、HANDOFF `1ec8a9da…`）后闭合签字** `reviews/astra_r15.md`。签字仅确认方案与交接文档闭合，**预检/实施/红队/上线验收均未过**。
   - **用户已定、待授权**：A 暂缓、P0 并入 Tier 1、Tier 1 立项已定；**待授权**预检 2a/2b（测试号/测试服务器）、推送/PR/合并/发版/灰度。测试 Key（分组 57）用户自建、本会话只在环境变量用未落盘。
   - 详见“进行中的工作”与本日志。
+  - （20:17 UTC 追记，collab-plaintext-impl）预检 2a/2b 已在实施任务中经用户授权完成，实施与发版进展见上方实施小节。
 - **Claude 判慢让位红队 A r4（2026-11-03 13:20 UTC）**：`737e7c7e4` 的 r3 P1 已闭合，签字已追加至本地 `implementation/redteam_astra_r2.md`；原 overlay 与正式回归均新过旧失败，目标树干净。登记已原样归档；只读复核未改代码、未提交。
 
 ### 版本与环境速览（2026-11-03：0.5.1 已发布）
@@ -99,6 +136,7 @@
   - 集成分支 `feat/collab-plaintext-20261104`（Paseo 工作树 `collab-integration`），基于 PR #194 头 `c96a488fb`；#194 合入后 rebase 到 main。
   - 分工（用户 11-04 指定）：后端 gpt-6-astra xhigh 三路并行，前端 Opus high，预检 2a/2b 脚本 Opus xhigh；红队 astra xhigh 与 Opus xhigh 两路。
   - 门禁：预检 2a/2b 两步都过，P1′ 才进 PR；任一不过，P1′ 首版不发并回报用户。授权：生产只读。推送、PR、合并、发版、部署、灰度未授权。
+  - 20:17 UTC：集成、四轮红队、全量门禁与发版前端到端完成，最终代码头 `9c0245a78`（已合入 0.5.2）。用户授权在确认具备上线条件后开 PR、合并并发版 0.5.3；部署与灰度不在授权内。现状与下一步见“当前交接状态”。
 
 - **20261104-gate-v3-impl**（2026-11-04 09:35 UTC 开始，Claude 主持与集成）：按本地 `.work/tasks/20261103-gpt-errors-gate-cache/` 的 `PLAN_T2_FINAL.md` 与 `HANDOFF.md` 实施门槛 v3、判慢让位与急性保护，一次开发、一次发版。本地实施记录在同目录 `implementation/`（不入库）。
   - 集成分支 `feat/gate-v3-20261104`（Paseo 工作树 `gate-v3-integration`，基于 origin/main `c89f8e66d`）。契约提交 `f9edba129`：档位常量改名为 `GroupQualityGateTierPass`/`Retest`/`Fail`，门槛视图加 `MigrationTarget`，OpenSpec `group-quality-gate-v3-20261104`（design §5 为各路共用的接口契约）。
@@ -1277,3 +1315,38 @@ pnpm --dir frontend run build
 - 修改文件：`docs/PROJECT_MEMORY.md`（交接、进行中、本条）；本地任务目录（不入库）。未改代码、生产配置，未调用生产模型。
 - 卡点/风险：A 暂缓=Tier 1 上线前 S2 无新增止血（用户接受）；签字只确认文档闭合，预检 2a/2b、实施、红队、上线验收均未过。
 - 下一步：两份文档可交下一个主 agent 分派；第一步预检 2a/2b（需测试号/测试服务器授权），推送/PR/合并/发版/灰度各需单独授权。
+
+### 2026-11-04 20:17 UTC — 20261104-collab-plaintext-impl — 集成、四轮红队、门禁与发版前端到端完成，用户授权 PR、合并与发版 0.5.3
+
+- 请求/目标：按 `FINAL_v3.md`/`HANDOFF_FINAL.md` 实施 Tier 1，即 P0 状态族请求级识别与观测（默认开）和 P1′ 协作消息明文通道（默认关）。用户要求：
+  - 严格审查每个子 agent，逻辑闭合；
+  - 精简，不加无用测试、兜底或影子模式；
+  - 最终可上线。
+
+  19:30 UTC 起，用户授权在确认具备上线条件后开 PR、合并并发版 0.5.3（macOS 没有机器时改用备用开发机）。部署与灰度不在授权内。
+- 开始状态：基于 PR #194 头 `c96a488fb` 建集成分支 `feat/collab-plaintext-20261104`；19:12 UTC 合入 origin/main 0.5.2（`821eb58d5`）。
+- 完成操作：
+  - **分工**：后端三路（甲：改写与还原核心；乙：接线、资格、观测与文档；丙：P0），另有前端一路、预检一路。PM 逐提交审查后合入。
+  - **预检**：2a/2b 通过。c2 自然选工具对照发现 developer 寻址示例与改名后的声明失配，于是追加 developer/system 文本同步改写：只改名时 13/16，改名加改写后 15/16。
+  - **会话连续性**：用户决定增加，仅限 API Key，且历史协作调用的 EFA 须恰为 `[]`。PM 在 r2 曾把它放宽到明文 message；红队 B 指出这超出了用户批准的范围，r3 已撤回。
+  - **两路红队四轮**（A 报 P1 12 项，B 报 P1 3 项，PM 自审 1 项），均已修复，B 于 r4 签字、A 于增量复核 b 签字：
+    - A：错误体与 JSON 转义；协议容器与 schema 中的重复键；OAuth 归一化抹掉 store/previous；“归一化洗掉原始歧义”共出现四次，最终改为在原始字节上跑全部改写检查（只算 plan），按类封口；
+    - B：灰度池一致性、连续性信号、Warn 口径与 runbook；
+    - PM：换号耗尽后的错误体。
+  - **PM 追加**：功能未开启时，入口不做原始 plan 检查。
+  - **红队 B 增量复核 b 的 P2**：资格门通过、但原始阶段查出冲突的请求，恢复记为 `conflict` 并告警（丙 `da7ec7c62`）。
+  - **红队 A 增量复核的 P2（R4c-A-1）**：测试的日志截获同时恢复 slog 与标准库 log 的 writer、flags；3 个指标测试改为精确差值断言（丙 `9c0245a78`，只改测试）。
+  - **发版前真实端到端**：
+    - `deb7c5f4b` 构建：PASS 16（含 observe 2）、TRANSIENT 4（b672e6）、FAIL 0；正文中引用私有别名 1 次，记为已知限制。
+    - `da7ec7c62` 复跑（之后只改测试）：PASS 16（含 observe 2）、TRANSIENT 4（b672e6 上游 502/503）、FAIL 0；c2 子 agent 两个模型闭环；正文引用 0 次。
+- 修改文件：
+  - 后端：service、resilience、handler 相关文件；
+  - 前端：网关韧性设置卡片、账号编辑与批量编辑；
+  - 文档与登记：`docs/GATEWAY_RESILIENCE.md`、`deploy/README.md`、OpenSpec `codex-collaboration-plaintext-20261104`、`docs/README.md`、`tools/upstream-sync/policy.json`、`tools/docs_consistency.json`、本文件。
+- 验证（最终代码头 `9c0245a78`）：
+  - 本机（`9c0245a78`）：vet、unit 67 个包、`ci_gate.py` -race 0 跳过、lint 0；
+  - 备用开发机（`da7ec7c62`，之后只改 unit 测试）：Linux unit 68 个包、Docker integration 60 个包；
+  - 前端（`ff4fc83a1`，与最终头的前端树相同）：lint、typecheck、486 个文件 3806 个测试、build；
+  - docs consistency、干净树 sync audit 通过。
+- 卡点/风险：见“当前交接状态”中对应的小节。
+- 下一步：推送、开 PR → CI 全绿后合并 → `chore(release): prepare 0.5.3` → tag `v0.5.3` → 核验 Release。部署与灰度另行授权。

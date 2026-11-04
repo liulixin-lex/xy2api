@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strings"
 	"sync/atomic"
+	"unicode/utf8"
 )
 
 // SettingKey is the settings-table key of the stored JSON.
@@ -19,22 +20,23 @@ const SettingKey = "gateway_resilience_settings"
 // switch restores the pre-resilience behavior; newer child switches restore
 // the behavior preceding their own introduction.
 type Settings struct {
-	Enabled              bool                `json:"enabled"`
-	Failure              FailureSettings     `json:"failure"`
-	Session              SessionSettings     `json:"session"`
-	AnthropicLatencyHold SwitchSettings      `json:"anthropic_latency_hold"`
-	SameSiteHold         SwitchSettings      `json:"same_site_hold"`
-	LastResort           SwitchSettings      `json:"last_resort"`
-	Balance              BalanceSettings     `json:"balance"`
-	Budget               BudgetSettings      `json:"budget"`
-	Keepalive            KeepaliveSettings   `json:"keepalive"`
-	Stall                StallSettings       `json:"stall"`
-	Disconnect           DisconnectSettings  `json:"disconnect"`
-	Errors               ErrorSettings       `json:"errors"`
-	FallbackGroup        FallbackSettings    `json:"fallback_group"`
-	Reservation          ReservationSettings `json:"reservation"`
-	Stream               StreamSettings      `json:"stream"`
-	Capability           CapabilitySettings  `json:"capability"`
+	Enabled                bool                           `json:"enabled"`
+	Failure                FailureSettings                `json:"failure"`
+	Session                SessionSettings                `json:"session"`
+	AnthropicLatencyHold   SwitchSettings                 `json:"anthropic_latency_hold"`
+	SameSiteHold           SwitchSettings                 `json:"same_site_hold"`
+	CollaborationPlaintext CollaborationPlaintextSettings `json:"collaboration_plaintext"`
+	LastResort             SwitchSettings                 `json:"last_resort"`
+	Balance                BalanceSettings                `json:"balance"`
+	Budget                 BudgetSettings                 `json:"budget"`
+	Keepalive              KeepaliveSettings              `json:"keepalive"`
+	Stall                  StallSettings                  `json:"stall"`
+	Disconnect             DisconnectSettings             `json:"disconnect"`
+	Errors                 ErrorSettings                  `json:"errors"`
+	FallbackGroup          FallbackSettings               `json:"fallback_group"`
+	Reservation            ReservationSettings            `json:"reservation"`
+	Stream                 StreamSettings                 `json:"stream"`
+	Capability             CapabilitySettings             `json:"capability"`
 }
 
 // StreamSettings controls stream protocol staging and terminal recognition.
@@ -53,6 +55,13 @@ type CapabilitySettings struct {
 // SwitchSettings is a capability with only an on/off switch.
 type SwitchSettings struct {
 	Enabled bool `json:"enabled"`
+}
+
+// CollaborationPlaintextSettings opts verified upstream models into the Codex
+// collaboration plaintext channel. Models are final, mapped upstream names.
+type CollaborationPlaintextSettings struct {
+	Enabled bool     `json:"enabled"`
+	Models  []string `json:"models"`
 }
 
 // FailureSettings tunes classification and soft cooldowns.
@@ -181,13 +190,14 @@ type ReservationSettings struct {
 // Defaults returns the documented default settings (design §10).
 func Defaults() Settings {
 	return Settings{
-		Enabled:              true,
-		Failure:              FailureSettings{TransientCooldownSeconds: 30, RetryAfterCapSeconds: 120, BalanceKeywordsExtra: []string{}, DecisionV2: true},
-		Session:              SessionSettings{Enabled: true, PostOutputRebind: true, StreakThreshold: 2, StreakWindowSeconds: 600, AvoidSeconds: 600},
-		LastResort:           SwitchSettings{Enabled: true},
-		AnthropicLatencyHold: SwitchSettings{Enabled: true},
-		SameSiteHold:         SwitchSettings{Enabled: true},
-		Balance:              BalanceSettings{Enabled: true, PauseSeconds: 300},
+		Enabled:                true,
+		Failure:                FailureSettings{TransientCooldownSeconds: 30, RetryAfterCapSeconds: 120, BalanceKeywordsExtra: []string{}, DecisionV2: true},
+		Session:                SessionSettings{Enabled: true, PostOutputRebind: true, StreakThreshold: 2, StreakWindowSeconds: 600, AvoidSeconds: 600},
+		LastResort:             SwitchSettings{Enabled: true},
+		AnthropicLatencyHold:   SwitchSettings{Enabled: true},
+		SameSiteHold:           SwitchSettings{Enabled: true},
+		CollaborationPlaintext: CollaborationPlaintextSettings{Models: []string{}},
+		Balance:                BalanceSettings{Enabled: true, PauseSeconds: 300},
 		// Of attempts still silent at 20s in 48 h of production data, about half
 		// remained silent at 30s and one tenth at 60s; fresh attempts on healthy
 		// accounts produced a first byte within seconds. The last candidate is
@@ -313,6 +323,11 @@ func (s Settings) Validate() error {
 	check(in(f.BindingTTLSeconds, 1, 86400), "fallback_group.binding_ttl_seconds must be 1-86400")
 
 	check(in(s.Capability.LearnTTLSeconds, 600, 86400), "capability.learn_ttl_seconds must be 600-86400")
+	check(len(s.CollaborationPlaintext.Models) <= 16, "collaboration_plaintext.models allows at most 16 entries")
+	for _, model := range s.CollaborationPlaintext.Models {
+		length := utf8.RuneCountInString(strings.TrimSpace(model))
+		check(length >= 1 && length <= 128, "collaboration_plaintext.models entries must be 1-128 characters")
+	}
 
 	if len(p) > 0 {
 		return &ValidationError{Problems: p}
@@ -361,6 +376,17 @@ func (s *Settings) normalize() {
 	if s.Keepalive.Edges == nil {
 		s.Keepalive.Edges = []string{}
 	}
+	models := make([]string, 0, len(s.CollaborationPlaintext.Models))
+	seen := make(map[string]struct{}, len(s.CollaborationPlaintext.Models))
+	for _, model := range s.CollaborationPlaintext.Models {
+		model = strings.TrimSpace(model)
+		key := strings.ToLower(model)
+		if _, exists := seen[key]; !exists {
+			models = append(models, model)
+			seen[key] = struct{}{}
+		}
+	}
+	s.CollaborationPlaintext.Models = models
 }
 
 // Normalized returns a copy with nil collections filled; handlers use it
@@ -382,6 +408,29 @@ func (s *Settings) PostOutputRebindOn() bool { return s.SessionOn() && s.Session
 
 // SameSiteHoldOn enables correlated OpenAI transport-failure holds.
 func (s *Settings) SameSiteHoldOn() bool { return s.master() && s.SameSiteHold.Enabled }
+
+// CollaborationPlaintextOn reports whether any final model can use the channel.
+func (s *Settings) CollaborationPlaintextOn() bool {
+	return s.master() && s.CollaborationPlaintext.Enabled && len(s.CollaborationPlaintext.Models) > 0
+}
+
+// CollaborationPlaintextModel matches the final upstream model exactly after
+// trimming whitespace and ignoring case. Empty lists never authorize a model.
+func (s *Settings) CollaborationPlaintextModel(model string) bool {
+	if !s.CollaborationPlaintextOn() {
+		return false
+	}
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return false
+	}
+	for _, allowed := range s.CollaborationPlaintext.Models {
+		if strings.EqualFold(model, strings.TrimSpace(allowed)) {
+			return true
+		}
+	}
+	return false
+}
 
 // AnthropicLatencyHoldOn controls Claude latency samples, ordering and migration.
 func (s *Settings) AnthropicLatencyHoldOn() bool { return s.master() && s.AnthropicLatencyHold.Enabled }
@@ -501,6 +550,7 @@ func (s Settings) Clone() Settings {
 	c := s
 	c.Failure.BalanceKeywordsExtra = append([]string(nil), s.Failure.BalanceKeywordsExtra...)
 	c.Keepalive.Edges = append([]string(nil), s.Keepalive.Edges...)
+	c.CollaborationPlaintext.Models = append([]string(nil), s.CollaborationPlaintext.Models...)
 	c.Budget.ModelOverrides = make(map[string]int, len(s.Budget.ModelOverrides))
 	for k, v := range s.Budget.ModelOverrides {
 		c.Budget.ModelOverrides[k] = v

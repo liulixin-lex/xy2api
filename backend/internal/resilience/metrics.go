@@ -59,6 +59,9 @@ func resilienceEventFields(ctx context.Context, preOutput bool) []any {
 
 // Metric names.
 const (
+	MetricCollabPlaintext    = "collab_plaintext"
+	MetricCollabCall         = "collab_call"
+	MetricCollabCallAction   = "collab_call_action"
 	MetricKeepaliveCommitted = "keepalive_committed"
 	MetricPreCreatedDelta    = "pre_created_delta"
 	MetricFirstOutputTimeout = "first_output_timeout"
@@ -79,6 +82,7 @@ const (
 	// MetricRelayKeepalive counts relay keep-alive frames dropped from
 	// upstream streams (design §7.8), per account.
 	MetricRelayKeepalive = "relay_keepalive"
+	MetricStateRejection = "state_rejection"
 )
 
 // MetricsRetention bounds the history kept for the stats endpoint.

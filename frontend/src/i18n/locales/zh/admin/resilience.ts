@@ -38,7 +38,11 @@ export default {
         cacheAware: '缓存感知预留',
         cacheAwareHint: '在途预留按会话最近一次的缓存读比例估算输入费用。',
         outputP99: '输出 P99 上限',
-        outputP99Hint: '在途预留的输出 Token 取模型近 7 天 P99（下限 1024）。'
+        outputP99Hint: '在途预留的输出 Token 取模型近 7 天 P99（下限 1024）。',
+        collaborationPlaintext: '协作消息明文化',
+        collaborationPlaintextHint: '符合条件的新 Codex 协作消息（spawn_agent、send_message、followup_task）在上游未返回密文、网关未否决时以明文投递，减少换号后的协作会话报错。不修复已有会话历史。',
+        collaborationPlaintextScope: '生效条件：Codex 客户端经原生 Responses HTTP 请求、模型在下方清单内，且账号开关开启，或 API Key 账号上的会话历史已带协作明文标记（会话连续性）。',
+        collaborationPlaintextOff: '关闭后，后续请求停止转换，进行中的响应仍会还原；已用过的会话在部分上游可能被拒绝，需新开会话。'
       },
       fields: {
         balancePause: '首次暂停时长（秒）',
@@ -57,7 +61,10 @@ export default {
         codexRetryAfterCap: 'Codex Retry-After 上限（秒）',
         codexRetryAfterCapHint: 'Codex 客户端遇到无号或配置拒绝时，Retry-After 的上限（秒），0 表示关闭。需要“错误语义与防风暴”开启。',
         learnTtl: '学习结果有效期（秒）',
-        learnTtlHint: '默认 21600（6 小时），到期自动恢复；修改只影响之后新学到的记录。也可在账号列表的状态列手动清除。'
+        learnTtlHint: '默认 21600（6 小时），到期自动恢复；修改只影响之后新学到的记录。也可在账号列表的状态列手动清除。',
+        collaborationModels: '已验证模型',
+        collaborationModelsHint: '每行一个，按模型映射后的实际出站模型匹配（不区分大小写）。最多 16 个，每个不超过 128 个字符，重复项自动合并；不在清单中的模型不转换。',
+        collaborationModelsEmpty: '清单为空，开关打开也不会转换任何请求。'
       },
       switches: {
         postOutputRebind: '输出后首次失败即改绑',
@@ -81,7 +88,9 @@ export default {
       saveFailed: '保存失败',
       loadFailed: '无法读取网关韧性设置。',
       reload: '重新加载',
-      invalidNumber: '{field} 需为 {min}–{max} 之间的整数'
+      invalidNumber: '{field} 需为 {min}–{max} 之间的整数',
+      invalidCollaborationModelsCount: '已验证模型最多 {max} 个',
+      invalidCollaborationModelLength: '每个已验证模型不超过 {max} 个字符'
     },
     panel: {
       title: '网关韧性',
@@ -111,7 +120,11 @@ export default {
         stall: '停滞断流',
         post_output_failure: '已输出后上游失败',
         pre_created_delta: 'created 之前的正文',
-        relay_keepalive: '中转伪保活帧'
+        relay_keepalive: '中转伪保活帧',
+        collab_plaintext: '协作消息明文化尝试',
+        collab_call: '协作工具调用（按密文参数状态）',
+        collab_call_action: '协作工具调用处理动作',
+        state_rejection: '会话状态拒绝'
       }
     },
     undelivered: {

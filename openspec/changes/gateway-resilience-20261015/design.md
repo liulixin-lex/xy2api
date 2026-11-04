@@ -451,6 +451,7 @@ Claude 客户端请求分发到 GPT 中转（Messages 转 Responses）时，网�
                "balance_keywords_extra": [] },
   "session": { "enabled": true, "post_output_rebind": true, "streak_threshold": 2, "streak_window_seconds": 600, "avoid_seconds": 600 },
   "same_site_hold": { "enabled": true },
+  "collaboration_plaintext": { "enabled": false, "models": [] },
   "last_resort": { "enabled": true },
   "balance": { "enabled": true, "pause_seconds": 300 },
   "budget": { "enabled": true, "max_attempts": 4, "pre_output_budget_seconds": 240,
@@ -471,6 +472,8 @@ Claude 客户端请求分发到 GPT 中转（Messages 转 Responses）时，网�
   "reservation": { "cache_aware_estimate": true, "output_p99_cap": true }
 }
 ```
+
+协作通道 `collaboration_plaintext.models` 去首尾空白后按不分大小写去重，最多 16 条、每条 1–128 字符，nil 归一为 []。只匹配实际映射后的出站模型；完整门控见 [协作通道设计](../codex-collaboration-plaintext-20261104/design.md)。
 
 校验规则：
 
