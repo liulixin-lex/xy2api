@@ -321,7 +321,7 @@ func TestGateV3Migration(t *testing.T) {
 				gateV3Hold(svc, 2, time.Now())
 			}
 			id, result := svc.migrateOpenAILatencyHeldOwner(ctx, &group, PlatformOpenAI, session, "gpt-test", 1, nil, false, "", false)
-			want := !(tc.guard || tc.pinned || tc.full || tc.busy || tc.casFail || tc.cacheErr || tc.noTarget || tc.noCAS || tc.disabled || tc.ws || tc.qualityOwned || tc.shared || tc.targetHeld || tc.loadErr || tc.missingLoad)
+			want := !tc.guard && !tc.pinned && !tc.full && !tc.busy && !tc.casFail && !tc.cacheErr && !tc.noTarget && !tc.noCAS && !tc.disabled && !tc.ws && !tc.qualityOwned && !tc.shared && !tc.targetHeld && !tc.loadErr && !tc.missingLoad
 			require.Equal(t, want, result != nil)
 			if want {
 				require.Contains(t, eventLog.String(), `"msg":"group_quality_gate.migrate"`)
