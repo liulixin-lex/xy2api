@@ -6,7 +6,7 @@
 
 ## 当前交接状态
 
-- **Codex 协作消息明文通道与状态族观测实施（20261104-collab-plaintext-impl；2026-11-04 20:17 UTC；集成完成，用户已授权 PR、合并与发版 0.5.3，部署与灰度未授权）**
+- **Codex 协作消息明文通道与状态族观测实施（20261104-collab-plaintext-impl；2026-11-04 20:52 UTC；PR #196 已合并，0.5.3 版本准备中，部署与灰度未授权）**
   - **背景**：“会话状态归属类报错”方案定稿后（见下一条），用户 11-04 指定 Claude 主持实施 Tier 1：P0 状态族请求级识别与观测（默认开）＋ P1′ 协作消息明文通道（默认关）。
   - **目标**：用户追加要求是严格审查每个子 agent、逻辑闭合、精简（不加无用测试、兜底或影子模式），最终达到可上线。用户 11-04 选定“会话连续性”：历史协作调用的 `encrypted_function_args` 恰为 `[]` 时视同账号开关满足，仅限 API Key。
   - **要求与约束**：
@@ -14,6 +14,7 @@
     - 用户 11-04 19:30 UTC 授权：确认具备上线条件后开 PR、合并并发版 0.5.3（macOS 没有机器时改用备用开发机）。部署、灰度与生产配置变更仍要单独授权。
   - **已完成**：
     - 集成分支 `feat/collab-plaintext-20261104` 已合入 origin/main 0.5.2，最终代码头 `9c0245a78`。
+    - PR #196 CI 全绿后普通合并（20:52 UTC 前）。
     - 预检 2a/2b 通过：d0c7a8、c2a95e、b672e6 × gpt-6.1-sol、gpt-6-astra，Codex 0.166。
     - 两路红队四轮均签字，无遗留 P0/P1。
     - 门禁全部通过：
@@ -28,12 +29,11 @@
       - c2 子 agent 两个模型闭环；
       - b672e6 的生产账号不可调度，上游返回 502/503，没有结论。
   - **未完成**（按顺序）：
-    1. 推送并开 PR（描述在本地 `implementation/PR_BODY.md`），CI 全绿后普通合并；
-    2. `chore(release): prepare 0.5.3` PR 合并后，在合并提交上打 annotated tag `v0.5.3`（发版说明在本地 `implementation/RELEASE_NOTES_0.5.3.md`），核验 Release 附件、校验和与 GHCR 镜像；
-    3. 发版后用记忆 PR 补版本表并归档本任务；
-    4. 部署需单独授权；
-    5. 灰度按 `deploy/README.md` 六步执行，先开 d0c7a8、c2a95e；b672e6 待用户决定；OAuth 验证前不开；
-    6. 上线后按 `GATEWAY_RESILIENCE.md` §4.14 的口径做 48 小时与 7 天核对。
+    1. 本 PR（`chore(release): prepare 0.5.3`）合并后，在合并提交上打 annotated tag `v0.5.3`（发版说明在本地 `implementation/RELEASE_NOTES_0.5.3.md`），核验 Release 附件、校验和与 GHCR 镜像；
+    2. 发版后用记忆 PR 补版本表并归档本任务；
+    3. 部署需单独授权；
+    4. 灰度按 `deploy/README.md` 六步执行，先开 d0c7a8、c2a95e；b672e6 待用户决定；OAuth 验证前不开；
+    5. 上线后按 `GATEWAY_RESILIENCE.md` §4.14 的口径做 48 小时与 7 天核对。
   - **卡点与风险**：
     - b672e6 的开→关续轮在账号 470 上两次遇到 cyber_policy，472 端到端无结论。
     - provider 名不是 OpenAI 的 Codex 没有连续性，关账号开关对它等同硬回退。
@@ -1350,3 +1350,16 @@ pnpm --dir frontend run build
   - docs consistency、干净树 sync audit 通过。
 - 卡点/风险：见“当前交接状态”中对应的小节。
 - 下一步：推送、开 PR → CI 全绿后合并 → `chore(release): prepare 0.5.3` → tag `v0.5.3` → 核验 Release。部署与灰度另行授权。
+
+### 2026-11-04 20:52 UTC — 20261104-collab-plaintext-impl — PR #196 合并，准备 0.5.3
+
+- 请求/目标：按用户 19:30 UTC 授权，功能 PR 合并后发版 0.5.3。
+- 开始状态：main 含 PR #196；本 PR 为 `chore(release): prepare 0.5.3`。
+- 完成操作：
+  - `backend/cmd/server/VERSION` 与 `UPSTREAM_BASE.json` 的 xy2api_version 改为 0.5.3；
+  - `docs/README.md` 中本变更的状态改为“随 0.5.3 发布”；
+  - `GATEWAY_RESILIENCE.md` 版本表：“上游会话状态拒绝”标为 0.5.3；另两行（权威失败终态、原生部分用量）随 0.4.13 发布（`18265f80c`、`47d950eb5`），但一直标着“未发布”，一并更正。
+- 修改文件：上述 4 个文件与本文件。
+- 验证：`check_docs_consistency.py`、干净树 `sync.py audit`；CI。
+- 卡点/风险：无。
+- 下一步：合并后在合并提交上打 annotated tag `v0.5.3`，核验 Release；发版后用记忆 PR 补版本表并归档本任务。部署与灰度另行授权。
