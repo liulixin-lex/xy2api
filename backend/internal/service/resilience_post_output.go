@@ -110,8 +110,16 @@ func openAIEncryptedContentRebindGuarded(ctx context.Context) bool {
 	return ctx != nil && openAINoStickyMigration(ctx)
 }
 
-// withOpenAIEncryptedContentTurnGuard replaces the flag for one WS turn, including
-// false, so neither a previous turn nor a connection guard can suppress P1-B.
+// openAIEncryptedContentForWSTurn retains encrypted-chain protection for delta
+// turns. A full request without previous_response_id starts a new chain; the
+// first frame has no history and callers pass previous=false.
+func openAIEncryptedContentForWSTurn(payload []byte, previous bool) bool {
+	return openAIRequestHasEncryptedState(payload) ||
+		(previous && strings.TrimSpace(openAIRequestPayloadView(payload).Get("previous_response_id").String()) != "")
+}
+
+// withOpenAIEncryptedContentTurnGuard writes the resolved flag for one WS turn,
+// including false, so a full request can clear a previous connection guard.
 func withOpenAIEncryptedContentTurnGuard(ctx context.Context, encrypted bool) context.Context {
 	return context.WithValue(ctx, openAINoStickyMigrationKey{}, encrypted)
 }

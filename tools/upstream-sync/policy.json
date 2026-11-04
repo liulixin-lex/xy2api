@@ -810,19 +810,19 @@
     },
     {
       "path": "backend/internal/service/openai_ws_http_bridge.go",
-      "value": "s.resilienceOpenAIWSFailedAfterOutput(postOutputCtx, account, resp, eventType, upstreamMessage, wroteDownstream, officialOpenAIResponses)"
+      "value": "s.resilienceOpenAIWSFailedAfterOutput(ctx, account, resp, eventType, upstreamMessage, wroteDownstream, officialOpenAIResponses)"
     },
     {
       "path": "backend/internal/service/openai_ws_http_bridge.go",
-      "value": "s.resilienceOpenAIFailedAfterOutput(postOutputCtx, account, resp, bareErrorPayload, bareErrorMessage, wroteDownstream)"
+      "value": "s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, bareErrorPayload, bareErrorMessage, wroteDownstream)"
     },
     {
       "path": "backend/internal/service/openai_ws_http_bridge.go",
-      "value": "resilienceStreamBrokenAfterOutput(postOutputCtx, s.rateLimitService, account, resp, err, wroteDownstream && !clientDisconnected)"
+      "value": "resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, err, wroteDownstream && !clientDisconnected)"
     },
     {
       "path": "backend/internal/service/openai_ws_http_bridge.go",
-      "value": "resilienceStreamBrokenAfterOutput(postOutputCtx, s.rateLimitService, account, resp, nil, wroteDownstream && !clientDisconnected)"
+      "value": "resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, nil, wroteDownstream && !clientDisconnected)"
     },
     {
       "path": "backend/internal/service/openai_ws_forwarder_ingress.go",
@@ -2838,19 +2838,27 @@
     },
     {
       "path": "backend/internal/service/openai_ws_forwarder_ingress.go",
-      "value": "postOutputCtx := withOpenAIEncryptedContentTurnGuard(ctx, openAIRequestHasEncryptedState(payload))"
+      "value": "postOutputCtx := withOpenAIEncryptedContentTurnGuard(ctx, turnHasEncryptedContent)"
     },
     {
-      "path": "backend/internal/service/openai_ws_http_bridge.go",
-      "value": "postOutputCtx := withOpenAIEncryptedContentTurnGuard(ctx, openAIRequestHasEncryptedState(payload))"
+      "path": "backend/internal/service/openai_ws_forwarder_ingress.go",
+      "value": "turnHasEncryptedContent = openAIEncryptedContentForWSTurn(currentBridgePayload.rawForHash, turnHasEncryptedContent)"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_forwarder_ingress.go",
+      "value": "result, bridgeErr := s.proxyOpenAIWSHTTPBridgeTurn(\n\t\t\t\tpostOutputCtx,"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_forwarder_ingress.go",
+      "value": "turnHasEncryptedContent = openAIEncryptedContentForWSTurn(currentClientPayload, turnHasEncryptedContent)"
     },
     {
       "path": "backend/internal/service/openai_ws_v2_passthrough_adapter.go",
-      "value": "turnHasEncryptedContent.Store(openAIRequestHasEncryptedState(originalFirstClientMessage))"
+      "value": "turnHasEncryptedContent.Store(openAIEncryptedContentForWSTurn(originalFirstClientMessage, false))"
     },
     {
       "path": "backend/internal/service/openai_ws_v2_passthrough_adapter.go",
-      "value": "turnHasEncryptedContent.Store(openAIRequestHasEncryptedState(originalPayload))"
+      "value": "turnHasEncryptedContent.Store(openAIEncryptedContentForWSTurn(originalPayload, turnHasEncryptedContent.Load()))"
     },
     {
       "path": "backend/internal/service/resilience_post_output.go",
