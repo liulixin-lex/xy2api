@@ -1710,10 +1710,6 @@
           "tiers       map[int64]int",
           "expectedP90 map[int64]int",
           "if order.tiers != nil {",
-          "am, ak := order.expectedP90[a.account.ID]",
-          "bm, bk := order.expectedP90[b.account.ID]",
-          "if ak && bk && am != bm {",
-          "return am < bm",
           "if view.Enabled(order.groupID) {",
           "order.expectedP90 = make(map[int64]int, len(items))",
           "if ms, ok := view.ExpectedP90Ms(order.groupID, item.account.ID); ok {",
@@ -1726,10 +1722,7 @@
           "if !req.AdvancedScheduler && req.UseUpstreamTokenCost && s.isOpenAILowUpstreamRatePriorityEnabled(ctx, req.GroupID) {",
           "candidates = s.partitionOpenAILatencyHeldLoad(ctx, candidates, req.RequestedModel, req.RequireCompact, req.GroupID)",
           "}",
-          "}",
           "shuffleOpenAIWithinQualityGroups(available, order.tiers, s.openAIAccountLatencyHoldSnapshotForAccounts(candidates, requestedModel))",
-          "s.sortOpenAIAccounts(ordered, groupID, rateOrder, requestedModel)",
-          "s.sortOpenAIAccounts(candidates, groupID, rateOrder, requestedModel)",
           "held := map[int64]openAIAccountLatencyHoldSnapshot(nil)",
           "if qualityTiers != nil {",
           "held = s.openAIAccountLatencyHoldSnapshotForAccounts(accounts, model)",
@@ -1738,13 +1731,26 @@
           "// current account after acquiring a slot, including after a wait plan.",
           "// Quality is an ordering signal and never vetoes an already selected account.",
           "if order.tiers != nil {",
-          "func (s *OpenAIGatewayService) sortOpenAIAccounts(accounts []*Account, groupID *int64, rates openAILegacyUpstreamRateOrder, requestedModel string) {",
           "var held map[int64]openAIAccountLatencyHoldSnapshot",
           "held = s.openAIAccountLatencyHoldSnapshotForAccounts(accounts, requestedModel)",
           "for end < len(accounts) && order.tiers[accounts[end].ID] == order.tiers[accounts[start].ID] && held[accounts[end].ID].Held == held[accounts[start].ID].Held {",
           "service *OpenAIGatewayService",
           "groupID int64",
           "exempt  bool"
+        ]
+      },
+      {
+        "block": "group-quality-gate-v3-prediction-order",
+        "note": "Red-team A-03: transitive load/LRU base comparator followed by stable ordering only at known predicted positions within quality/held/priority/capacity/rate/compact cohorts. Unknown positions keep the established base order; all legacy selection, fallback and borrowing paths use the refinement.",
+        "removed": [],
+        "added": [
+          "s.orderOpenAIPredictedAccounts(eligible, order, requestedModel, requireCompact)",
+          "s.orderOpenAIPredictedLoad(available, order, requestedModel, requireCompact)",
+          "s.sortOpenAIAccounts(ordered, groupID, rateOrder, requestedModel, requireCompact)",
+          "s.sortOpenAIAccounts(candidates, groupID, rateOrder, requestedModel, requireCompact)",
+          "func (s *OpenAIGatewayService) sortOpenAIAccounts(accounts []*Account, groupID *int64, rates openAILegacyUpstreamRateOrder, requestedModel string, compact bool) {",
+          "s.orderOpenAIPredictedAccounts(accounts, order, requestedModel, compact)",
+          "s.orderOpenAIPredictedLoad(candidates, order, req.RequestedModel, req.RequireCompact)"
         ]
       }
     ],

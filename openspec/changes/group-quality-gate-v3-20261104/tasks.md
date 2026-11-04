@@ -41,6 +41,8 @@
 - [x] 3.6 判慢参数：30%、3/6/12/15 分钟递增、30 分钟重置；事件加 `hold_seconds`、`level`；为状态接口提供按账号的判慢查询。
 - [x] 3.7 文档：`GATEWAY_RESILIENCE.md` §4.5、`account-scheduling.md`；`policy.json` 与 `scheduler-diff.json`；规格 `specs/openai-scheduling/spec.md`。
 
+- [x] 3.8 红队 A-01/A-02/A-03 与 B11：共享同站暂停不保留软罚绑定、共享档内判慢、已知预测位置细排与比较器传递性、判慢 Warn 字段回归。
+
 ## 4 前端（WP8）
 
 - [x] 4.1 每组门槛设置：启用、首字上限（秒）、错误上限、缓存下限、严格模式；不展示、不改写 v2 字段。

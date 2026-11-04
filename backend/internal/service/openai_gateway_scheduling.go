@@ -1172,6 +1172,7 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 		}
 		return openAICandidateLess(accountWithLoad{account: a}, accountWithLoad{account: b}, order)
 	})
+	s.orderOpenAIPredictedAccounts(eligible, order, requestedModel, requireCompact)
 	eligible = s.partitionOpenAILatencyHeldAccounts(ctx, eligible, requestedModel, requireCompact, groupID)
 	return eligible[0], compactBlocked, filterStats
 }
@@ -1410,6 +1411,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			s.preferOpenAIQualityCacheCandidates(ctx, available, requestedModel, order.tiers)
 		}
 
+		s.orderOpenAIPredictedLoad(available, order, requestedModel, requireCompact)
 		selectionOrder := make([]accountWithLoad, 0, len(available))
 		if requireCompact {
 			appendTier := func(out []accountWithLoad, tier int) []accountWithLoad {
@@ -1460,7 +1462,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	loadMap, err := s.concurrencyService.GetAccountsLoadBatch(ctx, accountLoads)
 	if err != nil {
 		ordered := append([]*Account(nil), candidates...)
-		s.sortOpenAIAccounts(ordered, groupID, rateOrder, requestedModel)
+		s.sortOpenAIAccounts(ordered, groupID, rateOrder, requestedModel, requireCompact)
 		if requireCompact {
 			ordered = prioritizeOpenAICompactAccounts(ordered)
 		}
@@ -1509,7 +1511,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	}
 
 	// ============ Layer 3: Fallback wait ============
-	s.sortOpenAIAccounts(candidates, groupID, rateOrder, requestedModel)
+	s.sortOpenAIAccounts(candidates, groupID, rateOrder, requestedModel, requireCompact)
 	if requireCompact {
 		candidates = prioritizeOpenAICompactAccounts(candidates)
 	}
@@ -2072,11 +2074,6 @@ func openAICandidateLess(a, b accountWithLoad, order openAICandidateOrder) bool 
 		if cmp := order.rates.compare(a.account, b.account); cmp != 0 {
 			return cmp < 0
 		}
-		am, ak := order.expectedP90[a.account.ID]
-		bm, bk := order.expectedP90[b.account.ID]
-		if ak && bk && am != bm {
-			return am < bm
-		}
 	}
 	if a.loadInfo != nil && b.loadInfo != nil && a.loadInfo.LoadRate != b.loadInfo.LoadRate {
 		return a.loadInfo.LoadRate < b.loadInfo.LoadRate
@@ -2111,7 +2108,7 @@ func (s *OpenAIGatewayService) openAICandidateOrderForItems(groupID *int64, rate
 	}
 	return order
 }
-func (s *OpenAIGatewayService) sortOpenAIAccounts(accounts []*Account, groupID *int64, rates openAILegacyUpstreamRateOrder, requestedModel string) {
+func (s *OpenAIGatewayService) sortOpenAIAccounts(accounts []*Account, groupID *int64, rates openAILegacyUpstreamRateOrder, requestedModel string, compact bool) {
 	items := make([]accountWithLoad, len(accounts))
 	for i, account := range accounts {
 		items[i] = accountWithLoad{account: account}
@@ -2134,6 +2131,7 @@ func (s *OpenAIGatewayService) sortOpenAIAccounts(accounts []*Account, groupID *
 			start = end
 		}
 	}
+	s.orderOpenAIPredictedAccounts(accounts, order, requestedModel, compact)
 }
 
 // selectOpenAIStickyCapacity is shared by all three sticky saturation paths.
@@ -2330,6 +2328,7 @@ func (s *OpenAIGatewayService) selectOpenAIStickyCapacityResult(ctx context.Cont
 		}
 		s.preferOpenAISessionOrder(ctx, candidates, req.GroupID, req.SessionHash, req.RequestedModel, sessionRates, req.RequireCompact, req.RequiredCapability, true, order.tiers)
 	}
+	s.orderOpenAIPredictedLoad(candidates, order, req.RequestedModel, req.RequireCompact)
 	candidates = s.partitionOpenAILatencyHeldLoad(ctx, candidates, req.RequestedModel, req.RequireCompact, req.GroupID)
 	if fallbackWait {
 		for _, item := range candidates {

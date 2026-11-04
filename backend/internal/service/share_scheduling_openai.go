@@ -115,7 +115,7 @@ func (s *OpenAIGatewayService) selectAccountWithShareScheduling(ctx context.Cont
 		newResult: func(acc *Account, acquired bool, release func(), wait *AccountWaitPlan) (*AccountSelectionResult, error) {
 			return attachSelectionProfitGate(ctx, &AccountSelectionResult{Account: acc, Acquired: acquired, ReleaseFunc: release, WaitPlan: wait}), nil
 		}}
-	d := s.orderOpenAIShareQuality(in.groupID, sharesched.Plan(req, cands))
+	d := s.orderOpenAIShareQuality(in.groupID, in.model, accounts, sharesched.Plan(req, cands))
 	out := exec.serve(d)
 	for _, c := range cands {
 		if c.Eligible && !c.Excluded {
@@ -185,7 +185,7 @@ func (s *OpenAIGatewayService) shareOpenAILastResort(ctx context.Context, gp *sh
 		newResult: func(acc *Account, acquired bool, release func(), wait *AccountWaitPlan) (*AccountSelectionResult, error) {
 			return attachSelectionProfitGate(withResilienceLastResortGate(ctx), &AccountSelectionResult{Account: acc, Acquired: acquired, ReleaseFunc: release, WaitPlan: wait}), nil
 		}}
-	out := exec.serve(s.orderOpenAIShareQuality(req.GroupID, round.plan(shareReq)))
+	out := exec.serve(s.orderOpenAIShareQuality(req.GroupID, req.RequestedModel, round.accounts, round.plan(shareReq)))
 	if out == nil || out.err != nil || out.result == nil {
 		return nil
 	}
@@ -288,7 +288,11 @@ func (s *OpenAIGatewayService) shareOpenAICandidates(ctx context.Context, in ope
 	if boundID > 0 && accounts[boundID] == nil {
 		if _, excluded := in.excluded[boundID]; !excluded {
 			if acc := gates.lookup(boundID); acc != nil && acc.Platform == in.platform && s.openAIAccountMatchesSchedulingGroup(acc, in.groupID) {
-				if c, ok := s.shareScheduling.shareMissingBoundCandidate(derefGroupID(in.groupID), acc, in.model, now, s.resilienceOpenAIPenaltyOf); ok {
+				if gates.sameSiteHeld(acc, now) {
+					c := s.shareScheduling.shareCandidate(derefGroupID(in.groupID), acc, now)
+					c.Reason = sharesched.ReasonRuntimeBlocked
+					cands = append(cands, c)
+				} else if c, ok := s.shareScheduling.shareMissingBoundCandidate(derefGroupID(in.groupID), acc, in.model, now, s.resilienceOpenAIPenaltyOf); ok {
 					cands = append(cands, c)
 				}
 			}
@@ -353,12 +357,21 @@ func (g *openAIShareGates) lookup(id int64) *Account {
 // context the caller has cleared the soft account states, and the
 // scheduler's soft restrictions pass as in the original last resort: short
 // per-model rate limits and in-memory runtime blocks.
+func (g *openAIShareGates) sameSiteHeld(acc *Account, now time.Time) bool {
+	return g.s.resilience != nil && g.s.resilience.sameSiteHold.held(acc, now)
+}
+
 func (g *openAIShareGates) candidateReason(acc *Account, now time.Time) (sharesched.Reason, time.Time) {
+	lastResort := resilienceLastResortGate(g.ctx)
+	// Same-site pauses require rebinding even when a different soft penalty
+	// would otherwise offer a recover-at time for temporary soft spill.
+	if !lastResort && g.sameSiteHeld(acc, now) {
+		return sharesched.ReasonRuntimeBlocked, time.Time{}
+	}
 	if !acc.IsSchedulable() {
 		reason, end := shareAccountStateReason(acc, now)
 		return reason, shareSoftRecovery(acc, g.in.model, now, g.s.resilienceOpenAIPenaltyOf, end)
 	}
-	lastResort := resilienceLastResortGate(g.ctx)
 	switch reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(g.ctx, acc, g.in.platform, g.in.model, false, g.in.capability); {
 	case reason == "":
 	case reason == "model_rate_limited" && lastResortModelLimitSoft(g.ctx, acc, g.in.model, false):
@@ -419,7 +432,7 @@ func (g *openAIShareGates) requestReason(acc *Account, now time.Time) sharesched
 
 // Preserve an admitted sticky owner; only new placement and spill candidates
 // are quality ordered. Share scheduling does not perform quality migration.
-func (s *OpenAIGatewayService) orderOpenAIShareQuality(groupID *int64, d sharesched.Decision) sharesched.Decision {
+func (s *OpenAIGatewayService) orderOpenAIShareQuality(groupID *int64, model string, accounts map[int64]*Account, d sharesched.Decision) sharesched.Decision {
 	view := s.GroupQualityGateView()
 	if !view.Enabled(derefGroupID(groupID)) || len(d.Steps) < 2 {
 		return d
@@ -429,8 +442,19 @@ func (s *OpenAIGatewayService) orderOpenAIShareQuality(groupID *int64, d sharesc
 		start = 1
 	}
 	steps := d.Steps[start:]
+	tiers := make(map[int64]int, len(steps))
+	candidates := make([]*Account, 0, len(steps))
+	for _, step := range steps {
+		tiers[step.AccountID] = view.OrderTier(derefGroupID(groupID), step.AccountID)
+		candidates = append(candidates, accounts[step.AccountID])
+	}
+	held := s.openAIAccountLatencyHoldSnapshotForAccounts(candidates, model)
 	sort.SliceStable(steps, func(i, j int) bool {
-		return view.OrderTier(derefGroupID(groupID), steps[i].AccountID) < view.OrderTier(derefGroupID(groupID), steps[j].AccountID)
+		a, b := steps[i].AccountID, steps[j].AccountID
+		if tiers[a] != tiers[b] {
+			return tiers[a] < tiers[b]
+		}
+		return !held[a].Held && held[b].Held
 	})
 	if start == 0 {
 		d.Target = d.Steps[0].AccountID

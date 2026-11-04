@@ -1,6 +1,70 @@
 package service
 
-import "context"
+import (
+	"context"
+	"sort"
+)
+
+// orderOpenAIPredictedPositions refines a stable load/LRU base order. Unknown
+// predictions stay in their base positions, so missing values cannot create a
+// non-transitive pairwise comparison. Only comparable known positions move.
+func orderOpenAIPredictedPositions[T any](items []T, itemOf func(T) accountWithLoad, order openAICandidateOrder, held map[int64]openAIAccountLatencyHoldSnapshot, compact bool) {
+	if !order.rates.enabled || len(order.expectedP90) < 2 {
+		return
+	}
+	type cohort struct {
+		tier, compact, priority       int
+		held, nearCapacity, rateKnown bool
+		rate                          float64
+	}
+	positions := make(map[cohort][]int)
+	for i, value := range items {
+		item := itemOf(value)
+		account := item.account
+		if _, known := order.expectedP90[account.ID]; !known {
+			continue
+		}
+		rate, known := order.rates.rates[account.ID]
+		key := cohort{tier: order.tiers[account.ID], held: held[account.ID].Held, priority: account.Priority, nearCapacity: openAIAccountNearCapacity(item), rateKnown: known, rate: rate}
+		if compact {
+			key.compact = openAICompactSupportTier(account)
+		}
+		positions[key] = append(positions[key], i)
+	}
+	for _, indices := range positions {
+		if len(indices) < 2 {
+			continue
+		}
+		known := make([]T, len(indices))
+		for i, index := range indices {
+			known[i] = items[index]
+		}
+		sort.SliceStable(known, func(i, j int) bool {
+			return order.expectedP90[itemOf(known[i]).account.ID] < order.expectedP90[itemOf(known[j]).account.ID]
+		})
+		for i, index := range indices {
+			items[index] = known[i]
+		}
+	}
+}
+
+func (s *OpenAIGatewayService) orderOpenAIPredictedAccounts(accounts []*Account, order openAICandidateOrder, model string, compact bool) {
+	if !order.rates.enabled || len(order.expectedP90) < 2 {
+		return
+	}
+	orderOpenAIPredictedPositions(accounts, func(a *Account) accountWithLoad { return accountWithLoad{account: a} }, order, s.openAIAccountLatencyHoldSnapshotForAccounts(accounts, model), compact)
+}
+
+func (s *OpenAIGatewayService) orderOpenAIPredictedLoad(items []accountWithLoad, order openAICandidateOrder, model string, compact bool) {
+	if !order.rates.enabled || len(order.expectedP90) < 2 {
+		return
+	}
+	accounts := make([]*Account, len(items))
+	for i, item := range items {
+		accounts[i] = item.account
+	}
+	orderOpenAIPredictedPositions(items, func(item accountWithLoad) accountWithLoad { return item }, order, s.openAIAccountLatencyHoldSnapshotForAccounts(accounts, model), compact)
+}
 
 // openAIQualitySegmentKey keeps latency partitions inside quality and protocol
 // capability segments. Disabled groups retain the original partition behavior.
