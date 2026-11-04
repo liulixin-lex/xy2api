@@ -267,7 +267,7 @@ func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(account *Acc
 	if isOpenAIContextWindowError(upstreamMsg, upstreamBody) {
 		return false
 	}
-	if isOpenAIEncryptedContentRejectionPayload(upstreamBody) || resilience.IsEncryptedContentRejection("", upstreamMsg) {
+	if isOpenAIStateRejection(upstreamBody, upstreamMsg) {
 		return false
 	}
 	if isOpenAIHTTPUpstreamAccessStateError(statusCode, upstreamMsg, upstreamBody) {
@@ -541,6 +541,7 @@ func (s *OpenAIGatewayService) handleErrorResponseCore(
 	requestedModel ...string,
 ) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
+	captureOpenAIStateRejection(c, account, body, "", "native_http", false, requestBody)
 	body = s.redactAgentIdentitySensitiveBody(ctx, account, body)
 
 	// cyber_policy 硬阻断：透传上游原始错误体给客户端（不重包成通用 502），不冷却账号。
@@ -622,6 +623,7 @@ func (s *OpenAIGatewayService) handleErrorResponseCore(
 			UpstreamRequestID:  resp.Header.Get("x-request-id"),
 			Kind:               "failover",
 			ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, body, upstreamMsg),
+			StateFamily:        string(openAIStateRejection(body, upstreamMsg).Family),
 			Message:            upstreamMsg,
 			Detail:             upstreamDetail,
 		})
@@ -674,6 +676,7 @@ func (s *OpenAIGatewayService) handleErrorResponseCore(
 				UpstreamRequestID:  resp.Header.Get("x-request-id"),
 				Kind:               "http_error",
 				ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, body, upstreamMsg),
+				StateFamily:        string(openAIStateRejection(body, upstreamMsg).Family),
 				Message:            upstreamMsg,
 				Detail:             upstreamDetail,
 			})
@@ -720,6 +723,7 @@ func (s *OpenAIGatewayService) handleErrorResponseCore(
 			UpstreamRequestID:  resp.Header.Get("x-request-id"),
 			Kind:               kind,
 			ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, body, upstreamMsg),
+			StateFamily:        string(openAIStateRejection(body, upstreamMsg).Family),
 			Message:            upstreamMsg,
 			Detail:             upstreamDetail,
 		})
@@ -902,6 +906,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 				UpstreamRequestID:  resp.Header.Get("x-request-id"),
 				Kind:               "http_error",
 				ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, body, upstreamMsg),
+				StateFamily:        string(openAIStateRejection(body, upstreamMsg).Family),
 				Message:            upstreamMsg,
 				Detail:             upstreamDetail,
 			})
@@ -941,6 +946,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 			UpstreamRequestID:  resp.Header.Get("x-request-id"),
 			Kind:               kind,
 			ResilienceCategory: opsHTTPResilienceCategory(resp.StatusCode, resp.Header, body, upstreamMsg),
+			StateFamily:        string(openAIStateRejection(body, upstreamMsg).Family),
 			Message:            upstreamMsg,
 			Detail:             upstreamDetail,
 		})

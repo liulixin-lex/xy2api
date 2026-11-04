@@ -3518,15 +3518,15 @@
     },
     {
       "path": "backend/internal/service/openai_account_runtime_block_fastpath.go",
-      "value": "account.Platform == PlatformOpenAI && isOpenAIEncryptedContentRejectionPayload(responseBody)"
+      "value": "account.Platform == PlatformOpenAI && isOpenAIStateRejection(responseBody, \"\")"
     },
     {
       "path": "backend/internal/service/ratelimit_service.go",
-      "value": "account.Platform == PlatformOpenAI && isOpenAIEncryptedContentRejectionPayload(responseBody)"
+      "value": "account.Platform == PlatformOpenAI && isOpenAIStateRejection(responseBody, \"\")"
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
-      "value": "if isOpenAIEncryptedContentRejectionPayload(payload) || resilience.IsEncryptedContentRejection(\"\", message) {"
+      "value": "if isOpenAIStateRejection(payload, message) {"
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
@@ -3538,7 +3538,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_upstream_errors.go",
-      "value": "if isOpenAIEncryptedContentRejectionPayload(upstreamBody) || resilience.IsEncryptedContentRejection(\"\", upstreamMsg) {"
+      "value": "if isOpenAIStateRejection(upstreamBody, upstreamMsg) {"
     },
     {
       "path": "backend/internal/service/openai_gateway_upstream_errors.go",
@@ -3743,6 +3743,62 @@
     {
       "path": "backend/internal/service/share_scheduling_openai.go",
       "value": "if gates.sameSiteHeld(acc, now)"
+    },
+    {
+      "path": "backend/internal/service/resilience_post_output.go",
+      "value": "return isOpenAIStateRejection(payload, message)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "defer beginOpenAIStateRejectionAttempt(ctx, c, account, body)(&forwardErr)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "captureOpenAIStateRejection(c, account, dataBytes, failedMessage, \"native_sse\", outputStarted, nil)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "captureOpenAIStateRejection(c, account, dataBytes, failedMessage, \"passthrough_sse\", outputStarted, nil)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "if isOpenAIStateRejection(responseBody, \"\") {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_upstream_errors.go",
+      "value": "captureOpenAIStateRejection(c, account, body, \"\", \"native_http\", false, requestBody)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_cc_pipeline.go",
+      "value": "captureOpenAIStateRejection(c, account, respBody, upstreamMsg, \"chat\", false, nil)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_chat_completions.go",
+      "value": "captureOpenAIStateRejection(c, account, payloadBytes, message, \"chat\", clientOutputStarted, nil)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_messages.go",
+      "value": "captureOpenAIStateRejection(c, account, payloadBytes, message, \"messages\", clientOutputStarted, nil)"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_forwarder_support.go",
+      "value": "if noteOpenAIWSStateRejection(ctx, account, payload) {"
+    },
+    {
+      "path": "backend/internal/service/ops_upstream_context.go",
+      "value": "StateFamily        string `json:\"state_family,omitempty\"`"
+    },
+    {
+      "path": "backend/internal/service/error_passthrough_runtime.go",
+      "value": "c.Set(OpsErrorPassthroughRuleIDKey, rule.ID)"
+    },
+    {
+      "path": "backend/internal/handler/resilience_budget.go",
+      "value": "if resilienceStateRejected(failoverErr) {"
+    },
+    {
+      "path": "backend/internal/handler/resilience_failover.go",
+      "value": "service.ClassifyFailoverError(err).StateFamily != resilience.StateNone"
     }
   ],
   "forbidden_module_paths": [
@@ -6533,6 +6589,66 @@
       "id": "xy-openai-group-quality-scheduling",
       "path": "backend/internal/service/openai_gate_v3_redteam_test.go",
       "literal": "func TestGateV3LatencyHoldStartedWarnFields(t *testing.T) {"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/resilience/state_rejection_test.go",
+      "literal": "func TestClassifyStateRejection(t *testing.T)"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/resilience/state_rejection_test.go",
+      "literal": "func TestStateRejectionLeavesRecoverableCategories(t *testing.T)"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_state_rejection_test.go",
+      "literal": "func TestOpenAIStateRejectionAllDecisionEntrances(t *testing.T)"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_state_rejection_test.go",
+      "literal": "func TestOpenAIStateRejectionDoesNotDiscardStructuredCode(t *testing.T)"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_state_rejection_test.go",
+      "literal": "func TestOpenAIStateRejectionRepairBoundary(t *testing.T)"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_state_rejection_test.go",
+      "literal": "func TestOpenAIEncryptedFragmentCensus(t *testing.T)"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_state_rejection_test.go",
+      "literal": "func TestOpenAIStateRejectionObservationFinalAttemptFacts(t *testing.T)"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_state_rejection_test.go",
+      "literal": "func TestOpenAIWSStateRejectionObservationUsesUnknownStage(t *testing.T)"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_state_rejection_test.go",
+      "literal": "func TestOpenAIStateRejectionForwardObservationHooks(t *testing.T)"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_state_rejection_test.go",
+      "literal": "func TestOpenAIStateRejectionRecoverableRouting(t *testing.T)"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_state_rejection_test.go",
+      "literal": "func TestOpenAIStateRejectionFinalSuccessIsNotCounted(t *testing.T)"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/resilience_state_rejection_test.go",
+      "literal": "func TestStateRejectionTerminatesRecoveryWithoutBudgetOrMaster(t *testing.T)"
     }
   ]
 }

@@ -26,7 +26,7 @@ func recordForwardRecovery(c *gin.Context, err error, disconnected, completed bo
 	default:
 		var failure *service.UpstreamFailoverError
 		var rejection *service.OpenAIRequestRejectionError
-		if errors.As(err, &rejection) || (errors.As(err, &failure) && failure != nil && (!failure.ShouldRetryNextAccount() || resilienceContentRejected(failure))) {
+		if errors.As(err, &rejection) || (errors.As(err, &failure) && failure != nil && (!failure.ShouldRetryNextAccount() || resilienceContentRejected(failure) || resilienceStateRejected(failure))) {
 			outcome = "terminal_rejection"
 		}
 	}
@@ -71,7 +71,7 @@ func recordExhaustedRecovery(c *gin.Context, failure *service.UpstreamFailoverEr
 		st.SetRecoveryOutcome("client_cancel")
 		return
 	}
-	if resilienceContentRejected(failure) || (failure != nil && !failure.ShouldRetryNextAccount()) {
+	if resilienceContentRejected(failure) || resilienceStateRejected(failure) || (failure != nil && !failure.ShouldRetryNextAccount()) {
 		st.SetRecoveryOutcome("terminal_rejection")
 	} else if b := requestBudget(c.Request.Context()); b != nil && b.Exhausted() != "" {
 		st.SetRecoveryOutcome("budget_exhausted")

@@ -34,6 +34,10 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (forwardResult *OpenAIForwardResult, forwardErr error) {
+	if c != nil {
+		c.Set(openAIStateRejectionBodyKey, body)
+		defer c.Set(openAIStateRejectionBodyKey, nil)
+	}
 	defer func() { s.finishCacheDiagnostic(c, body, forwardResult) }()
 	if c != nil {
 		c.Set("openai_cache_diagnostic", nil)
@@ -670,6 +674,7 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 			return nil, fmt.Errorf("openai cyber_policy: %s", msg)
 		}
 		message := openAICompatFailedResponseMessage(finalResponse)
+		captureOpenAIStateRejection(c, account, payload, message, "messages", false, nil)
 		if openAIStreamFailedEventShouldFailover(payload, message) {
 			return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, payload, message, upstreamModel, resp.Header)
 		}
@@ -1180,6 +1185,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				// Once Anthropic output has started, switching accounts would splice
 				// two model streams together. Surface a proper Anthropic error event
 				// instead of returning a failover error that the handler cannot retry.
+				captureOpenAIStateRejection(c, account, payloadBytes, message, "messages", clientOutputStarted, nil)
 				shouldFailover := openAIStreamFailedEventShouldFailover(payloadBytes, message)
 				if isBareErrorEvent {
 					shouldFailover = openAIStreamErrorEventShouldFailover(payloadBytes, message)

@@ -465,6 +465,7 @@ type OpsUpstreamErrorEvent struct {
 	// resilience design §2), e.g. BALANCE or TRANSIENT; empty when the
 	// resilience switch is off or the event is not an upstream answer.
 	ResilienceCategory string `json:"resilience_category,omitempty"`
+	StateFamily        string `json:"state_family,omitempty"`
 
 	// SkipMonitoring is request-local rule state. It is intentionally excluded
 	// from persisted attempt JSON. The logger consults it only when this event is
@@ -504,6 +505,9 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
 	}
 	if ev.ResilienceCategory == "" {
 		ev.ResilienceCategory = opsResilienceCategory(&ev)
+	}
+	if ev.StateFamily == "" && ev.UpstreamResponseBody != "" {
+		ev.StateFamily = string(openAIStateRejection([]byte(ev.UpstreamResponseBody), ev.Message).Family)
 	}
 	if c.Request != nil {
 		resilience.StateFrom(c.Request.Context()).MarkAccountFailed(ev.AccountID)

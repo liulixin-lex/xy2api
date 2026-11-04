@@ -106,6 +106,9 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	if account != nil && account.Platform == PlatformOpenAI && isOpenAIRequestScopedCapacityShed("", responseBody) {
 		return false
 	}
+	if account != nil && account.Platform == PlatformOpenAI && isOpenAIStateRejection(responseBody, "") {
+		return false
+	}
 	stateCtx, cancel := openAIAccountStateContext(ctx)
 	defer cancel()
 	if account != nil && account.Platform == PlatformOpenAI && isOpenAIHTTPUpstreamAccessStateError(statusCode, "", responseBody) {
@@ -123,9 +126,6 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	}
 
 	if account != nil && account.Platform == PlatformOpenAI && isOpenAIContextWindowError("", responseBody) {
-		return false
-	}
-	if account != nil && account.Platform == PlatformOpenAI && isOpenAIEncryptedContentRejectionPayload(responseBody) {
 		return false
 	}
 

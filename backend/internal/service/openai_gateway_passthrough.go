@@ -854,6 +854,9 @@ func shouldFailoverOpenAIPassthroughResponse(account *Account, statusCode int, r
 	if isOpenAIContextWindowError("", responseBody) {
 		return false
 	}
+	if isOpenAIStateRejection(responseBody, "") {
+		return false
+	}
 	if isOpenAIHTTPUpstreamAccessStateError(statusCode, "", responseBody) {
 		return true
 	}
@@ -994,6 +997,7 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 		Detail:               upstreamDetail,
 		UpstreamResponseBody: upstreamDetail,
 		ResilienceCategory:   opsHTTPResilienceCategory(resp.StatusCode, resp.Header, body, upstreamMsg),
+		StateFamily:          string(openAIStateRejection(body, upstreamMsg).Family),
 	})
 	return s.newOpenAIAccountFailoverError(
 		account,
@@ -1014,6 +1018,7 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	requestBody []byte,
 	responseBody []byte,
 ) error {
+	captureOpenAIStateRejection(c, account, responseBody, "", "passthrough_http", false, requestBody)
 	MarkResponseCommitted(c)
 	body := s.redactAgentIdentitySensitiveBody(ctx, account, responseBody)
 
@@ -1063,6 +1068,7 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 		Detail:               upstreamDetail,
 		UpstreamResponseBody: upstreamDetail,
 		ResilienceCategory:   opsHTTPResilienceCategory(resp.StatusCode, resp.Header, body, upstreamMsg),
+		StateFamily:          string(openAIStateRejection(body, upstreamMsg).Family),
 	})
 	// context-window 超限是确定性请求失败（shouldFailoverOpenAIPassthroughResponse
 	// 已保证不切号），其文案对客户端可操作（如触发自动压缩）；在净化信封内保留
@@ -1668,7 +1674,7 @@ func openAIStreamFailedEventShouldFailover(payload []byte, message string) bool 
 	if isOpenAIContextWindowError(message, payload) {
 		return false
 	}
-	if isOpenAIEncryptedContentRejectionPayload(payload) || resilience.IsEncryptedContentRejection("", message) {
+	if isOpenAIStateRejection(payload, message) {
 		return false
 	}
 	if openAIStreamBalanceFailure(payload) {
@@ -1726,7 +1732,7 @@ func openAIStreamErrorEventShouldFailover(payload []byte, message string) bool {
 	if isOpenAIContextWindowError(message, payload) {
 		return false
 	}
-	if isOpenAIEncryptedContentRejectionPayload(payload) || resilience.IsEncryptedContentRejection("", message) {
+	if isOpenAIStateRejection(payload, message) {
 		return false
 	}
 	if openAIStreamBalanceFailure(payload) {
@@ -1770,6 +1776,9 @@ func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffectsWithC
 	canonicalModel ...string,
 ) (int, bool) {
 	statusCode := openAIStreamFailureStatus(payload, message)
+	if isOpenAIStateRejection(payload, message) {
+		return statusCode, false
+	}
 	if statusCode != http.StatusTooManyRequests && openAIStreamBalanceFailure(payload) {
 		model := firstNonEmpty(canonicalModel...)
 		if model == "" {
@@ -1859,6 +1868,7 @@ func (s *OpenAIGatewayService) recordOpenAIStreamUpstreamError(
 			event.AccountID = account.ID
 			event.AccountName = account.Name
 		}
+		event.StateFamily = string(openAIStateRejection(payload, message).Family)
 		event.ResilienceCategory = string(category)
 		appendOpsUpstreamError(c, event)
 	}
@@ -1968,6 +1978,11 @@ func (s *OpenAIGatewayService) nonStreamingTerminalFailureFailover(
 	message string,
 	canonicalModel ...string,
 ) *UpstreamFailoverError {
+	path := "native_sse"
+	if passthrough {
+		path = "passthrough_sse"
+	}
+	captureOpenAIStateRejection(c, account, payload, message, path, false, nil)
 	if account == nil || IsResponseCommitted(c) {
 		return nil
 	}
@@ -2348,6 +2363,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 						return passthroughReturn(resultWithUsage(), replayErr)
 					}
 				}
+				captureOpenAIStateRejection(c, account, dataBytes, failedMessage, "passthrough_sse", outputStarted, nil)
 				if outputStarted && !cyberHit {
 					if codexFailureTerminal && eventType == "error" {
 						// Wait for the authoritative response.failed before mutating

@@ -45,6 +45,10 @@ func resilienceAttemptFailed(ctx context.Context, accountID int64, failoverErr *
 	if !failoverErr.IsCapabilityStreamOnly() {
 		resilienceReportAttemptFailure(ctx, accountID, failoverErr)
 	}
+	if resilienceStateRejected(failoverErr) {
+		resilience.StateFrom(ctx).SetRecoveryOutcome("terminal_rejection")
+		return true
+	}
 	if resilienceContentRejected(failoverErr) {
 		resilience.StateFrom(ctx).SetRecoveryOutcome("terminal_rejection")
 		logger.FromContext(ctx).Info("resilience.content_policy_no_failover",
