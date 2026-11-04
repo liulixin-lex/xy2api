@@ -36,7 +36,7 @@
 - collab_call：efa=absent|empty|nonempty，分别取 EFAAbsent/EFAEmpty/EFANonEmpty。
 - collab_call_action：action=marker_added|vetoed|contradicted|uncovered，取四个动作计数。
 
-EFA 与 action 不增加联合字段，不做 EFA×action 联合标签。追加 DevTextRewrites 仅统计本次开发者/系统消息与 instructions 中精确字面串的实际替换次数（由出站 plan 冻结传给 restorer）；不新增指标。只有 conflict/invalid、Vetoed/Contradicted/Uncovered>0 或还原出错发 Warn resilience.collab_plaintext，带 account_id/group_id/model/client_version 及各计数，不存正文、密文、参数或原始错误。
+EFA 与 action 不增加联合字段，不做 EFA×action 联合标签。追加 DevTextRewrites 仅统计本次开发者/系统消息与 instructions 中精确字面串的实际替换次数（由出站 plan 冻结传给 restorer）；不新增指标，也不单独触发 Warn。只有 conflict/invalid、Vetoed/Contradicted/Uncovered>0 或还原出错发 Warn resilience.collab_plaintext，带 account_id/group_id/model/client_version 及各计数，不存正文、密文、参数或原始错误。
 
 ## 6. P0 状态族识别与观测
 

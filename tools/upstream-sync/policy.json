@@ -3519,15 +3519,15 @@
     },
     {
       "path": "backend/internal/service/openai_account_runtime_block_fastpath.go",
-      "value": "account.Platform == PlatformOpenAI && isOpenAIEncryptedContentRejectionPayload(responseBody)"
+      "value": "account.Platform == PlatformOpenAI && isOpenAIStateRejection(responseBody, \"\")"
     },
     {
       "path": "backend/internal/service/ratelimit_service.go",
-      "value": "account.Platform == PlatformOpenAI && isOpenAIEncryptedContentRejectionPayload(responseBody)"
+      "value": "account.Platform == PlatformOpenAI && isOpenAIStateRejection(responseBody, \"\")"
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
-      "value": "if isOpenAIEncryptedContentRejectionPayload(payload) || resilience.IsEncryptedContentRejection(\"\", message) {"
+      "value": "if isOpenAIStateRejection(payload, message) {"
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
@@ -3539,7 +3539,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_upstream_errors.go",
-      "value": "if isOpenAIEncryptedContentRejectionPayload(upstreamBody) || resilience.IsEncryptedContentRejection(\"\", upstreamMsg) {"
+      "value": "if isOpenAIStateRejection(upstreamBody, upstreamMsg) {"
     },
     {
       "path": "backend/internal/service/openai_gateway_upstream_errors.go",

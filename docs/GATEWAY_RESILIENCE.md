@@ -406,7 +406,7 @@ HTTP 流已向客户端输出可见内容后，快层确认账号发生读流出
 
 管理端网关韧性中的 `collaboration_plaintext.enabled` 默认关闭；`models` 是经过验证的实际出站模型清单，模型映射之后再匹配（去首尾空白、不分大小写精确匹配）。账号页的 `extra.openai_collaboration_plaintext` 仅布尔 true 生效；单账号关闭删除键、批量关闭写 false 都表示关闭。全局总开关、功能开关、模型、账号及 Codex UA/originator 全部满足才转换；ForceCodexCLI 不绕过真实客户端门。API Key 和 OAuth 均适用，仅原生 Responses HTTP，WS、透传、compact、协议桥接、摊平账号不转换。
 
-请求声明 collaboration 命名空间时，先判冲突再原子改名为 collaboration-xy，只删 spawn_agent/send_message/followup_task 的 message.encrypted。仅 applied 时，把顶层 instructions 与 developer/system 消息的文本（字符串或 input_text.text）里精确的 functions.collaboration. 同步替换成 functions.collaboration-xy.，避免寻址示例与声明失配；用户消息、工具输出和参数不替换。DevTextRewrites 记录本次精确字面串的实际替换次数，不新增指标。回程三种身份回声统一恢复 namespace=collaboration 和裸叶名，仅符合声明、message 为非空明文且没有密文否决的消息调用补 encrypted_function_args:[]。非空标记、gAAAA 前缀或无空白长 base64 等可疑形态否决补标记；早先非空证据持续到该尝试结束。wait/list 等同 namespace 工具只恢复名字；未知私有叶名恢复身份、计 uncovered、不补标记。
+请求声明 collaboration 命名空间时，先判冲突再原子改名为 collaboration-xy，只删 spawn_agent/send_message/followup_task 的 message.encrypted。仅 applied 时，把顶层 instructions 与 developer/system 消息的文本（字符串或 input_text.text）里精确的 functions.collaboration. 同步替换成 functions.collaboration-xy.，避免寻址示例与声明失配；用户消息、工具输出和参数不替换。DevTextRewrites 记录本次精确字面串的实际替换次数，仅作为异常 Warn 的字段，不单独触发 Warn、不新增指标。回程三种身份回声统一恢复 namespace=collaboration 和裸叶名，仅符合声明、message 为非空明文且没有密文否决的消息调用补 encrypted_function_args:[]。非空标记、gAAAA 前缀或无空白长 base64 等可疑形态否决补标记；早先非空证据持续到该尝试结束。wait/list 等同 namespace 工具只恢复名字；未知私有叶名恢复身份、计 uncovered、不补标记。
 
 流式、JSON、SSE→JSON 共用本次尝试的冻结 plan，不跨请求继承。恢复身份不安全时本地终止：未提交返回 502、已提交发送协议终态，不下发私有名，不经 failover 重放。不改 IDs、arguments、output 正文或输入历史，已有密文历史不修复。上游拒绝沿用原有错误路径，不靠拒绝文案触发转换。
 

@@ -12,7 +12,7 @@ import (
 )
 
 const openAICollabResponseKey = "openai_collaboration_response"
-const openAICollabRestoreMessage = "Unable to safely restore collaboration tool response"
+const openAICollabRestoreMessage = "unable to safely restore collaboration tool response"
 
 func (a *Account) IsOpenAICollaborationPlaintextEnabled() bool {
 	if a == nil || !a.IsOpenAI() {

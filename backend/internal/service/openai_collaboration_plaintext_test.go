@@ -107,6 +107,7 @@ func TestCollaborationForwardAPIKeyAndOAuth(t *testing.T) {
 			a.Extra["openai_collaboration_plaintext"] = true
 			a.Credentials["model_mapping"] = map[string]any{"inbound-alias": "gpt-5.4"}
 			body := []byte(strings.Replace(collabWiringBody, `"model":"gpt-5.4"`, `"model":"inbound-alias"`, 1))
+			body = []byte(strings.Replace(string(body), `"instructions":"test"`, `"instructions":"Call functions.collaboration.send_message"`, 1))
 			original := string(body)
 			c, recorder := newOpenAIAstraProRetryContext(nil)
 			c.Request.Header.Set("User-Agent", "codex_cli_rs/0.166.0")
@@ -117,10 +118,12 @@ func TestCollaborationForwardAPIKeyAndOAuth(t *testing.T) {
 			require.Equal(t, original, string(body), "attempt must not mutate handler's immutable input")
 			require.Equal(t, "collaboration-xy", gjson.GetBytes(upstream.lastBody, "tools.0.name").String())
 			require.False(t, gjson.GetBytes(upstream.lastBody, "tools.0.tools.0.parameters.properties.message.encrypted").Exists())
+			require.Contains(t, gjson.GetBytes(upstream.lastBody, "instructions").String(), "functions.collaboration-xy.send_message")
 			stats, ok := openAICodexCollabAttempt(c)
 			require.True(t, ok)
 			require.True(t, stats.Applied)
 			require.Equal(t, 1, stats.MarkerAdded)
+			require.Equal(t, 1, stats.DevTextRewrites)
 			require.Equal(t, "collaboration", gjson.Get(recorder.Body.String(), "output.0.namespace").String())
 			require.Equal(t, "send_message", gjson.Get(recorder.Body.String(), "output.0.name").String())
 			require.Equal(t, "[]", gjson.Get(recorder.Body.String(), "output.0.encrypted_function_args").Raw)
