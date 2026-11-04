@@ -6927,3 +6927,52 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
     - P3 中转状态类不改代码；
     - P4 收口与状态族相关的 400 契约缺口。
     - astra 审查中。
+
+## 2026-11-04 — 20261104-collab-plaintext-impl 实施与 0.5.3 发版原样归档
+
+### 当前交接状态原文（截至 21:58 UTC 发版后归档）
+
+- **Codex 协作消息明文通道与状态族观测实施（20261104-collab-plaintext-impl；2026-11-04 20:52 UTC；PR #196 已合并，0.5.3 版本准备中，部署与灰度未授权）**
+  - **背景**：“会话状态归属类报错”方案定稿后（见下一条），用户 11-04 指定 Claude 主持实施 Tier 1：P0 状态族请求级识别与观测（默认开）＋ P1′ 协作消息明文通道（默认关）。
+  - **目标**：用户追加要求是严格审查每个子 agent、逻辑闭合、精简（不加无用测试、兜底或影子模式），最终达到可上线。用户 11-04 选定“会话连续性”：历史协作调用的 `encrypted_function_args` 恰为 `[]` 时视同账号开关满足，仅限 API Key。
+  - **要求与约束**：
+    - 生产只读；测试 Key 只放环境变量。
+    - 用户 11-04 19:30 UTC 授权：确认具备上线条件后开 PR、合并并发版 0.5.3（macOS 没有机器时改用备用开发机）。部署、灰度与生产配置变更仍要单独授权。
+  - **已完成**：
+    - 集成分支 `feat/collab-plaintext-20261104` 已合入 origin/main 0.5.2，最终代码头 `9c0245a78`。
+    - PR #196 CI 全绿后普通合并（20:52 UTC 前）。
+    - 预检 2a/2b 通过：d0c7a8、c2a95e、b672e6 × gpt-6.1-sol、gpt-6-astra，Codex 0.166。
+    - 两路红队四轮均签字，无遗留 P0/P1。
+    - 门禁全部通过：
+      - 本机（`9c0245a78`）：vet、unit 67 个包、ci_gate -race 0 跳过、lint 0；
+      - 备用开发机（`da7ec7c62`，之后只改 unit 测试）：Linux unit 68 个包、Docker integration 60 个包；
+      - 前端（`ff4fc83a1`，与最终头的前端树相同）：lint、typecheck、vitest、build；
+      - docs consistency 与干净树 sync audit。
+    - 发版前真实端到端（`da7ec7c62` 构建，之后只改了测试；`deb7c5f4b` 上也跑过一轮）：
+      - d0c7a8、c2a95e 两个模型的父子委派与续轮都闭环；
+      - 关开关续轮：OpenAI provider 按连续性闭环，非 OpenAI provider 只观测；
+      - Warn、state_rejection、本地还原错误均为 0；
+      - c2 子 agent 两个模型闭环；
+      - b672e6 的生产账号不可调度，上游返回 502/503，没有结论。
+  - **未完成**（按顺序）：
+    1. 本 PR（`chore(release): prepare 0.5.3`）合并后，在合并提交上打 annotated tag `v0.5.3`（发版说明在本地 `implementation/RELEASE_NOTES_0.5.3.md`），核验 Release 附件、校验和与 GHCR 镜像；
+    2. 发版后用记忆 PR 补版本表并归档本任务；
+    3. 部署需单独授权；
+    4. 灰度按 `deploy/README.md` 六步执行，先开 d0c7a8、c2a95e；b672e6 待用户决定；OAuth 验证前不开；
+    5. 上线后按 `GATEWAY_RESILIENCE.md` §4.14 的口径做 48 小时与 7 天核对。
+  - **卡点与风险**：
+    - b672e6 的开→关续轮在账号 470 上两次遇到 cyber_policy，472 端到端无结论。
+    - provider 名不是 OpenAI 的 Codex 没有连续性，关账号开关对它等同硬回退。
+    - 模型写在正文里的私有别名不改写，是已知限制。
+  - **关键位置**：
+    - 本地 `.work/tasks/20261104-encrypted-state-breaks/implementation/`：STATUS.md、BRIEF_*、红队报告、门禁日志、PR_BODY.md；
+    - 同目录 `e2e/`：发版前端到端脚本与报告；
+    - Paseo 工作树 `collab-integration`。
+
+### 进行中的工作原文（14:35 UTC 开始）
+
+- **20261104-collab-plaintext-impl**（2026-11-04 14:35 UTC 开始，Claude 主持与集成）：按本地 `.work/tasks/20261104-encrypted-state-breaks/` 的 `FINAL_v3.md` 与 `HANDOFF_FINAL.md` 实施 Tier 1（P0 状态族识别与观测，默认开；P1′ 协作消息明文通道，默认关）。本地实施记录在同目录 `implementation/`（不入库）。
+  - 集成分支 `feat/collab-plaintext-20261104`（Paseo 工作树 `collab-integration`），基于 PR #194 头 `c96a488fb`；#194 合入后 rebase 到 main。
+  - 分工（用户 11-04 指定）：后端 gpt-6-astra xhigh 三路并行，前端 Opus high，预检 2a/2b 脚本 Opus xhigh；红队 astra xhigh 与 Opus xhigh 两路。
+  - 门禁：预检 2a/2b 两步都过，P1′ 才进 PR；任一不过，P1′ 首版不发并回报用户。授权：生产只读。推送、PR、合并、发版、部署、灰度未授权。
+  - 20:17 UTC：集成、四轮红队、全量门禁与发版前端到端完成，最终代码头 `9c0245a78`（已合入 0.5.2）。用户授权在确认具备上线条件后开 PR、合并并发版 0.5.3；部署与灰度不在授权内。现状与下一步见“当前交接状态”。

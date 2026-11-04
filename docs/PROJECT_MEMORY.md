@@ -6,42 +6,6 @@
 
 ## 当前交接状态
 
-- **Codex 协作消息明文通道与状态族观测实施（20261104-collab-plaintext-impl；2026-11-04 20:52 UTC；PR #196 已合并，0.5.3 版本准备中，部署与灰度未授权）**
-  - **背景**：“会话状态归属类报错”方案定稿后（见下一条），用户 11-04 指定 Claude 主持实施 Tier 1：P0 状态族请求级识别与观测（默认开）＋ P1′ 协作消息明文通道（默认关）。
-  - **目标**：用户追加要求是严格审查每个子 agent、逻辑闭合、精简（不加无用测试、兜底或影子模式），最终达到可上线。用户 11-04 选定“会话连续性”：历史协作调用的 `encrypted_function_args` 恰为 `[]` 时视同账号开关满足，仅限 API Key。
-  - **要求与约束**：
-    - 生产只读；测试 Key 只放环境变量。
-    - 用户 11-04 19:30 UTC 授权：确认具备上线条件后开 PR、合并并发版 0.5.3（macOS 没有机器时改用备用开发机）。部署、灰度与生产配置变更仍要单独授权。
-  - **已完成**：
-    - 集成分支 `feat/collab-plaintext-20261104` 已合入 origin/main 0.5.2，最终代码头 `9c0245a78`。
-    - PR #196 CI 全绿后普通合并（20:52 UTC 前）。
-    - 预检 2a/2b 通过：d0c7a8、c2a95e、b672e6 × gpt-6.1-sol、gpt-6-astra，Codex 0.166。
-    - 两路红队四轮均签字，无遗留 P0/P1。
-    - 门禁全部通过：
-      - 本机（`9c0245a78`）：vet、unit 67 个包、ci_gate -race 0 跳过、lint 0；
-      - 备用开发机（`da7ec7c62`，之后只改 unit 测试）：Linux unit 68 个包、Docker integration 60 个包；
-      - 前端（`ff4fc83a1`，与最终头的前端树相同）：lint、typecheck、vitest、build；
-      - docs consistency 与干净树 sync audit。
-    - 发版前真实端到端（`da7ec7c62` 构建，之后只改了测试；`deb7c5f4b` 上也跑过一轮）：
-      - d0c7a8、c2a95e 两个模型的父子委派与续轮都闭环；
-      - 关开关续轮：OpenAI provider 按连续性闭环，非 OpenAI provider 只观测；
-      - Warn、state_rejection、本地还原错误均为 0；
-      - c2 子 agent 两个模型闭环；
-      - b672e6 的生产账号不可调度，上游返回 502/503，没有结论。
-  - **未完成**（按顺序）：
-    1. 本 PR（`chore(release): prepare 0.5.3`）合并后，在合并提交上打 annotated tag `v0.5.3`（发版说明在本地 `implementation/RELEASE_NOTES_0.5.3.md`），核验 Release 附件、校验和与 GHCR 镜像；
-    2. 发版后用记忆 PR 补版本表并归档本任务；
-    3. 部署需单独授权；
-    4. 灰度按 `deploy/README.md` 六步执行，先开 d0c7a8、c2a95e；b672e6 待用户决定；OAuth 验证前不开；
-    5. 上线后按 `GATEWAY_RESILIENCE.md` §4.14 的口径做 48 小时与 7 天核对。
-  - **卡点与风险**：
-    - b672e6 的开→关续轮在账号 470 上两次遇到 cyber_policy，472 端到端无结论。
-    - provider 名不是 OpenAI 的 Codex 没有连续性，关账号开关对它等同硬回退。
-    - 模型写在正文里的私有别名不改写，是已知限制。
-  - **关键位置**：
-    - 本地 `.work/tasks/20261104-encrypted-state-breaks/implementation/`：STATUS.md、BRIEF_*、红队报告、门禁日志、PR_BODY.md；
-    - 同目录 `e2e/`：发版前端到端脚本与报告；
-    - Paseo 工作树 `collab-integration`。
 - **门槛 v3 实施（2026-11-04 14:50 UTC；PR #194 已合并，main `746ec14fc`；用户授权发版 0.5.2，版本准备中，未部署）**：分支 `feat/gate-v3-20261104`，CI 20 项全绿（pull_request 运行里 macOS `shell` 因排不到机器被取消，重跑后通过）。0.5.2 包含 #191–#194，迁移新增 289。部署需单独授权。
   - 范围：门槛 v3、判慢让位、P1-B、同站暂停、`usage_logs.attempt_first_output_ms`（迁移 289）、低倍率优先分组范围、前端；另含用户追加的会话状态两条约束：
     - 带密文片段的请求不软迁移，P1-B 退回连击规则，WS 增量轮沿用标记；
@@ -57,12 +21,12 @@
   - **评审**：astra r4–r15（r10 的 B1–B6、r11 首版范围收敛原生 HTTP、r12 清理旧绝对结论，r13 核对 SHA-256 签机制/红线 `reviews/astra_r13.md`）；用户定稿后的范围变更（A暂缓/P0并入/Tier1立项，仅改范围排期、机制/红线/§8 逐字未动）r14 复核发现回退措辞冲突、已按其原句改定，**r15 核对新哈希（FINAL_v3 `ec3a4b32…`、HANDOFF `1ec8a9da…`）后闭合签字** `reviews/astra_r15.md`。签字仅确认方案与交接文档闭合，**预检/实施/红队/上线验收均未过**。
   - **用户已定、待授权**：A 暂缓、P0 并入 Tier 1、Tier 1 立项已定；**待授权**预检 2a/2b（测试号/测试服务器）、推送/PR/合并/发版/灰度。测试 Key（分组 57）用户自建、本会话只在环境变量用未落盘。
   - 详见“进行中的工作”与本日志。
-  - （20:17 UTC 追记，collab-plaintext-impl）预检 2a/2b 已在实施任务中经用户授权完成，实施与发版进展见上方实施小节。
+  - （20:17 UTC 追记，collab-plaintext-impl）预检 2a/2b 已在实施任务中经用户授权完成；实施已随 0.5.3 发布（PR #196），实施记录已归档，遗留见“未结事项”。
 - **Claude 判慢让位红队 A r4（2026-11-03 13:20 UTC）**：`737e7c7e4` 的 r3 P1 已闭合，签字已追加至本地 `implementation/redteam_astra_r2.md`；原 overlay 与正式回归均新过旧失败，目标树干净。登记已原样归档；只读复核未改代码、未提交。
 
-### 版本与环境速览（2026-11-03：0.5.1 已发布）
+### 版本与环境速览（2026-11-04：0.5.3 已发布，生产状态以重新核实为准）
 
-- 当前产品版本 XY2API v0.5.1（2026-11-03 正式发布），Sub2API 兼容基线 0.2.15，迁移共 333 项（最后为 288，0.5.1 无新迁移）。
+- 最新产品版本 XY2API v0.5.3（2026-11-04 正式发布），Sub2API 兼容基线 0.2.15，迁移共 334 项（最后为 289，0.5.2 新增，0.5.3 无新迁移）。0.5.2、0.5.3 均未部署。
 - 生产：2026-11-03 只读核实运行 0.5.1（02:09 UTC 上线）；`ops_monitoring_enabled=true`，门槛策略第 23 版（04:20 UTC），五个 OpenAI 门槛组（A–E）均启用质量门槛与利润门，低倍率优先已开。外部状态以重新核实为准。
 - 预上线主机仍运行 0.4.2 的浸泡候选 `0ad63fab7`，换成正式镜像需要授权。
 - 上游：Sub2API v0.2.17 已发布、尚未同步（2026-10-19 定时同步的 prepare 失败），需按 [`UPSTREAM_SYNC.md`](UPSTREAM_SYNC.md) 另开任务。
@@ -76,6 +40,8 @@
 
 | 版本 | 日期 | 发布提交（相关 PR） | 主要内容 | 迁移 |
 |---|---|---|---|---|
+| 0.5.3 | 2026-11-04 | `92830a0d2`（#196、#197） | 会话状态类拒绝按请求级处理与观测（`state_rejection`）；Codex 协作消息明文通道（默认关闭、按站灰度），见 [`GATEWAY_RESILIENCE.md`](GATEWAY_RESILIENCE.md) §4.12、§4.14 | — |
+| 0.5.2 | 2026-11-04 | `f204d00bb`（#191、#192、#193、#194、#195） | OpenAI 分组质量门槛 v3、判慢让位与急性保护；Claude 判慢让位与粘性迁出；账号页近期表现第 2 版；输出后带内失败补记；会话状态保护，见 [`GROUP_QUALITY_GATE.md`](GROUP_QUALITY_GATE.md) | 289 |
 | 0.5.1 | 2026-11-03 | `afaef43b0`（#184、#185、#186、#187、#188、#189） | 分组质量门槛第二版（用户可见首字、两档与档位记忆、限时观察、慢号迁出）；GPT 报错补漏（订阅共享额度、加密内容、内容拒绝口径、请求兼容 400、Grok 与 alpha search 收尾）；输出后断流补记为上游失败尝试并改归因；账号页状态列与客服气泡样式。见 [`GATEWAY_RESILIENCE.md`](GATEWAY_RESILIENCE.md)、[`GROUP_QUALITY_GATE.md`](GROUP_QUALITY_GATE.md)、[`USAGE_METRICS.md`](USAGE_METRICS.md) | — |
 | 0.5.0 | 2026-11-01 | `84e610681`（#181、#182、#183） | 悬浮在线客服与客户服务工单整合；账号管理页精简与信息层级优化 | 287、288 |
 | 0.4.16 | 2026-11-01 | `dcd47423e`（#175、#176、#177、#178、#179） | 分组质量门槛、兜底服务组计费、满载借用与 WS 粘性；Claude 缓存卡片、用量文案和工具缓存标记，见 [`GROUP_QUALITY_GATE.md`](GROUP_QUALITY_GATE.md)、[`ANTHROPIC_CACHE_TTL.md`](ANTHROPIC_CACHE_TTL.md) | — |
@@ -99,6 +65,15 @@
 
 ### 未结事项（2026-10-31 汇总；动手前重新核实）
 
+- **Codex 协作明文通道与状态族（0.5.3）**：
+  - 部署需用户授权。
+  - 灰度按 `deploy/README.md`“Codex 协作消息明文通道”六步执行，先开 d0c7a8、c2a95e（gpt-6.1-sol、gpt-6-astra，API Key）。
+  - b672e6 待用户决定：账号 470 的开→关续轮两次遇到 cyber_policy，472 在发版前端到端时不可调度。
+  - OAuth 验证前不开。
+  - 上线后按 `GATEWAY_RESILIENCE.md` §4.14 做 48 小时与 7 天核对；Codex 升级后按 client_version 复核。
+  - 已知限制：模型写在正文里的私有别名不改写。
+  - 实施记录已归档，本地过程稿在 `.work/tasks/20261104-encrypted-state-breaks/implementation/`。
+- **Release 前端构建内存临界（0.5.3 发版时发现）**：`release.yml` 的 build-frontend 用 Runner 上 Node 20 的默认堆（约 2 GB）。0.5.3 第 1 次运行 `vue-tsc -b` OOM，重跑通过；本机在 2 GB 上限下峰值 RSS 2.31 GB。建议在 Build frontend 步骤加 `NODE_OPTIONS=--max-old-space-size=4096`（改动需用户授权）。
 - **OpenAI 门槛 v3、判慢让位与急性保护（2026-11-04 定稿，待实施）**：用户 11-04 批准五轮决策（任务 20261103-gpt-errors-gate-cache 第二议题，记录已归档）。方案与交接在本地 `.work/tasks/20261103-gpt-errors-gate-cache/`（不入库）：`PLAN_T2_FINAL.md` 是唯一依据，`HANDOFF.md` 写工作包 WP1–WP11、改动点（基于 `c89f8e66d`）、门禁与角色。用户 11-04 决定一次开发、一次发版，不分批。范围包括 `usage_logs` 尝试级可见首字列 `attempt_first_output_ms`、判慢 30% 加递增时长与档内后排、P1-B 输出后首败改绑、同站断流暂停、v3 评估与分档、统一迁出、低倍率优先按组、高级调度分档和前端；一个集成分支、一个 PR。发版前与开发并行做只读核对（用端到端首字近似新列复核初始值，≥4 周回测回滚线，需会话内授权），报告经用户确认后发版；上线后 48 小时用新列核对，之后 7 天验收。用户将交另一主 agent 分派子 agent 实施；推送、PR、合并、发版、部署与生产查询逐次授权。第一议题的 P0 运维建议（本地 `FINAL.md` §7）用户未单独答复，现网状态未核实。
 - **公开 GPT 分组门槛标定（2026-11-03，05:15 UTC 定稿）**：线上门槛策略第 23 版（04:20 UTC）为主力组 10%/30000/15000、测试组 10%/25000/13000、专属组 50 10%/25000/13000、企业专线组 8%/20000/10000、微稳定组 10%/30000/20000，低倍率优先已开。目标是使用记录页首字绿（语义首字 <10s）且缓存命中高。定稿（含 astra 第 3 轮）：所有启用门槛的组首字熔断 30000；快档线主力、测试、企业专线、专属组 15000，微稳定组维持 20000（迁出后几次请求上游成本在该组约翻倍，最便宜的组以缓存和成本优先）；错误率 10%（企业专线 8%）。企业专线组维持不含页面常黄的高缓存号，其余组保留缓存最好的两个号。分级：A 企业专线（8%，成员更严）、B 主力与测试、C 微稳定（快档 20s）。撤回此前 20000/10000 的分级建议和“B 档移出页面常黄号”的成员建议。依据（03:09–04:53 UTC）：换号后首个请求缓存命中仅 30–54%，页面黄 15–40%（整体约 12%），约两次请求后恢复。熔断造成的换号最差（页面黄 40%，30 分钟内再换号 75%），所以熔断线保持 30s，由迁出来引导。同模型同推理档下，快档线 10/15/20s 的三个组页面黄 0/13.6/36.3%，缓存 75.7/78.7/85.6%。快档线低于组内最快号的 p90 时快档为空，迁出失效：当天最快约 11s，10s 线让企业专线组失去引导。约 55% 的换号不是门槛触发，多发生在计划内首输出截止换号之后（全局 `budget.first_output_timeout_seconds`），这是下一步可分析的杠杆。配置后 24 小时只读复核需会话内授权。
 - **分组质量门槛第二版（0.5.1）**：上线 24 小时后按 OpenSpec `group-quality-gate-v2-20261102` design §7 只读复核，需要用户在会话内授权；号池只有 1–2 个号的五个组的可用账号数告警，待用户在管理端配置（组号见本地交接包）。档位记忆与观察状态只在进程内，重启后重新积累。
@@ -121,7 +96,7 @@
 - **工单与 2FA**：真实 OpenAI 网页登录/MFA 只有 mock；启用 2FA 须部署 Worker、固定运行时和加密恢复目录，回退前须解决不确定任务并保留密钥与恢复日志。
 - **安全与依赖**：vue-i18n 安全例外 2026-11-27 到期前处理；两台主机的 SSH 密码曾出现在对话中，建议改用密钥并更换；生产 settings 中的明文代理凭据建议轮换；`.github/SECURITY.md` 仍指向上游 Sub2API 的报告渠道，应改为本仓库（该文件未分类，改动需同时登记 `policy.json`）。
 - **待用户决定**：Codex 历史联网搜索导致 502（2026-10-17 诊断，原文已归档）——恢复映射或调整白名单，代码改进前先核实 0.4.0 的 `resilience_web_search_replay` 是否覆盖 apikey 中转账号；XY-image 0.0.17 先交接并经用户确认；远端保留的 3 个含未合入提交的分支（`feat/native-stream-recovery-20260930`、`fix/native-stream-concurrency-20261001`、`fix/signature-retry-preserve-tool-result-media`）是否删除；`tools/gateway-resilience/` 下 `staging/`、`fault-upstream/`、`cdn-sim/` 发布演练脚手架 0.4.6 后未再使用，是否删除。
-- **测试稳定性**：CI 偶发 `TestCompatPreludeCommentHeartbeatStillAllowsFailover/enabled` 等心跳计时用例；2026-10-28 已放宽一组截止时间，其余未定位。`TestGatewayServiceRecordUsage_PeakRateAffectsTokenModeImageOutputTokens` 与 OpenAI 同名用例把峰值时段写成 00:00–23:59，而判定区间是 `[PeakStart, PeakEnd)`，在 23:59 那一分钟运行会失败（2026-10-31 本地遇到，干净 main 相同）。`-race` 下两条用例偶发数据竞争，都在测试代码里，干净 main 同样能复现（2026-11-02）：`TestAuthServiceBindEmailIdentity_AllowsOnlyOneConcurrentAliasVariant` 是测试替身的竞争，10 次约 2 次；`TestRecordCyberPolicyEvent_RuntimeSnapshotRefreshFailureKeepsStaleScope` 在构造函数启动后台 worker 之后才改 `runtimeCacheTTL`。
+- **测试稳定性**：CI 偶发 `TestCompatPreludeCommentHeartbeatStillAllowsFailover/enabled` 等心跳计时用例；2026-10-28 已放宽一组截止时间，其余未定位。`TestGatewayServiceRecordUsage_PeakRateAffectsTokenModeImageOutputTokens` 与 OpenAI 同名用例把峰值时段写成 00:00–23:59，而判定区间是 `[PeakStart, PeakEnd)`，在 23:59 那一分钟运行会失败（2026-10-31 本地遇到，干净 main 相同）。`-race` 下两条用例偶发数据竞争，都在测试代码里，干净 main 同样能复现（2026-11-02）：`TestAuthServiceBindEmailIdentity_AllowsOnlyOneConcurrentAliasVariant` 是测试替身的竞争，10 次约 2 次；`TestRecordCyberPolicyEvent_RuntimeSnapshotRefreshFailureKeepsStaleScope` 在构造函数启动后台 worker 之后才改 `runtimeCacheTTL`。`TestGatewayConvertCancelBeforeOutputBillsNothing` 偶发 3 秒超时（2026-11-04，记忆 PR #198 的 push CI）。原因在测试替身：上游 body 是 `io.NopCloser(pipe)`，客户端取消时关 body 不起作用，只有 `cancel()` 抢在读循环处理完首个事件之前才能通过。在 `cancel()` 前加 200ms 延迟可稳定复现。生产不受影响：真实 body 是 `cancelOnCloseBody`，`Close` 会先取消本次请求，阻塞中的读随即返回。修法：让替身的 `Close` 关闭 pipe。
 - **仓库外环境收尾**：测试服务器的候选镜像、浸泡与演练目录、`xy2api_upgrade` 库按 staging-validation §11 清理；预上线主机的两份切换前备份在正式部署后删除。
 
 ## 进行中的工作
@@ -131,12 +106,6 @@
   - 下一步：只重跑取消的检查；全绿后固定 head 普通合并，annotated `v0.5.2` 指向合并提交（正文保留 Markdown），等待 Release 并核验原生包、校验和及镜像。
   - 保留主工作区和其它工作树的既有改动；此次只在版本工作树维护发版记忆。部署及生产配置不在授权范围。
   - 17:40 UTC：用户授权 Linux 优先、可用备用开发机执行发布验证。把必需 `shell` job 迁到 Ubuntu，保留 Apple 脚本语法检查及全部 Linux 部署策略测试；Apple 专属生命周期测试转为独立手动 macOS workflow。镜像仍为 Linux 双架构，原生包继续交叉编译。备用开发机首次连接超时，短重试后可用 GitHub Ubuntu runner 完成。
-
-- **20261104-collab-plaintext-impl**（2026-11-04 14:35 UTC 开始，Claude 主持与集成）：按本地 `.work/tasks/20261104-encrypted-state-breaks/` 的 `FINAL_v3.md` 与 `HANDOFF_FINAL.md` 实施 Tier 1（P0 状态族识别与观测，默认开；P1′ 协作消息明文通道，默认关）。本地实施记录在同目录 `implementation/`（不入库）。
-  - 集成分支 `feat/collab-plaintext-20261104`（Paseo 工作树 `collab-integration`），基于 PR #194 头 `c96a488fb`；#194 合入后 rebase 到 main。
-  - 分工（用户 11-04 指定）：后端 gpt-6-astra xhigh 三路并行，前端 Opus high，预检 2a/2b 脚本 Opus xhigh；红队 astra xhigh 与 Opus xhigh 两路。
-  - 门禁：预检 2a/2b 两步都过，P1′ 才进 PR；任一不过，P1′ 首版不发并回报用户。授权：生产只读。推送、PR、合并、发版、部署、灰度未授权。
-  - 20:17 UTC：集成、四轮红队、全量门禁与发版前端到端完成，最终代码头 `9c0245a78`（已合入 0.5.2）。用户授权在确认具备上线条件后开 PR、合并并发版 0.5.3；部署与灰度不在授权内。现状与下一步见“当前交接状态”。
 
 - **20261104-gate-v3-impl**（2026-11-04 09:35 UTC 开始，Claude 主持与集成）：按本地 `.work/tasks/20261103-gpt-errors-gate-cache/` 的 `PLAN_T2_FINAL.md` 与 `HANDOFF.md` 实施门槛 v3、判慢让位与急性保护，一次开发、一次发版。本地实施记录在同目录 `implementation/`（不入库）。
   - 集成分支 `feat/gate-v3-20261104`（Paseo 工作树 `gate-v3-integration`，基于 origin/main `c89f8e66d`）。契约提交 `f9edba129`：档位常量改名为 `GroupQualityGateTierPass`/`Retest`/`Fail`，门槛视图加 `MigrationTarget`，OpenSpec `group-quality-gate-v3-20261104`（design §5 为各路共用的接口契约）。
@@ -1363,3 +1332,19 @@ pnpm --dir frontend run build
 - 验证：`check_docs_consistency.py`、干净树 `sync.py audit`；CI。
 - 卡点/风险：无。
 - 下一步：合并后在合并提交上打 annotated tag `v0.5.3`，核验 Release；发版后用记忆 PR 补版本表并归档本任务。部署与灰度另行授权。
+
+### 2026-11-04 21:58 UTC — 20261104-collab-plaintext-impl — v0.5.3 发布完成，任务归档
+
+- 请求/目标：按用户 19:30 UTC 授权，合并 PR 并发版 0.5.3；部署与灰度不在授权内。
+- 开始状态：PR #196 已于 20:49 UTC 合并（`f8aa06f75`）。
+- 完成操作：
+  - 版本准备 PR #197 在 CI 通过后普通合并（`92830a0d2`）。
+  - annotated tag `v0.5.3` 指向该合并提交，发版说明写在 tag 正文（`--cleanup=verbatim`）。
+  - Release 41915422743 第 1 次运行时，build-frontend 的 `vue-tsc -b` Node 堆 OOM，没有产出任何发布物；`gh run rerun --failed` 后通过。
+  - 核验：Release 非 draft、非 prerelease，标为 Latest；5 个包加 checksums.txt，sha256 全部一致；darwin_arm64 二进制的构建信息（只读，未执行）为 `92830a0d2`、未修改、release 构建；GHCR 的 `0.5.3`、`latest`、`0.5`、`0` 为同一摘要（`sha256:d97c2bfa1536…`），含 linux/amd64 与 linux/arm64，镜像标签 revision 为 `92830a0d2`、version 为 0.5.3；tag 上的 CI（8 项，含 macOS shell）与 Security Scan 通过。
+  - 本任务在“当前交接状态”的小节和“进行中的工作”的条目已原样移到归档文件；遗留并入“未结事项”。
+  - 版本表补登 0.5.2 行：0.5.2 发版 agent 的发版后记录只留在共享工作区，没有提交。
+- 修改文件：本文件与 `PROJECT_MEMORY_ARCHIVE.md`。
+- 验证：`check_docs_consistency.py`、干净树 `sync.py audit`；CI。
+- 卡点/风险：Release 前端构建内存临界；本 PR 的 push CI 遇到一次测试替身竞态导致的偶发失败，根因已定位、与 0.5.3 无关。两项都见“未结事项”。
+- 下一步：部署与灰度待用户授权，见“未结事项”。
