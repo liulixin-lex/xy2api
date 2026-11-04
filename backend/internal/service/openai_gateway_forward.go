@@ -27,11 +27,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	previousResponse := gjson.GetBytes(body, "previous_response_id")
 	collabStatefulRequest := gjson.GetBytes(body, "store").Bool() ||
 		(previousResponse.Exists() && previousResponse.Type != gjson.Null && strings.TrimSpace(previousResponse.String()) != "")
-	// Reset before any early return so failover attempts never inherit a plan.
-	c.Set(openAICollabResponseKey, nil)
-	c.Set(codexCollabAttemptContextKey, nil)
 	defer func() { s.finishCacheDiagnostic(c, body, result) }()
 	if c != nil {
+		// Reset before any early return so failover attempts never inherit a plan.
+		c.Set(openAICollabResponseKey, nil)
+		c.Set(codexCollabAttemptContextKey, nil)
 		c.Set("openai_cache_diagnostic", nil)
 	}
 	// Validate the original request before compatibility filters can discard an

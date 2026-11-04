@@ -3522,6 +3522,10 @@
       "value": "account.Platform == PlatformOpenAI && isOpenAIStateRejection(responseBody, \"\")"
     },
     {
+      "path": "backend/internal/resilience/state_rejection.go",
+      "value": "func ClassifyStateRejection(code, message string) StateRejection {"
+    },
+    {
       "path": "backend/internal/service/ratelimit_service.go",
       "value": "account.Platform == PlatformOpenAI && isOpenAIStateRejection(responseBody, \"\")"
     },

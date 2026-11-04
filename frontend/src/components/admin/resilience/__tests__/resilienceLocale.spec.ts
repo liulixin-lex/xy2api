@@ -10,7 +10,8 @@ const dynamicKeys = [
     .flatMap((k) => [`admin.resilience.settings.switches.${k}`, `admin.resilience.settings.switches.${k}Hint`]),
   ...['balancePause', 'codexRetryAfterCap', 'learnTtl'].flatMap((k) => [`admin.resilience.settings.fields.${k}`, `admin.resilience.settings.fields.${k}Hint`]),
   'admin.resilience.explain.reasons.capability_stream_only',
-  'admin.resilience.panel.metrics.pre_created_delta'
+  'admin.resilience.panel.metrics.pre_created_delta',
+  ...['collab_plaintext', 'collab_call', 'collab_call_action', 'state_rejection'].map((k) => `admin.resilience.panel.metrics.${k}`)
 ]
 
 function lookup(messages: unknown, key: string): unknown {

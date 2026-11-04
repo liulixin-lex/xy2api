@@ -44,7 +44,7 @@ EFA、message 形态与 action 各为边际计数，不增加联合字段或联�
 
 ## 6. P0 状态族识别与观测
 
-请求级决策与有限修复分离。`ClassifyStateRejection(code, type, message)` 保留 v3 窄边界：专用 `client_tool_continuation_unavailable` code 或旧 `IsEncryptedContentRejection(code, message)` 命中；其余仅 code 为空时允许 S1 完整短语 `opaque conversation state` / `unrecognized conversation state` 和 S2 完整短语 `encrypted content is invalid for this conversation`。type 本身不作为证据。非空 server/rate-limit code 不因 S1/S2 文案降成请求错误；旧加密解密/校验拒绝仍优先。`Encrypted` 恒等旧谓词结果，仅用于诊断，不扩展修复资格。
+请求级决策与有限修复分离。`ClassifyStateRejection(code, message)` 保留 v3 窄边界：专用 `client_tool_continuation_unavailable` code 或旧 `IsEncryptedContentRejection(code, message)` 命中；其余仅 code 为空时允许 S1 完整短语 `opaque conversation state` / `unrecognized conversation state` 和 S2 完整短语 `encrypted content is invalid for this conversation`。type 本身不作为证据。非空 server/rate-limit code 不因 S1/S2 文案降成请求错误；旧加密解密/校验拒绝仍优先。`Encrypted` 恒等旧谓词结果，仅用于诊断，不扩展修复资格。
 
 分类命中统一为 `CLIENT_ERROR`，`Result.StateFamily` 按识别优先级区分 `relay_state`、`conversation_invalid`、`function_output`、`agent_message`、`reasoning`、`other_encrypted` 六个家族。旧加密谓词命中时 reason 保持 `encrypted_content`，其余使用 `conversation_state`。
 
