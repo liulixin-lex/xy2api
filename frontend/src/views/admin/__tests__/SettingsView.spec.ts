@@ -263,6 +263,17 @@ vi.mock("vue-i18n", async () => {
 });
 
 const AppLayoutStub = { template: "<div><slot /></div>" };
+// 低倍率优先“指定分组”的分组多选：列出候选分组，点击即选中。
+const GroupSelectorStub = defineComponent({
+  props: { modelValue: { type: Array, default: () => [] }, groups: { type: Array, default: () => [] }, platform: String },
+  emits: ["update:modelValue"],
+  setup(props, { emit }) {
+    return () =>
+      h("div", { "data-testid": "group-selector-stub", "data-platform": props.platform }, (props.groups as { id: number; name: string }[]).map((group) =>
+        h("button", { type: "button", "data-group": group.id, onClick: () => emit("update:modelValue", [...(props.modelValue as number[]), group.id]) }, group.name),
+      ));
+  },
+});
 const ToggleStub = defineComponent({
   props: {
     modelValue: {
@@ -562,6 +573,7 @@ function mountView() {
         PaymentProviderDialog: true,
         GroupBadge: true,
         GroupOptionItem: true,
+        GroupSelector: GroupSelectorStub,
         ShareSchedulingSettings: true,
         GatewayResilienceSettings: true,
         ProxySelector: true,
@@ -1749,6 +1761,63 @@ describe("admin SettingsView payment visible method controls", () => {
       weightedModeText.indexOf("调度权值覆盖"),
     );
     expect(weightedModeText).toContain("计费倍率");
+  });
+
+  it("limits low-rate priority to selected OpenAI groups and warns that none selected means off", async () => {
+    getGroups.mockResolvedValue([
+      { id: 18, name: "主力", platform: "openai", status: "active", subscription_type: "standard" },
+      { id: 7, name: "Claude", platform: "anthropic", status: "active", subscription_type: "standard" },
+      { id: 53, name: "企业", platform: "openai", status: "inactive", subscription_type: "standard" },
+    ]);
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, openai_low_upstream_rate_priority_enabled: true });
+    const wrapper = mountView();
+    await flushPromises();
+
+    const scope = wrapper.get('[data-testid="openai-low-rate-priority-scope"]');
+    expect(scope.get<HTMLInputElement>('[data-testid="openai-low-rate-priority-scope-all"]').element.checked).toBe(true);
+    expect(scope.find('[data-testid="openai-low-rate-priority-groups"]').exists()).toBe(false);
+
+    await scope.get('[data-testid="openai-low-rate-priority-scope-groups"]').setValue(true);
+    const selector = wrapper.get('[data-testid="openai-low-rate-priority-groups"]');
+    expect(selector.findAll("button").map((button) => button.attributes("data-group"))).toEqual(["18", "53"]);
+    expect(wrapper.get('[data-testid="openai-low-rate-priority-groups-empty"]').text()).toBe("admin.settings.openaiExperimentalScheduler.lowRatePriorityScopeEmpty");
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({
+      openai_low_upstream_rate_priority_scope: "groups",
+      openai_low_upstream_rate_priority_group_ids: [],
+    }));
+
+    await selector.get('[data-group="53"]').trigger("click");
+    await selector.get('[data-group="18"]').trigger("click");
+    expect(wrapper.find('[data-testid="openai-low-rate-priority-groups-empty"]').exists()).toBe(false);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({
+      openai_low_upstream_rate_priority_scope: "groups",
+      openai_low_upstream_rate_priority_group_ids: [18, 53],
+    }));
+  });
+
+  it("loads a stored group scope and keeps the default scope as all", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      openai_low_upstream_rate_priority_enabled: true,
+      openai_low_upstream_rate_priority_scope: "groups",
+      openai_low_upstream_rate_priority_group_ids: [18],
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    expect(wrapper.get<HTMLInputElement>('[data-testid="openai-low-rate-priority-scope-groups"]').element.checked).toBe(true);
+    expect(wrapper.find('[data-testid="openai-low-rate-priority-groups-empty"]').exists()).toBe(false);
+    await wrapper.get('[data-testid="openai-low-rate-priority-scope-all"]').setValue(true);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({
+      openai_low_upstream_rate_priority_scope: "all",
+      openai_low_upstream_rate_priority_group_ids: [18],
+    }));
   });
 
   it("passes translated upload and remove labels to the payment help image uploader", async () => {

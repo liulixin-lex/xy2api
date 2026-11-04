@@ -1363,6 +1363,13 @@ export default {
         description: '默认关闭。开启后仅影响本网关在 OpenAI 账号间的实验性调度选择逻辑，不代表上游 OpenAI 官方能力。',
         lowRatePriorityTitle: '低倍率优先',
         lowRatePriorityDescription: '开启后优先选择计费倍率较低的账号；倍率相同时，再比较账号优先级和当前负载等。启用实验调度策略后，此开关不生效。',
+        lowRatePriorityScopeTitle: '适用范围',
+        lowRatePriorityScopeDescription: '选“指定分组”时，只在所选的 OpenAI 分组内按倍率排序。开了质量门槛的分组只在同一质量档内按倍率排序，不跨档。',
+        lowRatePriorityScope: {
+          all: '全部分组',
+          groups: '指定分组'
+        },
+        lowRatePriorityScopeEmpty: '未选择分组，等于关闭低倍率优先。',
         oauthRateTitle: 'OAuth 调度参考倍率',
         oauthRatePriorityDescription: 'OAuth 账号按此参考倍率参与低倍率优先排序；留空时使用各自的账号倍率。API Key 账号优先使用有效探测倍率，无有效探测时使用账号倍率。',
         oauthRateWeightedDescription: '计算“计费倍率”得分时，OAuth 账号使用此参考倍率；留空时使用各自的账号倍率。API Key 账号优先使用有效探测倍率，无有效探测时使用账号倍率。',

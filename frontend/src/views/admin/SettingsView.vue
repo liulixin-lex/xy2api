@@ -5136,6 +5136,63 @@
                 />
               </div>
 
+              <!-- 低倍率优先的适用范围：全部分组 / 指定的 OpenAI 分组；指定但未选分组等于关闭 -->
+              <div
+                v-if="!form.openai_advanced_scheduler_enabled && form.openai_low_upstream_rate_priority_enabled"
+                class="border-t border-gray-100 pt-5 dark:border-dark-700"
+                data-testid="openai-low-rate-priority-scope"
+              >
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+                  <div class="min-w-0">
+                    <p id="openai-low-rate-priority-scope-label" class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {{ t("admin.settings.openaiExperimentalScheduler.lowRatePriorityScopeTitle") }}
+                    </p>
+                    <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.openaiExperimentalScheduler.lowRatePriorityScopeDescription") }}
+                    </p>
+                  </div>
+                  <div
+                    role="radiogroup"
+                    aria-labelledby="openai-low-rate-priority-scope-label"
+                    class="flex shrink-0 items-center gap-4"
+                  >
+                    <label
+                      v-for="scope in LOW_RATE_PRIORITY_SCOPES"
+                      :key="scope"
+                      class="flex cursor-pointer items-center gap-2 whitespace-nowrap"
+                    >
+                      <input
+                        v-model="form.openai_low_upstream_rate_priority_scope"
+                        type="radio"
+                        :value="scope"
+                        class="h-4 w-4 text-primary-600"
+                        :data-testid="`openai-low-rate-priority-scope-${scope}`"
+                      />
+                      <span class="text-sm text-gray-700 dark:text-gray-300">
+                        {{ t(`admin.settings.openaiExperimentalScheduler.lowRatePriorityScope.${scope}`) }}
+                      </span>
+                    </label>
+                  </div>
+                </div>
+                <template v-if="form.openai_low_upstream_rate_priority_scope === 'groups'">
+                  <GroupSelector
+                    v-model="form.openai_low_upstream_rate_priority_group_ids"
+                    class="mt-3"
+                    :groups="openaiGroups"
+                    platform="openai"
+                    data-testid="openai-low-rate-priority-groups"
+                  />
+                  <p
+                    v-if="!form.openai_low_upstream_rate_priority_group_ids.length"
+                    class="mt-2 text-xs text-amber-600 dark:text-amber-400"
+                    role="status"
+                    data-testid="openai-low-rate-priority-groups-empty"
+                  >
+                    {{ t("admin.settings.openaiExperimentalScheduler.lowRatePriorityScopeEmpty") }}
+                  </p>
+                </template>
+              </div>
+
               <div
                 v-if="!form.openai_advanced_scheduler_enabled && form.openai_low_upstream_rate_priority_enabled"
                 class="flex flex-col items-stretch gap-3 border-t border-gray-100 pt-5 sm:flex-row sm:items-start sm:justify-between sm:gap-6 dark:border-dark-700"
@@ -9187,6 +9244,7 @@ import type {
   UpdateSettingsRequest,
   DefaultSubscriptionSetting,
   DefaultPlatformQuotasMap,
+  LowRatePriorityScope,
   OpenAIFastPolicyRule,
   WeChatConnectMode,
   WebSearchEmulationConfig,
@@ -9227,6 +9285,7 @@ import PaymentProviderList from "@/components/payment/PaymentProviderList.vue";
 import PaymentProviderDialog from "@/components/payment/PaymentProviderDialog.vue";
 import GroupBadge from "@/components/common/GroupBadge.vue";
 import GroupOptionItem from "@/components/common/GroupOptionItem.vue";
+import GroupSelector from "@/components/common/GroupSelector.vue";
 import Toggle from "@/components/common/Toggle.vue";
 import ProxySelector from "@/components/common/ProxySelector.vue";
 import ImageUpload from "@/components/common/ImageUpload.vue";
@@ -9388,6 +9447,9 @@ const adminApiKeyMasked = ref("");
 const adminApiKeyOperating = ref(false);
 const newAdminApiKey = ref("");
 const subscriptionGroups = ref<AdminGroup[]>([]);
+// 低倍率优先“指定分组”的候选，只列 OpenAI 分组。
+const openaiGroups = ref<AdminGroup[]>([]);
+const LOW_RATE_PRIORITY_SCOPES: LowRatePriorityScope[] = ["all", "groups"];
 
 // Upstream billing probe state
 const upstreamBillingProbeLoading = ref(true);
@@ -9947,6 +10009,8 @@ type SettingsForm = Omit<
   google_oauth_client_secret: string;
   force_email_on_third_party_signup: boolean;
   openai_low_upstream_rate_priority_enabled: boolean;
+  openai_low_upstream_rate_priority_scope: LowRatePriorityScope;
+  openai_low_upstream_rate_priority_group_ids: number[];
   openai_oauth_scheduling_rate_multiplier: number | "" | null;
   openai_advanced_scheduler_enabled: boolean;
   openai_advanced_scheduler_sticky_weighted_enabled: boolean;
@@ -10204,6 +10268,8 @@ const form = reactive<SettingsForm>({
   // 分组隔离
   allow_ungrouped_key_scheduling: false,
   openai_low_upstream_rate_priority_enabled: false,
+  openai_low_upstream_rate_priority_scope: "all",
+  openai_low_upstream_rate_priority_group_ids: [],
   openai_oauth_scheduling_rate_multiplier: 1,
   openai_advanced_scheduler_enabled: false,
   openai_advanced_scheduler_sticky_weighted_enabled: false,
@@ -11460,15 +11526,17 @@ async function loadSettings() {
   }
 }
 
-async function loadSubscriptionGroups() {
+async function loadGroupOptions() {
   try {
     const groups = await adminAPI.groups.getAll();
     subscriptionGroups.value = groups.filter(
       (group) =>
         group.subscription_type === "subscription" && group.status === "active",
     );
+    openaiGroups.value = groups.filter((group) => group.platform === "openai");
   } catch (_error: unknown) {
     subscriptionGroups.value = [];
+    openaiGroups.value = [];
   }
 }
 
@@ -11971,6 +12039,11 @@ async function saveSettings() {
         form.payment_alipay_mobile_precreate_deep_link,
       openai_low_upstream_rate_priority_enabled:
         form.openai_low_upstream_rate_priority_enabled,
+      openai_low_upstream_rate_priority_scope:
+        form.openai_low_upstream_rate_priority_scope,
+      openai_low_upstream_rate_priority_group_ids: [
+        ...new Set(form.openai_low_upstream_rate_priority_group_ids),
+      ].sort((a, b) => a - b),
       openai_oauth_scheduling_rate_multiplier:
         oauthSchedulingRate === "" ? null : oauthSchedulingRate,
       openai_advanced_scheduler_enabled: form.openai_advanced_scheduler_enabled,
@@ -13167,7 +13240,7 @@ async function handleDeleteProvider() {
 
 onMounted(() => {
   loadSettings();
-  loadSubscriptionGroups();
+  loadGroupOptions();
   loadAdminApiKey();
   loadUpstreamBillingProbeSettings();
   loadOllamaCloudUsageSettings();
