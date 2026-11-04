@@ -2825,6 +2825,26 @@
       "value": "nullInt64(log.AttemptFirstOutputMs)"
     },
     {
+      "path": "backend/internal/service/resilience_post_output.go",
+      "value": "st.SessionFailureAfterOutput(ctx, account.ID, resilience.CategoryTransient)"
+    },
+    {
+      "path": "backend/internal/service/resilience_post_output.go",
+      "value": "rl.resilience.noteOpenAISameSiteStreamFailure(account, at)"
+    },
+    {
+      "path": "backend/internal/service/openai_account_runtime_block_fastpath.go",
+      "value": "s.resilience.sameSiteHold.held(account, time.Now())"
+    },
+    {
+      "path": "backend/internal/service/resilience_session.go",
+      "value": "s.resilience.sameSiteHold.until(acc, now)"
+    },
+    {
+      "path": "backend/internal/service/resilience_session.go",
+      "value": "if s != nil && s.resilience != nil && s.resilience.sameSiteHold.held(account, now) {"
+    },
+    {
       "path": "backend/internal/repository/usage_log_repo_query.go",
       "value": "log.EndToEndFirstOutputMs = &v"
     },

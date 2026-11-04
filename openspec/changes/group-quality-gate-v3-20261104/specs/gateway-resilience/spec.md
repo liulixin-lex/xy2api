@@ -18,3 +18,64 @@
 - **THEN** 系统 SHALL 幂等追加可空 BIGINT 列，不设默认值、不加索引、不回填历史记录
 - **AND** 旧版本 SHALL 可忽略并保留该列
 - **AND** 本列 SHALL 不加入运维错误日志、用户端接口或管理端接口
+
+### Requirement: P1-B 输出后首次失败改绑
+
+系统 SHALL 在 `session.post_output_rebind` 开启时，为输出后的流内失败事件、读流出错与缺终态传递专用会话失败信号，首次即执行现有连击改绑动作：按属主删除绑定、加入会话避开、标记会话和本请求的避开集合。系统 SHALL 沿用 `ReportStreamFailure` 的 attempt 标识去重，HTTP 请求内同一失败只立即改绑一次，WebSocket 连接按 turn 计；避开时长 SHALL 沿用 `session.avoid_seconds`（缺省 600 秒）。
+
+#### Scenario: 输出后信号与输出前失败隔离
+
+- **WHEN** 输出后首次发生上述三种已确认失败之一
+- **THEN** 系统 SHALL 立即执行改绑，记一条 Warn `resilience.session_rebind`，原因与会话改绑计数标签均为 `post_output_first_failure`
+- **AND** 同请求的重复信号 SHALL 不重复改绑
+- **AND** 输出前失败 SHALL 仍按原有连击阈值（缺省 2）处理
+
+#### Scenario: 同一 WebSocket 连接的多个 turn
+
+- **WHEN** 同一 WebSocket 连接内两个 turn 分别发生输出后失败
+- **THEN** 每个 turn SHALL 各执行一次 P1-B 改绑
+- **AND** 同一 turn 内的重复失败信号 SHALL 不重复动作
+
+#### Scenario: 开关关闭
+
+- **WHEN** `session.post_output_rebind` 关闭
+- **THEN** 输出后失败 SHALL 回到原有连击规则
+- **AND** `session.enabled` 或总开关关闭时 P1-B SHALL 一并失效
+
+#### Scenario: 绑定属主与质量路由
+
+- **WHEN** 绑定已换为另一属主，或绑定由质量路由持有
+- **THEN** 系统 SHALL 沿用原有删除权限，不越权删除绑定
+- **AND** 会话避开 SHALL 继续生效，有其他正常候选时下一请求不选出错号
+- **AND** 没有其他正常候选时 SHALL 保留现有末位兜底
+
+### Requirement: 同站传输层断流暂停
+
+系统 SHALL 以 OpenAI 账号 `GetOpenAIBaseURL()` 的主机名为站点键，未配置时使用官方站点。只计 `resilienceStreamBrokenAfterOutput` 确认的输出后读流出错与缺终态，不计中转流内失败、输出前失败、客户端取消或非 OpenAI 账号。同号 3 秒内 SHALL 合并一次；当同站至少 2 个账号在 60 秒内分别断流时，只对这些断流账号中未暂停的各暂停 300 秒。
+
+#### Scenario: 同站部分账号断流
+
+- **WHEN** 同站两个账号在窗口内分别发生符合条件的断流
+- **THEN** 两个账号 SHALL 暂停，同站没有断流的账号 SHALL 不暂停
+- **AND** 每个账号每次暂停 SHALL 记一条 Warn `resilience.same_site_hold`，字段为 `host_hash`、`account_id`、`peer_account_id`、`until`
+- **AND** `host_hash` SHALL 使用主机名 SHA-256 的前 16 个十六进制字符，不记录明文主机名
+
+#### Scenario: 暂停期间再次断流
+
+- **WHEN** 暂停期间再次断流，或同站又有另一账号断流
+- **THEN** 已有暂停 SHALL 不延长、不重新计时；新满足条件且未暂停的账号 SHALL 单独取得 300 秒暂停
+
+#### Scenario: 普通选号、绑定与末位兜底
+
+- **WHEN** 账号处于同站暂停
+- **THEN** 系统 SHALL 按运行时冷却语义跳过普通选号，绑定会话在下一请求改绑
+- **AND** 系统 SHALL 将该暂停映射为软惩罚，组内无其他可用号时仍可末位兜底
+- **AND** 同站暂停 SHALL 不保留原软罚属主的绑定；关闭同站开关后，普通瞬时软罚 SHALL 仍保留绑定
+- **AND** 暂停到期 SHALL 不主动迁回，不改变门槛统计
+
+#### Scenario: 关闭与重启
+
+- **WHEN** `same_site_hold.enabled` 或总开关关闭
+- **THEN** 系统 SHALL 不新建暂停，已有暂停在判断与软惩罚映射时立即失效
+- **AND** 重开 SHALL 从新样本开始，旧暂停 SHALL 不复活
+- **AND** 进程重启 SHALL 清空跟踪器，各实例独立

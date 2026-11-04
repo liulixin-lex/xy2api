@@ -307,7 +307,7 @@ func TestPostOutputOpsFactsKeepP0ExclusionsAndCancellation(t *testing.T) {
 func TestPostOutputFailureStreakRebindsSession(t *testing.T) {
 	// R2: a session bound to an account that fails after output moves away
 	// on the second failure instead of staying for ten.
-	withResilienceSettings(t, nil)
+	withResilienceSettings(t, func(s *resilience.Settings) { s.Session.PostOutputRebind = false })
 	store := newMemResilienceStore()
 	cache := &mockGatewayCacheForPlatform{sessionBindings: map[string]int64{"sess": 170}}
 	svc := &GatewayService{cache: cache, resilience: NewResilienceService(nil, store)}

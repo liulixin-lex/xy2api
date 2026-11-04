@@ -16,9 +16,9 @@
 
 用量明细仅展示适用的 Token 请求，排除图片输出、视频、非 Token 计费和 Live/未知请求类型；旧记录缺少请求类型或计费模式时仍允许按已有 Token 数据计算。输出或耗时不是有限正数时显示 `—`，不伪造 0 t/s。输出计数已经可能包含推理 Token，不再额外相加。显示开关继续生效（见“显示与公开”），不因上游组件更新而绕过设置。
 
-`first_token_ms` 与 `duration_ms` 都从最后一次上游尝试开始计时，不含此前失败的尝试与换号等待；输出后失败而保留的部分用量，同样从所属尝试开始计时；换过号的请求，客户端实际等待更长，各次尝试见运维错误记录的 `upstream_errors`。OpenAI 首字口径由设置 `openai_ttft_mode` 决定：`semantic`（缺省）把中转插入的伪保活帧也记为首个事件，与 0.3.0 一致；`visible` 只算真实输出（见 [网关韧性](GATEWAY_RESILIENCE.md) §3）。该设置决定 `first_token_ms`，影响用量记录、运维看板和健康分、渠道监控里显示的首字，以及高级调度的首 token 评分。账号列表近期表现与[分组质量门槛](GROUP_QUALITY_GATE.md) 的续轮首字都优先读取用户可见的 `end_to_end_first_output_ms`，不受该设置影响；为 0 或缺失时（例如 WebSocket）仍回落到语义 `first_token_ms`。
+`first_token_ms` 与 `duration_ms` 都从最后一次上游尝试开始计时，不含此前失败的尝试与换号等待；输出后失败而保留的部分用量，同样从所属尝试开始计时；换过号的请求，客户端实际等待更长，各次尝试见运维错误记录的 `upstream_errors`。OpenAI 首字口径由设置 `openai_ttft_mode` 决定：`semantic`（缺省）把中转插入的伪保活帧也记为首个事件，与 0.3.0 一致；`visible` 只算真实输出（见 [网关韧性](GATEWAY_RESILIENCE.md) §3）。该设置决定 `first_token_ms`，影响用量记录、运维看板和健康分、渠道监控里显示的首字，以及高级调度的首 token 评分。账号列表近期表现保持端到端首字口径：优先读取 `end_to_end_first_output_ms`，为 0 或缺失时（例如 WebSocket）回退到 `first_token_ms`。[分组质量门槛 v3](GROUP_QUALITY_GATE.md) 的速度样本只读 `attempt_first_output_ms`，不回退到其他首字字段。
 
-`usage_logs.end_to_end_first_output_ms` 从入站 delivery 初始化到首次成功写出的语义输出计时，包含排队、选号和先前失败尝试，不依赖请求预算；没有语义输出时为 NULL。错误帧、`[DONE]`、纯终态、开场与心跳均不算，终态中实际携带的内容可以算。正常的 `error: null` 等空占位字段不屏蔽真实内容；空内容数组与对象不算输出。旧 `first_token_ms` 及计费送达判据不变。新列不增加接口或页面，分组质量门槛与账号列表近期表现的续轮首字都读取它。运维结果由实际完成或拒绝信号分类：OpenAI 原生/透传 Responses 与 Chat/Messages 的已知请求/策略拒绝均为 `terminal_rejection`；已明确报告客户端断开时，即使 context 尚未取消，`client_cancel` 也不被部分输出分类覆盖。
+`usage_logs.end_to_end_first_output_ms` 从入站 delivery 初始化到首次成功写出的语义输出计时，包含排队、选号和先前失败尝试，不依赖请求预算；没有语义输出时为 NULL。错误帧、`[DONE]`、纯终态、开场与心跳均不算，终态中实际携带的内容可以算。正常的 `error: null` 等空占位字段不屏蔽真实内容；空内容数组与对象不算输出。旧 `first_token_ms` 及计费送达判据不变。该列不增加接口或页面，账号列表近期表现的续轮首字继续读取它；门槛 v3 改读下述尝试级首字。运维结果由实际完成或拒绝信号分类：OpenAI 原生/透传 Responses 与 Chat/Messages 的已知请求/策略拒绝均为 `terminal_rejection`；已明确报告客户端断开时，即使 context 尚未取消，`client_cancel` 也不被部分输出分类覆盖。
 
 `usage_logs.attempt_first_output_ms` 记录最终尝试的可见首字，计算为该请求的 `SemanticOutputAt − AttemptStart`（毫秒）。语义输出判定与 `end_to_end_first_output_ms` 完全相同，仅起点不同：不含排队、选号与此前失败尝试的等待。缺少尝试起点、没有语义输出，或语义输出早于当前尝试时为 NULL；可计算的 0 毫秒保留为 0。OpenAI `RecordUsage` 与通用网关 `buildRecordUsageLog` 两条用量写入路径采集，运维错误日志不写该列。Go 字段为 `UsageLog.AttemptFirstOutputMs *int64`，取值方法为韧性请求状态的 `AttemptFirstOutputMs()`。本列不进入用户端或管理端接口，校准与验收直接查库；供门槛 v3 的速度样本使用，现有 `first_token_ms`、`end_to_end_first_output_ms`、近期表现查询与判慢采样口径不变。
 
@@ -72,7 +72,7 @@ Key 的 TTL 选择与供应商实际 usage 独立。用量接口新增 `anthropi
 
 ## 账号列表的近期表现
 
-账号管理的“近期表现”列紧跟“状态”列，可在列显示里隐藏；隐藏时不请求。它显示最近可计入的失败尝试、续轮首字和缓存保持表现。三项复用分组质量门槛的软失败分类、请求去重和用户可见首字定义，**定义相同、窗口不同**：近期列使用下述滚动样本窗口；门槛仍按 [分组质量门槛](GROUP_QUALITY_GATE.md) 的原窗口与续轮规则评估。
+账号管理的“近期表现”列紧跟“状态”列，可在列显示里隐藏；隐藏时不请求。它显示最近可计入的失败尝试、续轮首字和缓存保持表现。近期表现保持现有口径：首字读取端到端首字，缺失或为 0 时回退 `first_token_ms`；软失败包含首字截止。[分组质量门槛 v3](GROUP_QUALITY_GATE.md) 的速度样本只读 `attempt_first_output_ms`，错误维排除首字截止；两者的统计窗口和严格续轮规则也分别按各自定义执行，不能视为完全相同口径。
 
 窗口先按指标资格筛选，再取时间倒序最近 N 个；不足 N 个时只使用最长时长内的全部样本，不会为凑数引入更旧数据。悬停显示实际样本数与最早样本距当前时刻的覆盖分钟数。
 

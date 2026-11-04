@@ -419,6 +419,26 @@ func (s *RequestState) SessionFailure(ctx context.Context, accountID int64, c Ca
 	rec.Failure(ctx, g, h, accountID, c)
 }
 
+type postOutputSessionFailureKey struct{}
+
+// SessionFailureAfterOutput marks only this recorder invocation as a post-output
+// failure. Ordinary failure callers keep the existing streak semantics.
+func (s *RequestState) SessionFailureAfterOutput(ctx context.Context, accountID int64, c Category) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.SessionFailure(context.WithValue(ctx, postOutputSessionFailureKey{}, true), accountID, c)
+}
+
+// IsPostOutputSessionFailure reports the explicit signal sent to the recorder.
+func IsPostOutputSessionFailure(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	postOutput, _ := ctx.Value(postOutputSessionFailureKey{}).(bool)
+	return postOutput
+}
+
 // SessionSuccess reports a successful request of the session on an account.
 func (s *RequestState) SessionSuccess(ctx context.Context, accountID int64) {
 	g, h, rec := s.session()

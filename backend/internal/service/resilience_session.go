@@ -96,14 +96,21 @@ func resiliencePenaltyOf(a *Account, model string, now time.Time) (resilience.Pe
 // show: an account held back only by it is soft until the block ends, so
 // last resort can use it. The in-process account block only holds while a
 // persisted cooldown does, which resiliencePenaltyOf already reads; Codex
-// ticket gates are no penalty and stay gates.
+// ticket gates are no penalty and stay gates. Same-site transport holds are
+// also soft penalties, so an otherwise healthy held account remains eligible
+// for last resort.
 func (s *OpenAIGatewayService) resilienceOpenAIPenaltyOf(acc *Account, model string, now time.Time) (resilience.PenaltyTier, time.Time, string) {
 	tier, recoverAt, why := resiliencePenaltyOf(acc, model, now)
 	if tier == resilience.TierHard {
 		return tier, recoverAt, why
 	}
 	if end := s.openAIModelBreakerEnd(acc, model, now); end.After(recoverAt) {
-		return resilience.TierSoft, end, "model_transient"
+		tier, recoverAt, why = resilience.TierSoft, end, "model_transient"
+	}
+	if s != nil && s.resilience != nil {
+		if end := s.resilience.sameSiteHold.until(acc, now); end.After(recoverAt) {
+			tier, recoverAt, why = resilience.TierSoft, end, "same_site_hold"
+		}
 	}
 	return tier, recoverAt, why
 }
@@ -601,14 +608,19 @@ func (s *GatewayService) resilienceGatewayBindAllowed(ctx context.Context, accou
 // on the original OpenAI scheduler (legacy and advanced paths), as the
 // Gateway does (design §4.2): the request is served elsewhere and the
 // session returns afterwards. The scheduler's per-model transient block
-// counts as soft here, as it does for last resort. It reports whether the
-// owner was kept.
+// counts as soft here, as it does for last resort. Same-site holds instead
+// let the normal runtime gate delete the owner and rebind the session.
+// It reports whether the owner was kept.
 func (s *OpenAIGatewayService) resilienceKeepOpenAISoftOwner(ctx context.Context, account *Account, platform, requestedModel string) bool {
 	if account == nil || account.Platform != NormalizeOpenAICompatiblePlatform(platform) || !account.IsOpenAICompatible() ||
 		!resilience.Current().SessionOn() {
 		return false
 	}
-	if tier, _, _ := s.resilienceOpenAIPenaltyOf(account, requestedModel, time.Now()); tier != resilience.TierSoft {
+	now := time.Now()
+	if s != nil && s.resilience != nil && s.resilience.sameSiteHold.held(account, now) {
+		return false
+	}
+	if tier, _, _ := s.resilienceOpenAIPenaltyOf(account, requestedModel, now); tier != resilience.TierSoft {
 		return false
 	}
 	resilience.StateFrom(ctx).KeepSticky(account.ID)
@@ -778,13 +790,14 @@ type sessionFailureRecorder struct {
 }
 
 // Failure counts a failure of the session on an account. Reaching the streak
-// threshold deletes the binding (owner-checked) and avoids the account for
-// the session (design §4.1-§4.2).
+// threshold, or a P1-B post-output signal, deletes the binding (owner-checked)
+// and avoids the account for the session (design §4.1-§4.2).
 func (rec *sessionFailureRecorder) Failure(ctx context.Context, groupID int64, sessionHash string, accountID int64, c resilience.Category) {
 	cfg := resilience.Current()
 	if rec == nil || rec.r == nil || rec.r.store == nil || !cfg.SessionOn() || !c.CountsForSession() {
 		return
 	}
+	postOutput := cfg.PostOutputRebindOn() && resilience.IsPostOutputSessionFailure(ctx)
 	stateCtx, cancel := resilienceStateContext(ctx)
 	defer cancel()
 	window := time.Duration(cfg.Session.StreakWindowSeconds) * time.Second
@@ -793,8 +806,12 @@ func (rec *sessionFailureRecorder) Failure(ctx context.Context, groupID int64, s
 		return
 	}
 	rec.r.markSessionFailures(groupID, sessionHash, window)
-	if n < int64(cfg.Session.StreakThreshold) {
+	if !postOutput && n < int64(cfg.Session.StreakThreshold) {
 		return
+	}
+	reason := "resil_failure_streak"
+	if postOutput {
+		reason = "post_output_first_failure"
 	}
 	if rec.deleteIfOwner != nil {
 		_ = rec.deleteIfOwner(stateCtx, groupID, sessionHash, accountID)
@@ -805,7 +822,7 @@ func (rec *sessionFailureRecorder) Failure(ctx context.Context, groupID int64, s
 	// The request that hit the streak must not keep or restore the binding.
 	resilience.StateFrom(ctx).AddAvoided(accountID)
 	_ = rec.r.store.ClearSessionFailure(stateCtx, groupID, sessionHash, accountID)
-	resilience.Count(resilience.MetricSessionRebind, groupID, accountID, "resil_failure_streak")
+	resilience.Count(resilience.MetricSessionRebind, groupID, accountID, reason)
 	slog.Warn("resilience.session_rebind", append(resilience.EventFields(ctx),
 		"group_id", groupID,
 		"session", shortSessionHash(sessionHash),
@@ -813,7 +830,7 @@ func (rec *sessionFailureRecorder) Failure(ctx context.Context, groupID int64, s
 		"failures", n,
 		"category", string(c),
 		"avoid", avoid.String(),
-		"reason", "resil_failure_streak",
+		"reason", reason,
 	)...)
 }
 

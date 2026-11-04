@@ -95,7 +95,8 @@ type ResilienceService struct {
 	avoidingSessions sync.Map
 	// postOutput counts recent failures after output per account for the
 	// threshold cooldown (design §7.6).
-	postOutput postOutputTracker
+	postOutput   postOutputTracker
+	sameSiteHold openAISameSiteHoldTracker
 
 	// outputP99 is the per-model output-token P99 of recent usage
 	// (lower-cased model -> tokens) for reservation estimates.
