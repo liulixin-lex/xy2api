@@ -1189,7 +1189,7 @@ export default {
           '默认关闭：/responses 上的 namespace 工具声明原样转发，这正是 ChatGPT Codex 后端期望的形态。仅当该 OAuth 账号指向不认识 namespace 的兼容上游时才开启——摊平会把工具改名为 namespace__tool，使按 functions.<命名空间>.<工具> 寻址的模型（如 gpt-5.6 多智能体）无法调用。压缩（compact）请求不受该开关影响，始终摊平。',
         collaborationPlaintext: '协作消息明文化',
         collaborationPlaintextDesc:
-          '默认关闭。开启后，该账号经原生 Responses HTTP 的 Codex 请求在模型命中网关韧性设置的“已验证模型”时，符合条件的新协作消息以明文投递（上游未返回密文且网关未否决时）；网关韧性设置中的“协作消息明文化”也需开启。开启了“摊平 Codex namespace 工具”的账号不生效。只影响新的协作消息，不修复已有会话历史；关闭后新会话不再在此账号启用；已有协作明文历史的会话在其他条件满足时仍会继续启用（会话连续性仅对 API Key 账号生效）。',
+          '开启后，此账号按网关韧性中的“协作消息明文化”设置投递明文协作消息（需全局开启且模型在清单内）；开启了“摊平 Codex namespace 工具”的账号不生效。关闭后新会话不再启用；历史已带协作明文标记的 API Key 账号会话仍会继续。',
         longContextBilling: 'API 长上下文计费',
         longContextBillingDesc: '默认关闭。仅当该账号的上游会按模型阈值收取 OpenAI API 长上下文费率时开启。',
         responsesWebsocketsV2: 'Responses WebSocket v2',

@@ -134,7 +134,7 @@ describe('gateway resilience settings', () => {
   it('saves collaboration plaintext with a trimmed, de-duplicated model list and reloads it', async () => {
     const w = mountSettings(); await flushPromises()
     const card = w.get('[data-testid="resilience-card-collaborationPlaintext"]')
-    expect(card.text()).toContain('admin.resilience.settings.sections.collaborationPlaintextHint')
+    for (const key of ['Hint', 'Scope', 'Off']) expect(card.text()).toContain(`admin.resilience.settings.sections.collaborationPlaintext${key}`)
     await card.get('[data-testid="resilience-section-collaborationPlaintext"]').trigger('click')
     expect(card.find('[data-testid="resilience-collaborationModels-empty"]').exists()).toBe(true)
     const models = card.get<HTMLTextAreaElement>('[data-testid="resilience-field-collaborationModels"]')

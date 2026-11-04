@@ -40,7 +40,9 @@ export default {
         outputP99: 'Output P99 cap',
         outputP99Hint: 'In-flight reservations cap output tokens at the model\'s 7-day P99 (at least 1024).',
         collaborationPlaintext: 'Collaboration messages in plaintext',
-        collaborationPlaintextHint: 'Eligible new Codex collaboration messages (spawn_agent, send_message, followup_task) are delivered in plaintext when the upstream returns no ciphertext and the gateway does not veto them, which reduces conversation errors caused by a different ciphertext issuer after switching accounts. Applies only to Codex client requests over native Responses HTTP, and needs the account switch "Collaboration messages in plaintext" on, or a conversation on an API key account that already has plaintext collaboration history (session continuity); WebSocket, compaction, passthrough and other paths are unaffected. Only new collaboration messages change and existing conversation history is not repaired; turning it off stops conversion for all later requests while responses in progress are still restored; conversations that already used it may be rejected by some upstreams and need a new conversation.'
+        collaborationPlaintextHint: 'Eligible new Codex collaboration messages (spawn_agent, send_message, followup_task) are delivered in plaintext when the upstream returns no ciphertext and the gateway does not veto them, reducing collaboration errors after account switches. Existing conversation history is not repaired.',
+        collaborationPlaintextScope: 'Applies when a Codex client uses native Responses HTTP, the model is listed below, and the account switch is on, or the conversation on an API key account already carries the plaintext collaboration marker (session continuity).',
+        collaborationPlaintextOff: 'Turning it off stops conversion for later requests while responses in progress are still restored; conversations that already used it may be rejected by some upstreams and need a new conversation.'
       },
       fields: {
         balancePause: 'Initial pause (s)',
