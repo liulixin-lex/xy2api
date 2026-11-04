@@ -4,10 +4,13 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -452,27 +455,72 @@ func TestCodexCollabRestorerCanonicalEchoes(t *testing.T) {
 }
 
 func TestCodexCollabErrorBody(t *testing.T) {
-	const body = `{"error":{"type":"collaboration-xy","code":"collaboration-xy","message":"Unknown collaboration-xy.send_message, collaboration-xy__spawn_agent and collaboration-xy; xcollaboration-xy and collaboration-xyz stay","param":"collaboration-xy.send_message"},"other":"collaboration-xy"}`
-	const expected = `{"error":{"type":"collaboration-xy","code":"collaboration-xy","message":"Unknown collaboration.send_message, collaboration__spawn_agent and collaboration; xcollaboration-xy and collaboration-xyz stay","param":"collaboration.send_message"},"other":"collaboration-xy"}`
+	const body = `{ "error" : {"type":"invalid_request_error","code":"cyber_policy","message":"Unknown collaboration-xy.send_message","message":"Unknown collaboration-xy__spawn_agent", "param":"collaboration-xy"}, "extra":"xcollaboration-xyz" }`
+	const expected = `{ "error" : {"type":"invalid_request_error","code":"cyber_policy","message":"Unknown collaboration.send_message","message":"Unknown collaboration__spawn_agent", "param":"collaboration"}, "extra":"xcollaborationz" }`
 	r := newCodexCollabRestorer(codexCollabTestPlan(t))
-	require.JSONEq(t, expected, string(r.ErrorBody([]byte(body))))
+	require.Equal(t, expected, string(r.ErrorBody([]byte(body))))
 	require.Equal(t, []byte(body), newCodexCollabRestorer(nil).ErrorBody([]byte(body)))
-	for _, input := range []string{`{"error":`, `{"error":{"message":"collaboration-xy","message":"collaboration-xy"}}`} {
-		require.Equal(t, []byte(input), r.ErrorBody([]byte(input)))
-	}
-	for _, tt := range []struct{ event, body, path string }{
-		{"error", `{"type":"error","error":{"message":"collaboration-xy.send_message","param":"collaboration-xy__send_message","code":"collaboration-xy"}}`, "error"},
-		{"response.failed", `{"type":"response.failed","response":{"error":{"message":"collaboration-xy.send_message","param":"collaboration-xy__send_message","code":"collaboration-xy"}}}`, "response.error"},
+	require.Equal(t, `not JSON collaboration`, string(r.ErrorBody([]byte(`not JSON collaboration-xy`))))
+	for _, tt := range []struct{ name, event, body, expected string }{
+		{"flat error", "error", `{"type":"error","message":"collaboration-xy.send_message","param":"collaboration-xy.send_message"}`, `{"type":"error","message":"collaboration.send_message","param":"collaboration.send_message"}`},
+		{"nested duplicate", "error", `{"type":"error","error":{"message":"collaboration-xy.send_message","message":"collaboration-xy__spawn_agent"}}`, `{"type":"error","error":{"message":"collaboration.send_message","message":"collaboration__spawn_agent"}}`},
+		{"root duplicate", "error", `{"type":"error","message":"collaboration-xy","message":"collaboration-xy"}`, `{"type":"error","message":"collaboration","message":"collaboration"}`},
+		{"failed value only", "response.failed", `{"type":"response.failed","response":{"note":"collaboration-xy","error":{"message":"collaboration-xy.send_message","message":"collaboration-xy__spawn_agent","code":"cyber_policy"},"output":[{"type":"message","content":"collaboration-xy"}]},"extra":"collaboration-xy"}`, `{"type":"response.failed","response":{"note":"collaboration-xy","error":{"message":"collaboration.send_message","message":"collaboration__spawn_agent","code":"cyber_policy"},"output":[{"type":"message","content":"collaboration-xy"}]},"extra":"collaboration-xy"}`},
+		{"failed string value", "response.failed", `{"type":"response.failed","response":{"error":"collaboration-xy.send_message"}}`, `{"type":"response.failed","response":{"error":"collaboration.send_message"}}`},
+		{"failed no value", "response.failed", `{"type":"response.failed","response":{"note":"collaboration-xy"}}`, `{"type":"response.failed","response":{"note":"collaboration-xy"}}`},
 	} {
-		t.Run(tt.event, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			out, err := r.SSEData(tt.event, []byte(tt.body))
 			require.NoError(t, err)
-			require.Equal(t, "collaboration.send_message", gjson.GetBytes(out, tt.path+".message").String())
-			require.Equal(t, "collaboration__send_message", gjson.GetBytes(out, tt.path+".param").String())
-			require.Equal(t, "collaboration-xy", gjson.GetBytes(out, tt.path+".code").String())
+			require.Equal(t, tt.expected, string(out))
 			observed, err := newCodexCollabRestorer(nil).SSEData(tt.event, []byte(tt.body))
 			require.NoError(t, err)
 			require.Equal(t, []byte(tt.body), observed)
+		})
+	}
+	for _, body := range []string{
+		`{"type":"response.failed","response":{"error":"collaboration-xy","error":"collaboration-xy"}}`,
+		`{"type":"response.failed","response":{"error":"collaboration-xy","err\u006fr":"collaboration-xy"}}`,
+	} {
+		out, err := r.SSEData("response.failed", []byte(body))
+		require.Error(t, err)
+		require.Nil(t, out)
+	}
+}
+
+func TestCodexCollabErrorEnvelopeExits(t *testing.T) {
+	for _, route := range []string{"flat_apikey", "flat_oauth", "http_cyber", "sse_failed"} {
+		t.Run(route, func(t *testing.T) {
+			enableCollabTest(t)
+			c, rec := newOpenAIAstraProRetryContext(nil)
+			c.Request.Header.Set("User-Agent", "codex_cli_rs/0.166.0")
+			SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+			account := newOpenAIRejectedFieldTestAccount()
+			account.Extra = map[string]any{"openai_collaboration_plaintext": true}
+			if route == "flat_oauth" {
+				account = newOpenAIOAuthNamespaceTestAccount()
+			}
+			payload := `{"type":"invalid_request_error","code":"cyber_policy","message":"Unknown collaboration-xy.send_message","message":"Unknown collaboration-xy.spawn_agent"}`
+			var err error
+			if route == "http_cyber" {
+				upstream := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(400, `{"error":`+payload+`}`)}
+				_, err = newOpenAIRejectedFieldTestService(upstream).Forward(context.Background(), c, account, []byte(collabWiringBody))
+				require.Len(t, upstream.bodies, 1)
+			} else {
+				_, attempt := armOpenAICollaboration(c, []byte(collabWiringBody), "gpt-5.4", true)
+				require.True(t, attempt.applied)
+				data := `{"type":"error","code":"client_tool_continuation_unavailable","message":"Unknown function collaboration-xy.send_message","param":"collaboration-xy.send_message"}`
+				if route == "sse_failed" {
+					data = `{"type":"response.failed","response":{"id":"resp_1","error":` + payload + `}}`
+				}
+				response := newOpenAIRejectedFieldTestResponse(200, "data: "+data+"\n\n")
+				response.Header.Set("Content-Type", "text/event-stream")
+				_, err = newOpenAIRejectedFieldTestService(nil).handleStreamingResponse(context.Background(), response, c, account, time.Now(), "gpt-5.4", "gpt-5.4")
+			}
+			require.Error(t, err)
+			var failover *UpstreamFailoverError
+			require.False(t, errors.As(err, &failover))
+			require.NotContains(t, rec.Body.String(), "collaboration-xy")
 		})
 	}
 }
