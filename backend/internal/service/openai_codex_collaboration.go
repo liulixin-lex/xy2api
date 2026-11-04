@@ -534,6 +534,68 @@ func (r *codexCollabRestorer) ResponseJSON(body []byte) ([]byte, error) {
 	return r.transform(body, "response.json", false)
 }
 
+// ErrorBody restores only protocol error text; callers retain the original body
+// for classification and logging. Malformed or ambiguous bodies stay untouched.
+func (r *codexCollabRestorer) ErrorBody(body []byte) []byte {
+	if r == nil || r.plan == nil || !json.Valid(body) {
+		return body
+	}
+	root := gjson.ParseBytes(body)
+	if !root.IsObject() || !codexCollabUniqueObject(root) || !codexCollabUniqueObject(root.Get("response")) {
+		return body
+	}
+	changed := body
+	for _, base := range []string{"error", "response.error"} {
+		object := root.Get(base)
+		if !codexCollabUniqueObject(object) {
+			return body
+		}
+		for _, field := range []string{"message", "param"} {
+			path := base + "." + field
+			value := root.Get(path)
+			if value.Type != gjson.String {
+				continue
+			}
+			restored := codexCollabRestoreErrorText(value.String())
+			if restored != value.String() {
+				var err error
+				changed, err = sjson.SetBytes(changed, path, restored)
+				if err != nil {
+					return body
+				}
+			}
+		}
+	}
+	return changed
+}
+
+func codexCollabRestoreErrorText(value string) string {
+	const alias = codexCollaborationNamespaceAlias
+	var out strings.Builder
+	for start := 0; start < len(value); {
+		index := strings.Index(value[start:], alias)
+		if index < 0 {
+			out.WriteString(value[start:])
+			break
+		}
+		index += start
+		end := index + len(alias)
+		boundary := func(b byte) bool {
+			return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '_' || b == '-'
+		}
+		beforeOK := index == 0 || !boundary(value[index-1])
+		afterOK := end == len(value) || !boundary(value[end]) || strings.HasPrefix(value[end:], "__")
+		out.WriteString(value[start:index])
+		if beforeOK && afterOK {
+			out.WriteString(codexCollaborationNamespace)
+		} else {
+			out.WriteString(alias)
+		}
+		start = end
+	}
+	return out.String()
+}
+
 func (r *codexCollabRestorer) Stats() codexCollabStats {
 	if r == nil {
 		return codexCollabStats{}
@@ -559,6 +621,10 @@ func (r *codexCollabRestorer) transform(body []byte, eventType string, streaming
 	}
 	if eventType == "" {
 		eventType = root.Get("type").String()
+	}
+	if streaming && (eventType == "error" || eventType == "response.failed" || root.Get("type").String() == "error" || root.Get("type").String() == "response.failed") {
+		body = r.ErrorBody(body)
+		root = gjson.ParseBytes(body)
 	}
 	items, err := codexCollabResponseItems(root, eventType, streaming)
 	if err != nil {

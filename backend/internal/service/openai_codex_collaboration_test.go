@@ -323,6 +323,32 @@ func TestCodexCollabRestorerCanonicalEchoes(t *testing.T) {
 	}
 }
 
+func TestCodexCollabErrorBody(t *testing.T) {
+	const body = `{"error":{"type":"collaboration-xy","code":"collaboration-xy","message":"Unknown collaboration-xy.send_message, collaboration-xy__spawn_agent and collaboration-xy; xcollaboration-xy and collaboration-xyz stay","param":"collaboration-xy.send_message"},"other":"collaboration-xy"}`
+	const expected = `{"error":{"type":"collaboration-xy","code":"collaboration-xy","message":"Unknown collaboration.send_message, collaboration__spawn_agent and collaboration; xcollaboration-xy and collaboration-xyz stay","param":"collaboration.send_message"},"other":"collaboration-xy"}`
+	r := newCodexCollabRestorer(codexCollabTestPlan(t))
+	require.JSONEq(t, expected, string(r.ErrorBody([]byte(body))))
+	require.Equal(t, []byte(body), newCodexCollabRestorer(nil).ErrorBody([]byte(body)))
+	for _, input := range []string{`{"error":`, `{"error":{"message":"collaboration-xy","message":"collaboration-xy"}}`} {
+		require.Equal(t, []byte(input), r.ErrorBody([]byte(input)))
+	}
+	for _, tt := range []struct{ event, body, path string }{
+		{"error", `{"type":"error","error":{"message":"collaboration-xy.send_message","param":"collaboration-xy__send_message","code":"collaboration-xy"}}`, "error"},
+		{"response.failed", `{"type":"response.failed","response":{"error":{"message":"collaboration-xy.send_message","param":"collaboration-xy__send_message","code":"collaboration-xy"}}}`, "response.error"},
+	} {
+		t.Run(tt.event, func(t *testing.T) {
+			out, err := r.SSEData(tt.event, []byte(tt.body))
+			require.NoError(t, err)
+			require.Equal(t, "collaboration.send_message", gjson.GetBytes(out, tt.path+".message").String())
+			require.Equal(t, "collaboration__send_message", gjson.GetBytes(out, tt.path+".param").String())
+			require.Equal(t, "collaboration-xy", gjson.GetBytes(out, tt.path+".code").String())
+			observed, err := newCodexCollabRestorer(nil).SSEData(tt.event, []byte(tt.body))
+			require.NoError(t, err)
+			require.Equal(t, []byte(tt.body), observed)
+		})
+	}
+}
+
 func TestCodexCollabRestorerMarkerVetoes(t *testing.T) {
 	tests := []struct {
 		name, args, efa    string
