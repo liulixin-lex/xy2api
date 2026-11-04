@@ -22,10 +22,11 @@ import (
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, forwardErr error) {
 	defer beginOpenAIStateRejectionAttempt(ctx, c, account, body)(&forwardErr)
-	// Freeze client state exclusions before OAuth compatibility filters rewrite
-	// store or discard previous_response_id.
-	previousResponse := gjson.GetBytes(body, "previous_response_id")
-	collabStatefulRequest := gjson.GetBytes(body, "store").Bool() ||
+	// Freeze root ambiguity and state exclusions before OAuth compatibility
+	// filters collapse duplicate keys, rewrite store or discard previous_response_id.
+	originalCollabRoot := gjson.ParseBytes(body)
+	previousResponse := originalCollabRoot.Get("previous_response_id")
+	collabStatefulRequest := !codexCollabUniqueObject(originalCollabRoot) || originalCollabRoot.Get("store").Bool() ||
 		(previousResponse.Exists() && previousResponse.Type != gjson.Null && strings.TrimSpace(previousResponse.String()) != "")
 	defer func() { s.finishCacheDiagnostic(c, body, result) }()
 	if c != nil {

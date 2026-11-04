@@ -142,7 +142,11 @@ func TestCollaborationForwardAPIKeyAndOAuth(t *testing.T) {
 
 func TestCollaborationForwardPreservesOriginalStateExclusions(t *testing.T) {
 	for _, oauth := range []bool{false, true} {
-		for _, state := range []string{`"store":true`, `"previous_response_id":"resp_previous"`} {
+		for _, state := range []string{
+			`"store":true`, `"previous_response_id":"resp_previous"`,
+			`"store":false,"store":true`, `"previous_response_id":null,"previous_response_id":"resp_previous"`,
+			`"metadata":{},"metadata":{}`, `"store":false,"st\u006fre":true`,
+		} {
 			t.Run(map[bool]string{false: "apikey", true: "oauth"}[oauth]+"/"+state, func(t *testing.T) {
 				enableCollabTest(t)
 				response := `{"id":"resp_1","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`
@@ -178,20 +182,31 @@ func TestCollaborationForwardPreservesOriginalStateExclusions(t *testing.T) {
 
 func TestCollaborationForwardContinuity(t *testing.T) {
 	history := `{"type":"function_call","namespace":"collaboration","name":"send_message","call_id":"fc_old_call","arguments":"{\"message\":\"old plaintext\"}","encrypted_function_args":[]}`
+	customProviderHistory := strings.Replace(history, `,"encrypted_function_args":[]`, "", 1)
 	for _, tc := range []struct {
 		name, item, extra                                               string
 		masterOff, modelOff, flatten, noDeclaration, oauth, wantApplied bool
 	}{
 		{name: "existing_history_account_off", item: history, wantApplied: true},
+		{name: "custom_provider_plaintext", item: customProviderHistory, wantApplied: true},
+		{name: "custom_provider_opaque", item: strings.Replace(customProviderHistory, "old plaintext", "gAAAAopaque", 1)},
+		{name: "custom_provider_base64", item: strings.Replace(customProviderHistory, "old plaintext", strings.Repeat("A", 256), 1)},
+		{name: "custom_provider_invalid_arguments", item: strings.Replace(customProviderHistory, `\"old plaintext\"}`, `\"old plaintext\"`, 1)},
+		{name: "custom_provider_message_missing", item: strings.Replace(customProviderHistory, `\"message\"`, `\"note\"`, 1)},
+		{name: "custom_provider_oauth", item: customProviderHistory, oauth: true},
 		{name: "oauth_account_off", item: history, oauth: true},
 		{name: "new_session_account_off", item: `{"type":"message","role":"user","content":"hello"}`},
 		{name: "master_off", item: history, masterOff: true},
 		{name: "model_removed", item: history, modelOff: true},
 		{name: "original_store", item: history, extra: `"store":true,`},
 		{name: "original_previous", item: history, extra: `"previous_response_id":"resp_previous",`},
+		{name: "ambiguous_original_store", item: customProviderHistory, extra: `"store":false,"store":true,`},
+		{name: "ambiguous_original_previous", item: customProviderHistory, extra: `"previous_response_id":null,"previous_response_id":"resp_previous",`},
 		{name: "flatten", item: history, flatten: true},
 		{name: "no_declaration", item: history, noDeclaration: true},
-		{name: "nonempty_efa", item: strings.Replace(history, `"encrypted_function_args":[]`, `"encrypted_function_args":["cipher"]`, 1)},
+		{name: "nonempty_efa_plain_message", item: strings.Replace(history, `"encrypted_function_args":[]`, `"encrypted_function_args":["cipher"]`, 1)},
+		{name: "null_efa_plain_message", item: strings.Replace(history, `"encrypted_function_args":[]`, `"encrypted_function_args":null`, 1)},
+		{name: "string_efa_plain_message", item: strings.Replace(history, `"encrypted_function_args":[]`, `"encrypted_function_args":"[]"`, 1)},
 		{name: "non_message_tool", item: strings.Replace(history, `"name":"send_message"`, `"name":"wait_agent"`, 1)},
 		{name: "nested_user_json", item: `{"type":"message","role":"user","content":` + history + `}`},
 	} {
@@ -234,22 +249,62 @@ func TestCollaborationForwardContinuity(t *testing.T) {
 				require.Equal(t, "continuity", openAICollaborationAttempt(c).eligibilitySource)
 				require.Equal(t, "collaboration-xy", gjson.GetBytes(upstream.lastBody, "tools.0.name").String())
 				for _, field := range []string{"call_id", "arguments", "encrypted_function_args"} {
-					require.Equal(t, gjson.Get(history, field).Raw, gjson.GetBytes(upstream.lastBody, "input.0."+field).Raw)
+					require.Equal(t, gjson.Get(tc.item, field).Raw, gjson.GetBytes(upstream.lastBody, "input.0."+field).Raw)
 				}
 			}
 		})
 	}
 }
 
+func TestCollaborationAttemptWarnExcludesTransientFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name                                       string
+		status                                     int
+		success, inactive, restoreFailed, wantWarn bool
+	}{
+		{name: "bad_request", status: 400, wantWarn: true},
+		{name: "authentication", status: 401, wantWarn: true},
+		{name: "forbidden", status: 403, wantWarn: true},
+		{name: "rate_limited", status: 429},
+		{name: "overloaded", status: 503},
+		{name: "server_error", status: 500},
+		{name: "stream_disconnect", status: 200},
+		{name: "network_failure", status: 0},
+		{name: "success_after_recovery", status: 400, success: true},
+		{name: "observe_only", status: 400, inactive: true},
+		{name: "local_restore_failure_still_warns", status: 200, restoreFailed: true, wantWarn: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+			c := collabTestContext()
+			_, attempt := armOpenAICollaboration(c, []byte(collabWiringBody), "gpt-5.4", !tc.inactive)
+			attempt.upstreamStatus = tc.status
+			attempt.restoreFailed = tc.restoreFailed
+			var err error
+			if !tc.success {
+				err = errors.New("synthetic upstream failure")
+			}
+			attempt.finish(context.Background(), c, newOpenAIRejectedFieldTestAccount(), err)
+			require.Equal(t, tc.wantWarn, strings.Contains(logs.String(), `"msg":"resilience.collab_plaintext"`))
+		})
+	}
+}
+
 func TestCollaborationForwardHTTPErrorRestoration(t *testing.T) {
-	for _, mode := range []string{"deterministic", "cyber", "rule", "disabled"} {
+	for _, mode := range []string{"deterministic", "cyber", "cyber_duplicate", "rule", "disabled"} {
 		t.Run(mode, func(t *testing.T) {
 			enableCollabTest(t)
 			code := "invalid_function"
-			if mode == "cyber" {
+			if strings.HasPrefix(mode, "cyber") {
 				code = "cyber_policy"
 			}
 			body := `{"error":{"type":"invalid_request_error","code":"` + code + `","message":"Unknown function collaboration-xy.send_message","param":"collaboration-xy__send_message"}}`
+			if mode == "cyber_duplicate" {
+				body = strings.Replace(body, `"param":`, `"message":"Unknown function collaboration-xy.spawn_agent","param":`, 1)
+			}
 			upstream := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(400, body)}
 			c, rec := newOpenAIAstraProRetryContext(nil)
 			c.Request.Header.Set("User-Agent", "codex_cli_rs/0.166.0")
@@ -577,16 +632,27 @@ func TestCollaborationObserveMessageCounters(t *testing.T) {
 }
 
 func TestCollaborationStreamErrorExitsRestoreIdentity(t *testing.T) {
-	for _, route := range []string{"sse_failed", "oauth_bare", "sse_json", "rule_json", "rule_committed"} {
+	for _, route := range []string{"sse_failed", "sse_duplicate_message", "sse_duplicate_error", "sse_flat", "oauth_flat", "oauth_bare", "sse_json", "rule_json", "rule_committed"} {
 		t.Run(route, func(t *testing.T) {
 			c, rec := newOpenAIAstraProRetryContext(nil)
 			_, attempt := armOpenAICollaboration(c, []byte(collabWiringBody), "gpt-5.4", true)
 			require.True(t, attempt.applied)
 			account := newOpenAIRejectedFieldTestAccount()
 			errorBody := `{"type":"invalid_request_error","code":"client_tool_continuation_unavailable","message":"Unknown function collaboration-xy.send_message","param":"collaboration-xy__send_message"}`
+			if route == "sse_duplicate_message" {
+				errorBody = strings.Replace(errorBody, `"param":`, `"message":"Unknown function collaboration-xy.spawn_agent","param":`, 1)
+			}
 			data := `{"type":"response.failed","response":{"id":"resp_1","error":` + errorBody + `}}`
-			if route == "oauth_bare" {
+			if route == "sse_duplicate_error" {
+				data = `{"type":"response.failed","response":{"error":` + errorBody + `,"error":` + errorBody + `}}`
+			}
+			if route == "sse_flat" || route == "oauth_flat" {
+				data = strings.Replace(errorBody, `"type":"invalid_request_error"`, `"type":"error"`, 1)
+			}
+			if strings.HasPrefix(route, "oauth_") {
 				account = newOpenAIOAuthNamespaceTestAccount()
+			}
+			if route == "oauth_bare" {
 				data = `{"type":"error","error":` + errorBody + `}`
 			}
 			if strings.HasPrefix(route, "rule_") {
@@ -612,6 +678,11 @@ func TestCollaborationStreamErrorExitsRestoreIdentity(t *testing.T) {
 			var failover *UpstreamFailoverError
 			require.False(t, errors.As(err, &failover))
 			require.NotContains(t, rec.Body.String(), "collaboration-xy")
+			if route == "sse_duplicate_error" {
+				require.True(t, attempt.restoreFailed)
+				require.Contains(t, rec.Body.String(), openAICollabRestoreMessage)
+				return
+			}
 			require.Contains(t, rec.Body.String(), "collaboration.send_message")
 			if route == "rule_json" {
 				require.Equal(t, 418, rec.Code)

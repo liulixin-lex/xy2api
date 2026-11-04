@@ -404,15 +404,19 @@ HTTP 流已向客户端输出可见内容后，快层确认账号发生读流出
 
 ### 4.14 Codex 协作消息明文通道（P1′）
 
-管理端网关韧性中的 `collaboration_plaintext.enabled` 默认关闭；`models` 是经过验证的实际出站模型清单，模型映射之后再匹配（去首尾空白、不分大小写精确匹配）。账号页的 `extra.openai_collaboration_plaintext` 仅布尔 true 生效；单账号关闭删除键、批量关闭写 false 都表示关闭。全局总开关、功能开关、模型、账号资格及 Codex UA/originator 全部满足才转换；ForceCodexCLI 不绕过真实客户端门。代码同时接通 API Key 与 OAuth，仅原生 Responses HTTP；预检仅覆盖 API Key 中转站，OAuth 未预检，验证前不要在 OAuth 账号开启。WS、透传、compact、协议桥接、摊平账号不转换。原始请求含 store:true 或非空 previous_response_id 时也不转换；此排除在 OAuth 归一化之前冻结。outcome=unsupported 同时涵盖资格门未满足、这些状态字段与不支持的形态，当前不区分细项。
+管理端网关韧性中的 `collaboration_plaintext.enabled` 默认关闭；`models` 是经过验证的实际出站模型清单，模型映射之后再匹配（去首尾空白、不分大小写精确匹配）。账号页的 `extra.openai_collaboration_plaintext` 仅布尔 true 生效；单账号关闭删除键、批量关闭写 false 都表示关闭。全局总开关、功能开关、模型、账号资格及 Codex UA/originator 全部满足才转换；ForceCodexCLI 不绕过真实客户端门。代码同时接通 API Key 与 OAuth，仅原生 Responses HTTP；预检仅覆盖 API Key 中转站，OAuth 未预检，验证前不要在 OAuth 账号开启。WS、透传、compact、协议桥接、摊平账号不转换。原始请求含 store:true、非空 previous_response_id 或根对象重复键时也不转换；根键唯一性与状态排除均在任何兼容归一化之前冻结，OAuth 合并重复键或改删字段不会解除排除。outcome=unsupported 同时涵盖资格门未满足、原始状态/根键排除与不支持的形态，当前不区分细项。
 
 请求声明 collaboration 命名空间时，先判冲突再原子改名为 collaboration-xy，只删 spawn_agent/send_message/followup_task 的 message.encrypted。tool_choice 仅支持缺省或 auto/none/required 字符串；对象选择、点号/双下划线请求历史身份、Chat 嵌套 function 形态均 unsupported、原样不转换。仅 applied 时，把顶层 instructions 与 developer/system 消息的文本（字符串或 input_text.text）里精确的 functions.collaboration. 同步替换成 functions.collaboration-xy.，避免寻址示例与声明失配；用户消息、工具输出和参数不替换。DevTextRewrites 记录本次精确字面串的实际替换次数，仅作为异常 Warn 的字段，不单独触发 Warn、不新增指标。回程三种身份回声统一恢复 namespace=collaboration 和裸叶名，仅符合声明、message 为非空明文且没有密文否决的消息调用补 encrypted_function_args:[]。非空标记、gAAAA 前缀或无空白长 base64 等可疑形态否决补标记；早先非空证据持续到该尝试结束。wait/list 等同 namespace 工具只恢复名字；未知私有叶名恢复身份、计 uncovered、不补标记。
 
-流式、JSON、SSE→JSON 共用本次尝试的冻结 plan，不跨请求继承。恢复身份不安全时本地终止：未提交返回 502、已提交发送协议终态，不下发私有名，不经 failover 重放。不改 IDs、arguments、output 正文或输入中的 agent_message/function_call_output 密文片段，已有密文历史不修复。上游拒绝沿用原有分类、修复与重试判断，不靠拒绝文案触发转换；仅在写给客户端前恢复 error.message/param、response.error.message/param 中的确切私有身份，状态码、type 与 code 不变。instructions 的已改写结构化回声也按冻结 plan 对称恢复。
+流式、JSON、SSE→JSON 共用本次尝试的冻结 plan，不跨请求继承。恢复身份不安全时本地终止：未提交返回 502、已提交发送协议终态，不下发私有名，不经 failover 重放。不改 IDs、arguments、output 正文或输入中的 agent_message/function_call_output 密文片段，已有密文历史不修复。上游拒绝沿用原有分类、修复与重试判断，不靠拒绝文案触发转换；仅在写给客户端前，以原始错误信封字节将字面别名 collaboration-xy 替换为 collaboration：非 2xx HTTP 错误体与 SSE type=error 的整段错误 data 均覆盖扁平/重复错误字段；response.failed 仅处理 response.error 原始值，response 对象的 error 键重复则按现有提交门禁安全终止。HTTP 状态、分类与重试语义不变。instructions 的已改写结构化回声也按冻结 plan 对称恢复。
 
 schema 兼容：工具 schema 清理器对精确名为 collaboration 的整个 namespace 跳过递归修复，包含 wait/list；其他工具的 null type、object union、null required、lookaround 修复不变。normalizeCodexTools 不递归 namespace。改动前清理器对真实 Codex 0.166 fixture 的顶层与 Lite additional_tools 声明均逐字节不变；该样本在 P1′ 关闭时没有额外变化。对原本需修复的其它 collaboration schema，豁免仍会让其保持原样，此行为独立于开关。
 
-灰度范围：已验证站为 d0c7a8 / c2a95e / b672e6，模型为 gpt-6.1-sol / gpt-6-astra，客户端为 Codex 0.166。同站账号须统一配置；账号开关表示该站对全局清单内全部模型均已验证，新增模型前须逐站补验。混池换号或软回退后，符合连续性条件的 API Key 会话仍继续转换；不满足其它资格的路由不由此放开。账号开关只决定新会话在哪些账号开始启用。已声明 collaboration 且 input 顶层历史包含 function_call、namespace=collaboration、name 为三个消息工具之一、encrypted_function_args 为空数组 [] 时，视同账号资格已满足，在任何其它资格合格的 API Key 账号上继续启用；不扫描 arguments/工具输出或用户正文。连续性只对 API Key 生效，OAuth 必须管理员显式开账号开关且验证前不要开启。该连续性识别不新增会话存储，不绕过总开关、功能开关、模型清单、真实 Codex 客户端、原生 HTTP、非摊平或原始 store/previous 排除。全停用（硬回退）的开→关续轮实测：d0c7a8、c2a95e 通过，b672e6 的账号 470 两次返回 cyber_policy。因此账号开关用于软回退：新会话不再启用，已有产物的会话继续；关总开关、功能开关或清空模型清单是硬回退，部分上游会拒绝已用 P1′ 的历史，此时需新开会话。
+灰度范围：已验证站为 d0c7a8 / c2a95e / b672e6，模型为 gpt-6.1-sol / gpt-6-astra，客户端为 Codex 0.166。同站账号须统一配置；账号开关表示该站对全局清单内全部模型均已验证，新增模型前须逐站补验。混池换号或软回退后，符合连续性条件的 API Key 会话仍继续转换；不满足其它资格的路由不由此放开。账号开关只决定新会话在哪些账号开始启用。已声明 collaboration 且 input 顶层历史包含 function_call、namespace=collaboration、name 为三个消息工具之一，且满足以下之一时，视同账号资格已满足：encrypted_function_args 为空数组 []；或该字段完全缺失，arguments 字符串为合法、顶层键唯一的 JSON 对象，顶层 message 是字符串且未命中现有可疑密文判定。encrypted_function_args 为非空、null 或其它类型均不满足连续性。满足条件后，在任何其它资格合格的 API Key 账号上继续启用；除读取该调用 arguments 的顶层 message 外，不递归嵌套参数、工具输出或用户正文。连续性信号是客户端可声明的协议条件，不是授权或账号隔离边界；客户端自带 [] 或符合条件的 message 历史也能触发，eligibility=continuity 不能证明历史来自网关，也不证明消息一定可投递。连续性只对 API Key 生效，OAuth 必须管理员显式开账号开关且验证前不要开启。该连续性识别不新增会话存储，不绕过总开关、功能开关、模型清单、真实 Codex 客户端、原生 HTTP、非摊平或原始 store/previous 排除。全停用（硬回退）的开→关续轮实测：d0c7a8、c2a95e 通过，b672e6 的账号 470 两次返回 cyber_policy。因此账号开关用于软回退：新会话不再启用，符合连续性协议条件的会话继续；关总开关、功能开关或清空模型清单是硬回退，部分上游会拒绝已用 P1′ 的历史，此时需新开会话。
+
+灰度池包含该会话路由可达的全部账号，而非仅当前分组：兜底分组与满载借用目标的 API Key 账号也须逐站逐模型验证。未验证 API Key 账号应从可达池中排除，关账号开关不能隔离连续性流量。同组或可达路由中的 OAuth 账号若开关关闭，对存量 P1′ 会话就是“开→关”，直连 OAuth 未预检，验证前应排除该路由。会话中途切换到清单外模型，或模型映射后得到清单外模型，等于对该请求做硬回退。
+
+预检补充：Codex 0.166 provider 名不是 OpenAI 时会删除历史 EFA，连续性使用上述“字段缺失 + message 形态”分支。该类 provider 的开→关续轮在 c2a95e、d0c7a8 的两个目标模型已闭环；b672e6 对非 OpenAI provider 的补跑持续 503 过载，没有续轮结论，不能从其它站推定安全。此前 b672e6 账号 470 的两次 cyber_policy 证据来自 OpenAI provider。
 
 提示缓存：持续启用且输入相同时，变换后的前缀稳定；使转换状态改变的开/关（含总开关、功能开关或模型清单变化）会使进行中会话下一请求从工具声明处起失效一次，之后同态稳定。只关账号开关时，已有产物的会话由连续性资格保持转换，不因此改变前缀。真实 Codex 0.166 的 58,104 字节样本中，首个差异在字节 19,695，位于 input[0] additional_tools 的 [46, 25,018) 区间；不据此推算其它会话的精确失效率。反复切换会重复失效，建议低峰、整站切换。
 
@@ -472,7 +476,7 @@ schema 兼容：工具 schema 清理器对精确名为 collaboration 的整个 n
 
 warn 级，进入运维页“系统日志”（`ops_system_logs`）：
 
-- `resilience.collab_plaintext`：conflict/invalid、vetoed/contradicted/uncovered 非零、恢复报错，或 applied 后本次 Forward 失败时记录；含 account_id、group_id、model、client_version、outcome、applied、eligibility（account/continuity，资格未通过时为空）、upstream_status（无响应时为 0）、headers_committed 与各计数（含 msg_opaque/msg_text、dev_text_rewrites）。正常提示替换不单独触发 Warn，不存正文/参数/密文/原始错误。
+- `resilience.collab_plaintext`：conflict/invalid、vetoed/contradicted/uncovered 非零、恢复报错，或 applied 后本次 Forward 失败且最终上游 HTTP 状态为 400–499（排除 429）时记录；含 account_id、group_id、model、client_version、outcome、applied、eligibility（account/continuity，资格未通过时为空）、upstream_status（无响应时为 0）、headers_committed 与各计数（含 msg_opaque/msg_text、dev_text_rewrites）。瞬时 5xx、429、网络故障或断流不单独触发这条失败 Warn；本地恢复错误及前述异常计数仍独立触发。正常提示替换不单独触发 Warn，不存正文/参数/密文/原始错误。
 
 - `balance_paused`（含账号、暂停时长与上游原文；0.4.12 起另含档位 `step`）；
 - `session_rebind`（P1-B 原因 `post_output_first_failure`，普通连击原因 `resil_failure_streak`，含会话哈希前缀、组、账号、类别、避开时长）、`last_resort`；
@@ -533,7 +537,7 @@ OpenAI 判慢降序与会话迁移的事件（见 §4.5）不带 `resilience.` �
 
 ## 6. 回退
 
-协作消息明文通道分两种回退。**软回退**：关闭目标账号开关，新会话不再启用；已带符合 §4.14 条件产物的会话仍在任何合格 API Key 账号继续，前缀不因账号开关而改变。**硬回退**：关闭韧性总开关、collaboration_plaintext.enabled 或清空 models，所有新尝试停止转换；已发出的尝试仍按冻结 plan 还原。已有历史不重标：全停用续轮实测 d0c7a8、c2a95e 通过，b672e6 的账号 470 两次 cyber_policy，遇此拒绝需新开会话。硬切换使下一请求从工具声明处起提示缓存失效一次，建议低峰、整站切换并保持同站账号一致。OAuth 尚未预检且不适用连续性，仅可管理员显式开账号开关，验证前不要开启。灰度池先排除未验证 API Key 账号，关账号开关不能隔离存量连续性流量。无需重启；schema 豁免不随开关回退。
+协作消息明文通道分两种回退。**软回退**：关闭目标账号开关，新会话不再启用；满足 §4.14 协议条件的会话（EFA=[]，或 EFA 缺失且 message 非可疑）仍在任何合格 API Key 账号继续，前缀不因账号开关而改变。**硬回退**：关闭韧性总开关、collaboration_plaintext.enabled 或清空 models，所有新尝试停止转换；已发出的尝试仍按冻结 plan 还原。已有历史不重标：全停用续轮实测 d0c7a8、c2a95e 通过，b672e6 的账号 470 两次 cyber_policy，遇此拒绝需新开会话。硬切换使下一请求从工具声明处起提示缓存失效一次，建议低峰、整站切换并保持同站账号一致。OAuth 尚未预检且不适用连续性，仅可管理员显式开账号开关，验证前不要开启。灰度池包括兜底分组与满载借用可达账号，须排除未验证 API Key 账号和未验证的 OAuth 路由；关账号开关不是隔离边界。存量会话落到关闭开关的 OAuth 或切换到清单外模型时也形成硬回退形态。非 OpenAI provider 续轮在 c2a95e、d0c7a8 已通过，b672e6 仍无该形态结论。无需重启；schema 豁免不随开关回退。
 
 - 单项关闭：在“网关韧性”卡中关闭对应能力，即时生效。各能力关闭后的行为见 runbook §6。0.4.4 新增的开关关闭后回到 0.4.3 的对应行为，不是 0.3.0（两处小例外：关闭 `failure.decision_v2` 后分类输入的证据补全仍保留，见下表；关闭 `errors.failed_frame_retry_after` 后用户余额不足与内容拒绝仍不带重试时间，见 §3）；关闭 `capability.stream_only_learning` 后已学到的记录不删除，按到期时间自然过期，期间重新开启仍然生效。
 - 状态拒绝的请求级分类、不换号与不罚号，以及 `state_rejection` 观测不受总开关影响，无新增设置。有限修复仍沿用原有触发条件与预算。

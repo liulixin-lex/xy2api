@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
@@ -32,7 +33,8 @@ func openAICollaborationEligible(c *gin.Context, a *Account, model string, trans
 		resilience.Current().CollaborationPlaintextModel(model)
 }
 
-// Inspect only protocol-level history items, never arguments or tool output.
+// Inspect only protocol-level calls and their top-level message argument, never
+// nested user JSON or tool output. This client-declared signal is not authorization.
 func openAICollaborationContinuity(body []byte) bool {
 	for _, item := range gjson.GetBytes(body, "input").Array() {
 		if item.Get("type").String() != "function_call" || item.Get("namespace").String() != codexCollaborationNamespace {
@@ -41,7 +43,21 @@ func openAICollaborationContinuity(body []byte) bool {
 		if _, ok := codexCollabMessageTools[item.Get("name").String()]; !ok {
 			continue
 		}
-		if efa := item.Get("encrypted_function_args"); efa.IsArray() && len(efa.Array()) == 0 {
+		if efa := item.Get("encrypted_function_args"); efa.Exists() {
+			if efa.IsArray() && len(efa.Array()) == 0 {
+				return true
+			}
+			continue
+		}
+		arguments := item.Get("arguments")
+		if arguments.Type != gjson.String || !gjson.Valid(arguments.String()) {
+			continue
+		}
+		parsed := gjson.Parse(arguments.String())
+		if !parsed.IsObject() || !codexCollabUniqueObject(parsed) {
+			continue
+		}
+		if message := parsed.Get("message"); message.Type == gjson.String && !openAICodexCollabMessageLooksOpaque(message.String()) {
 			return true
 		}
 	}
@@ -178,7 +194,8 @@ func (a *openAICollabAttempt) finish(ctx context.Context, c *gin.Context, accoun
 			resilience.Count(count.name, group, account.ID, count.label)
 		}
 	}
-	if s.Outcome == codexCollabConflict || s.Outcome == codexCollabInvalid || s.Vetoed+s.Contradicted+s.Uncovered > 0 || a.restoreFailed || (a.applied && forwardErr != nil) {
+	upstreamRejected := a.applied && forwardErr != nil && a.upstreamStatus >= http.StatusBadRequest && a.upstreamStatus < http.StatusInternalServerError && a.upstreamStatus != http.StatusTooManyRequests
+	if s.Outcome == codexCollabConflict || s.Outcome == codexCollabInvalid || s.Vetoed+s.Contradicted+s.Uncovered > 0 || a.restoreFailed || upstreamRejected {
 		fields := resilience.EventFields(ctx)
 		for i := 0; i+1 < len(fields); i += 2 {
 			if fields[i] == "model" {

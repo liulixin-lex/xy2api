@@ -3912,6 +3912,18 @@
     {
       "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
       "value": "func TestCollaborationForwardPublishesFinalStatsBeforeP0"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "!codexCollabUniqueObject(originalCollabRoot)"
+    },
+    {
+      "path": "backend/internal/service/openai_collaboration_plaintext.go",
+      "value": "efa := item.Get(\"encrypted_function_args\"); efa.Exists()"
+    },
+    {
+      "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
+      "value": "func TestCollaborationAttemptWarnExcludesTransientFailures"
     }
   ],
   "forbidden_module_paths": [

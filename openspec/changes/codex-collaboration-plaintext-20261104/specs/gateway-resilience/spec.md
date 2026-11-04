@@ -16,8 +16,8 @@ The gateway SHALL default collaboration_plaintext.enabled to false and models to
 
 #### Scenario: Original state exclusions
 
-- **GIVEN** the original request has store:true or a nonempty previous_response_id
-- **WHEN** OAuth compatibility normalization changes or removes these fields
+- **GIVEN** the original request has store:true, a nonempty previous_response_id or duplicate root keys
+- **WHEN** compatibility normalization changes/removes these fields or collapses duplicate keys
 - **THEN** P1′ SHALL remain unsupported and SHALL NOT transform the declaration.
 - **AND** non-string tool_choice, dotted/dunder request histories and Chat function shapes SHALL remain unsupported; only absent or auto/none/required tool_choice is supported.
 
@@ -28,7 +28,7 @@ The gateway SHALL default collaboration_plaintext.enabled to false and models to
 - **THEN** the original plan SHALL restore the canonical namespace and bare leaf name
 - **AND** nonempty encrypted evidence SHALL veto adding an empty encrypted_function_args marker.
 - **AND** known instructions echoes SHALL restore only the exact references rewritten by this plan.
-- **AND** final HTTP and SSE error message/param fields SHALL restore exact private identities, with original errors retained for classification, observations and retry decisions.
+- **AND** final non-2xx HTTP error envelopes and SSE type=error data SHALL replace the literal private alias in raw bytes, including flat and duplicate fields; response.failed SHALL replace only the raw response.error value, terminating locally if the response.error carrier is duplicated. Original errors SHALL remain the source for classification, observations and retry decisions; nil plans SHALL not rewrite.
 
 #### Scenario: Unsafe restoration
 
@@ -38,7 +38,8 @@ The gateway SHALL default collaboration_plaintext.enabled to false and models to
 
 #### Scenario: Continuity and soft rollback
 
-- **GIVEN** the request declares collaboration and a top-level input item has type=function_call, namespace=collaboration, one of the three message tool names and encrypted_function_args=[]
+- **GIVEN** the request declares collaboration and a top-level input item has type=function_call, namespace=collaboration, one of the three message tool names and either encrypted_function_args=[] or an absent encrypted_function_args with arguments decoding to a valid JSON object with unique top-level keys and a top-level string message that does not match the existing opaque-message predicate
+- **AND** nonempty, null or other typed encrypted_function_args SHALL NOT satisfy continuity, regardless of the message
 - **WHEN** the selected API Key account switch is off
 - **THEN** the gateway SHALL treat the account gate as satisfied and report eligibility=continuity, without relaxing any other gate or scanning nested prose.
 - **AND** OAuth with its account switch off SHALL remain observe-only even with matching history; OAuth SHALL require explicit administrator opt-in after separate prechecks.
@@ -51,13 +52,13 @@ The schema sanitizer SHALL skip the entire exact collaboration namespace. Other 
 
 ### Requirement: Bounded collaboration observations
 
-The gateway SHALL report attempt outcome/model, EFA marginal counts and action marginal counts separately. It SHALL deduplicate logical calls and retain earlier nonempty evidence. Calls/EFA SHALL count only the three message tools, excluding wait/list/interrupt. Observe-only calls SHALL expose msg=opaque|text shape counts for valid string messages. Statistics SHALL publish only at arm and finish, before P0 reads final attempt facts. Applied attempts returning an error SHALL warn with upstream_status and headers_committed. Warnings SHALL contain only metadata and counts.
+The gateway SHALL report attempt outcome/model, EFA marginal counts and action marginal counts separately. It SHALL deduplicate logical calls and retain earlier nonempty evidence. Calls/EFA SHALL count only the three message tools, excluding wait/list/interrupt. Observe-only calls SHALL expose msg=opaque|text shape counts for valid string messages. Statistics SHALL publish only at arm and finish, before P0 reads final attempt facts. Applied attempts returning an error SHALL add a failure warning only for upstream HTTP 400–499 excluding 429, with upstream_status and headers_committed. Network failures, 5xx and stream disconnects SHALL NOT independently trigger this warning; existing restore-failure and anomalous-stat warnings SHALL remain independent. Warnings SHALL contain only metadata and counts.
 
 Long-window acceptance SHALL use persistent state_rejection.collab_plaintext events and usage_logs grouped by account/model/UA as an approximate request denominator, without claiming exact eligible message coverage. Single-instance counters retain at most one hour and SHALL only support gray-release sampling.
 
 ### Requirement: Rollout and rollback constraints
 
-Operators SHALL keep accounts within the same upstream site consistently configured and precheck every model in the global list per site. Switching configuration can invalidate the ongoing prompt prefix once from the declaration onward. Existing sessions MAY be rejected after hard rollback; affected users MUST start a new session. The account switch SHALL provide soft rollback for new sessions while existing product-bearing sessions continue on otherwise eligible API Key accounts. Disabling master/feature or clearing models SHALL provide hard rollback for all new attempts. No server-side session storage SHALL be introduced; unvalidated API Key accounts MUST be excluded from the gray-release pool rather than relying on their account switch to stop continuity traffic. Codex version changes SHALL trigger state-rejection sampling by client_version.
+Operators SHALL keep accounts within the same upstream site consistently configured and precheck every model in the global list per site. Switching configuration can invalidate the ongoing prompt prefix once from the declaration onward. Existing sessions MAY be rejected after hard rollback; affected users MUST start a new session. The account switch SHALL provide soft rollback for new sessions while existing product-bearing sessions continue on otherwise eligible API Key accounts. Disabling master/feature or clearing models SHALL provide hard rollback for all new attempts. Continuity SHALL be a client-declared protocol condition, not authorization: client-supplied empty markers or eligible plaintext-shaped histories MAY satisfy it and eligibility=continuity SHALL NOT imply gateway provenance. No server-side session storage SHALL be introduced; unvalidated API Key accounts MUST be excluded from the gray-release pool rather than relying on their account switch to stop continuity traffic. The reachable pool SHALL include fallback groups and full-load borrowing targets. OAuth accounts with the switch off SHALL be treated as an on-to-off transition for an existing session and excluded until prechecked. Switching to an unlisted final mapped model SHALL be treated as hard rollback for that request. Codex version changes SHALL trigger state-rejection sampling by client_version.
 
 ### Requirement: P0 state rejection classification
 
