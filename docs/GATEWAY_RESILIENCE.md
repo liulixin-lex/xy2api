@@ -374,7 +374,7 @@ HTTP 流已向客户端输出可见内容后，快层确认账号发生读流出
 
 `session.post_output_rebind` 缺省为 true，**仅 OpenAI 账号**生效，以最终上游账号的平台（`PlatformOpenAI`）为准。Anthropic、Grok 等其他平台的输出后失败仍按原连击规则处理。仅已确认输出后的流内失败事件（例如 `response.failed`）、读流出错、缺终态携带专用会话失败信号；沿用 `ReportStreamFailure` 的 attempt 标识去重：HTTP 请求内同一失败只立即改绑一次，WebSocket 连接按 turn 计，每个 turn 可各触发一次。动作复用现有连击改绑：按属主删除绑定、加入会话避开、标记会话、把账号加入本请求的避开集合。避开时长沿用 `session.avoid_seconds`，缺省 600 秒。输出前失败仍需达到 `session.streak_threshold`（缺省 2），不降低全局阈值；客户端取消、客户端错误和内容安全拒绝仍不罚号。
 
-带密文片段的请求退回原有连击规则（`session.streak_threshold`，缺省连续 2 次）：只识别 `input[]` 内 `agent_message.content[]` 或数组形态 `function_call_output.output[]` 中的 `type=encrypted_content`，按 JSON 解码后的结构匹配，合法 Unicode 转义同样有效，非法 JSON 不命中。第一次真实输出后失败不立即改绑或避开原号，达到连击阈值才改绑；账号输出后冷却计数、同站暂停记账和其他失败类改绑不变。HTTP 读取请求上的密文保护标记；WebSocket 原生池、透传及 HTTP 桥按每个 turn 的 payload 更新实际用于输出后处理的上下文，前一轮的密文标记不带到后一轮。不带这些片段的请求，真实输出后失败仍首次即改绑。
+带密文片段的请求退回原有连击规则（`session.streak_threshold`，缺省连续 2 次）：只识别 `input[]` 内 `agent_message.content[]` 或数组形态 `function_call_output.output[]` 中的 `type=encrypted_content`，按 JSON 解码后的结构匹配，合法 Unicode 转义同样有效，非法 JSON 不命中。第一次真实输出后失败不立即改绑或避开原号，达到连击阈值才改绑；账号输出后冷却计数、同站暂停记账和其他失败类改绑不变。HTTP 读取请求上的密文保护标记。WebSocket 原生池、透传及 HTTP 桥在连接内保留密文标记，并按客户端每个 turn 的 payload 更新实际用于输出后处理的上下文：带非空 `previous_response_id` 的增量轮继承上一轮标记，并识别本轮新增密文；不带该 ID 的全量轮只按本轮 payload 判定，无密文时可以清除标记。首帧没有上一轮，即使带 `previous_response_id` 也只按本帧 payload 判定。同一轮内部重试保留本轮标记。未受该保护的请求，真实输出后失败仍首次即改绑。
 
 会话状态族拒绝只排除三项动作：P1-B（含它带来的会话避开）、账号输出后冷却和会话连击。HTTP SSE 与 WebSocket 的裸 `error`、`response.failed` 或二者先后出现均适用。状态拒绝按以下顺序识别：
 

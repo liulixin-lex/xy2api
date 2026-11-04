@@ -21,11 +21,11 @@
 
 ### Requirement: P1-B 输出后首次失败改绑
 
-系统 SHALL 在 `session.post_output_rebind` 开启时，仅为最终上游账号平台为 OpenAI（`PlatformOpenAI`）且不带下述密文片段的请求，在输出后的流内失败事件、读流出错与缺终态传递专用会话失败信号，首次即执行现有连击改绑动作：按属主删除绑定、加入会话避开、标记会话和本请求的避开集合。系统 SHALL 沿用 `ReportStreamFailure` 的 attempt 标识去重，HTTP 请求内同一失败只立即改绑一次，WebSocket 连接按 turn 计；避开时长 SHALL 沿用 `session.avoid_seconds`（缺省 600 秒）。
+系统 SHALL 在 `session.post_output_rebind` 开启时，仅为最终上游账号平台为 OpenAI（`PlatformOpenAI`）且未受下述密文保护的请求，在输出后的流内失败事件、读流出错与缺终态传递专用会话失败信号，首次即执行现有连击改绑动作：按属主删除绑定、加入会话避开、标记会话和本请求的避开集合。系统 SHALL 沿用 `ReportStreamFailure` 的 attempt 标识去重，HTTP 请求内同一失败只立即改绑一次，WebSocket 连接按 turn 计；避开时长 SHALL 沿用 `session.avoid_seconds`（缺省 600 秒）。
 
 #### Scenario: 输出后信号与输出前失败隔离
 
-- **WHEN** 不带上述密文片段的 OpenAI 请求在输出后首次发生上述三种已确认失败之一
+- **WHEN** 未受上述密文保护的 OpenAI 请求在输出后首次发生上述三种已确认失败之一
 - **THEN** 系统 SHALL 立即执行改绑，记一条 Warn `resilience.session_rebind`，原因与会话改绑计数标签均为 `post_output_first_failure`
 - **AND** 同请求的重复信号 SHALL 不重复改绑
 - **AND** 输出前失败 SHALL 仍按原有连击阈值（缺省 2）处理
@@ -35,8 +35,23 @@
 - **WHEN** 请求 `input[]` 中 `agent_message.content[]` 或数组形态 `function_call_output.output[]` 含 JSON 解码后 `type=encrypted_content` 的片段，且发生真实输出后失败
 - **THEN** 系统 SHALL 发送普通会话失败信号并沿用连击阈值（缺省 2），首次不立即改绑或会话避开，达到阈值才改绑
 - **AND** 账号输出后冷却计数、同站暂停记账及其他失败类改绑 SHALL 保持生效
-- **AND** HTTP SHALL 读取请求标记；WS 原生池、透传和 HTTP 桥 SHALL 按每个 turn 的 payload 更新输出后路径实际读取的上下文，前一轮标记不得遗留
-- **AND** 带密文的 turn 之后，不带密文的 turn SHALL 在首次符合条件的输出后失败时触发 P1-B
+- **AND** HTTP SHALL 读取请求标记；WS 原生池、透传和 HTTP 桥 SHALL 按客户端每个 turn 的 payload 更新输出后路径实际读取的上下文：带非空 `previous_response_id` 时继承上一轮密文标记，并识别本轮新增密文；不带该 ID 时只按本轮 payload 重判
+- **AND** 同一轮内部重试 SHALL 保留本轮标记，不因内部剥离续链 ID 而解除保护
+
+#### Scenario: WS 增量轮继承密文保护
+
+- **WHEN** 同一连接的首轮带密文并正常完成，下一轮带 `previous_response_id` 和新条目但不再携带密文片段
+- **THEN** WS 原生池、透传和 HTTP 桥 SHALL 继承密文保护，下一轮首次真实输出后失败不立即改绑或避开原号，仍按连击规则处理
+
+#### Scenario: WS 全量轮清除密文保护
+
+- **WHEN** 同一连接的首轮带密文并正常完成，下一轮既不带 `previous_response_id` 也不带密文片段
+- **THEN** WS 原生池、透传和 HTTP 桥 SHALL 清除上一轮标记，下一轮首次符合条件的输出后失败触发 P1-B
+
+#### Scenario: WS 首帧没有可继承的密文标记
+
+- **WHEN** 新连接的首帧已带 `previous_response_id`
+- **THEN** 系统 SHALL 只按本帧 payload 判定密文标记，有密文时退回连击规则，无密文时保留 P1-B
 
 #### Scenario: 会话状态族拒绝不触发输出后三项动作
 
@@ -45,7 +60,7 @@
 - **AND** 请求最终失败、运维记录与真实用量 SHALL 照常保留，输出前分类与换号规则 SHALL 保持不变
 - **AND** 系统 SHALL 依次匹配专用 code `client_tool_continuation_unavailable` / `invalid_encrypted_content` / `encrypted_context_invalid`、现有 `IsEncryptedContentRejection`；仅 code 为空时 SHALL 用 `opaque conversation state` / `unrecognized conversation state` / `encrypted content is invalid for this conversation` 补判，不得仅凭 `for item amsg_` 或 `invalid for this conversation` 排除
 - **AND** 门槛 v3 错误维、近期表现与份额健康 SHALL 仍按运维分类计数；无包装 S1 的原分类为 `TRANSIENT`、计入，生产中已核对的带 `invalid_request_error` 包装 S1 为 `CLIENT_ERROR`、不计入
-- **AND** 读流出错与缺终态等真实断流 SHALL 继续执行输出后保护；只有请求带密文片段时 P1-B 退回上述连击规则
+- **AND** 读流出错与缺终态等真实断流 SHALL 继续执行输出后保护；请求受密文保护（含 WS 增量轮继承）时 P1-B 退回上述连击规则
 
 #### Scenario: 非 OpenAI 账号保持原连击规则
 
@@ -55,7 +70,7 @@
 
 #### Scenario: 同一 WebSocket 连接的多个 turn
 
-- **WHEN** 同一 WebSocket 连接内两个不带上述密文片段的 turn 分别发生输出后失败
+- **WHEN** 同一 WebSocket 连接内两个未受上述密文保护的 turn 分别发生输出后失败
 - **THEN** 每个 turn SHALL 各执行一次 P1-B 改绑
 - **AND** 同一 turn 内的重复失败信号 SHALL 不重复动作
 

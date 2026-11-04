@@ -7,20 +7,19 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
-	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
 
 const encryptedRebindRequest = `{"type":"response.create","model":"gpt-5.1","input":[{"type":"agent_message","content":[{"type":"encrypted_content","encrypted_content":"opaque"}]}]}`
+const fullPlainRebindRequest = `{"type":"response.create","model":"gpt-5.1","input":[{"role":"user","content":"new full request"}]}`
 const plainRebindRequest = `{"type":"response.create","model":"gpt-5.1","previous_response_id":"resp_guard_1","input":[{"role":"user","content":"continue"}]}`
 
 func TestPostOutputEncryptedContentUsesFailureStreak(t *testing.T) {
@@ -119,106 +118,129 @@ func (c *encryptedRebindWSConn) WriteJSON(ctx context.Context, value any) error 
 	return c.WriteFrame(ctx, coderws.MessageText, payload)
 }
 
-func TestPostOutputEncryptedContentWebSocketTurns(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	for _, mode := range []string{OpenAIWSIngressModeCtxPool, OpenAIWSIngressModePassthrough} {
-		t.Run(mode, func(t *testing.T) {
-			withResilienceSettings(t, nil)
-			account := passthroughLifecycleAccount()
-			account.Extra["openai_apikey_responses_websockets_v2_mode"] = mode
-			cache := &mockGatewayCacheForPlatform{sessionBindings: map[string]int64{"sess": account.ID}}
-			gw := &GatewayService{cache: cache, resilience: NewResilienceService(nil, newMemResilienceStore())}
-			rec := &encryptedRebindRecorder{SessionRecorder: gw.gatewaySessionRecorder(), postOutput: make(chan bool, 2)}
-			ctx, cancel := context.WithCancel(postOutputRequest(rec))
-			defer cancel()
-			upstream := newStagedPassthroughConn()
-			cfg := passthroughLifecycleConfig()
-			cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
-			cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
-			cfg.Gateway.OpenAIWS.IngressInterTurnIdleTimeoutSeconds = 5
-			svc := newPassthroughLifecycleService(cfg, upstream)
-			if mode == OpenAIWSIngressModeCtxPool {
-				pool := newOpenAIWSConnPool(cfg)
-				pool.setClientDialerForTest(&stagedPassthroughDialer{conn: &encryptedRebindWSConn{upstream}})
-				svc.openaiWSPool = pool
-				defer pool.Close()
-			}
-			server, serverErr := startPassthroughLifecycleServer(t, ctx, svc, account)
-			defer server.Close()
-			client := dialPassthroughLifecycleClientWithPayload(t, server, encryptedRebindRequest)
-			defer func() { _ = client.CloseNow() }()
-			before := sessionRebindMetric(account.ID, "post_output_first_failure")
-			for turn := 1; turn <= 2; turn++ {
-				if turn > 1 {
-					writeCtx, stop := context.WithTimeout(ctx, 3*time.Second)
-					err := client.Write(writeCtx, coderws.MessageText, []byte(plainRebindRequest))
-					stop()
-					require.NoError(t, err)
-				}
-				requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
-				upstream.Send(`{"type":"response.output_text.delta","delta":"partial"}`)
-				upstream.Send(`{"type":"response.failed","response":{"id":"resp_guard_1","status":"failed","error":{"code":"server_error","message":"upstream failed"}}}`)
-				for _, eventType := range []string{"response.output_text.delta", "response.failed"} {
-					frame, err := readPassthroughLifecycleFrame(t, client, 3*time.Second)
-					require.NoError(t, err)
-					require.Equal(t, eventType, gjson.GetBytes(frame, "type").String())
-				}
-				select {
-				case postOutput := <-rec.postOutput:
-					require.Equal(t, turn == 2, postOutput, "only the plaintext turn uses P1-B")
-				case <-time.After(3 * time.Second):
-					t.Fatal("WS turn did not report the failure")
-				}
-				if turn == 1 {
-					require.Equal(t, account.ID, cache.sessionBindings["sess"])
-					require.False(t, resilience.StateFrom(ctx).Avoided(account.ID))
-				} else {
-					require.NotContains(t, cache.sessionBindings, "sess")
-					require.True(t, resilience.StateFrom(ctx).Avoided(account.ID))
-					require.Equal(t, before+1, sessionRebindMetric(account.ID, "post_output_first_failure"))
-				}
-			}
-			_ = client.CloseNow()
-			cancel()
-			select {
-			case <-serverErr:
-			case <-time.After(3 * time.Second):
-				t.Fatal("WS handler did not exit")
-			}
+func TestOpenAIEncryptedContentForWSTurn(t *testing.T) {
+	for _, tc := range []struct {
+		name, payload string
+		previous      bool
+		want          bool
+	}{
+		{"encrypted first frame", encryptedRebindRequest, false, true},
+		{"first frame with previous ID has no inherited state", plainRebindRequest, false, false},
+		{"encrypted first frame with previous ID", `{"type":"response.create","previous_response_id":"resp_old","input":[{"type":"function_call_output","output":[{"type":"encrypted_content"}]}]}`, false, true},
+		{"delta inherits encrypted chain", plainRebindRequest, true, true},
+		{"full plaintext clears encrypted chain", fullPlainRebindRequest, true, false},
+		{"delta adds encrypted content", `{"type":"response.create","previous_response_id":"resp_old","input":[{"type":"function_call_output","output":[{"type":"encrypted_content"}]}]}`, false, true},
+		{"response envelope inherits chain", `{"type":"response.create","response":{"previous_response_id":"resp_old","input":[]}}`, true, true},
+		{"blank previous ID clears chain", `{"type":"response.create","previous_response_id":"  ","input":[]}`, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, openAIEncryptedContentForWSTurn([]byte(tc.payload), tc.previous))
 		})
 	}
 }
 
-func TestPostOutputEncryptedContentHTTPBridgeTurns(t *testing.T) {
+func TestPostOutputEncryptedContentWebSocketTurns(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	rl, _, account, r := newPenaltyFixture(t, PlatformOpenAI)
-	r.store = newMemResilienceStore()
-	cache := &mockGatewayCacheForPlatform{sessionBindings: map[string]int64{"sess": account.ID}}
-	gw := &GatewayService{cache: cache, resilience: r}
-	ctx := postOutputRequest(gw.gatewaySessionRecorder())
-	// Deliberately inherit a first-turn marker: the plaintext turn must replace it.
-	ctx = WithOpenAIEncryptedContentMigrationGuard(ctx, []byte(encryptedRebindRequest))
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil).WithContext(ctx)
-	svc := &OpenAIGatewayService{cfg: &config.Config{}, rateLimitService: rl}
-	before := sessionRebindMetric(account.ID, "post_output_first_failure")
-	for turn, body := range []string{encryptedRebindRequest, plainRebindRequest} {
-		svc.httpUpstream = &httpUpstreamRecorder{resp: &http.Response{
-			StatusCode: http.StatusOK, Header: make(http.Header),
-			Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n")),
-		}}
-		writes := 0
-		_, err := svc.proxyOpenAIWSHTTPBridgeTurn(ctx, c, account, "sk-test", []byte(body), len(body), "gpt-5.1", "", "", "", "", turn+1, func([]byte) error { writes++; return nil })
-		require.Error(t, err, "a missing terminal remains a stream failure")
-		require.Positive(t, writes)
-		require.Len(t, r.postOutput.failures[account.ID], turn+1)
-		if turn == 0 {
-			require.Equal(t, account.ID, cache.sessionBindings["sess"])
-			require.False(t, resilience.StateFrom(ctx).Avoided(account.ID))
-		} else {
-			require.NotContains(t, cache.sessionBindings, "sess")
-			require.True(t, resilience.StateFrom(ctx).Avoided(account.ID))
-			require.Equal(t, before+1, sessionRebindMetric(account.ID, "post_output_first_failure"))
+	for _, mode := range []string{OpenAIWSIngressModeCtxPool, OpenAIWSIngressModePassthrough, OpenAIWSIngressModeHTTPBridge} {
+		for _, second := range []struct {
+			name, payload string
+			wantRebind    bool
+		}{
+			{"delta inherits protection", plainRebindRequest, false},
+			{"full plaintext clears protection", fullPlainRebindRequest, true},
+		} {
+			t.Run(mode+"/"+second.name, func(t *testing.T) {
+				withResilienceSettings(t, nil)
+				account := passthroughLifecycleAccount()
+				account.Extra["openai_apikey_responses_websockets_v2_mode"] = mode
+				cache := &mockGatewayCacheForPlatform{sessionBindings: map[string]int64{"sess": account.ID}}
+				r := NewResilienceService(nil, newMemResilienceStore())
+				gw := &GatewayService{cache: cache, resilience: r}
+				rec := &encryptedRebindRecorder{SessionRecorder: gw.gatewaySessionRecorder(), postOutput: make(chan bool, 2)}
+				// A full turn must also override the first-frame request guard.
+				connectionCtx := WithOpenAIEncryptedContentMigrationGuard(postOutputRequest(rec), []byte(encryptedRebindRequest))
+				ctx, cancel := context.WithCancel(connectionCtx)
+				defer cancel()
+				upstream := newStagedPassthroughConn()
+				cfg := passthroughLifecycleConfig()
+				cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
+				cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
+				cfg.Gateway.OpenAIWS.IngressInterTurnIdleTimeoutSeconds = 5
+				svc := newPassthroughLifecycleService(cfg, upstream)
+				if mode == OpenAIWSIngressModeCtxPool {
+					pool := newOpenAIWSConnPool(cfg)
+					pool.setClientDialerForTest(&stagedPassthroughDialer{conn: &encryptedRebindWSConn{upstream}})
+					svc.openaiWSPool = pool
+					defer pool.Close()
+				}
+				const delta = `{"type":"response.output_text.delta","delta":"partial"}`
+				const completed = `{"type":"response.completed","response":{"id":"resp_guard_1","status":"completed","output":[]}}`
+				const failed = `{"type":"response.failed","response":{"id":"resp_guard_2","status":"failed","error":{"code":"server_error","message":"upstream failed"}}}`
+				if mode == OpenAIWSIngressModeHTTPBridge {
+					cfg.Gateway.OpenAIWS.HTTPBridgeEnabled = true
+					httpUpstream := &httpUpstreamSequenceRecorder{}
+					for _, terminal := range []string{completed, failed} {
+						httpUpstream.responses = append(httpUpstream.responses, &http.Response{
+							StatusCode: http.StatusOK,
+							Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+							Body:       io.NopCloser(strings.NewReader("data: " + delta + "\n\ndata: " + terminal + "\n\n")),
+						})
+					}
+					svc.httpUpstream = httpUpstream
+				}
+				server, serverErr := startPassthroughLifecycleServer(t, ctx, svc, account)
+				defer server.Close()
+				client := dialPassthroughLifecycleClientWithPayload(t, server, encryptedRebindRequest)
+				defer func() { _ = client.CloseNow() }()
+				before := sessionRebindMetric(account.ID, "post_output_first_failure")
+				streakBefore := sessionRebindMetric(account.ID, "resil_failure_streak")
+				// The encrypted first turn succeeds. Only the second turn fails,
+				// so a rebind cannot be explained by the ordinary two-failure streak.
+				for turn, terminal := range []string{completed, failed} {
+					if turn > 0 {
+						writeCtx, stop := context.WithTimeout(ctx, 3*time.Second)
+						err := client.Write(writeCtx, coderws.MessageText, []byte(second.payload))
+						stop()
+						require.NoError(t, err)
+					}
+					if mode != OpenAIWSIngressModeHTTPBridge {
+						requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
+						upstream.Send(delta)
+						upstream.Send(terminal)
+					}
+					for _, eventType := range []string{"response.output_text.delta", gjson.Get(terminal, "type").String()} {
+						frame, err := readPassthroughLifecycleFrame(t, client, 3*time.Second)
+						require.NoError(t, err)
+						require.Equal(t, eventType, gjson.GetBytes(frame, "type").String())
+					}
+				}
+				select {
+				case postOutput := <-rec.postOutput:
+					require.Equal(t, second.wantRebind, postOutput)
+				case <-time.After(3 * time.Second):
+					t.Fatal("WS turn did not report the failure")
+				}
+				group := int64(25)
+				if second.wantRebind {
+					require.NotContains(t, cache.sessionBindings, "sess")
+					require.True(t, resilience.StateFrom(ctx).Avoided(account.ID))
+					require.Contains(t, r.sessionAvoid(ctx, &group, "sess"), account.ID)
+					require.Equal(t, before+1, sessionRebindMetric(account.ID, "post_output_first_failure"))
+				} else {
+					require.Equal(t, account.ID, cache.sessionBindings["sess"])
+					require.False(t, resilience.StateFrom(ctx).Avoided(account.ID))
+					require.Empty(t, r.sessionAvoid(ctx, &group, "sess"))
+					require.Equal(t, before, sessionRebindMetric(account.ID, "post_output_first_failure"))
+				}
+				require.Equal(t, streakBefore, sessionRebindMetric(account.ID, "resil_failure_streak"))
+				_ = client.CloseNow()
+				cancel()
+				select {
+				case <-serverErr:
+				case <-time.After(3 * time.Second):
+					t.Fatal("WS handler did not exit")
+				}
+			})
 		}
 	}
 }

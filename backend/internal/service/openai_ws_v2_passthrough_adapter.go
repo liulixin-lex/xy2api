@@ -976,7 +976,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	var upstreamRelayConn openaiwsv2.FrameConn = relayUpstreamFrameConn
 	completedTurns := atomic.Int32{}
 	var turnHasEncryptedContent atomic.Bool
-	turnHasEncryptedContent.Store(openAIRequestHasEncryptedState(originalFirstClientMessage))
+	turnHasEncryptedContent.Store(openAIEncryptedContentForWSTurn(originalFirstClientMessage, false))
 	turnLifecycle := newOpenAIWSPassthroughTurnLifecycle(true)
 	var acceptedTurnStartedAt atomic.Pointer[time.Time]
 	clientFrameConn := &openAIWSClientFrameConn{
@@ -1171,7 +1171,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				SetOpsUpstreamModel(c, actualModel)
 				responseCreateAtCopy := responseCreateAt
 				acceptedTurnStartedAt.Store(&responseCreateAtCopy)
-				turnHasEncryptedContent.Store(openAIRequestHasEncryptedState(originalPayload))
+				turnHasEncryptedContent.Store(openAIEncryptedContentForWSTurn(originalPayload, turnHasEncryptedContent.Load()))
 				acceptedTurn = true
 			}
 			return out, blocked, policyErr
