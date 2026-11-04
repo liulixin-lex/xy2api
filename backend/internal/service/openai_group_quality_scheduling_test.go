@@ -28,6 +28,8 @@ func (*schedulingQualityView) SlowerThanFastLine(int64, int64) (int, int, bool) 
 
 func (*schedulingQualityView) MigrationTarget(int64, int64) bool { return false }
 
+func (*schedulingQualityView) ExpectedP90Ms(int64, int64) (int, bool) { return 0, false }
+
 type qualityCapacityCache struct {
 	schedulerTestConcurrencyCache
 	start         time.Time

@@ -391,6 +391,9 @@ type GroupQualityGateView interface {
 	// MigrationTarget reports whether the account meets the quality part of the
 	// v3 migration-target rule for the group. Pinned accounts get no exception.
 	MigrationTarget(groupID, accountID int64) bool
+	// ExpectedP90Ms returns the account's predicted first-output P90 for the
+	// group (GM30 × e_G); ok is false when either factor is unavailable.
+	ExpectedP90Ms(groupID, accountID int64) (ms int, ok bool)
 }
 
 type emptyGroupQualityGateView struct{}
@@ -406,6 +409,8 @@ func (emptyGroupQualityGateView) SlowerThanFastLine(int64, int64) (int, int, boo
 }
 
 func (emptyGroupQualityGateView) MigrationTarget(int64, int64) bool { return false }
+
+func (emptyGroupQualityGateView) ExpectedP90Ms(int64, int64) (int, bool) { return 0, false }
 
 // NewEmptyGroupQualityGateView creates the safe view used until the evaluator is installed.
 func NewEmptyGroupQualityGateView() GroupQualityGateView {

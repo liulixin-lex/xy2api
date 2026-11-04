@@ -2088,6 +2088,8 @@ func (wsPinnedQualityView) SlowerThanFastLine(int64, int64) (int, int, bool) {
 
 func (wsPinnedQualityView) MigrationTarget(int64, int64) bool { return false }
 
+func (wsPinnedQualityView) ExpectedP90Ms(int64, int64) (int, bool) { return 0, false }
+
 func wsResponseAccountCacheKey(responseID string) string {
 	digest := sha256.Sum256([]byte(responseID))
 	return "openai:response:" + hex.EncodeToString(digest[:])
@@ -2154,6 +2156,8 @@ func (*wsTurnQualityView) SlowerThanFastLine(int64, int64) (int, int, bool) {
 }
 
 func (*wsTurnQualityView) MigrationTarget(int64, int64) bool { return false }
+
+func (*wsTurnQualityView) ExpectedP90Ms(int64, int64) (int, bool) { return 0, false }
 
 func TestOpenAIResponsesWebSocket_QualityTurnAdmissionThroughHooks(t *testing.T) {
 	for _, row := range []struct {

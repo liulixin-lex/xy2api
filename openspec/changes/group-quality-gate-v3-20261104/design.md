@@ -78,8 +78,12 @@ type GroupQualityGateView interface {
 	Enabled(groupID int64) bool
 	OrderTier(groupID, accountID int64) int        // 启用组返回 0/1/2，未启用组返回 0
 	MigrationTarget(groupID, accountID int64) bool // §3 目标条件中的质量部分
+	ExpectedP90Ms(groupID, accountID int64) (ms int, ok bool) // 预计 P90 = GM30 × e_G，供同倍率排序；不可用时 ok=false
 }
 ```
+
+- 判慢查询（调度侧提供，状态接口消费）：`OpenAIGatewayService.OpenAIAccountLatencyHoldStatus(accountID int64, now time.Time) (until time.Time, models []string)`；门槛服务通过 `SetLatencyHoldLookup` 接收同签名函数。
+- 首字单元退化第 3 级的“相邻两档合并”固定为 [<20k, 20–60k] 与 [60–120k, ≥120k]（与回放一致）。
 
 `Vetoed` 与 `SlowerThanFastLine` 随 v2 逻辑删除。
 

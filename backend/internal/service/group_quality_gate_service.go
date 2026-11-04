@@ -153,6 +153,11 @@ func (s *GroupQualityGateService) MigrationTarget(groupID, accountID int64) bool
 	return false
 }
 
+// ExpectedP90Ms is implemented by the v3 evaluator.
+func (s *GroupQualityGateService) ExpectedP90Ms(groupID, accountID int64) (int, bool) {
+	return 0, false
+}
+
 func (s *GroupQualityGateService) SlowerThanFastLine(groupID, accountID int64) (warmTTFTP90Ms, fastWarmTTFTP90Ms int, migrate bool) {
 	if s == nil || !s.Enabled(groupID) {
 		return 0, 0, false
