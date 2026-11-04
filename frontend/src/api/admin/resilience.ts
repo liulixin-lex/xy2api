@@ -19,10 +19,19 @@ export interface GatewayResilienceSettings {
     /** 0.4.4: only real capacity signals count as capacity (W2.1). */
     decision_v2: boolean
   }
-  session: { enabled: boolean; streak_threshold: number; streak_window_seconds: number; avoid_seconds: number }
+  session: {
+    enabled: boolean
+    streak_threshold: number
+    streak_window_seconds: number
+    avoid_seconds: number
+    /** Rebind on the first failure after output instead of waiting for the streak; needs session.enabled. */
+    post_output_rebind: boolean
+  }
   last_resort: { enabled: boolean }
   /** Claude accounts slow to first output on follow-up turns rank last within their priority. */
   anthropic_latency_hold: { enabled: boolean }
+  /** Pause for 5 minutes only the accounts of one upstream site that broke a stream within 60 seconds of each other. */
+  same_site_hold: { enabled: boolean }
   balance: { enabled: boolean; pause_seconds: number }
   budget: {
     enabled: boolean

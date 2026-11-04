@@ -105,6 +105,7 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			createdAt,
 			sqlmock.AnyArg(), // origin_group_id
 			sqlmock.AnyArg(), // end_to_end_first_output_ms
+			sqlmock.AnyArg(), // attempt_first_output_ms
 			sqlmock.AnyArg(), // anthropic_cache_ttl_policy
 			sqlmock.AnyArg(), // anthropic_cache_ttl_applied
 		).
@@ -204,6 +205,7 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			createdAt,
 			sqlmock.AnyArg(), // origin_group_id
 			sqlmock.AnyArg(), // end_to_end_first_output_ms
+			sqlmock.AnyArg(), // attempt_first_output_ms
 			sqlmock.AnyArg(), // anthropic_cache_ttl_policy
 			sqlmock.AnyArg(), // anthropic_cache_ttl_applied
 		).
@@ -287,8 +289,8 @@ func TestPrepareUsageLogInsert_PersistsNativeCompactionV2WithoutChangingRequestT
 
 	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
 	// created_at and origin_group_id follow native_compaction_v2.
-	require.Equal(t, "boolean", usageLogInsertArgTypes[len(usageLogInsertArgTypes)-6])
-	require.Equal(t, true, prepared.args[len(prepared.args)-6])
+	require.Equal(t, "boolean", usageLogInsertArgTypes[len(usageLogInsertArgTypes)-7])
+	require.Equal(t, true, prepared.args[len(prepared.args)-7])
 	require.Equal(t, int16(service.RequestTypeStream), prepared.args[30])
 	require.Equal(t, service.RequestTypeStream, log.RequestType)
 	require.True(t, log.Stream)
@@ -972,6 +974,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			now,
 			sql.NullInt64{},  // origin_group_id
 			sql.NullInt64{},  // end_to_end_first_output_ms
+			sql.NullInt64{},  // attempt_first_output_ms
 			sql.NullString{}, // anthropic_cache_ttl_policy
 			sql.NullBool{},   // anthropic_cache_ttl_applied
 		}})
@@ -1056,6 +1059,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			now,
 			sql.NullInt64{},  // origin_group_id
 			sql.NullInt64{},  // end_to_end_first_output_ms
+			sql.NullInt64{},  // attempt_first_output_ms
 			sql.NullString{}, // anthropic_cache_ttl_policy
 			sql.NullBool{},   // anthropic_cache_ttl_applied
 		}})
@@ -1123,12 +1127,14 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			now,
 			sql.NullInt64{},  // origin_group_id
 			sql.NullInt64{},  // end_to_end_first_output_ms
+			sql.NullInt64{},  // attempt_first_output_ms
 			sql.NullString{}, // anthropic_cache_ttl_policy
 			sql.NullBool{},   // anthropic_cache_ttl_applied
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
 		require.Equal(t, "flex", *log.ServiceTier)
+		require.Nil(t, log.AttemptFirstOutputMs)
 		require.Equal(t, service.RequestTypeStream, log.RequestType)
 		require.True(t, log.Stream)
 		require.False(t, log.OpenAIWSMode)
@@ -1189,14 +1195,17 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // session_id
 			false,             // native_compaction_v2
 			now,
-			sql.NullInt64{},  // origin_group_id
-			sql.NullInt64{},  // end_to_end_first_output_ms
-			sql.NullString{}, // anthropic_cache_ttl_policy
-			sql.NullBool{},   // anthropic_cache_ttl_applied
+			sql.NullInt64{},                          // origin_group_id
+			sql.NullInt64{Valid: true, Int64: 28000}, // end_to_end_first_output_ms
+			sql.NullInt64{Valid: true, Int64: 5000},  // attempt_first_output_ms
+			sql.NullString{},                         // anthropic_cache_ttl_policy
+			sql.NullBool{},                           // anthropic_cache_ttl_applied
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
 		require.Equal(t, "priority", *log.ServiceTier)
+		require.Equal(t, int64(28000), *log.EndToEndFirstOutputMs)
+		require.Equal(t, int64(5000), *log.AttemptFirstOutputMs)
 	})
 
 }

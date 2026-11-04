@@ -454,6 +454,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	usageLog.DurationMs = &durationMs
 	usageLog.FirstTokenMs = result.FirstTokenMs
 	usageLog.EndToEndFirstOutputMs = resilience.StateFrom(ctx).EndToEndFirstOutputMs()
+	usageLog.AttemptFirstOutputMs = resilience.StateFrom(ctx).AttemptFirstOutputMs()
 	usageLog.CreatedAt = time.Now()
 	// 设置渠道信息
 	usageLog.ChannelID = optionalInt64Ptr(input.ChannelID)

@@ -1175,6 +1175,9 @@ func ProvideResilienceService(
 	openai.resilience = s
 	s.SetGroupQualityGateView(groupQualityGateView)
 	openai.SetGroupQualityGateView(groupQualityGateView)
+	if gate, ok := groupQualityGateView.(*GroupQualityGateService); ok {
+		gate.SetLatencyHoldLookup(openai.OpenAIAccountLatencyHoldStatus)
+	}
 	s.pricingRestricted = func(ctx context.Context, groupID int64, model string) bool {
 		return gateway.checkChannelPricingRestriction(ctx, &groupID, model)
 	}

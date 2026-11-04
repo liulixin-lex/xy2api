@@ -103,6 +103,24 @@
   ],
   "contracts": [
     {
+      "item": "post-output session rebind reason",
+      "sources": [
+        "backend/internal/service/resilience_session.go"
+      ],
+      "pattern": "\"(post_output_first_failure)\"",
+      "match": "word",
+      "doc": "docs/GATEWAY_RESILIENCE.md"
+    },
+    {
+      "item": "usage attempt first output column",
+      "sources": [
+        "backend/ent/schema/usage_log.go"
+      ],
+      "pattern": "field\\.Int64\\(\"(attempt_first_output_ms)\"\\)",
+      "match": "word",
+      "doc": "docs/USAGE_METRICS.md"
+    },
+    {
       "item": "resilience counter",
       "sources": [
         "backend/internal/resilience/metrics.go"
@@ -172,7 +190,7 @@
       "sources": [
         "backend/internal/service/**/*.go"
       ],
-      "pattern": "group_quality_gate\\.(?:eject|trial|recover|guard_hold|last_resort|migrate|evaluate_failed)",
+      "pattern": "group_quality_gate\\.(?:tier|last_resort|migrate|evaluate_failed)",
       "doc": "docs/GROUP_QUALITY_GATE.md"
     },
     {
@@ -476,6 +494,22 @@
       ]
     },
     {
+      "pattern": "\\b(?:strictestQualityLimits|decisionMetricsFromWindow|accountQualityMetricItems|groupQualityTierText|groupQualityTooltip|QUALITY_HEADROOM_WARN|ZERO_CACHE_ALERT_RATE|ZERO_CACHE_MIN_SAMPLES|pinnedMemberScope|pinnedCandidates|qualityGatePoliciesEqual|qualityGateFormToPolicy|GroupQualityAccountMetrics|GroupQualityMemberMetrics|GroupQualityBadgeKind|GroupQualityGateReason)\\b",
+      "reason": "2026-11-04 group quality gate v3 (WP8): the admin UI edits only the v3 sub-object and shows per-group tiers with three dimensions; the v2 breaker, fast-line, guard, headroom, zero-cache and pinned-editing helpers and types were removed",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
+    },
+    {
+      "pattern": "admin\\.groupQualityGate\\.(?:state\\.(?:eligible|ejected|ejectedUntil|trial|trialUntil|guardHeld)|reason\\.|panel\\.|metrics\\.|tooltip\\.(?:tierFast|tierOther|fastLine|fastLineNoBest|strikes|guardHeld|ejectionWindow|headroom|warmTtft|belowThreshold|notEnoughSamples)\\b|pinned(?:Hint|Count|Search|NoMatch)\\b|members(?:Loading|Empty|Failed)\\b|errorRateRange\\b|fastTtftMin\\b|fastTtftBelowMax\\b|maxWarmTtft|fastWarmTtft)",
+      "reason": "2026-11-04 group quality gate v3 (WP8): the v2 breaker, observation, guard, fast-line and pinned-editing wording was removed with the v2 UI; v3 shows passing/unknown/retest/failing/pinned and per-dimension states",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
+    },
+    {
       "pattern": "\\b(?:first_token_avg_ms|first_token_samples|recent_errors|cache_samples|first_token_window_seconds|errors_window_seconds|cache_window_seconds)\\b",
       "reason": "recent-health v2 removed the old account-list response fields and window declarations; only migration/history and explicit assertions that the fields are absent may name them",
       "allowed": [
@@ -507,6 +541,36 @@
       "allowed": [
         "docs/PROJECT_MEMORY.md",
         "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
+    },
+    {
+      "pattern": "\\bgroup_quality_gate\\.(?:eject|trial|recover|guard_hold)\\b",
+      "reason": "2026-11-04 quality gate v3 replaces hard exclusion, trial, recovery and floor-guard events with tier transitions",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md",
+        "openspec/changes/group-quality-gate-20261031/**",
+        "openspec/changes/group-quality-gate-v2-20261102/**"
+      ]
+    },
+    {
+      "pattern": "\\b(?:groupQualityDefaultErrorRate|groupQualityDefaultEjectMs|groupQualityDefaultFastMs|groupQualityFastLineMarginMs|groupQualityTrialDuration|groupQualityTierHold|groupQualityFastRetest|groupQualityTrialFailure|groupQualityBackoff|groupQualityZeroCacheCondition|groupQualityTierFromData|resolveGroupQualityTier|accumulateQualityTrial|applyQualityGuard|GroupQualityMetrics|GroupQualityMetricView|GroupQualityDecisionMetrics|GroupQualityMemberResult|effective_fast_warm_ttft_p90_ms|warm_zero_cache_rate|guard_held|WarmSamples|WarmTTFTP90Ms|ZeroCacheSamples|WarmZeroCacheRate|warm_samples|warm_ttft_p90_ms|zero_cache_samples|account_metrics|DataTier|TierAt|FastAt|TrialEndReason|LastEjectionEnd|TrialRequests|TrialFailures)\\b",
+      "reason": "2026-11-04 quality gate v3 removes the v2 evaluator/DTO-only identifiers; persisted legacy policy fields remain supported for rollback",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md",
+        "openspec/changes/group-quality-gate-20261031/**",
+        "openspec/changes/group-quality-gate-v2-20261102/**"
+      ]
+    },
+    {
+      "pattern": "\\b(?:groupQualityGateVeto|group_quality_ejected)\\b",
+      "reason": "Group quality v3 uses ordering and guarded migration, never a quality admission veto.",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md",
+        "openspec/changes/group-quality-gate-20261031/**",
+        "openspec/changes/group-quality-gate-v2-20261102/**"
       ]
     }
   ],

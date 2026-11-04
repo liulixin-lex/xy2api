@@ -86,10 +86,51 @@ func openAIRequestHasEncryptedAgentMessage(body []byte) bool {
 		if item.Get("type").String() != "agent_message" {
 			continue
 		}
-		for _, part := range item.Get("content").Array() {
-			if part.Get("type").String() == "encrypted_content" {
-				return true
-			}
+		if openAIContentHasEncryptedPart(item.Get("content")) {
+			return true
+		}
+	}
+	return false
+}
+
+func openAIContentHasEncryptedPart(content gjson.Result) bool {
+	for _, part := range content.Array() {
+		if part.Get("type").String() == "encrypted_content" {
+			return true
+		}
+	}
+	return false
+}
+
+// WithOpenAIEncryptedContentMigrationGuard keeps issuer-bound collaboration and
+// tool output on their sticky owner. Hard admission and failure rebinds still apply.
+func WithOpenAIEncryptedContentMigrationGuard(ctx context.Context, body []byte) context.Context {
+	if openAIRequestHasEncryptedState(body) {
+		return withOpenAINoStickyMigration(ctx)
+	}
+	return ctx
+}
+
+func openAIRequestHasEncryptedState(body []byte) bool {
+	if !gjson.ValidBytes(body) {
+		return false
+	}
+	input := openAIRequestPayloadView(body).Get("input")
+	if !input.IsArray() {
+		return false
+	}
+	for _, item := range input.Array() {
+		var content gjson.Result
+		switch item.Get("type").String() {
+		case "agent_message":
+			content = item.Get("content")
+		case "function_call_output":
+			content = item.Get("output")
+		default:
+			continue
+		}
+		if content.IsArray() && openAIContentHasEncryptedPart(content) {
+			return true
 		}
 	}
 	return false

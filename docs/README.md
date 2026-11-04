@@ -24,7 +24,7 @@
 | [`CLAUDE_CACHE_FALLBACK.md`](CLAUDE_CACHE_FALLBACK.md) | Claude 自动缓存（按分组） |
 | [`ANTHROPIC_CACHE_TTL.md`](ANTHROPIC_CACHE_TTL.md) | Claude 缓存 TTL：管理员默认、Key 偏好、最终请求、计费与迁移 |
 | [`OPENAI_QUALITY_ROUTING.md`](OPENAI_QUALITY_ROUTING.md) | OpenAI 会话质量路由 |
-| [`GROUP_QUALITY_GATE.md`](GROUP_QUALITY_GATE.md) | OpenAI 分组质量门槛、指标、保底、管理接口与恢复 |
+| [`GROUP_QUALITY_GATE.md`](GROUP_QUALITY_GATE.md) | OpenAI 分组质量门槛 v3、三维统计、软性三档、管理接口与恢复 |
 | [`OPENAI_IQ_CHECK.md`](OPENAI_IQ_CHECK.md) | OpenAI 智商检测：按“账号 × 模型”检测与冷却、参数化题目、自报模型识别、升级与回退 |
 | [`CODEX_STATE.md`](CODEX_STATE.md) | Codex STATE 与智商检测（按出站模型联动） |
 | [`CODEX_STATE_RELIABILITY.md`](CODEX_STATE_RELIABILITY.md) | STATE 可靠性控制与策略 |
@@ -75,6 +75,7 @@
 
 | 变更 | 内容 | 状态 |
 |---|---|---|
+| [`group-quality-gate-v3-20261104`](../openspec/changes/group-quality-gate-v3-20261104/) | OpenAI 分组质量门槛 v3：账号级三维统计与软性三档、统一迁出、低倍率优先按组、判慢递增、同站断流暂停、输出后首败改绑、`usage_logs` 尝试级首字列；[韧性规格](../openspec/changes/group-quality-gate-v3-20261104/specs/gateway-resilience/spec.md) | 开发中（集成分支 `feat/gate-v3-20261104`）；WP1 新列已完成 |
 | [`add-support-chat-widget-20261031`](../openspec/changes/add-support-chat-widget-20261031/) | 客户服务：悬浮在线客服气泡、会话与图片、客服收件箱与提醒，工单并入 | 随 0.5.0 发布（PR #181） |
 | [`gate-post-output-attempts-20261102`](../openspec/changes/gate-post-output-attempts-20261102/) | 门槛漏记补齐：HTTP 输出后由快层确认的断流、停滞与带内失败事件补记为上游失败尝试，按发送边界去重并沿直接登记分类 | 基础变更随 0.5.1 发布（PR #188）；§4 带内失败补漏待发布；上线后只读验收见其 tasks 与 `GATEWAY_RESILIENCE.md` §4.11 |
 | [`group-quality-gate-v2-20261102`](../openspec/changes/group-quality-gate-v2-20261102/) | 分组质量门槛第二版：按用户可见首字判定、两档排序与实时快档线、限时观察与恢复入口、门槛组慢号迁出 | 随 0.5.1 发布（PR #185）；上线 24 小时复核与可用账号数告警见其 tasks |

@@ -55,7 +55,8 @@
       "openspec/changes/group-quality-gate-20261031/**",
       "openspec/changes/add-support-chat-widget-20261031/**",
       "openspec/changes/group-quality-gate-v2-20261102/**",
-      "openspec/changes/gate-post-output-attempts-20261102/**"
+      "openspec/changes/gate-post-output-attempts-20261102/**",
+      "openspec/changes/group-quality-gate-v3-20261104/**"
     ],
     "manual_merge": [
       "Makefile",
@@ -825,11 +826,11 @@
     },
     {
       "path": "backend/internal/service/openai_ws_forwarder_ingress.go",
-      "value": "s.resilienceOpenAIWSFailedAfterOutput(ctx, account, turn, eventType, upstreamMessage, wroteDownstream, account.IsOpenAIOAuthLike())"
+      "value": "s.resilienceOpenAIWSFailedAfterOutput(postOutputCtx, account, turn, eventType, upstreamMessage, wroteDownstream, account.IsOpenAIOAuthLike())"
     },
     {
       "path": "backend/internal/service/openai_ws_v2_passthrough_adapter.go",
-      "value": "s.resilienceOpenAIWSFailedAfterOutput(ctx, account, int(completedTurns.Load())+1, eventType, payload, wroteDownstream, true)"
+      "value": "s.resilienceOpenAIWSFailedAfterOutput(postOutputCtx, account, int(completedTurns.Load())+1, eventType, payload, wroteDownstream, true)"
     },
     {
       "path": "backend/internal/service/gateway_upstream_response.go",
@@ -2820,16 +2821,88 @@
       "value": "nullInt64(log.EndToEndFirstOutputMs)"
     },
     {
+      "path": "backend/internal/repository/usage_log_repo_insert.go",
+      "value": "nullInt64(log.AttemptFirstOutputMs)"
+    },
+    {
+      "path": "backend/internal/service/resilience_post_output.go",
+      "value": "st.SessionFailureAfterOutput(ctx, account.ID, resilience.CategoryTransient)"
+    },
+    {
+      "path": "backend/internal/service/resilience_post_output.go",
+      "value": "if confirmedPostOutput && account.Platform == PlatformOpenAI && !openAIEncryptedContentRebindGuarded(ctx) {"
+    },
+    {
+      "path": "backend/internal/service/resilience_post_output.go",
+      "value": "if openAIConversationStateRejection(payload, message) {"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_forwarder_ingress.go",
+      "value": "postOutputCtx := withOpenAIEncryptedContentTurnGuard(ctx, turnHasEncryptedContent)"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_forwarder_ingress.go",
+      "value": "turnHasEncryptedContent = openAIEncryptedContentForWSTurn(currentBridgePayload.rawForHash, turnHasEncryptedContent)"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_forwarder_ingress.go",
+      "value": "result, bridgeErr := s.proxyOpenAIWSHTTPBridgeTurn(\n\t\t\t\tpostOutputCtx,"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_forwarder_ingress.go",
+      "value": "turnHasEncryptedContent = openAIEncryptedContentForWSTurn(currentClientPayload, turnHasEncryptedContent)"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_v2_passthrough_adapter.go",
+      "value": "turnHasEncryptedContent.Store(openAIEncryptedContentForWSTurn(originalFirstClientMessage, false))"
+    },
+    {
+      "path": "backend/internal/service/openai_ws_v2_passthrough_adapter.go",
+      "value": "turnHasEncryptedContent.Store(openAIEncryptedContentForWSTurn(originalPayload, turnHasEncryptedContent.Load()))"
+    },
+    {
+      "path": "backend/internal/service/resilience_post_output.go",
+      "value": "return context.WithValue(ctx, openAINoStickyMigrationKey{}, encrypted)"
+    },
+    {
+      "path": "backend/internal/service/resilience_post_output.go",
+      "value": "rl.resilience.noteOpenAISameSiteStreamFailure(account, at)"
+    },
+    {
+      "path": "backend/internal/service/openai_account_runtime_block_fastpath.go",
+      "value": "s.resilience.sameSiteHold.held(account, time.Now())"
+    },
+    {
+      "path": "backend/internal/service/resilience_session.go",
+      "value": "s.resilience.sameSiteHold.until(acc, now)"
+    },
+    {
+      "path": "backend/internal/service/resilience_session.go",
+      "value": "if s != nil && s.resilience != nil && s.resilience.sameSiteHold.held(account, now) {"
+    },
+    {
       "path": "backend/internal/repository/usage_log_repo_query.go",
       "value": "log.EndToEndFirstOutputMs = &v"
+    },
+    {
+      "path": "backend/internal/repository/usage_log_repo_query.go",
+      "value": "log.AttemptFirstOutputMs = &v"
     },
     {
       "path": "backend/internal/service/openai_gateway_usage.go",
       "value": "usageLog.EndToEndFirstOutputMs = resilience.StateFrom(ctx).EndToEndFirstOutputMs()"
     },
     {
+      "path": "backend/internal/service/openai_gateway_usage.go",
+      "value": "usageLog.AttemptFirstOutputMs = resilience.StateFrom(ctx).AttemptFirstOutputMs()"
+    },
+    {
       "path": "backend/internal/service/gateway_usage_billing.go",
       "value": "resilience.StateFrom(ctx).EndToEndFirstOutputMs()"
+    },
+    {
+      "path": "backend/internal/service/gateway_usage_billing.go",
+      "value": "resilience.StateFrom(ctx).AttemptFirstOutputMs()"
     },
     {
       "path": "backend/internal/service/openai_first_output_timeout.go",
@@ -3089,7 +3162,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
-      "value": "if reason != resilience.ReasonCapabilityStreamOnly && reason != \"group_quality_ejected\" {"
+      "value": "if reason != resilience.ReasonCapabilityStreamOnly {"
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
@@ -3109,7 +3182,7 @@
     },
     {
       "path": "backend/internal/service/openai_account_scheduler.go",
-      "value": "groupQualityGateVeto(ctx, account)"
+      "value": "pools := s.service.openAIQualityPools(req.GroupID, filtered, req.RequestedModel)"
     },
     {
       "path": "backend/internal/service/openai_ws_forwarder_support.go",
@@ -3121,7 +3194,7 @@
     },
     {
       "path": "backend/internal/service/share_scheduling_openai.go",
-      "value": "groupQualityGateVeto(ctx, acc)"
+      "value": "d := s.orderOpenAIShareQuality(in.groupID, in.model, accounts, sharesched.Plan(req, cands))"
     },
     {
       "path": "backend/internal/service/resilience_session.go",
@@ -3209,15 +3282,15 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
-      "value": "// Legacy candidate admission reports group_quality_ejected through its filter stats.\n\tif vetoed, reason := groupQualityGateVeto(ctx, account); vetoed {"
+      "value": "if view.Enabled(order.groupID) {"
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
-      "value": "// Legacy sticky admission rejects the owner before returning it to a caller.\n\tif vetoed, _ := groupQualityGateVeto(ctx, account); vetoed {"
+      "value": "stickyAccountID, migrated = s.migrateOpenAILatencyHeldOwner("
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
-      "value": "// Legacy load-aware sticky admission must not retain an ejected owner.\n\t\t\tif vetoed, _ := groupQualityGateVeto(ctx, account); vetoed {"
+      "value": "if order.tiers != nil {"
     },
     {
       "path": "backend/internal/service/openai_quality_routing.go",
@@ -3241,7 +3314,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
-      "value": "key.qualityTier = qualityTiers[item.account.ID]\n\t\t\tkey.nearCapacity = openAIAccountNearCapacity(item)"
+      "value": "qualityTier: qualityTiers[item.account.ID], held: held[item.account.ID].Held"
     },
     {
       "path": "backend/internal/service/openai_quality_routing.go",
@@ -3402,6 +3475,22 @@
     {
       "path": "backend/internal/handler/openai_gateway_handler.go",
       "value": "ctx = h.gatewayService.WithOpenAIGuardianParentAffinity(ctx, c, firstMessage, reqModel)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "c.Request = c.Request.WithContext(service.WithOpenAIEncryptedContentMigrationGuard(c.Request.Context(), body))"
+    },
+    {
+      "path": "backend/internal/handler/openai_chat_completions.go",
+      "value": "c.Request = c.Request.WithContext(service.WithOpenAIEncryptedContentMigrationGuard(c.Request.Context(), body))"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "service.WithOpenAIEncryptedContentMigrationGuard(ctx, wsAttemptMessage)"
+    },
+    {
+      "path": "backend/internal/service/openai_guardian_affinity.go",
+      "value": "func WithOpenAIEncryptedContentMigrationGuard(ctx context.Context, body []byte) context.Context"
     },
     {
       "path": "backend/internal/service/openai_gateway_forward.go",
@@ -3622,6 +3711,38 @@
     {
       "path": "backend/internal/service/gateway_scheduling.go",
       "value": "s.anthropicLatencyHoldSnapshotForOutboundModel(candidate.account, model, time.Now())"
+    },
+    {
+      "path": "backend/internal/service/openai_quality_migration.go",
+      "value": "cache.CompareAndSwapSessionAccountID("
+    },
+    {
+      "path": "backend/internal/service/openai_quality_migration.go",
+      "value": "cooldown.note(key, time.Now())"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "req.StickyAccountID, migrated = s.service.migrateOpenAILatencyHeldOwner("
+    },
+    {
+      "path": "backend/internal/service/anthropic_account_latency_hold.go",
+      "value": "state.recordWithPolicy(account.ID, openAIAccountModelTransientModel(model), sample, now, 0.35, false)"
+    },
+    {
+      "path": "backend/internal/service/openai_account_latency_hold.go",
+      "value": "s.recordWithPolicy(accountID, model, sample, now, openAIAccountLatencySlowFraction, true)"
+    },
+    {
+      "path": "backend/internal/repository/gateway_cache.go",
+      "value": "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end"
+    },
+    {
+      "path": "backend/internal/service/share_scheduling_openai.go",
+      "value": "if !lastResort && g.sameSiteHeld(acc, now)"
+    },
+    {
+      "path": "backend/internal/service/share_scheduling_openai.go",
+      "value": "if gates.sameSiteHeld(acc, now)"
     }
   ],
   "forbidden_module_paths": [
@@ -6096,7 +6217,7 @@
     {
       "id": "xy-openai-group-quality-scheduling",
       "path": "backend/internal/handler/openai_profit_slot_recheck_test.go",
-      "literal": "quality veto/"
+      "literal": "quality does not veto/"
     },
     {
       "id": "xy-openai-group-quality-scheduling",
@@ -6105,8 +6226,8 @@
     },
     {
       "id": "xy-openai-group-quality-scheduling",
-      "path": "backend/internal/handler/openai_gateway_handler_test.go",
-      "literal": "func TestOpenAIResponsesWebSocket_QualityGateDoesNotLeakPinnedExemptionToConnection(t *testing.T) {"
+      "path": "backend/internal/service/openai_gate_v3_test.go",
+      "literal": "func TestGateV3Migration(t *testing.T) {"
     },
     {
       "id": "xy-openai-group-quality-scheduling",
@@ -6332,6 +6453,86 @@
       "id": "xy-recovery-observability",
       "path": "backend/internal/handler/ops_error_logger_test.go",
       "literal": "func TestOpsErrorLoggerMiddleware_RecordsConfirmedPostOutputFailureWhenClientCancels"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_gate_v3_test.go",
+      "literal": "func TestGateV3FiveLatencyPartitionPaths(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_gate_v3_test.go",
+      "literal": "func TestGateV3AdvancedPoolsAndShare(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_gate_v3_test.go",
+      "literal": "func TestGateV3LowRateScope(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_gate_v3_test.go",
+      "literal": "func TestGateV3AdvancedMigration(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_gate_v3_test.go",
+      "literal": "func TestGateV3LatencyEscalation(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_gate_v3_test.go",
+      "literal": "func TestGateV3LatencyBoundariesAndClaudeUnchanged(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/repository/gateway_cache_atomic_test.go",
+      "literal": "func TestGateV3CacheCompareAndSwapBinding(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_gate_v3_test.go",
+      "literal": "func TestGateV3MigrationRechecksOnlyOrderedFreeCandidates(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_encrypted_migration_test.go",
+      "literal": "func TestOpenAIRequestHasEncryptedState(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_encrypted_migration_test.go",
+      "literal": "func TestWithOpenAIEncryptedContentMigrationGuard(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_encrypted_migration_test.go",
+      "literal": "func TestEncryptedStateKeepsStickyOwnerAcrossSchedulers(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_gate_v3_redteam_test.go",
+      "literal": "func TestGateV3ShareSameSiteHoldOverridesSoftSpill(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_gate_v3_redteam_test.go",
+      "literal": "func TestGateV3ShareLatencyOrdering(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_gate_v3_redteam_test.go",
+      "literal": "func TestGateV3PredictionOrderTransitivityAndPermutations(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_gate_v3_redteam_test.go",
+      "literal": "func TestGateV3SameRateSelectionUsesPrediction(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_gate_v3_redteam_test.go",
+      "literal": "func TestGateV3LatencyHoldStartedWarnFields(t *testing.T) {"
     }
   ]
 }

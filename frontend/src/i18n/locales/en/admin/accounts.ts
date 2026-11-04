@@ -992,7 +992,7 @@ export default {
       recoverState: 'Recover State',
       recoverStateHint: 'Used to recover error, rate-limit, and temporary unschedulable runtime state.',
       recoverStateSuccess: 'Account state recovered successfully',
-      recoverStateSuccessGate: 'Account state recovered. The group quality gate will show it as observing after the next evaluation (about 1 minute).',
+      recoverStateSuccessGate: 'Account state recovered. Its gate state and recent failures are cleared; after the next evaluation (about 1 minute) it shows as never measured: "Unknown", or "Retest" in strict groups.',
       recoverStateFailed: 'Failed to recover account state',
       fallbackActive: 'Fallback',
       fallbackActiveTip: 'Origin proxy {origin} expired',

@@ -44,12 +44,12 @@ func (c *profitCountingConcurrencyCache) DecrementAccountWaitCount(context.Conte
 
 type slotQualityView struct{}
 
-func (slotQualityView) Vetoed(_, accountID int64) bool { return accountID == 1 }
-func (slotQualityView) OrderTier(int64, int64) int     { return 0 }
-func (slotQualityView) Enabled(int64) bool             { return false }
-func (slotQualityView) SlowerThanFastLine(int64, int64) (int, int, bool) {
-	return 0, 0, false
-}
+func (slotQualityView) OrderTier(int64, int64) int { return 2 }
+func (slotQualityView) Enabled(int64) bool         { return true }
+
+func (slotQualityView) MigrationTarget(int64, int64) bool { return false }
+
+func (slotQualityView) ExpectedP90Ms(int64, int64) (int, bool) { return 0, false }
 
 func (c *profitCountingConcurrencyCache) ReleaseAccountSlot(context.Context, int64, string) error {
 	c.accountReleases.Add(1)
@@ -164,7 +164,7 @@ func TestAcquireResponsesAccountSlotProfitRecheck(t *testing.T) {
 		release()
 	})
 	for _, path := range []string{"acquired", "quick", "queued"} {
-		t.Run("quality veto/"+path, func(t *testing.T) {
+		t.Run("quality does not veto/"+path, func(t *testing.T) {
 			qualityGateway := &service.OpenAIGatewayService{}
 			qualityGateway.SetGroupQualityGateView(slotQualityView{})
 			cache := &profitCountingConcurrencyCache{queued: path == "queued"}
@@ -180,14 +180,11 @@ func TestAcquireResponsesAccountSlotProfitRecheck(t *testing.T) {
 			}
 			started := false
 			release, result := h.acquireResponsesAccountSlot(c, &groupID, "", selection, false, &started, zap.NewNop())
-			require.Equal(t, openAISlotAcquireProfitVetoed, result)
-			require.Nil(t, release)
+			require.Equal(t, openAISlotAcquireOK, result)
+			require.NotNil(t, release)
+			release()
 			require.Zero(t, w.Body.Len())
 			require.Equal(t, int64(1), cache.accountReleases.Load())
-			excluded := map[int64]struct{}{}
-			count := 0
-			require.True(t, recordOpenAIProfitVeto(excluded, 1, &count))
-			require.Contains(t, excluded, int64(1))
 			if path == "queued" {
 				require.Equal(t, int64(1), cache.waitAdds.Load())
 				require.Equal(t, int64(1), cache.waitRemoves.Load())

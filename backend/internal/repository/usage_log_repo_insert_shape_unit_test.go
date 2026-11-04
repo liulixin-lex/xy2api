@@ -50,6 +50,7 @@ func requireStaticInsertMatchesArgTypes(t *testing.T, query string) {
 		}
 	}
 	require.Equal(t, want, columns, "INSERT column list must match usageLogInsertArgTypes")
+	require.Contains(t, m[1], "attempt_first_output_ms")
 
 	seen := make(map[int]struct{}, want)
 	for _, ph := range usageLogPlaceholderRe.FindAllStringSubmatch(m[2], -1) {
@@ -129,7 +130,7 @@ func TestPrepareUsageLogInsert_UpstreamRequestIDArgWiring(t *testing.T) {
 	})
 	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
 
-	idx := len(prepared.args) - 8 // TTL policy/applied and end_to_end_first_output_ms follow origin_group_id
+	idx := len(prepared.args) - 9 // TTL policy/applied and both first-output columns follow origin_group_id
 	arg, ok := prepared.args[idx].(sql.NullString)
 	require.True(t, ok, "upstream_request_id arg should be sql.NullString, got %T", prepared.args[idx])
 	require.True(t, arg.Valid)
@@ -142,4 +143,27 @@ func TestPrepareUsageLogInsert_UpstreamRequestIDArgWiring(t *testing.T) {
 	require.False(t, nullArg.Valid, "absent upstream request id must be NULL")
 
 	require.Contains(t, usageLogSelectColumns, "upstream_request_id")
+}
+
+func TestPrepareUsageLogInsert_AttemptFirstOutputArgWiring(t *testing.T) {
+	for _, value := range []*int64{nil, new(int64(0)), new(int64(5000))} {
+		log := &service.UsageLog{RequestID: "attempt-first-output", APIKeyID: 1, AttemptFirstOutputMs: value}
+		prepared := prepareUsageLogInsert(log)
+		idx := len(prepared.args) - 3 // Both Anthropic TTL columns follow this value.
+		require.Equal(t, "bigint", usageLogInsertArgTypes[idx])
+		arg, ok := prepared.args[idx].(sql.NullInt64)
+		require.True(t, ok)
+		require.Equal(t, value != nil, arg.Valid)
+		if value != nil {
+			require.Equal(t, *value, arg.Int64)
+		}
+		key := usageLogBatchKey(log.RequestID, log.APIKeyID)
+		batch, args := buildUsageLogBatchInsertQuery([]string{key}, map[string]usageLogInsertPrepared{key: prepared})
+		require.Equal(t, 3, strings.Count(batch, "attempt_first_output_ms"), "CTE, INSERT and SELECT must all carry the column")
+		require.Equal(t, arg, args[idx+1], "batch prepends the synthetic input index")
+		bestEffort, args := buildUsageLogBestEffortInsertQuery([]usageLogInsertPrepared{prepared})
+		require.Equal(t, 3, strings.Count(bestEffort, "attempt_first_output_ms"))
+		require.Equal(t, arg, args[idx])
+	}
+	require.Contains(t, usageLogSelectColumns, "end_to_end_first_output_ms, attempt_first_output_ms, anthropic_cache_ttl_policy")
 }

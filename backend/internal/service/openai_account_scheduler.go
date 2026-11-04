@@ -45,24 +45,28 @@ const (
 )
 
 type cachedOpenAIAdvancedSchedulerSetting struct {
-	lowUpstreamRatePriorityEnabled bool
-	oauthSchedulingRateMultiplier  *float64
-	enabled                        bool
-	stickyWeightedEnabled          bool
-	subscriptionPriorityEnabled    bool
-	lbTopKOverride                 int
-	weightOverrides                map[string]float64
-	expiresAt                      int64
+	lowUpstreamRatePriorityEnabled  bool
+	lowUpstreamRatePriorityScope    string
+	lowUpstreamRatePriorityGroupIDs []int64
+	oauthSchedulingRateMultiplier   *float64
+	enabled                         bool
+	stickyWeightedEnabled           bool
+	subscriptionPriorityEnabled     bool
+	lbTopKOverride                  int
+	weightOverrides                 map[string]float64
+	expiresAt                       int64
 }
 
 type openAIAdvancedSchedulerRuntimeSettings struct {
-	lowUpstreamRatePriorityEnabled bool
-	oauthSchedulingRateMultiplier  *float64
-	enabled                        bool
-	stickyWeightedEnabled          bool
-	subscriptionPriorityEnabled    bool
-	lbTopKOverride                 int
-	weightOverrides                map[string]float64
+	lowUpstreamRatePriorityEnabled  bool
+	lowUpstreamRatePriorityScope    string
+	lowUpstreamRatePriorityGroupIDs []int64
+	oauthSchedulingRateMultiplier   *float64
+	enabled                         bool
+	stickyWeightedEnabled           bool
+	subscriptionPriorityEnabled     bool
+	lbTopKOverride                  int
+	weightOverrides                 map[string]float64
 }
 
 var openAIAdvancedSchedulerSettingCache atomic.Value // *cachedOpenAIAdvancedSchedulerSetting
@@ -486,6 +490,23 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		}
 	}
 
+	// Quality migration is independent of the legacy low-rate switch. Protocol
+	// ownership and all target/cooldown rules are shared with legacy selection.
+	if s.service.GroupQualityGateView().Enabled(derefGroupID(req.GroupID)) && !req.PreserveStickyBinding && !req.DisableStickyEscape {
+		owner := req.StickyAccountID
+		if owner <= 0 {
+			owner, _ = s.service.getStickySessionAccountID(ctx, req.GroupID, req.SessionHash)
+		}
+		migrationCtx := withOpenAIStickyMigrationGuard(ctx, req.PreviousResponseID, req.RequiredTransport)
+		migrationCtx = withOpenAILegacyStickyCapacity(migrationCtx, req.RequiredTransport, req.RequiredImageCapability)
+		var migrated *AccountSelectionResult
+		req.StickyAccountID, migrated = s.service.migrateOpenAILatencyHeldOwner(migrationCtx, req.GroupID, req.Platform, req.SessionHash, req.RequestedModel, owner, req.ExcludedIDs, req.RequireCompact, req.RequiredCapability, false)
+		if migrated != nil {
+			decision.Layer = openAIAccountScheduleLayerSessionSticky
+			decision.SelectedAccountID, decision.SelectedAccountType = migrated.Account.ID, migrated.Account.Type
+			return migrated, decision, nil
+		}
+	}
 	if !req.StickyWeighted {
 		selection, escapedSticky, err := s.selectBySessionHash(ctx, req)
 		if err != nil {
@@ -557,11 +578,6 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	}
 	account, err := s.service.getSchedulableAccount(ctx, accountID)
 	if err != nil || account == nil {
-		clearBinding()
-		return nil, false, nil
-	}
-	// Advanced sticky validation drops ejected owners so load balancing can rebind them.
-	if vetoed, _ := groupQualityGateVeto(ctx, account); vetoed {
 		clearBinding()
 		return nil, false, nil
 	}
@@ -909,7 +925,43 @@ func buildOpenAIWeightedSelectionOrder(
 	return order
 }
 
-func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
+func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(ctx context.Context, req OpenAIAccountScheduleRequest, filtered []*Account, loadMap map[int64]*AccountLoadInfo) openAIAccountLoadPlan {
+	pools := s.service.openAIQualityPools(req.GroupID, filtered, req.RequestedModel)
+	if pools == nil {
+		return s.buildOpenAIAccountLoadPlanInPool(ctx, req, filtered, loadMap)
+	}
+	result := openAIAccountLoadPlan{}
+	for _, pool := range pools {
+		if len(pool) == 0 {
+			continue
+		}
+		subpools := [][]*Account{pool}
+		if req.SubscriptionPriority {
+			subscriptions, regular := partitionOpenAIChatGPTSubscriptionAccounts(pool)
+			subpools = [][]*Account{subscriptions, regular}
+		}
+		for _, subpool := range subpools {
+			if len(subpool) == 0 {
+				continue
+			}
+			plan := s.buildOpenAIAccountLoadPlanInPool(ctx, req, subpool, loadMap)
+			result.allCandidates = append(result.allCandidates, plan.allCandidates...)
+			result.candidates = append(result.candidates, plan.candidates...)
+			result.staleSnapshotCompactRetry = append(result.staleSnapshotCompactRetry, plan.staleSnapshotCompactRetry...)
+			result.selectionOrder = append(result.selectionOrder, plan.selectionOrder...)
+			result.candidateCount += plan.candidateCount
+			result.topK += plan.topK
+			result.loadSkew += plan.loadSkew * float64(plan.candidateCount)
+			result.includeOverflowFallback = result.includeOverflowFallback || plan.includeOverflowFallback
+		}
+	}
+	if result.candidateCount > 0 {
+		result.loadSkew /= float64(result.candidateCount)
+	}
+	return result
+}
+
+func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlanInPool(
 	ctx context.Context,
 	req OpenAIAccountScheduleRequest,
 	filtered []*Account,
@@ -1553,7 +1605,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		}
 	}
 
-	if req.SubscriptionPriority {
+	if req.SubscriptionPriority && !s.service.GroupQualityGateView().Enabled(derefGroupID(req.GroupID)) {
 		subscriptionAccounts, regularAccounts := partitionOpenAIChatGPTSubscriptionAccounts(filtered)
 		if len(subscriptionAccounts) > 0 {
 			attempt := s.trySelectByLoadBalancePool(ctx, req, subscriptionAccounts, loadMap, budget)
@@ -1906,10 +1958,6 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx con
 	if vetoed, reason := openAIProfitControlVetoReason(ctx, account); vetoed {
 		return false, reason
 	}
-	// Advanced candidate admission reports the shared reason through filter stats.
-	if vetoed, reason := groupQualityGateVeto(ctx, account); vetoed {
-		return false, reason
-	}
 
 	return true, ""
 }
@@ -1976,13 +2024,15 @@ func loadOpenAIAdvancedSchedulerRuntimeSettings(ctx context.Context, repo Settin
 	if cached, ok := openAIAdvancedSchedulerSettingCache.Load().(*cachedOpenAIAdvancedSchedulerSetting); ok && cached != nil {
 		if time.Now().UnixNano() < cached.expiresAt {
 			return openAIAdvancedSchedulerRuntimeSettings{
-				lowUpstreamRatePriorityEnabled: cached.lowUpstreamRatePriorityEnabled,
-				oauthSchedulingRateMultiplier:  cached.oauthSchedulingRateMultiplier,
-				enabled:                        cached.enabled,
-				stickyWeightedEnabled:          cached.stickyWeightedEnabled,
-				subscriptionPriorityEnabled:    cached.subscriptionPriorityEnabled,
-				lbTopKOverride:                 cached.lbTopKOverride,
-				weightOverrides:                cloneOpenAIAdvancedSchedulerWeightOverrides(cached.weightOverrides),
+				lowUpstreamRatePriorityEnabled:  cached.lowUpstreamRatePriorityEnabled,
+				lowUpstreamRatePriorityScope:    cached.lowUpstreamRatePriorityScope,
+				lowUpstreamRatePriorityGroupIDs: cached.lowUpstreamRatePriorityGroupIDs,
+				oauthSchedulingRateMultiplier:   cached.oauthSchedulingRateMultiplier,
+				enabled:                         cached.enabled,
+				stickyWeightedEnabled:           cached.stickyWeightedEnabled,
+				subscriptionPriorityEnabled:     cached.subscriptionPriorityEnabled,
+				lbTopKOverride:                  cached.lbTopKOverride,
+				weightOverrides:                 cloneOpenAIAdvancedSchedulerWeightOverrides(cached.weightOverrides),
 			}
 		}
 	}
@@ -1991,18 +2041,21 @@ func loadOpenAIAdvancedSchedulerRuntimeSettings(ctx context.Context, repo Settin
 		if cached, ok := openAIAdvancedSchedulerSettingCache.Load().(*cachedOpenAIAdvancedSchedulerSetting); ok && cached != nil {
 			if time.Now().UnixNano() < cached.expiresAt {
 				return openAIAdvancedSchedulerRuntimeSettings{
-					lowUpstreamRatePriorityEnabled: cached.lowUpstreamRatePriorityEnabled,
-					oauthSchedulingRateMultiplier:  cached.oauthSchedulingRateMultiplier,
-					enabled:                        cached.enabled,
-					stickyWeightedEnabled:          cached.stickyWeightedEnabled,
-					subscriptionPriorityEnabled:    cached.subscriptionPriorityEnabled,
-					lbTopKOverride:                 cached.lbTopKOverride,
-					weightOverrides:                cloneOpenAIAdvancedSchedulerWeightOverrides(cached.weightOverrides),
+					lowUpstreamRatePriorityEnabled:  cached.lowUpstreamRatePriorityEnabled,
+					lowUpstreamRatePriorityScope:    cached.lowUpstreamRatePriorityScope,
+					lowUpstreamRatePriorityGroupIDs: cached.lowUpstreamRatePriorityGroupIDs,
+					oauthSchedulingRateMultiplier:   cached.oauthSchedulingRateMultiplier,
+					enabled:                         cached.enabled,
+					stickyWeightedEnabled:           cached.stickyWeightedEnabled,
+					subscriptionPriorityEnabled:     cached.subscriptionPriorityEnabled,
+					lbTopKOverride:                  cached.lbTopKOverride,
+					weightOverrides:                 cloneOpenAIAdvancedSchedulerWeightOverrides(cached.weightOverrides),
 				}, nil
 			}
 		}
 
 		lowUpstreamRatePriorityEnabled := false
+		lowRateScope, lowRateGroups := "all", []int64{}
 		oauthSchedulingRateMultiplier := parseOpenAIOAuthSchedulingRateMultiplier(nil)
 		enabled := false
 		stickyWeightedEnabled := false
@@ -2015,6 +2068,7 @@ func loadOpenAIAdvancedSchedulerRuntimeSettings(ctx context.Context, repo Settin
 
 			if values, err := repo.GetMultiple(dbCtx, openAIAdvancedSchedulerRuntimeSettingKeys()); err == nil {
 				lowUpstreamRatePriorityEnabled = strings.EqualFold(strings.TrimSpace(values[SettingKeyOpenAILowUpstreamRatePriorityEnabled]), "true")
+				lowRateScope, lowRateGroups = parseOpenAILowUpstreamRateScope(values)
 				oauthSchedulingRateMultiplier = parseOpenAIOAuthSchedulingRateMultiplier(values)
 				enabled = strings.EqualFold(strings.TrimSpace(values[openAIAdvancedSchedulerSettingKey]), "true")
 				stickyWeightedEnabled = strings.EqualFold(strings.TrimSpace(values[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled]), "true")
@@ -2032,6 +2086,7 @@ func loadOpenAIAdvancedSchedulerRuntimeSettings(ctx context.Context, repo Settin
 					}
 				}
 				lowUpstreamRatePriorityEnabled = strings.EqualFold(strings.TrimSpace(fallbackValues[SettingKeyOpenAILowUpstreamRatePriorityEnabled]), "true")
+				lowRateScope, lowRateGroups = parseOpenAILowUpstreamRateScope(fallbackValues)
 				oauthSchedulingRateMultiplier = parseOpenAIOAuthSchedulingRateMultiplier(fallbackValues)
 				enabled = strings.EqualFold(strings.TrimSpace(fallbackValues[openAIAdvancedSchedulerSettingKey]), "true")
 				stickyWeightedEnabled = strings.EqualFold(strings.TrimSpace(fallbackValues[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled]), "true")
@@ -2042,23 +2097,27 @@ func loadOpenAIAdvancedSchedulerRuntimeSettings(ctx context.Context, repo Settin
 		}
 
 		openAIAdvancedSchedulerSettingCache.Store(&cachedOpenAIAdvancedSchedulerSetting{
-			lowUpstreamRatePriorityEnabled: lowUpstreamRatePriorityEnabled,
-			oauthSchedulingRateMultiplier:  oauthSchedulingRateMultiplier,
-			enabled:                        enabled,
-			stickyWeightedEnabled:          stickyWeightedEnabled,
-			subscriptionPriorityEnabled:    subscriptionPriorityEnabled,
-			lbTopKOverride:                 lbTopKOverride,
-			weightOverrides:                cloneOpenAIAdvancedSchedulerWeightOverrides(weightOverrides),
-			expiresAt:                      time.Now().Add(openAIAdvancedSchedulerSettingCacheTTL).UnixNano(),
+			lowUpstreamRatePriorityEnabled:  lowUpstreamRatePriorityEnabled,
+			lowUpstreamRatePriorityScope:    lowRateScope,
+			lowUpstreamRatePriorityGroupIDs: lowRateGroups,
+			oauthSchedulingRateMultiplier:   oauthSchedulingRateMultiplier,
+			enabled:                         enabled,
+			stickyWeightedEnabled:           stickyWeightedEnabled,
+			subscriptionPriorityEnabled:     subscriptionPriorityEnabled,
+			lbTopKOverride:                  lbTopKOverride,
+			weightOverrides:                 cloneOpenAIAdvancedSchedulerWeightOverrides(weightOverrides),
+			expiresAt:                       time.Now().Add(openAIAdvancedSchedulerSettingCacheTTL).UnixNano(),
 		})
 		return openAIAdvancedSchedulerRuntimeSettings{
-			lowUpstreamRatePriorityEnabled: lowUpstreamRatePriorityEnabled,
-			oauthSchedulingRateMultiplier:  oauthSchedulingRateMultiplier,
-			enabled:                        enabled,
-			stickyWeightedEnabled:          stickyWeightedEnabled,
-			subscriptionPriorityEnabled:    subscriptionPriorityEnabled,
-			lbTopKOverride:                 lbTopKOverride,
-			weightOverrides:                weightOverrides,
+			lowUpstreamRatePriorityEnabled:  lowUpstreamRatePriorityEnabled,
+			lowUpstreamRatePriorityScope:    lowRateScope,
+			lowUpstreamRatePriorityGroupIDs: lowRateGroups,
+			oauthSchedulingRateMultiplier:   oauthSchedulingRateMultiplier,
+			enabled:                         enabled,
+			stickyWeightedEnabled:           stickyWeightedEnabled,
+			subscriptionPriorityEnabled:     subscriptionPriorityEnabled,
+			lbTopKOverride:                  lbTopKOverride,
+			weightOverrides:                 weightOverrides,
 		}, nil
 	})
 
@@ -2070,9 +2129,20 @@ func (s *OpenAIGatewayService) isOpenAIAdvancedSchedulerEnabled(ctx context.Cont
 	return s.openAIAdvancedSchedulerRuntimeSettings(ctx).enabled
 }
 
-func (s *OpenAIGatewayService) isOpenAILowUpstreamRatePriorityEnabled(ctx context.Context) bool {
+func (s *OpenAIGatewayService) isOpenAILowUpstreamRatePriorityEnabled(ctx context.Context, groupID *int64) bool {
 	settings := s.openAIAdvancedSchedulerRuntimeSettings(ctx)
-	return !settings.enabled && settings.lowUpstreamRatePriorityEnabled
+	if settings.enabled || !settings.lowUpstreamRatePriorityEnabled {
+		return false
+	}
+	if settings.lowUpstreamRatePriorityScope != "groups" {
+		return true
+	}
+	for _, id := range settings.lowUpstreamRatePriorityGroupIDs {
+		if id == derefGroupID(groupID) {
+			return true
+		}
+	}
+	return false
 }
 
 // cachedOpenAIOAuthSchedulingRateMultiplier reads the shared runtime reference
@@ -2105,6 +2175,8 @@ func (s *OpenAIGatewayService) isOpenAIAdvancedSchedulerSubscriptionPriorityEnab
 func openAIAdvancedSchedulerRuntimeSettingKeys() []string {
 	keys := []string{
 		SettingKeyOpenAILowUpstreamRatePriorityEnabled,
+		SettingKeyOpenAILowUpstreamRatePriorityScope,
+		SettingKeyOpenAILowUpstreamRatePriorityGroupIDs,
 		SettingKeyOpenAIOAuthSchedulingRateMultiplier,
 		openAIAdvancedSchedulerSettingKey,
 		SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled,

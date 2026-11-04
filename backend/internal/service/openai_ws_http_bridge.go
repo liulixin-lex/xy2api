@@ -433,6 +433,8 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if writeClientMessage == nil {
 		return nil, errors.New("client websocket writer is nil")
 	}
+	// The ingress loop resolves the encrypted-chain guard before rebuilding the
+	// HTTP payload. Use that turn context rather than reclassifying the replay.
 	responseModelObserver := s.qualityObserver(ctx, account, gjson.GetBytes(payload, "model").String())
 
 	body, err := prepareOpenAIWSHTTPBridgeBody(account, payload)

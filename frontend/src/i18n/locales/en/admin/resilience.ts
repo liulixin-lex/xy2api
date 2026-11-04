@@ -13,6 +13,8 @@ export default {
         lastResortHint: 'Without healthy accounts, serve on a free soft-penalised account, by priority and soonest cooldown end, queueing only when all are busy, so single-account groups stay available.',
         anthropicLatencyHold: 'Hold back slow Claude accounts',
         anthropicLatencyHoldHint: 'When a Claude account is persistently slow to its first usable output (not preambles, heartbeats or empty frames) on follow-up turns, with 35% or more at 10 s or longer over the last 5 minutes, requests for that model rank it last within its priority for 3 minutes; it is never removed or moved across priorities. Sessions on it move away when an account of the same priority is not judged slow and has free concurrency: the binding is dropped and normal selection rebinds them (needs "Session rebinding" on), at most once per session every 30 minutes. Off stops the hold and the moves at once; moved sessions are not moved back, and turning it on again judges by new samples only.',
+        sameSiteHold: 'Pause stream breaks on one site',
+        sameSiteHoldHint: 'When 2 or more accounts of the same upstream site break a stream within 60 seconds (read error or no terminal event after output; errors a relay reports inside the stream do not count), only those accounts pause for 5 minutes; other accounts on that site are unaffected, and a paused account can still serve as a last resort when the group has nothing else. Off stops new pauses and ends existing ones at once.',
         balance: 'Pause on low balance',
         balanceHint: 'Accounts out of upstream balance stop being scheduled until real traffic retries them after the pause; "Recover State" in the account list puts one back at once.',
         budget: 'Request budget',
@@ -58,6 +60,8 @@ export default {
         learnTtlHint: 'Default 21600 (6 hours); it clears itself when it expires, and a change applies only to states learned afterwards. It can also be cleared by hand in the status column of the account list.'
       },
       switches: {
+        postOutputRebind: 'Rebind on the first failure after output',
+        postOutputRebindHint: 'OpenAI accounts only: the first failure after output has started (response.failed in the stream, a read error or a missing terminal event) rebinds the session and avoids that account for the avoid period; failures before output and other platforms still follow the streak threshold. Needs "Session rebinding" on.',
         preludeStaging: 'Delay the prelude in compatibility conversion',
         preludeStagingHint: 'Chat and Messages conversions write their opening events (role chunk, message_start) only at the first content or a terminal event, so a failure after the upstream opened but before any content can move to another account. Off restores the 0.4.3 behaviour.',
         nativePreludeWhitelist: 'Wider native Responses prelude whitelist',

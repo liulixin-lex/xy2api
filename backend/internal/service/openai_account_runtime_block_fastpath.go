@@ -594,6 +594,9 @@ func (s *OpenAIGatewayService) isOpenAIAccountRequestRuntimeBlocked(account *Acc
 	if s.openAICodexTicketBlocksAccount(account, outboundModel) {
 		return true
 	}
+	if s.resilience != nil && s.resilience.sameSiteHold.held(account, time.Now()) {
+		return true
+	}
 	snapshot := s.peekOpenAIAccountRuntimeBlock(account)
 	if snapshot.blocked {
 		if accountPersistedSchedulingCooldownActive(account) {

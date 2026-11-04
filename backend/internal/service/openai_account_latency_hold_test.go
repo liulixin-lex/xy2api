@@ -1,16 +1,13 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
-	"github.com/liulixin-lex/xy2api/internal/sharesched"
 	"github.com/stretchr/testify/require"
 )
 
@@ -97,7 +94,7 @@ func TestMigrateOpenAILatencyHeldOwnerKeepsSingleOrAllHeldOwner(t *testing.T) {
 	requestCtx := resilience.WithRequestState(context.Background(), &resilience.RequestState{})
 	ctx := resilience.StateFrom(requestCtx)
 	ctx.KeepSticky(owner.ID)
-	got := svc.migrateOpenAILatencyHeldOwner(requestCtx, &group, PlatformOpenAI, "v2:migrate", "gpt-test", owner.ID, nil, false, "", false)
+	got, _ := svc.migrateOpenAILatencyHeldOwner(requestCtx, &group, PlatformOpenAI, "v2:migrate", "gpt-test", owner.ID, nil, false, "", false)
 	require.Equal(t, owner.ID, got)
 	require.Equal(t, owner.ID, ctx.KeptSticky())
 	bound, err := cache.GetSessionAccountID(context.Background(), group, "openai:v2:migrate")
@@ -123,7 +120,7 @@ func TestMigrateOpenAILatencyHeldOwnerUsesHealthyAlternativeAndProfitGate(t *tes
 	requestCtx := resilience.WithRequestState(context.Background(), &resilience.RequestState{})
 	state := resilience.StateFrom(requestCtx)
 	state.KeepSticky(owner.ID)
-	got := svc.migrateOpenAILatencyHeldOwner(requestCtx, &group, PlatformOpenAI, "v2:migrate", "gpt-test", owner.ID, nil, false, "", false)
+	got, _ := svc.migrateOpenAILatencyHeldOwner(requestCtx, &group, PlatformOpenAI, "v2:migrate", "gpt-test", owner.ID, nil, false, "", false)
 	require.Zero(t, got)
 	require.Zero(t, state.KeptSticky())
 	_, err := cache.GetSessionAccountID(context.Background(), group, "openai:v2:migrate")
@@ -134,7 +131,7 @@ func TestMigrateOpenAILatencyHeldOwnerUsesHealthyAlternativeAndProfitGate(t *tes
 	profitCtx := context.WithValue(resilience.WithRequestState(context.Background(), &resilience.RequestState{}), openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{threshold: 0, pricingAt: time.Now()})
 	state = resilience.StateFrom(profitCtx)
 	state.KeepSticky(owner.ID)
-	got = svc.migrateOpenAILatencyHeldOwner(profitCtx, &group, PlatformOpenAI, "v2:migrate", "gpt-test", owner.ID, nil, false, "", false)
+	got, _ = svc.migrateOpenAILatencyHeldOwner(profitCtx, &group, PlatformOpenAI, "v2:migrate", "gpt-test", owner.ID, nil, false, "", false)
 	require.Equal(t, owner.ID, got)
 	require.Equal(t, owner.ID, state.KeptSticky())
 }
@@ -178,8 +175,7 @@ func TestMigrateOpenAILatencyHeldOwnerRequiresFreshCapacity(t *testing.T) {
 				accountRepo: schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: []Account{owner, alternative}}},
 			}
 			if tc.gate != "" {
-				view := NewGroupQualityGateService(nil, nil, nil)
-				view.snapshot.Store(&groupQualitySnapshot{Policies: GroupQualityGatePolicies{Groups: map[string]GroupQualityGatePolicy{"79": {Enabled: tc.gate == "on"}}}})
+				view := &schedulingQualityView{enabled: tc.gate == "on"}
 				svc.SetGroupQualityGateView(view)
 			}
 			now := time.Now()
@@ -188,7 +184,7 @@ func TestMigrateOpenAILatencyHeldOwnerRequiresFreshCapacity(t *testing.T) {
 			}
 			ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
 			resilience.StateFrom(ctx).KeepSticky(owner.ID)
-			got := svc.migrateOpenAILatencyHeldOwner(ctx, &group, PlatformOpenAI, "v2:migrate", "gpt-test", owner.ID, nil, false, "", false)
+			got, _ := svc.migrateOpenAILatencyHeldOwner(ctx, &group, PlatformOpenAI, "v2:migrate", "gpt-test", owner.ID, nil, false, "", false)
 			bound, err := sticky.GetSessionAccountID(ctx, group, "openai:v2:migrate")
 			if tc.migrate {
 				require.Zero(t, got)
@@ -199,103 +195,6 @@ func TestMigrateOpenAILatencyHeldOwnerRequiresFreshCapacity(t *testing.T) {
 				require.Equal(t, owner.ID, resilience.StateFrom(ctx).KeptSticky())
 				require.NoError(t, err)
 				require.Equal(t, owner.ID, bound)
-			}
-		})
-	}
-}
-
-func TestMigrateOpenAILatencyHeldOwnerGroupQualityGate(t *testing.T) {
-	for _, tc := range []struct {
-		name               string
-		warmP90            int
-		pinned             bool
-		preferLow          bool
-		full               bool
-		strongContinuation bool
-		qualityRouting     bool
-		shareScheduling    bool
-		migrate            bool
-	}{
-		{name: "slow owner migrates to a fast account with a free slot", warmP90: 14000, preferLow: true, migrate: true},
-		{name: "owner between effective and policy lines stays bound", warmP90: 8000, preferLow: true},
-		{name: "full fast tier stays bound", warmP90: 14000, preferLow: true, full: true},
-		{name: "strong continuation stays bound", warmP90: 14000, preferLow: true, strongContinuation: true},
-		{name: "quality routing takeover stays bound", warmP90: 14000, preferLow: true, qualityRouting: true},
-		{name: "pinned owner stays bound", warmP90: 14000, pinned: true, preferLow: true},
-		{name: "low-rate priority off stays bound", warmP90: 14000},
-		{name: "share scheduling stays bound", warmP90: 14000, preferLow: true, shareScheduling: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			const groupID int64 = 77
-			const ownerID int64 = 301
-			const fastID int64 = 302
-			const sessionHash = "v2:migrate"
-			group := groupID
-			owner := Account{ID: ownerID, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, GroupIDs: []int64{groupID}}
-			fast := Account{ID: fastID, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, GroupIDs: []int64{groupID}}
-			if tc.full {
-				fast.Concurrency = 1
-			}
-			sticky := &atomicStickyTestCache{bindings: map[string]int64{"openai:" + sessionHash: ownerID}}
-			cfg := &config.Config{RunMode: config.RunModeStandard}
-			gatePolicy := defaultGroupQualityGatePolicy()
-			gatePolicy.Enabled = true
-			gatePolicy.PinnedAccountIDs = nil
-			ownerResult := GroupQualityMemberResult{Usable: true, Passing: true, State: "eligible", Tier: GroupQualityGateTierOther, Pinned: tc.pinned}
-			effectiveFastLine := 7000
-			gate := NewGroupQualityGateService(nil, nil, nil)
-			gate.snapshot.Store(&groupQualitySnapshot{
-				Policies: GroupQualityGatePolicies{Groups: map[string]GroupQualityGatePolicy{"77": gatePolicy}},
-				Members: map[int64]map[int64]groupQualityMemberSnapshot{groupID: {
-					ownerID: {AccountID: ownerID, Metric: GroupQualityMetrics{WarmSamples: 10, WarmTTFTP90Ms: tc.warmP90}, State: groupQualityAccountState{State: "eligible"}, Result: ownerResult},
-					fastID:  {AccountID: fastID, Metric: GroupQualityMetrics{WarmSamples: 10, WarmTTFTP90Ms: 3000}, State: groupQualityAccountState{State: "eligible"}, Result: GroupQualityMemberResult{Usable: true, Passing: true, State: "eligible", Tier: GroupQualityGateTierFast}},
-				}},
-				EffectiveFastLines: map[int64]*int{groupID: &effectiveFastLine},
-			})
-			var loadCache schedulerTestConcurrencyCache
-			var concurrency *ConcurrencyService
-			if tc.full {
-				loadCache = schedulerTestConcurrencyCache{loadMap: map[int64]*AccountLoadInfo{fastID: {CurrentConcurrency: 1}}}
-				concurrency = NewConcurrencyService(loadCache)
-			}
-			svc := &OpenAIGatewayService{
-				cache: sticky, cfg: cfg, concurrencyService: concurrency,
-				accountRepo: schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: []Account{owner, fast}}},
-			}
-			svc.SetGroupQualityGateView(gate)
-			if tc.shareScheduling {
-				share := &ShareSchedulingService{}
-				share.state.Store(&shareSchedulingState{settings: ShareSchedulingSettings{Enabled: true}, groups: map[int64]*shareGroupPolicy{
-					groupID: {groupID: groupID, policy: sharesched.Policy{Scheduler: sharesched.SchedulerShare}},
-				}})
-				svc.shareScheduling = share
-			}
-			ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
-			resilience.StateFrom(ctx).KeepSticky(ownerID)
-			if tc.strongContinuation {
-				ctx = withOpenAIStickyMigrationGuard(ctx, "response-chain", OpenAIUpstreamTransportAny)
-			}
-			if tc.qualityRouting {
-				q := &openAIQualityRequest{group: groupID, session: sessionHash, state: OpenAIQualityState{Generation: 1}}
-				ctx = context.WithValue(withOpenAIQualityRouting(ctx), openAIQualityContextKey{}, q)
-			}
-			previousLogger := slog.Default()
-			var logs bytes.Buffer
-			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
-			t.Cleanup(func() { slog.SetDefault(previousLogger) })
-			got := svc.migrateOpenAILatencyHeldOwner(ctx, &group, PlatformOpenAI, sessionHash, "gpt-test", ownerID, nil, false, "", tc.preferLow)
-			bound, err := sticky.GetSessionAccountID(ctx, groupID, "openai:"+sessionHash)
-			if tc.migrate {
-				require.Zero(t, got)
-				require.ErrorIs(t, err, ErrStickySessionNotFound)
-				require.Zero(t, resilience.StateFrom(ctx).KeptSticky())
-				require.Contains(t, logs.String(), `"level":"WARN","msg":"group_quality_gate.migrate","group_id":77,"account_id":301,"warm_ttft_p90_ms":14000,"fast_warm_ttft_p90_ms":10000`)
-			} else {
-				require.NoError(t, err)
-				require.Equal(t, ownerID, got)
-				require.Equal(t, ownerID, bound)
-				require.Equal(t, ownerID, resilience.StateFrom(ctx).KeptSticky())
-				require.NotContains(t, logs.String(), `"msg":"group_quality_gate.migrate"`)
 			}
 		})
 	}

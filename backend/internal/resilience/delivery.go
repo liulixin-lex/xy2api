@@ -354,6 +354,21 @@ func (s *RequestState) EndToEndFirstOutputMs() *int64 {
 	return &ms
 }
 
+// AttemptFirstOutputMs measures semantic delivery from the final attempt's start,
+// excluding queueing, account selection and preceding attempts.
+func (s *RequestState) AttemptFirstOutputMs() *int64 {
+	if s == nil {
+		return nil
+	}
+	start := s.AttemptProfile().AttemptStart
+	output := s.SemanticOutputAt()
+	if start.IsZero() || output.IsZero() || output.Before(start) {
+		return nil
+	}
+	ms := output.Sub(start).Milliseconds()
+	return &ms
+}
+
 // SetRecoveryOutcome is called by handlers at their completion/error boundaries.
 func (s *RequestState) SetRecoveryOutcome(outcome string) {
 	if s == nil {

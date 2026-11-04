@@ -11,9 +11,10 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | 能力 | 设置段 | 行为摘要 |
 |---|---|---|
 | 失败分类与冷却 | `failure` | 上游瞬时失败（502/503/超时等）进入短冷却（缺省 30 秒），不再与账号级失败混用；上游 `Retry-After` 封顶。中转前面的 CDN 或代理写出的 5xx 错误页（Cloudflare 的 JSON 错误页、HTML 页面）按瞬时失败处理，即使文案提到 overloaded；“overloaded”“at capacity”只在 503、529、4xx 与流内事件上算容量降载（0.4.3）。已输出后的上游失败在同一账号 60 秒内达 3 次时，该账号进入同样的短冷却（池模式账号除外）。0.4.4（`failure.decision_v2`）：只有 `server_is_overloaded`、`slow_down`、529 与结构化的 overloaded 算容量降载；Grok 流空闲、raw 429、“The service is busy”“Too many pending requests”“Concurrency limit exceeded” 改为瞬时或限流，可以换到同一主机上的其他账号；余额等更强的证据优先。0.4.9：Anthropic、Gemini、Antigravity 账号不带 `Retry-After` 的瞬时失败改为按账号×模型逐级冷却（§4.6），不再第一次就冷却整个账号；带 `Retry-After` 时仍按账号冷却。Gemini 的普通 5xx 与 408 接入这套处理（以前不受罚），池模式、自定义错误码与临时不可调度规则的优先级不变。0.4.12：上游明确报告模型不可用（`MODEL_UNSUPPORTED`）与余额不足时，各平台都换号，见 §4.9 |
-| 会话失败改绑 | `session` | 同一会话在同一账号上 10 分钟内连续失败 2 次后改绑，并在 10 分钟内避开该账号；已输出后的上游失败（流内失败事件、断流）也计入，客户端错误、内容安全拒绝与客户端断开不计，计划内首输出截止（0.4.9，§4.5）也不计。窗口按账号各自计算，同一会话其他账号的失败不会延长它（0.4.2）。绑定账号只是软罚（含 OpenAI 按模型的瞬时屏蔽）时保留绑定，本次由其他账号服务 |
+| 会话失败改绑 | `session` | 输出前失败在同一会话、同一账号上 10 分钟内连续 2 次后改绑；`session.post_output_rebind` 缺省开启，仅 OpenAI 账号的流内失败、读流出错或缺终态等已输出后的首次失败立即改绑，带密文片段的请求退回连击规则（§4.12）；Anthropic、Grok 等其他平台的输出后失败仍按原连击规则处理。两者都在缺省 10 分钟内避开该账号，客户端错误、内容安全拒绝与客户端断开不计，计划内首输出截止（0.4.9，§4.5）也不计。窗口按账号各自计算，同一会话其他账号的失败不会延长它（0.4.2）。绑定账号只是普通软罚（含 OpenAI 按模型的瞬时屏蔽）时保留绑定，本次由其他账号服务；同站断流暂停按 §4.13 改绑 |
+| 同站断流暂停 | `same_site_hold` | 60 秒内同一上游主机至少 2 个 OpenAI 账号分别发生传输层断流，只暂停这些断流账号 300 秒；同号 3 秒内合并、暂停不延长；普通选号跳过，仍可作末位兜底，见 §4.13 |
 | Claude 判慢让位 | `anthropic_latency_hold` | 缺省开启；按账号和实际出站模型记录粘性热尝试的语义首输出，持续偏慢时在同优先级内后排并可迁出会话，见 §4.5。关闭后状态失效，重新开启从新样本开始 |
-| 末位兜底 | `last_resort` | 分组内没有无罚账号时，先转投兜底分组；否则软罚账号按优先级、再按罚期结束时间排序（0.4.9起同优先级内 OpenAI 与 Claude 判慢期账号排在其他账号之后，见 §4.5），取第一个有空闲并发的账号继续服务，全部占满时排队等待排在第一的账号，避免单号分组整组不可用。门禁与正常选号相同（只放宽软罚），超过窗口费用或 RPM 硬上限的账号不会被选中；份额分组按账号优先级与有效权重（负载因子乘自适应系数）选择，绑定账号只是软罚时不改绑。候选来自 2 秒的分组快照，派发前按账号当前状态再核对一次，快照之后被停用、删除、移出分组或进入硬罚的账号不会被选中（0.4.2） |
+| 末位兜底 | `last_resort` | 分组内没有无罚账号时，先转投兜底分组；否则软罚账号按优先级、再按罚期结束时间排序（0.4.9起同优先级内 OpenAI 与 Claude 判慢期账号排在其他账号之后，见 §4.5），取第一个有空闲并发的账号继续服务，全部占满时排队等待排在第一的账号，避免单号分组整组不可用。门禁与正常选号相同（只放宽软罚），超过窗口费用或 RPM 硬上限的账号不会被选中；份额分组按账号优先级与有效权重（负载因子乘自适应系数）选择，绑定账号只是普通软罚时不改绑（同站断流暂停除外）。候选来自 2 秒的分组快照，派发前按账号当前状态再核对一次，快照之后被停用、删除、移出分组或进入硬罚的账号不会被选中（0.4.2） |
 | 余额不足暂停 | `balance` | 上游余额不足的账号暂停调度，期间按硬罚处理、不作末位兜底；到期后由真实请求重试。0.4.12 起时长逐级加长：首次 `pause_seconds`（缺省 300 秒），到期后仍不足依次为 3 倍、12 倍并封顶（缺省 5、15、60 分钟），成功或“恢复状态”后复位，见 §4.9；以前每次暂停同样时长。账号列表的“恢复状态”立即放回。账号已有更长的软冷却（如 403 计数冷却 10 分钟）时，改记为余额暂停并保留较晚的结束时间；暂停期间新的软冷却不会覆盖它（0.4.2）。不监控、不探测、不告警。普通用户只看到 503，余额细节只对管理员可见。Gemini 的 `RESOURCE_EXHAUSTED` 分钟级限额按限流处理，不触发暂停；Grok API Key 账号的余额字样 429 同样暂停，不再按中转给出的重置时间限流 |
 | 请求预算 | `budget` | 文本请求最多尝试 4 次、首输出前总时长 240 秒（等待并发槽位也计入）；图片与视频不设首输出截止；WebSocket 不挂连接级预算。同号重试每号至多一次，账号级失败不重试；容量降载只切换一次且只切到其他上游主机。非流式请求的“首输出”就是整个响应，预算只决定能否再发起新的尝试，进行中的单次非流式请求不按预算截断（截断仍在生成的长回答只会多一次失败）；例外是 0.4.9起 Gemini 文本请求的单次尝试截止（缺省 60 秒，非流式到完整响应，只截非最后候选，见 §4.7）。分组里唯一能服务该请求模型的账号不受单次档位限制，用满剩余预算。0.4.9：OpenAI 流式文本请求的单次首输出截止分热、冷尝试（热 20/25/30/30 秒；冷尝试按请求体大小至少 45 或 75 秒）；非最后候选的截止不短于本请求已耗时；最后候选只受剩余预算约束；等待响应头与等待第一个内容共用同一截止时刻；非流式不受影响，见 §4.5。例外：Antigravity 平台在同一账号上的智能重试（上游给出的短重试等待）不计入尝试次数，只在剩余预算与 `Retry-After` 封顶内等待 |
 | 可重放前缀（0.4.4） | `stream` | 第一个正文之前写出的只有开场事件时，上游失败仍可换号（三个开关都只要求总开关开启；下面三个元数据事件在兼容转换里还要求 `native_prelude_whitelist`）：原生 Responses 把 `response.queued` 与不带任何内容的 `output_item.added`、`content_part.added` 也算开场（`native_prelude_whitelist`；另按确切事件名包括三个元数据事件：0.4.6 起的 `response.metadata`（OpenAI Codex 后端过载时会在 created、in_progress 与它之后才发 `server_is_overloaded`）、0.4.9 起的 `codex.rate_limits`、0.4.12 起的 `codex.response.metadata`。它们与其他开场一样不解除首输出截止，之后只有心跳、迟迟没有正文的尝试到期换号（`first_output_timeout`）。以前它们算内容，之后的失败无法换号；`response.metadata` 在 0.4.3 至 0.4.5 还会提前解除截止，`codex.response.metadata` 在 0.4.11 及以前让首输出截止失效。其他 `codex.*` 与未知事件仍算内容。判定共用 `ClassifyStreamEvent`，Chat Completions 与 Messages 兼容转换同样适用，须同时开启 `prelude_staging`）；Chat Completions 与 Messages 经 OpenAI 兼容转换时，开场事件推迟到第一个内容或终态才写出（`prelude_staging`）；raw Chat 透传把 `error` 后跟 `[DONE]` 判为失败（`strict_terminal`；0.4.5 起 `error` 须是非空字符串，或带非空 `message`、`code`、`type` 的对象，或根上 `type` 为 `error`；`null`、空串或只含空白的字符串、`false`、`0`、`{}` 与各字段都为空的对象等占位值不算）：输出前换号，输出后按已输出后失败记账、原样转发错误。0.4.5：Gateway 入站经 Anthropic 上游的 Responses 与 Chat 反向转换同样推迟开场（`prelude_staging`，首事件截止延长到第一个内容）并明确终止（`strict_terminal`，见 §3）；OpenAI Responses 透传接入首输出截止与停滞检测（`strict_terminal`，见 §3）。0.4.12：原生 Anthropic 与 API Key 直通同样推迟开场（`prelude_staging`，见 §4.9）。不完整（incomplete）、内容拒绝、合法空回答与客户端断开不重放 |
@@ -128,6 +129,8 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 
 | 字段 | 缺省 | 范围 |
 |---|---|---|
+| `session.post_output_rebind` | true | 布尔；仅 OpenAI 账号，依赖 `session.enabled` 与总开关 |
+| `same_site_hold.enabled` | true | 布尔；依赖总开关 |
 | `budget.max_attempts` | 4 | 1–10 |
 | `budget.pre_output_budget_seconds` | 240 | 60–290 |
 | `budget.first_output_timeout_seconds` | default 20 / high 25 / xhigh 30 / max 30（0.4.9起，按生产 48 小时流式首字分布约 p97 校准；是热尝试的档位，冷尝试另有下限，见 §4.5；0.4.8 及以前为 180/180/200/220） | 5–预算 |
@@ -212,13 +215,13 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 - 成功只在这次尝试的开始时间晚于最近一次慢失败时清除冷却与计数。开始更早的成功（例如卡住几分钟后才结束的长流）不清除。
 - 冷却期间账号对该模型暂不被选中，与按模型的瞬时屏蔽同属软罚：组内没有其他可用账号时，末位兜底照常使用它。对所有选号方式生效。
 
-**判慢降序（仅原版选号）**
+**判慢让位**
 
 - 样本只取热、成功的流式文本尝试：从这次尝试开始到第一个内容送达客户端的时间，开场事件与心跳不算（口径同 §4.4）。不读用量记录的首字时间；计划内截止只记慢失败，不计入样本。
-- 按账号与模型做时间常数 5 分钟的指数衰减计数，样本 ≥10 秒计为慢。有效样本 ≥6 且慢占比 ≥35% 时进入 3 分钟的判慢期，同时清空样本，到期后重新积累。
-- 判慢期内账号只排到候选末尾，不剔除，不计为罚。优先级、负载、缓存偏好与低倍率等排序先完成，健康账号之间保持原有顺序；compact 请求只在同一能力层内调整。负载快照显示全部满载时仍会排队，与以前相同。
+- OpenAI 按账号与模型做时间常数 5 分钟的指数衰减计数，尝试级可见首字 ≥10 秒计为慢；有效样本 ≥6 且慢占比 ≥30% 时触发。距上次让位结束 ≤30 分钟再次触发时，时长 3→6→12→15 分钟封顶，否则从 3 分钟开始。让位期间继续累积样本，触发时清零；重启清空级数。
+- 判慢期不剔除账号，不计为罚。OpenAI 门槛组在质量档内后排，compact 能力分段保留；随机、会话和缓存偏好不得越档或越判慢分隔。未开门槛的原版选号仍排到候选末尾。到期只解除后排，不改门槛状态，也不表示“已恢复”。全部满载仍排队。
 - 末位兜底同样：同优先级内先选非判慢期账号，再按恢复时间。判慢期不升级为硬罚。
-- Claude 原生和 API Key 透传也使用这套阈值，按账号和最终出站模型独立计数。只记录成功完成的流式粘性热尝试，从发送尝试到首个语义输出；开场、心跳、空或签名 delta、错误和纯终态不算。换号、同号重试、溢出及迁出后的首轮不采样，转换入口不采样。模型路由、负载感知选号和等待队列只在同优先级段内把判慢账号后排，不跨优先级。
+- Claude 原生和 API Key 透传保持原阈值（35%、固定 3 分钟），不采用 OpenAI 的递增时长，按账号和最终出站模型独立计数。只记录成功完成的流式粘性热尝试，从发送尝试到首个语义输出；开场、心跳、空或签名 delta、错误和纯终态不算。换号、同号重试、溢出及迁出后的首轮不采样，转换入口不采样。模型路由、负载感知选号和等待队列只在同优先级段内把判慢账号后排，不跨优先级。
 
 **会话迁移（仅原版选号）**
 
@@ -226,12 +229,13 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 - 迁移前按实时负载确认至少一个这样的替代账号有空闲并发（并发上限不大于 0 视为不限）；负载查询失败、缺项或全部满载时保留原绑定，不白白丢掉缓存。这只降低白迁移的概率，确认之后空位仍可能被其他请求抢走。
 - 单账号分组，或组内其他账号都在判慢期时，保留原绑定，不迁移。整体拥塞时不会成批迁移。
 - 质量路由钉住的会话、带 `previous_response_id` 的请求与 WebSocket 不迁移。
-- 开启分组质量门槛的分组不用本节的判慢迁移，改按门槛判据迁出：绑定账号的续轮可见首字 p90 超过策略快档线、有快档成员此刻有空位，且本次选号开启低倍率优先，见[分组质量门槛](GROUP_QUALITY_GATE.md)。判慢降序仍然生效。未开门槛的分组保持本节行为。
+- 带协作或工具输出密文片段的请求同样不做软迁移：`input[]` 中的 `agent_message.content[]` 或数组形态的 `function_call_output.output[]` 含 `type=encrypted_content` 时，由 `WithOpenAIEncryptedContentMigrationGuard` 设置与续链相同的保护，跳过质量迁出、判慢迁出及其低倍率目标改道。HTTP Responses（含透传）以及接受 Responses 形状 `input[]` 的 Chat Completions 在选号前设置，WebSocket 首帧选号前设置（连接内不重选号，客户端重连后的新连接首帧照样判定）。reasoning／compaction 的顶层密文不在此列。带上述密文片段的请求，P1-B 按 §4.12 退回连击规则；硬准入、其他失败换号、同站暂停、新会话放置、利润门和旧粘性逃逸照常。
+- 开启门槛的 OpenAI 分组在原版和高级调度共用统一迁出：绑定号为 2 档或本模型判慢，且有满足恢复线、未判慢、硬准入及空位条件的目标时，先占目标槽位、再 CAS 原子改绑。候选先经过快照与批量空位过滤，再按档内顺序逐个 DB 复核和占槽；全部候选失败或 CAS 失败时保留原绑定，满载候选不做逐号 DB 复核；成功后同组同会话冷却 5 分钟（进程内 LRU，16384 键），失败类改绑不受限。续链、WebSocket、质量路由所有权与固定续轮豁免；固定账号只免质量降档，不免判慢迁出。详见[调度顺序](account-scheduling.md)与[分组质量门槛](GROUP_QUALITY_GATE.md)。
 - Claude 迁出目标须通过正常候选准入、与 owner 同优先级且未判慢，并由新鲜负载快照确认空槽；模型路由内的迁出只考虑路由集合。属主删除出错、负载查询失败或没有合格目标时保留绑定；属主比较确认绑定已变时重新读取绑定，按新 owner 继续，读不到则正常选号。每个分组+会话成功迁出后 30 分钟内不再迁出，命中冷却时保留绑定并记 `cooldown`；冷却状态在进程内维护，多实例各自计算。迁出后正常选号并改绑，首轮按冷尝试。
 
 **范围与回退**
 
-- 判慢降序与会话迁移作用于默认开启的原版负载批量选号（`gateway.scheduling.load_batch_enabled=true`）；关闭该设置或未配置并发服务时走旧选择器，Claude 判慢后排与迁出不生效。高级调度与份额调度不变。热、冷截止与慢失败冷却不分选号方式。
+- OpenAI 原版选号的五条判慢分区（直接选择、负载选择、负载查询失败回退、等待回退、粘性满载借用）均遵守质量分段。启用门槛的高级调度按“档×判慢”六池依次运行 TopK 与权重；未启用的高级调度保持原状。份额调度的新放置与 spill 候选接入分档和档内判慢，合法绑定属主保留；同站暂停按失败类改绑，不因叠加其他软罚而保留旧绑定。Claude 仍要求默认开启的 `gateway.scheduling.load_batch_enabled` 和并发服务；缺少时不后排、不迁出。热、冷截止与慢失败冷却不分选号方式。
 - 慢失败计数、冷却与判慢期都在进程内，多实例时各自维护，重启后清零。
 - 开关：OpenAI 判慢降序与样本记录随韧性总开关，没有另设开关；Claude 还受 `anthropic_latency_hold` 独立控制，关闭任一开关即不采样、不后排、不迁出并使本进程状态失效，重开只用新样本。两者的会话迁移另外要求“会话失败改绑”（`session`）开启，关闭不会删除或迁回绑定。OpenAI 热、冷截止，计划内截止与慢失败冷却随请求预算（`budget`）生效，关闭总开关或请求预算时回到原有的首输出超时处理。
 - 要恢复旧档位，在 `gateway_resilience_settings` 中设置 `budget.first_output_timeout_seconds`（例如 180/180/200/220），保存即生效，不需要重新部署；冷尝试的下限仍取较大者，档位不低于 75 秒时不再起作用。
@@ -366,6 +370,34 @@ HTTP 流已向客户端输出可见内容后，快层确认账号发生读流出
 
 补项先进入请求的上游事件上下文，再进行归因并写入错误记录。常规、带内终态和显式 HTTP 流错误路径都读取合并后的上下文；阶段为 `upstream`、责任方为 `provider`、来源为 `upstream_http`。这里的 `upstream_http` 是既有来源分类，不表示实际收到 HTTP 5xx；细因看尝试的类别与原因。带内终态的顶层上游状态可能是逻辑状态，也不代表实际收到的 HTTP 状态。流错误快照只用于 WebSocket 回合，不含补项；WebSocket 回合与连接退出均不补记，其漏记与归因保持原状。监控过滤、脱敏和队列限制保持不变；写运维记录前 Anthropic 的 `event: error` 已有同账号 `stream_error` 上游事件，因此按发送边界去重，不会重复补记；其他平台共用已有快层与运维边界，不扩展失败类别。
 
+### 4.12 P1-B：输出后首次失败改绑
+
+`session.post_output_rebind` 缺省为 true，**仅 OpenAI 账号**生效，以最终上游账号的平台（`PlatformOpenAI`）为准。Anthropic、Grok 等其他平台的输出后失败仍按原连击规则处理。仅已确认输出后的流内失败事件（例如 `response.failed`）、读流出错、缺终态携带专用会话失败信号；沿用 `ReportStreamFailure` 的 attempt 标识去重：HTTP 请求内同一失败只立即改绑一次，WebSocket 连接按 turn 计，每个 turn 可各触发一次。动作复用现有连击改绑：按属主删除绑定、加入会话避开、标记会话、把账号加入本请求的避开集合。避开时长沿用 `session.avoid_seconds`，缺省 600 秒。输出前失败仍需达到 `session.streak_threshold`（缺省 2），不降低全局阈值；客户端取消、客户端错误和内容安全拒绝仍不罚号。
+
+带密文片段的请求退回原有连击规则（`session.streak_threshold`，缺省连续 2 次）：只识别 `input[]` 内 `agent_message.content[]` 或数组形态 `function_call_output.output[]` 中的 `type=encrypted_content`，按 JSON 解码后的结构匹配，合法 Unicode 转义同样有效，非法 JSON 不命中。第一次真实输出后失败不立即改绑或避开原号，达到连击阈值才改绑；账号输出后冷却计数、同站暂停记账和其他失败类改绑不变。HTTP 读取请求上的密文保护标记。WebSocket 原生池、透传及 HTTP 桥在连接内保留密文标记，并按客户端每个 turn 的 payload 更新实际用于输出后处理的上下文：带非空 `previous_response_id` 的增量轮继承上一轮标记，并识别本轮新增密文；不带该 ID 的全量轮只按本轮 payload 判定，无密文时可以清除标记。首帧没有上一轮，即使带 `previous_response_id` 也只按本帧 payload 判定。同一轮内部重试保留本轮标记。未受该保护的请求，真实输出后失败仍首次即改绑。
+
+会话状态族拒绝只排除三项动作：P1-B（含它带来的会话避开）、账号输出后冷却和会话连击。HTTP SSE 与 WebSocket 的裸 `error`、`response.failed` 或二者先后出现均适用。状态拒绝按以下顺序识别：
+
+1. 专用 code `client_tool_continuation_unavailable`、`invalid_encrypted_content`、`encrypted_context_invalid`（不区分大小写）直接命中。
+2. 现有 `IsEncryptedContentRejection` 命中时排除；它覆盖 S3 的加密函数输出无法解密，以及 S4 的 `encrypted content` 搭配 `could not be verified`、`could not be decrypted` 或 `hydration failed` 等完整拒绝文案。
+3. 仅在 code 为空时，用 `opaque conversation state`、`unrecognized conversation state`、`encrypted content is invalid for this conversation` 补判 S1/S2。单独出现 `for item amsg_` 或 `invalid for this conversation` 不足以排除；明确的 server/rate-limit 错误码不会被这一步的文案覆盖。
+
+请求的最终失败、运维记录与真实用量照常保留，输出前分类与换号规则不变。上述三项排除不改变门槛 v3 错误维、近期表现或份额健康的口径：它们仍按运维记录分类计数，无 `invalid_request_error` 包装的 S1 按原分类为 `TRANSIENT`、会计入；本次核对的生产 S1 带包装，属于 `CLIENT_ERROR`、不计入。
+
+质量路由持有的绑定不越权删除；会话避开集合在进入质量路由之前并入排除集，因此有其他正常候选时下一请求不再选出错号。组内只剩该号时仍保留现有末位兜底。绑定已换成其他属主时，沿用现有 owner 校验；非 `v2:` OpenAI 会话键仍沿用原有删除语义。关闭该开关回到原有输出后失败连击逻辑；关闭 `session.enabled` 时 P1-B 一并失效。
+
+事件沿用 Warn `resilience.session_rebind`，`reason=post_output_first_failure`；`session_rebind` 计数使用同一原因。普通连击的原因仍为 `resil_failure_streak`。
+
+### 4.13 OpenAI 同站断流暂停
+
+站点按 `GetOpenAIBaseURL()` 的主机名归并（忽略协议、端口和路径；未配置时归到官方站点）。只计 `resilienceStreamBrokenAfterOutput` 确认的传输层断流：输出后读流出错或缺终态。中转在流内报告的错误、输出前失败、客户端取消及非 OpenAI 账号不计入。
+
+同号 3 秒内的断流合并一次。某号断流时，同站另一账号在此前 60 秒内也断过流，才对这些断流账号中尚未暂停的各暂停 300 秒；没有断流的同站账号不受影响。暂停中的再次断流不延长到期时间。上述时长与至少 2 个账号的条件均为代码常量。
+
+暂停接入现有运行时冷却检查，普通选号跳过；同时映射为软惩罚，所以组内没有其他可用号时仍可作末位兜底。绑定会话下次请求通过现有属主删除与绑定流程改绑，属于失败类改绑，不受质量迁出冷却限制；同站暂停不享有普通瞬时软罚的“保留原绑定”例外，暂停到期后不主动迁回。不改变门槛统计，断流照常进入错误维。
+
+`same_site_hold.enabled` 缺省为 true。关闭后不建立新暂停，已有暂停在检查时立即失效；重新开启从新样本开始。跟踪器在韧性服务内独立保存，不复用代理断流熔断；进程重启清空，各实例独立。Warn 事件为 `resilience.same_site_hold`，每个账号每次暂停一条，只记主机名 SHA-256 的前 16 个十六进制字符，不记录明文主机名。
+
 ## 5. 观测
 
 ### 5.1 管理端
@@ -416,7 +448,8 @@ HTTP 流已向客户端输出可见内容后，快层确认账号发生读流出
 warn 级，进入运维页“系统日志”（`ops_system_logs`）：
 
 - `balance_paused`（含账号、暂停时长与上游原文；0.4.12 起另含档位 `step`）；
-- `session_rebind`、`last_resort`；
+- `session_rebind`（P1-B 原因 `post_output_first_failure`，普通连击原因 `resil_failure_streak`，含会话哈希前缀、组、账号、类别、避开时长）、`last_resort`；
+- `same_site_hold`（`host_hash`、`account_id`、`peer_account_id`、`until`）；
 - `fallback_group`、`fallback_return`；
 - `budget_exhausted`、`capacity_switch_exhausted`；
 - `stall`、`fast_fail`、`turn_cap`、`abuse_guard`；
@@ -458,13 +491,13 @@ info 级，只写应用标准输出（量大，明细已有计数或未送达表
 
 `*_failed` 结尾的事件表示存储或查询失败，功能会降级为原有行为。
 
-OpenAI 判慢降序与会话迁移的事件（0.4.9，见 §4.5）不带 `resilience.` 前缀。进入判慢期为 warn 级（进入运维系统日志，便于追查换号原因），会话迁移为 info 级、只写应用标准输出：
+OpenAI 判慢降序与会话迁移的事件（见 §4.5）不带 `resilience.` 前缀。进入判慢期为 Warn。门槛组统一迁出使用 Warn `group_quality_gate.migrate`，含 `session_hash` 前缀、`group_id`、`from_account_id`、`to_account_id`、`trigger`（`tier`/`latency_hold`）；未开门槛组的旧判慢迁出仍为 Info，只写应用标准输出：
 
 | 事件 | 含义与字段 |
 |---|---|
-| `openai_account_latency_hold_started` | 账号对某模型进入判慢期；`account_id`、`model`（实际出站模型）、`sample_count`（触发时衰减后的有效样本数）、`slow_fraction`（慢占比）、`hold_seconds`、`hold_until` |
+| `openai_account_latency_hold_started` | 账号对某模型进入判慢期；`account_id`、`model`（实际出站模型）、`sample_count`（触发时衰减后的有效样本数）、`slow_fraction`（慢占比）、`hold_seconds`、`level`（1–4）、`hold_until` |
 | `openai_account_latency_sticky_migrated` | 会话从判慢期的账号解除绑定；`from_account_id`、`alternative_account_id`（证明同组有健康替代的账号，不一定是本次最终选中的账号）、`model`（原绑定账号的实际出站模型，与上一项一致） |
-| `anthropic_account_latency_hold_started` | Warn；Claude 账号进入判慢期，字段与 OpenAI 对应事件相同，另含 `platform` |
+| `anthropic_account_latency_hold_started` | Warn；Claude 账号进入判慢期，含 `platform`、`account_id`、`model`、`sample_count`、`slow_fraction`、`hold_seconds`（固定 180）、`hold_until` |
 | `anthropic_account_latency_sticky_migrated` | Warn；属主比较删除成功；含 `group_id`、`model`（最终出站模型）、`from_account_id`、`alternative_account_id`（证明同段存在合格替代，不一定是最终选中的账号）、脱敏 `session` 和 `latency_hold` 原因 |
 | `anthropic_account_latency_sticky_kept` | Info；含 `group_id`、`model`、`from_account_id`、`alternative_account_id`、`reason`、脱敏 `session`。原因：`session_off`、`no_target`、`no_free_slot`、`owner_changed`、`cooldown`；`no_free_slot` 包含新鲜负载查询失败或并发服务缺失。`owner_changed` 表示本请求未删除绑定：删除出错或缓存不支持属主比较删除时保留 owner，比较确认绑定已变时重新读取并使用新 owner，读不到则正常选号 |
 

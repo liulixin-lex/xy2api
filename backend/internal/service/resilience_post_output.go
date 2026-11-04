@@ -24,9 +24,12 @@ import (
 // branch that recognises an upstream failure after output reports it here,
 // once per attempt:
 //
-//   - the session counts it as TRANSIENT toward its failure streak (§4.1),
-//     which rebinds the session and avoids the account (§4.2). Wording that
-//     is request scoped before output (overloaded, CAPACITY_SHED) says after
+//   - the session counts it as TRANSIENT and, for an OpenAI account with
+//     P1-B enabled and no encrypted-content guard, immediately rebinds once
+//     per attempt (per WebSocket turn);
+//     otherwise it uses the
+//     failure streak. Wording that is request scoped before output
+//     (overloaded, CAPACITY_SHED) says after
 //     output that this account is unreliable right now;
 //   - the account counts it in a per-process sliding window; three failures
 //     within 60 s put it into the transient soft cooldown (§3.4), which only
@@ -61,23 +64,28 @@ const (
 // after output reached the client. attempt identifies the upstream attempt
 // (see resilience.RequestState.ReportStreamFailure); later signals of the
 // same attempt are ignored.
-func noteResiliencePostOutputFailure(ctx context.Context, rl *RateLimitService, account *Account, attempt any, kind string) {
-	noteResiliencePostOutputFailureWithCategory(ctx, rl, account, attempt, kind, resilience.CategoryTransient)
+func noteResiliencePostOutputFailure(ctx context.Context, rl *RateLimitService, account *Account, attempt any, kind string) bool {
+	return noteResiliencePostOutputFailureWithCategory(ctx, rl, account, attempt, kind, resilience.CategoryTransient)
 }
 
-func noteResiliencePostOutputFailureWithCategory(ctx context.Context, rl *RateLimitService, account *Account, attempt any, kind string, factCategory resilience.Category) {
+func noteResiliencePostOutputFailureWithCategory(ctx context.Context, rl *RateLimitService, account *Account, attempt any, kind string, factCategory resilience.Category) bool {
 	if account == nil || !resilience.Current().FailureOn() {
-		return
+		return false
 	}
 	st := resilience.StateFrom(ctx)
 	st.MarkAccountFailed(account.ID)
 	if !st.ReportStreamFailure(account.ID, attempt) {
-		return
+		return false
 	}
-	if kind == postOutputEvent || kind == postOutputReadError || kind == postOutputNoTerminal {
+	confirmedPostOutput := kind == postOutputEvent || kind == postOutputReadError || kind == postOutputNoTerminal
+	if confirmedPostOutput {
 		recordPostOutputFailureFact(ctx, account, kind, factCategory, time.Now())
 	}
-	st.SessionFailure(ctx, account.ID, resilience.CategoryTransient)
+	if confirmedPostOutput && account.Platform == PlatformOpenAI && !openAIEncryptedContentRebindGuarded(ctx) {
+		st.SessionFailureAfterOutput(ctx, account.ID, resilience.CategoryTransient)
+	} else {
+		st.SessionFailure(ctx, account.ID, resilience.CategoryTransient)
+	}
 	// The 200 that carried the failure must not end the conversation's
 	// failed-turn streak (design §9.7).
 	st.MarkTurnFailed()
@@ -92,6 +100,28 @@ func noteResiliencePostOutputFailureWithCategory(ctx context.Context, rl *RateLi
 		"failures", failures,
 		"cooldown", cooled,
 	)...)
+	return true
+}
+
+// openAIEncryptedContentRebindGuarded reads the request-scoped encrypted-content
+// guard. withOpenAIStickyMigrationGuard only derives scheduler-local contexts;
+// those do not reach post-output reporting.
+func openAIEncryptedContentRebindGuarded(ctx context.Context) bool {
+	return ctx != nil && openAINoStickyMigration(ctx)
+}
+
+// openAIEncryptedContentForWSTurn retains encrypted-chain protection for delta
+// turns. A full request without previous_response_id starts a new chain; the
+// first frame has no history and callers pass previous=false.
+func openAIEncryptedContentForWSTurn(payload []byte, previous bool) bool {
+	return openAIRequestHasEncryptedState(payload) ||
+		(previous && strings.TrimSpace(openAIRequestPayloadView(payload).Get("previous_response_id").String()) != "")
+}
+
+// withOpenAIEncryptedContentTurnGuard writes the resolved flag for one WS turn,
+// including false, so a full request can clear a previous connection guard.
+func withOpenAIEncryptedContentTurnGuard(ctx context.Context, encrypted bool) context.Context {
+	return context.WithValue(ctx, openAINoStickyMigrationKey{}, encrypted)
 }
 
 // notePostOutputFailure counts a failure after output of the account and
@@ -124,8 +154,11 @@ func resiliencePostOutputCounts(res resilience.Result) bool {
 // (response.failed, error) after output is a failure of the account: it
 // must be what would have switched accounts before output (not a cyber or
 // content-policy refusal, an exceeded context or another request error) and
-// carry no structured client error code.
+// carry no structured client error code or conversation-state rejection.
 func openAIPostOutputEventCounts(payload []byte, message string) bool {
+	if openAIConversationStateRejection(payload, message) {
+		return false
+	}
 	if !openAIStreamFailedEventShouldFailover(payload, message) {
 		return false
 	}
@@ -138,6 +171,26 @@ func openAIPostOutputEventCounts(payload []byte, message string) bool {
 		Code:       openAIStreamFailedEventErrorCode(payload),
 		Message:    message,
 	}, resilience.Current()))
+}
+
+// openAIConversationStateRejection is a post-output-only guard until the
+// unified state-family classifier replaces it; pre-output routing is unchanged.
+func openAIConversationStateRejection(payload []byte, message string) bool {
+	code := openAIStreamFailedEventErrorCode(payload)
+	switch code {
+	case "client_tool_continuation_unavailable", "invalid_encrypted_content", "encrypted_context_invalid":
+		return true
+	}
+	if resilience.IsEncryptedContentRejection(code, message) {
+		return true
+	}
+	if code != "" {
+		return false
+	}
+	message = strings.ToLower(message)
+	return strings.Contains(message, "opaque conversation state") ||
+		strings.Contains(message, "unrecognized conversation state") ||
+		strings.Contains(message, "encrypted content is invalid for this conversation")
 }
 
 // resilienceOpenAIFailedAfterOutput reports an OpenAI failure event that
@@ -183,7 +236,11 @@ func resilienceStreamBrokenAfterOutput(ctx context.Context, rl *RateLimitService
 	if cause != nil {
 		kind = postOutputReadError
 	}
-	noteResiliencePostOutputFailure(ctx, rl, account, attempt, kind)
+	at := time.Now()
+	recorded := noteResiliencePostOutputFailure(ctx, rl, account, attempt, kind)
+	if recorded && rl != nil && rl.resilience != nil && account.IsOpenAI() {
+		rl.resilience.noteOpenAISameSiteStreamFailure(account, at)
+	}
 }
 
 // resilienceAnthropicFailedAfterOutput reports an Anthropic error event

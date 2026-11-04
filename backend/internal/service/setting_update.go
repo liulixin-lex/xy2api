@@ -553,6 +553,26 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingPaymentVisibleMethodAlipayEnabled] = strconv.FormatBool(settings.PaymentVisibleMethodAlipayEnabled)
 	updates[SettingPaymentVisibleMethodWxpayEnabled] = strconv.FormatBool(settings.PaymentVisibleMethodWxpayEnabled)
 	updates[SettingKeyOpenAILowUpstreamRatePriorityEnabled] = strconv.FormatBool(settings.OpenAILowUpstreamRatePriorityEnabled)
+
+	scope := strings.TrimSpace(settings.OpenAILowUpstreamRatePriorityScope)
+	if scope == "" {
+		scope = "all"
+	}
+	if scope != "all" && scope != "groups" {
+		return nil, infraerrors.BadRequest("INVALID_LOW_RATE_SCOPE", "low upstream rate priority scope must be all or groups")
+	}
+	for _, id := range settings.OpenAILowUpstreamRatePriorityGroupIDs {
+		if id <= 0 {
+			return nil, infraerrors.BadRequest("INVALID_LOW_RATE_GROUP", "group IDs must be positive")
+		}
+	}
+	groupIDs, _ := json.Marshal(settings.OpenAILowUpstreamRatePriorityGroupIDs)
+	if string(groupIDs) == "null" {
+		groupIDs = []byte("[]")
+	}
+	settings.OpenAILowUpstreamRatePriorityScope = scope
+	updates[SettingKeyOpenAILowUpstreamRatePriorityScope] = scope
+	updates[SettingKeyOpenAILowUpstreamRatePriorityGroupIDs] = string(groupIDs)
 	updates[SettingKeyOpenAIOAuthSchedulingRateMultiplier] = ""
 	if rate := settings.OpenAIOAuthSchedulingRateMultiplier; rate != nil {
 		updates[SettingKeyOpenAIOAuthSchedulingRateMultiplier] = strconv.FormatFloat(*rate, 'f', -1, 64)
@@ -801,12 +821,14 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	s.InvalidateClaudeCodeClientVersionCache()
 	openAIAdvancedSchedulerSettingSF.Forget(openAIAdvancedSchedulerSettingKey)
 	openAIAdvancedSchedulerSettingCache.Store(&cachedOpenAIAdvancedSchedulerSetting{
-		lowUpstreamRatePriorityEnabled: settings.OpenAILowUpstreamRatePriorityEnabled,
-		oauthSchedulingRateMultiplier:  settings.OpenAIOAuthSchedulingRateMultiplier,
-		enabled:                        settings.OpenAIAdvancedSchedulerEnabled,
-		stickyWeightedEnabled:          settings.OpenAIAdvancedSchedulerStickyWeightedEnabled,
-		subscriptionPriorityEnabled:    settings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled,
-		lbTopKOverride:                 parsePositiveIntOverride(settings.OpenAIAdvancedSchedulerLBTopK),
+		lowUpstreamRatePriorityEnabled:  settings.OpenAILowUpstreamRatePriorityEnabled,
+		lowUpstreamRatePriorityScope:    settings.OpenAILowUpstreamRatePriorityScope,
+		lowUpstreamRatePriorityGroupIDs: append([]int64(nil), settings.OpenAILowUpstreamRatePriorityGroupIDs...),
+		oauthSchedulingRateMultiplier:   settings.OpenAIOAuthSchedulingRateMultiplier,
+		enabled:                         settings.OpenAIAdvancedSchedulerEnabled,
+		stickyWeightedEnabled:           settings.OpenAIAdvancedSchedulerStickyWeightedEnabled,
+		subscriptionPriorityEnabled:     settings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled,
+		lbTopKOverride:                  parsePositiveIntOverride(settings.OpenAIAdvancedSchedulerLBTopK),
 		weightOverrides: parseOpenAIAdvancedSchedulerWeightOverrides(map[string]string{
 			SettingKeyOpenAIAdvancedSchedulerWeightPriority:         settings.OpenAIAdvancedSchedulerWeightPriority,
 			SettingKeyOpenAIAdvancedSchedulerWeightLoad:             settings.OpenAIAdvancedSchedulerWeightLoad,

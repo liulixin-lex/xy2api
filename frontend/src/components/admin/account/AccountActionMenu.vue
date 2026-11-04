@@ -86,7 +86,7 @@ import { IQ_GATE_KEY_PREFIX } from './iqCheckPresentation'
 import { useAuthStore } from '@/stores/auth'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 
-// qualityRecoverable：账号在已加载门槛状态的某个分组里熔断、保底保留或观察中。“恢复状态”会清除门槛熔断、清零次数，并重新开始 30 分钟观察。
+// qualityRecoverable：账号在已加载门槛状态的某个分组里不达标或待复测。“恢复状态”会清空该号在各组的门槛状态与坏记忆，之后按从未测过处理。
 const props = withDefaults(defineProps<{ show: boolean; account: Account | null; anchorRect: DOMRect | null; qualityRecoverable?: boolean }>(), { qualityRecoverable: false })
 const emit = defineEmits(['iq-run', 'iq-records', 'close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow', 'manage-openai-totp'])
 const { t } = useI18n()

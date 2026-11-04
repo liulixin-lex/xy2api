@@ -410,6 +410,8 @@ func TestSettingService_UpdateSettings_PaymentVisibleMethodsAndAdvancedScheduler
 		PaymentVisibleMethodAlipayEnabled:                  true,
 		PaymentVisibleMethodWxpayEnabled:                   false,
 		OpenAILowUpstreamRatePriorityEnabled:               true,
+		OpenAILowUpstreamRatePriorityScope:                 "groups",
+		OpenAILowUpstreamRatePriorityGroupIDs:              []int64{7, 8},
 		OpenAIOAuthSchedulingRateMultiplier:                testPtrFloat64(0.05),
 		OpenAIAdvancedSchedulerEnabled:                     true,
 		OpenAIAdvancedSchedulerStickyWeightedEnabled:       true,
@@ -432,6 +434,11 @@ func TestSettingService_UpdateSettings_PaymentVisibleMethodsAndAdvancedScheduler
 	require.Equal(t, "true", repo.updates[SettingPaymentVisibleMethodAlipayEnabled])
 	require.Equal(t, "false", repo.updates[SettingPaymentVisibleMethodWxpayEnabled])
 	require.Equal(t, "true", repo.updates[SettingKeyOpenAILowUpstreamRatePriorityEnabled])
+	require.Equal(t, "groups", repo.updates[SettingKeyOpenAILowUpstreamRatePriorityScope])
+	require.Equal(t, "[7,8]", repo.updates[SettingKeyOpenAILowUpstreamRatePriorityGroupIDs])
+	cached := loadOpenAIAdvancedSchedulerRuntimeSettings(context.Background(), nil)
+	require.Equal(t, "groups", cached.lowUpstreamRatePriorityScope)
+	require.Equal(t, []int64{7, 8}, cached.lowUpstreamRatePriorityGroupIDs)
 	require.Equal(t, "0.05", repo.updates[SettingKeyOpenAIOAuthSchedulingRateMultiplier])
 	require.Equal(t, "true", repo.updates[openAIAdvancedSchedulerSettingKey])
 	require.Equal(t, "true", repo.updates[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled])
