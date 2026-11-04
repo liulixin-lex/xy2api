@@ -4,15 +4,17 @@
 
 `gateway_resilience_settings.collaboration_plaintext` 缺省 `{ "enabled": false, "models": [] }`。models 最多 16 条，每条去首尾空白后 1–128 字符；去空白后按不分大小写判重，保留第一项，nil 归一为 []。读取、发布和 Clone 均隔离集合。
 
-所有门同时满足才转换：韧性总开关、功能开关、最终映射后的出站模型精确命中清单、OpenAI 账号 `extra.openai_collaboration_plaintext` 为布尔 true、真实 Codex UA/originator、入站 HTTP 且原生 Responses HTTP 出站、非透传/compact/桥接/摊平账号。ForceCodexCLI 不绕过客户端门。API Key 和 OAuth 均适用。
+所有门同时满足才转换：韧性总开关、功能开关、最终映射后的出站模型精确命中清单、OpenAI 账号资格（`extra.openai_collaboration_plaintext` 为布尔 true 或下述连续性产物）、真实 Codex UA/originator、入站 HTTP 且原生 Responses HTTP 出站、非透传/compact/桥接/摊平账号。ForceCodexCLI 不绕过客户端门。API Key 与 OAuth 接线均支持，但预检仅覆盖 API Key 中转站，OAuth 验证前不开启。原始请求 store:true 或非空 previous_response_id 一律 unsupported，在任何兼容归一化前冻结此排除。unsupported 当前合并资格门未满足、状态字段排除与不支持形态，不另细分原因。
 
 只在 tools 或 input[type=additional_tools].tools 声明 collaboration namespace 时挂本次尝试的还原器；不合格请求只观测、不改字节，无声明不挂。非原生提前分流不进入该转换。每次从不可变请求体重新派生 plan；不使用 codexToolNameSessionKey 跨请求继承。设置热变更只影响新尝试，在途 plan 保持冻结。
 
+账号开关控制新会话开始启用；请求声明 collaboration 时，若 input 顶层历史条目 type=function_call、namespace=collaboration、name 属于三个消息工具且 encrypted_function_args 为 []，仅在 API Key 账号视同资格已满足；OAuth 不适用连续性，必须管理员显式开启账号开关且验证前不要开启。只检查这些协议字段，不递归 arguments、output 或用户正文；其余资格门和原始状态排除不变，无服务端会话存储。账号开启时来源记 account，否则由产物满足时记 continuity。
+
 ## 2. 原子出站变换（核心契约）
 
-`applyCodexCollaborationPlaintext` 先全量校验冲突，再原子将 namespace 节点 collaboration 改成 collaboration-xy，并只删 spawn_agent/send_message/followup_task 的 parameters.properties.message.encrypted。不得只删标记、不改名。明确工具选择引用随声明改名；applied 时同步把顶层 instructions 字符串与 input[] 的 message(role=developer/system)正文（字符串或 input_text.text）中精确的 functions.collaboration. 替换为 functions.collaboration-xy.，保证开发者提示的寻址示例与声明一致。该范围由预检自然选工具对照暴露后 PM 追加裁决，用户消息/工具输出/参数不在替换范围。历史 agent_message、function_call_output、call_id/item_id、arguments 与 output 正文不改。
+`applyCodexCollaborationPlaintext` 先全量校验冲突，再原子将 namespace 节点 collaboration 改成 collaboration-xy，并只删 spawn_agent/send_message/followup_task 的 parameters.properties.message.encrypted。不得只删标记、不改名。tool_choice 仅接受缺省或 auto/none/required 字符串，其余原样 unsupported，不做出站选择器改写；请求侧点号/双下划线历史身份与 Chat 嵌套 function 形态均 unsupported。协议容器与身份字段先校验重复键，歧义不得部分改写；applied 时同步把顶层 instructions 字符串与 input[] 的 message(role=developer/system)正文（字符串或 input_text.text）中精确的 functions.collaboration. 替换为 functions.collaboration-xy.，保证开发者提示的寻址示例与声明一致。该范围由预检自然选工具对照暴露后 PM 追加裁决，用户消息/工具输出/参数不在替换范围。历史 agent_message、function_call_output、call_id/item_id、arguments 与 output 正文不改。
 
-返回 outcome=applied|absent|conflict|unsupported|invalid；非 applied 保持原字节、plan=nil。`newCodexCollabRestorer(plan)` 每次尝试创建；nil plan 只观测。`SSEData` / `ResponseJSON` / `Stats` 是三条回程出口共享的契约。
+返回 outcome=applied|absent|conflict|unsupported|invalid；非 applied 保持原字节、plan=nil。`newCodexCollabRestorer(plan)` 每次尝试创建；nil plan 只观测。`SSEData` / `ResponseJSON` / `ErrorBody` / `Stats` 是三条回程出口共享的契约。
 
 ## 3. 回程与终止
 
@@ -22,6 +24,8 @@
 
 流、JSON、SSE→JSON 三出口都恢复；聚合前先观察各帧，保证早先密文证据保留。无法安全恢复身份（无效 JSON、身份歧义）则本地终止：未提交发 502，已提交写协议终态，不把私有名或原始错误下发，不返回 FailoverError 重放。applied 的 SSE 无法聚合成最终 JSON 时同样本地终止。只观测解析失败保留原字节，不制造新中断。
 
+已改写的 instructions / response.instructions 结构化回声按本次 plan 对称恢复；其余正文不改。ErrorBody 仅在 applied 时恢复 error.message/param、response.error.message/param 的确切私有身份，SSE error/response.failed 同样覆盖。HTTP 与错误透传规则在最终客户端写出前恢复，分类、有限修复、观测与重试判据仍使用原错误，不新增换号；状态、type、code 保持既有行为。
+
 ## 4. schema 兼容
 
 工具 schema sanitizer 对精确名为 collaboration 的整个 namespace 节点豁免递归修改，包含 wait/list 等叶；其它工具继续原有 null type、object union、null required、lookaround 兼容修复。normalizeCodexTools 不递归 namespace，仅加锁定测试。
@@ -30,13 +34,15 @@
 
 ## 5. 观测（PM 裁决）
 
-尝试开始、每次恢复及返回前用 setOpenAICodexCollabAttempt 写本次统计。P0 的收尾 defer 最先注册、最后执行，读取最终统计。
+仅尝试开始和返回前用 setOpenAICodexCollabAttempt 写本次统计，逐帧只更新 restorer。P0 的收尾 defer 最先注册、最后执行，读取最终统计。
 
-- collab_plaintext：outcome、model，标签编码 outcome=<值>;model=<实际出站模型>。
-- collab_call：efa=absent|empty|nonempty，分别取 EFAAbsent/EFAEmpty/EFANonEmpty。
+- collab_plaintext：outcome、model，标签编码 outcome=<值>;model=<实际出站模型>，资格门通过时追加 ;eligibility=account|continuity。
+- collab_call：efa=absent|empty|nonempty，分别取 EFAAbsent/EFAEmpty/EFANonEmpty；Calls/EFA 仅计三个消息工具，不含 wait/list/interrupt。只观测模式另以 msg=opaque|text 取 MsgOpaque/MsgText，按有效字符串 message 的形态统计，缺失/无效 message 不计。
 - collab_call_action：action=marker_added|vetoed|contradicted|uncovered，取四个动作计数。
 
-EFA 与 action 不增加联合字段，不做 EFA×action 联合标签。追加 DevTextRewrites 仅统计本次开发者/系统消息与 instructions 中精确字面串的实际替换次数（由出站 plan 冻结传给 restorer）；不新增指标，也不单独触发 Warn。只有 conflict/invalid、Vetoed/Contradicted/Uncovered>0 或还原出错发 Warn resilience.collab_plaintext，带 account_id/group_id/model/client_version 及各计数，不存正文、密文、参数或原始错误。
+EFA、message 形态与 action 各为边际计数，不增加联合字段或联合标签。追加 DevTextRewrites 仅统计本次开发者/系统消息与 instructions 中精确字面串的实际替换次数（由出站 plan 冻结传给 restorer）；不新增指标，也不单独触发 Warn。conflict/invalid、Vetoed/Contradicted/Uncovered>0、还原出错，或 applied 后 Forward 返回错误时发 Warn resilience.collab_plaintext，带 account_id/group_id/model/client_version、eligibility（资格不满足时为空）、upstream_status（无响应为 0）、headers_committed 及各计数（含 msg_opaque/msg_text），不存正文、密文、参数或原始错误。
+
+持久验收来源为 resilience.state_rejection 的 collab_plaintext 标识与 usage_logs 按账号/模型/UA 的近似请求量；后者不能还原精确的合格协作投递分母。进程指标为单实例最近 1h，仅作灰度抽查，不代替 48h/7d 验收。
 
 ## 6. P0 状态族识别与观测
 
@@ -56,4 +62,8 @@ HTTP/带内 rs/cmp 有限剥离、WS 恢复判据与预算、输出提交门禁�
 
 ## 7. 启用与回退
 
-默认关。前后端同版后先验证最终模型，再配置全局 enabled/models 与目标账号开关；不用新增环境变量或重启。关闭开关停止后续转换，在途还原器继续按原 plan 工作。已有密文历史不重标，不保证恢复；上游拒绝走既有错误路径，不靠错误文案触发转换或自动换号补救。
+默认关。预检 2a/2b 已通过 API Key 中转站 d0c7a8 / c2a95e / b672e6 × gpt-6.1-sol / gpt-6-astra、Codex 0.166；OAuth 只接线、未预检，验证前不开启。前后端同版后配置全局 enabled/models，逐站验证清单内全部模型、统一同站账号开关；新增模型先逐站补验。账号开关表示该站对清单内全部模型已验证，混池换号时，已有产物的会话继续在任何其它资格合格的 API Key 账号转换；未验证 API Key 账号须从灰度池排除，关账号开关不能隔离存量连续性流量。
+
+软回退为关闭账号开关：新会话不启用，已有产物且其余资格满足的会话继续转换。硬回退为关闭韧性总开关、功能开关或清空 models：所有新尝试停止转换，在途还原器按原 plan 工作。全停用开→关续轮实测 d0c7a8、c2a95e 通过，b672e6 的账号 470 两次 cyber_policy；硬回退后部分上游可能拒绝已用历史，需新开会话。已有密文历史不重标、不保证恢复，上游拒绝不靠自动换号补救。
+
+持续启用时同态前缀稳定；转换状态因硬切换/模型清单改变时，进行中会话下一请求从工具声明处起提示缓存失效一次；账号软回退对已有产物的会话保持前缀。真实 0.166 的 58,104 字节样本首差异为 19,695，位于 input[0] additional_tools [46, 25,018)，不泛化其它会话失效率。建议低峰、整站切换；Codex 新版本发布后按 client_version 抽检状态族拒绝分布。

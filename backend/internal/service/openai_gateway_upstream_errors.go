@@ -560,7 +560,7 @@ func (s *OpenAIGatewayService) handleErrorResponseCore(
 		if contentType == "" {
 			contentType = "application/json"
 		}
-		c.Data(resp.StatusCode, contentType, body)
+		c.Data(resp.StatusCode, contentType, restoreOpenAICollaborationError(c, body))
 		if cyberMsg == "" {
 			return nil, &OpenAIRequestRejectionError{fmt.Errorf("openai cyber_policy: %d", resp.StatusCode)}
 		}
@@ -648,7 +648,7 @@ func (s *OpenAIGatewayService) handleErrorResponseCore(
 	); matched {
 		markContentPolicy()
 		MarkResponseCommitted(c)
-		c.JSON(status, gin.H{
+		writeOpenAICollaborationErrorJSON(c, status, gin.H{
 			"error": gin.H{
 				"type":    errType,
 				"message": errMsg,
@@ -788,7 +788,7 @@ func (s *OpenAIGatewayService) handleErrorResponseCore(
 		errMsg = upstreamMsg
 	}
 
-	c.JSON(statusCode, gin.H{
+	writeOpenAICollaborationErrorJSON(c, statusCode, gin.H{
 		"error": gin.H{
 			"type":    errType,
 			"message": errMsg,

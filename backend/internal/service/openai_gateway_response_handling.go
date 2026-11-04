@@ -360,7 +360,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			"sequence_number": nextFailureSequence,
 			"error":           gin.H{"type": "server_error", "code": "server_error", "status_code": http.StatusInternalServerError},
 		})
-		frame := buildOpenAIResponseFailedSSE(ctx, responseID, originalModel, source, message)
+		frame := buildOpenAIResponseFailedSSEForClient(ctx, c, responseID, originalModel, source, message)
 		if eventInProgress {
 			frame = "\n" + frame
 		}
@@ -421,7 +421,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 		if codexFailureTerminal && sawBareError && !sawResponseFailed && !clientDisconnected {
 			applyAttemptResponseHeaders()
-			if _, err := writePendingString(buildOpenAIResponseFailedSSE(ctx, responseID, originalModel, bareErrorPayload, failedMessage)); err != nil {
+			if _, err := writePendingString(buildOpenAIResponseFailedSSEForClient(ctx, c, responseID, originalModel, bareErrorPayload, failedMessage)); err != nil {
 				handlePendingWriteError(err)
 			} else {
 				failureDelivered = true
@@ -1914,6 +1914,10 @@ func extractOpenAISSEErrorMessage(payload []byte) string {
 }
 
 func buildOpenAIResponseFailedSSE(ctx context.Context, responseID, model string, source []byte, fallbackMessage string) string {
+	return buildOpenAIResponseFailedSSEForClient(ctx, nil, responseID, model, source, fallbackMessage)
+}
+
+func buildOpenAIResponseFailedSSEForClient(ctx context.Context, c *gin.Context, responseID, model string, source []byte, fallbackMessage string) string {
 	responseID = strings.TrimSpace(responseID)
 	if responseID == "" {
 		responseID = "resp_" + strings.ReplaceAll(uuid.NewString(), "-", "")
@@ -1969,7 +1973,7 @@ func buildOpenAIResponseFailedSSE(ctx context.Context, responseID, model string,
 		// All values above are JSON primitives, so this is only a defensive fallback.
 		payload = []byte(`{"type":"response.failed","response":{"status":"failed","output":[],"error":{"code":"upstream_error","message":"Upstream response failed"}}}`)
 	}
-	return "event: response.failed\ndata: " + string(payload) + "\n\n"
+	return "event: response.failed\ndata: " + string(restoreOpenAICollaborationError(c, payload)) + "\n\n"
 }
 
 func sanitizeOpenAIResponseFailedEventForClient(payload []byte, eventType string, clientOutputStarted bool) ([]byte, bool) {
@@ -2058,7 +2062,7 @@ func (s *OpenAIGatewayService) writeOpenAINonStreamingProtocolError(resp *http.R
 	}
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
-	c.JSON(http.StatusBadGateway, gin.H{
+	writeOpenAICollaborationErrorJSON(c, http.StatusBadGateway, gin.H{
 		"error": gin.H{
 			"type":    "upstream_error",
 			"message": message,
