@@ -24,8 +24,9 @@ import (
 // branch that recognises an upstream failure after output reports it here,
 // once per attempt:
 //
-//   - the session counts it as TRANSIENT and, with P1-B enabled, immediately
-//     rebinds once per attempt (per WebSocket turn); otherwise it uses the
+//   - the session counts it as TRANSIENT and, for an OpenAI account with
+//     P1-B enabled, immediately rebinds once per attempt (per WebSocket turn);
+//     otherwise it uses the
 //     failure streak. Wording that is request scoped before output
 //     (overloaded, CAPACITY_SHED) says after
 //     output that this account is unreliable right now;
@@ -75,8 +76,11 @@ func noteResiliencePostOutputFailureWithCategory(ctx context.Context, rl *RateLi
 	if !st.ReportStreamFailure(account.ID, attempt) {
 		return false
 	}
-	if kind == postOutputEvent || kind == postOutputReadError || kind == postOutputNoTerminal {
+	confirmedPostOutput := kind == postOutputEvent || kind == postOutputReadError || kind == postOutputNoTerminal
+	if confirmedPostOutput {
 		recordPostOutputFailureFact(ctx, account, kind, factCategory, time.Now())
+	}
+	if confirmedPostOutput && account.Platform == PlatformOpenAI {
 		st.SessionFailureAfterOutput(ctx, account.ID, resilience.CategoryTransient)
 	} else {
 		st.SessionFailure(ctx, account.ID, resilience.CategoryTransient)

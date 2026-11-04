@@ -21,7 +21,7 @@
 
 ### Requirement: P1-B 输出后首次失败改绑
 
-系统 SHALL 在 `session.post_output_rebind` 开启时，为输出后的流内失败事件、读流出错与缺终态传递专用会话失败信号，首次即执行现有连击改绑动作：按属主删除绑定、加入会话避开、标记会话和本请求的避开集合。系统 SHALL 沿用 `ReportStreamFailure` 的 attempt 标识去重，HTTP 请求内同一失败只立即改绑一次，WebSocket 连接按 turn 计；避开时长 SHALL 沿用 `session.avoid_seconds`（缺省 600 秒）。
+系统 SHALL 在 `session.post_output_rebind` 开启时，仅为最终上游账号平台为 OpenAI（`PlatformOpenAI`）的输出后的流内失败事件、读流出错与缺终态传递专用会话失败信号，首次即执行现有连击改绑动作：按属主删除绑定、加入会话避开、标记会话和本请求的避开集合。系统 SHALL 沿用 `ReportStreamFailure` 的 attempt 标识去重，HTTP 请求内同一失败只立即改绑一次，WebSocket 连接按 turn 计；避开时长 SHALL 沿用 `session.avoid_seconds`（缺省 600 秒）。
 
 #### Scenario: 输出后信号与输出前失败隔离
 
@@ -29,6 +29,12 @@
 - **THEN** 系统 SHALL 立即执行改绑，记一条 Warn `resilience.session_rebind`，原因与会话改绑计数标签均为 `post_output_first_failure`
 - **AND** 同请求的重复信号 SHALL 不重复改绑
 - **AND** 输出前失败 SHALL 仍按原有连击阈值（缺省 2）处理
+
+#### Scenario: 非 OpenAI 账号保持原连击规则
+
+- **WHEN** Anthropic、Grok 或其他非 OpenAI 平台的账号发生输出后失败
+- **THEN** 系统 SHALL 不发送 P1-B 专用信号，首次失败 SHALL 不立即改绑
+- **AND** 失败记录与原有会话连击 SHALL 保持生效，缺省连续 2 次失败才改绑
 
 #### Scenario: 同一 WebSocket 连接的多个 turn
 
