@@ -1,7 +1,7 @@
 export default {
   groupQualityGate: {
     title: '质量门槛',
-    hint: '按本组标准把成员分为三档：不达标的号排到最后，绑定在它上面的会话迁往达标的号；不剔除、不暂停，连续两次回到恢复线后回到前排。只用本进程启动后的数据，重启后约 30 分钟内多数号为“未知”。',
+    hint: '按本组标准把成员分为三档：不达标的号排到最后；绑定号不达标或判慢时，会话迁往本组留有余量的合格号。不剔除、不暂停，连续两次回到恢复线后回到前排。只用本进程启动后的数据，重启后约 30 分钟内多数号为“未知”（严格模式下为“待复测”）。',
     enable: '启用质量门槛',
     disabledHint: '关闭门槛后，本组不分档，判慢的号排到候选末尾。',
     loading: '正在读取门槛配置…',
@@ -25,7 +25,7 @@ export default {
     column: '门槛',
     summaryTitle: '{counts}；{composition}',
     groupSamplesShort: '本组样本不足',
-    unknownBadgeTitle: '{group} · 未知：样本不足，暂按 0 档参与排序',
+    unknownBadgeTitle: '{group} · 未知：暂无结论（样本不足或处于中间带），暂按 0 档参与排序',
     pinnedMark: '固定',
     state: {
       passing: '达标',
@@ -68,7 +68,7 @@ export default {
       badMemory: '坏记忆：{items}',
       badMemoryItem: '{dimension}至 {time}',
       separator: '、',
-      stale: '数据陈旧（最新用量记录超过 5 分钟），本轮未评估，沿用上一轮状态',
+      stale: '评估数据陈旧或读取失败，本轮未评估，沿用上一轮状态',
       pending: '每分钟评估一次',
       failed: '刷新列表后重试'
     },

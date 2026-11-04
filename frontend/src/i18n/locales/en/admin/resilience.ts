@@ -61,7 +61,7 @@ export default {
       },
       switches: {
         postOutputRebind: 'Rebind on the first failure after output',
-        postOutputRebindHint: 'The first failure after output has started (response.failed in the stream, a read error or a missing terminal event) rebinds the session and avoids that account for the avoid period; failures before output still follow the streak threshold. Needs "Session rebinding" on.',
+        postOutputRebindHint: 'OpenAI accounts only: the first failure after output has started (response.failed in the stream, a read error or a missing terminal event) rebinds the session and avoids that account for the avoid period; failures before output and other platforms still follow the streak threshold. Needs "Session rebinding" on.',
         preludeStaging: 'Delay the prelude in compatibility conversion',
         preludeStagingHint: 'Chat and Messages conversions write their opening events (role chunk, message_start) only at the first content or a terminal event, so a failure after the upstream opened but before any content can move to another account. Off restores the 0.4.3 behaviour.',
         nativePreludeWhitelist: 'Wider native Responses prelude whitelist',
