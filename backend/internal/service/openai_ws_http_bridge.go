@@ -433,6 +433,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if writeClientMessage == nil {
 		return nil, errors.New("client websocket writer is nil")
 	}
+	postOutputCtx := withOpenAIEncryptedContentTurnGuard(ctx, openAIRequestHasEncryptedState(payload))
 	responseModelObserver := s.qualityObserver(ctx, account, gjson.GetBytes(payload, "model").String())
 
 	body, err := prepareOpenAIWSHTTPBridgeBody(account, payload)
@@ -711,7 +712,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if !failureAccountSideEffectsApplied {
 			failureAccountSideEffectsApplied = s.handleOpenAIWSFailureAccountSideEffects(ctx, account, mappedModel, resp.Header, bareErrorPayload)
 		}
-		s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, bareErrorPayload, bareErrorMessage, wroteDownstream)
+		s.resilienceOpenAIFailedAfterOutput(postOutputCtx, account, resp, bareErrorPayload, bareErrorMessage, wroteDownstream)
 		upstreamTerminalEvent = "response.failed"
 		if clientDisconnected {
 			return nil
@@ -858,7 +859,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 					failureAccountSideEffectsApplied = s.handleOpenAIWSFailureAccountSideEffects(ctx, account, mappedModel, resp.Header, upstreamMessage)
 				}
 			}
-			s.resilienceOpenAIWSFailedAfterOutput(ctx, account, resp, eventType, upstreamMessage, wroteDownstream, officialOpenAIResponses)
+			s.resilienceOpenAIWSFailedAfterOutput(postOutputCtx, account, resp, eventType, upstreamMessage, wroteDownstream, officialOpenAIResponses)
 			if wroteDownstream && requestScopedCapacity && !capacityFailoverSuppressedLogged {
 				logOpenAICapacityFailoverSuppressed(ctx, account, "ws_http_bridge", resp.Header.Get("x-request-id"), eventType)
 				capacityFailoverSuppressedLogged = true
@@ -991,7 +992,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if turn == 1 && !clientDisconnected && !wroteDownstream {
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, streamErr, true)
 		}
-		resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, err, wroteDownstream && !clientDisconnected)
+		resilienceStreamBrokenAfterOutput(postOutputCtx, s.rateLimitService, account, resp, err, wroteDownstream && !clientDisconnected)
 		return resultWithUsage(), streamErr
 	}
 	terminalErr := errors.New("upstream http bridge stream ended before terminal event")
@@ -1001,7 +1002,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if turn == 1 && !clientDisconnected && !wroteDownstream {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, terminalErr, true)
 	}
-	resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, nil, wroteDownstream && !clientDisconnected)
+	resilienceStreamBrokenAfterOutput(postOutputCtx, s.rateLimitService, account, resp, nil, wroteDownstream && !clientDisconnected)
 	return resultWithUsage(), terminalErr
 }
 

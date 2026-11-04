@@ -25,7 +25,8 @@ import (
 // once per attempt:
 //
 //   - the session counts it as TRANSIENT and, for an OpenAI account with
-//     P1-B enabled, immediately rebinds once per attempt (per WebSocket turn);
+//     P1-B enabled and no encrypted-content guard, immediately rebinds once
+//     per attempt (per WebSocket turn);
 //     otherwise it uses the
 //     failure streak. Wording that is request scoped before output
 //     (overloaded, CAPACITY_SHED) says after
@@ -80,7 +81,7 @@ func noteResiliencePostOutputFailureWithCategory(ctx context.Context, rl *RateLi
 	if confirmedPostOutput {
 		recordPostOutputFailureFact(ctx, account, kind, factCategory, time.Now())
 	}
-	if confirmedPostOutput && account.Platform == PlatformOpenAI {
+	if confirmedPostOutput && account.Platform == PlatformOpenAI && !openAIEncryptedContentRebindGuarded(ctx) {
 		st.SessionFailureAfterOutput(ctx, account.ID, resilience.CategoryTransient)
 	} else {
 		st.SessionFailure(ctx, account.ID, resilience.CategoryTransient)
@@ -100,6 +101,19 @@ func noteResiliencePostOutputFailureWithCategory(ctx context.Context, rl *RateLi
 		"cooldown", cooled,
 	)...)
 	return true
+}
+
+// openAIEncryptedContentRebindGuarded reads the request-scoped encrypted-content
+// guard. withOpenAIStickyMigrationGuard only derives scheduler-local contexts;
+// those do not reach post-output reporting.
+func openAIEncryptedContentRebindGuarded(ctx context.Context) bool {
+	return ctx != nil && openAINoStickyMigration(ctx)
+}
+
+// withOpenAIEncryptedContentTurnGuard replaces the flag for one WS turn, including
+// false, so neither a previous turn nor a connection guard can suppress P1-B.
+func withOpenAIEncryptedContentTurnGuard(ctx context.Context, encrypted bool) context.Context {
+	return context.WithValue(ctx, openAINoStickyMigrationKey{}, encrypted)
 }
 
 // notePostOutputFailure counts a failure after output of the account and
@@ -155,14 +169,20 @@ func openAIPostOutputEventCounts(payload []byte, message string) bool {
 // unified state-family classifier replaces it; pre-output routing is unchanged.
 func openAIConversationStateRejection(payload []byte, message string) bool {
 	code := openAIStreamFailedEventErrorCode(payload)
-	if code == "client_tool_continuation_unavailable" || resilience.IsEncryptedContentRejection(code, message) {
+	switch code {
+	case "client_tool_continuation_unavailable", "invalid_encrypted_content", "encrypted_context_invalid":
 		return true
+	}
+	if resilience.IsEncryptedContentRejection(code, message) {
+		return true
+	}
+	if code != "" {
+		return false
 	}
 	message = strings.ToLower(message)
 	return strings.Contains(message, "opaque conversation state") ||
 		strings.Contains(message, "unrecognized conversation state") ||
-		strings.Contains(message, "invalid for this conversation") ||
-		strings.Contains(message, "for item amsg_")
+		strings.Contains(message, "encrypted content is invalid for this conversation")
 }
 
 // resilienceOpenAIFailedAfterOutput reports an OpenAI failure event that

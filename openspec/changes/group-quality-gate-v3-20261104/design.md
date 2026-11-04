@@ -47,7 +47,7 @@
 - **高级调度**：启用门槛的组按 0 未判慢 → 0 判慢 → 1 未判慢 → 1 判慢 → 2 未判慢 → 2 判慢 分池，逐池运行原有 TopK 与权重，取到即停；缓存偏好与借用路径同样按池。
 - **v2 否决取消**：原调用 质量否决函数 的路径（普通选号、粘性命中、借用、高级调度、共享调度、占槽后复核）改为按档排序；运维可用性与兜底分组判定视为“未被否决”。
 - **迁出触发**：绑定号对本组为 2 档，或在本模型上正处判慢让位。豁免：续链、WebSocket、指定传输方式、`withOpenAIStickyMigrationGuard`、`qualityOwnsSticky`、`OpenAIQualityTurnPinned`。绑定在固定账号上的会话不豁免判慢迁出。
-- **密文片段保护**：HTTP Responses（含透传）及接受 Responses 形状 `input[]` 的 Chat Completions 在选号前调用 `WithOpenAIEncryptedContentMigrationGuard`；WebSocket 首帧选号前设置（连接内不重选号，客户端重连后的新连接首帧照样判定）。仅当 `input[]` 中 `agent_message.content[]` 或数组形态 `function_call_output.output[]` 含 `type=encrypted_content` 时，设置与续链相同的 `withOpenAINoStickyMigration` 标记，跳过质量、判慢及其低倍率软迁出。父线程亲和仍只看 `agent_message`；reasoning／compaction 顶层密文不算。硬准入、失败类改绑、新会话放置、利润门和旧粘性逃逸保持原样。
+- **密文片段保护**：HTTP Responses（含透传）及接受 Responses 形状 `input[]` 的 Chat Completions 在选号前调用 `WithOpenAIEncryptedContentMigrationGuard`；WebSocket 首帧选号前设置（连接内不重选号，客户端重连后的新连接首帧照样判定）。仅当合法 JSON 的 `input[]` 中 `agent_message.content[]` 或数组形态 `function_call_output.output[]` 含解码后 `type=encrypted_content`（含 Unicode 转义）时，设置与续链相同的 `withOpenAINoStickyMigration` 标记，跳过质量、判慢及其低倍率软迁出。父线程亲和仍只看 `agent_message`；reasoning／compaction 顶层密文不算。带密文片段时 P1-B 按 §4 退回连击；硬准入、其他失败类改绑、新会话放置、利润门和旧粘性逃逸保持原样。
 - **迁出目标**：通过硬准入、未判慢、有空位，且 `MigrationTarget` 为真：
   - 普通组：首字已测到且预计 P90 ≤ 0.9X；错误、缓存没有当前 `fail`，也没有坏记忆；
   - 严格组：三维都已测到，且都在恢复线以内（首字 ≤0.9X、错误 ≤0.8Y、缓存点估计 ≥Z）。
@@ -59,9 +59,9 @@
 
 - **判慢让位**：按账号 × 模型，EWMA τ=5 分钟，尝试级可见首字 ≥10 秒记为慢，有效加权样本 ≥6，慢占比 ≥30% 触发。距该账号 × 模型上次让位结束 ≤30 分钟再次触发时，时长依次 3 → 6 → 12 → 15 分钟（封顶），否则从 3 分钟开始。让位期间继续累积样本，触发时清零。到期只解除后排，不改 v3 状态。参数为代码常量。
 - **同站断流暂停**：站点 = `GetOpenAIBaseURL()` 的主机名（空值回落官方地址）。只计 `resilienceStreamBrokenAfterOutput` 入口的传输层断流（读流出错、输出后缺终态），中转流内失败不计；同号 3 秒内合并。某账号断流时，若同站另一账号此前 60 秒内也断过流，对这些断流账号中尚未暂停的各暂停 300 秒；暂停期间再断流不延长。暂停与慢失败冷却同级：普通选号跳过，末位兜底仍可用；绑定会话下次请求改绑。同站没有断流的账号不受影响。
-- **P1-B**：仅 OpenAI 平台账号（`PlatformOpenAI`，不含 Anthropic、Grok 等其他平台）输出后失败（流内 `response.failed`、读流出错、缺终态）第一次发生，就执行与连击达到阈值相同的改绑：按属主删除绑定、记会话避开（`session.avoid_seconds`，缺省 600 秒）、标记会话、加入本请求避开集合。沿用 `ReportStreamFailure` 的 attempt 标识去重：HTTP 请求内同一失败只动作一次，WebSocket 连接的每个 turn 各自可触发一次。输出前失败及其他平台的输出后失败仍按原连击阈值。质量路由持有的绑定不越权删除，避开照常生效，末位兜底不变。
+- **P1-B**：仅 OpenAI 平台账号（`PlatformOpenAI`，不含 Anthropic、Grok 等其他平台）输出后失败（流内 `response.failed`、读流出错、缺终态）第一次发生，就执行与连击达到阈值相同的改绑：按属主删除绑定、记会话避开（`session.avoid_seconds`，缺省 600 秒）、标记会话、加入本请求避开集合。沿用 `ReportStreamFailure` 的 attempt 标识去重：HTTP 请求内同一失败只动作一次，WebSocket 连接的每个 turn 各自可触发一次。带约束 1 密文片段的请求退回原连击规则：HTTP 读请求标记，WS 原生池、透传和 HTTP 桥按逐 turn payload 更新输出后路径实际读取的上下文，上一轮状态不遗留；输出后冷却与同站暂停记账不变。输出前失败及其他平台的输出后失败仍按原连击阈值。质量路由持有的绑定不越权删除，避开照常生效，末位兜底不变。
 
-- **会话状态族拒绝**：S1–S4 及其他加密内容拒绝在输出后事件计数入口排除，不触发 P1-B、账号输出后冷却或会话连击；HTTP SSE 与 WS、有无 `invalid_request_error` 包装、裸 `error` 与 `response.failed` 都适用。请求最终失败、运维记录与真实用量保留，输出前分类与换号不变；真实断流仍走原保护。
+- **会话状态族拒绝**：输出后按专用 code（`client_tool_continuation_unavailable`、`invalid_encrypted_content`、`encrypted_context_invalid`）→ 现有 `IsEncryptedContentRejection` → 仅 code 为空时的窄文案（`opaque conversation state`、`unrecognized conversation state`、`encrypted content is invalid for this conversation`）识别 S1–S4 及其他加密拒绝。单独 `for item amsg_` 或 `invalid for this conversation` 不足以命中。只排除 P1-B、账号输出后冷却和会话连击；HTTP SSE/WS、有无包装、裸 `error`/`response.failed` 都适用。最终失败、运维记录、真实用量与输出前分类/换号不变。门槛 v3 错误维、近期表现、份额健康按原运维分类计：无包装 S1 为 `TRANSIENT`，本次核对的生产 S1 带 `invalid_request_error` 包装、为 `CLIENT_ERROR`。
 
 ## 5. 接口契约（各工作包共用，名字不得改）
 

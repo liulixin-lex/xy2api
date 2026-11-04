@@ -186,13 +186,88 @@ func TestPostOutputConversationStateRejectionMarkers(t *testing.T) {
 		{"S1 opaque message", "", "Cannot prove ownership of opaque conversation state"},
 		{"S1 unrecognized message", "", "Unrecognized conversation state"},
 		{"S2 message only", "", "Encrypted content is invalid for this conversation"},
-		{"S4 item message", "", "Request rejected for item amsg_example"},
 		{"other encrypted code", "encrypted_context_invalid", "Request rejected"},
 		{"other encrypted message", "", "Could not validate encrypted continuation context"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			payload := conversationStateErrorPayload(t, "response.failed", tc.code, tc.message, false)
 			require.False(t, openAIPostOutputEventCounts(payload, extractOpenAISSEErrorMessage(payload)))
+		})
+	}
+}
+
+func TestPostOutputStateMarkersDoNotHideAccountFailures(t *testing.T) {
+	for _, tc := range []struct {
+		code, message string
+	}{
+		{"server_error", "Upstream server error for item amsg_123"},
+		{"rate_limit_exceeded", "Rate limit exceeded for item amsg_123; retry shortly"},
+	} {
+		for _, enabled := range []bool{true, false} {
+			t.Run(tc.code+"/post_output_"+fmtBool(enabled), func(t *testing.T) {
+				rl, repo, account, r := newPenaltyFixture(t, PlatformOpenAI)
+				withResilienceSettings(t, func(s *resilience.Settings) { s.Session.PostOutputRebind = enabled })
+				store := &conversationStateSessionStore{memResilienceStore: newMemResilienceStore()}
+				r.store = store
+				cache := &mockGatewayCacheForPlatform{sessionBindings: map[string]int64{"sess": account.ID}}
+				gw := &GatewayService{cache: cache, resilience: r}
+				svc := &OpenAIGatewayService{rateLimitService: rl}
+				payload, err := json.Marshal(map[string]any{
+					"type": "response.failed",
+					"response": map[string]any{"error": map[string]string{
+						"type": "server_error", "code": tc.code, "message": tc.message,
+					}},
+				})
+				require.NoError(t, err)
+				require.True(t, openAIPostOutputEventCounts(payload, tc.message))
+				before := sessionRebindMetric(account.ID, "post_output_first_failure")
+				streakBefore := sessionRebindMetric(account.ID, "resil_failure_streak")
+				for failure := 1; failure <= postOutputCooldownThreshold; failure++ {
+					ctx := postOutputRequest(gw.gatewaySessionRecorder())
+					svc.resilienceOpenAIFailedAfterOutput(ctx, account, &http.Response{}, payload, tc.message, true)
+					require.Equal(t, int64(failure), store.failureCalls.Load())
+					if failure == 1 && !enabled {
+						require.Equal(t, account.ID, cache.sessionBindings["sess"])
+						require.False(t, resilience.StateFrom(ctx).Avoided(account.ID))
+					} else {
+						require.NotContains(t, cache.sessionBindings, "sess")
+					}
+				}
+				require.Contains(t, repo.tempReason, postOutputCooldownLabel)
+				group := int64(25)
+				require.Contains(t, r.sessionAvoid(context.Background(), &group, "sess"), account.ID)
+				if enabled {
+					require.Equal(t, before+postOutputCooldownThreshold, sessionRebindMetric(account.ID, "post_output_first_failure"))
+				} else {
+					require.Equal(t, before, sessionRebindMetric(account.ID, "post_output_first_failure"))
+					require.Equal(t, streakBefore+1, sessionRebindMetric(account.ID, "resil_failure_streak"))
+				}
+			})
+		}
+	}
+	for _, message := range []string{"Request rejected for item amsg_example", "Invalid for this conversation"} {
+		payload := conversationStateErrorPayload(t, "response.failed", "", message, false)
+		require.False(t, openAIConversationStateRejection(payload, message), "a bare fragment is not a state rejection")
+		require.True(t, openAIPostOutputEventCounts(payload, message))
+	}
+}
+
+func TestPostOutputConversationStateRejectionCodePrecedence(t *testing.T) {
+	for _, tc := range []struct {
+		code, message string
+		rejected      bool
+	}{
+		{"client_tool_continuation_unavailable", "Request rejected", true},
+		{"invalid_encrypted_content", "Request rejected", true},
+		{"encrypted_context_invalid", "Request rejected", true},
+		{"server_error", "Encrypted function output content could not be decrypted", true},
+		{"server_error", "Opaque conversation state", false},
+		{"rate_limit_exceeded", "Unrecognized conversation state", false},
+		{"server_error", "Encrypted content is invalid for this conversation", false},
+	} {
+		t.Run(tc.code+"/"+tc.message, func(t *testing.T) {
+			payload := conversationStateErrorPayload(t, "response.failed", tc.code, tc.message, false)
+			require.Equal(t, tc.rejected, openAIConversationStateRejection(payload, tc.message))
 		})
 	}
 }

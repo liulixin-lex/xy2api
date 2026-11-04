@@ -112,7 +112,7 @@ func WithOpenAIEncryptedContentMigrationGuard(ctx context.Context, body []byte) 
 }
 
 func openAIRequestHasEncryptedState(body []byte) bool {
-	if !bytes.Contains(body, []byte(`"encrypted_content"`)) || !gjson.ValidBytes(body) {
+	if !gjson.ValidBytes(body) {
 		return false
 	}
 	input := openAIRequestPayloadView(body).Get("input")
