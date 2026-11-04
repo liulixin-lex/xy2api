@@ -922,7 +922,10 @@ func openAICodexCollabMessageLooksOpaque(message string) bool {
 	}
 	for index := 0; index < len(message); index++ {
 		b := message[index]
-		if !(b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z' || b >= '0' && b <= '9' || b == '-' || b == '_' || b == '=' || b == '+' || b == '/') {
+		switch {
+		case b >= 'A' && b <= 'Z', b >= 'a' && b <= 'z', b >= '0' && b <= '9',
+			b == '-', b == '_', b == '=', b == '+', b == '/':
+		default:
 			return false
 		}
 	}
