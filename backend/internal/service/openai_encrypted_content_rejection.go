@@ -24,19 +24,17 @@ func isOpenAIEncryptedContentRejectionPayload(payload []byte) bool {
 // message. A nonempty code must never be discarded to enable text matching.
 func openAIStateRejection(payload []byte, message string) resilience.StateRejection {
 	code := extractUpstreamErrorCode(payload)
-	typ := gjson.GetBytes(payload, "error.type").String()
 	msg := extractUpstreamErrorMessage(payload)
 	if gjson.GetBytes(payload, "response.error").IsObject() {
 		code = firstNonEmpty(code, gjson.GetBytes(payload, "response.error.code").String())
-		typ = firstNonEmpty(typ, gjson.GetBytes(payload, "response.error.type").String())
 		msg = firstNonEmpty(msg, gjson.GetBytes(payload, "response.error.message").String())
 	}
-	if rej := resilience.ClassifyStateRejection(code, typ, msg); rej.RequestScoped() {
+	if rej := resilience.ClassifyStateRejection(code, msg); rej.RequestScoped() {
 		return rej
 	}
 	// The stream reader may have extracted a message from another supported
 	// envelope. Keep its code when considering that message, as the v3 guard did.
-	return resilience.ClassifyStateRejection(code, typ, message)
+	return resilience.ClassifyStateRejection(code, message)
 }
 
 func isOpenAIStateRejection(payload []byte, message string) bool {

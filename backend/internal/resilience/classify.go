@@ -505,7 +505,7 @@ func classify(o Outcome, extraBalanceKeywords []string, decisionV2 bool) Result 
 	if contentPolicyCode(code, typ, lowerBody) {
 		return Result{Category: CategoryClientError, Reason: ReasonContentPolicy}
 	}
-	if rej := ClassifyStateRejection(code, typ, text); rej.RequestScoped() {
+	if rej := ClassifyStateRejection(code, text); rej.RequestScoped() {
 		reason := ReasonConversationState
 		if rej.Encrypted {
 			reason = ReasonEncryptedContent
