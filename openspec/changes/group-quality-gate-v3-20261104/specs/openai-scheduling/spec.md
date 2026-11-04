@@ -3,14 +3,14 @@
 ## ADDED Requirements
 
 ### Requirement: Quality ordering remains independent of cost preference
-Enabled groups MUST order hard-admitted accounts by quality tier 0/1/2 and place latency-held accounts last inside each quality and compact-capability segment. Priority, capacity band, cost, predicted P90, load and last use MUST follow the design's in-tier ordering. Missing predictions are neutral. Randomization, cache/session preferences and borrowing MUST NOT cross quality or latency boundaries. Disabled groups preserve their existing behavior.
+Enabled groups MUST order hard-admitted accounts by quality tier 0/1/2 and place latency-held accounts last inside each quality and compact-capability segment. Priority, capacity band, cost, predicted P90, load and last use MUST follow the design's in-tier ordering. Missing predictions are neutral: first establish the load/LRU base order, then stable-sort known predicted positions inside the same quality/held/priority/capacity/rate/compact cohort. Unknown positions remain in their base positions. The pairwise base comparator MUST remain transitive. Randomization, cache/session preferences and borrowing MUST NOT cross quality or latency boundaries. Disabled groups preserve their existing behavior.
 
 #### Scenario: Held tier 0 versus healthy tier 2
 - **WHEN** tier 0 is held and tier 2 is healthy
 - **THEN** tier 0 remains ahead of tier 2; a non-held member of tier 0 precedes the held member.
 
 ### Requirement: Advanced and shared scheduling honor tiers
-Advanced scheduling MUST run existing TopK and weights separately in six pools (tier 0 healthy/held, tier 1 healthy/held, tier 2 healthy/held), including borrowing. Shared scheduling MUST quality-sort placement candidates without adding quality migration or vetoing a valid sticky owner. Quality MUST NOT reduce operations availability or trigger group fallback.
+Advanced scheduling MUST run existing TopK and weights separately in six pools (tier 0 healthy/held, tier 1 healthy/held, tier 2 healthy/held), including borrowing. Shared scheduling MUST stable-sort new placement and spill candidates by quality tier, current-model latency hold and original share order, without adding quality migration or vetoing a valid sticky owner. All-held pools remain eligible. Same-site pauses MUST override temporary soft-spill preservation even when another soft penalty is present, including early account/model-limit returns and missing-owner supplements. The global soft penalty mapping MUST remain available to last resort, and disabling same-site hold MUST restore ordinary soft-spill behavior. Quality MUST NOT reduce operations availability or trigger group fallback.
 
 ### Requirement: Scoped low-rate preference
 The global switch MUST retain its prior prerequisites (advanced off and upstream token cost used). Scope MUST default to `all`; `groups` uses only the listed group IDs and an empty list disables the preference. Settings update, read and runtime caches MUST carry both new fields.

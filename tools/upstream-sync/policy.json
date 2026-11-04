@@ -3158,7 +3158,7 @@
     },
     {
       "path": "backend/internal/service/share_scheduling_openai.go",
-      "value": "d := s.orderOpenAIShareQuality(in.groupID, sharesched.Plan(req, cands))"
+      "value": "d := s.orderOpenAIShareQuality(in.groupID, in.model, accounts, sharesched.Plan(req, cands))"
     },
     {
       "path": "backend/internal/service/resilience_session.go",
@@ -3683,6 +3683,14 @@
     {
       "path": "backend/internal/repository/gateway_cache.go",
       "value": "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end"
+    },
+    {
+      "path": "backend/internal/service/share_scheduling_openai.go",
+      "value": "if !lastResort && g.sameSiteHeld(acc, now)"
+    },
+    {
+      "path": "backend/internal/service/share_scheduling_openai.go",
+      "value": "if gates.sameSiteHeld(acc, now)"
     }
   ],
   "forbidden_module_paths": [
@@ -6433,6 +6441,31 @@
       "id": "xy-openai-group-quality-scheduling",
       "path": "backend/internal/service/openai_gate_v3_test.go",
       "literal": "func TestGateV3MigrationRechecksOnlyOrderedFreeCandidates(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_gate_v3_redteam_test.go",
+      "literal": "func TestGateV3ShareSameSiteHoldOverridesSoftSpill(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_gate_v3_redteam_test.go",
+      "literal": "func TestGateV3ShareLatencyOrdering(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_gate_v3_redteam_test.go",
+      "literal": "func TestGateV3PredictionOrderTransitivityAndPermutations(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_gate_v3_redteam_test.go",
+      "literal": "func TestGateV3SameRateSelectionUsesPrediction(t *testing.T) {"
+    },
+    {
+      "id": "xy-openai-group-quality-scheduling",
+      "path": "backend/internal/service/openai_gate_v3_redteam_test.go",
+      "literal": "func TestGateV3LatencyHoldStartedWarnFields(t *testing.T) {"
     }
   ]
 }

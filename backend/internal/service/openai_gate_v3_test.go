@@ -171,7 +171,9 @@ func TestGateV3OrderingAndPreferences(t *testing.T) {
 	view.tiers[2] = 0
 	view.predicted = map[int64]int{1: 10000, 2: 5000}
 	order = svc.openAICandidateOrderForItems(&group, openAILegacyUpstreamRateOrder{enabled: true, rates: map[int64]float64{1: .2, 2: .2}}, []accountWithLoad{{account: a}, {account: b}})
-	require.True(t, openAICandidateLess(accountWithLoad{account: b}, accountWithLoad{account: a}, order))
+	predicted := []accountWithLoad{{account: a}, {account: b}}
+	orderOpenAIPredictedPositions(predicted, func(item accountWithLoad) accountWithLoad { return item }, order, nil, false)
+	require.Equal(t, b.ID, predicted[0].account.ID)
 	delete(view.predicted, 1)
 	order = svc.openAICandidateOrderForItems(&group, order.rates, []accountWithLoad{{account: a}, {account: b}})
 	require.True(t, openAICandidateLess(accountWithLoad{account: a}, accountWithLoad{account: b}, order), "missing prediction is neutral")
@@ -221,10 +223,10 @@ func TestGateV3AdvancedPoolsAndShare(t *testing.T) {
 	require.Len(t, plan.selectionOrder, 1, "disabled group retains one TopK pool")
 	view.enabled = true
 	decision := sharesched.Decision{Steps: []sharesched.Step{{AccountID: 6}, {AccountID: 3}, {AccountID: 1}}}
-	ordered := svc.orderOpenAIShareQuality(&group, decision)
+	ordered := svc.orderOpenAIShareQuality(&group, "gpt-test", nil, decision)
 	require.Equal(t, int64(1), ordered.Steps[0].AccountID)
 	decision = sharesched.Decision{Bound: 6, Steps: []sharesched.Step{{AccountID: 6}, {AccountID: 3}, {AccountID: 1}}}
-	ordered = svc.orderOpenAIShareQuality(&group, decision)
+	ordered = svc.orderOpenAIShareQuality(&group, "gpt-test", nil, decision)
 	require.Equal(t, int64(6), ordered.Steps[0].AccountID)
 	require.Equal(t, int64(1), ordered.Steps[1].AccountID)
 }

@@ -164,6 +164,7 @@ func (s *OpenAIGatewayService) migrateOpenAIQualityOwner(ctx context.Context, gr
 		}
 		shuffleOpenAIWithinQualityGroups(candidates, order.tiers, nil)
 	}
+	s.orderOpenAIPredictedLoad(candidates, order, model, compact)
 	for _, candidate := range candidates {
 		if ctx.Err() != nil || !view.Enabled(key.groupID) {
 			return owner, nil
