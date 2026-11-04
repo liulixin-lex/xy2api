@@ -29,11 +29,13 @@ func TestRecoveryObservabilityMigrationAndRoundTrip(t *testing.T) {
 			require.NoError(t, err)
 		}
 	})
-	migration, err := migrations.FS.ReadFile("283_recovery_observability.sql")
-	require.NoError(t, err)
-	for i := 0; i < 2; i++ {
-		_, err = integrationDB.ExecContext(ctx, string(migration))
+	for _, name := range []string{"283_recovery_observability.sql", "289_usage_log_attempt_first_output.sql"} {
+		migration, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)
+		for i := 0; i < 2; i++ {
+			_, err = integrationDB.ExecContext(ctx, string(migration))
+			require.NoError(t, err)
+		}
 	}
 	client := testEntClient(t)
 	repo := newUsageLogRepositoryWithSQL(client, integrationDB)
@@ -41,10 +43,15 @@ func TestRecoveryObservabilityMigrationAndRoundTrip(t *testing.T) {
 	key := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: uuid.NewString(), Name: tag})
 	account := mustCreateAccount(t, client, &service.Account{Name: tag})
 	elapsed := int64(28000)
+	attemptElapsed := int64(5000)
+	zero := int64(0)
 	for _, mode := range []string{"single", "batch", "best_effort", "no_result"} {
-		for _, value := range []*int64{nil, &elapsed} {
-			log := &service.UsageLog{UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID, Model: "gpt-5", RequestID: tag + "-" + uuid.NewString()[:16], CreatedAt: time.Now(), EndToEndFirstOutputMs: value}
+		for _, values := range []struct{ endToEnd, attempt *int64 }{
+			{}, {&elapsed, nil}, {&elapsed, &zero}, {&elapsed, &attemptElapsed},
+		} {
+			log := &service.UsageLog{UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID, Model: "gpt-5", RequestID: tag + "-" + uuid.NewString()[:16], CreatedAt: time.Now(), EndToEndFirstOutputMs: values.endToEnd, AttemptFirstOutputMs: values.attempt}
 			prepared := prepareUsageLogInsert(log)
+			var err error
 			switch mode {
 			case "single":
 				_, err = repo.createSingle(ctx, integrationDB, log)
@@ -61,7 +68,11 @@ func TestRecoveryObservabilityMigrationAndRoundTrip(t *testing.T) {
 			require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT id FROM usage_logs WHERE request_id=$1 AND api_key_id=$2", log.RequestID, log.APIKeyID).Scan(&log.ID))
 			got, e := repo.GetByID(ctx, log.ID)
 			require.NoError(t, e)
-			require.Equal(t, value, got.EndToEndFirstOutputMs, mode)
+			require.Equal(t, values.endToEnd, got.EndToEndFirstOutputMs, mode)
+			require.Equal(t, values.attempt, got.AttemptFirstOutputMs, mode)
+			entity, err := client.UsageLog.Get(ctx, log.ID)
+			require.NoError(t, err)
+			require.Equal(t, values.attempt, entity.AttemptFirstOutputMs, mode)
 		}
 	}
 	ops := NewOpsRepository(integrationDB)
@@ -73,6 +84,7 @@ func TestRecoveryObservabilityMigrationAndRoundTrip(t *testing.T) {
 				entry.RecoveryOutcome = &completed
 			}
 			var id int64
+			var err error
 			if batch {
 				_, err = ops.BatchInsertErrorLogs(ctx, []*service.OpsInsertErrorLogInput{entry})
 				require.NoError(t, err)

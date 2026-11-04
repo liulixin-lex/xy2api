@@ -103,6 +103,15 @@
   ],
   "contracts": [
     {
+      "item": "usage attempt first output column",
+      "sources": [
+        "backend/ent/schema/usage_log.go"
+      ],
+      "pattern": "field\\.Int64\\(\"(attempt_first_output_ms)\"\\)",
+      "match": "word",
+      "doc": "docs/USAGE_METRICS.md"
+    },
+    {
       "item": "resilience counter",
       "sources": [
         "backend/internal/resilience/metrics.go"

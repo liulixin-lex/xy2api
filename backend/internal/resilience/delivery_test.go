@@ -29,6 +29,31 @@ func newDeliveryState(t *testing.T, delivered *atomic.Int64) (*RequestState, con
 	return st, WithRequestState(client, st), cancel
 }
 
+func TestAttemptFirstOutputMs(t *testing.T) {
+	start := time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name   string
+		start  time.Time
+		output time.Time
+		want   *int64
+	}{
+		{name: "missing start", output: start},
+		{name: "missing output", start: start},
+		{name: "output belongs to preceding attempt", start: start, output: start.Add(-time.Second)},
+		{name: "zero milliseconds is a value", start: start, output: start, want: new(int64(0))},
+		{name: "milliseconds", start: start, output: start.Add(1234 * time.Millisecond), want: new(int64(1234))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := NewRequestState()
+			st.SetAttemptProfile(AttemptProfile{AttemptStart: tc.start})
+			st.NoteSemanticOutput(tc.output)
+			require.Equal(t, tc.want, st.AttemptFirstOutputMs())
+		})
+	}
+	var absent *RequestState
+	require.Nil(t, absent.AttemptFirstOutputMs())
+}
+
 func TestResolveDisconnect(t *testing.T) {
 	withPublished(t, nil)
 	var delivered atomic.Int64

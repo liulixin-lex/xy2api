@@ -225,6 +225,11 @@ func EndToEndFirstOutputMs(v int64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldEndToEndFirstOutputMs, v))
 }
 
+// AttemptFirstOutputMs applies equality check predicate on the "attempt_first_output_ms" field. It's identical to AttemptFirstOutputMsEQ.
+func AttemptFirstOutputMs(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldAttemptFirstOutputMs, v))
+}
+
 // FirstTokenMs applies equality check predicate on the "first_token_ms" field. It's identical to FirstTokenMsEQ.
 func FirstTokenMs(v int) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldFirstTokenMs, v))
@@ -1798,6 +1803,56 @@ func EndToEndFirstOutputMsIsNil() predicate.UsageLog {
 // EndToEndFirstOutputMsNotNil applies the NotNil predicate on the "end_to_end_first_output_ms" field.
 func EndToEndFirstOutputMsNotNil() predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNotNull(FieldEndToEndFirstOutputMs))
+}
+
+// AttemptFirstOutputMsEQ applies the EQ predicate on the "attempt_first_output_ms" field.
+func AttemptFirstOutputMsEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldAttemptFirstOutputMs, v))
+}
+
+// AttemptFirstOutputMsNEQ applies the NEQ predicate on the "attempt_first_output_ms" field.
+func AttemptFirstOutputMsNEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldAttemptFirstOutputMs, v))
+}
+
+// AttemptFirstOutputMsIn applies the In predicate on the "attempt_first_output_ms" field.
+func AttemptFirstOutputMsIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldAttemptFirstOutputMs, vs...))
+}
+
+// AttemptFirstOutputMsNotIn applies the NotIn predicate on the "attempt_first_output_ms" field.
+func AttemptFirstOutputMsNotIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldAttemptFirstOutputMs, vs...))
+}
+
+// AttemptFirstOutputMsGT applies the GT predicate on the "attempt_first_output_ms" field.
+func AttemptFirstOutputMsGT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldAttemptFirstOutputMs, v))
+}
+
+// AttemptFirstOutputMsGTE applies the GTE predicate on the "attempt_first_output_ms" field.
+func AttemptFirstOutputMsGTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldAttemptFirstOutputMs, v))
+}
+
+// AttemptFirstOutputMsLT applies the LT predicate on the "attempt_first_output_ms" field.
+func AttemptFirstOutputMsLT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldAttemptFirstOutputMs, v))
+}
+
+// AttemptFirstOutputMsLTE applies the LTE predicate on the "attempt_first_output_ms" field.
+func AttemptFirstOutputMsLTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldAttemptFirstOutputMs, v))
+}
+
+// AttemptFirstOutputMsIsNil applies the IsNil predicate on the "attempt_first_output_ms" field.
+func AttemptFirstOutputMsIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldAttemptFirstOutputMs))
+}
+
+// AttemptFirstOutputMsNotNil applies the NotNil predicate on the "attempt_first_output_ms" field.
+func AttemptFirstOutputMsNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldAttemptFirstOutputMs))
 }
 
 // FirstTokenMsEQ applies the EQ predicate on the "first_token_ms" field.

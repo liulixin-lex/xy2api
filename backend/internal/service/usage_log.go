@@ -191,6 +191,7 @@ type UsageLog struct {
 	DurationMs            *int
 	FirstTokenMs          *int
 	EndToEndFirstOutputMs *int64
+	AttemptFirstOutputMs  *int64
 	UserAgent             *string
 	IPAddress             *string
 	// SessionID is the explicit client-provided request correlation identifier
