@@ -476,6 +476,7 @@ func TestCodexCollabErrorBody(t *testing.T) {
 		{"flat error", "error", `{"type":"error","message":"collaboration-xy.send_message","param":"collaboration-xy.send_message"}`, `{"type":"error","message":"collaboration.send_message","param":"collaboration.send_message"}`},
 		{"nested duplicate", "error", `{"type":"error","error":{"message":"collaboration-xy.send_message","message":"collaboration-xy__spawn_agent"}}`, `{"type":"error","error":{"message":"collaboration.send_message","message":"collaboration__spawn_agent"}}`},
 		{"root duplicate", "error", `{"type":"error","message":"collaboration-xy","message":"collaboration-xy"}`, `{"type":"error","message":"collaboration","message":"collaboration"}`},
+		{"duplicate error keys", "error", `{"type":"error","error":"collaboration-xy","err\u006fr":"collaboration\u002dxy","response":{"error":"collaboration-xy","error":"collaboration-xy"}}`, `{"type":"error","error":"collaboration","err\u006fr":"collaboration","response":{"error":"collaboration","error":"collaboration"}}`},
 		{"failed value only", "response.failed", `{"type":"response.failed","response":{"note":"collaboration-xy","error":{"message":"collaboration-xy.send_message","message":"collaboration-xy__spawn_agent","code":"cyber_policy"},"output":[{"type":"message","content":"collaboration-xy"}]},"extra":"collaboration-xy"}`, `{"type":"response.failed","response":{"note":"collaboration-xy","error":{"message":"collaboration.send_message","message":"collaboration__spawn_agent","code":"cyber_policy"},"output":[{"type":"message","content":"collaboration-xy"}]},"extra":"collaboration-xy"}`},
 		{"failed string value", "response.failed", `{"type":"response.failed","response":{"error":"collaboration-xy.send_message"}}`, `{"type":"response.failed","response":{"error":"collaboration.send_message"}}`},
 		{"failed no value", "response.failed", `{"type":"response.failed","response":{"note":"collaboration-xy"}}`, `{"type":"response.failed","response":{"note":"collaboration-xy"}}`},
@@ -499,9 +500,6 @@ func TestCodexCollabErrorBody(t *testing.T) {
 		require.Error(t, err)
 		require.Nil(t, out)
 	}
-	out, err := r.SSEData("error", []byte(`{"type":"error","error":"x","err\u006fr":"y"}`))
-	require.Error(t, err)
-	require.Nil(t, out)
 }
 
 func TestCodexCollabErrorEnvelopeExits(t *testing.T) {

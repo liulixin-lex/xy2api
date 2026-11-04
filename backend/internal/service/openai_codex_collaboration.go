@@ -571,9 +571,6 @@ func (r *codexCollabRestorer) transform(body []byte, eventType string, streaming
 		eventType = root.Get("type").String()
 	}
 	if streaming && (eventType == "error" || (eventType != "response.failed" && root.Get("type").String() == "error")) {
-		if r.plan != nil && (!codexCollabUniqueErrorKey(root) || !codexCollabUniqueObject(root.Get("response"))) {
-			return nil, errors.New("ambiguous collaboration response error")
-		}
 		return r.ErrorBody(body), nil
 	}
 	if r.plan != nil && (!codexCollabUniqueObject(root) || !codexCollabUniqueObject(root.Get("response"))) {
@@ -612,17 +609,6 @@ func (r *codexCollabRestorer) transform(body []byte, eventType string, streaming
 		}
 	}
 	return r.restoreResponseEchoes(updated, root)
-}
-
-func codexCollabUniqueErrorKey(root gjson.Result) bool {
-	count := 0
-	root.ForEach(func(key, _ gjson.Result) bool {
-		if key.String() == "error" {
-			count++
-		}
-		return count < 2
-	})
-	return count < 2
 }
 
 func codexCollabResponseItems(root gjson.Result, eventType string, streaming bool) ([]codexCollabItem, error) {
