@@ -615,6 +615,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 						return
 					}
 				}
+				captureOpenAIStateRejection(c, account, dataBytes, failedMessage, "native_sse", outputStarted, nil)
 				if outputStarted && !cyberHit {
 					if codexFailureTerminal && eventType == "error" {
 						// OpenAI commonly follows a bare error with response.failed.

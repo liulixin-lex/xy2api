@@ -139,7 +139,7 @@ func (a *openAICollabAttempt) finish(ctx context.Context, c *gin.Context, accoun
 				fields[i+1] = a.model
 			}
 		}
-		fields = append(fields, "account_id", account.ID, "group_id", group, "client_version", codexClientVersionFromUA(c.GetHeader("User-Agent")), "outcome", string(s.Outcome), "applied", s.Applied, "calls", s.Calls, "efa_absent", s.EFAAbsent, "efa_empty", s.EFAEmpty, "efa_nonempty", s.EFANonEmpty, "marker_added", s.MarkerAdded, "vetoed", s.Vetoed, "contradicted", s.Contradicted, "uncovered", s.Uncovered, "restore_failed", a.restoreFailed)
+		fields = append(fields, "account_id", account.ID, "group_id", group, "client_version", codexClientVersionFromUA(c.GetHeader("User-Agent")), "outcome", string(s.Outcome), "applied", s.Applied, "dev_text_rewrites", s.DevTextRewrites, "calls", s.Calls, "efa_absent", s.EFAAbsent, "efa_empty", s.EFAEmpty, "efa_nonempty", s.EFANonEmpty, "marker_added", s.MarkerAdded, "vetoed", s.Vetoed, "contradicted", s.Contradicted, "uncovered", s.Uncovered, "restore_failed", a.restoreFailed)
 		slog.Warn("resilience.collab_plaintext", fields...)
 	}
 }

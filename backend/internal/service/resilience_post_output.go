@@ -173,24 +173,9 @@ func openAIPostOutputEventCounts(payload []byte, message string) bool {
 	}, resilience.Current()))
 }
 
-// openAIConversationStateRejection is a post-output-only guard until the
-// unified state-family classifier replaces it; pre-output routing is unchanged.
+// openAIConversationStateRejection retains the v3 guard's name for callers.
 func openAIConversationStateRejection(payload []byte, message string) bool {
-	code := openAIStreamFailedEventErrorCode(payload)
-	switch code {
-	case "client_tool_continuation_unavailable", "invalid_encrypted_content", "encrypted_context_invalid":
-		return true
-	}
-	if resilience.IsEncryptedContentRejection(code, message) {
-		return true
-	}
-	if code != "" {
-		return false
-	}
-	message = strings.ToLower(message)
-	return strings.Contains(message, "opaque conversation state") ||
-		strings.Contains(message, "unrecognized conversation state") ||
-		strings.Contains(message, "encrypted content is invalid for this conversation")
+	return isOpenAIStateRejection(payload, message)
 }
 
 // resilienceOpenAIFailedAfterOutput reports an OpenAI failure event that

@@ -21,6 +21,7 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, forwardErr error) {
+	defer beginOpenAIStateRejectionAttempt(ctx, c, account, body)(&forwardErr)
 	// Reset before any early return so failover attempts never inherit a plan.
 	c.Set(openAICollabResponseKey, nil)
 	c.Set(codexCollabAttemptContextKey, nil)
