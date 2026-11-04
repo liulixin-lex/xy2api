@@ -176,7 +176,7 @@ type GroupQualityGateView interface {
 | `resilience.same_site_hold`（新增） | 每个账号每次暂停 | `host_hash`、`account_id`、`peer_account_id`、`until` |
 | `resilience.session_rebind`（沿用） | P1-B 改绑 | 现有字段，`reason` = `post_output_first_failure` |
 
-退役：`group_quality_gate.eject`、`group_quality_gate.trial`、`group_quality_gate.recover`、`group_quality_gate.guard_hold`。
+旧版硬熔断、观察、恢复与质量保底专有事件退役；精确名称登记在 `tools/docs_consistency.json`，仅历史记录保留。
 
 ## 6. 兼容与回滚
 

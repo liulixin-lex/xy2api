@@ -678,3 +678,40 @@ gateway:
 4. 回退前停用新偏好入口，明确恢复旧版全局策略并排空新实例；保留新增列、数据库与账单数据，旧二进制可忽略列但不执行新 TTL 语义。不得删除列或重算历史账单，也不把可启动等同于行为等价。
 
 没有新增环境变量、反向代理要求或后台进程。部署与真实上游验证仍按操作授权执行；本地受控上游测试不证明所有中转的物理缓存能力。
+
+## Group quality gate v3 upgrade
+
+Deploy the v3 backend and frontend together. Migration 289 adds nullable
+`usage_logs.attempt_first_output_ms` without a default, index or backfill;
+allow for the short ALTER table lock during a low-traffic window. Confirm
+`ops_monitoring_enabled` before enabling quality evaluation. See
+[the quality-gate guide](../docs/GROUP_QUALITY_GATE.md) for sample definitions,
+state transitions and the rollback contract.
+
+After upgrading, set the approved group policies in the group editor:
+
+| Group | Enabled | P90 limit | Error ceiling | Cache floor | Strict |
+|---|---|---|---|---|---|
+| 53 | yes | 10 seconds | 8% | 50% | yes |
+| 18, 47, 50 | yes | 15 seconds | 10% | 50% | no |
+| 83 | yes | 20 seconds | 10% | 50% | no |
+| 25, 72, 20, 78 | no | defaults | defaults | defaults | no |
+
+Keep low upstream rate priority scoped to all groups. Enable the resilience
+session option `session.post_output_rebind` and `same_site_hold.enabled`.
+These values are the approved initial configuration; the pre-release
+calibration report still requires user confirmation before release. Do not
+change production configuration as part of a code-only deployment rehearsal.
+
+The process starts with unknown quality and rebuilds evidence from new
+requests. At 48 hours, check the new column's coverage (at least 95% of OpenAI
+successful streams), tier distribution, insufficient group composition and
+migrations. Run the seven-day acceptance checks in the
+[v3 tasks](../openspec/changes/group-quality-gate-v3-20261104/tasks.md).
+Production inspection and deployment require separate authorization.
+
+For a binary rollback, retain the nullable column. Version 0.5.1 ignores it
+and the `v3` policy subobject; the original v2 fields remain unchanged. If low
+upstream rate priority used a selected-group scope, decide the old global
+switch setting before rollback. The two acute-protection options can be
+turned off independently in gateway resilience settings.

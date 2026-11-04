@@ -5,11 +5,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/lib/pq"
 	"github.com/liulixin-lex/xy2api/ent"
 	"github.com/liulixin-lex/xy2api/internal/service"
+	"github.com/tidwall/sjson"
 )
 
 type groupQualityGateRepository struct {
@@ -64,17 +66,48 @@ func (r *groupQualityGateRepository) CompareAndSwapPolicies(ctx context.Context,
 	if current.Version != expected {
 		return current, service.ErrGroupQualityGateVersionConflict
 	}
-	b, err := json.Marshal(next)
+	raw, err = patchGroupQualityPolicies(raw, current, next)
 	if err != nil {
 		return service.GroupQualityGatePolicies{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=EXCLUDED.updated_at`, service.SettingKeyGroupQualityGatePolicies, string(b)); err != nil {
+	var saved service.GroupQualityGatePolicies
+	if err := json.Unmarshal([]byte(raw), &saved); err != nil {
+		return saved, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=EXCLUDED.updated_at`, service.SettingKeyGroupQualityGatePolicies, raw); err != nil {
 		return service.GroupQualityGatePolicies{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return service.GroupQualityGatePolicies{}, err
 	}
-	return next, nil
+	return saved, nil
+}
+
+// Patch only changed v3 objects and the version in the locked original JSON.
+// Re-marshalling the setting would compact even legacy arrays/objects and
+// change their bytes, despite preserving their decoded values.
+func patchGroupQualityPolicies(raw string, current, next service.GroupQualityGatePolicies) (string, error) {
+	if raw == "" {
+		raw = `{"version":0,"groups":{}}`
+	}
+	for id, policy := range next.Groups {
+		previous := current.Groups[id]
+		if policy.V3 == nil || (previous.V3 != nil && *previous.V3 == *policy.V3) {
+			continue
+		}
+		if groupID, err := strconv.ParseInt(id, 10, 64); err != nil || groupID <= 0 {
+			return "", fmt.Errorf("invalid quality policy group ID %q", id)
+		}
+		value, err := json.Marshal(policy.V3)
+		if err != nil {
+			return "", err
+		}
+		raw, err = sjson.SetRaw(raw, "groups.:"+id+".v3", string(value))
+		if err != nil {
+			return "", err
+		}
+	}
+	return sjson.Set(raw, "version", next.Version)
 }
 
 // LoadMembers loads only fields needed by quality and the shared resilience/profit
@@ -138,32 +171,67 @@ func (r *groupQualityGateRepository) LoadObservations(ctx context.Context, accou
 }
 
 func loadGroupQualityObservations(ctx context.Context, tx *sql.Tx, accountIDs []int64, from, to time.Time) ([]service.GroupQualityObservation, time.Time, error) {
-	if len(accountIDs) == 0 {
-		return nil, to.UTC(), nil
-	}
+	// Read all OpenAI contributors before LAG. The time range is at most six
+	// hours and never predates process startup. Reset bounds are applied in the
+	// evaluator without hiding intervening accounts from the window functions.
 	out := make([]service.GroupQualityObservation, 0)
 	rows, err := tx.QueryContext(ctx, `
-		WITH history AS (
-			SELECT account_id, COALESCE(request_id, '') AS request_id, created_at, stream, COALESCE(NULLIF(end_to_end_first_output_ms,0), first_token_ms, 0) AS first_output_ms,
-		       COALESCE(session_id,'') AS session_id,
-		       COALESCE(input_tokens, 0) + COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0) AS prompt_tokens,
-		       COALESCE(cache_read_tokens, 0) AS cache_read_tokens,
-		       COALESCE(cache_creation_tokens, 0) AS cache_creation_tokens,
-		       LAG(created_at) OVER (PARTITION BY account_id, session_id ORDER BY created_at) AS previous_at
-			FROM usage_logs WHERE account_id = ANY($1) AND created_at >= $2 AND created_at < $3
-		)
-		SELECT account_id, request_id, created_at, stream, first_output_ms, session_id,
-		       prompt_tokens, cache_read_tokens, cache_creation_tokens, TRUE,
-		       session_id <> '' AND previous_at IS NOT NULL AND created_at - previous_at <= INTERVAL '5 minutes'
-		FROM history`, pq.Array(accountIDs), from.UTC(), to.UTC())
+  WITH source AS MATERIALIZED (
+   SELECT u.id, u.account_id, u.api_key_id, COALESCE(u.group_id,0) AS group_id,
+          COALESCE(u.request_id,'') AS request_id, u.created_at, u.stream,
+          u.attempt_first_output_ms, COALESCE(u.session_id,'') AS session_id,
+          u.model, COALESCE(u.reasoning_effort,'') AS reasoning_effort,
+          (u.actual_cost > 0 OR u.output_tokens > 0) AS is_success,
+          COALESCE(u.input_tokens,0) + COALESCE(u.cache_read_tokens,0) + COALESCE(u.cache_creation_tokens,0) AS prompt_tokens,
+          COALESCE(u.cache_read_tokens,0) AS cache_read_tokens,
+          COALESCE(u.cache_creation_tokens,0) AS cache_creation_tokens,
+          COALESCE(a.extra->>'group_quality_reset_at','') AS reset_at
+   FROM usage_logs u JOIN accounts a ON a.id = u.account_id
+   WHERE a.platform = 'openai' AND u.created_at >= $1 AND u.created_at < $2
+  ), history AS (
+   SELECT *, LAG(account_id) OVER session_order AS previous_account_id,
+          LAG(model) OVER session_order AS previous_model,
+          LAG(created_at) OVER session_order AS previous_at,
+          LAG(prompt_tokens) OVER session_order AS previous_prompt_tokens
+   FROM source
+   WINDOW session_order AS (PARTITION BY api_key_id, group_id, session_id ORDER BY created_at, id)
+  )
+  SELECT id, account_id, api_key_id, group_id, request_id, created_at, stream,
+         attempt_first_output_ms, session_id, model, reasoning_effort,
+         prompt_tokens, cache_read_tokens, cache_creation_tokens,
+         COALESCE(session_id <> '' AND previous_account_id = account_id AND previous_model = model
+          AND created_at - previous_at <= INTERVAL '5 minutes',FALSE),
+         COALESCE(previous_prompt_tokens,0), previous_at, reset_at
+  FROM history
+  WHERE is_success
+  ORDER BY created_at DESC, id DESC`, from.UTC(), to.UTC())
 	if err != nil {
 		return nil, time.Time{}, err
 	}
+	resets := map[int64]time.Time{}
+	seen := map[int64]bool{}
+	ids := append([]int64(nil), accountIDs...)
+	for _, id := range ids {
+		seen[id] = true
+	}
 	for rows.Next() {
 		var o service.GroupQualityObservation
-		if err := rows.Scan(&o.AccountID, &o.RequestID, &o.At, &o.Streaming, &o.FirstOutputMs, &o.SessionID, &o.PromptTokens, &o.CacheReadTokens, &o.CacheCreationTokens, &o.Success, &o.Warm); err != nil {
+		var previousAt sql.NullTime
+		var resetAt string
+		if err := rows.Scan(&o.ID, &o.AccountID, &o.APIKeyID, &o.GroupID, &o.RequestID, &o.At, &o.Streaming,
+			&o.AttemptFirstOutputMs, &o.SessionID, &o.Model, &o.ReasoningEffort,
+			&o.PromptTokens, &o.CacheReadTokens, &o.CacheCreationTokens,
+			&o.StrictContinuation, &o.PreviousPromptTokens, &previousAt, &resetAt); err != nil {
 			_ = rows.Close()
 			return nil, time.Time{}, err
+		}
+		o.PreviousAt = previousAt.Time
+		o.ResetAt, _ = time.Parse(time.RFC3339Nano, resetAt)
+		o.Success = true
+		resets[o.AccountID] = o.ResetAt
+		if !seen[o.AccountID] {
+			ids = append(ids, o.AccountID)
+			seen[o.AccountID] = true
 		}
 		out = append(out, o)
 	}
@@ -171,12 +239,19 @@ func loadGroupQualityObservations(ctx context.Context, tx *sql.Tx, accountIDs []
 		_ = rows.Close()
 		return nil, time.Time{}, err
 	}
-	_ = rows.Close()
-	errorObservations, err := loadGroupQualityErrorObservations(ctx, tx, accountIDs, from, to)
+	if err := rows.Close(); err != nil {
+		return nil, time.Time{}, err
+	}
+	// All failure categories exclude a failed final account from speed samples.
+	// Only the legacy soft subset minus first-output cutoffs enters v3 error rate.
+	errorObservations, err := loadQualityErrorObservations(ctx, tx, ids, from, to, true)
 	if err != nil {
 		return nil, time.Time{}, err
 	}
-	out = append(out, errorObservations...)
+	for _, o := range errorObservations {
+		o.ResetAt = resets[o.AccountID]
+		out = append(out, o)
+	}
 	var observedAt time.Time
 	// A fresh error log must not hide stalled usage writes. Freshness is global,
 	// so an idle member does not make an otherwise healthy stream stale.
@@ -190,20 +265,32 @@ func loadGroupQualityObservations(ctx context.Context, tx *sql.Tx, accountIDs []
 func loadGroupQualityErrorObservations(ctx context.Context, tx interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }, accountIDs []int64, from, to time.Time) ([]service.GroupQualityObservation, error) {
+	return loadQualityErrorObservations(ctx, tx, accountIDs, from, to, false)
+}
+
+// includeAll is used only by v3 for success attribution. Recent health retains
+// its legacy classifier, including first-output timeouts.
+func loadQualityErrorObservations(ctx context.Context, tx interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, accountIDs []int64, from, to time.Time, includeAll bool) ([]service.GroupQualityObservation, error) {
 	if len(accountIDs) == 0 {
 		return nil, nil
 	}
 	out := make([]service.GroupQualityObservation, 0)
-	rows, err := tx.QueryContext(ctx, `
-		SELECT DISTINCT ON (COALESCE(e.request_id, ''), (ev->>'account_id')::bigint, COALESCE((ev->>'at_unix_ms')::bigint, (EXTRACT(EPOCH FROM e.created_at)*1000)::bigint))
+	identity := "COALESCE(e.request_id, '')"
+	if includeAll {
+		identity = "CASE WHEN COALESCE(e.client_request_id,'') <> '' THEN 'client:' || e.client_request_id WHEN COALESCE(e.request_id,'') <> '' THEN 'local:' || e.request_id ELSE 'row:' || e.id::text || ':' || ordinal::text END"
+	}
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
+		SELECT DISTINCT ON (%s, (ev->>'account_id')::bigint, COALESCE((ev->>'at_unix_ms')::bigint, (EXTRACT(EPOCH FROM e.created_at)*1000)::bigint))
 		       COALESCE(e.request_id, ''), COALESCE(e.client_request_id, ''), (ev->>'account_id')::bigint,
 		       to_timestamp(COALESCE((ev->>'at_unix_ms')::bigint, (EXTRACT(EPOCH FROM e.created_at)*1000)::bigint)/1000.0),
 		       COALESCE(ev->>'kind',''), CASE WHEN jsonb_typeof(ev->'upstream_status_code')='number' THEN (ev->>'upstream_status_code')::int ELSE 0 END,
 		       COALESCE(ev->>'resilience_category',''), COALESCE(ev->>'message','')
-		FROM ops_error_logs e CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(e.upstream_errors)='array' THEN e.upstream_errors ELSE '[]'::jsonb END) ev
+		FROM ops_error_logs e CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(e.upstream_errors)='array' THEN e.upstream_errors ELSE '[]'::jsonb END) WITH ORDINALITY AS events(ev, ordinal)
 		WHERE e.created_at >= $2 AND e.created_at < $3 AND e.upstream_errors IS NOT NULL
 		  AND jsonb_typeof(ev->'account_id')='number' AND (ev->>'account_id')::bigint = ANY($1)
-		ORDER BY COALESCE(e.request_id, ''), (ev->>'account_id')::bigint, COALESCE((ev->>'at_unix_ms')::bigint, (EXTRACT(EPOCH FROM e.created_at)*1000)::bigint), e.id`, pq.Array(accountIDs), from.UTC(), to.UTC())
+		ORDER BY %s, (ev->>'account_id')::bigint, COALESCE((ev->>'at_unix_ms')::bigint, (EXTRACT(EPOCH FROM e.created_at)*1000)::bigint), e.id`, identity, identity), pq.Array(accountIDs), from.UTC(), to.UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +303,8 @@ func loadGroupQualityErrorObservations(ctx context.Context, tx interface {
 		}
 		o.RequestID = service.GroupQualityErrorRequestID(clientRequestID, o.RequestID)
 		o.SoftFailure = service.IsGroupQualitySoftFailure(o.Kind, o.StatusCode, o.Category, o.Message)
-		if o.SoftFailure {
+		o.Failed = true
+		if o.SoftFailure || includeAll {
 			out = append(out, o)
 		}
 	}

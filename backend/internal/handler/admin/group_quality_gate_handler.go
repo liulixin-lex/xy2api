@@ -31,8 +31,10 @@ func (h *GroupQualityGateHandler) Policies(c *gin.Context) {
 }
 
 type groupQualityGatePolicyRequest struct {
-	ExpectedVersion int                            `json:"expected_version"`
-	Policy          service.GroupQualityGatePolicy `json:"policy"`
+	ExpectedVersion int `json:"expected_version"`
+	Policy          struct {
+		V3 *service.GroupQualityGateV3Policy `json:"v3"`
+	} `json:"policy"`
 }
 
 func (h *GroupQualityGateHandler) UpdatePolicy(c *gin.Context) {
@@ -50,7 +52,7 @@ func (h *GroupQualityGateHandler) UpdatePolicy(c *gin.Context) {
 		response.BadRequest(c, "Invalid request body")
 		return
 	}
-	out, err := h.svc.UpdatePolicy(c.Request.Context(), groupID, req.ExpectedVersion, req.Policy)
+	out, err := h.svc.UpdatePolicy(c.Request.Context(), groupID, req.ExpectedVersion, service.GroupQualityGatePolicy{V3: req.Policy.V3})
 	if response.ErrorFrom(c, err) {
 		return
 	}

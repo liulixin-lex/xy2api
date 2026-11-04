@@ -181,7 +181,7 @@
       "sources": [
         "backend/internal/service/**/*.go"
       ],
-      "pattern": "group_quality_gate\\.(?:eject|trial|recover|guard_hold|last_resort|migrate|evaluate_failed)",
+      "pattern": "group_quality_gate\\.(?:tier|last_resort|migrate|evaluate_failed)",
       "doc": "docs/GROUP_QUALITY_GATE.md"
     },
     {
@@ -516,6 +516,26 @@
       "allowed": [
         "docs/PROJECT_MEMORY.md",
         "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
+    },
+    {
+      "pattern": "\\bgroup_quality_gate\\.(?:eject|trial|recover|guard_hold)\\b",
+      "reason": "2026-11-04 quality gate v3 replaces hard exclusion, trial, recovery and floor-guard events with tier transitions",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md",
+        "openspec/changes/group-quality-gate-20261031/**",
+        "openspec/changes/group-quality-gate-v2-20261102/**"
+      ]
+    },
+    {
+      "pattern": "\\b(?:groupQualityDefaultErrorRate|groupQualityDefaultEjectMs|groupQualityDefaultFastMs|groupQualityFastLineMarginMs|groupQualityTrialDuration|groupQualityTierHold|groupQualityFastRetest|groupQualityTrialFailure|groupQualityBackoff|groupQualityZeroCacheCondition|groupQualityTierFromData|resolveGroupQualityTier|accumulateQualityTrial|applyQualityGuard|GroupQualityMetrics|GroupQualityMetricView|GroupQualityDecisionMetrics|GroupQualityMemberResult|effective_fast_warm_ttft_p90_ms|warm_zero_cache_rate|guard_held|WarmSamples|WarmTTFTP90Ms|ZeroCacheSamples|WarmZeroCacheRate|warm_samples|warm_ttft_p90_ms|zero_cache_samples|account_metrics|DataTier|TierAt|FastAt|TrialEndReason|LastEjectionEnd|TrialRequests|TrialFailures)\\b",
+      "reason": "2026-11-04 quality gate v3 removes the v2 evaluator/DTO-only identifiers; persisted legacy policy fields remain supported for rollback",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md",
+        "openspec/changes/group-quality-gate-20261031/**",
+        "openspec/changes/group-quality-gate-v2-20261102/**"
       ]
     }
   ],

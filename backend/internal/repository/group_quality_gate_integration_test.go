@@ -9,109 +9,149 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
-func TestGroupQualityGateRepositoryLoadsWarmMetricsAndDeduplicatesFailures(t *testing.T) {
+func TestGroupQualityGateV3RepositoryObservations(t *testing.T) {
 	ctx := context.Background()
 	tx := testTx(t)
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	suffix := now.UnixNano()
-	var userID, keyID, groupID, accountID int64
-	require.NoError(t, tx.QueryRowContext(ctx,
-		`INSERT INTO users(email,password_hash) VALUES($1,'x') RETURNING id`, fmt.Sprintf("quality-%d@example.test", suffix)).Scan(&userID))
-	require.NoError(t, tx.QueryRowContext(ctx,
-		`INSERT INTO api_keys(user_id,key,name) VALUES($1,$2,'quality') RETURNING id`, userID, fmt.Sprintf("sk-quality-%d", suffix)).Scan(&keyID))
-	require.NoError(t, tx.QueryRowContext(ctx,
-		`INSERT INTO groups(name,platform,rate_multiplier,status) VALUES($1,'openai',1,'active') RETURNING id`, fmt.Sprintf("quality-%d", suffix)).Scan(&groupID))
-	require.NoError(t, tx.QueryRowContext(ctx,
-		`INSERT INTO accounts(name,platform,type,credentials,extra) VALUES($1,'openai','oauth','{}'::jsonb,'{}'::jsonb) RETURNING id`, fmt.Sprintf("quality-%d", suffix)).Scan(&accountID))
-
-	_, err := tx.ExecContext(ctx, `INSERT INTO account_groups(account_id,group_id,priority) VALUES($1,$2,0)`, accountID, groupID)
-	require.NoError(t, err)
-	_, err = tx.ExecContext(ctx, `UPDATE accounts SET rate_multiplier=0.75, extra=$2::jsonb, temp_unschedulable_until=$3, temp_unschedulable_reason='balance:exhausted' WHERE id=$1`, accountID, `{"group_quality_reset_at":"2026-11-01T00:00:00Z","quota_limit":10}`, now.Add(time.Hour))
-	require.NoError(t, err)
-	members, err := loadGroupQualityMembers(ctx, tx, []int64{groupID})
-	require.NoError(t, err)
-	require.Len(t, members[groupID], 1)
-	member := members[groupID][0]
-	require.Equal(t, accountID, member.ID)
-	require.Equal(t, 0.75, *member.RateMultiplier)
-	require.Equal(t, "balance:exhausted", member.TempUnschedulableReason)
-	require.Equal(t, "2026-11-01T00:00:00Z", member.Extra["group_quality_reset_at"])
-	require.Nil(t, member.Proxy)
-	require.Empty(t, member.Groups)
-
-	firstAt, warmAt := now.Add(-2*time.Minute), now.Add(-time.Minute)
-	for i, at := range []time.Time{firstAt, warmAt} {
-		firstOutputMs := 0
-		if i == 1 {
-			firstOutputMs = 14000
+	var userID int64
+	require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO users(email,password_hash) VALUES($1,'x') RETURNING id`, fmt.Sprintf("quality-v3-%d@example.test", suffix)).Scan(&userID))
+	keys, groups, accounts := make([]int64, 2), make([]int64, 2), make([]int64, 3)
+	for i := range keys {
+		require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO api_keys(user_id,key,name) VALUES($1,$2,'quality') RETURNING id`, userID, fmt.Sprintf("sk-v3-%d-%d", suffix, i)).Scan(&keys[i]))
+		require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO groups(name,platform,rate_multiplier,status) VALUES($1,'openai',1,'active') RETURNING id`, fmt.Sprintf("quality-v3-%d-%d", suffix, i)).Scan(&groups[i]))
+	}
+	for i := range accounts {
+		platform := "openai"
+		if i == 2 {
+			platform = "anthropic"
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO usage_logs(user_id,api_key_id,account_id,group_id,request_id,model,stream,first_token_ms,end_to_end_first_output_ms,session_id,input_tokens,cache_read_tokens,cache_creation_tokens,created_at)
-			VALUES($1,$2,$3,$4,$5,'gpt-test',TRUE,$6,$7,'session-quality',2048,0,0,$8)`, userID, keyID, accountID, groupID, fmt.Sprintf("quality-%d-success-%d", suffix, i), 1200+i*100, firstOutputMs, at)
-		require.NoError(t, err)
+		require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO accounts(name,platform,type,credentials,extra) VALUES($1,$2,'oauth','{}'::jsonb,'{}'::jsonb) RETURNING id`, fmt.Sprintf("quality-v3-%d-%d", suffix, i), platform).Scan(&accounts[i]))
 	}
-	// A six-minute gap is not a warm continuation and must not enter either warm metric.
-	for i, at := range []time.Time{now.Add(-7 * time.Minute), now.Add(-time.Minute)} {
-		_, err := tx.ExecContext(ctx, `INSERT INTO usage_logs(user_id,api_key_id,account_id,group_id,request_id,model,stream,first_token_ms,session_id,input_tokens,cache_read_tokens,created_at)
-			VALUES($1,$2,$3,$4,$5,'gpt-test',TRUE,9000,'session-cold-gap',2048,0,$6)`, userID, keyID, accountID, groupID, fmt.Sprintf("quality-%d-cold-%d", suffix, i), at)
-		require.NoError(t, err)
-	}
-
-	atMillis := now.Add(-30 * time.Second).UnixMilli()
-	event := map[string]any{"account_id": accountID, "at_unix_ms": atMillis, "kind": "failover", "upstream_status_code": 502, "resilience_category": "TRANSIENT", "message": "synthetic failure"}
-	raw, err := json.Marshal([]any{event})
+	_, err := tx.ExecContext(ctx, `INSERT INTO account_groups(account_id,group_id,priority) VALUES($1,$2,0)`, accounts[0], groups[0])
 	require.NoError(t, err)
-	clientRequestID := fmt.Sprintf("quality-%d-client", suffix)
-	for range 2 {
-		_, err := tx.ExecContext(ctx, `INSERT INTO ops_error_logs(request_id,client_request_id,error_phase,error_type,status_code,group_id,created_at,upstream_errors)
-			VALUES($1,$2,'upstream','upstream_error',502,$3,$4,$5::jsonb)`, fmt.Sprintf("quality-%d-failure", suffix), clientRequestID, groupID, now, string(raw))
+	reset := now.Add(-time.Hour).Format(time.RFC3339Nano)
+	_, err = tx.ExecContext(ctx, `UPDATE accounts SET rate_multiplier=.75, extra=jsonb_build_object('group_quality_reset_at',$2::text) WHERE id=$1`, accounts[0], reset)
+	require.NoError(t, err)
+	members, err := loadGroupQualityMembers(ctx, tx, groups)
+	require.NoError(t, err)
+	require.Len(t, members[groups[0]], 1)
+	require.Equal(t, .75, *members[groups[0]][0].RateMultiplier)
+	counter := 0
+	add := func(label, session, model string, key, group, account int64, at time.Time, ms *int64, success bool, prompt int64) {
+		t.Helper()
+		counter++
+		output := 1
+		if !success {
+			output = 0
+		}
+		_, err := tx.ExecContext(ctx, `INSERT INTO usage_logs(user_id,api_key_id,account_id,group_id,request_id,model,reasoning_effort,stream,first_token_ms,end_to_end_first_output_ms,attempt_first_output_ms,session_id,input_tokens,cache_read_tokens,output_tokens,created_at)
+  VALUES($1,$2,$3,$4,$5,$6,'high',TRUE,777,9999,$7,$8,$9,0,$10,$11)`, userID, key, account, group, fmt.Sprintf("v3-%d-%s-%d", suffix, label, counter), model, ms, fmt.Sprintf("%d-%s", suffix, session), prompt, output, at)
 		require.NoError(t, err)
 	}
-
-	observations, observedAt, err := loadGroupQualityObservations(ctx, tx, []int64{accountID}, now.Add(-2*time.Hour), now.Add(time.Second))
+	duration := int64(1234)
+	type fixture struct {
+		name                string
+		key, group, account int64
+		model               string
+		gap                 time.Duration
+		placeholder         bool
+		want                bool
+		previousPrompt      int64
+	}
+	cases := []fixture{
+		{"strict", keys[0], groups[0], accounts[0], "m", time.Minute, false, true, 8000},
+		{"key", keys[1], groups[0], accounts[0], "m", time.Minute, false, false, 0},
+		{"group", keys[0], groups[1], accounts[0], "m", time.Minute, false, false, 0},
+		{"account", keys[0], groups[0], accounts[1], "m", time.Minute, false, false, 8000},
+		{"model", keys[0], groups[0], accounts[0], "other", time.Minute, false, false, 8000},
+		{"five minutes", keys[0], groups[0], accounts[0], "m", 5 * time.Minute, false, true, 8000},
+		{"over five minutes", keys[0], groups[0], accounts[0], "m", 5*time.Minute + time.Millisecond, false, false, 8000},
+		{"same account placeholder", keys[0], groups[0], accounts[0], "m", time.Minute, true, true, 0},
+		{"other account placeholder", keys[0], groups[0], accounts[1], "m", time.Minute, true, false, 0},
+	}
+	for _, tc := range cases {
+		previousPrompt := int64(8000)
+		if tc.placeholder {
+			previousPrompt = 0
+		}
+		add(tc.name+"-prev", tc.name, "m", keys[0], groups[0], accounts[0], now.Add(-time.Minute).Add(-tc.gap), nil, !tc.placeholder, previousPrompt)
+		add(tc.name+"-next", tc.name, tc.model, tc.key, tc.group, tc.account, now.Add(-time.Minute), &duration, true, 4000)
+	}
+	// This predecessor is not among the requested members. It still breaks A's continuation.
+	add("switch-prev", "switch", "m", keys[0], groups[0], accounts[0], now.Add(-3*time.Minute), nil, true, 8000)
+	add("switch-middle", "switch", "m", keys[0], groups[0], accounts[1], now.Add(-2*time.Minute), nil, true, 8000)
+	add("switch-next", "switch", "m", keys[0], groups[0], accounts[0], now.Add(-time.Minute), &duration, true, 8000)
+	add("null-column", "null", "m", keys[0], groups[0], accounts[0], now.Add(-time.Minute), nil, true, 8000)
+	add("other-platform", "foreign", "m", keys[0], groups[0], accounts[2], now.Add(-time.Second), &duration, true, 8000)
+	add("composition-old", "old", "m", keys[0], groups[0], accounts[0], now.Add(-5*time.Hour), nil, true, 8000)
+	addError := func(id string, events []map[string]any) {
+		t.Helper()
+		raw, err := json.Marshal(events)
+		require.NoError(t, err)
+		_, err = tx.ExecContext(ctx, `INSERT INTO ops_error_logs(request_id,client_request_id,error_phase,error_type,status_code,group_id,created_at,upstream_errors) VALUES($1,$2,'upstream','upstream_error',502,$3,$4,$5::jsonb)`, id, id, groups[0], now.Add(-time.Second), string(raw))
+		require.NoError(t, err)
+	}
+	event := func(kind, category string) map[string]any {
+		return map[string]any{"account_id": accounts[0], "at_unix_ms": now.Add(-time.Second).UnixMilli(), "kind": kind, "upstream_status_code": 502, "resilience_category": category}
+	}
+	softID := fmt.Sprintf("soft-%d", suffix)
+	addError(softID, []map[string]any{event("stream_failed", "TRANSIENT")})
+	addError(softID, []map[string]any{event("stream_failed", "TRANSIENT")})
+	addError(fmt.Sprintf("cutoff-%d", suffix), []map[string]any{event("first_output_timeout", "FIRST_OUTPUT_TIMEOUT")})
+	addError(fmt.Sprintf("hard-%d", suffix), []map[string]any{event("http_error", "AUTH")})
+	addError("", []map[string]any{event("stream_failed", "TRANSIENT"), event("stream_failed", "TRANSIENT")})
+	observations, observedAt, err := loadGroupQualityObservations(ctx, tx, []int64{accounts[0]}, now.Add(-6*time.Hour), now)
 	require.NoError(t, err)
 	var latestUsage time.Time
-	require.NoError(t, tx.QueryRowContext(ctx, `SELECT MAX(created_at) FROM usage_logs WHERE created_at < $1`, now.Add(time.Second)).Scan(&latestUsage))
-	require.WithinDuration(t, latestUsage, observedAt, time.Millisecond, "fresh error rows must not hide stale usage writes")
-	successes, softFailures, warmSamples, zeroCacheSamples := 0, 0, 0, 0
-	var fallbackFirstOutputMs int
-	var warmTTFT []int
-	for _, observation := range observations {
-		if observation.Success {
-			successes++
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT MAX(created_at) FROM usage_logs WHERE created_at<$1`, now).Scan(&latestUsage))
+	require.WithinDuration(t, latestUsage, observedAt, time.Millisecond)
+	find := func(label string) service.GroupQualityObservation {
+		t.Helper()
+		for _, o := range observations {
+			if stringsContainsLabel(o.RequestID, fmt.Sprintf("v3-%d-%s-", suffix, label)) {
+				return o
+			}
 		}
-		if observation.RequestID == fmt.Sprintf("quality-%d-success-0", suffix) {
-			fallbackFirstOutputMs = observation.FirstOutputMs
-		}
-		if observation.SoftFailure {
-			softFailures++
-			require.Equal(t, "client:"+clientRequestID, observation.RequestID, "failure IDs use the usage_logs request ID format")
-		}
-		if observation.Warm && observation.Success && observation.Streaming && observation.FirstOutputMs > 0 {
-			warmSamples++
-			warmTTFT = append(warmTTFT, observation.FirstOutputMs)
-		}
-		if observation.Warm && observation.Success && observation.PromptTokens >= 2048 {
-			zeroCacheSamples++
-			require.Zero(t, observation.CacheReadTokens)
+		t.Fatalf("missing %s", label)
+		return service.GroupQualityObservation{}
+	}
+	for _, tc := range cases {
+		o := find(tc.name + "-next")
+		require.Equal(t, tc.want, o.StrictContinuation, tc.name)
+		require.Equal(t, tc.previousPrompt, o.PreviousPromptTokens, tc.name)
+		require.Equal(t, duration, *o.AttemptFirstOutputMs)
+		require.Equal(t, "high", o.ReasoningEffort)
+	}
+	require.False(t, find("switch-next").StrictContinuation)
+	require.Nil(t, find("null-column").AttemptFirstOutputMs, "never fall back to semantic/end-to-end TTFT")
+	require.True(t, find("composition-old").At.Before(now.Add(-2*time.Hour)), "six-hour composition includes older request shape")
+	failures, softCopies, emptyCopies := 0, 0, 0
+	for _, o := range observations {
+		require.NotEqual(t, accounts[2], o.AccountID, "only OpenAI contributes")
+		if o.Failed {
+			failures++
+			if o.RequestID == "client:"+softID {
+				softCopies++
+			}
+			if o.RequestID == "" {
+				emptyCopies++
+			}
 		}
 	}
-	require.Equal(t, 4, successes)
-	require.Equal(t, 1, softFailures, "two persisted copies of one upstream attempt must deduplicate")
-	require.Equal(t, 1, warmSamples, "only the request following a same-session request within five minutes is warm")
-	require.Equal(t, []int{14000}, warmTTFT, "the end-to-end first output takes precedence over the semantic first token")
-	require.Equal(t, 1200, fallbackFirstOutputMs, "a zero end-to-end value falls back to the semantic first token")
-	require.Equal(t, 1, zeroCacheSamples)
+	require.Equal(t, 5, failures)
+	require.Equal(t, 1, softCopies)
+	require.Equal(t, 2, emptyCopies)
+	// The shared recent-health path retains cutoff semantics and omits hard failures.
+	recent, err := loadGroupQualityErrorObservations(ctx, tx, []int64{accounts[0]}, now.Add(-time.Hour), now)
+	require.NoError(t, err)
+	require.Len(t, recent, 3)
+}
 
-	var committedUsage, committedErrors, committedAccounts int
-	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT
-		(SELECT COUNT(*) FROM usage_logs WHERE user_id=$1),
-		(SELECT COUNT(*) FROM ops_error_logs WHERE group_id=$2),
-		(SELECT COUNT(*) FROM accounts WHERE id=$3)`, userID, groupID, accountID).
-		Scan(&committedUsage, &committedErrors, &committedAccounts))
-	require.Zero(t, committedUsage, "the fixture must remain inside its rollback transaction")
-	require.Zero(t, committedErrors)
-	require.Zero(t, committedAccounts)
+func stringsContainsLabel(id, label string) bool {
+	return len(id) >= len(label) && id[:len(label)] == label
 }

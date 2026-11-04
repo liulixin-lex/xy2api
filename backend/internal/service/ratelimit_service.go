@@ -2232,7 +2232,7 @@ func (s *RateLimitService) RecoverAccountState(ctx context.Context, accountID in
 		}
 	}
 	if options.ResetGroupQualityGate {
-		if err := s.accountRepo.UpdateExtra(ctx, accountID, map[string]any{"group_quality_reset_at": time.Now().UTC().Format(time.RFC3339)}); err != nil {
+		if err := s.accountRepo.UpdateExtra(ctx, accountID, map[string]any{"group_quality_reset_at": time.Now().UTC().Format(time.RFC3339Nano)}); err != nil {
 			return nil, err
 		}
 	}
