@@ -61,7 +61,7 @@ export default {
       },
       switches: {
         postOutputRebind: '输出后首次失败即改绑',
-        postOutputRebindHint: '已开始输出后失败（流内 response.failed、读流出错、缺终态）第一次发生就换号，并在回避期内避开该号；输出前失败仍按连续失败阈值改绑。依赖“会话失败改绑”开启。',
+        postOutputRebindHint: '仅 OpenAI 账号：已开始输出后失败（流内 response.failed、读流出错、缺终态）第一次发生就换号，并在回避期内避开该号；输出前失败与其他平台仍按连续失败阈值改绑。依赖“会话失败改绑”开启。',
         preludeStaging: '兼容转换推迟开场',
         preludeStagingHint: 'Chat 与 Messages 的兼容转换等到首个正文或终态再写开场事件（role 块、message_start）；上游开场后、正文前失败时可以换号。关闭后回到 0.4.3 行为。',
         nativePreludeWhitelist: '原生 Responses 开场白名单扩展',

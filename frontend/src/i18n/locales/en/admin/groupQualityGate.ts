@@ -1,7 +1,7 @@
 export default {
   groupQualityGate: {
     title: 'Quality gate',
-    hint: 'Sorts members into three tiers by this group\'s standards: accounts below standard go last and sessions bound to them move to accounts that meet it. Nothing is removed or paused; an account returns to the front after two checks in a row back within the recovery line. Only data since this process started counts, so most accounts show as "Unknown" for about 30 minutes after a restart.',
+    hint: 'Sorts members into three tiers by this group\'s standards: accounts below standard go last. When a bound account is below standard or held back as slow, its sessions move to a qualified account in this group with spare capacity. Nothing is removed or paused; an account returns to the front after two checks in a row back within the recovery line. Only data since this process started counts, so most accounts show as "Unknown" ("Retest" in strict mode) for about 30 minutes after a restart.',
     enable: 'Enable quality gate',
     disabledHint: 'While the gate is off, this group has no tiers and accounts judged slow go to the end of the candidates.',
     loading: 'Loading gate settings…',
@@ -25,7 +25,7 @@ export default {
     column: 'Gate',
     summaryTitle: '{counts}; {composition}',
     groupSamplesShort: 'Too few group samples',
-    unknownBadgeTitle: '{group} · Unknown: not enough samples yet, ranked as tier 0 for now',
+    unknownBadgeTitle: '{group} · Unknown: no verdict yet (too few samples or in the middle band), ranked as tier 0 for now',
     pinnedMark: 'Pinned',
     state: {
       passing: 'Passing',
@@ -68,7 +68,7 @@ export default {
       badMemory: 'Recent failure: {items}',
       badMemoryItem: '{dimension} until {time}',
       separator: ', ',
-      stale: 'Data is stale (latest usage record older than 5 minutes); this round was skipped and the previous state is kept',
+      stale: 'Evaluation data is stale or could not be read; this round was skipped and the previous state is kept',
       pending: 'Evaluated every minute',
       failed: 'Refresh the list to retry'
     },
