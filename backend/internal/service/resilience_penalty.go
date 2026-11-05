@@ -446,6 +446,9 @@ func ClassifyFailoverError(e *UpstreamFailoverError) resilience.Result {
 	if e.IsCredentialFailure() {
 		return resilience.Result{Category: resilience.CategoryAuth, Reason: "credential_failure"}
 	}
+	if e.Reason == OpenAIStreamForbiddenReason {
+		return resilience.Result{Category: resilience.CategoryTransient, Reason: string(OpenAIStreamForbiddenReason)}
+	}
 	if e.Reason == OpenAIAlphaSearchE5001Reason {
 		return resilience.Result{Category: resilience.CategoryTransient, Reason: string(OpenAIAlphaSearchE5001Reason)}
 	}

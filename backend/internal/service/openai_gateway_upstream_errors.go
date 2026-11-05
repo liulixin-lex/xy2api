@@ -399,6 +399,10 @@ const (
 	// OpenAIUpstreamAccessStateReason marks a provider credential whose
 	// account, workspace, or organization is unavailable.
 	OpenAIUpstreamAccessStateReason = GatewayFailureReason("openai_upstream_access_state")
+	// OpenAIStreamForbiddenReason marks an output-before stream 403 that is not
+	// an account credential/disable failure. It is request-local failover with a
+	// soft account×model cooldown, never the HTTP 403 penalty path.
+	OpenAIStreamForbiddenReason = GatewayFailureReason("openai_stream_forbidden_transient")
 	// OpenAIHTTPContinuationUnsupportedReason identifies accounts that cannot
 	// preserve an official Responses HTTP continuation without dropping state.
 	OpenAIHTTPContinuationUnsupportedReason = GatewayFailureReason("openai_http_continuation_unsupported")
