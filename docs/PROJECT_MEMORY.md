@@ -105,6 +105,15 @@
   - 集成分支 `feat/encrypted-routing-20261105`（Paseo 工作树 `enc-routing-integration`，基于 origin/main `381687250`）。
   - 分工（用户 11-05 指定）：后端 gpt-6-astra xhigh 两路（甲：流式判定与包装帧；乙：状态机与 forbidden）；红队 astra xhigh（协议与客户端）与 Opus xhigh（路由与韧性）两路逆向审查。
   - 授权：生产只读补数据。推送、PR、合并、发版、部署、镜像固化需在发布前再确认；测试 Key 待用户提供。
+  - 13:00 UTC：
+    - **分工调整**（用户追加）：PM 只调度；丙测试（预检、门禁，在独立 detached 检出中跑），丁合并集成。
+    - **设计稿**：DESIGN_A/B 经两路红队快审，裁决后开工。主要裁决：
+      - 同号重放留在 Forward 内；
+      - §3.4 只覆盖输出前的流内帧；
+      - 只有包装 400 进 M3，包装帧按“迟到的 HTTP 状态”路由；
+      - M3 终止改为 Codex 可重试的形式：未提交写 502，已提交写 `server_error`。这一条偏离 FINAL 原先的“写真 4xx”。
+    - **预检 1**：三个测试 Key 对应的三个上游，两个模型都接受占位形状；混合真实密文的情况未覆盖，因为拿不到有效的协作密文。
+    - 裁决全文在本地 `implementation/DECISIONS.md`。
 
 - **20261104-release0502-handoff**（2026-11-04 17:22 UTC，发版接力）：用户再次授权继续 0.5.2 发版（包含 #191–#194，新增迁移 289），不部署生产。
   - 版本 PR #195：head `2d41304954e51cf62809cbf38ac8a44cd6fa34ff`，base `746ec14fc`；除两个 macOS `shell` 检查取消外均通过，GitHub Actions 事故已恢复。
