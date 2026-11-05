@@ -6,6 +6,9 @@
 
 ## 当前交接状态
 
+- **只读 MCP 实施完成（2026-11-05；本地交付，未发布/部署）**：`feat/readonly-mcp-20261105`、基线 `381687250909140e8bb253f9b0c3d16d794a366b`；29个安全查询工具、OAuth/授权/撤销、独立只读Reader、迁移290/291与CI必跑门禁已实现。全部后端gpt-6.1-sol xhigh，两路Astra xhigh审查无未解决P0/P1。
+  - 必要验证通过：65项MCP tests/subtests、真实PG 29工具矩阵、Inspector真实授权/7工具发现/profile调用、相关7包lint、server build、前端关键集合1282项与lint/typecheck/build、文档/迁移/调度差异/干净快照审计。全仓后端unit/integration与GitHub CI未执行；生产及指定商业Host需按runbook验收。代码仍在主工作树未提交，MCP默认关闭，详细登记已归档。
+
 - **门槛 v3 实施（2026-11-04 14:50 UTC；PR #194 已合并，main `746ec14fc`；用户授权发版 0.5.2，版本准备中，未部署）**：分支 `feat/gate-v3-20261104`，CI 20 项全绿（pull_request 运行里 macOS `shell` 因排不到机器被取消，重跑后通过）。0.5.2 包含 #191–#194，迁移新增 289。部署需单独授权。
   - 范围：门槛 v3、判慢让位、P1-B、同站暂停、`usage_logs.attempt_first_output_ms`（迁移 289）、低倍率优先分组范围、前端；另含用户追加的会话状态两条约束：
     - 带密文片段的请求不软迁移，P1-B 退回连击规则，WS 增量轮沿用标记；
@@ -100,6 +103,9 @@
 - **仓库外环境收尾**：测试服务器的候选镜像、浸泡与演练目录、`xy2api_upgrade` 库按 staging-validation §11 清理；预上线主机的两份切换前备份在正式部署后删除。
 
 ## 进行中的工作
+
+- **20261106-release054-mcp**（2026-11-06，用户明确授权推送、PR、合并全部PR并发布0.5.4）：从已完成只读MCP工作树推进正式版本；当前远端无open PR，HEAD仍为381687250909140e8bb253f9b0c3d16d794a366b。发布前运行远端完整CI，检查固定head后合并，再创建annotated v0.5.4并核验Release资产和镜像。后端继续由gpt-6.1-sol xhigh负责，Astra xhigh复核发布安全边界；PM维护版本、发布与交接。授权不含生产部署、启用MCP或生产数据写入。
+
 
 - **20261104-release0502-handoff**（2026-11-04 17:22 UTC，发版接力）：用户再次授权继续 0.5.2 发版（包含 #191–#194，新增迁移 289），不部署生产。
   - 版本 PR #195：head `2d41304954e51cf62809cbf38ac8a44cd6fa34ff`，base `746ec14fc`；除两个 macOS `shell` 检查取消外均通过，GitHub Actions 事故已恢复。
@@ -1348,3 +1354,36 @@ pnpm --dir frontend run build
 - 验证：`check_docs_consistency.py`、干净树 `sync.py audit`；CI。
 - 卡点/风险：Release 前端构建内存临界；本 PR 的 push CI 遇到一次测试替身竞态导致的偶发失败，根因已定位、与 0.5.3 无关。两项都见“未结事项”。
 - 下一步：部署与灰度待用户授权，见“未结事项”。
+
+### 2026-11-05 — 20261105-readonly-mcp-design — 源码审计和只读 MCP 方案完成
+
+- 请求/目标：拉取 `liulixin-lex/xy2api`，深入分析管理员权限、数据记录及分析链路，规划根管理员、普通管理员、普通用户可用的只读 MCP。
+- 开始状态：克隆到本地工作区；`main` HEAD `381687250909140e8bb253f9b0c3d16d794a366b`，初始工作树干净。本任务期间未切分支。
+- 完成操作：按 `AGENTS.md` 完整阅读项目记忆、核实代码/Git；逐项核对 `operatoraccess` catalog/middleware/service、admin/user 路由、usage/ops/账单/运维/韧性/调度/余额/提示词审计/保留配置；统计 catalog 为 538 条管理路由（236 GET、407 module、128 super-only、3 other admin）；浏览 MCP 当前规范、Streamable HTTP、Authorization、Tools 与官方 Go SDK 文档。记录关键调用 ID 差异、尝试级 rescue 事件、读接口的 Redis 清理副作用、active 上游探测和 prompt 全文敏感边界，并编制查询工具、三类权限、认证、只读硬边界、工作包与验收方案。
+- 修改文件：`docs/READ_ONLY_MCP_DESIGN.md`；`docs/README.md` 的文档索引；`.gitignore` 的 docs 白名单；本文件交接摘要与操作日志。
+- 验证：新方案以 intent-to-add 临时进入索引后，`python3 tools/check_docs_consistency.py` → `documentation consistency: ok`；`git diff --check` 通过。intent-to-add 已移除，工作树保持新文件未跟踪。未运行代码测试（无业务代码变更）。没有连接生产、写数据库、提交、推送或部署。
+- 卡点/风险：跨表 request/client/billing ID 不是统一精确关联；需 WP0 用受控样本量化覆盖度。MCP 外发高敏事件／日志会将数据交给第三方模型 host；根管理员全读设计之外仍须明确 host consent。实时 Redis/进程状态以及系统日志有 TTL、drop、开关和实例边界。OAuth host 兼容需实施前验证。
+- 下一步：如批准立项，先按设计 WP0 核查并建 OpenSpec；未经另行授权不连接生产或部署。
+
+### 2026-11-05 — 20261105-readonly-mcp-plan-review — 后端可行性与单路逆向审查
+
+- 请求/目标：用户指定 PM 监督与分工、后端 gpt-6.1-sol xhigh、逆向审查仅一路 gpt-6-astra xhigh；完成严谨、精简、可执行的只读 MCP 方案。
+- 开始状态：main 基线 `381687250909140e8bb253f9b0c3d16d794a366b` 上已有本任务方案文档；本轮创建 `feat/readonly-mcp-20261105` 分支继续。
+- 完成操作：后端核对 fresh ACL、只读 Redis/PG 接口、OAuth 缺口、库候选和 owner/gate；生产按会话授权仅做 READ ONLY transaction、statement timeout 与有限聚合抽样，发现 billing/client/ops ID 不能直接等同且 recovered/final-error 来源不同。单路红队发现的 AnyOf、数值 ID、工具 source、敏感文本、运行开关和 me 工具映射问题已逐项修订。OpenSpec 统一为 WP0–WP5；未测代码/Host 项均未勾选。
+- 范围更正：PM 曾误把规划扩展为实现，已立即停止；backend agent 精确撤回自己临时新增文件和 config 修改，backend tracked diff 与 untracked code 均为零；未改依赖/迁移 checksum/Wire/router。最终仅交付开发规划，不声称已实现。
+- 修改文件：主方案、OpenSpec proposal/design/spec/tasks、文档索引、docs 白名单、本记忆；生产原始行、标识与凭据不入仓。
+- 验证：唯一 Astra 方案签字通过（P0/P1/必要 P2=0）；`python3 tools/check_docs_consistency.py` 与 `git diff --check` 通过。backend tracked diff=0、无未跟踪代码；没有业务实现，未运行代码测试或真实 Host E2E。
+- 卡点/风险：实际 OAuth Host 兼容、库 code/refresh 原子性、只读角色配置及性能预算需后续实施验证；规划审查不能证明上线无漏洞。
+- 下一步：方案已交付，实施与真实 Host 验证仍未进行；后续按 WP1–WP5 推进。推送/PR/合并/发版/生产写不在本次执行范围；本任务详细登记已归档。
+
+
+### 2026-11-05 — 20261105-readonly-mcp-implementation — 只读 MCP 本地实现与验收完成
+
+- 请求/目标：按用户“开始实施”开发只读 MCP；PM监督与集成，所有后端由gpt-6.1-sol xhigh执行，Astra xhigh分别进行交付审查与安全红队。
+- 开始状态：`feat/readonly-mcp-20261105`，HEAD `381687250909140e8bb253f9b0c3d16d794a366b`；保留上一轮方案/OpenSpec既有改动，未回退其他工作。
+- 完成操作：实现22个管理诊断与7个本人查询工具；官方Go SDK stateless transport、本地OAuth AS/PKCE/opaque token/refresh rotation与重放撤销、fresh ACL/token_version/目标和owner检查、独立PG Reader与只读Redis、来源/统计/保留语义、有界控制面审计/限流/清理。完成consent与本人connections/revoke界面、中英文及默认关闭配置。新增迁移290/291并追加checksum；固定列授权和显式函数权限收敛脚本、部署/回退runbook、上游钩子与OpenSpec登记同步完成。
+- 修改文件：`backend/internal/mcp/`、config/Wire/router/handler、纯质量快照/Redis只读错误传播、迁移及依赖；`frontend/src/features/mcp/`及profile/router/i18n；CI/Makefile；`docs/READ_ONLY_MCP_DESIGN.md`、`deploy/MCP_READONLY.md`、OpenSpec和本记忆。未改网关调度热路径、未加影子模式。
+- 验证：CI等效真实PG suite 65个tests/subtests、12个关键必跑测试全部PASS且0skip/fail；29工具安全列Reader矩阵、Redis只读命令捕获、code/refresh并发单次消费/重放撤销、fresh ACL/AnyOf/flags/target/owner/token_version与控制面容量清理通过。相关7个后端包分拆lint均0问题、server构建/接线/cleanup/config及受影响service/repository定向通过；一次七包lint超时后按包完成。前端全量lint/typecheck/build、115文件1282关键回归及MCP16项流程测试通过，桌面/手机浏览器检查通过。Inspector2.14.0以真实本地TLS/PG OAuth完成授权、7工具发现和profile调用；未禁TLS。两路Astra签字无未解决P0/P1，最后Flush增量也复核通过。
+- 仓库门禁：文档一致性、迁移checksum、`git diff --check`、scheduler-diff、upstream-sync工具15项单测与临时干净快照audit通过；仅新增本任务OpenSpec的xy_owned登记及必要字面量，不放宽全局检查。主HEAD/索引未因审计改变，临时审计工作树已移除；主分支实现改动未提交或推送。一次性测试PG、UI fixture与验证二进制已清理，其他资源保留。
+- 卡点/边界：无本地开发阻断；没有运行全仓后端unit/integration或触发GitHub CI。Inspector使用合成身份和integration-only consent fixture，产品UI单独验证；合法nullable schema触发49项可移植性warning但0error。未验证生产完整登录/代理链路、指定商业Host及生产数据规模执行计划，不承诺全Host兼容或零漏洞。本轮未连接生产。
+- 下一步：按 `deploy/MCP_READONLY.md` 与OpenSpec WP5，在后续明确授权内完成目标环境验收、提交/推送/发布及部署；启用前显式配置独立Reader和函数权限收敛。MCP保持默认关闭，未执行生产迁移或业务写操作。详细过程登记已原样归档。

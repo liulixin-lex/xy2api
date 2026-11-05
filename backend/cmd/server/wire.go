@@ -13,6 +13,7 @@ import (
 	"github.com/liulixin-lex/xy2api/ent"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/handler"
+	"github.com/liulixin-lex/xy2api/internal/mcp"
 	"github.com/liulixin-lex/xy2api/internal/payment"
 	"github.com/liulixin-lex/xy2api/internal/repository"
 	"github.com/liulixin-lex/xy2api/internal/securityaudit"
@@ -44,6 +45,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 		payment.ProviderSet,
 		middleware.ProviderSet,
 		handler.ProviderSet,
+		mcp.ProviderSet,
 
 		// Server layer ProviderSet
 		server.ProviderSet,
@@ -143,6 +145,7 @@ func provideCleanup(
 	imageTasks *service.ImageTaskService,
 	asyncImage *handler.AsyncImageHandler,
 	supportChatPurge *service.SupportChatImagePurgeService,
+	mcpServer *mcp.Server,
 ) func() {
 	return func() {
 		// Async image tasks run in this process. Let them finish (bounded by
@@ -165,6 +168,12 @@ func provideCleanup(
 
 		// 应用层清理步骤可并行执行，基础设施资源（Redis/Ent）最后按顺序关闭。
 		parallelSteps := []cleanupStep{
+			{"MCPServer", func() error {
+				if mcpServer != nil {
+					mcpServer.Close()
+				}
+				return nil
+			}},
 			{"GroupQualityGateService", func() error { groupQualityGate.Stop(); return nil }},
 			{"SupportChatImagePurgeService", func() error {
 				if supportChatPurge != nil {

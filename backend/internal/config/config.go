@@ -71,6 +71,7 @@ type OpenAITOTPConfig struct {
 }
 
 type Config struct {
+	MCP                     MCPConfig                     `mapstructure:"mcp"`
 	OpenAITOTP              OpenAITOTPConfig              `mapstructure:"openai_totp"`
 	UsageExport             usageexport.Config            `mapstructure:"usage_export"`
 	Server                  ServerConfig                  `mapstructure:"server"`
@@ -2099,6 +2100,11 @@ func configureConfigSource(setConfigFile, addConfigPath func(string)) {
 
 func setDefaults() {
 	viper.SetDefault("run_mode", RunModeStandard)
+	viper.SetDefault("mcp.enabled", false)
+	viper.SetDefault("mcp.public_url", "")
+	viper.SetDefault("mcp.oauth_hmac_secret", "")
+	viper.SetDefault("mcp.reader_dsn", "")
+	viper.SetDefault("mcp.allowed_origins", []string{})
 	viper.SetDefault("simple_mode.auto_create_default_groups", true)
 	viper.SetDefault("simple_mode_key_rate_limit_enabled", false)
 

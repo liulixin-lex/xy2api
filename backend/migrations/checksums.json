@@ -338,6 +338,8 @@
     "286_anthropic_cache_ttl.sql": "749f7d32e835fb0bde471739f3fb95c1e5d288155c733ce8d10d014244aee0fb",
     "287_support_chat.sql": "90aa4fede4bc4fcea0152157e97453b0200f9469a45b26d8f2f03a901b465413",
     "288_support_chat_user_recall.sql": "c0a5f9112906c7a89751c35b2869a10cb2c4fef086729c590b431eea206c8e64",
-    "289_usage_log_attempt_first_output.sql": "cabf5ebe6bf1243eb79ee1bff6f11fd789d7f038b1b52da71568df8d34207020"
+    "289_usage_log_attempt_first_output.sql": "cabf5ebe6bf1243eb79ee1bff6f11fd789d7f038b1b52da71568df8d34207020",
+    "290_readonly_mcp.sql": "b510fabcefdcf86ad722f6c6f3dee00a39d53e927f0b2da1b3a07a976d436c7a",
+    "291_readonly_mcp_control_limits.sql": "89bf7fb4f44d9657a0e302794d4aa988915995bdefcf3f2150ccba521b664aa6"
   }
 }

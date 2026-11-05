@@ -2,6 +2,7 @@ package handler
 
 import (
 	"github.com/liulixin-lex/xy2api/internal/handler/admin"
+	"github.com/liulixin-lex/xy2api/internal/mcp"
 	"github.com/liulixin-lex/xy2api/internal/securityaudit"
 )
 
@@ -54,6 +55,7 @@ type AdminHandlers struct {
 
 // Handlers contains all HTTP handlers
 type Handlers struct {
+	MCP              *mcp.Server
 	UsageExport      *UsageExportHandler
 	Auth             *AuthHandler
 	User             *UserHandler
