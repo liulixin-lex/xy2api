@@ -117,6 +117,9 @@ func registerRoutes(
 ) {
 	// 通用路由（健康检查、状态等）
 	routes.RegisterCommonRoutes(r)
+	if h.MCP != nil {
+		h.MCP.RegisterRoutes(r, gin.HandlerFunc(jwtAuth), gin.HandlerFunc(auditLog))
+	}
 
 	// API v1
 	v1 := r.Group("/api/v1")

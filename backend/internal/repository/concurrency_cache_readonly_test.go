@@ -6,6 +6,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
+	"strings"
 	"testing"
 	"time"
 )
@@ -34,4 +35,18 @@ func TestPeekAccountsLoadBatchPreservesExpiredLeases(t *testing.T) {
 	require.NoError(t, e)
 	require.Equal(t, actual, got)
 	require.NotEqual(t, before, m.Dump(), "normal scheduler owns expired-lease cleanup")
+}
+
+func TestPeekAccountsLoadBatchPreservesZCountErrorsAfterMissingWaitKey(t *testing.T) {
+	m := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: m.Addr()})
+	defer func() { _ = client.Close() }()
+	cache, ok := NewConcurrencyCache(client, 15, 900).(*concurrencyCache)
+	require.True(t, ok)
+	// Account 1's absent wait key makes Pipeline.Exec return redis.Nil. The
+	// malformed account 2 slot key must still surface its own WRONGTYPE error.
+	require.NoError(t, client.Set(context.Background(), accountSlotKeyPrefix+"2", "not-a-zset", 0).Err())
+	_, err := cache.PeekAccountsLoadBatch(context.Background(), []service.AccountWithConcurrency{{ID: 1, MaxConcurrency: 5}, {ID: 2, MaxConcurrency: 5}})
+	require.Error(t, err)
+	require.Contains(t, strings.ToUpper(err.Error()), "WRONGTYPE")
 }

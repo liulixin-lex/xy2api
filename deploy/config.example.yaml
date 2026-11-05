@@ -6,6 +6,19 @@
 #
 # Documentation / 文档: https://github.com/liulixin-lex/xy2api
 
+# Read-only MCP is opt-in. See deploy/MCP_READONLY.md before enabling.
+# 只读 MCP 默认关闭；须先配置独立只读数据库账号和 OAuth secret。
+mcp:
+  enabled: false
+  # Canonical public HTTPS origin, without path/query/fragment.
+  public_url: ""
+  # Base64 of >=32 random bytes, separate from JWT; use deployment secrets.
+  oauth_hmac_secret: ""
+  # Separate SELECT-only PostgreSQL login; never use the application writer.
+  reader_dsn: ""
+  # Exact additional browser origins only; the public origin is already allowed.
+  allowed_origins: []
+
 # =============================================================================
 # Server Configuration
 # 服务器配置

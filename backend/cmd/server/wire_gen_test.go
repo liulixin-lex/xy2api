@@ -112,6 +112,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		&service.ImageTaskService{}, // imageTasks
 		handler.NewAsyncImageHandler(nil, nil, nil), // asyncImage
 		nil, // supportChatPurge
+		nil, // MCP server
 	)
 
 	require.NotPanics(t, func() {

@@ -8,6 +8,7 @@ import channelMonitorV2 from './channelMonitorV2'
 import batchImage from './batchImage'
 import admin from './admin'
 import misc from './misc'
+import mcp from './mcp'
 
 export default {
   ...supportTickets,
@@ -19,5 +20,6 @@ export default {
   ...channelMonitorV2,
   ...batchImage,
   admin,
+  mcp,
   ...misc,
 }

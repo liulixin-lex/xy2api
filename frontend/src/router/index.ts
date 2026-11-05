@@ -317,6 +317,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/mcp/authorize',
+    name: 'MCPAuthorize',
+    component: () => import('@/features/mcp/MCPAuthorizeView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Authorize MCP',
+      titleKey: 'mcp.authorizeTitle',
+      hideSupportWidget: true
+    }
+  },
+  {
     path: '/subscriptions',
     name: 'Subscriptions',
     component: () => import('@/views/user/SubscriptionsView.vue'),

@@ -34,6 +34,15 @@ func (c *concurrencyCache) PeekAccountsLoadBatch(ctx context.Context, accounts [
 		return nil, err
 	}
 	for _, cmd := range all {
+		// Pipeline Exec reports the first command error. A missing wait key on
+		// an earlier account is an expected redis.Nil and must not mask a
+		// later slot ZCOUNT failure (which must not become a zero reading).
+		if err := cmd.slots.Err(); err != nil {
+			return nil, err
+		}
+		if err := cmd.live.Err(); err != nil {
+			return nil, err
+		}
 		wait, err := cmd.wait.Int()
 		if err != nil && !errors.Is(err, redis.Nil) {
 			return nil, err
