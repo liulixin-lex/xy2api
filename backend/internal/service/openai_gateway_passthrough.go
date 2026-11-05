@@ -1491,7 +1491,10 @@ var openAIStreamErrorStatusPaths = []string{
 	"status",
 }
 
-func openAIStreamFailedEventSemanticStatus(payload []byte, message string) int {
+func openAIStreamFailedEventSemanticStatus(payload []byte, message string, validatedWrappedStatus ...int) int {
+	if len(validatedWrappedStatus) > 0 && validatedWrappedStatus[0] >= http.StatusBadRequest && validatedWrappedStatus[0] <= 599 {
+		return validatedWrappedStatus[0]
+	}
 	if isOpenAIContextWindowError(message, payload) {
 		return http.StatusBadRequest
 	}
@@ -1526,11 +1529,14 @@ func openAIStreamFailedEventSemanticStatus(payload []byte, message string) int {
 	}
 }
 
-func openAIStreamFailureStatus(payload []byte, message string) int {
+func openAIStreamFailureStatus(payload []byte, message string, validatedWrappedStatus ...int) int {
 	if len(bytes.TrimSpace(payload)) == 0 || !gjson.ValidBytes(payload) {
 		return http.StatusBadGateway
 	}
-	semanticStatus := openAIStreamFailedEventSemanticStatus(payload, message)
+	if len(validatedWrappedStatus) > 0 && validatedWrappedStatus[0] >= http.StatusBadRequest && validatedWrappedStatus[0] <= 599 {
+		return validatedWrappedStatus[0]
+	}
+	semanticStatus := openAIStreamFailedEventSemanticStatus(payload, message, validatedWrappedStatus...)
 	switch semanticStatus {
 	case http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests, 529:
 		return semanticStatus
@@ -1542,12 +1548,12 @@ func openAIStreamFailureStatus(payload []byte, message string) int {
 	return http.StatusBadGateway
 }
 
-func openAIStreamFailureStatusAndCategory(kind string, payload []byte, message string) (int, resilience.Category) {
+func openAIStreamFailureStatusAndCategory(kind string, payload []byte, message string, validatedWrappedStatus ...int) (int, resilience.Category) {
 	message = sanitizeUpstreamErrorMessage(strings.TrimSpace(message))
 	if message == "" {
 		message = "OpenAI upstream response failed"
 	}
-	statusCode := openAIStreamFailureStatus(payload, message)
+	statusCode := openAIStreamFailureStatus(payload, message, validatedWrappedStatus...)
 	category := opsResilienceCategory(&OpsUpstreamErrorEvent{
 		Kind:                 kind,
 		UpstreamStatusCode:   statusCode,
@@ -1836,12 +1842,13 @@ func (s *OpenAIGatewayService) recordOpenAIStreamUpstreamError(
 	kind string,
 	payload []byte,
 	message string,
+	validatedWrappedStatus ...int,
 ) string {
 	message = sanitizeUpstreamErrorMessage(strings.TrimSpace(message))
 	if message == "" {
 		message = "OpenAI upstream response failed"
 	}
-	statusCode, category := openAIStreamFailureStatusAndCategory(kind, payload, message)
+	statusCode, category := openAIStreamFailureStatusAndCategory(kind, payload, message, validatedWrappedStatus...)
 	detail := ""
 	if len(payload) > 0 && s != nil && s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
 		maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
@@ -1873,6 +1880,60 @@ func (s *OpenAIGatewayService) recordOpenAIStreamUpstreamError(
 		appendOpsUpstreamError(c, event)
 	}
 	return message
+}
+
+func (s *OpenAIGatewayService) newOpenAIWrappedStreamFailoverError(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	passthrough bool,
+	upstreamRequestID string,
+	payload []byte,
+	message string,
+	canonicalModel string,
+	headers http.Header,
+	wrappedStatus int,
+) *UpstreamFailoverError {
+	if wrappedStatus < http.StatusBadRequest || wrappedStatus > 599 || account == nil || IsResponseCommitted(c) {
+		return nil
+	}
+	if message = sanitizeUpstreamErrorMessage(strings.TrimSpace(message)); message == "" {
+		message = "OpenAI upstream response failed"
+	}
+	classificationBody := openAIWrappedUpstreamErrorClassificationBody(payload)
+	classificationMessage := firstNonEmpty(extractOpenAISSEErrorMessage(classificationBody), message)
+	if wrappedStatus != http.StatusBadRequest && wrappedStatus != http.StatusForbidden &&
+		!s.shouldFailoverOpenAIUpstreamResponse(account, wrappedStatus, classificationMessage, classificationBody) {
+		return nil
+	}
+
+	shouldDisable := false
+	if wrappedStatus == http.StatusForbidden {
+		// A wrapped 403 belongs either to the established account-fault path or
+		// to the request-scoped forbidden handling. Do not apply generic 403
+		// cooldowns to the latter.
+		if openAIStream403AccountFailure(classificationBody, classificationMessage) {
+			shouldDisable = s.handleOpenAIAccountUpstreamError(ctx, account, wrappedStatus, headers, classificationBody, canonicalModel)
+		}
+	} else if wrappedStatus != http.StatusBadRequest {
+		shouldDisable = s.handleOpenAIAccountUpstreamError(ctx, account, wrappedStatus, headers, classificationBody, canonicalModel)
+	}
+
+	message = s.recordOpenAIStreamUpstreamError(c, account, passthrough, upstreamRequestID, "failover", classificationBody, classificationMessage, wrappedStatus)
+	retryableOnSameAccount := wrappedStatus != http.StatusBadRequest && wrappedStatus != http.StatusForbidden &&
+		!shouldDisable && account.IsPoolMode() && (account.IsPoolModeRetryableStatus(wrappedStatus) || isOpenAITransientProcessingError(wrappedStatus, message, classificationBody))
+	classificationHeaders := headers
+	if wrappedStatus == http.StatusTooManyRequests {
+		classificationHeaders = nil
+	}
+	failoverErr := s.newOpenAIAccountFailoverErrorWithClassificationHeaders(
+		account, wrappedStatus, headers, classificationHeaders, classificationBody, message, shouldDisable, retryableOnSameAccount,
+	)
+	failoverErr.WrappedStatus = wrappedStatus
+	// Keep the validated wrapper payload available to the request-level repair
+	// handler; generic stream errors replace it with a client-safe envelope.
+	failoverErr.ResponseBody = append([]byte(nil), payload...)
+	return failoverErr
 }
 
 func (s *OpenAIGatewayService) newOpenAIStreamFailoverError(
@@ -1985,6 +2046,27 @@ func (s *OpenAIGatewayService) nonStreamingTerminalFailureFailover(
 	captureOpenAIStateRejection(c, account, payload, message, path, false, nil)
 	if account == nil || IsResponseCommitted(c) {
 		return nil
+	}
+	wrappedStatus, wrapped, malformed := openAIWrappedUpstreamErrorStatus(terminalType, payload)
+	if malformed {
+		ctx := context.Background()
+		if c != nil && c.Request != nil {
+			ctx = c.Request.Context()
+		}
+		logOpenAIWrappedErrorMalformed(ctx, account, "nonstreaming_sse")
+	}
+	if wrapped {
+		ctx := context.Background()
+		if c != nil && c.Request != nil {
+			ctx = c.Request.Context()
+		}
+		var headers http.Header
+		upstreamRequestID := ""
+		if resp != nil {
+			headers = resp.Header
+			upstreamRequestID = strings.TrimSpace(resp.Header.Get("x-request-id"))
+		}
+		return s.newOpenAIWrappedStreamFailoverError(ctx, c, account, passthrough, upstreamRequestID, payload, message, firstNonEmpty(canonicalModel...), headers, wrappedStatus)
 	}
 	shouldFailover := openAIStreamFailedEventShouldFailover(payload, message)
 	if terminalType == "error" {
@@ -2283,6 +2365,14 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			dataBytes := []byte(data)
 			trimmedData := strings.TrimSpace(data)
 			rawEventType := effectiveOpenAISSEEventType(dataBytes, pendingSSEEventType)
+			wrappedStatus, wrappedFrame, malformedWrapped := openAIWrappedUpstreamErrorStatus(pendingSSEEventType, dataBytes)
+			wrappedPayload := []byte(nil)
+			if wrappedFrame {
+				wrappedPayload = append([]byte(nil), dataBytes...)
+			}
+			if malformedWrapped {
+				logOpenAIWrappedErrorMalformed(ctx, account, "passthrough_sse")
+			}
 			observeOpenAIPreludeCreated(preludeTrace, rawEventType)
 			observer.ObserveOpenAI(dataBytes, rawEventType)
 			if needModelReplace {
@@ -2381,8 +2471,14 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 					}
 				}
 				if !outputStarted {
+					if wrappedFrame {
+						wrappedMessage := firstNonEmpty(extractOpenAISSEErrorMessage(wrappedPayload), failedMessage)
+						if failoverErr := s.newOpenAIWrappedStreamFailoverError(ctx, c, account, true, upstreamRequestID, wrappedPayload, wrappedMessage, mappedModel, resp.Header, wrappedStatus); failoverErr != nil && !clientDisconnected {
+							return passthroughReturn(resultWithUsage(), failoverErr)
+						}
+					}
 					shouldFailover := false
-					if !cyberHit {
+					if !cyberHit && !wrappedFrame {
 						if eventType == "error" {
 							shouldFailover = openAIStreamErrorEventShouldFailover(dataBytes, failedMessage)
 						} else {
