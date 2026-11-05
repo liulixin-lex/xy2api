@@ -101,6 +101,11 @@
 
 ## 进行中的工作
 
+- **20261105-encrypted-routing-impl**（2026-11-05 11:00 UTC 开始，Claude 主持与集成）：按本地 `.work/tasks/20261105-encrypted-routing/FINAL.md`（astra、Opus 已签字，用户 11-05 全部批准）实施“空白占位不算输出 + 包装错误帧 + 状态类同号学习重放与一次换号 + 通用 forbidden 软冷却 + 最小计数”，一次发布。实施交接与裁决在同目录 `implementation/`（不入库）。
+  - 集成分支 `feat/encrypted-routing-20261105`（Paseo 工作树 `enc-routing-integration`，基于 origin/main `381687250`）。
+  - 分工（用户 11-05 指定）：后端 gpt-6-astra xhigh 两路（甲：流式判定与包装帧；乙：状态机与 forbidden）；红队 astra xhigh（协议与客户端）与 Opus xhigh（路由与韧性）两路逆向审查。
+  - 授权：生产只读补数据。推送、PR、合并、发版、部署、镜像固化需在发布前再确认；测试 Key 待用户提供。
+
 - **20261104-release0502-handoff**（2026-11-04 17:22 UTC，发版接力）：用户再次授权继续 0.5.2 发版（包含 #191–#194，新增迁移 289），不部署生产。
   - 版本 PR #195：head `2d41304954e51cf62809cbf38ac8a44cd6fa34ff`，base `746ec14fc`；除两个 macOS `shell` 检查取消外均通过，GitHub Actions 事故已恢复。
   - 下一步：只重跑取消的检查；全绿后固定 head 普通合并，annotated `v0.5.2` 指向合并提交（正文保留 Markdown），等待 Release 并核验原生包、校验和及镜像。

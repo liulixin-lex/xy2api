@@ -727,6 +727,7 @@ type UpstreamFailoverError struct {
 	NextAccountAction               NextAccountAction
 	ClientStatusCode                int
 	ClientMessage                   string
+	WrappedStatus                   int // 中转包装错误帧里校验过的上游状态码（400–599）；0 表示不是包装帧
 }
 
 func annotateUpstreamFailoverAccount(failoverErr *UpstreamFailoverError, account *Account) *UpstreamFailoverError {
