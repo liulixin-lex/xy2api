@@ -6997,3 +6997,17 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
   - 验证进展：前端关键集合 115 文件/1282 测试、全量 lint/typecheck/生产 build 通过；真实浏览器 consent/connection 手机检查无横向溢出或 page error。全迁移 PG 的 29 Reader 与最新统计口径回归通过，Redis 捕获仅读命令且过期 slot 不变；OAuth+PG role 原子兑换/重放/缩权/SDK 定向通过。Inspector 2.14.0 实测发现 DCR 标准 application_type 和 required:null 的互操作问题，已回派修复，不将仅授权成功误作 Host 调用验收。匿名认证准入、控制面容量/清理及两路签字现已闭合；Inspector 2.14.0 + Node24.22.1 真实 OAuth 授权后发现全部7个本人工具并成功调用profile，未禁TLS，仅信任本地fixture CA。最新全MCP实库suite通过15.854s，后端lint/build最后收尾；未把fixture身份或页面冒充生产完整登录验收。
 
 - 收尾更正：本地实现和必要验证已完成，最终7包lint分拆通过、65项MCP tests/subtests无跳过或失败、真实Inspector授权和调用通过，两路Astra代码审查无未解决P0/P1。详细证据与目标环境未验证边界见 `openspec/changes/readonly-mcp-20261105/tasks.md`。主分支代码未提交或推送；临时干净快照审计通过并已删除其工作树；本轮未连接生产、发布或部署。
+
+
+### 2026-11-06 — 0.5.4 发布登记原样归档
+
+#### 发布前交接状态原文
+
+- **只读 MCP 实施完成（2026-11-05；本地交付，未发布/部署）**：`feat/readonly-mcp-20261105`、基线 `381687250909140e8bb253f9b0c3d16d794a366b`；29个安全查询工具、OAuth/授权/撤销、独立只读Reader、迁移290/291与CI必跑门禁已实现。全部后端gpt-6.1-sol xhigh，两路Astra xhigh审查无未解决P0/P1。
+  - 必要验证通过：65项MCP tests/subtests、真实PG 29工具矩阵、Inspector真实授权/7工具发现/profile调用、相关7包lint、server build、前端关键集合1282项与lint/typecheck/build、文档/迁移/调度差异/干净快照审计。全仓后端unit/integration与GitHub CI未执行；生产及指定商业Host需按runbook验收。代码仍在主工作树未提交，MCP默认关闭，详细登记已归档。
+
+#### 进行中的工作原文
+
+- **20261106-release054-mcp**（2026-11-06，用户明确授权推送、PR、合并全部PR并发布0.5.4）：从已完成只读MCP工作树推进正式版本；当前远端无open PR，HEAD仍为381687250909140e8bb253f9b0c3d16d794a366b。发布前运行远端完整CI，检查固定head后合并，再创建annotated v0.5.4并核验Release资产和镜像。后端继续由gpt-6.1-sol xhigh负责，Astra xhigh复核发布安全边界；PM维护版本、发布与交接。授权不含生产部署、启用MCP或生产数据写入。
+
+- 收尾更正：PR #199 已在20项CI全绿后正常合并，v0.5.4指向2356b8b200eb567defdd6fe3e3939d5a5ec017e2，Release运行42083934644成功。5原生包SHA256/归档内容和Linux amd64版本输出已核验；GHCR双架构版本/commit/latest一致。正式Release非draft、非prerelease且为latest；未连接生产或部署。

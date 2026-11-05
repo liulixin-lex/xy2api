@@ -50,7 +50,7 @@
 
 - [x] 5.1 配置/反向代理/只读 role/迁移/保留/回退 runbook；默认关闭，不改网关热路径。
 - [ ] 5.2 在目标部署核对 schema/只读角色、完整登录与代理链路、指定商业 Host、生产规模 query budget/执行计划；本地证据已齐，目标环境验收尚未执行，不能宣布已上线。
-- [ ] 5.3 用户已于2026-11-06授权push/PR/merge/release 0.5.4，发布执行中；完成后登记实际提交与发布证据。
+- [x] 5.3 已按2026-11-06授权推送、创建并合并PR #199、正式发布v0.5.4；标签指向2356b8b200eb567defdd6fe3e3939d5a5ec017e2，Release运行42083934644成功，5平台包/SHA256与双架构镜像已核验。
 - [ ] 5.4 生产迁移、只读角色配置及启用待独立部署窗口执行；本轮发布授权不含生产部署。
 
 ## 逐工具实现核对
@@ -99,10 +99,10 @@
 - 前端：全量 lint/typecheck/生产 build 通过；项目关键集合 115 文件、1,282 测试通过；MCP 16 项流程测试通过。真实 Chromium 在桌面/390px 手机检查授权和连接页，无横向溢出及 page error。沿用既有界面风格。
 - 官方 MCP Inspector **2.14.0** + Node **24.22.1**：本地 TLS fixture 使用真实 NewServer/PG OAuth 与合成普通用户、safe query fixture，DCR → PKCE S256/resource → 浏览器预览/同意 → loopback callback → tools/list 的全部 7 个 me 工具 → 新会话 tools/call `xy2api.me.get_profile` 均通过（schema_version=1、isError=false）。只信任该临时自签 CA，未禁用 TLS 验证；OAuth secret 仅内存、不写产品配置。Schema 检查 0 errors/49 portability warnings（7 工具），经离线复用 Inspector 检查器确认均为 SDK 输出 schema 的合法 nullable type 数组提示，部分单一 type 方言可能不兼容，未阻断 Inspector 发现/调用。过程中发现并修复 application_type 兼容与 required:null；不得把此前仅2工具的首次结果当通过。
 - Host 边界：Inspector 的浏览器授权使用 integration-only consent fixture，产品页面另有组件和浏览器验证；尚未在生产完整登录/代理链路或用户指定商业 AI Host 上验收，不宣称通用兼容。后续上线核对仍见 WP5。
-- 后端：MCP/config/handler/server/cmd 五包、service/repository 两包分别 lint 通过（0 issues）；服务二进制构建、接线/清理、config、纯质量快照与 Redis peek 回归通过。完整本地 MCP 实库 suite 通过（15.854s），新增并发 refresh 回归通过（0.781s），AnyOf/flags/target 委托与 token_version 在线撤权回归通过（0.840s）。未运行全仓后端 unit/integration，不能把上述范围等同于全仓 CI 全绿。
-- CI：复用现有 PostgreSQL service 建独立 `mcp_readonly_test` 数据库及合成测试 writer；MCP 专用步骤要求 12 项关键测试全部通过、所选范围 0 skip/fail，排除手动 Inspector fixture。Workflow YAML 已解析通过；从 workflow 原样提取的本地等效命令与 JSON 断言通过：65 个 tests/subtests、12 个必跑关键测试全部通过、0 skip/fail。GitHub Actions 尚未触发。
+- 后端：MCP/config/handler/server/cmd 五包、service/repository 两包分别 lint 通过（0 issues）；服务二进制构建、接线/清理、config、纯质量快照与 Redis peek 回归通过。完整本地 MCP 实库 suite 通过（15.854s），新增并发 refresh 回归通过（0.781s），AnyOf/flags/target 委托与 token_version 在线撤权回归通过（0.840s）。2026-11-06 发布阶段又完成远端全仓 unit/integration、golangci-lint、网关 reliability/resilience、真实 Redis 缓存和支付 PostgreSQL 回归。
+- CI：复用现有 PostgreSQL service 建独立 `mcp_readonly_test` 数据库及合成测试 writer；MCP 专用步骤要求 12 项关键测试全部通过、所选范围 0 skip/fail，排除手动 Inspector fixture。Workflow YAML 已解析通过；从 workflow 原样提取的本地等效命令与 JSON 断言通过：65 个 tests/subtests、12 个必跑关键测试全部通过、0 skip/fail。2026-11-06 PR #199 的 push/pull_request 两路 CI 与安全扫描共20项检查全绿；PR CI运行42078746808、push CI运行42078709061，专用MCP门禁均确认12项关键测试PASS、0 SKIP。固定head `0335f39d6633e6cfb2aab75fcfc55a86620866b8` 后合并，未绕过分支保护。
 - 已通过 `python3 tools/check_docs_consistency.py`、`git diff --check`、`sync.py scheduler-diff` 与 upstream-sync 工具 15 项单测；迁移 290/291 checksum 一致。最终代码的独立临时干净快照 `sync.py audit` 通过；首次审计发现新 OpenSpec 目录缺归属登记，已按现有方式只补该目录的 xy_owned 规则后复验。主分支 HEAD/索引不变，临时审计工作树已删除。
 
 ## 交付状态
 
-WP1–WP4 与部署 runbook 已完成，代码保留在本地 `feat/readonly-mcp-20261105` 工作树，MCP 默认关闭。WP5.2 的目标环境验收和 WP5.3 的发布/部署尚未执行。本轮没有连接生产。已清理本轮一次性 PostgreSQL 容器、临时 UI fixture 和构建验证二进制；不影响其他任务资源。
+WP1–WP4 与部署 runbook 已完成；2026-11-06 经用户授权推送并合并 PR #199，合并提交 `2356b8b200eb567defdd6fe3e3939d5a5ec017e2`。MCP 默认关闭，WP5.2 的目标环境验收及 WP5.4 的部署/启用尚未执行。v0.5.4 标签指向该合并提交，发布流水线42083934644成功；正式Release非draft/非prerelease且为latest，5原生包SHA256/归档内容、Linux amd64版本和GHCR双架构version/revision/latest均核验通过。本轮没有连接生产；一次性 PostgreSQL 容器、临时 UI fixture 和构建验证二进制已清理，不影响其他任务资源。
