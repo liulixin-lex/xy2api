@@ -27,6 +27,9 @@ Before upgrading the group Fast policy, review [OpenAI group Fast](../docs/OPENA
 | `xy2api.service` | Systemd service unit file |
 | `config.example.yaml` | Example configuration file |
 | `EDGE_SECURITY.md` | Reverse proxy, CDN/WAF, trusted proxy, and ingress hardening guide |
+| `MCP_READONLY.md` | Read-only MCP OAuth, dedicated database reader, proxy, and rollback runbook |
+| `mcp-reader-grants.sql` | Fixed safe-column SELECT grants for the dedicated MCP reader |
+| `mcp-reader-function-privileges.sql` | Explicit function privilege hardening that preserves the application writer |
 
 ---
 

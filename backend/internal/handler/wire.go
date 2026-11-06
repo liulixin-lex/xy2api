@@ -3,6 +3,7 @@ package handler
 import (
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/handler/admin"
+	"github.com/liulixin-lex/xy2api/internal/mcp"
 	"github.com/liulixin-lex/xy2api/internal/securityaudit"
 	"github.com/liulixin-lex/xy2api/internal/service"
 
@@ -200,6 +201,7 @@ func ProvideAdminSettingHandler(settingService *service.SettingService, emailSer
 
 // ProvideHandlers creates the Handlers struct
 func ProvideHandlers(
+	mcpServer *mcp.Server,
 	usageExportHandler *UsageExportHandler,
 	authHandler *AuthHandler,
 	userHandler *UserHandler,
@@ -229,6 +231,7 @@ func ProvideHandlers(
 	_ *service.OpenAIQuotaAutoResetService,
 ) *Handlers {
 	return &Handlers{
+		MCP:              mcpServer,
 		UsageExport:      usageExportHandler,
 		Auth:             authHandler,
 		User:             userHandler,

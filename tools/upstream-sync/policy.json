@@ -58,7 +58,8 @@
       "openspec/changes/gate-post-output-attempts-20261102/**",
       "openspec/changes/group-quality-gate-v3-20261104/**",
       "openspec/changes/codex-collaboration-plaintext-20261104/**",
-      "openspec/changes/encrypted-routing-20261105/**"
+      "openspec/changes/encrypted-routing-20261105/**",
+      "openspec/changes/readonly-mcp-20261105/**"
     ],
     "manual_merge": [
       "Makefile",
@@ -3973,6 +3974,66 @@
     {
       "path": "backend/internal/service/openai_gateway_forward.go",
       "value": "collabAttempt.clientRejected = resp.StatusCode < 500 && resp.StatusCode != 429 && classifyUpstreamHTTP(resp.StatusCode, resp.Header, respBody, upstreamMsg).Category == resilience.CategoryClientError"
+    },
+    {
+      "path": "backend/internal/config/config.go",
+      "value": "MCP                     MCPConfig"
+    },
+    {
+      "path": "backend/internal/config/config.go",
+      "value": "viper.SetDefault(\"mcp.enabled\", false)"
+    },
+    {
+      "path": "backend/cmd/server/wire.go",
+      "value": "mcp.ProviderSet,"
+    },
+    {
+      "path": "backend/cmd/server/wire_gen.go",
+      "value": "mcp.ProvideReaderDB(configConfig, db)"
+    },
+    {
+      "path": "backend/cmd/server/wire_gen.go",
+      "value": "mcp.NewServer(configConfig, db, readerDB,"
+    },
+    {
+      "path": "backend/internal/handler/handler.go",
+      "value": "MCP              *mcp.Server"
+    },
+    {
+      "path": "backend/internal/handler/wire.go",
+      "value": "mcpServer *mcp.Server,"
+    },
+    {
+      "path": "backend/internal/server/router.go",
+      "value": "h.MCP.RegisterRoutes(r, gin.HandlerFunc(jwtAuth), gin.HandlerFunc(auditLog))"
+    },
+    {
+      "path": "backend/internal/repository/concurrency_cache_readonly.go",
+      "value": "if err := cmd.slots.Err(); err != nil {"
+    },
+    {
+      "path": "backend/internal/repository/concurrency_cache_readonly.go",
+      "value": "if err := cmd.live.Err(); err != nil {"
+    },
+    {
+      "path": "frontend/src/router/index.ts",
+      "value": "path: '/mcp/authorize'"
+    },
+    {
+      "path": "frontend/src/views/user/ProfileView.vue",
+      "value": "<MCPConnectionsCard />"
+    },
+    {
+      "path": ".github/workflows/backend-ci.yml",
+      "value": "MCP read-only and OAuth tests with isolated PostgreSQL"
+    },
+    {
+      "path": ".github/workflows/backend-ci.yml",
+      "value": "MCP PostgreSQL tests cannot skip or fail: "
+    },
+    {
+      "path": ".github/workflows/release.yml",
+      "value": "NODE_OPTIONS: --max-old-space-size=4096"
     }
   ],
   "forbidden_module_paths": [

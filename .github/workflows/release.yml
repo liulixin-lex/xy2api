@@ -101,6 +101,8 @@ jobs:
 
       - name: Build frontend
         working-directory: frontend
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: pnpm run build
 
       - name: Upload frontend artifact

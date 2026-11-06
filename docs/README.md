@@ -35,6 +35,7 @@
 | [`GROUP_CATEGORIES.md`](GROUP_CATEGORIES.md) | 分组分类（管理端整理，不影响调度、计费和用户端） |
 | [`UPSTREAM_BALANCE.md`](UPSTREAM_BALANCE.md) | 账号页「上游余额」列：sub2api 与 new-api 的识别和口径、每分钟采集、对上游的影响、new-api 访问令牌 |
 | [`ADMIN_PERMISSIONS.md`](ADMIN_PERMISSIONS.md) | 普通管理员与后台权限：模块「查看 / 管理」、资金与数据开关、显示上游地址与网络设置、只有超级管理员能做的事、保护措施与原因码、迁移 282 与回退 |
+| [`READ_ONLY_MCP_DESIGN.md`](READ_ONLY_MCP_DESIGN.md) | 只读 MCP 的源码审计、静态 ACL/source 映射、请求关联和安全边界；已随0.5.4发布，生产部署待单独验收 |
 | [`SUPPORT_TICKETS.md`](SUPPORT_TICKETS.md) | 客户服务（在线客服与工单）：两个开关、悬浮气泡与面板、客服收件箱与提醒、限制、权限与审计口径、图片保留与备份 |
 | [`OPENAI_TOTP.md`](OPENAI_TOTP.md) | OpenAI 账号 2FA 直接登录导入、专用加密凭据、轮换/恢复与安全导出；[Worker 部署](../deploy/OPENAI_TOTP_WORKER.md) |
 | [`CHANNEL_MONITOR_V1.md`](CHANNEL_MONITOR_V1.md) | 渠道监控 v1：判定口径（10 秒黄、30 秒红）、流式探测与请求形状、探测选号、调度可靠性 |
@@ -76,6 +77,7 @@
 | 变更 | 内容 | 状态 |
 |---|---|---|
 | [`encrypted-routing-20261105`](../openspec/changes/encrypted-routing-20261105/) | 零中断的加密态与路由：空白占位不算输出、Codex 输出前 ping 心跳、流内包装错误帧校验与路由、M3 状态类拒绝同号修复与一次换号、输出前流内 forbidden 软冷却、`resilience.*` 最小计数；[韧性规格](../openspec/changes/encrypted-routing-20261105/specs/gateway-resilience/spec.md) | 集成分支 `feat/encrypted-routing-20261105` 门禁全绿；推送、PR、发版与部署待用户授权 |
+| [`readonly-mcp-20261105`](../openspec/changes/readonly-mcp-20261105/) | 只读 MCP：按当前用户权限查询诊断数据；后端、授权界面和双路代码审查 | 已随0.5.4发布；生产验收待执行 |
 | [`group-quality-gate-v3-20261104`](../openspec/changes/group-quality-gate-v3-20261104/) | OpenAI 分组质量门槛 v3：账号级三维统计与软性三档、统一迁出、低倍率优先按组、判慢递增、同站断流暂停、输出后首败改绑、`usage_logs` 尝试级首字列；[韧性规格](../openspec/changes/group-quality-gate-v3-20261104/specs/gateway-resilience/spec.md) | 随 0.5.2 发布（PR #194，含会话状态约束）；升级继承关闭，按 `deploy/README.md` 逐组启用；上线后 48 小时与 7 天核对见其 tasks §6 |
 | [`add-support-chat-widget-20261031`](../openspec/changes/add-support-chat-widget-20261031/) | 客户服务：悬浮在线客服气泡、会话与图片、客服收件箱与提醒，工单并入 | 随 0.5.0 发布（PR #181） |
 | [`gate-post-output-attempts-20261102`](../openspec/changes/gate-post-output-attempts-20261102/) | 门槛漏记补齐：HTTP 输出后由快层确认的断流、停滞与带内失败事件补记为上游失败尝试，按发送边界去重并沿直接登记分类 | 基础变更随 0.5.1 发布（PR #188）；§4 带内失败补漏随 0.5.2 发布（PR #191）；上线后只读验收见其 tasks 与 `GATEWAY_RESILIENCE.md` §4.11 |
