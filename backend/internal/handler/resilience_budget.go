@@ -142,6 +142,14 @@ func resilienceRetryDelay(ctx context.Context, d time.Duration) time.Duration {
 // upstream host; accounts on the failed host join the exclusions. It
 // reports whether the request must end instead.
 func resilienceBeforeSwitch(ctx context.Context, hosts any, accountID int64, failoverErr *service.UpstreamFailoverError, excluded map[int64]struct{}) bool {
+	if failoverErr != nil && failoverErr.Reason == service.OpenAIStreamForbiddenReason {
+		if sharer, ok := hosts.(resilienceHostSharer); ok && excluded != nil {
+			for _, id := range sharer.ResilienceSameHostAccountIDs(ctx, accountID) {
+				excluded[id] = struct{}{}
+			}
+		}
+		return false
+	}
 	b := requestBudget(ctx)
 	if b == nil || failoverErr == nil || service.ClassifyFailoverError(failoverErr).Category != resilience.CategoryCapacityShed {
 		return false

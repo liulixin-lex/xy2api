@@ -1597,6 +1597,18 @@ func openAIStream403AccountFailure(payload []byte, message string) bool {
 	return isOpenAIUpstreamAccessStateError(message, payload) || openAIStreamCredentialAuthFailure(payload)
 }
 
+func openAIStream403TransientForbidden(payload []byte, message string) bool {
+	if openAIStreamFailedEventSemanticStatus(payload, message) != http.StatusForbidden ||
+		openAIStream403AccountFailure(payload, message) || isOpenAIStateRejection(payload, message) ||
+		isOpenAIContextWindowError(message, payload) {
+		return false
+	}
+	if hit, _, _ := detectOpenAICyberPolicy(payload); hit {
+		return false
+	}
+	return !classifyUpstreamHTTP(http.StatusForbidden, nil, payload, message).ContentPolicy()
+}
+
 func openAIStreamFailedEventPassthroughBody(payload []byte, failedMessage string) []byte {
 	if len(payload) == 0 || !gjson.ValidBytes(payload) {
 		return payload
@@ -1691,7 +1703,7 @@ func openAIStreamFailedEventShouldFailover(payload []byte, message string) bool 
 	}
 	semanticStatus := openAIStreamFailureStatus(payload, message)
 	if semanticStatus == http.StatusForbidden {
-		return openAIStream403AccountFailure(payload, message)
+		return openAIStream403AccountFailure(payload, message) || openAIStream403TransientForbidden(payload, message)
 	}
 	// A response.failed event is transported over HTTP 200. Prefer its semantic
 	// rate-limit status over a generic/invalid_request error type so it can enter
@@ -1749,7 +1761,7 @@ func openAIStreamErrorEventShouldFailover(payload []byte, message string) bool {
 	}
 	switch openAIStreamFailedEventSemanticStatus(payload, message) {
 	case http.StatusForbidden:
-		return openAIStream403AccountFailure(payload, message)
+		return openAIStream403AccountFailure(payload, message) || openAIStream403TransientForbidden(payload, message)
 	case http.StatusUnauthorized, http.StatusTooManyRequests, 529:
 		return true
 	}
@@ -1989,6 +2001,27 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverErrorWithModel(
 		classificationHeaders = nil
 	}
 	failoverErr := s.newOpenAIAccountFailoverErrorWithClassificationHeaders(account, statusCode, headers, classificationHeaders, payload, message, shouldDisable, retryableOnSameAccount)
+	if openAIStream403TransientForbidden(payload, message) {
+		failoverErr.Reason = OpenAIStreamForbiddenReason
+		failoverErr.Scope = GatewayFailureScopeRequest
+		failoverErr.RetryableOnSameAccount = false
+		failoverErr.RequestScopedTransient = false
+		model := firstNonEmpty(canonicalModel, gjson.GetBytes(payload, "model").String(), gjson.GetBytes(payload, "response.model").String())
+		if s != nil && account != nil && account.Platform == PlatformOpenAI && account.Type == AccountTypeAPIKey && resilience.Current().FailureOn() {
+			decision := s.recordOpenAIAccountModelTransientFailure(account, model, time.Now())
+			eventCtx := context.Background()
+			if c != nil && c.Request != nil {
+				eventCtx = c.Request.Context()
+			}
+			logger.FromContext(eventCtx).Info("resilience.forbidden_cooldown",
+				zap.Int64("account_id", account.ID),
+				zap.Int64("group_id", getOpenAIGroupIDFromContext(c)),
+				zap.String("model", openAIAccountModelTransientModel(model)),
+				zap.Int("failure_streak", decision.FailureStreak),
+				zap.Int64("cooldown_ms", decision.Cooldown.Milliseconds()),
+			)
+		}
+	}
 	if failoverErr.IsCredentialFailure() || failoverErr.RequestScopedTransient || openAIStreamBalanceFailure(payload) {
 		return failoverErr
 	}
