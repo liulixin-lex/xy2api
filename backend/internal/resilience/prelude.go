@@ -45,7 +45,7 @@ func ResponsesEventOutputDisposition(eventType string, payload []byte) Responses
 	if validObject {
 		if payloadType := strings.TrimSpace(root.Get("type").String()); payloadType != "" {
 			if strings.HasPrefix(declaredType, "response.") && payloadType != declaredType &&
-				!(declaredType == "response.metadata" && payloadType == "codex.response.metadata") {
+				(declaredType != "response.metadata" || payloadType != "codex.response.metadata") {
 				return responsesVisibleDisposition()
 			}
 			typ = payloadType
