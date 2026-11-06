@@ -1127,7 +1127,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 			frame := preOutputCommentFrame
 			if !clientOutputStarted {
-				frame = preOutputPingFrame
+				frame = responsesPreOutputHeartbeatFrame(c)
 			}
 			if stageFirstOutput {
 				// Bypass attempt-local buffered frames. Only turn-state may accompany

@@ -122,7 +122,7 @@ Responses 空白占位：`response.output_text.delta` / `.done`、output_text �
 
 本地断流时，已经判为可见但尚缺 SSE 结束空行的末尾事件仍按既有输出路径冲刷，随后补齐原有边界并发送合成 `response.failed`；截断 JSON 与未知载荷同样保留。只有纯开场、空白占位且没有待冲刷可见事件时，才丢弃暂存。
 
-Responses 输出前的原生、直通及请求级 preOutput 心跳统一为完整的 `event: ping\ndata: {"type":"ping"}\n\n`，每拍派发一个 SSE 事件，供按事件计时的客户端重置空闲计时。心跳仍扣除输出字节、不计首输出，停拍与帧边界保护保持；上游注释原样处理，Anthropic 与 Chat 的心跳不变。
+Responses 输出前的原生、直通及请求级 preOutput 共用客户端心跳选择：按既有 originator / User-Agent 判定为 Codex 的请求发送完整的 `event: ping\ndata: {"type":"ping"}\n\n`，每拍派发一个 SSE 事件以重置客户端空闲计时；其他客户端保留注释心跳，避免要求首事件为 created 的 SDK 拒绝该流。不会为此提前释放 created。心跳仍扣除输出字节、不计首输出，停拍与帧边界保护保持；上游注释原样处理，Anthropic 与 Chat 的心跳不变。
 
 直通的网关心跳独立节流，只有网关心跳成功写出才更新其时间；上游注释继续即时透传并扣除心跳字节，但不会推迟网关定时 ping。
 

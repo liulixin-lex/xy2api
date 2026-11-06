@@ -139,6 +139,7 @@ func TestOpenAIPassthroughStagingHeartbeatIsNotOutput(t *testing.T) {
 	withResilienceSettings(t, nil)
 	w := newGWWriter()
 	c := ptContext(w)
+	c.Request.Header.Set("originator", "codex_cli_rs")
 	up := newGWUpstream(nil)
 	done := ptRun(compatStreamService(nil, 10, 0, 1), c, up.response(nil))
 	up.send(t, ptCreated)
@@ -225,6 +226,7 @@ func TestOpenAIPassthroughHeartbeatWriteFailureIsClientGone(t *testing.T) {
 			w := newGWWriter()
 			w.fail = func(data string) bool { return data == string(preOutputPingFrame) }
 			c := ptContext(w)
+			c.Request.Header.Set("originator", "codex_cli_rs")
 			up := newGWUpstream(nil)
 			done := ptRun(compatStreamService(nil, 3, 0, 1), c, up.response(nil))
 			up.send(t, ptCreated)

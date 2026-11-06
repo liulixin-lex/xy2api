@@ -32,6 +32,7 @@ func nativeTurnStateService(keepalive, timeout int) *OpenAIGatewayService {
 func nativeTurnStateContext() (*gin.Context, *gwWriter) {
 	w := newGWWriter()
 	c := ptContext(w)
+	c.Request.Header.Set("originator", "codex_cli_rs")
 	c.Request.Header.Set("session_id", "sess-turn")
 	c.Set("api_key", &APIKey{ID: 31})
 	return c, w

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 )
@@ -27,6 +28,13 @@ var (
 	preOutputPingFrame    = []byte("event: ping\ndata: {\"type\":\"ping\"}\n\n")
 )
 
+func responsesPreOutputHeartbeatFrame(c *gin.Context) []byte {
+	if c != nil && c.Request != nil && openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) {
+		return preOutputPingFrame
+	}
+	return preOutputCommentFrame
+}
+
 // StartPreOutputKeepalive arms the delayed pre-output heartbeat of a
 // streaming request: if nothing reached the client firstDelay from now, the
 // SSE headers are committed and a protocol heartbeat follows every interval
@@ -41,8 +49,11 @@ func StartPreOutputKeepalive(c *gin.Context, protocol string, firstDelay, interv
 		return func() {}
 	}
 	frame := preOutputCommentFrame
-	if protocol == PreOutputProtocolAnthropic || protocol == PreOutputProtocolResponses {
+	switch protocol {
+	case PreOutputProtocolAnthropic:
 		frame = preOutputPingFrame
+	case PreOutputProtocolResponses:
+		frame = responsesPreOutputHeartbeatFrame(c)
 	}
 	stop := startSSEKeepalive(c, firstDelay, interval, frame, protocol)
 

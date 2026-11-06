@@ -24,6 +24,7 @@ func runNativeRuleStream(t *testing.T, keepalive int, beforeFailed func(w *gwWri
 	t.Helper()
 	w := newGWWriter()
 	c := ptContext(w)
+	c.Request.Header.Set("originator", "codex_cli_rs")
 	bindPassthroughRule(c, "openai", []string{"context_length_exceeded"}, 400)
 	up := newGWUpstream(nil)
 	done := make(chan error, 1)

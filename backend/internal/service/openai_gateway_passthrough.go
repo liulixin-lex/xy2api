@@ -2200,7 +2200,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	// 600~900s 才产出首个可见输出（每个 3~5 万 output token，上游其实算完了），
 	// 全部被中间 nginx 的 proxy_read_timeout(600s) 判超时回 504，用户一个字没拿到。
 	//
-	// 心跳写出的完整 SSE ping 事件同时做到三件事：
+	// 按入站客户端选择的心跳（Codex 为完整 SSE ping）同时做到三件事：
 	//   1. 提交 HTTP 响应头，让下游知道连接活着；
 	//   2. 刷新中间层的空闲超时（proxy_read_timeout 衡量的是两次读之间的间隔，
 	//      不是请求总时长），长推理因此不再被误杀；
@@ -2208,16 +2208,17 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	//      且心跳字节已由 OpenAICompactKeepaliveAdjustedWrittenSize 排除，
 	//      所以 pre-output failover 的能力完全不受影响（#3887 的记账在此复用）。
 	//
-	// 用带 Responses ping 的 startSSEKeepalive：compact 入口会检查
+	// 用带所选心跳帧的 startSSEKeepalive：compact 入口会检查
 	// compact 标记，而这里是普通 /v1/responses 透传。走到这一行时上游已回
 	// text/event-stream、SSE 响应头也已设好，处于流式上下文是确定的。
 	stopKeepalive := func() {}
+	heartbeatFrame := responsesPreOutputHeartbeatFrame(c)
 	keepaliveInterval := time.Duration(0)
 	if s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
 		keepaliveInterval = time.Duration(s.cfg.Gateway.StreamKeepaliveInterval) * time.Second
 	}
 	if keepaliveInterval > 0 && !guarded {
-		stopKeepalive = startSSEKeepalive(c, keepaliveInterval, keepaliveInterval, preOutputPingFrame, "")
+		stopKeepalive = startSSEKeepalive(c, keepaliveInterval, keepaliveInterval, heartbeatFrame, "")
 	}
 	// 任何返回路径都要停拍。Stop 与心跳 goroutine 之间有互斥锁，
 	// 返回后不会再有字节写出。
@@ -2823,7 +2824,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			if clientOutputStarted || clientDisconnected || failureDelivered || tick.Sub(lastGatewayHeartbeatAt) < keepaliveInterval {
 				return
 			}
-			writeHeartbeat(string(preOutputPingFrame))
+			writeHeartbeat(string(heartbeatFrame))
 			if !clientDisconnected {
 				// Upstream comments cannot postpone dispatchable gateway beats.
 				// Use the ticker time so write latency cannot skip the next beat.

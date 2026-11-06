@@ -232,6 +232,7 @@ func (w *keepaliveFailWriter) Write([]byte) (int, error) {
 
 func TestPreOutputResponsesHeartbeatDispatchesOneEventPerBeat(t *testing.T) {
 	c, recorder := newKeepaliveTestContext(t)
+	c.Request.Header.Set("originator", "codex_cli_rs")
 	stop := StartPreOutputKeepalive(c, PreOutputProtocolResponses, 0, 10*time.Millisecond)
 	defer stop()
 	waitCommitted(t, c)
@@ -240,6 +241,21 @@ func TestPreOutputResponsesHeartbeatDispatchesOneEventPerBeat(t *testing.T) {
 	body := recorder.Body.String()
 	require.GreaterOrEqual(t, strings.Count(body, string(preOutputPingFrame)), 2)
 	requireResponsesPingEvents(t, body)
+	require.Equal(t, -1, OpenAICompactKeepaliveAdjustedWrittenSize(c))
+	require.False(t, openAIStreamClientOutputStarted(c, false))
+}
+
+func TestPreOutputResponsesNonCodexHeartbeatRemainsComment(t *testing.T) {
+	c, recorder := newKeepaliveTestContext(t)
+	c.Request.Header.Set("User-Agent", "OpenAI/Python 2.0.0")
+	stop := StartPreOutputKeepalive(c, PreOutputProtocolResponses, 0, 10*time.Millisecond)
+	defer stop()
+	waitCommitted(t, c)
+	stop()
+	body := recorder.Body.String()
+	beats := strings.Count(body, string(preOutputCommentFrame))
+	require.Positive(t, beats)
+	require.Equal(t, strings.Repeat(string(preOutputCommentFrame), beats), body)
 	require.Equal(t, -1, OpenAICompactKeepaliveAdjustedWrittenSize(c))
 	require.False(t, openAIStreamClientOutputStarted(c, false))
 }
