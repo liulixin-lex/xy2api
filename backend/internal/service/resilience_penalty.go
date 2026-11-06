@@ -443,6 +443,16 @@ func ClassifyFailoverError(e *UpstreamFailoverError) resilience.Result {
 	if e.RequestScopedTransient && !resilience.Current().DecisionV2On() {
 		return resilience.Result{Category: resilience.CategoryCapacityShed, Reason: "request_scoped"}
 	}
+	if e.isOpenAIWrappedRequestRejection() {
+		// Use the request predicates' status for text-only safety refusals, while
+		// preserving the validated upstream status on the error itself.
+		msg := strings.TrimSpace(extractUpstreamErrorMessage(e.ResponseBody))
+		result := classifyUpstreamHTTP(http.StatusForbidden, e.ResponseHeaders, e.ResponseBody, msg)
+		if result.Category != resilience.CategoryClientError {
+			return resilience.Result{Category: resilience.CategoryClientError, Reason: "wrapped_request_rejection"}
+		}
+		return result
+	}
 	if e.IsCredentialFailure() {
 		return resilience.Result{Category: resilience.CategoryAuth, Reason: "credential_failure"}
 	}

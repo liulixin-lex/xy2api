@@ -1539,14 +1539,20 @@ func openAIStream403AccountFailure(payload []byte, message string) bool {
 
 func openAIStream403TransientForbidden(payload []byte, message string) bool {
 	if openAIStreamFailedEventSemanticStatus(payload, message) != http.StatusForbidden ||
-		openAIStream403AccountFailure(payload, message) || isOpenAIStateRejection(payload, message) ||
-		isOpenAIContextWindowError(message, payload) {
+		openAIStream403AccountFailure(payload, message) {
 		return false
+	}
+	return !openAIStreamRequestRejected(payload, message)
+}
+
+func openAIStreamRequestRejected(payload []byte, message string) bool {
+	if isOpenAIStateRejection(payload, message) || isOpenAIContextWindowError(message, payload) {
+		return true
 	}
 	if hit, _, _ := detectOpenAICyberPolicy(payload); hit {
-		return false
+		return true
 	}
-	return !classifyUpstreamHTTP(http.StatusForbidden, nil, payload, message).ContentPolicy()
+	return classifyUpstreamHTTP(http.StatusForbidden, nil, payload, message).ContentPolicy()
 }
 
 func openAIStreamFailedEventPassthroughBody(payload []byte, failedMessage string) []byte {
@@ -1972,6 +1978,13 @@ func (s *OpenAIGatewayService) applyOpenAIStreamForbiddenSoftCooldown(
 		forbidden = openAIStream403TransientForbidden(payload, message)
 	}
 	if !forbidden || c == nil || IsResponseCommitted(c) {
+		return
+	}
+	// Relay authentication statuses do not override a rejection of this request.
+	// payload is already the decoded classification body on the wrapped path.
+	if failoverErr.WrappedStatus != 0 && openAIStreamRequestRejected(payload, message) {
+		failoverErr.Scope = GatewayFailureScopeRequest
+		failoverErr.NextAccountAction = NextAccountStop
 		return
 	}
 	failoverErr.Reason = OpenAIStreamForbiddenReason

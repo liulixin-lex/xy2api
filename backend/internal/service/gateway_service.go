@@ -760,12 +760,17 @@ func (e *UpstreamFailoverError) IsCredentialFailure() bool {
 	return e != nil && e.Stage == GatewayFailureStageAccountAuth
 }
 
+func (e *UpstreamFailoverError) isOpenAIWrappedRequestRejection() bool {
+	return e != nil && (e.WrappedStatus == http.StatusUnauthorized || e.WrappedStatus == http.StatusForbidden) &&
+		e.Scope == GatewayFailureScopeRequest && e.NextAccountAction == NextAccountStop
+}
+
 // ShouldReportAccountScheduleFailure prevents provider- and request-scoped
 // credential failures from being misattributed to the selected account. Legacy
 // and inference failures retain their existing scheduler-health behavior.
 func (e *UpstreamFailoverError) ShouldReportAccountScheduleFailure() bool {
 	// Forbidden intentionally uses soft cooldown/session streaks without also reporting scheduler-health failure.
-	if e == nil || e.IsCapabilityStreamOnly() || e.Reason == OpenAIStreamForbiddenReason {
+	if e == nil || e.IsCapabilityStreamOnly() || e.Reason == OpenAIStreamForbiddenReason || e.isOpenAIWrappedRequestRejection() {
 		return false
 	}
 	return !e.IsCredentialFailure() || e.Scope == GatewayFailureScopeAccount

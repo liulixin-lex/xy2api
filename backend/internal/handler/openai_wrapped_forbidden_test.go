@@ -21,12 +21,42 @@ import (
 
 type wrappedForbiddenUpstream struct {
 	service.HTTPUpstream
+	payload string
 }
 
-func (*wrappedForbiddenUpstream) Do(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+func (u *wrappedForbiddenUpstream) Do(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 	// Only the validated wrapper carries a status; the inner body is generic.
-	body := "event: error\ndata: " + `{"type":"proxy.upstream_error","status":403,"upstream_body":{"error":{"code":"upstream_error","message":"upstream rejected"}}}` + "\n\n"
+	payload := u.payload
+	if payload == "" {
+		payload = `{"type":"proxy.upstream_error","status":403,"upstream_body":{"error":{"code":"upstream_error","message":"upstream rejected"}}}`
+	}
+	body := "event: error\ndata: " + payload + "\n\n"
 	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
+}
+
+func TestOpenAIWrappedRequestRejectionStopsFailover(t *testing.T) {
+	withHandlerResilience(t, nil)
+	core, logs := observer.New(zap.InfoLevel)
+	ctx := logger.IntoContext(budgetCtx(t, resilience.KindText, 7), zap.New(core))
+	c, recorder := newOpenAIResponsesFailoverTestContext(t, ctx)
+	upstream := &wrappedForbiddenUpstream{payload: `{"type":"proxy.upstream_error","status":403,"upstream_body":{"error":{"code":"content_policy_violation","message":"request rejected"}}}`}
+	gateway := service.NewOpenAIGatewayService(nil, nil, nil, nil, nil, nil, nil, &config.Config{RunMode: config.RunModeSimple}, nil, nil, nil, nil, nil, upstream, nil, nil, nil, nil, nil, nil, nil, nil)
+	account := &service.Account{ID: 1, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test-key"}}
+	_, err := gateway.Forward(ctx, c, account, []byte(`{"model":"gpt-5.1","stream":false,"input":"hello"}`))
+	var failure *service.UpstreamFailoverError
+	require.ErrorAs(t, err, &failure)
+	require.NotEqual(t, service.OpenAIStreamForbiddenReason, failure.Reason)
+	require.False(t, failure.ShouldReportAccountScheduleFailure())
+	require.Equal(t, resilience.CategoryClientError, service.ClassifyFailoverError(failure).Category)
+	state := NewFailoverState(10, false)
+	hosts := &hostSharingUnscheduler{sameHost: map[int64][]int64{1: {2}}}
+	require.Equal(t, FailoverExhausted, state.HandleFailoverError(ctx, hosts, account.ID, service.PlatformOpenAI, 3, failure))
+	require.Empty(t, state.FailedAccountIDs, "request rejection must stop before excluding accounts or hosts")
+	require.Empty(t, logs.FilterMessage("resilience.forbidden_cooldown").All())
+	handler := &OpenAIGatewayHandler{gatewayService: gateway}
+	handler.handleFailoverExhausted(c, failure, false)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Equal(t, "content_policy_violation", gjson.Get(recorder.Body.String(), "error.code").String())
 }
 
 func TestOpenAIWrappedForbiddenFailoverChain(t *testing.T) {

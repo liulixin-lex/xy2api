@@ -1347,7 +1347,7 @@
     },
     {
       "path": "backend/internal/service/gateway_service.go",
-      "value": "if e == nil || e.IsCapabilityStreamOnly() || e.Reason == OpenAIStreamForbiddenReason {"
+      "value": "if e == nil || e.IsCapabilityStreamOnly() || e.Reason == OpenAIStreamForbiddenReason || e.isOpenAIWrappedRequestRejection() {"
     },
     {
       "path": "backend/internal/service/openai_gateway_grok.go",
