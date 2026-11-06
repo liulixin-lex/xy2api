@@ -4062,6 +4062,14 @@
     {
       "path": "backend/internal/service/openai_model_availability_test.go",
       "value": "func TestOpenAIModelAvailabilityPreservesRequestRejections(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/openai_wrapped_upstream_error.go",
+      "value": "zap.String(\"status_json_type\", statusType)"
+    },
+    {
+      "path": "backend/internal/service/openai_wrapped_malformed_routing_test.go",
+      "value": "func TestOpenAIWrappedMalformedSchemaDoesNotLogValues(t *testing.T) {"
     }
   ],
   "forbidden_module_paths": [
