@@ -91,12 +91,13 @@ func TestOpenAIStateRejectionRepairBoundary(t *testing.T) {
 	for _, tc := range []struct {
 		name, code, message string
 		repair              bool
+		m3Cause             string
 	}{
-		{"S1", "client_tool_continuation_unavailable", "opaque conversation state", false},
-		{"S2", "invalid_encrypted_content", "encrypted content is invalid for this conversation", true},
-		{"S6", "encrypted_context_invalid", "neutral", true},
-		{"S3", "invalid_encrypted_content", "encrypted function output content could not be decrypted", false},
-		{"S4", "invalid_encrypted_content", "encrypted content could not be verified for item amsg_1", false},
+		{"S1", "client_tool_continuation_unavailable", "opaque conversation state", false, ""},
+		{"S2", "invalid_encrypted_content", "encrypted content is invalid for this conversation", true, ""},
+		{"S6", "encrypted_context_invalid", "neutral", true, ""},
+		{"S3", "invalid_encrypted_content", "encrypted function output content could not be decrypted", false, "no_growth"},
+		{"S4", "invalid_encrypted_content", "encrypted content could not be verified for item amsg_1", false, "item_not_unique"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			withResilienceSettings(t, nil)
@@ -113,7 +114,14 @@ func TestOpenAIStateRejectionRepairBoundary(t *testing.T) {
 				require.Error(t, err)
 				require.Len(t, upstream.bodies, 1)
 				var failover *UpstreamFailoverError
-				require.NotErrorAs(t, err, &failover)
+				if tc.m3Cause != "" {
+					// FINAL §3.3 step 2 switches accounts when M3 cannot replace a target slot.
+					require.ErrorAs(t, err, &failover)
+					require.Equal(t, OpenAIStateRepairReason, failover.Reason)
+					require.Equal(t, tc.m3Cause, failover.M3Cause)
+				} else {
+					require.NotErrorAs(t, err, &failover)
+				}
 				require.Equal(t, upstream.bodies[0], openAIRequestRepairFrom(req.c).body)
 				require.True(t, gjson.GetBytes(upstream.bodies[0], "input.0.encrypted_content").Exists())
 			}
