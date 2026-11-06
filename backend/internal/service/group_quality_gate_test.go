@@ -20,16 +20,18 @@ import (
 )
 
 type qualityTestRepository struct {
-	policies       GroupQualityGatePolicies
-	members        map[int64][]Account
-	observations   []GroupQualityObservation
-	observedAt     time.Time
-	usageWrites    []GroupQualityUsageWrite
-	observationErr error
-	froms          []time.Time
-	memberLoads    int
-	deadline       bool
-	onLoad         func(context.Context)
+	policies        GroupQualityGatePolicies
+	members         map[int64][]Account
+	observations    []GroupQualityObservation
+	observedAt      time.Time
+	observedAtFunc  func(time.Time) time.Time
+	usageWrites     []GroupQualityUsageWrite
+	observationErr  error
+	replayLoadDelay time.Duration
+	froms           []time.Time
+	memberLoads     int
+	deadline        bool
+	onLoad          func(context.Context)
 }
 
 func (r *qualityTestRepository) LoadPolicies(context.Context) (GroupQualityGatePolicies, error) {
@@ -64,19 +66,32 @@ func (r *qualityTestRepository) LoadObservations(_ context.Context, _ []int64, f
 		}
 	}
 	observedAt := r.observedAt
+	if r.observedAtFunc != nil {
+		observedAt = r.observedAtFunc(to)
+	}
 	if observedAt.IsZero() {
 		observedAt = to.Add(-time.Second)
 	}
 	return out, observedAt, r.observationErr
 }
-func (r *qualityTestRepository) LoadObservationsForReplay(_ context.Context, _ []int64, from, to time.Time) (GroupQualityReplayData, error) {
+func (r *qualityTestRepository) LoadObservationsForReplay(ctx context.Context, _ []int64, from, to time.Time) (GroupQualityReplayData, error) {
+	if r.replayLoadDelay > 0 {
+		select {
+		case <-time.After(r.replayLoadDelay):
+		case <-ctx.Done():
+			return GroupQualityReplayData{}, ctx.Err()
+		}
+	}
+	if r.observationErr != nil {
+		return GroupQualityReplayData{}, r.observationErr
+	}
 	out := []GroupQualityObservation{}
 	for _, o := range r.observations {
 		if !o.At.Before(from) && o.At.Before(to) {
 			out = append(out, o)
 		}
 	}
-	return GroupQualityReplayData{Observations: out, UsageWrites: slices.Clone(r.usageWrites)}, r.observationErr
+	return GroupQualityReplayData{Observations: out, UsageWrites: slices.Clone(r.usageWrites)}, nil
 }
 
 type qualityTestAccounts struct {
@@ -202,6 +217,16 @@ func qualityReplayCacheFailures(accountID int64, now time.Time, count int) []Gro
 	return observations
 }
 
+func comparableQualityState(state groupQualityAccountState) groupQualityAccountState {
+	state.TTFT.LastVote = time.Time{}
+	state.Error.LastVote = time.Time{}
+	state.Cache.LastVote = time.Time{}
+	state.TTFT.LastFail = time.Time{}
+	state.Error.LastFail = time.Time{}
+	state.Cache.LastFail = time.Time{}
+	return state
+}
+
 func TestGroupQualityWarmStartRestoresErrorAndCacheStateWithoutTierHistory(t *testing.T) {
 	e := newQualityTestEnv(t)
 	e.svc.processStartedAt = e.base
@@ -216,6 +241,9 @@ func TestGroupQualityWarmStartRestoresErrorAndCacheStateWithoutTierHistory(t *te
 	require.Equal(t, "fail", member.State.Error.state())
 	require.Equal(t, "fail", member.State.Cache.state())
 	require.Equal(t, 40, member.Metric.ErrorSamples)
+	require.False(t, member.State.Error.LastFail.IsZero())
+	require.True(t, member.State.Error.hasBad(e.base))
+	require.NotNil(t, qualityAccountView(member, e.base).Error.BadUntil)
 	require.Equal(t, 0, strings.Count(e.logs.String(), `"msg":"group_quality_gate.tier"`))
 	require.Equal(t, 1, strings.Count(e.logs.String(), `"msg":"group_quality_gate.warm_start"`))
 }
@@ -248,62 +276,81 @@ func TestGroupQualityWarmStartMatchesPrewarmedOnlineState(t *testing.T) {
 	online.repo.observations = slices.Clone(warm.repo.observations)
 	online.repo.usageWrites = slices.Clone(warm.repo.usageWrites)
 	online.svc.processStartedAt = online.base.Add(-8 * time.Hour)
-	online.evaluate(t, -2*time.Minute)
-	online.evaluate(t, -time.Minute)
-	require.Equal(t, online.member(1).State, warm.member(1).State)
+	for offset := -8 * time.Hour; offset <= 0; offset += time.Minute {
+		online.evaluate(t, offset)
+	}
+	require.Equal(t, comparableQualityState(online.member(1).State), comparableQualityState(warm.member(1).State))
 	require.Equal(t, online.member(1).Metric, warm.member(1).Metric)
 	require.Equal(t, online.member(1).Tier, warm.member(1).Tier)
 }
 
 func TestGroupQualityWarmStartSpanOutsideStickyFailIsOptimistic(t *testing.T) {
-	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
-	policy := defaultGroupQualityGatePolicy()
-	policy.V3.Enabled = true
-	members := map[int64][]Account{7: {{ID: 1, Platform: PlatformOpenAI}}}
-	writes := qualityReplayUsageWrites(now)
-	data := GroupQualityReplayData{UsageWrites: writes, Observations: []GroupQualityObservation{{AccountID: 1, At: now.Add(-7 * time.Hour), SoftFailure: true}}}
-	snapshot, _, err := replayGroupQualityState(context.Background(), now, now.Add(-8*time.Hour), GroupQualityGatePolicies{Groups: map[string]GroupQualityGatePolicy{"7": policy}}, members, map[int64]bool{7: true}, map[int64]time.Time{}, data)
-	require.NoError(t, err)
-	require.Equal(t, 0, snapshot.Members[7][1].Tier)
-	onlineState := groupQualityAccountState{Error: groupQualityDimensionState{State: "fail", LastFail: now.Add(-2 * time.Minute)}}
-	middleZone := groupQualityMetrics{ErrorSamples: 20, Failures: 2, ErrorRate: qualityFloatPtr(.1)}
-	onlineState = evaluateGroupQualityMember(now.Add(-time.Minute), *policy.V3, middleZone, nil, onlineState)
-	onlineState = evaluateGroupQualityMember(now, *policy.V3, middleZone, nil, onlineState)
-	replayed := snapshot.Members[7][1].State
-	require.Equal(t, "fail", onlineState.Error.state())
-	require.NotEqual(t, onlineState.Error.state(), replayed.Error.state())
-	require.Equal(t, onlineState.TTFT.state(), replayed.TTFT.state())
-	require.Equal(t, onlineState.Cache.state(), replayed.Cache.state())
-	require.LessOrEqual(t, snapshot.Members[7][1].Tier, groupQualityTier(onlineState, *policy.V3, false, now))
+	dataEnv := newQualityTestEnv(t)
+	dataEnv.events(1, dataEnv.base.Add(-7*time.Hour), 20, 5)
+	for at := dataEnv.base.Add(-7*time.Hour + time.Minute); at.Before(dataEnv.base.Add(-10 * time.Minute)); at = at.Add(time.Minute) {
+		dataEnv.events(1, at, 20, 2)
+	}
+
+	warm := newQualityTestEnv(t)
+	warm.repo.observations = slices.Clone(dataEnv.repo.observations)
+	warm.repo.usageWrites = qualityReplayUsageWrites(warm.base)
+	require.True(t, warm.svc.warmStart(context.Background()))
+
+	online := newQualityTestEnv(t)
+	online.repo.observations = slices.Clone(dataEnv.repo.observations)
+	online.svc.processStartedAt = online.base.Add(-8 * time.Hour)
+	for offset := -8 * time.Hour; offset <= 0; offset += time.Minute {
+		online.evaluate(t, offset)
+	}
+	require.Equal(t, "fail", online.member(1).State.Error.state())
+	require.NotEqual(t, online.member(1).State.Error.state(), warm.member(1).State.Error.state())
+	require.LessOrEqual(t, warm.member(1).Tier, online.member(1).Tier)
 }
 
 func TestGroupQualityWarmStartHonorsResetAt(t *testing.T) {
 	e := newQualityTestEnv(t)
 	e.svc.processStartedAt = e.base
-	reset := e.base.Add(-2 * time.Hour)
+	reset := e.base.Add(-5 * time.Minute)
 	e.repo.members[7][0].Extra = map[string]any{"group_quality_reset_at": reset.Format(time.RFC3339Nano)}
 	e.repo.usageWrites = qualityReplayUsageWrites(e.base)
-	e.events(1, e.base.Add(-3*time.Hour), 20, 5)
 	e.events(1, e.base.Add(-10*time.Minute), 20, 5)
 	require.True(t, e.svc.warmStart(context.Background()))
-	require.Equal(t, 20, e.member(1).Metric.ErrorSamples)
-	require.Equal(t, "fail", e.member(1).State.Error.state())
+	require.Zero(t, e.member(1).Metric.ErrorSamples)
+	require.NotEqual(t, "fail", e.member(1).State.Error.state())
 	require.Equal(t, reset, e.member(1).State.ResetAt)
 }
 
 func TestGroupQualityWarmStartSkipsStaleCutoffs(t *testing.T) {
 	e := newQualityTestEnv(t)
-	e.repo.usageWrites = []GroupQualityUsageWrite{{Minute: e.base.Add(-6 * time.Hour), LastWrite: e.base.Add(-6 * time.Hour)}}
+	e.svc.processStartedAt = e.base.Add(-8 * time.Hour)
 	e.events(1, e.base.Add(-10*time.Minute), 20, 5)
+	for minute := e.base.Add(-groupQualityReplayWindow - groupQualityReplayLookback); minute.Before(e.base.Add(-21 * time.Minute)); minute = minute.Add(time.Minute) {
+		e.repo.usageWrites = append(e.repo.usageWrites, GroupQualityUsageWrite{Minute: minute, LastWrite: minute.Add(10 * time.Second)})
+	}
 	ctx := context.Background()
 	policies, err := e.repo.LoadPolicies(ctx)
 	require.NoError(t, err)
 	ids, resets := groupQualityMemberIDs(e.repo.members)
 	data, err := e.repo.LoadObservationsForReplay(ctx, ids, e.base.Add(-groupQualityReplayWindow-groupQualityReplayLookback), e.base)
 	require.NoError(t, err)
-	_, summary, err := replayGroupQualityState(ctx, e.base, e.svc.processStartedAt, policies, e.repo.members, map[int64]bool{7: true}, resets, data)
+	snapshot, summary, err := replayGroupQualityState(ctx, e.base, e.svc.processStartedAt, policies, e.repo.members, map[int64]bool{7: true}, resets, data)
 	require.NoError(t, err)
 	require.Positive(t, summary.staleCutoffs)
+	require.NotEqual(t, "fail", snapshot.Members[7][1].State.Error.state(), "stale cutoffs must not vote the failure")
+
+	online := newQualityTestEnv(t)
+	online.svc.processStartedAt = online.base.Add(-8 * time.Hour)
+	online.repo.observations = slices.Clone(e.repo.observations)
+	online.repo.observedAtFunc = func(to time.Time) time.Time {
+		if to.Before(online.base.Add(-15 * time.Minute)) {
+			return to.Add(-time.Second)
+		}
+		return online.base.Add(-21 * time.Minute)
+	}
+	for offset := -8 * time.Hour; offset <= 0; offset += time.Minute {
+		online.evaluate(t, offset)
+	}
+	require.Equal(t, comparableQualityState(online.member(1).State), comparableQualityState(snapshot.Members[7][1].State))
 }
 
 func TestGroupQualityWarmStartFailureKeepsEmptySnapshot(t *testing.T) {
@@ -322,6 +369,17 @@ func TestGroupQualityWarmStartFailureKeepsEmptySnapshot(t *testing.T) {
 	})
 }
 
+func TestGroupQualityWarmStartSlowLoadTimesOutBeforePublishing(t *testing.T) {
+	e := newQualityTestEnv(t)
+	e.repo.replayLoadDelay = 20 * time.Millisecond
+	e.repo.observationErr = context.DeadlineExceeded
+	started := time.Now()
+	require.True(t, e.svc.warmStart(context.Background()))
+	require.GreaterOrEqual(t, time.Since(started), 20*time.Millisecond)
+	require.Empty(t, e.svc.snapshot.Load().Members)
+	require.Contains(t, e.logs.String(), `"msg":"group_quality_gate.warm_start_failed"`)
+}
+
 func TestGroupQualityWarmStartLeavesTTFTBeforeProcessStartIneligible(t *testing.T) {
 	now := eNowForQualityTest()
 	ms := int64(1000)
@@ -332,6 +390,24 @@ func TestGroupQualityWarmStartLeavesTTFTBeforeProcessStartIneligible(t *testing.
 	metrics, composition := calculateGroupQualityMetrics(prepared, now, groupQualityBaselines{groupQualityCells(observation)[3]: 1000}, failed, soft, map[int64]bool{7: true})
 	require.Zero(t, metrics[1].TTFTSamples)
 	require.Empty(t, composition)
+	boundary := observation
+	boundary.At = now.Add(-time.Hour + time.Minute)
+	boundary.PreviousAt = now.Add(-time.Hour - time.Second)
+	prepared, _, _ = prepareGroupQualityObservations([]GroupQualityObservation{boundary}, now, now.Add(-time.Hour), nil)
+	require.Len(t, prepared, 1)
+	require.False(t, prepared[0].TTFTEligible, "a continuation whose predecessor predates process start is not a TTFT sample")
+}
+
+func TestGroupQualityLagBoundaryReachesCacheMetrics(t *testing.T) {
+	now := eNowForQualityTest()
+	threeMinute := qualitySpeedObservation(1, 1, now.Add(-time.Minute), 1000)
+	threeMinute.PreviousAt = now.Add(-4 * time.Minute)
+	sixMinute := qualitySpeedObservation(2, 1, now.Add(-2*time.Minute), 1000)
+	sixMinute.PreviousAt = now.Add(-8 * time.Minute)
+	sixMinute.StrictContinuation = false
+	prepared, failed, soft := prepareGroupQualityObservations([]GroupQualityObservation{threeMinute, sixMinute}, now, now.Add(-time.Hour), nil)
+	metrics, _ := calculateGroupQualityMetrics(prepared, now, groupQualityBaselines{groupQualityCells(threeMinute)[3]: 1000}, failed, soft, map[int64]bool{7: true})
+	require.Equal(t, 1, metrics[1].CacheSamples)
 }
 
 func eNowForQualityTest() time.Time {
