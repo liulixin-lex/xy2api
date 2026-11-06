@@ -15,16 +15,23 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 type m3MessageEchoUpstream struct {
 	service.HTTPUpstream
 	calls     int
 	aggregate bool
+	bodies    [][]byte
 }
 
-func (u *m3MessageEchoUpstream) Do(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+func (u *m3MessageEchoUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 	u.calls++
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	u.bodies = append(u.bodies, body)
 	if u.aggregate {
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -60,6 +67,11 @@ func TestOpenAIM3AggregateTerminalNeverEchoesCiphertext(t *testing.T) {
 			require.ErrorAs(t, err, &failure)
 			require.Equal(t, service.OpenAIStateRepairReason, failure.Reason)
 			require.Equal(t, 2, upstream.calls)
+			require.Len(t, upstream.bodies, 2)
+			require.Equal(t, "amsg_safe", gjson.GetBytes(upstream.bodies[1], "input.0.id").String())
+			require.JSONEq(t, `{"type":"input_text","text":"[encrypted content omitted]"}`, gjson.GetBytes(upstream.bodies[1], "input.0.content.0").Raw)
+			require.False(t, gjson.GetBytes(upstream.bodies[1], "input.0.content.0.encrypted_content").Exists())
+			require.NotContains(t, string(upstream.bodies[1]), "cipher-must-not-leak")
 			require.Equal(t, "The upstream rejected the derived encrypted-state request", failure.ClientMessage)
 			require.Empty(t, failure.ResponseBody)
 			(&OpenAIGatewayHandler{gatewayService: gateway}).handleFailoverExhausted(c, failure, false)
