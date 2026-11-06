@@ -1538,7 +1538,14 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			if stagePrelude && !clientOutputStarted {
 				frame = ":\n\n"
 			}
-			n, err := fmt.Fprint(c.Writer, frame)
+			var err error
+			if stagePrelude && !clientOutputStarted {
+				_, err = writeOpenAIStreamKeepalive(c, c.Writer, []byte(frame), true)
+			} else {
+				var n int
+				n, err = fmt.Fprint(c.Writer, frame)
+				recordOpenAIStreamKeepaliveBytes(c, n)
+			}
 			if err != nil {
 				// Client disconnected
 				logger.L().Info("openai messages stream: client disconnected during keepalive",
@@ -1549,7 +1556,6 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			}
 			// xy2api resilience (review G1): a heartbeat, not output; before
 			// the first upstream line the attempt may still fail over.
-			recordOpenAIStreamKeepaliveBytes(c, n)
 			if !stagePrelude {
 				clientOutputStarted = true
 			}

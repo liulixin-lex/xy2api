@@ -228,7 +228,7 @@ func (st *gatewayConvertStream) run() gatewayConvertOutcome {
 			if st.released || time.Since(st.lastWrite) < keepaliveInterval {
 				continue
 			}
-			st.heartbeat(":\n\n")
+			st.heartbeat(":\n\n", true)
 		}
 	}
 }
@@ -256,7 +256,7 @@ func (st *gatewayConvertStream) onLine(line string) (gatewayConvertOutcome, bool
 	// Upstream liveness reaches the client at once while the opening is held
 	// (review R2-P1③); the comment text itself stays private.
 	if st.guarded && !st.released && strings.HasPrefix(line, ":") {
-		st.heartbeat(":\n\n")
+		st.heartbeat(":\n\n", false)
 	}
 	return gatewayConvertOutcome{}, false
 }
@@ -273,11 +273,11 @@ func (st *gatewayConvertStream) onEvent(name, payload string) (gatewayConvertOut
 	}
 	if event.Type == "ping" {
 		if st.protocol == gatewayConvertChat {
-			st.heartbeat(": ping\n\n")
+			st.heartbeat(": ping\n\n", false)
 		} else {
 			st.hooks.convert(&event, payload, false)
 			if st.guarded && !st.released {
-				st.heartbeat(":\n\n")
+				st.heartbeat(":\n\n", false)
 			}
 		}
 		return gatewayConvertOutcome{}, !st.guarded && st.gone
@@ -566,14 +566,20 @@ func (st *gatewayConvertStream) write(frames []string) {
 }
 
 // heartbeat writes a comment; it commits 200 but is no output.
-func (st *gatewayConvertStream) heartbeat(frame string) {
+func (st *gatewayConvertStream) heartbeat(frame string, refreshClock bool) {
 	if st.gone {
 		return
 	}
 	st.headers(false)
-	n, err := st.c.Writer.Write([]byte(frame))
-	if st.guarded {
-		recordOpenAIStreamKeepaliveBytes(st.c, n)
+	var n int
+	var err error
+	if st.guarded && !st.released {
+		n, err = writeOpenAIStreamKeepalive(st.c, st.c.Writer, []byte(frame), refreshClock)
+	} else {
+		n, err = st.c.Writer.Write([]byte(frame))
+		if st.guarded {
+			recordOpenAIStreamKeepaliveBytes(st.c, n)
+		}
 	}
 	if err == nil && n != len(frame) {
 		err = io.ErrShortWrite

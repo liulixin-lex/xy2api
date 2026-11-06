@@ -1343,7 +1343,14 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			}
 			// Send SSE comment as keepalive
 			writeStableStreamHeaders(c)
-			n, err := fmt.Fprint(c.Writer, ":\n\n")
+			var err error
+			if stagePrelude && !clientOutputStarted {
+				_, err = writeOpenAIStreamKeepalive(c, c.Writer, []byte(":\n\n"), true)
+			} else {
+				var n int
+				n, err = fmt.Fprint(c.Writer, ":\n\n")
+				recordOpenAIStreamKeepaliveBytes(c, n)
+			}
 			if err != nil {
 				logger.L().Info("openai chat_completions stream: client disconnected during keepalive",
 					zap.String("request_id", requestID),
@@ -1353,7 +1360,6 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			}
 			// xy2api resilience (review G1): a heartbeat, not output; before
 			// the first upstream line the attempt may still fail over.
-			recordOpenAIStreamKeepaliveBytes(c, n)
 			c.Writer.Flush()
 		}
 	}

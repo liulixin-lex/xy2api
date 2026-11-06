@@ -1157,7 +1157,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 						s.noteOpenAICodexTurnStateProvenance(c, account)
 					}
 				}
-				_, err := writeOpenAIStreamKeepalive(c, w, frame)
+				_, err := writeOpenAIStreamKeepalive(c, w, frame, true)
 				if err != nil {
 					clientDisconnected = true
 					logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming, continuing to drain upstream for billing")
