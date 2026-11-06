@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,6 +18,11 @@ import (
 )
 
 const openAITerminalRejectionCapacity = 16384
+
+var (
+	openAITerminalRequestIDPattern = regexp.MustCompile(`(?i)\b(?:request|req)[ _-]?id\b\s*[:=]\s*["']?[^"'\s,;]+`)
+	openAITerminalVariablePattern  = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b|\b[0-9a-f]{16,}\b|[0-9]+`)
+)
 
 // One key per account streak and one per rejection's host evidence. Both share
 // a bounded LRU; only digests of messages are retained. State is instance-local.
@@ -156,6 +162,9 @@ func openAITerminalRejectionDigest(status int, headers http.Header, body []byte)
 	if message == "" && !gjson.ValidBytes(body) {
 		message = string(body)
 	}
+	if resilience.IsContextWindowError(message, body) {
+		return empty, false
+	}
 	result := classifyUpstreamHTTP(status, headers, body, message)
 	if result.Category != resilience.CategoryClientError || result.ContentPolicy() ||
 		classifyUpstreamHTTP(http.StatusForbidden, headers, body, message).ContentPolicy() {
@@ -177,7 +186,13 @@ func openAITerminalRejectionDigest(status int, headers http.Header, body []byte)
 	if resilience.IsKnownClientErrorCode(code) {
 		return empty, false
 	}
-	message = strings.Join(strings.Fields(strings.ToLower(SanitizeUpstreamErrorMessage(message))), " ")
+	message = normalizeOpenAITerminalRejectionMessage(message)
 	code = strings.ToLower(strings.TrimSpace(code))
 	return sha256.Sum256([]byte(strconv.Itoa(status) + "\x00" + code + "\x00" + message)), true
+}
+
+func normalizeOpenAITerminalRejectionMessage(message string) string {
+	message = strings.Join(strings.Fields(strings.ToLower(SanitizeUpstreamErrorMessage(message))), " ")
+	message = openAITerminalRequestIDPattern.ReplaceAllString(message, "request_id=[id]")
+	return openAITerminalVariablePattern.ReplaceAllString(message, "[number]")
 }

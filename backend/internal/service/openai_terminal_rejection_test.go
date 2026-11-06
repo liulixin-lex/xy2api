@@ -129,6 +129,46 @@ func TestOpenAITerminalRejectionKnownCodesAndPoliciesDoNotAvoid(t *testing.T) {
 	}
 }
 
+func TestOpenAITerminalRejectionNormalizesVariableRequestIDs(t *testing.T) {
+	withResilienceSettings(t, nil)
+	svc, store, _ := terminalRejectionTestService()
+	account := terminalRejectionTestAccount(1, "relay-a.example")
+	ctx := resilience.WithRequestState(t.Context(), func() *resilience.RequestState {
+		state := resilience.NewRequestState()
+		state.SetSession(9, "v2:rejection-session", svc.openAISessionRecorder())
+		return state
+	}())
+	for i := range resilience.Current().Session.StreakThreshold {
+		requestID, count := "req-14928", "32"
+		if i%2 == 1 {
+			requestID, count = "req-90371", "64"
+		}
+		body := []byte(fmt.Sprintf(`{"error":{"type":"invalid_request_error","code":"provider_request_invalid","message":"Input exceeds %s MiB; request id: %s"}}`, count, requestID))
+		svc.noteOpenAITerminalRejection(ctx, account, http.StatusBadRequest, nil, body, errors.New("terminal"))
+	}
+	avoid, err := store.SessionAvoid(ctx, 9, "v2:rejection-session")
+	require.NoError(t, err)
+	require.Contains(t, avoid, account.ID)
+}
+
+func TestOpenAITerminalRejectionMessageOnlyContextLimitDoesNotAvoid(t *testing.T) {
+	withResilienceSettings(t, nil)
+	svc, store, _ := terminalRejectionTestService()
+	account := terminalRejectionTestAccount(1, "relay-a.example")
+	ctx := resilience.WithRequestState(t.Context(), func() *resilience.RequestState {
+		state := resilience.NewRequestState()
+		state.SetSession(9, "v2:rejection-session", svc.openAISessionRecorder())
+		return state
+	}())
+	body := []byte(`{"error":{"type":"invalid_request_error","code":"provider_request_invalid","message":"Maximum context length is 32768 tokens; request cannot continue"}}`)
+	for range resilience.Current().Session.StreakThreshold + 1 {
+		svc.noteOpenAITerminalRejection(ctx, account, http.StatusBadRequest, nil, body, errors.New("terminal"))
+	}
+	avoid, err := store.SessionAvoid(ctx, 9, "v2:rejection-session")
+	require.NoError(t, err)
+	require.Empty(t, avoid)
+}
+
 func TestOpenAITerminalRejectionStopsAvoidingAcrossHosts(t *testing.T) {
 	withResilienceSettings(t, nil)
 	svc, store, _ := terminalRejectionTestService()

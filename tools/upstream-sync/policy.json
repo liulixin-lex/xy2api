@@ -4142,6 +4142,22 @@
     {
       "path": "backend/internal/service/openai_terminal_rejection_test.go",
       "value": "func TestOpenAITerminalRejectionStopsAvoidingAcrossHosts(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_rejection.go",
+      "value": "if resilience.IsContextWindowError(message, body) {"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_rejection.go",
+      "value": "message = normalizeOpenAITerminalRejectionMessage(message)"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_rejection_test.go",
+      "value": "func TestOpenAITerminalRejectionNormalizesVariableRequestIDs(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_rejection_test.go",
+      "value": "func TestOpenAITerminalRejectionMessageOnlyContextLimitDoesNotAvoid(t *testing.T) {"
     }
   ],
   "forbidden_module_paths": [
