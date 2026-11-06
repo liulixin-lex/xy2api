@@ -891,11 +891,11 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
-      "value": "if replayErr := newOpenAIWebSearchReplaySignal(c, account, dataBytes, failedMessage); replayErr != nil {"
+      "value": "if replayErr := newOpenAIWebSearchReplaySignal(c, account, dataBytes, failedMessage, wrappedStatus); replayErr != nil {"
     },
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
-      "value": "if replayErr := newOpenAIWebSearchReplaySignal(c, account, dataBytes, failedMessage); replayErr != nil {"
+      "value": "if replayErr := newOpenAIWebSearchReplaySignal(c, account, dataBytes, failedMessage, wrappedStatus); replayErr != nil {"
     },
     {
       "path": "backend/internal/handler/openai_gateway_handler.go",
@@ -1351,7 +1351,7 @@
     },
     {
       "path": "backend/internal/service/gateway_service.go",
-      "value": "if e == nil || e.IsCapabilityStreamOnly() || e.Reason == OpenAIStreamForbiddenReason || e.isOpenAIWrappedRequestRejection() {"
+      "value": "if e == nil || e.IsCapabilityStreamOnly() || e.Reason == OpenAIStreamForbiddenReason || e.Reason == OpenAIStateRepairReason || e.isOpenAIWrappedRequestRejection() {"
     },
     {
       "path": "backend/internal/service/openai_gateway_grok.go",
@@ -1603,15 +1603,15 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
-      "value": "firstOutputTimeout = s.openAIFirstOutputTimeoutFor(ctx, account.ID, reqModel, reasoningEffortValue, startTime)"
+      "value": "firstOutputTimeout = s.openAIFirstOutputTimeoutFor(ctx, account.ID, reqModel, reasoningEffortValue, attemptStart)"
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
-      "value": "upstreamCtx, headerGuard = newOpenAIFirstOutputHeaderGuard(upstreamCtx, releaseUpstreamCtx, startTime.Add(firstOutputTimeout))"
+      "value": "upstreamCtx, headerGuard = newOpenAIFirstOutputHeaderGuard(upstreamCtx, releaseUpstreamCtx, attemptStart.Add(firstOutputTimeout))"
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
-      "value": "s.handleStreamingResponsePassthroughWithReasoning(ctx, resp, c, account, startTime, reqModel, upstreamPassthroughModel, reasoningEffortValue)"
+      "value": "s.handleStreamingResponsePassthroughWithReasoning(ctx, resp, c, account, attemptStart, reqModel, upstreamPassthroughModel, reasoningEffortValue)"
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",

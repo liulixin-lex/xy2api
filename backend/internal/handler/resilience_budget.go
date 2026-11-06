@@ -39,6 +39,30 @@ func requestBudget(ctx context.Context) *resilience.Budget {
 // attempt or the upstream refused the request content. Every failover loop
 // calls it once per failed attempt, before any same-account retry or switch.
 func resilienceAttemptFailed(ctx context.Context, accountID int64, failoverErr *service.UpstreamFailoverError) bool {
+	if failoverErr != nil && failoverErr.Reason == service.OpenAIStateRepairReason {
+		b := requestBudget(ctx)
+		now := time.Now()
+		if b != nil {
+			b.RecordAttemptAt(now)
+			if !b.CanAttempt(now) {
+				failoverErr.M3Cause = "budget"
+				resilience.StateFrom(ctx).SetRecoveryOutcome("budget_exhausted")
+				resilience.Count(resilience.MetricBudgetExhausted, resilience.StateFrom(ctx).GroupID(), accountID, b.Exhausted())
+				return true
+			}
+			if !b.AllowStateSwitch() {
+				failoverErr.M3Cause = "switch_exhausted"
+				return true
+			}
+		} else {
+			state := resilience.StateFrom(ctx)
+			if state == nil || !state.AllowStateSwitch() {
+				failoverErr.M3Cause = "switch_exhausted"
+				return true
+			}
+		}
+		return false
+	}
 	if failoverErr != nil {
 		resilience.NoteCapabilityAttempt(ctx, failoverErr.IsCapabilityStreamOnly())
 	}

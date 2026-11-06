@@ -107,8 +107,8 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | 中转站插入的 `SSE-Keep-Alive` 空 delta 帧；0.4.4 起还包括 `response.created` 之前、`delta` 为空字符串或只有空白的 delta（第一个非空 delta 之后的空白属于正文，照常转发） | 直接丢弃，不转发、不算首输出（openai-python 遇到会报错，网关也会因此提前放弃换号）；但算上游存活，不会因此被判停滞。`response.created` 之前的非空 delta 是真实内容，照常立即输出，计入 `pre_created_delta`。缺省首字口径（`openai_ttft_mode=semantic`）下，只有带 `SSE-Keep-Alive` 标记的保活帧仍沿用原计时；created 前无标记的空白 delta 不计首 token。`visible` 口径不算这两类帧 |
 | Claude 请求分发到 GPT 中转时，中转站拒绝续链（`previous_response_id`）并返回笼统的 4xx | 去掉续链按完整历史重放一次，并对该会话在该账号上关闭续链。0.4.2 起只认指向续链的应答：404/409、提到上一响应的文案，或 400/422 上的笼统中转文案（单独的 “Upstream request failed”、“could not be processed”、没有文案）；指名其他参数的错误（如 `temperature` 越界）、上下文超长、内容审核、图片、模型不存在等照常返回，不重放。按笼统文案猜测的重放计入请求预算的尝试次数，预算用尽时不重放 |
 | 上游内容安全拒绝（如智谱 `request_check_blocked`、`content_policy_violation`） | 400 `invalid_request_error`，`code: content_policy_violation`，附脱敏后的上游原文；不重试、不换号，账号不受罚。只关闭 `errors` 时回到 0.3.0 的 502 文案。0.5.1：code 或 type 为 `content_policy`，以及 400、403、451 上的“内容政策”文案也按内容安全拒绝处理，带账号措辞（封禁、organization 等）的照旧；403 上的这类文案以前判为鉴权失败并罚号，总开关开启时不再罚号。运维记录标为业务限制，见 §5.1 |
-| 上游会话状态拒绝（0.5.3） | S1/S2 的窄文案与专用状态码按 §4.12 统一识别为 `CLIENT_ERROR`，含无 type 包装的流内错误；不换号、不罚号、不计软失败。状态族与有限加密修复是两个决定，修复判据和预算不变 |
-| 上游无法解密或校验请求中的加密内容（0.5.1） | code 为 `invalid_encrypted_content`、`encrypted_context_invalid`，或文案为 encrypted content 加 “could not be verified”“could not be decrypted”“hydration failed” 之一、“encrypted function output content could not be decrypted”、“could not validate encrypted continuation context”，密文通常来自别的账号。按请求级处理：不随机换号，不罚 OpenAI 账号（临时不可调度规则与自定义错误码也不作用于它），不计会话失败与分组质量门槛的软失败；与上下文超长一样不受总开关影响。OpenAI 原生 Responses 在第一个内容之前遇到它时，若点名的是 reasoning（`rs_`）或 compaction（`cmp_`）条目，或没有点名条目但剥离确实改变了请求体，就删掉 reasoning 的 `encrypted_content`、丢弃带密文的 compaction 后同号重放一次；HTTP 400、502 与带内 `response.failed` 在同一账号尝试内合计一次。`agent_message`（`amsg_`）与 function output 的密文是正文，不剥离。不能剥离或不再重放时按请求级失败返回：HTTP 保持原状态（400 带原文，502 为通用文案），带内照常写出原 `response.failed`。Codex 子 agent 优先回到父线程的账号，见 §4.10 |
+| 上游会话状态拒绝（0.5.3） | S1/S2 的窄文案与专用状态码按 §4.12 统一识别为 `CLIENT_ERROR`，含无 type 包装的流内错误；不罚号、不计软失败。原生与直通 Responses 输出前的 S2/S3/S4 和校验通过的包装 400 使用下述 M3；其他状态拒绝保持请求级终止 |
+| 上游无法解密或校验请求中的加密内容（0.5.1） | code 为 `invalid_encrypted_content`、`encrypted_context_invalid`，或文案为 encrypted content 加 “could not be verified”“could not be decrypted”“hydration failed” 之一、“encrypted function output content could not be decrypted”、“could not validate encrypted continuation context”，密文通常来自别的账号。按请求级处理：不罚 OpenAI 账号（临时不可调度规则与自定义错误码也不作用于它），不计会话失败与分组质量门槛的软失败；与上下文超长一样不受总开关影响。OpenAI 原生 Responses 在第一个内容之前遇到它时，若点名的是 reasoning（`rs_`）或 compaction（`cmp_`）条目，或没有点名条目但剥离确实改变了请求体，就删掉 reasoning 的 `encrypted_content`、丢弃带密文的 compaction 后同号重放一次；HTTP 400、502 与带内 `response.failed` 在同一账号尝试内合计一次。原生与直通 Responses 的输出前 S2/S3/S4 和校验通过的包装 400 走 M3：只替换 amsg/fco 的目标密文槽位，集合严格增长才同号重放；无法继续修复时回避当前号，最多使用一次独立状态换号额度。M3 终止未提交写 502，已提交写 `response.failed` / `server_error`，原始拒绝仅放 message。其他路径不能剥离时保持原有请求级失败出口。Codex 子 agent 优先回到父线程的账号，见 §4.10 |
 | 上游明确点名的请求兼容问题（0.5.1） | 上游明确拒绝（结构化 code、param，或 “Unsupported parameter: X” 文案）时，删除请求顶层已有的 `top_p`、`metadata`、`temperature`、`frequency_penalty`、`presence_penalty`（原有 `max_output_tokens`、`truncation`）；输出上限、停止条件、模板、用量选项、缓存保留与身份类字段被拒时照原样返回。裸名 `prompt_cache_breakpoint` 只删 `input[i]` 与 `input[i].content[j]` 两层协议位置，不进入工具参数、输出或用户 JSON。`tool_search_call` 的 `arguments` 被拒为非对象时，只有字符串能严格解析为 JSON 对象才改成对象（保留原始字节），同一请求内满足条件的同类条目一并转换，其余照原样返回。修复后同号重放，每个请求合计最多 6 次，同一账号尝试内同一请求体不重放第二次；HTTP 与原生 Responses 第一个内容之前的带内 `response.failed` 都适用，Chat Completions 路径的 HTTP 错误同样适用；不认识的 400 照旧返回 |
 | Codex Alpha Search 的端点不支持（0.5.1） | API Key 账号返回 404、405，或返回 400 且消息含 `do not support the requested endpoint`、`not encrypted history or tool items` 时，按端点不支持换号，不写账号错误状态；所有候选都这样失败时按换号耗尽返回 502 |
 | Anthropic 中转在流内报 `rate_limit_error`（如并发上限） | 输出前可换号；耗尽时 429 带 `Retry-After`，不再是 502“访问被禁止”。`overloaded_error` 耗尽时为 503 `api_error`（0.4.12，见下一行；以前为 529），`api_error` 为 502 |
@@ -363,7 +363,7 @@ Chat/Messages 兼容转换只在首次提交前暂存解码后的开场与空白
 - Codex 子 agent 的父线程亲和：以前只用于 Codex 自动审查（模型 `codex-auto-review`）；现在输入里有 `agent_message` 条目、且其 `content` 带 `encrypted_content` 片段的子线程，也优先选父线程的粘性账号，因为只有父线程的账号能解开这段任务正文。父线程 ID 取自请求头、turn metadata 与请求体的 `client_metadata.x-codex-parent-thread-id`，非空候选不一致时放弃，不接受客户端指定账号。HTTP 与 WebSocket 首帧共用这一规则。
 - 父线程的会话键与普通请求一样按 API Key、分组、模型加作用域。以前直接对父线程 ID 求哈希，查不到 routing v2 起加了作用域的绑定，自动审查的亲和实际没有生效。修正后，模型相同的子 agent 能命中父绑定；自动审查（`codex-auto-review`）因模型不同仍查不到，见 §7。
 - 父号选择仍遵守排除集、能力、隐私与利润门；分组质量门槛的豁免只用于命中的父号那一次粘性选择。父号不可用时普通选号，不带豁免，也不改写父线程的绑定。计算父线程哈希不改子请求的会话、质量路由与 lineage 状态。这只降低同模型、同 API Key、同分组且父绑定仍在时的跨号，边界见 §7。
-- 状态族识别见 §4.12；它覆盖换号与处罚入口，不扩大有限修复范围。S2/S6 中满足原加密判据且请求可剥离的 rs/cmp 仍能同号重放；S3/S4 即使带旁路 reasoning 也不剥离正文。
+- 状态族识别见 §4.12；rs/cmp 沿用既有原生路径剥离，S3/S4 不剥离旁路 reasoning。M3 另按 item 引用和完整槽位摘要替换 amsg/fco 密文，覆盖原生与直通 Responses 的 HTTP、输出前流内及非流式聚合出口。
 - 同号剥离重放见 §3。HTTP 与带内都消耗本请求预算的一次原地重试（与 web_search 补声明相同），预算不足时不重放、原错误照常返回。带内重放与 web_search 补声明同一结构：在第一个内容之前收到可修复的拒绝时，先在本地算出新请求体，预算许可后才关闭这次响应、按新请求体重新发起；被拒字段的带内修复同样走这条路径。
 
 **内容安全拒绝的运维口径**
@@ -406,13 +406,18 @@ HTTP 流已向客户端输出可见内容后，快层确认账号发生读流出
 
 带密文片段的请求退回原有连击规则（`session.streak_threshold`，缺省连续 2 次）：只识别 `input[]` 内 `agent_message.content[]` 或数组形态 `function_call_output.output[]` 中的 `type=encrypted_content`，按 JSON 解码后的结构匹配，合法 Unicode 转义同样有效，非法 JSON 不命中。第一次真实输出后失败不立即改绑或避开原号，达到连击阈值才改绑；账号输出后冷却计数、同站暂停记账和其他失败类改绑不变。HTTP 读取请求上的密文保护标记。WebSocket 原生池、透传及 HTTP 桥在连接内保留密文标记，并按客户端每个 turn 的 payload 更新实际用于输出后处理的上下文：带非空 `previous_response_id` 的增量轮继承上一轮标记，并识别本轮新增密文；不带该 ID 的全量轮只按本轮 payload 判定，无密文时可以清除标记。首帧没有上一轮，即使带 `previous_response_id` 也只按本帧 payload 判定。同一轮内部重试保留本轮标记。未受该保护的请求，真实输出后失败仍首次即改绑。
 
-会话状态族拒绝属于请求级问题：原生与透传 HTTP、SSE、Chat / Messages 桥接及 WebSocket 的换号与账号副作用入口共用 `ClassifyStateRejection`；不换号、不罚号、不计会话连击、不计门槛与份额健康的软失败，输出后不触发 P1-B（含会话避开）或账号冷却。HTTP SSE 与 WebSocket 的裸 `error`、`response.failed` 或二者先后出现均适用。状态拒绝按以下顺序识别：
+会话状态族拒绝属于请求级问题：原生与透传 HTTP、SSE、Chat / Messages 桥接及 WebSocket 的换号与账号副作用入口共用 `ClassifyStateRejection`；不罚号、不计会话连击、不计门槛与份额健康的软失败。除 §3 的 M3 明确换号或终止时按请求态回避外，输出后不触发 P1-B（含会话避开）或账号冷却。HTTP SSE 与 WebSocket 的裸 `error`、`response.failed` 或二者先后出现均适用。状态拒绝按以下顺序识别：
 
 1. 专用 code `client_tool_continuation_unavailable`、`invalid_encrypted_content`、`encrypted_context_invalid`（不区分大小写）直接命中。
 2. 现有 `IsEncryptedContentRejection` 命中时排除；它覆盖 S3 的加密函数输出无法解密，以及 S4 的 `encrypted content` 搭配 `could not be verified`、`could not be decrypted` 或 `hydration failed` 等完整拒绝文案。
 3. 仅在 code 为空时，用 `opaque conversation state`、`unrecognized conversation state`、`encrypted content is invalid for this conversation` 补判 S1/S2。单独出现 `for item amsg_` 或 `invalid for this conversation` 不足以排除；明确的 server/rate-limit 错误码不会被这一步的文案覆盖。
 
-命中后按 S1 → S2 → S3 → S4 → reasoning / compaction → S6 细分为 `relay_state`、`conversation_invalid`、`function_output`、`agent_message`、`reasoning`、`other_encrypted`。分类结果为 `CLIENT_ERROR`，不带加密判据时 reason 为 `conversation_state`，带加密判据时仍为 `encrypted_content`。无 `invalid_request_error` 包装的 S1 也按请求级拒绝处理。请求的最终失败、既有运维事件与真实用量照常保留；只给已有 `upstream_errors` 条目附 `state_family`，不为状态拒绝新增尝试事件。请求级判断与修复决定分离：`Encrypted` 仅作诊断，有限 rs/cmp 剥离仍使用原有加密判据与预算，S1、S3、S4 不借机删正文；透传 HTTP 的错误信封和文案沿用现有行为。
+命中后按 S1 → S2 → S3 → S4 → reasoning / compaction → S6 细分为 `relay_state`、`conversation_invalid`、`function_output`、`agent_message`、`reasoning`、`other_encrypted`。分类结果为 `CLIENT_ERROR`，不带加密判据时 reason 为 `conversation_state`，带加密判据时仍为 `encrypted_content`。无 `invalid_request_error` 包装的 S1 也按请求级拒绝处理。请求的最终失败、既有运维事件与真实用量照常保留；只给已有 `upstream_errors` 条目附 `state_family`，不为状态拒绝新增尝试事件。请求级判断与修复决定分离：`Encrypted` 仅作诊断，有限 rs/cmp 剥离仍使用原有加密判据与预算，S1 不扩大修复。原生与直通 Responses 输出前的 S2/S3/S4 和校验通过的包装 400 改走 M3；其他路径保持现有错误出口。
+
+
+M3 每个请求按账号保存已替换槽位集合；槽位身份为 kind、item 引用、part 下标及完整槽位的规范化 JSON 摘要。每次出站在既有构造器之前替换，保留 item、引用、数组顺序及明文，不读 arguments 或字符串 output。形状歧义时终止派生。S4 必须唯一定位点名 item，立即把有引用槽位写入 Bad；S2/S3/包装 400 的整批 Bad 仅在重放完整成功后写入。Bad 复用 lineage 进程内存储，按组、进场会话与账号隔离，TTL 沿用粘性 TTL（默认 1 小时）；无引用槽位只在当前请求替换，不持久学习。共享 Bad 的增长不影响本请求的重放判据。
+
+M3 换号额度上限 1，与容量额度独立；换号仍受请求预算约束，同号修复仅豁免末位尝试次数守卫，保留截止时间和取消检查。换号与终止均对最后出错号执行属主校验删绑和会话回避，写入本请求排除集，不排同站、不计连败及调度健康失败。改写后的非 429 4xx 先用既有有界字段、compact、web_search 修复，耗尽再换号。每次重放重置 AttemptProfile，首字窗口按新的尝试起点和剩余预算重算。
 
 质量路由持有的绑定不越权删除；会话避开集合在进入质量路由之前并入排除集，因此有其他正常候选时下一请求不再选出错号。组内只剩该号时仍保留现有末位兜底。绑定已换成其他属主时，沿用现有 owner 校验；非 `v2:` OpenAI 会话键仍沿用原有删除语义。关闭该开关回到原有输出后失败连击逻辑；关闭 `session.enabled` 时 P1-B 一并失效。
 
@@ -520,6 +525,11 @@ warn 级，进入运维页“系统日志”（`ops_system_logs`）：
 - `balance_lift_failed`（0.4.12）：请求成功后清除过期的余额暂停时写库失败（含 `account_id`）；原因保留，之后再遇余额不足仍从原档位往上升；
 - `capability_learning_failed`（0.4.4）：仅流式学习结果写入失败（含 `account_id`、`protocol`、`error`）；本请求仍可在预算内换号，只是下一次不会跳过该账号；
 - `web_search_history_rejected`：API Key 中转拒绝回放 web_search 历史，补声明重放后仍失败或无法重放（含 `account_id`、`upstream_status`、是否已重放、是否透传）。
+- `m3_learned`、`m3_replaced`、`m3_replay_ok`：M3 分别记录写入 Bad、实际出站槽位替换、同号重放成功；含 `group_id`、`account_id`、`count`，不记密文或完整摘要。
+- `m3_state_switch`：M3 回避当前号并消耗唯一状态换号额度；含 `group_id`、`account_id`、`switch_count`。
+- `m3_terminal`：M3 在没有可用同号修复或换号额度时终止；含 `group_id`、`account_id`、`cause`。
+- `committed_terminal`：M3 终止时下游响应头已提交，网关以 `response.failed` / `server_error` 收尾；含 `group_id`、`account_id`、`cause`。
+- `last_resort_avoided`：末位兜底选择了本请求会话已回避的账号；含 `group_id`、`account_id`、`reason=session_avoid`。
 
 info 级，只写应用标准输出（量大，明细已有计数或未送达表）：
 
@@ -572,7 +582,7 @@ OpenAI 判慢降序与会话迁移的事件（见 §4.5）不带 `resilience.` �
 协作消息明文通道的**软回退**是关闭账号开关：新会话不再启用，原始历史保留 [] 且满足其它资格的 API Key 会话继续。provider 名非 OpenAI 的 Codex 客户端删除历史 EFA，无连续性，关账号开关对它等同硬回退。**硬回退**是关韧性总开关、collaboration_plaintext.enabled 或清空 models：所有后续尝试停止转换，在途仍按冻结 plan 还原，部分上游的存量会话可能需新开。OAuth/清单外模型边界、实测结果与缓存代价见 §4.14；操作顺序见 [部署 runbook](../deploy/README.md#codex-协作消息明文通道)。无需重启，schema 豁免不随开关回退。
 
 - 单项关闭：在“网关韧性”卡中关闭对应能力，即时生效。各能力关闭后的行为见 runbook §6。0.4.4 新增的开关关闭后回到 0.4.3 的对应行为，不是 0.3.0（两处小例外：关闭 `failure.decision_v2` 后分类输入的证据补全仍保留，见下表；关闭 `errors.failed_frame_retry_after` 后用户余额不足与内容拒绝仍不带重试时间，见 §3）；关闭 `capability.stream_only_learning` 后已学到的记录不删除，按到期时间自然过期，期间重新开启仍然生效。
-- 状态拒绝的请求级分类、不换号与不罚号，以及 `state_rejection` 观测不受总开关影响，无新增设置。有限修复仍沿用原有触发条件与预算。
+- 状态拒绝的请求级分类、不罚号及 `state_rejection` 观测不受总开关影响，无新增设置。M3 同样生效；预算关闭时仍只允许一次状态换号。rs/cmp 有限修复保持既有行为。
 - 整体关闭：关闭总开关，韧性能力全部停用，调度与错误处理按 0.3.0 逻辑运行。份额分组随之回到 0.3.0 的软溢出规则（300 秒内结束的状态都只临时借用、不改绑，余额暂停不特殊处理），健康降权与恢复爬升停用，见 [份额调度](SHARE_SCHEDULING.md)。
 - 从 0.4.4 回退到 0.4.3：无迁移，直接换回镜像。仅流式学习记录留在账号 `extra` 里，0.4.3 不读，回退后不再过滤；再升级时未到期的记录仍然生效。0.4.3 读取设置时忽略 0.4.4 新增的字段，原有字段与行为不变。**在 0.4.3 上再次保存设置会丢弃新字段**：再升级到 0.4.4 时它们回到缺省值（全部开启），回退期间关掉过的新开关要重新关闭。回退后仍开着 0.4.4 管理页面的浏览器，保存会因未知字段被拒，刷新页面即可。
 - 版本回退：迁移只追加，0.3.0 可直接运行在 0.4.0 的库上，无需回退数据库。回退时余额暂停中的账号在暂停到期后回到流量里，0.3.0 下再遇余额失败按原有逻辑处理（402 置错、403 计数）；不希望欠费账号被试探的，回退前关掉其调度。
@@ -638,7 +648,7 @@ OpenAI 判慢降序与会话迁移的事件（见 §4.5）不带 `resilience.` �
 - 韧性设置的保存没有版本校验：两位管理员基于旧页面先后保存时，后保存的覆盖先保存的（份额策略有版本校验）。单管理员维护时无影响；多人维护时保存前先刷新页面。
 - 未送达的计数按“开场事件之后是否写出过内容”判定，Gemini 原生流等不带这些开场事件的路径，第一个数据块即算送达。
 - Codex 子 agent 的父线程亲和（§4.10）按本次请求的模型查父绑定：子线程与父线程模型不同时（自动审查即如此）查不到。父线程已迁号或绑定过期、父号在输出前失败后换到的号解不开、历史密文来自多个账号时，仍按请求级失败结束。
-- 带内的请求修复重放（加密剥离与被拒字段，§3）只接入 OpenAI 原生 Responses 路径；Chat Completions、Messages、Responses 透传与 WS HTTP 桥不做带内修复（Chat 只修 HTTP 被拒字段），HTTP 加密剥离同样只在原生路径；WebSocket 沿用自身的加密恢复。
+- 带内 rs/cmp 剥离仍只接入 OpenAI 原生 Responses；M3 和被拒字段修复覆盖原生与直通 Responses 的 HTTP、输出前流内及聚合出口。Chat Completions、Messages 与 WS HTTP 桥不接 M3（Chat 只修 HTTP 被拒字段）；WebSocket 沿用自身的加密恢复。
 
 ## 8. 与份额调度的关系
 

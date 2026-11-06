@@ -92,6 +92,21 @@ func TestBudgetBalanceNotRetriedOnSameAccount(t *testing.T) {
 	require.Zero(t, fs.SameAccountRetryCount[1])
 }
 
+func TestM3StateSwitchAllowanceIsIndependentFromCapacitySwitch(t *testing.T) {
+	withHandlerResilience(t, nil)
+	ctx := budgetCtx(t, resilience.KindText, 7)
+	b := resilience.StateFrom(ctx).Budget()
+	require.True(t, b.AllowCapacitySwitch())
+	failure := &service.UpstreamFailoverError{StatusCode: http.StatusBadRequest, Reason: service.OpenAIStateRepairReason}
+	require.False(t, resilienceAttemptFailed(ctx, 1, failure))
+	require.True(t, b.CapacitySwitchUsed())
+	require.Equal(t, 1, b.Attempts())
+
+	failure = &service.UpstreamFailoverError{StatusCode: http.StatusBadRequest, Reason: service.OpenAIStateRepairReason}
+	require.True(t, resilienceAttemptFailed(ctx, 2, failure))
+	require.Equal(t, "switch_exhausted", failure.M3Cause)
+}
+
 func TestBudgetSameAccountRetryOncePerAccount(t *testing.T) {
 	withHandlerResilience(t, nil)
 	ctx := budgetCtx(t, resilience.KindText, 7)

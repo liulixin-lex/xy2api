@@ -661,12 +661,12 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				}
 				outputStarted := openAIStreamClientOutputStarted(c, clientOutputStarted)
 				if !outputStarted && !cyberHit {
-					if compactErr := newOpenAICompactFallbackSignal(c, dataBytes, failedMessage); compactErr != nil {
+					if compactErr := newOpenAICompactFallbackSignal(c, dataBytes, failedMessage, wrappedStatus); compactErr != nil {
 						sawFailedEvent = true
 						streamEarlyErr = compactErr
 						return
 					}
-					if replayErr := newOpenAIWebSearchReplaySignal(c, account, dataBytes, failedMessage); replayErr != nil {
+					if replayErr := newOpenAIWebSearchReplaySignal(c, account, dataBytes, failedMessage, wrappedStatus); replayErr != nil {
 						sawFailedEvent = true
 						streamEarlyErr = replayErr
 						return
@@ -1890,10 +1890,10 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		if msg == "" {
 			msg = "Upstream compact response failed"
 		}
-		_, _, malformed := openAIWrappedUpstreamErrorStatus(terminalSSEEvent, terminalPayload)
+		wrappedStatus, _, malformed := openAIWrappedUpstreamErrorStatus(terminalSSEEvent, terminalPayload)
 		if malformed {
 			msg = openAIMalformedWrappedErrorMessage
-		} else if compactErr := newOpenAICompactFallbackSignal(c, terminalPayload, msg); compactErr != nil {
+		} else if compactErr := newOpenAICompactFallbackSignal(c, terminalPayload, msg, wrappedStatus); compactErr != nil {
 			return nil, compactErr
 		}
 		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, false, terminalType, terminalSSEEvent, terminalPayload, msg, mappedModel); failoverErr != nil {

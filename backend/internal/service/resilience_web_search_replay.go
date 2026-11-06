@@ -199,8 +199,9 @@ func openAIWebSearchReplayFrom(c *gin.Context) *openAIWebSearchReplay {
 // before any output, so the forwarder can decide instead of relaying the
 // error event.
 type openAIWebSearchReplaySignal struct {
-	payload []byte
-	message string
+	wrappedStatus int
+	payload       []byte
+	message       string
 }
 
 func (e *openAIWebSearchReplaySignal) Error() string {
@@ -210,14 +211,18 @@ func (e *openAIWebSearchReplaySignal) Error() string {
 // newOpenAIWebSearchReplaySignal returns the signal for a failed event seen
 // before output when the attempt is armed for the account and the event is
 // the web_search history rejection, nil otherwise.
-func newOpenAIWebSearchReplaySignal(c *gin.Context, account *Account, payload []byte, message string) error {
+func newOpenAIWebSearchReplaySignal(c *gin.Context, account *Account, payload []byte, message string, wrappedStatus int) error {
+	if wrappedStatus != 0 && wrappedStatus != http.StatusBadRequest {
+		return nil
+	}
 	r := openAIWebSearchReplayFrom(c)
 	if r == nil || account == nil || r.accountID != account.ID || !isOpenAIWebSearchHistoryRejection(message, payload) {
 		return nil
 	}
 	return &openAIWebSearchReplaySignal{
-		payload: append([]byte(nil), payload...),
-		message: sanitizeUpstreamErrorMessage(strings.TrimSpace(message)),
+		wrappedStatus: wrappedStatus,
+		payload:       append([]byte(nil), payload...),
+		message:       sanitizeUpstreamErrorMessage(strings.TrimSpace(message)),
 	}
 }
 
@@ -251,10 +256,10 @@ func (s *OpenAIGatewayService) openAIWebSearchReplayAfterSignal(ctx context.Cont
 			_ = resp.Body.Close()
 		}
 	}
-	return s.openAIWebSearchReplayDecide(ctx, c, account, r, sent, http.StatusOK, requestID, signal.payload, signal.message)
+	return s.openAIWebSearchReplayDecide(ctx, c, account, r, sent, http.StatusOK, requestID, signal.payload, signal.message, signal.wrappedStatus)
 }
 
-func (s *OpenAIGatewayService) openAIWebSearchReplayDecide(ctx context.Context, c *gin.Context, account *Account, r *openAIWebSearchReplay, sent []byte, status int, requestID string, payload []byte, message string) ([]byte, error) {
+func (s *OpenAIGatewayService) openAIWebSearchReplayDecide(ctx context.Context, c *gin.Context, account *Account, r *openAIWebSearchReplay, sent []byte, status int, requestID string, payload []byte, message string, wrappedStatus ...int) ([]byte, error) {
 	if !r.declared {
 		next, changed, err := ensureOpenAIOAuthWebSearchToolForHistoryBody(sent, r.responsesLite)
 		if err == nil && changed && resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(account.ID, false, time.Now()) {
@@ -266,6 +271,20 @@ func (s *OpenAIGatewayService) openAIWebSearchReplayDecide(ctx context.Context, 
 			)
 			return next, nil
 		}
+	}
+	semanticStatus := status
+	if status == http.StatusOK {
+		semanticStatus = openAIStreamFailedEventSemanticStatus(payload, message)
+	}
+	wrapped := 0
+	if len(wrappedStatus) == 1 {
+		wrapped = wrappedStatus[0]
+	}
+	if repairErr := openAIM3AfterLocalRepairExhausted(ctx, c, payload, message, semanticStatus, wrapped); repairErr != nil {
+		if next, _, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, nil, repairErr); ok {
+			return next, nil
+		}
+		return nil, repairErr
 	}
 	return nil, s.openAIWebSearchHistoryRejected(ctx, c, account, r, status, requestID, payload, message)
 }

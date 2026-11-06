@@ -727,7 +727,8 @@ type UpstreamFailoverError struct {
 	NextAccountAction               NextAccountAction
 	ClientStatusCode                int
 	ClientMessage                   string
-	WrappedStatus                   int // 中转包装错误帧里校验过的上游状态码（400–599）；0 表示不是包装帧
+	M3Cause                         string // Request repair terminal cause; never upstream payload.
+	WrappedStatus                   int    // 中转包装错误帧里校验过的上游状态码（400–599）；0 表示不是包装帧
 }
 
 func annotateUpstreamFailoverAccount(failoverErr *UpstreamFailoverError, account *Account) *UpstreamFailoverError {
@@ -786,7 +787,7 @@ func (e *UpstreamFailoverError) OpenAIWrappedRequestRejectionCode() string {
 // and inference failures retain their existing scheduler-health behavior.
 func (e *UpstreamFailoverError) ShouldReportAccountScheduleFailure() bool {
 	// Forbidden intentionally uses soft cooldown/session streaks without also reporting scheduler-health failure.
-	if e == nil || e.IsCapabilityStreamOnly() || e.Reason == OpenAIStreamForbiddenReason || e.isOpenAIWrappedRequestRejection() {
+	if e == nil || e.IsCapabilityStreamOnly() || e.Reason == OpenAIStreamForbiddenReason || e.Reason == OpenAIStateRepairReason || e.isOpenAIWrappedRequestRejection() {
 		return false
 	}
 	return !e.IsCredentialFailure() || e.Scope == GatewayFailureScopeAccount
