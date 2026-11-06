@@ -17,7 +17,7 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-const m3TwoItemRequest = `{"model":"gpt-5.5","stream":true,"input":[{"type":"agent_message","id":"amsg_one","content":[{"type":"encrypted_content","data":"same-cipher"},{"type":"input_text","text":"first"}]},{"type":"agent_message","id":"amsg_two","content":[{"type":"encrypted_content","data":"same-cipher"},{"type":"input_text","text":"second"}]}]}`
+const m3TwoItemRequest = `{"model":"gpt-5.5","stream":true,"input":[{"type":"agent_message","id":"amsg_one","content":[{"type":"encrypted_content","encrypted_content":"same-cipher"},{"type":"input_text","text":"first"}]},{"type":"agent_message","id":"amsg_two","content":[{"type":"encrypted_content","encrypted_content":"same-cipher"},{"type":"input_text","text":"second"}]}]}`
 
 func TestOpenAIM3S4LearnsOnlyNamedItem(t *testing.T) {
 	req := newWebSearchReplayRequest(t)
@@ -57,7 +57,7 @@ func TestOpenAIM3LearnsFunctionOutputSlots(t *testing.T) {
 	store := NewOpenAIWSStateStore(nil)
 	svc := &OpenAIGatewayService{openaiWSStateStore: store}
 	account := webSearchReplayAccount(false)
-	body := []byte(`{"model":"gpt-5.5","input":[{"type":"function_call_output","call_id":"call_one","output":[{"type":"encrypted_content","payload":"cipher"}]}]}`)
+	body := []byte(`{"model":"gpt-5.5","input":[{"type":"function_call_output","call_id":"call_one","output":[{"type":"encrypted_content","encrypted_content":"cipher"}]}]}`)
 	attempt := svc.armOpenAIM3(req.c, account, body)
 	err := attempt.learn(req.ctx, body, []byte(`{"error":{"code":"server_error","message":"Encrypted function output content could not be decrypted"}}`), "Encrypted function output content could not be decrypted", http.StatusBadRequest, 0)
 	var signal *openAIRequestRepairSignal
@@ -85,7 +85,7 @@ func TestForwardOpenAIM3ReplaySendsOnlyPlaceholderInNamedSlot(t *testing.T) {
 	require.Equal(t, "[encrypted content omitted]", gjson.GetBytes(second, "input.0.content.0.text").String())
 	require.Equal(t, "amsg_one", gjson.GetBytes(second, "input.0.id").String())
 	require.Equal(t, "encrypted_content", gjson.GetBytes(second, "input.1.content.0.type").String())
-	require.Equal(t, "same-cipher", gjson.GetBytes(second, "input.1.content.0.data").String())
+	require.Equal(t, "same-cipher", gjson.GetBytes(second, "input.1.content.0.encrypted_content").String())
 }
 
 func TestForwardOpenAIM3NativeStreamReplaySendsPlaceholder(t *testing.T) {
@@ -379,6 +379,10 @@ func TestOpenAIM3Wrapped400LocalRepairsRetainEvidence(t *testing.T) {
 			req.c.Request.URL.Path = "/v1/responses/compact"
 			payload = []byte(`{"error":{"code":"model_not_found","message":"model not found"}}`)
 			message = "model not found"
+			var localSignal *openAICompactFallbackSignal
+			require.ErrorAs(t, newOpenAICompactFallbackSignal(req.c, payload, message, http.StatusBadRequest), &localSignal)
+			require.Equal(t, http.StatusBadRequest, localSignal.wrappedStatus)
+			require.Nil(t, newOpenAICompactFallbackSignal(req.c, payload, message, http.StatusForbidden))
 		}
 		next, err, retry := svc.interceptOpenAIM3Failover(req.ctx, req.c, account, nil, nil, &UpstreamFailoverError{StatusCode: 400, WrappedStatus: 400, ClientMessage: message, ResponseBody: payload})
 		if compact {
@@ -411,12 +415,32 @@ func TestOpenAIWebSearchSignalCarriesWrapped400ToM3(t *testing.T) {
 	message := "response protection is unavailable; Encrypted content could not be verified for item amsg_one"
 	wrappedBody := []byte(`{"type":"response.failed","response":{"error":{"type":"upstream_error","code":"400","status_code":400,"message":"` + message + `"}}}`)
 	signalErr := newOpenAIWebSearchReplaySignal(req.c, account, wrappedBody, message, http.StatusBadRequest)
+	require.Nil(t, newOpenAIWebSearchReplaySignal(req.c, account, wrappedBody, message, http.StatusForbidden))
 	var signal *openAIWebSearchReplaySignal
 	require.ErrorAs(t, signalErr, &signal)
 	next, err := svc.openAIWebSearchReplayAfterSignal(req.ctx, req.c, account, webSearch, repair.body, nil, signalErr)
 	require.NoError(t, err)
 	require.Equal(t, "[encrypted content omitted]", gjson.GetBytes(next, "input.0.content.0.text").String())
 	require.Equal(t, "[encrypted content omitted]", gjson.GetBytes(next, "input.1.content.0.text").String())
+}
+
+func TestOpenAIM3FirstStateRefusalAfterWebSearchRepair(t *testing.T) {
+	req := newWebSearchReplayRequest(t)
+	account := webSearchReplayAccount(false)
+	svc := &OpenAIGatewayService{openaiWSStateStore: NewOpenAIWSStateStore(nil)}
+	repair := armOpenAIRequestRepair(req.c, account, nil)
+	repair.body = []byte(m3TwoItemRequest)
+	repair.m3 = svc.armOpenAIM3(req.c, account, repair.body)
+	webSearch := &openAIWebSearchReplay{accountID: account.ID, declared: true}
+	req.c.Set(openAIWebSearchReplayContextKey, webSearch)
+	message := "response protection is unavailable; Encrypted content could not be verified for item amsg_one"
+	payload := []byte(`{"error":{"code":"invalid_encrypted_content","message":"` + message + `"}}`)
+	signalErr := newOpenAIWebSearchReplaySignal(req.c, account, payload, message, 0)
+	next, err := svc.openAIWebSearchReplayAfterSignal(req.ctx, req.c, account, webSearch, repair.body, nil, signalErr)
+	require.NoError(t, err)
+	require.Equal(t, "[encrypted content omitted]", gjson.GetBytes(next, "input.0.content.0.text").String())
+	require.Equal(t, "encrypted_content", gjson.GetBytes(next, "input.1.content.0.type").String())
+	require.Empty(t, req.session.failures)
 }
 
 func TestForwardOpenAIM3ContinuesAfterWebSearchRepairExhaustion(t *testing.T) {

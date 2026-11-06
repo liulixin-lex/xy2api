@@ -887,11 +887,11 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
-      "value": "if replayErr := newOpenAIWebSearchReplaySignal(c, account, dataBytes, failedMessage); replayErr != nil {"
+      "value": "if replayErr := newOpenAIWebSearchReplaySignal(c, account, dataBytes, failedMessage, wrappedStatus); replayErr != nil {"
     },
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
-      "value": "if replayErr := newOpenAIWebSearchReplaySignal(c, account, dataBytes, failedMessage); replayErr != nil {"
+      "value": "if replayErr := newOpenAIWebSearchReplaySignal(c, account, dataBytes, failedMessage, wrappedStatus); replayErr != nil {"
     },
     {
       "path": "backend/internal/handler/openai_gateway_handler.go",
@@ -3515,7 +3515,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
-      "value": "newOpenAIRequestRepairSignal(ctx, c, account, dataBytes, failedMessage, 0)"
+      "value": "newOpenAIRequestRepairSignal(ctx, c, account, dataBytes, failedMessage, wrappedStatus)"
     },
     {
       "path": "backend/internal/service/openai_account_runtime_block_fastpath.go",

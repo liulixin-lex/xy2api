@@ -35,14 +35,18 @@ func isExplicitOpenAICompactContext(c *gin.Context) bool {
 	return isOpenAIResponsesCompactPath(c) || isOpenAINativeCompactionV2(c)
 }
 
-func newOpenAICompactFallbackSignal(c *gin.Context, payload []byte, message string) error {
+func newOpenAICompactFallbackSignal(c *gin.Context, payload []byte, message string, wrappedStatus int) error {
+	if wrappedStatus != 0 && wrappedStatus != http.StatusBadRequest {
+		return nil
+	}
 	if !isExplicitOpenAICompactContext(c) ||
 		!isOpenAICompactModelFailure(http.StatusBadRequest, message, payload) {
 		return nil
 	}
 	return &openAICompactFallbackSignal{
-		payload: append([]byte(nil), payload...),
-		message: sanitizeUpstreamErrorMessage(strings.TrimSpace(message)),
+		wrappedStatus: wrappedStatus,
+		payload:       append([]byte(nil), payload...),
+		message:       sanitizeUpstreamErrorMessage(strings.TrimSpace(message)),
 	}
 }
 

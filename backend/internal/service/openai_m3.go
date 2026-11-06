@@ -175,7 +175,7 @@ func (a *openAIM3Attempt) failure(message, cause string) *UpstreamFailoverError 
 	return annotateUpstreamFailoverAccount(&UpstreamFailoverError{StatusCode: 400, Reason: OpenAIStateRepairReason, Scope: GatewayFailureScopeRequest, NextAccountAction: NextAccountRetry, ClientStatusCode: 502, ClientMessage: sanitizeUpstreamErrorMessage(message), SafeToFailoverAfterWrite: true, M3Cause: cause}, a.account)
 }
 func (a *openAIM3Attempt) event(ctx context.Context, name string, count int) {
-	logger.FromContext(ctx).Warn("resilience.m3_"+name, zap.Int64("group_id", a.request.groupID), zap.Int64("account_id", a.account.ID), zap.Int("count", count))
+	logger.FromContext(ctx).Warn(name, zap.Int64("group_id", a.request.groupID), zap.Int64("account_id", a.account.ID), zap.Int("count", count))
 }
 func (a *openAIM3Attempt) persist(ctx context.Context, slots []openAIBadEncryptedSlot) {
 	if len(slots) == 0 {
@@ -184,7 +184,7 @@ func (a *openAIM3Attempt) persist(ctx context.Context, slots []openAIBadEncrypte
 	if store := a.service.getOpenAIWSStateStore(); store != nil {
 		n := store.MarkSessionBadEncryptedSlots(a.request.groupID, a.request.session, a.account.ID, slots, a.service.openAIWSSessionStickyTTL())
 		if n > 0 {
-			a.event(ctx, "learned", n)
+			a.event(ctx, "resilience.m3_learned", n)
 		}
 	}
 }
@@ -220,7 +220,7 @@ func (a *openAIM3Attempt) derive(ctx context.Context, body []byte) ([]byte, erro
 		count++
 	}
 	if count > 0 {
-		a.event(ctx, "replaced", count)
+		a.event(ctx, "resilience.m3_replaced", count)
 	}
 	return body, nil
 }
@@ -292,7 +292,7 @@ func (a *openAIM3Attempt) learn(ctx context.Context, body, payload []byte, messa
 		}
 	}
 	a.state.replayed = true
-	a.event(ctx, "replaced", len(selected))
+	a.event(ctx, "resilience.m3_replaced", len(selected))
 	return &openAIRequestRepairSignal{kind: string(OpenAIStateRepairReason), next: next}
 }
 func (a *openAIM3Attempt) succeeded(ctx context.Context) {
@@ -306,7 +306,7 @@ func (a *openAIM3Attempt) succeeded(ctx context.Context) {
 	a.persist(ctx, slots)
 	clear(a.state.pending)
 	a.state.replayed = false
-	a.event(ctx, "replay_ok", 1)
+	a.event(ctx, "resilience.m3_replay_ok", 1)
 }
 func (a *openAIM3Attempt) afterLocalRepairs(ctx context.Context, body, payload []byte, message string, status, wrappedStatus int) error {
 	if a == nil {
@@ -337,11 +337,7 @@ func (s *OpenAIGatewayService) interceptOpenAIM3Failover(ctx context.Context, c 
 		return nil, err, false
 	}
 	if failure.WrappedStatus == http.StatusBadRequest {
-		if compactErr := newOpenAICompactFallbackSignal(c, failure.ResponseBody, message); compactErr != nil {
-			var signal *openAICompactFallbackSignal
-			if errors.As(compactErr, &signal) {
-				signal.wrappedStatus = failure.WrappedStatus
-			}
+		if compactErr := newOpenAICompactFallbackSignal(c, failure.ResponseBody, message, failure.WrappedStatus); compactErr != nil {
 			return nil, compactErr, false
 		}
 	}
@@ -379,7 +375,7 @@ func (s *OpenAIGatewayService) interceptOpenAIM3Failover(ctx context.Context, c 
 // session or expose a non-retryable 4xx.
 func openAIM3AfterLocalRepairExhausted(ctx context.Context, c *gin.Context, payload []byte, message string, status, wrappedStatus int) error {
 	r := openAIRequestRepairFrom(c)
-	if r == nil || r.m3 == nil || (len(r.m3.state.replaced) == 0 && wrappedStatus != http.StatusBadRequest) {
+	if r == nil || r.m3 == nil {
 		return nil
 	}
 	return r.m3.afterLocalRepairs(ctx, r.body, payload, message, status, wrappedStatus)

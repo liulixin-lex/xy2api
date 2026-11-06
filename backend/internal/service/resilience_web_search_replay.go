@@ -212,6 +212,9 @@ func (e *openAIWebSearchReplaySignal) Error() string {
 // before output when the attempt is armed for the account and the event is
 // the web_search history rejection, nil otherwise.
 func newOpenAIWebSearchReplaySignal(c *gin.Context, account *Account, payload []byte, message string, wrappedStatus int) error {
+	if wrappedStatus != 0 && wrappedStatus != http.StatusBadRequest {
+		return nil
+	}
 	r := openAIWebSearchReplayFrom(c)
 	if r == nil || account == nil || r.accountID != account.ID || !isOpenAIWebSearchHistoryRejection(message, payload) {
 		return nil
