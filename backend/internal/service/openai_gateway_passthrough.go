@@ -2187,6 +2187,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	mappedModel string,
 	reasoningEffort string,
 ) (*openaiStreamingResultPassthrough, error) {
+	failureModel := firstNonEmpty(mappedModel, canonicalOpenAIAccountSchedulingModel(account, originalModel))
 	preludeTrace := beginOpenAIPreludeTrace(ctx, resilience.Current().NativePreludeWhitelistOn())
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
@@ -2554,7 +2555,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				if !outputStarted {
 					if wrappedFrame {
 						wrappedMessage := firstNonEmpty(extractOpenAISSEErrorMessage(wrappedPayload), failedMessage)
-						if failoverErr := s.newOpenAIWrappedStreamFailoverError(ctx, c, account, true, upstreamRequestID, wrappedPayload, wrappedMessage, mappedModel, resp.Header, wrappedStatus); failoverErr != nil && !clientDisconnected {
+						if failoverErr := s.newOpenAIWrappedStreamFailoverError(ctx, c, account, true, upstreamRequestID, wrappedPayload, wrappedMessage, failureModel, resp.Header, wrappedStatus); failoverErr != nil && !clientDisconnected {
 							return passthroughReturn(resultWithUsage(), failoverErr)
 						}
 					}
@@ -2568,7 +2569,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 					}
 					if shouldFailover && !clientDisconnected {
 						return passthroughReturn(resultWithUsage(),
-							s.newOpenAIStreamFailoverErrorWithModel(c, account, true, upstreamRequestID, dataBytes, failedMessage, mappedModel, resp.Header))
+							s.newOpenAIStreamFailoverErrorWithModel(c, account, true, upstreamRequestID, dataBytes, failedMessage, failureModel, resp.Header))
 					}
 					if !cyberHit && !sawBareError {
 						if status, errType, errMsg, matched := applyOpenAIStreamFailedErrorPassthroughRule(c, account.Platform, dataBytes, failedMessage); matched {
@@ -2931,6 +2932,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 // preserving passthrough payloads, except compact-only model remapping may
 // rewrite model fields back to the original requested model.
 func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c *gin.Context, account *Account, body []byte, originalModel string, mappedModel string) (*openaiNonStreamingResultPassthrough, error) {
+	failureModel := firstNonEmpty(mappedModel, canonicalOpenAIAccountSchedulingModel(account, originalModel))
 	bodyText := string(body)
 	terminalType, terminalPayload, terminalOK := extractOpenAISSETerminalEvent(bodyText)
 	if terminalOK && (terminalType == "response.failed" || terminalType == "error") {
@@ -2941,7 +2943,7 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 		if compactErr := newOpenAICompactFallbackSignal(c, terminalPayload, msg); compactErr != nil {
 			return nil, compactErr
 		}
-		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, true, terminalType, terminalPayload, msg, mappedModel); failoverErr != nil {
+		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, true, terminalType, terminalPayload, msg, failureModel); failoverErr != nil {
 			return nil, failoverErr
 		}
 		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg)

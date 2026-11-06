@@ -308,6 +308,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 - OpenAI Responses 的流内中转包装帧（`event: error` + `type=proxy.upstream_error`，或 `response.failed` + `response.error.type=upstream_error`）只在状态码、字段类型与相等关系校验通过后按迟到的上游 HTTP 状态路由。输出前包装 400 交给加密态请求修复；包装 401 和所有包装 403（含停用码、凭证码）均走请求级 forbidden：换号、账号×模型软冷却、本请求内排除同站、用尽写 502，不进入凭证处罚、停用或 HTTP 403 连续失败计数。包装帧表示中转已接受本网关的 Key，帧内认证错误归于中转自己的上游。其他状态复用 HTTP 的换号判定。包装 400–599 以外或结构不完整的帧按普通失败处理，畸形帧各记一条 `resilience.wrapped_error_malformed`；输出后的流、非包装流内 403 及 HTTP 401/403 保持原行为。
 - forbidden 的本请求内同站排除只用于 API Key 账号，与账号×模型软冷却的账号类型范围一致。OAuth 等其他账号只排除当前失败账号，其他官方端点账号仍可被选择；此分支不占容量换号额度。
 - forbidden 的账号×模型软冷却只在有结构化证据时记录：载荷中的数字状态 403、校验通过的包装 401/403，或错误对象的 `code=upstream_error` 且没有 `type` 字段。仅从文案推导出的 forbidden 仍然换号，用尽写 502，但不记录软冷却；字符串状态码不作为数字状态证据，空值或空字符串的 `type` 也不等于缺少该字段。
+- 直通流式与 SSE→JSON 聚合的失败分类在错误帧不带模型时使用本次请求的调度模型；compact 已改写的上游模型优先保留，不再二次映射。该模型也传给流内终态账号副作用处理，与原生路径同样按模型计数。
 - forbidden 用尽的 502 分支同样应用通用耗尽重试提示：未提交时写 `Retry-After`，已提交的 Responses 流按现有终止帧规则携带提示。达到会话连续失败上限时沿用通用终止策略（503、`server_is_overloaded`、不再建议重试）。
 - `codex.response.metadata` 判为开场事件（§1）。以前它算内容，之后的失败不能换号，首输出截止也随之解除，出现过 240 秒的挂起。
 - 原生 Anthropic 与 API Key 直通（`stream.prelude_staging`）：`message_start`、`ping`、空的 text 与 thinking `content_block_start` 暂存到第一个内容或终态，`tool_use` 起始算内容、立即写出。暂存期间上游的可重试失败（流内 `overloaded_error`、`rate_limit_error`，断流、读错、停滞）丢弃本次开场并换号，客户端只看到成功那次尝试的一个 `message_start`；不可重试的拒绝写出开场后以 `event: error` 结束；合法的空回答照常写出。
