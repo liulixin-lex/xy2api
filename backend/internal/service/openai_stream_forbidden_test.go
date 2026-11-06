@@ -111,6 +111,52 @@ func TestOpenAIWrappedForbiddenUsesSoftCooldown(t *testing.T) {
 	}
 }
 
+func TestOpenAIStreamForbiddenRequiresCooldownEvidence(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, tc := range []struct {
+		name     string
+		payload  string
+		cooldown bool
+	}{
+		{"numeric response status", `{"type":"response.failed","response":{"error":{"status":403,"type":"permission_error"}}}`, true},
+		{"numeric error status code", `{"error":{"status_code":403,"type":"permission_error"}}`, true},
+		{"numeric top-level status", `{"status":403,"error":{"type":"permission_error"}}`, true},
+		{"untyped response upstream error", `{"type":"response.failed","response":{"error":{"code":"upstream_error"}}}`, true},
+		{"untyped error upstream error", `{"error":{"code":"upstream_error"}}`, true},
+		{"untyped top-level upstream error", `{"code":"upstream_error"}`, true},
+		{"text only", `{"error":{"message":"Upstream access forbidden"}}`, false},
+		{"string status", `{"error":{"status":"403"}}`, false},
+		{"fractional status", `{"error":{"status":403.5}}`, false},
+		{"typed upstream error", `{"error":{"code":"upstream_error","type":"permission_error"}}`, false},
+		{"empty type is present", `{"error":{"code":"upstream_error","type":""}}`, false},
+		{"null type is present", `{"error":{"code":"upstream_error","type":null}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := newNonStreamingFailoverContext(t)
+			account := newNonStreamingFailoverAccount()
+			svc := newNonStreamingFailoverService()
+			payload := []byte(tc.payload)
+			const message = "Upstream access forbidden"
+			require.True(t, openAIStreamFailedEventShouldFailover(payload, message))
+			require.True(t, openAIStreamErrorEventShouldFailover(payload, message))
+			for attempt := 1; attempt <= 2; attempt++ {
+				failoverErr := svc.newOpenAIStreamFailoverErrorWithModel(c, account, false, "", payload, message, "model")
+				require.Equal(t, OpenAIStreamForbiddenReason, failoverErr.Reason)
+				require.Equal(t, GatewayFailureScopeRequest, failoverErr.Scope)
+				require.True(t, failoverErr.ShouldRetryNextAccount())
+				require.False(t, failoverErr.RetryableOnSameAccount)
+				require.False(t, failoverErr.ShouldReportAccountScheduleFailure())
+				entry, recorded := svc.getOpenAIAccountModelTransientState().readEntry(account.ID, "model", time.Now())
+				require.Equal(t, tc.cooldown, recorded)
+				if recorded {
+					require.Equal(t, attempt, entry.failureStreak)
+				}
+			}
+		})
+	}
+	require.False(t, openAIStreamForbiddenCooldownEvidence([]byte(`{"error":{"status":403}`), 0), "invalid JSON cannot establish cooldown evidence")
+}
+
 func TestOpenAIStream403NonWrappedDeactivatedKeepsAccountFailure(t *testing.T) {
 	withResilienceSettings(t, nil)
 	c, _ := newNonStreamingFailoverContext(t)

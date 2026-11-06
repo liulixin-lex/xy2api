@@ -2037,7 +2037,8 @@ func (s *OpenAIGatewayService) applyOpenAIStreamForbiddenSoftCooldown(
 	failoverErr.RetryableOnSameAccount = false
 	failoverErr.RequestScopedTransient = false
 	model := firstNonEmpty(canonicalModel, gjson.GetBytes(payload, "model").String(), gjson.GetBytes(payload, "response.model").String())
-	if s != nil && account != nil && account.Platform == PlatformOpenAI && account.Type == AccountTypeAPIKey && resilience.Current().FailureOn() {
+	if s != nil && account != nil && account.Platform == PlatformOpenAI && account.Type == AccountTypeAPIKey &&
+		resilience.Current().FailureOn() && openAIStreamForbiddenCooldownEvidence(payload, failoverErr.WrappedStatus) {
 		decision := s.recordOpenAIAccountModelTransientFailure(account, model, time.Now())
 		eventCtx := context.Background()
 		if c != nil && c.Request != nil {
@@ -2051,6 +2052,31 @@ func (s *OpenAIGatewayService) applyOpenAIStreamForbiddenSoftCooldown(
 			zap.Int64("cooldown_ms", decision.Cooldown.Milliseconds()),
 		)
 	}
+}
+
+// Free-form permission messages still switch accounts, but cannot establish
+// account-wide model health. Only structured relay evidence records a cooldown.
+func openAIStreamForbiddenCooldownEvidence(payload []byte, wrappedStatus int) bool {
+	if wrappedStatus == http.StatusUnauthorized || wrappedStatus == http.StatusForbidden {
+		return true
+	}
+	if !gjson.ValidBytes(payload) {
+		return false
+	}
+	for _, path := range openAIStreamErrorStatusPaths {
+		status := gjson.GetBytes(payload, path)
+		if status.Type == gjson.Number && status.Num == http.StatusForbidden {
+			return true
+		}
+	}
+	root := gjson.ParseBytes(payload)
+	for _, errObject := range []gjson.Result{root.Get("response.error"), root.Get("error"), root} {
+		code := errObject.Get("code")
+		if code.Type == gjson.String && code.Str == "upstream_error" && !errObject.Get("type").Exists() {
+			return true
+		}
+	}
+	return false
 }
 
 // nonStreamingTerminalFailureFailover applies the streaming path's terminal-event
