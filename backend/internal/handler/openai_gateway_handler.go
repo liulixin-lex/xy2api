@@ -3723,6 +3723,22 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 		h.handleFailoverExhaustedSimple(c, http.StatusBadGateway, streamStarted)
 		return
 	}
+	if code := failoverErr.OpenAIWrappedRequestRejectionCode(); code != "" {
+		rawMessage := (resilience.RetryAdvice{Suppress: true}).Message(strings.TrimSpace(service.ExtractUpstreamErrorMessage(failoverErr.ResponseBody)))
+		message := service.SanitizeUpstreamErrorMessage(rawMessage)
+		if resilienceContentRejected(failoverErr) {
+			service.MarkOpsUpstreamContentPolicy(c)
+			message = sanitizeContentRejectionMessage(message)
+		}
+		if message == "" {
+			message = "Request rejected by upstream"
+		}
+		suppressResilienceRetryAdvice(c, "wrapped_request_rejection")
+		message = (resilience.RetryAdvice{Suppress: true}).Message(message)
+		service.SetOpsUpstreamError(c, failoverErr.WrappedStatus, message, "")
+		h.handleStreamingAwareErrorWithCode(c, http.StatusBadRequest, "invalid_request_error", code, message, streamStarted, false)
+		return
+	}
 	if failoverErr.Reason == service.OpenAIStreamForbiddenReason {
 		message := "Upstream service temporarily unavailable"
 		service.SetOpsUpstreamError(c, failoverErr.StatusCode, message, "")

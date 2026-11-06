@@ -3,10 +3,12 @@
 package handler
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/model"
@@ -34,29 +36,111 @@ func (u *wrappedForbiddenUpstream) Do(_ *http.Request, _ string, _ int64, _ int)
 	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
 }
 
-func TestOpenAIWrappedRequestRejectionStopsFailover(t *testing.T) {
+func TestOpenAIWrappedRequestRejectionUncommitted(t *testing.T) {
+	testOpenAIWrappedRequestRejectionTerminal(t, false)
+}
+
+func TestOpenAIWrappedRequestRejectionAfterHeartbeat(t *testing.T) {
+	testOpenAIWrappedRequestRejectionTerminal(t, true)
+}
+
+func testOpenAIWrappedRequestRejectionTerminal(t *testing.T, committed bool) {
+	t.Helper()
 	withHandlerResilience(t, nil)
-	core, logs := observer.New(zap.InfoLevel)
-	ctx := logger.IntoContext(budgetCtx(t, resilience.KindText, 7), zap.New(core))
-	c, recorder := newOpenAIResponsesFailoverTestContext(t, ctx)
-	upstream := &wrappedForbiddenUpstream{payload: `{"type":"proxy.upstream_error","status":403,"upstream_body":{"error":{"code":"content_policy_violation","message":"request rejected"}}}`}
-	gateway := service.NewOpenAIGatewayService(nil, nil, nil, nil, nil, nil, nil, &config.Config{RunMode: config.RunModeSimple}, nil, nil, nil, nil, nil, upstream, nil, nil, nil, nil, nil, nil, nil, nil)
-	account := &service.Account{ID: 1, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test-key"}}
-	_, err := gateway.Forward(ctx, c, account, []byte(`{"model":"gpt-5.1","stream":false,"input":"hello"}`))
-	var failure *service.UpstreamFailoverError
-	require.ErrorAs(t, err, &failure)
-	require.NotEqual(t, service.OpenAIStreamForbiddenReason, failure.Reason)
-	require.False(t, failure.ShouldReportAccountScheduleFailure())
-	require.Equal(t, resilience.CategoryClientError, service.ClassifyFailoverError(failure).Category)
-	state := NewFailoverState(10, false)
-	hosts := &hostSharingUnscheduler{sameHost: map[int64][]int64{1: {2}}}
-	require.Equal(t, FailoverExhausted, state.HandleFailoverError(ctx, hosts, account.ID, service.PlatformOpenAI, 3, failure))
-	require.Empty(t, state.FailedAccountIDs, "request rejection must stop before excluding accounts or hosts")
-	require.Empty(t, logs.FilterMessage("resilience.forbidden_cooldown").All())
-	handler := &OpenAIGatewayHandler{gatewayService: gateway}
-	handler.handleFailoverExhausted(c, failure, false)
-	require.Equal(t, http.StatusBadRequest, recorder.Code)
-	require.Equal(t, "content_policy_violation", gjson.Get(recorder.Body.String(), "error.code").String())
+	for _, tc := range []struct {
+		name, code, message, wantCode string
+		status                        int
+	}{
+		{"state", "client_tool_continuation_unavailable", "Conversation state rejected", "invalid_prompt", http.StatusUnauthorized},
+		{"context wording", "", "maximum context length exceeded", "context_length_exceeded", http.StatusForbidden},
+		{"cyber", "cyber_policy", "Cyber policy rejected this request", "cyber_policy", http.StatusUnauthorized},
+		{"content safety", "content_policy_violation", "Content policy rejected this request", "invalid_prompt", http.StatusForbidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			core, logs := observer.New(zap.InfoLevel)
+			ctx := logger.IntoContext(budgetCtx(t, resilience.KindText, 7), zap.New(core))
+			c, recorder := newOpenAIResponsesFailoverTestContext(t, ctx)
+			service.InstallDeliveryTracking(c, time.Now())
+			if committed {
+				c.Header("Content-Type", "text/event-stream")
+				n, err := c.Writer.WriteString("event: ping\ndata: {\"type\":\"ping\"}\n\n")
+				require.NoError(t, err)
+				require.True(t, service.NoteDeliveryHeartbeat(c, n))
+				c.Writer.Flush()
+				only, tracked := service.DeliveryOnlyHeartbeats(c)
+				require.True(t, only && tracked)
+			}
+			innerMessage := tc.message + "; workspace_id=workspace-secret. Please try again in 7s."
+			payload, err := json.Marshal(map[string]any{
+				"type": "proxy.upstream_error", "status": tc.status,
+				"upstream_body": map[string]any{"error": map[string]any{"code": tc.code, "message": innerMessage}},
+			})
+			require.NoError(t, err)
+			upstream := &wrappedForbiddenUpstream{payload: string(payload)}
+			gateway := service.NewOpenAIGatewayService(nil, nil, nil, nil, nil, nil, nil, &config.Config{RunMode: config.RunModeSimple}, nil, nil, nil, nil, nil, upstream, nil, nil, nil, nil, nil, nil, nil, nil)
+			account := &service.Account{ID: 1, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test-key"}}
+			_, err = gateway.Forward(ctx, c, account, []byte(`{"model":"gpt-5.1","stream":false,"input":"hello"}`))
+			var failure *service.UpstreamFailoverError
+			require.ErrorAs(t, err, &failure)
+			require.Equal(t, tc.status, failure.WrappedStatus, "preserve validated status for diagnostics")
+			require.NotEqual(t, service.OpenAIStreamForbiddenReason, failure.Reason)
+			require.False(t, failure.ShouldReportAccountScheduleFailure())
+			require.Equal(t, resilience.CategoryClientError, service.ClassifyFailoverError(failure).Category)
+			state := NewFailoverState(10, false)
+			hosts := &hostSharingUnscheduler{sameHost: map[int64][]int64{1: {2}}}
+			require.Equal(t, FailoverExhausted, state.HandleFailoverError(ctx, hosts, account.ID, service.PlatformOpenAI, 3, failure))
+			require.Empty(t, state.FailedAccountIDs, "request rejection must stop before excluding accounts or hosts")
+			require.Empty(t, logs.FilterMessage("resilience.forbidden_cooldown").All())
+
+			// Neither a competing status passthrough nor stale retry advice may
+			// override the terminal semantics of the decoded request rejection.
+			passthroughStatus, passthroughMessage := http.StatusBadGateway, "passthrough must not win"
+			rules := service.NewErrorPassthroughService(&passthroughRuleRepo{rules: []*model.ErrorPassthroughRule{{
+				ID: 1, Name: "wrapped status", Enabled: true, Priority: 1, ErrorCodes: []int{tc.status},
+				MatchMode: model.MatchModeAll, Platforms: []string{"openai"}, ResponseCode: &passthroughStatus, CustomMessage: &passthroughMessage,
+			}}}, nil)
+			require.NotNil(t, rules.MatchRule(service.PlatformOpenAI, failure.StatusCode, failure.ResponseBody))
+			failure.ResponseHeaders = http.Header{"Retry-After": {"9"}}
+			c.Header("Retry-After", "7")
+			c.Set(ginKeyResilienceRetryAfter, 7)
+			resilience.SetRetryAdvice(ctx, resilience.RetryAdvice{Seconds: 7})
+			handler := &OpenAIGatewayHandler{gatewayService: gateway, errorPassthroughService: rules}
+			handler.handleFailoverExhausted(c, failure, committed)
+			wantMessage := tc.message + "; workspace_id=[redacted]"
+			if committed {
+				require.Equal(t, http.StatusOK, recorder.Code, "the heartbeat already committed HTTP 200")
+				stream := recorder.Body.String()
+				require.Contains(t, stream, "event: ping\n")
+				require.Contains(t, stream, "event: response.created\n")
+				terminalAt := strings.LastIndex(stream, "event: response.failed\n")
+				require.NotEqual(t, -1, terminalAt)
+				_, body := parseResponsesFailedSSE(t, stream[terminalAt:])
+				require.Equal(t, tc.wantCode, body["code"])
+				require.Equal(t, wantMessage, body["message"])
+				require.NotContains(t, body, "headers")
+				// Codex 0.166 codex-api/src/sse/responses_error.rs maps these
+				// codes to ContextWindowExceeded, CyberPolicy and InvalidPrompt,
+				// respectively, before the default ApiError::Retryable arm.
+				require.Contains(t, []string{"context_length_exceeded", "cyber_policy", "invalid_prompt"}, body["code"])
+				streamErr, ok := service.GetOpsStreamError(c)
+				require.True(t, ok)
+				require.Equal(t, http.StatusBadRequest, streamErr.IntendedStatus)
+			} else {
+				require.Equal(t, http.StatusBadRequest, recorder.Code)
+				require.Equal(t, tc.wantCode, gjson.Get(recorder.Body.String(), "error.code").String())
+				require.Equal(t, "invalid_request_error", gjson.Get(recorder.Body.String(), "error.type").String())
+				require.Equal(t, wantMessage, gjson.Get(recorder.Body.String(), "error.message").String())
+			}
+			require.Empty(t, recorder.Header().Get("Retry-After"))
+			require.Empty(t, recorder.Result().Header.Get("Retry-After"))
+			require.Empty(t, recorder.Header().Get("x-should-retry"))
+			require.Zero(t, c.GetInt(ginKeyResilienceRetryAfter))
+			require.True(t, resilience.RetryAdviceFrom(ctx).Suppress)
+			require.NotContains(t, recorder.Body.String(), "Please try again")
+			require.NotContains(t, recorder.Body.String(), "workspace-secret")
+			require.NotContains(t, recorder.Body.String(), passthroughMessage)
+		})
+	}
 }
 
 func TestOpenAIWrappedForbiddenFailoverChain(t *testing.T) {

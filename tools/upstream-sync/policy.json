@@ -715,6 +715,10 @@
     },
     {
       "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "if code := failoverErr.OpenAIWrappedRequestRejectionCode(); code != \"\" {"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
       "value": "write(http.StatusBadRequest, \"invalid_request_error\", msg)"
     },
     {

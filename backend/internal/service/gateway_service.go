@@ -765,6 +765,22 @@ func (e *UpstreamFailoverError) isOpenAIWrappedRequestRejection() bool {
 		e.Scope == GatewayFailureScopeRequest && e.NextAccountAction == NextAccountStop
 }
 
+// OpenAIWrappedRequestRejectionCode projects only a pre-output wrapped request
+// rejection to a terminal client code. The validated relay status is diagnostic;
+// classification uses the decoded body and the same predicates as stream routing.
+func (e *UpstreamFailoverError) OpenAIWrappedRequestRejectionCode() string {
+	if !e.isOpenAIWrappedRequestRejection() {
+		return ""
+	}
+	if isOpenAIContextWindowError(extractUpstreamErrorMessage(e.ResponseBody), e.ResponseBody) {
+		return "context_length_exceeded"
+	}
+	if hit, code, _ := detectOpenAICyberPolicy(e.ResponseBody); hit {
+		return code
+	}
+	return "invalid_prompt"
+}
+
 // ShouldReportAccountScheduleFailure prevents provider- and request-scoped
 // credential failures from being misattributed to the selected account. Legacy
 // and inference failures retain their existing scheduler-health behavior.

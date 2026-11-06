@@ -85,14 +85,18 @@ func resilienceContentRejection(c *gin.Context, failoverErr *service.UpstreamFai
 	upstreamMsg := service.SanitizeUpstreamErrorMessage(strings.TrimSpace(service.ExtractUpstreamErrorMessage(failoverErr.ResponseBody)))
 	service.SetOpsUpstreamError(c, failoverErr.StatusCode, upstreamMsg, "")
 	service.MarkOpsUpstreamContentPolicy(c)
+	return sanitizeContentRejectionMessage(upstreamMsg), true
+}
+
+func sanitizeContentRejectionMessage(upstreamMsg string) string {
 	message := strings.TrimSpace(upstreamURLPattern.ReplaceAllString(upstreamMsg, "[url]"))
 	if message == "" {
-		return contentRejectionFallbackMessage, true
+		return contentRejectionFallbackMessage
 	}
 	if runes := []rune(message); len(runes) > contentRejectionMessageMax {
 		message = string(runes[:contentRejectionMessageMax]) + "..."
 	}
-	return message, true
+	return message
 }
 
 // resilienceTranslateError maps internal error types to the client-facing
