@@ -3,8 +3,6 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -16,34 +14,6 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 )
-
-func TestOpenAIWrappedMalformedSchemaDoesNotLogValues(t *testing.T) {
-	for _, tc := range []struct {
-		event, payload, dataType, keys, statusType, codeType string
-	}{
-		{"error", `{"type":"proxy.upstream_error","status":"private-status","code":["private-code"],"message":"private-message","encrypted_content":"private-encrypted"}`, "proxy.upstream_error", "code,encrypted_content,message,status,type", "string", "array"},
-		{"response.failed", `{"type":"response.failed","response":{"error":{"type":"upstream_error","status_code":502,"code":{"value":"private-code"},"message":"private-message"}}}`, "response.failed", "response,type", "number", "object"},
-		{"error", `{"type":"proxy.upstream_error","status":null,"code":false}`, "proxy.upstream_error", "code,status,type", "null", "boolean"},
-		{"error", `{"type":"proxy.upstream_error"}`, "proxy.upstream_error", "type", "missing", "missing"},
-		{"error", `{"type":"proxy.upstream_error","message":"private-message"`, "", "", "invalid", "invalid"},
-	} {
-		core, logs := observer.New(zap.InfoLevel)
-		ctx := logger.IntoContext(context.Background(), zap.New(core))
-		logOpenAIWrappedErrorMalformed(ctx, &Account{ID: 1}, "native_sse", tc.event, []byte(tc.payload))
-		entries := logs.FilterMessage("resilience.wrapped_error_malformed").All()
-		require.Len(t, entries, 1)
-		fields := entries[0].ContextMap()
-		require.Equal(t, tc.event, fields["event_type"])
-		require.Equal(t, tc.dataType, fields["data_type"])
-		require.Equal(t, tc.keys, fields["data_keys"])
-		require.Equal(t, tc.statusType, fields["status_json_type"])
-		require.Equal(t, tc.codeType, fields["code_json_type"])
-		encoded, err := json.Marshal(fields)
-		require.NoError(t, err)
-		require.NotContains(t, string(encoded), "private-")
-		require.NotContains(t, string(encoded), "502")
-	}
-}
 
 func TestOpenAIWrappedMalformedFrameIsProtocolFailure(t *testing.T) {
 	withResilienceSettings(t, nil)
@@ -86,10 +56,7 @@ func TestOpenAIWrappedMalformedFrameIsProtocolFailure(t *testing.T) {
 				require.Zero(t, repo.tempCalls, "invalid wrapper cannot trigger authentication cooldown")
 				require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
 				require.Empty(t, recorder.Body.String())
-				entries := logs.FilterMessage("resilience.wrapped_error_malformed").All()
-				require.Len(t, entries, 1)
-				require.Equal(t, tc.event, entries[0].ContextMap()["event_type"])
-				require.NotEmpty(t, entries[0].ContextMap()["data_keys"])
+				require.Len(t, logs.FilterMessage("resilience.wrapped_error_malformed").All(), 1)
 			})
 		}
 	}

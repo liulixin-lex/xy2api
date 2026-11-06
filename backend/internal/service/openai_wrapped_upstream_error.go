@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -103,57 +102,10 @@ func openAIWrappedUpstreamErrorClassificationBody(payload []byte) []byte {
 	return payload
 }
 
-func logOpenAIWrappedErrorMalformed(ctx context.Context, account *Account, path, event string, payload []byte) {
-	dataType, dataKeys, statusType, codeType := "", "", "invalid", "invalid"
-	if gjson.ValidBytes(payload) {
-		root := gjson.ParseBytes(payload)
-		dataType = strings.TrimSpace(root.Get("type").Str)
-		var keys []string
-		if root.IsObject() {
-			root.ForEach(func(key, _ gjson.Result) bool {
-				keys = append(keys, key.Str)
-				return true
-			})
-		}
-		sort.Strings(keys)
-		dataKeys = strings.Join(keys, ",")
-		status, code := root.Get("status"), root.Get("code")
-		if dataType == "response.failed" {
-			status, code = root.Get("response.error.status_code"), root.Get("response.error.code")
-		}
-		statusType, codeType = openAIWrappedSchemaJSONType(status), openAIWrappedSchemaJSONType(code)
-	}
-	fields := []zap.Field{
-		zap.String("path", strings.TrimSpace(path)),
-		zap.String("event_type", strings.TrimSpace(event)),
-		zap.String("data_type", dataType),
-		zap.String("data_keys", dataKeys),
-		zap.String("status_json_type", statusType),
-		zap.String("code_json_type", codeType),
-	}
+func logOpenAIWrappedErrorMalformed(ctx context.Context, account *Account, path string) {
+	fields := []zap.Field{zap.String("path", strings.TrimSpace(path))}
 	if account != nil {
 		fields = append(fields, zap.Int64("account_id", account.ID))
 	}
 	logger.FromContext(ctx).Warn("resilience.wrapped_error_malformed", fields...)
-}
-
-func openAIWrappedSchemaJSONType(value gjson.Result) string {
-	if !value.Exists() {
-		return "missing"
-	}
-	switch value.Type {
-	case gjson.Null:
-		return "null"
-	case gjson.True, gjson.False:
-		return "boolean"
-	case gjson.Number:
-		return "number"
-	case gjson.String:
-		return "string"
-	default:
-		if value.IsArray() {
-			return "array"
-		}
-		return "object"
-	}
 }

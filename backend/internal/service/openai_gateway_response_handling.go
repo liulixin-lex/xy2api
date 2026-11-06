@@ -564,7 +564,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			eventType := effectiveOpenAISSEEventType(dataBytes, pendingSSEEventType)
 			wrappedStatus, wrappedFrame, malformedWrapped := openAIWrappedUpstreamErrorStatus(pendingSSEEventType, dataBytes)
 			if malformedWrapped {
-				logOpenAIWrappedErrorMalformed(ctx, account, "native_sse", pendingSSEEventType, dataBytes)
+				logOpenAIWrappedErrorMalformed(ctx, account, "native_sse")
 				if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
 					// Failed validation is a control-flow boundary: none of the
 					// rejected frame's status, code or message is classification input.

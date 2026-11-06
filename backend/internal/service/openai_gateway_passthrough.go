@@ -2178,7 +2178,7 @@ func (s *OpenAIGatewayService) nonStreamingTerminalFailureFailover(
 		if c != nil && c.Request != nil {
 			ctx = c.Request.Context()
 		}
-		logOpenAIWrappedErrorMalformed(ctx, account, "nonstreaming_sse", sseEvent, payload)
+		logOpenAIWrappedErrorMalformed(ctx, account, "nonstreaming_sse")
 		if account == nil || IsResponseCommitted(c) {
 			return nil
 		}
@@ -2530,7 +2530,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				wrappedPayload = append([]byte(nil), dataBytes...)
 			}
 			if malformedWrapped {
-				logOpenAIWrappedErrorMalformed(ctx, account, "passthrough_sse", pendingSSEEventType, dataBytes)
+				logOpenAIWrappedErrorMalformed(ctx, account, "passthrough_sse")
 				if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
 					return passthroughReturn(resultWithUsage(), s.newOpenAIStreamFailoverErrorWithModel(c, account, true, upstreamRequestID, nil, openAIMalformedWrappedErrorMessage, mappedModel, resp.Header))
 				}
