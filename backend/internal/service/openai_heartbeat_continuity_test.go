@@ -116,50 +116,58 @@ func (u *replayHeartbeatUpstream) Do(req *http.Request, proxy string, id int64, 
 }
 
 func TestForwardReplayResumesCommittedHeartbeat(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		withResilienceSettings(t, func(s *resilience.Settings) { s.Keepalive.IntervalSeconds = 5 })
-		resetWebSearchDeclarations(t)
-		up := newGWUpstream(context.Background())
-		defer func() { _ = up.Close() }()
-		recorder := &httpUpstreamRecorder{responses: []*http.Response{up.response(context.Background()), webSearchSuccessStream("resp_replayed")}}
-		upstream := &replayHeartbeatUpstream{httpUpstreamRecorder: recorder, secondStarted: make(chan struct{}), release: make(chan struct{})}
-		defer func() {
-			select {
-			case <-upstream.release:
-			default:
+	for _, passthrough := range []bool{false, true} {
+		name := "native"
+		if passthrough {
+			name = "passthrough"
+		}
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				withResilienceSettings(t, func(s *resilience.Settings) { s.Keepalive.IntervalSeconds = 5 })
+				resetWebSearchDeclarations(t)
+				up := newGWUpstream(context.Background())
+				defer func() { _ = up.Close() }()
+				recorder := &httpUpstreamRecorder{responses: []*http.Response{up.response(context.Background()), webSearchSuccessStream("resp_replayed")}}
+				upstream := &replayHeartbeatUpstream{httpUpstreamRecorder: recorder, secondStarted: make(chan struct{}), release: make(chan struct{})}
+				defer func() {
+					select {
+					case <-upstream.release:
+					default:
+						close(upstream.release)
+					}
+				}()
+				svc := newOpenAIImageGenerationControlTestService(recorder)
+				svc.httpUpstream = upstream
+				svc.cfg.Gateway.StreamKeepaliveInterval = 5
+				req := newWebSearchReplayRequest(t)
+				w := &continuityWriter{gwWriter: newGWWriter()}
+				c, _ := gin.CreateTestContext(w)
+				c.Request = req.c.Request
+				stop := StartPreOutputKeepalive(c, PreOutputProtocolResponses, 5*time.Second, 5*time.Second)
+				defer stop()
+				start := time.Now()
+				time.Sleep(6 * time.Second)
+				synctest.Wait()
+				done := make(chan error, 1)
+				go func() {
+					_, err := svc.Forward(req.ctx, c, webSearchReplayAccount(passthrough), []byte(openAIWebSearchHistoryCompactionBody))
+					done <- err
+				}()
+				up.send(t, ptCreated)
+				synctest.Wait()
+				time.Sleep(6 * time.Second)
+				up.send(t, webSearchRejectionEvent)
+				<-upstream.secondStarted
+				synctest.Wait()
+				time.Sleep(8 * time.Second)
+				synctest.Wait()
+				require.Equal(t, []time.Time{start.Add(5 * time.Second), start.Add(10 * time.Second), start.Add(15 * time.Second), start.Add(20 * time.Second)}, w.pingTimes())
+				require.NotContains(t, w.Body(), "response.created")
 				close(upstream.release)
-			}
-		}()
-		svc := newOpenAIImageGenerationControlTestService(recorder)
-		svc.httpUpstream = upstream
-		svc.cfg.Gateway.StreamKeepaliveInterval = 5
-		req := newWebSearchReplayRequest(t)
-		w := &continuityWriter{gwWriter: newGWWriter()}
-		c, _ := gin.CreateTestContext(w)
-		c.Request = req.c.Request
-		stop := StartPreOutputKeepalive(c, PreOutputProtocolResponses, 5*time.Second, 5*time.Second)
-		defer stop()
-		start := time.Now()
-		time.Sleep(6 * time.Second)
-		synctest.Wait()
-		done := make(chan error, 1)
-		go func() {
-			_, err := svc.Forward(req.ctx, c, webSearchReplayAccount(false), []byte(openAIWebSearchHistoryCompactionBody))
-			done <- err
-		}()
-		up.send(t, ptCreated)
-		synctest.Wait()
-		time.Sleep(6 * time.Second)
-		up.send(t, webSearchRejectionEvent)
-		<-upstream.secondStarted
-		synctest.Wait()
-		time.Sleep(8 * time.Second)
-		synctest.Wait()
-		require.Equal(t, []time.Time{start.Add(5 * time.Second), start.Add(10 * time.Second), start.Add(15 * time.Second), start.Add(20 * time.Second)}, w.pingTimes())
-		require.NotContains(t, w.Body(), "response.created")
-		close(upstream.release)
-		require.NoError(t, <-done)
-	})
+				require.NoError(t, <-done)
+			})
+		})
+	}
 }
 
 func (w *continuityWriter) Write(p []byte) (int, error) {

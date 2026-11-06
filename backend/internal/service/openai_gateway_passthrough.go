@@ -378,6 +378,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	requestRepair.m3 = s.armOpenAIM3(c, account, body)
 	replayAttempt := false
 	for {
+		if replayAttempt {
+			ResumeCommittedPreOutputKeepalive(c, time.Duration(resilience.Current().Keepalive.IntervalSeconds)*time.Second)
+		}
 		derivedBody, deriveErr := requestRepair.m3.derive(ctx, body)
 		if deriveErr != nil {
 			return nil, deriveErr
