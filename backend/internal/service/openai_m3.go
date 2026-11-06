@@ -364,6 +364,11 @@ func openAIM3JSONAccepted(body []byte) bool {
 		root.Get("error").Type == gjson.Null
 }
 
+func openAIM3RewrittenShapeRejected(status int, payload []byte, message string) bool {
+	return (status == http.StatusBadRequest || status == http.StatusUnprocessableEntity) &&
+		!openAIStreamRequestRejected(payload, message)
+}
+
 func (a *openAIM3Attempt) afterLocalRepairs(ctx context.Context, body, payload []byte, message string, status, wrappedStatus int) error {
 	if a == nil {
 		return nil
@@ -374,7 +379,7 @@ func (a *openAIM3Attempt) afterLocalRepairs(ctx context.Context, body, payload [
 	if signal := a.learn(ctx, body, payload, message, status, wrappedStatus); signal != nil {
 		return signal
 	}
-	if len(a.state.replaced) > 0 && status >= 400 && status < 500 && status != 429 {
+	if len(a.state.replaced) > 0 && openAIM3RewrittenShapeRejected(status, payload, message) {
 		return a.failure(resilience.StateNone, "", "rewritten_4xx")
 	}
 	return nil
@@ -463,7 +468,7 @@ func deferOpenAIM3ToForward(c *gin.Context, account *Account, payload []byte, me
 		}
 	}
 	_, trigger := openAIM3Trigger(payload, message, wrappedStatus)
-	if !trigger && !(len(r.m3.state.replaced) > 0 && status >= 400 && status < 500 && status != http.StatusTooManyRequests) {
+	if !trigger && !(len(r.m3.state.replaced) > 0 && openAIM3RewrittenShapeRejected(status, payload, message)) {
 		return nil
 	}
 	return annotateUpstreamFailoverAccount(&UpstreamFailoverError{
