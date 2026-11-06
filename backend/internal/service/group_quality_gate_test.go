@@ -307,13 +307,13 @@ func TestGroupQualityV3DimensionVotesAndMemory(t *testing.T) {
 	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
 	state := groupQualityDimensionState{}
 	vote := func(valid, fail, pass, recovered bool) {
-		state = voteGroupQualityDimension(state, now, valid, fail, pass, recovered)
+		state = voteGroupQualityDimension(state, now, valid, fail, pass, recovered, 2)
 		now = now.Add(time.Minute)
 	}
 	vote(true, true, false, false)
 	require.Equal(t, "none", state.state())
 	frozen := state
-	state = voteGroupQualityDimension(state, now.Add(-30*time.Second), true, true, false, false)
+	state = voteGroupQualityDimension(state, now.Add(-30*time.Second), true, true, false, false, 2)
 	require.Equal(t, frozen, state, "one vote per minute")
 	vote(true, true, false, false)
 	require.Equal(t, "fail", state.state())
@@ -338,6 +338,66 @@ func TestGroupQualityV3DimensionVotesAndMemory(t *testing.T) {
 	state.LastFail = now
 	require.True(t, state.hasBad(now.Add(2*time.Hour)))
 	require.False(t, state.hasBad(now.Add(2*time.Hour+time.Nanosecond)))
+}
+
+func TestGroupQualityTTFTRecoveryNeedsFifteenConsecutiveVotes(t *testing.T) {
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	state := groupQualityDimensionState{}
+	for i := 0; i < 2; i++ {
+		state = voteGroupQualityDimension(state, now, true, true, false, false, 2)
+		now = now.Add(time.Minute)
+	}
+	require.Equal(t, "fail", state.state())
+	for i := 0; i < 60; i++ {
+		pass := i%7 < 3
+		fail := !pass
+		state = voteGroupQualityDimension(state, now, true, fail, pass, pass, groupQualityTTFTRecoverVotes)
+		now = now.Add(time.Minute)
+	}
+	require.Equal(t, "fail", state.state(), "three recovered minutes cannot clear a noisy TTFT failure")
+
+	for i := 0; i < groupQualityTTFTRecoverVotes-1; i++ {
+		state = voteGroupQualityDimension(state, now, true, false, true, true, groupQualityTTFTRecoverVotes)
+		now = now.Add(time.Minute)
+		require.Equal(t, "fail", state.state())
+	}
+	state = voteGroupQualityDimension(state, now, true, false, true, true, groupQualityTTFTRecoverVotes)
+	require.Equal(t, "pass", state.state())
+}
+
+func TestGroupQualityTTFTRecoveryMiddleBandClearsAndBadMemoryUsesLongStreak(t *testing.T) {
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	state := groupQualityDimensionState{State: "fail", LastFail: now}
+	for i := 0; i < 3; i++ {
+		state = voteGroupQualityDimension(state, now, true, false, true, true, groupQualityTTFTRecoverVotes)
+		now = now.Add(time.Minute)
+	}
+	state = voteGroupQualityDimension(state, now, true, false, true, false, groupQualityTTFTRecoverVotes)
+	require.Zero(t, state.Votes)
+	require.Equal(t, "fail", state.state())
+
+	state = groupQualityDimensionState{State: "none", LastFail: now}
+	for i := 0; i < groupQualityTTFTRecoverVotes-1; i++ {
+		state = voteGroupQualityDimension(state, now, true, false, true, true, groupQualityTTFTRecoverVotes)
+		now = now.Add(time.Minute)
+	}
+	require.Equal(t, "none", state.state())
+	state = voteGroupQualityDimension(state, now, true, false, true, true, groupQualityTTFTRecoverVotes)
+	require.Equal(t, "pass", state.state())
+}
+
+func TestGroupQualityNonTTFTRecoveryAndFailureVotesRemainTwo(t *testing.T) {
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	state := groupQualityDimensionState{}
+	state = voteGroupQualityDimension(state, now, true, false, true, false, 2)
+	state = voteGroupQualityDimension(state, now.Add(time.Minute), true, false, true, false, 2)
+	require.Equal(t, "pass", state.state())
+	state = voteGroupQualityDimension(state, now.Add(2*time.Minute), true, true, false, false, 2)
+	state = voteGroupQualityDimension(state, now.Add(3*time.Minute), true, true, false, false, 2)
+	require.Equal(t, "fail", state.state())
+	state = voteGroupQualityDimension(state, now.Add(4*time.Minute), true, false, true, true, 2)
+	state = voteGroupQualityDimension(state, now.Add(5*time.Minute), true, false, true, true, 2)
+	require.Equal(t, "pass", state.state())
 }
 
 func TestGroupQualityV3TierAndRecoveryRules(t *testing.T) {

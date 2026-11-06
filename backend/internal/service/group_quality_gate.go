@@ -22,6 +22,8 @@ const (
 	groupQualityAccountWindow     = 30 * time.Minute
 	groupQualityBaselineWindow    = 2 * time.Hour
 	groupQualityCompositionWindow = 6 * time.Hour
+	// Recovery needs half of the GM30 window in consecutive votes.
+	groupQualityTTFTRecoverVotes = int(groupQualityAccountWindow / (2 * time.Minute))
 )
 
 // GroupQualityGatePolicy preserves the legacy policy for version rollback.
@@ -287,7 +289,7 @@ func (s groupQualityDimensionState) badUntil() *time.Time {
 
 // A missing observation sets none and breaks the vote streak, but keeps the
 // dimension's bad memory. A stale evaluation must not call this function.
-func voteGroupQualityDimension(s groupQualityDimensionState, now time.Time, valid, fail, pass, recovered bool) groupQualityDimensionState {
+func voteGroupQualityDimension(s groupQualityDimensionState, now time.Time, valid, fail, pass, recovered bool, recoverVotes int) groupQualityDimensionState {
 	minute := now.Truncate(time.Minute)
 	if !s.LastVote.IsZero() && !minute.After(s.LastVote) {
 		return s
@@ -306,11 +308,15 @@ func voteGroupQualityDimension(s groupQualityDimensionState, now time.Time, vali
 	if vote == "" {
 		s.Vote, s.Votes = "", 0
 	} else {
+		need := 2
+		if vote == "pass" && (s.state() == "fail" || s.hasBad(now)) {
+			need = recoverVotes
+		}
 		if s.Vote != vote {
 			s.Vote, s.Votes = vote, 0
 		}
-		s.Votes = min(s.Votes+1, 2)
-		if s.Votes == 2 {
+		s.Votes = min(s.Votes+1, need)
+		if s.Votes == need {
 			s.State = vote
 			if vote == "pass" {
 				s.LastFail = time.Time{}

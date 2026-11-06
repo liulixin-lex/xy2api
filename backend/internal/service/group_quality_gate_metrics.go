@@ -269,21 +269,21 @@ func groupQualityPrediction(m groupQualityMetrics, composition groupQualityCompo
 
 func evaluateGroupQualityMember(now time.Time, p GroupQualityGateV3Policy, m groupQualityMetrics, expected *float64, state groupQualityAccountState) groupQualityAccountState {
 	if expected == nil {
-		state.TTFT = voteGroupQualityDimension(state.TTFT, now, false, false, false, false)
+		state.TTFT = voteGroupQualityDimension(state.TTFT, now, false, false, false, false, groupQualityTTFTRecoverVotes)
 	} else {
 		limit := float64(p.MaxTTFTP90Seconds) * 1000
-		state.TTFT = voteGroupQualityDimension(state.TTFT, now, true, *expected > limit, *expected <= limit, *expected <= .9*limit)
+		state.TTFT = voteGroupQualityDimension(state.TTFT, now, true, *expected > limit, *expected <= limit, *expected <= .9*limit, groupQualityTTFTRecoverVotes)
 	}
 	if m.ErrorSamples < 20 || m.ErrorRate == nil {
-		state.Error = voteGroupQualityDimension(state.Error, now, false, false, false, false)
+		state.Error = voteGroupQualityDimension(state.Error, now, false, false, false, false, 2)
 	} else {
-		state.Error = voteGroupQualityDimension(state.Error, now, true, m.Failures >= 5 && *m.ErrorRate > p.MaxErrorRate, *m.ErrorRate <= p.MaxErrorRate, *m.ErrorRate <= .8*p.MaxErrorRate)
+		state.Error = voteGroupQualityDimension(state.Error, now, true, m.Failures >= 5 && *m.ErrorRate > p.MaxErrorRate, *m.ErrorRate <= p.MaxErrorRate, *m.ErrorRate <= .8*p.MaxErrorRate, 2)
 	}
 	if m.CacheSamples < 20 || m.CacheRate == nil || m.CacheHigh == nil {
-		state.Cache = voteGroupQualityDimension(state.Cache, now, false, false, false, false)
+		state.Cache = voteGroupQualityDimension(state.Cache, now, false, false, false, false, 2)
 	} else {
 		pass := *m.CacheRate >= p.MinCacheKeepRate
-		state.Cache = voteGroupQualityDimension(state.Cache, now, true, *m.CacheHigh < p.MinCacheKeepRate, pass, pass)
+		state.Cache = voteGroupQualityDimension(state.Cache, now, true, *m.CacheHigh < p.MinCacheKeepRate, pass, pass, 2)
 	}
 	return state
 }
