@@ -251,6 +251,13 @@ var clientErrorCodes = map[string]struct{}{
 	"request_too_large":        {},
 }
 
+// IsKnownClientErrorCode identifies explicit client-fault codes, not the
+// generic error type used by some upstreams for their own restrictions.
+func IsKnownClientErrorCode(code string) bool {
+	_, known := clientErrorCodes[strings.ToLower(strings.TrimSpace(code))]
+	return known
+}
+
 // contentPolicyCodes are the codes (or types) of an upstream content-safety
 // refusal; they are checked before clientErrorCodes. cyber_policy and
 // bio_policy keep their own handling.

@@ -500,8 +500,11 @@ func (s *OpenAIGatewayService) handleErrorResponseCore(
 	requestBody []byte,
 	accountErrorAlreadyHandled bool,
 	requestedModel ...string,
-) (*OpenAIForwardResult, error) {
+) (result *OpenAIForwardResult, forwardErr error) {
 	body := s.readUpstreamErrorBody(resp)
+	defer func() {
+		s.noteOpenAITerminalRejection(ctx, account, resp.StatusCode, resp.Header, body, forwardErr)
+	}()
 	captureOpenAIStateRejection(c, account, body, "", "native_http", false, requestBody)
 	body = s.redactAgentIdentitySensitiveBody(ctx, account, body)
 
@@ -778,8 +781,11 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 	writeError compatErrorWriter,
 	accountErrorAlreadyHandled bool,
 	requestedModel ...string,
-) (*OpenAIForwardResult, error) {
+) (result *OpenAIForwardResult, forwardErr error) {
 	body := s.readUpstreamErrorBody(resp)
+	defer func() {
+		s.noteOpenAITerminalRejection(c.Request.Context(), account, resp.StatusCode, resp.Header, body, forwardErr)
+	}()
 	body = s.redactAgentIdentitySensitiveBody(context.Background(), account, body)
 
 	// cyber_policy：兼容路径（Chat Completions / Anthropic）以各自格式回写错误，

@@ -1084,7 +1084,10 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	account *Account,
 	requestBody []byte,
 	responseBody []byte,
-) error {
+) (forwardErr error) {
+	defer func() {
+		s.noteOpenAITerminalRejection(ctx, account, resp.StatusCode, resp.Header, responseBody, forwardErr)
+	}()
 	captureOpenAIStateRejection(c, account, responseBody, "", "passthrough_http", false, requestBody)
 	MarkResponseCommitted(c)
 	body := s.redactAgentIdentitySensitiveBody(ctx, account, responseBody)

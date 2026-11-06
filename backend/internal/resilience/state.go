@@ -427,6 +427,12 @@ func (s *RequestState) session() (int64, string, SessionRecorder) {
 	return s.sessionGroupID, s.sessionHash, s.sessionRec
 }
 
+// SessionIdentity returns the actual group and sticky session after selection.
+func (s *RequestState) SessionIdentity() (int64, string) {
+	group, session, _ := s.session()
+	return group, session
+}
+
 // SessionFailure reports a failed attempt of the session on an account.
 func (s *RequestState) SessionFailure(ctx context.Context, accountID int64, c Category) {
 	g, h, rec := s.session()

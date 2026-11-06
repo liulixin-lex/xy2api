@@ -4106,6 +4106,30 @@
     {
       "path": "backend/internal/service/resilience_compat_stream_trace_test.go",
       "value": "func TestPreludeReleaseSchemaKeysBounded(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/resilience/classify.go",
+      "value": "func IsKnownClientErrorCode(code string) bool {"
+    },
+    {
+      "path": "backend/internal/resilience/state.go",
+      "value": "func (s *RequestState) SessionIdentity() (int64, string) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_upstream_errors.go",
+      "value": "s.noteOpenAITerminalRejection(ctx, account, resp.StatusCode, resp.Header, body, forwardErr)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "s.noteOpenAITerminalRejection(ctx, account, resp.StatusCode, resp.Header, responseBody, forwardErr)"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_rejection.go",
+      "value": "s.AvoidOpenAIStateAccount(stateCtx, group, session, account.ID)"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_rejection_test.go",
+      "value": "func TestOpenAITerminalRejectionStopsAvoidingAcrossHosts(t *testing.T) {"
     }
   ],
   "forbidden_module_paths": [
