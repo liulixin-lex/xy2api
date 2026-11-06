@@ -33,11 +33,14 @@ func TestOpenAIModelAvailabilityForwardSwitchesAccount(t *testing.T) {
 			name = "passthrough"
 		}
 		for _, sample := range []struct {
-			name, body string
-			status     int
+			name, body  string
+			status      int
+			restriction bool
 		}{
-			{"unsupported", `{"error":{"type":"invalid_request_error","message":"The 'requested-model' model is not supported when using Codex with a ChatGPT account."}}`, 400},
-			{"unavailable", `model is unavailable`, 404},
+			{"unsupported", `{"error":{"type":"invalid_request_error","message":"The 'requested-model' model is not supported when using Codex with a ChatGPT account."}}`, 400, false},
+			{"unavailable", `model is unavailable`, 404, false},
+			{"relay unavailable", `{"error":{"type":"internal_server_error","message":"model is unavailable"}}`, 503, false},
+			{"upstream request restriction", `{"error":{"type":"invalid_request_error","code":"basispoints_request_invalid","message":"inline images exceed 32 MiB"}}`, 502, true},
 		} {
 			t.Run(name+"/"+sample.name, func(t *testing.T) {
 				c, rec := newOpenAIUpstreamErrorTestContext(t)
@@ -65,12 +68,18 @@ func TestOpenAIModelAvailabilityForwardSwitchesAccount(t *testing.T) {
 				require.Nil(t, result)
 				var failover *UpstreamFailoverError
 				require.ErrorAs(t, err, &failover)
-				require.Equal(t, openAIModelUnavailableReason, failover.Reason)
+				expectedReason, expectedCategory := openAIModelUnavailableReason, resilience.CategoryModelUnsupported
+				if sample.restriction {
+					expectedReason, expectedCategory = openAIUpstreamRequestRestrictionReason, resilience.CategoryUpstreamRequestRestriction
+				}
+				require.Equal(t, expectedReason, failover.Reason)
 				require.Equal(t, sample.status, failover.StatusCode)
 				require.True(t, failover.ShouldRetryNextAccount())
 				require.False(t, failover.RetryableOnSameAccount)
 				require.False(t, failover.ShouldReportAccountScheduleFailure())
-				require.Equal(t, resilience.CategoryModelUnsupported, ClassifyFailoverError(failover).Category)
+				require.Equal(t, expectedCategory, ClassifyFailoverError(failover).Category)
+				_, _, healthFailure := classifyOpenAIAPIKeyHealthFailure(failover)
+				require.False(t, healthFailure)
 				require.False(t, IsResponseCommitted(c))
 				require.Empty(t, rec.Body.String())
 				events, ok := c.Get(OpsUpstreamErrorsKey)
@@ -78,15 +87,17 @@ func TestOpenAIModelAvailabilityForwardSwitchesAccount(t *testing.T) {
 				upstreamEvents, ok := events.([]*OpsUpstreamErrorEvent)
 				require.True(t, ok)
 				require.Len(t, upstreamEvents, 1)
-				require.Equal(t, string(resilience.CategoryModelUnsupported), upstreamEvents[0].ResilienceCategory)
+				require.Equal(t, string(expectedCategory), upstreamEvents[0].ResilienceCategory)
 				upstreamModel := "scheduled-model"
 				if passthrough {
 					upstreamModel = "requested-model"
 				}
 				require.Equal(t, upstreamModel, gjson.GetBytes(upstream.bodies[0], "model").String())
 				entry, recorded := svc.getOpenAIAccountModelTransientState().readEntry(first.ID, upstreamModel, time.Now())
-				require.True(t, recorded)
-				require.Equal(t, 1, entry.failureStreak)
+				require.Equal(t, !sample.restriction, recorded)
+				if recorded {
+					require.Equal(t, 1, entry.failureStreak)
+				}
 				_, remapped := svc.openaiModelTransient.readEntry(first.ID, "must-not-remap", time.Now())
 				require.False(t, remapped)
 
@@ -113,6 +124,7 @@ func TestOpenAIModelAvailabilityPreservesRequestRejections(t *testing.T) {
 		}
 		for _, sample := range []struct{ name, body string }{
 			{"ordinary 400", openAIInvalidFunctionParametersBody},
+			{"ordinary request restriction on 400", `{"error":{"type":"invalid_request_error","code":"basispoints_request_invalid","message":"inline images exceed 32 MiB"}}`},
 			{"echoed content", `{"error":{"message":"Invalid input"},"input":{"message":"model is unavailable"}}`},
 			{"context", `{"error":{"code":"context_length_exceeded","message":"maximum context length exceeded; model is unavailable"}}`},
 			{"content safety", `{"error":{"code":"content_policy_violation","message":"model is unavailable"}}`},

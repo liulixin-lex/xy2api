@@ -787,7 +787,7 @@ func (e *UpstreamFailoverError) OpenAIWrappedRequestRejectionCode() string {
 // and inference failures retain their existing scheduler-health behavior.
 func (e *UpstreamFailoverError) ShouldReportAccountScheduleFailure() bool {
 	// Forbidden intentionally uses soft cooldown/session streaks without also reporting scheduler-health failure.
-	if e == nil || e.IsCapabilityStreamOnly() || e.Reason == OpenAIStreamForbiddenReason || e.Reason == OpenAIStateRepairReason || e.Reason == openAIModelUnavailableReason || e.isOpenAIWrappedRequestRejection() {
+	if e == nil || e.IsCapabilityStreamOnly() || e.Reason == OpenAIStreamForbiddenReason || e.Reason == OpenAIStateRepairReason || e.Reason == openAIModelUnavailableReason || e.Reason == openAIUpstreamRequestRestrictionReason || e.isOpenAIWrappedRequestRejection() {
 		return false
 	}
 	return !e.IsCredentialFailure() || e.Scope == GatewayFailureScopeAccount

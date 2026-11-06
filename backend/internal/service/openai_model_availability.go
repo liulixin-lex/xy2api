@@ -13,17 +13,27 @@ import (
 )
 
 const openAIModelUnavailableReason = GatewayFailureReason("openai_model_unavailable")
+const openAIUpstreamRequestRestrictionReason = GatewayFailureReason(resilience.ReasonUpstreamRequestRestriction)
 
 // failoverOpenAIModelAvailability is shared by native and passthrough HTTP
 // routing, after local request repairs and compact fallback. It owns the
-// decision, observation and model cooldown together; stream events keep their
+// decision and observation together. Provider request restrictions share this
+// unpenalized exit without a model cooldown; stream events keep their
 // existing policy. A bare forwarder has no account-selection owner.
 func (s *OpenAIGatewayService) failoverOpenAIModelAvailability(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, body []byte, model string, passthrough bool) *UpstreamFailoverError {
 	if s == nil || s.accountRepo == nil || !account.IsOpenAICompatible() || resp == nil ||
-		openAIStreamClientOutputStarted(c, false) || !isOpenAIModelAvailabilityError(resp.StatusCode, "", body) {
+		openAIStreamClientOutputStarted(c, false) {
 		return nil
 	}
-	s.recordOpenAIModelAvailabilityFailure(account, model)
+	reason, failureCategory := openAIModelUnavailableReason, resilience.CategoryModelUnsupported
+	switch {
+	case isOpenAIModelAvailabilityError(resp.StatusCode, "", body):
+		s.recordOpenAIModelAvailabilityFailure(account, model)
+	case !openAIStreamRequestRejected(body, "") && classifyUpstreamHTTP(resp.StatusCode, resp.Header, body, "").Category == resilience.CategoryUpstreamRequestRestriction:
+		reason, failureCategory = openAIUpstreamRequestRestrictionReason, resilience.CategoryUpstreamRequestRestriction
+	default:
+		return nil
+	}
 	body = s.redactAgentIdentitySensitiveBody(ctx, account, body)
 	message := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body)))
 	if message == "" && !gjson.ValidBytes(body) {
@@ -39,7 +49,7 @@ func (s *OpenAIGatewayService) failoverOpenAIModelAvailability(ctx context.Conte
 	}
 	category := ""
 	if resilience.Current().FailureOn() {
-		category = string(resilience.CategoryModelUnsupported)
+		category = string(failureCategory)
 	}
 	setOpsUpstreamError(c, resp.StatusCode, message, detail)
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -62,7 +72,7 @@ func (s *OpenAIGatewayService) failoverOpenAIModelAvailability(ctx context.Conte
 		ResponseHeaders:   resp.Header.Clone(),
 		ResponseBody:      body,
 		Scope:             GatewayFailureScopeAccount,
-		Reason:            openAIModelUnavailableReason,
+		Reason:            reason,
 		NextAccountAction: NextAccountRetry,
 	}, account)
 }
@@ -71,7 +81,7 @@ func (s *OpenAIGatewayService) failoverOpenAIModelAvailability(ctx context.Conte
 // availability phrases. Only error-message fields count; echoed request
 // content must not change routing. Request rejections always take precedence.
 func isOpenAIModelAvailabilityError(status int, message string, body []byte) bool {
-	if status != http.StatusBadRequest && status != http.StatusNotFound {
+	if status != http.StatusBadRequest && status != http.StatusNotFound && (status < 500 || status > 599) {
 		return false
 	}
 	if openAIStreamRequestRejected(body, message) {

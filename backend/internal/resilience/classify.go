@@ -17,18 +17,19 @@ type Category string
 
 // Categories (design §2.2). Values are persisted in logs and statistics.
 const (
-	CategorySuccess            Category = "SUCCESS"
-	CategoryBalance            Category = "BALANCE"
-	CategoryAuth               Category = "AUTH"
-	CategoryRateLimitReset     Category = "RATE_LIMIT_RESET"
-	CategoryRateLimit          Category = "RATE_LIMIT"
-	CategoryCapacityShed       Category = "CAPACITY_SHED"
-	CategoryTransient          Category = "TRANSIENT"
-	CategoryFirstOutputTimeout Category = "FIRST_OUTPUT_TIMEOUT"
-	CategoryStall              Category = "STALL"
-	CategoryClientCancel       Category = "CLIENT_CANCEL"
-	CategoryClientError        Category = "CLIENT_ERROR"
-	CategoryModelUnsupported   Category = "MODEL_UNSUPPORTED"
+	CategorySuccess                    Category = "SUCCESS"
+	CategoryBalance                    Category = "BALANCE"
+	CategoryAuth                       Category = "AUTH"
+	CategoryRateLimitReset             Category = "RATE_LIMIT_RESET"
+	CategoryRateLimit                  Category = "RATE_LIMIT"
+	CategoryCapacityShed               Category = "CAPACITY_SHED"
+	CategoryTransient                  Category = "TRANSIENT"
+	CategoryFirstOutputTimeout         Category = "FIRST_OUTPUT_TIMEOUT"
+	CategoryStall                      Category = "STALL"
+	CategoryClientCancel               Category = "CLIENT_CANCEL"
+	CategoryClientError                Category = "CLIENT_ERROR"
+	CategoryModelUnsupported           Category = "MODEL_UNSUPPORTED"
+	CategoryUpstreamRequestRestriction Category = "UPSTREAM_REQUEST_RESTRICTION"
 )
 
 // HardRateLimitThreshold is the reset distance beyond which a rate limit is a
@@ -88,6 +89,9 @@ func (r Result) StatusOnly() bool { return strings.HasPrefix(r.Reason, "status_"
 // content-safety refusal of the request.
 const ReasonContentPolicy = "content_policy"
 
+// ReasonUpstreamRequestRestriction marks a provider-specific request limitation.
+const ReasonUpstreamRequestRestriction = "upstream_request_restriction"
+
 // ReasonEncryptedContent is the reason of a CLIENT_ERROR caused by upstream
 // rejecting encrypted request content it cannot decrypt or verify.
 const ReasonEncryptedContent = "encrypted_content"
@@ -136,7 +140,7 @@ func (r Result) Hard() bool {
 func (c Category) SwitchAccount() bool {
 	switch c {
 	case CategoryBalance, CategoryAuth, CategoryRateLimitReset, CategoryRateLimit,
-		CategoryCapacityShed, CategoryTransient, CategoryFirstOutputTimeout, CategoryModelUnsupported:
+		CategoryCapacityShed, CategoryTransient, CategoryFirstOutputTimeout, CategoryModelUnsupported, CategoryUpstreamRequestRestriction:
 		return true
 	}
 	return false
@@ -384,7 +388,7 @@ func isStructuredModelUnsupportedError(err structuredModelError, statusCode int)
 	if typeModel {
 		return code == "" || code == "invalid_request_error"
 	}
-	if err.Param != "" {
+	if param := strings.TrimSpace(err.Param); param != "" && param != "model" {
 		return false
 	}
 	if code != "" && code != "invalid_request_error" {
@@ -601,6 +605,12 @@ func classify(o Outcome, extraBalanceKeywords []string, decisionV2 bool) Result 
 		return Result{Category: CategoryTransient, RetryAfter: retryAfter, Reason: "status_404"}
 	}
 	if _, ok := clientErrorCodes[typ]; ok {
+		// A generic request-error type cannot establish client fault on 5xx.
+		// Explicit request evidence retains its existing terminal classification.
+		if status >= 500 && status <= 599 && typ == "invalid_request_error" &&
+			!IsContextWindowError(o.Message, o.Body) && !contentPolicyText(http.StatusForbidden, text, lowerBody) {
+			return Result{Category: CategoryUpstreamRequestRestriction, Reason: ReasonUpstreamRequestRestriction}
+		}
 		return Result{Category: CategoryClientError, Reason: "client_type"}
 	}
 	switch status {

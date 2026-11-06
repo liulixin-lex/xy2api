@@ -99,6 +99,8 @@ func (s *RateLimitService) resilienceHandleUpstreamError(ctx context.Context, ac
 	res := classifyUpstreamHTTP(statusCode, headers, responseBody, upstreamMsg)
 	logUnclassified(account, statusCode, responseBody, upstreamMsg, res)
 	switch res.Category {
+	case resilience.CategoryUpstreamRequestRestriction:
+		return true, false
 	case resilience.CategoryBalance:
 		if !cfg.BalanceOn() || !resilienceBalanceEligible(account) {
 			return false, false
@@ -439,6 +441,9 @@ func ClassifyFailoverError(e *UpstreamFailoverError) resilience.Result {
 	}
 	if e.Reason == OpenAIStateRepairReason {
 		return resilience.Result{Category: resilience.CategoryClientError, Reason: string(OpenAIStateRepairReason)}
+	}
+	if e.Reason == openAIUpstreamRequestRestrictionReason {
+		return resilience.Result{Category: resilience.CategoryUpstreamRequestRestriction, Reason: string(openAIUpstreamRequestRestrictionReason)}
 	}
 	if e.Reason == openAIModelUnavailableReason {
 		return resilience.Result{Category: resilience.CategoryModelUnsupported, Reason: string(openAIModelUnavailableReason)}

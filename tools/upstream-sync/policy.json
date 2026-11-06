@@ -1353,7 +1353,7 @@
     },
     {
       "path": "backend/internal/service/gateway_service.go",
-      "value": "if e == nil || e.IsCapabilityStreamOnly() || e.Reason == OpenAIStreamForbiddenReason || e.Reason == OpenAIStateRepairReason || e.Reason == openAIModelUnavailableReason || e.isOpenAIWrappedRequestRejection() {"
+      "value": "if e == nil || e.IsCapabilityStreamOnly() || e.Reason == OpenAIStreamForbiddenReason || e.Reason == OpenAIStateRepairReason || e.Reason == openAIModelUnavailableReason || e.Reason == openAIUpstreamRequestRestrictionReason || e.isOpenAIWrappedRequestRejection() {"
     },
     {
       "path": "backend/internal/service/openai_gateway_grok.go",
@@ -4070,6 +4070,18 @@
     {
       "path": "backend/internal/service/openai_wrapped_malformed_routing_test.go",
       "value": "func TestOpenAIWrappedMalformedSchemaDoesNotLogValues(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/resilience/classify.go",
+      "value": "return Result{Category: CategoryUpstreamRequestRestriction, Reason: ReasonUpstreamRequestRestriction}"
+    },
+    {
+      "path": "backend/internal/service/openai_model_availability.go",
+      "value": "reason, failureCategory = openAIUpstreamRequestRestrictionReason, resilience.CategoryUpstreamRequestRestriction"
+    },
+    {
+      "path": "backend/internal/resilience/context_window.go",
+      "value": "func IsContextWindowError(upstreamMsg string, upstreamBody []byte) bool {"
     }
   ],
   "forbidden_module_paths": [
