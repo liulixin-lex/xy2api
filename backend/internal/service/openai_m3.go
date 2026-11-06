@@ -308,6 +308,38 @@ func (a *openAIM3Attempt) succeeded(ctx context.Context) {
 	a.state.replayed = false
 	a.event(ctx, "resilience.m3_replay_ok", 1)
 }
+
+// A nil reader error is not acceptance evidence: incomplete and raw SSE EOF
+// can both return nil. Reuse the reader's semantic-output decision and require
+// a terminal; failed/error and missing terminals never commit batch learning.
+func openAIM3TerminalAccepted(terminal string, semanticOutput bool) bool {
+	switch terminal {
+	case "response.completed", "response.done", "[DONE]":
+		return true
+	case "response.incomplete", "response.cancelled", "response.canceled":
+		return semanticOutput
+	default:
+		return false
+	}
+}
+
+func openAIM3AggregateAccepted(body, terminal string) bool {
+	semanticOutput := false
+	forEachOpenAISSEFrame(body, func(event string, payload []byte) {
+		if !openAIStreamEventTypeIsTerminal(event) {
+			semanticOutput = semanticOutput || resilience.ResponsesEventOutputDisposition(event, payload).SemanticOutput
+		}
+	})
+	return openAIM3TerminalAccepted(terminal, semanticOutput)
+}
+
+func openAIM3JSONAccepted(body []byte) bool {
+	root := gjson.ParseBytes(body)
+	return gjson.ValidBytes(body) && root.IsObject() && root.Get("object").String() == "response" &&
+		root.Get("status").String() == "completed" && root.Get("output").IsArray() &&
+		root.Get("error").Type == gjson.Null
+}
+
 func (a *openAIM3Attempt) afterLocalRepairs(ctx context.Context, body, payload []byte, message string, status, wrappedStatus int) error {
 	if a == nil {
 		return nil

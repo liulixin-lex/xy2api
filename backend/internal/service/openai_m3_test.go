@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -66,6 +67,49 @@ func TestOpenAIM3LearnsFunctionOutputSlots(t *testing.T) {
 	require.Empty(t, store.GetSessionBadEncryptedSlots(attempt.request.groupID, attempt.request.session, account.ID))
 	attempt.succeeded(req.ctx)
 	require.Len(t, store.GetSessionBadEncryptedSlots(attempt.request.groupID, attempt.request.session, account.ID), 1)
+}
+
+func TestForwardOpenAIM3IncompleteDoesNotCommitBatchBad(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		t.Run(fmt.Sprintf("passthrough=%t", passthrough), func(t *testing.T) {
+			withResilienceSettings(t, nil)
+			req := newWebSearchReplayRequest(t)
+			account := webSearchReplayAccount(passthrough)
+			upstream := &httpUpstreamRecorder{responses: []*http.Response{
+				newOpenAIUpstreamErrorResponse(http.StatusBadRequest, `{"error":{"message":"Encrypted content is invalid for this conversation"}}`),
+				{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+					Body:       io.NopCloser(strings.NewReader("data: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_incomplete\",\"status\":\"incomplete\",\"output\":[],\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n")),
+				},
+			}}
+			svc := newOpenAIImageGenerationControlTestService(upstream)
+			svc.openaiWSStateStore = NewOpenAIWSStateStore(nil)
+			_, err := svc.Forward(req.ctx, req.c, account, []byte(m3TwoItemRequest))
+			require.NoError(t, err, "nil from the reader must not commit pending Bad")
+			require.Len(t, upstream.bodies, 2)
+			require.Equal(t, "[encrypted content omitted]", gjson.GetBytes(upstream.bodies[1], "input.0.content.0.text").String())
+			attempt := openAIRequestRepairFrom(req.c).m3
+			require.Len(t, attempt.state.pending, 2)
+			require.Empty(t, svc.getOpenAIWSStateStore().GetSessionBadEncryptedSlots(attempt.request.groupID, attempt.request.session, account.ID))
+		})
+	}
+}
+
+func TestOpenAIM3AcceptanceRequiresOutputOrSuccessTerminal(t *testing.T) {
+	text := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
+	blank := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"  \"}\n\n"
+	require.False(t, openAIM3AggregateAccepted(text, ""), "EOF without a terminal is not acceptance")
+	require.False(t, openAIM3AggregateAccepted(text, "response.failed"))
+	require.False(t, openAIM3AggregateAccepted(text, "error"))
+	require.False(t, openAIM3AggregateAccepted(blank, "response.incomplete"))
+	require.True(t, openAIM3AggregateAccepted(text, "response.incomplete"))
+	require.True(t, openAIM3AggregateAccepted(text, "response.cancelled"))
+	require.True(t, openAIM3AggregateAccepted(blank, "response.completed"))
+	require.True(t, openAIM3AggregateAccepted(blank, "response.done"))
+	require.True(t, openAIM3JSONAccepted([]byte(`{"id":"resp_ok","object":"response","status":"completed","output":[]}`)))
+	require.False(t, openAIM3JSONAccepted([]byte(`{"object":"response","status":"incomplete","output":[]}`)))
+	require.False(t, openAIM3JSONAccepted([]byte(`{"object":"response","status":"completed"}`)))
 }
 
 func TestForwardOpenAIM3ReplaySendsOnlyPlaceholderInNamedSlot(t *testing.T) {

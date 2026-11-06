@@ -36,6 +36,7 @@ type openaiStreamingResult struct {
 	imageOutputSizes []string
 	searchCount      int
 	clientSawOutput  bool
+	upstreamAccepted bool
 }
 
 // openAISemanticWriteTracker observes actual downstream writes, including a
@@ -60,6 +61,7 @@ func (w *openAISemanticWriteTracker) Write(p []byte) (int, error) {
 
 type openaiNonStreamingResult struct {
 	*OpenAIUsage
+	upstreamAccepted bool
 	usage            *OpenAIUsage
 	responseID       string
 	imageCount       int
@@ -418,6 +420,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			imageOutputSizes: imageCounter.Sizes(),
 			searchCount:      searchCounter,
 			clientSawOutput:  delivery.sawOutput,
+			upstreamAccepted: !sawFailedEvent && openAIM3TerminalAccepted(terminalEventType, responsesSemanticOutputSeen),
 		}
 	}
 	flushPending := func(disconnectMessage string) {
@@ -1842,6 +1845,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		OpenAIUsage:      usage,
 		usage:            usage,
 		responseID:       extractOpenAIResponseIDFromJSONBytes(body),
+		upstreamAccepted: openAIM3JSONAccepted(body),
 		imageCount:       countOpenAIResponseImageOutputsFromJSONBytes(body),
 		imageOutputSizes: collectOpenAIResponseImageOutputSizesFromJSONBytes(body),
 		searchCount:      countGrokNativeSearchCallsFromJSONBytes(body),
@@ -1973,6 +1977,7 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		OpenAIUsage:      usage,
 		usage:            usage,
 		responseID:       extractOpenAIResponseIDFromJSONBytes(body),
+		upstreamAccepted: openAIM3AggregateAccepted(bodyText, terminalType),
 		imageCount:       countOpenAIImageOutputsFromSSEBody(bodyText),
 		imageOutputSizes: collectOpenAIImageOutputSizesFromSSEBody(bodyText),
 		searchCount:      countGrokNativeSearchCallsFromSSEBody(bodyText),

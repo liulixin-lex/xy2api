@@ -415,7 +415,7 @@ HTTP 流已向客户端输出可见内容后，快层确认账号发生读流出
 命中后按 S1 → S2 → S3 → S4 → reasoning / compaction → S6 细分为 `relay_state`、`conversation_invalid`、`function_output`、`agent_message`、`reasoning`、`other_encrypted`。分类结果为 `CLIENT_ERROR`，不带加密判据时 reason 为 `conversation_state`，带加密判据时仍为 `encrypted_content`。无 `invalid_request_error` 包装的 S1 也按请求级拒绝处理。请求的最终失败、既有运维事件与真实用量照常保留；只给已有 `upstream_errors` 条目附 `state_family`，不为状态拒绝新增尝试事件。请求级判断与修复决定分离：`Encrypted` 仅作诊断，有限 rs/cmp 剥离仍使用原有加密判据与预算，S1 不扩大修复。原生与直通 Responses 输出前的 S2/S3/S4 和校验通过的包装 400 改走 M3；其他路径保持现有错误出口。
 
 
-M3 每个请求按账号保存已替换槽位集合；槽位身份为 kind、item 引用、part 下标及完整槽位的规范化 JSON 摘要。每次出站在既有构造器之前替换，保留 item、引用、数组顺序及明文，不读 arguments 或字符串 output。形状歧义时终止派生。S4 必须唯一定位点名 item，立即把有引用槽位写入 Bad；S2/S3/包装 400 的整批 Bad 仅在重放完整成功后写入。Bad 复用 lineage 进程内存储，按组、进场会话与账号隔离，TTL 沿用粘性 TTL（默认 1 小时）；无引用槽位只在当前请求替换，不持久学习。共享 Bad 的增长不影响本请求的重放判据。
+M3 每个请求按账号保存已替换槽位集合；槽位身份为 kind、item 引用、part 下标及完整槽位的规范化 JSON 摘要。每次出站在既有构造器之前替换，保留 item、引用、数组顺序及明文，不读 arguments 或字符串 output。形状歧义时终止派生。S4 必须唯一定位点名 item，立即把有引用槽位写入 Bad；S2/S3/包装 400 的整批 Bad 只在本次重放获得上游接受证据后写入：收到 completed / 兼容 done 成功终态、完整成功的非流式 Response，或真实语义输出后收到 incomplete / cancelled 终态。语义输出沿用 §3.1 判定；failed、error、缺终态 EOF 和没有输出的 incomplete 均不提交，读取器返回 nil 本身不算证据。Bad 复用 lineage 进程内存储，按组、进场会话与账号隔离，TTL 沿用粘性 TTL（默认 1 小时）；无引用槽位只在当前请求替换，不持久学习。共享 Bad 的增长不影响本请求的重放判据。
 
 M3 换号额度上限 1，与容量额度独立；换号仍受请求预算约束，同号修复仅豁免末位尝试次数守卫，保留截止时间和取消检查。换号与终止均对最后出错号执行属主校验删绑和会话回避，写入本请求排除集，不排同站、不计连败及调度健康失败。改写后的非 429 4xx 先用既有有界字段、compact、web_search 修复，耗尽再换号。每次重放重置 AttemptProfile，首字窗口按新的尝试起点和剩余预算重算。
 
