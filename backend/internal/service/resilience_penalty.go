@@ -440,6 +440,9 @@ func ClassifyFailoverError(e *UpstreamFailoverError) resilience.Result {
 	if e.Reason == OpenAIStateRepairReason {
 		return resilience.Result{Category: resilience.CategoryClientError, Reason: string(OpenAIStateRepairReason)}
 	}
+	if e.Reason == openAIModelUnavailableReason {
+		return resilience.Result{Category: resilience.CategoryModelUnsupported, Reason: string(openAIModelUnavailableReason)}
+	}
 	if e.IsCapabilityStreamOnly() {
 		return resilience.Result{Category: resilience.CategoryClientError, Reason: resilience.ReasonCapabilityStreamOnly}
 	}

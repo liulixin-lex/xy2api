@@ -1353,7 +1353,7 @@
     },
     {
       "path": "backend/internal/service/gateway_service.go",
-      "value": "if e == nil || e.IsCapabilityStreamOnly() || e.Reason == OpenAIStreamForbiddenReason || e.Reason == OpenAIStateRepairReason || e.isOpenAIWrappedRequestRejection() {"
+      "value": "if e == nil || e.IsCapabilityStreamOnly() || e.Reason == OpenAIStreamForbiddenReason || e.Reason == OpenAIStateRepairReason || e.Reason == openAIModelUnavailableReason || e.isOpenAIWrappedRequestRejection() {"
     },
     {
       "path": "backend/internal/service/openai_gateway_grok.go",
@@ -4034,6 +4034,34 @@
     {
       "path": ".github/workflows/release.yml",
       "value": "NODE_OPTIONS: --max-old-space-size=4096"
+    },
+    {
+      "path": "backend/internal/service/openai_model_availability.go",
+      "value": "isExplicitOpenAIModelAvailabilityMessage(extractUpstreamErrorMessage(body))"
+    },
+    {
+      "path": "backend/internal/service/openai_model_availability.go",
+      "value": "s.recordOpenAIAccountModelTransientFailure(account, model, time.Now())"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "s.failoverOpenAIModelAvailability(ctx, c, account, resp, respBody, upstreamModel, false)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "s.failoverOpenAIModelAvailability(ctx, c, account, resp, probeBody, actualModel, true)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_cc_pipeline.go",
+      "value": "s.failoverOpenAIModelAvailability(ctx, c, account, resp, respBody, upstreamModel, false)"
+    },
+    {
+      "path": "backend/internal/service/openai_model_availability_test.go",
+      "value": "func TestOpenAIModelAvailabilityForwardSwitchesAccount(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/openai_model_availability_test.go",
+      "value": "func TestOpenAIModelAvailabilityPreservesRequestRejections(t *testing.T) {"
     }
   ],
   "forbidden_module_paths": [

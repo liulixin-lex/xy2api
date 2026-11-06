@@ -1267,6 +1267,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			if collabAttempt != nil && collabAttempt.applied {
 				collabAttempt.clientRejected = resp.StatusCode < 500 && resp.StatusCode != 429 && classifyUpstreamHTTP(resp.StatusCode, resp.Header, respBody, upstreamMsg).Category == resilience.CategoryClientError
 			}
+			if failure := s.failoverOpenAIModelAvailability(ctx, c, account, resp, respBody, upstreamModel, false); failure != nil {
+				return nil, failure
+			}
 			if s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody) {
 				upstreamDetail := ""
 				if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
