@@ -77,7 +77,7 @@ func TestOpenAIWrappedForbiddenUsesSoftCooldown(t *testing.T) {
 			svc.rateLimitService.SetOpenAI403CounterCache(counter)
 			payload := []byte(tc.payload)
 			for attempt := 1; attempt <= 2; attempt++ {
-				failoverErr := svc.nonStreamingTerminalFailureFailover(c, newNonStreamingSSEResponse(), account, false, tc.event, payload, "upstream rejected", "model")
+				failoverErr := svc.nonStreamingTerminalFailureFailover(c, newNonStreamingSSEResponse(), account, false, tc.event, tc.event, payload, "upstream rejected", "model")
 				require.NotNil(t, failoverErr)
 				require.Equal(t, OpenAIStreamForbiddenReason, failoverErr.Reason)
 				require.Equal(t, GatewayFailureScopeRequest, failoverErr.Scope)
@@ -98,7 +98,7 @@ func TestOpenAIWrappedForbiddenUsesSoftCooldown(t *testing.T) {
 				}
 			}
 			MarkResponseCommitted(c)
-			require.Nil(t, svc.nonStreamingTerminalFailureFailover(c, newNonStreamingSSEResponse(), account, false, tc.event, payload, "upstream rejected", "model"))
+			require.Nil(t, svc.nonStreamingTerminalFailureFailover(c, newNonStreamingSSEResponse(), account, false, tc.event, tc.event, payload, "upstream rejected", "model"))
 			entry, ok := svc.openaiModelTransient.readEntry(account.ID, "model", time.Now())
 			require.True(t, ok)
 			require.Equal(t, 2, entry.failureStreak, "post-output failure must not add a forbidden cooldown")
@@ -121,7 +121,7 @@ func TestOpenAIStream403NonWrappedDeactivatedKeepsAccountFailure(t *testing.T) {
 	svc.rateLimitService = NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
 	payload := []byte(`{"type":"error","error":{"code":"account_deactivated","status":403,"message":"account deactivated"}}`)
 
-	failoverErr := svc.nonStreamingTerminalFailureFailover(c, newNonStreamingSSEResponse(), account, false, "error", payload, "account deactivated", "model")
+	failoverErr := svc.nonStreamingTerminalFailureFailover(c, newNonStreamingSSEResponse(), account, false, "error", "error", payload, "account deactivated", "model")
 
 	require.NotNil(t, failoverErr)
 	require.Zero(t, failoverErr.WrappedStatus)
