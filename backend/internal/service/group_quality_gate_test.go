@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -178,6 +179,147 @@ func (e *qualityTestEnv) evaluate(t *testing.T, after time.Duration) {
 }
 func (e *qualityTestEnv) member(id int64) groupQualityMemberSnapshot {
 	return e.svc.snapshot.Load().Members[7][id]
+}
+
+func qualityReplayUsageWrites(now time.Time) []GroupQualityUsageWrite {
+	writes := make([]GroupQualityUsageWrite, 0, 6*60+30)
+	for minute := now.Add(-groupQualityReplayWindow - groupQualityReplayLookback); minute.Before(now); minute = minute.Add(time.Minute) {
+		writes = append(writes, GroupQualityUsageWrite{Minute: minute, LastWrite: minute.Add(30 * time.Second)})
+	}
+	return writes
+}
+
+func qualityReplayCacheFailures(accountID int64, now time.Time, count int) []GroupQualityObservation {
+	observations := make([]GroupQualityObservation, 0, count)
+	for i := range count {
+		at := now.Add(-10*time.Minute + time.Duration(i)*time.Second)
+		observations = append(observations, GroupQualityObservation{
+			ID: int64(i + 1), AccountID: accountID, GroupID: 7, RequestID: fmt.Sprintf("cache-%d", i),
+			At: at, PreviousAt: at.Add(-time.Minute), Success: true, StrictContinuation: true,
+			SessionID: "cache-session", PromptTokens: 10000, PreviousPromptTokens: 10000,
+		})
+	}
+	return observations
+}
+
+func TestGroupQualityWarmStartRestoresErrorAndCacheStateWithoutTierHistory(t *testing.T) {
+	e := newQualityTestEnv(t)
+	e.svc.processStartedAt = e.base
+	e.repo.usageWrites = qualityReplayUsageWrites(e.base)
+	e.events(1, e.base.Add(-10*time.Minute), 20, 5)
+	e.repo.observations = append(e.repo.observations, qualityReplayCacheFailures(1, e.base, 20)...)
+	e.svc.Start()
+	t.Cleanup(e.svc.Stop)
+	require.Eventually(t, func() bool { return e.member(1).Tier == GroupQualityGateTierFail }, time.Second, time.Millisecond)
+	member := e.member(1)
+	require.Equal(t, 2, member.Tier)
+	require.Equal(t, "fail", member.State.Error.state())
+	require.Equal(t, "fail", member.State.Cache.state())
+	require.Equal(t, 40, member.Metric.ErrorSamples)
+	require.Equal(t, 0, strings.Count(e.logs.String(), `"msg":"group_quality_gate.tier"`))
+	require.Equal(t, 1, strings.Count(e.logs.String(), `"msg":"group_quality_gate.warm_start"`))
+}
+
+func TestGroupQualityWarmStartMatchesPrewarmedOnlineState(t *testing.T) {
+	warm := newQualityTestEnv(t)
+	warm.svc.processStartedAt = warm.base
+	warm.repo.usageWrites = qualityReplayUsageWrites(warm.base)
+	warm.events(1, warm.base.Add(-10*time.Minute), 20, 5)
+	warm.repo.observations = append(warm.repo.observations, qualityReplayCacheFailures(1, warm.base, 20)...)
+	require.True(t, warm.svc.warmStart(context.Background()))
+
+	online := newQualityTestEnv(t)
+	online.repo.observations = slices.Clone(warm.repo.observations)
+	online.repo.usageWrites = slices.Clone(warm.repo.usageWrites)
+	online.svc.processStartedAt = online.base.Add(-8 * time.Hour)
+	online.evaluate(t, -2*time.Minute)
+	online.evaluate(t, -time.Minute)
+	require.Equal(t, online.member(1).State, warm.member(1).State)
+	require.Equal(t, online.member(1).Metric, warm.member(1).Metric)
+	require.Equal(t, online.member(1).Tier, warm.member(1).Tier)
+}
+
+func TestGroupQualityWarmStartSpanOutsideStickyFailIsOptimistic(t *testing.T) {
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	policy := defaultGroupQualityGatePolicy()
+	policy.V3.Enabled = true
+	members := map[int64][]Account{7: {{ID: 1, Platform: PlatformOpenAI}}}
+	writes := qualityReplayUsageWrites(now)
+	data := GroupQualityReplayData{UsageWrites: writes, Observations: []GroupQualityObservation{{AccountID: 1, At: now.Add(-7 * time.Hour), SoftFailure: true}}}
+	snapshot, _, err := replayGroupQualityState(context.Background(), now, now.Add(-8*time.Hour), GroupQualityGatePolicies{Groups: map[string]GroupQualityGatePolicy{"7": policy}}, members, map[int64]bool{7: true}, map[int64]time.Time{}, data)
+	require.NoError(t, err)
+	require.Equal(t, 0, snapshot.Members[7][1].Tier)
+	onlineState := groupQualityAccountState{Error: groupQualityDimensionState{State: "fail", LastFail: now.Add(-2 * time.Minute)}}
+	middleZone := groupQualityMetrics{ErrorSamples: 20, Failures: 2, ErrorRate: qualityFloatPtr(.1)}
+	onlineState = evaluateGroupQualityMember(now.Add(-time.Minute), *policy.V3, middleZone, nil, onlineState)
+	onlineState = evaluateGroupQualityMember(now, *policy.V3, middleZone, nil, onlineState)
+	replayed := snapshot.Members[7][1].State
+	require.Equal(t, "fail", onlineState.Error.state())
+	require.NotEqual(t, onlineState.Error.state(), replayed.Error.state())
+	require.Equal(t, onlineState.TTFT.state(), replayed.TTFT.state())
+	require.Equal(t, onlineState.Cache.state(), replayed.Cache.state())
+	require.LessOrEqual(t, snapshot.Members[7][1].Tier, groupQualityTier(onlineState, *policy.V3, false, now))
+}
+
+func TestGroupQualityWarmStartHonorsResetAt(t *testing.T) {
+	e := newQualityTestEnv(t)
+	e.svc.processStartedAt = e.base
+	reset := e.base.Add(-2 * time.Hour)
+	e.repo.members[7][0].Extra = map[string]any{"group_quality_reset_at": reset.Format(time.RFC3339Nano)}
+	e.repo.usageWrites = qualityReplayUsageWrites(e.base)
+	e.events(1, e.base.Add(-3*time.Hour), 20, 5)
+	e.events(1, e.base.Add(-10*time.Minute), 20, 5)
+	require.True(t, e.svc.warmStart(context.Background()))
+	require.Equal(t, 20, e.member(1).Metric.ErrorSamples)
+	require.Equal(t, "fail", e.member(1).State.Error.state())
+	require.Equal(t, reset, e.member(1).State.ResetAt)
+}
+
+func TestGroupQualityWarmStartSkipsStaleCutoffs(t *testing.T) {
+	e := newQualityTestEnv(t)
+	e.repo.usageWrites = []GroupQualityUsageWrite{{Minute: e.base.Add(-6 * time.Hour), LastWrite: e.base.Add(-6 * time.Hour)}}
+	e.events(1, e.base.Add(-10*time.Minute), 20, 5)
+	ctx := context.Background()
+	policies, err := e.repo.LoadPolicies(ctx)
+	require.NoError(t, err)
+	ids, resets := groupQualityMemberIDs(e.repo.members)
+	data, err := e.repo.LoadObservationsForReplay(ctx, ids, e.base.Add(-groupQualityReplayWindow-groupQualityReplayLookback), e.base)
+	require.NoError(t, err)
+	_, summary, err := replayGroupQualityState(ctx, e.base, e.svc.processStartedAt, policies, e.repo.members, map[int64]bool{7: true}, resets, data)
+	require.NoError(t, err)
+	require.Positive(t, summary.staleCutoffs)
+}
+
+func TestGroupQualityWarmStartFailureKeepsEmptySnapshot(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e := newQualityTestEnv(t)
+		e.repo.observationErr = errors.New("replay unavailable")
+		e.svc.Start()
+		synctest.Wait()
+		require.Len(t, e.repo.froms, 1, "failed replay must fall through to the ordinary evaluation")
+		require.Equal(t, 0, e.member(1).Tier)
+		require.Contains(t, e.logs.String(), `"msg":"group_quality_gate.warm_start_failed"`)
+		time.Sleep(groupQualityEvaluationInterval)
+		synctest.Wait()
+		require.Len(t, e.repo.froms, 2, "ordinary ticker must continue after replay failure")
+		e.svc.Stop()
+	})
+}
+
+func TestGroupQualityWarmStartLeavesTTFTBeforeProcessStartIneligible(t *testing.T) {
+	now := eNowForQualityTest()
+	ms := int64(1000)
+	observation := qualitySpeedObservation(1, 1, now.Add(-2*time.Hour), ms)
+	prepared, failed, soft := prepareGroupQualityObservations([]GroupQualityObservation{observation}, now, now.Add(-time.Hour), nil)
+	require.Len(t, prepared, 1)
+	require.False(t, prepared[0].TTFTEligible)
+	metrics, composition := calculateGroupQualityMetrics(prepared, now, groupQualityBaselines{groupQualityCells(observation)[3]: 1000}, failed, soft, map[int64]bool{7: true})
+	require.Zero(t, metrics[1].TTFTSamples)
+	require.Empty(t, composition)
+}
+
+func eNowForQualityTest() time.Time {
+	return time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
 }
 
 func TestGroupQualityV3TierEventLifecycle(t *testing.T) {
@@ -660,6 +802,7 @@ func TestGroupQualityV3EvaluationLifecycle(t *testing.T) {
 			t.Fatal("initial evaluation was not started")
 		}
 		e.svc.Stop()
+		require.Empty(t, e.repo.froms, "canceled warm start must not run online evaluation")
 	})
 	t.Run("query errors freeze", func(t *testing.T) {
 		e := newQualityTestEnv(t)
