@@ -1983,10 +1983,6 @@ func (s *OpenAIGatewayService) nonStreamingTerminalFailureFailover(
 	if passthrough {
 		path = "passthrough_sse"
 	}
-	captureOpenAIStateRejection(c, account, payload, message, path, false, nil)
-	if account == nil || IsResponseCommitted(c) {
-		return nil
-	}
 	wrappedStatus, wrapped, malformed := openAIWrappedUpstreamErrorStatus(terminalType, payload)
 	if malformed {
 		ctx := context.Background()
@@ -1994,7 +1990,19 @@ func (s *OpenAIGatewayService) nonStreamingTerminalFailureFailover(
 			ctx = c.Request.Context()
 		}
 		logOpenAIWrappedErrorMalformed(ctx, account, "nonstreaming_sse")
+		if account == nil || IsResponseCommitted(c) {
+			return nil
+		}
+		upstreamRequestID := ""
+		if resp != nil {
+			upstreamRequestID = strings.TrimSpace(resp.Header.Get("x-request-id"))
+		}
+		return s.newOpenAIStreamFailoverErrorWithModel(c, account, passthrough, upstreamRequestID, nil, openAIMalformedWrappedErrorMessage, firstNonEmpty(canonicalModel...))
 	}
+	if account == nil || IsResponseCommitted(c) {
+		return nil
+	}
+	captureOpenAIStateRejection(c, account, payload, message, path, false, nil)
 	if wrapped {
 		ctx := context.Background()
 		if c != nil && c.Request != nil {
@@ -2327,6 +2335,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			}
 			if malformedWrapped {
 				logOpenAIWrappedErrorMalformed(ctx, account, "passthrough_sse")
+				if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+					return passthroughReturn(resultWithUsage(), s.newOpenAIStreamFailoverErrorWithModel(c, account, true, upstreamRequestID, nil, openAIMalformedWrappedErrorMessage, mappedModel, resp.Header))
+				}
 			}
 			observeOpenAIPreludeCreated(preludeTrace, rawEventType)
 			observer.ObserveOpenAI(dataBytes, rawEventType)
@@ -2826,7 +2837,10 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 		if msg == "" {
 			msg = "Upstream compact response failed"
 		}
-		if compactErr := newOpenAICompactFallbackSignal(c, terminalPayload, msg); compactErr != nil {
+		_, _, malformed := openAIWrappedUpstreamErrorStatus(terminalType, terminalPayload)
+		if malformed {
+			msg = openAIMalformedWrappedErrorMessage
+		} else if compactErr := newOpenAICompactFallbackSignal(c, terminalPayload, msg); compactErr != nil {
 			return nil, compactErr
 		}
 		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, true, terminalType, terminalPayload, msg, mappedModel); failoverErr != nil {

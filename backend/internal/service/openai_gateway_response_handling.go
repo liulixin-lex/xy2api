@@ -557,6 +557,13 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			wrappedStatus, wrappedFrame, malformedWrapped := openAIWrappedUpstreamErrorStatus(pendingSSEEventType, dataBytes)
 			if malformedWrapped {
 				logOpenAIWrappedErrorMalformed(ctx, account, "native_sse")
+				if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+					// Failed validation is a control-flow boundary: none of the
+					// rejected frame's status, code or message is classification input.
+					sawFailedEvent = true
+					streamEarlyErr = s.newOpenAIStreamFailoverErrorWithModel(c, account, false, upstreamRequestID, nil, openAIMalformedWrappedErrorMessage, mappedModel, resp.Header)
+					return
+				}
 			}
 			if disposition := resilience.ResponsesEventOutputDisposition(eventType, dataBytes); disposition.BlankPlaceholder {
 				eventHasBlankPlaceholder = true
@@ -1847,7 +1854,10 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		if msg == "" {
 			msg = "Upstream compact response failed"
 		}
-		if compactErr := newOpenAICompactFallbackSignal(c, terminalPayload, msg); compactErr != nil {
+		_, _, malformed := openAIWrappedUpstreamErrorStatus(terminalType, terminalPayload)
+		if malformed {
+			msg = openAIMalformedWrappedErrorMessage
+		} else if compactErr := newOpenAICompactFallbackSignal(c, terminalPayload, msg); compactErr != nil {
 			return nil, compactErr
 		}
 		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, false, terminalType, terminalPayload, msg, mappedModel); failoverErr != nil {
