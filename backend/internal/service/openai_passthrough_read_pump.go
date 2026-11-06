@@ -30,7 +30,7 @@ type openAIPassthroughPump struct {
 	onDeadline func() (*openaiStreamingResultPassthrough, error)
 	// onStall checks the idle time; done reports that the attempt ended.
 	onStall     func(lastRead time.Time, deadlineArmed bool) (result *openaiStreamingResultPassthrough, err error, done bool)
-	onKeepalive func(time.Time)
+	onKeepalive func()
 
 	firstOutputDeadline time.Time
 	stallCheckBase      time.Duration
@@ -128,8 +128,8 @@ func runOpenAIPassthroughReadPump(resp *http.Response, scanner *openAISSEJSONDoc
 			if result, err, ended := pump.onStall(time.Unix(0, lastReadAt.Load()), deadlineCh != nil); ended {
 				return result, err
 			}
-		case tick := <-keepaliveCh:
-			pump.onKeepalive(tick)
+		case <-keepaliveCh:
+			pump.onKeepalive()
 		}
 	}
 }

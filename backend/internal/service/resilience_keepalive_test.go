@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -231,31 +232,38 @@ func (w *keepaliveFailWriter) Write([]byte) (int, error) {
 }
 
 func TestPreOutputResponsesHeartbeatDispatchesOneEventPerBeat(t *testing.T) {
-	c, recorder := newKeepaliveTestContext(t)
-	c.Request.Header.Set("originator", "codex_cli_rs")
-	stop := StartPreOutputKeepalive(c, PreOutputProtocolResponses, 0, 10*time.Millisecond)
-	defer stop()
-	waitCommitted(t, c)
-	time.Sleep(30 * time.Millisecond)
-	stop()
-	body := recorder.Body.String()
-	require.GreaterOrEqual(t, strings.Count(body, string(preOutputPingFrame)), 2)
-	requireResponsesPingEvents(t, body)
-	require.Equal(t, -1, OpenAICompactKeepaliveAdjustedWrittenSize(c))
-	require.False(t, openAIStreamClientOutputStarted(c, false))
+	synctest.Test(t, func(t *testing.T) {
+		c, recorder := newKeepaliveTestContext(t)
+		c.Request.Header.Set("originator", "codex_cli_rs")
+		stop := StartPreOutputKeepalive(c, PreOutputProtocolResponses, 0, 10*time.Millisecond)
+		defer stop()
+		synctest.Wait()
+		require.True(t, PreOutputKeepaliveCommitted(c))
+		time.Sleep(30 * time.Millisecond)
+		synctest.Wait()
+		stop()
+		body := recorder.Body.String()
+		require.Equal(t, 4, strings.Count(body, string(preOutputPingFrame)))
+		requireResponsesPingEvents(t, body)
+		require.Equal(t, -1, OpenAICompactKeepaliveAdjustedWrittenSize(c))
+		require.False(t, openAIStreamClientOutputStarted(c, false))
+	})
 }
 
 func TestPreOutputResponsesNonCodexHeartbeatRemainsComment(t *testing.T) {
-	c, recorder := newKeepaliveTestContext(t)
-	c.Request.Header.Set("User-Agent", "OpenAI/Python 2.0.0")
-	stop := StartPreOutputKeepalive(c, PreOutputProtocolResponses, 0, 10*time.Millisecond)
-	defer stop()
-	waitCommitted(t, c)
-	stop()
-	body := recorder.Body.String()
-	beats := strings.Count(body, string(preOutputCommentFrame))
-	require.Positive(t, beats)
-	require.Equal(t, strings.Repeat(string(preOutputCommentFrame), beats), body)
-	require.Equal(t, -1, OpenAICompactKeepaliveAdjustedWrittenSize(c))
-	require.False(t, openAIStreamClientOutputStarted(c, false))
+	synctest.Test(t, func(t *testing.T) {
+		c, recorder := newKeepaliveTestContext(t)
+		c.Request.Header.Set("User-Agent", "OpenAI/Python 2.0.0")
+		stop := StartPreOutputKeepalive(c, PreOutputProtocolResponses, 0, 10*time.Millisecond)
+		defer stop()
+		synctest.Wait()
+		require.True(t, PreOutputKeepaliveCommitted(c))
+		time.Sleep(30 * time.Millisecond)
+		synctest.Wait()
+		stop()
+		body := recorder.Body.String()
+		require.Equal(t, strings.Repeat(string(preOutputCommentFrame), 4), body)
+		require.Equal(t, -1, OpenAICompactKeepaliveAdjustedWrittenSize(c))
+		require.False(t, openAIStreamClientOutputStarted(c, false))
+	})
 }

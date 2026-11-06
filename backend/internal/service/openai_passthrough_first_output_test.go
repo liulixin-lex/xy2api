@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -156,44 +157,56 @@ func TestOpenAIPassthroughStagingHeartbeatIsNotOutput(t *testing.T) {
 }
 
 func TestOpenAIPassthroughUpstreamCommentsDoNotSuppressPings(t *testing.T) {
-	withResilienceSettings(t, nil)
-	w := newGWWriter()
-	c := ptContext(w)
-	c.Request.Header.Set("originator", "codex_cli_rs")
-	up := newGWUpstream(nil)
-	t.Cleanup(func() { _ = up.Close() })
-	start := time.Now()
-	done := ptRun(compatStreamService(nil, 30, 0, 10), c, up.response(nil))
-	up.send(t, ptCreated)
-	comments := time.NewTicker(3 * time.Second)
-	defer comments.Stop()
-	deadline := time.NewTimer(25 * time.Second)
-	defer deadline.Stop()
-	lastPing := start
-	pingCount := 0
-	for pingCount < 2 {
-		select {
-		case <-comments.C:
-			up.send(t, ptComment)
-		case body := <-w.flushed:
-			count := strings.Count(body, string(preOutputPingFrame))
-			if count > pingCount {
-				now := time.Now()
-				require.InDelta(t, 10, now.Sub(lastPing).Seconds(), 2, "gateway ping interval")
-				lastPing, pingCount = now, count
-			}
-		case <-deadline.C:
-			t.Fatal("upstream comments suppressed scheduled gateway pings")
-		}
+	for _, tc := range []struct {
+		name, userAgent string
+		frame           []byte
+	}{
+		{"codex", "codex_cli_rs/0.166.0", preOutputPingFrame},
+		{"python", "OpenAI/Python 2.0.0", preOutputCommentFrame},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				withResilienceSettings(t, nil)
+				w := newGWWriter()
+				c := ptContext(w)
+				c.Request.Header.Set("User-Agent", tc.userAgent)
+				up := newGWUpstream(nil)
+				defer func() { _ = up.Close() }()
+				done := ptRun(compatStreamService(nil, 100, 0, 10), c, up.response(nil))
+				up.send(t, ptCreated)
+				synctest.Wait() // Arm the read pump before advancing the virtual clock.
+				// Preserve the production-scale 3s/10s cadence without wall-clock
+				// waits. Check both due beats and the gaps between them exactly.
+				for elapsed := time.Second; elapsed <= 20*time.Second; elapsed += time.Second {
+					time.Sleep(time.Second)
+					if elapsed%(3*time.Second) == 0 {
+						up.send(t, ptComment)
+					}
+					synctest.Wait()
+					require.Equal(t, int(elapsed/(10*time.Second)), strings.Count(w.Body(), string(tc.frame)),
+						"gateway heartbeat count at %s with continuing upstream comments", elapsed)
+					require.Equal(t, int(elapsed/(3*time.Second)), strings.Count(w.Body(), ptComment))
+				}
+				up.send(t, ptOverload)
+				got := ptAwait(t, done, 100*time.Second)
+				var failover *UpstreamFailoverError
+				require.ErrorAs(t, got.err, &failover)
+				body := w.Body()
+				heartbeats := strings.ReplaceAll(body, ptComment, "")
+				require.Equal(t, strings.Repeat(string(tc.frame), 2), heartbeats)
+				if tc.name == "codex" {
+					requireResponsesPingEvents(t, heartbeats)
+				} else {
+					require.NotContains(t, body, "event:", "non-Codex clients receive only comments before created")
+				}
+				requireOnlyHeartbeats(t, c, body)
+				require.NotContains(t, body, "resp_pt")
+				time.Sleep(10 * time.Second)
+				synctest.Wait()
+				require.Equal(t, body, w.Body(), "the finished attempt must stop heartbeats")
+			})
+		})
 	}
-	up.send(t, ptOverload)
-	got := ptAwait(t, done, 3*time.Second)
-	var failover *UpstreamFailoverError
-	require.ErrorAs(t, got.err, &failover)
-	require.GreaterOrEqual(t, strings.Count(w.Body(), ptComment), 6)
-	requireResponsesPingEvents(t, strings.ReplaceAll(w.Body(), ptComment, ""))
-	requireOnlyHeartbeats(t, c, w.Body())
-	require.NotContains(t, w.Body(), "resp_pt")
 }
 
 // R2-P1③: upstream comment heartbeats are passed through at once, not
