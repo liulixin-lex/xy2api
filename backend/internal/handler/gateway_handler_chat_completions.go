@@ -441,6 +441,12 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 	if c.GetBool(ginKeyResilienceFinalized) {
 		return
 	}
+	if handleModelUnavailableExhausted(c, lastErr, streamStarted, true, func(status int, message string, _ bool) {
+		service.MarkOpsStreamError(c, "invalid_request_error", message, status)
+		writeChatCompletionsErrorSSE(c, "invalid_request_error", "", message, status)
+	}) {
+		return
+	}
 	write := func(status int, errType, code, message string) {
 		if streamStarted && c.Writer.Size() > 0 && !gatewayStreamHasOnlyHeartbeats(c) {
 			service.MarkOpsStreamError(c, errType, message, status)

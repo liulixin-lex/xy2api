@@ -761,6 +761,11 @@ func (e *UpstreamFailoverError) IsCredentialFailure() bool {
 	return e != nil && e.Stage == GatewayFailureStageAccountAuth
 }
 
+// IsOpenAIModelUnavailable identifies the unpenalized model-availability route.
+func (e *UpstreamFailoverError) IsOpenAIModelUnavailable() bool {
+	return e != nil && e.Reason == openAIModelUnavailableReason
+}
+
 func (e *UpstreamFailoverError) isOpenAIWrappedRequestRejection() bool {
 	return e != nil && (e.WrappedStatus == http.StatusUnauthorized || e.WrappedStatus == http.StatusForbidden) &&
 		e.Scope == GatewayFailureScopeRequest && e.NextAccountAction == NextAccountStop

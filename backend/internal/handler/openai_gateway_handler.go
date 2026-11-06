@@ -1796,6 +1796,11 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 	if c.GetBool(ginKeyResilienceFinalized) {
 		return
 	}
+	if handleModelUnavailableExhausted(c, failoverErr, streamStarted, false, func(status int, message string, stream bool) {
+		h.anthropicStreamingAwareError(c, status, "invalid_request_error", message, stream)
+	}) {
+		return
+	}
 	write := func(status int, errType, message string) {
 		if streamStarted && c.Writer.Size() > 0 && !gatewayStreamHasOnlyHeartbeats(c) {
 			service.MarkOpsStreamError(c, errType, message, status)
@@ -3760,6 +3765,11 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	recordExhaustedRecovery(c, failoverErr)
 	if failoverErr == nil {
 		h.handleFailoverExhaustedSimple(c, http.StatusBadGateway, streamStarted)
+		return
+	}
+	if handleModelUnavailableExhausted(c, failoverErr, streamStarted, true, func(status int, message string, stream bool) {
+		h.handleStreamingAwareError(c, status, "invalid_request_error", message, stream)
+	}) {
 		return
 	}
 	if code := failoverErr.OpenAIWrappedRequestRejectionCode(); code != "" {

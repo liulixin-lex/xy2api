@@ -4074,6 +4074,18 @@
     {
       "path": "backend/internal/resilience/context_window.go",
       "value": "func IsContextWindowError(upstreamMsg string, upstreamBody []byte) bool {"
+    },
+    {
+      "path": "backend/internal/service/gateway_service.go",
+      "value": "func (e *UpstreamFailoverError) IsOpenAIModelUnavailable() bool {"
+    },
+    {
+      "path": "backend/internal/handler/openai_model_availability.go",
+      "value": "suppressResilienceRetryAdvice(c, \"model_unavailable\")"
+    },
+    {
+      "path": "backend/internal/handler/openai_model_availability_test.go",
+      "value": "func TestOpenAIModelUnavailableExhaustionPreservesLastError(t *testing.T) {"
     }
   ],
   "forbidden_module_paths": [
