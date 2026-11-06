@@ -278,7 +278,9 @@ func replayGroupQualityState(ctx context.Context, now, processStart time.Time, p
 	left, right, writeIndex := 0, 0, 0
 	var observedAt time.Time
 	summary := groupQualityWarmSummary{cutoffs: groupQualityReplaySteps, tier1: []groupQualityWarmMember{}, tier2: []groupQualityWarmMember{}}
-	replayStart := now.Add(-groupQualityReplayWindow)
+	// Freshness is aggregated by natural minute; align replay cutoffs to the
+	// same boundary so a minute's MAX cannot be compared with a mid-minute cutoff.
+	replayStart := now.Truncate(time.Minute).Add(-groupQualityReplayWindow)
 	for step := 0; step < groupQualityReplaySteps; step++ {
 		if err := ctx.Err(); err != nil {
 			return nil, summary, err

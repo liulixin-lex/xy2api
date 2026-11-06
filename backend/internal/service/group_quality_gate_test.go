@@ -220,6 +220,22 @@ func TestGroupQualityWarmStartRestoresErrorAndCacheStateWithoutTierHistory(t *te
 	require.Equal(t, 1, strings.Count(e.logs.String(), `"msg":"group_quality_gate.warm_start"`))
 }
 
+func TestGroupQualityReplayFreshnessUsesNaturalMinuteCutoffs(t *testing.T) {
+	now := time.Date(2026, 11, 4, 12, 0, 30, 0, time.UTC)
+	policy := defaultGroupQualityGatePolicy()
+	policy.V3.Enabled = true
+	members := map[int64][]Account{7: {{ID: 1, Platform: PlatformOpenAI}}}
+	start := now.Truncate(time.Minute).Add(-groupQualityReplayWindow)
+	writes := make([]GroupQualityUsageWrite, 0, int(groupQualityReplayWindow/time.Minute))
+	for minute := start; minute.Before(now); minute = minute.Add(time.Minute) {
+		writes = append(writes, GroupQualityUsageWrite{Minute: minute, LastWrite: minute.Add(10 * time.Second)})
+	}
+	data := GroupQualityReplayData{UsageWrites: writes}
+	_, summary, err := replayGroupQualityState(context.Background(), now, now.Add(-8*time.Hour), GroupQualityGatePolicies{Groups: map[string]GroupQualityGatePolicy{"7": policy}}, members, map[int64]bool{7: true}, map[int64]time.Time{}, data)
+	require.NoError(t, err)
+	require.Equal(t, 1, summary.staleCutoffs, "only the first natural-minute cutoff lacks prior data")
+}
+
 func TestGroupQualityWarmStartMatchesPrewarmedOnlineState(t *testing.T) {
 	warm := newQualityTestEnv(t)
 	warm.svc.processStartedAt = warm.base
