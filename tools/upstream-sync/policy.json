@@ -4018,6 +4018,22 @@
     {
       "path": ".github/workflows/release.yml",
       "value": "NODE_OPTIONS: --max-old-space-size=4096"
+    },
+    {
+      "path": "backend/internal/service/openai_sticky_atomic.go",
+      "value": "deleted, err := reporter.DeleteSessionAccountIDIfOwnerAndReport(ctx, derefGroupID(groupID), s.openAISessionCacheKey(sessionHash), owner)"
+    },
+    {
+      "path": "backend/internal/service/openai_sticky_atomic.go",
+      "value": "return reporter.DeleteSessionAccountIDAndReport(ctx, groupID, key)"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "resilience.StateFrom(ctx).ResetStickyBypassReason()"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "resilience.StateFrom(ctx).ResetStickyBypassReason()"
     }
   ],
   "forbidden_module_paths": [

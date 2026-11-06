@@ -391,6 +391,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	ctx context.Context,
 	req OpenAIAccountScheduleRequest,
 ) (selection *AccountSelectionResult, decision OpenAIAccountScheduleDecision, err error) {
+	resilience.StateFrom(ctx).ResetStickyBypassReason()
 	if s != nil && s.service != nil && s.service.openAIGroupRequiresPrivacySet(ctx, req.GroupID) {
 		req.RequirePrivacySet = true
 	}
@@ -510,7 +511,6 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		}
 		if owner > 0 && req.StickyAccountID != owner {
 			resilience.StateFrom(ctx).NoteStickyBypassReason("latency_migration")
-			resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
 		}
 	}
 	if !req.StickyWeighted {
@@ -573,7 +573,6 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	clearBinding := func(reason string) {
 		noteBypass(reason)
 		if !req.PreserveStickyBinding {
-			resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
 			_ = s.service.deleteStickySessionAccountIDIfOwner(ctx, req.GroupID, sessionHash, accountID)
 		}
 	}
@@ -2616,6 +2615,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	resilience.StateFrom(ctx).ResetStickyBypassReason()
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
 	ctx = s.withOpenAIGroupPrivacyRequirement(ctx, groupID)
 	// 分组利润控制：唯一文本调度入口的防御性装门。handler 文本

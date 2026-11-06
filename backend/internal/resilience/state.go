@@ -650,7 +650,7 @@ func (s *RequestState) ResetStickyBypassReason() {
 	s.mu.Unlock()
 }
 
-// NoteStickyBypassBindingChange marks a deletion or migration attempted by
+// NoteStickyBypassBindingChange marks a confirmed deletion or migration by
 // the current selection, independently of its first recorded reason.
 func (s *RequestState) NoteStickyBypassBindingChange() {
 	if s == nil {
