@@ -1,6 +1,7 @@
 package resilience
 
 import (
+	"math"
 	"strings"
 
 	"github.com/tidwall/gjson"
@@ -62,6 +63,9 @@ func ResponsesEventOutputDisposition(eventType string, payload []byte) Responses
 	if typ == "response.failed" || typ == "response.incomplete" || typ == "error" {
 		return ResponsesOutputDisposition{}
 	}
+	if validObject && !responsesObjectHasOnlyFields(root) {
+		return responsesVisibleDisposition()
+	}
 	if typ == "response.completed" || typ == "response.done" {
 		return ResponsesOutputDisposition{
 			Matched: true, Kind: TerminalSuccess, Visible: true,
@@ -81,12 +85,12 @@ func ResponsesEventOutputDisposition(eventType string, payload []byte) Responses
 		}
 		return ResponsesOutputDisposition{}
 	case "response.output_text.delta":
-		if !responsesObjectHasOnlyFields(root, "type", "sequence_number", "item_id", "output_index", "content_index", "delta") {
+		if !responsesObjectHasOnlyFields(root, "type", "sequence_number", "item_id", "output_index", "content_index", "delta", "logprobs", "obfuscation") {
 			return responsesVisibleDisposition()
 		}
 		return responsesTextDisposition(root.Get("delta"))
 	case "response.output_text.done":
-		if !responsesObjectHasOnlyFields(root, "type", "sequence_number", "item_id", "output_index", "content_index", "text") {
+		if !responsesObjectHasOnlyFields(root, "type", "sequence_number", "item_id", "output_index", "content_index", "text", "logprobs") {
 			return responsesVisibleDisposition()
 		}
 		return responsesTextDisposition(root.Get("text"))
@@ -101,7 +105,7 @@ func ResponsesEventOutputDisposition(eventType string, payload []byte) Responses
 		if strings.TrimSpace(part.Get("type").String()) != "output_text" {
 			return responsesVisibleDisposition()
 		}
-		if !responsesObjectHasOnlyFields(part, "type", "text", "annotations") || !responsesAnnotationsAreEmpty(part.Get("annotations")) {
+		if !responsesObjectHasOnlyFields(part, "type", "text", "annotations", "logprobs") || !responsesAnnotationsAreEmpty(part.Get("annotations")) {
 			return responsesVisibleDisposition()
 		}
 		return responsesTextDisposition(part.Get("text"))
@@ -142,7 +146,7 @@ func ResponsesEventOutputDisposition(eventType string, payload []byte) Responses
 			if !responsesObjectHasOnlyFields(item, "id", "type", "status", "index", "summary", "encrypted_content") {
 				return responsesVisibleDisposition()
 			}
-			if encrypted := item.Get("encrypted_content"); encrypted.Exists() && (encrypted.Type != gjson.String || encrypted.Str != "") {
+			if encrypted := item.Get("encrypted_content"); encrypted.Exists() && encrypted.Type != gjson.Null && (encrypted.Type != gjson.String || encrypted.Str != "") {
 				return responsesVisibleDisposition()
 			}
 			summary := item.Get("summary")
@@ -194,7 +198,7 @@ func responsesMessageItemDisposition(item gjson.Result) ResponsesOutputDispositi
 		}
 		switch strings.TrimSpace(part.Get("type").String()) {
 		case "output_text":
-			if !responsesObjectHasOnlyFields(part, "type", "text", "annotations") || !responsesAnnotationsAreEmpty(part.Get("annotations")) {
+			if !responsesObjectHasOnlyFields(part, "type", "text", "annotations", "logprobs") || !responsesAnnotationsAreEmpty(part.Get("annotations")) {
 				return responsesVisibleDisposition()
 			}
 			text := part.Get("text")
@@ -229,9 +233,37 @@ func responsesObjectHasOnlyFields(value gjson.Result, allowed ...string) bool {
 	for _, key := range allowed {
 		allowedSet[key] = struct{}{}
 	}
+	seen := make(map[string]struct{})
 	valid := true
-	value.ForEach(func(key, _ gjson.Result) bool {
-		_, valid = allowedSet[key.String()]
+	value.ForEach(func(key, field gjson.Result) bool {
+		name := key.String()
+		if _, duplicate := seen[name]; duplicate {
+			valid = false
+			return false
+		}
+		seen[name] = struct{}{}
+		if len(allowed) > 0 {
+			if _, ok := allowedSet[name]; !ok {
+				valid = false
+				return false
+			}
+		}
+		// Fields may be absent, but a supplied structural field must have its
+		// wire type. Ambiguous JSON must never hide potential client output.
+		switch name {
+		case "type", "id", "item_id", "response_id", "status", "role", "phase", "call_id", "name", "arguments", "input", "text", "delta", "obfuscation":
+			valid = field.Type == gjson.String
+		case "sequence_number", "output_index", "content_index", "summary_index", "index":
+			valid = field.Type == gjson.Number && field.Num >= 0 && field.Num == math.Trunc(field.Num)
+		case "part", "item", "response", "metadata":
+			valid = field.IsObject()
+		case "content", "summary", "output":
+			valid = field.IsArray()
+		case "annotations", "logprobs":
+			valid = field.IsArray() && len(field.Array()) == 0
+		case "encrypted_content":
+			valid = field.Type == gjson.String || field.Type == gjson.Null
+		}
 		return valid
 	})
 	return valid
@@ -242,6 +274,10 @@ func responsesAnnotationsAreEmpty(value gjson.Result) bool {
 }
 
 func responsesCompletedHasSemanticOutput(root gjson.Result) bool {
+	response := root.Get("response")
+	if response.Exists() && !responsesObjectHasOnlyFields(response) {
+		return true
+	}
 	output := root.Get("response.output")
 	if !output.Exists() {
 		return false

@@ -4,6 +4,7 @@ package service
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,9 +13,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 )
@@ -29,17 +32,17 @@ func d10BlankPlaceholderStream(count int, failed bool) string {
 	emit("response.in_progress", 1, `,"response":{"id":"resp_ft_test","status":"in_progress"}`)
 	sequence := 2
 	for i := 0; i < count; i++ {
-		item := fmt.Sprintf(`{"id":"msg_ft_%d","type":"message","role":"assistant","status":"in_progress","content":[{"type":"output_text","text":" "}]}`, i)
-		part := `{"type":"output_text","text":" "}`
+		item := fmt.Sprintf(`{"id":"msg_ft_%d","type":"message","role":"assistant","status":"in_progress","phase":"final_answer","content":[{"type":"output_text","text":" ","annotations":[],"logprobs":[]}]}`, i)
+		part := `{"type":"output_text","text":" ","annotations":[],"logprobs":[]}`
 		emit("response.output_item.added", sequence, fmt.Sprintf(`,"output_index":%d,"item":%s`, i, item))
 		sequence++
-		emit("response.content_part.added", sequence, fmt.Sprintf(`,"output_index":%d,"content_index":0,"part":%s`, i, part))
+		emit("response.content_part.added", sequence, fmt.Sprintf(`,"item_id":"msg_ft_%d","output_index":%d,"content_index":0,"part":%s`, i, i, part))
 		sequence++
-		emit("response.output_text.delta", sequence, fmt.Sprintf(`,"output_index":%d,"content_index":0,"delta":" "`, i))
+		emit("response.output_text.delta", sequence, fmt.Sprintf(`,"item_id":"msg_ft_%d","output_index":%d,"content_index":0,"delta":" ","logprobs":[],"obfuscation":"test"`, i, i))
 		sequence++
-		emit("response.output_text.done", sequence, fmt.Sprintf(`,"output_index":%d,"content_index":0,"text":" "`, i))
+		emit("response.output_text.done", sequence, fmt.Sprintf(`,"item_id":"msg_ft_%d","output_index":%d,"content_index":0,"text":" ","logprobs":[]`, i, i))
 		sequence++
-		emit("response.content_part.done", sequence, fmt.Sprintf(`,"output_index":%d,"content_index":0,"part":%s`, i, part))
+		emit("response.content_part.done", sequence, fmt.Sprintf(`,"item_id":"msg_ft_%d","output_index":%d,"content_index":0,"part":%s`, i, i, part))
 		sequence++
 		completedItem := strings.Replace(item, `"status":"in_progress"`, `"status":"completed"`, 1)
 		emit("response.output_item.done", sequence, fmt.Sprintf(`,"output_index":%d,"item":%s`, i, completedItem))
@@ -130,11 +133,26 @@ func TestResponsesBlankPlaceholderPredicatesAndSemanticDeliveryAgree(t *testing.
 		{"content part", "response.content_part.added", `{"type":"response.content_part.added","part":{"type":"output_text","text":" "}}`},
 		{"message item", "response.output_item.added", `{"type":"response.output_item.added","item":{"type":"message","role":"assistant","status":"in_progress","content":[{"type":"output_text","text":" "}]}}`},
 	}
+	for _, block := range strings.Split(d10BlankPlaceholderStream(2, true), "\n\n") {
+		event, data := sseBlockFields([]byte(block))
+		if len(data) > 0 && event != "response.failed" {
+			tests = append(tests, struct{ name, event, payload string }{event + " wire", event, string(data)})
+		}
+	}
+	tests = append(tests, struct{ name, event, payload string }{"metadata wire", "response.metadata", `{"type":"response.metadata","response_id":"resp_test","sequence_number":2,"metadata":{}}`})
+	// Marshal the repository's own wire shape so logprobs cannot disappear
+	// from this fixture when the apicompat encoder changes.
+	part, err := json.Marshal(apicompat.ResponsesStreamEvent{Type: "response.content_part.added", Part: &apicompat.ResponsesContentPart{Type: "output_text", Text: " "}})
+	require.NoError(t, err)
+	tests = append(tests, struct{ name, event, payload string }{"apicompat wire", "response.content_part.added", string(part)})
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			payload := []byte(tc.payload)
 			disposition := resilience.ResponsesEventOutputDisposition(tc.event, payload)
-			require.True(t, disposition.BlankPlaceholder)
+			require.Equal(t, resilience.Prelude, disposition.Kind)
+			var compatEvent apicompat.ResponsesStreamEvent
+			require.NoError(t, json.Unmarshal(payload, &compatEvent))
+			require.True(t, openAICompatPreludeEvent(&compatEvent, payload))
 			require.Equal(t, resilience.Prelude, resilience.ClassifyStreamEvent("responses", tc.event, payload).Kind)
 			require.False(t, openAIStreamDataStartsClientOutput(tc.payload, tc.event))
 			require.False(t, openAIStreamDataStartsVisibleOutput(tc.payload, tc.event))
@@ -156,22 +174,29 @@ func TestResponsesBlankPlaceholderPredicatesAndSemanticDeliveryAgree(t *testing.
 
 func TestResponsesMalformedEventFailsClosedAtAllOutputChecks(t *testing.T) {
 	withResilienceSettings(t, nil)
-	const event = "response.output_text.delta"
-	const payload = `{"type":"response.output_text.delta","delta":`
-	got := resilience.ClassifyStreamEvent("responses", event, []byte(payload))
-	require.Equal(t, resilience.Content, got.Kind)
-	require.True(t, openAIStreamDataStartsClientOutput(payload, event))
-	require.True(t, openAIStreamDataStartsVisibleOutput(payload, event))
-	require.True(t, openAIStreamDataStartsSemanticTTFT(payload, event))
-	require.True(t, semanticSSEBlock([]byte("event: "+event+"\ndata: "+payload)))
-
-	c, state := newSSEDeliveryContext(t, "text/event-stream")
-	start := time.Now().Add(-time.Second)
-	state.SetAttemptProfile(resilience.AttemptProfile{AccountID: 9024, AttemptStart: start})
-	_, err := deliveryWriterFrom(c).WriteString("event: " + event + "\ndata: " + payload + "\n\n")
-	require.NoError(t, err)
-	require.False(t, state.SemanticOutputAt().IsZero())
-	require.NotNil(t, state.AttemptFirstOutputMs())
+	for _, payload := range []string{
+		`{"type":"response.output_text.delta","delta":`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"id":"m","type":"message","role":"assistant","content":[{"type":"output_text","text":" ","text":"hi"}]}}`,
+		`{"type":"response.output_text.delta","item_id":[],"output_index":"bad","delta":" "}`,
+	} {
+		t.Run(payload, func(t *testing.T) {
+			event := gjson.Get(payload, "type").String()
+			got := resilience.ClassifyStreamEvent("responses", event, []byte(payload))
+			require.Equal(t, resilience.Content, got.Kind)
+			require.True(t, openAIStreamDataStartsClientOutput(payload, event))
+			require.True(t, openAIStreamDataStartsVisibleOutput(payload, event))
+			require.True(t, openAIStreamDataStartsSemanticTTFT(payload, event))
+			require.True(t, semanticSSEBlock([]byte("event: "+event+"\ndata: "+payload)))
+			require.False(t, openAICompatPreludeEvent(&apicompat.ResponsesStreamEvent{Type: event}, []byte(payload)))
+			c, state := newSSEDeliveryContext(t, "text/event-stream")
+			start := time.Now().Add(-time.Second)
+			state.SetAttemptProfile(resilience.AttemptProfile{AccountID: 9024, AttemptStart: start})
+			_, err := deliveryWriterFrom(c).WriteString("event: " + event + "\ndata: " + payload + "\n\n")
+			require.NoError(t, err)
+			require.False(t, state.SemanticOutputAt().IsZero())
+			require.NotNil(t, state.AttemptFirstOutputMs())
+		})
+	}
 }
 
 func TestCompatStreamStagesD10BlankPlaceholderBeforeFailure(t *testing.T) {
@@ -211,6 +236,9 @@ func TestResponsesBlankPlaceholderVisibleItemFlushesAllBeforeTerminal(t *testing
 			prelude := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_test\"}}\n\n" +
 				"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"item_id\":\"a\",\"output_index\":0,\"delta\":\" \"}\n\n" +
 				"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"item_id\":\"b\",\"output_index\":1,\"delta\":\"\\t\"}\n\n"
+			prelude = strings.Split(d10BlankPlaceholderStream(2, true), "event: response.failed")[0] + prelude
+			metadata := "event: response.metadata\ndata: {\"type\":\"response.metadata\",\"response_id\":\"resp_test\",\"sequence_number\":2,\"metadata\":{}}\n\n"
+			prelude = strings.Replace(prelude, "event: response.output_item.added", metadata+"event: response.output_item.added", 1)
 			visible := "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"id\":\"b\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\" hi\"}]}}\n\n"
 			completed := "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n"
 			c, _ := compatStreamContext("/v1/responses", `{}`)
