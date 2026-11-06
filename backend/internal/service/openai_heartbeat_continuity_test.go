@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
@@ -22,6 +23,111 @@ type continuityWriter struct {
 	mu      sync.Mutex
 	latency time.Duration
 	times   []time.Time
+}
+
+type protocolHeartbeatWriter struct {
+	*gwWriter
+	mu     sync.Mutex
+	times  []time.Time
+	frames []string
+}
+
+func (w *protocolHeartbeatWriter) Write(p []byte) (int, error) {
+	n, err := w.gwWriter.Write(p)
+	if err == nil && (string(p) == string(preOutputCommentFrame) || string(p) == string(preOutputPingFrame)) {
+		w.mu.Lock()
+		w.times = append(w.times, time.Now())
+		w.frames = append(w.frames, string(p))
+		w.mu.Unlock()
+	}
+	return n, err
+}
+
+func (w *protocolHeartbeatWriter) heartbeatTimes() []time.Time {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]time.Time(nil), w.times...)
+}
+
+func runProtocolHeartbeatHandoff(t *testing.T, name string) {
+	t.Helper()
+	w := &protocolHeartbeatWriter{gwWriter: newGWWriter()}
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/"+name, nil)
+	stop := StartPreOutputKeepalive(c, map[string]string{
+		"chat/completions": PreOutputProtocolChat,
+		"messages":         PreOutputProtocolAnthropic,
+		"responses":        PreOutputProtocolResponses,
+	}[name], 5*time.Second, 5*time.Second)
+	defer stop()
+	start := time.Now()
+	time.Sleep(5 * time.Second)
+	synctest.Wait()
+	time.Sleep(3500 * time.Millisecond)
+	synctest.Wait()
+
+	up := newGWUpstream(nil)
+	t.Cleanup(func() { _ = up.Close() })
+	var done <-chan error
+	switch name {
+	case "chat/completions":
+		ch := make(chan error, 1)
+		go func() {
+			svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{StreamKeepaliveInterval: 5}}}
+			_, err := svc.handleChatStreamingResponse(up.response(nil), c, rawChatCompletionsTestAccount(), "gpt-5.4", "gpt-5.4", "gpt-5.4", time.Now(), 0)
+			ch <- err
+		}()
+		done = ch
+		up.send(t, ptCreated)
+	case "messages":
+		ch := make(chan error, 1)
+		go func() {
+			svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{StreamKeepaliveInterval: 5}}}
+			_, err := svc.handleAnthropicStreamingResponse(up.response(nil), c, rawChatCompletionsTestAccount(), "gpt-5.4", "gpt-5.4", "gpt-5.4", time.Now())
+			ch <- err
+		}()
+		done = ch
+		up.send(t, ptCreated)
+	case "responses":
+		ch := gwRun(gwConvertPaths()[0], gwConvertService(5, 0), c, up.response(nil))
+		resultDone := make(chan error, 1)
+		go func() {
+			got := <-ch
+			resultDone <- got.err
+		}()
+		done = resultDone
+		up.send(t, gwMsgStart)
+	}
+	synctest.Wait()
+	time.Sleep(1500 * time.Millisecond)
+	synctest.Wait()
+	require.Equal(t, []time.Time{start.Add(5 * time.Second), start.Add(10 * time.Second)}, w.heartbeatTimes())
+	require.Equal(t, -1, OpenAICompactKeepaliveAdjustedWrittenSize(c))
+	require.NotContains(t, w.Body(), "response.created")
+
+	if name == "responses" {
+		up.send(t, gwTextStart, gwTextDelta, gwBlockStop, gwMsgDelta("end_turn"), gwMsgStop)
+	} else {
+		up.send(t, ptCompleted)
+	}
+	_ = up.pw.Close()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("protocol stream did not finish")
+	}
+}
+
+func TestProtocolKeepaliveHandoffUsesRequestHeartbeatClock(t *testing.T) {
+	for _, name := range []string{"chat/completions", "messages", "responses"} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				withResilienceSettings(t, nil)
+				runProtocolHeartbeatHandoff(t, name)
+			})
+		})
+	}
 }
 
 func TestHeartbeatCommentBeforeFirstBeat(t *testing.T) {

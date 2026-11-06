@@ -742,11 +742,35 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	firstChunk := true
 	clientDisconnected := false
 	clientOutputStarted := false
+	var keepaliveInterval time.Duration
+	var keepaliveTimer *time.Timer
+	var lastDownstreamWriteAt time.Time
+	resetKeepaliveTimer := func() {
+		if keepaliveTimer == nil {
+			return
+		}
+		remaining := time.Until(lastDownstreamWriteAt.Add(keepaliveInterval))
+		if remaining < 0 {
+			remaining = 0
+		}
+		if !keepaliveTimer.Stop() {
+			select {
+			case <-keepaliveTimer.C:
+			default:
+			}
+		}
+		keepaliveTimer.Reset(remaining)
+	}
+	noteDownstreamWrite := func() {
+		lastDownstreamWriteAt = time.Now()
+		resetKeepaliveTimer()
+	}
 	stopPreludeCancel := func() bool { return false }
 	writeClient := func(data string) error {
 		n, err := fmt.Fprint(c.Writer, data)
 		if n > 0 {
 			clientOutputStarted = true
+			noteDownstreamWrite()
 			stopPreludeCancel()
 		}
 		if err == nil && n != len(data) {
@@ -1160,7 +1184,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	}
 
 	// Determine keepalive interval
-	keepaliveInterval := time.Duration(0)
+	keepaliveInterval = 0
 	if s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
 		keepaliveInterval = time.Duration(s.cfg.Gateway.StreamKeepaliveInterval) * time.Second
 	}
@@ -1245,16 +1269,20 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	}()
 	defer close(done)
 
-	var keepaliveTicker *time.Ticker
-	if keepaliveInterval > 0 {
-		keepaliveTicker = time.NewTicker(keepaliveInterval)
-		defer keepaliveTicker.Stop()
-	}
 	var keepaliveCh <-chan time.Time
-	if keepaliveTicker != nil {
-		keepaliveCh = keepaliveTicker.C
+	if keepaliveInterval > 0 {
+		lastDownstreamWriteAt = openAIKeepaliveLastWrite(c)
+		if k := keepaliveFrom(c); k != nil {
+			k.suspend()
+		}
+		remaining := time.Until(lastDownstreamWriteAt.Add(keepaliveInterval))
+		if remaining < 0 {
+			remaining = 0
+		}
+		keepaliveTimer = time.NewTimer(remaining)
+		defer keepaliveTimer.Stop()
+		keepaliveCh = keepaliveTimer.C
 	}
-	lastDataAt := time.Now()
 	var parser openAICompatSSEFrameParser
 
 	for {
@@ -1293,7 +1321,6 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			if !stagePrelude && !firstEvent.disarm() && !clientDisconnected {
 				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
 			}
-			lastDataAt = time.Now()
 			line := ev.line
 			frame, ok := parser.AddLine(line)
 			if !ok {
@@ -1338,9 +1365,6 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			if !stagePrelude && refusalDetector.Enabled() && !clientOutputStarted {
 				continue
 			}
-			if time.Since(lastDataAt) < keepaliveInterval {
-				continue
-			}
 			// Send SSE comment as keepalive
 			writeStableStreamHeaders(c)
 			var err error
@@ -1358,6 +1382,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				clientDisconnected = true
 				continue
 			}
+			noteDownstreamWrite()
 			// xy2api resilience (review G1): a heartbeat, not output; before
 			// the first upstream line the attempt may still fail over.
 			c.Writer.Flush()
