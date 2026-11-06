@@ -437,6 +437,9 @@ func ClassifyFailoverError(e *UpstreamFailoverError) resilience.Result {
 	if e == nil {
 		return resilience.Result{Category: resilience.CategorySuccess}
 	}
+	if e.Reason == OpenAIStateRepairReason {
+		return resilience.Result{Category: resilience.CategoryClientError, Reason: string(OpenAIStateRepairReason)}
+	}
 	if e.IsCapabilityStreamOnly() {
 		return resilience.Result{Category: resilience.CategoryClientError, Reason: resilience.ReasonCapabilityStreamOnly}
 	}

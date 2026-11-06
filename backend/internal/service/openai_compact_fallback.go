@@ -14,8 +14,9 @@ import (
 )
 
 type openAICompactFallbackSignal struct {
-	payload []byte
-	message string
+	wrappedStatus int // retained while Forward offers the existing local compact repair
+	payload       []byte
+	message       string
 }
 
 func (e *openAICompactFallbackSignal) Error() string {

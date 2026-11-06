@@ -727,7 +727,8 @@ type UpstreamFailoverError struct {
 	NextAccountAction               NextAccountAction
 	ClientStatusCode                int
 	ClientMessage                   string
-	WrappedStatus                   int // 中转包装错误帧里校验过的上游状态码（400–599）；0 表示不是包装帧
+	M3Cause                         string // Request repair terminal cause; never upstream payload.
+	WrappedStatus                   int    // 中转包装错误帧里校验过的上游状态码（400–599）；0 表示不是包装帧
 }
 
 func annotateUpstreamFailoverAccount(failoverErr *UpstreamFailoverError, account *Account) *UpstreamFailoverError {
@@ -764,7 +765,7 @@ func (e *UpstreamFailoverError) IsCredentialFailure() bool {
 // credential failures from being misattributed to the selected account. Legacy
 // and inference failures retain their existing scheduler-health behavior.
 func (e *UpstreamFailoverError) ShouldReportAccountScheduleFailure() bool {
-	if e == nil || e.IsCapabilityStreamOnly() || e.Reason == OpenAIStreamForbiddenReason {
+	if e == nil || e.IsCapabilityStreamOnly() || (e.Reason == OpenAIStreamForbiddenReason || e.Reason == OpenAIStateRepairReason) {
 		return false
 	}
 	return !e.IsCredentialFailure() || e.Scope == GatewayFailureScopeAccount

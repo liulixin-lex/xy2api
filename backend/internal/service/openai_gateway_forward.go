@@ -74,6 +74,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if _, err := s.prepareCodexAccountIdentitySource(ctx, c, account); err != nil {
 		return nil, err
 	}
+	s.beginOpenAIM3(c, body)
 	startTime := time.Now()
 	// 固定渠道映射后的请求级 canonical body；账号 normalize/strip 不得改写跨 failover hint。
 	canonicalImageIntentBody := body
@@ -1095,10 +1096,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if reasoningEffort != nil {
 		reasoningEffortValue = *reasoningEffort
 	}
-	firstOutputTimeout := time.Duration(0)
-	if reqStream && account.Platform == PlatformOpenAI {
-		firstOutputTimeout = s.openAIFirstOutputTimeoutFor(ctx, account.ID, originalModel, reasoningEffortValue, startTime)
-	}
 
 	// xy2api resilience: web_search history on API-key relays.
 	webSearchReplay, webSearchBody := armOpenAIWebSearchReplay(c, account, body, false)
@@ -1109,14 +1106,27 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	agentTaskRecoveryTried := false
 	rejectedFieldRetryState := openAIResponsesRejectedFieldRetryStateForRequest(c, body)
 	requestRepair := armOpenAIRequestRepair(c, account, rejectedFieldRetryState)
+	requestRepair.m3 = s.armOpenAIM3(c, account, body)
+	replayAttempt := false
 	for {
+		derivedBody, deriveErr := requestRepair.m3.derive(ctx, body)
+		if deriveErr != nil {
+			return nil, deriveErr
+		}
+		body, requestView, reqBody = derivedBody, newOpenAIRequestView(derivedBody), nil
 		requestRepair.setBody(body)
+		attemptStart := resetOpenAIRepairAttempt(ctx, account, upstreamModel, reqStream, body, replayAttempt)
+		replayAttempt = true
+		firstOutputTimeout := time.Duration(0)
+		if reqStream && account.Platform == PlatformOpenAI {
+			firstOutputTimeout = s.openAIFirstOutputTimeoutFor(ctx, account.ID, originalModel, reasoningEffortValue, attemptStart)
+		}
 		// Build upstream request
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 		var headerGuard *openAIFirstOutputHeaderGuard
 		if firstOutputTimeout > 0 {
 			upstreamCtx, headerGuard = newOpenAIFirstOutputHeaderGuard(
-				upstreamCtx, releaseUpstreamCtx, startTime.Add(firstOutputTimeout),
+				upstreamCtx, releaseUpstreamCtx, attemptStart.Add(firstOutputTimeout),
 			)
 		}
 		upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, body, token, reqStream, promptCacheKey, isCodexCLI)
@@ -1153,7 +1163,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			headerGuard.close()
 			return nil, s.newOpenAIFirstOutputTimeoutError(
 				ctx, c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
-				startTime, originalModel, reasoningEffortValue,
+				attemptStart, originalModel, reasoningEffortValue,
 				firstOutputTimeout, "response_headers", nil,
 			)
 		}
@@ -1247,6 +1257,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				body, requestView, reqBody = next, newOpenAIRequestView(next), nil
 				continue
 			}
+			if repairErr := requestRepair.m3.afterLocalRepairs(ctx, body, respBody, upstreamMsg, resp.StatusCode, 0); repairErr != nil {
+				if next, _, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, resp, repairErr); ok {
+					body, requestView, reqBody = next, newOpenAIRequestView(next), nil
+					continue
+				}
+				return nil, repairErr
+			}
 			if collabAttempt != nil && collabAttempt.applied {
 				collabAttempt.clientRejected = resp.StatusCode < 500 && resp.StatusCode != 429 && classifyUpstreamHTTP(resp.StatusCode, resp.Header, respBody, upstreamMsg).Category == resilience.CategoryClientError
 			}
@@ -1309,7 +1326,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		var imageOutputSizes []string
 		var partialErr error
 		if reqStream {
-			streamResult, err := s.handleStreamingResponseWithReasoning(ctx, resp, c, account, startTime, originalModel, upstreamModel, reasoningEffortValue)
+			streamResult, err := s.handleStreamingResponseWithReasoning(ctx, resp, c, account, attemptStart, originalModel, upstreamModel, reasoningEffortValue)
 			if err != nil {
 				if next, replayErr := s.openAIWebSearchReplayAfterSignal(ctx, c, account, webSearchReplay, body, resp, err); replayErr != nil {
 					return nil, replayErr
@@ -1323,6 +1340,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					}
 					body, requestView, reqBody = next, newOpenAIRequestView(next), nil
 					continue
+				}
+				if next, interceptedErr, retry := s.interceptOpenAIM3Failover(ctx, c, account, resp, webSearchReplay, err); retry {
+					body, requestView, reqBody = next, newOpenAIRequestView(next), nil
+					continue
+				} else {
+					err = interceptedErr
 				}
 				if signal, ok := asOpenAICompactFallbackSignal(err); ok {
 					if retryBody, fallbackModel, retry := s.prepareOpenAICompactFallbackRetry(
@@ -1340,6 +1363,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 						_ = resp.Body.Close()
 					}
 					compactResp, compactBody := openAICompactFallbackErrorResponse(resp, signal)
+					if repairErr := openAIM3AfterLocalRepairExhausted(ctx, c, compactBody, signal.message, http.StatusBadRequest, signal.wrappedStatus); repairErr != nil {
+						if next, _, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, resp, repairErr); ok {
+							body, requestView, reqBody = next, newOpenAIRequestView(next), nil
+							continue
+						}
+						return nil, repairErr
+					}
 					if s.shouldFailoverOpenAIUpstreamResponse(account, compactResp.StatusCode, signal.message, compactBody) {
 						appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 							ProxyID:            opsUpstreamProxyID(account),
@@ -1377,6 +1407,16 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		} else {
 			nonStreamResult, err := s.handleNonStreamingResponse(ctx, resp, c, account, originalModel, upstreamModel)
 			if err != nil {
+				if next, _, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, resp, err); ok {
+					body, requestView, reqBody = next, newOpenAIRequestView(next), nil
+					continue
+				}
+				if next, interceptedErr, retry := s.interceptOpenAIM3Failover(ctx, c, account, resp, webSearchReplay, err); retry {
+					body, requestView, reqBody = next, newOpenAIRequestView(next), nil
+					continue
+				} else {
+					err = interceptedErr
+				}
 				if signal, ok := asOpenAICompactFallbackSignal(err); ok {
 					if retryBody, fallbackModel, retry := s.prepareOpenAICompactFallbackRetry(
 						c, account, requestedModel, body, http.StatusBadRequest, signal.message, signal.payload, compactModelFallbackRetried,
@@ -1389,6 +1429,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 						SetOpsUpstreamModel(c, fallbackModel)
 						continue
 					}
+					if repairErr := openAIM3AfterLocalRepairExhausted(ctx, c, signal.payload, signal.message, http.StatusBadRequest, signal.wrappedStatus); repairErr != nil {
+						if next, _, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, resp, repairErr); ok {
+							body, requestView, reqBody = next, newOpenAIRequestView(next), nil
+							continue
+						}
+						return nil, repairErr
+					}
 				}
 				return nil, err
 			}
@@ -1399,6 +1446,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			searchCount = nonStreamResult.searchCount
 		}
 		if partialErr == nil {
+			requestRepair.m3.succeeded(ctx)
 			webSearchReplay.succeeded()
 			s.bindHTTPResponseAccount(ctx, c, account, responseID)
 		}

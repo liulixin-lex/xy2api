@@ -604,12 +604,13 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 						streamEarlyErr = compactErr
 						return
 					}
-					if replayErr := newOpenAIWebSearchReplaySignal(c, account, dataBytes, failedMessage); replayErr != nil {
+					wrappedStatus, _, _ := openAIWrappedUpstreamErrorStatus(eventType, dataBytes)
+					if replayErr := newOpenAIWebSearchReplaySignal(c, account, dataBytes, failedMessage, wrappedStatus); replayErr != nil {
 						sawFailedEvent = true
 						streamEarlyErr = replayErr
 						return
 					}
-					if repairErr := newOpenAIRequestRepairSignal(ctx, c, account, dataBytes, failedMessage); repairErr != nil {
+					if repairErr := newOpenAIRequestRepairSignal(ctx, c, account, dataBytes, failedMessage, 0); repairErr != nil {
 						sawFailedEvent = true
 						streamEarlyErr = repairErr
 						return

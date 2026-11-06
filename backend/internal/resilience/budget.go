@@ -46,6 +46,7 @@ type Budget struct {
 	sameAccountMax int
 	sameAccount    map[int64]int
 	capacitySwitch int
+	stateSwitch    int
 	exhausted      string
 	retryAfterCap  time.Duration
 	ctx            context.Context
@@ -231,21 +232,37 @@ func (b *Budget) AllowCapacitySwitch() bool {
 	return true
 }
 
-// ConsumeInPlaceRetry counts a failed attempt that a service retries in
-// place, but only when the budget still allows another attempt afterwards
-// (and, for sameAccount, the per-account retry cap allows one more);
-// otherwise it changes nothing and the failure surfaces to the handler,
-// which records it there.
-func (b *Budget) ConsumeInPlaceRetry(accountID int64, sameAccount bool, now time.Time) bool {
+// AllowStateSwitch grants the single request-scoped switch reserved for a
+// state repair. It is independent from capacity shedding.
+func (b *Budget) AllowStateSwitch() bool {
 	if b == nil {
 		return true
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.stateSwitch >= 1 {
+		return false
+	}
+	b.stateSwitch++
+	return true
+}
+
+// ConsumeInPlaceRetry counts a failed attempt that a service retries in
+// place, but only when the budget still allows another attempt afterwards
+// (and, for sameAccount, the per-account retry cap allows one more);
+// otherwise it changes nothing and the failure surfaces to the handler,
+// which records it there.
+func (b *Budget) ConsumeInPlaceRetry(accountID int64, sameAccount bool, now time.Time, reason ...string) bool {
+	if b == nil {
+		return true
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	encryptedRepair := len(reason) == 1 && reason[0] == ReasonEncryptedContent
 	switch {
 	case b.ctx != nil && b.ctx.Err() != nil:
 		return false
-	case b.attempts+1 >= b.maxAttempts:
+	case !encryptedRepair && b.attempts+1 >= b.maxAttempts:
 		return false
 	case !b.deadline.IsZero() && b.deadline.Sub(now) < minAttemptWindow:
 		return false

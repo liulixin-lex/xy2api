@@ -519,6 +519,13 @@ func (s *GatewayService) noteLastResort(ctx context.Context, groupID *int64, acc
 		"recover_at", recoverAt,
 		"reason", string(sharesched.ReasonLastResortSoft),
 	)...)
+	if resilience.StateFrom(ctx).Avoided(account.ID) {
+		slog.Warn("resilience.last_resort_avoided", append(resilience.EventFields(ctx),
+			"group_id", derefGroupID(groupID),
+			"account_id", account.ID,
+			"reason", "session_avoid",
+		)...)
+	}
 }
 
 // noteLastResortSelected remembers that an account served as last resort so
@@ -755,6 +762,13 @@ func (s *OpenAIGatewayService) noteOpenAILastResort(ctx context.Context, groupID
 		"recover_at", recoverAt,
 		"reason", string(sharesched.ReasonLastResortSoft),
 	)...)
+	if resilience.StateFrom(ctx).Avoided(account.ID) {
+		slog.Warn("resilience.last_resort_avoided", append(resilience.EventFields(ctx),
+			"group_id", derefGroupID(groupID),
+			"account_id", account.ID,
+			"reason", "session_avoid",
+		)...)
+	}
 }
 
 type resilienceLastResortGateKey struct{}
@@ -788,6 +802,23 @@ func lastResortModelLimitSoft(ctx context.Context, acc *Account, model string, r
 type sessionFailureRecorder struct {
 	r             *ResilienceService
 	deleteIfOwner func(ctx context.Context, groupID int64, sessionHash string, accountID int64) error
+}
+
+// AvoidOpenAIStateAccount records a request-scoped state repair avoidance
+// without incrementing the account failure streak or health counters.
+func (s *OpenAIGatewayService) AvoidOpenAIStateAccount(ctx context.Context, groupID int64, sessionHash string, accountID int64) {
+	if s == nil || s.resilience == nil || s.resilience.store == nil || sessionHash == "" || accountID <= 0 {
+		resilience.StateFrom(ctx).AddAvoided(accountID)
+		return
+	}
+	avoid := time.Duration(resilience.Current().Session.AvoidSeconds) * time.Second
+	if avoid <= 0 {
+		avoid = 10 * time.Minute
+	}
+	_ = s.resilience.store.AddSessionAvoid(ctx, groupID, sessionHash, accountID, avoid)
+	s.resilience.avoidingSessions.Store(sessionMarkKey(groupID, sessionHash), time.Now().Add(avoid))
+	_ = s.deleteStickySessionAccountIDIfOwner(ctx, &groupID, sessionHash, accountID)
+	resilience.StateFrom(ctx).AddAvoided(accountID)
 }
 
 // Failure counts a failure of the session on an account. Reaching the streak
