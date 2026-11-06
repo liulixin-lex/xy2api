@@ -3,6 +3,7 @@
 package service
 
 import (
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -107,12 +108,41 @@ func TestNonStreamingWrappedErrorFrameBypassesConservativeEventErrorCheck(t *tes
 	account := newNonStreamingFailoverAccount()
 	payload := []byte(`{"type":"proxy.upstream_error","status":400,"message":"upstream rejected"}`)
 
-	err := svc.nonStreamingTerminalFailureFailover(c, newNonStreamingSSEResponse(), account, false, "error", payload, "upstream rejected")
+	err := svc.nonStreamingTerminalFailureFailover(c, newNonStreamingSSEResponse(), account, false, "error", "error", payload, "upstream rejected")
 
 	require.NotNil(t, err)
 	require.Equal(t, http.StatusBadRequest, err.StatusCode)
 	require.Equal(t, http.StatusBadRequest, err.WrappedStatus)
 	require.Equal(t, payload, err.ResponseBody)
+}
+
+func TestNonStreamingWrappedErrorPreservesOriginalSSEEvent(t *testing.T) {
+	for _, tc := range []struct {
+		name, payload string
+		status        int
+	}{
+		{"E1", `{"type":"proxy.upstream_error","status":400,"message":"upstream rejected"}`, 400},
+		{"E2", `{"type":"response.failed","response":{"error":{"type":"upstream_error","code":"503","status_code":503,"message":"busy"}}}`, 503},
+	} {
+		for _, passthrough := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/passthrough=%t", tc.name, passthrough), func(t *testing.T) {
+				c, rec := newNonStreamingFailoverContext(t)
+				svc := newNonStreamingFailoverService()
+				body := []byte("event: error\ndata: " + tc.payload + "\n\n")
+				var err error
+				if passthrough {
+					_, err = svc.handlePassthroughSSEToJSON(newNonStreamingSSEResponse(), c, newNonStreamingFailoverAccount(), body, "model", "model")
+				} else {
+					_, err = svc.handleSSEToJSON(newNonStreamingSSEResponse(), c, newNonStreamingFailoverAccount(), body, "model", "model")
+				}
+				var failover *UpstreamFailoverError
+				require.ErrorAs(t, err, &failover)
+				require.Equal(t, tc.status, failover.StatusCode)
+				require.Equal(t, tc.status, failover.WrappedStatus)
+				require.Empty(t, rec.Body.String())
+			})
+		}
+	}
 }
 
 func TestOpenAIWrappedUpstreamErrorUsesInnerBodyFor403Classification(t *testing.T) {

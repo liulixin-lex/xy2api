@@ -253,6 +253,6 @@ func TestNonStreamingTerminalFailureFailover_NilAccountProposesNothing(t *testin
 	payload := []byte(`{"type":"response.failed","error":{"message":"Selected model is at capacity. Please try a different model."}}`)
 
 	require.Nil(t, svc.nonStreamingTerminalFailureFailover(
-		c, newNonStreamingSSEResponse(), nil, false, "response.failed", payload,
+		c, newNonStreamingSSEResponse(), nil, false, "response.failed", "", payload,
 		"Selected model is at capacity. Please try a different model."))
 }

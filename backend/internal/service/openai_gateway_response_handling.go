@@ -565,6 +565,11 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 					return
 				}
 			}
+			if wrappedFrame && eventType == "proxy.upstream_error" && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+				// Only pre-output E1 dispatch uses the raw error event. E2 keeps
+				// its authoritative response.failed payload type on both sides.
+				eventType = "error"
+			}
 			if disposition := resilience.ResponsesEventOutputDisposition(eventType, dataBytes); disposition.BlankPlaceholder {
 				eventHasBlankPlaceholder = true
 			}
@@ -621,6 +626,8 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 					suppressCurrentEvent = true
 				} else if codexFailureTerminal && eventType == "response.failed" {
 					sawResponseFailed = true
+					restoreFailureEventLine = restoreFailureEventLine || (suppressCurrentEvent && pendingSSEEventLine != "")
+					suppressCurrentEvent = false
 				}
 				failedMessage = extractOpenAISSEErrorMessage(dataBytes)
 				if failedMessage == "" {
@@ -1224,9 +1231,6 @@ func openAICompatPayloadWithEventType(payload, eventType string) string {
 
 func effectiveOpenAISSEEventType(payload []byte, eventType string) string {
 	eventType = strings.TrimSpace(eventType)
-	if eventType == "error" {
-		return eventType
-	}
 	if payloadType := strings.TrimSpace(gjson.GetBytes(payload, "type").String()); payloadType != "" {
 		return payloadType
 	}
@@ -1848,19 +1852,19 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 			return nil, s.writeOpenAINonStreamingProtocolError(resp, c, openAICollabRestoreMessage)
 		}
 	}
-	terminalType, terminalPayload, terminalOK := extractOpenAISSETerminalEvent(bodyText)
+	terminalType, terminalSSEEvent, terminalPayload, terminalOK := extractOpenAISSETerminalEvent(bodyText)
 	if terminalOK && (terminalType == "response.failed" || terminalType == "error") {
 		msg := extractOpenAISSEErrorMessage(terminalPayload)
 		if msg == "" {
 			msg = "Upstream compact response failed"
 		}
-		_, _, malformed := openAIWrappedUpstreamErrorStatus(terminalType, terminalPayload)
+		_, _, malformed := openAIWrappedUpstreamErrorStatus(terminalSSEEvent, terminalPayload)
 		if malformed {
 			msg = openAIMalformedWrappedErrorMessage
 		} else if compactErr := newOpenAICompactFallbackSignal(c, terminalPayload, msg); compactErr != nil {
 			return nil, compactErr
 		}
-		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, false, terminalType, terminalPayload, msg, mappedModel); failoverErr != nil {
+		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, false, terminalType, terminalSSEEvent, terminalPayload, msg, mappedModel); failoverErr != nil {
 			return nil, failoverErr
 		}
 		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg)
@@ -1943,20 +1947,25 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 	}, nil
 }
 
-func extractOpenAISSETerminalEvent(body string) (string, []byte, bool) {
-	var terminalType string
+func extractOpenAISSETerminalEvent(body string) (string, string, []byte, bool) {
+	var terminalType, terminalSSEEvent string
 	var terminalPayload []byte
-	forEachOpenAISSEFrame(body, func(eventType string, data []byte) {
+	forEachOpenAISSEFrameWithRawEvent(body, func(sseEvent string, data []byte) {
+		eventType := effectiveOpenAISSEEventType(data, sseEvent)
+		if _, wrapped, malformed := openAIWrappedUpstreamErrorStatus(sseEvent, data); (wrapped || malformed) && eventType != "response.failed" {
+			eventType = "error"
+		}
 		switch eventType {
 		case "response.completed", "response.done", "response.failed", "response.incomplete", "response.cancelled", "response.canceled", "error":
 			terminalType = eventType
+			terminalSSEEvent = sseEvent
 			terminalPayload = append([]byte(nil), data...)
 		}
 	})
 	if terminalPayload != nil {
-		return terminalType, terminalPayload, true
+		return terminalType, terminalSSEEvent, terminalPayload, true
 	}
-	return "", nil, false
+	return "", "", nil, false
 }
 
 func extractOpenAISSEErrorMessage(payload []byte) string {

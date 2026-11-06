@@ -44,6 +44,17 @@ func forEachOpenAISSEDataPayload(body string, fn func([]byte)) {
 }
 
 func forEachOpenAISSEFrame(body string, fn func(string, []byte)) {
+	if fn == nil {
+		return
+	}
+	forEachOpenAISSEFrameWithRawEvent(body, func(sseEvent string, data []byte) {
+		fn(effectiveOpenAISSEEventType(data, sseEvent), data)
+	})
+}
+
+// Keep the event field available to wrapper validation; payload.type remains
+// authoritative for ordinary event and terminal handling.
+func forEachOpenAISSEFrameWithRawEvent(body string, fn func(string, []byte)) {
 	if fn == nil || strings.TrimSpace(body) == "" {
 		return
 	}
@@ -58,7 +69,7 @@ func forEachOpenAISSEFrame(body string, fn func(string, []byte)) {
 				return
 			}
 			data := []byte(value)
-			fn(effectiveOpenAISSEEventType(data, frame.EventType), data)
+			fn(frame.EventType, data)
 		}
 		if gjson.Valid(frame.Data) {
 			emitData(frame.Data)

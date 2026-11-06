@@ -1974,7 +1974,7 @@ func (s *OpenAIGatewayService) nonStreamingTerminalFailureFailover(
 	resp *http.Response,
 	account *Account,
 	passthrough bool,
-	terminalType string,
+	terminalType, sseEvent string,
 	payload []byte,
 	message string,
 	canonicalModel ...string,
@@ -1983,7 +1983,7 @@ func (s *OpenAIGatewayService) nonStreamingTerminalFailureFailover(
 	if passthrough {
 		path = "passthrough_sse"
 	}
-	wrappedStatus, wrapped, malformed := openAIWrappedUpstreamErrorStatus(terminalType, payload)
+	wrappedStatus, wrapped, malformed := openAIWrappedUpstreamErrorStatus(sseEvent, payload)
 	if malformed {
 		ctx := context.Background()
 		if c != nil && c.Request != nil {
@@ -2324,8 +2324,8 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		if data, ok := extractOpenAISSEDataLine(line); ok {
 			dataBytes := []byte(data)
 			trimmedData := strings.TrimSpace(data)
-			rawEventType := effectiveOpenAISSEEventType(dataBytes, pendingSSEEventType)
-			if disposition := resilience.ResponsesEventOutputDisposition(rawEventType, dataBytes); disposition.BlankPlaceholder {
+			sourceEventType := effectiveOpenAISSEEventType(dataBytes, pendingSSEEventType)
+			if disposition := resilience.ResponsesEventOutputDisposition(sourceEventType, dataBytes); disposition.BlankPlaceholder {
 				eventHasBlankPlaceholder = true
 			}
 			wrappedStatus, wrappedFrame, malformedWrapped := openAIWrappedUpstreamErrorStatus(pendingSSEEventType, dataBytes)
@@ -2339,8 +2339,8 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 					return passthroughReturn(resultWithUsage(), s.newOpenAIStreamFailoverErrorWithModel(c, account, true, upstreamRequestID, nil, openAIMalformedWrappedErrorMessage, mappedModel, resp.Header))
 				}
 			}
-			observeOpenAIPreludeCreated(preludeTrace, rawEventType)
-			observer.ObserveOpenAI(dataBytes, rawEventType)
+			observeOpenAIPreludeCreated(preludeTrace, sourceEventType)
+			observer.ObserveOpenAI(dataBytes, sourceEventType)
 			if needModelReplace {
 				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
 				if replacedData, replaced := extractOpenAISSEDataLine(line); replaced {
@@ -2363,14 +2363,17 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				if restoreErr != nil {
 					return passthroughReturn(resultWithUsage(), fmt.Errorf("restore OpenAI passthrough namespace response: %w", restoreErr))
 				}
-				restoredData = restoreCodexToolNamesFromSSEContext(c, restoredData, rawEventType)
+				restoredData = restoreCodexToolNamesFromSSEContext(c, restoredData, sourceEventType)
 				if !bytes.Equal(restoredData, dataBytes) {
 					dataBytes = restoredData
 					trimmedData = strings.TrimSpace(string(restoredData))
 					line = "data: " + string(restoredData)
 				}
 			}
-			eventType := effectiveOpenAISSEEventType(dataBytes, rawEventType)
+			eventType := effectiveOpenAISSEEventType(dataBytes, sourceEventType)
+			if wrappedFrame && eventType == "proxy.upstream_error" && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+				eventType = "error"
+			}
 			if (eventType == "response.failed" || eventType == "error") && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
 				if err := discardPendingLines(); err != nil {
 					return passthroughReturn(resultWithUsage(), s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, nil,
@@ -2397,6 +2400,8 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 					suppressCurrentEvent = true
 				} else if codexFailureTerminal && eventType == "response.failed" {
 					sawResponseFailed = true
+					restoreFailureEventLine = restoreFailureEventLine || (suppressCurrentEvent && pendingSSEEventLine != "")
+					suppressCurrentEvent = false
 				}
 				responseFailedPending = !codexFailureTerminal || eventType == "response.failed"
 				failedMessage = extractOpenAISSEErrorMessage(dataBytes)
@@ -2529,7 +2534,13 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 
 		if !clientDisconnected && !failureDelivered && !suppressCurrentEvent {
 			if restoreFailureEventLine {
-				if _, err := pendingStage.WriteString(pendingSSEEventLine + "\n"); err != nil {
+				if clientOutputStarted {
+					if _, err := fmt.Fprintln(w, pendingSSEEventLine); err != nil {
+						clientDisconnected = true
+						return passthroughLineContinue
+					}
+					flushPending = true
+				} else if _, err := pendingStage.WriteString(pendingSSEEventLine + "\n"); err != nil {
 					return passthroughReturn(resultWithUsage(), s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, nil,
 						"OpenAI first-output failure header staging failed: "+err.Error()))
 				}
@@ -2831,19 +2842,19 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 // rewrite model fields back to the original requested model.
 func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c *gin.Context, account *Account, body []byte, originalModel string, mappedModel string) (*openaiNonStreamingResultPassthrough, error) {
 	bodyText := string(body)
-	terminalType, terminalPayload, terminalOK := extractOpenAISSETerminalEvent(bodyText)
+	terminalType, terminalSSEEvent, terminalPayload, terminalOK := extractOpenAISSETerminalEvent(bodyText)
 	if terminalOK && (terminalType == "response.failed" || terminalType == "error") {
 		msg := extractOpenAISSEErrorMessage(terminalPayload)
 		if msg == "" {
 			msg = "Upstream compact response failed"
 		}
-		_, _, malformed := openAIWrappedUpstreamErrorStatus(terminalType, terminalPayload)
+		_, _, malformed := openAIWrappedUpstreamErrorStatus(terminalSSEEvent, terminalPayload)
 		if malformed {
 			msg = openAIMalformedWrappedErrorMessage
 		} else if compactErr := newOpenAICompactFallbackSignal(c, terminalPayload, msg); compactErr != nil {
 			return nil, compactErr
 		}
-		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, true, terminalType, terminalPayload, msg, mappedModel); failoverErr != nil {
+		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, true, terminalType, terminalSSEEvent, terminalPayload, msg, mappedModel); failoverErr != nil {
 			return nil, failoverErr
 		}
 		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg)
