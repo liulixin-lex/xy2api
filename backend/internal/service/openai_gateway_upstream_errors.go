@@ -201,51 +201,7 @@ func isOpenAIRequestScopedCapacityShed(upstreamMsg string, upstreamBody []byte) 
 }
 
 func isOpenAIContextWindowError(upstreamMsg string, upstreamBody []byte) bool {
-	match := func(text string) bool {
-		lower := strings.ToLower(strings.TrimSpace(text))
-		if lower == "" {
-			return false
-		}
-		if strings.Contains(lower, "context_too_large") || strings.Contains(lower, "context_length_exceeded") {
-			return true
-		}
-		if strings.Contains(lower, "maximum context length") || strings.Contains(lower, "max context length") {
-			return true
-		}
-		hasExceeded := strings.Contains(lower, "exceed") || strings.Contains(lower, "too large") || strings.Contains(lower, "too long")
-		if strings.Contains(lower, "context window") && hasExceeded {
-			return true
-		}
-		if strings.Contains(lower, "context length") && hasExceeded {
-			return true
-		}
-		return strings.Contains(lower, "token limit") &&
-			strings.Contains(lower, "context") &&
-			hasExceeded
-	}
-
-	if match(upstreamMsg) {
-		return true
-	}
-	if len(upstreamBody) == 0 {
-		return false
-	}
-	for _, path := range []string{
-		"error.message",
-		"response.error.message",
-		"message",
-		"error.code",
-		"response.error.code",
-		"code",
-	} {
-		if match(gjson.GetBytes(upstreamBody, path).String()) {
-			return true
-		}
-	}
-	// Do not let echoed request content in a structured JSON error change the
-	// retry/client-status classification. Plain-text upstream errors remain
-	// supported by scanning the whole body only when it is not valid JSON.
-	return !gjson.ValidBytes(upstreamBody) && match(string(upstreamBody))
+	return resilience.IsContextWindowError(upstreamMsg, upstreamBody)
 }
 
 func (s *OpenAIGatewayService) shouldFailoverUpstreamError(statusCode int) bool {
@@ -544,8 +500,11 @@ func (s *OpenAIGatewayService) handleErrorResponseCore(
 	requestBody []byte,
 	accountErrorAlreadyHandled bool,
 	requestedModel ...string,
-) (*OpenAIForwardResult, error) {
+) (result *OpenAIForwardResult, forwardErr error) {
 	body := s.readUpstreamErrorBody(resp)
+	defer func() {
+		s.noteOpenAITerminalRejection(ctx, account, resp.StatusCode, resp.Header, body, forwardErr)
+	}()
 	captureOpenAIStateRejection(c, account, body, "", "native_http", false, requestBody)
 	body = s.redactAgentIdentitySensitiveBody(ctx, account, body)
 
@@ -822,8 +781,11 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 	writeError compatErrorWriter,
 	accountErrorAlreadyHandled bool,
 	requestedModel ...string,
-) (*OpenAIForwardResult, error) {
+) (result *OpenAIForwardResult, forwardErr error) {
 	body := s.readUpstreamErrorBody(resp)
+	defer func() {
+		s.noteOpenAITerminalRejection(c.Request.Context(), account, resp.StatusCode, resp.Header, body, forwardErr)
+	}()
 	body = s.redactAgentIdentitySensitiveBody(context.Background(), account, body)
 
 	// cyber_policy：兼容路径（Chat Completions / Anthropic）以各自格式回写错误，

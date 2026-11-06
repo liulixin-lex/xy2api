@@ -825,6 +825,9 @@ func (s *OpenAIGatewayService) AvoidOpenAIStateAccount(ctx context.Context, grou
 // threshold, or a P1-B post-output signal, deletes the binding (owner-checked)
 // and avoids the account for the session (design §4.1-§4.2).
 func (rec *sessionFailureRecorder) Failure(ctx context.Context, groupID int64, sessionHash string, accountID int64, c resilience.Category) {
+	if rec != nil && rec.r != nil {
+		rec.r.terminalRejections.reset(groupID, sessionHash, accountID)
+	}
 	cfg := resilience.Current()
 	if rec == nil || rec.r == nil || rec.r.store == nil || !cfg.SessionOn() || !c.CountsForSession() {
 		return
@@ -869,6 +872,9 @@ func (rec *sessionFailureRecorder) Failure(ctx context.Context, groupID int64, s
 // Success resets the session's failure count of the account. Only sessions
 // this instance saw failing touch Redis, so the common path costs nothing.
 func (rec *sessionFailureRecorder) Success(ctx context.Context, groupID int64, sessionHash string, accountID int64) {
+	if rec != nil && rec.r != nil {
+		rec.r.terminalRejections.reset(groupID, sessionHash, accountID)
+	}
 	if rec == nil || rec.r == nil || rec.r.store == nil || !rec.r.sessionHadFailures(groupID, sessionHash) {
 		return
 	}

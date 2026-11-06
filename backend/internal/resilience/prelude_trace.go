@@ -2,11 +2,19 @@ package resilience
 
 import "time"
 
+// PreludeReleaseSchema retains only the shape of the released item or part.
+type PreludeReleaseSchema struct {
+	ItemType     string
+	ItemKeys     string
+	HasEncrypted bool
+}
+
 // PreludeTraceSnapshot describes the first release in the current attempt.
 // A zero delay also represents content that arrived without a created event.
 type PreludeTraceSnapshot struct {
 	ReleaseEvent          string
 	ReleaseAfterCreatedMS int64
+	PreludeReleaseSchema
 }
 
 // NotePreludeCreated starts an attempt's trace. A zero time resets it before
@@ -22,7 +30,7 @@ func (s *RequestState) NotePreludeCreated(at time.Time) {
 
 // NotePreludeReleased freezes the event that releases the opening sequence.
 // Actual first-output time and delivered bytes are tracked by the delivery writer.
-func (s *RequestState) NotePreludeReleased(eventType string, at time.Time) {
+func (s *RequestState) NotePreludeReleased(eventType string, at time.Time, schema PreludeReleaseSchema) {
 	if s == nil || eventType == "" {
 		return
 	}
@@ -32,6 +40,7 @@ func (s *RequestState) NotePreludeReleased(eventType string, at time.Time) {
 		return
 	}
 	s.prelude.releaseEvent = eventType
+	s.prelude.schema = schema
 	if !s.prelude.createdAt.IsZero() {
 		s.prelude.releaseAfterCreatedMS = max(0, at.Sub(s.prelude.createdAt).Milliseconds())
 	}
@@ -43,5 +52,5 @@ func (s *RequestState) PreludeTrace() PreludeTraceSnapshot {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return PreludeTraceSnapshot{ReleaseEvent: s.prelude.releaseEvent, ReleaseAfterCreatedMS: s.prelude.releaseAfterCreatedMS}
+	return PreludeTraceSnapshot{ReleaseEvent: s.prelude.releaseEvent, ReleaseAfterCreatedMS: s.prelude.releaseAfterCreatedMS, PreludeReleaseSchema: s.prelude.schema}
 }

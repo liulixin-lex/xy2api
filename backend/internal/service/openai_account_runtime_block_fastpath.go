@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
 const (
@@ -212,6 +214,9 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 }
 
 func shouldCooldownOpenAITransientUpstreamError(statusCode int, responseBody []byte) bool {
+	if classifyUpstreamHTTP(statusCode, nil, responseBody, "").Category == resilience.CategoryUpstreamRequestRestriction {
+		return false
+	}
 	switch statusCode {
 	case http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout, 520, 521, 522, 523, 524:
 		return true

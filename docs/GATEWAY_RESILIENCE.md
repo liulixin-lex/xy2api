@@ -88,7 +88,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | 上游余额不足 | 本请求换号（0.4.12 起各平台都换，不再先在同一账号上重试），耗尽时普通用户看到 503；账号暂停期间单号分组的 503 带 `Retry-After`（暂停剩余时间，2–30 秒）；管理员在账号列表看到临时不可调度，原因 `balance:exhausted[step=N]: <证据摘要>`（N 为暂停档位，见 §4.9）。管理员配置的错误透传规则命中时按规则返回。0.5.1：含订阅共享额度用尽（`subscription_sharing_usage_limit_exceeded`）；OpenAI 流内事件的余额码（`response.error.code` 或 `error.code`，不看正文）同样在第一个内容之前换号并暂停，之后不重放，只暂停账号，不计会话失败与输出后软冷却，见 §4.10 |
 | Grok API Key 精确 422 | 仅 `api_error` 且文案完整等于 `Service temporarily unavailable`、没有请求错误 `code`/`param` 时换号；Responses、Chat 与 Messages 入口预算耗尽均返回 503，运维尝试保留上游 422 并记为 `TRANSIENT` |
 | alpha search E5001 | API Key 的 alpha search HTTP 400 且 `error.code=E5001`、`error.type=server_error` 时换号；预算耗尽默认返回 502，回合封顶时为 503，运维尝试保留上游 400 并记为 `TRANSIENT`；不执行账号副作用或全局调度失败上报 |
-| 上游报告模型不可用（0.4.12） | 400 或 404 的错误消息为 `unknown provider for model`、`unknown model`、`model not found`、`model is not supported` 之一，且没有更具体的错误码、`type` 或 `param` 时（数值错误码等于本次 400 或 404 时不算更具体），或带结构化的模型错误码时：本请求换号，该账号对该模型 30 分钟不可用（见 §4.9）。无错误码、消息提到 model 的其他 404 仍按模型不可用分类并换号，但不设 30 分钟不可用。换号耗尽时按入站协议原有的错误映射返回，不保证原样的状态码与正文 |
+| 上游报告模型不可用（0.4.12） | OpenAI 兼容网关的 Responses 原生、直通及 Chat 兼容转发输出前收到 HTTP 400/404 或 5xx，且错误消息命中现有通用模型可用性短语（如 `model is not supported`、`model is unavailable`、`model not found`）时，按 `MODEL_UNSUPPORTED` 换号，给账号×实际出站模型记瞬时失败；首次只记数，第二次冷却 10 秒，后续沿用现有阶梯（§4.6）。不罚号、不上报调度失败，不写 30 分钟持久化模型限流。请求级拒绝优先，compact 本地回退仍先执行。其余既有路径中，400/404 带结构化模型错误码，或消息为 `unknown provider for model`、`unknown model`、`model not found`、`model is not supported` 且无更具体的错误码、`type` 或 `param` 时（数值错误码等于本次状态码不算更具体），仍沿用 30 分钟模型限流（§4.9）。无错误码、消息提到 model 的其他 404 只影响分类与换号。换号耗尽时沿用入站协议原有错误映射 |
 | 首包前心跳已提交后失败 | 不再改写状态码，改为协议终止帧：Responses 为 `response.failed`（`rate_limit_exceeded` 或 `server_error`），客户端此前只收到心跳时前面先补同一响应的 `response.created`（openai-python 等严格 SDK 要求流以它开始）；Chat 为 `data: {"error":{…,"status":N}}` 后跟 `[DONE]`；Anthropic 为 `event: error` |
 | 合成 `response.failed` 的重试时间（0.4.4） | `errors.failed_frame_retry_after` 开启时写在 `error.headers.retry-after`（Codex 从这里读）：本请求还有健康账号时为 1 秒；组内没有健康账号、能算出最早恢复时间时为 2–10 秒，正文 “try again in Ns” 的 N 相同；恢复时间未知时不带（0.4.3 缺省提示 30 秒）；回合封顶、用户自身余额不足、内容拒绝不带，并去掉正文里的重试句（上游账号余额不足会换号，不算）；配置拒绝、鉴权类错误与其他不可重试的原因（模型不存在、`billing_service_error` 等，只有 429 与 5xx 才可能带）不给重试建议。重试建议只在实际写出 `response.failed` 时计算，以普通 JSON 结束的无号与耗尽出口不再计算（0.4.5）。HTTP 头尚未提交时同步改写 `Retry-After`。关闭时不带 `error.headers`，正文同 0.4.3（用户余额不足与内容拒绝仍不带重试时间，这两项只受 `errors.enabled` 控制） |
 | 排队等待时已发出 ping，之后遇到计费等错误（0.4.4） | 按入站协议写终止帧：Responses 为 `response.created` 后跟 `response.failed`，Chat 为 `error` 后跟 `[DONE]`；不再写裸 JSON（不受开关控制） |
@@ -308,7 +308,15 @@ Chat/Messages 兼容转换只在首次提交前暂存解码后的开场与空白
 
 - 上游错误分为余额不足（`BALANCE`）或模型不可用（`MODEL_UNSUPPORTED`，判据见 §3）时，Gemini（原生、Messages 与 Chat 兼容转换）、Grok、Anthropic（原生、API Key 直通、Bedrock，以及 Gateway 入站经 Anthropic 上游的 Responses 与 Chat）、Antigravity 的各入口都换号；以前这些平台按状态码判断，400、402 直接返回客户端。402 `deactivated_workspace` 按鉴权失败换号，不做余额暂停。其他类别的换号规则不变。
 - 平台原有的不换号判断优先：内容拒绝、上下文超长、签名与 beta 头、续链与重放约束。同一个上游响应只惩罚一次。
-- 模型不可用：只有结构化的模型错误码、§3 的几种明确消息，以及原有的 OpenAI 401 与 Codex 套餐限制两个特例，才让该账号对该模型 30 分钟不可用；无错误码、消息提到 model 的其他 404 只影响分类与换号。沿用 OpenAI“模型不存在”的模型限流（`model_rate_limits`），同账号的其他模型照常服务；末位兜底在到期前不放回。
+- OpenAI 兼容网关的 Responses 原生、直通及 Chat 兼容转发输出前的 HTTP 400/404 或 5xx：错误消息命中 `isExplicitOpenAIModelAvailabilityMessage` 的既有通用短语，且结构化错误的 `param` 缺失、为空或为 `model` 时，按账号×实际出站模型不可用换号，禁止同号重试，复用瞬时失败计数与冷却（§4.6），不写 `model_rate_limits`，不进入 401/403 处罚，也不上报调度失败。上下文超限、内容安全、cyber 与状态类拒绝优先终止；普通 400 仍走原路径。compact 本地回退的顺序与单次重试约束不变。候选耗尽后保留最后一条上游错误的状态和脱敏 type/code/param/message（包括 400/404），不追加 Retry-After 或重试建议，不计 turn cap；已提交流沿用终止帧规则，不重复追加通用失败帧。判定只读取错误消息字段或纯文本错误体，不扫描 JSON 中回显的请求内容。
+- 同一请求的模型不可用若已在另一上游主机上出现过，则按请求级拒绝终止（`CLIENT_ERROR`），不再给当前号×模型记失败或冷却；同主机兄弟号仍照常换号、记数。主机口径复用 `accountUpstreamHost`，不以账号名称或站点文案判定。指向其他输入字段的 `param` 不进入 Q2，保留原错误处理。
+- 上述共享模型不可用判定先于管理员配置的临时不可调度规则，因此命中的模型不可用 400 不再执行这些规则。Responses 直通在 `shouldFailoverOpenAIPassthroughResponse` 之前调用同一共享出口；WS 的 HTTP bridge 与 compact 回退响应有意不接入，保留各自既有行为。
+- 上游 HTTP 5xx 仅凭 `type=invalid_request_error` 不再判为 `CLIENT_ERROR`，而归为 `UPSTREAM_REQUEST_RESTRICTION`（`upstream_request_restriction`）：在现有预算内换号，不在同号重试，不罚号、不记账号健康失败、不累计会话连败，也不写软冷却或模型冷却。与模型不可用共用上述跨主机护栏和终止出口：同一请求的这类 5xx 若在第二台上游主机复现，立即按请求级拒绝终止；同主机兄弟号仍可换号。候选耗尽也保留最后一条上游状态和脱敏错误体，不附重试建议、不计 turn cap，已提交流沿用既有终止帧规则。未提交的 HTTP 响应保留上游 5xx 状态并带 `x-should-retry: false`：该扩展头只对识别它的客户端生效，例如 OpenAI 官方 SDK；Codex 0.166 不读取此头，会在自身预算内重试 5xx。跨主机止损使每次重试最多触达两台上游主机。两类错误分别保留主机证据；明确模型不可用仍优先记号×模型冷却。4xx 的该 type、上下文超限、内容安全、cyber 和状态类请求拒绝维持原判定。其他 5xx 的瞬时故障处理不变。
+- OpenAI 兼容网关的 HTTP 原生、Responses 直通及 Chat/Messages 兼容终止出口会记录未知拒绝连击：只处理最终分类为 `CLIENT_ERROR`、且 `code` 缺失或不在既有 `clientErrorCodes` 中的拒绝，排除 HTTP 401/403、cyber、bio 及内容安全/策略屏蔽。当前请求仍按原错误状态和正文终止，不追加上游调用；同一实际分组、会话、账号在 `session.streak_window_seconds` 内连续收到同类拒绝，达到 `session.streak_threshold` 后，通过 `AvoidOpenAIStateAccount` 按 `session.avoid_seconds` 回避该号，并按属主删除绑定。不罚号、不新增账号健康失败或普通会话失败计数；随现有 `session.enabled` 与总开关生效。
+- 拒绝类型由“上游状态码 + code + 归一化消息”的 SHA-256 摘要区分；消息先脱敏、转小写并折叠空白，再将数字、UUID/长十六进制串和 request id 统一替换为占位符，不保存正文。所有数字都归一化是有意取舍，可能把 `32 MiB` 与 `64 MiB` 合并：最坏只会让该会话在 `AvoidSeconds` 内回避一个号，不罚号，跨主机出现同类拒绝后就停止回避。反过来，如果不归一化数字，上游消息中变化的大小、计数等会让摘要持续不同，连击可能永远达不到阈值，使会话卡在反复失败中。message 命中 `IsContextWindowError` 的上下文超限始终不触发回避。同号成功、其他失败或不同拒绝会重置连击。跨主机护栏沿用 `accountUpstreamHost`：同一会话的同类拒绝一旦在另一上游主机出现，就停止继续回避或延长回避；该证据保留至少 `max(streak_window_seconds, avoid_seconds)`，不会因同号连击复位而消失。已有的回避按原期限结束，不提前撤销。
+- 连击及跨主机证据使用进程内 LRU，总计最多 16,384 条；多实例各自计数，重启后清零，过期或淘汰后重新积累。会话回避仍复用原有存储，不扩展 Redis 接口、不加开关。已知确定性 code（例如上下文超限）不触发回避；如果同样的请求问题只以未知 code 或无 code 文案返回，也可能先回避一个号，代价是后续请求换到另一主机后再失败一次，随后由跨主机护栏停止扩散。
+- 结构化模型不可用的消息判据允许 `param` 为空或为 `model`；其他参数名仍不允许仅凭消息判定。
+- 其余模型不可用路径：只有结构化的模型错误码、§3 的几种明确消息，以及原有的 OpenAI 401 与 Codex 套餐限制两个特例，才让该账号对该模型 30 分钟不可用；无错误码、消息提到 model 的其他 404 只影响分类与换号。沿用 OpenAI“模型不存在”的模型限流（`model_rate_limits`），同账号的其他模型照常服务；末位兜底在到期前不放回。
 - 余额不足、鉴权失败、模型不可用不在同一账号上重试（Gemini 以前先同号重试，生产中一个账号 48 小时重试 341 次），换号耗尽后也不清空已排除的账号重新选号。其他失败照旧可在 2 秒后重选。OAuth 刷新后的认证重试、签名整流与续链重放这类修复性重试不受影响。
 - Grok 每个上游错误只记一条运维记录，以前同一个错误记两次。
 
@@ -488,7 +496,7 @@ Codex 0.166 provider 名不是精确的 OpenAI 时，每轮删除历史 EFA，�
 | `budget_exhausted` | 请求预算耗尽 |
 | `last_resort` | 末位兜底选中软罚账号 |
 | `fallback_group` / `fallback_return` | 转投兜底分组 / 切回主分组 |
-| `session_rebind` | 会话失败改绑 |
+| `session_rebind` | 会话失败改绑；未知终止拒绝达到既有会话阈值时复用该计数，原因 `terminal_rejection_streak` |
 | `undelivered` / `cdn_cut` | 未送达；按耗时推断的 CDN 切断（90 秒、125 秒、300 秒） |
 | `fast_fail` | 同一 Key、同一模型的重复 503 快速返回 |
 | `turn_cap` | 会话连续耗尽失败到达上限，改为终止应答 |
@@ -512,7 +520,7 @@ warn 级，进入运维页“系统日志”（`ops_system_logs`）：
 - `resilience.collab_plaintext`：conflict/invalid、vetoed/contradicted/uncovered 非零、恢复报错，或 applied 后最终失败被现有分类判为客户端错误且不是 429/5xx 等价时记录；HTTP 200 输出前的流内拒绝同样覆盖，in_band=true；含 account_id、group_id、model、client_version、outcome、applied、eligibility（account/continuity，资格未通过时为空）、upstream_status（无响应时为 0）、headers_committed 与各计数（含 msg_opaque/msg_text、dev_text_rewrites）。401/402/403 等账号侧或余额类别、瞬时 5xx、429、网络故障或断流不单独触发这条失败 Warn；本地恢复错误及前述异常计数仍独立触发。原始阶段 invalid（根对象非法/重复键）归为 unsupported，不因该判定触发 Warn；决策点改写返回 invalid 仍触发 Warn。正常提示替换不单独触发 Warn，不存正文/参数/密文/原始错误。
 
 - `balance_paused`（含账号、暂停时长与上游原文；0.4.12 起另含档位 `step`）；
-- `session_rebind`（P1-B 原因 `post_output_first_failure`，普通连击原因 `resil_failure_streak`，含会话哈希前缀、组、账号、类别、避开时长）、`last_resort`；
+- `session_rebind`（P1-B 原因 `post_output_first_failure`，普通连击原因 `resil_failure_streak`，未知终止拒绝连击原因 `terminal_rejection_streak`；含会话哈希前缀、组、账号、类别、连击次数及避开时长，不记拒绝正文或摘要）、`last_resort`；
 - `same_site_hold`（`host_hash`、`account_id`、`peer_account_id`、`until`）；
 - `fallback_group`、`fallback_return`；
 - `budget_exhausted`、`capacity_switch_exhausted`；
@@ -558,6 +566,9 @@ info 级，只写应用标准输出（量大，明细已有计数或未送达表
 | `ms_since_first_output` | 距第一次写出内容的毫秒数；还没有输出时为 0 |
 | `prelude_release_event` | 结束开场暂存、开始向客户端输出的那个上游事件类型（记的是释放的决定，不保证写出成功）；没有暂存过时为空 |
 | `prelude_release_ms` | 上一项距 `response.created` 的毫秒数；没有收到 created 时为 0 |
+| `prelude_release_item_type` | 释放事件的 `item.type` 或 `part.type`；非 item/part 事件或缺少类型时为空 |
+| `prelude_release_item_keys` | 上述对象的字段名，排序后用逗号连接；最多 32 个键、连接后最多 256 字节，任一超限时只记 `[truncated;keys=N]`（N 为总键数），不保留任何键名片段或字段值 |
+| `prelude_release_has_encrypted` | 上述对象是否带非空字符串 `encrypted_content`；没有时为 false |
 
 `keepalive_committed` 发生在输出之前，`delivered_bytes` 与 `ms_since_first_output` 总是 0。日志不含正文、Key 或完整会话值。
 
@@ -575,7 +586,18 @@ OpenAI 判慢降序与会话迁移的事件（见 §4.5）不带 `resilience.` �
 | `anthropic_account_latency_sticky_migrated` | Warn；属主比较删除成功；含 `group_id`、`model`（最终出站模型）、`from_account_id`、`alternative_account_id`（证明同段存在合格替代，不一定是最终选中的账号）、脱敏 `session` 和 `latency_hold` 原因 |
 | `anthropic_account_latency_sticky_kept` | Info；含 `group_id`、`model`、`from_account_id`、`alternative_account_id`、`reason`、脱敏 `session`。原因：`session_off`、`no_target`、`no_free_slot`、`owner_changed`、`cooldown`；`no_free_slot` 包含新鲜负载查询失败或并发服务缺失。`owner_changed` 表示本请求未删除绑定：删除出错或缓存不支持属主比较删除时保留 owner，比较确认绑定已变时重新读取并使用新 owner，读不到则正常选号 |
 
-慢失败冷却沿用 `openai_model_transient_state`（warn 级），字段 `account_id`、`model`（实际出站模型）、`failure_streak`（普通瞬时失败的连续次数）、`cooldown_ms`（本次施加的冷却，没有冷却时为 0）、`block_scope`（`account_model`）、`slow_streak`（连续慢失败次数）。每次计划内截止记一条，带 `reason` 为 `planned_first_output_timeout`；API Key 账号普通瞬时失败的那条不带 `reason`，`slow_streak` 为 0（连续计数已被打断）。计划内截止本身看计数 `first_output_timeout` 与运维记录中 Reason 为 `first_output_timeout` 的尝试。
+慢失败与模型不可用的瞬时冷却沿用 `openai_model_transient_state`（warn 级），字段如下：
+
+| 字段 | 含义 |
+|---|---|
+| `account_id`、`model` | 账号与实际出站模型；模型映射只执行一次 |
+| `failure_streak` | 该账号×模型的连续瞬时失败次数；首次只记数，第二次开始冷却 |
+| `cooldown_ms` | 本次施加的冷却毫秒数；没有新冷却时为 0 |
+| `block_scope` | 固定为 `account_model`，不影响同号其他模型 |
+| `slow_streak` | 连续慢失败次数；普通瞬时失败与明确模型不可用会打断慢失败连击 |
+| `reason` | 计划内截止为 `planned_first_output_timeout`；输出前 HTTP 400/404 或 5xx 明确模型不可用为 `openai_model_unavailable`；API Key 普通瞬时失败不带此字段 |
+
+每次计划内截止或明确模型不可用记一条，不新增计数器。计划内截止本身看计数 `first_output_timeout` 与运维记录中 Reason 为 `first_output_timeout` 的尝试。明确模型不可用的运维尝试分类为 `MODEL_UNSUPPORTED`；跨主机重复后终止的尝试为 `CLIENT_ERROR`。
 
 ## 6. 回退
 
@@ -619,6 +641,8 @@ OpenAI 判慢降序与会话迁移的事件（见 §4.5）不带 `resilience.` �
 管理端只读功能（选号解释中的模型限制提示等）也不受开关影响。
 
 ## 7. 已知限制
+
+- 模型不可用的账号×模型瞬时冷却仅接入输出前 HTTP 错误响应。上游返回 HTTP 200 后，在输出前通过未包装的 `response.failed` 或 `error` 事件表达同类 400/404/5xx 模型错误时，仍按原流内分类与终止规则处理，没有接入该共享出口，也不新增这条模型冷却；HTTP 与流内形式尚不等价。
 
 - 输出后失败补记仅覆盖 HTTP，WebSocket 不补；缺少有效发送边界且本请求已有同账号事件时保守跳过，可能漏记。历史记录不回填，见 §4.11。
 

@@ -10,22 +10,22 @@ func TestPreludeTraceTracksOneAttempt(t *testing.T) {
 	s := NewRequestState()
 	created := time.Unix(100, 0)
 	s.NotePreludeCreated(created)
-	s.NotePreludeReleased("response.output_text.delta", created.Add(17*time.Millisecond))
-	s.NotePreludeReleased("response.completed", created.Add(time.Second))
+	s.NotePreludeReleased("response.output_text.delta", created.Add(17*time.Millisecond), PreludeReleaseSchema{ItemType: "reasoning", ItemKeys: "type", HasEncrypted: true})
+	s.NotePreludeReleased("response.completed", created.Add(time.Second), PreludeReleaseSchema{})
 	got := s.PreludeTrace()
-	if got.ReleaseEvent != "response.output_text.delta" || got.ReleaseAfterCreatedMS != 17 {
+	if got.ReleaseEvent != "response.output_text.delta" || got.ReleaseAfterCreatedMS != 17 || got.ItemType != "reasoning" || got.ItemKeys != "type" || !got.HasEncrypted {
 		t.Fatalf("first release must freeze: %+v", got)
 	}
 	s.NotePreludeCreated(time.Time{})
-	if got = s.PreludeTrace(); got.ReleaseEvent != "" || got.ReleaseAfterCreatedMS != 0 {
+	if got = s.PreludeTrace(); got.ReleaseEvent != "" || got.ReleaseAfterCreatedMS != 0 || got.PreludeReleaseSchema != (PreludeReleaseSchema{}) {
 		t.Fatalf("new attempt leaks old release: %+v", got)
 	}
-	s.NotePreludeReleased("response.function_call_arguments.delta", created)
+	s.NotePreludeReleased("response.function_call_arguments.delta", created, PreludeReleaseSchema{})
 	if got = s.PreludeTrace(); got.ReleaseAfterCreatedMS != 0 {
 		t.Fatalf("no created has no latency: %+v", got)
 	}
 	s.NotePreludeCreated(created)
-	s.NotePreludeReleased("response.completed", created.Add(-time.Second))
+	s.NotePreludeReleased("response.completed", created.Add(-time.Second), PreludeReleaseSchema{})
 	if got = s.PreludeTrace(); got.ReleaseAfterCreatedMS != 0 {
 		t.Fatalf("negative delay: %+v", got)
 	}
@@ -38,7 +38,7 @@ func TestPreludeTraceConcurrent(t *testing.T) {
 		wg.Go(func() {
 			for range 50 {
 				s.NotePreludeCreated(time.Now())
-				s.NotePreludeReleased("response.completed", time.Now())
+				s.NotePreludeReleased("response.completed", time.Now(), PreludeReleaseSchema{})
 				_ = s.PreludeTrace()
 			}
 		})
@@ -46,6 +46,6 @@ func TestPreludeTraceConcurrent(t *testing.T) {
 	wg.Wait()
 	var absent *RequestState
 	absent.NotePreludeCreated(time.Now())
-	absent.NotePreludeReleased("response.completed", time.Now())
+	absent.NotePreludeReleased("response.completed", time.Now(), PreludeReleaseSchema{})
 	_ = absent.PreludeTrace()
 }

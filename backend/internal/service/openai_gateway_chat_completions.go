@@ -959,7 +959,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				return true
 			}
 			if !clientOutputStarted {
-				releaseOpenAIPrelude(preludeTrace, event.Type)
+				releaseOpenAIPrelude(preludeTrace, event.Type, []byte(payload))
 			}
 			s.resilienceOpenAIFailedAfterOutput(c.Request.Context(), account, resp, payloadBytes, message, clientOutputStarted)
 			message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payloadBytes, message)
@@ -1010,7 +1010,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			return false
 		}
 		if !holdPrelude && !clientOutputStarted && event.Type != "response.created" {
-			releaseOpenAIPrelude(preludeTrace, event.Type)
+			releaseOpenAIPrelude(preludeTrace, event.Type, []byte(payload))
 		}
 		var chunks []apicompat.ChatCompletionsChunk
 		if stagePrelude {

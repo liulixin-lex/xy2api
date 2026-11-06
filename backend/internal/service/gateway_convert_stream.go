@@ -303,7 +303,7 @@ func (st *gatewayConvertStream) onEvent(name, payload string) (gatewayConvertOut
 			return st.deadline(), true
 		}
 		if st.staging {
-			releaseOpenAIPrelude(st.preludeLog, event.Type)
+			releaseOpenAIPrelude(st.preludeLog, event.Type, []byte(payload))
 		}
 	}
 	if st.guarded && class.Kind == resilience.TerminalFailure {

@@ -111,6 +111,9 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 	upstreamModel string,
 ) *UpstreamFailoverError {
 	captureOpenAIStateRejection(c, account, respBody, upstreamMsg, "chat", false, nil)
+	if failure := s.failoverOpenAIModelAvailability(ctx, c, account, resp, respBody, upstreamModel, false); failure != nil {
+		return failure
+	}
 	shouldFailover := s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody)
 	tempUnscheduled := false
 	if c != nil && account != nil && account.Platform != PlatformGrok && !shouldFailover && !IsResponseCommitted(c) && s.rateLimitService != nil {

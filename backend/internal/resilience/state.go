@@ -142,6 +142,7 @@ type preludeTrace struct {
 	createdAt             time.Time
 	releaseEvent          string
 	releaseAfterCreatedMS int64
+	schema                PreludeReleaseSchema
 }
 
 // SessionRecorder records attempt outcomes of a sticky session. The service
@@ -424,6 +425,12 @@ func (s *RequestState) session() (int64, string, SessionRecorder) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.sessionGroupID, s.sessionHash, s.sessionRec
+}
+
+// SessionIdentity returns the actual group and sticky session after selection.
+func (s *RequestState) SessionIdentity() (int64, string) {
+	group, session, _ := s.session()
+	return group, session
 }
 
 // SessionFailure reports a failed attempt of the session on an account.

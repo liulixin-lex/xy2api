@@ -761,6 +761,11 @@ func (e *UpstreamFailoverError) IsCredentialFailure() bool {
 	return e != nil && e.Stage == GatewayFailureStageAccountAuth
 }
 
+// IsOpenAIModelUnavailable identifies the unpenalized model-availability route.
+func (e *UpstreamFailoverError) IsOpenAIModelUnavailable() bool {
+	return e != nil && e.Reason == openAIModelUnavailableReason
+}
+
 func (e *UpstreamFailoverError) isOpenAIWrappedRequestRejection() bool {
 	return e != nil && (e.WrappedStatus == http.StatusUnauthorized || e.WrappedStatus == http.StatusForbidden) &&
 		e.Scope == GatewayFailureScopeRequest && e.NextAccountAction == NextAccountStop
@@ -787,7 +792,7 @@ func (e *UpstreamFailoverError) OpenAIWrappedRequestRejectionCode() string {
 // and inference failures retain their existing scheduler-health behavior.
 func (e *UpstreamFailoverError) ShouldReportAccountScheduleFailure() bool {
 	// Forbidden intentionally uses soft cooldown/session streaks without also reporting scheduler-health failure.
-	if e == nil || e.IsCapabilityStreamOnly() || e.Reason == OpenAIStreamForbiddenReason || e.Reason == OpenAIStateRepairReason || e.isOpenAIWrappedRequestRejection() {
+	if e == nil || e.IsCapabilityStreamOnly() || e.Reason == OpenAIStreamForbiddenReason || e.Reason == OpenAIStateRepairReason || e.Reason == openAIModelUnavailableReason || e.Reason == openAIUpstreamRequestRestrictionReason || e.isOpenAIWrappedRequestRejection() {
 		return false
 	}
 	return !e.IsCredentialFailure() || e.Scope == GatewayFailureScopeAccount

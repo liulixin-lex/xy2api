@@ -825,7 +825,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 			startsClientOutput := forceFlushFailedEvent || openAIStreamDataStartsClientOutput(data, eventType)
 			if startsClientOutput && !clientOutputStarted {
-				releaseOpenAIPrelude(preludeTrace, eventType)
+				releaseOpenAIPrelude(preludeTrace, eventType, dataBytes)
 			}
 			startsVisibleOutput := openAIStreamDataStartsVisibleOutput(data, eventType)
 			startsTTFTOutput := openAIStreamDataStartsTTFT(data, eventType, forceFlushFailedEvent, ttftMode)
