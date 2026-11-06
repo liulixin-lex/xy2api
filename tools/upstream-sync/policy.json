@@ -1347,7 +1347,7 @@
     },
     {
       "path": "backend/internal/service/gateway_service.go",
-      "value": "if e == nil || e.IsCapabilityStreamOnly() {"
+      "value": "if e == nil || e.IsCapabilityStreamOnly() || e.Reason == OpenAIStreamForbiddenReason {"
     },
     {
       "path": "backend/internal/service/openai_gateway_grok.go",
@@ -3515,7 +3515,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
-      "value": "newOpenAIRequestRepairSignal(ctx, c, account, dataBytes, failedMessage)"
+      "value": "newOpenAIRequestRepairSignal(ctx, c, account, dataBytes, failedMessage, wrappedStatus)"
     },
     {
       "path": "backend/internal/service/openai_account_runtime_block_fastpath.go",
@@ -3535,7 +3535,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
-      "value": "statusCode, category := openAIStreamFailureStatusAndCategory(kind, payload, message)"
+      "value": "statusCode, category := openAIStreamFailureStatusAndCategory(kind, payload, message, validatedWrappedStatus...)"
     },
     {
       "path": "backend/internal/service/resilience_post_output.go",
