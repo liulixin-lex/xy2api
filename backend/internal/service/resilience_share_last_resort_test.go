@@ -3,6 +3,7 @@
 package service
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -131,6 +132,54 @@ func TestResilienceLastResortRebindsFromAvoidedAccount(t *testing.T) {
 			require.Equal(t, lrAccountB, result.Account.ID)
 			require.Equal(t, lrAccountB, env.cache.sessionBindings[lrSession], "the binding leaves the avoided account")
 		})
+	}
+}
+
+func TestResilienceLastResortLogsPriorSessionAvoidance(t *testing.T) {
+	for _, scheduler := range lastResortSchedulers {
+		for _, openai := range []bool{false, true} {
+			name := "gateway/"
+			if openai {
+				name = "openai/"
+			}
+			t.Run(name+string(scheduler), func(t *testing.T) {
+				logs := captureOpenAIObservationLogs(t)
+				state := resilience.NewRequestState()
+				ctx := resilience.WithRequestState(cacheableContext(), state)
+				gid := shareTestGroupID
+				excluded := map[int64]struct{}{lrAccountB: {}}
+				var selected *AccountSelectionResult
+				if openai {
+					env := newOpenAILastResortEnv(t, scheduler, 1, 5)
+					a := env.account(lrAccountA)
+					a.TempUnschedulableUntil, a.TempUnschedulableReason = nil, ""
+					store := env.svc.resilience.store
+					require.NoError(t, store.AddSessionAvoid(ctx, gid, lrSession, lrAccountA, time.Minute))
+					avoided, err := store.SessionAvoid(ctx, gid, lrSession)
+					require.NoError(t, err)
+					selected = env.svc.resilienceOpenAILastResort(ctx, OpenAIAccountScheduleRequest{
+						GroupID: &gid, Platform: PlatformOpenAI, SessionHash: lrSession, RequestedModel: "gpt-5.1", ExcludedIDs: excluded,
+					}, avoided)
+				} else {
+					env := newGatewayLastResortEnv(t, scheduler, 1, 5)
+					a := env.repo.accountsByID[lrAccountA]
+					a.TempUnschedulableUntil, a.TempUnschedulableReason = nil, ""
+					store := env.gateway.resilience.store
+					require.NoError(t, store.AddSessionAvoid(ctx, gid, lrSession, lrAccountA, time.Minute))
+					avoided, err := store.SessionAvoid(ctx, gid, lrSession)
+					require.NoError(t, err)
+					selected = env.gateway.resilienceGatewayLastResort(ctx, nil, &gid, lrSession, "claude-sonnet-4-5", excluded, avoided)
+				}
+				require.NotNil(t, selected)
+				if selected.ReleaseFunc != nil {
+					defer selected.ReleaseFunc()
+				}
+				require.Equal(t, lrAccountA, selected.Account.ID)
+				require.False(t, state.Avoided(lrAccountA), "avoidance comes from the earlier request's session store")
+				require.Equal(t, 1, strings.Count(logs.String(), `"msg":"resilience.last_resort_avoided"`))
+				require.Contains(t, logs.String(), `"reason":"session_avoid"`)
+			})
+		}
 	}
 }
 

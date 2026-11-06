@@ -529,7 +529,7 @@ warn 级，进入运维页“系统日志”（`ops_system_logs`）：
 - `m3_state_switch`：M3 回避当前号并消耗唯一状态换号额度；含 `group_id`、`account_id`、`switch_count`。
 - `m3_terminal`：M3 在没有可用同号修复或换号额度时终止；含 `group_id`、`account_id`、`cause`。
 - `committed_terminal`：M3 终止时下游响应头已提交，网关以 `response.failed` / `server_error` 收尾；含 `group_id`、`account_id`、`cause`。
-- `last_resort_avoided`：末位兜底选择了本请求会话已回避的账号；含 `group_id`、`account_id`、`reason=session_avoid`。
+- `last_resort_avoided`：末位兜底选择了会话回避集合中的账号，依据本次 fallback 已加载的会话集合（包括此前请求留下的回避），不依赖当前请求新写入的回避标记；含 `group_id`、`account_id`、`reason=session_avoid`。
 
 info 级，只写应用标准输出（量大，明细已有计数或未送达表）：
 
