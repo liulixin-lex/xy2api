@@ -29,7 +29,7 @@
 
 - [x] 3.1 原生、直通各一条真实 E2 包装 400 → M3 同号重放的 Forward 衔接回归，核对实际出站体。
 - [x] 3.2 两路红队（协议与客户端、路由与韧性）逐轮签字。
-- [ ] 3.3 最终集成头全量门禁：gofmt、vet、golangci-lint、后端全量 unit、既有 race 门禁及 M3 定向 `-race`、integration、干净树 audit。
+- [x] 3.3 最终集成头全量门禁：gofmt、vet、golangci-lint、后端全量 unit、既有 race 门禁及 M3 定向 `-race`、integration、干净树 audit。代码最终头 `777597cd2` 13 项全过；其后的 handler 测试补强已复跑 handler 全量 unit 与 lint。
 - [ ] 3.4 Codex 0.166 冒烟：暂存后原样放出，与直通无可见差异；ping 期间不超时；同一连接内修复成功时只感到延迟。
 
 ## 4 发布（须用户授权）

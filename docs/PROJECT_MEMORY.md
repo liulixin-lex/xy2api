@@ -6,6 +6,11 @@
 
 ## 当前交接状态
 
+- **零中断加密态与路由实施（2026-11-06 08:20 UTC；集成完成、门禁全绿，未推送）**：分支 `feat/encrypted-routing-20261105`（基于 origin/main `381687250`），本条所在提交即集成头。
+  - 范围：空白占位不算输出、Codex 输出前 ping、流内包装错误帧、M3 状态类同号修复与一次换号、输出前流内 forbidden 软冷却、`resilience.*` 计数；OpenSpec `encrypted-routing-20261105`。无迁移、无新开关、无前端改动。
+  - 门禁：代码最终头 `777597cd2` 13 项全过（gofmt、三种 vet、lint 0、unit 68 包 30,955 项、`ci_gate.py` race 525 项 0 跳过、M3 定向 race、integration 60 包、docs、干净树 audit、scheduler-diff）。其后只有一个 handler 测试补强（handler 全量 unit 与 lint 复跑通过）和文档提交。
+  - 两路红队对全部开发提交与集成冲突处理签字，无未关闭的 P0–P2。
+  - 待用户：Codex 0.166 冒烟（tasks 3.4）的执行方式；推送、PR、合并、发版、镜像固化与部署授权。详见“进行中的工作”。
 - **门槛 v3 实施（2026-11-04 14:50 UTC；PR #194 已合并，main `746ec14fc`；用户授权发版 0.5.2，版本准备中，未部署）**：分支 `feat/gate-v3-20261104`，CI 20 项全绿（pull_request 运行里 macOS `shell` 因排不到机器被取消，重跑后通过）。0.5.2 包含 #191–#194，迁移新增 289。部署需单独授权。
   - 范围：门槛 v3、判慢让位、P1-B、同站暂停、`usage_logs.attempt_first_output_ms`（迁移 289）、低倍率优先分组范围、前端；另含用户追加的会话状态两条约束：
     - 带密文片段的请求不软迁移，P1-B 退回连击规则，WS 增量轮沿用标记；
@@ -114,6 +119,16 @@
       - M3 终止改为 Codex 可重试的形式：未提交写 502，已提交写 `server_error`。这一条偏离 FINAL 原先的“写真 4xx”。
     - **预检 1**：三个测试 Key 对应的三个上游，两个模型都接受占位形状；混合真实密文的情况未覆盖，因为拿不到有效的协作密文。
     - 裁决全文在本地 `implementation/DECISIONS.md`。
+  - 11-06 08:20 UTC：
+    - 测试 Key 已由用户提供（三个，对应三个上游），只经环境变量使用，未落盘。
+    - 开发完成：甲的空白占位、包装帧、forbidden 衔接与心跳修复，乙的 M3 及审查修复，均由丁普通 merge 合入。
+    - 实施中相对 FINAL 的裁决（全文见本地 DECISIONS）：
+      - Responses 输出前心跳按客户端选择：Codex 写完整 ping 事件，其他客户端保留注释（要求首事件为 created 的 SDK 遇到 ping 会报错）；
+      - M3 批量 Bad 只在上游接受派生请求后写入，`[DONE]` 本身不算证据；DeepSeek/Kimi 归一化账号不启用 M3；M3 客户端与 ops 消息用固定模板；
+      - 包装 401/403 命中请求级拒绝时按请求级终止（HTTP 400 / 流内 failed，code 按拒绝语义）；
+      - 改写后的派生形状兜底只对非请求级 400/422。
+    - 已接受的已知差异：M3 终止不计入 turn cap；包装 401/403 上下文超限未提交时写 HTTP 400，Codex 0.166 不据此自动压缩；compact 回退的 retry ops 沿用基线观测口径。
+    - 未完成：Codex 0.166 冒烟（预检 2）；发布前镜像固化；推送、PR、发版、部署。均待用户决定。
 
 - **20261104-release0502-handoff**（2026-11-04 17:22 UTC，发版接力）：用户再次授权继续 0.5.2 发版（包含 #191–#194，新增迁移 289），不部署生产。
   - 版本 PR #195：head `2d41304954e51cf62809cbf38ac8a44cd6fa34ff`，base `746ec14fc`；除两个 macOS `shell` 检查取消外均通过，GitHub Actions 事故已恢复。
@@ -1362,3 +1377,13 @@ pnpm --dir frontend run build
 - 验证：`check_docs_consistency.py`、干净树 `sync.py audit`；CI。
 - 卡点/风险：Release 前端构建内存临界；本 PR 的 push CI 遇到一次测试替身竞态导致的偶发失败，根因已定位、与 0.5.3 无关。两项都见“未结事项”。
 - 下一步：部署与灰度待用户授权，见“未结事项”。
+
+### 2026-11-06 — 20261105-encrypted-routing-impl — 集成完成，最终门禁全绿，待发布授权
+
+- 请求/目标：按 FINAL（用户 11-05 全部批准）一次发布零中断方案。Claude 任 PM 调度；gpt-6-astra xhigh 负责开发（甲、乙）、测试（丙）、集成（丁）；astra 与 Opus 两路红队逆向审查。
+- 开始状态：origin/main `381687250`，分支 `feat/encrypted-routing-20261105`。
+- 完成操作：空白占位暂存与冲刷、兼容转换保留空白、按客户端选择心跳并修复直通 ticker 漏拍；E1/E2 严格校验与路由、包装 401/403 请求级终止映射；M3（槽位替换、严格增长重放、Bad 接受门槛、一次状态换号、可重试终止）；输出前流内 forbidden 软冷却；`resilience.*` 计数；`docs/GATEWAY_RESILIENCE.md`、OpenSpec `encrypted-routing-20261105`、policy literal 与目录归属同步。
+- 修改文件：`backend/internal/{handler,resilience,service}` 相关代码与测试（77 个文件，+5705/−468）、`docs/GATEWAY_RESILIENCE.md`、`docs/README.md`、`openspec/changes/encrypted-routing-20261105/`、`tools/upstream-sync/policy.json`、本文件。
+- 验证：`777597cd2` 13 项门禁全过（见当前交接状态）；`9e10b731c` handler 全量 unit 与 lint；文档提交后 docs 与干净树 audit。
+- 卡点/风险：M3 store 的 race 检查只覆盖串行路径（store 复用既有加锁的 lineage 存储）；Codex 0.166 冒烟未做。
+- 下一步：用户决定冒烟方式，并授权推送、PR、发版、镜像固化与部署；上线后按 tasks §4.3 验收。
