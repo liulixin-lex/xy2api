@@ -150,6 +150,51 @@ func TestExhaustedRateLimitCarriesCappedRetryAfter(t *testing.T) {
 	require.Equal(t, "3600", w.Header().Get("Retry-After"))
 }
 
+func TestExhaustedOpenAIStreamForbiddenCarriesRetryHint(t *testing.T) {
+	failoverErr := &service.UpstreamFailoverError{
+		StatusCode: http.StatusForbidden,
+		Reason:     service.OpenAIStreamForbiddenReason,
+	}
+	for _, tc := range []struct {
+		name      string
+		committed bool
+	}{{"HTTP Retry-After", false}, {"committed legacy hint", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			withHandlerResilience(t, func(s *resilience.Settings) {
+				s.Errors.NoAccountRetryAfter.Min = 7
+				s.Errors.NoAccountRetryAfter.Max = 7
+				s.Errors.FailedFrameRetryAfter = false
+			})
+			c, w := newGinContextForEndpoint(t, EndpointResponses)
+			if tc.committed {
+				_, err := c.Writer.WriteString(":\n\n")
+				require.NoError(t, err)
+			}
+			(&OpenAIGatewayHandler{}).handleFailoverExhausted(c, failoverErr, tc.committed)
+			if tc.committed {
+				require.Equal(t, http.StatusOK, w.Code)
+				_, errObject := parseResponsesFailedSSE(t, strings.TrimPrefix(w.Body.String(), ":\n\n"))
+				require.Equal(t, "server_error", errObject["code"])
+				require.Equal(t, "Upstream service temporarily unavailable. Please try again in 7s.", errObject["message"])
+			} else {
+				require.Equal(t, http.StatusBadGateway, w.Code)
+				require.Equal(t, "7", w.Result().Header.Get("Retry-After"))
+				require.Equal(t, "server_error", gjson.Get(w.Body.String(), "error.code").String())
+			}
+		})
+	}
+	t.Run("turn cap keeps the common terminal policy", func(t *testing.T) {
+		withHandlerResilience(t, func(s *resilience.Settings) { s.Errors.TurnCap.Failures = 1 })
+		resetTurnCap(t)
+		c, w := turnCapContext(t, EndpointResponses)
+		(&OpenAIGatewayHandler{}).handleFailoverExhausted(c, failoverErr, false)
+		require.Equal(t, http.StatusServiceUnavailable, w.Code)
+		require.Empty(t, w.Header().Get("Retry-After"))
+		require.Equal(t, "false", w.Header().Get("x-should-retry"))
+		require.Equal(t, "server_is_overloaded", gjson.Get(w.Body.String(), "error.code").String())
+	})
+}
+
 func TestExhaustedBadGatewayCapsUpstreamRetryAfter(t *testing.T) {
 	// Spec: every Retry-After sent by the gateway is capped by the server; a
 	// Cloudflare 502 page's 60 s used to pass through unchanged (staging BUD-1).

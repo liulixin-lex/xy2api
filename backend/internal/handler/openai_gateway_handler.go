@@ -3705,7 +3705,8 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	if failoverErr.Reason == service.OpenAIStreamForbiddenReason {
 		message := "Upstream service temporarily unavailable"
 		service.SetOpsUpstreamError(c, failoverErr.StatusCode, message, "")
-		h.handleStreamingAwareErrorWithCode(c, http.StatusBadGateway, "server_error", "server_error", message, streamStarted, false)
+		status := applyExhaustedRetryHint(c, h.gatewayService, http.StatusBadGateway)
+		h.handleStreamingAwareErrorWithCode(c, status, "server_error", "server_error", message, streamStarted, false)
 		return
 	}
 	if failoverErr.IsOpenAIRequestBodyTooLarge() {
