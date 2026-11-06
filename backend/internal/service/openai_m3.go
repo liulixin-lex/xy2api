@@ -234,7 +234,7 @@ func (a *openAIM3Attempt) derive(ctx context.Context, body []byte) ([]byte, erro
 	for _, slot := range slots {
 		_, replaced := a.state.replaced[slot.id]
 		_, learned := bad[slot.id.openAIBadEncryptedSlot]
-		if !replaced && !(slot.id.ref != "" && learned) {
+		if !replaced && (slot.id.ref == "" || !learned) {
 			continue
 		}
 		body, err = sjson.SetRawBytes(body, slot.path, []byte(openAIM3Placeholder))
@@ -468,7 +468,7 @@ func deferOpenAIM3ToForward(c *gin.Context, account *Account, payload []byte, me
 		}
 	}
 	_, trigger := openAIM3Trigger(payload, message, wrappedStatus)
-	if !trigger && !(len(r.m3.state.replaced) > 0 && openAIM3RewrittenShapeRejected(status, payload, message)) {
+	if !trigger && (len(r.m3.state.replaced) == 0 || !openAIM3RewrittenShapeRejected(status, payload, message)) {
 		return nil
 	}
 	return annotateUpstreamFailoverAccount(&UpstreamFailoverError{
