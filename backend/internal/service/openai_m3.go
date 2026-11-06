@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -109,19 +110,24 @@ func openAIM3Slots(body []byte) ([]openAIM3Slot, map[string]int, error) {
 		if id := item.Get("id"); id.Type == gjson.String {
 			ids[id.String()]++
 		}
-		kind := item.Get("type").String()
-		var parts, refKey string
-		switch kind {
-		case "agent_message":
-			parts, refKey = "content", "id"
-		case "function_call_output":
-			parts, refKey = "output", "call_id"
+		var kind, parts, refKey string
+		switch item.Get("type").String() {
+		case openAIM3AgentMessage:
+			kind, parts, refKey = openAIM3AgentMessage, "content", "id"
+		case openAIM3FunctionOutput:
+			kind, parts, refKey = openAIM3FunctionOutput, "output", "call_id"
 		default:
 			continue
 		}
 		ref := item.Get(refKey)
 		if ref.Exists() && ref.Type != gjson.String {
 			return nil, nil, errors.New("invalid item reference")
+		}
+		// gjson strings may retain the entire request. Bound and detach refs
+		// before adding them to request state or the shared Bad store.
+		var refValue string
+		if len(ref.String()) <= openAIM3MaxRefBytes {
+			refValue = strings.Clone(ref.String())
 		}
 		container := item.Get(parts)
 		if kind == "function_call_output" && container.Type == gjson.String {
@@ -151,7 +157,7 @@ func openAIM3Slots(body []byte) ([]openAIM3Slot, map[string]int, error) {
 				return nil, nil, err
 			}
 			sum := sha256.Sum256(bytes.TrimSuffix(normalized.Bytes(), []byte("\n")))
-			id := openAIM3SlotID{openAIBadEncryptedSlot: openAIBadEncryptedSlot{kind, ref.String(), hex.EncodeToString(sum[:])}, part: j, anonymousItem: -1}
+			id := openAIM3SlotID{openAIBadEncryptedSlot: openAIBadEncryptedSlot{kind, refValue, hex.EncodeToString(sum[:])}, part: j, anonymousItem: -1}
 			if id.ref == "" {
 				id.anonymousItem = i
 			}

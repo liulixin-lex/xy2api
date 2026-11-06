@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
@@ -399,6 +400,50 @@ func TestOpenAIM3BadScopeAndExpiry(t *testing.T) {
 	store.sessionBadEncrypted[key] = binding
 	store.sessionBadEncryptedMu.Unlock()
 	require.Empty(t, store.GetSessionBadEncryptedSlots(7, "session", 11))
+}
+
+func TestOpenAIM3BadReferencesAreBoundedAndDetached(t *testing.T) {
+	for _, size := range []int{openAIM3MaxRefBytes, openAIM3MaxRefBytes + 1} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			req := newWebSearchReplayRequest(t)
+			store := NewOpenAIWSStateStore(nil)
+			svc := &OpenAIGatewayService{openaiWSStateStore: store}
+			body, err := sjson.Set(m3TwoItemRequest, "input.0.id", "amsg_"+strings.Repeat("x", size-5))
+			require.NoError(t, err)
+			slots, _, err := openAIM3Slots([]byte(body))
+			require.NoError(t, err)
+			attempt := svc.armOpenAIM3(req.c, webSearchReplayAccount(false), []byte(body))
+			message := "Encrypted content could not be verified for item " + gjson.Get(body, "input.0.id").String()
+			var signal *openAIRequestRepairSignal
+			require.ErrorAs(t, attempt.learn(req.ctx, []byte(body), nil, message, 400, 0), &signal)
+			require.Equal(t, "input_text", gjson.GetBytes(signal.next, "input.0.content.0.type").String())
+			bad := store.GetSessionBadEncryptedSlots(attempt.request.groupID, attempt.request.session, attempt.account.ID)
+			if size > openAIM3MaxRefBytes {
+				require.Empty(t, slots[0].id.ref)
+				require.Empty(t, bad)
+			} else {
+				require.Len(t, bad, 1)
+				for slot := range bad {
+					require.Len(t, slot.ref, size)
+					require.Equal(t, slots[0].id.ref, slot.ref)
+					require.False(t, unsafe.StringData(slots[0].id.ref) == unsafe.StringData(slot.ref))
+				}
+			}
+		})
+	}
+	// Also defend the persistence API against a caller retaining a substring.
+	store := NewOpenAIWSStateStore(nil)
+	body := strings.Repeat("x", 4096) + "amsg_ref"
+	ref := body[4096:]
+	slot := openAIBadEncryptedSlot{kind: openAIM3AgentMessage, ref: ref, digest: "digest"}
+	require.Equal(t, 1, store.MarkSessionBadEncryptedSlots(1, "session", 1, []openAIBadEncryptedSlot{slot}, time.Hour))
+	for saved := range store.GetSessionBadEncryptedSlots(1, "session", 1) {
+		require.Len(t, saved.ref, len(ref))
+		require.Equal(t, ref, saved.ref)
+		require.False(t, unsafe.StringData(ref) == unsafe.StringData(saved.ref))
+	}
+	slot.ref = strings.Repeat("x", openAIM3MaxRefBytes+1)
+	require.Zero(t, store.MarkSessionBadEncryptedSlots(1, "session", 1, []openAIBadEncryptedSlot{slot}, time.Hour))
 }
 
 func TestOpenAIM3WrappedStatusRoutesOnly400(t *testing.T) {

@@ -1,6 +1,15 @@
 package service
 
-import "time"
+import (
+	"strings"
+	"time"
+)
+
+const (
+	openAIM3AgentMessage   = "agent_message"
+	openAIM3FunctionOutput = "function_call_output"
+	openAIM3MaxRefBytes    = 256
+)
 
 // Bad is deliberately separate from rs/cmp lineage: both the item reference
 // and the account are required to reuse evidence on a later turn.
@@ -38,12 +47,21 @@ func (s *defaultOpenAIWSStateStore) MarkSessionBadEncryptedSlots(groupID int64, 
 	}
 	added := 0
 	for _, slot := range slots {
-		if slot.ref == "" || slot.digest == "" {
+		if slot.ref == "" || len(slot.ref) > openAIM3MaxRefBytes || slot.digest == "" {
 			continue
 		}
 		if _, exists := binding.slots[slot]; exists || len(binding.slots) >= openAIWSInvalidEncryptedDigestsPerSession {
 			continue
 		}
+		switch slot.kind {
+		case openAIM3AgentMessage:
+			slot.kind = openAIM3AgentMessage
+		case openAIM3FunctionOutput:
+			slot.kind = openAIM3FunctionOutput
+		default:
+			continue
+		}
+		slot.ref = strings.Clone(slot.ref)
 		binding.slots[slot] = struct{}{}
 		added++
 	}
