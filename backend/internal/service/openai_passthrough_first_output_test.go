@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -133,22 +134,79 @@ func TestOpenAIPassthroughStallAfterOutputEndsTheStream(t *testing.T) {
 	require.Contains(t, w.Body(), "hello")
 }
 
-// R1-P1-2: heartbeats while the opening is staged are comments counted as
+// R1-P1-2: heartbeats while the opening is staged are ping events counted as
 // heartbeat bytes; the attempt may still switch.
 func TestOpenAIPassthroughStagingHeartbeatIsNotOutput(t *testing.T) {
 	withResilienceSettings(t, nil)
 	w := newGWWriter()
 	c := ptContext(w)
+	c.Request.Header.Set("originator", "codex_cli_rs")
 	up := newGWUpstream(nil)
 	done := ptRun(compatStreamService(nil, 10, 0, 1), c, up.response(nil))
 	up.send(t, ptCreated)
-	require.Eventually(t, func() bool { return strings.HasPrefix(w.Body(), ":") }, 3*time.Second, 20*time.Millisecond)
+	require.Eventually(t, func() bool {
+		return (strings.HasPrefix(w.Body(), ":") || strings.HasPrefix(w.Body(), string(preOutputPingFrame)))
+	}, 3*time.Second, 20*time.Millisecond)
 	up.send(t, ptOverload)
 	got := ptAwait(t, done, 3*time.Second)
 	var failover *UpstreamFailoverError
 	require.ErrorAs(t, got.err, &failover)
+	requireResponsesPingEvents(t, w.Body())
 	requireOnlyHeartbeats(t, c, w.Body())
 	require.NotContains(t, w.Body(), "resp_pt")
+}
+
+func TestOpenAIPassthroughUpstreamCommentsDoNotSuppressPings(t *testing.T) {
+	for _, tc := range []struct {
+		name, userAgent string
+		frame           []byte
+	}{
+		{"codex", "codex_cli_rs/0.166.0", preOutputPingFrame},
+		{"python", "OpenAI/Python 2.0.0", preOutputCommentFrame},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				withResilienceSettings(t, nil)
+				w := newGWWriter()
+				c := ptContext(w)
+				c.Request.Header.Set("User-Agent", tc.userAgent)
+				up := newGWUpstream(nil)
+				defer func() { _ = up.Close() }()
+				done := ptRun(compatStreamService(nil, 100, 0, 10), c, up.response(nil))
+				up.send(t, ptCreated)
+				synctest.Wait() // Arm the read pump before advancing the virtual clock.
+				// Preserve the production-scale 3s/10s cadence without wall-clock
+				// waits. Check both due beats and the gaps between them exactly.
+				for elapsed := time.Second; elapsed <= 20*time.Second; elapsed += time.Second {
+					time.Sleep(time.Second)
+					if elapsed%(3*time.Second) == 0 {
+						up.send(t, ptComment)
+					}
+					synctest.Wait()
+					require.Equal(t, int(elapsed/(10*time.Second)), strings.Count(w.Body(), string(tc.frame)),
+						"gateway heartbeat count at %s with continuing upstream comments", elapsed)
+					require.Equal(t, int(elapsed/(3*time.Second)), strings.Count(w.Body(), ptComment))
+				}
+				up.send(t, ptOverload)
+				got := ptAwait(t, done, 100*time.Second)
+				var failover *UpstreamFailoverError
+				require.ErrorAs(t, got.err, &failover)
+				body := w.Body()
+				heartbeats := strings.ReplaceAll(body, ptComment, "")
+				require.Equal(t, strings.Repeat(string(tc.frame), 2), heartbeats)
+				if tc.name == "codex" {
+					requireResponsesPingEvents(t, heartbeats)
+				} else {
+					require.NotContains(t, body, "event:", "non-Codex clients receive only comments before created")
+				}
+				requireOnlyHeartbeats(t, c, body)
+				require.NotContains(t, body, "resp_pt")
+				time.Sleep(10 * time.Second)
+				synctest.Wait()
+				require.Equal(t, body, w.Body(), "the finished attempt must stop heartbeats")
+			})
+		})
+	}
 }
 
 // R2-P1③: upstream comment heartbeats are passed through at once, not
@@ -179,8 +237,9 @@ func TestOpenAIPassthroughHeartbeatWriteFailureIsClientGone(t *testing.T) {
 	}{{"failed_event", ptOverload}, {"deadline", ""}} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := newGWWriter()
-			w.fail = func(data string) bool { return strings.HasPrefix(data, ":") }
+			w.fail = func(data string) bool { return data == string(preOutputPingFrame) }
 			c := ptContext(w)
+			c.Request.Header.Set("originator", "codex_cli_rs")
 			up := newGWUpstream(nil)
 			done := ptRun(compatStreamService(nil, 3, 0, 1), c, up.response(nil))
 			up.send(t, ptCreated)
@@ -302,7 +361,9 @@ func TestOpenAIPassthroughRuleAfterHeartbeatEndsWithResponsesTerminal(t *testing
 			if tc.strict {
 				up.send(t, ": keep-alive\n\n")
 			}
-			require.Eventually(t, func() bool { return strings.HasPrefix(w.Body(), ":") }, 3*time.Second, 10*time.Millisecond)
+			require.Eventually(t, func() bool {
+				return (strings.HasPrefix(w.Body(), ":") || strings.HasPrefix(w.Body(), string(preOutputPingFrame)))
+			}, 3*time.Second, 10*time.Millisecond)
 			up.send(t, buildContextLengthFailedSSE())
 			_ = up.pw.Close()
 			got := ptAwait(t, done, 3*time.Second)
@@ -315,7 +376,7 @@ func TestOpenAIPassthroughRuleAfterHeartbeatEndsWithResponsesTerminal(t *testing
 			require.NotContains(t, body, "\n{", "no bare JSON after the heartbeat")
 			var events []string
 			for _, block := range strings.Split(strings.TrimSuffix(body, "\n\n"), "\n\n") {
-				if !strings.HasPrefix(block, ":") {
+				if !strings.HasPrefix(block, ":") && !strings.HasPrefix(block, "event: ping\n") {
 					events = append(events, block)
 				}
 			}

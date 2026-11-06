@@ -37,8 +37,9 @@ const (
 const ssePendingLimit = 64 << 10
 
 type sseDeliveryState struct {
-	kind    atomic.Int32
-	content atomic.Bool
+	kind      atomic.Int32
+	content   atomic.Bool
+	responses atomic.Bool
 
 	mu      sync.Mutex
 	pending []byte
@@ -82,6 +83,10 @@ func (w *deliveryWriter) observeStream(p []byte) {
 		}
 		block := st.pending[:end]
 		st.pending = st.pending[end+sep:]
+		event, data := sseBlockFields(block)
+		if strings.HasPrefix(strings.TrimSpace(gjson.GetBytes(data, "type").String()), "response.") || strings.HasPrefix(strings.TrimSpace(event), "response.") {
+			st.responses.Store(true)
+		}
 		if !sseBlockIsOpening(block) {
 			st.content.Store(true)
 			st.pending = nil

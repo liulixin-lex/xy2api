@@ -6,6 +6,15 @@
 
 ## 当前交接状态
 
+- **零中断加密态与路由实施（2026-11-06 12:30 UTC；PR #201 已开、CI 全绿、冒烟完成，未合并）**：分支 `feat/encrypted-routing-20261105`，已普通合并 main（0.5.4），本条所在提交即 PR 头。
+  - main 已发布 0.5.4（只读 MCP），本变更随下一个版本发布。
+  - 范围：空白占位不算输出、Codex 输出前 ping、流内包装错误帧、M3 状态类同号修复与一次换号、输出前流内 forbidden 软冷却、`resilience.*` 计数；OpenSpec `encrypted-routing-20261105`。无迁移、无新开关、无前端改动。
+  - 门禁：代码最终头 `777597cd2` 13 项全过（gofmt、三种 vet、lint 0、unit 68 包 30,955 项、`ci_gate.py` race 525 项 0 跳过、M3 定向 race、integration 60 包、docs、干净树 audit、scheduler-diff）。其后只有一个 handler 测试补强（handler 全量 unit 与 lint 复跑通过）和文档提交。
+  - 两路红队对全部开发提交与集成冲突处理签字，无未关闭的 P0–P2。
+  - PR #201：用户授权推送并开 PR。合并 main 后追加依赖升级（brotli 1.2.7、klauspost/compress 1.20.2，修复新收录的 GO-2026-6888 / GO-2026-6865）；CI 20 项全绿。push 一路有一次跨实例缓存失效用例超时，同头 PR 一路通过，单次重跑通过，记为偶发。
+  - Codex 0.166 冒烟（tasks 3.4，PR 头 `e596bc670` 的隔离临时网关）：三个测试上游普通提示均通过，单次 created，观察到空白暂存；首输出前等待 34–51 秒仅靠 ping 维持，12 秒空闲超时未触发。M3 未能在真实上游触发：测试上游对构造的 agent_message 一律返回通用 400，由单测与 Forward 衔接回归覆盖。
+  - 待用户：合并、发版、镜像固化与部署授权。详见“进行中的工作”。
+
 - **0.5.4 已正式发布（2026-11-06；未部署）**：PR #199 已合并，发布提交2356b8b200eb567defdd6fe3e3939d5a5ec017e2，标签v0.5.4。只读MCP含29工具，默认关闭；迁移290/291随包提供，生产启用前按runbook配置最小权限并验收目标环境。
   - 两路完整CI共20项检查全绿；Release运行42083934644成功。5平台安装包及SHA256、Linux amd64版本输出、GHCR amd64/arm64版本与commit标签均已核验，latest指向本版。生产和指定商业Host未验收；发布不等于生产启用。详细记录已归档。
 
@@ -105,6 +114,36 @@
 
 ## 进行中的工作
 
+- **20261105-encrypted-routing-impl**（2026-11-05 11:00 UTC 开始，Claude 主持与集成）：按本地 `.work/tasks/20261105-encrypted-routing/FINAL.md`（astra、Opus 已签字，用户 11-05 全部批准）实施“空白占位不算输出 + 包装错误帧 + 状态类同号学习重放与一次换号 + 通用 forbidden 软冷却 + 最小计数”，一次发布。实施交接与裁决在同目录 `implementation/`（不入库）。
+  - 集成分支 `feat/encrypted-routing-20261105`（Paseo 工作树 `enc-routing-integration`，基于 origin/main `381687250`）。
+  - 分工（用户 11-05 指定）：后端 gpt-6-astra xhigh 两路（甲：流式判定与包装帧；乙：状态机与 forbidden）；红队 astra xhigh（协议与客户端）与 Opus xhigh（路由与韧性）两路逆向审查。
+  - 授权：生产只读补数据。推送、PR、合并、发版、部署、镜像固化需在发布前再确认；测试 Key 待用户提供。
+  - 13:00 UTC：
+    - **分工调整**（用户追加）：PM 只调度；丙测试（预检、门禁，在独立 detached 检出中跑），丁合并集成。
+    - **设计稿**：DESIGN_A/B 经两路红队快审，裁决后开工。主要裁决：
+      - 同号重放留在 Forward 内；
+      - §3.4 只覆盖输出前的流内帧；
+      - 只有包装 400 进 M3，包装帧按“迟到的 HTTP 状态”路由；
+      - M3 终止改为 Codex 可重试的形式：未提交写 502，已提交写 `server_error`。这一条偏离 FINAL 原先的“写真 4xx”。
+    - **预检 1**：三个测试 Key 对应的三个上游，两个模型都接受占位形状；混合真实密文的情况未覆盖，因为拿不到有效的协作密文。
+    - 裁决全文在本地 `implementation/DECISIONS.md`。
+  - 11-06 08:20 UTC：
+    - 测试 Key 已由用户提供（三个，对应三个上游），只经环境变量使用，未落盘。
+    - 开发完成：甲的空白占位、包装帧、forbidden 衔接与心跳修复，乙的 M3 及审查修复，均由丁普通 merge 合入。
+    - 实施中相对 FINAL 的裁决（全文见本地 DECISIONS）：
+      - Responses 输出前心跳按客户端选择：Codex 写完整 ping 事件，其他客户端保留注释（要求首事件为 created 的 SDK 遇到 ping 会报错）；
+      - M3 批量 Bad 只在上游接受派生请求后写入，`[DONE]` 本身不算证据；DeepSeek/Kimi 归一化账号不启用 M3；M3 客户端与 ops 消息用固定模板；
+      - 包装 401/403 命中请求级拒绝时按请求级终止（HTTP 400 / 流内 failed，code 按拒绝语义）；
+      - 改写后的派生形状兜底只对非请求级 400/422。
+    - 已接受的已知差异：M3 终止不计入 turn cap；包装 401/403 上下文超限未提交时写 HTTP 400，Codex 0.166 不据此自动压缩；compact 回退的 retry ops 沿用基线观测口径。
+    - 未完成：发布前镜像固化；合并、发版、部署。均待用户决定。
+  - 11-06 12:30 UTC：
+    - PR #201 开出并 CI 全绿（见当前交接状态）。冒烟环境由 Opus 辅助搭建（用户要求加快进度）；管理员合规承诺经用户授权，仅在该次 tmpfs 临时库代为确认，已随库删除。
+    - 冒烟环境与本机临时目录已清理，Key、上游地址泄漏扫描均为 0。
+    - 后续观察项（不阻塞发布）：
+      - 输出前心跳实测相邻最大间隔 8.5 秒（设定 5 秒），按生产 10 秒间隔推算最坏约 20 秒；对 Codex 缺省设置无影响，原因待单独排查；
+      - 心跳已提交响应头后到达的请求级 4xx 以 `response.failed` / `server_error` 收尾，Codex 会按可重试处理（基线行为）；
+      - OpenAI API Key 账号的能力探测在 info 日志打印上游 base_url，且未配模型映射时用缺省探测模型，测试上游返回 404（基线行为）。
 
 
 
@@ -1399,3 +1438,23 @@ pnpm --dir frontend run build
 - 验证：PR CI42078746808、push CI42078709061及两路Security Scan共20项全绿，包含全仓unit/integration、golangci-lint、MCP真实PG12关键测试0skip、前端、Windows插件、upstream/docs、部署脚本、网关可靠性/韧性、真实Redis缓存与支付PG。首次冷编译耗时较长，未跳过检查或重试掩盖失败。发布verify-version/frontend/release全成功。下载5平台安装包逐项SHA256、归档二进制与MCP runbook存在性通过；Linux amd64 -version报告0.5.4/兼容0.2.15及发布commit。GHCR 0.5.4和latest清单一致，linux/amd64摘要b20d943cc890acc5411835d940110f717f6ec218f5e947a7490d1f50d7e4c5ce、linux/arm64摘要34e61a1d69f1da0e55d2177e5c177c85f028564d3b3b5fbfb101015148a61209，镜像version/revision标签均正确。安装包临时副本已清理。
 - 卡点/风险：无发布阻断；未连接生产、迁移生产数据库、配置生产Reader或启用MCP。目标登录/代理/商业Host及生产规模查询计划仍需按WP5.2/WP5.4验收，MCP默认关闭。
 - 下一步：发布产物可供用户使用；生产部署与MCP启用需独立授权和部署验收。详细发布前登记已原样归档，本次交接文档PR不改变v0.5.4发布提交。
+
+
+### 2026-11-06 — 20261105-encrypted-routing-impl — 集成完成，最终门禁全绿，待发布授权
+
+- 请求/目标：按 FINAL（用户 11-05 全部批准）一次发布零中断方案。Claude 任 PM 调度；gpt-6-astra xhigh 负责开发（甲、乙）、测试（丙）、集成（丁）；astra 与 Opus 两路红队逆向审查。
+- 开始状态：origin/main `381687250`，分支 `feat/encrypted-routing-20261105`。
+- 完成操作：空白占位暂存与冲刷、兼容转换保留空白、按客户端选择心跳并修复直通 ticker 漏拍；E1/E2 严格校验与路由、包装 401/403 请求级终止映射；M3（槽位替换、严格增长重放、Bad 接受门槛、一次状态换号、可重试终止）；输出前流内 forbidden 软冷却；`resilience.*` 计数；`docs/GATEWAY_RESILIENCE.md`、OpenSpec `encrypted-routing-20261105`、policy literal 与目录归属同步。
+- 修改文件：`backend/internal/{handler,resilience,service}` 相关代码与测试（77 个文件，+5705/−468）、`docs/GATEWAY_RESILIENCE.md`、`docs/README.md`、`openspec/changes/encrypted-routing-20261105/`、`tools/upstream-sync/policy.json`、本文件。
+- 验证：`777597cd2` 13 项门禁全过（见当前交接状态）；`9e10b731c` handler 全量 unit 与 lint；文档提交后 docs 与干净树 audit。
+- 卡点/风险：M3 store 的 race 检查只覆盖串行路径（store 复用既有加锁的 lineage 存储）；Codex 0.166 冒烟未做。
+- 下一步：用户决定冒烟方式，并授权推送、PR、发版、镜像固化与部署；上线后按 tasks §4.3 验收。
+
+### 2026-11-06 — 20261105-encrypted-routing-impl — PR #201、CI 全绿与 Codex 0.166 冒烟
+
+- 请求/目标：用户授权推送并开 PR，以及发布前在备用机冒烟；随后要求加快进度，可加派 Opus。
+- 完成操作：普通合并 main（0.5.4）；追加依赖升级修复两条新收录漏洞；PR #201 开出，CI 20 项全绿。冒烟在 PR 头的隔离临时网关上完成，Codex 0.166 在本容器经 ssh 隧道连接；测试 Key 只经 stdin 注入，未落盘。
+- 修改文件：`backend/go.mod`、`backend/go.sum`、`docs/PROJECT_MEMORY.md`、`docs/README.md`、`tools/upstream-sync/policy.json`（合并 main）、`openspec/changes/encrypted-routing-20261105/tasks.md`。
+- 验证：合并后本地 build、vet、定向 514 项、MCP unit；依赖升级后 govulncheck 可达漏洞 0、三包 unit；PR CI 20/20；冒烟结果见当前交接状态。
+- 卡点/风险：M3 未能在真实上游触发，仅有单测与 Forward 衔接回归证据；心跳相邻间隔偶见超过设定值。
+- 下一步：用户授权合并、发版、镜像固化与部署；上线后按 tasks §4.3 验收。

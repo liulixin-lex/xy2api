@@ -32,6 +32,7 @@ func nativeTurnStateService(keepalive, timeout int) *OpenAIGatewayService {
 func nativeTurnStateContext() (*gin.Context, *gwWriter) {
 	w := newGWWriter()
 	c := ptContext(w)
+	c.Request.Header.Set("originator", "codex_cli_rs")
 	c.Request.Header.Set("session_id", "sess-turn")
 	c.Set("api_key", &APIKey{ID: 31})
 	return c, w
@@ -72,7 +73,7 @@ func awaitNativeTurnStateHeartbeat(t *testing.T, w *gwWriter) {
 	t.Helper()
 	select {
 	case body := <-w.flushed:
-		require.True(t, strings.HasPrefix(body, ":"), body)
+		require.True(t, strings.Contains(body, string(preOutputPingFrame)), body)
 		require.NotContains(t, body, "response.created", "the opening stays staged")
 	case <-time.After(4 * time.Second):
 		t.Fatal("native stream did not flush a heartbeat")
@@ -125,7 +126,7 @@ func TestOpenAINativeHeartbeatCommitsOnlyTurnStateAndProvenance(t *testing.T) {
 			a.await(t)
 			require.NoError(t, a.err)
 			require.Equal(t, 5, a.result.usage.OutputTokens)
-			require.True(t, strings.HasPrefix(w.Body(), ":\n\n"))
+			require.True(t, strings.HasPrefix(w.Body(), string(preOutputPingFrame)))
 			require.Contains(t, w.Body(), "hello")
 			require.Contains(t, w.Body(), "response.completed")
 			requireNativeTurnStateHeaders(t, w, "blob-A")

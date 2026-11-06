@@ -189,7 +189,7 @@ func (s *OpenAIGatewayService) shareOpenAILastResort(ctx context.Context, gp *sh
 	if out == nil || out.err != nil || out.result == nil {
 		return nil
 	}
-	s.noteOpenAILastResort(ctx, req.GroupID, out.result.Account, round.recoverAt[out.served])
+	s.noteOpenAILastResort(ctx, req.GroupID, out.result.Account, round.recoverAt[out.served], avoided)
 	return out.result
 }
 

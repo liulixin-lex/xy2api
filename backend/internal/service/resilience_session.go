@@ -477,7 +477,7 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 			resilience.StateFrom(ctx).MarkLastResortSessionLimited()
 			continue
 		}
-		s.noteLastResort(ctx, groupID, acc, c.recoverAt)
+		s.noteLastResort(ctx, groupID, acc, c.recoverAt, avoided)
 		sel, err := s.newSelectionResult(ctx, acc, true, result.ReleaseFunc, nil)
 		if err != nil {
 			result.ReleaseFunc()
@@ -492,7 +492,7 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 			resilience.StateFrom(ctx).MarkLastResortSessionLimited()
 			continue
 		}
-		s.noteLastResort(ctx, groupID, acc, c.recoverAt)
+		s.noteLastResort(ctx, groupID, acc, c.recoverAt, avoided)
 		sel, err := s.newSelectionResult(ctx, acc, false, nil, &AccountWaitPlan{
 			AccountID:      acc.ID,
 			MaxConcurrency: acc.Concurrency,
@@ -507,7 +507,7 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 	return nil
 }
 
-func (s *GatewayService) noteLastResort(ctx context.Context, groupID *int64, account *Account, recoverAt time.Time) {
+func (s *GatewayService) noteLastResort(ctx context.Context, groupID *int64, account *Account, recoverAt time.Time, avoided map[int64]struct{}) {
 	resilience.StateFrom(ctx).SetLastResort(account.ID)
 	s.resilience.noteLastResortSelected(account.ID)
 	s.shareScheduling.noteResilienceReason(derefGroupID(groupID), sharesched.ReasonLastResortSoft)
@@ -519,6 +519,13 @@ func (s *GatewayService) noteLastResort(ctx context.Context, groupID *int64, acc
 		"recover_at", recoverAt,
 		"reason", string(sharesched.ReasonLastResortSoft),
 	)...)
+	if _, sessionAvoided := avoided[account.ID]; sessionAvoided {
+		slog.Warn("resilience.last_resort_avoided", append(resilience.EventFields(ctx),
+			"group_id", derefGroupID(groupID),
+			"account_id", account.ID,
+			"reason", "session_avoid",
+		)...)
+	}
 }
 
 // noteLastResortSelected remembers that an account served as last resort so
@@ -714,7 +721,7 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 		verified = append(verified, c)
 		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, s.codexEffectiveConcurrency(ctx, acc.ID, acc.Concurrency))
 		if err == nil && result != nil && result.Acquired {
-			s.noteOpenAILastResort(ctx, req.GroupID, acc, c.recoverAt)
+			s.noteOpenAILastResort(ctx, req.GroupID, acc, c.recoverAt, avoided)
 			return attachSelectionProfitGate(gateCtx, &AccountSelectionResult{Account: acc, Acquired: true, ReleaseFunc: result.ReleaseFunc})
 		}
 	}
@@ -723,7 +730,7 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 	}
 	cfg := s.schedulingConfig()
 	acc := verified[0].account
-	s.noteOpenAILastResort(ctx, req.GroupID, acc, verified[0].recoverAt)
+	s.noteOpenAILastResort(ctx, req.GroupID, acc, verified[0].recoverAt, avoided)
 	return attachSelectionProfitGate(gateCtx, &AccountSelectionResult{
 		Account: acc,
 		WaitPlan: &AccountWaitPlan{
@@ -735,7 +742,7 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 	})
 }
 
-func (s *OpenAIGatewayService) noteOpenAILastResort(ctx context.Context, groupID *int64, account *Account, recoverAt time.Time) {
+func (s *OpenAIGatewayService) noteOpenAILastResort(ctx context.Context, groupID *int64, account *Account, recoverAt time.Time, avoided map[int64]struct{}) {
 	if account != nil && account.IsOpenAI() {
 		gate, _ := ctx.Value(groupQualityGateContextKey{}).(*openAIGroupQualityGate)
 		if gate != nil && gate.service != nil && !gate.exempt && !groupQualityGateExempt(ctx) &&
@@ -755,6 +762,13 @@ func (s *OpenAIGatewayService) noteOpenAILastResort(ctx context.Context, groupID
 		"recover_at", recoverAt,
 		"reason", string(sharesched.ReasonLastResortSoft),
 	)...)
+	if _, sessionAvoided := avoided[account.ID]; sessionAvoided {
+		slog.Warn("resilience.last_resort_avoided", append(resilience.EventFields(ctx),
+			"group_id", derefGroupID(groupID),
+			"account_id", account.ID,
+			"reason", "session_avoid",
+		)...)
+	}
 }
 
 type resilienceLastResortGateKey struct{}
@@ -788,6 +802,23 @@ func lastResortModelLimitSoft(ctx context.Context, acc *Account, model string, r
 type sessionFailureRecorder struct {
 	r             *ResilienceService
 	deleteIfOwner func(ctx context.Context, groupID int64, sessionHash string, accountID int64) error
+}
+
+// AvoidOpenAIStateAccount records a request-scoped state repair avoidance
+// without incrementing the account failure streak or health counters.
+func (s *OpenAIGatewayService) AvoidOpenAIStateAccount(ctx context.Context, groupID int64, sessionHash string, accountID int64) {
+	if s == nil || s.resilience == nil || s.resilience.store == nil || sessionHash == "" || accountID <= 0 {
+		resilience.StateFrom(ctx).AddAvoided(accountID)
+		return
+	}
+	avoid := time.Duration(resilience.Current().Session.AvoidSeconds) * time.Second
+	if avoid <= 0 {
+		avoid = 10 * time.Minute
+	}
+	_ = s.resilience.store.AddSessionAvoid(ctx, groupID, sessionHash, accountID, avoid)
+	s.resilience.avoidingSessions.Store(sessionMarkKey(groupID, sessionHash), time.Now().Add(avoid))
+	_ = s.deleteStickySessionAccountIDIfOwner(ctx, &groupID, sessionHash, accountID)
+	resilience.StateFrom(ctx).AddAvoided(accountID)
 }
 
 // Failure counts a failure of the session on an account. Reaching the streak

@@ -92,6 +92,21 @@ func TestBudgetBalanceNotRetriedOnSameAccount(t *testing.T) {
 	require.Zero(t, fs.SameAccountRetryCount[1])
 }
 
+func TestM3StateSwitchAllowanceIsIndependentFromCapacitySwitch(t *testing.T) {
+	withHandlerResilience(t, nil)
+	ctx := budgetCtx(t, resilience.KindText, 7)
+	b := resilience.StateFrom(ctx).Budget()
+	require.True(t, b.AllowCapacitySwitch())
+	failure := &service.UpstreamFailoverError{StatusCode: http.StatusBadRequest, Reason: service.OpenAIStateRepairReason}
+	require.False(t, resilienceAttemptFailed(ctx, 1, failure))
+	require.True(t, b.CapacitySwitchUsed())
+	require.Equal(t, 1, b.Attempts())
+
+	failure = &service.UpstreamFailoverError{StatusCode: http.StatusBadRequest, Reason: service.OpenAIStateRepairReason}
+	require.True(t, resilienceAttemptFailed(ctx, 2, failure))
+	require.Equal(t, "switch_exhausted", failure.M3Cause)
+}
+
 func TestBudgetSameAccountRetryOncePerAccount(t *testing.T) {
 	withHandlerResilience(t, nil)
 	ctx := budgetCtx(t, resilience.KindText, 7)
@@ -274,6 +289,48 @@ func TestDecisionV2TransientAndRateLimitKeepSameHostCandidates(t *testing.T) {
 			require.NotContains(t, fs.FailedAccountIDs, int64(2), "another credential on the same host stays eligible")
 			require.NotContains(t, fs.FailedAccountIDs, int64(3))
 			require.True(t, requestBudget(ctx).AllowCapacitySwitch(), "ordinary retries do not consume the capacity host switch")
+		})
+	}
+}
+
+func TestOpenAIStreamForbiddenExcludesSameHostWithoutCapacityQuota(t *testing.T) {
+	withHandlerResilience(t, nil)
+	ctx := budgetCtx(t, resilience.KindText, 7)
+	excluded := map[int64]struct{}{1: {}}
+	hosts := &hostSharingUnscheduler{sameHost: map[int64][]int64{1: {2, 3}}}
+	failoverErr := &service.UpstreamFailoverError{
+		StatusCode:          http.StatusForbidden,
+		Reason:              service.OpenAIStreamForbiddenReason,
+		UpstreamPlatform:    service.PlatformOpenAI,
+		UpstreamAccountType: service.AccountTypeAPIKey,
+	}
+
+	require.False(t, resilienceBeforeSwitch(ctx, hosts, 1, failoverErr, excluded))
+	require.Contains(t, excluded, int64(2))
+	require.Contains(t, excluded, int64(3))
+	require.True(t, requestBudget(ctx).AllowCapacitySwitch(), "forbidden must not consume the capacity switch quota")
+}
+
+func TestOpenAIStreamForbiddenKeepsOtherOfficialAccounts(t *testing.T) {
+	withHandlerResilience(t, nil)
+	for _, tc := range []struct{ name, platform, accountType string }{
+		{"OpenAI OAuth", service.PlatformOpenAI, service.AccountTypeOAuth},
+		{"Grok API Key", service.PlatformGrok, service.AccountTypeAPIKey},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := budgetCtx(t, resilience.KindText, 7)
+			fs := NewFailoverState(3, false)
+			hosts := &hostSharingUnscheduler{sameHost: map[int64][]int64{1: {2, 3}}}
+			failoverErr := &service.UpstreamFailoverError{
+				StatusCode:          http.StatusForbidden,
+				Reason:              service.OpenAIStreamForbiddenReason,
+				UpstreamPlatform:    tc.platform,
+				UpstreamAccountType: tc.accountType,
+			}
+
+			require.Equal(t, FailoverContinue, fs.HandleFailoverError(ctx, hosts, 1, tc.platform, 0, failoverErr))
+			require.Equal(t, map[int64]struct{}{1: {}}, fs.FailedAccountIDs, "only the failed credential is excluded, not every official account")
+			require.True(t, requestBudget(ctx).AllowCapacitySwitch())
 		})
 	}
 }

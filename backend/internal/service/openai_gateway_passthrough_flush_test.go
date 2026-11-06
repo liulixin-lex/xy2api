@@ -203,6 +203,20 @@ func TestOpenAIStreamingPassthroughFailedBeforeOutputCanStillFailOverWithoutFlus
 	require.Empty(t, writer.flushBodyLengths)
 }
 
+func TestOpenAIStreamingPassthroughWrappedE2UsesFrameStatus(t *testing.T) {
+	upstream := "event: response.failed\n" +
+		`data: {"type":"response.failed","response":{"error":{"type":"upstream_error","code":"413","status_code":413,"message":"request too large"}}}` + "\n\n"
+
+	_, recorder, writer, err := runPassthroughFlushTest(t, io.NopCloser(strings.NewReader(upstream)), -1)
+
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusRequestEntityTooLarge, failoverErr.StatusCode)
+	require.Equal(t, http.StatusRequestEntityTooLarge, failoverErr.WrappedStatus)
+	require.Empty(t, recorder.Body.String())
+	require.Empty(t, writer.flushBodyLengths)
+}
+
 func TestOpenAIStreamingPassthroughNonRetryableFailedBeforeOutputFlushesAtBoundary(t *testing.T) {
 	upstream := "event: response.failed\n" +
 		`data: {"type":"response.failed","error":{"code":"content_policy","message":"request blocked by policy"},"usage":{"input_tokens":6,"output_tokens":0,"total_tokens":6}}` + "\n\n"

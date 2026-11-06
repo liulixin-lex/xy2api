@@ -16,7 +16,8 @@ import (
 type RequestState struct {
 	mu sync.Mutex
 
-	budget *Budget
+	budget      *Budget
+	stateSwitch int
 
 	// retryAdvice is shared by the handler and service terminal writers.
 	retryAdvice         RetryAdvice
@@ -102,6 +103,21 @@ type RequestState struct {
 	opsUpstreamEventSequence  uint64
 	opsUpstreamSendBoundaries map[int64]uint64
 	postOutputFailureFacts    []PostOutputFailureFact
+}
+
+// AllowStateSwitch grants one request-scoped state-repair account switch,
+// including when the normal Budget is disabled.
+func (s *RequestState) AllowStateSwitch() bool {
+	if s == nil {
+		return true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stateSwitch >= 1 {
+		return false
+	}
+	s.stateSwitch++
+	return true
 }
 
 // PostOutputFailureFact is a request-local snapshot of a stream failure that

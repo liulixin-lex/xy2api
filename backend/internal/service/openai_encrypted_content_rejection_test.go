@@ -289,10 +289,18 @@ func TestForwardOpenAIRequestRepairDoesNotReplayUnrepairableOrExhausted(t *testi
 			svc := newOpenAIImageGenerationControlTestService(upstream)
 			_, err := svc.Forward(req.ctx, req.c, webSearchReplayAccount(false), []byte(encryptedRepairRequestBody))
 			var failoverErr *UpstreamFailoverError
-			require.NotErrorAs(t, err, &failoverErr)
+			if strings.Contains(tc.message, "amsg_") {
+				require.ErrorAs(t, err, &failoverErr)
+				require.Equal(t, OpenAIStateRepairReason, failoverErr.Reason)
+				require.Equal(t, "item_not_unique", failoverErr.M3Cause)
+			} else {
+				require.NotErrorAs(t, err, &failoverErr)
+			}
 			require.Len(t, upstream.bodies, 1)
-			require.Contains(t, req.rec.Body.String(), "response.failed")
-			require.Contains(t, req.rec.Body.String(), tc.message)
+			if failoverErr == nil {
+				require.Contains(t, req.rec.Body.String(), "response.failed")
+				require.Contains(t, req.rec.Body.String(), tc.message)
+			}
 			repair := openAIRequestRepairFrom(req.c)
 			require.False(t, repair.encryptedTried)
 			require.Equal(t, upstream.bodies[0], repair.body)

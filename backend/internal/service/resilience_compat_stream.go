@@ -133,8 +133,31 @@ func openAICompatPreludeEvent(event *apicompat.ResponsesStreamEvent, payload []b
 	return resilience.ClassifyStreamEvent("responses", event.Type, payload).Kind == resilience.Prelude
 }
 
-// Only identity is retained during the prelude. No role chunks or encoded SSE
-// bytes are produced until the first content or terminal. Late created events
+// openAICompatPreludeBuffer retains decoded events only until conversion may
+// commit output. Bound it by upstream payload bytes, using the native stage's
+// 8 MiB limit; no per-item state or second raw-frame buffer is needed.
+type openAICompatPreludeBuffer struct {
+	events []apicompat.ResponsesStreamEvent
+	bytes  int
+}
+
+func (b *openAICompatPreludeBuffer) add(event apicompat.ResponsesStreamEvent, payloadBytes int) error {
+	if payloadBytes > openAIFirstOutputStageMaxBytes-b.bytes {
+		return errOpenAIFirstOutputStageLimit
+	}
+	b.events = append(b.events, event)
+	b.bytes += payloadBytes
+	return nil
+}
+
+func (b *openAICompatPreludeBuffer) take() []apicompat.ResponsesStreamEvent {
+	events := b.events
+	b.events, b.bytes = nil, 0
+	return events
+}
+
+// During staging only identity reaches the converter; the caller retains the
+// events and replays them on release. No SSE bytes are emitted early. Late created events
 // cannot change an identity already sent to the client.
 func deferredOpenAIChatChunks(event *apicompat.ResponsesStreamEvent, state *apicompat.ResponsesEventToChatState, hold bool) []apicompat.ChatCompletionsChunk {
 	if !state.SentRole && event.Response != nil {
@@ -179,7 +202,7 @@ func deferredOpenAIAnthropicEvents(event *apicompat.ResponsesStreamEvent, state 
 	}
 	// An empty reasoning added was deliberately not converted. Reconstruct its
 	// structure only when reasoning content/signature arrives, so block indices
-	// remain valid without retaining a list of upstream prelude events.
+	// remain valid even if the upstream omitted its reasoning added event.
 	_, hasReasoningBlock := state.OutputIndexToBlockIdx[event.OutputIndex]
 	if !hasReasoningBlock && (event.Type == "response.reasoning_summary_text.delta" || event.Type == "response.reasoning_text.delta" ||
 		(event.Type == "response.output_item.done" && event.Item != nil && event.Item.Type == "reasoning")) {

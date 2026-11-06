@@ -27,6 +27,8 @@ type openAIRequestRepair struct {
 	accountID               int64
 	body                    []byte
 	encryptedTried          bool
+	passthrough             bool
+	m3                      *openAIM3Attempt
 	rejectedFieldRetryState *openAIResponsesRejectedFieldRetryState
 }
 
@@ -113,39 +115,46 @@ func openAIRequestRepairErrorObject(payload []byte) []byte {
 
 // newOpenAIRequestRepairSignal prepares a same-account replay for an in-band
 // rejection. It performs all local validation before changing attempt state.
-func newOpenAIRequestRepairSignal(ctx context.Context, c *gin.Context, account *Account, payload []byte, message string) error {
+func newOpenAIRequestRepairSignal(ctx context.Context, c *gin.Context, account *Account, payload []byte, message string, wrappedStatus int) error {
+	if wrappedStatus != 0 && wrappedStatus != http.StatusBadRequest {
+		return nil
+	}
+	if wrappedStatus == 0 {
+		_, _, malformedError := openAIWrappedUpstreamErrorStatus("error", payload)
+		_, _, malformedFailed := openAIWrappedUpstreamErrorStatus("response.failed", payload)
+		if malformedError || malformedFailed {
+			return nil
+		}
+	}
 	r := openAIRequestRepairFrom(c)
 	if r == nil || account == nil || r.accountID != account.ID || len(r.body) == 0 {
 		return nil
 	}
 	if !r.encryptedTried && (isOpenAIEncryptedContentRejectionPayload(payload) || resilience.IsEncryptedContentRejection("", message)) {
 		next, changed, err := openAIEncryptedContentRepairBody(r.body, message)
-		if err == nil && changed {
-			if !resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(account.ID, false, time.Now()) {
-				return nil
-			}
+		if err == nil && changed && resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(account.ID, false, time.Now()) {
 			return &openAIRequestRepairSignal{kind: resilience.ReasonEncryptedContent, next: next}
 		}
 	}
 
-	if r.rejectedFieldRetryState == nil {
-		return nil
+	_, m3Trigger := openAIM3Trigger(payload, message, wrappedStatus)
+	m3Related := r.m3 != nil && (m3Trigger || len(r.m3.state.replaced) > 0)
+	// Passthrough's baseline only repairs HTTP fields. In-band field repair
+	// is enabled solely for M3 signals or a request already derived by M3.
+	if r.rejectedFieldRetryState != nil && (!r.passthrough || m3Related) {
+		errorObject := openAIRequestRepairErrorObject(payload)
+		if len(errorObject) > 0 {
+			next, reason, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, r.body, errorObject)
+			if err == nil && changed && r.rejectedFieldRetryState.Allow(next) && resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(account.ID, false, time.Now()) {
+				return &openAIRequestRepairSignal{kind: reason, next: next}
+			}
+		}
 	}
-	errorObject := openAIRequestRepairErrorObject(payload)
-	if len(errorObject) == 0 {
-		return nil
+	status := openAIStreamFailedEventSemanticStatus(payload, message)
+	if wrappedStatus != 0 {
+		status = 0
 	}
-	next, reason, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, r.body, errorObject)
-	if err != nil || !changed || !r.rejectedFieldRetryState.Allow(next) {
-		return nil
-	}
-	if !resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(account.ID, false, time.Now()) {
-		return nil
-	}
-	return &openAIRequestRepairSignal{
-		kind: reason,
-		next: next,
-	}
+	return r.m3.afterLocalRepairs(ctx, r.body, payload, message, status, wrappedStatus)
 }
 
 func (s *OpenAIGatewayService) openAIRequestRepairAfterSignal(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, err error) ([]byte, string, bool) {

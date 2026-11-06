@@ -399,6 +399,11 @@ const (
 	// OpenAIUpstreamAccessStateReason marks a provider credential whose
 	// account, workspace, or organization is unavailable.
 	OpenAIUpstreamAccessStateReason = GatewayFailureReason("openai_upstream_access_state")
+	// OpenAIStreamForbiddenReason marks a pre-output generic stream 403 or a
+	// validated wrapped 401/403. Wrapped auth errors belong to the relay's
+	// upstream, so both use request-local failover and soft account×model
+	// cooldown instead of the HTTP credential/403 penalty path.
+	OpenAIStreamForbiddenReason = GatewayFailureReason("openai_stream_forbidden_transient")
 	// OpenAIHTTPContinuationUnsupportedReason identifies accounts that cannot
 	// preserve an official Responses HTTP continuation without dropping state.
 	OpenAIHTTPContinuationUnsupportedReason = GatewayFailureReason("openai_http_continuation_unsupported")

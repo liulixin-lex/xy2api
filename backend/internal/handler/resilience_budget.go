@@ -39,6 +39,30 @@ func requestBudget(ctx context.Context) *resilience.Budget {
 // attempt or the upstream refused the request content. Every failover loop
 // calls it once per failed attempt, before any same-account retry or switch.
 func resilienceAttemptFailed(ctx context.Context, accountID int64, failoverErr *service.UpstreamFailoverError) bool {
+	if failoverErr != nil && failoverErr.Reason == service.OpenAIStateRepairReason {
+		b := requestBudget(ctx)
+		now := time.Now()
+		if b != nil {
+			b.RecordAttemptAt(now)
+			if !b.CanAttempt(now) {
+				failoverErr.M3Cause = "budget"
+				resilience.StateFrom(ctx).SetRecoveryOutcome("budget_exhausted")
+				resilience.Count(resilience.MetricBudgetExhausted, resilience.StateFrom(ctx).GroupID(), accountID, b.Exhausted())
+				return true
+			}
+			if !b.AllowStateSwitch() {
+				failoverErr.M3Cause = "switch_exhausted"
+				return true
+			}
+		} else {
+			state := resilience.StateFrom(ctx)
+			if state == nil || !state.AllowStateSwitch() {
+				failoverErr.M3Cause = "switch_exhausted"
+				return true
+			}
+		}
+		return false
+	}
 	if failoverErr != nil {
 		resilience.NoteCapabilityAttempt(ctx, failoverErr.IsCapabilityStreamOnly())
 	}
@@ -142,6 +166,17 @@ func resilienceRetryDelay(ctx context.Context, d time.Duration) time.Duration {
 // upstream host; accounts on the failed host join the exclusions. It
 // reports whether the request must end instead.
 func resilienceBeforeSwitch(ctx context.Context, hosts any, accountID int64, failoverErr *service.UpstreamFailoverError, excluded map[int64]struct{}) bool {
+	if failoverErr != nil && failoverErr.Reason == service.OpenAIStreamForbiddenReason {
+		if failoverErr.UpstreamPlatform != service.PlatformOpenAI || failoverErr.UpstreamAccountType != service.AccountTypeAPIKey {
+			return false
+		}
+		if sharer, ok := hosts.(resilienceHostSharer); ok && excluded != nil {
+			for _, id := range sharer.ResilienceSameHostAccountIDs(ctx, accountID) {
+				excluded[id] = struct{}{}
+			}
+		}
+		return false
+	}
 	b := requestBudget(ctx)
 	if b == nil || failoverErr == nil || service.ClassifyFailoverError(failoverErr).Category != resilience.CategoryCapacityShed {
 		return false

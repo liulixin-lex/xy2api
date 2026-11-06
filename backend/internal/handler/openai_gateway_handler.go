@@ -431,6 +431,27 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		zap.Int64("api_key_id", apiKey.ID),
 		zap.Any("group_id", apiKey.GroupID),
 	)
+	defer func() {
+		_, placeholderTimeouts, marked := service.OpenAIBlankPlaceholderOutcomeCounts(c)
+		if !marked {
+			return
+		}
+		finalOutcome := "unknown"
+		if outcome := recoveryOutcome(c); outcome != nil {
+			finalOutcome = *outcome
+		}
+		budgetCause := ""
+		if c.Request != nil {
+			if budget := requestBudget(c.Request.Context()); budget != nil {
+				budgetCause = budget.Exhausted()
+			}
+		}
+		reqLog.Info("resilience.blank_placeholder_outcome",
+			zap.Int("placeholder_timeouts", placeholderTimeouts),
+			zap.String("final_outcome", finalOutcome),
+			zap.String("budget_cause", budgetCause),
+		)
+	}()
 	if !h.ensureResponsesDependencies(c, reqLog) {
 		return
 	}
@@ -690,6 +711,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	pricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
 	c.Request = c.Request.WithContext(pricingCtx)
 
+	// M3 also needs a request-scoped switch allowance when the normal budget is off.
+	if resilience.StateFrom(c.Request.Context()) == nil {
+		c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), resilience.NewRequestState()))
+	}
+
 	// xy2api resilience: the pre-output heartbeat ends with the request (design §7.2).
 	defer stopPreOutputKeepalive(c)
 	for {
@@ -740,6 +766,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				return
 			}
 			if lastFailoverErr != nil {
+				if lastFailoverErr.Reason == service.OpenAIStateRepairReason {
+					lastFailoverErr.M3Cause = "no_account"
+				}
 				h.handleFailoverExhausted(c, lastFailoverErr, streamStarted)
 			} else {
 				h.handleFailoverExhaustedSimple(c, 502, streamStarted)
@@ -747,6 +776,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			return
 		}
 		if selection == nil || selection.Account == nil {
+			if lastFailoverErr != nil && lastFailoverErr.Reason == service.OpenAIStateRepairReason {
+				lastFailoverErr.M3Cause = "no_account"
+				h.handleFailoverExhausted(c, lastFailoverErr, streamStarted)
+				return
+			}
 			cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, requestPlatform)
 			if !cls.ModelNotFound && !cls.CapabilityOnly {
 				markOpsRoutingCapacityLimited(c)
@@ -931,6 +965,32 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 							zap.Int("upstream_status", failoverErr.StatusCode),
 						)
 						return
+					}
+					if failoverErr.Reason == service.OpenAIStateRepairReason {
+						// State repair deliberately skips scheduler/health failure reporting.
+						failedAccountIDs[account.ID] = struct{}{}
+						lastFailoverErr = failoverErr
+						c.Set("openai_m3_last_account_id", account.ID)
+						h.gatewayService.AvoidOpenAIStateAccount(c.Request.Context(), derefGroupID(apiKey.GroupID), sessionHash, account.ID)
+						if !openAIForwardMayFailover(c, writerSizeBeforeForward, failoverErr) {
+							failoverErr.M3Cause = "committed_output"
+							h.handleFailoverExhausted(c, failoverErr, true)
+							return
+						}
+						if c.Writer.Written() {
+							streamStarted = true
+						}
+						if resilienceAttemptFailed(c.Request.Context(), account.ID, failoverErr) {
+							h.handleFailoverExhausted(c, failoverErr, c.Writer.Written() || streamStarted)
+							return
+						}
+						h.gatewayService.RecordOpenAIAccountSwitch()
+						logger.FromContext(c.Request.Context()).Warn("resilience.m3_state_switch",
+							zap.Int64("group_id", derefGroupID(apiKey.GroupID)),
+							zap.Int64("account_id", account.ID),
+							zap.Int("switch_count", 1),
+						)
+						continue
 					}
 					if !openAIForwardMayFailover(c, writerSizeBeforeForward, failoverErr) {
 						h.gatewayService.ObserveOpenAIAccountHealthFailure(c.Request.Context(), account, err)
@@ -3700,6 +3760,58 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	recordExhaustedRecovery(c, failoverErr)
 	if failoverErr == nil {
 		h.handleFailoverExhaustedSimple(c, http.StatusBadGateway, streamStarted)
+		return
+	}
+	if code := failoverErr.OpenAIWrappedRequestRejectionCode(); code != "" {
+		rawMessage := (resilience.RetryAdvice{Suppress: true}).Message(strings.TrimSpace(service.ExtractUpstreamErrorMessage(failoverErr.ResponseBody)))
+		message := service.SanitizeUpstreamErrorMessage(rawMessage)
+		if resilienceContentRejected(failoverErr) {
+			service.MarkOpsUpstreamContentPolicy(c)
+			message = sanitizeContentRejectionMessage(message)
+		}
+		if message == "" {
+			message = "Request rejected by upstream"
+		}
+		suppressResilienceRetryAdvice(c, "wrapped_request_rejection")
+		message = (resilience.RetryAdvice{Suppress: true}).Message(message)
+		service.SetOpsUpstreamError(c, failoverErr.WrappedStatus, message, "")
+		h.handleStreamingAwareErrorWithCode(c, http.StatusBadRequest, "invalid_request_error", code, message, streamStarted, false)
+		return
+	}
+	if failoverErr.Reason == service.OpenAIStateRepairReason {
+		message := strings.TrimSpace(failoverErr.ClientMessage)
+		if message == "" {
+			message = "The upstream rejected encrypted conversation state"
+		}
+		service.SetOpsUpstreamError(c, failoverErr.StatusCode, message, "")
+		ctx := context.Background()
+		if c != nil && c.Request != nil {
+			ctx = c.Request.Context()
+		}
+		accountID := int64(0)
+		if c != nil {
+			if value, ok := c.Get("openai_m3_last_account_id"); ok {
+				accountID, _ = value.(int64)
+			}
+		}
+		fields := []zap.Field{
+			zap.Int64("group_id", resilience.StateFrom(ctx).GroupID()),
+			zap.Int64("account_id", accountID),
+			zap.String("cause", firstNonEmpty(failoverErr.M3Cause, "unknown")),
+		}
+		committed := streamStarted || (c != nil && c.Writer != nil && c.Writer.Written()) || service.IsResponseCommitted(c)
+		logger.FromContext(ctx).Warn("resilience.m3_terminal", fields...)
+		if committed {
+			logger.FromContext(ctx).Warn("resilience.committed_terminal", fields...)
+		}
+		h.handleStreamingAwareErrorWithCode(c, http.StatusBadGateway, "server_error", "server_error", message, committed, false)
+		return
+	}
+	if failoverErr.Reason == service.OpenAIStreamForbiddenReason {
+		message := "Upstream service temporarily unavailable"
+		service.SetOpsUpstreamError(c, failoverErr.StatusCode, message, "")
+		status := applyExhaustedRetryHint(c, h.gatewayService, http.StatusBadGateway)
+		h.handleStreamingAwareErrorWithCode(c, status, "server_error", "server_error", message, streamStarted, false)
 		return
 	}
 	if failoverErr.IsOpenAIRequestBodyTooLarge() {

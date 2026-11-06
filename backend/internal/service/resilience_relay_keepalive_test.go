@@ -101,7 +101,9 @@ func TestRelayPreCreatedDelta(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, before+1, relayPreludeMetric(resilience.MetricRelayKeepalive, live.accountID))
 	require.NotZero(t, live.at.Load())
-	require.NotZero(t, live.firstDrop.Load())
+	require.Zero(t, live.firstDrop.Load())
+	require.Nil(t, live.firstTokenMs(nil, time.Now().Add(-time.Second), OpenAITTFTModeSemantic))
+	require.True(t, live.lastActivity(time.Time{}).After(time.Time{}), "unmarked blank delta still updates stall liveness")
 	for _, input := range []string{
 		"data: {\"type\":\"response.output_text.delta\"}\n\n",
 		"data: {\"type\":\"response.output_text.delta\",\"delta\":null}\n\n",

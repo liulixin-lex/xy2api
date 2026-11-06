@@ -727,6 +727,8 @@ type UpstreamFailoverError struct {
 	NextAccountAction               NextAccountAction
 	ClientStatusCode                int
 	ClientMessage                   string
+	M3Cause                         string // Request repair terminal cause; never upstream payload.
+	WrappedStatus                   int    // 中转包装错误帧里校验过的上游状态码（400–599）；0 表示不是包装帧
 }
 
 func annotateUpstreamFailoverAccount(failoverErr *UpstreamFailoverError, account *Account) *UpstreamFailoverError {
@@ -759,11 +761,33 @@ func (e *UpstreamFailoverError) IsCredentialFailure() bool {
 	return e != nil && e.Stage == GatewayFailureStageAccountAuth
 }
 
+func (e *UpstreamFailoverError) isOpenAIWrappedRequestRejection() bool {
+	return e != nil && (e.WrappedStatus == http.StatusUnauthorized || e.WrappedStatus == http.StatusForbidden) &&
+		e.Scope == GatewayFailureScopeRequest && e.NextAccountAction == NextAccountStop
+}
+
+// OpenAIWrappedRequestRejectionCode projects only a pre-output wrapped request
+// rejection to a terminal client code. The validated relay status is diagnostic;
+// classification uses the decoded body and the same predicates as stream routing.
+func (e *UpstreamFailoverError) OpenAIWrappedRequestRejectionCode() string {
+	if !e.isOpenAIWrappedRequestRejection() {
+		return ""
+	}
+	if isOpenAIContextWindowError(extractUpstreamErrorMessage(e.ResponseBody), e.ResponseBody) {
+		return "context_length_exceeded"
+	}
+	if hit, code, _ := detectOpenAICyberPolicy(e.ResponseBody); hit {
+		return code
+	}
+	return "invalid_prompt"
+}
+
 // ShouldReportAccountScheduleFailure prevents provider- and request-scoped
 // credential failures from being misattributed to the selected account. Legacy
 // and inference failures retain their existing scheduler-health behavior.
 func (e *UpstreamFailoverError) ShouldReportAccountScheduleFailure() bool {
-	if e == nil || e.IsCapabilityStreamOnly() {
+	// Forbidden intentionally uses soft cooldown/session streaks without also reporting scheduler-health failure.
+	if e == nil || e.IsCapabilityStreamOnly() || e.Reason == OpenAIStreamForbiddenReason || e.Reason == OpenAIStateRepairReason || e.isOpenAIWrappedRequestRejection() {
 		return false
 	}
 	return !e.IsCredentialFailure() || e.Scope == GatewayFailureScopeAccount

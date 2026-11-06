@@ -92,6 +92,8 @@ type OpenAIWSStateStore interface {
 	// HasAnySessionInvalidEncryptedContent 是热路径快速探测：全局无记录时
 	// 调用方可跳过会话哈希计算与摘要匹配。
 	HasAnySessionInvalidEncryptedContent() bool
+	MarkSessionBadEncryptedSlots(groupID int64, sessionHash string, accountID int64, slots []openAIBadEncryptedSlot, ttl time.Duration) int
+	GetSessionBadEncryptedSlots(groupID int64, sessionHash string, accountID int64) map[openAIBadEncryptedSlot]struct{}
 }
 
 type defaultOpenAIWSStateStore struct {
@@ -111,6 +113,9 @@ type defaultOpenAIWSStateStore struct {
 	sessionInvalidEncryptedMu sync.RWMutex
 	sessionInvalidEncrypted   map[string]openAIWSInvalidEncryptedBinding
 
+	sessionBadEncryptedMu sync.RWMutex
+	sessionBadEncrypted   map[openAIBadEncryptedScope]openAIBadEncryptedBinding
+
 	lastCleanupUnixNano atomic.Int64
 }
 
@@ -118,6 +123,7 @@ type defaultOpenAIWSStateStore struct {
 func NewOpenAIWSStateStore(cache GatewayCache) OpenAIWSStateStore {
 	store := &defaultOpenAIWSStateStore{
 		cache:                   cache,
+		sessionBadEncrypted:     make(map[openAIBadEncryptedScope]openAIBadEncryptedBinding),
 		responseToAccount:       make(map[string]openAIWSAccountBinding, 256),
 		responseOwners:          make(map[string]openAIHTTPResponseOwnerBinding, 256),
 		responseToConn:          make(map[string]openAIWSConnBinding, 256),
@@ -528,6 +534,7 @@ func (s *defaultOpenAIWSStateStore) maybeCleanup() {
 	s.sessionInvalidEncryptedMu.Lock()
 	cleanupExpiredInvalidEncryptedBindings(s.sessionInvalidEncrypted, now, openAIWSStateStoreCleanupMaxPerMap)
 	s.sessionInvalidEncryptedMu.Unlock()
+	s.cleanupBadEncrypted(now)
 }
 
 func cleanupExpiredInvalidEncryptedBindings(bindings map[string]openAIWSInvalidEncryptedBinding, now time.Time, maxScan int) {
@@ -610,7 +617,7 @@ func cleanupExpiredSessionConnBindings(bindings map[string]openAIWSSessionConnBi
 	}
 }
 
-func ensureBindingCapacity[T any](bindings map[string]T, incomingKey string, maxEntries int) {
+func ensureBindingCapacity[K comparable, T any](bindings map[K]T, incomingKey K, maxEntries int) {
 	if len(bindings) < maxEntries || maxEntries <= 0 {
 		return
 	}

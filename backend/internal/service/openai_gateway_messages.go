@@ -1012,6 +1012,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		return err
 	}
 	stagePrelude := resilience.Current().PreludeStagingOn()
+	var pendingPrelude openAICompatPreludeBuffer
 	preludeTrace := beginOpenAIPreludeTrace(c.Request.Context(), stagePrelude)
 	// preludeBodyClosed is set before the cancel AfterFunc closes the body.
 	// A cancel racing the first write runs it although output started; the
@@ -1123,7 +1124,10 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			return false
 		}
 		observeOpenAIPreludeCreated(preludeTrace, event.Type)
-		holdPrelude := stagePrelude && openAICompatPreludeEvent(&event, []byte(payload))
+		holdPrelude := stagePrelude && !clientOutputStarted && openAICompatPreludeEvent(&event, []byte(payload))
+		if stagePrelude && !clientOutputStarted && resilience.ClassifyStreamEvent("responses", event.Type, []byte(payload)).Kind == resilience.TerminalFailure {
+			pendingPrelude.take()
+		}
 		if stagePrelude && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
 			if err := c.Request.Context().Err(); err != nil {
 				streamNonFailoverErr = err
@@ -1228,12 +1232,25 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		}
 
 		// Convert to Anthropic events
+		if holdPrelude {
+			if err := pendingPrelude.add(event, len(payload)); err != nil {
+				failoverErr := s.newOpenAIStreamFailoverError(c, account, false, requestID, nil, "OpenAI compatibility prelude staging limit exceeded")
+				failoverErr.SafeToFailoverAfterWrite = true
+				streamFailoverErr = failoverErr
+				return true
+			}
+			deferredOpenAIAnthropicEvents(&event, state, true)
+			return false
+		}
 		if !holdPrelude && !clientOutputStarted && event.Type != "response.created" {
 			releaseOpenAIPrelude(preludeTrace, event.Type)
 		}
 		var events []apicompat.AnthropicStreamEvent
 		if stagePrelude {
-			events = deferredOpenAIAnthropicEvents(&event, state, holdPrelude)
+			for _, pending := range pendingPrelude.take() {
+				events = append(events, deferredOpenAIAnthropicEvents(&pending, state, false)...)
+			}
+			events = append(events, deferredOpenAIAnthropicEvents(&event, state, false)...)
 		} else {
 			events = apicompat.ResponsesEventToAnthropicEvents(&event, state)
 		}

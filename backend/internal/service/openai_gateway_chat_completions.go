@@ -755,6 +755,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		return err
 	}
 	stagePrelude := resilience.Current().PreludeStagingOn()
+	var pendingPrelude openAICompatPreludeBuffer
 	preludeTrace := beginOpenAIPreludeTrace(c.Request.Context(), stagePrelude)
 	// preludeBodyClosed is set before the cancel AfterFunc closes the body.
 	// A cancel racing the first write runs it although output started; the
@@ -866,7 +867,10 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			return false
 		}
 		observeOpenAIPreludeCreated(preludeTrace, event.Type)
-		holdPrelude := stagePrelude && openAICompatPreludeEvent(&event, []byte(payload))
+		holdPrelude := stagePrelude && !clientOutputStarted && openAICompatPreludeEvent(&event, []byte(payload))
+		if stagePrelude && !clientOutputStarted && resilience.ClassifyStreamEvent("responses", event.Type, []byte(payload)).Kind == resilience.TerminalFailure {
+			pendingPrelude.take()
+		}
 		if stagePrelude && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
 			if err := c.Request.Context().Err(); err != nil {
 				streamNonFailoverErr = err
@@ -971,12 +975,25 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			return true
 		}
 
+		if holdPrelude {
+			if err := pendingPrelude.add(event, len(payload)); err != nil {
+				failoverErr := s.newOpenAIStreamFailoverError(c, account, false, requestID, nil, "OpenAI compatibility prelude staging limit exceeded")
+				failoverErr.SafeToFailoverAfterWrite = true
+				streamFailoverErr = failoverErr
+				return true
+			}
+			deferredOpenAIChatChunks(&event, state, true)
+			return false
+		}
 		if !holdPrelude && !clientOutputStarted && event.Type != "response.created" {
 			releaseOpenAIPrelude(preludeTrace, event.Type)
 		}
 		var chunks []apicompat.ChatCompletionsChunk
 		if stagePrelude {
-			chunks = deferredOpenAIChatChunks(&event, state, holdPrelude)
+			for _, pending := range pendingPrelude.take() {
+				chunks = append(chunks, deferredOpenAIChatChunks(&pending, state, false)...)
+			}
+			chunks = append(chunks, deferredOpenAIChatChunks(&event, state, false)...)
 		} else {
 			chunks = apicompat.ResponsesEventToChatChunks(&event, state)
 		}

@@ -15,11 +15,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-contrib/sse"
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/tlsfingerprint"
 	"github.com/stretchr/testify/require"
 )
+
+// Decode actual output bytes: each complete beat must dispatch exactly one SSE
+// event, not merely keep the HTTP connection busy with comments.
+func requireResponsesPingEvents(t *testing.T, body string) {
+	t.Helper()
+	beats := strings.Count(body, string(preOutputPingFrame))
+	require.Equal(t, strings.Repeat(string(preOutputPingFrame), beats), body)
+	events, err := sse.Decode(strings.NewReader(body))
+	require.NoError(t, err)
+	require.Len(t, events, beats)
+	for _, event := range events {
+		require.Equal(t, "ping", event.Event)
+		require.Equal(t, `{"type":"ping"}`, event.Data)
+	}
+}
 
 type blockingOpenAIResponseHeaderUpstream struct {
 	canceled chan struct{}
@@ -401,6 +417,7 @@ func assertOpenAINativeLargeOpenEventTimesOutWithoutLeak(t *testing.T, line stri
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.166.0")
 	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{
 		"X-Request-Id":                   []string{"request-partial"},
 		"X-Ratelimit-Remaining-Requests": []string{"1"},
@@ -413,13 +430,7 @@ func assertOpenAINativeLargeOpenEventTimesOutWithoutLeak(t *testing.T, line stri
 	require.Equal(t, http.StatusGatewayTimeout, failoverErr.StatusCode)
 	require.Contains(t, string(failoverErr.ResponseBody), "first_output_timeout")
 	require.True(t, failoverErr.SafeToFailoverAfterWrite)
-	require.NotContains(t, rec.Body.String(), "data:", "attempt JSON must remain private before the SSE boundary")
-	require.NotContains(t, rec.Body.String(), `"type"`, "attempt JSON must remain private before the SSE boundary")
-	for _, outputLine := range strings.Split(strings.TrimSpace(rec.Body.String()), "\n") {
-		if outputLine != "" {
-			require.True(t, strings.HasPrefix(outputLine, ":"), "only keepalive comments may precede failover: %q", outputLine)
-		}
-	}
+	requireResponsesPingEvents(t, rec.Body.String())
 	require.Empty(t, rec.Header().Values("X-Request-Id"))
 	require.Empty(t, rec.Header().Values("X-Ratelimit-Remaining-Requests"))
 	select {
@@ -594,13 +605,15 @@ func TestOpenAINativeFirstOutputTimeoutDisabledKeepsPreamblePrivateAcrossKeepali
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.166.0")
 	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: pr}
 
 	_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 1, Platform: PlatformOpenAI}, time.Now(), "model", "model")
 
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
-	require.Contains(t, rec.Body.String(), ":\n\n")
+	require.Contains(t, rec.Body.String(), string(preOutputPingFrame))
+	requireResponsesPingEvents(t, rec.Body.String())
 	require.NotContains(t, rec.Body.String(), "response.created")
 	require.NotContains(t, rec.Body.String(), "response.in_progress")
 }
@@ -618,6 +631,7 @@ func TestOpenAINativeFirstOutputFailoverKeepsAttemptHeadersPrivateAfterKeepalive
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.166.0")
 	firstBody, firstWriter := io.Pipe()
 	trackedFirstBody := &firstOutputCloseTrackingBody{ReadCloser: firstBody, closed: make(chan struct{})}
 	firstWriterDone := make(chan struct{})
@@ -643,7 +657,7 @@ func TestOpenAINativeFirstOutputFailoverKeepsAttemptHeadersPrivateAfterKeepalive
 	_, firstErr := svc.handleStreamingResponse(c.Request.Context(), firstResp, c, &Account{ID: 1, Platform: PlatformOpenAI}, time.Now(), "model", "model")
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, firstErr, &failoverErr)
-	require.Contains(t, rec.Body.String(), ":\n\n", "first attempt should have committed only a stable keepalive")
+	require.Contains(t, rec.Body.String(), string(preOutputPingFrame), "first attempt should have committed only a stable keepalive")
 	require.NotContains(t, rec.Body.String(), "resp_first")
 
 	secondResp := &http.Response{

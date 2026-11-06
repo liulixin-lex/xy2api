@@ -203,6 +203,25 @@ func (s *openAIFirstOutputStage) CommitTo(dst io.Writer) error {
 	return nil
 }
 
+// Reset drops every byte that has not been committed while keeping the stage
+// writable for the failure event that follows.
+func (s *openAIFirstOutputStage) Reset() error {
+	if s == nil || s.closed {
+		return nil
+	}
+	s.size = 0
+	s.memory.Reset()
+	if s.tempFile != nil {
+		if err := s.tempFile.Truncate(0); err != nil {
+			return fmt.Errorf("reset first-output stage: %w", err)
+		}
+		if _, err := s.tempFile.Seek(0, io.SeekStart); err != nil {
+			return fmt.Errorf("rewind first-output stage: %w", err)
+		}
+	}
+	return nil
+}
+
 func (s *openAIFirstOutputStage) Close() error {
 	if s == nil {
 		return nil
