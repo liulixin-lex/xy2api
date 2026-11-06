@@ -210,4 +210,5 @@ func TestOpenAIWrapped400RetainsOriginalBodyForM3(t *testing.T) {
 	require.NotNil(t, failure)
 	require.Equal(t, http.StatusBadRequest, failure.WrappedStatus)
 	require.Equal(t, payload, failure.ResponseBody)
+	require.Len(t, opsUpstreamEventsForTest(t, c), 1, "without armed M3, wrapped error observation is unchanged")
 }

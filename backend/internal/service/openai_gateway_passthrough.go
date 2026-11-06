@@ -1935,6 +1935,13 @@ func (s *OpenAIGatewayService) newOpenAIWrappedStreamFailoverError(
 	if wrappedStatus < http.StatusBadRequest || wrappedStatus > 599 || account == nil || IsResponseCommitted(c) {
 		return nil
 	}
+	// M3 owns the raw rejection evidence privately, including aggregate exits.
+	// Defer before generic ops recording can persist echoed ciphertext.
+	if wrappedStatus == http.StatusBadRequest {
+		if deferred := deferOpenAIM3ToForward(c, account, payload, message, wrappedStatus, wrappedStatus); deferred != nil {
+			return deferred
+		}
+	}
 	if message = sanitizeUpstreamErrorMessage(strings.TrimSpace(message)); message == "" {
 		message = "OpenAI upstream response failed"
 	}
