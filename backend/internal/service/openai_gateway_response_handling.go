@@ -307,6 +307,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	failureDelivered := false
 	suppressCurrentEvent := false
 	var bareErrorPayload []byte
+	bareErrorWrappedStatus := 0
 	bareErrorAccountSideEffectsPending := false
 	pendingSSEEventType := ""
 	pendingSSEEventLine := ""
@@ -434,7 +435,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			completeGuardedEvent(true)
 		}
 		if codexFailureTerminal && sawBareError && !sawResponseFailed && bareErrorAccountSideEffectsPending {
-			s.handleOpenAIStreamTerminalAccountSideEffects(c, account, bareErrorPayload, failedMessage, resp.Header, mappedModel)
+			s.handleOpenAIStreamTerminalAccountSideEffectsForFrame(c, account, bareErrorPayload, failedMessage, resp.Header, mappedModel, bareErrorWrappedStatus)
 			bareErrorAccountSideEffectsPending = false
 			s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, bareErrorPayload, failedMessage, true)
 		}
@@ -583,6 +584,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				terminalFailurePending = false
 				suppressCurrentEvent = false
 				bareErrorPayload = nil
+				bareErrorWrappedStatus = 0
 				bareErrorAccountSideEffectsPending = false
 				failedMessage = ""
 			}
@@ -623,6 +625,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				if codexFailureTerminal && eventType == "error" {
 					sawBareError = true
 					bareErrorPayload = append(bareErrorPayload[:0], dataBytes...)
+					bareErrorWrappedStatus = wrappedStatus
 					suppressCurrentEvent = true
 				} else if codexFailureTerminal && eventType == "response.failed" {
 					sawResponseFailed = true
@@ -677,7 +680,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 						// Defer account health updates so the pair is applied once.
 						bareErrorAccountSideEffectsPending = true
 					} else {
-						s.handleOpenAIStreamTerminalAccountSideEffects(c, account, dataBytes, failedMessage, resp.Header, mappedModel)
+						s.handleOpenAIStreamTerminalAccountSideEffectsForFrame(c, account, dataBytes, failedMessage, resp.Header, mappedModel, wrappedStatus)
 						bareErrorAccountSideEffectsPending = false
 						s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, dataBytes, failedMessage, outputStarted)
 					}

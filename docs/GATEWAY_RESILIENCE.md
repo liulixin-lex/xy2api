@@ -311,7 +311,7 @@ Responses 空白占位：`response.output_text.delta` / `.done`、output_text �
 
 **第一个内容之前的失败可以换号**
 
-- OpenAI Responses 的流内中转包装帧（`event: error` + `type=proxy.upstream_error`，或 `response.failed` + `response.error.type=upstream_error`）只在状态码、字段类型与相等关系校验通过后按迟到的上游 HTTP 状态路由。输出前包装 400 交给加密态请求修复；包装 401/403 先在解包后的错误体上复用状态类拒绝、上下文超限、cyber 与内容安全判定，命中时按请求级终止，不换号、不冷却、不罚号、不上报调度失败，也不归为 AUTH；其余包装 401/403（含停用码、凭证码）走请求级 forbidden：换号、账号×模型软冷却、本请求内排除同站、用尽写 502，不进入凭证处罚、停用或 HTTP 403 连续失败计数。包装帧表示中转已接受本网关的 Key，帧内认证错误归于中转自己的上游。其他状态复用 HTTP 的换号判定。包装 400–599 以外或结构不完整的帧按普通失败处理，畸形帧各记一条 `resilience.wrapped_error_malformed`；输出后的流、非包装流内 403 及 HTTP 401/403 保持原行为。
+- OpenAI Responses 的流内中转包装帧（`event: error` + `type=proxy.upstream_error`，或 `response.failed` + `response.error.type=upstream_error`）只在状态码、字段类型与相等关系校验通过后按迟到的上游 HTTP 状态路由。输出前包装 400 交给加密态请求修复；包装 401/403 先在解包后的错误体上复用状态类拒绝、上下文超限、cyber 与内容安全判定，命中时按请求级终止，不换号、不冷却、不罚号、不上报调度失败，也不归为 AUTH；其余包装 401/403（含停用码、凭证码）走请求级 forbidden：换号、账号×模型软冷却、本请求内排除同站、用尽写 502，不进入凭证处罚、停用或 HTTP 403 连续失败计数。包装帧表示中转已接受本网关的 Key，帧内认证错误归于中转自己的上游。其他状态复用 HTTP 的换号判定。包装 400–599 以外或结构不完整的帧按普通失败处理，畸形帧各记一条 `resilience.wrapped_error_malformed`；已校验的包装 401/403 在输出后也不进入凭证、停用或 HTTP 403 计数处罚，终止帧照常投递，不再换号或记 forbidden 软冷却；非包装流内 403 及 HTTP 401/403 保持原行为。
 - 包装校验单独保留原始 SSE `event`，仅用于 E1 校验和输出前包装分派；终态判断仍以 payload 的 `type` 为准。已输出时，即使原始行是 `event: error`，载荷里的 `response.failed` 仍完整投递并立即结束，不等另一帧或 EOF。非流式聚合出口同样分开保存原始 event 与终态类型。
 - 包装帧的 `upstream_body` 解包后用于首次 HTTP 路由和后续失败分类，保留内层容量码、余额码等语义；仅包装 400 为 M3 保留原始外层体。`WrappedStatus` 始终保留校验过的上游状态码。
 - forbidden 的本请求内同站排除只用于 API Key 账号，与账号×模型软冷却的账号类型范围一致。OAuth 等其他账号只排除当前失败账号，其他官方端点账号仍可被选择；此分支不占容量换号额度。

@@ -1722,6 +1722,16 @@ func openAIStreamErrorEventShouldFailover(payload []byte, message string) bool {
 		strings.Contains(combined, "please retry")
 }
 
+// wrappedStatus is the status validated with the original SSE event by the reader.
+func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffectsForFrame(c *gin.Context, account *Account, payload []byte, message string, headers http.Header, canonicalModel string, wrappedStatus int) (int, bool) {
+	// The relay's upstream credentials do not describe this account's health,
+	// regardless of whether client output has already been committed.
+	if wrappedStatus == http.StatusUnauthorized || wrappedStatus == http.StatusForbidden {
+		return wrappedStatus, false
+	}
+	return s.handleOpenAIStreamTerminalAccountSideEffects(c, account, payload, message, headers, canonicalModel)
+}
+
 func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffects(c *gin.Context, account *Account, payload []byte, message string, headers http.Header, canonicalModel ...string) (int, bool) {
 	ctx := context.Background()
 	if c != nil && c.Request != nil {
@@ -2195,6 +2205,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	suppressCurrentEvent := false
 	responseFailedPending := false
 	var bareErrorPayload []byte
+	bareErrorWrappedStatus := 0
 	bareErrorAccountSideEffectsPending := false
 	upstreamRequestID := strings.TrimSpace(resp.Header.Get("x-request-id"))
 	// The first-output stage keeps the leading events until the first visible
@@ -2293,7 +2304,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			return
 		}
 		if bareErrorAccountSideEffectsPending {
-			s.handleOpenAIStreamTerminalAccountSideEffects(c, account, bareErrorPayload, failedMessage, resp.Header, mappedModel)
+			s.handleOpenAIStreamTerminalAccountSideEffectsForFrame(c, account, bareErrorPayload, failedMessage, resp.Header, mappedModel, bareErrorWrappedStatus)
 			bareErrorAccountSideEffectsPending = false
 			s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, bareErrorPayload, failedMessage, true)
 		}
@@ -2494,6 +2505,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				if codexFailureTerminal && eventType == "error" {
 					sawBareError = true
 					bareErrorPayload = append(bareErrorPayload[:0], dataBytes...)
+					bareErrorWrappedStatus = wrappedStatus
 					suppressCurrentEvent = true
 				} else if codexFailureTerminal && eventType == "response.failed" {
 					sawResponseFailed = true
@@ -2536,7 +2548,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 						// account health; EOF synthesis applies the pending effect.
 						bareErrorAccountSideEffectsPending = true
 					} else {
-						s.handleOpenAIStreamTerminalAccountSideEffects(c, account, dataBytes, failedMessage, resp.Header, mappedModel)
+						s.handleOpenAIStreamTerminalAccountSideEffectsForFrame(c, account, dataBytes, failedMessage, resp.Header, mappedModel, wrappedStatus)
 						bareErrorAccountSideEffectsPending = false
 						s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, dataBytes, failedMessage, outputStarted)
 					}
