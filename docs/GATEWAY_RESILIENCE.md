@@ -558,6 +558,9 @@ info 级，只写应用标准输出（量大，明细已有计数或未送达表
 | `ms_since_first_output` | 距第一次写出内容的毫秒数；还没有输出时为 0 |
 | `prelude_release_event` | 结束开场暂存、开始向客户端输出的那个上游事件类型（记的是释放的决定，不保证写出成功）；没有暂存过时为空 |
 | `prelude_release_ms` | 上一项距 `response.created` 的毫秒数；没有收到 created 时为 0 |
+| `prelude_release_item_type` | 释放事件的 `item.type` 或 `part.type`；非 item/part 事件或缺少类型时为空 |
+| `prelude_release_item_keys` | 上述对象的字段名，排序后用逗号连接；只记字段名，不记字段值 |
+| `prelude_release_has_encrypted` | 上述对象是否带非空字符串 `encrypted_content`；没有时为 false |
 
 `keepalive_committed` 发生在输出之前，`delivered_bytes` 与 `ms_since_first_output` 总是 0。日志不含正文、Key 或完整会话值。
 

@@ -2722,7 +2722,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			// heartbeat, so it cannot cut the drain of the usage (PM7).
 			firstOutputSeen = firstOutputSeen || lineStartsClientOutput
 			if lineStartsClientOutput && !clientOutputStarted {
-				releaseOpenAIPrelude(preludeTrace, eventType)
+				releaseOpenAIPrelude(preludeTrace, eventType, dataBytes)
 			}
 			if firstTokenMs == nil && openAIStreamDataStartsTTFT(trimmedData, eventType, forceFlushFailedEvent, ttftMode) {
 				ms := int(time.Since(startTime).Milliseconds())

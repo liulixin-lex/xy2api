@@ -142,6 +142,7 @@ type preludeTrace struct {
 	createdAt             time.Time
 	releaseEvent          string
 	releaseAfterCreatedMS int64
+	schema                PreludeReleaseSchema
 }
 
 // SessionRecorder records attempt outcomes of a sticky session. The service

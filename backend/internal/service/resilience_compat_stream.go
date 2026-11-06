@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
+	"sort"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -230,9 +233,33 @@ func observeOpenAIPreludeCreated(state *resilience.RequestState, eventType strin
 	}
 }
 
-func releaseOpenAIPrelude(state *resilience.RequestState, eventType string) {
+func releaseOpenAIPrelude(state *resilience.RequestState, eventType string, payload []byte) {
+	if state == nil || state.PreludeTrace().ReleaseEvent != "" {
+		return
+	}
 	if eventType == "" {
 		eventType = "unknown"
 	}
-	state.NotePreludeReleased(eventType, time.Now())
+	var schema resilience.PreludeReleaseSchema
+	var field string
+	switch {
+	case strings.HasPrefix(eventType, "response.output_item."):
+		field = "item"
+	case strings.HasPrefix(eventType, "response.content_part."), strings.HasPrefix(eventType, "response.reasoning_summary_part."):
+		field = "part"
+	}
+	var envelope map[string]json.RawMessage
+	var object map[string]json.RawMessage
+	if field != "" && json.Unmarshal(payload, &envelope) == nil && json.Unmarshal(envelope[field], &object) == nil {
+		keys := make([]string, 0, len(object))
+		for key := range object {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		schema.ItemKeys = strings.Join(keys, ",")
+		_ = json.Unmarshal(object["type"], &schema.ItemType)
+		var encrypted string
+		schema.HasEncrypted = json.Unmarshal(object["encrypted_content"], &encrypted) == nil && encrypted != ""
+	}
+	state.NotePreludeReleased(eventType, time.Now(), schema)
 }

@@ -6,6 +6,8 @@
 
 ## 当前交接状态
 
+- **20261106-enc-followups-q12**：Q1 已补输出边界 schema 字段，原生与直通日志脱敏定向回归通过；Q2 将复用通用模型可用性短语及号×模型瞬时冷却。分两次提交，不推送、不连接生产。
+
 - **零中断加密态与路由实施（2026-11-06 12:30 UTC；PR #201 已开、CI 全绿、冒烟完成，未合并）**：分支 `feat/encrypted-routing-20261105`，已普通合并 main（0.5.4），本条所在提交即 PR 头。
   - main 已发布 0.5.4（只读 MCP），本变更随下一个版本发布。
   - 范围：空白占位不算输出、Codex 输出前 ping、流内包装错误帧、M3 状态类同号修复与一次换号、输出前流内 forbidden 软冷却、`resilience.*` 计数；OpenSpec `encrypted-routing-20261105`。无迁移、无新开关、无前端改动。
@@ -113,6 +115,8 @@
 - **仓库外环境收尾**：测试服务器的候选镜像、浸泡与演练目录、`xy2api_upgrade` 库按 staging-validation §11 清理；预上线主机的两份切换前备份在正式部署后删除。
 
 ## 进行中的工作
+
+- **20261106-enc-followups-q12**（2026-11-06 14:33 UTC，实施中）：在 `feat/enc-followups-observe-model`、基线 `0c3cc6f8b` 上分别实施 Q1 输出边界 schema 观测与 Q2 明确模型不可用换号/号×模型瞬时冷却。只跑改动包定向测试、vet、lint、docs 与干净树 audit；两项分开提交，不推送、不连接生产。
 
 - **20261105-encrypted-routing-impl**（2026-11-05 11:00 UTC 开始，Claude 主持与集成）：按本地 `.work/tasks/20261105-encrypted-routing/FINAL.md`（astra、Opus 已签字，用户 11-05 全部批准）实施“空白占位不算输出 + 包装错误帧 + 状态类同号学习重放与一次换号 + 通用 forbidden 软冷却 + 最小计数”，一次发布。实施交接与裁决在同目录 `implementation/`（不入库）。
   - 集成分支 `feat/encrypted-routing-20261105`（Paseo 工作树 `enc-routing-integration`，基于 origin/main `381687250`）。
@@ -1458,3 +1462,12 @@ pnpm --dir frontend run build
 - 验证：合并后本地 build、vet、定向 514 项、MCP unit；依赖升级后 govulncheck 可达漏洞 0、三包 unit；PR CI 20/20；冒烟结果见当前交接状态。
 - 卡点/风险：M3 未能在真实上游触发，仅有单测与 Forward 衔接回归证据；心跳相邻间隔偶见超过设定值。
 - 下一步：用户授权合并、发版、镜像固化与部署；上线后按 tasks §4.3 验收。
+
+### 2026-11-06 — 20261106-enc-followups-q12 — Q1 输出边界观测
+
+- 请求/目标：为后续输出边界分析补 schema 观测，不改变输出判定与路由行为。
+- 完成操作：首个释放事件同步冻结 item/part 类型、排序字段名集合和非空 encrypted_content 标记；所有 resilience 事件使用同一组字段；原生、直通与兼容转换释放点传入既有载荷。未保存正文、条目 ID 或密文值。
+- 修改文件：`backend/internal/resilience/{metrics,prelude_trace,state}.go`、service 流释放点与定向测试、`docs/GATEWAY_RESILIENCE.md`、policy literal。
+- 验证：resilience/service 定向 unit、两包 vet、两包 golangci-lint（0 issues）、docs 一致性与 diff 检查；提交后在干净树运行 upstream-sync audit。
+- 卡点/风险：无；只观测，不改行为。
+- 下一步：Q2 实施；通用短语表不扩充，请求级拒绝和 compact 回退保持优先。
