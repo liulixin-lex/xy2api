@@ -176,8 +176,22 @@ func openAIM3Slots(body []byte) ([]openAIM3Slot, map[string]int, error) {
 	}
 	return slots, ids, nil
 }
-func (a *openAIM3Attempt) failure(message, cause string) *UpstreamFailoverError {
-	return annotateUpstreamFailoverAccount(&UpstreamFailoverError{StatusCode: 400, Reason: OpenAIStateRepairReason, Scope: GatewayFailureScopeRequest, NextAccountAction: NextAccountRetry, ClientStatusCode: 502, ClientMessage: sanitizeUpstreamErrorMessage(message), SafeToFailoverAfterWrite: true, M3Cause: cause}, a.account)
+func (a *openAIM3Attempt) failure(family resilience.StateFamily, itemID, cause string) *UpstreamFailoverError {
+	// Upstream messages may echo ciphertext. Only classified reasons and an
+	// item ID uniquely verified against this request may reach clients or ops.
+	message := "The upstream rejected the derived encrypted-state request"
+	switch family {
+	case resilience.StateConversationInvalid:
+		message = "Encrypted content is invalid for this conversation"
+	case resilience.StateFunctionOutput:
+		message = "Encrypted function output content could not be decrypted"
+	case resilience.StateAgentMessage:
+		message = "Encrypted content could not be verified"
+		if itemID != "" {
+			message += " for item " + itemID
+		}
+	}
+	return annotateUpstreamFailoverAccount(&UpstreamFailoverError{StatusCode: 400, Reason: OpenAIStateRepairReason, Scope: GatewayFailureScopeRequest, NextAccountAction: NextAccountRetry, ClientStatusCode: 502, ClientMessage: message, SafeToFailoverAfterWrite: true, M3Cause: cause}, a.account)
 }
 func (a *openAIM3Attempt) event(ctx context.Context, name string, count int) {
 	logger.FromContext(ctx).Warn(name, zap.Int64("group_id", a.request.groupID), zap.Int64("account_id", a.account.ID), zap.Int("count", count))
@@ -208,7 +222,7 @@ func (a *openAIM3Attempt) derive(ctx context.Context, body []byte) ([]byte, erro
 		if len(bad) == 0 && len(a.state.replaced) == 0 {
 			return body, nil
 		}
-		return nil, a.failure("Cannot safely derive encrypted request: "+err.Error(), "shape")
+		return nil, a.failure(resilience.StateNone, "", "shape")
 	}
 	count := 0
 	for _, slot := range slots {
@@ -219,7 +233,7 @@ func (a *openAIM3Attempt) derive(ctx context.Context, body []byte) ([]byte, erro
 		}
 		body, err = sjson.SetRawBytes(body, slot.path, []byte(openAIM3Placeholder))
 		if err != nil {
-			return nil, a.failure("Cannot replace encrypted slot", "shape")
+			return nil, a.failure(resilience.StateNone, "", "shape")
 		}
 		a.state.replaced[slot.id] = struct{}{}
 		count++
@@ -246,13 +260,13 @@ func (a *openAIM3Attempt) learn(ctx context.Context, body, payload []byte, messa
 	}
 	slots, ids, err := openAIM3Slots(body)
 	if err != nil {
-		return a.failure(message, "shape")
+		return a.failure(family, "", "shape")
 	}
 	itemID := ""
 	if family == resilience.StateAgentMessage {
 		matches := openAIM3ItemPattern.FindAllStringSubmatch(message, -1)
 		if len(matches) != 1 || ids[matches[0][1]] != 1 {
-			return a.failure(message, "item_not_unique")
+			return a.failure(family, "", "item_not_unique")
 		}
 		itemID = matches[0][1]
 	}
@@ -266,7 +280,7 @@ func (a *openAIM3Attempt) learn(ctx context.Context, body, payload []byte, messa
 		}
 	}
 	if len(selected) == 0 {
-		return a.failure(message, "no_growth")
+		return a.failure(family, itemID, "no_growth")
 	}
 	var evidence []openAIBadEncryptedSlot
 	for _, slot := range selected {
@@ -278,13 +292,13 @@ func (a *openAIM3Attempt) learn(ctx context.Context, body, payload []byte, messa
 		a.persist(ctx, evidence)
 	}
 	if ctx.Err() != nil || !resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(a.account.ID, false, time.Now(), resilience.ReasonEncryptedContent) {
-		return a.failure(message, "budget")
+		return a.failure(family, itemID, "budget")
 	}
 	next := body
 	for _, slot := range selected {
 		next, err = sjson.SetRawBytes(next, slot.path, []byte(openAIM3Placeholder))
 		if err != nil {
-			return a.failure(message, "shape")
+			return a.failure(family, itemID, "shape")
 		}
 	}
 	// Only this request's newly selected identities authorize a replay. Bad is not consulted here.
@@ -356,7 +370,7 @@ func (a *openAIM3Attempt) afterLocalRepairs(ctx context.Context, body, payload [
 		return signal
 	}
 	if len(a.state.replaced) > 0 && status >= 400 && status < 500 && status != 429 {
-		return a.failure(message, "rewritten_4xx")
+		return a.failure(resilience.StateNone, "", "rewritten_4xx")
 	}
 	return nil
 }
