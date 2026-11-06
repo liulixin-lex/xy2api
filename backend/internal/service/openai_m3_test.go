@@ -515,14 +515,24 @@ func TestForwardOpenAIM3ContinuesAfterWebSearchRepairExhaustion(t *testing.T) {
 			require.NoError(t, err)
 			first := `{"error":{"code":"invalid_encrypted_content","message":"Encrypted content could not be verified for item amsg_one"}}`
 			second := `{"error":{"code":"invalid_encrypted_content","message":"response protection is unavailable; Encrypted content could not be verified for item amsg_two"}}`
-			reject := func(payload string) *http.Response {
+			reject := func(id, payload string) *http.Response {
 				if tc.streamError {
-					return requestRepairFailedStream(`{"type":"response.failed","response":` + payload + `}`)
+					failed, err := sjson.Set(`{"type":"response.failed","response":`+payload+`}`, "response.id", id)
+					require.NoError(t, err)
+					created := fmt.Sprintf("event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":%q,\"status\":\"in_progress\"}}\n\n", id)
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+						Body:       io.NopCloser(strings.NewReader(created + "event: response.failed\ndata: " + failed + "\n\n")),
+					}
 				}
+				payload, err := sjson.Set(payload, "id", id)
+				require.NoError(t, err)
 				return newOpenAIUpstreamErrorResponse(http.StatusBadRequest, payload)
 			}
+			failedIDs := []string{"resp_m3_failed_first", "resp_m3_failed_declaration", "resp_m3_failed_second"}
 			upstream := &httpUpstreamRecorder{responses: []*http.Response{
-				reject(first), reject(second), reject(second), webSearchSuccessStream("resp_m3_web_search"),
+				reject(failedIDs[0], first), reject(failedIDs[1], second), reject(failedIDs[2], second), webSearchSuccessStream("resp_m3_web_search"),
 			}}
 			svc := newOpenAIImageGenerationControlTestService(upstream)
 			_, err = svc.Forward(req.ctx, req.c, webSearchReplayAccount(tc.passthrough), body)
@@ -533,7 +543,21 @@ func TestForwardOpenAIM3ContinuesAfterWebSearchRepairExhaustion(t *testing.T) {
 			require.True(t, gjsonToolsContainWebSearch(gjson.GetBytes(upstream.bodies[2], "tools")))
 			require.Equal(t, "[encrypted content omitted]", gjson.GetBytes(upstream.bodies[3], "input.1.content.0.text").String())
 			require.Equal(t, "amsg_two", gjson.GetBytes(upstream.bodies[3], "input.1.id").String())
-			require.Contains(t, req.rec.Body.String(), "hello")
+			output := req.rec.Body.String()
+			require.Contains(t, output, "hello")
+			createdCount := 0
+			forEachOpenAISSEFrame(output, func(event string, payload []byte) {
+				if event == "response.created" {
+					createdCount++
+					require.Equal(t, "resp_m3_web_search", gjson.GetBytes(payload, "response.id").String())
+				}
+				require.NotEqual(t, "response.failed", event)
+			})
+			require.Equal(t, 1, createdCount, "only the accepted attempt's created frame is delivered")
+			for _, id := range failedIDs {
+				require.NotContains(t, output, id)
+			}
+			require.NotContains(t, output, "invalid_encrypted_content")
 			require.Empty(t, req.session.failures)
 		})
 	}
