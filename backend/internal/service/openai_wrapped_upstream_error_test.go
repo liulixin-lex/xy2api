@@ -3,10 +3,12 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
 
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
 
@@ -152,4 +154,60 @@ func TestOpenAIWrappedUpstreamErrorUsesInnerBodyFor403Classification(t *testing.
 	inner := openAIWrappedUpstreamErrorClassificationBody(payload)
 	require.JSONEq(t, `{"error":{"type":"authentication_error","code":"invalid_api_key","message":"bad key"}}`, string(inner))
 	require.True(t, openAIStream403AccountFailure(inner, "bad key"))
+}
+
+func TestOpenAIWrappedFailoverRetainsInnerClassificationBody(t *testing.T) {
+	withResilienceSettings(t, func(s *resilience.Settings) { s.Failure.DecisionV2 = true })
+	for _, tc := range []struct {
+		name, inner string
+		status      int
+		category    resilience.Category
+		capacity    bool
+	}{
+		{"capacity", `{"error":{"code":"server_is_overloaded","message":"request declined"}}`, 503, resilience.CategoryCapacityShed, true},
+		{"balance", `{"error":{"code":"subscription_sharing_usage_limit_exceeded","message":"request declined"}}`, 429, resilience.CategoryBalance, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := newNonStreamingFailoverContext(t)
+			svc := newNonStreamingFailoverService()
+			// E1 relays may serialize upstream_body as a JSON string.
+			payload, err := json.Marshal(map[string]any{"type": "proxy.upstream_error", "status": tc.status, "message": "late upstream status", "upstream_body": tc.inner})
+			require.NoError(t, err)
+			failure := svc.newOpenAIWrappedStreamFailoverError(c.Request.Context(), c, newNonStreamingFailoverAccount(), false, "rid-inner", payload, "late upstream status", "model", nil, tc.status)
+			require.NotNil(t, failure)
+			require.Equal(t, tc.status, failure.StatusCode)
+			require.Equal(t, tc.status, failure.WrappedStatus)
+			require.JSONEq(t, tc.inner, string(failure.ResponseBody))
+			require.Equal(t, tc.capacity, failure.IsOpenAICapacityShed())
+			require.Equal(t, tc.category, ClassifyFailoverError(failure).Category)
+		})
+	}
+}
+
+func TestOpenAIWrappedAuthStatusesRetainInnerBodyForIntegration(t *testing.T) {
+	// The integration branch owns 401/403 soft-cooldown routing. This contract
+	// only ensures its downstream classifier receives the decoded origin body.
+	for _, status := range []int{401, 403} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			c, _ := newNonStreamingFailoverContext(t)
+			svc := newNonStreamingFailoverService()
+			inner := `{"error":{"type":"authentication_error","code":"invalid_api_key","message":"origin rejected"}}`
+			payload, err := json.Marshal(map[string]any{"type": "proxy.upstream_error", "status": status, "message": "late upstream status", "upstream_body": json.RawMessage(inner)})
+			require.NoError(t, err)
+			failure := svc.newOpenAIWrappedStreamFailoverError(c.Request.Context(), c, newNonStreamingFailoverAccount(), false, "rid-inner", payload, "late upstream status", "model", nil, status)
+			require.NotNil(t, failure)
+			require.Equal(t, status, failure.WrappedStatus)
+			require.JSONEq(t, inner, string(failure.ResponseBody))
+		})
+	}
+}
+
+func TestOpenAIWrapped400RetainsOriginalBodyForM3(t *testing.T) {
+	c, _ := newNonStreamingFailoverContext(t)
+	svc := newNonStreamingFailoverService()
+	payload := []byte(`{"type":"proxy.upstream_error","status":400,"message":"late upstream status","upstream_body":{"error":{"code":"conversation_invalid","message":"origin rejected"}}}`)
+	failure := svc.newOpenAIWrappedStreamFailoverError(c.Request.Context(), c, newNonStreamingFailoverAccount(), false, "rid-m3", payload, "late upstream status", "model", nil, 400)
+	require.NotNil(t, failure)
+	require.Equal(t, http.StatusBadRequest, failure.WrappedStatus)
+	require.Equal(t, payload, failure.ResponseBody)
 }

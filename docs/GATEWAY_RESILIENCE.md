@@ -313,6 +313,7 @@ Responses 空白占位：`response.output_text.delta` / `.done`、output_text �
 
 - OpenAI Responses 的流内中转包装帧（`event: error` + `type=proxy.upstream_error`，或 `response.failed` + `response.error.type=upstream_error`）只在状态码、字段类型与相等关系校验通过后按迟到的上游 HTTP 状态路由。输出前包装 400 交给加密态请求修复，403 按停用/凭证码走账号故障路径，否则走请求级 forbidden；其他状态复用 HTTP 的换号判定。包装 400–599 以外或结构不完整的帧按普通失败处理，畸形帧各记一条 `resilience.wrapped_error_malformed`；输出后的流保持原行为。
 - 包装校验单独保留原始 SSE `event`，仅用于 E1 校验和输出前包装分派；终态判断仍以 payload 的 `type` 为准。已输出时，即使原始行是 `event: error`，载荷里的 `response.failed` 仍完整投递并立即结束，不等另一帧或 EOF。非流式聚合出口同样分开保存原始 event 与终态类型。
+- 包装帧的 `upstream_body` 解包后用于首次 HTTP 路由和后续失败分类，保留内层容量码、余额码等语义；仅包装 400 为 M3 保留原始外层体。`WrappedStatus` 始终保留校验过的上游状态码。
 - `codex.response.metadata` 判为开场事件（§1）。以前它算内容，之后的失败不能换号，首输出截止也随之解除，出现过 240 秒的挂起。
 - 原生 Anthropic 与 API Key 直通（`stream.prelude_staging`）：`message_start`、`ping`、空的 text 与 thinking `content_block_start` 暂存到第一个内容或终态，`tool_use` 起始算内容、立即写出。暂存期间上游的可重试失败（流内 `overloaded_error`、`rate_limit_error`，断流、读错、停滞）丢弃本次开场并换号，客户端只看到成功那次尝试的一个 `message_start`；不可重试的拒绝写出开场后以 `event: error` 结束；合法的空回答照常写出。
 - 暂存期间按流内心跳间隔写注释行 `: ping`（以前是 `event: ping`），不算输出；失败尝试的上游响应头与 request-id 不写出。暂存最多 8 MiB（超过 64 KiB 写入已解除链接的临时文件），超出时换号；预算开启的文本请求最多暂存到本请求预算用尽。图片请求与没有预算的请求不设这个时限。

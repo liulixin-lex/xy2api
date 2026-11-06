@@ -1870,9 +1870,11 @@ func (s *OpenAIGatewayService) newOpenAIWrappedStreamFailoverError(
 		account, wrappedStatus, headers, classificationHeaders, classificationBody, message, shouldDisable, retryableOnSameAccount,
 	)
 	failoverErr.WrappedStatus = wrappedStatus
-	// Keep the validated wrapper payload available to the request-level repair
-	// handler; generic stream errors replace it with a client-safe envelope.
-	failoverErr.ResponseBody = append([]byte(nil), payload...)
+	// Only M3 consumes the original 400 wrapper. Other statuses must retain
+	// the same decoded body for both HTTP routing and downstream classification.
+	if wrappedStatus == http.StatusBadRequest {
+		failoverErr.ResponseBody = append([]byte(nil), payload...)
+	}
 	return failoverErr
 }
 
