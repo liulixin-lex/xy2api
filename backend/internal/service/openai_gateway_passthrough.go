@@ -2443,7 +2443,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	// outside one is passed through with its closing blank line.
 	eventOpen, skipBlank := false, false
 	lastLineWritten := ""
-	var lastGatewayHeartbeatAt time.Time
 	// writeHeartbeat writes a complete heartbeat while the opening is staged: it commits
 	// 200 but is no output; a failed write means the client left (PM7).
 	writeHeartbeat := func(frame string) {
@@ -2940,16 +2939,13 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			MarkResponseCommitted(c)
 			return resultWithUsage(), errors.New("stream data interval timeout"), true
 		},
-		onKeepalive: func(tick time.Time) {
-			if clientOutputStarted || clientDisconnected || failureDelivered || tick.Sub(lastGatewayHeartbeatAt) < keepaliveInterval {
+		onKeepalive: func() {
+			if clientOutputStarted || clientDisconnected || failureDelivered {
 				return
 			}
+			// The read pump's ticker owns the cadence, independently of upstream
+			// comments. Rechecking tick timestamps can skip a beat on clock jitter.
 			writeHeartbeat(string(heartbeatFrame))
-			if !clientDisconnected {
-				// Upstream comments cannot postpone dispatchable gateway beats.
-				// Use the ticker time so write latency cannot skip the next beat.
-				lastGatewayHeartbeatAt = tick
-			}
 		},
 		firstOutputDeadline: firstOutputDeadline(startTime, firstOutputTimeout),
 		stallCheckBase:      stallCheckBase,
