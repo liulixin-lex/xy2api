@@ -328,9 +328,8 @@ func (a *openAIM3Attempt) succeeded(ctx context.Context) {
 	a.event(ctx, "resilience.m3_replay_ok", 1)
 }
 
-// A nil reader error is not acceptance evidence: incomplete and raw SSE EOF
-// can both return nil. Reuse the reader's semantic-output decision and require
-// a terminal; failed/error and missing terminals never commit batch learning.
+// A nil reader error is not acceptance evidence. Reuse the reader's semantic
+// output decision; clean EOF with output is checked separately by the reader.
 func openAIM3TerminalAccepted(terminal string, semanticOutput bool) bool {
 	switch terminal {
 	case "response.completed", "response.done", "[DONE]":
@@ -349,7 +348,7 @@ func openAIM3AggregateAccepted(body, terminal string) bool {
 			semanticOutput = semanticOutput || resilience.ResponsesEventOutputDisposition(event, payload).SemanticOutput
 		}
 	})
-	return openAIM3TerminalAccepted(terminal, semanticOutput)
+	return openAIM3TerminalAccepted(terminal, semanticOutput) || terminal == "" && semanticOutput
 }
 
 func openAIM3JSONAccepted(body []byte) bool {

@@ -1448,10 +1448,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			imageOutputSizes = nonStreamResult.imageOutputSizes
 			searchCount = nonStreamResult.searchCount
 		}
+		if upstreamAccepted {
+			requestRepair.m3.succeeded(ctx)
+		}
 		if partialErr == nil {
-			if upstreamAccepted {
-				requestRepair.m3.succeeded(ctx)
-			}
 			webSearchReplay.succeeded()
 			s.bindHTTPResponseAccount(ctx, c, account, responseID)
 		}

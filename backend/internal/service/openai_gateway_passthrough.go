@@ -569,6 +569,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 					usage, firstTokenMs = result.usage, result.firstTokenMs
 					responseID = strings.TrimSpace(result.responseID)
 					imageCount, imageOutputSizes = result.imageCount, result.imageOutputSizes
+					upstreamAccepted = result.upstreamAccepted
 					partialErr = handleErr
 					break
 				}
@@ -628,10 +629,10 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		break
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if upstreamAccepted {
+		requestRepair.m3.succeeded(ctx)
+	}
 	if partialErr == nil {
-		if upstreamAccepted {
-			requestRepair.m3.succeeded(ctx)
-		}
 		webSearchReplay.succeeded()
 	}
 	serviceTier := extractOpenAIServiceTierFromBody(body)
@@ -2415,6 +2416,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	documentScanner := newOpenAISSEJSONDocumentScanner(scanner)
 
 	needModelReplace := strings.TrimSpace(originalModel) != "" && strings.TrimSpace(mappedModel) != "" && strings.TrimSpace(originalModel) != strings.TrimSpace(mappedModel)
+	cleanEOF := false
 	resultWithUsage := func() *openaiStreamingResultPassthrough {
 		return &openaiStreamingResultPassthrough{
 			usage:            usage,
@@ -2423,7 +2425,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			imageCount:       imageCounter.Count(),
 			imageOutputSizes: imageCounter.Sizes(),
 			clientSawOutput:  clientOutputStarted || clientDisconnected,
-			upstreamAccepted: !sawFailedEvent && openAIM3TerminalAccepted(terminalEventType, semanticOutputSeen),
+			upstreamAccepted: !sawFailedEvent && (openAIM3TerminalAccepted(terminalEventType, semanticOutputSeen) || cleanEOF && semanticOutputSeen),
 		}
 	}
 
@@ -2806,6 +2808,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		return passthroughLineContinue
 	}
 	finish := func(scanErr error) (*openaiStreamingResultPassthrough, error) {
+		cleanEOF = scanErr == nil && ctx.Err() == nil
 		ensureResponseFailedTerminal()
 		if guarded && !clientOutputStarted && reqCtx.Err() != nil {
 			return resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", reqCtx.Err())

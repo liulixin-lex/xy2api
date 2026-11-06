@@ -411,6 +411,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	// Dedup search tool calls across SSE events (item.done + response.completed
 	// both list the same call_id — counting both would ~2× the surcharge).
 	streamSearchSeen := make(map[string]struct{})
+	cleanEOF := false
 	resultWithUsage := func() *openaiStreamingResult {
 		return &openaiStreamingResult{
 			usage:            usage,
@@ -420,7 +421,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			imageOutputSizes: imageCounter.Sizes(),
 			searchCount:      searchCounter,
 			clientSawOutput:  delivery.sawOutput,
-			upstreamAccepted: !sawFailedEvent && openAIM3TerminalAccepted(terminalEventType, responsesSemanticOutputSeen),
+			upstreamAccepted: !sawFailedEvent && (openAIM3TerminalAccepted(terminalEventType, responsesSemanticOutputSeen) || cleanEOF && responsesSemanticOutputSeen),
 		}
 	}
 	flushPending := func(disconnectMessage string) {
@@ -978,6 +979,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		if result, err, done := handleScanErr(documentScanner.Err()); done {
 			return result, err
 		}
+		cleanEOF = true
 		return finalizeStream()
 	}
 
@@ -1037,6 +1039,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		select {
 		case ev, ok := <-events:
 			if !ok {
+				cleanEOF = true
 				if stageFirstOutput && eventInProgress {
 					// EOF dispatches the final SSE event even without a trailing blank
 					// line. Do not synthesize extra bytes on the downstream wire.

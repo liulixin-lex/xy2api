@@ -110,7 +110,9 @@ func TestForwardOpenAIM3IncompleteDoesNotCommitBatchBad(t *testing.T) {
 func TestOpenAIM3AcceptanceRequiresOutputOrSuccessTerminal(t *testing.T) {
 	text := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
 	blank := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"  \"}\n\n"
-	require.False(t, openAIM3AggregateAccepted(text, ""), "EOF without a terminal is not acceptance")
+	require.True(t, openAIM3AggregateAccepted(text, ""), "clean EOF after semantic output is acceptance")
+	require.False(t, openAIM3AggregateAccepted(blank, ""))
+	require.False(t, openAIM3AggregateAccepted(blank, "response.cancelled"))
 	require.False(t, openAIM3AggregateAccepted(text, "response.failed"))
 	require.False(t, openAIM3AggregateAccepted(text, "error"))
 	require.False(t, openAIM3AggregateAccepted(blank, "response.incomplete"))
@@ -121,6 +123,47 @@ func TestOpenAIM3AcceptanceRequiresOutputOrSuccessTerminal(t *testing.T) {
 	require.True(t, openAIM3JSONAccepted([]byte(`{"id":"resp_ok","object":"response","status":"completed","output":[]}`)))
 	require.False(t, openAIM3JSONAccepted([]byte(`{"object":"response","status":"incomplete","output":[]}`)))
 	require.False(t, openAIM3JSONAccepted([]byte(`{"object":"response","status":"completed"}`)))
+}
+
+func TestForwardOpenAIM3AcceptanceAfterOutput(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		for _, stream := range []bool{false, true} {
+			for _, terminal := range []string{"", "response.cancelled"} {
+				for _, output := range []bool{false, true} {
+					t.Run(fmt.Sprintf("passthrough=%t/stream=%t/terminal=%s/output=%t", passthrough, stream, terminal, output), func(t *testing.T) {
+						withResilienceSettings(t, nil)
+						req := newWebSearchReplayRequest(t)
+						account := webSearchReplayAccount(passthrough)
+						frames := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_accepted\"}}\n\n"
+						if output {
+							frames += "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
+						}
+						if terminal != "" {
+							frames += fmt.Sprintf("data: {\"type\":%q,\"response\":{\"id\":\"resp_accepted\",\"status\":\"cancelled\",\"output\":[]}}\n\n", terminal)
+						}
+						upstream := &httpUpstreamRecorder{responses: []*http.Response{
+							newOpenAIUpstreamErrorResponse(http.StatusBadRequest, `{"error":{"message":"Encrypted content is invalid for this conversation"}}`),
+							{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(frames))},
+						}}
+						svc := newOpenAIImageGenerationControlTestService(upstream)
+						svc.openaiWSStateStore = NewOpenAIWSStateStore(nil)
+						body, err := sjson.Set(m3TwoItemRequest, "stream", stream)
+						require.NoError(t, err)
+						_, _ = svc.Forward(req.ctx, req.c, account, []byte(body))
+						require.Len(t, upstream.bodies, 2)
+						require.Equal(t, "[encrypted content omitted]", gjson.GetBytes(upstream.bodies[1], "input.0.content.0.text").String())
+						attempt := openAIRequestRepairFrom(req.c).m3
+						bad := svc.getOpenAIWSStateStore().GetSessionBadEncryptedSlots(attempt.request.groupID, attempt.request.session, account.ID)
+						if output {
+							require.Len(t, bad, 2)
+						} else {
+							require.Empty(t, bad)
+						}
+					})
+				}
+			}
+		}
+	}
 }
 
 func TestForwardOpenAIM3ReplaySendsOnlyPlaceholderInNamedSlot(t *testing.T) {
