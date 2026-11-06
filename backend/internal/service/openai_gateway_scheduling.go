@@ -1060,6 +1060,7 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 	// Check if sticky session should be cleared
 	if shouldClearStickySession(account, requestedModel) {
 		resilience.StateFrom(ctx).NoteStickyBypassReason("owner_should_clear")
+		resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
 		_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 		return nil
 	}
@@ -1072,11 +1073,13 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 	}
 	if !parentHealthyForShadow(account, s.parentAccountLookup(ctx)) {
 		resilience.StateFrom(ctx).NoteStickyBypassReason("shadow_parent_unhealthy")
+		resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
 		_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 		return nil
 	}
 	if s.isOpenAIAccountRequestRuntimeBlocked(account, requestedModel, requireCompact) {
 		resilience.StateFrom(ctx).NoteStickyBypassReason("runtime_blocked")
+		resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
 		_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 		return nil
 	}
@@ -1087,12 +1090,14 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 	}
 	if account == nil || !s.openAIAccountMatchesSchedulingGroup(account, groupID) {
 		resilience.StateFrom(ctx).NoteStickyBypassReason("owner_group_mismatch")
+		resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
 		_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 		return nil
 	}
 	if groupID != nil && s.needsUpstreamChannelRestrictionCheck(ctx, groupID) &&
 		s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel, requireCompact) {
 		resilience.StateFrom(ctx).NoteStickyBypassReason("channel_upstream_restricted")
+		resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
 		_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 		return nil
 	}
@@ -1240,9 +1245,16 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		(stickyAccountID > 0 || len(excludedIDs) > 0) &&
 		!s.shareScheduling.shareSchedulingActive(derefGroupID(groupID))
 	var migrated *AccountSelectionResult
+	originalStickyAccountID := stickyAccountID
 	stickyAccountID, migrated = s.migrateOpenAILatencyHeldOwner(ctx, groupID, platform, sessionHash, requestedModel, stickyAccountID, excludedIDs, requireCompact, requiredCapability, preferLowUpstreamRate)
 	if migrated != nil {
+		resilience.StateFrom(ctx).NoteStickyBypassReason("quality_migration")
+		resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
 		return migrated, nil
+	}
+	if originalStickyAccountID > 0 && stickyAccountID != originalStickyAccountID {
+		resilience.StateFrom(ctx).NoteStickyBypassReason("latency_migration")
+		resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
 	}
 	if s.concurrencyService == nil || !cfg.LoadBatchEnabled {
 		account, stickyHit, err := s.selectAccountForModelWithExclusionsStickyHit(ctx, groupID, platform, sessionHash, requestedModel, excludedIDs, requireCompact, stickyAccountID, requiredCapability, preferLowUpstreamRate)
@@ -1288,25 +1300,58 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		accountID := stickyAccountID
 		if accountID > 0 {
 			account, err := s.getSchedulableAccount(ctx, accountID)
-			if err == nil && account != nil && !isExcluded(accountID) && !s.resilienceKeepOpenAISoftOwner(ctx, account, platform, requestedModel) {
+			softOwner := false
+			if err != nil {
+				resilience.StateFrom(ctx).NoteStickyBypassReason("owner_lookup_failed")
+			} else if account == nil {
+				resilience.StateFrom(ctx).NoteStickyBypassReason("owner_unavailable")
+			}
+			if err == nil && account != nil && isExcluded(accountID) {
+				resilience.StateFrom(ctx).NoteStickyBypassReason("owner_excluded")
+			}
+			if err == nil && account != nil && !isExcluded(accountID) {
+				softOwner = s.resilienceKeepOpenAISoftOwner(ctx, account, platform, requestedModel)
+			}
+			if softOwner {
+				resilience.StateFrom(ctx).NoteStickyBypassReason("soft_owner_preserved")
+			}
+			if err == nil && account != nil && !isExcluded(accountID) && !softOwner {
 				clearSticky := shouldClearStickySession(account, requestedModel)
 				if clearSticky {
+					resilience.StateFrom(ctx).NoteStickyBypassReason("owner_should_clear")
+					resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
 					_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 				}
-				if !clearSticky && isOpenAICompatibleAccountEligibleForRequest(ctx, account, platform, requestedModel, false, requiredCapability) {
+				eligible := !clearSticky && isOpenAICompatibleAccountEligibleForRequest(ctx, account, platform, requestedModel, false, requiredCapability)
+				if !clearSticky && !eligible {
+					resilience.StateFrom(ctx).NoteStickyBypassReason("owner_ineligible")
+				}
+				if eligible {
 					var transient bool
 					account, transient = s.recheckOpenAIStickyOwnerFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
 					if account == nil {
 						if !transient {
+							resilience.StateFrom(ctx).NoteStickyBypassReason("owner_group_mismatch")
+							resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
 							_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
+						} else {
+							resilience.StateFrom(ctx).NoteStickyBypassReason("owner_recheck_transient")
 						}
 					} else if !s.openAIAccountMatchesSchedulingGroup(account, groupID) {
+						resilience.StateFrom(ctx).NoteStickyBypassReason("owner_group_mismatch")
+						resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
 						_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 					} else if s.isOpenAIAccountRequestRuntimeBlocked(account, requestedModel, requireCompact) {
+						resilience.StateFrom(ctx).NoteStickyBypassReason("runtime_blocked")
+						resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
 						_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 					} else if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel, requireCompact) {
+						resilience.StateFrom(ctx).NoteStickyBypassReason("channel_upstream_restricted")
+						resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
 						_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 					} else if !parentHealthyForShadow(account, s.parentAccountLookup(ctx)) {
+						resilience.StateFrom(ctx).NoteStickyBypassReason("shadow_parent_unhealthy")
+						resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
 						_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 					} else {
 						result, err := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
@@ -1319,7 +1364,13 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 							return markStickySessionHit(selection, true), nil
 						}
 
-						return s.selectOpenAIStickyCapacity(ctx, account, openAILegacyStickyCapacityRequest(ctx, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability, UseUpstreamTokenCost: useUpstreamTokenCost, SkipStickyCapacityRetry: err != nil}))
+						selection, capacityErr := s.selectOpenAIStickyCapacity(ctx, account, openAILegacyStickyCapacityRequest(ctx, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability, UseUpstreamTokenCost: useUpstreamTokenCost, SkipStickyCapacityRetry: err != nil}))
+						if selection != nil && selection.StickyCapacitySpillover {
+							resilience.StateFrom(ctx).NoteStickyBypassReason("capacity_overflow")
+						} else {
+							resilience.StateFrom(ctx).NoteStickyBypassReason("concurrency_full")
+						}
+						return selection, capacityErr
 					}
 				}
 			}

@@ -502,9 +502,15 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		var migrated *AccountSelectionResult
 		req.StickyAccountID, migrated = s.service.migrateOpenAILatencyHeldOwner(migrationCtx, req.GroupID, req.Platform, req.SessionHash, req.RequestedModel, owner, req.ExcludedIDs, req.RequireCompact, req.RequiredCapability, false)
 		if migrated != nil {
+			resilience.StateFrom(ctx).NoteStickyBypassReason("quality_migration")
+			resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
 			decision.Layer = openAIAccountScheduleLayerSessionSticky
 			decision.SelectedAccountID, decision.SelectedAccountType = migrated.Account.ID, migrated.Account.Type
 			return migrated, decision, nil
+		}
+		if owner > 0 && req.StickyAccountID != owner {
+			resilience.StateFrom(ctx).NoteStickyBypassReason("latency_migration")
+			resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
 		}
 	}
 	if !req.StickyWeighted {
@@ -567,6 +573,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	clearBinding := func(reason string) {
 		noteBypass(reason)
 		if !req.PreserveStickyBinding {
+			resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
 			_ = s.service.deleteStickySessionAccountIDIfOwner(ctx, req.GroupID, sessionHash, accountID)
 		}
 	}
@@ -2380,6 +2387,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 ) (selection *AccountSelectionResult, decision OpenAIAccountScheduleDecision, err error) {
 	sessionHash = monitorProbeSessionHash(ctx, sessionHash)
 	state := resilience.StateFrom(ctx)
+	state.ResetStickyBypassReason()
 	stickyOwner := state.StickyOwner()
 	if stickyOwner <= 0 && sessionHash != "" && s != nil {
 		stickyOwner, _ = s.getStickySessionAccountID(ctx, groupID, sessionHash)
@@ -2390,14 +2398,25 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		if selection != nil && selection.Account != nil {
 			selected = selection.Account.ID
 		}
-		if stickyOwner <= 0 || stickyOwner == selected {
+		if stickyOwner <= 0 || stickyOwner == selected || !state.ClaimStickyBypassLog() {
 			return
 		}
 		reason := state.StickyBypassReason()
 		if reason == "" {
 			reason = "unrecorded"
 		}
-		slog.Warn("openai.sticky_bypass", "owner", stickyOwner, "selected", selected, "reason", reason)
+		fields := append(resilience.EventFields(ctx),
+			"group_id", derefGroupID(groupID),
+			"session", shortSessionHash(sessionHash),
+			"owner", stickyOwner,
+			"selected", selected,
+			"reason", reason,
+		)
+		if reason == "unrecorded" || state.StickyBypassChangesBinding() {
+			slog.Warn("openai.sticky_bypass", fields...)
+		} else {
+			slog.Info("openai.sticky_bypass", fields...)
+		}
 	}()
 	origExcluded := excludedIDs
 	resilience.StateFrom(ctx).NoteTurn(derefGroupID(groupID), requestedModel, sessionHash)

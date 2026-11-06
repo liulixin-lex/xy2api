@@ -3,9 +3,12 @@
 package service
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/sharesched"
 	"github.com/stretchr/testify/require"
@@ -21,6 +24,89 @@ func TestStickyBypassReasonKeepsFirstReason(t *testing.T) {
 	state.NoteStickyBypassReason("owner_excluded")
 	state.NoteStickyBypassReason("capacity")
 	require.Equal(t, "owner_excluded", state.StickyBypassReason())
+	state.ResetStickyBypassReason()
+	state.NoteStickyBypassReason("capacity")
+	require.Equal(t, "capacity", state.StickyBypassReason())
+}
+
+func TestResilienceOpenAILoadBatchStickyBypassRecordsReason(t *testing.T) {
+	withResilienceSettings(t, nil)
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
+	resetAt := time.Now().Add(time.Minute)
+	groupID := int64(10109)
+	accounts := []Account{
+		{ID: 36021, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID}, RateLimitResetAt: &resetAt},
+		{ID: 36022, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID}},
+	}
+	cfg := &config.Config{}
+	cfg.Gateway.Scheduling.LoadBatchEnabled = true
+	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:load-batch-session": accounts[0].ID}}
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+		cache:              cache,
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+		resilience:         NewResilienceService(nil, newMemResilienceStore()),
+	}
+	logs := captureOpenAIObservationLogs(t)
+	state := resilience.NewRequestState()
+	ctx := resilience.WithRequestState(context.Background(), state)
+	selection, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "load-batch-session", "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, accounts[1].ID, selection.Account.ID)
+	require.NotEqual(t, "unrecorded", state.StickyBypassReason())
+	require.Equal(t, "soft_owner_preserved", state.StickyBypassReason())
+	require.Contains(t, logs.String(), `"msg":"openai.sticky_bypass"`)
+	require.Contains(t, logs.String(), `"reason":"soft_owner_preserved"`)
+	require.Contains(t, logs.String(), `"level":"INFO"`)
+	require.Contains(t, logs.String(), `"group_id":10109`)
+	require.Contains(t, logs.String(), `"session":"load-bat"`)
+	require.Contains(t, logs.String(), `"request_id":`)
+	retry, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "load-batch-session", "gpt-5.1", map[int64]struct{}{accounts[0].ID: {}}, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.Equal(t, "owner_excluded", state.StickyBypassReason())
+	require.Equal(t, 1, strings.Count(logs.String(), `"msg":"openai.sticky_bypass"`))
+	if retry.ReleaseFunc != nil {
+		retry.ReleaseFunc()
+	}
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestResilienceOpenAILoadBatchStickyDeleteWarns(t *testing.T) {
+	withResilienceSettings(t, nil)
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
+	groupID := int64(10110)
+	accounts := []Account{
+		{ID: 36031, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusError, Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID}},
+		{ID: 36032, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID}},
+	}
+	cfg := &config.Config{}
+	cfg.Gateway.Scheduling.LoadBatchEnabled = true
+	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:delete-session": accounts[0].ID}}
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+		cache:              cache,
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+		resilience:         NewResilienceService(nil, newMemResilienceStore()),
+	}
+	logs := captureOpenAIObservationLogs(t)
+	ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+	selection, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "delete-session", "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.Equal(t, accounts[1].ID, selection.Account.ID)
+	require.Equal(t, 1, cache.deletedSessions["openai:delete-session"])
+	require.Contains(t, logs.String(), `"level":"WARN"`)
+	require.Contains(t, logs.String(), `"reason":"owner_should_clear"`)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
 }
 
 func TestResilienceOpenAILegacySchedulerKeepsSoftBinding(t *testing.T) {
@@ -54,7 +140,7 @@ func TestResilienceOpenAILegacySchedulerKeepsSoftBinding(t *testing.T) {
 		}
 		require.Equal(t, lrAccountA, env.cache.sessionBindings[key], "served elsewhere, the binding stays on the owner")
 		require.Contains(t, logs.String(), `"msg":"openai.sticky_bypass"`)
-		require.Contains(t, logs.String(), `"level":"WARN"`)
+		require.Contains(t, logs.String(), `"level":"INFO"`)
 		require.Contains(t, logs.String(), `"owner":1`)
 		require.Contains(t, logs.String(), `"selected":2`)
 		require.Contains(t, logs.String(), `"reason":"soft_owner_preserved"`)

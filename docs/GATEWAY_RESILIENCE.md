@@ -511,6 +511,7 @@ warn 级，进入运维页“系统日志”（`ops_system_logs`）：
 
 - `balance_paused`（含账号、暂停时长与上游原文；0.4.12 起另含档位 `step`）；
 - `session_rebind`（P1-B 原因 `post_output_first_failure`，普通连击原因 `resil_failure_streak`，含会话哈希前缀、组、账号、类别、避开时长）、`last_resort`；
+- `openai.sticky_bypass`：原会话 owner 与最终 selected 不同的选号收尾诊断；含通用请求关联字段（`resilience.EventFields`）、`group_id`、脱敏 `session`、`owner`、`selected`、`reason`。每个请求最多一条。删绑、迁移或原因未记录（`unrecorded`）为 Warn；保留绑定的临时放弃（如 `soft_owner_preserved`、`concurrency_full`、`capacity_overflow`，以及重选时的 `owner_excluded`）为 Info。`reason` 是本轮最先记录的原因码，包括 owner 状态/资格、请求门槛、容量与迁移原因；资格判断沿用对应 gate 的原因码。
 - `same_site_hold`（`host_hash`、`account_id`、`peer_account_id`、`until`）；
 - `fallback_group`、`fallback_return`；
 - `budget_exhausted`、`capacity_switch_exhausted`；
@@ -527,13 +528,16 @@ warn 级，进入运维页“系统日志”（`ops_system_logs`）：
 - `m3_state_switch`：M3 回避当前号并消耗唯一状态换号额度；含 `group_id`、`account_id`、`switch_count`。
 - `m3_terminal`：M3 在没有可用同号修复或换号额度时终止；含 `group_id`、`account_id`、`cause`。
 - `committed_terminal`：M3 终止时下游响应头已提交，网关以 `response.failed` / `server_error` 收尾；含 `group_id`、`account_id`、`cause`。
-- `last_resort_avoided`：末位兜底选择了会话回避集合中的账号，依据本次 fallback 已加载的会话集合（包括此前请求留下的回避），不依赖当前请求新写入的回避标记；含 `group_id`、`account_id`、`reason=session_avoid`。
+- `last_resort_avoided`：末位兜底选择了会话回避集合中的账号，依据本次 fallback 已加载的会话集合（包括此前请求留下的回避），不依赖当前请求新写入的回避标记；含 `group_id`、`account_id`、`reason=session_avoid`、`candidates`、`penalty_reason`。
+
+`resilience.last_resort` 与 `resilience.last_resort_avoided` 的 `candidates` 是本轮候选扫描数：普通末位兜底按分组扫描到的账号数，份额调度按份额计划完成 include 过滤后的候选数。`penalty_reason` 是按原因计数后稳定排序的 `reason:count` 摘要；同一个账号可能因多个独立条件计入多项，因此各项计数之和不必等于 `candidates`。
 
 info 级，只写应用标准输出（量大，明细已有计数或未送达表）：
 
 - `blank_placeholder_staged`（完整事件名 `resilience.blank_placeholder_staged`）：原生/透传 Responses 每次尝试实际暂存过空白占位后只记一条，含 `account_id`，不记录占位正文；
 - `blank_placeholder_outcome`（完整事件名 `resilience.blank_placeholder_outcome`）：Responses handler 结束时，仅请求内曾实际暂存空白才记一条。`placeholder_timeouts` 只累计暂存过空白的尝试所发生的首输出超时，普通静默尝试不计；`final_outcome` 读取现有请求恢复结果，`budget_cause` 读取预算的耗尽原因（未耗尽为空）。用于关联下一跳结果和有占位请求最终预算耗尽的次数，不改写恢复结果；
 - `keepalive_committed`（含 `group_id`、`protocol`、`edge`）；
+- `openai.sticky_bypass`：保留原绑定的临时放弃，字段与 Warn 事件相同；仅写应用标准输出。
 - `unclassified`：只按状态码归类的上游 4xx 文案采样（脱敏、截断，每分钟约 10 条），发现新的余额文案时加入 `failure.balance_keywords_extra`；
 - `undelivered`（含阶段、耗时、推断的 CDN 切断与 `edge`）；
 - `transient_cooldown`、`transient_lifted`、`undelivered_cleanup`；

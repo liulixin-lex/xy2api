@@ -3165,7 +3165,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
-      "value": "if err == nil && account != nil && !isExcluded(accountID) && !s.resilienceKeepOpenAISoftOwner(ctx, account, platform, requestedModel) {"
+      "value": "if err == nil && account != nil && !isExcluded(accountID) && !softOwner {"
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
