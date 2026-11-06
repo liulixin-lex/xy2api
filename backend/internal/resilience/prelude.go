@@ -239,8 +239,11 @@ func responsesObjectHasOnlyFields(value gjson.Result, allowed ...string) bool {
 		name := key.String()
 		if len(allowed) > 0 {
 			if _, ok := allowedSet[name]; !ok {
-				valid = false
-				return false
+				if !responsesFieldValueIsEmpty(field) {
+					valid = false
+					return false
+				}
+				return true
 			}
 		}
 		// Fields may be absent, but a supplied structural field must have its
@@ -262,6 +265,19 @@ func responsesObjectHasOnlyFields(value gjson.Result, allowed ...string) bool {
 		return valid
 	})
 	return valid
+}
+
+func responsesFieldValueIsEmpty(value gjson.Result) bool {
+	switch value.Type {
+	case gjson.Null:
+		return true
+	case gjson.String:
+		return value.Str == ""
+	}
+	if value.IsArray() {
+		return len(value.Array()) == 0
+	}
+	return value.IsObject() && len(value.Map()) == 0
 }
 
 func responsesObjectHasUniqueFields(value gjson.Result) bool {
