@@ -20,6 +20,17 @@ import (
 
 const m3TwoItemRequest = `{"model":"gpt-5.5","stream":true,"input":[{"type":"agent_message","id":"amsg_one","content":[{"type":"encrypted_content","encrypted_content":"same-cipher"},{"type":"input_text","text":"first"}]},{"type":"agent_message","id":"amsg_two","content":[{"type":"encrypted_content","encrypted_content":"same-cipher"},{"type":"input_text","text":"second"}]}]}`
 
+func TestOpenAIM3DoesNotArmForMappedDeepSeek(t *testing.T) {
+	req := newWebSearchReplayRequest(t)
+	svc := &OpenAIGatewayService{}
+	account := openaiMappedDeepSeekResponsesImageAccount()
+	require.Equal(t, PlatformOpenAI, account.Platform)
+	require.True(t, shouldAliasDeepSeekResponsesInputImages(account))
+	require.Nil(t, svc.armOpenAIM3(req.c, account, []byte(m3TwoItemRequest)))
+	require.Empty(t, svc.beginOpenAIM3(req.c, nil).accounts)
+	require.NotNil(t, svc.armOpenAIM3(req.c, webSearchReplayAccount(false), []byte(m3TwoItemRequest)))
+}
+
 func TestOpenAIM3S4LearnsOnlyNamedItem(t *testing.T) {
 	req := newWebSearchReplayRequest(t)
 	ctx := req.ctx

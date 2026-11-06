@@ -74,6 +74,11 @@ func (s *OpenAIGatewayService) armOpenAIM3(c *gin.Context, account *Account, bod
 	if r == nil || account == nil || account.Platform != PlatformOpenAI {
 		return nil
 	}
+	// These are the same gates as normalizeDeepSeekResponsesRequestBody;
+	// its media lifting may stringify fco.output and cannot preserve M3 slots.
+	if account.UsesNativeCNResponses() || shouldAliasDeepSeekResponsesInputImages(account) {
+		return nil
+	}
 	a := r.accounts[account.ID]
 	if a == nil {
 		a = &openAIM3Account{replaced: make(map[openAIM3SlotID]struct{}), pending: make(map[openAIBadEncryptedSlot]struct{})}
