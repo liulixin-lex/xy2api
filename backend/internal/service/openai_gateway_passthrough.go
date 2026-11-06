@@ -1971,7 +1971,7 @@ func (s *OpenAIGatewayService) applyOpenAIStreamForbiddenSoftCooldown(
 	if failoverErr.WrappedStatus == 0 {
 		forbidden = openAIStream403TransientForbidden(payload, message)
 	}
-	if IsResponseCommitted(c) || !forbidden {
+	if !forbidden || c == nil || IsResponseCommitted(c) {
 		return
 	}
 	failoverErr.Reason = OpenAIStreamForbiddenReason
