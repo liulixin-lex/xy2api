@@ -807,7 +807,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if needModelReplace {
 				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
 			}
-			responsesSemanticOutputSeen = responsesSemanticOutputSeen || resilience.ResponsesEventOutputDisposition(eventType, dataBytes).SemanticOutput
+			if !openAIStreamEventTypeIsTerminal(eventType) {
+				responsesSemanticOutputSeen = responsesSemanticOutputSeen || resilience.ResponsesEventOutputDisposition(eventType, dataBytes).SemanticOutput
+			}
 			// Preserve the silent-refusal guard (#5009/#7774); whitespace does not
 			// turn an otherwise empty, usage-free completed event into success.
 			if account != nil && (account.Platform == PlatformOpenAI || account.Platform == PlatformGrok) &&
@@ -1551,10 +1553,14 @@ func openAIResponsesCompletedEventIsEmpty(data []byte, usage *OpenAIUsage) bool 
 		usage.CacheCreationInputTokens > 0 || usage.CacheReadInputTokens > 0) {
 		return false
 	}
-	if gjson.GetBytes(data, "usage").Exists() || gjson.GetBytes(data, "response.usage").Exists() {
+	usageValue := gjson.GetBytes(data, "usage")
+	responseUsage := gjson.GetBytes(data, "response.usage")
+	if (usageValue.Exists() && usageValue.Type != gjson.Null) || (responseUsage.Exists() && responseUsage.Type != gjson.Null) {
 		return false
 	}
-	if gjson.GetBytes(data, "error").Exists() || gjson.GetBytes(data, "response.error").Exists() {
+	errorValue := gjson.GetBytes(data, "error")
+	responseError := gjson.GetBytes(data, "response.error")
+	if (errorValue.Exists() && errorValue.Type != gjson.Null) || (responseError.Exists() && responseError.Type != gjson.Null) {
 		return false
 	}
 	if output := gjson.GetBytes(data, "response.output"); output.Exists() && output.IsArray() && len(output.Array()) > 0 {

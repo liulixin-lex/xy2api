@@ -227,22 +227,16 @@ func responsesEmptyStringItemDisposition(item gjson.Result, valueField string, a
 }
 
 func responsesObjectHasOnlyFields(value gjson.Result, allowed ...string) bool {
-	if !value.IsObject() {
+	if !responsesObjectHasUniqueFields(value) {
 		return false
 	}
 	allowedSet := make(map[string]struct{}, len(allowed))
 	for _, key := range allowed {
 		allowedSet[key] = struct{}{}
 	}
-	seen := make(map[string]struct{})
 	valid := true
 	value.ForEach(func(key, field gjson.Result) bool {
 		name := key.String()
-		if _, duplicate := seen[name]; duplicate {
-			valid = false
-			return false
-		}
-		seen[name] = struct{}{}
 		if len(allowed) > 0 {
 			if _, ok := allowedSet[name]; !ok {
 				valid = false
@@ -270,13 +264,33 @@ func responsesObjectHasOnlyFields(value gjson.Result, allowed ...string) bool {
 	return valid
 }
 
+func responsesObjectHasUniqueFields(value gjson.Result) bool {
+	if !value.IsObject() {
+		return false
+	}
+	seen := make(map[string]struct{})
+	unique := true
+	value.ForEach(func(key, _ gjson.Result) bool {
+		name := key.String()
+		if _, duplicate := seen[name]; duplicate {
+			unique = false
+			return false
+		}
+		seen[name] = struct{}{}
+		return true
+	})
+	return unique
+}
+
 func responsesAnnotationsAreEmpty(value gjson.Result) bool {
 	return !value.Exists() || (value.IsArray() && len(value.Array()) == 0)
 }
 
 func responsesCompletedHasSemanticOutput(root gjson.Result) bool {
 	response := root.Get("response")
-	if response.Exists() && !responsesObjectHasOnlyFields(response) {
+	// Response configuration shares field names with output parts (e.g. text),
+	// so only duplicate keys and output's array shape affect this projection.
+	if response.Exists() && !responsesObjectHasUniqueFields(response) {
 		return true
 	}
 	output := root.Get("response.output")

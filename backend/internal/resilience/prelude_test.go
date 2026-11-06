@@ -117,6 +117,9 @@ func TestResponsesEventOutputDisposition(t *testing.T) {
 		{name: "unknown nested payload", event: "response.content_part.added", payload: `{"type":"response.content_part.added","part":{"type":"output_text","text":"","vendor":"x"}}`, visible: true, semanticOutput: true},
 		{name: "malformed known event", event: "response.output_text.delta", payload: `{`, visible: true, semanticOutput: true},
 		{name: "completed empty", event: "response.completed", payload: `{"type":"response.completed","response":{"output":[]}}`, visible: true},
+		{name: "completed configuration is not output", event: "response.completed", payload: `{"type":"response.completed","response":{"id":"r","status":"completed","output":[],"text":{"format":{"type":"text"}},"metadata":null}}`, visible: true},
+		{name: "completed duplicate response key", event: "response.completed", payload: `{"type":"response.completed","response":{"output":[],"output":[]}}`, visible: true, semanticOutput: true},
+		{name: "completed non-array output", event: "response.completed", payload: `{"type":"response.completed","response":{"output":{}}}`, visible: true, semanticOutput: true},
 		{name: "completed with text", event: "response.completed", payload: `{"type":"response.completed","response":{"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}]}}`, visible: true, semanticOutput: true},
 		{name: "unknown response event", event: "response.vendor_extension", payload: `{"type":"response.vendor_extension","future":true}`, visible: true, semanticOutput: true},
 	}

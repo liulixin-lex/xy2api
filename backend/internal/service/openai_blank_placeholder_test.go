@@ -123,6 +123,52 @@ func TestResponsesBlankPlaceholderCompletedFlushesInOrderWithoutFirstToken(t *te
 	}
 }
 
+func TestResponsesBlankPlaceholderCompletedResponseConfigIsNotSemanticOutput(t *testing.T) {
+	withResilienceSettings(t, nil)
+	// Full Response wire fields from openai-python v2.0.0. The silent-refusal
+	// fixture intentionally omits usage and error, as required by that guard.
+	for _, tc := range []struct {
+		name, payload string
+		failover      bool
+	}{
+		{"empty output", `{"type":"response.completed","response":{"id":"resp_empty","object":"response","created_at":1760000000,"status":"completed","model":"gpt-5.4","output":[],"error":null,"incomplete_details":null,"usage":null,"parallel_tool_calls":true,"temperature":1,"tool_choice":"auto","tools":[],"top_p":1,"metadata":null,"reasoning":{"effort":"low","summary":null},"text":{"format":{"type":"text"},"verbosity":"medium"},"background":false,"conversation":null,"prompt":null,"prompt_cache_key":null,"safety_identifier":null,"top_logprobs":0,"user":null,"truncation":"disabled","instructions":null,"max_output_tokens":null,"max_tool_calls":null,"previous_response_id":null,"service_tier":"default"}}`, true},
+		{"whitespace output", `{"type":"response.completed","response":{"id":"resp_blank","object":"response","created_at":1760000000,"status":"completed","model":"gpt-5.4","output":[{"id":"msg_blank","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":" ","annotations":[],"logprobs":[]}]}],"parallel_tool_calls":true,"temperature":1,"tool_choice":"auto","tools":[],"top_p":1,"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2,"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":0}},"error":null,"incomplete_details":null,"metadata":null,"reasoning":{"effort":"low","summary":null},"text":{"format":{"type":"text"},"verbosity":"medium"},"background":false,"conversation":null,"prompt":null,"prompt_cache_key":null,"safety_identifier":null,"top_logprobs":0,"user":null,"truncation":"disabled","instructions":null,"max_output_tokens":null,"max_tool_calls":null,"previous_response_id":null,"service_tier":"default"}}`, false},
+	} {
+		for _, passthrough := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/passthrough=%t", tc.name, passthrough), func(t *testing.T) {
+				disposition := resilience.ResponsesEventOutputDisposition("response.completed", []byte(tc.payload))
+				require.Equal(t, resilience.TerminalSuccess, disposition.Kind)
+				require.True(t, disposition.Visible)
+				require.False(t, disposition.SemanticOutput)
+				require.True(t, openAIStreamDataStartsClientOutput(tc.payload, "response.completed"))
+				require.False(t, openAIStreamDataStartsVisibleOutput(tc.payload, "response.completed"))
+				require.False(t, openAIStreamDataStartsSemanticTTFT(tc.payload, "response.completed"))
+				require.False(t, semanticSSEBlock([]byte("event: response.completed\ndata: "+tc.payload)))
+				c, recorder := compatStreamContext("/v1/responses", `{}`)
+				state := resilience.NewRequestState()
+				c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
+				InstallDeliveryTracking(c, time.Now())
+				body := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_test\",\"status\":\"in_progress\"}}\n\n" +
+					"data: " + tc.payload + "\n\n"
+				firstToken, err := runBlankPlaceholderAttempt(&OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}, c,
+					&Account{ID: 9031, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, passthrough, io.NopCloser(strings.NewReader(body)), time.Now())
+				if tc.failover {
+					var failover *UpstreamFailoverError
+					require.ErrorAs(t, err, &failover)
+					require.Empty(t, recorder.Body.String())
+				} else {
+					require.NoError(t, err)
+					require.Contains(t, recorder.Body.String(), "response.completed")
+				}
+				require.Nil(t, firstToken)
+				require.True(t, state.FirstOutput().IsZero())
+				require.True(t, state.SemanticOutputAt().IsZero())
+				require.Nil(t, state.AttemptFirstOutputMs())
+			})
+		}
+	}
+}
+
 func TestResponsesBlankPlaceholderPredicatesAndSemanticDeliveryAgree(t *testing.T) {
 	withResilienceSettings(t, nil)
 	tests := []struct {
