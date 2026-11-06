@@ -16,6 +16,13 @@ import (
 // there too while the request is served elsewhere (design §4.2), as under
 // the advanced scheduler and the Gateway.
 
+func TestStickyBypassReasonKeepsFirstReason(t *testing.T) {
+	state := resilience.NewRequestState()
+	state.NoteStickyBypassReason("owner_excluded")
+	state.NoteStickyBypassReason("capacity")
+	require.Equal(t, "owner_excluded", state.StickyBypassReason())
+}
+
 func TestResilienceOpenAILegacySchedulerKeepsSoftBinding(t *testing.T) {
 	const key = "openai:" + lrSession
 
@@ -28,6 +35,7 @@ func TestResilienceOpenAILegacySchedulerKeepsSoftBinding(t *testing.T) {
 	})
 
 	t.Run("healthy_alternative", func(t *testing.T) {
+		logs := captureOpenAIObservationLogs(t)
 		env := newOpenAILastResortEnv(t, sharesched.SchedulerSub2API, 5, 1)
 		healthy := env.account(lrAccountB)
 		healthy.TempUnschedulableUntil, healthy.TempUnschedulableReason = nil, ""
@@ -45,5 +53,10 @@ func TestResilienceOpenAILegacySchedulerKeepsSoftBinding(t *testing.T) {
 			sel.ReleaseFunc()
 		}
 		require.Equal(t, lrAccountA, env.cache.sessionBindings[key], "served elsewhere, the binding stays on the owner")
+		require.Contains(t, logs.String(), `"msg":"openai.sticky_bypass"`)
+		require.Contains(t, logs.String(), `"level":"WARN"`)
+		require.Contains(t, logs.String(), `"owner":1`)
+		require.Contains(t, logs.String(), `"selected":2`)
+		require.Contains(t, logs.String(), `"reason":"soft_owner_preserved"`)
 	})
 }

@@ -1038,20 +1038,28 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 
 	account, err := s.getSchedulableAccount(ctx, accountID)
 	if err != nil {
+		resilience.StateFrom(ctx).NoteStickyBypassReason("owner_lookup_failed")
+		return nil
+	}
+	if account == nil {
+		resilience.StateFrom(ctx).NoteStickyBypassReason("owner_unavailable")
 		return nil
 	}
 
 	if _, excluded := excludedIDs[accountID]; excluded {
+		resilience.StateFrom(ctx).NoteStickyBypassReason("owner_excluded")
 		return nil
 	}
 	// xy2api resilience: a soft-penalised owner keeps the binding (design §4.2).
 	if s.resilienceKeepOpenAISoftOwner(ctx, account, platform, requestedModel) {
+		resilience.StateFrom(ctx).NoteStickyBypassReason("soft_owner_preserved")
 		return nil
 	}
 
 	// 检查账号是否需要清理粘性会话
 	// Check if sticky session should be cleared
 	if shouldClearStickySession(account, requestedModel) {
+		resilience.StateFrom(ctx).NoteStickyBypassReason("owner_should_clear")
 		_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 		return nil
 	}
@@ -1059,26 +1067,32 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 	// 验证账号是否可用于当前请求
 	// Verify account is usable for current request
 	if !isOpenAICompatibleAccountEligibleForRequest(ctx, account, platform, requestedModel, false, requiredCapability) {
+		resilience.StateFrom(ctx).NoteStickyBypassReason("owner_ineligible")
 		return nil
 	}
 	if !parentHealthyForShadow(account, s.parentAccountLookup(ctx)) {
+		resilience.StateFrom(ctx).NoteStickyBypassReason("shadow_parent_unhealthy")
 		_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 		return nil
 	}
 	if s.isOpenAIAccountRequestRuntimeBlocked(account, requestedModel, requireCompact) {
+		resilience.StateFrom(ctx).NoteStickyBypassReason("runtime_blocked")
 		_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 		return nil
 	}
 	account, transient := s.recheckOpenAIStickyOwnerFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
 	if transient {
+		resilience.StateFrom(ctx).NoteStickyBypassReason("owner_recheck_transient")
 		return nil
 	}
 	if account == nil || !s.openAIAccountMatchesSchedulingGroup(account, groupID) {
+		resilience.StateFrom(ctx).NoteStickyBypassReason("owner_group_mismatch")
 		_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 		return nil
 	}
 	if groupID != nil && s.needsUpstreamChannelRestrictionCheck(ctx, groupID) &&
 		s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel, requireCompact) {
+		resilience.StateFrom(ctx).NoteStickyBypassReason("channel_upstream_restricted")
 		_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 		return nil
 	}

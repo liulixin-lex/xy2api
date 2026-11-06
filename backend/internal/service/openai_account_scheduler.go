@@ -561,7 +561,11 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	}
 
 	accountID := req.StickyAccountID
-	clearBinding := func() {
+	noteBypass := func(reason string) {
+		resilience.StateFrom(ctx).NoteStickyBypassReason(reason)
+	}
+	clearBinding := func(reason string) {
+		noteBypass(reason)
 		if !req.PreserveStickyBinding {
 			_ = s.service.deleteStickySessionAccountIDIfOwner(ctx, req.GroupID, sessionHash, accountID)
 		}
@@ -570,6 +574,9 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		var err error
 		accountID, err = s.service.getStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		if err != nil || accountID <= 0 {
+			if err != nil {
+				noteBypass("owner_lookup_failed")
+			}
 			return nil, false, nil
 		}
 	}
@@ -578,52 +585,72 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	}
 	account, err := s.service.getSchedulableAccount(ctx, accountID)
 	if err != nil || account == nil {
-		clearBinding()
+		clearBinding("owner_unavailable")
 		return nil, false, nil
 	}
 	if _, excluded := req.ExcludedIDs[accountID]; excluded {
+		noteBypass("owner_excluded")
 		return nil, false, nil
 	}
 	// xy2api resilience: a soft-penalised owner keeps the binding while this
 	// request is served elsewhere (design §4.2).
 	if s.service.resilienceKeepOpenAISoftOwner(ctx, account, req.Platform, req.RequestedModel) {
+		noteBypass("soft_owner_preserved")
 		return nil, false, nil
 	}
-	if shouldClearStickySession(account, req.RequestedModel) || account.Platform != NormalizeOpenAICompatiblePlatform(req.Platform) || !account.IsOpenAICompatible() || !account.IsSchedulable() {
-		clearBinding()
+	if shouldClearStickySession(account, req.RequestedModel) {
+		clearBinding("owner_should_clear")
 		return nil, false, nil
 	}
-	if !s.isAccountRequestCompatible(ctx, account, req) {
+	if account.Platform != NormalizeOpenAICompatiblePlatform(req.Platform) || !account.IsOpenAICompatible() || !account.IsSchedulable() {
+		clearBinding("owner_not_schedulable")
+		return nil, false, nil
+	}
+	if compatible, reason := s.isAccountRequestCompatibleReason(ctx, account, req); !compatible {
+		noteBypass(reason)
 		return nil, false, nil
 	}
 	if !s.isAccountTransportCompatible(account, req.RequiredTransport) {
-		clearBinding()
+		clearBinding("transport_incompatible")
 		return nil, false, nil
 	}
 	account = s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
-	if account == nil || !s.service.openAIAccountMatchesSchedulingGroup(account, req.GroupID) || !s.isAccountRequestCompatible(ctx, account, req) || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
-		clearBinding()
+	if account == nil {
+		clearBinding("owner_recheck_failed")
+		return nil, false, nil
+	}
+	if !s.service.openAIAccountMatchesSchedulingGroup(account, req.GroupID) {
+		clearBinding("owner_group_mismatch")
+		return nil, false, nil
+	}
+	if compatible, reason := s.isAccountRequestCompatibleReason(ctx, account, req); !compatible {
+		clearBinding(reason)
+		return nil, false, nil
+	}
+	if !s.isAccountTransportCompatible(account, req.RequiredTransport) {
+		clearBinding("transport_incompatible")
 		return nil, false, nil
 	}
 	// Free-tier soft gate: sticky session must not pin an over-quota free OAuth account.
 	// Admin QueryQuota / import probes do not use this path.
 	if account != nil && len(s.filterGrokFreeQuotaAccounts(ctx, []Account{*account})) == 0 {
-		clearBinding()
+		clearBinding("grok_free_quota_soft_gate")
 		return nil, false, nil
 	}
 	// Team+model cool: sticky must not pin a sibling under the same team 429 window.
 	now := time.Now()
 	upstreamModel := canonicalOpenAIAccountSchedulingModel(account, req.RequestedModel)
 	if account != nil && isGrokTeamModelRateLimited(account, upstreamModel, now) {
-		clearBinding()
+		clearBinding("grok_team_model_rate_limited")
 		return nil, false, nil
 	}
 	if account != nil && isGrokModelQuotaBlocked(account.ID, upstreamModel, now) {
-		clearBinding()
+		clearBinding("grok_model_quota_blocked")
 		return nil, false, nil
 	}
 	escapeCfg := s.service.openAIStickyEscapeConfig()
 	if reason, errorRate, ttft, shouldEscape := s.shouldEscapeStickyAccount(accountID, escapeCfg); shouldEscape && !req.DisableStickyEscape {
+		noteBypass(reason)
 		slog.Info("sticky_escape_triggered",
 			"account_id", accountID,
 			"reason", reason,
@@ -634,6 +661,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	}
 	result, acquireErr := s.service.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
 	if acquireErr != nil && req.DisableStickyEscape {
+		noteBypass("sticky_capacity_error")
 		return nil, false, acquireErr
 	}
 	if acquireErr == nil && result != nil && result.Acquired {
@@ -672,6 +700,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	}
 
 	if s.service.concurrencyService != nil {
+		noteBypass("concurrency_full")
 		if acquireErr != nil {
 			req.SkipStickyCapacityRetry = true
 		}
@@ -2348,8 +2377,28 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	platform string,
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
-) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+) (selection *AccountSelectionResult, decision OpenAIAccountScheduleDecision, err error) {
 	sessionHash = monitorProbeSessionHash(ctx, sessionHash)
+	state := resilience.StateFrom(ctx)
+	stickyOwner := state.StickyOwner()
+	if stickyOwner <= 0 && sessionHash != "" && s != nil {
+		stickyOwner, _ = s.getStickySessionAccountID(ctx, groupID, sessionHash)
+		state.NoteStickyOwner(stickyOwner)
+	}
+	defer func() {
+		selected := int64(0)
+		if selection != nil && selection.Account != nil {
+			selected = selection.Account.ID
+		}
+		if stickyOwner <= 0 || stickyOwner == selected {
+			return
+		}
+		reason := state.StickyBypassReason()
+		if reason == "" {
+			reason = "unrecorded"
+		}
+		slog.Warn("openai.sticky_bypass", "owner", stickyOwner, "selected", selected, "reason", reason)
+	}()
 	origExcluded := excludedIDs
 	resilience.StateFrom(ctx).NoteTurn(derefGroupID(groupID), requestedModel, sessionHash)
 	negativeCacheable := strings.TrimSpace(previousResponseID) == "" && requiredImageCapability == "" && !requireCompact
@@ -2367,7 +2416,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	avoided := s.resilience.sessionAvoid(ctx, groupID, sessionHash)
 	excludedIDs = mergeExcluded(excludedIDs, avoided)
 	ctx = s.withOpenAIShareTrace(ctx, groupID, sessionHash, excludedIDs, requiredImageCapability)
-	selection, decision, err := s.selectAccountWithQualityRouting(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
+	selection, decision, err = s.selectAccountWithQualityRouting(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
 	markResilienceConfigError(ctx, err)
 	// xy2api resilience: last-resort soft selection instead of "no available
 	// account" (design §4.3). Continuations owned by an account keep failing

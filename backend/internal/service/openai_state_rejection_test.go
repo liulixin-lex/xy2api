@@ -131,7 +131,7 @@ func TestOpenAIStateRejectionRepairBoundary(t *testing.T) {
 }
 
 func TestOpenAIEncryptedFragmentCensus(t *testing.T) {
-	body := []byte(`{"input":[{"type":"agent_mess\u0061ge","content":[{"type":"encrypted_content","data":"hello there"}]},{"type":"function_call_output","output":[{"type":"encrypted_content","data":"gAAAAcipher"}]},{"type":"reasoning","encrypted_content":"abcdefghijklmnopqrstuvwxyz"},{"type":"function_call","arguments":"{\"encrypted_content\":\"ignore\"}"},{"type":"function_call_output","output":"{\"type\":\"encrypted_content\",\"data\":\"ignore\"}"}]}`)
+	body := []byte(`{"input":[{"type":"agent_mess\u0061ge","content":[{"type":"encrypted_content","encrypted_content":"hello there"}]},{"type":"function_call_output","output":[{"type":"encrypted_content","encrypted_content":"gAAAAcipher"}]},{"type":"reasoning","encrypted_content":"abcdefghijklmnopqrstuvwxyz"},{"type":"function_call","arguments":"{\"encrypted_content\":\"ignore\"}"},{"type":"function_call_output","output":"{\"type\":\"encrypted_content\",\"encrypted_content\":\"ignore\"}"}]}`)
 	require.Equal(t, openAIEncryptedFragments{AgentMessage: 1, FunctionOutput: 1, Other: 1, OpaqueLike: 2, TextLike: 1}, openAIEncryptedFragmentCensus(body))
 	require.Equal(t, openAIEncryptedFragments{}, openAIEncryptedFragmentCensus([]byte(`{"input":[`)))
 }

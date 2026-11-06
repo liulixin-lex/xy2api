@@ -2,6 +2,7 @@ package resilience
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -46,8 +47,9 @@ type RequestState struct {
 	// stickyOwner is the account the session was bound to when selection
 	// started; keptSticky is set when that binding must survive this request
 	// because its account is only soft-penalised (design §4.2).
-	stickyOwner int64
-	keptSticky  int64
+	stickyOwner        int64
+	keptSticky         int64
+	stickyBypassReason string
 
 	// lastResort is the account chosen by last-resort soft selection.
 	lastResort int64
@@ -608,6 +610,29 @@ func (s *RequestState) StickyOwner() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.stickyOwner
+}
+
+// NoteStickyBypassReason records the first scheduler reason that caused the
+// existing sticky owner to be bypassed. Later checks must not overwrite it.
+func (s *RequestState) NoteStickyBypassReason(reason string) {
+	if s == nil || strings.TrimSpace(reason) == "" {
+		return
+	}
+	s.mu.Lock()
+	if s.stickyBypassReason == "" {
+		s.stickyBypassReason = strings.TrimSpace(reason)
+	}
+	s.mu.Unlock()
+}
+
+// StickyBypassReason returns the first recorded sticky bypass reason.
+func (s *RequestState) StickyBypassReason() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stickyBypassReason
 }
 
 // KeepSticky marks the binding to accountID as kept for this request.
