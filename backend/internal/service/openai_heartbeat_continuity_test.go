@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
@@ -49,7 +50,7 @@ func (w *protocolHeartbeatWriter) heartbeatTimes() []time.Time {
 	return append([]time.Time(nil), w.times...)
 }
 
-func runProtocolHeartbeatHandoff(t *testing.T, name string) {
+func runProtocolHeartbeatHandoff(t *testing.T, name string, atHeartbeatBoundary bool) {
 	t.Helper()
 	w := &protocolHeartbeatWriter{gwWriter: newGWWriter()}
 	gin.SetMode(gin.TestMode)
@@ -63,9 +64,11 @@ func runProtocolHeartbeatHandoff(t *testing.T, name string) {
 	defer stop()
 	start := time.Now()
 	time.Sleep(5 * time.Second)
-	synctest.Wait()
-	time.Sleep(3500 * time.Millisecond)
-	synctest.Wait()
+	if !atHeartbeatBoundary {
+		synctest.Wait()
+		time.Sleep(3500 * time.Millisecond)
+		synctest.Wait()
+	}
 
 	up := newGWUpstream(nil)
 	t.Cleanup(func() { _ = up.Close() })
@@ -100,8 +103,13 @@ func runProtocolHeartbeatHandoff(t *testing.T, name string) {
 		up.send(t, gwMsgStart)
 	}
 	synctest.Wait()
-	time.Sleep(1500 * time.Millisecond)
-	synctest.Wait()
+	if atHeartbeatBoundary {
+		time.Sleep(5 * time.Second)
+		synctest.Wait()
+	} else {
+		time.Sleep(1500 * time.Millisecond)
+		synctest.Wait()
+	}
 	require.Equal(t, []time.Time{start.Add(5 * time.Second), start.Add(10 * time.Second)}, w.heartbeatTimes())
 	require.Equal(t, -1, OpenAICompactKeepaliveAdjustedWrittenSize(c))
 	require.NotContains(t, w.Body(), "response.created")
@@ -124,10 +132,61 @@ func TestProtocolKeepaliveHandoffUsesRequestHeartbeatClock(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				withResilienceSettings(t, nil)
-				runProtocolHeartbeatHandoff(t, name)
+				runProtocolHeartbeatHandoff(t, name, false)
 			})
 		})
 	}
+}
+
+func TestProtocolKeepaliveHandoffAtHeartbeatBoundary(t *testing.T) {
+	for _, name := range []string{"chat/completions", "messages", "responses"} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				withResilienceSettings(t, nil)
+				runProtocolHeartbeatHandoff(t, name, true)
+			})
+		})
+	}
+}
+
+func TestGatewayConvertHandoffReadsPhaseAfterRequestHeartbeat(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		withResilienceSettings(t, nil)
+		w := &protocolHeartbeatWriter{gwWriter: newGWWriter()}
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+		stop := StartPreOutputKeepalive(c, PreOutputProtocolChat, 5*time.Second, 5*time.Second)
+		defer stop()
+
+		up := newGWUpstream(nil)
+		defer func() { _ = up.Close() }()
+		svc := gwConvertService(5, 0)
+		stream := svc.newGatewayConvertStream(c, up.response(nil), gwTestAccount(), gatewayConvertChat, "gpt-5", gatewayConvertHooks{
+			convert:  func(_ *apicompat.AnthropicStreamEvent, _ string, _ bool) []string { return nil },
+			finalize: func() []string { return nil },
+			failure:  func([]byte) []string { return nil },
+		})
+		start := time.Now()
+		time.Sleep(5 * time.Second)
+		synctest.Wait()
+
+		done := make(chan gatewayConvertOutcome, 1)
+		go func() { done <- stream.run() }()
+		up.send(t, gwMsgStart)
+		synctest.Wait()
+		require.Equal(t, []time.Time{start.Add(5 * time.Second)}, w.heartbeatTimes())
+
+		time.Sleep(5 * time.Second)
+		synctest.Wait()
+		require.Equal(t, []time.Time{start.Add(5 * time.Second), start.Add(10 * time.Second)}, w.heartbeatTimes())
+
+		_ = up.pw.Close()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("conversion stream did not finish")
+		}
+	})
 }
 
 func TestHeartbeatCommentBeforeFirstBeat(t *testing.T) {

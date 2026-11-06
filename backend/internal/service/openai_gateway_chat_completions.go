@@ -1271,10 +1271,10 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 
 	var keepaliveCh <-chan time.Time
 	if keepaliveInterval > 0 {
-		lastDownstreamWriteAt = openAIKeepaliveLastWrite(c)
 		if k := keepaliveFrom(c); k != nil {
 			k.suspend()
 		}
+		lastDownstreamWriteAt = openAIKeepaliveLastWrite(c)
 		remaining := time.Until(lastDownstreamWriteAt.Add(keepaliveInterval))
 		if remaining < 0 {
 			remaining = 0

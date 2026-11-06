@@ -113,7 +113,7 @@ func (s *GatewayService) newGatewayConvertStream(c *gin.Context, resp *http.Resp
 		s: s, c: c, resp: resp, account: account, protocol: protocol, model: model,
 		requestID: resp.Header.Get("x-request-id"), hooks: hooks,
 		staging: cfg.PreludeStagingOn(), strict: cfg.StrictTerminalOn(),
-		stopCancel: func() bool { return false }, lastWrite: openAIKeepaliveLastWrite(c),
+		stopCancel: func() bool { return false },
 	}
 	st.guarded = st.staging || st.strict
 	if st.guarded && resp.Request != nil {
@@ -202,6 +202,7 @@ func (st *gatewayConvertStream) run() gatewayConvertOutcome {
 		if k := keepaliveFrom(st.c); k != nil {
 			k.suspend()
 		}
+		st.lastWrite = openAIKeepaliveLastWrite(st.c)
 		st.keepaliveInterval = keepaliveInterval
 		st.keepaliveTimer = time.NewTimer(time.Until(st.lastWrite.Add(keepaliveInterval)))
 		defer st.keepaliveTimer.Stop()
