@@ -6,8 +6,6 @@
 
 ## 当前交接状态
 
-- **Responses 输出前心跳连续性修复（2026-11-06，本地完成）**：分支 `feat/enc-followups-heartbeat`，实现提交 `d132fde83`、synctest 回归 `2d26f8ba9`。修复原生与 guarded 直通的交接相位、原生漏拍及流内 ping 后换号停拍；R1–R3、提前换号对照和首拍 turn-state 头均有覆盖。定向测试、vet、文档检查和干净树同步 audit 通过；lint 增量检查 0 issues，全包检查仍报告既有问题。未推送、未开 PR、未发布或部署。
-
 - **零中断加密态与路由实施（2026-11-06 12:30 UTC；PR #201 已开、CI 全绿、冒烟完成，未合并）**：分支 `feat/encrypted-routing-20261105`，已普通合并 main（0.5.4），本条所在提交即 PR 头。
   - main 已发布 0.5.4（只读 MCP），本变更随下一个版本发布。
   - 范围：空白占位不算输出、Codex 输出前 ping、流内包装错误帧、M3 状态类同号修复与一次换号、输出前流内 forbidden 软冷却、`resilience.*` 计数；OpenSpec `encrypted-routing-20261105`。无迁移、无新开关、无前端改动。
@@ -1460,12 +1458,3 @@ pnpm --dir frontend run build
 - 验证：合并后本地 build、vet、定向 514 项、MCP unit；依赖升级后 govulncheck 可达漏洞 0、三包 unit；PR CI 20/20；冒烟结果见当前交接状态。
 - 卡点/风险：M3 未能在真实上游触发，仅有单测与 Forward 衔接回归证据；心跳相邻间隔偶见超过设定值。
 - 下一步：用户授权合并、发版、镜像固化与部署；上线后按 tasks §4.3 验收。
-
-### 2026-11-06 — 20261106-heartbeat-continuity — 输出前心跳修复
-
-- 请求/目标：按 `.work/tasks/20261106-encrypted-routing-followups/DIAG_heartbeat_gap.md` 与 `DECISIONS.md` 第一条修复 D1–D3，在原生与 guarded 直通加入 R1–R3 synctest 回归；不推送、不部署。
-- 开始状态：`feat/enc-followups-heartbeat`，基于 0.5.5 发布提交 `0c3cc6f8b`，初始工作树干净。
-- 完成操作：请求级心跳对象接管流内 ping 的序列化与字节计数但只停拍；原生改为按最后一次下游写入重设 timer，guarded 直通按请求级心跳的剩余间隔延迟首拍；换号后按 `k.lastWrite` 恢复。加原生和 guarded 直通的交接、慢写入、ping 后换号、ping 前换号对照与首拍 turn-state 用例。提交 `d132fde83`（实现）、`2d26f8ba9`（回归）。更新本文件与 `docs/GATEWAY_RESILIENCE.md`。
-- 验证：回归在基线复现 D1/D2/D3；修复后定向心跳及 keepalive 用例 `-count=3` 通过，新连续性用例 `-count=3` 通过；`go vet -p 1 -tags=unit ./internal/service` 通过；golangci-lint 全包报告原有问题并发现新测试的 3 项告警，修正后 `--new` 为 0 issues；文档一致性、`git diff --check` 和提交后干净树 `sync.py audit` 通过。
-- 卡点/风险：lint 全包的既有告警仍在；本机无全仓测试，本任务依照要求只跑定向包。未改变 `tools/upstream-sync/policy.json` 所守护的字面量。
-- 下一步：交付提交和自检结果；不推送或部署。
