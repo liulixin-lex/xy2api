@@ -35,6 +35,7 @@ type openAIPassthroughPump struct {
 	firstOutputDeadline time.Time
 	stallCheckBase      time.Duration
 	keepaliveInterval   time.Duration
+	keepaliveFirstDelay time.Duration
 }
 
 // firstOutputDeadline returns when the first output is due, or zero.
@@ -89,15 +90,22 @@ func runOpenAIPassthroughReadPump(resp *http.Response, scanner *openAISSEJSONDoc
 		deadlineCh = timer.C
 	}
 	var stallCh, keepaliveCh <-chan time.Time
+	var keepaliveTimer *time.Timer
+	var keepaliveTicker *time.Ticker
+	defer func() {
+		if keepaliveTicker != nil {
+			keepaliveTicker.Stop()
+		}
+	}()
 	if pump.stallCheckBase > 0 {
 		ticker := time.NewTicker(resilienceStallCheckPeriod(pump.stallCheckBase))
 		defer ticker.Stop()
 		stallCh = ticker.C
 	}
 	if pump.keepaliveInterval > 0 {
-		ticker := time.NewTicker(pump.keepaliveInterval)
-		defer ticker.Stop()
-		keepaliveCh = ticker.C
+		keepaliveTimer = time.NewTimer(pump.keepaliveFirstDelay)
+		defer keepaliveTimer.Stop()
+		keepaliveCh = keepaliveTimer.C
 	}
 
 	for {
@@ -129,6 +137,10 @@ func runOpenAIPassthroughReadPump(resp *http.Response, scanner *openAISSEJSONDoc
 				return result, err
 			}
 		case <-keepaliveCh:
+			if keepaliveTicker == nil {
+				keepaliveTicker = time.NewTicker(pump.keepaliveInterval)
+				keepaliveCh = keepaliveTicker.C
+			}
 			pump.onKeepalive()
 		}
 	}

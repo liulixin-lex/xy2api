@@ -217,6 +217,41 @@ func (k *openAICompactSSEKeepalive) beat(generation uint64) bool {
 	return true
 }
 
+// writeOpenAIStreamKeepalive preserves the request heartbeat for a later attempt.
+func writeOpenAIStreamKeepalive(c *gin.Context, w gin.ResponseWriter, frame []byte) (int, error) {
+	if k := keepaliveFrom(c); k != nil {
+		k.mu.Lock()
+		if !k.closed {
+			defer k.mu.Unlock()
+			k.markStoppedLocked()
+			if !k.started {
+				k.writer.WriteHeader(http.StatusOK)
+				k.started = true
+				k.noteCommitted()
+			}
+			n, err := k.writer.Write(frame)
+			k.bytes += n
+			k.lastWrite = time.Now()
+			return n, err
+		}
+		k.mu.Unlock()
+	}
+	n, err := w.Write(frame)
+	recordOpenAIStreamKeepaliveBytes(c, n)
+	return n, err
+}
+
+func openAIKeepaliveLastWrite(c *gin.Context) time.Time {
+	if k := keepaliveFrom(c); k != nil {
+		k.mu.Lock()
+		defer k.mu.Unlock()
+		if k.started {
+			return k.lastWrite
+		}
+	}
+	return time.Now()
+}
+
 // Stop permanently closes the heartbeat; it cannot resume on a later attempt.
 func (k *openAICompactSSEKeepalive) Stop() {
 	k.mu.Lock()

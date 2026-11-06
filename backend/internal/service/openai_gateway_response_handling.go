@@ -246,15 +246,16 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	if s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
 		keepaliveInterval = time.Duration(s.cfg.Gateway.StreamKeepaliveInterval) * time.Second
 	}
-	// 下游 keepalive 仅用于防止代理空闲断开
-	var keepaliveTicker *time.Ticker
-	if keepaliveInterval > 0 {
-		keepaliveTicker = time.NewTicker(keepaliveInterval)
-		defer keepaliveTicker.Stop()
-	}
+	// Staged upstream events do not count as downstream writes; start from the
+	// request heartbeat when it has already committed.
+	lastDownstreamWriteAt := openAIKeepaliveLastWrite(c)
+	var keepaliveTimer *time.Timer
 	var keepaliveCh <-chan time.Time
-	if keepaliveTicker != nil {
-		keepaliveCh = keepaliveTicker.C
+	keepalivePending := false
+	if keepaliveInterval > 0 {
+		keepaliveTimer = time.NewTimer(time.Until(lastDownstreamWriteAt.Add(keepaliveInterval)))
+		defer keepaliveTimer.Stop()
+		keepaliveCh = keepaliveTimer.C
 	}
 
 	var firstOutputTimer *time.Timer
@@ -281,11 +282,6 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		firstOutputTimer = nil
 		firstOutputCh = nil
 	}
-	// Track downstream writes separately from upstream reads: pre-output failover
-	// can buffer response.created / response.in_progress, so keepalive must be
-	// based on downstream idle time.
-	lastDownstreamWriteAt := time.Now()
-
 	// 仅发送一次错误事件，避免多次写入导致协议混乱。
 	// 注意：OpenAI `/v1/responses` streaming 事件必须符合 OpenAI Responses schema；
 	// 否则下游 SDK（例如 OpenCode）会因为类型校验失败而报错。
@@ -1053,6 +1049,14 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 			processSSELine(ev.line, len(events) == 0)
 			markEventProcessed(ev)
+			if keepalivePending && !eventInProgress {
+				keepalivePending = false
+				remaining := time.Until(lastDownstreamWriteAt.Add(keepaliveInterval))
+				if remaining < 0 {
+					remaining = 0
+				}
+				keepaliveTimer.Reset(remaining)
+			}
 			if streamEarlyErr != nil {
 				return resultWithUsage(), streamEarlyErr
 			}
@@ -1128,12 +1132,15 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 
 		case <-keepaliveCh:
 			if clientDisconnected || failureDelivered {
+				keepaliveCh = nil
 				continue
 			}
 			if eventInProgress {
+				keepalivePending = true
 				continue
 			}
-			if time.Since(lastDownstreamWriteAt) < keepaliveInterval {
+			if remaining := time.Until(lastDownstreamWriteAt.Add(keepaliveInterval)); remaining > 0 {
+				keepaliveTimer.Reset(remaining)
 				continue
 			}
 			frame := preOutputCommentFrame
@@ -1150,8 +1157,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 						s.noteOpenAICodexTurnStateProvenance(c, account)
 					}
 				}
-				n, err := w.Write(frame)
-				recordOpenAIStreamKeepaliveBytes(c, n)
+				_, err := writeOpenAIStreamKeepalive(c, w, frame)
 				if err != nil {
 					clientDisconnected = true
 					logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming, continuing to drain upstream for billing")
@@ -1159,6 +1165,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				}
 				flusher.Flush()
 				lastDownstreamWriteAt = time.Now()
+				keepaliveTimer.Reset(keepaliveInterval)
 				continue
 			}
 			if _, err := writePendingString(string(frame)); err != nil {
@@ -1171,6 +1178,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				logger.LegacyPrintf("service.openai_gateway", "Client disconnected during keepalive flush, continuing to drain upstream for billing")
 			} else {
 				lastDownstreamWriteAt = time.Now()
+				keepaliveTimer.Reset(keepaliveInterval)
 			}
 		}
 	}

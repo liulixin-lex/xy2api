@@ -2347,6 +2347,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	if s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
 		keepaliveInterval = time.Duration(s.cfg.Gateway.StreamKeepaliveInterval) * time.Second
 	}
+	lastKeepaliveWrite := openAIKeepaliveLastWrite(c)
 	if keepaliveInterval > 0 && !guarded {
 		stopKeepalive = startSSEKeepalive(c, keepaliveInterval, keepaliveInterval, heartbeatFrame, "")
 	}
@@ -2467,8 +2468,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		if clientDisconnected {
 			return
 		}
-		n, err := w.Write([]byte(frame))
-		recordOpenAIStreamKeepaliveBytes(c, n)
+		_, err := writeOpenAIStreamKeepalive(c, w, []byte(frame))
 		if err != nil {
 			clientDisconnected = true
 			logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] Client disconnected during heartbeat: account=%d", account.ID)
@@ -2969,6 +2969,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		firstOutputDeadline: firstOutputDeadline(startTime, firstOutputTimeout),
 		stallCheckBase:      stallCheckBase,
 		keepaliveInterval:   keepaliveInterval,
+		keepaliveFirstDelay: time.Until(lastKeepaliveWrite.Add(keepaliveInterval)),
 	})
 }
 
