@@ -195,6 +195,9 @@ func (s *GroupQualityGateService) warmStart(ctx context.Context) (continueRun bo
 	if err != nil {
 		return fail(err)
 	}
+	if len(data.Observations) > GroupQualityReplayMaxObservationRows || len(data.UsageWrites) > GroupQualityReplayMaxUsageWriteRows {
+		return fail(fmt.Errorf("group quality replay row limit exceeded: observations=%d usage_writes=%d", len(data.Observations), len(data.UsageWrites)))
+	}
 	loadDuration := time.Since(started)
 	if replayCtx.Err() != nil {
 		if ctx.Err() != nil {
@@ -243,6 +246,12 @@ func groupQualityMemberIDs(members map[int64][]Account) ([]int64, map[int64]time
 }
 
 func replayGroupQualityState(ctx context.Context, now, processStart time.Time, policies GroupQualityGatePolicies, members map[int64][]Account, enabledGroups map[int64]bool, resets map[int64]time.Time, data GroupQualityReplayData) (*groupQualitySnapshot, groupQualityWarmSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, groupQualityWarmSummary{}, err
+	}
+	if len(data.Observations) > GroupQualityReplayMaxObservationRows || len(data.UsageWrites) > GroupQualityReplayMaxUsageWriteRows {
+		return nil, groupQualityWarmSummary{}, fmt.Errorf("group quality replay row limit exceeded: observations=%d usage_writes=%d", len(data.Observations), len(data.UsageWrites))
+	}
 	observations := slices.Clone(data.Observations)
 	slices.SortFunc(observations, func(a, b GroupQualityObservation) int {
 		if a.At.Before(b.At) {
@@ -259,6 +268,9 @@ func replayGroupQualityState(ctx context.Context, now, processStart time.Time, p
 		}
 		return 0
 	})
+	if err := ctx.Err(); err != nil {
+		return nil, groupQualityWarmSummary{}, err
+	}
 	writes := slices.Clone(data.UsageWrites)
 	slices.SortFunc(writes, func(a, b GroupQualityUsageWrite) int {
 		if a.Minute.Before(b.Minute) {
@@ -269,6 +281,9 @@ func replayGroupQualityState(ctx context.Context, now, processStart time.Time, p
 		}
 		return 0
 	})
+	if err := ctx.Err(); err != nil {
+		return nil, groupQualityWarmSummary{}, err
+	}
 	metrics := map[int64]groupQualityMetrics{}
 	composition := map[int64]groupQualityComposition{}
 	states := map[int64]map[int64]groupQualityAccountState{}
@@ -312,6 +327,11 @@ func replayGroupQualityState(ctx context.Context, now, processStart time.Time, p
 			continue
 		}
 		for right < len(observations) && observations[right].At.Before(cutoff) {
+			if right%256 == 0 {
+				if err := ctx.Err(); err != nil {
+					return nil, summary, err
+				}
+			}
 			right++
 		}
 		windowStart := cutoff.Add(-groupQualityReplayLookback)
@@ -323,6 +343,9 @@ func replayGroupQualityState(ctx context.Context, now, processStart time.Time, p
 		metricsAt, compositionAt := calculateGroupQualityMetrics(eligible, cutoff, nil, failed, softFailed, enabledGroups)
 		metrics, composition = metricsAt, compositionAt
 		for groupID, accounts := range members {
+			if err := ctx.Err(); err != nil {
+				return nil, summary, err
+			}
 			if !enabledGroups[groupID] {
 				continue
 			}
@@ -363,7 +386,11 @@ func replayGroupQualityState(ctx context.Context, now, processStart time.Time, p
 			member := groupQualityMemberSnapshot{AccountID: account.ID, State: state, Metric: metric, ExpectedP90Ms: expected, Tier: tier, Pinned: pinned}
 			next.Members[groupID][account.ID] = member
 			if tier == GroupQualityGateTierFail || tier == GroupQualityGateTierRetest {
-				entry := groupQualityWarmMember{AccountID: account.ID, GroupID: groupID, Dimensions: groupQualityWarmDimensions(state, now)}
+				dimensions := groupQualityWarmDimensions(state, now)
+				if len(dimensions) == 0 {
+					continue
+				}
+				entry := groupQualityWarmMember{AccountID: account.ID, GroupID: groupID, Dimensions: dimensions}
 				if tier == GroupQualityGateTierFail && len(summary.tier2) < groupQualityWarmMemberListLimit {
 					summary.tier2 = append(summary.tier2, entry)
 				}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -13,6 +14,8 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/tidwall/sjson"
 )
+
+var errGroupQualityReplayRowLimit = errors.New("group quality replay row limit exceeded")
 
 type groupQualityGateRepository struct {
 	db *sql.DB
@@ -179,7 +182,7 @@ func (r *groupQualityGateRepository) LoadObservationsForReplay(ctx context.Conte
 	if _, err := tx.ExecContext(ctx, `SET LOCAL statement_timeout = '20s'`); err != nil {
 		return service.GroupQualityReplayData{}, err
 	}
-	observations, _, err := loadGroupQualityObservations(ctx, tx, accountIDs, from, to)
+	observations, _, err := loadGroupQualityObservationsBounded(ctx, tx, accountIDs, from, to, service.GroupQualityReplayMaxObservationRows)
 	if err != nil {
 		return service.GroupQualityReplayData{}, err
 	}
@@ -188,13 +191,17 @@ func (r *groupQualityGateRepository) LoadObservationsForReplay(ctx context.Conte
 		FROM usage_logs
 		WHERE created_at >= $1 AND created_at < $2
 		GROUP BY 1
-		ORDER BY 1`, from.UTC(), to.UTC())
+		ORDER BY 1
+		LIMIT $3`, from.UTC(), to.UTC(), service.GroupQualityReplayMaxUsageWriteRows+1)
 	if err != nil {
 		return service.GroupQualityReplayData{}, err
 	}
 	defer func() { _ = rows.Close() }()
 	writes := make([]service.GroupQualityUsageWrite, 0)
 	for rows.Next() {
+		if len(writes) >= service.GroupQualityReplayMaxUsageWriteRows {
+			return service.GroupQualityReplayData{}, errGroupQualityReplayRowLimit
+		}
 		var write service.GroupQualityUsageWrite
 		if err := rows.Scan(&write.Minute, &write.LastWrite); err != nil {
 			return service.GroupQualityReplayData{}, err
@@ -208,6 +215,10 @@ func (r *groupQualityGateRepository) LoadObservationsForReplay(ctx context.Conte
 }
 
 func loadGroupQualityObservations(ctx context.Context, tx *sql.Tx, accountIDs []int64, from, to time.Time) ([]service.GroupQualityObservation, time.Time, error) {
+	return loadGroupQualityObservationsBounded(ctx, tx, accountIDs, from, to, 0)
+}
+
+func loadGroupQualityObservationsBounded(ctx context.Context, tx *sql.Tx, accountIDs []int64, from, to time.Time, maxRows int) ([]service.GroupQualityObservation, time.Time, error) {
 	// Read all OpenAI contributors before LAG. The time range is at most six
 	// hours and never predates process startup. Reset bounds are applied in the
 	// evaluator without hiding intervening accounts from the window functions.
@@ -265,6 +276,9 @@ func loadGroupQualityObservations(ctx context.Context, tx *sql.Tx, accountIDs []
 		o.PreviousAt = previousAt.Time
 		o.ResetAt, _ = time.Parse(time.RFC3339Nano, resetAt)
 		o.Success = true
+		if maxRows > 0 && len(out) >= maxRows {
+			return nil, time.Time{}, errGroupQualityReplayRowLimit
+		}
 		resets[o.AccountID] = o.ResetAt
 		if !seen[o.AccountID] {
 			ids = append(ids, o.AccountID)
@@ -281,11 +295,14 @@ func loadGroupQualityObservations(ctx context.Context, tx *sql.Tx, accountIDs []
 	}
 	// All failure categories exclude a failed final account from speed samples.
 	// Only the legacy soft subset minus first-output cutoffs enters v3 error rate.
-	errorObservations, err := loadQualityErrorObservations(ctx, tx, ids, from, to, true)
+	errorObservations, err := loadQualityErrorObservationsBounded(ctx, tx, ids, from, to, true, maxRows-len(out))
 	if err != nil {
 		return nil, time.Time{}, err
 	}
 	for _, o := range errorObservations {
+		if maxRows > 0 && len(out) >= maxRows {
+			return nil, time.Time{}, errGroupQualityReplayRowLimit
+		}
 		o.ResetAt = resets[o.AccountID]
 		out = append(out, o)
 	}
@@ -302,7 +319,7 @@ func loadGroupQualityObservations(ctx context.Context, tx *sql.Tx, accountIDs []
 func loadGroupQualityErrorObservations(ctx context.Context, tx interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }, accountIDs []int64, from, to time.Time) ([]service.GroupQualityObservation, error) {
-	return loadQualityErrorObservations(ctx, tx, accountIDs, from, to, false)
+	return loadQualityErrorObservationsBounded(ctx, tx, accountIDs, from, to, false, 0)
 }
 
 // includeAll is used only by v3 for success attribution. Recent health retains
@@ -310,6 +327,12 @@ func loadGroupQualityErrorObservations(ctx context.Context, tx interface {
 func loadQualityErrorObservations(ctx context.Context, tx interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }, accountIDs []int64, from, to time.Time, includeAll bool) ([]service.GroupQualityObservation, error) {
+	return loadQualityErrorObservationsBounded(ctx, tx, accountIDs, from, to, includeAll, 0)
+}
+
+func loadQualityErrorObservationsBounded(ctx context.Context, tx interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, accountIDs []int64, from, to time.Time, includeAll bool, maxRows int) ([]service.GroupQualityObservation, error) {
 	if len(accountIDs) == 0 {
 		return nil, nil
 	}
@@ -333,6 +356,9 @@ func loadQualityErrorObservations(ctx context.Context, tx interface {
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
+		if maxRows > 0 && len(out) >= maxRows {
+			return nil, errGroupQualityReplayRowLimit
+		}
 		var o service.GroupQualityObservation
 		var clientRequestID string
 		if err := rows.Scan(&o.RequestID, &clientRequestID, &o.AccountID, &o.At, &o.Kind, &o.StatusCode, &o.Category, &o.Message); err != nil {

@@ -380,6 +380,28 @@ func TestGroupQualityWarmStartSlowLoadTimesOutBeforePublishing(t *testing.T) {
 	require.Contains(t, e.logs.String(), `"msg":"group_quality_gate.warm_start_failed"`)
 }
 
+func TestGroupQualityWarmStartRowLimitFallsBackBeforeReplayClone(t *testing.T) {
+	e := newQualityTestEnv(t)
+	e.repo.usageWrites = make([]GroupQualityUsageWrite, GroupQualityReplayMaxUsageWriteRows+1)
+	require.True(t, e.svc.warmStart(context.Background()))
+	require.Empty(t, e.svc.snapshot.Load().Members)
+	require.Contains(t, e.logs.String(), `"msg":"group_quality_gate.warm_start_failed"`)
+}
+
+func TestGroupQualityWarmStartSummaryOmitsEmptyStrictRetestEntries(t *testing.T) {
+	e := newQualityTestEnv(t)
+	policy := e.repo.policies.Groups["7"]
+	policy.V3.Strict = true
+	e.repo.policies.Groups["7"] = policy
+	e.repo.usageWrites = qualityReplayUsageWrites(e.base)
+	ids, resets := groupQualityMemberIDs(e.repo.members)
+	data, err := e.repo.LoadObservationsForReplay(context.Background(), ids, e.base.Add(-groupQualityReplayWindow-groupQualityReplayLookback), e.base)
+	require.NoError(t, err)
+	_, summary, err := replayGroupQualityState(context.Background(), e.base, e.svc.processStartedAt, e.repo.policies, e.repo.members, map[int64]bool{7: true}, resets, data)
+	require.NoError(t, err)
+	require.Empty(t, summary.tier1)
+}
+
 func TestGroupQualityWarmStartLeavesTTFTBeforeProcessStartIneligible(t *testing.T) {
 	now := eNowForQualityTest()
 	ms := int64(1000)

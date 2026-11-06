@@ -160,6 +160,11 @@ type GroupQualityObservation struct {
 	TTFTEligible         bool
 }
 
+const (
+	GroupQualityReplayMaxObservationRows = 200_000
+	GroupQualityReplayMaxUsageWriteRows  = 10_000
+)
+
 // IsGroupQualitySoftFailure is the shared legacy classifier also used by
 // recent health. V3 excludes first-output cutoffs separately.
 func IsGroupQualitySoftFailure(kind string, statusCode int, category, message string) bool {
