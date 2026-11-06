@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-contrib/sse"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -115,7 +116,7 @@ func TestPreOutputKeepaliveResponsesTerminalOpensTheResponse(t *testing.T) {
 	var events []string
 	for _, block := range strings.Split(w.Body.String(), "\n\n") {
 		for _, line := range strings.Split(block, "\n") {
-			if data, ok := strings.CutPrefix(line, "data: "); ok {
+			if data, ok := strings.CutPrefix(line, "data: "); ok && gjson.Get(data, "type").String() != "ping" {
 				events = append(events, data)
 			}
 		}
@@ -228,4 +229,33 @@ type keepaliveFailWriter struct{ gin.ResponseWriter }
 
 func (w *keepaliveFailWriter) Write([]byte) (int, error) {
 	return 0, context.Canceled
+}
+
+// Decode actual output bytes: each complete beat must dispatch exactly one SSE
+// event, not merely keep the HTTP connection busy with comments.
+func requireResponsesPingEvents(t *testing.T, body string) {
+	t.Helper()
+	beats := strings.Count(body, string(preOutputPingFrame))
+	require.Equal(t, strings.Repeat(string(preOutputPingFrame), beats), body)
+	events, err := sse.Decode(strings.NewReader(body))
+	require.NoError(t, err)
+	require.Len(t, events, beats)
+	for _, event := range events {
+		require.Equal(t, "ping", event.Event)
+		require.Equal(t, `{"type":"ping"}`, event.Data)
+	}
+}
+
+func TestPreOutputResponsesHeartbeatDispatchesOneEventPerBeat(t *testing.T) {
+	c, recorder := newKeepaliveTestContext(t)
+	stop := StartPreOutputKeepalive(c, PreOutputProtocolResponses, 0, 10*time.Millisecond)
+	defer stop()
+	waitCommitted(t, c)
+	time.Sleep(30 * time.Millisecond)
+	stop()
+	body := recorder.Body.String()
+	require.GreaterOrEqual(t, strings.Count(body, string(preOutputPingFrame)), 2)
+	requireResponsesPingEvents(t, body)
+	require.Equal(t, -1, OpenAICompactKeepaliveAdjustedWrittenSize(c))
+	require.False(t, openAIStreamClientOutputStarted(c, false))
 }

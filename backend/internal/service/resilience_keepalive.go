@@ -41,7 +41,7 @@ func StartPreOutputKeepalive(c *gin.Context, protocol string, firstDelay, interv
 		return func() {}
 	}
 	frame := preOutputCommentFrame
-	if protocol == PreOutputProtocolAnthropic {
+	if protocol == PreOutputProtocolAnthropic || protocol == PreOutputProtocolResponses {
 		frame = preOutputPingFrame
 	}
 	stop := startSSEKeepalive(c, firstDelay, interval, frame, protocol)

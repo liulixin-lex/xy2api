@@ -1123,6 +1123,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if time.Since(lastDownstreamWriteAt) < keepaliveInterval {
 				continue
 			}
+			frame := preOutputCommentFrame
+			if !clientOutputStarted {
+				frame = preOutputPingFrame
+			}
 			if stageFirstOutput {
 				// Bypass attempt-local buffered frames. Only turn-state may accompany
 				// the stable SSE headers; record its origin before the heartbeat commits.
@@ -1133,7 +1137,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 						s.noteOpenAICodexTurnStateProvenance(c, account)
 					}
 				}
-				n, err := w.Write([]byte(":\n\n"))
+				n, err := w.Write(frame)
 				recordOpenAIStreamKeepaliveBytes(c, n)
 				if err != nil {
 					clientDisconnected = true
@@ -1144,7 +1148,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				lastDownstreamWriteAt = time.Now()
 				continue
 			}
-			if _, err := writePendingString(":\n\n"); err != nil {
+			if _, err := writePendingString(string(frame)); err != nil {
 				clientDisconnected = true
 				logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming, continuing to drain upstream for billing")
 				continue

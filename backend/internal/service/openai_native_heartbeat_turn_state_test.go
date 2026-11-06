@@ -72,7 +72,7 @@ func awaitNativeTurnStateHeartbeat(t *testing.T, w *gwWriter) {
 	t.Helper()
 	select {
 	case body := <-w.flushed:
-		require.True(t, strings.HasPrefix(body, ":"), body)
+		require.True(t, strings.Contains(body, string(preOutputPingFrame)), body)
 		require.NotContains(t, body, "response.created", "the opening stays staged")
 	case <-time.After(4 * time.Second):
 		t.Fatal("native stream did not flush a heartbeat")
@@ -125,7 +125,7 @@ func TestOpenAINativeHeartbeatCommitsOnlyTurnStateAndProvenance(t *testing.T) {
 			a.await(t)
 			require.NoError(t, a.err)
 			require.Equal(t, 5, a.result.usage.OutputTokens)
-			require.True(t, strings.HasPrefix(w.Body(), ":\n\n"))
+			require.True(t, strings.HasPrefix(w.Body(), string(preOutputPingFrame)))
 			require.Contains(t, w.Body(), "hello")
 			require.Contains(t, w.Body(), "response.completed")
 			requireNativeTurnStateHeaders(t, w, "blob-A")

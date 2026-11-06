@@ -224,7 +224,7 @@ func requireOnlyHeartbeats(t *testing.T, c *gin.Context, body string) {
 		if block == "" {
 			continue
 		}
-		require.True(t, strings.HasPrefix(block, ":"), "only heartbeats before content, got %q in %q", block, body)
+		require.True(t, strings.HasPrefix(block, ":") || block+"\n\n" == string(preOutputPingFrame), "only heartbeats before content, got %q in %q", block, body)
 	}
 	require.Equal(t, -1, OpenAICompactKeepaliveAdjustedWrittenSize(c), "heartbeats are no output")
 	require.NotContains(t, body, "msg_A")

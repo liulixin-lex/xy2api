@@ -133,7 +133,7 @@ func TestOpenAIPassthroughStallAfterOutputEndsTheStream(t *testing.T) {
 	require.Contains(t, w.Body(), "hello")
 }
 
-// R1-P1-2: heartbeats while the opening is staged are comments counted as
+// R1-P1-2: heartbeats while the opening is staged are ping events counted as
 // heartbeat bytes; the attempt may still switch.
 func TestOpenAIPassthroughStagingHeartbeatIsNotOutput(t *testing.T) {
 	withResilienceSettings(t, nil)
@@ -142,11 +142,14 @@ func TestOpenAIPassthroughStagingHeartbeatIsNotOutput(t *testing.T) {
 	up := newGWUpstream(nil)
 	done := ptRun(compatStreamService(nil, 10, 0, 1), c, up.response(nil))
 	up.send(t, ptCreated)
-	require.Eventually(t, func() bool { return strings.HasPrefix(w.Body(), ":") }, 3*time.Second, 20*time.Millisecond)
+	require.Eventually(t, func() bool {
+		return (strings.HasPrefix(w.Body(), ":") || strings.HasPrefix(w.Body(), string(preOutputPingFrame)))
+	}, 3*time.Second, 20*time.Millisecond)
 	up.send(t, ptOverload)
 	got := ptAwait(t, done, 3*time.Second)
 	var failover *UpstreamFailoverError
 	require.ErrorAs(t, got.err, &failover)
+	requireResponsesPingEvents(t, w.Body())
 	requireOnlyHeartbeats(t, c, w.Body())
 	require.NotContains(t, w.Body(), "resp_pt")
 }
@@ -179,7 +182,7 @@ func TestOpenAIPassthroughHeartbeatWriteFailureIsClientGone(t *testing.T) {
 	}{{"failed_event", ptOverload}, {"deadline", ""}} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := newGWWriter()
-			w.fail = func(data string) bool { return strings.HasPrefix(data, ":") }
+			w.fail = func(data string) bool { return data == string(preOutputPingFrame) }
 			c := ptContext(w)
 			up := newGWUpstream(nil)
 			done := ptRun(compatStreamService(nil, 3, 0, 1), c, up.response(nil))
@@ -302,7 +305,9 @@ func TestOpenAIPassthroughRuleAfterHeartbeatEndsWithResponsesTerminal(t *testing
 			if tc.strict {
 				up.send(t, ": keep-alive\n\n")
 			}
-			require.Eventually(t, func() bool { return strings.HasPrefix(w.Body(), ":") }, 3*time.Second, 10*time.Millisecond)
+			require.Eventually(t, func() bool {
+				return (strings.HasPrefix(w.Body(), ":") || strings.HasPrefix(w.Body(), string(preOutputPingFrame)))
+			}, 3*time.Second, 10*time.Millisecond)
 			up.send(t, buildContextLengthFailedSSE())
 			_ = up.pw.Close()
 			got := ptAwait(t, done, 3*time.Second)
@@ -315,7 +320,7 @@ func TestOpenAIPassthroughRuleAfterHeartbeatEndsWithResponsesTerminal(t *testing
 			require.NotContains(t, body, "\n{", "no bare JSON after the heartbeat")
 			var events []string
 			for _, block := range strings.Split(strings.TrimSuffix(body, "\n\n"), "\n\n") {
-				if !strings.HasPrefix(block, ":") {
+				if !strings.HasPrefix(block, ":") && !strings.HasPrefix(block, "event: ping\n") {
 					events = append(events, block)
 				}
 			}
