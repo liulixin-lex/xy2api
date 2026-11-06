@@ -814,7 +814,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if needModelReplace {
 				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
 			}
-			if !openAIStreamEventTypeIsTerminal(eventType) {
+			if strings.TrimSpace(data) != "[DONE]" && !openAIStreamEventTypeIsTerminal(eventType) {
 				responsesSemanticOutputSeen = responsesSemanticOutputSeen || resilience.ResponsesEventOutputDisposition(eventType, dataBytes).SemanticOutput
 			}
 			// Preserve the silent-refusal guard (#5009/#7774); whitespace does not

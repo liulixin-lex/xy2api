@@ -82,33 +82,42 @@ func TestOpenAIM3LearnsFunctionOutputSlots(t *testing.T) {
 }
 
 func TestForwardOpenAIM3IncompleteDoesNotCommitBatchBad(t *testing.T) {
-	for _, passthrough := range []bool{false, true} {
-		t.Run(fmt.Sprintf("passthrough=%t", passthrough), func(t *testing.T) {
-			withResilienceSettings(t, nil)
-			req := newWebSearchReplayRequest(t)
-			account := webSearchReplayAccount(passthrough)
-			upstream := &httpUpstreamRecorder{responses: []*http.Response{
-				newOpenAIUpstreamErrorResponse(http.StatusBadRequest, `{"error":{"message":"Encrypted content is invalid for this conversation"}}`),
-				{
-					StatusCode: http.StatusOK,
-					Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-					Body:       io.NopCloser(strings.NewReader("data: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_incomplete\",\"status\":\"incomplete\",\"output\":[],\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n")),
-				},
-			}}
-			svc := newOpenAIImageGenerationControlTestService(upstream)
-			svc.openaiWSStateStore = NewOpenAIWSStateStore(nil)
-			_, err := svc.Forward(req.ctx, req.c, account, []byte(m3TwoItemRequest))
-			require.NoError(t, err, "nil from the reader must not commit pending Bad")
-			require.Len(t, upstream.bodies, 2)
-			require.Equal(t, "[encrypted content omitted]", gjson.GetBytes(upstream.bodies[1], "input.0.content.0.text").String())
-			attempt := openAIRequestRepairFrom(req.c).m3
-			require.Len(t, attempt.state.pending, 2)
-			require.Empty(t, svc.getOpenAIWSStateStore().GetSessionBadEncryptedSlots(attempt.request.groupID, attempt.request.session, account.ID))
-		})
+	for name, frames := range map[string]string{
+		"incomplete":   "data: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_incomplete\",\"status\":\"incomplete\",\"output\":[],\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n",
+		"created_done": "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_created_done\"}}\n\ndata: [DONE]\n\n",
+	} {
+		for _, passthrough := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/passthrough=%t", name, passthrough), func(t *testing.T) {
+				withResilienceSettings(t, nil)
+				req := newWebSearchReplayRequest(t)
+				account := webSearchReplayAccount(passthrough)
+				upstream := &httpUpstreamRecorder{responses: []*http.Response{
+					newOpenAIUpstreamErrorResponse(http.StatusBadRequest, `{"error":{"message":"Encrypted content is invalid for this conversation"}}`),
+					{
+						StatusCode: http.StatusOK,
+						Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+						Body:       io.NopCloser(strings.NewReader(frames)),
+					},
+				}}
+				svc := newOpenAIImageGenerationControlTestService(upstream)
+				svc.openaiWSStateStore = NewOpenAIWSStateStore(nil)
+				_, err := svc.Forward(req.ctx, req.c, account, []byte(m3TwoItemRequest))
+				require.NoError(t, err, "nil from the reader must not commit pending Bad")
+				require.Len(t, upstream.bodies, 2)
+				require.Equal(t, "[encrypted content omitted]", gjson.GetBytes(upstream.bodies[1], "input.0.content.0.text").String())
+				if name == "created_done" {
+					require.Contains(t, req.rec.Body.String(), "data: [DONE]", "the transport marker is still forwarded")
+				}
+				attempt := openAIRequestRepairFrom(req.c).m3
+				require.Len(t, attempt.state.pending, 2)
+				require.Empty(t, svc.getOpenAIWSStateStore().GetSessionBadEncryptedSlots(attempt.request.groupID, attempt.request.session, account.ID))
+			})
+		}
 	}
 }
-
 func TestOpenAIM3AcceptanceRequiresOutputOrSuccessTerminal(t *testing.T) {
+	require.False(t, openAIM3TerminalAccepted("[DONE]", false))
+	require.True(t, openAIM3TerminalAccepted("[DONE]", true))
 	text := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
 	blank := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"  \"}\n\n"
 	require.True(t, openAIM3AggregateAccepted(text, ""), "clean EOF after semantic output is acceptance")
