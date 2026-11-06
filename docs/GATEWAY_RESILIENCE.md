@@ -435,9 +435,9 @@ M3 换号额度上限 1，与容量额度独立；换号仍受请求预算约束
 
 ### 4.14 Codex 协作消息明文通道（P1′）
 
-管理端网关韧性中的 `collaboration_plaintext.enabled` 默认关闭；`models` 是经过验证的实际出站模型清单，模型映射之后再匹配（去首尾空白、不分大小写精确匹配）。账号页的 `extra.openai_collaboration_plaintext` 仅布尔 true 生效；单账号关闭删除键、批量关闭写 false 都表示关闭。全局总开关、功能开关、模型、账号资格及 Codex UA/originator 全部满足才转换；ForceCodexCLI 不绕过真实客户端门。代码同时接通 API Key 与 OAuth，仅原生 Responses HTTP；预检仅覆盖 API Key 中转站，OAuth 未预检，验证前不要在 OAuth 账号开启。WS、透传、compact、协议桥接、摊平账号不转换。功能未生效（总开关或功能开关关闭，或模型清单为空）时，入口不做原始 plan 检查；只观测统计照旧。入口仅对原始字节含字面 `"collaboration"` 的请求，在原始字节上执行与改写相同的全部检查（只算 plan、不改写），并冻结结果与连续性；否则禁止获得 plan。原样拿不到 plan 的请求，归一化后也不转换。这类请求包括：协议容器、协作声明或 developer/system 文本片段中有重复键或其他歧义，有冲突，store:true，previous_response_id 非空，或形态不受支持。只有原始请求任何位置都没有字面 `"collaboration"` 时，转义声明随后被归一化也只观测；若原始字节已有该字面，则照常按原始 JSON 解码后的值判定（含转义声明），原始歧义仍会被拦截。资格门全部通过、但原始阶段判为冲突的请求记 outcome=conflict（eligibility=account），照常触发 Warn；资格门未满足、根对象非法/重复键、store/previous 排除与不支持形态统一记 outcome=unsupported，不另细分原因。
+管理端网关韧性中的 `collaboration_plaintext.enabled` 默认关闭；`models` 是经过验证的实际出站模型清单，模型映射之后再匹配（去首尾空白、不分大小写精确匹配）。账号页的 `extra.openai_collaboration_plaintext` 仅布尔 true 生效；单账号关闭删除键、批量关闭写 false 都表示关闭。全局总开关、功能开关、模型、账号资格及 Codex UA/originator 全部满足才转换；ForceCodexCLI 不绕过真实客户端门。代码同时接通 API Key 与 OAuth，仅原生 Responses HTTP；预检仅覆盖 API Key 中转站，OAuth 未预检，验证前不要在 OAuth 账号开启。WS、透传、compact、协议桥接、摊平账号不转换。功能未生效（总开关或功能开关关闭，或模型清单为空）时，入口不做原始 plan 检查；只观测统计照旧。入口仅对原始字节含字面 `"collaboration"` 的请求，在原始字节上执行与改写相同的全部检查（只算 plan、不改写），并冻结结果；否则禁止获得 plan。原样拿不到 plan 的请求，归一化后也不转换。这类请求包括：协议容器、协作声明或 developer/system 文本片段中有重复键或其他歧义，有冲突，store:true，previous_response_id 非空，或形态不受支持。只有原始请求任何位置都没有字面 `"collaboration"` 时，转义声明随后被归一化也只观测；若原始字节已有该字面，则照常按原始 JSON 解码后的值判定（含转义声明），原始歧义仍会被拦截。资格门全部通过、但原始阶段判为冲突的请求记 outcome=conflict（eligibility=account），照常触发 Warn；资格门未满足、根对象非法/重复键、store/previous 排除与不支持形态统一记 outcome=unsupported，不另细分原因。
 
-请求声明 collaboration 命名空间时，先判冲突再原子改名为 collaboration-xy，只删 spawn_agent/send_message/followup_task 的 message.encrypted。tool_choice 仅支持缺省或 auto/none/required 字符串；对象选择、点号/双下划线请求历史身份、Chat 嵌套 function 形态均 unsupported、原样不转换。仅 applied 时，把顶层 instructions 与 developer/system 消息的文本（字符串或 input_text.text）里精确的 functions.collaboration. 同步替换成 functions.collaboration-xy.，避免寻址示例与声明失配；用户消息、工具输出和参数不替换。DevTextRewrites 记录本次精确字面串的实际替换次数，仅作为异常 Warn 的字段，不单独触发 Warn、不新增指标。回程三种身份回声统一恢复 namespace=collaboration 和裸叶名，仅符合声明、message 为非空明文且没有密文否决的消息调用补 encrypted_function_args:[]。非空标记、gAAAA 前缀或无空白长 base64 等可疑形态否决补标记；早先非空证据持续到该尝试结束。wait/list 等同 namespace 工具只恢复名字；未知私有叶名恢复身份、计 uncovered、不补标记。
+请求声明 collaboration 命名空间时，先判冲突再原子改名为 collaboration-xy，只删 spawn_agent/send_message/followup_task 的 message.encrypted。tool_choice 仅支持缺省或 auto/none/required 字符串；对象选择和 Chat 嵌套 function 形态均 unsupported、原样不转换。历史 function_call/custom_tool_call 中，namespace=collaboration-xy 或 name 使用 collaboration-xy. / collaboration-xy__ 前缀时，只有裸名属于本次已校验声明的工具才归一化；显式外部 namespace、未知工具、alias 声明和 developer/system 文本里的 alias 仍判 conflict。历史 alias 的进入来源尚未定位，此处只兼容本方案定义的名字。仅 applied 时，把顶层 instructions 与 developer/system 消息的文本（字符串或 input_text.text）里精确的 functions.collaboration. 同步替换成 functions.collaboration-xy.，避免寻址示例与声明失配；用户消息、工具输出和参数不替换。DevTextRewrites 记录本次精确字面串的实际替换次数，仅作为异常 Warn 的字段，不单独触发 Warn、不新增指标。回程三种身份回声统一恢复 namespace=collaboration 和裸叶名，仅符合声明、message 为非空明文且没有密文否决的消息调用补 encrypted_function_args:[]。非空标记、gAAAA 前缀或无空白长 base64 等可疑形态否决补标记；早先非空证据持续到该尝试结束。wait/list 等同 namespace 工具只恢复名字；未知私有叶名恢复身份、计 uncovered、不补标记。
 
 流式、JSON、SSE→JSON 共用本次尝试的冻结 plan，不跨请求继承。不改 IDs、arguments、output 正文或输入中的密文片段；instructions 的已改写结构化回声对称恢复。错误信封按 JSON 字符串解码后匹配别名（含转义），只重写含别名的字符串，其余字节不变；非 JSON 错误体按字面替换。非 2xx HTTP 错误体和 SSE type=error 的完整错误信封均覆盖；所有 JSON 响应/事件的顶层 error 与 response.error 也会还原，包括 HTTP 200 失败 JSON。歧义载体仍本地终止（未提交 502、已提交协议终态），不泄漏私有名、不经 failover 重放。applied 尝试的 UpstreamFailoverError.ResponseBody 与非空 ClientMessage 在返回 handler 前已还原，因此换号耗尽后 handler 侧的错误透传规则按规范名匹配，服务侧按原始错误匹配；规则关键词不应包含私有别名。内部运维日志（如 openai.forward_failed）保留上游原文，可能含私有别名，仅供诊断，不下发客户端。nil plan 不改字节。
 
@@ -445,13 +445,11 @@ M3 换号额度上限 1，与容量额度独立；换号仍受请求预算约束
 
 schema 兼容：工具 schema 清理器对精确名为 collaboration 的整个 namespace 跳过递归修复，包含 wait/list；其他工具的 null type、object union、null required、lookaround 修复不变。normalizeCodexTools 不递归 namespace。改动前清理器对真实 Codex 0.166 fixture 的顶层与 Lite additional_tools 声明均逐字节不变；该样本在 P1′ 关闭时没有额外变化。对原本需修复的其它 collaboration schema，豁免仍会让其保持原样，此行为独立于开关。
 
-连续性只认原始 input 顶层 function_call：namespace=collaboration、name 为 spawn_agent/send_message/followup_task 之一，且 encrypted_function_args 存在并恰为 []。不读取 arguments/message；EFA 缺失、null、非空或其它类型均不触发。因此只配置全局开关与模型清单，不会因上游原生明文历史而启用；只有开账号开关才启动新会话。已有 [] 的会话可在其它合格 API Key 账号继续，但不绕过客户端、模型、HTTP 路径与原始排除门。OAuth 不适用连续性，必须显式开账号开关，预检前不要开启。[] 仍是客户端可声明的协议条件，不是授权/隔离边界，eligibility=continuity 不证明网关来源。
+灰度预检覆盖 API Key 站 d0c7a8 / c2a95e / b672e6 × gpt-6.1-sol / gpt-6-astra、Codex 0.166。账号开关表示该站已验证全局清单内全部模型；同站账号统一配置。灰度池须包含兜底分组、满载借用等可达账号，排除未验证 API Key 账号及未验证 OAuth 路由；关闭账号开关后，存量请求按账号资格重新判定；切到清单外最终模型时形成开→关。列出账号和启停步骤见 [部署 runbook](../deploy/README.md#codex-协作消息明文通道)。
 
-灰度预检覆盖 API Key 站 d0c7a8 / c2a95e / b672e6 × gpt-6.1-sol / gpt-6-astra、Codex 0.166。账号开关表示该站已验证全局清单内全部模型；同站账号统一配置。灰度池须包含兜底分组、满载借用等可达账号，排除未验证 API Key 账号及未验证 OAuth 路由；关账号开关不能隔离已带 [] 的连续性流量。存量会话落到关闭开关的 OAuth，或切到清单外最终模型，形成开→关。列出账号和启停步骤见 [部署 runbook](../deploy/README.md#codex-协作消息明文通道)。
+Codex 0.166 provider 名不是精确的 OpenAI 时，每轮删除历史 EFA，关账号开关对这类客户端等同硬回退。该形态的开→关续轮在 c2a95e、d0c7a8 两个目标模型已闭环；b672e6 补跑持续 503、无结论。保留 EFA 的 OpenAI provider 开→关在前两站也通过，但 b672e6 账号 470 两次 cyber_policy；不承诺硬回退后存量会话不中断。
 
-Codex 0.166 provider 名不是精确的 OpenAI 时，每轮删除历史 EFA，因此没有连续性，关账号开关对这类客户端等同硬回退。该形态的开→关续轮在 c2a95e、d0c7a8 两个目标模型已闭环；b672e6 补跑持续 503、无结论。保留 EFA 的 OpenAI provider 开→关在前两站也通过，但 b672e6 账号 470 两次 cyber_policy；不承诺硬回退后存量会话不中断。
-
-提示缓存：持续启用且输入相同时，变换后的前缀稳定；使转换状态改变的开/关（含总开关、功能开关或模型清单变化）会使进行中会话下一请求从工具声明处起失效一次，之后同态稳定。只关账号开关时，保留 [] 且满足其它资格的会话继续转换、前缀不变；不保留 EFA 的客户端不适用。真实 Codex 0.166 的 58,104 字节样本中，首个差异在字节 19,695，位于 input[0] additional_tools 的 [46, 25,018) 区间；不据此推算其它会话的精确失效率。反复切换会重复失效，建议低峰、整站切换。
+提示缓存：持续启用且输入相同时，变换后的前缀稳定；使转换状态改变的开/关（含总开关、功能开关、模型清单或账号开关变化）会使进行中会话下一请求从工具声明处起失效一次，之后同态稳定。真实 Codex 0.166 的 58,104 字节样本中，首个差异在字节 19,695，位于 input[0] additional_tools 的 [46, 25,018) 区间；不据此推算其它会话的精确失效率。反复切换会重复失效，建议低峰、整站切换。
 
 完整契约与验收见 [OpenSpec design](../openspec/changes/codex-collaboration-plaintext-20261104/design.md)。
 
@@ -499,7 +497,7 @@ Codex 0.166 provider 名不是精确的 OpenAI 时，每轮删除历史 EFA，�
 | `relay_keepalive` | 从上游流中丢弃的中转伪保活帧（按账号；0.4.4 起含 `response.created` 之前的空 delta） |
 | `pre_created_delta` | 上游在 `response.created` 之前发出的非空 delta（按分组、账号、平台，0.4.4；每次尝试至多计一次）；照常输出，用来观察这类中转的规模 |
 
-`collab_plaintext` 按 outcome、实际出站 model 统计尝试（label 编码为 `outcome=<值>;model=<值>`，全部资格门通过时追加 `;eligibility=account|continuity`，优先记录 account，账号关闭且由历史产物满足时记录 continuity）；`collab_call` 按 `efa=absent|empty|nonempty` 统计三个消息工具的逻辑调用（Calls/EFA 分母不含 wait/list/interrupt）；只观测模式另以 `msg=opaque|text` 记录有效字符串 message 的可疑/文本形态，缺失或无效 message 不计入这两项；`collab_call_action` 按 `action=marker_added|vetoed|contradicted|uncovered` 统计动作。EFA、message 形态与 action 是独立边际计数，不代表联合分布，流式多事件不重复计同一调用。message 形态仅为诊断，不证明可投递。
+`collab_plaintext` 按 outcome、实际出站 model 统计尝试（label 编码为 `outcome=<值>;model=<值>`，全部资格门通过时追加 `;eligibility=account`）；`collab_call` 按 `efa=absent|empty|nonempty` 统计三个消息工具的逻辑调用（Calls/EFA 分母不含 wait/list/interrupt）；只观测模式另以 `msg=opaque|text` 记录有效字符串 message 的可疑/文本形态，缺失或无效 message 不计入这两项；`collab_call_action` 按 `action=marker_added|vetoed|contradicted|uncovered` 统计动作。EFA、message 形态与 action 是独立边际计数，不代表联合分布，流式多事件不重复计同一调用。message 形态仅为诊断，不证明可投递。
 
 48 小时/7 天验收的持久化来源为 resilience.state_rejection 事件中的 collab_plaintext 标识，以及 usage_logs 按账号、模型和客户端 UA 汇总的请求量。usage_logs 只能近似合格流量，无法精确得出“符合资格的新协作投递”分母，不应把近似请求量当精确覆盖率。进程计数仅保留当前实例最近 1 小时，可作灰度抽查；多实例须分别采集，不以它替代长期验收。
 
@@ -509,7 +507,7 @@ Codex 0.166 provider 名不是精确的 OpenAI 时，每轮删除历史 EFA，�
 
 warn 级，进入运维页“系统日志”（`ops_system_logs`）：
 
-- `resilience.collab_plaintext`：conflict/invalid、vetoed/contradicted/uncovered 非零、恢复报错，或 applied 后最终失败被现有分类判为客户端错误且不是 429/5xx 等价时记录；HTTP 200 输出前的流内拒绝同样覆盖，in_band=true；含 account_id、group_id、model、client_version、outcome、applied、eligibility（account/continuity，资格未通过时为空）、upstream_status（无响应时为 0）、headers_committed 与各计数（含 msg_opaque/msg_text、dev_text_rewrites）。401/402/403 等账号侧或余额类别、瞬时 5xx、429、网络故障或断流不单独触发这条失败 Warn；本地恢复错误及前述异常计数仍独立触发。原始阶段 invalid（根对象非法/重复键）归为 unsupported，不因该判定触发 Warn；决策点改写返回 invalid 仍触发 Warn。正常提示替换不单独触发 Warn，不存正文/参数/密文/原始错误。
+- `resilience.collab_plaintext`：conflict/invalid、vetoed/contradicted/uncovered 非零、恢复报错，或 applied 后最终失败被现有分类判为客户端错误且不是 429/5xx 等价时记录；HTTP 200 输出前的流内拒绝同样覆盖，in_band=true；含 account_id、group_id、model、client_version、outcome、applied、eligibility（account，资格未通过时为空）、upstream_status（无响应时为 0）、headers_committed 与各计数（含 msg_opaque/msg_text、dev_text_rewrites）。401/402/403 等账号侧或余额类别、瞬时 5xx、429、网络故障或断流不单独触发这条失败 Warn；本地恢复错误及前述异常计数仍独立触发。原始阶段 invalid（根对象非法/重复键）归为 unsupported，不因该判定触发 Warn；决策点改写返回 invalid 仍触发 Warn。正常提示替换不单独触发 Warn，不存正文/参数/密文/原始错误。
 
 - `balance_paused`（含账号、暂停时长与上游原文；0.4.12 起另含档位 `step`）；
 - `session_rebind`（P1-B 原因 `post_output_first_failure`，普通连击原因 `resil_failure_streak`，含会话哈希前缀、组、账号、类别、避开时长）、`last_resort`；
@@ -579,7 +577,7 @@ OpenAI 判慢降序与会话迁移的事件（见 §4.5）不带 `resilience.` �
 
 ## 6. 回退
 
-协作消息明文通道的**软回退**是关闭账号开关：新会话不再启用，原始历史保留 [] 且满足其它资格的 API Key 会话继续。provider 名非 OpenAI 的 Codex 客户端删除历史 EFA，无连续性，关账号开关对它等同硬回退。**硬回退**是关韧性总开关、collaboration_plaintext.enabled 或清空 models：所有后续尝试停止转换，在途仍按冻结 plan 还原，部分上游的存量会话可能需新开。OAuth/清单外模型边界、实测结果与缓存代价见 §4.14；操作顺序见 [部署 runbook](../deploy/README.md#codex-协作消息明文通道)。无需重启，schema 豁免不随开关回退。
+协作消息明文通道的**软回退**是关闭账号开关：该账号后续请求停止转换，在途仍按冻结 plan 还原，部分上游的存量会话可能需新开。**硬回退**是关韧性总开关、collaboration_plaintext.enabled 或清空 models：所有账号的后续尝试停止转换。OAuth/清单外模型边界、实测结果与缓存代价见 §4.14；操作顺序见 [部署 runbook](../deploy/README.md#codex-协作消息明文通道)。无需重启，schema 豁免不随开关回退。
 
 - 单项关闭：在“网关韧性”卡中关闭对应能力，即时生效。各能力关闭后的行为见 runbook §6。0.4.4 新增的开关关闭后回到 0.4.3 的对应行为，不是 0.3.0（两处小例外：关闭 `failure.decision_v2` 后分类输入的证据补全仍保留，见下表；关闭 `errors.failed_frame_retry_after` 后用户余额不足与内容拒绝仍不带重试时间，见 §3）；关闭 `capability.stream_only_learning` 后已学到的记录不删除，按到期时间自然过期，期间重新开启仍然生效。
 - 状态拒绝的请求级分类、不罚号及 `state_rejection` 观测不受总开关影响，无新增设置。M3 同样生效；预算关闭时仍只允许一次状态换号。rs/cmp 有限修复保持既有行为。

@@ -100,7 +100,7 @@ func TestCollaborationEligibilityEachGate(t *testing.T) {
 				a.Extra["openai_responses_flatten_namespaces"] = true
 			}
 			resilience.Publish(settings)
-			eligible := openAICollaborationEligible(c, a, model, transport, gate == "passthrough", gate == "compact", gate == "bridge", false)
+			eligible := openAICollaborationEligible(c, a, model, transport, gate == "passthrough", gate == "compact", gate == "bridge")
 			require.Equal(t, gate == "all", eligible)
 			if !eligible {
 				out, attempt := armOpenAICollaboration(c, []byte(collabWiringBody), model, false)
@@ -205,83 +205,7 @@ func TestCollaborationForwardPreservesOriginalStateExclusions(t *testing.T) {
 	}
 }
 
-func TestCollaborationForwardContinuity(t *testing.T) {
-	history := `{"type":"function_call","namespace":"collaboration","name":"send_message","call_id":"fc_old_call","arguments":"{\"message\":\"old plaintext\"}","encrypted_function_args":[]}`
-	customProviderHistory := strings.Replace(history, `,"encrypted_function_args":[]`, "", 1)
-	for _, tc := range []struct {
-		name, item, extra                                               string
-		masterOff, modelOff, flatten, noDeclaration, oauth, wantApplied bool
-	}{
-		{name: "existing_history_account_off", item: history, wantApplied: true},
-		{name: "custom_provider_plaintext", item: customProviderHistory},
-		{name: "custom_provider_opaque", item: strings.Replace(customProviderHistory, "old plaintext", "gAAAAopaque", 1)},
-		{name: "custom_provider_base64", item: strings.Replace(customProviderHistory, "old plaintext", strings.Repeat("A", 256), 1)},
-		{name: "custom_provider_invalid_arguments", item: strings.Replace(customProviderHistory, `\"old plaintext\"}`, `\"old plaintext\"`, 1)},
-		{name: "custom_provider_message_missing", item: strings.Replace(customProviderHistory, `\"message\"`, `\"note\"`, 1)},
-		{name: "custom_provider_oauth", item: customProviderHistory, oauth: true},
-		{name: "oauth_account_off", item: history, oauth: true},
-		{name: "new_session_account_off", item: `{"type":"message","role":"user","content":"hello"}`},
-		{name: "master_off", item: history, masterOff: true},
-		{name: "model_removed", item: history, modelOff: true},
-		{name: "original_store", item: history, extra: `"store":true,`},
-		{name: "original_previous", item: history, extra: `"previous_response_id":"resp_previous",`},
-		{name: "ambiguous_original_store", item: customProviderHistory, extra: `"store":false,"store":true,`},
-		{name: "ambiguous_original_previous", item: customProviderHistory, extra: `"previous_response_id":null,"previous_response_id":"resp_previous",`},
-		{name: "flatten", item: history, flatten: true},
-		{name: "no_declaration", item: history, noDeclaration: true},
-		{name: "nonempty_efa_plain_message", item: strings.Replace(history, `"encrypted_function_args":[]`, `"encrypted_function_args":["cipher"]`, 1)},
-		{name: "null_efa_plain_message", item: strings.Replace(history, `"encrypted_function_args":[]`, `"encrypted_function_args":null`, 1)},
-		{name: "string_efa_plain_message", item: strings.Replace(history, `"encrypted_function_args":[]`, `"encrypted_function_args":"[]"`, 1)},
-		{name: "non_message_tool", item: strings.Replace(history, `"name":"send_message"`, `"name":"wait_agent"`, 1)},
-		{name: "nested_user_json", item: `{"type":"message","role":"user","content":` + history + `}`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			enableCollabTest(t)
-			settings := resilience.Current().Clone()
-			if tc.masterOff {
-				settings.Enabled = false
-			}
-			if tc.modelOff {
-				settings.CollaborationPlaintext.Models = nil
-			}
-			resilience.Publish(settings)
-			a := newOpenAIRejectedFieldTestAccount()
-			if tc.oauth || tc.flatten {
-				a = newOpenAIOAuthNamespaceTestAccount()
-			}
-			a.Extra = map[string]any{"openai_collaboration_plaintext": false}
-			if tc.flatten {
-				a.Extra["openai_responses_flatten_namespaces"] = true
-			}
-			body := strings.Replace(collabWiringBody, `"input":"hello"`, `"input":[`+tc.item+`]`, 1)
-			body = strings.Replace(body, "{", "{"+tc.extra, 1)
-			if tc.noDeclaration {
-				body = strings.Replace(body, `"tools":[`, `"unused_tools":[`, 1)
-			}
-			upstream := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(200, `{"id":"resp_1","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)}
-			c := collabTestContext()
-			_, err := newOpenAIRejectedFieldTestService(upstream).Forward(context.Background(), c, a, []byte(body))
-			require.NoError(t, err)
-			require.Len(t, upstream.bodies, 1)
-			stats, ok := openAICodexCollabAttempt(c)
-			if tc.noDeclaration || tc.flatten {
-				require.False(t, ok)
-				return
-			}
-			require.True(t, ok)
-			require.Equal(t, tc.wantApplied, stats.Applied)
-			if tc.wantApplied {
-				require.Equal(t, "continuity", openAICollaborationAttempt(c).eligibilitySource)
-				require.Equal(t, "collaboration-xy", gjson.GetBytes(upstream.lastBody, "tools.0.name").String())
-				for _, field := range []string{"call_id", "arguments", "encrypted_function_args"} {
-					require.Equal(t, gjson.Get(tc.item, field).Raw, gjson.GetBytes(upstream.lastBody, "input.0."+field).Raw)
-				}
-			}
-		})
-	}
-}
-
-func TestCollaborationForwardContinuityBeforeNormalization(t *testing.T) {
+func TestCollaborationForwardConflictBeforeNormalization(t *testing.T) {
 	for _, tc := range []struct {
 		name, encrypted, input        string
 		wantEncrypted, accountEnabled bool
@@ -307,7 +231,6 @@ func TestCollaborationForwardContinuityBeforeNormalization(t *testing.T) {
 			}
 			body = strings.Replace(body, "{", `{"text":{"format":{"type":"json_schema","name":"sample","schema":{"type":"object","minProperties":1,"properties":{"x":{"type":"string"}}}}},`, 1)
 			require.True(t, json.Valid([]byte(body)))
-			require.False(t, openAICollaborationContinuity([]byte(body)))
 			raw, plan, outcome := applyCodexCollaborationPlaintext([]byte(body))
 			require.Equal(t, codexCollabConflict, outcome)
 			require.Nil(t, plan)
@@ -496,7 +419,6 @@ func TestCollaborationForwardAppliedHTTPFailureWarn(t *testing.T) {
 		wantWarn     bool
 	}{
 		{name: "account", source: "account", status: 400, wantWarn: true},
-		{name: "continuity", source: "continuity", status: 400, wantWarn: true},
 		{name: "in_band", source: "account", inBand: true, status: 200, wantWarn: true},
 		{name: "balance", source: "account", status: 402},
 	} {
@@ -511,9 +433,6 @@ func TestCollaborationForwardAppliedHTTPFailureWarn(t *testing.T) {
 			metricDelta := collaborationMetricDelta(a.ID)
 			c := collabTestContext()
 			body := collabWiringBody
-			if tc.source == "continuity" {
-				body = strings.Replace(body, `"input":"hello"`, `"input":[{"type":"function_call","namespace":"collaboration","name":"send_message","call_id":"fc_old","arguments":"{}","encrypted_function_args":[]}]`, 1)
-			}
 			status := tc.status
 			if tc.inBand {
 				status = http.StatusOK
