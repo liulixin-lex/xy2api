@@ -437,7 +437,7 @@ func (s *GroupQualityGateService) evaluate(ctx context.Context) error {
 	observedAt := now
 	var observationErr error
 	if len(groupIDs) > 0 {
-		observations, observedAt, observationErr = s.policyRepo.LoadObservations(ctx, ids, maxTime(now.Add(-groupQualityCompositionWindow), s.processStartedAt), now)
+		observations, observedAt, observationErr = s.policyRepo.LoadObservations(ctx, ids, now.Add(-groupQualityCompositionWindow), now)
 	}
 	stale := observationErr != nil || observedAt.Before(now.Add(-5*time.Minute))
 	metrics, composition := old.Metrics, old.Composition

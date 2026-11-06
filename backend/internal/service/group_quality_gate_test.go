@@ -23,6 +23,7 @@ type qualityTestRepository struct {
 	members        map[int64][]Account
 	observations   []GroupQualityObservation
 	observedAt     time.Time
+	usageWrites    []GroupQualityUsageWrite
 	observationErr error
 	froms          []time.Time
 	memberLoads    int
@@ -66,6 +67,15 @@ func (r *qualityTestRepository) LoadObservations(_ context.Context, _ []int64, f
 		observedAt = to.Add(-time.Second)
 	}
 	return out, observedAt, r.observationErr
+}
+func (r *qualityTestRepository) LoadObservationsForReplay(_ context.Context, _ []int64, from, to time.Time) (GroupQualityReplayData, error) {
+	out := []GroupQualityObservation{}
+	for _, o := range r.observations {
+		if !o.At.Before(from) && o.At.Before(to) {
+			out = append(out, o)
+		}
+	}
+	return GroupQualityReplayData{Observations: out, UsageWrites: slices.Clone(r.usageWrites)}, r.observationErr
 }
 
 type qualityTestAccounts struct {
@@ -163,7 +173,7 @@ func (e *qualityTestEnv) evaluate(t *testing.T, after time.Duration) {
 	}
 	require.True(t, e.repo.deadline)
 	if len(e.repo.froms) > loads {
-		require.Equal(t, maxTime(e.now.Add(-6*time.Hour), e.svc.processStartedAt), e.repo.froms[len(e.repo.froms)-1])
+		require.Equal(t, e.now.Add(-6*time.Hour), e.repo.froms[len(e.repo.froms)-1])
 	}
 }
 func (e *qualityTestEnv) member(id int64) groupQualityMemberSnapshot {
@@ -386,7 +396,7 @@ func TestGroupQualityV3TierAndRecoveryRules(t *testing.T) {
 }
 
 func qualitySpeedObservation(id, account int64, at time.Time, ms int64) GroupQualityObservation {
-	return GroupQualityObservation{ID: id, AccountID: account, APIKeyID: 1, GroupID: 7, RequestID: fmt.Sprint(id), At: at, PreviousAt: at.Add(-time.Minute), Success: true, StrictContinuation: true, SessionID: fmt.Sprintf("session-%d", id/3), Model: "model", ReasoningEffort: "high", PromptTokens: 10000, PreviousPromptTokens: 10000, CacheReadTokens: 6000, AttemptFirstOutputMs: &ms}
+	return GroupQualityObservation{ID: id, AccountID: account, APIKeyID: 1, GroupID: 7, RequestID: fmt.Sprint(id), At: at, PreviousAt: at.Add(-time.Minute), Success: true, StrictContinuation: true, TTFTEligible: true, SessionID: fmt.Sprintf("session-%d", id/3), Model: "model", ReasoningEffort: "high", PromptTokens: 10000, PreviousPromptTokens: 10000, CacheReadTokens: 6000, AttemptFirstOutputMs: &ms}
 }
 func qualityCompute(obs []GroupQualityObservation, now time.Time) (map[int64]groupQualityMetrics, map[int64]groupQualityComposition, groupQualityBaselines) {
 	obs, failed, softFailed := prepareGroupQualityObservations(obs, now, now.Add(-6*time.Hour), nil)
@@ -626,7 +636,7 @@ func TestGroupQualityV3EvaluationLifecycle(t *testing.T) {
 		e.evaluate(t, 152*time.Minute)
 		require.Empty(t, e.svc.snapshot.Load().Departed)
 	})
-	t.Run("restart and process boundary", func(t *testing.T) {
+	t.Run("restart keeps error state and process boundary for ttft", func(t *testing.T) {
 		e := newQualityTestEnv(t)
 		e.events(1, e.base.Add(-time.Minute), 20, 5)
 		e.evaluate(t, 0)
@@ -636,7 +646,8 @@ func TestGroupQualityV3EvaluationLifecycle(t *testing.T) {
 		e.svc.processStartedAt = e.base.Add(time.Minute)
 		e.evaluate(t, 2*time.Minute)
 		require.Equal(t, 0, e.svc.OrderTier(7, 1))
-		require.Zero(t, e.member(1).Metric.ErrorSamples)
+		require.Equal(t, 20, e.member(1).Metric.ErrorSamples)
+		require.Zero(t, e.member(1).Metric.TTFTSamples)
 	})
 	t.Run("startup evaluates and cancellation stops", func(t *testing.T) {
 		e := newQualityTestEnv(t)

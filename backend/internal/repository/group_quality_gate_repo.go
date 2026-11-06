@@ -170,6 +170,43 @@ func (r *groupQualityGateRepository) LoadObservations(ctx context.Context, accou
 	return loadGroupQualityObservations(ctx, tx, accountIDs, from, to)
 }
 
+func (r *groupQualityGateRepository) LoadObservationsForReplay(ctx context.Context, accountIDs []int64, from, to time.Time) (service.GroupQualityReplayData, error) {
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return service.GroupQualityReplayData{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `SET LOCAL statement_timeout = '20s'`); err != nil {
+		return service.GroupQualityReplayData{}, err
+	}
+	observations, _, err := loadGroupQualityObservations(ctx, tx, accountIDs, from, to)
+	if err != nil {
+		return service.GroupQualityReplayData{}, err
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT date_trunc('minute', created_at), MAX(created_at)
+		FROM usage_logs
+		WHERE created_at >= $1 AND created_at < $2
+		GROUP BY 1
+		ORDER BY 1`, from.UTC(), to.UTC())
+	if err != nil {
+		return service.GroupQualityReplayData{}, err
+	}
+	defer func() { _ = rows.Close() }()
+	writes := make([]service.GroupQualityUsageWrite, 0)
+	for rows.Next() {
+		var write service.GroupQualityUsageWrite
+		if err := rows.Scan(&write.Minute, &write.LastWrite); err != nil {
+			return service.GroupQualityReplayData{}, err
+		}
+		writes = append(writes, write)
+	}
+	if err := rows.Err(); err != nil {
+		return service.GroupQualityReplayData{}, err
+	}
+	return service.GroupQualityReplayData{Observations: observations, UsageWrites: writes}, nil
+}
+
 func loadGroupQualityObservations(ctx context.Context, tx *sql.Tx, accountIDs []int64, from, to time.Time) ([]service.GroupQualityObservation, time.Time, error) {
 	// Read all OpenAI contributors before LAG. The time range is at most six
 	// hours and never predates process startup. Reset bounds are applied in the
@@ -187,7 +224,7 @@ func loadGroupQualityObservations(ctx context.Context, tx *sql.Tx, accountIDs []
           COALESCE(u.cache_creation_tokens,0) AS cache_creation_tokens,
           COALESCE(a.extra->>'group_quality_reset_at','') AS reset_at
    FROM usage_logs u JOIN accounts a ON a.id = u.account_id
-   WHERE a.platform = 'openai' AND u.created_at >= $1 AND u.created_at < $2
+		WHERE a.platform = 'openai' AND u.created_at >= $1 AND u.created_at < $3
   ), history AS (
    SELECT *, LAG(account_id) OVER session_order AS previous_account_id,
           LAG(model) OVER session_order AS previous_model,
@@ -202,9 +239,9 @@ func loadGroupQualityObservations(ctx context.Context, tx *sql.Tx, accountIDs []
          COALESCE(session_id <> '' AND previous_account_id = account_id AND previous_model = model
           AND created_at - previous_at <= INTERVAL '5 minutes',FALSE),
          COALESCE(previous_prompt_tokens,0), previous_at, reset_at
-  FROM history
-  WHERE is_success
-  ORDER BY created_at DESC, id DESC`, from.UTC(), to.UTC())
+	FROM history
+	WHERE is_success AND created_at >= $2 AND created_at < $3
+		ORDER BY created_at DESC, id DESC`, from.Add(-5*time.Minute).UTC(), from.UTC(), to.UTC())
 	if err != nil {
 		return nil, time.Time{}, err
 	}

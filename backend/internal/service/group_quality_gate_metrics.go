@@ -81,13 +81,15 @@ func prepareGroupQualityObservations(observations []GroupQualityObservation, now
 	eligible := make([]GroupQualityObservation, 0, len(observations))
 	failed, softFailed := map[groupQualityRequest]bool{}, map[groupQualityRequest]bool{}
 	for _, o := range observations {
-		start := maxTime(now.Add(-groupQualityCompositionWindow), processStart, resets[o.AccountID], o.ResetAt)
+		start := maxTime(now.Add(-groupQualityCompositionWindow), resets[o.AccountID], o.ResetAt)
 		if o.At.Before(start) || !o.At.Before(now) {
 			continue
 		}
 		if !o.PreviousAt.IsZero() && o.PreviousAt.Before(start) {
 			o.StrictContinuation = false
 		}
+		ttftStart := maxTime(start, processStart)
+		o.TTFTEligible = !o.At.Before(ttftStart) && (o.PreviousAt.IsZero() || !o.PreviousAt.Before(ttftStart))
 		eligible = append(eligible, o)
 		if o.RequestID == "" {
 			continue
@@ -121,7 +123,7 @@ func groupQualitySuccess(o GroupQualityObservation, failed map[groupQualityReque
 }
 
 func groupQualitySpeedSample(o GroupQualityObservation, failed map[groupQualityRequest]bool) bool {
-	return groupQualitySuccess(o, failed) && o.StrictContinuation && o.AttemptFirstOutputMs != nil && *o.AttemptFirstOutputMs > 0
+	return o.TTFTEligible && groupQualitySuccess(o, failed) && o.StrictContinuation && o.AttemptFirstOutputMs != nil && *o.AttemptFirstOutputMs > 0
 }
 
 func buildGroupQualityBaselines(observations []GroupQualityObservation, failed map[groupQualityRequest]bool, now time.Time) groupQualityBaselines {
@@ -178,7 +180,7 @@ func calculateGroupQualityMetrics(observations []GroupQualityObservation, now ti
 		// Cache and composition describe the persisted request, including partial
 		// usage. Only speed samples exclude matching failed attempts.
 		success := o.Success
-		if enabledGroups[o.GroupID] && success && o.StrictContinuation && len(compositionValues[o.GroupID]) < 100 {
+		if enabledGroups[o.GroupID] && o.TTFTEligible && success && o.StrictContinuation && len(compositionValues[o.GroupID]) < 100 {
 			if expected, ok := baseline.expected(o); ok {
 				compositionValues[o.GroupID] = append(compositionValues[o.GroupID], expected)
 			}

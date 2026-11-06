@@ -157,6 +157,7 @@ type GroupQualityObservation struct {
 	PreviousPromptTokens int64
 	CacheReadTokens      int64
 	CacheCreationTokens  int64
+	TTFTEligible         bool
 }
 
 // IsGroupQualitySoftFailure is the shared legacy classifier also used by
@@ -189,6 +190,17 @@ type GroupQualityGateRepository interface {
 	CompareAndSwapPolicies(context.Context, int, GroupQualityGatePolicies) (GroupQualityGatePolicies, error)
 	LoadMembers(context.Context, []int64) (map[int64][]Account, error)
 	LoadObservations(context.Context, []int64, time.Time, time.Time) ([]GroupQualityObservation, time.Time, error)
+	LoadObservationsForReplay(context.Context, []int64, time.Time, time.Time) (GroupQualityReplayData, error)
+}
+
+type GroupQualityUsageWrite struct {
+	Minute    time.Time
+	LastWrite time.Time
+}
+
+type GroupQualityReplayData struct {
+	Observations []GroupQualityObservation
+	UsageWrites  []GroupQualityUsageWrite
 }
 
 // GroupQualityGateStatus matches the v3 admin contract.
