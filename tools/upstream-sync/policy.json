@@ -57,7 +57,8 @@
       "openspec/changes/group-quality-gate-v2-20261102/**",
       "openspec/changes/gate-post-output-attempts-20261102/**",
       "openspec/changes/group-quality-gate-v3-20261104/**",
-      "openspec/changes/codex-collaboration-plaintext-20261104/**"
+      "openspec/changes/codex-collaboration-plaintext-20261104/**",
+      "openspec/changes/encrypted-routing-20261105/**"
     ],
     "manual_merge": [
       "Makefile",
