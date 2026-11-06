@@ -316,7 +316,7 @@ Responses 空白占位：`response.output_text.delta` / `.done`、output_text �
 - 包装帧的 `upstream_body` 解包后用于首次 HTTP 路由和后续失败分类，保留内层容量码、余额码等语义；仅包装 400 为 M3 保留原始外层体。`WrappedStatus` 始终保留校验过的上游状态码。
 - forbidden 的本请求内同站排除只用于 API Key 账号，与账号×模型软冷却的账号类型范围一致。OAuth 等其他账号只排除当前失败账号，其他官方端点账号仍可被选择；此分支不占容量换号额度。
 - forbidden 的账号×模型软冷却只在有结构化证据时记录：载荷中的数字状态 403、校验通过的包装 401/403，或错误对象的 `code=upstream_error` 且没有 `type` 字段。仅从文案推导出的 forbidden 仍然换号，用尽写 502，但不记录软冷却；字符串状态码不作为数字状态证据，空值或空字符串的 `type` 也不等于缺少该字段。
-- 直通流式与 SSE→JSON 聚合的失败分类在错误帧不带模型时使用本次请求的调度模型；compact 已改写的上游模型优先保留，不再二次映射。该模型也传给流内终态账号副作用处理，与原生路径同样按模型计数。
+- 直通流式与 SSE→JSON 聚合的失败分类在错误帧不带模型时使用本次请求的调度模型；compact 已改写的上游模型优先保留，不再二次映射。该模型也传给输出前和输出后的流内终态账号副作用处理（含 bare error 在 EOF 时的延迟处理），使模型级 429 限流和自定义临时不可调度规则使用号×模型范围，与原生路径一致。
 - forbidden 用尽的 502 分支同样应用通用耗尽重试提示：未提交时写 `Retry-After`，已提交的 Responses 流按现有终止帧规则携带提示。达到会话连续失败上限时沿用通用终止策略（503、`server_is_overloaded`、不再建议重试）。
 - `codex.response.metadata` 判为开场事件（§1）。以前它算内容，之后的失败不能换号，首输出截止也随之解除，出现过 240 秒的挂起。
 - 原生 Anthropic 与 API Key 直通（`stream.prelude_staging`）：`message_start`、`ping`、空的 text 与 thinking `content_block_start` 暂存到第一个内容或终态，`tool_use` 起始算内容、立即写出。暂存期间上游的可重试失败（流内 `overloaded_error`、`rate_limit_error`，断流、读错、停滞）丢弃本次开场并换号，客户端只看到成功那次尝试的一个 `message_start`；不可重试的拒绝写出开场后以 `event: error` 结束；合法的空回答照常写出。
