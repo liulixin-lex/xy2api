@@ -194,5 +194,9 @@ func openAITerminalRejectionDigest(status int, headers http.Header, body []byte)
 func normalizeOpenAITerminalRejectionMessage(message string) string {
 	message = strings.Join(strings.Fields(strings.ToLower(SanitizeUpstreamErrorMessage(message))), " ")
 	message = openAITerminalRequestIDPattern.ReplaceAllString(message, "request_id=[id]")
+	// Normalize all numbers so changing limits or counts do not prevent a
+	// session streak from forming. A false merge only avoids one account for
+	// AvoidSeconds without penalty, then cross-host evidence stops avoidance;
+	// a missed merge can leave a session retrying a numbered refusal indefinitely.
 	return openAITerminalVariablePattern.ReplaceAllString(message, "[number]")
 }

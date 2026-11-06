@@ -21,6 +21,9 @@ func handleOpenAIRequestRejectionExhausted(c *gin.Context, failure *service.Upst
 	source := "model_unavailable"
 	if failure.IsOpenAIUpstreamRequestRestriction() {
 		source = resilience.ReasonUpstreamRequestRestriction
+		// This extension header only affects clients that recognize it. Codex
+		// 0.166 ignores it and may retry 5xx within its own budget; the host
+		// guard limits each retry to at most two upstream hosts.
 		c.Header("x-should-retry", "false")
 	}
 	suppressResilienceRetryAdvice(c, source)
