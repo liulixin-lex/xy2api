@@ -291,34 +291,40 @@ func TestOpenAIStreamBareErrorUsesSemanticFailover(t *testing.T) {
 	require.True(t, openAIStreamErrorEventShouldFailover(payload, "slow down"))
 }
 
-func TestOpenAIStream403FailoverRequiresStructuredAccountCredentialSignal(t *testing.T) {
+func TestOpenAIStream403FailoverIncludesRequestScopedForbidden(t *testing.T) {
 	tests := []struct {
-		name    string
-		payload string
-		want    bool
+		name           string
+		payload        string
+		want           bool
+		accountFailure bool
 	}{
 		{
 			name:    "ordinary permission error",
 			payload: `{"type":"response.failed","response":{"error":{"type":"permission_error","code":"forbidden","message":"access denied for this request"}}}`,
+			want:    true,
 		},
 		{
 			name:    "explicit 403 request status",
 			payload: `{"type":"error","error":{"type":"permission_error","code":"forbidden","status_code":403,"message":"forbidden content"}}`,
-		},
-		{
-			name:    "structured access state",
-			payload: `{"type":"response.failed","response":{"error":{"code":"workspace_suspended","message":"workspace is suspended"}}}`,
 			want:    true,
 		},
 		{
-			name:    "explicit credential auth code",
-			payload: `{"type":"error","error":{"type":"permission_error","code":"invalid_api_key","status_code":403,"message":"credential rejected"}}`,
-			want:    true,
+			name:           "structured access state",
+			payload:        `{"type":"response.failed","response":{"error":{"code":"workspace_suspended","message":"workspace is suspended"}}}`,
+			want:           true,
+			accountFailure: true,
 		},
 		{
-			name:    "explicit authentication type",
-			payload: `{"type":"error","error":{"type":"authentication_error","status_code":403,"message":"credential rejected"}}`,
-			want:    true,
+			name:           "explicit credential auth code",
+			payload:        `{"type":"error","error":{"type":"permission_error","code":"invalid_api_key","status_code":403,"message":"credential rejected"}}`,
+			want:           true,
+			accountFailure: true,
+		},
+		{
+			name:           "explicit authentication type",
+			payload:        `{"type":"error","error":{"type":"authentication_error","status_code":403,"message":"credential rejected"}}`,
+			want:           true,
+			accountFailure: true,
 		},
 	}
 
@@ -329,6 +335,8 @@ func TestOpenAIStream403FailoverRequiresStructuredAccountCredentialSignal(t *tes
 			require.Equal(t, http.StatusForbidden, openAIStreamFailureStatus(payload, message))
 			require.Equal(t, tt.want, openAIStreamFailedEventShouldFailover(payload, message))
 			require.Equal(t, tt.want, openAIStreamErrorEventShouldFailover(payload, message))
+			require.Equal(t, tt.accountFailure, openAIStream403AccountFailure(payload, message))
+			require.Equal(t, !tt.accountFailure, openAIStream403TransientForbidden(payload, message))
 		})
 	}
 }

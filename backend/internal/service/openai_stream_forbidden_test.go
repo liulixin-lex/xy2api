@@ -51,3 +51,84 @@ func TestOpenAIStreamForbiddenUsesSoftCooldownWithoutHTTP403Penalty(t *testing.T
 	require.Equal(t, string(OpenAIStreamForbiddenReason), classified.Reason)
 	require.False(t, failoverErr.ShouldReportAccountScheduleFailure())
 }
+
+func TestOpenAIWrappedForbiddenUsesSoftCooldown(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, tc := range []struct {
+		name    string
+		event   string
+		payload string
+		status  int
+	}{
+		{"E1 with inner body without status", "error", `{"type":"proxy.upstream_error","status":403,"upstream_body":{"error":{"code":"upstream_error","message":"upstream rejected"}}}`, http.StatusForbidden},
+		{"E2", "response.failed", `{"type":"response.failed","response":{"error":{"type":"upstream_error","code":"403","status_code":403,"message":"upstream rejected"}}}`, http.StatusForbidden},
+		{"wrapped 401 credentials", "error", `{"type":"proxy.upstream_error","status":401,"upstream_body":{"error":{"code":"invalid_api_key","message":"invalid api key"}}}`, http.StatusUnauthorized},
+		{"wrapped 403 deactivated", "error", `{"type":"proxy.upstream_error","status":403,"upstream_body":{"error":{"code":"account_deactivated","message":"account deactivated"}}}`, http.StatusForbidden},
+		{"wrapped 403 credentials", "error", `{"type":"proxy.upstream_error","status":403,"upstream_body":{"error":{"code":"invalid_api_key","message":"invalid api key"}}}`, http.StatusForbidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := newNonStreamingFailoverContext(t)
+			account := newNonStreamingFailoverAccount()
+			account.Credentials["pool_mode"] = false
+			repo := &encryptedContentAccountRepo{resilienceAccountRepo: resilienceAccountRepo{account: account}}
+			svc := newNonStreamingFailoverService()
+			svc.rateLimitService = NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			counter := &countingOpenAI403CounterCache{}
+			svc.rateLimitService.SetOpenAI403CounterCache(counter)
+			payload := []byte(tc.payload)
+			for attempt := 1; attempt <= 2; attempt++ {
+				failoverErr := svc.nonStreamingTerminalFailureFailover(c, newNonStreamingSSEResponse(), account, false, tc.event, payload, "upstream rejected", "model")
+				require.NotNil(t, failoverErr)
+				require.Equal(t, OpenAIStreamForbiddenReason, failoverErr.Reason)
+				require.Equal(t, GatewayFailureScopeRequest, failoverErr.Scope)
+				require.Equal(t, tc.status, failoverErr.StatusCode)
+				require.Equal(t, tc.status, failoverErr.WrappedStatus)
+				require.False(t, failoverErr.IsCredentialFailure())
+				require.True(t, failoverErr.ShouldRetryNextAccount())
+				require.False(t, failoverErr.RetryableOnSameAccount)
+				require.False(t, failoverErr.ShouldReportAccountScheduleFailure())
+				require.Equal(t, resilience.CategoryTransient, ClassifyFailoverError(failoverErr).Category)
+				entry, ok := svc.openaiModelTransient.readEntry(account.ID, "model", time.Now())
+				require.True(t, ok)
+				require.Equal(t, attempt, entry.failureStreak, "each failed attempt must be counted once")
+				if attempt == 2 {
+					require.Equal(t, 10*time.Second, entry.blockUntil.Sub(entry.lastFailure))
+				} else {
+					require.True(t, entry.blockUntil.IsZero(), "the first failure does not start a cooldown")
+				}
+			}
+			MarkResponseCommitted(c)
+			require.Nil(t, svc.nonStreamingTerminalFailureFailover(c, newNonStreamingSSEResponse(), account, false, tc.event, payload, "upstream rejected", "model"))
+			entry, ok := svc.openaiModelTransient.readEntry(account.ID, "model", time.Now())
+			require.True(t, ok)
+			require.Equal(t, 2, entry.failureStreak, "post-output failure must not add a forbidden cooldown")
+			require.Zero(t, counter.increments, "wrapped stream 403 must not enter the HTTP 403 counter")
+			require.Zero(t, repo.errorCalls)
+			require.Zero(t, repo.tempCalls)
+			require.Zero(t, repo.modelRateLimitCalls)
+			require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
+		})
+	}
+}
+
+func TestOpenAIStream403NonWrappedDeactivatedKeepsAccountFailure(t *testing.T) {
+	withResilienceSettings(t, nil)
+	c, _ := newNonStreamingFailoverContext(t)
+	account := newNonStreamingFailoverAccount()
+	account.Credentials["pool_mode"] = false
+	repo := &encryptedContentAccountRepo{resilienceAccountRepo: resilienceAccountRepo{account: account}}
+	svc := newNonStreamingFailoverService()
+	svc.rateLimitService = NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	payload := []byte(`{"type":"error","error":{"code":"account_deactivated","status":403,"message":"account deactivated"}}`)
+
+	failoverErr := svc.nonStreamingTerminalFailureFailover(c, newNonStreamingSSEResponse(), account, false, "error", payload, "account deactivated", "model")
+
+	require.NotNil(t, failoverErr)
+	require.Zero(t, failoverErr.WrappedStatus)
+	require.Equal(t, OpenAIUpstreamAccessStateReason, failoverErr.Reason)
+	require.True(t, failoverErr.IsCredentialFailure())
+	require.Equal(t, 1, repo.errorCalls)
+	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+	_, cooled := svc.getOpenAIAccountModelTransientState().readEntry(account.ID, "model", time.Now())
+	require.False(t, cooled, "non-wrapped account faults must not enter forbidden soft cooldown")
+}

@@ -1914,34 +1914,40 @@ func (s *OpenAIGatewayService) newOpenAIWrappedStreamFailoverError(
 	}
 	classificationBody := openAIWrappedUpstreamErrorClassificationBody(payload)
 	classificationMessage := firstNonEmpty(extractOpenAISSEErrorMessage(classificationBody), message)
-	if wrappedStatus != http.StatusBadRequest && wrappedStatus != http.StatusForbidden &&
+	wrappedForbidden := wrappedStatus == http.StatusUnauthorized || wrappedStatus == http.StatusForbidden
+	if wrappedStatus != http.StatusBadRequest && !wrappedForbidden &&
 		!s.shouldFailoverOpenAIUpstreamResponse(account, wrappedStatus, classificationMessage, classificationBody) {
 		return nil
 	}
 
 	shouldDisable := false
-	if wrappedStatus == http.StatusForbidden {
-		// A wrapped 403 belongs either to the established account-fault path or
-		// to the request-scoped forbidden handling. Do not apply generic 403
-		// cooldowns to the latter.
-		if openAIStream403AccountFailure(classificationBody, classificationMessage) {
-			shouldDisable = s.handleOpenAIAccountUpstreamError(ctx, account, wrappedStatus, headers, classificationBody, canonicalModel)
-		}
-	} else if wrappedStatus != http.StatusBadRequest {
+	// The relay accepted our key. Wrapped 401/403 errors describe its own
+	// upstream credentials, so they must bypass local credential/403 penalties.
+	if wrappedStatus != http.StatusBadRequest && !wrappedForbidden {
 		shouldDisable = s.handleOpenAIAccountUpstreamError(ctx, account, wrappedStatus, headers, classificationBody, canonicalModel)
 	}
 
 	message = s.recordOpenAIStreamUpstreamError(c, account, passthrough, upstreamRequestID, "failover", classificationBody, classificationMessage, wrappedStatus)
-	retryableOnSameAccount := wrappedStatus != http.StatusBadRequest && wrappedStatus != http.StatusForbidden &&
+	retryableOnSameAccount := wrappedStatus != http.StatusBadRequest && !wrappedForbidden &&
 		!shouldDisable && account.IsPoolMode() && (account.IsPoolModeRetryableStatus(wrappedStatus) || isOpenAITransientProcessingError(wrappedStatus, message, classificationBody))
 	classificationHeaders := headers
 	if wrappedStatus == http.StatusTooManyRequests {
 		classificationHeaders = nil
 	}
-	failoverErr := s.newOpenAIAccountFailoverErrorWithClassificationHeaders(
-		account, wrappedStatus, headers, classificationHeaders, classificationBody, message, shouldDisable, retryableOnSameAccount,
-	)
+	var failoverErr *UpstreamFailoverError
+	if wrappedForbidden {
+		failoverErr = annotateUpstreamFailoverAccount(&UpstreamFailoverError{
+			StatusCode:      wrappedStatus,
+			ResponseHeaders: headers.Clone(),
+			ResponseBody:    classificationBody,
+		}, account)
+	} else {
+		failoverErr = s.newOpenAIAccountFailoverErrorWithClassificationHeaders(
+			account, wrappedStatus, headers, classificationHeaders, classificationBody, message, shouldDisable, retryableOnSameAccount,
+		)
+	}
 	failoverErr.WrappedStatus = wrappedStatus
+	s.applyOpenAIStreamForbiddenSoftCooldown(c, account, failoverErr, classificationBody, classificationMessage, canonicalModel)
 	// Keep the validated wrapper payload available to the request-level repair
 	// handler; generic stream errors replace it with a client-safe envelope.
 	failoverErr.ResponseBody = append([]byte(nil), payload...)
@@ -2001,27 +2007,7 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverErrorWithModel(
 		classificationHeaders = nil
 	}
 	failoverErr := s.newOpenAIAccountFailoverErrorWithClassificationHeaders(account, statusCode, headers, classificationHeaders, payload, message, shouldDisable, retryableOnSameAccount)
-	if openAIStream403TransientForbidden(payload, message) {
-		failoverErr.Reason = OpenAIStreamForbiddenReason
-		failoverErr.Scope = GatewayFailureScopeRequest
-		failoverErr.RetryableOnSameAccount = false
-		failoverErr.RequestScopedTransient = false
-		model := firstNonEmpty(canonicalModel, gjson.GetBytes(payload, "model").String(), gjson.GetBytes(payload, "response.model").String())
-		if s != nil && account != nil && account.Platform == PlatformOpenAI && account.Type == AccountTypeAPIKey && resilience.Current().FailureOn() {
-			decision := s.recordOpenAIAccountModelTransientFailure(account, model, time.Now())
-			eventCtx := context.Background()
-			if c != nil && c.Request != nil {
-				eventCtx = c.Request.Context()
-			}
-			logger.FromContext(eventCtx).Info("resilience.forbidden_cooldown",
-				zap.Int64("account_id", account.ID),
-				zap.Int64("group_id", getOpenAIGroupIDFromContext(c)),
-				zap.String("model", openAIAccountModelTransientModel(model)),
-				zap.Int("failure_streak", decision.FailureStreak),
-				zap.Int64("cooldown_ms", decision.Cooldown.Milliseconds()),
-			)
-		}
-	}
+	s.applyOpenAIStreamForbiddenSoftCooldown(c, account, failoverErr, payload, message, canonicalModel)
 	if failoverErr.IsCredentialFailure() || failoverErr.RequestScopedTransient || openAIStreamBalanceFailure(payload) {
 		return failoverErr
 	}
@@ -2029,6 +2015,42 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverErrorWithModel(
 	// only typed access/capacity/balance failures need the original payload downstream.
 	failoverErr.ResponseBody = body
 	return failoverErr
+}
+
+func (s *OpenAIGatewayService) applyOpenAIStreamForbiddenSoftCooldown(
+	c *gin.Context,
+	account *Account,
+	failoverErr *UpstreamFailoverError,
+	payload []byte,
+	message string,
+	canonicalModel string,
+) {
+	forbidden := failoverErr.WrappedStatus == http.StatusUnauthorized || failoverErr.WrappedStatus == http.StatusForbidden
+	if failoverErr.WrappedStatus == 0 {
+		forbidden = openAIStream403TransientForbidden(payload, message)
+	}
+	if IsResponseCommitted(c) || !forbidden {
+		return
+	}
+	failoverErr.Reason = OpenAIStreamForbiddenReason
+	failoverErr.Scope = GatewayFailureScopeRequest
+	failoverErr.RetryableOnSameAccount = false
+	failoverErr.RequestScopedTransient = false
+	model := firstNonEmpty(canonicalModel, gjson.GetBytes(payload, "model").String(), gjson.GetBytes(payload, "response.model").String())
+	if s != nil && account != nil && account.Platform == PlatformOpenAI && account.Type == AccountTypeAPIKey && resilience.Current().FailureOn() {
+		decision := s.recordOpenAIAccountModelTransientFailure(account, model, time.Now())
+		eventCtx := context.Background()
+		if c != nil && c.Request != nil {
+			eventCtx = c.Request.Context()
+		}
+		logger.FromContext(eventCtx).Info("resilience.forbidden_cooldown",
+			zap.Int64("account_id", account.ID),
+			zap.Int64("group_id", getOpenAIGroupIDFromContext(c)),
+			zap.String("model", openAIAccountModelTransientModel(model)),
+			zap.Int("failure_streak", decision.FailureStreak),
+			zap.Int64("cooldown_ms", decision.Cooldown.Milliseconds()),
+		)
+	}
 }
 
 // nonStreamingTerminalFailureFailover applies the streaming path's terminal-event
