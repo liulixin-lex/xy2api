@@ -1545,7 +1545,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
-      "value": "recordOpenAIStreamKeepaliveBytes"
+      "value": "writeOpenAIStreamKeepalive(c, c.Writer, []byte(line+\"\\n\"), false)"
     },
     {
       "path": "backend/internal/service/resilience_keepalive.go",
@@ -1625,7 +1625,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
-      "value": "writeHeartbeat(line + \"\\n\\n\")"
+      "value": "writeHeartbeat(line+\"\\n\\n\", false)"
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",

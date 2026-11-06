@@ -22,7 +22,7 @@ const ginKeyPreOutputKeepaliveStop = "xy_resilience_pre_output_keepalive_stop"
 // billing checks and selection have passed, on an account that is not an
 // official OAuth account. The heartbeat clock runs from the request start
 // and is not reset by account switches. Later attempts resume a suspended
-// heartbeat, except when an official OAuth account takes over.
+// heartbeat; official OAuth accounts only resume an already committed one.
 func armPreOutputKeepalive(c *gin.Context, protocol string, stream bool, account *service.Account) {
 	if c == nil || c.Request == nil {
 		return
@@ -46,6 +46,7 @@ func armPreOutputKeepalive(c *gin.Context, protocol string, stream bool, account
 	}
 	if cfg.Keepalive.SkipOfficialOAuth && isOfficialOAuthAccount(account) {
 		service.StopPreOutputKeepaliveIfUncommitted(c)
+		service.ResumeCommittedPreOutputKeepalive(c, time.Duration(cfg.Keepalive.IntervalSeconds)*time.Second)
 		return
 	}
 	start := time.Now()

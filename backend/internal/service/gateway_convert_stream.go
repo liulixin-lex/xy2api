@@ -69,34 +69,36 @@ type gatewayConvertHooks struct {
 }
 
 type gatewayConvertStream struct {
-	s           *GatewayService
-	c           *gin.Context
-	resp        *http.Response
-	account     *Account
-	protocol    string
-	model       string
-	requestID   string
-	hooks       gatewayConvertHooks
-	staging     bool
-	strict      bool
-	guarded     bool
-	firstEvent  *firstEventGuard
-	guardFired  bool
-	guardDone   bool
-	stopCancel  func() bool
-	bodyClosed  atomic.Bool
-	preludeLog  *resilience.RequestState
-	upstreamHdr bool
-	held        []string
-	released    bool
-	sawStop     bool
-	sawFailure  bool
-	lineSeen    bool
-	awaitData   bool
-	eventName   string
-	written     bool
-	gone        bool
-	lastWrite   time.Time
+	s                 *GatewayService
+	c                 *gin.Context
+	resp              *http.Response
+	account           *Account
+	protocol          string
+	model             string
+	requestID         string
+	hooks             gatewayConvertHooks
+	staging           bool
+	strict            bool
+	guarded           bool
+	firstEvent        *firstEventGuard
+	guardFired        bool
+	guardDone         bool
+	stopCancel        func() bool
+	bodyClosed        atomic.Bool
+	preludeLog        *resilience.RequestState
+	upstreamHdr       bool
+	held              []string
+	released          bool
+	sawStop           bool
+	sawFailure        bool
+	lineSeen          bool
+	awaitData         bool
+	eventName         string
+	written           bool
+	gone              bool
+	lastWrite         time.Time
+	keepaliveTimer    *time.Timer
+	keepaliveInterval time.Duration
 }
 
 // gatewayConvertOutcome is the end of an attempt; noResult drops the usage.
@@ -111,7 +113,7 @@ func (s *GatewayService) newGatewayConvertStream(c *gin.Context, resp *http.Resp
 		s: s, c: c, resp: resp, account: account, protocol: protocol, model: model,
 		requestID: resp.Header.Get("x-request-id"), hooks: hooks,
 		staging: cfg.PreludeStagingOn(), strict: cfg.StrictTerminalOn(),
-		stopCancel: func() bool { return false }, lastWrite: time.Now(),
+		stopCancel: func() bool { return false },
 	}
 	st.guarded = st.staging || st.strict
 	if st.guarded && resp.Request != nil {
@@ -197,9 +199,14 @@ func (st *gatewayConvertStream) run() gatewayConvertOutcome {
 		stallCh = ticker.C
 	}
 	if st.staging && keepaliveInterval > 0 {
-		ticker := time.NewTicker(keepaliveInterval)
-		defer ticker.Stop()
-		keepaliveCh = ticker.C
+		if k := keepaliveFrom(st.c); k != nil {
+			k.suspend()
+		}
+		st.lastWrite = openAIKeepaliveLastWrite(st.c)
+		st.keepaliveInterval = keepaliveInterval
+		st.keepaliveTimer = time.NewTimer(time.Until(st.lastWrite.Add(keepaliveInterval)))
+		defer st.keepaliveTimer.Stop()
+		keepaliveCh = st.keepaliveTimer.C
 	}
 
 	for {
@@ -225,10 +232,11 @@ func (st *gatewayConvertStream) run() gatewayConvertOutcome {
 			}
 			return st.onStall(threshold)
 		case <-keepaliveCh:
-			if st.released || time.Since(st.lastWrite) < keepaliveInterval {
+			if st.released {
 				continue
 			}
-			st.heartbeat(":\n\n")
+			st.heartbeat(":\n\n", true)
+			st.resetKeepaliveTimer()
 		}
 	}
 }
@@ -256,7 +264,7 @@ func (st *gatewayConvertStream) onLine(line string) (gatewayConvertOutcome, bool
 	// Upstream liveness reaches the client at once while the opening is held
 	// (review R2-P1③); the comment text itself stays private.
 	if st.guarded && !st.released && strings.HasPrefix(line, ":") {
-		st.heartbeat(":\n\n")
+		st.heartbeat(":\n\n", false)
 	}
 	return gatewayConvertOutcome{}, false
 }
@@ -273,11 +281,11 @@ func (st *gatewayConvertStream) onEvent(name, payload string) (gatewayConvertOut
 	}
 	if event.Type == "ping" {
 		if st.protocol == gatewayConvertChat {
-			st.heartbeat(": ping\n\n")
+			st.heartbeat(": ping\n\n", false)
 		} else {
 			st.hooks.convert(&event, payload, false)
 			if st.guarded && !st.released {
-				st.heartbeat(":\n\n")
+				st.heartbeat(":\n\n", false)
 			}
 		}
 		return gatewayConvertOutcome{}, !st.guarded && st.gone
@@ -563,17 +571,24 @@ func (st *gatewayConvertStream) write(frames []string) {
 	}
 	st.c.Writer.Flush()
 	st.lastWrite = time.Now()
+	st.resetKeepaliveTimer()
 }
 
 // heartbeat writes a comment; it commits 200 but is no output.
-func (st *gatewayConvertStream) heartbeat(frame string) {
+func (st *gatewayConvertStream) heartbeat(frame string, refreshClock bool) {
 	if st.gone {
 		return
 	}
 	st.headers(false)
-	n, err := st.c.Writer.Write([]byte(frame))
-	if st.guarded {
-		recordOpenAIStreamKeepaliveBytes(st.c, n)
+	var n int
+	var err error
+	if st.guarded && !st.released {
+		n, err = writeOpenAIStreamKeepalive(st.c, st.c.Writer, []byte(frame), refreshClock)
+	} else {
+		n, err = st.c.Writer.Write([]byte(frame))
+		if st.guarded {
+			recordOpenAIStreamKeepaliveBytes(st.c, n)
+		}
 	}
 	if err == nil && n != len(frame) {
 		err = io.ErrShortWrite
@@ -586,6 +601,24 @@ func (st *gatewayConvertStream) heartbeat(frame string) {
 	}
 	st.c.Writer.Flush()
 	st.lastWrite = time.Now()
+	st.resetKeepaliveTimer()
+}
+
+func (st *gatewayConvertStream) resetKeepaliveTimer() {
+	if st.keepaliveTimer == nil || st.keepaliveInterval <= 0 {
+		return
+	}
+	remaining := time.Until(st.lastWrite.Add(st.keepaliveInterval))
+	if remaining < 0 {
+		remaining = 0
+	}
+	if !st.keepaliveTimer.Stop() {
+		select {
+		case <-st.keepaliveTimer.C:
+		default:
+		}
+	}
+	st.keepaliveTimer.Reset(remaining)
 }
 
 // gatewayConvertErrorSource is an Anthropic error event body for a failure

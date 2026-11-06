@@ -334,8 +334,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		if terminal.strict && !terminal.sawDataLine && !clientOutputStarted &&
 			(strings.HasPrefix(line, ":") || (line == "" && len(pendingLines) == 0)) {
 			writeStableStreamHeaders(c)
-			n, werr := c.Writer.WriteString(line + "\n")
-			recordOpenAIStreamKeepaliveBytes(c, n)
+			n, werr := writeOpenAIStreamKeepalive(c, c.Writer, []byte(line+"\n"), false)
 			if werr == nil && n != len(line)+1 {
 				werr = io.ErrShortWrite
 			}

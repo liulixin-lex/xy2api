@@ -378,6 +378,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	requestRepair.m3 = s.armOpenAIM3(c, account, body)
 	replayAttempt := false
 	for {
+		if replayAttempt {
+			ResumeCommittedPreOutputKeepalive(c, time.Duration(resilience.Current().Keepalive.IntervalSeconds)*time.Second)
+		}
 		derivedBody, deriveErr := requestRepair.m3.derive(ctx, body)
 		if deriveErr != nil {
 			return nil, deriveErr
@@ -2347,6 +2350,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	if s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
 		keepaliveInterval = time.Duration(s.cfg.Gateway.StreamKeepaliveInterval) * time.Second
 	}
+	lastKeepaliveWrite := openAIKeepaliveLastWrite(c)
 	if keepaliveInterval > 0 && !guarded {
 		stopKeepalive = startSSEKeepalive(c, keepaliveInterval, keepaliveInterval, heartbeatFrame, "")
 	}
@@ -2463,12 +2467,11 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	lastLineWritten := ""
 	// writeHeartbeat writes a complete heartbeat while the opening is staged: it commits
 	// 200 but is no output; a failed write means the client left (PM7).
-	writeHeartbeat := func(frame string) {
+	writeHeartbeat := func(frame string, refreshClock bool) {
 		if clientDisconnected {
 			return
 		}
-		n, err := w.Write([]byte(frame))
-		recordOpenAIStreamKeepaliveBytes(c, n)
+		_, err := writeOpenAIStreamKeepalive(c, w, []byte(frame), refreshClock)
 		if err != nil {
 			clientDisconnected = true
 			logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] Client disconnected during heartbeat: account=%d", account.ID)
@@ -2494,7 +2497,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			// Upstream comments are heartbeats: passed through at once
 			// instead of staged with the opening (review R2-P1③).
 			if strings.HasPrefix(line, ":") {
-				writeHeartbeat(line + "\n\n")
+				writeHeartbeat(line+"\n\n", false)
 				skipBlank = !eventOpen
 				return passthroughLineContinue
 			}
@@ -2964,11 +2967,12 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			}
 			// The read pump's ticker owns the cadence, independently of upstream
 			// comments. Rechecking tick timestamps can skip a beat on clock jitter.
-			writeHeartbeat(string(heartbeatFrame))
+			writeHeartbeat(string(heartbeatFrame), true)
 		},
 		firstOutputDeadline: firstOutputDeadline(startTime, firstOutputTimeout),
 		stallCheckBase:      stallCheckBase,
 		keepaliveInterval:   keepaliveInterval,
+		keepaliveFirstDelay: time.Until(lastKeepaliveWrite.Add(keepaliveInterval)),
 	})
 }
 
