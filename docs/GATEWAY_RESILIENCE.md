@@ -120,7 +120,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 
 Responses 空白占位：`response.output_text.delta` / `.done`、output_text 的 `response.content_part.added` / `.done`、assistant message 的 `response.output_item.added` / `.done` 逐事件按自身载荷判定，文本经 Go `strings.TrimSpace` 为空时暂存，不提交、不停止首输出截止、不计首 token。空 delta 必须存在且为字符串；refusal、非文本 part、未知或畸形载荷立即算输出，不依赖 item 状态表。原生与透传复用尝试级有界暂存；任一可见事件先按原序冲刷全部暂存，再发送该事件，字节与既有输出路径的协议变换结果相同。输出前失败丢弃全部未提交帧（含 created/in_progress），再走失败处理。
 
-`response.completed` 始终按成功终态冲刷并发送，包括空回答；扫描 `response.output` 只决定首 token、delivery 的 `FirstOutput` 与 `SemanticOutputAt`，不改变终态。仅空白的成功响应不进入 `ReportOpenAIAttemptSuccess` 的首输出延迟样本，`attempt_first_output_ms` 也为空。delivery 开场分类仍依赖缺省开启的 `stream.native_prelude_whitelist`；兼容转换还依赖 `stream.prelude_staging`。首字档位、末位候选和 240 秒总预算不变。
+`response.completed` 通过既有静默拒绝守卫后，按成功终态冲刷并发送；原生（含 Grok）与直通仍对尚无语义输出、output/usage/error 都为空的 completed 换号（#5009/#7774），空白不算已见语义输出。有 output 或 usage 的合法空回答保留；扫描 `response.output` 决定首 token、delivery 的 `FirstOutput` 与 `SemanticOutputAt`。仅空白的成功响应不进入 `ReportOpenAIAttemptSuccess` 的首输出延迟样本，`attempt_first_output_ms` 也为空。delivery 开场分类仍依赖缺省开启的 `stream.native_prelude_whitelist`；兼容转换还依赖 `stream.prelude_staging`。首字档位、末位候选和 240 秒总预算不变。
 
 `response.created` 前被既有过滤器丢弃的无标记空白 delta 仍更新存活计数和 stall 活动时间，但不再计入 semantic 首 token；有 `SSE-Keep-Alive` 标记的保活帧保留原有计时行为。
 

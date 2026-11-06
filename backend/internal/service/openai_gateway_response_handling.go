@@ -297,6 +297,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	terminalEventType := ""
 	capacityFailoverSuppressedLogged := false
 	failedMessage := ""
+	responsesSemanticOutputSeen := false
 	clientOutputStarted := false
 	codexFailureTerminal := account != nil && account.IsOpenAIOAuthLike()
 	upstreamRequestID := strings.TrimSpace(resp.Header.Get("x-request-id"))
@@ -798,6 +799,17 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			// Replace model in response if needed.
 			if needModelReplace {
 				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
+			}
+			responsesSemanticOutputSeen = responsesSemanticOutputSeen || resilience.ResponsesEventOutputDisposition(eventType, dataBytes).SemanticOutput
+			// Preserve the silent-refusal guard (#5009/#7774); whitespace does not
+			// turn an otherwise empty, usage-free completed event into success.
+			if account != nil && (account.Platform == PlatformOpenAI || account.Platform == PlatformGrok) &&
+				(eventType == "response.completed" || eventType == "response.done") &&
+				!sawFailedEvent && !responsesSemanticOutputSeen && !clientOutputStarted &&
+				openAIResponsesCompletedEventIsEmpty(dataBytes, usage) {
+				sawTerminalEvent = true
+				streamEarlyErr = newOpenAIResponsesEmptyCompletedFailoverError(c, account, upstreamRequestID)
+				return
 			}
 			startsClientOutput := forceFlushFailedEvent || openAIStreamDataStartsClientOutput(data, eventType)
 			if startsClientOutput && !clientOutputStarted {

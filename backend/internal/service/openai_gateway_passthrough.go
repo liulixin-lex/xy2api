@@ -2147,6 +2147,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	terminalEventType := ""
 	capacityFailoverSuppressedLogged := false
 	failedMessage := ""
+	semanticOutputSeen := false
 	clientOutputStarted := false
 	attemptStagedBlankPlaceholder := false
 	eventHasBlankPlaceholder := false
@@ -2565,6 +2566,12 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				dataBytes = sanitizedData
 				trimmedData = strings.TrimSpace(string(sanitizedData))
 				line = "data: " + string(sanitizedData)
+			}
+			semanticOutputSeen = semanticOutputSeen || resilience.ResponsesEventOutputDisposition(eventType, dataBytes).SemanticOutput
+			if (eventType == "response.completed" || eventType == "response.done") &&
+				!sawFailedEvent && !semanticOutputSeen && !clientOutputStarted && !clientDisconnected &&
+				openAIResponsesCompletedEventIsEmpty(dataBytes, usage) {
+				return passthroughReturn(resultWithUsage(), newOpenAIResponsesEmptyCompletedFailoverError(c, account, upstreamRequestID))
 			}
 			lineStartsClientOutput = forceFlushFailedEvent || openAIStreamDataStartsClientOutput(trimmedData, eventType)
 			// Content stops the first-output deadline even after a failed
