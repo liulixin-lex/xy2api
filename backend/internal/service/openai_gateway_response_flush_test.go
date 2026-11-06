@@ -441,6 +441,23 @@ func TestOpenAIResponseFlush_FailedAndErrorEventsFlushAtBoundaries(t *testing.T)
 	})
 }
 
+func TestOpenAIResponseFlush_WrappedError400FailsOverBeforeOutput(t *testing.T) {
+	upstream := "event: error\n" +
+		`data: {"type":"proxy.upstream_error","status":400,"message":"late upstream status"}` + "\n\n"
+	recorder := newOpenAIResponseFlushRecorder()
+
+	result, err := runOpenAIResponseFlushTest(recorder, io.NopCloser(strings.NewReader(upstream)), config.GatewayConfig{})
+
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.NotNil(t, result)
+	require.Equal(t, http.StatusBadRequest, failoverErr.StatusCode)
+	require.Equal(t, http.StatusBadRequest, failoverErr.WrappedStatus)
+	gotBody, flushes := recorder.snapshot()
+	require.Empty(t, gotBody)
+	require.Empty(t, flushes)
+}
+
 func TestOpenAIResponseFlush_BareErrorFollowedByCompletedUsesCompletedTerminal(t *testing.T) {
 	body := "data: {\"type\":\"error\",\"error\":{\"code\":\"transient\",\"message\":\"retrying\"}}\n\n" +
 		"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_recovered\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":7,\"output_tokens\":3}}}\n\n"

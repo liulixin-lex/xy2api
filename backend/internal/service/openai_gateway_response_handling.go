@@ -533,6 +533,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				nextFailureSequence = seq.Int() + 1
 			}
 			eventType := effectiveOpenAISSEEventType(dataBytes, pendingSSEEventType)
+			wrappedStatus, wrappedFrame, malformedWrapped := openAIWrappedUpstreamErrorStatus(pendingSSEEventType, dataBytes)
+			if malformedWrapped {
+				logOpenAIWrappedErrorMalformed(ctx, account, "native_sse")
+			}
 			observeOpenAIPreludeCreated(preludeTrace, eventType)
 			if codexFailureTerminal && sawBareError && !sawResponseFailed &&
 				(eventType == "response.completed" || eventType == "response.done") {
@@ -609,7 +613,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 						streamEarlyErr = replayErr
 						return
 					}
-					if repairErr := newOpenAIRequestRepairSignal(ctx, c, account, dataBytes, failedMessage); repairErr != nil {
+					if repairErr := newOpenAIRequestRepairSignal(ctx, c, account, dataBytes, failedMessage, wrappedStatus); repairErr != nil {
 						sawFailedEvent = true
 						streamEarlyErr = repairErr
 						return
@@ -617,7 +621,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				}
 				captureOpenAIStateRejection(c, account, dataBytes, failedMessage, "native_sse", outputStarted, nil)
 				if a := openAICollaborationAttempt(c); a != nil && a.applied && !outputStarted && resp.StatusCode == http.StatusOK {
-					status := openAIStreamFailedEventSemanticStatus(dataBytes, failedMessage)
+					status := openAIStreamFailedEventSemanticStatus(dataBytes, failedMessage, wrappedStatus)
 					a.clientRejected = a.clientRejected || (status >= 400 && status < 500 && status != 429 && classifyUpstreamHTTP(status, nil, dataBytes, failedMessage).Category == resilience.CategoryClientError)
 				}
 				if outputStarted && !cyberHit {
@@ -638,8 +642,15 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 					}
 				}
 				if !outputStarted {
+					if wrappedFrame {
+						if failoverErr := s.newOpenAIWrappedStreamFailoverError(ctx, c, account, false, upstreamRequestID, dataBytes, failedMessage, mappedModel, resp.Header, wrappedStatus); failoverErr != nil {
+							sawFailedEvent = true
+							streamEarlyErr = failoverErr
+							return
+						}
+					}
 					shouldFailover := false
-					if !cyberHit {
+					if !cyberHit && !wrappedFrame {
 						if eventType == "error" {
 							shouldFailover = openAIStreamErrorEventShouldFailover(dataBytes, failedMessage)
 						} else {
@@ -1176,10 +1187,14 @@ func openAICompatPayloadWithEventType(payload, eventType string) string {
 }
 
 func effectiveOpenAISSEEventType(payload []byte, eventType string) string {
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "error" {
+		return eventType
+	}
 	if payloadType := strings.TrimSpace(gjson.GetBytes(payload, "type").String()); payloadType != "" {
 		return payloadType
 	}
-	return strings.TrimSpace(eventType)
+	return eventType
 }
 
 func (s *OpenAIGatewayService) replaceModelInSSELine(line, fromModel, toModel string) string {

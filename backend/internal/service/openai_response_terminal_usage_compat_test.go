@@ -12,10 +12,11 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-func TestEffectiveOpenAISSEEventTypePrefersPayload(t *testing.T) {
+func TestEffectiveOpenAISSEEventTypePreservesRawErrorEvent(t *testing.T) {
 	t.Parallel()
 
-	require.Equal(t, "response.failed", effectiveOpenAISSEEventType([]byte(`{"type":"response.failed"}`), "error"))
+	require.Equal(t, "error", effectiveOpenAISSEEventType([]byte(`{"type":"response.failed"}`), "error"))
+	require.Equal(t, "response.failed", effectiveOpenAISSEEventType([]byte(`{"type":"response.failed"}`), ""))
 	require.Equal(t, "error", effectiveOpenAISSEEventType([]byte(`{"error":{"message":"failed"}}`), " error "))
 	require.JSONEq(t, `{"type":"error","error":{"message":"failed"}}`, openAICompatPayloadWithEventType(`{"type":"","error":{"message":"failed"}}`, "error"))
 }

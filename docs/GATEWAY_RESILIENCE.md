@@ -305,6 +305,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 
 **第一个内容之前的失败可以换号**
 
+- OpenAI Responses 的流内中转包装帧（`event: error` + `type=proxy.upstream_error`，或 `response.failed` + `response.error.type=upstream_error`）只在状态码、字段类型与相等关系校验通过后按迟到的上游 HTTP 状态路由。输出前包装 400 交给加密态请求修复，403 按停用/凭证码走账号故障路径，否则走请求级 forbidden；其他状态复用 HTTP 的换号判定。包装 400–599 以外或结构不完整的帧按普通失败处理，畸形帧各记一条 `resilience.wrapped_error_malformed`；输出后的流保持原行为。
 - `codex.response.metadata` 判为开场事件（§1）。以前它算内容，之后的失败不能换号，首输出截止也随之解除，出现过 240 秒的挂起。
 - 原生 Anthropic 与 API Key 直通（`stream.prelude_staging`）：`message_start`、`ping`、空的 text 与 thinking `content_block_start` 暂存到第一个内容或终态，`tool_use` 起始算内容、立即写出。暂存期间上游的可重试失败（流内 `overloaded_error`、`rate_limit_error`，断流、读错、停滞）丢弃本次开场并换号，客户端只看到成功那次尝试的一个 `message_start`；不可重试的拒绝写出开场后以 `event: error` 结束；合法的空回答照常写出。
 - 暂存期间按流内心跳间隔写注释行 `: ping`（以前是 `event: ping`），不算输出；失败尝试的上游响应头与 request-id 不写出。暂存最多 8 MiB（超过 64 KiB 写入已解除链接的临时文件），超出时换号；预算开启的文本请求最多暂存到本请求预算用尽。图片请求与没有预算的请求不设这个时限。
@@ -487,6 +488,7 @@ warn 级，进入运维页“系统日志”（`ops_system_logs`）：
 - `budget_exhausted`、`capacity_switch_exhausted`；
 - `stall`、`fast_fail`、`turn_cap`、`abuse_guard`；
 - `state_rejection`（完整事件名 `resilience.state_rejection`）：原生与透传每次 Forward 结束时至多一次，桥接与 WS 在判断点记录；仅计数与标识，不存正文。含通用请求字段、`group_id`、`account_id`、`family`、`encrypted`、`path`（`native_http`、`native_sse`、`passthrough_http`、`passthrough_sse`、`chat`、`messages`、`ws`）、`stage`（`pre_output` / `post_output`；WS 缺少本 turn 输出事实时为 `unknown`）、`headers_committed`、距尝试开始的 `error_ms`、`client_version`。原生与透传另带最终 `rule_id`（来自 gin 键 `ops_error_passthrough_rule_id`，每次尝试清零；桥接与 WS 不带）。`collab_plaintext` 取本次尝试的 `Applied`，并带 `collab_calls`、`collab_efa_absent`、`collab_efa_empty`、`collab_efa_nonempty`、`collab_marker_added`、`collab_vetoed`、`collab_contradicted`、`collab_uncovered`。`frag_amsg`、`frag_fco`、`frag_other` 只扫描协议位置的密文片段，`frag_opaque_like` / `frag_text_like` 只用于形态诊断，不进入修复或改写决定；不递归工具参数或正文。WS 处罚入口没有 Gin / 当前请求体 / 本 turn 输出状态，只记录可得字段，省略 `headers_committed`、`client_version` 及片段计数，不从连接累计字节推断阶段；
+- `wrapped_error_malformed`：Responses 原生/透传流内或非流式聚合出口识别到像包装帧但类型、状态或字段不一致时每帧一条，含 `account_id` 与 `path`，不记帧正文；
 - `post_output_failure`（含 `group_id`、`account_id`、`reason`、窗口内次数与是否施加冷却）；
 - `undelivered_record_dropped`：未送达记录的后台写入全部占满，这条记录未写（含 `request_id`）；
 - `last_resort_verify_failed`：末位兜底派发前复核账号时读库失败，按快照中的账号继续；
