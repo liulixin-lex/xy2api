@@ -75,7 +75,7 @@
 
 - **零中断加密态与路由（0.5.5）**：
   - 部署需用户授权。部署前按 OpenSpec `encrypted-routing-20261105` tasks 4.1 核实当前运行版本、固化可回退镜像并核对重建后的版本一致性。
-  - 上线配套的生产设置项（门槛 v3 ResetAt、流内心跳间隔）见本地任务目录交接，待用户决定。
+  - 上线不需要改生产设置：门槛 v3 的状态、投票与坏记忆只保存在进程内，样本下界包含进程启动时刻，所以部署重启后会自动清空并重新统计，不需要 ResetAt（见 `docs/GROUP_QUALITY_GATE.md`）；输出前暂存期间的流内心跳依赖 `gateway.stream_keepalive_interval`，生产使用缺省值 10 秒，部署时保持不变，不要设为 0。
   - 上线后按 tasks 4.3 验收：Codex 可见失败总数、输出前最终失败按原因拆分（forbidden、5xx、首字超时、预算耗尽、M3 terminal），并盯占位站换号、首字超时、慢退避、额外上游调用和延迟迁移量。
   - 证据缺口与观察项（不阻塞发布）：M3 未能在真实上游触发，以单测与 Forward 衔接回归为证；输出前心跳实测相邻最大间隔 8.5 秒（设定 5 秒），原因待查；心跳已提交响应头后到达的请求级 4xx 以 `response.failed` / `server_error` 收尾（基线行为）；OpenAI API Key 账号能力探测在 info 日志打印上游 base_url（基线行为）。
   - proposal“不做”所列三项（明文默认生效与 conflict 修正、删除 P1-B 守卫读点、`sticky_bypass` 诊断）后续单独处理。
