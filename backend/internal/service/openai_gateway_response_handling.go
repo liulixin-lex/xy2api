@@ -367,7 +367,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		if errorEventSent || clientDisconnected || failureDelivered || sawTerminalEvent {
 			return
 		}
-		if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+		// A visible event may still await its closing blank line. Preserve that
+		// pending output and let the failure frame close the original boundary.
+		if !openAIStreamClientOutputStarted(c, clientOutputStarted) && !eventShouldFlush {
 			if err := discardPendingWrites(); err != nil {
 				handlePendingWriteError(err)
 				return

@@ -120,6 +120,8 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 
 Responses 空白占位：`response.output_text.delta` / `.done`、output_text 的 `response.content_part.added` / `.done`、assistant message 的 `response.output_item.added` / `.done` 逐事件按自身载荷判定，文本经 Go `strings.TrimSpace` 为空时暂存，不提交、不停止首输出截止、不计首 token。空 delta 必须存在且为字符串；refusal、非文本 part、未知或畸形载荷立即算输出，不依赖 item 状态表。原生与透传复用尝试级有界暂存；任一可见事件先按原序冲刷全部暂存，再发送该事件，字节与既有输出路径的协议变换结果相同。输出前失败丢弃全部未提交帧（含 created/in_progress），再走失败处理。
 
+本地断流时，已经判为可见但尚缺 SSE 结束空行的末尾事件仍按既有输出路径冲刷，随后补齐原有边界并发送合成 `response.failed`；截断 JSON 与未知载荷同样保留。只有纯开场、空白占位且没有待冲刷可见事件时，才丢弃暂存。
+
 Responses 输出前的原生、直通及请求级 preOutput 心跳统一为完整的 `event: ping\ndata: {"type":"ping"}\n\n`，每拍派发一个 SSE 事件，供按事件计时的客户端重置空闲计时。心跳仍扣除输出字节、不计首输出，停拍与帧边界保护保持；上游注释原样处理，Anthropic 与 Chat 的心跳不变。
 
 Chat/Messages 兼容转换只在首次提交前暂存解码后的开场与空白事件，按上游载荷累计限制为 8 MiB。首个可见事件或成功终态到达时按序转换并冲刷；失败丢弃。提交后空白 delta 照常转换，保留前导空格和词间空格；超出暂存上限按既有输出前失败换号。
