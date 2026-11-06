@@ -60,13 +60,14 @@ func ResponsesEventOutputDisposition(eventType string, payload []byte) Responses
 			return responsesVisibleDisposition()
 		}
 	}
-	if typ == "response.failed" || typ == "response.incomplete" || typ == "error" {
+	interrupted := typ == "response.incomplete" && root.Get("response.incomplete_details.reason").String() == "interrupted"
+	if typ == "response.failed" || (typ == "response.incomplete" && !interrupted) {
 		return ResponsesOutputDisposition{}
 	}
 	if validObject && !responsesObjectHasOnlyFields(root) {
 		return responsesVisibleDisposition()
 	}
-	if typ == "response.completed" || typ == "response.done" {
+	if typ == "response.completed" || typ == "response.done" || interrupted {
 		return ResponsesOutputDisposition{
 			Matched: true, Kind: TerminalSuccess, Visible: true,
 			SemanticOutput: !validObject || responsesCompletedHasSemanticOutput(root),

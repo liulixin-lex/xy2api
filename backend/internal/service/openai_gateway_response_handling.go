@@ -610,17 +610,22 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				logOpenAICapacityFailoverSuppressed(ctx, account, "native_sse", upstreamRequestID, eventType)
 				capacityFailoverSuppressedLogged = true
 			}
+			if resilience.ClassifyStreamEvent("responses", eventType, dataBytes).Kind == resilience.TerminalFailure &&
+				!openAIStreamClientOutputStarted(c, clientOutputStarted) {
+				if err := discardPendingWrites(); err != nil {
+					handlePendingWriteError(err)
+					return
+				}
+				if writer := deliveryWriterFrom(c); writer != nil {
+					// A bare error is still a Responses terminal after its prelude is discarded.
+					writer.stream.responses.Store(true)
+				}
+				restoreFailureEventLine = pendingSSEEventLine != ""
+				eventInProgress = false
+				eventHasBlankPlaceholder = false
+			}
 			cyberHit := false
 			if eventType == "response.failed" || eventType == "error" {
-				if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
-					if err := discardPendingWrites(); err != nil {
-						handlePendingWriteError(err)
-						return
-					}
-					restoreFailureEventLine = pendingSSEEventLine != ""
-					eventInProgress = false
-					eventHasBlankPlaceholder = false
-				}
 				if codexFailureTerminal && eventType == "error" {
 					sawBareError = true
 					bareErrorPayload = append(bareErrorPayload[:0], dataBytes...)

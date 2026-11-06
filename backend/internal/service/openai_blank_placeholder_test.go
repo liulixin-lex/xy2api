@@ -278,18 +278,53 @@ func TestResponsesBlankPlaceholderVisibleItemFlushesAllBeforeTerminal(t *testing
 func TestResponsesBlankPlaceholderNonRetryableFailureKeepsOnlyFailureFrame(t *testing.T) {
 	withResilienceSettings(t, nil)
 	for _, passthrough := range []bool{false, true} {
+		for _, ending := range []struct{ event, payload string }{
+			{"response.failed", `{"type":"response.failed","response":{"error":{"code":"content_policy_violation","message":"blocked"}}}`},
+			{"error", `{"type":"error","error":{"code":"content_policy_violation","message":"blocked"}}`},
+			{"response.incomplete", `{"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"content_filter"}}}`},
+		} {
+			t.Run(fmt.Sprintf("passthrough=%t/%s", passthrough, ending.event), func(t *testing.T) {
+				c, recorder := compatStreamContext("/v1/responses", `{}`)
+				state := resilience.NewRequestState()
+				c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
+				InstallDeliveryTracking(c, time.Now())
+				prelude := strings.Split(d10BlankPlaceholderStream(2, true), "event: response.failed")[0]
+				body := prelude + "event: " + ending.event + "\ndata: " + ending.payload + "\n\n"
+				firstToken, err := runBlankPlaceholderAttempt(&OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}, c,
+					&Account{ID: 9026, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, passthrough, io.NopCloser(strings.NewReader(body)), time.Now())
+				if ending.event != "response.incomplete" {
+					require.Error(t, err)
+				}
+				require.Nil(t, firstToken)
+				require.True(t, state.FirstOutput().IsZero())
+				require.True(t, state.SemanticOutputAt().IsZero())
+				require.Nil(t, state.AttemptFirstOutputMs())
+				out := recorder.Body.String()
+				require.NotEmpty(t, out)
+				require.True(t, strings.HasSuffix(out, "\n\n"), out)
+				require.NotContains(t, out, "response.created")
+				require.NotContains(t, out, "response.in_progress")
+				require.NotContains(t, out, "response.output_item")
+				if ending.event == "response.incomplete" {
+					require.True(t, strings.HasPrefix(out, "event: response.incomplete\ndata: "), out)
+					require.Contains(t, out, "content_filter")
+				}
+			})
+		}
+	}
+}
+
+func TestResponsesBlankPlaceholderInterruptedFlushesPrelude(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, passthrough := range []bool{false, true} {
 		c, recorder := compatStreamContext("/v1/responses", `{}`)
-		body := strings.ReplaceAll(d10BlankPlaceholderStream(2, true), "server_is_overloaded", "content_policy_violation")
-		body = strings.ReplaceAll(body, "service_unavailable_error", "invalid_request_error")
+		prelude := strings.Split(d10BlankPlaceholderStream(1, true), "event: response.failed")[0]
+		body := prelude + "event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"incomplete_details\":{\"reason\":\"interrupted\"}}}\n\n"
 		_, err := runBlankPlaceholderAttempt(&OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}, c,
-			&Account{ID: 9026, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, passthrough, io.NopCloser(strings.NewReader(body)), time.Now())
-		require.Error(t, err)
-		out := recorder.Body.String()
-		require.True(t, strings.HasPrefix(out, "event: response.failed\ndata: "), out)
-		require.True(t, strings.HasSuffix(out, "\n\n"), out)
-		require.NotContains(t, out, "response.created")
-		require.NotContains(t, out, "response.in_progress")
-		require.NotContains(t, out, "response.output_item")
+			&Account{ID: 9026, Platform: PlatformOpenAI}, passthrough, io.NopCloser(strings.NewReader(body)), time.Now())
+		require.NoError(t, err)
+		require.True(t, strings.HasPrefix(recorder.Body.String(), prelude))
+		require.Contains(t, recorder.Body.String(), "event: response.incomplete")
 	}
 }
 

@@ -1259,6 +1259,8 @@ func openAIStreamDataStartsVisibleOutput(data, eventType string) bool {
 		return delta.Exists() && delta.String() != ""
 	}
 	switch eventType {
+	case "response.failed", "response.incomplete", "error":
+		return false
 	case "response.output_text.done",
 		"response.reasoning_summary_text.done",
 		"response.reasoning_text.done",
@@ -1298,11 +1300,10 @@ func openAIStreamDataStartsSemanticTTFT(data, eventType string) bool {
 		eventType = strings.TrimSpace(gjson.Get(trimmed, "type").String())
 	}
 	switch eventType {
-	case "response.failed":
+	case "response.failed", "error":
 		return false
-	case "error":
-		payload := []byte(trimmed)
-		return !openAIStreamFailedEventShouldFailover(payload, extractOpenAISSEErrorMessage(payload))
+	case "response.incomplete":
+		return resilience.ResponsesEventOutputDisposition(eventType, []byte(trimmed)).SemanticOutput
 	default:
 		if disposition := resilience.ResponsesEventOutputDisposition(eventType, []byte(trimmed)); disposition.Matched {
 			return disposition.SemanticOutput
@@ -1327,6 +1328,9 @@ func (s *OpenAIGatewayService) openAITTFTMode(ctx context.Context) string {
 }
 
 func openAIStreamDataStartsTTFT(data, eventType string, forceOutput bool, mode string) bool {
+	if resilience.ClassifyStreamEvent("responses", eventType, []byte(data)).Kind == resilience.TerminalFailure {
+		return false
+	}
 	if mode == OpenAITTFTModeVisible {
 		return openAIStreamDataStartsVisibleOutput(data, eventType)
 	}
@@ -2432,10 +2436,13 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			if wrappedFrame && eventType == "proxy.upstream_error" && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
 				eventType = "error"
 			}
-			if (eventType == "response.failed" || eventType == "error") && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+			if resilience.ClassifyStreamEvent("responses", eventType, dataBytes).Kind == resilience.TerminalFailure && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
 				if err := discardPendingLines(); err != nil {
 					return passthroughReturn(resultWithUsage(), s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, nil,
 						"OpenAI first-output stage reset failed: "+err.Error()))
+				}
+				if writer := deliveryWriterFrom(c); writer != nil {
+					writer.stream.responses.Store(true)
 				}
 				restoreFailureEventLine = pendingSSEEventLine != ""
 				eventHasBlankPlaceholder = false
