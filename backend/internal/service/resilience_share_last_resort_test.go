@@ -176,8 +176,11 @@ func TestResilienceLastResortLogsPriorSessionAvoidance(t *testing.T) {
 				}
 				require.Equal(t, lrAccountA, selected.Account.ID)
 				require.False(t, state.Avoided(lrAccountA), "avoidance comes from the earlier request's session store")
-				require.Equal(t, 1, strings.Count(logs.String(), `"msg":"resilience.last_resort_avoided"`))
-				require.Contains(t, logs.String(), `"reason":"session_avoid"`)
+				logOutput := logs.String()
+				require.Equal(t, 1, strings.Count(logOutput, `"msg":"resilience.last_resort_avoided"`))
+				require.Contains(t, logOutput, `"reason":"session_avoid"`)
+				require.Contains(t, logOutput, `"candidates":2`)
+				require.Contains(t, logOutput, `session_avoid:1`)
 			})
 		}
 	}

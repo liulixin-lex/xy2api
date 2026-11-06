@@ -186,6 +186,11 @@ func (c *schedulerTestGatewayCache) DeleteSessionAccountID(ctx context.Context, 
 	return nil
 }
 
+func (c *schedulerTestGatewayCache) DeleteSessionAccountIDAndReport(ctx context.Context, groupID int64, sessionHash string) (bool, error) {
+	_, existed := c.sessionBindings[sessionHash]
+	return existed, c.DeleteSessionAccountID(ctx, groupID, sessionHash)
+}
+
 func (c *schedulerTestGatewayCache) SetGrokVideoPendingBilling(_ context.Context, _ string, _ []byte, _ time.Duration) error {
 	return nil
 }

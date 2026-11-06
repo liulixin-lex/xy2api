@@ -123,6 +123,26 @@ func TestCodexCollabApplyDeclarationsAndOpaqueHistory(t *testing.T) {
 	}
 }
 
+func TestCodexCollabApplyKnownHistoricalAliases(t *testing.T) {
+	request := codexCollabTestRequest()
+	items := []any{
+		map[string]any{"type": "function_call", "namespace": "collaboration-xy", "name": "spawn_agent"},
+		map[string]any{"type": "function_call", "name": "collaboration-xy.send_message"},
+		map[string]any{"type": "custom_tool_call", "name": "collaboration-xy__followup_task"},
+	}
+	for _, item := range items {
+		request = codexCollabTestSet(t, request, "input.-1", item)
+	}
+	out, plan, outcome := applyCodexCollaborationPlaintext(request)
+	require.Equal(t, codexCollabApplied, outcome)
+	require.NotNil(t, plan)
+	for index, name := range []string{"spawn_agent", "send_message", "followup_task"} {
+		path := fmt.Sprintf("input.%d", index+1)
+		require.Equal(t, codexCollaborationNamespaceAlias, gjson.GetBytes(out, path+".namespace").String())
+		require.Equal(t, name, gjson.GetBytes(out, path+".name").String())
+	}
+}
+
 func TestCodexCollabApplyAtomicRejections(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -151,8 +171,11 @@ func TestCodexCollabApplyAtomicRejections(t *testing.T) {
 		{"private declaration flat", func(t *testing.T, b []byte) []byte {
 			return codexCollabTestSet(t, b, "tools", []any{map[string]any{"type": "custom", "name": "collaboration-xy__other"}})
 		}, codexCollabConflict},
-		{"private history", func(t *testing.T, b []byte) []byte {
-			return codexCollabTestSet(t, b, "input.-1", map[string]any{"type": "function_call", "namespace": "collaboration-xy", "name": "spawn_agent"})
+		{"unknown private history", func(t *testing.T, b []byte) []byte {
+			return codexCollabTestSet(t, b, "input.-1", map[string]any{"type": "custom_tool_call", "name": "collaboration-xy.other"})
+		}, codexCollabConflict},
+		{"private history with external namespace", func(t *testing.T, b []byte) []byte {
+			return codexCollabTestSet(t, b, "input.-1", map[string]any{"type": "function_call", "namespace": "external", "name": "collaboration-xy.spawn_agent"})
 		}, codexCollabConflict},
 		{"private tool choice", func(t *testing.T, b []byte) []byte {
 			return codexCollabTestSet(t, b, "tool_choice", json.RawMessage(`{"type":"allowed_tools","tools":[{"type":"function","function":{"name":"collaboration-xy__spawn_agent"}}]}`))

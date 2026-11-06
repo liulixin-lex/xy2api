@@ -215,13 +215,19 @@ func (c *atomicStickyTestCache) ClaimSessionAccountID(_ context.Context, _ int64
 	return c.bindings[key], nil
 }
 
-func (c *atomicStickyTestCache) DeleteSessionAccountIDIfOwner(_ context.Context, _ int64, key string, owner int64) error {
+func (c *atomicStickyTestCache) DeleteSessionAccountIDIfOwner(ctx context.Context, groupID int64, key string, owner int64) error {
+	_, err := c.DeleteSessionAccountIDIfOwnerAndReport(ctx, groupID, key, owner)
+	return err
+}
+
+func (c *atomicStickyTestCache) DeleteSessionAccountIDIfOwnerAndReport(_ context.Context, _ int64, key string, owner int64) (bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.bindings[key] == owner {
 		delete(c.bindings, key)
+		return true, nil
 	}
-	return nil
+	return false, nil
 }
 
 func TestOpenAICacheConcurrentColdSelection(t *testing.T) {

@@ -167,7 +167,7 @@ func openAIEncryptedFragmentCensus(body []byte) (counts openAIEncryptedFragments
 		for _, part := range parts.Array() {
 			if part.Get("type").String() == "encrypted_content" {
 				*count++
-				countShape(part.Get("data").String())
+				countShape(part.Get("encrypted_content").String())
 			}
 		}
 	}

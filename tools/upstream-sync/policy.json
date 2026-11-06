@@ -3165,7 +3165,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
-      "value": "if err == nil && account != nil && !isExcluded(accountID) && !s.resilienceKeepOpenAISoftOwner(ctx, account, platform, requestedModel) {"
+      "value": "if err == nil && account != nil && !isExcluded(accountID) && !softOwner {"
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
@@ -3884,10 +3884,6 @@
       "value": "func TestCollaborationForwardAppliedHTTPFailureWarn"
     },
     {
-      "path": "backend/internal/service/openai_gateway_forward.go",
-      "value": "account.IsOpenAIApiKey() && !account.IsOpenAICollaborationPlaintextEnabled() && collabRawContinuity"
-    },
-    {
       "path": "backend/internal/service/openai_gateway_upstream_errors.go",
       "value": "restoreOpenAICollaborationError(c, body)"
     },
@@ -3909,10 +3905,6 @@
     },
     {
       "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
-      "value": "func TestCollaborationForwardContinuity"
-    },
-    {
-      "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
       "value": "func TestCollaborationForwardHTTPErrorRestoration"
     },
     {
@@ -3926,10 +3918,6 @@
     {
       "path": "backend/internal/service/openai_gateway_forward.go",
       "value": "collabAttempt.outcome, collabAttempt.eligibilitySource = codexCollabConflict, \"account\""
-    },
-    {
-      "path": "backend/internal/service/openai_collaboration_plaintext.go",
-      "value": "efa := item.Get(\"encrypted_function_args\"); efa.Exists() && efa.IsArray() && len(efa.Array()) == 0"
     },
     {
       "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
@@ -3961,15 +3949,11 @@
     },
     {
       "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
-      "value": "func TestCollaborationForwardContinuityBeforeNormalization"
+      "value": "func TestCollaborationForwardConflictBeforeNormalization"
     },
     {
       "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
       "value": "func TestCollaborationForwardEscapedDeclarationRemainsObserveOnly"
-    },
-    {
-      "path": "backend/internal/service/openai_gateway_forward.go",
-      "value": "collabRawContinuity = rawPlan != nil && openAICollaborationContinuity(body)"
     },
     {
       "path": "backend/internal/service/openai_gateway_forward.go",
@@ -4158,6 +4142,22 @@
     {
       "path": "backend/internal/service/openai_terminal_rejection_test.go",
       "value": "func TestOpenAITerminalRejectionMessageOnlyContextLimitDoesNotAvoid(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/openai_sticky_atomic.go",
+      "value": "deleted, err := reporter.DeleteSessionAccountIDIfOwnerAndReport(ctx, derefGroupID(groupID), s.openAISessionCacheKey(sessionHash), owner)"
+    },
+    {
+      "path": "backend/internal/service/openai_sticky_atomic.go",
+      "value": "return reporter.DeleteSessionAccountIDAndReport(ctx, groupID, key)"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "resilience.StateFrom(ctx).ResetStickyBypassReason()"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "resilience.StateFrom(ctx).ResetStickyBypassReason()"
     }
   ],
   "forbidden_module_paths": [

@@ -112,6 +112,20 @@ func TestAnthropicStickyDeleteIfOwner(t *testing.T) {
 	require.False(t, deleted)
 }
 
+func TestStickyDeleteReportsMissingBinding(t *testing.T) {
+	client := redis.NewClient(&redis.Options{Addr: miniredis.RunT(t).Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	cache := &gatewayCache{rdb: client}
+	ctx := context.Background()
+	require.NoError(t, cache.SetSessionAccountID(ctx, 1, "sticky-delete-report", 42, time.Hour))
+	deleted, err := cache.DeleteSessionAccountIDAndReport(ctx, 1, "sticky-delete-report")
+	require.NoError(t, err)
+	require.True(t, deleted)
+	deleted, err = cache.DeleteSessionAccountIDAndReport(ctx, 1, "sticky-delete-report")
+	require.NoError(t, err)
+	require.False(t, deleted, "a successful DEL does not imply that a binding existed")
+}
+
 func TestOpenAICacheUnadmittedReservationExpires(t *testing.T) {
 	addr := os.Getenv("SCHEDULING_TEST_REDIS_ADDR")
 	var fixture *miniredis.Miniredis

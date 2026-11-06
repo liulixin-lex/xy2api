@@ -154,6 +154,8 @@ func planCodexCollaborationPlaintext(body []byte) ([]codexCollabJSONEdit, *codex
 	if len(namespaces) == 0 {
 		return nil, nil, codexCollabAbsent
 	}
+	// Alias declarations are never accepted. Only historical call items may
+	// carry names emitted by an earlier transformed request.
 	if codexCollabHasPrivateName(root) {
 		return nil, nil, codexCollabConflict
 	}
@@ -247,7 +249,11 @@ func planCodexCollaborationPlaintext(body []byte) ([]codexCollabJSONEdit, *codex
 			}
 		}
 	}
-	edits = append(edits, codexCollabReferenceEdits(root)...)
+	referenceEdits, ok := codexCollabReferenceEdits(root, newPlan.tools)
+	if !ok {
+		return nil, nil, codexCollabConflict
+	}
+	edits = append(edits, referenceEdits...)
 
 	return edits, newPlan, codexCollabApplied
 }
@@ -425,25 +431,59 @@ func codexCollabHasPrivateName(root gjson.Result) bool {
 			if typ == "additional_tools" && scanTools(item.Get("tools")) {
 				return true
 			}
-			if (typ == "function_call" || typ == "custom_tool_call") && (item.Get("namespace").String() == codexCollaborationNamespaceAlias || codexCollabHasAliasPrefix(item.Get("name").String())) {
-				return true
-			}
 		}
 	}
 	return false
 }
 
-func codexCollabReferenceEdits(root gjson.Result) []codexCollabJSONEdit {
+// codexCollabReferenceEdits accepts only historical function/custom call
+// identities that can be tied to a declared collaboration tool. Declaration
+// aliases and developer text are rejected elsewhere, and an explicit
+// external namespace is never rewritten.
+func codexCollabReferenceEdits(root gjson.Result, knownTools map[string]struct{}) ([]codexCollabJSONEdit, bool) {
 	var edits []codexCollabJSONEdit
 	input := root.Get("input")
 	if input.IsArray() {
 		for index, item := range input.Array() {
-			if item.Get("type").String() == "function_call" && item.Get("namespace").String() == codexCollaborationNamespace {
+			itemType := item.Get("type").String()
+			if itemType != "function_call" && itemType != "custom_tool_call" {
+				continue
+			}
+			nameResult, namespaceResult := item.Get("name"), item.Get("namespace")
+			name, namespace := nameResult.String(), namespaceResult.String()
+			aliasName := codexCollabHasAliasPrefix(name)
+			aliasNamespace := namespace == codexCollaborationNamespaceAlias
+			if !aliasName && !aliasNamespace && namespace != codexCollaborationNamespace {
+				continue
+			}
+			if aliasName && namespace != "" && namespace != codexCollaborationNamespace && !aliasNamespace {
+				return nil, false
+			}
+			if nameResult.Type != gjson.String || name == "" || (namespaceResult.Exists() && namespaceResult.Type != gjson.String) {
+				return nil, false
+			}
+			toolName := name
+			if aliasName {
+				var ok bool
+				toolName, ok = codexCollabRestoreAliasName(name)
+				if !ok {
+					return nil, false
+				}
+			}
+			if aliasName || aliasNamespace {
+				if _, known := knownTools[toolName]; !known {
+					return nil, false
+				}
+				if aliasName {
+					edits = append(edits, codexCollabJSONEdit{path: fmt.Sprintf("input.%d.name", index), value: toolName})
+				}
+			}
+			if namespace == codexCollaborationNamespace || aliasNamespace || aliasName {
 				edits = append(edits, codexCollabJSONEdit{path: fmt.Sprintf("input.%d.namespace", index), value: codexCollaborationNamespaceAlias})
 			}
 		}
 	}
-	return edits
+	return edits, true
 }
 
 func codexCollabRestoreAliasName(name string) (string, bool) {

@@ -2,6 +2,7 @@ package resilience
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -46,8 +47,11 @@ type RequestState struct {
 	// stickyOwner is the account the session was bound to when selection
 	// started; keptSticky is set when that binding must survive this request
 	// because its account is only soft-penalised (design §4.2).
-	stickyOwner int64
-	keptSticky  int64
+	stickyOwner                int64
+	keptSticky                 int64
+	stickyBypassReason         string
+	stickyBypassLogged         bool
+	stickyBypassChangesBinding bool
 
 	// lastResort is the account chosen by last-resort soft selection.
 	lastResort int64
@@ -615,6 +619,76 @@ func (s *RequestState) StickyOwner() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.stickyOwner
+}
+
+// NoteStickyBypassReason records the first scheduler reason that caused the
+// existing sticky owner to be bypassed. Later checks must not overwrite it.
+func (s *RequestState) NoteStickyBypassReason(reason string) {
+	if s == nil || strings.TrimSpace(reason) == "" {
+		return
+	}
+	s.mu.Lock()
+	if s.stickyBypassReason == "" {
+		s.stickyBypassReason = strings.TrimSpace(reason)
+	}
+	s.mu.Unlock()
+}
+
+// StickyBypassReason returns the first recorded sticky bypass reason.
+func (s *RequestState) StickyBypassReason() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stickyBypassReason
+}
+
+// ResetStickyBypassReason starts a fresh scheduler pass. A request can retry
+// selection after an upstream failure; the next pass must report its own first
+// reason instead of carrying over the previous pass.
+func (s *RequestState) ResetStickyBypassReason() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.stickyBypassReason = ""
+	s.stickyBypassChangesBinding = false
+	s.mu.Unlock()
+}
+
+// NoteStickyBypassBindingChange marks a confirmed deletion or migration by
+// the current selection, independently of its first recorded reason.
+func (s *RequestState) NoteStickyBypassBindingChange() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.stickyBypassChangesBinding = true
+	s.mu.Unlock()
+}
+
+func (s *RequestState) StickyBypassChangesBinding() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stickyBypassChangesBinding
+}
+
+// ClaimStickyBypassLog allows at most one sticky bypass event per request.
+func (s *RequestState) ClaimStickyBypassLog() bool {
+	if s == nil {
+		return true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stickyBypassLogged {
+		return false
+	}
+	s.stickyBypassLogged = true
+	return true
 }
 
 // KeepSticky marks the binding to accountID as kept for this request.
