@@ -84,12 +84,18 @@ func relayLivenessFor(c *gin.Context, account *Account) *relayLiveness {
 }
 
 func (l *relayLiveness) frameDropped() {
+	l.noteDroppedFrame(true)
+}
+
+func (l *relayLiveness) noteDroppedFrame(markFirstToken bool) {
 	if l == nil {
 		return
 	}
 	now := time.Now().UnixNano()
 	l.at.Store(now)
-	l.firstDrop.CompareAndSwap(0, now)
+	if markFirstToken {
+		l.firstDrop.CompareAndSwap(0, now)
+	}
 	resilience.Count(resilience.MetricRelayKeepalive, l.groupID, l.accountID, l.platform)
 }
 
@@ -202,10 +208,11 @@ func (f *relayKeepaliveFilter) next() {
 		}
 	}
 	if f.holding {
-		if isRelayKeepaliveDataLine(trimmed) || (f.nativePrelude && !f.createdSeen && isEmptyResponsesDeltaLine(trimmed)) {
+		marked := isRelayKeepaliveDataLine(trimmed)
+		if marked || (f.nativePrelude && !f.createdSeen && isEmptyResponsesDeltaLine(trimmed)) {
 			f.holding = false
 			f.skipBlank = true
-			f.live.frameDropped()
+			f.live.noteDroppedFrame(marked)
 			return
 		}
 		f.emit(line)
@@ -216,9 +223,10 @@ func (f *relayKeepaliveFilter) next() {
 		f.holding = true
 		return
 	}
-	if isRelayKeepaliveDataLine(trimmed) || (f.nativePrelude && !f.createdSeen && isEmptyResponsesDeltaLine(trimmed)) {
+	marked := isRelayKeepaliveDataLine(trimmed)
+	if marked || (f.nativePrelude && !f.createdSeen && isEmptyResponsesDeltaLine(trimmed)) {
 		f.skipBlank = true
-		f.live.frameDropped()
+		f.live.noteDroppedFrame(marked)
 		return
 	}
 	f.emit(line)

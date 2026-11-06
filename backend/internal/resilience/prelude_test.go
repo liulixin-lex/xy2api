@@ -14,9 +14,9 @@ func TestClassifyStreamEvent(t *testing.T) {
 		{"created", "responses", "", `{"type":"response.created","response":{"id":"resp_a"}}`, Prelude, false},
 		{"queued", "responses", "response.queued", `{}`, Prelude, false},
 		{"keepalive", "responses", "keepalive", `{}`, Prelude, false},
-		{"unknown_metadata", "responses", "vendor.rate_limits", `{}`, Unknown, false},
-		{"unknown_codex", "responses", "codex.unverified", `{}`, Unknown, false},
-		{"empty_message", "responses", "response.output_item.added", `{"item":{"type":"message","content":[]}}`, Prelude, false},
+		{"unknown_metadata", "responses", "vendor.rate_limits", `{}`, Content, false},
+		{"unknown_codex", "responses", "codex.unverified", `{}`, Content, false},
+		{"empty_message", "responses", "response.output_item.added", `{"item":{"type":"message","role":"assistant","content":[]}}`, Prelude, false},
 		{"unknown_item_payload", "responses", "response.output_item.added", `{"item":{"type":"message","content":[],"vendor_payload":"opaque"}}`, Content, false},
 		{"unknown_part_payload", "responses", "response.content_part.added", `{"part":{"type":"output_text","text":"","annotation":{"value":"opaque"}}}`, Content, false},
 		{"malformed_message_content", "responses", "response.output_item.added", `{"item":{"type":"message","content":"opaque"}}`, Content, false},
@@ -34,7 +34,7 @@ func TestClassifyStreamEvent(t *testing.T) {
 		{"tool_delta", "responses", "response.function_call_arguments.delta", `{"delta":"{}"}`, Content, false},
 		{"empty_part", "responses", "response.content_part.added", `{"part":{"type":"output_text","text":""}}`, Prelude, false},
 		{"part_content", "responses", "response.content_part.added", `{"part":{"type":"output_text","text":"hello"}}`, Content, false},
-		{"missing_part", "responses", "response.content_part.added", `{}`, Unknown, false},
+		{"missing_part", "responses", "response.content_part.added", `{}`, Content, false},
 		{"empty_summary", "responses", "response.reasoning_summary_part.added", `{"part":{"type":"summary_text","text":""}}`, Prelude, false},
 		{"text", "responses", "response.output_text.delta", `{"delta":"hi"}`, Content, false},
 		{"refusal", "responses", "response.refusal.delta", `{"delta":"cannot"}`, Content, false},
@@ -44,7 +44,15 @@ func TestClassifyStreamEvent(t *testing.T) {
 		{"policy", "responses", "response.failed", `{"response":{"error":{"code":"content_policy_violation"}}}`, TerminalFailure, false},
 		{"bad_request", "responses", "error", `{"error":{"type":"invalid_request_error","message":"bad input"}}`, TerminalFailure, false},
 		{"busy", "responses", "error", `{"error":{"message":"The service is busy"}}`, TerminalFailure, true},
-		{"malformed", "responses", "response.created", `{`, Unknown, false},
+		{"malformed", "responses", "response.created", `{`, Content, false},
+		{"blank_delta", "responses", "response.output_text.delta", `{"type":"response.output_text.delta","delta":" \t"}`, Prelude, false},
+		{"empty_delta", "responses", "response.output_text.delta", `{"type":"response.output_text.delta","delta":""}`, Prelude, false},
+		{"missing_delta", "responses", "response.output_text.delta", `{"type":"response.output_text.delta"}`, Content, false},
+		{"blank_text_done", "responses", "response.output_text.done", `{"type":"response.output_text.done","text":"　 "}`, Prelude, false},
+		{"assistant_item_done_blank", "responses", "response.output_item.done", `{"type":"response.output_item.done","item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":" "}]}}`, Prelude, false},
+		{"empty_refusal_is_visible", "responses", "response.content_part.added", `{"type":"response.content_part.added","part":{"type":"refusal","refusal":""}}`, Content, false},
+		{"non_text_part_is_visible", "responses", "response.content_part.added", `{"type":"response.content_part.added","part":{"type":"image","data":""}}`, Content, false},
+		{"completed_always_terminal", "responses", "response.completed", `{"type":"response.completed","response":{"output":[]}}`, TerminalSuccess, false},
 		{"chat_role", "chat", "", `{"object":"chat.completion.chunk","choices":[{"delta":{"role":"assistant"}}]}`, Prelude, false},
 		{"chat_empty", "chat", "", `{"choices":[{"delta":{"content":""}}]}`, Prelude, false},
 		{"chat_text", "chat", "", `{"choices":[{"delta":{"content":"hi"}}]}`, Content, false},
@@ -79,6 +87,37 @@ func TestClassifyStreamEvent(t *testing.T) {
 			got := ClassifyStreamEvent(tt.protocol, tt.event, []byte(tt.payload))
 			if got.Kind != tt.kind || got.Retryable != tt.retry {
 				t.Fatalf("got %+v, want kind=%v retry=%v", got, tt.kind, tt.retry)
+			}
+		})
+	}
+}
+
+func TestResponsesEventOutputDisposition(t *testing.T) {
+	tests := []struct {
+		name           string
+		event          string
+		payload        string
+		placeholder    bool
+		visible        bool
+		semanticOutput bool
+	}{
+		{name: "blank delta", event: "response.output_text.delta", payload: `{"type":"response.output_text.delta","delta":"  "}`, placeholder: true},
+		{name: "whitespace item", event: "response.output_item.added", payload: `{"type":"response.output_item.added","item":{"id":"m1","type":"message","role":"assistant","status":"in_progress","content":[{"type":"output_text","text":"\n　"}]}}`, placeholder: true},
+		{name: "refusal", event: "response.content_part.added", payload: `{"type":"response.content_part.added","part":{"type":"refusal","refusal":""}}`, visible: true, semanticOutput: true},
+		{name: "unknown nested payload", event: "response.content_part.added", payload: `{"type":"response.content_part.added","part":{"type":"output_text","text":"","vendor":"x"}}`, visible: true, semanticOutput: true},
+		{name: "malformed known event", event: "response.output_text.delta", payload: `{`, visible: true, semanticOutput: true},
+		{name: "completed empty", event: "response.completed", payload: `{"type":"response.completed","response":{"output":[]}}`, visible: true},
+		{name: "completed with text", event: "response.completed", payload: `{"type":"response.completed","response":{"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}]}}`, visible: true, semanticOutput: true},
+		{name: "unknown response event", event: "response.vendor_extension", payload: `{"type":"response.vendor_extension","future":true}`, visible: true, semanticOutput: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ResponsesEventOutputDisposition(tt.event, []byte(tt.payload))
+			if !got.Matched {
+				t.Fatal("event was not matched")
+			}
+			if got.Kind == Prelude != tt.placeholder || got.Visible != tt.visible || got.SemanticOutput != tt.semanticOutput {
+				t.Fatalf("got %+v, want placeholder=%v visible=%v semantic=%v", got, tt.placeholder, tt.visible, tt.semanticOutput)
 			}
 		})
 	}

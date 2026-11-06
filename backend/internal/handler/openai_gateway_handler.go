@@ -431,6 +431,27 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		zap.Int64("api_key_id", apiKey.ID),
 		zap.Any("group_id", apiKey.GroupID),
 	)
+	defer func() {
+		_, placeholderTimeouts, marked := service.OpenAIBlankPlaceholderOutcomeCounts(c)
+		if !marked {
+			return
+		}
+		finalOutcome := "unknown"
+		if outcome := recoveryOutcome(c); outcome != nil {
+			finalOutcome = *outcome
+		}
+		budgetCause := ""
+		if c.Request != nil {
+			if budget := requestBudget(c.Request.Context()); budget != nil {
+				budgetCause = budget.Exhausted()
+			}
+		}
+		reqLog.Info("resilience.blank_placeholder_outcome",
+			zap.Int("placeholder_timeouts", placeholderTimeouts),
+			zap.String("final_outcome", finalOutcome),
+			zap.String("budget_cause", budgetCause),
+		)
+	}()
 	if !h.ensureResponsesDependencies(c, reqLog) {
 		return
 	}

@@ -75,3 +75,54 @@ func TestOpenAIAuthoritativeFailedEndsBareErrorWait(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenAIWrappedFailedAfterOutputEndsWithoutEOF(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withResilienceSettings(t, nil)
+	opening := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
+	failed := "event: error\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_wrapped_failed\",\"status\":\"failed\",\"usage\":{\"input_tokens\":9,\"output_tokens\":2},\"error\":{\"type\":\"upstream_error\",\"code\":\"503\",\"status_code\":503,\"message\":\"busy\"}}}\n\n"
+	for _, passthrough := range []bool{false, true} {
+		t.Run(map[bool]string{false: "native", true: "passthrough"}[passthrough], func(t *testing.T) {
+			cfg := &config.Config{}
+			cfg.Gateway.StreamKeepaliveInterval = 1
+			cfg.Gateway.StreamDataIntervalTimeout = 30
+			svc := &OpenAIGatewayService{cfg: cfg}
+			body := &hangingOpenAISSEAfterTerminal{payload: []byte(opening + failed), release: make(chan struct{})}
+			t.Cleanup(func() { _ = body.Close() })
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: body}
+			account := &Account{ID: 811, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+			type outcome struct {
+				usage *OpenAIUsage
+				err   error
+			}
+			done := make(chan outcome, 1)
+			go func() {
+				if passthrough {
+					result, err := svc.handleStreamingResponsePassthrough(context.Background(), resp, c, account, time.Now(), "model", "model")
+					done <- outcome{result.usage, err}
+				} else {
+					result, err := svc.handleStreamingResponse(context.Background(), resp, c, account, time.Now(), "model", "model")
+					done <- outcome{result.usage, err}
+				}
+			}()
+			select {
+			case got := <-done:
+				require.Error(t, got.err)
+				var failover *UpstreamFailoverError
+				require.NotErrorAs(t, got.err, &failover, "committed output cannot be replayed")
+				require.Equal(t, 9, got.usage.InputTokens)
+				require.Equal(t, 2, got.usage.OutputTokens)
+			case <-time.After(time.Second):
+				t.Fatal("payload response.failed must end the stream without waiting for EOF")
+			}
+			require.Contains(t, rec.Body.String(), "hello")
+			require.Contains(t, rec.Body.String(), "event: error\ndata: ")
+			require.Contains(t, rec.Body.String(), `"id":"resp_wrapped_failed"`)
+			require.Equal(t, 1, strings.Count(rec.Body.String(), `"type":"response.failed"`))
+			require.True(t, strings.HasSuffix(rec.Body.String(), "\n\n"))
+		})
+	}
+}

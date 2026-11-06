@@ -12,6 +12,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const openAIMalformedWrappedErrorMessage = "Upstream returned a malformed error frame"
+
 // openAIWrappedUpstreamErrorStatus recognizes the two relay-wrapped error
 // frame shapes and returns the upstream status they carry. sseEvent is the raw
 // SSE `event:` value of the frame ("" when absent), payload its data JSON.

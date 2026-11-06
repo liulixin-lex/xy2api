@@ -125,6 +125,9 @@ func (w *deliveryWriter) noteFirstOutput(nonWhitespace bool) {
 	if w.state.FirstOutputNoted() {
 		return
 	}
+	if w.stream.responses.Load() && !w.semantic.noted.Load() {
+		return
+	}
 	// Do not invoke the delivery probe here: this write can be underneath
 	// a keepalive mutex, and its probe can reenter that mutex.
 	// JSON keepalive writes whitespace. For SSE, a whitespace-only write
