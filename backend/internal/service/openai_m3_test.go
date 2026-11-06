@@ -4,11 +4,13 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
@@ -18,6 +20,17 @@ import (
 )
 
 const m3TwoItemRequest = `{"model":"gpt-5.5","stream":true,"input":[{"type":"agent_message","id":"amsg_one","content":[{"type":"encrypted_content","encrypted_content":"same-cipher"},{"type":"input_text","text":"first"}]},{"type":"agent_message","id":"amsg_two","content":[{"type":"encrypted_content","encrypted_content":"same-cipher"},{"type":"input_text","text":"second"}]}]}`
+
+func TestOpenAIM3DoesNotArmForMappedDeepSeek(t *testing.T) {
+	req := newWebSearchReplayRequest(t)
+	svc := &OpenAIGatewayService{}
+	account := openaiMappedDeepSeekResponsesImageAccount()
+	require.Equal(t, PlatformOpenAI, account.Platform)
+	require.True(t, shouldAliasDeepSeekResponsesInputImages(account))
+	require.Nil(t, svc.armOpenAIM3(req.c, account, []byte(m3TwoItemRequest)))
+	require.Empty(t, svc.beginOpenAIM3(req.c, nil).accounts)
+	require.NotNil(t, svc.armOpenAIM3(req.c, webSearchReplayAccount(false), []byte(m3TwoItemRequest)))
+}
 
 func TestOpenAIM3S4LearnsOnlyNamedItem(t *testing.T) {
 	req := newWebSearchReplayRequest(t)
@@ -66,6 +79,92 @@ func TestOpenAIM3LearnsFunctionOutputSlots(t *testing.T) {
 	require.Empty(t, store.GetSessionBadEncryptedSlots(attempt.request.groupID, attempt.request.session, account.ID))
 	attempt.succeeded(req.ctx)
 	require.Len(t, store.GetSessionBadEncryptedSlots(attempt.request.groupID, attempt.request.session, account.ID), 1)
+}
+
+func TestForwardOpenAIM3IncompleteDoesNotCommitBatchBad(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		t.Run(fmt.Sprintf("passthrough=%t", passthrough), func(t *testing.T) {
+			withResilienceSettings(t, nil)
+			req := newWebSearchReplayRequest(t)
+			account := webSearchReplayAccount(passthrough)
+			upstream := &httpUpstreamRecorder{responses: []*http.Response{
+				newOpenAIUpstreamErrorResponse(http.StatusBadRequest, `{"error":{"message":"Encrypted content is invalid for this conversation"}}`),
+				{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+					Body:       io.NopCloser(strings.NewReader("data: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_incomplete\",\"status\":\"incomplete\",\"output\":[],\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n")),
+				},
+			}}
+			svc := newOpenAIImageGenerationControlTestService(upstream)
+			svc.openaiWSStateStore = NewOpenAIWSStateStore(nil)
+			_, err := svc.Forward(req.ctx, req.c, account, []byte(m3TwoItemRequest))
+			require.NoError(t, err, "nil from the reader must not commit pending Bad")
+			require.Len(t, upstream.bodies, 2)
+			require.Equal(t, "[encrypted content omitted]", gjson.GetBytes(upstream.bodies[1], "input.0.content.0.text").String())
+			attempt := openAIRequestRepairFrom(req.c).m3
+			require.Len(t, attempt.state.pending, 2)
+			require.Empty(t, svc.getOpenAIWSStateStore().GetSessionBadEncryptedSlots(attempt.request.groupID, attempt.request.session, account.ID))
+		})
+	}
+}
+
+func TestOpenAIM3AcceptanceRequiresOutputOrSuccessTerminal(t *testing.T) {
+	text := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
+	blank := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"  \"}\n\n"
+	require.True(t, openAIM3AggregateAccepted(text, ""), "clean EOF after semantic output is acceptance")
+	require.False(t, openAIM3AggregateAccepted(blank, ""))
+	require.False(t, openAIM3AggregateAccepted(blank, "response.cancelled"))
+	require.False(t, openAIM3AggregateAccepted(text, "response.failed"))
+	require.False(t, openAIM3AggregateAccepted(text, "error"))
+	require.False(t, openAIM3AggregateAccepted(blank, "response.incomplete"))
+	require.True(t, openAIM3AggregateAccepted(text, "response.incomplete"))
+	require.True(t, openAIM3AggregateAccepted(text, "response.cancelled"))
+	require.True(t, openAIM3AggregateAccepted(blank, "response.completed"))
+	require.True(t, openAIM3AggregateAccepted(blank, "response.done"))
+	require.True(t, openAIM3JSONAccepted([]byte(`{"id":"resp_ok","object":"response","status":"completed","output":[]}`)))
+	require.False(t, openAIM3JSONAccepted([]byte(`{"object":"response","status":"incomplete","output":[]}`)))
+	require.False(t, openAIM3JSONAccepted([]byte(`{"object":"response","status":"completed"}`)))
+}
+
+func TestForwardOpenAIM3AcceptanceAfterOutput(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		for _, stream := range []bool{false, true} {
+			for _, terminal := range []string{"", "response.cancelled"} {
+				for _, output := range []bool{false, true} {
+					t.Run(fmt.Sprintf("passthrough=%t/stream=%t/terminal=%s/output=%t", passthrough, stream, terminal, output), func(t *testing.T) {
+						withResilienceSettings(t, nil)
+						req := newWebSearchReplayRequest(t)
+						account := webSearchReplayAccount(passthrough)
+						frames := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_accepted\"}}\n\n"
+						if output {
+							frames += "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
+						}
+						if terminal != "" {
+							frames += fmt.Sprintf("data: {\"type\":%q,\"response\":{\"id\":\"resp_accepted\",\"status\":\"cancelled\",\"output\":[]}}\n\n", terminal)
+						}
+						upstream := &httpUpstreamRecorder{responses: []*http.Response{
+							newOpenAIUpstreamErrorResponse(http.StatusBadRequest, `{"error":{"message":"Encrypted content is invalid for this conversation"}}`),
+							{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(frames))},
+						}}
+						svc := newOpenAIImageGenerationControlTestService(upstream)
+						svc.openaiWSStateStore = NewOpenAIWSStateStore(nil)
+						body, err := sjson.Set(m3TwoItemRequest, "stream", stream)
+						require.NoError(t, err)
+						_, _ = svc.Forward(req.ctx, req.c, account, []byte(body))
+						require.Len(t, upstream.bodies, 2)
+						require.Equal(t, "[encrypted content omitted]", gjson.GetBytes(upstream.bodies[1], "input.0.content.0.text").String())
+						attempt := openAIRequestRepairFrom(req.c).m3
+						bad := svc.getOpenAIWSStateStore().GetSessionBadEncryptedSlots(attempt.request.groupID, attempt.request.session, account.ID)
+						if output {
+							require.Len(t, bad, 2)
+						} else {
+							require.Empty(t, bad)
+						}
+					})
+				}
+			}
+		}
+	}
 }
 
 func TestForwardOpenAIM3ReplaySendsOnlyPlaceholderInNamedSlot(t *testing.T) {
@@ -303,6 +402,50 @@ func TestOpenAIM3BadScopeAndExpiry(t *testing.T) {
 	require.Empty(t, store.GetSessionBadEncryptedSlots(7, "session", 11))
 }
 
+func TestOpenAIM3BadReferencesAreBoundedAndDetached(t *testing.T) {
+	for _, size := range []int{openAIM3MaxRefBytes, openAIM3MaxRefBytes + 1} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			req := newWebSearchReplayRequest(t)
+			store := NewOpenAIWSStateStore(nil)
+			svc := &OpenAIGatewayService{openaiWSStateStore: store}
+			body, err := sjson.Set(m3TwoItemRequest, "input.0.id", "amsg_"+strings.Repeat("x", size-5))
+			require.NoError(t, err)
+			slots, _, err := openAIM3Slots([]byte(body))
+			require.NoError(t, err)
+			attempt := svc.armOpenAIM3(req.c, webSearchReplayAccount(false), []byte(body))
+			message := "Encrypted content could not be verified for item " + gjson.Get(body, "input.0.id").String()
+			var signal *openAIRequestRepairSignal
+			require.ErrorAs(t, attempt.learn(req.ctx, []byte(body), nil, message, 400, 0), &signal)
+			require.Equal(t, "input_text", gjson.GetBytes(signal.next, "input.0.content.0.type").String())
+			bad := store.GetSessionBadEncryptedSlots(attempt.request.groupID, attempt.request.session, attempt.account.ID)
+			if size > openAIM3MaxRefBytes {
+				require.Empty(t, slots[0].id.ref)
+				require.Empty(t, bad)
+			} else {
+				require.Len(t, bad, 1)
+				for slot := range bad {
+					require.Len(t, slot.ref, size)
+					require.Equal(t, slots[0].id.ref, slot.ref)
+					require.False(t, unsafe.StringData(slots[0].id.ref) == unsafe.StringData(slot.ref))
+				}
+			}
+		})
+	}
+	// Also defend the persistence API against a caller retaining a substring.
+	store := NewOpenAIWSStateStore(nil)
+	body := strings.Repeat("x", 4096) + "amsg_ref"
+	ref := body[4096:]
+	slot := openAIBadEncryptedSlot{kind: openAIM3AgentMessage, ref: ref, digest: "digest"}
+	require.Equal(t, 1, store.MarkSessionBadEncryptedSlots(1, "session", 1, []openAIBadEncryptedSlot{slot}, time.Hour))
+	for saved := range store.GetSessionBadEncryptedSlots(1, "session", 1) {
+		require.Len(t, saved.ref, len(ref))
+		require.Equal(t, ref, saved.ref)
+		require.False(t, unsafe.StringData(ref) == unsafe.StringData(saved.ref))
+	}
+	slot.ref = strings.Repeat("x", openAIM3MaxRefBytes+1)
+	require.Zero(t, store.MarkSessionBadEncryptedSlots(1, "session", 1, []openAIBadEncryptedSlot{slot}, time.Hour))
+}
+
 func TestOpenAIM3WrappedStatusRoutesOnly400(t *testing.T) {
 	for _, status := range []int{400, 401, 403, 413, 429, 500} {
 		req := newWebSearchReplayRequest(t)
@@ -327,24 +470,143 @@ func TestOpenAIM3WrappedStatusRoutesOnly400(t *testing.T) {
 
 func TestForwardOpenAIM3Rewritten4xxRepairsFieldsBeforeSwitch(t *testing.T) {
 	for _, passthrough := range []bool{false, true} {
-		withResilienceSettings(t, nil)
-		req := newWebSearchReplayRequest(t)
-		body, err := sjson.SetBytes([]byte(m3TwoItemRequest), "temperature", 0.5)
-		require.NoError(t, err)
-		upstream := &httpUpstreamRecorder{responses: []*http.Response{
-			newOpenAIUpstreamErrorResponse(400, `{"error":{"code":"invalid_encrypted_content","message":"Encrypted content could not be verified for item amsg_one"}}`),
-			newOpenAIUpstreamErrorResponse(400, `{"error":{"message":"Unsupported parameter: temperature","param":"temperature","code":"unsupported_parameter"}}`),
-			newOpenAIUpstreamErrorResponse(422, `{"error":{"message":"rewritten shape rejected"}}`),
-		}}
-		svc := newOpenAIImageGenerationControlTestService(upstream)
-		_, err = svc.Forward(req.ctx, req.c, webSearchReplayAccount(passthrough), body)
-		var failure *UpstreamFailoverError
-		require.ErrorAs(t, err, &failure)
-		require.Equal(t, OpenAIStateRepairReason, failure.Reason)
-		require.Equal(t, "rewritten_4xx", failure.M3Cause)
-		require.Len(t, upstream.bodies, 3)
-		require.False(t, gjson.GetBytes(upstream.bodies[2], "temperature").Exists())
-		require.Equal(t, "input_text", gjson.GetBytes(upstream.bodies[2], "input.0.content.0.type").String())
+		for _, tc := range []struct {
+			name     string
+			status   int
+			payload  string
+			m3       bool
+			punished int
+		}{
+			{"shape", 422, `{"error":{"message":"rewritten shape rejected"}}`, true, 0},
+			{"credentials", 401, `{"error":{"code":"invalid_api_key","message":"invalid credentials"}}`, false, 1},
+			{"context", 400, `{"error":{"code":"context_length_exceeded","message":"Your input exceeds the context window of this model"}}`, false, 0},
+		} {
+			t.Run(fmt.Sprintf("passthrough=%t/%s", passthrough, tc.name), func(t *testing.T) {
+				withResilienceSettings(t, nil)
+				req := newWebSearchReplayRequest(t)
+				body, err := sjson.SetBytes([]byte(m3TwoItemRequest), "temperature", 0.5)
+				require.NoError(t, err)
+				upstream := &httpUpstreamRecorder{responses: []*http.Response{
+					newOpenAIUpstreamErrorResponse(400, `{"error":{"code":"invalid_encrypted_content","message":"Encrypted content could not be verified for item amsg_one"}}`),
+					newOpenAIUpstreamErrorResponse(400, `{"error":{"message":"Unsupported parameter: temperature","param":"temperature","code":"unsupported_parameter"}}`),
+					newOpenAIUpstreamErrorResponse(tc.status, tc.payload),
+				}}
+				svc := newOpenAIImageGenerationControlTestService(upstream)
+				repo := &countTokensRuntimeStateRepo{}
+				svc.rateLimitService = NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+				account := webSearchReplayAccount(passthrough)
+				account.Credentials["pool_mode"] = false
+				_, err = svc.Forward(req.ctx, req.c, account, body)
+				var failure *UpstreamFailoverError
+				if tc.m3 {
+					require.ErrorAs(t, err, &failure)
+					require.Equal(t, OpenAIStateRepairReason, failure.Reason)
+					require.Equal(t, "rewritten_4xx", failure.M3Cause)
+				} else if tc.punished > 0 {
+					if passthrough {
+						require.Error(t, err)
+						require.NotErrorAs(t, err, &failure)
+					} else {
+						require.ErrorAs(t, err, &failure)
+						require.NotEqual(t, OpenAIStateRepairReason, failure.Reason)
+						require.Equal(t, http.StatusUnauthorized, failure.StatusCode)
+					}
+				} else {
+					require.Error(t, err)
+					require.NotErrorAs(t, err, &failure)
+					require.Equal(t, http.StatusBadRequest, req.rec.Code)
+					require.Contains(t, req.rec.Body.String(), "Your input exceeds the context window")
+				}
+				require.Equal(t, tc.punished, repo.setErrorCalls)
+				require.Len(t, upstream.bodies, 3)
+				require.False(t, gjson.GetBytes(upstream.bodies[2], "temperature").Exists())
+				require.Equal(t, "input_text", gjson.GetBytes(upstream.bodies[2], "input.0.content.0.type").String())
+			})
+		}
+	}
+}
+
+func TestOpenAIM3RewrittenFallbackPreservesRequestErrors(t *testing.T) {
+	for _, tc := range []struct {
+		status  int
+		payload string
+		want    bool
+	}{
+		{400, `{"error":{"message":"shape rejected"}}`, true},
+		{422, `{"error":{"message":"shape rejected"}}`, true},
+		{401, `{"error":{"code":"invalid_api_key"}}`, false},
+		{403, `{"error":{"message":"forbidden"}}`, false},
+		{404, `{"error":{"message":"not found"}}`, false},
+		{429, `{"error":{"message":"rate limited"}}`, false},
+		{400, `{"error":{"code":"context_length_exceeded"}}`, false},
+		{422, `{"error":{"code":"content_policy_violation"}}`, false},
+		{400, `{"error":{"code":"cyber_policy"}}`, false},
+	} {
+		t.Run(fmt.Sprintf("%d/%s", tc.status, tc.payload), func(t *testing.T) {
+			req := newWebSearchReplayRequest(t)
+			svc := &OpenAIGatewayService{}
+			account := webSearchReplayAccount(false)
+			r := armOpenAIRequestRepair(req.c, account, nil)
+			r.m3 = svc.armOpenAIM3(req.c, account, []byte(m3TwoItemRequest))
+			r.m3.state.replaced[openAIM3SlotID{}] = struct{}{}
+			message := extractUpstreamErrorMessage([]byte(tc.payload))
+			err := r.m3.afterLocalRepairs(req.ctx, nil, []byte(tc.payload), message, tc.status, 0)
+			require.Equal(t, tc.want, err != nil)
+			deferred := deferOpenAIM3ToForward(req.c, account, []byte(tc.payload), message, tc.status, 0)
+			require.Equal(t, tc.want, deferred != nil)
+		})
+	}
+}
+
+func TestForwardOpenAIM3PassthroughInbandFieldRepairScope(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		passthrough bool
+		m3Replay    bool
+		wrapped     bool
+		repairs     bool
+	}{
+		{"native baseline", false, false, false, true},
+		{"passthrough ordinary rejection", true, false, false, false},
+		{"passthrough M3 derived request", true, true, false, true},
+		{"passthrough wrapped 400", true, false, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withResilienceSettings(t, nil)
+			req := newWebSearchReplayRequest(t)
+			body, err := sjson.Set(m3TwoItemRequest, "temperature", 0.5)
+			require.NoError(t, err)
+			var responses []*http.Response
+			if tc.m3Replay {
+				responses = append(responses, newOpenAIUpstreamErrorResponse(400, `{"error":{"code":"invalid_encrypted_content","message":"Encrypted content could not be verified for item amsg_one"}}`))
+			}
+			payload := `{"type":"response.failed","response":{"error":{"code":"unsupported_parameter","param":"temperature","message":"Unsupported parameter: temperature"}}}`
+			if tc.wrapped {
+				payload = `{"type":"response.failed","response":{"error":{"type":"upstream_error","code":"400","status_code":400,"message":"Unsupported parameter: temperature"}},"upstream_body":{"error":{"code":"unsupported_parameter","param":"temperature","message":"Unsupported parameter: temperature"}}}`
+			}
+			responses = append(responses, requestRepairFailedStream(payload), webSearchSuccessStream("resp_field_repaired"))
+			upstream := &httpUpstreamRecorder{responses: responses}
+			svc := newOpenAIImageGenerationControlTestService(upstream)
+			_, err = svc.Forward(req.ctx, req.c, webSearchReplayAccount(tc.passthrough), []byte(body))
+			if tc.repairs {
+				require.NoError(t, err)
+				wantRequests := 2
+				if tc.m3Replay {
+					wantRequests++
+				}
+				require.Len(t, upstream.bodies, wantRequests)
+				last := upstream.bodies[wantRequests-1]
+				require.False(t, gjson.GetBytes(last, "temperature").Exists())
+				if tc.m3Replay {
+					require.Equal(t, "[encrypted content omitted]", gjson.GetBytes(last, "input.0.content.0.text").String())
+				}
+			} else {
+				require.Error(t, err)
+				require.Len(t, upstream.bodies, 1)
+				require.True(t, gjson.GetBytes(upstream.bodies[0], "temperature").Exists())
+				require.NotContains(t, req.rec.Body.String(), "resp_field_repaired")
+			}
+		})
 	}
 }
 
@@ -460,14 +722,24 @@ func TestForwardOpenAIM3ContinuesAfterWebSearchRepairExhaustion(t *testing.T) {
 			require.NoError(t, err)
 			first := `{"error":{"code":"invalid_encrypted_content","message":"Encrypted content could not be verified for item amsg_one"}}`
 			second := `{"error":{"code":"invalid_encrypted_content","message":"response protection is unavailable; Encrypted content could not be verified for item amsg_two"}}`
-			reject := func(payload string) *http.Response {
+			reject := func(id, payload string) *http.Response {
 				if tc.streamError {
-					return requestRepairFailedStream(`{"type":"response.failed","response":` + payload + `}`)
+					failed, err := sjson.Set(`{"type":"response.failed","response":`+payload+`}`, "response.id", id)
+					require.NoError(t, err)
+					created := fmt.Sprintf("event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":%q,\"status\":\"in_progress\"}}\n\n", id)
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+						Body:       io.NopCloser(strings.NewReader(created + "event: response.failed\ndata: " + failed + "\n\n")),
+					}
 				}
+				payload, err := sjson.Set(payload, "id", id)
+				require.NoError(t, err)
 				return newOpenAIUpstreamErrorResponse(http.StatusBadRequest, payload)
 			}
+			failedIDs := []string{"resp_m3_failed_first", "resp_m3_failed_declaration", "resp_m3_failed_second"}
 			upstream := &httpUpstreamRecorder{responses: []*http.Response{
-				reject(first), reject(second), reject(second), webSearchSuccessStream("resp_m3_web_search"),
+				reject(failedIDs[0], first), reject(failedIDs[1], second), reject(failedIDs[2], second), webSearchSuccessStream("resp_m3_web_search"),
 			}}
 			svc := newOpenAIImageGenerationControlTestService(upstream)
 			_, err = svc.Forward(req.ctx, req.c, webSearchReplayAccount(tc.passthrough), body)
@@ -478,7 +750,21 @@ func TestForwardOpenAIM3ContinuesAfterWebSearchRepairExhaustion(t *testing.T) {
 			require.True(t, gjsonToolsContainWebSearch(gjson.GetBytes(upstream.bodies[2], "tools")))
 			require.Equal(t, "[encrypted content omitted]", gjson.GetBytes(upstream.bodies[3], "input.1.content.0.text").String())
 			require.Equal(t, "amsg_two", gjson.GetBytes(upstream.bodies[3], "input.1.id").String())
-			require.Contains(t, req.rec.Body.String(), "hello")
+			output := req.rec.Body.String()
+			require.Contains(t, output, "hello")
+			createdCount := 0
+			forEachOpenAISSEFrame(output, func(event string, payload []byte) {
+				if event == "response.created" {
+					createdCount++
+					require.Equal(t, "resp_m3_web_search", gjson.GetBytes(payload, "response.id").String())
+				}
+				require.NotEqual(t, "response.failed", event)
+			})
+			require.Equal(t, 1, createdCount, "only the accepted attempt's created frame is delivered")
+			for _, id := range failedIDs {
+				require.NotContains(t, output, id)
+			}
+			require.NotContains(t, output, "invalid_encrypted_content")
 			require.Empty(t, req.session.failures)
 		})
 	}

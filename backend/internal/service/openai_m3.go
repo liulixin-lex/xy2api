@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -74,6 +75,11 @@ func (s *OpenAIGatewayService) armOpenAIM3(c *gin.Context, account *Account, bod
 	if r == nil || account == nil || account.Platform != PlatformOpenAI {
 		return nil
 	}
+	// These are the same gates as normalizeDeepSeekResponsesRequestBody;
+	// its media lifting may stringify fco.output and cannot preserve M3 slots.
+	if account.UsesNativeCNResponses() || shouldAliasDeepSeekResponsesInputImages(account) {
+		return nil
+	}
 	a := r.accounts[account.ID]
 	if a == nil {
 		a = &openAIM3Account{replaced: make(map[openAIM3SlotID]struct{}), pending: make(map[openAIBadEncryptedSlot]struct{})}
@@ -104,19 +110,24 @@ func openAIM3Slots(body []byte) ([]openAIM3Slot, map[string]int, error) {
 		if id := item.Get("id"); id.Type == gjson.String {
 			ids[id.String()]++
 		}
-		kind := item.Get("type").String()
-		var parts, refKey string
-		switch kind {
-		case "agent_message":
-			parts, refKey = "content", "id"
-		case "function_call_output":
-			parts, refKey = "output", "call_id"
+		var kind, parts, refKey string
+		switch item.Get("type").String() {
+		case openAIM3AgentMessage:
+			kind, parts, refKey = openAIM3AgentMessage, "content", "id"
+		case openAIM3FunctionOutput:
+			kind, parts, refKey = openAIM3FunctionOutput, "output", "call_id"
 		default:
 			continue
 		}
 		ref := item.Get(refKey)
 		if ref.Exists() && ref.Type != gjson.String {
 			return nil, nil, errors.New("invalid item reference")
+		}
+		// gjson strings may retain the entire request. Bound and detach refs
+		// before adding them to request state or the shared Bad store.
+		var refValue string
+		if len(ref.String()) <= openAIM3MaxRefBytes {
+			refValue = strings.Clone(ref.String())
 		}
 		container := item.Get(parts)
 		if kind == "function_call_output" && container.Type == gjson.String {
@@ -146,7 +157,7 @@ func openAIM3Slots(body []byte) ([]openAIM3Slot, map[string]int, error) {
 				return nil, nil, err
 			}
 			sum := sha256.Sum256(bytes.TrimSuffix(normalized.Bytes(), []byte("\n")))
-			id := openAIM3SlotID{openAIBadEncryptedSlot: openAIBadEncryptedSlot{kind, ref.String(), hex.EncodeToString(sum[:])}, part: j, anonymousItem: -1}
+			id := openAIM3SlotID{openAIBadEncryptedSlot: openAIBadEncryptedSlot{kind, refValue, hex.EncodeToString(sum[:])}, part: j, anonymousItem: -1}
 			if id.ref == "" {
 				id.anonymousItem = i
 			}
@@ -171,8 +182,22 @@ func openAIM3Slots(body []byte) ([]openAIM3Slot, map[string]int, error) {
 	}
 	return slots, ids, nil
 }
-func (a *openAIM3Attempt) failure(message, cause string) *UpstreamFailoverError {
-	return annotateUpstreamFailoverAccount(&UpstreamFailoverError{StatusCode: 400, Reason: OpenAIStateRepairReason, Scope: GatewayFailureScopeRequest, NextAccountAction: NextAccountRetry, ClientStatusCode: 502, ClientMessage: sanitizeUpstreamErrorMessage(message), SafeToFailoverAfterWrite: true, M3Cause: cause}, a.account)
+func (a *openAIM3Attempt) failure(family resilience.StateFamily, itemID, cause string) *UpstreamFailoverError {
+	// Upstream messages may echo ciphertext. Only classified reasons and an
+	// item ID uniquely verified against this request may reach clients or ops.
+	message := "The upstream rejected the derived encrypted-state request"
+	switch family {
+	case resilience.StateConversationInvalid:
+		message = "Encrypted content is invalid for this conversation"
+	case resilience.StateFunctionOutput:
+		message = "Encrypted function output content could not be decrypted"
+	case resilience.StateAgentMessage:
+		message = "Encrypted content could not be verified"
+		if itemID != "" {
+			message += " for item " + itemID
+		}
+	}
+	return annotateUpstreamFailoverAccount(&UpstreamFailoverError{StatusCode: 400, Reason: OpenAIStateRepairReason, Scope: GatewayFailureScopeRequest, NextAccountAction: NextAccountRetry, ClientStatusCode: 502, ClientMessage: message, SafeToFailoverAfterWrite: true, M3Cause: cause}, a.account)
 }
 func (a *openAIM3Attempt) event(ctx context.Context, name string, count int) {
 	logger.FromContext(ctx).Warn(name, zap.Int64("group_id", a.request.groupID), zap.Int64("account_id", a.account.ID), zap.Int("count", count))
@@ -203,7 +228,7 @@ func (a *openAIM3Attempt) derive(ctx context.Context, body []byte) ([]byte, erro
 		if len(bad) == 0 && len(a.state.replaced) == 0 {
 			return body, nil
 		}
-		return nil, a.failure("Cannot safely derive encrypted request: "+err.Error(), "shape")
+		return nil, a.failure(resilience.StateNone, "", "shape")
 	}
 	count := 0
 	for _, slot := range slots {
@@ -214,7 +239,7 @@ func (a *openAIM3Attempt) derive(ctx context.Context, body []byte) ([]byte, erro
 		}
 		body, err = sjson.SetRawBytes(body, slot.path, []byte(openAIM3Placeholder))
 		if err != nil {
-			return nil, a.failure("Cannot replace encrypted slot", "shape")
+			return nil, a.failure(resilience.StateNone, "", "shape")
 		}
 		a.state.replaced[slot.id] = struct{}{}
 		count++
@@ -241,13 +266,13 @@ func (a *openAIM3Attempt) learn(ctx context.Context, body, payload []byte, messa
 	}
 	slots, ids, err := openAIM3Slots(body)
 	if err != nil {
-		return a.failure(message, "shape")
+		return a.failure(family, "", "shape")
 	}
 	itemID := ""
 	if family == resilience.StateAgentMessage {
 		matches := openAIM3ItemPattern.FindAllStringSubmatch(message, -1)
 		if len(matches) != 1 || ids[matches[0][1]] != 1 {
-			return a.failure(message, "item_not_unique")
+			return a.failure(family, "", "item_not_unique")
 		}
 		itemID = matches[0][1]
 	}
@@ -261,7 +286,7 @@ func (a *openAIM3Attempt) learn(ctx context.Context, body, payload []byte, messa
 		}
 	}
 	if len(selected) == 0 {
-		return a.failure(message, "no_growth")
+		return a.failure(family, itemID, "no_growth")
 	}
 	var evidence []openAIBadEncryptedSlot
 	for _, slot := range selected {
@@ -273,13 +298,13 @@ func (a *openAIM3Attempt) learn(ctx context.Context, body, payload []byte, messa
 		a.persist(ctx, evidence)
 	}
 	if ctx.Err() != nil || !resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(a.account.ID, false, time.Now(), resilience.ReasonEncryptedContent) {
-		return a.failure(message, "budget")
+		return a.failure(family, itemID, "budget")
 	}
 	next := body
 	for _, slot := range selected {
 		next, err = sjson.SetRawBytes(next, slot.path, []byte(openAIM3Placeholder))
 		if err != nil {
-			return a.failure(message, "shape")
+			return a.failure(family, itemID, "shape")
 		}
 	}
 	// Only this request's newly selected identities authorize a replay. Bad is not consulted here.
@@ -308,6 +333,42 @@ func (a *openAIM3Attempt) succeeded(ctx context.Context) {
 	a.state.replayed = false
 	a.event(ctx, "resilience.m3_replay_ok", 1)
 }
+
+// A nil reader error is not acceptance evidence. Reuse the reader's semantic
+// output decision; clean EOF with output is checked separately by the reader.
+func openAIM3TerminalAccepted(terminal string, semanticOutput bool) bool {
+	switch terminal {
+	case "response.completed", "response.done", "[DONE]":
+		return true
+	case "response.incomplete", "response.cancelled", "response.canceled":
+		return semanticOutput
+	default:
+		return false
+	}
+}
+
+func openAIM3AggregateAccepted(body, terminal string) bool {
+	semanticOutput := false
+	forEachOpenAISSEFrame(body, func(event string, payload []byte) {
+		if !openAIStreamEventTypeIsTerminal(event) {
+			semanticOutput = semanticOutput || resilience.ResponsesEventOutputDisposition(event, payload).SemanticOutput
+		}
+	})
+	return openAIM3TerminalAccepted(terminal, semanticOutput) || terminal == "" && semanticOutput
+}
+
+func openAIM3JSONAccepted(body []byte) bool {
+	root := gjson.ParseBytes(body)
+	return gjson.ValidBytes(body) && root.IsObject() && root.Get("object").String() == "response" &&
+		root.Get("status").String() == "completed" && root.Get("output").IsArray() &&
+		root.Get("error").Type == gjson.Null
+}
+
+func openAIM3RewrittenShapeRejected(status int, payload []byte, message string) bool {
+	return (status == http.StatusBadRequest || status == http.StatusUnprocessableEntity) &&
+		!openAIStreamRequestRejected(payload, message)
+}
+
 func (a *openAIM3Attempt) afterLocalRepairs(ctx context.Context, body, payload []byte, message string, status, wrappedStatus int) error {
 	if a == nil {
 		return nil
@@ -318,8 +379,8 @@ func (a *openAIM3Attempt) afterLocalRepairs(ctx context.Context, body, payload [
 	if signal := a.learn(ctx, body, payload, message, status, wrappedStatus); signal != nil {
 		return signal
 	}
-	if len(a.state.replaced) > 0 && status >= 400 && status < 500 && status != 429 {
-		return a.failure(message, "rewritten_4xx")
+	if len(a.state.replaced) > 0 && openAIM3RewrittenShapeRejected(status, payload, message) {
+		return a.failure(resilience.StateNone, "", "rewritten_4xx")
 	}
 	return nil
 }
@@ -407,7 +468,7 @@ func deferOpenAIM3ToForward(c *gin.Context, account *Account, payload []byte, me
 		}
 	}
 	_, trigger := openAIM3Trigger(payload, message, wrappedStatus)
-	if !trigger && !(len(r.m3.state.replaced) > 0 && status >= 400 && status < 500 && status != http.StatusTooManyRequests) {
+	if !trigger && !(len(r.m3.state.replaced) > 0 && openAIM3RewrittenShapeRejected(status, payload, message)) {
 		return nil
 	}
 	return annotateUpstreamFailoverAccount(&UpstreamFailoverError{

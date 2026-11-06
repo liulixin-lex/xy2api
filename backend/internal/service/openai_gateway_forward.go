@@ -1325,6 +1325,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		searchCount := 0
 		var imageOutputSizes []string
 		var partialErr error
+		upstreamAccepted := false
 		if reqStream {
 			streamResult, err := s.handleStreamingResponseWithReasoning(ctx, resp, c, account, attemptStart, originalModel, upstreamModel, reasoningEffortValue)
 			if err != nil {
@@ -1398,6 +1399,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				// Keep metered usage after output without turning a failed attempt into success.
 				partialErr = err
 			}
+			upstreamAccepted = streamResult.upstreamAccepted
 			usage = streamResult.usage
 			firstTokenMs = streamResult.firstTokenMs
 			responseID = strings.TrimSpace(streamResult.responseID)
@@ -1439,14 +1441,17 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				}
 				return nil, err
 			}
+			upstreamAccepted = nonStreamResult.upstreamAccepted
 			usage = nonStreamResult.usage
 			responseID = strings.TrimSpace(nonStreamResult.responseID)
 			imageCount = nonStreamResult.imageCount
 			imageOutputSizes = nonStreamResult.imageOutputSizes
 			searchCount = nonStreamResult.searchCount
 		}
-		if partialErr == nil {
+		if upstreamAccepted {
 			requestRepair.m3.succeeded(ctx)
+		}
+		if partialErr == nil {
 			webSearchReplay.succeeded()
 			s.bindHTTPResponseAccount(ctx, c, account, responseID)
 		}

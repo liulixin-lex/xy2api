@@ -36,6 +36,7 @@ type openaiStreamingResult struct {
 	imageOutputSizes []string
 	searchCount      int
 	clientSawOutput  bool
+	upstreamAccepted bool
 }
 
 // openAISemanticWriteTracker observes actual downstream writes, including a
@@ -60,6 +61,7 @@ func (w *openAISemanticWriteTracker) Write(p []byte) (int, error) {
 
 type openaiNonStreamingResult struct {
 	*OpenAIUsage
+	upstreamAccepted bool
 	usage            *OpenAIUsage
 	responseID       string
 	imageCount       int
@@ -409,6 +411,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	// Dedup search tool calls across SSE events (item.done + response.completed
 	// both list the same call_id — counting both would ~2× the surcharge).
 	streamSearchSeen := make(map[string]struct{})
+	cleanEOF := false
 	resultWithUsage := func() *openaiStreamingResult {
 		return &openaiStreamingResult{
 			usage:            usage,
@@ -418,6 +421,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			imageOutputSizes: imageCounter.Sizes(),
 			searchCount:      searchCounter,
 			clientSawOutput:  delivery.sawOutput,
+			upstreamAccepted: !sawFailedEvent && (openAIM3TerminalAccepted(terminalEventType, responsesSemanticOutputSeen) || cleanEOF && responsesSemanticOutputSeen),
 		}
 	}
 	flushPending := func(disconnectMessage string) {
@@ -975,6 +979,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		if result, err, done := handleScanErr(documentScanner.Err()); done {
 			return result, err
 		}
+		cleanEOF = true
 		return finalizeStream()
 	}
 
@@ -1034,6 +1039,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		select {
 		case ev, ok := <-events:
 			if !ok {
+				cleanEOF = true
 				if stageFirstOutput && eventInProgress {
 					// EOF dispatches the final SSE event even without a trailing blank
 					// line. Do not synthesize extra bytes on the downstream wire.
@@ -1842,6 +1848,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		OpenAIUsage:      usage,
 		usage:            usage,
 		responseID:       extractOpenAIResponseIDFromJSONBytes(body),
+		upstreamAccepted: openAIM3JSONAccepted(body),
 		imageCount:       countOpenAIResponseImageOutputsFromJSONBytes(body),
 		imageOutputSizes: collectOpenAIResponseImageOutputSizesFromJSONBytes(body),
 		searchCount:      countGrokNativeSearchCallsFromJSONBytes(body),
@@ -1973,6 +1980,7 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		OpenAIUsage:      usage,
 		usage:            usage,
 		responseID:       extractOpenAIResponseIDFromJSONBytes(body),
+		upstreamAccepted: openAIM3AggregateAccepted(bodyText, terminalType),
 		imageCount:       countOpenAIImageOutputsFromSSEBody(bodyText),
 		imageOutputSizes: collectOpenAIImageOutputSizesFromSSEBody(bodyText),
 		searchCount:      countGrokNativeSearchCallsFromSSEBody(bodyText),

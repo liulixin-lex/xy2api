@@ -371,7 +371,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	// partialErr ends a stream that broke after output: its usage so far is
 	// returned with the error (review DELTA-P2-5).
 	var partialErr error
+	upstreamAccepted := false
 	requestRepair := armOpenAIRequestRepair(c, account, rejectedFieldRetryState)
+	requestRepair.passthrough = true
 	requestRepair.encryptedTried = true // rs/cmp stripping remains exclusive to the native path.
 	requestRepair.m3 = s.armOpenAIM3(c, account, body)
 	replayAttempt := false
@@ -568,11 +570,13 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 					usage, firstTokenMs = result.usage, result.firstTokenMs
 					responseID = strings.TrimSpace(result.responseID)
 					imageCount, imageOutputSizes = result.imageCount, result.imageOutputSizes
+					upstreamAccepted = result.upstreamAccepted
 					partialErr = handleErr
 					break
 				}
 				return nil, handleErr
 			}
+			upstreamAccepted = result.upstreamAccepted
 			usage = result.usage
 			firstTokenMs = result.firstTokenMs
 			responseID = strings.TrimSpace(result.responseID)
@@ -617,6 +621,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 				_ = resp.Body.Close()
 				return nil, handleErr
 			}
+			upstreamAccepted = result.upstreamAccepted
 			usage = result.usage
 			responseID = strings.TrimSpace(result.responseID)
 			imageCount = result.imageCount
@@ -625,8 +630,10 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		break
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if partialErr == nil {
+	if upstreamAccepted {
 		requestRepair.m3.succeeded(ctx)
+	}
+	if partialErr == nil {
 		webSearchReplay.succeeded()
 	}
 	serviceTier := extractOpenAIServiceTierFromBody(body)
@@ -1194,11 +1201,13 @@ type openaiStreamingResultPassthrough struct {
 	imageOutputSizes []string
 	// clientSawOutput: semantic output was written, or a write failed; a
 	// stream that broke afterwards is billed for its usage so far.
-	clientSawOutput bool
+	clientSawOutput  bool
+	upstreamAccepted bool
 }
 
 type openaiNonStreamingResultPassthrough struct {
 	*OpenAIUsage
+	upstreamAccepted bool
 	usage            *OpenAIUsage
 	responseID       string
 	imageCount       int
@@ -2408,6 +2417,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	documentScanner := newOpenAISSEJSONDocumentScanner(scanner)
 
 	needModelReplace := strings.TrimSpace(originalModel) != "" && strings.TrimSpace(mappedModel) != "" && strings.TrimSpace(originalModel) != strings.TrimSpace(mappedModel)
+	cleanEOF := false
 	resultWithUsage := func() *openaiStreamingResultPassthrough {
 		return &openaiStreamingResultPassthrough{
 			usage:            usage,
@@ -2416,6 +2426,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			imageCount:       imageCounter.Count(),
 			imageOutputSizes: imageCounter.Sizes(),
 			clientSawOutput:  clientOutputStarted || clientDisconnected,
+			upstreamAccepted: !sawFailedEvent && (openAIM3TerminalAccepted(terminalEventType, semanticOutputSeen) || cleanEOF && semanticOutputSeen),
 		}
 	}
 
@@ -2798,6 +2809,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		return passthroughLineContinue
 	}
 	finish := func(scanErr error) (*openaiStreamingResultPassthrough, error) {
+		cleanEOF = scanErr == nil && ctx.Err() == nil
 		ensureResponseFailedTerminal()
 		if guarded && !clientOutputStarted && reqCtx.Err() != nil {
 			return resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", reqCtx.Err())
@@ -3027,6 +3039,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 		OpenAIUsage:      usage,
 		usage:            usage,
 		responseID:       extractOpenAIResponseIDFromJSONBytes(body),
+		upstreamAccepted: openAIM3JSONAccepted(body),
 		imageCount:       countOpenAIResponseImageOutputsFromJSONBytes(body),
 		imageOutputSizes: collectOpenAIResponseImageOutputSizesFromJSONBytes(body),
 	}, nil
@@ -3110,6 +3123,7 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 		OpenAIUsage:      usage,
 		usage:            usage,
 		responseID:       extractOpenAIResponseIDFromJSONBytes(body),
+		upstreamAccepted: openAIM3AggregateAccepted(bodyText, terminalType),
 		imageCount:       countOpenAIImageOutputsFromSSEBody(bodyText),
 		imageOutputSizes: collectOpenAIImageOutputSizesFromSSEBody(bodyText),
 	}, nil
