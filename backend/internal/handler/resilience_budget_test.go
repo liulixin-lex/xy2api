@@ -284,14 +284,33 @@ func TestOpenAIStreamForbiddenExcludesSameHostWithoutCapacityQuota(t *testing.T)
 	excluded := map[int64]struct{}{1: {}}
 	hosts := &hostSharingUnscheduler{sameHost: map[int64][]int64{1: {2, 3}}}
 	failoverErr := &service.UpstreamFailoverError{
-		StatusCode: http.StatusForbidden,
-		Reason:     service.OpenAIStreamForbiddenReason,
+		StatusCode:          http.StatusForbidden,
+		Reason:              service.OpenAIStreamForbiddenReason,
+		UpstreamPlatform:    service.PlatformOpenAI,
+		UpstreamAccountType: service.AccountTypeAPIKey,
 	}
 
 	require.False(t, resilienceBeforeSwitch(ctx, hosts, 1, failoverErr, excluded))
 	require.Contains(t, excluded, int64(2))
 	require.Contains(t, excluded, int64(3))
 	require.True(t, requestBudget(ctx).AllowCapacitySwitch(), "forbidden must not consume the capacity switch quota")
+}
+
+func TestOpenAIStreamForbiddenOAuthKeepsOtherOfficialAccounts(t *testing.T) {
+	withHandlerResilience(t, nil)
+	ctx := budgetCtx(t, resilience.KindText, 7)
+	fs := NewFailoverState(3, false)
+	hosts := &hostSharingUnscheduler{sameHost: map[int64][]int64{1: {2, 3}}}
+	failoverErr := &service.UpstreamFailoverError{
+		StatusCode:          http.StatusForbidden,
+		Reason:              service.OpenAIStreamForbiddenReason,
+		UpstreamPlatform:    service.PlatformOpenAI,
+		UpstreamAccountType: service.AccountTypeOAuth,
+	}
+
+	require.Equal(t, FailoverContinue, fs.HandleFailoverError(ctx, hosts, 1, service.PlatformOpenAI, 0, failoverErr))
+	require.Equal(t, map[int64]struct{}{1: {}}, fs.FailedAccountIDs, "OAuth only excludes the failed credential, not every official account")
+	require.True(t, requestBudget(ctx).AllowCapacitySwitch())
 }
 
 type capabilityAttemptRecorder struct{ calls int }
