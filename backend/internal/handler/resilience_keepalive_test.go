@@ -5,8 +5,10 @@ package handler
 import (
 	"context"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -19,6 +21,45 @@ func keepaliveCtx(t *testing.T, edge string, kind resilience.RequestKind) *gin.C
 	t.Helper()
 	c, _ := keepaliveCtxWithRecorder(t, edge, kind)
 	return c
+}
+
+func TestArmPreOutputKeepaliveOAuthHandoff(t *testing.T) {
+	for _, committed := range []bool{false, true} {
+		t.Run(strconv.FormatBool(committed), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				withHandlerResilience(t, func(s *resilience.Settings) {
+					s.Keepalive.DelaySeconds = 5
+					s.Keepalive.IntervalSeconds = 5
+				})
+				c, rec := keepaliveCtxWithRecorder(t, "cf", resilience.KindText)
+				c.Request.Header.Set("originator", "codex_cli_rs")
+				defer stopPreOutputKeepalive(c)
+				armPreOutputKeepalive(c, service.PreOutputProtocolResponses, true, &service.Account{Type: service.AccountTypeAPIKey})
+				if committed {
+					time.Sleep(6 * time.Second)
+				} else {
+					time.Sleep(time.Second)
+				}
+				synctest.Wait()
+				c.Header("X-Attempt", "one")
+				armPreOutputKeepalive(c, service.PreOutputProtocolResponses, true, &service.Account{Type: service.AccountTypeOAuth})
+				time.Sleep(4 * time.Second)
+				synctest.Wait()
+				if committed {
+					require.Equal(t, 2, strings.Count(rec.Body.String(), "event: ping\n"))
+					time.Sleep(5 * time.Second)
+					synctest.Wait()
+					require.Equal(t, 3, strings.Count(rec.Body.String(), "event: ping\n"))
+					require.Equal(t, -1, service.OpenAICompactKeepaliveAdjustedWrittenSize(c))
+				} else {
+					time.Sleep(15 * time.Second)
+					synctest.Wait()
+					require.Empty(t, rec.Body.String())
+					require.False(t, service.PreOutputKeepaliveCommitted(c))
+				}
+			})
+		})
+	}
 }
 
 func keepaliveCtxWithRecorder(t *testing.T, edge string, kind resilience.RequestKind) (*gin.Context, *httptest.ResponseRecorder) {

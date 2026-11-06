@@ -6,12 +6,14 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,6 +22,144 @@ type continuityWriter struct {
 	mu      sync.Mutex
 	latency time.Duration
 	times   []time.Time
+}
+
+func TestHeartbeatCommentBeforeFirstBeat(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		withResilienceSettings(t, nil)
+		w := newGWWriter()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+		stop := StartPreOutputKeepalive(c, PreOutputProtocolAnthropic, 5*time.Second, 5*time.Second)
+		defer stop()
+		time.Sleep(time.Second)
+		_, err := writeOpenAIStreamKeepalive(c, c.Writer, []byte(": upstream\n\n"), false)
+		require.NoError(t, err)
+		time.Sleep(time.Second)
+		StartPreOutputKeepalive(c, PreOutputProtocolAnthropic, 0, 5*time.Second)
+		time.Sleep(2999 * time.Millisecond)
+		synctest.Wait()
+		require.Equal(t, ": upstream\n\n", w.Body())
+		time.Sleep(time.Millisecond)
+		synctest.Wait()
+		require.Equal(t, ": upstream\n\n"+string(preOutputPingFrame), w.Body())
+	})
+}
+
+func TestStagedHeartbeatResumesAfterFailover(t *testing.T) {
+	for _, protocol := range []string{PreOutputProtocolAnthropic, PreOutputProtocolChat} {
+		t.Run(protocol, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				withResilienceSettings(t, nil)
+				w := newGWWriter()
+				c, _ := gin.CreateTestContext(w)
+				c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+				stop := StartPreOutputKeepalive(c, protocol, 5*time.Second, 5*time.Second)
+				defer stop()
+				time.Sleep(5 * time.Second)
+				synctest.Wait()
+				c.Header("X-Attempt", "one")
+				time.Sleep(5 * time.Second)
+				if protocol == PreOutputProtocolAnthropic {
+					stage := newAnthropicStreamStage(c.Request.Context(), c, func() {})
+					defer stage.close()
+					_, err := stage.submit("event: message_start\ndata: {\"type\":\"message_start\"}\n\n")
+					require.NoError(t, err)
+					require.NoError(t, stage.heartbeat(""))
+					_, err = stage.submit("event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"busy\"}}\n\n")
+					err = (&GatewayService{}).anthropicStreamEventError(c.Request.Context(), c, &http.Response{Header: http.Header{}}, &Account{}, "", err)
+					var failover *UpstreamFailoverError
+					require.ErrorAs(t, err, &failover)
+				} else {
+					st := &gatewayConvertStream{c: c, guarded: true, protocol: gatewayConvertChat, resp: &http.Response{Header: http.Header{}}}
+					st.heartbeat(": ping\n\n", true)
+					outcome, done := st.onEvent("error", `{"type":"error","error":{"type":"overloaded_error","message":"busy"}}`)
+					require.True(t, done)
+					var failover *UpstreamFailoverError
+					require.ErrorAs(t, outcome.err, &failover)
+				}
+				before := w.Body()
+				time.Sleep(2 * time.Second)
+				StartPreOutputKeepalive(c, protocol, 0, 5*time.Second)
+				time.Sleep(2999 * time.Millisecond)
+				synctest.Wait()
+				require.Equal(t, before, w.Body())
+				time.Sleep(time.Millisecond)
+				synctest.Wait()
+				require.Equal(t, before+string(map[string][]byte{PreOutputProtocolAnthropic: preOutputPingFrame, PreOutputProtocolChat: preOutputCommentFrame}[protocol]), w.Body())
+				require.Equal(t, -1, OpenAICompactKeepaliveAdjustedWrittenSize(c))
+				require.NotContains(t, w.Body(), "message_start")
+				k := keepaliveFrom(c)
+				k.mu.Lock()
+				kBytes := k.bytes
+				k.mu.Unlock()
+				streamBytes, _ := c.Get(openAIStreamKeepaliveBytesKey)
+				streamCount, _ := streamBytes.(int)
+				require.Equal(t, len(w.Body()), kBytes+streamCount)
+			})
+		})
+	}
+}
+
+type replayHeartbeatUpstream struct {
+	*httpUpstreamRecorder
+	secondStarted chan struct{}
+	release       chan struct{}
+}
+
+func (u *replayHeartbeatUpstream) Do(req *http.Request, proxy string, id int64, concurrency int) (*http.Response, error) {
+	if len(u.requests) == 1 {
+		close(u.secondStarted)
+		<-u.release
+	}
+	return u.httpUpstreamRecorder.Do(req, proxy, id, concurrency)
+}
+
+func TestForwardReplayResumesCommittedHeartbeat(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		withResilienceSettings(t, func(s *resilience.Settings) { s.Keepalive.IntervalSeconds = 5 })
+		resetWebSearchDeclarations(t)
+		up := newGWUpstream(context.Background())
+		defer func() { _ = up.Close() }()
+		recorder := &httpUpstreamRecorder{responses: []*http.Response{up.response(context.Background()), webSearchSuccessStream("resp_replayed")}}
+		upstream := &replayHeartbeatUpstream{httpUpstreamRecorder: recorder, secondStarted: make(chan struct{}), release: make(chan struct{})}
+		defer func() {
+			select {
+			case <-upstream.release:
+			default:
+				close(upstream.release)
+			}
+		}()
+		svc := newOpenAIImageGenerationControlTestService(recorder)
+		svc.httpUpstream = upstream
+		svc.cfg.Gateway.StreamKeepaliveInterval = 5
+		req := newWebSearchReplayRequest(t)
+		w := &continuityWriter{gwWriter: newGWWriter()}
+		c, _ := gin.CreateTestContext(w)
+		c.Request = req.c.Request
+		stop := StartPreOutputKeepalive(c, PreOutputProtocolResponses, 5*time.Second, 5*time.Second)
+		defer stop()
+		start := time.Now()
+		time.Sleep(6 * time.Second)
+		synctest.Wait()
+		done := make(chan error, 1)
+		go func() {
+			_, err := svc.Forward(req.ctx, c, webSearchReplayAccount(false), []byte(openAIWebSearchHistoryCompactionBody))
+			done <- err
+		}()
+		up.send(t, ptCreated)
+		synctest.Wait()
+		time.Sleep(6 * time.Second)
+		up.send(t, webSearchRejectionEvent)
+		<-upstream.secondStarted
+		synctest.Wait()
+		time.Sleep(8 * time.Second)
+		synctest.Wait()
+		require.Equal(t, []time.Time{start.Add(5 * time.Second), start.Add(10 * time.Second), start.Add(15 * time.Second), start.Add(20 * time.Second)}, w.pingTimes())
+		require.NotContains(t, w.Body(), "response.created")
+		close(upstream.release)
+		require.NoError(t, <-done)
+	})
 }
 
 func (w *continuityWriter) Write(p []byte) (int, error) {
@@ -43,7 +183,10 @@ func (w *continuityWriter) pingTimes() []time.Time {
 
 func TestOpenAIHeartbeatContinuity(t *testing.T) {
 	for _, path := range []string{"native", "passthrough"} {
-		for _, scenario := range []string{"handoff", "slow_write", "failover_after_ping", "failover_before_ping", "headers_before_first_ping"} {
+		for _, scenario := range []string{"handoff", "slow_write", "failover_after_ping", "failover_after_comment", "failover_before_ping", "headers_before_first_ping"} {
+			if scenario == "failover_after_comment" && path != "passthrough" {
+				continue
+			}
 			t.Run(path+"/"+scenario, func(t *testing.T) {
 				synctest.Test(t, func(t *testing.T) {
 					withResilienceSettings(t, nil)
@@ -88,15 +231,21 @@ func TestOpenAIHeartbeatContinuity(t *testing.T) {
 					switch scenario {
 					case "slow_write":
 						headersAt = 5500 * time.Millisecond
-					case "failover_after_ping", "failover_before_ping":
+					case "failover_after_ping", "failover_after_comment", "failover_before_ping":
 						headersAt = 6 * time.Second
 					case "headers_before_first_ping":
 						headersAt = time.Second
 					}
 					advance(headersAt)
 					startStream()
-					if scenario == "failover_after_ping" || scenario == "failover_before_ping" {
+					if scenario == "failover_after_ping" || scenario == "failover_after_comment" || scenario == "failover_before_ping" {
 						failAt := 12 * time.Second
+						if scenario == "failover_after_comment" {
+							advance(12 * time.Second)
+							up.send(t, ptComment)
+							synctest.Wait()
+							failAt = 13 * time.Second
+						}
 						if scenario == "failover_before_ping" {
 							failAt = 8 * time.Second
 						}
@@ -114,9 +263,13 @@ func TestOpenAIHeartbeatContinuity(t *testing.T) {
 						require.Equal(t, "turn-state", nativeTurnStateWireHeaders(w.gwWriter).Get(openAICodexTurnStateHeader))
 					}
 					for i := 1; i < len(times); i++ {
-						require.LessOrEqual(t, times[i].Sub(times[i-1]), 5*time.Second+w.latency, "ping times: %v", times)
+						gap := 5 * time.Second
+						if scenario == "slow_write" && (path == "native" || i == 1) {
+							gap += w.latency
+						}
+						require.Equal(t, gap, times[i].Sub(times[i-1]), "ping times: %v", times)
 					}
-					if scenario == "failover_after_ping" || scenario == "failover_before_ping" {
+					if scenario == "failover_after_ping" || scenario == "failover_after_comment" || scenario == "failover_before_ping" {
 						require.Equal(t, start.Add(15*time.Second), times[2], "failover must preserve the previous beat")
 					} else {
 						up.send(t, ptOverload)
@@ -124,7 +277,19 @@ func TestOpenAIHeartbeatContinuity(t *testing.T) {
 						require.ErrorAs(t, <-done, &failover)
 					}
 					body := w.Body()
-					requireResponsesPingEvents(t, body)
+					pingBody := body
+					if scenario == "failover_after_comment" {
+						require.Equal(t, 1, strings.Count(body, ptComment))
+						pingBody = strings.Replace(body, ptComment, "", 1)
+					}
+					requireResponsesPingEvents(t, pingBody)
+					k := keepaliveFrom(c)
+					k.mu.Lock()
+					kBytes := k.bytes
+					k.mu.Unlock()
+					streamBytes, _ := c.Get(openAIStreamKeepaliveBytesKey)
+					streamCount, _ := streamBytes.(int)
+					require.Equal(t, len(body), kBytes+streamCount)
 					require.Equal(t, -1, OpenAICompactKeepaliveAdjustedWrittenSize(c))
 					require.NotContains(t, body, "response.created")
 				})
