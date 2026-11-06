@@ -133,20 +133,65 @@ func TestOpenAIPassthroughStallAfterOutputEndsTheStream(t *testing.T) {
 	require.Contains(t, w.Body(), "hello")
 }
 
-// R1-P1-2: heartbeats while the opening is staged are comments counted as
+// R1-P1-2: heartbeats while the opening is staged are ping events counted as
 // heartbeat bytes; the attempt may still switch.
 func TestOpenAIPassthroughStagingHeartbeatIsNotOutput(t *testing.T) {
 	withResilienceSettings(t, nil)
 	w := newGWWriter()
 	c := ptContext(w)
+	c.Request.Header.Set("originator", "codex_cli_rs")
 	up := newGWUpstream(nil)
 	done := ptRun(compatStreamService(nil, 10, 0, 1), c, up.response(nil))
 	up.send(t, ptCreated)
-	require.Eventually(t, func() bool { return strings.HasPrefix(w.Body(), ":") }, 3*time.Second, 20*time.Millisecond)
+	require.Eventually(t, func() bool {
+		return (strings.HasPrefix(w.Body(), ":") || strings.HasPrefix(w.Body(), string(preOutputPingFrame)))
+	}, 3*time.Second, 20*time.Millisecond)
 	up.send(t, ptOverload)
 	got := ptAwait(t, done, 3*time.Second)
 	var failover *UpstreamFailoverError
 	require.ErrorAs(t, got.err, &failover)
+	requireResponsesPingEvents(t, w.Body())
+	requireOnlyHeartbeats(t, c, w.Body())
+	require.NotContains(t, w.Body(), "resp_pt")
+}
+
+func TestOpenAIPassthroughUpstreamCommentsDoNotSuppressPings(t *testing.T) {
+	withResilienceSettings(t, nil)
+	w := newGWWriter()
+	c := ptContext(w)
+	c.Request.Header.Set("originator", "codex_cli_rs")
+	up := newGWUpstream(nil)
+	t.Cleanup(func() { _ = up.Close() })
+	start := time.Now()
+	done := ptRun(compatStreamService(nil, 30, 0, 10), c, up.response(nil))
+	up.send(t, ptCreated)
+	comments := time.NewTicker(3 * time.Second)
+	defer comments.Stop()
+	deadline := time.NewTimer(25 * time.Second)
+	defer deadline.Stop()
+	lastPing := start
+	pingCount := 0
+	for pingCount < 2 {
+		select {
+		case <-comments.C:
+			up.send(t, ptComment)
+		case body := <-w.flushed:
+			count := strings.Count(body, string(preOutputPingFrame))
+			if count > pingCount {
+				now := time.Now()
+				require.InDelta(t, 10, now.Sub(lastPing).Seconds(), 2, "gateway ping interval")
+				lastPing, pingCount = now, count
+			}
+		case <-deadline.C:
+			t.Fatal("upstream comments suppressed scheduled gateway pings")
+		}
+	}
+	up.send(t, ptOverload)
+	got := ptAwait(t, done, 3*time.Second)
+	var failover *UpstreamFailoverError
+	require.ErrorAs(t, got.err, &failover)
+	require.GreaterOrEqual(t, strings.Count(w.Body(), ptComment), 6)
+	requireResponsesPingEvents(t, strings.ReplaceAll(w.Body(), ptComment, ""))
 	requireOnlyHeartbeats(t, c, w.Body())
 	require.NotContains(t, w.Body(), "resp_pt")
 }
@@ -179,8 +224,9 @@ func TestOpenAIPassthroughHeartbeatWriteFailureIsClientGone(t *testing.T) {
 	}{{"failed_event", ptOverload}, {"deadline", ""}} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := newGWWriter()
-			w.fail = func(data string) bool { return strings.HasPrefix(data, ":") }
+			w.fail = func(data string) bool { return data == string(preOutputPingFrame) }
 			c := ptContext(w)
+			c.Request.Header.Set("originator", "codex_cli_rs")
 			up := newGWUpstream(nil)
 			done := ptRun(compatStreamService(nil, 3, 0, 1), c, up.response(nil))
 			up.send(t, ptCreated)
@@ -302,7 +348,9 @@ func TestOpenAIPassthroughRuleAfterHeartbeatEndsWithResponsesTerminal(t *testing
 			if tc.strict {
 				up.send(t, ": keep-alive\n\n")
 			}
-			require.Eventually(t, func() bool { return strings.HasPrefix(w.Body(), ":") }, 3*time.Second, 10*time.Millisecond)
+			require.Eventually(t, func() bool {
+				return (strings.HasPrefix(w.Body(), ":") || strings.HasPrefix(w.Body(), string(preOutputPingFrame)))
+			}, 3*time.Second, 10*time.Millisecond)
 			up.send(t, buildContextLengthFailedSSE())
 			_ = up.pw.Close()
 			got := ptAwait(t, done, 3*time.Second)
@@ -315,7 +363,7 @@ func TestOpenAIPassthroughRuleAfterHeartbeatEndsWithResponsesTerminal(t *testing
 			require.NotContains(t, body, "\n{", "no bare JSON after the heartbeat")
 			var events []string
 			for _, block := range strings.Split(strings.TrimSuffix(body, "\n\n"), "\n\n") {
-				if !strings.HasPrefix(block, ":") {
+				if !strings.HasPrefix(block, ":") && !strings.HasPrefix(block, "event: ping\n") {
 					events = append(events, block)
 				}
 			}

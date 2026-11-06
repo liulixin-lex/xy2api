@@ -297,6 +297,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	terminalEventType := ""
 	capacityFailoverSuppressedLogged := false
 	failedMessage := ""
+	responsesSemanticOutputSeen := false
 	clientOutputStarted := false
 	codexFailureTerminal := account != nil && account.IsOpenAIOAuthLike()
 	upstreamRequestID := strings.TrimSpace(resp.Header.Get("x-request-id"))
@@ -367,7 +368,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		if errorEventSent || clientDisconnected || failureDelivered || sawTerminalEvent {
 			return
 		}
-		if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+		// A visible event may still await its closing blank line. Preserve that
+		// pending output and let the failure frame close the original boundary.
+		if !openAIStreamClientOutputStarted(c, clientOutputStarted) && !eventShouldFlush {
 			if err := discardPendingWrites(); err != nil {
 				handlePendingWriteError(err)
 				return
@@ -611,17 +614,22 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				logOpenAICapacityFailoverSuppressed(ctx, account, "native_sse", upstreamRequestID, eventType)
 				capacityFailoverSuppressedLogged = true
 			}
+			if resilience.ClassifyStreamEvent("responses", eventType, dataBytes).Kind == resilience.TerminalFailure &&
+				!openAIStreamClientOutputStarted(c, clientOutputStarted) {
+				if err := discardPendingWrites(); err != nil {
+					handlePendingWriteError(err)
+					return
+				}
+				if writer := deliveryWriterFrom(c); writer != nil {
+					// A bare error is still a Responses terminal after its prelude is discarded.
+					writer.stream.responses.Store(true)
+				}
+				restoreFailureEventLine = pendingSSEEventLine != ""
+				eventInProgress = false
+				eventHasBlankPlaceholder = false
+			}
 			cyberHit := false
 			if eventType == "response.failed" || eventType == "error" {
-				if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
-					if err := discardPendingWrites(); err != nil {
-						handlePendingWriteError(err)
-						return
-					}
-					restoreFailureEventLine = pendingSSEEventLine != ""
-					eventInProgress = false
-					eventHasBlankPlaceholder = false
-				}
 				if codexFailureTerminal && eventType == "error" {
 					sawBareError = true
 					bareErrorPayload = append(bareErrorPayload[:0], dataBytes...)
@@ -801,6 +809,19 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			// Replace model in response if needed.
 			if needModelReplace {
 				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
+			}
+			if !openAIStreamEventTypeIsTerminal(eventType) {
+				responsesSemanticOutputSeen = responsesSemanticOutputSeen || resilience.ResponsesEventOutputDisposition(eventType, dataBytes).SemanticOutput
+			}
+			// Preserve the silent-refusal guard (#5009/#7774); whitespace does not
+			// turn an otherwise empty, usage-free completed event into success.
+			if account != nil && (account.Platform == PlatformOpenAI || account.Platform == PlatformGrok) &&
+				(eventType == "response.completed" || eventType == "response.done") &&
+				!sawFailedEvent && !responsesSemanticOutputSeen && !clientOutputStarted &&
+				openAIResponsesCompletedEventIsEmpty(dataBytes, usage) {
+				sawTerminalEvent = true
+				streamEarlyErr = newOpenAIResponsesEmptyCompletedFailoverError(c, account, upstreamRequestID)
+				return
 			}
 			startsClientOutput := forceFlushFailedEvent || openAIStreamDataStartsClientOutput(data, eventType)
 			if startsClientOutput && !clientOutputStarted {
@@ -1109,6 +1130,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if time.Since(lastDownstreamWriteAt) < keepaliveInterval {
 				continue
 			}
+			frame := preOutputCommentFrame
+			if !clientOutputStarted {
+				frame = responsesPreOutputHeartbeatFrame(c)
+			}
 			if stageFirstOutput {
 				// Bypass attempt-local buffered frames. Only turn-state may accompany
 				// the stable SSE headers; record its origin before the heartbeat commits.
@@ -1119,7 +1144,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 						s.noteOpenAICodexTurnStateProvenance(c, account)
 					}
 				}
-				n, err := w.Write([]byte(":\n\n"))
+				n, err := w.Write(frame)
 				recordOpenAIStreamKeepaliveBytes(c, n)
 				if err != nil {
 					clientDisconnected = true
@@ -1130,7 +1155,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				lastDownstreamWriteAt = time.Now()
 				continue
 			}
-			if _, err := writePendingString(":\n\n"); err != nil {
+			if _, err := writePendingString(string(frame)); err != nil {
 				clientDisconnected = true
 				logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming, continuing to drain upstream for billing")
 				continue
@@ -1531,10 +1556,14 @@ func openAIResponsesCompletedEventIsEmpty(data []byte, usage *OpenAIUsage) bool 
 		usage.CacheCreationInputTokens > 0 || usage.CacheReadInputTokens > 0) {
 		return false
 	}
-	if gjson.GetBytes(data, "usage").Exists() || gjson.GetBytes(data, "response.usage").Exists() {
+	usageValue := gjson.GetBytes(data, "usage")
+	responseUsage := gjson.GetBytes(data, "response.usage")
+	if (usageValue.Exists() && usageValue.Type != gjson.Null) || (responseUsage.Exists() && responseUsage.Type != gjson.Null) {
 		return false
 	}
-	if gjson.GetBytes(data, "error").Exists() || gjson.GetBytes(data, "response.error").Exists() {
+	errorValue := gjson.GetBytes(data, "error")
+	responseError := gjson.GetBytes(data, "response.error")
+	if (errorValue.Exists() && errorValue.Type != gjson.Null) || (responseError.Exists() && responseError.Type != gjson.Null) {
 		return false
 	}
 	if output := gjson.GetBytes(data, "response.output"); output.Exists() && output.IsArray() && len(output.Array()) > 0 {

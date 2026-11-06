@@ -83,10 +83,6 @@ func relayLivenessFor(c *gin.Context, account *Account) *relayLiveness {
 	return newRelayLiveness(ctx, account)
 }
 
-func (l *relayLiveness) frameDropped() {
-	l.noteDroppedFrame(true)
-}
-
 func (l *relayLiveness) noteDroppedFrame(markFirstToken bool) {
 	if l == nil {
 		return

@@ -24,6 +24,7 @@ func runNativeRuleStream(t *testing.T, keepalive int, beforeFailed func(w *gwWri
 	t.Helper()
 	w := newGWWriter()
 	c := ptContext(w)
+	c.Request.Header.Set("originator", "codex_cli_rs")
 	bindPassthroughRule(c, "openai", []string{"context_length_exceeded"}, 400)
 	up := newGWUpstream(nil)
 	done := make(chan error, 1)
@@ -48,7 +49,7 @@ func runNativeRuleStream(t *testing.T, keepalive int, beforeFailed func(w *gwWri
 func TestNativeResponsesRuleAfterHeartbeatEndsWithResponsesTerminal(t *testing.T) {
 	withResilienceSettings(t, nil)
 	w, err := runNativeRuleStream(t, 1, func(w *gwWriter) {
-		require.Eventually(t, func() bool { return strings.HasPrefix(w.Body(), ":") }, 3*time.Second, 10*time.Millisecond)
+		require.Eventually(t, func() bool { return strings.HasPrefix(w.Body(), string(preOutputPingFrame)) }, 3*time.Second, 10*time.Millisecond)
 	})
 	require.Error(t, err)
 	var failover *UpstreamFailoverError
@@ -59,7 +60,7 @@ func TestNativeResponsesRuleAfterHeartbeatEndsWithResponsesTerminal(t *testing.T
 	require.NotContains(t, body, "resp_pt", "the staged upstream opening is not released")
 	var events []string
 	for _, block := range strings.Split(strings.TrimSuffix(body, "\n\n"), "\n\n") {
-		if !strings.HasPrefix(block, ":") {
+		if !strings.HasPrefix(block, ":") && !strings.HasPrefix(block, "event: ping\n") {
 			events = append(events, block)
 		}
 	}

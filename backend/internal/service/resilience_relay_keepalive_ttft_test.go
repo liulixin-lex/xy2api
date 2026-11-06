@@ -172,10 +172,10 @@ func TestRelayKeepaliveFramesStillDoNotStopTheFirstOutputTimer(t *testing.T) {
 func TestRelayLivenessKeepsTheFirstDrop(t *testing.T) {
 	start := time.Now()
 	l := newRelayLiveness(context.Background(), &Account{ID: 7207, Platform: PlatformOpenAI})
-	l.frameDropped()
+	l.noteDroppedFrame(true)
 	first := l.firstDrop.Load()
 	time.Sleep(20 * time.Millisecond)
-	l.frameDropped()
+	l.noteDroppedFrame(true)
 	require.Equal(t, first, l.firstDrop.Load())
 	recorded := 300
 	got := l.firstTokenMs(&recorded, start, OpenAITTFTModeSemantic)

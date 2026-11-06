@@ -1259,6 +1259,8 @@ func openAIStreamDataStartsVisibleOutput(data, eventType string) bool {
 		return delta.Exists() && delta.String() != ""
 	}
 	switch eventType {
+	case "response.failed", "response.incomplete", "error":
+		return false
 	case "response.output_text.done",
 		"response.reasoning_summary_text.done",
 		"response.reasoning_text.done",
@@ -1298,11 +1300,10 @@ func openAIStreamDataStartsSemanticTTFT(data, eventType string) bool {
 		eventType = strings.TrimSpace(gjson.Get(trimmed, "type").String())
 	}
 	switch eventType {
-	case "response.failed":
+	case "response.failed", "error":
 		return false
-	case "error":
-		payload := []byte(trimmed)
-		return !openAIStreamFailedEventShouldFailover(payload, extractOpenAISSEErrorMessage(payload))
+	case "response.incomplete":
+		return resilience.ResponsesEventOutputDisposition(eventType, []byte(trimmed)).SemanticOutput
 	default:
 		if disposition := resilience.ResponsesEventOutputDisposition(eventType, []byte(trimmed)); disposition.Matched {
 			return disposition.SemanticOutput
@@ -1327,6 +1328,9 @@ func (s *OpenAIGatewayService) openAITTFTMode(ctx context.Context) string {
 }
 
 func openAIStreamDataStartsTTFT(data, eventType string, forceOutput bool, mode string) bool {
+	if resilience.ClassifyStreamEvent("responses", eventType, []byte(data)).Kind == resilience.TerminalFailure {
+		return false
+	}
 	if mode == OpenAITTFTModeVisible {
 		return openAIStreamDataStartsVisibleOutput(data, eventType)
 	}
@@ -2197,6 +2201,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	terminalEventType := ""
 	capacityFailoverSuppressedLogged := false
 	failedMessage := ""
+	semanticOutputSeen := false
 	clientOutputStarted := false
 	attemptStagedBlankPlaceholder := false
 	eventHasBlankPlaceholder := false
@@ -2246,7 +2251,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	// 600~900s 才产出首个可见输出（每个 3~5 万 output token，上游其实算完了），
 	// 全部被中间 nginx 的 proxy_read_timeout(600s) 判超时回 504，用户一个字没拿到。
 	//
-	// 心跳写出的 SSE 注释同时做到三件事：
+	// 按入站客户端选择的心跳（Codex 为完整 SSE ping）同时做到三件事：
 	//   1. 提交 HTTP 响应头，让下游知道连接活着；
 	//   2. 刷新中间层的空闲超时（proxy_read_timeout 衡量的是两次读之间的间隔，
 	//      不是请求总时长），长推理因此不再被误杀；
@@ -2254,16 +2259,17 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	//      且心跳字节已由 OpenAICompactKeepaliveAdjustedWrittenSize 排除，
 	//      所以 pre-output failover 的能力完全不受影响（#3887 的记账在此复用）。
 	//
-	// 用 startOpenAISSEKeepalive 而不是 StartOpenAICompactSSEKeepalive：后者会检查
+	// 用带所选心跳帧的 startSSEKeepalive：compact 入口会检查
 	// compact 标记，而这里是普通 /v1/responses 透传。走到这一行时上游已回
 	// text/event-stream、SSE 响应头也已设好，处于流式上下文是确定的。
 	stopKeepalive := func() {}
+	heartbeatFrame := responsesPreOutputHeartbeatFrame(c)
 	keepaliveInterval := time.Duration(0)
 	if s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
 		keepaliveInterval = time.Duration(s.cfg.Gateway.StreamKeepaliveInterval) * time.Second
 	}
 	if keepaliveInterval > 0 && !guarded {
-		stopKeepalive = startOpenAISSEKeepalive(c, keepaliveInterval)
+		stopKeepalive = startSSEKeepalive(c, keepaliveInterval, keepaliveInterval, heartbeatFrame, "")
 	}
 	// 任何返回路径都要停拍。Stop 与心跳 goroutine 之间有互斥锁，
 	// 返回后不会再有字节写出。
@@ -2374,8 +2380,8 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	// outside one is passed through with its closing blank line.
 	eventOpen, skipBlank := false, false
 	lastLineWritten := ""
-	lastHeartbeatAt := time.Now()
-	// writeHeartbeat writes a comment while the opening is staged: it commits
+	var lastGatewayHeartbeatAt time.Time
+	// writeHeartbeat writes a complete heartbeat while the opening is staged: it commits
 	// 200 but is no output; a failed write means the client left (PM7).
 	writeHeartbeat := func(frame string) {
 		if clientDisconnected {
@@ -2389,7 +2395,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			return
 		}
 		flusher.Flush()
-		lastHeartbeatAt = time.Now()
 	}
 	var retResult *openaiStreamingResultPassthrough
 	var retErr error
@@ -2482,10 +2487,13 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			if wrappedFrame && eventType == "proxy.upstream_error" && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
 				eventType = "error"
 			}
-			if (eventType == "response.failed" || eventType == "error") && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+			if resilience.ClassifyStreamEvent("responses", eventType, dataBytes).Kind == resilience.TerminalFailure && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
 				if err := discardPendingLines(); err != nil {
 					return passthroughReturn(resultWithUsage(), s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, nil,
 						"OpenAI first-output stage reset failed: "+err.Error()))
+				}
+				if writer := deliveryWriterFrom(c); writer != nil {
+					writer.stream.responses.Store(true)
 				}
 				restoreFailureEventLine = pendingSSEEventLine != ""
 				eventHasBlankPlaceholder = false
@@ -2617,6 +2625,14 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				dataBytes = sanitizedData
 				trimmedData = strings.TrimSpace(string(sanitizedData))
 				line = "data: " + string(sanitizedData)
+			}
+			if !openAIStreamEventTypeIsTerminal(eventType) {
+				semanticOutputSeen = semanticOutputSeen || resilience.ResponsesEventOutputDisposition(eventType, dataBytes).SemanticOutput
+			}
+			if (eventType == "response.completed" || eventType == "response.done") &&
+				!sawFailedEvent && !semanticOutputSeen && !clientOutputStarted && !clientDisconnected &&
+				openAIResponsesCompletedEventIsEmpty(dataBytes, usage) {
+				return passthroughReturn(resultWithUsage(), newOpenAIResponsesEmptyCompletedFailoverError(c, account, upstreamRequestID))
 			}
 			lineStartsClientOutput = forceFlushFailedEvent || openAIStreamDataStartsClientOutput(trimmedData, eventType)
 			// Content stops the first-output deadline even after a failed
@@ -2858,11 +2874,16 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			MarkResponseCommitted(c)
 			return resultWithUsage(), errors.New("stream data interval timeout"), true
 		},
-		onKeepalive: func() {
-			if clientOutputStarted || clientDisconnected || failureDelivered || time.Since(lastHeartbeatAt) < keepaliveInterval {
+		onKeepalive: func(tick time.Time) {
+			if clientOutputStarted || clientDisconnected || failureDelivered || tick.Sub(lastGatewayHeartbeatAt) < keepaliveInterval {
 				return
 			}
-			writeHeartbeat(":\n\n")
+			writeHeartbeat(string(heartbeatFrame))
+			if !clientDisconnected {
+				// Upstream comments cannot postpone dispatchable gateway beats.
+				// Use the ticker time so write latency cannot skip the next beat.
+				lastGatewayHeartbeatAt = tick
+			}
 		},
 		firstOutputDeadline: firstOutputDeadline(startTime, firstOutputTimeout),
 		stallCheckBase:      stallCheckBase,

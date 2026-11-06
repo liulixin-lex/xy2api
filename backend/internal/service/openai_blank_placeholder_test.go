@@ -4,6 +4,7 @@ package service
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,9 +13,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 )
@@ -29,17 +32,17 @@ func d10BlankPlaceholderStream(count int, failed bool) string {
 	emit("response.in_progress", 1, `,"response":{"id":"resp_ft_test","status":"in_progress"}`)
 	sequence := 2
 	for i := 0; i < count; i++ {
-		item := fmt.Sprintf(`{"id":"msg_ft_%d","type":"message","role":"assistant","status":"in_progress","content":[{"type":"output_text","text":" "}]}`, i)
-		part := `{"type":"output_text","text":" "}`
+		item := fmt.Sprintf(`{"id":"msg_ft_%d","type":"message","role":"assistant","status":"in_progress","phase":"final_answer","content":[{"type":"output_text","text":" ","annotations":[],"logprobs":[]}]}`, i)
+		part := `{"type":"output_text","text":" ","annotations":[],"logprobs":[]}`
 		emit("response.output_item.added", sequence, fmt.Sprintf(`,"output_index":%d,"item":%s`, i, item))
 		sequence++
-		emit("response.content_part.added", sequence, fmt.Sprintf(`,"output_index":%d,"content_index":0,"part":%s`, i, part))
+		emit("response.content_part.added", sequence, fmt.Sprintf(`,"item_id":"msg_ft_%d","output_index":%d,"content_index":0,"part":%s`, i, i, part))
 		sequence++
-		emit("response.output_text.delta", sequence, fmt.Sprintf(`,"output_index":%d,"content_index":0,"delta":" "`, i))
+		emit("response.output_text.delta", sequence, fmt.Sprintf(`,"item_id":"msg_ft_%d","output_index":%d,"content_index":0,"delta":" ","logprobs":[],"obfuscation":"test"`, i, i))
 		sequence++
-		emit("response.output_text.done", sequence, fmt.Sprintf(`,"output_index":%d,"content_index":0,"text":" "`, i))
+		emit("response.output_text.done", sequence, fmt.Sprintf(`,"item_id":"msg_ft_%d","output_index":%d,"content_index":0,"text":" ","logprobs":[]`, i, i))
 		sequence++
-		emit("response.content_part.done", sequence, fmt.Sprintf(`,"output_index":%d,"content_index":0,"part":%s`, i, part))
+		emit("response.content_part.done", sequence, fmt.Sprintf(`,"item_id":"msg_ft_%d","output_index":%d,"content_index":0,"part":%s`, i, i, part))
 		sequence++
 		completedItem := strings.Replace(item, `"status":"in_progress"`, `"status":"completed"`, 1)
 		emit("response.output_item.done", sequence, fmt.Sprintf(`,"output_index":%d,"item":%s`, i, completedItem))
@@ -120,6 +123,52 @@ func TestResponsesBlankPlaceholderCompletedFlushesInOrderWithoutFirstToken(t *te
 	}
 }
 
+func TestResponsesBlankPlaceholderCompletedResponseConfigIsNotSemanticOutput(t *testing.T) {
+	withResilienceSettings(t, nil)
+	// Full Response wire fields from openai-python v2.0.0. The silent-refusal
+	// fixture intentionally omits usage and error, as required by that guard.
+	for _, tc := range []struct {
+		name, payload string
+		failover      bool
+	}{
+		{"empty output", `{"type":"response.completed","response":{"id":"resp_empty","object":"response","created_at":1760000000,"status":"completed","model":"gpt-5.4","output":[],"error":null,"incomplete_details":null,"usage":null,"parallel_tool_calls":true,"temperature":1,"tool_choice":"auto","tools":[],"top_p":1,"metadata":null,"reasoning":{"effort":"low","summary":null},"text":{"format":{"type":"text"},"verbosity":"medium"},"background":false,"conversation":null,"prompt":null,"prompt_cache_key":null,"safety_identifier":null,"top_logprobs":0,"user":null,"truncation":"disabled","instructions":null,"max_output_tokens":null,"max_tool_calls":null,"previous_response_id":null,"service_tier":"default"}}`, true},
+		{"whitespace output", `{"type":"response.completed","response":{"id":"resp_blank","object":"response","created_at":1760000000,"status":"completed","model":"gpt-5.4","output":[{"id":"msg_blank","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":" ","annotations":[],"logprobs":[]}]}],"parallel_tool_calls":true,"temperature":1,"tool_choice":"auto","tools":[],"top_p":1,"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2,"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":0}},"error":null,"incomplete_details":null,"metadata":null,"reasoning":{"effort":"low","summary":null},"text":{"format":{"type":"text"},"verbosity":"medium"},"background":false,"conversation":null,"prompt":null,"prompt_cache_key":null,"safety_identifier":null,"top_logprobs":0,"user":null,"truncation":"disabled","instructions":null,"max_output_tokens":null,"max_tool_calls":null,"previous_response_id":null,"service_tier":"default"}}`, false},
+	} {
+		for _, passthrough := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/passthrough=%t", tc.name, passthrough), func(t *testing.T) {
+				disposition := resilience.ResponsesEventOutputDisposition("response.completed", []byte(tc.payload))
+				require.Equal(t, resilience.TerminalSuccess, disposition.Kind)
+				require.True(t, disposition.Visible)
+				require.False(t, disposition.SemanticOutput)
+				require.True(t, openAIStreamDataStartsClientOutput(tc.payload, "response.completed"))
+				require.False(t, openAIStreamDataStartsVisibleOutput(tc.payload, "response.completed"))
+				require.False(t, openAIStreamDataStartsSemanticTTFT(tc.payload, "response.completed"))
+				require.False(t, semanticSSEBlock([]byte("event: response.completed\ndata: "+tc.payload)))
+				c, recorder := compatStreamContext("/v1/responses", `{}`)
+				state := resilience.NewRequestState()
+				c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
+				InstallDeliveryTracking(c, time.Now())
+				body := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_test\",\"status\":\"in_progress\"}}\n\n" +
+					"data: " + tc.payload + "\n\n"
+				firstToken, err := runBlankPlaceholderAttempt(&OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}, c,
+					&Account{ID: 9031, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, passthrough, io.NopCloser(strings.NewReader(body)), time.Now())
+				if tc.failover {
+					var failover *UpstreamFailoverError
+					require.ErrorAs(t, err, &failover)
+					require.Empty(t, recorder.Body.String())
+				} else {
+					require.NoError(t, err)
+					require.Contains(t, recorder.Body.String(), "response.completed")
+				}
+				require.Nil(t, firstToken)
+				require.True(t, state.FirstOutput().IsZero())
+				require.True(t, state.SemanticOutputAt().IsZero())
+				require.Nil(t, state.AttemptFirstOutputMs())
+			})
+		}
+	}
+}
+
 func TestResponsesBlankPlaceholderPredicatesAndSemanticDeliveryAgree(t *testing.T) {
 	withResilienceSettings(t, nil)
 	tests := []struct {
@@ -130,11 +179,26 @@ func TestResponsesBlankPlaceholderPredicatesAndSemanticDeliveryAgree(t *testing.
 		{"content part", "response.content_part.added", `{"type":"response.content_part.added","part":{"type":"output_text","text":" "}}`},
 		{"message item", "response.output_item.added", `{"type":"response.output_item.added","item":{"type":"message","role":"assistant","status":"in_progress","content":[{"type":"output_text","text":" "}]}}`},
 	}
+	for _, block := range strings.Split(d10BlankPlaceholderStream(2, true), "\n\n") {
+		event, data := sseBlockFields([]byte(block))
+		if len(data) > 0 && event != "response.failed" {
+			tests = append(tests, struct{ name, event, payload string }{event + " wire", event, string(data)})
+		}
+	}
+	tests = append(tests, struct{ name, event, payload string }{"metadata wire", "response.metadata", `{"type":"response.metadata","response_id":"resp_test","sequence_number":2,"metadata":{}}`})
+	// Marshal the repository's own wire shape so logprobs cannot disappear
+	// from this fixture when the apicompat encoder changes.
+	part, err := json.Marshal(apicompat.ResponsesStreamEvent{Type: "response.content_part.added", Part: &apicompat.ResponsesContentPart{Type: "output_text", Text: " "}})
+	require.NoError(t, err)
+	tests = append(tests, struct{ name, event, payload string }{"apicompat wire", "response.content_part.added", string(part)})
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			payload := []byte(tc.payload)
 			disposition := resilience.ResponsesEventOutputDisposition(tc.event, payload)
-			require.True(t, disposition.BlankPlaceholder)
+			require.Equal(t, resilience.Prelude, disposition.Kind)
+			var compatEvent apicompat.ResponsesStreamEvent
+			require.NoError(t, json.Unmarshal(payload, &compatEvent))
+			require.True(t, openAICompatPreludeEvent(&compatEvent, payload))
 			require.Equal(t, resilience.Prelude, resilience.ClassifyStreamEvent("responses", tc.event, payload).Kind)
 			require.False(t, openAIStreamDataStartsClientOutput(tc.payload, tc.event))
 			require.False(t, openAIStreamDataStartsVisibleOutput(tc.payload, tc.event))
@@ -156,22 +220,29 @@ func TestResponsesBlankPlaceholderPredicatesAndSemanticDeliveryAgree(t *testing.
 
 func TestResponsesMalformedEventFailsClosedAtAllOutputChecks(t *testing.T) {
 	withResilienceSettings(t, nil)
-	const event = "response.output_text.delta"
-	const payload = `{"type":"response.output_text.delta","delta":`
-	got := resilience.ClassifyStreamEvent("responses", event, []byte(payload))
-	require.Equal(t, resilience.Content, got.Kind)
-	require.True(t, openAIStreamDataStartsClientOutput(payload, event))
-	require.True(t, openAIStreamDataStartsVisibleOutput(payload, event))
-	require.True(t, openAIStreamDataStartsSemanticTTFT(payload, event))
-	require.True(t, semanticSSEBlock([]byte("event: "+event+"\ndata: "+payload)))
-
-	c, state := newSSEDeliveryContext(t, "text/event-stream")
-	start := time.Now().Add(-time.Second)
-	state.SetAttemptProfile(resilience.AttemptProfile{AccountID: 9024, AttemptStart: start})
-	_, err := deliveryWriterFrom(c).WriteString("event: " + event + "\ndata: " + payload + "\n\n")
-	require.NoError(t, err)
-	require.False(t, state.SemanticOutputAt().IsZero())
-	require.NotNil(t, state.AttemptFirstOutputMs())
+	for _, payload := range []string{
+		`{"type":"response.output_text.delta","delta":`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"id":"m","type":"message","role":"assistant","content":[{"type":"output_text","text":" ","text":"hi"}]}}`,
+		`{"type":"response.output_text.delta","item_id":[],"output_index":"bad","delta":" "}`,
+	} {
+		t.Run(payload, func(t *testing.T) {
+			event := gjson.Get(payload, "type").String()
+			got := resilience.ClassifyStreamEvent("responses", event, []byte(payload))
+			require.Equal(t, resilience.Content, got.Kind)
+			require.True(t, openAIStreamDataStartsClientOutput(payload, event))
+			require.True(t, openAIStreamDataStartsVisibleOutput(payload, event))
+			require.True(t, openAIStreamDataStartsSemanticTTFT(payload, event))
+			require.True(t, semanticSSEBlock([]byte("event: "+event+"\ndata: "+payload)))
+			require.False(t, openAICompatPreludeEvent(&apicompat.ResponsesStreamEvent{Type: event}, []byte(payload)))
+			c, state := newSSEDeliveryContext(t, "text/event-stream")
+			start := time.Now().Add(-time.Second)
+			state.SetAttemptProfile(resilience.AttemptProfile{AccountID: 9024, AttemptStart: start})
+			_, err := deliveryWriterFrom(c).WriteString("event: " + event + "\ndata: " + payload + "\n\n")
+			require.NoError(t, err)
+			require.False(t, state.SemanticOutputAt().IsZero())
+			require.NotNil(t, state.AttemptFirstOutputMs())
+		})
+	}
 }
 
 func TestCompatStreamStagesD10BlankPlaceholderBeforeFailure(t *testing.T) {
@@ -207,11 +278,15 @@ func TestResponsesBlankPlaceholderVisibleItemFlushesAllBeforeTerminal(t *testing
 	for _, passthrough := range []bool{false, true} {
 		t.Run(fmt.Sprintf("passthrough=%t", passthrough), func(t *testing.T) {
 			// The two empty items interleave, and item 1 has no item.added.
-			// Its .done carries all text and must release both items immediately.
+			// Its first real delta must release the whole wire-shaped prelude immediately.
 			prelude := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_test\"}}\n\n" +
 				"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"item_id\":\"a\",\"output_index\":0,\"delta\":\" \"}\n\n" +
 				"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"item_id\":\"b\",\"output_index\":1,\"delta\":\"\\t\"}\n\n"
-			visible := "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"id\":\"b\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\" hi\"}]}}\n\n"
+			prelude = strings.Split(d10BlankPlaceholderStream(2, true), "event: response.failed")[0] + prelude
+			metadata := "event: response.metadata\ndata: {\"type\":\"response.metadata\",\"response_id\":\"resp_test\",\"sequence_number\":2,\"metadata\":{}}\n\n"
+			prelude = strings.Replace(prelude, "event: response.output_item.added", metadata+"event: response.output_item.added", 1)
+			itemDone := "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"id\":\"b\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\" hi\"}]}}\n\n"
+			visible := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":20,\"item_id\":\"b\",\"output_index\":1,\"content_index\":0,\"delta\":\" hi\",\"logprobs\":[],\"obfuscation\":\"test\"}\n\n"
 			completed := "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n"
 			c, _ := compatStreamContext("/v1/responses", `{}`)
 			recorder := newOpenAIResponseFlushRecorder()
@@ -237,7 +312,7 @@ func TestResponsesBlankPlaceholderVisibleItemFlushesAllBeforeTerminal(t *testing
 			}
 			body, _ := recorder.snapshot()
 			require.Equal(t, prelude+visible, body, "staging preserves output-path bytes and item order")
-			_, err = io.WriteString(writer, completed)
+			_, err = io.WriteString(writer, itemDone+completed)
 			require.NoError(t, err)
 			require.NoError(t, writer.Close())
 			require.NoError(t, <-result)
@@ -250,18 +325,53 @@ func TestResponsesBlankPlaceholderVisibleItemFlushesAllBeforeTerminal(t *testing
 func TestResponsesBlankPlaceholderNonRetryableFailureKeepsOnlyFailureFrame(t *testing.T) {
 	withResilienceSettings(t, nil)
 	for _, passthrough := range []bool{false, true} {
+		for _, ending := range []struct{ event, payload string }{
+			{"response.failed", `{"type":"response.failed","response":{"error":{"code":"content_policy_violation","message":"blocked"}}}`},
+			{"error", `{"type":"error","error":{"code":"content_policy_violation","message":"blocked"}}`},
+			{"response.incomplete", `{"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"content_filter"}}}`},
+		} {
+			t.Run(fmt.Sprintf("passthrough=%t/%s", passthrough, ending.event), func(t *testing.T) {
+				c, recorder := compatStreamContext("/v1/responses", `{}`)
+				state := resilience.NewRequestState()
+				c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
+				InstallDeliveryTracking(c, time.Now())
+				prelude := strings.Split(d10BlankPlaceholderStream(2, true), "event: response.failed")[0]
+				body := prelude + "event: " + ending.event + "\ndata: " + ending.payload + "\n\n"
+				firstToken, err := runBlankPlaceholderAttempt(&OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}, c,
+					&Account{ID: 9026, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, passthrough, io.NopCloser(strings.NewReader(body)), time.Now())
+				if ending.event != "response.incomplete" {
+					require.Error(t, err)
+				}
+				require.Nil(t, firstToken)
+				require.True(t, state.FirstOutput().IsZero())
+				require.True(t, state.SemanticOutputAt().IsZero())
+				require.Nil(t, state.AttemptFirstOutputMs())
+				out := recorder.Body.String()
+				require.NotEmpty(t, out)
+				require.True(t, strings.HasSuffix(out, "\n\n"), out)
+				require.NotContains(t, out, "response.created")
+				require.NotContains(t, out, "response.in_progress")
+				require.NotContains(t, out, "response.output_item")
+				if ending.event == "response.incomplete" {
+					require.True(t, strings.HasPrefix(out, "event: response.incomplete\ndata: "), out)
+					require.Contains(t, out, "content_filter")
+				}
+			})
+		}
+	}
+}
+
+func TestResponsesBlankPlaceholderInterruptedFlushesPrelude(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, passthrough := range []bool{false, true} {
 		c, recorder := compatStreamContext("/v1/responses", `{}`)
-		body := strings.ReplaceAll(d10BlankPlaceholderStream(2, true), "server_is_overloaded", "content_policy_violation")
-		body = strings.ReplaceAll(body, "service_unavailable_error", "invalid_request_error")
+		prelude := strings.Split(d10BlankPlaceholderStream(1, true), "event: response.failed")[0]
+		body := prelude + "event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"incomplete_details\":{\"reason\":\"interrupted\"}}}\n\n"
 		_, err := runBlankPlaceholderAttempt(&OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}, c,
-			&Account{ID: 9026, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, passthrough, io.NopCloser(strings.NewReader(body)), time.Now())
-		require.Error(t, err)
-		out := recorder.Body.String()
-		require.True(t, strings.HasPrefix(out, "event: response.failed\ndata: "), out)
-		require.True(t, strings.HasSuffix(out, "\n\n"), out)
-		require.NotContains(t, out, "response.created")
-		require.NotContains(t, out, "response.in_progress")
-		require.NotContains(t, out, "response.output_item")
+			&Account{ID: 9026, Platform: PlatformOpenAI}, passthrough, io.NopCloser(strings.NewReader(body)), time.Now())
+		require.NoError(t, err)
+		require.True(t, strings.HasPrefix(recorder.Body.String(), prelude))
+		require.Contains(t, recorder.Body.String(), "event: response.incomplete")
 	}
 }
 
@@ -357,4 +467,55 @@ func TestResponsesBlankPlaceholderSuccessLatencyUsesRealOutput(t *testing.T) {
 			require.Nil(t, state.AttemptFirstOutputMs())
 		}
 	}
+}
+
+func TestCompatPreludePreservesWhitespaceContent(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, tc := range []struct {
+		name     string
+		messages bool
+		deltas   []string
+		want     string
+	}{
+		{"chat leading", false, []string{"  ", "Hello"}, "  Hello"},
+		{"chat middle", false, []string{"Hello", " ", "world"}, "Hello world"},
+		{"messages leading", true, []string{"  ", "Hello"}, "  Hello"},
+		{"messages middle", true, []string{"Hello", " ", "world"}, "Hello world"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := keepaliveStallCreated + "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_test\",\"role\":\"assistant\",\"content\":[]}}\n\n"
+			for _, delta := range tc.deltas {
+				payload, err := json.Marshal(apicompat.ResponsesStreamEvent{Type: "response.output_text.delta", Delta: delta})
+				require.NoError(t, err)
+				body += "data: " + string(payload) + "\n\n"
+			}
+			body += "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
+			c, recorder := compatStreamContext("/v1/chat/completions", compatChatStreamBody)
+			_, err := runPreludeCompat(t, c, tc.messages, strings.NewReader(body), 0, 0)
+			require.NoError(t, err)
+			var content strings.Builder
+			for _, block := range strings.Split(recorder.Body.String(), "\n\n") {
+				_, payload := sseBlockFields([]byte(block))
+				if tc.messages {
+					if gjson.GetBytes(payload, "delta.type").String() == "text_delta" {
+						content.WriteString(gjson.GetBytes(payload, "delta.text").String())
+					}
+				} else {
+					for _, choice := range gjson.GetBytes(payload, "choices").Array() {
+						content.WriteString(choice.Get("delta.content").String())
+					}
+				}
+			}
+			require.Equal(t, tc.want, content.String())
+		})
+	}
+}
+
+func TestCompatPreludeBufferIsBounded(t *testing.T) {
+	var pending openAICompatPreludeBuffer
+	event := apicompat.ResponsesStreamEvent{Type: "response.output_text.delta", Delta: " "}
+	require.NoError(t, pending.add(event, openAIFirstOutputStageMaxBytes))
+	require.ErrorIs(t, pending.add(event, 1), errOpenAIFirstOutputStageLimit)
+	require.Len(t, pending.take(), 1)
+	require.NoError(t, pending.add(event, 1), "discard releases the attempt's retained events")
 }
