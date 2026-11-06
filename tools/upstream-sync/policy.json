@@ -4086,6 +4086,18 @@
     {
       "path": "backend/internal/handler/openai_model_availability_test.go",
       "value": "func TestOpenAIModelUnavailableExhaustionPreservesLastError(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/openai_model_availability.go",
+      "value": "if !openAIModelAvailabilityParamAllowed(body) {"
+    },
+    {
+      "path": "backend/internal/service/openai_model_availability.go",
+      "value": "host != previousHost"
+    },
+    {
+      "path": "backend/internal/service/openai_model_availability_test.go",
+      "value": "func TestOpenAIModelAvailabilityStopsAcrossHosts(t *testing.T) {"
     }
   ],
   "forbidden_module_paths": [

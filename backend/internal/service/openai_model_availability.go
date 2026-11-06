@@ -14,6 +14,7 @@ import (
 
 const openAIModelUnavailableReason = GatewayFailureReason("openai_model_unavailable")
 const openAIUpstreamRequestRestrictionReason = GatewayFailureReason(resilience.ReasonUpstreamRequestRestriction)
+const openAIModelUnavailableHostKey = "openai_model_unavailable_host"
 
 // failoverOpenAIModelAvailability is shared by native and passthrough HTTP
 // routing, after local request repairs and compact fallback. It owns the
@@ -26,9 +27,24 @@ func (s *OpenAIGatewayService) failoverOpenAIModelAvailability(ctx context.Conte
 		return nil
 	}
 	reason, failureCategory := openAIModelUnavailableReason, resilience.CategoryModelUnsupported
+	scope, action, kind := GatewayFailureScopeAccount, NextAccountRetry, "failover"
 	switch {
 	case isOpenAIModelAvailabilityError(resp.StatusCode, "", body):
-		s.recordOpenAIModelAvailabilityFailure(account, model)
+		host, previousHost := accountUpstreamHost(account), ""
+		if c != nil {
+			previousHost = c.GetString(openAIModelUnavailableHostKey)
+		}
+		if host != "" && previousHost != "" && host != previousHost {
+			// Matching evidence from independent upstream hosts belongs to this
+			// request. Do not spread its model cooldown across the account pool.
+			scope, action, kind = GatewayFailureScopeRequest, NextAccountStop, "http_error"
+			failureCategory = resilience.CategoryClientError
+		} else {
+			if c != nil && host != "" {
+				c.Set(openAIModelUnavailableHostKey, host)
+			}
+			s.recordOpenAIModelAvailabilityFailure(account, model)
+		}
 	case !openAIStreamRequestRejected(body, "") && classifyUpstreamHTTP(resp.StatusCode, resp.Header, body, "").Category == resilience.CategoryUpstreamRequestRestriction:
 		reason, failureCategory = openAIUpstreamRequestRestrictionReason, resilience.CategoryUpstreamRequestRestriction
 	default:
@@ -61,7 +77,7 @@ func (s *OpenAIGatewayService) failoverOpenAIModelAvailability(ctx context.Conte
 		UpstreamStatusCode:   resp.StatusCode,
 		UpstreamRequestID:    resp.Header.Get("x-request-id"),
 		Passthrough:          passthrough,
-		Kind:                 "failover",
+		Kind:                 kind,
 		Message:              message,
 		Detail:               detail,
 		UpstreamResponseBody: detail,
@@ -71,9 +87,9 @@ func (s *OpenAIGatewayService) failoverOpenAIModelAvailability(ctx context.Conte
 		StatusCode:        resp.StatusCode,
 		ResponseHeaders:   resp.Header.Clone(),
 		ResponseBody:      body,
-		Scope:             GatewayFailureScopeAccount,
+		Scope:             scope,
 		Reason:            reason,
-		NextAccountAction: NextAccountRetry,
+		NextAccountAction: action,
 	}, account)
 }
 
@@ -87,12 +103,38 @@ func isOpenAIModelAvailabilityError(status int, message string, body []byte) boo
 	if openAIStreamRequestRejected(body, message) {
 		return false
 	}
+	if !openAIModelAvailabilityParamAllowed(body) {
+		return false
+	}
 	if isExplicitOpenAIModelAvailabilityMessage(message) ||
 		isExplicitOpenAIModelAvailabilityMessage(extractUpstreamErrorMessage(body)) ||
 		isExplicitOpenAIModelAvailabilityMessage(gjson.GetBytes(body, "response.error.message").String()) {
 		return true
 	}
 	return !gjson.ValidBytes(body) && isExplicitOpenAIModelAvailabilityMessage(string(body))
+}
+
+func openAIModelAvailabilityParamAllowed(body []byte) bool {
+	if !gjson.ValidBytes(body) {
+		return true
+	}
+	objects := []gjson.Result{gjson.ParseBytes(body)}
+	// Match extractUpstreamErrorMessage's single embedded JSON error envelope.
+	if inner := objects[0].Get("error.message"); inner.Type == gjson.String && gjson.Valid(inner.Str) {
+		objects = append(objects, gjson.Parse(inner.Str))
+	}
+	for _, object := range objects {
+		for _, path := range []string{"error.param", "response.error.param", "param"} {
+			param := object.Get(path)
+			if !param.Exists() || param.Type == gjson.Null {
+				continue
+			}
+			if param.Type != gjson.String || (strings.TrimSpace(param.Str) != "" && strings.TrimSpace(param.Str) != "model") {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // recordOpenAIModelAvailabilityFailure is used only by pre-output failover.

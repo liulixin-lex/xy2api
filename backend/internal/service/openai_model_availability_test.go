@@ -124,6 +124,7 @@ func TestOpenAIModelAvailabilityPreservesRequestRejections(t *testing.T) {
 		}
 		for _, sample := range []struct{ name, body string }{
 			{"ordinary 400", openAIInvalidFunctionParametersBody},
+			{"input parameter", `{"error":{"type":"invalid_request_error","param":"input","message":"Streaming for this model is not supported"}}`},
 			{"ordinary request restriction on 400", `{"error":{"type":"invalid_request_error","code":"basispoints_request_invalid","message":"inline images exceed 32 MiB"}}`},
 			{"echoed content", `{"error":{"message":"Invalid input"},"input":{"message":"model is unavailable"}}`},
 			{"context", `{"error":{"code":"context_length_exceeded","message":"maximum context length exceeded; model is unavailable"}}`},
@@ -153,6 +154,28 @@ func TestOpenAIModelAvailabilityPreservesRequestRejections(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestOpenAIModelAvailabilityStopsAcrossHosts(t *testing.T) {
+	withResilienceSettings(t, nil)
+	c, rec := newOpenAIUpstreamErrorTestContext(t)
+	svc := &OpenAIGatewayService{accountRepo: &openAIModelAvailabilityRepo{}}
+	body := []byte(`{"error":{"type":"invalid_request_error","param":"model","message":"model is unavailable"}}`)
+	resp := newOpenAIUpstreamErrorResponse(400, string(body))
+	for i, baseURL := range []string{"https://relay-a.example/v1", "https://relay-a.example/another", "https://relay-b.example/v1"} {
+		account := &Account{ID: int64(i + 1), Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"base_url": baseURL}}
+		failure := svc.failoverOpenAIModelAvailability(c.Request.Context(), c, account, resp, body, "model", false)
+		require.NotNil(t, failure)
+		_, cooled := svc.getOpenAIAccountModelTransientState().readEntry(account.ID, "model", time.Now())
+		require.Equal(t, i < 2, failure.ShouldRetryNextAccount())
+		require.Equal(t, i < 2, cooled)
+		if i == 2 {
+			require.Equal(t, GatewayFailureScopeRequest, failure.Scope)
+			require.Equal(t, resilience.CategoryClientError, ClassifyFailoverError(failure).Category)
+			require.True(t, failure.IsOpenAIModelUnavailable())
+		}
+	}
+	require.Empty(t, rec.Body.String())
 }
 
 func TestOpenAIModelAvailabilityUsesExistingTransientCooldown(t *testing.T) {
