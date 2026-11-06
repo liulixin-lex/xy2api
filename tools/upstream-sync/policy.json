@@ -4098,6 +4098,14 @@
     {
       "path": "backend/internal/service/openai_model_availability_test.go",
       "value": "func TestOpenAIModelAvailabilityStopsAcrossHosts(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/resilience_compat_stream.go",
+      "value": "schema.ItemKeys = preludeReleaseSchemaKeys(object)"
+    },
+    {
+      "path": "backend/internal/service/resilience_compat_stream_trace_test.go",
+      "value": "func TestPreludeReleaseSchemaKeysBounded(t *testing.T) {"
     }
   ],
   "forbidden_module_paths": [

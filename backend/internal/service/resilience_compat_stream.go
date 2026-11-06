@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -251,15 +252,36 @@ func releaseOpenAIPrelude(state *resilience.RequestState, eventType string, payl
 	var envelope map[string]json.RawMessage
 	var object map[string]json.RawMessage
 	if field != "" && json.Unmarshal(payload, &envelope) == nil && json.Unmarshal(envelope[field], &object) == nil {
-		keys := make([]string, 0, len(object))
-		for key := range object {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		schema.ItemKeys = strings.Join(keys, ",")
+		schema.ItemKeys = preludeReleaseSchemaKeys(object)
 		_ = json.Unmarshal(object["type"], &schema.ItemType)
 		var encrypted string
 		schema.HasEncrypted = json.Unmarshal(object["encrypted_content"], &encrypted) == nil && encrypted != ""
 	}
 	state.NotePreludeReleased(eventType, time.Now(), schema)
+}
+
+const (
+	preludeReleaseMaxKeys     = 32
+	preludeReleaseMaxKeyBytes = 256
+)
+
+func preludeReleaseSchemaKeys(object map[string]json.RawMessage) string {
+	truncated := "[truncated;keys=" + strconv.Itoa(len(object)) + "]"
+	if len(object) > preludeReleaseMaxKeys {
+		return truncated
+	}
+	keys := make([]string, 0, len(object))
+	bytes := 0
+	for key := range object {
+		if len(keys) > 0 {
+			bytes++ // Comma separator.
+		}
+		bytes += len(key)
+		if bytes > preludeReleaseMaxKeyBytes {
+			return truncated
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ",")
 }

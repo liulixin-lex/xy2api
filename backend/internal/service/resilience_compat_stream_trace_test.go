@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -83,6 +84,38 @@ func TestPreludeReleaseTraceFromStream(t *testing.T) {
 			require.Equal(t, "response.output_text.delta", state.PreludeTrace().ReleaseEvent)
 			require.GreaterOrEqual(t, state.PreludeTrace().ReleaseAfterCreatedMS, int64(0))
 			require.Positive(t, state.DeliveredBytes())
+		})
+	}
+}
+
+func TestPreludeReleaseSchemaKeysBounded(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, limit := range []string{"count", "bytes"} {
+		t.Run(limit, func(t *testing.T) {
+			logs := captureOpenAIObservationLogs(t)
+			item := map[string]any{"type": "reasoning", "encrypted_content": "private-encrypted-value"}
+			if limit == "count" {
+				for i := range preludeReleaseMaxKeys {
+					item["field"+strconv.Itoa(i)] = "private-field-value"
+				}
+			} else {
+				item[strings.Repeat("x", preludeReleaseMaxKeyBytes+1)] = "private-field-value"
+			}
+			payload, err := json.Marshal(map[string]any{"type": "response.output_item.added", "item": item})
+			require.NoError(t, err)
+			c, _ := compatStreamContext("/v1/responses", "")
+			state := resilience.NewRequestState()
+			c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
+			InstallDeliveryTracking(c, time.Now())
+			body := keepaliveStallCreated + "data: " + string(payload) + "\n\n" + keepaliveStallDelta1
+			resp := &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}
+			_, _ = compatStreamService(nil, 0, 0, 0).handleStreamingResponse(c.Request.Context(), resp, c, rawChatCompletionsTestAccount(), time.Now(), "model", "model")
+			require.Equal(t, "[truncated;keys="+strconv.Itoa(len(item))+"]", state.PreludeTrace().ItemKeys)
+			require.Contains(t, logs.String(), `"msg":"resilience.post_output_failure"`)
+			require.Contains(t, logs.String(), `"prelude_release_item_keys":"[truncated;keys=`+strconv.Itoa(len(item))+`]"`)
+			require.NotContains(t, logs.String(), "private-field-value")
+			require.NotContains(t, logs.String(), "private-encrypted-value")
+			require.NotContains(t, logs.String(), strings.Repeat("x", preludeReleaseMaxKeyBytes+1))
 		})
 	}
 }
