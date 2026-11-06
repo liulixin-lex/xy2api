@@ -28,6 +28,7 @@ type qualityTestRepository struct {
 	usageWrites     []GroupQualityUsageWrite
 	observationErr  error
 	replayLoadDelay time.Duration
+	replayLoadBlock bool
 	froms           []time.Time
 	memberLoads     int
 	deadline        bool
@@ -75,6 +76,10 @@ func (r *qualityTestRepository) LoadObservations(_ context.Context, _ []int64, f
 	return out, observedAt, r.observationErr
 }
 func (r *qualityTestRepository) LoadObservationsForReplay(ctx context.Context, _ []int64, from, to time.Time) (GroupQualityReplayData, error) {
+	if r.replayLoadBlock {
+		<-ctx.Done()
+		return GroupQualityReplayData{}, ctx.Err()
+	}
 	if r.replayLoadDelay > 0 {
 		select {
 		case <-time.After(r.replayLoadDelay):
@@ -248,7 +253,7 @@ func TestGroupQualityWarmStartRestoresErrorAndCacheStateWithoutTierHistory(t *te
 	require.Equal(t, 1, strings.Count(e.logs.String(), `"msg":"group_quality_gate.warm_start"`))
 }
 
-func TestGroupQualityReplayFreshnessUsesNaturalMinuteCutoffs(t *testing.T) {
+func TestGroupQualityReplayFreshnessUsesSecondOffsetCutoffs(t *testing.T) {
 	now := time.Date(2026, 11, 4, 12, 0, 30, 0, time.UTC)
 	policy := defaultGroupQualityGatePolicy()
 	policy.V3.Enabled = true
@@ -261,7 +266,21 @@ func TestGroupQualityReplayFreshnessUsesNaturalMinuteCutoffs(t *testing.T) {
 	data := GroupQualityReplayData{UsageWrites: writes}
 	_, summary, err := replayGroupQualityState(context.Background(), now, now.Add(-8*time.Hour), GroupQualityGatePolicies{Groups: map[string]GroupQualityGatePolicy{"7": policy}}, members, map[int64]bool{7: true}, map[int64]time.Time{}, data)
 	require.NoError(t, err)
-	require.Equal(t, 1, summary.staleCutoffs, "only the first natural-minute cutoff lacks prior data")
+	require.Zero(t, summary.staleCutoffs, "the first minute already has a write before the second-offset cutoff")
+}
+
+func TestGroupQualityReplayFreshnessUsesExactSecondCutoffs(t *testing.T) {
+	now := time.Date(2026, 11, 4, 12, 0, 30, 0, time.UTC)
+	policy := defaultGroupQualityGatePolicy()
+	policy.V3.Enabled = true
+	members := map[int64][]Account{7: {{ID: 1, Platform: PlatformOpenAI}}}
+	data := GroupQualityReplayData{UsageWrites: []GroupQualityUsageWrite{
+		{Minute: now.Truncate(time.Minute).Add(-7 * time.Minute), LastWrite: now.Truncate(time.Minute).Add(-7*time.Minute + 30*time.Second)},
+		{Minute: now.Add(-time.Minute).Truncate(time.Minute), LastWrite: now.Add(-40 * time.Second), BeforeCutoff: now.Add(-80 * time.Second)},
+	}}
+	_, summary, err := replayGroupQualityState(context.Background(), now, now.Add(-8*time.Hour), GroupQualityGatePolicies{Groups: map[string]GroupQualityGatePolicy{"7": policy}}, members, map[int64]bool{7: true}, map[int64]time.Time{}, data)
+	require.NoError(t, err)
+	require.Equal(t, 354, summary.staleCutoffs, "the 11:59:10 write must count for the 11:59:30 cutoff even though 11:59:50 is later")
 }
 
 func TestGroupQualityWarmStartMatchesPrewarmedOnlineState(t *testing.T) {
@@ -371,10 +390,9 @@ func TestGroupQualityWarmStartFailureKeepsEmptySnapshot(t *testing.T) {
 
 func TestGroupQualityWarmStartSlowLoadTimesOutBeforePublishing(t *testing.T) {
 	e := newQualityTestEnv(t)
-	e.repo.replayLoadDelay = 20 * time.Millisecond
-	e.repo.observationErr = context.DeadlineExceeded
+	e.repo.replayLoadBlock = true
 	started := time.Now()
-	require.True(t, e.svc.warmStart(context.Background()))
+	require.True(t, e.svc.warmStartWithBudget(context.Background(), 20*time.Millisecond))
 	require.GreaterOrEqual(t, time.Since(started), 20*time.Millisecond)
 	require.Empty(t, e.svc.snapshot.Load().Members)
 	require.Contains(t, e.logs.String(), `"msg":"group_quality_gate.warm_start_failed"`)

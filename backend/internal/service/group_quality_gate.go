@@ -198,9 +198,12 @@ type GroupQualityGateRepository interface {
 	LoadObservationsForReplay(context.Context, []int64, time.Time, time.Time) (GroupQualityReplayData, error)
 }
 
+// GroupQualityUsageWrite contains the latest write for a natural minute and,
+// when present, the latest write before the replay cutoff's second offset.
 type GroupQualityUsageWrite struct {
-	Minute    time.Time
-	LastWrite time.Time
+	Minute       time.Time
+	LastWrite    time.Time
+	BeforeCutoff time.Time
 }
 
 type GroupQualityReplayData struct {

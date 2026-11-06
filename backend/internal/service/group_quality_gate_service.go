@@ -130,6 +130,10 @@ type groupQualityWarmMember struct {
 }
 
 func (s *GroupQualityGateService) warmStart(ctx context.Context) (continueRun bool) {
+	return s.warmStartWithBudget(ctx, groupQualityReplayTotalBudget)
+}
+
+func (s *GroupQualityGateService) warmStartWithBudget(ctx context.Context, budget time.Duration) (continueRun bool) {
 	s.runMu.Lock()
 	defer s.runMu.Unlock()
 	if ctx.Err() != nil {
@@ -146,7 +150,7 @@ func (s *GroupQualityGateService) warmStart(ctx context.Context) (continueRun bo
 			slog.Warn("group_quality_gate.warm_start_failed", "duration_ms", time.Since(started).Milliseconds(), "reason", fmt.Sprintf("panic: %v", recovered))
 		}
 	}()
-	replayCtx, cancel := context.WithTimeout(ctx, groupQualityReplayTotalBudget)
+	replayCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	now := s.now().UTC()
 	fail := func(err error) bool {
@@ -293,19 +297,30 @@ func replayGroupQualityState(ctx context.Context, now, processStart time.Time, p
 	left, right, writeIndex := 0, 0, 0
 	var observedAt time.Time
 	summary := groupQualityWarmSummary{cutoffs: groupQualityReplaySteps, tier1: []groupQualityWarmMember{}, tier2: []groupQualityWarmMember{}}
-	// Freshness is aggregated by natural minute; align replay cutoffs to the
-	// same boundary so a minute's MAX cannot be compared with a mid-minute cutoff.
-	replayStart := now.Truncate(time.Minute).Add(-groupQualityReplayWindow)
+	// Replay keeps the startup timestamp's seconds. UsageWrites also carries the
+	// latest write before that same second within each natural minute, so a later
+	// write in the bucket cannot make a mid-minute cutoff look stale.
+	replayStart := now.Add(-groupQualityReplayWindow)
 	for step := 0; step < groupQualityReplaySteps; step++ {
 		if err := ctx.Err(); err != nil {
 			return nil, summary, err
 		}
 		cutoff := replayStart.Add(time.Duration(step) * groupQualityReplayStep)
-		for writeIndex < len(writes) && writes[writeIndex].LastWrite.Before(cutoff) {
+		cutoffMinute := cutoff.Truncate(time.Minute)
+		for writeIndex < len(writes) && writes[writeIndex].Minute.Before(cutoffMinute) {
 			if writes[writeIndex].LastWrite.After(observedAt) {
 				observedAt = writes[writeIndex].LastWrite
 			}
 			writeIndex++
+		}
+		if writeIndex < len(writes) && writes[writeIndex].Minute.Equal(cutoffMinute) {
+			current := writes[writeIndex].BeforeCutoff
+			if current.IsZero() && writes[writeIndex].LastWrite.Before(cutoff) {
+				current = writes[writeIndex].LastWrite
+			}
+			if current.After(observedAt) {
+				observedAt = current
+			}
 		}
 		if observedAt.IsZero() || observedAt.Before(cutoff.Add(-5*time.Minute)) {
 			for groupID, accounts := range members {
