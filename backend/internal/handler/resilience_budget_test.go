@@ -296,21 +296,28 @@ func TestOpenAIStreamForbiddenExcludesSameHostWithoutCapacityQuota(t *testing.T)
 	require.True(t, requestBudget(ctx).AllowCapacitySwitch(), "forbidden must not consume the capacity switch quota")
 }
 
-func TestOpenAIStreamForbiddenOAuthKeepsOtherOfficialAccounts(t *testing.T) {
+func TestOpenAIStreamForbiddenKeepsOtherOfficialAccounts(t *testing.T) {
 	withHandlerResilience(t, nil)
-	ctx := budgetCtx(t, resilience.KindText, 7)
-	fs := NewFailoverState(3, false)
-	hosts := &hostSharingUnscheduler{sameHost: map[int64][]int64{1: {2, 3}}}
-	failoverErr := &service.UpstreamFailoverError{
-		StatusCode:          http.StatusForbidden,
-		Reason:              service.OpenAIStreamForbiddenReason,
-		UpstreamPlatform:    service.PlatformOpenAI,
-		UpstreamAccountType: service.AccountTypeOAuth,
-	}
+	for _, tc := range []struct{ name, platform, accountType string }{
+		{"OpenAI OAuth", service.PlatformOpenAI, service.AccountTypeOAuth},
+		{"Grok API Key", service.PlatformGrok, service.AccountTypeAPIKey},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := budgetCtx(t, resilience.KindText, 7)
+			fs := NewFailoverState(3, false)
+			hosts := &hostSharingUnscheduler{sameHost: map[int64][]int64{1: {2, 3}}}
+			failoverErr := &service.UpstreamFailoverError{
+				StatusCode:          http.StatusForbidden,
+				Reason:              service.OpenAIStreamForbiddenReason,
+				UpstreamPlatform:    tc.platform,
+				UpstreamAccountType: tc.accountType,
+			}
 
-	require.Equal(t, FailoverContinue, fs.HandleFailoverError(ctx, hosts, 1, service.PlatformOpenAI, 0, failoverErr))
-	require.Equal(t, map[int64]struct{}{1: {}}, fs.FailedAccountIDs, "OAuth only excludes the failed credential, not every official account")
-	require.True(t, requestBudget(ctx).AllowCapacitySwitch())
+			require.Equal(t, FailoverContinue, fs.HandleFailoverError(ctx, hosts, 1, tc.platform, 0, failoverErr))
+			require.Equal(t, map[int64]struct{}{1: {}}, fs.FailedAccountIDs, "only the failed credential is excluded, not every official account")
+			require.True(t, requestBudget(ctx).AllowCapacitySwitch())
+		})
+	}
 }
 
 type capabilityAttemptRecorder struct{ calls int }

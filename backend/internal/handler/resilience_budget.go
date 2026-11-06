@@ -143,7 +143,7 @@ func resilienceRetryDelay(ctx context.Context, d time.Duration) time.Duration {
 // reports whether the request must end instead.
 func resilienceBeforeSwitch(ctx context.Context, hosts any, accountID int64, failoverErr *service.UpstreamFailoverError, excluded map[int64]struct{}) bool {
 	if failoverErr != nil && failoverErr.Reason == service.OpenAIStreamForbiddenReason {
-		if failoverErr.UpstreamAccountType != service.AccountTypeAPIKey {
+		if failoverErr.UpstreamPlatform != service.PlatformOpenAI || failoverErr.UpstreamAccountType != service.AccountTypeAPIKey {
 			return false
 		}
 		if sharer, ok := hosts.(resilienceHostSharer); ok && excluded != nil {
