@@ -104,7 +104,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | 换号耗尽的 429/5xx | 带 `Retry-After`：上游给出的值按 2–30 秒封顶，没有时取分组最早恢复时间。0.4.12：Codex 请求同样不超过 `errors.codex_retry_after_cap_seconds`（以前只有无号与失败帧受这个上限）；重试被抑制（回合封顶等）时不带。Gemini 入口在组内账号全部暂时不可用（限流、容量、瞬时失败、余额）时返回 503 并带同样的提示，以前按最后一次的状态返回 502 或 429（随 `errors`）；换号时保留上游响应头，以最后一个账号的 `Retry-After` 为准 |
 | 不可重试的耗尽（0.4.9） | OpenAI 入口的 413 请求过大与 HTTP 续链被拒的 400（`previous_response_id` 只能由 OpenAI API Key 账号服务）不带 `Retry-After`，JSON 与 SSE 都清除前面尝试留下的重试提示；上游的 `Retry-After` 只在可重试的状态（429、5xx）上转发。以前会复制上游的值 |
 | 同一会话连续第 5 次耗尽失败（无号、换号耗尽、流内失败） | 终止应答：不带 `Retry-After`，`x-should-retry: false`，`error.code` 为 `server_is_overloaded`，5xx 改为 503（429 保持）。Codex 对 5xx 的重试次数有上限（4 次传输层重试 × 6 次流层尝试，一个回合最多约 30 次请求），但按 `Retry-After` 等待的时长没有上限（0.158.0 起；更早的版本忽略 `Retry-After`）；封顶后不超过 5 次。会话真正成功一次或两次失败相隔超过 120 秒后重新计数 |
-| 中转站插入的 `SSE-Keep-Alive` 空 delta 帧；0.4.4 起还包括 `response.created` 之前、`delta` 为空字符串或只有空白的 delta（第一个非空 delta 之后的空白属于正文，照常转发） | 直接丢弃，不转发、不算首输出（openai-python 遇到会报错，网关也会因此提前放弃换号）；但算上游存活，不会因此被判停滞。`response.created` 之前的非空 delta 是真实内容，照常立即输出，计入 `pre_created_delta`。缺省首字口径（`openai_ttft_mode=semantic`）下，用量记录的首字时间仍从第一帧算起，与 0.3.0 一致；`visible` 口径不算这类帧 |
+| 中转站插入的 `SSE-Keep-Alive` 空 delta 帧；0.4.4 起还包括 `response.created` 之前、`delta` 为空字符串或只有空白的 delta（第一个非空 delta 之后的空白属于正文，照常转发） | 直接丢弃，不转发、不算首输出（openai-python 遇到会报错，网关也会因此提前放弃换号）；但算上游存活，不会因此被判停滞。`response.created` 之前的非空 delta 是真实内容，照常立即输出，计入 `pre_created_delta`。缺省首字口径（`openai_ttft_mode=semantic`）下，只有带 `SSE-Keep-Alive` 标记的保活帧仍沿用原计时；created 前无标记的空白 delta 不计首 token。`visible` 口径不算这两类帧 |
 | Claude 请求分发到 GPT 中转时，中转站拒绝续链（`previous_response_id`）并返回笼统的 4xx | 去掉续链按完整历史重放一次，并对该会话在该账号上关闭续链。0.4.2 起只认指向续链的应答：404/409、提到上一响应的文案，或 400/422 上的笼统中转文案（单独的 “Upstream request failed”、“could not be processed”、没有文案）；指名其他参数的错误（如 `temperature` 越界）、上下文超长、内容审核、图片、模型不存在等照常返回，不重放。按笼统文案猜测的重放计入请求预算的尝试次数，预算用尽时不重放 |
 | 上游内容安全拒绝（如智谱 `request_check_blocked`、`content_policy_violation`） | 400 `invalid_request_error`，`code: content_policy_violation`，附脱敏后的上游原文；不重试、不换号，账号不受罚。只关闭 `errors` 时回到 0.3.0 的 502 文案。0.5.1：code 或 type 为 `content_policy`，以及 400、403、451 上的“内容政策”文案也按内容安全拒绝处理，带账号措辞（封禁、organization 等）的照旧；403 上的这类文案以前判为鉴权失败并罚号，总开关开启时不再罚号。运维记录标为业务限制，见 §5.1 |
 | 上游会话状态拒绝（0.5.3） | S1/S2 的窄文案与专用状态码按 §4.12 统一识别为 `CLIENT_ERROR`，含无 type 包装的流内错误；不换号、不罚号、不计软失败。状态族与有限加密修复是两个决定，修复判据和预算不变 |
@@ -117,6 +117,12 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | 客户端看到的上游错误消息（0.4.12） | 返回给客户端的错误消息去掉上游组织、工作区、项目与账号的标识（如 `org-…`），`code`、`type`、`param`、重试头与 response、tool 的 id 保留；运维记录仍保存受控的原文 |
 | API Key 中转拒绝回放 `web_search_call` 历史（“response protection is unavailable”） | 同号补 web_search 声明重放一次，成功后该账号 6 小时内同类请求直接补声明；仍失败时 502 带原因，不换号，计入会话失败与回合封顶 |
 | 请求的模型不在分组白名单 | 404，消息附本分组白名单的前 10 项 |
+
+Responses 空白占位：`response.output_text.delta` / `.done`、output_text 的 `response.content_part.added` / `.done`、assistant message 的 `response.output_item.added` / `.done` 逐事件按自身载荷判定，文本经 Go `strings.TrimSpace` 为空时暂存，不提交、不停止首输出截止、不计首 token。空 delta 必须存在且为字符串；refusal、非文本 part、未知或畸形载荷立即算输出，不依赖 item 状态表。原生与透传复用尝试级有界暂存；任一可见事件先按原序冲刷全部暂存，再发送该事件，字节与既有输出路径的协议变换结果相同。输出前失败丢弃全部未提交帧（含 created/in_progress），再走失败处理。
+
+`response.completed` 始终按成功终态冲刷并发送，包括空回答；扫描 `response.output` 只决定首 token、delivery 的 `FirstOutput` 与 `SemanticOutputAt`，不改变终态。仅空白的成功响应不进入 `ReportOpenAIAttemptSuccess` 的首输出延迟样本，`attempt_first_output_ms` 也为空。delivery 开场分类仍依赖缺省开启的 `stream.native_prelude_whitelist`；兼容转换还依赖 `stream.prelude_staging`。首字档位、末位候选和 240 秒总预算不变。
+
+`response.created` 前被既有过滤器丢弃的无标记空白 delta 仍更新存活计数和 stall 活动时间，但不再计入 semantic 首 token；有 `SSE-Keep-Alive` 标记的保活帧保留原有计时行为。
 
 ## 4. 配置
 
@@ -489,6 +495,8 @@ warn 级，进入运维页“系统日志”（`ops_system_logs`）：
 - `stall`、`fast_fail`、`turn_cap`、`abuse_guard`；
 - `state_rejection`（完整事件名 `resilience.state_rejection`）：原生与透传每次 Forward 结束时至多一次，桥接与 WS 在判断点记录；仅计数与标识，不存正文。含通用请求字段、`group_id`、`account_id`、`family`、`encrypted`、`path`（`native_http`、`native_sse`、`passthrough_http`、`passthrough_sse`、`chat`、`messages`、`ws`）、`stage`（`pre_output` / `post_output`；WS 缺少本 turn 输出事实时为 `unknown`）、`headers_committed`、距尝试开始的 `error_ms`、`client_version`。原生与透传另带最终 `rule_id`（来自 gin 键 `ops_error_passthrough_rule_id`，每次尝试清零；桥接与 WS 不带）。`collab_plaintext` 取本次尝试的 `Applied`，并带 `collab_calls`、`collab_efa_absent`、`collab_efa_empty`、`collab_efa_nonempty`、`collab_marker_added`、`collab_vetoed`、`collab_contradicted`、`collab_uncovered`。`frag_amsg`、`frag_fco`、`frag_other` 只扫描协议位置的密文片段，`frag_opaque_like` / `frag_text_like` 只用于形态诊断，不进入修复或改写决定；不递归工具参数或正文。WS 处罚入口没有 Gin / 当前请求体 / 本 turn 输出状态，只记录可得字段，省略 `headers_committed`、`client_version` 及片段计数，不从连接累计字节推断阶段；
 - `wrapped_error_malformed`：Responses 原生/透传流内或非流式聚合出口识别到像包装帧但类型、状态或字段不一致时每帧一条，含 `account_id` 与 `path`，不记帧正文；
+- `blank_placeholder_staged`（完整事件名 `resilience.blank_placeholder_staged`）：原生/透传 Responses 每次尝试实际暂存过空白占位后只记一条，含 `account_id`，不记录占位正文；
+- `blank_placeholder_outcome`（完整事件名 `resilience.blank_placeholder_outcome`）：Responses handler 结束时，仅请求内曾实际暂存空白才记一条。`placeholder_timeouts` 只累计暂存过空白的尝试所发生的首输出超时，普通静默尝试不计；`final_outcome` 读取现有请求恢复结果，`budget_cause` 读取预算的耗尽原因（未耗尽为空）。用于关联下一跳结果和有占位请求最终预算耗尽的次数，不改写恢复结果；
 - `post_output_failure`（含 `group_id`、`account_id`、`reason`、窗口内次数与是否施加冷却）；
 - `undelivered_record_dropped`：未送达记录的后台写入全部占满，这条记录未写（含 `request_id`）；
 - `last_resort_verify_failed`：末位兜底派发前复核账号时读库失败，按快照中的账号继续；

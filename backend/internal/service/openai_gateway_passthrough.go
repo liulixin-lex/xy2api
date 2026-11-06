@@ -1190,107 +1190,35 @@ func openAIStreamEventIsMetadata(eventType string) bool {
 	}
 }
 
-func openAIStreamAddedEventStartsClientOutput(payload []byte, eventType string) bool {
-	if len(payload) == 0 || !gjson.ValidBytes(payload) {
-		return true
-	}
-
-	switch strings.TrimSpace(eventType) {
-	case "response.output_item.added":
-		item := gjson.GetBytes(payload, "item")
-		if !item.Exists() || !item.IsObject() {
-			return true
-		}
-		switch strings.TrimSpace(item.Get("type").String()) {
-		case "reasoning":
-			if item.Get("encrypted_content").String() != "" {
-				return true
-			}
-			summary := item.Get("summary")
-			if !summary.IsArray() {
-				return false
-			}
-			for _, part := range summary.Array() {
-				if strings.TrimSpace(part.Get("type").String()) != "summary_text" || part.Get("text").String() != "" {
-					return true
-				}
-			}
-			return false
-		case "message":
-			content := item.Get("content")
-			if !content.IsArray() {
-				return false
-			}
-			for _, part := range content.Array() {
-				switch strings.TrimSpace(part.Get("type").String()) {
-				case "output_text":
-					if part.Get("text").String() != "" {
-						return true
-					}
-				case "refusal":
-					if part.Get("refusal").String() != "" {
-						return true
-					}
-				default:
-					return true
-				}
-			}
-			return false
-		case "function_call":
-			return item.Get("arguments").String() != ""
-		case "custom_tool_call":
-			return item.Get("input").String() != ""
-		case "compaction":
-			return item.Get("encrypted_content").String() != ""
-		default:
-			return true
-		}
-	case "response.content_part.added":
-		part := gjson.GetBytes(payload, "part")
-		if !part.Exists() || !part.IsObject() {
-			return true
-		}
-		switch strings.TrimSpace(part.Get("type").String()) {
-		case "output_text":
-			return part.Get("text").String() != ""
-		case "refusal":
-			return part.Get("refusal").String() != ""
-		default:
-			return true
-		}
-	case "response.reasoning_summary_part.added":
-		part := gjson.GetBytes(payload, "part")
-		if !part.Exists() || !part.IsObject() || strings.TrimSpace(part.Get("type").String()) != "summary_text" {
-			return true
-		}
-		return part.Get("text").String() != ""
-	default:
-		return true
-	}
-}
-
 func openAIStreamDataStartsClientOutput(data, eventType string) bool {
 	trimmed := strings.TrimSpace(data)
 	if trimmed == "" {
 		return false
 	}
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "" {
+		eventType = strings.TrimSpace(gjson.Get(trimmed, "type").String())
+	}
+	switch eventType {
+	case "response.queued":
+		if !resilience.Current().NativePreludeWhitelistOn() {
+			return true
+		}
+	case "response.failed":
+		return false
+	case "error":
+		payload := []byte(trimmed)
+		return !openAIStreamFailedEventShouldFailover(payload, extractOpenAISSEErrorMessage(payload))
+	}
+	if disposition := resilience.ResponsesEventOutputDisposition(eventType, []byte(trimmed)); disposition.Matched {
+		return disposition.Visible
+	}
 	if resilience.Current().NativePreludeWhitelistOn() {
 		class := resilience.ClassifyStreamEvent("responses", eventType, []byte(trimmed))
 		return class.Kind != resilience.Prelude && (class.Kind != resilience.TerminalFailure || !class.Retryable)
 	}
-	switch strings.TrimSpace(eventType) {
-	case "response.failed":
-		return false
-	case "error":
-		// 上游降载/瞬时故障会先推 {"type":"error"} 帧、再以 response.failed 收尾。
-		// 可重试类错误帧不能算客户端输出：一旦把它当首输出 flush，
-		// clientOutputStarted 即被固化，随后的 failed 事件永远进不了 pre-output
-		// failover 分支，只能把致命错误原样转发给客户端。不可重试类
-		// （content_policy / invalid_request 等）维持原样转发，保留上游错误细节。
-		payload := []byte(trimmed)
-		return !openAIStreamFailedEventShouldFailover(payload, extractOpenAISSEErrorMessage(payload))
-	case "response.output_item.added", "response.content_part.added", "response.reasoning_summary_part.added":
-		return openAIStreamAddedEventStartsClientOutput([]byte(trimmed), eventType)
+	if strings.HasPrefix(eventType, "response.") && !openAIStreamEventIsMetadata(eventType) {
+		return true
 	}
 	return !openAIStreamEventIsMetadata(eventType)
 }
@@ -1313,12 +1241,18 @@ func openAIStreamItemHasVisibleOutput(item gjson.Result) bool {
 // but TTFT should start only when the stream carries content a client can use.
 func openAIStreamDataStartsVisibleOutput(data, eventType string) bool {
 	trimmed := strings.TrimSpace(data)
-	if trimmed == "" || trimmed == "[DONE]" || !gjson.Valid(trimmed) {
+	if trimmed == "" || trimmed == "[DONE]" {
 		return false
+	}
+	if !gjson.Valid(trimmed) {
+		return true
 	}
 	eventType = strings.TrimSpace(eventType)
 	if eventType == "" {
 		eventType = strings.TrimSpace(gjson.Get(trimmed, "type").String())
+	}
+	if disposition := resilience.ResponsesEventOutputDisposition(eventType, []byte(trimmed)); disposition.Matched {
+		return disposition.SemanticOutput
 	}
 	if strings.HasSuffix(eventType, ".delta") {
 		delta := gjson.Get(trimmed, "delta")
@@ -1342,12 +1276,9 @@ func openAIStreamDataStartsVisibleOutput(data, eventType string) bool {
 		return part.Get("text").String() != "" || part.Get("transcript").String() != ""
 	case "response.output_item.added", "response.output_item.done":
 		return openAIStreamItemHasVisibleOutput(gjson.Get(trimmed, "item"))
-	case "response.completed", "response.done":
-		for _, item := range gjson.Get(trimmed, "response.output").Array() {
-			if openAIStreamItemHasVisibleOutput(item) {
-				return true
-			}
-		}
+	}
+	if strings.HasPrefix(eventType, "response.") && !openAIStreamEventIsMetadata(eventType) {
+		return true
 	}
 	return false
 }
@@ -1358,6 +1289,9 @@ func openAIStreamDataStartsSemanticTTFT(data, eventType string) bool {
 	trimmed := strings.TrimSpace(data)
 	if trimmed == "" || trimmed == "[DONE]" {
 		return false
+	}
+	if !gjson.Valid(trimmed) {
+		return true
 	}
 	eventType = strings.TrimSpace(eventType)
 	if eventType == "" && gjson.Valid(trimmed) {
@@ -1370,6 +1304,12 @@ func openAIStreamDataStartsSemanticTTFT(data, eventType string) bool {
 		payload := []byte(trimmed)
 		return !openAIStreamFailedEventShouldFailover(payload, extractOpenAISSEErrorMessage(payload))
 	default:
+		if disposition := resilience.ResponsesEventOutputDisposition(eventType, []byte(trimmed)); disposition.Matched {
+			return disposition.SemanticOutput
+		}
+		if strings.HasPrefix(eventType, "response.") && !openAIStreamEventIsMetadata(eventType) {
+			return true
+		}
 		return !openAIStreamEventIsMetadata(eventType)
 	}
 }
@@ -2140,10 +2080,11 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	sawBareError := false
 	sawResponseFailed := false
 	terminalEventType := ""
-	semanticOutputSeen := false
 	capacityFailoverSuppressedLogged := false
 	failedMessage := ""
 	clientOutputStarted := false
+	attemptStagedBlankPlaceholder := false
+	eventHasBlankPlaceholder := false
 	codexFailureTerminal := account != nil && account.Platform == PlatformOpenAI
 	failureDelivered := false
 	suppressCurrentEvent := false
@@ -2214,6 +2155,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	// flushPending 表示已写入但未到 SSE 空行边界的脏状态；defer 兜底函数退出前的残留，断连后不再 Flush。
 	flushPending := false
 	pendingSSEEventType := ""
+	pendingSSEEventLine := ""
 	flushPendingOutput := func() {
 		if clientDisconnected || !flushPending {
 			return
@@ -2232,6 +2174,14 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			return false
 		}
 		return true
+	}
+	discardPendingLines := func() error {
+		if !pendingStage.closed {
+			if err := pendingStage.Reset(); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	ensureResponseFailedTerminal := func() {
 		if !sawBareError || sawResponseFailed || failureDelivered {
@@ -2356,15 +2306,20 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		eventOpen = line != ""
 		if eventType, ok := extractOpenAISSEEventLine(line); ok {
 			pendingSSEEventType = eventType
+			pendingSSEEventLine = line
 			eventType = strings.TrimSpace(eventType)
 			suppressCurrentEvent = codexFailureTerminal && (eventType == "error" || (sawBareError && !sawResponseFailed && eventType != "response.failed"))
 		}
 		lineStartsClientOutput := false
 		forceFlushFailedEvent := false
+		restoreFailureEventLine := false
 		if data, ok := extractOpenAISSEDataLine(line); ok {
 			dataBytes := []byte(data)
 			trimmedData := strings.TrimSpace(data)
 			rawEventType := effectiveOpenAISSEEventType(dataBytes, pendingSSEEventType)
+			if disposition := resilience.ResponsesEventOutputDisposition(rawEventType, dataBytes); disposition.BlankPlaceholder {
+				eventHasBlankPlaceholder = true
+			}
 			wrappedStatus, wrappedFrame, malformedWrapped := openAIWrappedUpstreamErrorStatus(pendingSSEEventType, dataBytes)
 			wrappedPayload := []byte(nil)
 			if wrappedFrame {
@@ -2405,6 +2360,14 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				}
 			}
 			eventType := effectiveOpenAISSEEventType(dataBytes, rawEventType)
+			if (eventType == "response.failed" || eventType == "error") && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+				if err := discardPendingLines(); err != nil {
+					return passthroughReturn(resultWithUsage(), s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, nil,
+						"OpenAI first-output stage reset failed: "+err.Error()))
+				}
+				restoreFailureEventLine = pendingSSEEventLine != ""
+				eventHasBlankPlaceholder = false
+			}
 			if codexFailureTerminal && sawBareError && !sawResponseFailed && eventType != "response.failed" {
 				suppressCurrentEvent = true
 			}
@@ -2537,18 +2500,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			if lineStartsClientOutput && !clientOutputStarted {
 				releaseOpenAIPrelude(preludeTrace, eventType)
 			}
-			if lineStartsClientOutput && trimmedData != "[DONE]" && !openAIStreamEventTypeIsTerminal(eventType) {
-				semanticOutputSeen = true
-			}
-			// OpenAI Responses streams that terminate with an empty
-			// response.completed (no output, no usage, no error, nothing sent
-			// to the client) are silent upstream refusals: fail over instead of
-			// recording a successful 0/0 usage turn (issue #5009).
-			if (eventType == "response.completed" || eventType == "response.done") &&
-				!sawFailedEvent && !semanticOutputSeen && !clientOutputStarted && !clientDisconnected &&
-				openAIResponsesCompletedEventIsEmpty(dataBytes, usage) {
-				return passthroughReturn(resultWithUsage(), newOpenAIResponsesEmptyCompletedFailoverError(c, account, upstreamRequestID))
-			}
 			if firstTokenMs == nil && openAIStreamDataStartsTTFT(trimmedData, eventType, forceFlushFailedEvent, ttftMode) {
 				ms := int(time.Since(startTime).Milliseconds())
 				firstTokenMs = &ms
@@ -2557,6 +2508,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		}
 		if line == "" {
 			pendingSSEEventType = ""
+			pendingSSEEventLine = ""
 			if suppressCurrentEvent {
 				suppressCurrentEvent = false
 				responseFailedPending = false
@@ -2565,6 +2517,12 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		}
 
 		if !clientDisconnected && !failureDelivered && !suppressCurrentEvent {
+			if restoreFailureEventLine {
+				if _, err := pendingStage.WriteString(pendingSSEEventLine + "\n"); err != nil {
+					return passthroughReturn(resultWithUsage(), s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, nil,
+						"OpenAI first-output failure header staging failed: "+err.Error()))
+				}
+			}
 			if !clientOutputStarted && !lineStartsClientOutput {
 				if _, err := pendingStage.WriteString(line + "\n"); err != nil {
 					message := "OpenAI first-output staging failed"
@@ -2575,6 +2533,13 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 					failoverErr := s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, nil, message)
 					failoverErr.SafeToFailoverAfterWrite = true
 					return passthroughReturn(resultWithUsage(), failoverErr)
+				}
+				if eventHasBlankPlaceholder && !attemptStagedBlankPlaceholder {
+					markOpenAIBlankPlaceholderStaged(c, account.ID)
+					attemptStagedBlankPlaceholder = true
+				}
+				if line == "" {
+					eventHasBlankPlaceholder = false
 				}
 				return passthroughLineContinue
 			}
@@ -2606,6 +2571,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		if line == "" && responseFailedPending {
 			responseFailedPending = false
 			failureDelivered = true
+		}
+		if line == "" {
+			eventHasBlankPlaceholder = false
 		}
 		// Terminal 事件（response.completed / [DONE] 等）随空行完整刷出后不再等上游
 		// EOF：上游在 keep-alive/HTTP2 复用连接上可能拖延关闭连接（观测到 8~46s 不等），
@@ -2714,6 +2682,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			if codexFailureTerminal && sawBareError && !sawResponseFailed {
 				return finish(nil)
 			}
+			markOpenAIBlankPlaceholderTimeout(c, attemptStagedBlankPlaceholder)
 			return resultWithUsage(), s.newOpenAIFirstOutputTimeoutError(ctx, c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
 				startTime, originalModel, reasoningEffort, firstOutputTimeout, "semantic_output", resp.Header)
 		},

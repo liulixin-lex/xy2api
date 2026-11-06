@@ -75,11 +75,11 @@ func semanticSSEBlock(block []byte) bool {
 	if typ == "" {
 		typ = event
 	}
-	if typ == "error" || typ == "response.failed" || resilience.ChatErrorField(root) {
+	if event == "error" || typ == "error" || typ == "response.failed" || resilience.ChatErrorField(root) {
 		return false
 	}
-	if strings.HasPrefix(typ, "response.") {
-		return openAIStreamDataStartsVisibleOutput(string(data), typ)
+	if strings.HasPrefix(typ, "response.") || strings.HasPrefix(event, "response.") {
+		return openAIStreamDataStartsVisibleOutput(string(data), event)
 	}
 	switch typ {
 	case "image_generation.partial_image", "image_generation.completed":

@@ -83,7 +83,7 @@ func TestOpenAINativeMetadataAndKeepaliveDoNotDisarmFirstOutputTimeout(t *testin
 		defer close(writerDone)
 		defer func() { _ = writer.Close() }()
 		_, _ = io.WriteString(writer, "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_test\"}}\n\n")
-		_, _ = io.WriteString(writer, "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"item_test\",\"type\":\"reasoning\",\"summary\":[]}}\n\n")
+		_, _ = io.WriteString(writer, "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"item_test\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\" \"}]}}\n\n")
 		_, _ = io.WriteString(writer, "data: {\"type\":\"keepalive\"}\n\n")
 		time.Sleep(1200 * time.Millisecond)
 	}()
@@ -116,7 +116,7 @@ func TestOpenAIResponsesTTFTDefaultsToSemanticOutput(t *testing.T) {
 			result := runSyntheticVisibleTTFTStream(t, passthrough, 120*time.Millisecond, 0, "",
 				`{"type":"response.output_text.delta","delta":"test output"}`)
 			require.NotNil(t, result.firstTokenMs)
-			require.Less(t, *result.firstTokenMs, 100)
+			require.GreaterOrEqual(t, *result.firstTokenMs, 100, "blank assistant events do not start semantic TTFT")
 		})
 	}
 }
@@ -142,7 +142,7 @@ func runSyntheticVisibleTTFTStream(t *testing.T, passthrough bool, visibleDelay 
 		defer close(writerDone)
 		defer func() { _ = writer.Close() }()
 		_, _ = io.WriteString(writer, "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_test\"}}\n\n")
-		_, _ = io.WriteString(writer, "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"item_test\",\"type\":\"reasoning\",\"summary\":[]}}\n\n")
+		_, _ = io.WriteString(writer, "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"item_test\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\" \"}]}}\n\n")
 		time.Sleep(visibleDelay)
 		_, _ = io.WriteString(writer, "data: "+visibleEvent+"\n\n")
 		_, _ = io.WriteString(writer, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n")
