@@ -124,6 +124,8 @@ Responses 空白占位：`response.output_text.delta` / `.done`、output_text �
 
 Responses 输出前的原生、直通及请求级 preOutput 心跳统一为完整的 `event: ping\ndata: {"type":"ping"}\n\n`，每拍派发一个 SSE 事件，供按事件计时的客户端重置空闲计时。心跳仍扣除输出字节、不计首输出，停拍与帧边界保护保持；上游注释原样处理，Anthropic 与 Chat 的心跳不变。
 
+直通的网关心跳独立节流，只有网关心跳成功写出才更新其时间；上游注释继续即时透传并扣除心跳字节，但不会推迟网关定时 ping。
+
 Chat/Messages 兼容转换只在首次提交前暂存解码后的开场与空白事件，按上游载荷累计限制为 8 MiB。首个可见事件或成功终态到达时按序转换并冲刷；失败丢弃。提交后空白 delta 照常转换，保留前导空格和词间空格；超出暂存上限按既有输出前失败换号。
 
 输出前的 `response.failed`、`error` 与失败 `response.incomplete` 丢弃整段暂存，终态本身沿既有失败处理发出，不计首 token、`FirstOutput` 或 `SemanticOutputAt`。`incomplete_details.reason=interrupted` 按成功终态处理，保留暂存顺序；真实内容已输出后的行为不变。

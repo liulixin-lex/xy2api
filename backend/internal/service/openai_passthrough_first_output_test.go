@@ -154,6 +154,47 @@ func TestOpenAIPassthroughStagingHeartbeatIsNotOutput(t *testing.T) {
 	require.NotContains(t, w.Body(), "resp_pt")
 }
 
+func TestOpenAIPassthroughUpstreamCommentsDoNotSuppressPings(t *testing.T) {
+	withResilienceSettings(t, nil)
+	w := newGWWriter()
+	c := ptContext(w)
+	c.Request.Header.Set("originator", "codex_cli_rs")
+	up := newGWUpstream(nil)
+	t.Cleanup(func() { _ = up.Close() })
+	start := time.Now()
+	done := ptRun(compatStreamService(nil, 30, 0, 10), c, up.response(nil))
+	up.send(t, ptCreated)
+	comments := time.NewTicker(3 * time.Second)
+	defer comments.Stop()
+	deadline := time.NewTimer(25 * time.Second)
+	defer deadline.Stop()
+	lastPing := start
+	pingCount := 0
+	for pingCount < 2 {
+		select {
+		case <-comments.C:
+			up.send(t, ptComment)
+		case body := <-w.flushed:
+			count := strings.Count(body, string(preOutputPingFrame))
+			if count > pingCount {
+				now := time.Now()
+				require.InDelta(t, 10, now.Sub(lastPing).Seconds(), 2, "gateway ping interval")
+				lastPing, pingCount = now, count
+			}
+		case <-deadline.C:
+			t.Fatal("upstream comments suppressed scheduled gateway pings")
+		}
+	}
+	up.send(t, ptOverload)
+	got := ptAwait(t, done, 3*time.Second)
+	var failover *UpstreamFailoverError
+	require.ErrorAs(t, got.err, &failover)
+	require.GreaterOrEqual(t, strings.Count(w.Body(), ptComment), 6)
+	requireResponsesPingEvents(t, strings.ReplaceAll(w.Body(), ptComment, ""))
+	requireOnlyHeartbeats(t, c, w.Body())
+	require.NotContains(t, w.Body(), "resp_pt")
+}
+
 // R2-P1③: upstream comment heartbeats are passed through at once, not
 // staged with the opening.
 func TestOpenAIPassthroughUpstreamCommentPassesThroughDuringStaging(t *testing.T) {

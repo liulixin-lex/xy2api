@@ -2328,7 +2328,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	// outside one is passed through with its closing blank line.
 	eventOpen, skipBlank := false, false
 	lastLineWritten := ""
-	lastHeartbeatAt := time.Now()
+	var lastGatewayHeartbeatAt time.Time
 	// writeHeartbeat writes a complete heartbeat while the opening is staged: it commits
 	// 200 but is no output; a failed write means the client left (PM7).
 	writeHeartbeat := func(frame string) {
@@ -2343,7 +2343,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			return
 		}
 		flusher.Flush()
-		lastHeartbeatAt = time.Now()
 	}
 	var retResult *openaiStreamingResultPassthrough
 	var retErr error
@@ -2820,11 +2819,16 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			MarkResponseCommitted(c)
 			return resultWithUsage(), errors.New("stream data interval timeout"), true
 		},
-		onKeepalive: func() {
-			if clientOutputStarted || clientDisconnected || failureDelivered || time.Since(lastHeartbeatAt) < keepaliveInterval {
+		onKeepalive: func(tick time.Time) {
+			if clientOutputStarted || clientDisconnected || failureDelivered || tick.Sub(lastGatewayHeartbeatAt) < keepaliveInterval {
 				return
 			}
 			writeHeartbeat(string(preOutputPingFrame))
+			if !clientDisconnected {
+				// Upstream comments cannot postpone dispatchable gateway beats.
+				// Use the ticker time so write latency cannot skip the next beat.
+				lastGatewayHeartbeatAt = tick
+			}
 		},
 		firstOutputDeadline: firstOutputDeadline(startTime, firstOutputTimeout),
 		stallCheckBase:      stallCheckBase,
