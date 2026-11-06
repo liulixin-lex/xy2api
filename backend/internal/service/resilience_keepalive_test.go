@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-contrib/sse"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -229,21 +228,6 @@ type keepaliveFailWriter struct{ gin.ResponseWriter }
 
 func (w *keepaliveFailWriter) Write([]byte) (int, error) {
 	return 0, context.Canceled
-}
-
-// Decode actual output bytes: each complete beat must dispatch exactly one SSE
-// event, not merely keep the HTTP connection busy with comments.
-func requireResponsesPingEvents(t *testing.T, body string) {
-	t.Helper()
-	beats := strings.Count(body, string(preOutputPingFrame))
-	require.Equal(t, strings.Repeat(string(preOutputPingFrame), beats), body)
-	events, err := sse.Decode(strings.NewReader(body))
-	require.NoError(t, err)
-	require.Len(t, events, beats)
-	for _, event := range events {
-		require.Equal(t, "ping", event.Event)
-		require.Equal(t, `{"type":"ping"}`, event.Data)
-	}
 }
 
 func TestPreOutputResponsesHeartbeatDispatchesOneEventPerBeat(t *testing.T) {

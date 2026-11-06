@@ -15,11 +15,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-contrib/sse"
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/tlsfingerprint"
 	"github.com/stretchr/testify/require"
 )
+
+// Decode actual output bytes: each complete beat must dispatch exactly one SSE
+// event, not merely keep the HTTP connection busy with comments.
+func requireResponsesPingEvents(t *testing.T, body string) {
+	t.Helper()
+	beats := strings.Count(body, string(preOutputPingFrame))
+	require.Equal(t, strings.Repeat(string(preOutputPingFrame), beats), body)
+	events, err := sse.Decode(strings.NewReader(body))
+	require.NoError(t, err)
+	require.Len(t, events, beats)
+	for _, event := range events {
+		require.Equal(t, "ping", event.Event)
+		require.Equal(t, `{"type":"ping"}`, event.Data)
+	}
+}
 
 type blockingOpenAIResponseHeaderUpstream struct {
 	canceled chan struct{}
