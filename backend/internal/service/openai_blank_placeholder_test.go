@@ -232,14 +232,15 @@ func TestResponsesBlankPlaceholderVisibleItemFlushesAllBeforeTerminal(t *testing
 	for _, passthrough := range []bool{false, true} {
 		t.Run(fmt.Sprintf("passthrough=%t", passthrough), func(t *testing.T) {
 			// The two empty items interleave, and item 1 has no item.added.
-			// Its .done carries all text and must release both items immediately.
+			// Its first real delta must release the whole wire-shaped prelude immediately.
 			prelude := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_test\"}}\n\n" +
 				"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"item_id\":\"a\",\"output_index\":0,\"delta\":\" \"}\n\n" +
 				"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"item_id\":\"b\",\"output_index\":1,\"delta\":\"\\t\"}\n\n"
 			prelude = strings.Split(d10BlankPlaceholderStream(2, true), "event: response.failed")[0] + prelude
 			metadata := "event: response.metadata\ndata: {\"type\":\"response.metadata\",\"response_id\":\"resp_test\",\"sequence_number\":2,\"metadata\":{}}\n\n"
 			prelude = strings.Replace(prelude, "event: response.output_item.added", metadata+"event: response.output_item.added", 1)
-			visible := "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"id\":\"b\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\" hi\"}]}}\n\n"
+			itemDone := "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"id\":\"b\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\" hi\"}]}}\n\n"
+			visible := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":20,\"item_id\":\"b\",\"output_index\":1,\"content_index\":0,\"delta\":\" hi\",\"logprobs\":[],\"obfuscation\":\"test\"}\n\n"
 			completed := "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n"
 			c, _ := compatStreamContext("/v1/responses", `{}`)
 			recorder := newOpenAIResponseFlushRecorder()
@@ -265,7 +266,7 @@ func TestResponsesBlankPlaceholderVisibleItemFlushesAllBeforeTerminal(t *testing
 			}
 			body, _ := recorder.snapshot()
 			require.Equal(t, prelude+visible, body, "staging preserves output-path bytes and item order")
-			_, err = io.WriteString(writer, completed)
+			_, err = io.WriteString(writer, itemDone+completed)
 			require.NoError(t, err)
 			require.NoError(t, writer.Close())
 			require.NoError(t, <-result)
