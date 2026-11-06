@@ -1796,7 +1796,7 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 	if c.GetBool(ginKeyResilienceFinalized) {
 		return
 	}
-	if handleModelUnavailableExhausted(c, failoverErr, streamStarted, false, func(status int, message string, stream bool) {
+	if handleOpenAIRequestRejectionExhausted(c, failoverErr, streamStarted, false, func(status int, message string, stream bool) {
 		h.anthropicStreamingAwareError(c, status, "invalid_request_error", message, stream)
 	}) {
 		return
@@ -3767,7 +3767,7 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 		h.handleFailoverExhaustedSimple(c, http.StatusBadGateway, streamStarted)
 		return
 	}
-	if handleModelUnavailableExhausted(c, failoverErr, streamStarted, true, func(status int, message string, stream bool) {
+	if handleOpenAIRequestRejectionExhausted(c, failoverErr, streamStarted, true, func(status int, message string, stream bool) {
 		h.handleStreamingAwareError(c, status, "invalid_request_error", message, stream)
 	}) {
 		return

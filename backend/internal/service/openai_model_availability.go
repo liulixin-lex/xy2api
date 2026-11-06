@@ -14,7 +14,11 @@ import (
 
 const openAIModelUnavailableReason = GatewayFailureReason("openai_model_unavailable")
 const openAIUpstreamRequestRestrictionReason = GatewayFailureReason(resilience.ReasonUpstreamRequestRestriction)
-const openAIModelUnavailableHostKey = "openai_model_unavailable_host"
+
+// IsOpenAIUpstreamRequestRestriction identifies the unpenalized 5xx request route.
+func (e *UpstreamFailoverError) IsOpenAIUpstreamRequestRestriction() bool {
+	return e != nil && e.Reason == openAIUpstreamRequestRestrictionReason
+}
 
 // failoverOpenAIModelAvailability is shared by native and passthrough HTTP
 // routing, after local request repairs and compact fallback. It owns the
@@ -30,25 +34,29 @@ func (s *OpenAIGatewayService) failoverOpenAIModelAvailability(ctx context.Conte
 	scope, action, kind := GatewayFailureScopeAccount, NextAccountRetry, "failover"
 	switch {
 	case isOpenAIModelAvailabilityError(resp.StatusCode, "", body):
-		host, previousHost := accountUpstreamHost(account), ""
-		if c != nil {
-			previousHost = c.GetString(openAIModelUnavailableHostKey)
-		}
-		if host != "" && previousHost != "" && host != previousHost {
-			// Matching evidence from independent upstream hosts belongs to this
-			// request. Do not spread its model cooldown across the account pool.
-			scope, action, kind = GatewayFailureScopeRequest, NextAccountStop, "http_error"
-			failureCategory = resilience.CategoryClientError
-		} else {
-			if c != nil && host != "" {
-				c.Set(openAIModelUnavailableHostKey, host)
-			}
-			s.recordOpenAIModelAvailabilityFailure(account, model)
-		}
 	case !openAIStreamRequestRejected(body, "") && classifyUpstreamHTTP(resp.StatusCode, resp.Header, body, "").Category == resilience.CategoryUpstreamRequestRestriction:
 		reason, failureCategory = openAIUpstreamRequestRestrictionReason, resilience.CategoryUpstreamRequestRestriction
 	default:
 		return nil
+	}
+	// Keep independent evidence for each failure class within this request.
+	// A second upstream host establishes request scope; sibling accounts on
+	// the first host may still support the request.
+	host, previousHost := accountUpstreamHost(account), ""
+	hostKey := "openai_request_failure_host_" + string(reason)
+	if c != nil {
+		previousHost = c.GetString(hostKey)
+	}
+	if host != "" && previousHost != "" && host != previousHost {
+		scope, action, kind = GatewayFailureScopeRequest, NextAccountStop, "http_error"
+		failureCategory = resilience.CategoryClientError
+	} else {
+		if c != nil && host != "" {
+			c.Set(hostKey, host)
+		}
+		if reason == openAIModelUnavailableReason {
+			s.recordOpenAIModelAvailabilityFailure(account, model)
+		}
 	}
 	body = s.redactAgentIdentitySensitiveBody(ctx, account, body)
 	message := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body)))

@@ -4081,11 +4081,23 @@
     },
     {
       "path": "backend/internal/handler/openai_model_availability.go",
-      "value": "suppressResilienceRetryAdvice(c, \"model_unavailable\")"
+      "value": "suppressResilienceRetryAdvice(c, source)"
     },
     {
       "path": "backend/internal/handler/openai_model_availability_test.go",
       "value": "func TestOpenAIModelUnavailableExhaustionPreservesLastError(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/handler/openai_model_availability.go",
+      "value": "if !failure.IsOpenAIModelUnavailable() && !failure.IsOpenAIUpstreamRequestRestriction() {"
+    },
+    {
+      "path": "backend/internal/handler/openai_model_availability_test.go",
+      "value": "func TestOpenAIUpstreamRequestRestrictionStopsWithoutRetryAdvice(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/handler/openai_model_availability.go",
+      "value": "c.Header(\"x-should-retry\", \"false\")"
     },
     {
       "path": "backend/internal/service/openai_model_availability.go",

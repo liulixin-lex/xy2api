@@ -443,6 +443,9 @@ func ClassifyFailoverError(e *UpstreamFailoverError) resilience.Result {
 		return resilience.Result{Category: resilience.CategoryClientError, Reason: string(OpenAIStateRepairReason)}
 	}
 	if e.Reason == openAIUpstreamRequestRestrictionReason {
+		if e.Scope == GatewayFailureScopeRequest {
+			return resilience.Result{Category: resilience.CategoryClientError, Reason: string(openAIUpstreamRequestRestrictionReason)}
+		}
 		return resilience.Result{Category: resilience.CategoryUpstreamRequestRestriction, Reason: string(openAIUpstreamRequestRestrictionReason)}
 	}
 	if e.Reason == openAIModelUnavailableReason {

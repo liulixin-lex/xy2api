@@ -425,7 +425,7 @@ func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastEr
 	if c.GetBool(ginKeyResilienceFinalized) {
 		return
 	}
-	if handleModelUnavailableExhausted(c, lastErr, streamStarted, true, func(status int, message string, _ bool) {
+	if handleOpenAIRequestRejectionExhausted(c, lastErr, streamStarted, true, func(status int, message string, _ bool) {
 		service.MarkOpsStreamError(c, "invalid_request_error", message, status)
 		writeResponsesFailedSSEWithOpeningStatus(c, status, "invalid_request_error", "", message, gatewayStreamHasOnlyHeartbeats(c))
 	}) {
