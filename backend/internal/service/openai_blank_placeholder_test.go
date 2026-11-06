@@ -421,3 +421,54 @@ func TestResponsesBlankPlaceholderSuccessLatencyUsesRealOutput(t *testing.T) {
 		}
 	}
 }
+
+func TestCompatPreludePreservesWhitespaceContent(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, tc := range []struct {
+		name     string
+		messages bool
+		deltas   []string
+		want     string
+	}{
+		{"chat leading", false, []string{"  ", "Hello"}, "  Hello"},
+		{"chat middle", false, []string{"Hello", " ", "world"}, "Hello world"},
+		{"messages leading", true, []string{"  ", "Hello"}, "  Hello"},
+		{"messages middle", true, []string{"Hello", " ", "world"}, "Hello world"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := keepaliveStallCreated + "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_test\",\"role\":\"assistant\",\"content\":[]}}\n\n"
+			for _, delta := range tc.deltas {
+				payload, err := json.Marshal(apicompat.ResponsesStreamEvent{Type: "response.output_text.delta", Delta: delta})
+				require.NoError(t, err)
+				body += "data: " + string(payload) + "\n\n"
+			}
+			body += "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
+			c, recorder := compatStreamContext("/v1/chat/completions", compatChatStreamBody)
+			_, err := runPreludeCompat(t, c, tc.messages, strings.NewReader(body), 0, 0)
+			require.NoError(t, err)
+			var content strings.Builder
+			for _, block := range strings.Split(recorder.Body.String(), "\n\n") {
+				_, payload := sseBlockFields([]byte(block))
+				if tc.messages {
+					if gjson.GetBytes(payload, "delta.type").String() == "text_delta" {
+						content.WriteString(gjson.GetBytes(payload, "delta.text").String())
+					}
+				} else {
+					for _, choice := range gjson.GetBytes(payload, "choices").Array() {
+						content.WriteString(choice.Get("delta.content").String())
+					}
+				}
+			}
+			require.Equal(t, tc.want, content.String())
+		})
+	}
+}
+
+func TestCompatPreludeBufferIsBounded(t *testing.T) {
+	var pending openAICompatPreludeBuffer
+	event := apicompat.ResponsesStreamEvent{Type: "response.output_text.delta", Delta: " "}
+	require.NoError(t, pending.add(event, openAIFirstOutputStageMaxBytes))
+	require.ErrorIs(t, pending.add(event, 1), errOpenAIFirstOutputStageLimit)
+	require.Len(t, pending.take(), 1)
+	require.NoError(t, pending.add(event, 1), "discard releases the attempt's retained events")
+}
