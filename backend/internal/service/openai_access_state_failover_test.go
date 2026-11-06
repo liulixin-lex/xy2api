@@ -212,7 +212,8 @@ func TestOpenAIStreamSemanticStatusesPreservedAcrossTerminalShapes(t *testing.T)
 		wantFailover bool
 	}{
 		{"unauthorized", `{"type":"error","error":{"type":"authentication_error","code":"invalid_api_key","message":"unauthorized"}}`, http.StatusUnauthorized, true},
-		{"forbidden", `{"type":"response.failed","response":{"error":{"type":"permission_error","message":"forbidden"}}}`, http.StatusForbidden, false},
+		// FINAL §3.4: pre-output forbidden switches accounts; wording alone has no cooldown evidence.
+		{"forbidden", `{"type":"response.failed","response":{"error":{"type":"permission_error","message":"forbidden"}}}`, http.StatusForbidden, true},
 		{"rate_limit", `{"error":{"type":"rate_limit_error","code":"rate_limit_exceeded","message":"slow down"}}`, http.StatusTooManyRequests, true},
 		{"overload_529", `{"type":"error","error":{"status_code":529,"code":"overloaded","message":"overloaded"}}`, 529, true},
 	}
@@ -222,6 +223,11 @@ func TestOpenAIStreamSemanticStatusesPreservedAcrossTerminalShapes(t *testing.T)
 			message := extractOpenAISSEErrorMessage(payload)
 			require.Equal(t, tt.status, openAIStreamFailureStatus(payload, message))
 			require.Equal(t, tt.wantFailover, openAIStreamErrorEventShouldFailover(payload, message))
+			if tt.status == http.StatusForbidden {
+				require.True(t, openAIStream403TransientForbidden(payload, message))
+				require.False(t, openAIStream403AccountFailure(payload, message))
+				require.False(t, openAIStreamForbiddenCooldownEvidence(payload, 0))
+			}
 		})
 	}
 }
@@ -254,9 +260,11 @@ func TestOpenAIStreamSemanticStatusHonorsErrorStatusAlias(t *testing.T) {
 			wantFailover: true,
 		},
 		{
-			name:   "response.error.status forbidden without account signal",
-			body:   `{"type":"response.failed","response":{"error":{"code":"server_error","status":403,"message":"request was rejected"}}}`,
-			status: http.StatusForbidden,
+			// FINAL §3.4: structured pre-output forbidden switches accounts and supplies cooldown evidence.
+			name:         "response.error.status forbidden without account signal",
+			body:         `{"type":"response.failed","response":{"error":{"code":"server_error","status":403,"message":"request was rejected"}}}`,
+			status:       http.StatusForbidden,
+			wantFailover: true,
 		},
 	}
 	for _, tt := range tests {
@@ -266,6 +274,11 @@ func TestOpenAIStreamSemanticStatusHonorsErrorStatusAlias(t *testing.T) {
 			require.Equal(t, tt.status, openAIStreamFailureStatus(payload, message))
 			require.Equal(t, tt.wantFailover, openAIStreamErrorEventShouldFailover(payload, message))
 			require.Equal(t, tt.wantFailover, openAIStreamFailedEventShouldFailover(payload, message))
+			if tt.status == http.StatusForbidden {
+				require.True(t, openAIStream403TransientForbidden(payload, message))
+				require.False(t, openAIStream403AccountFailure(payload, message))
+				require.True(t, openAIStreamForbiddenCooldownEvidence(payload, 0))
+			}
 		})
 	}
 }
