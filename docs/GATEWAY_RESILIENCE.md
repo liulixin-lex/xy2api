@@ -305,7 +305,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 
 **第一个内容之前的失败可以换号**
 
-- OpenAI Responses 的流内中转包装帧（`event: error` + `type=proxy.upstream_error`，或 `response.failed` + `response.error.type=upstream_error`）只在状态码、字段类型与相等关系校验通过后按迟到的上游 HTTP 状态路由。输出前包装 400 交给加密态请求修复，403 按停用/凭证码走账号故障路径，否则走请求级 forbidden；其他状态复用 HTTP 的换号判定。包装 400–599 以外或结构不完整的帧按普通失败处理，畸形帧各记一条 `resilience.wrapped_error_malformed`；输出后的流保持原行为。
+- OpenAI Responses 的流内中转包装帧（`event: error` + `type=proxy.upstream_error`，或 `response.failed` + `response.error.type=upstream_error`）只在状态码、字段类型与相等关系校验通过后按迟到的上游 HTTP 状态路由。输出前包装 400 交给加密态请求修复；包装 401 和所有包装 403（含停用码、凭证码）均走请求级 forbidden：换号、账号×模型软冷却、本请求内排除同站、用尽写 502，不进入凭证处罚、停用或 HTTP 403 连续失败计数。包装帧表示中转已接受本网关的 Key，帧内认证错误归于中转自己的上游。其他状态复用 HTTP 的换号判定。包装 400–599 以外或结构不完整的帧按普通失败处理，畸形帧各记一条 `resilience.wrapped_error_malformed`；输出后的流、非包装流内 403 及 HTTP 401/403 保持原行为。
 - `codex.response.metadata` 判为开场事件（§1）。以前它算内容，之后的失败不能换号，首输出截止也随之解除，出现过 240 秒的挂起。
 - 原生 Anthropic 与 API Key 直通（`stream.prelude_staging`）：`message_start`、`ping`、空的 text 与 thinking `content_block_start` 暂存到第一个内容或终态，`tool_use` 起始算内容、立即写出。暂存期间上游的可重试失败（流内 `overloaded_error`、`rate_limit_error`，断流、读错、停滞）丢弃本次开场并换号，客户端只看到成功那次尝试的一个 `message_start`；不可重试的拒绝写出开场后以 `event: error` 结束；合法的空回答照常写出。
 - 暂存期间按流内心跳间隔写注释行 `: ping`（以前是 `event: ping`），不算输出；失败尝试的上游响应头与 request-id 不写出。暂存最多 8 MiB（超过 64 KiB 写入已解除链接的临时文件），超出时换号；预算开启的文本请求最多暂存到本请求预算用尽。图片请求与没有预算的请求不设这个时限。
@@ -502,6 +502,7 @@ info 级，只写应用标准输出（量大，明细已有计数或未送达表
 - `unclassified`：只按状态码归类的上游 4xx 文案采样（脱敏、截断，每分钟约 10 条），发现新的余额文案时加入 `failure.balance_keywords_extra`；
 - `undelivered`（含阶段、耗时、推断的 CDN 切断与 `edge`）；
 - `transient_cooldown`、`transient_lifted`、`undelivered_cleanup`；
+- `forbidden_cooldown`：失败处理启用时，OpenAI API Key 账号在输出前收到流内通用 403 或校验通过的包装 401/403，进入账号×模型软冷却计数时每次一条；包装帧内的停用/凭证码同样按此处理。非包装帧的停用/凭证错误、状态类拒绝、上下文超限与内容安全拒绝不触发。含 `account_id`、`group_id`、`model`、`failure_streak`、`cooldown_ms`（首次为 0）；不进入 HTTP 403 连续失败计数；
 - `content_policy_refusal`（上游内容安全拒绝，含账号、平台、状态与截断的上游原文）、`content_policy_no_failover`（换号循环因内容安全拒绝结束）；
 - `web_search_replay`（补 web_search 声明后同号重放）、`web_search_declaration_learned`（重放成功，该账号 6 小时内同类请求直接补声明）；
 - `request_repair_replay`（0.5.1）：网关修好上游点名的问题后同号重放（§3、§4.10），覆盖 OpenAI 原生 Responses 的 HTTP 与带内修复、Chat Completions 路径的被拒字段修复；透传与 WebSocket 路径的被拒字段重放沿用原有日志。含 `account_id`、`kind`（`encrypted_content` 或被拒字段的原因）与 `form`（`http` 或 `inband`）；Chat Completions 路径另带 `path=chat`。不记请求体；
