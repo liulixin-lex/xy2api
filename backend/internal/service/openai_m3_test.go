@@ -558,6 +558,58 @@ func TestOpenAIM3RewrittenFallbackPreservesRequestErrors(t *testing.T) {
 	}
 }
 
+func TestForwardOpenAIM3PassthroughInbandFieldRepairScope(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		passthrough bool
+		m3Replay    bool
+		wrapped     bool
+		repairs     bool
+	}{
+		{"native baseline", false, false, false, true},
+		{"passthrough ordinary rejection", true, false, false, false},
+		{"passthrough M3 derived request", true, true, false, true},
+		{"passthrough wrapped 400", true, false, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withResilienceSettings(t, nil)
+			req := newWebSearchReplayRequest(t)
+			body, err := sjson.Set(m3TwoItemRequest, "temperature", 0.5)
+			require.NoError(t, err)
+			var responses []*http.Response
+			if tc.m3Replay {
+				responses = append(responses, newOpenAIUpstreamErrorResponse(400, `{"error":{"code":"invalid_encrypted_content","message":"Encrypted content could not be verified for item amsg_one"}}`))
+			}
+			payload := `{"type":"response.failed","response":{"error":{"code":"unsupported_parameter","param":"temperature","message":"Unsupported parameter: temperature"}}}`
+			if tc.wrapped {
+				payload = `{"type":"response.failed","response":{"error":{"type":"upstream_error","code":"400","status_code":400,"message":"Unsupported parameter: temperature"}},"upstream_body":{"error":{"code":"unsupported_parameter","param":"temperature","message":"Unsupported parameter: temperature"}}}`
+			}
+			responses = append(responses, requestRepairFailedStream(payload), webSearchSuccessStream("resp_field_repaired"))
+			upstream := &httpUpstreamRecorder{responses: responses}
+			svc := newOpenAIImageGenerationControlTestService(upstream)
+			_, err = svc.Forward(req.ctx, req.c, webSearchReplayAccount(tc.passthrough), []byte(body))
+			if tc.repairs {
+				require.NoError(t, err)
+				wantRequests := 2
+				if tc.m3Replay {
+					wantRequests++
+				}
+				require.Len(t, upstream.bodies, wantRequests)
+				last := upstream.bodies[wantRequests-1]
+				require.False(t, gjson.GetBytes(last, "temperature").Exists())
+				if tc.m3Replay {
+					require.Equal(t, "[encrypted content omitted]", gjson.GetBytes(last, "input.0.content.0.text").String())
+				}
+			} else {
+				require.Error(t, err)
+				require.Len(t, upstream.bodies, 1)
+				require.True(t, gjson.GetBytes(upstream.bodies[0], "temperature").Exists())
+				require.NotContains(t, req.rec.Body.String(), "resp_field_repaired")
+			}
+		})
+	}
+}
+
 func TestOpenAIM3ReplayFirstOutputWindowUsesRemainingBudget(t *testing.T) {
 	withResilienceSettings(t, nil)
 	settings := resilience.Current()

@@ -373,6 +373,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	var partialErr error
 	upstreamAccepted := false
 	requestRepair := armOpenAIRequestRepair(c, account, rejectedFieldRetryState)
+	requestRepair.passthrough = true
 	requestRepair.encryptedTried = true // rs/cmp stripping remains exclusive to the native path.
 	requestRepair.m3 = s.armOpenAIM3(c, account, body)
 	replayAttempt := false

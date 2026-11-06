@@ -27,6 +27,7 @@ type openAIRequestRepair struct {
 	accountID               int64
 	body                    []byte
 	encryptedTried          bool
+	passthrough             bool
 	m3                      *openAIM3Attempt
 	rejectedFieldRetryState *openAIResponsesRejectedFieldRetryState
 }
@@ -136,7 +137,11 @@ func newOpenAIRequestRepairSignal(ctx context.Context, c *gin.Context, account *
 		}
 	}
 
-	if r.rejectedFieldRetryState != nil {
+	_, m3Trigger := openAIM3Trigger(payload, message, wrappedStatus)
+	m3Related := r.m3 != nil && (m3Trigger || len(r.m3.state.replaced) > 0)
+	// Passthrough's baseline only repairs HTTP fields. In-band field repair
+	// is enabled solely for M3 signals or a request already derived by M3.
+	if r.rejectedFieldRetryState != nil && (!r.passthrough || m3Related) {
 		errorObject := openAIRequestRepairErrorObject(payload)
 		if len(errorObject) > 0 {
 			next, reason, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, r.body, errorObject)
