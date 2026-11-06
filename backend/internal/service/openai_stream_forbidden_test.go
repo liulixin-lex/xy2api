@@ -3,7 +3,6 @@
 package service
 
 import (
-	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -23,33 +22,61 @@ func TestOpenAIStreamForbiddenUsesSoftCooldownWithoutHTTP403Penalty(t *testing.T
 	require.False(t, openAIStream403TransientForbidden([]byte(`{"error":{"code":"invalid_api_key","status":403}}`), "invalid api key"))
 	require.False(t, openAIStream403TransientForbidden([]byte(`{"error":{"code":"content_policy_violation","status":403}}`), "policy refusal"))
 
-	req := newWebSearchReplayRequest(t)
-	account := webSearchReplayAccount(false)
-	repo := &encryptedContentAccountRepo{resilienceAccountRepo: resilienceAccountRepo{account: account}}
-	rl := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
-	upstream := &httpUpstreamRecorder{responses: []*http.Response{requestRepairFailedStream(string(payload))}}
-	svc := newOpenAIImageGenerationControlTestService(upstream)
-	svc.rateLimitService = rl
-	_, err := svc.Forward(req.ctx, req.c, account, []byte(`{"model":"gpt-5.5","stream":true,"input":"hello"}`))
-	require.Error(t, err)
-	var failoverErr *UpstreamFailoverError
-	require.True(t, errors.As(err, &failoverErr))
-	require.Equal(t, OpenAIStreamForbiddenReason, failoverErr.Reason)
-	require.Equal(t, http.StatusForbidden, failoverErr.StatusCode)
-	require.False(t, failoverErr.RetryableOnSameAccount)
-	require.Len(t, upstream.bodies, 1)
+	for _, tc := range []struct {
+		name        string
+		passthrough bool
+		wrapped401  bool
+	}{
+		{"native", false, false},
+		{"passthrough", true, false},
+		{"native wrapped 401", false, true},
+		{"passthrough wrapped 401", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := newWebSearchReplayRequest(t)
+			account := webSearchReplayAccount(tc.passthrough)
+			account.Credentials["pool_mode"] = false
+			require.False(t, account.IsPoolMode(), "exercise the rate-limit path without the pool-mode exemption")
+			repo := &encryptedContentAccountRepo{resilienceAccountRepo: resilienceAccountRepo{account: account}}
+			rl := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			counter := &countingOpenAI403CounterCache{}
+			rl.SetOpenAI403CounterCache(counter)
+			frame := string(payload)
+			wantStatus, wantWrapped := http.StatusForbidden, 0
+			if tc.wrapped401 {
+				frame = `{"type":"response.failed","response":{"error":{"type":"upstream_error","code":"401","status_code":401,"message":"invalid api key"}}}`
+				wantStatus, wantWrapped = http.StatusUnauthorized, http.StatusUnauthorized
+			}
+			upstream := &httpUpstreamRecorder{responses: []*http.Response{requestRepairFailedStream(frame)}}
+			svc := newOpenAIImageGenerationControlTestService(upstream)
+			svc.rateLimitService = rl
+			_, err := svc.Forward(req.ctx, req.c, account, []byte(`{"model":"gpt-5.5","stream":true,"input":"hello"}`))
+			require.Error(t, err)
+			var failoverErr *UpstreamFailoverError
+			require.ErrorAs(t, err, &failoverErr)
+			require.Equal(t, OpenAIStreamForbiddenReason, failoverErr.Reason)
+			require.Equal(t, wantStatus, failoverErr.StatusCode)
+			require.Equal(t, wantWrapped, failoverErr.WrappedStatus)
+			require.False(t, failoverErr.IsCredentialFailure())
+			require.False(t, failoverErr.RetryableOnSameAccount)
+			require.Len(t, upstream.bodies, 1)
+			require.False(t, req.c.Writer.Written(), "pre-output failure must remain available for failover")
+			require.Empty(t, req.rec.Body.String())
 
-	entry, ok := svc.openaiModelTransient.readEntry(account.ID, "gpt-5.5", time.Now())
-	require.True(t, ok)
-	require.Equal(t, 1, entry.failureStreak)
-	require.Zero(t, repo.errorCalls, "stream 403 must not enter RateLimitService's permanent 403 counter")
-	require.Zero(t, repo.tempCalls)
-	require.Zero(t, repo.modelRateLimitCalls)
+			require.Zero(t, counter.increments, "non-pool stream 403 must not increment the HTTP 403 counter")
+			require.Zero(t, repo.errorCalls)
+			require.Zero(t, repo.tempCalls)
+			require.Zero(t, repo.modelRateLimitCalls)
 
-	classified := ClassifyFailoverError(failoverErr)
-	require.Equal(t, resilience.CategoryTransient, classified.Category)
-	require.Equal(t, string(OpenAIStreamForbiddenReason), classified.Reason)
-	require.False(t, failoverErr.ShouldReportAccountScheduleFailure())
+			classified := ClassifyFailoverError(failoverErr)
+			require.Equal(t, resilience.CategoryTransient, classified.Category)
+			require.Equal(t, string(OpenAIStreamForbiddenReason), classified.Reason)
+			require.False(t, failoverErr.ShouldReportAccountScheduleFailure())
+			entry, ok := svc.openaiModelTransient.readEntry(account.ID, "gpt-5.5", time.Now())
+			require.True(t, ok)
+			require.Equal(t, 1, entry.failureStreak)
+		})
+	}
 }
 
 func TestOpenAIWrappedForbiddenUsesSoftCooldown(t *testing.T) {
