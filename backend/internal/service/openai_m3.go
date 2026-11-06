@@ -338,9 +338,9 @@ func (a *openAIM3Attempt) succeeded(ctx context.Context) {
 // output decision; clean EOF with output is checked separately by the reader.
 func openAIM3TerminalAccepted(terminal string, semanticOutput bool) bool {
 	switch terminal {
-	case "response.completed", "response.done", "[DONE]":
+	case "response.completed", "response.done":
 		return true
-	case "response.incomplete", "response.cancelled", "response.canceled":
+	case "response.incomplete", "response.cancelled", "response.canceled", "[DONE]":
 		return semanticOutput
 	default:
 		return false
