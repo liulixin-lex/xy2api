@@ -619,7 +619,7 @@ func recordPostOutputFailureFact(ctx context.Context, account *Account, reason s
 	}
 	proxyID, proxyName := opsUpstreamProxyAttribution(account)
 	message := "upstream stream broke after output"
-	if reason == postOutputEvent {
+	if reason == postOutputEvent || reason == postOutputModelUnavailable {
 		message = "upstream reported a failure after output"
 	}
 	st.RecordPostOutputFailureFact(resilience.PostOutputFailureFact{

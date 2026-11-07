@@ -7193,3 +7193,55 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
   - （2026-11-07 11:48 UTC 追记）用户于 2026-11-07 05:52 UTC 将 0.5.6 蓝绿部署到生产。上线 1 h 内，Codex 输出后失败率 0.04%；上一版本最后 1 h 为 0.18%，此前三天同一时段为 0.39%–6.35%。输出边界空值类失败为 0，门槛热启动正常。同时段的正式对照以当日 13–18 时数据为准。
 
 - 收尾追记（2026-11-07 13:14 UTC）：PR #206 已普通合并为 `b414da13ddf5d27c203a509273ce60e3103f720a` 并正式发布 v0.5.7；最终候选 `574d906dc` 的 CI 20/20 首次全绿，真实上游冒烟获 PM 确认。Release `42373852746` 成功，五平台附件、Linux arm64 版本与 GHCR 双架构均核验通过。上述候选中的“未合并”“冒烟进行中”及旧速览的“未部署”均为当时记录。0.5.6 已由用户部署；本次未部署 0.5.7、未固化镜像或连接生产。后续 M5、上线验收与未交付缺口仍见主记忆。
+
+
+### 2026-11-07 16:44 UTC — 0.5.5 与 0.5.4 已完成交接状态原样归档
+
+- **0.5.5 已正式发布（2026-11-06；部署追记见下）**：PR #201 已合并，发布提交 `0c3cc6f8b85e3df10dbd5238aae8eb2dcc87b44d`，标签 `v0.5.5`。零中断加密态与路由：空白占位不算输出、Codex 输出前 ping、流内包装错误帧、M3 状态类同号修复与一次换号、输出前流内 forbidden 软冷却、`resilience.*` 最小计数；另含 brotli、klauspost/compress 漏洞修复。无迁移、无新开关、无前端改动。
+  - 两路 CI 共 20 项全绿（无重跑）；Release 运行 42220535877 成功。5 平台安装包 SHA256、Linux arm64 `-version`（amd64 未在本机执行）、GHCR amd64/arm64 版本与 commit 标签均已核验，latest 指向本版。镜像固化、部署与上线验收待用户授权，遗留见“未结事项”。详细记录已归档。
+  - （2026-11-07 02:25 UTC 追记）用户另派 agent 于 2026-11-06 13:24 UTC 将 0.5.5 部署到生产，PM 只读核实了镜像版本与 revision。线上验收 tasks §4.3 判为有条件通过：核心修复生效，同时段对照没有回退的证据；“整体可见失败下降”待 0.5.6 上线后验证。
+
+- **0.5.4 已正式发布（2026-11-06；未部署）**：PR #199 已合并，发布提交2356b8b200eb567defdd6fe3e3939d5a5ec017e2，标签v0.5.4。只读MCP含29工具，默认关闭；迁移290/291随包提供，生产启用前按runbook配置最小权限并验收目标环境。
+  - 两路完整CI共20项检查全绿；Release运行42083934644成功。5平台安装包及SHA256、Linux amd64版本输出、GHCR amd64/arm64版本与commit标签均已核验，latest指向本版。生产和指定商业Host未验收；发布不等于生产启用。详细记录已归档。
+
+
+### 2026-11-07 — 0.5.5 周期操作日志原样归档
+
+### 2026-11-06 — 20261105-encrypted-routing-impl — 集成完成，最终门禁全绿，待发布授权
+
+- 请求/目标：按 FINAL（用户 11-05 全部批准）一次发布零中断方案。Claude 任 PM 调度；gpt-6-astra xhigh 负责开发（甲、乙）、测试（丙）、集成（丁）；astra 与 Opus 两路红队逆向审查。
+- 开始状态：origin/main `381687250`，分支 `feat/encrypted-routing-20261105`。
+- 完成操作：空白占位暂存与冲刷、兼容转换保留空白、按客户端选择心跳并修复直通 ticker 漏拍；E1/E2 严格校验与路由、包装 401/403 请求级终止映射；M3（槽位替换、严格增长重放、Bad 接受门槛、一次状态换号、可重试终止）；输出前流内 forbidden 软冷却；`resilience.*` 计数；`docs/GATEWAY_RESILIENCE.md`、OpenSpec `encrypted-routing-20261105`、policy literal 与目录归属同步。
+- 修改文件：`backend/internal/{handler,resilience,service}` 相关代码与测试（77 个文件，+5705/−468）、`docs/GATEWAY_RESILIENCE.md`、`docs/README.md`、`openspec/changes/encrypted-routing-20261105/`、`tools/upstream-sync/policy.json`、本文件。
+- 验证：`777597cd2` 13 项门禁全过（见当前交接状态）；`9e10b731c` handler 全量 unit 与 lint；文档提交后 docs 与干净树 audit。
+- 卡点/风险：M3 store 的 race 检查只覆盖串行路径（store 复用既有加锁的 lineage 存储）；Codex 0.166 冒烟未做。
+- 下一步：用户决定冒烟方式，并授权推送、PR、发版、镜像固化与部署；上线后按 tasks §4.3 验收。
+
+### 2026-11-06 — 20261105-encrypted-routing-impl — PR #201、CI 全绿与 Codex 0.166 冒烟
+
+- 请求/目标：用户授权推送并开 PR，以及发布前在备用机冒烟；随后要求加快进度，可加派 Opus。
+- 完成操作：普通合并 main（0.5.4）；追加依赖升级修复两条新收录漏洞；PR #201 开出，CI 20 项全绿。冒烟在 PR 头的隔离临时网关上完成，Codex 0.166 在本容器经 ssh 隧道连接；测试 Key 只经 stdin 注入，未落盘。
+- 修改文件：`backend/go.mod`、`backend/go.sum`、`docs/PROJECT_MEMORY.md`、`docs/README.md`、`tools/upstream-sync/policy.json`（合并 main）、`openspec/changes/encrypted-routing-20261105/tasks.md`。
+- 验证：合并后本地 build、vet、定向 514 项、MCP unit；依赖升级后 govulncheck 可达漏洞 0、三包 unit；PR CI 20/20；冒烟结果见当前交接状态。
+- 卡点/风险：M3 未能在真实上游触发，仅有单测与 Forward 衔接回归证据；心跳相邻间隔偶见超过设定值。
+- 下一步：用户授权合并、发版、镜像固化与部署；上线后按 tasks §4.3 验收。
+
+### 2026-11-06 13:20 UTC — 20261106-release055-encrypted-routing — PR #201 合并与 0.5.5 发布完成
+
+- 请求/目标：用户授权 PR #201 CI 全绿后合并，并正式发版 0.5.5；不含生产部署、镜像固化、连接生产服务器或数据库、启用 MCP、修改生产设置或合并其他 PR。PM 调度，Claude 执行。
+- 开始状态：`feat/encrypted-routing-20261105` 头 `355666e0c`（文档提交，CI 运行中），工作树干净；origin/main `5d8b06a1a`。
+- 完成操作：
+  - 版本提交 `7324fc585`（`chore(release): bump version to 0.5.5`）：VERSION 与 `UPSTREAM_BASE.json` 改为 0.5.5，`docs/README.md` 中本变更的状态改为随 0.5.5 发布。`docs_consistency.json` 的 pins 与 `policy.json` 无产品版本 literal，无需同步。
+  - 新头 20 项检查全绿，无重跑：push CI 42216514599、PR CI 42216522927、Security Scan 42216514521 与 42216522960。
+  - 12:48 UTC 以 `--match-head-commit` 普通合并，合并提交 `0c3cc6f8b85e3df10dbd5238aae8eb2dcc87b44d` 与已测 head 的树相同（`100a726ea`）。
+  - annotated `v0.5.5`（标签对象 `ff590f85d036c4a6118ccb69e74cd5b085236ab9`，`--cleanup=verbatim`）指向合并提交，正文为面向用户的中文要点；未强推或改写 tag。
+  - 本任务在“当前交接状态”的小节和“进行中的工作”的条目已原样移到归档文件；遗留并入“未结事项”。
+- 修改文件：本文件、`PROJECT_MEMORY_ARCHIVE.md`、`openspec/changes/encrypted-routing-20261105/tasks.md`。
+- 验证：
+  - 版本提交：提交前 docs 检查与 `git diff --check`，提交后干净树 `sync.py audit`；按 release.yml 的 verify-version 逻辑本地核对 tag 格式、commit、VERSION 与兼容版本（临时本地 tag 已删除）。
+  - Release 42220535877：verify-version、build-frontend、release 均成功；正式版非 draft、非 prerelease，为 latest，正文保留 Markdown。
+  - 产物：5 平台安装包与 checksums.txt 的 SHA256 及 API digest 一致；Linux arm64 `-version` 报告 0.5.5、兼容 0.2.15 与合并提交；Linux amd64 未在本机执行，只读确认内嵌合并提交。
+  - GHCR：`0.5.5`、`latest`、`0.5`、`0` 为同一 index `sha256:b87983ac86856ddc25f02512ad939c9b32e0d35a57b8768e587576ea94d723db`；linux/amd64 `sha256:cfdd9b4b936f12100d924c0d0c4a125f26eafdc50e573d4563a46c106629d8a6`，linux/arm64 `sha256:f211a37f0a212844ed7bfebafebe78040ed9c9b337bc7e66de105af416506b0e`，version 与 revision 标签正确；`0.5.4` 摘要未变。
+  - 下载副本与解包目录已删除。本 PR：docs 检查与干净树 audit。
+- 卡点/风险：无发布阻断。未连接生产、未部署、未固化镜像。
+- 下一步：镜像固化、部署与上线验收待用户授权，见“未结事项”。

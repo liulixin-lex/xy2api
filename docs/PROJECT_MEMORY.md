@@ -6,12 +6,23 @@
 
 ## 当前交接状态
 
-- **0.5.5 已正式发布（2026-11-06；部署追记见下）**：PR #201 已合并，发布提交 `0c3cc6f8b85e3df10dbd5238aae8eb2dcc87b44d`，标签 `v0.5.5`。零中断加密态与路由：空白占位不算输出、Codex 输出前 ping、流内包装错误帧、M3 状态类同号修复与一次换号、输出前流内 forbidden 软冷却、`resilience.*` 最小计数；另含 brotli、klauspost/compress 漏洞修复。无迁移、无新开关、无前端改动。
-  - 两路 CI 共 20 项全绿（无重跑）；Release 运行 42220535877 成功。5 平台安装包 SHA256、Linux arm64 `-version`（amd64 未在本机执行）、GHCR amd64/arm64 版本与 commit 标签均已核验，latest 指向本版。镜像固化、部署与上线验收待用户授权，遗留见“未结事项”。详细记录已归档。
-  - （2026-11-07 02:25 UTC 追记）用户另派 agent 于 2026-11-06 13:24 UTC 将 0.5.5 部署到生产，PM 只读核实了镜像版本与 revision。线上验收 tasks §4.3 判为有条件通过：核心修复生效，同时段对照没有回退的证据；“整体可见失败下降”待 0.5.6 上线后验证。
+### 0.5.8 候选（2026-11-07 16:51 UTC；Q2b 门禁与记忆登记完成，PR #210 已开，CI 与冒烟待完成）
 
-- **0.5.4 已正式发布（2026-11-06；未部署）**：PR #199 已合并，发布提交2356b8b200eb567defdd6fe3e3939d5a5ec017e2，标签v0.5.4。只读MCP含29工具，默认关闭；迁移290/291随包提供，生产启用前按runbook配置最小权限并验收目标环境。
-  - 两路完整CI共20项检查全绿；Release运行42083934644成功。5平台安装包及SHA256、Linux amd64版本输出、GHCR amd64/arm64版本与commit标签均已核验，latest指向本版。生产和指定商业Host未验收；发布不等于生产启用。详细记录已归档。
+- **背景**：分支 `feat/enc-routing-058-20261107`。Q2b 代码头 `56c931c3f`；已合入 main 文档提交 `8a026d706`，得到合并提交 `90ac38d13`；版本提交 `b3692b32b`，版本 0.5.8、兼容基线 0.2.15。记忆登记后推送并创建 PR #210，base 为 main，普通 PR。
+- **目标**：修复原生和直通 Responses 流式请求在开始输出前收到模型不存在或暂不可用错误时直接失败的问题；改动是通用机制，不针对单一上游。
+- **要求与约束**：无迁移、无新开关、无前端改动；部署由用户执行。
+- **已完成**：
+  - Q2b 识别 HTTP 和流内事件中的结构化 `model_not_found`（含受支持的嵌套错误信封），接入已有模型不可用出口；输出前透明换号并为账号×模型加冷却。只有默认状态下模型不存在映射为 404，显式状态保持原值。
+  - 输出后流不能重放，只推进账号×模型临时计数，每次尝试只记一次 `model_unavailable_after_output` 并标记本轮失败；不记会话失败、不触发会话守卫或账号级冷却。
+  - 后端 13 项全量门禁通过：unit 31,311 PASS / 38 SKIP / 0 FAIL，integration 16,649 PASS / 41 SKIP / 0 FAIL，CI race 547 PASS，CI 默认标签 lint 0，unit 增量 lint 0（以 `b414da13d` 为基准）。前端相对 `b414da13d` 无差异，沿用参照轮四项结果。
+  - Q2b 三个开发提交经两路红队签字，无未关闭的 P0–P2。
+  - 记忆登记提交只改记忆文件及原样归档；文档一致性、diff 检查和干净树 upstream audit 通过。GitHub 读回确认 PR #210 使用审定正文，目标为 main，非 draft。
+- **未完成**：
+  1. 等待 PR #210 新头的 GitHub CI 全部通过。
+  2. 等待真实上游冒烟完成并由 PM 确认。
+  3. CI 全绿且冒烟经 PM 确认后，按 PM 后续指令普通合并、打 tag 和正式发布。
+- **卡点与风险**：Q8（输出前只有裸 `error` 事件即结束时换号）和 M5 均不含在 0.5.8，列入 0.5.9 后续；M5 是否进入待 24 h 数据裁决。已知缺口见 PR 正文。
+- **关键位置与授权**：门禁报告在任务目录 `gates/56c931c3f.md`；记忆登记来源为 `MEMORY_ENTRY_058.md`。用户已授权推送、开 PR、CI、真实上游冒烟、合并、tag 与发版；部署由用户执行。
 
 - **门槛 v3 实施（2026-11-04 14:50 UTC；PR #194 已合并，main `746ec14fc`；用户授权发版 0.5.2，版本准备中，未部署）**：分支 `feat/gate-v3-20261104`，CI 20 项全绿（pull_request 运行里 macOS `shell` 因排不到机器被取消，重跑后通过）。0.5.2 包含 #191–#194，迁移新增 289。部署需单独授权。
   - 范围：门槛 v3、判慢让位、P1-B、同站暂停、`usage_logs.attempt_first_output_ms`（迁移 289）、低倍率优先分组范围、前端；另含用户追加的会话状态两条约束：
@@ -31,7 +42,7 @@
   - （20:17 UTC 追记，collab-plaintext-impl）预检 2a/2b 已在实施任务中经用户授权完成；实施已随 0.5.3 发布（PR #196），实施记录已归档，遗留见“未结事项”。
 - **Claude 判慢让位红队 A r4（2026-11-03 13:20 UTC）**：`737e7c7e4` 的 r3 P1 已闭合，签字已追加至本地 `implementation/redteam_astra_r2.md`；原 overlay 与正式回归均新过旧失败，目标树干净。登记已原样归档；只读复核未改代码、未提交。
 
-### 版本与环境速览（2026-11-07 13:51 UTC 核实；0.5.7 已上线）
+### 版本与环境速览（2026-11-07 16:44 UTC 核实；0.5.7 已上线，0.5.8 候选）
 
 - 最新产品版本 XY2API v0.5.7（2026-11-07 正式发布），PR #206 普通合并，发布提交 `b414da13ddf5d27c203a509273ce60e3103f720a`，annotated tag `v0.5.7`。Release 运行 `42373852746` 首次成功，正式版、非 draft、非 prerelease，当前为 latest；5 平台包及 SHA256/API digest、Linux arm64 `-version` 和 GHCR 双架构 version/revision 已核验。兼容基线仍为 Sub2API 0.2.15，无新迁移、无新开关；前端仅更新质量门槛说明。0.5.7 已于 2026-11-07 13:12:11 UTC 经后台在线更新上线，镜像未固化（见“生产”一行）。
 - 0.5.6 已由用户于 2026-11-07 05:52 UTC 蓝绿部署；PM 的上线 1 h 快照为 Codex 输出后失败率 0.04%，上一版本最后 1 h 为 0.18%，此前三天同一时段为 0.39%–6.35%。输出边界空值类失败为 0，门槛热启动正常；正式同时段验收继续按 PROD_ACCEPT 观察。这些事实来自先前 PM 核验，本次发布未重新查询生产。
@@ -81,7 +92,14 @@
   - 0.5.7 已正式发布，并已由用户于 2026-11-07 13:12:11 UTC 经后台在线更新上线（镜像标签仍为 0.5.6，固化另行安排）；文档交接 PR 只开出待审，合并需用户另行授权。上线后按 PROD_ACCEPT 观察 G2c 的输出边界、透明换号、首字与门槛迁移，生产验收由用户另行安排。
   - 合并前独立条件均已满足：最终代码头 `d48343814` 后端 13 项全过；前端相对 `75f571cde` 无差异，沿用 488 文件 / 3,822 用例及其他三项通过结果；最终文档头 `574d906dc` 的 CI 20/20 首次全绿；真实上游冒烟经 PM 确认通过。Codex CLI 0.166 和 Chat 流式各覆盖 3 个上游；布尔占位暂存约 1.2 s 后逐字节释放，重复开场事件透明转发且客户端正常完成。
   - 已知缺口：Q7 尚未接入 Chat 裸 `error` 事件及非流式缓冲路径；Chat 兼容入口和 WebSocket 尚未装配 M3，加密会话守卫继续生效。0.5.6 遗留的模型不可用裸流内错误、关闭 `prelude_staging` 时的兼容 ping 和槽位等待 ping 问题仍保留。
-  - M5 不在 0.5.7。以上线时刻 2026-11-07 13:12:11 UTC 为起点，用 P1B-OBS 数据于 11-07 19:12 UTC 初看（6 h）、11-08 13:12 UTC 裁决（24 h）是否发布 0.5.8；提前触发条件和数据门控项继续按下列记录执行。
+  - （2026-11-07 14:12 UTC 追记）0.5.7 上线 1 h 验收（13:12–14:12 UTC）：Codex 可见失败率 0.54%，与 0.5.6 持平；14 时这一整小时为 0.41%，是当天各小时中最低的。改绑守卫拦截为 0；`sticky_bypass` 的 unrecorded 为 0；门槛 tier 事件从每小时 8.8 次降到 1 次。首字截止换号率约 3.3%，其中约 90% 换号后恢复；`keepalive_committed` 约为原来的 5.8 倍，符合 G2c 预期。
+- M5 不在 0.5.8；按 0.5.7 上线时刻 2026-11-07 13:12:11 UTC 计算，使用 P1B-OBS 数据在 11-08 13:12 UTC 作 24 h 裁决，决定是否进入 0.5.9。
+
+- **0.5.9 候选与上线观察**：
+  - Q8：输出前仅收到裸 `error` 事件即结束时换号，待两路复审后集成。
+  - M5：根据 0.5.7 上线后 24 h 的 P1B-OBS 数据决定是否纳入。
+  - 新登记 P3：生图 generations 和 edits 请求的 prompt 为空时，在选号前直接返回客户端 400，归因记为 client。
+  - 观察同一请求内中转报来的 `stream_timeout` 反复换号；该项随 Q8 在 0.5.9 一并评估。
 
 - **0.5.6 发布后的验收与后续工作**：
   - 0.5.6 已由用户部署，PM 完成 1 h 快照与热启动核查；正式同时段验收继续按 PROD_ACCEPT 观察。文档交接 PR #204 已于 2026-11-07 08:07 UTC 普通合并为 `a98c6e797`。
@@ -141,7 +159,7 @@
 
 - **20261107-release057-docs-handoff**（2026-11-07 13:14 UTC）：0.5.7 已正式发布并完成制品核验；本任务仅提交两份记忆文档中的发布登记、版本表与原样归档。文档交接 PR 只开出待审，合并需用户另行授权；不部署、不固化镜像。
 
-- **20261106-encrypted-routing-followups**（2026-11-07 13:14 UTC）：0.5.7 已随 PR #206 发布，集成和发布前候选登记原文已归档。后续继续由 PM 跟进上线验收与 M5 数据裁决（0.5.8 候选），其他未交付项见“未结事项”。
+- **20261106-encrypted-routing-followups**（2026-11-07 16:51 UTC）：0.5.7 已上线且 1 h 验收通过；0.5.8 候选只含 Q2b，代码头 `56c931c3f` 已通过后端 13 项门禁，版本提交为 `b3692b32b`。记忆登记和 PR #210 已完成，等待新头 CI 与真实上游冒烟；Q8、M5 顺延至 0.5.9 评估，详见“当前交接状态”和“未结事项”。
 
 - **20261104-release0502-handoff**（2026-11-04 17:22 UTC，发版接力）：用户再次授权继续 0.5.2 发版（包含 #191–#194，新增迁移 289），不部署生产。
   - 版本 PR #195：head `2d41304954e51cf62809cbf38ac8a44cd6fa34ff`，base `746ec14fc`；除两个 macOS `shell` 检查取消外均通过，GitHub Actions 事故已恢复。
@@ -1437,45 +1455,6 @@ pnpm --dir frontend run build
 - 下一步：发布产物可供用户使用；生产部署与MCP启用需独立授权和部署验收。详细发布前登记已原样归档，本次交接文档PR不改变v0.5.4发布提交。
 
 
-### 2026-11-06 — 20261105-encrypted-routing-impl — 集成完成，最终门禁全绿，待发布授权
-
-- 请求/目标：按 FINAL（用户 11-05 全部批准）一次发布零中断方案。Claude 任 PM 调度；gpt-6-astra xhigh 负责开发（甲、乙）、测试（丙）、集成（丁）；astra 与 Opus 两路红队逆向审查。
-- 开始状态：origin/main `381687250`，分支 `feat/encrypted-routing-20261105`。
-- 完成操作：空白占位暂存与冲刷、兼容转换保留空白、按客户端选择心跳并修复直通 ticker 漏拍；E1/E2 严格校验与路由、包装 401/403 请求级终止映射；M3（槽位替换、严格增长重放、Bad 接受门槛、一次状态换号、可重试终止）；输出前流内 forbidden 软冷却；`resilience.*` 计数；`docs/GATEWAY_RESILIENCE.md`、OpenSpec `encrypted-routing-20261105`、policy literal 与目录归属同步。
-- 修改文件：`backend/internal/{handler,resilience,service}` 相关代码与测试（77 个文件，+5705/−468）、`docs/GATEWAY_RESILIENCE.md`、`docs/README.md`、`openspec/changes/encrypted-routing-20261105/`、`tools/upstream-sync/policy.json`、本文件。
-- 验证：`777597cd2` 13 项门禁全过（见当前交接状态）；`9e10b731c` handler 全量 unit 与 lint；文档提交后 docs 与干净树 audit。
-- 卡点/风险：M3 store 的 race 检查只覆盖串行路径（store 复用既有加锁的 lineage 存储）；Codex 0.166 冒烟未做。
-- 下一步：用户决定冒烟方式，并授权推送、PR、发版、镜像固化与部署；上线后按 tasks §4.3 验收。
-
-### 2026-11-06 — 20261105-encrypted-routing-impl — PR #201、CI 全绿与 Codex 0.166 冒烟
-
-- 请求/目标：用户授权推送并开 PR，以及发布前在备用机冒烟；随后要求加快进度，可加派 Opus。
-- 完成操作：普通合并 main（0.5.4）；追加依赖升级修复两条新收录漏洞；PR #201 开出，CI 20 项全绿。冒烟在 PR 头的隔离临时网关上完成，Codex 0.166 在本容器经 ssh 隧道连接；测试 Key 只经 stdin 注入，未落盘。
-- 修改文件：`backend/go.mod`、`backend/go.sum`、`docs/PROJECT_MEMORY.md`、`docs/README.md`、`tools/upstream-sync/policy.json`（合并 main）、`openspec/changes/encrypted-routing-20261105/tasks.md`。
-- 验证：合并后本地 build、vet、定向 514 项、MCP unit；依赖升级后 govulncheck 可达漏洞 0、三包 unit；PR CI 20/20；冒烟结果见当前交接状态。
-- 卡点/风险：M3 未能在真实上游触发，仅有单测与 Forward 衔接回归证据；心跳相邻间隔偶见超过设定值。
-- 下一步：用户授权合并、发版、镜像固化与部署；上线后按 tasks §4.3 验收。
-
-### 2026-11-06 13:20 UTC — 20261106-release055-encrypted-routing — PR #201 合并与 0.5.5 发布完成
-
-- 请求/目标：用户授权 PR #201 CI 全绿后合并，并正式发版 0.5.5；不含生产部署、镜像固化、连接生产服务器或数据库、启用 MCP、修改生产设置或合并其他 PR。PM 调度，Claude 执行。
-- 开始状态：`feat/encrypted-routing-20261105` 头 `355666e0c`（文档提交，CI 运行中），工作树干净；origin/main `5d8b06a1a`。
-- 完成操作：
-  - 版本提交 `7324fc585`（`chore(release): bump version to 0.5.5`）：VERSION 与 `UPSTREAM_BASE.json` 改为 0.5.5，`docs/README.md` 中本变更的状态改为随 0.5.5 发布。`docs_consistency.json` 的 pins 与 `policy.json` 无产品版本 literal，无需同步。
-  - 新头 20 项检查全绿，无重跑：push CI 42216514599、PR CI 42216522927、Security Scan 42216514521 与 42216522960。
-  - 12:48 UTC 以 `--match-head-commit` 普通合并，合并提交 `0c3cc6f8b85e3df10dbd5238aae8eb2dcc87b44d` 与已测 head 的树相同（`100a726ea`）。
-  - annotated `v0.5.5`（标签对象 `ff590f85d036c4a6118ccb69e74cd5b085236ab9`，`--cleanup=verbatim`）指向合并提交，正文为面向用户的中文要点；未强推或改写 tag。
-  - 本任务在“当前交接状态”的小节和“进行中的工作”的条目已原样移到归档文件；遗留并入“未结事项”。
-- 修改文件：本文件、`PROJECT_MEMORY_ARCHIVE.md`、`openspec/changes/encrypted-routing-20261105/tasks.md`。
-- 验证：
-  - 版本提交：提交前 docs 检查与 `git diff --check`，提交后干净树 `sync.py audit`；按 release.yml 的 verify-version 逻辑本地核对 tag 格式、commit、VERSION 与兼容版本（临时本地 tag 已删除）。
-  - Release 42220535877：verify-version、build-frontend、release 均成功；正式版非 draft、非 prerelease，为 latest，正文保留 Markdown。
-  - 产物：5 平台安装包与 checksums.txt 的 SHA256 及 API digest 一致；Linux arm64 `-version` 报告 0.5.5、兼容 0.2.15 与合并提交；Linux amd64 未在本机执行，只读确认内嵌合并提交。
-  - GHCR：`0.5.5`、`latest`、`0.5`、`0` 为同一 index `sha256:b87983ac86856ddc25f02512ad939c9b32e0d35a57b8768e587576ea94d723db`；linux/amd64 `sha256:cfdd9b4b936f12100d924c0d0c4a125f26eafdc50e573d4563a46c106629d8a6`，linux/arm64 `sha256:f211a37f0a212844ed7bfebafebe78040ed9c9b337bc7e66de105af416506b0e`，version 与 revision 标签正确；`0.5.4` 摘要未变。
-  - 下载副本与解包目录已删除。本 PR：docs 检查与干净树 audit。
-- 卡点/风险：无发布阻断。未连接生产、未部署、未固化镜像。
-- 下一步：镜像固化、部署与上线验收待用户授权，见“未结事项”。
-
 ### 2026-11-07 11:48 UTC — 20261106-encrypted-routing-followups — 0.5.7 集成与全量门禁完成，PR #206 已开，冒烟进行中
 
 - 请求/目标：用户在 0.5.6 上线后要求连接生产收集新数据，并继续规划、开工剩余任务；所有改动须适配普遍上游。
@@ -1515,3 +1494,23 @@ pnpm --dir frontend run build
 - 验证：`python3 tools/check_docs_consistency.py`；`git diff` 自查无主机、域名、路径、容器名、账号等信息。
 - 卡点/风险：镜像未固化，容器重建会回到 0.5.6。
 - 下一步：等用户授权后推送到 PR #207；镜像固化由用户安排；M5 按 19:12 / 13:12 时点评估。
+
+### 2026-11-07 16:44 UTC — 20261106-encrypted-routing-followups — 0.5.8（Q2b）候选准备与记忆登记
+
+- 请求/目标：按用户授权准备只含 Q2b 的 0.5.8 候选；部署由用户执行。
+- 开始状态：origin/main `8a026d706`；Q2b 门禁代码头 `56c931c3f`。
+- 完成操作：合入 main 文档并生成合并提交 `90ac38d13`；版本提交 `b3692b32b`，版本 0.5.8、兼容 0.2.15；按记忆维护规范更新候选状态、0.5.7 验收追记、未结事项和进行中的工作，并归档已结束的较早交接与操作日志。
+- 修改文件：更新 `docs/PROJECT_MEMORY.md`；按记忆维护规范将已结束的交接状态和较早日志原样归档至 `docs/PROJECT_MEMORY_ARCHIVE.md`。
+- 验证：Q2b 后端 13 项和本机 unit 增量 lint 通过；登记后文档一致性与 diff 检查通过，干净树 upstream audit 随后执行。
+- 卡点/风险：推送、PR 创建、CI 与真实上游冒烟尚待完成。
+- 下一步：推送分支、创建 base 为 main 的普通 PR，并跟踪 CI；冒烟由 PM 另行安排。合并和发版等待 PM 后续指令。
+
+### 2026-11-07 16:51 UTC — 20261106-encrypted-routing-followups — 0.5.8 候选 PR #210 已开，CI 运行中
+
+- 请求/目标：用户授权推送 Q2b 候选、创建普通 PR 并启动 CI；合并、打 tag 和发版等待 CI、冒烟及后续指令。
+- 开始状态：分支 `feat/enc-routing-058-20261107`；版本提交 `b3692b32b`，记忆登记提交 `a196ec098`。
+- 完成操作：按指定 HTTPS 凭据方式推送分支，创建 PR #210（base `main`，非 draft），使用已审定的 `/tmp/pr_058_body.md`；GitHub 读回确认 PR 正文和 base。
+- 修改文件：本次只更新 `docs/PROJECT_MEMORY.md` 的交接状态和工作进度。
+- 验证：`gh auth status` 认证有效；PR head 与推送分支一致。push/PR 检查已启动，当前部分通过、其余进行中。
+- 卡点/风险：等待 CI 全绿以及 PM 确认真实上游冒烟。
+- 下一步：跟踪 PR #210 当前头检查；待 CI、冒烟均通过后等待 PM 的合并与发版指令。部署由用户执行。
