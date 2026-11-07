@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -229,6 +231,79 @@ type keepaliveFailWriter struct{ gin.ResponseWriter }
 
 func (w *keepaliveFailWriter) Write([]byte) (int, error) {
 	return 0, context.Canceled
+}
+
+type keepaliveShortWriter struct {
+	gin.ResponseWriter
+	err error
+}
+
+func (w *keepaliveShortWriter) Write(p []byte) (int, error) {
+	if len(p) > 1 {
+		p = p[:1]
+	}
+	n, err := w.ResponseWriter.Write(p)
+	if err == nil {
+		err = w.err
+	}
+	return n, err
+}
+
+func TestPreOutputKeepaliveShortWriteStopsAutomaticBeats(t *testing.T) {
+	for _, tc := range []struct {
+		name, protocol string
+		codex          bool
+	}{
+		{"compact", "", false},
+		{"responses_comment", PreOutputProtocolResponses, false},
+		{"responses_ping", PreOutputProtocolResponses, true},
+		{"chat", PreOutputProtocolChat, false},
+		{"messages", PreOutputProtocolAnthropic, false},
+	} {
+		for _, writeErr := range []error{nil, io.ErrClosedPipe} {
+			t.Run(tc.name+"/write_error="+fmtBool(writeErr != nil), func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					w := newGWWriter()
+					c, _ := gin.CreateTestContext(w)
+					c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+					if tc.codex {
+						c.Request.Header.Set("originator", "codex_cli_rs")
+					}
+					c.Writer = &keepaliveShortWriter{ResponseWriter: c.Writer, err: writeErr}
+					c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), resilience.NewRequestState()))
+					InstallDeliveryTracking(c, time.Now())
+					var stop func()
+					if tc.protocol == "" {
+						stop = startOpenAISSEKeepalive(c, 5*time.Second)
+					} else {
+						stop = StartPreOutputKeepalive(c, tc.protocol, 5*time.Second, 5*time.Second)
+					}
+					defer stop()
+					time.Sleep(5 * time.Second)
+					synctest.Wait()
+					require.Len(t, w.Body(), 1)
+					require.Equal(t, 1, OpenAICompactKeepaliveAdjustedWrittenSize(c), "the partial frame is not deductible")
+					require.True(t, openAIStreamClientOutputStarted(c, false), "partial delivery prevents replay")
+					only, tracked := DeliveryOnlyHeartbeats(c)
+					require.True(t, tracked)
+					require.False(t, only)
+					k := keepaliveFrom(c)
+					k.mu.Lock()
+					closed, stopped, heartbeatBytes := k.closed, k.stopped, k.bytes
+					k.mu.Unlock()
+					require.True(t, closed)
+					require.True(t, stopped)
+					require.Zero(t, heartbeatBytes)
+					before := w.Body()
+					startOpenAISSEKeepalive(c, 5*time.Second)
+					ResumeCommittedPreOutputKeepalive(c, 5*time.Second)
+					time.Sleep(20 * time.Second)
+					synctest.Wait()
+					require.Equal(t, before, w.Body(), "no automatic beat or resume after a short write")
+				})
+			})
+		}
+	}
 }
 
 func TestPreOutputResponsesHeartbeatDispatchesOneEventPerBeat(t *testing.T) {

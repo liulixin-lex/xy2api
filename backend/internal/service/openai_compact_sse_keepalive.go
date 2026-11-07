@@ -209,13 +209,16 @@ func (k *openAICompactSSEKeepalive) beat(generation uint64) bool {
 		frame = []byte(": keepalive\n\n")
 	}
 	n, err := k.writer.Write(frame)
-	k.bytes += n
-	k.lastWrite = time.Now()
+	if err == nil && n != len(frame) {
+		err = io.ErrShortWrite
+	}
 	if err != nil {
 		k.closed = true
 		k.markStoppedLocked()
 		return false
 	}
+	k.bytes += n
+	k.lastWrite = time.Now()
 	k.writer.Flush()
 	return true
 }
