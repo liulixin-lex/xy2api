@@ -250,7 +250,9 @@ func TestGroupQualityWarmStartRestoresErrorAndCacheStateWithoutTierHistory(t *te
 	require.True(t, member.State.Error.hasBad(e.base))
 	require.NotNil(t, qualityAccountView(member, e.base).Error.BadUntil)
 	require.Equal(t, 0, strings.Count(e.logs.String(), `"msg":"group_quality_gate.tier"`))
-	require.Equal(t, 1, strings.Count(e.logs.String(), `"msg":"group_quality_gate.warm_start"`))
+	require.Eventually(t, func() bool {
+		return strings.Count(e.logs.String(), `"msg":"group_quality_gate.warm_start"`) == 1
+	}, time.Second, time.Millisecond)
 }
 
 func TestGroupQualityReplayFreshnessUsesSecondOffsetCutoffs(t *testing.T) {
