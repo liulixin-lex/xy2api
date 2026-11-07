@@ -131,13 +131,20 @@ func TestAnthropicStagingUsesRemainingBudget(t *testing.T) {
 	}
 }
 
-type anthropicShortWriter struct{ gin.ResponseWriter }
+type anthropicShortWriter struct {
+	gin.ResponseWriter
+	err error
+}
 
 func (w *anthropicShortWriter) Write(p []byte) (int, error) {
 	if len(p) > 3 {
 		p = p[:3]
 	}
-	return w.ResponseWriter.Write(p)
+	n, err := w.ResponseWriter.Write(p)
+	if err == nil {
+		err = w.err
+	}
+	return n, err
 }
 
 func (w *anthropicShortWriter) WriteString(p string) (int, error) { return w.Write([]byte(p)) }
@@ -163,7 +170,7 @@ func TestAnthropicStageBoundsAndDeliveryAccounting(t *testing.T) {
 
 	// A partial event release is irreversible even when only its opening bytes fit.
 	c2, _ := compatStreamContext("/v1/messages", `{}`)
-	c2.Writer = &anthropicShortWriter{c2.Writer}
+	c2.Writer = &anthropicShortWriter{ResponseWriter: c2.Writer}
 	c2.Header("Content-Type", "text/event-stream")
 	c2.Request = c2.Request.WithContext(resilience.WithRequestState(c2.Request.Context(), resilience.NewRequestState()))
 	InstallDeliveryTracking(c2, time.Now())
@@ -178,7 +185,7 @@ func TestAnthropicStageBoundsAndDeliveryAccounting(t *testing.T) {
 
 	// An incomplete comment cannot be replayed safely either.
 	c3, _ := compatStreamContext("/v1/messages", `{}`)
-	c3.Writer = &anthropicShortWriter{c3.Writer}
+	c3.Writer = &anthropicShortWriter{ResponseWriter: c3.Writer}
 	stage3 := newAnthropicStreamStage(c3.Request.Context(), c3, func() {})
 	defer stage3.close()
 	require.ErrorIs(t, stage3.heartbeat(""), io.ErrShortWrite)
@@ -194,4 +201,41 @@ func TestAnthropicStageBoundsAndDeliveryAccounting(t *testing.T) {
 	_, err = stage4.submit("event: error\ndata: " + streamErrorEvent("overloaded_error") + "\n\n")
 	require.ErrorIs(t, err, context.Canceled)
 	require.Empty(t, rec4.Body.String())
+}
+
+func TestAnthropicStageHeartbeatWriteFailurePreservesDelivery(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, keepalive := range []bool{false, true} {
+		for _, tracking := range []bool{false, true} {
+			for _, writeErr := range []error{nil, io.ErrClosedPipe} {
+				name := "keepalive=" + fmtBool(keepalive) + "/tracking=" + fmtBool(tracking) + "/write_error=" + fmtBool(writeErr != nil)
+				t.Run(name, func(t *testing.T) {
+					c, rec := compatStreamContext("/v1/messages", `{}`)
+					c.Writer = &anthropicShortWriter{ResponseWriter: c.Writer, err: writeErr}
+					c.Header("Content-Type", "text/event-stream")
+					if tracking {
+						c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), resilience.NewRequestState()))
+						InstallDeliveryTracking(c, time.Now())
+					}
+					if keepalive {
+						stop := StartPreOutputKeepalive(c, PreOutputProtocolAnthropic, time.Hour, time.Hour)
+						defer stop()
+					}
+					stage := newAnthropicStreamStage(c.Request.Context(), c, func() {})
+					defer stage.close()
+					wantErr := writeErr
+					if wantErr == nil {
+						wantErr = io.ErrShortWrite
+					}
+					require.ErrorIs(t, stage.heartbeat(""), wantErr)
+					require.Equal(t, ": p", rec.Body.String())
+					require.Equal(t, 3, OpenAICompactKeepaliveAdjustedWrittenSize(c), "an incomplete ping must not be deducted")
+					require.True(t, openAIStreamClientOutputStarted(c, false), "a partial frame must prevent replay")
+					if tracking {
+						require.Equal(t, int64(3), deliveryWriterFrom(c).deliveredBytes())
+					}
+				})
+			}
+		}
+	}
 }

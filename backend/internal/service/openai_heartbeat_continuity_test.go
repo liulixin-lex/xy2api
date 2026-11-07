@@ -64,8 +64,10 @@ func runProtocolHeartbeatHandoff(t *testing.T, name string, atHeartbeatBoundary 
 	defer stop()
 	start := time.Now()
 	time.Sleep(5 * time.Second)
+	// At the boundary the request beat must finish before the stream takes
+	// ownership. Sharing a deadline alone does not order the two goroutines.
+	synctest.Wait()
 	if !atHeartbeatBoundary {
-		synctest.Wait()
 		time.Sleep(3500 * time.Millisecond)
 		synctest.Wait()
 	}
