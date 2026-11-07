@@ -3,6 +3,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -97,17 +98,30 @@ func TestPreludeReleaseEventSchemaFromStream(t *testing.T) {
 
 func TestPreludeReleaseEventSchemaScope(t *testing.T) {
 	for _, tc := range []struct {
-		event, payload, want string
+		name, event, payload, want string
 	}{
-		{"response.output_item.done", `{"type":"response.output_item.done","item":{"type":"reasoning","encrypted_content":"private"}}`, ""},
-		{"response.output_item.custom", `{"type":"response.output_item.custom","item":{"type":"reasoning"}}`, "item:object,type:string"},
-		{"response.output_text.delta", `{"type":"response.output_text.delta","delta":"private"}`, "delta:string,type:string"},
-		{"response.content_part.added", `{"type":"response.content_part.added","part":{"type":"refusal","refusal":"private"}}`, "part:object,type:string"},
+		{"output_item_added_standard", "response.output_item.added", `{"type":"response.output_item.added","sequence_number":0,"output_index":0,"item":{"type":"reasoning"}}`, ""},
+		{"output_item_added_extra", "response.output_item.added", `{"type":"response.output_item.added","sequence_number":0,"output_index":0,"item":{"type":"reasoning"},"sub2api_placeholder":true}`, "item:object,output_index:number,sequence_number:number,sub2api_placeholder:boolean,type:string"},
+		{"output_item_done_standard", "response.output_item.done", `{"type":"response.output_item.done","sequence_number":0,"output_index":0,"item":{"type":"reasoning"}}`, ""},
+		{"output_item_done_no_sequence", "response.output_item.done", `{"type":"response.output_item.done","item":{"type":"reasoning","encrypted_content":"private"}}`, ""},
+		{"output_item_unknown", "response.output_item.custom", `{"type":"response.output_item.custom","item":{"type":"reasoning"}}`, "item:object,type:string"},
+		{"output_text_delta", "response.output_text.delta", `{"type":"response.output_text.delta","delta":"private"}`, "delta:string,type:string"},
+		{"content_part_added", "response.content_part.added", `{"type":"response.content_part.added","part":{"type":"refusal","refusal":"private"}}`, "part:object,type:string"},
 	} {
-		t.Run(tc.event, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			state := resilience.NewRequestState()
 			releaseOpenAIPrelude(state, tc.event, []byte(tc.payload))
 			require.Equal(t, tc.want, state.PreludeTrace().EventKeys)
+			fields := resilience.EventFields(resilience.WithRequestState(context.Background(), state))
+			logged := map[string]any{}
+			for i := 0; i < len(fields); i += 2 {
+				logged[fields[i].(string)] = fields[i+1]
+			}
+			if tc.want == "" {
+				require.NotContains(t, logged, "prelude_release_event_keys")
+			} else {
+				require.Equal(t, tc.want, logged["prelude_release_event_keys"])
+			}
 		})
 	}
 }

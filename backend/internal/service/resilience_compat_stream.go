@@ -253,10 +253,7 @@ func releaseOpenAIPrelude(state *resilience.RequestState, eventType string, payl
 	var envelope map[string]json.RawMessage
 	var object map[string]json.RawMessage
 	if json.Unmarshal(payload, &envelope) == nil {
-		// Only the two output_item event types explicitly handled by
-		// ResponsesEventOutputDisposition omit the top-level schema. Other
-		// release events, including unknown output_item.* types, retain it.
-		if eventType != "response.output_item.added" && eventType != "response.output_item.done" {
+		if preludeReleaseEventNeedsSchema(eventType, envelope) {
 			schema.EventKeys = preludeReleaseSchemaKeys(envelope, true)
 		}
 		if field != "" && json.Unmarshal(envelope[field], &object) == nil {
@@ -267,6 +264,20 @@ func releaseOpenAIPrelude(state *resilience.RequestState, eventType string, payl
 		}
 	}
 	state.NotePreludeReleased(eventType, time.Now(), schema)
+}
+
+func preludeReleaseEventNeedsSchema(eventType string, envelope map[string]json.RawMessage) bool {
+	if eventType != "response.output_item.added" && eventType != "response.output_item.done" {
+		return true
+	}
+	for key := range envelope {
+		switch key {
+		case "type", "sequence_number", "output_index", "item":
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 const (
