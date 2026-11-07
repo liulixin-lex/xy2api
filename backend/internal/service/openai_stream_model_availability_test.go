@@ -193,6 +193,67 @@ func TestOpenAIModelAvailabilityStructuredCodeGuards(t *testing.T) {
 	}
 }
 
+func TestOpenAIStreamModelAvailabilityNestedStatusForward(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, path := range []string{"native", "passthrough"} {
+		for _, tc := range []struct {
+			name   string
+			status int
+			want   int
+		}{
+			{"explicit 503", http.StatusServiceUnavailable, http.StatusServiceUnavailable},
+			{"explicit 502", http.StatusBadGateway, http.StatusBadGateway},
+			{"no status", 0, http.StatusNotFound},
+		} {
+			t.Run(path+"/"+tc.name, func(t *testing.T) {
+				errorFields := map[string]any{"code": "model_not_found", "param": "model"}
+				if tc.status != 0 {
+					errorFields["status_code"] = tc.status
+				}
+				inner, err := json.Marshal(map[string]any{"error": errorFields})
+				require.NoError(t, err)
+				payload, err := json.Marshal(map[string]any{"response": map[string]any{
+					"error": map[string]any{"message": string(inner)},
+				}})
+				require.NoError(t, err)
+				c, rec := newOpenAIUpstreamErrorTestContext(t)
+				upstream := &httpUpstreamRecorder{resp: streamModelResponse(string(payload), "")}
+				svc := compatStreamService(upstream, 0, 0, 0)
+				svc.accountRepo = &openAIModelAvailabilityRepo{}
+				account := streamModelAccount(1, path == "passthrough", "https://relay-a.example/v1")
+				_, err = svc.Forward(c.Request.Context(), c, account, []byte(streamModelRequest))
+				var failure *UpstreamFailoverError
+				require.ErrorAs(t, err, &failure)
+				require.True(t, failure.IsOpenAIModelUnavailable())
+				require.Equal(t, tc.want, failure.StatusCode)
+				require.True(t, failure.ShouldRetryNextAccount())
+				require.Len(t, upstream.bodies, 1)
+				require.Empty(t, rec.Body.String())
+			})
+		}
+	}
+}
+
+func TestOpenAIStreamModelAvailabilityNestedStatusPrecedence(t *testing.T) {
+	for _, tc := range []struct {
+		name, payload string
+		wrapped, want int
+		matched       bool
+	}{
+		{"wrapper wins", `{"response":{"error":{"message":"{\"error\":{\"code\":\"model_not_found\",\"status_code\":503}}"}}}`, 403, 403, false},
+		{"embedded Responses status", `{"error":{"message":"{\"response\":{\"error\":{\"code\":\"model_not_found\",\"status\":503}}}"}}`, 0, 503, true},
+		{"outer wins", `{"error":{"status_code":502,"message":"{\"response\":{\"error\":{\"code\":\"model_not_found\",\"status_code\":503}}}"}}`, 0, 502, true},
+		{"string status ignored", `{"response":{"error":{"message":"{\"error\":{\"code\":\"model_not_found\",\"status_code\":\"503\"}}"}}}`, 0, 404, true},
+		{"request status ignored", `{"error":{"code":"model_not_found"},"input":{"error":{"status_code":503}}}`, 0, 404, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			status, matched := openAIStreamModelAvailabilityStatus([]byte(tc.payload), "", tc.wrapped)
+			require.Equal(t, tc.want, status)
+			require.Equal(t, tc.matched, matched)
+		})
+	}
+}
+
 func TestOpenAIStreamModelAvailabilityPreservesRequestRejections(t *testing.T) {
 	withResilienceSettings(t, nil)
 	for _, path := range []string{"native", "passthrough"} {

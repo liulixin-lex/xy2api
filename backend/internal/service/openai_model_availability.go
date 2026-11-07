@@ -172,6 +172,19 @@ func openAIModelNotFoundCode(body []byte) bool {
 	return false
 }
 
+// Use the same bounded envelope scope as the code/param checks, with an
+// explicit outer status taking precedence over an embedded error status.
+func openAIModelAvailabilityExplicitStatus(payload []byte) (int, bool) {
+	for _, object := range openAIModelAvailabilityEnvelopes(payload) {
+		for _, path := range openAIStreamErrorStatusPaths {
+			if status, ok := strictJSONIntegerStatus([]byte(object.Raw), path); ok && status >= 400 && status <= 599 {
+				return status, true
+			}
+		}
+	}
+	return 0, false
+}
+
 // openAIStreamModelAvailabilityStatus uses the existing semantic status and
 // Q2 predicate. Validated wrapper statuses retain priority, including 401/403;
 // request rejections and input parameters are checked on the original payload.
@@ -180,11 +193,8 @@ func openAIStreamModelAvailabilityStatus(payload []byte, message string, wrapped
 	// Numeric protocol statuses, including 5xx, must not become a synthesized
 	// 404. Keep the legacy semantic mapping unchanged for non-Q2 callers.
 	if wrappedStatus == 0 {
-		for _, path := range openAIStreamErrorStatusPaths {
-			if explicit, ok := strictJSONIntegerStatus(payload, path); ok && explicit >= 400 && explicit <= 599 {
-				status, defaulted = explicit, false
-				break
-			}
+		if explicit, ok := openAIModelAvailabilityExplicitStatus(payload); ok {
+			status, defaulted = explicit, false
 		}
 	}
 	if !isOpenAIModelAvailabilityError(status, message, payload) {

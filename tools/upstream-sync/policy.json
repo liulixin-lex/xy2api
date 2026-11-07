@@ -4109,6 +4109,10 @@
     },
     {
       "path": "backend/internal/service/openai_model_availability.go",
+      "value": "if explicit, ok := openAIModelAvailabilityExplicitStatus(payload); ok {"
+    },
+    {
+      "path": "backend/internal/service/openai_model_availability.go",
       "value": "noteResiliencePostOutputFailureWithCategory(ctx, s.rateLimitService, account, resp, postOutputModelUnavailable, resilience.CategoryModelUnsupported)"
     },
     {
