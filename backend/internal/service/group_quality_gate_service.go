@@ -333,9 +333,7 @@ func replayGroupQualityState(ctx context.Context, now, processStart time.Time, p
 					}
 					state := states[groupID][account.ID]
 					resetAt := resets[account.ID]
-					if !resetAt.Equal(state.ResetAt) {
-						states[groupID][account.ID] = groupQualityAccountState{ResetAt: resetAt}
-					}
+					states[groupID][account.ID] = groupQualityStateAfterReset(state, resetAt)
 				}
 			}
 			summary.staleCutoffs++
@@ -370,9 +368,7 @@ func replayGroupQualityState(ctx context.Context, now, processStart time.Time, p
 				}
 				state := states[groupID][account.ID]
 				resetAt := resets[account.ID]
-				if !resetAt.Equal(state.ResetAt) {
-					state = groupQualityAccountState{ResetAt: resetAt}
-				}
+				state = groupQualityStateAfterReset(state, resetAt)
 				metric := metrics[account.ID]
 				expected := groupQualityPrediction(metric, composition[groupID])
 				states[groupID][account.ID] = evaluateGroupQualityMember(cutoff, *normalizeGroupQualityGatePolicy(policies.Groups[strconv.FormatInt(groupID, 10)]).V3, metric, expected, state)
@@ -800,9 +796,7 @@ func (s *GroupQualityGateService) evaluate(ctx context.Context) error {
 			state := previous.State
 			resetAt := resets[account.ID]
 			reset := !resetAt.Equal(state.ResetAt)
-			if reset {
-				state = groupQualityAccountState{ResetAt: resetAt}
-			}
+			state = groupQualityStateAfterReset(state, resetAt)
 			metric := metrics[account.ID]
 			expected := groupQualityPrediction(metric, composition[groupID])
 			if stale {

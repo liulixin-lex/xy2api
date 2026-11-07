@@ -339,6 +339,23 @@ func TestGroupQualityWarmStartHonorsResetAt(t *testing.T) {
 	require.Equal(t, reset, e.member(1).State.ResetAt)
 }
 
+func TestGroupQualityResetClearsPreviouslyEstablishedBadState(t *testing.T) {
+	lastFail := eNowForQualityTest().Add(-time.Minute)
+	state := groupQualityAccountState{
+		Error:   groupQualityDimensionState{State: "fail", Vote: "fail", Votes: 2, LastVote: lastFail, LastFail: lastFail},
+		Cache:   groupQualityDimensionState{State: "fail", Vote: "fail", Votes: 2, LastVote: lastFail, LastFail: lastFail},
+		ResetAt: time.Time{},
+	}
+	resetAt := eNowForQualityTest()
+
+	got := groupQualityStateAfterReset(state, resetAt)
+	require.Equal(t, groupQualityAccountState{ResetAt: resetAt}, got)
+	require.NotEqual(t, "fail", got.Error.state())
+	require.False(t, got.Error.hasBad(resetAt))
+	require.False(t, got.Cache.hasBad(resetAt))
+	require.Equal(t, state, groupQualityStateAfterReset(state, time.Time{}), "an unchanged reset timestamp preserves state")
+}
+
 func TestGroupQualityWarmStartSkipsStaleCutoffs(t *testing.T) {
 	e := newQualityTestEnv(t)
 	e.svc.processStartedAt = e.base.Add(-8 * time.Hour)

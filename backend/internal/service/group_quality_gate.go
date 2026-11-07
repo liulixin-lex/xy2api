@@ -350,6 +350,13 @@ type groupQualityAccountState struct {
 	ResetAt time.Time
 }
 
+func groupQualityStateAfterReset(state groupQualityAccountState, resetAt time.Time) groupQualityAccountState {
+	if !resetAt.Equal(state.ResetAt) {
+		return groupQualityAccountState{ResetAt: resetAt}
+	}
+	return state
+}
+
 func (s groupQualityAccountState) dimensions() [3]groupQualityDimensionState {
 	return [3]groupQualityDimensionState{s.TTFT, s.Error, s.Cache}
 }
