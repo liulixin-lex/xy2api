@@ -18,6 +18,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/account/__tests__/OpenCodeGoProtocolRulesEditor.spec.ts \
 	src/components/keys/__tests__/BulkEditKeysModal.spec.ts \
 	src/components/keys/__tests__/CcSwitchImportDialog.spec.ts \
+	src/components/keys/__tests__/UseKeyModal.spec.ts \
 	src/utils/__tests__/ccswitchImport.spec.ts \
 	src/utils/__tests__/ccswitchImport.antigravityUrl.spec.ts \
 	src/components/admin/user/__tests__/UserPlatformQuotaModal.spec.ts \
