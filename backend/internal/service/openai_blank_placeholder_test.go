@@ -221,12 +221,50 @@ func TestResponsesBlankPlaceholderPredicatesAndSemanticDeliveryAgree(t *testing.
 func TestResponsesExtraFieldsPreserveSharedOutputDecision(t *testing.T) {
 	withResilienceSettings(t, nil)
 	tests := []struct {
-		name, payload string
-		wantPrelude   bool
+		name, event, payload string
+		wantPrelude          bool
+		wantBlankPlaceholder bool
 	}{
 		{
 			name:        "reasoning item with empty extra field",
 			payload:     `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[],"content":[]}}`,
+			wantPrelude: true,
+		},
+		{
+			name:        "event root with extra boolean",
+			payload:     `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[]},"vendor_flag":true}`,
+			wantPrelude: true,
+		},
+		{
+			name:                 "message item added with extra boolean",
+			payload:              `{"type":"response.output_item.added","item":{"id":"m","type":"message","role":"assistant","status":"in_progress","content":[]},"vendor_flag":true}`,
+			wantPrelude:          true,
+			wantBlankPlaceholder: true,
+		},
+		{
+			name:                 "whitespace delta with extra boolean",
+			event:                "response.output_text.delta",
+			payload:              `{"type":"response.output_text.delta","delta":" ","vendor_flag":true}`,
+			wantPrelude:          true,
+			wantBlankPlaceholder: true,
+		},
+		{
+			name:                 "whitespace done with extra boolean",
+			event:                "response.output_text.done",
+			payload:              `{"type":"response.output_text.done","text":" ","vendor_flag":true}`,
+			wantPrelude:          true,
+			wantBlankPlaceholder: true,
+		},
+		{
+			name:                 "message item done with whitespace and extra boolean",
+			event:                "response.output_item.done",
+			payload:              `{"type":"response.output_item.done","item":{"id":"m","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":" "}]},"vendor_flag":true}`,
+			wantPrelude:          true,
+			wantBlankPlaceholder: true,
+		},
+		{
+			name:        "event root with extra number",
+			payload:     `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[]},"vendor_count":3}`,
 			wantPrelude: true,
 		},
 		{
@@ -239,14 +277,20 @@ func TestResponsesExtraFieldsPreserveSharedOutputDecision(t *testing.T) {
 			payload: `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[]},"vendor_extension":"value"}`,
 		},
 		{
+			name:    "visible delta with extra boolean",
+			event:   "response.output_text.delta",
+			payload: `{"type":"response.output_text.delta","delta":"ok","vendor_flag":true}`,
+		},
+		{
 			name:        "reasoning item with nested empty object",
 			payload:     `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[],"extra":{"x":{"y":""}}}}`,
 			wantPrelude: true,
 		},
 		{
-			name:        "message item with nested empty array",
-			payload:     `{"type":"response.output_item.added","item":{"id":"m","type":"message","role":"assistant","content":[],"extra":{"x":[{}]}}}`,
-			wantPrelude: true,
+			name:                 "message item with nested empty array",
+			payload:              `{"type":"response.output_item.added","item":{"id":"m","type":"message","role":"assistant","content":[],"extra":{"x":[{}]}}}`,
+			wantPrelude:          true,
+			wantBlankPlaceholder: true,
 		},
 		{
 			name:        "event root with nested empty mixed array",
@@ -258,12 +302,14 @@ func TestResponsesExtraFieldsPreserveSharedOutputDecision(t *testing.T) {
 			payload: `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[],"extra":{"x":{"y":"a"}}}}`,
 		},
 		{
-			name:    "event root with nested zero",
-			payload: `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[]},"extra":{"x":[0]}}`,
+			name:        "event root with nested zero",
+			payload:     `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[]},"extra":{"x":[0]}}`,
+			wantPrelude: true,
 		},
 		{
-			name:    "reasoning item with nested false",
-			payload: `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[],"extra":{"x":false}}}`,
+			name:        "reasoning item with nested false",
+			payload:     `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[],"extra":{"x":false}}}`,
+			wantPrelude: true,
 		},
 		{
 			name:    "event root with nested whitespace",
@@ -272,7 +318,10 @@ func TestResponsesExtraFieldsPreserveSharedOutputDecision(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			const event = "response.output_item.added"
+			event := tc.event
+			if event == "" {
+				event = "response.output_item.added"
+			}
 			payload := []byte(tc.payload)
 			disposition := resilience.ResponsesEventOutputDisposition(event, payload)
 			wantKind := resilience.Content
@@ -282,6 +331,7 @@ func TestResponsesExtraFieldsPreserveSharedOutputDecision(t *testing.T) {
 			require.Equal(t, wantKind, disposition.Kind)
 			require.Equal(t, !tc.wantPrelude, disposition.Visible)
 			require.Equal(t, !tc.wantPrelude, disposition.SemanticOutput)
+			require.Equal(t, tc.wantBlankPlaceholder, disposition.BlankPlaceholder)
 
 			var compatEvent apicompat.ResponsesStreamEvent
 			require.NoError(t, json.Unmarshal(payload, &compatEvent))
