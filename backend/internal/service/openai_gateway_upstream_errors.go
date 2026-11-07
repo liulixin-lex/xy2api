@@ -133,6 +133,10 @@ func isOpenAITransientProcessingError(upstreamStatusCode int, upstreamMsg string
 		if code == "" {
 			code = strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "response.error.code").String()))
 		}
+		if code == "" {
+			code = strings.ToLower(strings.TrimSpace(openAITopLevelStreamError(payload).Get("code").String()))
+		}
+
 		return code == "server_is_overloaded" || code == "slow_down"
 	}
 

@@ -425,6 +425,24 @@ func TestSanitizeOpenAICapacityShedErrorCodeForClient(t *testing.T) {
 		wantContain string
 	}{
 		{
+			name:        "top_level_overloaded_code",
+			payload:     `{"type":"error","code":"server_is_overloaded","message":"request rejected"}`,
+			wantChanged: true,
+			wantContain: `"code":"server_error"`,
+		},
+		{
+			name:        "top_level_slow_down_code",
+			payload:     `{"type":"error","code":"slow_down","message":"request rejected"}`,
+			wantChanged: true,
+			wantContain: `"code":"server_error"`,
+		},
+		{
+			name:        "top_level_rate_limit_preserved",
+			payload:     `{"type":"error","code":"rate_limit_exceeded","message":"try again in 3s"}`,
+			wantChanged: false,
+			wantContain: `"code":"rate_limit_exceeded"`,
+		},
+		{
 			name:        "failed事件嵌套code改写",
 			payload:     `{"type":"response.failed","response":{"error":{"code":"server_is_overloaded","message":"overloaded"}}}`,
 			wantChanged: true,

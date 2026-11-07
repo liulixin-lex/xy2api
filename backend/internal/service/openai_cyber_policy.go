@@ -77,12 +77,18 @@ func detectOpenAICyberPolicy(payload []byte) (bool, string, string) {
 	if code == "" {
 		code = gjson.GetBytes(payload, "response.error.code").String()
 	}
+	if code == "" {
+		code = openAITopLevelStreamError(payload).Get("code").String()
+	}
 	if !strings.EqualFold(strings.TrimSpace(code), "cyber_policy") {
 		return false, "", ""
 	}
 	msg := gjson.GetBytes(payload, "error.message").String()
 	if msg == "" {
 		msg = gjson.GetBytes(payload, "response.error.message").String()
+	}
+	if msg == "" {
+		msg = openAITopLevelStreamError(payload).Get("message").String()
 	}
 	return true, "cyber_policy", strings.TrimSpace(msg)
 }
