@@ -465,6 +465,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	}
 	if next, _, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, nil, handleErr); ok {
 		closeAttempt()
+		ResumeCommittedPreOutputKeepalive(c, time.Duration(resilience.Current().Keepalive.IntervalSeconds)*time.Second)
 		return s.forwardAsChatCompletions(ctx, c, account, next, promptCacheKey, defaultMappedModel, compatPromptCacheTenantIsolated, rejectedFieldRetryState)
 	}
 	stampOpenAIResponsesUpstreamEndpoint(c, result)
