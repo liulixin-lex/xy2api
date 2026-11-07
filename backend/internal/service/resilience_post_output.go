@@ -81,12 +81,17 @@ func noteResiliencePostOutputFailureWithCategory(ctx context.Context, rl *RateLi
 	if confirmedPostOutput {
 		recordPostOutputFailureFact(ctx, account, kind, factCategory, time.Now())
 	}
-	rebindGuarded := false
+	_, session := st.SessionIdentity()
+	rebindGuard := ""
+	if confirmedPostOutput && account.Platform == PlatformOpenAI && resilience.Current().PostOutputRebindOn() && session != "" {
+		rebindGuard = "none"
+	}
 	if confirmedPostOutput && account.Platform == PlatformOpenAI && !openAIEncryptedContentRebindGuarded(ctx) {
 		st.SessionFailureAfterOutput(ctx, account.ID, resilience.CategoryTransient)
 	} else {
-		rebindGuarded = confirmedPostOutput && account.Platform == PlatformOpenAI &&
-			resilience.Current().PostOutputRebindOn() && openAIEncryptedContentRebindGuarded(ctx)
+		if rebindGuard != "" && openAIEncryptedContentRebindGuarded(ctx) {
+			rebindGuard = "blocked"
+		}
 		st.SessionFailure(ctx, account.ID, resilience.CategoryTransient)
 	}
 	// The 200 that carried the failure must not end the conversation's
@@ -95,15 +100,21 @@ func noteResiliencePostOutputFailureWithCategory(ctx context.Context, rl *RateLi
 	groupID := st.GroupID()
 	resilience.Count(resilience.MetricPostOutputFailure, groupID, account.ID, kind)
 	failures, cooled := rl.notePostOutputFailure(ctx, account)
-	slog.Warn("resilience.post_output_failure", append(resilience.EventFields(ctx),
+	fields := append(resilience.EventFields(ctx),
 		"group_id", groupID,
 		"account_id", account.ID,
 		"platform", account.Platform,
 		"reason", kind,
 		"failures", failures,
 		"cooldown", cooled,
-		"rebind_guarded", rebindGuarded,
-	)...)
+	)
+	if rebindGuard != "" {
+		fields = append(fields, "rebind_guard", rebindGuard)
+	}
+	if session != "" {
+		fields = append(fields, "session", shortSessionHash(session))
+	}
+	slog.Warn("resilience.post_output_failure", fields...)
 	return true
 }
 
