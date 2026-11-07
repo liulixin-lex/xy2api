@@ -23,8 +23,9 @@ func (e *UpstreamFailoverError) IsOpenAIUpstreamRequestRestriction() bool {
 // failoverOpenAIModelAvailability is shared by native and passthrough HTTP
 // routing, after local request repairs and compact fallback. It owns the
 // decision and observation together. Provider request restrictions share this
-// unpenalized exit without a model cooldown; stream events keep their
-// existing policy. A bare forwarder has no account-selection owner.
+// unpenalized exit without a model cooldown. Responses stream model errors
+// enter through failoverOpenAIStreamModelAvailability. A bare forwarder has
+// no account-selection owner.
 func (s *OpenAIGatewayService) failoverOpenAIModelAvailability(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, body []byte, model string, passthrough bool) *UpstreamFailoverError {
 	if s == nil || s.accountRepo == nil || !account.IsOpenAICompatible() || resp == nil ||
 		openAIStreamClientOutputStarted(c, false) {
@@ -145,7 +146,39 @@ func openAIModelAvailabilityParamAllowed(body []byte) bool {
 	return true
 }
 
-// recordOpenAIModelAvailabilityFailure is used only by pre-output failover.
+// openAIStreamModelAvailabilityStatus uses the existing semantic status and
+// Q2 predicate. Validated wrapper statuses retain priority, including 401/403;
+// request rejections and input parameters are checked on the original payload.
+func openAIStreamModelAvailabilityStatus(payload []byte, message string, wrappedStatus int) (int, bool) {
+	status := openAIStreamFailedEventSemanticStatus(payload, message, wrappedStatus)
+	return status, isOpenAIModelAvailabilityError(status, message, payload)
+}
+
+// failoverOpenAIStreamModelAvailability only adapts model errors. Other stream
+// failures, including generic invalid_request_error, retain their existing exit.
+func (s *OpenAIGatewayService) failoverOpenAIStreamModelAvailability(ctx context.Context, c *gin.Context, account *Account, payload []byte, message string, headers http.Header, model string, passthrough bool, wrappedStatus int) *UpstreamFailoverError {
+	status, matched := openAIStreamModelAvailabilityStatus(payload, message, wrappedStatus)
+	if !matched {
+		return nil
+	}
+	body := openAIStreamFailedEventPassthroughBody(payload, message)
+	return s.failoverOpenAIModelAvailability(ctx, c, account, &http.Response{StatusCode: status, Header: headers}, body, model, passthrough)
+}
+
+// handleOpenAIStreamFailureAfterOutput is shared only by native/passthrough
+// Responses. Model availability advances the same account-model cooldown as
+// HTTP Q2, without replay or account-health penalties. Bare error/failed pairs
+// still use the callers' existing terminal deferral to apply this once.
+func (s *OpenAIGatewayService) handleOpenAIStreamFailureAfterOutput(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, payload []byte, message, model string, wrappedStatus int) {
+	if _, matched := openAIStreamModelAvailabilityStatus(payload, message, wrappedStatus); matched && account.IsOpenAICompatible() {
+		s.recordOpenAIModelAvailabilityFailure(account, model)
+		return
+	}
+	s.handleOpenAIStreamTerminalAccountSideEffectsForFrame(c, account, payload, message, resp.Header, model, wrappedStatus)
+	s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, payload, message, true)
+}
+
+// recordOpenAIModelAvailabilityFailure is shared by HTTP and Responses SSE.
 // It bypasses persistent model limits and all account-health penalties.
 func (s *OpenAIGatewayService) recordOpenAIModelAvailabilityFailure(account *Account, model string) {
 	decision := s.recordOpenAIAccountModelTransientFailure(account, model, time.Now())

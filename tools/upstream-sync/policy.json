@@ -761,11 +761,15 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
-      "value": "s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, dataBytes, failedMessage, outputStarted)"
+      "value": "s.handleOpenAIStreamFailureAfterOutput(ctx, c, account, resp, dataBytes, failedMessage, mappedModel, wrappedStatus)"
     },
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
-      "value": "s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, bareErrorPayload, failedMessage, true)"
+      "value": "s.failoverOpenAIStreamModelAvailability(ctx, c, account, dataBytes, failedMessage, resp.Header, mappedModel, false, wrappedStatus)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_response_handling.go",
+      "value": "s.handleOpenAIStreamFailureAfterOutput(ctx, c, account, resp, bareErrorPayload, failedMessage, mappedModel, bareErrorWrappedStatus)"
     },
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
@@ -777,11 +781,15 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
-      "value": "s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, dataBytes, failedMessage, outputStarted)"
+      "value": "s.handleOpenAIStreamFailureAfterOutput(ctx, c, account, resp, dataBytes, failedMessage, failureModel, wrappedStatus)"
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
-      "value": "s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, bareErrorPayload, failedMessage, true)"
+      "value": "s.failoverOpenAIStreamModelAvailability(ctx, c, account, dataBytes, failedMessage, resp.Header, failureModel, true, wrappedStatus)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "s.handleOpenAIStreamFailureAfterOutput(ctx, c, account, resp, bareErrorPayload, failedMessage, failureModel, bareErrorWrappedStatus)"
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",

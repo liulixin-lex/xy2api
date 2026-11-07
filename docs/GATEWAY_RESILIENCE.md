@@ -310,6 +310,7 @@ Chat/Messages 兼容转换只在首次提交前暂存解码后的开场与空白
 - 上游错误分为余额不足（`BALANCE`）或模型不可用（`MODEL_UNSUPPORTED`，判据见 §3）时，Gemini（原生、Messages 与 Chat 兼容转换）、Grok、Anthropic（原生、API Key 直通、Bedrock，以及 Gateway 入站经 Anthropic 上游的 Responses 与 Chat）、Antigravity 的各入口都换号；以前这些平台按状态码判断，400、402 直接返回客户端。402 `deactivated_workspace` 按鉴权失败换号，不做余额暂停。其他类别的换号规则不变。
 - 平台原有的不换号判断优先：内容拒绝、上下文超长、签名与 beta 头、续链与重放约束。同一个上游响应只惩罚一次。
 - OpenAI 兼容网关的 Responses 原生、直通及 Chat 兼容转发输出前的 HTTP 400/404 或 5xx：错误消息命中 `isExplicitOpenAIModelAvailabilityMessage` 的既有通用短语，且结构化错误的 `param` 缺失、为空或为 `model` 时，按账号×实际出站模型不可用换号，禁止同号重试，复用瞬时失败计数与冷却（§4.6），不写 `model_rate_limits`，不进入 401/403 处罚，也不上报调度失败。上下文超限、内容安全、cyber 与状态类拒绝优先终止；普通 400 仍走原路径。compact 本地回退的顺序与单次重试约束不变。候选耗尽后保留最后一条上游错误的状态和脱敏 type/code/param/message（包括 400/404），不追加 Retry-After 或重试建议，不计 turn cap；已提交流沿用终止帧规则，不重复追加通用失败帧。判定只读取错误消息字段或纯文本错误体，不扫描 JSON 中回显的请求内容。
+- Responses 原生与直通在 HTTP 200 后收到 `response.failed` 或 `error` 时，用既有流内语义状态和同一 Q2 通用谓词判断模型不可用（仍要求 `param` 缺省、为空或为 `model`，不增加短语）。输出前在既有本地修复之后进入上述共享出口：换号、记号×模型瞬时失败、复用跨主机止损及耗尽返回；嵌套的 `response.error` 转成标准 `error`，保留脱敏后的 type/code/param/message，不附重试建议、不计 turn cap。输出后只记同一号×模型的瞬时失败与冷却，终止帧沿原流写出，不重放、不记账号健康失败；OAuth 裸 error 与 response.failed 成对到达时沿用既有延迟处理，只应用一次。状态、上下文、cyber、内容安全拒绝及校验通过的包装 401/403 保持原优先级。
 - 同一请求的模型不可用若已在另一上游主机上出现过，则按请求级拒绝终止（`CLIENT_ERROR`），不再给当前号×模型记失败或冷却；同主机兄弟号仍照常换号、记数。主机口径复用 `accountUpstreamHost`，不以账号名称或站点文案判定。指向其他输入字段的 `param` 不进入 Q2，保留原错误处理。
 - 上述共享模型不可用判定先于管理员配置的临时不可调度规则，因此命中的模型不可用 400 不再执行这些规则。Responses 直通在 `shouldFailoverOpenAIPassthroughResponse` 之前调用同一共享出口；WS 的 HTTP bridge 与 compact 回退响应有意不接入，保留各自既有行为。
 - 上游 HTTP 5xx 仅凭 `type=invalid_request_error` 不再判为 `CLIENT_ERROR`，而归为 `UPSTREAM_REQUEST_RESTRICTION`（`upstream_request_restriction`）：在现有预算内换号，不在同号重试，不罚号、不记账号健康失败、不累计会话连败，也不写软冷却或模型冷却。与模型不可用共用上述跨主机护栏和终止出口：同一请求的这类 5xx 若在第二台上游主机复现，立即按请求级拒绝终止；同主机兄弟号仍可换号。候选耗尽也保留最后一条上游状态和脱敏错误体，不附重试建议、不计 turn cap，已提交流沿用既有终止帧规则。未提交的 HTTP 响应保留上游 5xx 状态并带 `x-should-retry: false`：该扩展头只对识别它的客户端生效，例如 OpenAI 官方 SDK；Codex 0.166 不读取此头，会在自身预算内重试 5xx。跨主机止损使每次重试最多触达两台上游主机。两类错误分别保留主机证据；明确模型不可用仍优先记号×模型冷却。4xx 的该 type、上下文超限、内容安全、cyber 和状态类请求拒绝维持原判定。其他 5xx 的瞬时故障处理不变。
@@ -601,7 +602,7 @@ OpenAI 判慢降序与会话迁移的事件（见 §4.5）不带 `resilience.` �
 | `cooldown_ms` | 本次施加的冷却毫秒数；没有新冷却时为 0 |
 | `block_scope` | 固定为 `account_model`，不影响同号其他模型 |
 | `slow_streak` | 连续慢失败次数；普通瞬时失败与明确模型不可用会打断慢失败连击 |
-| `reason` | 计划内截止为 `planned_first_output_timeout`；输出前 HTTP 400/404 或 5xx 明确模型不可用为 `openai_model_unavailable`；API Key 普通瞬时失败不带此字段 |
+| `reason` | 计划内截止为 `planned_first_output_timeout`；HTTP 400/404 或 5xx，以及 Responses 原生/直通输出前后流内明确模型不可用为 `openai_model_unavailable`；API Key 普通瞬时失败不带此字段 |
 
 每次计划内截止或明确模型不可用记一条，不新增计数器。计划内截止本身看计数 `first_output_timeout` 与运维记录中 Reason 为 `first_output_timeout` 的尝试。明确模型不可用的运维尝试分类为 `MODEL_UNSUPPORTED`；跨主机重复后终止的尝试为 `CLIENT_ERROR`。
 
@@ -648,7 +649,7 @@ OpenAI 判慢降序与会话迁移的事件（见 §4.5）不带 `resilience.` �
 
 ## 7. 已知限制
 
-- 模型不可用的账号×模型瞬时冷却仅接入输出前 HTTP 错误响应。上游返回 HTTP 200 后，在输出前通过未包装的 `response.failed` 或 `error` 事件表达同类 400/404/5xx 模型错误时，仍按原流内分类与终止规则处理，没有接入该共享出口，也不新增这条模型冷却；HTTP 与流内形式尚不等价。
+- 模型不可用的账号×模型瞬时冷却已覆盖 HTTP 错误响应，以及 Responses 原生/直通的流内失败（§4.9）。Chat/Messages 兼容流、非流式聚合、WS 与 HTTP bridge 的流内模型错误仍保留既有处理，本次未扩展。
 
 - 输出后失败补记仅覆盖 HTTP，WebSocket 不补；缺少有效发送边界且本请求已有同账号事件时保守跳过，可能漏记。历史记录不回填，见 §4.11。
 

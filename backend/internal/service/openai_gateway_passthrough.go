@@ -2399,9 +2399,8 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			return
 		}
 		if bareErrorAccountSideEffectsPending {
-			s.handleOpenAIStreamTerminalAccountSideEffectsForFrame(c, account, bareErrorPayload, failedMessage, resp.Header, failureModel, bareErrorWrappedStatus)
+			s.handleOpenAIStreamFailureAfterOutput(ctx, c, account, resp, bareErrorPayload, failedMessage, failureModel, bareErrorWrappedStatus)
 			bareErrorAccountSideEffectsPending = false
-			s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, bareErrorPayload, failedMessage, true)
 		}
 		if clientDisconnected || !writePendingLines() {
 			return
@@ -2648,9 +2647,8 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 						// account health; EOF synthesis applies the pending effect.
 						bareErrorAccountSideEffectsPending = true
 					} else {
-						s.handleOpenAIStreamTerminalAccountSideEffectsForFrame(c, account, dataBytes, failedMessage, resp.Header, failureModel, wrappedStatus)
+						s.handleOpenAIStreamFailureAfterOutput(ctx, c, account, resp, dataBytes, failedMessage, failureModel, wrappedStatus)
 						bareErrorAccountSideEffectsPending = false
-						s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, dataBytes, failedMessage, outputStarted)
 					}
 					if eventType == "response.failed" {
 						// The stream cannot be replayed after semantic output. Preserve the
@@ -2659,6 +2657,11 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 					}
 				}
 				if !outputStarted {
+					if !clientDisconnected {
+						if failoverErr := s.failoverOpenAIStreamModelAvailability(ctx, c, account, dataBytes, failedMessage, resp.Header, failureModel, true, wrappedStatus); failoverErr != nil {
+							return passthroughReturn(resultWithUsage(), failoverErr)
+						}
+					}
 					if wrappedFrame {
 						wrappedMessage := firstNonEmpty(extractOpenAISSEErrorMessage(wrappedPayload), failedMessage)
 						if failoverErr := s.newOpenAIWrappedStreamFailoverError(ctx, c, account, true, upstreamRequestID, wrappedPayload, wrappedMessage, failureModel, resp.Header, wrappedStatus); failoverErr != nil && !clientDisconnected {
