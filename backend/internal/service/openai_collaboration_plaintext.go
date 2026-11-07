@@ -25,29 +25,12 @@ func (a *Account) IsOpenAICollaborationPlaintextEnabled() bool {
 
 // The decision uses actual client headers, never ForceCodexCLI, and the final
 // mapped upstream model. Unsupported routes cannot acquire a mutating plan.
-func openAICollaborationEligible(c *gin.Context, a *Account, model string, transport OpenAIUpstreamTransport, passthrough, compact, bridge, continuity bool) bool {
+func openAICollaborationEligible(c *gin.Context, a *Account, model string, transport OpenAIUpstreamTransport, passthrough, compact, bridge bool) bool {
 	return c != nil && GetOpenAIClientTransport(c) == OpenAIClientTransportHTTP &&
 		transport == OpenAIUpstreamTransportHTTPSSE && !passthrough && !compact && !bridge &&
-		a != nil && a.IsOpenAI() && (a.IsOpenAICollaborationPlaintextEnabled() || continuity) && !a.IsOpenAIResponsesFlattenNamespacesEnabled() &&
+		a != nil && a.IsOpenAI() && a.IsOpenAICollaborationPlaintextEnabled() && !a.IsOpenAIResponsesFlattenNamespacesEnabled() &&
 		openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) &&
 		resilience.Current().CollaborationPlaintextModel(model)
-}
-
-// Inspect only the explicit protocol marker, never arguments or tool output.
-// This client-declared signal is not authorization.
-func openAICollaborationContinuity(body []byte) bool {
-	for _, item := range gjson.GetBytes(body, "input").Array() {
-		if item.Get("type").String() != "function_call" || item.Get("namespace").String() != codexCollaborationNamespace {
-			continue
-		}
-		if _, ok := codexCollabMessageTools[item.Get("name").String()]; !ok {
-			continue
-		}
-		if efa := item.Get("encrypted_function_args"); efa.Exists() && efa.IsArray() && len(efa.Array()) == 0 {
-			return true
-		}
-	}
-	return false
 }
 
 // Only declaration carriers are visited; historical calls and arbitrary input

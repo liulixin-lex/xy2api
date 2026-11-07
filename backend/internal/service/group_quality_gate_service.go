@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math"
 	"slices"
@@ -16,6 +17,15 @@ import (
 )
 
 const groupQualityEvaluationInterval = time.Minute
+
+const (
+	groupQualityReplayWindow        = 6 * time.Hour
+	groupQualityReplayLookback      = 30 * time.Minute
+	groupQualityReplaySteps         = 6 * 60
+	groupQualityReplayStep          = time.Minute
+	groupQualityReplayTotalBudget   = 60 * time.Second
+	groupQualityWarmMemberListLimit = 50
+)
 
 type groupQualityMemberSnapshot struct {
 	AccountID     int64
@@ -90,7 +100,16 @@ func (s *GroupQualityGateService) Start() {
 	s.cancel, s.done = cancel, make(chan struct{})
 	go func() {
 		defer close(s.done)
+		if !s.warmStart(ctx) {
+			return
+		}
+		if ctx.Err() != nil {
+			return
+		}
 		_ = s.evaluate(ctx)
+		if ctx.Err() != nil {
+			return
+		}
 		ticker := time.NewTicker(groupQualityEvaluationInterval)
 		defer ticker.Stop()
 		for {
@@ -102,6 +121,309 @@ func (s *GroupQualityGateService) Start() {
 			}
 		}
 	}()
+}
+
+type groupQualityWarmMember struct {
+	AccountID  int64
+	GroupID    int64
+	Dimensions []string
+}
+
+func (s *GroupQualityGateService) warmStart(ctx context.Context) (continueRun bool) {
+	return s.warmStartWithBudget(ctx, groupQualityReplayTotalBudget)
+}
+
+func (s *GroupQualityGateService) warmStartWithBudget(ctx context.Context, budget time.Duration) (continueRun bool) {
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+	if ctx.Err() != nil {
+		return false
+	}
+	continueRun = true
+	started := time.Now()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			if ctx.Err() != nil {
+				continueRun = false
+				return
+			}
+			slog.Warn("group_quality_gate.warm_start_failed", "duration_ms", time.Since(started).Milliseconds(), "reason", fmt.Sprintf("panic: %v", recovered))
+		}
+	}()
+	replayCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	now := s.now().UTC()
+	fail := func(err error) bool {
+		if ctx.Err() != nil {
+			return false
+		}
+		slog.Warn("group_quality_gate.warm_start_failed", "duration_ms", time.Since(started).Milliseconds(), "reason", err.Error())
+		return true
+	}
+	policies, err := s.loadPolicies(replayCtx)
+	if err != nil {
+		return fail(err)
+	}
+	groups, err := s.groupRepo.ListActive(replayCtx)
+	if err != nil {
+		return fail(err)
+	}
+	groupIDs, enabledGroups := []int64{}, map[int64]bool{}
+	for _, group := range groups {
+		p := normalizeGroupQualityGatePolicy(policies.Groups[strconv.FormatInt(group.ID, 10)])
+		if group.Platform == PlatformOpenAI && p.V3.Enabled {
+			groupIDs = append(groupIDs, group.ID)
+			enabledGroups[group.ID] = true
+		}
+	}
+	members, err := s.policyRepo.LoadMembers(replayCtx, groupIDs)
+	if err != nil {
+		return fail(err)
+	}
+	if replayCtx.Err() != nil {
+		if ctx.Err() != nil {
+			return false
+		}
+		return fail(replayCtx.Err())
+	}
+	ids, resets := groupQualityMemberIDs(members)
+	if len(groupIDs) == 0 {
+		if ctx.Err() != nil {
+			return false
+		}
+		s.snapshot.Store(&groupQualitySnapshot{GeneratedAt: now, Policies: policies, Metrics: map[int64]groupQualityMetrics{}, Members: map[int64]map[int64]groupQualityMemberSnapshot{}, Composition: map[int64]groupQualityComposition{}, Departed: map[int64]map[int64]groupQualityDeparted{}})
+		slog.Info("group_quality_gate.warm_start", "cutoff_count", 0, "stale_cutoffs", 0, "load_duration_ms", time.Since(started).Milliseconds(), "replay_duration_ms", 0, "observation_rows", 0, "restored_tier2", []groupQualityWarmMember{}, "restored_tier1", []groupQualityWarmMember{})
+		return true
+	}
+	data, err := s.policyRepo.LoadObservationsForReplay(replayCtx, ids, now.Add(-groupQualityReplayWindow-groupQualityReplayLookback), now)
+	if err != nil {
+		return fail(err)
+	}
+	if len(data.Observations) > GroupQualityReplayMaxObservationRows || len(data.UsageWrites) > GroupQualityReplayMaxUsageWriteRows {
+		return fail(fmt.Errorf("group quality replay row limit exceeded: observations=%d usage_writes=%d", len(data.Observations), len(data.UsageWrites)))
+	}
+	loadDuration := time.Since(started)
+	if replayCtx.Err() != nil {
+		if ctx.Err() != nil {
+			return false
+		}
+		return fail(replayCtx.Err())
+	}
+	replayStarted := time.Now()
+	next, summary, err := replayGroupQualityState(replayCtx, now, s.processStartedAt, policies, members, enabledGroups, resets, data)
+	if err != nil {
+		if ctx.Err() != nil {
+			return false
+		}
+		return fail(err)
+	}
+	s.snapshot.Store(next)
+	slog.Info("group_quality_gate.warm_start", "cutoff_count", summary.cutoffs, "stale_cutoffs", summary.staleCutoffs,
+		"load_duration_ms", loadDuration.Milliseconds(), "replay_duration_ms", time.Since(replayStarted).Milliseconds(),
+		"observation_rows", len(data.Observations), "restored_tier2", summary.tier2, "restored_tier1", summary.tier1)
+	return true
+}
+
+type groupQualityWarmSummary struct {
+	cutoffs      int
+	staleCutoffs int
+	tier2        []groupQualityWarmMember
+	tier1        []groupQualityWarmMember
+}
+
+func groupQualityMemberIDs(members map[int64][]Account) ([]int64, map[int64]time.Time) {
+	ids, seen := []int64{}, map[int64]bool{}
+	resets := map[int64]time.Time{}
+	for _, accounts := range members {
+		for _, account := range accounts {
+			if account.Platform != PlatformOpenAI {
+				continue
+			}
+			if !seen[account.ID] {
+				ids = append(ids, account.ID)
+				seen[account.ID] = true
+			}
+			resets[account.ID] = accountGroupQualityResetAt(&account)
+		}
+	}
+	return ids, resets
+}
+
+func replayGroupQualityState(ctx context.Context, now, processStart time.Time, policies GroupQualityGatePolicies, members map[int64][]Account, enabledGroups map[int64]bool, resets map[int64]time.Time, data GroupQualityReplayData) (*groupQualitySnapshot, groupQualityWarmSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, groupQualityWarmSummary{}, err
+	}
+	if len(data.Observations) > GroupQualityReplayMaxObservationRows || len(data.UsageWrites) > GroupQualityReplayMaxUsageWriteRows {
+		return nil, groupQualityWarmSummary{}, fmt.Errorf("group quality replay row limit exceeded: observations=%d usage_writes=%d", len(data.Observations), len(data.UsageWrites))
+	}
+	observations := slices.Clone(data.Observations)
+	slices.SortFunc(observations, func(a, b GroupQualityObservation) int {
+		if a.At.Before(b.At) {
+			return -1
+		}
+		if a.At.After(b.At) {
+			return 1
+		}
+		if a.ID < b.ID {
+			return -1
+		}
+		if a.ID > b.ID {
+			return 1
+		}
+		return 0
+	})
+	if err := ctx.Err(); err != nil {
+		return nil, groupQualityWarmSummary{}, err
+	}
+	writes := slices.Clone(data.UsageWrites)
+	slices.SortFunc(writes, func(a, b GroupQualityUsageWrite) int {
+		if a.Minute.Before(b.Minute) {
+			return -1
+		}
+		if a.Minute.After(b.Minute) {
+			return 1
+		}
+		return 0
+	})
+	if err := ctx.Err(); err != nil {
+		return nil, groupQualityWarmSummary{}, err
+	}
+	metrics := map[int64]groupQualityMetrics{}
+	composition := map[int64]groupQualityComposition{}
+	states := map[int64]map[int64]groupQualityAccountState{}
+	for groupID := range enabledGroups {
+		states[groupID] = map[int64]groupQualityAccountState{}
+	}
+	left, right, writeIndex := 0, 0, 0
+	var observedAt time.Time
+	summary := groupQualityWarmSummary{cutoffs: groupQualityReplaySteps, tier1: []groupQualityWarmMember{}, tier2: []groupQualityWarmMember{}}
+	// Replay keeps the startup timestamp's seconds. UsageWrites also carries the
+	// latest write before that same second within each natural minute, so a later
+	// write in the bucket cannot make a mid-minute cutoff look stale.
+	replayStart := now.Add(-groupQualityReplayWindow)
+	for step := 0; step < groupQualityReplaySteps; step++ {
+		if err := ctx.Err(); err != nil {
+			return nil, summary, err
+		}
+		cutoff := replayStart.Add(time.Duration(step) * groupQualityReplayStep)
+		cutoffMinute := cutoff.Truncate(time.Minute)
+		for writeIndex < len(writes) && writes[writeIndex].Minute.Before(cutoffMinute) {
+			if writes[writeIndex].LastWrite.After(observedAt) {
+				observedAt = writes[writeIndex].LastWrite
+			}
+			writeIndex++
+		}
+		if writeIndex < len(writes) && writes[writeIndex].Minute.Equal(cutoffMinute) {
+			current := writes[writeIndex].BeforeCutoff
+			if current.IsZero() && writes[writeIndex].LastWrite.Before(cutoff) {
+				current = writes[writeIndex].LastWrite
+			}
+			if current.After(observedAt) {
+				observedAt = current
+			}
+		}
+		if observedAt.IsZero() || observedAt.Before(cutoff.Add(-5*time.Minute)) {
+			for groupID, accounts := range members {
+				if !enabledGroups[groupID] {
+					continue
+				}
+				for _, account := range accounts {
+					if account.Platform != PlatformOpenAI {
+						continue
+					}
+					state := states[groupID][account.ID]
+					resetAt := resets[account.ID]
+					states[groupID][account.ID] = groupQualityStateAfterReset(state, resetAt)
+				}
+			}
+			summary.staleCutoffs++
+			continue
+		}
+		for right < len(observations) && observations[right].At.Before(cutoff) {
+			if right%256 == 0 {
+				if err := ctx.Err(); err != nil {
+					return nil, summary, err
+				}
+			}
+			right++
+		}
+		windowStart := cutoff.Add(-groupQualityReplayLookback)
+		for left < right && observations[left].At.Before(windowStart) {
+			left++
+		}
+		window := observations[left:right]
+		eligible, failed, softFailed := prepareGroupQualityObservations(window, cutoff, processStart, resets)
+		metricsAt, compositionAt := calculateGroupQualityMetrics(eligible, cutoff, nil, failed, softFailed, enabledGroups)
+		metrics, composition = metricsAt, compositionAt
+		for groupID, accounts := range members {
+			if err := ctx.Err(); err != nil {
+				return nil, summary, err
+			}
+			if !enabledGroups[groupID] {
+				continue
+			}
+			for _, account := range accounts {
+				if account.Platform != PlatformOpenAI {
+					continue
+				}
+				state := states[groupID][account.ID]
+				resetAt := resets[account.ID]
+				state = groupQualityStateAfterReset(state, resetAt)
+				metric := metrics[account.ID]
+				expected := groupQualityPrediction(metric, composition[groupID])
+				states[groupID][account.ID] = evaluateGroupQualityMember(cutoff, *normalizeGroupQualityGatePolicy(policies.Groups[strconv.FormatInt(groupID, 10)]).V3, metric, expected, state)
+			}
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, summary, err
+	}
+	next := &groupQualitySnapshot{GeneratedAt: now, Policies: policies, Metrics: metrics, Composition: composition, Members: map[int64]map[int64]groupQualityMemberSnapshot{}, Departed: map[int64]map[int64]groupQualityDeparted{}}
+	for groupID, accounts := range members {
+		if !enabledGroups[groupID] {
+			continue
+		}
+		p := normalizeGroupQualityGatePolicy(policies.Groups[strconv.FormatInt(groupID, 10)])
+		next.Members[groupID] = map[int64]groupQualityMemberSnapshot{}
+		for _, account := range accounts {
+			if account.Platform != PlatformOpenAI {
+				continue
+			}
+			state := states[groupID][account.ID]
+			metric := metrics[account.ID]
+			expected := groupQualityPrediction(metric, composition[groupID])
+			pinned := containsInt64(p.PinnedAccountIDs, account.ID)
+			tier := groupQualityTier(state, *p.V3, pinned, now)
+			member := groupQualityMemberSnapshot{AccountID: account.ID, State: state, Metric: metric, ExpectedP90Ms: expected, Tier: tier, Pinned: pinned}
+			next.Members[groupID][account.ID] = member
+			if tier == GroupQualityGateTierFail || tier == GroupQualityGateTierRetest {
+				dimensions := groupQualityWarmDimensions(state, now)
+				if len(dimensions) == 0 {
+					continue
+				}
+				entry := groupQualityWarmMember{AccountID: account.ID, GroupID: groupID, Dimensions: dimensions}
+				if tier == GroupQualityGateTierFail && len(summary.tier2) < groupQualityWarmMemberListLimit {
+					summary.tier2 = append(summary.tier2, entry)
+				}
+				if tier == GroupQualityGateTierRetest && len(summary.tier1) < groupQualityWarmMemberListLimit {
+					summary.tier1 = append(summary.tier1, entry)
+				}
+			}
+		}
+	}
+	return next, summary, nil
+}
+
+func groupQualityWarmDimensions(state groupQualityAccountState, now time.Time) []string {
+	names := [3]string{"ttft", "error", "cache"}
+	dimensions := state.dimensions()
+	out := make([]string, 0, len(dimensions))
+	for i, dimension := range dimensions {
+		if dimension.state() == "fail" || (dimension.state() == "none" && dimension.hasBad(now)) {
+			out = append(out, names[i])
+		}
+	}
+	return out
 }
 
 func (s *GroupQualityGateService) Stop() {
@@ -437,7 +759,7 @@ func (s *GroupQualityGateService) evaluate(ctx context.Context) error {
 	observedAt := now
 	var observationErr error
 	if len(groupIDs) > 0 {
-		observations, observedAt, observationErr = s.policyRepo.LoadObservations(ctx, ids, maxTime(now.Add(-groupQualityCompositionWindow), s.processStartedAt), now)
+		observations, observedAt, observationErr = s.policyRepo.LoadObservations(ctx, ids, now.Add(-groupQualityCompositionWindow), now)
 	}
 	stale := observationErr != nil || observedAt.Before(now.Add(-5*time.Minute))
 	metrics, composition := old.Metrics, old.Composition
@@ -474,9 +796,7 @@ func (s *GroupQualityGateService) evaluate(ctx context.Context) error {
 			state := previous.State
 			resetAt := resets[account.ID]
 			reset := !resetAt.Equal(state.ResetAt)
-			if reset {
-				state = groupQualityAccountState{ResetAt: resetAt}
-			}
+			state = groupQualityStateAfterReset(state, resetAt)
 			metric := metrics[account.ID]
 			expected := groupQualityPrediction(metric, composition[groupID])
 			if stale {

@@ -171,6 +171,67 @@ type lastResortCandidate struct {
 	held      bool
 }
 
+type lastResortLogMeta struct {
+	candidates int
+	reasons    map[string]int
+}
+
+func (m *lastResortLogMeta) addReason(reason string) {
+	if reason == "" {
+		return
+	}
+	if m.reasons == nil {
+		m.reasons = make(map[string]int)
+	}
+	m.reasons[reason]++
+}
+
+func (m lastResortLogMeta) penaltyReason() string {
+	if len(m.reasons) == 0 {
+		return "none"
+	}
+	keys := make([]string, 0, len(m.reasons))
+	for reason := range m.reasons {
+		keys = append(keys, reason)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, reason := range keys {
+		parts = append(parts, reason+":"+strconv.Itoa(m.reasons[reason]))
+	}
+	return strings.Join(parts, ",")
+}
+
+func lastResortShareLogMeta(round *shareLastResortRound, avoided map[int64]struct{}, skipped map[int64]sharesched.Reason) lastResortLogMeta {
+	meta := lastResortLogMeta{candidates: len(round.cands)}
+	for _, candidate := range round.cands {
+		if _, ok := avoided[candidate.AccountID]; ok {
+			meta.addReason("session_avoid")
+		}
+		if reason := round.penaltyReasons[candidate.AccountID]; reason != "" {
+			meta.addReason(reason)
+		}
+		if candidate.Eligible && !candidate.Excluded {
+			continue
+		}
+		if candidate.Excluded {
+			if _, isAvoided := avoided[candidate.AccountID]; !isAvoided {
+				meta.addReason("request_excluded")
+			}
+		} else {
+			reason := string(candidate.Reason)
+			if reason == "" {
+				reason = "ineligible"
+			}
+			meta.addReason(reason)
+		}
+	}
+	for _, reason := range skipped {
+		meta.addReason(string(reason))
+	}
+	return meta
+}
+
 // pickLastResort orders candidates by priority (lower first), then by the
 // latency hold preference, then the earliest end of the penalty (design §4.3).
 func pickLastResort(cands []lastResortCandidate) []lastResortCandidate {
@@ -192,7 +253,8 @@ func pickLastResort(cands []lastResortCandidate) []lastResortCandidate {
 // tiers, drain, weights and cache domains apply exactly as in normal
 // placement. Hard states and every other gate still exclude.
 type shareLastResortRound struct {
-	cands []sharesched.Candidate
+	cands          []sharesched.Candidate
+	penaltyReasons map[int64]string
 	// accounts are the eligible accounts with their soft restrictions
 	// cleared, as they serve.
 	accounts  map[int64]*Account
@@ -218,7 +280,7 @@ func (s *ShareSchedulingService) newShareLastResortRound(groupID int64, accounts
 	if penalty == nil {
 		penalty = resiliencePenaltyOf
 	}
-	r := &shareLastResortRound{accounts: map[int64]*Account{}, recoverAt: map[int64]time.Time{}}
+	r := &shareLastResortRound{accounts: map[int64]*Account{}, recoverAt: map[int64]time.Time{}, penaltyReasons: map[int64]string{}}
 	for i := range accounts {
 		acc := accounts[i]
 		if include != nil && !include(&acc) {
@@ -226,6 +288,9 @@ func (s *ShareSchedulingService) newShareLastResortRound(groupID int64, accounts
 		}
 		c := s.shareCandidate(groupID, &acc, now)
 		tier, recoverAt, why := penalty(&acc, model, now)
+		if why != "" {
+			r.penaltyReasons[acc.ID] = why
+		}
 		_, isAvoided := avoided[acc.ID]
 		if acc.ID == boundID && !isAvoided && tier != resilience.TierHard {
 			r.keep = acc.ID
@@ -442,17 +507,30 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 	owner := resilience.StateFrom(ctx).StickyOwner()
 	now := time.Now()
 	var cands []lastResortCandidate
+	meta := lastResortLogMeta{candidates: len(accounts)}
 	for i := range accounts {
 		acc := accounts[i]
+		_, isAvoided := avoided[acc.ID]
+		if isAvoided {
+			meta.addReason("session_avoid")
+		}
 		if _, excluded := excludedIDs[acc.ID]; excluded {
+			if !isAvoided {
+				meta.addReason("request_excluded")
+			}
 			continue
 		}
-		tier, recoverAt, _ := resiliencePenaltyOf(&acc, requestedModel, now)
+		tier, recoverAt, penaltyReason := resiliencePenaltyOf(&acc, requestedModel, now)
+		meta.addReason(penaltyReason)
 		if !lastResortTierAllowed(tier, acc.ID, avoided) {
+			if tier == resilience.TierNone {
+				meta.addReason("tier_none")
+			}
 			continue
 		}
 		candidate := withoutSoftPenalties(acc, now)
 		if reason, _ := gates.candidateReason(gateCtx, candidate, acc.ID == owner, now); reason != "" {
+			meta.addReason(string(reason))
 			continue
 		}
 		held := platform == PlatformAnthropic && s.anthropicLatencyHoldSnapshot(&acc, anthropicLatencyModel(ctx, requestedModel), now).Held
@@ -464,20 +542,23 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 	for _, c := range pickLastResort(cands) {
 		acc, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *groupID, c.account, requestedModel, false, resiliencePenaltyOf, nil)
 		if !ok {
+			meta.addReason("verify_failed")
 			continue
 		}
 		c.account = acc
 		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, acc.Concurrency)
 		if err != nil || result == nil || !result.Acquired {
+			meta.addReason("capacity")
 			busy = append(busy, c)
 			continue
 		}
 		if !s.checkAndRegisterSession(ctx, acc, sessionHash) {
+			meta.addReason("session_limit")
 			result.ReleaseFunc()
 			resilience.StateFrom(ctx).MarkLastResortSessionLimited()
 			continue
 		}
-		s.noteLastResort(ctx, groupID, acc, c.recoverAt, avoided)
+		s.noteLastResort(ctx, groupID, acc, c.recoverAt, avoided, meta)
 		sel, err := s.newSelectionResult(ctx, acc, true, result.ReleaseFunc, nil)
 		if err != nil {
 			result.ReleaseFunc()
@@ -489,10 +570,11 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 	for _, c := range busy {
 		acc := c.account
 		if !s.checkAndRegisterSession(ctx, acc, sessionHash) {
+			meta.addReason("session_limit")
 			resilience.StateFrom(ctx).MarkLastResortSessionLimited()
 			continue
 		}
-		s.noteLastResort(ctx, groupID, acc, c.recoverAt, avoided)
+		s.noteLastResort(ctx, groupID, acc, c.recoverAt, avoided, meta)
 		sel, err := s.newSelectionResult(ctx, acc, false, nil, &AccountWaitPlan{
 			AccountID:      acc.ID,
 			MaxConcurrency: acc.Concurrency,
@@ -507,7 +589,7 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 	return nil
 }
 
-func (s *GatewayService) noteLastResort(ctx context.Context, groupID *int64, account *Account, recoverAt time.Time, avoided map[int64]struct{}) {
+func (s *GatewayService) noteLastResort(ctx context.Context, groupID *int64, account *Account, recoverAt time.Time, avoided map[int64]struct{}, meta lastResortLogMeta) {
 	resilience.StateFrom(ctx).SetLastResort(account.ID)
 	s.resilience.noteLastResortSelected(account.ID)
 	s.shareScheduling.noteResilienceReason(derefGroupID(groupID), sharesched.ReasonLastResortSoft)
@@ -518,12 +600,16 @@ func (s *GatewayService) noteLastResort(ctx context.Context, groupID *int64, acc
 		"platform", account.Platform,
 		"recover_at", recoverAt,
 		"reason", string(sharesched.ReasonLastResortSoft),
+		"candidates", meta.candidates,
+		"penalty_reason", meta.penaltyReason(),
 	)...)
 	if _, sessionAvoided := avoided[account.ID]; sessionAvoided {
 		slog.Warn("resilience.last_resort_avoided", append(resilience.EventFields(ctx),
 			"group_id", derefGroupID(groupID),
 			"account_id", account.ID,
 			"reason", "session_avoid",
+			"candidates", meta.candidates,
+			"penalty_reason", meta.penaltyReason(),
 		)...)
 	}
 }
@@ -665,12 +751,21 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 	gateCtx := withResilienceLastResortGate(ctx)
 	now := time.Now()
 	var cands []lastResortCandidate
+	meta := lastResortLogMeta{candidates: len(accounts)}
 	for i := range accounts {
 		acc := accounts[i]
+		_, isAvoided := avoided[acc.ID]
+		if isAvoided {
+			meta.addReason("session_avoid")
+		}
 		if _, excluded := req.ExcludedIDs[acc.ID]; excluded {
+			if !isAvoided {
+				meta.addReason("request_excluded")
+			}
 			continue
 		}
 		if acc.Platform != platform || !acc.IsOpenAICompatible() {
+			meta.addReason("platform_mismatch")
 			continue
 		}
 		compactOutboundModel := ""
@@ -678,21 +773,29 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 			compactOutboundModel = s.openAICodexTicketOutboundModel(&acc, req.RequestedModel, true)
 		}
 		if iqGateBlocksRequest(&acc, req.RequestedModel, req.RequireCompact, compactOutboundModel) {
+			meta.addReason("threshold")
 			continue
 		}
-		tier, recoverAt, _ := s.resilienceOpenAIPenaltyOf(&acc, req.RequestedModel, now)
+		tier, recoverAt, penaltyReason := s.resilienceOpenAIPenaltyOf(&acc, req.RequestedModel, now)
+		meta.addReason(penaltyReason)
 		if !lastResortTierAllowed(tier, acc.ID, avoided) {
+			if tier == resilience.TierNone {
+				meta.addReason("tier_none")
+			}
 			continue
 		}
 		candidate := withoutSoftPenalties(acc, now)
 		if reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(gateCtx, candidate, platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability, s); reason != "" &&
 			(reason != "model_rate_limited" || !lastResortModelLimitSoft(gateCtx, candidate, req.RequestedModel, req.RequireCompact, compactOutboundModel)) {
+			meta.addReason(reason)
 			continue
 		}
-		if ok, _ := gate.isAccountRequestCompatibleReason(gateCtx, candidate, req); !ok {
+		if ok, reason := gate.isAccountRequestCompatibleReason(gateCtx, candidate, req); !ok {
+			meta.addReason(string(reason))
 			continue
 		}
 		if !gate.isAccountTransportCompatible(candidate, req.RequiredTransport) {
+			meta.addReason("transport_mismatch")
 			continue
 		}
 		held := resilience.Current().Enabled && s.openAIAccountLatencyHoldSnapshot(candidate, canonicalOpenAIAccountSchedulingModel(candidate, req.RequestedModel), now).Held
@@ -715,22 +818,24 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 	for _, c := range cands {
 		acc, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *req.GroupID, c.account, req.RequestedModel, req.RequireCompact, s.resilienceOpenAIPenaltyOf, compactOutboundForFresh)
 		if !ok {
+			meta.addReason("verify_failed")
 			continue
 		}
 		c.account = acc
 		verified = append(verified, c)
 		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, s.codexEffectiveConcurrency(ctx, acc.ID, acc.Concurrency))
 		if err == nil && result != nil && result.Acquired {
-			s.noteOpenAILastResort(ctx, req.GroupID, acc, c.recoverAt, avoided)
+			s.noteOpenAILastResort(ctx, req.GroupID, acc, c.recoverAt, avoided, meta)
 			return attachSelectionProfitGate(gateCtx, &AccountSelectionResult{Account: acc, Acquired: true, ReleaseFunc: result.ReleaseFunc})
 		}
+		meta.addReason("capacity")
 	}
 	if len(verified) == 0 {
 		return nil
 	}
 	cfg := s.schedulingConfig()
 	acc := verified[0].account
-	s.noteOpenAILastResort(ctx, req.GroupID, acc, verified[0].recoverAt, avoided)
+	s.noteOpenAILastResort(ctx, req.GroupID, acc, verified[0].recoverAt, avoided, meta)
 	return attachSelectionProfitGate(gateCtx, &AccountSelectionResult{
 		Account: acc,
 		WaitPlan: &AccountWaitPlan{
@@ -742,7 +847,7 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 	})
 }
 
-func (s *OpenAIGatewayService) noteOpenAILastResort(ctx context.Context, groupID *int64, account *Account, recoverAt time.Time, avoided map[int64]struct{}) {
+func (s *OpenAIGatewayService) noteOpenAILastResort(ctx context.Context, groupID *int64, account *Account, recoverAt time.Time, avoided map[int64]struct{}, meta lastResortLogMeta) {
 	if account != nil && account.IsOpenAI() {
 		gate, _ := ctx.Value(groupQualityGateContextKey{}).(*openAIGroupQualityGate)
 		if gate != nil && gate.service != nil && !gate.exempt && !groupQualityGateExempt(ctx) &&
@@ -761,12 +866,16 @@ func (s *OpenAIGatewayService) noteOpenAILastResort(ctx context.Context, groupID
 		"platform", account.Platform,
 		"recover_at", recoverAt,
 		"reason", string(sharesched.ReasonLastResortSoft),
+		"candidates", meta.candidates,
+		"penalty_reason", meta.penaltyReason(),
 	)...)
 	if _, sessionAvoided := avoided[account.ID]; sessionAvoided {
 		slog.Warn("resilience.last_resort_avoided", append(resilience.EventFields(ctx),
 			"group_id", derefGroupID(groupID),
 			"account_id", account.ID,
 			"reason", "session_avoid",
+			"candidates", meta.candidates,
+			"penalty_reason", meta.penaltyReason(),
 		)...)
 	}
 }
@@ -825,6 +934,9 @@ func (s *OpenAIGatewayService) AvoidOpenAIStateAccount(ctx context.Context, grou
 // threshold, or a P1-B post-output signal, deletes the binding (owner-checked)
 // and avoids the account for the session (design §4.1-§4.2).
 func (rec *sessionFailureRecorder) Failure(ctx context.Context, groupID int64, sessionHash string, accountID int64, c resilience.Category) {
+	if rec != nil && rec.r != nil {
+		rec.r.terminalRejections.reset(groupID, sessionHash, accountID)
+	}
 	cfg := resilience.Current()
 	if rec == nil || rec.r == nil || rec.r.store == nil || !cfg.SessionOn() || !c.CountsForSession() {
 		return
@@ -869,6 +981,9 @@ func (rec *sessionFailureRecorder) Failure(ctx context.Context, groupID int64, s
 // Success resets the session's failure count of the account. Only sessions
 // this instance saw failing touch Redis, so the common path costs nothing.
 func (rec *sessionFailureRecorder) Success(ctx context.Context, groupID int64, sessionHash string, accountID int64) {
+	if rec != nil && rec.r != nil {
+		rec.r.terminalRejections.reset(groupID, sessionHash, accountID)
+	}
 	if rec == nil || rec.r == nil || rec.r.store == nil || !rec.r.sessionHadFailures(groupID, sessionHash) {
 		return
 	}

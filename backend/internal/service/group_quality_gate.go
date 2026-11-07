@@ -159,7 +159,15 @@ type GroupQualityObservation struct {
 	PreviousPromptTokens int64
 	CacheReadTokens      int64
 	CacheCreationTokens  int64
+	TTFTEligible         bool
 }
+
+const (
+	GroupQualityReplayMaxObservationRows = 200_000
+	GroupQualityReplayMaxRawUsageRows    = GroupQualityReplayMaxObservationRows
+	GroupQualityReplayMaxRawErrorEvents  = GroupQualityReplayMaxObservationRows
+	GroupQualityReplayMaxUsageWriteRows  = 10_000
+)
 
 // IsGroupQualitySoftFailure is the shared legacy classifier also used by
 // recent health. V3 excludes first-output cutoffs separately.
@@ -191,6 +199,20 @@ type GroupQualityGateRepository interface {
 	CompareAndSwapPolicies(context.Context, int, GroupQualityGatePolicies) (GroupQualityGatePolicies, error)
 	LoadMembers(context.Context, []int64) (map[int64][]Account, error)
 	LoadObservations(context.Context, []int64, time.Time, time.Time) ([]GroupQualityObservation, time.Time, error)
+	LoadObservationsForReplay(context.Context, []int64, time.Time, time.Time) (GroupQualityReplayData, error)
+}
+
+// GroupQualityUsageWrite contains the latest write for a natural minute and,
+// when present, the latest write before the replay cutoff's second offset.
+type GroupQualityUsageWrite struct {
+	Minute       time.Time
+	LastWrite    time.Time
+	BeforeCutoff time.Time
+}
+
+type GroupQualityReplayData struct {
+	Observations []GroupQualityObservation
+	UsageWrites  []GroupQualityUsageWrite
 }
 
 // GroupQualityGateStatus matches the v3 admin contract.
@@ -334,6 +356,13 @@ type groupQualityAccountState struct {
 	Error   groupQualityDimensionState
 	Cache   groupQualityDimensionState
 	ResetAt time.Time
+}
+
+func groupQualityStateAfterReset(state groupQualityAccountState, resetAt time.Time) groupQualityAccountState {
+	if !resetAt.Equal(state.ResetAt) {
+		return groupQualityAccountState{ResetAt: resetAt}
+	}
+	return state
 }
 
 func (s groupQualityAccountState) dimensions() [3]groupQualityDimensionState {

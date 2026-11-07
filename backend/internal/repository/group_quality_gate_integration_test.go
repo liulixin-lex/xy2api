@@ -89,6 +89,10 @@ func TestGroupQualityGateV3RepositoryObservations(t *testing.T) {
 	add("null-column", "null", "m", keys[0], groups[0], accounts[0], now.Add(-time.Minute), nil, true, 8000)
 	add("other-platform", "foreign", "m", keys[0], groups[0], accounts[2], now.Add(-time.Second), &duration, true, 8000)
 	add("composition-old", "old", "m", keys[0], groups[0], accounts[0], now.Add(-5*time.Hour), nil, true, 8000)
+	add("lag-three-prev", "lag-three", "m", keys[0], groups[0], accounts[0], now.Add(-6*time.Hour-3*time.Minute), nil, true, 8000)
+	add("lag-three-next", "lag-three", "m", keys[0], groups[0], accounts[0], now.Add(-6*time.Hour), &duration, true, 8000)
+	add("lag-six-prev", "lag-six", "m", keys[0], groups[0], accounts[0], now.Add(-6*time.Hour-6*time.Minute), nil, true, 8000)
+	add("lag-six-next", "lag-six", "m", keys[0], groups[0], accounts[0], now.Add(-6*time.Hour), &duration, true, 8000)
 	addError := func(id string, events []map[string]any) {
 		t.Helper()
 		raw, err := json.Marshal(events)
@@ -130,6 +134,8 @@ func TestGroupQualityGateV3RepositoryObservations(t *testing.T) {
 	require.False(t, find("switch-next").StrictContinuation)
 	require.Nil(t, find("null-column").AttemptFirstOutputMs, "never fall back to semantic/end-to-end TTFT")
 	require.True(t, find("composition-old").At.Before(now.Add(-2*time.Hour)), "six-hour composition includes older request shape")
+	require.True(t, find("lag-three-next").StrictContinuation, "predecessor three minutes before window is included for LAG")
+	require.False(t, find("lag-six-next").StrictContinuation, "predecessor six minutes before window remains excluded")
 	failures, softCopies, emptyCopies := 0, 0, 0
 	for _, o := range observations {
 		require.NotEqual(t, accounts[2], o.AccountID, "only OpenAI contributes")

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"sync"
@@ -99,11 +100,13 @@ func startSSEKeepalive(c *gin.Context, firstDelay, interval time.Duration, frame
 		return func() {}
 	}
 	originalWriter := c.Writer
+	// A comment can commit before the first beat; retain its scheduled phase.
 	k := &openAICompactSSEKeepalive{
-		writer:   originalWriter,
-		stopped:  true,
-		frame:    frame,
-		protocol: protocol,
+		writer:    originalWriter,
+		stopped:   true,
+		frame:     frame,
+		protocol:  protocol,
+		lastWrite: time.Now().Add(firstDelay - interval),
 	}
 	if c.Request != nil {
 		k.ctx = c.Request.Context()
@@ -206,15 +209,69 @@ func (k *openAICompactSSEKeepalive) beat(generation uint64) bool {
 		frame = []byte(": keepalive\n\n")
 	}
 	n, err := k.writer.Write(frame)
-	k.bytes += n
-	k.lastWrite = time.Now()
+	if err == nil && n != len(frame) {
+		err = io.ErrShortWrite
+	}
 	if err != nil {
 		k.closed = true
 		k.markStoppedLocked()
 		return false
 	}
+	k.bytes += n
+	k.lastWrite = time.Now()
 	k.writer.Flush()
 	return true
+}
+
+// writeOpenAIStreamKeepalive preserves the request heartbeat for a later attempt.
+func writeOpenAIStreamKeepalive(c *gin.Context, w gin.ResponseWriter, frame []byte, refreshClock bool) (int, error) {
+	if k := keepaliveFrom(c); k != nil {
+		k.mu.Lock()
+		if !k.closed {
+			defer k.mu.Unlock()
+			k.markStoppedLocked()
+			if !k.started {
+				k.writer.WriteHeader(http.StatusOK)
+				k.started = true
+				k.noteCommitted()
+			}
+			n, err := k.writer.Write(frame)
+			if err == nil && n != len(frame) {
+				err = io.ErrShortWrite
+			}
+			if err != nil {
+				// A partial frame is irreversible output, not a heartbeat
+				// that can be deducted before another attempt.
+				k.closed = true
+				return n, err
+			}
+			k.bytes += n
+			if refreshClock {
+				k.lastWrite = time.Now()
+			}
+			return n, err
+		}
+		k.mu.Unlock()
+	}
+	n, err := w.Write(frame)
+	if err == nil && n != len(frame) {
+		err = io.ErrShortWrite
+	}
+	if err == nil {
+		recordOpenAIStreamKeepaliveBytes(c, n)
+	}
+	return n, err
+}
+
+func openAIKeepaliveLastWrite(c *gin.Context) time.Time {
+	if k := keepaliveFrom(c); k != nil {
+		k.mu.Lock()
+		defer k.mu.Unlock()
+		if k.started {
+			return k.lastWrite
+		}
+	}
+	return time.Now()
 }
 
 // Stop permanently closes the heartbeat; it cannot resume on a later attempt.

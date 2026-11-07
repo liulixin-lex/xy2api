@@ -11,7 +11,7 @@ import (
 
 // EventFields correlates resilience events with access and operations logs.
 // A separate gateway_request_id always retains the locally generated UUID.
-// Missing observations are explicit zero values; no payloads or keys are logged.
+// Missing observations are explicit zero values; no payloads or credentials are logged.
 func EventFields(ctx context.Context) []any {
 	return resilienceEventFields(ctx, false)
 }
@@ -37,10 +37,12 @@ func resilienceEventFields(ctx context.Context, preOutput bool) []any {
 		model = st.Model()
 	}
 	var releaseEvent string
+	var schema PreludeReleaseSchema
 	var releaseMS, delivered, elapsed int64
 	if st != nil {
 		st.mu.Lock()
 		releaseEvent, releaseMS = st.prelude.releaseEvent, st.prelude.releaseAfterCreatedMS
+		schema = st.prelude.schema
 		st.mu.Unlock()
 	}
 	if !preOutput {
@@ -50,6 +52,8 @@ func resilienceEventFields(ctx context.Context, preOutput bool) []any {
 		"request_id", requestID, "gateway_request_id", st.GatewayRequestID(), "model", model,
 		"delivered_bytes", delivered, "ms_since_first_output", elapsed,
 		"prelude_release_event", releaseEvent, "prelude_release_ms", releaseMS,
+		"prelude_release_item_type", schema.ItemType, "prelude_release_item_keys", schema.ItemKeys,
+		"prelude_release_has_encrypted", schema.HasEncrypted,
 	}
 }
 

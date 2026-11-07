@@ -132,17 +132,18 @@ func (s *anthropicStreamStage) submit(block string) (resilience.EventClass, erro
 }
 
 func (s *anthropicStreamStage) heartbeat(block string) error {
+	var n int
+	var err error
 	if s.holding() {
 		block = ": ping\n\n"
+		n, err = writeOpenAIStreamKeepalive(s.c, s.c.Writer, []byte(block), true)
+	} else {
+		n, err = io.WriteString(s.c.Writer, block)
 	}
-	n, err := io.WriteString(s.c.Writer, block)
 	if err == nil && n != len(block) {
 		err = io.ErrShortWrite
 	}
 	if err == nil {
-		if s.holding() {
-			recordOpenAIStreamKeepaliveBytes(s.c, n)
-		}
 		s.c.Writer.Flush()
 	}
 	if err != nil {

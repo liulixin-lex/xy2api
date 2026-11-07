@@ -6,14 +6,26 @@
 
 ## 当前交接状态
 
-- **零中断加密态与路由实施（2026-11-06 12:30 UTC；PR #201 已开、CI 全绿、冒烟完成，未合并）**：分支 `feat/encrypted-routing-20261105`，已普通合并 main（0.5.4），本条所在提交即 PR 头。
-  - main 已发布 0.5.4（只读 MCP），本变更随下一个版本发布。
-  - 范围：空白占位不算输出、Codex 输出前 ping、流内包装错误帧、M3 状态类同号修复与一次换号、输出前流内 forbidden 软冷却、`resilience.*` 计数；OpenSpec `encrypted-routing-20261105`。无迁移、无新开关、无前端改动。
-  - 门禁：代码最终头 `777597cd2` 13 项全过（gofmt、三种 vet、lint 0、unit 68 包 30,955 项、`ci_gate.py` race 525 项 0 跳过、M3 定向 race、integration 60 包、docs、干净树 audit、scheduler-diff）。其后只有一个 handler 测试补强（handler 全量 unit 与 lint 复跑通过）和文档提交。
-  - 两路红队对全部开发提交与集成冲突处理签字，无未关闭的 P0–P2。
-  - PR #201：用户授权推送并开 PR。合并 main 后追加依赖升级（brotli 1.2.7、klauspost/compress 1.20.2，修复新收录的 GO-2026-6888 / GO-2026-6865）；CI 20 项全绿。push 一路有一次跨实例缓存失效用例超时，同头 PR 一路通过，单次重跑通过，记为偶发。
-  - Codex 0.166 冒烟（tasks 3.4，PR 头 `e596bc670` 的隔离临时网关）：三个测试上游普通提示均通过，单次 created，观察到空白暂存；首输出前等待 34–51 秒仅靠 ping 维持，12 秒空闲超时未触发。M3 未能在真实上游触发：测试上游对构造的 agent_message 一律返回通用 400，由单测与 Forward 衔接回归覆盖。
-  - 待用户：合并、发版、镜像固化与部署授权。详见“进行中的工作”。
+- **0.5.6 候选（2026-11-07 02:25 UTC；集成与全量门禁完成，未推送）**：集成分支 `feat/enc-routing-followups-20261106`，已普通合并 main（含 PR #202 文档）。本条所在提交为候选头。
+  - 范围（各项均为通用机制，不针对任何单一上游）：
+    - 首包前请求级心跳连续性：重试、换号、直通重放、兼容与转换流交接时不断拍、不重复拍；心跳只写出一半时按已输出处理并停拍，不会换号重放半截流。
+    - 输出边界恢复空值额外字段容忍：白名单外值为 null、空串、空数组、空对象的字段视同缺省。
+    - 输出边界 schema 观测：只记键和类型，最多 32 个键、256 字节。
+    - 明确的模型不可用错误换号：400/404，或带明确文案的 5xx；做号×模型冷却，不罚号；有跨主机护栏；全部候选都不支持时原样返回上游状态和脱敏错误体，不带重试建议。
+    - 会话级未知终止拒绝避号：进程内有界状态，多实例下各自计数，重启清零；排除 401/403、内容安全与策略屏蔽、上下文超限；跨主机复现后停止避号。
+    - 5xx 不再仅凭 `invalid_request_error` 判为请求级错误；第二台主机复现即止损。
+    - 协作别名历史冲突修复：不改开关语义和默认值。
+    - 选号诊断：`openai.sticky_bypass`；`last_resort` 补 `candidates` 和 `penalty_reason`。
+    - 门槛热启动：错误维、缓存维和坏记忆由 6 h 重放恢复；首字维照旧重学；载入前先做行数预检，超限退回旧行为。
+  - 无迁移、无新开关、无前端改动。
+  - 门禁：代码最终头 `f567f1e24` 13 项全过（unit 69 包 31,101 项、integration 16,576 项、`ci_gate.py` race 536 项 0 跳过、M3 定向 race、lint 0、docs、干净树 audit、scheduler-diff）。第一轮 `8e2ca2bcd` 在全仓 unit 抓到两处心跳失败（半截写出计数、取消用例的时序），修复后重跑通过。
+  - 两路红队对全部开发提交签字，无未关闭的 P0–P2。已知缺口：明确模型不可用的未包装流内错误；`prelude_staging` 关闭时兼容路径的 ping；槽位等待时的 ping 会关闭请求级心跳（P3，基线既有）。
+  - 不含：删除 P1-B 加密守卫读点（等 0.5.5 观察期结束并经用户授权）；门槛首字恢复连击与超时判慢样本（目标 0.5.7）。
+  - 待用户：推送、PR、是否先在备用机做真实上游冒烟、合并、发版、部署。本地记录在 `.work/tasks/20261106-encrypted-routing-followups/`。
+
+- **0.5.5 已正式发布（2026-11-06；未部署）**：PR #201 已合并，发布提交 `0c3cc6f8b85e3df10dbd5238aae8eb2dcc87b44d`，标签 `v0.5.5`。零中断加密态与路由：空白占位不算输出、Codex 输出前 ping、流内包装错误帧、M3 状态类同号修复与一次换号、输出前流内 forbidden 软冷却、`resilience.*` 最小计数；另含 brotli、klauspost/compress 漏洞修复。无迁移、无新开关、无前端改动。
+  - 两路 CI 共 20 项全绿（无重跑）；Release 运行 42220535877 成功。5 平台安装包 SHA256、Linux arm64 `-version`（amd64 未在本机执行）、GHCR amd64/arm64 版本与 commit 标签均已核验，latest 指向本版。镜像固化、部署与上线验收待用户授权，遗留见“未结事项”。详细记录已归档。
+  - （2026-11-07 02:25 UTC 追记）用户另派 agent 于 2026-11-06 13:24 UTC 将 0.5.5 部署到生产，PM 只读核实了镜像版本与 revision。线上验收 tasks §4.3 判为有条件通过：核心修复生效，同时段对照没有回退的证据；“整体可见失败下降”待 0.5.6 上线后验证。
 
 - **0.5.4 已正式发布（2026-11-06；未部署）**：PR #199 已合并，发布提交2356b8b200eb567defdd6fe3e3939d5a5ec017e2，标签v0.5.4。只读MCP含29工具，默认关闭；迁移290/291随包提供，生产启用前按runbook配置最小权限并验收目标环境。
   - 两路完整CI共20项检查全绿；Release运行42083934644成功。5平台安装包及SHA256、Linux amd64版本输出、GHCR amd64/arm64版本与commit标签均已核验，latest指向本版。生产和指定商业Host未验收；发布不等于生产启用。详细记录已归档。
@@ -36,9 +48,9 @@
   - （20:17 UTC 追记，collab-plaintext-impl）预检 2a/2b 已在实施任务中经用户授权完成；实施已随 0.5.3 发布（PR #196），实施记录已归档，遗留见“未结事项”。
 - **Claude 判慢让位红队 A r4（2026-11-03 13:20 UTC）**：`737e7c7e4` 的 r3 P1 已闭合，签字已追加至本地 `implementation/redteam_astra_r2.md`；原 overlay 与正式回归均新过旧失败，目标树干净。登记已原样归档；只读复核未改代码、未提交。
 
-### 版本与环境速览（2026-11-06：0.5.4 已发布，生产状态以重新核实为准）
+### 版本与环境速览（2026-11-06：0.5.5 已发布，生产状态以重新核实为准）
 
-- 最新产品版本 XY2API v0.5.4（2026-11-06 正式发布），Sub2API 兼容基线 0.2.15，迁移共336项（本版新增290/291）。本轮未部署，生产版本需独立重新核实。
+- 最新产品版本 XY2API v0.5.5（2026-11-06 正式发布），Sub2API 兼容基线 0.2.15，迁移共336项（0.5.5 无新迁移，最后为 0.5.4 新增的 290/291）。0.5.4、0.5.5 均未部署，生产版本需独立重新核实。
 - 生产：2026-11-03 只读核实运行 0.5.1（02:09 UTC 上线）；`ops_monitoring_enabled=true`，门槛策略第 23 版（04:20 UTC），五个 OpenAI 门槛组（A–E）均启用质量门槛与利润门，低倍率优先已开。外部状态以重新核实为准。
 - 预上线主机仍运行 0.4.2 的浸泡候选 `0ad63fab7`，换成正式镜像需要授权。
 - 上游：Sub2API v0.2.17 已发布、尚未同步（2026-10-19 定时同步的 prepare 失败），需按 [`UPSTREAM_SYNC.md`](UPSTREAM_SYNC.md) 另开任务。
@@ -52,6 +64,7 @@
 
 | 版本 | 日期 | 发布提交（相关 PR） | 主要内容 | 迁移 |
 |---|---|---|---|---|
+| 0.5.5 | 2026-11-06 | `0c3cc6f8b`（#201） | 零中断加密态与路由：空白占位不算输出、Codex 输出前 ping 心跳、流内包装错误帧校验与路由、M3 状态类同号修复与一次换号、输出前流内 forbidden 软冷却、`resilience.*` 最小计数；brotli 1.2.7、klauspost/compress 1.20.2 漏洞修复（GO-2026-6888、GO-2026-6865），见 [`GATEWAY_RESILIENCE.md`](GATEWAY_RESILIENCE.md)、OpenSpec `encrypted-routing-20261105` | — |
 | 0.5.4 | 2026-11-06 | 2356b8b20（#199） | 29工具只读MCP、OAuth授权与连接管理、在线账号权限和独立只读Reader，默认关闭；发布前端构建堆调整，见 [部署runbook](../deploy/MCP_READONLY.md) | 290、291 |
 | 0.5.3 | 2026-11-04 | `92830a0d2`（#196、#197） | 会话状态类拒绝按请求级处理与观测（`state_rejection`）；Codex 协作消息明文通道（默认关闭、按站灰度），见 [`GATEWAY_RESILIENCE.md`](GATEWAY_RESILIENCE.md) §4.12、§4.14 | — |
 | 0.5.2 | 2026-11-04 | `f204d00bb`（#191、#192、#193、#194、#195） | OpenAI 分组质量门槛 v3、判慢让位与急性保护；Claude 判慢让位与粘性迁出；账号页近期表现第 2 版；输出后带内失败补记；会话状态保护，见 [`GROUP_QUALITY_GATE.md`](GROUP_QUALITY_GATE.md) | 289 |
@@ -78,6 +91,13 @@
 
 ### 未结事项（2026-10-31 汇总；动手前重新核实）
 
+- **零中断加密态与路由（0.5.5）**：
+  - 部署需用户授权。部署前按 OpenSpec `encrypted-routing-20261105` tasks 4.1 核实当前运行版本、固化可回退镜像并核对重建后的版本一致性。
+  - 上线不需要改生产设置：门槛 v3 的状态、投票与坏记忆只保存在进程内，样本下界包含进程启动时刻，所以部署重启后会自动清空并重新统计，不需要 ResetAt（见 `docs/GROUP_QUALITY_GATE.md`）；输出前暂存期间的流内心跳依赖 `gateway.stream_keepalive_interval`，生产使用缺省值 10 秒，部署时保持不变，不要设为 0。
+  - 上线后按 tasks 4.3 验收：Codex 可见失败总数、输出前最终失败按原因拆分（forbidden、5xx、首字超时、预算耗尽、M3 terminal），并盯占位站换号、首字超时、慢退避、额外上游调用和延迟迁移量。
+  - 证据缺口与观察项（不阻塞发布）：M3 未能在真实上游触发，以单测与 Forward 衔接回归为证；输出前心跳实测相邻最大间隔 8.5 秒（设定 5 秒），原因待查；心跳已提交响应头后到达的请求级 4xx 以 `response.failed` / `server_error` 收尾（基线行为）；OpenAI API Key 账号能力探测在 info 日志打印上游 base_url（基线行为）。
+  - proposal“不做”所列三项（明文默认生效与 conflict 修正、删除 P1-B 守卫读点、`sticky_bypass` 诊断）后续单独处理。
+  - 实施记录已归档，本地过程稿在 `.work/tasks/20261105-encrypted-routing/`（不入库）。
 - **Codex 协作明文通道与状态族（0.5.3）**：
   - 部署需用户授权。
   - 灰度按 `deploy/README.md`“Codex 协作消息明文通道”六步执行，先开 d0c7a8、c2a95e（gpt-6.1-sol、gpt-6-astra，API Key）。
@@ -114,36 +134,10 @@
 
 ## 进行中的工作
 
-- **20261105-encrypted-routing-impl**（2026-11-05 11:00 UTC 开始，Claude 主持与集成）：按本地 `.work/tasks/20261105-encrypted-routing/FINAL.md`（astra、Opus 已签字，用户 11-05 全部批准）实施“空白占位不算输出 + 包装错误帧 + 状态类同号学习重放与一次换号 + 通用 forbidden 软冷却 + 最小计数”，一次发布。实施交接与裁决在同目录 `implementation/`（不入库）。
-  - 集成分支 `feat/encrypted-routing-20261105`（Paseo 工作树 `enc-routing-integration`，基于 origin/main `381687250`）。
-  - 分工（用户 11-05 指定）：后端 gpt-6-astra xhigh 两路（甲：流式判定与包装帧；乙：状态机与 forbidden）；红队 astra xhigh（协议与客户端）与 Opus xhigh（路由与韧性）两路逆向审查。
-  - 授权：生产只读补数据。推送、PR、合并、发版、部署、镜像固化需在发布前再确认；测试 Key 待用户提供。
-  - 13:00 UTC：
-    - **分工调整**（用户追加）：PM 只调度；丙测试（预检、门禁，在独立 detached 检出中跑），丁合并集成。
-    - **设计稿**：DESIGN_A/B 经两路红队快审，裁决后开工。主要裁决：
-      - 同号重放留在 Forward 内；
-      - §3.4 只覆盖输出前的流内帧；
-      - 只有包装 400 进 M3，包装帧按“迟到的 HTTP 状态”路由；
-      - M3 终止改为 Codex 可重试的形式：未提交写 502，已提交写 `server_error`。这一条偏离 FINAL 原先的“写真 4xx”。
-    - **预检 1**：三个测试 Key 对应的三个上游，两个模型都接受占位形状；混合真实密文的情况未覆盖，因为拿不到有效的协作密文。
-    - 裁决全文在本地 `implementation/DECISIONS.md`。
-  - 11-06 08:20 UTC：
-    - 测试 Key 已由用户提供（三个，对应三个上游），只经环境变量使用，未落盘。
-    - 开发完成：甲的空白占位、包装帧、forbidden 衔接与心跳修复，乙的 M3 及审查修复，均由丁普通 merge 合入。
-    - 实施中相对 FINAL 的裁决（全文见本地 DECISIONS）：
-      - Responses 输出前心跳按客户端选择：Codex 写完整 ping 事件，其他客户端保留注释（要求首事件为 created 的 SDK 遇到 ping 会报错）；
-      - M3 批量 Bad 只在上游接受派生请求后写入，`[DONE]` 本身不算证据；DeepSeek/Kimi 归一化账号不启用 M3；M3 客户端与 ops 消息用固定模板；
-      - 包装 401/403 命中请求级拒绝时按请求级终止（HTTP 400 / 流内 failed，code 按拒绝语义）；
-      - 改写后的派生形状兜底只对非请求级 400/422。
-    - 已接受的已知差异：M3 终止不计入 turn cap；包装 401/403 上下文超限未提交时写 HTTP 400，Codex 0.166 不据此自动压缩；compact 回退的 retry ops 沿用基线观测口径。
-    - 未完成：发布前镜像固化；合并、发版、部署。均待用户决定。
-  - 11-06 12:30 UTC：
-    - PR #201 开出并 CI 全绿（见当前交接状态）。冒烟环境由 Opus 辅助搭建（用户要求加快进度）；管理员合规承诺经用户授权，仅在该次 tmpfs 临时库代为确认，已随库删除。
-    - 冒烟环境与本机临时目录已清理，Key、上游地址泄漏扫描均为 0。
-    - 后续观察项（不阻塞发布）：
-      - 输出前心跳实测相邻最大间隔 8.5 秒（设定 5 秒），按生产 10 秒间隔推算最坏约 20 秒；对 Codex 缺省设置无影响，原因待单独排查；
-      - 心跳已提交响应头后到达的请求级 4xx 以 `response.failed` / `server_error` 收尾，Codex 会按可重试处理（基线行为）；
-      - OpenAI API Key 账号的能力探测在 info 日志打印上游 base_url，且未配模型映射时用缺省探测模型，测试上游返回 404（基线行为）。
+- **20261106-encrypted-routing-followups**（2026-11-06 13:30 UTC 开始，Claude 任 PM 调度，后端 gpt-6-astra xhigh，红队 astra 与 Opus 两路）：0.5.5 后续任务（协作别名冲突、P1-B 守卫读点、选号诊断、心跳间隔），以及 0.5.5 上线后的线上报错分析与修复。0.5.6 候选见“当前交接状态”。另有两个分支未进 0.5.6：
+  - `feat/enc-followups-m5`（`722c8eb56`）：待两路审查、观察期结束和用户授权；
+  - `feat/enc-followups-o3`：开发中，目标 0.5.7。
+
 
 
 
@@ -1458,3 +1452,39 @@ pnpm --dir frontend run build
 - 验证：合并后本地 build、vet、定向 514 项、MCP unit；依赖升级后 govulncheck 可达漏洞 0、三包 unit；PR CI 20/20；冒烟结果见当前交接状态。
 - 卡点/风险：M3 未能在真实上游触发，仅有单测与 Forward 衔接回归证据；心跳相邻间隔偶见超过设定值。
 - 下一步：用户授权合并、发版、镜像固化与部署；上线后按 tasks §4.3 验收。
+
+### 2026-11-06 13:20 UTC — 20261106-release055-encrypted-routing — PR #201 合并与 0.5.5 发布完成
+
+- 请求/目标：用户授权 PR #201 CI 全绿后合并，并正式发版 0.5.5；不含生产部署、镜像固化、连接生产服务器或数据库、启用 MCP、修改生产设置或合并其他 PR。PM 调度，Claude 执行。
+- 开始状态：`feat/encrypted-routing-20261105` 头 `355666e0c`（文档提交，CI 运行中），工作树干净；origin/main `5d8b06a1a`。
+- 完成操作：
+  - 版本提交 `7324fc585`（`chore(release): bump version to 0.5.5`）：VERSION 与 `UPSTREAM_BASE.json` 改为 0.5.5，`docs/README.md` 中本变更的状态改为随 0.5.5 发布。`docs_consistency.json` 的 pins 与 `policy.json` 无产品版本 literal，无需同步。
+  - 新头 20 项检查全绿，无重跑：push CI 42216514599、PR CI 42216522927、Security Scan 42216514521 与 42216522960。
+  - 12:48 UTC 以 `--match-head-commit` 普通合并，合并提交 `0c3cc6f8b85e3df10dbd5238aae8eb2dcc87b44d` 与已测 head 的树相同（`100a726ea`）。
+  - annotated `v0.5.5`（标签对象 `ff590f85d036c4a6118ccb69e74cd5b085236ab9`，`--cleanup=verbatim`）指向合并提交，正文为面向用户的中文要点；未强推或改写 tag。
+  - 本任务在“当前交接状态”的小节和“进行中的工作”的条目已原样移到归档文件；遗留并入“未结事项”。
+- 修改文件：本文件、`PROJECT_MEMORY_ARCHIVE.md`、`openspec/changes/encrypted-routing-20261105/tasks.md`。
+- 验证：
+  - 版本提交：提交前 docs 检查与 `git diff --check`，提交后干净树 `sync.py audit`；按 release.yml 的 verify-version 逻辑本地核对 tag 格式、commit、VERSION 与兼容版本（临时本地 tag 已删除）。
+  - Release 42220535877：verify-version、build-frontend、release 均成功；正式版非 draft、非 prerelease，为 latest，正文保留 Markdown。
+  - 产物：5 平台安装包与 checksums.txt 的 SHA256 及 API digest 一致；Linux arm64 `-version` 报告 0.5.5、兼容 0.2.15 与合并提交；Linux amd64 未在本机执行，只读确认内嵌合并提交。
+  - GHCR：`0.5.5`、`latest`、`0.5`、`0` 为同一 index `sha256:b87983ac86856ddc25f02512ad939c9b32e0d35a57b8768e587576ea94d723db`；linux/amd64 `sha256:cfdd9b4b936f12100d924c0d0c4a125f26eafdc50e573d4563a46c106629d8a6`，linux/arm64 `sha256:f211a37f0a212844ed7bfebafebe78040ed9c9b337bc7e66de105af416506b0e`，version 与 revision 标签正确；`0.5.4` 摘要未变。
+  - 下载副本与解包目录已删除。本 PR：docs 检查与干净树 audit。
+- 卡点/风险：无发布阻断。未连接生产、未部署、未固化镜像。
+- 下一步：镜像固化、部署与上线验收待用户授权，见“未结事项”。
+
+### 2026-11-07 02:25 UTC — 20261106-encrypted-routing-followups — 0.5.6 集成与全量门禁完成，待推送授权
+
+- 请求/目标：用户 11-06 13:30 UTC 授权开后续任务；随后要求实时分析 0.5.5 上线后的生产报错、找出根因、规划方案并加入开发队列。所有改动必须适配普遍上游，不针对单一上游；单站问题走运维。
+- 开始状态：origin/main `0c3cc6f8b`（0.5.5），集成分支 `feat/enc-routing-followups-20261106`。
+- 完成操作：
+  - PM 只读分析生产数据（报错、恢复结局、站点级相关失败、门槛档位），分析员维护本地 ANALYSIS。
+  - 按分析结果立项：输出边界空值容忍、schema 观测、模型不可用换号、会话级避号、5xx 归类、门槛热启动。
+  - 心跳间隔诊断与修复，协作别名冲突修复，选号诊断。
+  - 各项均经两路红队审查后，按顺序普通合并：心跳、输出边界、Q 系列、协作别名与诊断、门槛热启动；版本号改为 0.5.6。
+- 修改文件：`backend/internal/{handler,resilience,service,repository}` 相关代码与测试，`docs/GATEWAY_RESILIENCE.md` 等文档，`tools/upstream-sync/policy.json`，版本文件。
+- 验证：`f567f1e24` 13 项门禁全过（见当前交接状态）；合并 main（只有文档）后跑了 docs 和干净树 audit。
+- 卡点/风险：
+  - 11-06 18:37–21:50 UTC，Opus 额度用尽导致监测中断约 3.4 h，已补查。
+  - 门槛热启动的行数预检把非 OpenAI 行也算进去了，非 OpenAI 流量大时会更早退回旧行为（偏安全）。
+- 下一步：等用户授权推送、PR、冒烟、合并、发版、部署；上线后按本地 PROD_ACCEPT_056 按站点和同一时段验收。

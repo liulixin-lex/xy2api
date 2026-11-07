@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -444,8 +445,73 @@ func TestGatewayConvertClientCancelBeforeOutputStopsUpstream(t *testing.T) {
 			got := gwAwait(t, done, 3*time.Second)
 			require.ErrorIs(t, got.err, context.Canceled)
 			require.Nil(t, got.result, "nothing to bill")
-			require.True(t, up.closed.Load(), "the upstream attempt is closed")
+			requireGatewayConvertUpstreamClosed(t, up)
 			require.Empty(t, w.Body())
+		})
+	}
+}
+
+func requireGatewayConvertUpstreamClosed(t *testing.T, up *gwUpstream) {
+	t.Helper()
+	// The baseline already closes asynchronously: the handler can return
+	// after the cancellation callback starts but before Close completes.
+	require.Eventually(t, up.closed.Load, 2*time.Second, 10*time.Millisecond, "the upstream attempt is closed")
+}
+
+type gwDelayedCloseUpstream struct {
+	*gwUpstream
+	closeStarted chan struct{}
+	allowClose   chan struct{}
+}
+
+func (u *gwDelayedCloseUpstream) Close() error {
+	close(u.closeStarted)
+	<-u.allowClose
+	return u.gwUpstream.Close()
+}
+
+func TestGatewayConvertClientCancelWaitsForAsyncClose(t *testing.T) {
+	for _, protocol := range []string{gatewayConvertResponses, gatewayConvertChat} {
+		t.Run(protocol, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				withResilienceSettings(t, nil)
+				w := newGWWriter()
+				c := gwContext(gwPathURL(protocol), w)
+				ctx, cancel := context.WithCancel(c.Request.Context())
+				defer cancel()
+				c.Request = c.Request.WithContext(ctx)
+				up := newGWUpstream(nil)
+				defer func() { _ = up.Close() }()
+				defer func() { _ = up.pw.Close() }()
+				body := &gwDelayedCloseUpstream{gwUpstream: up, closeStarted: make(chan struct{}), allowClose: make(chan struct{})}
+				releaseClose := sync.OnceFunc(func() { close(body.allowClose) })
+				defer releaseClose()
+				resp := up.response(nil)
+				resp.Body = body
+				converting, release := make(chan struct{}), make(chan struct{})
+				stream := gwConvertService(0, 0).newGatewayConvertStream(c, resp, gwTestAccount(), protocol, gwStreamModel, gatewayConvertHooks{
+					convert: func(*apicompat.AnthropicStreamEvent, string, bool) []string {
+						close(converting)
+						<-release
+						return nil
+					},
+				})
+				done := make(chan gatewayConvertOutcome, 1)
+				go func() { done <- stream.run() }()
+				up.send(t, gwMsgStart, gwTextStart)
+				<-converting
+				cancel()
+				<-body.closeStarted
+				close(release)
+				got := <-done
+				require.ErrorIs(t, got.err, context.Canceled)
+				require.True(t, got.noResult, "nothing to bill")
+				require.False(t, up.closed.Load(), "Close is still blocked after the handler returned")
+				releaseTimer := time.AfterFunc(50*time.Millisecond, releaseClose)
+				defer releaseTimer.Stop()
+				requireGatewayConvertUpstreamClosed(t, up)
+				require.Empty(t, w.Body())
+			})
 		})
 	}
 }

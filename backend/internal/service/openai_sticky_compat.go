@@ -11,6 +11,7 @@ import (
 
 	"github.com/cespare/xxhash/v2"
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
 type openAILegacySessionHashContextKey struct{}
@@ -244,14 +245,18 @@ func (s *OpenAIGatewayService) deleteStickySessionAccountID(ctx context.Context,
 		return nil
 	}
 
-	err := s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), primaryKey)
-	if !s.openAISessionHashReadOldFallbackEnabled() && !s.openAISessionHashDualWriteOldEnabled() {
-		return err
+	deleted, err := s.deleteOpenAIStickyBinding(ctx, derefGroupID(groupID), primaryKey)
+	confirmed := err == nil
+	if s.openAISessionHashReadOldFallbackEnabled() || s.openAISessionHashDualWriteOldEnabled() {
+		legacyKey := s.openAILegacySessionCacheKey(ctx, sessionHash)
+		if legacyKey != "" {
+			legacyDeleted, legacyErr := s.deleteOpenAIStickyBinding(ctx, derefGroupID(groupID), legacyKey)
+			deleted = deleted || legacyDeleted
+			confirmed = confirmed && legacyErr == nil
+		}
 	}
-
-	legacyKey := s.openAILegacySessionCacheKey(ctx, sessionHash)
-	if legacyKey != "" {
-		_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), legacyKey)
+	if confirmed && deleted {
+		resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
 	}
 	return err
 }

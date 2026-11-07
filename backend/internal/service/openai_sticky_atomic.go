@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
 // OpenAIStickyAtomicCache provides first-writer binding and owner-checked cleanup.
@@ -33,9 +35,30 @@ func (s *OpenAIGatewayService) deleteStickySessionAccountIDIfOwner(ctx context.C
 		return nil
 	}
 	if cache, ok := s.cache.(OpenAIStickyAtomicCache); ok && openAIAtomicStickySession(sessionHash) {
+		if reporter, ok := s.cache.(interface {
+			DeleteSessionAccountIDIfOwnerAndReport(context.Context, int64, string, int64) (bool, error)
+		}); ok {
+			deleted, err := reporter.DeleteSessionAccountIDIfOwnerAndReport(ctx, derefGroupID(groupID), s.openAISessionCacheKey(sessionHash), owner)
+			if err == nil && deleted {
+				resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
+			}
+			return err
+		}
 		return cache.DeleteSessionAccountIDIfOwner(ctx, derefGroupID(groupID), s.openAISessionCacheKey(sessionHash), owner)
 	}
 	return s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+}
+
+// deleteOpenAIStickyBinding preserves the cache's deletion semantics. Only a
+// reported deletion counts as a binding change; error-only caches cannot prove
+// that a key was present and stay conservative for diagnostics.
+func (s *OpenAIGatewayService) deleteOpenAIStickyBinding(ctx context.Context, groupID int64, key string) (bool, error) {
+	if reporter, ok := s.cache.(interface {
+		DeleteSessionAccountIDAndReport(context.Context, int64, string) (bool, error)
+	}); ok {
+		return reporter.DeleteSessionAccountIDAndReport(ctx, groupID, key)
+	}
+	return false, s.cache.DeleteSessionAccountID(ctx, groupID, key)
 }
 
 // openAIStickyBindingTTL is the configured binding TTL (or the share

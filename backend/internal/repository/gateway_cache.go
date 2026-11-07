@@ -128,8 +128,14 @@ func (c *gatewayCache) RefreshSessionTTL(ctx context.Context, groupID int64, ses
 // Called when the bound account becomes unavailable (e.g., error status, disabled,
 // or unschedulable), allowing subsequent requests to select a new available account.
 func (c *gatewayCache) DeleteSessionAccountID(ctx context.Context, groupID int64, sessionHash string) error {
+	_, err := c.DeleteSessionAccountIDAndReport(ctx, groupID, sessionHash)
+	return err
+}
+
+func (c *gatewayCache) DeleteSessionAccountIDAndReport(ctx context.Context, groupID int64, sessionHash string) (bool, error) {
 	key := buildSessionKey(groupID, sessionHash)
-	return c.rdb.Del(ctx, key).Err()
+	deleted, err := c.rdb.Del(ctx, key).Result()
+	return deleted > 0, err
 }
 
 var claimOpenAIResponsesSessionWindowScript = redis.NewScript(`

@@ -1353,7 +1353,7 @@
     },
     {
       "path": "backend/internal/service/gateway_service.go",
-      "value": "if e == nil || e.IsCapabilityStreamOnly() || e.Reason == OpenAIStreamForbiddenReason || e.Reason == OpenAIStateRepairReason || e.isOpenAIWrappedRequestRejection() {"
+      "value": "if e == nil || e.IsCapabilityStreamOnly() || e.Reason == OpenAIStreamForbiddenReason || e.Reason == OpenAIStateRepairReason || e.Reason == openAIModelUnavailableReason || e.Reason == openAIUpstreamRequestRestrictionReason || e.isOpenAIWrappedRequestRejection() {"
     },
     {
       "path": "backend/internal/service/openai_gateway_grok.go",
@@ -1385,7 +1385,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
-      "value": "releaseOpenAIPrelude"
+      "value": "releaseOpenAIPrelude(preludeTrace, eventType, dataBytes)"
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
@@ -1405,7 +1405,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
-      "value": "releaseOpenAIPrelude"
+      "value": "releaseOpenAIPrelude(preludeTrace, eventType, dataBytes)"
     },
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
@@ -1425,7 +1425,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_chat_completions.go",
-      "value": "releaseOpenAIPrelude"
+      "value": "releaseOpenAIPrelude(preludeTrace, event.Type, []byte(payload))"
     },
     {
       "path": "backend/internal/service/openai_gateway_messages.go",
@@ -1441,7 +1441,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_messages.go",
-      "value": "releaseOpenAIPrelude"
+      "value": "releaseOpenAIPrelude(preludeTrace, event.Type, []byte(payload))"
     },
     {
       "path": "backend/internal/service/openai_gateway_chat_completions.go",
@@ -1545,7 +1545,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_chat_completions_raw.go",
-      "value": "recordOpenAIStreamKeepaliveBytes"
+      "value": "writeOpenAIStreamKeepalive(c, c.Writer, []byte(line+\"\\n\"), false)"
     },
     {
       "path": "backend/internal/service/resilience_keepalive.go",
@@ -1625,7 +1625,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
-      "value": "writeHeartbeat(line + \"\\n\\n\")"
+      "value": "writeHeartbeat(line+\"\\n\\n\", false)"
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
@@ -3165,7 +3165,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
-      "value": "if err == nil && account != nil && !isExcluded(accountID) && !s.resilienceKeepOpenAISoftOwner(ctx, account, platform, requestedModel) {"
+      "value": "if err == nil && account != nil && !isExcluded(accountID) && !softOwner {"
     },
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
@@ -3884,10 +3884,6 @@
       "value": "func TestCollaborationForwardAppliedHTTPFailureWarn"
     },
     {
-      "path": "backend/internal/service/openai_gateway_forward.go",
-      "value": "account.IsOpenAIApiKey() && !account.IsOpenAICollaborationPlaintextEnabled() && collabRawContinuity"
-    },
-    {
       "path": "backend/internal/service/openai_gateway_upstream_errors.go",
       "value": "restoreOpenAICollaborationError(c, body)"
     },
@@ -3909,10 +3905,6 @@
     },
     {
       "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
-      "value": "func TestCollaborationForwardContinuity"
-    },
-    {
-      "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
       "value": "func TestCollaborationForwardHTTPErrorRestoration"
     },
     {
@@ -3926,10 +3918,6 @@
     {
       "path": "backend/internal/service/openai_gateway_forward.go",
       "value": "collabAttempt.outcome, collabAttempt.eligibilitySource = codexCollabConflict, \"account\""
-    },
-    {
-      "path": "backend/internal/service/openai_collaboration_plaintext.go",
-      "value": "efa := item.Get(\"encrypted_function_args\"); efa.Exists() && efa.IsArray() && len(efa.Array()) == 0"
     },
     {
       "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
@@ -3961,15 +3949,11 @@
     },
     {
       "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
-      "value": "func TestCollaborationForwardContinuityBeforeNormalization"
+      "value": "func TestCollaborationForwardConflictBeforeNormalization"
     },
     {
       "path": "backend/internal/service/openai_collaboration_plaintext_test.go",
       "value": "func TestCollaborationForwardEscapedDeclarationRemainsObserveOnly"
-    },
-    {
-      "path": "backend/internal/service/openai_gateway_forward.go",
-      "value": "collabRawContinuity = rawPlan != nil && openAICollaborationContinuity(body)"
     },
     {
       "path": "backend/internal/service/openai_gateway_forward.go",
@@ -4034,6 +4018,146 @@
     {
       "path": ".github/workflows/release.yml",
       "value": "NODE_OPTIONS: --max-old-space-size=4096"
+    },
+    {
+      "path": "backend/internal/service/openai_model_availability.go",
+      "value": "isExplicitOpenAIModelAvailabilityMessage(extractUpstreamErrorMessage(body))"
+    },
+    {
+      "path": "backend/internal/service/openai_model_availability.go",
+      "value": "s.recordOpenAIAccountModelTransientFailure(account, model, time.Now())"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "s.failoverOpenAIModelAvailability(ctx, c, account, resp, respBody, upstreamModel, false)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "s.failoverOpenAIModelAvailability(ctx, c, account, resp, probeBody, actualModel, true)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_cc_pipeline.go",
+      "value": "s.failoverOpenAIModelAvailability(ctx, c, account, resp, respBody, upstreamModel, false)"
+    },
+    {
+      "path": "backend/internal/service/openai_model_availability_test.go",
+      "value": "func TestOpenAIModelAvailabilityForwardSwitchesAccount(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/openai_model_availability_test.go",
+      "value": "func TestOpenAIModelAvailabilityPreservesRequestRejections(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/resilience/classify.go",
+      "value": "return Result{Category: CategoryUpstreamRequestRestriction, Reason: ReasonUpstreamRequestRestriction}"
+    },
+    {
+      "path": "backend/internal/service/openai_model_availability.go",
+      "value": "reason, failureCategory = openAIUpstreamRequestRestrictionReason, resilience.CategoryUpstreamRequestRestriction"
+    },
+    {
+      "path": "backend/internal/resilience/context_window.go",
+      "value": "func IsContextWindowError(upstreamMsg string, upstreamBody []byte) bool {"
+    },
+    {
+      "path": "backend/internal/service/gateway_service.go",
+      "value": "func (e *UpstreamFailoverError) IsOpenAIModelUnavailable() bool {"
+    },
+    {
+      "path": "backend/internal/handler/openai_model_availability.go",
+      "value": "suppressResilienceRetryAdvice(c, source)"
+    },
+    {
+      "path": "backend/internal/handler/openai_model_availability_test.go",
+      "value": "func TestOpenAIModelUnavailableExhaustionPreservesLastError(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/handler/openai_model_availability.go",
+      "value": "if !failure.IsOpenAIModelUnavailable() && !failure.IsOpenAIUpstreamRequestRestriction() {"
+    },
+    {
+      "path": "backend/internal/handler/openai_model_availability_test.go",
+      "value": "func TestOpenAIUpstreamRequestRestrictionStopsWithoutRetryAdvice(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/handler/openai_model_availability.go",
+      "value": "c.Header(\"x-should-retry\", \"false\")"
+    },
+    {
+      "path": "backend/internal/service/openai_model_availability.go",
+      "value": "if !openAIModelAvailabilityParamAllowed(body) {"
+    },
+    {
+      "path": "backend/internal/service/openai_model_availability.go",
+      "value": "host != previousHost"
+    },
+    {
+      "path": "backend/internal/service/openai_model_availability_test.go",
+      "value": "func TestOpenAIModelAvailabilityStopsAcrossHosts(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/resilience_compat_stream.go",
+      "value": "schema.ItemKeys = preludeReleaseSchemaKeys(object)"
+    },
+    {
+      "path": "backend/internal/service/resilience_compat_stream_trace_test.go",
+      "value": "func TestPreludeReleaseSchemaKeysBounded(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/resilience/classify.go",
+      "value": "func IsKnownClientErrorCode(code string) bool {"
+    },
+    {
+      "path": "backend/internal/resilience/state.go",
+      "value": "func (s *RequestState) SessionIdentity() (int64, string) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_upstream_errors.go",
+      "value": "s.noteOpenAITerminalRejection(ctx, account, resp.StatusCode, resp.Header, body, forwardErr)"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "s.noteOpenAITerminalRejection(ctx, account, resp.StatusCode, resp.Header, responseBody, forwardErr)"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_rejection.go",
+      "value": "s.AvoidOpenAIStateAccount(stateCtx, group, session, account.ID)"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_rejection_test.go",
+      "value": "func TestOpenAITerminalRejectionStopsAvoidingAcrossHosts(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_rejection.go",
+      "value": "if resilience.IsContextWindowError(message, body) {"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_rejection.go",
+      "value": "message = normalizeOpenAITerminalRejectionMessage(message)"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_rejection_test.go",
+      "value": "func TestOpenAITerminalRejectionNormalizesVariableRequestIDs(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_rejection_test.go",
+      "value": "func TestOpenAITerminalRejectionMessageOnlyContextLimitDoesNotAvoid(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/openai_sticky_atomic.go",
+      "value": "deleted, err := reporter.DeleteSessionAccountIDIfOwnerAndReport(ctx, derefGroupID(groupID), s.openAISessionCacheKey(sessionHash), owner)"
+    },
+    {
+      "path": "backend/internal/service/openai_sticky_atomic.go",
+      "value": "return reporter.DeleteSessionAccountIDAndReport(ctx, groupID, key)"
+    },
+    {
+      "path": "backend/internal/service/openai_account_scheduler.go",
+      "value": "resilience.StateFrom(ctx).ResetStickyBypassReason()"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "resilience.StateFrom(ctx).ResetStickyBypassReason()"
     }
   ],
   "forbidden_module_paths": [
