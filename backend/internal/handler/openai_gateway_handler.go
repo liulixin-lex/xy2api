@@ -972,6 +972,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 						lastFailoverErr = failoverErr
 						c.Set("openai_m3_last_account_id", account.ID)
 						h.gatewayService.AvoidOpenAIStateAccount(c.Request.Context(), derefGroupID(apiKey.GroupID), sessionHash, account.ID)
+						resilience.StateFrom(c.Request.Context()).NoteStateRepairAvoidance(account.ID)
 						if !openAIForwardMayFailover(c, writerSizeBeforeForward, failoverErr) {
 							failoverErr.M3Cause = "committed_output"
 							h.handleFailoverExhausted(c, failoverErr, true)

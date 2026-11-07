@@ -52,6 +52,9 @@ type RequestState struct {
 	stickyBypassReason         string
 	stickyBypassLogged         bool
 	stickyBypassChangesBinding bool
+	// stateRepairAvoidedAccount is diagnostic-only evidence from this request's
+	// M3 switch. Unlike avoided, it never imports historical session avoidance.
+	stateRepairAvoidedAccount int64
 
 	// lastResort is the account chosen by last-resort soft selection.
 	lastResort int64
@@ -619,6 +622,26 @@ func (s *RequestState) StickyOwner() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.stickyOwner
+}
+
+// NoteStateRepairAvoidance records this request's state-repair switch only.
+func (s *RequestState) NoteStateRepairAvoidance(accountID int64) {
+	if s == nil || accountID <= 0 {
+		return
+	}
+	s.mu.Lock()
+	s.stateRepairAvoidedAccount = accountID
+	s.mu.Unlock()
+}
+
+// StateRepairAvoided reports diagnostic evidence, not a scheduling exclusion.
+func (s *RequestState) StateRepairAvoided(accountID int64) bool {
+	if s == nil || accountID <= 0 {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stateRepairAvoidedAccount == accountID
 }
 
 // NoteStickyBypassReason records the first scheduler reason that caused the

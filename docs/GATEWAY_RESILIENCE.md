@@ -520,7 +520,7 @@ warn 级，进入运维页“系统日志”（`ops_system_logs`）：
 
 - `balance_paused`（含账号、暂停时长与上游原文；0.4.12 起另含档位 `step`）；
 - `session_rebind`（P1-B 原因 `post_output_first_failure`，普通连击原因 `resil_failure_streak`，未知终止拒绝连击原因 `terminal_rejection_streak`；含会话哈希前缀、组、账号、类别、连击次数及避开时长，不记拒绝正文或摘要）、`last_resort`；
-- `openai.sticky_bypass`：原会话 owner 与最终 selected 不同的选号收尾诊断；含通用请求关联字段（`resilience.EventFields`）、`group_id`、脱敏 `session`、`owner`、`selected`、`reason`。每个请求最多一条。缓存确认实际删绑、成功迁移或原因未记录（`unrecorded`）为 Warn；删除失败、未执行删除、owner 比较未命中，以及保留绑定的临时放弃（如 `soft_owner_preserved`、`concurrency_full`、`capacity_overflow`、`owner_excluded`）为 Info。仅返回 error、不能报告实际删除结果的缓存也保守记 Info。`reason` 是最终选号轮最先记录的原因码，包括 owner 状态/资格、请求门槛、容量与迁移原因；资格判断沿用对应 gate 的原因码。每轮内部重选（含代理隔离重试和原子绑定对账）清空原因与绑定变化标志，请求级日志去重标志保留。
+- `openai.sticky_bypass`：原会话 owner 与最终 selected 不同的选号收尾诊断；含通用请求关联字段（`resilience.EventFields`）、`group_id`、脱敏 `session`、`owner`、`selected`、`reason`。每个请求最多一条。缓存确认实际删绑、成功迁移或原因未记录（`unrecorded`）为 Warn；删除失败、未执行删除、owner 比较未命中，以及保留绑定的临时放弃（如 `soft_owner_preserved`、`concurrency_full`、`capacity_overflow`、`owner_excluded`）为 Info。仅返回 error、不能报告实际删除结果的缓存也保守记 Info。`reason` 在原 owner 已于本请求失败、或本请求在 M3 状态换号处明确标记回避，并且列入本轮传入的排除集时优先为 `owner_failed_in_request`；该原因优先于判慢/质量迁移，即使缓存绑定已被前序清理也能归因。M3 标记仅作请求内诊断，不写 AccountFailed、不参与罚号或候选资格；从会话载入的历史回避不算这一标记，历史回避加本轮非失败排除仍取原有原因；其余取最终选号轮最先记录的原因码，包括 owner 状态/资格、请求门槛、容量与迁移原因；资格判断沿用对应 gate 的原因码。每轮内部重选（含代理隔离重试和原子绑定对账）清空原因与绑定变化标志，请求级日志去重标志保留。
 - `same_site_hold`（`host_hash`、`account_id`、`peer_account_id`、`until`）；
 - `fallback_group`、`fallback_return`；
 - `budget_exhausted`、`capacity_switch_exhausted`；
