@@ -1511,11 +1511,16 @@ var openAIStreamErrorStatusPaths = []string{
 }
 
 func openAIStreamFailedEventSemanticStatus(payload []byte, message string, validatedWrappedStatus ...int) int {
+	status, _ := openAIStreamFailedEventSemanticStatusSource(payload, message, validatedWrappedStatus...)
+	return status
+}
+
+func openAIStreamFailedEventSemanticStatusSource(payload []byte, message string, validatedWrappedStatus ...int) (status int, defaulted bool) {
 	if len(validatedWrappedStatus) > 0 && validatedWrappedStatus[0] >= http.StatusBadRequest && validatedWrappedStatus[0] <= 599 {
-		return validatedWrappedStatus[0]
+		return validatedWrappedStatus[0], false
 	}
 	if isOpenAIContextWindowError(message, payload) {
-		return http.StatusBadRequest
+		return http.StatusBadRequest, false
 	}
 
 	code := openAIStreamFailedEventErrorCode(payload)
@@ -1527,24 +1532,24 @@ func openAIStreamFailedEventSemanticStatus(payload []byte, message string, valid
 	for _, path := range openAIStreamErrorStatusPaths {
 		if status := int(gjson.GetBytes(payload, path).Int()); status == http.StatusUnauthorized ||
 			status == http.StatusForbidden || status == http.StatusTooManyRequests || status == 529 {
-			return status
+			return status, false
 		}
 	}
 	switch {
 	case strings.Contains(combined, "rate_limit"):
-		return http.StatusTooManyRequests
+		return http.StatusTooManyRequests, false
 	case strings.Contains(errType, "invalid_request"):
-		return http.StatusBadRequest
+		return http.StatusBadRequest, false
 	case strings.Contains(combined, "authentication") || strings.Contains(combined, "unauthorized") || strings.Contains(combined, "invalid_api_key"):
-		return http.StatusUnauthorized
+		return http.StatusUnauthorized, false
 	case strings.Contains(combined, "permission") || strings.Contains(combined, "forbidden") || strings.Contains(combined, "access denied"):
-		return http.StatusForbidden
+		return http.StatusForbidden, false
 	case isOpenAIUpstreamAccessStateError(message, payload):
-		return http.StatusForbidden
+		return http.StatusForbidden, false
 	case isOpenAIUpstreamCapacityShedEvent(payload):
-		return http.StatusServiceUnavailable
+		return http.StatusServiceUnavailable, false
 	default:
-		return http.StatusBadGateway
+		return http.StatusBadGateway, true
 	}
 }
 

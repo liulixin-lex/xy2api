@@ -3,6 +3,7 @@
 package service
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -83,8 +84,11 @@ func TestOpenAIStreamModelAvailabilityAfterOutput(t *testing.T) {
 	withResilienceSettings(t, nil)
 	for _, path := range []string{"native", "passthrough"} {
 		t.Run(path, func(t *testing.T) {
+			logs := captureOpenAIObservationLogs(t)
 			c, rec := newOpenAIUpstreamErrorTestContext(t)
 			state := resilience.NewRequestState()
+			sessions := newRecordingSessions()
+			state.SetSession(25, "sess", sessions)
 			c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
 			InstallDeliveryTracking(c, time.Now())
 			upstream := &httpUpstreamRecorder{resp: streamModelResponse(streamModelUnavailablePayload, keepaliveStallCreated+keepaliveStallDelta1)}
@@ -93,6 +97,7 @@ func TestOpenAIStreamModelAvailabilityAfterOutput(t *testing.T) {
 			svc.accountRepo = repo
 			svc.rateLimitService = NewRateLimitService(repo, nil, svc.cfg, nil, nil)
 			account := streamModelAccount(1, path == "passthrough", "https://relay-a.example/v1")
+			before := postOutputMetric(account.ID, "model_unavailable_after_output")
 			svc.recordOpenAIAccountModelTransientFailure(account, "requested-model", time.Now())
 			_, err := svc.Forward(c.Request.Context(), c, account, []byte(streamModelRequest))
 			require.Error(t, err)
@@ -106,10 +111,84 @@ func TestOpenAIStreamModelAvailabilityAfterOutput(t *testing.T) {
 			require.Positive(t, state.DeliveredBytes())
 			require.Equal(t, 1, strings.Count(rec.Body.String(), "event: response.failed"))
 			require.Contains(t, rec.Body.String(), "model_not_found")
-			require.False(t, state.TurnFailed(), "model availability must not count as account-health failure")
+			require.True(t, state.TurnFailed(), "the failed stream must count as a failed turn")
+			require.Equal(t, before+1, postOutputMetric(account.ID, "model_unavailable_after_output"))
+			require.Empty(t, sessions.of(account.ID), "no session failure or streak")
+			require.False(t, state.Avoided(account.ID))
+			require.Equal(t, 1, strings.Count(logs.String(), `"msg":"resilience.post_output_failure"`))
+			require.Contains(t, logs.String(), `"reason":"model_unavailable_after_output"`)
+			require.NotContains(t, logs.String(), `"msg":"resilience.session_rebind"`)
 			require.Zero(t, repo.setErrorCalls)
 			require.Zero(t, repo.tempCalls)
 			require.Empty(t, repo.modelRateLimitCalls)
+		})
+	}
+}
+
+func TestOpenAIModelAvailabilityStructuredCodeForward(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, path := range []string{"native", "passthrough"} {
+		for _, form := range []string{"http", "stream"} {
+			for _, sample := range []struct {
+				name, message string
+				status        int
+			}{
+				{"empty", "", http.StatusBadRequest},
+				{"generic", "Requested resource absent", http.StatusNotFound},
+			} {
+				t.Run(path+"/"+form+"/"+sample.name, func(t *testing.T) {
+					c, rec := newOpenAIUpstreamErrorTestContext(t)
+					errBody, err := json.Marshal(map[string]any{"error": map[string]any{
+						"code": "model_not_found", "param": "model", "type": "invalid_request_error", "message": sample.message,
+					}})
+					require.NoError(t, err)
+					resp := newOpenAIUpstreamErrorResponse(sample.status, string(errBody))
+					request := []byte(`{"model":"requested-model","stream":false,"input":"hello"}`)
+					if form == "stream" {
+						resp = streamModelResponse(`{"response":`+string(errBody)+`}`, "")
+						request = []byte(streamModelRequest)
+					}
+					upstream := &httpUpstreamRecorder{resp: resp}
+					repo := &openAIModelAvailabilityRepo{}
+					svc := compatStreamService(upstream, 0, 0, 0)
+					svc.accountRepo = repo
+					svc.rateLimitService = NewRateLimitService(repo, nil, svc.cfg, nil, nil)
+					account := streamModelAccount(1, path == "passthrough", "https://relay-a.example/v1")
+					_, err = svc.Forward(c.Request.Context(), c, account, request)
+					var failure *UpstreamFailoverError
+					require.ErrorAs(t, err, &failure)
+					require.True(t, failure.IsOpenAIModelUnavailable())
+					require.True(t, failure.ShouldRetryNextAccount())
+					require.False(t, failure.ShouldReportAccountScheduleFailure())
+					entry, recorded := svc.getOpenAIAccountModelTransientState().readEntry(account.ID, "requested-model", time.Now())
+					require.True(t, recorded)
+					require.Equal(t, 1, entry.failureStreak)
+					require.Empty(t, repo.modelRateLimitCalls)
+					require.Empty(t, rec.Body.String())
+				})
+			}
+		}
+	}
+}
+
+func TestOpenAIModelAvailabilityStructuredCodeGuards(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		want       bool
+	}{
+		{"nested HTTP code", `{"error":{"message":"{\"error\":{\"code\":\"model_not_found\",\"param\":\"model\"}}"}}`, true},
+		{"nested Responses code", `{"response":{"error":{"message":"{\"response\":{\"error\":{\"code\":\"model_not_found\",\"param\":\"model\"}}}"}}}`, true},
+		{"other code", `{"error":{"code":"invalid_value","param":"model","message":"Requested resource absent"}}`, false},
+		{"input param", `{"error":{"code":"model_not_found","param":"input[0]"}}`, false},
+		{"nested input param", `{"response":{"error":{"code":"model_not_found","message":"{\"error\":{\"param\":\"input[0]\"}}"}}}`, false},
+		{"state code", `{"error":{"code":"invalid_encrypted_content","message":"{\"error\":{\"code\":\"model_not_found\"}}"}}`, false},
+		{"nested state code", `{"error":{"code":"model_not_found","message":"{\"response\":{\"error\":{\"code\":\"invalid_encrypted_content\"}}}"}}`, false},
+		{"context", `{"response":{"error":{"code":"model_not_found","message":"maximum context length exceeded"}}}`, false},
+		{"policy", `{"error":{"code":"model_not_found","type":"content_policy_violation"}}`, false},
+		{"echoed code", `{"input":{"error":{"code":"model_not_found"}},"error":{"code":"invalid_value"}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, isOpenAIModelAvailabilityError(http.StatusBadRequest, "", []byte(tc.body)))
 		})
 	}
 }
