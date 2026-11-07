@@ -1415,10 +1415,7 @@ func openAIStreamDataStartsTTFT(data, eventType string, forceOutput bool, mode s
 // openAIStreamFailedEventErrorCode 提取流内 failed 事件的错误码（小写），
 // 兼容 response.failed 的嵌套形态与裸 error 形态。
 func openAIStreamFailedEventErrorCode(payload []byte) string {
-	code := strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "response.error.code").String()))
-	if code == "" {
-		code = strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "error.code").String()))
-	}
+	code := strings.ToLower(strings.TrimSpace(openAIStreamErrorField(payload, "code").String()))
 	return code
 }
 
@@ -1478,9 +1475,13 @@ func sanitizeOpenAICapacityShedErrorCodeForClient(payload []byte) ([]byte, bool)
 	}
 	updated := payload
 	changed := false
-	for _, path := range []string{"response.error.code", "error.code"} {
+	codePaths := []string{"response.error.code", "error.code"}
+	if openAITopLevelStreamError(payload).IsObject() {
+		codePaths = []string{"code"}
+	}
+	for _, path := range codePaths {
 		parent := strings.TrimSuffix(path, ".code")
-		if !gjson.GetBytes(updated, parent).Exists() {
+		if path != "code" && !gjson.GetBytes(updated, parent).Exists() {
 			continue
 		}
 		code := strings.ToLower(strings.TrimSpace(gjson.GetBytes(updated, path).String()))
@@ -1524,10 +1525,7 @@ func openAIStreamFailedEventSemanticStatusSource(payload []byte, message string,
 	}
 
 	code := openAIStreamFailedEventErrorCode(payload)
-	errType := strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "response.error.type").String()))
-	if errType == "" {
-		errType = strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "error.type").String()))
-	}
+	errType := strings.ToLower(strings.TrimSpace(openAIStreamErrorField(payload, "type").String()))
 	combined := strings.TrimSpace(errType + " " + code + " " + strings.ToLower(strings.TrimSpace(message)))
 	for _, path := range openAIStreamErrorStatusPaths {
 		if status := int(gjson.GetBytes(payload, path).Int()); status == http.StatusUnauthorized ||
@@ -1643,11 +1641,14 @@ func openAIStreamFailedEventPassthroughBody(payload []byte, failedMessage string
 	if len(payload) == 0 || !gjson.ValidBytes(payload) {
 		return payload
 	}
-	if gjson.GetBytes(payload, "error").Exists() {
+	if gjson.GetBytes(payload, "error").IsObject() {
 		return payload
 	}
-	responseError := gjson.GetBytes(payload, "response.error")
-	if !responseError.Exists() {
+	responseError := openAIStreamErrorObject(payload)
+	if !responseError.IsObject() && openAITopLevelStreamError(payload).IsObject() {
+		responseError = openAITopLevelStreamError(payload)
+	}
+	if !responseError.IsObject() {
 		if strings.TrimSpace(failedMessage) == "" {
 			return payload
 		}
@@ -1663,16 +1664,16 @@ func openAIStreamFailedEventPassthroughBody(payload []byte, failedMessage string
 	}
 
 	errorPayload := gin.H{}
-	if errType := strings.TrimSpace(gjson.Get(responseError.Raw, "type").String()); errType != "" {
+	if errType := strings.TrimSpace(openAIStreamErrorField(payload, "type").String()); errType != "" {
 		errorPayload["type"] = errType
 	}
-	if code := strings.TrimSpace(gjson.Get(responseError.Raw, "code").String()); code != "" {
+	if code := strings.TrimSpace(openAIStreamErrorField(payload, "code").String()); code != "" {
 		errorPayload["code"] = code
 	}
-	if param := strings.TrimSpace(gjson.Get(responseError.Raw, "param").String()); param != "" {
+	if param := strings.TrimSpace(openAIStreamErrorField(payload, "param").String()); param != "" {
 		errorPayload["param"] = param
 	}
-	message := strings.TrimSpace(gjson.Get(responseError.Raw, "message").String())
+	message := strings.TrimSpace(openAIStreamErrorField(payload, "message").String())
 	if message == "" {
 		message = strings.TrimSpace(failedMessage)
 	}
@@ -1744,14 +1745,8 @@ func openAIStreamFailedEventShouldFailover(payload []byte, message string) bool 
 	if isOpenAITransientProcessingError(http.StatusBadRequest, message, payload) {
 		return true
 	}
-	code := strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "response.error.code").String()))
-	if code == "" {
-		code = strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "error.code").String()))
-	}
-	errType := strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "response.error.type").String()))
-	if errType == "" {
-		errType = strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "error.type").String()))
-	}
+	code := strings.ToLower(strings.TrimSpace(openAIStreamErrorField(payload, "code").String()))
+	errType := strings.ToLower(strings.TrimSpace(openAIStreamErrorField(payload, "type").String()))
 	combined := strings.ToLower(strings.TrimSpace(message + " " + code + " " + errType))
 	if combined == "" {
 		return true
@@ -1783,6 +1778,14 @@ func openAIStreamErrorEventShouldFailover(payload []byte, message string) bool {
 	if isOpenAIStateRejection(payload, message) {
 		return false
 	}
+	// These are this gateway's own transport failures, whether detected locally
+	// or reported by another compatible hop. Callers gate replay on no output.
+	switch openAIStreamFailedEventErrorCode(payload) {
+	case OpenAIUpstreamStreamReadErrorCode, OpenAIUpstreamHTTP2StreamErrorCode,
+		OpenAIUpstreamStreamTruncatedCode, OpenAIStreamTimeoutCode:
+		return true
+	}
+
 	if openAIStreamBalanceFailure(payload) {
 		return true
 	}
@@ -1798,9 +1801,7 @@ func openAIStreamErrorEventShouldFailover(payload []byte, message string) bool {
 	if isOpenAITransientProcessingError(http.StatusBadRequest, message, payload) {
 		return true
 	}
-	combined := strings.ToLower(strings.TrimSpace(message + " " +
-		gjson.GetBytes(payload, "error.message").String() + " " +
-		gjson.GetBytes(payload, "response.error.message").String()))
+	combined := strings.ToLower(strings.TrimSpace(message + " " + openAIStreamErrorField(payload, "message").String()))
 	return strings.Contains(combined, "temporary") ||
 		strings.Contains(combined, "try again") ||
 		strings.Contains(combined, "please retry")
@@ -2410,7 +2411,11 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		if clientDisconnected || !writePendingLines() {
 			return
 		}
-		if _, err := fmt.Fprint(w, buildOpenAIResponseFailedSSE(ctx, responseID, originalModel, bareErrorPayload, failedMessage)); err != nil {
+		clientErrorPayload := bareErrorPayload
+		if rewritten, changed := sanitizeOpenAICapacityShedErrorCodeForClient(clientErrorPayload); changed {
+			clientErrorPayload = rewritten
+		}
+		if _, err := fmt.Fprint(w, buildOpenAIResponseFailedSSE(ctx, responseID, originalModel, clientErrorPayload, failedMessage)); err != nil {
 			clientDisconnected = true
 			return
 		}
@@ -2968,7 +2973,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			if lastLineWritten != "" {
 				prefix = "\n"
 			}
-			source := []byte(`{"error":{"type":"api_error","code":"stream_timeout","message":"Upstream response stream timed out"}}`)
+			source := []byte(`{"error":{"type":"api_error","code":"` + OpenAIStreamTimeoutCode + `","message":"Upstream response stream timed out"}}`)
 			if _, err := fmt.Fprint(w, prefix+buildOpenAIResponseFailedSSE(ctx, responseID, originalModel, source, "")); err == nil {
 				flusher.Flush()
 			}

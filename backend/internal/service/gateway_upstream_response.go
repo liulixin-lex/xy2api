@@ -319,6 +319,10 @@ func extractUpstreamErrorCode(body []byte) string {
 		return code
 	}
 
+	if code := strings.TrimSpace(openAITopLevelStreamError(body).Get("code").String()); code != "" {
+		return code
+	}
+
 	inner := strings.TrimSpace(gjson.GetBytes(body, "error.message").String())
 	if !strings.HasPrefix(inner, "{") {
 		return ""

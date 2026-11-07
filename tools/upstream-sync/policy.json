@@ -3913,7 +3913,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
-      "value": "buildOpenAIResponseFailedSSEForClient(ctx, c, responseID, originalModel, bareErrorPayload, failedMessage)"
+      "value": "buildOpenAIResponseFailedSSEForClient(ctx, c, responseID, originalModel, clientErrorPayload, failedMessage)"
     },
     {
       "path": "backend/internal/service/openai_collaboration_plaintext_test.go",

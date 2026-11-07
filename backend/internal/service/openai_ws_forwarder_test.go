@@ -167,6 +167,15 @@ func TestOpenAIWSPayloadTransientStatus_Explicit529IsNotModelTransient(t *testin
 	require.Zero(t, openAIWSPayloadTransientStatus(payload))
 }
 
+func TestOpenAIWSPayloadTransientStatus_FlatErrorMatchesObject(t *testing.T) {
+	for _, payload := range []string{
+		`{"type":"error","error":{"code":"server_is_overloaded"}}`,
+		`{"type":"error","code":"server_is_overloaded"}`,
+	} {
+		require.Equal(t, http.StatusServiceUnavailable, openAIWSPayloadTransientStatus([]byte(payload)))
+	}
+}
+
 func TestOpenAIWSDial5xxRecordsModelTransient(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	svc.rateLimitService = NewRateLimitService(transientCooldownAccountRepo{}, nil, &config.Config{}, nil, nil)

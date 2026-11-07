@@ -12,7 +12,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
-	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
 
@@ -104,13 +103,28 @@ func openAIEncryptedContentRepairBody(body []byte, message string) ([]byte, bool
 }
 
 func openAIRequestRepairErrorObject(payload []byte) []byte {
-	for _, path := range []string{"response.error", "error"} {
-		raw := strings.TrimSpace(gjson.GetBytes(payload, path).Raw)
-		if raw != "" && gjson.Valid(raw) && gjson.Parse(raw).IsObject() {
-			return []byte(`{"error":` + raw + `}`)
+	if object := openAIStreamErrorObject(payload); object.IsObject() {
+		return []byte(`{"error":` + object.Raw + `}`)
+	}
+	top := openAITopLevelStreamError(payload)
+	if !top.IsObject() {
+		return nil
+	}
+	fields := map[string]any{}
+	for _, key := range []string{"code", "message", "param", "status", "status_code"} {
+		value := top.Get(key)
+		if value.Exists() {
+			fields[key] = value.Value()
 		}
 	}
-	return nil
+	if len(fields) == 0 {
+		return nil
+	}
+	body, err := marshalOpenAIUpstreamJSON(map[string]any{"error": fields})
+	if err != nil {
+		return nil
+	}
+	return body
 }
 
 // newOpenAIRequestRepairSignal prepares a same-account replay for an in-band
