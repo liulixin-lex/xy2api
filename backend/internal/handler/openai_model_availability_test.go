@@ -14,13 +14,15 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 type modelUnavailableUpstream struct {
 	service.HTTPUpstream
-	status   int
-	body     string
-	accounts []int64
+	status      int
+	body        string
+	contentType string
+	accounts    []int64
 }
 
 func TestOpenAIModelUnavailableExhaustionAfterHeartbeat(t *testing.T) {
@@ -54,11 +56,48 @@ func (u *modelUnavailableUpstream) Do(_ *http.Request, _ string, accountID int64
 	if body == "" {
 		body = `{"error":{"type":"invalid_request_error","code":"model_unavailable","param":"model","message":"model is unavailable; workspace_id=private-workspace"}}`
 	}
+	contentType := u.contentType
+	if contentType == "" {
+		contentType = "application/json"
+	}
 	return &http.Response{
 		StatusCode: u.status,
-		Header:     http.Header{"Content-Type": {"application/json"}, "Retry-After": {"9"}},
+		Header:     http.Header{"Content-Type": {contentType}, "Retry-After": {"9"}},
 		Body:       io.NopCloser(strings.NewReader(body)),
 	}, nil
+}
+
+func TestOpenAIStreamModelUnavailableExhaustionPreservesError(t *testing.T) {
+	withHandlerResilience(t, nil)
+	for _, tc := range []struct {
+		name, errorBody string
+		status          int
+	}{
+		{"typed invalid request", `{"type":"invalid_request_error","code":"model_not_found","param":"model","message":"model is unavailable"}`, http.StatusBadRequest},
+		{"missing model code", `{"code":"model_not_found","param":"model","message":"Requested resource absent"}`, http.StatusNotFound},
+		{"missing model phrase", `{"message":"The model 'example' does not exist"}`, http.StatusNotFound},
+		{"unavailable", `{"message":"model is unavailable"}`, http.StatusBadGateway},
+		{"not available", `{"message":"model is not available"}`, http.StatusBadGateway},
+		{"explicit server status", `{"code":"model_not_found","message":"model not found","status_code":503}`, http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := &modelUnavailableUpstream{
+				status: http.StatusOK, contentType: "text/event-stream",
+				body: "event: response.failed\ndata: " + `{"response":{"error":` + tc.errorBody + `}}` + "\n\n",
+			}
+			h := newOpenAIResponsesFailoverTestHandler(t, upstream)
+			c, recorder := newOpenAIResponsesFailoverTestContext(t, nil)
+			c.Request.Body = io.NopCloser(strings.NewReader(`{"model":"gpt-5.1","stream":true,"input":"hello"}`))
+			h.Responses(c)
+			require.Equal(t, []int64{1, 2}, upstream.accounts)
+			require.Equal(t, tc.status, recorder.Code)
+			for _, field := range []string{"code", "param", "message"} {
+				require.Equal(t, gjson.Get(tc.errorBody, field).String(), gjson.Get(recorder.Body.String(), "error."+field).String(), field)
+			}
+			require.Empty(t, recorder.Header().Get("Retry-After"))
+			require.False(t, c.GetBool(ginKeyResilienceTurnCounted))
+		})
+	}
 }
 
 func TestOpenAIModelUnavailableExhaustionPreservesLastError(t *testing.T) {
