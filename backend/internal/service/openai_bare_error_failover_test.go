@@ -100,6 +100,58 @@ func TestOpenAIBareErrorTransportRecovery(t *testing.T) {
 	}
 }
 
+func TestB2ProbeHeartbeatCommittedThenTransportBareError(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, path := range []string{"native", "passthrough"} {
+		for _, accountType := range []string{AccountTypeAPIKey, AccountTypeOAuth} {
+			for _, shape := range []string{"top", "object"} {
+				t.Run(fmt.Sprintf("%s/%s/%s", path, accountType, shape), func(t *testing.T) {
+					reader, writer := io.Pipe()
+					defer reader.Close()
+					defer writer.Close()
+					upstream := &httpUpstreamRecorder{resp: bareErrorResponse("")}
+					upstream.resp.Body = reader
+					svc := compatStreamService(upstream, 30, 0, 1)
+					c, rec := newOpenAIUpstreamErrorTestContext(t)
+					InstallDeliveryTracking(c, time.Now())
+					account := streamModelAccount(1, path == "passthrough", "https://relay.example/v1")
+					account.Type = accountType
+					if accountType == AccountTypeOAuth {
+						account.Credentials["access_token"] = "test-token"
+					}
+					resultCh := make(chan error, 1)
+					go func() {
+						resultCh <- forwardBareErrorPath(svc, c, account, path, true, &strings.Builder{})
+					}()
+					opening := `data: {"type":"response.created","response":{"id":"resp_heartbeat","model":"public"}}` + "\n\n"
+					_, err := io.WriteString(writer, opening)
+					require.NoError(t, err)
+					time.Sleep(1200 * time.Millisecond)
+					payload := bareErrorPayload(shape, fmt.Sprintf(`"code":%q,"message":"Upstream response stream was interrupted"`, OpenAIUpstreamStreamReadErrorCode))
+					_, err = io.WriteString(writer, bareErrorFrame(payload))
+					require.NoError(t, err)
+					_ = writer.Close()
+					select {
+					case err = <-resultCh:
+					case <-time.After(5 * time.Second):
+						t.Fatal("stream did not decide the pre-output transport failure")
+					}
+					var failover *UpstreamFailoverError
+					require.ErrorAs(t, err, &failover)
+					output := rec.Body.String()
+					require.Contains(t, output, ":\n\n")
+					require.NotContains(t, output, "response.created")
+					require.NotContains(t, output, "response.failed")
+					require.NotContains(t, output, OpenAIUpstreamStreamReadErrorCode)
+					raw, ok := c.Get(OpsUpstreamErrorsKey)
+					require.True(t, ok)
+					require.Len(t, raw.([]*OpsUpstreamErrorEvent), 1)
+				})
+			}
+		}
+	}
+}
+
 func TestOpenAIBareErrorAuthoritativePairFailsOverOnce(t *testing.T) {
 	withResilienceSettings(t, nil)
 	for _, path := range []string{"native", "passthrough"} {
@@ -269,6 +321,15 @@ func TestOpenAIBareErrorCodeRouting(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestOpenAIBareErrorRetryMessageMatchesObject(t *testing.T) {
+	for _, shape := range []string{"top", "object"} {
+		t.Run(shape, func(t *testing.T) {
+			payload := []byte(bareErrorPayload(shape, `"code":"upstream_error","message":"Temporary failure; please retry"`))
+			require.True(t, openAIStreamErrorEventShouldFailover(payload, ""))
+		})
 	}
 }
 

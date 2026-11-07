@@ -1475,9 +1475,13 @@ func sanitizeOpenAICapacityShedErrorCodeForClient(payload []byte) ([]byte, bool)
 	}
 	updated := payload
 	changed := false
-	for _, path := range []string{"response.error.code", "error.code"} {
+	codePaths := []string{"response.error.code", "error.code"}
+	if openAITopLevelStreamError(payload).IsObject() {
+		codePaths = []string{"code"}
+	}
+	for _, path := range codePaths {
 		parent := strings.TrimSuffix(path, ".code")
-		if !gjson.GetBytes(updated, parent).Exists() {
+		if path != "code" && !gjson.GetBytes(updated, parent).Exists() {
 			continue
 		}
 		code := strings.ToLower(strings.TrimSpace(gjson.GetBytes(updated, path).String()))
@@ -1797,9 +1801,7 @@ func openAIStreamErrorEventShouldFailover(payload []byte, message string) bool {
 	if isOpenAITransientProcessingError(http.StatusBadRequest, message, payload) {
 		return true
 	}
-	combined := strings.ToLower(strings.TrimSpace(message + " " +
-		gjson.GetBytes(payload, "error.message").String() + " " +
-		gjson.GetBytes(payload, "response.error.message").String()))
+	combined := strings.ToLower(strings.TrimSpace(message + " " + openAIStreamErrorField(payload, "message").String()))
 	return strings.Contains(combined, "temporary") ||
 		strings.Contains(combined, "try again") ||
 		strings.Contains(combined, "please retry")

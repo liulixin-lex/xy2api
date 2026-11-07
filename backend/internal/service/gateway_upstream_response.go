@@ -1187,7 +1187,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 				s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
 			}
 			noteResilienceStall(ctx, s.rateLimitService, account)
-			sendErrorEvent(OpenAIStreamTimeoutCode, fmt.Sprintf("upstream stream idle for %s", stallThreshold))
+			sendErrorEvent("stream_timeout", fmt.Sprintf("upstream stream idle for %s", stallThreshold))
 			return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream data interval timeout")
 
 		case <-keepaliveCh:

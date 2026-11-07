@@ -38,6 +38,21 @@ func TestMarkOpenAIWSClientVisibleFailure_ErrorAndSuccessBoundary(t *testing.T) 
 	})
 }
 
+func TestMarkOpenAIWSClientVisibleFailure_FlatErrorMatchesObjectFields(t *testing.T) {
+	objectContext, _ := gin.CreateTestContext(nil)
+	markOpenAIWSClientVisibleFailure(objectContext, "error", []byte(`{"type":"error","error":{"type":"invalid_request_error","code":"unknown_parameter","message":"Unknown parameter","status_code":400}}`))
+	object, ok := GetOpsStreamError(objectContext)
+	require.True(t, ok)
+
+	flatContext, _ := gin.CreateTestContext(nil)
+	markOpenAIWSClientVisibleFailure(flatContext, "error", []byte(`{"type":"error","code":"unknown_parameter","message":"Unknown parameter","status_code":400}`))
+	flat, ok := GetOpsStreamError(flatContext)
+	require.True(t, ok)
+	require.Equal(t, object.Code, flat.Code)
+	require.Equal(t, object.Message, flat.Message)
+	require.Equal(t, object.IntendedStatus, flat.IntendedStatus)
+}
+
 func TestSetOpsUpstreamModelStoresOnlyTrimmedModelSlug(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	SetOpsUpstreamModel(c, "  gpt-5.6-sol  ")

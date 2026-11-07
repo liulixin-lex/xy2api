@@ -231,22 +231,10 @@ func markOpenAIWSClientVisibleFailure(c *gin.Context, eventType string, payload 
 	if eventType != "error" && eventType != "response.failed" {
 		return
 	}
-	prefix := "error"
-	if eventType == "response.failed" {
-		prefix = "response.error"
-	}
-	code := strings.TrimSpace(gjson.GetBytes(payload, prefix+".code").String())
-	errType := strings.TrimSpace(gjson.GetBytes(payload, prefix+".type").String())
-	message := strings.TrimSpace(gjson.GetBytes(payload, prefix+".message").String())
-	if eventType == "response.failed" && code == "" && errType == "" && message == "" {
-		prefix = "error"
-		code = strings.TrimSpace(gjson.GetBytes(payload, prefix+".code").String())
-		errType = strings.TrimSpace(gjson.GetBytes(payload, prefix+".type").String())
-		message = strings.TrimSpace(gjson.GetBytes(payload, prefix+".message").String())
-	}
-	status := int(gjson.GetBytes(payload, prefix+".status_code").Int())
+	code, errType, message := parseOpenAIWSErrorEventFields(payload)
+	status := int(openAIStreamErrorField(payload, "status_code").Int())
 	if status == 0 {
-		status = int(gjson.GetBytes(payload, prefix+".status").Int())
+		status = int(openAIStreamErrorField(payload, "status").Int())
 	}
 	if status == 0 && eventType == "error" {
 		status = int(gjson.GetBytes(payload, "status").Int())
@@ -270,15 +258,9 @@ func openAIWSPayloadTransientStatus(payload []byte) int {
 	if len(payload) == 0 {
 		return 0
 	}
-	status := int(gjson.GetBytes(payload, "response.error.status_code").Int())
+	status := int(openAIStreamErrorField(payload, "status_code").Int())
 	if status == 0 {
-		status = int(gjson.GetBytes(payload, "response.error.status").Int())
-	}
-	if status == 0 {
-		status = int(gjson.GetBytes(payload, "error.status_code").Int())
-	}
-	if status == 0 {
-		status = int(gjson.GetBytes(payload, "error.status").Int())
+		status = int(openAIStreamErrorField(payload, "status").Int())
 	}
 	if shouldCooldownOpenAITransientUpstreamError(status, payload) {
 		return status
@@ -286,14 +268,8 @@ func openAIWSPayloadTransientStatus(payload []byte) int {
 	if status != 0 {
 		return 0
 	}
-	code := strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "response.error.code").String()))
-	errType := strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "response.error.type").String()))
-	if code == "" {
-		code = strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "error.code").String()))
-	}
-	if errType == "" {
-		errType = strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "error.type").String()))
-	}
+	code := strings.ToLower(strings.TrimSpace(openAIStreamErrorField(payload, "code").String()))
+	errType := strings.ToLower(strings.TrimSpace(openAIStreamErrorField(payload, "type").String()))
 	switch {
 	case code == "server_is_overloaded", code == "slow_down":
 		return http.StatusServiceUnavailable

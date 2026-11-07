@@ -130,7 +130,7 @@ func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, respon
 
 	code := strings.ToLower(strings.TrimSpace(extractUpstreamErrorCode(responseBody)))
 	message := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(responseBody)))
-	param := strings.ToLower(strings.TrimSpace(gjson.GetBytes(responseBody, "error.param").String()))
+	param := strings.ToLower(strings.TrimSpace(openAIStreamErrorField(responseBody, "param").String()))
 	if code == "invalid_function_parameters" &&
 		openAIResponsesToolParametersParamPattern.MatchString(param) &&
 		openAIResponsesMissingSchemaTypePattern.MatchString(message) {
