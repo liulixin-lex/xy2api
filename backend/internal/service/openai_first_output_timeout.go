@@ -304,6 +304,11 @@ func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 		warmValue := profile.Warm
 		warm = &warmValue
 		bodyBytes = profile.BodyBytes
+		if profile.Warm && profile.Stream {
+			// A timeout bounds first-content delay from below; keep the same
+			// canonical outbound model key as successful warm stream samples.
+			s.recordOpenAIAccountLatencySample(account, profile.Model, time.Since(profile.AttemptStart), time.Now())
+		}
 	}
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 		Warm: warm, BodyBytes: bodyBytes, Effort: reasoningEffort,
