@@ -162,6 +162,8 @@ type GroupQualityObservation struct {
 
 const (
 	GroupQualityReplayMaxObservationRows = 200_000
+	GroupQualityReplayMaxRawUsageRows    = GroupQualityReplayMaxObservationRows
+	GroupQualityReplayMaxRawErrorEvents  = GroupQualityReplayMaxObservationRows
 	GroupQualityReplayMaxUsageWriteRows  = 10_000
 )
 

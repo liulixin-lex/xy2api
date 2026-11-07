@@ -182,6 +182,9 @@ func (r *groupQualityGateRepository) LoadObservationsForReplay(ctx context.Conte
 	if _, err := tx.ExecContext(ctx, `SET LOCAL statement_timeout = '20s'`); err != nil {
 		return service.GroupQualityReplayData{}, err
 	}
+	if err := enforceGroupQualityReplayInputLimits(ctx, tx, from.Add(-5*time.Minute), from, to); err != nil {
+		return service.GroupQualityReplayData{}, err
+	}
 	observations, _, err := loadGroupQualityObservationsBounded(ctx, tx, accountIDs, from, to, service.GroupQualityReplayMaxObservationRows)
 	if err != nil {
 		return service.GroupQualityReplayData{}, err
@@ -216,6 +219,35 @@ func (r *groupQualityGateRepository) LoadObservationsForReplay(ctx context.Conte
 		return service.GroupQualityReplayData{}, err
 	}
 	return service.GroupQualityReplayData{Observations: observations, UsageWrites: writes}, nil
+}
+
+func enforceGroupQualityReplayInputLimits(ctx context.Context, tx *sql.Tx, lagFrom, from, to time.Time) error {
+	var usageRows int64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM (
+			SELECT 1 FROM usage_logs WHERE created_at >= $1 AND created_at < $2 LIMIT $3
+		) AS bounded_usage_rows`, lagFrom.UTC(), to.UTC(), service.GroupQualityReplayMaxRawUsageRows+1).Scan(&usageRows); err != nil {
+		return err
+	}
+	if usageRows > service.GroupQualityReplayMaxRawUsageRows {
+		return fmt.Errorf("%w: raw usage rows exceeded %d", errGroupQualityReplayRowLimit, service.GroupQualityReplayMaxRawUsageRows)
+	}
+
+	var errorEvents int64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM (
+			SELECT 1
+			FROM ops_error_logs e
+			CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(e.upstream_errors)='array' THEN e.upstream_errors ELSE '[]'::jsonb END) AS events(ev)
+			WHERE e.created_at >= $1 AND e.created_at < $2 AND e.upstream_errors IS NOT NULL
+			LIMIT $3
+		) AS bounded_error_events`, from.UTC(), to.UTC(), service.GroupQualityReplayMaxRawErrorEvents+1).Scan(&errorEvents); err != nil {
+		return err
+	}
+	if errorEvents > service.GroupQualityReplayMaxRawErrorEvents {
+		return fmt.Errorf("%w: raw upstream error events exceeded %d", errGroupQualityReplayRowLimit, service.GroupQualityReplayMaxRawErrorEvents)
+	}
+	return nil
 }
 
 func loadGroupQualityObservations(ctx context.Context, tx *sql.Tx, accountIDs []int64, from, to time.Time) ([]service.GroupQualityObservation, time.Time, error) {
