@@ -139,6 +139,8 @@
 
 ## 进行中的工作
 
+- **20261107-ccs-import-panel**（2026-11-07 14:26 UTC 开始；15:30 UTC 更新）：「导入到 CCS」前置面板，PR #208 已开，gpt-6-astra 三轮签字；Codex 默认模型按用户决定改为 `gpt-5.6-sol`。等 CI 全绿后由其他作者合并，发版与部署另行授权；详见操作日志。
+
 - **20261107-release057-docs-handoff**（2026-11-07 13:14 UTC）：0.5.7 已正式发布并完成制品核验；本任务仅提交两份记忆文档中的发布登记、版本表与原样归档。文档交接 PR 只开出待审，合并需用户另行授权；不部署、不固化镜像。
 
 - **20261106-encrypted-routing-followups**（2026-11-07 13:14 UTC）：0.5.7 已随 PR #206 发布，集成和发布前候选登记原文已归档。后续继续由 PM 跟进上线验收与 M5 数据裁决（0.5.8 候选），其他未交付项见“未结事项”。
@@ -1515,3 +1517,13 @@ pnpm --dir frontend run build
 - 验证：`python3 tools/check_docs_consistency.py`；`git diff` 自查无主机、域名、路径、容器名、账号等信息。
 - 卡点/风险：镜像未固化，容器重建会回到 0.5.6。
 - 下一步：等用户授权后推送到 PR #207；镜像固化由用户安排；M5 按 19:12 / 13:12 时点评估。
+
+### 2026-11-07 15:30 UTC — 20261107-ccs-import-panel — 导入 CCS 前置面板，PR #208 已开
+
+- 请求/目标：用户反馈「导入到 CCS」后 CC Switch 的确认框不能改。核实该框按设计只读，用户选择在本站加导入前面板，并决定 Codex 默认模型改为 `gpt-5.6-sol`（与上游 Sub2API 一致）。
+- 开始状态：origin/main `b414da13d`；工作树分支 `feat/ccs-import-panel-20261107`。
+- 完成操作：新增 `CcSwitchImportDialog.vue`，可改名称（默认「站点名 · 密钥名」）、端点（附自定义端点快捷项）、模型（仅 Codex、Grok Build）；Antigravity 客户端选择并入。设置晚到时，未改的字段跟随新默认值；面板关闭后的迟到点击不再唤起 CC Switch。3 个相关 spec 加入关键测试清单。
+- 修改文件：上述组件、`ccswitchImport.ts`、`KeysView.vue` 及各自 spec，中英文 `dashboard.ts`，`Makefile`，本文件。
+- 验证：全量 vitest、build、lint、typecheck、docs 一致性、干净树 audit 与 scheduler-diff 均通过；变异检查覆盖各项修复；无头 Chrome 截图核对。gpt-6-astra 三轮只读审查发现 P2 两项、P3 一项，均已修复，第三轮签字。
+- 卡点/风险：PR #207 先合并；本分支合入 main 时，本文件两处冲突均保留两边。「使用密钥」弹窗的 Codex 配置仍默认 `gpt-5.5`，待用户决定。
+- 下一步：CI 全绿后由其他作者合并；发版与部署另行授权。
