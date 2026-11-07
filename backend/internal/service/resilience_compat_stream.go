@@ -2,7 +2,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
+	"sort"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -230,9 +234,54 @@ func observeOpenAIPreludeCreated(state *resilience.RequestState, eventType strin
 	}
 }
 
-func releaseOpenAIPrelude(state *resilience.RequestState, eventType string) {
+func releaseOpenAIPrelude(state *resilience.RequestState, eventType string, payload []byte) {
+	if state == nil || state.PreludeTrace().ReleaseEvent != "" {
+		return
+	}
 	if eventType == "" {
 		eventType = "unknown"
 	}
-	state.NotePreludeReleased(eventType, time.Now())
+	var schema resilience.PreludeReleaseSchema
+	var field string
+	switch {
+	case strings.HasPrefix(eventType, "response.output_item."):
+		field = "item"
+	case strings.HasPrefix(eventType, "response.content_part."), strings.HasPrefix(eventType, "response.reasoning_summary_part."):
+		field = "part"
+	}
+	var envelope map[string]json.RawMessage
+	var object map[string]json.RawMessage
+	if field != "" && json.Unmarshal(payload, &envelope) == nil && json.Unmarshal(envelope[field], &object) == nil {
+		schema.ItemKeys = preludeReleaseSchemaKeys(object)
+		_ = json.Unmarshal(object["type"], &schema.ItemType)
+		var encrypted string
+		schema.HasEncrypted = json.Unmarshal(object["encrypted_content"], &encrypted) == nil && encrypted != ""
+	}
+	state.NotePreludeReleased(eventType, time.Now(), schema)
+}
+
+const (
+	preludeReleaseMaxKeys     = 32
+	preludeReleaseMaxKeyBytes = 256
+)
+
+func preludeReleaseSchemaKeys(object map[string]json.RawMessage) string {
+	truncated := "[truncated;keys=" + strconv.Itoa(len(object)) + "]"
+	if len(object) > preludeReleaseMaxKeys {
+		return truncated
+	}
+	keys := make([]string, 0, len(object))
+	bytes := 0
+	for key := range object {
+		if len(keys) > 0 {
+			bytes++ // Comma separator.
+		}
+		bytes += len(key)
+		if bytes > preludeReleaseMaxKeyBytes {
+			return truncated
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ",")
 }

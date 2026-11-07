@@ -5,8 +5,11 @@ package handler
 import (
 	"context"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -19,6 +22,83 @@ func keepaliveCtx(t *testing.T, edge string, kind resilience.RequestKind) *gin.C
 	t.Helper()
 	c, _ := keepaliveCtxWithRecorder(t, edge, kind)
 	return c
+}
+
+func TestArmPreOutputKeepaliveOAuthHandoff(t *testing.T) {
+	for _, committed := range []bool{false, true} {
+		t.Run(strconv.FormatBool(committed), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				withHandlerResilience(t, func(s *resilience.Settings) {
+					s.Keepalive.DelaySeconds = 5
+					s.Keepalive.IntervalSeconds = 5
+				})
+				c, rec := keepaliveCtxWithRecorder(t, "cf", resilience.KindText)
+				lockedWriter := &lockedKeepaliveResponseWriter{ResponseWriter: c.Writer, recorder: rec}
+				c.Writer = lockedWriter
+				c.Request.Header.Set("originator", "codex_cli_rs")
+				defer stopPreOutputKeepalive(c)
+				armPreOutputKeepalive(c, service.PreOutputProtocolResponses, true, &service.Account{Type: service.AccountTypeAPIKey})
+				if committed {
+					time.Sleep(6 * time.Second)
+				} else {
+					time.Sleep(time.Second)
+				}
+				synctest.Wait()
+				c.Header("X-Attempt", "one")
+				armPreOutputKeepalive(c, service.PreOutputProtocolResponses, true, &service.Account{Type: service.AccountTypeOAuth})
+				time.Sleep(4 * time.Second)
+				synctest.Wait()
+				if committed {
+					require.Equal(t, 2, strings.Count(lockedWriter.body(), "event: ping\n"))
+					time.Sleep(5 * time.Second)
+					synctest.Wait()
+					require.Equal(t, 3, strings.Count(lockedWriter.body(), "event: ping\n"))
+					require.Equal(t, -1, service.OpenAICompactKeepaliveAdjustedWrittenSize(c))
+				} else {
+					time.Sleep(15 * time.Second)
+					synctest.Wait()
+					require.Empty(t, lockedWriter.body())
+					require.False(t, service.PreOutputKeepaliveCommitted(c))
+				}
+			})
+		})
+	}
+}
+
+type lockedKeepaliveResponseWriter struct {
+	gin.ResponseWriter
+	mu       sync.Mutex
+	recorder *httptest.ResponseRecorder
+}
+
+func (w *lockedKeepaliveResponseWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.ResponseWriter.Write(p)
+}
+
+func (w *lockedKeepaliveResponseWriter) WriteString(s string) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.ResponseWriter.WriteString(s)
+}
+
+func (w *lockedKeepaliveResponseWriter) WriteHeader(code int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *lockedKeepaliveResponseWriter) Flush() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.ResponseWriter.Flush()
+}
+
+func (w *lockedKeepaliveResponseWriter) body() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.recorder.Body.String()
 }
 
 func keepaliveCtxWithRecorder(t *testing.T, edge string, kind resilience.RequestKind) (*gin.Context, *httptest.ResponseRecorder) {

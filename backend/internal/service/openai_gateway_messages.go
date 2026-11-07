@@ -999,11 +999,35 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	firstChunk := true
 	clientDisconnected := false
 	clientOutputStarted := false
+	var keepaliveInterval time.Duration
+	var keepaliveTimer *time.Timer
+	var lastDownstreamWriteAt time.Time
+	resetKeepaliveTimer := func() {
+		if keepaliveTimer == nil {
+			return
+		}
+		remaining := time.Until(lastDownstreamWriteAt.Add(keepaliveInterval))
+		if remaining < 0 {
+			remaining = 0
+		}
+		if !keepaliveTimer.Stop() {
+			select {
+			case <-keepaliveTimer.C:
+			default:
+			}
+		}
+		keepaliveTimer.Reset(remaining)
+	}
+	noteDownstreamWrite := func() {
+		lastDownstreamWriteAt = time.Now()
+		resetKeepaliveTimer()
+	}
 	stopPreludeCancel := func() bool { return false }
 	writeClient := func(data string) error {
 		n, err := fmt.Fprint(c.Writer, data)
 		if n > 0 {
 			clientOutputStarted = true
+			noteDownstreamWrite()
 			stopPreludeCancel()
 		}
 		if err == nil && n != len(data) {
@@ -1199,7 +1223,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 					return true
 				}
 				if !clientOutputStarted {
-					releaseOpenAIPrelude(preludeTrace, event.Type)
+					releaseOpenAIPrelude(preludeTrace, event.Type, []byte(payload))
 				}
 				s.resilienceOpenAIFailedAfterOutput(c.Request.Context(), account, resp, payloadBytes, message, clientOutputStarted)
 				message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payloadBytes, message)
@@ -1243,7 +1267,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			return false
 		}
 		if !holdPrelude && !clientOutputStarted && event.Type != "response.created" {
-			releaseOpenAIPrelude(preludeTrace, event.Type)
+			releaseOpenAIPrelude(preludeTrace, event.Type, []byte(payload))
 		}
 		var events []apicompat.AnthropicStreamEvent
 		if stagePrelude {
@@ -1358,7 +1382,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	}
 
 	// ── Determine keepalive interval ──
-	keepaliveInterval := time.Duration(0)
+	keepaliveInterval = 0
 	if s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
 		keepaliveInterval = time.Duration(s.cfg.Gateway.StreamKeepaliveInterval) * time.Second
 	}
@@ -1440,16 +1464,20 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	}()
 	defer close(done)
 
-	var keepaliveTicker *time.Ticker
-	if keepaliveInterval > 0 {
-		keepaliveTicker = time.NewTicker(keepaliveInterval)
-		defer keepaliveTicker.Stop()
-	}
 	var keepaliveCh <-chan time.Time
-	if keepaliveTicker != nil {
-		keepaliveCh = keepaliveTicker.C
+	if keepaliveInterval > 0 {
+		if k := keepaliveFrom(c); k != nil {
+			k.suspend()
+		}
+		lastDownstreamWriteAt = openAIKeepaliveLastWrite(c)
+		remaining := time.Until(lastDownstreamWriteAt.Add(keepaliveInterval))
+		if remaining < 0 {
+			remaining = 0
+		}
+		keepaliveTimer = time.NewTimer(remaining)
+		defer keepaliveTimer.Stop()
+		keepaliveCh = keepaliveTimer.C
 	}
-	lastDataAt := time.Now()
 	var parser openAICompatSSEFrameParser
 
 	for {
@@ -1486,7 +1514,6 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			if !stagePrelude && !firstEvent.disarm() && !clientDisconnected {
 				return nil, s.openAICompatFirstEventTimeout(c.Request.Context(), c, account, firstEvent, "first_event", resp.Header)
 			}
-			lastDataAt = time.Now()
 			line := ev.line
 			if isOpenAICompatDoneSentinelLine(line) {
 				return missingTerminalErr()
@@ -1528,9 +1555,6 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			if clientDisconnected {
 				continue
 			}
-			if time.Since(lastDataAt) < keepaliveInterval {
-				continue
-			}
 			// Before message_start, comments keep the connection alive without
 			// opening a protocol stream that could belong to a failed attempt.
 			writeStableStreamHeaders(c)
@@ -1538,7 +1562,14 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			if stagePrelude && !clientOutputStarted {
 				frame = ":\n\n"
 			}
-			n, err := fmt.Fprint(c.Writer, frame)
+			var err error
+			if stagePrelude && !clientOutputStarted {
+				_, err = writeOpenAIStreamKeepalive(c, c.Writer, []byte(frame), true)
+			} else {
+				var n int
+				n, err = fmt.Fprint(c.Writer, frame)
+				recordOpenAIStreamKeepaliveBytes(c, n)
+			}
 			if err != nil {
 				// Client disconnected
 				logger.L().Info("openai messages stream: client disconnected during keepalive",
@@ -1547,9 +1578,9 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				clientDisconnected = true
 				continue
 			}
+			noteDownstreamWrite()
 			// xy2api resilience (review G1): a heartbeat, not output; before
 			// the first upstream line the attempt may still fail over.
-			recordOpenAIStreamKeepaliveBytes(c, n)
 			if !stagePrelude {
 				clientOutputStarted = true
 			}

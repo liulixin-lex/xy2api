@@ -242,6 +242,7 @@ func (s *GatewayService) shareGatewayLastResort(ctx context.Context, gp *shareGr
 	if out == nil || out.err != nil || out.result == nil {
 		return nil
 	}
-	s.noteLastResort(ctx, groupID, out.result.Account, round.recoverAt[out.served], avoided)
+	s.noteLastResort(ctx, groupID, out.result.Account, round.recoverAt[out.served], avoided,
+		lastResortShareLogMeta(round, avoided, exec.skipped))
 	return out.result
 }

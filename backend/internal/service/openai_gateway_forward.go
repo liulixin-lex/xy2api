@@ -24,11 +24,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	defer beginOpenAIStateRejectionAttempt(ctx, c, account, body)(&forwardErr)
 	// Run the same complete checks on original bytes without applying edits;
 	// requests that cannot obtain a raw plan cannot gain one after normalization.
-	collabRawBlocked, collabRawContinuity, collabRawConflict := true, false, false
+	collabRawBlocked, collabRawConflict := true, false
 	if resilience.Current().CollaborationPlaintextOn() && bytes.Contains(body, []byte(`"collaboration"`)) {
 		_, rawPlan, rawOutcome := planCodexCollaborationPlaintext(body)
 		collabRawBlocked = rawPlan == nil
-		collabRawContinuity = rawPlan != nil && openAICollaborationContinuity(body)
 		collabRawConflict = rawOutcome == codexCollabConflict
 	}
 	defer func() { s.finishCacheDiagnostic(c, body, result) }()
@@ -1063,16 +1062,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	// Native Responses HTTP only; each attempt freezes its own restore plan.
-	collabContinuity := account.IsOpenAIApiKey() && !account.IsOpenAICollaborationPlaintextEnabled() && collabRawContinuity
-	collabEligible := openAICollaborationEligible(c, account, upstreamModel, wsDecision.Transport, passthroughEnabled, compactPath, compatMessagesBridge, collabContinuity)
+	collabEligible := openAICollaborationEligible(c, account, upstreamModel, wsDecision.Transport, passthroughEnabled, compactPath, compatMessagesBridge)
 	collabBody, collabAttempt := armOpenAICollaboration(c, body, upstreamModel, !collabRawBlocked && collabEligible)
 	// Raw conflicts stay visible as conflict for eligible traffic instead of a generic exclusion.
 	if collabAttempt != nil && collabEligible && collabRawConflict {
 		collabAttempt.outcome, collabAttempt.eligibilitySource = codexCollabConflict, "account"
 		collabAttempt.publish(c)
-	}
-	if collabContinuity && collabAttempt != nil && collabAttempt.eligibilitySource != "" {
-		collabAttempt.eligibilitySource = "continuity"
 	}
 	defer func() {
 		collabAttempt.finish(ctx, c, account, forwardErr)
@@ -1109,6 +1104,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	requestRepair.m3 = s.armOpenAIM3(c, account, body)
 	replayAttempt := false
 	for {
+		if replayAttempt {
+			ResumeCommittedPreOutputKeepalive(c, time.Duration(resilience.Current().Keepalive.IntervalSeconds)*time.Second)
+		}
 		derivedBody, deriveErr := requestRepair.m3.derive(ctx, body)
 		if deriveErr != nil {
 			return nil, deriveErr
@@ -1266,6 +1264,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			if collabAttempt != nil && collabAttempt.applied {
 				collabAttempt.clientRejected = resp.StatusCode < 500 && resp.StatusCode != 429 && classifyUpstreamHTTP(resp.StatusCode, resp.Header, respBody, upstreamMsg).Category == resilience.CategoryClientError
+			}
+			if failure := s.failoverOpenAIModelAvailability(ctx, c, account, resp, respBody, upstreamModel, false); failure != nil {
+				return nil, failure
 			}
 			if s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody) {
 				upstreamDetail := ""

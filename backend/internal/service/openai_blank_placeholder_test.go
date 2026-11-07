@@ -218,6 +218,93 @@ func TestResponsesBlankPlaceholderPredicatesAndSemanticDeliveryAgree(t *testing.
 	}
 }
 
+func TestResponsesExtraFieldsPreserveSharedOutputDecision(t *testing.T) {
+	withResilienceSettings(t, nil)
+	tests := []struct {
+		name, payload string
+		wantPrelude   bool
+	}{
+		{
+			name:        "reasoning item with empty extra field",
+			payload:     `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[],"content":[]}}`,
+			wantPrelude: true,
+		},
+		{
+			name:        "event root with empty extra field",
+			payload:     `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[]},"vendor_extension":{}}`,
+			wantPrelude: true,
+		},
+		{
+			name:    "event root with nonempty extra field",
+			payload: `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[]},"vendor_extension":"value"}`,
+		},
+		{
+			name:        "reasoning item with nested empty object",
+			payload:     `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[],"extra":{"x":{"y":""}}}}`,
+			wantPrelude: true,
+		},
+		{
+			name:        "message item with nested empty array",
+			payload:     `{"type":"response.output_item.added","item":{"id":"m","type":"message","role":"assistant","content":[],"extra":{"x":[{}]}}}`,
+			wantPrelude: true,
+		},
+		{
+			name:        "event root with nested empty mixed array",
+			payload:     `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[]},"extra":{"x":[null,""]}}`,
+			wantPrelude: true,
+		},
+		{
+			name:    "reasoning item with nested nonempty string",
+			payload: `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[],"extra":{"x":{"y":"a"}}}}`,
+		},
+		{
+			name:    "event root with nested zero",
+			payload: `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[]},"extra":{"x":[0]}}`,
+		},
+		{
+			name:    "reasoning item with nested false",
+			payload: `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[],"extra":{"x":false}}}`,
+		},
+		{
+			name:    "event root with nested whitespace",
+			payload: `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[]},"extra":{"x":" "}}`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			const event = "response.output_item.added"
+			payload := []byte(tc.payload)
+			disposition := resilience.ResponsesEventOutputDisposition(event, payload)
+			wantKind := resilience.Content
+			if tc.wantPrelude {
+				wantKind = resilience.Prelude
+			}
+			require.Equal(t, wantKind, disposition.Kind)
+			require.Equal(t, !tc.wantPrelude, disposition.Visible)
+			require.Equal(t, !tc.wantPrelude, disposition.SemanticOutput)
+
+			var compatEvent apicompat.ResponsesStreamEvent
+			require.NoError(t, json.Unmarshal(payload, &compatEvent))
+			require.Equal(t, tc.wantPrelude, openAICompatPreludeEvent(&compatEvent, payload))
+			require.Equal(t, !tc.wantPrelude, resilience.ClassifyStreamEvent("responses", event, payload).Kind == resilience.Content)
+			require.Equal(t, !tc.wantPrelude, openAIStreamDataStartsClientOutput(tc.payload, event))
+			require.Equal(t, !tc.wantPrelude, openAIStreamDataStartsVisibleOutput(tc.payload, event))
+			require.Equal(t, !tc.wantPrelude, openAIStreamDataStartsSemanticTTFT(tc.payload, event))
+			require.Equal(t, !tc.wantPrelude, openAIStreamDataStartsTTFT(tc.payload, event, false, OpenAITTFTModeVisible))
+			require.Equal(t, !tc.wantPrelude, semanticSSEBlock([]byte("event: "+event+"\ndata:"+tc.payload)))
+
+			c, state := newSSEDeliveryContext(t, "text/event-stream")
+			start := time.Now().Add(-time.Second)
+			state.SetAttemptProfile(resilience.AttemptProfile{AccountID: 9023, AttemptStart: start})
+			_, err := deliveryWriterFrom(c).WriteString("event: " + event + "\ndata: " + tc.payload + "\n\n")
+			require.NoError(t, err)
+			require.Equal(t, !tc.wantPrelude, !state.SemanticOutputAt().IsZero())
+			require.Equal(t, !tc.wantPrelude, state.AttemptFirstOutputMs() != nil)
+			require.Equal(t, !tc.wantPrelude, !state.FirstOutput().IsZero())
+		})
+	}
+}
+
 func TestResponsesMalformedEventFailsClosedAtAllOutputChecks(t *testing.T) {
 	withResilienceSettings(t, nil)
 	for _, payload := range []string{

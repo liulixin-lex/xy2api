@@ -226,6 +226,30 @@ func TestClassifySpecScenarios(t *testing.T) {
 	}
 }
 
+func TestClassifyUpstreamRequestRestrictionPreservesRequestEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		status        int
+		code, message string
+		want          Category
+	}{
+		{502, "provider_request_invalid", "inline images exceed provider limit", CategoryUpstreamRequestRestriction},
+		{400, "provider_request_invalid", "inline images exceed provider limit", CategoryClientError},
+		{502, "context_length_exceeded", "request rejected", CategoryClientError},
+		{502, "", "maximum context length exceeded", CategoryClientError},
+		{502, "content_policy_violation", "request rejected", CategoryClientError},
+		{502, "", "rejected by safety system", CategoryClientError},
+		{502, "cyber_policy", "request rejected", CategoryClientError},
+		{502, "invalid_encrypted_content", "request rejected", CategoryClientError},
+	} {
+		got := Classify(Outcome{StatusCode: tc.status, Type: "invalid_request_error", Code: tc.code, Message: tc.message}, nil)
+		require.Equal(t, tc.want, got.Category, "%d %s %s", tc.status, tc.code, tc.message)
+	}
+	require.False(t, CategoryUpstreamRequestRestriction.CountsForSession())
+	require.False(t, CategoryUpstreamRequestRestriction.SoftCooldown())
+	require.False(t, CategoryUpstreamRequestRestriction.AccountScoped())
+	require.True(t, CategoryUpstreamRequestRestriction.SwitchAccount())
+}
+
 func TestIsEncryptedContentRejection(t *testing.T) {
 	tests := []struct {
 		name, code, message string
@@ -275,6 +299,7 @@ func TestIsModelUnsupportedResponseUsesRestrictedStructuredMessages(t *testing.T
 		{"explicit model code wins with param", 400, `{"error":{"code":"model_not_found","param":"model","message":"model not found"}}`, true},
 		{"strong code wins", 400, `{"error":{"code":"invalid_api_key","message":"unknown model x"}}`, false},
 		{"strong type wins", 404, `{"error":{"type":"context_length_exceeded","message":"model not found"}}`, false},
+		{"model param allows text", 400, `{"error":{"type":"invalid_request_error","param":"model","message":"model not found"}}`, true},
 		{"param blocks text", 400, `{"error":{"param":"tools","message":"model not found"}}`, false},
 		{"endpoint mismatch", 400, `{"error":{"message":"model is not supported by this endpoint"}}`, false},
 		{"mode mismatch", 404, `{"error":{"message":"model is not supported in this mode"}}`, false},
@@ -292,17 +317,18 @@ func TestCategoryPolicyTable(t *testing.T) {
 	// Spec: category determines failover, penalty and session handling.
 	type policy struct{ switchAcct, session, soft, scoped bool }
 	want := map[Category]policy{
-		CategoryBalance:            {true, false, false, true},
-		CategoryAuth:               {true, false, false, true},
-		CategoryRateLimitReset:     {true, false, false, true},
-		CategoryRateLimit:          {true, true, false, true},
-		CategoryCapacityShed:       {true, false, false, false},
-		CategoryTransient:          {true, true, true, true},
-		CategoryFirstOutputTimeout: {true, true, true, true},
-		CategoryStall:              {false, true, true, true},
-		CategoryClientCancel:       {false, false, false, false},
-		CategoryClientError:        {false, false, false, false},
-		CategoryModelUnsupported:   {true, false, false, true},
+		CategoryBalance:                    {true, false, false, true},
+		CategoryAuth:                       {true, false, false, true},
+		CategoryRateLimitReset:             {true, false, false, true},
+		CategoryRateLimit:                  {true, true, false, true},
+		CategoryCapacityShed:               {true, false, false, false},
+		CategoryTransient:                  {true, true, true, true},
+		CategoryFirstOutputTimeout:         {true, true, true, true},
+		CategoryStall:                      {false, true, true, true},
+		CategoryClientCancel:               {false, false, false, false},
+		CategoryClientError:                {false, false, false, false},
+		CategoryModelUnsupported:           {true, false, false, true},
+		CategoryUpstreamRequestRestriction: {true, false, false, false},
 	}
 	for c, p := range want {
 		require.Equal(t, p.switchAcct, c.SwitchAccount(), "switch %s", c)

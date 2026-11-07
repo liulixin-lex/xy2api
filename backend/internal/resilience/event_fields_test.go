@@ -33,7 +33,7 @@ func TestEventFieldsUseGatewayRequestIDAndDelivery(t *testing.T) {
 	require.Equal(t, int64(1500), st.MSSinceFirstOutput(at.Add(1500*time.Millisecond)))
 	require.Zero(t, st.MSSinceFirstOutput(at.Add(-time.Second)))
 	fields := eventFieldMap(t, EventFields(ctx))
-	require.Len(t, fields, 7)
+	require.Len(t, fields, 10)
 	require.NotEmpty(t, fields["request_id"])
 	require.Equal(t, "client-chosen", fields["request_id"])
 	require.Equal(t, st.GatewayRequestID(), fields["gateway_request_id"])
@@ -43,6 +43,9 @@ func TestEventFieldsUseGatewayRequestIDAndDelivery(t *testing.T) {
 	require.Equal(t, int64(42), fields["delivered_bytes"])
 	require.Equal(t, "", fields["prelude_release_event"])
 	require.Equal(t, int64(0), fields["prelude_release_ms"])
+	require.Equal(t, "", fields["prelude_release_item_type"])
+	require.Equal(t, "", fields["prelude_release_item_keys"])
+	require.Equal(t, false, fields["prelude_release_has_encrypted"])
 	st.mu.Lock()
 	st.prelude.releaseEvent = "response.output_text.delta"
 	st.prelude.releaseAfterCreatedMS = 17
@@ -60,7 +63,7 @@ func TestPreOutputEventFieldsNeverReenterDeliveryProbe(t *testing.T) {
 	require.Zero(t, f["delivered_bytes"])
 	require.Zero(t, f["ms_since_first_output"])
 	var nilContext context.Context
-	require.Len(t, eventFieldMap(t, EventFields(nilContext)), 7)
+	require.Len(t, eventFieldMap(t, EventFields(nilContext)), 10)
 	require.Equal(t, st.GatewayRequestID(), f["request_id"], "missing HTTP ID falls back to the local ID")
 	require.Equal(t, st.GatewayRequestID(), f["gateway_request_id"])
 	ctx = context.WithValue(ctx, ctxkey.RequestID, "http-id")

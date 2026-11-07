@@ -82,6 +82,20 @@ func PreOutputKeepaliveCommitted(c *gin.Context) bool {
 	return k.started
 }
 
+// ResumeCommittedPreOutputKeepalive resumes only an existing, committed request heartbeat.
+func ResumeCommittedPreOutputKeepalive(c *gin.Context, interval time.Duration) {
+	k := keepaliveFrom(c)
+	if k == nil || interval <= 0 {
+		return
+	}
+	k.mu.Lock()
+	committed := k.protocol != "" && k.started
+	k.mu.Unlock()
+	if committed {
+		k.resume(0, interval)
+	}
+}
+
 // StopPreOutputKeepaliveIfUncommitted stops a heartbeat that has not
 // committed the response yet (an official OAuth account was selected after a
 // switch, design §7.2); a committed one keeps running.
