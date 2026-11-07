@@ -10,10 +10,10 @@ func TestPreludeTraceTracksOneAttempt(t *testing.T) {
 	s := NewRequestState()
 	created := time.Unix(100, 0)
 	s.NotePreludeCreated(created)
-	s.NotePreludeReleased("response.output_text.delta", created.Add(17*time.Millisecond), PreludeReleaseSchema{ItemType: "reasoning", ItemKeys: "type", HasEncrypted: true})
+	s.NotePreludeReleased("response.output_text.delta", created.Add(17*time.Millisecond), PreludeReleaseSchema{EventKeys: "delta:string,type:string", ItemType: "reasoning", ItemKeys: "type", HasEncrypted: true})
 	s.NotePreludeReleased("response.completed", created.Add(time.Second), PreludeReleaseSchema{})
 	got := s.PreludeTrace()
-	if got.ReleaseEvent != "response.output_text.delta" || got.ReleaseAfterCreatedMS != 17 || got.ItemType != "reasoning" || got.ItemKeys != "type" || !got.HasEncrypted {
+	if got.ReleaseEvent != "response.output_text.delta" || got.ReleaseAfterCreatedMS != 17 || got.EventKeys != "delta:string,type:string" || got.ItemType != "reasoning" || got.ItemKeys != "type" || !got.HasEncrypted {
 		t.Fatalf("first release must freeze: %+v", got)
 	}
 	s.NotePreludeCreated(time.Time{})

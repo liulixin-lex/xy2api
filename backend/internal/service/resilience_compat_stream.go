@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -251,11 +252,19 @@ func releaseOpenAIPrelude(state *resilience.RequestState, eventType string, payl
 	}
 	var envelope map[string]json.RawMessage
 	var object map[string]json.RawMessage
-	if field != "" && json.Unmarshal(payload, &envelope) == nil && json.Unmarshal(envelope[field], &object) == nil {
-		schema.ItemKeys = preludeReleaseSchemaKeys(object)
-		_ = json.Unmarshal(object["type"], &schema.ItemType)
-		var encrypted string
-		schema.HasEncrypted = json.Unmarshal(object["encrypted_content"], &encrypted) == nil && encrypted != ""
+	if json.Unmarshal(payload, &envelope) == nil {
+		// Only the two output_item event types explicitly handled by
+		// ResponsesEventOutputDisposition omit the top-level schema. Other
+		// release events, including unknown output_item.* types, retain it.
+		if eventType != "response.output_item.added" && eventType != "response.output_item.done" {
+			schema.EventKeys = preludeReleaseSchemaKeys(envelope, true)
+		}
+		if field != "" && json.Unmarshal(envelope[field], &object) == nil {
+			schema.ItemKeys = preludeReleaseSchemaKeys(object, false)
+			_ = json.Unmarshal(object["type"], &schema.ItemType)
+			var encrypted string
+			schema.HasEncrypted = json.Unmarshal(object["encrypted_content"], &encrypted) == nil && encrypted != ""
+		}
 	}
 	state.NotePreludeReleased(eventType, time.Now(), schema)
 }
@@ -265,14 +274,17 @@ const (
 	preludeReleaseMaxKeyBytes = 256
 )
 
-func preludeReleaseSchemaKeys(object map[string]json.RawMessage) string {
+func preludeReleaseSchemaKeys(object map[string]json.RawMessage, includeTypes bool) string {
 	truncated := "[truncated;keys=" + strconv.Itoa(len(object)) + "]"
 	if len(object) > preludeReleaseMaxKeys {
 		return truncated
 	}
 	keys := make([]string, 0, len(object))
 	bytes := 0
-	for key := range object {
+	for key, value := range object {
+		if includeTypes {
+			bytes += 1 + len(preludeReleaseJSONType(value))
+		}
 		if len(keys) > 0 {
 			bytes++ // Comma separator.
 		}
@@ -283,5 +295,30 @@ func preludeReleaseSchemaKeys(object map[string]json.RawMessage) string {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
+	if includeTypes {
+		for i, key := range keys {
+			keys[i] += ":" + preludeReleaseJSONType(object[key])
+		}
+	}
 	return strings.Join(keys, ",")
+}
+
+// Values come from a successfully decoded JSON object. Inspect only the JSON
+// type; nested field names and all values are excluded from the observation.
+func preludeReleaseJSONType(value json.RawMessage) string {
+	value = bytes.TrimSpace(value)
+	switch value[0] {
+	case '{':
+		return "object"
+	case '[':
+		return "array"
+	case '"':
+		return "string"
+	case 't', 'f':
+		return "boolean"
+	case 'n':
+		return "null"
+	default:
+		return "number"
+	}
 }

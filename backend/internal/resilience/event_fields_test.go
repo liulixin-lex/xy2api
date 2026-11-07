@@ -49,10 +49,12 @@ func TestEventFieldsUseGatewayRequestIDAndDelivery(t *testing.T) {
 	st.mu.Lock()
 	st.prelude.releaseEvent = "response.output_text.delta"
 	st.prelude.releaseAfterCreatedMS = 17
+	st.prelude.schema.EventKeys = "delta:string,type:string"
 	st.mu.Unlock()
 	fields = eventFieldMap(t, EventFields(ctx))
 	require.Equal(t, "response.output_text.delta", fields["prelude_release_event"])
 	require.Equal(t, int64(17), fields["prelude_release_ms"])
+	require.Equal(t, "delta:string,type:string", fields["prelude_release_event_keys"])
 }
 
 func TestPreOutputEventFieldsNeverReenterDeliveryProbe(t *testing.T) {
