@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"sync"
@@ -232,6 +233,15 @@ func writeOpenAIStreamKeepalive(c *gin.Context, w gin.ResponseWriter, frame []by
 				k.noteCommitted()
 			}
 			n, err := k.writer.Write(frame)
+			if err == nil && n != len(frame) {
+				err = io.ErrShortWrite
+			}
+			if err != nil {
+				// A partial frame is irreversible output, not a heartbeat
+				// that can be deducted before another attempt.
+				k.closed = true
+				return n, err
+			}
 			k.bytes += n
 			if refreshClock {
 				k.lastWrite = time.Now()
@@ -241,7 +251,12 @@ func writeOpenAIStreamKeepalive(c *gin.Context, w gin.ResponseWriter, frame []by
 		k.mu.Unlock()
 	}
 	n, err := w.Write(frame)
-	recordOpenAIStreamKeepaliveBytes(c, n)
+	if err == nil && n != len(frame) {
+		err = io.ErrShortWrite
+	}
+	if err == nil {
+		recordOpenAIStreamKeepaliveBytes(c, n)
+	}
 	return n, err
 }
 
