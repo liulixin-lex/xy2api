@@ -1,7 +1,7 @@
 export default {
   groupQualityGate: {
     title: 'Quality gate',
-    hint: 'Ranks members in three tiers by this group\'s standards: accounts below standard go last. When a bound account is below standard or held back as slow, its sessions move to a qualified account in this group with spare capacity. Accounts are not removed or paused. Recovery requires consecutive checks meeting the recovery threshold: 15 for first token, 2 each for errors and cache. After a restart, the system tries to restore error and cache tiers and recent failure flags from the last 6 hours of data; first token is learned again. Unpinned accounts with an undecided metric and no failing metrics or recent failure flags show "Unknown" ("Retest" in strict mode).',
+    hint: 'Accounts are ranked in three tiers by this group\'s standards. Accounts below standard go last; none are removed or paused. Sessions on an account that is below standard or held back as slow move to a qualified account in this group with spare capacity. Recovery requires consecutive checks meeting the recovery threshold: 15 for first token, 2 each for errors and cache. After a restart, the system tries to rebuild error and cache states and recent failure flags from the last 6 hours of data; first token assessments start afresh.',
     enable: 'Enable quality gate',
     disabledHint: 'While the gate is off, this group has no tiers and accounts judged slow go to the end of the candidates.',
     loading: 'Loading gate settings…',
