@@ -455,6 +455,26 @@ func TestGroupQualityWarmStartLeavesTTFTBeforeProcessStartIneligible(t *testing.
 	require.False(t, prepared[0].TTFTEligible, "a continuation whose predecessor predates process start is not a TTFT sample")
 }
 
+func TestGroupQualityProcessBoundaryExcludesPreStartPredecessorsFromB1(t *testing.T) {
+	now := eNowForQualityTest()
+	processStart := now.Add(-30 * time.Minute)
+	var observations []GroupQualityObservation
+	for accountID := int64(1); accountID <= 3; accountID++ {
+		for i := range 10 {
+			o := qualitySpeedObservation(accountID*100+int64(i), accountID, now.Add(-time.Duration(i+1)*time.Minute), 1000)
+			o.PreviousAt = processStart.Add(-time.Second)
+			observations = append(observations, o)
+		}
+	}
+	prepared, failed, _ := prepareGroupQualityObservations(observations, now, processStart, nil)
+	require.Len(t, prepared, 30)
+	for _, o := range prepared {
+		require.True(t, o.StrictContinuation, "the predecessor remains inside the six-hour fact window")
+		require.False(t, o.TTFTEligible, "a predecessor before process start disqualifies the B1 sample")
+	}
+	require.Empty(t, buildGroupQualityBaselines(prepared, failed, now))
+}
+
 func TestGroupQualityLagBoundaryReachesCacheMetrics(t *testing.T) {
 	now := eNowForQualityTest()
 	threeMinute := qualitySpeedObservation(1, 1, now.Add(-time.Minute), 1000)
