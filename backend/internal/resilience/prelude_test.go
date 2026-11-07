@@ -97,7 +97,9 @@ func TestClassifyStreamEvent(t *testing.T) {
 	}
 }
 
-func TestResponsesExtraFieldsMatchV054EmptySemantics(t *testing.T) {
+// Recursive null, string and container handling remains compatible with v0.5.4.
+// Scalar metadata follows the separate G2c rule tested below.
+func TestResponsesExtraFieldsMatchV054RecursiveEmptiness(t *testing.T) {
 	for _, tc := range []struct {
 		name, value string
 		empty       bool
@@ -110,11 +112,7 @@ func TestResponsesExtraFieldsMatchV054EmptySemantics(t *testing.T) {
 		{"nested empty array", `{"x":[{}]}`, true},
 		{"nested empty mixed array", `{"x":[null,""]}`, true},
 		{"nested nonempty string", `{"x":{"y":"a"}}`, false},
-		{"nested zero", `{"x":[0]}`, false},
-		{"nested false", `{"x":false}`, false},
 		{"nested whitespace", `{"x":" "}`, false},
-		{"true", `true`, false},
-		{"number", `1`, false},
 		{"no structural field exemption", `{"x":{"id":"r"}}`, false},
 		{"no tool identity exemption", `{"x":{"type":"function_call","name":"tool","arguments":""}}`, false},
 		{"duplicate cannot hide content", `{"x":{"y":"a","y":""}}`, false},
@@ -137,6 +135,40 @@ func TestResponsesExtraFieldsMatchV054EmptySemantics(t *testing.T) {
 	}
 }
 
+func TestResponsesExtraFieldScalarsDoNotCountAsContent(t *testing.T) {
+	for _, tc := range []struct {
+		name, value string
+		empty       bool
+	}{
+		{"true", `true`, true},
+		{"false", `false`, true},
+		{"zero", `0`, true},
+		{"number", `3`, true},
+		{"negative number", `-4`, true},
+		{"fractional number", `1.25`, true},
+		{"exponent number", `1e100`, true},
+		{"nested zero", `{"x":[0]}`, true},
+		{"nested false", `{"x":false}`, true},
+		{"nested scalars", `{"x":[true,3]}`, true},
+		{"empty scalar containers", `{"x":[],"y":{}}`, true},
+		{"nonempty string", `"y"`, false},
+		{"whitespace string", `" "`, false},
+		{"nested nonempty string", `{"x":{"y":"y"}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := fmt.Sprintf(`{"type":"response.output_item.added","item":{"type":"reasoning","summary":[],"extra":%s}}`, tc.value)
+			got := ResponsesEventOutputDisposition("response.output_item.added", []byte(payload))
+			wantKind := Content
+			if tc.empty {
+				wantKind = Prelude
+			}
+			if !got.Matched || got.Kind != wantKind || got.Visible != !tc.empty || got.SemanticOutput != !tc.empty {
+				t.Errorf("got %+v, want kind=%v empty=%t", got, wantKind, tc.empty)
+			}
+		})
+	}
+}
+
 func TestResponsesExtraFieldDepthLimit(t *testing.T) {
 	for _, tc := range []struct {
 		depth     int
@@ -149,7 +181,7 @@ func TestResponsesExtraFieldDepthLimit(t *testing.T) {
 			// Count array/object levels within the extra value, excluding the
 			// event and item envelopes. Check both scalar and empty-container
 			// leaves so a childless container cannot bypass the depth limit.
-			for _, leaf := range []string{`null`, `{}`} {
+			for _, leaf := range []string{`null`, `{}`, `true`, `3`} {
 				value := leaf
 				levels := 0
 				if leaf == `{}` {
@@ -244,6 +276,11 @@ func TestResponsesEventOutputDisposition(t *testing.T) {
 		{name: "bad obfuscation", event: "response.output_text.delta", payload: `{"type":"response.output_text.delta","delta":" ","obfuscation":null}`, visible: true, semanticOutput: true},
 		{name: "nonempty logprobs", event: "response.output_text.delta", payload: `{"type":"response.output_text.delta","delta":" ","logprobs":[{}]}`, visible: true, semanticOutput: true},
 		{name: "bad logprobs", event: "response.output_text.done", payload: `{"type":"response.output_text.done","text":" ","logprobs":null}`, visible: true, semanticOutput: true},
+		{name: "boolean sequence number", event: "response.output_text.delta", payload: `{"type":"response.output_text.delta","sequence_number":true,"delta":" ","x":true}`, visible: true, semanticOutput: true},
+		{name: "boolean item index", event: "response.output_item.added", payload: `{"type":"response.output_item.added","item":{"type":"reasoning","index":false,"summary":[]},"x":true}`, visible: true, semanticOutput: true},
+		{name: "numeric text", event: "response.output_text.done", payload: `{"type":"response.output_text.done","text":3,"x":true}`, visible: true, semanticOutput: true},
+		{name: "boolean delta", event: "response.output_text.delta", payload: `{"type":"response.output_text.delta","delta":false,"x":true}`, visible: true, semanticOutput: true},
+		{name: "duplicate scalar extension", event: "response.output_text.delta", payload: `{"type":"response.output_text.delta","delta":" ","x":true,"x":false}`, visible: true, semanticOutput: true},
 		{name: "fractional index", event: "response.output_text.delta", payload: `{"type":"response.output_text.delta","output_index":0.5,"delta":" "}`, visible: true, semanticOutput: true},
 		{name: "refusal", event: "response.content_part.added", payload: `{"type":"response.content_part.added","part":{"type":"refusal","refusal":""}}`, visible: true, semanticOutput: true},
 		{name: "unknown nested payload", event: "response.content_part.added", payload: `{"type":"response.content_part.added","part":{"type":"output_text","text":"","vendor":"x"}}`, visible: true, semanticOutput: true},
