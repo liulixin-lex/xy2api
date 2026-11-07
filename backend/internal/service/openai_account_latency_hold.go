@@ -200,8 +200,8 @@ func (s *OpenAIGatewayService) getOpenAIAccountLatencyHoldState() *openAIAccount
 	return s.openaiAccountLatencyHold
 }
 
-// recordOpenAIAccountLatencySample records one warm, successful HTTP text
-// stream's first-content delay (first delivered content - attempt start).
+// recordOpenAIAccountLatencySample records one warm HTTP text stream's
+// first-content delay, or its lower bound when the first-output deadline expires.
 func (s *OpenAIGatewayService) recordOpenAIAccountLatencySample(account *Account, canonicalModel string, sample time.Duration, now time.Time) {
 	if s == nil || account == nil || !resilience.Current().Enabled {
 		return
