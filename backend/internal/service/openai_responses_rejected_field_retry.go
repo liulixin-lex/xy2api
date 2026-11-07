@@ -31,7 +31,7 @@ var (
 	openAIResponsesRejectedContentParamPattern        = regexp.MustCompile(`(?i)^input\[(\d+)\]\.content$`)
 	openAIResponsesRejectedCacheParamPattern          = regexp.MustCompile(`(?i)^input\[(\d+)\]\.prompt_cache_breakpoint$`)
 	openAIResponsesRejectedContentCacheParamPattern   = regexp.MustCompile(`(?i)^input\[\d+\]\.content\[\d+\]\.cache_control$`)
-	openAIResponsesRejectedContentCacheMessagePattern = regexp.MustCompile(`(?i)(?:unknown|unsupported)[ _-]+parameter\s*(?::|=|is)?\s*["']?(input\[\d+\]\.content\[\d+\]\.cache_control)(?:["']|\s|[.,;:]?$)`)
+	openAIResponsesRejectedContentCacheMessagePattern = regexp.MustCompile(`(?i)(?:unknown|unsupported)[ _-]+parameter\s*(?::|=|is)?\s*["']?(input\[\d+\]\.content\[\d+\]\.cache_control)(?:["']|[.,;:]?(?:\s|$))`)
 	openAIResponsesRejectedMessageParamPattern        = regexp.MustCompile(`(?i)(?:unknown|unsupported)[ _-]+parameter\s*(?::|=|is)?\s*["']?(max_output_tokens|truncation|top_p|metadata|temperature|frequency_penalty|presence_penalty|input\[\d+\]\.(?:namespace|status))(?:["']|\b)`)
 	openAIResponsesRejectedArgumentsParamPattern      = regexp.MustCompile(`(?i)^input\[(\d+)\]\.arguments$`)
 	openAIResponsesInvalidTypeMessageParamPattern     = regexp.MustCompile(`(?i)invalid[ _-]+type\s+for\s+["']?(input\[\d+\]\.content)(?:["']|\b)[^\n]*\b(?:got|received)\s+null\b`)

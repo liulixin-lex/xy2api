@@ -3445,7 +3445,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_chat_completions.go",
-      "value": "changed && openAIResponsesRejectedFieldRetryStateForRequest(c, body).Allow(retryBody)"
+      "value": "changed && rejectedFieldRetryState.Allow(retryBody)"
     },
     {
       "path": "backend/internal/service/openai_gateway_chat_completions.go",

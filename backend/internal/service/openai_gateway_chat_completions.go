@@ -64,7 +64,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	if c != nil {
 		c.Set("openai_cache_diagnostic", nil)
 	}
-	return s.forwardAsChatCompletions(ctx, c, account, body, promptCacheKey, defaultMappedModel, false)
+	return s.forwardAsChatCompletions(ctx, c, account, body, promptCacheKey, defaultMappedModel, false, nil)
 }
 
 func (s *OpenAIGatewayService) forwardAsChatCompletions(
@@ -75,6 +75,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	promptCacheKey string,
 	defaultMappedModel string,
 	compatPromptCacheTenantIsolated bool,
+	rejectedFieldRetryState *openAIResponsesRejectedFieldRetryState,
 ) (*OpenAIForwardResult, error) {
 	if c != nil {
 		c.Set(openAIStateRejectionBodyKey, body)
@@ -162,6 +163,13 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	// 上游为 Responses（含 adaptive 下 Responses 形状入站且供应商有原生
 	// Responses 端点）：走下方 Chat Completions ↔ Responses 转换链。
 	SetActualOpenAIUpstreamEndpoint(c, openAIResponsesUpstreamEndpoint)
+	if rejectedFieldRetryState == nil {
+		rejectedFieldRetryState = openAIResponsesRejectedFieldRetryStateForRequest(c, body)
+	}
+	// Keep the original Chat body for field repair; conversion must run again
+	// after stripping a rejected hint. This does not enable M3 or encrypted repair.
+	requestRepair := armOpenAIRequestRepair(c, account, rejectedFieldRetryState)
+	requestRepair.setBody(body)
 
 	startTime := time.Now()
 
@@ -417,10 +425,10 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 				return nil, fmt.Errorf("agent identity task recovery failed: %w", err)
 			}
 			closeAttempt()
-			return s.forwardAsChatCompletions(markAgentIdentityTaskRecoveryTried(ctx), c, account, body, promptCacheKey, defaultMappedModel, compatPromptCacheTenantIsolated)
+			return s.forwardAsChatCompletions(markAgentIdentityTaskRecoveryTried(ctx), c, account, body, promptCacheKey, defaultMappedModel, compatPromptCacheTenantIsolated, rejectedFieldRetryState)
 		}
 		if retryBody, reason, changed, repairErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, respBody); repairErr == nil &&
-			changed && openAIResponsesRejectedFieldRetryStateForRequest(c, body).Allow(retryBody) {
+			changed && rejectedFieldRetryState.Allow(retryBody) {
 			closeAttempt()
 			logger.FromContext(ctx).Info("resilience.request_repair_replay",
 				zap.Int64("account_id", account.ID),
@@ -428,7 +436,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 				zap.String("form", "http"),
 				zap.String("path", "chat"),
 			)
-			return s.forwardAsChatCompletions(ctx, c, account, retryBody, promptCacheKey, defaultMappedModel, compatPromptCacheTenantIsolated)
+			return s.forwardAsChatCompletions(ctx, c, account, retryBody, promptCacheKey, defaultMappedModel, compatPromptCacheTenantIsolated, rejectedFieldRetryState)
 		}
 		if account.Type == AccountTypeAPIKey &&
 			!account.routesByModel() &&
@@ -454,6 +462,10 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		result, handleErr = s.handleChatStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime, len(body))
 	} else {
 		result, handleErr = s.handleChatBufferedStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime)
+	}
+	if next, _, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, nil, handleErr); ok {
+		closeAttempt()
+		return s.forwardAsChatCompletions(ctx, c, account, next, promptCacheKey, defaultMappedModel, compatPromptCacheTenantIsolated, rejectedFieldRetryState)
 	}
 	stampOpenAIResponsesUpstreamEndpoint(c, result)
 
@@ -948,6 +960,17 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 					clientDisconnected = true
 				}
 				return true
+			}
+			if strings.TrimSpace(event.Type) == "response.failed" && !clientDisconnected &&
+				!openAIStreamClientOutputStarted(c, clientOutputStarted) && c.Request.Context().Err() == nil {
+				status, wrapped, malformed := openAIWrappedUpstreamErrorStatus(event.Type, payloadBytes)
+				repair := openAIRequestRepairFrom(c)
+				if !malformed && (!wrapped || status == http.StatusBadRequest) && repair != nil && repair.accountID == account.ID {
+					if signal := newOpenAIRejectedFieldRepairSignal(c.Request.Context(), repair, payloadBytes); signal != nil {
+						streamNonFailoverErr = signal
+						return true
+					}
+				}
 			}
 			captureOpenAIStateRejection(c, account, payloadBytes, message, "chat", clientOutputStarted, nil)
 			shouldFailover := openAIStreamFailedEventShouldFailover(payloadBytes, message)
