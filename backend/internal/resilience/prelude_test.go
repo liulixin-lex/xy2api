@@ -1,6 +1,11 @@
 package resilience
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+
+	"github.com/tidwall/gjson"
+)
 
 func TestClassifyStreamEvent(t *testing.T) {
 	before := Current().Clone()
@@ -92,6 +97,88 @@ func TestClassifyStreamEvent(t *testing.T) {
 	}
 }
 
+func TestResponsesExtraFieldsMatchV054EmptySemantics(t *testing.T) {
+	for _, tc := range []struct {
+		name, value string
+		empty       bool
+	}{
+		{"null", `null`, true},
+		{"empty string", `""`, true},
+		{"empty array", `[]`, true},
+		{"empty object", `{}`, true},
+		{"nested empty object", `{"x":{"y":""}}`, true},
+		{"nested empty array", `{"x":[{}]}`, true},
+		{"nested empty mixed array", `{"x":[null,""]}`, true},
+		{"nested nonempty string", `{"x":{"y":"a"}}`, false},
+		{"nested zero", `{"x":[0]}`, false},
+		{"nested false", `{"x":false}`, false},
+		{"nested whitespace", `{"x":" "}`, false},
+		{"true", `true`, false},
+		{"number", `1`, false},
+		{"no structural field exemption", `{"x":{"id":"r"}}`, false},
+		{"no tool identity exemption", `{"x":{"type":"function_call","name":"tool","arguments":""}}`, false},
+		{"duplicate cannot hide content", `{"x":{"y":"a","y":""}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			value := gjson.Parse(tc.value)
+			legacy := emptyPreludeFieldsV054(value, false)
+			if legacy != tc.empty {
+				t.Fatalf("v0.5.4 empty=%t, want %t", legacy, tc.empty)
+			}
+			if got := responsesFieldValueIsEmpty(value); got != legacy {
+				t.Errorf("empty=%t, v0.5.4=%t", got, legacy)
+			}
+			payload := fmt.Sprintf(`{"type":"response.output_item.added","item":{"type":"reasoning","summary":[],"extra":%s}}`, tc.value)
+			got := ResponsesEventOutputDisposition("response.output_item.added", []byte(payload))
+			if !got.Matched || (got.Kind == Prelude) != legacy || got.Visible != !legacy || got.SemanticOutput != !legacy {
+				t.Errorf("got %+v, v0.5.4 extra field empty=%t", got, legacy)
+			}
+		})
+	}
+}
+
+// Frozen from v0.5.4:backend/internal/resilience/prelude.go, with only the
+// function name changed. Extra fields use structural=false: field names never
+// exempt a nonempty value. Keep this reference independent of the new helper.
+func emptyPreludeFieldsV054(value gjson.Result, structural bool) bool {
+	switch {
+	case value.Type == gjson.Null:
+		return true
+	case value.Type == gjson.String:
+		return value.String() == ""
+	case value.IsArray():
+		for _, entry := range value.Array() {
+			if !emptyPreludeFieldsV054(entry, structural) {
+				return false
+			}
+		}
+		return true
+	case value.IsObject():
+		empty := true
+		value.ForEach(func(key, child gjson.Result) bool {
+			if structural {
+				switch key.String() {
+				case "id", "type", "status", "role", "index", "phase":
+					return true
+				case "call_id", "name":
+					if typ := value.Get("type").String(); typ == "function_call" || typ == "custom_tool_call" {
+						return true
+					}
+				}
+			}
+			nestedStructure := structural && (key.String() == "content" || key.String() == "summary")
+			if !emptyPreludeFieldsV054(child, nestedStructure) {
+				empty = false
+				return false
+			}
+			return true
+		})
+		return empty
+	default:
+		return false
+	}
+}
+
 func TestResponsesEventOutputDisposition(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -106,6 +193,9 @@ func TestResponsesEventOutputDisposition(t *testing.T) {
 		{name: "delta logprobs obfuscation", event: "response.output_text.delta", payload: `{"type":"response.output_text.delta","delta":" ","logprobs":[],"obfuscation":"x"}`, placeholder: true},
 		{name: "done logprobs", event: "response.output_text.done", payload: `{"type":"response.output_text.done","text":" ","logprobs":[]}`, placeholder: true},
 		{name: "reasoning null", event: "response.output_item.added", payload: `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[],"encrypted_content":null}}`, placeholder: true},
+		{name: "known summary cannot use recursive emptiness", event: "response.output_item.added", payload: `{"type":"response.output_item.added","item":{"type":"reasoning","summary":[{}],"extra":{"x":[null,""]}}}`, visible: true, semanticOutput: true},
+		{name: "known encrypted content keeps wire type", event: "response.output_item.added", payload: `{"type":"response.output_item.added","item":{"type":"reasoning","summary":[],"encrypted_content":{"x":""},"extra":{"x":[{}]}}}`, visible: true, semanticOutput: true},
+		{name: "known duplicate summary stays visible", event: "response.output_item.added", payload: `{"type":"response.output_item.added","item":{"type":"reasoning","summary":[],"summary":[],"extra":{"x":{"y":""}}}}`, visible: true, semanticOutput: true},
 		{name: "duplicate type", event: "response.output_text.delta", payload: `{"type":"response.output_text.delta","type":"response.output_text.delta","delta":" "}`, visible: true, semanticOutput: true},
 		{name: "duplicate item", event: "response.output_item.added", payload: `{"type":"response.output_item.added","item":{"type":"message","role":"assistant","content":[],"content":[]}}`, visible: true, semanticOutput: true},
 		{name: "bad phase", event: "response.output_item.added", payload: `{"type":"response.output_item.added","item":{"type":"message","role":"assistant","phase":[],"content":[]}}`, visible: true, semanticOutput: true},
@@ -122,6 +212,7 @@ func TestResponsesEventOutputDisposition(t *testing.T) {
 		{name: "completed non-array output", event: "response.completed", payload: `{"type":"response.completed","response":{"output":{}}}`, visible: true, semanticOutput: true},
 		{name: "completed with text", event: "response.completed", payload: `{"type":"response.completed","response":{"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}]}}`, visible: true, semanticOutput: true},
 		{name: "unknown response event", event: "response.vendor_extension", payload: `{"type":"response.vendor_extension","future":true}`, visible: true, semanticOutput: true},
+		{name: "unknown response event with recursively empty extra", event: "response.vendor_extension", payload: `{"type":"response.vendor_extension","extra":{"x":[null,{},""]}}`, visible: true, semanticOutput: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

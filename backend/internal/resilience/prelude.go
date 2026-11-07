@@ -267,6 +267,8 @@ func responsesObjectHasOnlyFields(value gjson.Result, allowed ...string) bool {
 	return valid
 }
 
+// Extra fields use the recursive empty-value rule from v0.5.4, without any
+// structural field exemptions. Numbers, booleans, and whitespace are content.
 func responsesFieldValueIsEmpty(value gjson.Result) bool {
 	switch value.Type {
 	case gjson.Null:
@@ -274,10 +276,15 @@ func responsesFieldValueIsEmpty(value gjson.Result) bool {
 	case gjson.String:
 		return value.Str == ""
 	}
-	if value.IsArray() {
-		return len(value.Array()) == 0
+	if value.IsArray() || value.IsObject() {
+		empty := true
+		value.ForEach(func(_, child gjson.Result) bool {
+			empty = responsesFieldValueIsEmpty(child)
+			return empty
+		})
+		return empty
 	}
-	return value.IsObject() && len(value.Map()) == 0
+	return false
 }
 
 func responsesObjectHasUniqueFields(value gjson.Result) bool {

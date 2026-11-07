@@ -238,6 +238,37 @@ func TestResponsesExtraFieldsPreserveSharedOutputDecision(t *testing.T) {
 			name:    "event root with nonempty extra field",
 			payload: `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[]},"vendor_extension":"value"}`,
 		},
+		{
+			name:        "reasoning item with nested empty object",
+			payload:     `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[],"extra":{"x":{"y":""}}}}`,
+			wantPrelude: true,
+		},
+		{
+			name:        "message item with nested empty array",
+			payload:     `{"type":"response.output_item.added","item":{"id":"m","type":"message","role":"assistant","content":[],"extra":{"x":[{}]}}}`,
+			wantPrelude: true,
+		},
+		{
+			name:        "event root with nested empty mixed array",
+			payload:     `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[]},"extra":{"x":[null,""]}}`,
+			wantPrelude: true,
+		},
+		{
+			name:    "reasoning item with nested nonempty string",
+			payload: `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[],"extra":{"x":{"y":"a"}}}}`,
+		},
+		{
+			name:    "event root with nested zero",
+			payload: `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[]},"extra":{"x":[0]}}`,
+		},
+		{
+			name:    "reasoning item with nested false",
+			payload: `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[],"extra":{"x":false}}}`,
+		},
+		{
+			name:    "event root with nested whitespace",
+			payload: `{"type":"response.output_item.added","item":{"id":"r","type":"reasoning","summary":[]},"extra":{"x":" "}}`,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
