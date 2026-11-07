@@ -399,8 +399,15 @@ func ClassifyStreamEvent(protocol, eventType string, payload []byte) EventClass 
 		if status == 0 {
 			status = int(root.Get("status_code").Int())
 		}
+		errType := err.Get("type").String()
+		flatError := typ == "error" && !root.Get("response.error").IsObject() && !root.Get("error").IsObject()
+		if flatError {
+			// In a flat Responses error event, top-level type names the event,
+			// not the error category. Do not classify it as error.type.
+			errType = ""
+		}
 		result := ClassifyWithSettings(Outcome{Source: SourceStreamEvent, StatusCode: status,
-			Code: err.Get("code").String(), Type: err.Get("type").String(),
+			Code: err.Get("code").String(), Type: errType,
 			Message: err.Get("message").String(), Body: payload}, Current())
 		return EventClass{Kind: TerminalFailure, Retryable: result.Category.SwitchAccount()}
 	}

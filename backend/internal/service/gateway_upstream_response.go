@@ -319,6 +319,10 @@ func extractUpstreamErrorCode(body []byte) string {
 		return code
 	}
 
+	if code := strings.TrimSpace(openAITopLevelStreamError(body).Get("code").String()); code != "" {
+		return code
+	}
+
 	inner := strings.TrimSpace(gjson.GetBytes(body, "error.message").String())
 	if !strings.HasPrefix(inner, "{") {
 		return ""
@@ -1183,7 +1187,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 				s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
 			}
 			noteResilienceStall(ctx, s.rateLimitService, account)
-			sendErrorEvent("stream_timeout", fmt.Sprintf("upstream stream idle for %s", stallThreshold))
+			sendErrorEvent(OpenAIStreamTimeoutCode, fmt.Sprintf("upstream stream idle for %s", stallThreshold))
 			return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream data interval timeout")
 
 		case <-keepaliveCh:

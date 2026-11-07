@@ -2023,6 +2023,15 @@ func extractOpenAISSEErrorMessage(payload []byte) string {
 	if len(payload) == 0 {
 		return ""
 	}
+	if top := gjson.GetBytes(payload, "type"); top.String() == "error" {
+		if message := strings.TrimSpace(openAIStreamErrorField(payload, "message").String()); message != "" {
+			return sanitizeUpstreamErrorMessage(message)
+		}
+		if openAIStreamErrorObject(payload).IsObject() {
+			return ""
+		}
+		return sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(payload)))
+	}
 	for _, path := range []string{"response.error.message", "error.message", "message"} {
 		if msg := strings.TrimSpace(gjson.GetBytes(payload, path).String()); msg != "" {
 			return sanitizeUpstreamErrorMessage(msg)
@@ -2040,14 +2049,8 @@ func buildOpenAIResponseFailedSSEForClient(ctx context.Context, c *gin.Context, 
 	if responseID == "" {
 		responseID = "resp_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	}
-	errorType := strings.TrimSpace(gjson.GetBytes(source, "error.type").String())
-	if errorType == "" {
-		errorType = strings.TrimSpace(gjson.GetBytes(source, "response.error.type").String())
-	}
-	code := strings.TrimSpace(gjson.GetBytes(source, "error.code").String())
-	if code == "" {
-		code = strings.TrimSpace(gjson.GetBytes(source, "response.error.code").String())
-	}
+	errorType := strings.TrimSpace(openAIStreamErrorField(source, "type").String())
+	code := strings.TrimSpace(openAIStreamErrorField(source, "code").String())
 	if code == "" {
 		code = "upstream_error"
 	}
@@ -2069,6 +2072,9 @@ func buildOpenAIResponseFailedSSEForClient(ctx context.Context, c *gin.Context, 
 		}
 	}
 	errorBody := openAIResponseFailureError(ctx, status, errorType, code, message)
+	if param := openAIStreamErrorField(source, "param"); param.Exists() && param.Type != gjson.Null {
+		errorBody["param"] = param.Value()
+	}
 	if errorType != "" {
 		errorBody["type"] = errorType
 	}

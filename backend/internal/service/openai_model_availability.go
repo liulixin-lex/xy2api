@@ -158,11 +158,17 @@ func openAIModelAvailabilityEnvelopes(body []byte) []gjson.Result {
 			objects = append(objects, gjson.Parse(inner.Str))
 		}
 	}
+	if inner := openAITopLevelStreamError(body).Get("message"); inner.Type == gjson.String && gjson.Valid(inner.Str) {
+		objects = append(objects, gjson.Parse(inner.Str))
+	}
 	return objects
 }
 
 func openAIModelNotFoundCode(body []byte) bool {
 	for _, object := range openAIModelAvailabilityEnvelopes(body) {
+		if strings.TrimSpace(openAITopLevelStreamError([]byte(object.Raw)).Get("code").String()) == "model_not_found" {
+			return true
+		}
 		for _, path := range []string{"error.code", "response.error.code"} {
 			if code := object.Get(path); code.Type == gjson.String && strings.TrimSpace(code.Str) == "model_not_found" {
 				return true
