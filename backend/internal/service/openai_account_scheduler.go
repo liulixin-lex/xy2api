@@ -2393,7 +2393,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		state.NoteStickyOwner(stickyOwner)
 	}
 	_, ownerExcluded := excludedIDs[stickyOwner]
-	ownerFailedInRequest := ownerExcluded && state.AccountFailed(stickyOwner)
+	ownerFailedInRequest := ownerExcluded && (state.AccountFailed(stickyOwner) || state.StateRepairAvoided(stickyOwner))
 	defer func() {
 		selected := int64(0)
 		if selection != nil && selection.Account != nil {

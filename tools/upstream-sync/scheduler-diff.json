@@ -870,7 +870,7 @@
         "removed": [],
         "added": [
           "_, ownerExcluded := excludedIDs[stickyOwner]",
-          "ownerFailedInRequest := ownerExcluded && state.AccountFailed(stickyOwner)",
+          "ownerFailedInRequest := ownerExcluded && (state.AccountFailed(stickyOwner) || state.StateRepairAvoided(stickyOwner))",
           "// A failed attempt can already have removed the cached binding before",
           "// this pass. Its request exclusion takes precedence over soft migration.",
           "if ownerFailedInRequest {",

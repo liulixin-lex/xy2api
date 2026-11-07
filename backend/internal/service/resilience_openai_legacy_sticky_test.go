@@ -94,6 +94,74 @@ func TestStickyBypassFirstOutputTimeoutReselectionRecordsRequestFailure(t *testi
 	}
 }
 
+func TestStickyBypassStateRepairAvoidanceIsRequestScoped(t *testing.T) {
+	for _, currentStateRepair := range []bool{true, false} {
+		name := "historical avoidance and nonfailure exclusion"
+		if currentStateRepair {
+			name = "M3 state switch"
+		}
+		t.Run(name, func(t *testing.T) {
+			withResilienceSettings(t, nil)
+			resetOpenAIAdvancedSchedulerSettingCacheForTest()
+			t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
+			groupID := int64(10129)
+			accounts := []Account{
+				{ID: 36071, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID}},
+				{ID: 36072, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID}},
+			}
+			const session = "state-reselect"
+			cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:" + session: accounts[0].ID}}
+			store := newMemResilienceStore()
+			cfg := &config.Config{}
+			cfg.Gateway.Scheduling.LoadBatchEnabled = true
+			svc := &OpenAIGatewayService{
+				accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+				cache:              cache,
+				cfg:                cfg,
+				concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+				resilience:         NewResilienceService(nil, store),
+			}
+			state := resilience.NewRequestState()
+			ctx := resilience.WithRequestState(context.Background(), state)
+			state.NoteStickyOwner(accounts[0].ID)
+			if currentStateRepair {
+				// Mirror the M3 handler's single avoidance/diagnostic write point.
+				svc.AvoidOpenAIStateAccount(ctx, groupID, session, accounts[0].ID)
+				state.NoteStateRepairAvoidance(accounts[0].ID)
+				require.NotContains(t, cache.sessionBindings, "openai:"+session)
+			} else {
+				// Historical avoidance may coexist with a retained cache owner.
+				require.NoError(t, store.AddSessionAvoid(ctx, groupID, session, accounts[0].ID, time.Minute))
+				svc.resilience.avoidingSessions.Store(sessionMarkKey(groupID, session), time.Now().Add(time.Minute))
+				require.Contains(t, svc.resilience.sessionAvoid(ctx, &groupID, session), accounts[0].ID)
+			}
+			require.True(t, state.Avoided(accounts[0].ID))
+			require.False(t, state.AccountFailed(accounts[0].ID))
+			logs := captureOpenAIObservationLogs(t)
+			// The caller can exclude an owner for a nonfailure gate such as profit.
+			excluded := map[int64]struct{}{accounts[0].ID: {}}
+			selection, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", session, "gpt-test", excluded, OpenAIUpstreamTransportAny, false)
+			require.NoError(t, err)
+			require.Equal(t, accounts[1].ID, selection.Account.ID)
+			if selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+			require.False(t, state.AccountFailed(accounts[0].ID), "diagnostics must not mark account failure")
+			failures, err := store.SessionFailures(ctx, groupID, session)
+			require.NoError(t, err)
+			require.Empty(t, failures)
+			if currentStateRepair {
+				require.Contains(t, logs.String(), `"reason":"owner_failed_in_request"`)
+				require.NotContains(t, logs.String(), `"reason":"unrecorded"`)
+			} else {
+				require.NotContains(t, logs.String(), `"reason":"owner_failed_in_request"`)
+				require.Contains(t, logs.String(), `"reason":"owner_excluded"`)
+			}
+			require.Equal(t, 1, strings.Count(logs.String(), `"msg":"openai.sticky_bypass"`))
+		})
+	}
+}
+
 func TestResilienceOpenAILoadBatchStickyBypassRecordsReason(t *testing.T) {
 	withResilienceSettings(t, nil)
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
