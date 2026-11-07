@@ -783,7 +783,7 @@ describe('user KeysView column settings', () => {
       expect((wrapper.get('[data-test="ccs-name"]').element as HTMLInputElement).value).toBe('XY2API · test-key')
 
       await wrapper.get('[data-test="ccs-name"]').setValue('Work laptop')
-      await wrapper.get('[data-test="ccs-model"]').setValue('gpt-5.6-sol')
+      await wrapper.get('[data-test="ccs-model"]').setValue('gpt-6.1-sol')
       await wrapper.get('[data-test="ccs-import-confirm"]').trigger('click')
 
       expect(open).toHaveBeenCalledTimes(1)
@@ -792,7 +792,7 @@ describe('user KeysView column settings', () => {
       const params = new URL(String(deeplink)).searchParams
       expect(params.get('app')).toBe('codex')
       expect(params.get('name')).toBe('Work laptop')
-      expect(params.get('model')).toBe('gpt-5.6-sol')
+      expect(params.get('model')).toBe('gpt-6.1-sol')
       expect(params.get('endpoint')).toBe('https://api.example.com')
       expect(params.get('apiKey')).toBe('sk-test-key')
       expect(wrapper.find('[data-test="ccs-name"]').exists()).toBe(false)

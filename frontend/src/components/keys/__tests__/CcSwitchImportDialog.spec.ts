@@ -62,11 +62,11 @@ describe('CcSwitchImportDialog', () => {
 
     await wrapper.get('[data-test="ccs-name"]').setValue('  My Codex  ')
     await wrapper.get('[data-test="ccs-endpoint"]').setValue(' https://cn.example.com ')
-    await wrapper.get('[data-test="ccs-model"]').setValue(' gpt-5.6-sol ')
+    await wrapper.get('[data-test="ccs-model"]').setValue(' gpt-6.1-sol ')
     await wrapper.get('[data-test="ccs-import-confirm"]').trigger('click')
 
     expect(wrapper.emitted('import')).toEqual([
-      [{ clientType: 'claude', providerName: 'My Codex', endpoint: 'https://cn.example.com', model: 'gpt-5.6-sol' }]
+      [{ clientType: 'claude', providerName: 'My Codex', endpoint: 'https://cn.example.com', model: 'gpt-6.1-sol' }]
     ])
   })
 
