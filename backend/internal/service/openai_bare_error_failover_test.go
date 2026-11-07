@@ -3,6 +3,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -50,7 +51,15 @@ func forwardBareErrorPath(svc *OpenAIGatewayService, c *gin.Context, account *Ac
 		return err
 	case "bridge":
 		_, err := svc.proxyOpenAIWSHTTPBridgeTurn(c.Request.Context(), c, account, "test-key", body, len(body), "public", "", "", "", "", 1,
-			func(message []byte) error { writes.Write(message); writes.WriteString("\n"); return nil })
+			func(message []byte) error {
+				if _, writeErr := writes.Write(message); writeErr != nil {
+					return writeErr
+				}
+				if _, writeErr := writes.WriteString("\n"); writeErr != nil {
+					return writeErr
+				}
+				return nil
+			})
 		return err
 	default:
 		_, err := svc.Forward(c.Request.Context(), c, account, body)
@@ -80,7 +89,8 @@ func TestOpenAIBareErrorTransportRecovery(t *testing.T) {
 					require.Empty(t, writes.String())
 					raw, ok := c.Get(OpsUpstreamErrorsKey)
 					require.True(t, ok)
-					attempts := raw.([]*OpsUpstreamErrorEvent)
+					attempts, ok := raw.([]*OpsUpstreamErrorEvent)
+					require.True(t, ok)
 					require.Len(t, attempts, 1)
 					require.Equal(t, int64(1), attempts[0].AccountID)
 					require.Equal(t, "failover", attempts[0].Kind)
@@ -92,8 +102,11 @@ func TestOpenAIBareErrorTransportRecovery(t *testing.T) {
 					require.Contains(t, output, "ok")
 					require.NotContains(t, output, "response.failed")
 					require.NotContains(t, output, code)
-					raw, _ = c.Get(OpsUpstreamErrorsKey)
-					require.Len(t, raw.([]*OpsUpstreamErrorEvent), 1)
+					raw, ok = c.Get(OpsUpstreamErrorsKey)
+					require.True(t, ok)
+					attempts, ok = raw.([]*OpsUpstreamErrorEvent)
+					require.True(t, ok)
+					require.Len(t, attempts, 1)
 				})
 			}
 		}
@@ -107,8 +120,8 @@ func TestOpenAIBareErrorHeartbeatCommittedThenTransportFailsOver(t *testing.T) {
 			for _, shape := range []string{"top", "object"} {
 				t.Run(fmt.Sprintf("%s/%s/%s", path, accountType, shape), func(t *testing.T) {
 					reader, writer := io.Pipe()
-					defer reader.Close()
-					defer writer.Close()
+					defer func() { _ = reader.Close() }()
+					defer func() { _ = writer.Close() }()
 					upstream := &httpUpstreamRecorder{resp: bareErrorResponse("")}
 					upstream.resp.Body = reader
 					svc := compatStreamService(upstream, 30, 0, 1)
@@ -145,7 +158,9 @@ func TestOpenAIBareErrorHeartbeatCommittedThenTransportFailsOver(t *testing.T) {
 					require.NotContains(t, output, OpenAIUpstreamStreamReadErrorCode)
 					raw, ok := c.Get(OpsUpstreamErrorsKey)
 					require.True(t, ok)
-					require.Len(t, raw.([]*OpsUpstreamErrorEvent), 1)
+					events, ok := raw.([]*OpsUpstreamErrorEvent)
+					require.True(t, ok)
+					require.Len(t, events, 1)
 				})
 			}
 		}
@@ -180,7 +195,8 @@ func TestOpenAIBareErrorAuthoritativePairFailsOverOnce(t *testing.T) {
 			require.NotContains(t, rec.Body.String(), "response.failed")
 			raw, ok := c.Get(OpsUpstreamErrorsKey)
 			require.True(t, ok)
-			events := raw.([]*OpsUpstreamErrorEvent)
+			events, ok := raw.([]*OpsUpstreamErrorEvent)
+			require.True(t, ok)
 			require.Len(t, events, 1)
 			require.Equal(t, int64(1), events[0].AccountID)
 			require.Equal(t, "failover", events[0].Kind)
@@ -222,7 +238,9 @@ func TestOpenAIBareErrorResponsesBoundary(t *testing.T) {
 						if !output {
 							raw, ok := c.Get(OpsUpstreamErrorsKey)
 							require.True(t, ok)
-							require.Len(t, raw.([]*OpsUpstreamErrorEvent), 1)
+							events, ok := raw.([]*OpsUpstreamErrorEvent)
+							require.True(t, ok)
+							require.Len(t, events, 1)
 						}
 						if output {
 							require.Contains(t, rec.Body.String(), "already delivered")
@@ -343,7 +361,7 @@ func TestOpenAIBareErrorFlatFieldsArePreserved(t *testing.T) {
 			require.Equal(t, "cache_control", gjson.GetBytes(passthrough, "error.param").String())
 
 			var failedFrame []byte
-			for _, line := range strings.Split(buildOpenAIResponseFailedSSE(nil, "resp_test", "model", payload, ""), "\n") {
+			for _, line := range strings.Split(buildOpenAIResponseFailedSSE(context.Background(), "resp_test", "model", payload, ""), "\n") {
 				if data, ok := extractOpenAISSEDataLine(line); ok {
 					failedFrame = append([]byte(nil), data...)
 					break
