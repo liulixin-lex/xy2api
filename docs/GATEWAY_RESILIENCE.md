@@ -109,7 +109,8 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | 上游内容安全拒绝（如智谱 `request_check_blocked`、`content_policy_violation`） | 400 `invalid_request_error`，`code: content_policy_violation`，附脱敏后的上游原文；不重试、不换号，账号不受罚。只关闭 `errors` 时回到 0.3.0 的 502 文案。0.5.1：code 或 type 为 `content_policy`，以及 400、403、451 上的“内容政策”文案也按内容安全拒绝处理，带账号措辞（封禁、organization 等）的照旧；403 上的这类文案以前判为鉴权失败并罚号，总开关开启时不再罚号。运维记录标为业务限制，见 §5.1 |
 | 上游会话状态拒绝（0.5.3） | S1/S2 的窄文案与专用状态码按 §4.12 统一识别为 `CLIENT_ERROR`，含无 type 包装的流内错误；不罚号、不计软失败。原生与直通 Responses 输出前的 S2/S3/S4 和校验通过的包装 400 使用下述 M3；其他状态拒绝保持请求级终止 |
 | 上游无法解密或校验请求中的加密内容（0.5.1） | code 为 `invalid_encrypted_content`、`encrypted_context_invalid`，或文案为 encrypted content 加 “could not be verified”“could not be decrypted”“hydration failed” 之一、“encrypted function output content could not be decrypted”、“could not validate encrypted continuation context”，密文通常来自别的账号。按请求级处理：不罚 OpenAI 账号（临时不可调度规则与自定义错误码也不作用于它），不计会话失败与分组质量门槛的软失败；与上下文超长一样不受总开关影响。OpenAI 原生 Responses 在第一个内容之前遇到它时，若点名的是 reasoning（`rs_`）或 compaction（`cmp_`）条目，或没有点名条目但剥离确实改变了请求体，就删掉 reasoning 的 `encrypted_content`、丢弃带密文的 compaction 后同号重放一次；HTTP 400、502 与带内 `response.failed` 在同一账号尝试内合计一次。原生与直通 Responses 的输出前 S2/S3/S4 和校验通过的包装 400 走 M3：只替换 amsg/fco 的目标密文槽位，集合严格增长才同号重放；无法继续修复时回避当前号，最多使用一次独立状态换号额度。M3 终止未提交写 502，已提交写 `response.failed` / `server_error`，message 仅由固定拒绝原因及已校验的 item id 生成，不转出上游原文或密文回显。其他路径不能剥离时保持原有请求级失败出口。Codex 子 agent 优先回到父线程的账号，见 §4.10 |
-| 上游明确点名的请求兼容问题（0.5.1） | 上游明确拒绝（结构化 code、param，或 “Unsupported parameter: X” 文案）时，删除请求顶层已有的 `top_p`、`metadata`、`temperature`、`frequency_penalty`、`presence_penalty`（原有 `max_output_tokens`、`truncation`）；输出上限、停止条件、模板、用量选项、缓存保留与身份类字段被拒时照原样返回。裸名 `prompt_cache_breakpoint` 只删 `input[i]` 与 `input[i].content[j]` 两层协议位置，不进入工具参数、输出或用户 JSON。`tool_search_call` 的 `arguments` 被拒为非对象时，只有字符串能严格解析为 JSON 对象才改成对象（保留原始字节），同一请求内满足条件的同类条目一并转换，其余照原样返回。修复后同号重放，每个请求合计最多 6 次，同一账号尝试内同一请求体不重放第二次；HTTP 与原生 Responses 第一个内容之前的带内 `response.failed` 都适用，Chat Completions 路径的 HTTP 错误同样适用；不认识的 400 照旧返回 |
+| 上游明确点名的请求兼容问题（0.5.1） | 上游明确拒绝（结构化 code、param，或 “Unsupported parameter: X” 文案）时，删除请求顶层已有的 `top_p`、`metadata`、`temperature`、`frequency_penalty`、`presence_penalty`（原有 `max_output_tokens`、`truncation`）；输出上限、停止条件、模板、用量选项、缓存保留与身份类字段被拒时照原样返回。裸名 `prompt_cache_breakpoint` 只删 `input[i]` 与 `input[i].content[j]` 两层协议位置，不进入工具参数、输出或用户 JSON。`tool_search_call` 的 `arguments` 被拒为非对象时，只有字符串能严格解析为 JSON 对象才改成对象（保留原始字节），同一请求内满足条件的同类条目一并转换，其余照原样返回。修复后同号重放，每个请求合计最多 6 次，同一账号尝试内同一请求体不重放第二次；HTTP 错误以及原生 Responses、Chat Completions 转换流在客户端第一个内容之前收到的带内 `response.failed` 都适用；Chat 使用同一字段修复入口，HTTP 与带内修复共用请求体去重和每请求 6 次预算，先关闭旧流，再恢复已经提交的输出前心跳后原号重放；重放等头期间沿上次写出时间续拍，新流接管时不重复拍（`backend/internal/service/openai_gateway_chat_completions.go:468`）。失败尝试的暂存与错误帧不发给客户端。客户端已经开始输出后保持原有出口。已知范围：Chat 裸 `error` 事件和非流式缓冲路径尚未接入带内字段修复，仍沿用既有出口；`/v1/messages` 兼容路径不接入。不认识的 400 照旧返回 |
+| content part 缓存提示被明确拒绝（Q7） | 上游 400 明确点名 `input[i].content[j].cache_control` 为未知或不支持的参数后（支持无引号路径后接句号／逗号和续句，不匹配 `.ttl`／`.type` 子字段），才一次性删除该请求所有 content part 上的 `cache_control`，原号重试一次。沿用上一行的字段修复入口、请求体去重和共享预算；Chat Completions 转换路径从原始 `messages[i].content[j]` 剥离，避免转换时重新带回。顶层、消息级、工具参数和用户 JSON 中的同名字段均保留；首次转发保留缓存提示，支持显式缓存的上游继续使用它。其他字段被拒时不删除该提示；剥离后仍被拒则沿用既有终止出口，不重复剥离。实现：`backend/internal/service/openai_responses_rejected_field_retry.go:349` |
 | Codex Alpha Search 的端点不支持（0.5.1） | API Key 账号返回 404、405，或返回 400 且消息含 `do not support the requested endpoint`、`not encrypted history or tool items` 时，按端点不支持换号，不写账号错误状态；所有候选都这样失败时按换号耗尽返回 502 |
 | Anthropic 中转在流内报 `rate_limit_error`（如并发上限） | 输出前可换号；耗尽时 429 带 `Retry-After`，不再是 502“访问被禁止”。`overloaded_error` 耗尽时为 503 `api_error`（0.4.12，见下一行；以前为 529），`api_error` 为 502 |
 | Anthropic 协议下网关自身的无号与瞬时失败（0.4.4） | 错误 `type` 统一为 `api_error`（含只有 code 的错误体），状态码与正文不变。0.4.12 起上游的容量降载（`overloaded_error`、529）换号耗尽后也返回 503 `api_error`，消息里内嵌的 `overloaded_error` 字样一并改写；已提交的流写 `event: error`，类型同样为 `api_error`。覆盖 Gateway 与 OpenAI→Messages 的耗尽出口、错误透传规则的提前返回、原生 Anthropic 与 API Key 直通的流内终止。Claude Code 把任何 `overloaded_error` 当作 529 计数，连续 3 次就停止或切换模型；以前上游真实返回的 `overloaded_error` 会原样到达客户端。运维记录的分类仍为 `CAPACITY_SHED`，原始响应体保留；限流、权限与回合封顶的语义不变。关闭 `errors` 时不做这两项改写，回到 0.4.3 |
@@ -130,7 +131,7 @@ Chat/Messages 兼容转换只在首次提交前暂存解码后的开场与空白
 
 输出前的 `response.failed`、`error` 与失败 `response.incomplete` 丢弃整段暂存，终态本身沿既有失败处理发出，不计首 token、`FirstOutput` 或 `SemanticOutputAt`。`incomplete_details.reason=interrupted` 按成功终态处理，保留暂存顺序；真实内容已输出后的行为不变。
 
-占位白名单允许文本 part、delta、done 的 `logprobs: []`、delta 的字符串 `obfuscation`、message item 的字符串 `phase`；reasoning 的 `encrypted_content: null` 等同缺省。白名单外的额外字段按 0.5.4 的规则递归判空：`null`、空字符串，以及子项全部递归为空的数组或对象均等同缺省，不豁免其中的结构字段名；非空额外字段（包括数字、布尔、仅含空白的字符串）仍按可见内容处理。额外字段内部的对象／数组嵌套最多允许 32 层（不计事件和 item 外壳），超过上限立即停止递归，按非空、可见内容处理。已提供的结构字段校验类型，参与判定的对象拒绝重复键，未知或歧义形状按可见内容处理。`response.metadata` 在既有白名单开启时仍是开场，原生、直通、兼容转换与首输出观测共用此判定。
+占位白名单允许文本 part、delta、done 的 `logprobs: []`、delta 的字符串 `obfuscation`、message item 的字符串 `phase`；reasoning 的 `encrypted_content: null` 等同缺省。白名单外的额外字段按递归空值规则判定：`null`、空字符串、数字、布尔，以及子项全部递归为空的数组或对象均等同缺省，不豁免其中的结构字段名；非空额外字符串（包括仅含空白的字符串）仍按可见内容处理。额外字段内部的对象／数组嵌套最多允许 32 层（不计事件和 item 外壳），超过上限立即停止递归，按非空、可见内容处理。已提供的结构字段校验类型，参与判定的对象拒绝重复键，未知或歧义形状按可见内容处理。`response.metadata` 在既有白名单开启时仍是开场，原生、直通、兼容转换与首输出观测共用此判定。
 
 `response.completed` 通过既有静默拒绝守卫后，按成功终态冲刷并发送；原生（含 Grok）与直通仍对尚无语义输出、output/usage/error 都为空的 completed 换号（#5009/#7774），空白不算已见语义输出。“已见语义输出”只由非终态事件累计；终态的 response 对象只检查重复键和 output 类型，`text` 配置对象、`metadata` 等其余字段不按 part/delta 的字段类型校验，正文仍按 output 判断。有 output 或 usage 的合法空回答保留；扫描 `response.output` 决定首 token、delivery 的 `FirstOutput` 与 `SemanticOutputAt`。仅空白的成功响应不进入 `ReportOpenAIAttemptSuccess` 的首输出延迟样本，`attempt_first_output_ms` 也为空。delivery 开场分类仍依赖缺省开启的 `stream.native_prelude_whitelist`；兼容转换还依赖 `stream.prelude_staging`。首字档位、末位候选和 240 秒总预算不变。
 
@@ -238,7 +239,7 @@ Chat/Messages 兼容转换只在首次提交前暂存解码后的开场与空白
 
 **判慢让位**
 
-- 样本只取热、成功的流式文本尝试：从这次尝试开始到第一个内容送达客户端的时间，开场事件与心跳不算（口径同 §4.4）。不读用量记录的首字时间；计划内截止只记慢失败，不计入样本。
+- OpenAI 样本取热的 HTTP 流式文本尝试：成功时记录从这次尝试开始到第一个内容送达客户端的时间，开场事件与心跳不算（口径同 §4.4），不读用量记录的首字时间；首输出超时时，不区分是否计划内截止，以画像中的尝试开始至超时被判定时的已等待时长为准：已等待不小于判慢阈值时才记超时样本，作为真实首字耗时的下界；低于阈值时无法判断快慢，不计样本。两条路径共用映射后的实际出站模型键。冷尝试、非流式、没有匹配账号及有效开始时间的画像（包括 WebSocket）不采超时样本；原有慢失败冷却规则不变。
 - OpenAI 按账号与模型做时间常数 5 分钟的指数衰减计数，尝试级可见首字 ≥10 秒计为慢；有效样本 ≥6 且慢占比 ≥30% 时触发。距上次让位结束 ≤30 分钟再次触发时，时长 3→6→12→15 分钟封顶，否则从 3 分钟开始。让位期间继续累积样本，触发时清零；重启清空级数。
 - 判慢期不剔除账号，不计为罚。OpenAI 门槛组在质量档内后排，compact 能力分段保留；随机、会话和缓存偏好不得越档或越判慢分隔。未开门槛的原版选号仍排到候选末尾。到期只解除后排，不改门槛状态，也不表示“已恢复”。全部满载仍排队。
 - 末位兜底同样：同优先级内先选非判慢期账号，再按恢复时间。判慢期不升级为硬罚。
@@ -519,14 +520,14 @@ warn 级，进入运维页“系统日志”（`ops_system_logs`）：
 
 - `balance_paused`（含账号、暂停时长与上游原文；0.4.12 起另含档位 `step`）；
 - `session_rebind`（P1-B 原因 `post_output_first_failure`，普通连击原因 `resil_failure_streak`，未知终止拒绝连击原因 `terminal_rejection_streak`；含会话哈希前缀、组、账号、类别、连击次数及避开时长，不记拒绝正文或摘要）、`last_resort`；
-- `openai.sticky_bypass`：原会话 owner 与最终 selected 不同的选号收尾诊断；含通用请求关联字段（`resilience.EventFields`）、`group_id`、脱敏 `session`、`owner`、`selected`、`reason`。每个请求最多一条。缓存确认实际删绑、成功迁移或原因未记录（`unrecorded`）为 Warn；删除失败、未执行删除、owner 比较未命中，以及保留绑定的临时放弃（如 `soft_owner_preserved`、`concurrency_full`、`capacity_overflow`、`owner_excluded`）为 Info。仅返回 error、不能报告实际删除结果的缓存也保守记 Info。`reason` 是最终选号轮最先记录的原因码，包括 owner 状态/资格、请求门槛、容量与迁移原因；资格判断沿用对应 gate 的原因码。每轮内部重选（含代理隔离重试和原子绑定对账）清空原因与绑定变化标志，请求级日志去重标志保留。
+- `openai.sticky_bypass`：原会话 owner 与最终 selected 不同的选号收尾诊断；含通用请求关联字段（`resilience.EventFields`）、`group_id`、脱敏 `session`、`owner`、`selected`、`reason`。每个请求最多一条。缓存确认实际删绑、成功迁移或原因未记录（`unrecorded`）为 Warn；删除失败、未执行删除、owner 比较未命中，以及保留绑定的临时放弃（如 `soft_owner_preserved`、`concurrency_full`、`capacity_overflow`、`owner_excluded`）为 Info。仅返回 error、不能报告实际删除结果的缓存也保守记 Info。`reason` 在原 owner 已于本请求失败、或本请求在 M3 状态换号处明确标记回避，并且列入本轮传入的排除集时优先为 `owner_failed_in_request`；该原因优先于判慢/质量迁移，即使缓存绑定已被前序清理也能归因。M3 标记仅作请求内诊断，不写 AccountFailed、不参与罚号或候选资格；从会话载入的历史回避不算这一标记，历史回避加本轮非失败排除仍取原有原因；其余取最终选号轮最先记录的原因码，包括 owner 状态/资格、请求门槛、容量与迁移原因；资格判断沿用对应 gate 的原因码。每轮内部重选（含代理隔离重试和原子绑定对账）清空原因与绑定变化标志，请求级日志去重标志保留。
 - `same_site_hold`（`host_hash`、`account_id`、`peer_account_id`、`until`）；
 - `fallback_group`、`fallback_return`；
 - `budget_exhausted`、`capacity_switch_exhausted`；
 - `stall`、`fast_fail`、`turn_cap`、`abuse_guard`；
 - `state_rejection`（完整事件名 `resilience.state_rejection`）：原生与透传每次 Forward 结束时至多一次，桥接与 WS 在判断点记录；仅计数与标识，不存正文。含通用请求字段、`group_id`、`account_id`、`family`、`encrypted`、`path`（`native_http`、`native_sse`、`passthrough_http`、`passthrough_sse`、`chat`、`messages`、`ws`）、`stage`（`pre_output` / `post_output`；WS 缺少本 turn 输出事实时为 `unknown`）、`headers_committed`、距尝试开始的 `error_ms`、`client_version`。原生与透传另带最终 `rule_id`（来自 gin 键 `ops_error_passthrough_rule_id`，每次尝试清零；桥接与 WS 不带）。`collab_plaintext` 取本次尝试的 `Applied`，并带 `collab_calls`、`collab_efa_absent`、`collab_efa_empty`、`collab_efa_nonempty`、`collab_marker_added`、`collab_vetoed`、`collab_contradicted`、`collab_uncovered`。`frag_amsg`、`frag_fco`、`frag_other` 只扫描协议位置的密文片段，`frag_opaque_like` / `frag_text_like` 只用于形态诊断，不进入修复或改写决定；不递归工具参数或正文。WS 处罚入口没有 Gin / 当前请求体 / 本 turn 输出状态，只记录可得字段，省略 `headers_committed`、`client_version` 及片段计数，不从连接累计字节推断阶段；
 - `wrapped_error_malformed`：Responses 原生/透传流内或非流式聚合出口识别到像包装帧但类型、状态或字段不一致时每帧一条，含 `account_id` 与 `path`，不记帧正文。输出前直接按通用协议失败处理，拒绝继续使用该帧的状态、code、message 触发请求修复、认证/403 账号副作用或错误透传规则；
-- `post_output_failure`（含 `group_id`、`account_id`、`reason`、窗口内次数与是否施加冷却）；
+- `post_output_failure`（含 `group_id`、`account_id`、`reason`、窗口内次数与是否施加冷却）。仅已确认的 OpenAI 输出后失败、`PostOutputRebindOn()` 生效（包含 SessionOn）且请求有实际会话键时附加枚举 `rebind_guard`：`none` 表示未受守卫；`blocked` 表示实际守卫分支拦下 P1-B 首败改绑，仍可能按连击阈值改绑。不适用时省略整个字段，不以 none 代替。仅扩展既有事件，沿用按 attempt 去重（WebSocket 按 turn），不改变处理行为。请求状态已有实际会话键时，另带 `session`，读取 `RequestState.SessionIdentity()` 并与 `session_rebind` 共用 `shortSessionHash`（保留前 8 字节，短键原样保留）；无键时省略，不推导替代值。可用 `group_id`、`session`、`account_id` 和时间窗口关联后续同号输出后失败；摘要有前缀碰撞可能，无后续失败不等于下一请求成功。`request_id` 仍用于请求内关联。
 - `undelivered_record_dropped`：未送达记录的后台写入全部占满，这条记录未写（含 `request_id`）；
 - `last_resort_verify_failed`：末位兜底派发前复核账号时读库失败，按快照中的账号继续；
 - `balance_lift_failed`（0.4.12）：请求成功后清除过期的余额暂停时写库失败（含 `account_id`）；原因保留，之后再遇余额不足仍从原档位往上升；
@@ -568,9 +569,12 @@ info 级，只写应用标准输出（量大，明细已有计数或未送达表
 | `ms_since_first_output` | 距第一次写出内容的毫秒数；还没有输出时为 0 |
 | `prelude_release_event` | 结束开场暂存、开始向客户端输出的那个上游事件类型（记的是释放的决定，不保证写出成功）；没有暂存过时为空 |
 | `prelude_release_ms` | 上一项距 `response.created` 的毫秒数；没有收到 created 时为 0 |
+| `prelude_release_event_keys` | 首次释放事件的顶层字段，按键名排序后用逗号连接为 `键名:JSON类型`；类型为 `object`、`array`、`string`、`number`、`boolean`、`null`，不展开嵌套对象、不记录值。最多 32 个键，完整摘要（含类型和分隔符）最多 256 字节；任一超限时只记 `[truncated;keys=N]`，N 为总键数。仅在下述范围内且有可解析的顶层字段时出现 |
 | `prelude_release_item_type` | 释放事件的 `item.type` 或 `part.type`；非 item/part 事件或缺少类型时为空 |
 | `prelude_release_item_keys` | 上述对象的字段名，排序后用逗号连接；最多 32 个键、连接后最多 256 字节，任一超限时只记 `[truncated;keys=N]`（N 为总键数），不保留任何键名片段或字段值 |
 | `prelude_release_has_encrypted` | 上述对象是否带非空字符串 `encrypted_content`；没有时为 false |
+
+事件层 schema 与 Q1 的 item/part schema 在同一个释放边界采集，随 `resilience.EventFields` 写入 `resilience.post_output_failure` 等系统日志。范围按 `ResponsesEventOutputDisposition` 的事件分支划分：标准顶层仅含 `type`、`sequence_number`、`output_index`、`item` 的 `response.output_item.added` / `.done` 省略 `prelude_release_event_keys`；这两类事件若出现其余顶层字段则记录完整顶层 schema。其他首次释放事件均采集，包括文本、content part、成功终态及未知事件；未知的 `response.output_item.*` 不因前缀相同而省略。没有先收到 created 的首个释放事件也适用。空对象、非对象或无法解析的 JSON 不产生此字段；每次尝试仅冻结首次释放的 schema。此观测不改变未知事件按可见内容处理的判定、开场暂存或失败出口。
 
 `keepalive_committed` 发生在输出之前，`delivered_bytes` 与 `ms_since_first_output` 总是 0。日志不含正文、Key 或完整会话值。
 

@@ -2,8 +2,9 @@ package resilience
 
 import "time"
 
-// PreludeReleaseSchema retains only the shape of the released item or part.
+// PreludeReleaseSchema retains only the shape of the released event, item or part.
 type PreludeReleaseSchema struct {
+	EventKeys    string
 	ItemType     string
 	ItemKeys     string
 	HasEncrypted bool

@@ -2392,6 +2392,8 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		stickyOwner, _ = s.getStickySessionAccountID(ctx, groupID, sessionHash)
 		state.NoteStickyOwner(stickyOwner)
 	}
+	_, ownerExcluded := excludedIDs[stickyOwner]
+	ownerFailedInRequest := ownerExcluded && (state.AccountFailed(stickyOwner) || state.StateRepairAvoided(stickyOwner))
 	defer func() {
 		selected := int64(0)
 		if selection != nil && selection.Account != nil {
@@ -2401,6 +2403,11 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			return
 		}
 		reason := state.StickyBypassReason()
+		// A failed attempt can already have removed the cached binding before
+		// this pass. Its request exclusion takes precedence over soft migration.
+		if ownerFailedInRequest {
+			reason = "owner_failed_in_request"
+		}
 		if reason == "" {
 			reason = "unrecorded"
 		}

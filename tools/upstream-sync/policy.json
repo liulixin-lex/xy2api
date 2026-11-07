@@ -284,6 +284,10 @@
   },
   "required_literals": [
     {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "resilience.StateFrom(c.Request.Context()).NoteStateRepairAvoidance(account.ID)"
+    },
+    {
       "path": "frontend/src/components/admin/usage/UsageTable.vue",
       "value": "v-if=\"showFallbackOrigin && row.origin_group_id\""
     },
@@ -3445,7 +3449,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_chat_completions.go",
-      "value": "changed && openAIResponsesRejectedFieldRetryStateForRequest(c, body).Allow(retryBody)"
+      "value": "changed && rejectedFieldRetryState.Allow(retryBody)"
     },
     {
       "path": "backend/internal/service/openai_gateway_chat_completions.go",
@@ -4097,7 +4101,11 @@
     },
     {
       "path": "backend/internal/service/resilience_compat_stream.go",
-      "value": "schema.ItemKeys = preludeReleaseSchemaKeys(object)"
+      "value": "schema.ItemKeys = preludeReleaseSchemaKeys(object, false)"
+    },
+    {
+      "path": "backend/internal/service/resilience_compat_stream.go",
+      "value": "schema.EventKeys = preludeReleaseSchemaKeys(envelope, true)"
     },
     {
       "path": "backend/internal/service/resilience_compat_stream_trace_test.go",

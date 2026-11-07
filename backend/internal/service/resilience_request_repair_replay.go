@@ -142,12 +142,8 @@ func newOpenAIRequestRepairSignal(ctx context.Context, c *gin.Context, account *
 	// Passthrough's baseline only repairs HTTP fields. In-band field repair
 	// is enabled solely for M3 signals or a request already derived by M3.
 	if r.rejectedFieldRetryState != nil && (!r.passthrough || m3Related) {
-		errorObject := openAIRequestRepairErrorObject(payload)
-		if len(errorObject) > 0 {
-			next, reason, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, r.body, errorObject)
-			if err == nil && changed && r.rejectedFieldRetryState.Allow(next) && resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(account.ID, false, time.Now()) {
-				return &openAIRequestRepairSignal{kind: reason, next: next}
-			}
+		if signal := newOpenAIRejectedFieldRepairSignal(ctx, r, payload); signal != nil {
+			return signal
 		}
 	}
 	status := openAIStreamFailedEventSemanticStatus(payload, message)
@@ -155,6 +151,22 @@ func newOpenAIRequestRepairSignal(ctx context.Context, c *gin.Context, account *
 		status = 0
 	}
 	return r.m3.afterLocalRepairs(ctx, r.body, payload, message, status, wrappedStatus)
+}
+
+// newOpenAIRejectedFieldRepairSignal is shared by native Responses and Chat
+// pre-output failures. Callers validate the output boundary and wrapper status.
+func newOpenAIRejectedFieldRepairSignal(ctx context.Context, r *openAIRequestRepair, payload []byte) error {
+	if r == nil || r.rejectedFieldRetryState == nil || len(r.body) == 0 {
+		return nil
+	}
+	errorObject := openAIRequestRepairErrorObject(payload)
+	if len(errorObject) > 0 {
+		next, reason, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, r.body, errorObject)
+		if err == nil && changed && r.rejectedFieldRetryState.Allow(next) && resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(r.accountID, false, time.Now()) {
+			return &openAIRequestRepairSignal{kind: reason, next: next}
+		}
+	}
+	return nil
 }
 
 func (s *OpenAIGatewayService) openAIRequestRepairAfterSignal(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, err error) ([]byte, string, bool) {

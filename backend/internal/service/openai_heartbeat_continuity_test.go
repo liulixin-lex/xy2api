@@ -337,6 +337,83 @@ func TestForwardReplayResumesCommittedHeartbeat(t *testing.T) {
 	}
 }
 
+func TestChatFieldRepairReplayResumesCommittedHeartbeat(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		withResilienceSettings(t, func(s *resilience.Settings) { s.Keepalive.IntervalSeconds = 5 })
+		first := newGWUpstream(nil)
+		defer func() { _ = first.Close() }()
+		second := newGWUpstream(nil)
+		defer func() { _ = second.Close() }()
+		recorder := &httpUpstreamRecorder{responses: []*http.Response{first.response(nil), second.response(nil)}}
+		upstream := &replayHeartbeatUpstream{httpUpstreamRecorder: recorder, secondStarted: make(chan struct{}), release: make(chan struct{})}
+		defer func() {
+			select {
+			case <-upstream.release:
+			default:
+				close(upstream.release)
+			}
+		}()
+		svc := newOpenAIRejectedFieldTestService(recorder)
+		svc.httpUpstream = upstream
+		svc.cfg.Gateway.StreamKeepaliveInterval = 5
+		w := &protocolHeartbeatWriter{gwWriter: newGWWriter()}
+		gin.SetMode(gin.TestMode)
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(openAIChatContentCacheRetryBody))
+		c.Request.Header.Set("Content-Type", "application/json")
+		stop := StartPreOutputKeepalive(c, PreOutputProtocolChat, 5*time.Second, 5*time.Second)
+		defer stop()
+		start := time.Now()
+		time.Sleep(6 * time.Second)
+		synctest.Wait()
+		require.True(t, PreOutputKeepaliveCommitted(c))
+
+		done := make(chan error, 1)
+		go func() {
+			_, err := svc.ForwardAsChatCompletions(c.Request.Context(), c, newOpenAIRejectedFieldTestAccount(), []byte(openAIChatContentCacheRetryBody), "", "")
+			done <- err
+		}()
+		first.send(t, ptCreated)
+		synctest.Wait()
+		time.Sleep(6 * time.Second)
+		synctest.Wait()
+		require.Equal(t, []time.Time{start.Add(5 * time.Second), start.Add(10 * time.Second)}, w.heartbeatTimes())
+		first.send(t, "event: response.failed\ndata: {\"response\":{\"error\":"+openAIChatContentCacheRetryError+"}}\n\n")
+		<-upstream.secondStarted
+		synctest.Wait()
+		require.True(t, first.closed.Load(), "the rejected stream closes before replay")
+
+		// Header wait lasts longer than one interval. Preserve the original
+		// phase rather than restarting the clock at the repair boundary.
+		time.Sleep(8 * time.Second)
+		synctest.Wait()
+		want := []time.Time{start.Add(5 * time.Second), start.Add(10 * time.Second), start.Add(15 * time.Second), start.Add(20 * time.Second)}
+		require.Equal(t, want, w.heartbeatTimes(), "header wait must keep beating without duplicate writes")
+		requireOnlyHeartbeats(t, c, w.Body())
+
+		// Handoff exactly at a completed beat must not add another beat.
+		close(upstream.release)
+		second.send(t, ptCreated)
+		synctest.Wait()
+		require.Equal(t, want, w.heartbeatTimes())
+		time.Sleep(5 * time.Second)
+		synctest.Wait()
+		want = append(want, start.Add(25*time.Second))
+		require.Equal(t, want, w.heartbeatTimes())
+		requireOnlyHeartbeats(t, c, w.Body())
+		second.send(t, ptDelta, ptCompleted)
+		require.NoError(t, <-done)
+		require.Len(t, recorder.bodies, 2)
+		require.NotContains(t, string(recorder.bodies[1]), "cache_control")
+		require.Contains(t, w.Body(), `"content":"hello"`)
+		require.NotContains(t, w.Body(), `"error"`)
+		require.Equal(t, 1, strings.Count(w.Body(), "[DONE]"))
+		time.Sleep(10 * time.Second)
+		synctest.Wait()
+		require.Equal(t, want, w.heartbeatTimes(), "heartbeats stop after client output")
+	})
+}
+
 func (w *continuityWriter) Write(p []byte) (int, error) {
 	if w.latency > 0 {
 		time.Sleep(w.latency)

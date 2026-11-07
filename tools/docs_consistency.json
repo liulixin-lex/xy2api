@@ -229,6 +229,14 @@
   ],
   "retired": [
     {
+      "pattern": "rebind_guarded",
+      "reason": "unreleased boolean observation replaced by the optional rebind_guard enum",
+      "allowed": [
+        "docs/PROJECT_MEMORY.md",
+        "docs/PROJECT_MEMORY_ARCHIVE.md"
+      ]
+    },
+    {
       "pattern": "balance_transition|RecheckBalance|balance/recheck",
       "reason": "the 0.4.0 balance simplification removed the balance states, probes, recheck and alerts; design §3.2",
       "allowed": [
