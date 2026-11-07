@@ -20,13 +20,13 @@ const keyFor = (platform: GroupPlatform | null, name = 'laptop'): ApiKey =>
 
 const mountDialog = (
   apiKey: ApiKey | null,
-  options: { customEndpoints?: CustomEndpoint[]; siteName?: string } = {}
+  options: { customEndpoints?: CustomEndpoint[]; siteName?: string; baseUrl?: string } = {}
 ) =>
   mount(CcSwitchImportDialog, {
     props: {
       show: true,
       apiKey,
-      baseUrl: 'https://api.example.com/',
+      baseUrl: options.baseUrl ?? 'https://api.example.com/',
       siteName: options.siteName ?? 'XY2API',
       customEndpoints: options.customEndpoints ?? []
     },
@@ -95,9 +95,15 @@ describe('CcSwitchImportDialog', () => {
     expect(wrapper.get('[data-test="ccs-app"]').text()).toBe('Claude Code')
     expect(inputValue(wrapper, 'ccs-endpoint')).toBe('https://api.example.com/antigravity')
 
-    await wrapper.get('[data-test="ccs-client-gemini"]').trigger('click')
+    const radio = (value: string) => wrapper.get(`[data-test="ccs-client-${value}"]`).element as HTMLInputElement
+    expect(radio('claude').type).toBe('radio')
+    expect(radio('claude').name).toBe(radio('gemini').name)
+    expect(radio('claude').checked).toBe(true)
+
+    await wrapper.get('[data-test="ccs-client-gemini"]').setValue(true)
     expect(wrapper.get('[data-test="ccs-app"]').text()).toBe('Gemini CLI')
-    expect(wrapper.get('[data-test="ccs-client-gemini"]').attributes('aria-checked')).toBe('true')
+    expect(radio('gemini').checked).toBe(true)
+    expect(radio('claude').checked).toBe(false)
 
     await wrapper.get('[data-test="ccs-import-confirm"]').trigger('click')
     expect(wrapper.emitted('import')?.[0]?.[0]).toMatchObject({
@@ -158,6 +164,29 @@ describe('CcSwitchImportDialog', () => {
     await wrapper.setProps({ show: true })
     await nextTick()
 
+    expect(inputValue(wrapper, 'ccs-name')).toBe('XY2API · laptop')
+  })
+
+  it('moves untouched fields to settings that arrive after opening and keeps edits', async () => {
+    const wrapper = mountDialog(keyFor('openai'), { baseUrl: 'https://fallback.example.com', siteName: 'xy2api' })
+    expect(inputValue(wrapper, 'ccs-endpoint')).toBe('https://fallback.example.com')
+
+    await wrapper.get('[data-test="ccs-name"]').setValue('Typed name')
+    await wrapper.setProps({ baseUrl: 'https://api.example.com/', siteName: 'XY2API' })
+
+    expect(inputValue(wrapper, 'ccs-endpoint')).toBe('https://api.example.com')
+    expect(inputValue(wrapper, 'ccs-name')).toBe('Typed name')
+
+    await wrapper.get('[data-test="ccs-endpoint"]').setValue('https://edited.example.com')
+    await wrapper.setProps({ baseUrl: 'https://other.example.com', siteName: 'Other' })
+    expect(inputValue(wrapper, 'ccs-endpoint')).toBe('https://edited.example.com')
+  })
+
+  it('moves an untouched name to the site name once it loads', async () => {
+    const wrapper = mountDialog(keyFor('openai'), { siteName: 'xy2api' })
+    expect(inputValue(wrapper, 'ccs-name')).toBe('xy2api · laptop')
+
+    await wrapper.setProps({ siteName: 'XY2API' })
     expect(inputValue(wrapper, 'ccs-name')).toBe('XY2API · laptop')
   })
 

@@ -2070,9 +2070,10 @@ const handleCcsImport = (options: CcSwitchImportOptions) => {
   }
 }
 
+// Keep the key while the dialog fades out so its body does not collapse
+// mid-transition; the next open replaces it.
 const closeCcsImport = () => {
   showCcsImport.value = false
-  ccsImportKey.value = null
 }
 
 function formatResetTime(resetAt: string | null): string {

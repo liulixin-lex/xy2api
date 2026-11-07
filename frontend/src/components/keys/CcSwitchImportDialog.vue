@@ -5,26 +5,31 @@
 
       <div v-if="isAntigravity">
         <span class="input-label">{{ t('keys.ccsClientSelect.description') }}</span>
+        <!-- Native radios: arrow keys and a single Tab stop come from the browser. -->
         <div class="grid grid-cols-2 gap-3" role="radiogroup" :aria-label="t('keys.ccsClientSelect.title')">
-          <button
+          <label
             v-for="option in clientOptions"
             :key="option.value"
-            type="button"
-            role="radio"
-            :aria-checked="clientType === option.value"
-            :data-test="`ccs-client-${option.value}`"
             :class="[
-              'flex flex-col items-center gap-1 rounded-xl border-2 p-3 text-center transition-colors',
+              'flex cursor-pointer flex-col items-center gap-1 rounded-xl border-2 p-3 text-center transition-colors',
+              'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary-500/40',
               clientType === option.value
                 ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
                 : 'border-gray-200 hover:border-primary-300 dark:border-dark-600 dark:hover:border-primary-500'
             ]"
-            @click="clientType = option.value"
           >
+            <input
+              v-model="clientType"
+              type="radio"
+              name="ccs-import-client"
+              :value="option.value"
+              class="sr-only"
+              :data-test="`ccs-client-${option.value}`"
+            />
             <Icon :name="option.icon" size="lg" class="text-gray-600 dark:text-gray-400" />
             <span class="text-sm font-medium text-gray-900 dark:text-white">{{ option.label }}</span>
             <span class="text-xs text-gray-500 dark:text-gray-400">{{ option.description }}</span>
-          </button>
+          </label>
         </div>
       </div>
 
@@ -206,10 +211,13 @@ const canImport = computed(
   () => props.apiKey !== null && !nameInvalid.value && !endpointInvalid.value && !modelInvalid.value
 )
 
+const defaultName = computed(() => defaultCcSwitchProviderName(props.siteName, props.apiKey?.name))
+const defaultEndpoint = computed(() => importConfig.value.endpoint)
+
 function resetForm() {
   clientType.value = platform.value === 'gemini' ? 'gemini' : 'claude'
-  providerName.value = defaultCcSwitchProviderName(props.siteName, props.apiKey?.name)
-  endpoint.value = importConfig.value.endpoint
+  providerName.value = defaultName.value
+  endpoint.value = defaultEndpoint.value
   model.value = defaultModel.value
 }
 
@@ -220,6 +228,16 @@ watch(
   },
   { immediate: true }
 )
+
+// The site name and address come from public settings, which can arrive after
+// the panel opens. Fields the user has not edited follow the new defaults;
+// edited ones stay as typed.
+watch(defaultName, (next, prev) => {
+  if (props.show && providerName.value === prev) providerName.value = next
+})
+watch(defaultEndpoint, (next, prev) => {
+  if (props.show && endpoint.value === prev) endpoint.value = next
+})
 
 function confirmImport() {
   if (!canImport.value) return
