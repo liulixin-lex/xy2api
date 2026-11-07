@@ -26,17 +26,19 @@ var openAIResponsesRejectedOptionalTopLevelFields = [...]string{
 }
 
 var (
-	openAIResponsesRejectedNamespaceParamPattern  = regexp.MustCompile(`(?i)^input\[(\d+)\]\.namespace$`)
-	openAIResponsesRejectedStatusParamPattern     = regexp.MustCompile(`(?i)^input\[(\d+)\]\.status$`)
-	openAIResponsesRejectedContentParamPattern    = regexp.MustCompile(`(?i)^input\[(\d+)\]\.content$`)
-	openAIResponsesRejectedCacheParamPattern      = regexp.MustCompile(`(?i)^input\[(\d+)\]\.prompt_cache_breakpoint$`)
-	openAIResponsesRejectedMessageParamPattern    = regexp.MustCompile(`(?i)(?:unknown|unsupported)[ _-]+parameter\s*(?::|=|is)?\s*["']?(max_output_tokens|truncation|top_p|metadata|temperature|frequency_penalty|presence_penalty|input\[\d+\]\.(?:namespace|status))(?:["']|\b)`)
-	openAIResponsesRejectedArgumentsParamPattern  = regexp.MustCompile(`(?i)^input\[(\d+)\]\.arguments$`)
-	openAIResponsesInvalidTypeMessageParamPattern = regexp.MustCompile(`(?i)invalid[ _-]+type\s+for\s+["']?(input\[\d+\]\.content)(?:["']|\b)[^\n]*\b(?:got|received)\s+null\b`)
-	openAIResponsesMaxZeroContentMessagePattern   = regexp.MustCompile(`(?i)invalid\s+["']?(input\[\d+\]\.content)["']?\s*:\s*array too long\.[^\n]*maximum length 0\b`)
-	openAIResponsesCacheModelRejectionPattern     = regexp.MustCompile(`(?i)["']?(prompt_cache_breakpoint|input\[\d+\]\.prompt_cache_breakpoint)["']?\s+is\s+not\s+supported\s+on\s+this\s+model\b`)
-	openAIResponsesToolParametersParamPattern     = regexp.MustCompile(`(?i)^(?:tools|input)\[\d+\](?:\.tools\[\d+\])*(?:\.function)?\.parameters$`)
-	openAIResponsesMissingSchemaTypePattern       = regexp.MustCompile(`(?i)\bgot\s+["']?type\s*:\s*["']?none["']?`)
+	openAIResponsesRejectedNamespaceParamPattern      = regexp.MustCompile(`(?i)^input\[(\d+)\]\.namespace$`)
+	openAIResponsesRejectedStatusParamPattern         = regexp.MustCompile(`(?i)^input\[(\d+)\]\.status$`)
+	openAIResponsesRejectedContentParamPattern        = regexp.MustCompile(`(?i)^input\[(\d+)\]\.content$`)
+	openAIResponsesRejectedCacheParamPattern          = regexp.MustCompile(`(?i)^input\[(\d+)\]\.prompt_cache_breakpoint$`)
+	openAIResponsesRejectedContentCacheParamPattern   = regexp.MustCompile(`(?i)^input\[\d+\]\.content\[\d+\]\.cache_control$`)
+	openAIResponsesRejectedContentCacheMessagePattern = regexp.MustCompile(`(?i)(?:unknown|unsupported)[ _-]+parameter\s*(?::|=|is)?\s*["']?(input\[\d+\]\.content\[\d+\]\.cache_control)(?:["']|[.,;:]?(?:\s|$))`)
+	openAIResponsesRejectedMessageParamPattern        = regexp.MustCompile(`(?i)(?:unknown|unsupported)[ _-]+parameter\s*(?::|=|is)?\s*["']?(max_output_tokens|truncation|top_p|metadata|temperature|frequency_penalty|presence_penalty|input\[\d+\]\.(?:namespace|status))(?:["']|\b)`)
+	openAIResponsesRejectedArgumentsParamPattern      = regexp.MustCompile(`(?i)^input\[(\d+)\]\.arguments$`)
+	openAIResponsesInvalidTypeMessageParamPattern     = regexp.MustCompile(`(?i)invalid[ _-]+type\s+for\s+["']?(input\[\d+\]\.content)(?:["']|\b)[^\n]*\b(?:got|received)\s+null\b`)
+	openAIResponsesMaxZeroContentMessagePattern       = regexp.MustCompile(`(?i)invalid\s+["']?(input\[\d+\]\.content)["']?\s*:\s*array too long\.[^\n]*maximum length 0\b`)
+	openAIResponsesCacheModelRejectionPattern         = regexp.MustCompile(`(?i)["']?(prompt_cache_breakpoint|input\[\d+\]\.prompt_cache_breakpoint)["']?\s+is\s+not\s+supported\s+on\s+this\s+model\b`)
+	openAIResponsesToolParametersParamPattern         = regexp.MustCompile(`(?i)^(?:tools|input)\[\d+\](?:\.tools\[\d+\])*(?:\.function)?\.parameters$`)
+	openAIResponsesMissingSchemaTypePattern           = regexp.MustCompile(`(?i)\bgot\s+["']?type\s*:\s*["']?none["']?`)
 )
 
 type openAIResponsesRejectedFieldRetryState struct {
@@ -170,6 +172,9 @@ func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, respon
 		if param == "" {
 			param = messageParam
 		}
+		if openAIResponsesRejectedContentCacheParamPattern.MatchString(param) {
+			return removeOpenAIResponsesContentPartCacheControls(body)
+		}
 		if index, ok := openAIResponsesRejectedNamespaceIndex(param); ok {
 			return removeOpenAIResponsesRejectedNamespaceAtIndex(body, index)
 		}
@@ -234,6 +239,9 @@ func isExplicitOpenAIResponsesFieldRejection(code, message string) bool {
 }
 
 func openAIResponsesRejectedParamFromMessage(message string) string {
+	if match := openAIResponsesRejectedContentCacheMessagePattern.FindStringSubmatch(strings.TrimSpace(message)); len(match) == 2 {
+		return strings.ToLower(strings.TrimSpace(match[1]))
+	}
 	match := openAIResponsesRejectedMessageParamPattern.FindStringSubmatch(strings.TrimSpace(message))
 	if len(match) != 2 {
 		return ""
@@ -333,6 +341,47 @@ func removeNestedOpenAIResponsesPromptCacheBreakpoints(body []byte) ([]byte, str
 		return nil, "", false, nil
 	}
 	return retryBody, "nested prompt_cache_breakpoint rejection", true, nil
+}
+
+// The upstream names Responses input positions even when the replay source is
+// a Chat Completions request. Remove all content-part hints in that source so
+// conversion cannot reintroduce them; never descend into user JSON or tools.
+func removeOpenAIResponsesContentPartCacheControls(body []byte) ([]byte, string, bool, error) {
+	root := "input"
+	if !gjson.GetBytes(body, root).Exists() {
+		root = "messages"
+	}
+	items := gjson.GetBytes(body, root)
+	if !items.IsArray() {
+		return nil, "", false, nil
+	}
+	retryBody := body
+	removed := false
+	for itemIndex, item := range items.Array() {
+		if !item.IsObject() {
+			continue
+		}
+		content := item.Get("content")
+		if !content.IsArray() {
+			continue
+		}
+		for partIndex, part := range content.Array() {
+			if !part.IsObject() || !part.Get("cache_control").Exists() {
+				continue
+			}
+			path := fmt.Sprintf("%s.%d.content.%d.cache_control", root, itemIndex, partIndex)
+			next, err := sjson.DeleteBytes(retryBody, path)
+			if err != nil {
+				return nil, "", false, fmt.Errorf("delete rejected content-part cache_control at %s: %w", path, err)
+			}
+			retryBody = next
+			removed = true
+		}
+	}
+	if !removed {
+		return nil, "", false, nil
+	}
+	return retryBody, "content-part cache_control parameter rejection", true, nil
 }
 
 func convertOpenAIResponsesToolSearchCallArguments(body []byte, rejectedIndex int) ([]byte, string, bool, error) {
