@@ -4101,7 +4101,11 @@
     },
     {
       "path": "backend/internal/service/resilience_compat_stream.go",
-      "value": "schema.ItemKeys = preludeReleaseSchemaKeys(object)"
+      "value": "schema.ItemKeys = preludeReleaseSchemaKeys(object, false)"
+    },
+    {
+      "path": "backend/internal/service/resilience_compat_stream.go",
+      "value": "schema.EventKeys = preludeReleaseSchemaKeys(envelope, true)"
     },
     {
       "path": "backend/internal/service/resilience_compat_stream_trace_test.go",

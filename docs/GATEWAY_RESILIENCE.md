@@ -569,9 +569,12 @@ info 级，只写应用标准输出（量大，明细已有计数或未送达表
 | `ms_since_first_output` | 距第一次写出内容的毫秒数；还没有输出时为 0 |
 | `prelude_release_event` | 结束开场暂存、开始向客户端输出的那个上游事件类型（记的是释放的决定，不保证写出成功）；没有暂存过时为空 |
 | `prelude_release_ms` | 上一项距 `response.created` 的毫秒数；没有收到 created 时为 0 |
+| `prelude_release_event_keys` | 首次释放事件的顶层字段，按键名排序后用逗号连接为 `键名:JSON类型`；类型为 `object`、`array`、`string`、`number`、`boolean`、`null`，不展开嵌套对象、不记录值。最多 32 个键，完整摘要（含类型和分隔符）最多 256 字节；任一超限时只记 `[truncated;keys=N]`，N 为总键数。仅在下述范围内且有可解析的顶层字段时出现 |
 | `prelude_release_item_type` | 释放事件的 `item.type` 或 `part.type`；非 item/part 事件或缺少类型时为空 |
 | `prelude_release_item_keys` | 上述对象的字段名，排序后用逗号连接；最多 32 个键、连接后最多 256 字节，任一超限时只记 `[truncated;keys=N]`（N 为总键数），不保留任何键名片段或字段值 |
 | `prelude_release_has_encrypted` | 上述对象是否带非空字符串 `encrypted_content`；没有时为 false |
+
+事件层 schema 与 Q1 的 item/part schema 在同一个释放边界采集，随 `resilience.EventFields` 写入 `resilience.post_output_failure` 等系统日志。范围按 `ResponsesEventOutputDisposition` 的事件分支划分：标准顶层仅含 `type`、`sequence_number`、`output_index`、`item` 的 `response.output_item.added` / `.done` 省略 `prelude_release_event_keys`；这两类事件若出现其余顶层字段则记录完整顶层 schema。其他首次释放事件均采集，包括文本、content part、成功终态及未知事件；未知的 `response.output_item.*` 不因前缀相同而省略。没有先收到 created 的首个释放事件也适用。空对象、非对象或无法解析的 JSON 不产生此字段；每次尝试仅冻结首次释放的 schema。此观测不改变未知事件按可见内容处理的判定、开场暂存或失败出口。
 
 `keepalive_committed` 发生在输出之前，`delivered_bytes` 与 `ms_since_first_output` 总是 0。日志不含正文、Key 或完整会话值。
 
