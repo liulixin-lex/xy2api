@@ -76,6 +76,74 @@ func TestOpenAIFirstOutputTimeoutLatencySamplesRequireWarmMatchingStreamProfile(
 	}
 }
 
+func TestOpenAIFirstOutputTimeoutLatencySamplesRequireSlowEvidence(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, tc := range []struct {
+		name            string
+		timeout         time.Duration
+		elapsed         time.Duration
+		configuredTier  bool
+		remainingBudget bool
+		wantSample      bool
+	}{
+		{name: "configured five second tier", timeout: 5 * time.Second, elapsed: 5 * time.Second, configuredTier: true},
+		{name: "last candidate remaining budget", timeout: 5 * time.Second, elapsed: 5 * time.Second, remainingBudget: true},
+		{name: "just below threshold", timeout: openAIAccountLatencySlowThreshold - time.Nanosecond, elapsed: openAIAccountLatencySlowThreshold - time.Nanosecond},
+		{name: "at threshold", timeout: openAIAccountLatencySlowThreshold, elapsed: openAIAccountLatencySlowThreshold, wantSample: true},
+		{name: "short deadline observed at threshold", timeout: openAIAccountLatencySlowThreshold / 2, elapsed: openAIAccountLatencySlowThreshold, wantSample: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				svc := &OpenAIGatewayService{}
+				account := &Account{ID: 1, Platform: PlatformOpenAI}
+				st := resilience.NewRequestState()
+				ctx := resilience.WithRequestState(context.Background(), st)
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
+				start := time.Now()
+				timeout := tc.timeout
+				if tc.configuredTier {
+					settings := *resilience.Current()
+					settings.Budget.FirstOutputTimeoutSeconds.Default = int(tc.timeout / time.Second)
+					require.NoError(t, settings.Validate())
+					budget := resilience.NewBudget(ctx, &settings, resilience.KindText, start)
+					require.NotNil(t, budget)
+					st.SetBudget(budget)
+					timeout = budget.AttemptTimeout(resilience.FirstOutputTier(&settings, "mapped-model", ""), false, start)
+					require.Equal(t, tc.timeout, timeout)
+				}
+				if tc.remainingBudget {
+					settings := resilience.Current()
+					requestStart := start.Add(tc.timeout - time.Duration(settings.Budget.PreOutputBudgetSeconds)*time.Second)
+					budget := resilience.NewBudget(ctx, settings, resilience.KindText, requestStart)
+					require.NotNil(t, budget)
+					st.SetBudget(budget)
+					timeout = budget.AttemptTimeout(2*openAIAccountLatencySlowThreshold, true, start)
+					require.Equal(t, tc.timeout, timeout)
+				}
+				st.SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, Model: "mapped-model", AttemptStart: start, Warm: true, Stream: true})
+				time.Sleep(tc.elapsed)
+				_ = svc.newOpenAIFirstOutputTimeoutError(ctx, c, account, nil, "", start,
+					"mapped-model", "", timeout, "first_output", http.Header{})
+				if !tc.wantSample {
+					require.Nil(t, svc.openaiAccountLatencyHold, "a timeout below the slow threshold cannot establish fast or slow evidence")
+					return
+				}
+				key, ok := openAIAccountModelTransientKey(account.ID, "mapped-model")
+				require.True(t, ok)
+				state := svc.getOpenAIAccountLatencyHoldState()
+				state.mu.Lock()
+				entry := state.entries[key]
+				entryCount := len(state.entries)
+				state.mu.Unlock()
+				require.Equal(t, 1, entryCount)
+				require.Equal(t, float64(1), entry.weightedSamples, "exactly one sample per timeout")
+				require.Equal(t, float64(1), entry.weightedSlow, "only unambiguous slow timeout samples are recorded")
+			})
+		})
+	}
+}
+
 func TestOpenAIFirstOutputTimeoutSamplesCombineWithSuccessToTriggerLatencyHold(t *testing.T) {
 	withResilienceSettings(t, nil)
 	sink, restore := captureStructuredLog(t)
