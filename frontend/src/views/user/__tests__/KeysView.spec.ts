@@ -4,6 +4,8 @@ import { nextTick } from 'vue'
 
 import type { ApiKey } from '@/types'
 import { keysAPI } from '@/api'
+import CcSwitchImportDialog from '@/components/keys/CcSwitchImportDialog.vue'
+import type { CcSwitchImportOptions } from '@/utils/ccswitchImport'
 import KeysView from '../KeysView.vue'
 
 const {
@@ -794,6 +796,33 @@ describe('user KeysView column settings', () => {
       expect(params.get('endpoint')).toBe('https://api.example.com')
       expect(params.get('apiKey')).toBe('sk-test-key')
       expect(wrapper.find('[data-test="ccs-name"]').exists()).toBe(false)
+      wrapper.unmount()
+    })
+
+    it('opens CC Switch once even if Import fires again while the panel fades out', async () => {
+      const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+      openSpy = open
+      const wrapper = await mountView()
+      const panel = () => wrapper.findComponent(CcSwitchImportDialog)
+      const options: CcSwitchImportOptions = {
+        clientType: 'claude',
+        providerName: 'XY2API',
+        endpoint: 'https://api.example.com',
+      }
+
+      await getButtonByText(wrapper, 'keys.importToCcSwitch').trigger('click')
+      await wrapper.get('[data-test="ccs-import-confirm"]').trigger('click')
+      // A second click that lands during the fade-out.
+      panel().vm.$emit('import', options)
+      await nextTick()
+      expect(open).toHaveBeenCalledTimes(1)
+
+      await getButtonByText(wrapper, 'keys.importToCcSwitch').trigger('click')
+      await getButtonByText(wrapper, 'common.cancel').trigger('click')
+      // A click right after cancelling (or Esc).
+      panel().vm.$emit('import', options)
+      await nextTick()
+      expect(open).toHaveBeenCalledTimes(1)
       wrapper.unmount()
     })
 

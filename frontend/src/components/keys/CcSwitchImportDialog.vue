@@ -240,7 +240,8 @@ watch(defaultEndpoint, (next, prev) => {
 })
 
 function confirmImport() {
-  if (!canImport.value) return
+  // The footer is still clickable while BaseDialog fades out after closing.
+  if (!props.show || !canImport.value) return
   emit('import', {
     clientType: clientType.value,
     providerName: providerName.value.trim(),

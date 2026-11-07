@@ -2064,10 +2064,11 @@ const executeCcsImport = (row: ApiKey, options: CcSwitchImportOptions) => {
 
 const handleCcsImport = (options: CcSwitchImportOptions) => {
   const row = ccsImportKey.value
+  // The Import button stays clickable while the dialog fades out; a double
+  // click or a click right after Esc must not open CC Switch again.
+  if (!showCcsImport.value || !row) return
   closeCcsImport()
-  if (row) {
-    executeCcsImport(row, options)
-  }
+  executeCcsImport(row, options)
 }
 
 // Keep the key while the dialog fades out so its body does not collapse

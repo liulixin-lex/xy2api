@@ -196,6 +196,24 @@ describe('CcSwitchImportDialog', () => {
     expect(inputValue(wrapper, 'ccs-name')).toBe('XY2API')
   })
 
+  it('ignores Import clicks while the dialog is closing', async () => {
+    const wrapper = mount(CcSwitchImportDialog, {
+      props: { show: true, apiKey: keyFor('openai'), baseUrl: 'https://api.example.com/', siteName: 'XY2API' },
+      global: {
+        stubs: {
+          // Like BaseDialog during its leave transition: the footer is still in the DOM.
+          BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' },
+          Icon: true
+        }
+      }
+    })
+
+    await wrapper.setProps({ show: false })
+    await wrapper.get('[data-test="ccs-import-confirm"]').trigger('click')
+
+    expect(wrapper.emitted('import')).toBeUndefined()
+  })
+
   it('emits close from the cancel button', async () => {
     const wrapper = mountDialog(keyFor('openai'))
 
