@@ -137,6 +137,48 @@ func TestResponsesExtraFieldsMatchV054EmptySemantics(t *testing.T) {
 	}
 }
 
+func TestResponsesExtraFieldDepthLimit(t *testing.T) {
+	for _, tc := range []struct {
+		depth     int
+		wantEmpty bool
+	}{
+		{32, true},
+		{33, false},
+	} {
+		t.Run(fmt.Sprintf("depth_%d", tc.depth), func(t *testing.T) {
+			// Count array/object levels within the extra value, excluding the
+			// event and item envelopes. Check both scalar and empty-container
+			// leaves so a childless container cannot bypass the depth limit.
+			for _, leaf := range []string{`null`, `{}`} {
+				value := leaf
+				levels := 0
+				if leaf == `{}` {
+					levels = 1
+				}
+				for ; levels < tc.depth; levels++ {
+					if levels%2 == 0 {
+						value = `{"x":` + value + `}`
+					} else {
+						value = `[` + value + `]`
+					}
+				}
+				if got := responsesFieldValueIsEmpty(gjson.Parse(value)); got != tc.wantEmpty {
+					t.Errorf("leaf=%s empty=%t, want %t", leaf, got, tc.wantEmpty)
+				}
+				payload := fmt.Sprintf(`{"type":"response.output_item.added","item":{"type":"reasoning","summary":[],"extra":%s}}`, value)
+				wantKind := Content
+				if tc.wantEmpty {
+					wantKind = Prelude
+				}
+				got := ResponsesEventOutputDisposition("response.output_item.added", []byte(payload))
+				if !got.Matched || got.Kind != wantKind || got.Visible != !tc.wantEmpty || got.SemanticOutput != !tc.wantEmpty {
+					t.Errorf("leaf=%s got %+v, want kind=%v empty=%t", leaf, got, wantKind, tc.wantEmpty)
+				}
+			}
+		})
+	}
+}
+
 // Frozen from v0.5.4:backend/internal/resilience/prelude.go, with only the
 // function name changed. Extra fields use structural=false: field names never
 // exempt a nonempty value. Keep this reference independent of the new helper.

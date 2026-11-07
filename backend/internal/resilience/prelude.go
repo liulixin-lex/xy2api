@@ -267,9 +267,16 @@ func responsesObjectHasOnlyFields(value gjson.Result, allowed ...string) bool {
 	return valid
 }
 
-// Extra fields use the recursive empty-value rule from v0.5.4, without any
-// structural field exemptions. Numbers, booleans, and whitespace are content.
+const responsesEmptyFieldMaxDepth = 32
+
+// Extra fields use the recursive empty-value rule from v0.5.4 within a bounded
+// number of array/object levels, without any structural field exemptions.
+// Numbers, booleans, and whitespace are content.
 func responsesFieldValueIsEmpty(value gjson.Result) bool {
+	return responsesFieldValueIsEmptyAtDepth(value, 0)
+}
+
+func responsesFieldValueIsEmptyAtDepth(value gjson.Result, depth int) bool {
 	switch value.Type {
 	case gjson.Null:
 		return true
@@ -277,9 +284,13 @@ func responsesFieldValueIsEmpty(value gjson.Result) bool {
 		return value.Str == ""
 	}
 	if value.IsArray() || value.IsObject() {
+		depth++
+		if depth > responsesEmptyFieldMaxDepth {
+			return false
+		}
 		empty := true
 		value.ForEach(func(_, child gjson.Result) bool {
-			empty = responsesFieldValueIsEmpty(child)
+			empty = responsesFieldValueIsEmptyAtDepth(child, depth)
 			return empty
 		})
 		return empty
