@@ -275,7 +275,8 @@ describe('gate wording (red team B8)', () => {
     const zhT2 = i18nFor('zh').t
     expect(zhT2('admin.groupQualityGate.unknownBadgeTitle', { group: '主力' })).toBe('主力 · 未知：暂无结论（样本不足或处于中间带），暂按 0 档参与排序')
     expect(zhT2('admin.groupQualityGate.hint')).toContain('绑定号不达标或判慢时，会话迁往本组留有余量的合格号')
-    expect(zhT2('admin.groupQualityGate.hint')).toContain('严格模式下为“待复测”')
+    expect(zhT2('admin.groupQualityGate.hint')).toContain('首字 15 次评估')
+    expect(zhT2('admin.groupQualityGate.hint')).toContain('近 6 小时数据重建')
     expect(zhT2('admin.groupQualityGate.tooltip.stale')).toContain('评估数据陈旧或读取失败')
     expect(i18nFor('en').t('admin.groupQualityGate.tooltip.stale')).toContain('stale or could not be read')
   })
