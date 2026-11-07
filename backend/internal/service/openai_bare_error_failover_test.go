@@ -100,7 +100,7 @@ func TestOpenAIBareErrorTransportRecovery(t *testing.T) {
 	}
 }
 
-func TestB2ProbeHeartbeatCommittedThenTransportBareError(t *testing.T) {
+func TestOpenAIBareErrorHeartbeatCommittedThenTransportFailsOver(t *testing.T) {
 	withResilienceSettings(t, nil)
 	for _, path := range []string{"native", "passthrough"} {
 		for _, accountType := range []string{AccountTypeAPIKey, AccountTypeOAuth} {
@@ -126,7 +126,7 @@ func TestB2ProbeHeartbeatCommittedThenTransportBareError(t *testing.T) {
 					opening := `data: {"type":"response.created","response":{"id":"resp_heartbeat","model":"public"}}` + "\n\n"
 					_, err := io.WriteString(writer, opening)
 					require.NoError(t, err)
-					time.Sleep(1200 * time.Millisecond)
+					time.Sleep(1500 * time.Millisecond)
 					payload := bareErrorPayload(shape, fmt.Sprintf(`"code":%q,"message":"Upstream response stream was interrupted"`, OpenAIUpstreamStreamReadErrorCode))
 					_, err = io.WriteString(writer, bareErrorFrame(payload))
 					require.NoError(t, err)
@@ -470,6 +470,93 @@ func TestOpenAIBareErrorAfterOutputUsesOneFailedTerminal(t *testing.T) {
 					}
 				})
 			}
+		}
+	}
+}
+
+func TestOpenAIBareErrorCapacityShedAfterOutputSanitizesSynthesizedTerminal(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, path := range []string{"native", "passthrough"} {
+		for _, shape := range []string{"top", "object"} {
+			for _, code := range []string{"server_is_overloaded", "slow_down"} {
+				t.Run(fmt.Sprintf("%s/%s/%s", path, shape, code), func(t *testing.T) {
+					rl, repo, _, resilienceService := newPenaltyFixtureKeepSettings(t, PlatformOpenAI)
+					account := streamModelAccount(254, path == "passthrough", "https://relay.example/v1")
+					repo.account = account
+					account.Type = AccountTypeOAuth
+					account.Credentials["access_token"] = "test-token"
+					const message = "Upstream request deferred"
+					payload := bareErrorPayload(shape, fmt.Sprintf(`"code":%q,"message":%q`, code, message))
+					frames := `data: {"type":"response.output_text.delta","delta":"partial"}` + "\n\n" + bareErrorFrame(payload)
+					upstream := &httpUpstreamRecorder{resp: bareErrorResponse(frames)}
+					svc := compatStreamService(upstream, 0, 0, 0)
+					svc.rateLimitService = rl
+					c, rec := newOpenAIUpstreamErrorTestContext(t)
+					state := resilience.NewRequestState()
+					requestContext := resilience.WithRequestState(c.Request.Context(), state)
+					c.Request = c.Request.WithContext(requestContext)
+					InstallDeliveryTracking(c, time.Now())
+					beforeMetric := postOutputMetric(account.ID, postOutputEvent)
+
+					err := forwardBareErrorPath(svc, c, account, path, true, &strings.Builder{})
+					require.Error(t, err)
+					var failover *UpstreamFailoverError
+					require.NotErrorAs(t, err, &failover)
+					require.Len(t, upstream.bodies, 1)
+					// Account effects retain the original capacity classification; a
+					// client-side server_error must not replace the upstream evidence.
+					require.True(t, state.StreamFailureReported(account.ID))
+					require.True(t, state.AccountFailed(account.ID))
+					require.Equal(t, beforeMetric+1, postOutputMetric(account.ID, postOutputEvent))
+					facts := state.TakePostOutputFailureFacts()
+					require.Len(t, facts, 1)
+					require.Equal(t, resilience.CategoryCapacityShed, facts[0].Category)
+					require.Len(t, resilienceService.postOutput.failures[account.ID], 1)
+					require.Zero(t, repo.tempCalls, "one failure remains below the post-output cooldown threshold")
+					require.Zero(t, repo.errorCalls)
+					output := rec.Body.String()
+					require.Contains(t, output, "partial")
+					require.Equal(t, 1, strings.Count(output, `"type":"response.failed"`))
+					var failurePayload []byte
+					for _, line := range strings.Split(output, "\n") {
+						data, ok := extractOpenAISSEDataLine(line)
+						if ok && gjson.Get(data, "type").String() == "response.failed" {
+							failurePayload = []byte(data)
+							break
+						}
+					}
+					require.NotEmpty(t, failurePayload)
+					require.Equal(t, openAICapacityShedRetryableClientCode, gjson.GetBytes(failurePayload, "response.error.code").String())
+					require.Equal(t, message, gjson.GetBytes(failurePayload, "response.error.message").String())
+					require.NotContains(t, output, `"type":"error"`)
+					require.NotContains(t, output, code)
+				})
+			}
+		}
+	}
+}
+
+func TestOpenAIBareErrorRateLimitAfterOutputPreservesSynthesizedCode(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, path := range []string{"native", "passthrough"} {
+		for _, shape := range []string{"top", "object"} {
+			t.Run(path+"/"+shape, func(t *testing.T) {
+				payload := bareErrorPayload(shape, `"code":"rate_limit_exceeded","message":"retry later"`)
+				frames := `data: {"type":"response.output_text.delta","delta":"partial"}` + "\n\n" + bareErrorFrame(payload)
+				upstream := &httpUpstreamRecorder{resp: bareErrorResponse(frames)}
+				svc := compatStreamService(upstream, 0, 0, 0)
+				account := streamModelAccount(1, path == "passthrough", "https://relay.example/v1")
+				account.Type = AccountTypeOAuth
+				account.Credentials["access_token"] = "test-token"
+				c, rec := newOpenAIUpstreamErrorTestContext(t)
+				err := forwardBareErrorPath(svc, c, account, path, true, &strings.Builder{})
+				require.Error(t, err)
+				var failover *UpstreamFailoverError
+				require.NotErrorAs(t, err, &failover)
+				require.Equal(t, 1, strings.Count(rec.Body.String(), `"type":"response.failed"`))
+				require.Contains(t, rec.Body.String(), `"code":"rate_limit_exceeded"`)
+				require.NotContains(t, rec.Body.String(), `"code":"server_error"`)
+			})
 		}
 	}
 }
