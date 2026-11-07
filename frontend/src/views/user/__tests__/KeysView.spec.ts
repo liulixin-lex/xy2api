@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
@@ -748,6 +748,66 @@ describe('user KeysView column settings', () => {
       await getButtonByText(wrapper, 'common.edit').trigger('click')
       expect(wrapper.find('[data-tour="key-form-provider"]').exists()).toBe(false)
       expect(optionIds(wrapper)).toHaveLength(12)
+    })
+  })
+
+  describe('CC Switch import', () => {
+    let openSpy: ReturnType<typeof vi.spyOn> | null = null
+
+    afterEach(() => {
+      openSpy?.mockRestore()
+      openSpy = null
+    })
+
+    it('opens the import panel first and imports the values the user confirmed', async () => {
+      const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+      openSpy = open
+      getPublicSettings.mockResolvedValue({ api_base_url: 'https://api.example.com', site_name: 'XY2API' })
+      listKeys.mockResolvedValueOnce({
+        items: [{
+          ...createApiKey(),
+          group_id: 1,
+          group: { id: 1, name: 'codex', platform: 'openai' } as unknown as ApiKey['group'],
+        }],
+        total: 1,
+        page: 1,
+        page_size: 20,
+        pages: 1,
+      })
+      const wrapper = await mountView()
+
+      await getButtonByText(wrapper, 'keys.importToCcSwitch').trigger('click')
+      expect(open).not.toHaveBeenCalled()
+      expect((wrapper.get('[data-test="ccs-name"]').element as HTMLInputElement).value).toBe('XY2API · test-key')
+
+      await wrapper.get('[data-test="ccs-name"]').setValue('Work laptop')
+      await wrapper.get('[data-test="ccs-model"]').setValue('gpt-5.6-sol')
+      await wrapper.get('[data-test="ccs-import-confirm"]').trigger('click')
+
+      expect(open).toHaveBeenCalledTimes(1)
+      const [deeplink, target] = open.mock.calls[0]
+      expect(target).toBe('_self')
+      const params = new URL(String(deeplink)).searchParams
+      expect(params.get('app')).toBe('codex')
+      expect(params.get('name')).toBe('Work laptop')
+      expect(params.get('model')).toBe('gpt-5.6-sol')
+      expect(params.get('endpoint')).toBe('https://api.example.com')
+      expect(params.get('apiKey')).toBe('sk-test-key')
+      expect(wrapper.find('[data-test="ccs-name"]').exists()).toBe(false)
+      wrapper.unmount()
+    })
+
+    it('does not open CC Switch when the panel is cancelled', async () => {
+      const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+      openSpy = open
+      const wrapper = await mountView()
+
+      await getButtonByText(wrapper, 'keys.importToCcSwitch').trigger('click')
+      await getButtonByText(wrapper, 'common.cancel').trigger('click')
+
+      expect(open).not.toHaveBeenCalled()
+      expect(wrapper.find('[data-test="ccs-name"]').exists()).toBe(false)
+      wrapper.unmount()
     })
   })
 })
