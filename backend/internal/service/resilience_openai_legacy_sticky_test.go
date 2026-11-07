@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -28,6 +29,69 @@ func TestStickyBypassReasonKeepsFirstReason(t *testing.T) {
 	state.ResetStickyBypassReason()
 	state.NoteStickyBypassReason("capacity")
 	require.Equal(t, "capacity", state.StickyBypassReason())
+}
+
+func TestStickyBypassFirstOutputTimeoutReselectionRecordsRequestFailure(t *testing.T) {
+	for _, binding := range []string{"retained", "cleared"} {
+		t.Run(binding, func(t *testing.T) {
+			withResilienceSettings(t, nil)
+			resetOpenAIAdvancedSchedulerSettingCacheForTest()
+			t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
+			groupID := int64(10119)
+			accounts := []Account{
+				{ID: 36061, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID}},
+				{ID: 36062, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID}},
+			}
+			const session = "timeout-reselect"
+			cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:" + session: accounts[0].ID}}
+			cfg := &config.Config{}
+			cfg.Gateway.Scheduling.LoadBatchEnabled = true
+			svc := &OpenAIGatewayService{
+				accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+				cache:              cache,
+				cfg:                cfg,
+				concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+				resilience:         NewResilienceService(nil, newMemResilienceStore()),
+			}
+			req := newWebSearchReplayRequest(t)
+			ctx := req.ctx
+			state := resilience.StateFrom(ctx)
+			first, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", session, "gpt-test", nil, OpenAIUpstreamTransportAny, false)
+			require.NoError(t, err)
+			require.Equal(t, accounts[0].ID, first.Account.ID)
+			if first.ReleaseFunc != nil {
+				first.ReleaseFunc()
+			}
+			logs := captureOpenAIObservationLogs(t)
+			state.SetAttemptProfile(resilience.AttemptProfile{AccountID: accounts[0].ID, Model: "gpt-test", AttemptStart: time.Now().Add(-time.Second), Stream: true})
+			timeout := svc.newOpenAIFirstOutputTimeoutError(ctx, req.c, &accounts[0], nil, "", time.Now().Add(-time.Second), "gpt-test", "", time.Second, "headers", http.Header{})
+			require.Equal(t, http.StatusGatewayTimeout, timeout.StatusCode)
+			require.Equal(t, PlannedFirstOutputTimeoutReason, timeout.Reason)
+			require.True(t, state.AccountFailed(accounts[0].ID), "the actual timeout reporter marks the failed attempt")
+			holdAt := time.Now()
+			for i := 0; i < openAIAccountLatencyMinSamples; i++ {
+				svc.recordOpenAIAccountLatencySample(&accounts[0], "gpt-test", 11*time.Second, holdAt)
+			}
+			require.True(t, svc.openAIAccountLatencyHoldSnapshot(&accounts[0], "gpt-test", time.Now()).Held)
+			// An earlier migration/cleanup can remove the cache entry while RequestState
+			// still retains the original owner for the request's next selection.
+			if binding == "cleared" {
+				require.NoError(t, svc.deleteStickySessionAccountIDIfOwner(ctx, &groupID, session, accounts[0].ID))
+			}
+			retry, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", session, "gpt-test", map[int64]struct{}{accounts[0].ID: {}}, OpenAIUpstreamTransportAny, false)
+			require.NoError(t, err)
+			require.Equal(t, accounts[1].ID, retry.Account.ID)
+			if retry.ReleaseFunc != nil {
+				retry.ReleaseFunc()
+			}
+			if binding == "retained" {
+				require.Equal(t, "latency_migration", state.StickyBypassReason(), "the failed-owner log reason takes precedence over the observed migration")
+			}
+			require.Contains(t, logs.String(), `"reason":"owner_failed_in_request"`)
+			require.NotContains(t, logs.String(), `"reason":"unrecorded"`)
+			require.Equal(t, 1, strings.Count(logs.String(), `"msg":"openai.sticky_bypass"`))
+		})
+	}
 }
 
 func TestResilienceOpenAILoadBatchStickyBypassRecordsReason(t *testing.T) {

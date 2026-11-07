@@ -863,6 +863,20 @@
           "slog.Info(\"openai.sticky_bypass\", fields...)",
           "selection, decision, err = s.selectAccountWithQualityRouting(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)"
         ]
+      },
+      {
+        "block": "sticky-bypass-request-failure-reason",
+        "note": "D4 follow-up: use the original request owner plus incoming failed exclusions for log-only attribution, ahead of soft migration. Selection, binding changes and request log deduplication are unchanged.",
+        "removed": [],
+        "added": [
+          "_, ownerExcluded := excludedIDs[stickyOwner]",
+          "ownerFailedInRequest := ownerExcluded && state.AccountFailed(stickyOwner)",
+          "// A failed attempt can already have removed the cached binding before",
+          "// this pass. Its request exclusion takes precedence over soft migration.",
+          "if ownerFailedInRequest {",
+          "reason = \"owner_failed_in_request\"",
+          "}"
+        ]
       }
     ],
     "backend/internal/service/openai_gateway_scheduling.go": [
