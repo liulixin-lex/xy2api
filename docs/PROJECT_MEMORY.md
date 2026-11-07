@@ -162,7 +162,7 @@
 
 ## 进行中的工作
 
-- **20261107-ccs-import-panel**（2026-11-07 14:26 UTC 开始，Claude 实施）：API 密钥页「导入到 CCS」先弹出本站的导入面板，用户可改供应商名称、API 端点和模型（仅 Codex、Grok Build），确认后再唤起 CC Switch；Antigravity 的客户端选择并入面板。原因是 CC Switch 的导入确认框按设计只读，而原链接各项写死，导入多个密钥后同名。只改前端，无后端改动、迁移或开关，默认模型不变。分支 `feat/ccs-import-panel-20261107`（基于 `b414da13d`）。按用户惯例止于开 PR、CI 全绿，合并由其他作者执行，发版与部署另行授权。
+- **20261107-ccs-import-panel**（2026-11-07 14:26 UTC 开始，Claude 实施；14:55 UTC 更新）：API 密钥页「导入到 CCS」先弹出本站的导入面板，用户可改供应商名称、API 端点和模型（仅 Codex、Grok Build），确认后再唤起 CC Switch；Antigravity 的客户端选择并入面板。原因是 CC Switch 的导入确认框按设计只读，而原链接各项写死，导入多个密钥后同名。只改前端，无后端改动、迁移或开关，默认模型不变。分支 `feat/ccs-import-panel-20261107`（基于 `b414da13d`），PR #208 已开，gpt-6-astra 三轮审查签字；CI 全绿后由其他作者合并，发版与部署另行授权。
 
 - **20261106-encrypted-routing-followups**（2026-11-07 11:48 UTC 更新）：0.5.6 已上线并完成 PM 的 1 h 验收；0.5.7 候选见“当前交接状态”，代码头 `d48343814` 后端 13 项及 GitHub CI 20 项全过，前端按零差异沿用参照结果，PR #206 已开。独立记忆登记后推送并等待新头 CI，冒烟进行中，合并和打 tag 等 PM 指令。M5 为 0.5.8 候选，按上线后 6 h 初看、24 h 数据裁决。PR #204 的已完成文档交接条目已原样归档。
 
@@ -1513,3 +1513,13 @@ pnpm --dir frontend run build
   - 本机 Go 检查经共享锁串行执行，多个审查排队；
   - 定时监测在 PM 忙时会被跳过，改为手动补跑。
 - 下一步：本次文档提交通过 docs 一致性、diff 检查和干净树 audit 后推送，等待新头 CI；冒烟通过并由 PM 确认后，等 PM 指令再合并、打 tag、发版；部署由用户执行；上线后按 PROD_ACCEPT 观察 G2c 指标，并在 24 h 内决定 M5 是否作为 0.5.8 发布。
+
+### 2026-11-07 14:55 UTC — 20261107-ccs-import-panel — 导入 CCS 前置面板完成，PR #208 已开
+
+- 请求/目标：用户反馈 API 密钥页「导入到 CCS」后，CC Switch 弹出的确认框不能修改。核对 CC Switch 源码与站长接入文档，确认该框按设计只读；用户选择在本站加导入前面板。
+- 开始状态：origin/main `b414da13d`；新建工作树分支 `feat/ccs-import-panel-20261107`。
+- 完成操作：新增 `CcSwitchImportDialog.vue`；`buildCcSwitchImportDeeplink` 接受用户确认的端点与模型，留空回退原默认值；KeysView 改为先开面板，Antigravity 客户端选择并入（沿用原文案，用原生 radio）；中英文 `keys.ccsImport.*`；3 个相关 spec 加入关键测试清单。名称默认「站点名 · 密钥名」，其余默认值不变；公开设置晚到时，未改动的名称与端点跟随新默认值；面板关闭后的迟到点击不再唤起 CC Switch。
+- 修改文件：上述组件、`frontend/src/utils/ccswitchImport.ts`、`frontend/src/views/user/KeysView.vue` 及各自 spec，中英文 `dashboard.ts`，`Makefile`，本文件。
+- 验证：`make test-frontend`（关键 118 文件 1,337 项）、全量 vitest 489 文件 3,855 项、build、docs 一致性、干净树 audit 与 scheduler-diff 通过；变异检查确认新用例能抓住旧行为与各项修复；无头 Chrome 截图核对中英文与明暗主题。gpt-6-astra 只读审查三轮：第 1 轮 P2（设置晚到）与 P3（单选键盘交互）、第 2 轮 P2（退场期间可重复导入）均已修复，第 3 轮签字通过。
+- 卡点/风险：无。默认 Codex 模型仍为 `gpt-5.5`（上游已改为 `gpt-5.6-sol`），是否跟进待用户决定。PR #207 也改本文件，后合并者需保留两边追加的内容。
+- 下一步：CI 全绿后由其他作者合并；发版与部署另行授权。
