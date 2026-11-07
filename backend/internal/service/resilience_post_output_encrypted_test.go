@@ -81,6 +81,74 @@ func TestPostOutputEncryptedContentUsesFailureStreak(t *testing.T) {
 	}
 }
 
+func TestPostOutputFailureLogsRebindGuarded(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		p1b        bool
+		guarded    bool
+	}{
+		{"guarded", encryptedRebindRequest, true, true},
+		{"plain", fullPlainRebindRequest, true, false},
+		{"p1b disabled", encryptedRebindRequest, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rl, _, account, r := newPenaltyFixture(t, PlatformOpenAI)
+			withResilienceSettings(t, func(cfg *resilience.Settings) {
+				cfg.Session.PostOutputRebind = tc.p1b
+			})
+			r.store = newMemResilienceStore()
+			cache := &mockGatewayCacheForPlatform{sessionBindings: map[string]int64{"sess": account.ID}}
+			gw := &GatewayService{cache: cache, resilience: r}
+			ctx := WithOpenAIEncryptedContentMigrationGuard(postOutputRequest(gw.gatewaySessionRecorder()), []byte(tc.body))
+			logs := captureOpenAIObservationLogs(t)
+			attempt := &http.Response{}
+			require.True(t, noteResiliencePostOutputFailure(ctx, rl, account, attempt, postOutputReadError))
+			require.False(t, noteResiliencePostOutputFailure(ctx, rl, account, attempt, postOutputReadError), "duplicate signals keep existing attempt deduplication")
+			var event map[string]any
+			for _, line := range strings.Split(logs.String(), "\n") {
+				if strings.Contains(line, `"msg":"resilience.post_output_failure"`) {
+					require.NoError(t, json.Unmarshal([]byte(line), &event))
+				}
+			}
+			require.NotNil(t, event)
+			require.Equal(t, tc.guarded, event["rebind_guarded"])
+			require.Equal(t, 1, strings.Count(logs.String(), `"msg":"resilience.post_output_failure"`))
+			if tc.p1b && !tc.guarded {
+				require.NotContains(t, cache.sessionBindings, "sess")
+			} else {
+				require.Equal(t, account.ID, cache.sessionBindings["sess"], "logging must retain the existing guard behavior")
+			}
+		})
+	}
+}
+
+func TestPostOutputChatLogsRebindGuarded(t *testing.T) {
+	rl, _, _, r := newPenaltyFixture(t, PlatformOpenAI)
+	r.store = newMemResilienceStore()
+	account := webSearchReplayAccount(false)
+	cache := &mockGatewayCacheForPlatform{sessionBindings: map[string]int64{"sess": account.ID}}
+	gw := &GatewayService{cache: cache, resilience: r}
+	req := newWebSearchReplayRequest(t)
+	ctx := WithOpenAIEncryptedContentMigrationGuard(postOutputRequest(gw.gatewaySessionRecorder()), []byte(m3TwoItemRequest))
+	req.c.Request = req.c.Request.WithContext(ctx)
+	failure := "event: response.failed\n" + `data: {"type":"response.failed","response":{"id":"resp_guarded","status":"failed","error":{"code":"server_error","message":"upstream failed"}}}`
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(openAIPostOutputStream(failure))),
+	}}}
+	svc := newOpenAIImageGenerationControlTestService(upstream)
+	svc.rateLimitService = rl
+	logs := captureOpenAIObservationLogs(t)
+	_, _ = svc.ForwardAsChatCompletions(ctx, req.c, account, []byte(m3TwoItemRequest), "", "")
+	require.Len(t, upstream.bodies, 1)
+	require.Contains(t, req.rec.Body.String(), "partial")
+	require.True(t, resilience.StateFrom(ctx).AccountFailed(account.ID))
+	require.Equal(t, account.ID, cache.sessionBindings["sess"])
+	require.Contains(t, logs.String(), `"rebind_guarded":true`)
+	require.Equal(t, 1, strings.Count(logs.String(), `"msg":"resilience.post_output_failure"`))
+}
+
 func TestPostOutputEncryptedContentKeepsCooldownAndSameSiteHold(t *testing.T) {
 	rl, repo, account, r := newPenaltyFixture(t, PlatformOpenAI)
 	for i := 0; i < postOutputCooldownThreshold; i++ {
@@ -151,6 +219,7 @@ func TestPostOutputEncryptedContentWebSocketTurns(t *testing.T) {
 		} {
 			t.Run(mode+"/"+second.name, func(t *testing.T) {
 				withResilienceSettings(t, nil)
+				logs := captureOpenAIObservationLogs(t)
 				account := passthroughLifecycleAccount()
 				account.Extra["openai_apikey_responses_websockets_v2_mode"] = mode
 				cache := &mockGatewayCacheForPlatform{sessionBindings: map[string]int64{"sess": account.ID}}
@@ -240,6 +309,12 @@ func TestPostOutputEncryptedContentWebSocketTurns(t *testing.T) {
 				case <-time.After(3 * time.Second):
 					t.Fatal("WS handler did not exit")
 				}
+				wantField := `"rebind_guarded":true`
+				if second.wantRebind {
+					wantField = `"rebind_guarded":false`
+				}
+				require.Contains(t, logs.String(), wantField)
+				require.Equal(t, 1, strings.Count(logs.String(), `"msg":"resilience.post_output_failure"`))
 			})
 		}
 	}

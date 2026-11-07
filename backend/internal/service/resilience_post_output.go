@@ -81,9 +81,12 @@ func noteResiliencePostOutputFailureWithCategory(ctx context.Context, rl *RateLi
 	if confirmedPostOutput {
 		recordPostOutputFailureFact(ctx, account, kind, factCategory, time.Now())
 	}
+	rebindGuarded := false
 	if confirmedPostOutput && account.Platform == PlatformOpenAI && !openAIEncryptedContentRebindGuarded(ctx) {
 		st.SessionFailureAfterOutput(ctx, account.ID, resilience.CategoryTransient)
 	} else {
+		rebindGuarded = confirmedPostOutput && account.Platform == PlatformOpenAI &&
+			resilience.Current().PostOutputRebindOn() && openAIEncryptedContentRebindGuarded(ctx)
 		st.SessionFailure(ctx, account.ID, resilience.CategoryTransient)
 	}
 	// The 200 that carried the failure must not end the conversation's
@@ -99,6 +102,7 @@ func noteResiliencePostOutputFailureWithCategory(ctx context.Context, rl *RateLi
 		"reason", kind,
 		"failures", failures,
 		"cooldown", cooled,
+		"rebind_guarded", rebindGuarded,
 	)...)
 	return true
 }
