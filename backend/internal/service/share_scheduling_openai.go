@@ -185,7 +185,8 @@ func (s *OpenAIGatewayService) shareOpenAILastResort(ctx context.Context, gp *sh
 		newResult: func(acc *Account, acquired bool, release func(), wait *AccountWaitPlan) (*AccountSelectionResult, error) {
 			return attachSelectionProfitGate(withResilienceLastResortGate(ctx), &AccountSelectionResult{Account: acc, Acquired: acquired, ReleaseFunc: release, WaitPlan: wait}), nil
 		}}
-	out := exec.serve(s.orderOpenAIShareQuality(req.GroupID, req.RequestedModel, round.accounts, round.plan(shareReq)))
+	d := s.orderOpenAIShareQuality(req.GroupID, req.RequestedModel, round.accounts, round.plan(shareReq))
+	out := exec.serve(round.preferUnavoided(d))
 	if out == nil || out.err != nil || out.result == nil {
 		return nil
 	}

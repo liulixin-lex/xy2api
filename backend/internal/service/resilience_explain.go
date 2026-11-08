@@ -140,7 +140,7 @@ func (r *ResilienceService) Explain(ctx context.Context, groupID int64, sessionH
 		}
 		if capability == nil && lastResortTierAllowed(tier, acc.ID, avoided) {
 			candidate := acc
-			cands = append(cands, lastResortCandidate{account: &candidate, recoverAt: recoverAt})
+			cands = append(cands, lastResortCandidate{account: &candidate, recoverAt: recoverAt, avoided: e.Avoided})
 		}
 		out.Accounts = append(out.Accounts, e)
 	}

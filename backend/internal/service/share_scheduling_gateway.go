@@ -238,7 +238,7 @@ func (s *GatewayService) shareGatewayLastResort(ctx context.Context, gp *shareGr
 		newResult: func(acc *Account, acquired bool, release func(), wait *AccountWaitPlan) (*AccountSelectionResult, error) {
 			return s.newSelectionResult(ctx, acc, acquired, release, wait)
 		}}
-	out := exec.serve(round.plan(req))
+	out := exec.serve(round.preferUnavoided(round.plan(req)))
 	if out == nil || out.err != nil || out.result == nil {
 		return nil
 	}
