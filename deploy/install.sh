@@ -864,7 +864,7 @@ upgrade() {
 
     # Get current version
     # The first match is the product version; the line also names the Sub2API compatibility version.
-    CURRENT_VERSION=$("$INSTALL_DIR/xy2api" --version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    CURRENT_VERSION=$("$INSTALL_DIR/xy2api" --version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
     CURRENT_VERSION=${CURRENT_VERSION:-unknown}
     print_info "$(msg 'current_version'): $CURRENT_VERSION"
 
