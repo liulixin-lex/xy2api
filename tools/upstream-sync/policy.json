@@ -3397,7 +3397,7 @@
     },
     {
       "path": "backend/internal/pkg/apicompat/responses_to_anthropic_request.go",
-      "value": "convertResponsesInputToAnthropic(req.Instructions, req.Input, isOpus55 || isSonnet55, req.chatCacheControls...)"
+      "value": "convertResponsesInputToAnthropic(req.Instructions, req.Input, is55, req.chatCacheControls...)"
     },
     {
       "path": "backend/internal/pkg/apicompat/responses_to_anthropic_request.go",
