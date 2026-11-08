@@ -6,6 +6,12 @@
 
 ## 当前交接状态
 
+
+### 0.5.11 OAuth 伪装采样参数修正（2026-11-08 09:56 UTC；本地完成，待 PM 复审）
+
+- 分支 `feat/oauth-temperature-0511-20261108` 从 `0fc5cc9fd` 建立。OAuth/SetupToken 的非 Claude Code 伪装路径不再给 Opus 4.7+ 补 `temperature=1`；完整模型 ID 判断覆盖平台前缀与日期快照，不会把 `claude-opus-4-20250514` 误作高版本。
+- Responses/Chat 转换共用同一 body 伪装入口；该路径不会透传客户端 `anthropic-version`，出站固定为 `2023-06-01`，因此 `2026-10-21` 版本规则无需额外分支。用户采样字段保持不变；Sonnet/Haiku/Fable 等仍按既有逻辑补默认值。
+- 新回归在旧代码上实际失败，修复后通过；`claude` 与 `service` 受影响包定向测试通过，增量 lint 相对 `0fc5cc9fd` 为 0 issues。未推送，未部署。待 PM 复审与集成。
 ### Haiku 5.5 别名计价保持（补修提交待审）
 
 - 基于 `0fc5cc9fd` 上的候选提交，仅将新增内置价匹配收窄为规范 ID；保留别名原有计价与内置价格目录。
@@ -204,6 +210,8 @@
 
 ## 进行中的工作
 
+
+- **20261108-oauth-temperature-0511**（酉，2026-11-08 09:56 UTC）：OAuth/SetupToken 伪装路径采样参数小修已完成，旧代码反例和修复后测试均已验证，增量 lint 为 0 issues；提交在本地分支 `feat/oauth-temperature-0511-20261108`，待 PM 复审。未推送、未部署。范围和证据见当前交接状态及本次操作日志。
 - **20261108-release0511-final-integration**（2026-11-08，最终集成执行）：按 PM 指定范围合入 main、P3 批 A 与 Haiku 价格分支；在最终提交完成 CI、13 项门禁和真实上游冒烟。PR #214 保持 draft，合并、tag、发版与部署由 PM 审阅后执行。
 
 - **20261106-encrypted-routing-followups**（2026-11-08 05:40 UTC）：0.5.10 已正式发布并蓝绿上线，是当前线上版本，0.5.9 留作回滚。0.5.11 候选（draft PR #214）包含两项：客户端断开、网关排空后取消，不再记成号的失败；Claude 5.5 Haiku 的预校验、转换和 OAuth 伪装修复。两路审查都已签字；全量门禁在跑；冒烟在准备；发版等用户批准。
@@ -656,3 +664,12 @@ pnpm --dir frontend run build
 - 验证：新回归在原候选上五种别名均因新阶梯价失败；修复后 Haiku 5.5 定向与既有回退测试通过；增量 lint 0 issues，文档一致性通过。
 - 卡点/风险：无；待独立审查。仅运行 service 包定向测试，没有全量测试。
 - 下一步：由审查者复核追加提交。
+
+### 2026-11-08 09:56 UTC — 20261108-oauth-temperature-0511 — OAuth 伪装默认采样参数修正
+
+- 请求/目标：从 `0fc5cc9fd` 建立 `feat/oauth-temperature-0511-20261108`，避免 OAuth/SetupToken 伪装的非 Claude Code Messages、Responses 与 Chat 转换请求在 Opus 4.7 及以后型号被网关补入上游不接受的 `temperature=1`。
+- 完成操作：新增 Claude 型号完整 ID 判断 `RejectsSamplingParameters`（Opus 4.7+，日期快照、平台前缀、地域/Bedrock 前缀；旧 Opus 4 日期不会被当作小版本），归一化入口仅对该型号族跳过默认 temperature 注入；新增型号表与路径表驱动测试，覆盖 Opus 4.6/4.7/4.8/5/5.5、旧日期 Opus 4、Sonnet/Haiku/Fable、客户端采样参数及 OAuth/SetupToken。更新网关韧性行为说明。
+- 旧代码反例：将目标函数用 `git show 0fc5cc9fd` 生成源码 overlay 后运行新增 service 用例；Opus 4.7 的 native Messages 与 converted Messages 均失败，证明旧逻辑补入 `temperature=1`。基线失败符合预期。
+- anthropic-version 核实：`buildUpstreamRequest` 对 OAuth mimic 跳过客户端白名单头透传，再由 OAuth header defaults 写入 `2023-06-01`；Responses/Chat 转换也经同一构造器。因此客户端的 `2026-10-21` 或更高版本头在此路径不出站，函数只需按模型版本判断。
+- 验证：`flock /tmp/xy2api-go.lock nice -n 10 go test -p 1 -tags=unit ./internal/pkg/claude ./internal/service -run '^(TestRejectsSamplingParameters|TestOAuthMimicTemperatureByModelAndAPIVersion|TestOAuthMimicPreservesClientSamplingParameters|TestNormalizeClaudeOAuthRequestBody.*|TestOpus55ThinkingDefaultPreservesSignedHistory|TestSonnet55PreservesSignedHistoryAndAcceptsDefaultParameters|TestBuildOAuthMimicRequest_RuntimeVersionConsistentBetweenHeaderAndBilling)$' -count=1` 通过；golangci-lint v2.14.0 增量 lint（`--new-from-rev=0fc5cc9fd`，仅 `internal/pkg/claude`、`internal/service`，`unit` build tags）0 issues；文档一致性及 `git diff --check` 通过。
+- 取舍/未完成：CI、红队审查、推送、部署未进行；下一步待 PM 复审与集成。

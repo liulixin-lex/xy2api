@@ -264,7 +264,9 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 	// 之前的实现直接 delete 会导致 payload 缺字段，与真实 CLI 字节级不一致。
 	// 策略：客户端传了什么就透传；没传则补默认 1。客户端已带 top_p 时不补：
 	// Claude 4 及以后的模型拒绝 temperature 与 top_p 同时出现。
-	if !gjson.GetBytes(out, "temperature").Exists() && !gjson.GetBytes(out, "top_p").Exists() && !claude.IsOpus55(modelID) {
+	// Opus 4.7 及以后连默认值也拒绝。此伪装路径的出站 anthropic-version
+	// 固定为 2023-06-01（buildUpstreamRequest/buildCountTokensRequest），不使用客户端版本头。
+	if !gjson.GetBytes(out, "temperature").Exists() && !gjson.GetBytes(out, "top_p").Exists() && !claude.RejectsSamplingParameters(modelID) {
 		if next, ok := setJSONValueBytes(out, "temperature", 1); ok {
 			out = next
 			modified = true
