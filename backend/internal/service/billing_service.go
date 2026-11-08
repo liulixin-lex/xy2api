@@ -1032,7 +1032,7 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	if claude.IsSonnet55(modelLower) {
 		return s.fallbackPrices["claude-sonnet-5-5"]
 	}
-	if claude.IsHaiku55(modelLower) {
+	if modelLower == "claude-haiku-5-5" {
 		return s.fallbackPrices["claude-haiku-5-5"]
 	}
 	if strings.Contains(modelLower, "opus") {

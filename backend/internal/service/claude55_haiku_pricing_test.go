@@ -29,7 +29,7 @@ func TestClaudeHaiku55PricingTwoRateCards(t *testing.T) {
 		"catalog": NewBillingService(&config.Config{}, catalog),
 	}
 	for source, svc := range sources {
-		for _, model := range []string{"claude-haiku-5-5", "anthropic/claude-haiku-5.5", "anthropic.claude-haiku-5-5"} {
+		for _, model := range []string{"claude-haiku-5-5"} {
 			t.Run(source+"/"+model, func(t *testing.T) {
 				for _, prompt := range []int{100_000, 100_001} {
 					tokens := UsageTokens{

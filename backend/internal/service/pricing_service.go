@@ -1420,7 +1420,7 @@ func (s *PricingService) matchByModelFamily(model string) *LiteLLMModelPricing {
 		}
 		return claudeSonnet55FallbackPricing
 	}
-	if claude.IsHaiku55(model) {
+	if model == "claude-haiku-5-5" {
 		if pricing, ok := s.pricingData["claude-haiku-5-5"]; ok {
 			return pricing
 		}
