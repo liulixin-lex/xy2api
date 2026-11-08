@@ -204,6 +204,35 @@ func TestInference404OpenAIStopsAfterSecondHost(t *testing.T) {
 	}
 }
 
+func TestInference404OpenAIRespectsCustomErrorCodePolicy(t *testing.T) {
+	withResilienceSettings(t, nil)
+	account := newOpenAIUpstreamErrorTestAccount()
+	account.Type = AccountTypeAPIKey
+	if account.Credentials == nil {
+		account.Credentials = make(map[string]any)
+	}
+	account.Credentials["custom_error_codes_enabled"] = true
+	account.Credentials["custom_error_codes"] = []any{float64(http.StatusNotFound)}
+	require.True(t, customPolicyOverridesGenericInference404(account, http.StatusNotFound, []byte(`{"message":"not found"}`)))
+	noExplicitCode := &Account{Type: AccountTypeAPIKey, Credentials: map[string]any{"custom_error_codes_enabled": true}}
+	require.False(t, customPolicyOverridesGenericInference404(noExplicitCode, http.StatusNotFound, []byte(`{"message":"not found"}`)))
+	repo := &openAIModelAvailabilityRepo{}
+	svc := &OpenAIGatewayService{
+		accountRepo:      repo,
+		rateLimitService: NewRateLimitService(repo, nil, &config.Config{}, nil, nil),
+	}
+	c, _ := newOpenAIUpstreamErrorTestContext(t)
+	resp := newOpenAIUpstreamErrorResponse(http.StatusNotFound, `{"message":"not found"}`)
+
+	require.Nil(t, svc.failoverOpenAIModelAvailability(c.Request.Context(), c, account, resp, []byte(`{"message":"not found"}`), "requested-model", false))
+	require.True(t, svc.handleOpenAIAccountUpstreamError(c.Request.Context(), account, http.StatusNotFound, nil, []byte(`{"message":"not found"}`), "requested-model"))
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Empty(t, repo.modelRateLimitCalls)
+	require.Zero(t, repo.tempCalls)
+	_, recorded := svc.getOpenAIAccountModelTransientState().readEntry(account.ID, "requested-model", time.Now())
+	require.False(t, recorded)
+}
+
 func TestInference404CountTokensKeepsNonInferenceBehavior(t *testing.T) {
 	for _, body := range []string{"", `{"error":{"message":"Not found: /v1/messages/count_tokens","type":"not_found_error"}}`} {
 		t.Run(body, func(t *testing.T) {

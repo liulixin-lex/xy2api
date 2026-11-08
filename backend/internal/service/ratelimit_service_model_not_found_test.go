@@ -284,6 +284,29 @@ func TestRateLimitService_HandleUpstreamError_CustomPolicyExclusionSkipsAllState
 	require.Empty(t, repo.modelRateLimitCalls)
 }
 
+func TestRateLimitService_HandleUpstreamError_Custom404KeepsTemporaryRulePrecedence(t *testing.T) {
+	repo := &openAIModelAvailabilityRepo{}
+	svc := &RateLimitService{accountRepo: repo}
+	account := openAIModelNotFoundTempAccount()
+	account.Credentials["custom_error_codes_enabled"] = true
+	account.Credentials["custom_error_codes"] = []any{float64(http.StatusNotFound)}
+
+	handled := svc.HandleUpstreamError(context.Background(), account, http.StatusNotFound, nil,
+		[]byte(`{"message":"not found"}`), "requested-model")
+
+	require.True(t, handled)
+	require.Zero(t, repo.setErrorCalls)
+	require.Zero(t, repo.tempCalls)
+	require.Len(t, repo.modelRateLimitCalls, 1)
+	call := repo.modelRateLimitCalls[0]
+	require.Equal(t, "requested-model", call.scope)
+	require.WithinDuration(t, time.Now().Add(10*time.Minute), call.resetAt, 5*time.Second)
+	var state TempUnschedState
+	require.NoError(t, json.Unmarshal([]byte(call.reason), &state))
+	require.Equal(t, http.StatusNotFound, state.StatusCode)
+	require.Equal(t, "not found", state.MatchedKeyword)
+}
+
 func TestRateLimitService_HandleTempUnschedulable_AuthenticationFailureStaysAccountScoped(t *testing.T) {
 	repo := &modelNotFoundAccountRepoStub{}
 	svc := &RateLimitService{accountRepo: repo}

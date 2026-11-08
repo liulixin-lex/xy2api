@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -224,6 +225,55 @@ func TestGrokContentPolicy403SharedErrorFallbackDoesNotMutate(t *testing.T) {
 	require.Zero(t, repo.tempUnschedCalls)
 	require.Zero(t, repo.rateLimitedCalls)
 	require.Zero(t, repo.updateCalls)
+}
+
+func TestGrokCustomGenericInference404KeepsBaseTerminalBehavior(t *testing.T) {
+	withResilienceSettings(t, nil)
+	const genericHTML = `<html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><hr><center>nginx</center></body></html>`
+	for _, tc := range []struct {
+		name, body string
+	}{
+		{name: "empty body", body: ""},
+		{name: "generic json", body: `{"message":"not found"}`},
+		{name: "generic html", body: genericHTML},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &openAIModelAvailabilityRepo{}
+			upstream := &httpUpstreamRecorder{responses: []*http.Response{
+				newOpenAIUpstreamErrorResponse(http.StatusNotFound, tc.body),
+			}}
+			svc := &OpenAIGatewayService{
+				cfg:              &config.Config{},
+				httpUpstream:     upstream,
+				accountRepo:      repo,
+				rateLimitService: NewRateLimitService(repo, nil, &config.Config{}, nil, nil),
+			}
+			account := &Account{
+				ID:       808,
+				Platform: PlatformGrok,
+				Type:     AccountTypeAPIKey,
+				Credentials: map[string]any{
+					"api_key":                    "test-key",
+					"base_url":                   "https://relay.example/v1",
+					"custom_error_codes_enabled": true,
+					"custom_error_codes":         []any{float64(http.StatusNotFound)},
+				},
+				Extra: map[string]any{
+					"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeOff,
+				},
+			}
+			c, recorder := newOpenAIUpstreamErrorTestContext(t)
+			_, err := svc.Forward(c.Request.Context(), c, account, []byte(`{"model":"grok-4.3","stream":false,"input":"hello"}`))
+			var failover *UpstreamFailoverError
+			require.Error(t, err)
+			require.NotErrorAs(t, err, &failover, "the baseline returns the Grok 404 terminal error without retrying another account")
+			require.Len(t, upstream.bodies, 1)
+			require.Equal(t, 0, repo.setErrorCalls, "the Grok entry did not run custom-code state handling on the baseline")
+			require.Empty(t, repo.modelRateLimitCalls, "the baseline does not add generic inference 404 model cooldowns on Grok")
+			require.Zero(t, repo.tempCalls)
+			require.Equal(t, http.StatusBadGateway, recorder.Code)
+		})
+	}
 }
 
 func TestGrokContentPolicy403MediaResponseBypassesCustomErrorCodes(t *testing.T) {
