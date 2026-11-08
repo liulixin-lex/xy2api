@@ -67,8 +67,20 @@ func TestInference404AnthropicForwardSwitchesAccount(t *testing.T) {
 }
 
 func TestInference404GeminiAndSharedRouting(t *testing.T) {
-	for _, body := range []string{"", "endpoint not found", `{"error":{"status":"NOT_FOUND","message":"Not Found"}}`, `{"error":{"type":"invalid_request_error","message":"Not found"}}`} {
-		t.Run(body, func(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "empty", body: ""},
+		{name: "non-json", body: "upstream route missing"},
+		{name: "plain endpoint not found", body: "endpoint not found"},
+		{name: "structured not found with punctuation", body: `{"error":{"status":"NOT_FOUND","message":"  NOT.FOUND!! "}}`},
+		{name: "structured 404", body: `{"error":{"type":"not_found_error","message":"404!!!"}}`},
+		{name: "generic request error type", body: `{"error":{"type":"invalid_request_error","message":"Not found"}}`},
+		{name: "existing explicit unsupported model text", body: `{"error":{"type":"invalid_request_error","message":"The model 'requested-model' is not supported"}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := tc.body
 			repo := &modelNotFoundAccountRepoStub{}
 			svc := &GeminiMessagesCompatService{rateLimitService: &RateLimitService{accountRepo: repo}}
 			account := &Account{ID: 1, Platform: PlatformGemini, Type: AccountTypeAPIKey}
@@ -86,6 +98,8 @@ func TestInference404PreservesClientResourceErrors(t *testing.T) {
 	for _, body := range []string{
 		`{"error":{"code":"previous_response_not_found","message":"Previous response not found"}}`,
 		`{"error":{"code":"not_found","param":"file_id","message":"File not found"}}`,
+		`{"error":{"code":"container_not_found","message":"Container not found: cntr_missing"}}`,
+		`{"error":{"type":"not_found_error","message":"File not found: file_missing"}}`,
 		`{"error":{"type":"invalid_request_error","message":"No response found with id 'resp_missing'"}}`,
 	} {
 		t.Run(body, func(t *testing.T) {
@@ -103,28 +117,52 @@ func TestInference404PreservesClientResourceErrors(t *testing.T) {
 	}
 }
 
-func TestInference404OpenAIMultipleHostsKeepTryingAndCooldown(t *testing.T) {
+func TestInference404PreservesExplicitAccountClassifications(t *testing.T) {
+	for _, tc := range []struct {
+		body string
+		want resilience.Category
+	}{
+		{`{"error":{"code":"invalid_api_key","message":"invalid api key"}}`, resilience.CategoryAuth},
+		{`{"error":{"code":"insufficient_quota","message":"quota exhausted"}}`, resilience.CategoryBalance},
+	} {
+		t.Run(string(tc.want), func(t *testing.T) {
+			result := classifyInferenceUpstreamHTTP(http.StatusNotFound, nil, []byte(tc.body), "")
+			require.Equal(t, tc.want, result.Category)
+
+			repo := &modelNotFoundAccountRepoStub{}
+			rl := &RateLimitService{accountRepo: repo}
+			rl.HandleUpstreamError(context.Background(), newAnthropicAPIKeyAccountForTest(), http.StatusNotFound, nil, []byte(tc.body), "requested-model")
+			require.Empty(t, repo.modelRateLimitCalls)
+		})
+	}
+}
+
+func TestInference404OpenAIStopsAfterSecondHost(t *testing.T) {
 	withResilienceSettings(t, nil)
 	c, _ := newOpenAIUpstreamErrorTestContext(t)
 	svc := &OpenAIGatewayService{accountRepo: &openAIModelAvailabilityRepo{}}
-	for index, baseURL := range []string{"https://relay-a.example", "https://relay-b.example", "https://relay-c.example"} {
+	for index, baseURL := range []string{"https://relay-a.example", "https://relay-b.example"} {
 		account := newOpenAIUpstreamErrorTestAccount()
 		account.ID = int64(index + 1)
+		account.Type = AccountTypeAPIKey
 		account.Credentials = map[string]any{"base_url": baseURL}
-		for range 2 {
-			failure := svc.failoverOpenAIModelAvailability(c.Request.Context(), c, account,
-				newOpenAIUpstreamErrorResponse(http.StatusNotFound, ""), nil, "requested-model", false)
-			require.NotNil(t, failure)
+		failure := svc.failoverOpenAIModelAvailability(c.Request.Context(), c, account,
+			newOpenAIUpstreamErrorResponse(http.StatusNotFound, ""), nil, "requested-model", false)
+		require.NotNil(t, failure)
+		if index == 0 {
 			require.True(t, failure.ShouldRetryNextAccount())
 			require.False(t, failure.RetryableOnSameAccount)
 			require.Equal(t, resilience.CategoryModelUnsupported, ClassifyFailoverError(failure).Category)
+			entry, exists := svc.getOpenAIAccountModelTransientState().readEntry(account.ID, "requested-model", time.Now())
+			require.True(t, exists)
+			require.Equal(t, 1, entry.failureStreak)
+		} else {
+			require.False(t, failure.ShouldRetryNextAccount())
+			require.Equal(t, GatewayFailureScopeRequest, failure.Scope)
+			require.Equal(t, resilience.CategoryClientError, ClassifyFailoverError(failure).Category)
+			_, exists := svc.getOpenAIAccountModelTransientState().readEntry(account.ID, "requested-model", time.Now())
+			require.False(t, exists)
 		}
-		entry, exists := svc.getOpenAIAccountModelTransientState().readEntry(account.ID, "requested-model", time.Now())
-		require.True(t, exists)
-		require.Equal(t, 2, entry.failureStreak)
-		require.True(t, time.Now().Before(entry.blockUntil))
-		_, exists = svc.getOpenAIAccountModelTransientState().readEntry(account.ID, "other-model", time.Now())
-		require.False(t, exists)
 	}
 }
 

@@ -26,7 +26,7 @@ func (e *UpstreamFailoverError) IsOpenAIUpstreamRequestRestriction() bool {
 // unpenalized exit without a model cooldown. Responses stream model errors
 // enter through failoverOpenAIStreamModelAvailability. A bare forwarder has
 // no account-selection owner.
-func (s *OpenAIGatewayService) failoverOpenAIModelAvailability(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, body []byte, model string, passthrough bool, streamError ...bool) *UpstreamFailoverError {
+func (s *OpenAIGatewayService) failoverOpenAIModelAvailability(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, body []byte, model string, passthrough bool) *UpstreamFailoverError {
 	if s == nil || s.accountRepo == nil || !account.IsOpenAICompatible() || resp == nil ||
 		openAIStreamClientOutputStarted(c, false) {
 		return nil
@@ -45,16 +45,14 @@ func (s *OpenAIGatewayService) failoverOpenAIModelAvailability(ctx context.Conte
 		return nil
 	}
 	// Keep independent evidence for each failure class within this request.
-	// A second upstream host establishes request scope except for inference
-	// HTTP 404s: every remaining candidate may have a working model endpoint.
-	// Stream-derived model errors retain the existing cross-host guard.
+	// A second upstream host establishes request scope for every model
+	// availability failure; stream-derived model errors use the same guard.
 	host, previousHost := accountUpstreamHost(account), ""
 	hostKey := "openai_request_failure_host_" + string(reason)
 	if c != nil {
 		previousHost = c.GetString(hostKey)
 	}
-	httpNotFound := resp.StatusCode == http.StatusNotFound && (len(streamError) == 0 || !streamError[0])
-	if !httpNotFound && host != "" && previousHost != "" && host != previousHost {
+	if host != "" && previousHost != "" && host != previousHost {
 		scope, action, kind = GatewayFailureScopeRequest, NextAccountStop, "http_error"
 		failureCategory = resilience.CategoryClientError
 	} else {
@@ -229,7 +227,7 @@ func (s *OpenAIGatewayService) failoverOpenAIStreamModelAvailability(ctx context
 		return nil
 	}
 	body := openAIStreamFailedEventPassthroughBody(payload, message)
-	return s.failoverOpenAIModelAvailability(ctx, c, account, &http.Response{StatusCode: status, Header: headers}, body, model, passthrough, true)
+	return s.failoverOpenAIModelAvailability(ctx, c, account, &http.Response{StatusCode: status, Header: headers}, body, model, passthrough)
 }
 
 // handleOpenAIStreamFailureAfterOutput is shared only by native/passthrough
