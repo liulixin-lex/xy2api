@@ -43,6 +43,13 @@ type Budget struct {
 	lastMark       time.Time
 	lastAttempt    time.Duration
 	deadline       time.Time
+	anchor         time.Time
+	bodyReceived   time.Time
+	attemptStarted bool
+	base           time.Duration
+	budgetStart    string
+	attribution    string
+	clientFamily   string
 	sameAccountMax int
 	sameAccount    map[int64]int
 	capacitySwitch int
@@ -59,6 +66,11 @@ func NewBudget(ctx context.Context, s *Settings, kind RequestKind, now time.Time
 	}
 	b := &Budget{
 		kind:           kind,
+		anchor:         now,
+		base:           time.Duration(s.Budget.PreOutputBudgetSeconds) * time.Second,
+		budgetStart:    s.Budget.BudgetStart,
+		attribution:    s.Budget.BudgetCutAttribution,
+		clientFamily:   clientFamilyFromContext(ctx),
 		started:        now,
 		lastMark:       now,
 		maxAttempts:    s.Budget.MaxAttempts,
@@ -68,7 +80,7 @@ func NewBudget(ctx context.Context, s *Settings, kind RequestKind, now time.Time
 		ctx:            ctx,
 	}
 	if kind == KindText {
-		b.deadline = now.Add(time.Duration(s.Budget.PreOutputBudgetSeconds) * time.Second)
+		b.deadline = now.Add(min(b.base, PreOutputWallCap))
 	}
 	return b
 }
@@ -318,6 +330,7 @@ func (b *Budget) AttemptTimeout(tier time.Duration, lastCandidate bool, now time
 	if b == nil {
 		return tier
 	}
+	b.MarkAttemptStarted()
 	rem := b.Remaining(now)
 	if lastCandidate {
 		return rem

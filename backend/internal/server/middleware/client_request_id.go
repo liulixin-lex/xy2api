@@ -61,6 +61,7 @@ func withResilienceRequestState(ctx context.Context, r *http.Request) context.Co
 	}
 	st := resilience.NewRequestState()
 	if kind, ok := resilienceRequestKind(r); ok {
+		ctx = resilience.WithClientFamily(ctx, r.UserAgent())
 		st.SetBudget(resilience.NewBudget(ctx, resilience.Current(), kind, time.Now()))
 	}
 	return resilience.WithRequestState(ctx, st)

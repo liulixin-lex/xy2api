@@ -9,6 +9,9 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
+
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -30,13 +33,25 @@ const (
 // reader 是否已被（部分）消费——包装的字节完整且不可变，即使 reader 已被
 // 流式消费过，Bytes() 也始终返回完整请求体。
 type PrereadBody struct {
-	body   []byte
-	reader *bytes.Reader
+	body       []byte
+	reader     *bytes.Reader
+	receivedAt time.Time
 }
 
 // NewPrereadBody 包装一段已读取的请求体。
 func NewPrereadBody(body []byte) *PrereadBody {
-	return &PrereadBody{body: body, reader: bytes.NewReader(body)}
+	return NewPrereadBodyAt(body, time.Now())
+}
+
+// NewPrereadBodyAt preserves the first successful inbound receipt across resets.
+func NewPrereadBodyAt(body []byte, at time.Time) *PrereadBody {
+	return &PrereadBody{body: body, reader: bytes.NewReader(body), receivedAt: at}
+}
+func (p *PrereadBody) ReceivedAt() time.Time {
+	if p == nil {
+		return time.Time{}
+	}
+	return p.receivedAt
 }
 
 // Read 实现 io.Reader（转发给内部 bytes.Reader）。
@@ -68,6 +83,7 @@ func ReadRequestBodyWithPrealloc(req *http.Request) ([]byte, error) {
 		return nil, nil
 	}
 	if preread, ok := req.Body.(*PrereadBody); ok {
+		resilience.StateFrom(req.Context()).MarkBodyReceived(preread.ReceivedAt(), "preread", int64(len(preread.Bytes())))
 		return preread.Bytes(), nil
 	}
 
@@ -83,11 +99,14 @@ func ReadRequestBodyWithPrealloc(req *http.Request) ([]byte, error) {
 		}
 	}
 
+	st := resilience.StateFrom(req.Context())
+	st.MarkFirstBodyRead(time.Now())
 	raw, err := readRequestBodyChunks(req.Body, capHint, req.ContentLength)
 	if err != nil {
 		return nil, err
 	}
 
+	st.MarkBodyReceived(time.Now(), "handler_read", int64(len(raw)))
 	enc := strings.ToLower(strings.TrimSpace(req.Header.Get("Content-Encoding")))
 	if enc == "" || enc == "identity" {
 		return raw, nil

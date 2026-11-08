@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/httputil"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 )
 
@@ -214,7 +215,12 @@ func ResetRequestBody(req *http.Request, body []byte) {
 	if req == nil {
 		return
 	}
-	req.Body = httputil.NewPrereadBody(body)
+	at := resilience.StateFrom(req.Context()).BodyReceivedAt()
+	if at.IsZero() {
+		req.Body = httputil.NewPrereadBody(body)
+	} else {
+		req.Body = httputil.NewPrereadBodyAt(body, at)
+	}
 	req.ContentLength = int64(len(body))
 	req.Header.Set("Content-Length", strconv.Itoa(len(body)))
 }

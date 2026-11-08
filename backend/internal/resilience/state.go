@@ -17,8 +17,13 @@ import (
 type RequestState struct {
 	mu sync.Mutex
 
-	budget      *Budget
-	stateSwitch int
+	bodyFirstRead     time.Time
+	bodyReceived      time.Time
+	bodyReceiptBasis  string
+	bodyReceiptRepeat int64
+	bodyBytes         int64
+	budget            *Budget
+	stateSwitch       int
 
 	// retryAdvice is shared by the handler and service terminal writers.
 	retryAdvice         RetryAdvice

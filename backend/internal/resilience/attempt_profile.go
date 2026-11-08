@@ -20,7 +20,9 @@ func (s *RequestState) SetAttemptProfile(profile AttemptProfile) {
 	}
 	s.mu.Lock()
 	s.attemptProfile = profile
+	b := s.budget
 	s.mu.Unlock()
+	b.MarkAttemptStarted()
 }
 
 // AttemptProfile returns the current attempt snapshot.
