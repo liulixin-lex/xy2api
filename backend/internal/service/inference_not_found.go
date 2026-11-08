@@ -1,18 +1,24 @@
 package service
 
 import (
+	"bytes"
+	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"unicode"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
+	"golang.org/x/net/html"
 )
 
+var inferenceNotFoundServerSignature = regexp.MustCompile(`(?i)\b(nginx|openresty|apache|cloudflare|caddy)/[0-9]+(?:\.[0-9]+)*\b`)
+
 // classifyInferenceUpstreamHTTP is only for model-bearing inference attempts.
-// Only an empty, non-JSON, or strictly generic not-found response is evidence
-// that the account cannot serve the model or endpoint. Keep explicit account,
-// request, and structured resource classifications unchanged.
+// Only empty bodies, generic text/HTML pages, or generic JSON error envelopes
+// add model/endpoint unavailability evidence. Explicit account and request
+// classifications retain their existing handling.
 func classifyInferenceUpstreamHTTP(status int, headers http.Header, body []byte, message string) resilience.Result {
 	result := classifyUpstreamHTTP(status, headers, body, message)
 	if status != http.StatusNotFound {
@@ -29,49 +35,133 @@ func classifyInferenceUpstreamHTTP(status int, headers http.Header, body []byte,
 			return resilience.Result{Category: resilience.CategoryClientError, Reason: "inference_request_rejected"}
 		}
 	}
-	if !isGenericInferenceNotFound(body, message) {
+	if !isGenericInferenceNotFound(body) {
 		return result
 	}
 	return resilience.Result{Category: resilience.CategoryModelUnsupported, Reason: "status_404_inference"}
 }
 
-func isGenericInferenceNotFound(body []byte, message string) bool {
+func isGenericInferenceNotFound(body []byte) bool {
 	trimmedBody := strings.TrimSpace(string(body))
-	trimmedMessage := strings.TrimSpace(message)
-	if trimmedBody == "" {
+	if trimmedBody == "" || trimmedBody == "404" {
+		// A bare HTTP status is also valid JSON, but is not an error envelope.
 		return true
 	}
 	if !gjson.ValidBytes(body) {
-		return true
+		return isGenericNonJSONNotFound(body)
 	}
-	var hasStructuredMessage bool
-	for _, object := range openAIModelAvailabilityEnvelopes(body) {
-		for _, path := range []string{"error.message", "response.error.message", "message"} {
-			candidate := strings.TrimSpace(object.Get(path).String())
-			if candidate == "" || gjson.Valid(candidate) {
-				continue
-			}
-			hasStructuredMessage = true
-			if isGenericNotFoundText(candidate) {
-				return true
-			}
-		}
-	}
-	return !hasStructuredMessage && isGenericNotFoundText(trimmedMessage)
+	return isGenericJSONNotFound(body)
 }
 
-func isGenericNotFoundText(message string) bool {
-	message = strings.Map(func(r rune) rune {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsSpace(r) {
-			return unicode.ToLower(r)
+func isGenericNonJSONNotFound(body []byte) bool {
+	var text strings.Builder
+	tokenizer := html.NewTokenizer(bytes.NewReader(body))
+	for {
+		token := tokenizer.Next()
+		if token == html.ErrorToken {
+			if tokenizer.Err() != io.EOF {
+				return false
+			}
+			break
 		}
-		return ' '
-	}, message)
-	message = strings.Join(strings.Fields(message), " ")
-	switch message {
-	case "not found", "404", "endpoint not found":
+		if token == html.TextToken {
+			_, _ = text.Write(tokenizer.Text())
+			_ = text.WriteByte(' ')
+		}
+	}
+	tokens := normalizedInferenceNotFoundTokens(inferenceNotFoundServerSignature.ReplaceAllString(text.String(), "$1"))
+	if len(tokens) == 0 {
+		return false
+	}
+	for len(tokens) > 0 {
+		switch tokens[0] {
+		case "404", "nginx", "openresty", "apache", "cloudflare", "caddy":
+			tokens = tokens[1:]
+		case "not":
+			if len(tokens) < 2 || tokens[1] != "found" {
+				return false
+			}
+			tokens = tokens[2:]
+		case "page":
+			if len(tokens) < 3 || tokens[1] != "not" || tokens[2] != "found" {
+				return false
+			}
+			tokens = tokens[3:]
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func isGenericJSONNotFound(body []byte) bool {
+	root := gjson.ParseBytes(body)
+	if !root.IsObject() {
+		return false
+	}
+	objects := []gjson.Result{root}
+	hasErrorShape := len(root.Map()) == 0
+	for _, path := range []string{"error", "response.error"} {
+		if object := root.Get(path); object.Exists() {
+			if !object.IsObject() {
+				return false
+			}
+			objects = append(objects, object)
+			hasErrorShape = true
+		}
+	}
+	// Every supplied field must be generic. A generic outer message cannot
+	// hide a specific nested code, message, or even an empty param field.
+	for _, object := range objects {
+		if object.Get("param").Exists() {
+			return false
+		}
+		for _, field := range []string{"code", "type", "message"} {
+			value := object.Get(field)
+			if !value.Exists() {
+				continue
+			}
+			hasErrorShape = true
+			if value.Type == gjson.Null {
+				continue
+			}
+			if value.Type != gjson.String {
+				return false
+			}
+			if strings.TrimSpace(value.Str) == "" {
+				continue
+			}
+			if field == "message" {
+				if !isGenericNotFoundText(value.Str) {
+					return false
+				}
+			} else if !isGenericNotFoundCode(value.Str) {
+				return false
+			}
+		}
+	}
+	return hasErrorShape
+}
+
+func isGenericNotFoundCode(code string) bool {
+	switch strings.ToLower(strings.TrimSpace(code)) {
+	case "not_found", "not_found_error", "notfound":
 		return true
 	default:
 		return false
 	}
+}
+
+func normalizedInferenceNotFoundTokens(text string) []string {
+	text = strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsSpace(r) {
+			return unicode.ToLower(r)
+		}
+		return ' '
+	}, text)
+	return strings.Fields(text)
+}
+
+func isGenericNotFoundText(message string) bool {
+	return strings.Join(normalizedInferenceNotFoundTokens(message), " ") == "not found"
 }
