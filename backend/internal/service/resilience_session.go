@@ -169,6 +169,7 @@ type lastResortCandidate struct {
 	account   *Account
 	recoverAt time.Time
 	held      bool
+	avoided   bool
 }
 
 type lastResortLogMeta struct {
@@ -232,10 +233,14 @@ func lastResortShareLogMeta(round *shareLastResortRound, avoided map[int64]struc
 	return meta
 }
 
-// pickLastResort orders candidates by priority (lower first), then by the
-// latency hold preference, then the earliest end of the penalty (design §4.3).
+// pickLastResort tries accounts the session does not avoid first. Within
+// each group it keeps priority (lower first), latency hold preference and
+// the earliest end of the penalty (design §4.3).
 func pickLastResort(cands []lastResortCandidate) []lastResortCandidate {
 	sort.SliceStable(cands, func(i, j int) bool {
+		if cands[i].avoided != cands[j].avoided {
+			return !cands[i].avoided
+		}
 		if cands[i].account.Priority != cands[j].account.Priority {
 			return cands[i].account.Priority < cands[j].account.Priority
 		}
@@ -259,6 +264,7 @@ type shareLastResortRound struct {
 	// cleared, as they serve.
 	accounts  map[int64]*Account
 	recoverAt map[int64]time.Time
+	avoided   map[int64]struct{}
 	// keep is the bound account unless it is hard-penalised, avoided or
 	// rejected by a gate: the binding stays with it whichever account
 	// serves, as a soft-penalised owner keeps it in normal selection
@@ -280,7 +286,7 @@ func (s *ShareSchedulingService) newShareLastResortRound(groupID int64, accounts
 	if penalty == nil {
 		penalty = resiliencePenaltyOf
 	}
-	r := &shareLastResortRound{accounts: map[int64]*Account{}, recoverAt: map[int64]time.Time{}, penaltyReasons: map[int64]string{}}
+	r := &shareLastResortRound{accounts: map[int64]*Account{}, recoverAt: map[int64]time.Time{}, penaltyReasons: map[int64]string{}, avoided: avoided}
 	for i := range accounts {
 		acc := accounts[i]
 		if include != nil && !include(&acc) {
@@ -354,6 +360,26 @@ func (r *shareLastResortRound) plan(req sharesched.Request) sharesched.Decision 
 			d.Write = sharesched.WriteNone
 		}
 		d.Spill = sharesched.WriteNone
+	}
+	return d
+}
+
+// preferUnavoided runs after the plan and any quality ordering. It keeps
+// their order within each group and retains avoided accounts as a final
+// fallback. Binding writes stay as planned: an avoided owner already
+// cleared the binding in plan; other owners keep their relative order.
+func (r *shareLastResortRound) preferUnavoided(d sharesched.Decision) sharesched.Decision {
+	if len(r.avoided) == 0 || len(d.Steps) < 2 {
+		return d
+	}
+	first := d.Steps[0].AccountID
+	sort.SliceStable(d.Steps, func(i, j int) bool {
+		_, a := r.avoided[d.Steps[i].AccountID]
+		_, b := r.avoided[d.Steps[j].AccountID]
+		return !a && b
+	})
+	if d.Steps[0].AccountID != first {
+		d.Target = d.Steps[0].AccountID
 	}
 	return d
 }
@@ -534,7 +560,7 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 			continue
 		}
 		held := platform == PlatformAnthropic && s.anthropicLatencyHoldSnapshot(&acc, anthropicLatencyModel(ctx, requestedModel), now).Held
-		cands = append(cands, lastResortCandidate{account: candidate, recoverAt: recoverAt, held: held})
+		cands = append(cands, lastResortCandidate{account: candidate, recoverAt: recoverAt, held: held, avoided: isAvoided})
 	}
 	// Take the first candidate with a free slot; when all are busy, wait
 	// for the best one.
@@ -799,7 +825,7 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 			continue
 		}
 		held := resilience.Current().Enabled && s.openAIAccountLatencyHoldSnapshot(candidate, canonicalOpenAIAccountSchedulingModel(candidate, req.RequestedModel), now).Held
-		cands = append(cands, lastResortCandidate{account: candidate, recoverAt: recoverAt, held: held})
+		cands = append(cands, lastResortCandidate{account: candidate, recoverAt: recoverAt, held: held, avoided: isAvoided})
 	}
 	cands = pickLastResort(cands)
 	if len(cands) == 0 {
