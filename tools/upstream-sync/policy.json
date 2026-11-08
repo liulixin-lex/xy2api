@@ -4197,7 +4197,7 @@
     },
     {
       "path": "backend/internal/service/inference_not_found.go",
-      "value": "Reason: \"request_resource_not_found\""
+      "value": "func isGenericInferenceNotFound("
     },
     {
       "path": "backend/internal/service/gemini_messages_compat_service.go",
@@ -4209,7 +4209,7 @@
     },
     {
       "path": "backend/internal/service/openai_model_availability.go",
-      "value": "httpNotFound := resp.StatusCode == http.StatusNotFound"
+      "value": "if host != \"\" && previousHost != \"\" && host != previousHost {"
     },
     {
       "path": "backend/internal/handler/no_account_error.go",
