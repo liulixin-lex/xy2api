@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/sharesched"
 	"github.com/stretchr/testify/require"
 )
@@ -51,6 +52,37 @@ func TestResilienceGatewayLastResortPrefersUnavoided(t *testing.T) {
 				require.Equal(t, !tc.busyBoth, sel.Acquired)
 			})
 		}
+	}
+}
+
+func TestResilienceGeminiLastResortPrefersUnavoided(t *testing.T) {
+	for _, scheduler := range lastResortSchedulers {
+		t.Run(string(scheduler), func(t *testing.T) {
+			env := newGatewayLastResortEnv(t, scheduler, 1, 5)
+			for _, account := range env.repo.accountsByID {
+				account.Platform = PlatformGemini
+			}
+			env.gateway.groupRepo = &mockGroupRepoForGateway{groups: map[int64]*Group{
+				shareTestGroupID: {ID: shareTestGroupID, Platform: PlatformGemini, Status: StatusActive, Hydrated: true},
+			}}
+			a := env.repo.accountsByID[lrAccountA]
+			a.TempUnschedulableUntil, a.TempUnschedulableReason = nil, ""
+			r := env.gateway.resilience
+			require.NoError(t, r.store.AddSessionAvoid(t.Context(), shareTestGroupID, lrSession, lrAccountA, time.Minute))
+			r.avoidingSessions.Store(sessionMarkKey(shareTestGroupID, lrSession), time.Now().Add(time.Minute))
+			st := resilience.NewRequestState()
+			ctx := resilience.WithRequestState(cacheableContext(), st)
+			gid := shareTestGroupID
+			sel, err := env.gateway.SelectAccountWithLoadAwareness(ctx, &gid, lrSession, "gemini-2.5-pro", nil, "", 0)
+			require.NoError(t, err)
+			require.NotNil(t, sel)
+			require.NotNil(t, sel.Account)
+			if sel.ReleaseFunc != nil {
+				t.Cleanup(sel.ReleaseFunc)
+			}
+			require.Equal(t, lrAccountB, sel.Account.ID)
+			require.Equal(t, lrAccountB, st.LastResort())
+		})
 	}
 }
 

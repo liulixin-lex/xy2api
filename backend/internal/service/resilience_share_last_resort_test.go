@@ -262,6 +262,7 @@ func selectOpenAILastResort(t *testing.T, env *openAIShareTestEnv) *AccountSelec
 	require.NoError(t, err)
 	require.NotNil(t, sel.Account)
 	require.Equal(t, sel.Account.ID, st.LastResort(), "served as the last resort")
+	require.True(t, resilienceLastCandidate(ctx, sel.Account.ID), "last resort is exempt from the per-attempt first-output timeout")
 	admission := ContextWithSelectionProfitGate(ctx, sel)
 	require.NoError(t, env.svc.BindStickySessionAfterProfitAdmission(admission, &gid, lrSession, sel.Account.ID))
 	if sel.ReleaseFunc != nil {
