@@ -790,6 +790,10 @@ func parseGeminiModelAction(rest string) (model string, action string, err error
 
 func (h *GatewayHandler) handleGeminiFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError) {
 	recordExhaustedRecovery(c, failoverErr)
+	if message, matched := inferenceNotFoundExhaustedMessage(c, failoverErr); matched {
+		googleError(c, http.StatusNotFound, message)
+		return
+	}
 	if failoverErr == nil {
 		googleError(c, http.StatusBadGateway, "Upstream request failed")
 		return

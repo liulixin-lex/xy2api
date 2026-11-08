@@ -27,11 +27,17 @@ type systemOnePolicyAccountRepo struct {
 	rateLimitedCalls int
 	overloadedCalls  int
 	errorCalls       int
+	modelLimitCalls  int
 	tempUnschedCalls int
 	tempUnschedWhy   string
 }
 
 func (r *systemOnePolicyAccountRepo) UpdateExtra(context.Context, int64, map[string]any) error {
+	return nil
+}
+
+func (r *systemOnePolicyAccountRepo) SetModelRateLimit(context.Context, int64, string, time.Time, ...string) error {
+	r.modelLimitCalls++
 	return nil
 }
 
@@ -332,7 +338,8 @@ func TestForwardSystemOneHonorsCustomErrorCodes(t *testing.T) {
 	_, err := svc.ForwardSystemOne(context.Background(), newSystemOneTestContext(), account, []byte(`{}`))
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
-	require.Equal(t, 1, repo.errorCalls)
+	require.Zero(t, repo.errorCalls)
+	require.Equal(t, 1, repo.modelLimitCalls)
 }
 
 func TestForwardSystemOneUnhandledStatusDoesNotFailOver(t *testing.T) {

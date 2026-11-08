@@ -14,6 +14,22 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
+// inferenceNotFoundExhaustedMessage shares the existing no-model wording
+// across inference protocols. The upstream 404 remains provider evidence;
+// this is not a local group-configuration/business-limit classification.
+func inferenceNotFoundExhaustedMessage(c *gin.Context, failure *service.UpstreamFailoverError) (string, bool) {
+	if failure == nil || failure.NonInference || failure.StatusCode != http.StatusNotFound ||
+		service.ClassifyFailoverError(failure).Category != resilience.CategoryModelUnsupported {
+		return "", false
+	}
+	if c.GetBool(ginKeyResilienceFinalized) {
+		return "", false
+	}
+	suppressResilienceRetryAdvice(c, "model_not_found")
+	service.SetOpsUpstreamError(c, failure.StatusCode, service.ExtractUpstreamErrorMessage(failure.ResponseBody), "")
+	return fmt.Sprintf("Model %q is not supported by any configured account in this group", exhaustedRetryModel(c)), true
+}
+
 // anthropicFailoverError projects recoverable capacity failures without the
 // overload marker that makes Claude Code stop retrying early.
 func anthropicFailoverError(status int, errType, message string, failure *service.UpstreamFailoverError) (int, string, string) {
