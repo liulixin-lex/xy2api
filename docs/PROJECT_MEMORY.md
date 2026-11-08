@@ -7,6 +7,12 @@
 ## 当前交接状态
 
 
+### 0.5.11 槽位等待心跳修复（待集成审查）
+
+- 基于集成头 `0fc5cc9fd` 修复换号后槽位 ping 永久停止请求心跳；影响符合请求心跳条件的流式 Responses、Chat 兼容与 Anthropic Messages。
+- 槽位 ping 与请求心跳共享锁、节拍协调和字节统计；非流式等待不发槽位 ping。未改开关、间隔、预算、截止、前端或迁移。
+- 回归在基线六个分支均失败；受影响包相关单测、定向 race 及增量 lint 通过。待审查与集成，本地提交不推送。
+
 ### 0.5.11 OAuth 伪装采样参数修正（2026-11-08 09:56 UTC；本地完成，待 PM 复审）
 
 - 分支 `feat/oauth-temperature-0511-20261108` 从 `0fc5cc9fd` 建立。OAuth/SetupToken 的非 Claude Code 伪装路径不再给 Opus 4.7+ 补 `temperature=1`；完整模型 ID 判断覆盖平台前缀与日期快照，不会把 `claude-opus-4-20250514` 误作高版本。
@@ -673,3 +679,12 @@ pnpm --dir frontend run build
 - anthropic-version 核实：`buildUpstreamRequest` 对 OAuth mimic 跳过客户端白名单头透传，再由 OAuth header defaults 写入 `2023-06-01`；Responses/Chat 转换也经同一构造器。因此客户端的 `2026-10-21` 或更高版本头在此路径不出站，函数只需按模型版本判断。
 - 验证：`flock /tmp/xy2api-go.lock nice -n 10 go test -p 1 -tags=unit ./internal/pkg/claude ./internal/service -run '^(TestRejectsSamplingParameters|TestOAuthMimicTemperatureByModelAndAPIVersion|TestOAuthMimicPreservesClientSamplingParameters|TestNormalizeClaudeOAuthRequestBody.*|TestOpus55ThinkingDefaultPreservesSignedHistory|TestSonnet55PreservesSignedHistoryAndAcceptsDefaultParameters|TestBuildOAuthMimicRequest_RuntimeVersionConsistentBetweenHeaderAndBilling)$' -count=1` 通过；golangci-lint v2.14.0 增量 lint（`--new-from-rev=0fc5cc9fd`，仅 `internal/pkg/claude`、`internal/service`，`unit` build tags）0 issues；文档一致性及 `git diff --check` 通过。
 - 取舍/未完成：CI、红队审查、推送、部署未进行；下一步待 PM 复审与集成。
+
+### 2026-11-08 — 20261108-slotwait-heartbeat — 槽位等待心跳修复
+
+- 请求/目标：修复换号后槽位等待使请求级心跳永久停止，保持流式会话的输出前保活。
+- 开始状态：独立分支基于 `0fc5cc9fd`，工作树干净。
+- 完成操作：协调槽位 ping 与请求心跳，避免重复帧与交错，保留短写处理及心跳字节统计；无交付跟踪时的纯心跳判断一并适配。
+- 验证：基线六个回归分支失败；修复后的相关单测与定向 race 通过；相对基线的增量 lint 为 0 issues，文档一致性通过。
+- 卡点/风险：未运行全量测试或真实上游；待独立审查与集成。
+- 下一步：本地提交并交 PM 审查，不推送。
