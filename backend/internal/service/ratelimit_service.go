@@ -428,7 +428,7 @@ func (s *RateLimitService) handleUpstreamError(ctx context.Context, account *Acc
 
 	// 先尝试临时不可调度规则（401除外）
 	// 如果匹配成功，直接返回，不执行后续禁用逻辑
-	if statusCode != 401 && !customGenericInference404 {
+	if statusCode != 401 {
 		if s.tryTempUnschedulable(ctx, account, statusCode, responseBody, firstRequestedModel(requestedModel)) {
 			return true
 		}
