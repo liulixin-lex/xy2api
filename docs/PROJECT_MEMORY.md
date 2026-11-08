@@ -6,6 +6,12 @@
 
 ## 当前交接状态
 
+### 0.5.11 OAuth 伪装采样参数修正（2026-11-08 09:56 UTC；本地完成，待 PM 复审）
+
+- 分支 `feat/oauth-temperature-0511-20261108` 从 `0fc5cc9fd` 建立。OAuth/SetupToken 的非 Claude Code 伪装路径不再给 Opus 4.7+ 补 `temperature=1`；完整模型 ID 判断覆盖平台前缀与日期快照，不会把 `claude-opus-4-20250514` 误作高版本。
+- Responses/Chat 转换共用同一 body 伪装入口；该路径不会透传客户端 `anthropic-version`，出站固定为 `2023-06-01`，因此 `2026-10-21` 版本规则无需额外分支。用户采样字段保持不变；Sonnet/Haiku/Fable 等仍按既有逻辑补默认值。
+- 新回归在旧代码上实际失败，修复后通过；`claude` 与 `service` 受影响包定向测试通过，增量 lint 相对 `0fc5cc9fd` 为 0 issues。未推送，未部署。待 PM 复审与集成。
+
 ### 0.5.10 候选（2026-11-08 03:16 UTC；两路红队已签字，门禁、冒烟与 CI 进行中，合并与发版等用户批准）
 
 - **背景**：分支 `feat/enc-lastresort-avoid-20261108`，基于 main `e6e01c4da`（0.5.9 加记忆登记）；draft PR #213 目标为 main。提交依次为：修复 `f4518649e`、只改测试的 `09ce7f9d5`、版本提交 `6c50a361a`（版本 0.5.10，兼容基线 0.2.15）。
@@ -194,6 +200,8 @@
 - **仓库外环境收尾**：测试服务器的候选镜像、浸泡与演练目录、`xy2api_upgrade` 库按 staging-validation §11 清理；预上线主机的两份切换前备份在正式部署后删除。
 
 ## 进行中的工作
+
+- **20261108-oauth-temperature-0511**（酉，2026-11-08 09:56 UTC）：OAuth/SetupToken 伪装路径采样参数小修已完成，旧代码反例和修复后测试均已验证，增量 lint 为 0 issues；提交在本地分支 `feat/oauth-temperature-0511-20261108`，待 PM 复审。未推送、未部署。范围和证据见当前交接状态及本次操作日志。
 
 - **20261106-encrypted-routing-followups**（2026-11-08 03:16 UTC）：0.5.9 已正式发布并蓝绿上线，是当前线上版本；0.5.10 候选（兜底把会话暂避的号排到最后，draft PR #213）两路红队已签字，门禁、冒烟和 CI 进行中，合并与发版等用户批准。
 
@@ -1515,3 +1523,12 @@ pnpm --dir frontend run build
 - 完成操作：`PROJECT_MEMORY.md` 的 0.5.9 观察 P3 清单加一条（频率、影响、最小修法，下一轮做）。只改文档，不影响门禁目标 `6c50a361a`。
 - 验证：check_docs_consistency 通过；干净树 upstream audit 通过。
 - 下一步：下一轮实现入口处“客户端已离开就不记”。
+
+### 2026-11-08 09:56 UTC — 20261108-oauth-temperature-0511 — OAuth 伪装默认采样参数修正
+
+- 请求/目标：从 `0fc5cc9fd` 建立 `feat/oauth-temperature-0511-20261108`，避免 OAuth/SetupToken 伪装的非 Claude Code Messages、Responses 与 Chat 转换请求在 Opus 4.7 及以后型号被网关补入上游不接受的 `temperature=1`。
+- 完成操作：新增 Claude 型号完整 ID 判断 `RejectsSamplingParameters`（Opus 4.7+，日期快照、平台前缀、地域/Bedrock 前缀；旧 Opus 4 日期不会被当作小版本），归一化入口仅对该型号族跳过默认 temperature 注入；新增型号表与路径表驱动测试，覆盖 Opus 4.6/4.7/4.8/5/5.5、旧日期 Opus 4、Sonnet/Haiku/Fable、客户端采样参数及 OAuth/SetupToken。更新网关韧性行为说明。
+- 旧代码反例：将目标函数用 `git show 0fc5cc9fd` 生成源码 overlay 后运行新增 service 用例；Opus 4.7 的 native Messages 与 converted Messages 均失败，证明旧逻辑补入 `temperature=1`。基线失败符合预期。
+- anthropic-version 核实：`buildUpstreamRequest` 对 OAuth mimic 跳过客户端白名单头透传，再由 OAuth header defaults 写入 `2023-06-01`；Responses/Chat 转换也经同一构造器。因此客户端的 `2026-10-21` 或更高版本头在此路径不出站，函数只需按模型版本判断。
+- 验证：`flock /tmp/xy2api-go.lock nice -n 10 go test -p 1 -tags=unit ./internal/pkg/claude ./internal/service -run '^(TestRejectsSamplingParameters|TestOAuthMimicTemperatureByModelAndAPIVersion|TestOAuthMimicPreservesClientSamplingParameters|TestNormalizeClaudeOAuthRequestBody.*|TestOpus55ThinkingDefaultPreservesSignedHistory|TestSonnet55PreservesSignedHistoryAndAcceptsDefaultParameters|TestBuildOAuthMimicRequest_RuntimeVersionConsistentBetweenHeaderAndBilling)$' -count=1` 通过；golangci-lint v2.14.0 增量 lint（`--new-from-rev=0fc5cc9fd`，仅 `internal/pkg/claude`、`internal/service`，`unit` build tags）0 issues；文档一致性及 `git diff --check` 通过。
+- 取舍/未完成：CI、红队审查、推送、部署未进行；下一步待 PM 复审与集成。
