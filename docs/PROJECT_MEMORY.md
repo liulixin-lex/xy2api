@@ -124,7 +124,7 @@
     - 转换器和本地预校验 `validateClaude55Request` 都不认识 haiku-5-5（预校验只覆盖 opus-5-5 和 sonnet-5-5）：`reasoning_effort` 不是 low 时会被转成 enabled，上游必然拒绝，并记为 provider。haiku-5-5 的确切约束没有权威来源，暂不改；
     - ~~Chat 兼容入口疑似把参数转成 claude-5.5 不接受的 thinking~~ 已排除（2026-11-08 03:24 UTC，PM 核实）：那几条记录是网关本地预校验的拒绝文案，没有上游尝试，error_source 为 client_request，是客户端在 Chat 请求里自己带了 thinking，被本地正确拒绝；
     - 中转在输出中途注入没有 code 的 “access forbidden” 错误，属于零星现象，只记录；
-    - **客户端部分送达后断开、网关排空后取消时，被误记成号的输出后失败**（2026-11-08 03:32 UTC 登记，PM 已用数据核实，依据任务目录的诊断稿）：7 天约 148 次，每天 8–42 次。每次都会标记号失败、记门槛软失败、可能冷却，并触发 P1-B 改绑、暂避原号 600 s；带 agent_message 或工具输出密文的会话有保护，不会立刻改绑。修法：在 `noteResiliencePostOutputFailureWithCategory` 和 `noteResilienceStall` 入口各加一行“客户端已离开就不记”，通用、最小。下一轮做，不并入 0.5.10；
+    - **客户端部分送达后断开、网关排空后取消时，被误记成号的输出后失败**（2026-11-08 03:32 UTC 登记，PM 已用数据核实，依据任务目录的诊断稿）：7 天约 148 次，每天 8–42 次。每次都会标记号失败、记门槛软失败、可能冷却，并触发 P1-B 改绑、原号暂避 600 s；带 agent_message 或工具输出密文的会话有保护，不会立刻改绑。修法：在 `noteResiliencePostOutputFailureWithCategory` 和 `noteResilienceStall` 入口各加一行“客户端已离开就不记”，通用、最小。下一轮做，不并入 0.5.10；
     - Anthropic 上游 404 且 body 为空时记为 TRANSIENT，不冷却号×模型（那次卡死的根源是分组配置问题，已自行恢复）；
     - Gemini 400 INVALID_ARGUMENT 的 error_owner 记为 provider，只影响统计口径：不换号，不冷却，客户端收到原始 400。
     - **密文会话的签发号在输出前失败**（这是 [`GATEWAY_RESILIENCE.md`](GATEWAY_RESILIENCE.md) §7 已写明的限制）：
