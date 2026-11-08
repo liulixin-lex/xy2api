@@ -130,3 +130,45 @@ func TestHaiku55BridgeConvertsToAdaptiveThinking(t *testing.T) {
 		require.True(t, gjson.GetBytes(upstream.lastBody, "thinking.budget_tokens").Exists())
 	}
 }
+
+func TestClaudeOAuthMimicryDoesNotPairTemperatureWithTopP(t *testing.T) {
+	for _, model := range []string{"claude-haiku-5-5", "claude-sonnet-5-5", "claude-sonnet-4-6", "claude-opus-5-5"} {
+		withTopP, _ := normalizeClaudeOAuthRequestBody([]byte(`{"model":"`+model+`","messages":[],"top_p":0.99}`), model, claudeOAuthNormalizeOptions{})
+		require.False(t, gjson.GetBytes(withTopP, "temperature").Exists(), model)
+		require.Equal(t, 0.99, gjson.GetBytes(withTopP, "top_p").Float(), model)
+
+		plain, _ := normalizeClaudeOAuthRequestBody([]byte(`{"model":"`+model+`","messages":[]}`), model, claudeOAuthNormalizeOptions{})
+		if model == "claude-opus-5-5" {
+			require.False(t, gjson.GetBytes(plain, "temperature").Exists(), "Opus 5.5 never gets an injected temperature")
+		} else {
+			require.Equal(t, int64(1), gjson.GetBytes(plain, "temperature").Int(), model)
+		}
+	}
+	// The tool_choice exception for an empty tool list stays limited to Opus and Sonnet 5.5.
+	haiku, _ := normalizeClaudeOAuthRequestBody([]byte(`{"model":"claude-haiku-5-5","messages":[],"tool_choice":{"type":"auto"}}`), "claude-haiku-5-5", claudeOAuthNormalizeOptions{})
+	require.False(t, gjson.GetBytes(haiku, "tool_choice").Exists())
+	sonnet, _ := normalizeClaudeOAuthRequestBody([]byte(`{"model":"claude-sonnet-5-5","messages":[],"tool_choice":{"type":"auto"}}`), "claude-sonnet-5-5", claudeOAuthNormalizeOptions{})
+	require.True(t, gjson.GetBytes(sonnet, "tool_choice").Exists())
+}
+
+func TestHaiku55OAuthForwardSendsTopPWithoutTemperature(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, typ := range []string{AccountTypeOAuth, AccountTypeSetupToken} {
+		svc, _, base := cacheFixture(t)
+		account := *base
+		account.Type = typ
+		account.Credentials = map[string]any{"access_token": "fixture"}
+		raw := []byte(`{"model":"claude-haiku-5-5","max_tokens":64,"messages":[{"role":"user","content":"hello"}],"top_p":0.99}`)
+		parsed, err := ParseGatewayRequest(NewRequestBodyRef(raw), PlatformAnthropic)
+		require.NoError(t, err)
+		upstream := ttlWireUpstream(false)
+		svc.httpUpstream = upstream
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+		_, err = svc.Forward(context.Background(), c, &account, parsed)
+		require.NoError(t, err, typ)
+		require.NotNil(t, upstream.lastReq, typ)
+		require.Equal(t, 0.99, gjson.GetBytes(upstream.lastBody, "top_p").Float(), typ)
+		require.False(t, gjson.GetBytes(upstream.lastBody, "temperature").Exists(), typ)
+	}
+}
