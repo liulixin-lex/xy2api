@@ -217,8 +217,8 @@ func (s *AccountTestService) ProbeOpenAIAPIKeyResponsesSupport(ctx context.Conte
 	// 宁可不写，让请求继续走既有的 Responses 路径。
 	if !responsesProbeVerdictIsConclusive(resp.StatusCode, bodyBytes) {
 		logger.LegacyPrintf("service.openai_probe",
-			"probe_inconclusive_keep_unknown: account_id=%d base_url=%s probe_model=%s status=%d response_status=%s reason=%s",
-			accountID, normalizedBaseURL, probeModel, resp.StatusCode,
+			"probe_inconclusive_keep_unknown: account_id=%d probe_model=%s status=%d response_status=%s reason=%s",
+			accountID, probeModel, resp.StatusCode,
 			gjson.GetBytes(bodyBytes, "status").String(),
 			gjson.GetBytes(bodyBytes, "incomplete_details.reason").String(),
 		)
@@ -248,8 +248,8 @@ func (s *AccountTestService) ProbeOpenAIAPIKeyResponsesSupport(ctx context.Conte
 	}
 
 	logger.LegacyPrintf("service.openai_probe",
-		"probe_done: account_id=%d base_url=%s probe_model=%s status=%d supported=%v",
-		accountID, normalizedBaseURL, probeModel, resp.StatusCode, supported,
+		"probe_done: account_id=%d probe_model=%s status=%d supported=%v",
+		accountID, probeModel, resp.StatusCode, supported,
 	)
 }
 
