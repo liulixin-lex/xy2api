@@ -31,6 +31,9 @@ func (s *OpenAIGatewayService) failoverOpenAIModelAvailability(ctx context.Conte
 		openAIStreamClientOutputStarted(c, false) {
 		return nil
 	}
+	if customPolicyOverridesGenericInference404(account, resp.StatusCode, body) {
+		return nil
+	}
 	reason, failureCategory := openAIModelUnavailableReason, resilience.CategoryModelUnsupported
 	scope, action, kind := GatewayFailureScopeAccount, NextAccountRetry, "failover"
 	switch {

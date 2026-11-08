@@ -396,12 +396,13 @@ func (s *RateLimitService) handleUpstreamError(ctx context.Context, account *Acc
 	// Bare inference 404s now use the model-unavailable route. Preserve an
 	// administrator's existing explicit temporary rule before that new route;
 	// already recognized model errors retain their original precedence.
-	if inference && len(requestedModel) > 0 && statusCode == http.StatusNotFound &&
+	customGenericInference404 := inference && customPolicyOverridesGenericInference404(account, statusCode, responseBody)
+	if !customGenericInference404 && inference && len(requestedModel) > 0 && statusCode == http.StatusNotFound &&
 		!isUpstreamModelNotFoundError(statusCode, responseBody) &&
 		s.tryTempUnschedulable(ctx, account, statusCode, responseBody, firstRequestedModel(requestedModel)) {
 		return true
 	}
-	if len(requestedModel) > 0 && s.handleUpstreamModelNotFoundAtKey(ctx, account, requestedModel[0],
+	if !customGenericInference404 && len(requestedModel) > 0 && s.handleUpstreamModelNotFoundAtKey(ctx, account, requestedModel[0],
 		modelRateLimitKeyForUpstreamModelNotFound(ctx, account, requestedModel[0]), statusCode, responseBody, inference) {
 		return true
 	}
@@ -427,7 +428,7 @@ func (s *RateLimitService) handleUpstreamError(ctx context.Context, account *Acc
 
 	// 先尝试临时不可调度规则（401除外）
 	// 如果匹配成功，直接返回，不执行后续禁用逻辑
-	if statusCode != 401 {
+	if statusCode != 401 && !customGenericInference404 {
 		if s.tryTempUnschedulable(ctx, account, statusCode, responseBody, firstRequestedModel(requestedModel)) {
 			return true
 		}
@@ -2581,6 +2582,9 @@ func (s *RateLimitService) HandleUpstreamModelNotFound(ctx context.Context, acco
 
 func (s *RateLimitService) handleUpstreamModelNotFoundAtKey(ctx context.Context, account *Account, requestedModel, modelKey string, statusCode int, responseBody []byte, inference bool) bool {
 	if s == nil || account == nil || s.accountRepo == nil {
+		return false
+	}
+	if inference && customPolicyOverridesGenericInference404(account, statusCode, responseBody) {
 		return false
 	}
 	if !account.ShouldHandleErrorCode(statusCode) {

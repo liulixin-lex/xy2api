@@ -41,6 +41,24 @@ func classifyInferenceUpstreamHTTP(status int, headers http.Header, body []byte,
 	return resilience.Result{Category: resilience.CategoryModelUnsupported, Reason: "status_404_inference"}
 }
 
+func customPolicyOverridesGenericInference404(account *Account, status int, body []byte) bool {
+	if status != http.StatusNotFound || account == nil || !account.IsCustomErrorCodesEnabled() {
+		return false
+	}
+	configured := false
+	for _, code := range account.GetCustomErrorCodes() {
+		if code == status {
+			configured = true
+			break
+		}
+	}
+	if !configured {
+		return false
+	}
+	result := classifyInferenceUpstreamHTTP(status, nil, body, "")
+	return result.Category == resilience.CategoryModelUnsupported && result.Reason == "status_404_inference"
+}
+
 func isGenericInferenceNotFound(body []byte) bool {
 	trimmedBody := strings.TrimSpace(string(body))
 	if trimmedBody == "" || trimmedBody == "404" {
