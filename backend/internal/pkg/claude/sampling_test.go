@@ -11,6 +11,7 @@ func TestRejectsSamplingParameters(t *testing.T) {
 		model string
 		want  bool
 	}{
+		{"claude-opus-4-5", false},
 		{"claude-opus-4-6", false},
 		{"claude-opus-4-7", true},
 		{"claude-opus-4-8", true},
@@ -18,7 +19,16 @@ func TestRejectsSamplingParameters(t *testing.T) {
 		{"claude-opus-5-5", true},
 		{"claude-opus-4-20250514", false},
 		{"claude-opus-4-1-20250805", false},
+		{"claude-opus-4-5-20251101", false},
 		{"claude-opus-4-6-20260205", false},
+		{"claude-opus-4-5@20251101", false},
+		{"claude-opus-4-6@20260205", false},
+		{"anthropic/claude-opus-4.5", false},
+		{"anthropic/claude-opus-4.6", false},
+		{"anthropic/claude-opus-4-5-20251101", false},
+		{"anthropic/claude-opus-4-6-20260205", false},
+		{"bedrock/us.anthropic.claude-opus-4-5-20251101-v1:0", false},
+		{"bedrock/us.anthropic.claude-opus-4-6-20260205-v1:0", false},
 		{"claude-opus-4-7-20260417", true},
 		{"claude-opus-5-20260601", true},
 		{"claude-opus-5-5-20260922", true},
