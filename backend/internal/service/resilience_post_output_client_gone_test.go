@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
@@ -65,4 +66,39 @@ func TestPostOutputFailureCountsWhileClientConnected(t *testing.T) {
 	gid := int64(25)
 	require.Contains(t, svc.resilience.sessionAvoid(context.Background(), &gid, "sess"), account.ID)
 	require.Len(t, r.postOutput.failures[account.ID], 1)
+}
+
+// A stall reported after the client left is ignored like any other failure
+// of the drain: no failed mark, no session failure, no stall count.
+func TestStallIgnoredAfterClientLeft(t *testing.T) {
+	rl, repo, account, _ := newPenaltyFixture(t, PlatformOpenAI)
+	rec := newRecordingSessions()
+
+	client, cancel := context.WithCancel(context.Background())
+	cancel()
+	ctx := postOutputRequestWithClient(rec, client)
+	noteResilienceStall(ctx, rl, account)
+	require.False(t, resilience.StateFrom(ctx).AccountFailed(account.ID))
+	require.Empty(t, rec.of(account.ID))
+	require.Zero(t, repo.tempCalls, "no stall cooldown")
+
+	connected := postOutputRequestWithClient(rec, context.Background())
+	noteResilienceStall(connected, rl, account)
+	require.True(t, resilience.StateFrom(connected).AccountFailed(account.ID))
+	require.Equal(t, []resilience.Category{resilience.CategoryStall}, rec.of(account.ID))
+}
+
+// The legacy stream timeout penalty, when an administrator enables it,
+// skips a request whose client already left and still applies otherwise.
+func TestStreamTimeoutIgnoredAfterClientLeft(t *testing.T) {
+	rl, repo, account, _ := newPenaltyFixture(t, PlatformOpenAI)
+	rl.SetSettingService(NewSettingService(&openAIAPIKeyHealthSettingRepo{value: `{"enabled":true,"action":"temp_unsched","threshold_count":1,"temp_unsched_minutes":1}`}, &config.Config{}))
+
+	client, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.False(t, rl.HandleStreamTimeout(postOutputRequestWithClient(newRecordingSessions(), client), account, "gpt-5.1"))
+	require.True(t, repo.tempUntil.IsZero())
+
+	require.True(t, rl.HandleStreamTimeout(postOutputRequestWithClient(newRecordingSessions(), context.Background()), account, "gpt-5.1"))
+	require.False(t, repo.tempUntil.IsZero())
 }

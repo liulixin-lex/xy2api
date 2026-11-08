@@ -66,7 +66,10 @@ func noteResilienceStall(ctx context.Context, rl *RateLimitService, account *Acc
 	st := resilience.StateFrom(ctx)
 	// A stall while the upstream drains for a client that already left is
 	// no failure of the account (see noteResiliencePostOutputFailureWithCategory).
+	// ClientGone is also true once the handler has returned, so a report made
+	// after the handler returns must not rely on this entry point.
 	if st.ClientGone() {
+		noteResilienceClientGoneSkip(ctx, account, "stall", resilience.CategoryStall)
 		return
 	}
 	st.MarkAccountFailed(account.ID)
