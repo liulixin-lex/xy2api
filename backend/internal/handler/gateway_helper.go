@@ -39,12 +39,19 @@ func gatewayStreamHasOnlyHeartbeats(c *gin.Context) bool {
 	if only, tracked := service.DeliveryOnlyHeartbeats(c); tracked {
 		return only
 	}
+	if c.Writer.Size() <= 0 {
+		return false
+	}
+	adjusted := service.OpenAICompactKeepaliveAdjustedWrittenSize(c)
+	if adjusted <= 0 {
+		return true
+	}
 	value, ok := c.Get(gatewayStreamHeartbeatBytesKey)
 	if !ok {
 		return false
 	}
 	heartbeatBytes, _ := value.(int)
-	return heartbeatBytes > 0 && c.Writer.Size() == heartbeatBytes
+	return heartbeatBytes > 0 && adjusted == heartbeatBytes
 }
 
 // claudeCodeValidator is a singleton validator for Claude Code client detection
@@ -441,6 +448,13 @@ func (h *ConcurrencyHelper) waitForSlotWithPingTimeout(c *gin.Context, slotType 
 
 		case <-pingCh:
 			// Send ping to keep connection alive
+			if handled, committed, err := service.WriteSlotWaitHeartbeat(c, []byte(pingFormat), h.pingInterval); handled {
+				if err != nil {
+					return nil, err
+				}
+				*streamStarted = *streamStarted || committed
+				continue
+			}
 			if !*streamStarted {
 				c.Header("Content-Type", "text/event-stream")
 				c.Header("Cache-Control", "no-cache")
