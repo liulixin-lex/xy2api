@@ -69,11 +69,36 @@ func noteResiliencePostOutputFailure(ctx context.Context, rl *RateLimitService, 
 	return noteResiliencePostOutputFailureWithCategory(ctx, rl, account, attempt, kind, resilience.CategoryTransient)
 }
 
+// noteResilienceClientGoneSkip logs, at Info level and once per dropped
+// report, a failure report ignored because the client had already left, so
+// the upstream failures hidden by the drain can be measured.
+func noteResilienceClientGoneSkip(ctx context.Context, account *Account, reason string, category resilience.Category) {
+	if account == nil {
+		return
+	}
+	slog.Info("resilience.client_gone_skip", append(resilience.EventFields(ctx),
+		"group_id", resilience.StateFrom(ctx).GroupID(),
+		"account_id", account.ID,
+		"platform", account.Platform,
+		"reason", reason,
+		"category", string(category),
+	)...)
+}
+
 func noteResiliencePostOutputFailureWithCategory(ctx context.Context, rl *RateLimitService, account *Account, attempt any, kind string, factCategory resilience.Category) bool {
 	if account == nil || !resilience.Current().FailureOn() {
 		return false
 	}
 	st := resilience.StateFrom(ctx)
+	// After a client leaves with output delivered, the upstream is drained
+	// and then cancelled (design §8.2); however that drain ends, the request
+	// is the client's cancellation, not a failure of the account.
+	// ClientGone is also true once the handler has returned, so a report made
+	// after the handler returns must not rely on this entry point.
+	if st.ClientGone() {
+		noteResilienceClientGoneSkip(ctx, account, kind, factCategory)
+		return false
+	}
 	st.MarkAccountFailed(account.ID)
 	if !st.ReportStreamFailure(account.ID, attempt) {
 		return false

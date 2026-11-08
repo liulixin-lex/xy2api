@@ -2848,6 +2848,14 @@ func (s *RateLimitService) HandleStreamTimeout(ctx context.Context, account *Acc
 	if account == nil {
 		return false
 	}
+	// A timeout while the upstream drains for a client that already left is
+	// no failure of the account (see noteResiliencePostOutputFailureWithCategory).
+	// ClientGone is also true once the handler has returned, so a report made
+	// after the handler returns must not rely on this entry point.
+	if resilience.StateFrom(ctx).ClientGone() {
+		noteResilienceClientGoneSkip(ctx, account, "stream_timeout", "")
+		return false
+	}
 
 	// 获取系统设置
 	if s.settingService == nil {
