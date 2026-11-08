@@ -14,6 +14,7 @@ import (
 func TestGeminiTemporaryFailoverExhaustionReturnsRetryable503(t *testing.T) {
 	withHandlerResilience(t, nil)
 	c, w := newResilienceTestContext(t)
+	c.Set(opsModelKey, "requested-model")
 	(&GatewayHandler{}).handleGeminiFailoverExhausted(c, &service.UpstreamFailoverError{
 		StatusCode:      http.StatusTooManyRequests,
 		ResponseHeaders: http.Header{"Retry-After": []string{"12"}},
@@ -24,13 +25,16 @@ func TestGeminiTemporaryFailoverExhaustionReturnsRetryable503(t *testing.T) {
 	require.Equal(t, "Upstream service temporarily unavailable", gjson.GetBytes(w.Body.Bytes(), "error.message").String())
 }
 
-func TestGeminiModelUnsupportedExhaustionKeepsClientErrorSemantics(t *testing.T) {
+func TestGeminiModelUnsupportedExhaustionUsesModelNotFoundSemantics(t *testing.T) {
 	withHandlerResilience(t, nil)
 	c, w := newResilienceTestContext(t)
+	c.Set(opsModelKey, "requested-model")
 	(&GatewayHandler{}).handleGeminiFailoverExhausted(c, &service.UpstreamFailoverError{
 		StatusCode:   http.StatusNotFound,
 		ResponseBody: []byte(`{"error":{"message":"unknown model x"}}`),
 	})
-	require.Equal(t, http.StatusBadGateway, w.Code)
+	require.Equal(t, http.StatusNotFound, w.Code)
+	require.Equal(t, `Model "requested-model" is not supported by any configured account in this group`, gjson.GetBytes(w.Body.Bytes(), "error.message").String())
+	require.Equal(t, "NOT_FOUND", gjson.GetBytes(w.Body.Bytes(), "error.status").String())
 	require.Empty(t, w.Header().Get("Retry-After"))
 }

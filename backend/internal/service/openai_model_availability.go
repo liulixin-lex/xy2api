@@ -26,7 +26,7 @@ func (e *UpstreamFailoverError) IsOpenAIUpstreamRequestRestriction() bool {
 // unpenalized exit without a model cooldown. Responses stream model errors
 // enter through failoverOpenAIStreamModelAvailability. A bare forwarder has
 // no account-selection owner.
-func (s *OpenAIGatewayService) failoverOpenAIModelAvailability(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, body []byte, model string, passthrough bool) *UpstreamFailoverError {
+func (s *OpenAIGatewayService) failoverOpenAIModelAvailability(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, body []byte, model string, passthrough bool, streamError ...bool) *UpstreamFailoverError {
 	if s == nil || s.accountRepo == nil || !account.IsOpenAICompatible() || resp == nil ||
 		openAIStreamClientOutputStarted(c, false) {
 		return nil
@@ -34,6 +34,10 @@ func (s *OpenAIGatewayService) failoverOpenAIModelAvailability(ctx context.Conte
 	reason, failureCategory := openAIModelUnavailableReason, resilience.CategoryModelUnsupported
 	scope, action, kind := GatewayFailureScopeAccount, NextAccountRetry, "failover"
 	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		if classifyInferenceUpstreamHTTP(resp.StatusCode, resp.Header, body, "").Category != resilience.CategoryModelUnsupported {
+			return nil
+		}
 	case isOpenAIModelAvailabilityError(resp.StatusCode, "", body):
 	case !openAIStreamRequestRejected(body, "") && classifyUpstreamHTTP(resp.StatusCode, resp.Header, body, "").Category == resilience.CategoryUpstreamRequestRestriction:
 		reason, failureCategory = openAIUpstreamRequestRestrictionReason, resilience.CategoryUpstreamRequestRestriction
@@ -41,14 +45,16 @@ func (s *OpenAIGatewayService) failoverOpenAIModelAvailability(ctx context.Conte
 		return nil
 	}
 	// Keep independent evidence for each failure class within this request.
-	// A second upstream host establishes request scope; sibling accounts on
-	// the first host may still support the request.
+	// A second upstream host establishes request scope except for inference
+	// HTTP 404s: every remaining candidate may have a working model endpoint.
+	// Stream-derived model errors retain the existing cross-host guard.
 	host, previousHost := accountUpstreamHost(account), ""
 	hostKey := "openai_request_failure_host_" + string(reason)
 	if c != nil {
 		previousHost = c.GetString(hostKey)
 	}
-	if host != "" && previousHost != "" && host != previousHost {
+	httpNotFound := resp.StatusCode == http.StatusNotFound && (len(streamError) == 0 || !streamError[0])
+	if !httpNotFound && host != "" && previousHost != "" && host != previousHost {
 		scope, action, kind = GatewayFailureScopeRequest, NextAccountStop, "http_error"
 		failureCategory = resilience.CategoryClientError
 	} else {
@@ -223,7 +229,7 @@ func (s *OpenAIGatewayService) failoverOpenAIStreamModelAvailability(ctx context
 		return nil
 	}
 	body := openAIStreamFailedEventPassthroughBody(payload, message)
-	return s.failoverOpenAIModelAvailability(ctx, c, account, &http.Response{StatusCode: status, Header: headers}, body, model, passthrough)
+	return s.failoverOpenAIModelAvailability(ctx, c, account, &http.Response{StatusCode: status, Header: headers}, body, model, passthrough, true)
 }
 
 // handleOpenAIStreamFailureAfterOutput is shared only by native/passthrough

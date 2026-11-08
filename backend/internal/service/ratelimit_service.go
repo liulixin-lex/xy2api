@@ -335,9 +335,15 @@ func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Accoun
 	return ErrorPolicyNone
 }
 
-// HandleUpstreamError 处理上游错误响应，标记账号状态
+// HandleUpstreamError 处理上游错误响应，标记账号状态。
+// requestedModel identifies an inference attempt; non-inference actions that
+// also carry a model must use handleUpstreamError with inference=false.
 // 返回是否应该停止该账号的调度
 func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, requestedModel ...string) (shouldDisable bool) {
+	return s.handleUpstreamError(ctx, account, statusCode, headers, responseBody, true, requestedModel...)
+}
+
+func (s *RateLimitService) handleUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, inference bool, requestedModel ...string) (shouldDisable bool) {
 	if account != nil && account.Platform == PlatformOpenAI && isOpenAIStateRejection(responseBody, "") {
 		return false
 	}
@@ -387,7 +393,16 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		return false
 	}
 
-	if len(requestedModel) > 0 && s.HandleUpstreamModelNotFound(ctx, account, requestedModel[0], statusCode, responseBody) {
+	// Bare inference 404s now use the model-unavailable route. Preserve an
+	// administrator's existing explicit temporary rule before that new route;
+	// already recognized model errors retain their original precedence.
+	if inference && len(requestedModel) > 0 && statusCode == http.StatusNotFound &&
+		!isUpstreamModelNotFoundError(statusCode, responseBody) &&
+		s.tryTempUnschedulable(ctx, account, statusCode, responseBody, firstRequestedModel(requestedModel)) {
+		return true
+	}
+	if len(requestedModel) > 0 && s.handleUpstreamModelNotFoundAtKey(ctx, account, requestedModel[0],
+		modelRateLimitKeyForUpstreamModelNotFound(ctx, account, requestedModel[0]), statusCode, responseBody, inference) {
 		return true
 	}
 
@@ -2545,7 +2560,7 @@ const tempUnschedMessageMaxBytes = 2048
 
 // HandleUpstreamModelNotFound marks the requested model as temporarily
 // unavailable on the account when the upstream deterministically reports it
-// cannot serve that model: a structured 400/404 model error, the OpenAI
+// cannot serve that model: an inference HTTP 404, a structured 400 model error, the OpenAI
 // compatible 401 model-not-found exception, or the Codex 400 rejecting a
 // plan-gated model on a ChatGPT OAuth account. Returning true tells the caller
 // to fail the current attempt over to another account; the scheduler skips the
@@ -2560,20 +2575,25 @@ func (s *RateLimitService) HandleUpstreamModelNotFound(ctx context.Context, acco
 		modelRateLimitKeyForUpstreamModelNotFound(ctx, account, requestedModel),
 		statusCode,
 		responseBody,
+		true,
 	)
 }
 
-func (s *RateLimitService) handleUpstreamModelNotFoundAtKey(ctx context.Context, account *Account, requestedModel, modelKey string, statusCode int, responseBody []byte) bool {
+func (s *RateLimitService) handleUpstreamModelNotFoundAtKey(ctx context.Context, account *Account, requestedModel, modelKey string, statusCode int, responseBody []byte, inference bool) bool {
 	if s == nil || account == nil || s.accountRepo == nil {
 		return false
 	}
 	if !account.ShouldHandleErrorCode(statusCode) {
 		return false
 	}
+	modelNotFound := isUpstreamModelNotFoundError(statusCode, responseBody)
+	if inference && statusCode == http.StatusNotFound {
+		modelNotFound = classifyInferenceUpstreamHTTP(statusCode, nil, responseBody, "").Category == resilience.CategoryModelUnsupported
+	}
 	var cooldown time.Duration
 	var reason string
 	switch {
-	case isUpstreamModelNotFoundError(statusCode, responseBody):
+	case modelNotFound:
 		cooldown = upstreamModelNotFoundCooldown
 		if statusCode == http.StatusBadRequest {
 			reason = upstreamModelUnsupported400Reason

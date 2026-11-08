@@ -39,6 +39,8 @@ func TestOpenAIModelAvailabilityForwardSwitchesAccount(t *testing.T) {
 		}{
 			{"unsupported", `{"error":{"type":"invalid_request_error","message":"The 'requested-model' model is not supported when using Codex with a ChatGPT account."}}`, 400, false},
 			{"unavailable", `model is unavailable`, 404, false},
+			{"empty 404", ``, 404, false},
+			{"endpoint 404", `{"error":{"message":"endpoint not found"}}`, 404, false},
 			{"relay unavailable", `{"error":{"type":"internal_server_error","message":"model is unavailable"}}`, 503, false},
 			{"upstream request restriction", `{"error":{"type":"invalid_request_error","code":"basispoints_request_invalid","message":"inline images exceed 32 MiB"}}`, 502, true},
 		} {

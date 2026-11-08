@@ -484,6 +484,9 @@ func ClassifyFailoverError(e *UpstreamFailoverError) resilience.Result {
 	}
 	msg := strings.TrimSpace(extractUpstreamErrorMessage(e.ResponseBody))
 	result := classifyUpstreamHTTP(e.StatusCode, e.ResponseHeaders, e.ResponseBody, msg)
+	if !e.NonInference {
+		result = classifyInferenceUpstreamHTTP(e.StatusCode, e.ResponseHeaders, e.ResponseBody, msg)
+	}
 	if result.Category == resilience.CategorySuccess && e.RequestScopedTransient {
 		return resilience.Result{Category: resilience.CategoryTransient, Reason: "request_scoped_transient"}
 	}
@@ -503,6 +506,8 @@ func opsResilienceCategory(ev *OpsUpstreamErrorEvent) string {
 		return string(resilience.CategoryTransient)
 	}
 	switch {
+	case ev.UpstreamStatusCode == http.StatusNotFound && ev.Kind == "failover":
+		return string(classifyInferenceUpstreamHTTP(ev.UpstreamStatusCode, nil, body, ev.Message).Category)
 	case ev.UpstreamStatusCode >= 400:
 		return opsHTTPResilienceCategory(ev.UpstreamStatusCode, nil, body, ev.Message)
 	case ev.UpstreamStatusCode == http.StatusOK && (len(body) > 0 || ev.Message != ""):

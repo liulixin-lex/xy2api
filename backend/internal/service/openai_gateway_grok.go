@@ -2029,7 +2029,7 @@ func (s *OpenAIGatewayService) handleGrokAccountUpstreamError(ctx context.Contex
 	}
 	if s.rateLimitService != nil {
 		if model := grokRequestedModelFromCtx(ctx); model != "" &&
-			s.rateLimitService.handleUpstreamModelNotFoundAtKey(ctx, account, model, model, statusCode, responseBody) {
+			s.rateLimitService.handleUpstreamModelNotFoundAtKey(ctx, account, model, model, statusCode, responseBody, true) {
 			return
 		}
 	}

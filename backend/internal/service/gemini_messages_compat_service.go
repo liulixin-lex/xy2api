@@ -1442,7 +1442,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 			}
 			if attempt < geminiMaxRetries && !resilienceGeminiSkipInPlaceRetry(ctx, account, resp.StatusCode, resp.Header, respBody) && geminiInPlaceRetryAllowed(ctx, &inPlaceRetries) {
 				if resp.StatusCode == 429 {
-					s.handleGeminiUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, originalModel)
+					s.handleGeminiUpstreamErrorForAction(ctx, account, resp.StatusCode, resp.Header, respBody, action != "countTokens", originalModel)
 				}
 				upstreamReqID := resp.Header.Get(requestIDHeader)
 				if upstreamReqID == "" {
@@ -1515,6 +1515,10 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 
 	if resp.StatusCode >= 400 {
 		respBody := s.readUpstreamErrorBody(resp)
+		category := ""
+		if action == "countTokens" {
+			category = opsHTTPResilienceCategory(resp.StatusCode, resp.Header, respBody, "", account)
+		}
 		// Best-effort fallback for OAuth tokens missing AI Studio scopes when calling countTokens.
 		// This avoids Gemini SDKs failing hard during preflight token counting.
 		// Checked before error policy so it always works regardless of custom error codes.
@@ -1538,7 +1542,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 			policy := s.rateLimitService.CheckErrorPolicy(ctx, account, resp.StatusCode, respBody, mappedModel)
 			switch policy {
 			case ErrorPolicySkipped:
-				if failoverErr := s.skippedErrorPolicyFailoverError(c, account, resp.StatusCode, resp.Header, respBody, requestID); failoverErr != nil {
+				if failoverErr := s.skippedErrorPolicyFailoverError(c, account, resp.StatusCode, resp.Header, respBody, requestID, action != "countTokens"); failoverErr != nil {
 					return nil, failoverErr
 				}
 				if account.IsCustomErrorCodesEnabled() {
@@ -1550,7 +1554,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				return nil, s.writeGeminiNativeUpstreamError(c, account, resp, respBody, requestID, isOAuth)
 			case ErrorPolicyMatched, ErrorPolicyTempUnscheduled:
 				if policy == ErrorPolicyMatched {
-					s.handleGeminiUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, originalModel)
+					s.handleGeminiUpstreamErrorForAction(ctx, account, resp.StatusCode, resp.Header, respBody, action != "countTokens", originalModel)
 				}
 				evBody := unwrapIfNeeded(isOAuth, respBody)
 				upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(evBody))
@@ -1572,15 +1576,16 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 					UpstreamStatusCode: resp.StatusCode,
 					UpstreamRequestID:  requestID,
 					Kind:               "failover",
+					ResilienceCategory: category,
 					Message:            upstreamMsg,
 					Detail:             upstreamDetail,
 				})
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, ResponseHeaders: resp.Header.Clone()}
+				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, ResponseHeaders: resp.Header.Clone(), NonInference: action == "countTokens"}
 			}
 		}
 
 		// ErrorPolicyNone → 原有逻辑
-		s.handleGeminiUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, originalModel)
+		s.handleGeminiUpstreamErrorForAction(ctx, account, resp.StatusCode, resp.Header, respBody, action != "countTokens", originalModel)
 		// 精确匹配服务端配置类 400 错误，触发 failover + 临时封禁
 		if resp.StatusCode == http.StatusBadRequest {
 			msg400 := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
@@ -1605,13 +1610,14 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 					UpstreamStatusCode: resp.StatusCode,
 					UpstreamRequestID:  requestID,
 					Kind:               "failover",
+					ResilienceCategory: category,
 					Message:            upstreamMsg,
 					Detail:             upstreamDetail,
 				})
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: evBody, ResponseHeaders: resp.Header.Clone(), RetryableOnSameAccount: true}
+				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: evBody, ResponseHeaders: resp.Header.Clone(), RetryableOnSameAccount: true, NonInference: action == "countTokens"}
 			}
 		}
-		if s.shouldFailoverGeminiUpstreamError(resp.StatusCode, respBody) {
+		if s.shouldFailoverGeminiUpstreamError(resp.StatusCode, respBody, action != "countTokens") {
 			evBody := unwrapIfNeeded(isOAuth, respBody)
 			upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(evBody))
 			upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
@@ -1632,10 +1638,11 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				UpstreamStatusCode: resp.StatusCode,
 				UpstreamRequestID:  requestID,
 				Kind:               "failover",
+				ResilienceCategory: category,
 				Message:            upstreamMsg,
 				Detail:             upstreamDetail,
 			})
-			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: evBody, ResponseHeaders: resp.Header.Clone()}
+			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: evBody, ResponseHeaders: resp.Header.Clone(), NonInference: action == "countTokens"}
 		}
 
 		return nil, s.writeGeminiNativeUpstreamError(c, account, resp, respBody, requestID, isOAuth)
@@ -1750,7 +1757,7 @@ func (s *GeminiMessagesCompatService) shouldRetryGeminiUpstreamError(account *Ac
 	}
 }
 
-func (s *GeminiMessagesCompatService) shouldFailoverGeminiUpstreamError(statusCode int, responseBody []byte) bool {
+func (s *GeminiMessagesCompatService) shouldFailoverGeminiUpstreamError(statusCode int, responseBody []byte, inference ...bool) bool {
 	switch statusCode {
 	case 401, 402, 403, 408, 429, 529:
 		return true
@@ -1759,6 +1766,9 @@ func (s *GeminiMessagesCompatService) shouldFailoverGeminiUpstreamError(statusCo
 			return true
 		}
 	}
+	if len(inference) > 0 && !inference[0] {
+		return shouldFailoverUpstreamClassification(statusCode, classifyUpstreamHTTP(statusCode, nil, responseBody, ""))
+	}
 	return shouldFailoverClassifiedUpstreamError(statusCode, nil, responseBody)
 }
 
@@ -1766,9 +1776,14 @@ func (s *GeminiMessagesCompatService) shouldFailoverGeminiUpstreamError(statusCo
 // 时构造 failover 错误：可 failover 的状态码返回 UpstreamFailoverError，交给 handler 层换号
 // （池模式账号按 pool_mode_retry_count 先同账号重试）；返回 nil 表示状态码不可 failover，
 // 由调用方决定客户端写出。Skipped 只豁免账号状态标记，不豁免换号，与 OpenAI 网关路径一致。
-func (s *GeminiMessagesCompatService) skippedErrorPolicyFailoverError(c *gin.Context, account *Account, statusCode int, headers http.Header, respBody []byte, upstreamRequestID string) *UpstreamFailoverError {
-	if !s.shouldFailoverGeminiUpstreamError(statusCode, respBody) {
+func (s *GeminiMessagesCompatService) skippedErrorPolicyFailoverError(c *gin.Context, account *Account, statusCode int, headers http.Header, respBody []byte, upstreamRequestID string, inference ...bool) *UpstreamFailoverError {
+	if !s.shouldFailoverGeminiUpstreamError(statusCode, respBody, inference...) {
 		return nil
+	}
+	nonInference := len(inference) > 0 && !inference[0]
+	category := ""
+	if nonInference {
+		category = opsHTTPResilienceCategory(statusCode, headers, respBody, "", account)
 	}
 	upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
 	upstreamDetail := s.upstreamErrorDetail(respBody)
@@ -1781,11 +1796,13 @@ func (s *GeminiMessagesCompatService) skippedErrorPolicyFailoverError(c *gin.Con
 		UpstreamStatusCode: statusCode,
 		UpstreamRequestID:  upstreamRequestID,
 		Kind:               "failover",
+		ResilienceCategory: category,
 		Message:            upstreamMsg,
 		Detail:             upstreamDetail,
 	})
 	return &UpstreamFailoverError{
 		StatusCode:             statusCode,
+		NonInference:           nonInference,
 		ResponseBody:           respBody,
 		ResponseHeaders:        headers.Clone(),
 		RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(statusCode),
@@ -3226,15 +3243,22 @@ func asInt(v any) (int, bool) {
 }
 
 func (s *GeminiMessagesCompatService) handleGeminiUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, body []byte, requestedModel ...string) {
+	s.handleGeminiUpstreamErrorForAction(ctx, account, statusCode, headers, body, true, requestedModel...)
+}
+
+func (s *GeminiMessagesCompatService) handleGeminiUpstreamErrorForAction(ctx context.Context, account *Account, statusCode int, headers http.Header, body []byte, inference bool, requestedModel ...string) {
 	// 遵守自定义错误码策略：未命中则跳过所有限流处理
 	if !account.ShouldHandleErrorCode(statusCode) {
 		return
 	}
 	result := classifyUpstreamHTTP(statusCode, headers, body, "")
+	if inference {
+		result = classifyInferenceUpstreamHTTP(statusCode, headers, body, "")
+	}
 	if s.rateLimitService != nil && (statusCode == 401 || statusCode == 402 || statusCode == 403 || statusCode >= 500 || statusCode == 408 ||
 		result.Category == resilience.CategoryBalance || result.Category == resilience.CategoryModelUnsupported ||
 		(statusCode == http.StatusPaymentRequired && result.Category == resilience.CategoryAuth && result.Reason == "deactivated_workspace")) {
-		s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, headers, body, requestedModel...)
+		s.rateLimitService.handleUpstreamError(ctx, account, statusCode, headers, body, inference, requestedModel...)
 		return
 	}
 	if statusCode != 429 {
