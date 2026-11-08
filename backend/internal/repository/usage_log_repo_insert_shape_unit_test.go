@@ -130,7 +130,7 @@ func TestPrepareUsageLogInsert_UpstreamRequestIDArgWiring(t *testing.T) {
 	})
 	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
 
-	idx := len(prepared.args) - 9 // TTL policy/applied and both first-output columns follow origin_group_id
+	idx := 58 // TTL policy/applied and both first-output columns follow origin_group_id
 	arg, ok := prepared.args[idx].(sql.NullString)
 	require.True(t, ok, "upstream_request_id arg should be sql.NullString, got %T", prepared.args[idx])
 	require.True(t, arg.Valid)
@@ -149,7 +149,7 @@ func TestPrepareUsageLogInsert_AttemptFirstOutputArgWiring(t *testing.T) {
 	for _, value := range []*int64{nil, new(int64(0)), new(int64(5000))} {
 		log := &service.UsageLog{RequestID: "attempt-first-output", APIKeyID: 1, AttemptFirstOutputMs: value}
 		prepared := prepareUsageLogInsert(log)
-		idx := len(prepared.args) - 3 // Both Anthropic TTL columns follow this value.
+		idx := 64 // Stable append-only position: attempt_first_output_ms.
 		require.Equal(t, "bigint", usageLogInsertArgTypes[idx])
 		arg, ok := prepared.args[idx].(sql.NullInt64)
 		require.True(t, ok)

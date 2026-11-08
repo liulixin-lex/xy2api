@@ -24,6 +24,7 @@ func (s *RequestState) MarkBodyReceived(at time.Time, basis string, bytes int64)
 	if !s.bodyReceived.IsZero() {
 		s.bodyReceiptRepeat++
 		s.mu.Unlock()
+		Count("body_receipt_repeat", s.GroupID(), 0, "")
 		return
 	}
 	s.bodyReceived, s.bodyReceiptBasis, s.bodyBytes = at, basis, bytes

@@ -340,6 +340,8 @@
     "288_support_chat_user_recall.sql": "c0a5f9112906c7a89751c35b2869a10cb2c4fef086729c590b431eea206c8e64",
     "289_usage_log_attempt_first_output.sql": "cabf5ebe6bf1243eb79ee1bff6f11fd789d7f038b1b52da71568df8d34207020",
     "290_readonly_mcp.sql": "b510fabcefdcf86ad722f6c6f3dee00a39d53e927f0b2da1b3a07a976d436c7a",
-    "291_readonly_mcp_control_limits.sql": "89bf7fb4f44d9657a0e302794d4aa988915995bdefcf3f2150ccba521b664aa6"
+    "291_readonly_mcp_control_limits.sql": "89bf7fb4f44d9657a0e302794d4aa988915995bdefcf3f2150ccba521b664aa6",
+    "292_usage_logs_budget_timing.sql": "c97b8fabb4467d7d07ba767de70517e23ffd560834ee2bb9ffed1cc4f4577d01",
+    "293_ops_error_logs_resilience_timing.sql": "b4eea5f2d4834063b68851632e3ae0553f992c0c0e77abb2a9ae5a6cd387c054"
   }
 }

@@ -85,6 +85,7 @@ func resilienceTrackDelivery(c *gin.Context) {
 	if client.Err() != nil {
 		st.ResolveDisconnect()
 	}
+	st.FinishTiming()
 	st.MarkFinished()
 }
 

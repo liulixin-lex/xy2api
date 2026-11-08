@@ -17,6 +17,7 @@ import (
 type RequestState struct {
 	mu sync.Mutex
 
+	timing            timingTrace
 	bodyFirstRead     time.Time
 	bodyReceived      time.Time
 	bodyReceiptBasis  string

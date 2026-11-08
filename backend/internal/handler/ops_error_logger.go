@@ -1707,6 +1707,8 @@ func applyOpsLatencyFieldsFromContext(c *gin.Context, entry *service.OpsInsertEr
 	entry.TimeToFirstTokenMs = getContextLatencyMs(c, service.OpsTimeToFirstTokenMsKey)
 	entry.EndToEndFirstOutputMs = resilience.StateFrom(c.Request.Context()).EndToEndFirstOutputMs()
 	entry.RecoveryOutcome = recoveryOutcome(c)
+	resilience.StateFrom(c.Request.Context()).NoteWireStatus(c.Writer.Status())
+	entry.ResilienceTiming = resilience.StateFrom(c.Request.Context()).TimingJSON()
 	applyResilienceDisconnectFields(c, entry)
 }
 

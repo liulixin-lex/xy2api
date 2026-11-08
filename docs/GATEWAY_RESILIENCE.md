@@ -466,6 +466,14 @@ Codex 0.166 provider 名不是精确的 OpenAI 时，每轮删除历史 EFA，�
 
 完整契约与验收见 [OpenSpec design](../openspec/changes/codex-collaboration-plaintext-20261104/design.md)。
 
+### 0.5.12 第一期观测增量
+
+`budget.budget_start=arrival` 与 `budget.budget_cut_attribution=observe` 为发版缺省，请求创建预算时固定策略；本阶段只新增观测。usage 可空列和 ops `resilience_timing` 保存读体、EOF、截止、派出、提交与取消时序，时间以预算到达时刻为原点；既有 E2E 首输出时钟不改。`cdn_observed` 原样记录心跳使用的 edge 推断，来源是客户端可伪造头，不可信，只用于统计。Anthropic response-stage 诊断仅写 ops，不增加尝试事件。
+
+`GET /admin/resilience/stats` 新增 `resilience_dispatch_remaining_seconds` 累积直方图，包含有限 path、body_bucket、committed 分组、buckets、count（+Inf）和 sum。只统计 OpenAI 网关携带文本预算的真实 HTTP 传输；插件提前返回、图片预算、WS 与其他平台不在口径内。派出 helper 不准入、不消耗尝试。
+
+迁移 292/293 分两个事务，仅加可空列，无缺省、索引、回填；lock_timeout=5s，statement_timeout=30s。两次 ALTER 可能分别阻塞，不能承诺总计 ≤5s；支持半迁移后重试。发版前需检查长事务，首次启动关闭自动重启或有限次退避，失败停止发版保留旧实例。旧二进制与半迁移兼容、等锁与持锁时长仍需在测试库实测。
+
 ## 5. 观测
 
 ### 5.1 管理端
