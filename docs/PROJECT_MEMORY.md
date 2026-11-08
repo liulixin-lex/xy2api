@@ -1460,7 +1460,7 @@ pnpm --dir frontend run build
 - 完成操作：
   - PR #211 普通合并，打 annotated tag `v0.5.9`（`--cleanup=verbatim`），发布并核验；
   - PM 蓝绿上线，旧槽位 0.5.8 保留作回滚目标；
-  - 上线后每 30 min 分析一次增量数据；M5 于 01:15 UTC 复核；P3 只登记。
+  - 上线后每 30 min 分析一次增量数据；M5 于 01:05 UTC 复核（原定 01:15，数据已足够，提前做）；P3 只登记。
   - 记忆登记：“0.5.9 候选”整段换为发布与验收小节，版本速览、版本表、未结事项和进行中条目同步更新；被替换的旧段与已结束的进行中条目原样追加到归档。
 - 修改文件：只改 `docs/PROJECT_MEMORY.md` 与 `docs/PROJECT_MEMORY_ARCHIVE.md`。
 - 验证：check_docs_consistency 通过；干净树 upstream audit 通过；PR CI 结果以 PR 为准。
