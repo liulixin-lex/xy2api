@@ -64,6 +64,11 @@ func noteResilienceStall(ctx context.Context, rl *RateLimitService, account *Acc
 	}
 	failureAt := time.Now()
 	st := resilience.StateFrom(ctx)
+	// A stall while the upstream drains for a client that already left is
+	// no failure of the account (see noteResiliencePostOutputFailureWithCategory).
+	if st.ClientGone() {
+		return
+	}
 	st.MarkAccountFailed(account.ID)
 	// The 200 of a stalled stream must not end the conversation's failed-turn
 	// streak (design §9.7, review R10).

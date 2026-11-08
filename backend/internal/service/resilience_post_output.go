@@ -74,6 +74,12 @@ func noteResiliencePostOutputFailureWithCategory(ctx context.Context, rl *RateLi
 		return false
 	}
 	st := resilience.StateFrom(ctx)
+	// After a client leaves with output delivered, the upstream is drained
+	// and then cancelled (design §8.2); however that drain ends, the request
+	// is the client's cancellation, not a failure of the account.
+	if st.ClientGone() {
+		return false
+	}
 	st.MarkAccountFailed(account.ID)
 	if !st.ReportStreamFailure(account.ID, attempt) {
 		return false
