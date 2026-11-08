@@ -121,8 +121,8 @@
     - 生图 prompt 为空时在本地返回客户端 400；
     - Responses WS 入口的字段修复只认 400；
     - 余额暂停分组的绕过没有记录原因；
-    - 本地预校验 `validateClaude55Request` 只覆盖 opus-5-5 和 sonnet-5-5，没有覆盖 haiku-5-5，所以 haiku-5-5 的参数错误要到上游才被拒，并记为 provider；
-    - Chat 兼容入口疑似把参数转成 claude-5.5 不接受的 thinking（核实中）；
+    - 转换器和本地预校验 `validateClaude55Request` 都不认识 haiku-5-5（预校验只覆盖 opus-5-5 和 sonnet-5-5）：`reasoning_effort` 不是 low 时会被转成 enabled，上游必然拒绝，并记为 provider。haiku-5-5 的确切约束没有权威来源，暂不改；
+    - ~~Chat 兼容入口疑似把参数转成 claude-5.5 不接受的 thinking~~ 已排除（2026-11-08 03:24 UTC，PM 核实）：那几条记录是网关本地预校验的拒绝文案，没有上游尝试，error_source 为 client_request，是客户端在 Chat 请求里自己带了 thinking，被本地正确拒绝；
     - 中转在输出中途注入没有 code 的 “access forbidden” 错误，属于零星现象，只记录；
     - Anthropic 上游 404 且 body 为空时记为 TRANSIENT，不冷却号×模型（那次卡死的根源是分组配置问题，已自行恢复）；
     - Gemini 400 INVALID_ARGUMENT 的 error_owner 记为 provider，只影响统计口径：不换号，不冷却，客户端收到原始 400。
@@ -1502,7 +1502,7 @@ pnpm --dir frontend run build
 
 - 请求/目标：用户决定 0.5.10 在门禁、冒烟和 CI 全部通过后由 PM 直接发版上线；“换号后被拒改为可重试”先不做；Gemini 唯一候选的截止把文档改成与代码一致。
 - 开始状态：分支 `feat/enc-lastresort-avoid-20261108`，HEAD `10c3444cf`，工作树干净。
-- 完成操作：`GATEWAY_RESILIENCE.md` §4.7 “时长”改为实际行为（非最后候选受首事件截止与剩余预算约束；最后候选不设首事件截止，第一个事件之前没有心跳），请求预算表格的对应说明同步；记忆里 0.5.10 候选的约束和两条 P3 按决定更新。
+- 完成操作：`GATEWAY_RESILIENCE.md` §4.7 “时长”改为实际行为（非最后候选受首事件截止与剩余预算约束；最后候选不设首事件截止，第一个事件之前没有心跳），请求预算表格的对应说明同步；记忆里 0.5.10 候选的约束和两条 P3 按决定更新。追加：“Chat 兼容入口疑似转出 thinking”经 PM 核实为客户端侧，改为已排除；haiku-5-5 的转换与预校验缺口合并为一条 P3。
 - 修改文件：`docs/GATEWAY_RESILIENCE.md`、`docs/PROJECT_MEMORY.md`。只改文档，不影响门禁目标 `6c50a361a`。
 - 验证：check_docs_consistency 通过；干净树 upstream audit 通过。
 - 卡点/风险：无。
