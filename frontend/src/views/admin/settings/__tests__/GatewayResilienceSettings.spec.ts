@@ -18,7 +18,7 @@ function settings(): Settings {
     same_site_hold: { enabled: true },
     balance: { enabled: true, pause_seconds: 300 },
     budget: {
-      enabled: true, max_attempts: 4, pre_output_budget_seconds: 240,
+      enabled: true, max_attempts: 4, pre_output_budget_seconds: 240, budget_start: 'arrival', budget_cut_attribution: 'observe',
       first_output_timeout_seconds: { default: 180, high: 180, xhigh: 200, max: 220 },
       anthropic_first_event_timeout_seconds: 90, gemini_first_event_timeout_seconds: 90, model_overrides: {},
       same_account_retry_max: 1, gemini_same_account_retries: 1, upstream_retry_after_cap_seconds: 30
@@ -71,6 +71,16 @@ describe('gateway resilience settings', () => {
     expected.budget.max_attempts = 3
     expect(mocks.save).toHaveBeenCalledWith(expected)
     expect(w.text()).toContain('admin.resilience.settings.saved')
+  })
+
+  it('saves deadline and attribution controls independently', async () => {
+    const w = mountSettings(); await flushPromises()
+    expect((w.get('[data-testid="resilience-field-budgetStart"]').element as HTMLSelectElement).value).toBe('arrival')
+    expect((w.get('[data-testid="resilience-field-budgetAttribution"]').element as HTMLSelectElement).value).toBe('observe')
+    await w.get('[data-testid="resilience-field-budgetStart"]').setValue('body_eof')
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    expect(mocks.save.mock.calls[0][0].budget.budget_start).toBe('body_eof')
+    expect(mocks.save.mock.calls[0][0].budget.budget_cut_attribution).toBe('observe')
   })
 
   it('edits the initial balance pause with a tiered pause hint in the balance card', async () => {

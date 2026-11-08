@@ -2,6 +2,7 @@ package resilience
 
 import (
 	"context"
+	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -181,6 +182,7 @@ func (s *RequestState) ResolveDisconnect() (disconnected, delivered, abuse bool)
 			s.d.stageAtCut = StageStreaming
 		}
 		apiKeyID := s.d.apiKeyID
+		client := s.d.client
 		stage := s.d.stageAtCut
 		elapsed := s.d.disconnectAt.Sub(s.d.started)
 		s.d.mu.Unlock()
@@ -201,6 +203,14 @@ func (s *RequestState) ResolveDisconnect() (disconnected, delivered, abuse bool)
 		// went upstream, so it is no abuse strike.
 		if apiKeyID <= 0 || stage == StageUpload {
 			return
+		}
+		if late := s.Timing().LateAttemptNoTimerCount; late != nil && *late > 0 {
+			requestID, clientRequestID := "", ""
+			if client != nil {
+				requestID, _ = client.Value(ctxkey.RequestID).(string)
+				clientRequestID, _ = client.Value(ctxkey.ClientRequestID).(string)
+			}
+			slog.Warn("resilience.late_attempt_undelivered", "request_id", requestID, "client_request_id", clientRequestID, "group_id", groupID, "api_key_id", apiKeyID, "stage", stage, "elapsed_ms", elapsed.Milliseconds(), "late_attempt_no_timer_count", *late)
 		}
 		if fn := undeliveredAbuseCheck.Load(); fn != nil && (*fn)(apiKeyID) {
 			s.d.mu.Lock()

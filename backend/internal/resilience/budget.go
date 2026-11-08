@@ -46,6 +46,7 @@ type Budget struct {
 	anchor         time.Time
 	bodyReceived   time.Time
 	attemptStarted bool
+	planSequence   uint64
 	base           time.Duration
 	budgetStart    string
 	attribution    string
@@ -80,6 +81,7 @@ func NewBudget(ctx context.Context, s *Settings, kind RequestKind, now time.Time
 		ctx:            ctx,
 	}
 	if kind == KindText {
+		Count("budget_snapshot", 0, 0, "budget_start_mode="+b.budgetStart)
 		b.deadline = now.Add(min(b.base, PreOutputWallCap))
 	}
 	return b
@@ -327,21 +329,7 @@ func (b *Budget) ClampWait(d time.Duration, now time.Time) time.Duration {
 // lastCandidate removes the tier timeout so the last usable account only
 // answers to the deadline (design §7.4). Zero means no per-attempt timeout.
 func (b *Budget) AttemptTimeout(tier time.Duration, lastCandidate bool, now time.Time) time.Duration {
-	if b == nil {
-		return tier
-	}
-	b.MarkAttemptStarted()
-	rem := b.Remaining(now)
-	if lastCandidate {
-		return rem
-	}
-	if spent := now.Sub(b.started); tier > 0 && spent > tier {
-		tier = spent
-	}
-	if rem > 0 && (tier <= 0 || rem < tier) {
-		return rem
-	}
-	return tier
+	return b.PlanAttemptTimeout(tier, lastCandidate, now).Effective()
 }
 
 // FirstOutputTier returns the first-output timeout tier for an OpenAI request

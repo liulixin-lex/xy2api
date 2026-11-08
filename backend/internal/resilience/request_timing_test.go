@@ -43,7 +43,10 @@ func TestRequestTimingObservationsDoNotChangeBudget(t *testing.T) {
 	require.EqualValues(t, 2, *timing.DispatchCount)
 	require.EqualValues(t, 0, *timing.MinDispatchRemainingMs)
 	require.EqualValues(t, 240000, *timing.FinalDeadlineMs)
-	require.EqualValues(t, 1, *timing.LateAttemptCount)
+	require.EqualValues(t, 1, *timing.LateAttemptCount, "hidden replay can bypass arrival admission")
+	require.EqualValues(t, 0, *timing.LateAttemptNoTimerCount)
+	require.Equal(t, "arrival", *timing.BudgetStartMode)
+	require.Equal(t, now.UnixMilli(), *timing.BudgetT0UnixMs)
 	require.Equal(t, "codex", *timing.ClientFamily)
 	require.Equal(t, "esa", *timing.CDNObserved)
 	require.Nil(t, timing.ClientCancelMs)
@@ -109,3 +112,31 @@ func TestRequestTimingCancelUsesArrivalAndUploadStage(t *testing.T) {
 }
 
 func timingTestSettings() *Settings { cfg := Defaults(); return &cfg }
+
+func TestRequestTimingLateNoTimerUsesConfiguredBase(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	for _, base := range []int{60, 240, 290} {
+		for _, mode := range []string{BudgetStartArrival, BudgetStartBodyEOF} {
+			cfg := Defaults()
+			cfg.Budget.PreOutputBudgetSeconds = base
+			cfg.Budget.BudgetStart = mode
+			st := NewRequestState()
+			st.SetBudget(NewBudget(context.Background(), &cfg, KindText, t0))
+			st.MarkBodyReceived(t0.Add(10*time.Second), "body_eof", 1024)
+			edge := t0.Add(time.Duration(base)*time.Second - 2*time.Second)
+			st.SetAttemptProfile(AttemptProfile{AttemptStart: edge})
+			st.SetAttemptProfile(AttemptProfile{AttemptStart: edge.Add(time.Millisecond)})
+			st.SetAttemptProfile(AttemptProfile{AttemptStart: edge.Add(time.Millisecond), Warm: true})
+			st.SetAttemptProfile(AttemptProfile{AttemptStart: edge.Add(2 * time.Millisecond)})
+			st.NoteAttemptTimer(edge.Add(2 * time.Millisecond))
+			timing := st.Timing()
+			all, noTimer := int64(2), int64(1)
+			require.Equal(t, all, *timing.LateAttemptCount)
+			require.Equal(t, noTimer, *timing.LateAttemptNoTimerCount)
+			raw, err := json.Marshal(timing)
+			require.NoError(t, err)
+			require.NotContains(t, string(raw), "late_attempt")
+			require.Contains(t, *st.TimingJSON(), "late_attempt_no_timer_count")
+		}
+	}
+}

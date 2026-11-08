@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -28,6 +29,7 @@ type anthropicStreamStage struct {
 	cancel    <-chan struct{}
 	headers   func()
 	scanGuard atomic.Bool
+	plan      resilience.TimeoutPlan
 }
 
 func newAnthropicStreamStage(ctx context.Context, c *gin.Context, headers func()) *anthropicStreamStage {
@@ -36,14 +38,23 @@ func newAnthropicStreamStage(ctx context.Context, c *gin.Context, headers func()
 		s.stage = newDefaultOpenAIFirstOutputStage()
 		s.scanGuard.Store(true)
 		s.cancel = ctx.Done()
-		if budget := resilienceTextBudget(ctx); budget != nil {
-			s.timer = time.NewTimer(budget.Remaining(time.Now()))
+		if resilienceTextBudget(ctx) != nil {
+			s.plan = resilience.StateFrom(ctx).ResponseStagePlan(time.Now())
+			s.timer = time.NewTimer(s.plan.Effective())
 			s.timeout = s.timer.C
 		}
 	} else {
 		headers()
 	}
 	return s
+}
+
+// noteTimeout intentionally emits no attempt event: this path had none in 0.5.11.
+func (s *anthropicStreamStage) noteTimeout(c *gin.Context) {
+	st := resilience.StateFrom(s.ctx)
+	st.NoteResponseStage(s.plan.Start(), s.plan.Effective())
+	resilience.Count("anthropic_response_stage_timeout", st.GroupID(), 0, st.Budget().AnchorBasis())
+	slog.Info("resilience.anthropic_response_stage_timeout", "timeout_source", s.plan.Diagnostics().TimeoutSource, "start_offset_ms", s.plan.Diagnostics().AttemptStartOffsetMs, "window_ms", s.plan.Effective().Milliseconds(), "would_budget_cut", false, "budget_cut_applied", false)
 }
 
 func (s *anthropicStreamStage) holding() bool { return s.stage != nil && !s.stage.closed }

@@ -387,7 +387,8 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		var firstEvent *firstEventGuard
 		if reqStream {
 			activeFirstEvent.Release()
-			upstreamCtx, firstEvent = newFirstEventGuard(upstreamCtx, resilienceFirstEventTimeout(ctx, account.ID, account.Platform))
+			timeout, plan := resilienceFirstEventPlan(ctx, account.ID, account.Platform)
+			upstreamCtx, firstEvent = newFirstEventGuard(upstreamCtx, timeout, plan)
 			activeFirstEvent = firstEvent
 		}
 		upstreamReq, wireBody, err := s.buildUpstreamRequest(upstreamCtx, c, account, body, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)

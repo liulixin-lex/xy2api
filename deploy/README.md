@@ -731,3 +731,8 @@ gateway:
 4. **整站启用新会话。** 在账号管理统一打开已验证站的目标账号开关，使用真实 Codex 原生 Responses HTTP 验证父子调用和续轮。避开高峰；WS、compact、透传、桥接、摊平、原始 store/previous 或协议歧义都不进入 P1′。
 5. **抽查计数与拒绝。** 运维“网关韧性”查看 collab_plaintext 的 outcome/eligibility、collab_call 与 collab_call_action；系统日志查 resilience.collab_plaintext 的 upstream_status/in_band。只对现有分类中的客户端拒绝告警（带内输出前拒绝为 HTTP 200、in_band=true），账号/余额、429/5xx 不单独触发。Warn 不带拒绝原因；按 request_id 关联运维错误日志，查看分类和上游原文。48h/7d 用持久 state_rejection 标识与 usage_logs 账号/模型/UA 请求量近似核对，单实例 1h 计数只供抽查。Codex 升级后按 client_version 复核。
 6. **按客户端选择回退。** 软回退关账号开关：新会话停止启用，保留 [] 的合格 API Key 会话继续。provider 名非 OpenAI 的 Codex 删除历史 EFA，没有连续性，关账号开关等同硬回退；开→关在 c2a95e/d0c7a8 已通过，b672e6 补跑持续 503、无结论。硬回退关总开关/功能或清空 models，所有后续请求停止转换、在途继续还原；OpenAI provider 在 b672e6 账号 470 已出现两次 cyber_policy，存量会话可能需新开。落到关闭开关的 OAuth 或切换到清单外模型也形成开→关；转换状态改变会从工具声明处使下一请求提示缓存失效一次。
+
+
+### 0.5.12 第一期候选的迁移与灰度
+
+发版缺省arrival/observe；迁移292/293仅nullable观测列，5s等锁、30s语句超时，两个事务可分别阻塞且可能半迁移。发版前检查长事务，首次启动禁无限自动重启，失败保留旧版低峰人工重试。测试库需先完成全/半迁移下旧0.5.11启动读写与持锁实测。分阶段48h切换、G9在15分钟内切回arrival、回滚不可逆历史见[第一期runbook](../openspec/changes/budget-anchor-0512-20261108/runbook.md)。本候选尚未获部署授权。

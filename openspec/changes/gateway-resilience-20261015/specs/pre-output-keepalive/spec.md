@@ -90,7 +90,7 @@ Anthropic and Gemini attempts MUST have a first-upstream-event timeout (default 
 
 #### Scenario: Last candidate waits for the budget
 - **WHEN** account A is the only candidate
-- **THEN** the attempt continues past 180 s until output arrives or the 240 s pre-output deadline ends it.
+- **THEN** the attempt continues past 180 s until output arrives or the pre-output deadline D (0.5.12 budget-anchor delta §2.1.1) ends it.
 
 #### Scenario: Another account serves only other models
 - **WHEN** account A is the only account of the group that serves the requested model and account B serves other models only
@@ -151,5 +151,5 @@ Error JSON MUST be on a single line and MUST include a stable `code` and the ori
 - **THEN** the gateway writes `response.failed` with `rate_limit_exceeded` and closes the stream, and Codex retries after the indicated delay.
 
 #### Scenario: openai-python reads a failure after heartbeats
-- **WHEN** the 240 s budget ends a Responses stream that heartbeats committed
+- **WHEN** the pre-output deadline D (0.5.12 budget-anchor delta §2.1.1) ends a Responses stream that heartbeats committed
 - **THEN** the client receives `response.created` and then `response.failed` of the same response, and openai-python reports the gateway's error instead of a protocol error.

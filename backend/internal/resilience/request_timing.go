@@ -9,23 +9,26 @@ import (
 // from forgeable client headers and must never drive budget or scheduling.
 // Pointers distinguish an observed zero from an unavailable/historical value.
 type RequestTiming struct {
-	BodyBytes              *int64  `json:"body_bytes,omitempty"`
-	FirstReadMs            *int64  `json:"first_read_ms,omitempty"`
-	BodyEOFMs              *int64  `json:"body_eof_ms,omitempty"`
-	AnchorBasis            *string `json:"anchor_basis,omitempty"`
-	AnchorEligible         *bool   `json:"anchor_eligible,omitempty"`
-	BodyReceiptRepeat      *int64  `json:"body_receipt_repeat,omitempty"`
-	PreDispatchMs          *int64  `json:"pre_dispatch_ms,omitempty"`
-	KeepaliveCommitMs      *int64  `json:"keepalive_commit_ms,omitempty"`
-	WireStatus             *int64  `json:"wire_status,omitempty"`
-	DispatchCount          *int64  `json:"dispatch_count,omitempty"`
-	MinDispatchRemainingMs *int64  `json:"min_dispatch_remaining_ms,omitempty"`
-	FinalDeadlineMs        *int64  `json:"final_deadline_ms,omitempty"`
-	LateAttemptCount       *int64  `json:"late_attempt_count,omitempty"`
-	ClientFamily           *string `json:"client_family,omitempty"`
-	ClientCancelMs         *int64  `json:"client_cancel_ms,omitempty"`
-	CancelStage            *string `json:"cancel_stage,omitempty"`
-	CDNObserved            *string `json:"cdn_observed,omitempty"`
+	BodyBytes               *int64  `json:"body_bytes,omitempty"`
+	FirstReadMs             *int64  `json:"first_read_ms,omitempty"`
+	BodyEOFMs               *int64  `json:"body_eof_ms,omitempty"`
+	AnchorBasis             *string `json:"anchor_basis,omitempty"`
+	AnchorEligible          *bool   `json:"anchor_eligible,omitempty"`
+	BodyReceiptRepeat       *int64  `json:"body_receipt_repeat,omitempty"`
+	PreDispatchMs           *int64  `json:"pre_dispatch_ms,omitempty"`
+	KeepaliveCommitMs       *int64  `json:"keepalive_commit_ms,omitempty"`
+	WireStatus              *int64  `json:"wire_status,omitempty"`
+	DispatchCount           *int64  `json:"dispatch_count,omitempty"`
+	MinDispatchRemainingMs  *int64  `json:"min_dispatch_remaining_ms,omitempty"`
+	FinalDeadlineMs         *int64  `json:"final_deadline_ms,omitempty"`
+	LateAttemptNoTimerCount *int64  `json:"-"`
+	BudgetStartMode         *string `json:"budget_start_mode,omitempty"`
+	BudgetT0UnixMs          *int64  `json:"budget_t0_unix_ms,omitempty"`
+	LateAttemptCount        *int64  `json:"-"`
+	ClientFamily            *string `json:"client_family,omitempty"`
+	ClientCancelMs          *int64  `json:"client_cancel_ms,omitempty"`
+	CancelStage             *string `json:"cancel_stage,omitempty"`
+	CDNObserved             *string `json:"cdn_observed,omitempty"`
 }
 
 type ResponseStageTiming struct {
@@ -55,6 +58,12 @@ func (s *RequestState) Timing() RequestTiming {
 	b, firstRead, eof := s.budget, s.bodyFirstRead, s.bodyReceived
 	bytes, repeat, edge, trace := s.bodyBytes, s.bodyReceiptRepeat, s.edge, s.timing
 	lateCount := len(s.timing.attempts)
+	lateNoTimer := int64(0)
+	for _, timed := range s.timing.attempts {
+		if !timed {
+			lateNoTimer++
+		}
+	}
 	s.mu.Unlock()
 	s.d.mu.Lock()
 	start, cancelAt, cancelStage := s.d.started, s.d.disconnectAt, s.d.stageAtCut
@@ -64,6 +73,8 @@ func (s *RequestState) Timing() RequestTiming {
 		start = b.Started()
 		out.ClientFamily = observed(b.clientFamily)
 		if b.Kind() == KindText {
+			out.BudgetStartMode = observed(b.budgetStart)
+			out.BudgetT0UnixMs = observed(start.UnixMilli())
 			out.AnchorBasis = observed(b.AnchorBasis())
 			out.AnchorEligible = observed(!eof.IsZero() && eof.Sub(start) >= BodyAnchorThreshold)
 			out.FinalDeadlineMs = observed(b.Deadline().Sub(start).Milliseconds())
@@ -92,6 +103,7 @@ func (s *RequestState) Timing() RequestTiming {
 		out.MinDispatchRemainingMs = observed(trace.minRemaining.Milliseconds())
 	}
 	out.LateAttemptCount = observed(int64(lateCount))
+	out.LateAttemptNoTimerCount = observed(lateNoTimer)
 	out.ClientCancelMs = offset(cancelAt)
 	if !cancelAt.IsZero() {
 		out.CancelStage = observed(cancelStage)
@@ -110,8 +122,10 @@ func (s *RequestState) TimingJSON() *string {
 	s.mu.Unlock()
 	raw, err := json.Marshal(struct {
 		RequestTiming
-		ResponseStage *ResponseStageTiming `json:"response_stage,omitempty"`
-	}{timing, stage})
+		ResponseStage           *ResponseStageTiming `json:"response_stage,omitempty"`
+		LateAttemptCount        *int64               `json:"late_attempt_count,omitempty"`
+		LateAttemptNoTimerCount *int64               `json:"late_attempt_no_timer_count,omitempty"`
+	}{timing, stage, timing.LateAttemptCount, timing.LateAttemptNoTimerCount})
 	if err != nil {
 		return nil
 	}
@@ -165,7 +179,7 @@ func (s *RequestState) NoteResponseStage(start time.Time, window time.Duration) 
 // noteAttemptStart counts distinct scheduling starts, never Warm-only profile updates.
 func (s *RequestState) noteAttemptStart(at time.Time) {
 	b := s.Budget()
-	if b == nil || b.Kind() != KindText || at.IsZero() || at.Sub(b.Started()) <= 238*time.Second {
+	if b == nil || b.Kind() != KindText || at.IsZero() || at.Sub(b.Started()) <= b.base-minAttemptWindow {
 		return
 	}
 	s.mu.Lock()

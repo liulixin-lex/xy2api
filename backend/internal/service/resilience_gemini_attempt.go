@@ -34,6 +34,7 @@ type geminiAttempt struct {
 	cancel   context.CancelCauseFunc
 	timer    *time.Timer
 	timeout  time.Duration
+	plan     resilience.TimeoutPlan
 	stall    time.Duration
 	output   bool
 	terminal bool
@@ -73,7 +74,8 @@ func newGeminiAttempt(ctx context.Context, account *Account, model, action strin
 		last := resilienceLastCandidate(ctx, account.ID)
 		if !last {
 			tier := time.Duration(resilience.Current().Budget.GeminiFirstEventTimeoutSeconds) * time.Second
-			g.timeout = b.AttemptTimeout(tier, last, started)
+			g.plan = resilience.StateFrom(ctx).PlanAttemptTimeout(tier, last, started)
+			g.timeout = g.plan.Effective()
 			if g.timeout > 0 {
 				g.mu.Lock()
 				g.resetTimer(g.timeout-time.Since(started), &geminiAttemptDeadlineError{})
@@ -305,7 +307,7 @@ func (g *geminiAttempt) finish(c *gin.Context, rl *RateLimitService, account *Ac
 	var stall *geminiStreamStallError
 	switch cause := context.Cause(g.ctx); {
 	case errors.As(cause, &deadline) && !g.outputStarted() && OpenAICompactKeepaliveAdjustedWrittenSize(c) <= 0:
-		fe := (&firstEventGuard{timeout: g.timeout}).failoverError(c, account, g.phase)
+		fe := (&firstEventGuard{timeout: g.timeout, plan: g.plan}).failoverError(c, account, g.phase)
 		fe.cause = cause
 		rl.ApplyResilienceOutcome(g.parent, account, resilience.Result{Category: resilience.CategoryFirstOutputTimeout}, "Gemini attempt deadline")
 		return fe

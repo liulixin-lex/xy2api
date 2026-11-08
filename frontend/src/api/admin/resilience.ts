@@ -37,6 +37,8 @@ export interface GatewayResilienceSettings {
     enabled: boolean
     max_attempts: number
     pre_output_budget_seconds: number
+    budget_start: 'arrival' | 'body_eof'
+    budget_cut_attribution: 'off' | 'observe' | 'enforce'
     first_output_timeout_seconds: { default: number; high: number; xhigh: number; max: number }
     anthropic_first_event_timeout_seconds: number
     gemini_first_event_timeout_seconds: number

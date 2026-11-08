@@ -916,7 +916,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			// Stop the guard on content even after a downstream write failure,
 			// so the first-output deadline cannot truncate usage draining.
 			if !holdPrelude && !firstEvent.disarm() && !clientDisconnected {
-				streamFailoverErr = s.newOpenAIFirstOutputTimeoutError(c.Request.Context(), c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account), firstEvent.started, firstEvent.model, firstEvent.effort, firstEvent.timeout, "first_event", resp.Header)
+				streamFailoverErr = s.newOpenAIFirstOutputTimeoutError(c.Request.Context(), c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account), firstEvent.started, firstEvent.model, firstEvent.effort, firstEvent.timeout, "first_event", resp.Header, firstEvent.plan)
 				return true
 			}
 		}

@@ -19,7 +19,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
-const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, model, requested_model, upstream_model, upstream_response_model, upstream_model_mismatch, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, image_output_tokens, image_output_cost, image_input_tokens, image_input_cost, input_cost, output_cost, cache_creation_cost, cache_read_cost, total_cost, actual_cost, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, image_count, image_size, image_input_size, image_output_size, image_size_source, image_size_breakdown, video_count, video_resolution, video_duration_seconds, service_tier, reasoning_effort, requested_reasoning_effort, inbound_endpoint, upstream_endpoint, cache_ttl_overridden, long_context_billing_applied, channel_id, model_mapping_chain, billing_tier, billing_mode, account_stats_cost, upstream_request_id, session_id, native_compaction_v2, created_at, origin_group_id, end_to_end_first_output_ms, attempt_first_output_ms, anthropic_cache_ttl_policy, anthropic_cache_ttl_applied, body_bytes, first_read_ms, body_eof_ms, anchor_basis, anchor_eligible, body_receipt_repeat, pre_dispatch_ms, keepalive_commit_ms, wire_status, dispatch_count, min_dispatch_remaining_ms, final_deadline_ms, late_attempt_count, client_family, client_cancel_ms, cancel_stage, cdn_observed"
+const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, model, requested_model, upstream_model, upstream_response_model, upstream_model_mismatch, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, image_output_tokens, image_output_cost, image_input_tokens, image_input_cost, input_cost, output_cost, cache_creation_cost, cache_read_cost, total_cost, actual_cost, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, image_count, image_size, image_input_size, image_output_size, image_size_source, image_size_breakdown, video_count, video_resolution, video_duration_seconds, service_tier, reasoning_effort, requested_reasoning_effort, inbound_endpoint, upstream_endpoint, cache_ttl_overridden, long_context_billing_applied, channel_id, model_mapping_chain, billing_tier, billing_mode, account_stats_cost, upstream_request_id, session_id, native_compaction_v2, created_at, origin_group_id, end_to_end_first_output_ms, attempt_first_output_ms, anthropic_cache_ttl_policy, anthropic_cache_ttl_applied, body_bytes, first_read_ms, body_eof_ms, anchor_basis, anchor_eligible, body_receipt_repeat, pre_dispatch_ms, keepalive_commit_ms, wire_status, dispatch_count, min_dispatch_remaining_ms, final_deadline_ms, client_family, client_cancel_ms, cancel_stage, cdn_observed, budget_start_mode, budget_t0_unix_ms"
 
 func (r *usageLogRepository) GetByID(ctx context.Context, id int64) (log *service.UsageLog, err error) {
 	query := "SELECT " + usageLogSelectColumns + " FROM usage_logs WHERE id = $1"
@@ -485,11 +485,12 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		timingDispatchCount          sql.NullInt64
 		timingMinDispatchRemainingMs sql.NullInt64
 		timingFinalDeadlineMs        sql.NullInt64
-		timingLateAttemptCount       sql.NullInt64
 		timingClientFamily           sql.NullString
 		timingClientCancelMs         sql.NullInt64
 		timingCancelStage            sql.NullString
 		timingCDNObserved            sql.NullString
+		timingBudgetStartMode        sql.NullString
+		timingBudgetT0UnixMs         sql.NullInt64
 
 		originGroupID sql.NullInt64
 	)
@@ -575,11 +576,12 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		&timingDispatchCount,
 		&timingMinDispatchRemainingMs,
 		&timingFinalDeadlineMs,
-		&timingLateAttemptCount,
 		&timingClientFamily,
 		&timingClientCancelMs,
 		&timingCancelStage,
 		&timingCDNObserved,
+		&timingBudgetStartMode,
+		&timingBudgetT0UnixMs,
 	); err != nil {
 		return nil, err
 	}
@@ -660,9 +662,6 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 	if timingFinalDeadlineMs.Valid {
 		log.FinalDeadlineMs = &timingFinalDeadlineMs.Int64
 	}
-	if timingLateAttemptCount.Valid {
-		log.LateAttemptCount = &timingLateAttemptCount.Int64
-	}
 	if timingClientFamily.Valid {
 		log.ClientFamily = &timingClientFamily.String
 	}
@@ -674,6 +673,13 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 	}
 	if timingCDNObserved.Valid {
 		log.CDNObserved = &timingCDNObserved.String
+	}
+
+	if timingBudgetStartMode.Valid {
+		log.BudgetStartMode = &timingBudgetStartMode.String
+	}
+	if timingBudgetT0UnixMs.Valid {
+		log.BudgetT0UnixMs = &timingBudgetT0UnixMs.Int64
 	}
 
 	// 先回填 legacy 字段，再基于 legacy + request_type 计算最终请求类型，保证历史数据兼容。

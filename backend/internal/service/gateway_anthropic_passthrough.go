@@ -639,6 +639,7 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 			if ctx.Err() != nil {
 				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, ctx.Err()
 			}
+			stage.noteTimeout(c)
 			return nil, anthropicPreOutputFailover(resp, "Upstream produced no semantic output before the request deadline")
 		case <-stage.cancel:
 			return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, ctx.Err()

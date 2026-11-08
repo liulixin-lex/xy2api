@@ -33,18 +33,25 @@ func TestBudgetTimingRepositoryRoundTripShape(t *testing.T) {
 	log.AnchorEligible = &yes
 	log.AnchorBasis = &arrival
 	log.CDNObserved = &cf
+	log.BudgetStartMode = &arrival
+	t0 := int64(1234)
+	log.BudgetT0UnixMs = &t0
 	prepared := prepareUsageLogInsert(log)
 	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
 	require.Equal(t, &zero, prepared.args[67])
 	require.Equal(t, &arrival, prepared.args[70])
 	require.Equal(t, &yes, prepared.args[71])
-	require.Equal(t, &cf, prepared.args[len(prepared.args)-1])
-	loaded, err := scanUsageLog(budgetTimingScanner{map[string]any{"body_bytes": sql.NullInt64{Int64: 0, Valid: true}, "anchor_basis": sql.NullString{String: arrival, Valid: true}, "anchor_eligible": sql.NullBool{Bool: true, Valid: true}, "cdn_observed": sql.NullString{String: cf, Valid: true}}})
+	require.Equal(t, &cf, prepared.args[len(prepared.args)-3])
+	loaded, err := scanUsageLog(budgetTimingScanner{map[string]any{"body_bytes": sql.NullInt64{Int64: 0, Valid: true}, "anchor_basis": sql.NullString{String: arrival, Valid: true}, "anchor_eligible": sql.NullBool{Bool: true, Valid: true}, "cdn_observed": sql.NullString{String: cf, Valid: true}, "budget_start_mode": sql.NullString{String: arrival, Valid: true}, "budget_t0_unix_ms": sql.NullInt64{Int64: t0, Valid: true}}})
 	require.NoError(t, err)
 	require.Equal(t, log.BodyBytes, loaded.BodyBytes)
 	require.Equal(t, log.AnchorBasis, loaded.AnchorBasis)
 	require.Equal(t, log.AnchorEligible, loaded.AnchorEligible)
 	require.Equal(t, log.CDNObserved, loaded.CDNObserved)
+	require.Equal(t, log.BudgetStartMode, loaded.BudgetStartMode)
+	require.Equal(t, log.BudgetT0UnixMs, loaded.BudgetT0UnixMs)
+	require.Equal(t, &arrival, prepared.args[len(prepared.args)-2])
+	require.Equal(t, &t0, prepared.args[len(prepared.args)-1])
 	require.Nil(t, loaded.BodyEOFMs)
 	historical, err := scanUsageLog(budgetTimingScanner{})
 	require.NoError(t, err)

@@ -120,11 +120,12 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			sqlmock.AnyArg(), // dispatch_count
 			sqlmock.AnyArg(), // min_dispatch_remaining_ms
 			sqlmock.AnyArg(), // final_deadline_ms
-			sqlmock.AnyArg(), // late_attempt_count
 			sqlmock.AnyArg(), // client_family
 			sqlmock.AnyArg(), // client_cancel_ms
 			sqlmock.AnyArg(), // cancel_stage
 			sqlmock.AnyArg(), // cdn_observed
+			sqlmock.AnyArg(), // budget_start_mode
+			sqlmock.AnyArg(), // budget_t0_unix_ms
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(99), createdAt))
 
@@ -237,11 +238,12 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			sqlmock.AnyArg(), // dispatch_count
 			sqlmock.AnyArg(), // min_dispatch_remaining_ms
 			sqlmock.AnyArg(), // final_deadline_ms
-			sqlmock.AnyArg(), // late_attempt_count
 			sqlmock.AnyArg(), // client_family
 			sqlmock.AnyArg(), // client_cancel_ms
 			sqlmock.AnyArg(), // cancel_stage
 			sqlmock.AnyArg(), // cdn_observed
+			sqlmock.AnyArg(), // budget_start_mode
+			sqlmock.AnyArg(), // budget_t0_unix_ms
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(100), createdAt))
 
@@ -1023,11 +1025,12 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullInt64{},  // dispatch_count
 			sql.NullInt64{},  // min_dispatch_remaining_ms
 			sql.NullInt64{},  // final_deadline_ms
-			sql.NullInt64{},  // late_attempt_count
 			sql.NullString{}, // client_family
 			sql.NullInt64{},  // client_cancel_ms
 			sql.NullString{}, // cancel_stage
 			sql.NullString{}, // cdn_observed
+			sql.NullString{}, // budget_start_mode
+			sql.NullInt64{},  // budget_t0_unix_ms
 		}})
 		require.NoError(t, err)
 		require.Equal(t, 2, log.ImageCount)
@@ -1125,11 +1128,12 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullInt64{},  // dispatch_count
 			sql.NullInt64{},  // min_dispatch_remaining_ms
 			sql.NullInt64{},  // final_deadline_ms
-			sql.NullInt64{},  // late_attempt_count
 			sql.NullString{}, // client_family
 			sql.NullInt64{},  // client_cancel_ms
 			sql.NullString{}, // cancel_stage
 			sql.NullString{}, // cdn_observed
+			sql.NullString{}, // budget_start_mode
+			sql.NullInt64{},  // budget_t0_unix_ms
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -1210,11 +1214,12 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullInt64{},  // dispatch_count
 			sql.NullInt64{},  // min_dispatch_remaining_ms
 			sql.NullInt64{},  // final_deadline_ms
-			sql.NullInt64{},  // late_attempt_count
 			sql.NullString{}, // client_family
 			sql.NullInt64{},  // client_cancel_ms
 			sql.NullString{}, // cancel_stage
 			sql.NullString{}, // cdn_observed
+			sql.NullString{}, // budget_start_mode
+			sql.NullInt64{},  // budget_t0_unix_ms
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -1297,11 +1302,12 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullInt64{},                          // dispatch_count
 			sql.NullInt64{},                          // min_dispatch_remaining_ms
 			sql.NullInt64{},                          // final_deadline_ms
-			sql.NullInt64{},                          // late_attempt_count
 			sql.NullString{},                         // client_family
 			sql.NullInt64{},                          // client_cancel_ms
 			sql.NullString{},                         // cancel_stage
 			sql.NullString{},                         // cdn_observed
+			sql.NullString{},                         // budget_start_mode
+			sql.NullInt64{},                          // budget_t0_unix_ms
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)

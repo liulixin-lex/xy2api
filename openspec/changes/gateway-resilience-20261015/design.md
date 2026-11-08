@@ -208,7 +208,7 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 | 字段 | 含义 |
 |---|---|
 | `MaxAttempts` | 默认 4，包括首次尝试、换号与同号重试。例外：Antigravity 平台的智能重试（`antigravity_gateway_retry.go`，按上游给出的短等待在同一账号上重发）不计入尝试次数，只受剩余首输出前时间与 `Retry-After` 封顶约束（等待放不进剩余预算就不再重试） |
-| `PreOutputDeadline` | 文本请求为开始时间 + 240 秒；图片端点与异步图片任务不设。非流式请求的“首输出”就是整个响应：截止时间只决定能否再发起新的尝试，进行中的单次非流式请求不按它截断（审查 R04 的取舍：截断仍在生成的长回答只会多一次失败、多一份上游成本；单次请求仍受上游与客户端各自的超时约束） |
+| `PreOutputDeadline` | 文本请求为截止 D=min(锚点+base,到达+290s)，base缺省240s；arrival为缺省，body_eof仅Δ≥1s生效；图片端点与异步图片任务不设。非流式请求的“首输出”就是整个响应：截止时间只决定能否再发起新的尝试，进行中的单次非流式请求不按它截断（审查 R04 的取舍：截断仍在生成的长回答只会多一次失败、多一份上游成本；单次请求仍受上游与客户端各自的超时约束） |
 | `Attempts`、`SameAccountRetries[account]` | 已用次数 |
 | 请求上下文 | 客户端或转发上下文取消后不再允许新的尝试（耗尽原因 `canceled`） |
 
@@ -218,7 +218,7 @@ Redis 键 `xy:resil:sf:{group_id}:{session_hash}` 为 Hash，字段为 `account_
 - Anthropic 网关循环（`gateway_handler.go`、`gateway_handler_responses.go`、`gateway_handler_chat_completions.go`）；
 - Gemini 兼容服务的原地重试（`gemini_*_compat_service.go`）；
 - 透传传输重试；
-- 用户与账号槽位等待（`waitForSlotWithPingTimeout`）：等待时长截到剩余的首输出前时间，否则排队的流可能越过 240 秒、由客户端自己的空闲超时结束，而不是收到终止应答（审查 F12）。
+- 用户与账号槽位等待（`waitForSlotWithPingTimeout`）：等待时长截到剩余的首输出前时间，否则排队的流可能越过截止 D、由客户端自己的空闲超时结束，而不是收到终止应答（审查 F12）。
 
 每次失败尝试后记一次（`RecordAttemptAt`），再由 `CanAttempt` 判断能否继续，耗尽则结束：
 

@@ -98,9 +98,13 @@ func resilienceTextBudget(ctx context.Context) *resilience.Budget {
 // upstream headers arrive; measuring the budget from that moment instead
 // cut a slow-header attempt the instant its headers came (staging KA-1).
 func (s *OpenAIGatewayService) openAIFirstOutputTimeoutFor(ctx context.Context, accountID int64, model, reasoningEffort string, attemptStart time.Time) time.Duration {
+	timeout, _ := s.openAIFirstOutputPlanFor(ctx, accountID, model, reasoningEffort, attemptStart)
+	return timeout
+}
+func (s *OpenAIGatewayService) openAIFirstOutputPlanFor(ctx context.Context, accountID int64, model, reasoningEffort string, attemptStart time.Time) (time.Duration, resilience.TimeoutPlan) {
 	b := resilienceTextBudget(ctx)
 	if b == nil {
-		return s.openAIFirstOutputTimeout(reasoningEffort)
+		return s.openAIFirstOutputTimeout(reasoningEffort), resilience.TimeoutPlan{}
 	}
 	profile := resilience.StateFrom(ctx).AttemptProfile()
 	profileMatches := profile.AccountID == accountID && accountID > 0
@@ -119,7 +123,8 @@ func (s *OpenAIGatewayService) openAIFirstOutputTimeoutFor(ctx context.Context, 
 	if attemptStart.IsZero() {
 		attemptStart = time.Now()
 	}
-	return b.AttemptTimeout(tier, resilienceLastCandidate(ctx, accountID), attemptStart)
+	plan := resilience.StateFrom(ctx).PlanAttemptTimeout(tier, resilienceLastCandidate(ctx, accountID), attemptStart)
+	return plan.Effective(), plan
 }
 
 func warmFirstOutputTier(tier time.Duration, bodyBytes int) time.Duration {
@@ -169,16 +174,21 @@ func (s *OpenAIGatewayService) ReportOpenAIAttemptSuccess(ctx context.Context, a
 // resilienceFirstEventTimeout returns the first-upstream-event timeout of a
 // streaming Anthropic or Gemini attempt, or zero when none applies.
 func resilienceFirstEventTimeout(ctx context.Context, accountID int64, platform string) time.Duration {
+	timeout, _ := resilienceFirstEventPlan(ctx, accountID, platform)
+	return timeout
+}
+func resilienceFirstEventPlan(ctx context.Context, accountID int64, platform string) (time.Duration, resilience.TimeoutPlan) {
 	b := resilienceTextBudget(ctx)
 	if b == nil {
-		return 0
+		return 0, resilience.TimeoutPlan{}
 	}
 	cfg := resilience.Current()
 	tier := time.Duration(cfg.Budget.AnthropicFirstEventTimeoutSeconds) * time.Second
 	if platform == PlatformGemini {
 		tier = time.Duration(cfg.Budget.GeminiFirstEventTimeoutSeconds) * time.Second
 	}
-	return b.AttemptTimeout(tier, resilienceLastCandidate(ctx, accountID), time.Now())
+	plan := resilience.StateFrom(ctx).PlanAttemptTimeout(tier, resilienceLastCandidate(ctx, accountID), time.Now())
+	return plan.Effective(), plan
 }
 
 // firstEventGuard cancels an upstream attempt that produced no first event
@@ -188,6 +198,7 @@ type firstEventGuard struct {
 	cancel  context.CancelFunc
 	fired   atomic.Bool
 	timeout time.Duration
+	plan    resilience.TimeoutPlan
 }
 
 type firstEventGuardKey struct{}
@@ -195,12 +206,15 @@ type firstEventGuardKey struct{}
 // newFirstEventGuard derives the attempt context; timeout <= 0 returns ctx
 // unchanged and a nil (inert) guard. The caller must call Release when the
 // attempt is over.
-func newFirstEventGuard(ctx context.Context, timeout time.Duration) (context.Context, *firstEventGuard) {
+func newFirstEventGuard(ctx context.Context, timeout time.Duration, plans ...resilience.TimeoutPlan) (context.Context, *firstEventGuard) {
 	if timeout <= 0 {
 		return ctx, nil
 	}
 	guarded, cancel := context.WithCancel(ctx)
 	g := &firstEventGuard{cancel: cancel, timeout: timeout}
+	if len(plans) > 0 {
+		g.plan = plans[0]
+	}
 	g.timer = time.AfterFunc(timeout, func() {
 		g.fired.Store(true)
 		cancel()
@@ -241,8 +255,12 @@ func (g *firstEventGuard) failoverError(c *gin.Context, account *Account, phase 
 		resilience.Count(resilience.MetricFirstOutputTimeout, resilience.StateFrom(c.Request.Context()).GroupID(), account.ID, phase)
 	}
 	if account != nil {
+		if c != nil && c.Request != nil {
+			noteTimeoutPlan(c.Request.Context(), account, g.plan)
+		}
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-			Platform: account.Platform, AccountID: account.ID, AccountName: account.Name,
+			TimeoutDiagnostics: g.plan.Diagnostics(),
+			Platform:           account.Platform, AccountID: account.ID, AccountName: account.Name,
 			UpstreamStatusCode: http.StatusGatewayTimeout,
 			Kind:               "first_output_timeout",
 			Reason:             "first_output_timeout",
@@ -251,7 +269,8 @@ func (g *firstEventGuard) failoverError(c *gin.Context, account *Account, phase 
 		})
 	}
 	return &UpstreamFailoverError{
-		StatusCode:   http.StatusGatewayTimeout,
-		ResponseBody: []byte(`{"error":{"type":"first_output_timeout","message":"Upstream produced no output before the deadline"}}`),
+		BudgetCutPlan: &g.plan,
+		StatusCode:    http.StatusGatewayTimeout,
+		ResponseBody:  []byte(`{"error":{"type":"first_output_timeout","message":"Upstream produced no output before the deadline"}}`),
 	}
 }

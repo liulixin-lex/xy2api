@@ -684,5 +684,6 @@ func (s *GatewayService) armGatewayConvertFirstEvent(ctx, upstreamCtx context.Co
 	if !clientStream || account == nil || !gatewayConvertGuarded() {
 		return upstreamCtx, nil
 	}
-	return newFirstEventGuard(upstreamCtx, resilienceFirstEventTimeout(ctx, account.ID, account.Platform))
+	timeout, plan := resilienceFirstEventPlan(ctx, account.ID, account.Platform)
+	return newFirstEventGuard(upstreamCtx, timeout, plan)
 }
