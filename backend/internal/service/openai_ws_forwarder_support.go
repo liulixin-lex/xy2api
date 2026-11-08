@@ -291,12 +291,15 @@ func (s *OpenAIGatewayService) handleOpenAIWSTerminalTransientFailure(ctx contex
 	if terminalEvent != "response.failed" {
 		return terminalEvent
 	}
-	s.handleOpenAIWSFailureAccountSideEffects(ctx, account, canonicalModel, headers, payload)
+	s.handleOpenAIWSFailureAccountSideEffects(ctx, account, canonicalModel, headers, payload, true)
 	return terminalEvent
 }
 
-func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx context.Context, account *Account, canonicalModel string, headers http.Header, payload []byte) {
+func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx context.Context, account *Account, canonicalModel string, headers http.Header, payload []byte, terminalStateRejection ...bool) {
 	if noteOpenAIWSStateRejection(ctx, account, payload) {
+		if len(terminalStateRejection) > 0 && terminalStateRejection[0] {
+			s.noteOpenAIWSStateRejectionStreak(ctx, account, payload)
+		}
 		return
 	}
 	eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
@@ -315,8 +318,11 @@ func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx cont
 // handleOpenAIWSFailureAccountSideEffects applies both structured credential
 // failures and transient failures. Its return value lets stream callers avoid
 // applying the same transition twice for an error/response.failed pair.
-func (s *OpenAIGatewayService) handleOpenAIWSFailureAccountSideEffects(ctx context.Context, account *Account, canonicalModel string, headers http.Header, payload []byte) bool {
+func (s *OpenAIGatewayService) handleOpenAIWSFailureAccountSideEffects(ctx context.Context, account *Account, canonicalModel string, headers http.Header, payload []byte, terminalStateRejection ...bool) bool {
 	if noteOpenAIWSStateRejection(ctx, account, payload) {
+		if len(terminalStateRejection) > 0 && terminalStateRejection[0] {
+			s.noteOpenAIWSStateRejectionStreak(ctx, account, payload)
+		}
 		return false
 	}
 	message := extractOpenAISSEErrorMessage(payload)

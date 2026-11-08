@@ -708,7 +708,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			return nil
 		}
 		if !failureAccountSideEffectsApplied {
-			failureAccountSideEffectsApplied = s.handleOpenAIWSFailureAccountSideEffects(ctx, account, mappedModel, resp.Header, bareErrorPayload)
+			failureAccountSideEffectsApplied = s.handleOpenAIWSFailureAccountSideEffects(ctx, account, mappedModel, resp.Header, bareErrorPayload, true)
 		}
 		s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, bareErrorPayload, bareErrorMessage, wroteDownstream)
 		upstreamTerminalEvent = "response.failed"

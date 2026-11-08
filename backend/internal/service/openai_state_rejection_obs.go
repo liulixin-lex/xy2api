@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -20,6 +21,36 @@ type openAIStateRejectionAttempt struct {
 	rejection   resilience.StateRejection
 	path, stage string
 	observedAt  time.Time
+	streakStatus int
+	streakBody   []byte
+	streakMessage string
+}
+
+type openAITerminalRejectionSessionContextKey struct{}
+
+type openAITerminalRejectionSessionIdentity struct {
+	groupID int64
+	session string
+}
+
+// WithOpenAITerminalRejectionIdentity carries the request's selected session
+// identity through long-lived WS turn handlers that do not own a RequestState.
+func WithOpenAITerminalRejectionIdentity(ctx context.Context, groupID *int64, session string) context.Context {
+	if ctx == nil || groupID == nil || strings.TrimSpace(session) == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, openAITerminalRejectionSessionContextKey{}, openAITerminalRejectionSessionIdentity{
+		groupID: *groupID,
+		session: strings.TrimSpace(session),
+	})
+}
+
+func openAITerminalRejectionIdentityFromContext(ctx context.Context) (openAITerminalRejectionSessionIdentity, bool) {
+	if ctx == nil {
+		return openAITerminalRejectionSessionIdentity{}, false
+	}
+	identity, ok := ctx.Value(openAITerminalRejectionSessionContextKey{}).(openAITerminalRejectionSessionIdentity)
+	return identity, ok && identity.groupID > 0 && identity.session != ""
 }
 
 func beginOpenAIStateRejectionAttempt(ctx context.Context, c *gin.Context, account *Account, body []byte) func(*error) {
@@ -65,6 +96,14 @@ func captureOpenAIStateRejection(c *gin.Context, account *Account, payload []byt
 	if v, ok := c.Get(openAIStateRejectionAttemptKey); ok {
 		if a, ok := v.(*openAIStateRejectionAttempt); ok && a != nil {
 			a.rejection, a.path, a.stage, a.observedAt = rej, path, stage, time.Now()
+			a.streakStatus = 0
+			a.streakBody = nil
+			a.streakMessage = ""
+			if rej.RequestScoped() && (path == "native_sse" || path == "passthrough_sse") {
+				a.streakStatus = openAIStreamFailedEventSemanticStatus(payload, message)
+				a.streakBody = append(a.streakBody[:0], payload...)
+				a.streakMessage = message
+			}
 			return
 		}
 	}
@@ -80,6 +119,38 @@ func captureOpenAIStateRejection(c *gin.Context, account *Account, payload []byt
 		ctx = c.Request.Context()
 	}
 	noteOpenAIStateRejection(ctx, c, account, rej, path, stage, body)
+}
+
+func (s *OpenAIGatewayService) noteOpenAIStreamStateRejectionStreak(ctx context.Context, c *gin.Context, account *Account, forwardErr error) {
+	if s == nil || c == nil || account == nil || forwardErr == nil {
+		return
+	}
+	v, ok := c.Get(openAIStateRejectionAttemptKey)
+	if !ok {
+		return
+	}
+	attempt, ok := v.(*openAIStateRejectionAttempt)
+	if !ok || attempt == nil || !attempt.rejection.RequestScoped() || attempt.stage != "pre_output" ||
+		(attempt.path != "native_sse" && attempt.path != "passthrough_sse") || len(attempt.streakBody) == 0 {
+		return
+	}
+	groupID, session := resilience.StateFrom(ctx).SessionIdentity()
+	s.noteOpenAITerminalRejectionForSession(ctx, account, groupID, session, attempt.streakStatus, nil,
+		attempt.streakBody, forwardErr)
+}
+
+func (s *OpenAIGatewayService) noteOpenAIWSStateRejectionStreak(ctx context.Context, account *Account, payload []byte) {
+	if s == nil || account == nil || !openAIStateRejection(payload, "").RequestScoped() {
+		return
+	}
+	identity, ok := openAITerminalRejectionIdentityFromContext(ctx)
+	if !ok {
+		return
+	}
+	message := extractOpenAISSEErrorMessage(payload)
+	status := openAIStreamFailedEventSemanticStatus(payload, message)
+	s.noteOpenAITerminalRejectionForSession(ctx, account, identity.groupID, identity.session,
+		status, nil, payload, errors.New("upstream state rejection"))
 }
 
 func noteOpenAIStateRejection(ctx context.Context, c *gin.Context, account *Account, rej resilience.StateRejection, path, stage string, body []byte) {

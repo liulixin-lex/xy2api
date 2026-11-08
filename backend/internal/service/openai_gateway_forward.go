@@ -21,7 +21,11 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, forwardErr error) {
-	defer beginOpenAIStateRejectionAttempt(ctx, c, account, body)(&forwardErr)
+	finishStateRejection := beginOpenAIStateRejectionAttempt(ctx, c, account, body)
+	defer func() {
+		s.noteOpenAIStreamStateRejectionStreak(ctx, c, account, forwardErr)
+		finishStateRejection(&forwardErr)
+	}()
 	// Run the same complete checks on original bytes without applying edits;
 	// requests that cannot obtain a raw plan cannot gain one after normalization.
 	collabRawBlocked, collabRawConflict := true, false

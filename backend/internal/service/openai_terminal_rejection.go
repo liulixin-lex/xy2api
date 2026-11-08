@@ -114,13 +114,23 @@ func (t *openAITerminalRejectionTracker) reset(group int64, session string, acco
 // Called only after the existing HTTP error handler decides to terminate.
 // It never changes that response or retries the current request.
 func (s *OpenAIGatewayService) noteOpenAITerminalRejection(ctx context.Context, account *Account, status int, headers http.Header, body []byte, forwardErr error) {
+	group, session := resilience.StateFrom(ctx).SessionIdentity()
+	s.noteOpenAITerminalRejectionForSession(ctx, account, group, session, status, headers, body, forwardErr)
+}
+
+func (s *OpenAIGatewayService) noteOpenAITerminalRejectionForSession(ctx context.Context, account *Account, group int64, session string, status int, headers http.Header, body []byte, forwardErr error) {
 	cfg := resilience.Current()
 	if s == nil || s.resilience == nil || s.resilience.store == nil || account == nil ||
 		!account.IsOpenAICompatible() || !cfg.SessionOn() {
 		return
 	}
-	group, session := resilience.StateFrom(ctx).SessionIdentity()
 	if session == "" || account.ID <= 0 {
+		return
+	}
+	// A guardian request can be scheduled with its parent's binding as a hint.
+	// If the request identity aliases that parent key, do not let a child-side
+	// rejection delete or avoid the parent's healthy sticky owner.
+	if preserveOpenAIGuardianParentBinding(ctx, session) {
 		return
 	}
 	tracker := &s.resilience.terminalRejections
