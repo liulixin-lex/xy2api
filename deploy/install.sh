@@ -607,7 +607,9 @@ validate_version() {
 get_current_version() {
     if [ -f "$INSTALL_DIR/xy2api" ]; then
         # Use grep -E for better compatibility (works on macOS and Linux)
-        "$INSTALL_DIR/xy2api" --version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "unknown"
+        local current_version
+        current_version=$("$INSTALL_DIR/xy2api" --version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+        echo "${current_version:-unknown}"
     else
         echo "not_installed"
     fi

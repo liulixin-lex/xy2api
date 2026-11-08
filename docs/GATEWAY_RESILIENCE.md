@@ -547,7 +547,7 @@ info 级，只写应用标准输出（量大，明细已有计数或未送达表
 - `blank_placeholder_staged`（完整事件名 `resilience.blank_placeholder_staged`）：原生/透传 Responses 每次尝试实际暂存过空白占位后只记一条，含 `account_id`，不记录占位正文；
 - `blank_placeholder_outcome`（完整事件名 `resilience.blank_placeholder_outcome`）：Responses handler 结束时，仅请求内曾实际暂存空白才记一条。`placeholder_timeouts` 只累计暂存过空白的尝试所发生的首输出超时，普通静默尝试不计；`final_outcome` 读取现有请求恢复结果，`budget_cause` 读取预算的耗尽原因（未耗尽为空）。用于关联下一跳结果和有占位请求最终预算耗尽的次数，不改写恢复结果；
 - `keepalive_committed`（含 `group_id`、`protocol`、`edge`）；
-- `client_gone_skip`（完整事件名 `resilience.client_gone_skip`，0.5.11）：客户端已离开时，网关跳过号失败标记、门槛软失败、输出后计数与冷却、会话改绑（含 P1-B）以及流超时计数，只记这一条，用于统计排空期间被跳过的上游故障。含通用请求字段、`group_id`、`account_id`、`platform`、`reason`、`category`；`reason` 为输出后失败的原因（`stream_read_error`、`missing_terminal`、`stream_failed` 等）、`stall` 或 `stream_timeout`，`category` 为本应记入的类别（`stream_timeout` 为空）。同一次停滞可能同时出现 `stall` 和 `stream_timeout` 两条，统计时按 `reason` 过滤或按请求去重；
+- `client_gone_skip`（完整事件名 `resilience.client_gone_skip`，0.5.11）：客户端已离开时，网关跳过号失败标记、门槛软失败、输出后计数与冷却、会话改绑（含 P1-B）以及流超时计数，只记这一条，用于统计排空期间被跳过的上游故障。stream_timeout 的 client_gone_skip 只在处置开启（且 action 不为 none）时记录。含通用请求字段、`group_id`、`account_id`、`platform`、`reason`、`category`；`reason` 为输出后失败的原因（`stream_read_error`、`missing_terminal`、`stream_failed` 等）、`stall` 或 `stream_timeout`，`category` 为本应记入的类别（`stream_timeout` 为空）。同一次停滞可能同时出现 `stall` 和 `stream_timeout` 两条，统计时按 `reason` 过滤或按请求去重；
 - `openai.sticky_bypass`：保留原绑定的临时放弃，字段与 Warn 事件相同；仅写应用标准输出。
 - `unclassified`：只按状态码归类的上游 4xx 文案采样（脱敏、截断，每分钟约 10 条），发现新的余额文案时加入 `failure.balance_keywords_extra`；
 - `undelivered`（含阶段、耗时、推断的 CDN 切断与 `edge`）；

@@ -6,13 +6,6 @@
 
 ## 当前交接状态
 
-### 0.5.11 版本与三项小修候选（2026-11-08 09:30 UTC；本地完成，待 PM 复审）
-
-- 分支 `feat/p3-version-0511-20261108`，基于 `0fc5cc9fd`；先 cherry-pick `ef1e97a52`，再各自提交安装回退、探测日志、生图 prompt 和流超时日志修复。未推送，未部署。
-- 安装脚本在 `set -euo pipefail` 下无法取得版本时继续回退 `unknown`；补真实 `-version` 入口 stdout 测试。两条探测 info 日志去掉上游地址；generations/edits 的 JSON 与 multipart 请求在选号前统一拒绝空白 prompt，返回 `400 invalid_request_error` / `prompt is required`；流超时的 `client_gone_skip` 只在惩罚开启且 action 非 none 时记录。
-- 新增回归均已证实旧代码失败、修复后通过；install 测试、`cmd/server`、受影响 service/handler 定向单测通过，Go 测试全程使用共享锁与 `-p 1`，未跑全量。
-- `d1d25c99c` 整体排除，上游 400 的归属只登记；A4 的 P3-1/P3-2 属于该延期项，本次不带入。下一步由 PM 复审、集成与安排后续门禁。
-
 ### 0.5.10 候选（2026-11-08 03:16 UTC；两路红队已签字，门禁、冒烟与 CI 进行中，合并与发版等用户批准）
 
 - **背景**：分支 `feat/enc-lastresort-avoid-20261108`，基于 main `e6e01c4da`（0.5.9 加记忆登记）；draft PR #213 目标为 main。提交依次为：修复 `f4518649e`、只改测试的 `09ce7f9d5`、版本提交 `6c50a361a`（版本 0.5.10，兼容基线 0.2.15）。
@@ -201,8 +194,6 @@
 - **仓库外环境收尾**：测试服务器的候选镜像、浸泡与演练目录、`xy2api_upgrade` 库按 staging-validation §11 清理；预上线主机的两份切换前备份在正式部署后删除。
 
 ## 进行中的工作
-
-- **20261108-p3-version-0511**（酉，2026-11-08 09:30 UTC）：本地版本、安装回退与三项小修已完成，定向回归全部通过，待 PM 复审与集成。分支 `feat/p3-version-0511-20261108`；未推送，不含 `d1d25c99c`。范围和验证见当前交接状态及本次操作日志。
 
 - **20261106-encrypted-routing-followups**（2026-11-08 03:16 UTC）：0.5.9 已正式发布并蓝绿上线，是当前线上版本；0.5.10 候选（兜底把会话暂避的号排到最后，draft PR #213）两路红队已签字，门禁、冒烟和 CI 进行中，合并与发版等用户批准。
 
@@ -1524,11 +1515,3 @@ pnpm --dir frontend run build
 - 完成操作：`PROJECT_MEMORY.md` 的 0.5.9 观察 P3 清单加一条（频率、影响、最小修法，下一轮做）。只改文档，不影响门禁目标 `6c50a361a`。
 - 验证：check_docs_consistency 通过；干净树 upstream audit 通过。
 - 下一步：下一轮实现入口处“客户端已离开就不记”。
-
-### 2026-11-08 09:30 UTC — 20261108-p3-version-0511 — 版本、安装回退与三项小修完成
-
-- 请求/目标：PM 指定从 `0fc5cc9fd` 新建 `feat/p3-version-0511-20261108`，仅保留 `ef1e97a52`，修复 A4 的安装版本回退；随后同分支追加探测日志、生图空 prompt、流超时日志三项，每项单独提交，不推送。
-- 完成操作：版本输出提交 cherry-pick 为 `0fd64d841`；安装版本提取管道增加 `|| true` 并补 CLI 接线测试（`5249114e5`）；两条探测 info 日志移除 `base_url`（`ef5f40673`）；解析 JSON/multipart 生图请求后统一校验空白 prompt（`975fb617e`）；流超时 client-gone 判断原样移至 enabled/action 检查之后。使用仓库既有 noreply 身份与指定 Co-Authored-By。
-- 旧代码反例：strict shell 的空版本输出退出 1，未到达 unknown 回退；两条探测 info 日志含上游地址；空 prompt 在 handler 前置组检查得到 403，真实选号用例 API Key 进入上游、OAuth 返回 502；流超时关闭或 action none 时仍记录 client_gone_skip。各项对应的新回归在旧代码上均失败，修复后均通过。
-- 验证：`deploy/tests/install-version-test.sh` 的普通/strict 两模式共 8 场景、既有 `install-github-token-test.sh` 及 shell 语法通过；`cmd/server` 的版本 helper/真实入口测试通过；service 的两条真实探测路径、流超时四场景及相邻客户端离开回归通过；handler 的 generations/edits × JSON/multipart 空值与有效值对照、API Key/OAuth 选号前拒绝，以及相邻解析/转发回归通过。所有 Go 命令均使用 `flock`、`nice -n 10`、`-p 1`，只测受影响包，未跑全量。提交前检查文档一致性与 diff。
-- 取舍/未完成：`d1d25c99c` 与对应 A4 P3-1/P3-2 均只登记；未进行 CI、红队签字、生产访问、推送或部署。无开发卡点，下一步由 PM 复审与集成。
