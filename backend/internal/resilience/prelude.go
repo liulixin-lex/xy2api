@@ -36,8 +36,9 @@ type ResponsesOutputDisposition struct {
 	BlankPlaceholder bool
 }
 
-// ResponsesEventOutputDisposition applies the same per-event whitespace rule
-// everywhere. Unknown or malformed response events fail closed as visible.
+// ResponsesEventOutputDisposition applies the same per-event rule everywhere.
+// Unknown events with unambiguous metadata stay staged. Outside response.* and
+// codex.*, strings are also metadata because clients ignore those event types.
 func ResponsesEventOutputDisposition(eventType string, payload []byte) ResponsesOutputDisposition {
 	typ := strings.TrimSpace(eventType)
 	declaredType := typ
@@ -51,6 +52,13 @@ func ResponsesEventOutputDisposition(eventType string, payload []byte) Responses
 			}
 			typ = payloadType
 		}
+	}
+	if !isKnownResponsesEventType(typ) {
+		if validObject && typ != "" && (declaredType == "" || declaredType == typ) &&
+			responsesUnknownEventHasOnlyMetadata(root, typ) {
+			return ResponsesOutputDisposition{Matched: true, Kind: Prelude}
+		}
+		return responsesVisibleDisposition()
 	}
 	if !strings.HasPrefix(typ, "response.") {
 		switch typ {
@@ -165,10 +173,157 @@ func ResponsesEventOutputDisposition(eventType string, payload []byte) Responses
 			return responsesVisibleDisposition()
 		}
 	default:
-		// Only the explicitly supported lifecycle and text-placeholder shapes
-		// remain staged. Unknown response events fail closed as visible content.
 		return responsesVisibleDisposition()
 	}
+}
+
+// responsesKnownEventTypeNames is the source of truth for events that retain
+// their established Responses handling. It covers the official OpenAI
+// ResponseStreamEvent union plus gateway heartbeats/errors and legacy event
+// spellings already handled here. The payload marker sub2api_placeholder is
+// handled by the existing known output_item classifier, not as an event type.
+const responsesKnownEventTypeNames = `
+response.audio.delta
+response.audio.done
+response.audio.transcript.delta
+response.audio.transcript.done
+response.audio_transcript.delta
+response.audio_transcript.done
+response.output_audio.delta
+response.output_audio.done
+response.output_audio_transcript.delta
+response.output_audio_transcript.done
+response.code_interpreter_call_code.delta
+response.code_interpreter_call_code.done
+response.code_interpreter_call.in_progress
+response.code_interpreter_call.interpreting
+response.code_interpreter_call.completed
+response.compaction.compacting
+response.completed
+response.content_part.added
+response.content_part.done
+response.created
+response.done
+response.failed
+response.incomplete
+response.in_progress
+response.queued
+response.cancelled
+response.canceled
+response.metadata
+response.output_item.added
+response.output_item.done
+response.output_text.annotation.added
+response.output_text.delta
+response.output_text.done
+response.refusal.delta
+response.refusal.done
+response.function_call_arguments.delta
+response.function_call_arguments.done
+response.custom_tool_call_input.delta
+response.custom_tool_call_input.done
+response.reasoning_summary_part.added
+response.reasoning_summary_part.done
+response.reasoning_summary_text.delta
+response.reasoning_summary_text.done
+response.reasoning_text.delta
+response.reasoning_text.done
+response.file_search_call.in_progress
+response.file_search_call.searching
+response.file_search_call.completed
+response.web_search_call.in_progress
+response.web_search_call.searching
+response.web_search_call.completed
+response.web_search_call.failed
+response.computer_call.in_progress
+response.computer_call.completed
+response.local_shell_call.in_progress
+response.local_shell_call.completed
+response.local_shell_call.failed
+response.apply_patch_call.in_progress
+response.apply_patch_call.completed
+response.apply_patch_call.failed
+response.apply_patch_call_input.delta
+response.apply_patch_call_input.done
+response.image_generation_call.in_progress
+response.image_generation_call.generating
+response.image_generation_call.completed
+response.image_generation_call.partial_image
+response.mcp_call_arguments.delta
+response.mcp_call_arguments.done
+response.mcp_call.in_progress
+response.mcp_call.failed
+response.mcp_call.completed
+response.mcp_list_tools.in_progress
+response.mcp_list_tools.failed
+response.mcp_list_tools.completed
+response.shell_call_command.added
+response.shell_call_command.delta
+response.shell_call_command.done
+response.shell_call_output_content.delta
+response.shell_call_output_content.done
+error
+keepalive
+ping
+codex.response.metadata
+codex.rate_limits
+`
+
+var responsesKnownEventTypeSet = func() map[string]struct{} {
+	known := make(map[string]struct{})
+	for _, eventType := range strings.Fields(responsesKnownEventTypeNames) {
+		known[eventType] = struct{}{}
+	}
+	return known
+}()
+
+func isKnownResponsesEventType(eventType string) bool {
+	_, known := responsesKnownEventTypeSet[eventType]
+	return known
+}
+
+// Validate unknown extensions separately so their recursive duplicate-key
+// checks and relaxed strings cannot change known G2a/G2c event handling.
+func responsesUnknownEventHasOnlyMetadata(root gjson.Result, eventType string) bool {
+	if !responsesObjectHasUniqueFields(root) {
+		return false
+	}
+	allowStrings := !strings.HasPrefix(eventType, "response.") && !strings.HasPrefix(eventType, "codex.")
+	valid := true
+	root.ForEach(func(key, field gjson.Result) bool {
+		switch key.String() {
+		case "type", "id", "response_id", "item_id":
+			valid = field.Type == gjson.String
+		case "sequence_number":
+			valid = field.Type == gjson.Number && field.Num >= 0 && field.Num == math.Trunc(field.Num)
+		default:
+			valid = responsesUnknownFieldIsMetadata(field, 0, allowStrings)
+		}
+		return valid
+	})
+	return valid
+}
+
+func responsesUnknownFieldIsMetadata(value gjson.Result, depth int, allowStrings bool) bool {
+	switch value.Type {
+	case gjson.Null, gjson.Number, gjson.True, gjson.False:
+		return true
+	case gjson.String:
+		return allowStrings || value.Str == ""
+	}
+	if !value.IsArray() && !value.IsObject() {
+		return false
+	}
+	depth++
+	if depth > responsesEmptyFieldMaxDepth || (value.IsObject() && !responsesObjectHasUniqueFields(value)) {
+		return false
+	}
+	valid := true
+	value.ForEach(func(_, child gjson.Result) bool {
+		valid = responsesUnknownFieldIsMetadata(child, depth, allowStrings)
+		return valid
+	})
+	return valid
 }
 
 func responsesTextDisposition(text gjson.Result) ResponsesOutputDisposition {
@@ -415,8 +570,8 @@ func ClassifyStreamEvent(protocol, eventType string, payload []byte) EventClass 
 		if typ == "response.metadata" {
 			return EventClass{Kind: Unknown}
 		}
-		// Unknown or malformed event shapes are visible by default. The explicit
-		// blank-placeholder and lifecycle cases were handled above.
+		// Known Responses event types not handled by the shared structural
+		// projection preserve their existing visible-content fallback.
 		return EventClass{Kind: Content}
 	}
 	switch protocol {
@@ -429,7 +584,7 @@ func ClassifyStreamEvent(protocol, eventType string, payload []byte) EventClass 
 			// capacity error (codex.rate_limits carries the plan's usage
 			// windows; production saw it commit streams that then failed with
 			// a replayable 503). Exact names only, and only with the native
-			// whitelist on; otherwise they fall through to Unknown (content).
+			// whitelist on; otherwise they retain their legacy Unknown result.
 			if Current().NativePreludeWhitelistOn() {
 				return EventClass{Kind: Prelude}
 			}

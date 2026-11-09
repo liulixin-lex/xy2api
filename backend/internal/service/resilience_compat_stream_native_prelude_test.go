@@ -77,7 +77,7 @@ func TestNativePreludeAttemptBoundary(t *testing.T) {
 		{"marked", relayKeepaliveFrame, "", true},
 		{"nonempty_before_created", "data: {\"type\":\"response.output_text.delta\",\"delta\":\"real\"}\n\n", "", false},
 		{"codex_metadata", "", "data: {\"type\":\"codex.response.metadata\"}\n\n", true},
-		{"unknown_codex", "", "data: {\"type\":\"codex.unknown\"}\n\n", false},
+		{"unknown_codex_ready", "", "data: {\"type\":\"codex.unknown\"}\n\n", true},
 		{"response_metadata", "", "event: response.metadata\ndata: {\"type\":\"response.metadata\",\"sequence_number\":1,\"metadata\":{\"openai_chatgpt_moderation_metadata\":{}}}\n\n", true},
 		{"unknown_added_payload", "", "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"message\",\"content\":[],\"opaque\":\"payload\"}}\n\n", false},
 	}
