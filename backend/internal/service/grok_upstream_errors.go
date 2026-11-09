@@ -208,7 +208,8 @@ func (s *OpenAIGatewayService) shouldFailoverGrokUpstreamError(account *Account,
 	if isOpenAIRequestBodyTooLargeError(statusCode, extractUpstreamErrorMessage(responseBody), responseBody) {
 		return true
 	}
-	if shouldFailoverClassifiedUpstreamError(statusCode, nil, responseBody) {
+	if !customPolicyOverridesGenericInference404(account, statusCode, responseBody) &&
+		shouldFailoverClassifiedUpstreamError(statusCode, nil, responseBody) {
 		return true
 	}
 	// A 422 emitted by xAI's ModelInput decoder is account/runtime compatibility,

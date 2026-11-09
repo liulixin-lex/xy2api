@@ -327,19 +327,33 @@ func TestForwardSystemOneAccountLevelFailuresFailOver(t *testing.T) {
 }
 
 func TestForwardSystemOneHonorsCustomErrorCodes(t *testing.T) {
-	account := &Account{ID: 23, Platform: PlatformTypeSafe, Type: AccountTypeAPIKey, Credentials: map[string]any{
-		"base_url": "http://typesafe.test", "api_key": "ts-secret",
-		"custom_error_codes_enabled": true, "custom_error_codes": []any{float64(http.StatusNotFound)},
-	}}
-	repo := &systemOnePolicyAccountRepo{account: account}
-	svc := newSystemOneTestService(newSystemOneStatusUpstream(http.StatusNotFound, `{"detail":"missing"}`))
-	svc.rateLimitService = NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	for _, tc := range []struct {
+		name           string
+		body           string
+		customPolicy   bool
+		wantError      int
+		wantModelLimit int
+	}{
+		{name: "non-generic 404 uses custom policy", body: `{"detail":"missing"}`, customPolicy: true, wantError: 1},
+		{name: "generic 404 uses custom policy", body: `{"message":"not found"}`, customPolicy: true, wantError: 1},
+		{name: "generic 404 without custom policy limits model", body: `{"message":"not found"}`, wantModelLimit: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			account := &Account{ID: 23, Platform: PlatformTypeSafe, Type: AccountTypeAPIKey, Credentials: map[string]any{
+				"base_url": "http://typesafe.test", "api_key": "ts-secret",
+				"custom_error_codes_enabled": tc.customPolicy, "custom_error_codes": []any{float64(http.StatusNotFound)},
+			}}
+			repo := &systemOnePolicyAccountRepo{account: account}
+			svc := newSystemOneTestService(newSystemOneStatusUpstream(http.StatusNotFound, tc.body))
+			svc.rateLimitService = NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
 
-	_, err := svc.ForwardSystemOne(context.Background(), newSystemOneTestContext(), account, []byte(`{}`))
-	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, err, &failoverErr)
-	require.Zero(t, repo.errorCalls)
-	require.Equal(t, 1, repo.modelLimitCalls)
+			_, err := svc.ForwardSystemOne(context.Background(), newSystemOneTestContext(), account, []byte(`{}`))
+			var failoverErr *UpstreamFailoverError
+			require.ErrorAs(t, err, &failoverErr)
+			require.Equal(t, tc.wantError, repo.errorCalls)
+			require.Equal(t, tc.wantModelLimit, repo.modelLimitCalls)
+		})
+	}
 }
 
 func TestForwardSystemOneUnhandledStatusDoesNotFailOver(t *testing.T) {

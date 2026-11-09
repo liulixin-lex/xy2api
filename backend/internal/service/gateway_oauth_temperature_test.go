@@ -20,7 +20,18 @@ func TestOAuthMimicTemperatureByModelAndAPIVersion(t *testing.T) {
 		model           string
 		wantTemperature bool
 	}{
+		{"claude-opus-4-5", true},
 		{"claude-opus-4-6", true},
+		{"claude-opus-4-5-20251101", true},
+		{"claude-opus-4-6-20260205", true},
+		{"claude-opus-4-5@20251101", true},
+		{"claude-opus-4-6@20260205", true},
+		{"anthropic/claude-opus-4.5", true},
+		{"anthropic/claude-opus-4.6", true},
+		{"anthropic/claude-opus-4-5-20251101", true},
+		{"anthropic/claude-opus-4-6-20260205", true},
+		{"bedrock/us.anthropic.claude-opus-4-5-20251101-v1:0", true},
+		{"bedrock/us.anthropic.claude-opus-4-6-20260205-v1:0", true},
 		{"claude-opus-4-7", false},
 		{"claude-opus-4-8", false},
 		{"claude-opus-5", false},
