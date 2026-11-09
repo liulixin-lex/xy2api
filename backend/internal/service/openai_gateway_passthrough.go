@@ -2803,6 +2803,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 					markOpenAIBlankPlaceholderStaged(c, account.ID)
 					attemptStagedBlankPlaceholder = true
 				}
+				if data, ok := extractOpenAISSEDataLine(line); ok && resilience.ResponsesEventOutputDisposition(effectiveOpenAISSEEventType([]byte(data), pendingSSEEventType), []byte(data)).Staged {
+					resilience.StateFrom(ctx).NotePreludeStaged(startTime)
+				}
 				if line == "" {
 					eventHasBlankPlaceholder = false
 				}
@@ -2849,81 +2852,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		}
 		return passthroughLineContinue
 	}
-	// Classify unknown metadata only after joining the complete SSE event.
-	// Preserve its wire lines for replay; all other events use the existing path.
-	var preludeEvent openAICompatSSEFrameParser
-	var preludeEventLines []string
-	var preludeEventBytes int64
-	flushPreludeEvent := func() passthroughLineStep {
-		frame, complete := preludeEvent.Finish()
-		lines := preludeEventLines
-		preludeEventLines, preludeEventBytes = nil, 0
-		eventOpen = false
-		payload := []byte(frame.Data)
-		eventType := effectiveOpenAISSEEventType(payload, frame.EventType)
-		_, wrapped, malformed := openAIWrappedUpstreamErrorStatus(frame.EventType, payload)
-		stagedMetadata := complete && !wrapped && !malformed && !clientOutputStarted && !clientDisconnected && !failureDelivered && !suppressCurrentEvent &&
-			(!codexFailureTerminal || !sawBareError || sawResponseFailed) && resilience.ResponsesEventOutputDisposition(eventType, payload).Staged
-		if stagedMetadata && strings.Contains(frame.Data, "\n") {
-			if _, err := pendingStage.WriteString(strings.Join(lines, "\n") + "\n"); err != nil {
-				failover := s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, nil, "OpenAI first-output staging failed: "+err.Error())
-				failover.SafeToFailoverAfterWrite = true
-				return passthroughReturn(resultWithUsage(), failover)
-			}
-			observer.ObserveOpenAI(payload, eventType)
-		} else {
-			for _, pending := range lines {
-				if step := processLine(pending); step != passthroughLineContinue {
-					return step
-				}
-			}
-		}
-		if stagedMetadata && !clientDisconnected {
-			resilience.StateFrom(ctx).NotePreludeStaged(startTime)
-		}
-		return passthroughLineContinue
-	}
-	var eventUsesLinePath bool
-	processEventLine := func(line string) passthroughLineStep {
-		if clientOutputStarted || eventUsesLinePath {
-			eventUsesLinePath = line != ""
-			return processLine(line)
-		}
-		if (guarded && strings.HasPrefix(line, ":")) || (line == "" && len(preludeEventLines) == 0) {
-			eventOpen = len(preludeEventLines) > 0
-			return processLine(line)
-		}
-		preludeEventBytes += int64(len(line) + 1)
-		preludeEventLines = append(preludeEventLines, line)
-		if line != "" {
-			_, _ = preludeEvent.AddLine(line)
-		}
-		// Complete non-G2b payloads retain immediate handling, including large
-		// visible events that release the stage instead of consuming its limit.
-		if data, ok := extractOpenAISSEDataLine(line); ok && len(preludeEvent.dataLines) == 1 {
-			payload := []byte(data)
-			_, wrapped, malformed := openAIWrappedUpstreamErrorStatus(preludeEvent.eventType, payload)
-			if strings.TrimSpace(data) == "[DONE]" || (gjson.Valid(data) && (wrapped || malformed ||
-				!resilience.ResponsesEventOutputDisposition(effectiveOpenAISSEEventType(payload, preludeEvent.eventType), payload).Staged)) {
-				eventUsesLinePath = true
-				return flushPreludeEvent()
-			}
-		}
-		if pendingStage.Buffered()+preludeEventBytes > openAIFirstOutputStageMaxBytes {
-			failover := s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, nil, "OpenAI first-output staging limit exceeded")
-			failover.SafeToFailoverAfterWrite = true
-			return passthroughReturn(resultWithUsage(), failover)
-		}
-		if line == "" {
-			return flushPreludeEvent()
-		}
-		eventOpen = true
-		return passthroughLineContinue
-	}
 	finish := func(scanErr error) (*openaiStreamingResultPassthrough, error) {
-		if len(preludeEventLines) > 0 && flushPreludeEvent() == passthroughLineReturn {
-			return retResult, retErr
-		}
 		cleanEOF = scanErr == nil && ctx.Err() == nil
 		ensureResponseFailedTerminal()
 		if guarded && !clientOutputStarted && reqCtx.Err() != nil {
@@ -2998,7 +2927,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	}
 	if !guarded || (firstOutputTimeout <= 0 && stallCheckBase <= 0 && keepaliveInterval <= 0) {
 		for documentScanner.Scan() {
-			switch processEventLine(documentScanner.Text()) {
+			switch processLine(documentScanner.Text()) {
 			case passthroughLineReturn:
 				return retResult, retErr
 			case passthroughLineBreak:
@@ -3009,7 +2938,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	}
 	releaseScanBuf = false
 	return runOpenAIPassthroughReadPump(resp, documentScanner, scanBuf, openAIPassthroughPump{
-		processLine: processEventLine,
+		processLine: processLine,
 		finish:      finish,
 		returned:    func() (*openaiStreamingResultPassthrough, error) { return retResult, retErr },
 		contentSeen: func() bool { return firstOutputSeen },
