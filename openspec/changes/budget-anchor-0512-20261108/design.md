@@ -26,10 +26,10 @@ budget_start=arrival、budget_cut_attribution=observe 为发版缺省，新增�
 
 OpenAI 派出只在真实 HTTP 传输前计一次；插件提前失败不计、WS/Anthropic/Gemini 不纳入此直方图。迟发定义 start>T0+base−2 s，不写死 238；无计时器迟发另计 late_attempt_no_timer_count，只进请求 JSON/日志/指标。未送达 Warn resilience.late_attempt_undelivered 供 G9 与同 key 同 UTC 小时的 abuse_guard 配对。
 
-292 为 usage 可空观测列（含 budget_start_mode、budget_t0_unix_ms），293 为 ops resilience_timing；无默认值、索引、回填。等锁 5 s、语句 30 s，两个独立事务可能半迁移。G9 切回流程和核验 SQL 见 [runbook](runbook.md)。
+292 为 usage 可空观测列（含 budget_start_mode、budget_t0_unix_ms），293 为 ops resilience_timing；无默认值、索引、回填。等锁 5 s、语句 30 s，两个独立事务可能半迁移。G9 观测与（PM 决定后）切回流程和核验 SQL 见 [runbook](runbook.md)。
 
 ## T8–T11 旧契约同步
 
 T8：pre-output-keepalive 中的固定 240 s 改为相对 D。T9：预算场景改为相对 D，无计时器路径新尝试最晚 D−2 s。T10：旧 design/runbook 与现行文档使用 D，并说明 Gemini 末候选风险。T11：≥60 s 账号级定义不改动，从到达起算；E2/E4 移至第二期待探针和数据。
 
-正常 arrival 准入不产生迟发，隐藏重放绕过准入时计数与 Warn 仍可非零，仅增加观测。Warn 包含 request_id/client_request_id；abuse_guard 仅证明进入 abuse 状态。G9 只作迟发观测与核验，不自动切回 arrival，也不是启用 body_eof 的硬前置门槛；观测字段与检查流程见 runbook。
+正常 arrival 准入不产生迟发，隐藏重放绕过准入时计数与 Warn 仍可非零，仅增加观测。Warn 包含 request_id/client_request_id；abuse_guard 仅证明进入 abuse 状态。G9 只作迟发观测；runbook 说明观测与（PM 决定后）切回流程。

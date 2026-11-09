@@ -77,6 +77,9 @@ func TestTimedAdmissionUsesDAndArrivalIsUnchanged(t *testing.T) {
 		if kind == KindImage {
 			require.Zero(t, b.AdmissionRemaining(at, false))
 			require.True(t, b.CanAttempt(at))
+		} else {
+			require.Equal(t, time.Second, b.AdmissionRemaining(at, false))
+			require.False(t, b.CanAttempt(at))
 		}
 	}
 	var none *Budget
