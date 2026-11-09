@@ -25,6 +25,11 @@ func TestUsageLogBudgetTimingMigrationColumns(t *testing.T) {
 			actual := byName[col[1]]
 			require.NotNil(t, actual)
 			require.Equal(t, types[col[2]], actual.Type)
+			if col[2] == "TEXT" {
+				require.Equal(t, "text", actual.SchemaType["postgres"])
+			} else {
+				require.Empty(t, actual.SchemaType)
+			}
 			require.True(t, actual.Nullable)
 			require.Nil(t, actual.Default)
 		})

@@ -4260,6 +4260,10 @@
     {
       "path": "backend/internal/service/openai_gateway_scheduling.go",
       "value": "if account.ID == state.StickyOwner() {"
+    },
+    {
+      "path": "backend/ent/migrate/usage_log_budget_timing_test.go",
+      "value": "require.Equal(t, \"text\", actual.SchemaType[\"postgres\"])"
     }
   ],
   "forbidden_module_paths": [

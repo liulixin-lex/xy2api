@@ -136,6 +136,6 @@ Anthropic TTL 迁移 286 追加 Key 四态和 usage 两个可空观测列；已�
 
 ### Migration-owned Ent columns
 
-迁移 `292_usage_logs_budget_timing.sql` 新增的 18 个可空观测列已纳入 `backend/ent/schema/usage_log.go`，同步生成 nullable/nillable 字段、查询条件和 CRUD 接口。BIGINT、TEXT、BOOLEAN 分别对应 Int64、String、Bool；手写 repository 的读写口径不变，批量 INSERT 有 85 个列值，另加合成的 `input_index`。
+迁移 `292_usage_logs_budget_timing.sql` 新增的 18 个可空观测列已纳入 `backend/ent/schema/usage_log.go`，同步生成 nullable/nillable 字段、查询条件和 CRUD 接口。BIGINT、TEXT、BOOLEAN 分别对应 Int64、String、Bool；其中 TEXT 字段必须显式声明 `SchemaType(map[string]string{dialect.Postgres: "text"})`，才能与迁移的 TEXT 一致，避免被 Ent 当作 varchar；手写 repository 的读写口径不变，批量 INSERT 有 85 个列值，另加合成的 `input_index`。
 
 运行时由 `InitEnt` 和 setup 路径调用 SQL 迁移执行器，使用嵌入的编号迁移及校验和；不调用 Ent `Schema.Create` 或 Atlas schema diff。生成代码本身不执行 DDL。迁移仍是数据库结构的权威来源，**禁止直接应用 Ent/Atlas diff 提议的 DROP**；必须逐列核对现有 SQL 迁移。回退本次代码保留观测列和数据，不改写迁移或校验和。
