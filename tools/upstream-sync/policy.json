@@ -4412,6 +4412,10 @@
     {
       "path": "backend/ent/migrate/usage_log_budget_timing_test.go",
       "value": "require.Equal(t, \"text\", actual.SchemaType[\"postgres\"])"
+    },
+    {
+      "path": "backend/internal/pkg/googleapi/status.go",
+      "value": "return \"UNAVAILABLE\""
     }
   ],
   "forbidden_module_paths": [

@@ -526,6 +526,15 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 	isOAuth bool,
 	includeUsage bool,
 ) (*geminiStreamResult, error) {
+	upstreamBody, err := geminiJSONStreamReader(c, resp, s.cfg)
+	if err != nil {
+		var syntaxError *json.SyntaxError
+		if errors.As(err, &syntaxError) {
+			return nil, s.writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Failed to parse upstream response")
+		}
+		return nil, err
+	}
+
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	}
@@ -630,10 +639,6 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 		return disconnected
 	}
 
-	upstreamBody, err := geminiJSONStreamReader(c, resp, s.cfg)
-	if err != nil {
-		return nil, err
-	}
 	reader := bufio.NewReader(upstreamBody)
 	for {
 		line, err := reader.ReadString('\n')

@@ -2253,6 +2253,15 @@ func (s *GeminiMessagesCompatService) handleNonStreamingResponse(c *gin.Context,
 }
 
 func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, resp *http.Response, startTime time.Time, originalModel string) (*geminiStreamResult, error) {
+	upstreamBody, err := geminiJSONStreamReader(c, resp, s.cfg)
+	if err != nil {
+		var syntaxError *json.SyntaxError
+		if errors.As(err, &syntaxError) {
+			return nil, s.writeClaudeError(c, http.StatusBadGateway, "upstream_error", "Failed to parse upstream response")
+		}
+		return nil, err
+	}
+
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
@@ -2309,10 +2318,6 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 	openToolName := ""
 	seenToolJSON := ""
 
-	upstreamBody, err := geminiJSONStreamReader(c, resp, s.cfg)
-	if err != nil {
-		return nil, err
-	}
 	reader := bufio.NewReader(upstreamBody)
 	for {
 		line, err := reader.ReadString('\n')

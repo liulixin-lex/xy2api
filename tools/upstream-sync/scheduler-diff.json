@@ -2389,6 +2389,10 @@
           "upstreamBody, err := geminiJSONStreamReader(c, resp, s.cfg)",
           "}",
           "}",
+          "}",
+          "if errors.As(err, &syntaxError) {",
+          "return nil, s.writeClaudeError(c, http.StatusBadGateway, \"upstream_error\", \"Failed to parse upstream response\")",
+          "var syntaxError *json.SyntaxError",
           "}"
         ]
       }
