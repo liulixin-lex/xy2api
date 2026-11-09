@@ -4295,6 +4295,14 @@
     {
       "path": "backend/internal/service/resilience_timeout_observe_test.go",
       "value": "func TestTimeoutMetricIncludesAllBuiltinCatalogs(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_ops_redaction.go",
+      "value": "if containsCredential(redacted) || containsCredential(string(encoded)) {"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_ops_sanitizer_parity_test.go",
+      "value": "func TestOpenAITerminalOpsSerializationCannotRecreateCredentials(t *testing.T) {"
     }
   ],
   "forbidden_module_paths": [

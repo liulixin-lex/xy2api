@@ -161,3 +161,56 @@ func TestOpenAITerminalOpsDecodedCredentialsNeverReachQueue(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenAITerminalOpsSerializationCannotRecreateCredentials(t *testing.T) {
+	for _, suffix := range []string{"q7V", "q7V-long-credential"} {
+		for _, tc := range []struct{ name, prefix, encodedTail string }{
+			{"LF", "\n", "n"},
+			{"TAB", "\t", "t"},
+			{"CR", "\r", "r"},
+			{"unicodeHTML", "<", "c"},
+			{"unicodeLineSeparator", "\u2028", "8"},
+		} {
+			t.Run(suffix+"/"+tc.name, func(t *testing.T) {
+				secret := tc.encodedTail + suffix
+				message := "warning" + tc.prefix + suffix + "; rejected"
+				require.NotContains(t, message, secret, "the credential is formed only by encoding")
+				raw, err := json.Marshal(map[string]any{
+					"diagnostic": message,
+					"nested":     []any{map[string]string{"detail": message}},
+					"unrelated":  "keep",
+				})
+				require.NoError(t, err)
+				require.Contains(t, string(raw), secret, "the encoded fixture must reproduce the leak")
+				original := string(raw)
+				account := terminalRejectionTestAccount(1, "fixture.example")
+				account.Credentials = map[string]any{"api_key": secret}
+				got := redactOpenAITerminalOpsSensitiveBody(t.Context(), nil, account, raw)
+				svc, _, _ := terminalRejectionTestService()
+				svc.cfg.Gateway.LogUpstreamErrorBody = true
+				svc.cfg.Gateway.LogUpstreamErrorBodyMaxBytes = OpsErrorLogQueueBodyMaxBytes
+				c, _ := newOpenAIUpstreamErrorTestContext(t)
+				svc.recordOpenAIStreamUpstreamError(c, account, false, "", "terminal_rejection", raw, message, 400)
+				events := currentOpsUpstreamEvents(c)
+				require.Len(t, events, 1)
+				input := &OpsInsertErrorLogInput{UpstreamErrors: events}
+				require.NoError(t, SanitizeOpsUpstreamErrorsForQueue(input))
+				require.NotNil(t, input.UpstreamErrorsJSON)
+				t.Logf("secret=%q sanitized=%s queued=%s", secret, got, *input.UpstreamErrorsJSON)
+				require.NotContains(t, *input.UpstreamErrorsJSON, secret)
+				require.JSONEq(t, `{"diagnostic":"[redacted]","nested":[{"detail":"[redacted]"}],"unrelated":"keep"}`, string(got))
+				require.Equal(t, "[redacted]", events[0].Message)
+				require.JSONEq(t, string(got), events[0].Detail)
+				require.Equal(t, original, string(raw))
+			})
+		}
+	}
+}
+
+func TestOpenAITerminalOpsSerializedStructureCredentialHidesBody(t *testing.T) {
+	account := terminalRejectionTestAccount(1, "fixture.example")
+	account.Credentials = map[string]any{"api_key": `","`}
+	raw := []byte(`{"diagnostic":"keep","other":"text"}`)
+	got := redactOpenAITerminalOpsSensitiveBody(t.Context(), nil, account, raw)
+	require.JSONEq(t, `"[redacted]"`, string(got), "a credential spanning fields must hide the whole body")
+}

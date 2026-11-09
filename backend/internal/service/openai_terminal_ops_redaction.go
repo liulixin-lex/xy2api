@@ -71,9 +71,23 @@ func redactOpenAITerminalOpsSensitiveBody(ctx context.Context, repo AccountRepos
 		}
 	}
 	sort.Slice(secrets, func(i, j int) bool { return len(secrets[i].text) > len(secrets[j].text) })
+	containsCredential := func(text string) bool {
+		for _, secret := range secrets {
+			if strings.Contains(text, secret.text) {
+				return true
+			}
+		}
+		return false
+	}
 	redactText := func(text string) string {
 		for _, secret := range secrets {
 			text = replaceOpenAITerminalOpsCredentialValue(text, secret.text, secret.substring)
+		}
+		// Encoding can join an escape suffix and following text into a
+		// credential that never existed in the decoded string (e.g. \nq7V).
+		encoded, _ := json.Marshal(text)
+		if containsCredential(string(encoded)) {
+			return "[redacted]"
 		}
 		return text
 	}
@@ -102,6 +116,16 @@ func redactOpenAITerminalOpsSensitiveBody(ctx context.Context, repo AccountRepos
 	// Keep it at the persistence-only boundary, after strict credential and
 	// assertion handling and before the caller's configured detail limit.
 	redacted, _ = sanitizeErrorBodyForStorage(redacted, OpsErrorLogQueueBodyMaxBytes)
+	// Recheck the actual storage bytes after all re-encoding/truncation, plus
+	// their encoding as the queue's message/detail string. A remaining match
+	// can cross JSON syntax rather than belong to one field: hide the body.
+	encoded, _ := json.Marshal(redacted)
+	if containsCredential(redacted) || containsCredential(string(encoded)) {
+		if json.Valid([]byte(redacted)) {
+			return []byte(`"[redacted]"`)
+		}
+		return []byte("[redacted]")
+	}
 	return []byte(redacted)
 }
 
