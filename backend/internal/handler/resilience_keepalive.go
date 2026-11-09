@@ -32,6 +32,12 @@ func armPreOutputKeepalive(c *gin.Context, protocol string, stream bool, account
 	if !stream {
 		return
 	}
+	if account != nil && account.Platform == service.PlatformGemini {
+		// Gemini's service admits only a final candidate after checking all
+		// platforms and handler switch limits. Do not arm ahead of that decision.
+		service.StopPreOutputKeepaliveIfUncommitted(c)
+		return
+	}
 	cfg := resilience.Current()
 	if !cfg.KeepaliveOn() {
 		return

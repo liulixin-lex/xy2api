@@ -213,6 +213,9 @@ func (s *FailoverState) HandleFailoverError(
 	if resilienceAttemptFailed(ctx, accountID, failoverErr) {
 		return FailoverExhausted
 	}
+	if service.GeminiFinalKeepaliveCommitted(ctx, accountID) {
+		return FailoverExhausted
+	}
 
 	// 同账号重试不算切换账号，粘性会话仅在实际切换时强制缓存计费。
 	retryCount := s.SameAccountRetryCount[accountID]

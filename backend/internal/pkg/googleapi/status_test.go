@@ -15,9 +15,9 @@ func TestHTTPStatusToGoogleStatus(t *testing.T) {
 		{http.StatusForbidden, "PERMISSION_DENIED"},
 		{http.StatusNotFound, "NOT_FOUND"},
 		{http.StatusTooManyRequests, "RESOURCE_EXHAUSTED"},
+		{http.StatusServiceUnavailable, "UNAVAILABLE"},
 		{499, "CANCELLED"},
 		{http.StatusBadGateway, "INTERNAL"},
-		{http.StatusServiceUnavailable, "INTERNAL"},
 		{http.StatusConflict, "UNKNOWN"},
 	}
 	for _, tc := range cases {

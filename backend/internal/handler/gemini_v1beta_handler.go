@@ -661,6 +661,10 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		// 5) forward (根据平台分流)
 		var result *service.ForwardResult
 		requestCtx := c.Request.Context()
+		if account.Platform == service.PlatformGemini {
+			requestCtx = service.WithGeminiFailoverState(requestCtx, fs.SwitchCount >= fs.MaxSwitches,
+				!middleware.HasForcePlatform(c), fs.FailedAccountIDs)
+		}
 		if fs.SwitchCount > 0 {
 			requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())
 		}

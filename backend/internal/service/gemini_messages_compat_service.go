@@ -804,7 +804,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 	}
 
 	attemptGuard := newGeminiAttempt(ctx, account, mappedModel, "generateContent", geminiReq, req.Stream, PreOutputProtocolAnthropic, startTime)
-	attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, req.Stream, attemptGuard.unique, attemptGuard.protocol)
+	attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, req.Stream, attemptGuard.finalCandidate, attemptGuard.protocol)
 	defer func() {
 		retErr = attemptGuard.finish(c, s.rateLimitService, account, retErr)
 		attemptGuard.close()
@@ -1375,7 +1375,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	}
 
 	attemptGuard := newGeminiAttempt(ctx, account, mappedModel, action, body, stream, "gemini", startTime)
-	attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, stream, attemptGuard.unique, attemptGuard.protocol)
+	attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, stream, attemptGuard.finalCandidate, attemptGuard.protocol)
 	defer func() {
 		retErr = attemptGuard.finish(c, s.rateLimitService, account, retErr)
 		attemptGuard.close()
@@ -2253,6 +2253,15 @@ func (s *GeminiMessagesCompatService) handleNonStreamingResponse(c *gin.Context,
 }
 
 func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, resp *http.Response, startTime time.Time, originalModel string) (*geminiStreamResult, error) {
+	upstreamBody, err := geminiJSONStreamReader(c, resp, s.cfg)
+	if err != nil {
+		var syntaxError *json.SyntaxError
+		if errors.As(err, &syntaxError) {
+			return nil, s.writeClaudeError(c, http.StatusBadGateway, "upstream_error", "Failed to parse upstream response")
+		}
+		return nil, err
+	}
+
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
@@ -2309,10 +2318,6 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 	openToolName := ""
 	seenToolJSON := ""
 
-	upstreamBody, err := geminiJSONStreamReader(c, resp, s.cfg)
-	if err != nil {
-		return nil, err
-	}
 	reader := bufio.NewReader(upstreamBody)
 	for {
 		line, err := reader.ReadString('\n')

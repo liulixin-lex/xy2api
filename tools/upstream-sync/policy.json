@@ -4246,15 +4246,15 @@
     },
     {
       "path": "backend/internal/service/gemini_messages_compat_service.go",
-      "value": "attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, req.Stream, attemptGuard.unique, attemptGuard.protocol)"
+      "value": "attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, req.Stream, attemptGuard.finalCandidate, attemptGuard.protocol)"
     },
     {
       "path": "backend/internal/service/gemini_messages_compat_service.go",
-      "value": "attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, stream, attemptGuard.unique, attemptGuard.protocol)"
+      "value": "attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, stream, attemptGuard.finalCandidate, attemptGuard.protocol)"
     },
     {
       "path": "backend/internal/service/gemini_chat_completions_compat_service.go",
-      "value": "attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, clientStream, attemptGuard.unique, attemptGuard.protocol)"
+      "value": "attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, clientStream, attemptGuard.finalCandidate, attemptGuard.protocol)"
     },
     {
       "path": "backend/internal/handler/gemini_v1beta_handler.go",
@@ -4283,6 +4283,30 @@
     {
       "path": "backend/internal/service/gemini_chat_completions_compat_service.go",
       "value": "upstreamBody, err := geminiJSONStreamReader(c, resp, s.cfg)"
+    },
+    {
+      "path": "backend/internal/service/resilience_gemini_final_candidate.go",
+      "value": "func WithGeminiFailoverState(ctx context.Context, limitReached, allowMixed bool, excluded map[int64]struct{}) context.Context"
+    },
+    {
+      "path": "backend/internal/handler/failover_loop.go",
+      "value": "service.GeminiFinalKeepaliveCommitted(ctx, accountID)"
+    },
+    {
+      "path": "backend/internal/handler/gemini_v1beta_handler.go",
+      "value": "requestCtx = service.WithGeminiFailoverState(requestCtx, fs.SwitchCount >= fs.MaxSwitches,"
+    },
+    {
+      "path": "backend/internal/service/gemini_messages_compat_service.go",
+      "value": "var syntaxError *json.SyntaxError"
+    },
+    {
+      "path": "backend/internal/service/gemini_chat_completions_compat_service.go",
+      "value": "var syntaxError *json.SyntaxError"
+    },
+    {
+      "path": "backend/internal/pkg/googleapi/status.go",
+      "value": "return \"UNAVAILABLE\""
     }
   ],
   "forbidden_module_paths": [

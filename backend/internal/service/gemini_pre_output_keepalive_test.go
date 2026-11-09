@@ -69,6 +69,7 @@ func TestGeminiSoleCandidatePreOutputHeartbeat(t *testing.T) {
 					stub := &geminiDispatchProbe{before: func(req *http.Request) {
 						require.False(t, geminiRetryHasTimer(req.Context()), "sole candidate must remain untimed")
 						time.Sleep(2 * time.Second) // Wait for headers beyond the budget.
+						require.NotEmpty(t, w.heartbeatTimes(), "a heartbeat must be sent before upstream headers return")
 					}}
 					stub.response = &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: reader}
 					svc := &GeminiMessagesCompatService{httpUpstream: stub, tokenProvider: &GeminiTokenProvider{}, cfg: &config.Config{}}
@@ -77,6 +78,8 @@ func TestGeminiSoleCandidatePreOutputHeartbeat(t *testing.T) {
 						_, err := forwardGeminiTestEntry(svc, entry, ctx, c, a)
 						done <- err
 					}()
+					_, err := io.WriteString(writer, "data: {\"usageMetadata\":{\"promptTokenCount\":1}}\n\n")
+					require.NoError(t, err)
 					time.Sleep(5 * time.Second)
 					synctest.Wait()
 					require.GreaterOrEqual(t, len(w.heartbeatTimes()), 4, "heartbeats must cover headers and first-content wait")
@@ -93,7 +96,7 @@ func TestGeminiSoleCandidatePreOutputHeartbeat(t *testing.T) {
 						require.NoError(t, err)
 						require.NoError(t, writer.Close())
 					}
-					err := <-done
+					err = <-done
 					if ending == "content" {
 						require.NoError(t, err)
 					} else {
@@ -150,10 +153,10 @@ func TestGeminiCommittedHeartbeatErrorUsesNativeEnvelope(t *testing.T) {
 	c, w := newKeepaliveTestContext(t)
 	stop := StartPreOutputKeepalive(c, "gemini", 0, time.Hour)
 	waitCommitted(t, c)
-	c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"code": 503, "status": "INTERNAL", "message": "busy"}})
+	c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"code": 503, "status": "UNAVAILABLE", "message": "busy"}})
 	stop()
 	require.Equal(t, http.StatusOK, w.Code)
-	require.Contains(t, w.Body.String(), `data: {"error":{"code":503,"message":"busy","status":"INTERNAL"}}`)
+	require.Contains(t, w.Body.String(), `data: {"error":{"code":503,"message":"busy","status":"UNAVAILABLE"}}`)
 	require.NotContains(t, w.Body.String(), "response.failed")
 }
 
