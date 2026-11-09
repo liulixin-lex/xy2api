@@ -230,6 +230,13 @@ func (h *UserMsgQueueHelper) ThrottleWithPing(
 			return ctx.Err()
 		case <-pingCh:
 			// SSE ping 逻辑（与 waitForLockWithPing 一致）
+			if handled, committed, err := service.WriteSlotWaitHeartbeat(c, []byte(pingFormat), h.pingInterval, "queue_wait"); handled {
+				if err != nil {
+					return err
+				}
+				*streamStarted = *streamStarted || committed
+				continue
+			}
 			if !*streamStarted {
 				c.Header("Content-Type", "text/event-stream")
 				c.Header("Cache-Control", "no-cache")

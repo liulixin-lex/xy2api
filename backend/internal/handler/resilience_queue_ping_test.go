@@ -141,3 +141,29 @@ func TestUserMessageQueuePreservesRequestHeartbeat(t *testing.T) {
 		require.Contains(t, rec.Body.String(), "event: ping")
 	})
 }
+
+func TestUserMessageThrottlePreservesCommittedRequestHeartbeat(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c, rec, _, cancel := trackedQueueContext(t)
+		defer cancel()
+		stop := service.StartPreOutputKeepalive(c, service.PreOutputProtocolAnthropic, 0, 20*time.Millisecond)
+		defer stop()
+		synctest.Wait()
+		require.True(t, service.PreOutputKeepaliveCommitted(c))
+		queue := service.NewUserMessageQueueService(&queuePingLockStub{}, nil,
+			&config.UserMessageQueueConfig{MinDelayMs: 10, MaxDelayMs: 10})
+		helper := NewUserMsgQueueHelper(queue, SSEPingFormatClaude, 5*time.Millisecond)
+		started := false
+		require.NoError(t, helper.ThrottleWithPing(c, 7, 0, true, &started, time.Second, zap.NewNop()))
+		require.True(t, started)
+		before := c.Writer.Size()
+		time.Sleep(100 * time.Millisecond)
+		synctest.Wait()
+		after := c.Writer.Size()
+		stop()
+		t.Logf("throttle: heartbeat_continues=%t before=%d after=%d", after > before, before, after)
+		require.Greater(t, after, before)
+		require.True(t, gatewayStreamHasOnlyHeartbeats(c))
+		require.Contains(t, rec.Body.String(), "event: ping")
+	})
+}
