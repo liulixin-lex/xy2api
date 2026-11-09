@@ -5,6 +5,7 @@ import "time"
 // TimeoutPlan belongs to one concrete timer. Private fields and value passing
 // prevent later profile/tier changes from altering a fired timer's attribution.
 type TimeoutPlan struct {
+	//nolint:unused // Read and written only by the unit/gt0512 trace implementation.
 	testTrace                                  timeoutPlanTrace
 	seq                                        uint64
 	accountID                                  int64

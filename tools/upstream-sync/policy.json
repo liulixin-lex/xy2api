@@ -59,7 +59,8 @@
       "openspec/changes/group-quality-gate-v3-20261104/**",
       "openspec/changes/codex-collaboration-plaintext-20261104/**",
       "openspec/changes/encrypted-routing-20261105/**",
-      "openspec/changes/readonly-mcp-20261105/**"
+      "openspec/changes/readonly-mcp-20261105/**",
+      "openspec/changes/budget-anchor-0512-20261108/**"
     ],
     "manual_merge": [
       "Makefile",
@@ -1569,7 +1570,7 @@
     },
     {
       "path": "backend/internal/service/gateway_forward_as_responses.go",
-      "value": "s.armGatewayConvertFirstEvent(ctx, upstreamCtx, account, clientStream)"
+      "value": "s.armGatewayConvertFirstEvent(ctx, upstreamCtx, account, clientStream, attemptStart)"
     },
     {
       "path": "backend/internal/service/gateway_forward_as_responses.go",
@@ -1585,7 +1586,7 @@
     },
     {
       "path": "backend/internal/service/gateway_forward_as_chat_completions.go",
-      "value": "s.armGatewayConvertFirstEvent(ctx, upstreamCtx, account, clientStream)"
+      "value": "s.armGatewayConvertFirstEvent(ctx, upstreamCtx, account, clientStream, attemptStart)"
     },
     {
       "path": "backend/internal/service/gateway_forward_as_chat_completions.go",
@@ -1617,11 +1618,11 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
-      "value": "firstOutputTimeout = s.openAIFirstOutputTimeoutFor(ctx, account.ID, reqModel, reasoningEffortValue, attemptStart)"
+      "value": "firstOutputTimeout, firstOutputPlan = s.openAIFirstOutputPlanFor(ctx, account.ID, reqModel, reasoningEffortValue, attemptStart)"
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
-      "value": "upstreamCtx, headerGuard = newOpenAIFirstOutputHeaderGuard(upstreamCtx, releaseUpstreamCtx, attemptStart.Add(firstOutputTimeout))"
+      "value": "upstreamCtx, headerGuard = newOpenAIFirstOutputHeaderGuard(upstreamCtx, releaseUpstreamCtx, attemptStart.Add(firstOutputTimeout), firstOutputPlan)"
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
@@ -2201,7 +2202,7 @@
     },
     {
       "path": "backend/internal/service/gateway_forward_as_responses.go",
-      "value": "SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: time.Now()})"
+      "value": "SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: attemptStart})"
     },
     {
       "path": "backend/internal/service/gateway_forward_as_chat_completions.go",
@@ -2209,7 +2210,7 @@
     },
     {
       "path": "backend/internal/service/gateway_forward_as_chat_completions.go",
-      "value": "SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: time.Now()})"
+      "value": "SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: attemptStart})"
     },
     {
       "path": "backend/internal/service/gemini_chat_completions_compat_service.go",
@@ -2217,7 +2218,7 @@
     },
     {
       "path": "backend/internal/service/gemini_chat_completions_compat_service.go",
-      "value": "SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: time.Now()})"
+      "value": "SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: attemptStart})"
     },
     {
       "path": "backend/internal/service/gateway_bedrock.go",

@@ -91,16 +91,6 @@ func resilienceTextBudget(ctx context.Context) *resilience.Budget {
 	return b
 }
 
-// openAIFirstOutputTimeoutFor returns the first-output timeout of an OpenAI
-// attempt, measured from attemptStart: under the request budget the effort
-// tier (or model override) bounded by the budget left at attemptStart,
-// otherwise the 0.3.0 configuration. The stream handler asks again when the
-// upstream headers arrive; measuring the budget from that moment instead
-// cut a slow-header attempt the instant its headers came (staging KA-1).
-func (s *OpenAIGatewayService) openAIFirstOutputTimeoutFor(ctx context.Context, accountID int64, model, reasoningEffort string, attemptStart time.Time) time.Duration {
-	timeout, _ := s.openAIFirstOutputPlanFor(ctx, accountID, model, reasoningEffort, attemptStart)
-	return timeout
-}
 func (s *OpenAIGatewayService) openAIFirstOutputPlanFor(ctx context.Context, accountID int64, model, reasoningEffort string, attemptStart time.Time) (time.Duration, resilience.TimeoutPlan) {
 	b := resilienceTextBudget(ctx)
 	if b == nil {
@@ -169,29 +159,6 @@ func (s *OpenAIGatewayService) ReportOpenAIAttemptSuccess(ctx context.Context, a
 		}
 	}
 	s.clearOpenAIAccountModelTransientStateAt(account.ID, openAIAccountModelTransientModel(canonical), start)
-}
-
-// resilienceFirstEventTimeout returns the first-upstream-event timeout of a
-// streaming Anthropic or Gemini attempt, or zero when none applies.
-func resilienceFirstEventTimeout(ctx context.Context, accountID int64, platform string) time.Duration {
-	timeout, _ := resilienceFirstEventPlan(ctx, accountID, platform)
-	return timeout
-}
-
-func resilienceProfileAttemptStart(ctx context.Context, accountID int64, fallback time.Time) time.Time {
-	profile := resilience.StateFrom(ctx).AttemptProfile()
-	if profile.AccountID == accountID && !profile.AttemptStart.IsZero() {
-		return profile.AttemptStart
-	}
-	if !fallback.IsZero() {
-		return fallback
-	}
-	return time.Now()
-}
-
-func resilienceFirstEventPlan(ctx context.Context, accountID int64, platform string) (time.Duration, resilience.TimeoutPlan) {
-	started := resilienceProfileAttemptStart(ctx, accountID, time.Time{})
-	return resilienceFirstEventPlanAt(ctx, accountID, platform, started)
 }
 
 func resilienceFirstEventPlanAt(ctx context.Context, accountID int64, platform string, started time.Time) (time.Duration, resilience.TimeoutPlan) {

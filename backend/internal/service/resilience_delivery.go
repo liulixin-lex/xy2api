@@ -57,7 +57,7 @@ func (w *deliveryWriter) WriteHeader(code int) {
 		code = http.StatusServiceUnavailable
 	}
 	w.ResponseWriter.WriteHeader(code)
-	w.state.NoteWireStatus(w.ResponseWriter.Status())
+	w.state.NoteWireStatus(w.Status())
 }
 
 func deliveryWriterFrom(c *gin.Context) *deliveryWriter {
@@ -98,7 +98,7 @@ func (w *deliveryWriter) semanticBytes() int64 {
 
 func (w *deliveryWriter) Write(data []byte) (int, error) {
 	n, err := w.ResponseWriter.Write(data)
-	w.state.NoteWireStatus(w.ResponseWriter.Status())
+	w.state.NoteWireStatus(w.Status())
 	w.written.Add(int64(n))
 	if n > 0 {
 		w.observeStream(data[:n])
@@ -110,7 +110,7 @@ func (w *deliveryWriter) Write(data []byte) (int, error) {
 
 func (w *deliveryWriter) WriteString(s string) (int, error) {
 	n, err := w.ResponseWriter.WriteString(s)
-	w.state.NoteWireStatus(w.ResponseWriter.Status())
+	w.state.NoteWireStatus(w.Status())
 	w.written.Add(int64(n))
 	if n > 0 && w.stream.observing() {
 		w.observeStream([]byte(s[:n]))
@@ -168,12 +168,12 @@ func (w *deliveryWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 
 func (w *deliveryWriter) Flush() {
 	w.ResponseWriter.Flush()
-	w.state.NoteWireStatus(w.ResponseWriter.Status())
+	w.state.NoteWireStatus(w.Status())
 }
 
 func (w *deliveryWriter) WriteHeaderNow() {
 	w.ResponseWriter.WriteHeaderNow()
-	w.state.NoteWireStatus(w.ResponseWriter.Status())
+	w.state.NoteWireStatus(w.Status())
 }
 
 // Unwrap lets http.ResponseController reach the server's writer.

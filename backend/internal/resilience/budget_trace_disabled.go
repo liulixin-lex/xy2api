@@ -11,6 +11,7 @@ import (
 // not evaluate observation arguments or install any recording callbacks.
 const BudgetTraceEnabledForTest = false
 
+//nolint:unused // Empty production counterpart of the unit/gt0512 trace state.
 type timeoutPlanTrace struct{}
 
 func captureTimeoutPlanForTest(*Budget, *TimeoutPlan, AttemptProfile, *RequestState) {}
