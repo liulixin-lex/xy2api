@@ -223,7 +223,7 @@ func resilienceSlotWaitTimeout(c *gin.Context, timeout time.Duration) time.Durat
 	if c == nil || c.Request == nil {
 		return timeout
 	}
-	if rem := resilience.StateFrom(c.Request.Context()).Budget().Remaining(time.Now()); rem > 0 && rem < timeout {
+	if rem := resilience.StateFrom(c.Request.Context()).Budget().AdmissionRemaining(time.Now(), false); rem > 0 && rem < timeout {
 		return rem
 	}
 	return timeout

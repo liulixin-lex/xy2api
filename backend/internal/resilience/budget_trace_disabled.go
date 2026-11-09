@@ -16,7 +16,7 @@ type timeoutPlanTrace struct{}
 
 func captureTimeoutPlanForTest(*Budget, *TimeoutPlan, AttemptProfile, *RequestState) {}
 func (b *Budget) traceProfileForTest(AttemptProfile)                                 {}
-func (b *Budget) traceDeadlineForTest(string, time.Time, int64)                      {}
+func (b *Budget) traceDeadlineForTest(string, time.Time, int64, time.Time)           {}
 func (b *Budget) traceClampForTest(time.Time, time.Duration, time.Duration, time.Duration, time.Duration) {
 }
 func (p TimeoutPlan) ObserveFiredForTest(string)                                          {}

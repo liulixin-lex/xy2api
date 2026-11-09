@@ -164,12 +164,12 @@ func (b *Budget) traceProfileForTest(profile AttemptProfile) {
 
 // Called under b.mu at the actual rejecting branch. The recorder only takes
 // its own lock; it cannot re-enter the budget or alter its result.
-func (b *Budget) traceDeadlineForTest(site string, at time.Time, accountID int64) {
+func (b *Budget) traceDeadlineForTest(site string, at time.Time, accountID int64, deadline time.Time) {
 	if t := budgetTraceFrom(b.ctx); t != nil {
 		now := time.Now()
 		t.append(BudgetEventForTest{Kind: "deadline_rejected", Site: site, At: now,
 			Offset: now.Sub(b.started), DecisionAt: at, DecisionOffset: at.Sub(b.started), AccountID: accountID, DeadlineLimited: true,
-			Input: minAttemptWindow, Remaining: b.deadline.Sub(at), Attempts: b.attempts})
+			Input: minAttemptWindow, Remaining: deadline.Sub(at), Attempts: b.attempts})
 	}
 }
 

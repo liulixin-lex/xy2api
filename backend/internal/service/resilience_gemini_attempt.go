@@ -27,6 +27,8 @@ type geminiStreamStallError struct{}
 
 func (*geminiStreamStallError) Error() string { return "Gemini stream stalled" }
 
+type geminiAttemptKey struct{}
+
 type geminiAttempt struct {
 	mu       sync.Mutex
 	ctx      context.Context
@@ -71,6 +73,7 @@ func newGeminiAttempt(ctx context.Context, account *Account, model, action strin
 	}
 	guarded, cancel := context.WithCancelCause(ctx)
 	g := &geminiAttempt{ctx: guarded, parent: ctx, cancel: cancel, protocol: protocol}
+	g.ctx = context.WithValue(guarded, geminiAttemptKey{}, g)
 	g.headerWait()
 	if account == nil || account.Platform != PlatformGemini || !geminiTextRequest(model, action, body) {
 		return g
@@ -96,12 +99,20 @@ func newGeminiAttempt(ctx context.Context, account *Account, model, action strin
 
 // observeDispatch records whether the existing guard covers this send. In-place
 // retries keep their own send starts; the shared timer and its plan are untouched.
-func (g *geminiAttempt) observeDispatch(started time.Time) {
+func (g *geminiAttempt) hasTimer() bool {
 	g.mu.Lock()
-	hasTimer := g.timer != nil && g.timeout > 0 && !g.output
-	g.mu.Unlock()
+	defer g.mu.Unlock()
+	return g.timer != nil && g.timeout > 0 && !g.output
+}
+
+func geminiRetryHasTimer(ctx context.Context) bool {
+	g, _ := ctx.Value(geminiAttemptKey{}).(*geminiAttempt)
+	return g != nil && g.hasTimer()
+}
+
+func (g *geminiAttempt) observeDispatch(started time.Time) {
 	st := resilience.StateFrom(g.parent)
-	if hasTimer {
+	if g.hasTimer() {
 		st.NoteAttemptTimer(started)
 	}
 	st.ObserveAttemptStart()

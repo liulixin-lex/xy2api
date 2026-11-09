@@ -934,7 +934,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				}
 				break
 			}
-			if attempt < geminiMaxRetries && !resilienceGeminiSkipInPlaceRetry(ctx, account, resp.StatusCode, resp.Header, respBody) && geminiInPlaceRetryAllowed(ctx, &inPlaceRetries) {
+			if attempt < geminiMaxRetries && !resilienceGeminiSkipInPlaceRetry(ctx, account, resp.StatusCode, resp.Header, respBody) && geminiInPlaceRetryAllowed(attemptGuard.ctx, &inPlaceRetries) {
 				if resp.StatusCode == 429 {
 					// Mark the response that will actually be retried once so concurrent
 					// requests avoid the account without penalizing the final response twice.
@@ -1450,7 +1450,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				}
 				break
 			}
-			if attempt < geminiMaxRetries && !resilienceGeminiSkipInPlaceRetry(ctx, account, resp.StatusCode, resp.Header, respBody) && geminiInPlaceRetryAllowed(ctx, &inPlaceRetries) {
+			if attempt < geminiMaxRetries && !resilienceGeminiSkipInPlaceRetry(ctx, account, resp.StatusCode, resp.Header, respBody) && geminiInPlaceRetryAllowed(attemptGuard.ctx, &inPlaceRetries) {
 				if resp.StatusCode == 429 {
 					s.handleGeminiUpstreamErrorForAction(ctx, account, resp.StatusCode, resp.Header, respBody, action != "countTokens", originalModel)
 				}
@@ -1909,7 +1909,7 @@ func sleepGeminiBackoffCtx(ctx context.Context, attempt int) bool {
 	}
 	delay = resilience.Jitter(delay, 0.2)
 	if b := resilience.StateFrom(ctx).Budget(); b != nil {
-		delay = b.ClampWait(delay, time.Now())
+		delay = b.ClampWaitWithTimer(delay, time.Now(), geminiRetryHasTimer(ctx))
 	}
 	return resilience.Sleep(ctx, delay)
 }
@@ -1928,7 +1928,7 @@ func geminiInPlaceRetryAllowed(ctx context.Context, retries *int) bool {
 	if *retries >= cfg.Budget.GeminiSameAccountRetries {
 		return false
 	}
-	if !budget.ConsumeInPlaceRetry(0, false, time.Now()) {
+	if !budget.ConsumeInPlaceRetryWithTimer(0, false, time.Now(), geminiRetryHasTimer(ctx)) {
 		return false
 	}
 	*retries++
