@@ -6,7 +6,7 @@
 
 T0 = Started()，Te = 首次成功读到 EOF 的时刻。KindText、budget_start=body_eof 且 Te−T0≥1 s 时 anchor=Te，其余 anchor=T0。D=min(anchor+base,T0+290 s)。图片预算无截止；nil Budget 不产生截止。首次生成计时器或设置 AttemptProfile 后冻结锚点；重复接收只计数。
 
-锚点只用于截止。spent=start−T0，首试 lastMark=T0，≥60 s 即账号级失败的定义不改动。AttemptTimeout 非末候选=min(Remaining,max(tier_eff,spent))，末候选=Remaining。上传、出首字后的阶段不新增强制取消；无计时器的在途尝试不因 D 被截断。CanAttempt 的 2 s 窗口、ConsumeInPlaceRetry、ClampWait、等槽消费点均保持既有机制。
+锚点只用于截止。spent=start−T0，首试 lastMark=T0，≥60 s 即账号级失败的定义不改动。AttemptTimeout 非末候选=min(Remaining,max(tier_eff,spent))，末候选=Remaining。上传、出首字后的阶段不新增强制取消；进行中的尝试仍由其已安装计时器约束。body_eof 下，CanAttempt、ConsumeInPlaceRetry、ClampWait 与等槽等待若能确认下一次尝试由现有计时器覆盖则沿用 D；无法判断或无计时器的准入与等待沿用 arrival 上限 T0+base（迟发判据为 T0+base−2 s）。arrival 模式保持不变。
 
 性质 M 来自 D_new≥D_old 与截止消费者的单调性。Remaining 过期后下限为 1 ns，故“剩余恰增 δ”只在首次旧截止约束前成立。ER-3 是有限轨迹回归检查，不是任意输入的数学证明。
 
@@ -32,4 +32,4 @@ OpenAI 派出只在真实 HTTP 传输前计一次；插件提前失败不计、W
 
 T8：pre-output-keepalive 中的固定 240 s 改为相对 D。T9：预算场景改为相对 D，无计时器路径新尝试最晚 D−2 s。T10：旧 design/runbook 与现行文档使用 D，并说明 Gemini 末候选风险。T11：≥60 s 账号级定义不改动，从到达起算；E2/E4 移至第二期待探针和数据。
 
-正常 arrival 准入不产生迟发，隐藏重放绕过准入时计数与 Warn 仍可非零，仅增加观测。Warn 包含 request_id/client_request_id；abuse_guard 仅证明进入 abuse 状态。G9 的检查节奏及丢日志兜底以修订 12 的 runbook 为准。
+正常 arrival 准入不产生迟发，隐藏重放绕过准入时计数与 Warn 仍可非零，仅增加观测。Warn 包含 request_id/client_request_id；abuse_guard 仅证明进入 abuse 状态。G9 只作迟发观测与核验，不自动切回 arrival，也不是启用 body_eof 的硬前置门槛；观测字段与检查流程见 runbook。
