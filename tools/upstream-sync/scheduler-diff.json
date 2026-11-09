@@ -2341,6 +2341,15 @@
           "}",
           "}"
         ]
+      },
+      {
+        "block": "budget-g9-dispatch-observation",
+        "note": "G9 observation only: freeze existing shared-guard coverage for each actual dispatch. In-place retries keep their existing send starts, timer and immutable plan. Covered by TestG9DispatchObservationCallsites and TestGeminiAttemptTimerOwnsInitialProfileAcrossInPlaceRetry.",
+        "removed": [],
+        "added": [
+          "attemptGuard.observeDispatch(attemptStart)",
+          "attemptGuard.observeDispatch(attemptStart)"
+        ]
       }
     ]
   }

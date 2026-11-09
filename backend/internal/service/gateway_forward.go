@@ -412,6 +412,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		attemptProfile.AttemptStart = time.Now()
 		attemptProfile.BodyBytes = len(wireBody)
 		resilience.StateFrom(ctx).SetAttemptProfile(attemptProfile)
+		resilience.StateFrom(ctx).ObserveAttemptStart()
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
 		if err != nil {
 			if resp != nil && resp.Body != nil {

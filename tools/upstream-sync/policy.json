@@ -4239,6 +4239,10 @@
     {
       "path": "backend/internal/service/openai_gateway_forward.go",
       "value": "finishStateRejection(&forwardErr)"
+    },
+    {
+      "path": "backend/internal/service/gemini_messages_compat_service.go",
+      "value": "attemptGuard.observeDispatch(attemptStart)"
     }
   ],
   "forbidden_module_paths": [
