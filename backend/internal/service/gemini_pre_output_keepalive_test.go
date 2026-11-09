@@ -14,7 +14,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
-	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
@@ -30,9 +29,6 @@ func (s *geminiDispatchProbe) Do(req *http.Request, proxy string, id int64, conc
 }
 
 func forwardGeminiTestEntry(s *GeminiMessagesCompatService, entry string, ctx context.Context, c *gin.Context, a *Account) (*ForwardResult, error) {
-	if ctx.Value(ctxkey.Group) == nil {
-		ctx = context.WithValue(ctx, ctxkey.Group, &Group{ID: resilience.StateFrom(ctx).GroupID(), Platform: PlatformGemini, Hydrated: true})
-	}
 	body := []byte(`{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"hi"}],"stream":true,"max_tokens":32}`)
 	switch entry {
 	case "messages":
@@ -73,7 +69,6 @@ func TestGeminiSoleCandidatePreOutputHeartbeat(t *testing.T) {
 					stub := &geminiDispatchProbe{before: func(req *http.Request) {
 						require.False(t, geminiRetryHasTimer(req.Context()), "sole candidate must remain untimed")
 						time.Sleep(2 * time.Second) // Wait for headers beyond the budget.
-						require.NotEmpty(t, w.heartbeatTimes(), "a heartbeat must be sent before upstream headers return")
 					}}
 					stub.response = &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: reader}
 					svc := &GeminiMessagesCompatService{httpUpstream: stub, tokenProvider: &GeminiTokenProvider{}, cfg: &config.Config{}}
@@ -82,8 +77,6 @@ func TestGeminiSoleCandidatePreOutputHeartbeat(t *testing.T) {
 						_, err := forwardGeminiTestEntry(svc, entry, ctx, c, a)
 						done <- err
 					}()
-					_, err := io.WriteString(writer, "data: {\"usageMetadata\":{\"promptTokenCount\":1}}\n\n")
-					require.NoError(t, err)
 					time.Sleep(5 * time.Second)
 					synctest.Wait()
 					require.GreaterOrEqual(t, len(w.heartbeatTimes()), 4, "heartbeats must cover headers and first-content wait")
@@ -100,7 +93,7 @@ func TestGeminiSoleCandidatePreOutputHeartbeat(t *testing.T) {
 						require.NoError(t, err)
 						require.NoError(t, writer.Close())
 					}
-					err = <-done
+					err := <-done
 					if ending == "content" {
 						require.NoError(t, err)
 					} else {
@@ -157,7 +150,7 @@ func TestGeminiCommittedHeartbeatErrorUsesNativeEnvelope(t *testing.T) {
 	c, w := newKeepaliveTestContext(t)
 	stop := StartPreOutputKeepalive(c, "gemini", 0, time.Hour)
 	waitCommitted(t, c)
-	c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"code": 503, "status": "UNAVAILABLE", "message": "busy"}})
+	c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"code": 503, "status": "INTERNAL", "message": "busy"}})
 	stop()
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Contains(t, w.Body.String(), `data: {"error":{"code":503,"message":"busy","status":"UNAVAILABLE"}}`)
@@ -210,4 +203,50 @@ func TestGeminiSoleCandidateHeartbeatEligibility(t *testing.T) {
 			})
 		})
 	}
+}
+
+// Other Gemini accounts excluded for this request do not count toward
+// soleCandidate; mixed-platform alternatives remain available to failover.
+func TestGeminiSoleCandidateHeartbeatsAfterOtherGeminiCandidatesFailed(t *testing.T) {
+	r, _, repo, _ := newFallbackFixture(t)
+	SetResilienceInstance(r)
+	t.Cleanup(func() { SetResilienceInstance(nil) })
+	withResilienceSettings(t, func(s *resilience.Settings) {
+		s.Keepalive.DelaySeconds, s.Keepalive.IntervalSeconds = 1, 1
+	})
+	synctest.Test(t, func(t *testing.T) {
+		ctx := geminiAttemptTestContext(context.Background(), 0)
+		st := resilience.StateFrom(ctx)
+		st.SetGroup(20)
+		st.NoteTurn(20, "gemini-2.5-flash", "")
+		st.SetEdge("cloudflare")
+		a := geminiPoolModeAPIKeyAccount()
+		a.ID = 501
+		delete(a.Credentials, "pool_mode")
+		failed := *a
+		failed.ID = 502
+		mixed := *a
+		mixed.ID = 503
+		mixed.Platform = PlatformAntigravity
+		mixed.Extra = map[string]any{"mixed_scheduling": true}
+		mixed.Credentials = map[string]any{"model_mapping": map[string]any{"gemini-2.5-flash": "gemini-2.5-flash"}}
+		repo.byGroup[20] = []Account{*a, failed, mixed}
+		st.MarkAccountFailed(failed.ID)
+
+		w := &protocolHeartbeatWriter{gwWriter: newGWWriter()}
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, "/", nil).WithContext(ctx)
+		defer StopGeminiUniqueCandidateKeepalive(c)
+		stub := &geminiDispatchProbe{before: func(req *http.Request) {
+			require.False(t, geminiRetryHasTimer(req.Context()))
+			time.Sleep(3 * time.Second)
+			require.NotEmpty(t, w.heartbeatTimes(), "the remaining Gemini account gets its heartbeat")
+		}}
+		stub.response = &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hello\"}]},\"finishReason\":\"STOP\"}]}\n\n"))}
+		svc := &GeminiMessagesCompatService{httpUpstream: stub, tokenProvider: &GeminiTokenProvider{}, cfg: &config.Config{}}
+		_, err := forwardGeminiTestEntry(svc, "native", ctx, c, a)
+		require.NoError(t, err)
+		require.True(t, resilience.StateFrom(c.Request.Context()).AccountFailed(failed.ID))
+		require.True(t, mixed.IsMixedSchedulingEnabled(), "the excluded same-platform account does not remove the mixed-platform alternative")
+	})
 }

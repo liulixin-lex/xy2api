@@ -2350,6 +2350,8 @@
         "note": "Gemini sole-candidate pre-output heartbeat and actual send AttemptStart; preserve shared timer ownership.",
         "removed": [],
         "added": [
+          "attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, req.Stream, attemptGuard.unique, attemptGuard.protocol)",
+          "attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, stream, attemptGuard.unique, attemptGuard.protocol)",
           "resumeGeminiPreOutputKeepalive(c, resp)",
           "resumeGeminiPreOutputKeepalive(c, resp)"
         ]
@@ -2374,16 +2376,7 @@
           "upstreamBody, err := geminiJSONStreamReader(c, resp, s.cfg)",
           "}",
           "}",
-          "}"
-        ]
-      },
-      {
-        "block": "gemini-final-candidate-and-json-errors-0513",
-        "note": "Gate Gemini heartbeat on a static singleton candidate universe including mixed platforms; preserve existing invalid JSON errors and bookkeeping.",
-        "removed": [],
-        "added": [
-          "attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, req.Stream, attemptGuard.unique, attemptGuard.protocol)",
-          "attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, stream, attemptGuard.unique, attemptGuard.protocol)",
+          "}",
           "if errors.As(err, &syntaxError) {",
           "return nil, s.writeClaudeError(c, http.StatusBadGateway, \"upstream_error\", \"Failed to parse upstream response\")",
           "var syntaxError *json.SyntaxError",

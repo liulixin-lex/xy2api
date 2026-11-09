@@ -12,6 +12,4 @@ C1 影响 EOF 明显晚于 arrival 的请求，包括成功的大上传；C3 也
 
 compat 入口遇上游 JSON 回退时，由空回答改为正常输出，按实际 usage 计费。
 
-Gemini 首包前心跳只覆盖完整静态候选全集为单账号的请求；多号组的最后候选不启用，保留实际调度器的换号机会。同账号重试和退避保持原行为。
-
 Google 风格错误体中，HTTP 503 的 status 由 INTERNAL 更正为 UNAVAILABLE（HTTP 状态码不变）

@@ -4285,40 +4285,8 @@
       "value": "upstreamBody, err := geminiJSONStreamReader(c, resp, s.cfg)"
     },
     {
-      "path": "backend/internal/service/resilience_gemini_final_candidate.go",
-      "value": "func WithGeminiCandidateUniverse(ctx context.Context, group *Group, allowMixed bool) context.Context"
-    },
-    {
-      "path": "backend/internal/handler/resilience_keepalive.go",
-      "value": "service.GeminiFinalKeepaliveBlocksAccount(ctx, selection.Account)"
-    },
-    {
-      "path": "backend/internal/handler/gemini_v1beta_handler.go",
-      "value": "requestCtx = service.WithGeminiCandidateUniverse(requestCtx, apiKey.Group, !middleware.HasForcePlatform(c))"
-    },
-    {
-      "path": "backend/internal/service/gemini_messages_compat_service.go",
-      "value": "var syntaxError *json.SyntaxError"
-    },
-    {
-      "path": "backend/internal/service/gemini_chat_completions_compat_service.go",
-      "value": "var syntaxError *json.SyntaxError"
-    },
-    {
       "path": "backend/internal/pkg/googleapi/status.go",
       "value": "return \"UNAVAILABLE\""
-    },
-    {
-      "path": "backend/internal/handler/gemini_v1beta_handler.go",
-      "value": "if geminiKeepaliveBlocksSelection(c.Request.Context(), selection) {"
-    },
-    {
-      "path": "backend/internal/handler/gateway_handler.go",
-      "value": "if geminiKeepaliveBlocksSelection(c.Request.Context(), selection) {"
-    },
-    {
-      "path": "backend/internal/handler/gateway_handler_chat_completions.go",
-      "value": "if geminiKeepaliveBlocksSelection(c.Request.Context(), selection) {"
     }
   ],
   "forbidden_module_paths": [
