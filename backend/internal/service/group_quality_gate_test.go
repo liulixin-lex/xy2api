@@ -29,6 +29,7 @@ type qualityTestRepository struct {
 	observationErr  error
 	replayLoadDelay time.Duration
 	replayLoadBlock bool
+	fromsMu         sync.Mutex
 	froms           []time.Time
 	memberLoads     int
 	deadline        bool
@@ -59,7 +60,9 @@ func (r *qualityTestRepository) LoadMembers(ctx context.Context, ids []int64) (m
 	return out, nil
 }
 func (r *qualityTestRepository) LoadObservations(_ context.Context, _ []int64, from, to time.Time) ([]GroupQualityObservation, time.Time, error) {
+	r.fromsMu.Lock()
 	r.froms = append(r.froms, from)
+	r.fromsMu.Unlock()
 	out := []GroupQualityObservation{}
 	for _, o := range r.observations {
 		if !o.At.Before(from) && o.At.Before(to) {
@@ -74,6 +77,12 @@ func (r *qualityTestRepository) LoadObservations(_ context.Context, _ []int64, f
 		observedAt = to.Add(-time.Second)
 	}
 	return out, observedAt, r.observationErr
+}
+
+func (r *qualityTestRepository) observationFroms() []time.Time {
+	r.fromsMu.Lock()
+	defer r.fromsMu.Unlock()
+	return slices.Clone(r.froms)
 }
 func (r *qualityTestRepository) LoadObservationsForReplay(ctx context.Context, _ []int64, from, to time.Time) (GroupQualityReplayData, error) {
 	if r.replayLoadBlock {
@@ -185,7 +194,7 @@ func (e *qualityTestEnv) evaluate(t *testing.T, after time.Duration) {
 	t.Helper()
 	e.now = e.base.Add(after)
 	e.svc.policyCache.Store(nil)
-	loads := len(e.repo.froms)
+	loads := len(e.repo.observationFroms())
 	err := e.svc.evaluate(context.Background())
 	if e.repo.observationErr != nil {
 		require.ErrorIs(t, err, e.repo.observationErr)
@@ -193,8 +202,9 @@ func (e *qualityTestEnv) evaluate(t *testing.T, after time.Duration) {
 		require.NoError(t, err)
 	}
 	require.True(t, e.repo.deadline)
-	if len(e.repo.froms) > loads {
-		require.Equal(t, e.now.Add(-6*time.Hour), e.repo.froms[len(e.repo.froms)-1])
+	froms := e.repo.observationFroms()
+	if len(froms) > loads {
+		require.Equal(t, e.now.Add(-6*time.Hour), froms[len(froms)-1])
 	}
 }
 func (e *qualityTestEnv) member(id int64) groupQualityMemberSnapshot {
@@ -397,12 +407,12 @@ func TestGroupQualityWarmStartFailureKeepsEmptySnapshot(t *testing.T) {
 		e.repo.observationErr = errors.New("replay unavailable")
 		e.svc.Start()
 		synctest.Wait()
-		require.Len(t, e.repo.froms, 1, "failed replay must fall through to the ordinary evaluation")
+		require.Len(t, e.repo.observationFroms(), 1, "failed replay must fall through to the ordinary evaluation")
 		require.Equal(t, 0, e.member(1).Tier)
 		require.Contains(t, e.logs.String(), `"msg":"group_quality_gate.warm_start_failed"`)
 		time.Sleep(groupQualityEvaluationInterval)
 		synctest.Wait()
-		require.Len(t, e.repo.froms, 2, "ordinary ticker must continue after replay failure")
+		require.Len(t, e.repo.observationFroms(), 2, "ordinary ticker must continue after replay failure")
 		e.svc.Stop()
 	})
 }
@@ -1095,7 +1105,7 @@ func TestGroupQualityV3EvaluationLifecycle(t *testing.T) {
 			t.Fatal("initial evaluation was not started")
 		}
 		e.svc.Stop()
-		require.Empty(t, e.repo.froms, "canceled warm start must not run online evaluation")
+		require.Empty(t, e.repo.observationFroms(), "canceled warm start must not run online evaluation")
 	})
 	t.Run("query errors freeze", func(t *testing.T) {
 		e := newQualityTestEnv(t)
