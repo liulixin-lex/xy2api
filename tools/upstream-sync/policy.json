@@ -746,7 +746,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_messages.go",
-      "value": "rejected := !notFound && !unsupported && isOpenAICompatContinuationRejected(resp.StatusCode, respBody)"
+      "value": "rejected := !notFound && !unsupported && !isOpenAIHTTPUpstreamAccessStateError(resp.StatusCode, upstreamMsg, respBody) && isOpenAICompatContinuationRejected(resp.StatusCode, respBody)"
     },
     {
       "path": "backend/internal/service/openai_messages_continuation.go",
@@ -4325,6 +4325,36 @@
   ],
   "custom_patch_tests": [
     {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_error_classification_forward_test.go",
+      "literal": "TestOpenAIDeviceBindingRequiredForwardRoutes"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/inference_not_found_test.go",
+      "literal": "TestInference404RecognizesFastAPIAndAnthropicGenericEnvelopes"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/grok_upstream_errors_test.go",
+      "literal": "TestGrokCustomGenericInference404UsesSharedCustomPolicy"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/grok_upstream_errors_test.go",
+      "literal": "TestGrokMessagesNonFailoverSkipsOpenAIAccountSideEffects"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_error_classification_forward_test.go",
+      "literal": "TestGeminiGeneric404PolicyAcrossEntrypoints"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/resilience_anthropic_type_test.go",
+      "literal": "TestAnthropicModelUnavailableExhaustionMatchesLocalType"
+    },
+    {
       "id": "xy-fallback-group-user-invisible",
       "path": "frontend/src/components/admin/usage/__tests__/UsageTable.fallback.spec.ts",
       "literal": "never shows the fallback to users, even if an older server still sends the origin fields"
@@ -7093,6 +7123,36 @@
       "id": "xy-error-recovery-routing",
       "path": "backend/internal/handler/resilience_state_rejection_test.go",
       "literal": "func TestStateRejectionTerminatesRecoveryWithoutBudgetOrMaster(t *testing.T)"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_error_classification_followup_test.go",
+      "literal": "TestOpenAIDeviceBindingChainedMessagesSingleAttempt"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_error_classification_followup_test.go",
+      "literal": "TestOpenAICompatStreamModelAvailability"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_error_classification_followup_test.go",
+      "literal": "TestOpenAIDeviceBindingClassificationPlatformBoundary"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_error_classification_followup_test.go",
+      "literal": "TestOpenAIDeviceBindingWSHandshake"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/resilience_anthropic_type_test.go",
+      "literal": "TestOpenAIDeviceBindingExhaustionUsesExistingAccountExit"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_error_classification_followup_test.go",
+      "literal": "TestInference404AnthropicEnvelopeRequiresEvidence"
     }
   ]
 }

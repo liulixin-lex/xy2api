@@ -76,6 +76,9 @@ func opsHTTPResilienceCategory(status int, headers http.Header, body []byte, mes
 	if !resilience.Current().FailureOn() {
 		return ""
 	}
+	if len(accounts) > 0 && accounts[0] != nil && accounts[0].Platform == PlatformOpenAI && isOpenAIDeviceBindingRequired(status, body) {
+		return string(resilience.CategoryAuth)
+	}
 	if len(accounts) > 0 && isGrokTemporaryUnavailable422(accounts[0], status, body) {
 		return string(resilience.CategoryTransient)
 	}
@@ -509,7 +512,7 @@ func opsResilienceCategory(ev *OpsUpstreamErrorEvent) string {
 	case ev.UpstreamStatusCode == http.StatusNotFound && ev.Kind == "failover":
 		return string(classifyInferenceUpstreamHTTP(ev.UpstreamStatusCode, nil, body, ev.Message).Category)
 	case ev.UpstreamStatusCode >= 400:
-		return opsHTTPResilienceCategory(ev.UpstreamStatusCode, nil, body, ev.Message)
+		return opsHTTPResilienceCategory(ev.UpstreamStatusCode, nil, body, ev.Message, &Account{Platform: ev.Platform})
 	case ev.UpstreamStatusCode == http.StatusOK && (len(body) > 0 || ev.Message != ""):
 		// A Responses response.failed carries its error under "response".
 		return string(classifyUpstreamOutcome(resilience.Outcome{

@@ -113,8 +113,25 @@ func TestInference404GeminiAndSharedRouting(t *testing.T) {
 	}
 }
 
+func TestInference404RecognizesFastAPIAndAnthropicGenericEnvelopes(t *testing.T) {
+	for _, body := range []string{
+		`{"detail":"Not Found"}`,
+		`{"type":"error","error":{"type":"not_found_error","message":"Not Found"}}`,
+	} {
+		require.Equal(t, resilience.CategoryModelUnsupported, classifyInferenceUpstreamHTTP(http.StatusNotFound, nil, []byte(body), "").Category)
+		require.True(t, shouldFailoverClassifiedUpstreamError(http.StatusNotFound, nil, []byte(body)))
+	}
+}
+
 func TestInference404PreservesClientResourceErrors(t *testing.T) {
 	for _, body := range []string{
+		`{"detail":"Not Found","request_id":"extra"}`,
+		`{"detail":"File not found"}`,
+		`{"detail":["Not Found"]}`,
+		`{"type":"error"}`,
+		`{"type":"error","error":{"code":"file_not_found","message":"Not Found"}}`,
+		`{"type":"error","error":{"message":"Not Found","param":""}}`,
+		`{"type":"error","error":{"message":"File not found"}}`,
 		`{"error":{"code":"previous_response_not_found","message":"Previous response not found"}}`,
 		`{"error":{"code":"not_found","param":"file_id","message":"File not found"}}`,
 		`{"error":{"code":"container_not_found","message":"Container not found: cntr_missing"}}`,

@@ -491,7 +491,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		unsupported := isOpenAICompatPreviousResponseUnsupported(resp.StatusCode, upstreamMsg, respBody)
 		// xy2api resilience (design §9.8): a vague 4xx to a chained request may
 		// be a pooled relay that cannot find the stored response.
-		rejected := !notFound && !unsupported && isOpenAICompatContinuationRejected(resp.StatusCode, respBody)
+		rejected := !notFound && !unsupported && !isOpenAIHTTPUpstreamAccessStateError(resp.StatusCode, upstreamMsg, respBody) && isOpenAICompatContinuationRejected(resp.StatusCode, respBody)
 		if previousResponseID != "" && (notFound || unsupported || rejected) && resilienceContinuationReplayAllowed(ctx, account, rejected) {
 			if unsupported || rejected {
 				s.disableOpenAICompatSessionContinuation(ctx, c, account, promptCacheKey)
@@ -1214,6 +1214,13 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				// two model streams together. Surface a proper Anthropic error event
 				// instead of returning a failover error that the handler cannot retry.
 				captureOpenAIStateRejection(c, account, payloadBytes, message, "messages", clientOutputStarted, nil)
+				wrappedStatus, _, malformed := openAIWrappedUpstreamErrorStatus(event.Type, payloadBytes)
+				if !malformed && !clientDisconnected && !openAIStreamClientOutputStarted(c, clientOutputStarted) && c.Request.Context().Err() == nil {
+					if failure := s.failoverOpenAIStreamModelAvailability(c.Request.Context(), c, account, payloadBytes, message, resp.Header, upstreamModel, false, wrappedStatus); failure != nil {
+						streamFailoverErr = failure
+						return true
+					}
+				}
 				shouldFailover := openAIStreamFailedEventShouldFailover(payloadBytes, message)
 				if isBareErrorEvent {
 					shouldFailover = openAIStreamErrorEventShouldFailover(payloadBytes, message)
@@ -1225,7 +1232,11 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				if !clientOutputStarted {
 					releaseOpenAIPrelude(preludeTrace, event.Type, []byte(payload))
 				}
-				s.resilienceOpenAIFailedAfterOutput(c.Request.Context(), account, resp, payloadBytes, message, clientOutputStarted)
+				if _, modelUnavailable := openAIStreamModelAvailabilityStatus(payloadBytes, message, wrappedStatus); !malformed && modelUnavailable && openAIStreamClientOutputStarted(c, clientOutputStarted) {
+					s.handleOpenAIStreamFailureAfterOutput(c.Request.Context(), c, account, resp, payloadBytes, message, upstreamModel, wrappedStatus)
+				} else {
+					s.resilienceOpenAIFailedAfterOutput(c.Request.Context(), account, resp, payloadBytes, message, clientOutputStarted)
+				}
 				message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payloadBytes, message)
 				errStatus, errType, errMsg := http.StatusBadGateway, "api_error", message
 				// 统一走语义状态推断 + body 归一化（与 /v1/responses 路径一致），

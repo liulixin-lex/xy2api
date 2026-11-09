@@ -118,7 +118,22 @@ func isGenericJSONNotFound(body []byte) bool {
 		return false
 	}
 	objects := []gjson.Result{root}
-	hasErrorShape := len(root.Map()) == 0
+	rootMap := root.Map()
+	hasErrorShape := len(rootMap) == 0
+	// FastAPI's default 404 envelope is a single generic detail field.
+	if detail := root.Get("detail"); len(rootMap) == 1 && detail.Type == gjson.String && isGenericNotFoundText(detail.Str) {
+		return true
+	}
+	// Anthropic wraps generic failures as {type:"error", error:{...}}.
+	// The outer type is an envelope marker, while the inner object carries the
+	// generic not-found evidence validated below.
+	anthropicEnvelope := strings.EqualFold(strings.TrimSpace(root.Get("type").String()), "error") && root.Get("error").IsObject()
+	if inner := root.Get("error"); anthropicEnvelope &&
+		!isGenericNotFoundCode(inner.Get("code").String()) &&
+		!isGenericNotFoundCode(inner.Get("type").String()) &&
+		!isGenericNotFoundText(inner.Get("message").String()) {
+		return false
+	}
 	for _, path := range []string{"error", "response.error"} {
 		if object := root.Get(path); object.Exists() {
 			if !object.IsObject() {
@@ -130,7 +145,7 @@ func isGenericJSONNotFound(body []byte) bool {
 	}
 	// Every supplied field must be generic. A generic outer message cannot
 	// hide a specific nested code, message, or even an empty param field.
-	for _, object := range objects {
+	for objectIndex, object := range objects {
 		if object.Get("param").Exists() {
 			return false
 		}
@@ -153,6 +168,8 @@ func isGenericJSONNotFound(body []byte) bool {
 				if !isGenericNotFoundText(value.Str) {
 					return false
 				}
+			} else if field == "type" && objectIndex == 0 && anthropicEnvelope {
+				continue
 			} else if !isGenericNotFoundCode(value.Str) {
 				return false
 			}
