@@ -4250,7 +4250,15 @@
     },
     {
       "path": "backend/internal/service/gateway_request.go",
+      "value": "account.Type == AccountTypeAPIKey && isOfficialAnthropicAPIBaseURL(account.GetBaseURL())"
+    },
+    {
+      "path": "backend/internal/service/gateway_request.go",
       "value": "if !claudeAPI || !claude.IsHaiku55(model) {"
+    },
+    {
+      "path": "backend/internal/service/upstream_billing_probe.go",
+      "value": "func isOfficialAnthropicAPIBaseURL(baseURL string) bool {"
     },
     {
       "path": "backend/internal/domain/constants.go",
