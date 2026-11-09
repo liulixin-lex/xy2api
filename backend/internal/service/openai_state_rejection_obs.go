@@ -18,43 +18,18 @@ const openAIStateRejectionBodyKey = "openai_state_rejection_body"
 // One Forward owns the observation; errors and terminal frames only update
 // its facts. No payload is retained in an ops event or log.
 type openAIStateRejectionAttempt struct {
-	rejection   resilience.StateRejection
-	path, stage string
-	observedAt  time.Time
-	streakStatus int
-	streakBody   []byte
+	rejection     resilience.StateRejection
+	path, stage   string
+	observedAt    time.Time
+	streakStatus  int
+	streakBody    []byte
 	streakMessage string
-}
-
-type openAITerminalRejectionSessionContextKey struct{}
-
-type openAITerminalRejectionSessionIdentity struct {
-	groupID int64
-	session string
-}
-
-// WithOpenAITerminalRejectionIdentity carries the request's selected session
-// identity through long-lived WS turn handlers that do not own a RequestState.
-func WithOpenAITerminalRejectionIdentity(ctx context.Context, groupID *int64, session string) context.Context {
-	if ctx == nil || groupID == nil || strings.TrimSpace(session) == "" {
-		return ctx
-	}
-	return context.WithValue(ctx, openAITerminalRejectionSessionContextKey{}, openAITerminalRejectionSessionIdentity{
-		groupID: *groupID,
-		session: strings.TrimSpace(session),
-	})
-}
-
-func openAITerminalRejectionIdentityFromContext(ctx context.Context) (openAITerminalRejectionSessionIdentity, bool) {
-	if ctx == nil {
-		return openAITerminalRejectionSessionIdentity{}, false
-	}
-	identity, ok := ctx.Value(openAITerminalRejectionSessionContextKey{}).(openAITerminalRejectionSessionIdentity)
-	return identity, ok && identity.groupID > 0 && identity.session != ""
+	attemptBody   []byte
+	eventBoundary uint64
 }
 
 func beginOpenAIStateRejectionAttempt(ctx context.Context, c *gin.Context, account *Account, body []byte) func(*error) {
-	attempt := &openAIStateRejectionAttempt{}
+	attempt := &openAIStateRejectionAttempt{attemptBody: body}
 	if c != nil {
 		c.Set(openAIStateRejectionAttemptKey, attempt)
 		c.Set(openAIStateRejectionBodyKey, body)
@@ -62,7 +37,7 @@ func beginOpenAIStateRejectionAttempt(ctx context.Context, c *gin.Context, accou
 	}
 	return func(err *error) {
 		if err != nil && *err != nil && attempt.rejection.RequestScoped() {
-			noteOpenAIStateRejection(ctx, c, account, attempt.rejection, attempt.path, attempt.stage, body)
+			noteOpenAIStateRejection(ctx, c, account, attempt.rejection, attempt.path, attempt.stage, body, attempt.attemptBody)
 		}
 		if c != nil {
 			c.Set(openAIStateRejectionAttemptKey, nil)
@@ -83,7 +58,7 @@ func openAIStateRejectionPath(c *gin.Context, fallback string) string {
 	return fallback
 }
 
-func captureOpenAIStateRejection(c *gin.Context, account *Account, payload []byte, message, path string, outputStarted bool, body []byte) {
+func captureOpenAIStateRejection(c *gin.Context, account *Account, payload []byte, message, path string, outputStarted bool, body []byte, validatedWrappedStatus ...int) {
 	if c == nil {
 		return
 	}
@@ -96,11 +71,19 @@ func captureOpenAIStateRejection(c *gin.Context, account *Account, payload []byt
 	if v, ok := c.Get(openAIStateRejectionAttemptKey); ok {
 		if a, ok := v.(*openAIStateRejectionAttempt); ok && a != nil {
 			a.rejection, a.path, a.stage, a.observedAt = rej, path, stage, time.Now()
+			if c.Request != nil {
+				a.eventBoundary = resilience.StateFrom(c.Request.Context()).OpsUpstreamEventSequence()
+			}
+			if repair := openAIRequestRepairFrom(c); repair != nil && len(repair.body) > 0 {
+				a.attemptBody = append([]byte(nil), repair.body...)
+			} else if body != nil {
+				a.attemptBody = append([]byte(nil), body...)
+			}
 			a.streakStatus = 0
 			a.streakBody = nil
 			a.streakMessage = ""
 			if rej.RequestScoped() && (path == "native_sse" || path == "passthrough_sse") {
-				a.streakStatus = openAIStreamFailedEventSemanticStatus(payload, message)
+				a.streakStatus = openAIStreamFailedEventSemanticStatus(payload, message, validatedWrappedStatus...)
 				a.streakBody = append(a.streakBody[:0], payload...)
 				a.streakMessage = message
 			}
@@ -118,11 +101,15 @@ func captureOpenAIStateRejection(c *gin.Context, account *Account, payload []byt
 	if c.Request != nil {
 		ctx = c.Request.Context()
 	}
-	noteOpenAIStateRejection(ctx, c, account, rej, path, stage, body)
+	noteOpenAIStateRejection(ctx, c, account, rej, path, stage, body, body)
 }
 
-func (s *OpenAIGatewayService) noteOpenAIStreamStateRejectionStreak(ctx context.Context, c *gin.Context, account *Account, forwardErr error) {
-	if s == nil || c == nil || account == nil || forwardErr == nil {
+func (s *OpenAIGatewayService) finishOpenAIStreamStateRejection(ctx context.Context, c *gin.Context, account *Account, forwardErr *error) {
+	if s == nil || c == nil || account == nil || forwardErr == nil || *forwardErr == nil {
+		return
+	}
+	var failover *UpstreamFailoverError
+	if errors.As(*forwardErr, &failover) {
 		return
 	}
 	v, ok := c.Get(openAIStateRejectionAttemptKey)
@@ -135,25 +122,34 @@ func (s *OpenAIGatewayService) noteOpenAIStreamStateRejectionStreak(ctx context.
 		return
 	}
 	groupID, session := resilience.StateFrom(ctx).SessionIdentity()
-	s.noteOpenAITerminalRejectionForSession(ctx, account, groupID, session, attempt.streakStatus, nil,
-		attempt.streakBody, forwardErr)
+	session = openAITerminalRejectionSession(ctx, session)
+	status := attempt.streakStatus
+	message := attempt.streakMessage
+	s.noteOpenAITerminalRejectionForSession(ctx, account, groupID, session, status, nil,
+		attempt.streakBody, *forwardErr)
+	// Error-passthrough rules may already have recorded this terminal frame.
+	// Earlier repair attempts must not suppress the final attempt's evidence.
+	events := currentOpsUpstreamEvents(c)
+	recorded := false
+	if sequence := resilience.StateFrom(ctx).OpsUpstreamEventSequence(); sequence == uint64(len(events)) && attempt.eventBoundary <= sequence {
+		for _, event := range events[attempt.eventBoundary:] {
+			if event != nil && event.AccountID == account.ID {
+				recorded = true
+				break
+			}
+		}
+	}
+	if !recorded {
+		s.recordOpenAIStreamUpstreamError(c, account, attempt.path == "passthrough_sse", "", "terminal_rejection",
+			attempt.streakBody, message, status)
+	}
+	var rejection *OpenAIRequestRejectionError
+	if !errors.As(*forwardErr, &rejection) {
+		*forwardErr = &OpenAIRequestRejectionError{*forwardErr}
+	}
 }
 
-func (s *OpenAIGatewayService) noteOpenAIWSStateRejectionStreak(ctx context.Context, account *Account, payload []byte) {
-	if s == nil || account == nil || !openAIStateRejection(payload, "").RequestScoped() {
-		return
-	}
-	identity, ok := openAITerminalRejectionIdentityFromContext(ctx)
-	if !ok {
-		return
-	}
-	message := extractOpenAISSEErrorMessage(payload)
-	status := openAIStreamFailedEventSemanticStatus(payload, message)
-	s.noteOpenAITerminalRejectionForSession(ctx, account, identity.groupID, identity.session,
-		status, nil, payload, errors.New("upstream state rejection"))
-}
-
-func noteOpenAIStateRejection(ctx context.Context, c *gin.Context, account *Account, rej resilience.StateRejection, path, stage string, body []byte) {
+func noteOpenAIStateRejection(ctx context.Context, c *gin.Context, account *Account, rej resilience.StateRejection, path, stage string, body, attemptBody []byte) {
 	if !rej.RequestScoped() || account == nil {
 		return
 	}
@@ -176,6 +172,7 @@ func noteOpenAIStateRejection(ctx context.Context, c *gin.Context, account *Acco
 	committed := c != nil && (IsResponseCommitted(c) || (c.Writer != nil && c.Writer.Written()))
 	stats, _ := openAICodexCollabAttempt(c)
 	census := openAIEncryptedFragmentCensus(body)
+	attemptCensus := openAIEncryptedFragmentCensus(attemptBody)
 	fields := append(resilience.EventFields(ctx),
 		"group_id", st.GroupID(), "account_id", account.ID, "family", string(rej.Family), "encrypted", rej.Encrypted,
 		"path", path, "stage", stage, "error_ms", errorMS,
@@ -188,8 +185,13 @@ func noteOpenAIStateRejection(ctx context.Context, c *gin.Context, account *Acco
 	}
 	if path != "ws" {
 		fields = append(fields, "headers_committed", committed, "client_version", version,
-			"frag_amsg", census.AgentMessage, "frag_fco", census.FunctionOutput, "frag_other", census.Other,
-			"frag_opaque_like", census.OpaqueLike, "frag_text_like", census.TextLike)
+			"frag_amsg", census.AgentMessage, "frag_fco", census.FunctionOutput, "frag_reasoning", census.Reasoning,
+			"frag_compaction", census.Compaction, "frag_other", census.Other,
+			"frag_opaque_like", census.OpaqueLike, "frag_text_like", census.TextLike,
+			"attempt_frag_amsg", attemptCensus.AgentMessage, "attempt_frag_fco", attemptCensus.FunctionOutput,
+			"attempt_frag_reasoning", attemptCensus.Reasoning, "attempt_frag_compaction", attemptCensus.Compaction,
+			"attempt_frag_other", attemptCensus.Other, "attempt_frag_opaque_like", attemptCensus.OpaqueLike,
+			"attempt_frag_text_like", attemptCensus.TextLike)
 	}
 	if path == "native_http" || path == "native_sse" || path == "passthrough_http" || path == "passthrough_sse" {
 		var ruleID int64
@@ -202,7 +204,7 @@ func noteOpenAIStateRejection(ctx context.Context, c *gin.Context, account *Acco
 	slog.WarnContext(ctx, "resilience.state_rejection", fields...)
 }
 
-type openAIEncryptedFragments struct{ AgentMessage, FunctionOutput, Other, OpaqueLike, TextLike int }
+type openAIEncryptedFragments struct{ AgentMessage, FunctionOutput, Reasoning, Compaction, Other, OpaqueLike, TextLike int }
 
 // Only protocol-defined positions are inspected; arguments, output strings,
 // and user JSON are never recursively searched. Shapes are diagnostics only.
@@ -228,6 +230,12 @@ func openAIEncryptedFragmentCensus(body []byte) (counts openAIEncryptedFragments
 		default:
 			if value := item.Get("encrypted_content"); value.Exists() && value.Type != gjson.Null {
 				counts.Other++
+				switch item.Get("type").String() {
+				case "reasoning":
+					counts.Reasoning++
+				case "compaction":
+					counts.Compaction++
+				}
 				countShape(value.String())
 			}
 			continue
@@ -267,6 +275,6 @@ func noteOpenAIWSStateRejection(ctx context.Context, account *Account, payload [
 		return false
 	}
 	// These side-effect entry points do not carry per-turn delivery facts.
-	noteOpenAIStateRejection(ctx, nil, account, rej, "ws", "unknown", nil)
+	noteOpenAIStateRejection(ctx, nil, account, rej, "ws", "unknown", nil, nil)
 	return true
 }

@@ -21,9 +21,10 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, forwardErr error) {
+	ctx = WithOpenAITerminalRejectionScope(ctx, c, body)
 	finishStateRejection := beginOpenAIStateRejectionAttempt(ctx, c, account, body)
 	defer func() {
-		s.noteOpenAIStreamStateRejectionStreak(ctx, c, account, forwardErr)
+		s.finishOpenAIStreamStateRejection(ctx, c, account, &forwardErr)
 		finishStateRejection(&forwardErr)
 	}()
 	// Run the same complete checks on original bytes without applying edits;

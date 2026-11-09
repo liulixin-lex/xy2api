@@ -28,6 +28,7 @@ type openAIGuardianParentAffinity struct {
 // The hint is resolved against the current group's sticky-session namespace
 // later; client headers never carry an account ID.
 func (s *OpenAIGatewayService) WithOpenAIGuardianParentAffinity(ctx context.Context, c *gin.Context, body []byte, requestedModel string) context.Context {
+	ctx = WithOpenAITerminalRejectionScope(ctx, c, body)
 	if ctx == nil || c == nil {
 		return ctx
 	}
@@ -176,6 +177,9 @@ func openAIGuardianParentAffinityFromContext(ctx context.Context) (openAIGuardia
 }
 
 func preserveOpenAIGuardianParentBinding(ctx context.Context, sessionHash string) bool {
+	if scope := openAIRejectionScope(ctx); scope.preserveBinding && sessionHash != "" && sessionHash != scope.session {
+		return true
+	}
 	affinity, ok := openAIGuardianParentAffinityFromContext(ctx)
 	if !ok {
 		return false

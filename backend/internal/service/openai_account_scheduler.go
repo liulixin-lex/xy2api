@@ -2439,6 +2439,11 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	}
 	ctx = s.withResilienceOpenAIEligibility(ctx, groupID, previousResponseID, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform)
 	avoided := s.resilience.sessionAvoid(ctx, groupID, sessionHash)
+	if scope := openAIRejectionScope(ctx).session; scope != "" && scope != sessionHash {
+		threadAvoid := s.resilience.sessionAvoid(ctx, groupID, scope)
+		avoided = mergeExcluded(avoided, threadAvoid)
+	}
+	resilience.StateFrom(ctx).SetAvoided(avoided)
 	excludedIDs = mergeExcluded(excludedIDs, avoided)
 	ctx = s.withOpenAIShareTrace(ctx, groupID, sessionHash, excludedIDs, requiredImageCapability)
 	selection, decision, err = s.selectAccountWithQualityRouting(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)

@@ -877,6 +877,18 @@
           "reason = \"owner_failed_in_request\"",
           "}"
         ]
+      },
+      {
+        "block": "encrypted-rejection-execution-scope-0512",
+        "note": "0.5.12 E: merge thread-scoped terminal rejection avoidance before parent affinity and regular selection; keep shared parent binding intact. Covered by TestOpenAITerminalRejectionScopeKeepsParentAffinityAvailable.",
+        "removed": [],
+        "added": [
+          "if scope := openAIRejectionScope(ctx).session; scope != \"\" && scope != sessionHash {",
+          "threadAvoid := s.resilience.sessionAvoid(ctx, groupID, scope)",
+          "avoided = mergeExcluded(avoided, threadAvoid)",
+          "}",
+          "resilience.StateFrom(ctx).SetAvoided(avoided)"
+        ]
       }
     ],
     "backend/internal/service/openai_gateway_scheduling.go": [

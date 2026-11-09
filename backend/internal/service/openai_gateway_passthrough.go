@@ -2203,7 +2203,7 @@ func (s *OpenAIGatewayService) nonStreamingTerminalFailureFailover(
 	if account == nil || IsResponseCommitted(c) {
 		return nil
 	}
-	captureOpenAIStateRejection(c, account, payload, message, path, false, nil)
+	captureOpenAIStateRejection(c, account, payload, message, path, false, nil, wrappedStatus)
 	if wrapped {
 		ctx := context.Background()
 		if c != nil && c.Request != nil {
@@ -2650,7 +2650,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 						return passthroughReturn(resultWithUsage(), repairErr)
 					}
 				}
-				captureOpenAIStateRejection(c, account, dataBytes, failedMessage, "passthrough_sse", outputStarted, nil)
+				captureOpenAIStateRejection(c, account, dataBytes, failedMessage, "passthrough_sse", outputStarted, nil, wrappedStatus)
 				if outputStarted && !cyberHit {
 					if codexFailureTerminal && eventType == "error" {
 						// Wait for the authoritative response.failed before mutating

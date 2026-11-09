@@ -3829,15 +3829,15 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_forward.go",
-      "value": "defer beginOpenAIStateRejectionAttempt(ctx, c, account, body)(&forwardErr)"
+      "value": "finishStateRejection := beginOpenAIStateRejectionAttempt(ctx, c, account, body)"
     },
     {
       "path": "backend/internal/service/openai_gateway_response_handling.go",
-      "value": "captureOpenAIStateRejection(c, account, dataBytes, failedMessage, \"native_sse\", outputStarted, nil)"
+      "value": "captureOpenAIStateRejection(c, account, dataBytes, failedMessage, \"native_sse\", outputStarted, nil, wrappedStatus)"
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
-      "value": "captureOpenAIStateRejection(c, account, dataBytes, failedMessage, \"passthrough_sse\", outputStarted, nil)"
+      "value": "captureOpenAIStateRejection(c, account, dataBytes, failedMessage, \"passthrough_sse\", outputStarted, nil, wrappedStatus)"
     },
     {
       "path": "backend/internal/service/openai_gateway_passthrough.go",
@@ -4218,6 +4218,26 @@
     {
       "path": "backend/internal/service/resilience_penalty.go",
       "value": "if !e.NonInference {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "s.finishOpenAIStreamStateRejection(ctx, c, account, &forwardErr)"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_rejection.go",
+      "value": "session = openAITerminalRejectionSession(ctx, session)"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_rejection_test.go",
+      "value": "func TestOpenAITerminalRejectionScopeKeepsParentAffinityAvailable(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/openai_state_rejection_test.go",
+      "value": "func TestOpenAIStreamStateRejectionUsesThreadScopedAvoidance(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_forward.go",
+      "value": "finishStateRejection(&forwardErr)"
     }
   ],
   "forbidden_module_paths": [
