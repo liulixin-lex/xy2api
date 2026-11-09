@@ -119,6 +119,6 @@ func (s *RequestState) ResponseStagePlan(start time.Time) TimeoutPlan {
 		captureTimeoutPlanForTest(b, &p, s.attemptProfile, s)
 	}
 	s.mu.Unlock()
-	s.NoteAttemptTimer(s.AttemptProfile().AttemptStart)
+	s.NoteAttemptTimer(s.AttemptProfile().timerOwnerStart())
 	return p
 }

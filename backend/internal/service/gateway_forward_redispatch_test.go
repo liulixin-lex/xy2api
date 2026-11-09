@@ -116,6 +116,7 @@ func TestGatewayForwardSameAccountRedispatchGetsFreshFirstEventWindow(t *testing
 	t.Logf("dispatch2: err=%v took=%s attemptStart-age-at-send=%s", err2, took, sends[1].Sub(profiles[1].AttemptStart))
 	require.False(t, profiles[1].AttemptStart.Before(redispatchStart), "dispatch 2 must get its own AttemptStart")
 	require.True(t, profiles[1].AttemptStart.After(profiles[0].AttemptStart))
+	require.False(t, profiles[1].TimerOwnerStart.Before(redispatchStart), "the timer owner is also fresh on redispatch")
 	require.NoError(t, err2, "the event at +300 ms must be delivered within the fresh first-event window")
 	require.NotNil(t, res)
 	require.Equal(t, 1, res.Usage.OutputTokens)
