@@ -123,6 +123,7 @@ func TestBudgetLateWarningsReachSystemSink(t *testing.T) {
 			at := start.Add(239 * time.Second)
 			if hidden || st.Budget().CanAttempt(at) {
 				st.SetAttemptProfile(resilience.AttemptProfile{AttemptStart: at})
+				st.ObserveAttemptStart()
 			}
 			cancel()
 			_, _, abuse := st.ResolveDisconnect()
