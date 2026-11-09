@@ -62,6 +62,26 @@ func minTime(a, b time.Time) time.Time {
 	return b
 }
 
+func TestBudgetAnchorDoesNotChangeArrivalBasedAttemptDurationU6(t *testing.T) {
+	t0 := time.Unix(1700000000, 0)
+	for _, elapsed := range []time.Duration{60*time.Second - time.Nanosecond, 60 * time.Second} {
+		var arrivalDuration time.Duration
+		for _, mode := range []string{BudgetStartArrival, BudgetStartBodyEOF} {
+			settings := Defaults()
+			settings.Budget.BudgetStart = mode
+			budget := NewBudget(context.Background(), &settings, KindText, t0)
+			budget.MarkBodyReceived(t0.Add(100*time.Second), "body_eof")
+			duration := budget.RecordAttemptAt(t0.Add(elapsed))
+			require.Equal(t, elapsed, duration, "lastMark and attempt duration remain anchored to arrival")
+			if mode == BudgetStartArrival {
+				arrivalDuration = duration
+			} else {
+				require.Equal(t, arrivalDuration, duration)
+			}
+		}
+	}
+}
+
 func TestBudgetAnchorLegacyValuesAndPrefix(t *testing.T) {
 	t0 := time.Unix(1700000000, 0)
 	for _, base := range []int{60, 240, 290} {

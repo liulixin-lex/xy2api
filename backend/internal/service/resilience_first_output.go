@@ -177,7 +177,24 @@ func resilienceFirstEventTimeout(ctx context.Context, accountID int64, platform 
 	timeout, _ := resilienceFirstEventPlan(ctx, accountID, platform)
 	return timeout
 }
+
+func resilienceProfileAttemptStart(ctx context.Context, accountID int64, fallback time.Time) time.Time {
+	profile := resilience.StateFrom(ctx).AttemptProfile()
+	if profile.AccountID == accountID && !profile.AttemptStart.IsZero() {
+		return profile.AttemptStart
+	}
+	if !fallback.IsZero() {
+		return fallback
+	}
+	return time.Now()
+}
+
 func resilienceFirstEventPlan(ctx context.Context, accountID int64, platform string) (time.Duration, resilience.TimeoutPlan) {
+	started := resilienceProfileAttemptStart(ctx, accountID, time.Time{})
+	return resilienceFirstEventPlanAt(ctx, accountID, platform, started)
+}
+
+func resilienceFirstEventPlanAt(ctx context.Context, accountID int64, platform string, started time.Time) (time.Duration, resilience.TimeoutPlan) {
 	b := resilienceTextBudget(ctx)
 	if b == nil {
 		return 0, resilience.TimeoutPlan{}
@@ -187,7 +204,10 @@ func resilienceFirstEventPlan(ctx context.Context, accountID int64, platform str
 	if platform == PlatformGemini {
 		tier = time.Duration(cfg.Budget.GeminiFirstEventTimeoutSeconds) * time.Second
 	}
-	plan := resilience.StateFrom(ctx).PlanAttemptTimeout(tier, resilienceLastCandidate(ctx, accountID), time.Now())
+	if started.IsZero() {
+		started = time.Now()
+	}
+	plan := resilience.StateFrom(ctx).PlanAttemptTimeout(tier, resilienceLastCandidate(ctx, accountID), started)
 	return plan.Effective(), plan
 }
 
@@ -214,12 +234,23 @@ func newFirstEventGuard(ctx context.Context, timeout time.Duration, plans ...res
 	g := &firstEventGuard{cancel: cancel, timeout: timeout}
 	if len(plans) > 0 {
 		g.plan = plans[0]
+		timeout = timeoutUntilPlanDeadline(timeout, g.plan.Start(), time.Now())
 	}
 	g.timer = time.AfterFunc(timeout, func() {
 		g.fired.Store(true)
 		cancel()
 	})
 	return context.WithValue(guarded, firstEventGuardKey{}, g), g
+}
+
+func timeoutUntilPlanDeadline(timeout time.Duration, started, now time.Time) time.Duration {
+	if timeout > 0 && !started.IsZero() {
+		timeout -= now.Sub(started)
+		if timeout <= 0 {
+			return time.Nanosecond
+		}
+	}
+	return timeout
 }
 
 func firstEventGuardFrom(ctx context.Context) *firstEventGuard {

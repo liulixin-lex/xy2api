@@ -827,8 +827,12 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 		requestIDHeader = idHeader
 
 		attemptGuard.headerWait()
+		attemptStart := time.Now()
+		if attempt == 1 {
+			attemptStart = startTime
+		}
 		resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{
-			AccountID: account.ID, Model: originalModel, AttemptStart: time.Now(), Stream: req.Stream, BodyBytes: len(geminiReq),
+			AccountID: account.ID, Model: originalModel, AttemptStart: attemptStart, Stream: req.Stream, BodyBytes: len(geminiReq),
 		})
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
@@ -1394,8 +1398,12 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		requestIDHeader = idHeader
 
 		attemptGuard.headerWait()
+		attemptStart := time.Now()
+		if attempt == 1 {
+			attemptStart = startTime
+		}
 		resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{
-			AccountID: account.ID, Model: originalModel, AttemptStart: time.Now(), Stream: stream, BodyBytes: len(body),
+			AccountID: account.ID, Model: originalModel, AttemptStart: attemptStart, Stream: stream, BodyBytes: len(body),
 		})
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {

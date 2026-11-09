@@ -61,6 +61,14 @@ func geminiTextRequest(model, action string, body []byte) bool {
 // One guard spans the header wait, all in-place retries and all six body
 // collection paths. Only replay-safe nonstream bodies get an attempt cutoff.
 func newGeminiAttempt(ctx context.Context, account *Account, model, action string, body []byte, stream bool, protocol string, started time.Time) *geminiAttempt {
+	if started.IsZero() {
+		started = time.Now()
+	}
+	if account != nil {
+		resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{
+			AccountID: account.ID, Model: model, AttemptStart: started, Stream: stream, BodyBytes: len(body),
+		})
+	}
 	guarded, cancel := context.WithCancelCause(ctx)
 	g := &geminiAttempt{ctx: guarded, parent: ctx, cancel: cancel, protocol: protocol}
 	g.headerWait()
