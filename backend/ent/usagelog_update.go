@@ -1041,6 +1041,450 @@ func (_u *UsageLogUpdate) SetNillableCacheTTLOverridden(v *bool) *UsageLogUpdate
 	return _u
 }
 
+// SetBodyBytes sets the "body_bytes" field.
+func (_u *UsageLogUpdate) SetBodyBytes(v int64) *UsageLogUpdate {
+	_u.mutation.ResetBodyBytes()
+	_u.mutation.SetBodyBytes(v)
+	return _u
+}
+
+// SetNillableBodyBytes sets the "body_bytes" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableBodyBytes(v *int64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetBodyBytes(*v)
+	}
+	return _u
+}
+
+// AddBodyBytes adds value to the "body_bytes" field.
+func (_u *UsageLogUpdate) AddBodyBytes(v int64) *UsageLogUpdate {
+	_u.mutation.AddBodyBytes(v)
+	return _u
+}
+
+// ClearBodyBytes clears the value of the "body_bytes" field.
+func (_u *UsageLogUpdate) ClearBodyBytes() *UsageLogUpdate {
+	_u.mutation.ClearBodyBytes()
+	return _u
+}
+
+// SetFirstReadMs sets the "first_read_ms" field.
+func (_u *UsageLogUpdate) SetFirstReadMs(v int64) *UsageLogUpdate {
+	_u.mutation.ResetFirstReadMs()
+	_u.mutation.SetFirstReadMs(v)
+	return _u
+}
+
+// SetNillableFirstReadMs sets the "first_read_ms" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableFirstReadMs(v *int64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetFirstReadMs(*v)
+	}
+	return _u
+}
+
+// AddFirstReadMs adds value to the "first_read_ms" field.
+func (_u *UsageLogUpdate) AddFirstReadMs(v int64) *UsageLogUpdate {
+	_u.mutation.AddFirstReadMs(v)
+	return _u
+}
+
+// ClearFirstReadMs clears the value of the "first_read_ms" field.
+func (_u *UsageLogUpdate) ClearFirstReadMs() *UsageLogUpdate {
+	_u.mutation.ClearFirstReadMs()
+	return _u
+}
+
+// SetBodyEOFMs sets the "body_eof_ms" field.
+func (_u *UsageLogUpdate) SetBodyEOFMs(v int64) *UsageLogUpdate {
+	_u.mutation.ResetBodyEOFMs()
+	_u.mutation.SetBodyEOFMs(v)
+	return _u
+}
+
+// SetNillableBodyEOFMs sets the "body_eof_ms" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableBodyEOFMs(v *int64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetBodyEOFMs(*v)
+	}
+	return _u
+}
+
+// AddBodyEOFMs adds value to the "body_eof_ms" field.
+func (_u *UsageLogUpdate) AddBodyEOFMs(v int64) *UsageLogUpdate {
+	_u.mutation.AddBodyEOFMs(v)
+	return _u
+}
+
+// ClearBodyEOFMs clears the value of the "body_eof_ms" field.
+func (_u *UsageLogUpdate) ClearBodyEOFMs() *UsageLogUpdate {
+	_u.mutation.ClearBodyEOFMs()
+	return _u
+}
+
+// SetAnchorBasis sets the "anchor_basis" field.
+func (_u *UsageLogUpdate) SetAnchorBasis(v string) *UsageLogUpdate {
+	_u.mutation.SetAnchorBasis(v)
+	return _u
+}
+
+// SetNillableAnchorBasis sets the "anchor_basis" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableAnchorBasis(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetAnchorBasis(*v)
+	}
+	return _u
+}
+
+// ClearAnchorBasis clears the value of the "anchor_basis" field.
+func (_u *UsageLogUpdate) ClearAnchorBasis() *UsageLogUpdate {
+	_u.mutation.ClearAnchorBasis()
+	return _u
+}
+
+// SetAnchorEligible sets the "anchor_eligible" field.
+func (_u *UsageLogUpdate) SetAnchorEligible(v bool) *UsageLogUpdate {
+	_u.mutation.SetAnchorEligible(v)
+	return _u
+}
+
+// SetNillableAnchorEligible sets the "anchor_eligible" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableAnchorEligible(v *bool) *UsageLogUpdate {
+	if v != nil {
+		_u.SetAnchorEligible(*v)
+	}
+	return _u
+}
+
+// ClearAnchorEligible clears the value of the "anchor_eligible" field.
+func (_u *UsageLogUpdate) ClearAnchorEligible() *UsageLogUpdate {
+	_u.mutation.ClearAnchorEligible()
+	return _u
+}
+
+// SetBodyReceiptRepeat sets the "body_receipt_repeat" field.
+func (_u *UsageLogUpdate) SetBodyReceiptRepeat(v int64) *UsageLogUpdate {
+	_u.mutation.ResetBodyReceiptRepeat()
+	_u.mutation.SetBodyReceiptRepeat(v)
+	return _u
+}
+
+// SetNillableBodyReceiptRepeat sets the "body_receipt_repeat" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableBodyReceiptRepeat(v *int64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetBodyReceiptRepeat(*v)
+	}
+	return _u
+}
+
+// AddBodyReceiptRepeat adds value to the "body_receipt_repeat" field.
+func (_u *UsageLogUpdate) AddBodyReceiptRepeat(v int64) *UsageLogUpdate {
+	_u.mutation.AddBodyReceiptRepeat(v)
+	return _u
+}
+
+// ClearBodyReceiptRepeat clears the value of the "body_receipt_repeat" field.
+func (_u *UsageLogUpdate) ClearBodyReceiptRepeat() *UsageLogUpdate {
+	_u.mutation.ClearBodyReceiptRepeat()
+	return _u
+}
+
+// SetPreDispatchMs sets the "pre_dispatch_ms" field.
+func (_u *UsageLogUpdate) SetPreDispatchMs(v int64) *UsageLogUpdate {
+	_u.mutation.ResetPreDispatchMs()
+	_u.mutation.SetPreDispatchMs(v)
+	return _u
+}
+
+// SetNillablePreDispatchMs sets the "pre_dispatch_ms" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillablePreDispatchMs(v *int64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetPreDispatchMs(*v)
+	}
+	return _u
+}
+
+// AddPreDispatchMs adds value to the "pre_dispatch_ms" field.
+func (_u *UsageLogUpdate) AddPreDispatchMs(v int64) *UsageLogUpdate {
+	_u.mutation.AddPreDispatchMs(v)
+	return _u
+}
+
+// ClearPreDispatchMs clears the value of the "pre_dispatch_ms" field.
+func (_u *UsageLogUpdate) ClearPreDispatchMs() *UsageLogUpdate {
+	_u.mutation.ClearPreDispatchMs()
+	return _u
+}
+
+// SetKeepaliveCommitMs sets the "keepalive_commit_ms" field.
+func (_u *UsageLogUpdate) SetKeepaliveCommitMs(v int64) *UsageLogUpdate {
+	_u.mutation.ResetKeepaliveCommitMs()
+	_u.mutation.SetKeepaliveCommitMs(v)
+	return _u
+}
+
+// SetNillableKeepaliveCommitMs sets the "keepalive_commit_ms" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableKeepaliveCommitMs(v *int64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetKeepaliveCommitMs(*v)
+	}
+	return _u
+}
+
+// AddKeepaliveCommitMs adds value to the "keepalive_commit_ms" field.
+func (_u *UsageLogUpdate) AddKeepaliveCommitMs(v int64) *UsageLogUpdate {
+	_u.mutation.AddKeepaliveCommitMs(v)
+	return _u
+}
+
+// ClearKeepaliveCommitMs clears the value of the "keepalive_commit_ms" field.
+func (_u *UsageLogUpdate) ClearKeepaliveCommitMs() *UsageLogUpdate {
+	_u.mutation.ClearKeepaliveCommitMs()
+	return _u
+}
+
+// SetWireStatus sets the "wire_status" field.
+func (_u *UsageLogUpdate) SetWireStatus(v int64) *UsageLogUpdate {
+	_u.mutation.ResetWireStatus()
+	_u.mutation.SetWireStatus(v)
+	return _u
+}
+
+// SetNillableWireStatus sets the "wire_status" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableWireStatus(v *int64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetWireStatus(*v)
+	}
+	return _u
+}
+
+// AddWireStatus adds value to the "wire_status" field.
+func (_u *UsageLogUpdate) AddWireStatus(v int64) *UsageLogUpdate {
+	_u.mutation.AddWireStatus(v)
+	return _u
+}
+
+// ClearWireStatus clears the value of the "wire_status" field.
+func (_u *UsageLogUpdate) ClearWireStatus() *UsageLogUpdate {
+	_u.mutation.ClearWireStatus()
+	return _u
+}
+
+// SetDispatchCount sets the "dispatch_count" field.
+func (_u *UsageLogUpdate) SetDispatchCount(v int64) *UsageLogUpdate {
+	_u.mutation.ResetDispatchCount()
+	_u.mutation.SetDispatchCount(v)
+	return _u
+}
+
+// SetNillableDispatchCount sets the "dispatch_count" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableDispatchCount(v *int64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetDispatchCount(*v)
+	}
+	return _u
+}
+
+// AddDispatchCount adds value to the "dispatch_count" field.
+func (_u *UsageLogUpdate) AddDispatchCount(v int64) *UsageLogUpdate {
+	_u.mutation.AddDispatchCount(v)
+	return _u
+}
+
+// ClearDispatchCount clears the value of the "dispatch_count" field.
+func (_u *UsageLogUpdate) ClearDispatchCount() *UsageLogUpdate {
+	_u.mutation.ClearDispatchCount()
+	return _u
+}
+
+// SetMinDispatchRemainingMs sets the "min_dispatch_remaining_ms" field.
+func (_u *UsageLogUpdate) SetMinDispatchRemainingMs(v int64) *UsageLogUpdate {
+	_u.mutation.ResetMinDispatchRemainingMs()
+	_u.mutation.SetMinDispatchRemainingMs(v)
+	return _u
+}
+
+// SetNillableMinDispatchRemainingMs sets the "min_dispatch_remaining_ms" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableMinDispatchRemainingMs(v *int64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetMinDispatchRemainingMs(*v)
+	}
+	return _u
+}
+
+// AddMinDispatchRemainingMs adds value to the "min_dispatch_remaining_ms" field.
+func (_u *UsageLogUpdate) AddMinDispatchRemainingMs(v int64) *UsageLogUpdate {
+	_u.mutation.AddMinDispatchRemainingMs(v)
+	return _u
+}
+
+// ClearMinDispatchRemainingMs clears the value of the "min_dispatch_remaining_ms" field.
+func (_u *UsageLogUpdate) ClearMinDispatchRemainingMs() *UsageLogUpdate {
+	_u.mutation.ClearMinDispatchRemainingMs()
+	return _u
+}
+
+// SetFinalDeadlineMs sets the "final_deadline_ms" field.
+func (_u *UsageLogUpdate) SetFinalDeadlineMs(v int64) *UsageLogUpdate {
+	_u.mutation.ResetFinalDeadlineMs()
+	_u.mutation.SetFinalDeadlineMs(v)
+	return _u
+}
+
+// SetNillableFinalDeadlineMs sets the "final_deadline_ms" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableFinalDeadlineMs(v *int64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetFinalDeadlineMs(*v)
+	}
+	return _u
+}
+
+// AddFinalDeadlineMs adds value to the "final_deadline_ms" field.
+func (_u *UsageLogUpdate) AddFinalDeadlineMs(v int64) *UsageLogUpdate {
+	_u.mutation.AddFinalDeadlineMs(v)
+	return _u
+}
+
+// ClearFinalDeadlineMs clears the value of the "final_deadline_ms" field.
+func (_u *UsageLogUpdate) ClearFinalDeadlineMs() *UsageLogUpdate {
+	_u.mutation.ClearFinalDeadlineMs()
+	return _u
+}
+
+// SetClientFamily sets the "client_family" field.
+func (_u *UsageLogUpdate) SetClientFamily(v string) *UsageLogUpdate {
+	_u.mutation.SetClientFamily(v)
+	return _u
+}
+
+// SetNillableClientFamily sets the "client_family" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableClientFamily(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetClientFamily(*v)
+	}
+	return _u
+}
+
+// ClearClientFamily clears the value of the "client_family" field.
+func (_u *UsageLogUpdate) ClearClientFamily() *UsageLogUpdate {
+	_u.mutation.ClearClientFamily()
+	return _u
+}
+
+// SetClientCancelMs sets the "client_cancel_ms" field.
+func (_u *UsageLogUpdate) SetClientCancelMs(v int64) *UsageLogUpdate {
+	_u.mutation.ResetClientCancelMs()
+	_u.mutation.SetClientCancelMs(v)
+	return _u
+}
+
+// SetNillableClientCancelMs sets the "client_cancel_ms" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableClientCancelMs(v *int64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetClientCancelMs(*v)
+	}
+	return _u
+}
+
+// AddClientCancelMs adds value to the "client_cancel_ms" field.
+func (_u *UsageLogUpdate) AddClientCancelMs(v int64) *UsageLogUpdate {
+	_u.mutation.AddClientCancelMs(v)
+	return _u
+}
+
+// ClearClientCancelMs clears the value of the "client_cancel_ms" field.
+func (_u *UsageLogUpdate) ClearClientCancelMs() *UsageLogUpdate {
+	_u.mutation.ClearClientCancelMs()
+	return _u
+}
+
+// SetCancelStage sets the "cancel_stage" field.
+func (_u *UsageLogUpdate) SetCancelStage(v string) *UsageLogUpdate {
+	_u.mutation.SetCancelStage(v)
+	return _u
+}
+
+// SetNillableCancelStage sets the "cancel_stage" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableCancelStage(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetCancelStage(*v)
+	}
+	return _u
+}
+
+// ClearCancelStage clears the value of the "cancel_stage" field.
+func (_u *UsageLogUpdate) ClearCancelStage() *UsageLogUpdate {
+	_u.mutation.ClearCancelStage()
+	return _u
+}
+
+// SetCdnObserved sets the "cdn_observed" field.
+func (_u *UsageLogUpdate) SetCdnObserved(v string) *UsageLogUpdate {
+	_u.mutation.SetCdnObserved(v)
+	return _u
+}
+
+// SetNillableCdnObserved sets the "cdn_observed" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableCdnObserved(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetCdnObserved(*v)
+	}
+	return _u
+}
+
+// ClearCdnObserved clears the value of the "cdn_observed" field.
+func (_u *UsageLogUpdate) ClearCdnObserved() *UsageLogUpdate {
+	_u.mutation.ClearCdnObserved()
+	return _u
+}
+
+// SetBudgetStartMode sets the "budget_start_mode" field.
+func (_u *UsageLogUpdate) SetBudgetStartMode(v string) *UsageLogUpdate {
+	_u.mutation.SetBudgetStartMode(v)
+	return _u
+}
+
+// SetNillableBudgetStartMode sets the "budget_start_mode" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableBudgetStartMode(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetBudgetStartMode(*v)
+	}
+	return _u
+}
+
+// ClearBudgetStartMode clears the value of the "budget_start_mode" field.
+func (_u *UsageLogUpdate) ClearBudgetStartMode() *UsageLogUpdate {
+	_u.mutation.ClearBudgetStartMode()
+	return _u
+}
+
+// SetBudgetT0UnixMs sets the "budget_t0_unix_ms" field.
+func (_u *UsageLogUpdate) SetBudgetT0UnixMs(v int64) *UsageLogUpdate {
+	_u.mutation.ResetBudgetT0UnixMs()
+	_u.mutation.SetBudgetT0UnixMs(v)
+	return _u
+}
+
+// SetNillableBudgetT0UnixMs sets the "budget_t0_unix_ms" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableBudgetT0UnixMs(v *int64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetBudgetT0UnixMs(*v)
+	}
+	return _u
+}
+
+// AddBudgetT0UnixMs adds value to the "budget_t0_unix_ms" field.
+func (_u *UsageLogUpdate) AddBudgetT0UnixMs(v int64) *UsageLogUpdate {
+	_u.mutation.AddBudgetT0UnixMs(v)
+	return _u
+}
+
+// ClearBudgetT0UnixMs clears the value of the "budget_t0_unix_ms" field.
+func (_u *UsageLogUpdate) ClearBudgetT0UnixMs() *UsageLogUpdate {
+	_u.mutation.ClearBudgetT0UnixMs()
+	return _u
+}
+
 // SetUser sets the "user" edge to the User entity.
 func (_u *UsageLogUpdate) SetUser(v *User) *UsageLogUpdate {
 	return _u.SetUserID(v.ID)
@@ -1509,6 +1953,150 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.CacheTTLOverridden(); ok {
 		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.BodyBytes(); ok {
+		_spec.SetField(usagelog.FieldBodyBytes, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedBodyBytes(); ok {
+		_spec.AddField(usagelog.FieldBodyBytes, field.TypeInt64, value)
+	}
+	if _u.mutation.BodyBytesCleared() {
+		_spec.ClearField(usagelog.FieldBodyBytes, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.FirstReadMs(); ok {
+		_spec.SetField(usagelog.FieldFirstReadMs, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedFirstReadMs(); ok {
+		_spec.AddField(usagelog.FieldFirstReadMs, field.TypeInt64, value)
+	}
+	if _u.mutation.FirstReadMsCleared() {
+		_spec.ClearField(usagelog.FieldFirstReadMs, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.BodyEOFMs(); ok {
+		_spec.SetField(usagelog.FieldBodyEOFMs, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedBodyEOFMs(); ok {
+		_spec.AddField(usagelog.FieldBodyEOFMs, field.TypeInt64, value)
+	}
+	if _u.mutation.BodyEOFMsCleared() {
+		_spec.ClearField(usagelog.FieldBodyEOFMs, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.AnchorBasis(); ok {
+		_spec.SetField(usagelog.FieldAnchorBasis, field.TypeString, value)
+	}
+	if _u.mutation.AnchorBasisCleared() {
+		_spec.ClearField(usagelog.FieldAnchorBasis, field.TypeString)
+	}
+	if value, ok := _u.mutation.AnchorEligible(); ok {
+		_spec.SetField(usagelog.FieldAnchorEligible, field.TypeBool, value)
+	}
+	if _u.mutation.AnchorEligibleCleared() {
+		_spec.ClearField(usagelog.FieldAnchorEligible, field.TypeBool)
+	}
+	if value, ok := _u.mutation.BodyReceiptRepeat(); ok {
+		_spec.SetField(usagelog.FieldBodyReceiptRepeat, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedBodyReceiptRepeat(); ok {
+		_spec.AddField(usagelog.FieldBodyReceiptRepeat, field.TypeInt64, value)
+	}
+	if _u.mutation.BodyReceiptRepeatCleared() {
+		_spec.ClearField(usagelog.FieldBodyReceiptRepeat, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.PreDispatchMs(); ok {
+		_spec.SetField(usagelog.FieldPreDispatchMs, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedPreDispatchMs(); ok {
+		_spec.AddField(usagelog.FieldPreDispatchMs, field.TypeInt64, value)
+	}
+	if _u.mutation.PreDispatchMsCleared() {
+		_spec.ClearField(usagelog.FieldPreDispatchMs, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.KeepaliveCommitMs(); ok {
+		_spec.SetField(usagelog.FieldKeepaliveCommitMs, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedKeepaliveCommitMs(); ok {
+		_spec.AddField(usagelog.FieldKeepaliveCommitMs, field.TypeInt64, value)
+	}
+	if _u.mutation.KeepaliveCommitMsCleared() {
+		_spec.ClearField(usagelog.FieldKeepaliveCommitMs, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.WireStatus(); ok {
+		_spec.SetField(usagelog.FieldWireStatus, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedWireStatus(); ok {
+		_spec.AddField(usagelog.FieldWireStatus, field.TypeInt64, value)
+	}
+	if _u.mutation.WireStatusCleared() {
+		_spec.ClearField(usagelog.FieldWireStatus, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.DispatchCount(); ok {
+		_spec.SetField(usagelog.FieldDispatchCount, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedDispatchCount(); ok {
+		_spec.AddField(usagelog.FieldDispatchCount, field.TypeInt64, value)
+	}
+	if _u.mutation.DispatchCountCleared() {
+		_spec.ClearField(usagelog.FieldDispatchCount, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.MinDispatchRemainingMs(); ok {
+		_spec.SetField(usagelog.FieldMinDispatchRemainingMs, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedMinDispatchRemainingMs(); ok {
+		_spec.AddField(usagelog.FieldMinDispatchRemainingMs, field.TypeInt64, value)
+	}
+	if _u.mutation.MinDispatchRemainingMsCleared() {
+		_spec.ClearField(usagelog.FieldMinDispatchRemainingMs, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.FinalDeadlineMs(); ok {
+		_spec.SetField(usagelog.FieldFinalDeadlineMs, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedFinalDeadlineMs(); ok {
+		_spec.AddField(usagelog.FieldFinalDeadlineMs, field.TypeInt64, value)
+	}
+	if _u.mutation.FinalDeadlineMsCleared() {
+		_spec.ClearField(usagelog.FieldFinalDeadlineMs, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.ClientFamily(); ok {
+		_spec.SetField(usagelog.FieldClientFamily, field.TypeString, value)
+	}
+	if _u.mutation.ClientFamilyCleared() {
+		_spec.ClearField(usagelog.FieldClientFamily, field.TypeString)
+	}
+	if value, ok := _u.mutation.ClientCancelMs(); ok {
+		_spec.SetField(usagelog.FieldClientCancelMs, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedClientCancelMs(); ok {
+		_spec.AddField(usagelog.FieldClientCancelMs, field.TypeInt64, value)
+	}
+	if _u.mutation.ClientCancelMsCleared() {
+		_spec.ClearField(usagelog.FieldClientCancelMs, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.CancelStage(); ok {
+		_spec.SetField(usagelog.FieldCancelStage, field.TypeString, value)
+	}
+	if _u.mutation.CancelStageCleared() {
+		_spec.ClearField(usagelog.FieldCancelStage, field.TypeString)
+	}
+	if value, ok := _u.mutation.CdnObserved(); ok {
+		_spec.SetField(usagelog.FieldCdnObserved, field.TypeString, value)
+	}
+	if _u.mutation.CdnObservedCleared() {
+		_spec.ClearField(usagelog.FieldCdnObserved, field.TypeString)
+	}
+	if value, ok := _u.mutation.BudgetStartMode(); ok {
+		_spec.SetField(usagelog.FieldBudgetStartMode, field.TypeString, value)
+	}
+	if _u.mutation.BudgetStartModeCleared() {
+		_spec.ClearField(usagelog.FieldBudgetStartMode, field.TypeString)
+	}
+	if value, ok := _u.mutation.BudgetT0UnixMs(); ok {
+		_spec.SetField(usagelog.FieldBudgetT0UnixMs, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedBudgetT0UnixMs(); ok {
+		_spec.AddField(usagelog.FieldBudgetT0UnixMs, field.TypeInt64, value)
+	}
+	if _u.mutation.BudgetT0UnixMsCleared() {
+		_spec.ClearField(usagelog.FieldBudgetT0UnixMs, field.TypeInt64)
 	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -2684,6 +3272,450 @@ func (_u *UsageLogUpdateOne) SetNillableCacheTTLOverridden(v *bool) *UsageLogUpd
 	return _u
 }
 
+// SetBodyBytes sets the "body_bytes" field.
+func (_u *UsageLogUpdateOne) SetBodyBytes(v int64) *UsageLogUpdateOne {
+	_u.mutation.ResetBodyBytes()
+	_u.mutation.SetBodyBytes(v)
+	return _u
+}
+
+// SetNillableBodyBytes sets the "body_bytes" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableBodyBytes(v *int64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetBodyBytes(*v)
+	}
+	return _u
+}
+
+// AddBodyBytes adds value to the "body_bytes" field.
+func (_u *UsageLogUpdateOne) AddBodyBytes(v int64) *UsageLogUpdateOne {
+	_u.mutation.AddBodyBytes(v)
+	return _u
+}
+
+// ClearBodyBytes clears the value of the "body_bytes" field.
+func (_u *UsageLogUpdateOne) ClearBodyBytes() *UsageLogUpdateOne {
+	_u.mutation.ClearBodyBytes()
+	return _u
+}
+
+// SetFirstReadMs sets the "first_read_ms" field.
+func (_u *UsageLogUpdateOne) SetFirstReadMs(v int64) *UsageLogUpdateOne {
+	_u.mutation.ResetFirstReadMs()
+	_u.mutation.SetFirstReadMs(v)
+	return _u
+}
+
+// SetNillableFirstReadMs sets the "first_read_ms" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableFirstReadMs(v *int64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetFirstReadMs(*v)
+	}
+	return _u
+}
+
+// AddFirstReadMs adds value to the "first_read_ms" field.
+func (_u *UsageLogUpdateOne) AddFirstReadMs(v int64) *UsageLogUpdateOne {
+	_u.mutation.AddFirstReadMs(v)
+	return _u
+}
+
+// ClearFirstReadMs clears the value of the "first_read_ms" field.
+func (_u *UsageLogUpdateOne) ClearFirstReadMs() *UsageLogUpdateOne {
+	_u.mutation.ClearFirstReadMs()
+	return _u
+}
+
+// SetBodyEOFMs sets the "body_eof_ms" field.
+func (_u *UsageLogUpdateOne) SetBodyEOFMs(v int64) *UsageLogUpdateOne {
+	_u.mutation.ResetBodyEOFMs()
+	_u.mutation.SetBodyEOFMs(v)
+	return _u
+}
+
+// SetNillableBodyEOFMs sets the "body_eof_ms" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableBodyEOFMs(v *int64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetBodyEOFMs(*v)
+	}
+	return _u
+}
+
+// AddBodyEOFMs adds value to the "body_eof_ms" field.
+func (_u *UsageLogUpdateOne) AddBodyEOFMs(v int64) *UsageLogUpdateOne {
+	_u.mutation.AddBodyEOFMs(v)
+	return _u
+}
+
+// ClearBodyEOFMs clears the value of the "body_eof_ms" field.
+func (_u *UsageLogUpdateOne) ClearBodyEOFMs() *UsageLogUpdateOne {
+	_u.mutation.ClearBodyEOFMs()
+	return _u
+}
+
+// SetAnchorBasis sets the "anchor_basis" field.
+func (_u *UsageLogUpdateOne) SetAnchorBasis(v string) *UsageLogUpdateOne {
+	_u.mutation.SetAnchorBasis(v)
+	return _u
+}
+
+// SetNillableAnchorBasis sets the "anchor_basis" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableAnchorBasis(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetAnchorBasis(*v)
+	}
+	return _u
+}
+
+// ClearAnchorBasis clears the value of the "anchor_basis" field.
+func (_u *UsageLogUpdateOne) ClearAnchorBasis() *UsageLogUpdateOne {
+	_u.mutation.ClearAnchorBasis()
+	return _u
+}
+
+// SetAnchorEligible sets the "anchor_eligible" field.
+func (_u *UsageLogUpdateOne) SetAnchorEligible(v bool) *UsageLogUpdateOne {
+	_u.mutation.SetAnchorEligible(v)
+	return _u
+}
+
+// SetNillableAnchorEligible sets the "anchor_eligible" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableAnchorEligible(v *bool) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetAnchorEligible(*v)
+	}
+	return _u
+}
+
+// ClearAnchorEligible clears the value of the "anchor_eligible" field.
+func (_u *UsageLogUpdateOne) ClearAnchorEligible() *UsageLogUpdateOne {
+	_u.mutation.ClearAnchorEligible()
+	return _u
+}
+
+// SetBodyReceiptRepeat sets the "body_receipt_repeat" field.
+func (_u *UsageLogUpdateOne) SetBodyReceiptRepeat(v int64) *UsageLogUpdateOne {
+	_u.mutation.ResetBodyReceiptRepeat()
+	_u.mutation.SetBodyReceiptRepeat(v)
+	return _u
+}
+
+// SetNillableBodyReceiptRepeat sets the "body_receipt_repeat" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableBodyReceiptRepeat(v *int64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetBodyReceiptRepeat(*v)
+	}
+	return _u
+}
+
+// AddBodyReceiptRepeat adds value to the "body_receipt_repeat" field.
+func (_u *UsageLogUpdateOne) AddBodyReceiptRepeat(v int64) *UsageLogUpdateOne {
+	_u.mutation.AddBodyReceiptRepeat(v)
+	return _u
+}
+
+// ClearBodyReceiptRepeat clears the value of the "body_receipt_repeat" field.
+func (_u *UsageLogUpdateOne) ClearBodyReceiptRepeat() *UsageLogUpdateOne {
+	_u.mutation.ClearBodyReceiptRepeat()
+	return _u
+}
+
+// SetPreDispatchMs sets the "pre_dispatch_ms" field.
+func (_u *UsageLogUpdateOne) SetPreDispatchMs(v int64) *UsageLogUpdateOne {
+	_u.mutation.ResetPreDispatchMs()
+	_u.mutation.SetPreDispatchMs(v)
+	return _u
+}
+
+// SetNillablePreDispatchMs sets the "pre_dispatch_ms" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillablePreDispatchMs(v *int64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetPreDispatchMs(*v)
+	}
+	return _u
+}
+
+// AddPreDispatchMs adds value to the "pre_dispatch_ms" field.
+func (_u *UsageLogUpdateOne) AddPreDispatchMs(v int64) *UsageLogUpdateOne {
+	_u.mutation.AddPreDispatchMs(v)
+	return _u
+}
+
+// ClearPreDispatchMs clears the value of the "pre_dispatch_ms" field.
+func (_u *UsageLogUpdateOne) ClearPreDispatchMs() *UsageLogUpdateOne {
+	_u.mutation.ClearPreDispatchMs()
+	return _u
+}
+
+// SetKeepaliveCommitMs sets the "keepalive_commit_ms" field.
+func (_u *UsageLogUpdateOne) SetKeepaliveCommitMs(v int64) *UsageLogUpdateOne {
+	_u.mutation.ResetKeepaliveCommitMs()
+	_u.mutation.SetKeepaliveCommitMs(v)
+	return _u
+}
+
+// SetNillableKeepaliveCommitMs sets the "keepalive_commit_ms" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableKeepaliveCommitMs(v *int64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetKeepaliveCommitMs(*v)
+	}
+	return _u
+}
+
+// AddKeepaliveCommitMs adds value to the "keepalive_commit_ms" field.
+func (_u *UsageLogUpdateOne) AddKeepaliveCommitMs(v int64) *UsageLogUpdateOne {
+	_u.mutation.AddKeepaliveCommitMs(v)
+	return _u
+}
+
+// ClearKeepaliveCommitMs clears the value of the "keepalive_commit_ms" field.
+func (_u *UsageLogUpdateOne) ClearKeepaliveCommitMs() *UsageLogUpdateOne {
+	_u.mutation.ClearKeepaliveCommitMs()
+	return _u
+}
+
+// SetWireStatus sets the "wire_status" field.
+func (_u *UsageLogUpdateOne) SetWireStatus(v int64) *UsageLogUpdateOne {
+	_u.mutation.ResetWireStatus()
+	_u.mutation.SetWireStatus(v)
+	return _u
+}
+
+// SetNillableWireStatus sets the "wire_status" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableWireStatus(v *int64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetWireStatus(*v)
+	}
+	return _u
+}
+
+// AddWireStatus adds value to the "wire_status" field.
+func (_u *UsageLogUpdateOne) AddWireStatus(v int64) *UsageLogUpdateOne {
+	_u.mutation.AddWireStatus(v)
+	return _u
+}
+
+// ClearWireStatus clears the value of the "wire_status" field.
+func (_u *UsageLogUpdateOne) ClearWireStatus() *UsageLogUpdateOne {
+	_u.mutation.ClearWireStatus()
+	return _u
+}
+
+// SetDispatchCount sets the "dispatch_count" field.
+func (_u *UsageLogUpdateOne) SetDispatchCount(v int64) *UsageLogUpdateOne {
+	_u.mutation.ResetDispatchCount()
+	_u.mutation.SetDispatchCount(v)
+	return _u
+}
+
+// SetNillableDispatchCount sets the "dispatch_count" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableDispatchCount(v *int64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetDispatchCount(*v)
+	}
+	return _u
+}
+
+// AddDispatchCount adds value to the "dispatch_count" field.
+func (_u *UsageLogUpdateOne) AddDispatchCount(v int64) *UsageLogUpdateOne {
+	_u.mutation.AddDispatchCount(v)
+	return _u
+}
+
+// ClearDispatchCount clears the value of the "dispatch_count" field.
+func (_u *UsageLogUpdateOne) ClearDispatchCount() *UsageLogUpdateOne {
+	_u.mutation.ClearDispatchCount()
+	return _u
+}
+
+// SetMinDispatchRemainingMs sets the "min_dispatch_remaining_ms" field.
+func (_u *UsageLogUpdateOne) SetMinDispatchRemainingMs(v int64) *UsageLogUpdateOne {
+	_u.mutation.ResetMinDispatchRemainingMs()
+	_u.mutation.SetMinDispatchRemainingMs(v)
+	return _u
+}
+
+// SetNillableMinDispatchRemainingMs sets the "min_dispatch_remaining_ms" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableMinDispatchRemainingMs(v *int64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetMinDispatchRemainingMs(*v)
+	}
+	return _u
+}
+
+// AddMinDispatchRemainingMs adds value to the "min_dispatch_remaining_ms" field.
+func (_u *UsageLogUpdateOne) AddMinDispatchRemainingMs(v int64) *UsageLogUpdateOne {
+	_u.mutation.AddMinDispatchRemainingMs(v)
+	return _u
+}
+
+// ClearMinDispatchRemainingMs clears the value of the "min_dispatch_remaining_ms" field.
+func (_u *UsageLogUpdateOne) ClearMinDispatchRemainingMs() *UsageLogUpdateOne {
+	_u.mutation.ClearMinDispatchRemainingMs()
+	return _u
+}
+
+// SetFinalDeadlineMs sets the "final_deadline_ms" field.
+func (_u *UsageLogUpdateOne) SetFinalDeadlineMs(v int64) *UsageLogUpdateOne {
+	_u.mutation.ResetFinalDeadlineMs()
+	_u.mutation.SetFinalDeadlineMs(v)
+	return _u
+}
+
+// SetNillableFinalDeadlineMs sets the "final_deadline_ms" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableFinalDeadlineMs(v *int64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetFinalDeadlineMs(*v)
+	}
+	return _u
+}
+
+// AddFinalDeadlineMs adds value to the "final_deadline_ms" field.
+func (_u *UsageLogUpdateOne) AddFinalDeadlineMs(v int64) *UsageLogUpdateOne {
+	_u.mutation.AddFinalDeadlineMs(v)
+	return _u
+}
+
+// ClearFinalDeadlineMs clears the value of the "final_deadline_ms" field.
+func (_u *UsageLogUpdateOne) ClearFinalDeadlineMs() *UsageLogUpdateOne {
+	_u.mutation.ClearFinalDeadlineMs()
+	return _u
+}
+
+// SetClientFamily sets the "client_family" field.
+func (_u *UsageLogUpdateOne) SetClientFamily(v string) *UsageLogUpdateOne {
+	_u.mutation.SetClientFamily(v)
+	return _u
+}
+
+// SetNillableClientFamily sets the "client_family" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableClientFamily(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetClientFamily(*v)
+	}
+	return _u
+}
+
+// ClearClientFamily clears the value of the "client_family" field.
+func (_u *UsageLogUpdateOne) ClearClientFamily() *UsageLogUpdateOne {
+	_u.mutation.ClearClientFamily()
+	return _u
+}
+
+// SetClientCancelMs sets the "client_cancel_ms" field.
+func (_u *UsageLogUpdateOne) SetClientCancelMs(v int64) *UsageLogUpdateOne {
+	_u.mutation.ResetClientCancelMs()
+	_u.mutation.SetClientCancelMs(v)
+	return _u
+}
+
+// SetNillableClientCancelMs sets the "client_cancel_ms" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableClientCancelMs(v *int64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetClientCancelMs(*v)
+	}
+	return _u
+}
+
+// AddClientCancelMs adds value to the "client_cancel_ms" field.
+func (_u *UsageLogUpdateOne) AddClientCancelMs(v int64) *UsageLogUpdateOne {
+	_u.mutation.AddClientCancelMs(v)
+	return _u
+}
+
+// ClearClientCancelMs clears the value of the "client_cancel_ms" field.
+func (_u *UsageLogUpdateOne) ClearClientCancelMs() *UsageLogUpdateOne {
+	_u.mutation.ClearClientCancelMs()
+	return _u
+}
+
+// SetCancelStage sets the "cancel_stage" field.
+func (_u *UsageLogUpdateOne) SetCancelStage(v string) *UsageLogUpdateOne {
+	_u.mutation.SetCancelStage(v)
+	return _u
+}
+
+// SetNillableCancelStage sets the "cancel_stage" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableCancelStage(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetCancelStage(*v)
+	}
+	return _u
+}
+
+// ClearCancelStage clears the value of the "cancel_stage" field.
+func (_u *UsageLogUpdateOne) ClearCancelStage() *UsageLogUpdateOne {
+	_u.mutation.ClearCancelStage()
+	return _u
+}
+
+// SetCdnObserved sets the "cdn_observed" field.
+func (_u *UsageLogUpdateOne) SetCdnObserved(v string) *UsageLogUpdateOne {
+	_u.mutation.SetCdnObserved(v)
+	return _u
+}
+
+// SetNillableCdnObserved sets the "cdn_observed" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableCdnObserved(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetCdnObserved(*v)
+	}
+	return _u
+}
+
+// ClearCdnObserved clears the value of the "cdn_observed" field.
+func (_u *UsageLogUpdateOne) ClearCdnObserved() *UsageLogUpdateOne {
+	_u.mutation.ClearCdnObserved()
+	return _u
+}
+
+// SetBudgetStartMode sets the "budget_start_mode" field.
+func (_u *UsageLogUpdateOne) SetBudgetStartMode(v string) *UsageLogUpdateOne {
+	_u.mutation.SetBudgetStartMode(v)
+	return _u
+}
+
+// SetNillableBudgetStartMode sets the "budget_start_mode" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableBudgetStartMode(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetBudgetStartMode(*v)
+	}
+	return _u
+}
+
+// ClearBudgetStartMode clears the value of the "budget_start_mode" field.
+func (_u *UsageLogUpdateOne) ClearBudgetStartMode() *UsageLogUpdateOne {
+	_u.mutation.ClearBudgetStartMode()
+	return _u
+}
+
+// SetBudgetT0UnixMs sets the "budget_t0_unix_ms" field.
+func (_u *UsageLogUpdateOne) SetBudgetT0UnixMs(v int64) *UsageLogUpdateOne {
+	_u.mutation.ResetBudgetT0UnixMs()
+	_u.mutation.SetBudgetT0UnixMs(v)
+	return _u
+}
+
+// SetNillableBudgetT0UnixMs sets the "budget_t0_unix_ms" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableBudgetT0UnixMs(v *int64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetBudgetT0UnixMs(*v)
+	}
+	return _u
+}
+
+// AddBudgetT0UnixMs adds value to the "budget_t0_unix_ms" field.
+func (_u *UsageLogUpdateOne) AddBudgetT0UnixMs(v int64) *UsageLogUpdateOne {
+	_u.mutation.AddBudgetT0UnixMs(v)
+	return _u
+}
+
+// ClearBudgetT0UnixMs clears the value of the "budget_t0_unix_ms" field.
+func (_u *UsageLogUpdateOne) ClearBudgetT0UnixMs() *UsageLogUpdateOne {
+	_u.mutation.ClearBudgetT0UnixMs()
+	return _u
+}
+
 // SetUser sets the "user" edge to the User entity.
 func (_u *UsageLogUpdateOne) SetUser(v *User) *UsageLogUpdateOne {
 	return _u.SetUserID(v.ID)
@@ -3182,6 +4214,150 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if value, ok := _u.mutation.CacheTTLOverridden(); ok {
 		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.BodyBytes(); ok {
+		_spec.SetField(usagelog.FieldBodyBytes, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedBodyBytes(); ok {
+		_spec.AddField(usagelog.FieldBodyBytes, field.TypeInt64, value)
+	}
+	if _u.mutation.BodyBytesCleared() {
+		_spec.ClearField(usagelog.FieldBodyBytes, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.FirstReadMs(); ok {
+		_spec.SetField(usagelog.FieldFirstReadMs, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedFirstReadMs(); ok {
+		_spec.AddField(usagelog.FieldFirstReadMs, field.TypeInt64, value)
+	}
+	if _u.mutation.FirstReadMsCleared() {
+		_spec.ClearField(usagelog.FieldFirstReadMs, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.BodyEOFMs(); ok {
+		_spec.SetField(usagelog.FieldBodyEOFMs, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedBodyEOFMs(); ok {
+		_spec.AddField(usagelog.FieldBodyEOFMs, field.TypeInt64, value)
+	}
+	if _u.mutation.BodyEOFMsCleared() {
+		_spec.ClearField(usagelog.FieldBodyEOFMs, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.AnchorBasis(); ok {
+		_spec.SetField(usagelog.FieldAnchorBasis, field.TypeString, value)
+	}
+	if _u.mutation.AnchorBasisCleared() {
+		_spec.ClearField(usagelog.FieldAnchorBasis, field.TypeString)
+	}
+	if value, ok := _u.mutation.AnchorEligible(); ok {
+		_spec.SetField(usagelog.FieldAnchorEligible, field.TypeBool, value)
+	}
+	if _u.mutation.AnchorEligibleCleared() {
+		_spec.ClearField(usagelog.FieldAnchorEligible, field.TypeBool)
+	}
+	if value, ok := _u.mutation.BodyReceiptRepeat(); ok {
+		_spec.SetField(usagelog.FieldBodyReceiptRepeat, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedBodyReceiptRepeat(); ok {
+		_spec.AddField(usagelog.FieldBodyReceiptRepeat, field.TypeInt64, value)
+	}
+	if _u.mutation.BodyReceiptRepeatCleared() {
+		_spec.ClearField(usagelog.FieldBodyReceiptRepeat, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.PreDispatchMs(); ok {
+		_spec.SetField(usagelog.FieldPreDispatchMs, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedPreDispatchMs(); ok {
+		_spec.AddField(usagelog.FieldPreDispatchMs, field.TypeInt64, value)
+	}
+	if _u.mutation.PreDispatchMsCleared() {
+		_spec.ClearField(usagelog.FieldPreDispatchMs, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.KeepaliveCommitMs(); ok {
+		_spec.SetField(usagelog.FieldKeepaliveCommitMs, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedKeepaliveCommitMs(); ok {
+		_spec.AddField(usagelog.FieldKeepaliveCommitMs, field.TypeInt64, value)
+	}
+	if _u.mutation.KeepaliveCommitMsCleared() {
+		_spec.ClearField(usagelog.FieldKeepaliveCommitMs, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.WireStatus(); ok {
+		_spec.SetField(usagelog.FieldWireStatus, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedWireStatus(); ok {
+		_spec.AddField(usagelog.FieldWireStatus, field.TypeInt64, value)
+	}
+	if _u.mutation.WireStatusCleared() {
+		_spec.ClearField(usagelog.FieldWireStatus, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.DispatchCount(); ok {
+		_spec.SetField(usagelog.FieldDispatchCount, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedDispatchCount(); ok {
+		_spec.AddField(usagelog.FieldDispatchCount, field.TypeInt64, value)
+	}
+	if _u.mutation.DispatchCountCleared() {
+		_spec.ClearField(usagelog.FieldDispatchCount, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.MinDispatchRemainingMs(); ok {
+		_spec.SetField(usagelog.FieldMinDispatchRemainingMs, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedMinDispatchRemainingMs(); ok {
+		_spec.AddField(usagelog.FieldMinDispatchRemainingMs, field.TypeInt64, value)
+	}
+	if _u.mutation.MinDispatchRemainingMsCleared() {
+		_spec.ClearField(usagelog.FieldMinDispatchRemainingMs, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.FinalDeadlineMs(); ok {
+		_spec.SetField(usagelog.FieldFinalDeadlineMs, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedFinalDeadlineMs(); ok {
+		_spec.AddField(usagelog.FieldFinalDeadlineMs, field.TypeInt64, value)
+	}
+	if _u.mutation.FinalDeadlineMsCleared() {
+		_spec.ClearField(usagelog.FieldFinalDeadlineMs, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.ClientFamily(); ok {
+		_spec.SetField(usagelog.FieldClientFamily, field.TypeString, value)
+	}
+	if _u.mutation.ClientFamilyCleared() {
+		_spec.ClearField(usagelog.FieldClientFamily, field.TypeString)
+	}
+	if value, ok := _u.mutation.ClientCancelMs(); ok {
+		_spec.SetField(usagelog.FieldClientCancelMs, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedClientCancelMs(); ok {
+		_spec.AddField(usagelog.FieldClientCancelMs, field.TypeInt64, value)
+	}
+	if _u.mutation.ClientCancelMsCleared() {
+		_spec.ClearField(usagelog.FieldClientCancelMs, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.CancelStage(); ok {
+		_spec.SetField(usagelog.FieldCancelStage, field.TypeString, value)
+	}
+	if _u.mutation.CancelStageCleared() {
+		_spec.ClearField(usagelog.FieldCancelStage, field.TypeString)
+	}
+	if value, ok := _u.mutation.CdnObserved(); ok {
+		_spec.SetField(usagelog.FieldCdnObserved, field.TypeString, value)
+	}
+	if _u.mutation.CdnObservedCleared() {
+		_spec.ClearField(usagelog.FieldCdnObserved, field.TypeString)
+	}
+	if value, ok := _u.mutation.BudgetStartMode(); ok {
+		_spec.SetField(usagelog.FieldBudgetStartMode, field.TypeString, value)
+	}
+	if _u.mutation.BudgetStartModeCleared() {
+		_spec.ClearField(usagelog.FieldBudgetStartMode, field.TypeString)
+	}
+	if value, ok := _u.mutation.BudgetT0UnixMs(); ok {
+		_spec.SetField(usagelog.FieldBudgetT0UnixMs, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedBudgetT0UnixMs(); ok {
+		_spec.AddField(usagelog.FieldBudgetT0UnixMs, field.TypeInt64, value)
+	}
+	if _u.mutation.BudgetT0UnixMsCleared() {
+		_spec.ClearField(usagelog.FieldBudgetT0UnixMs, field.TypeInt64)
 	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{
