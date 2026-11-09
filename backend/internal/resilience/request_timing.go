@@ -14,6 +14,7 @@ type RequestTiming struct {
 	BodyEOFMs               *int64  `json:"body_eof_ms,omitempty"`
 	AnchorBasis             *string `json:"anchor_basis,omitempty"`
 	AnchorEligible          *bool   `json:"anchor_eligible,omitempty"`
+	ReceiptSource           *string `json:"receipt_source,omitempty"`
 	BodyReceiptRepeat       *int64  `json:"body_receipt_repeat,omitempty"`
 	PreDispatchMs           *int64  `json:"pre_dispatch_ms,omitempty"`
 	KeepaliveCommitMs       *int64  `json:"keepalive_commit_ms,omitempty"`
@@ -43,7 +44,7 @@ type timingTrace struct {
 	dispatchCount   int64
 	minRemaining    time.Duration
 	attempts        map[time.Time]bool // late attempt start -> has a timer
-	emitted         bool
+	attemptMetrics  map[time.Time]bool // owners already observed at dispatch
 	responseStage   *ResponseStageTiming
 }
 
@@ -57,6 +58,7 @@ func (s *RequestState) Timing() RequestTiming {
 	s.mu.Lock()
 	b, firstRead, eof := s.budget, s.bodyFirstRead, s.bodyReceived
 	bytes, repeat, edge, trace := s.bodyBytes, s.bodyReceiptRepeat, s.edge, s.timing
+	receiptSource := s.bodyReceiptBasis
 	lateCount := len(s.timing.attempts)
 	lateNoTimer := int64(0)
 	for _, timed := range s.timing.attempts {
@@ -91,6 +93,7 @@ func (s *RequestState) Timing() RequestTiming {
 	}
 	if !eof.IsZero() {
 		out.BodyBytes = observed(bytes)
+		out.ReceiptSource = observed(receiptSource)
 	}
 	out.FirstReadMs, out.BodyEOFMs = offset(firstRead), offset(eof)
 	out.BodyReceiptRepeat, out.CDNObserved = observed(repeat), observed(edge)
@@ -202,37 +205,35 @@ func (s *RequestState) NoteAttemptTimer(at time.Time) {
 	}
 }
 
-// FinishTiming emits late-attempt counters once when middleware returns.
-func (s *RequestState) FinishTiming() {
+// ObserveAttemptStart publishes the late-attempt metric immediately before
+// dispatch, after the caller has decided whether this attempt owns a timer.
+// Profile preparation and Warm-only updates never emit a metric. In particular,
+// a response-stage timer installed later cannot relabel the dispatch observation.
+func (s *RequestState) ObserveAttemptStart() {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
-	if s.timing.emitted {
-		s.mu.Unlock()
+	defer s.mu.Unlock()
+	owner := s.attemptProfile.timerOwnerStart()
+	hasTimer, late := s.timing.attempts[owner]
+	if !late || s.timing.attemptMetrics[owner] || s.budget == nil {
 		return
 	}
-	s.timing.emitted = true
-	counts := [2]int{}
-	for _, timed := range s.timing.attempts {
-		if timed {
-			counts[1]++
-		} else {
-			counts[0]++
-		}
+	if s.timing.attemptMetrics == nil {
+		s.timing.attemptMetrics = make(map[time.Time]bool)
 	}
-	group := s.groupID
-	s.mu.Unlock()
-	for i, n := range counts {
-		label := "has_timer=false"
-		if i == 1 {
-			label = "has_timer=true"
-		}
-		for j := 0; j < n; j++ {
-			Count("late_attempt_start", group, 0, label)
-		}
+	s.timing.attemptMetrics[owner] = true
+	label := "false:" + s.budget.budgetStart
+	if hasTimer {
+		label = "true:" + s.budget.budgetStart
 	}
+	Count("late_attempt_start", s.groupID, 0, label)
 }
+
+// FinishTiming is retained for completion callers. Late-attempt metrics are
+// already published at dispatch; completion must not count them again.
+func (s *RequestState) FinishTiming() {}
 
 // NoteOpenAIDispatch is called immediately before an actual HTTP transport.
 // It observes only: it does not admit, consume an attempt, or change a deadline.

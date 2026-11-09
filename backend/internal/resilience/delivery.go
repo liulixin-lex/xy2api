@@ -184,7 +184,8 @@ func (s *RequestState) ResolveDisconnect() (disconnected, delivered, abuse bool)
 		apiKeyID := s.d.apiKeyID
 		client := s.d.client
 		stage := s.d.stageAtCut
-		elapsed := s.d.disconnectAt.Sub(s.d.started)
+		disconnectAt := s.d.disconnectAt
+		elapsed := disconnectAt.Sub(s.d.started)
 		s.d.mu.Unlock()
 		if deliveredBytes > 0 {
 			return
@@ -204,20 +205,43 @@ func (s *RequestState) ResolveDisconnect() (disconnected, delivered, abuse bool)
 		if apiKeyID <= 0 || stage == StageUpload {
 			return
 		}
-		if late := s.Timing().LateAttemptNoTimerCount; late != nil && *late > 0 {
-			requestID, clientRequestID := "", ""
-			if client != nil {
-				requestID, _ = client.Value(ctxkey.RequestID).(string)
-				clientRequestID, _ = client.Value(ctxkey.ClientRequestID).(string)
-			}
-			slog.Warn("resilience.late_attempt_undelivered", "request_id", requestID, "client_request_id", clientRequestID, "group_id", groupID, "api_key_id", apiKeyID, "stage", stage, "elapsed_ms", elapsed.Milliseconds(), "late_attempt_no_timer_count", *late)
+		timing := s.Timing()
+		lateCount, lateNoTimer, mode, anchor := int64(0), int64(0), "", ""
+		if timing.LateAttemptCount != nil {
+			lateCount = *timing.LateAttemptCount
+		}
+		if timing.LateAttemptNoTimerCount != nil {
+			lateNoTimer = *timing.LateAttemptNoTimerCount
+		}
+		if timing.BudgetStartMode != nil {
+			mode = *timing.BudgetStartMode
+		}
+		if timing.AnchorBasis != nil {
+			anchor = *timing.AnchorBasis
 		}
 		if fn := undeliveredAbuseCheck.Load(); fn != nil && (*fn)(apiKeyID) {
 			s.d.mu.Lock()
 			s.d.abuse = true
 			s.d.mu.Unlock()
 			Count(MetricAbuseGuard, groupID, 0, "")
-			slog.Warn("resilience.abuse_guard", "group_id", groupID, "api_key_id", apiKeyID, "stage", stage)
+			slog.Warn("resilience.abuse_guard", "group_id", groupID, "api_key_id", apiKeyID, "stage", stage,
+				"late_attempt_count", lateCount, "late_attempt_no_timer_count", lateNoTimer, "budget_start_mode", mode)
+		}
+		if lateNoTimer > 0 {
+			requestID, clientRequestID := "", ""
+			if client != nil {
+				requestID, _ = client.Value(ctxkey.RequestID).(string)
+				clientRequestID, _ = client.Value(ctxkey.ClientRequestID).(string)
+			}
+			s.d.mu.Lock()
+			abuse, billed := s.d.abuse, s.d.billed
+			s.d.mu.Unlock()
+			// billed is the observed state at disconnect; final settlement may
+			// follow upstream completion and is recorded in the undelivered row.
+			slog.Warn("resilience.late_attempt_undelivered", "request_id", requestID, "client_request_id", clientRequestID,
+				"group_id", groupID, "api_key_id", apiKeyID, "stage", stage, "elapsed_ms", elapsed.Milliseconds(),
+				"disconnect_unix_ms", disconnectAt.UnixMilli(), "anchor_basis", anchor, "budget_start_mode", mode,
+				"late_attempt_count", lateCount, "late_attempt_no_timer_count", lateNoTimer, "abuse", abuse, "billed", billed)
 		}
 	})
 	s.d.mu.Lock()

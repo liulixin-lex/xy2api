@@ -1152,6 +1152,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 		// Send request
 		upstreamStart := time.Now()
+		resilience.StateFrom(ctx).ObserveAttemptStart()
 		resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		if collabAttempt != nil {
 			collabAttempt.upstreamStatus = 0

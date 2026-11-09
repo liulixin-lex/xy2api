@@ -2341,6 +2341,15 @@
           "}",
           "}"
         ]
+      },
+      {
+        "block": "budget-g9-dispatch-observation",
+        "note": "G9 observation only: publish the frozen-mode late-attempt metric before the existing Forward and ForwardNative transport calls. No guard, retry, admission or deadline changes. Covered by TestG9DispatchObservationCallsites and TestG9LateMetricVisibleBeforeFinishAndFrozenAtDispatch.",
+        "removed": [],
+        "added": [
+          "resilience.StateFrom(ctx).ObserveAttemptStart()",
+          "resilience.StateFrom(ctx).ObserveAttemptStart()"
+        ]
       }
     ]
   }
