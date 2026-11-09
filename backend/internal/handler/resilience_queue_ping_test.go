@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -115,4 +116,28 @@ func TestUserMessageQueueUsesInboundPingProtocol(t *testing.T) {
 			require.Contains(t, rec.Body.String(), string(SSEPingFormatComment))
 		})
 	}
+}
+
+func TestUserMessageQueuePreservesRequestHeartbeat(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c, rec, _, cancel := trackedQueueContext(t)
+		defer cancel()
+		stop := service.StartPreOutputKeepalive(c, service.PreOutputProtocolAnthropic, 50*time.Millisecond, 20*time.Millisecond)
+		defer stop()
+		queue := service.NewUserMessageQueueService(&queuePingLockStub{seq: []bool{false, true}}, nil, &config.UserMessageQueueConfig{})
+		helper := NewUserMsgQueueHelper(queue, SSEPingFormatClaude, 5*time.Millisecond)
+		started := false
+		release, err := helper.AcquireWithWait(c, 7, 0, true, &started, time.Second, zap.NewNop())
+		require.NoError(t, err)
+		defer release()
+		require.True(t, started)
+		before := c.Writer.Size()
+		time.Sleep(40 * time.Millisecond)
+		synctest.Wait()
+		t.Logf("request_heartbeat_committed=%t heartbeat_continues=%t", service.PreOutputKeepaliveCommitted(c), c.Writer.Size() > before)
+		require.Greater(t, c.Writer.Size(), before, "queue pings must not stop the request heartbeat")
+		stop()
+		require.True(t, gatewayStreamHasOnlyHeartbeats(c))
+		require.Contains(t, rec.Body.String(), "event: ping")
+	})
 }

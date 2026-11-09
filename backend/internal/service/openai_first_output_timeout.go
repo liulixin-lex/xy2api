@@ -287,10 +287,11 @@ func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 	}
 	noteTimeoutPlan(ctx, account, plan)
 	elapsed := time.Since(startTime)
+	staged := resilience.StateFrom(ctx).PreludeTrace().StagedAt.Equal(startTime)
 	logger.LegacyPrintf(
 		"service.openai_gateway",
-		"OpenAI first output timeout: account=%d model=%s effort=%s phase=%s elapsed=%s limit=%s",
-		account.ID, originalModel, reasoningEffort, phase, elapsed, timeout,
+		"OpenAI first output timeout: account=%d model=%s effort=%s phase=%s staged=%t elapsed=%s limit=%s",
+		account.ID, originalModel, reasoningEffort, phase, staged, elapsed, timeout,
 	)
 	requestID := strings.TrimSpace(responseHeaders.Get("x-request-id"))
 	planned := false

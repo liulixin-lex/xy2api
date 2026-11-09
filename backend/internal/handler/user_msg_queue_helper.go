@@ -115,6 +115,13 @@ func (h *UserMsgQueueHelper) waitForLockWithPing(
 			return nil, fmt.Errorf("umq wait timeout for account %d", accountID)
 
 		case <-pingCh:
+			if handled, committed, err := service.WriteSlotWaitHeartbeat(c, []byte(pingFormat), h.pingInterval, "queue_wait"); handled {
+				if err != nil {
+					return nil, err
+				}
+				*streamStarted = *streamStarted || committed
+				continue
+			}
 			if !*streamStarted {
 				c.Header("Content-Type", "text/event-stream")
 				c.Header("Cache-Control", "no-cache")

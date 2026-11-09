@@ -869,6 +869,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				} else if _, err := writePendingString("\n"); err != nil {
 					handlePendingWriteError(err)
 				} else {
+					if firstOutputStage != nil && !firstOutputStage.closed && resilience.ResponsesEventOutputDisposition(eventType, dataBytes).Staged {
+						resilience.StateFrom(ctx).NotePreludeStaged(startTime)
+					}
 					if eventHasBlankPlaceholder && !attemptStagedBlankPlaceholder && firstOutputStage != nil && !firstOutputStage.closed {
 						markOpenAIBlankPlaceholderStaged(c, account.ID)
 						attemptStagedBlankPlaceholder = true

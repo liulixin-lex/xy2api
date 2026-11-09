@@ -4243,6 +4243,30 @@
     {
       "path": "backend/internal/service/gemini_messages_compat_service.go",
       "value": "attemptGuard.observeDispatch(attemptStart)"
+    },
+    {
+      "path": "backend/internal/handler/user_msg_queue_helper.go",
+      "value": "service.WriteSlotWaitHeartbeat(c, []byte(pingFormat), h.pingInterval, \"queue_wait\")"
+    },
+    {
+      "path": "backend/internal/handler/gateway_helper.go",
+      "value": "service.WriteSlotWaitHeartbeat(c, []byte(pingFormat), h.pingInterval, \"slot_wait\")"
+    },
+    {
+      "path": "backend/internal/service/openai_compact_sse_keepalive.go",
+      "value": "k.noteCommitted(\"request\")"
+    },
+    {
+      "path": "backend/internal/service/resilience_keepalive.go",
+      "value": "\"source\", source"
+    },
+    {
+      "path": "backend/internal/service/openai_first_output_timeout.go",
+      "value": "PreludeTrace().StagedAt.Equal(startTime)"
+    },
+    {
+      "path": "backend/internal/service/openai_first_output_timeout.go",
+      "value": "phase=%s staged=%t elapsed=%s"
     }
   ],
   "forbidden_module_paths": [

@@ -2803,6 +2803,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 					markOpenAIBlankPlaceholderStaged(c, account.ID)
 					attemptStagedBlankPlaceholder = true
 				}
+				if data, ok := extractOpenAISSEDataLine(line); ok && resilience.ResponsesEventOutputDisposition(effectiveOpenAISSEEventType([]byte(data), pendingSSEEventType), []byte(data)).Staged {
+					resilience.StateFrom(ctx).NotePreludeStaged(startTime)
+				}
 				if line == "" {
 					eventHasBlankPlaceholder = false
 				}
