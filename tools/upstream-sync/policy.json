@@ -7123,6 +7123,36 @@
       "id": "xy-error-recovery-routing",
       "path": "backend/internal/handler/resilience_state_rejection_test.go",
       "literal": "func TestStateRejectionTerminatesRecoveryWithoutBudgetOrMaster(t *testing.T)"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_error_classification_followup_test.go",
+      "literal": "TestOpenAIDeviceBindingChainedMessagesSingleAttempt"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_error_classification_followup_test.go",
+      "literal": "TestOpenAICompatStreamModelAvailability"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_error_classification_followup_test.go",
+      "literal": "TestOpenAIDeviceBindingClassificationPlatformBoundary"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_error_classification_followup_test.go",
+      "literal": "TestOpenAIDeviceBindingWSHandshake"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/resilience_anthropic_type_test.go",
+      "literal": "TestOpenAIDeviceBindingExhaustionUsesExistingAccountExit"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_error_classification_followup_test.go",
+      "literal": "TestInference404AnthropicEnvelopeRequiresEvidence"
     }
   ]
 }

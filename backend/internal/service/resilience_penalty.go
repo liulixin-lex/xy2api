@@ -61,9 +61,6 @@ func classifyUpstreamHTTP(statusCode int, headers http.Header, body []byte, upst
 
 // classifyUpstreamOutcome is shared by HTTP, stream ops and handler failover.
 func classifyUpstreamOutcome(outcome resilience.Outcome) resilience.Result {
-	if outcome.Source == resilience.SourceHTTP && isOpenAIDeviceBindingRequired(outcome.StatusCode, outcome.Body) {
-		return resilience.Result{Category: resilience.CategoryAuth, Reason: "device_binding_required"}
-	}
 	outcome.Code = firstNonEmpty(outcome.Code, extractUpstreamErrorCode(outcome.Body),
 		gjson.GetBytes(outcome.Body, "response.error.code").String())
 	outcome.Type = firstNonEmpty(outcome.Type, gjson.GetBytes(outcome.Body, "error.type").String(),
@@ -78,6 +75,9 @@ func classifyUpstreamOutcome(outcome resilience.Outcome) resilience.Result {
 func opsHTTPResilienceCategory(status int, headers http.Header, body []byte, message string, accounts ...*Account) string {
 	if !resilience.Current().FailureOn() {
 		return ""
+	}
+	if len(accounts) > 0 && accounts[0] != nil && accounts[0].Platform == PlatformOpenAI && isOpenAIDeviceBindingRequired(status, body) {
+		return string(resilience.CategoryAuth)
 	}
 	if len(accounts) > 0 && isGrokTemporaryUnavailable422(accounts[0], status, body) {
 		return string(resilience.CategoryTransient)
@@ -512,7 +512,7 @@ func opsResilienceCategory(ev *OpsUpstreamErrorEvent) string {
 	case ev.UpstreamStatusCode == http.StatusNotFound && ev.Kind == "failover":
 		return string(classifyInferenceUpstreamHTTP(ev.UpstreamStatusCode, nil, body, ev.Message).Category)
 	case ev.UpstreamStatusCode >= 400:
-		return opsHTTPResilienceCategory(ev.UpstreamStatusCode, nil, body, ev.Message)
+		return opsHTTPResilienceCategory(ev.UpstreamStatusCode, nil, body, ev.Message, &Account{Platform: ev.Platform})
 	case ev.UpstreamStatusCode == http.StatusOK && (len(body) > 0 || ev.Message != ""):
 		// A Responses response.failed carries its error under "response".
 		return string(classifyUpstreamOutcome(resilience.Outcome{

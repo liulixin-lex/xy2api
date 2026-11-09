@@ -128,6 +128,12 @@ func isGenericJSONNotFound(body []byte) bool {
 	// The outer type is an envelope marker, while the inner object carries the
 	// generic not-found evidence validated below.
 	anthropicEnvelope := strings.EqualFold(strings.TrimSpace(root.Get("type").String()), "error") && root.Get("error").IsObject()
+	if inner := root.Get("error"); anthropicEnvelope &&
+		!isGenericNotFoundCode(inner.Get("code").String()) &&
+		!isGenericNotFoundCode(inner.Get("type").String()) &&
+		!isGenericNotFoundText(inner.Get("message").String()) {
+		return false
+	}
 	for _, path := range []string{"error", "response.error"} {
 		if object := root.Get(path); object.Exists() {
 			if !object.IsObject() {

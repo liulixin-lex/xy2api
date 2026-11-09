@@ -233,8 +233,8 @@ func (s *OpenAIGatewayService) failoverOpenAIStreamModelAvailability(ctx context
 	return s.failoverOpenAIModelAvailability(ctx, c, account, &http.Response{StatusCode: status, Header: headers}, body, model, passthrough)
 }
 
-// handleOpenAIStreamFailureAfterOutput is shared only by native/passthrough
-// Responses. Model availability advances the same account-model cooldown as
+// handleOpenAIStreamFailureAfterOutput is shared by native/passthrough
+// Responses and the Chat/Messages converters. Model availability advances the same account-model cooldown as
 // HTTP Q2, without replay or account-health penalties. Bare error/failed pairs
 // still use the callers' existing terminal deferral to apply this once.
 func (s *OpenAIGatewayService) handleOpenAIStreamFailureAfterOutput(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, payload []byte, message, model string, wrappedStatus int) {
