@@ -10,7 +10,16 @@ export default defineConfig({
       'vue-i18n': 'vue-i18n/dist/vue-i18n.runtime.esm-bundler.js'
     }
   },
+  server: {
+    fs: { allow: [__dirname, resolve(__dirname, '../docs/legal')] }
+  },
   test: {
+    // Keep paired idle-callback polyfills backed by fake setTimeout/clearTimeout.
+    fakeTimers: {
+      toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date',
+        'setImmediate', 'clearImmediate', 'hrtime', 'performance',
+        'requestAnimationFrame', 'cancelAnimationFrame']
+    },
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/__tests__/setup.ts'],

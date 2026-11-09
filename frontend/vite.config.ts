@@ -98,7 +98,11 @@ export default defineConfig(({ mode }) => {
       'vue-i18n': 'vue-i18n/dist/vue-i18n.runtime.esm-bundler.js'
     }
   },
+  // Keep JSON module generation consistent with Vite 5.
+  json: { stringify: false },
   build: {
+    // Preserve Vite 5's CommonJS execution behavior during the toolchain upgrade.
+    commonjsOptions: { strictRequires: 'auto' },
     outDir: '../backend/internal/web/dist',
     emptyOutDir: true,
     rollupOptions: {
@@ -173,6 +177,7 @@ export default defineConfig(({ mode }) => {
     }
   },
     server: {
+      fs: { allow: [__dirname, resolve(__dirname, '../docs/legal')] },
       host: '0.0.0.0',
       port: devPort,
       proxy: {
