@@ -16,7 +16,7 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | Claude 判慢让位 | `anthropic_latency_hold` | 缺省开启；按账号和实际出站模型记录粘性热尝试的语义首输出，持续偏慢时在同优先级内后排并可迁出会话，见 §4.5。关闭后状态失效，重新开启从新样本开始 |
 | 末位兜底 | `last_resort` | 分组内没有无罚账号时，先转投兜底分组；否则先尝试本会话未暂避的候选，暂避账号留作最后选择；两类内部各自保持原排序：软罚账号按优先级、再按罚期结束时间排序（0.4.9起同优先级内 OpenAI 与 Claude 判慢期账号排在其他账号之后，见 §4.5），取第一个有空闲并发的账号继续服务，全部占满时排队等待排在第一的账号，避免单号分组整组不可用。门禁与正常选号相同（只放宽软罚），超过窗口费用或 RPM 硬上限的账号不会被选中；份额分组在两类内部保持原有份额计划和质量排序，按账号优先级与有效权重（负载因子乘自适应系数）选择，绑定账号只是普通软罚时不改绑（同站断流暂停除外）。候选来自 2 秒的分组快照，派发前按账号当前状态再核对一次，快照之后被停用、删除、移出分组或进入硬罚的账号不会被选中（0.4.2） |
 | 余额不足暂停 | `balance` | 上游余额不足的账号暂停调度，期间按硬罚处理、不作末位兜底；到期后由真实请求重试。0.4.12 起时长逐级加长：首次 `pause_seconds`（缺省 300 秒），到期后仍不足依次为 3 倍、12 倍并封顶（缺省 5、15、60 分钟），成功或“恢复状态”后复位，见 §4.9；以前每次暂停同样时长。账号列表的“恢复状态”立即放回。账号已有更长的软冷却（如 403 计数冷却 10 分钟）时，改记为余额暂停并保留较晚的结束时间；暂停期间新的软冷却不会覆盖它（0.4.2）。不监控、不探测、不告警。普通用户只看到 503，余额细节只对管理员可见。Gemini 的 `RESOURCE_EXHAUSTED` 分钟级限额按限流处理，不触发暂停；Grok API Key 账号的余额字样 429 同样暂停，不再按中转给出的重置时间限流 |
-| 请求预算 | `budget` | 文本请求最多尝试 4 次、首输出前总时长 240 秒（等待并发槽位也计入）；图片与视频不设首输出截止；WebSocket 不挂连接级预算。同号重试每号至多一次，账号级失败不重试；容量降载只切换一次且只切到其他上游主机。非流式请求的“首输出”就是整个响应，预算只决定能否再发起新的尝试，进行中的单次非流式请求不按预算截断（截断仍在生成的长回答只会多一次失败）；例外是 0.4.9起 Gemini 文本请求的单次尝试截止（缺省 60 秒，非流式到完整响应，只截非最后候选；Gemini 最后候选不设首事件截止，也不受剩余预算截断，见 §4.7）。分组里唯一能服务该请求模型的账号不受单次档位限制，用满剩余预算。0.4.9：OpenAI 流式文本请求的单次首输出截止分热、冷尝试（热 20/25/30/30 秒；冷尝试按请求体大小至少 45 或 75 秒）；非最后候选的截止不短于本请求已耗时；最后候选只受剩余预算约束；等待响应头与等待第一个内容共用同一截止时刻；非流式不受影响，见 §4.5。例外：Antigravity 平台在同一账号上的智能重试（上游给出的短重试等待）不计入尝试次数，只在剩余预算与 `Retry-After` 封顶内等待 |
+| 请求预算 | `budget` | 文本请求最多尝试 4 次、首输出前截止 D=min(锚点+base,到达+290s)，base缺省240秒、锚点发版缺省arrival（等待并发槽位也计入）；图片与视频不设首输出截止；WebSocket 不挂连接级预算。同号重试每号至多一次，账号级失败不重试；容量降载只切换一次且只切到其他上游主机。非流式请求的“首输出”就是整个响应，预算只决定能否再发起新的尝试，进行中的单次非流式请求不按预算截断（截断仍在生成的长回答只会多一次失败）；例外是 0.4.9起 Gemini 文本请求的单次尝试截止（缺省 60 秒，非流式到完整响应，只截非最后候选；Gemini 最后候选不设首事件截止，也不受剩余预算截断，见 §4.7）。分组里唯一能服务该请求模型的账号不受单次档位限制，用满剩余预算。0.4.9：OpenAI 流式文本请求的单次首输出截止分热、冷尝试（热 20/25/30/30 秒；冷尝试按请求体大小至少 45 或 75 秒）；非最后候选的截止不短于本请求已耗时；最后候选只受剩余预算约束；等待响应头与等待第一个内容共用同一截止时刻；非流式不受影响，见 §4.5。例外：Antigravity 平台在同一账号上的智能重试（上游给出的短重试等待）不计入尝试次数，只在剩余预算与 `Retry-After` 封顶内等待 |
 | 可重放前缀（0.4.4） | `stream` | 第一个正文之前写出的只有开场事件时，上游失败仍可换号（三个开关都只要求总开关开启；下面三个元数据事件在兼容转换里还要求 `native_prelude_whitelist`）：原生 Responses 把 `response.queued` 与不带任何内容的 `output_item.added`、`content_part.added` 也算开场（`native_prelude_whitelist`；另按确切事件名包括三个元数据事件：0.4.6 起的 `response.metadata`（OpenAI Codex 后端过载时会在 created、in_progress 与它之后才发 `server_is_overloaded`）、0.4.9 起的 `codex.rate_limits`、0.4.12 起的 `codex.response.metadata`。它们与其他开场一样不解除首输出截止，之后只有心跳、迟迟没有正文的尝试到期换号（`first_output_timeout`）。以前它们算内容，之后的失败无法换号；`response.metadata` 在 0.4.3 至 0.4.5 还会提前解除截止，`codex.response.metadata` 在 0.4.11 及以前让首输出截止失效。G2b B2 起，已知事件保持原判定；未知事件按服务层的有效载荷类型分类，并须通过合法对象、身份字段类型和递归无重复键检查。`response.*`、`codex.*` 的非空额外字符串仍可见，其他命名空间的字符串也视为元数据；仅元数据事件暂存、不计语义输出，后续可见事件或成功终态按原序释放，输出前失败丢弃。沿用 8 MiB 暂存上限及换号路径。判定共用 `ClassifyStreamEvent`，Chat Completions 与 Messages 兼容转换同样适用，须同时开启 `prelude_staging`）；Chat Completions 与 Messages 经 OpenAI 兼容转换时，开场事件推迟到第一个内容或终态才写出（`prelude_staging`）；raw Chat 透传把 `error` 后跟 `[DONE]` 判为失败（`strict_terminal`；0.4.5 起 `error` 须是非空字符串，或带非空 `message`、`code`、`type` 的对象，或根上 `type` 为 `error`；`null`、空串或只含空白的字符串、`false`、`0`、`{}` 与各字段都为空的对象等占位值不算）：输出前换号，输出后按已输出后失败记账、原样转发错误。0.4.5：Gateway 入站经 Anthropic 上游的 Responses 与 Chat 反向转换同样推迟开场（`prelude_staging`，首事件截止延长到第一个内容）并明确终止（`strict_terminal`，见 §3）；OpenAI Responses 透传接入首输出截止与停滞检测（`strict_terminal`，见 §3）。0.4.12：原生 Anthropic 与 API Key 直通同样推迟开场（`prelude_staging`，见 §4.9）。不完整（incomplete）、内容拒绝、合法空回答与客户端断开不重放 |
 | 首包前保活 | `keepalive` | 仅对经 CDN 的流式请求（0.4.1 起按 CDN 自带的回源头自动识别 Cloudflare 与阿里云 ESA，见 §2.1）：请求开始 15 秒后仍无输出时提交 SSE 头并每 10 秒发心跳，避免 CDN 空闲超时；官方 OAuth / setup-token 账号不发起首包前保活，已提交后接手时照常续拍。0.4.9：心跳按尝试恢复。收到上游响应头只暂停心跳，换号后的下一次尝试原地恢复同一个心跳，从请求开始起算的时钟、已提交状态与已发心跳字节都保留；OpenAI 同号重放在已提交后等头时也续拍，未提交时保持原有首拍时机；写出语义内容、终态、请求结束或心跳写失败后永久停止。以前第一次尝试收到响应头后心跳就停了，后续尝试等头期间没有心跳，可能被 CDN 空闲超时切断 |
 | 停滞检测 | `stall` | 已输出后长时间无数据（缺省 120 秒）判定断流并结束请求；图片生成豁免。OpenAI 上游给出响应头后、输出前完全静默时，由首输出超时（按推理档位；0.4.9起热尝试 20/25/30/30 秒，冷尝试见 §4.5，0.4.8 及以前为 180/200/220 秒）换号，不再在 180 秒处被停滞检测以终止帧结束（0.4.2）。停滞的回合计入会话失败回合。覆盖 OpenAI Responses、Anthropic 原生，以及 Chat Completions 与 Messages 经 OpenAI 兼容转换的流（0.4.2；未覆盖的路径见“已知限制”）；0.4.9起含 Gemini 流式文本请求（§4.7） |
@@ -138,7 +138,8 @@ G2b B2 在原生、直通及 Responses→Chat/Messages 兼容转换服务路径�
 
 例如 SSE 声明为 `response.output_text.delta`，载荷却是 `{"type":"relay.ready","delta":"synthetic"}`，服务路径按外部未知类型 `relay.ready` 处理：通过上述结构检查后，输出前暂存，不解除首输出截止；后续可见事件或成功终态到达时按原序释放，输出前失败时随该次尝试一起丢弃并沿既有策略换号。载荷类型优先是 0.5.11 已有语义，B2 改变的是此类未知事件由可见提交变为暂存；OpenAI SDK 与 Codex 同样按载荷 `type` 分派并忽略这些外部未知类型，因此在该客户端前提下，不会丢失、重复或损坏客户端可呈现的内容，失败时可多一次换号机会。共享分类函数在调用方直接传入原始声明时仍有类型一致性检查（含 `response.metadata` → `codex.response.metadata` 别名）；这不是服务层对“SSE 声明不一致即可见”的保证。
 
-`response.completed` 通过既有静默拒绝守卫后，按成功终态冲刷并发送；原生（含 Grok）与直通仍对尚无语义输出、output/usage/error 都为空的 completed 换号（#5009/#7774），空白不算已见语义输出。“已见语义输出”只由非终态事件累计；终态的 response 对象只检查重复键和 output 类型，`text` 配置对象、`metadata` 等其余字段不按 part/delta 的字段类型校验，正文仍按 output 判断。有 output 或 usage 的合法空回答保留；扫描 `response.output` 决定首 token、delivery 的 `FirstOutput` 与 `SemanticOutputAt`。仅空白的成功响应不进入 `ReportOpenAIAttemptSuccess` 的首输出延迟样本，`attempt_first_output_ms` 也为空。delivery 开场分类仍依赖缺省开启的 `stream.native_prelude_whitelist`；兼容转换还依赖 `stream.prelude_staging`。首字档位、末位候选和 240 秒总预算不变。
+
+`response.completed` 通过既有静默拒绝守卫后，按成功终态冲刷并发送；原生（含 Grok）与直通仍对尚无语义输出、output/usage/error 都为空的 completed 换号（#5009/#7774），空白不算已见语义输出。“已见语义输出”只由非终态事件累计；终态的 response 对象只检查重复键和 output 类型，`text` 配置对象、`metadata` 等其余字段不按 part/delta 的字段类型校验，正文仍按 output 判断。有 output 或 usage 的合法空回答保留；扫描 `response.output` 决定首 token、delivery 的 `FirstOutput` 与 `SemanticOutputAt`。仅空白的成功响应不进入 `ReportOpenAIAttemptSuccess` 的首输出延迟样本，`attempt_first_output_ms` 也为空。delivery 开场分类仍依赖缺省开启的 `stream.native_prelude_whitelist`；兼容转换还依赖 `stream.prelude_staging`。首字档位、末位候选和缺省arrival下的240秒预算不变（0.5.12可仅后移D）。
 
 `response.created` 前被既有过滤器丢弃的无标记空白 delta 仍更新存活计数和 stall 活动时间，但不再计入 semantic 首 token；有 `SSE-Keep-Alive` 标记的保活帧保留原有计时行为。
 
@@ -160,6 +161,8 @@ G2b B2 在原生、直通及 Responses→Chat/Messages 兼容转换服务路径�
 | `collaboration_plaintext.models` | `[]` | 最多 16 条；每条去空白后 1–128 字符；trim 后不分大小写去重，nil 返回 [] |
 | `budget.max_attempts` | 4 | 1–10 |
 | `budget.pre_output_budget_seconds` | 240 | 60–290 |
+| `budget.budget_start` | arrival | arrival / body_eof；只控制D锚点，请求开始快照 |
+| `budget.budget_cut_attribution` | observe | off / observe / enforce；独立快照，见0.5.12重裁 |
 | `budget.first_output_timeout_seconds` | default 20 / high 25 / xhigh 30 / max 30（0.4.9起，按生产 48 小时流式首字分布约 p97 校准；是热尝试的档位，冷尝试另有下限，见 §4.5；0.4.8 及以前为 180/180/200/220） | 5–预算 |
 | `budget.anthropic_first_event_timeout_seconds` | 90（Anthropic；0.4.9起 Antigravity 也读它） | 5–预算 |
 | `budget.gemini_first_event_timeout_seconds` | 60（0.4.9起只管 Gemini 平台的文本尝试截止，见 §4.7；0.4.8 及以前为 90，并同时用于 Antigravity） | 5–预算 |
@@ -226,13 +229,13 @@ G2b B2 在原生、直通及 Responses→Chat/Messages 兼容转换服务路径�
 - 热尝试：会话粘性命中，选中的就是该会话的绑定账号，不是容量溢出时的临时借用，且本请求此前没有上游失败。截止取 `budget.first_output_timeout_seconds` 的档位（default 20 / high 25 / xhigh 30 / max 30 秒，模型自定义档位同样适用）与输入大小下限中较大者：请求体 ≥256 KiB 至少 30 秒，≥512 KiB 至少 40 秒。该下限是初值，仍受剩余预算与最后候选规则约束；后续按首字超时尝试落库的真实 warm、body_bytes 与 effort 校准（§5）。
 - 冷尝试：其余尝试，包括换号重试与同号重试、新会话首轮、会话迁移后首轮、不带会话标识的请求。截止取档位与请求体大小下限中较大者：请求体 ≥128 KiB 时至少 45 秒，≥256 KiB 时至少 75 秒。用 `budget.model_overrides` 设置了模型档位时，同样取较大者。
 - 非最后候选的截止不短于本请求到这次尝试开始时已耗费的时间，再受剩余预算约束：上游都慢时，被截断的尝试逐次放宽；快速失败不拉长下一次尝试。
-- 最后候选（末位兜底选中的账号、最后一次允许的尝试、组内唯一能服务该模型的账号）不按档位截断，只受剩余预算约束（缺省 240 秒）。判断“唯一”时，其他账号要通过本请求完整的选号资格（能力与 transport、隐私、利润门、母账号健康），HTTP 续链（`previous_response_id`）只算 OpenAI API Key 账号；软罚账号算替代，硬罚不算。缺能力的名义候选不会让唯一能服务的账号按档位被截断。
+- 最后候选（末位兜底选中的账号、最后一次允许的尝试、组内唯一能服务该模型的账号）不按档位截断，只受剩余预算约束（截止 D）。判断“唯一”时，其他账号要通过本请求完整的选号资格（能力与 transport、隐私、利润门、母账号健康），HTTP 续链（`previous_response_id`）只算 OpenAI API Key 账号；软罚账号算替代，硬罚不算。缺能力的名义候选不会让唯一能服务的账号按档位被截断。
 - 等待响应头与等待第一个内容共用同一截止时刻，从本次尝试开始计时，收到响应头后不重新计时。开场事件与心跳不解除截止，口径同 §1。
 
 **计划内截止**
 
 - 受请求预算管理的截止到期时，按计划内截止处理（失败原因 `planned_first_output_timeout`）。客户端行为不变：输出前换号，耗尽时响应体 `error.type` 仍为 `first_output_timeout`；运维记录中这次尝试的 Reason 仍为 `first_output_timeout`，计数仍记 `first_output_timeout`。
-- 不施加账号级的流超时惩罚（会把整个账号设为临时不可调度），不计入 API Key 健康熔断，也不计入会话失败（不会因此触发会话改绑）。请求预算的尝试次数与账号×模型的慢失败照常记录，OAuth 与 API Key 账号都记。
+- 不施加账号级的流超时惩罚（会把整个账号设为临时不可调度），不计入 API Key 健康熔断，也不计入会话失败（不会因此触发会话改绑）。请求预算的尝试次数照常记录；0.5.12仅applied追加豁免慢连击、latency-hold、近期健康展示和share，不替代计划内截止。OAuth与API Key相同；高级调度器失败上报、Gemini breaker、Anthropic/Gemini SessionFailure保持。
 - 上游真实返回的 504、524，断流、停滞与 WebSocket 照旧处理。
 
 **慢失败冷却**
@@ -286,7 +289,7 @@ G2b B2 在原生、直通及 Responses→Chat/Messages 兼容转换服务路径�
 0.4.8 及以前，Gemini 的首事件截止只在配置里，三个入口都没有用上：卡在上游的请求一直等到预算或客户端超时，运维记录的阶段也停在选号。
 
 - **范围**：Gemini 平台账号上受请求预算管理的文本请求，覆盖 Gemini 原生与 Messages、Chat Completions 兼容转换三个入口。图片或其他非文本输出（映射后的模型名含 `image`，或 `responseModalities` 不只有 TEXT）、countTokens，以及不能安全重放的非流式请求（含带 tools 的请求）不设截止。
-- **时长**：非最后候选受 `budget.gemini_first_event_timeout_seconds`（缺省 60 秒）约束，再受剩余预算约束，从本次尝试开始计时，同号重试与退避不重置。最后候选（含组内唯一能服务该模型的候选）不设首事件截止，一直等到第一个内容、终态或客户端断开为止：截短唯一可用的号只会把慢答案变成错误（预上线验证 KA-6）。这条路径在第一个事件之前没有心跳，客户端或 CDN 自己的超时（例如 300 秒）会先生效。
+- **时长**：非最后候选受 `budget.gemini_first_event_timeout_seconds`（缺省 60 秒）约束，再受剩余预算约束，从本次尝试开始计时，同号重试与退避不重置。最后候选（含组内唯一能服务该模型的候选）不设首事件截止，一直等到第一个内容、终态或客户端断开为止：截短唯一可用的号只会把慢答案变成错误（预上线验证 KA-6）。这条路径在第一个事件之前没有心跳；截止只限制新尝试，进行中的尝试可越过D，客户端或CDN的300s窗口可能先生效（E6）。
 - **结束点**：流式到第一个真实内容（文本、函数调用或内联数据）或终态，ping、空行与只有 usage 的事件不解除截止；非流式到完整响应收齐。有截止的流式请求在第一个内容之前不向客户端写出，到期时仍可换号。
 - **到期**：确认没有写出内容时按首输出超时换号（`first_output_timeout`，计数与运维记录同 §5.2），并计入 §4.6 的模型级冷却。客户端取消不算截止。
 - **输出后**：Gemini 流式文本请求接入停滞检测（`stall.text_stall_seconds`，缺省 120 秒），停滞时按入站协议写终止帧结束，记 `stall`，计入账号与会话失败。
@@ -471,6 +474,20 @@ Codex 0.166 provider 名不是精确的 OpenAI 时，每轮删除历史 EFA，�
 
 完整契约与验收见 [OpenSpec design](../openspec/changes/codex-collaboration-plaintext-20261104/design.md)。
 
+### 0.5.12 第一期观测增量
+
+`budget.budget_start=arrival` 与 `budget.budget_cut_attribution=observe` 为发版缺省，请求创建预算时固定策略；本阶段只新增观测。usage 可空列和 ops `resilience_timing` 保存读体、EOF、截止、派出、提交与取消时序，时间以预算到达时刻为原点；既有 E2E 首输出时钟不改。`cdn_observed` 原样记录心跳使用的 edge 推断，来源是客户端可伪造头，不可信，只用于统计。Anthropic response-stage 诊断仅写 ops，不增加尝试事件。
+
+`GET /admin/resilience/stats` 新增 `resilience_dispatch_remaining_seconds` 累积直方图，包含有限 path、body_bucket、committed 分组、buckets、count（+Inf）和 sum。只统计 OpenAI 网关携带文本预算的真实 HTTP 传输；插件提前返回、图片预算、WS 与其他平台不在口径内。派出 helper 不准入、不消耗尝试。
+
+迁移 292/293 分两个事务，仅加可空列，无缺省、索引、回填；lock_timeout=5s，statement_timeout=30s。两次 ALTER 可能分别阻塞，不能承诺总计 ≤5s；支持半迁移后重试。发版前需检查长事务，首次启动关闭自动重启或有限次退避，失败停止发版保留旧实例。旧二进制与半迁移兼容、等锁与持锁时长仍需在测试库实测。
+
+C3 的 `TimeoutPlan` 随触发计时器冻结，`cut_after_full_tier := remaining_at_plan >= tier_eff`（无档位为 false），`applied = would && !cut_after_full_tier && enforce`；观测字段 `budget_cut_after_full_tier := would && cut_after_full_tier`，不直接输出判定字段。日志 `resilience.budget_timeout_plan`、指标 `budget_cut_fot{would,applied}`、`slow_streak_decision{planned,applied,advanced}`、`latency_hold_sample{applied,recorded}` 与尝试事件使用同一个 plan。observe 的 applied 恒为 false。enforce 只追加豁免慢连击、latency-hold、近期健康展示与 share；planned/Reason、非 planned 的流超时/API-key/SessionFailure、调度器失败上报不变。末候选仍按档位归因；Gemini 末候选不新增 timer，WS 零 plan。
+
+日志 `resilience.anthropic_response_stage_timeout` 与指标 `anthropic_response_stage_timeout{anchor_basis}` 只补 response-stage 诊断，不新增尝试事件；`ttfo_lower_bound` 按账号与 plan 冻结的模型分桶。`budget_snapshot{budget_start_mode}` 在创建文本预算时记录快照。迟发定义 `start > T0 + base - 2s`，`late_attempt_count` / `late_attempt_no_timer_count` 仅进 ops 时序与指标 `late_attempt_start{has_timer}`，不进 usage；Warn `resilience.late_attempt_undelivered` 带 API key、group、stage、elapsed_ms、无计时器次数、request_id 和 client_request_id，在上传及无 key 排除后发出。arrival 的正常准入不产生迟发，绕过准入的隐藏重放仍如实记观测，不改变请求行为。`resilience.abuse_guard` 表示进入 abuse 状态，不能单凭 Warn 证明已扣费。G9 与 sink 丢日志兜底、切回步骤见候选 runbook。
+
+292 包含 `budget_start_mode` 与 `budget_t0_unix_ms` 以核验配置切回；它不包含迟发列。MCP 仅投影 would/applied 布尔属性；applied 在近期健康和 share 的 SQL 聚合前过滤，gate v3 的 includeAll 输入不变。
+
 ## 5. 观测
 
 ### 5.1 管理端
@@ -616,6 +633,9 @@ OpenAI 判慢降序与会话迁移的事件（见 §4.5）不带 `resilience.` �
 每次计划内截止或明确模型不可用记一条，不新增计数器。计划内截止本身看计数 `first_output_timeout` 与运维记录中 Reason 为 `first_output_timeout` 的尝试。明确模型不可用的运维尝试分类为 `MODEL_UNSUPPORTED`；跨主机重复后终止的尝试为 `CLIENT_ERROR`。
 
 ## 6. 回退
+
+0.5.12第一期候选的[发布说明](../openspec/changes/budget-anchor-0512-20261108/release-notes.md)与[值班runbook](../openspec/changes/budget-anchor-0512-20261108/runbook.md)写明分三阶段各48h切换、G9在15分钟内硬回arrival、迁移首启禁无限重启以及回滚历史边界。≥60s即账号级失败不改动，仍从到达算起；1.5期另需代码变更。
+
 
 协作消息明文通道的**软回退**是关闭账号开关：该账号后续请求停止转换，在途仍按冻结 plan 还原，部分上游的存量会话可能需新开。**硬回退**是关韧性总开关、collaboration_plaintext.enabled 或清空 models：所有账号的后续尝试停止转换。OAuth/清单外模型边界、实测结果与缓存代价见 §4.14；操作顺序见 [部署 runbook](../deploy/README.md#codex-协作消息明文通道)。无需重启，schema 豁免不随开关回退。
 

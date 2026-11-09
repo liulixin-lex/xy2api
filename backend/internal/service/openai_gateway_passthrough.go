@@ -396,13 +396,14 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		attemptStart := resetOpenAIRepairAttempt(ctx, account, actualModel, reqStream, body, replayAttempt)
 		replayAttempt = true
 		firstOutputTimeout := time.Duration(0)
+		var firstOutputPlan resilience.TimeoutPlan
 		if reqStream && account.Platform == PlatformOpenAI && resilience.Current().StrictTerminalOn() {
-			firstOutputTimeout = s.openAIFirstOutputTimeoutFor(ctx, account.ID, reqModel, reasoningEffortValue, attemptStart)
+			firstOutputTimeout, firstOutputPlan = s.openAIFirstOutputPlanFor(ctx, account.ID, reqModel, reasoningEffortValue, attemptStart)
 		}
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 		var headerGuard *openAIFirstOutputHeaderGuard
 		if firstOutputTimeout > 0 {
-			upstreamCtx, headerGuard = newOpenAIFirstOutputHeaderGuard(upstreamCtx, releaseUpstreamCtx, attemptStart.Add(firstOutputTimeout))
+			upstreamCtx, headerGuard = newOpenAIFirstOutputHeaderGuard(upstreamCtx, releaseUpstreamCtx, attemptStart.Add(firstOutputTimeout), firstOutputPlan)
 		}
 		upstreamReq, buildErr := s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, body, token)
 		if headerGuard == nil {
@@ -424,7 +425,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			}
 			headerGuard.close()
 			return nil, s.newOpenAIFirstOutputTimeoutError(ctx, c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
-				attemptStart, reqModel, reasoningEffortValue, firstOutputTimeout, "response_headers", nil)
+				attemptStart, reqModel, reasoningEffortValue, firstOutputTimeout, "response_headers", nil, headerGuard.plan)
 		}
 		if err != nil && headerGuard != nil {
 			headerGuard.close()
@@ -2323,8 +2324,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	// as a departed client (PM7).
 	guarded := resilience.Current().StrictTerminalOn()
 	firstOutputTimeout := time.Duration(0)
+	var firstOutputPlan resilience.TimeoutPlan
 	if guarded && account != nil && account.Platform == PlatformOpenAI {
-		firstOutputTimeout = s.openAIFirstOutputTimeoutFor(ctx, account.ID, originalModel, reasoningEffort, startTime)
+		firstOutputTimeout, firstOutputPlan = s.openAIFirstOutputPlanFor(ctx, account.ID, originalModel, reasoningEffort, startTime)
 	}
 
 	// ── 首个可见输出之前的下游 keepalive ──────────────────────────────────
@@ -2927,6 +2929,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		returned:    func() (*openaiStreamingResultPassthrough, error) { return retResult, retErr },
 		contentSeen: func() bool { return firstOutputSeen },
 		onDeadline: func() (*openaiStreamingResultPassthrough, error) {
+			if resilience.BudgetTraceEnabledForTest {
+				firstOutputPlan.ObserveFiredForTest("openai_passthrough_semantic_output")
+			}
 			_ = resp.Body.Close()
 			if clientDisconnected || reqCtx.Err() != nil {
 				MarkResponseCommitted(c)
@@ -2937,7 +2942,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			}
 			markOpenAIBlankPlaceholderTimeout(c, attemptStagedBlankPlaceholder)
 			return resultWithUsage(), s.newOpenAIFirstOutputTimeoutError(ctx, c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
-				startTime, originalModel, reasoningEffort, firstOutputTimeout, "semantic_output", resp.Header)
+				startTime, originalModel, reasoningEffort, firstOutputTimeout, "semantic_output", resp.Header, firstOutputPlan)
 		},
 		onStall: func(lastRead time.Time, deadlineArmed bool) (*openaiStreamingResultPassthrough, error, bool) {
 			if failureDelivered {

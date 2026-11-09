@@ -20,7 +20,13 @@ func (s *RequestState) SetAttemptProfile(profile AttemptProfile) {
 	}
 	s.mu.Lock()
 	s.attemptProfile = profile
+	b := s.budget
+	if BudgetTraceEnabledForTest {
+		b.traceProfileForTest(profile)
+	}
 	s.mu.Unlock()
+	b.MarkAttemptStarted()
+	s.noteAttemptStart(profile.AttemptStart)
 }
 
 // AttemptProfile returns the current attempt snapshot.

@@ -131,6 +131,7 @@ func recentHealthObservations(ctx context.Context, tx *sql.Tx, ids []int64, now 
  (COALESCE(ev->>'resilience_category','') IN ('TRANSIENT','FIRST_OUTPUT_TIMEOUT','STALL') OR (COALESCE(ev->>'resilience_category','')='' AND ev->>'kind'='request_error' AND COALESCE(`+numericJSON("upstream_status_code")+`,0)=0 AND POSITION('context canceled' IN LOWER(COALESCE(ev->>'message','')))=0)) AS soft_failure
  FROM public.ops_error_logs e CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(e.upstream_errors)='array' THEN e.upstream_errors ELSE '[]'::jsonb END) WITH ORDINALITY AS events(ev,ordinal)
  WHERE e.created_at >= $1 AND e.created_at < $2
+ AND NOT COALESCE((ev->>'budget_cut_applied')::boolean,false)
  ),dedup AS (
  SELECT DISTINCT ON(api_key_id,request_ref,account_id,at_ms) account_id,'key:'||COALESCE(api_key_id::text,'unknown')||'|'||request_ref AS request_ref,to_timestamp(at_ms/1000.0) AS at,kind,category
  FROM projected WHERE account_id=ANY($3) AND soft_failure AND at_ms >= EXTRACT(EPOCH FROM $1::timestamptz)*1000 AND at_ms < EXTRACT(EPOCH FROM $2::timestamptz)*1000

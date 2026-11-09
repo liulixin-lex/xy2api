@@ -381,15 +381,31 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		cachedErrorResponse = nil
 		cachedErrorBody = nil
 		hardClassifiedFailure = false
+		attemptStart := time.Time{}
+		if profile := resilience.StateFrom(ctx).AttemptProfile(); attempt == 1 && profile.AccountID == account.ID {
+			attemptStart = profile.AttemptStart
+		}
+		if attemptStart.IsZero() {
+			attemptStart = time.Now()
+		}
+		resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{
+			AccountID: account.ID, Model: attemptModel, AttemptStart: attemptStart,
+			Warm: anthropicAttemptWarmFromContext(ctx) && attempt == 1, Stream: reqStream, BodyBytes: len(body),
+		})
 		// 构建上游请求（每次重试需要重新构建，因为请求体需要重新读取）
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
 		// xy2api resilience: first upstream event timeout (design §7.4).
 		var firstEvent *firstEventGuard
 		if reqStream {
 			activeFirstEvent.Release()
-			upstreamCtx, firstEvent = newFirstEventGuard(upstreamCtx, resilienceFirstEventTimeout(ctx, account.ID, account.Platform))
+			timeout, plan := resilienceFirstEventPlanAt(ctx, account.ID, account.Platform, attemptStart)
+			upstreamCtx, firstEvent = newFirstEventGuard(upstreamCtx, timeout, plan)
 			activeFirstEvent = firstEvent
 		}
+		resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{
+			AccountID: account.ID, Model: attemptModel, AttemptStart: attemptStart,
+			Warm: anthropicAttemptWarmFromContext(ctx) && attempt == 1, Stream: reqStream, BodyBytes: len(body),
+		})
 		upstreamReq, wireBody, err := s.buildUpstreamRequest(upstreamCtx, c, account, body, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 		releaseUpstreamCtx()
 		if err != nil {
@@ -400,7 +416,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 
 		// 发送请求
 		resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{
-			AccountID: account.ID, Model: attemptModel, AttemptStart: time.Now(),
+			AccountID: account.ID, Model: attemptModel, AttemptStart: attemptStart,
 			Warm: anthropicAttemptWarmFromContext(ctx) && attempt == 1, Stream: reqStream, BodyBytes: len(wireBody),
 		})
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, tlsProfile)

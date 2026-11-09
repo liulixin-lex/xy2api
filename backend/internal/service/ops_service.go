@@ -14,6 +14,7 @@ import (
 
 	"github.com/liulixin-lex/xy2api/internal/config"
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
 var ErrOpsDisabled = infraerrors.NotFound("OPS_DISABLED", "Ops monitoring is disabled")
@@ -681,7 +682,13 @@ func boundOpsUpstreamErrors(events []*OpsUpstreamErrorEvent) ([]*OpsUpstreamErro
 		if len(events)-i > opsUpstreamErrorsMaxEvents {
 			break
 		}
-		raw, err := json.Marshal(events[i])
+		var legacy *OpsUpstreamErrorEvent
+		if events[i] != nil {
+			copy := *events[i]
+			copy.TimeoutDiagnostics = resilience.TimeoutDiagnostics{}
+			legacy = &copy
+		}
+		raw, err := json.Marshal(legacy)
 		size := 0
 		if err == nil {
 			size = len(raw) + 1 // trailing comma / bracket share
