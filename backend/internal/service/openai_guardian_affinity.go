@@ -177,9 +177,6 @@ func openAIGuardianParentAffinityFromContext(ctx context.Context) (openAIGuardia
 }
 
 func preserveOpenAIGuardianParentBinding(ctx context.Context, sessionHash string) bool {
-	if scope := openAIRejectionScope(ctx); scope.preserveBinding && sessionHash != "" && sessionHash != scope.session {
-		return true
-	}
 	affinity, ok := openAIGuardianParentAffinityFromContext(ctx)
 	if !ok {
 		return false

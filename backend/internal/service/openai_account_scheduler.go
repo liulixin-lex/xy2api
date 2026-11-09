@@ -2387,6 +2387,9 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	sessionHash = monitorProbeSessionHash(ctx, sessionHash)
 	state := resilience.StateFrom(ctx)
 	state.ResetStickyBypassReason()
+	if guard := openAIRejectionScope(ctx).selectionPreservesBinding; guard != nil {
+		guard.Store(false)
+	}
 	stickyOwner := state.StickyOwner()
 	if stickyOwner <= 0 && sessionHash != "" && s != nil {
 		stickyOwner, _ = s.getStickySessionAccountID(ctx, groupID, sessionHash)
@@ -2442,6 +2445,11 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	if scope := openAIRejectionScope(ctx).session; scope != "" && scope != sessionHash {
 		threadAvoid := s.resilience.sessionAvoid(ctx, groupID, scope)
 		avoided = mergeExcluded(avoided, threadAvoid)
+		if rejectionScope := openAIRejectionScope(ctx); len(threadAvoid) > 0 && rejectionScope.preserveBinding && rejectionScope.selectionPreservesBinding != nil {
+			owner, _ := s.getStickySessionAccountID(ctx, groupID, sessionHash)
+			_, ownerAvoided := threadAvoid[owner]
+			rejectionScope.selectionPreservesBinding.Store(owner > 0 && ownerAvoided)
+		}
 	}
 	resilience.StateFrom(ctx).SetAvoided(avoided)
 	excludedIDs = mergeExcluded(excludedIDs, avoided)
@@ -2784,7 +2792,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		StickyPreviousAccountID: stickyPreviousAccountID,
 		StickyWeighted:          stickyWeighted,
 		SubscriptionPriority:    subscriptionPriority,
-		PreserveStickyBinding:   preserveGuardianParentBinding,
+		PreserveStickyBinding:   preserveGuardianParentBinding || preserveOpenAIRejectionBinding(ctx, sessionHash),
 		RequirePrivacySet:       s.openAIGroupRequiresPrivacySet(ctx, groupID),
 		PreviousResponseID:      previousResponseID,
 		PreviousResponseCanMove: previousResponseCanMove,

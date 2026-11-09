@@ -122,7 +122,6 @@ func (s *OpenAIGatewayService) finishOpenAIStreamStateRejection(ctx context.Cont
 		return
 	}
 	groupID, session := resilience.StateFrom(ctx).SessionIdentity()
-	session = openAITerminalRejectionSession(ctx, session)
 	status := attempt.streakStatus
 	message := attempt.streakMessage
 	s.noteOpenAITerminalRejectionForSession(ctx, account, groupID, session, status, nil,
@@ -140,8 +139,11 @@ func (s *OpenAIGatewayService) finishOpenAIStreamStateRejection(ctx context.Cont
 		}
 	}
 	if !recorded {
+		// Use the same credential/assertion boundary as the HTTP error exits.
+		payload := s.redactAgentIdentitySensitiveBody(ctx, account, attempt.streakBody)
+		message = string(s.redactAgentIdentitySensitiveBody(ctx, account, []byte(message)))
 		s.recordOpenAIStreamUpstreamError(c, account, attempt.path == "passthrough_sse", "", "terminal_rejection",
-			attempt.streakBody, message, status)
+			payload, message, status)
 	}
 	var rejection *OpenAIRequestRejectionError
 	if !errors.As(*forwardErr, &rejection) {

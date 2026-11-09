@@ -889,6 +889,24 @@
           "}",
           "resilience.StateFrom(ctx).SetAvoided(avoided)"
         ]
+      },
+      {
+        "block": "encrypted-rejection-review-fixes-0512",
+        "note": "S review B-P2-1: only suppress binding writes when child-scope avoidance excludes the shared owner; preserve affinity reads and normal HTTP/WS child placement. Regression: TestOpenAITerminalRejectionShareChildAffinityWithoutAvoidance and WS equivalent.",
+        "removed": [
+          "PreserveStickyBinding:   preserveGuardianParentBinding,"
+        ],
+        "added": [
+          "if guard := openAIRejectionScope(ctx).selectionPreservesBinding; guard != nil {",
+          "guard.Store(false)",
+          "}",
+          "if rejectionScope := openAIRejectionScope(ctx); len(threadAvoid) > 0 && rejectionScope.preserveBinding && rejectionScope.selectionPreservesBinding != nil {",
+          "owner, _ := s.getStickySessionAccountID(ctx, groupID, sessionHash)",
+          "_, ownerAvoided := threadAvoid[owner]",
+          "rejectionScope.selectionPreservesBinding.Store(owner > 0 && ownerAvoided)",
+          "}",
+          "PreserveStickyBinding:   preserveGuardianParentBinding || preserveOpenAIRejectionBinding(ctx, sessionHash),"
+        ]
       }
     ],
     "backend/internal/service/openai_gateway_scheduling.go": [

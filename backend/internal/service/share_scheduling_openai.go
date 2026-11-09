@@ -96,6 +96,9 @@ func (s *OpenAIGatewayService) selectAccountWithShareScheduling(ctx context.Cont
 		cacheKey = s.openAISessionCacheKey(sessionHash)
 	}
 	binding, legacy := s.readOpenAIShareBinding(ctx, gp, cacheKey, sessionHash)
+	if preserveOpenAIRejectionBinding(ctx, sessionHash) {
+		cacheKey = ""
+	}
 	cands, accounts, stats, err := s.shareOpenAICandidates(ctx, in, binding.AccountID)
 	if err != nil {
 		return nil, decision, err
@@ -159,6 +162,9 @@ func (s *OpenAIGatewayService) shareOpenAILastResort(ctx context.Context, gp *sh
 		cacheKey = s.openAISessionCacheKey(sessionHash)
 	}
 	binding, legacy := s.readOpenAIShareBinding(ctx, gp, cacheKey, sessionHash)
+	if preserveOpenAIRejectionBinding(ctx, sessionHash) {
+		cacheKey = ""
+	}
 	gates := s.newOpenAIShareGates(withResilienceLastResortGate(ctx), openAIShareSelection{groupID: req.GroupID,
 		model: req.RequestedModel, transport: req.RequiredTransport, capability: req.RequiredCapability, platform: platform})
 	now := time.Now()

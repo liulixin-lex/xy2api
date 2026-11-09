@@ -127,6 +127,7 @@ func (s *OpenAIGatewayService) noteOpenAITerminalRejectionForSession(ctx context
 	if ctx != nil && (ctx.Err() != nil || resilience.StateFrom(ctx).ClientGone()) {
 		return
 	}
+	stickySession := session
 	session = openAITerminalRejectionSession(ctx, session)
 	if session == "" || account.ID <= 0 {
 		return
@@ -152,6 +153,12 @@ func (s *OpenAIGatewayService) noteOpenAITerminalRejectionForSession(ctx context
 	stateCtx, cancel := resilienceStateContext(ctx)
 	defer cancel()
 	s.AvoidOpenAIStateAccount(stateCtx, group, session, account.ID)
+	// Root rejections must release the actual atomic sticky owner as well as
+	// avoiding it in the execution scope. Child rejections keep the parent key.
+	if stickySession != "" && stickySession != session && !openAIRejectionScope(ctx).preserveBinding &&
+		!preserveOpenAIGuardianParentBinding(ctx, stickySession) {
+		_ = s.deleteStickySessionAccountIDIfOwner(stateCtx, &group, stickySession, account.ID)
+	}
 	const reason = "terminal_rejection_streak"
 	resilience.Count(resilience.MetricSessionRebind, group, account.ID, reason)
 	slog.Warn("resilience.session_rebind", append(resilience.EventFields(ctx),
