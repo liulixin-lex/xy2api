@@ -35,7 +35,7 @@ func TestShouldFailoverGeminiUpstreamError(t *testing.T) {
 		{"502_failover", 502, true},
 		{"503_failover", 503, true},
 		{"400_no_failover", 400, false},
-		{"404_no_failover", 404, false},
+		{"404_failover", 404, true},
 		{"422_no_failover", 422, false},
 	}
 

@@ -7,6 +7,8 @@ import (
 	_ "embed"
 	"errors"
 	"flag"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -59,6 +61,12 @@ func init() {
 	}
 }
 
+// printVersion writes the version as one plain line. It bypasses the logger,
+// whose bridge adds a timestamp and level, so scripts can read the first line.
+func printVersion(w io.Writer) {
+	_, _ = fmt.Fprintf(w, "XY2API %s (Sub2API compatibility: %s, commit: %s, built: %s)\n", Version, Sub2APICompatVersion, Commit, Date)
+}
+
 // initLogger configures the default slog handler based on gin.Mode().
 // In non-release mode, Debug level logs are enabled.
 func main() {
@@ -71,7 +79,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		log.Printf("XY2API %s (Sub2API compatibility: %s, commit: %s, built: %s)\n", Version, Sub2APICompatVersion, Commit, Date)
+		printVersion(os.Stdout)
 		return
 	}
 

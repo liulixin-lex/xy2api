@@ -76,7 +76,7 @@
 
 | 变更 | 内容 | 状态 |
 |---|---|---|
-| [`encrypted-routing-20261105`](../openspec/changes/encrypted-routing-20261105/) | 零中断的加密态与路由：空白占位不算输出、Codex 输出前 ping 心跳、流内包装错误帧校验与路由、M3 状态类拒绝同号修复与一次换号、输出前流内 forbidden 软冷却、`resilience.*` 最小计数；[韧性规格](../openspec/changes/encrypted-routing-20261105/specs/gateway-resilience/spec.md) | 基础变更随 0.5.5 发布（PR #201）；0.5.6 已发布（PR #203）；0.5.7 已发布（PR #206）；0.5.8 已发布（PR #210）；0.5.9 已发布（PR #211），包含输出前裸 error 恢复、顶层错误码识别与输出后容量错误码规范化；0.5.10 候选让末位兜底优先尝试本会话未暂避的账号，尚未发布 |
+| [`encrypted-routing-20261105`](../openspec/changes/encrypted-routing-20261105/) | 零中断的加密态与路由：空白占位不算输出、Codex 输出前 ping 心跳、流内包装错误帧校验与路由、M3 状态类拒绝同号修复与一次换号、输出前流内 forbidden 软冷却、`resilience.*` 最小计数；[韧性规格](../openspec/changes/encrypted-routing-20261105/specs/gateway-resilience/spec.md) | 基础变更随 0.5.5 发布（PR #201）；0.5.6 已发布（PR #203）；0.5.7 已发布（PR #206）；0.5.8 已发布（PR #210）；0.5.9 已发布（PR #211），包含输出前裸 error 恢复、顶层错误码识别与输出后容量错误码规范化；0.5.10 已候选，让末位兜底优先尝试本会话未暂避的账号；0.5.11 候选修复客户端断开后的账号失败误记，并增加 Claude 5.5 Haiku 的预校验、参数转换与兼容处理，尚未发布 |
 | [`readonly-mcp-20261105`](../openspec/changes/readonly-mcp-20261105/) | 只读 MCP：按当前用户权限查询诊断数据；后端、授权界面和双路代码审查 | 已随0.5.4发布；生产验收待执行 |
 | [`group-quality-gate-v3-20261104`](../openspec/changes/group-quality-gate-v3-20261104/) | OpenAI 分组质量门槛 v3：账号级三维统计与软性三档、统一迁出、低倍率优先按组、判慢递增、同站断流暂停、输出后首败改绑、`usage_logs` 尝试级首字列；[韧性规格](../openspec/changes/group-quality-gate-v3-20261104/specs/gateway-resilience/spec.md) | 随 0.5.2 发布（PR #194，含会话状态约束）；升级继承关闭，按 `deploy/README.md` 逐组启用；上线后 48 小时与 7 天核对见其 tasks §6 |
 | [`add-support-chat-widget-20261031`](../openspec/changes/add-support-chat-widget-20261031/) | 客户服务：悬浮在线客服气泡、会话与图片、客服收件箱与提醒，工单并入 | 随 0.5.0 发布（PR #181） |

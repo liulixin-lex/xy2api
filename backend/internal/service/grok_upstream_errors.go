@@ -208,7 +208,8 @@ func (s *OpenAIGatewayService) shouldFailoverGrokUpstreamError(account *Account,
 	if isOpenAIRequestBodyTooLargeError(statusCode, extractUpstreamErrorMessage(responseBody), responseBody) {
 		return true
 	}
-	if shouldFailoverClassifiedUpstreamError(statusCode, nil, responseBody) {
+	if !customPolicyOverridesGenericInference404(account, statusCode, responseBody) &&
+		shouldFailoverClassifiedUpstreamError(statusCode, nil, responseBody) {
 		return true
 	}
 	// A 422 emitted by xAI's ModelInput decoder is account/runtime compatibility,
@@ -262,7 +263,10 @@ func IsGrokTemporaryUnavailable422Failover(failoverErr *UpstreamFailoverError) b
 }
 
 func shouldFailoverClassifiedUpstreamError(statusCode int, headers http.Header, responseBody []byte) bool {
-	result := classifyUpstreamHTTP(statusCode, headers, responseBody, "")
+	return shouldFailoverUpstreamClassification(statusCode, classifyInferenceUpstreamHTTP(statusCode, headers, responseBody, ""))
+}
+
+func shouldFailoverUpstreamClassification(statusCode int, result resilience.Result) bool {
 	switch result.Category {
 	case resilience.CategoryBalance, resilience.CategoryModelUnsupported:
 		return true

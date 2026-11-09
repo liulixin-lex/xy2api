@@ -90,9 +90,15 @@ func TestOpenAIStreamModelUnavailableExhaustionPreservesError(t *testing.T) {
 			c.Request.Body = io.NopCloser(strings.NewReader(`{"model":"gpt-5.1","stream":true,"input":"hello"}`))
 			h.Responses(c)
 			require.Equal(t, []int64{1, 2}, upstream.accounts)
-			require.Equal(t, tc.status, recorder.Code)
-			for _, field := range []string{"code", "param", "message"} {
-				require.Equal(t, gjson.Get(tc.errorBody, field).String(), gjson.Get(recorder.Body.String(), "error."+field).String(), field)
+			if tc.status == http.StatusNotFound {
+				require.Equal(t, http.StatusNotFound, recorder.Code)
+				require.Equal(t, "model_not_found", gjson.Get(recorder.Body.String(), "error.code").String())
+				require.Equal(t, `Model "gpt-5.1" is not supported by any configured account in this group`, gjson.Get(recorder.Body.String(), "error.message").String())
+			} else {
+				require.Equal(t, tc.status, recorder.Code)
+				for _, field := range []string{"code", "param", "message"} {
+					require.Equal(t, gjson.Get(tc.errorBody, field).String(), gjson.Get(recorder.Body.String(), "error."+field).String(), field)
+				}
 			}
 			require.Empty(t, recorder.Header().Get("Retry-After"))
 			require.False(t, c.GetBool(ginKeyResilienceTurnCounted))
@@ -129,7 +135,11 @@ func TestOpenAIModelUnavailableExhaustionPreservesLastError(t *testing.T) {
 			resilience.SetRetryAdvice(c.Request.Context(), resilience.RetryAdvice{Seconds: 7})
 			tc.write(c, last, false)
 			require.Equal(t, tc.status, recorder.Code)
-			require.JSONEq(t, `{"error":{"type":"invalid_request_error","code":"model_unavailable","param":"model","message":"model is unavailable; workspace_id=[redacted]"}}`, recorder.Body.String())
+			if tc.status == http.StatusNotFound {
+				require.JSONEq(t, `{"error":{"code":"model_not_found","message":"Model \"gpt-6.1-sol\" is not supported by any configured account in this group"}}`, recorder.Body.String())
+			} else {
+				require.JSONEq(t, `{"error":{"type":"invalid_request_error","code":"model_unavailable","param":"model","message":"model is unavailable; workspace_id=[redacted]"}}`, recorder.Body.String())
+			}
 			require.Empty(t, recorder.Header().Get("Retry-After"))
 			require.False(t, c.GetBool(ginKeyResilienceTurnCounted))
 			require.False(t, resilience.StateFrom(c.Request.Context()).TurnFailed())

@@ -711,6 +711,7 @@ type UpstreamFailoverError struct {
 	PreDispatchSelectionInvalidated bool  // Candidate lost admission before any upstream call.
 	UpstreamPlatform                string
 	UpstreamAccountType             string
+	NonInference                    bool // Token counting keeps the general HTTP classifier and terminal response.
 	StatusCode                      int
 	ResponseBody                    []byte        // 上游响应体，用于错误透传规则匹配
 	ResponseHeaders                 http.Header   // 上游响应头，用于透传 cf-ray/cf-mitigated/content-type 等诊断信息

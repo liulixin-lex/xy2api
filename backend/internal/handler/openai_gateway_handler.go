@@ -1797,6 +1797,10 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 	if c.GetBool(ginKeyResilienceFinalized) {
 		return
 	}
+	if message, matched := inferenceNotFoundExhaustedMessage(c, failoverErr); matched {
+		h.anthropicStreamingAwareError(c, http.StatusNotFound, "model_not_found", message, streamStarted)
+		return
+	}
 	if handleOpenAIRequestRejectionExhausted(c, failoverErr, streamStarted, false, func(status int, message string, stream bool) {
 		h.anthropicStreamingAwareError(c, status, "invalid_request_error", message, stream)
 	}) {
@@ -3764,6 +3768,10 @@ func (h *OpenAIGatewayHandler) handleConcurrencyError(c *gin.Context, err error,
 
 func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, streamStarted bool) {
 	recordExhaustedRecovery(c, failoverErr)
+	if message, matched := inferenceNotFoundExhaustedMessage(c, failoverErr); matched {
+		h.handleStreamingAwareErrorWithCode(c, http.StatusNotFound, "invalid_request_error", "model_not_found", message, streamStarted, false)
+		return
+	}
 	if failoverErr == nil {
 		h.handleFailoverExhaustedSimple(c, http.StatusBadGateway, streamStarted)
 		return

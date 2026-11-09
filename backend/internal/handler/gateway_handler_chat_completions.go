@@ -441,6 +441,17 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 	if c.GetBool(ginKeyResilienceFinalized) {
 		return
 	}
+	if message, matched := inferenceNotFoundExhaustedMessage(c, lastErr); matched {
+		if streamStarted {
+			service.MarkOpsStreamError(c, "invalid_request_error", message, http.StatusNotFound)
+			if c.Writer.Size() <= 0 || gatewayStreamHasOnlyHeartbeats(c) {
+				writeChatCompletionsErrorSSE(c, "invalid_request_error", "model_not_found", message, http.StatusNotFound)
+			}
+		} else {
+			h.chatCompletionsErrorResponseWithCode(c, http.StatusNotFound, "invalid_request_error", "model_not_found", message)
+		}
+		return
+	}
 	if handleOpenAIRequestRejectionExhausted(c, lastErr, streamStarted, true, func(status int, message string, _ bool) {
 		service.MarkOpsStreamError(c, "invalid_request_error", message, status)
 		writeChatCompletionsErrorSSE(c, "invalid_request_error", "", message, status)

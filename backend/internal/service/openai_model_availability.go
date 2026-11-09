@@ -31,9 +31,16 @@ func (s *OpenAIGatewayService) failoverOpenAIModelAvailability(ctx context.Conte
 		openAIStreamClientOutputStarted(c, false) {
 		return nil
 	}
+	if customPolicyOverridesGenericInference404(account, resp.StatusCode, body) {
+		return nil
+	}
 	reason, failureCategory := openAIModelUnavailableReason, resilience.CategoryModelUnsupported
 	scope, action, kind := GatewayFailureScopeAccount, NextAccountRetry, "failover"
 	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		if classifyInferenceUpstreamHTTP(resp.StatusCode, resp.Header, body, "").Category != resilience.CategoryModelUnsupported {
+			return nil
+		}
 	case isOpenAIModelAvailabilityError(resp.StatusCode, "", body):
 	case !openAIStreamRequestRejected(body, "") && classifyUpstreamHTTP(resp.StatusCode, resp.Header, body, "").Category == resilience.CategoryUpstreamRequestRestriction:
 		reason, failureCategory = openAIUpstreamRequestRestrictionReason, resilience.CategoryUpstreamRequestRestriction
@@ -41,8 +48,8 @@ func (s *OpenAIGatewayService) failoverOpenAIModelAvailability(ctx context.Conte
 		return nil
 	}
 	// Keep independent evidence for each failure class within this request.
-	// A second upstream host establishes request scope; sibling accounts on
-	// the first host may still support the request.
+	// A second upstream host establishes request scope for every model
+	// availability failure; stream-derived model errors use the same guard.
 	host, previousHost := accountUpstreamHost(account), ""
 	hostKey := "openai_request_failure_host_" + string(reason)
 	if c != nil {
