@@ -61,6 +61,9 @@ func classifyUpstreamHTTP(statusCode int, headers http.Header, body []byte, upst
 
 // classifyUpstreamOutcome is shared by HTTP, stream ops and handler failover.
 func classifyUpstreamOutcome(outcome resilience.Outcome) resilience.Result {
+	if outcome.Source == resilience.SourceHTTP && isOpenAIDeviceBindingRequired(outcome.StatusCode, outcome.Body) {
+		return resilience.Result{Category: resilience.CategoryAuth, Reason: "device_binding_required"}
+	}
 	outcome.Code = firstNonEmpty(outcome.Code, extractUpstreamErrorCode(outcome.Body),
 		gjson.GetBytes(outcome.Body, "response.error.code").String())
 	outcome.Type = firstNonEmpty(outcome.Type, gjson.GetBytes(outcome.Body, "error.type").String(),

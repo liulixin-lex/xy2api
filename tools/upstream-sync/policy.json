@@ -4325,6 +4325,36 @@
   ],
   "custom_patch_tests": [
     {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_error_classification_forward_test.go",
+      "literal": "TestOpenAIDeviceBindingRequiredForwardRoutes"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/inference_not_found_test.go",
+      "literal": "TestInference404RecognizesFastAPIAndAnthropicGenericEnvelopes"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/grok_upstream_errors_test.go",
+      "literal": "TestGrokCustomGenericInference404UsesSharedCustomPolicy"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/grok_upstream_errors_test.go",
+      "literal": "TestGrokMessagesNonFailoverSkipsOpenAIAccountSideEffects"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_error_classification_forward_test.go",
+      "literal": "TestGeminiGeneric404PolicyAcrossEntrypoints"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/resilience_anthropic_type_test.go",
+      "literal": "TestAnthropicModelUnavailableExhaustionMatchesLocalType"
+    },
+    {
       "id": "xy-fallback-group-user-invisible",
       "path": "frontend/src/components/admin/usage/__tests__/UsageTable.fallback.spec.ts",
       "literal": "never shows the fallback to users, even if an older server still sends the origin fields"

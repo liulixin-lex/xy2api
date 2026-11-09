@@ -2027,6 +2027,10 @@ func (s *OpenAIGatewayService) handleGrokAccountUpstreamError(ctx context.Contex
 	if isGrokContentPolicyRejection(statusCode, responseBody) {
 		return
 	}
+	if statusCode == http.StatusNotFound && customPolicyOverridesGenericInference404(account, statusCode, responseBody) && s.rateLimitService != nil {
+		s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, headers, responseBody, grokRequestedModelFromCtx(ctx))
+		return
+	}
 	if s.rateLimitService != nil {
 		if model := grokRequestedModelFromCtx(ctx); model != "" &&
 			s.rateLimitService.handleUpstreamModelNotFoundAtKey(ctx, account, model, model, statusCode, responseBody, true) {

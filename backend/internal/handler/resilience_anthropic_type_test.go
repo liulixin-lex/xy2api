@@ -108,3 +108,50 @@ func TestTerminalPassthroughRuleDropsUpstreamRetryAfter(t *testing.T) {
 		})
 	}
 }
+
+func TestAnthropicModelUnavailableExhaustionMatchesLocalType(t *testing.T) {
+	withHandlerResilience(t, nil)
+	c, rec := newResilienceTestContext(t)
+	failure := &service.UpstreamFailoverError{
+		StatusCode:   http.StatusNotFound,
+		ResponseBody: []byte(`{"error":{"code":"model_not_found","message":"model not found"}}`),
+	}
+	(&OpenAIGatewayHandler{}).handleAnthropicFailoverExhausted(c, failure, false)
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	local := classifyNoAccountError(c.Request.Context(),
+		&fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{HasAccountsInPool: true}},
+		&service.APIKey{GroupID: ptrInt64(1)}, "model", "model", service.PlatformAnthropic)
+	require.True(t, local.ModelNotFound)
+	require.Equal(t, local.Status, rec.Code)
+	require.Equal(t, local.ErrType, gjson.GetBytes(rec.Body.Bytes(), "error.type").String(), rec.Body.String())
+}
+
+func TestOpenAIDeviceBindingExhaustionUsesExistingAccountExit(t *testing.T) {
+	withHandlerResilience(t, nil)
+	for _, anthropic := range []bool{false, true} {
+		var baseline string
+		for _, status := range []int{http.StatusForbidden, http.StatusConflict} {
+			c, rec := newResilienceTestContext(t)
+			failure := &service.UpstreamFailoverError{
+				StatusCode: status, Stage: service.GatewayFailureStageAccountAuth,
+				Scope: service.GatewayFailureScopeAccount, Reason: service.OpenAIUpstreamAccessStateReason,
+				NextAccountAction: service.NextAccountRetry, ClientStatusCode: http.StatusBadGateway,
+				ClientMessage: "Upstream access is temporarily unavailable, please retry later",
+				ResponseBody:  []byte(`{"error":{"code":"device_binding_required","message":"private upstream detail"}}`),
+			}
+			if anthropic {
+				(&OpenAIGatewayHandler{}).handleAnthropicFailoverExhausted(c, failure, false)
+			} else {
+				(&OpenAIGatewayHandler{}).handleFailoverExhausted(c, failure, false)
+			}
+			require.Equal(t, http.StatusBadGateway, rec.Code)
+			require.NotContains(t, rec.Body.String(), "device_binding_required")
+			require.NotContains(t, rec.Body.String(), "private upstream detail")
+			if status == http.StatusForbidden {
+				baseline = rec.Body.String()
+			} else {
+				require.Equal(t, baseline, rec.Body.String())
+			}
+		}
+	}
+}
