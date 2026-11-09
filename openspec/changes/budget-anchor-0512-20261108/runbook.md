@@ -27,7 +27,7 @@
 - **T-a**：SQL-1b 返回任意行，即同一 key、同一 UTC 小时内既有无计时器迟发未送达，又有进入 abuse 状态。迟发按 `disconnect_unix_ms` 分小时，缺字段时退回日志时间；abuse 按日志时间分小时。abuse 一侧不按模式过滤，迟发一侧只计 `body_eof`。
 - **T-b**：任一实例 sink 的累计 `dropped_count` 或 `write_failed_count` 上升，且满足任一迟发条件：本次 `late_attempt_start` 的 `false:body_eof` 在 60 分钟窗口内 > 0，或 SQL-1c 返回行。SQL 查询失败另按下文处理。某个实例读不到，或发生非计划重启（身份变化或累计计数下降），也直接按 T-b 命中。
 
-**指标口径与巡检**：逐实例直连读取 `GET /api/v1/admin/ops/system-logs/health` 和 `GET /api/v1/admin/resilience/stats?window=15m`、`?window=60m`。sink 的累计数只与同一实例身份的上次成功读数比较；下降或身份变化视为重启；非计划重启直接按 T-b 命中，不把缺失当作 0。阶段 1、2 冻结非紧急重启和切流；必须重启时先跑 R0 并保存旧实例读数。迟发指标的 label 为 `<has_timer>:<budget_start_mode>`（如 `false:body_eof`），在 guard 决定后的派发前计数，在途即能看到，Warm/发送样本更新及 FinishTiming 不会重复计数。它是分钟桶的滑动窗口和，只看窗口内 > 0，不能比较相邻读数求增量，也不能据其下降推断重启。
+**指标口径与巡检**：逐实例直连读取 `GET /api/v1/admin/ops/system-logs/health` 和 `GET /api/v1/admin/resilience/stats?window=15m`、`?window=60m`。sink 的累计数只与同一实例身份的上次成功读数比较；下降或身份变化视为重启；非计划重启直接按 T-b 命中，不把缺失当作 0。阶段 1、2 冻结非紧急重启和切流；必须重启时先跑 R0 并保存旧实例读数。迟发指标的 label 为 `<has_timer>:<budget_start_mode>`（如 `false:body_eof`），在 guard 决定后的派发前计数，在途即能看到，Warm/发送样本更新及 FinishTiming 不会重复计数。两条 Warn、请求时序和指标共用实际派发 owner 的冻结集合，handler/profile 预设不计数；后建 response-stage timer 不回写分类。Gemini 同号重试若仍受原共享 attempt guard 覆盖，记有计时器，但不改变发送起点、guard 或 plan。它是分钟桶的滑动窗口和，只看窗口内 > 0，不能比较相邻读数求增量，也不能据其下降推断重启。
 
 例行每 10 分钟跑 R0；15 分钟窗口内有 `false:body_eof` 时，5 分钟后加跑一次，再恢复例行节奏。检查推迟时，加跑窗口取“距上次检查时长 + 5 分钟”，不超过 60 分钟。记录 `T_stage1 = body_eof 切换响应时刻 + 15 秒`，再次进入阶段 1 时重新记录；首小时的长窗口取 `now − T_stage1`，之后用 60 分钟。SQL 的日志下限也不早于 T_stage1，并按请求快照模式排除阶段 0 开始、阶段 1 才断开的 arrival 请求。分钟桶只有分钟精度，重进阶段 1 的同分钟旧 body_eof 事件可能使回滚偏保守，允许偶发多切一次，不能漏报。
 

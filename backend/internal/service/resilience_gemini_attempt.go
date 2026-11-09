@@ -94,6 +94,19 @@ func newGeminiAttempt(ctx context.Context, account *Account, model, action strin
 	return g
 }
 
+// observeDispatch records whether the existing guard covers this send. In-place
+// retries keep their own send starts; the shared timer and its plan are untouched.
+func (g *geminiAttempt) observeDispatch(started time.Time) {
+	g.mu.Lock()
+	hasTimer := g.timer != nil && g.timeout > 0 && !g.output
+	g.mu.Unlock()
+	st := resilience.StateFrom(g.parent)
+	if hasTimer {
+		st.NoteAttemptTimer(started)
+	}
+	st.ObserveAttemptStart()
+}
+
 // Callers hold mu after construction. A stopped callback checks the current
 // generation before canceling, so content racing a timer can safely disarm it.
 func (g *geminiAttempt) resetTimer(d time.Duration, cause error) {

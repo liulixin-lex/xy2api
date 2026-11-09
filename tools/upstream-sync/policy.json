@@ -4242,7 +4242,7 @@
     },
     {
       "path": "backend/internal/service/gemini_messages_compat_service.go",
-      "value": "resilience.StateFrom(ctx).ObserveAttemptStart()"
+      "value": "attemptGuard.observeDispatch(attemptStart)"
     }
   ],
   "forbidden_module_paths": [

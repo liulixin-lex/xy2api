@@ -2344,11 +2344,11 @@
       },
       {
         "block": "budget-g9-dispatch-observation",
-        "note": "G9 observation only: publish the frozen-mode late-attempt metric before the existing Forward and ForwardNative transport calls. No guard, retry, admission or deadline changes. Covered by TestG9DispatchObservationCallsites and TestG9LateMetricVisibleBeforeFinishAndFrozenAtDispatch.",
+        "note": "G9 observation only: freeze existing shared-guard coverage for each actual dispatch. In-place retries keep their existing send starts, timer and immutable plan. Covered by TestG9DispatchObservationCallsites and TestGeminiAttemptTimerOwnsInitialProfileAcrossInPlaceRetry.",
         "removed": [],
         "added": [
-          "resilience.StateFrom(ctx).ObserveAttemptStart()",
-          "resilience.StateFrom(ctx).ObserveAttemptStart()"
+          "attemptGuard.observeDispatch(attemptStart)",
+          "attemptGuard.observeDispatch(attemptStart)"
         ]
       }
     ]

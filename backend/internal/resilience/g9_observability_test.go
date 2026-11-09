@@ -48,7 +48,9 @@ func g9LogState(t *testing.T, mode string, abusive, billed bool) (*RequestState,
 	at := time.Now()
 	st.SetAttemptProfile(AttemptProfile{AttemptStart: at.Add(-time.Millisecond)})
 	st.NoteAttemptTimer(at.Add(-time.Millisecond))
+	st.ObserveAttemptStart()
 	st.SetAttemptProfile(AttemptProfile{AttemptStart: at})
+	st.ObserveAttemptStart()
 	st.NoteUndeliveredUsage(nil, 0, billed)
 	// Logs must retain the request snapshot even after a settings replacement.
 	newer := Defaults()

@@ -43,8 +43,8 @@ type timingTrace struct {
 	wireStatus      int64
 	dispatchCount   int64
 	minRemaining    time.Duration
-	attempts        map[time.Time]bool // late attempt start -> has a timer
-	attemptMetrics  map[time.Time]bool // owners already observed at dispatch
+	attemptTimers   map[time.Time]bool // timer coverage known before dispatch
+	attemptMetrics  map[time.Time]bool // dispatched late owner -> frozen timer coverage
 	responseStage   *ResponseStageTiming
 }
 
@@ -59,9 +59,9 @@ func (s *RequestState) Timing() RequestTiming {
 	b, firstRead, eof := s.budget, s.bodyFirstRead, s.bodyReceived
 	bytes, repeat, edge, trace := s.bodyBytes, s.bodyReceiptRepeat, s.edge, s.timing
 	receiptSource := s.bodyReceiptBasis
-	lateCount := len(s.timing.attempts)
+	lateCount := len(s.timing.attemptMetrics)
 	lateNoTimer := int64(0)
-	for _, timed := range s.timing.attempts {
+	for _, timed := range s.timing.attemptMetrics {
 		if !timed {
 			lateNoTimer++
 		}
@@ -179,30 +179,22 @@ func (s *RequestState) NoteResponseStage(start time.Time, window time.Duration) 
 	s.mu.Unlock()
 }
 
-// noteAttemptStart counts distinct scheduling starts, never Warm-only profile updates.
-func (s *RequestState) noteAttemptStart(at time.Time) {
-	b := s.Budget()
-	if b == nil || b.Kind() != KindText || at.IsZero() || at.Sub(b.Started()) <= b.base-minAttemptWindow {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.timing.attempts == nil {
-		s.timing.attempts = make(map[time.Time]bool)
-	}
-	if _, ok := s.timing.attempts[at]; !ok {
-		s.timing.attempts[at] = false
-	}
-}
+// NoteAttemptTimer records observed coverage only. Creating a profile or plan
+// does not count a dispatch, and later timers cannot rewrite an emitted sample.
 func (s *RequestState) NoteAttemptTimer(at time.Time) {
-	if s == nil {
+	if s == nil || at.IsZero() {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.timing.attempts[at]; ok {
-		s.timing.attempts[at] = true
+	b := s.budget
+	if b == nil || b.kind != KindText || at.Sub(b.started) <= b.base-minAttemptWindow {
+		return
 	}
+	if s.timing.attemptTimers == nil {
+		s.timing.attemptTimers = make(map[time.Time]bool)
+	}
+	s.timing.attemptTimers[at] = true
 }
 
 // ObserveAttemptStart publishes the late-attempt metric immediately before
@@ -216,14 +208,19 @@ func (s *RequestState) ObserveAttemptStart() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	owner := s.attemptProfile.timerOwnerStart()
-	hasTimer, late := s.timing.attempts[owner]
-	if !late || s.timing.attemptMetrics[owner] || s.budget == nil {
+	b := s.budget
+	// These budget fields are immutable request-start snapshots.
+	if b == nil || b.kind != KindText || owner.IsZero() || owner.Sub(b.started) <= b.base-minAttemptWindow {
 		return
 	}
+	if _, emitted := s.timing.attemptMetrics[owner]; emitted {
+		return
+	}
+	hasTimer := s.timing.attemptTimers[owner]
 	if s.timing.attemptMetrics == nil {
 		s.timing.attemptMetrics = make(map[time.Time]bool)
 	}
-	s.timing.attemptMetrics[owner] = true
+	s.timing.attemptMetrics[owner] = hasTimer
 	label := "false:" + s.budget.budgetStart
 	if hasTimer {
 		label = "true:" + s.budget.budgetStart

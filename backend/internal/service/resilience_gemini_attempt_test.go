@@ -264,12 +264,53 @@ func TestGeminiAttemptTimerOwnsInitialProfileAcrossInPlaceRetry(t *testing.T) {
 	require.Equal(t, attemptStart, g.plan.Start())
 	require.Equal(t, attemptStart, st.AttemptProfile().AttemptStart)
 
+	g.observeDispatch(attemptStart)
 	// An in-place replay updates the active profile but reuses the original
-	// guard. Its new start must not inherit the first attempt's timer ownership.
+	// guard. Both sends are bounded while that one immutable guard is active.
 	retryStart := attemptStart.Add(time.Second)
 	st.SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, Model: "gemini-2.5-flash", AttemptStart: retryStart, Stream: true, BodyBytes: len(body)})
 	require.Equal(t, attemptStart, g.plan.Start(), "the guard retains its immutable plan")
+	g.observeDispatch(retryStart)
 	timing := st.Timing()
 	require.EqualValues(t, 2, *timing.LateAttemptCount)
-	require.EqualValues(t, 1, *timing.LateAttemptNoTimerCount)
+	require.Zero(t, *timing.LateAttemptNoTimerCount)
+}
+
+func TestG9GeminiDispatchUsesExistingGuardCoverage(t *testing.T) {
+	for i, tc := range []struct {
+		name          string
+		timer, output bool
+		wantNoTimer   int64
+	}{
+		{name: "shared attempt guard", timer: true, wantNoTimer: 0},
+		{name: "last candidate without guard", wantNoTimer: 2},
+		{name: "stall timer is not an attempt guard", timer: true, output: true, wantNoTimer: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := resilience.NewRequestState()
+			st.SetGroup(int64(8320 + i))
+			ctx := resilience.WithRequestState(context.Background(), st)
+			cfg := resilience.Defaults()
+			now := time.Now()
+			st.SetBudget(resilience.NewBudget(ctx, &cfg, resilience.KindText, now.Add(-239*time.Second)))
+			g := &geminiAttempt{parent: ctx, timeout: 30 * time.Second, output: tc.output}
+			if tc.timer {
+				g.timer = time.NewTimer(time.Hour)
+				defer g.timer.Stop()
+			}
+			originalTimer, originalPlan := g.timer, g.plan
+			for _, at := range []time.Time{now, now.Add(time.Millisecond)} {
+				profile := resilience.AttemptProfile{AccountID: 1, AttemptStart: at}
+				st.SetAttemptProfile(profile)
+				g.observeDispatch(at)
+				g.observeDispatch(at)
+				require.Equal(t, profile, st.AttemptProfile(), "observation never rewrites the send sample or owner")
+			}
+			require.Equal(t, originalTimer, g.timer)
+			require.Equal(t, originalPlan, g.plan)
+			timing := st.Timing()
+			require.EqualValues(t, 2, *timing.LateAttemptCount)
+			require.Equal(t, tc.wantNoTimer, *timing.LateAttemptNoTimerCount)
+		})
+	}
 }
