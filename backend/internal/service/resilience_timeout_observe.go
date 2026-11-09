@@ -3,8 +3,14 @@ package service
 import (
 	"context"
 	"fmt"
-	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"log/slog"
+	"strings"
+
+	"github.com/liulixin-lex/xy2api/internal/pkg/claude"
+	"github.com/liulixin-lex/xy2api/internal/pkg/gemini"
+	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
+	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
 func noteTimeoutPlan(ctx context.Context, account *Account, plan resilience.TimeoutPlan) {
@@ -28,6 +34,31 @@ func noteTimeoutPlan(ctx context.Context, account *Account, plan resilience.Time
 	} else if d.TTFOLowerBoundMs >= 10000 {
 		bucket = "10_30"
 	}
-	resilience.Count("ttfo_lower_bound", st.GroupID(), id, plan.Model()+":"+bucket)
+	resilience.Count("ttfo_lower_bound", st.GroupID(), id, timeoutMetricModel(plan.Model())+":"+bucket)
 	slog.Info("resilience.budget_timeout_plan", "account_id", id, "timeout_source", d.TimeoutSource, "tier_ms", d.TierMs, "planned_timeout_ms", d.PlannedTimeoutMs, "effective_timeout_ms", d.EffectiveTimeoutMs, "budget_remaining_ms_at_start", d.BudgetRemainingMsAtStart, "would_budget_cut", d.WouldBudgetCut, "budget_cut_applied", d.BudgetCutApplied, "budget_cut_after_full_tier", d.CutAfterFullTier, "anchor_offset_ms", d.AnchorOffsetMs, "attempt_start_offset_ms", d.AttemptStartOffsetMs, "committed_at_start", d.CommittedAtStart, "shadow_eof_remaining_ms", d.ShadowEOFRemainingMs)
+}
+
+// Snapshot the built-in catalogs: client names never add metric label values.
+// Five time buckets yield at most 5*(len(timeoutMetricModels)+1) labels here;
+// the shared metric store may still collapse rows into its overflow label.
+var timeoutMetricModels = func() map[string]struct{} {
+	models := append(claude.DefaultModelIDs(), openai.DefaultModelIDs()...)
+	models = append(models, xai.DefaultModelIDs()...)
+	for _, model := range gemini.DefaultModels() {
+		models = append(models, model.Name)
+	}
+	known := make(map[string]struct{}, len(models))
+	for _, model := range models {
+		known[claude.NormalizeModelID(normalizeModelNameForPricing(model))] = struct{}{}
+	}
+	return known
+}()
+
+func timeoutMetricModel(model string) string {
+	model = strings.ToLower(lastOpenAIModelSegment(model))
+	model = claude.NormalizeModelID(normalizeModelNameForPricing(model))
+	if _, known := timeoutMetricModels[model]; known {
+		return model
+	}
+	return "other"
 }

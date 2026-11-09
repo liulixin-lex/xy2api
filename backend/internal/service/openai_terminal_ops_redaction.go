@@ -94,7 +94,7 @@ func replaceOpenAITerminalOpsCredentialValue(body, credential string, substring 
 	for offset := 0; offset < len(body); {
 		relative := strings.Index(body[offset:], credential)
 		if relative < 0 {
-			out.WriteString(body[offset:])
+			_, _ = out.WriteString(body[offset:])
 			break
 		}
 		start := offset + relative
@@ -110,13 +110,13 @@ func replaceOpenAITerminalOpsCredentialValue(body, credential string, substring 
 			afterOK = !credentialWordRune(after)
 		}
 		if beforeOK && afterOK {
-			out.WriteString(body[offset:start])
-			out.WriteString("[redacted]")
+			_, _ = out.WriteString(body[offset:start])
+			_, _ = out.WriteString("[redacted]")
 			offset = end
 			continue
 		}
 		_, width := utf8.DecodeRuneInString(body[start:])
-		out.WriteString(body[offset : start+width])
+		_, _ = out.WriteString(body[offset : start+width])
 		offset = start + width
 	}
 	return out.String()

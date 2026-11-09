@@ -46,8 +46,13 @@ func (r gwUsageReadError) Read([]byte) (int, error) { return 0, r.err }
 type gwUsageUpstream struct{ body func() io.Reader }
 
 func (u *gwUsageUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	body := u.body()
+	closer, ok := body.(io.ReadCloser)
+	if !ok {
+		closer = io.NopCloser(body)
+	}
 	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}},
-		Body: io.NopCloser(u.body()), Request: req}, nil
+		Body: closer, Request: req}, nil
 }
 
 func (u *gwUsageUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
@@ -190,6 +195,30 @@ func newGatewayConvertUsageContext(writer http.ResponseWriter, path, body string
 	return c
 }
 
+// Signal the second read so cancellation exercises an upstream read already
+// blocked after message_start, instead of racing the first event parser.
+type gwUsagePipeBody struct {
+	*io.PipeReader
+	reads     int
+	blocked   chan struct{}
+	closed    chan struct{}
+	closeOnce sync.Once
+}
+
+func (b *gwUsagePipeBody) Read(p []byte) (int, error) {
+	b.reads++
+	if b.reads == 2 {
+		close(b.blocked)
+	}
+	return b.PipeReader.Read(p)
+}
+
+func (b *gwUsagePipeBody) Close() error {
+	err := b.PipeReader.Close()
+	b.closeOnce.Do(func() { close(b.closed) })
+	return err
+}
+
 // A client that cancels while the opening is still staged is billed
 // nothing, and its cancellation is no forward failure (DELTA-P2-3).
 func TestGatewayConvertCancelBeforeOutputBillsNothing(t *testing.T) {
@@ -205,11 +234,13 @@ func TestGatewayConvertCancelBeforeOutputBillsNothing(t *testing.T) {
 		t.Run(endpoint.name, func(t *testing.T) {
 			pr, pw := io.Pipe()
 			t.Cleanup(func() { _ = pw.Close() })
+			upstreamBody := &gwUsagePipeBody{PipeReader: pr, blocked: make(chan struct{}), closed: make(chan struct{})}
 			usageRepo := &gwUsageLogRepo{}
-			h := newGatewayConvertUsageHandler(t, usageRepo, &gwUsageUpstream{body: func() io.Reader { return pr }}, 0)
+			h := newGatewayConvertUsageHandler(t, usageRepo, &gwUsageUpstream{body: func() io.Reader { return upstreamBody }}, 0)
 			recorder := httptest.NewRecorder()
 			c := newGatewayConvertUsageContext(recorder, endpoint.path, endpoint.body)
 			ctx, cancel := context.WithCancel(c.Request.Context())
+			t.Cleanup(cancel)
 			c.Request = c.Request.WithContext(ctx)
 			done := make(chan struct{})
 			go func() {
@@ -218,11 +249,21 @@ func TestGatewayConvertCancelBeforeOutputBillsNothing(t *testing.T) {
 			}()
 			_, err := io.WriteString(pw, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_cancel\",\"usage\":{\"input_tokens\":100}}}\n\n")
 			require.NoError(t, err)
+			select {
+			case <-upstreamBody.blocked:
+			case <-time.After(3 * time.Second):
+				t.Fatal("upstream did not begin the next read")
+			}
 			cancel()
 			select {
 			case <-done:
 			case <-time.After(3 * time.Second):
 				t.Fatal("handler did not return after the client cancelled")
+			}
+			select {
+			case <-upstreamBody.closed:
+			case <-time.After(3 * time.Second):
+				t.Fatal("cancelled upstream body was not closed")
 			}
 			time.Sleep(100 * time.Millisecond)
 			require.Empty(t, usageRepo.recorded())

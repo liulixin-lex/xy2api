@@ -42,8 +42,12 @@ func TestOAuthMimicTemperatureByModelAndAPIVersion(t *testing.T) {
 		{"anthropic/claude-opus-5.5", false},
 		{"claude-sonnet-5-5", true},
 		{"claude-haiku-5-5", true},
-		{"claude-fable-5", true},
-		{"claude-fable-5-1", true},
+		{"claude-fable-5", false},
+		{"claude-fable-5-1", false},
+		{"claude-mythos-5", false},
+		{"claude-mythos-5-1", false},
+		{"anthropic/claude-fable-5.1", false},
+		{"bedrock/us.anthropic.claude-mythos-5-1-v1:0", false},
 	} {
 		for _, accountType := range []string{AccountTypeOAuth, AccountTypeSetupToken} {
 			for _, apiVersion := range []string{"", "2026-10-21", "2027-01-01"} {
@@ -81,7 +85,7 @@ func TestOAuthMimicTemperatureByModelAndAPIVersion(t *testing.T) {
 }
 
 func TestOAuthMimicPreservesClientSamplingParameters(t *testing.T) {
-	for _, model := range []string{"claude-opus-4-6", "claude-opus-4-7", "claude-opus-5-5"} {
+	for _, model := range []string{"claude-opus-4-6", "claude-opus-4-7", "claude-opus-5-5", "claude-fable-5-1", "claude-mythos-5-1"} {
 		for _, field := range []string{`"temperature":0.7`, `"top_p":0.9`, `"top_k":20`} {
 			t.Run(model+"/"+field, func(t *testing.T) {
 				body := []byte(fmt.Sprintf(`{"model":%q,%s,"messages":[]}`, model, field))

@@ -4259,6 +4259,22 @@
     {
       "path": "backend/internal/service/gateway_convert_stream_test.go",
       "value": "func TestGatewayConvertFailedAttemptLeavesNoTrace(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/gateway_claude_oauth_body.go",
+      "value": "!omitDefaultTemperature"
+    },
+    {
+      "path": "backend/internal/service/resilience_timeout_observe.go",
+      "value": "timeoutMetricModel(plan.Model())+\":\"+bucket"
+    },
+    {
+      "path": "backend/internal/service/resilience_timeout_observe.go",
+      "value": "return \"other\""
+    },
+    {
+      "path": "backend/internal/service/resilience_timeout_observe_test.go",
+      "value": "func TestTimeoutPlanMetricModelCardinality(t *testing.T) {"
     }
   ],
   "forbidden_module_paths": [
