@@ -133,3 +133,9 @@ Key 的 TTL 选择与供应商实际 usage 独立。用量接口新增 `anthropi
 Anthropic TTL 迁移 286 追加 Key 四态和 usage 两个可空观测列；已有 Key off、新建 inherit，无历史用量回填或索引。约束可能扫描 Key 表，ALTER 需要表锁，按低峰迁移；回退保留列但须明确恢复旧全局策略，详见 [TTL 迁移与回退](ANTHROPIC_CACHE_TTL.md#迁移与回退)。
 
 门槛 v3 的迁移 289（`289_usage_log_attempt_first_output.sql`）仅追加 `usage_logs.attempt_first_output_ms BIGINT NULL`，无 DEFAULT、无 NOT NULL、无索引、不回填。ALTER 会短暂取得 ACCESS EXCLUSIVE 锁，应在低峰避开长事务执行；迁移使用 `ADD COLUMN IF NOT EXISTS`，重复执行幂等。旧版本忽略该列，回退时可保留，无需删除数据或改写迁移校验和。新列从升级后开始采集；上线后 48 小时核对 OpenAI 成功流式请求的非空率（目标 ≥95%），以及它与判慢样本、端到端首字的差异。
+
+### Migration-owned Ent columns
+
+迁移 `292_usage_logs_budget_timing.sql` 新增 18 个可空观测列，完整名称和类型已列在 `backend/ent/schema/usage_log.go` 注释中。当前由 SQL 迁移及手写 repository 读写维护；批量 INSERT 有 85 个列值，另加一个合成的 `input_index`，这不是 Ent 字段数。
+
+尝试把这 18 列声明为 Ent 字段后，`go generate ./ent` 除新增字段外，还重写既有 create/update 路径并移动 migration schema 中现有外键和索引的列引用，未满足仅增量生成的条件。因此本次采用 schema 注释回退，保留现有生成代码，字段尚未纳入 Ent 模型。**Ent/Atlas diff 仍可能建议删除这些列，禁止直接应用此类 DROP；必须逐列对照迁移 292，保留已有列和数据。** 后续需单独审查生成器与现有生成代码差异后再补齐模型。回退本次代码不删除这些观测列，也不改写迁移或其校验和。

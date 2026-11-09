@@ -24,6 +24,7 @@
       "AGENTS.md",
       ".github/workflows/**",
       ".github/audit-exceptions.yml",
+      ".github/SECURITY.md",
       "CLA.md",
       "DEV_GUIDE.md",
       "README_JA.md",
@@ -4243,6 +4244,18 @@
     {
       "path": "backend/internal/service/gemini_messages_compat_service.go",
       "value": "attemptGuard.observeDispatch(attemptStart)"
+    },
+    {
+      "path": ".github/SECURITY.md",
+      "value": "https://github.com/liulixin-lex/xy2api/security/advisories/new"
+    },
+    {
+      "path": "backend/internal/service/resilience_fallback_group.go",
+      "value": "\"api_key_id\", apiKey.ID, \"reason\", reason)"
+    },
+    {
+      "path": "backend/ent/schema/usage_log.go",
+      "value": "diffs MUST NOT drop these migration-owned columns. See"
     }
   ],
   "forbidden_module_paths": [

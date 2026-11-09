@@ -194,6 +194,17 @@ func (UsageLog) Fields() []ent.Field {
 			Default(time.Now).
 			Immutable().
 			SchemaType(map[string]string{dialect.Postgres: "timestamptz"}),
+
+		// Migration 292 owns 18 nullable columns not yet modeled here:
+		// BIGINT: body_bytes, first_read_ms, body_eof_ms, body_receipt_repeat,
+		// pre_dispatch_ms, keepalive_commit_ms, wire_status, dispatch_count,
+		// min_dispatch_remaining_ms, final_deadline_ms, client_cancel_ms,
+		// budget_t0_unix_ms; TEXT: anchor_basis, client_family, cancel_stage,
+		// cdn_observed, budget_start_mode; BOOLEAN: anchor_eligible.
+		// Adding these fields rewrites existing generated create/update paths
+		// and migration index references, so generation is deferred. Ent/Atlas
+		// diffs MUST NOT drop these migration-owned columns. See
+		// docs/USAGE_METRICS.md, "Migration-owned Ent columns".
 	}
 }
 
