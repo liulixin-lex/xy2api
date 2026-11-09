@@ -804,6 +804,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 	}
 
 	attemptGuard := newGeminiAttempt(ctx, account, mappedModel, "generateContent", geminiReq, req.Stream, PreOutputProtocolAnthropic, startTime)
+	attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, req.Stream, attemptGuard.unique, attemptGuard.protocol)
 	defer func() {
 		retErr = attemptGuard.finish(c, s.rateLimitService, account, retErr)
 		attemptGuard.close()
@@ -828,9 +829,6 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 
 		attemptGuard.headerWait()
 		attemptStart := time.Now()
-		if attempt == 1 {
-			attemptStart = startTime
-		}
 		resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{
 			AccountID: account.ID, Model: originalModel, AttemptStart: attemptStart, Stream: req.Stream, BodyBytes: len(geminiReq),
 		})
@@ -1377,6 +1375,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	}
 
 	attemptGuard := newGeminiAttempt(ctx, account, mappedModel, action, body, stream, "gemini", startTime)
+	attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, stream, attemptGuard.unique, attemptGuard.protocol)
 	defer func() {
 		retErr = attemptGuard.finish(c, s.rateLimitService, account, retErr)
 		attemptGuard.close()
@@ -1400,9 +1399,6 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 
 		attemptGuard.headerWait()
 		attemptStart := time.Now()
-		if attempt == 1 {
-			attemptStart = startTime
-		}
 		resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{
 			AccountID: account.ID, Model: originalModel, AttemptStart: attemptStart, Stream: stream, BodyBytes: len(body),
 		})
@@ -2268,6 +2264,8 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 		return nil, errors.New("streaming not supported")
 	}
 
+	resumeGeminiPreOutputKeepalive(c, resp)
+
 	messageID := generateAnthropicMsgID()
 	messageStart := map[string]any{
 		"type": "message_start",
@@ -2929,6 +2927,7 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 		return nil, errors.New("streaming not supported")
 	}
 
+	resumeGeminiPreOutputKeepalive(c, resp)
 	upstreamBody, err := geminiNativeStreamReader(c, resp, s.cfg)
 	if err != nil {
 		return nil, err

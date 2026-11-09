@@ -2,7 +2,7 @@
 
 发版缺省 budget_start=arrival、budget_cut_attribution=observe。body_eof 只后移文本请求的截止 D，最长 arrival+290 s；spent、首试时长、≥60 s 账号级失败、计费、心跳及既有 planned 规则不变。C3 enforce 仅追加豁免未拿满账号档位的预算截断，详见 [设计](design.md)。
 
-C1 影响 EOF 明显晚于 arrival 的请求，包括成功的大上传；C3 也影响非上传的预算截断尝试。body_eof 下，无单次计时器或无法判断计时器的新尝试及等待沿用 arrival 上限 T0+base−2s；已安装计时器的尝试使用 D。G9 只作迟发观测与核验，不自动切回 arrival，也不是启用 body_eof 的硬前置门槛。
+C1 影响 EOF 明显晚于 arrival 的请求，包括成功的大上传；C3 也影响非上传的预算截断尝试。body_eof 下，无单次计时器或无法判断计时器的新尝试及等待沿用 arrival 截止 T0+base；新尝试准入保留 2 s 窗口；已安装计时器的尝试使用 D。G9 只作迟发观测与核验，不自动切回 arrival，也不是启用 body_eof 的硬前置门槛。
 
 配置回滚只影响新请求，在途保留快照，不承诺排空时限。已跳过的慢连击和 hold 样本不补记；已落库 applied 在新版读取窗口中继续排除。旧 0.5.11 读取方不认识 applied，版本回滚后历史事件会重新计为近期健康/share 软失败。新增可空列和迁移记录保留，没有 down-migration。旧版保存设置会丢弃新键；兼容性仍需测试库实测。
 

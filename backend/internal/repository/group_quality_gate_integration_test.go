@@ -156,6 +156,16 @@ func TestGroupQualityGateV3RepositoryObservations(t *testing.T) {
 	recent, err := loadGroupQualityErrorObservations(ctx, tx, []int64{accounts[0]}, now.Add(-time.Hour), now)
 	require.NoError(t, err)
 	require.Len(t, recent, 3)
+	// Malformed attribution must not abort recent-health reads. True alone
+	// remains excluded; false, null and legacy missing values remain failures.
+	for i, applied := range []any{true, false, "not-a-boolean", nil, 7, map[string]any{"bad": true}} {
+		ev := event("stream_failed", "TRANSIENT")
+		ev["budget_cut_applied"] = applied
+		addError(fmt.Sprintf("applied-%d-%d", suffix, i), []map[string]any{ev})
+	}
+	recent, err = loadGroupQualityErrorObservations(ctx, tx, []int64{accounts[0]}, now.Add(-time.Hour), now)
+	require.NoError(t, err)
+	require.Len(t, recent, 8)
 }
 
 func stringsContainsLabel(id, label string) bool {

@@ -30,18 +30,20 @@ func (*geminiStreamStallError) Error() string { return "Gemini stream stalled" }
 type geminiAttemptKey struct{}
 
 type geminiAttempt struct {
-	mu       sync.Mutex
-	ctx      context.Context
-	parent   context.Context
-	cancel   context.CancelCauseFunc
-	timer    *time.Timer
-	timeout  time.Duration
-	plan     resilience.TimeoutPlan
-	stall    time.Duration
-	output   bool
-	terminal bool
-	phase    string
-	protocol string
+	mu        sync.Mutex
+	ctx       context.Context
+	parent    context.Context
+	cancel    context.CancelCauseFunc
+	timer     *time.Timer
+	timeout   time.Duration
+	plan      resilience.TimeoutPlan
+	stall     time.Duration
+	output    bool
+	terminal  bool
+	phase     string
+	protocol  string
+	unique    bool
+	keepalive bool
 }
 
 func geminiTextRequest(model, action string, body []byte) bool {
@@ -77,6 +79,9 @@ func newGeminiAttempt(ctx context.Context, account *Account, model, action strin
 	g.headerWait()
 	if account == nil || account.Platform != PlatformGemini || !geminiTextRequest(model, action, body) {
 		return g
+	}
+	if stream && resilience.Current().KeepaliveOn() {
+		g.unique = Resilience().soleCandidate(ctx, resilience.StateFrom(ctx).GroupID(), account.ID)
 	}
 	if stream && resilience.Current().StallOn() {
 		g.stall = time.Duration(resilience.Current().Stall.TextStallSeconds) * time.Second
@@ -272,7 +277,7 @@ func (g *geminiAttempt) outputStarted() bool {
 
 func geminiStreamMayWrite(resp *http.Response) bool {
 	g := geminiAttemptOf(resp)
-	return g == nil || g.timeout <= 0 || g.outputStarted()
+	return g == nil || (g.timeout <= 0 && !g.keepalive) || g.outputStarted()
 }
 
 // Native passthrough stages every prelude byte, including metadata and SSE
