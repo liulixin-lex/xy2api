@@ -24,6 +24,8 @@ type RequestState struct {
 	bodyReceiptRepeat int64
 	bodyBytes         int64
 	budget            *Budget
+	budgetBaseSeconds int64
+	budgetBaseSet     bool
 	stateSwitch       int
 
 	// retryAdvice is shared by the handler and service terminal writers.
@@ -595,8 +597,17 @@ func (s *RequestState) SetBudget(b *Budget) {
 	if s == nil {
 		return
 	}
+	var baseSeconds int64
+	baseSet := false
+	if b != nil {
+		b.mu.Lock()
+		baseSeconds = int64(b.base / time.Second)
+		baseSet = true
+		b.mu.Unlock()
+	}
 	s.mu.Lock()
 	s.budget = b
+	s.budgetBaseSeconds, s.budgetBaseSet = baseSeconds, baseSet
 	s.mu.Unlock()
 }
 
@@ -608,6 +619,19 @@ func (s *RequestState) Budget() *Budget {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.budget
+}
+
+// BudgetBaseSecondsForTest returns the request's frozen NewBudget base.
+// It is intentionally a test-only read point: the value is not included in
+// TimingJSON or any production persistence payload.
+func (s *RequestState) BudgetBaseSecondsForTest() (int64, bool) {
+	if s == nil {
+		return 0, false
+	}
+	s.mu.Lock()
+	base, ok := s.budgetBaseSeconds, s.budgetBaseSet
+	s.mu.Unlock()
+	return base, ok
 }
 
 // NoteStickyOwner records the session owner seen at selection start.

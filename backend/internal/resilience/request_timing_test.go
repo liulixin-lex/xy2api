@@ -140,3 +140,46 @@ func TestRequestTimingLateNoTimerUsesConfiguredBase(t *testing.T) {
 		}
 	}
 }
+
+func TestBudgetBaseSecondsForTestFreezesAcrossHotReloadAndFinish(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	before := Defaults()
+	before.Budget.PreOutputBudgetSeconds = 60
+	completedBeforeReload := NewRequestState()
+	completedBeforeReload.SetBudget(NewBudget(context.Background(), &before, KindText, t0))
+	completedBeforeReload.FinishTiming()
+	base, ok := completedBeforeReload.BudgetBaseSecondsForTest()
+	require.True(t, ok)
+	require.EqualValues(t, 60, base)
+	require.NotContains(t, *completedBeforeReload.TimingJSON(), "budget_base_s")
+
+	inFlight := NewRequestState()
+	inFlight.SetBudget(NewBudget(context.Background(), &before, KindText, t0))
+
+	// A settings replacement affects only subsequently-created requests.
+	after := before
+	after.Budget.PreOutputBudgetSeconds = 90
+	startedAfterReload := NewRequestState()
+	startedAfterReload.SetBudget(NewBudget(context.Background(), &after, KindText, t0.Add(time.Second)))
+
+	base, ok = inFlight.BudgetBaseSecondsForTest()
+	require.True(t, ok)
+	require.EqualValues(t, 60, base)
+	inFlight.FinishTiming()
+	base, ok = inFlight.BudgetBaseSecondsForTest()
+	require.True(t, ok)
+	require.EqualValues(t, 60, base)
+
+	base, ok = startedAfterReload.BudgetBaseSecondsForTest()
+	require.True(t, ok)
+	require.EqualValues(t, 90, base)
+
+	var nilState *RequestState
+	_, ok = nilState.BudgetBaseSecondsForTest()
+	require.False(t, ok)
+	image := NewRequestState()
+	image.SetBudget(NewBudget(context.Background(), &after, KindImage, t0))
+	base, ok = image.BudgetBaseSecondsForTest()
+	require.True(t, ok)
+	require.EqualValues(t, 90, base)
+}
