@@ -1902,6 +1902,17 @@ func (s *OpenAIGatewayService) recordOpenAIStreamUpstreamError(
 		message = "OpenAI upstream response failed"
 	}
 	statusCode, category := openAIStreamFailureStatusAndCategory(kind, payload, message, validatedWrappedStatus...)
+	stateFamily := string(openAIStateRejection(payload, message).Family)
+	if kind == "terminal_rejection" {
+		ctx := context.Background()
+		if c != nil && c.Request != nil {
+			ctx = c.Request.Context()
+		}
+		// Classify first, then fail closed before either message or detail can
+		// enter persistent ops records.
+		payload = s.redactAgentIdentitySensitiveBody(ctx, account, payload)
+		message = string(s.redactAgentIdentitySensitiveBody(ctx, account, []byte(message)))
+	}
 	detail := ""
 	if len(payload) > 0 && s != nil && s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
 		maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
@@ -1928,7 +1939,7 @@ func (s *OpenAIGatewayService) recordOpenAIStreamUpstreamError(
 			event.AccountID = account.ID
 			event.AccountName = account.Name
 		}
-		event.StateFamily = string(openAIStateRejection(payload, message).Family)
+		event.StateFamily = stateFamily
 		event.ResilienceCategory = string(category)
 		appendOpsUpstreamError(c, event)
 	}

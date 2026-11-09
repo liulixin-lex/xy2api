@@ -901,9 +901,11 @@
           "guard.Store(false)",
           "}",
           "if rejectionScope := openAIRejectionScope(ctx); len(threadAvoid) > 0 && rejectionScope.preserveBinding && rejectionScope.selectionPreservesBinding != nil {",
-          "owner, _ := s.getStickySessionAccountID(ctx, groupID, sessionHash)",
+          "owner, ownerErr := s.getStickySessionAccountID(ctx, groupID, sessionHash)",
           "_, ownerAvoided := threadAvoid[owner]",
-          "rejectionScope.selectionPreservesBinding.Store(owner > 0 && ownerAvoided)",
+          "// A child-only avoidance must not replace an unknown shared owner.",
+          "// Keep affinity reads, but suppress this selection's binding writes.",
+          "rejectionScope.selectionPreservesBinding.Store(ownerErr != nil || owner <= 0 || ownerAvoided)",
           "}",
           "PreserveStickyBinding:   preserveGuardianParentBinding || preserveOpenAIRejectionBinding(ctx, sessionHash),"
         ]

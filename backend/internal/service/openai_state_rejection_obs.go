@@ -139,11 +139,10 @@ func (s *OpenAIGatewayService) finishOpenAIStreamStateRejection(ctx context.Cont
 		}
 	}
 	if !recorded {
-		// Use the same credential/assertion boundary as the HTTP error exits.
-		payload := s.redactAgentIdentitySensitiveBody(ctx, account, attempt.streakBody)
-		message = string(s.redactAgentIdentitySensitiveBody(ctx, account, []byte(message)))
+		// The recorder classifies private evidence before fail-closed redaction,
+		// so unavailable credentials cannot alter the semantic status/family.
 		s.recordOpenAIStreamUpstreamError(c, account, attempt.path == "passthrough_sse", "", "terminal_rejection",
-			payload, message, status)
+			attempt.streakBody, message, status)
 	}
 	var rejection *OpenAIRequestRejectionError
 	if !errors.As(*forwardErr, &rejection) {
