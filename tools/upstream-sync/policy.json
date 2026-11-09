@@ -4243,6 +4243,22 @@
     {
       "path": "backend/internal/service/gemini_messages_compat_service.go",
       "value": "attemptGuard.observeDispatch(attemptStart)"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_ops_redaction.go",
+      "value": "const minimumCredentialSubstringRunes = 8"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_ops_redaction.go",
+      "value": "redacted = replaceOpenAITerminalOpsCredentialValue(redacted, secret.text, secret.substring)"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_ops_sanitizer_parity_test.go",
+      "value": "func TestOpenAITerminalOpsShortCredentialBoundaries(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/gateway_convert_stream_test.go",
+      "value": "func TestGatewayConvertFailedAttemptLeavesNoTrace(t *testing.T) {"
     }
   ],
   "forbidden_module_paths": [

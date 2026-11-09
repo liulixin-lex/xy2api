@@ -62,3 +62,48 @@ func TestOpenAITerminalOpsRedactsKnownCredentialValuesForEveryAuthMode(t *testin
 		})
 	}
 }
+
+// Short credential values remain hidden as standalone values without erasing
+// the same letters inside ordinary diagnostic words. Eight runes is the cutoff.
+func TestOpenAITerminalOpsShortCredentialBoundaries(t *testing.T) {
+	for _, mode := range []string{AccountTypeAPIKey, AccountTypeOAuth, OpenAIAuthModeAgentIdentity} {
+		t.Run(mode, func(t *testing.T) {
+			for _, tc := range []struct {
+				name, key, secret, message, want string
+			}{
+				{"one_character", "api_key", "a", "a; a; validation data", "[redacted]; [redacted]; validation data"},
+				{"seven_characters", "api_key", "abcdefg", "xabcdefgy abcdefg", "xabcdefgy [redacted]"},
+				{"eight_characters", "api_key", "abcdefgh", "xabcdefghy abcdefgh", "x[redacted]y [redacted]"},
+				{"unicode_runes", "api_key", "短凭据", "短凭据值 短凭据", "短凭据值 [redacted]"},
+				{"escaped_short", "cookie", `a"b\c`, `xa"b\cy a"b\c`, `xa"b\cy [redacted]`},
+				{"escaped_threshold", "cookie", "a<b", "xa<by a<b", "xa<by [redacted]"},
+				{"sensitive_field", "api_key", "a", "Bearer a validation", "Bearer [redacted] validation"},
+				{"identity_runtime", "agent_runtime_id", "a", "a validation", "[redacted] validation"},
+				{"identity_task", "task_id", "a", "a validation", "[redacted] validation"},
+			} {
+				if (tc.key == "agent_runtime_id" || tc.key == "task_id") && mode != OpenAIAuthModeAgentIdentity {
+					continue
+				}
+				t.Run(tc.name, func(t *testing.T) {
+					account := terminalRejectionTestAccount(1, "relay-a.example")
+					account.Type = mode
+					account.Credentials = map[string]any{tc.key: tc.secret}
+					if mode == OpenAIAuthModeAgentIdentity {
+						account.Type = AccountTypeOAuth
+						account.Credentials[openAIAuthModeCredentialKey] = mode
+					}
+					raw, err := json.Marshal(map[string]string{"message": tc.message, "api_key": tc.secret})
+					require.NoError(t, err)
+					original := string(raw)
+					got := redactOpenAITerminalOpsSensitiveBody(t.Context(), nil, account, raw)
+					var decoded map[string]string
+					require.NoError(t, json.Unmarshal(got, &decoded), string(got))
+					t.Logf("message=%q api_key=%q", decoded["message"], decoded["api_key"])
+					require.Equal(t, tc.want, decoded["message"])
+					require.Equal(t, "[REDACTED]", decoded["api_key"])
+					require.Equal(t, original, string(raw), "classification and client input must stay pristine")
+				})
+			}
+		})
+	}
+}

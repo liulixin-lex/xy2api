@@ -784,18 +784,43 @@ func TestGatewayConvertFailedAttemptLeavesNoTrace(t *testing.T) {
 			first, err := path.run(svc, c, gwTestAccount(), gwStatic(strings.ReplaceAll(gwMsgStart, `"input_tokens":100`, `"input_tokens":999`)+gwOverloaded))
 			requireGWFailover(t, err)
 			require.Nil(t, first)
-			second := strings.ReplaceAll(gwMsgStart, "msg_A", "msg_B")
+			// A valid attempt identity can contain the failed attempt token count.
+			second := strings.ReplaceAll(gwMsgStart, "msg_A", "msg_B999")
 			result, err := path.run(svc, c, gwTestAccount(), gwStatic(second+gwTextStart+gwTextDelta+gwBlockStop+gwMsgDelta("end_turn")+gwMsgStop))
 			require.NoError(t, err)
 			require.Equal(t, 100, result.Usage.InputTokens)
-			body := w.Body()
-			require.NotContains(t, body, "999")
-			if path.name == "responses" {
-				require.Contains(t, body, "msg_B")
-				require.Equal(t, 1, strings.Count(body, "event: response.created\n"))
-			} else {
-				require.Equal(t, 1, strings.Count(body, `"role":"assistant"`))
+			require.Equal(t, 7, result.Usage.OutputTokens)
+			var openings, usageFrames int
+			for _, line := range strings.Split(w.Body(), "\n") {
+				payload, ok := strings.CutPrefix(line, "data: ")
+				if !ok || payload == "[DONE]" {
+					continue
+				}
+				require.True(t, gjson.Valid(payload), payload)
+				frame := gjson.Parse(payload)
+				id, usage := frame.Get("id"), frame.Get("usage")
+				inputField, outputField := "prompt_tokens", "completion_tokens"
+				if path.name == "responses" {
+					if frame.Get("type").String() == "response.created" {
+						openings++
+					}
+					id, usage = frame.Get("response.id"), frame.Get("response.usage")
+					inputField, outputField = "input_tokens", "output_tokens"
+				} else if frame.Get("choices.0.delta.role").String() == "assistant" {
+					openings++
+				}
+				if id.Exists() {
+					require.Equal(t, "msg_B999", id.String(), "only the successful attempt identity may be sent")
+				}
+				if usage.IsObject() {
+					usageFrames++
+					require.Equal(t, int64(100), usage.Get(inputField).Int(), usage.Raw)
+					require.Equal(t, int64(7), usage.Get(outputField).Int(), usage.Raw)
+					require.Equal(t, int64(107), usage.Get("total_tokens").Int(), usage.Raw)
+				}
 			}
+			require.Equal(t, 1, openings, "the failed attempt must not emit an opening")
+			require.Equal(t, 1, usageFrames, "only the successful attempt usage may be sent")
 		})
 	}
 }
