@@ -21,7 +21,12 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, forwardErr error) {
-	defer beginOpenAIStateRejectionAttempt(ctx, c, account, body)(&forwardErr)
+	ctx = WithOpenAITerminalRejectionScope(ctx, c, body)
+	finishStateRejection := beginOpenAIStateRejectionAttempt(ctx, c, account, body)
+	defer func() {
+		s.finishOpenAIStreamStateRejection(ctx, c, account, &forwardErr)
+		finishStateRejection(&forwardErr)
+	}()
 	// Run the same complete checks on original bytes without applying edits;
 	// requests that cannot obtain a raw plan cannot gain one after normalization.
 	collabRawBlocked, collabRawConflict := true, false
@@ -1116,15 +1121,16 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		attemptStart := resetOpenAIRepairAttempt(ctx, account, upstreamModel, reqStream, body, replayAttempt)
 		replayAttempt = true
 		firstOutputTimeout := time.Duration(0)
+		var firstOutputPlan resilience.TimeoutPlan
 		if reqStream && account.Platform == PlatformOpenAI {
-			firstOutputTimeout = s.openAIFirstOutputTimeoutFor(ctx, account.ID, originalModel, reasoningEffortValue, attemptStart)
+			firstOutputTimeout, firstOutputPlan = s.openAIFirstOutputPlanFor(ctx, account.ID, originalModel, reasoningEffortValue, attemptStart)
 		}
 		// Build upstream request
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 		var headerGuard *openAIFirstOutputHeaderGuard
 		if firstOutputTimeout > 0 {
 			upstreamCtx, headerGuard = newOpenAIFirstOutputHeaderGuard(
-				upstreamCtx, releaseUpstreamCtx, attemptStart.Add(firstOutputTimeout),
+				upstreamCtx, releaseUpstreamCtx, attemptStart.Add(firstOutputTimeout), firstOutputPlan,
 			)
 		}
 		upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, body, token, reqStream, promptCacheKey, isCodexCLI)
@@ -1162,7 +1168,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			return nil, s.newOpenAIFirstOutputTimeoutError(
 				ctx, c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
 				attemptStart, originalModel, reasoningEffortValue,
-				firstOutputTimeout, "response_headers", nil,
+				firstOutputTimeout, "response_headers", nil, headerGuard.plan,
 			)
 		}
 		if err != nil {

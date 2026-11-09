@@ -65,7 +65,7 @@ func TestPreludeReleaseEventSchemaFromStream(t *testing.T) {
 			state := resilience.NewRequestState()
 			c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
 			InstallDeliveryTracking(c, time.Now())
-			// An unknown event releases the opening sequence even without created.
+			// Unknown event types stay staged until the semantic delta releases the prefix.
 			payload := `{"type":"proxy.ready","sequence_number":987654,"gateway":{"private-child":"private-nested-value"},"items":["private-array-value"],"ready":true,"detail":"private-detail-value","optional":null}`
 			resp := &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("data: " + payload + "\n\n" + keepaliveStallDelta1))}
 			svc := compatStreamService(nil, 0, 0, 0)
@@ -86,8 +86,8 @@ func TestPreludeReleaseEventSchemaFromStream(t *testing.T) {
 				}
 			}
 			require.NotNil(t, failure)
-			require.Equal(t, "proxy.ready", failure["prelude_release_event"])
-			require.Equal(t, "detail:string,gateway:object,items:array,optional:null,ready:boolean,sequence_number:number,type:string", failure["prelude_release_event_keys"])
+			require.Equal(t, "response.output_text.delta", failure["prelude_release_event"])
+			require.Equal(t, "delta:string,item_id:string,type:string", failure["prelude_release_event_keys"])
 			require.Empty(t, failure["prelude_release_item_keys"])
 			for _, value := range []string{"987654", "private-child", "private-nested-value", "private-array-value", "private-detail-value"} {
 				require.NotContains(t, logs.String(), value)

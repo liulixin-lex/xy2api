@@ -279,7 +279,13 @@ func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 	timeout time.Duration,
 	phase string,
 	responseHeaders http.Header,
+	plans ...resilience.TimeoutPlan,
 ) *UpstreamFailoverError {
+	plan := resilience.TimeoutPlan{}
+	if len(plans) > 0 {
+		plan = plans[0]
+	}
+	noteTimeoutPlan(ctx, account, plan)
 	elapsed := time.Since(startTime)
 	logger.LegacyPrintf(
 		"service.openai_gateway",
@@ -298,22 +304,32 @@ func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 	if planned {
 		reason = PlannedFirstOutputTimeoutReason
 	}
+	fe := &UpstreamFailoverError{
+		BudgetCutPlan:   &plan,
+		StatusCode:      http.StatusGatewayTimeout,
+		ResponseBody:    []byte(`{"error":{"type":"first_output_timeout","message":"Upstream produced no output before the deadline"}}`),
+		ResponseHeaders: responseHeaders.Clone(), SafeToFailoverAfterWrite: true, Reason: reason,
+	}
 	var warm *bool
+	holdRecorded := false
 	bodyBytes := 0
 	if profile.AccountID == account.ID && !profile.AttemptStart.IsZero() {
 		warmValue := profile.Warm
 		warm = &warmValue
 		bodyBytes = profile.BodyBytes
-		if profile.Warm && profile.Stream {
+		if profile.Warm && profile.Stream && !BudgetCutApplied(fe) {
 			// Below the slow threshold, a timeout cannot tell fast from slow.
 			// Keep the canonical outbound model key used by successful samples.
 			if sample := time.Since(profile.AttemptStart); sample >= openAIAccountLatencySlowThreshold {
 				s.recordOpenAIAccountLatencySample(account, profile.Model, sample, time.Now())
+				holdRecorded = true
 			}
 		}
 	}
+	resilience.Count("latency_hold_sample", resilience.StateFrom(ctx).GroupID(), account.ID, fmt.Sprintf("applied=%t,recorded=%t", BudgetCutApplied(fe), holdRecorded))
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-		Warm: warm, BodyBytes: bodyBytes, Effort: reasoningEffort,
+		TimeoutDiagnostics: plan.Diagnostics(),
+		Warm:               warm, BodyBytes: bodyBytes, Effort: reasoningEffort,
 		AttemptElapsedMs: elapsed.Milliseconds(), TimeoutMs: timeout.Milliseconds(),
 		ProxyID:   proxyID,
 		ProxyName: proxyName,
@@ -326,15 +342,12 @@ func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 	if !planned && s.rateLimitService != nil {
 		s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
 	}
-	if planned {
+	if planned && !BudgetCutApplied(fe) {
 		s.recordOpenAIAccountModelSlowFailure(account, profile.Model, time.Now())
 	}
+	resilience.Count("slow_streak_decision", resilience.StateFrom(ctx).GroupID(), account.ID, fmt.Sprintf("planned=%t,applied=%t,advanced=%t", planned, BudgetCutApplied(fe), planned && !BudgetCutApplied(fe)))
 	resilience.Count(resilience.MetricFirstOutputTimeout, resilience.StateFrom(ctx).GroupID(), account.ID, phase)
-	return &UpstreamFailoverError{
-		StatusCode:      http.StatusGatewayTimeout,
-		ResponseBody:    []byte(`{"error":{"type":"first_output_timeout","message":"Upstream produced no output before the deadline"}}`),
-		ResponseHeaders: responseHeaders.Clone(), SafeToFailoverAfterWrite: true, Reason: reason,
-	}
+	return fe
 }
 
 type openAIFirstOutputHeaderGuard struct {
@@ -343,20 +356,28 @@ type openAIFirstOutputHeaderGuard struct {
 	timer   *time.Timer
 	fired   chan struct{}
 	once    sync.Once
+	plan    resilience.TimeoutPlan
 }
 
 func newOpenAIFirstOutputHeaderGuard(
 	ctx context.Context,
 	release context.CancelFunc,
 	deadline time.Time,
+	plans ...resilience.TimeoutPlan,
 ) (context.Context, *openAIFirstOutputHeaderGuard) {
 	guardedCtx, cancel := context.WithCancel(ctx)
 	guard := &openAIFirstOutputHeaderGuard{cancel: cancel, release: release, fired: make(chan struct{})}
+	if len(plans) > 0 {
+		guard.plan = plans[0]
+	}
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
 		remaining = time.Nanosecond
 	}
 	guard.timer = time.AfterFunc(remaining, func() {
+		if resilience.BudgetTraceEnabledForTest {
+			guard.plan.ObserveFiredForTest("openai_header")
+		}
 		close(guard.fired)
 		cancel()
 	})

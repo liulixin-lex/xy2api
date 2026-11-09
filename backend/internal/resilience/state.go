@@ -17,8 +17,16 @@ import (
 type RequestState struct {
 	mu sync.Mutex
 
-	budget      *Budget
-	stateSwitch int
+	timing            timingTrace
+	bodyFirstRead     time.Time
+	bodyReceived      time.Time
+	bodyReceiptBasis  string
+	bodyReceiptRepeat int64
+	bodyBytes         int64
+	budget            *Budget
+	budgetBaseSeconds int64
+	budgetBaseSet     bool
+	stateSwitch       int
 
 	// retryAdvice is shared by the handler and service terminal writers.
 	retryAdvice         RetryAdvice
@@ -589,8 +597,17 @@ func (s *RequestState) SetBudget(b *Budget) {
 	if s == nil {
 		return
 	}
+	var baseSeconds int64
+	baseSet := false
+	if b != nil {
+		b.mu.Lock()
+		baseSeconds = int64(b.base / time.Second)
+		baseSet = true
+		b.mu.Unlock()
+	}
 	s.mu.Lock()
 	s.budget = b
+	s.budgetBaseSeconds, s.budgetBaseSet = baseSeconds, baseSet
 	s.mu.Unlock()
 }
 

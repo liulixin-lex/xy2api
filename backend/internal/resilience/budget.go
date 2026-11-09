@@ -43,6 +43,14 @@ type Budget struct {
 	lastMark       time.Time
 	lastAttempt    time.Duration
 	deadline       time.Time
+	anchor         time.Time
+	bodyReceived   time.Time
+	attemptStarted bool
+	planSequence   uint64
+	base           time.Duration
+	budgetStart    string
+	attribution    string
+	clientFamily   string
 	sameAccountMax int
 	sameAccount    map[int64]int
 	capacitySwitch int
@@ -59,6 +67,11 @@ func NewBudget(ctx context.Context, s *Settings, kind RequestKind, now time.Time
 	}
 	b := &Budget{
 		kind:           kind,
+		anchor:         now,
+		base:           time.Duration(s.Budget.PreOutputBudgetSeconds) * time.Second,
+		budgetStart:    s.Budget.BudgetStart,
+		attribution:    s.Budget.BudgetCutAttribution,
+		clientFamily:   clientFamilyFromContext(ctx),
 		started:        now,
 		lastMark:       now,
 		maxAttempts:    s.Budget.MaxAttempts,
@@ -68,7 +81,8 @@ func NewBudget(ctx context.Context, s *Settings, kind RequestKind, now time.Time
 		ctx:            ctx,
 	}
 	if kind == KindText {
-		b.deadline = now.Add(time.Duration(s.Budget.PreOutputBudgetSeconds) * time.Second)
+		Count("budget_snapshot", 0, 0, "budget_start_mode="+b.budgetStart)
+		b.deadline = now.Add(min(b.base, PreOutputWallCap))
 	}
 	return b
 }
@@ -159,6 +173,9 @@ func (b *Budget) CanAttempt(now time.Time) bool {
 		b.exhausted = ExhaustedAttempts
 	case !b.deadline.IsZero() && b.deadline.Sub(now) < minAttemptWindow:
 		b.exhausted = ExhaustedDeadline
+		if BudgetTraceEnabledForTest {
+			b.traceDeadlineForTest("CanAttempt", now, 0)
+		}
 	default:
 		return true
 	}
@@ -265,6 +282,9 @@ func (b *Budget) ConsumeInPlaceRetry(accountID int64, sameAccount bool, now time
 	case !encryptedRepair && b.attempts+1 >= b.maxAttempts:
 		return false
 	case !b.deadline.IsZero() && b.deadline.Sub(now) < minAttemptWindow:
+		if BudgetTraceEnabledForTest {
+			b.traceDeadlineForTest("ConsumeInPlaceRetry", now, accountID)
+		}
 		return false
 	case sameAccount && b.sameAccount[accountID] >= b.sameAccountMax:
 		return false
@@ -296,13 +316,18 @@ func (b *Budget) ClampWait(d time.Duration, now time.Time) time.Duration {
 	if b == nil || d <= 0 {
 		return d
 	}
+	raw := d
 	if b.retryAfterCap > 0 && d > b.retryAfterCap {
 		d = b.retryAfterCap
 	}
 	if rem := b.Remaining(now); rem > 0 && d > rem-minAttemptWindow {
+		capped := d
 		d = rem - minAttemptWindow
 		if d < 0 {
 			d = 0
+		}
+		if BudgetTraceEnabledForTest && d < capped {
+			b.traceClampForTest(now, raw, capped, d, rem)
 		}
 	}
 	return d
@@ -315,20 +340,7 @@ func (b *Budget) ClampWait(d time.Duration, now time.Time) time.Duration {
 // lastCandidate removes the tier timeout so the last usable account only
 // answers to the deadline (design §7.4). Zero means no per-attempt timeout.
 func (b *Budget) AttemptTimeout(tier time.Duration, lastCandidate bool, now time.Time) time.Duration {
-	if b == nil {
-		return tier
-	}
-	rem := b.Remaining(now)
-	if lastCandidate {
-		return rem
-	}
-	if spent := now.Sub(b.started); tier > 0 && spent > tier {
-		tier = spent
-	}
-	if rem > 0 && (tier <= 0 || rem < tier) {
-		return rem
-	}
-	return tier
+	return b.PlanAttemptTimeout(tier, lastCandidate, now).Effective()
 }
 
 // FirstOutputTier returns the first-output timeout tier for an OpenAI request

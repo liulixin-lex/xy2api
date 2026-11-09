@@ -98,6 +98,7 @@ type OpsErrorLogDetail struct {
 	TimeToFirstTokenMs    *int64  `json:"time_to_first_token_ms"`
 	EndToEndFirstOutputMs *int64  `json:"-"`
 	RecoveryOutcome       *string `json:"-"`
+	ResilienceTiming      *string `json:"resilience_timing,omitempty"`
 
 	// vNext metric semantics
 	IsBusinessLimited bool `json:"is_business_limited"`

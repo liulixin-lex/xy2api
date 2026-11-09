@@ -66,6 +66,7 @@ func (k *openAICompactSSEKeepalive) noteCommitted() {
 	if k.protocol == "" {
 		return
 	}
+	resilience.StateFrom(k.ctx).NoteKeepaliveCommit(time.Now())
 	resilience.Count(resilience.MetricKeepaliveCommitted, k.metricGroup, 0, k.protocol)
 	slog.Info("resilience.keepalive_committed", append(resilience.PreOutputEventFields(k.ctx), "group_id", k.metricGroup, "protocol", k.protocol, "edge", k.edge)...)
 }

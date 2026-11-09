@@ -185,8 +185,11 @@ func TestGeminiAttemptStreamContentAndStall(t *testing.T) {
 	account := &Account{ID: 1, Platform: PlatformGemini}
 	body := []byte(geminiTransportTestNativeBody)
 	ctx := geminiAttemptTestContext(context.Background(), 0)
-	g := newGeminiAttempt(ctx, account, "gemini-2.5-flash", "streamGenerateContent", body, true, "gemini", time.Now())
+	started := time.Now()
+	resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, Model: "gemini-2.5-flash", AttemptStart: started})
+	g := newGeminiAttempt(ctx, account, "gemini-2.5-flash", "streamGenerateContent", body, true, "gemini", started)
 	defer g.close()
+	require.Equal(t, started, g.plan.Start())
 	require.Equal(t, 60*time.Second, g.timeout)
 	require.Equal(t, 120*time.Second, g.stall)
 	resp := &http.Response{Body: io.NopCloser(strings.NewReader(""))}
@@ -244,4 +247,29 @@ func TestGeminiAttemptStreamContentAndStall(t *testing.T) {
 	require.Zero(t, output.pending.Len())
 	require.Nil(t, overflow.timer, "committed prelude disarms the first-output deadline")
 	require.NoError(t, overflow.ctx.Err())
+}
+
+func TestGeminiAttemptTimerOwnsInitialProfileAcrossInPlaceRetry(t *testing.T) {
+	withResilienceSettings(t, nil)
+	account := &Account{ID: 1, Platform: PlatformGemini}
+	body := []byte(geminiTransportTestNativeBody)
+	st := resilience.NewRequestState()
+	ctx := resilience.WithRequestState(context.Background(), st)
+	attemptStart := time.Now()
+	budgetStart := attemptStart.Add(-239 * time.Second)
+	st.SetBudget(resilience.NewBudget(ctx, resilience.Current(), resilience.KindText, budgetStart))
+	g := newGeminiAttempt(ctx, account, "gemini-2.5-flash", "streamGenerateContent", body, true, "gemini", attemptStart)
+	defer g.close()
+	require.NotNil(t, g.timer, "the first attempt owns the one Gemini timeout")
+	require.Equal(t, attemptStart, g.plan.Start())
+	require.Equal(t, attemptStart, st.AttemptProfile().AttemptStart)
+
+	// An in-place replay updates the active profile but reuses the original
+	// guard. Its new start must not inherit the first attempt's timer ownership.
+	retryStart := attemptStart.Add(time.Second)
+	st.SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, Model: "gemini-2.5-flash", AttemptStart: retryStart, Stream: true, BodyBytes: len(body)})
+	require.Equal(t, attemptStart, g.plan.Start(), "the guard retains its immutable plan")
+	timing := st.Timing()
+	require.EqualValues(t, 2, *timing.LateAttemptCount)
+	require.EqualValues(t, 1, *timing.LateAttemptNoTimerCount)
 }

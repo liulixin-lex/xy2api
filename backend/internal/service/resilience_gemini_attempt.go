@@ -34,6 +34,7 @@ type geminiAttempt struct {
 	cancel   context.CancelCauseFunc
 	timer    *time.Timer
 	timeout  time.Duration
+	plan     resilience.TimeoutPlan
 	stall    time.Duration
 	output   bool
 	terminal bool
@@ -60,6 +61,14 @@ func geminiTextRequest(model, action string, body []byte) bool {
 // One guard spans the header wait, all in-place retries and all six body
 // collection paths. Only replay-safe nonstream bodies get an attempt cutoff.
 func newGeminiAttempt(ctx context.Context, account *Account, model, action string, body []byte, stream bool, protocol string, started time.Time) *geminiAttempt {
+	if started.IsZero() {
+		started = time.Now()
+	}
+	if account != nil {
+		resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{
+			AccountID: account.ID, Model: model, AttemptStart: started, Stream: stream, BodyBytes: len(body),
+		})
+	}
 	guarded, cancel := context.WithCancelCause(ctx)
 	g := &geminiAttempt{ctx: guarded, parent: ctx, cancel: cancel, protocol: protocol}
 	g.headerWait()
@@ -73,7 +82,8 @@ func newGeminiAttempt(ctx context.Context, account *Account, model, action strin
 		last := resilienceLastCandidate(ctx, account.ID)
 		if !last {
 			tier := time.Duration(resilience.Current().Budget.GeminiFirstEventTimeoutSeconds) * time.Second
-			g.timeout = b.AttemptTimeout(tier, last, started)
+			g.plan = resilience.StateFrom(ctx).PlanAttemptTimeout(tier, last, started)
+			g.timeout = g.plan.Effective()
 			if g.timeout > 0 {
 				g.mu.Lock()
 				g.resetTimer(g.timeout-time.Since(started), &geminiAttemptDeadlineError{})
@@ -96,6 +106,11 @@ func (g *geminiAttempt) resetTimer(d time.Duration, cause error) {
 		g.mu.Lock()
 		defer g.mu.Unlock()
 		if g.timer == timer {
+			if resilience.BudgetTraceEnabledForTest {
+				if _, deadline := cause.(*geminiAttemptDeadlineError); deadline {
+					g.plan.ObserveFiredForTest("gemini_attempt_" + g.phase)
+				}
+			}
 			g.cancel(cause)
 		}
 	})
@@ -305,7 +320,7 @@ func (g *geminiAttempt) finish(c *gin.Context, rl *RateLimitService, account *Ac
 	var stall *geminiStreamStallError
 	switch cause := context.Cause(g.ctx); {
 	case errors.As(cause, &deadline) && !g.outputStarted() && OpenAICompactKeepaliveAdjustedWrittenSize(c) <= 0:
-		fe := (&firstEventGuard{timeout: g.timeout}).failoverError(c, account, g.phase)
+		fe := (&firstEventGuard{timeout: g.timeout, plan: g.plan}).failoverError(c, account, g.phase)
 		fe.cause = cause
 		rl.ApplyResilienceOutcome(g.parent, account, resilience.Result{Category: resilience.CategoryFirstOutputTimeout}, "Gemini attempt deadline")
 		return fe
