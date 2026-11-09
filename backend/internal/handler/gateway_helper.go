@@ -460,7 +460,7 @@ func (h *ConcurrencyHelper) waitForSlotWithPingTimeout(c *gin.Context, slotType 
 
 		case <-pingCh:
 			// Send ping to keep connection alive
-			if handled, committed, err := service.WriteSlotWaitHeartbeat(c, []byte(pingFormat), h.pingInterval); handled {
+			if handled, committed, err := service.WriteSlotWaitHeartbeat(c, []byte(pingFormat), h.pingInterval, "slot_wait"); handled {
 				if err != nil {
 					return nil, err
 				}

@@ -1274,6 +1274,9 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				streamFailoverErr = failoverErr
 				return true
 			}
+			if resilience.ResponsesEventOutputDisposition(event.Type, []byte(payload)).Staged {
+				resilience.StateFrom(c.Request.Context()).NotePreludeStaged(startTime)
+			}
 			deferredOpenAIAnthropicEvents(&event, state, true)
 			return false
 		}

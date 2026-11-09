@@ -9,15 +9,16 @@ import (
 func TestPreludeTraceTracksOneAttempt(t *testing.T) {
 	s := NewRequestState()
 	created := time.Unix(100, 0)
+	s.NotePreludeStaged(created)
 	s.NotePreludeCreated(created)
 	s.NotePreludeReleased("response.output_text.delta", created.Add(17*time.Millisecond), PreludeReleaseSchema{EventKeys: "delta:string,type:string", ItemType: "reasoning", ItemKeys: "type", HasEncrypted: true})
 	s.NotePreludeReleased("response.completed", created.Add(time.Second), PreludeReleaseSchema{})
 	got := s.PreludeTrace()
-	if got.ReleaseEvent != "response.output_text.delta" || got.ReleaseAfterCreatedMS != 17 || got.EventKeys != "delta:string,type:string" || got.ItemType != "reasoning" || got.ItemKeys != "type" || !got.HasEncrypted {
+	if !got.StagedAt.Equal(created) || got.ReleaseEvent != "response.output_text.delta" || got.ReleaseAfterCreatedMS != 17 || got.EventKeys != "delta:string,type:string" || got.ItemType != "reasoning" || got.ItemKeys != "type" || !got.HasEncrypted {
 		t.Fatalf("first release must freeze: %+v", got)
 	}
 	s.NotePreludeCreated(time.Time{})
-	if got = s.PreludeTrace(); got.ReleaseEvent != "" || got.ReleaseAfterCreatedMS != 0 || got.PreludeReleaseSchema != (PreludeReleaseSchema{}) {
+	if got = s.PreludeTrace(); !got.StagedAt.IsZero() || got.ReleaseEvent != "" || got.ReleaseAfterCreatedMS != 0 || got.PreludeReleaseSchema != (PreludeReleaseSchema{}) {
 		t.Fatalf("new attempt leaks old release: %+v", got)
 	}
 	s.NotePreludeReleased("response.function_call_arguments.delta", created, PreludeReleaseSchema{})

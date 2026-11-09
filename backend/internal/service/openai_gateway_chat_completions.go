@@ -1041,6 +1041,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				streamFailoverErr = failoverErr
 				return true
 			}
+			if resilience.ResponsesEventOutputDisposition(event.Type, []byte(payload)).Staged {
+				resilience.StateFrom(c.Request.Context()).NotePreludeStaged(startTime)
+			}
 			deferredOpenAIChatChunks(&event, state, true)
 			return false
 		}

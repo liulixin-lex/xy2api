@@ -136,6 +136,8 @@ Chat/Messages 兼容转换只在首次提交前暂存解码后的开场与空白
 
 G2b B2 在原生、直通及 Responses→Chat/Messages 兼容转换服务路径中，以去除首尾空白后的非空载荷 `type` 为有效类型；存在该类型时，SSE `event:` 行不参与此分类，无非空载荷类型时才回退到 `event:`。匹配区分大小写，命名空间是有效类型的精确前缀 `response.`、`codex.`，已知集合内的类型跳过新规则。未知事件须是合法 JSON 对象，根及嵌套对象均无重复键；根的 `type`、`id`、`response_id`、`item_id` 若提供必须为字符串，`sequence_number` 若提供必须为非负整数。其余字段的 null、数字、布尔及递归元数据数组／对象可暂存；协议命名空间只接受空额外字符串，其他命名空间也接受非空、纯空白及嵌套字符串。额外字段最多 32 层，结构歧义、畸形、超深对象可见。此规则不受 `native_prelude_whitelist` 控制，兼容转换是否暂存仍受 `prelude_staging` 控制。
 
+首输出截止的既有 `OpenAI first output timeout` 日志带 `staged=true/false`：只有本次尝试实际暂存过 G2b 未知元数据事件时才为 true，普通开场或尚未收到响应头时为 false；该标记不改变截止、计费或换号。 Responses 透传在首输出前按完整 SSE 事件拼接多条 `data:` 行后判定 G2b 元数据，按原始行暂存并在后续输出时顺序回放；分行 JSON 不会再被单行误判提前提交。事件组装和已有暂存合计受 8 MiB 上限约束。
+
 例如 SSE 声明为 `response.output_text.delta`，载荷却是 `{"type":"relay.ready","delta":"synthetic"}`，服务路径按外部未知类型 `relay.ready` 处理：通过上述结构检查后，输出前暂存，不解除首输出截止；后续可见事件或成功终态到达时按原序释放，输出前失败时随该次尝试一起丢弃并沿既有策略换号。载荷类型优先是 0.5.11 已有语义，B2 改变的是此类未知事件由可见提交变为暂存；OpenAI SDK 与 Codex 同样按载荷 `type` 分派并忽略这些外部未知类型，因此在该客户端前提下，不会丢失、重复或损坏客户端可呈现的内容，失败时可多一次换号机会。共享分类函数在调用方直接传入原始声明时仍有类型一致性检查（含 `response.metadata` → `codex.response.metadata` 别名）；这不是服务层对“SSE 声明不一致即可见”的保证。
 
 
@@ -576,7 +578,7 @@ info 级，只写应用标准输出（量大，明细已有计数或未送达表
 
 - `blank_placeholder_staged`（完整事件名 `resilience.blank_placeholder_staged`）：原生/透传 Responses 每次尝试实际暂存过空白占位后只记一条，含 `account_id`，不记录占位正文；
 - `blank_placeholder_outcome`（完整事件名 `resilience.blank_placeholder_outcome`）：Responses handler 结束时，仅请求内曾实际暂存空白才记一条。`placeholder_timeouts` 只累计暂存过空白的尝试所发生的首输出超时，普通静默尝试不计；`final_outcome` 读取现有请求恢复结果，`budget_cause` 读取预算的耗尽原因（未耗尽为空）。用于关联下一跳结果和有占位请求最终预算耗尽的次数，不改写恢复结果；
-- `keepalive_committed`（含 `group_id`、`protocol`、`edge`）；
+- `keepalive_committed`（含 `group_id`、`protocol`、`edge`、`source`）；`source` 为 `request`（请求及流内心跳）、`slot_wait`（槽位等待）或 `queue_wait`（用户消息队列等待），表示首次提交响应头的来源；用户消息队列串行等待及 throttle 延迟的 ping 与请求心跳共用写锁和间隔协调。
 - `client_gone_skip`（完整事件名 `resilience.client_gone_skip`，0.5.11）：客户端已离开时，网关跳过号失败标记、门槛软失败、输出后计数与冷却、会话改绑（含 P1-B）以及流超时计数，只记这一条，用于统计排空期间被跳过的上游故障。stream_timeout 的 client_gone_skip 只在处置开启（且 action 不为 none）时记录。含通用请求字段、`group_id`、`account_id`、`platform`、`reason`、`category`；`reason` 为输出后失败的原因（`stream_read_error`、`missing_terminal`、`stream_failed` 等）、`stall` 或 `stream_timeout`，`category` 为本应记入的类别（`stream_timeout` 为空）。同一次停滞可能同时出现 `stall` 和 `stream_timeout` 两条，统计时按 `reason` 过滤或按请求去重；
 - `openai.sticky_bypass`：保留原绑定的临时放弃，字段与 Warn 事件相同；仅写应用标准输出。
 - `unclassified`：只按状态码归类的上游 4xx 文案采样（脱敏、截断，每分钟约 10 条），发现新的余额文案时加入 `failure.balance_keywords_extra`；

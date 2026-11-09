@@ -130,13 +130,13 @@ func StopGeminiUniqueCandidateKeepalive(c *gin.Context) {
 
 // noteCommitted counts a pre-output heartbeat that committed the response
 // (called with k.mu held).
-func (k *openAICompactSSEKeepalive) noteCommitted() {
+func (k *openAICompactSSEKeepalive) noteCommitted(source string) {
 	if k.protocol == "" {
 		return
 	}
 	resilience.StateFrom(k.ctx).NoteKeepaliveCommit(time.Now())
 	resilience.Count(resilience.MetricKeepaliveCommitted, k.metricGroup, 0, k.protocol)
-	slog.Info("resilience.keepalive_committed", append(resilience.PreOutputEventFields(k.ctx), "group_id", k.metricGroup, "protocol", k.protocol, "edge", k.edge)...)
+	slog.Info("resilience.keepalive_committed", append(resilience.PreOutputEventFields(k.ctx), "group_id", k.metricGroup, "protocol", k.protocol, "edge", k.edge, "source", source)...)
 }
 
 // PreOutputKeepaliveCommitted reports, without stopping it, whether the

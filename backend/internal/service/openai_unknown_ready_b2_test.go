@@ -18,6 +18,8 @@ const g2b355SyntheticFrame = "event: sub2api.gateway_ready\ndata: {\"type\":\"su
 
 func TestG2BB2GatewayReadyAttemptBoundary(t *testing.T) {
 	withResilienceSettings(t, nil)
+	logs, restoreLogs := captureStructuredLog(t)
+	defer restoreLogs()
 	for _, path := range []struct {
 		name        string
 		passthrough bool
@@ -57,6 +59,7 @@ func TestG2BB2GatewayReadyAttemptBoundary(t *testing.T) {
 			require.Zero(t, state.DeliveredBytes())
 			require.True(t, state.FirstOutput().IsZero())
 			require.True(t, state.SemanticOutputAt().IsZero())
+			require.Equal(t, start, state.PreludeTrace().StagedAt)
 			require.Empty(t, state.PreludeTrace().ReleaseEvent)
 
 			account.ID++
@@ -72,6 +75,7 @@ func TestG2BB2GatewayReadyAttemptBoundary(t *testing.T) {
 			t.Log("recovery: success=true failed_ready_leaked=false real_output=true")
 		})
 	}
+	require.True(t, logs.ContainsMessageAtLevel("staged=true", "info"))
 }
 
 func TestG2BB2ProtocolStringsRemainVisible(t *testing.T) {

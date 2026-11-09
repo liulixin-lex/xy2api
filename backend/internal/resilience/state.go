@@ -155,6 +155,7 @@ type PostOutputFailureFact struct {
 // with the stream state machine so attempt resets follow stream staging.
 type preludeTrace struct {
 	createdAt             time.Time
+	stagedAt              time.Time
 	releaseEvent          string
 	releaseAfterCreatedMS int64
 	schema                PreludeReleaseSchema
