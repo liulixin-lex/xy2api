@@ -124,6 +124,10 @@ func numericJSON(key string) string {
 	return `CASE WHEN jsonb_typeof(ev->'` + key + `')='number' THEN CASE WHEN (ev->>'` + key + `')::numeric BETWEEN 0 AND 9223372036854775807 THEN trunc((ev->>'` + key + `')::numeric)::bigint ELSE NULL END ELSE NULL END`
 }
 
+func booleanJSON(key string) string {
+	return `CASE WHEN jsonb_typeof(ev->'` + key + `')='boolean' THEN (ev->>'` + key + `')::boolean ELSE NULL END`
+}
+
 func enumJSON(key string, values ...string) string {
 	quoted := make([]string, len(values))
 	for i, v := range values {
@@ -160,6 +164,7 @@ func (q *readerQuery) attempts(ctx context.Context, tx *sql.Tx) error {
 	stmt := `SELECT e.id AS error_row_id,e.created_at,e.request_id,e.client_request_id,e.group_id,ordinal AS attempt_index,
  ` + numericJSON("at_unix_ms") + ` AS at_unix_ms,` + numericJSON("account_id") + ` AS account_id,` + numericJSON("upstream_status_code") + ` AS upstream_status_code,
  ` + numericJSON("attempt_elapsed_ms") + ` AS attempt_elapsed_ms,` + numericJSON("timeout_ms") + ` AS timeout_ms,` + numericJSON("dropped_earlier_attempts") + ` AS dropped_earlier_attempts,
+ ` + booleanJSON("would_budget_cut") + ` AS would_budget_cut,` + booleanJSON("budget_cut_applied") + ` AS budget_cut_applied,
  ` + enumJSON("platform", "openai", "anthropic", "gemini", "antigravity", "grok", "kiro", "kimi", "glm", "deepseek") + ` AS platform,
  ` + enumJSON("kind", "http_error", "request_error", "retry_exhausted", "failover", "first_output_timeout", "stream_failed", "stream_error") + ` AS kind,
  ` + enumJSON("stage", "account_auth", "inference", "upload", "first_output", "stream") + ` AS stage,

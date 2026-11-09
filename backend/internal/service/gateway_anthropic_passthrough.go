@@ -118,8 +118,9 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 			input.Body = input.Parsed.Body.Bytes()
 		}
 
+		attemptStart := time.Now()
 		resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{
-			AccountID: account.ID, Model: openAIAccountModelTransientModel(input.RequestModel), AttemptStart: time.Now(),
+			AccountID: account.ID, Model: openAIAccountModelTransientModel(input.RequestModel), AttemptStart: attemptStart,
 			Warm: anthropicAttemptWarmFromContext(ctx) && attempt == 1, Stream: input.RequestStream, BodyBytes: len(wireBody),
 		})
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
@@ -639,6 +640,7 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 			if ctx.Err() != nil {
 				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, ctx.Err()
 			}
+			stage.noteTimeout(c)
 			return nil, anthropicPreOutputFailover(resp, "Upstream produced no semantic output before the request deadline")
 		case <-stage.cancel:
 			return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, ctx.Err()

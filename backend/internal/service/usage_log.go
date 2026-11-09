@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"strings"
 	"time"
 )
@@ -102,6 +103,7 @@ func ApplyLegacyRequestFields(requestType RequestType, fallbackStream bool, fall
 }
 
 type UsageLog struct {
+	resilience.RequestTiming
 	AnthropicCacheTTLPolicy  *string
 	AnthropicCacheTTLApplied *bool
 	ID                       int64

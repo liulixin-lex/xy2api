@@ -388,6 +388,10 @@ func loadQualityErrorObservationsBounded(ctx context.Context, tx interface {
 	if includeAll {
 		identity = "CASE WHEN COALESCE(e.client_request_id,'') <> '' THEN 'client:' || e.client_request_id WHEN COALESCE(e.request_id,'') <> '' THEN 'local:' || e.request_id ELSE 'row:' || e.id::text || ':' || ordinal::text END"
 	}
+	filterApplied := ""
+	if !includeAll {
+		filterApplied = " AND NOT COALESCE((ev->>'budget_cut_applied')::boolean,false)"
+	}
 	limitClause := ""
 	args := []any{pq.Array(accountIDs), from.UTC(), to.UTC()}
 	if maxRows > 0 {
@@ -402,8 +406,8 @@ func loadQualityErrorObservationsBounded(ctx context.Context, tx interface {
 		       COALESCE(ev->>'resilience_category',''), COALESCE(ev->>'message','')
 		FROM ops_error_logs e CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(e.upstream_errors)='array' THEN e.upstream_errors ELSE '[]'::jsonb END) WITH ORDINALITY AS events(ev, ordinal)
 		WHERE e.created_at >= $2 AND e.created_at < $3 AND e.upstream_errors IS NOT NULL
-		  AND jsonb_typeof(ev->'account_id')='number' AND (ev->>'account_id')::bigint = ANY($1)
-			ORDER BY %s, (ev->>'account_id')::bigint, COALESCE((ev->>'at_unix_ms')::bigint, (EXTRACT(EPOCH FROM e.created_at)*1000)::bigint), e.id%s`, identity, identity, limitClause), args...)
+		  AND jsonb_typeof(ev->'account_id')='number' AND (ev->>'account_id')::bigint = ANY($1)%s
+			ORDER BY %s, (ev->>'account_id')::bigint, COALESCE((ev->>'at_unix_ms')::bigint, (EXTRACT(EPOCH FROM e.created_at)*1000)::bigint), e.id%s`, identity, filterApplied, identity, limitClause), args...)
 	if err != nil {
 		return nil, err
 	}

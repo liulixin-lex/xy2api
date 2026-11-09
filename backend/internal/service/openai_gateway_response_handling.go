@@ -82,8 +82,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	// xy2api resilience: upstream headers arrived (design §8.2 stages).
 	resilience.StateFrom(ctx).SetStage(resilience.StagePreOutput)
 	firstOutputTimeout := time.Duration(0)
+	var firstOutputPlan resilience.TimeoutPlan
 	if account != nil && account.Platform == PlatformOpenAI {
-		firstOutputTimeout = s.openAIFirstOutputTimeoutFor(ctx, account.ID, originalModel, reasoningEffort, startTime)
+		firstOutputTimeout, firstOutputPlan = s.openAIFirstOutputPlanFor(ctx, account.ID, originalModel, reasoningEffort, startTime)
 	}
 	guardFirstOutput := firstOutputTimeout > 0
 	stageFirstOutput := account != nil && account.Platform == PlatformOpenAI
@@ -680,7 +681,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 						return
 					}
 				}
-				captureOpenAIStateRejection(c, account, dataBytes, failedMessage, "native_sse", outputStarted, nil)
+				captureOpenAIStateRejection(c, account, dataBytes, failedMessage, "native_sse", outputStarted, nil, wrappedStatus)
 				if a := openAICollaborationAttempt(c); a != nil && a.applied && !outputStarted && resp.StatusCode == http.StatusOK {
 					status := openAIStreamFailedEventSemanticStatus(dataBytes, failedMessage, wrappedStatus)
 					a.clientRejected = a.clientRejected || (status >= 400 && status < 500 && status != 429 && classifyUpstreamHTTP(status, nil, dataBytes, failedMessage).Category == resilience.CategoryClientError)
@@ -1126,6 +1127,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				_ = resp.Body.Close()
 				return finalizeStream()
 			}
+			if resilience.BudgetTraceEnabledForTest {
+				firstOutputPlan.ObserveFiredForTest("openai_semantic_output")
+			}
 			_ = resp.Body.Close()
 			for ev := range events {
 				markEventProcessed(ev)
@@ -1134,7 +1138,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			return resultWithUsage(), s.newOpenAIFirstOutputTimeoutError(
 				ctx, c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
 				startTime, originalModel, reasoningEffort,
-				firstOutputTimeout, "semantic_output", resp.Header,
+				firstOutputTimeout, "semantic_output", resp.Header, firstOutputPlan,
 			)
 
 		case <-keepaliveCh:

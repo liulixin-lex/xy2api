@@ -877,6 +877,38 @@
           "reason = \"owner_failed_in_request\"",
           "}"
         ]
+      },
+      {
+        "block": "encrypted-rejection-execution-scope-0512",
+        "note": "0.5.12 E: merge thread-scoped terminal rejection avoidance before parent affinity and regular selection; keep shared parent binding intact. Covered by TestOpenAITerminalRejectionScopeKeepsParentAffinityAvailable.",
+        "removed": [],
+        "added": [
+          "if scope := openAIRejectionScope(ctx).session; scope != \"\" && scope != sessionHash {",
+          "threadAvoid := s.resilience.sessionAvoid(ctx, groupID, scope)",
+          "avoided = mergeExcluded(avoided, threadAvoid)",
+          "}",
+          "resilience.StateFrom(ctx).SetAvoided(avoided)"
+        ]
+      },
+      {
+        "block": "encrypted-rejection-review-fixes-0512",
+        "note": "S review B-P2-1: only suppress binding writes when child-scope avoidance excludes the shared owner; preserve affinity reads and normal HTTP/WS child placement. Regression: TestOpenAITerminalRejectionShareChildAffinityWithoutAvoidance and WS equivalent.",
+        "removed": [
+          "PreserveStickyBinding:   preserveGuardianParentBinding,"
+        ],
+        "added": [
+          "if guard := openAIRejectionScope(ctx).selectionPreservesBinding; guard != nil {",
+          "guard.Store(false)",
+          "}",
+          "if rejectionScope := openAIRejectionScope(ctx); len(threadAvoid) > 0 && rejectionScope.preserveBinding && rejectionScope.selectionPreservesBinding != nil {",
+          "owner, ownerErr := s.getStickySessionAccountID(ctx, groupID, sessionHash)",
+          "_, ownerAvoided := threadAvoid[owner]",
+          "// A child-only avoidance must not replace an unknown shared owner.",
+          "// Keep affinity reads, but suppress this selection's binding writes.",
+          "rejectionScope.selectionPreservesBinding.Store(ownerErr != nil || owner <= 0 || ownerAvoided)",
+          "}",
+          "PreserveStickyBinding:   preserveGuardianParentBinding || preserveOpenAIRejectionBinding(ctx, sessionHash),"
+        ]
       }
     ],
     "backend/internal/service/openai_gateway_scheduling.go": [
@@ -2201,7 +2233,11 @@
         "added": [
           "\"github.com/tidwall/sjson\"",
           "resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{",
-          "AccountID: account.ID, Model: originalModel, AttemptStart: time.Now(), Stream: req.Stream, BodyBytes: len(geminiReq),",
+          "attemptStart := time.Now()",
+          "if attempt == 1 {",
+          "attemptStart = startTime",
+          "}",
+          "AccountID: account.ID, Model: originalModel, AttemptStart: attemptStart, Stream: req.Stream, BodyBytes: len(geminiReq),",
           "})",
           "}",
           "// Mark the response that will actually be retried once so concurrent",
@@ -2219,7 +2255,11 @@
           "}",
           "}",
           "resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{",
-          "AccountID: account.ID, Model: originalModel, AttemptStart: time.Now(), Stream: stream, BodyBytes: len(body),",
+          "attemptStart := time.Now()",
+          "if attempt == 1 {",
+          "attemptStart = startTime",
+          "}",
+          "AccountID: account.ID, Model: originalModel, AttemptStart: attemptStart, Stream: stream, BodyBytes: len(body),",
           "})",
           "}",
           "}",

@@ -109,6 +109,7 @@ type OpsInsertErrorLogInput struct {
 	UpstreamErrors []*OpsUpstreamErrorEvent
 	// UpstreamErrorsJSON is the sanitized JSON string stored into ops_error_logs.upstream_errors.
 	// It is set by OpsService.RecordError before persisting.
+	ResilienceTiming   *string
 	UpstreamErrorsJSON *string
 
 	AuthLatencyMs         *int64

@@ -6,16 +6,16 @@
 
 Every gateway request MUST carry a single budget with:
 - a maximum number of upstream attempts, `budget.max_attempts` (default 4), counting the first attempt, account switches and same-account retries;
-- for text endpoints, a pre-output deadline of `budget.pre_output_budget_seconds` (default 240 s) after the request starts.
+- for text endpoints, deadline D = min(anchor + `budget.pre_output_budget_seconds` (default 240 s), arrival + 290 s). The anchor defaults to arrival; `budget.budget_start=body_eof` uses the first gateway-observed EOF only when it is at least 1 s after arrival. The anchor changes only D; spent, lastMark and the 60 s account-level failure rule still start at arrival. See the 0.5.12 budget-anchor delta.
 
-Every retry path MUST draw from this budget: OpenAI, Anthropic and Gemini handler failover loops, same-account retries, Gemini in-service retries, passthrough transport retries, and the full replay of a chained turn that a pooled relay rejected with a vague answer (0.4.2; that replay MUST NOT run when the budget allows no further attempt). The effective switch limit MUST be the smaller of the budget and the existing `max_account_switches`. Image endpoints and asynchronous image tasks MUST NOT be subject to the pre-output deadline. For a non-streaming request the whole response is its first output: the deadline MUST decide whether another attempt may start, and the attempt in flight MUST NOT be cut by it.
+Every retry path MUST draw from this budget: OpenAI, Anthropic and Gemini handler failover loops, same-account retries, Gemini in-service retries, passthrough transport retries, and the full replay of a chained turn that a pooled relay rejected with a vague answer (0.4.2; that replay MUST NOT run when the budget allows no further attempt). The effective switch limit MUST be the smaller of the budget and the existing `max_account_switches`. Image endpoints and asynchronous image tasks MUST NOT be subject to the pre-output deadline. For a non-streaming request the whole response is its first output: new attempts MUST start no later than D−2 s, and the deadline MUST NOT cut an attempt in flight. Existing replay-safe Gemini non-streaming attempt timers remain unchanged. No new request-level cancellation is introduced, including during upload or after first output.
 
 #### Scenario: Four attempts at most
 - **WHEN** four consecutive attempts fail with `TRANSIENT`
 - **THEN** no fifth attempt is made and the request ends with the last failure.
 
 #### Scenario: Deadline reached before output
-- **WHEN** 240 s have passed without a semantic byte and an attempt is still waiting
+- **WHEN** deadline D is reached without a semantic byte and an existing first-output timer expires
 - **THEN** the attempt is cancelled and the request ends:
   - with the uncommitted error response, if the SSE headers were not committed;
   - with a protocol terminal frame, if they were.
@@ -25,7 +25,7 @@ Every retry path MUST draw from this budget: OpenAI, Anthropic and Gemini handle
 - **THEN** the wait ends after at most 30 s and the request ends as for an exhausted budget.
 
 #### Scenario: Non-streaming request past the deadline
-- **WHEN** a non-streaming text request's only attempt is still generating at 240 s
+- **WHEN** a non-streaming text request's only attempt is still generating at D
 - **THEN** it is not cancelled by the deadline; a failure after the deadline ends the request without another attempt.
 
 #### Scenario: Images are exempt from the deadline

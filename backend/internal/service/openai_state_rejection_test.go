@@ -132,7 +132,7 @@ func TestOpenAIStateRejectionRepairBoundary(t *testing.T) {
 
 func TestOpenAIEncryptedFragmentCensus(t *testing.T) {
 	body := []byte(`{"input":[{"type":"agent_mess\u0061ge","content":[{"type":"encrypted_content","encrypted_content":"hello there"}]},{"type":"function_call_output","output":[{"type":"encrypted_content","encrypted_content":"gAAAAcipher"}]},{"type":"reasoning","encrypted_content":"abcdefghijklmnopqrstuvwxyz"},{"type":"function_call","arguments":"{\"encrypted_content\":\"ignore\"}"},{"type":"function_call_output","output":"{\"type\":\"encrypted_content\",\"encrypted_content\":\"ignore\"}"}]}`)
-	require.Equal(t, openAIEncryptedFragments{AgentMessage: 1, FunctionOutput: 1, Other: 1, OpaqueLike: 2, TextLike: 1}, openAIEncryptedFragmentCensus(body))
+	require.Equal(t, openAIEncryptedFragments{AgentMessage: 1, FunctionOutput: 1, Reasoning: 1, Other: 1, OpaqueLike: 2, TextLike: 1}, openAIEncryptedFragmentCensus(body))
 	require.Equal(t, openAIEncryptedFragments{}, openAIEncryptedFragmentCensus([]byte(`{"input":[`)))
 }
 
@@ -171,10 +171,37 @@ func TestOpenAIStateRejectionObservationFinalAttemptFacts(t *testing.T) {
 	require.Equal(t, float64(3), event["collab_calls"])
 	require.Equal(t, float64(42), event["rule_id"])
 	require.Equal(t, float64(1), event["frag_other"])
+	require.Equal(t, float64(1), event["frag_reasoning"])
+	require.Equal(t, float64(1), event["attempt_frag_reasoning"])
 	errorMS, ok := event["error_ms"].(float64)
 	require.True(t, ok)
 	require.GreaterOrEqual(t, errorMS, float64(1000))
 	require.NotContains(t, logs.String(), "secret body")
+}
+
+func TestOpenAIStateRejectionObservationSeparatesOriginalAndAttemptBodies(t *testing.T) {
+	withResilienceSettings(t, func(s *resilience.Settings) { s.Enabled = false })
+	logs := captureOpenAIObservationLogs(t)
+	req := newWebSearchReplayRequest(t)
+	account := webSearchReplayAccount(false)
+	original := []byte(`{"input":[{"type":"reasoning","encrypted_content":"rs_cipher"}]}`)
+	attempted := []byte(`{"input":[{"type":"compaction","encrypted_content":"cmp_cipher"}]}`)
+	finish := beginOpenAIStateRejectionAttempt(req.ctx, req.c, account, original)
+	req.c.Set(openAIRequestRepairContextKey, &openAIRequestRepair{body: attempted})
+	captureOpenAIStateRejection(req.c, account,
+		[]byte(`{"type":"response.failed","response":{"error":{"code":"client_tool_continuation_unavailable","message":"state rejected"}}}`),
+		"state rejected", "native_sse", false, nil)
+	err := errors.New("terminal")
+	finish(&err)
+
+	lines := bytes.Split(bytes.TrimSpace(logs.Bytes()), []byte("\n"))
+	require.Len(t, lines, 1)
+	var event map[string]any
+	require.NoError(t, json.Unmarshal(lines[0], &event))
+	require.Equal(t, float64(1), event["frag_reasoning"])
+	require.Equal(t, float64(0), event["frag_compaction"])
+	require.Equal(t, float64(0), event["attempt_frag_reasoning"])
+	require.Equal(t, float64(1), event["attempt_frag_compaction"])
 }
 
 func TestOpenAIWSStateRejectionObservationUsesUnknownStage(t *testing.T) {
@@ -227,6 +254,12 @@ func TestOpenAIStateRejectionForwardObservationHooks(t *testing.T) {
 				require.Equal(t, "relay_state", events[0]["family"])
 				require.Equal(t, "pre_output", events[0]["stage"])
 				require.Contains(t, events[0], "rule_id")
+				upstreamEvents := opsUpstreamEventsForTest(t, req.c)
+				if stream {
+					require.Len(t, upstreamEvents, 1)
+					require.Equal(t, "terminal_rejection", upstreamEvents[0].Kind)
+					require.Equal(t, "relay_state", upstreamEvents[0].StateFamily)
+				}
 				if !stream {
 					ops := opsUpstreamEventsForTest(t, req.c)
 					require.Len(t, ops, 1)
@@ -263,4 +296,101 @@ func TestOpenAIStateRejectionFinalSuccessIsNotCounted(t *testing.T) {
 	var err error
 	finish(&err)
 	require.Empty(t, logs.String())
+}
+
+func TestOpenAIStreamStateRejectionUsesThreadScopedAvoidance(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		t.Run("passthrough_"+fmtBool(passthrough), func(t *testing.T) {
+			withResilienceSettings(t, func(cfg *resilience.Settings) { cfg.Session.StreakThreshold = 2 })
+			svc, store, cache := terminalRejectionTestService()
+			account := terminalRejectionTestAccount(1, "relay-a.example")
+			account.Extra["openai_passthrough"] = passthrough
+			body := []byte(`{"model":"requested-model","stream":true,"input":[{"type":"agent_message","content":[{"type":"encrypted_content","encrypted_content":"cipher"}]}]}`)
+			refusal := `{"type":"response.failed","response":{"error":{"type":"invalid_request_error","code":"invalid_encrypted_content","message":"The encrypted content could not be verified"}}}`
+
+			for i := 1; i <= 2; i++ {
+				c, _ := newOpenAIUpstreamErrorTestContext(t)
+				c.Request.Header.Set("session-id", "parent-session")
+				c.Request.Header.Set(openAIWSThreadIDHeader, "child-thread")
+				c.Request.Header.Set(codexParentThreadIDHeader, "parent-thread")
+				parentSession := svc.GenerateSessionHash(c, body)
+				state := resilience.NewRequestState()
+				state.SetSession(9, parentSession, svc.openAISessionRecorder())
+				ctx := resilience.WithRequestState(t.Context(), state)
+				ctx = WithOpenAITerminalRejectionScope(ctx, c, body)
+				c.Request = c.Request.WithContext(ctx)
+				cache.bindings[svc.openAISessionCacheKey(parentSession)] = account.ID
+				svc.httpUpstream = &httpUpstreamRecorder{responses: []*http.Response{requestRepairFailedStream(refusal)}}
+
+				_, err := svc.Forward(ctx, c, account, body)
+				require.Error(t, err)
+				var requestRejection *OpenAIRequestRejectionError
+				require.ErrorAs(t, err, &requestRejection)
+				parentAvoid, readErr := store.SessionAvoid(t.Context(), 9, parentSession)
+				require.NoError(t, readErr)
+				if i == 1 {
+					require.Empty(t, parentAvoid)
+					require.Equal(t, account.ID, cache.bindings[svc.openAISessionCacheKey(parentSession)])
+				} else {
+					scope := openAIRejectionScope(ctx).session
+					require.NotEmpty(t, scope)
+					require.NotEqual(t, parentSession, scope)
+					threadAvoid, threadErr := store.SessionAvoid(t.Context(), 9, scope)
+					require.NoError(t, threadErr)
+					require.Contains(t, threadAvoid, account.ID)
+					require.Empty(t, parentAvoid, "child rejection must not avoid the parent session")
+					require.Equal(t, account.ID, cache.bindings[svc.openAISessionCacheKey(parentSession)],
+						"child avoidance must leave the parent sticky owner untouched")
+				}
+			}
+		})
+	}
+}
+
+func TestOpenAIStreamStateRejectionTerminalEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name                           string
+		postOutput, failover, recorded bool
+		status                         int
+		wantAvoid, wantRejection       bool
+	}{
+		{name: "terminal", status: 400, wantAvoid: true, wantRejection: true},
+		{name: "already recorded terminal", status: 400, recorded: true, wantAvoid: true, wantRejection: true},
+		{name: "validated wrapped auth", status: 401, wantRejection: true},
+		{name: "post output", status: 400, postOutput: true},
+		{name: "failover", status: 400, failover: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withResilienceSettings(t, func(cfg *resilience.Settings) { cfg.Session.StreakThreshold = 1 })
+			svc, store, _ := terminalRejectionTestService()
+			account := terminalRejectionTestAccount(1, "relay-a.example")
+			c, _ := newOpenAIUpstreamErrorTestContext(t)
+			state := resilience.NewRequestState()
+			state.SetSession(9, "v2:terminal-evidence", svc.openAISessionRecorder())
+			ctx := resilience.WithRequestState(t.Context(), state)
+			c.Request = c.Request.WithContext(ctx)
+			finish := beginOpenAIStateRejectionAttempt(ctx, c, account, nil)
+			payload := []byte(`{"type":"response.failed","response":{"error":{"code":"client_tool_continuation_unavailable","message":"opaque conversation state"}}}`)
+			captureOpenAIStateRejection(c, account, payload, "opaque conversation state", "native_sse", tc.postOutput, nil, tc.status)
+			if tc.recorded {
+				svc.recordOpenAIStreamUpstreamError(c, account, false, "fixture-request", "http_error", payload, "opaque conversation state", tc.status)
+			}
+			var err error = errors.New("terminal")
+			if tc.failover {
+				err = &UpstreamFailoverError{}
+			}
+			svc.finishOpenAIStreamStateRejection(ctx, c, account, &err)
+			finish(&err)
+			var rejection *OpenAIRequestRejectionError
+			require.Equal(t, tc.wantRejection, errors.As(err, &rejection))
+			avoid, readErr := store.SessionAvoid(t.Context(), 9, "v2:terminal-evidence")
+			require.NoError(t, readErr)
+			require.Equal(t, tc.wantAvoid, len(avoid) > 0)
+			if tc.wantRejection {
+				events := currentOpsUpstreamEvents(c)
+				require.Len(t, events, 1, "a recorded terminal frame must not be duplicated")
+				require.Equal(t, tc.status, events[0].UpstreamStatusCode)
+			}
+		})
+	}
 }

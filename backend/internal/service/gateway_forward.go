@@ -381,15 +381,25 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		cachedErrorResponse = nil
 		cachedErrorBody = nil
 		hardClassifiedFailure = false
+		// The immutable plan owns the timer from this fresh dispatch start. The
+		// measured AttemptStart is replaced after request preparation, before send.
+		timerOwnerStart := time.Now()
+		attemptProfile := resilience.AttemptProfile{
+			AccountID: account.ID, Model: attemptModel, AttemptStart: timerOwnerStart, TimerOwnerStart: timerOwnerStart,
+			Warm: anthropicAttemptWarmFromContext(ctx) && attempt == 1, Stream: reqStream, BodyBytes: len(body),
+		}
+		resilience.StateFrom(ctx).SetAttemptProfile(attemptProfile)
 		// 构建上游请求（每次重试需要重新构建，因为请求体需要重新读取）
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
 		// xy2api resilience: first upstream event timeout (design §7.4).
 		var firstEvent *firstEventGuard
 		if reqStream {
 			activeFirstEvent.Release()
-			upstreamCtx, firstEvent = newFirstEventGuard(upstreamCtx, resilienceFirstEventTimeout(ctx, account.ID, account.Platform))
+			timeout, plan := resilienceFirstEventPlanAt(ctx, account.ID, account.Platform, timerOwnerStart)
+			upstreamCtx, firstEvent = newFirstEventGuard(upstreamCtx, timeout, plan)
 			activeFirstEvent = firstEvent
 		}
+		resilience.StateFrom(ctx).SetAttemptProfile(attemptProfile)
 		upstreamReq, wireBody, err := s.buildUpstreamRequest(upstreamCtx, c, account, body, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 		releaseUpstreamCtx()
 		if err != nil {
@@ -398,11 +408,10 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		// 记录本次实际发送的 wire body；只有请求成功后才写回 ParsedRequest，缓存变换仅用于本次出站。
 		lastWireBody = wireBody
 
-		// 发送请求
-		resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{
-			AccountID: account.ID, Model: attemptModel, AttemptStart: time.Now(),
-			Warm: anthropicAttemptWarmFromContext(ctx) && attempt == 1, Stream: reqStream, BodyBytes: len(wireBody),
-		})
+		// 发送样本从实际派发起点计时；每次循环都在 builder 完成后重新取时。
+		attemptProfile.AttemptStart = time.Now()
+		attemptProfile.BodyBytes = len(wireBody)
+		resilience.StateFrom(ctx).SetAttemptProfile(attemptProfile)
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
 		if err != nil {
 			if resp != nil && resp.Body != nil {

@@ -215,6 +215,13 @@ func (c *atomicStickyTestCache) ClaimSessionAccountID(_ context.Context, _ int64
 	return c.bindings[key], nil
 }
 
+func (c *atomicStickyTestCache) DeleteSessionAccountID(_ context.Context, _ int64, key string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.bindings, key)
+	return nil
+}
+
 func (c *atomicStickyTestCache) DeleteSessionAccountIDIfOwner(ctx context.Context, groupID int64, key string, owner int64) error {
 	_, err := c.DeleteSessionAccountIDIfOwnerAndReport(ctx, groupID, key, owner)
 	return err

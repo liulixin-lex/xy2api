@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	pkghttputil "github.com/liulixin-lex/xy2api/internal/pkg/httputil"
@@ -31,13 +32,17 @@ type clientBodyReader struct {
 	io.ReadCloser
 	broken atomic.Bool
 	state  *resilience.RequestState
+	bytes  int64
 }
 
 func (r *clientBodyReader) Read(p []byte) (int, error) {
+	r.state.MarkFirstBodyRead(time.Now())
 	n, err := r.ReadCloser.Read(p)
+	r.bytes += int64(n)
 	if isClientUploadBreak(err) {
 		r.broken.Store(true)
 	} else if errors.Is(err, io.EOF) {
+		r.state.MarkBodyReceived(time.Now(), "body_eof", r.bytes)
 		r.state.EndUpload()
 	}
 	return n, err
@@ -46,10 +51,16 @@ func (r *clientBodyReader) Read(p []byte) (int, error) {
 // trackClientBodyRead wraps the request body before the handlers read it.
 // A body that was already read stays as it is.
 func trackClientBodyRead(c *gin.Context) {
-	if c.Request == nil || c.Request.Body == nil || c.Request.Body == http.NoBody {
+	if c.Request == nil {
 		return
 	}
-	if _, preread := c.Request.Body.(*pkghttputil.PrereadBody); preread {
+	st := resilience.StateFrom(c.Request.Context())
+	if c.Request.Body == nil || c.Request.Body == http.NoBody {
+		st.MarkBodyReceived(time.Now(), "empty_body", 0)
+		return
+	}
+	if preread, ok := c.Request.Body.(*pkghttputil.PrereadBody); ok {
+		st.MarkBodyReceived(preread.ReceivedAt(), "preread", int64(len(preread.Bytes())))
 		return
 	}
 	r := &clientBodyReader{ReadCloser: c.Request.Body, state: resilience.StateFrom(c.Request.Context())}
