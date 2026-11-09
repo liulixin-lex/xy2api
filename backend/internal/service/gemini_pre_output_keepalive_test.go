@@ -150,7 +150,7 @@ func TestGeminiCommittedHeartbeatErrorUsesNativeEnvelope(t *testing.T) {
 	c, w := newKeepaliveTestContext(t)
 	stop := StartPreOutputKeepalive(c, "gemini", 0, time.Hour)
 	waitCommitted(t, c)
-	c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"code": 503, "status": "INTERNAL", "message": "busy"}})
+	c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"code": 503, "status": "UNAVAILABLE", "message": "busy"}})
 	stop()
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Contains(t, w.Body.String(), `data: {"error":{"code":503,"message":"busy","status":"UNAVAILABLE"}}`)
