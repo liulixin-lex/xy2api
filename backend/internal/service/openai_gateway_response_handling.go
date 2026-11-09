@@ -1127,6 +1127,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				_ = resp.Body.Close()
 				return finalizeStream()
 			}
+			if resilience.BudgetTraceEnabledForTest {
+				firstOutputPlan.ObserveFiredForTest("openai_semantic_output")
+			}
 			_ = resp.Body.Close()
 			for ev := range events {
 				markEventProcessed(ev)

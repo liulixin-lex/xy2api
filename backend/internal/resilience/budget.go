@@ -173,6 +173,9 @@ func (b *Budget) CanAttempt(now time.Time) bool {
 		b.exhausted = ExhaustedAttempts
 	case !b.deadline.IsZero() && b.deadline.Sub(now) < minAttemptWindow:
 		b.exhausted = ExhaustedDeadline
+		if BudgetTraceEnabledForTest {
+			b.traceDeadlineForTest("CanAttempt", now, 0)
+		}
 	default:
 		return true
 	}
@@ -279,6 +282,9 @@ func (b *Budget) ConsumeInPlaceRetry(accountID int64, sameAccount bool, now time
 	case !encryptedRepair && b.attempts+1 >= b.maxAttempts:
 		return false
 	case !b.deadline.IsZero() && b.deadline.Sub(now) < minAttemptWindow:
+		if BudgetTraceEnabledForTest {
+			b.traceDeadlineForTest("ConsumeInPlaceRetry", now, accountID)
+		}
 		return false
 	case sameAccount && b.sameAccount[accountID] >= b.sameAccountMax:
 		return false
@@ -310,13 +316,18 @@ func (b *Budget) ClampWait(d time.Duration, now time.Time) time.Duration {
 	if b == nil || d <= 0 {
 		return d
 	}
+	raw := d
 	if b.retryAfterCap > 0 && d > b.retryAfterCap {
 		d = b.retryAfterCap
 	}
 	if rem := b.Remaining(now); rem > 0 && d > rem-minAttemptWindow {
+		capped := d
 		d = rem - minAttemptWindow
 		if d < 0 {
 			d = 0
+		}
+		if BudgetTraceEnabledForTest && d < capped {
+			b.traceClampForTest(now, raw, capped, d, rem)
 		}
 	}
 	return d

@@ -51,6 +51,9 @@ func newAnthropicStreamStage(ctx context.Context, c *gin.Context, headers func()
 
 // noteTimeout intentionally emits no attempt event: this path had none in 0.5.11.
 func (s *anthropicStreamStage) noteTimeout(c *gin.Context) {
+	if resilience.BudgetTraceEnabledForTest {
+		s.plan.ObserveFiredForTest("anthropic_response_stage")
+	}
 	st := resilience.StateFrom(s.ctx)
 	st.NoteResponseStage(s.plan.Start(), s.plan.Effective())
 	resilience.Count("anthropic_response_stage_timeout", st.GroupID(), 0, st.Budget().AnchorBasis())

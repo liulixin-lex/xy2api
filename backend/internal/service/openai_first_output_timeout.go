@@ -375,6 +375,9 @@ func newOpenAIFirstOutputHeaderGuard(
 		remaining = time.Nanosecond
 	}
 	guard.timer = time.AfterFunc(remaining, func() {
+		if resilience.BudgetTraceEnabledForTest {
+			guard.plan.ObserveFiredForTest("openai_header")
+		}
 		close(guard.fired)
 		cancel()
 	})

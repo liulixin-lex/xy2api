@@ -57,6 +57,9 @@ func (s *OpenAIGatewayService) armOpenAICompatFirstEvent(ctx, upstreamCtx contex
 	if timeout <= 0 {
 		return upstreamCtx, nil
 	}
+	if resilience.BudgetTraceEnabledForTest {
+		plan = plan.WithTimerSiteForTest("openai_compat_first_output")
+	}
 	guarded, guard := newOpenAIFirstOutputHeaderGuard(upstreamCtx, func() {}, started.Add(timeout), plan)
 	fe := &openAICompatFirstEvent{plan: plan, guard: guard, started: started, timeout: timeout, model: model, effort: effort}
 	return context.WithValue(guarded, openAICompatFirstEventKey{}, fe), fe

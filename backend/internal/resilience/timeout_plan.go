@@ -5,6 +5,7 @@ import "time"
 // TimeoutPlan belongs to one concrete timer. Private fields and value passing
 // prevent later profile/tier changes from altering a fired timer's attribution.
 type TimeoutPlan struct {
+	testTrace                                  timeoutPlanTrace
 	seq                                        uint64
 	accountID                                  int64
 	model                                      string
@@ -93,6 +94,9 @@ func (s *RequestState) PlanAttemptTimeout(tier time.Duration, last bool, start t
 	p.committed = !s.timing.keepaliveCommit.IsZero()
 	p.accountID = s.attemptProfile.AccountID
 	p.model = s.attemptProfile.Model
+	if BudgetTraceEnabledForTest {
+		captureTimeoutPlanForTest(b, &p, s.attemptProfile, s)
+	}
 	s.mu.Unlock()
 	s.NoteAttemptTimer(start)
 	return p
@@ -111,6 +115,9 @@ func (s *RequestState) ResponseStagePlan(start time.Time) TimeoutPlan {
 	p.committed = !s.timing.keepaliveCommit.IsZero()
 	p.accountID = s.attemptProfile.AccountID
 	p.model = s.attemptProfile.Model
+	if BudgetTraceEnabledForTest {
+		captureTimeoutPlanForTest(b, &p, s.attemptProfile, s)
+	}
 	s.mu.Unlock()
 	s.NoteAttemptTimer(s.AttemptProfile().AttemptStart)
 	return p

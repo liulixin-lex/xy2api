@@ -2929,6 +2929,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		returned:    func() (*openaiStreamingResultPassthrough, error) { return retResult, retErr },
 		contentSeen: func() bool { return firstOutputSeen },
 		onDeadline: func() (*openaiStreamingResultPassthrough, error) {
+			if resilience.BudgetTraceEnabledForTest {
+				firstOutputPlan.ObserveFiredForTest("openai_passthrough_semantic_output")
+			}
 			_ = resp.Body.Close()
 			if clientDisconnected || reqCtx.Err() != nil {
 				MarkResponseCommitted(c)

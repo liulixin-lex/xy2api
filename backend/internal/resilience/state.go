@@ -621,19 +621,6 @@ func (s *RequestState) Budget() *Budget {
 	return s.budget
 }
 
-// BudgetBaseSecondsForTest returns the request's frozen NewBudget base.
-// It is intentionally a test-only read point: the value is not included in
-// TimingJSON or any production persistence payload.
-func (s *RequestState) BudgetBaseSecondsForTest() (int64, bool) {
-	if s == nil {
-		return 0, false
-	}
-	s.mu.Lock()
-	base, ok := s.budgetBaseSeconds, s.budgetBaseSet
-	s.mu.Unlock()
-	return base, ok
-}
-
 // NoteStickyOwner records the session owner seen at selection start.
 func (s *RequestState) NoteStickyOwner(accountID int64) {
 	if s == nil || accountID <= 0 {

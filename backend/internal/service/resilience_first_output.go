@@ -237,6 +237,9 @@ func newFirstEventGuard(ctx context.Context, timeout time.Duration, plans ...res
 		timeout = timeoutUntilPlanDeadline(timeout, g.plan.Start(), time.Now())
 	}
 	g.timer = time.AfterFunc(timeout, func() {
+		if resilience.BudgetTraceEnabledForTest {
+			g.plan.ObserveFiredForTest("first_event_guard")
+		}
 		g.fired.Store(true)
 		cancel()
 	})

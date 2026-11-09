@@ -106,6 +106,11 @@ func (g *geminiAttempt) resetTimer(d time.Duration, cause error) {
 		g.mu.Lock()
 		defer g.mu.Unlock()
 		if g.timer == timer {
+			if resilience.BudgetTraceEnabledForTest {
+				if _, deadline := cause.(*geminiAttemptDeadlineError); deadline {
+					g.plan.ObserveFiredForTest("gemini_attempt_" + g.phase)
+				}
+			}
 			g.cancel(cause)
 		}
 	})
