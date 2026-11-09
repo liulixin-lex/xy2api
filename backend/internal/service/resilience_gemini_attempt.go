@@ -31,20 +31,20 @@ func (*geminiStreamStallError) Error() string { return "Gemini stream stalled" }
 type geminiAttemptKey struct{}
 
 type geminiAttempt struct {
-	mu             sync.Mutex
-	ctx            context.Context
-	parent         context.Context
-	cancel         context.CancelCauseFunc
-	timer          *time.Timer
-	timeout        time.Duration
-	plan           resilience.TimeoutPlan
-	stall          time.Duration
-	output         bool
-	terminal       bool
-	phase          string
-	protocol       string
-	finalCandidate bool
-	keepalive      bool
+	mu        sync.Mutex
+	ctx       context.Context
+	parent    context.Context
+	cancel    context.CancelCauseFunc
+	timer     *time.Timer
+	timeout   time.Duration
+	plan      resilience.TimeoutPlan
+	stall     time.Duration
+	output    bool
+	terminal  bool
+	phase     string
+	protocol  string
+	unique    bool
+	keepalive bool
 }
 
 func geminiTextRequest(model, action string, body []byte) bool {
@@ -81,18 +81,14 @@ func newGeminiAttempt(ctx context.Context, account *Account, model, action strin
 	if account == nil || account.Platform != PlatformGemini || !geminiTextRequest(model, action, body) {
 		return g
 	}
-	b := resilienceTextBudget(ctx)
-	last := false
-	if b != nil || (stream && resilience.Current().KeepaliveOn()) {
-		last = resilienceLastCandidate(ctx, account.ID)
-	}
-	if stream && resilience.Current().KeepaliveOn() && last {
-		g.finalCandidate = geminiNoFurtherAccount(ctx, account)
+	if stream && resilience.Current().KeepaliveOn() {
+		g.unique = geminiSoleCandidateUniverse(ctx, account)
 	}
 	if stream && resilience.Current().StallOn() {
 		g.stall = time.Duration(resilience.Current().Stall.TextStallSeconds) * time.Second
 	}
-	if b != nil && (stream || (!requestReplayUnsafe(ctx) && requestBodyReplaySafe(body, true))) {
+	if b := resilienceTextBudget(ctx); b != nil && (stream || (!requestReplayUnsafe(ctx) && requestBodyReplaySafe(body, true))) {
+		last := resilienceLastCandidate(ctx, account.ID)
 		if !last {
 			tier := time.Duration(resilience.Current().Budget.GeminiFirstEventTimeoutSeconds) * time.Second
 			g.plan = resilience.StateFrom(ctx).PlanAttemptTimeout(tier, last, started)
@@ -380,7 +376,7 @@ func geminiNativeStreamReader(c *gin.Context, resp *http.Response, cfg *config.C
 }
 
 func (g *geminiAttempt) finish(c *gin.Context, rl *RateLimitService, account *Account, err error) error {
-	// Freeze commit state before the handler decides whether another attempt is allowed.
+	// Freeze commit state before the handler returns to account selection.
 	if g.keepalive {
 		if k := keepaliveFrom(c); k != nil {
 			k.suspend()

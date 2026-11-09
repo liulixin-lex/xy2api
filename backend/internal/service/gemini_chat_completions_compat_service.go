@@ -113,7 +113,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 	)
 
 	attemptGuard := newGeminiAttempt(ctx, account, mappedModel, "generateContent", geminiReq, clientStream, PreOutputProtocolChat, startTime)
-	attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, clientStream, attemptGuard.finalCandidate, attemptGuard.protocol)
+	attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, clientStream, attemptGuard.unique, attemptGuard.protocol)
 	defer func() {
 		retErr = attemptGuard.finish(c, s.rateLimitService, account, retErr)
 		attemptGuard.close()

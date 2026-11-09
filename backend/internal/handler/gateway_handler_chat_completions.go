@@ -233,6 +233,10 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				return
 			}
 		}
+		if geminiKeepaliveBlocksSelection(c.Request.Context(), selection) {
+			h.handleCCFailoverExhausted(c, fs.LastFailoverErr, streamStarted)
+			return
+		}
 		account := selection.Account
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
@@ -302,9 +306,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		setActualUpstreamEndpoint(c, "")
 		if account.Platform == service.PlatformGemini {
 			stateCtx := c.Request.Context()
-			stateCtx = service.WithGeminiFailoverState(stateCtx,
-				fs.SwitchCount >= fs.MaxSwitches,
-				false, fs.FailedAccountIDs)
+			stateCtx = service.WithGeminiCandidateUniverse(stateCtx, apiKey.Group, false)
 			if h.geminiCompatService == nil {
 				h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", "Gemini compatibility service is not configured")
 				if accountReleaseFunc != nil {

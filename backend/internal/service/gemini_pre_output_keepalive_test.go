@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
@@ -29,6 +30,9 @@ func (s *geminiDispatchProbe) Do(req *http.Request, proxy string, id int64, conc
 }
 
 func forwardGeminiTestEntry(s *GeminiMessagesCompatService, entry string, ctx context.Context, c *gin.Context, a *Account) (*ForwardResult, error) {
+	if ctx.Value(ctxkey.Group) == nil {
+		ctx = context.WithValue(ctx, ctxkey.Group, &Group{ID: resilience.StateFrom(ctx).GroupID(), Platform: PlatformGemini, Hydrated: true})
+	}
 	body := []byte(`{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"hi"}],"stream":true,"max_tokens":32}`)
 	switch entry {
 	case "messages":

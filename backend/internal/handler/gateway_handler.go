@@ -396,6 +396,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					return
 				}
 			}
+			if geminiKeepaliveBlocksSelection(c.Request.Context(), selection) {
+				h.handleFailoverExhausted(c, fs.LastFailoverErr, service.PlatformGemini, streamStarted)
+				return
+			}
 			account := selection.Account
 			setOpsSelectedAccount(c, account.ID, account.Platform)
 
@@ -499,9 +503,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			var result *service.ForwardResult
 			requestCtx := c.Request.Context()
 			if account.Platform == service.PlatformGemini {
-				requestCtx = service.WithGeminiFailoverState(requestCtx,
-					fs.SwitchCount >= fs.MaxSwitches,
-					!middleware2.HasForcePlatform(c), fs.FailedAccountIDs)
+				requestCtx = service.WithGeminiCandidateUniverse(requestCtx, apiKey.Group, !middleware2.HasForcePlatform(c))
 			}
 			if fs.SwitchCount > 0 {
 				requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())

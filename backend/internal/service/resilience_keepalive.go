@@ -67,7 +67,7 @@ func StartPreOutputKeepalive(c *gin.Context, protocol string, firstDelay, interv
 }
 
 // StartGeminiUniqueCandidateKeepalive starts the shared pre-output heartbeat
-// only for a streamed Gemini last candidate with no further account switch. It does not
+// only for a streamed Gemini request with one static candidate. It does not
 // install or change an attempt deadline; request handlers own final cleanup.
 func StartGeminiUniqueCandidateKeepalive(c *gin.Context, account *Account, stream, finalCandidate bool, protocol string) bool {
 	if !finalCandidate {

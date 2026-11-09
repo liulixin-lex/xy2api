@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -15,6 +16,16 @@ import (
 // ginKeyPreOutputKeepaliveStop holds the stop function of the request's
 // pre-output heartbeat.
 const ginKeyPreOutputKeepaliveStop = "xy_resilience_pre_output_keepalive_stop"
+
+func geminiKeepaliveBlocksSelection(ctx context.Context, selection *service.AccountSelectionResult) bool {
+	if selection == nil || !service.GeminiFinalKeepaliveBlocksAccount(ctx, selection.Account) {
+		return false
+	}
+	if selection.Acquired && selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+	return true
+}
 
 // armPreOutputKeepalive starts the delayed pre-output heartbeat before an
 // upstream attempt when the request qualifies (design §7.2): a streaming

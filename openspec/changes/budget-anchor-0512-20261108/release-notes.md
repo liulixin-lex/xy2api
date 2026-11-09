@@ -11,3 +11,7 @@ C1 影响 EOF 明显晚于 arrival 的请求，包括成功的大上传；C3 也
 三阶段分别观察 48 h，两个开关不在同一窗口切换。阶段 2 前完成高级调度器 N3 裁决。540 s cap、准入、非流式 guard、spent/首试时钟调整属于后续代码变更。测试、签字和上线条件见 [runbook](runbook.md)；本候选未发布。
 
 compat 入口遇上游 JSON 回退时，由空回答改为正常输出，按实际 usage 计费。
+
+Gemini 首包前心跳只覆盖完整静态候选全集为单账号的请求；多号组的最后候选不启用，保留实际调度器的换号机会。同账号重试和退避保持原行为。
+
+Google 风格错误体中，HTTP 503 的 status 由 INTERNAL 更正为 UNAVAILABLE（HTTP 状态码不变）

@@ -804,7 +804,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 	}
 
 	attemptGuard := newGeminiAttempt(ctx, account, mappedModel, "generateContent", geminiReq, req.Stream, PreOutputProtocolAnthropic, startTime)
-	attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, req.Stream, attemptGuard.finalCandidate, attemptGuard.protocol)
+	attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, req.Stream, attemptGuard.unique, attemptGuard.protocol)
 	defer func() {
 		retErr = attemptGuard.finish(c, s.rateLimitService, account, retErr)
 		attemptGuard.close()
@@ -1375,7 +1375,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	}
 
 	attemptGuard := newGeminiAttempt(ctx, account, mappedModel, action, body, stream, "gemini", startTime)
-	attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, stream, attemptGuard.finalCandidate, attemptGuard.protocol)
+	attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, stream, attemptGuard.unique, attemptGuard.protocol)
 	defer func() {
 		retErr = attemptGuard.finish(c, s.rateLimitService, account, retErr)
 		attemptGuard.close()

@@ -32,7 +32,7 @@ func (s *geminiFinalHTTPStub) Do(*http.Request, string, int64, int) (*http.Respo
 	return &http.Response{StatusCode: http.StatusUnauthorized, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"bad key"}}`))}, nil
 }
 
-func TestGeminiNativeHandlerLastResortAtSwitchLimitKeepsAlive(t *testing.T) {
+func TestGeminiNativeHandlerMultipleCandidatesAtSwitchLimitStayUncommitted(t *testing.T) {
 	withHandlerResilience(t, func(s *resilience.Settings) {
 		s.Keepalive.DelaySeconds, s.Keepalive.IntervalSeconds = 1, 1
 	})
@@ -65,9 +65,8 @@ func TestGeminiNativeHandlerLastResortAtSwitchLimitKeepsAlive(t *testing.T) {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
 		require.Equal(t, 1, upstream.calls)
-		require.Contains(t, rec.Body.String(), ":\n\n", "handler switch limit must authorize the non-sole last-resort heartbeat")
-		require.Contains(t, rec.Body.String(), "data: ")
-		require.Equal(t, http.StatusOK, rec.Code)
+		require.NotContains(t, rec.Body.String(), ":\n\n", "multiple configured accounts never authorize an early heartbeat")
+		require.Equal(t, http.StatusBadGateway, rec.Code)
 		require.Equal(t, 1, st.Budget().Attempts())
 	})
 }
@@ -90,17 +89,48 @@ func TestGeminiCommittedFinalKeepalivePreventsHandlerSwitch(t *testing.T) {
 				failure := &service.UpstreamFailoverError{StatusCode: http.StatusBadGateway}
 				fs := NewFailoverState(2, false)
 				action := fs.HandleFailoverError(c.Request.Context(), nil, a.ID, a.Platform, 0, failure)
-				want := FailoverContinue
-				if committed {
-					want = FailoverExhausted
-					require.Zero(t, fs.SwitchCount, "do not select another platform after committing heartbeat")
+				require.Equal(t, FailoverContinue, action, "retain the original retry/backoff decision")
+				for _, next := range []*service.Account{
+					a,
+					{ID: a.ID + 1, Platform: service.PlatformGemini},
+					{ID: a.ID + 1, Platform: service.PlatformAntigravity},
+					{ID: a.ID, Platform: service.PlatformAntigravity},
+				} {
+					released := false
+					selection := &service.AccountSelectionResult{Account: next, Acquired: true, ReleaseFunc: func() { released = true }}
+					wantBlocked := committed && (next.ID != a.ID || next.Platform != a.Platform)
+					require.Equal(t, wantBlocked, geminiKeepaliveBlocksSelection(c.Request.Context(), selection))
+					require.Equal(t, wantBlocked, released, "a blocked selection releases its acquired slot")
 				}
-				require.Equal(t, want, action)
 				require.Same(t, failure, fs.LastFailoverErr)
 				require.Equal(t, 1, resilience.StateFrom(c.Request.Context()).Budget().Attempts(), "retain the existing failure accounting exactly once")
 			})
 		})
 	}
+}
+
+func TestGeminiCommittedKeepalivePreservesSelectionBackoff(t *testing.T) {
+	withHandlerResilience(t, func(s *resilience.Settings) {
+		s.Keepalive.DelaySeconds, s.Keepalive.IntervalSeconds = 1, 1
+	})
+	synctest.Test(t, func(t *testing.T) {
+		c, _ := keepaliveCtxWithRecorder(t, "cf", resilience.KindText)
+		a := &service.Account{ID: 7, Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey}
+		require.True(t, service.StartGeminiUniqueCandidateKeepalive(c, a, true, true, service.PreOutputProtocolGemini))
+		defer stopPreOutputKeepalive(c)
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		failure := &service.UpstreamFailoverError{StatusCode: http.StatusServiceUnavailable}
+		fs := NewFailoverState(2, false)
+		require.Equal(t, FailoverContinue, fs.HandleFailoverError(c.Request.Context(), nil, a.ID, a.Platform, 0, failure))
+		require.Contains(t, fs.FailedAccountIDs, a.ID)
+		started := time.Now()
+		require.Equal(t, FailoverContinue, fs.HandleSelectionExhausted(c.Request.Context()))
+		require.Equal(t, singleAccountBackoffDelay, time.Since(started))
+		require.Empty(t, fs.FailedAccountIDs)
+		require.Same(t, failure, fs.LastFailoverErr)
+		require.Equal(t, 1, resilience.StateFrom(c.Request.Context()).Budget().Attempts())
+	})
 }
 
 func TestGeminiHandlerWaitsForServiceKeepaliveAdmission(t *testing.T) {
@@ -116,4 +146,60 @@ func TestGeminiHandlerWaitsForServiceKeepaliveAdmission(t *testing.T) {
 		require.False(t, service.PreOutputKeepaliveCommitted(c), "generic compat arming must not bypass Gemini's cross-platform admission")
 		require.Empty(t, rec.Body.String())
 	})
+}
+
+func TestGeminiCommittedKeepalivePreservesSameAccountRetry(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		status     int
+		retryLimit int
+		errorCap   int
+		deadline   bool
+		want       int
+	}{
+		{name: "pool_429", status: http.StatusTooManyRequests, retryLimit: 2, want: 2},
+		{name: "transient_503", status: http.StatusServiceUnavailable, retryLimit: 2, want: 2},
+		{name: "error_cap", status: http.StatusTooManyRequests, retryLimit: 3, errorCap: 1, want: 1},
+		{name: "deadline_window", status: http.StatusTooManyRequests, deadline: true, want: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withHandlerResilience(t, func(s *resilience.Settings) {
+				s.Keepalive.DelaySeconds, s.Keepalive.IntervalSeconds = 1, 1
+				s.Budget.MaxAttempts, s.Budget.SameAccountRetryMax = 5, 2
+			})
+			synctest.Test(t, func(t *testing.T) {
+				c, _ := keepaliveCtxWithRecorder(t, "cf", resilience.KindText)
+				a := &service.Account{ID: 7, Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey}
+				require.True(t, service.StartGeminiUniqueCandidateKeepalive(c, a, true, true, service.PreOutputProtocolGemini))
+				defer stopPreOutputKeepalive(c)
+				time.Sleep(2 * time.Second)
+				synctest.Wait()
+				require.True(t, service.PreOutputKeepaliveCommitted(c))
+				failure := &service.UpstreamFailoverError{StatusCode: tc.status, RetryableOnSameAccount: true, SameAccountRetryMax: tc.errorCap, SameAccountRetryDelay: time.Millisecond}
+				if tc.deadline {
+					failure.SameAccountRetryDeadline = time.Now().Add(time.Minute)
+				}
+				fs := NewFailoverState(0, true)
+				scheduler := &mockTempUnscheduler{}
+				for attempt := 1; attempt <= tc.want; attempt++ {
+					action := fs.HandleFailoverError(c.Request.Context(), scheduler, a.ID, a.Platform, tc.retryLimit, failure)
+					t.Logf("attempt=%d action=%d retries=%d switches=%d", attempt, action, fs.SameAccountRetryCount[a.ID], fs.SwitchCount)
+					require.Equal(t, FailoverContinue, action)
+					require.Equal(t, attempt, fs.SameAccountRetryCount[a.ID])
+					require.Zero(t, fs.SwitchCount)
+					require.Empty(t, fs.FailedAccountIDs)
+					require.Empty(t, scheduler.calls)
+					require.False(t, fs.ForceCacheBilling)
+				}
+				require.Equal(t, FailoverExhausted, fs.HandleFailoverError(c.Request.Context(), scheduler, a.ID, a.Platform, tc.retryLimit, failure))
+				require.Equal(t, tc.want, fs.SameAccountRetryCount[a.ID])
+				require.Zero(t, fs.SwitchCount)
+				require.Len(t, scheduler.calls, 1)
+				require.Contains(t, fs.FailedAccountIDs, a.ID)
+				require.True(t, fs.ForceCacheBilling)
+				require.Same(t, failure, fs.LastFailoverErr)
+				require.Equal(t, tc.want+1, resilience.StateFrom(c.Request.Context()).Budget().Attempts())
+			})
+		})
+	}
 }
