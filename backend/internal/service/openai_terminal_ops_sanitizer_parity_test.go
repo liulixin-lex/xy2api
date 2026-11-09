@@ -63,24 +63,24 @@ func TestOpenAITerminalOpsRedactsKnownCredentialValuesForEveryAuthMode(t *testin
 	}
 }
 
-// Short credential values remain hidden as standalone values without erasing
-// the same letters inside ordinary diagnostic words. Eight runes is the cutoff.
+// Short credentials are scrubbed at decoded boundaries. Ambiguous embedded
+// values hide their containing text rather than weakening the baseline mask.
 func TestOpenAITerminalOpsShortCredentialBoundaries(t *testing.T) {
 	for _, mode := range []string{AccountTypeAPIKey, AccountTypeOAuth, OpenAIAuthModeAgentIdentity} {
 		t.Run(mode, func(t *testing.T) {
 			for _, tc := range []struct {
 				name, key, secret, message, want string
 			}{
-				{"one_character", "api_key", "a", "a; a; validation data", "[redacted]; [redacted]; validation data"},
-				{"seven_characters", "api_key", "abcdefg", "xabcdefgy abcdefg", "xabcdefgy [redacted]"},
+				{"one_character", "api_key", "a", "a; a; validation data", ""},
+				{"seven_characters", "api_key", "abcdefg", "xabcdefgy abcdefg", "[redacted]"},
 				{"eight_characters", "api_key", "abcdefgh", "xabcdefghy abcdefgh", "x[redacted]y [redacted]"},
-				{"unicode_runes", "api_key", "短凭据", "短凭据值 短凭据", "短凭据值 [redacted]"},
-				{"escaped_short", "cookie", `a"b\c`, `xa"b\cy a"b\c`, `xa"b\cy [redacted]`},
-				{"escaped_threshold", "cookie", "a<b", "xa<by a<b", "xa<by [redacted]"},
-				{"sensitive_field", "api_key", "a", "Bearer a validation", "Bearer [redacted] validation"},
-				{"identity_runtime", "agent_runtime_id", "a", "a validation", "[redacted] validation"},
-				{"identity_task", "task_id", "a", "a validation", "[redacted] validation"},
-				{"numeric_identity", "task_id", "123", "x123y 123", "x123y [redacted]"},
+				{"unicode_runes", "api_key", "短凭据", "短凭据值 短凭据", "[redacted]"},
+				{"escaped_short", "cookie", `a"b\c`, `xa"b\cy a"b\c`, `[redacted]`},
+				{"escaped_threshold", "cookie", "a<b", "xa<by a<b", "[redacted]"},
+				{"sensitive_field", "api_key", "a", "Bearer a validation", ""},
+				{"identity_runtime", "agent_runtime_id", "a", "a validation", ""},
+				{"identity_task", "task_id", "a", "a validation", ""},
+				{"numeric_identity", "task_id", "123", "x123y 123", "[redacted]"},
 			} {
 				if (tc.key == "agent_runtime_id" || tc.key == "task_id") && mode != OpenAIAuthModeAgentIdentity {
 					continue
@@ -100,6 +100,11 @@ func TestOpenAITerminalOpsShortCredentialBoundaries(t *testing.T) {
 					require.NoError(t, err)
 					original := string(raw)
 					got := redactOpenAITerminalOpsSensitiveBody(t.Context(), nil, account, raw)
+					require.Equal(t, original, string(raw), "classification and client input must stay pristine")
+					if tc.want == "" {
+						require.JSONEq(t, `"[redacted]"`, string(got), "credential-bearing object keys must fail closed")
+						return
+					}
 					var decoded map[string]string
 					require.NoError(t, json.Unmarshal(got, &decoded), string(got))
 					t.Logf("message=%q api_key=%q", decoded["message"], decoded["api_key"])
@@ -109,5 +114,50 @@ func TestOpenAITerminalOpsShortCredentialBoundaries(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func TestOpenAITerminalOpsDecodedCredentialsNeverReachQueue(t *testing.T) {
+	for _, secret := range []string{"q7V", "synthetic-long-credential"} {
+		for _, tc := range []struct{ name, prefix, suffix string }{
+			{"LF", `\n`, "; rejected"},
+			{"CR", `\r`, "; rejected"},
+			{"TAB", `\t`, "; rejected"},
+			{"warningLF", `warning\n`, "; rejected"},
+			{"warningTAB", `warning\t`, "; rejected"},
+			{"unicodeLF", `warning\u000a`, "; rejected"},
+			{"adjacentQuotes", `warning \"`, `\"; rejected`},
+			{"embedded", "prefix", "suffix"},
+		} {
+			t.Run(secret+"/"+tc.name, func(t *testing.T) {
+				messageJSON := `"` + tc.prefix + secret + tc.suffix + `"`
+				var message string
+				require.NoError(t, json.Unmarshal([]byte(messageJSON), &message))
+				// Exercise all string-bearing locations, not only error.message.
+				raw := []byte(`{"message":` + messageJSON + `,"detail":` + messageJSON + `,"nested":{"items":[` + messageJSON + `]},"api_key":` + messageJSON + `}`)
+				original := string(raw)
+				account := terminalRejectionTestAccount(1, "fixture.example")
+				account.Credentials = map[string]any{"api_key": secret}
+				got := redactOpenAITerminalOpsSensitiveBody(t.Context(), nil, account, raw)
+				require.True(t, json.Valid(got), string(got))
+				require.NotContains(t, string(got), secret)
+				t.Logf("sanitized=%s", got)
+				svc, _, _ := terminalRejectionTestService()
+				svc.cfg.Gateway.LogUpstreamErrorBody = true
+				svc.cfg.Gateway.LogUpstreamErrorBodyMaxBytes = OpsErrorLogQueueBodyMaxBytes
+				c, _ := newOpenAIUpstreamErrorTestContext(t)
+				svc.recordOpenAIStreamUpstreamError(c, account, false, "", "terminal_rejection", raw, message, 400)
+				events := currentOpsUpstreamEvents(c)
+				require.Len(t, events, 1)
+				require.NotContains(t, events[0].Message, secret)
+				require.NotContains(t, events[0].Detail, secret)
+				input := &OpsInsertErrorLogInput{UpstreamErrors: events}
+				require.NoError(t, SanitizeOpsUpstreamErrorsForQueue(input))
+				require.NotNil(t, input.UpstreamErrorsJSON)
+				require.NotContains(t, *input.UpstreamErrorsJSON, secret)
+				t.Logf("queued=%s", *input.UpstreamErrorsJSON)
+				require.Equal(t, original, string(raw))
+			})
+		}
 	}
 }

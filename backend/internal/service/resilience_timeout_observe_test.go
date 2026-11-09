@@ -7,6 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/pkg/antigravity"
+	"github.com/liulixin-lex/xy2api/internal/pkg/claude"
+	"github.com/liulixin-lex/xy2api/internal/pkg/gemini"
+	"github.com/liulixin-lex/xy2api/internal/pkg/geminicli"
+	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
+	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
@@ -50,4 +56,31 @@ func TestTimeoutPlanMetricModelCardinality(t *testing.T) {
 	}
 	require.Equal(t, int64(attempts), countOther()-before)
 	t.Logf("unknown_models=%d emitted_label=other:10_30 maximum_labels=%d", attempts, 5*(len(timeoutMetricModels)+1))
+}
+
+func TestTimeoutMetricIncludesAllBuiltinCatalogs(t *testing.T) {
+	catalogs := map[string][]string{
+		"claude": claude.DefaultModelIDs(),
+		"openai": openai.DefaultModelIDs(),
+		"grok":   xai.DefaultModelIDs(),
+	}
+	for _, model := range gemini.DefaultModels() {
+		catalogs["gemini"] = append(catalogs["gemini"], model.Name)
+	}
+	for _, model := range antigravity.DefaultModels() {
+		catalogs["antigravity"] = append(catalogs["antigravity"], model.ID)
+	}
+	for _, model := range geminicli.DefaultModels {
+		catalogs["geminicli"] = append(catalogs["geminicli"], model.ID)
+	}
+	for _, model := range geminicli.GoogleOneModels {
+		catalogs["google_one"] = append(catalogs["google_one"], model.ID)
+	}
+	for catalog, models := range catalogs {
+		for _, model := range models {
+			t.Run(catalog+"/"+model, func(t *testing.T) {
+				require.NotEqual(t, "other", timeoutMetricModel(model), "declared built-in models must retain a known label")
+			})
+		}
+	}
 }

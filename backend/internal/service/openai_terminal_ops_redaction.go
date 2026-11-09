@@ -71,8 +71,28 @@ func redactOpenAITerminalOpsSensitiveBody(ctx context.Context, repo AccountRepos
 		}
 	}
 	sort.Slice(secrets, func(i, j int) bool { return len(secrets[i].text) > len(secrets[j].text) })
-	for _, secret := range secrets {
-		redacted = replaceOpenAITerminalOpsCredentialValue(redacted, secret.text, secret.substring)
+	redactText := func(text string) string {
+		for _, secret := range secrets {
+			text = replaceOpenAITerminalOpsCredentialValue(text, secret.text, secret.substring)
+		}
+		return text
+	}
+	if json.Valid(body) {
+		// Boundaries belong to decoded strings: a serialized \n ends in a
+		// letter, while its decoded newline is a credential boundary.
+		decoder := json.NewDecoder(strings.NewReader(string(body)))
+		decoder.UseNumber()
+		var value any
+		if err := decoder.Decode(&value); err != nil {
+			return []byte("[redacted: invalid payload]")
+		}
+		encoded, err := json.Marshal(redactOpenAITerminalOpsJSON(value, redactText))
+		if err != nil {
+			return []byte("[redacted: invalid payload]")
+		}
+		redacted = string(encoded)
+	} else {
+		redacted = redactText(redacted)
 	}
 	redacted = openAIJSONSensitiveCredentialField.ReplaceAllString(redacted, `${1}"[redacted]"`)
 	redacted = openAIAssignmentSensitiveField.ReplaceAllString(redacted, `${1}[redacted]`)
@@ -85,13 +105,13 @@ func redactOpenAITerminalOpsSensitiveBody(ctx context.Context, repo AccountRepos
 	return []byte(redacted)
 }
 
-// Eight characters avoids replacing common short fragments; real opaque
-// credentials still receive substring scrubbing, including JSON escapes.
+// Only longer credentials receive arbitrary substring replacement. If a short
+// value remains inside another word, hide that text instead of leaking it.
 const minimumCredentialSubstringRunes = 8
 
-// replaceOpenAITerminalOpsCredentialValue scrubs short values only at word
-// boundaries, preventing a one-character credential from erasing every
-// matching letter in operational text.
+// replaceOpenAITerminalOpsCredentialValue operates on decoded text. Complete
+// short values are scrubbed at word boundaries; ambiguous embedded values hide
+// the entire text, so the length floor cannot weaken credential protection.
 func replaceOpenAITerminalOpsCredentialValue(body, credential string, substring bool) string {
 	if substring {
 		return strings.ReplaceAll(body, credential, "[redacted]")
@@ -121,13 +141,49 @@ func replaceOpenAITerminalOpsCredentialValue(body, credential string, substring 
 			offset = end
 			continue
 		}
-		_, width := utf8.DecodeRuneInString(body[start:])
-		_, _ = out.WriteString(body[offset : start+width])
-		offset = start + width
+		return "[redacted]"
 	}
 	return out.String()
 }
 
 func credentialWordRune(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsMark(r) || r == '_'
+}
+
+// Clean every JSON value before storage, including nested diagnostic fields.
+// Recognize sensitive fields by their original keys. Hide credential-bearing
+// objects instead of renaming keys into possible collisions.
+func redactOpenAITerminalOpsJSON(value any, redactText func(string) string) any {
+	switch value := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(value))
+		for key, item := range value {
+			if redactText(key) != key {
+				return "[redacted]"
+			}
+			if isSensitiveKey(key) || strings.EqualFold(key, "agent_runtime_id") || strings.EqualFold(key, "task_id") {
+				out[key] = "[REDACTED]"
+			} else {
+				out[key] = redactOpenAITerminalOpsJSON(item, redactText)
+			}
+		}
+		return out
+	case []any:
+		for i, item := range value {
+			value[i] = redactOpenAITerminalOpsJSON(item, redactText)
+		}
+		return value
+	case string:
+		return redactText(value)
+	default:
+		// Preserve exact JSON numbers unless they themselves echo credentials.
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return "[redacted]"
+		}
+		if text := redactText(string(encoded)); text != string(encoded) {
+			return text
+		}
+		return value
+	}
 }

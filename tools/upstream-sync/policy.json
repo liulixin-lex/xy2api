@@ -4250,7 +4250,7 @@
     },
     {
       "path": "backend/internal/service/openai_terminal_ops_redaction.go",
-      "value": "redacted = replaceOpenAITerminalOpsCredentialValue(redacted, secret.text, secret.substring)"
+      "value": "text = replaceOpenAITerminalOpsCredentialValue(text, secret.text, secret.substring)"
     },
     {
       "path": "backend/internal/service/openai_terminal_ops_sanitizer_parity_test.go",
@@ -4279,6 +4279,22 @@
     {
       "path": "backend/internal/service/openai_terminal_ops_redaction.go",
       "value": "value, ok = credAccount.GetCredential(key), true"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_ops_redaction.go",
+      "value": "json.Marshal(redactOpenAITerminalOpsJSON(value, redactText))"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_ops_sanitizer_parity_test.go",
+      "value": "func TestOpenAITerminalOpsDecodedCredentialsNeverReachQueue(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/resilience_timeout_observe.go",
+      "value": "for _, model := range antigravity.DefaultModels() {"
+    },
+    {
+      "path": "backend/internal/service/resilience_timeout_observe_test.go",
+      "value": "func TestTimeoutMetricIncludesAllBuiltinCatalogs(t *testing.T) {"
     }
   ],
   "forbidden_module_paths": [

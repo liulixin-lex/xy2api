@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/liulixin-lex/xy2api/internal/pkg/antigravity"
 	"github.com/liulixin-lex/xy2api/internal/pkg/claude"
 	"github.com/liulixin-lex/xy2api/internal/pkg/gemini"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
@@ -46,6 +47,9 @@ var timeoutMetricModels = func() map[string]struct{} {
 	models = append(models, xai.DefaultModelIDs()...)
 	for _, model := range gemini.DefaultModels() {
 		models = append(models, model.Name)
+	}
+	for _, model := range antigravity.DefaultModels() {
+		models = append(models, model.ID)
 	}
 	known := make(map[string]struct{}, len(models))
 	for _, model := range models {
