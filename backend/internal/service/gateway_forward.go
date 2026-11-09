@@ -381,13 +381,8 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		cachedErrorResponse = nil
 		cachedErrorBody = nil
 		hardClassifiedFailure = false
-		attemptStart := time.Time{}
-		if profile := resilience.StateFrom(ctx).AttemptProfile(); attempt == 1 && profile.AccountID == account.ID {
-			attemptStart = profile.AttemptStart
-		}
-		if attemptStart.IsZero() {
-			attemptStart = time.Now()
-		}
+		// A handler retry may reuse this account and request state in a new Forward.
+		attemptStart := time.Now()
 		resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{
 			AccountID: account.ID, Model: attemptModel, AttemptStart: attemptStart,
 			Warm: anthropicAttemptWarmFromContext(ctx) && attempt == 1, Stream: reqStream, BodyBytes: len(body),
