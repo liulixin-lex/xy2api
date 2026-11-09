@@ -4,16 +4,42 @@
 
 ### Requirement: One replayable-prefix rule for every stream path
 
-The gateway MUST classify each complete upstream SSE event as prelude, content, terminal success, terminal failure (retryable or not) or unknown with one shared function, and every covered stream path (native Responses staging and pending lines, Chat and Messages compatibility conversion, delivery tracking) MUST use it. Unknown events MUST be treated as content.
+The gateway MUST classify each complete upstream SSE event as prelude, content, terminal success, terminal failure (retryable or not) or unknown with one shared function, and every covered stream path (native Responses staging and pending lines, Chat and Messages compatibility conversion, delivery tracking) MUST use it. Known Responses event types MUST retain their established classification. In native, passthrough and Responses-to-Chat/Messages service paths, a non-empty payload `type` determines classification; the SSE `event:` line does not participate when that type is present and is only a fallback when it is absent. An unknown type is prelude only for a valid JSON object with correctly typed event/identity fields and recursively unique object keys. Extra null, boolean and number values are metadata; arrays and objects may contain only metadata, up to 32 extra-field container levels. Extra strings MUST be empty for unknown `response.*` and `codex.*` types; for other unknown types, all strings are metadata because supported clients ignore these event types. Namespace prefixes are case-sensitive and include the dot. Malformed, ambiguous or over-depth unknown events MUST remain content. Staged metadata is released by a visible event or successful terminal, and discarded on pre-output failure. This unknown-event rule does not depend on `native_prelude_whitelist`; compatibility staging still requires `prelude_staging`.
 
 Prelude events are:
 - Responses: `response.created`, `response.in_progress`, `response.queued`, `keepalive`, `response.metadata` (exact type only, with `stream.native_prelude_whitelist` on; revised 2026-10-22, see design §3.1), and `response.output_item.added`, `response.content_part.added` or `response.reasoning_summary_part.added` whose known fields are all empty (no text, no encrypted reasoning, no tool arguments, no unknown non-empty field);
 - Chat: a chunk that carries only the role, or an empty content delta;
 - Messages: `message_start`, `ping`, and `content_block_start` of an empty text or thinking block.
 
-#### Scenario: Unknown event is content
-- **WHEN** an upstream Responses stream sends an event type the gateway does not know before any content
-- **THEN** the event is treated as content and the request is no longer switched to another account.
+#### Scenario: External unknown metadata with strings remains staged (G2b B2)
+- **WHEN** an upstream sends an unknown type outside `response.*` and `codex.*`, with a valid unambiguous payload such as `{"type":"sub2api.gateway_ready","source":"synthetic-gateway","model_output":false}`
+- **THEN** strings are metadata, the frame remains staged, and neither the first-output deadline nor semantic-output time is started or stopped by it.
+
+#### Scenario: Unknown protocol event with an extra non-empty string is content
+- **WHEN** an unknown `response.*` or `codex.*` event carries an extra non-empty string, including nested or whitespace-only text, encrypted content or tool identity
+- **THEN** it remains visible content and a subsequent failure cannot transparently replay it.
+
+#### Scenario: Ambiguous unknown payload remains content
+- **WHEN** an unknown event has duplicate keys at the root, in a nested object or in an object inside an array, invalid JSON, a non-object payload, wrong identity types or more than 32 extra-field container levels
+- **THEN** it remains visible content; this recursive validation does not change known G2a/G2c event handling.
+
+#### Scenario: Payload type takes precedence over a conflicting SSE declaration
+- **WHEN** a service path receives SSE `event: response.output_text.delta` with payload `{"type":"relay.ready","delta":"synthetic"}` before client output
+- **THEN** the external unknown payload type determines B2 classification: after the structural checks pass, the frame remains staged until visible output or a successful terminal, or is discarded with a failed pre-output attempt before an eligible account switch.
+- **AND** this preserves the payload-type precedence present in 0.5.11. OpenAI SDK and Codex dispatch by payload type and ignore this external unknown type, so staging preserves their presentable content without loss, duplication or corruption and permits another account attempt on failure.
+- **AND** declaration-conflict checks in direct shared-classifier calls MUST NOT be described as a service-path guarantee; those checks still apply when a caller supplies the raw declaration, including the existing `response.metadata` to `codex.response.metadata` alias.
+
+#### Scenario: Existing known-event type resolution is preserved
+- **WHEN** SSE declares `relay.ready` but the payload type is the known `response.created`
+- **THEN** the legacy created prelude rule applies using the payload type.
+
+#### Scenario: Unknown event is released in order after semantic output
+- **WHEN** an upstream Responses stream sends an unrecognized event that passes the metadata checks, then sends visible output
+- **THEN** the event stays staged, does not count as semantic output, and is released before the later output in its original byte order.
+
+#### Scenario: Unknown event is discarded on pre-output timeout
+- **WHEN** an upstream Responses stream sends only unrecognized metadata events until the first-output deadline
+- **THEN** the attempt switches accounts and none of its staged events reach the client.
 
 #### Scenario: Codex metadata event is not prelude (CV-9)
 - **WHEN** an upstream sends `codex.response.metadata` after `response.created` and before any text, then fails

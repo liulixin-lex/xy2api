@@ -1312,7 +1312,7 @@ func TestProxyOpenAIWSHTTPBridgeSharedPreludeBoundary(t *testing.T) {
 	t.Cleanup(func() { resilience.Publish(before) })
 	resilience.Publish(resilience.Defaults())
 	gin.SetMode(gin.TestMode)
-	for _, event := range []string{"response.queued", "response.metadata", "codex.response.metadata", "codex.unknown"} {
+	for _, event := range []string{"response.queued", "response.metadata", "codex.response.metadata", "codex.unknown", "sub2api.gateway_ready"} {
 		t.Run(event, func(t *testing.T) {
 			body := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_boundary\"}}\n\n" + "data: {\"type\":\"" + event + "\"}\n\n" +
 				"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_is_overloaded\",\"message\":\"busy\"}}}\n\n"
@@ -1328,14 +1328,8 @@ func TestProxyOpenAIWSHTTPBridgeSharedPreludeBoundary(t *testing.T) {
 				return nil
 			})
 			var failover *UpstreamFailoverError
-			if event != "codex.unknown" {
-				require.ErrorAs(t, err, &failover)
-				require.Empty(t, writes)
-			} else {
-				require.False(t, errors.As(err, &failover))
-				require.NotEmpty(t, writes)
-				require.Equal(t, "response.created", gjson.GetBytes(writes[0], "type").String())
-			}
+			require.ErrorAs(t, err, &failover)
+			require.Empty(t, writes)
 		})
 	}
 }
