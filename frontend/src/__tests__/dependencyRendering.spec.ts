@@ -79,5 +79,6 @@ describe('installed rendering dependencies', () => {
     expect(content.textContent).toContain('Done')
   })
 
-  // classDef validation needs native CSSStyleSheet; see fixtures/renderingBrowser.ts.
+  // Mermaid classDef containment is covered by the native-browser evidence in
+  // .work/tasks/20261109-0513-allin/tfe-browser-evidence/; jsdom cannot validate CSS values.
 })

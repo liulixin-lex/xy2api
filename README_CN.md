@@ -328,7 +328,7 @@ cd xy2api/deploy
 #### 前置条件
 
 - Go 1.27.3（以 `backend/go.mod` 为准）
-- Node.js 18+
+- Node.js 22+
 - PostgreSQL 15+
 - Redis 7+
 
