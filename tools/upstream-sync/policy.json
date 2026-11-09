@@ -4243,6 +4243,18 @@
     {
       "path": "backend/internal/service/gemini_messages_compat_service.go",
       "value": "attemptGuard.observeDispatch(attemptStart)"
+    },
+    {
+      "path": "backend/internal/service/gateway_request.go",
+      "value": "func validateHaiku55MessagesRequest("
+    },
+    {
+      "path": "backend/internal/service/gateway_request.go",
+      "value": "toolType == \"computer_20251124\" && claudeAPI"
+    },
+    {
+      "path": "backend/internal/domain/constants.go",
+      "value": "\"claude-haiku-5-5\":          \"anthropic.claude-haiku-5-5\""
     }
   ],
   "forbidden_module_paths": [
