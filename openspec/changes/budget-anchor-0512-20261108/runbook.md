@@ -27,7 +27,7 @@
 - **T-a**：SQL-1b 返回任意行，即同一 key、同一 UTC 小时内既有无计时器迟发未送达，又有进入 abuse 状态。迟发按 `disconnect_unix_ms` 分小时，缺字段时退回日志时间；abuse 按日志时间分小时。abuse 一侧不按模式过滤，迟发一侧只计 `body_eof`。
 - **T-b**：任一实例 sink 的累计 `dropped_count` 或 `write_failed_count` 上升，且满足任一迟发条件：本次 `late_attempt_start` 的 `false:body_eof` 在 60 分钟窗口内 > 0，或 SQL-1c 返回行。SQL 查询失败另按下文处理。某个实例读不到，或发生非计划重启（身份变化或累计计数下降），也直接按 T-b 命中。
 
-**指标口径与巡检**：逐实例直连读取 `GET /api/v1/admin/ops/system-logs/health` 和 `GET /api/v1/admin/resilience/stats?window=15m`、`?window=60m`。sink 的累计数只与同一实例身份的上次成功读数比较；下降或身份变化视为重启；非计划重启直接按 T-b 命中，不把缺失当作 0。阶段 1、2 冻结非紧急重启和切流；必须重启时先跑 R0 并保存旧实例读数。迟发指标的 label 为 `<has_timer>:<budget_start_mode>`（如 `false:body_eof`），在 guard 决定后的派发前计数，在途即能看到，Warm/发送样本更新及 FinishTiming 不会重复计数。两条 Warn、请求时序和指标共用实际派发 owner 的冻结集合，handler/profile 预设不计数；后建 response-stage timer 不回写分类。Gemini 同号重试若仍受原共享 attempt guard 覆盖，记有计时器，但不改变发送起点、guard 或 plan。它是分钟桶的滑动窗口和，只看窗口内 > 0，不能比较相邻读数求增量，也不能据其下降推断重启。
+**指标口径与巡检**：逐实例直连读取 `GET /api/v1/admin/ops/system-logs/health` 和 `GET /api/v1/admin/resilience/stats?window=15m`、`?window=60m`。sink 的累计数只与同一实例身份的上次成功读数比较；下降或身份变化视为重启；非计划重启直接按 T-b 命中，不把缺失当作 0。阶段 1、2 冻结非紧急重启和切流；必须重启时先跑 R0 并保存旧实例读数。迟发指标的 label 为 `<has_timer>:<budget_start_mode>`（如 `false:body_eof`），在 guard 决定后的派发前计数，在途即能看到，Warm/发送样本更新及 FinishTiming 不会重复计数。两条 Warn、请求时序和指标共用实际派发 owner 的冻结集合，handler/profile 预设不计数；后建 response-stage timer 不回写分类。Gemini 同号重试若仍受原共享 attempt guard 覆盖，记有计时器，但不改变发送起点、guard 或 plan。它是分钟桶的滑动窗口和，只看窗口内 > 0，不能比较相邻读数求增量，也不能据其下降推断重启。桶满时迟发指标只合并 group/account ID，保留四种模式与 timer label，汇总行不带 group_id；T-b 按 label 汇总所有行（含无 group_id 的实例汇总行），不能先按分组过滤。
 
 例行每 10 分钟跑 R0；15 分钟窗口内有 `false:body_eof` 时，5 分钟后加跑一次，再恢复例行节奏。检查推迟时，加跑窗口取“距上次检查时长 + 5 分钟”，不超过 60 分钟。记录 `T_stage1 = body_eof 切换响应时刻 + 15 秒`，再次进入阶段 1 时重新记录；首小时的长窗口取 `now − T_stage1`，之后用 60 分钟。SQL 的日志下限也不早于 T_stage1，并按请求快照模式排除阶段 0 开始、阶段 1 才断开的 arrival 请求。分钟桶只有分钟精度，重进阶段 1 的同分钟旧 body_eof 事件可能使回滚偏保守，允许偶发多切一次，不能漏报。
 
@@ -159,6 +159,6 @@ R2 写库失败不会发布新配置。R2′ 蓝绿回退到预留的 0.5.11 镜
 
 库恢复后，先向不在 Caddy 上游的新版本实例发送 R2，并直连 GET 确认 arrival；再加入上游、撤下 0.5.11。不得用旧版 PUT 丢弃新键。K10 ⑫ 要实测旧版与已执行迁移的库兼容、只读库启动表现和忽略新增键；不以静态推断替代演练。
 
-K10 ④ 必须在请求仍阻塞于上游、尚未 FinishTiming 时看到 `false:body_eof`，随后模拟 sink 丢失，按 T-b 执行 R1–R4。另验证：跨整点断开、T-a0 不等 handler 返回、两条 Warn 丢失、窗口自然下降、SQL 超时重试/连续两轮失败、旧 arrival 请求跨阶段完成，以及快速重新进入阶段 1 时同分钟旧 body_eof 桶导致的保守命中。记录每次确认至切回的耗时；最终扣费单列事后核实。
+K10 ④ 必须在请求仍阻塞于上游、尚未 FinishTiming 时看到 `false:body_eof`，随后把共享分钟桶填满 4096 个 key、模拟两条 Warn 同时丢失及 SQL 正常返回空，确认实例汇总行仍有 `false:body_eof > 0`，按 T-b 执行 R1–R4。另验证：跨整点断开、T-a0 不等 handler 返回、两条 Warn 丢失、窗口自然下降、SQL 超时重试/连续两轮失败、旧 arrival 请求跨阶段完成，以及快速重新进入阶段 1 时同分钟旧 body_eof 桶导致的保守命中。记录每次确认至切回的耗时；最终扣费单列事后核实。
 
 本 runbook 不授权本实施分支操作生产；回滚历史边界见 [发布说明](release-notes.md)。

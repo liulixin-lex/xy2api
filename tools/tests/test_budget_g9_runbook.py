@@ -41,7 +41,7 @@ class BudgetG9RunbookTests(unittest.TestCase):
         self.assertIn("('<T_last>'::timestamptz - interval '5 minutes')", self.query("SQL-1c"))
 
     def test_inflight_metrics_and_unavailable_sql_are_explicit(self):
-        for text in ("false:body_eof", "尚未 FinishTiming", "连续两轮", "正常返回空结果", "临时状态", "R2′", "RestartCount", "分钟精度", "非计划重启", "某个实例读不到", "切换响应时刻 + 15 秒"):
+        for text in ("false:body_eof", "尚未 FinishTiming", "连续两轮", "正常返回空结果", "临时状态", "R2′", "RestartCount", "分钟精度", "非计划重启", "某个实例读不到", "切换响应时刻 + 15 秒", "4096", "不能先按分组过滤", "两条 Warn 同时丢失"):
             self.assertIn(text, self.text)
         self.assertNotIn("SQL-1（", self.text)
 
