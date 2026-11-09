@@ -430,7 +430,7 @@ func estimateOpsErrorLogJobBytes(entry *service.OpsInsertErrorLogInput) int64 {
 		size += len(*entry.UpstreamErrorDetail)
 	}
 	if entry.UpstreamErrorsJSON != nil {
-		size += len(*entry.UpstreamErrorsJSON)
+		size += service.OpsUpstreamErrorsLegacyJSONSize(*entry.UpstreamErrorsJSON)
 	}
 	return int64(size)
 }

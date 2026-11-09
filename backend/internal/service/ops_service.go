@@ -417,6 +417,40 @@ func SanitizeOpsUpstreamErrorsForQueue(entry *OpsInsertErrorLogInput) error {
 	return sanitizeOpsUpstreamErrors(entry)
 }
 
+// OpsUpstreamErrorsLegacyJSONSize returns the serialized size used for queue
+// admission before timeout diagnostics were added. The persisted JSON remains
+// unchanged; only the process-wide queue estimate excludes these observations.
+func OpsUpstreamErrorsLegacyJSONSize(raw string) int {
+	var events []*OpsUpstreamErrorEvent
+	if err := json.Unmarshal([]byte(raw), &events); err != nil {
+		return len(raw)
+	}
+	hasDiagnostics := false
+	for i, event := range events {
+		if event != nil && event.TimeoutDiagnostics != (resilience.TimeoutDiagnostics{}) {
+			hasDiagnostics = true
+		}
+		events[i] = opsUpstreamErrorWithoutDiagnostics(event)
+	}
+	if !hasDiagnostics {
+		return len(raw)
+	}
+	legacy, err := json.Marshal(events)
+	if err != nil {
+		return len(raw)
+	}
+	return len(legacy)
+}
+
+func opsUpstreamErrorWithoutDiagnostics(event *OpsUpstreamErrorEvent) *OpsUpstreamErrorEvent {
+	if event == nil {
+		return nil
+	}
+	legacy := *event
+	legacy.TimeoutDiagnostics = resilience.TimeoutDiagnostics{}
+	return &legacy
+}
+
 func (s *OpsService) RecordError(ctx context.Context, entry *OpsInsertErrorLogInput) error {
 	prepared, ok, err := s.prepareErrorLogInput(ctx, entry)
 	if err != nil {
@@ -682,13 +716,7 @@ func boundOpsUpstreamErrors(events []*OpsUpstreamErrorEvent) ([]*OpsUpstreamErro
 		if len(events)-i > opsUpstreamErrorsMaxEvents {
 			break
 		}
-		var legacy *OpsUpstreamErrorEvent
-		if events[i] != nil {
-			copy := *events[i]
-			copy.TimeoutDiagnostics = resilience.TimeoutDiagnostics{}
-			legacy = &copy
-		}
-		raw, err := json.Marshal(legacy)
+		raw, err := json.Marshal(opsUpstreamErrorWithoutDiagnostics(events[i]))
 		size := 0
 		if err == nil {
 			size = len(raw) + 1 // trailing comma / bracket share

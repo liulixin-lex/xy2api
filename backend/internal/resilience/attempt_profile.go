@@ -2,15 +2,19 @@ package resilience
 
 import "time"
 
-// AttemptProfile is the immutable scheduling snapshot used by all first-output
-// guards for one upstream attempt.
+// AttemptProfile is the scheduling snapshot used by first-output consumers for
+// one upstream attempt. AttemptStart is the actual send start; timer ownership
+// can use an earlier, stable timestamp while the request is being built.
 type AttemptProfile struct {
 	AccountID    int64
 	Model        string
 	AttemptStart time.Time
-	Warm         bool
-	Stream       bool
-	BodyBytes    int
+	// TimerOwnerStart stays fixed when preparation ends and AttemptStart is
+	// refreshed for send-time samples. Zero means AttemptStart owns the timer.
+	TimerOwnerStart time.Time `json:"-"`
+	Warm            bool
+	Stream          bool
+	BodyBytes       int
 }
 
 // SetAttemptProfile replaces the current attempt snapshot.
@@ -26,7 +30,14 @@ func (s *RequestState) SetAttemptProfile(profile AttemptProfile) {
 	}
 	s.mu.Unlock()
 	b.MarkAttemptStarted()
-	s.noteAttemptStart(profile.AttemptStart)
+	s.noteAttemptStart(profile.timerOwnerStart())
+}
+
+func (p AttemptProfile) timerOwnerStart() time.Time {
+	if !p.TimerOwnerStart.IsZero() {
+		return p.TimerOwnerStart
+	}
+	return p.AttemptStart
 }
 
 // AttemptProfile returns the current attempt snapshot.
