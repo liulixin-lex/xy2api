@@ -4243,6 +4243,66 @@
     {
       "path": "backend/internal/service/gemini_messages_compat_service.go",
       "value": "attemptGuard.observeDispatch(attemptStart)"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_ops_redaction.go",
+      "value": "const minimumCredentialSubstringRunes = 8"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_ops_redaction.go",
+      "value": "text = replaceOpenAITerminalOpsCredentialValue(text, secret.text, secret.substring)"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_ops_sanitizer_parity_test.go",
+      "value": "func TestOpenAITerminalOpsShortCredentialBoundaries(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/gateway_convert_stream_test.go",
+      "value": "func TestGatewayConvertFailedAttemptLeavesNoTrace(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/gateway_claude_oauth_body.go",
+      "value": "!omitDefaultTemperature"
+    },
+    {
+      "path": "backend/internal/service/resilience_timeout_observe.go",
+      "value": "timeoutMetricModel(plan.Model())+\":\"+bucket"
+    },
+    {
+      "path": "backend/internal/service/resilience_timeout_observe.go",
+      "value": "return \"other\""
+    },
+    {
+      "path": "backend/internal/service/resilience_timeout_observe_test.go",
+      "value": "func TestTimeoutPlanMetricModelCardinality(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_ops_redaction.go",
+      "value": "value, ok = credAccount.GetCredential(key), true"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_ops_redaction.go",
+      "value": "json.Marshal(redactOpenAITerminalOpsJSON(value, redactText))"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_ops_sanitizer_parity_test.go",
+      "value": "func TestOpenAITerminalOpsDecodedCredentialsNeverReachQueue(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/resilience_timeout_observe.go",
+      "value": "for _, model := range antigravity.DefaultModels() {"
+    },
+    {
+      "path": "backend/internal/service/resilience_timeout_observe_test.go",
+      "value": "func TestTimeoutMetricIncludesAllBuiltinCatalogs(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_ops_redaction.go",
+      "value": "if containsCredential(redacted) || containsCredential(string(encoded)) {"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_ops_sanitizer_parity_test.go",
+      "value": "func TestOpenAITerminalOpsSerializationCannotRecreateCredentials(t *testing.T) {"
     }
   ],
   "forbidden_module_paths": [
