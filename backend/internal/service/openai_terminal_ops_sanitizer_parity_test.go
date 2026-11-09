@@ -80,6 +80,7 @@ func TestOpenAITerminalOpsShortCredentialBoundaries(t *testing.T) {
 				{"sensitive_field", "api_key", "a", "Bearer a validation", "Bearer [redacted] validation"},
 				{"identity_runtime", "agent_runtime_id", "a", "a validation", "[redacted] validation"},
 				{"identity_task", "task_id", "a", "a validation", "[redacted] validation"},
+				{"numeric_identity", "task_id", "123", "x123y 123", "x123y [redacted]"},
 			} {
 				if (tc.key == "agent_runtime_id" || tc.key == "task_id") && mode != OpenAIAuthModeAgentIdentity {
 					continue
@@ -88,6 +89,9 @@ func TestOpenAITerminalOpsShortCredentialBoundaries(t *testing.T) {
 					account := terminalRejectionTestAccount(1, "relay-a.example")
 					account.Type = mode
 					account.Credentials = map[string]any{tc.key: tc.secret}
+					if tc.name == "numeric_identity" {
+						account.Credentials[tc.key] = 123
+					}
 					if mode == OpenAIAuthModeAgentIdentity {
 						account.Type = AccountTypeOAuth
 						account.Credentials[openAIAuthModeCredentialKey] = mode

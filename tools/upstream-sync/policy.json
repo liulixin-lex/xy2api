@@ -4275,6 +4275,10 @@
     {
       "path": "backend/internal/service/resilience_timeout_observe_test.go",
       "value": "func TestTimeoutPlanMetricModelCardinality(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_ops_redaction.go",
+      "value": "value, ok = credAccount.GetCredential(key), true"
     }
   ],
   "forbidden_module_paths": [

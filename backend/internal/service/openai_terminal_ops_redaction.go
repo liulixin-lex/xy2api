@@ -49,9 +49,15 @@ func redactOpenAITerminalOpsSensitiveBody(ctx context.Context, repo AccountRepos
 	}
 	var secrets []credentialValue
 	if credAccount != nil {
+		identity := credAccount.IsOpenAIAgentIdentity()
 		for key, raw := range credAccount.Credentials {
-			identityKey := credAccount.IsOpenAIAgentIdentity() && (key == "agent_runtime_id" || key == "task_id")
-			if value, ok := raw.(string); ok && (isSensitiveKey(key) || identityKey) {
+			identityKey := identity && (key == "agent_runtime_id" || key == "task_id")
+			value, ok := raw.(string)
+			if identity {
+				// Preserve the identity scrubber's legacy numeric-value handling.
+				value, ok = credAccount.GetCredential(key), true
+			}
+			if ok && (isSensitiveKey(key) || identityKey) {
 				if value = strings.TrimSpace(value); value != "" {
 					substring := utf8.RuneCountInString(value) >= minimumCredentialSubstringRunes
 					secrets = append(secrets, credentialValue{value, substring})
