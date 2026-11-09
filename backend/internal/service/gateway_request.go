@@ -585,11 +585,13 @@ func validateClaude55RequestForAccount(body []byte, model string, account *Accou
 }
 
 // Only inspect native Messages bodies: token counting and unconverted OpenAI
-// requests do not establish a generation prefill. Official rules and Bedrock exception:
+// requests do not establish a generation prefill. These rules are documented
+// for the Claude API; leave Bedrock and other managed platforms to their upstream.
 // https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide#replace-assistant-prefill
 // https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool#migrate-from-computer-20251124
 func validateHaiku55MessagesRequest(body []byte, model string, account *Account) error {
-	if !claude.IsHaiku55(model) {
+	claudeAPI := account == nil || account.Type == AccountTypeAPIKey || account.IsOAuth()
+	if !claudeAPI || !claude.IsHaiku55(model) {
 		return nil
 	}
 	messages := gjson.GetBytes(body, "messages").Array()
@@ -612,8 +614,7 @@ func validateHaiku55MessagesRequest(body []byte, model string, account *Account)
 	}
 	for i, tool := range gjson.GetBytes(body, "tools").Array() {
 		toolType := tool.Get("type").String()
-		claudeAPI := account == nil || account.Type == AccountTypeAPIKey || account.IsOAuth()
-		if toolType == "computer_20250124" || (toolType == "computer_20251124" && claudeAPI) {
+		if toolType == "computer_20250124" || toolType == "computer_20251124" {
 			return fmt.Errorf("claude-haiku-5-5 does not support tools[%d].type=%s on this platform; use computer_toolset_20260801", i, toolType)
 		}
 	}

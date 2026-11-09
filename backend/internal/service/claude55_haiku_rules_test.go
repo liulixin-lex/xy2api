@@ -25,7 +25,11 @@ func TestHaiku55MessagesRules(t *testing.T) {
 		{"signed continuation", `{"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"","signature":"sig"},{"type":"text","text":"continue"}]}]}`, AccountTypeAPIKey, ""},
 		{"credit continuation", `{"fallback_credit_token":"fixture","messages":[{"role":"assistant","content":"continue"}]}`, AccountTypeAPIKey, ""},
 		{"legacy 0124", `{"tools":[{"type":"computer_20250124","name":"computer"}]}`, AccountTypeAPIKey, "computer_20250124"},
-		{"legacy 0124 bedrock", `{"tools":[{"type":"computer_20250124","name":"computer"}]}`, AccountTypeBedrock, "computer_20250124"},
+		{"bedrock 0124 deferred", `{"tools":[{"type":"computer_20250124","name":"computer"}]}`, AccountTypeBedrock, ""},
+		{"bedrock text prefill deferred", `{"messages":[{"role":"assistant","content":"prefix"}]}`, AccountTypeBedrock, ""},
+		{"bedrock block prefill thinking off deferred", `{"thinking":{"type":"disabled"},"messages":[{"role":"assistant","content":[{"type":"text","text":"prefix"}]}]}`, AccountTypeBedrock, ""},
+		{"vertex prefill deferred", `{"messages":[{"role":"assistant","content":"prefix"}]}`, AccountTypeServiceAccount, ""},
+		{"vertex 0124 deferred", `{"tools":[{"type":"computer_20250124","name":"computer"}]}`, AccountTypeServiceAccount, ""},
 		{"legacy 1124", `{"tools":[{"type":"computer_20251124","name":"computer"}]}`, AccountTypeAPIKey, "computer_20251124"},
 		{"bedrock 1124 accepted", `{"tools":[{"type":"computer_20251124","name":"computer"}]}`, AccountTypeBedrock, ""},
 		{"vertex 1124 deferred", `{"tools":[{"type":"computer_20251124","name":"computer"}]}`, AccountTypeServiceAccount, ""},
@@ -52,7 +56,7 @@ func TestHaiku55MessagesRules(t *testing.T) {
 }
 
 func TestHaiku55MessagesRulesRejectBeforeUpstream(t *testing.T) {
-	for _, typ := range []string{AccountTypeAPIKey, AccountTypeOAuth, AccountTypeSetupToken, AccountTypeBedrock} {
+	for _, typ := range []string{AccountTypeAPIKey, AccountTypeOAuth, AccountTypeSetupToken} {
 		for _, payload := range []string{
 			`"messages":[{"role":"assistant","content":"prefix"}]`,
 			`"messages":[{"role":"user","content":"hi"}],"tools":[{"type":"computer_20250124","name":"computer"}]`,
@@ -60,7 +64,7 @@ func TestHaiku55MessagesRulesRejectBeforeUpstream(t *testing.T) {
 			t.Run(typ+payload, func(t *testing.T) {
 				account := &Account{ID: 1, Platform: PlatformAnthropic, Type: typ, Credentials: map[string]any{"model_mapping": map[string]any{"public-haiku": "claude-haiku-5-5"}}}
 				model := "claude-haiku-5-5"
-				if typ == AccountTypeAPIKey || typ == AccountTypeBedrock {
+				if typ == AccountTypeAPIKey {
 					model = "public-haiku"
 				}
 				raw := []byte(`{"model":"` + model + `","max_tokens":64,` + payload + `}`)
@@ -128,21 +132,31 @@ func TestHaiku55CountTokensDoesNotApplyGenerationRules(t *testing.T) {
 	require.NotNil(t, upstream.lastReq)
 }
 
-func TestHaiku55BedrockLegacy1124ForwardAllowed(t *testing.T) {
-	raw := []byte(`{"model":"claude-haiku-5-5","max_tokens":64,"messages":[{"role":"user","content":"hi"}],"tools":[{"type":"computer_20251124","name":"computer","display_width_px":1024,"display_height_px":768}]}`)
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
-	c.Request.Header.Set("anthropic-beta", "computer-use-2025-11-24")
-	upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"id":"msg_fixture","type":"message","role":"assistant","model":"claude-haiku-5-5","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))}}
-	cfg := &config.Config{}
-	svc := &GatewayService{cfg: cfg, httpUpstream: upstream, responseHeaderFilter: compileResponseHeaderFilter(cfg), rateLimitService: &RateLimitService{}}
-	a := &Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeBedrock, Credentials: map[string]any{"auth_mode": "apikey", "api_key": "fixture", "aws_region": "us-east-1"}}
-	_, err := svc.Forward(context.Background(), c, a, &ParsedRequest{Model: "claude-haiku-5-5", Body: NewRequestBodyRef(raw)})
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.NotNil(t, upstream.lastReq)
-	require.Equal(t, "computer_20251124", gjson.GetBytes(upstream.lastBody, "tools.0.type").String())
-	require.Contains(t, upstream.lastReq.URL.Path, "anthropic.claude-haiku-5-5")
-	t.Logf("status=%d upstream_called=%t tool=%s", rec.Code, upstream.lastReq != nil, gjson.GetBytes(upstream.lastBody, "tools.0.type").String())
+func TestHaiku55BedrockGenerationRulesForwardAllowed(t *testing.T) {
+	for _, tc := range []struct{ name, payload, toolType, finalRole string }{
+		{"text prefill", `"messages":[{"role":"assistant","content":"prefix"}]`, "", "assistant"},
+		{"block prefill thinking off", `"thinking":{"type":"disabled"},"messages":[{"role":"assistant","content":[{"type":"text","text":"prefix"}]}]`, "", "assistant"},
+		{"computer_20250124", `"messages":[{"role":"user","content":"hi"}],"tools":[{"type":"computer_20250124","name":"computer","display_width_px":1024,"display_height_px":768}]`, "computer_20250124", "user"},
+		{"computer_20251124", `"messages":[{"role":"user","content":"hi"}],"tools":[{"type":"computer_20251124","name":"computer","display_width_px":1024,"display_height_px":768}]`, "computer_20251124", "user"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := []byte(`{"model":"public-haiku","max_tokens":64,` + tc.payload + `}`)
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"id":"msg_fixture","type":"message","role":"assistant","model":"claude-haiku-5-5","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))}}
+			cfg := &config.Config{}
+			svc := &GatewayService{cfg: cfg, httpUpstream: upstream, responseHeaderFilter: compileResponseHeaderFilter(cfg), rateLimitService: &RateLimitService{}}
+			a := &Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeBedrock, Credentials: map[string]any{"auth_mode": "apikey", "api_key": "fixture", "aws_region": "us-east-1", "model_mapping": map[string]any{"public-haiku": "claude-haiku-5-5"}}}
+			_, err := svc.Forward(context.Background(), c, a, &ParsedRequest{Model: "public-haiku", Body: NewRequestBodyRef(raw)})
+			require.NoError(t, err)
+			require.Equal(t, http.StatusOK, rec.Code)
+			require.NotNil(t, upstream.lastReq)
+			require.Equal(t, tc.toolType, gjson.GetBytes(upstream.lastBody, "tools.0.type").String())
+			require.Equal(t, tc.finalRole, gjson.GetBytes(upstream.lastBody, "messages.0.role").String())
+			require.JSONEq(t, gjson.GetBytes(raw, "messages").Raw, gjson.GetBytes(upstream.lastBody, "messages").Raw)
+			require.Contains(t, upstream.lastReq.URL.Path, "anthropic.claude-haiku-5-5")
+			t.Logf("status=%d upstream_called=%t role=%s tool=%s", rec.Code, upstream.lastReq != nil, tc.finalRole, tc.toolType)
+		})
+	}
 }

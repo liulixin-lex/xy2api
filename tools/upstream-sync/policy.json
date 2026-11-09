@@ -4250,7 +4250,7 @@
     },
     {
       "path": "backend/internal/service/gateway_request.go",
-      "value": "toolType == \"computer_20251124\" && claudeAPI"
+      "value": "if !claudeAPI || !claude.IsHaiku55(model) {"
     },
     {
       "path": "backend/internal/domain/constants.go",
