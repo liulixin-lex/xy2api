@@ -93,6 +93,8 @@ func TestTimeoutPlanResponseStageAndZero(t *testing.T) {
 	p := st.ResponseStagePlan(t0.Add(238 * time.Second))
 	require.Equal(t, 2*time.Second, p.Effective())
 	require.Equal(t, "response_stage_remaining", p.Diagnostics().TimeoutSource)
+	require.Zero(t, p.tier, "response stage has no attempt tier")
+	require.False(t, p.fullTier, "fullTier is not applicable without a tier")
 	require.False(t, p.Applied())
 	require.False(t, p.Diagnostics().WouldBudgetCut)
 	require.False(t, p.Diagnostics().CutAfterFullTier)

@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -30,18 +31,20 @@ func (*geminiStreamStallError) Error() string { return "Gemini stream stalled" }
 type geminiAttemptKey struct{}
 
 type geminiAttempt struct {
-	mu       sync.Mutex
-	ctx      context.Context
-	parent   context.Context
-	cancel   context.CancelCauseFunc
-	timer    *time.Timer
-	timeout  time.Duration
-	plan     resilience.TimeoutPlan
-	stall    time.Duration
-	output   bool
-	terminal bool
-	phase    string
-	protocol string
+	mu        sync.Mutex
+	ctx       context.Context
+	parent    context.Context
+	cancel    context.CancelCauseFunc
+	timer     *time.Timer
+	timeout   time.Duration
+	plan      resilience.TimeoutPlan
+	stall     time.Duration
+	output    bool
+	terminal  bool
+	phase     string
+	protocol  string
+	unique    bool
+	keepalive bool
 }
 
 func geminiTextRequest(model, action string, body []byte) bool {
@@ -77,6 +80,9 @@ func newGeminiAttempt(ctx context.Context, account *Account, model, action strin
 	g.headerWait()
 	if account == nil || account.Platform != PlatformGemini || !geminiTextRequest(model, action, body) {
 		return g
+	}
+	if stream && resilience.Current().KeepaliveOn() {
+		g.unique = Resilience().soleCandidate(ctx, resilience.StateFrom(ctx).GroupID(), account.ID)
 	}
 	if stream && resilience.Current().StallOn() {
 		g.stall = time.Duration(resilience.Current().Stall.TextStallSeconds) * time.Second
@@ -272,7 +278,7 @@ func (g *geminiAttempt) outputStarted() bool {
 
 func geminiStreamMayWrite(resp *http.Response) bool {
 	g := geminiAttemptOf(resp)
-	return g == nil || g.timeout <= 0 || g.outputStarted()
+	return g == nil || (g.timeout <= 0 && !g.keepalive) || g.outputStarted()
 }
 
 // Native passthrough stages every prelude byte, including metadata and SSE
@@ -319,9 +325,42 @@ func (w *geminiNativeStreamWriter) flush() error {
 	return nil
 }
 
-// Native upstreams may ignore alt=sse and send JSON. Keep that response intact,
-// collecting it under the same cutoff before the existing passthrough loop.
+// Gemini upstreams may ignore alt=sse. Feed JSON objects (or each array element)
+// through the existing SSE consumers without losing content or usage fields.
+func geminiJSONStreamReader(c *gin.Context, resp *http.Response, cfg *config.Config) (io.Reader, error) {
+	if !strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "application/json") {
+		return resp.Body, nil
+	}
+	body, err := ReadUpstreamResponseBody(resp.Body, cfg, c, openAITooLargeError)
+	if err = completeGeminiResponse(resp, err); err != nil {
+		return nil, err
+	}
+	body = bytes.TrimSpace(body)
+	events := []json.RawMessage{body}
+	if len(body) > 0 && body[0] == '[' {
+		if err := json.Unmarshal(body, &events); err != nil {
+			return nil, err
+		}
+	}
+	var frames bytes.Buffer
+	for _, event := range events {
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, event); err != nil {
+			return nil, err
+		}
+		_, _ = frames.WriteString("data: ")
+		_, _ = frames.Write(compact.Bytes())
+		_, _ = frames.WriteString("\n\n")
+	}
+	return bytes.NewReader(frames.Bytes()), nil
+}
+
+// Preserve native JSON bytes unless a heartbeat already committed SSE. The
+// caller keeps an uncommitted heartbeat suspended throughout a JSON fallback.
 func geminiNativeStreamReader(c *gin.Context, resp *http.Response, cfg *config.Config) (io.Reader, error) {
+	if PreOutputKeepaliveCommitted(c) {
+		return geminiJSONStreamReader(c, resp, cfg)
+	}
 	g := geminiAttemptOf(resp)
 	if g == nil || g.timeout <= 0 || !strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "application/json") {
 		return resp.Body, nil

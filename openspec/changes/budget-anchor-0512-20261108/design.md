@@ -6,7 +6,7 @@
 
 T0 = Started()，Te = 首次成功读到 EOF 的时刻。KindText、budget_start=body_eof 且 Te−T0≥1 s 时 anchor=Te，其余 anchor=T0。D=min(anchor+base,T0+290 s)。图片预算无截止；nil Budget 不产生截止。首次生成计时器或设置 AttemptProfile 后冻结锚点；重复接收只计数。
 
-锚点只用于截止。spent=start−T0，首试 lastMark=T0，≥60 s 即账号级失败的定义不改动。AttemptTimeout 非末候选=min(Remaining,max(tier_eff,spent))，末候选=Remaining。上传、出首字后的阶段不新增强制取消；进行中的尝试仍由其已安装计时器约束。body_eof 下，CanAttempt、ConsumeInPlaceRetry、ClampWait 与等槽等待若能确认下一次尝试由现有计时器覆盖则沿用 D；无法判断或无计时器的准入与等待沿用 arrival 上限 T0+base（迟发判据为 T0+base−2 s）。arrival 模式保持不变。
+锚点只用于截止。spent=start−T0，首试 lastMark=T0，≥60 s 即账号级失败的定义不改动。AttemptTimeout 非末候选=min(Remaining,max(tier_eff,spent))，末候选=Remaining。上传、出首字后的阶段不新增强制取消；进行中的尝试仍由其已安装计时器约束。body_eof 下，CanAttempt、ConsumeInPlaceRetry、ClampWait 与等槽等待若能确认下一次尝试由现有计时器覆盖则沿用 D；无法判断或无计时器的准入与等待沿用 arrival 截止 T0+base；新尝试准入保留 2 s 窗口（迟发判据为 T0+base−2 s）。arrival 模式保持不变。
 
 性质 M 来自 D_new≥D_old 与截止消费者的单调性。Remaining 过期后下限为 1 ns，故“剩余恰增 δ”只在首次旧截止约束前成立。ER-3 是有限轨迹回归检查，不是任意输入的数学证明。
 
@@ -14,7 +14,7 @@ T0 = Started()，Te = 首次成功读到 EOF 的时刻。KindText、budget_start
 
 每次创建或重算计时器时构造 TimeoutPlan，包含 seq、account/model、start、tier_eff、planned、effective、remaining、source、would、cut_after_full_tier、applied。remaining 是构造时的值；cut_after_full_tier := remaining_at_plan >= tier_eff（不受 would 门控），等号算已给满；派生观测字段 budget_cut_after_full_tier := would && cut_after_full_tier。would 只在 remaining < planned 的 remaining_cap / last_candidate_budget 路径成立。applied = would && !cut_after_full_tier && attribution=enforce。
 
-没有档位（Anthropic 响应阶段、WS 或 tier_eff≤0）applied=false。Gemini 末候选不新增计时器。计时器触发后只读它持有的 plan，不用可变 profile 或 elapsed 重算 applied；planned/Reason、Warm/Stream、hold 样本模型/体积及 !planned 的 HandleStreamTimeout 仍按现有 profile 读取。
+没有档位（Anthropic 响应阶段、WS 或 tier_eff≤0）applied=false；响应阶段没有 tier，fullTier 不适用且不参与 cut attribution。Gemini 末候选不新增计时器。计时器触发后只读它持有的 plan，不用可变 profile 或 elapsed 重算 applied；planned/Reason、Warm/Stream、hold 样本模型/体积及 !planned 的 HandleStreamTimeout 仍按现有 profile 读取。
 
 UpstreamFailoverError 挂 BudgetCutPlan，BudgetCutApplied(err) 为进程内唯一判定入口。既有 planned 豁免 HandleStreamTimeout、API-key 健康熔断、OpenAI SessionFailure；applied 仅追加豁免慢连击、latency-hold、近期健康展示和 share。applied 但非 planned 仍触发前三项；高级调度器失败上报、Gemini breaker、Anthropic/Gemini SessionFailure 不变。U11 钉住 applied FOT 仍上报失败。
 
@@ -30,6 +30,6 @@ OpenAI 派出只在真实 HTTP 传输前计一次；插件提前失败不计、W
 
 ## T8–T11 旧契约同步
 
-T8：pre-output-keepalive 中的固定 240 s 改为相对 D。T9：预算场景改为相对 D，无计时器路径新尝试最晚 D−2 s。T10：旧 design/runbook 与现行文档使用 D，并说明 Gemini 末候选风险。T11：≥60 s 账号级定义不改动，从到达起算；E2/E4 移至第二期待探针和数据。
+T8：pre-output-keepalive 中的固定 240 s 改为相对 D。T9：有计时器的预算场景相对 D；无计时器或无法判断计时器的路径沿用 arrival 截止 T0+base，等待不提前结束，新尝试准入保留 2 s 窗口。T10：旧 design/runbook 与现行文档使用 D，并说明 Gemini 末候选风险。T11：≥60 s 账号级定义不改动，从到达起算；E2/E4 移至第二期待探针和数据。
 
 正常 arrival 准入不产生迟发，隐藏重放绕过准入时计数与 Warn 仍可非零，仅增加观测。Warn 包含 request_id/client_request_id；abuse_guard 仅证明进入 abuse 状态。G9 只作迟发观测；runbook 说明观测与（PM 决定后）切回流程。

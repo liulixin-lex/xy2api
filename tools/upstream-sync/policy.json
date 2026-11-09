@@ -4303,6 +4303,46 @@
     {
       "path": "backend/internal/service/openai_terminal_ops_sanitizer_parity_test.go",
       "value": "func TestOpenAITerminalOpsSerializationCannotRecreateCredentials(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/gemini_messages_compat_service.go",
+      "value": "attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, req.Stream, attemptGuard.unique, attemptGuard.protocol)"
+    },
+    {
+      "path": "backend/internal/service/gemini_messages_compat_service.go",
+      "value": "attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, stream, attemptGuard.unique, attemptGuard.protocol)"
+    },
+    {
+      "path": "backend/internal/service/gemini_chat_completions_compat_service.go",
+      "value": "attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, clientStream, attemptGuard.unique, attemptGuard.protocol)"
+    },
+    {
+      "path": "backend/internal/handler/gemini_v1beta_handler.go",
+      "value": "defer stopPreOutputKeepalive(c)"
+    },
+    {
+      "path": "backend/internal/repository/group_quality_gate_repo.go",
+      "value": "CASE WHEN ev->>'budget_cut_applied' IN ('true','false') THEN (ev->>'budget_cut_applied')::boolean ELSE false END"
+    },
+    {
+      "path": "backend/internal/repository/share_scheduling_repo.go",
+      "value": "CASE WHEN ev->>'budget_cut_applied' IN ('true','false') THEN (ev->>'budget_cut_applied')::boolean ELSE false END"
+    },
+    {
+      "path": "backend/internal/mcp/runtime_health.go",
+      "value": "CASE WHEN ev->>'budget_cut_applied' IN ('true','false') THEN (ev->>'budget_cut_applied')::boolean ELSE false END"
+    },
+    {
+      "path": "backend/internal/service/resilience_gemini_attempt.go",
+      "value": "func geminiJSONStreamReader(c *gin.Context, resp *http.Response, cfg *config.Config) (io.Reader, error)"
+    },
+    {
+      "path": "backend/internal/service/gemini_messages_compat_service.go",
+      "value": "jsonAsSSE := jsonFallback && PreOutputKeepaliveCommitted(c)"
+    },
+    {
+      "path": "backend/internal/service/gemini_chat_completions_compat_service.go",
+      "value": "upstreamBody, err := geminiJSONStreamReader(c, resp, s.cfg)"
     }
   ],
   "forbidden_module_paths": [

@@ -113,6 +113,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 	)
 
 	attemptGuard := newGeminiAttempt(ctx, account, mappedModel, "generateContent", geminiReq, clientStream, PreOutputProtocolChat, startTime)
+	attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, clientStream, attemptGuard.unique, attemptGuard.protocol)
 	defer func() {
 		retErr = attemptGuard.finish(c, s.rateLimitService, account, retErr)
 		attemptGuard.close()
@@ -132,9 +133,6 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 
 		attemptGuard.headerWait()
 		attemptStart := time.Now()
-		if attempt == 1 {
-			attemptStart = startTime
-		}
 		resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: attemptStart})
 		attemptGuard.observeDispatch(attemptStart)
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
@@ -542,6 +540,7 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 		return nil, errors.New("streaming not supported")
 	}
 
+	resumeGeminiPreOutputKeepalive(c, resp)
 	anthState := apicompat.NewAnthropicEventToResponsesState()
 	anthState.Model = originalModel
 	ccState := apicompat.NewResponsesEventToChatState()
@@ -631,7 +630,11 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 		return disconnected
 	}
 
-	reader := bufio.NewReader(resp.Body)
+	upstreamBody, err := geminiJSONStreamReader(c, resp, s.cfg)
+	if err != nil {
+		return nil, err
+	}
+	reader := bufio.NewReader(upstreamBody)
 	for {
 		line, err := reader.ReadString('\n')
 		if len(line) > 0 {

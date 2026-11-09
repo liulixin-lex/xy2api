@@ -103,7 +103,8 @@ func (s *RequestState) PlanAttemptTimeout(tier time.Duration, last bool, start t
 	return p
 }
 
-// ResponseStagePlan has no tier and never participates in cut attribution.
+// ResponseStagePlan has no tier; fullTier is intentionally not applicable and
+// this stage never participates in cut attribution.
 func (s *RequestState) ResponseStagePlan(start time.Time) TimeoutPlan {
 	b := s.Budget()
 	if b == nil {

@@ -2234,8 +2234,6 @@
           "\"github.com/tidwall/sjson\"",
           "resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{",
           "attemptStart := time.Now()",
-          "if attempt == 1 {",
-          "attemptStart = startTime",
           "}",
           "AccountID: account.ID, Model: originalModel, AttemptStart: attemptStart, Stream: req.Stream, BodyBytes: len(geminiReq),",
           "})",
@@ -2256,8 +2254,6 @@
           "}",
           "resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{",
           "attemptStart := time.Now()",
-          "if attempt == 1 {",
-          "attemptStart = startTime",
           "}",
           "AccountID: account.ID, Model: originalModel, AttemptStart: attemptStart, Stream: stream, BodyBytes: len(body),",
           "})",
@@ -2321,8 +2317,6 @@
           "s.handleGeminiUpstreamErrorForAction(ctx, account, statusCode, headers, body, true, requestedModel...)",
           "s.rateLimitService.handleUpstreamError(ctx, account, statusCode, headers, body, inference, requestedModel...)",
           "}",
-          "}",
-          "}",
           "NonInference:           nonInference,",
           "ResilienceCategory: category,",
           "ResilienceCategory: category,",
@@ -2349,6 +2343,40 @@
         "added": [
           "attemptGuard.observeDispatch(attemptStart)",
           "attemptGuard.observeDispatch(attemptStart)"
+        ]
+      },
+      {
+        "block": "gemini-pre-output-0513",
+        "note": "Gemini sole-candidate pre-output heartbeat and actual send AttemptStart; preserve shared timer ownership.",
+        "removed": [],
+        "added": [
+          "attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, req.Stream, attemptGuard.unique, attemptGuard.protocol)",
+          "attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, stream, attemptGuard.unique, attemptGuard.protocol)",
+          "resumeGeminiPreOutputKeepalive(c, resp)",
+          "resumeGeminiPreOutputKeepalive(c, resp)"
+        ]
+      },
+      {
+        "block": "gemini-json-fallback-0513",
+        "note": "Keep native fallback JSON byte-identical before heartbeat commit; frame committed JSON as SSE and normalize compat JSON through existing stream converters.",
+        "removed": [
+          "reader := bufio.NewReader(resp.Body)"
+        ],
+        "added": [
+          "// Headers suspended the heartbeat. JSON passthrough must not commit SSE",
+          "// while its body is still arriving; an already committed stream keeps beating.",
+          "contentType = \"text/event-stream\"",
+          "if !jsonFallback || jsonAsSSE {",
+          "if err != nil {",
+          "if jsonAsSSE {",
+          "jsonAsSSE := jsonFallback && PreOutputKeepaliveCommitted(c)",
+          "jsonFallback := strings.HasPrefix(strings.ToLower(contentType), \"application/json\")",
+          "reader := bufio.NewReader(upstreamBody)",
+          "return nil, err",
+          "upstreamBody, err := geminiJSONStreamReader(c, resp, s.cfg)",
+          "}",
+          "}",
+          "}"
         ]
       }
     ]
