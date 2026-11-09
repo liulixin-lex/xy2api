@@ -14,12 +14,11 @@ function withI18n<T>(use: () => T): T {
   return result as T
 }
 
-// The test build of vue-i18n is runtime-only: t() returns the key, while te()
-// still checks the real locale messages, which is what the fallback relies on.
+// Vue I18n v11's JIT runtime compiles locale messages in the test build.
 describe('useShareSchedulingLabels', () => {
   it('translates known codes and shows unknown or retired ones as they are', () => {
     const labels = withI18n(() => useShareSchedulingLabels())
-    expect(labels.reason('affinity_hit')).toBe('admin.shareScheduling.reasons.affinity_hit')
+    expect(labels.reason('affinity_hit')).toBe('会话保持命中')
     // Counters written before the upgrade can still carry retired codes.
     expect(labels.reason('original')).toBe('original')
     expect(labels.reason('drain_cold')).toBe('drain_cold')
@@ -47,6 +46,6 @@ describe('useShareSchedulingLabels', () => {
     expect(text).toContain('legacy_class')
     expect(text).toContain('original')
     expect(text).toContain('old_skip_reason')
-    expect(text).toContain('admin.shareScheduling.reasons.affinity_hit')
+    expect(text).toContain('会话保持命中')
   })
 })
