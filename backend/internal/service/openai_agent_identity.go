@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -29,12 +28,6 @@ const (
 )
 
 var openAIAgentIdentityAuthAPIBaseURL = agentIdentityAuthAPIBaseURL
-
-var (
-	openAIJSONSensitiveCredentialField = regexp.MustCompile(`(?i)(["']?(?:agent_private_key|agent_runtime_id|task_id|access_token|refresh_token|id_token|api_key|session_key|cookie|authorization|token|secret)["']?\s*:\s*)"(?:\\.|[^"\\])*"`)
-	openAIAssignmentSensitiveField     = regexp.MustCompile(`(?i)(\b(?:agent_private_key|agent_runtime_id|task_id|access_token|refresh_token|id_token|api_key|session_key|cookie|authorization|token|secret)\b\s*[:=]\s*)[^\s"',;}\]]+`)
-	openAIBearerCredential             = regexp.MustCompile(`(?i)\bBearer\s+[^\s"',}]+`)
-)
 
 var agentIdentityTaskLocks sync.Map // map[int64]*sync.Mutex
 
@@ -475,22 +468,17 @@ func (s *OpenAIGatewayService) isAgentIdentityAccount(ctx context.Context, accou
 // Identity responses should not echo these values, but keeping this boundary
 // defensive prevents accidental disclosure if an upstream error does.
 func redactAgentIdentitySensitiveBodyForAccount(ctx context.Context, repo AccountRepository, account *Account, body []byte) []byte {
-	if len(body) == 0 {
+	if account == nil || len(body) == 0 {
 		return body
 	}
 	credAccount := account
 	if account != nil && account.IsShadow() {
-		// Unknown parent credentials may appear anywhere in an echoed error.
-		// Discard the evidence instead of allowing a repository outage to
-		// turn this persistence boundary into a fail-open path.
-		if repo == nil {
-			return []byte("[redacted: credentials unavailable]")
+		if resolved, err := resolveCredentialAccount(ctx, repo, account); err == nil && resolved != nil {
+			credAccount = resolved
 		}
-		resolved, err := resolveCredentialAccount(ctx, repo, account)
-		if err != nil || resolved == nil {
-			return []byte("[redacted: credentials unavailable]")
-		}
-		credAccount = resolved
+	}
+	if credAccount == nil || !credAccount.IsOpenAIAgentIdentity() {
+		return body
 	}
 	redacted := string(body)
 	for _, key := range []string{
@@ -504,15 +492,10 @@ func redactAgentIdentitySensitiveBodyForAccount(ctx context.Context, repo Accoun
 		"session_key",
 		"cookie",
 	} {
-		if credAccount != nil {
-			if value := strings.TrimSpace(credAccount.GetCredential(key)); value != "" {
-				redacted = strings.ReplaceAll(redacted, value, "[redacted]")
-			}
+		if value := strings.TrimSpace(credAccount.GetCredential(key)); value != "" {
+			redacted = strings.ReplaceAll(redacted, value, "[redacted]")
 		}
 	}
-	redacted = openAIJSONSensitiveCredentialField.ReplaceAllString(redacted, `${1}"[redacted]"`)
-	redacted = openAIAssignmentSensitiveField.ReplaceAllString(redacted, `${1}[redacted]`)
-	redacted = openAIBearerCredential.ReplaceAllString(redacted, "Bearer [redacted]")
 	const assertionPrefix = "AgentAssertion "
 	for offset := 0; offset < len(redacted); {
 		relativeStart := strings.Index(redacted[offset:], assertionPrefix)
@@ -532,6 +515,8 @@ func redactAgentIdentitySensitiveBodyForAccount(ctx context.Context, repo Accoun
 }
 
 func (s *OpenAIGatewayService) redactAgentIdentitySensitiveBody(ctx context.Context, account *Account, body []byte) []byte {
-	// Persistence must not depend on a separate identity lookup succeeding.
+	if !s.isAgentIdentityAccount(ctx, account) {
+		return body
+	}
 	return redactAgentIdentitySensitiveBodyForAccount(ctx, s.accountRepo, account, body)
 }

@@ -1910,8 +1910,8 @@ func (s *OpenAIGatewayService) recordOpenAIStreamUpstreamError(
 		}
 		// Classify first, then fail closed before either message or detail can
 		// enter persistent ops records.
-		payload = s.redactAgentIdentitySensitiveBody(ctx, account, payload)
-		message = string(s.redactAgentIdentitySensitiveBody(ctx, account, []byte(message)))
+		payload = redactOpenAITerminalOpsSensitiveBody(ctx, s.accountRepo, account, payload)
+		message = string(redactOpenAITerminalOpsSensitiveBody(ctx, s.accountRepo, account, []byte(message)))
 	}
 	detail := ""
 	if len(payload) > 0 && s != nil && s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {

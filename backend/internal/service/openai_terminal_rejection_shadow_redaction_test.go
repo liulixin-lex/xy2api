@@ -99,18 +99,18 @@ func TestEnc252XShadowTerminalOpsFailsClosed(t *testing.T) {
 	}
 }
 
-func TestOpenAIErrorRedactionDoesNotRequireIdentityLookup(t *testing.T) {
+func TestOpenAITerminalOpsRedactionDoesNotRequireIdentityLookup(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	for _, account := range []*Account{nil, {Platform: PlatformOpenAI, Type: AccountTypeOAuth}} {
 		body := []byte(`AgentAssertion synthetic-assertion access_token=synthetic-known-token`)
-		redacted := svc.redactAgentIdentitySensitiveBody(context.Background(), account, body)
+		redacted := redactOpenAITerminalOpsSensitiveBody(context.Background(), svc.accountRepo, account, body)
 		require.NotContains(t, string(redacted), "synthetic-assertion")
 		require.NotContains(t, string(redacted), "synthetic-known-token")
 	}
 	parentID := int64(10)
 	shadow := &Account{ParentAccountID: &parentID}
 	for _, repo := range []AccountRepository{nil, &enc252XFlakyCredentialRepo{fail: true}, &enc252XFlakyCredentialRepo{}} {
-		redacted := redactAgentIdentitySensitiveBodyForAccount(context.Background(), repo, shadow, []byte("unstructured unknown parent secret"))
+		redacted := redactOpenAITerminalOpsSensitiveBody(context.Background(), repo, shadow, []byte("unstructured unknown parent secret"))
 		require.Equal(t, "[redacted: credentials unavailable]", string(redacted))
 	}
 }
