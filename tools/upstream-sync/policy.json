@@ -494,11 +494,11 @@
     },
     {
       "path": "backend/internal/service/gemini_messages_compat_service.go",
-      "value": "geminiInPlaceRetryAllowed(ctx, &inPlaceRetries)"
+      "value": "geminiInPlaceRetryAllowed(attemptGuard.ctx, &inPlaceRetries)"
     },
     {
       "path": "backend/internal/service/gemini_chat_completions_compat_service.go",
-      "value": "geminiInPlaceRetryAllowed(ctx, &inPlaceRetries)"
+      "value": "geminiInPlaceRetryAllowed(attemptGuard.ctx, &inPlaceRetries)"
     },
     {
       "path": "backend/internal/service/gateway_forward.go",
