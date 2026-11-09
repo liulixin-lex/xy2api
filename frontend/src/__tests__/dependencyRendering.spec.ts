@@ -79,6 +79,6 @@ describe('installed rendering dependencies', () => {
     expect(content.textContent).toContain('Done')
   })
 
-  // Mermaid classDef containment is covered by the native-browser evidence in
-  // .work/tasks/20261109-0513-allin/tfe-browser-evidence/; jsdom cannot validate CSS values.
+  // Mermaid classDef containment needs a real browser (jsdom does not validate CSS values);
+  // it was verified out of tree for this upgrade.
 })
