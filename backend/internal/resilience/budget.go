@@ -166,15 +166,16 @@ func (b *Budget) CanAttempt(now time.Time) bool {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	deadline := b.admissionDeadlineLocked(false)
 	switch {
 	case b.ctx != nil && b.ctx.Err() != nil:
 		b.exhausted = ExhaustedCanceled
 	case b.attempts >= b.maxAttempts:
 		b.exhausted = ExhaustedAttempts
-	case !b.deadline.IsZero() && b.deadline.Sub(now) < minAttemptWindow:
+	case !deadline.IsZero() && deadline.Sub(now) < minAttemptWindow:
 		b.exhausted = ExhaustedDeadline
 		if BudgetTraceEnabledForTest {
-			b.traceDeadlineForTest("CanAttempt", now, 0)
+			b.traceDeadlineForTest("CanAttempt", now, 0, deadline)
 		}
 	default:
 		return true
@@ -207,6 +208,32 @@ func (b *Budget) Remaining(now time.Time) time.Duration {
 		return d
 	}
 	return time.Nanosecond
+}
+
+// admissionDeadlineLocked keeps untimed or not-yet-selected attempts on the
+// arrival deadline. A timer witness must come from the guard covering that
+// concrete retry, never from a previous attempt's profile or timeout plan.
+// Callers hold b.mu; timer plans and observations continue reading b.deadline.
+func (b *Budget) admissionDeadlineLocked(hasTimer bool) time.Time {
+	if b.kind == KindText && b.budgetStart == BudgetStartBodyEOF && !hasTimer {
+		return b.started.Add(min(b.base, PreOutputWallCap))
+	}
+	return b.deadline
+}
+
+// AdmissionRemaining bounds waits before a new attempt. When its timer is not
+// yet known, pass false; Remaining remains the timer/observation view of D.
+func (b *Budget) AdmissionRemaining(now time.Time, hasTimer bool) time.Duration {
+	if b == nil {
+		return 0
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	deadline := b.admissionDeadlineLocked(hasTimer)
+	if deadline.IsZero() {
+		return 0
+	}
+	return max(time.Nanosecond, deadline.Sub(now))
 }
 
 // Deadline returns the pre-output deadline (zero when none).
@@ -270,20 +297,27 @@ func (b *Budget) AllowStateSwitch() bool {
 // otherwise it changes nothing and the failure surfaces to the handler,
 // which records it there.
 func (b *Budget) ConsumeInPlaceRetry(accountID int64, sameAccount bool, now time.Time, reason ...string) bool {
+	return b.ConsumeInPlaceRetryWithTimer(accountID, sameAccount, now, false, reason...)
+}
+
+// ConsumeInPlaceRetryWithTimer preserves D only when the retry is covered by
+// an existing shared guard. All other callers use the conservative wrapper.
+func (b *Budget) ConsumeInPlaceRetryWithTimer(accountID int64, sameAccount bool, now time.Time, hasTimer bool, reason ...string) bool {
 	if b == nil {
 		return true
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	encryptedRepair := len(reason) == 1 && reason[0] == ReasonEncryptedContent
+	deadline := b.admissionDeadlineLocked(hasTimer)
 	switch {
 	case b.ctx != nil && b.ctx.Err() != nil:
 		return false
 	case !encryptedRepair && b.attempts+1 >= b.maxAttempts:
 		return false
-	case !b.deadline.IsZero() && b.deadline.Sub(now) < minAttemptWindow:
+	case !deadline.IsZero() && deadline.Sub(now) < minAttemptWindow:
 		if BudgetTraceEnabledForTest {
-			b.traceDeadlineForTest("ConsumeInPlaceRetry", now, accountID)
+			b.traceDeadlineForTest("ConsumeInPlaceRetry", now, accountID, deadline)
 		}
 		return false
 	case sameAccount && b.sameAccount[accountID] >= b.sameAccountMax:
@@ -313,6 +347,11 @@ func (b *Budget) CapacitySwitchUsed() bool {
 // ClampWait bounds an upstream-requested wait by the configured cap and the
 // remaining pre-output time.
 func (b *Budget) ClampWait(d time.Duration, now time.Time) time.Duration {
+	return b.ClampWaitWithTimer(d, now, false)
+}
+
+// ClampWaitWithTimer uses the same concrete guard witness as retry admission.
+func (b *Budget) ClampWaitWithTimer(d time.Duration, now time.Time, hasTimer bool) time.Duration {
 	if b == nil || d <= 0 {
 		return d
 	}
@@ -320,7 +359,7 @@ func (b *Budget) ClampWait(d time.Duration, now time.Time) time.Duration {
 	if b.retryAfterCap > 0 && d > b.retryAfterCap {
 		d = b.retryAfterCap
 	}
-	if rem := b.Remaining(now); rem > 0 && d > rem-minAttemptWindow {
+	if rem := b.AdmissionRemaining(now, hasTimer); rem > 0 && d > rem-minAttemptWindow {
 		capped := d
 		d = rem - minAttemptWindow
 		if d < 0 {

@@ -162,7 +162,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 				}
 				break
 			}
-			if attempt < geminiMaxRetries && !resilienceGeminiSkipInPlaceRetry(ctx, account, resp.StatusCode, resp.Header, respBody) && geminiInPlaceRetryAllowed(ctx, &inPlaceRetries) {
+			if attempt < geminiMaxRetries && !resilienceGeminiSkipInPlaceRetry(ctx, account, resp.StatusCode, resp.Header, respBody) && geminiInPlaceRetryAllowed(attemptGuard.ctx, &inPlaceRetries) {
 				if resp.StatusCode == http.StatusTooManyRequests {
 					s.handleGeminiUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, originalModel)
 				}

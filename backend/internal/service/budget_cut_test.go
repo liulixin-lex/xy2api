@@ -141,7 +141,7 @@ func TestBudgetLateWarningsReachSystemSink(t *testing.T) {
 					gotAbuse = true
 				}
 			}
-			require.Equal(t, hidden || mode == resilience.BudgetStartBodyEOF, gotLate)
+			require.Equal(t, hidden, gotLate)
 			require.True(t, gotAbuse)
 		}
 	}
