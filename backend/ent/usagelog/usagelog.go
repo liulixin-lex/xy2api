@@ -116,6 +116,42 @@ const (
 	FieldCacheTTLOverridden = "cache_ttl_overridden"
 	// FieldCreatedAt holds the string denoting the created_at field in the database.
 	FieldCreatedAt = "created_at"
+	// FieldBodyBytes holds the string denoting the body_bytes field in the database.
+	FieldBodyBytes = "body_bytes"
+	// FieldFirstReadMs holds the string denoting the first_read_ms field in the database.
+	FieldFirstReadMs = "first_read_ms"
+	// FieldBodyEOFMs holds the string denoting the body_eof_ms field in the database.
+	FieldBodyEOFMs = "body_eof_ms"
+	// FieldAnchorBasis holds the string denoting the anchor_basis field in the database.
+	FieldAnchorBasis = "anchor_basis"
+	// FieldAnchorEligible holds the string denoting the anchor_eligible field in the database.
+	FieldAnchorEligible = "anchor_eligible"
+	// FieldBodyReceiptRepeat holds the string denoting the body_receipt_repeat field in the database.
+	FieldBodyReceiptRepeat = "body_receipt_repeat"
+	// FieldPreDispatchMs holds the string denoting the pre_dispatch_ms field in the database.
+	FieldPreDispatchMs = "pre_dispatch_ms"
+	// FieldKeepaliveCommitMs holds the string denoting the keepalive_commit_ms field in the database.
+	FieldKeepaliveCommitMs = "keepalive_commit_ms"
+	// FieldWireStatus holds the string denoting the wire_status field in the database.
+	FieldWireStatus = "wire_status"
+	// FieldDispatchCount holds the string denoting the dispatch_count field in the database.
+	FieldDispatchCount = "dispatch_count"
+	// FieldMinDispatchRemainingMs holds the string denoting the min_dispatch_remaining_ms field in the database.
+	FieldMinDispatchRemainingMs = "min_dispatch_remaining_ms"
+	// FieldFinalDeadlineMs holds the string denoting the final_deadline_ms field in the database.
+	FieldFinalDeadlineMs = "final_deadline_ms"
+	// FieldClientFamily holds the string denoting the client_family field in the database.
+	FieldClientFamily = "client_family"
+	// FieldClientCancelMs holds the string denoting the client_cancel_ms field in the database.
+	FieldClientCancelMs = "client_cancel_ms"
+	// FieldCancelStage holds the string denoting the cancel_stage field in the database.
+	FieldCancelStage = "cancel_stage"
+	// FieldCdnObserved holds the string denoting the cdn_observed field in the database.
+	FieldCdnObserved = "cdn_observed"
+	// FieldBudgetStartMode holds the string denoting the budget_start_mode field in the database.
+	FieldBudgetStartMode = "budget_start_mode"
+	// FieldBudgetT0UnixMs holds the string denoting the budget_t0_unix_ms field in the database.
+	FieldBudgetT0UnixMs = "budget_t0_unix_ms"
 	// EdgeUser holds the string denoting the user edge name in mutations.
 	EdgeUser = "user"
 	// EdgeAPIKey holds the string denoting the api_key edge name in mutations.
@@ -219,6 +255,24 @@ var Columns = []string{
 	FieldAnthropicCacheTTLApplied,
 	FieldCacheTTLOverridden,
 	FieldCreatedAt,
+	FieldBodyBytes,
+	FieldFirstReadMs,
+	FieldBodyEOFMs,
+	FieldAnchorBasis,
+	FieldAnchorEligible,
+	FieldBodyReceiptRepeat,
+	FieldPreDispatchMs,
+	FieldKeepaliveCommitMs,
+	FieldWireStatus,
+	FieldDispatchCount,
+	FieldMinDispatchRemainingMs,
+	FieldFinalDeadlineMs,
+	FieldClientFamily,
+	FieldClientCancelMs,
+	FieldCancelStage,
+	FieldCdnObserved,
+	FieldBudgetStartMode,
+	FieldBudgetT0UnixMs,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -562,6 +616,96 @@ func ByCacheTTLOverridden(opts ...sql.OrderTermOption) OrderOption {
 // ByCreatedAt orders the results by the created_at field.
 func ByCreatedAt(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldCreatedAt, opts...).ToFunc()
+}
+
+// ByBodyBytes orders the results by the body_bytes field.
+func ByBodyBytes(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldBodyBytes, opts...).ToFunc()
+}
+
+// ByFirstReadMs orders the results by the first_read_ms field.
+func ByFirstReadMs(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldFirstReadMs, opts...).ToFunc()
+}
+
+// ByBodyEOFMs orders the results by the body_eof_ms field.
+func ByBodyEOFMs(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldBodyEOFMs, opts...).ToFunc()
+}
+
+// ByAnchorBasis orders the results by the anchor_basis field.
+func ByAnchorBasis(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAnchorBasis, opts...).ToFunc()
+}
+
+// ByAnchorEligible orders the results by the anchor_eligible field.
+func ByAnchorEligible(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAnchorEligible, opts...).ToFunc()
+}
+
+// ByBodyReceiptRepeat orders the results by the body_receipt_repeat field.
+func ByBodyReceiptRepeat(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldBodyReceiptRepeat, opts...).ToFunc()
+}
+
+// ByPreDispatchMs orders the results by the pre_dispatch_ms field.
+func ByPreDispatchMs(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldPreDispatchMs, opts...).ToFunc()
+}
+
+// ByKeepaliveCommitMs orders the results by the keepalive_commit_ms field.
+func ByKeepaliveCommitMs(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldKeepaliveCommitMs, opts...).ToFunc()
+}
+
+// ByWireStatus orders the results by the wire_status field.
+func ByWireStatus(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldWireStatus, opts...).ToFunc()
+}
+
+// ByDispatchCount orders the results by the dispatch_count field.
+func ByDispatchCount(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldDispatchCount, opts...).ToFunc()
+}
+
+// ByMinDispatchRemainingMs orders the results by the min_dispatch_remaining_ms field.
+func ByMinDispatchRemainingMs(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldMinDispatchRemainingMs, opts...).ToFunc()
+}
+
+// ByFinalDeadlineMs orders the results by the final_deadline_ms field.
+func ByFinalDeadlineMs(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldFinalDeadlineMs, opts...).ToFunc()
+}
+
+// ByClientFamily orders the results by the client_family field.
+func ByClientFamily(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldClientFamily, opts...).ToFunc()
+}
+
+// ByClientCancelMs orders the results by the client_cancel_ms field.
+func ByClientCancelMs(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldClientCancelMs, opts...).ToFunc()
+}
+
+// ByCancelStage orders the results by the cancel_stage field.
+func ByCancelStage(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCancelStage, opts...).ToFunc()
+}
+
+// ByCdnObserved orders the results by the cdn_observed field.
+func ByCdnObserved(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCdnObserved, opts...).ToFunc()
+}
+
+// ByBudgetStartMode orders the results by the budget_start_mode field.
+func ByBudgetStartMode(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldBudgetStartMode, opts...).ToFunc()
+}
+
+// ByBudgetT0UnixMs orders the results by the budget_t0_unix_ms field.
+func ByBudgetT0UnixMs(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldBudgetT0UnixMs, opts...).ToFunc()
 }
 
 // ByUserField orders the results by user field.

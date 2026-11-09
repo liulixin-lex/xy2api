@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "upstream_commit": "f2669c8cf62555cd92389b3f55920e9e6e7c6ff2",
-  "description": "Reviewed differences between the original Sub2API scheduler files and the recorded upstream commit. Any other change, or a changed upstream commit, fails `sync.py scheduler-diff` until reviewed. Reviewed for v0.2.15: all existing XY2API difference blocks are unchanged; the upstream NormalizeOpenAICompatiblePlatform change to domain.UsesOpenAIGateway is adopted verbatim after module-path normalization. Reviewed for 0.4.0: gateway resilience hooks are registered as `gateway-resilience` blocks; two earlier lines were rewritten by them (named results of SelectAccountWithLoadAwareness, the last-resort runtime-block gate). Reviewed for 0.4.5 local integration: all four original scheduler files are byte-for-byte unchanged from the 0.4.4 post-release main; the existing reviewed difference blocks remain valid. Reviewed for T-SECENT: fallback-group reason logging is confined to resilience_fallback_group.go; the four original scheduler files and their reviewed difference blocks are unchanged.",
+  "description": "Reviewed differences between the original Sub2API scheduler files and the recorded upstream commit. Any other change, or a changed upstream commit, fails `sync.py scheduler-diff` until reviewed. Reviewed for v0.2.15: all existing XY2API difference blocks are unchanged; the upstream NormalizeOpenAICompatiblePlatform change to domain.UsesOpenAIGateway is adopted verbatim after module-path normalization. Reviewed for 0.4.0: gateway resilience hooks are registered as `gateway-resilience` blocks; two earlier lines were rewritten by them (named results of SelectAccountWithLoadAwareness, the last-resort runtime-block gate). Reviewed for 0.4.5 local integration: all four original scheduler files are byte-for-byte unchanged from the 0.4.4 post-release main; the existing reviewed difference blocks remain valid. Reviewed for T-SECENT: fallback-group and sticky-owner balance reasons are diagnostic only; the sticky owner read hook is registered below.",
   "files": {
     "backend/internal/service/gateway_scheduling.go": [
       {
@@ -1959,6 +1959,19 @@
           "resilience.StateFrom(ctx).NoteStickyBypassReason(\"capacity_overflow\")",
           "resilience.StateFrom(ctx).NoteStickyBypassReason(\"concurrency_full\")",
           "return selection, capacityErr"
+        ]
+      },
+      {
+        "block": "sticky-bypass-balance-reason",
+        "note": "C7: retain an active sticky owner balance_exhausted reason before generic availability/clear reasons; existing account read and selection behavior are unchanged. Failed-in-request log attribution still wins.",
+        "removed": [],
+        "added": [
+          "state := resilience.StateFrom(ctx)",
+          "if account.ID == state.StickyOwner() {",
+          "if _, _, reason := resiliencePenaltyOf(account, \"\", time.Now()); reason == \"balance_exhausted\" {",
+          "state.NoteStickyBypassReason(reason)",
+          "}",
+          "}"
         ]
       }
     ],

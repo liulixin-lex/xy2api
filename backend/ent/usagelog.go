@@ -125,6 +125,42 @@ type UsageLog struct {
 	CacheTTLOverridden bool `json:"cache_ttl_overridden,omitempty"`
 	// CreatedAt holds the value of the "created_at" field.
 	CreatedAt time.Time `json:"created_at,omitempty"`
+	// BodyBytes holds the value of the "body_bytes" field.
+	BodyBytes *int64 `json:"body_bytes,omitempty"`
+	// FirstReadMs holds the value of the "first_read_ms" field.
+	FirstReadMs *int64 `json:"first_read_ms,omitempty"`
+	// BodyEOFMs holds the value of the "body_eof_ms" field.
+	BodyEOFMs *int64 `json:"body_eof_ms,omitempty"`
+	// AnchorBasis holds the value of the "anchor_basis" field.
+	AnchorBasis *string `json:"anchor_basis,omitempty"`
+	// AnchorEligible holds the value of the "anchor_eligible" field.
+	AnchorEligible *bool `json:"anchor_eligible,omitempty"`
+	// BodyReceiptRepeat holds the value of the "body_receipt_repeat" field.
+	BodyReceiptRepeat *int64 `json:"body_receipt_repeat,omitempty"`
+	// PreDispatchMs holds the value of the "pre_dispatch_ms" field.
+	PreDispatchMs *int64 `json:"pre_dispatch_ms,omitempty"`
+	// KeepaliveCommitMs holds the value of the "keepalive_commit_ms" field.
+	KeepaliveCommitMs *int64 `json:"keepalive_commit_ms,omitempty"`
+	// WireStatus holds the value of the "wire_status" field.
+	WireStatus *int64 `json:"wire_status,omitempty"`
+	// DispatchCount holds the value of the "dispatch_count" field.
+	DispatchCount *int64 `json:"dispatch_count,omitempty"`
+	// MinDispatchRemainingMs holds the value of the "min_dispatch_remaining_ms" field.
+	MinDispatchRemainingMs *int64 `json:"min_dispatch_remaining_ms,omitempty"`
+	// FinalDeadlineMs holds the value of the "final_deadline_ms" field.
+	FinalDeadlineMs *int64 `json:"final_deadline_ms,omitempty"`
+	// ClientFamily holds the value of the "client_family" field.
+	ClientFamily *string `json:"client_family,omitempty"`
+	// ClientCancelMs holds the value of the "client_cancel_ms" field.
+	ClientCancelMs *int64 `json:"client_cancel_ms,omitempty"`
+	// CancelStage holds the value of the "cancel_stage" field.
+	CancelStage *string `json:"cancel_stage,omitempty"`
+	// CdnObserved holds the value of the "cdn_observed" field.
+	CdnObserved *string `json:"cdn_observed,omitempty"`
+	// BudgetStartMode holds the value of the "budget_start_mode" field.
+	BudgetStartMode *string `json:"budget_start_mode,omitempty"`
+	// BudgetT0UnixMs holds the value of the "budget_t0_unix_ms" field.
+	BudgetT0UnixMs *int64 `json:"budget_t0_unix_ms,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the UsageLogQuery when eager-loading is set.
 	Edges        UsageLogEdges `json:"edges"`
@@ -210,13 +246,13 @@ func (*UsageLog) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case usagelog.FieldImageSizeBreakdown:
 			values[i] = new([]byte)
-		case usagelog.FieldUpstreamModelMismatch, usagelog.FieldLongContextBillingApplied, usagelog.FieldStream, usagelog.FieldAnthropicCacheTTLApplied, usagelog.FieldCacheTTLOverridden:
+		case usagelog.FieldUpstreamModelMismatch, usagelog.FieldLongContextBillingApplied, usagelog.FieldStream, usagelog.FieldAnthropicCacheTTLApplied, usagelog.FieldCacheTTLOverridden, usagelog.FieldAnchorEligible:
 			values[i] = new(sql.NullBool)
 		case usagelog.FieldInputCost, usagelog.FieldOutputCost, usagelog.FieldCacheCreationCost, usagelog.FieldCacheReadCost, usagelog.FieldTotalCost, usagelog.FieldActualCost, usagelog.FieldRateMultiplier, usagelog.FieldAccountRateMultiplier:
 			values[i] = new(sql.NullFloat64)
-		case usagelog.FieldID, usagelog.FieldUserID, usagelog.FieldAPIKeyID, usagelog.FieldAccountID, usagelog.FieldChannelID, usagelog.FieldGroupID, usagelog.FieldSubscriptionID, usagelog.FieldInputTokens, usagelog.FieldOutputTokens, usagelog.FieldCacheCreationTokens, usagelog.FieldCacheReadTokens, usagelog.FieldCacheCreation5mTokens, usagelog.FieldCacheCreation1hTokens, usagelog.FieldBillingType, usagelog.FieldDurationMs, usagelog.FieldEndToEndFirstOutputMs, usagelog.FieldAttemptFirstOutputMs, usagelog.FieldFirstTokenMs, usagelog.FieldImageCount, usagelog.FieldVideoCount, usagelog.FieldVideoDurationSeconds:
+		case usagelog.FieldID, usagelog.FieldUserID, usagelog.FieldAPIKeyID, usagelog.FieldAccountID, usagelog.FieldChannelID, usagelog.FieldGroupID, usagelog.FieldSubscriptionID, usagelog.FieldInputTokens, usagelog.FieldOutputTokens, usagelog.FieldCacheCreationTokens, usagelog.FieldCacheReadTokens, usagelog.FieldCacheCreation5mTokens, usagelog.FieldCacheCreation1hTokens, usagelog.FieldBillingType, usagelog.FieldDurationMs, usagelog.FieldEndToEndFirstOutputMs, usagelog.FieldAttemptFirstOutputMs, usagelog.FieldFirstTokenMs, usagelog.FieldImageCount, usagelog.FieldVideoCount, usagelog.FieldVideoDurationSeconds, usagelog.FieldBodyBytes, usagelog.FieldFirstReadMs, usagelog.FieldBodyEOFMs, usagelog.FieldBodyReceiptRepeat, usagelog.FieldPreDispatchMs, usagelog.FieldKeepaliveCommitMs, usagelog.FieldWireStatus, usagelog.FieldDispatchCount, usagelog.FieldMinDispatchRemainingMs, usagelog.FieldFinalDeadlineMs, usagelog.FieldClientCancelMs, usagelog.FieldBudgetT0UnixMs:
 			values[i] = new(sql.NullInt64)
-		case usagelog.FieldRequestID, usagelog.FieldModel, usagelog.FieldRequestedModel, usagelog.FieldUpstreamModel, usagelog.FieldUpstreamResponseModel, usagelog.FieldModelMappingChain, usagelog.FieldBillingTier, usagelog.FieldBillingMode, usagelog.FieldUserAgent, usagelog.FieldIPAddress, usagelog.FieldImageSize, usagelog.FieldImageInputSize, usagelog.FieldImageOutputSize, usagelog.FieldImageSizeSource, usagelog.FieldVideoResolution, usagelog.FieldAnthropicCacheTTLPolicy:
+		case usagelog.FieldRequestID, usagelog.FieldModel, usagelog.FieldRequestedModel, usagelog.FieldUpstreamModel, usagelog.FieldUpstreamResponseModel, usagelog.FieldModelMappingChain, usagelog.FieldBillingTier, usagelog.FieldBillingMode, usagelog.FieldUserAgent, usagelog.FieldIPAddress, usagelog.FieldImageSize, usagelog.FieldImageInputSize, usagelog.FieldImageOutputSize, usagelog.FieldImageSizeSource, usagelog.FieldVideoResolution, usagelog.FieldAnthropicCacheTTLPolicy, usagelog.FieldAnchorBasis, usagelog.FieldClientFamily, usagelog.FieldCancelStage, usagelog.FieldCdnObserved, usagelog.FieldBudgetStartMode:
 			values[i] = new(sql.NullString)
 		case usagelog.FieldCreatedAt:
 			values[i] = new(sql.NullTime)
@@ -574,6 +610,132 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.CreatedAt = value.Time
 			}
+		case usagelog.FieldBodyBytes:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field body_bytes", values[i])
+			} else if value.Valid {
+				_m.BodyBytes = new(int64)
+				*_m.BodyBytes = value.Int64
+			}
+		case usagelog.FieldFirstReadMs:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field first_read_ms", values[i])
+			} else if value.Valid {
+				_m.FirstReadMs = new(int64)
+				*_m.FirstReadMs = value.Int64
+			}
+		case usagelog.FieldBodyEOFMs:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field body_eof_ms", values[i])
+			} else if value.Valid {
+				_m.BodyEOFMs = new(int64)
+				*_m.BodyEOFMs = value.Int64
+			}
+		case usagelog.FieldAnchorBasis:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field anchor_basis", values[i])
+			} else if value.Valid {
+				_m.AnchorBasis = new(string)
+				*_m.AnchorBasis = value.String
+			}
+		case usagelog.FieldAnchorEligible:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field anchor_eligible", values[i])
+			} else if value.Valid {
+				_m.AnchorEligible = new(bool)
+				*_m.AnchorEligible = value.Bool
+			}
+		case usagelog.FieldBodyReceiptRepeat:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field body_receipt_repeat", values[i])
+			} else if value.Valid {
+				_m.BodyReceiptRepeat = new(int64)
+				*_m.BodyReceiptRepeat = value.Int64
+			}
+		case usagelog.FieldPreDispatchMs:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field pre_dispatch_ms", values[i])
+			} else if value.Valid {
+				_m.PreDispatchMs = new(int64)
+				*_m.PreDispatchMs = value.Int64
+			}
+		case usagelog.FieldKeepaliveCommitMs:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field keepalive_commit_ms", values[i])
+			} else if value.Valid {
+				_m.KeepaliveCommitMs = new(int64)
+				*_m.KeepaliveCommitMs = value.Int64
+			}
+		case usagelog.FieldWireStatus:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field wire_status", values[i])
+			} else if value.Valid {
+				_m.WireStatus = new(int64)
+				*_m.WireStatus = value.Int64
+			}
+		case usagelog.FieldDispatchCount:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field dispatch_count", values[i])
+			} else if value.Valid {
+				_m.DispatchCount = new(int64)
+				*_m.DispatchCount = value.Int64
+			}
+		case usagelog.FieldMinDispatchRemainingMs:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field min_dispatch_remaining_ms", values[i])
+			} else if value.Valid {
+				_m.MinDispatchRemainingMs = new(int64)
+				*_m.MinDispatchRemainingMs = value.Int64
+			}
+		case usagelog.FieldFinalDeadlineMs:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field final_deadline_ms", values[i])
+			} else if value.Valid {
+				_m.FinalDeadlineMs = new(int64)
+				*_m.FinalDeadlineMs = value.Int64
+			}
+		case usagelog.FieldClientFamily:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field client_family", values[i])
+			} else if value.Valid {
+				_m.ClientFamily = new(string)
+				*_m.ClientFamily = value.String
+			}
+		case usagelog.FieldClientCancelMs:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field client_cancel_ms", values[i])
+			} else if value.Valid {
+				_m.ClientCancelMs = new(int64)
+				*_m.ClientCancelMs = value.Int64
+			}
+		case usagelog.FieldCancelStage:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field cancel_stage", values[i])
+			} else if value.Valid {
+				_m.CancelStage = new(string)
+				*_m.CancelStage = value.String
+			}
+		case usagelog.FieldCdnObserved:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field cdn_observed", values[i])
+			} else if value.Valid {
+				_m.CdnObserved = new(string)
+				*_m.CdnObserved = value.String
+			}
+		case usagelog.FieldBudgetStartMode:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field budget_start_mode", values[i])
+			} else if value.Valid {
+				_m.BudgetStartMode = new(string)
+				*_m.BudgetStartMode = value.String
+			}
+		case usagelog.FieldBudgetT0UnixMs:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field budget_t0_unix_ms", values[i])
+			} else if value.Valid {
+				_m.BudgetT0UnixMs = new(int64)
+				*_m.BudgetT0UnixMs = value.Int64
+			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
 		}
@@ -837,6 +999,96 @@ func (_m *UsageLog) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("created_at=")
 	builder.WriteString(_m.CreatedAt.Format(time.ANSIC))
+	builder.WriteString(", ")
+	if v := _m.BodyBytes; v != nil {
+		builder.WriteString("body_bytes=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.FirstReadMs; v != nil {
+		builder.WriteString("first_read_ms=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.BodyEOFMs; v != nil {
+		builder.WriteString("body_eof_ms=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.AnchorBasis; v != nil {
+		builder.WriteString("anchor_basis=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.AnchorEligible; v != nil {
+		builder.WriteString("anchor_eligible=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.BodyReceiptRepeat; v != nil {
+		builder.WriteString("body_receipt_repeat=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.PreDispatchMs; v != nil {
+		builder.WriteString("pre_dispatch_ms=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.KeepaliveCommitMs; v != nil {
+		builder.WriteString("keepalive_commit_ms=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.WireStatus; v != nil {
+		builder.WriteString("wire_status=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.DispatchCount; v != nil {
+		builder.WriteString("dispatch_count=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.MinDispatchRemainingMs; v != nil {
+		builder.WriteString("min_dispatch_remaining_ms=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.FinalDeadlineMs; v != nil {
+		builder.WriteString("final_deadline_ms=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.ClientFamily; v != nil {
+		builder.WriteString("client_family=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.ClientCancelMs; v != nil {
+		builder.WriteString("client_cancel_ms=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.CancelStage; v != nil {
+		builder.WriteString("cancel_stage=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.CdnObserved; v != nil {
+		builder.WriteString("cdn_observed=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.BudgetStartMode; v != nil {
+		builder.WriteString("budget_start_mode=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.BudgetT0UnixMs; v != nil {
+		builder.WriteString("budget_t0_unix_ms=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
 	builder.WriteByte(')')
 	return builder.String()
 }

@@ -4255,7 +4255,11 @@
     },
     {
       "path": "backend/ent/schema/usage_log.go",
-      "value": "diffs MUST NOT drop these migration-owned columns. See"
+      "value": "field.Int64(\"budget_t0_unix_ms\").Optional().Nillable()"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "if account.ID == state.StickyOwner() {"
     }
   ],
   "forbidden_module_paths": [
