@@ -111,16 +111,28 @@ func (t *openAITerminalRejectionTracker) reset(group int64, session string, acco
 	}
 }
 
-// Called only after the existing HTTP error handler decides to terminate.
+// Called only after an existing HTTP or SSE handler decides to terminate.
 // It never changes that response or retries the current request.
 func (s *OpenAIGatewayService) noteOpenAITerminalRejection(ctx context.Context, account *Account, status int, headers http.Header, body []byte, forwardErr error) {
+	group, session := resilience.StateFrom(ctx).SessionIdentity()
+	s.noteOpenAITerminalRejectionForSession(ctx, account, group, session, status, headers, body, forwardErr)
+}
+
+func (s *OpenAIGatewayService) noteOpenAITerminalRejectionForSession(ctx context.Context, account *Account, group int64, session string, status int, headers http.Header, body []byte, forwardErr error) {
 	cfg := resilience.Current()
 	if s == nil || s.resilience == nil || s.resilience.store == nil || account == nil ||
 		!account.IsOpenAICompatible() || !cfg.SessionOn() {
 		return
 	}
-	group, session := resilience.StateFrom(ctx).SessionIdentity()
+	if ctx != nil && (ctx.Err() != nil || resilience.StateFrom(ctx).ClientGone()) {
+		return
+	}
+	stickySession := session
+	session = openAITerminalRejectionSession(ctx, session)
 	if session == "" || account.ID <= 0 {
+		return
+	}
+	if preserveOpenAIGuardianParentBinding(ctx, session) {
 		return
 	}
 	tracker := &s.resilience.terminalRejections
@@ -141,10 +153,17 @@ func (s *OpenAIGatewayService) noteOpenAITerminalRejection(ctx context.Context, 
 	stateCtx, cancel := resilienceStateContext(ctx)
 	defer cancel()
 	s.AvoidOpenAIStateAccount(stateCtx, group, session, account.ID)
+	// Root rejections must release the actual atomic sticky owner as well as
+	// avoiding it in the execution scope. Child rejections keep the parent key.
+	if stickySession != "" && stickySession != session && !openAIRejectionScope(ctx).preserveBinding &&
+		!preserveOpenAIGuardianParentBinding(ctx, stickySession) {
+		_ = s.deleteStickySessionAccountIDIfOwner(stateCtx, &group, stickySession, account.ID)
+	}
 	const reason = "terminal_rejection_streak"
 	resilience.Count(resilience.MetricSessionRebind, group, account.ID, reason)
 	slog.Warn("resilience.session_rebind", append(resilience.EventFields(ctx),
 		"group_id", group, "session", shortSessionHash(session), "account_id", account.ID,
+		"execution_scope", openAIRejectionScope(ctx).session != "",
 		"failures", n, "category", string(resilience.CategoryClientError),
 		"avoid", (time.Duration(cfg.Session.AvoidSeconds)*time.Second).String(), "reason", reason,
 	)...)

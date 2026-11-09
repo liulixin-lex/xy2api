@@ -1399,6 +1399,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	defer inflightDone()
 
 	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
+	c.Request = c.Request.WithContext(service.WithOpenAITerminalRejectionScope(c.Request.Context(), c, body))
 	promptCacheKey := h.gatewayService.ExtractSessionID(c, body)
 	sessionHash, promptCacheKey = resolveOpenAIMessagesMetadataSession(c, sessionHash, promptCacheKey, reqModel, body)
 	h.gatewayService.AttachOpenAIQualityRouting(c, sessionHash, body)

@@ -1903,6 +1903,17 @@ func (s *OpenAIGatewayService) recordOpenAIStreamUpstreamError(
 		message = "OpenAI upstream response failed"
 	}
 	statusCode, category := openAIStreamFailureStatusAndCategory(kind, payload, message, validatedWrappedStatus...)
+	stateFamily := string(openAIStateRejection(payload, message).Family)
+	if kind == "terminal_rejection" {
+		ctx := context.Background()
+		if c != nil && c.Request != nil {
+			ctx = c.Request.Context()
+		}
+		// Classify first, then fail closed before either message or detail can
+		// enter persistent ops records.
+		payload = redactOpenAITerminalOpsSensitiveBody(ctx, s.accountRepo, account, payload)
+		message = string(redactOpenAITerminalOpsSensitiveBody(ctx, s.accountRepo, account, []byte(message)))
+	}
 	detail := ""
 	if len(payload) > 0 && s != nil && s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
 		maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
@@ -1929,7 +1940,7 @@ func (s *OpenAIGatewayService) recordOpenAIStreamUpstreamError(
 			event.AccountID = account.ID
 			event.AccountName = account.Name
 		}
-		event.StateFamily = string(openAIStateRejection(payload, message).Family)
+		event.StateFamily = stateFamily
 		event.ResilienceCategory = string(category)
 		appendOpsUpstreamError(c, event)
 	}
@@ -2204,7 +2215,7 @@ func (s *OpenAIGatewayService) nonStreamingTerminalFailureFailover(
 	if account == nil || IsResponseCommitted(c) {
 		return nil
 	}
-	captureOpenAIStateRejection(c, account, payload, message, path, false, nil)
+	captureOpenAIStateRejection(c, account, payload, message, path, false, nil, wrappedStatus)
 	if wrapped {
 		ctx := context.Background()
 		if c != nil && c.Request != nil {
@@ -2652,7 +2663,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 						return passthroughReturn(resultWithUsage(), repairErr)
 					}
 				}
-				captureOpenAIStateRejection(c, account, dataBytes, failedMessage, "passthrough_sse", outputStarted, nil)
+				captureOpenAIStateRejection(c, account, dataBytes, failedMessage, "passthrough_sse", outputStarted, nil, wrappedStatus)
 				if outputStarted && !cyberHit {
 					if codexFailureTerminal && eventType == "error" {
 						// Wait for the authoritative response.failed before mutating
