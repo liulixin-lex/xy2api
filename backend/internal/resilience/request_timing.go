@@ -246,6 +246,9 @@ func (s *RequestState) NoteOpenAIDispatch(at time.Time, path string) {
 		return
 	}
 	rem := b.Remaining(at)
+	// All OpenAI HTTP routes, including non-native protocol fallbacks, share
+	// this existing transport observation point after their guard decision.
+	s.ObserveAttemptStart()
 	s.mu.Lock()
 	if s.timing.dispatchCount == 0 {
 		s.timing.firstDispatch, s.timing.minRemaining = at, rem

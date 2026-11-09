@@ -254,6 +254,7 @@ func callPositions(node ast.Node, name string) []token.Pos {
 // handler and repair setup sites are intentionally not dispatch observations.
 func TestG9DispatchObservationCallsites(t *testing.T) {
 	want := map[string]int{
+		"internal/resilience/request_timing.go:RequestState.NoteOpenAIDispatch":                                                     1,
 		"internal/service/gateway_forward.go:GatewayService.Forward":                                                                1,
 		"internal/service/gateway_anthropic_passthrough.go:GatewayService.forwardAnthropicAPIKeyPassthroughWithInput":               1,
 		"internal/service/gateway_forward_as_responses.go:GatewayService.ForwardAsResponses":                                        1,
@@ -261,8 +262,6 @@ func TestG9DispatchObservationCallsites(t *testing.T) {
 		"internal/service/gemini_messages_compat_service.go:GeminiMessagesCompatService.Forward":                                    1,
 		"internal/service/gemini_messages_compat_service.go:GeminiMessagesCompatService.ForwardNative":                              1,
 		"internal/service/gemini_chat_completions_compat_service.go:GeminiMessagesCompatService.forwardClaudeBodyAsChatCompletions": 1,
-		"internal/service/openai_gateway_forward.go:OpenAIGatewayService.Forward":                                                   1,
-		"internal/service/openai_gateway_passthrough.go:OpenAIGatewayService.forwardOpenAIPassthrough":                              1,
 	}
 	got := productionResilienceCallsites(t, "ObserveAttemptStart", false)
 	if !reflect.DeepEqual(got, want) {

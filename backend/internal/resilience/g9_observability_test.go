@@ -259,3 +259,24 @@ func TestG9ObservationPreservesBudgetAndDisconnectDecisions(t *testing.T) {
 		})
 	}
 }
+
+func TestG9OpenAIDispatchCoversProfilesWithoutRepairReset(t *testing.T) {
+	cfg := Defaults()
+	cfg.Budget.BudgetStart = BudgetStartBodyEOF
+	now := time.Now()
+	st := NewRequestState()
+	st.SetGroup(7603)
+	st.SetBudget(NewBudget(context.Background(), &cfg, KindText, now.Add(-239*time.Second)))
+	// Non-native OpenAI protocol branches retain the handler's profile rather
+	// than passing through resetOpenAIRepairAttempt in the native main loop.
+	st.SetAttemptProfile(AttemptProfile{AttemptStart: now})
+	before := g9MetricTotal("false:body_eof", 7603)
+	deadline := st.Budget().Deadline()
+	st.NoteOpenAIDispatch(now, "direct")
+	require.Equal(t, before+1, g9MetricTotal("false:body_eof", 7603))
+	st.NoteOpenAIDispatch(now.Add(time.Millisecond), "plugin")
+	require.Equal(t, before+1, g9MetricTotal("false:body_eof", 7603), "same owner is counted once across transport observations")
+	require.EqualValues(t, 2, *st.Timing().DispatchCount)
+	require.Equal(t, deadline, st.Budget().Deadline())
+	require.Zero(t, st.Budget().Attempts())
+}
