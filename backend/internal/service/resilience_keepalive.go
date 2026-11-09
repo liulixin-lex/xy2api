@@ -67,16 +67,10 @@ func StartPreOutputKeepalive(c *gin.Context, protocol string, firstDelay, interv
 }
 
 // StartGeminiUniqueCandidateKeepalive starts the shared pre-output heartbeat
-// only for a streamed Gemini request with one static candidate. It does not
+// only for a streamed Gemini request with one usable candidate. It does not
 // install or change an attempt deadline; request handlers own final cleanup.
-func StartGeminiUniqueCandidateKeepalive(c *gin.Context, account *Account, stream, finalCandidate bool, protocol string) bool {
-	if !finalCandidate {
-		if account != nil && account.Platform == PlatformGemini {
-			StopPreOutputKeepaliveIfUncommitted(c)
-		}
-		return false
-	}
-	if c == nil || c.Request == nil || account == nil || !stream || !resilience.Current().KeepaliveOn() {
+func StartGeminiUniqueCandidateKeepalive(c *gin.Context, account *Account, stream, unique bool, protocol string) bool {
+	if c == nil || c.Request == nil || !stream || !unique || !resilience.Current().KeepaliveOn() {
 		return false
 	}
 	if protocol == PreOutputProtocolGemini && downstreamRejectsSSEComments(c) {
@@ -102,15 +96,11 @@ func StartGeminiUniqueCandidateKeepalive(c *gin.Context, account *Account, strea
 	if _, owned := c.Get(geminiUniqueCandidateKeepaliveStopKey); !owned {
 		c.Set(geminiUniqueCandidateKeepaliveStopKey, stop)
 	}
-	k := keepaliveFrom(c)
-	if k != nil {
-		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), geminiFinalKeepaliveKey{}, geminiFinalKeepalive{account.ID, k}))
-	}
-	return k != nil
+	return keepaliveFrom(c) != nil
 }
 
 // Header preparation suspends the shared writer. Preserve the original first
-// beat and cadence when resuming the final candidate's pre-output body wait.
+// beat and cadence when resuming the sole candidate's pre-output body wait.
 func resumeGeminiPreOutputKeepalive(c *gin.Context, resp *http.Response) {
 	g := geminiAttemptOf(resp)
 	k := keepaliveFrom(c)

@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -17,16 +16,6 @@ import (
 // pre-output heartbeat.
 const ginKeyPreOutputKeepaliveStop = "xy_resilience_pre_output_keepalive_stop"
 
-func geminiKeepaliveBlocksSelection(ctx context.Context, selection *service.AccountSelectionResult) bool {
-	if selection == nil || !service.GeminiFinalKeepaliveBlocksAccount(ctx, selection.Account) {
-		return false
-	}
-	if selection.Acquired && selection.ReleaseFunc != nil {
-		selection.ReleaseFunc()
-	}
-	return true
-}
-
 // armPreOutputKeepalive starts the delayed pre-output heartbeat before an
 // upstream attempt when the request qualifies (design §7.2): a streaming
 // text request that arrived through a CDN edge, after authentication,
@@ -41,12 +30,6 @@ func armPreOutputKeepalive(c *gin.Context, protocol string, stream bool, account
 	// The attempt is about to wait for upstream headers (design §8.2 stages).
 	resilience.StateFrom(c.Request.Context()).SetStage(resilience.StageHeaderWait)
 	if !stream {
-		return
-	}
-	if account != nil && account.Platform == service.PlatformGemini {
-		// Gemini's service admits only a final candidate after checking all
-		// platforms and handler switch limits. Do not arm ahead of that decision.
-		service.StopPreOutputKeepaliveIfUncommitted(c)
 		return
 	}
 	cfg := resilience.Current()

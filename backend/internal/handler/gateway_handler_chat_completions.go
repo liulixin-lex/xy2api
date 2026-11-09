@@ -233,10 +233,6 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				return
 			}
 		}
-		if geminiKeepaliveBlocksSelection(c.Request.Context(), selection) {
-			h.handleCCFailoverExhausted(c, fs.LastFailoverErr, streamStarted)
-			return
-		}
 		account := selection.Account
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
@@ -305,8 +301,6 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		var result *service.ForwardResult
 		setActualUpstreamEndpoint(c, "")
 		if account.Platform == service.PlatformGemini {
-			stateCtx := c.Request.Context()
-			stateCtx = service.WithGeminiCandidateUniverse(stateCtx, apiKey.Group, false)
 			if h.geminiCompatService == nil {
 				h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", "Gemini compatibility service is not configured")
 				if accountReleaseFunc != nil {
@@ -314,7 +308,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				}
 				return
 			}
-			result, err = h.geminiCompatService.ForwardAsChatCompletions(stateCtx, c, account, forwardBody)
+			result, err = h.geminiCompatService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody)
 		} else if shouldUseAntigravityCompat(account) {
 			if h.antigravityGatewayService == nil {
 				h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", "Antigravity compatibility service is not configured")

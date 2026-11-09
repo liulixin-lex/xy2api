@@ -82,7 +82,7 @@ func newGeminiAttempt(ctx context.Context, account *Account, model, action strin
 		return g
 	}
 	if stream && resilience.Current().KeepaliveOn() {
-		g.unique = geminiSoleCandidateUniverse(ctx, account)
+		g.unique = Resilience().soleCandidate(ctx, resilience.StateFrom(ctx).GroupID(), account.ID)
 	}
 	if stream && resilience.Current().StallOn() {
 		g.stall = time.Duration(resilience.Current().Stall.TextStallSeconds) * time.Second
@@ -376,12 +376,6 @@ func geminiNativeStreamReader(c *gin.Context, resp *http.Response, cfg *config.C
 }
 
 func (g *geminiAttempt) finish(c *gin.Context, rl *RateLimitService, account *Account, err error) error {
-	// Freeze commit state before the handler returns to account selection.
-	if g.keepalive {
-		if k := keepaliveFrom(c); k != nil {
-			k.suspend()
-		}
-	}
 	if err == nil || g.parent.Err() != nil {
 		return err
 	}

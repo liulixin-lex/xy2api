@@ -555,10 +555,6 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				return
 			}
 		}
-		if geminiKeepaliveBlocksSelection(c.Request.Context(), selection) {
-			h.handleGeminiFailoverExhausted(c, fs.LastFailoverErr)
-			return
-		}
 		account := selection.Account
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
@@ -665,9 +661,6 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		// 5) forward (根据平台分流)
 		var result *service.ForwardResult
 		requestCtx := c.Request.Context()
-		if account.Platform == service.PlatformGemini {
-			requestCtx = service.WithGeminiCandidateUniverse(requestCtx, apiKey.Group, !middleware.HasForcePlatform(c))
-		}
 		if fs.SwitchCount > 0 {
 			requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())
 		}
