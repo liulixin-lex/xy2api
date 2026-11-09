@@ -572,9 +572,60 @@ func isClaude55SignedThinkingModel(model string) bool {
 	return claude.IsClaude55(model)
 }
 
-// validateClaude55Request rejects settings that the upstream cannot honor.
-// Call before OAuth mimicry can remove tool_choice or alter thinking defaults.
+// validateClaude55Request checks a native Claude API generation request.
 func validateClaude55Request(body []byte, model string) error {
+	return validateClaude55RequestForAccount(body, model, nil)
+}
+
+func validateClaude55RequestForAccount(body []byte, model string, account *Account) error {
+	if err := validateHaiku55MessagesRequest(body, model, account); err != nil {
+		return err
+	}
+	return validateClaude55Parameters(body, model)
+}
+
+// Only inspect native Messages bodies: token counting and unconverted OpenAI
+// requests do not establish a generation prefill. These rules are documented
+// for official Claude API endpoints; leave custom relays and managed platforms
+// to their upstream.
+// https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide#replace-assistant-prefill
+// https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool#migrate-from-computer-20251124
+func validateHaiku55MessagesRequest(body []byte, model string, account *Account) error {
+	claudeAPI := account == nil || (account.Platform == PlatformAnthropic &&
+		(account.IsOAuth() || account.Type == AccountTypeAPIKey && isOfficialAnthropicAPIBaseURL(account.GetBaseURL())))
+	if !claudeAPI || !claude.IsHaiku55(model) {
+		return nil
+	}
+	messages := gjson.GetBytes(body, "messages").Array()
+	if len(messages) > 0 && !gjson.GetBytes(body, "fallback_credit_token").Exists() {
+		last := messages[len(messages)-1]
+		content := last.Get("content")
+		textOnly := content.Type == gjson.String
+		if content.IsArray() {
+			blocks := content.Array()
+			textOnly = len(blocks) > 0
+			for _, block := range blocks {
+				textOnly = textOnly && block.Get("type").String() == "text"
+			}
+		}
+		// Leave signed/tool continuations to the upstream rather than reject a
+		// legitimate pause_turn or fallback-credit continuation as a prefill.
+		if last.Get("role").String() == "assistant" && textOnly {
+			return fmt.Errorf("claude-haiku-5-5 does not support assistant prefill; end messages with a user turn")
+		}
+	}
+	for i, tool := range gjson.GetBytes(body, "tools").Array() {
+		toolType := tool.Get("type").String()
+		if toolType == "computer_20250124" || toolType == "computer_20251124" {
+			return fmt.Errorf("claude-haiku-5-5 does not support tools[%d].type=%s on this platform; use computer_toolset_20260801", i, toolType)
+		}
+	}
+	return nil
+}
+
+// validateClaude55Parameters rejects settings that the upstream cannot honor.
+// Call before OAuth mimicry can remove tool_choice or alter thinking defaults.
+func validateClaude55Parameters(body []byte, model string) error {
 	spec, ok := claude.Claude55(model)
 	if !ok {
 		return nil

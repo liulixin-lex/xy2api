@@ -4384,6 +4384,26 @@
     {
       "path": "backend/ent/schema/usage_log.go",
       "value": "diffs MUST NOT drop these migration-owned columns. See"
+    },
+    {
+      "path": "backend/internal/service/gateway_request.go",
+      "value": "func validateHaiku55MessagesRequest("
+    },
+    {
+      "path": "backend/internal/service/gateway_request.go",
+      "value": "account.Type == AccountTypeAPIKey && isOfficialAnthropicAPIBaseURL(account.GetBaseURL())"
+    },
+    {
+      "path": "backend/internal/service/gateway_request.go",
+      "value": "if !claudeAPI || !claude.IsHaiku55(model) {"
+    },
+    {
+      "path": "backend/internal/service/upstream_billing_probe.go",
+      "value": "func isOfficialAnthropicAPIBaseURL(baseURL string) bool {"
+    },
+    {
+      "path": "backend/internal/domain/constants.go",
+      "value": "\"claude-haiku-5-5\":          \"anthropic.claude-haiku-5-5\""
     }
   ],
   "forbidden_module_paths": [

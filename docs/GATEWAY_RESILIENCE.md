@@ -120,6 +120,9 @@ xy2api 0.4.0 引入的一组网关能力，目标是减少用户可感知的失�
 | API Key 中转拒绝回放 `web_search_call` 历史（“response protection is unavailable”） | 同号补 web_search 声明重放一次，成功后该账号 6 小时内同类请求直接补声明；仍失败时 502 带原因，不换号，计入会话失败与回合封顶 |
 | 请求的模型不在分组白名单 | 404，消息附本分组白名单的前 10 项 |
 
+Haiku 5.5 的官方 Anthropic API 端点生成请求在转发前拒绝纯文本 assistant prefill（含关闭 thinking 的请求）和 `computer_20250124`，返回 400 `invalid_request_error`，按客户端请求错误归因；OAuth/setup-token 账号和 base URL 为空或命中现有官方 Anthropic 域名判断的 API Key 账号适用。Claude API 直连同时拒绝 `computer_20251124`；Bedrock、其他托管平台以及配置自定义 base URL 的 API Key 中转均交由上游判断。Bedrock 默认模型映射为 `anthropic.claude-haiku-5-5`（没有版本后缀）。规则按 [Haiku 5.5 官方迁移指南](https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide#replace-assistant-prefill) 与 [computer use 文档](https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool#migrate-from-computer-20251124) 收窄；保留用户结尾历史、工具/签名续传、fallback credit、未知工具版本和自定义同名工具。新规则不作用于 count_tokens；其他型号沿用原规则。
+
+
 Responses 空白占位：`response.output_text.delta` / `.done`、output_text 的 `response.content_part.added` / `.done`、assistant message 的 `response.output_item.added` / `.done` 逐事件按自身载荷判定，文本经 Go `strings.TrimSpace` 为空时暂存，不提交、不停止首输出截止、不计首 token。空 delta 必须存在且为字符串；这些已知事件中的 refusal、非文本 part、未知或畸形载荷立即算输出，不依赖 item 状态表。原生与透传复用尝试级有界暂存；任一可见事件先按原序冲刷全部暂存，再发送该事件，字节与既有输出路径的协议变换结果相同。输出前失败丢弃全部未提交帧（含 created/in_progress），再走失败处理。
 
 本地断流时，已经判为可见但尚缺 SSE 结束空行的末尾事件仍按既有输出路径冲刷，随后补齐原有边界并发送合成 `response.failed`；截断 JSON 与已经判为可见的未知载荷同样保留。只有纯开场、空白占位且没有待冲刷可见事件时，才丢弃暂存。
