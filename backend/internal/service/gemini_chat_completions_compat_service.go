@@ -630,7 +630,11 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 		return disconnected
 	}
 
-	reader := bufio.NewReader(resp.Body)
+	upstreamBody, err := geminiJSONStreamReader(c, resp, s.cfg)
+	if err != nil {
+		return nil, err
+	}
+	reader := bufio.NewReader(upstreamBody)
 	for {
 		line, err := reader.ReadString('\n')
 		if len(line) > 0 {

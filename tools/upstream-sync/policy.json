@@ -4271,6 +4271,18 @@
     {
       "path": "backend/internal/mcp/runtime_health.go",
       "value": "CASE WHEN ev->>'budget_cut_applied' IN ('true','false') THEN (ev->>'budget_cut_applied')::boolean ELSE false END"
+    },
+    {
+      "path": "backend/internal/service/resilience_gemini_attempt.go",
+      "value": "func geminiJSONStreamReader(c *gin.Context, resp *http.Response, cfg *config.Config) (io.Reader, error)"
+    },
+    {
+      "path": "backend/internal/service/gemini_messages_compat_service.go",
+      "value": "jsonAsSSE := jsonFallback && PreOutputKeepaliveCommitted(c)"
+    },
+    {
+      "path": "backend/internal/service/gemini_chat_completions_compat_service.go",
+      "value": "upstreamBody, err := geminiJSONStreamReader(c, resp, s.cfg)"
     }
   ],
   "forbidden_module_paths": [

@@ -2309,7 +2309,11 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 	openToolName := ""
 	seenToolJSON := ""
 
-	reader := bufio.NewReader(resp.Body)
+	upstreamBody, err := geminiJSONStreamReader(c, resp, s.cfg)
+	if err != nil {
+		return nil, err
+	}
+	reader := bufio.NewReader(upstreamBody)
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil && !errors.Is(err, io.EOF) {
@@ -2920,6 +2924,11 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 	if contentType == "" {
 		contentType = "text/event-stream; charset=utf-8"
 	}
+	jsonFallback := strings.HasPrefix(strings.ToLower(contentType), "application/json")
+	jsonAsSSE := jsonFallback && PreOutputKeepaliveCommitted(c)
+	if jsonAsSSE {
+		contentType = "text/event-stream"
+	}
 	c.Header("Content-Type", contentType)
 
 	_, ok := c.Writer.(http.Flusher)
@@ -2927,7 +2936,11 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 		return nil, errors.New("streaming not supported")
 	}
 
-	resumeGeminiPreOutputKeepalive(c, resp)
+	// Headers suspended the heartbeat. JSON passthrough must not commit SSE
+	// while its body is still arriving; an already committed stream keeps beating.
+	if !jsonFallback || jsonAsSSE {
+		resumeGeminiPreOutputKeepalive(c, resp)
+	}
 	upstreamBody, err := geminiNativeStreamReader(c, resp, s.cfg)
 	if err != nil {
 		return nil, err

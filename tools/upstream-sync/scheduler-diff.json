@@ -2355,6 +2355,29 @@
           "resumeGeminiPreOutputKeepalive(c, resp)",
           "resumeGeminiPreOutputKeepalive(c, resp)"
         ]
+      },
+      {
+        "block": "gemini-json-fallback-0513",
+        "note": "Keep native fallback JSON byte-identical before heartbeat commit; frame committed JSON as SSE and normalize compat JSON through existing stream converters.",
+        "removed": [
+          "reader := bufio.NewReader(resp.Body)"
+        ],
+        "added": [
+          "// Headers suspended the heartbeat. JSON passthrough must not commit SSE",
+          "// while its body is still arriving; an already committed stream keeps beating.",
+          "contentType = \"text/event-stream\"",
+          "if !jsonFallback || jsonAsSSE {",
+          "if err != nil {",
+          "if jsonAsSSE {",
+          "jsonAsSSE := jsonFallback && PreOutputKeepaliveCommitted(c)",
+          "jsonFallback := strings.HasPrefix(strings.ToLower(contentType), \"application/json\")",
+          "reader := bufio.NewReader(upstreamBody)",
+          "return nil, err",
+          "upstreamBody, err := geminiJSONStreamReader(c, resp, s.cfg)",
+          "}",
+          "}",
+          "}"
+        ]
       }
     ]
   }
