@@ -4541,6 +4541,14 @@
     {
       "path": "backend/internal/handler/openai_gateway_handler.go",
       "value": "zap.String(\"fco_item_index\", index), zap.String(\"fco_bad_item_count\", count)"
+    },
+    {
+      "path": "backend/internal/service/gateway_claude_apikey_selection.go",
+      "value": "return hydrated, ctx, true, nil"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_responses.go",
+      "value": "requestCtx = service.WithAnthropicCompatDispatchModel(requestCtx, channelMapping.MappedModel)"
     }
   ],
   "forbidden_module_paths": [
@@ -7582,6 +7590,21 @@
       "id": "xy-anthropic-apikey-compat",
       "path": "backend/internal/service/anthropic_compat_profile_test.go",
       "literal": "func TestAnthropicCompatBulkPreflightRejectsMissingExplicitProfileAndLoadedConflicts"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/service/gateway_claude_apikey_profit_gate_test.go",
+      "literal": "TestClaudeAPIKeyCompatBoundSelectionRetainsProfitGate"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/handler/gateway_handler_anthropic_compat_alias_test.go",
+      "literal": "TestAnthropicCompatResponsesChannelAlias"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/service/anthropic_compat_profile_test.go",
+      "literal": "TestAnthropicCompatRejectsMalformedProfileAtWriteEntrypoints"
     }
   ]
 }

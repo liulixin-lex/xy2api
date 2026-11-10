@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"maps"
 	"net/http"
@@ -28,6 +29,9 @@ func TestAnthropicCompatConfigurationAndSeedLifecycle(t *testing.T) {
 		name, platform, kind string
 		extra, creds         map[string]any
 	}{
+		{"empty", PlatformAnthropic, AccountTypeAPIKey, map[string]any{AnthropicCompatProfileExtraKey: ""}, nil},
+		{"null", PlatformAnthropic, AccountTypeAPIKey, map[string]any{AnthropicCompatProfileExtraKey: nil}, nil},
+		{"uppercase-off", PlatformAnthropic, AccountTypeAPIKey, map[string]any{AnthropicCompatProfileExtraKey: "OFF"}, nil},
 		{"unknown", PlatformAnthropic, AccountTypeAPIKey, map[string]any{AnthropicCompatProfileExtraKey: "latest"}, nil},
 		{"nonstring", PlatformAnthropic, AccountTypeAPIKey, map[string]any{AnthropicCompatProfileExtraKey: true}, nil},
 		{"platform", PlatformOpenAI, AccountTypeAPIKey, map[string]any{AnthropicCompatProfileExtraKey: AnthropicCompatProfileClaudeCodeV1}, nil},
@@ -107,6 +111,36 @@ func TestAnthropicCompatBulkPreflightPreservesGenericPartialUpdates(t *testing.T
 			require.NoError(t, err, "a stale ID must preserve the existing generic bulk update behavior")
 			require.Len(t, repo.bulkUpdates, 1)
 		})
+	}
+}
+
+func TestAnthropicCompatRejectsMalformedProfileAtWriteEntrypoints(t *testing.T) {
+	for _, value := range []any{"", nil, "OFF"} {
+		for _, entry := range []string{"create", "update", "extra", "bulk"} {
+			t.Run(fmt.Sprintf("%v/%s", value, entry), func(t *testing.T) {
+				account := compatTestAccount()
+				repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+				svc := &adminServiceImpl{accountRepo: repo}
+				extra := map[string]any{AnthropicCompatProfileExtraKey: value}
+				ctx := context.Background()
+				var err error
+				switch entry {
+				case "create":
+					_, err = svc.CreateAccount(ctx, &CreateAccountInput{Name: "invalid", Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "fixture"}, Extra: extra, SkipDefaultGroupBind: true})
+				case "update":
+					_, err = svc.UpdateAccount(ctx, account.ID, &UpdateAccountInput{Extra: extra})
+				case "extra":
+					err = svc.UpdateAccountExtra(ctx, account.ID, extra)
+				case "bulk":
+					_, err = svc.BulkUpdateAccounts(ctx, &BulkUpdateAccountsInput{AccountIDs: []int64{account.ID}, Extra: extra})
+				}
+				require.Error(t, err)
+				require.Len(t, repo.accounts, 1)
+				require.Empty(t, repo.bulkUpdates)
+				require.Empty(t, repo.updates)
+				require.Equal(t, AnthropicCompatProfileClaudeCodeV1, repo.accounts[account.ID].Extra[AnthropicCompatProfileExtraKey])
+			})
+		}
 	}
 }
 

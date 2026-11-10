@@ -33,7 +33,7 @@ func (s *GatewayService) SelectAccountForModel(ctx context.Context, groupID *int
 
 // SelectAccountForModelWithExclusions selects an account supporting the requested model while excluding specified accounts.
 func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*Account, error) {
-	if bound, handled, err := s.selectAnthropicCompatBoundAccount(ctx, groupID, requestedModel, excludedIDs); handled {
+	if bound, _, handled, err := s.selectAnthropicCompatBoundAccount(ctx, groupID, requestedModel, excludedIDs); handled {
 		return bound, err
 	}
 	// 优先检查 context 中的强制平台（/antigravity 路由）

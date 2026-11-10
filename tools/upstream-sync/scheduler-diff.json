@@ -220,7 +220,7 @@
         "note": "Signed Anthropic profile history resolves its authorized original account before ordinary scheduling; both model selection and load-aware selection enforce the same provenance constraint. No binding retains the existing scheduler. Unbound requests exclude account-local incompatible profile candidates using the existing model eligibility hook.",
         "removed": [],
         "added": [
-          "if bound, handled, err := s.selectAnthropicCompatBoundAccount(ctx, groupID, requestedModel, excludedIDs); handled {",
+          "if bound, _, handled, err := s.selectAnthropicCompatBoundAccount(ctx, groupID, requestedModel, excludedIDs); handled {",
           "return bound, err",
           "}",
           "if bound, handled, err := s.selectAnthropicCompatBoundWithLoad(ctx, groupID, requestedModel, excludedIDs); handled {",

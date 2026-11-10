@@ -146,7 +146,7 @@ type handlerCompatFixture struct {
 	wire     chan handlerCompatWire
 }
 
-func newHandlerCompatFixture(t *testing.T) *handlerCompatFixture {
+func newHandlerCompatFixture(t *testing.T, channels ...*service.ChannelService) *handlerCompatFixture {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	f := &handlerCompatFixture{wire: make(chan handlerCompatWire, 8)}
@@ -191,10 +191,14 @@ func newHandlerCompatFixture(t *testing.T) *handlerCompatFixture {
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 	billingCache := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 	t.Cleanup(billingCache.Stop)
+	var channel *service.ChannelService
+	if len(channels) > 0 {
+		channel = channels[0]
+	}
 	gw := service.NewGatewayService(f.accounts, &fakeGroupRepo{group: f.group}, f.usage, nil, nil, nil, nil, f.store, cfg,
 		service.NewSchedulerSnapshotService(f.snapshot, nil, nil, nil, nil), nil, service.NewBillingService(cfg, nil),
 		service.NewRateLimitService(f.accounts, nil, cfg, nil, nil), billingCache, nil, &handlerCompatHTTP{client: upstream.Client()},
-		service.NewDeferredService(f.accounts, nil, time.Hour), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		service.NewDeferredService(f.accounts, nil, time.Hour), nil, nil, nil, nil, nil, nil, channel, nil, nil, nil, nil)
 	f.handler = &GatewayHandler{gatewayService: gw, cfg: cfg, billingCacheService: billingCache,
 		concurrencyHelper: NewConcurrencyHelper(service.NewConcurrencyService(&fakeConcurrencyCache{}), SSEPingFormatClaude, 0), maxAccountSwitches: 2}
 	return f

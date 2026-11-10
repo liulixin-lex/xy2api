@@ -311,4 +311,6 @@ func TestClaudeAPIKeyCompatAlreadyNativeAndAttemptReset(t *testing.T) {
 	require.False(t, compatPreservesHistory(c))
 	value, _ := c.Get(betaPolicyFilterSetKey)
 	require.Nil(t, value)
+	value, _ = c.Get(toolNameRewriteKey)
+	require.Nil(t, value)
 }

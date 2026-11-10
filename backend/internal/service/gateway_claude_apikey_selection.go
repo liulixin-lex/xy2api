@@ -56,28 +56,28 @@ func (s *GatewayService) anthropicCompatCandidateEligible(ctx context.Context, a
 
 // A provenance binding is a routing constraint, not a sticky preference. Use
 // the regular snapshot, health, quota, channel and slot checks for its sole owner.
-func (s *GatewayService) selectAnthropicCompatBoundAccount(ctx context.Context, groupID *int64, model string, excluded map[int64]struct{}) (*Account, bool, error) {
+func (s *GatewayService) selectAnthropicCompatBoundAccount(ctx context.Context, groupID *int64, model string, excluded map[int64]struct{}) (*Account, context.Context, bool, error) {
 	scope := compatScope(ctx)
 	if scope == nil || scope.Record == nil {
-		return nil, false, nil
+		return nil, ctx, false, nil
 	}
 	if _, found := excluded[scope.Record.AccountID]; found {
-		return nil, true, compatUnavailable("The account bound to signed history is temporarily unavailable")
+		return nil, ctx, true, compatUnavailable("The account bound to signed history is temporarily unavailable")
 	}
 	group, resolvedID, err := s.checkClaudeCodeRestriction(ctx, groupID)
 	if err != nil {
-		return nil, true, err
+		return nil, ctx, true, err
 	}
 	groupID = resolvedID
 	ctx = s.withGroupContext(ctx, group)
 	ctx = s.withGatewayProfitControlGate(ctx, groupID)
 	platform, forced, err := s.resolvePlatform(ctx, groupID, group, model)
 	if err != nil {
-		return nil, true, err
+		return nil, ctx, true, err
 	}
 	accounts, mixed, err := s.listSchedulableAccounts(ctx, groupID, platform, forced)
 	if err != nil {
-		return nil, true, compatUnavailable("The account bound to signed history cannot be loaded")
+		return nil, ctx, true, compatUnavailable("The account bound to signed history cannot be loaded")
 	}
 	ctx = s.withWindowCostPrefetch(ctx, accounts)
 	ctx = s.withRPMPrefetch(ctx, accounts)
@@ -88,26 +88,26 @@ func (s *GatewayService) selectAnthropicCompatBoundAccount(ctx context.Context, 
 			continue
 		}
 		if err := s.guardAnthropicCompatAccount(ctx, account); err != nil {
-			return nil, true, err
+			return nil, ctx, true, err
 		}
 		reason, _ := gates.candidateReason(ctx, account, true, time.Now())
 		if reason != "" || s.checkChannelPricingRestriction(ctx, groupID, model) {
-			return nil, true, compatUnavailable("The account bound to signed history is temporarily unavailable")
+			return nil, ctx, true, compatUnavailable("The account bound to signed history is temporarily unavailable")
 		}
 		hydrated, err := s.hydrateSelectedAccount(ctx, account)
 		if err != nil {
-			return nil, true, compatUnavailable("The account bound to signed history cannot be loaded")
+			return nil, ctx, true, compatUnavailable("The account bound to signed history cannot be loaded")
 		}
 		if err := s.guardAnthropicCompatAccount(ctx, hydrated); err != nil {
-			return nil, true, err
+			return nil, ctx, true, err
 		}
-		return hydrated, true, nil
+		return hydrated, ctx, true, nil
 	}
-	return nil, true, compatUnavailable("The account bound to signed history is outside the available account pool")
+	return nil, ctx, true, compatUnavailable("The account bound to signed history is outside the available account pool")
 }
 
 func (s *GatewayService) selectAnthropicCompatBoundWithLoad(ctx context.Context, groupID *int64, model string, excluded map[int64]struct{}) (*AccountSelectionResult, bool, error) {
-	account, handled, err := s.selectAnthropicCompatBoundAccount(ctx, groupID, model, excluded)
+	account, ctx, handled, err := s.selectAnthropicCompatBoundAccount(ctx, groupID, model, excluded)
 	if !handled || err != nil {
 		return nil, handled, err
 	}
