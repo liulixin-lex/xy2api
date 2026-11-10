@@ -6,7 +6,7 @@
 #
 # Documentation / 文档: https://github.com/liulixin-lex/xy2api
 
-# Read-only MCP is opt-in. See deploy/MCP_READONLY.md before enabling.
+# Read-only MCP is opt-in. See docs/guides/mcp.md before enabling.
 # 只读 MCP 默认关闭；须先配置独立只读数据库账号和 OAuth secret。
 mcp:
   enabled: false
@@ -53,14 +53,14 @@ server:
   # List only the exact proxy addresses that connect directly to XY2API.
   # Set [] explicitly to disable forwarded-IP trust in high-security mode.
   # The optional CDN edge marker X-XY-Edge (gateway resilience pre-output
-  # keepalive) is also honoured only from these peers. Since 0.4.1
-  # Cloudflare and ESA are recognised by their own origin headers without
-  # it; see docs/GATEWAY_RESILIENCE.md §2.1.
+  # keepalive) is also honoured only from these peers. Cloudflare and ESA
+  # are recognised by their own origin headers without it; see
+  # docs/deployment/reverse-proxy.md.
   # security.trust_forwarded_ip_for_api_key_acl=false 时使用的可信代理。
   # 只填写直接连接 XY2API 的精确代理地址；显式设置 [] 可在高安全模式下
   # 禁用转发 IP 信任。网关韧性可选的 CDN 边缘标记 X-XY-Edge 也只接受来自
-  # 这些对端的值；0.4.1 起 Cloudflare 与 ESA 按其自带的回源头自动识别，
-  # 无需该标记，见 docs/GATEWAY_RESILIENCE.md §2.1。
+  # 这些对端的值；Cloudflare 与 ESA 按其自带的回源头自动识别，
+  # 无需该标记，见 docs/deployment/reverse-proxy.md。
   trusted_proxies:
     - 127.0.0.1/32
     - ::1/128
@@ -71,9 +71,9 @@ server:
   max_request_body_size: 268435456
   # After an online update or rollback, how long the restart waits for requests
   # in flight once it stopped accepting connections (0-600 seconds, 0 exits at
-  # once). Docker deployments should update the image instead; see deploy/README.md.
+  # once). Docker deployments should update the image instead; see docs/deployment/upgrade.md.
   # 在线更新或回退后的重启：停止接收连接后等待在途请求完成的最长秒数（0-600，0 为立即退出）。
-  # Docker 部署请改为更新镜像，见 deploy/README.md。
+  # Docker 部署请改为更新镜像，见 docs/deployment/upgrade.md。
   restart_drain_seconds: 30
   # HTTP/2 Cleartext (h2c) configuration
   # HTTP/2 Cleartext (h2c) 配置
@@ -490,7 +490,7 @@ gateway:
     rules: []
   # Privacy-safe cache diagnostics and optional cold-session tie-breaker.
   # Existing owners, health, priority, capacity and admission remain authoritative.
-  # See docs/openai-cache-reliability.md for rollout and rollback.
+  # See docs/guides/caching.md.
   openai_cache:
     diagnostics_enabled: false
     aware_routing_enabled: false

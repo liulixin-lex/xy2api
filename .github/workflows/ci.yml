@@ -141,6 +141,8 @@ jobs:
             bash "$test"
             echo "::endgroup::"
           done
+      - name: Documentation links
+        run: python3 tools/ci/check_links.py
       - name: Tool tests
         run: |
           python -m unittest discover -s tools/tests -t . -p 'test_*.py' -v

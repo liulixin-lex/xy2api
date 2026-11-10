@@ -700,7 +700,7 @@ export async function getBatchRecentHealth(accountIds: number[]): Promise<BatchR
   return data
 }
 
-/** 上游余额列（xy-upstream-balance）。state=ok 表示有当前身份下的成功值；其余见 docs/UPSTREAM_BALANCE.md。 */
+/** 上游余额列（xy-upstream-balance）。state=ok 表示有当前身份下的成功值；其余见 docs/guides/upstream-balance.md。 */
 export type UpstreamBalanceState = 'ok' | 'unavailable' | 'not_applicable'
 /** null 表示口径未知（new-api 只用 Key 查询时通常为 null）。 */
 export type UpstreamBalanceBasis = 'wallet' | 'key' | 'subscription'
