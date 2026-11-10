@@ -178,6 +178,7 @@ type AccountBulkUpdate struct {
 	// EnsureCodexFingerprintSeed asks the repository to atomically preserve an
 	// existing valid Codex fingerprint seed or create one for eligible rows.
 	EnsureCodexFingerprintSeed bool
+	EnsureAnthropicCompatSeed  bool
 }
 
 // CreateAccountRequest 创建账号请求
@@ -261,6 +262,11 @@ func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (
 		account.AutoPauseOnExpired = true
 	}
 
+	compatExtra, err := prepareAnthropicCompatExtra(account, nil, true)
+	if err != nil {
+		return nil, err
+	}
+	account.Extra = compatExtra
 	if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, fmt.Errorf("create account: %w", err)
 	}
@@ -331,6 +337,7 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 		return nil, fmt.Errorf("get account: %w", err)
 	}
 
+	previous := *account
 	// 更新字段
 	if req.Name != nil {
 		account.Name = *req.Name
@@ -385,6 +392,9 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 		}
 	}
 
+	if err := prepareAnthropicCompatAccountUpdate(account, &previous); err != nil {
+		return nil, err
+	}
 	// 执行更新
 	if err := s.accountRepo.Update(ctx, account); err != nil {
 		return nil, fmt.Errorf("update account: %w", err)

@@ -61,7 +61,8 @@
       "openspec/changes/codex-collaboration-plaintext-20261104/**",
       "openspec/changes/encrypted-routing-20261105/**",
       "openspec/changes/readonly-mcp-20261105/**",
-      "openspec/changes/budget-anchor-0512-20261108/**"
+      "openspec/changes/budget-anchor-0512-20261108/**",
+      "openspec/changes/claude-apikey-compat-20261110/**"
     ],
     "manual_merge": [
       "Makefile",
@@ -3810,22 +3811,6 @@
       "value": "func TestCollaborationRestoreErrorLocalTermination"
     },
     {
-      "path": "backend/internal/service/openai_account_runtime_block_fastpath.go",
-      "value": "account.Platform == PlatformOpenAI && isOpenAIStateRejection(responseBody, \"\")"
-    },
-    {
-      "path": "backend/internal/service/ratelimit_service.go",
-      "value": "account.Platform == PlatformOpenAI && isOpenAIStateRejection(responseBody, \"\")"
-    },
-    {
-      "path": "backend/internal/service/openai_gateway_passthrough.go",
-      "value": "if isOpenAIStateRejection(payload, message) {"
-    },
-    {
-      "path": "backend/internal/service/openai_gateway_upstream_errors.go",
-      "value": "if isOpenAIStateRejection(upstreamBody, upstreamMsg) {"
-    },
-    {
       "path": "backend/internal/service/resilience_post_output.go",
       "value": "return isOpenAIStateRejection(payload, message)"
     },
@@ -4480,6 +4465,102 @@
     {
       "path": "backend/internal/handler/grok_media.go",
       "value": "classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, routingModel, requestModel, platform)"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler.go",
+      "value": "h.gatewayService.PrepareAnthropicCompatibility("
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_chat_completions.go",
+      "value": "h.gatewayService.PrepareAnthropicCompatibility("
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_responses.go",
+      "value": "h.gatewayService.PrepareAnthropicCompatibility("
+    },
+    {
+      "path": "backend/internal/service/gateway_forward.go",
+      "value": "s.beginAnthropicCompatAttempt("
+    },
+    {
+      "path": "backend/internal/service/gateway_forward_as_chat_completions.go",
+      "value": "s.beginAnthropicCompatAttempt("
+    },
+    {
+      "path": "backend/internal/service/gateway_forward_as_responses.go",
+      "value": "s.beginAnthropicCompatAttempt("
+    },
+    {
+      "path": "backend/internal/service/gateway_count_tokens.go",
+      "value": "s.beginAnthropicCompatAttempt("
+    },
+    {
+      "path": "backend/internal/service/gateway_upstream_request.go",
+      "value": "finalizeAnthropicCompatPlan("
+    },
+    {
+      "path": "backend/internal/service/gateway_scheduling.go",
+      "value": "s.selectAnthropicCompatBoundWithLoad("
+    },
+    {
+      "path": "backend/internal/service/admin_account.go",
+      "value": "prepareAnthropicCompatExtra("
+    },
+    {
+      "path": "backend/internal/service/account_service.go",
+      "value": "prepareAnthropicCompatAccountUpdate("
+    },
+    {
+      "path": "backend/internal/service/account_test_service.go",
+      "value": "BuildAnthropicCompatDiagnosticRequest("
+    },
+    {
+      "path": "backend/internal/handler/dto/mappers.go",
+      "value": "service.AnthropicCompatIdentitySeedExtraKey"
+    },
+    {
+      "path": "backend/internal/handler/admin/account_data.go",
+      "value": "service.RedactAnthropicCompatExtra("
+    },
+    {
+      "path": "backend/internal/repository/account_repo.go",
+      "value": "ensureAnthropicCompatSeedSQL("
+    },
+    {
+      "path": "backend/internal/repository/wire.go",
+      "value": "NewGatewayCacheWithManagedProvenance,"
+    },
+    {
+      "path": "backend/cmd/server/wire_gen.go",
+      "value": "repository.NewGatewayCacheWithManagedProvenance("
+    },
+    {
+      "path": "frontend/src/components/account/CreateAccountModal.vue",
+      "value": "extra.anthropic_compat_profile ="
+    },
+    {
+      "path": "frontend/src/components/account/EditAccountModal.vue",
+      "value": "newExtra.anthropic_compat_profile ="
+    },
+    {
+      "path": "frontend/src/components/account/BulkEditAccountModal.vue",
+      "value": "ensureExtra().anthropic_compat_profile ="
+    },
+    {
+      "path": "backend/internal/repository/scheduler_cache.go",
+      "value": "service.AnthropicCompatIdentitySeedExtraKey"
+    },
+    {
+      "path": "backend/internal/service/gateway_scheduling.go",
+      "value": "s.anthropicCompatCandidateEligible(ctx, account, requestedModel)"
+    },
+    {
+      "path": "backend/internal/service/gateway_claude_apikey_selection.go",
+      "value": "return hydrated, ctx, true, nil"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler_responses.go",
+      "value": "requestCtx = service.WithAnthropicCompatDispatchModel(requestCtx, channelMapping.MappedModel)"
     }
   ],
   "forbidden_module_paths": [
@@ -4558,7 +4639,8 @@
     "xy-anthropic-cache-ttl",
     "xy-openai-group-quality-scheduling",
     "xy-converted-tool-cache-markers",
-    "xy-support-chat"
+    "xy-support-chat",
+    "xy-anthropic-apikey-compat"
   ],
   "custom_patch_tests": [
     {
@@ -7410,6 +7492,151 @@
       "id": "xy-error-recovery-routing",
       "path": "backend/internal/handler/model_reject_diagnosis_test.go",
       "literal": "TestModelRejectDiagnosis503BoundariesUnchanged"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/service/anthropic_compat_profile_test.go",
+      "literal": "func TestAnthropicCompatConfigurationAndSeedLifecycle"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/service/anthropic_compat_profile_test.go",
+      "literal": "func TestAnthropicCompatDiagnosticUsesAdapterAndRequiresTerminal"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/repository/anthropic_compat_config_integration_test.go",
+      "literal": "func TestAnthropicCompatBulkSeedsAndAdminLifecyclePostgres"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/service/gateway_claude_apikey_compat_test.go",
+      "literal": "func TestClaudeAPIKeyCompatWireIdentityIsolationAndCount"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/service/gateway_claude_apikey_compat_test.go",
+      "literal": "func TestClaudeAPIKeyCompatProvenanceAllBlocksAndRotation"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/service/gateway_claude_apikey_compat_test.go",
+      "literal": "func TestClaudeAPIKeyCompatSuccessTailAtomicAndFailureUsage"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/service/gateway_claude_apikey_compat_test.go",
+      "literal": "func TestClaudeAPIKeyCompatTruncatedInvalidAndBoundedStreams"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/service/gateway_claude_apikey_compat_test.go",
+      "literal": "func TestClaudeAPIKeyCompatAlreadyNativeAndAttemptReset"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/handler/gateway_handler_anthropic_compat_test.go",
+      "literal": "func TestAnthropicCompatHandlersSixPathsAndImmediateSignedToolContinuation"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/handler/gateway_handler_anthropic_compat_test.go",
+      "literal": "func TestAnthropicCompatHandlersCommitBeforeSuccessAndFailureUsage"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/repository/gateway_cache_managed_provenance_test.go",
+      "literal": "func TestGatewayCacheManagedProvenancePersistsCurrentAndPreviousRoots"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/service/gateway_claude_apikey_review_test.go",
+      "literal": "func TestClaudeAPIKeyCompatUsagePatchesSurviveFailedTerminal"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/service/gateway_claude_apikey_review_test.go",
+      "literal": "func TestClaudeAPIKeyCompatSSECanonicalAndReceiveLimits"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/service/gateway_claude_apikey_review_test.go",
+      "literal": "func TestClaudeAPIKeyCompatNonStreamOpaqueBound"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/service/gateway_claude_apikey_review_test.go",
+      "literal": "func TestClaudeAPIKeyCompatLegacyLimitsAndFullBatchGuard"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/service/gateway_claude_apikey_review_test.go",
+      "literal": "func TestClaudeAPIKeyCompatOffBetaAndCandidateAdmission"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/service/gateway_claude_apikey_review_test.go",
+      "literal": "func TestClaudeAPIKeyCompatRejectsMissingBetaCapabilities"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/service/gateway_claude_apikey_review_test.go",
+      "literal": "func TestClaudeAPIKeyCompatCompleteNativeValidatesMetadataAndConsistency"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/service/gateway_claude_apikey_review_test.go",
+      "literal": "func TestClaudeAPIKeyCompatPrefixIgnoresSerializationButProtectsMeaning"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/service/gateway_claude_apikey_review_test.go",
+      "literal": "func TestClaudeAPIKeyCompatDisconnectDrainUsesUpstreamRequestContext"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/service/gateway_claude_apikey_review_test.go",
+      "literal": "func TestClaudeAPIKeyCompatCandidateUsesActualChannelThenAccountModel"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/repository/anthropic_compat_provenance_integration_test.go",
+      "literal": "func TestAnthropicCompatProvenanceRedisAtomicConflictCapacityAndIdleTTL"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/repository/anthropic_compat_provenance_integration_test.go",
+      "literal": "func TestAnthropicCompatProvenanceRedisConcurrentWritersAndCancellation"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/handler/gateway_handler_anthropic_compat_test.go",
+      "literal": "func TestAnthropicCompatHandlersCountSkipsInapplicableCandidate"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/service/anthropic_compat_profile_test.go",
+      "literal": "func TestAnthropicCompatBulkPreflightPreservesGenericPartialUpdates"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/service/anthropic_compat_profile_test.go",
+      "literal": "func TestAnthropicCompatBulkPreflightRejectsMissingExplicitProfileAndLoadedConflicts"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/service/gateway_claude_apikey_profit_gate_test.go",
+      "literal": "TestClaudeAPIKeyCompatBoundSelectionRetainsProfitGate"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/handler/gateway_handler_anthropic_compat_alias_test.go",
+      "literal": "TestAnthropicCompatResponsesChannelAlias"
+    },
+    {
+      "id": "xy-anthropic-apikey-compat",
+      "path": "backend/internal/service/anthropic_compat_profile_test.go",
+      "literal": "TestAnthropicCompatRejectsMalformedProfileAtWriteEntrypoints"
     }
   ]
 }

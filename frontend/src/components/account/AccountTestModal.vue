@@ -353,7 +353,11 @@ const loadAvailableModels = async () => {
       : models
     // Default selection by platform
     if (availableModels.value.length > 0) {
-      if (props.account.platform === 'gemini') {
+      if (props.account.extra?.anthropic_compat_profile === 'claude_code_v1') {
+        const preferred = availableModels.value.find((m) => m.id === 'claude-opus-5-5')
+          || availableModels.value.find((m) => m.id === 'claude-opus-4-8')
+        selectedModelId.value = preferred?.id || availableModels.value[0].id
+      } else if (props.account.platform === 'gemini') {
         selectedModelId.value = availableModels.value[0].id
       } else {
         // Try to select Sonnet as default, otherwise use first model
@@ -484,6 +488,10 @@ const startTest = async () => {
 
 const handleEvent = (event: {
   type: string
+  actual_account_id?: number
+  test_scope?: string
+  compat_profile?: string
+  compat_revision?: string
   text?: string
   model?: string
   success?: boolean
@@ -493,6 +501,17 @@ const handleEvent = (event: {
 }) => {
   switch (event.type) {
     case 'test_start':
+      if (event.actual_account_id) {
+        addLine(t('admin.accounts.anthropic.diagnosticAccount', { id: event.actual_account_id }), 'text-cyan-400')
+      }
+      if (event.test_scope) {
+        addLine(t(event.test_scope === 'ordinary_client_compatibility'
+          ? 'admin.accounts.anthropic.diagnosticOrdinary'
+          : 'admin.accounts.anthropic.diagnosticLegacy'), 'text-gray-400')
+      }
+      if (event.compat_profile && event.compat_revision) {
+        addLine(`${event.compat_profile} / ${event.compat_revision}`, 'text-gray-400')
+      }
       addLine(t('admin.accounts.connectedToApi'), 'text-green-400')
       if (event.model) {
         addLine(t('admin.accounts.usingModel', { model: event.model }), 'text-cyan-400')
