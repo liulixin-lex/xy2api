@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -219,4 +220,155 @@ func TestOpenAIGatewayService_PreservesOversizedToolOutputForUpstream(t *testing
 	require.NotNil(t, result)
 	require.Len(t, upstream.bodies, 1)
 	require.Equal(t, oversized, gjson.GetBytes(upstream.bodies[0], "input.1.output").String())
+}
+
+func TestFCONamedOutputOutbound(t *testing.T) {
+	named := map[string]any{"type": "function_call_output", "name": "untrusted_context", "namespace": "agent", "output": "context", "id": "item_fixture"}
+	t.Run("T12_namespace_all_modes", func(t *testing.T) {
+		for _, mode := range []string{"oauth", "apikey", "apikey_no_declaration", "flatten", "compact", "passthrough"} {
+			t.Run(mode, func(t *testing.T) {
+				body := []byte(`{"model":"gpt-5.6-terra","stream":false,"instructions":"test","tools":[{"type":"namespace","name":"agent","tools":[{"type":"function","name":"untrusted_context","parameters":{"type":"object"}}]}],"input":[{"type":"function_call_output","name":"untrusted_context","namespace":"agent","output":"context"}]}`)
+				account := newOpenAIOAuthNamespaceTestAccount()
+				if strings.HasPrefix(mode, "apikey") {
+					account = newOpenAIRejectedFieldTestAccount()
+				}
+				if mode == "apikey_no_declaration" {
+					var request map[string]any
+					require.NoError(t, json.Unmarshal(body, &request))
+					delete(request, "tools")
+					var err error
+					body, err = json.Marshal(request)
+					require.NoError(t, err)
+				}
+				if mode == "flatten" {
+					account.Extra = map[string]any{"openai_responses_flatten_namespaces": true}
+				}
+				if mode == "passthrough" {
+					account.Extra = map[string]any{"openai_oauth_passthrough": true}
+				}
+				response := newOpenAIRejectedFieldTestResponse(http.StatusOK, namespaceForwardOKResponse)
+				if mode == "passthrough" {
+					response.Header.Set("Content-Type", "text/event-stream")
+					response.Body = io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_fixture\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"))
+				}
+				upstream := &httpUpstreamRecorder{responses: []*http.Response{response}}
+				c := newOpenAIRejectedFieldTestContext(body)
+				if mode == "compact" {
+					c.Request.URL.Path = "/v1/responses/compact"
+				}
+				_, err := newOpenAIRejectedFieldTestService(upstream).Forward(context.Background(), c, account, body)
+				require.NoError(t, err)
+				require.Len(t, upstream.bodies, 1)
+				item := gjson.GetBytes(upstream.bodies[0], `input.#(type=="function_call_output")`)
+				require.Equal(t, "agent", item.Get("namespace").String())
+				require.Equal(t, "untrusted_context", item.Get("name").String())
+				require.False(t, item.Get("call_id").Exists())
+			})
+		}
+	})
+	t.Run("T13_rejected_namespace", func(t *testing.T) {
+		raw, err := json.Marshal(map[string]any{"input": []any{named}})
+		require.NoError(t, err)
+		out, _, changed, err := removeOpenAIResponsesRejectedNamespaceAtIndex(raw, 0)
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.False(t, gjson.GetBytes(out, "input.0.namespace").Exists())
+		raw = []byte(`{"input":[{"type":"function_call_output","call_id":"paired","namespace":"agent"}]}`)
+		_, _, changed, err = removeOpenAIResponsesRejectedNamespaceAtIndex(raw, 0)
+		require.NoError(t, err)
+		require.False(t, changed)
+	})
+	t.Run("T14_no_output_id_fallback", func(t *testing.T) {
+		for _, typ := range []string{"function_call_output", "custom_tool_call_output", "mcp_tool_call_output", "tool_search_output"} {
+			item := map[string]any{"type": typ, "id": "call_fixture", "name": "context", "output": "context"}
+			out := filterCodexInputWithOptions([]any{item}, codexInputFilterOptions{})
+			require.Len(t, out, 1)
+			got, ok := out[0].(map[string]any)
+			require.True(t, ok)
+			require.NotContains(t, got, "call_id")
+		}
+		out := filterCodexInputWithOptions([]any{map[string]any{"type": "function_call", "id": "call_fixture", "name": "f", "arguments": "{}"}}, codexInputFilterOptions{})
+		got, ok := out[0].(map[string]any)
+		require.True(t, ok)
+		require.NotEmpty(t, got["call_id"])
+	})
+	t.Run("T15_no_grok_guess", func(t *testing.T) {
+		for _, items := range [][]any{{named, map[string]any{"type": "function_call", "call_id": "call_fixture", "name": "f", "arguments": "{}"}, map[string]any{"type": "function_call_output", "output": "paired"}}, {map[string]any{"type": "message", "role": "user", "content": "hi"}, named}} {
+			raw, err := json.Marshal(map[string]any{"input": items})
+			require.NoError(t, err)
+			out, err := sanitizeGrokResponsesModelInput(raw)
+			require.NoError(t, err)
+			item := gjson.GetBytes(out, `input.#(name=="untrusted_context")`)
+			require.True(t, item.Exists())
+			require.Equal(t, "agent", item.Get("namespace").String())
+			require.False(t, item.Get("call_id").Exists())
+			require.Equal(t, "item_fixture", item.Get("id").String())
+			if len(items) == 3 {
+				require.Equal(t, "call_fixture", gjson.GetBytes(out, "input.2.call_id").String())
+			}
+		}
+	})
+	t.Run("shared_sanitize_shape", func(t *testing.T) {
+		for _, callID := range []any{nil, "", " ", 123, true, []any{}, map[string]any{}} {
+			item := map[string]any{"type": "function_call_output", "name": "context", "call_id": callID}
+			input := []any{item}
+			req := map[string]any{"input": input}
+			changed := sanitizeOpenAIResponsesOrphanToolOutputs(req, input, false)
+			require.Equal(t, callID != nil, changed)
+		}
+	})
+}
+
+func TestFCONamedOutputExactTypeSharedWithSanitize(t *testing.T) {
+	for _, typ := range []string{" function_call_output", "function_call_output "} {
+		item := map[string]any{"type": typ, "name": "context"}
+		input := []any{item}
+		req := map[string]any{"input": input}
+		body, err := json.Marshal(req)
+		require.NoError(t, err)
+		require.True(t, ValidateFunctionCallOutputContextBytes(body).HasFunctionCallOutputMissingCallID)
+		require.True(t, sanitizeOpenAIResponsesOrphanToolOutputs(req, input, false))
+		require.Empty(t, req["input"])
+	}
+}
+
+func TestFCONamedOutputWSFrame(t *testing.T) {
+	cfg := newOpenAIWSV2TestConfig()
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
+	capture := &openAIWSCaptureConn{events: [][]byte{[]byte(`{"type":"response.completed","response":{"id":"resp_named","model":"gpt-5.6-sol","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":1}}}`)}}
+	pool := newOpenAIWSConnPool(cfg)
+	pool.setClientDialerForTest(&openAIWSCaptureDialer{conn: capture})
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: &httpUpstreamRecorder{}, cache: &stubGatewayCache{}, openaiWSResolver: NewOpenAIWSProtocolResolver(cfg), openaiWSPool: pool}
+	account := newOpenAIOAuthNamespaceTestAccount()
+	account.Extra = map[string]any{"responses_websockets_v2_enabled": true}
+	body := []byte(`{"model":"gpt-5.6-sol","stream":false,"input":[{"type":"function_call_output","name":"untrusted_context","namespace":"agent","output":"context"},{"type":"function_call_output","call_id":null,"name":"notification","namespace":"agent","output":"second"}]}`)
+	c := newOpenAIRejectedFieldTestContext(body)
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.144.1")
+	result, err := svc.Forward(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.OpenAIWSMode)
+	capture.mu.Lock()
+	frame := requestToJSONString(cloneMapStringAny(capture.lastWrite))
+	capture.mu.Unlock()
+	require.Equal(t, "response.create", gjson.Get(frame, "type").String())
+	require.JSONEq(t, gjson.GetBytes(body, "input").Raw, gjson.Get(frame, "input").Raw)
+	t.Logf("WS_FRAME input=%s", gjson.Get(frame, "input").Raw)
+}
+
+func TestFCONamedOutputRejectedNamespaceRetry(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.6-sol","stream":false,"input":[{"type":"function_call_output","name":"untrusted_context","namespace":"agent","output":"context"}]}`)
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, `{"error":{"message":"Unknown parameter: 'input[0].namespace'.","type":"invalid_request_error","param":"input[0].namespace"}}`),
+		newOpenAIRejectedFieldTestResponse(http.StatusOK, namespaceForwardOKResponse),
+	}}
+	result, err := newOpenAIRejectedFieldTestService(upstream).Forward(context.Background(), newOpenAIRejectedFieldTestContext(body), newOpenAIOAuthNamespaceTestAccount(), body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.bodies, 2)
+	require.Equal(t, "agent", gjson.GetBytes(upstream.bodies[0], "input.0.namespace").String())
+	require.False(t, gjson.GetBytes(upstream.bodies[1], "input.0.namespace").Exists())
+	require.Equal(t, "untrusted_context", gjson.GetBytes(upstream.bodies[1], "input.0.name").String())
+	require.False(t, gjson.GetBytes(upstream.bodies[1], "input.0.call_id").Exists())
 }

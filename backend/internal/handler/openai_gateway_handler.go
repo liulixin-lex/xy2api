@@ -1878,21 +1878,32 @@ func (h *OpenAIGatewayHandler) validateFunctionCallOutputRequest(c *gin.Context,
 		return true
 	}
 
+	if !validation.HasFunctionCallOutputMissingCallID && validation.HasItemReferenceForAllCallIDs {
+		return true
+	}
+	index, count := any(validation.BadItemIndex), any(validation.BadItemCount)
+	if validation.BadItemIndex >= 64 {
+		index = "64_plus"
+	}
+	if validation.BadItemCount >= 3 {
+		count = "3_plus"
+	}
+	reqLog = reqLog.With(zap.Any("fco_item_index", index), zap.Any("fco_bad_item_count", count),
+		zap.Bool("fco_name_present", validation.BadItem.Get("name").Exists()),
+		zap.Bool("fco_namespace_present", validation.BadItem.Get("namespace").Exists()))
 	if validation.HasFunctionCallOutputMissingCallID {
+		reqLog = reqLog.With(zap.String("fco_call_id_shape", validation.InvalidCallIDShape))
 		reqLog.Warn("openai.request_validation_failed",
 			zap.String("reason", "function_call_output_missing_call_id"),
 		)
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "function_call_output requires call_id on HTTP requests; continuation via previous_response_id is only supported on Responses WebSocket v2")
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", fmt.Sprintf("input[%d] (%s) requires a non-empty string call_id; only a named function_call_output may omit call_id or use null", validation.BadItemIndex, strings.TrimSpace(validation.BadItem.Get("type").String())))
 		return false
-	}
-	if validation.HasItemReferenceForAllCallIDs {
-		return true
 	}
 
 	reqLog.Warn("openai.request_validation_failed",
 		zap.String("reason", "function_call_output_missing_item_reference"),
 	)
-	h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "function_call_output requires item_reference ids matching each call_id on HTTP requests; continuation via previous_response_id is only supported on Responses WebSocket v2")
+	h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", fmt.Sprintf("input[%d] (%s) requires item_reference ids matching call_id, an originating tool call, or previous_response_id", validation.BadItemIndex, strings.TrimSpace(validation.BadItem.Get("type").String())))
 	return false
 }
 

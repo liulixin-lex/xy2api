@@ -30,6 +30,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestOpenAIHandleStreamingAwareError_JSONEscaping(t *testing.T) {
@@ -1017,7 +1019,7 @@ func TestOpenAIResponses_RejectsUnownedHTTPContinuation(t *testing.T) {
 	require.Contains(t, w.Body.String(), "previous_response_id is not available for this user")
 }
 
-func TestOpenAIResponses_FunctionCallOutputHTTPGuidanceDoesNotSuggestPreviousResponseReuse(t *testing.T) {
+func TestOpenAIResponses_FunctionCallOutputHTTPGuidanceIdentifiesInvalidItem(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	w := httptest.NewRecorder()
@@ -1042,7 +1044,9 @@ func TestOpenAIResponses_FunctionCallOutputHTTPGuidanceDoesNotSuggestPreviousRes
 	h.Responses(c)
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
-	require.Contains(t, w.Body.String(), "Responses WebSocket v2")
+	require.NotContains(t, w.Body.String(), "Responses WebSocket v2")
+	require.Contains(t, w.Body.String(), "input[0] (function_call_output)")
+	require.Contains(t, w.Body.String(), "non-empty string call_id")
 	require.NotContains(t, w.Body.String(), "reuse previous_response_id")
 }
 
@@ -3531,6 +3535,113 @@ func TestOpenAIResponsesWebSocketSimpleModeRechecksKeyWindows(t *testing.T) {
 				secondPayload: `{"type":"response.create","model":"gpt-5.1"}`,
 				ingressMode:   mode, simpleModeRejectAtRead: 3, secondTurnCloseExpected: true, closeReason: "billing check failed",
 			})
+		})
+	}
+}
+
+func TestFCONamedOutputIngress(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name, items, previous, shape string
+		index                        int
+		badCount                     any
+		ok                           bool
+	}{
+		{"T1_missing_named", `{"type":"function_call_output","name":"untrusted_context","namespace":"agent","output":"private_output"}`, "", "", 0, nil, true},
+		{"T2_null_named", `{"type":"function_call_output","call_id":null,"name":"untrusted_context","namespace":"agent","output":"private_output"}`, "", "", 0, nil, true},
+		{"T3_empty", `{"type":"function_call_output","call_id":"","name":"private_name","namespace":"private_namespace","output":"private_output"}`, "", "empty", 0, int64(1), false},
+		{"T4_whitespace", `{"type":"function_call_output","call_id":" \t","name":"private_name"}`, "", "whitespace", 0, int64(1), false},
+		{"T5_number", `{"type":"function_call_output","call_id":123,"name":"private_name"}`, "", "wrong_type", 0, int64(1), false},
+		{"T5_bool", `{"type":"function_call_output","call_id":true,"name":"private_name"}`, "", "wrong_type", 0, int64(1), false},
+		{"T5_object", `{"type":"function_call_output","call_id":{},"name":"private_name"}`, "", "wrong_type", 0, int64(1), false},
+		{"T5_array", `{"type":"function_call_output","call_id":[],"name":"private_name"}`, "", "wrong_type", 0, int64(1), false},
+		{"T6_missing_name", `{"type":"function_call_output","output":"private_output"}`, "", "missing", 0, int64(1), false},
+		{"T7_empty_name", `{"type":"function_call_output","name":""}`, "", "missing", 0, int64(1), false},
+		{"T7_blank_name", `{"type":"function_call_output","call_id":null,"name":" \t"}`, "", "null", 0, int64(1), false},
+		{"T7_wrong_name", `{"type":"function_call_output","name":1}`, "", "missing", 0, int64(1), false},
+		{"T8_mixed", `{"type":"function_call_output","name":"context"},{"type":"function_call_output","call_id":"call_fixture","output":"ok"},{"type":"item_reference","id":"call_fixture"},{"type":"custom_tool_call_output","name":"private_name"}`, "", "missing", 3, int64(1), false},
+		{"T9_context", `{"type":"function_call_output","name":"context"},{"type":"function_call_output","call_id":"call_fixture","output":"ok"},{"type":"function_call","call_id":"call_fixture","name":"f","arguments":"{}"}`, "", "", 0, nil, true},
+		{"T9_unrelated_context", `{"type":"function_call_output"},{"type":"function_call","call_id":"other"}`, "", "", 0, nil, true},
+		{"T9_previous", `{"type":"function_call_output"}`, "resp_fixture", "", 0, nil, true},
+		{"T10_custom", `{"type":"function_call_output","name":"context"},{"type":"custom_tool_call_output","name":"private_name"}`, "", "missing", 1, int64(1), false},
+		{"T10_mcp", `{"type":"function_call_output","name":"context"},{"type":"mcp_tool_call_output","name":"private_name"}`, "", "missing", 1, int64(1), false},
+		{"T10_search", `{"type":"function_call_output","name":"context"},{"type":"tool_search_output","name":"private_name"}`, "", "missing", 1, int64(1), false},
+		{"T11_duplicate", `{"type":"function_call_output","call_id":null,"call_id":"x","name":"context"}`, "", "", 0, nil, true},
+		{"T16_two", `{"type":"function_call_output"},{"type":"custom_tool_call_output"}`, "", "missing", 0, int64(2), false},
+		{"T16_bounded", strings.Repeat(`{"type":"message"},`, 64) + `{"type":"function_call_output"},{"type":"custom_tool_call_output"},{"type":"mcp_tool_call_output"},{"type":"tool_search_output"}`, "", "missing", 64, "3_plus", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(fmt.Sprintf(`{"model":"gpt-6.1-sol","input":[%s],"previous_response_id":%q}`, tc.items, tc.previous))
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			core, logs := observer.New(zap.WarnLevel)
+			ok := (&OpenAIGatewayHandler{}).validateFunctionCallOutputRequest(c, body, zap.New(core))
+			t.Logf("accepted=%v status=%d body=%s logs=%v", ok, rec.Code, rec.Body.String(), logs.All())
+			require.Equal(t, tc.ok, ok)
+			if tc.ok {
+				require.Zero(t, logs.Len())
+				return
+			}
+			require.Equal(t, 400, rec.Code)
+			response := gjson.Get(rec.Body.String(), "error")
+			require.Equal(t, "invalid_request_error", response.Get("type").String())
+			require.Contains(t, response.Get("message").String(), fmt.Sprintf("input[%d]", tc.index))
+			item := gjson.GetBytes(body, fmt.Sprintf("input.%d", tc.index))
+			require.Contains(t, response.Get("message").String(), item.Get("type").String())
+			require.Contains(t, response.Get("message").String(), "call_id")
+			require.NotContains(t, response.Get("message").String(), "only supported on Responses WebSocket")
+			entries := logs.FilterMessage("openai.request_validation_failed").All()
+			require.Len(t, entries, 1)
+			fields := entries[0].ContextMap()
+			require.Equal(t, "function_call_output_missing_call_id", fields["reason"])
+			require.Equal(t, tc.shape, fields["fco_call_id_shape"])
+			require.Equal(t, item.Get("name").Exists(), fields["fco_name_present"])
+			require.Equal(t, item.Get("namespace").Exists(), fields["fco_namespace_present"])
+			var index any = int64(tc.index)
+			if tc.index >= 64 {
+				index = "64_plus"
+			}
+			require.Equal(t, index, fields["fco_item_index"])
+			require.Equal(t, tc.badCount, fields["fco_bad_item_count"])
+			for _, secret := range []string{"private_name", "private_namespace", "private_output"} {
+				require.NotContains(t, fmt.Sprint(fields), secret)
+			}
+		})
+	}
+}
+
+func TestFCONamedOutputMissingReference(t *testing.T) {
+	body := []byte(`{"input":[{"type":"function_call_output","name":"context"},{"type":"item_reference","id":"valid"},{"type":"function_call_output","call_id":"valid"},{"type":"custom_tool_call_output","call_id":"private_id"}]}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	core, logs := observer.New(zap.WarnLevel)
+	require.False(t, (&OpenAIGatewayHandler{}).validateFunctionCallOutputRequest(c, body, zap.New(core)))
+	t.Logf("status=%d body=%s logs=%v", rec.Code, rec.Body.String(), logs.All())
+	require.Contains(t, rec.Body.String(), "input[3] (custom_tool_call_output)")
+	require.NotContains(t, rec.Body.String(), "only supported on Responses WebSocket")
+	require.Equal(t, "function_call_output_missing_item_reference", logs.All()[0].ContextMap()["reason"])
+	require.NotContains(t, fmt.Sprint(logs.All()[0].ContextMap()), "private_id")
+}
+
+func TestFCONamedOutputFullIngress(t *testing.T) {
+	for _, callID := range []string{"", `,"call_id":null`} {
+		t.Run(fmt.Sprintf("call_id_%q", callID), func(t *testing.T) {
+			reached := false
+			h := newOpenAIHandlerForPreviousResponseIDValidation(t, &concurrencyCacheMock{acquireUserSlotFn: func(context.Context, int64, int, string) (bool, error) {
+				reached = true
+				return false, errors.New("synthetic stop after ingress validation")
+			}})
+			body := fmt.Sprintf(`{"model":"gpt-6.1-sol","stream":true,"input":[{"type":"function_call_output","name":"untrusted_context","namespace":"agent","output":"context"%s}]}`, callID)
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+			groupID := int64(2)
+			c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{ID: 101, GroupID: &groupID, User: &service.User{ID: 1}})
+			c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 1, Concurrency: 1})
+			h.Responses(c)
+			t.Logf("past_ingress=%v status=%d body=%s", reached, rec.Code, rec.Body.String())
+			require.True(t, reached)
+			require.NotEqual(t, 400, rec.Code)
 		})
 	}
 }

@@ -564,10 +564,8 @@ func removeOpenAIResponsesRejectedReasoningContentAtIndex(body []byte, index int
 
 func removeOpenAIResponsesRejectedNamespaceAtIndex(body []byte, index int) ([]byte, string, bool, error) {
 	itemPath := fmt.Sprintf("input.%d", index)
-	itemType := strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, itemPath+".type").String()))
-	switch itemType {
-	case "function_call", "tool_call", "custom_tool_call", "mcp_tool_call":
-	default:
+	item := gjson.GetBytes(body, itemPath)
+	if !isOpenAIResponsesToolCallItemType(item.Get("type").String()) && !isNamedStandaloneFunctionCallOutputJSON(item) {
 		return nil, "", false, nil
 	}
 

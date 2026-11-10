@@ -148,8 +148,7 @@ func hasOpenAIResponsesNamespaceToolDeclaration(body []byte) bool {
 
 // openAIResponsesToolCallItemTypes 是携带 namespace 的调用项类型集合。与
 // removeOpenAIResponsesRejectedNamespaceAtIndex 的反应式白名单保持一致；codex-rs
-// protocol/src/models.rs 中只有 FunctionCall 与 CustomToolCall 序列化 namespace，
-// 其余类型带该字段一定是非 Codex 客户端或历史残留，清掉才安全。
+// 具名独立 function_call_output 由共用谓词单独识别，主动清理与反应式重试均保留该例外。
 var openAIResponsesToolCallItemTypes = map[string]bool{
 	"function_call":    true,
 	"tool_call":        true,
@@ -191,7 +190,7 @@ func flattenOpenAIResponsesNamespaces(c *gin.Context, body []byte) ([]byte, erro
 //
 // keepToolCallNamespaces 保留工具调用项（function_call / custom_tool_call 等）上的
 // namespace，让 Codex 调用能按上游要求原样回传；判定见
-// shouldKeepOpenAIResponsesToolCallNamespaces。
+// shouldKeepOpenAIResponsesToolCallNamespaces。具名独立输出不受调用项摊平开关影响。
 func stripOpenAIResponsesInputNamespaces(body []byte, keepToolCallNamespaces bool) ([]byte, error) {
 	if !bytes.Contains(body, []byte(`"namespace"`)) {
 		return body, nil
@@ -208,6 +207,7 @@ func stripOpenAIResponsesInputNamespaces(body []byte, keepToolCallNamespaces boo
 	var stripErr error
 	input.ForEach(func(_, item gjson.Result) bool {
 		if !item.IsObject() || !item.Get("namespace").Exists() ||
+			isNamedStandaloneFunctionCallOutputJSON(item) ||
 			(keepToolCallNamespaces && isOpenAIResponsesToolCallItemType(item.Get("type").String())) {
 			return true
 		}
