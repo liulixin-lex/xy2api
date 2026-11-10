@@ -1,150 +1,30 @@
-.PHONY: build build-backend build-frontend test test-backend test-frontend test-frontend-critical
+.PHONY: build build-backend build-frontend test test-backend test-frontend lint generate
 
-FRONTEND_CRITICAL_VITEST := \
-	src/i18n/__tests__/localeKeyCompleteness.spec.ts \
-	src/i18n/__tests__/escapeParameter.spec.ts \
-	src/i18n/__tests__/pipeMessages.spec.ts \
-	src/__tests__/dependencyRendering.spec.ts \
-	src/features/mcp/__tests__/consent.spec.ts \
-	src/features/mcp/__tests__/connections.spec.ts \
-	src/api/__tests__/client.spec.ts \
-	src/api/__tests__/tokenRefresh.spec.ts \
-	src/api/__tests__/keys.bulkUpdate.spec.ts \
-	src/components/account/__tests__/OpenAIReferralCell.spec.ts \
-	src/components/account/__tests__/OpenAIReferralCell.transport.spec.ts \
-	src/components/account/__tests__/OpenAIQuotaResetCell.spark_shadow.spec.ts \
-	src/constants/__tests__/platforms.spec.ts \
-	src/components/account/__tests__/credentialsBuilder.platformCatalog.spec.ts \
-	src/components/account/__tests__/CreateAccountModal.spec.ts \
-	src/components/account/__tests__/EditAccountModal.spec.ts \
-	src/components/account/__tests__/credentialsBuilder.spec.ts \
-	src/components/account/__tests__/OpenCodeGoProtocolRulesEditor.spec.ts \
-	src/components/keys/__tests__/BulkEditKeysModal.spec.ts \
-	src/components/keys/__tests__/CcSwitchImportDialog.spec.ts \
-	src/components/keys/__tests__/UseKeyModal.spec.ts \
-	src/utils/__tests__/ccswitchImport.spec.ts \
-	src/utils/__tests__/ccswitchImport.antigravityUrl.spec.ts \
-	src/components/admin/user/__tests__/UserPlatformQuotaModal.spec.ts \
-	src/views/user/__tests__/KeysView.spec.ts \
-	src/api/__tests__/channelMonitorV2.spec.ts \
-	src/components/admin/monitor/__tests__/GrokResponses.spec.ts \
-	src/views/auth/__tests__/LinuxDoCallbackView.spec.ts \
-	src/views/auth/__tests__/WechatCallbackView.spec.ts \
-	src/views/user/__tests__/PaymentView.spec.ts \
-	src/views/user/__tests__/PaymentResultView.spec.ts \
-	src/views/user/__tests__/ChannelStatusView.mode.spec.ts \
-	src/components/user/profile/__tests__/ProfileInfoCard.spec.ts \
-	src/components/user/profile/__tests__/ProfileIdentityBindingsSection.spec.ts \
-	src/views/admin/__tests__/SettingsView.spec.ts \
-	src/views/admin/settings/__tests__/ClaudeCacheFallbackSettings.spec.ts \
-	src/views/admin/settings/__tests__/ShareSchedulingSettings.spec.ts \
-	src/views/admin/__tests__/ShareSchedulingView.spec.ts \
-	src/stores/__tests__/shareScheduling.spec.ts \
-	src/utils/__tests__/shareScheduling.spec.ts \
-	src/api/__tests__/admin.shareScheduling.spec.ts \
-	src/components/account/__tests__/ShareAccountRules.spec.ts \
-	src/features/channel-monitor-v2/__tests__/designSystem.structure.spec.ts \
-	src/features/channel-monitor-v2/__tests__/monitorFormat.spec.ts \
-	src/features/channel-monitor-v2/__tests__/monitorZoom.spec.ts \
-	src/components/admin/channel/__tests__/PricingEntryCard.modelDefaultPrice.spec.ts \
-	src/stores/__tests__/groupCategories.spec.ts \
-	src/composables/__tests__/useGroupCategoryTabs.spec.ts \
-	src/api/__tests__/admin.groupCategories.spec.ts \
-	src/utils/__tests__/groupCategories.spec.ts \
-	src/utils/__tests__/accountGroupSelection.spec.ts \
-	src/components/common/__tests__/GroupSelector.spec.ts \
-	src/components/admin/group/__tests__/GroupCategoryManagerButton.spec.ts \
-	src/components/admin/group/__tests__/GroupCategoryField.spec.ts \
-	src/components/admin/group/__tests__/GroupCategoryFilter.spec.ts \
-	src/components/admin/account/__tests__/AccountGroupsCellButton.spec.ts \
-	src/components/admin/account/__tests__/groupQualityPresentation.spec.ts \
-	src/components/admin/group/__tests__/GroupQualityGateField.spec.ts \
-	src/views/admin/__tests__/groupsQualityGate.spec.ts \
-	src/views/admin/settings/__tests__/GatewayResilienceSettings.spec.ts \
-	src/components/admin/account/__tests__/AccountGroupsDialog.spec.ts \
-	src/components/admin/group/__tests__/GroupCategoryTabs.spec.ts \
-	src/components/admin/account/__tests__/AccountTableFilters.groupCategories.spec.ts \
-	src/components/admin/account/__tests__/AccountTableFilters.spec.ts \
-	src/views/admin/__tests__/GroupsView.columnSettings.spec.ts \
-	src/views/admin/__tests__/GroupsView.categories.spec.ts \
-	src/views/admin/__tests__/AccountsView.groupCategories.spec.ts \
-	src/components/common/__tests__/Select.spec.ts \
-	src/components/common/__tests__/DataTable.spec.ts \
-	src/components/common/__tests__/GroupOptionItem.spec.ts \
-	src/components/common/__tests__/TruncatedTextPopover.spec.ts \
-	src/components/account/__tests__/UpstreamBalanceCell.spec.ts \
-	src/components/account/__tests__/NewApiWalletSection.spec.ts \
-	src/components/account/__tests__/EditAccountModal.newapiWallet.spec.ts \
-	src/api/__tests__/admin.accounts.upstreamBalances.spec.ts \
-	src/views/admin/__tests__/AccountsView.upstreamBalance.spec.ts \
-	src/stores/__tests__/adminAccess.spec.ts \
-	src/router/__tests__/adminPermissionMeta.spec.ts \
-	src/components/layout/__tests__/AppSidebar.operator.spec.ts \
-	src/components/admin/user/__tests__/OperatorPermissionsTable.spec.ts \
-	src/components/admin/user/__tests__/UserEditModal.operator.spec.ts \
-	src/views/admin/__tests__/AccountsView.operatorAccess.spec.ts \
-	src/api/__tests__/client.permissionDenied.spec.ts \
-	src/components/admin/__tests__/AdminComplianceDialog.operator.spec.ts \
-	src/stores/__tests__/adminSettings.operator.spec.ts \
-	src/components/account/__tests__/EditAccountModal.operatorAddress.spec.ts \
-	src/components/account/__tests__/CreateAccountModal.operator.spec.ts \
-	src/components/account/__tests__/BulkEditAccountModal.operator.spec.ts \
-	src/components/admin/account/__tests__/ReAuthAccountModal.operator.spec.ts \
-	src/views/admin/__tests__/ProxiesView.operator.spec.ts \
-	src/components/admin/monitor/__tests__/MonitorTemplateApplyPickerDialog.operator.spec.ts \
-	src/views/admin/ops/components/__tests__/OpsSettingsDialog.operator.spec.ts \
-	src/views/admin/__tests__/UsersView.operator.spec.ts \
-	src/views/admin/__tests__/ChannelsView.operator.spec.ts \
-	src/views/admin/__tests__/GroupsView.operator.spec.ts \
-	src/components/admin/__tests__/accountToolPanels.readonly.spec.ts \
-	src/components/admin/monitor/__tests__/MonitorFormDialog.operator.spec.ts \
-	src/views/admin/__tests__/RiskControlView.spec.ts \
-	src/api/admin/__tests__/openaiTotp.spec.ts \
-	src/components/admin/account/__tests__/OpenAITotpDialogs.spec.ts \
-	src/components/admin/user/__tests__/UserCreateModal.permissions.spec.ts \
-	src/features/support-tickets/__tests__/supportTickets.spec.ts \
-	src/features/support-tickets/__tests__/TicketComponents.spec.ts \
-	src/features/support-tickets/__tests__/SupportTicketRequests.spec.ts \
-	src/views/user/__tests__/SupportTicketsViews.spec.ts \
-	src/views/admin/__tests__/SupportTicketsAdmin.spec.ts \
-	src/stores/__tests__/supportTickets.spec.ts \
-	src/router/__tests__/feature-access.spec.ts \
-	src/api/__tests__/supportChat.spec.ts \
-	src/stores/__tests__/supportChat.spec.ts \
-	src/features/support-chat/__tests__/compressImage.spec.ts \
-	src/features/support-chat/__tests__/supportBadges.spec.ts \
-	src/features/support-chat/__tests__/useSupportStaffAlerts.spec.ts \
-	src/features/support-chat/__tests__/SupportChatComponents.spec.ts \
-	src/features/support-chat/__tests__/AdminSupportChatInbox.spec.ts \
-	src/features/support-widget/__tests__/snapBubble.spec.ts \
-	src/features/support-widget/__tests__/supportWidgetVisibility.spec.ts \
-	src/features/support-widget/__tests__/SupportWidget.spec.ts \
-	src/features/support-widget/__tests__/SupportWidgetTickets.spec.ts \
-	src/views/user/__tests__/SupportHubTabs.spec.ts \
-	src/features/support-chat/__tests__/useSupportChatIdentityReset.spec.ts \
-	src/components/layout/__tests__/AppLayout.sidebarFlag.spec.ts
+# Build the frontend, then a single backend binary (backend/bin/server) that embeds it.
+build: build-frontend
+	@$(MAKE) -C backend build TAGS=embed
 
-# 一键编译前后端
-build: build-backend build-frontend
-
-# 编译后端（复用 backend/Makefile）
 build-backend:
 	@$(MAKE) -C backend build
 
-# 编译前端（需要已安装依赖）
 build-frontend:
 	@pnpm --dir frontend run build
 
-# 运行测试（后端 + 前端）
+# Run backend unit tests and the full frontend test suite.
 test: test-backend test-frontend
 
 test-backend:
-	@$(MAKE) -C backend test
+	@$(MAKE) -C backend test-unit
 
 test-frontend:
 	@pnpm --dir frontend run lint:check
 	@pnpm --dir frontend run typecheck
-	@$(MAKE) test-frontend-critical
+	@pnpm --dir frontend exec vitest run
 
-test-frontend-critical:
-	@pnpm --dir frontend exec vitest run $(FRONTEND_CRITICAL_VITEST)
+lint:
+	@cd backend && golangci-lint run ./...
+	@pnpm --dir frontend run lint:check
+
+# Regenerate Ent and Wire code after editing backend/ent/schema or providers.
+generate:
+	@$(MAKE) -C backend generate
