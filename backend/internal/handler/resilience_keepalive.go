@@ -68,6 +68,7 @@ func stopPreOutputKeepalive(c *gin.Context) {
 	if c == nil {
 		return
 	}
+	service.StopGeminiUniqueCandidateKeepalive(c)
 	if v, ok := c.Get(ginKeyPreOutputKeepaliveStop); ok {
 		if stop, ok := v.(func()); ok && stop != nil {
 			stop()

@@ -18,6 +18,10 @@ type ToolContinuationSignals struct {
 
 // FunctionCallOutputValidation 汇总 function_call_output 关联性校验结果。
 type FunctionCallOutputValidation struct {
+	BadItemIndex                       int
+	BadItemCount                       int
+	BadItem                            gjson.Result
+	InvalidCallIDShape                 string
 	HasFunctionCallOutput              bool
 	HasToolCallContext                 bool
 	HasFunctionCallOutputMissingCallID bool
@@ -166,25 +170,23 @@ func ValidateFunctionCallOutputContextBytes(body []byte) FunctionCallOutputValid
 		return result
 	}
 
-	var callIDs map[string]struct{}
 	var referenceIDs map[string]struct{}
-	input.ForEach(func(_, item gjson.Result) bool {
-		if !item.IsObject() {
+	input.ForEach(func(index, item gjson.Result) bool {
+		if !item.IsObject() || isNamedStandaloneFunctionCallOutputJSON(item) {
 			return true
 		}
 		itemType := item.Get("type").String()
 		switch {
 		case isCodexToolCallOutputItemType(itemType):
 			result.HasFunctionCallOutput = true
-			callID := strings.TrimSpace(item.Get("call_id").String())
-			if callID == "" {
+			if shape := functionCallOutputCallIDShape(item.Get("call_id")); shape != "string" {
+				if result.BadItemCount == 0 {
+					result.BadItemIndex, result.BadItem, result.InvalidCallIDShape = int(index.Int()), item, shape
+				}
+				result.BadItemCount++
 				result.HasFunctionCallOutputMissingCallID = true
 				return true
 			}
-			if callIDs == nil {
-				callIDs = make(map[string]struct{})
-			}
-			callIDs[callID] = struct{}{}
 		case isCodexToolCallContextItemType(itemType):
 			if strings.TrimSpace(item.Get("call_id").String()) != "" {
 				result.HasToolCallContext = true
@@ -201,17 +203,23 @@ func ValidateFunctionCallOutputContextBytes(body []byte) FunctionCallOutputValid
 		}
 		return !result.HasFunctionCallOutput || !result.HasToolCallContext
 	})
-	if !result.HasFunctionCallOutput || result.HasToolCallContext || len(callIDs) == 0 || len(referenceIDs) == 0 {
+	if !result.HasFunctionCallOutput || result.HasToolCallContext || result.HasFunctionCallOutputMissingCallID {
 		return result
 	}
-	allReferenced := true
-	for callID := range callIDs {
-		if _, ok := referenceIDs[callID]; !ok {
-			allReferenced = false
-			break
+	result.HasItemReferenceForAllCallIDs = true
+	input.ForEach(func(index, item gjson.Result) bool {
+		if !isCodexToolCallOutputItemType(item.Get("type").String()) || isNamedStandaloneFunctionCallOutputJSON(item) {
+			return true
 		}
-	}
-	result.HasItemReferenceForAllCallIDs = allReferenced
+		if _, ok := referenceIDs[strings.TrimSpace(item.Get("call_id").String())]; !ok {
+			if result.BadItemCount == 0 {
+				result.BadItemIndex, result.BadItem = int(index.Int()), item
+			}
+			result.BadItemCount++
+			result.HasItemReferenceForAllCallIDs = false
+		}
+		return true
+	})
 	return result
 }
 

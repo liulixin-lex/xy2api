@@ -1954,6 +1954,10 @@ func (h *GatewayHandler) handleConcurrencyError(c *gin.Context, err error, slotT
 
 func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, platform string, streamStarted bool) {
 	recordExhaustedRecovery(c, failoverErr)
+	if message, matched := inferenceNotFoundExhaustedMessage(c, failoverErr); matched {
+		h.handleStreamingAwareError(c, http.StatusNotFound, "model_not_found", message, streamStarted)
+		return
+	}
 	statusCode := failoverErr.StatusCode
 	responseBody := failoverErr.ResponseBody
 	if service.IsOpenAISilentRefusalErrorBody(responseBody) {

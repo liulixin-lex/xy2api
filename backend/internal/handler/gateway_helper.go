@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	middleware2 "github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
 
@@ -39,12 +41,19 @@ func gatewayStreamHasOnlyHeartbeats(c *gin.Context) bool {
 	if only, tracked := service.DeliveryOnlyHeartbeats(c); tracked {
 		return only
 	}
+	if c.Writer.Size() <= 0 {
+		return false
+	}
+	adjusted := service.OpenAICompactKeepaliveAdjustedWrittenSize(c)
+	if adjusted <= 0 {
+		return true
+	}
 	value, ok := c.Get(gatewayStreamHeartbeatBytesKey)
 	if !ok {
 		return false
 	}
 	heartbeatBytes, _ := value.(int)
-	return heartbeatBytes > 0 && c.Writer.Size() == heartbeatBytes
+	return heartbeatBytes > 0 && adjusted == heartbeatBytes
 }
 
 // claudeCodeValidator is a singleton validator for Claude Code client detection
@@ -380,11 +389,21 @@ func (h *ConcurrencyHelper) waitForSlotWithPing(c *gin.Context, slotType string,
 }
 
 // waitForSlotWithPingTimeout waits for a concurrency slot with a custom timeout.
-func (h *ConcurrencyHelper) waitForSlotWithPingTimeout(c *gin.Context, slotType string, id int64, maxConcurrency int, timeout time.Duration, isStream bool, streamStarted *bool, tryImmediate bool) (func(), error) {
+func (h *ConcurrencyHelper) waitForSlotWithPingTimeout(c *gin.Context, slotType string, id int64, maxConcurrency int, timeout time.Duration, isStream bool, streamStarted *bool, tryImmediate bool) (release func(), waitErr error) {
 	// xy2api resilience: the wait is part of the pre-output budget.
+	inputTimeout := timeout
 	timeout = resilienceSlotWaitTimeout(c, timeout)
 	ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
 	defer cancel()
+	if resilience.BudgetTraceEnabledForTest {
+		defer func() {
+			var slotErr *ConcurrencyError
+			timedOut := errors.Is(waitErr, context.DeadlineExceeded) || (errors.As(waitErr, &slotErr) && slotErr.IsTimeout)
+			if timedOut && timeout < inputTimeout && ctx.Err() == context.DeadlineExceeded && c.Request.Context().Err() == nil {
+				resilience.ObserveSlotWaitForTest(c.Request.Context(), slotType, id, inputTimeout, timeout)
+			}
+		}()
+	}
 
 	acquireSlot := func() (*service.AcquireResult, error) {
 		if slotType == "user" {
@@ -441,6 +460,13 @@ func (h *ConcurrencyHelper) waitForSlotWithPingTimeout(c *gin.Context, slotType 
 
 		case <-pingCh:
 			// Send ping to keep connection alive
+			if handled, committed, err := service.WriteSlotWaitHeartbeat(c, []byte(pingFormat), h.pingInterval, "slot_wait"); handled {
+				if err != nil {
+					return nil, err
+				}
+				*streamStarted = *streamStarted || committed
+				continue
+			}
 			if !*streamStarted {
 				c.Header("Content-Type", "text/event-stream")
 				c.Header("Cache-Control", "no-cache")

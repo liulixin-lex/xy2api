@@ -1311,6 +1311,7 @@ func (s *GatewayService) buildRecordUsageLog(
 		FirstTokenMs:             result.FirstTokenMs,
 		EndToEndFirstOutputMs:    resilience.StateFrom(ctx).EndToEndFirstOutputMs(),
 		AttemptFirstOutputMs:     resilience.StateFrom(ctx).AttemptFirstOutputMs(),
+		RequestTiming:            resilience.StateFrom(ctx).Timing(),
 		ImageCount:               result.ImageCount,
 		ImageSize:                optionalTrimmedStringPtr(result.ImageSize),
 		ImageInputSize:           optionalTrimmedStringPtr(result.ImageInputSize),

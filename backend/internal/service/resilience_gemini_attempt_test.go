@@ -185,8 +185,11 @@ func TestGeminiAttemptStreamContentAndStall(t *testing.T) {
 	account := &Account{ID: 1, Platform: PlatformGemini}
 	body := []byte(geminiTransportTestNativeBody)
 	ctx := geminiAttemptTestContext(context.Background(), 0)
-	g := newGeminiAttempt(ctx, account, "gemini-2.5-flash", "streamGenerateContent", body, true, "gemini", time.Now())
+	started := time.Now()
+	resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, Model: "gemini-2.5-flash", AttemptStart: started})
+	g := newGeminiAttempt(ctx, account, "gemini-2.5-flash", "streamGenerateContent", body, true, "gemini", started)
 	defer g.close()
+	require.Equal(t, started, g.plan.Start())
 	require.Equal(t, 60*time.Second, g.timeout)
 	require.Equal(t, 120*time.Second, g.stall)
 	resp := &http.Response{Body: io.NopCloser(strings.NewReader(""))}
@@ -244,4 +247,70 @@ func TestGeminiAttemptStreamContentAndStall(t *testing.T) {
 	require.Zero(t, output.pending.Len())
 	require.Nil(t, overflow.timer, "committed prelude disarms the first-output deadline")
 	require.NoError(t, overflow.ctx.Err())
+}
+
+func TestGeminiAttemptTimerOwnsInitialProfileAcrossInPlaceRetry(t *testing.T) {
+	withResilienceSettings(t, nil)
+	account := &Account{ID: 1, Platform: PlatformGemini}
+	body := []byte(geminiTransportTestNativeBody)
+	st := resilience.NewRequestState()
+	ctx := resilience.WithRequestState(context.Background(), st)
+	attemptStart := time.Now()
+	budgetStart := attemptStart.Add(-239 * time.Second)
+	st.SetBudget(resilience.NewBudget(ctx, resilience.Current(), resilience.KindText, budgetStart))
+	g := newGeminiAttempt(ctx, account, "gemini-2.5-flash", "streamGenerateContent", body, true, "gemini", attemptStart)
+	defer g.close()
+	require.NotNil(t, g.timer, "the first attempt owns the one Gemini timeout")
+	require.Equal(t, attemptStart, g.plan.Start())
+	require.Equal(t, attemptStart, st.AttemptProfile().AttemptStart)
+
+	g.observeDispatch(attemptStart)
+	// An in-place replay updates the active profile but reuses the original
+	// guard. Both sends are bounded while that one immutable guard is active.
+	retryStart := attemptStart.Add(time.Second)
+	st.SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, Model: "gemini-2.5-flash", AttemptStart: retryStart, Stream: true, BodyBytes: len(body)})
+	require.Equal(t, attemptStart, g.plan.Start(), "the guard retains its immutable plan")
+	g.observeDispatch(retryStart)
+	timing := st.Timing()
+	require.EqualValues(t, 2, *timing.LateAttemptCount)
+	require.Zero(t, *timing.LateAttemptNoTimerCount)
+}
+
+func TestG9GeminiDispatchUsesExistingGuardCoverage(t *testing.T) {
+	for i, tc := range []struct {
+		name          string
+		timer, output bool
+		wantNoTimer   int64
+	}{
+		{name: "shared attempt guard", timer: true, wantNoTimer: 0},
+		{name: "last candidate without guard", wantNoTimer: 2},
+		{name: "stall timer is not an attempt guard", timer: true, output: true, wantNoTimer: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := resilience.NewRequestState()
+			st.SetGroup(int64(8320 + i))
+			ctx := resilience.WithRequestState(context.Background(), st)
+			cfg := resilience.Defaults()
+			now := time.Now()
+			st.SetBudget(resilience.NewBudget(ctx, &cfg, resilience.KindText, now.Add(-239*time.Second)))
+			g := &geminiAttempt{parent: ctx, timeout: 30 * time.Second, output: tc.output}
+			if tc.timer {
+				g.timer = time.NewTimer(time.Hour)
+				defer g.timer.Stop()
+			}
+			originalTimer, originalPlan := g.timer, g.plan
+			for _, at := range []time.Time{now, now.Add(time.Millisecond)} {
+				profile := resilience.AttemptProfile{AccountID: 1, AttemptStart: at}
+				st.SetAttemptProfile(profile)
+				g.observeDispatch(at)
+				g.observeDispatch(at)
+				require.Equal(t, profile, st.AttemptProfile(), "observation never rewrites the send sample or owner")
+			}
+			require.Equal(t, originalTimer, g.timer)
+			require.Equal(t, originalPlan, g.plan)
+			timing := st.Timing()
+			require.EqualValues(t, 2, *timing.LateAttemptCount)
+			require.Equal(t, tc.wantNoTimer, *timing.LateAttemptNoTimerCount)
+		})
+	}
 }

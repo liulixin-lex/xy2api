@@ -1,7 +1,9 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -50,7 +52,7 @@ func TestProxyResponsesWebSocketFromClient_RewritesCapacityShedCodeForClient(t *
 		{
 			name: "capacity_shed_error_and_failed_are_rewritten",
 			upstreamEvents: [][]byte{
-				[]byte(`{"type":"error","error":{"type":"service_unavailable_error","code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}}`),
+				[]byte(`{"type":"error","code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}`),
 				[]byte(`{"type":"response.failed","response":{"id":"resp_shed","status":"failed","error":{"code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}}}`),
 			},
 			wantContains: []string{
@@ -181,6 +183,118 @@ func TestProxyResponsesWebSocketFromClient_RewritesCapacityShedCodeForClient(t *
 			case <-time.After(5 * time.Second):
 				t.Fatal("等待 ingress websocket 结束超时")
 			}
+		})
+	}
+}
+
+func TestProxyResponsesWebSocketFromClient_RejectedCacheControlUsesFlatParam(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, shape := range []string{"object", "top"} {
+		t.Run(shape, func(t *testing.T) {
+			cfg := newOpenAIWSV2TestConfig()
+			cfg.Security.URLAllowlist.Enabled = false
+			cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+			cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
+			cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
+			cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
+			cfg.Gateway.OpenAIWS.QueueLimitPerConn = 8
+			cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
+			cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
+			cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+
+			const param = "input[0].content[0].cache_control"
+			errorEvent := `{"type":"error","code":"unknown_parameter","message":"cache_control is unsupported on this content part","param":"` + param + `","status_code":400}`
+			if shape == "object" {
+				errorEvent = `{"type":"error","error":{"type":"invalid_request_error","code":"unknown_parameter","message":"cache_control is unsupported on this content part","param":"` + param + `","status_code":400}}`
+			}
+			successEvent := `{"type":"response.completed","response":{"id":"resp_repaired","model":"gpt-5.5","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`
+			captureConn := &openAIWSCaptureConn{events: [][]byte{[]byte(errorEvent), []byte(successEvent)}}
+			pool := newOpenAIWSConnPool(cfg)
+			pool.setClientDialerForTest(&openAIWSCaptureDialer{conn: captureConn})
+			account := Account{
+				ID: 5403, Name: "test-account", Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+				Status: StatusActive, Schedulable: true, Concurrency: 1,
+				Credentials: map[string]any{"api_key": "test-key"},
+				Extra: map[string]any{
+					"responses_websockets_v2_enabled":            true,
+					"openai_apikey_responses_websockets_v2_mode": OpenAIWSIngressModeCtxPool,
+				},
+			}
+			repo := &openAIWSIngressCapacityShedRepo{stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: []Account{account}}}
+			svc := &OpenAIGatewayService{
+				accountRepo: repo, rateLimitService: &RateLimitService{accountRepo: repo},
+				httpUpstream: &httpUpstreamRecorder{}, cache: &stubGatewayCache{}, cfg: cfg,
+				openaiWSResolver: NewOpenAIWSProtocolResolver(cfg), toolCorrector: NewCodexToolCorrector(), openaiWSPool: pool,
+			}
+
+			serverDone := make(chan struct{})
+			wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				defer close(serverDone)
+				conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{CompressionMode: coderws.CompressionContextTakeover})
+				if err != nil {
+					return
+				}
+				defer func() { _ = conn.CloseNow() }()
+				ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+				defer cancel()
+				_, firstMessage, err := conn.Read(ctx)
+				if err != nil {
+					return
+				}
+				rec := httptest.NewRecorder()
+				ginCtx, _ := gin.CreateTestContext(rec)
+				ginCtx.Request = r.Clone(r.Context())
+				ginCtx.Request.Header = r.Header.Clone()
+				_ = svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, &account, "test-key", firstMessage, nil)
+			}))
+			defer wsServer.Close()
+
+			dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
+			clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(wsServer.URL, "http"), nil)
+			cancelDial()
+			require.NoError(t, err)
+			defer func() { _ = clientConn.CloseNow() }()
+
+			request := `{"type":"response.create","model":"gpt-5.5","stream":true,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello","cache_control":{"type":"ephemeral"}}]}]}`
+			writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
+			err = clientConn.Write(writeCtx, coderws.MessageText, []byte(request))
+			cancelWrite()
+			require.NoError(t, err)
+
+			var clientEvents [][]byte
+			for {
+				readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+				_, message, readErr := clientConn.Read(readCtx)
+				cancelRead()
+				if readErr != nil {
+					break
+				}
+				clientEvents = append(clientEvents, message)
+				if gjson.GetBytes(message, "type").String() == "response.completed" {
+					break
+				}
+			}
+			require.NotEmpty(t, clientEvents)
+			require.Equal(t, "response.completed", gjson.GetBytes(clientEvents[len(clientEvents)-1], "type").String())
+			require.NotContains(t, string(bytes.Join(clientEvents, []byte("\n"))), "unsupported")
+			_ = clientConn.CloseNow()
+
+			select {
+			case <-serverDone:
+			case <-time.After(5 * time.Second):
+				t.Fatal("waiting for ingress websocket to finish timed out")
+			}
+			captureConn.mu.Lock()
+			writes := append([]map[string]any(nil), captureConn.writes...)
+			captureConn.mu.Unlock()
+			require.Len(t, writes, 2, "the same account must replay the normalized turn once")
+			firstBody, err := json.Marshal(writes[0])
+			require.NoError(t, err)
+			require.True(t, gjson.GetBytes(firstBody, "input.0.content.0.cache_control").Exists())
+			repairedBody, err := json.Marshal(writes[1])
+			require.NoError(t, err)
+			require.False(t, gjson.GetBytes(repairedBody, "input.0.content.0.cache_control").Exists())
+			require.Equal(t, "hello", gjson.GetBytes(repairedBody, "input.0.content.0.text").String())
 		})
 	}
 }

@@ -3,7 +3,10 @@
 package handler
 
 import (
+	"github.com/liulixin-lex/xy2api/internal/config"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/liulixin-lex/xy2api/internal/model"
@@ -107,4 +110,73 @@ func TestTerminalPassthroughRuleDropsUpstreamRetryAfter(t *testing.T) {
 			require.Empty(t, c.GetString(ginKeyResilienceUpstreamRetryAfter))
 		})
 	}
+}
+
+func TestAnthropicModelUnavailableExhaustionMatchesLocalType(t *testing.T) {
+	withHandlerResilience(t, nil)
+	c, rec := newResilienceTestContext(t)
+	failure := &service.UpstreamFailoverError{
+		StatusCode:   http.StatusNotFound,
+		ResponseBody: []byte(`{"error":{"code":"model_not_found","message":"model not found"}}`),
+	}
+	(&OpenAIGatewayHandler{}).handleAnthropicFailoverExhausted(c, failure, false)
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	local := classifyNoAccountError(c.Request.Context(),
+		&fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{HasAccountsInPool: true}},
+		&service.APIKey{GroupID: ptrInt64(1)}, "model", "model", service.PlatformAnthropic)
+	require.True(t, local.ModelNotFound)
+	require.Equal(t, local.Status, rec.Code)
+	require.Equal(t, local.ErrType, gjson.GetBytes(rec.Body.Bytes(), "error.type").String(), rec.Body.String())
+}
+
+func TestOpenAIDeviceBindingExhaustionUsesExistingAccountExit(t *testing.T) {
+	withHandlerResilience(t, nil)
+	for _, anthropic := range []bool{false, true} {
+		var baseline string
+		for _, status := range []int{http.StatusForbidden, http.StatusConflict} {
+			c, rec := newResilienceTestContext(t)
+			upstream := &deviceBindingExhaustionUpstream{status: status}
+			gateway := service.NewOpenAIGatewayService(nil, nil, nil, nil, nil, nil, nil, &config.Config{RunMode: config.RunModeSimple}, nil, nil, nil, nil, nil, upstream, nil, nil, nil, nil, nil, nil, nil, nil)
+			account := &service.Account{ID: 1, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test-key"}}
+			_, err := gateway.Forward(c.Request.Context(), c, account, []byte(`{"model":"gpt-5.5","stream":false,"input":"hello"}`))
+			var failure *service.UpstreamFailoverError
+			require.ErrorAs(t, err, &failure)
+			require.True(t, failure.IsCredentialFailure())
+			require.False(t, failure.RetryableOnSameAccount)
+			require.True(t, failure.ShouldRetryNextAccount())
+			require.Empty(t, rec.Body.String())
+			require.Equal(t, 1, upstream.calls)
+			state := NewFailoverState(10, false)
+			require.Equal(t, FailoverContinue, state.HandleFailoverError(c.Request.Context(), &mockTempUnscheduler{}, account.ID, service.PlatformOpenAI, 0, failure))
+			require.Equal(t, FailoverExhausted, state.HandleSelectionExhausted(c.Request.Context()))
+
+			if anthropic {
+				(&OpenAIGatewayHandler{}).handleAnthropicFailoverExhausted(c, failure, false)
+			} else {
+				(&OpenAIGatewayHandler{}).handleFailoverExhausted(c, failure, false)
+			}
+			require.Equal(t, http.StatusBadGateway, rec.Code)
+			require.NotContains(t, rec.Body.String(), "device_binding_required")
+			require.NotContains(t, rec.Body.String(), "private upstream detail")
+			if status == http.StatusForbidden {
+				baseline = rec.Body.String()
+			} else {
+				require.Equal(t, baseline, rec.Body.String())
+			}
+		}
+	}
+}
+
+type deviceBindingExhaustionUpstream struct {
+	service.HTTPUpstream
+	status, calls int
+}
+
+func (u *deviceBindingExhaustionUpstream) Do(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	u.calls++
+	body := `{"error":{"code":"device_binding_required","message":"private upstream detail"}}`
+	if u.status == http.StatusForbidden {
+		body = `{"error":{"code":"account_deactivated","message":"account deactivated"}}`
+	}
+	return &http.Response{StatusCode: u.status, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}, nil
 }

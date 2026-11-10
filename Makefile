@@ -2,6 +2,9 @@
 
 FRONTEND_CRITICAL_VITEST := \
 	src/i18n/__tests__/localeKeyCompleteness.spec.ts \
+	src/i18n/__tests__/escapeParameter.spec.ts \
+	src/i18n/__tests__/pipeMessages.spec.ts \
+	src/__tests__/dependencyRendering.spec.ts \
 	src/features/mcp/__tests__/consent.spec.ts \
 	src/features/mcp/__tests__/connections.spec.ts \
 	src/api/__tests__/client.spec.ts \

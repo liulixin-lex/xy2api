@@ -19,8 +19,8 @@ func TestClassifyStreamEvent(t *testing.T) {
 		{"created", "responses", "", `{"type":"response.created","response":{"id":"resp_a"}}`, Prelude, false},
 		{"queued", "responses", "response.queued", `{}`, Prelude, false},
 		{"keepalive", "responses", "keepalive", `{}`, Prelude, false},
-		{"unknown_metadata", "responses", "vendor.rate_limits", `{}`, Content, false},
-		{"unknown_codex", "responses", "codex.unverified", `{}`, Content, false},
+		{"unknown_metadata_ready", "responses", "vendor.rate_limits", `{}`, Prelude, false},
+		{"unknown_codex_ready", "responses", "codex.unverified", `{}`, Prelude, false},
 		{"empty_message", "responses", "response.output_item.added", `{"item":{"type":"message","role":"assistant","content":[]}}`, Prelude, false},
 		{"unknown_item_payload", "responses", "response.output_item.added", `{"item":{"type":"message","content":[],"vendor_payload":"opaque"}}`, Content, false},
 		{"unknown_part_payload", "responses", "response.content_part.added", `{"part":{"type":"output_text","text":"","annotation":{"value":"opaque"}}}`, Content, false},
@@ -290,8 +290,10 @@ func TestResponsesEventOutputDisposition(t *testing.T) {
 		{name: "completed duplicate response key", event: "response.completed", payload: `{"type":"response.completed","response":{"output":[],"output":[]}}`, visible: true, semanticOutput: true},
 		{name: "completed non-array output", event: "response.completed", payload: `{"type":"response.completed","response":{"output":{}}}`, visible: true, semanticOutput: true},
 		{name: "completed with text", event: "response.completed", payload: `{"type":"response.completed","response":{"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}]}}`, visible: true, semanticOutput: true},
-		{name: "unknown response event", event: "response.vendor_extension", payload: `{"type":"response.vendor_extension","future":true}`, visible: true, semanticOutput: true},
-		{name: "unknown response event with recursively empty extra", event: "response.vendor_extension", payload: `{"type":"response.vendor_extension","extra":{"x":[null,{},""]}}`, visible: true, semanticOutput: true},
+		{name: "unknown response event metadata only", event: "response.vendor_extension", payload: `{"type":"response.vendor_extension","future":true}`, placeholder: true},
+		{name: "unknown response event with recursively empty extra", event: "response.vendor_extension", payload: `{"type":"response.vendor_extension","extra":{"x":[null,{},""]}}`, placeholder: true},
+		{name: "unknown response event with text remains visible", event: "response.vendor_extension", payload: `{"type":"response.vendor_extension","text":"visible"}`, visible: true, semanticOutput: true},
+		{name: "known tool progress remains visible", event: "response.web_search_call.in_progress", payload: `{"type":"response.web_search_call.in_progress"}`, visible: true, semanticOutput: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -307,8 +309,8 @@ func TestResponsesEventOutputDisposition(t *testing.T) {
 }
 
 // response.metadata is prelude only while the native whitelist is on. With it
-// off the old rule holds (unknown means content), so the compat conversions,
-// which only check prelude_staging, do not change on their own either.
+// off the established metadata event keeps its legacy Unknown classification;
+// this setting does not control the separate unknown-event-type rule.
 func TestClassifyStreamEventResponseMetadataFollowsNativeWhitelist(t *testing.T) {
 	before := Current().Clone()
 	t.Cleanup(func() { Publish(before) })

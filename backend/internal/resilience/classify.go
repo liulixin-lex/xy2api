@@ -262,11 +262,12 @@ func IsKnownClientErrorCode(code string) bool {
 // refusal; they are checked before clientErrorCodes. cyber_policy and
 // bio_policy keep their own handling.
 var contentPolicyCodes = map[string]struct{}{
-	"content_policy":           {},
-	"content_policy_violation": {},
-	"content_filter":           {},
-	"request_check_blocked":    {}, // Zhipu preflight safety check (403)
-	"data_inspection_failed":   {}, // Qwen
+	"misalignment_policy_violation": {},
+	"content_policy":                {},
+	"content_policy_violation":      {},
+	"content_filter":                {},
+	"request_check_blocked":         {}, // Zhipu preflight safety check (403)
+	"data_inspection_failed":        {}, // Qwen
 }
 
 // contentPolicyKeywords recognise a content-safety refusal by its wording on

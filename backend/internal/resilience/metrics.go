@@ -145,8 +145,16 @@ func (m *metricStore) add(key MetricKey, now time.Time) {
 	}
 	b := &m.buckets[len(m.buckets)-1]
 	if _, ok := b.counts[key]; !ok && len(b.counts) >= maxMetricKeysPerBucket {
-		// Bounded memory: fold the detail into a per-name total.
-		key = MetricKey{Name: key.Name, Label: "overflow"}
+		// Bounded memory: fold high-cardinality IDs into an instance total.
+		// G9 needs these four finite labels even if both Warn records are lost.
+		label := "overflow"
+		if key.Name == "late_attempt_start" {
+			switch key.Label {
+			case "false:arrival", "true:arrival", "false:body_eof", "true:body_eof":
+				label = key.Label
+			}
+		}
+		key = MetricKey{Name: key.Name, Label: label}
 	}
 	b.counts[key]++
 }

@@ -17,6 +17,7 @@ const (
 	// no transport error, so without this classification a truncated generation is
 	// indistinguishable from a successful one.
 	OpenAIUpstreamStreamTruncatedCode = "upstream_stream_truncated"
+	OpenAIStreamTimeoutCode           = "stream_timeout"
 )
 
 // ErrOpenAIUpstreamStreamTruncated marks an upstream SSE stream that ended at

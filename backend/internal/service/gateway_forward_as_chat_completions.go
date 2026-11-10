@@ -71,7 +71,7 @@ func (s *GatewayService) ForwardAsChatCompletions(
 			mappedModel = normalized
 		}
 	}
-	if err := validateClaude55Request(body, mappedModel); err != nil {
+	if err := validateClaude55Parameters(body, mappedModel); err != nil {
 		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
 	}
@@ -99,6 +99,10 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	anthropicBody, err := json.Marshal(anthropicReq)
 	if err != nil {
 		return nil, fmt.Errorf("marshal anthropic request: %w", err)
+	}
+	if err := validateHaiku55MessagesRequest(anthropicBody, mappedModel, account); err != nil {
+		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return nil, err
 	}
 
 	// 6. Apply Claude Code mimicry for OAuth accounts.
@@ -131,7 +135,8 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	// 10. Build upstream request
 	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
 	// xy2api resilience (W1.2): the first-event deadline of a guarded stream.
-	upstreamCtx, firstEvent := s.armGatewayConvertFirstEvent(ctx, upstreamCtx, account, clientStream)
+	attemptStart := time.Now()
+	upstreamCtx, firstEvent := s.armGatewayConvertFirstEvent(ctx, upstreamCtx, account, clientStream, attemptStart)
 	defer firstEvent.Release()
 	upstreamReq, forwardedBody, err := s.buildUpstreamRequest(upstreamCtx, c, account, anthropicBody, token, tokenType, mappedModel, reqStream, shouldMimicClaudeCode)
 	releaseUpstreamCtx()
@@ -144,7 +149,8 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, forwardedBody, mappedModel)
 
 	// 11. Send request
-	resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: time.Now()})
+	resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: attemptStart})
+	resilience.StateFrom(ctx).ObserveAttemptStart()
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
 		if resp != nil && resp.Body != nil {

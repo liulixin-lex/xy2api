@@ -262,7 +262,10 @@ func IsGrokTemporaryUnavailable422Failover(failoverErr *UpstreamFailoverError) b
 }
 
 func shouldFailoverClassifiedUpstreamError(statusCode int, headers http.Header, responseBody []byte) bool {
-	result := classifyUpstreamHTTP(statusCode, headers, responseBody, "")
+	return shouldFailoverUpstreamClassification(statusCode, classifyInferenceUpstreamHTTP(statusCode, headers, responseBody, ""))
+}
+
+func shouldFailoverUpstreamClassification(statusCode int, result resilience.Result) bool {
 	switch result.Category {
 	case resilience.CategoryBalance, resilience.CategoryModelUnsupported:
 		return true

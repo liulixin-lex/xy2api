@@ -67,6 +67,28 @@ func TestBudgetDeadlineEndsBeforeNextAttempt(t *testing.T) {
 	require.Equal(t, FailoverContinue, NewFailoverState(10, false).HandleFailoverError(ctx, &mockTempUnscheduler{}, 1, service.PlatformOpenAI, 0, newTestFailoverErr(http.StatusBadGateway, false, false)))
 }
 
+func TestBodyEOFUntimedAttemptExhaustionMatchesArrival(t *testing.T) {
+	withHandlerResilience(t, nil)
+	var got []string
+	for _, mode := range []string{resilience.BudgetStartArrival, resilience.BudgetStartBodyEOF} {
+		settings := resilience.Defaults()
+		settings.Budget.BudgetStart = mode
+		t0 := time.Now().Add(-239 * time.Second)
+		state := resilience.NewRequestState()
+		ctx := resilience.WithRequestState(context.Background(), state)
+		state.SetBudget(resilience.NewBudget(ctx, &settings, resilience.KindText, t0))
+		state.MarkBodyReceived(t0.Add(30*time.Second), "body_eof", 1)
+		recorder := &countingRecorder{failures: map[int64]int{}}
+		state.SetSession(7, "untimed-admission", recorder)
+		failure := newTestFailoverErr(http.StatusBadGateway, false, false)
+		exhausted := resilienceAttemptFailed(ctx, 11, failure)
+		outcome := state.RecoveryOutcome()
+		got = append(got, fmt.Sprintf("exhausted=%t reason=%s outcome=%s attempts=%d account_failures=%d",
+			exhausted, state.Budget().Exhausted(), *outcome, state.Budget().Attempts(), recorder.failures[11]))
+	}
+	require.Equal(t, got[0], got[1], "body_eof's no-timer admission and failure accounting match arrival")
+}
+
 func TestBudgetBalanceNotRetriedOnSameAccount(t *testing.T) {
 	// Spec: a pool-mode account answering 403 insufficient balance switches.
 	withHandlerResilience(t, nil)

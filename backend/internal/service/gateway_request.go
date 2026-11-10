@@ -569,59 +569,117 @@ func StripEmptyTextBlocks(body []byte) []byte {
 // isClaude55SignedThinkingModel identifies models whose default thinking mode
 // requires signed history to survive protocol conversion and request filtering.
 func isClaude55SignedThinkingModel(model string) bool {
-	return claude.IsOpus55(model) || claude.IsSonnet55(model)
+	return claude.IsClaude55(model)
 }
 
-// validateClaude55Request rejects settings that the upstream cannot honor.
-// Call before OAuth mimicry can remove tool_choice or alter thinking defaults.
+// validateClaude55Request checks a native Claude API generation request.
 func validateClaude55Request(body []byte, model string) error {
-	if !isClaude55SignedThinkingModel(model) {
+	return validateClaude55RequestForAccount(body, model, nil)
+}
+
+func validateClaude55RequestForAccount(body []byte, model string, account *Account) error {
+	if err := validateHaiku55MessagesRequest(body, model, account); err != nil {
+		return err
+	}
+	return validateClaude55Parameters(body, model)
+}
+
+// Only inspect native Messages bodies: token counting and unconverted OpenAI
+// requests do not establish a generation prefill. These rules are documented
+// for official Claude API endpoints; leave custom relays and managed platforms
+// to their upstream.
+// https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide#replace-assistant-prefill
+// https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool#migrate-from-computer-20251124
+func validateHaiku55MessagesRequest(body []byte, model string, account *Account) error {
+	claudeAPI := account == nil || (account.Platform == PlatformAnthropic &&
+		(account.IsOAuth() || account.Type == AccountTypeAPIKey && isOfficialAnthropicAPIBaseURL(account.GetBaseURL())))
+	if !claudeAPI || !claude.IsHaiku55(model) {
 		return nil
 	}
-	isSonnet55 := claude.IsSonnet55(model)
-	switch gjson.GetBytes(body, "thinking.type").String() {
-	case "disabled", "enabled":
-		if isSonnet55 {
-			return fmt.Errorf("claude-sonnet-5-5 requires adaptive thinking or thinking.type=between_tools; omit thinking or use one of those modes")
-		}
-		return fmt.Errorf("claude-opus-5-5 requires adaptive thinking; omit thinking or use thinking.type=adaptive and output_config.effort")
-	case "between_tools":
-		if !isSonnet55 {
-			return fmt.Errorf("claude-opus-5-5 requires adaptive thinking; thinking.type=between_tools is unsupported")
-		}
-		effort := gjson.GetBytes(body, "output_config.effort").String()
-		if effort == "xhigh" || effort == "max" {
-			return fmt.Errorf("claude-sonnet-5-5 thinking.type=between_tools supports only low, medium or high effort")
-		}
-		for _, field := range []string{"thinking.display", "thinking.budget_tokens", "thinking.block_binding"} {
-			if gjson.GetBytes(body, field).Exists() {
-				return fmt.Errorf("claude-sonnet-5-5 thinking.type=between_tools does not support %s", field)
+	messages := gjson.GetBytes(body, "messages").Array()
+	if len(messages) > 0 && !gjson.GetBytes(body, "fallback_credit_token").Exists() {
+		last := messages[len(messages)-1]
+		content := last.Get("content")
+		textOnly := content.Type == gjson.String
+		if content.IsArray() {
+			blocks := content.Array()
+			textOnly = len(blocks) > 0
+			for _, block := range blocks {
+				textOnly = textOnly && block.Get("type").String() == "text"
 			}
 		}
-	}
-	modelName := "claude-opus-5-5"
-	if isSonnet55 {
-		modelName = "claude-sonnet-5-5"
-	}
-	if gjson.GetBytes(body, "tool_choice").String() == "required" {
-		return fmt.Errorf("%s does not support forced tool_choice; use auto or none", modelName)
-	}
-	switch gjson.GetBytes(body, "tool_choice.type").String() {
-	case "any", "tool", "function", "custom", "namespace":
-		return fmt.Errorf("%s does not support forced tool_choice; use auto or none", modelName)
-	}
-	if isSonnet55 {
-		if temperature := gjson.GetBytes(body, "temperature"); temperature.Exists() && (temperature.Type != gjson.Number || temperature.Float() != 1) {
-			return fmt.Errorf("claude-sonnet-5-5 does not support non-default temperature")
+		// Leave signed/tool continuations to the upstream rather than reject a
+		// legitimate pause_turn or fallback-credit continuation as a prefill.
+		if last.Get("role").String() == "assistant" && textOnly {
+			return fmt.Errorf("claude-haiku-5-5 does not support assistant prefill; end messages with a user turn")
 		}
-		if topP := gjson.GetBytes(body, "top_p"); topP.Exists() && (topP.Type != gjson.Number || topP.Float() < 0.99 || topP.Float() > 1) {
-			return fmt.Errorf("claude-sonnet-5-5 does not support non-default top_p")
-		}
-		if gjson.GetBytes(body, "top_k").Exists() {
-			return fmt.Errorf("claude-sonnet-5-5 does not support top_k")
+	}
+	for i, tool := range gjson.GetBytes(body, "tools").Array() {
+		toolType := tool.Get("type").String()
+		if toolType == "computer_20250124" || toolType == "computer_20251124" {
+			return fmt.Errorf("claude-haiku-5-5 does not support tools[%d].type=%s on this platform; use computer_toolset_20260801", i, toolType)
 		}
 	}
 	return nil
+}
+
+// validateClaude55Parameters rejects settings that the upstream cannot honor.
+// Call before OAuth mimicry can remove tool_choice or alter thinking defaults.
+func validateClaude55Parameters(body []byte, model string) error {
+	spec, ok := claude.Claude55(model)
+	if !ok {
+		return nil
+	}
+	modelName := spec.ID
+	effort := gjson.GetBytes(body, "output_config.effort").String()
+	switch gjson.GetBytes(body, "thinking.type").String() {
+	case "disabled", "enabled":
+		if spec.BetweenTools {
+			return fmt.Errorf("%s requires adaptive thinking or thinking.type=between_tools; omit thinking or use one of those modes", modelName)
+		}
+		if gjson.GetBytes(body, "thinking.type").String() == "enabled" || spec.DisabledThinkingMaxEffort == "" {
+			return fmt.Errorf("%s requires adaptive thinking; omit thinking or use thinking.type=adaptive and output_config.effort", modelName)
+		}
+		if effort == "xhigh" || effort == "max" {
+			return fmt.Errorf("%s thinking.type=disabled supports only low, medium or high effort", modelName)
+		}
+		if gjson.GetBytes(body, "thinking.block_binding").Exists() {
+			return fmt.Errorf("%s thinking.type=disabled does not support thinking.block_binding", modelName)
+		}
+	case "between_tools":
+		if !spec.BetweenTools {
+			if spec.DisabledThinkingMaxEffort != "" {
+				return fmt.Errorf("%s does not support thinking.type=between_tools; omit thinking or use thinking.type=adaptive and output_config.effort", modelName)
+			}
+			return fmt.Errorf("%s requires adaptive thinking; thinking.type=between_tools is unsupported", modelName)
+		}
+		if effort == "xhigh" || effort == "max" {
+			return fmt.Errorf("%s thinking.type=between_tools supports only low, medium or high effort", modelName)
+		}
+		for _, field := range []string{"thinking.display", "thinking.budget_tokens", "thinking.block_binding"} {
+			if gjson.GetBytes(body, field).Exists() {
+				return fmt.Errorf("%s thinking.type=between_tools does not support %s", modelName, field)
+			}
+		}
+	}
+	if !spec.ForcedToolChoice {
+		if gjson.GetBytes(body, "tool_choice").String() == "required" {
+			return fmt.Errorf("%s does not support forced tool_choice; use auto or none", modelName)
+		}
+		switch gjson.GetBytes(body, "tool_choice.type").String() {
+		case "any", "tool", "function", "custom", "namespace":
+			return fmt.Errorf("%s does not support forced tool_choice; use auto or none", modelName)
+		}
+	}
+	return spec.CheckSampling(gjsonSamplingValue(body, "temperature"), gjsonSamplingValue(body, "top_p"), gjson.GetBytes(body, "top_k").Exists())
+}
+
+func gjsonSamplingValue(body []byte, path string) claude.SamplingValue {
+	value := gjson.GetBytes(body, path)
+	if !value.Exists() {
+		return claude.SamplingValue{}
+	}
+	return claude.SamplingValue{Set: true, Number: value.Type == gjson.Number, Value: value.Float()}
 }
 
 // FilterThinkingBlocks removes thinking blocks from request body

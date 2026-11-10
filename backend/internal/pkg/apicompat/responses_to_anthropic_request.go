@@ -14,9 +14,8 @@ import (
 // enables Anthropic platform groups to accept OpenAI Responses API requests
 // by converting them to the native /v1/messages format before forwarding upstream.
 func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, error) {
-	isOpus55 := claude.IsOpus55(req.Model)
-	isSonnet55 := claude.IsSonnet55(req.Model)
-	system, messages, err := convertResponsesInputToAnthropic(req.Instructions, req.Input, isOpus55 || isSonnet55, req.chatCacheControls...)
+	spec, is55 := claude.Claude55(req.Model)
+	system, messages, err := convertResponsesInputToAnthropic(req.Instructions, req.Input, is55, req.chatCacheControls...)
 	if err != nil {
 		return nil, err
 	}
@@ -57,11 +56,11 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 		out.ToolChoice = tc
 	}
 
-	// The 5.5 models reject manual thinking and forced tool use. Sonnet 5.5
-	// additionally supports between_tools to disable up-front thinking.
-	// Resolve the upstream model before conversion: client aliases need not
-	// identify a Claude model.
-	if isOpus55 || isSonnet55 {
+	// The 5.5 models reject manual thinking; Opus and Sonnet 5.5 also reject
+	// forced tool use. Sonnet 5.5 additionally supports between_tools to
+	// disable up-front thinking. Resolve the upstream model before
+	// conversion: client aliases need not identify a Claude model.
+	if is55 {
 		var choice struct {
 			Type string `json:"type"`
 		}
@@ -70,32 +69,33 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 				return nil, fmt.Errorf("invalid tool_choice: %w", err)
 			}
 		}
-		if choice.Type == "any" || choice.Type == "tool" {
+		if !spec.ForcedToolChoice && (choice.Type == "any" || choice.Type == "tool") {
 			return nil, fmt.Errorf("%s does not support forced tool_choice; use auto or none", req.Model)
 		}
-		effort := "medium"
-		if isSonnet55 {
-			effort = "high"
-			if req.Temperature != nil && *req.Temperature != 1 {
-				return nil, fmt.Errorf("claude-sonnet-5-5 does not support non-default temperature")
-			}
-			if req.TopP != nil && (*req.TopP < 0.99 || *req.TopP > 1) {
-				return nil, fmt.Errorf("claude-sonnet-5-5 does not support non-default top_p")
-			}
+		if err := spec.CheckSampling(claude.SamplingFloat(req.Temperature), claude.SamplingFloat(req.TopP), false); err != nil {
+			return nil, err
 		}
+		effort := spec.DefaultEffort
 		if req.Reasoning != nil && req.Reasoning.Effort != "" {
 			effort = req.Reasoning.Effort
 		}
-		if isSonnet55 && effort == "none" {
-			// OpenAI's no-reasoning request maps to Sonnet 5.5's lowest
-			// thinking mode. between_tools still preserves signed progress
-			// blocks produced during tool use.
-			out.Thinking = &AnthropicThinking{Type: "between_tools"}
-			if out.OutputConfig == nil {
-				out.OutputConfig = &AnthropicOutputConfig{}
+		if effort == "none" {
+			switch {
+			case spec.BetweenTools:
+				// OpenAI's no-reasoning request maps to Sonnet 5.5's lowest
+				// thinking mode. between_tools still preserves signed progress
+				// blocks produced during tool use.
+				out.Thinking = &AnthropicThinking{Type: "between_tools"}
+				if out.OutputConfig == nil {
+					out.OutputConfig = &AnthropicOutputConfig{}
+				}
+				out.OutputConfig.Effort = "low"
+				return out, nil
+			case spec.DisabledThinkingMaxEffort != "":
+				// Lower effort, not disabled thinking, is the lever on Haiku 5.5:
+				// at low it can skip thinking on simple requests.
+				effort = "low"
 			}
-			out.OutputConfig.Effort = "low"
-			return out, nil
 		}
 		switch effort {
 		case "low", "medium", "high", "xhigh", "max":

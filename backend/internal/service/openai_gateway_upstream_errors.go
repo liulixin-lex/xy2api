@@ -133,6 +133,10 @@ func isOpenAITransientProcessingError(upstreamStatusCode int, upstreamMsg string
 		if code == "" {
 			code = strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "response.error.code").String()))
 		}
+		if code == "" {
+			code = strings.ToLower(strings.TrimSpace(openAITopLevelStreamError(payload).Get("code").String()))
+		}
+
 		return code == "server_is_overloaded" || code == "slow_down"
 	}
 
@@ -395,11 +399,22 @@ func isOpenAIUpstreamAccessStateCode(value string) bool {
 	return false
 }
 
-// isOpenAIHTTPUpstreamAccessStateError is deliberately status-independent:
-// known provider codes are durable evidence, while 401/403 messages without
-// such a code must flow through the existing authentication/403 policies.
-func isOpenAIHTTPUpstreamAccessStateError(_ int, _ string, body []byte) bool {
-	return isOpenAIUpstreamAccessStateError("", body)
+// Known provider access codes are durable evidence. Device binding is only
+// recognized on HTTP 409; unclassified 401/403 keep their existing policies.
+func isOpenAIHTTPUpstreamAccessStateError(status int, _ string, body []byte) bool {
+	return isOpenAIUpstreamAccessStateError("", body) || isOpenAIDeviceBindingRequired(status, body)
+}
+
+func isOpenAIDeviceBindingRequired(status int, body []byte) bool {
+	if status != http.StatusConflict || len(body) == 0 || !gjson.ValidBytes(body) {
+		return false
+	}
+	for _, path := range []string{"error.code", "response.error.code", "detail.code", "code"} {
+		if strings.EqualFold(strings.TrimSpace(gjson.GetBytes(body, path).String()), "device_binding_required") {
+			return true
+		}
+	}
+	return false
 }
 
 func openAICapacityShedClientMessage(upstreamMsg string, body []byte) string {
@@ -893,7 +908,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 		modelForCooldown = requestedModel[0]
 	}
 	shouldDisable := false
-	if !accountErrorAlreadyHandled {
+	if !accountErrorAlreadyHandled && (account == nil || account.Platform != PlatformGrok) {
 		shouldDisable = s.handleOpenAIAccountUpstreamError(
 			c.Request.Context(), account, resp.StatusCode, resp.Header, body, modelForCooldown,
 		)

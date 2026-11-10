@@ -1018,6 +1018,8 @@ func isUpstreamBillingProbeAccount(account *Account) bool {
 	return account != nil && IsUpstreamBillingProbeIdentity(account.Platform, account.Type)
 }
 
+const officialAnthropicAPIDomain = "anthropic.com"
+
 // upstreamBillingProbeOfficialAPIDomains lists the root domains of official
 // provider APIs. The create form fills empty base_url values with official
 // defaults (and offers official regional presets like us-east-1.api.x.ai),
@@ -1035,7 +1037,7 @@ func isUpstreamBillingProbeAccount(account *Account) bool {
 // serve the same role: official APIs that can never host /v1/sub2api/billing,
 // so their accounts short-circuit to "unsupported" without a request.
 var upstreamBillingProbeOfficialAPIDomains = []string{
-	"anthropic.com",
+	officialAnthropicAPIDomain,
 	"googleapis.com",
 	"x.ai",
 	"grok.com",
@@ -1064,12 +1066,32 @@ func upstreamBillingProbeTargetIsOfficialAPI(baseURL string) bool {
 	if host == "" {
 		return true
 	}
+	return officialAPIHostDomain(host) != ""
+}
+
+func officialAPIHostDomain(host string) string {
 	for _, domain := range upstreamBillingProbeOfficialAPIDomains {
 		if host == domain || strings.HasSuffix(host, "."+domain) {
-			return true
+			return domain
 		}
 	}
-	return false
+	return ""
+}
+
+// Anthropic endpoint checks share the normalized root-domain matching used by
+// upstreamBillingProbeTargetIsOfficialAPI without treating other providers'
+// official domains as Anthropic endpoints.
+func isOfficialAnthropicAPIBaseURL(baseURL string) bool {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		return true
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+	host := strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
+	return officialAPIHostDomain(host) == officialAnthropicAPIDomain
 }
 
 func upstreamBillingProbeEnabled(account *Account) bool {

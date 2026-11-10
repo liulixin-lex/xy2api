@@ -1920,6 +1920,12 @@ func (s *OpenAIGatewayService) getSchedulableAccount(ctx context.Context, accoun
 	if err != nil || account == nil {
 		return account, err
 	}
+	state := resilience.StateFrom(ctx)
+	if account.ID == state.StickyOwner() {
+		if _, _, reason := resiliencePenaltyOf(account, "", time.Now()); reason == "balance_exhausted" {
+			state.NoteStickyBypassReason(reason)
+		}
+	}
 	if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, account) {
 		return nil, nil
 	}

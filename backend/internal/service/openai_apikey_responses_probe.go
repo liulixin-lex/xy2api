@@ -165,7 +165,7 @@ func (s *AccountTestService) ProbeOpenAIAPIKeyResponsesSupport(ctx context.Conte
 	}
 	normalizedBaseURL, err := s.validateUpstreamBaseURL(baseURL)
 	if err != nil {
-		logger.LegacyPrintf("service.openai_probe", "probe_invalid_baseurl: account_id=%d base_url=%q err=%v", accountID, baseURL, err)
+		logger.LegacyPrintf("service.openai_probe", "probe_invalid_baseurl: account_id=%d error_type=%T", accountID, err)
 		return
 	}
 
@@ -177,7 +177,7 @@ func (s *AccountTestService) ProbeOpenAIAPIKeyResponsesSupport(ctx context.Conte
 
 	req, err := http.NewRequestWithContext(probeCtx, http.MethodPost, probeURL, bytes.NewReader(openaiResponsesProbePayload(probeModel)))
 	if err != nil {
-		logger.LegacyPrintf("service.openai_probe", "probe_build_request_failed: account_id=%d err=%v", accountID, err)
+		logger.LegacyPrintf("service.openai_probe", "probe_build_request_failed: account_id=%d error_type=%T", accountID, err)
 		return
 	}
 	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
@@ -197,7 +197,7 @@ func (s *AccountTestService) ProbeOpenAIAPIKeyResponsesSupport(ctx context.Conte
 	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
 		// 网络层失败：不写标记，保持 unknown，下次重试或由网关 fallback 处理
-		logger.LegacyPrintf("service.openai_probe", "probe_request_failed: account_id=%d url=%s err=%v", accountID, probeURL, err)
+		logger.LegacyPrintf("service.openai_probe", "probe_request_failed: account_id=%d error_type=%T", accountID, err)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -207,7 +207,7 @@ func (s *AccountTestService) ProbeOpenAIAPIKeyResponsesSupport(ctx context.Conte
 	if readErr != nil {
 		// 响应体读取失败(部分读取/传输错误):按网络层失败处理,保持 unknown,
 		// 不写标记——否则可能给一个 2xx 响应误写 supported=false。
-		logger.LegacyPrintf("service.openai_probe", "probe_read_body_failed: account_id=%d url=%s err=%v", accountID, probeURL, readErr)
+		logger.LegacyPrintf("service.openai_probe", "probe_read_body_failed: account_id=%d error_type=%T", accountID, readErr)
 		return
 	}
 
@@ -217,8 +217,8 @@ func (s *AccountTestService) ProbeOpenAIAPIKeyResponsesSupport(ctx context.Conte
 	// 宁可不写，让请求继续走既有的 Responses 路径。
 	if !responsesProbeVerdictIsConclusive(resp.StatusCode, bodyBytes) {
 		logger.LegacyPrintf("service.openai_probe",
-			"probe_inconclusive_keep_unknown: account_id=%d base_url=%s probe_model=%s status=%d response_status=%s reason=%s",
-			accountID, normalizedBaseURL, probeModel, resp.StatusCode,
+			"probe_inconclusive_keep_unknown: account_id=%d probe_model=%s status=%d response_status=%s reason=%s",
+			accountID, probeModel, resp.StatusCode,
 			gjson.GetBytes(bodyBytes, "status").String(),
 			gjson.GetBytes(bodyBytes, "incomplete_details.reason").String(),
 		)
@@ -240,16 +240,14 @@ func (s *AccountTestService) ProbeOpenAIAPIKeyResponsesSupport(ctx context.Conte
 		slog.Warn(
 			"openai_responses_probe_marked_unsupported",
 			"account_id", accountID,
-			"account_name", account.Name,
-			"base_url", normalizedBaseURL,
 			"probe_model", probeModel,
 			"upstream_status", resp.StatusCode,
 		)
 	}
 
 	logger.LegacyPrintf("service.openai_probe",
-		"probe_done: account_id=%d base_url=%s probe_model=%s status=%d supported=%v",
-		accountID, normalizedBaseURL, probeModel, resp.StatusCode, supported,
+		"probe_done: account_id=%d probe_model=%s status=%d supported=%v",
+		accountID, probeModel, resp.StatusCode, supported,
 	)
 }
 

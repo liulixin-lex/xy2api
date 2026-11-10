@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/googleapi"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
@@ -21,7 +22,10 @@ const (
 	PreOutputProtocolResponses = "responses"
 	PreOutputProtocolChat      = "chat"
 	PreOutputProtocolAnthropic = "anthropic"
+	PreOutputProtocolGemini    = "gemini"
 )
+
+const geminiUniqueCandidateKeepaliveStopKey = "xy_resilience_gemini_unique_keepalive_stop"
 
 var (
 	preOutputCommentFrame = []byte(":\n\n")
@@ -52,6 +56,8 @@ func StartPreOutputKeepalive(c *gin.Context, protocol string, firstDelay, interv
 	switch protocol {
 	case PreOutputProtocolAnthropic:
 		frame = preOutputPingFrame
+	case PreOutputProtocolGemini:
+		frame = preOutputCommentFrame
 	case PreOutputProtocolResponses:
 		frame = responsesPreOutputHeartbeatFrame(c)
 	}
@@ -60,14 +66,77 @@ func StartPreOutputKeepalive(c *gin.Context, protocol string, firstDelay, interv
 	return stop
 }
 
+// StartGeminiUniqueCandidateKeepalive starts the shared pre-output heartbeat
+// only for a streamed Gemini request with one usable candidate. It does not
+// install or change an attempt deadline; request handlers own final cleanup.
+func StartGeminiUniqueCandidateKeepalive(c *gin.Context, account *Account, stream, unique bool, protocol string) bool {
+	if c == nil || c.Request == nil || !stream || !unique || !resilience.Current().KeepaliveOn() {
+		return false
+	}
+	if protocol == PreOutputProtocolGemini && downstreamRejectsSSEComments(c) {
+		return false
+	}
+	cfg := resilience.Current()
+	if cfg.Keepalive.SkipOfficialOAuth && account != nil && (account.Type == AccountTypeOAuth || account.Type == AccountTypeSetupToken) {
+		return false
+	}
+	state := resilience.StateFrom(c.Request.Context())
+	if state.Edge() == "" {
+		return false
+	}
+	if b := state.Budget(); b != nil && b.Kind() != resilience.KindText {
+		return false
+	}
+	start := time.Now()
+	if b := state.Budget(); b != nil && !b.Started().IsZero() {
+		start = b.Started()
+	}
+	delay := time.Duration(cfg.Keepalive.DelaySeconds)*time.Second - time.Since(start)
+	stop := StartPreOutputKeepalive(c, protocol, delay, time.Duration(cfg.Keepalive.IntervalSeconds)*time.Second)
+	if _, owned := c.Get(geminiUniqueCandidateKeepaliveStopKey); !owned {
+		c.Set(geminiUniqueCandidateKeepaliveStopKey, stop)
+	}
+	return keepaliveFrom(c) != nil
+}
+
+// Header preparation suspends the shared writer. Preserve the original first
+// beat and cadence when resuming the sole candidate's pre-output body wait.
+func resumeGeminiPreOutputKeepalive(c *gin.Context, resp *http.Response) {
+	g := geminiAttemptOf(resp)
+	k := keepaliveFrom(c)
+	if g == nil || !g.keepalive || k == nil {
+		return
+	}
+	interval := time.Duration(resilience.Current().Keepalive.IntervalSeconds) * time.Second
+	k.mu.Lock()
+	delay := time.Until(k.lastWrite.Add(interval))
+	k.mu.Unlock()
+	StartPreOutputKeepalive(c, g.protocol, delay, interval)
+}
+
+// StopGeminiUniqueCandidateKeepalive releases the request-owned Gemini
+// heartbeat. It is safe for handlers that did not arm one.
+func StopGeminiUniqueCandidateKeepalive(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	if value, ok := c.Get(geminiUniqueCandidateKeepaliveStopKey); ok {
+		if stop, valid := value.(func()); valid && stop != nil {
+			stop()
+		}
+		c.Set(geminiUniqueCandidateKeepaliveStopKey, nil)
+	}
+}
+
 // noteCommitted counts a pre-output heartbeat that committed the response
 // (called with k.mu held).
-func (k *openAICompactSSEKeepalive) noteCommitted() {
+func (k *openAICompactSSEKeepalive) noteCommitted(source string) {
 	if k.protocol == "" {
 		return
 	}
+	resilience.StateFrom(k.ctx).NoteKeepaliveCommit(time.Now())
 	resilience.Count(resilience.MetricKeepaliveCommitted, k.metricGroup, 0, k.protocol)
-	slog.Info("resilience.keepalive_committed", append(resilience.PreOutputEventFields(k.ctx), "group_id", k.metricGroup, "protocol", k.protocol, "edge", k.edge)...)
+	slog.Info("resilience.keepalive_committed", append(resilience.PreOutputEventFields(k.ctx), "group_id", k.metricGroup, "protocol", k.protocol, "edge", k.edge, "source", source)...)
 }
 
 // PreOutputKeepaliveCommitted reports, without stopping it, whether the
@@ -179,6 +248,11 @@ func preOutputTerminalFrame(ctx context.Context, protocol string, status int, bo
 			"error": map[string]any{"type": errType, "message": message},
 		})
 		return []byte("event: error\ndata: " + string(payload) + "\n\n")
+	case PreOutputProtocolGemini:
+		payload, _ := json.Marshal(map[string]any{"error": map[string]any{
+			"code": status, "message": message, "status": googleapi.HTTPStatusToGoogleStatus(status),
+		}})
+		return []byte("data: " + string(payload) + "\n\n")
 	case PreOutputProtocolChat:
 		errObj := map[string]any{"type": errType, "message": message, "status": status}
 		if code != "" {

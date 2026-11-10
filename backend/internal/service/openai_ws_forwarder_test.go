@@ -167,6 +167,15 @@ func TestOpenAIWSPayloadTransientStatus_Explicit529IsNotModelTransient(t *testin
 	require.Zero(t, openAIWSPayloadTransientStatus(payload))
 }
 
+func TestOpenAIWSPayloadTransientStatus_FlatErrorMatchesObject(t *testing.T) {
+	for _, payload := range []string{
+		`{"type":"error","error":{"code":"server_is_overloaded"}}`,
+		`{"type":"error","code":"server_is_overloaded"}`,
+	} {
+		require.Equal(t, http.StatusServiceUnavailable, openAIWSPayloadTransientStatus([]byte(payload)))
+	}
+}
+
 func TestOpenAIWSDial5xxRecordsModelTransient(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	svc.rateLimitService = NewRateLimitService(transientCooldownAccountRepo{}, nil, &config.Config{}, nil, nil)
@@ -178,7 +187,9 @@ func TestOpenAIWSDial5xxRecordsModelTransient(t *testing.T) {
 	}
 
 	for range 2 {
-		svc.handleOpenAIWSDialTransientFailure(context.Background(), account, "gpt-5.5", dialErr)
+		// A 5xx records model health but is left to the normal WS retry path;
+		// only an account-level access-state handshake returns a switch signal.
+		require.Nil(t, svc.handleOpenAIWSDialTransientFailure(context.Background(), account, "gpt-5.5", dialErr))
 	}
 
 	require.Eventually(t, func() bool {

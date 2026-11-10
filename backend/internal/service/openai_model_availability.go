@@ -23,16 +23,24 @@ func (e *UpstreamFailoverError) IsOpenAIUpstreamRequestRestriction() bool {
 // failoverOpenAIModelAvailability is shared by native and passthrough HTTP
 // routing, after local request repairs and compact fallback. It owns the
 // decision and observation together. Provider request restrictions share this
-// unpenalized exit without a model cooldown; stream events keep their
-// existing policy. A bare forwarder has no account-selection owner.
+// unpenalized exit without a model cooldown. Responses stream model errors
+// enter through failoverOpenAIStreamModelAvailability. A bare forwarder has
+// no account-selection owner.
 func (s *OpenAIGatewayService) failoverOpenAIModelAvailability(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, body []byte, model string, passthrough bool) *UpstreamFailoverError {
 	if s == nil || s.accountRepo == nil || !account.IsOpenAICompatible() || resp == nil ||
 		openAIStreamClientOutputStarted(c, false) {
 		return nil
 	}
+	if customPolicyOverridesGenericInference404(account, resp.StatusCode, body) {
+		return nil
+	}
 	reason, failureCategory := openAIModelUnavailableReason, resilience.CategoryModelUnsupported
 	scope, action, kind := GatewayFailureScopeAccount, NextAccountRetry, "failover"
 	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		if classifyInferenceUpstreamHTTP(resp.StatusCode, resp.Header, body, "").Category != resilience.CategoryModelUnsupported {
+			return nil
+		}
 	case isOpenAIModelAvailabilityError(resp.StatusCode, "", body):
 	case !openAIStreamRequestRejected(body, "") && classifyUpstreamHTTP(resp.StatusCode, resp.Header, body, "").Category == resilience.CategoryUpstreamRequestRestriction:
 		reason, failureCategory = openAIUpstreamRequestRestrictionReason, resilience.CategoryUpstreamRequestRestriction
@@ -40,8 +48,8 @@ func (s *OpenAIGatewayService) failoverOpenAIModelAvailability(ctx context.Conte
 		return nil
 	}
 	// Keep independent evidence for each failure class within this request.
-	// A second upstream host establishes request scope; sibling accounts on
-	// the first host may still support the request.
+	// A second upstream host establishes request scope for every model
+	// availability failure; stream-derived model errors use the same guard.
 	host, previousHost := accountUpstreamHost(account), ""
 	hostKey := "openai_request_failure_host_" + string(reason)
 	if c != nil {
@@ -102,8 +110,8 @@ func (s *OpenAIGatewayService) failoverOpenAIModelAvailability(ctx context.Conte
 }
 
 // isOpenAIModelAvailabilityError shares the compact fallback's general
-// availability phrases. Only error-message fields count; echoed request
-// content must not change routing. Request rejections always take precedence.
+// availability phrases and also accepts the protocol code model_not_found.
+// Only error envelopes count; request rejections always take precedence.
 func isOpenAIModelAvailabilityError(status int, message string, body []byte) bool {
 	if status != http.StatusBadRequest && status != http.StatusNotFound && (status < 500 || status > 599) {
 		return false
@@ -114,6 +122,14 @@ func isOpenAIModelAvailabilityError(status int, message string, body []byte) boo
 	if !openAIModelAvailabilityParamAllowed(body) {
 		return false
 	}
+	for _, object := range openAIModelAvailabilityEnvelopes(body) {
+		if openAIStreamRequestRejected([]byte(object.Raw), message) {
+			return false
+		}
+	}
+	if openAIModelNotFoundCode(body) {
+		return true
+	}
 	if isExplicitOpenAIModelAvailabilityMessage(message) ||
 		isExplicitOpenAIModelAvailabilityMessage(extractUpstreamErrorMessage(body)) ||
 		isExplicitOpenAIModelAvailabilityMessage(gjson.GetBytes(body, "response.error.message").String()) {
@@ -123,15 +139,7 @@ func isOpenAIModelAvailabilityError(status int, message string, body []byte) boo
 }
 
 func openAIModelAvailabilityParamAllowed(body []byte) bool {
-	if !gjson.ValidBytes(body) {
-		return true
-	}
-	objects := []gjson.Result{gjson.ParseBytes(body)}
-	// Match extractUpstreamErrorMessage's single embedded JSON error envelope.
-	if inner := objects[0].Get("error.message"); inner.Type == gjson.String && gjson.Valid(inner.Str) {
-		objects = append(objects, gjson.Parse(inner.Str))
-	}
-	for _, object := range objects {
+	for _, object := range openAIModelAvailabilityEnvelopes(body) {
 		for _, path := range []string{"error.param", "response.error.param", "param"} {
 			param := object.Get(path)
 			if !param.Exists() || param.Type == gjson.Null {
@@ -145,7 +153,101 @@ func openAIModelAvailabilityParamAllowed(body []byte) bool {
 	return true
 }
 
-// recordOpenAIModelAvailabilityFailure is used only by pre-output failover.
+// Inspect the HTTP/Responses envelope and one embedded JSON error message,
+// matching the existing relay error convention. Never walk request content.
+func openAIModelAvailabilityEnvelopes(body []byte) []gjson.Result {
+	if !gjson.ValidBytes(body) {
+		return nil
+	}
+	objects := []gjson.Result{gjson.ParseBytes(body)}
+	for _, path := range []string{"error.message", "response.error.message"} {
+		if inner := objects[0].Get(path); inner.Type == gjson.String && gjson.Valid(inner.Str) {
+			objects = append(objects, gjson.Parse(inner.Str))
+		}
+	}
+	if inner := openAITopLevelStreamError(body).Get("message"); inner.Type == gjson.String && gjson.Valid(inner.Str) {
+		objects = append(objects, gjson.Parse(inner.Str))
+	}
+	return objects
+}
+
+func openAIModelNotFoundCode(body []byte) bool {
+	for _, object := range openAIModelAvailabilityEnvelopes(body) {
+		if strings.TrimSpace(openAITopLevelStreamError([]byte(object.Raw)).Get("code").String()) == "model_not_found" {
+			return true
+		}
+		for _, path := range []string{"error.code", "response.error.code"} {
+			if code := object.Get(path); code.Type == gjson.String && strings.TrimSpace(code.Str) == "model_not_found" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Use the same bounded envelope scope as the code/param checks, with an
+// explicit outer status taking precedence over an embedded error status.
+func openAIModelAvailabilityExplicitStatus(payload []byte) (int, bool) {
+	for _, object := range openAIModelAvailabilityEnvelopes(payload) {
+		for _, path := range openAIStreamErrorStatusPaths {
+			if status, ok := strictJSONIntegerStatus([]byte(object.Raw), path); ok && status >= 400 && status <= 599 {
+				return status, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// openAIStreamModelAvailabilityStatus uses the existing semantic status and
+// Q2 predicate. Validated wrapper statuses retain priority, including 401/403;
+// request rejections and input parameters are checked on the original payload.
+func openAIStreamModelAvailabilityStatus(payload []byte, message string, wrappedStatus int) (int, bool) {
+	status, defaulted := openAIStreamFailedEventSemanticStatusSource(payload, message, wrappedStatus)
+	// Numeric protocol statuses, including 5xx, must not become a synthesized
+	// 404. Keep the legacy semantic mapping unchanged for non-Q2 callers.
+	if wrappedStatus == 0 {
+		if explicit, ok := openAIModelAvailabilityExplicitStatus(payload); ok {
+			status, defaulted = explicit, false
+		}
+	}
+	if !isOpenAIModelAvailabilityError(status, message, payload) {
+		return status, false
+	}
+	if defaulted && (openAIModelNotFoundCode(payload) ||
+		isExplicitOpenAIModelNotFoundMessage(message) ||
+		isExplicitOpenAIModelNotFoundMessage(extractUpstreamErrorMessage(payload)) ||
+		isExplicitOpenAIModelNotFoundMessage(gjson.GetBytes(payload, "response.error.message").String())) {
+		status = http.StatusNotFound
+	}
+	return status, true
+}
+
+// failoverOpenAIStreamModelAvailability only adapts model errors. Other stream
+// failures, including generic invalid_request_error, retain their existing exit.
+func (s *OpenAIGatewayService) failoverOpenAIStreamModelAvailability(ctx context.Context, c *gin.Context, account *Account, payload []byte, message string, headers http.Header, model string, passthrough bool, wrappedStatus int) *UpstreamFailoverError {
+	status, matched := openAIStreamModelAvailabilityStatus(payload, message, wrappedStatus)
+	if !matched {
+		return nil
+	}
+	body := openAIStreamFailedEventPassthroughBody(payload, message)
+	return s.failoverOpenAIModelAvailability(ctx, c, account, &http.Response{StatusCode: status, Header: headers}, body, model, passthrough)
+}
+
+// handleOpenAIStreamFailureAfterOutput is shared by native/passthrough
+// Responses and the Chat/Messages converters. Model availability advances the same account-model cooldown as
+// HTTP Q2, without replay or account-health penalties. Bare error/failed pairs
+// still use the callers' existing terminal deferral to apply this once.
+func (s *OpenAIGatewayService) handleOpenAIStreamFailureAfterOutput(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, payload []byte, message, model string, wrappedStatus int) {
+	if _, matched := openAIStreamModelAvailabilityStatus(payload, message, wrappedStatus); matched && account.IsOpenAICompatible() {
+		s.recordOpenAIModelAvailabilityFailure(account, model)
+		noteResiliencePostOutputFailureWithCategory(ctx, s.rateLimitService, account, resp, postOutputModelUnavailable, resilience.CategoryModelUnsupported)
+		return
+	}
+	s.handleOpenAIStreamTerminalAccountSideEffectsForFrame(c, account, payload, message, resp.Header, model, wrappedStatus)
+	s.resilienceOpenAIFailedAfterOutput(ctx, account, resp, payload, message, true)
+}
+
+// recordOpenAIModelAvailabilityFailure is shared by HTTP and Responses SSE.
 // It bypasses persistent model limits and all account-health penalties.
 func (s *OpenAIGatewayService) recordOpenAIModelAvailabilityFailure(account *Account, model string) {
 	decision := s.recordOpenAIAccountModelTransientFailure(account, model, time.Now())

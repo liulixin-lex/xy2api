@@ -165,9 +165,10 @@ func (r *ResilienceService) refreshOutputP99(ctx context.Context, repo Resilienc
 
 // ResilienceStats is the payload of GET /admin/resilience/stats (design §12).
 type ResilienceStats struct {
-	WindowSeconds int64                  `json:"window_seconds"`
-	Scope         string                 `json:"scope"`
-	Counters      []resilience.MetricRow `json:"counters"`
+	WindowSeconds     int64                          `json:"window_seconds"`
+	Scope             string                         `json:"scope"`
+	Counters          []resilience.MetricRow         `json:"counters"`
+	DispatchRemaining []resilience.DispatchHistogram `json:"resilience_dispatch_remaining_seconds"`
 }
 
 // Stats sums this instance's resilience counters over window.
@@ -176,8 +177,9 @@ func (r *ResilienceService) Stats(window time.Duration) ResilienceStats {
 		window = resilience.MetricsRetention
 	}
 	return ResilienceStats{
-		WindowSeconds: int64(window / time.Second),
-		Scope:         "instance",
-		Counters:      resilience.Snapshot(window),
+		WindowSeconds:     int64(window / time.Second),
+		Scope:             "instance",
+		Counters:          resilience.Snapshot(window),
+		DispatchRemaining: resilience.DispatchHistogramSnapshot(window),
 	}
 }

@@ -319,6 +319,10 @@ func extractUpstreamErrorCode(body []byte) string {
 		return code
 	}
 
+	if code := strings.TrimSpace(openAITopLevelStreamError(body).Get("code").String()); code != "" {
+		return code
+	}
+
 	inner := strings.TrimSpace(gjson.GetBytes(body, "error.message").String())
 	if !strings.HasPrefix(inner, "{") {
 		return ""
@@ -1161,6 +1165,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			if ctx.Err() != nil {
 				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, ctx.Err()
 			}
+			stage.noteTimeout(c)
 			return nil, anthropicPreOutputFailover(resp, "Upstream produced no semantic output before the request deadline")
 		case <-stage.cancel:
 			return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, ctx.Err()

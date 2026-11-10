@@ -1336,7 +1336,7 @@ func (h *AccountHandler) scheduleOpenAIResponsesProbe(account *service.Account) 
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				slog.Error("openai_responses_probe_panic", "account_id", accountID, "recover", r)
+				slog.Error("openai_responses_probe_panic", "account_id", accountID, "recover_type", fmt.Sprintf("%T", r))
 			}
 		}()
 		h.accountTestService.ProbeOpenAIAPIKeyResponsesSupport(context.Background(), accountID)
