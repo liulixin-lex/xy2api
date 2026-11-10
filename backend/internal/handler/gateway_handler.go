@@ -168,6 +168,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
+	compatCtx, compatErr := h.gatewayService.PrepareAnthropicCompatibility(c.Request.Context(), subject.UserID, apiKey.ID, body, "messages", service.ExtractClientSessionID(c), c.Request.Header)
+	if compatErr != nil {
+		status, code, message, _ := service.AnthropicCompatErrorDetails(compatErr)
+		h.errorResponse(c, status, code, message)
+		return
+	}
+	c.Request = c.Request.WithContext(compatCtx)
 	c.Request = c.Request.WithContext(h.gatewayService.WithClaudeCacheFallbackRequest(c.Request.Context(), apiKey, body))
 	body = parsedReq.Body.Bytes()
 	reqModel := parsedReq.Model
@@ -191,6 +198,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 	// 解析渠道级模型映射
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
+	c.Request = c.Request.WithContext(service.WithAnthropicCompatDispatchModel(c.Request.Context(), channelMapping.MappedModel))
 
 	// 设置 max_tokens=1 + haiku 探测请求标识到 context 中
 	// 必须在 SetClaudeCodeClientContext 之前设置，因为 ClaudeCodeValidator 需要读取此标识进行绕过判断
@@ -353,6 +361,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		for {
 			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, "", int64(0)) // Gemini 不使用会话限制
 			if err != nil {
+				if status, code, message, local := service.AnthropicCompatErrorDetails(err); local {
+					h.errorResponse(c, status, code, message)
+					return
+				}
 				if failoverClientGone(c) {
 					recordSelectionExhausted(c.Request.Context())
 					reqLog.Info("gateway.account_select_aborted_client_disconnected", zap.Error(err))
@@ -525,6 +537,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				accountReleaseFunc()
 			}
 			if err != nil {
+				if service.IsAnthropicCompatCandidateError(err) {
+					fs.FailedAccountIDs[account.ID] = struct{}{}
+					continue
+				}
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
 					// 流式内容已写入客户端，无法撤销，禁止 failover 以防止流拼接腐化
@@ -698,6 +714,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(selectionCtx, currentAPIKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, parsedReq.MetadataUserID, subject.UserID)
 			if err != nil {
+				if status, code, message, local := service.AnthropicCompatErrorDetails(err); local {
+					h.errorResponse(c, status, code, message)
+					return
+				}
 				if failoverClientGone(c) {
 					recordSelectionExhausted(c.Request.Context())
 					reqLog.Info("gateway.account_select_aborted_client_disconnected", zap.Error(err))
@@ -1025,6 +1045,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 
 			if err != nil {
+				if service.IsAnthropicCompatCandidateError(err) {
+					fs.FailedAccountIDs[account.ID] = struct{}{}
+					continue
+				}
 				// Beta policy block: return 400 immediately, no failover
 				var betaBlockedErr *service.BetaBlockedError
 				if errors.As(err, &betaBlockedErr) {
@@ -2231,7 +2255,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		return
 	}
 
-	_, ok = middleware2.GetAuthSubjectFromContext(c)
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
 		h.errorResponse(c, http.StatusInternalServerError, "api_error", "User context not found")
 		return
@@ -2269,6 +2293,13 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
+	compatCtx, compatErr := h.gatewayService.PrepareAnthropicCompatibility(c.Request.Context(), subject.UserID, apiKey.ID, body, "count_tokens", service.ExtractClientSessionID(c), c.Request.Header)
+	if compatErr != nil {
+		status, code, message, _ := service.AnthropicCompatErrorDetails(compatErr)
+		h.errorResponse(c, status, code, message)
+		return
+	}
+	c.Request = c.Request.WithContext(compatCtx)
 	body = parsedReq.Body.Bytes()
 	// count_tokens 走 messages 严格校验时，复用已解析请求，避免二次反序列化。
 	SetClaudeCodeClientContext(c, body, parsedReq)
@@ -2317,7 +2348,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	parsedReq.GroupID = apiKey.GroupID
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
 	sessionKey := sessionHash
-	platform := ""
+	platform := service.PlatformAnthropic
 	if forcePlatform, ok := middleware2.GetForcePlatformFromContext(c); ok {
 		platform = forcePlatform
 	} else if resolvedPlatform, ok := service.ResolvedTargetPlatformFromContext(c.Request.Context()); ok {
@@ -2329,25 +2360,34 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		sessionKey = "gemini:" + sessionHash
 	}
 
-	// 选择支持该模型的账号
-	account, err := h.gatewayService.SelectAccountForModel(c.Request.Context(), apiKey.GroupID, sessionKey, parsedReq.Model)
-	if err != nil {
-		reqLog.Warn("gateway.count_tokens_select_account_failed", zap.Error(err))
-		cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, parsedReq.Model, parsedReq.Model, service.PlatformAnthropic)
-		if !cls.ModelNotFound {
-			markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
+	// Account-local compatibility conflicts may change after the snapshot was
+	// selected. Exclude that candidate and rebuild from the logical input.
+	excluded := make(map[int64]struct{})
+	for {
+		account, err := h.gatewayService.SelectAccountForModelWithExclusions(c.Request.Context(), apiKey.GroupID, sessionKey, parsedReq.Model, excluded)
+		if err != nil {
+			if status, code, message, local := service.AnthropicCompatErrorDetails(err); local {
+				h.errorResponse(c, status, code, message)
+				return
+			}
+			reqLog.Warn("gateway.count_tokens_select_account_failed", zap.Error(err))
+			cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, parsedReq.Model, parsedReq.Model, platform)
+			if !cls.ModelNotFound {
+				markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
+			}
+			h.errorResponse(c, cls.Status, cls.ErrType, cls.Message)
+			return
 		}
-		h.errorResponse(c, cls.Status, cls.ErrType, cls.Message)
-		return
-	}
-	setOpsSelectedAccount(c, account.ID, account.Platform)
-
-	// 转发请求（不记录使用量）
-	if err := h.gatewayService.ForwardCountTokens(c.Request.Context(), c, account, parsedReq); err != nil {
-		reqLog.Error("gateway.count_tokens_forward_failed", zap.Int64("account_id", account.ID), zap.Error(err))
-		// 错误响应已在 ForwardCountTokens 中处理
-		// 上游未服务该会话，立即释放选号时注册的会话槽（客户端可能已断开，用独立 ctx）
-		h.gatewayService.ReleaseAccountSession(context.Background(), account, sessionKey)
+		setOpsSelectedAccount(c, account.ID, account.Platform)
+		if err := h.gatewayService.ForwardCountTokens(c.Request.Context(), c, account, parsedReq); err != nil {
+			h.gatewayService.ReleaseAccountSession(context.Background(), account, sessionKey)
+			if service.IsAnthropicCompatCandidateError(err) {
+				excluded[account.ID] = struct{}{}
+				continue
+			}
+			reqLog.Error("gateway.count_tokens_forward_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+			return
+		}
 		return
 	}
 }

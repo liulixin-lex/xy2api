@@ -136,6 +136,21 @@ func ensureCodexFingerprintSeedSQL(extraExpr string) string {
 		"ELSE " + extraExpr + " END"
 }
 
+// The per-row generation stays inside the same UPDATE as enabling the profile.
+// Two independent UUIDs provide a random identity seed without requiring pgcrypto.
+func ensureAnthropicCompatSeedSQL(extraExpr, credentialPlaceholder string) string {
+	valid := "(extra ->> 'anthropic_compat_identity_seed') ~ '^[0-9a-f]{64}$'"
+	if credentialPlaceholder != "" {
+		for _, key := range []string{"api_key", "base_url", "auth_scheme"} {
+			valid += " AND (credentials->'" + key + "') IS NOT DISTINCT FROM ((COALESCE(credentials, '{}'::jsonb) || " + credentialPlaceholder + "::jsonb)->'" + key + "')"
+		}
+	}
+	valid += " AND (extra->'anthropic_apikey_auth_scheme') IS NOT DISTINCT FROM ((" + extraExpr + ")->'anthropic_apikey_auth_scheme')"
+	return "CASE WHEN platform = 'anthropic' AND type = 'apikey' AND (((" + extraExpr + ") ->> 'anthropic_compat_profile') = 'claude_code_v1' OR (extra ->> 'anthropic_compat_identity_seed') ~ '^[0-9a-f]{64}$') THEN " +
+		"jsonb_set(" + extraExpr + ", '{anthropic_compat_identity_seed}', CASE WHEN " + valid +
+		" THEN to_jsonb(extra ->> 'anthropic_compat_identity_seed') ELSE to_jsonb(replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '')) END, true) ELSE " + extraExpr + " END"
+}
+
 func stripCodexFingerprintSeedFromExtraUpdate(extra map[string]any) map[string]any {
 	if extra == nil {
 		return nil
@@ -2931,6 +2946,7 @@ func (r *accountRepository) AutoPauseExpiredAccounts(ctx context.Context, now ti
 }
 
 func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
+	updates = service.RedactAnthropicCompatExtra(updates)
 	updates = stripCodexFingerprintSeedFromExtraUpdate(updates)
 	if err := normalizeModelRateLimits(updates); err != nil {
 		return err
@@ -2985,6 +3001,9 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	}
 	if service.ShouldEnsureCodexFingerprintSeedForExtraUpdates(updates) {
 		extraExpression = ensureCodexFingerprintSeedSQL(extraExpression)
+	}
+	if service.ShouldEnsureAnthropicCompatSeedForExtraUpdates(updates) {
+		extraExpression = ensureAnthropicCompatSeedSQL(extraExpression, "")
 	}
 	identityChanged := false
 	if len(iqConditions) > 0 {
@@ -3258,7 +3277,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	if err := service.ValidateIQTargetsPatch(service.PlatformOpenAI, updates.IQTargets); err != nil {
 		return 0, err
 	}
-	updates.Extra = stripCodexFingerprintSeedFromExtraUpdate(updates.Extra)
+	updates.Extra = service.RedactAnthropicCompatExtra(stripCodexFingerprintSeedFromExtraUpdate(updates.Extra))
 	if err := normalizeModelRateLimits(updates.Extra); err != nil {
 		return 0, err
 	}
@@ -3435,7 +3454,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 				" AND COALESCE(btrim("+credentialPlaceholder+"::jsonb ->> 'account_mode') <> 'zen', true) IS NOT TRUE")
 	}
 
-	if len(updates.Extra) > 0 || len(ollamaGroupIdentityChanges) > 0 || len(opencodeGroupIdentityChanges) > 0 || ollamaProxyIdentityChanged != "" || updates.EnsureCodexFingerprintSeed {
+	if len(updates.Extra) > 0 || len(ollamaGroupIdentityChanges) > 0 || len(opencodeGroupIdentityChanges) > 0 || ollamaProxyIdentityChanged != "" || updates.EnsureCodexFingerprintSeed || updates.EnsureAnthropicCompatSeed {
 		extraExpression := "COALESCE(extra, '{}'::jsonb)"
 		if len(updates.Extra) > 0 {
 			if limits, ok := updates.Extra["model_rate_limits"].(map[string]any); ok {
@@ -3527,6 +3546,9 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 		if updates.EnsureCodexFingerprintSeed {
 			extraExpression = ensureCodexFingerprintSeedSQL(extraExpression)
+		}
+		if updates.EnsureAnthropicCompatSeed {
+			extraExpression = ensureAnthropicCompatSeedSQL(extraExpression, credentialPlaceholder)
 		}
 		setClauses = append(setClauses, "extra = "+extraExpression)
 	}

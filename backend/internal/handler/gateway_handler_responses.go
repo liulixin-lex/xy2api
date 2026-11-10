@@ -92,6 +92,13 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 	}
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
+	compatCtx, compatErr := h.gatewayService.PrepareAnthropicCompatibility(c.Request.Context(), subject.UserID, apiKey.ID, body, "responses", service.ExtractClientSessionID(c), c.Request.Header)
+	if compatErr != nil {
+		status, code, message, _ := service.AnthropicCompatErrorDetails(compatErr)
+		h.responsesErrorResponse(c, status, code, message)
+		return
+	}
+	c.Request = c.Request.WithContext(compatCtx)
 	c.Request = c.Request.WithContext(h.gatewayService.WithClaudeCacheFallbackRequest(c.Request.Context(), apiKey, body))
 	c.Request = c.Request.WithContext(service.WithRequestReplaySafety(c.Request.Context(), body, false))
 	setOpsRequestContext(c, reqModel, reqStream)
@@ -110,6 +117,8 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 
 	// 解析渠道级模型映射
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(requestCtx, apiKey.GroupID, reqModel)
+	requestCtx = service.WithAnthropicCompatDispatchModel(requestCtx, channelMapping.MappedModel)
+	c.Request = c.Request.WithContext(requestCtx)
 
 	// Claude Code only restriction: /v1/responses is never a Claude Code
 	// endpoint. With a fallback group the request continues and account selection
@@ -195,6 +204,10 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		}
 		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(requestCtx, apiKey.GroupID, sessionHash, reqModel, fs.FailedAccountIDs, "", int64(0))
 		if err != nil {
+			if status, code, message, local := service.AnthropicCompatErrorDetails(err); local {
+				h.responsesErrorResponse(c, status, code, message)
+				return
+			}
 			if failoverClientGone(c) {
 				recordSelectionExhausted(c.Request.Context())
 				reqLog.Info("gateway.responses.account_select_aborted_client_disconnected", zap.Error(err))
@@ -311,6 +324,10 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		}
 
 		if err != nil {
+			if service.IsAnthropicCompatCandidateError(err) {
+				fs.FailedAccountIDs[account.ID] = struct{}{}
+				continue
+			}
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
 				// Can't failover if streaming content already sent

@@ -433,6 +433,7 @@ func redactAccountManagedExtra(extra map[string]any) map[string]any {
 	for key, value := range extra {
 		switch {
 		case key == service.OllamaCloudUsageSessionExtraKey,
+			key == service.AnthropicCompatIdentitySeedExtraKey,
 			key == "capability_learned_responses",
 			key == "capability_learned_chat",
 			key == service.OllamaCloudUsageAutoRefreshExtraKey,

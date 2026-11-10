@@ -57,13 +57,20 @@ type TestEvent struct {
 	Code     string `json:"code,omitempty"`
 	ImageURL string `json:"image_url,omitempty"`
 	// AudioURL / VideoURL are data: or https URLs for in-browser media players.
-	AudioURL string `json:"audio_url,omitempty"`
-	VideoURL string `json:"video_url,omitempty"`
-	MimeType string `json:"mime_type,omitempty"`
-	Data     any    `json:"data,omitempty"`
-	Success  bool   `json:"success,omitempty"`
-	Error    string `json:"error,omitempty"`
+	AudioURL        string `json:"audio_url,omitempty"`
+	VideoURL        string `json:"video_url,omitempty"`
+	MimeType        string `json:"mime_type,omitempty"`
+	Data            any    `json:"data,omitempty"`
+	Success         bool   `json:"success,omitempty"`
+	Error           string `json:"error,omitempty"`
+	ActualAccountID int64  `json:"actual_account_id,omitempty"`
+	TestScope       string `json:"test_scope,omitempty"`
+	CompatProfile   string `json:"compat_profile,omitempty"`
+	CompatRevision  string `json:"compat_revision,omitempty"`
 }
+
+const AccountTestModeAnthropicCompatibility = "compatibility"
+const AccountTestModeAnthropicLegacyCLI = "legacy_cli"
 
 // AccountTestOptions carries optional media for admin connectivity tests.
 // ImageDataURL / AudioDataURL are full data URLs (data:<mime>;base64,...).
@@ -354,7 +361,8 @@ func createTestPayload(modelID string) (map[string]any, error) {
 }
 
 // TestAccountConnection tests an account's connection by sending a test request
-// All account types use full Claude Code client characteristics, only auth header differs
+// Enabled Anthropic compatibility accounts default to an ordinary-client diagnostic.
+// legacy_cli retains the old pre-shaped connectivity probe, which does not validate adaptation.
 // modelID is optional - if empty, defaults to claude.DefaultTestModel
 // mode is optional - "compact" routes OpenAI accounts to the /responses/compact probe path
 // opts is optional media (image/audio data URLs for real generation / STT).
@@ -424,7 +432,7 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		return s.testTypeSafeAccountConnection(c, account, prompt)
 	}
 
-	return s.testClaudeAccountConnection(c, account, modelID)
+	return s.testClaudeAccountConnection(c, account, modelID, mode)
 }
 
 // testModelRoutedAccountConnection probes the native endpoint for the selected
@@ -501,13 +509,30 @@ func (s *AccountTestService) testCNProviderChatCompletionsConnection(c *gin.Cont
 }
 
 // testClaudeAccountConnection tests an Anthropic Claude account's connection
-func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account *Account, modelID string) error {
+func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account *Account, modelID string, modes ...string) error {
 	ctx := c.Request.Context()
+	mode := ""
+	if len(modes) > 0 {
+		mode = modes[0]
+	}
+	profile, profileErr := ResolveAnthropicCompatProfile(account)
+	if profileErr != nil {
+		return s.sendErrorAndEnd(c, profileErr.Error())
+	}
+	ordinaryDiagnostic := account.Platform == PlatformAnthropic && account.Type == AccountTypeAPIKey && (mode == AccountTestModeAnthropicCompatibility || (profile != nil && mode != AccountTestModeAnthropicLegacyCLI))
+	if ordinaryDiagnostic {
+		if err := (&adminServiceImpl{settingService: s.settingService}).validateAnthropicCompatConfiguration(ctx, account); err != nil {
+			return s.sendErrorAndEnd(c, err.Error())
+		}
+	}
 
 	// Determine the model to use
 	testModelID := modelID
 	if testModelID == "" {
 		testModelID = claude.DefaultTestModel
+		if ordinaryDiagnostic {
+			testModelID = "claude-opus-5-5"
+		}
 	}
 
 	// API Key 账号测试连接时也需要应用通配符模型映射。
@@ -564,10 +589,21 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create test payload")
 	}
+	if ordinaryDiagnostic {
+		payload = map[string]any{"model": testModelID, "messages": []map[string]any{{"role": "user", "content": "Reply with OK."}}, "max_tokens": 64, "stream": true}
+	}
 	payloadBytes, _ := json.Marshal(payload)
 
 	// Send test_start event
-	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
+	startEvent := TestEvent{Type: "test_start", Model: testModelID, ActualAccountID: account.ID, TestScope: "legacy_cli_connectivity"}
+	if ordinaryDiagnostic {
+		startEvent.TestScope = "ordinary_client_compatibility"
+	}
+	if profile != nil {
+		startEvent.CompatProfile = profile.ID
+		startEvent.CompatRevision = profile.Revision
+	}
+	s.sendEvent(c, startEvent)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
 	if err != nil {
@@ -596,6 +632,23 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 
 	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
 	account.ApplyHeaderOverrides(req.Header)
+	if ordinaryDiagnostic {
+		// Begin with an ordinary client shape. The production adapter owns all CLI fields.
+		ordinaryHeaders := make(http.Header)
+		ordinaryHeaders.Set("Content-Type", "application/json")
+		ordinaryHeaders.Set("User-Agent", "XY2API-account-diagnostic/1.0")
+		ordinaryHeaders.Set("anthropic-version", "2023-06-01")
+		account.ApplyHeaderOverrides(ordinaryHeaders)
+		adapted, headers, err := BuildAnthropicCompatDiagnosticRequest(account, payloadBytes, ordinaryHeaders)
+		if err != nil {
+			return s.sendErrorAndEnd(c, err.Error())
+		}
+		req.Header = headers
+		setAnthropicAPIKeyAuthHeader(req.Header, account, authToken, account.GetBaseURL())
+		req.Body = io.NopCloser(bytes.NewReader(adapted))
+		req.ContentLength = int64(len(adapted))
+		req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(adapted)), nil }
+	}
 
 	// Get proxy URL
 	proxyURL := ""
@@ -614,7 +667,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		errMsg := fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body))
 
 		// 403 表示账号被上游封禁，标记为 error 状态
-		if resp.StatusCode == http.StatusForbidden {
+		if resp.StatusCode == http.StatusForbidden && !ordinaryDiagnostic {
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
 
@@ -622,7 +675,10 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	}
 
 	// Process SSE stream
-	return s.processClaudeStream(c, resp.Body)
+	if ordinaryDiagnostic {
+		resp.Body = newAnthropicCompatDiagnosticBody(ctx, resp.Body)
+	}
+	return s.processClaudeStream(c, resp.Body, ordinaryDiagnostic)
 }
 
 func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Context, ctx context.Context, account *Account, testModelID string) error {
@@ -2819,13 +2875,18 @@ func createOpenAIChatCompletionsTestPayload(modelID string, prompt string) map[s
 }
 
 // processClaudeStream processes the SSE stream from Claude API
-func (s *AccountTestService) processClaudeStream(c *gin.Context, body io.Reader) error {
+func (s *AccountTestService) processClaudeStream(c *gin.Context, body io.Reader, strictModes ...bool) error {
 	reader := bufio.NewReader(body)
+	strict := len(strictModes) > 0 && strictModes[0]
+	seenStopReason := false
 
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
+				if strict {
+					return s.sendErrorAndEnd(c, "Compatibility diagnostic ended without a complete Anthropic terminal event")
+				}
 				s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 				return nil
 			}
@@ -2839,6 +2900,9 @@ func (s *AccountTestService) processClaudeStream(c *gin.Context, body io.Reader)
 
 		jsonStr := sseDataPrefix.ReplaceAllString(line, "")
 		if jsonStr == "[DONE]" {
+			if strict {
+				return s.sendErrorAndEnd(c, "Compatibility diagnostic received a non-Anthropic terminal event")
+			}
 			s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 			return nil
 		}
@@ -2851,6 +2915,11 @@ func (s *AccountTestService) processClaudeStream(c *gin.Context, body io.Reader)
 		eventType, _ := data["type"].(string)
 
 		switch eventType {
+		case "message_delta":
+			if delta, ok := data["delta"].(map[string]any); ok {
+				reason, _ := delta["stop_reason"].(string)
+				seenStopReason = seenStopReason || reason != ""
+			}
 		case "content_block_delta":
 			if delta, ok := data["delta"].(map[string]any); ok {
 				if text, ok := delta["text"].(string); ok {
@@ -2858,6 +2927,9 @@ func (s *AccountTestService) processClaudeStream(c *gin.Context, body io.Reader)
 				}
 			}
 		case "message_stop":
+			if strict && !seenStopReason {
+				return s.sendErrorAndEnd(c, "Compatibility diagnostic is missing stop_reason")
+			}
 			s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 			return nil
 		case "error":

@@ -3,7 +3,9 @@ import {
   CC_SWITCH_USAGE_SCRIPT,
   GROK_CC_SWITCH_MODEL,
   OPENAI_CC_SWITCH_CODEX_MODEL,
-  buildCcSwitchImportDeeplink
+  buildCcSwitchImportDeeplink,
+  defaultCcSwitchProviderName,
+  isValidCcSwitchEndpoint
 } from '@/utils/ccswitchImport'
 import type { GroupPlatform } from '@/types'
 
@@ -14,7 +16,7 @@ function paramsFromDeeplink(deeplink: string): URLSearchParams {
 
 describe('ccswitchImport utils', () => {
   it('defaults OpenAI CC Switch imports to the current Codex model', () => {
-    expect(OPENAI_CC_SWITCH_CODEX_MODEL).toBe('gpt-5.5')
+    expect(OPENAI_CC_SWITCH_CODEX_MODEL).toBe('gpt-5.6-sol')
   })
 
   it('defaults Grok Build imports to the current Grok model', () => {
@@ -99,6 +101,80 @@ describe('ccswitchImport utils', () => {
     expect(params.get('app')).toBe('gemini')
     expect(params.get('endpoint')).toBe(`${baseInput.baseUrl}/antigravity`)
     expect(params.has('model')).toBe(false)
+  })
+
+  it('imports the confirmed endpoint and model as typed, keeping the site as homepage', () => {
+    const params = paramsFromDeeplink(
+      buildCcSwitchImportDeeplink({
+        ...baseInput,
+        platform: 'openai',
+        clientType: 'claude',
+        providerName: 'XY2API · laptop',
+        endpoint: '  https://cn.example.com/custom/  ',
+        model: ' gpt-6.1-sol '
+      })
+    )
+
+    expect(params.get('name')).toBe('XY2API · laptop')
+    expect(params.get('endpoint')).toBe('https://cn.example.com/custom/')
+    expect(params.get('model')).toBe('gpt-6.1-sol')
+    expect(params.get('homepage')).toBe(baseInput.baseUrl)
+  })
+
+  it('falls back to the platform defaults when the confirmed values are blank', () => {
+    const params = paramsFromDeeplink(
+      buildCcSwitchImportDeeplink({
+        ...baseInput,
+        platform: 'grok',
+        clientType: 'claude',
+        endpoint: '   ',
+        model: ''
+      })
+    )
+
+    expect(params.get('endpoint')).toBe('https://api.example.com/v1')
+    expect(params.get('model')).toBe(GROK_CC_SWITCH_MODEL)
+  })
+
+  it('ignores a model for apps that do not take one', () => {
+    const params = paramsFromDeeplink(
+      buildCcSwitchImportDeeplink({
+        ...baseInput,
+        platform: 'anthropic',
+        clientType: 'claude',
+        model: 'claude-opus-5-5'
+      })
+    )
+
+    expect(params.get('app')).toBe('claude')
+    expect(params.has('model')).toBe(false)
+  })
+})
+
+describe('defaultCcSwitchProviderName', () => {
+  it.each([
+    ['XY2API', 'laptop', 'XY2API · laptop'],
+    ['XY2API', '  laptop  ', 'XY2API · laptop'],
+    ['XY2API', '', 'XY2API'],
+    ['XY2API', null, 'XY2API'],
+    ['XY2API', 'XY2API', 'XY2API'],
+    ['', 'laptop', 'laptop']
+  ])('names site %j with key %j as %j', (siteName, keyName, expected) => {
+    expect(defaultCcSwitchProviderName(siteName, keyName)).toBe(expected)
+  })
+})
+
+describe('isValidCcSwitchEndpoint', () => {
+  it.each([
+    ['https://api.example.com', true],
+    ['http://127.0.0.1:8080/v1', true],
+    [' https://api.example.com/v1 ', true],
+    ['api.example.com', false],
+    ['ftp://api.example.com', false],
+    ['https://', false],
+    ['', false]
+  ])('treats %j as valid=%s', (value, expected) => {
+    expect(isValidCcSwitchEndpoint(value)).toBe(expected)
   })
 })
 

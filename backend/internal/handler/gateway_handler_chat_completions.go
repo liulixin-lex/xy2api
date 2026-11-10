@@ -96,6 +96,13 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	}
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
+	compatCtx, compatErr := h.gatewayService.PrepareAnthropicCompatibility(c.Request.Context(), subject.UserID, apiKey.ID, body, "chat", service.ExtractClientSessionID(c), c.Request.Header)
+	if compatErr != nil {
+		status, code, message, _ := service.AnthropicCompatErrorDetails(compatErr)
+		h.chatCompletionsErrorResponse(c, status, code, message)
+		return
+	}
+	c.Request = c.Request.WithContext(compatCtx)
 	c.Request = c.Request.WithContext(h.gatewayService.WithClaudeCacheFallbackRequest(c.Request.Context(), apiKey, body))
 	c.Request = c.Request.WithContext(service.WithRequestReplaySafety(c.Request.Context(), body, false))
 	setOpsRequestContext(c, reqModel, reqStream)
@@ -106,6 +113,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 
 	// 解析渠道级模型映射
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
+	c.Request = c.Request.WithContext(service.WithAnthropicCompatDispatchModel(c.Request.Context(), channelMapping.MappedModel))
 
 	// Claude Code only restriction: /v1/chat/completions is never a Claude Code
 	// endpoint. With a fallback group the request continues and account selection
@@ -198,6 +206,10 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, selectionSessionHash, reqModel, fs.FailedAccountIDs, "", int64(0))
 		if err != nil {
+			if status, code, message, local := service.AnthropicCompatErrorDetails(err); local {
+				h.chatCompletionsErrorResponse(c, status, code, message)
+				return
+			}
 			if failoverClientGone(c) {
 				recordSelectionExhausted(c.Request.Context())
 				reqLog.Info("gateway.cc.account_select_aborted_client_disconnected", zap.Error(err))
@@ -329,6 +341,10 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 
 		if err != nil {
+			if service.IsAnthropicCompatCandidateError(err) {
+				fs.FailedAccountIDs[account.ID] = struct{}{}
+				continue
+			}
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
 				if service.OpenAICompactKeepaliveAdjustedWrittenSize(c) != writerSizeBeforeForward {

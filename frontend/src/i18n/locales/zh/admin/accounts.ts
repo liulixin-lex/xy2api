@@ -1342,6 +1342,13 @@ export default {
         noResponseBody: '服务器未返回响应体'
       },
       anthropic: {
+        diagnosticAccount: '实际目标账号：{id}（固定账号，不使用备用账号）',
+        diagnosticOrdinary: '测试口径：普通客户端请求，经兼容适配；此结果仅覆盖本次模型与文本请求。',
+        diagnosticLegacy: '测试口径：旧版 CLI 形态连通性测试，不作为普通客户端兼容验收。',
+        compatibility: 'Claude Code 请求兼容',
+        compatibilityDesc: '为要求 Claude Code 形态的 Anthropic API Key 上游适配普通请求，保留业务 system 与工具参数。',
+        compatibilityCapabilities: '范围：claude-opus-4-8、claude-opus-5-5。计数依赖上游支持；Chat 不保证签名思考续轮，thread/compact 不受支持。',
+        compatibilityConflict: '请先关闭自动透传；自定义请求头和 Beta 策略须与兼容配置一致。',
         apiKeyPassthrough: '自动透传（仅替换认证）',
         apiKeyPassthroughDesc:
           '仅对 Anthropic API Key 生效。开启后，messages/count_tokens 请求将透传上游并仅替换认证，保留计费/并发/审计及必要安全过滤；关闭即可回滚到现有兼容链路。',

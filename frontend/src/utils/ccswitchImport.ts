@@ -1,6 +1,6 @@
 import type { GroupPlatform } from '@/types'
 
-export const OPENAI_CC_SWITCH_CODEX_MODEL = 'gpt-5.5'
+export const OPENAI_CC_SWITCH_CODEX_MODEL = 'gpt-5.6-sol'
 export const GROK_CC_SWITCH_MODEL = 'grok-4.5'
 
 export type CcSwitchClientType = 'claude' | 'gemini'
@@ -18,6 +18,46 @@ export interface CcSwitchImportDeeplinkInput {
   providerName: string
   apiKey: string
   usageScript: string
+  /** Endpoint the user confirmed; imported as typed. Blank uses the platform default. */
+  endpoint?: string
+  /** Model the user confirmed; only apps with a default model take one. Blank uses that default. */
+  model?: string
+}
+
+/** What the import panel hands back once the user confirms. */
+export interface CcSwitchImportOptions {
+  clientType: CcSwitchClientType
+  providerName: string
+  endpoint: string
+  model?: string
+}
+
+/** Product names CC Switch shows for the `app` values this site imports. */
+export const CC_SWITCH_APP_LABELS: Record<string, string> = {
+  claude: 'Claude Code',
+  codex: 'Codex',
+  gemini: 'Gemini CLI',
+  grokbuild: 'Grok Build'
+}
+
+/**
+ * CC Switch names the provider after this value and does not deduplicate, so
+ * the key name is appended to keep several imported keys apart.
+ */
+export function defaultCcSwitchProviderName(siteName: string, keyName?: string | null): string {
+  const site = siteName.trim()
+  const key = (keyName ?? '').trim()
+  if (!key || key === site) return site
+  return site ? `${site} · ${key}` : key
+}
+
+export function isValidCcSwitchEndpoint(value: string): boolean {
+  try {
+    const url = new URL(value.trim())
+    return (url.protocol === 'https:' || url.protocol === 'http:') && url.hostname !== ''
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -94,12 +134,14 @@ export function resolveCcSwitchImportConfig(
 
 export function buildCcSwitchImportDeeplink(input: CcSwitchImportDeeplinkInput): string {
   const config = resolveCcSwitchImportConfig(input.platform, input.clientType, input.baseUrl)
+  const endpoint = input.endpoint?.trim() || config.endpoint
+  const model = config.model ? input.model?.trim() || config.model : undefined
   const entries: [string, string][] = [
     ['resource', 'provider'],
     ['app', config.app],
     ['name', input.providerName],
     ['homepage', input.baseUrl],
-    ['endpoint', config.endpoint],
+    ['endpoint', endpoint],
     ['apiKey', input.apiKey],
     ['configFormat', 'json'],
     ['usageEnabled', 'true'],
@@ -107,8 +149,8 @@ export function buildCcSwitchImportDeeplink(input: CcSwitchImportDeeplinkInput):
     ['usageAutoInterval', '30']
   ]
 
-  if (config.model) {
-    entries.splice(2, 0, ['model', config.model])
+  if (model) {
+    entries.splice(2, 0, ['model', model])
   }
 
   return `ccswitch://v1/import?${new URLSearchParams(entries).toString()}`

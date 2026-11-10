@@ -2155,6 +2155,31 @@
         </template>
       </section>
 
+      <div
+        v-if="account?.platform === 'anthropic' && account?.type === 'apikey'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+        data-testid="anthropic-compat-section"
+      >
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <label for="anthropic-compat-toggle" class="input-label mb-0">{{ t('admin.accounts.anthropic.compatibility') }}</label>
+            <p id="anthropic-compat-description" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.anthropic.compatibilityDesc') }}
+            </p>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.anthropic.compatibilityCapabilities') }}</p>
+            <p v-if="anthropicPassthroughEnabled" class="mt-1 text-xs text-amber-700 dark:text-amber-400">{{ t('admin.accounts.anthropic.compatibilityConflict') }}</p>
+          </div>
+          <Toggle
+            id="anthropic-compat-toggle"
+            v-model="anthropicCompatibilityEnabled"
+            :disabled="anthropicPassthroughEnabled"
+            aria-describedby="anthropic-compat-description"
+            :aria-label="t('admin.accounts.anthropic.compatibility')"
+            data-testid="anthropic-compat-toggle"
+          />
+        </div>
+      </div>
+
       <!-- Anthropic API Key 自动透传开关 -->
       <div
         v-if="account?.platform === 'anthropic' && account?.type === 'apikey'"
@@ -2169,6 +2194,7 @@
           </div>
           <button
             type="button"
+            :disabled="anthropicCompatibilityEnabled"
             @click="anthropicPassthroughEnabled = !anthropicPassthroughEnabled"
             :class="[
               'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
@@ -3825,6 +3851,7 @@ const codexFingerprintMode = ref<CodexFingerprintMode>('off')
 type CodexImageToolMode = 'inherit' | 'enabled' | 'disabled' | 'block'
 const codexImageToolMode = ref<CodexImageToolMode>('inherit')
 type AnthropicAPIKeyAuthScheme = 'x_api_key' | 'authorization_bearer'
+const anthropicCompatibilityEnabled = ref(false)
 const anthropicPassthroughEnabled = ref(false)
 const anthropicAPIKeyAuthScheme = ref<AnthropicAPIKeyAuthScheme>('x_api_key')
 const webSearchEmulationMode = ref('default')
@@ -4314,6 +4341,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   codexCLIOnlyAppServerEnabled.value = false
   codexFingerprintMode.value = 'off'
   codexImageToolMode.value = 'inherit'
+  anthropicCompatibilityEnabled.value = false
   anthropicPassthroughEnabled.value = false
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
   webSearchEmulationMode.value = 'default'
@@ -4379,6 +4407,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     }
   }
   if (newAccount.platform === 'anthropic' && newAccount.type === 'apikey') {
+    anthropicCompatibilityEnabled.value = extra?.anthropic_compat_profile === 'claude_code_v1'
     anthropicPassthroughEnabled.value = extra?.anthropic_passthrough === true
     anthropicAPIKeyAuthScheme.value = extra?.anthropic_apikey_auth_scheme === 'authorization_bearer'
       ? 'authorization_bearer'
@@ -5788,6 +5817,7 @@ const handleSubmit = async () => {
     if (props.account.platform === 'anthropic' && props.account.type === 'apikey') {
       const currentExtra = (updatePayload.extra as Record<string, unknown>) || (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }
+      newExtra.anthropic_compat_profile = anthropicCompatibilityEnabled.value ? 'claude_code_v1' : 'off'
       if (anthropicPassthroughEnabled.value) {
         newExtra.anthropic_passthrough = true
       } else {

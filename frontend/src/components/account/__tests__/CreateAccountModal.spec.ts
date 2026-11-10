@@ -950,3 +950,19 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(credentials).not.toHaveProperty('newapi_user_id')
   })
 })
+
+describe('CreateAccountModal Claude Code compatibility', () => {
+  it.each([false, true])('creates an explicit profile (enabled=%s)', async (enabled) => {
+    createAccountMock.mockReset().mockResolvedValue({ id: 42, platform: 'anthropic', type: 'apikey' })
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'admin.accounts.claudeConsole')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('compatibility account')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('fixture')
+    if (enabled) await wrapper.get('[data-testid="anthropic-compat-toggle"]').trigger('click')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra?.anthropic_compat_profile).toBe(enabled ? 'claude_code_v1' : 'off')
+    wrapper.unmount()
+  })
+})
