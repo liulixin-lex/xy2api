@@ -4468,6 +4468,18 @@
     {
       "path": "backend/internal/handler/gateway_handler.go",
       "value": "classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, parsedReq.Model, parsedReq.Model, platform)"
+    },
+    {
+      "path": "backend/internal/handler/openai_embeddings.go",
+      "value": "classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, forwardModel, reqModel, service.PlatformOpenAI)"
+    },
+    {
+      "path": "backend/internal/handler/openai_images.go",
+      "value": "classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, routingModel, clientRequestModel, service.PlatformOpenAI)"
+    },
+    {
+      "path": "backend/internal/handler/grok_media.go",
+      "value": "classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, routingModel, requestModel, platform)"
     }
   ],
   "forbidden_module_paths": [
