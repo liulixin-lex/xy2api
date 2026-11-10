@@ -137,7 +137,6 @@ jobs:
         run: |
           bash -n deploy/install.sh deploy/docker-deploy.sh
           for test in deploy/tests/*-test.sh; do
-            case "$test" in *apple-container-test.sh) continue ;; esac # macOS only
             echo "::group::$test"
             bash "$test"
             echo "::endgroup::"

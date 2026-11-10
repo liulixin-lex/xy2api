@@ -2,237 +2,87 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
-      tag:
-        description: 'Existing tag to release (for example v0.0.2)'
+      ref:
+        description: Tag to release (for example v0.6.0); any branch or tag for a dry run
         required: true
-        type: string
-      simple_release:
-        description: 'Only build the x86_64 GHCR image'
-        required: false
+      dry_run:
+        description: Build binaries and the image but publish nothing
         type: boolean
-        default: false
-
-env:
-  SIMPLE_RELEASE: ${{ github.event.inputs.simple_release == 'true' || vars.SIMPLE_RELEASE == 'true' }}
+        default: true
 
 permissions:
   contents: write
   packages: write
 
-jobs:
-  verify-version:
-    runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.version.outputs.tag }}
-      product_version: ${{ steps.version.outputs.product_version }}
-      sub2api_compat_version: ${{ steps.version.outputs.sub2api_compat_version }}
-    steps:
-      - name: Checkout release tag
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          ref: ${{ github.event.inputs.tag || github.ref }}
+concurrency:
+  group: release
+  cancel-in-progress: false
 
-      - name: Verify immutable source versions
-        id: version
-        env:
-          TARGET_REF: ${{ github.event.inputs.tag || github.ref }}
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      REF: ${{ inputs.ref || github.ref_name }}
+      DRY_RUN: ${{ inputs.dry_run || false }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ env.REF }}
+          fetch-depth: 0
+
+      - name: Check tag, version and release notes
         run: |
           set -euo pipefail
-          tag="${TARGET_REF#refs/tags/}"
-          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'; then
-            echo "Unsupported release tag: $tag" >&2
-            exit 1
+          version=$(tr -d '\r\n' < backend/cmd/server/VERSION)
+          if [ "$DRY_RUN" != "true" ]; then
+            if ! [[ "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+              echo "::error::Unsupported tag: $REF"; exit 1
+            fi
+            if [ "v$version" != "$REF" ]; then
+              echo "::error::backend/cmd/server/VERSION is $version but the tag is $REF"; exit 1
+            fi
           fi
+          python3 tools/ci/changelog_section.py "$version" > "$RUNNER_TEMP/release-notes.md"
+          echo "GITHUB_REPO_OWNER_LOWER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
 
-          tag_commit=$(git rev-parse "$tag^{commit}")
-          checkout_commit=$(git rev-parse HEAD)
-          if [ "$tag_commit" != "$checkout_commit" ]; then
-            echo "Checkout $checkout_commit does not match $tag at $tag_commit" >&2
-            exit 1
-          fi
-
-          product_version=$(tr -d '\r\n' < backend/cmd/server/VERSION)
-          sub2api_compat_version=$(tr -d '\r\n' < backend/cmd/server/SUB2API_COMPAT_VERSION)
-          expected_product_version="${tag#v}"
-          if [ "$product_version" != "$expected_product_version" ]; then
-            echo "Tag $tag requires VERSION=$expected_product_version, found $product_version" >&2
-            exit 1
-          fi
-          if ! printf '%s' "$sub2api_compat_version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "Invalid SUB2API_COMPAT_VERSION: $sub2api_compat_version" >&2
-            exit 1
-          fi
-
-          {
-            echo "tag=$tag"
-            echo "product_version=$product_version"
-            echo "sub2api_compat_version=$sub2api_compat_version"
-          } >> "$GITHUB_OUTPUT"
-
-  build-frontend:
-    needs: verify-version
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout release tag
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.verify-version.outputs.tag }}
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: 9
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
-          node-version: '24'
-          cache: 'pnpm'
+          node-version: "24"
+          cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
-
-      - name: Install dependencies
-        working-directory: frontend
-        run: pnpm install --frozen-lockfile
-
       - name: Build frontend
         working-directory: frontend
         env:
           NODE_OPTIONS: --max-old-space-size=4096
-        run: pnpm run build
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
 
-      - name: Upload frontend artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: frontend-dist
-          path: backend/internal/web/dist/
-          retention-days: 1
-
-  release:
-    needs: [verify-version, build-frontend]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout release tag
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          ref: ${{ needs.verify-version.outputs.tag }}
-
-      - name: Download frontend artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: frontend-dist
-          path: backend/internal/web/dist/
-
-      - name: Setup Go
-        uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: backend/go.mod
-          check-latest: false
           cache-dependency-path: backend/go.sum
-
-      - name: Verify Go version
-        run: go version | grep -q 'go1.27.3'
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to DockerHub
-        if: ${{ env.DOCKERHUB_USERNAME != '' }}
-        uses: docker/login-action@v3
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        if: env.DRY_RUN != 'true'
         with:
           registry: ghcr.io
-          username: ${{ github.repository_owner }}
+          username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Read annotated tag message
-        id: tag_message
-        env:
-          TAG_NAME: ${{ needs.verify-version.outputs.tag }}
-        run: |
-          set -euo pipefail
-          git fetch --tags --force
-          tag_message=$(git tag -l --format='%(contents:body)' "$TAG_NAME")
-          {
-            echo 'message<<EOF'
-            echo "$tag_message"
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Set lowercase owner for GHCR
-        id: lowercase
-        run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
-
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v7
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
-          version: '~> v2'
-          args: release --clean --skip=validate ${{ env.SIMPLE_RELEASE == 'true' && '--config=.goreleaser.simple.yaml' || '' }}
+          version: v2.20.0
+          args: >-
+            release --clean
+            --release-notes=${{ runner.temp }}/release-notes.md
+            ${{ env.DRY_RUN == 'true' && '--snapshot' || '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG_MESSAGE: ${{ steps.tag_message.outputs.message }}
-          GITHUB_REPO_OWNER: ${{ github.repository_owner }}
-          GITHUB_REPO_OWNER_LOWER: ${{ steps.lowercase.outputs.owner }}
-          GITHUB_REPO_NAME: ${{ github.event.repository.name }}
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME || 'skip' }}
-
-      - name: Update DockerHub description
-        if: ${{ env.SIMPLE_RELEASE != 'true' && env.DOCKERHUB_USERNAME != '' }}
-        uses: peter-evans/dockerhub-description@v5
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: ${{ secrets.DOCKERHUB_USERNAME }}/xy2api
-          short-description: 'XY2API - AI API Gateway Platform'
-          readme-filepath: ./deploy/DOCKER.md
-
-      - name: Send Telegram notification
-        if: ${{ env.SIMPLE_RELEASE != 'true' }}
-        continue-on-error: true
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          TAG_NAME: ${{ needs.verify-version.outputs.tag }}
-          TAG_MESSAGE: ${{ steps.tag_message.outputs.message }}
-          REPOSITORY: ${{ github.repository }}
-          SUB2API_COMPAT_VERSION: ${{ needs.verify-version.outputs.sub2api_compat_version }}
-        run: |
-          set -euo pipefail
-          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
-            echo 'Telegram credentials are not configured; skipping notification.'
-            exit 0
-          fi
-
-          version="${TAG_NAME#v}"
-          repository_lower=$(printf '%s' "$REPOSITORY" | tr '[:upper:]' '[:lower:]')
-          ghcr_image="ghcr.io/$repository_lower"
-          release_notes="$TAG_MESSAGE"
-          if [ ${#release_notes} -gt 3500 ]; then
-            release_notes="${release_notes:0:3500}..."
-          fi
-
-          message=$(printf 'XY2API %s released\nSub2API compatibility: %s\n\n%s\n\n' "$version" "$SUB2API_COMPAT_VERSION" "$release_notes")
-          if [ -n "$DOCKERHUB_USERNAME" ]; then
-            message="${message}docker pull $DOCKERHUB_USERNAME/xy2api:$version"$'\n'
-          fi
-          message="${message}docker pull $ghcr_image:$version"$'\n'"$GITHUB_SERVER_URL/$REPOSITORY/releases/tag/$TAG_NAME"
-
-          curl --fail --silent --show-error -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" -H 'Content-Type: application/json' -d "$(jq -n --arg chat_id "$TELEGRAM_CHAT_ID" --arg text "$message" '{chat_id: $chat_id, text: $text, disable_web_page_preview: true}')"
