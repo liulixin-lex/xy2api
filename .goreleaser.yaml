@@ -1,10 +1,8 @@
+# GoReleaser configuration for tagged releases (see .github/workflows/release.yml).
+# Release notes come from the matching CHANGELOG.md section via --release-notes.
 version: 2
 
 project_name: xy2api
-
-before:
-  hooks:
-    - go mod tidy -C backend
 
 builds:
   - id: xy2api
@@ -13,203 +11,91 @@ builds:
     binary: xy2api
     flags:
       - -tags=embed
+      - -trimpath
     env:
       - CGO_ENABLED=0
-    goos:
-      - linux
-      - windows
-      - darwin
-    goarch:
-      - amd64
-      - arm64
+    # Official targets: Linux x86-64, Windows x86-64, macOS Apple silicon.
+    goos: [linux, windows, darwin]
+    goarch: [amd64, arm64]
     ignore:
+      - goos: linux
+        goarch: arm64
       - goos: windows
         goarch: arm64
+      - goos: darwin
+        goarch: amd64
     ldflags:
       - -s -w
-      - -X main.Commit={{.Commit}}
-      - -X main.Date={{.Date}}
+      - -X main.Commit={{ .Commit }}
+      - -X main.Date={{ .Date }}
       - -X main.BuildType=release
 
 archives:
   - id: default
-    format: tar.gz
-    name_template: >-
-      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
-        format: zip
+        formats: [zip]
     files:
-      - LICENSE*
-      - README*
-      - deploy/*
+      - LICENSE
+      - README*.md
+      - CHANGELOG.md
+      # Deployment files (scripts, Compose files, configuration examples).
+      - deploy/README.md
+      - deploy/Caddyfile
+      - deploy/.env.example
+      - deploy/*.example
+      - deploy/*.yaml
+      - deploy/*.yml
+      - deploy/*.sh
+      - deploy/*.sql
+      - deploy/*.service
+      - deploy/*.tmpl
+      # Fallback model pricing, loaded from ./resources/model-pricing at runtime.
+      - src: backend/resources/model-pricing/*
+        dst: resources/model-pricing
+        strip_parent: true
 
 checksum:
-  name_template: 'checksums.txt'
+  name_template: checksums.txt
   algorithm: sha256
 
 changelog:
-  # 禁用自动 changelog，完全使用 tag 消息
   disable: true
 
-# Docker images
-dockers:
-  # DockerHub images (skipped if DOCKERHUB_USERNAME is 'skip')
-  - id: amd64
-    goos: linux
-    goarch: amd64
-    skip_push: '{{ if eq .Env.DOCKERHUB_USERNAME "skip" }}true{{ else }}false{{ end }}'
-    image_templates:
-      - "{{ .Env.DOCKERHUB_USERNAME }}/xy2api:{{ .Version }}-amd64"
+dockers_v2:
+  - id: ghcr
+    ids: [xy2api]
     dockerfile: Dockerfile.goreleaser
-    use: buildx
+    platforms: [linux/amd64]
+    images:
+      - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api"
+    # Moving tags are only published for final releases.
+    tags:
+      - "{{ .Version }}"
+      - "{{ if not .Prerelease }}{{ .Major }}.{{ .Minor }}{{ end }}"
+      - "{{ if not .Prerelease }}{{ .Major }}{{ end }}"
+      - "{{ if not .Prerelease }}latest{{ end }}"
     extra_files:
       - deploy/docker-entrypoint.sh
       - backend/resources
-    build_flag_templates:
-      - "--platform=linux/amd64"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
-      - "--label=org.opencontainers.image.revision={{ .Commit }}"
-
-  - id: arm64
-    goos: linux
-    goarch: arm64
-    skip_push: '{{ if eq .Env.DOCKERHUB_USERNAME "skip" }}true{{ else }}false{{ end }}'
-    image_templates:
-      - "{{ .Env.DOCKERHUB_USERNAME }}/xy2api:{{ .Version }}-arm64"
-    dockerfile: Dockerfile.goreleaser
-    use: buildx
-    extra_files:
-      - deploy/docker-entrypoint.sh
-      - backend/resources
-    build_flag_templates:
-      - "--platform=linux/arm64"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
-      - "--label=org.opencontainers.image.revision={{ .Commit }}"
-
-  # GHCR images (owner must be lowercase)
-  - id: ghcr-amd64
-    goos: linux
-    goarch: amd64
-    image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:{{ .Version }}-amd64"
-    dockerfile: Dockerfile.goreleaser
-    use: buildx
-    extra_files:
-      - deploy/docker-entrypoint.sh
-      - backend/resources
-    build_flag_templates:
-      - "--platform=linux/amd64"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
-      - "--label=org.opencontainers.image.revision={{ .Commit }}"
-      - "--label=org.opencontainers.image.source=https://github.com/{{ .Env.GITHUB_REPO_OWNER }}/{{ .Env.GITHUB_REPO_NAME }}"
-
-  - id: ghcr-arm64
-    goos: linux
-    goarch: arm64
-    image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:{{ .Version }}-arm64"
-    dockerfile: Dockerfile.goreleaser
-    use: buildx
-    extra_files:
-      - deploy/docker-entrypoint.sh
-      - backend/resources
-    build_flag_templates:
-      - "--platform=linux/arm64"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
-      - "--label=org.opencontainers.image.revision={{ .Commit }}"
-      - "--label=org.opencontainers.image.source=https://github.com/{{ .Env.GITHUB_REPO_OWNER }}/{{ .Env.GITHUB_REPO_NAME }}"
-
-# Docker manifests for multi-arch support
-docker_manifests:
-  # DockerHub manifests (skipped if DOCKERHUB_USERNAME is 'skip')
-  - name_template: "{{ .Env.DOCKERHUB_USERNAME }}/xy2api:{{ .Version }}"
-    skip_push: '{{ if eq .Env.DOCKERHUB_USERNAME "skip" }}true{{ else }}false{{ end }}'
-    image_templates:
-      - "{{ .Env.DOCKERHUB_USERNAME }}/xy2api:{{ .Version }}-amd64"
-      - "{{ .Env.DOCKERHUB_USERNAME }}/xy2api:{{ .Version }}-arm64"
-
-  - name_template: "{{ .Env.DOCKERHUB_USERNAME }}/xy2api:latest"
-    skip_push: '{{ if eq .Env.DOCKERHUB_USERNAME "skip" }}true{{ else }}auto{{ end }}'
-    image_templates:
-      - "{{ .Env.DOCKERHUB_USERNAME }}/xy2api:{{ .Version }}-amd64"
-      - "{{ .Env.DOCKERHUB_USERNAME }}/xy2api:{{ .Version }}-arm64"
-
-  - name_template: "{{ .Env.DOCKERHUB_USERNAME }}/xy2api:{{ .Major }}.{{ .Minor }}"
-    skip_push: '{{ if eq .Env.DOCKERHUB_USERNAME "skip" }}true{{ else }}auto{{ end }}'
-    image_templates:
-      - "{{ .Env.DOCKERHUB_USERNAME }}/xy2api:{{ .Version }}-amd64"
-      - "{{ .Env.DOCKERHUB_USERNAME }}/xy2api:{{ .Version }}-arm64"
-
-  - name_template: "{{ .Env.DOCKERHUB_USERNAME }}/xy2api:{{ .Major }}"
-    skip_push: '{{ if eq .Env.DOCKERHUB_USERNAME "skip" }}true{{ else }}auto{{ end }}'
-    image_templates:
-      - "{{ .Env.DOCKERHUB_USERNAME }}/xy2api:{{ .Version }}-amd64"
-      - "{{ .Env.DOCKERHUB_USERNAME }}/xy2api:{{ .Version }}-arm64"
-
-  # GHCR manifests (owner must be lowercase)
-  - name_template: "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:{{ .Version }}"
-    image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:{{ .Version }}-amd64"
-      - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:{{ .Version }}-arm64"
-
-  - name_template: "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:latest"
-    skip_push: auto
-    image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:{{ .Version }}-amd64"
-      - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:{{ .Version }}-arm64"
-
-  - name_template: "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:{{ .Major }}.{{ .Minor }}"
-    skip_push: auto
-    image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:{{ .Version }}-amd64"
-      - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:{{ .Version }}-arm64"
-
-  - name_template: "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:{{ .Major }}"
-    skip_push: auto
-    image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:{{ .Version }}-amd64"
-      - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:{{ .Version }}-arm64"
+    labels:
+      org.opencontainers.image.title: XY2API
+      org.opencontainers.image.description: AI API gateway for subscription and API-key accounts
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.source: "https://github.com/{{ .Env.GITHUB_REPOSITORY }}"
+      org.opencontainers.image.licenses: LGPL-3.0-or-later
 
 release:
-  github:
-    owner: "{{ .Env.GITHUB_REPO_OWNER }}"
-    name: "{{ .Env.GITHUB_REPO_NAME }}"
   draft: false
   prerelease: auto
-  name_template: "XY2API {{.Version}}"
-  # 完全使用 tag 消息作为 release 内容（通过环境变量传入）
-  header: |
-    > AI API Gateway Platform - 将 AI 订阅配额分发和管理
-
-    {{ .Env.TAG_MESSAGE }}
-
+  name_template: "XY2API {{ .Version }}"
   footer: |
 
     ---
 
-    ## 📥 Installation
+    **Install** · [Docker](https://github.com/{{ .Env.GITHUB_REPOSITORY }}/blob/main/docs/deployment/docker.md) `docker pull ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:{{ .Version }}` · [Linux script](https://github.com/{{ .Env.GITHUB_REPOSITORY }}/blob/main/docs/deployment/binary.md) · binaries for linux/amd64, windows/amd64 and darwin/arm64 below.
 
-    **Docker:**
-    ```bash
-    {{ if ne .Env.DOCKERHUB_USERNAME "skip" -}}
-    # Docker Hub
-    docker pull {{ .Env.DOCKERHUB_USERNAME }}/xy2api:{{ .Version }}
-
-    {{ end -}}
-    # GitHub Container Registry
-    docker pull ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/xy2api:{{ .Version }}
-    ```
-
-    **One-line install (Linux):**
-    ```bash
-    curl -sSL https://raw.githubusercontent.com/{{ .Env.GITHUB_REPO_OWNER }}/{{ .Env.GITHUB_REPO_NAME }}/main/deploy/install.sh | sudo bash
-    ```
-
-    **Manual download:**
-    Download the appropriate archive for your platform from the assets below.
-
-    ## 📚 Documentation
-
-    - [GitHub Repository](https://github.com/{{ .Env.GITHUB_REPO_OWNER }}/{{ .Env.GITHUB_REPO_NAME }})
-    - [Installation Guide](https://github.com/{{ .Env.GITHUB_REPO_OWNER }}/{{ .Env.GITHUB_REPO_NAME }}/blob/main/deploy/README.md)
+    **Full changelog**: [{{ .PreviousTag }}...{{ .Tag }}](https://github.com/{{ .Env.GITHUB_REPOSITORY }}/compare/{{ .PreviousTag }}...{{ .Tag }})

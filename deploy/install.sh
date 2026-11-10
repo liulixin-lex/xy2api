@@ -75,6 +75,7 @@ declare -A MSG_ZH=(
     ["failed_get_version"]="获取最新版本失败"
     ["downloading"]="正在下载"
     ["download_failed"]="下载失败"
+    ["platform_not_published"]="该版本没有此平台的安装包。自 0.6.0 起官方只发布 linux_amd64、windows_amd64、darwin_arm64；其他平台请使用 Docker（linux/amd64）或从源码构建"
     ["verifying_checksum"]="正在校验文件..."
     ["checksum_verified"]="校验通过"
     ["checksum_failed"]="校验失败"
@@ -200,6 +201,7 @@ declare -A MSG_EN=(
     ["failed_get_version"]="Failed to get latest version"
     ["downloading"]="Downloading"
     ["download_failed"]="Download failed"
+    ["platform_not_published"]="This release has no package for this platform. Since 0.6.0 official builds cover linux_amd64, windows_amd64 and darwin_arm64 only; use Docker (linux/amd64) or build from source"
     ["verifying_checksum"]="Verifying checksum..."
     ["checksum_verified"]="Checksum verified"
     ["checksum_failed"]="Checksum verification failed"
@@ -628,9 +630,15 @@ download_and_extract() {
     TEMP_DIR=$(mktemp -d)
     trap "rm -rf $TEMP_DIR" EXIT
 
-    # Download archive
-    if ! curl -sL "$download_url" -o "$TEMP_DIR/$archive_name"; then
-        print_error "$(msg 'download_failed')"
+    # Download archive (an HTTP error page must never be treated as the archive)
+    local http_code
+    http_code=$(curl -sL "$download_url" -w '%{http_code}' -o "$TEMP_DIR/$archive_name") || http_code=000
+    if [ "$http_code" = "404" ]; then
+        print_error "$(msg 'platform_not_published'): ${OS}_${ARCH} @ ${LATEST_VERSION}"
+        exit 1
+    fi
+    if [ "$http_code" != "200" ]; then
+        print_error "$(msg 'download_failed') (HTTP $http_code)"
         exit 1
     fi
 
@@ -665,6 +673,12 @@ download_and_extract() {
     # Copy deploy files if they exist in the archive
     if [ -d "$TEMP_DIR/deploy" ]; then
         cp -r "$TEMP_DIR/deploy/"* "$INSTALL_DIR/" 2>/dev/null || true
+    fi
+
+    # Bundled fallback data (model pricing), read from ./resources at runtime
+    if [ -d "$TEMP_DIR/resources" ]; then
+        rm -rf "$INSTALL_DIR/resources"
+        cp -r "$TEMP_DIR/resources" "$INSTALL_DIR/resources"
     fi
 
     print_success "$(msg 'binary_installed') $INSTALL_DIR/xy2api"
