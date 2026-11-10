@@ -225,7 +225,7 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 			iqSettings = &domain.IQTargetsPatch{Targets: settings}
 		}
 		// Learned capabilities belong to this account identity, not an export.
-		extra := service.RedactOpenAICodexTicketExtra(acc.Extra)
+		extra := service.RedactAnthropicCompatExtra(service.RedactOpenAICodexTicketExtra(acc.Extra))
 		if limits, ok := extra["model_rate_limits"].(map[string]any); ok {
 			for key := range limits {
 				if domain.IsIQGateKey(key) {

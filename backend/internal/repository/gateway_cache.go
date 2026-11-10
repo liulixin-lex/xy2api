@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/ent"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/redis/go-redis/v9"
 )
@@ -19,11 +20,39 @@ const openAIResponsesSessionWindowPrefix = "openai_responses_session_window:"
 const liveCallPrefix = "live:call:"
 
 type gatewayCache struct {
-	rdb *redis.Client
+	rdb                         *redis.Client
+	anthropicCompatSeed         []byte
+	anthropicCompatPreviousSeed []byte
 }
 
 func NewGatewayCache(rdb *redis.Client) service.GatewayCache {
 	return &gatewayCache{rdb: rdb}
+}
+
+const securitySecretKeyAnthropicCompatProvenanceV1 = "anthropic_compat_provenance_v1"
+const securitySecretKeyAnthropicCompatProvenanceV2 = "anthropic_compat_provenance_v2"
+
+// NewGatewayCacheWithManagedProvenance loads one persistent, versioned root at startup.
+// The current v2 root writes new records; v1 remains available for old-record reads.
+func NewGatewayCacheWithManagedProvenance(rdb *redis.Client, client *ent.Client) (service.GatewayCache, error) {
+	if client == nil {
+		return nil, errors.New("nil ent client for Anthropic compatibility provenance")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	seeds := make([][]byte, 0, 2)
+	for _, key := range []string{securitySecretKeyAnthropicCompatProvenanceV2, securitySecretKeyAnthropicCompatProvenanceV1} {
+		encoded, _, err := getOrCreateGeneratedSecuritySecret(ctx, client, key, 32)
+		if err != nil {
+			return nil, fmt.Errorf("ensure Anthropic compatibility provenance root: %w", err)
+		}
+		seed, err := hex.DecodeString(encoded)
+		if err != nil || len(seed) != 32 {
+			return nil, errors.New("invalid persisted Anthropic compatibility provenance root")
+		}
+		seeds = append(seeds, seed)
+	}
+	return &gatewayCache{rdb: rdb, anthropicCompatSeed: seeds[0], anthropicCompatPreviousSeed: seeds[1]}, nil
 }
 
 // buildSessionKey 构建 session key，包含 groupID 实现分组隔离

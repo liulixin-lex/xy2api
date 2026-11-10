@@ -1234,6 +1234,13 @@ export default {
         noResponseBody: 'No response body from server'
       },
       anthropic: {
+        diagnosticAccount: 'Actual target account: {id} (fixed account, no fallback)',
+        diagnosticOrdinary: 'Scope: ordinary-client request through compatibility adaptation; covers this model and text request only.',
+        diagnosticLegacy: 'Scope: legacy CLI-shaped connectivity test; does not validate ordinary-client compatibility.',
+        compatibility: 'Claude Code request compatibility',
+        compatibilityDesc: 'Adapt ordinary requests for Anthropic API Key upstreams that require Claude Code request shape, preserving business system prompts and tool parameters.',
+        compatibilityCapabilities: 'Scope: claude-opus-4-8 and claude-opus-5-5. Token counting requires upstream support. Chat signed-thinking continuation, threads and compact are outside this mode.',
+        compatibilityConflict: 'Disable auto passthrough first. Header overrides and beta policies must agree with the compatibility profile.',
         apiKeyPassthrough: 'Auto passthrough (auth only)',
         apiKeyPassthroughDesc:
           'Only applies to Anthropic API Key accounts. When enabled, messages/count_tokens are forwarded in passthrough mode with auth replacement only, while billing/concurrency/audit and safety filtering are preserved. Disable to roll back immediately.',

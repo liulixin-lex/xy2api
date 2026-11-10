@@ -108,6 +108,9 @@ func sseEventIndex(event map[string]any) (int, bool) {
 // 的 400 不是签名缺失问题，retry 任何 thinking 变形都会破坏「原样回传」契约——直接透传
 // 错误给客户端。详见 thinking_protocol.go。
 func (s *GatewayService) shouldRectifySignatureError(ctx context.Context, account *Account, respBody []byte, mappedModel string) bool {
+	if compatHistoryProtected(ctx) {
+		return false
+	}
 	if !ShouldRectifyThinkingSignatureError(mappedModel) {
 		return false
 	}
@@ -1085,6 +1088,12 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil
 			}
 			if ev.err != nil {
+				if status, code, message, local := AnthropicCompatErrorDetails(ev.err); local {
+					_ = status
+					sendErrorEvent(code, message)
+					MarkResponseCommitted(c)
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, ev.err
+				}
 				if sawTerminalEvent {
 					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil
 				}
@@ -1412,6 +1421,9 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 	}
 
 	captureClaudeCacheRawUsage(ctx, response.Usage)
+	if err := s.commitAnthropicCompatJSON(ctx, compatPlan(c), body); err != nil {
+		return &response.Usage, err
+	}
 
 	// 如果有模型映射，替换响应中的model字段
 	if originalModel != mappedModel {

@@ -1956,3 +1956,22 @@ describe('EditAccountModal OpenAI 自动使用重置卡', () => {
     wrapper.unmount()
   })
 })
+
+
+describe('EditAccountModal Claude Code compatibility', () => {
+  it.each([false, true])('loads and explicitly saves profile (enabled=%s)', async (enabled) => {
+    const account = buildAccount()
+    account.platform = 'anthropic'
+    account.type = 'apikey'
+    account.credentials = { api_key: 'fixture' }
+    account.extra = { anthropic_compat_profile: enabled ? 'claude_code_v1' : 'off' }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    expect(wrapper.get('[data-testid="anthropic-compat-toggle"]').attributes('aria-checked')).toBe(String(enabled))
+    await wrapper.get('[data-testid="anthropic-compat-toggle"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.anthropic_compat_profile).toBe(enabled ? 'off' : 'claude_code_v1')
+    wrapper.unmount()
+  })
+})

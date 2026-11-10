@@ -33,6 +33,9 @@ func (s *GatewayService) SelectAccountForModel(ctx context.Context, groupID *int
 
 // SelectAccountForModelWithExclusions selects an account supporting the requested model while excluding specified accounts.
 func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*Account, error) {
+	if bound, handled, err := s.selectAnthropicCompatBoundAccount(ctx, groupID, requestedModel, excludedIDs); handled {
+		return bound, err
+	}
 	// 优先检查 context 中的强制平台（/antigravity 路由）
 	var platform string
 	forcePlatform, hasForcePlatform := ctx.Value(ctxkey.ForcePlatform).(string)
@@ -99,6 +102,9 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 // metadataUserID: 用于客户端亲和调度，从中提取客户端 ID
 // xy2apiUserID: 系统用户 ID，用于二维亲和调度
 func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, xy2apiUserID int64) (result *AccountSelectionResult, err error) {
+	if bound, handled, err := s.selectAnthropicCompatBoundWithLoad(ctx, groupID, requestedModel, excludedIDs); handled {
+		return bound, err
+	}
 	latencyModel := anthropicLatencyModel(ctx, requestedModel)
 	sessionHash = monitorProbeSessionHash(ctx, sessionHash)
 	// 调试日志：记录调度入口参数
@@ -2674,6 +2680,9 @@ func summarizeSelectionFailureStats(stats selectionFailureStats) string {
 // isModelSupportedByAccountWithContext 根据账户平台检查模型支持（带 context）
 // 对于 Antigravity 平台，会先获取映射后的最终模型名（包括 thinking 后缀）再检查支持
 func (s *GatewayService) isModelSupportedByAccountWithContext(ctx context.Context, account *Account, requestedModel string) bool {
+	if !s.anthropicCompatCandidateEligible(ctx, account, requestedModel) {
+		return false
+	}
 	if source, ok := CompositeRouteSourceFromContext(ctx); ok && source == CompositeRouteSourceAccount {
 		if publicModel, modelOK := RequestedPublicModelFromContext(ctx); modelOK && !explicitModelMappingClaims(*account, publicModel) {
 			return false

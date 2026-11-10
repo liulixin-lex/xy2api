@@ -365,9 +365,10 @@ func TestExportDataExcludesCodexTicketMaterial(t *testing.T) {
 func TestExportDataExcludesLearnedCapabilities(t *testing.T) {
 	router, adminSvc := setupAccountDataRouter()
 	extra := map[string]any{
-		"capability_learned_responses": map[string]any{"fingerprint": "private-identity", "expires_at": "2099-01-01T00:00:00Z"},
-		"capability_learned_chat":      nil,
-		"ordinary":                     "retained",
+		"capability_learned_responses":              map[string]any{"fingerprint": "private-identity", "expires_at": "2099-01-01T00:00:00Z"},
+		"capability_learned_chat":                   nil,
+		service.AnthropicCompatIdentitySeedExtraKey: "managed-compatibility-seed",
+		"ordinary": "retained",
 	}
 	adminSvc.accounts = []service.Account{{ID: 21, Name: "account", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Extra: extra}}
 	rec := httptest.NewRecorder()
@@ -378,6 +379,7 @@ func TestExportDataExcludesLearnedCapabilities(t *testing.T) {
 	require.Len(t, resp.Data.Accounts, 1)
 	require.Equal(t, map[string]any{"ordinary": "retained"}, resp.Data.Accounts[0].Extra)
 	require.NotContains(t, rec.Body.String(), "private-identity")
+	require.NotContains(t, rec.Body.String(), "managed-compatibility-seed")
 	require.Contains(t, extra, "capability_learned_responses")
 	require.Contains(t, extra, "capability_learned_chat")
 }
