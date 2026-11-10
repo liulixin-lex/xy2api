@@ -328,7 +328,7 @@ Build and run from source code for development or customization.
 #### Prerequisites
 
 - Go 1.27.3 (the version in `backend/go.mod`)
-- Node.js 22+
+- Node.js 24 LTS (minimum 22, required by vue-i18n 11)
 - PostgreSQL 15+
 - Redis 7+
 
