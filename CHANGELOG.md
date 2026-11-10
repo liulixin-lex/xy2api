@@ -4,12 +4,17 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-10
+
+本版把仓库整理为面向公众的开源项目：重写文档，精简 CI 与发布流程，官方构建收缩为三个平台。运行时行为与数据库不变。
+
 ### 变更
 
 - 文档按使用场景重新组织到 `docs/`（快速开始、部署、各平台接入、功能指南、API 参考、开发指南），只描述现行行为；README 精简为概览，另提供简体中文版 `README.zh-CN.md`，不再提供日文版。
 - 新增贡献指南、行为准则、支持说明、Issue 与 PR 模板、第三方来源声明，并更新安全策略。
 - Release 说明改为取自本文件对应版本的小节。
 - 管理后台“支付配置说明”的链接指向新的支付文档；旧地址 `docs/PAYMENT.md`、`docs/PAYMENT_CN.md` 保留为跳转页。
+- 从源码构建镜像时，`Dockerfile` 默认改用官方 Go 模块代理与校验服务；需要国内镜像时通过构建参数 `GOPROXY`、`GOSUMDB` 指定。
 
 ### 移除
 
@@ -20,11 +25,12 @@
 ### 修复
 
 - 安装脚本下载失败时不再把 HTTP 错误页当作安装包继续校验；所选版本没有当前平台的安装包时给出明确提示。
+- 二进制发行包附带价格数据兜底文件，安装脚本会把它复制到安装目录；此前二进制部署在远端价格表下载失败时没有本地兜底。
 
 ### 升级说明
 
 - 没有数据库迁移，也没有配置项变化。
-- 在 ARM 服务器、Intel Mac 或 Apple container 上运行的实例无法再通过安装脚本或在线更新升级到本版本及之后的版本。请改用 `linux/amd64` 主机上的 Docker 镜像，或按 [从源码构建](docs/deployment/source.md) 自行编译。
+- 在 ARM 服务器、Intel Mac 或 Apple container 上运行的实例无法再通过安装脚本或在线更新升级到本版本及之后的版本。请改用 `linux/amd64` 主机上的 Docker 镜像，或按[从源码构建](https://github.com/liulixin-lex/xy2api/blob/main/docs/deployment/source.md)自行编译。
 
 ## [0.5.15] - 2026-11-10
 
@@ -1805,7 +1811,8 @@ XY2API 首个独立版本：基于 Sub2API 0.1.184 的代码建立独立的仓�
 - 切换前备份数据库和 Redis；不要让新旧实例长时间同时运行迁移或后台写任务。
 - 切换步骤与兼容边界见 [品牌与迁移兼容边界](https://github.com/liulixin-lex/xy2api/blob/v0.0.1/docs/BRANDING_AND_MIGRATION_COMPATIBILITY.md)。
 
-[Unreleased]: https://github.com/liulixin-lex/xy2api/compare/v0.5.15...HEAD
+[Unreleased]: https://github.com/liulixin-lex/xy2api/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/liulixin-lex/xy2api/compare/v0.5.15...v0.6.0
 [0.5.15]: https://github.com/liulixin-lex/xy2api/compare/v0.5.14...v0.5.15
 [0.5.14]: https://github.com/liulixin-lex/xy2api/compare/v0.5.13...v0.5.14
 [0.5.13]: https://github.com/liulixin-lex/xy2api/compare/v0.5.12...v0.5.13
