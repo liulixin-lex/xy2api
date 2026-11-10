@@ -951,10 +951,10 @@ func TestClassifyOpsLocalModelConfigurationRejection(t *testing.T) {
 		http.StatusNotFound,
 	)
 
-	require.Equal(t, "routing", phase)
+	require.Equal(t, "request", phase)
 	require.True(t, isBusinessLimited)
-	require.Equal(t, "platform", errorOwner)
-	require.Equal(t, "gateway", errorSource)
+	require.Equal(t, "client", errorOwner)
+	require.Equal(t, "client_request", errorSource)
 }
 
 func TestClassifyOpsLocalModelConfigurationOverridesStaleUpstreamMarkers(t *testing.T) {
@@ -969,10 +969,10 @@ func TestClassifyOpsLocalModelConfigurationOverridesStaleUpstreamMarkers(t *test
 
 	phase, limited, owner, source := classifyOpsErrorLog(c, "model_not_found", "unsupported configured model", "", http.StatusNotFound)
 
-	require.Equal(t, "routing", phase)
+	require.Equal(t, "request", phase)
 	require.True(t, limited)
-	require.Equal(t, "platform", owner)
-	require.Equal(t, "gateway", source)
+	require.Equal(t, "client", owner)
+	require.Equal(t, "client_request", source)
 }
 
 func TestClassifyOpsLocalModelConfigurationRequiresMarkerAndReason(t *testing.T) {
@@ -1138,10 +1138,10 @@ func TestOpsErrorLoggerMiddleware_LocalModelConfigurationFields(t *testing.T) {
 	require.JSONEq(t, `{"error":{"type":"model_not_found","message":"Model \"gpt-missing\" is not supported by any configured account in this group"}}`, w.Body.String())
 	job := <-opsErrorLogQueue
 	require.Equal(t, http.StatusNotFound, job.entry.StatusCode)
-	require.Equal(t, "routing", job.entry.ErrorPhase)
+	require.Equal(t, "request", job.entry.ErrorPhase)
 	require.True(t, job.entry.IsBusinessLimited)
-	require.Equal(t, "platform", job.entry.ErrorOwner)
-	require.Equal(t, "gateway", job.entry.ErrorSource)
+	require.Equal(t, "client", job.entry.ErrorOwner)
+	require.Equal(t, "client_request", job.entry.ErrorSource)
 	require.Nil(t, job.entry.AccountID)
 	require.Nil(t, job.entry.UpstreamStatusCode)
 	require.Nil(t, job.entry.UpstreamErrors)
@@ -2177,8 +2177,8 @@ func TestClassifyOpsIngressModelNotAllowedKeepsRequestPhase(t *testing.T) {
 	require.Equal(t, "client_request", errorSource)
 }
 
-// 调度阶段的账号模型映射拒绝（无 ingress 标记）仍归类为 routing。
-func TestClassifyOpsLocalModelConfigurationWithoutIngressMarkStaysRouting(t *testing.T) {
+// 调度阶段确认不支持模型的本地拒绝也归属客户端。
+func TestClassifyOpsLocalModelConfigurationWithoutIngressMarkIsClient(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
@@ -2191,9 +2191,9 @@ func TestClassifyOpsLocalModelConfigurationWithoutIngressMarkStaysRouting(t *tes
 		http.StatusNotFound,
 	)
 
-	require.Equal(t, "routing", phase)
+	require.Equal(t, "request", phase)
 	require.True(t, isBusinessLimited)
-	require.Equal(t, "platform", errorOwner)
+	require.Equal(t, "client", errorOwner)
 }
 
 // 带内错误也可能出现在非流式 2xx 响应体里（如 Gemini generateContent 的 finishReason）：

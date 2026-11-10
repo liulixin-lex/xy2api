@@ -2284,7 +2284,8 @@ func classifyOpsErrorLog(c *gin.Context, errType, message, code string, status i
 	upstreamError := hasOpsUpstreamErrorContext(c)
 	accountAuthFailure := hasOpsAccountAuthFailure(c)
 	if localModelConfiguration && !ingressModelNotAllowed {
-		phase = "routing"
+		// A confirmed local model rejection is a client request error.
+		phase = "request"
 	} else if accountAuthFailure && !routingCapacityLimited {
 		phase = "account_auth"
 	} else if upstreamError && !routingCapacityLimited {

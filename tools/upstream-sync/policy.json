@@ -3811,22 +3811,6 @@
       "value": "func TestCollaborationRestoreErrorLocalTermination"
     },
     {
-      "path": "backend/internal/service/openai_account_runtime_block_fastpath.go",
-      "value": "account.Platform == PlatformOpenAI && isOpenAIStateRejection(responseBody, \"\")"
-    },
-    {
-      "path": "backend/internal/service/ratelimit_service.go",
-      "value": "account.Platform == PlatformOpenAI && isOpenAIStateRejection(responseBody, \"\")"
-    },
-    {
-      "path": "backend/internal/service/openai_gateway_passthrough.go",
-      "value": "if isOpenAIStateRejection(payload, message) {"
-    },
-    {
-      "path": "backend/internal/service/openai_gateway_upstream_errors.go",
-      "value": "if isOpenAIStateRejection(upstreamBody, upstreamMsg) {"
-    },
-    {
       "path": "backend/internal/service/resilience_post_output.go",
       "value": "return isOpenAIStateRejection(payload, message)"
     },
@@ -4419,6 +4403,70 @@
       "value": "return \"UNAVAILABLE\""
     },
     {
+      "path": "backend/internal/service/openai_function_call_output.go",
+      "value": "func isNamedStandaloneFunctionCallOutput(itemType, callID, name any) bool {"
+    },
+    {
+      "path": "backend/internal/service/openai_tool_continuation.go",
+      "value": "!item.IsObject() || isNamedStandaloneFunctionCallOutputJSON(item)"
+    },
+    {
+      "path": "backend/internal/service/openai_responses_input_compat.go",
+      "value": "if callID == \"\" && strings.TrimSpace(firstNonEmptyString(item[\"type\"])) == \"function_call_output\" &&"
+    },
+    {
+      "path": "backend/internal/service/openai_responses_namespace.go",
+      "value": "isNamedStandaloneFunctionCallOutputJSON(item) ||"
+    },
+    {
+      "path": "backend/internal/service/openai_responses_rejected_field_retry.go",
+      "value": "!isNamedStandaloneFunctionCallOutputJSON(item)"
+    },
+    {
+      "path": "backend/internal/service/openai_codex_transform.go",
+      "value": "isCodexToolCallContextItemType(typ) && (!ok || strings.TrimSpace(callID) == \"\")"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_grok_model_input.go",
+      "value": "!ok || isNamedStandaloneFunctionCallOutput(grokStringValue(item[\"type\"]), item[\"call_id\"], item[\"name\"])"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "zap.String(\"fco_call_id_shape\", validation.InvalidCallIDShape)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "zap.String(\"fco_item_index\", index), zap.String(\"fco_bad_item_count\", count)"
+    },
+    {
+      "path": "backend/internal/handler/ops_error_logger.go",
+      "value": "// A confirmed local model rejection is a client request error."
+    },
+    {
+      "path": "backend/internal/handler/openai_chat_completions.go",
+      "value": "classifyOpenAICompatibleNoAccountErrorFromGin(c, h.gatewayService, apiKey, forwardModel, reqModel"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, forwardModel, reqModel, requestPlatform"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler.go",
+      "value": "classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, parsedReq.Model, parsedReq.Model, platform)"
+    },
+    {
+      "path": "backend/internal/handler/openai_embeddings.go",
+      "value": "classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, forwardModel, reqModel, service.PlatformOpenAI)"
+    },
+    {
+      "path": "backend/internal/handler/openai_images.go",
+      "value": "classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, routingModel, clientRequestModel, service.PlatformOpenAI)"
+    },
+    {
+      "path": "backend/internal/handler/grok_media.go",
+      "value": "classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, routingModel, requestModel, platform)"
+    },
+    {
       "path": "backend/internal/handler/gateway_handler.go",
       "value": "h.gatewayService.PrepareAnthropicCompatibility("
     },
@@ -4505,42 +4553,6 @@
     {
       "path": "backend/internal/service/gateway_scheduling.go",
       "value": "s.anthropicCompatCandidateEligible(ctx, account, requestedModel)"
-    },
-    {
-      "path": "backend/internal/service/openai_function_call_output.go",
-      "value": "func isNamedStandaloneFunctionCallOutput(itemType, callID, name any) bool {"
-    },
-    {
-      "path": "backend/internal/service/openai_tool_continuation.go",
-      "value": "!item.IsObject() || isNamedStandaloneFunctionCallOutputJSON(item)"
-    },
-    {
-      "path": "backend/internal/service/openai_responses_input_compat.go",
-      "value": "if callID == \"\" && strings.TrimSpace(firstNonEmptyString(item[\"type\"])) == \"function_call_output\" &&"
-    },
-    {
-      "path": "backend/internal/service/openai_responses_namespace.go",
-      "value": "isNamedStandaloneFunctionCallOutputJSON(item) ||"
-    },
-    {
-      "path": "backend/internal/service/openai_responses_rejected_field_retry.go",
-      "value": "!isNamedStandaloneFunctionCallOutputJSON(item)"
-    },
-    {
-      "path": "backend/internal/service/openai_codex_transform.go",
-      "value": "isCodexToolCallContextItemType(typ) && (!ok || strings.TrimSpace(callID) == \"\")"
-    },
-    {
-      "path": "backend/internal/service/openai_gateway_grok_model_input.go",
-      "value": "!ok || isNamedStandaloneFunctionCallOutput(grokStringValue(item[\"type\"]), item[\"call_id\"], item[\"name\"])"
-    },
-    {
-      "path": "backend/internal/handler/openai_gateway_handler.go",
-      "value": "zap.String(\"fco_call_id_shape\", validation.InvalidCallIDShape)"
-    },
-    {
-      "path": "backend/internal/handler/openai_gateway_handler.go",
-      "value": "zap.String(\"fco_item_index\", index), zap.String(\"fco_bad_item_count\", count)"
     },
     {
       "path": "backend/internal/service/gateway_claude_apikey_selection.go",
@@ -7460,6 +7472,26 @@
       "id": "xy-error-recovery-routing",
       "path": "backend/internal/service/openai_error_classification_followup_test.go",
       "literal": "TestInference404AnthropicEnvelopeRequiresEvidence"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/model_reject_diagnosis_test.go",
+      "literal": "TestModelRejectDiagnosisLocal404IsClient"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/model_reject_diagnosis_test.go",
+      "literal": "TestModelRejectDiagnosisUsesOpenAIForwardModel"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/model_reject_diagnosis_test.go",
+      "literal": "TestModelRejectDiagnosisUsesCountTokensPlatform"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/model_reject_diagnosis_test.go",
+      "literal": "TestModelRejectDiagnosis503BoundariesUnchanged"
     },
     {
       "id": "xy-anthropic-apikey-compat",
