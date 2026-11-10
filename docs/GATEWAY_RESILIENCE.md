@@ -150,6 +150,16 @@ G2b B2 在原生、直通及 Responses→Chat/Messages 兼容转换服务路径�
 
 `response.created` 前被既有过滤器丢弃的无标记空白 delta 仍更新存活计数和 stall 活动时间，但不再计入 semantic 首 token；有 `SSE-Keep-Alive` 标记的保活帧保留原有计时行为。
 
+### 3.1 Responses 具名独立工具输出（0.5.14）
+
+HTTP Responses 入口将精确 `type=function_call_output`、`call_id` 缺失或为 JSON null、`name` 为非空且非全空白字符串的项识别为具名独立输入。这类项无需配对调用，可携带 `namespace=agent` 的额外上下文。空串、全空白、非字符串的 `call_id` 不属于独立输入；缺少有效 name 的项及 custom、MCP、tool-search 等输出也不享受该豁免。入口、namespace 保留与 Grok 使用同一严格判定。OAuth 孤儿清理（含 WS）保持原有较宽的保留条件：具名 FCO 的 call_id 为空串、全空白、非字符串，或 type 带首尾空白时，凡基线会保留的项仍保留；HTTP 已有调用上下文而整体放行的请求也不会在清理阶段多删这些项。
+
+兼容边界保持不变：非空 `previous_response_id` 或包内任意受识别的调用上下文仍使本地关联校验整体放行，不要求本地逐项解析上游保存的 `item_reference`。已有仅含其他输出类型、不含 FCO 的 HTTP 前置门也不扩大。本地不做重复键检测或长度限制；原 JSON 交由上游校验。缺 ID 与缺匹配引用继续返回 400、`invalid_request_error`，message 指明 input 下标、输出类型和无效或缺少的字段；不再宣称 HTTP 不支持 previous_response_id。
+
+独立 FCO 的 name、namespace 和 output 保留：namespace 清理与 OAuth 工具摊平不删除其 namespace，只有上游明确拒绝 `input[N].namespace` 时才沿既有反应式重试删除该字段。Codex 转换只允许调用类型从 item.id 回填 call_id，所有输出类型均禁止这种回填。Grok 不再为具名独立输出按位置猜配对或生成合成 ID，独立项保持原形。OAuth 透传、CN、Chat/Anthropic 桥、WS 和既有 delegation/automation bootstrap 保持各自行为；不新增转 user 消息的降级。目标是否接受原形由目标上游决定，本地放行不承诺上游成功。
+
+`openai.request_validation_failed` 保留 `function_call_output_missing_call_id` 和 `function_call_output_missing_item_reference` 两个 reason。两类拒绝记录 `fco_name_present`、`fco_namespace_present`（字段是否存在，布尔），`fco_item_index`（字符串 `"0"`–`"63"` 或 `"64_plus"`）以及 `fco_bad_item_count`（字符串 `"1"`、`"2"` 或 `"3_plus"`）；定位和计数针对该 reason 的失败项。仅 missing_call_id 记录 `fco_call_id_shape`，值为 missing、null、empty、whitespace、wrong_type；缺引用时 call_id 本身合法，不伪标为缺失。不记录这些字段的原值、output 或正文，放行路径不新增日志。
+
 ## 4. 配置
 
 ### 4.1 入口

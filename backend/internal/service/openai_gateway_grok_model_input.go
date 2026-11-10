@@ -50,6 +50,12 @@ func sanitizeGrokResponsesModelInput(body []byte) ([]byte, error) {
 			continue
 		}
 
+		if isNamedStandaloneFunctionCallOutput(grokStringValue(item["type"]), item["call_id"], item["name"]) {
+			filtered = appendGrokToolOutputImageMessage(filtered, pendingOutputImages)
+			pendingOutputImages = pendingOutputImages[:0]
+			filtered = append(filtered, item)
+			continue
+		}
 		itemType := strings.ToLower(strings.TrimSpace(grokStringValue(item["type"])))
 		role := strings.ToLower(strings.TrimSpace(grokStringValue(item["role"])))
 		if role == "tool" || role == "function" || isGrokReplayOutputType(itemType) {
@@ -394,7 +400,7 @@ func pairGrokReplayCallIDs(items []any) (map[int]string, map[int]string) {
 	}
 	for index, rawItem := range items {
 		item, ok := rawItem.(map[string]any)
-		if !ok {
+		if !ok || isNamedStandaloneFunctionCallOutput(grokStringValue(item["type"]), item["call_id"], item["name"]) {
 			continue
 		}
 		itemType := strings.ToLower(strings.TrimSpace(grokStringValue(item["type"])))
