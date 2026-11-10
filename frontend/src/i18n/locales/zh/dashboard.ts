@@ -302,6 +302,21 @@ export default {
       geminiCli: 'Gemini CLI',
       geminiCliDesc: '导入为 Gemini CLI 配置'
     },
+    ccsImport: {
+      title: '导入到 CC Switch',
+      description: '导入前可以修改下面几项。确认后会打开 CC Switch，并弹出它的导入确认框。',
+      app: '应用',
+      apiKey: 'API 密钥',
+      providerName: '供应商名称',
+      providerNameHint: '显示在 CC Switch 的供应商列表里，导入多个密钥时用来区分。',
+      nameRequired: '请填写供应商名称',
+      endpoint: 'API 端点',
+      endpointDefault: '默认地址',
+      endpointInvalid: '请输入以 http:// 或 https:// 开头的完整地址',
+      model: '模型',
+      modelRequired: '请填写模型',
+      confirm: '导入'
+    },
     // 配额和有效期
     quotaLimit: '额度限制',
     quotaAmount: '额度金额 (USD)',
