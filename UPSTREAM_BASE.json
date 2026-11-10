@@ -217,7 +217,8 @@
     "xy-anthropic-cache-ttl",
     "xy-openai-group-quality-scheduling",
     "xy-converted-tool-cache-markers",
-    "xy-support-chat"
+    "xy-support-chat",
+    "xy-anthropic-apikey-compat"
   ],
   "sync_pr": "https://github.com/liulixin-lex/xy2api/pull/92"
 }

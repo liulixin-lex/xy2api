@@ -21,6 +21,7 @@
 | [`SHARE_SCHEDULING.md`](SHARE_SCHEDULING.md) | 份额调度（0.3.0 起，默认关闭）：层级取账号优先级、权重取负载因子与自适应系数 |
 | [`account-scheduling.md`](account-scheduling.md) | 账号调度：日常开关、原版调度规则与 0.4.0 韧性规则 |
 | [`openai-cache-reliability.md`](openai-cache-reliability.md) | OpenAI 缓存计量与可靠性 |
+| [`ANTHROPIC_APIKEY_COMPAT.md`](ANTHROPIC_APIKEY_COMPAT.md) | Anthropic API Key 的 Claude Code 请求兼容：账号开关、请求语义、签名来源、入口能力及回滚 |
 | [`CLAUDE_CACHE_FALLBACK.md`](CLAUDE_CACHE_FALLBACK.md) | Claude 自动缓存（按分组） |
 | [`ANTHROPIC_CACHE_TTL.md`](ANTHROPIC_CACHE_TTL.md) | Claude 缓存 TTL：管理员默认、Key 偏好、最终请求、计费与迁移 |
 | [`OPENAI_QUALITY_ROUTING.md`](OPENAI_QUALITY_ROUTING.md) | OpenAI 会话质量路由 |
@@ -76,6 +77,7 @@
 
 | 变更 | 内容 | 状态 |
 |---|---|---|
+| [`claude-apikey-compat-20261110`](../openspec/changes/claude-apikey-compat-20261110/) | Anthropic API Key 账号级 Claude Code 请求适配、身份与签名来源保护、计数和诊断 | 已实现并提交 PR #221；默认关闭，自动检查见 PR，不含生产部署 |
 | [`budget-anchor-0512-20261108`](../openspec/changes/budget-anchor-0512-20261108/) | 文本预算EOF锚点、timer plan预算截断归因、时序与真实OpenAI HTTP派出观测；[发布说明](../openspec/changes/budget-anchor-0512-20261108/release-notes.md)、[runbook](../openspec/changes/budget-anchor-0512-20261108/runbook.md) | 0.5.12第一期实施中，尚未发布；依据v3.3与PM修订11，GT/数据库/压测和设计签字待完成 |
 | [`encrypted-routing-20261105`](../openspec/changes/encrypted-routing-20261105/) | 零中断的加密态与路由：空白占位不算输出、Codex 输出前 ping 心跳、流内包装错误帧校验与路由、M3 状态类拒绝同号修复与一次换号、输出前流内 forbidden 软冷却、`resilience.*` 最小计数；[韧性规格](../openspec/changes/encrypted-routing-20261105/specs/gateway-resilience/spec.md) | 基础变更随 0.5.5 发布（PR #201）；0.5.6 已发布（PR #203）；0.5.7 已发布（PR #206）；0.5.8 已发布（PR #210）；0.5.9 已发布（PR #211），包含输出前裸 error 恢复、顶层错误码识别与输出后容量错误码规范化；0.5.10 已候选，让末位兜底优先尝试本会话未暂避的账号；0.5.11 候选修复客户端断开后的账号失败误记，并增加 Claude 5.5 Haiku 的预校验、参数转换与兼容处理，尚未发布 |
 | [`readonly-mcp-20261105`](../openspec/changes/readonly-mcp-20261105/) | 只读 MCP：按当前用户权限查询诊断数据；后端、授权界面和双路代码审查 | 已随0.5.4发布；生产验收待执行 |

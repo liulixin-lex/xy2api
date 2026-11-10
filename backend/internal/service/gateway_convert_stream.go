@@ -115,6 +115,9 @@ func (s *GatewayService) newGatewayConvertStream(c *gin.Context, resp *http.Resp
 		staging: cfg.PreludeStagingOn(), strict: cfg.StrictTerminalOn(),
 		stopCancel: func() bool { return false },
 	}
+	if anthropicCompatObserved(resp) {
+		st.strict = true
+	}
 	st.guarded = st.staging || st.strict
 	if st.guarded && resp.Request != nil {
 		st.firstEvent = firstEventGuardFrom(resp.Request.Context())
@@ -311,7 +314,7 @@ func (st *gatewayConvertStream) onEvent(name, payload string) (gatewayConvertOut
 	}
 	// A stop_reason already ends the message; some compatible upstreams
 	// close the stream without the message_stop that follows it.
-	if event.Type == "message_stop" || (event.Type == "message_delta" && event.Delta != nil && event.Delta.StopReason != "") {
+	if event.Type == "message_stop" || (!anthropicCompatObserved(st.resp) && event.Type == "message_delta" && event.Delta != nil && event.Delta.StopReason != "") {
 		st.sawStop = true
 	}
 	frames := st.hooks.convert(&event, payload, hold)
@@ -358,6 +361,10 @@ func (st *gatewayConvertStream) onErrorEvent(event *apicompat.AnthropicStreamEve
 
 // onEnd handles the end of the upstream: EOF (cause nil) or a read error.
 func (st *gatewayConvertStream) onEnd(cause error) gatewayConvertOutcome {
+	if _, code, message, local := AnthropicCompatErrorDetails(cause); local {
+		st.terminal(gatewayConvertErrorSource("server_error", code, message))
+		return gatewayConvertOutcome{err: cause}
+	}
 	if st.sawStop || st.sawFailure || !st.guarded {
 		if cause != nil && !errors.Is(cause, context.Canceled) && !errors.Is(cause, context.DeadlineExceeded) {
 			logger.L().Warn("gateway convert stream: read error", zap.Error(cause),

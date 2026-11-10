@@ -93,6 +93,14 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	if parsed == nil {
 		return nil, fmt.Errorf("parse request: empty request")
 	}
+	defer func() {
+		writeAnthropicCompatError(c, "messages", err)
+		s.logAnthropicCompatOutcome(ctx, c, account, "messages", err)
+	}()
+	ctx, err = s.beginAnthropicCompatAttempt(ctx, c, account, parsed.Body.Bytes(), "messages")
+	if err != nil {
+		return nil, err
+	}
 	// Account-specific body normalization and cache generation belong to this
 	// attempt. A fresh BodyRef shares immutable bytes without copying the body.
 	attemptParsed := *parsed
@@ -166,6 +174,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	if account.Platform == PlatformAnthropic && c != nil {
 		policy := s.evaluateBetaPolicy(ctx, c.GetHeader("anthropic-beta"), account, parsed.Model)
 		if policy.blockErr != nil {
+			if compatPreservesHistory(c) {
+				return nil, compatCandidateError(compatScope(ctx), compatInvalid("anthropic_compat_configuration_conflict", "Beta policy blocks this compatibility request"))
+			}
 			return nil, policy.blockErr
 		}
 		filterSet := policy.filterSet
@@ -292,8 +303,10 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	}
 
 	// 强制执行 cache_control 块数量限制（最多 4 个）
-	if err := replaceBody(enforceCacheControlLimit(body)); err != nil {
-		return nil, err
+	if !compatPreservesHistory(c) {
+		if err := replaceBody(enforceCacheControlLimit(body)); err != nil {
+			return nil, err
+		}
 	}
 
 	// 应用模型映射；同时供 Claude 判慢键解析复用。
@@ -328,15 +341,19 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	logger.LegacyPrintf("service.gateway", "[Forward] Using account: ID=%d Name=%s Platform=%s Type=%s TLSFingerprint=%v Proxy=%s",
 		account.ID, account.Name, account.Platform, account.Type, tlsProfile, proxyURL)
 	// Pre-filter: strip empty text blocks (including nested in tool_result) to prevent upstream 400.
-	if err := replaceBody(StripEmptyTextBlocks(body)); err != nil {
-		return nil, err
+	if !compatPreservesHistory(c) {
+		if err := replaceBody(StripEmptyTextBlocks(body)); err != nil {
+			return nil, err
+		}
 	}
 	// Pre-filter: strip web-search history blocks the upstream cannot accept
 	// (emulation-synthesized server_tool_use / web_search_tool_result always;
 	// genuine ones additionally for passback-required upstreams). See
 	// FilterWebSearchHistoryBlocks. reqModel 此时已是映射后的模型 ID。
-	if err := replaceBody(FilterWebSearchHistoryBlocks(body, reqModel)); err != nil {
-		return nil, err
+	if !compatPreservesHistory(c) {
+		if err := replaceBody(FilterWebSearchHistoryBlocks(body, reqModel)); err != nil {
+			return nil, err
+		}
 	}
 	// Pre-filter: remove thinking blocks with missing/invalid signatures before forwarding.
 	// Clients (e.g. Claude Code) sometimes send multi-turn conversations where a historical
@@ -348,8 +365,10 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	//
 	// 仅 anthropic-strict 模型族执行此过滤；passback-required 上游 (DeepSeek/Kimi/GLM 等)
 	// 要求历史 thinking block 原样回传，过滤反而制造 400。reqModel 此时已是映射后的模型 ID。
-	if err := replaceBody(FilterThinkingBlocks(body, reqModel)); err != nil {
-		return nil, err
+	if !compatPreservesHistory(c) {
+		if err := replaceBody(FilterThinkingBlocks(body, reqModel)); err != nil {
+			return nil, err
+		}
 	}
 	// Chinese LLM thinking.type 协议差异补正（如 MiniMax 只接受 adaptive；Anthropic-SDK
 	// 客户端默认发 enabled）。仅对 passback-required 上游生效（claude-* 不会进来）。
@@ -853,6 +872,10 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		parsed.OnUpstreamAccepted()
 	}
 
+	if reqStream {
+		s.observeAnthropicCompatResponse(ctx, resp, compatPlan(c))
+	}
+
 	var usage *ClaudeUsage
 	var firstTokenMs *int
 	var clientDisconnect bool
@@ -874,6 +897,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	} else {
 		usage, err = s.handleNonStreamingResponse(ctx, resp, c, account, originalModel, reqModel)
 		if err != nil {
+			if usage != nil {
+				return &ForwardResult{RequestID: resp.Header.Get("x-request-id"), UpstreamHeaders: resp.Header, Usage: *usage, Model: originalModel, UpstreamModel: mappedModel, Duration: time.Since(startTime)}, err
+			}
 			return nil, err
 		}
 	}

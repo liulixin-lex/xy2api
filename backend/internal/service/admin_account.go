@@ -159,6 +159,7 @@ var duplicateAccountDiscardedExtraKeys = map[string]struct{}{
 	"drive_tier_updated_at":                  {},
 	// Codex fingerprint convergence uses a per-account random seed, never copied from another account.
 	codexFingerprintSeedExtraKey:           {},
+	AnthropicCompatIdentitySeedExtraKey:    {},
 	"codex_primary_used_percent":           {},
 	"codex_primary_reset_after_seconds":    {},
 	"codex_primary_window_minutes":         {},
@@ -391,6 +392,9 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 	if err := NormalizeProtocolRulesCredentials(input.Credentials); err != nil {
 		return nil, err
 	}
+	if err := s.validateAnthropicCompatConfiguration(ctx, &Account{Platform: input.Platform, Type: input.Type, Credentials: input.Credentials, Extra: accountExtra}); err != nil {
+		return nil, err
+	}
 	duplicate, err := buildAccountForCreate(input, accountExtra)
 	if err != nil {
 		return nil, err
@@ -476,6 +480,11 @@ func normalizeOpenAILongContextBillingUpdateExtra(account *Account, input *Updat
 // Grok media eligibility helpers live in account_grok_media_eligibility.go.
 
 func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]any) (*Account, error) {
+	var err error
+	accountExtra, err = prepareAnthropicCompatExtra(&Account{Platform: input.Platform, Type: input.Type, Credentials: input.Credentials, Extra: accountExtra}, nil, true)
+	if err != nil {
+		return nil, err
+	}
 	accountExtra = MergeCapabilityLearningExtra(accountExtra, nil)
 	accountExtra = MergeOpenAICodexTicketExtra(accountExtra, nil)
 	if err := ValidateIQTargetsPatch(input.Platform, input.IQTargets); err != nil {
@@ -554,6 +563,9 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 }
 
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
+	if err := s.validateAnthropicCompatConfiguration(ctx, &Account{Platform: input.Platform, Type: input.Type, Credentials: input.Credentials, Extra: input.Extra}); err != nil {
+		return nil, err
+	}
 	input.Extra = managedOpenAICreateExtra(input)
 	if err := s.operatorAccountCreateRules(ctx, input); err != nil {
 		return nil, err
@@ -826,6 +838,12 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if input.Extra == nil {
 		account.Extra = prepareCodexFingerprintExtraForUpdate(account, account.Extra)
 	}
+	if err := prepareAnthropicCompatAccountUpdate(account, &previousForToken); err != nil {
+		return nil, err
+	}
+	if err := s.validateAnthropicCompatConfiguration(ctx, account); err != nil {
+		return nil, err
+	}
 	if requestedRateSyncEnabledUpdate != nil && *requestedRateSyncEnabledUpdate {
 		if requestedProbeEnabledUpdate != nil && !*requestedProbeEnabledUpdate {
 			return nil, infraerrors.BadRequest(
@@ -1023,6 +1041,28 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
+	updates = RedactAnthropicCompatExtra(updates)
+	_, hasCompat := updates[AnthropicCompatProfileExtraKey]
+	_, hasPassthrough := updates["anthropic_passthrough"]
+	_, hasAuthScheme := updates["anthropic_apikey_auth_scheme"]
+	if hasCompat || hasPassthrough || hasAuthScheme {
+		account, err := s.accountRepo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if err := ValidateAnthropicCompatProfileExtra(account.Platform, account.Type, updates); err != nil {
+			return err
+		}
+		candidate := *account
+		candidate.Extra = maps.Clone(account.Extra)
+		if candidate.Extra == nil {
+			candidate.Extra = make(map[string]any)
+		}
+		maps.Copy(candidate.Extra, updates)
+		if err := s.validateAnthropicCompatConfiguration(ctx, &candidate); err != nil {
+			return err
+		}
+	}
 	if err := s.operatorAccountExtraRules(ctx, id, updates); err != nil {
 		return err
 	}
@@ -1057,6 +1097,11 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 // BulkUpdateAccounts updates multiple accounts in one request.
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
+	input.Extra = RedactAnthropicCompatExtra(input.Extra)
+	_, hasCompatUpdate := input.Extra[AnthropicCompatProfileExtraKey]
+	_, hasAnthropicPassthroughUpdate := input.Extra["anthropic_passthrough"]
+	_, hasAnthropicAuthSchemeUpdate := input.Extra["anthropic_apikey_auth_scheme"]
+	compatPreflight := hasCompatUpdate || hasAnthropicPassthroughUpdate || hasAnthropicAuthSchemeUpdate || len(input.Credentials) > 0
 	// Managed probe/session state may only enter through dedicated typed endpoints.
 	input.Extra = preserveManagedOpenAIImportMarker(input.Extra, nil)
 	input.Extra = MergeOpenAICodexTicketExtra(input.Extra, nil)
@@ -1108,7 +1153,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || input.IQTargets != nil {
+	if compatPreflight || len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || input.IQTargets != nil {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1225,6 +1270,37 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		}
 	}
 	input.Credentials = clearBulkNewAPITokenOnIdentityChange(cachedTargets, input.Credentials, input.ProxyID)
+	if compatPreflight {
+		for _, accountID := range input.AccountIDs {
+			account := targetsByID[accountID]
+			if account == nil {
+				if hasCompatUpdate {
+					return nil, ErrAccountNotFound
+				}
+				// Existing credential/extra patches may include stale IDs. Keep
+				// their bulk semantics; only an explicit profile patch requires
+				// a complete target set before validating account applicability.
+				continue
+			}
+			if err := ValidateAnthropicCompatProfileExtra(account.Platform, account.Type, input.Extra); err != nil {
+				return nil, err
+			}
+			candidate := *account
+			candidate.Extra = maps.Clone(account.Extra)
+			if candidate.Extra == nil {
+				candidate.Extra = make(map[string]any)
+			}
+			maps.Copy(candidate.Extra, input.Extra)
+			candidate.Credentials = maps.Clone(account.Credentials)
+			if candidate.Credentials == nil {
+				candidate.Credentials = make(map[string]any)
+			}
+			maps.Copy(candidate.Credentials, input.Credentials)
+			if err := s.validateAnthropicCompatConfiguration(ctx, &candidate); err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	// Prepare bulk updates for columns and JSONB fields.
 	repoUpdates := AccountBulkUpdate{
@@ -1232,6 +1308,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		Extra:                      input.Extra,
 		ProbeEnabled:               input.ProbeEnabled,
 		EnsureCodexFingerprintSeed: ShouldEnsureCodexFingerprintSeedForExtraUpdates(input.Extra),
+		EnsureAnthropicCompatSeed:  compatPreflight,
 	}
 	if input.ProbeEnabled != nil {
 		if repoUpdates.Extra == nil {

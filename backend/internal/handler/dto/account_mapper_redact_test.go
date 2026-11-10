@@ -97,6 +97,7 @@ func TestAccountFromServiceShallow_RedactsOllamaCloudManagedExtra(t *testing.T) 
 		ID: 9, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
 		Credentials: map[string]any{"base_url": "https://ollama.com", "api_key": "secret-key"},
 		Extra: map[string]any{
+			service.AnthropicCompatIdentitySeedExtraKey: "managed-compatibility-seed",
 			service.OllamaCloudUsageSessionExtraKey:     "ciphertext-secret",
 			service.OllamaCloudUsageAutoRefreshExtraKey: true,
 			service.OllamaCloudUsageSnapshotExtraKey:    snapshot,
@@ -117,6 +118,7 @@ func TestAccountFromServiceShallow_RedactsOllamaCloudManagedExtra(t *testing.T) 
 	raw, err := json.Marshal(got)
 	require.NoError(t, err)
 	require.NotContains(t, string(raw), "ciphertext-secret")
+	require.NotContains(t, string(raw), "managed-compatibility-seed")
 	require.NotContains(t, string(raw), "secret-key")
 	require.Contains(t, src.Extra, service.OllamaCloudUsageSessionExtraKey)
 }

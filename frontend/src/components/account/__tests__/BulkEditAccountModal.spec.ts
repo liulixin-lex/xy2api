@@ -1053,3 +1053,18 @@ describe('BulkEditAccountModal', () => {
     })
   })
 })
+
+describe('BulkEditAccountModal Claude Code compatibility', () => {
+  it.each([false, true])('applies an explicit profile without enabling unrelated settings (enabled=%s)', async (enabled) => {
+    vi.mocked(adminAPI.accounts.bulkUpdate).mockReset().mockResolvedValue({ success: 2, failed: 0, results: [] } as any)
+    const wrapper = mountModal({ selectedPlatforms: ['anthropic'], selectedTypes: ['apikey'] })
+    expect(wrapper.get('[data-testid="bulk-anthropic-compat-toggle"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('#bulk-anthropic-compat-apply').setValue(true)
+    if (enabled) await wrapper.get('[data-testid="bulk-anthropic-compat-toggle"]').trigger('click')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0]?.[1]?.extra).toEqual({ anthropic_compat_profile: enabled ? 'claude_code_v1' : 'off' })
+    wrapper.unmount()
+  })
+})
