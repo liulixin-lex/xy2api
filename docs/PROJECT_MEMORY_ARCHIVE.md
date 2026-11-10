@@ -8634,3 +8634,25 @@ Sub2API 兼容基线已更新到 `v0.2.8`。下方历史日志保留原样；本
 - 修改文件：`UseKeyModal.vue` 及其 spec、`Makefile`、本文件、归档文件。
 - 验证：`make test-frontend`（119 个文件 / 1,367 个用例）、全量 vitest（489 / 3,855）、build、docs 一致性、干净树 audit 与 scheduler-diff 通过；换回旧默认值时 5 个用例失败。改动只有 4 处默认值，未送 gpt-6-astra 审查。
 - 下一步：CI 全绿后，先合 #208，再把 #209 的 base 改为 main 后合并；发版与部署另行授权。
+
+### 2026-11-10 — 0.5.14/0.5.15 合并记忆 PR（第二步，填入 0.5.15 发版事实）：被改写行的原文
+
+以下为本次在主记忆中被改写的各行修改前的原文。
+
+### 0.5.15 集成中（2026-11-10；发版与切流结果待补）
+
+- **状态**：0.5.15 在集成中，尚未发版、尚未切流。用户 2026-11-10 决定把远端另外三个 PR（#208、#209、#221）一并并入 0.5.15，全部合进 main 后发版。发版信息：<<RELEASE_0515>>。切流结果：<<CUTOVER_0515_RESULT>>。
+
+- **交付范围**（按集成时的事实记录，发版后以最终发布说明为准）：
+
+### 版本与环境速览（2026-11-10，0.5.14 已正式发布并上线）
+
+- 最新产品版本 **XY2API v0.5.14**：发布提交 `dc7a1979011adfc34e20eb5b23de21e03677cac4`（PR #220 普通合并，GitHub 合并于 2026-11-10T09:08:31Z，合并提交的提交时间为 09:08:30Z；author 为 noreply 身份，合并树 `b6ddef2540708b00dd1eca007ec2690358566983` 与受测头 `e13fd433918cecd72904d6e57d598c74d7196d24` 相同），annotated tag `v0.5.14` 对象 `5d45d185903c3fea4279e807c735345f06bb9b93`，tagger 为 noreply，peeled 等于发布提交，打 tag 时用了 `--cleanup=verbatim`，正文 5 个小标题都在。Release run `42788241896` 成功，3 个 job 均 success；Release `440153969` 于 2026-11-10T09:21:57Z 发布，正式版、非 draft、非 prerelease，当前 latest。两路独立核验均 6/6 PASS：5 个平台包与 checksums、GHCR 双架构镜像 index `sha256:35cc97a949b139e0f2c448cbeafb99a408c85fc6f42e3bc2ac41abf2699016c6`，`0.5.14`、`latest`、`0.5`、`0` 四个 tag 均指向该 index，OCI revision 等于发布提交、version 为 0.5.14；0.5.13 的 index 未变。兼容基线仍为 Sub2API 0.2.15；无新迁移。
+
+- 上一版本 **XY2API v0.5.13**：发布提交 `2515d32e00a701652e5413fe0e5767d4c491baed`（PR #218 普通合并，GitHub `merged_at` 为 2026-11-10T03:23:32Z，合并提交的提交时间为 03:23:31Z；author 为 noreply 身份，合并树 `aa269f42402597630414592394b80b5edf4093f5` 与 PR 头 `7798ae9490341aef3e9e6392215ab9e1ce68b213` 相同），annotated tag `v0.5.13` 对象 `77cba61959facebb54ed2be18c098dfccf6151b0`，tagger 为 noreply，peeled 等于发布提交。Release run `42749192426` 成功，3 个 job 均 success，前端在 Node.js 24 下构建；Release `439918391` 于 2026-11-10T03:39:58Z 发布，正式版、非 draft、非 prerelease，0.5.14 发布前为 latest。打 tag 时 git 默认 cleanup 删掉了发布说明的 `##` 小标题，tag 未重打，Release 正文已用带标题的发布说明替换。两路独立核验均 6/6 PASS：5 个平台包与 checksums（共 6 个资产）、GHCR 双架构镜像 index `sha256:274248bb640d4796e18a39c9d266f1ca53785b667eba9c01f532a0c9eb1ef648`，`0.5.13`、`latest`、`0.5`、`0` 四个 tag 均指向该 index，OCI revision 等于发布提交、version 为 0.5.13；0.5.12 的 index 未变。兼容基线仍为 Sub2API 0.2.15；无新迁移（完整预算功能依赖既有的 292/293）。
+
+- 再上一版本 **XY2API v0.5.12**：发布提交 `74f9dff733c50402b452fb438d37b9581418fe97`（PR #217 普通合并，GitHub `merged_at` 为 2026-11-09T14:09:50Z，合并提交的提交时间为 14:09:49Z；合并树与受测候选 `70057792a` 相同），annotated tag `v0.5.12` 对象 `a946ad6336efa3635369f57b66e9b46fe5f3bca7`；Release run `42631979389` 成功，Release `439229768` 于 2026-11-09T14:25:41Z 发布；两路核验 6/6 PASS，镜像 index `sha256:dcb157e322e0603d4d745ea0af5894c334bbafe2191c581bbcba87fef2ee1e2f`，四个 tag 同指，0.5.11 的 index 未变。新增迁移 292/293。
+
+- 生产：2026-11-10 10:42 UTC 起新槽运行 0.5.14，旧槽 0.5.13 已停止并保留为回滚目标（见“0.5.14 生产切换结果”）。预算开关自 2026-11-10 10:02 UTC 起为 `body_eof + enforce`（见“预算开关”）。0.5.15 在集成中。
+
+- **0.5.15 集成与发布**（2026-11-10 12:10 UTC）：0.5.14 已发布并完成生产切换，预算开关已切到 `body_eof + enforce`。进行中：0.5.15 集成（三个外部 PR 与模型拒绝诊断修复）、#221 两项修复的复核、新 head 上的 13 项门禁与 PR CI；0.5.15 的切流包已两路签字，切流计划已准备。本合并记忆 PR（0.5.14 + 0.5.15）已在本地起草，发版与切流结果待填。
