@@ -1,6 +1,7 @@
 version: 2
 
 # Weekly updates; minor and patch bumps are grouped per ecosystem into one PR.
+# Major upgrades of Go and npm dependencies are evaluated and done by hand.
 updates:
   - package-ecosystem: gomod
     directory: /backend
@@ -13,6 +14,9 @@ updates:
     groups:
       go-minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 5
 
   - package-ecosystem: npm
@@ -26,6 +30,9 @@ updates:
     groups:
       frontend-minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 5
 
   - package-ecosystem: github-actions
