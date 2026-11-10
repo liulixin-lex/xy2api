@@ -392,7 +392,8 @@ func TestFCOL63MalformedNamedPreservation(t *testing.T) {
 				}
 				body := []byte(`{"model":"gpt-5.6-sol","stream":false,"input":` + input + `}`)
 				var forwarded string
-				if route == "http_sanitize_with_context" {
+				switch route {
+				case "http_sanitize_with_context":
 					var request map[string]any
 					require.NoError(t, decodeOpenAIJSONUseNumber(body, &request))
 					items, ok := request["input"].([]any)
@@ -401,14 +402,14 @@ func TestFCOL63MalformedNamedPreservation(t *testing.T) {
 					data, err := json.Marshal(request)
 					require.NoError(t, err)
 					forwarded = string(data)
-				} else if route == "http_forward_with_context" {
+				case "http_forward_with_context":
 					upstream := &httpUpstreamRecorder{responses: []*http.Response{newOpenAIRejectedFieldTestResponse(http.StatusOK, namespaceForwardOKResponse)}}
 					result, err := newOpenAIRejectedFieldTestService(upstream).Forward(context.Background(), newOpenAIRejectedFieldTestContext(body), newOpenAIOAuthNamespaceTestAccount(), body)
 					require.NoError(t, err)
 					require.NotNil(t, result)
 					require.Len(t, upstream.bodies, 1)
 					forwarded = string(upstream.bodies[0])
-				} else {
+				default:
 					body = []byte(strings.Replace(string(body), `{"model":`, `{"type":"response.create","model":`, 1))
 					data, _, err := normalizeOpenAIResponsesWebSocketCompatibilityBody(body, newOpenAIOAuthNamespaceTestAccount(), false)
 					require.NoError(t, err)
