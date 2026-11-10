@@ -1,8 +1,9 @@
 package service
 
 import (
-	"github.com/tidwall/gjson"
 	"strings"
+
+	"github.com/tidwall/gjson"
 )
 
 // Missing and JSON null IDs denote independent input only on a named FCO.

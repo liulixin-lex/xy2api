@@ -308,18 +308,19 @@ func TestFCONamedOutputOutbound(t *testing.T) {
 			}
 		}
 	})
-	t.Run("shared_sanitize_shape", func(t *testing.T) {
+	t.Run("baseline_sanitize_shape", func(t *testing.T) {
 		for _, callID := range []any{nil, "", " ", 123, true, []any{}, map[string]any{}} {
 			item := map[string]any{"type": "function_call_output", "name": "context", "call_id": callID}
 			input := []any{item}
 			req := map[string]any{"input": input}
 			changed := sanitizeOpenAIResponsesOrphanToolOutputs(req, input, false)
-			require.Equal(t, callID != nil, changed)
+			require.False(t, changed)
+			require.Equal(t, input, req["input"])
 		}
 	})
 }
 
-func TestFCONamedOutputExactTypeSharedWithSanitize(t *testing.T) {
+func TestFCONamedOutputStrictIngressKeepsLegacySanitize(t *testing.T) {
 	for _, typ := range []string{" function_call_output", "function_call_output "} {
 		item := map[string]any{"type": typ, "name": "context"}
 		input := []any{item}
@@ -327,8 +328,8 @@ func TestFCONamedOutputExactTypeSharedWithSanitize(t *testing.T) {
 		body, err := json.Marshal(req)
 		require.NoError(t, err)
 		require.True(t, ValidateFunctionCallOutputContextBytes(body).HasFunctionCallOutputMissingCallID)
-		require.True(t, sanitizeOpenAIResponsesOrphanToolOutputs(req, input, false))
-		require.Empty(t, req["input"])
+		require.False(t, sanitizeOpenAIResponsesOrphanToolOutputs(req, input, false))
+		require.Equal(t, input, req["input"])
 	}
 }
 
@@ -371,4 +372,64 @@ func TestFCONamedOutputRejectedNamespaceRetry(t *testing.T) {
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "input.0.namespace").Exists())
 	require.Equal(t, "untrusted_context", gjson.GetBytes(upstream.bodies[1], "input.0.name").String())
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "input.0.call_id").Exists())
+}
+
+func TestFCOL63MalformedNamedPreservation(t *testing.T) {
+	for _, tc := range []struct{ name, item string }{
+		{"empty", `{"type":"function_call_output","call_id":"","name":"notification","namespace":"agent","output":"context"}`},
+		{"whitespace", `{"type":"function_call_output","call_id":" \t","name":"notification","namespace":"agent","output":"context"}`},
+		{"number", `{"type":"function_call_output","call_id":7,"name":"notification","namespace":"agent","output":"context"}`},
+		{"boolean", `{"type":"function_call_output","call_id":true,"name":"notification","namespace":"agent","output":"context"}`},
+		{"array", `{"type":"function_call_output","call_id":[],"name":"notification","namespace":"agent","output":"context"}`},
+		{"object", `{"type":"function_call_output","call_id":{},"name":"notification","namespace":"agent","output":"context"}`},
+		{"padded_type", `{"type":" function_call_output ","name":"notification","namespace":"agent","output":"context"}`},
+	} {
+		for _, route := range []string{"http_sanitize_with_context", "http_forward_with_context", "ws_with_context", "ws_without_context"} {
+			t.Run(tc.name+"/"+route, func(t *testing.T) {
+				input := `[{"type":"function_call","call_id":"fc_fixture","name":"lookup","arguments":"{}"},{"type":"function_call_output","call_id":"fc_fixture","output":"paired"},` + tc.item + `]`
+				if route == "ws_without_context" {
+					input = `[` + tc.item + `]`
+				}
+				body := []byte(`{"model":"gpt-5.6-sol","stream":false,"input":` + input + `}`)
+				var forwarded string
+				if route == "http_sanitize_with_context" {
+					var request map[string]any
+					require.NoError(t, decodeOpenAIJSONUseNumber(body, &request))
+					items, ok := request["input"].([]any)
+					require.True(t, ok)
+					sanitizeOpenAIResponsesOrphanToolOutputs(request, items, false)
+					data, err := json.Marshal(request)
+					require.NoError(t, err)
+					forwarded = string(data)
+				} else if route == "http_forward_with_context" {
+					upstream := &httpUpstreamRecorder{responses: []*http.Response{newOpenAIRejectedFieldTestResponse(http.StatusOK, namespaceForwardOKResponse)}}
+					result, err := newOpenAIRejectedFieldTestService(upstream).Forward(context.Background(), newOpenAIRejectedFieldTestContext(body), newOpenAIOAuthNamespaceTestAccount(), body)
+					require.NoError(t, err)
+					require.NotNil(t, result)
+					require.Len(t, upstream.bodies, 1)
+					forwarded = string(upstream.bodies[0])
+				} else {
+					body = []byte(strings.Replace(string(body), `{"model":`, `{"type":"response.create","model":`, 1))
+					data, _, err := normalizeOpenAIResponsesWebSocketCompatibilityBody(body, newOpenAIOAuthNamespaceTestAccount(), false)
+					require.NoError(t, err)
+					forwarded = string(data)
+					require.Equal(t, "response.create", gjson.Get(forwarded, "type").String())
+				}
+				before, after := gjson.GetBytes(body, "input").Array(), gjson.Get(forwarded, "input").Array()
+				t.Logf("items %d -> %d; input=%s", len(before), len(after), gjson.Get(forwarded, "input").Raw)
+				if route == "http_forward_with_context" && tc.name == "whitespace" {
+					// Both baseline and current native HTTP normalize this ID before sanitize.
+					require.Len(t, after, 2)
+					return
+				}
+				require.Len(t, after, len(before))
+				last := after[len(after)-1]
+				require.Equal(t, "notification", last.Get("name").String())
+				require.Equal(t, "context", last.Get("output").String())
+				if route != "http_forward_with_context" {
+					require.JSONEq(t, input, gjson.Get(forwarded, "input").Raw)
+				}
+			})
+		}
+	}
 }

@@ -1881,14 +1881,14 @@ func (h *OpenAIGatewayHandler) validateFunctionCallOutputRequest(c *gin.Context,
 	if !validation.HasFunctionCallOutputMissingCallID && validation.HasItemReferenceForAllCallIDs {
 		return true
 	}
-	index, count := any(validation.BadItemIndex), any(validation.BadItemCount)
+	index, count := strconv.Itoa(validation.BadItemIndex), strconv.Itoa(validation.BadItemCount)
 	if validation.BadItemIndex >= 64 {
 		index = "64_plus"
 	}
 	if validation.BadItemCount >= 3 {
 		count = "3_plus"
 	}
-	reqLog = reqLog.With(zap.Any("fco_item_index", index), zap.Any("fco_bad_item_count", count),
+	reqLog = reqLog.With(zap.String("fco_item_index", index), zap.String("fco_bad_item_count", count),
 		zap.Bool("fco_name_present", validation.BadItem.Get("name").Exists()),
 		zap.Bool("fco_namespace_present", validation.BadItem.Get("namespace").Exists()))
 	if validation.HasFunctionCallOutputMissingCallID {

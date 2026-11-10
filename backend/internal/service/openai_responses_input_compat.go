@@ -50,7 +50,8 @@ func sanitizeOpenAIResponsesOrphanToolOutputs(reqBody map[string]any, input []an
 		// named function outputs without a preceding function call. Preserve
 		// their native type, namespace and output instead of silently dropping
 		// the request that started the turn.
-		if isNamedStandaloneFunctionCallOutput(item["type"], item["call_id"], item["name"]) {
+		if callID == "" && strings.TrimSpace(firstNonEmptyString(item["type"])) == "function_call_output" &&
+			strings.TrimSpace(firstNonEmptyString(item["name"])) != "" {
 			normalized = append(normalized, rawItem)
 			continue
 		}

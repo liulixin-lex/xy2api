@@ -3597,12 +3597,12 @@ func TestFCONamedOutputIngress(t *testing.T) {
 			require.Equal(t, tc.shape, fields["fco_call_id_shape"])
 			require.Equal(t, item.Get("name").Exists(), fields["fco_name_present"])
 			require.Equal(t, item.Get("namespace").Exists(), fields["fco_namespace_present"])
-			var index any = int64(tc.index)
+			index := fmt.Sprint(tc.index)
 			if tc.index >= 64 {
 				index = "64_plus"
 			}
 			require.Equal(t, index, fields["fco_item_index"])
-			require.Equal(t, tc.badCount, fields["fco_bad_item_count"])
+			require.Equal(t, fmt.Sprint(tc.badCount), fields["fco_bad_item_count"])
 			for _, secret := range []string{"private_name", "private_namespace", "private_output"} {
 				require.NotContains(t, fmt.Sprint(fields), secret)
 			}
@@ -3640,6 +3640,29 @@ func TestFCONamedOutputFullIngress(t *testing.T) {
 			c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 1, Concurrency: 1})
 			h.Responses(c)
 			t.Logf("past_ingress=%v status=%d body=%s", reached, rec.Code, rec.Body.String())
+			require.True(t, reached)
+			require.NotEqual(t, 400, rec.Code)
+		})
+	}
+}
+
+func TestFCOL63HTTPContextStillPassesIngress(t *testing.T) {
+	for _, id := range []string{`""`, `" \t"`, `7`} {
+		t.Run(id, func(t *testing.T) {
+			reached := false
+			h := newOpenAIHandlerForPreviousResponseIDValidation(t, &concurrencyCacheMock{acquireUserSlotFn: func(context.Context, int64, int, string) (bool, error) {
+				reached = true
+				return false, errors.New("synthetic stop after ingress")
+			}})
+			body := fmt.Sprintf(`{"model":"gpt-6.1-sol","input":[{"type":"function_call","call_id":"fc_fixture","name":"lookup","arguments":"{}"},{"type":"function_call_output","call_id":"fc_fixture","output":"paired"},{"type":"function_call_output","call_id":%s,"name":"notification","output":"context"}]}`, id)
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+			groupID := int64(2)
+			c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{ID: 101, GroupID: &groupID, User: &service.User{ID: 1}})
+			c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 1, Concurrency: 1})
+			h.Responses(c)
+			t.Logf("past_ingress=%v status=%d", reached, rec.Code)
 			require.True(t, reached)
 			require.NotEqual(t, 400, rec.Code)
 		})

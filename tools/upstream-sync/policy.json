@@ -4427,7 +4427,7 @@
     },
     {
       "path": "backend/internal/service/openai_responses_input_compat.go",
-      "value": "isNamedStandaloneFunctionCallOutput(item[\"type\"], item[\"call_id\"], item[\"name\"])"
+      "value": "if callID == \"\" && strings.TrimSpace(firstNonEmptyString(item[\"type\"])) == \"function_call_output\" &&"
     },
     {
       "path": "backend/internal/service/openai_responses_namespace.go",
@@ -4448,6 +4448,10 @@
     {
       "path": "backend/internal/handler/openai_gateway_handler.go",
       "value": "zap.String(\"fco_call_id_shape\", validation.InvalidCallIDShape)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "zap.String(\"fco_item_index\", index), zap.String(\"fco_bad_item_count\", count)"
     }
   ],
   "forbidden_module_paths": [
