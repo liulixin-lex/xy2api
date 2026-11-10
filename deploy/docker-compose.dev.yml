@@ -14,7 +14,8 @@ services:
       context: ..
       dockerfile: Dockerfile
       args:
-        NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
+        # Optional npm registry mirror, for example https://registry.npmmirror.com
+        NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-}
     container_name: xy2api-dev
     restart: unless-stopped
     security_opt:
@@ -49,11 +50,12 @@ services:
       - SETUP_MIGRATION_TIMEOUT_SECONDS=${SETUP_MIGRATION_TIMEOUT_SECONDS:-0}
       - TOTP_ENCRYPTION_KEY=${TOTP_ENCRYPTION_KEY:-}
       - TZ=${TZ:-Asia/Shanghai}
-      # Local mainland-China development proxy. Containers cannot use
-      # 127.0.0.1 for the host proxy, so default to Docker Desktop's host name.
-      - HTTP_PROXY=${XY2API_DEV_HTTP_PROXY:-http://host.docker.internal:7897}
-      - HTTPS_PROXY=${XY2API_DEV_HTTPS_PROXY:-http://host.docker.internal:7897}
-      - ALL_PROXY=${XY2API_DEV_ALL_PROXY:-socks5://host.docker.internal:7897}
+      # Optional outbound proxy for upstream calls. Containers cannot reach the
+      # host's 127.0.0.1; use Docker Desktop's host name, for example
+      # XY2API_DEV_HTTP_PROXY=http://host.docker.internal:7890
+      - HTTP_PROXY=${XY2API_DEV_HTTP_PROXY:-}
+      - HTTPS_PROXY=${XY2API_DEV_HTTPS_PROXY:-}
+      - ALL_PROXY=${XY2API_DEV_ALL_PROXY:-}
       - NO_PROXY=${XY2API_DEV_NO_PROXY:-127.0.0.1,localhost,::1,postgres,redis,xy2api,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,.local}
       # Gateway values come from Compose .env or the shell.
       # Fallbacks mirror XY2API backend defaults so omitted values preserve behavior.
@@ -102,10 +104,10 @@ services:
       - GATEWAY_IMAGE_CONCURRENCY_MAX_WAITING_REQUESTS=${GATEWAY_IMAGE_CONCURRENCY_MAX_WAITING_REQUESTS:-100}
       - BATCH_IMAGE_ENABLED=${BATCH_IMAGE_ENABLED:-true}
       - BATCH_IMAGE_QUEUE_ENABLED=${BATCH_IMAGE_QUEUE_ENABLED:-true}
-      - BATCH_IMAGE_VERTEX_ENABLED=${BATCH_IMAGE_VERTEX_ENABLED:-true}
-      - BATCH_IMAGE_VERTEX_PROJECT_ID=${BATCH_IMAGE_VERTEX_PROJECT_ID:-project-28424c50-8df2-46e2-a27}
+      - BATCH_IMAGE_VERTEX_ENABLED=${BATCH_IMAGE_VERTEX_ENABLED:-false}
+      - BATCH_IMAGE_VERTEX_PROJECT_ID=${BATCH_IMAGE_VERTEX_PROJECT_ID:-}
       - BATCH_IMAGE_VERTEX_LOCATION=${BATCH_IMAGE_VERTEX_LOCATION:-global}
-      - BATCH_IMAGE_VERTEX_MANAGED_GCS_BUCKET=${BATCH_IMAGE_VERTEX_MANAGED_GCS_BUCKET:-sub2-batch-image-prod-project-28424c50-8df2-46e2-a27}
+      - BATCH_IMAGE_VERTEX_MANAGED_GCS_BUCKET=${BATCH_IMAGE_VERTEX_MANAGED_GCS_BUCKET:-}
       - BATCH_IMAGE_VERTEX_MANAGED_GCS_PREFIX=${BATCH_IMAGE_VERTEX_MANAGED_GCS_PREFIX:-batch-image/prod/{batch_id}}
       - BATCH_IMAGE_VERTEX_INPUT_RETENTION_HOURS=${BATCH_IMAGE_VERTEX_INPUT_RETENTION_HOURS:-24}
       - BATCH_IMAGE_VERTEX_OUTPUT_RETENTION_HOURS=${BATCH_IMAGE_VERTEX_OUTPUT_RETENTION_HOURS:-72}

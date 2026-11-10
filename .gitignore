@@ -1,64 +1,68 @@
-# 本地杂项文档、测试数据和外部项目副本
-/docs-local/
-.codex
-
-# ===================
-# Go 后端
-# ===================
-# 二进制文件
+# --- Go backend ---------------------------------------------------------------
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
+*.test
+*.out
+coverage.html
+vendor/
 backend/bin/
 backend/server
 backend/xy2api
 backend/main
-
-# Go 测试二进制
-*.test
-
-# 测试覆盖率
-*.out
-coverage.html
-
-# 依赖（使用 go mod）
-vendor/
-
-# Go 编译缓存
+backend/cmd/server/server
 backend/.gocache/
+.gocache/
 
-# ===================
-# Node.js / Vue 前端
-# ===================
+# Frontend build output embedded into the backend binary (`-tags=embed`).
+# Only a placeholder is kept so `//go:embed all:dist` always matches.
+backend/internal/web/dist/*
+!backend/internal/web/dist/.keep
+
+# Runtime data and local configuration (may contain secrets).
+backend/data/
+backend/config.yaml
+backend/.installed
+deploy/config.yaml
+deploy/docker-compose.override.yml
+docker-compose.override.yml
+
+# --- Frontend -----------------------------------------------------------------
 node_modules/
-frontend/node_modules/
 frontend/dist/
+frontend/coverage/
+frontend/audit.json
 *.local
 *.tsbuildinfo
 vite.config.d.ts
+vite.config.js
 vite.config.js.timestamp-*
-
-# 日志
+.vite/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# ===================
-# 环境配置
-# ===================
+# --- Environment files --------------------------------------------------------
 .env
 .env.local
 .env.*.local
 *.env
 !.env.example
-docker-compose.override.yml
+!*.env.example
 
-# ===================
-# IDE / 编辑器
-# ===================
+# --- Python -------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+
+# --- Build and release output -------------------------------------------------
+dist/
+build/
+release/
+
+# --- Editors, OS and local tooling --------------------------------------------
 .idea/
 .vscode/
 *.swp
@@ -67,149 +71,25 @@ docker-compose.override.yml
 .project
 .settings/
 .classpath
-
-# ===================
-# 操作系统
-# ===================
 .DS_Store
 Thumbs.db
 Desktop.ini
-
-# ===================
-# 临时文件
-# ===================
-__pycache__/
-*.py[cod]
+.cache/
 tmp/
 temp/
 *.tmp
 *.temp
 *.log
 *.bak
-.cache/
-.dev/
-.serena/
 
-# ===================
-# 构建产物
-# ===================
-dist/
-build/
-release/
-
-# 后端嵌入的前端构建产物
-# Keep a placeholder file so `//go:embed all:dist` always has a match in CI/lint,
-# while still ignoring generated frontend build outputs.
-backend/internal/web/dist/
-!backend/internal/web/dist/
-backend/internal/web/dist/*
-!backend/internal/web/dist/.keep
-
-# 后端运行时缓存数据
-backend/data/
-
-# ===================
-# 本地配置文件（包含敏感信息）
-# ===================
-backend/config.yaml
-deploy/config.yaml
-backend/.installed
-
-# ===================
-# 其他
-# ===================
-tests
-!deploy/tests/
-!deploy/tests/**
-!tools/tests/
-!tools/tests/**
-tools/tests/**/__pycache__/
-tools/tests/**/*.py[cod]
+# Local AI assistant and code-review state.
 CLAUDE.md
-.claude
-scripts
-!backend/scripts/
-!backend/scripts/resolve-version.sh
-!skills/xy2api-admin/scripts/
-!skills/xy2api-admin/scripts/xy2api-admin.js
-!skills/xy2api-upstream-sync/scripts/
-!skills/xy2api-upstream-sync/scripts/doctor.py
-.code-review-state
-#openspec/
-code-reviews/
-AGENTS.md
-!AGENTS.md
-backend/cmd/server/server
-deploy/docker-compose.override.yml
-.gocache/
-vite.config.js
-docs/*
-!docs/CODEX_STATE_RELIABILITY.md
-!docs/PAYMENT.md
-!docs/PAYMENT_CN.md
-!docs/ADMIN_PAYMENT_INTEGRATION_API.md
-!docs/SUPPORT_TICKETS.md
-!docs/OPENAI_TOTP.md
-!docs/ASYNC_IMAGE_TASKS.md
-!docs/BATCH_IMAGE_MVP.md
-!docs/COMPOSITE_GROUPS.md
-!docs/PLUGIN_DEVELOPMENT.md
-!docs/BRANDING_AND_MIGRATION_COMPATIBILITY.md
-!docs/UPSTREAM_SYNC.md
-!docs/PROJECT_MEMORY.md
-!docs/GPT61_SOL_SUPPORT.md
-!docs/OPENAI_FAST.md
-!docs/GPT61_SOL_PROVENANCE.json
-!docs/OPENAI_IQ_CHECK.md
-!docs/account-scheduling.md
-!docs/SHARE_SCHEDULING.md
-!docs/GATEWAY_RESILIENCE.md
-!docs/channel-monitor-v2-safe-defaults.md
-!docs/CHANNEL_MONITOR_V1.md
-!docs/GROK_MONITOR_RESPONSES.md
-!docs/upstream-sync/
-!docs/upstream-sync/**
-!docs/legal/
-!docs/legal/*.md
-.serena/
+.claude/
 .codex/
-frontend/coverage/
-aicodex
-output/
+.serena/
 .codegraph/
-issues/
+.code-review-state
+code-reviews/
 
-# Vitest / Vite cache at repo root
-.vite/
-# 本地闭源插件开发目录及构建产物不进入 XY2API 仓库
+# Private plugins developed outside this repository.
 /plugins/
-
-
-!docs/openai-cache-reliability.md
-
-!docs/USAGE_METRICS.md
-!docs/BACKUP_RELIABILITY.md
-!docs/UPSTREAM_SYNC_V0215.md
-
-# XY2API 文档白名单：docs/ 下新增文件要在这里登记，并加入 docs/README.md 目录
-# （tools/check_docs_consistency.py 检查已跟踪的 docs 文件都在白名单内、都已登记）。
-!docs/README.md
-!docs/PROJECT_MEMORY_ARCHIVE.md
-!docs/CLAUDE_CACHE_FALLBACK.md
-!docs/ANTHROPIC_CACHE_TTL.md
-!docs/ANTHROPIC_APIKEY_COMPAT.md
-!docs/CODEX_STATE.md
-!docs/GROUP_CATEGORIES.md
-!docs/UPSTREAM_BALANCE.md
-!docs/ADMIN_PERMISSIONS.md
-!docs/READ_ONLY_MCP_DESIGN.md
-!docs/GROUP_SYSTEM_PROMPTS.md
-!docs/OPENAI_QUALITY_ROUTING.md
-!docs/GROUP_QUALITY_GATE.md
-!docs/STRIPE_HOSTED.md
-!docs/UPSTREAM_SYNC_V0214.md
-!docs/USAGE_EXPORTS.md
-!docs/FRONTEND_UX.md
-!docs/seedance-api.md
-!docs/third-party/
-!docs/third-party/**
