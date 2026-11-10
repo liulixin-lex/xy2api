@@ -180,7 +180,14 @@ func TestValidateFunctionCallOutputContextBytesMatchesMapValidation(t *testing.T
 			bodyBytes, err := json.Marshal(tt.body)
 			require.NoError(t, err)
 
-			require.Equal(t, ValidateFunctionCallOutputContext(tt.body), ValidateFunctionCallOutputContextBytes(bodyBytes))
+			got := ValidateFunctionCallOutputContextBytes(bodyBytes)
+			// Raw ingress additionally carries failure diagnostics; compare the existing decision contract.
+			require.Equal(t, ValidateFunctionCallOutputContext(tt.body), FunctionCallOutputValidation{
+				HasFunctionCallOutput:              got.HasFunctionCallOutput,
+				HasToolCallContext:                 got.HasToolCallContext,
+				HasFunctionCallOutputMissingCallID: got.HasFunctionCallOutputMissingCallID,
+				HasItemReferenceForAllCallIDs:      got.HasItemReferenceForAllCallIDs,
+			})
 		})
 	}
 }
