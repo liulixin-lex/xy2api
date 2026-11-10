@@ -30,7 +30,6 @@ func (s *RequestState) SetAttemptProfile(profile AttemptProfile) {
 	}
 	s.mu.Unlock()
 	b.MarkAttemptStarted()
-	s.noteAttemptStart(profile.timerOwnerStart())
 }
 
 func (p AttemptProfile) timerOwnerStart() time.Time {

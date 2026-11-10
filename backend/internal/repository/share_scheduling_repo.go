@@ -273,7 +273,7 @@ func (r *shareSchedulingRepository) AccountAttempts(ctx context.Context, account
 			WHERE e.created_at >= $2 AND e.created_at < $3 AND e.upstream_errors IS NOT NULL
 			  AND jsonb_typeof(ev->'account_id') = 'number'
 			  AND (ev->>'account_id')::bigint = ANY($1)
- AND NOT COALESCE((ev->>'budget_cut_applied')::boolean,false)
+ AND NOT (CASE WHEN ev->>'budget_cut_applied' IN ('true','false') THEN (ev->>'budget_cut_applied')::boolean ELSE false END)
 			GROUP BY 1, 2, 3, 4, 5
 			ORDER BY 6 DESC, 1, 2, 3, 4, 5
 			LIMIT `+strconv.Itoa(shareSchedulingMaxAttemptGroups), ids, from, to)

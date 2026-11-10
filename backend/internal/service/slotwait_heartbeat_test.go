@@ -3,7 +3,9 @@
 package service
 
 import (
+	"bytes"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -28,11 +30,11 @@ func TestSlotWaitHeartbeatCoordinatesScheduledBeat(t *testing.T) {
 		stop := StartPreOutputKeepalive(c, PreOutputProtocolChat, 50*time.Millisecond, 100*time.Millisecond)
 		defer stop()
 		time.Sleep(20 * time.Millisecond)
-		handled, committed, err := WriteSlotWaitHeartbeat(c, []byte(":\n\n"), 20*time.Millisecond)
+		handled, committed, err := WriteSlotWaitHeartbeat(c, []byte(":\n\n"), 20*time.Millisecond, "slot_wait")
 		require.True(t, handled)
 		require.True(t, committed)
 		require.NoError(t, err)
-		handled, committed, err = WriteSlotWaitHeartbeat(c, []byte(":\n\n"), 20*time.Millisecond)
+		handled, committed, err = WriteSlotWaitHeartbeat(c, []byte(":\n\n"), 20*time.Millisecond, "slot_wait")
 		require.True(t, handled)
 		require.True(t, committed)
 		require.NoError(t, err)
@@ -54,7 +56,7 @@ func TestSlotWaitHeartbeatShortWriteStopsHeartbeat(t *testing.T) {
 		c.Writer = &keepaliveShortWriter{ResponseWriter: c.Writer}
 		stop := StartPreOutputKeepalive(c, PreOutputProtocolChat, time.Second, time.Second)
 		defer stop()
-		handled, committed, err := WriteSlotWaitHeartbeat(c, []byte(":\n\n"), time.Second)
+		handled, committed, err := WriteSlotWaitHeartbeat(c, []byte(":\n\n"), time.Second, "slot_wait")
 		require.True(t, handled)
 		require.True(t, committed)
 		require.ErrorIs(t, err, io.ErrShortWrite)
@@ -74,10 +76,37 @@ func TestSlotWaitHeartbeatFutureInitialClock(t *testing.T) {
 		defer stop()
 		_, err := writeOpenAIStreamKeepalive(c, c.Writer, []byte(": upstream\n\n"), false)
 		require.NoError(t, err)
-		handled, committed, err := WriteSlotWaitHeartbeat(c, []byte(":\n\n"), time.Second)
+		handled, committed, err := WriteSlotWaitHeartbeat(c, []byte(":\n\n"), time.Second, "slot_wait")
 		require.True(t, handled)
 		require.True(t, committed)
 		require.NoError(t, err)
 		require.Equal(t, ": upstream\n\n:\n\n", w.Body())
 	})
+}
+
+func TestKeepaliveCommittedLogsSource(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	for _, source := range []string{"request", "slot_wait", "queue_wait"} {
+		logs.Reset()
+		c, _ := newKeepaliveTestContext(t)
+		firstDelay := time.Hour
+		if source == "request" {
+			firstDelay = 0
+		}
+		stop := StartPreOutputKeepalive(c, PreOutputProtocolChat, firstDelay, time.Hour)
+		if source == "request" {
+			waitCommitted(t, c)
+		} else {
+			handled, committed, err := WriteSlotWaitHeartbeat(c, []byte(":\n\n"), time.Second, source)
+			require.True(t, handled)
+			require.True(t, committed)
+			require.NoError(t, err)
+		}
+		stop()
+		require.Contains(t, logs.String(), `"source":"`+source+`"`)
+	}
 }

@@ -98,12 +98,11 @@ export default defineConfig(({ mode }) => {
       'vue-i18n': 'vue-i18n/dist/vue-i18n.runtime.esm-bundler.js'
     }
   },
-  define: {
-    // 启用 vue-i18n JIT 编译，在 CSP 环境下处理消息插值
-    // JIT 编译器生成 AST 对象而非 JS 代码，无需 unsafe-eval
-    __INTLIFY_JIT_COMPILATION__: true
-  },
+  // Keep JSON module generation consistent with Vite 5.
+  json: { stringify: false },
   build: {
+    // Preserve Vite 5's CommonJS execution behavior during the toolchain upgrade.
+    commonjsOptions: { strictRequires: 'auto' },
     outDir: '../backend/internal/web/dist',
     emptyOutDir: true,
     rollupOptions: {
@@ -178,6 +177,7 @@ export default defineConfig(({ mode }) => {
     }
   },
     server: {
+      fs: { allow: [__dirname, resolve(__dirname, '../docs/legal')] },
       host: '0.0.0.0',
       port: devPort,
       proxy: {

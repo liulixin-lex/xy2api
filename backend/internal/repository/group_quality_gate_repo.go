@@ -390,7 +390,7 @@ func loadQualityErrorObservationsBounded(ctx context.Context, tx interface {
 	}
 	filterApplied := ""
 	if !includeAll {
-		filterApplied = " AND NOT COALESCE((ev->>'budget_cut_applied')::boolean,false)"
+		filterApplied = " AND NOT (CASE WHEN ev->>'budget_cut_applied' IN ('true','false') THEN (ev->>'budget_cut_applied')::boolean ELSE false END)"
 	}
 	limitClause := ""
 	args := []any{pq.Array(accountIDs), from.UTC(), to.UTC()}

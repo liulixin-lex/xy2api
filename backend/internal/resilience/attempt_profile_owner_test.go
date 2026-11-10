@@ -32,6 +32,7 @@ func TestAttemptTimerOwnerSurvivesSendAndWarmUpdates(t *testing.T) {
 		} else {
 			require.Equal(t, owner, plan.Start(), "send-time update never rewrites the timer plan")
 		}
+		st.ObserveAttemptStart()
 		st.NoteSemanticOutput(profile.AttemptStart.Add(time.Millisecond))
 		require.EqualValues(t, 1, *st.AttemptFirstOutputMs())
 		timing := st.Timing()
@@ -41,6 +42,7 @@ func TestAttemptTimerOwnerSurvivesSendAndWarmUpdates(t *testing.T) {
 		profile.TimerOwnerStart = owner.Add(200 * time.Millisecond)
 		profile.AttemptStart = profile.TimerOwnerStart
 		st.SetAttemptProfile(profile)
+		st.ObserveAttemptStart()
 		timing = st.Timing()
 		require.EqualValues(t, 2, *timing.LateAttemptCount)
 		require.EqualValues(t, 1, *timing.LateAttemptNoTimerCount)

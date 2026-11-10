@@ -133,3 +133,9 @@ Key 的 TTL 选择与供应商实际 usage 独立。用量接口新增 `anthropi
 Anthropic TTL 迁移 286 追加 Key 四态和 usage 两个可空观测列；已有 Key off、新建 inherit，无历史用量回填或索引。约束可能扫描 Key 表，ALTER 需要表锁，按低峰迁移；回退保留列但须明确恢复旧全局策略，详见 [TTL 迁移与回退](ANTHROPIC_CACHE_TTL.md#迁移与回退)。
 
 门槛 v3 的迁移 289（`289_usage_log_attempt_first_output.sql`）仅追加 `usage_logs.attempt_first_output_ms BIGINT NULL`，无 DEFAULT、无 NOT NULL、无索引、不回填。ALTER 会短暂取得 ACCESS EXCLUSIVE 锁，应在低峰避开长事务执行；迁移使用 `ADD COLUMN IF NOT EXISTS`，重复执行幂等。旧版本忽略该列，回退时可保留，无需删除数据或改写迁移校验和。新列从升级后开始采集；上线后 48 小时核对 OpenAI 成功流式请求的非空率（目标 ≥95%），以及它与判慢样本、端到端首字的差异。
+
+### Migration-owned Ent columns
+
+迁移 `292_usage_logs_budget_timing.sql` 新增的 18 个可空观测列已纳入 `backend/ent/schema/usage_log.go`，同步生成 nullable/nillable 字段、查询条件和 CRUD 接口。BIGINT、TEXT、BOOLEAN 分别对应 Int64、String、Bool；其中 TEXT 字段必须显式声明 `SchemaType(map[string]string{dialect.Postgres: "text"})`，才能与迁移的 TEXT 一致，避免被 Ent 当作 varchar；手写 repository 的读写口径不变，批量 INSERT 有 85 个列值，另加合成的 `input_index`。
+
+运行时由 `InitEnt` 和 setup 路径调用 SQL 迁移执行器，使用嵌入的编号迁移及校验和；不调用 Ent `Schema.Create` 或 Atlas schema diff。生成代码本身不执行 DDL。迁移仍是数据库结构的权威来源，**禁止直接应用 Ent/Atlas diff 提议的 DROP**；必须逐列核对现有 SQL 迁移。回退本次代码保留观测列和数据，不改写迁移或校验和。

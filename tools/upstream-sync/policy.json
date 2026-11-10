@@ -24,6 +24,7 @@
       "AGENTS.md",
       ".github/workflows/**",
       ".github/audit-exceptions.yml",
+      ".github/SECURITY.md",
       "CLA.md",
       "DEV_GUIDE.md",
       "README_JA.md",
@@ -494,11 +495,11 @@
     },
     {
       "path": "backend/internal/service/gemini_messages_compat_service.go",
-      "value": "geminiInPlaceRetryAllowed(ctx, &inPlaceRetries)"
+      "value": "geminiInPlaceRetryAllowed(attemptGuard.ctx, &inPlaceRetries)"
     },
     {
       "path": "backend/internal/service/gemini_chat_completions_compat_service.go",
-      "value": "geminiInPlaceRetryAllowed(ctx, &inPlaceRetries)"
+      "value": "geminiInPlaceRetryAllowed(attemptGuard.ctx, &inPlaceRetries)"
     },
     {
       "path": "backend/internal/service/gateway_forward.go",
@@ -746,7 +747,7 @@
     },
     {
       "path": "backend/internal/service/openai_gateway_messages.go",
-      "value": "rejected := !notFound && !unsupported && isOpenAICompatContinuationRejected(resp.StatusCode, respBody)"
+      "value": "rejected := !notFound && !unsupported && !isOpenAIHTTPUpstreamAccessStateError(resp.StatusCode, upstreamMsg, respBody) && isOpenAICompatContinuationRejected(resp.StatusCode, respBody)"
     },
     {
       "path": "backend/internal/service/openai_messages_continuation.go",
@@ -4239,6 +4240,182 @@
     {
       "path": "backend/internal/service/openai_gateway_forward.go",
       "value": "finishStateRejection(&forwardErr)"
+    },
+    {
+      "path": "backend/internal/service/gemini_messages_compat_service.go",
+      "value": "attemptGuard.observeDispatch(attemptStart)"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_ops_redaction.go",
+      "value": "const minimumCredentialSubstringRunes = 8"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_ops_redaction.go",
+      "value": "text = replaceOpenAITerminalOpsCredentialValue(text, secret.text, secret.substring)"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_ops_sanitizer_parity_test.go",
+      "value": "func TestOpenAITerminalOpsShortCredentialBoundaries(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/gateway_convert_stream_test.go",
+      "value": "func TestGatewayConvertFailedAttemptLeavesNoTrace(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/gateway_claude_oauth_body.go",
+      "value": "!omitDefaultTemperature"
+    },
+    {
+      "path": "backend/internal/service/resilience_timeout_observe.go",
+      "value": "timeoutMetricModel(plan.Model())+\":\"+bucket"
+    },
+    {
+      "path": "backend/internal/service/resilience_timeout_observe.go",
+      "value": "return \"other\""
+    },
+    {
+      "path": "backend/internal/service/resilience_timeout_observe_test.go",
+      "value": "func TestTimeoutPlanMetricModelCardinality(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_ops_redaction.go",
+      "value": "value, ok = credAccount.GetCredential(key), true"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_ops_redaction.go",
+      "value": "json.Marshal(redactOpenAITerminalOpsJSON(value, redactText))"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_ops_sanitizer_parity_test.go",
+      "value": "func TestOpenAITerminalOpsDecodedCredentialsNeverReachQueue(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/resilience_timeout_observe.go",
+      "value": "for _, model := range antigravity.DefaultModels() {"
+    },
+    {
+      "path": "backend/internal/service/resilience_timeout_observe_test.go",
+      "value": "func TestTimeoutMetricIncludesAllBuiltinCatalogs(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_ops_redaction.go",
+      "value": "if containsCredential(redacted) || containsCredential(string(encoded)) {"
+    },
+    {
+      "path": "backend/internal/service/openai_terminal_ops_sanitizer_parity_test.go",
+      "value": "func TestOpenAITerminalOpsSerializationCannotRecreateCredentials(t *testing.T) {"
+    },
+    {
+      "path": "backend/internal/service/gemini_messages_compat_service.go",
+      "value": "attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, req.Stream, attemptGuard.unique, attemptGuard.protocol)"
+    },
+    {
+      "path": "backend/internal/service/gemini_messages_compat_service.go",
+      "value": "attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, stream, attemptGuard.unique, attemptGuard.protocol)"
+    },
+    {
+      "path": "backend/internal/service/gemini_chat_completions_compat_service.go",
+      "value": "attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, clientStream, attemptGuard.unique, attemptGuard.protocol)"
+    },
+    {
+      "path": "backend/internal/handler/gemini_v1beta_handler.go",
+      "value": "defer stopPreOutputKeepalive(c)"
+    },
+    {
+      "path": "backend/internal/repository/group_quality_gate_repo.go",
+      "value": "CASE WHEN ev->>'budget_cut_applied' IN ('true','false') THEN (ev->>'budget_cut_applied')::boolean ELSE false END"
+    },
+    {
+      "path": "backend/internal/repository/share_scheduling_repo.go",
+      "value": "CASE WHEN ev->>'budget_cut_applied' IN ('true','false') THEN (ev->>'budget_cut_applied')::boolean ELSE false END"
+    },
+    {
+      "path": "backend/internal/mcp/runtime_health.go",
+      "value": "CASE WHEN ev->>'budget_cut_applied' IN ('true','false') THEN (ev->>'budget_cut_applied')::boolean ELSE false END"
+    },
+    {
+      "path": "backend/internal/service/resilience_gemini_attempt.go",
+      "value": "func geminiJSONStreamReader(c *gin.Context, resp *http.Response, cfg *config.Config) (io.Reader, error)"
+    },
+    {
+      "path": "backend/internal/service/gemini_messages_compat_service.go",
+      "value": "jsonAsSSE := jsonFallback && PreOutputKeepaliveCommitted(c)"
+    },
+    {
+      "path": "backend/internal/service/gemini_chat_completions_compat_service.go",
+      "value": "upstreamBody, err := geminiJSONStreamReader(c, resp, s.cfg)"
+    },
+    {
+      "path": "backend/internal/handler/user_msg_queue_helper.go",
+      "value": "service.WriteSlotWaitHeartbeat(c, []byte(pingFormat), h.pingInterval, \"queue_wait\")"
+    },
+    {
+      "path": "backend/internal/handler/gateway_helper.go",
+      "value": "service.WriteSlotWaitHeartbeat(c, []byte(pingFormat), h.pingInterval, \"slot_wait\")"
+    },
+    {
+      "path": "backend/internal/service/openai_compact_sse_keepalive.go",
+      "value": "k.noteCommitted(\"request\")"
+    },
+    {
+      "path": "backend/internal/service/resilience_keepalive.go",
+      "value": "\"source\", source"
+    },
+    {
+      "path": "backend/internal/service/openai_first_output_timeout.go",
+      "value": "PreludeTrace().StagedAt.Equal(startTime)"
+    },
+    {
+      "path": "backend/internal/service/openai_first_output_timeout.go",
+      "value": "phase=%s staged=%t elapsed=%s"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_passthrough.go",
+      "value": "resilience.ResponsesEventOutputDisposition(effectiveOpenAISSEEventType([]byte(data), pendingSSEEventType), []byte(data)).Staged"
+    },
+    {
+      "path": ".github/SECURITY.md",
+      "value": "https://github.com/liulixin-lex/xy2api/security/advisories/new"
+    },
+    {
+      "path": "backend/internal/service/resilience_fallback_group.go",
+      "value": "\"api_key_id\", apiKey.ID, \"reason\", reason)"
+    },
+    {
+      "path": "backend/ent/schema/usage_log.go",
+      "value": "field.Int64(\"budget_t0_unix_ms\").Optional().Nillable()"
+    },
+    {
+      "path": "backend/internal/service/gateway_request.go",
+      "value": "func validateHaiku55MessagesRequest("
+    },
+    {
+      "path": "backend/internal/service/gateway_request.go",
+      "value": "account.Type == AccountTypeAPIKey && isOfficialAnthropicAPIBaseURL(account.GetBaseURL())"
+    },
+    {
+      "path": "backend/internal/service/gateway_request.go",
+      "value": "if !claudeAPI || !claude.IsHaiku55(model) {"
+    },
+    {
+      "path": "backend/internal/service/upstream_billing_probe.go",
+      "value": "func isOfficialAnthropicAPIBaseURL(baseURL string) bool {"
+    },
+    {
+      "path": "backend/internal/domain/constants.go",
+      "value": "\"claude-haiku-5-5\":          \"anthropic.claude-haiku-5-5\""
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_scheduling.go",
+      "value": "if account.ID == state.StickyOwner() {"
+    },
+    {
+      "path": "backend/ent/migrate/usage_log_budget_timing_test.go",
+      "value": "require.Equal(t, \"text\", actual.SchemaType[\"postgres\"])"
+    },
+    {
+      "path": "backend/internal/pkg/googleapi/status.go",
+      "value": "return \"UNAVAILABLE\""
     }
   ],
   "forbidden_module_paths": [
@@ -4320,6 +4497,36 @@
     "xy-support-chat"
   ],
   "custom_patch_tests": [
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_error_classification_forward_test.go",
+      "literal": "TestOpenAIDeviceBindingRequiredForwardRoutes"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/inference_not_found_test.go",
+      "literal": "TestInference404RecognizesFastAPIAndAnthropicGenericEnvelopes"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/grok_upstream_errors_test.go",
+      "literal": "TestGrokCustomGenericInference404UsesSharedCustomPolicy"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/grok_upstream_errors_test.go",
+      "literal": "TestGrokMessagesNonFailoverSkipsOpenAIAccountSideEffects"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_error_classification_forward_test.go",
+      "literal": "TestGeminiGeneric404PolicyAcrossEntrypoints"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/resilience_anthropic_type_test.go",
+      "literal": "TestAnthropicModelUnavailableExhaustionMatchesLocalType"
+    },
     {
       "id": "xy-fallback-group-user-invisible",
       "path": "frontend/src/components/admin/usage/__tests__/UsageTable.fallback.spec.ts",
@@ -7089,6 +7296,36 @@
       "id": "xy-error-recovery-routing",
       "path": "backend/internal/handler/resilience_state_rejection_test.go",
       "literal": "func TestStateRejectionTerminatesRecoveryWithoutBudgetOrMaster(t *testing.T)"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_error_classification_followup_test.go",
+      "literal": "TestOpenAIDeviceBindingChainedMessagesSingleAttempt"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_error_classification_followup_test.go",
+      "literal": "TestOpenAICompatStreamModelAvailability"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_error_classification_followup_test.go",
+      "literal": "TestOpenAIDeviceBindingClassificationPlatformBoundary"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_error_classification_followup_test.go",
+      "literal": "TestOpenAIDeviceBindingWSHandshake"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/resilience_anthropic_type_test.go",
+      "literal": "TestOpenAIDeviceBindingExhaustionUsesExistingAccountExit"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/service/openai_error_classification_followup_test.go",
+      "literal": "TestInference404AnthropicEnvelopeRequiresEvidence"
     }
   ]
 }

@@ -115,7 +115,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		}
 	}
 	if account != nil && account.Platform == PlatformAnthropic {
-		if err := validateClaude55Request(parsed.Body.Bytes(), validationModel); err != nil {
+		if err := validateClaude55RequestForAccount(parsed.Body.Bytes(), validationModel, account); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"type": "error", "error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
 			return nil, err
 		}
@@ -412,6 +412,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		attemptProfile.AttemptStart = time.Now()
 		attemptProfile.BodyBytes = len(wireBody)
 		resilience.StateFrom(ctx).SetAttemptProfile(attemptProfile)
+		resilience.StateFrom(ctx).ObserveAttemptStart()
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
 		if err != nil {
 			if resp != nil && resp.Body != nil {

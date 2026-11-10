@@ -31,6 +31,7 @@ type EventClass struct {
 type ResponsesOutputDisposition struct {
 	Matched          bool
 	Kind             EventKind
+	Staged           bool
 	Visible          bool
 	SemanticOutput   bool
 	BlankPlaceholder bool
@@ -56,7 +57,7 @@ func ResponsesEventOutputDisposition(eventType string, payload []byte) Responses
 	if !isKnownResponsesEventType(typ) {
 		if validObject && typ != "" && (declaredType == "" || declaredType == typ) &&
 			responsesUnknownEventHasOnlyMetadata(root, typ) {
-			return ResponsesOutputDisposition{Matched: true, Kind: Prelude}
+			return ResponsesOutputDisposition{Matched: true, Kind: Prelude, Staged: true}
 		}
 		return responsesVisibleDisposition()
 	}

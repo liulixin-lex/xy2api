@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "upstream_commit": "f2669c8cf62555cd92389b3f55920e9e6e7c6ff2",
-  "description": "Reviewed differences between the original Sub2API scheduler files and the recorded upstream commit. Any other change, or a changed upstream commit, fails `sync.py scheduler-diff` until reviewed. Reviewed for v0.2.15: all existing XY2API difference blocks are unchanged; the upstream NormalizeOpenAICompatiblePlatform change to domain.UsesOpenAIGateway is adopted verbatim after module-path normalization. Reviewed for 0.4.0: gateway resilience hooks are registered as `gateway-resilience` blocks; two earlier lines were rewritten by them (named results of SelectAccountWithLoadAwareness, the last-resort runtime-block gate). Reviewed for 0.4.5 local integration: all four original scheduler files are byte-for-byte unchanged from the 0.4.4 post-release main; the existing reviewed difference blocks remain valid.",
+  "description": "Reviewed differences between the original Sub2API scheduler files and the recorded upstream commit. Any other change, or a changed upstream commit, fails `sync.py scheduler-diff` until reviewed. Reviewed for v0.2.15: all existing XY2API difference blocks are unchanged; the upstream NormalizeOpenAICompatiblePlatform change to domain.UsesOpenAIGateway is adopted verbatim after module-path normalization. Reviewed for 0.4.0: gateway resilience hooks are registered as `gateway-resilience` blocks; two earlier lines were rewritten by them (named results of SelectAccountWithLoadAwareness, the last-resort runtime-block gate). Reviewed for 0.4.5 local integration: all four original scheduler files are byte-for-byte unchanged from the 0.4.4 post-release main; the existing reviewed difference blocks remain valid. Reviewed for v0.5.13 T2: error classification and account failover changes do not touch scheduler files; existing difference blocks remain valid. T2 follow-up: chained Messages access failures, compatibility stream model errors, and WS handshake failover retain the same scheduler files and reviewed blocks. Reviewed for 0.5.13 small fixes: credential-length handling is confined to terminal SSE ops persistence; structured conversion assertions only change tests. Original scheduler files and all reviewed difference blocks are unchanged. Follow-up: OAuth default temperature omission for Fable/Mythos and bounded timeout metric model labels do not change original scheduler blocks; peak, cancellation, and race corrections are test-only. Terminal ops also retains legacy numeric identity credential conversion; scheduler code remains unchanged. T3 review fixes decode terminal JSON before credential boundaries, fail closed on ambiguous short values, and include the Antigravity built-in metric catalog; original scheduler blocks are unchanged. Terminal credential scrubbing additionally checks re-encoded fields and final storage bytes; no scheduler differences are added. Reviewed for 0.5.13 T-HB: queue heartbeat coordination and commit/staging log observations do not change any of these four scheduler files; existing difference blocks remain valid. T-HB L49 revision: throttle retains shared queue heartbeats; native and passthrough G2b staging observation remains per-line, and multi-data event assembly is outside 0.5.13. No scheduler-file change. Reviewed for T-SECENT: fallback-group and sticky-owner balance reasons are diagnostic only; the sticky owner read hook is registered below. T-SECENT TEXT type alignment changes only Ent schema/generated migration metadata and its tests; scheduler source and reviewed blocks are unchanged. Reviewed for T-HAIKU: Haiku 5.5 generation validation and the official Bedrock alias do not alter the four original scheduler files or their reviewed difference blocks. P2-A01 leaves Bedrock and managed-platform requests upstream-validated; P2-A02 limits API-key enforcement to the official Anthropic endpoint, while custom relay URLs remain upstream-validated. Scheduler files and reviewed blocks are unchanged.",
   "files": {
     "backend/internal/service/gateway_scheduling.go": [
       {
@@ -1960,6 +1960,19 @@
           "resilience.StateFrom(ctx).NoteStickyBypassReason(\"concurrency_full\")",
           "return selection, capacityErr"
         ]
+      },
+      {
+        "block": "sticky-bypass-balance-reason",
+        "note": "C7: retain an active sticky owner balance_exhausted reason before generic availability/clear reasons; existing account read and selection behavior are unchanged. Failed-in-request log attribution still wins.",
+        "removed": [],
+        "added": [
+          "state := resilience.StateFrom(ctx)",
+          "if account.ID == state.StickyOwner() {",
+          "if _, _, reason := resiliencePenaltyOf(account, \"\", time.Now()); reason == \"balance_exhausted\" {",
+          "state.NoteStickyBypassReason(reason)",
+          "}",
+          "}"
+        ]
       }
     ],
     "backend/internal/service/gemini_messages_compat_service.go": [
@@ -2061,11 +2074,11 @@
           "// with ±20 % jitter, bounded by the request budget. It returns false as soon",
           "budget := resilience.StateFrom(ctx).Budget()",
           "cfg := resilience.Current()",
-          "delay = b.ClampWait(delay, time.Now())",
+          "delay = b.ClampWaitWithTimer(delay, time.Now(), geminiRetryHasTimer(ctx))",
           "delay = resilience.Jitter(delay, 0.2)",
           "func geminiInPlaceRetryAllowed(ctx context.Context, retries *int) bool {",
           "func sleepGeminiBackoffCtx(ctx context.Context, attempt int) bool {",
-          "if !budget.ConsumeInPlaceRetry(0, false, time.Now()) {",
+          "if !budget.ConsumeInPlaceRetryWithTimer(0, false, time.Now(), geminiRetryHasTimer(ctx)) {",
           "if !cfg.BudgetOn() || budget == nil {",
           "if *retries >= cfg.Budget.GeminiSameAccountRetries {",
           "if b := resilience.StateFrom(ctx).Budget(); b != nil {",
@@ -2134,8 +2147,8 @@
           "if !sleepGeminiBackoffCtx(attemptGuard.ctx, 1) {",
           "if !sleepGeminiBackoffCtx(attemptGuard.ctx, attempt) {",
           "if !sleepGeminiBackoffCtx(attemptGuard.ctx, attempt) {",
-          "if attempt < geminiMaxRetries && !resilienceGeminiSkipInPlaceRetry(ctx, account, resp.StatusCode, resp.Header, respBody) && geminiInPlaceRetryAllowed(ctx, &inPlaceRetries) {",
-          "if attempt < geminiMaxRetries && !resilienceGeminiSkipInPlaceRetry(ctx, account, resp.StatusCode, resp.Header, respBody) && geminiInPlaceRetryAllowed(ctx, &inPlaceRetries) {",
+          "if attempt < geminiMaxRetries && !resilienceGeminiSkipInPlaceRetry(ctx, account, resp.StatusCode, resp.Header, respBody) && geminiInPlaceRetryAllowed(attemptGuard.ctx, &inPlaceRetries) {",
+          "if attempt < geminiMaxRetries && !resilienceGeminiSkipInPlaceRetry(ctx, account, resp.StatusCode, resp.Header, respBody) && geminiInPlaceRetryAllowed(attemptGuard.ctx, &inPlaceRetries) {",
           "if err != nil {",
           "if err := completeGeminiResponse(resp, nil); err != nil {",
           "if err := completeGeminiResponse(resp, nil); err != nil {",
@@ -2234,8 +2247,6 @@
           "\"github.com/tidwall/sjson\"",
           "resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{",
           "attemptStart := time.Now()",
-          "if attempt == 1 {",
-          "attemptStart = startTime",
           "}",
           "AccountID: account.ID, Model: originalModel, AttemptStart: attemptStart, Stream: req.Stream, BodyBytes: len(geminiReq),",
           "})",
@@ -2256,8 +2267,6 @@
           "}",
           "resilience.StateFrom(ctx).SetAttemptProfile(resilience.AttemptProfile{",
           "attemptStart := time.Now()",
-          "if attempt == 1 {",
-          "attemptStart = startTime",
           "}",
           "AccountID: account.ID, Model: originalModel, AttemptStart: attemptStart, Stream: stream, BodyBytes: len(body),",
           "})",
@@ -2321,8 +2330,6 @@
           "s.handleGeminiUpstreamErrorForAction(ctx, account, statusCode, headers, body, true, requestedModel...)",
           "s.rateLimitService.handleUpstreamError(ctx, account, statusCode, headers, body, inference, requestedModel...)",
           "}",
-          "}",
-          "}",
           "NonInference:           nonInference,",
           "ResilienceCategory: category,",
           "ResilienceCategory: category,",
@@ -2339,6 +2346,53 @@
           "return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: evBody, ResponseHeaders: resp.Header.Clone(), RetryableOnSameAccount: true, NonInference: action == \"countTokens\"}",
           "return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, ResponseHeaders: resp.Header.Clone(), NonInference: action == \"countTokens\"}",
           "}",
+          "}"
+        ]
+      },
+      {
+        "block": "budget-g9-dispatch-observation",
+        "note": "G9 observation only: freeze existing shared-guard coverage for each actual dispatch. In-place retries keep their existing send starts, timer and immutable plan. Covered by TestG9DispatchObservationCallsites and TestGeminiAttemptTimerOwnsInitialProfileAcrossInPlaceRetry.",
+        "removed": [],
+        "added": [
+          "attemptGuard.observeDispatch(attemptStart)",
+          "attemptGuard.observeDispatch(attemptStart)"
+        ]
+      },
+      {
+        "block": "gemini-pre-output-0513",
+        "note": "Gemini sole-candidate pre-output heartbeat and actual send AttemptStart; preserve shared timer ownership.",
+        "removed": [],
+        "added": [
+          "attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, req.Stream, attemptGuard.unique, attemptGuard.protocol)",
+          "attemptGuard.keepalive = StartGeminiUniqueCandidateKeepalive(c, account, stream, attemptGuard.unique, attemptGuard.protocol)",
+          "resumeGeminiPreOutputKeepalive(c, resp)",
+          "resumeGeminiPreOutputKeepalive(c, resp)"
+        ]
+      },
+      {
+        "block": "gemini-json-fallback-0513",
+        "note": "Keep native fallback JSON byte-identical before heartbeat commit; frame committed JSON as SSE and normalize compat JSON through existing stream converters.",
+        "removed": [
+          "reader := bufio.NewReader(resp.Body)"
+        ],
+        "added": [
+          "// Headers suspended the heartbeat. JSON passthrough must not commit SSE",
+          "// while its body is still arriving; an already committed stream keeps beating.",
+          "contentType = \"text/event-stream\"",
+          "if !jsonFallback || jsonAsSSE {",
+          "if err != nil {",
+          "if jsonAsSSE {",
+          "jsonAsSSE := jsonFallback && PreOutputKeepaliveCommitted(c)",
+          "jsonFallback := strings.HasPrefix(strings.ToLower(contentType), \"application/json\")",
+          "reader := bufio.NewReader(upstreamBody)",
+          "return nil, err",
+          "upstreamBody, err := geminiJSONStreamReader(c, resp, s.cfg)",
+          "}",
+          "}",
+          "}",
+          "if errors.As(err, &syntaxError) {",
+          "return nil, s.writeClaudeError(c, http.StatusBadGateway, \"upstream_error\", \"Failed to parse upstream response\")",
+          "var syntaxError *json.SyntaxError",
           "}"
         ]
       }

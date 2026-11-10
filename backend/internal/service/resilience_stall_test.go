@@ -151,6 +151,7 @@ func TestFirstEventPlanOwnsTheProfileAttemptStart(t *testing.T) {
 	timeout, plan := resilienceFirstEventPlan(ctx, 7, PlatformAnthropic)
 	require.Equal(t, started, plan.Start())
 	require.Equal(t, plan.Effective(), timeout)
+	st.ObserveAttemptStart()
 	timing := st.Timing()
 	require.EqualValues(t, 1, *timing.LateAttemptCount)
 	require.Zero(t, *timing.LateAttemptNoTimerCount)

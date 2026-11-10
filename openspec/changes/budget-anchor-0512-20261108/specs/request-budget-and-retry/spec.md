@@ -26,6 +26,7 @@ Text requests MUST use D=min(anchor+base,arrival+290 s). The default anchor MUST
 
 #### Scenario: Existing timer boundaries
 - GIVEN a path with no single-attempt timer
-- THEN new attempts MUST obey the existing D−2 s admission window and running attempts MUST NOT gain a request-level cancellation.
+- THEN in body_eof mode, no-timer attempts and attempts whose timer coverage cannot be determined MUST use the arrival deadline T0+base for waits; admission of a new attempt MUST retain the 2 s window.
+- THEN an attempt with an installed timer MUST continue using D, and a running attempt without a timer MUST NOT gain a request-level cancellation.
 - GIVEN a replayable Gemini non-streaming attempt
 - THEN its existing attempt timer MUST remain active and the last-candidate exception MUST remain unchanged.

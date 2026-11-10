@@ -53,6 +53,9 @@ func TestG2BB2UnknownMetadataBoundaries(t *testing.T) {
 			if class := ClassifyStreamEvent("responses", tc.event, []byte(tc.payload)); (class.Kind == Prelude) != tc.prelude {
 				t.Fatalf("classification %+v disagrees with disposition %+v", class, got)
 			}
+			if got.Staged != tc.prelude {
+				t.Fatalf("staged marker mismatch: %+v", got)
+			}
 		})
 	}
 }

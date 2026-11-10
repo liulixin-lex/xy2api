@@ -341,12 +341,19 @@ func (s *OpenAIGatewayService) handleOpenAIWSFailureAccountSideEffects(ctx conte
 	return true
 }
 
-func (s *OpenAIGatewayService) handleOpenAIWSDialTransientFailure(ctx context.Context, account *Account, canonicalModel string, err error) {
+func (s *OpenAIGatewayService) handleOpenAIWSDialTransientFailure(ctx context.Context, account *Account, canonicalModel string, err error) *UpstreamFailoverError {
 	var dialErr *openAIWSDialError
-	if !errors.As(err, &dialErr) || dialErr == nil || !shouldCooldownOpenAITransientUpstreamError(dialErr.StatusCode, dialErr.ResponseBody) {
-		return
+	if !errors.As(err, &dialErr) || dialErr == nil {
+		return nil
 	}
-	s.handleOpenAIAccountUpstreamError(ctx, account, dialErr.StatusCode, dialErr.ResponseHeaders, dialErr.ResponseBody, canonicalModel)
+	if account != nil && account.Platform == PlatformOpenAI && isOpenAIDeviceBindingRequired(dialErr.StatusCode, dialErr.ResponseBody) {
+		s.handleOpenAIAccountUpstreamError(ctx, account, dialErr.StatusCode, dialErr.ResponseHeaders, dialErr.ResponseBody, canonicalModel)
+		return newOpenAIUpstreamFailoverError(dialErr.StatusCode, dialErr.ResponseHeaders, dialErr.ResponseBody, extractUpstreamErrorMessage(dialErr.ResponseBody), false)
+	}
+	if shouldCooldownOpenAITransientUpstreamError(dialErr.StatusCode, dialErr.ResponseBody) {
+		s.handleOpenAIAccountUpstreamError(ctx, account, dialErr.StatusCode, dialErr.ResponseHeaders, dialErr.ResponseBody, canonicalModel)
+	}
+	return nil
 }
 
 func isOpenAIWSTokenEvent(eventType string) bool {

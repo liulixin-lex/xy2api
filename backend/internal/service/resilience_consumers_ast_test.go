@@ -122,7 +122,6 @@ func TestBudgetDeadlineConsumerASTU10(t *testing.T) {
 		},
 		"ConsumeInPlaceRetry": {
 			"internal/service/antigravity_gateway_retry.go:AntigravityGatewayService.antigravityRetryLoop":      3,
-			"internal/service/gemini_messages_compat_service.go:geminiInPlaceRetryAllowed":                      1,
 			"internal/service/openai_gateway_forward.go:OpenAIGatewayService.Forward":                           1,
 			"internal/service/openai_m3.go:openAIM3Attempt.learn":                                               1,
 			"internal/service/openai_messages_continuation.go:resilienceContinuationReplayAllowed":              1,
@@ -131,9 +130,19 @@ func TestBudgetDeadlineConsumerASTU10(t *testing.T) {
 			"internal/service/resilience_request_repair_replay.go:newOpenAIRequestRepairSignal":                 1,
 			"internal/service/resilience_web_search_replay.go:OpenAIGatewayService.openAIWebSearchReplayDecide": 1,
 		},
+		"ConsumeInPlaceRetryWithTimer": {
+			"internal/resilience/budget.go:Budget.ConsumeInPlaceRetry":                     1,
+			"internal/service/gemini_messages_compat_service.go:geminiInPlaceRetryAllowed": 1,
+		},
+		"AdmissionRemaining": {
+			"internal/handler/resilience_budget.go:resilienceSlotWaitTimeout": 1,
+			"internal/resilience/budget.go:Budget.ClampWaitWithTimer":         1,
+		},
+		"ClampWaitWithTimer": {
+			"internal/resilience/budget.go:Budget.ClampWait":                           1,
+			"internal/service/gemini_messages_compat_service.go:sleepGeminiBackoffCtx": 1,
+		},
 		"Remaining": {
-			"internal/handler/resilience_budget.go:resilienceSlotWaitTimeout":       1,
-			"internal/resilience/budget.go:Budget.ClampWait":                        1,
 			"internal/resilience/request_timing.go:RequestState.NoteOpenAIDispatch": 1,
 			"internal/resilience/timeout_plan.go:RequestState.ResponseStagePlan":    1,
 		},
@@ -141,14 +150,13 @@ func TestBudgetDeadlineConsumerASTU10(t *testing.T) {
 			"internal/handler/resilience_budget.go:resilienceRetryDelay":                               1,
 			"internal/handler/resilience_budget.go:sameAccountRetryAllowedCtx":                         1,
 			"internal/service/antigravity_gateway_retry.go:AntigravityGatewayService.handleSmartRetry": 1,
-			"internal/service/gemini_messages_compat_service.go:sleepGeminiBackoffCtx":                 1,
 		},
 		// AttemptTimeout has no production callsites; callers use TimeoutPlan.
 		"AttemptTimeout": {},
 		// Deadline is read once for the non-gating request timing observation.
 		"Deadline": {"internal/resilience/request_timing.go:RequestState.Timing": 1},
 	}
-	for _, method := range []string{"CanAttempt", "ConsumeInPlaceRetry", "Remaining", "ClampWait", "AttemptTimeout", "Deadline"} {
+	for _, method := range []string{"CanAttempt", "ConsumeInPlaceRetry", "ConsumeInPlaceRetryWithTimer", "AdmissionRemaining", "Remaining", "ClampWait", "ClampWaitWithTimer", "AttemptTimeout", "Deadline"} {
 		got := productionResilienceCallsites(t, method, method == "Deadline")
 		if !reflect.DeepEqual(got, want[method]) {
 			t.Errorf("%s callsites changed; review the §2.2.1 consumer list before updating this AST guard\n got: %s\nwant: %s", method, strings.Join(sortedCallsiteKeys(got), ", "), strings.Join(sortedCallsiteKeys(want[method]), ", "))
@@ -248,4 +256,21 @@ func callPositions(node ast.Node, name string) []token.Pos {
 		return true
 	})
 	return positions
+}
+
+// G9 metrics must be visible before blocking in transport; the profile-only
+// handler and repair setup sites are intentionally not dispatch observations.
+func TestG9DispatchObservationCallsites(t *testing.T) {
+	want := map[string]int{
+		"internal/service/resilience_gemini_attempt.go:geminiAttempt.observeDispatch":                                 1,
+		"internal/resilience/request_timing.go:RequestState.NoteOpenAIDispatch":                                       1,
+		"internal/service/gateway_forward.go:GatewayService.Forward":                                                  1,
+		"internal/service/gateway_anthropic_passthrough.go:GatewayService.forwardAnthropicAPIKeyPassthroughWithInput": 1,
+		"internal/service/gateway_forward_as_responses.go:GatewayService.ForwardAsResponses":                          1,
+		"internal/service/gateway_forward_as_chat_completions.go:GatewayService.ForwardAsChatCompletions":             1,
+	}
+	got := productionResilienceCallsites(t, "ObserveAttemptStart", false)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("G9 dispatch observations changed: got %v, want %v", got, want)
+	}
 }

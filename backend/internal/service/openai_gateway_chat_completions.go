@@ -974,6 +974,13 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				}
 			}
 			captureOpenAIStateRejection(c, account, payloadBytes, message, "chat", clientOutputStarted, nil)
+			wrappedStatus, _, malformed := openAIWrappedUpstreamErrorStatus(event.Type, payloadBytes)
+			if !malformed && !clientDisconnected && !openAIStreamClientOutputStarted(c, clientOutputStarted) && c.Request.Context().Err() == nil {
+				if failure := s.failoverOpenAIStreamModelAvailability(c.Request.Context(), c, account, payloadBytes, message, resp.Header, upstreamModel, false, wrappedStatus); failure != nil {
+					streamFailoverErr = failure
+					return true
+				}
+			}
 			shouldFailover := openAIStreamFailedEventShouldFailover(payloadBytes, message)
 			if strings.TrimSpace(event.Type) == "error" {
 				shouldFailover = openAIStreamErrorEventShouldFailover(payloadBytes, message)
@@ -985,7 +992,11 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			if !clientOutputStarted {
 				releaseOpenAIPrelude(preludeTrace, event.Type, []byte(payload))
 			}
-			s.resilienceOpenAIFailedAfterOutput(c.Request.Context(), account, resp, payloadBytes, message, clientOutputStarted)
+			if _, modelUnavailable := openAIStreamModelAvailabilityStatus(payloadBytes, message, wrappedStatus); !malformed && modelUnavailable && openAIStreamClientOutputStarted(c, clientOutputStarted) {
+				s.handleOpenAIStreamFailureAfterOutput(c.Request.Context(), c, account, resp, payloadBytes, message, upstreamModel, wrappedStatus)
+			} else {
+				s.resilienceOpenAIFailedAfterOutput(c.Request.Context(), account, resp, payloadBytes, message, clientOutputStarted)
+			}
 			message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payloadBytes, message)
 			defaultStatus, defaultErrType, defaultMsg := http.StatusBadGateway, "upstream_error", message
 			// 统一走语义状态推断 + body 归一化（与 /v1/responses 路径一致），
@@ -1029,6 +1040,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				failoverErr.SafeToFailoverAfterWrite = true
 				streamFailoverErr = failoverErr
 				return true
+			}
+			if resilience.ResponsesEventOutputDisposition(event.Type, []byte(payload)).Staged {
+				resilience.StateFrom(c.Request.Context()).NotePreludeStaged(startTime)
 			}
 			deferredOpenAIChatChunks(&event, state, true)
 			return false

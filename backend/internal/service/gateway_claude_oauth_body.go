@@ -260,13 +260,16 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 		}
 	}
 
-	// temperature：真实 Claude Code CLI 总是发送 temperature（默认 1，客户端可覆盖）。
+	// temperature：支持采样参数的型号沿用 CLI 默认 1，客户端可覆盖。
 	// 之前的实现直接 delete 会导致 payload 缺字段，与真实 CLI 字节级不一致。
 	// 策略：客户端传了什么就透传；没传则补默认 1。客户端已带 top_p 时不补：
 	// Claude 4 及以后的模型拒绝 temperature 与 top_p 同时出现。
-	// Opus 4.7 及以后连默认值也拒绝。此伪装路径的出站 anthropic-version
+	// Opus 4.7 及以后连默认值也拒绝；Fable/Mythos 的支持存在分歧，保守不补。
+	// 此伪装路径的出站 anthropic-version
 	// 固定为 2023-06-01（buildUpstreamRequest/buildCountTokensRequest），不使用客户端版本头。
-	if !gjson.GetBytes(out, "temperature").Exists() && !gjson.GetBytes(out, "top_p").Exists() && !claude.RejectsSamplingParameters(modelID) {
+	modelLower := strings.ToLower(modelID)
+	omitDefaultTemperature := claude.RejectsSamplingParameters(modelID) || strings.Contains(modelLower, "claude-fable-") || strings.Contains(modelLower, "claude-mythos-")
+	if !gjson.GetBytes(out, "temperature").Exists() && !gjson.GetBytes(out, "top_p").Exists() && !omitDefaultTemperature {
 		if next, ok := setJSONValueBytes(out, "temperature", 1); ok {
 			out = next
 			modified = true

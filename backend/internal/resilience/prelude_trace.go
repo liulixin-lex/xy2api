@@ -13,6 +13,7 @@ type PreludeReleaseSchema struct {
 // PreludeTraceSnapshot describes the first release in the current attempt.
 // A zero delay also represents content that arrived without a created event.
 type PreludeTraceSnapshot struct {
+	StagedAt              time.Time
 	ReleaseEvent          string
 	ReleaseAfterCreatedMS int64
 	PreludeReleaseSchema
@@ -26,7 +27,21 @@ func (s *RequestState) NotePreludeCreated(at time.Time) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.prelude = preludeTrace{createdAt: at}
+	if at.IsZero() {
+		s.prelude = preludeTrace{}
+		return
+	}
+	s.prelude = preludeTrace{createdAt: at, stagedAt: s.prelude.stagedAt}
+}
+
+// NotePreludeStaged marks an unknown metadata event held before first output.
+func (s *RequestState) NotePreludeStaged(at time.Time) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.prelude.stagedAt = at
+	s.mu.Unlock()
 }
 
 // NotePreludeReleased freezes the event that releases the opening sequence.
@@ -53,5 +68,5 @@ func (s *RequestState) PreludeTrace() PreludeTraceSnapshot {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return PreludeTraceSnapshot{ReleaseEvent: s.prelude.releaseEvent, ReleaseAfterCreatedMS: s.prelude.releaseAfterCreatedMS, PreludeReleaseSchema: s.prelude.schema}
+	return PreludeTraceSnapshot{StagedAt: s.prelude.stagedAt, ReleaseEvent: s.prelude.releaseEvent, ReleaseAfterCreatedMS: s.prelude.releaseAfterCreatedMS, PreludeReleaseSchema: s.prelude.schema}
 }

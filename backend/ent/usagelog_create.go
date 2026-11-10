@@ -693,6 +693,258 @@ func (_c *UsageLogCreate) SetNillableCreatedAt(v *time.Time) *UsageLogCreate {
 	return _c
 }
 
+// SetBodyBytes sets the "body_bytes" field.
+func (_c *UsageLogCreate) SetBodyBytes(v int64) *UsageLogCreate {
+	_c.mutation.SetBodyBytes(v)
+	return _c
+}
+
+// SetNillableBodyBytes sets the "body_bytes" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableBodyBytes(v *int64) *UsageLogCreate {
+	if v != nil {
+		_c.SetBodyBytes(*v)
+	}
+	return _c
+}
+
+// SetFirstReadMs sets the "first_read_ms" field.
+func (_c *UsageLogCreate) SetFirstReadMs(v int64) *UsageLogCreate {
+	_c.mutation.SetFirstReadMs(v)
+	return _c
+}
+
+// SetNillableFirstReadMs sets the "first_read_ms" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableFirstReadMs(v *int64) *UsageLogCreate {
+	if v != nil {
+		_c.SetFirstReadMs(*v)
+	}
+	return _c
+}
+
+// SetBodyEOFMs sets the "body_eof_ms" field.
+func (_c *UsageLogCreate) SetBodyEOFMs(v int64) *UsageLogCreate {
+	_c.mutation.SetBodyEOFMs(v)
+	return _c
+}
+
+// SetNillableBodyEOFMs sets the "body_eof_ms" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableBodyEOFMs(v *int64) *UsageLogCreate {
+	if v != nil {
+		_c.SetBodyEOFMs(*v)
+	}
+	return _c
+}
+
+// SetAnchorBasis sets the "anchor_basis" field.
+func (_c *UsageLogCreate) SetAnchorBasis(v string) *UsageLogCreate {
+	_c.mutation.SetAnchorBasis(v)
+	return _c
+}
+
+// SetNillableAnchorBasis sets the "anchor_basis" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableAnchorBasis(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetAnchorBasis(*v)
+	}
+	return _c
+}
+
+// SetAnchorEligible sets the "anchor_eligible" field.
+func (_c *UsageLogCreate) SetAnchorEligible(v bool) *UsageLogCreate {
+	_c.mutation.SetAnchorEligible(v)
+	return _c
+}
+
+// SetNillableAnchorEligible sets the "anchor_eligible" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableAnchorEligible(v *bool) *UsageLogCreate {
+	if v != nil {
+		_c.SetAnchorEligible(*v)
+	}
+	return _c
+}
+
+// SetBodyReceiptRepeat sets the "body_receipt_repeat" field.
+func (_c *UsageLogCreate) SetBodyReceiptRepeat(v int64) *UsageLogCreate {
+	_c.mutation.SetBodyReceiptRepeat(v)
+	return _c
+}
+
+// SetNillableBodyReceiptRepeat sets the "body_receipt_repeat" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableBodyReceiptRepeat(v *int64) *UsageLogCreate {
+	if v != nil {
+		_c.SetBodyReceiptRepeat(*v)
+	}
+	return _c
+}
+
+// SetPreDispatchMs sets the "pre_dispatch_ms" field.
+func (_c *UsageLogCreate) SetPreDispatchMs(v int64) *UsageLogCreate {
+	_c.mutation.SetPreDispatchMs(v)
+	return _c
+}
+
+// SetNillablePreDispatchMs sets the "pre_dispatch_ms" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillablePreDispatchMs(v *int64) *UsageLogCreate {
+	if v != nil {
+		_c.SetPreDispatchMs(*v)
+	}
+	return _c
+}
+
+// SetKeepaliveCommitMs sets the "keepalive_commit_ms" field.
+func (_c *UsageLogCreate) SetKeepaliveCommitMs(v int64) *UsageLogCreate {
+	_c.mutation.SetKeepaliveCommitMs(v)
+	return _c
+}
+
+// SetNillableKeepaliveCommitMs sets the "keepalive_commit_ms" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableKeepaliveCommitMs(v *int64) *UsageLogCreate {
+	if v != nil {
+		_c.SetKeepaliveCommitMs(*v)
+	}
+	return _c
+}
+
+// SetWireStatus sets the "wire_status" field.
+func (_c *UsageLogCreate) SetWireStatus(v int64) *UsageLogCreate {
+	_c.mutation.SetWireStatus(v)
+	return _c
+}
+
+// SetNillableWireStatus sets the "wire_status" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableWireStatus(v *int64) *UsageLogCreate {
+	if v != nil {
+		_c.SetWireStatus(*v)
+	}
+	return _c
+}
+
+// SetDispatchCount sets the "dispatch_count" field.
+func (_c *UsageLogCreate) SetDispatchCount(v int64) *UsageLogCreate {
+	_c.mutation.SetDispatchCount(v)
+	return _c
+}
+
+// SetNillableDispatchCount sets the "dispatch_count" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableDispatchCount(v *int64) *UsageLogCreate {
+	if v != nil {
+		_c.SetDispatchCount(*v)
+	}
+	return _c
+}
+
+// SetMinDispatchRemainingMs sets the "min_dispatch_remaining_ms" field.
+func (_c *UsageLogCreate) SetMinDispatchRemainingMs(v int64) *UsageLogCreate {
+	_c.mutation.SetMinDispatchRemainingMs(v)
+	return _c
+}
+
+// SetNillableMinDispatchRemainingMs sets the "min_dispatch_remaining_ms" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableMinDispatchRemainingMs(v *int64) *UsageLogCreate {
+	if v != nil {
+		_c.SetMinDispatchRemainingMs(*v)
+	}
+	return _c
+}
+
+// SetFinalDeadlineMs sets the "final_deadline_ms" field.
+func (_c *UsageLogCreate) SetFinalDeadlineMs(v int64) *UsageLogCreate {
+	_c.mutation.SetFinalDeadlineMs(v)
+	return _c
+}
+
+// SetNillableFinalDeadlineMs sets the "final_deadline_ms" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableFinalDeadlineMs(v *int64) *UsageLogCreate {
+	if v != nil {
+		_c.SetFinalDeadlineMs(*v)
+	}
+	return _c
+}
+
+// SetClientFamily sets the "client_family" field.
+func (_c *UsageLogCreate) SetClientFamily(v string) *UsageLogCreate {
+	_c.mutation.SetClientFamily(v)
+	return _c
+}
+
+// SetNillableClientFamily sets the "client_family" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableClientFamily(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetClientFamily(*v)
+	}
+	return _c
+}
+
+// SetClientCancelMs sets the "client_cancel_ms" field.
+func (_c *UsageLogCreate) SetClientCancelMs(v int64) *UsageLogCreate {
+	_c.mutation.SetClientCancelMs(v)
+	return _c
+}
+
+// SetNillableClientCancelMs sets the "client_cancel_ms" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableClientCancelMs(v *int64) *UsageLogCreate {
+	if v != nil {
+		_c.SetClientCancelMs(*v)
+	}
+	return _c
+}
+
+// SetCancelStage sets the "cancel_stage" field.
+func (_c *UsageLogCreate) SetCancelStage(v string) *UsageLogCreate {
+	_c.mutation.SetCancelStage(v)
+	return _c
+}
+
+// SetNillableCancelStage sets the "cancel_stage" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableCancelStage(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetCancelStage(*v)
+	}
+	return _c
+}
+
+// SetCdnObserved sets the "cdn_observed" field.
+func (_c *UsageLogCreate) SetCdnObserved(v string) *UsageLogCreate {
+	_c.mutation.SetCdnObserved(v)
+	return _c
+}
+
+// SetNillableCdnObserved sets the "cdn_observed" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableCdnObserved(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetCdnObserved(*v)
+	}
+	return _c
+}
+
+// SetBudgetStartMode sets the "budget_start_mode" field.
+func (_c *UsageLogCreate) SetBudgetStartMode(v string) *UsageLogCreate {
+	_c.mutation.SetBudgetStartMode(v)
+	return _c
+}
+
+// SetNillableBudgetStartMode sets the "budget_start_mode" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableBudgetStartMode(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetBudgetStartMode(*v)
+	}
+	return _c
+}
+
+// SetBudgetT0UnixMs sets the "budget_t0_unix_ms" field.
+func (_c *UsageLogCreate) SetBudgetT0UnixMs(v int64) *UsageLogCreate {
+	_c.mutation.SetBudgetT0UnixMs(v)
+	return _c
+}
+
+// SetNillableBudgetT0UnixMs sets the "budget_t0_unix_ms" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableBudgetT0UnixMs(v *int64) *UsageLogCreate {
+	if v != nil {
+		_c.SetBudgetT0UnixMs(*v)
+	}
+	return _c
+}
+
 // SetUser sets the "user" edge to the User entity.
 func (_c *UsageLogCreate) SetUser(v *User) *UsageLogCreate {
 	return _c.SetUserID(v.ID)
@@ -1211,6 +1463,78 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.CreatedAt(); ok {
 		_spec.SetField(usagelog.FieldCreatedAt, field.TypeTime, value)
 		_node.CreatedAt = value
+	}
+	if value, ok := _c.mutation.BodyBytes(); ok {
+		_spec.SetField(usagelog.FieldBodyBytes, field.TypeInt64, value)
+		_node.BodyBytes = &value
+	}
+	if value, ok := _c.mutation.FirstReadMs(); ok {
+		_spec.SetField(usagelog.FieldFirstReadMs, field.TypeInt64, value)
+		_node.FirstReadMs = &value
+	}
+	if value, ok := _c.mutation.BodyEOFMs(); ok {
+		_spec.SetField(usagelog.FieldBodyEOFMs, field.TypeInt64, value)
+		_node.BodyEOFMs = &value
+	}
+	if value, ok := _c.mutation.AnchorBasis(); ok {
+		_spec.SetField(usagelog.FieldAnchorBasis, field.TypeString, value)
+		_node.AnchorBasis = &value
+	}
+	if value, ok := _c.mutation.AnchorEligible(); ok {
+		_spec.SetField(usagelog.FieldAnchorEligible, field.TypeBool, value)
+		_node.AnchorEligible = &value
+	}
+	if value, ok := _c.mutation.BodyReceiptRepeat(); ok {
+		_spec.SetField(usagelog.FieldBodyReceiptRepeat, field.TypeInt64, value)
+		_node.BodyReceiptRepeat = &value
+	}
+	if value, ok := _c.mutation.PreDispatchMs(); ok {
+		_spec.SetField(usagelog.FieldPreDispatchMs, field.TypeInt64, value)
+		_node.PreDispatchMs = &value
+	}
+	if value, ok := _c.mutation.KeepaliveCommitMs(); ok {
+		_spec.SetField(usagelog.FieldKeepaliveCommitMs, field.TypeInt64, value)
+		_node.KeepaliveCommitMs = &value
+	}
+	if value, ok := _c.mutation.WireStatus(); ok {
+		_spec.SetField(usagelog.FieldWireStatus, field.TypeInt64, value)
+		_node.WireStatus = &value
+	}
+	if value, ok := _c.mutation.DispatchCount(); ok {
+		_spec.SetField(usagelog.FieldDispatchCount, field.TypeInt64, value)
+		_node.DispatchCount = &value
+	}
+	if value, ok := _c.mutation.MinDispatchRemainingMs(); ok {
+		_spec.SetField(usagelog.FieldMinDispatchRemainingMs, field.TypeInt64, value)
+		_node.MinDispatchRemainingMs = &value
+	}
+	if value, ok := _c.mutation.FinalDeadlineMs(); ok {
+		_spec.SetField(usagelog.FieldFinalDeadlineMs, field.TypeInt64, value)
+		_node.FinalDeadlineMs = &value
+	}
+	if value, ok := _c.mutation.ClientFamily(); ok {
+		_spec.SetField(usagelog.FieldClientFamily, field.TypeString, value)
+		_node.ClientFamily = &value
+	}
+	if value, ok := _c.mutation.ClientCancelMs(); ok {
+		_spec.SetField(usagelog.FieldClientCancelMs, field.TypeInt64, value)
+		_node.ClientCancelMs = &value
+	}
+	if value, ok := _c.mutation.CancelStage(); ok {
+		_spec.SetField(usagelog.FieldCancelStage, field.TypeString, value)
+		_node.CancelStage = &value
+	}
+	if value, ok := _c.mutation.CdnObserved(); ok {
+		_spec.SetField(usagelog.FieldCdnObserved, field.TypeString, value)
+		_node.CdnObserved = &value
+	}
+	if value, ok := _c.mutation.BudgetStartMode(); ok {
+		_spec.SetField(usagelog.FieldBudgetStartMode, field.TypeString, value)
+		_node.BudgetStartMode = &value
+	}
+	if value, ok := _c.mutation.BudgetT0UnixMs(); ok {
+		_spec.SetField(usagelog.FieldBudgetT0UnixMs, field.TypeInt64, value)
+		_node.BudgetT0UnixMs = &value
 	}
 	if nodes := _c.mutation.UserIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -2240,6 +2564,402 @@ func (u *UsageLogUpsert) SetCacheTTLOverridden(v bool) *UsageLogUpsert {
 // UpdateCacheTTLOverridden sets the "cache_ttl_overridden" field to the value that was provided on create.
 func (u *UsageLogUpsert) UpdateCacheTTLOverridden() *UsageLogUpsert {
 	u.SetExcluded(usagelog.FieldCacheTTLOverridden)
+	return u
+}
+
+// SetBodyBytes sets the "body_bytes" field.
+func (u *UsageLogUpsert) SetBodyBytes(v int64) *UsageLogUpsert {
+	u.Set(usagelog.FieldBodyBytes, v)
+	return u
+}
+
+// UpdateBodyBytes sets the "body_bytes" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateBodyBytes() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldBodyBytes)
+	return u
+}
+
+// AddBodyBytes adds v to the "body_bytes" field.
+func (u *UsageLogUpsert) AddBodyBytes(v int64) *UsageLogUpsert {
+	u.Add(usagelog.FieldBodyBytes, v)
+	return u
+}
+
+// ClearBodyBytes clears the value of the "body_bytes" field.
+func (u *UsageLogUpsert) ClearBodyBytes() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldBodyBytes)
+	return u
+}
+
+// SetFirstReadMs sets the "first_read_ms" field.
+func (u *UsageLogUpsert) SetFirstReadMs(v int64) *UsageLogUpsert {
+	u.Set(usagelog.FieldFirstReadMs, v)
+	return u
+}
+
+// UpdateFirstReadMs sets the "first_read_ms" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateFirstReadMs() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldFirstReadMs)
+	return u
+}
+
+// AddFirstReadMs adds v to the "first_read_ms" field.
+func (u *UsageLogUpsert) AddFirstReadMs(v int64) *UsageLogUpsert {
+	u.Add(usagelog.FieldFirstReadMs, v)
+	return u
+}
+
+// ClearFirstReadMs clears the value of the "first_read_ms" field.
+func (u *UsageLogUpsert) ClearFirstReadMs() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldFirstReadMs)
+	return u
+}
+
+// SetBodyEOFMs sets the "body_eof_ms" field.
+func (u *UsageLogUpsert) SetBodyEOFMs(v int64) *UsageLogUpsert {
+	u.Set(usagelog.FieldBodyEOFMs, v)
+	return u
+}
+
+// UpdateBodyEOFMs sets the "body_eof_ms" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateBodyEOFMs() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldBodyEOFMs)
+	return u
+}
+
+// AddBodyEOFMs adds v to the "body_eof_ms" field.
+func (u *UsageLogUpsert) AddBodyEOFMs(v int64) *UsageLogUpsert {
+	u.Add(usagelog.FieldBodyEOFMs, v)
+	return u
+}
+
+// ClearBodyEOFMs clears the value of the "body_eof_ms" field.
+func (u *UsageLogUpsert) ClearBodyEOFMs() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldBodyEOFMs)
+	return u
+}
+
+// SetAnchorBasis sets the "anchor_basis" field.
+func (u *UsageLogUpsert) SetAnchorBasis(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldAnchorBasis, v)
+	return u
+}
+
+// UpdateAnchorBasis sets the "anchor_basis" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateAnchorBasis() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldAnchorBasis)
+	return u
+}
+
+// ClearAnchorBasis clears the value of the "anchor_basis" field.
+func (u *UsageLogUpsert) ClearAnchorBasis() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldAnchorBasis)
+	return u
+}
+
+// SetAnchorEligible sets the "anchor_eligible" field.
+func (u *UsageLogUpsert) SetAnchorEligible(v bool) *UsageLogUpsert {
+	u.Set(usagelog.FieldAnchorEligible, v)
+	return u
+}
+
+// UpdateAnchorEligible sets the "anchor_eligible" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateAnchorEligible() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldAnchorEligible)
+	return u
+}
+
+// ClearAnchorEligible clears the value of the "anchor_eligible" field.
+func (u *UsageLogUpsert) ClearAnchorEligible() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldAnchorEligible)
+	return u
+}
+
+// SetBodyReceiptRepeat sets the "body_receipt_repeat" field.
+func (u *UsageLogUpsert) SetBodyReceiptRepeat(v int64) *UsageLogUpsert {
+	u.Set(usagelog.FieldBodyReceiptRepeat, v)
+	return u
+}
+
+// UpdateBodyReceiptRepeat sets the "body_receipt_repeat" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateBodyReceiptRepeat() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldBodyReceiptRepeat)
+	return u
+}
+
+// AddBodyReceiptRepeat adds v to the "body_receipt_repeat" field.
+func (u *UsageLogUpsert) AddBodyReceiptRepeat(v int64) *UsageLogUpsert {
+	u.Add(usagelog.FieldBodyReceiptRepeat, v)
+	return u
+}
+
+// ClearBodyReceiptRepeat clears the value of the "body_receipt_repeat" field.
+func (u *UsageLogUpsert) ClearBodyReceiptRepeat() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldBodyReceiptRepeat)
+	return u
+}
+
+// SetPreDispatchMs sets the "pre_dispatch_ms" field.
+func (u *UsageLogUpsert) SetPreDispatchMs(v int64) *UsageLogUpsert {
+	u.Set(usagelog.FieldPreDispatchMs, v)
+	return u
+}
+
+// UpdatePreDispatchMs sets the "pre_dispatch_ms" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdatePreDispatchMs() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldPreDispatchMs)
+	return u
+}
+
+// AddPreDispatchMs adds v to the "pre_dispatch_ms" field.
+func (u *UsageLogUpsert) AddPreDispatchMs(v int64) *UsageLogUpsert {
+	u.Add(usagelog.FieldPreDispatchMs, v)
+	return u
+}
+
+// ClearPreDispatchMs clears the value of the "pre_dispatch_ms" field.
+func (u *UsageLogUpsert) ClearPreDispatchMs() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldPreDispatchMs)
+	return u
+}
+
+// SetKeepaliveCommitMs sets the "keepalive_commit_ms" field.
+func (u *UsageLogUpsert) SetKeepaliveCommitMs(v int64) *UsageLogUpsert {
+	u.Set(usagelog.FieldKeepaliveCommitMs, v)
+	return u
+}
+
+// UpdateKeepaliveCommitMs sets the "keepalive_commit_ms" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateKeepaliveCommitMs() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldKeepaliveCommitMs)
+	return u
+}
+
+// AddKeepaliveCommitMs adds v to the "keepalive_commit_ms" field.
+func (u *UsageLogUpsert) AddKeepaliveCommitMs(v int64) *UsageLogUpsert {
+	u.Add(usagelog.FieldKeepaliveCommitMs, v)
+	return u
+}
+
+// ClearKeepaliveCommitMs clears the value of the "keepalive_commit_ms" field.
+func (u *UsageLogUpsert) ClearKeepaliveCommitMs() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldKeepaliveCommitMs)
+	return u
+}
+
+// SetWireStatus sets the "wire_status" field.
+func (u *UsageLogUpsert) SetWireStatus(v int64) *UsageLogUpsert {
+	u.Set(usagelog.FieldWireStatus, v)
+	return u
+}
+
+// UpdateWireStatus sets the "wire_status" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateWireStatus() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldWireStatus)
+	return u
+}
+
+// AddWireStatus adds v to the "wire_status" field.
+func (u *UsageLogUpsert) AddWireStatus(v int64) *UsageLogUpsert {
+	u.Add(usagelog.FieldWireStatus, v)
+	return u
+}
+
+// ClearWireStatus clears the value of the "wire_status" field.
+func (u *UsageLogUpsert) ClearWireStatus() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldWireStatus)
+	return u
+}
+
+// SetDispatchCount sets the "dispatch_count" field.
+func (u *UsageLogUpsert) SetDispatchCount(v int64) *UsageLogUpsert {
+	u.Set(usagelog.FieldDispatchCount, v)
+	return u
+}
+
+// UpdateDispatchCount sets the "dispatch_count" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateDispatchCount() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldDispatchCount)
+	return u
+}
+
+// AddDispatchCount adds v to the "dispatch_count" field.
+func (u *UsageLogUpsert) AddDispatchCount(v int64) *UsageLogUpsert {
+	u.Add(usagelog.FieldDispatchCount, v)
+	return u
+}
+
+// ClearDispatchCount clears the value of the "dispatch_count" field.
+func (u *UsageLogUpsert) ClearDispatchCount() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldDispatchCount)
+	return u
+}
+
+// SetMinDispatchRemainingMs sets the "min_dispatch_remaining_ms" field.
+func (u *UsageLogUpsert) SetMinDispatchRemainingMs(v int64) *UsageLogUpsert {
+	u.Set(usagelog.FieldMinDispatchRemainingMs, v)
+	return u
+}
+
+// UpdateMinDispatchRemainingMs sets the "min_dispatch_remaining_ms" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateMinDispatchRemainingMs() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldMinDispatchRemainingMs)
+	return u
+}
+
+// AddMinDispatchRemainingMs adds v to the "min_dispatch_remaining_ms" field.
+func (u *UsageLogUpsert) AddMinDispatchRemainingMs(v int64) *UsageLogUpsert {
+	u.Add(usagelog.FieldMinDispatchRemainingMs, v)
+	return u
+}
+
+// ClearMinDispatchRemainingMs clears the value of the "min_dispatch_remaining_ms" field.
+func (u *UsageLogUpsert) ClearMinDispatchRemainingMs() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldMinDispatchRemainingMs)
+	return u
+}
+
+// SetFinalDeadlineMs sets the "final_deadline_ms" field.
+func (u *UsageLogUpsert) SetFinalDeadlineMs(v int64) *UsageLogUpsert {
+	u.Set(usagelog.FieldFinalDeadlineMs, v)
+	return u
+}
+
+// UpdateFinalDeadlineMs sets the "final_deadline_ms" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateFinalDeadlineMs() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldFinalDeadlineMs)
+	return u
+}
+
+// AddFinalDeadlineMs adds v to the "final_deadline_ms" field.
+func (u *UsageLogUpsert) AddFinalDeadlineMs(v int64) *UsageLogUpsert {
+	u.Add(usagelog.FieldFinalDeadlineMs, v)
+	return u
+}
+
+// ClearFinalDeadlineMs clears the value of the "final_deadline_ms" field.
+func (u *UsageLogUpsert) ClearFinalDeadlineMs() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldFinalDeadlineMs)
+	return u
+}
+
+// SetClientFamily sets the "client_family" field.
+func (u *UsageLogUpsert) SetClientFamily(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldClientFamily, v)
+	return u
+}
+
+// UpdateClientFamily sets the "client_family" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateClientFamily() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldClientFamily)
+	return u
+}
+
+// ClearClientFamily clears the value of the "client_family" field.
+func (u *UsageLogUpsert) ClearClientFamily() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldClientFamily)
+	return u
+}
+
+// SetClientCancelMs sets the "client_cancel_ms" field.
+func (u *UsageLogUpsert) SetClientCancelMs(v int64) *UsageLogUpsert {
+	u.Set(usagelog.FieldClientCancelMs, v)
+	return u
+}
+
+// UpdateClientCancelMs sets the "client_cancel_ms" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateClientCancelMs() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldClientCancelMs)
+	return u
+}
+
+// AddClientCancelMs adds v to the "client_cancel_ms" field.
+func (u *UsageLogUpsert) AddClientCancelMs(v int64) *UsageLogUpsert {
+	u.Add(usagelog.FieldClientCancelMs, v)
+	return u
+}
+
+// ClearClientCancelMs clears the value of the "client_cancel_ms" field.
+func (u *UsageLogUpsert) ClearClientCancelMs() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldClientCancelMs)
+	return u
+}
+
+// SetCancelStage sets the "cancel_stage" field.
+func (u *UsageLogUpsert) SetCancelStage(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldCancelStage, v)
+	return u
+}
+
+// UpdateCancelStage sets the "cancel_stage" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateCancelStage() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldCancelStage)
+	return u
+}
+
+// ClearCancelStage clears the value of the "cancel_stage" field.
+func (u *UsageLogUpsert) ClearCancelStage() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldCancelStage)
+	return u
+}
+
+// SetCdnObserved sets the "cdn_observed" field.
+func (u *UsageLogUpsert) SetCdnObserved(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldCdnObserved, v)
+	return u
+}
+
+// UpdateCdnObserved sets the "cdn_observed" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateCdnObserved() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldCdnObserved)
+	return u
+}
+
+// ClearCdnObserved clears the value of the "cdn_observed" field.
+func (u *UsageLogUpsert) ClearCdnObserved() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldCdnObserved)
+	return u
+}
+
+// SetBudgetStartMode sets the "budget_start_mode" field.
+func (u *UsageLogUpsert) SetBudgetStartMode(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldBudgetStartMode, v)
+	return u
+}
+
+// UpdateBudgetStartMode sets the "budget_start_mode" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateBudgetStartMode() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldBudgetStartMode)
+	return u
+}
+
+// ClearBudgetStartMode clears the value of the "budget_start_mode" field.
+func (u *UsageLogUpsert) ClearBudgetStartMode() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldBudgetStartMode)
+	return u
+}
+
+// SetBudgetT0UnixMs sets the "budget_t0_unix_ms" field.
+func (u *UsageLogUpsert) SetBudgetT0UnixMs(v int64) *UsageLogUpsert {
+	u.Set(usagelog.FieldBudgetT0UnixMs, v)
+	return u
+}
+
+// UpdateBudgetT0UnixMs sets the "budget_t0_unix_ms" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateBudgetT0UnixMs() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldBudgetT0UnixMs)
+	return u
+}
+
+// AddBudgetT0UnixMs adds v to the "budget_t0_unix_ms" field.
+func (u *UsageLogUpsert) AddBudgetT0UnixMs(v int64) *UsageLogUpsert {
+	u.Add(usagelog.FieldBudgetT0UnixMs, v)
+	return u
+}
+
+// ClearBudgetT0UnixMs clears the value of the "budget_t0_unix_ms" field.
+func (u *UsageLogUpsert) ClearBudgetT0UnixMs() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldBudgetT0UnixMs)
 	return u
 }
 
@@ -3328,6 +4048,468 @@ func (u *UsageLogUpsertOne) SetCacheTTLOverridden(v bool) *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) UpdateCacheTTLOverridden() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateCacheTTLOverridden()
+	})
+}
+
+// SetBodyBytes sets the "body_bytes" field.
+func (u *UsageLogUpsertOne) SetBodyBytes(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetBodyBytes(v)
+	})
+}
+
+// AddBodyBytes adds v to the "body_bytes" field.
+func (u *UsageLogUpsertOne) AddBodyBytes(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddBodyBytes(v)
+	})
+}
+
+// UpdateBodyBytes sets the "body_bytes" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateBodyBytes() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateBodyBytes()
+	})
+}
+
+// ClearBodyBytes clears the value of the "body_bytes" field.
+func (u *UsageLogUpsertOne) ClearBodyBytes() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearBodyBytes()
+	})
+}
+
+// SetFirstReadMs sets the "first_read_ms" field.
+func (u *UsageLogUpsertOne) SetFirstReadMs(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetFirstReadMs(v)
+	})
+}
+
+// AddFirstReadMs adds v to the "first_read_ms" field.
+func (u *UsageLogUpsertOne) AddFirstReadMs(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddFirstReadMs(v)
+	})
+}
+
+// UpdateFirstReadMs sets the "first_read_ms" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateFirstReadMs() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateFirstReadMs()
+	})
+}
+
+// ClearFirstReadMs clears the value of the "first_read_ms" field.
+func (u *UsageLogUpsertOne) ClearFirstReadMs() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearFirstReadMs()
+	})
+}
+
+// SetBodyEOFMs sets the "body_eof_ms" field.
+func (u *UsageLogUpsertOne) SetBodyEOFMs(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetBodyEOFMs(v)
+	})
+}
+
+// AddBodyEOFMs adds v to the "body_eof_ms" field.
+func (u *UsageLogUpsertOne) AddBodyEOFMs(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddBodyEOFMs(v)
+	})
+}
+
+// UpdateBodyEOFMs sets the "body_eof_ms" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateBodyEOFMs() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateBodyEOFMs()
+	})
+}
+
+// ClearBodyEOFMs clears the value of the "body_eof_ms" field.
+func (u *UsageLogUpsertOne) ClearBodyEOFMs() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearBodyEOFMs()
+	})
+}
+
+// SetAnchorBasis sets the "anchor_basis" field.
+func (u *UsageLogUpsertOne) SetAnchorBasis(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetAnchorBasis(v)
+	})
+}
+
+// UpdateAnchorBasis sets the "anchor_basis" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateAnchorBasis() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateAnchorBasis()
+	})
+}
+
+// ClearAnchorBasis clears the value of the "anchor_basis" field.
+func (u *UsageLogUpsertOne) ClearAnchorBasis() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearAnchorBasis()
+	})
+}
+
+// SetAnchorEligible sets the "anchor_eligible" field.
+func (u *UsageLogUpsertOne) SetAnchorEligible(v bool) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetAnchorEligible(v)
+	})
+}
+
+// UpdateAnchorEligible sets the "anchor_eligible" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateAnchorEligible() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateAnchorEligible()
+	})
+}
+
+// ClearAnchorEligible clears the value of the "anchor_eligible" field.
+func (u *UsageLogUpsertOne) ClearAnchorEligible() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearAnchorEligible()
+	})
+}
+
+// SetBodyReceiptRepeat sets the "body_receipt_repeat" field.
+func (u *UsageLogUpsertOne) SetBodyReceiptRepeat(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetBodyReceiptRepeat(v)
+	})
+}
+
+// AddBodyReceiptRepeat adds v to the "body_receipt_repeat" field.
+func (u *UsageLogUpsertOne) AddBodyReceiptRepeat(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddBodyReceiptRepeat(v)
+	})
+}
+
+// UpdateBodyReceiptRepeat sets the "body_receipt_repeat" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateBodyReceiptRepeat() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateBodyReceiptRepeat()
+	})
+}
+
+// ClearBodyReceiptRepeat clears the value of the "body_receipt_repeat" field.
+func (u *UsageLogUpsertOne) ClearBodyReceiptRepeat() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearBodyReceiptRepeat()
+	})
+}
+
+// SetPreDispatchMs sets the "pre_dispatch_ms" field.
+func (u *UsageLogUpsertOne) SetPreDispatchMs(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetPreDispatchMs(v)
+	})
+}
+
+// AddPreDispatchMs adds v to the "pre_dispatch_ms" field.
+func (u *UsageLogUpsertOne) AddPreDispatchMs(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddPreDispatchMs(v)
+	})
+}
+
+// UpdatePreDispatchMs sets the "pre_dispatch_ms" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdatePreDispatchMs() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdatePreDispatchMs()
+	})
+}
+
+// ClearPreDispatchMs clears the value of the "pre_dispatch_ms" field.
+func (u *UsageLogUpsertOne) ClearPreDispatchMs() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearPreDispatchMs()
+	})
+}
+
+// SetKeepaliveCommitMs sets the "keepalive_commit_ms" field.
+func (u *UsageLogUpsertOne) SetKeepaliveCommitMs(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetKeepaliveCommitMs(v)
+	})
+}
+
+// AddKeepaliveCommitMs adds v to the "keepalive_commit_ms" field.
+func (u *UsageLogUpsertOne) AddKeepaliveCommitMs(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddKeepaliveCommitMs(v)
+	})
+}
+
+// UpdateKeepaliveCommitMs sets the "keepalive_commit_ms" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateKeepaliveCommitMs() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateKeepaliveCommitMs()
+	})
+}
+
+// ClearKeepaliveCommitMs clears the value of the "keepalive_commit_ms" field.
+func (u *UsageLogUpsertOne) ClearKeepaliveCommitMs() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearKeepaliveCommitMs()
+	})
+}
+
+// SetWireStatus sets the "wire_status" field.
+func (u *UsageLogUpsertOne) SetWireStatus(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetWireStatus(v)
+	})
+}
+
+// AddWireStatus adds v to the "wire_status" field.
+func (u *UsageLogUpsertOne) AddWireStatus(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddWireStatus(v)
+	})
+}
+
+// UpdateWireStatus sets the "wire_status" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateWireStatus() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateWireStatus()
+	})
+}
+
+// ClearWireStatus clears the value of the "wire_status" field.
+func (u *UsageLogUpsertOne) ClearWireStatus() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearWireStatus()
+	})
+}
+
+// SetDispatchCount sets the "dispatch_count" field.
+func (u *UsageLogUpsertOne) SetDispatchCount(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetDispatchCount(v)
+	})
+}
+
+// AddDispatchCount adds v to the "dispatch_count" field.
+func (u *UsageLogUpsertOne) AddDispatchCount(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddDispatchCount(v)
+	})
+}
+
+// UpdateDispatchCount sets the "dispatch_count" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateDispatchCount() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateDispatchCount()
+	})
+}
+
+// ClearDispatchCount clears the value of the "dispatch_count" field.
+func (u *UsageLogUpsertOne) ClearDispatchCount() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearDispatchCount()
+	})
+}
+
+// SetMinDispatchRemainingMs sets the "min_dispatch_remaining_ms" field.
+func (u *UsageLogUpsertOne) SetMinDispatchRemainingMs(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetMinDispatchRemainingMs(v)
+	})
+}
+
+// AddMinDispatchRemainingMs adds v to the "min_dispatch_remaining_ms" field.
+func (u *UsageLogUpsertOne) AddMinDispatchRemainingMs(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddMinDispatchRemainingMs(v)
+	})
+}
+
+// UpdateMinDispatchRemainingMs sets the "min_dispatch_remaining_ms" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateMinDispatchRemainingMs() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateMinDispatchRemainingMs()
+	})
+}
+
+// ClearMinDispatchRemainingMs clears the value of the "min_dispatch_remaining_ms" field.
+func (u *UsageLogUpsertOne) ClearMinDispatchRemainingMs() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearMinDispatchRemainingMs()
+	})
+}
+
+// SetFinalDeadlineMs sets the "final_deadline_ms" field.
+func (u *UsageLogUpsertOne) SetFinalDeadlineMs(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetFinalDeadlineMs(v)
+	})
+}
+
+// AddFinalDeadlineMs adds v to the "final_deadline_ms" field.
+func (u *UsageLogUpsertOne) AddFinalDeadlineMs(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddFinalDeadlineMs(v)
+	})
+}
+
+// UpdateFinalDeadlineMs sets the "final_deadline_ms" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateFinalDeadlineMs() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateFinalDeadlineMs()
+	})
+}
+
+// ClearFinalDeadlineMs clears the value of the "final_deadline_ms" field.
+func (u *UsageLogUpsertOne) ClearFinalDeadlineMs() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearFinalDeadlineMs()
+	})
+}
+
+// SetClientFamily sets the "client_family" field.
+func (u *UsageLogUpsertOne) SetClientFamily(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetClientFamily(v)
+	})
+}
+
+// UpdateClientFamily sets the "client_family" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateClientFamily() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateClientFamily()
+	})
+}
+
+// ClearClientFamily clears the value of the "client_family" field.
+func (u *UsageLogUpsertOne) ClearClientFamily() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearClientFamily()
+	})
+}
+
+// SetClientCancelMs sets the "client_cancel_ms" field.
+func (u *UsageLogUpsertOne) SetClientCancelMs(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetClientCancelMs(v)
+	})
+}
+
+// AddClientCancelMs adds v to the "client_cancel_ms" field.
+func (u *UsageLogUpsertOne) AddClientCancelMs(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddClientCancelMs(v)
+	})
+}
+
+// UpdateClientCancelMs sets the "client_cancel_ms" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateClientCancelMs() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateClientCancelMs()
+	})
+}
+
+// ClearClientCancelMs clears the value of the "client_cancel_ms" field.
+func (u *UsageLogUpsertOne) ClearClientCancelMs() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearClientCancelMs()
+	})
+}
+
+// SetCancelStage sets the "cancel_stage" field.
+func (u *UsageLogUpsertOne) SetCancelStage(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetCancelStage(v)
+	})
+}
+
+// UpdateCancelStage sets the "cancel_stage" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateCancelStage() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateCancelStage()
+	})
+}
+
+// ClearCancelStage clears the value of the "cancel_stage" field.
+func (u *UsageLogUpsertOne) ClearCancelStage() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearCancelStage()
+	})
+}
+
+// SetCdnObserved sets the "cdn_observed" field.
+func (u *UsageLogUpsertOne) SetCdnObserved(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetCdnObserved(v)
+	})
+}
+
+// UpdateCdnObserved sets the "cdn_observed" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateCdnObserved() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateCdnObserved()
+	})
+}
+
+// ClearCdnObserved clears the value of the "cdn_observed" field.
+func (u *UsageLogUpsertOne) ClearCdnObserved() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearCdnObserved()
+	})
+}
+
+// SetBudgetStartMode sets the "budget_start_mode" field.
+func (u *UsageLogUpsertOne) SetBudgetStartMode(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetBudgetStartMode(v)
+	})
+}
+
+// UpdateBudgetStartMode sets the "budget_start_mode" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateBudgetStartMode() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateBudgetStartMode()
+	})
+}
+
+// ClearBudgetStartMode clears the value of the "budget_start_mode" field.
+func (u *UsageLogUpsertOne) ClearBudgetStartMode() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearBudgetStartMode()
+	})
+}
+
+// SetBudgetT0UnixMs sets the "budget_t0_unix_ms" field.
+func (u *UsageLogUpsertOne) SetBudgetT0UnixMs(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetBudgetT0UnixMs(v)
+	})
+}
+
+// AddBudgetT0UnixMs adds v to the "budget_t0_unix_ms" field.
+func (u *UsageLogUpsertOne) AddBudgetT0UnixMs(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddBudgetT0UnixMs(v)
+	})
+}
+
+// UpdateBudgetT0UnixMs sets the "budget_t0_unix_ms" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateBudgetT0UnixMs() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateBudgetT0UnixMs()
+	})
+}
+
+// ClearBudgetT0UnixMs clears the value of the "budget_t0_unix_ms" field.
+func (u *UsageLogUpsertOne) ClearBudgetT0UnixMs() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearBudgetT0UnixMs()
 	})
 }
 
@@ -4582,6 +5764,468 @@ func (u *UsageLogUpsertBulk) SetCacheTTLOverridden(v bool) *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) UpdateCacheTTLOverridden() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateCacheTTLOverridden()
+	})
+}
+
+// SetBodyBytes sets the "body_bytes" field.
+func (u *UsageLogUpsertBulk) SetBodyBytes(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetBodyBytes(v)
+	})
+}
+
+// AddBodyBytes adds v to the "body_bytes" field.
+func (u *UsageLogUpsertBulk) AddBodyBytes(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddBodyBytes(v)
+	})
+}
+
+// UpdateBodyBytes sets the "body_bytes" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateBodyBytes() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateBodyBytes()
+	})
+}
+
+// ClearBodyBytes clears the value of the "body_bytes" field.
+func (u *UsageLogUpsertBulk) ClearBodyBytes() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearBodyBytes()
+	})
+}
+
+// SetFirstReadMs sets the "first_read_ms" field.
+func (u *UsageLogUpsertBulk) SetFirstReadMs(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetFirstReadMs(v)
+	})
+}
+
+// AddFirstReadMs adds v to the "first_read_ms" field.
+func (u *UsageLogUpsertBulk) AddFirstReadMs(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddFirstReadMs(v)
+	})
+}
+
+// UpdateFirstReadMs sets the "first_read_ms" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateFirstReadMs() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateFirstReadMs()
+	})
+}
+
+// ClearFirstReadMs clears the value of the "first_read_ms" field.
+func (u *UsageLogUpsertBulk) ClearFirstReadMs() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearFirstReadMs()
+	})
+}
+
+// SetBodyEOFMs sets the "body_eof_ms" field.
+func (u *UsageLogUpsertBulk) SetBodyEOFMs(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetBodyEOFMs(v)
+	})
+}
+
+// AddBodyEOFMs adds v to the "body_eof_ms" field.
+func (u *UsageLogUpsertBulk) AddBodyEOFMs(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddBodyEOFMs(v)
+	})
+}
+
+// UpdateBodyEOFMs sets the "body_eof_ms" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateBodyEOFMs() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateBodyEOFMs()
+	})
+}
+
+// ClearBodyEOFMs clears the value of the "body_eof_ms" field.
+func (u *UsageLogUpsertBulk) ClearBodyEOFMs() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearBodyEOFMs()
+	})
+}
+
+// SetAnchorBasis sets the "anchor_basis" field.
+func (u *UsageLogUpsertBulk) SetAnchorBasis(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetAnchorBasis(v)
+	})
+}
+
+// UpdateAnchorBasis sets the "anchor_basis" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateAnchorBasis() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateAnchorBasis()
+	})
+}
+
+// ClearAnchorBasis clears the value of the "anchor_basis" field.
+func (u *UsageLogUpsertBulk) ClearAnchorBasis() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearAnchorBasis()
+	})
+}
+
+// SetAnchorEligible sets the "anchor_eligible" field.
+func (u *UsageLogUpsertBulk) SetAnchorEligible(v bool) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetAnchorEligible(v)
+	})
+}
+
+// UpdateAnchorEligible sets the "anchor_eligible" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateAnchorEligible() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateAnchorEligible()
+	})
+}
+
+// ClearAnchorEligible clears the value of the "anchor_eligible" field.
+func (u *UsageLogUpsertBulk) ClearAnchorEligible() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearAnchorEligible()
+	})
+}
+
+// SetBodyReceiptRepeat sets the "body_receipt_repeat" field.
+func (u *UsageLogUpsertBulk) SetBodyReceiptRepeat(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetBodyReceiptRepeat(v)
+	})
+}
+
+// AddBodyReceiptRepeat adds v to the "body_receipt_repeat" field.
+func (u *UsageLogUpsertBulk) AddBodyReceiptRepeat(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddBodyReceiptRepeat(v)
+	})
+}
+
+// UpdateBodyReceiptRepeat sets the "body_receipt_repeat" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateBodyReceiptRepeat() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateBodyReceiptRepeat()
+	})
+}
+
+// ClearBodyReceiptRepeat clears the value of the "body_receipt_repeat" field.
+func (u *UsageLogUpsertBulk) ClearBodyReceiptRepeat() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearBodyReceiptRepeat()
+	})
+}
+
+// SetPreDispatchMs sets the "pre_dispatch_ms" field.
+func (u *UsageLogUpsertBulk) SetPreDispatchMs(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetPreDispatchMs(v)
+	})
+}
+
+// AddPreDispatchMs adds v to the "pre_dispatch_ms" field.
+func (u *UsageLogUpsertBulk) AddPreDispatchMs(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddPreDispatchMs(v)
+	})
+}
+
+// UpdatePreDispatchMs sets the "pre_dispatch_ms" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdatePreDispatchMs() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdatePreDispatchMs()
+	})
+}
+
+// ClearPreDispatchMs clears the value of the "pre_dispatch_ms" field.
+func (u *UsageLogUpsertBulk) ClearPreDispatchMs() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearPreDispatchMs()
+	})
+}
+
+// SetKeepaliveCommitMs sets the "keepalive_commit_ms" field.
+func (u *UsageLogUpsertBulk) SetKeepaliveCommitMs(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetKeepaliveCommitMs(v)
+	})
+}
+
+// AddKeepaliveCommitMs adds v to the "keepalive_commit_ms" field.
+func (u *UsageLogUpsertBulk) AddKeepaliveCommitMs(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddKeepaliveCommitMs(v)
+	})
+}
+
+// UpdateKeepaliveCommitMs sets the "keepalive_commit_ms" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateKeepaliveCommitMs() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateKeepaliveCommitMs()
+	})
+}
+
+// ClearKeepaliveCommitMs clears the value of the "keepalive_commit_ms" field.
+func (u *UsageLogUpsertBulk) ClearKeepaliveCommitMs() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearKeepaliveCommitMs()
+	})
+}
+
+// SetWireStatus sets the "wire_status" field.
+func (u *UsageLogUpsertBulk) SetWireStatus(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetWireStatus(v)
+	})
+}
+
+// AddWireStatus adds v to the "wire_status" field.
+func (u *UsageLogUpsertBulk) AddWireStatus(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddWireStatus(v)
+	})
+}
+
+// UpdateWireStatus sets the "wire_status" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateWireStatus() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateWireStatus()
+	})
+}
+
+// ClearWireStatus clears the value of the "wire_status" field.
+func (u *UsageLogUpsertBulk) ClearWireStatus() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearWireStatus()
+	})
+}
+
+// SetDispatchCount sets the "dispatch_count" field.
+func (u *UsageLogUpsertBulk) SetDispatchCount(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetDispatchCount(v)
+	})
+}
+
+// AddDispatchCount adds v to the "dispatch_count" field.
+func (u *UsageLogUpsertBulk) AddDispatchCount(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddDispatchCount(v)
+	})
+}
+
+// UpdateDispatchCount sets the "dispatch_count" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateDispatchCount() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateDispatchCount()
+	})
+}
+
+// ClearDispatchCount clears the value of the "dispatch_count" field.
+func (u *UsageLogUpsertBulk) ClearDispatchCount() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearDispatchCount()
+	})
+}
+
+// SetMinDispatchRemainingMs sets the "min_dispatch_remaining_ms" field.
+func (u *UsageLogUpsertBulk) SetMinDispatchRemainingMs(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetMinDispatchRemainingMs(v)
+	})
+}
+
+// AddMinDispatchRemainingMs adds v to the "min_dispatch_remaining_ms" field.
+func (u *UsageLogUpsertBulk) AddMinDispatchRemainingMs(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddMinDispatchRemainingMs(v)
+	})
+}
+
+// UpdateMinDispatchRemainingMs sets the "min_dispatch_remaining_ms" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateMinDispatchRemainingMs() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateMinDispatchRemainingMs()
+	})
+}
+
+// ClearMinDispatchRemainingMs clears the value of the "min_dispatch_remaining_ms" field.
+func (u *UsageLogUpsertBulk) ClearMinDispatchRemainingMs() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearMinDispatchRemainingMs()
+	})
+}
+
+// SetFinalDeadlineMs sets the "final_deadline_ms" field.
+func (u *UsageLogUpsertBulk) SetFinalDeadlineMs(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetFinalDeadlineMs(v)
+	})
+}
+
+// AddFinalDeadlineMs adds v to the "final_deadline_ms" field.
+func (u *UsageLogUpsertBulk) AddFinalDeadlineMs(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddFinalDeadlineMs(v)
+	})
+}
+
+// UpdateFinalDeadlineMs sets the "final_deadline_ms" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateFinalDeadlineMs() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateFinalDeadlineMs()
+	})
+}
+
+// ClearFinalDeadlineMs clears the value of the "final_deadline_ms" field.
+func (u *UsageLogUpsertBulk) ClearFinalDeadlineMs() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearFinalDeadlineMs()
+	})
+}
+
+// SetClientFamily sets the "client_family" field.
+func (u *UsageLogUpsertBulk) SetClientFamily(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetClientFamily(v)
+	})
+}
+
+// UpdateClientFamily sets the "client_family" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateClientFamily() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateClientFamily()
+	})
+}
+
+// ClearClientFamily clears the value of the "client_family" field.
+func (u *UsageLogUpsertBulk) ClearClientFamily() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearClientFamily()
+	})
+}
+
+// SetClientCancelMs sets the "client_cancel_ms" field.
+func (u *UsageLogUpsertBulk) SetClientCancelMs(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetClientCancelMs(v)
+	})
+}
+
+// AddClientCancelMs adds v to the "client_cancel_ms" field.
+func (u *UsageLogUpsertBulk) AddClientCancelMs(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddClientCancelMs(v)
+	})
+}
+
+// UpdateClientCancelMs sets the "client_cancel_ms" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateClientCancelMs() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateClientCancelMs()
+	})
+}
+
+// ClearClientCancelMs clears the value of the "client_cancel_ms" field.
+func (u *UsageLogUpsertBulk) ClearClientCancelMs() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearClientCancelMs()
+	})
+}
+
+// SetCancelStage sets the "cancel_stage" field.
+func (u *UsageLogUpsertBulk) SetCancelStage(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetCancelStage(v)
+	})
+}
+
+// UpdateCancelStage sets the "cancel_stage" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateCancelStage() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateCancelStage()
+	})
+}
+
+// ClearCancelStage clears the value of the "cancel_stage" field.
+func (u *UsageLogUpsertBulk) ClearCancelStage() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearCancelStage()
+	})
+}
+
+// SetCdnObserved sets the "cdn_observed" field.
+func (u *UsageLogUpsertBulk) SetCdnObserved(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetCdnObserved(v)
+	})
+}
+
+// UpdateCdnObserved sets the "cdn_observed" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateCdnObserved() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateCdnObserved()
+	})
+}
+
+// ClearCdnObserved clears the value of the "cdn_observed" field.
+func (u *UsageLogUpsertBulk) ClearCdnObserved() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearCdnObserved()
+	})
+}
+
+// SetBudgetStartMode sets the "budget_start_mode" field.
+func (u *UsageLogUpsertBulk) SetBudgetStartMode(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetBudgetStartMode(v)
+	})
+}
+
+// UpdateBudgetStartMode sets the "budget_start_mode" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateBudgetStartMode() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateBudgetStartMode()
+	})
+}
+
+// ClearBudgetStartMode clears the value of the "budget_start_mode" field.
+func (u *UsageLogUpsertBulk) ClearBudgetStartMode() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearBudgetStartMode()
+	})
+}
+
+// SetBudgetT0UnixMs sets the "budget_t0_unix_ms" field.
+func (u *UsageLogUpsertBulk) SetBudgetT0UnixMs(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetBudgetT0UnixMs(v)
+	})
+}
+
+// AddBudgetT0UnixMs adds v to the "budget_t0_unix_ms" field.
+func (u *UsageLogUpsertBulk) AddBudgetT0UnixMs(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddBudgetT0UnixMs(v)
+	})
+}
+
+// UpdateBudgetT0UnixMs sets the "budget_t0_unix_ms" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateBudgetT0UnixMs() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateBudgetT0UnixMs()
+	})
+}
+
+// ClearBudgetT0UnixMs clears the value of the "budget_t0_unix_ms" field.
+func (u *UsageLogUpsertBulk) ClearBudgetT0UnixMs() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearBudgetT0UnixMs()
 	})
 }
 

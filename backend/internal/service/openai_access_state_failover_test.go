@@ -503,3 +503,50 @@ func TestOpenAIStreamOAuthLike429GetsDeadlineWithoutImmediateRuntimeBlock(t *tes
 		})
 	}
 }
+
+func TestOpenAIDeviceBindingRequiredUsesExistingAccessPolicy(t *testing.T) {
+	body := []byte(`{"error":{"code":"device_binding_required","message":"device binding required"}}`)
+	repo := &openAIAuthPolicyAccountRepo{}
+	svc := &OpenAIGatewayService{rateLimitService: NewRateLimitService(repo, nil, &config.Config{}, nil, nil), accountRepo: repo}
+	account := &Account{ID: 940, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true}
+
+	require.True(t, isOpenAIDeviceBindingRequired(http.StatusConflict, body))
+	require.True(t, svc.shouldFailoverOpenAIUpstreamResponse(account, http.StatusConflict, "", body))
+	require.True(t, shouldFailoverOpenAIPassthroughResponse(account, http.StatusConflict, body))
+	failover := newOpenAIUpstreamFailoverError(http.StatusConflict, nil, body, "", false)
+	require.True(t, failover.IsCredentialFailure())
+	require.Equal(t, GatewayFailureScopeAccount, failover.Scope)
+	require.Equal(t, OpenAIUpstreamAccessStateReason, failover.Reason)
+	require.True(t, svc.handleOpenAIAccountUpstreamError(context.Background(), account, http.StatusConflict, nil, body, "gpt-6.1-sol"))
+	require.Zero(t, repo.tempCalls)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+}
+
+func TestOpenAIDeviceBindingRequiredRequiresExactCode(t *testing.T) {
+	for _, body := range []string{
+		`{"error":{"code":"conflict","message":"device binding required"}}`,
+		`{"error":{"code":"device_binding_required_extra"}}`,
+		`{"error":{"message":"device_binding_required"}}`,
+		`{"error":{"code":"conflict"},"input":{"code":"device_binding_required"}}`,
+		`{"code":["device_binding_required"]}`,
+		`{"error":{"code":"device_binding_required"}} invalid`,
+	} {
+		require.False(t, isOpenAIDeviceBindingRequired(http.StatusConflict, []byte(body)))
+		require.False(t, (&OpenAIGatewayService{}).shouldFailoverOpenAIUpstreamResponse(&Account{Type: AccountTypeOAuth}, http.StatusConflict, "", []byte(body)))
+	}
+}
+
+func TestOpenAIDeviceBindingRequiredEnvelopeAndStatusBoundary(t *testing.T) {
+	for _, body := range []string{
+		`{"error":{"code":"device_binding_required"}}`,
+		`{"response":{"error":{"code":"device_binding_required"}}}`,
+		`{"detail":{"code":"device_binding_required"}}`,
+		`{"code":"device_binding_required"}`,
+	} {
+		require.True(t, isOpenAIDeviceBindingRequired(http.StatusConflict, []byte(body)))
+		for _, status := range []int{200, 400, 403, 404, 500} {
+			require.False(t, isOpenAIDeviceBindingRequired(status, []byte(body)))
+		}
+	}
+}

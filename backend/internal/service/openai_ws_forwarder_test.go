@@ -187,7 +187,9 @@ func TestOpenAIWSDial5xxRecordsModelTransient(t *testing.T) {
 	}
 
 	for range 2 {
-		svc.handleOpenAIWSDialTransientFailure(context.Background(), account, "gpt-5.5", dialErr)
+		// A 5xx records model health but is left to the normal WS retry path;
+		// only an account-level access-state handshake returns a switch signal.
+		require.Nil(t, svc.handleOpenAIWSDialTransientFailure(context.Background(), account, "gpt-5.5", dialErr))
 	}
 
 	require.Eventually(t, func() bool {

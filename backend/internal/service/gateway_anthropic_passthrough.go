@@ -123,6 +123,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 			AccountID: account.ID, Model: openAIAccountModelTransientModel(input.RequestModel), AttemptStart: attemptStart,
 			Warm: anthropicAttemptWarmFromContext(ctx) && attempt == 1, Stream: input.RequestStream, BodyBytes: len(wireBody),
 		})
+		resilience.StateFrom(ctx).ObserveAttemptStart()
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 		if err != nil {
 			if resp != nil && resp.Body != nil {
