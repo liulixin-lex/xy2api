@@ -2317,7 +2317,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	parsedReq.GroupID = apiKey.GroupID
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
 	sessionKey := sessionHash
-	platform := ""
+	platform := service.PlatformAnthropic
 	if forcePlatform, ok := middleware2.GetForcePlatformFromContext(c); ok {
 		platform = forcePlatform
 	} else if resolvedPlatform, ok := service.ResolvedTargetPlatformFromContext(c.Request.Context()); ok {
@@ -2333,7 +2333,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	account, err := h.gatewayService.SelectAccountForModel(c.Request.Context(), apiKey.GroupID, sessionKey, parsedReq.Model)
 	if err != nil {
 		reqLog.Warn("gateway.count_tokens_select_account_failed", zap.Error(err))
-		cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, parsedReq.Model, parsedReq.Model, service.PlatformAnthropic)
+		cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, parsedReq.Model, parsedReq.Model, platform)
 		if !cls.ModelNotFound {
 			markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 		}

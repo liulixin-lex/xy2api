@@ -4452,6 +4452,34 @@
     {
       "path": "backend/internal/handler/openai_gateway_handler.go",
       "value": "zap.String(\"fco_item_index\", index), zap.String(\"fco_bad_item_count\", count)"
+    },
+    {
+      "path": "backend/internal/handler/ops_error_logger.go",
+      "value": "// A confirmed local model rejection is a client request error."
+    },
+    {
+      "path": "backend/internal/handler/openai_chat_completions.go",
+      "value": "classifyOpenAICompatibleNoAccountErrorFromGin(c, h.gatewayService, apiKey, forwardModel, reqModel"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, forwardModel, reqModel, requestPlatform"
+    },
+    {
+      "path": "backend/internal/handler/gateway_handler.go",
+      "value": "classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, parsedReq.Model, parsedReq.Model, platform)"
+    },
+    {
+      "path": "backend/internal/handler/openai_embeddings.go",
+      "value": "classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, forwardModel, reqModel, service.PlatformOpenAI)"
+    },
+    {
+      "path": "backend/internal/handler/openai_images.go",
+      "value": "classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, routingModel, clientRequestModel, service.PlatformOpenAI)"
+    },
+    {
+      "path": "backend/internal/handler/grok_media.go",
+      "value": "classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, routingModel, requestModel, platform)"
     }
   ],
   "forbidden_module_paths": [
@@ -7362,6 +7390,26 @@
       "id": "xy-error-recovery-routing",
       "path": "backend/internal/service/openai_error_classification_followup_test.go",
       "literal": "TestInference404AnthropicEnvelopeRequiresEvidence"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/model_reject_diagnosis_test.go",
+      "literal": "TestModelRejectDiagnosisLocal404IsClient"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/model_reject_diagnosis_test.go",
+      "literal": "TestModelRejectDiagnosisUsesOpenAIForwardModel"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/model_reject_diagnosis_test.go",
+      "literal": "TestModelRejectDiagnosisUsesCountTokensPlatform"
+    },
+    {
+      "id": "xy-error-recovery-routing",
+      "path": "backend/internal/handler/model_reject_diagnosis_test.go",
+      "literal": "TestModelRejectDiagnosis503BoundariesUnchanged"
     }
   ]
 }
