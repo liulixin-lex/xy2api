@@ -209,10 +209,25 @@ func flushOpsErrorLogBatch(batch []opsErrorLogJob) {
 	opsErrorLogProcessed.Add(processed)
 }
 
+func applyBudgetCutErrorOwner(entry *service.OpsInsertErrorLogInput) {
+	if entry == nil || entry.RecoveryOutcome == nil || *entry.RecoveryOutcome != "budget_exhausted" {
+		return
+	}
+	for i := len(entry.UpstreamErrors) - 1; i >= 0; i-- {
+		if event := entry.UpstreamErrors[i]; event != nil {
+			if event.Kind == "first_output_timeout" && event.BudgetCutApplied {
+				entry.ErrorOwner = "budget"
+			}
+			return
+		}
+	}
+}
+
 func enqueueOpsErrorLog(ops *service.OpsService, entry *service.OpsInsertErrorLogInput) {
 	if ops == nil || entry == nil {
 		return
 	}
+	applyBudgetCutErrorOwner(entry)
 	entry.UserAgent = normalizeOpsPersistentUserAgent(entry.UserAgent)
 	if entry.ErrorBody != "" {
 		originalBody := entry.ErrorBody
@@ -415,7 +430,7 @@ func estimateOpsErrorLogJobBytes(entry *service.OpsInsertErrorLogInput) int64 {
 		size += len(*entry.UpstreamErrorDetail)
 	}
 	if entry.UpstreamErrorsJSON != nil {
-		size += len(*entry.UpstreamErrorsJSON)
+		size += service.OpsUpstreamErrorsLegacyJSONSize(*entry.UpstreamErrorsJSON)
 	}
 	return int64(size)
 }
@@ -1707,6 +1722,8 @@ func applyOpsLatencyFieldsFromContext(c *gin.Context, entry *service.OpsInsertEr
 	entry.TimeToFirstTokenMs = getContextLatencyMs(c, service.OpsTimeToFirstTokenMsKey)
 	entry.EndToEndFirstOutputMs = resilience.StateFrom(c.Request.Context()).EndToEndFirstOutputMs()
 	entry.RecoveryOutcome = recoveryOutcome(c)
+	resilience.StateFrom(c.Request.Context()).NoteWireStatus(c.Writer.Status())
+	entry.ResilienceTiming = resilience.StateFrom(c.Request.Context()).TimingJSON()
 	applyResilienceDisconnectFields(c, entry)
 }
 

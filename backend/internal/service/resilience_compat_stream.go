@@ -35,6 +35,7 @@ type openAICompatFirstEventKey struct{}
 
 // openAICompatFirstEvent guards one attempt of a converted stream.
 type openAICompatFirstEvent struct {
+	plan     resilience.TimeoutPlan
 	guard    *openAIFirstOutputHeaderGuard
 	started  time.Time
 	timeout  time.Duration
@@ -52,12 +53,15 @@ func (s *OpenAIGatewayService) armOpenAICompatFirstEvent(ctx, upstreamCtx contex
 	if !clientStream || account == nil || account.Platform != PlatformOpenAI {
 		return upstreamCtx, nil
 	}
-	timeout := s.openAIFirstOutputTimeoutFor(ctx, account.ID, model, effort, started)
+	timeout, plan := s.openAIFirstOutputPlanFor(ctx, account.ID, model, effort, started)
 	if timeout <= 0 {
 		return upstreamCtx, nil
 	}
-	guarded, guard := newOpenAIFirstOutputHeaderGuard(upstreamCtx, func() {}, started.Add(timeout))
-	fe := &openAICompatFirstEvent{guard: guard, started: started, timeout: timeout, model: model, effort: effort}
+	if resilience.BudgetTraceEnabledForTest {
+		plan = plan.WithTimerSiteForTest("openai_compat_first_output")
+	}
+	guarded, guard := newOpenAIFirstOutputHeaderGuard(upstreamCtx, func() {}, started.Add(timeout), plan)
+	fe := &openAICompatFirstEvent{plan: plan, guard: guard, started: started, timeout: timeout, model: model, effort: effort}
 	return context.WithValue(guarded, openAICompatFirstEventKey{}, fe), fe
 }
 
@@ -110,7 +114,7 @@ func (fe *openAICompatFirstEvent) close() {
 // timeoutError is the failover error of an expired guard.
 func (s *OpenAIGatewayService) openAICompatFirstEventTimeout(ctx context.Context, c *gin.Context, account *Account, fe *openAICompatFirstEvent, phase string, header http.Header) error {
 	return s.newOpenAIFirstOutputTimeoutError(ctx, c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
-		fe.started, fe.model, fe.effort, fe.timeout, phase, header)
+		fe.started, fe.model, fe.effort, fe.timeout, phase, header, fe.plan)
 }
 
 // noteOpenAICompatStall gives a stalled converted stream the bookkeeping of

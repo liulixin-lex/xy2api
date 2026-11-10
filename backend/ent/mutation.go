@@ -45222,6 +45222,36 @@ type UsageLogMutation struct {
 	anthropic_cache_ttl_applied   *bool
 	cache_ttl_overridden          *bool
 	created_at                    *time.Time
+	body_bytes                    *int64
+	addbody_bytes                 *int64
+	first_read_ms                 *int64
+	addfirst_read_ms              *int64
+	body_eof_ms                   *int64
+	addbody_eof_ms                *int64
+	anchor_basis                  *string
+	anchor_eligible               *bool
+	body_receipt_repeat           *int64
+	addbody_receipt_repeat        *int64
+	pre_dispatch_ms               *int64
+	addpre_dispatch_ms            *int64
+	keepalive_commit_ms           *int64
+	addkeepalive_commit_ms        *int64
+	wire_status                   *int64
+	addwire_status                *int64
+	dispatch_count                *int64
+	adddispatch_count             *int64
+	min_dispatch_remaining_ms     *int64
+	addmin_dispatch_remaining_ms  *int64
+	final_deadline_ms             *int64
+	addfinal_deadline_ms          *int64
+	client_family                 *string
+	client_cancel_ms              *int64
+	addclient_cancel_ms           *int64
+	cancel_stage                  *string
+	cdn_observed                  *string
+	budget_start_mode             *string
+	budget_t0_unix_ms             *int64
+	addbudget_t0_unix_ms          *int64
 	clearedFields                 map[string]struct{}
 	user                          *int64
 	cleareduser                   bool
@@ -47977,6 +48007,1140 @@ func (m *UsageLogMutation) ResetCreatedAt() {
 	m.created_at = nil
 }
 
+// SetBodyBytes sets the "body_bytes" field.
+func (m *UsageLogMutation) SetBodyBytes(i int64) {
+	m.body_bytes = &i
+	m.addbody_bytes = nil
+}
+
+// BodyBytes returns the value of the "body_bytes" field in the mutation.
+func (m *UsageLogMutation) BodyBytes() (r int64, exists bool) {
+	v := m.body_bytes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldBodyBytes returns the old "body_bytes" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldBodyBytes(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldBodyBytes is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldBodyBytes requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldBodyBytes: %w", err)
+	}
+	return oldValue.BodyBytes, nil
+}
+
+// AddBodyBytes adds i to the "body_bytes" field.
+func (m *UsageLogMutation) AddBodyBytes(i int64) {
+	if m.addbody_bytes != nil {
+		*m.addbody_bytes += i
+	} else {
+		m.addbody_bytes = &i
+	}
+}
+
+// AddedBodyBytes returns the value that was added to the "body_bytes" field in this mutation.
+func (m *UsageLogMutation) AddedBodyBytes() (r int64, exists bool) {
+	v := m.addbody_bytes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearBodyBytes clears the value of the "body_bytes" field.
+func (m *UsageLogMutation) ClearBodyBytes() {
+	m.body_bytes = nil
+	m.addbody_bytes = nil
+	m.clearedFields[usagelog.FieldBodyBytes] = struct{}{}
+}
+
+// BodyBytesCleared returns if the "body_bytes" field was cleared in this mutation.
+func (m *UsageLogMutation) BodyBytesCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldBodyBytes]
+	return ok
+}
+
+// ResetBodyBytes resets all changes to the "body_bytes" field.
+func (m *UsageLogMutation) ResetBodyBytes() {
+	m.body_bytes = nil
+	m.addbody_bytes = nil
+	delete(m.clearedFields, usagelog.FieldBodyBytes)
+}
+
+// SetFirstReadMs sets the "first_read_ms" field.
+func (m *UsageLogMutation) SetFirstReadMs(i int64) {
+	m.first_read_ms = &i
+	m.addfirst_read_ms = nil
+}
+
+// FirstReadMs returns the value of the "first_read_ms" field in the mutation.
+func (m *UsageLogMutation) FirstReadMs() (r int64, exists bool) {
+	v := m.first_read_ms
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldFirstReadMs returns the old "first_read_ms" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldFirstReadMs(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldFirstReadMs is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldFirstReadMs requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldFirstReadMs: %w", err)
+	}
+	return oldValue.FirstReadMs, nil
+}
+
+// AddFirstReadMs adds i to the "first_read_ms" field.
+func (m *UsageLogMutation) AddFirstReadMs(i int64) {
+	if m.addfirst_read_ms != nil {
+		*m.addfirst_read_ms += i
+	} else {
+		m.addfirst_read_ms = &i
+	}
+}
+
+// AddedFirstReadMs returns the value that was added to the "first_read_ms" field in this mutation.
+func (m *UsageLogMutation) AddedFirstReadMs() (r int64, exists bool) {
+	v := m.addfirst_read_ms
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearFirstReadMs clears the value of the "first_read_ms" field.
+func (m *UsageLogMutation) ClearFirstReadMs() {
+	m.first_read_ms = nil
+	m.addfirst_read_ms = nil
+	m.clearedFields[usagelog.FieldFirstReadMs] = struct{}{}
+}
+
+// FirstReadMsCleared returns if the "first_read_ms" field was cleared in this mutation.
+func (m *UsageLogMutation) FirstReadMsCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldFirstReadMs]
+	return ok
+}
+
+// ResetFirstReadMs resets all changes to the "first_read_ms" field.
+func (m *UsageLogMutation) ResetFirstReadMs() {
+	m.first_read_ms = nil
+	m.addfirst_read_ms = nil
+	delete(m.clearedFields, usagelog.FieldFirstReadMs)
+}
+
+// SetBodyEOFMs sets the "body_eof_ms" field.
+func (m *UsageLogMutation) SetBodyEOFMs(i int64) {
+	m.body_eof_ms = &i
+	m.addbody_eof_ms = nil
+}
+
+// BodyEOFMs returns the value of the "body_eof_ms" field in the mutation.
+func (m *UsageLogMutation) BodyEOFMs() (r int64, exists bool) {
+	v := m.body_eof_ms
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldBodyEOFMs returns the old "body_eof_ms" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldBodyEOFMs(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldBodyEOFMs is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldBodyEOFMs requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldBodyEOFMs: %w", err)
+	}
+	return oldValue.BodyEOFMs, nil
+}
+
+// AddBodyEOFMs adds i to the "body_eof_ms" field.
+func (m *UsageLogMutation) AddBodyEOFMs(i int64) {
+	if m.addbody_eof_ms != nil {
+		*m.addbody_eof_ms += i
+	} else {
+		m.addbody_eof_ms = &i
+	}
+}
+
+// AddedBodyEOFMs returns the value that was added to the "body_eof_ms" field in this mutation.
+func (m *UsageLogMutation) AddedBodyEOFMs() (r int64, exists bool) {
+	v := m.addbody_eof_ms
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearBodyEOFMs clears the value of the "body_eof_ms" field.
+func (m *UsageLogMutation) ClearBodyEOFMs() {
+	m.body_eof_ms = nil
+	m.addbody_eof_ms = nil
+	m.clearedFields[usagelog.FieldBodyEOFMs] = struct{}{}
+}
+
+// BodyEOFMsCleared returns if the "body_eof_ms" field was cleared in this mutation.
+func (m *UsageLogMutation) BodyEOFMsCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldBodyEOFMs]
+	return ok
+}
+
+// ResetBodyEOFMs resets all changes to the "body_eof_ms" field.
+func (m *UsageLogMutation) ResetBodyEOFMs() {
+	m.body_eof_ms = nil
+	m.addbody_eof_ms = nil
+	delete(m.clearedFields, usagelog.FieldBodyEOFMs)
+}
+
+// SetAnchorBasis sets the "anchor_basis" field.
+func (m *UsageLogMutation) SetAnchorBasis(s string) {
+	m.anchor_basis = &s
+}
+
+// AnchorBasis returns the value of the "anchor_basis" field in the mutation.
+func (m *UsageLogMutation) AnchorBasis() (r string, exists bool) {
+	v := m.anchor_basis
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAnchorBasis returns the old "anchor_basis" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldAnchorBasis(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAnchorBasis is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAnchorBasis requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAnchorBasis: %w", err)
+	}
+	return oldValue.AnchorBasis, nil
+}
+
+// ClearAnchorBasis clears the value of the "anchor_basis" field.
+func (m *UsageLogMutation) ClearAnchorBasis() {
+	m.anchor_basis = nil
+	m.clearedFields[usagelog.FieldAnchorBasis] = struct{}{}
+}
+
+// AnchorBasisCleared returns if the "anchor_basis" field was cleared in this mutation.
+func (m *UsageLogMutation) AnchorBasisCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldAnchorBasis]
+	return ok
+}
+
+// ResetAnchorBasis resets all changes to the "anchor_basis" field.
+func (m *UsageLogMutation) ResetAnchorBasis() {
+	m.anchor_basis = nil
+	delete(m.clearedFields, usagelog.FieldAnchorBasis)
+}
+
+// SetAnchorEligible sets the "anchor_eligible" field.
+func (m *UsageLogMutation) SetAnchorEligible(b bool) {
+	m.anchor_eligible = &b
+}
+
+// AnchorEligible returns the value of the "anchor_eligible" field in the mutation.
+func (m *UsageLogMutation) AnchorEligible() (r bool, exists bool) {
+	v := m.anchor_eligible
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAnchorEligible returns the old "anchor_eligible" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldAnchorEligible(ctx context.Context) (v *bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAnchorEligible is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAnchorEligible requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAnchorEligible: %w", err)
+	}
+	return oldValue.AnchorEligible, nil
+}
+
+// ClearAnchorEligible clears the value of the "anchor_eligible" field.
+func (m *UsageLogMutation) ClearAnchorEligible() {
+	m.anchor_eligible = nil
+	m.clearedFields[usagelog.FieldAnchorEligible] = struct{}{}
+}
+
+// AnchorEligibleCleared returns if the "anchor_eligible" field was cleared in this mutation.
+func (m *UsageLogMutation) AnchorEligibleCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldAnchorEligible]
+	return ok
+}
+
+// ResetAnchorEligible resets all changes to the "anchor_eligible" field.
+func (m *UsageLogMutation) ResetAnchorEligible() {
+	m.anchor_eligible = nil
+	delete(m.clearedFields, usagelog.FieldAnchorEligible)
+}
+
+// SetBodyReceiptRepeat sets the "body_receipt_repeat" field.
+func (m *UsageLogMutation) SetBodyReceiptRepeat(i int64) {
+	m.body_receipt_repeat = &i
+	m.addbody_receipt_repeat = nil
+}
+
+// BodyReceiptRepeat returns the value of the "body_receipt_repeat" field in the mutation.
+func (m *UsageLogMutation) BodyReceiptRepeat() (r int64, exists bool) {
+	v := m.body_receipt_repeat
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldBodyReceiptRepeat returns the old "body_receipt_repeat" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldBodyReceiptRepeat(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldBodyReceiptRepeat is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldBodyReceiptRepeat requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldBodyReceiptRepeat: %w", err)
+	}
+	return oldValue.BodyReceiptRepeat, nil
+}
+
+// AddBodyReceiptRepeat adds i to the "body_receipt_repeat" field.
+func (m *UsageLogMutation) AddBodyReceiptRepeat(i int64) {
+	if m.addbody_receipt_repeat != nil {
+		*m.addbody_receipt_repeat += i
+	} else {
+		m.addbody_receipt_repeat = &i
+	}
+}
+
+// AddedBodyReceiptRepeat returns the value that was added to the "body_receipt_repeat" field in this mutation.
+func (m *UsageLogMutation) AddedBodyReceiptRepeat() (r int64, exists bool) {
+	v := m.addbody_receipt_repeat
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearBodyReceiptRepeat clears the value of the "body_receipt_repeat" field.
+func (m *UsageLogMutation) ClearBodyReceiptRepeat() {
+	m.body_receipt_repeat = nil
+	m.addbody_receipt_repeat = nil
+	m.clearedFields[usagelog.FieldBodyReceiptRepeat] = struct{}{}
+}
+
+// BodyReceiptRepeatCleared returns if the "body_receipt_repeat" field was cleared in this mutation.
+func (m *UsageLogMutation) BodyReceiptRepeatCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldBodyReceiptRepeat]
+	return ok
+}
+
+// ResetBodyReceiptRepeat resets all changes to the "body_receipt_repeat" field.
+func (m *UsageLogMutation) ResetBodyReceiptRepeat() {
+	m.body_receipt_repeat = nil
+	m.addbody_receipt_repeat = nil
+	delete(m.clearedFields, usagelog.FieldBodyReceiptRepeat)
+}
+
+// SetPreDispatchMs sets the "pre_dispatch_ms" field.
+func (m *UsageLogMutation) SetPreDispatchMs(i int64) {
+	m.pre_dispatch_ms = &i
+	m.addpre_dispatch_ms = nil
+}
+
+// PreDispatchMs returns the value of the "pre_dispatch_ms" field in the mutation.
+func (m *UsageLogMutation) PreDispatchMs() (r int64, exists bool) {
+	v := m.pre_dispatch_ms
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPreDispatchMs returns the old "pre_dispatch_ms" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldPreDispatchMs(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPreDispatchMs is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPreDispatchMs requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPreDispatchMs: %w", err)
+	}
+	return oldValue.PreDispatchMs, nil
+}
+
+// AddPreDispatchMs adds i to the "pre_dispatch_ms" field.
+func (m *UsageLogMutation) AddPreDispatchMs(i int64) {
+	if m.addpre_dispatch_ms != nil {
+		*m.addpre_dispatch_ms += i
+	} else {
+		m.addpre_dispatch_ms = &i
+	}
+}
+
+// AddedPreDispatchMs returns the value that was added to the "pre_dispatch_ms" field in this mutation.
+func (m *UsageLogMutation) AddedPreDispatchMs() (r int64, exists bool) {
+	v := m.addpre_dispatch_ms
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearPreDispatchMs clears the value of the "pre_dispatch_ms" field.
+func (m *UsageLogMutation) ClearPreDispatchMs() {
+	m.pre_dispatch_ms = nil
+	m.addpre_dispatch_ms = nil
+	m.clearedFields[usagelog.FieldPreDispatchMs] = struct{}{}
+}
+
+// PreDispatchMsCleared returns if the "pre_dispatch_ms" field was cleared in this mutation.
+func (m *UsageLogMutation) PreDispatchMsCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldPreDispatchMs]
+	return ok
+}
+
+// ResetPreDispatchMs resets all changes to the "pre_dispatch_ms" field.
+func (m *UsageLogMutation) ResetPreDispatchMs() {
+	m.pre_dispatch_ms = nil
+	m.addpre_dispatch_ms = nil
+	delete(m.clearedFields, usagelog.FieldPreDispatchMs)
+}
+
+// SetKeepaliveCommitMs sets the "keepalive_commit_ms" field.
+func (m *UsageLogMutation) SetKeepaliveCommitMs(i int64) {
+	m.keepalive_commit_ms = &i
+	m.addkeepalive_commit_ms = nil
+}
+
+// KeepaliveCommitMs returns the value of the "keepalive_commit_ms" field in the mutation.
+func (m *UsageLogMutation) KeepaliveCommitMs() (r int64, exists bool) {
+	v := m.keepalive_commit_ms
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldKeepaliveCommitMs returns the old "keepalive_commit_ms" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldKeepaliveCommitMs(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldKeepaliveCommitMs is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldKeepaliveCommitMs requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldKeepaliveCommitMs: %w", err)
+	}
+	return oldValue.KeepaliveCommitMs, nil
+}
+
+// AddKeepaliveCommitMs adds i to the "keepalive_commit_ms" field.
+func (m *UsageLogMutation) AddKeepaliveCommitMs(i int64) {
+	if m.addkeepalive_commit_ms != nil {
+		*m.addkeepalive_commit_ms += i
+	} else {
+		m.addkeepalive_commit_ms = &i
+	}
+}
+
+// AddedKeepaliveCommitMs returns the value that was added to the "keepalive_commit_ms" field in this mutation.
+func (m *UsageLogMutation) AddedKeepaliveCommitMs() (r int64, exists bool) {
+	v := m.addkeepalive_commit_ms
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearKeepaliveCommitMs clears the value of the "keepalive_commit_ms" field.
+func (m *UsageLogMutation) ClearKeepaliveCommitMs() {
+	m.keepalive_commit_ms = nil
+	m.addkeepalive_commit_ms = nil
+	m.clearedFields[usagelog.FieldKeepaliveCommitMs] = struct{}{}
+}
+
+// KeepaliveCommitMsCleared returns if the "keepalive_commit_ms" field was cleared in this mutation.
+func (m *UsageLogMutation) KeepaliveCommitMsCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldKeepaliveCommitMs]
+	return ok
+}
+
+// ResetKeepaliveCommitMs resets all changes to the "keepalive_commit_ms" field.
+func (m *UsageLogMutation) ResetKeepaliveCommitMs() {
+	m.keepalive_commit_ms = nil
+	m.addkeepalive_commit_ms = nil
+	delete(m.clearedFields, usagelog.FieldKeepaliveCommitMs)
+}
+
+// SetWireStatus sets the "wire_status" field.
+func (m *UsageLogMutation) SetWireStatus(i int64) {
+	m.wire_status = &i
+	m.addwire_status = nil
+}
+
+// WireStatus returns the value of the "wire_status" field in the mutation.
+func (m *UsageLogMutation) WireStatus() (r int64, exists bool) {
+	v := m.wire_status
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldWireStatus returns the old "wire_status" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldWireStatus(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldWireStatus is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldWireStatus requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldWireStatus: %w", err)
+	}
+	return oldValue.WireStatus, nil
+}
+
+// AddWireStatus adds i to the "wire_status" field.
+func (m *UsageLogMutation) AddWireStatus(i int64) {
+	if m.addwire_status != nil {
+		*m.addwire_status += i
+	} else {
+		m.addwire_status = &i
+	}
+}
+
+// AddedWireStatus returns the value that was added to the "wire_status" field in this mutation.
+func (m *UsageLogMutation) AddedWireStatus() (r int64, exists bool) {
+	v := m.addwire_status
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearWireStatus clears the value of the "wire_status" field.
+func (m *UsageLogMutation) ClearWireStatus() {
+	m.wire_status = nil
+	m.addwire_status = nil
+	m.clearedFields[usagelog.FieldWireStatus] = struct{}{}
+}
+
+// WireStatusCleared returns if the "wire_status" field was cleared in this mutation.
+func (m *UsageLogMutation) WireStatusCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldWireStatus]
+	return ok
+}
+
+// ResetWireStatus resets all changes to the "wire_status" field.
+func (m *UsageLogMutation) ResetWireStatus() {
+	m.wire_status = nil
+	m.addwire_status = nil
+	delete(m.clearedFields, usagelog.FieldWireStatus)
+}
+
+// SetDispatchCount sets the "dispatch_count" field.
+func (m *UsageLogMutation) SetDispatchCount(i int64) {
+	m.dispatch_count = &i
+	m.adddispatch_count = nil
+}
+
+// DispatchCount returns the value of the "dispatch_count" field in the mutation.
+func (m *UsageLogMutation) DispatchCount() (r int64, exists bool) {
+	v := m.dispatch_count
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDispatchCount returns the old "dispatch_count" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldDispatchCount(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDispatchCount is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDispatchCount requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDispatchCount: %w", err)
+	}
+	return oldValue.DispatchCount, nil
+}
+
+// AddDispatchCount adds i to the "dispatch_count" field.
+func (m *UsageLogMutation) AddDispatchCount(i int64) {
+	if m.adddispatch_count != nil {
+		*m.adddispatch_count += i
+	} else {
+		m.adddispatch_count = &i
+	}
+}
+
+// AddedDispatchCount returns the value that was added to the "dispatch_count" field in this mutation.
+func (m *UsageLogMutation) AddedDispatchCount() (r int64, exists bool) {
+	v := m.adddispatch_count
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearDispatchCount clears the value of the "dispatch_count" field.
+func (m *UsageLogMutation) ClearDispatchCount() {
+	m.dispatch_count = nil
+	m.adddispatch_count = nil
+	m.clearedFields[usagelog.FieldDispatchCount] = struct{}{}
+}
+
+// DispatchCountCleared returns if the "dispatch_count" field was cleared in this mutation.
+func (m *UsageLogMutation) DispatchCountCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldDispatchCount]
+	return ok
+}
+
+// ResetDispatchCount resets all changes to the "dispatch_count" field.
+func (m *UsageLogMutation) ResetDispatchCount() {
+	m.dispatch_count = nil
+	m.adddispatch_count = nil
+	delete(m.clearedFields, usagelog.FieldDispatchCount)
+}
+
+// SetMinDispatchRemainingMs sets the "min_dispatch_remaining_ms" field.
+func (m *UsageLogMutation) SetMinDispatchRemainingMs(i int64) {
+	m.min_dispatch_remaining_ms = &i
+	m.addmin_dispatch_remaining_ms = nil
+}
+
+// MinDispatchRemainingMs returns the value of the "min_dispatch_remaining_ms" field in the mutation.
+func (m *UsageLogMutation) MinDispatchRemainingMs() (r int64, exists bool) {
+	v := m.min_dispatch_remaining_ms
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMinDispatchRemainingMs returns the old "min_dispatch_remaining_ms" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldMinDispatchRemainingMs(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMinDispatchRemainingMs is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMinDispatchRemainingMs requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMinDispatchRemainingMs: %w", err)
+	}
+	return oldValue.MinDispatchRemainingMs, nil
+}
+
+// AddMinDispatchRemainingMs adds i to the "min_dispatch_remaining_ms" field.
+func (m *UsageLogMutation) AddMinDispatchRemainingMs(i int64) {
+	if m.addmin_dispatch_remaining_ms != nil {
+		*m.addmin_dispatch_remaining_ms += i
+	} else {
+		m.addmin_dispatch_remaining_ms = &i
+	}
+}
+
+// AddedMinDispatchRemainingMs returns the value that was added to the "min_dispatch_remaining_ms" field in this mutation.
+func (m *UsageLogMutation) AddedMinDispatchRemainingMs() (r int64, exists bool) {
+	v := m.addmin_dispatch_remaining_ms
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearMinDispatchRemainingMs clears the value of the "min_dispatch_remaining_ms" field.
+func (m *UsageLogMutation) ClearMinDispatchRemainingMs() {
+	m.min_dispatch_remaining_ms = nil
+	m.addmin_dispatch_remaining_ms = nil
+	m.clearedFields[usagelog.FieldMinDispatchRemainingMs] = struct{}{}
+}
+
+// MinDispatchRemainingMsCleared returns if the "min_dispatch_remaining_ms" field was cleared in this mutation.
+func (m *UsageLogMutation) MinDispatchRemainingMsCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldMinDispatchRemainingMs]
+	return ok
+}
+
+// ResetMinDispatchRemainingMs resets all changes to the "min_dispatch_remaining_ms" field.
+func (m *UsageLogMutation) ResetMinDispatchRemainingMs() {
+	m.min_dispatch_remaining_ms = nil
+	m.addmin_dispatch_remaining_ms = nil
+	delete(m.clearedFields, usagelog.FieldMinDispatchRemainingMs)
+}
+
+// SetFinalDeadlineMs sets the "final_deadline_ms" field.
+func (m *UsageLogMutation) SetFinalDeadlineMs(i int64) {
+	m.final_deadline_ms = &i
+	m.addfinal_deadline_ms = nil
+}
+
+// FinalDeadlineMs returns the value of the "final_deadline_ms" field in the mutation.
+func (m *UsageLogMutation) FinalDeadlineMs() (r int64, exists bool) {
+	v := m.final_deadline_ms
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldFinalDeadlineMs returns the old "final_deadline_ms" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldFinalDeadlineMs(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldFinalDeadlineMs is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldFinalDeadlineMs requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldFinalDeadlineMs: %w", err)
+	}
+	return oldValue.FinalDeadlineMs, nil
+}
+
+// AddFinalDeadlineMs adds i to the "final_deadline_ms" field.
+func (m *UsageLogMutation) AddFinalDeadlineMs(i int64) {
+	if m.addfinal_deadline_ms != nil {
+		*m.addfinal_deadline_ms += i
+	} else {
+		m.addfinal_deadline_ms = &i
+	}
+}
+
+// AddedFinalDeadlineMs returns the value that was added to the "final_deadline_ms" field in this mutation.
+func (m *UsageLogMutation) AddedFinalDeadlineMs() (r int64, exists bool) {
+	v := m.addfinal_deadline_ms
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearFinalDeadlineMs clears the value of the "final_deadline_ms" field.
+func (m *UsageLogMutation) ClearFinalDeadlineMs() {
+	m.final_deadline_ms = nil
+	m.addfinal_deadline_ms = nil
+	m.clearedFields[usagelog.FieldFinalDeadlineMs] = struct{}{}
+}
+
+// FinalDeadlineMsCleared returns if the "final_deadline_ms" field was cleared in this mutation.
+func (m *UsageLogMutation) FinalDeadlineMsCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldFinalDeadlineMs]
+	return ok
+}
+
+// ResetFinalDeadlineMs resets all changes to the "final_deadline_ms" field.
+func (m *UsageLogMutation) ResetFinalDeadlineMs() {
+	m.final_deadline_ms = nil
+	m.addfinal_deadline_ms = nil
+	delete(m.clearedFields, usagelog.FieldFinalDeadlineMs)
+}
+
+// SetClientFamily sets the "client_family" field.
+func (m *UsageLogMutation) SetClientFamily(s string) {
+	m.client_family = &s
+}
+
+// ClientFamily returns the value of the "client_family" field in the mutation.
+func (m *UsageLogMutation) ClientFamily() (r string, exists bool) {
+	v := m.client_family
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldClientFamily returns the old "client_family" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldClientFamily(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldClientFamily is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldClientFamily requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldClientFamily: %w", err)
+	}
+	return oldValue.ClientFamily, nil
+}
+
+// ClearClientFamily clears the value of the "client_family" field.
+func (m *UsageLogMutation) ClearClientFamily() {
+	m.client_family = nil
+	m.clearedFields[usagelog.FieldClientFamily] = struct{}{}
+}
+
+// ClientFamilyCleared returns if the "client_family" field was cleared in this mutation.
+func (m *UsageLogMutation) ClientFamilyCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldClientFamily]
+	return ok
+}
+
+// ResetClientFamily resets all changes to the "client_family" field.
+func (m *UsageLogMutation) ResetClientFamily() {
+	m.client_family = nil
+	delete(m.clearedFields, usagelog.FieldClientFamily)
+}
+
+// SetClientCancelMs sets the "client_cancel_ms" field.
+func (m *UsageLogMutation) SetClientCancelMs(i int64) {
+	m.client_cancel_ms = &i
+	m.addclient_cancel_ms = nil
+}
+
+// ClientCancelMs returns the value of the "client_cancel_ms" field in the mutation.
+func (m *UsageLogMutation) ClientCancelMs() (r int64, exists bool) {
+	v := m.client_cancel_ms
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldClientCancelMs returns the old "client_cancel_ms" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldClientCancelMs(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldClientCancelMs is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldClientCancelMs requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldClientCancelMs: %w", err)
+	}
+	return oldValue.ClientCancelMs, nil
+}
+
+// AddClientCancelMs adds i to the "client_cancel_ms" field.
+func (m *UsageLogMutation) AddClientCancelMs(i int64) {
+	if m.addclient_cancel_ms != nil {
+		*m.addclient_cancel_ms += i
+	} else {
+		m.addclient_cancel_ms = &i
+	}
+}
+
+// AddedClientCancelMs returns the value that was added to the "client_cancel_ms" field in this mutation.
+func (m *UsageLogMutation) AddedClientCancelMs() (r int64, exists bool) {
+	v := m.addclient_cancel_ms
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearClientCancelMs clears the value of the "client_cancel_ms" field.
+func (m *UsageLogMutation) ClearClientCancelMs() {
+	m.client_cancel_ms = nil
+	m.addclient_cancel_ms = nil
+	m.clearedFields[usagelog.FieldClientCancelMs] = struct{}{}
+}
+
+// ClientCancelMsCleared returns if the "client_cancel_ms" field was cleared in this mutation.
+func (m *UsageLogMutation) ClientCancelMsCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldClientCancelMs]
+	return ok
+}
+
+// ResetClientCancelMs resets all changes to the "client_cancel_ms" field.
+func (m *UsageLogMutation) ResetClientCancelMs() {
+	m.client_cancel_ms = nil
+	m.addclient_cancel_ms = nil
+	delete(m.clearedFields, usagelog.FieldClientCancelMs)
+}
+
+// SetCancelStage sets the "cancel_stage" field.
+func (m *UsageLogMutation) SetCancelStage(s string) {
+	m.cancel_stage = &s
+}
+
+// CancelStage returns the value of the "cancel_stage" field in the mutation.
+func (m *UsageLogMutation) CancelStage() (r string, exists bool) {
+	v := m.cancel_stage
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCancelStage returns the old "cancel_stage" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldCancelStage(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCancelStage is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCancelStage requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCancelStage: %w", err)
+	}
+	return oldValue.CancelStage, nil
+}
+
+// ClearCancelStage clears the value of the "cancel_stage" field.
+func (m *UsageLogMutation) ClearCancelStage() {
+	m.cancel_stage = nil
+	m.clearedFields[usagelog.FieldCancelStage] = struct{}{}
+}
+
+// CancelStageCleared returns if the "cancel_stage" field was cleared in this mutation.
+func (m *UsageLogMutation) CancelStageCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldCancelStage]
+	return ok
+}
+
+// ResetCancelStage resets all changes to the "cancel_stage" field.
+func (m *UsageLogMutation) ResetCancelStage() {
+	m.cancel_stage = nil
+	delete(m.clearedFields, usagelog.FieldCancelStage)
+}
+
+// SetCdnObserved sets the "cdn_observed" field.
+func (m *UsageLogMutation) SetCdnObserved(s string) {
+	m.cdn_observed = &s
+}
+
+// CdnObserved returns the value of the "cdn_observed" field in the mutation.
+func (m *UsageLogMutation) CdnObserved() (r string, exists bool) {
+	v := m.cdn_observed
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCdnObserved returns the old "cdn_observed" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldCdnObserved(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCdnObserved is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCdnObserved requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCdnObserved: %w", err)
+	}
+	return oldValue.CdnObserved, nil
+}
+
+// ClearCdnObserved clears the value of the "cdn_observed" field.
+func (m *UsageLogMutation) ClearCdnObserved() {
+	m.cdn_observed = nil
+	m.clearedFields[usagelog.FieldCdnObserved] = struct{}{}
+}
+
+// CdnObservedCleared returns if the "cdn_observed" field was cleared in this mutation.
+func (m *UsageLogMutation) CdnObservedCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldCdnObserved]
+	return ok
+}
+
+// ResetCdnObserved resets all changes to the "cdn_observed" field.
+func (m *UsageLogMutation) ResetCdnObserved() {
+	m.cdn_observed = nil
+	delete(m.clearedFields, usagelog.FieldCdnObserved)
+}
+
+// SetBudgetStartMode sets the "budget_start_mode" field.
+func (m *UsageLogMutation) SetBudgetStartMode(s string) {
+	m.budget_start_mode = &s
+}
+
+// BudgetStartMode returns the value of the "budget_start_mode" field in the mutation.
+func (m *UsageLogMutation) BudgetStartMode() (r string, exists bool) {
+	v := m.budget_start_mode
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldBudgetStartMode returns the old "budget_start_mode" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldBudgetStartMode(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldBudgetStartMode is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldBudgetStartMode requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldBudgetStartMode: %w", err)
+	}
+	return oldValue.BudgetStartMode, nil
+}
+
+// ClearBudgetStartMode clears the value of the "budget_start_mode" field.
+func (m *UsageLogMutation) ClearBudgetStartMode() {
+	m.budget_start_mode = nil
+	m.clearedFields[usagelog.FieldBudgetStartMode] = struct{}{}
+}
+
+// BudgetStartModeCleared returns if the "budget_start_mode" field was cleared in this mutation.
+func (m *UsageLogMutation) BudgetStartModeCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldBudgetStartMode]
+	return ok
+}
+
+// ResetBudgetStartMode resets all changes to the "budget_start_mode" field.
+func (m *UsageLogMutation) ResetBudgetStartMode() {
+	m.budget_start_mode = nil
+	delete(m.clearedFields, usagelog.FieldBudgetStartMode)
+}
+
+// SetBudgetT0UnixMs sets the "budget_t0_unix_ms" field.
+func (m *UsageLogMutation) SetBudgetT0UnixMs(i int64) {
+	m.budget_t0_unix_ms = &i
+	m.addbudget_t0_unix_ms = nil
+}
+
+// BudgetT0UnixMs returns the value of the "budget_t0_unix_ms" field in the mutation.
+func (m *UsageLogMutation) BudgetT0UnixMs() (r int64, exists bool) {
+	v := m.budget_t0_unix_ms
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldBudgetT0UnixMs returns the old "budget_t0_unix_ms" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldBudgetT0UnixMs(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldBudgetT0UnixMs is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldBudgetT0UnixMs requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldBudgetT0UnixMs: %w", err)
+	}
+	return oldValue.BudgetT0UnixMs, nil
+}
+
+// AddBudgetT0UnixMs adds i to the "budget_t0_unix_ms" field.
+func (m *UsageLogMutation) AddBudgetT0UnixMs(i int64) {
+	if m.addbudget_t0_unix_ms != nil {
+		*m.addbudget_t0_unix_ms += i
+	} else {
+		m.addbudget_t0_unix_ms = &i
+	}
+}
+
+// AddedBudgetT0UnixMs returns the value that was added to the "budget_t0_unix_ms" field in this mutation.
+func (m *UsageLogMutation) AddedBudgetT0UnixMs() (r int64, exists bool) {
+	v := m.addbudget_t0_unix_ms
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearBudgetT0UnixMs clears the value of the "budget_t0_unix_ms" field.
+func (m *UsageLogMutation) ClearBudgetT0UnixMs() {
+	m.budget_t0_unix_ms = nil
+	m.addbudget_t0_unix_ms = nil
+	m.clearedFields[usagelog.FieldBudgetT0UnixMs] = struct{}{}
+}
+
+// BudgetT0UnixMsCleared returns if the "budget_t0_unix_ms" field was cleared in this mutation.
+func (m *UsageLogMutation) BudgetT0UnixMsCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldBudgetT0UnixMs]
+	return ok
+}
+
+// ResetBudgetT0UnixMs resets all changes to the "budget_t0_unix_ms" field.
+func (m *UsageLogMutation) ResetBudgetT0UnixMs() {
+	m.budget_t0_unix_ms = nil
+	m.addbudget_t0_unix_ms = nil
+	delete(m.clearedFields, usagelog.FieldBudgetT0UnixMs)
+}
+
 // ClearUser clears the "user" edge to the User entity.
 func (m *UsageLogMutation) ClearUser() {
 	m.cleareduser = true
@@ -48146,7 +49310,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 51)
+	fields := make([]string, 0, 69)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -48300,6 +49464,60 @@ func (m *UsageLogMutation) Fields() []string {
 	if m.created_at != nil {
 		fields = append(fields, usagelog.FieldCreatedAt)
 	}
+	if m.body_bytes != nil {
+		fields = append(fields, usagelog.FieldBodyBytes)
+	}
+	if m.first_read_ms != nil {
+		fields = append(fields, usagelog.FieldFirstReadMs)
+	}
+	if m.body_eof_ms != nil {
+		fields = append(fields, usagelog.FieldBodyEOFMs)
+	}
+	if m.anchor_basis != nil {
+		fields = append(fields, usagelog.FieldAnchorBasis)
+	}
+	if m.anchor_eligible != nil {
+		fields = append(fields, usagelog.FieldAnchorEligible)
+	}
+	if m.body_receipt_repeat != nil {
+		fields = append(fields, usagelog.FieldBodyReceiptRepeat)
+	}
+	if m.pre_dispatch_ms != nil {
+		fields = append(fields, usagelog.FieldPreDispatchMs)
+	}
+	if m.keepalive_commit_ms != nil {
+		fields = append(fields, usagelog.FieldKeepaliveCommitMs)
+	}
+	if m.wire_status != nil {
+		fields = append(fields, usagelog.FieldWireStatus)
+	}
+	if m.dispatch_count != nil {
+		fields = append(fields, usagelog.FieldDispatchCount)
+	}
+	if m.min_dispatch_remaining_ms != nil {
+		fields = append(fields, usagelog.FieldMinDispatchRemainingMs)
+	}
+	if m.final_deadline_ms != nil {
+		fields = append(fields, usagelog.FieldFinalDeadlineMs)
+	}
+	if m.client_family != nil {
+		fields = append(fields, usagelog.FieldClientFamily)
+	}
+	if m.client_cancel_ms != nil {
+		fields = append(fields, usagelog.FieldClientCancelMs)
+	}
+	if m.cancel_stage != nil {
+		fields = append(fields, usagelog.FieldCancelStage)
+	}
+	if m.cdn_observed != nil {
+		fields = append(fields, usagelog.FieldCdnObserved)
+	}
+	if m.budget_start_mode != nil {
+		fields = append(fields, usagelog.FieldBudgetStartMode)
+	}
+	if m.budget_t0_unix_ms != nil {
+		fields = append(fields, usagelog.FieldBudgetT0UnixMs)
+	}
 	return fields
 }
 
@@ -48410,6 +49628,42 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.CacheTTLOverridden()
 	case usagelog.FieldCreatedAt:
 		return m.CreatedAt()
+	case usagelog.FieldBodyBytes:
+		return m.BodyBytes()
+	case usagelog.FieldFirstReadMs:
+		return m.FirstReadMs()
+	case usagelog.FieldBodyEOFMs:
+		return m.BodyEOFMs()
+	case usagelog.FieldAnchorBasis:
+		return m.AnchorBasis()
+	case usagelog.FieldAnchorEligible:
+		return m.AnchorEligible()
+	case usagelog.FieldBodyReceiptRepeat:
+		return m.BodyReceiptRepeat()
+	case usagelog.FieldPreDispatchMs:
+		return m.PreDispatchMs()
+	case usagelog.FieldKeepaliveCommitMs:
+		return m.KeepaliveCommitMs()
+	case usagelog.FieldWireStatus:
+		return m.WireStatus()
+	case usagelog.FieldDispatchCount:
+		return m.DispatchCount()
+	case usagelog.FieldMinDispatchRemainingMs:
+		return m.MinDispatchRemainingMs()
+	case usagelog.FieldFinalDeadlineMs:
+		return m.FinalDeadlineMs()
+	case usagelog.FieldClientFamily:
+		return m.ClientFamily()
+	case usagelog.FieldClientCancelMs:
+		return m.ClientCancelMs()
+	case usagelog.FieldCancelStage:
+		return m.CancelStage()
+	case usagelog.FieldCdnObserved:
+		return m.CdnObserved()
+	case usagelog.FieldBudgetStartMode:
+		return m.BudgetStartMode()
+	case usagelog.FieldBudgetT0UnixMs:
+		return m.BudgetT0UnixMs()
 	}
 	return nil, false
 }
@@ -48521,6 +49775,42 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldCacheTTLOverridden(ctx)
 	case usagelog.FieldCreatedAt:
 		return m.OldCreatedAt(ctx)
+	case usagelog.FieldBodyBytes:
+		return m.OldBodyBytes(ctx)
+	case usagelog.FieldFirstReadMs:
+		return m.OldFirstReadMs(ctx)
+	case usagelog.FieldBodyEOFMs:
+		return m.OldBodyEOFMs(ctx)
+	case usagelog.FieldAnchorBasis:
+		return m.OldAnchorBasis(ctx)
+	case usagelog.FieldAnchorEligible:
+		return m.OldAnchorEligible(ctx)
+	case usagelog.FieldBodyReceiptRepeat:
+		return m.OldBodyReceiptRepeat(ctx)
+	case usagelog.FieldPreDispatchMs:
+		return m.OldPreDispatchMs(ctx)
+	case usagelog.FieldKeepaliveCommitMs:
+		return m.OldKeepaliveCommitMs(ctx)
+	case usagelog.FieldWireStatus:
+		return m.OldWireStatus(ctx)
+	case usagelog.FieldDispatchCount:
+		return m.OldDispatchCount(ctx)
+	case usagelog.FieldMinDispatchRemainingMs:
+		return m.OldMinDispatchRemainingMs(ctx)
+	case usagelog.FieldFinalDeadlineMs:
+		return m.OldFinalDeadlineMs(ctx)
+	case usagelog.FieldClientFamily:
+		return m.OldClientFamily(ctx)
+	case usagelog.FieldClientCancelMs:
+		return m.OldClientCancelMs(ctx)
+	case usagelog.FieldCancelStage:
+		return m.OldCancelStage(ctx)
+	case usagelog.FieldCdnObserved:
+		return m.OldCdnObserved(ctx)
+	case usagelog.FieldBudgetStartMode:
+		return m.OldBudgetStartMode(ctx)
+	case usagelog.FieldBudgetT0UnixMs:
+		return m.OldBudgetT0UnixMs(ctx)
 	}
 	return nil, fmt.Errorf("unknown UsageLog field %s", name)
 }
@@ -48887,6 +50177,132 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetCreatedAt(v)
 		return nil
+	case usagelog.FieldBodyBytes:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetBodyBytes(v)
+		return nil
+	case usagelog.FieldFirstReadMs:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetFirstReadMs(v)
+		return nil
+	case usagelog.FieldBodyEOFMs:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetBodyEOFMs(v)
+		return nil
+	case usagelog.FieldAnchorBasis:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAnchorBasis(v)
+		return nil
+	case usagelog.FieldAnchorEligible:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAnchorEligible(v)
+		return nil
+	case usagelog.FieldBodyReceiptRepeat:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetBodyReceiptRepeat(v)
+		return nil
+	case usagelog.FieldPreDispatchMs:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPreDispatchMs(v)
+		return nil
+	case usagelog.FieldKeepaliveCommitMs:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetKeepaliveCommitMs(v)
+		return nil
+	case usagelog.FieldWireStatus:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetWireStatus(v)
+		return nil
+	case usagelog.FieldDispatchCount:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDispatchCount(v)
+		return nil
+	case usagelog.FieldMinDispatchRemainingMs:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMinDispatchRemainingMs(v)
+		return nil
+	case usagelog.FieldFinalDeadlineMs:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetFinalDeadlineMs(v)
+		return nil
+	case usagelog.FieldClientFamily:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetClientFamily(v)
+		return nil
+	case usagelog.FieldClientCancelMs:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetClientCancelMs(v)
+		return nil
+	case usagelog.FieldCancelStage:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCancelStage(v)
+		return nil
+	case usagelog.FieldCdnObserved:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCdnObserved(v)
+		return nil
+	case usagelog.FieldBudgetStartMode:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetBudgetStartMode(v)
+		return nil
+	case usagelog.FieldBudgetT0UnixMs:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetBudgetT0UnixMs(v)
+		return nil
 	}
 	return fmt.Errorf("unknown UsageLog field %s", name)
 }
@@ -48964,6 +50380,42 @@ func (m *UsageLogMutation) AddedFields() []string {
 	if m.addvideo_duration_seconds != nil {
 		fields = append(fields, usagelog.FieldVideoDurationSeconds)
 	}
+	if m.addbody_bytes != nil {
+		fields = append(fields, usagelog.FieldBodyBytes)
+	}
+	if m.addfirst_read_ms != nil {
+		fields = append(fields, usagelog.FieldFirstReadMs)
+	}
+	if m.addbody_eof_ms != nil {
+		fields = append(fields, usagelog.FieldBodyEOFMs)
+	}
+	if m.addbody_receipt_repeat != nil {
+		fields = append(fields, usagelog.FieldBodyReceiptRepeat)
+	}
+	if m.addpre_dispatch_ms != nil {
+		fields = append(fields, usagelog.FieldPreDispatchMs)
+	}
+	if m.addkeepalive_commit_ms != nil {
+		fields = append(fields, usagelog.FieldKeepaliveCommitMs)
+	}
+	if m.addwire_status != nil {
+		fields = append(fields, usagelog.FieldWireStatus)
+	}
+	if m.adddispatch_count != nil {
+		fields = append(fields, usagelog.FieldDispatchCount)
+	}
+	if m.addmin_dispatch_remaining_ms != nil {
+		fields = append(fields, usagelog.FieldMinDispatchRemainingMs)
+	}
+	if m.addfinal_deadline_ms != nil {
+		fields = append(fields, usagelog.FieldFinalDeadlineMs)
+	}
+	if m.addclient_cancel_ms != nil {
+		fields = append(fields, usagelog.FieldClientCancelMs)
+	}
+	if m.addbudget_t0_unix_ms != nil {
+		fields = append(fields, usagelog.FieldBudgetT0UnixMs)
+	}
 	return fields
 }
 
@@ -49018,6 +50470,30 @@ func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedVideoCount()
 	case usagelog.FieldVideoDurationSeconds:
 		return m.AddedVideoDurationSeconds()
+	case usagelog.FieldBodyBytes:
+		return m.AddedBodyBytes()
+	case usagelog.FieldFirstReadMs:
+		return m.AddedFirstReadMs()
+	case usagelog.FieldBodyEOFMs:
+		return m.AddedBodyEOFMs()
+	case usagelog.FieldBodyReceiptRepeat:
+		return m.AddedBodyReceiptRepeat()
+	case usagelog.FieldPreDispatchMs:
+		return m.AddedPreDispatchMs()
+	case usagelog.FieldKeepaliveCommitMs:
+		return m.AddedKeepaliveCommitMs()
+	case usagelog.FieldWireStatus:
+		return m.AddedWireStatus()
+	case usagelog.FieldDispatchCount:
+		return m.AddedDispatchCount()
+	case usagelog.FieldMinDispatchRemainingMs:
+		return m.AddedMinDispatchRemainingMs()
+	case usagelog.FieldFinalDeadlineMs:
+		return m.AddedFinalDeadlineMs()
+	case usagelog.FieldClientCancelMs:
+		return m.AddedClientCancelMs()
+	case usagelog.FieldBudgetT0UnixMs:
+		return m.AddedBudgetT0UnixMs()
 	}
 	return nil, false
 }
@@ -49188,6 +50664,90 @@ func (m *UsageLogMutation) AddField(name string, value ent.Value) error {
 		}
 		m.AddVideoDurationSeconds(v)
 		return nil
+	case usagelog.FieldBodyBytes:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddBodyBytes(v)
+		return nil
+	case usagelog.FieldFirstReadMs:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddFirstReadMs(v)
+		return nil
+	case usagelog.FieldBodyEOFMs:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddBodyEOFMs(v)
+		return nil
+	case usagelog.FieldBodyReceiptRepeat:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddBodyReceiptRepeat(v)
+		return nil
+	case usagelog.FieldPreDispatchMs:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddPreDispatchMs(v)
+		return nil
+	case usagelog.FieldKeepaliveCommitMs:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddKeepaliveCommitMs(v)
+		return nil
+	case usagelog.FieldWireStatus:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddWireStatus(v)
+		return nil
+	case usagelog.FieldDispatchCount:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddDispatchCount(v)
+		return nil
+	case usagelog.FieldMinDispatchRemainingMs:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddMinDispatchRemainingMs(v)
+		return nil
+	case usagelog.FieldFinalDeadlineMs:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddFinalDeadlineMs(v)
+		return nil
+	case usagelog.FieldClientCancelMs:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddClientCancelMs(v)
+		return nil
+	case usagelog.FieldBudgetT0UnixMs:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddBudgetT0UnixMs(v)
+		return nil
 	}
 	return fmt.Errorf("unknown UsageLog numeric field %s", name)
 }
@@ -49273,6 +50833,60 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	}
 	if m.FieldCleared(usagelog.FieldAnthropicCacheTTLApplied) {
 		fields = append(fields, usagelog.FieldAnthropicCacheTTLApplied)
+	}
+	if m.FieldCleared(usagelog.FieldBodyBytes) {
+		fields = append(fields, usagelog.FieldBodyBytes)
+	}
+	if m.FieldCleared(usagelog.FieldFirstReadMs) {
+		fields = append(fields, usagelog.FieldFirstReadMs)
+	}
+	if m.FieldCleared(usagelog.FieldBodyEOFMs) {
+		fields = append(fields, usagelog.FieldBodyEOFMs)
+	}
+	if m.FieldCleared(usagelog.FieldAnchorBasis) {
+		fields = append(fields, usagelog.FieldAnchorBasis)
+	}
+	if m.FieldCleared(usagelog.FieldAnchorEligible) {
+		fields = append(fields, usagelog.FieldAnchorEligible)
+	}
+	if m.FieldCleared(usagelog.FieldBodyReceiptRepeat) {
+		fields = append(fields, usagelog.FieldBodyReceiptRepeat)
+	}
+	if m.FieldCleared(usagelog.FieldPreDispatchMs) {
+		fields = append(fields, usagelog.FieldPreDispatchMs)
+	}
+	if m.FieldCleared(usagelog.FieldKeepaliveCommitMs) {
+		fields = append(fields, usagelog.FieldKeepaliveCommitMs)
+	}
+	if m.FieldCleared(usagelog.FieldWireStatus) {
+		fields = append(fields, usagelog.FieldWireStatus)
+	}
+	if m.FieldCleared(usagelog.FieldDispatchCount) {
+		fields = append(fields, usagelog.FieldDispatchCount)
+	}
+	if m.FieldCleared(usagelog.FieldMinDispatchRemainingMs) {
+		fields = append(fields, usagelog.FieldMinDispatchRemainingMs)
+	}
+	if m.FieldCleared(usagelog.FieldFinalDeadlineMs) {
+		fields = append(fields, usagelog.FieldFinalDeadlineMs)
+	}
+	if m.FieldCleared(usagelog.FieldClientFamily) {
+		fields = append(fields, usagelog.FieldClientFamily)
+	}
+	if m.FieldCleared(usagelog.FieldClientCancelMs) {
+		fields = append(fields, usagelog.FieldClientCancelMs)
+	}
+	if m.FieldCleared(usagelog.FieldCancelStage) {
+		fields = append(fields, usagelog.FieldCancelStage)
+	}
+	if m.FieldCleared(usagelog.FieldCdnObserved) {
+		fields = append(fields, usagelog.FieldCdnObserved)
+	}
+	if m.FieldCleared(usagelog.FieldBudgetStartMode) {
+		fields = append(fields, usagelog.FieldBudgetStartMode)
+	}
+	if m.FieldCleared(usagelog.FieldBudgetT0UnixMs) {
+		fields = append(fields, usagelog.FieldBudgetT0UnixMs)
 	}
 	return fields
 }
@@ -49365,6 +50979,60 @@ func (m *UsageLogMutation) ClearField(name string) error {
 		return nil
 	case usagelog.FieldAnthropicCacheTTLApplied:
 		m.ClearAnthropicCacheTTLApplied()
+		return nil
+	case usagelog.FieldBodyBytes:
+		m.ClearBodyBytes()
+		return nil
+	case usagelog.FieldFirstReadMs:
+		m.ClearFirstReadMs()
+		return nil
+	case usagelog.FieldBodyEOFMs:
+		m.ClearBodyEOFMs()
+		return nil
+	case usagelog.FieldAnchorBasis:
+		m.ClearAnchorBasis()
+		return nil
+	case usagelog.FieldAnchorEligible:
+		m.ClearAnchorEligible()
+		return nil
+	case usagelog.FieldBodyReceiptRepeat:
+		m.ClearBodyReceiptRepeat()
+		return nil
+	case usagelog.FieldPreDispatchMs:
+		m.ClearPreDispatchMs()
+		return nil
+	case usagelog.FieldKeepaliveCommitMs:
+		m.ClearKeepaliveCommitMs()
+		return nil
+	case usagelog.FieldWireStatus:
+		m.ClearWireStatus()
+		return nil
+	case usagelog.FieldDispatchCount:
+		m.ClearDispatchCount()
+		return nil
+	case usagelog.FieldMinDispatchRemainingMs:
+		m.ClearMinDispatchRemainingMs()
+		return nil
+	case usagelog.FieldFinalDeadlineMs:
+		m.ClearFinalDeadlineMs()
+		return nil
+	case usagelog.FieldClientFamily:
+		m.ClearClientFamily()
+		return nil
+	case usagelog.FieldClientCancelMs:
+		m.ClearClientCancelMs()
+		return nil
+	case usagelog.FieldCancelStage:
+		m.ClearCancelStage()
+		return nil
+	case usagelog.FieldCdnObserved:
+		m.ClearCdnObserved()
+		return nil
+	case usagelog.FieldBudgetStartMode:
+		m.ClearBudgetStartMode()
+		return nil
+	case usagelog.FieldBudgetT0UnixMs:
+		m.ClearBudgetT0UnixMs()
 		return nil
 	}
 	return fmt.Errorf("unknown UsageLog nullable field %s", name)
@@ -49526,6 +51194,60 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldCreatedAt:
 		m.ResetCreatedAt()
+		return nil
+	case usagelog.FieldBodyBytes:
+		m.ResetBodyBytes()
+		return nil
+	case usagelog.FieldFirstReadMs:
+		m.ResetFirstReadMs()
+		return nil
+	case usagelog.FieldBodyEOFMs:
+		m.ResetBodyEOFMs()
+		return nil
+	case usagelog.FieldAnchorBasis:
+		m.ResetAnchorBasis()
+		return nil
+	case usagelog.FieldAnchorEligible:
+		m.ResetAnchorEligible()
+		return nil
+	case usagelog.FieldBodyReceiptRepeat:
+		m.ResetBodyReceiptRepeat()
+		return nil
+	case usagelog.FieldPreDispatchMs:
+		m.ResetPreDispatchMs()
+		return nil
+	case usagelog.FieldKeepaliveCommitMs:
+		m.ResetKeepaliveCommitMs()
+		return nil
+	case usagelog.FieldWireStatus:
+		m.ResetWireStatus()
+		return nil
+	case usagelog.FieldDispatchCount:
+		m.ResetDispatchCount()
+		return nil
+	case usagelog.FieldMinDispatchRemainingMs:
+		m.ResetMinDispatchRemainingMs()
+		return nil
+	case usagelog.FieldFinalDeadlineMs:
+		m.ResetFinalDeadlineMs()
+		return nil
+	case usagelog.FieldClientFamily:
+		m.ResetClientFamily()
+		return nil
+	case usagelog.FieldClientCancelMs:
+		m.ResetClientCancelMs()
+		return nil
+	case usagelog.FieldCancelStage:
+		m.ResetCancelStage()
+		return nil
+	case usagelog.FieldCdnObserved:
+		m.ResetCdnObserved()
+		return nil
+	case usagelog.FieldBudgetStartMode:
+		m.ResetBudgetStartMode()
+		return nil
+	case usagelog.FieldBudgetT0UnixMs:
+		m.ResetBudgetT0UnixMs()
 		return nil
 	}
 	return fmt.Errorf("unknown UsageLog field %s", name)

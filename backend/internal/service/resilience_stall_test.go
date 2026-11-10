@@ -132,6 +132,31 @@ func TestFirstEventGuard(t *testing.T) {
 	g.Release()
 }
 
+func TestFirstEventGuardUsesPlanStartForDeadline(t *testing.T) {
+	now := time.Unix(1000, 0)
+	started := now.Add(-700 * time.Millisecond)
+	require.Equal(t, 300*time.Millisecond, timeoutUntilPlanDeadline(time.Second, started, now))
+	require.Equal(t, time.Nanosecond, timeoutUntilPlanDeadline(time.Second, started.Add(-time.Second), now))
+	require.Equal(t, time.Second, timeoutUntilPlanDeadline(time.Second, time.Time{}, now))
+}
+
+func TestFirstEventPlanOwnsTheProfileAttemptStart(t *testing.T) {
+	withResilienceSettings(t, nil)
+	t0 := time.Unix(1000, 0)
+	st := resilience.NewRequestState()
+	ctx := resilience.WithRequestState(context.Background(), st)
+	st.SetBudget(resilience.NewBudget(ctx, resilience.Current(), resilience.KindText, t0))
+	started := t0.Add(239 * time.Second)
+	st.SetAttemptProfile(resilience.AttemptProfile{AccountID: 7, Model: "claude", AttemptStart: started})
+	timeout, plan := resilienceFirstEventPlan(ctx, 7, PlatformAnthropic)
+	require.Equal(t, started, plan.Start())
+	require.Equal(t, plan.Effective(), timeout)
+	st.ObserveAttemptStart()
+	timing := st.Timing()
+	require.EqualValues(t, 1, *timing.LateAttemptCount)
+	require.Zero(t, *timing.LateAttemptNoTimerCount)
+}
+
 func TestFirstEventTimeoutFailsOverBeforeOutput(t *testing.T) {
 	withResilienceSettings(t, nil)
 	gin.SetMode(gin.TestMode)

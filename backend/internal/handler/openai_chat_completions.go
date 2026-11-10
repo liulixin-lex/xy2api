@@ -167,6 +167,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	defer inflightRelease()
 
 	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
+	c.Request = c.Request.WithContext(service.WithOpenAITerminalRejectionScope(c.Request.Context(), c, body))
 	promptCacheKey := h.gatewayService.ExtractSessionID(c, body)
 
 	maxAccountSwitches := h.maxAccountSwitches

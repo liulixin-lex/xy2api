@@ -1702,7 +1702,7 @@ func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) []an
 
 		if isCodexToolCallItemType(typ) {
 			callID, ok := m["call_id"].(string)
-			if !ok || strings.TrimSpace(callID) == "" {
+			if isCodexToolCallContextItemType(typ) && (!ok || strings.TrimSpace(callID) == "") {
 				if id, ok := m["id"].(string); ok && strings.TrimSpace(id) != "" {
 					callID = id
 					ensureCopy()

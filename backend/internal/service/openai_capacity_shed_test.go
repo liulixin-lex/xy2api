@@ -130,10 +130,11 @@ func TestOpenAIStreamErrorFrameDoesNotStartClientOutput(t *testing.T) {
 		{`{"type":"response.created","response":{"id":"resp_1"}}`, "response.created", false},
 		{`{"type":"response.in_progress","response":{"id":"resp_1"}}`, "response.in_progress", false},
 		{`{"type":"keepalive"}`, "keepalive", false},
-		{`{"type":"unknown_event"}`, "unknown_event", true},
+		{`{"type":"unknown_event"}`, "unknown_event", false},
+		{`{"type":"unknown_event","value":"visible"}`, "unknown_event", false},
 		{`{"type":"response.metadata","sequence_number":2,"metadata":{"openai_chatgpt_moderation_metadata":{}}}`, "response.metadata", false},
 		{`{"type":"codex.response.metadata"}`, "codex.response.metadata", false},
-		{`{"type":"codex.unknown"}`, "codex.unknown", true},
+		{`{"type":"codex.unknown"}`, "codex.unknown", false},
 		{`{"type":"codex.rate_limits","rate_limits":{}}`, "codex.rate_limits", false},
 		{`{"type":"response.output_item.added","item":{"type":"reasoning","summary":[]}}`, "response.output_item.added", false},
 		{`{"type":"response.output_item.added","item":{"type":"reasoning","encrypted_content":"ciphertext"}}`, "response.output_item.added", true},
@@ -424,6 +425,24 @@ func TestSanitizeOpenAICapacityShedErrorCodeForClient(t *testing.T) {
 		wantChanged bool
 		wantContain string
 	}{
+		{
+			name:        "top_level_overloaded_code",
+			payload:     `{"type":"error","code":"server_is_overloaded","message":"request rejected"}`,
+			wantChanged: true,
+			wantContain: `"code":"server_error"`,
+		},
+		{
+			name:        "top_level_slow_down_code",
+			payload:     `{"type":"error","code":"slow_down","message":"request rejected"}`,
+			wantChanged: true,
+			wantContain: `"code":"server_error"`,
+		},
+		{
+			name:        "top_level_rate_limit_preserved",
+			payload:     `{"type":"error","code":"rate_limit_exceeded","message":"try again in 3s"}`,
+			wantChanged: false,
+			wantContain: `"code":"rate_limit_exceeded"`,
+		},
 		{
 			name:        "failed事件嵌套code改写",
 			payload:     `{"type":"response.failed","response":{"error":{"code":"server_is_overloaded","message":"overloaded"}}}`,

@@ -227,3 +227,148 @@ func TestOpenAITerminalRejectionEvidenceExpiresAndIsBounded(t *testing.T) {
 	require.Len(t, tracker.entries, openAITerminalRejectionCapacity)
 	require.Equal(t, openAITerminalRejectionCapacity, tracker.lru.Len())
 }
+
+func TestOpenAITerminalRejectionScopeKeepsParentAffinityAvailable(t *testing.T) {
+	withResilienceSettings(t, nil)
+	groupID := int64(102091)
+	parentID := "parent-session-id"
+	childID := "child-session-id"
+	accounts := []Account{
+		{ID: 39101, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID}, Credentials: map[string]any{"plan_type": "team"}},
+		{ID: 39102, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID}, Credentials: map[string]any{"plan_type": "team"}},
+	}
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.LBTopK = 2
+	store := newMemResilienceStore()
+	repo := schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}}
+	cache := &schedulerTestGatewayCache{sessionBindings: make(map[string]int64)}
+	svc := &OpenAIGatewayService{
+		cfg: cfg, accountRepo: repo, cache: cache, resilience: NewResilienceService(nil, store),
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("false", "false"),
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{acquireResults: map[int64]bool{39101: true, 39102: true}}),
+	}
+
+	child, _ := newOpenAIUpstreamErrorTestContext(t)
+	child.Request.Header.Set("session-id", parentID)
+	child.Request.Header.Set(openAIWSThreadIDHeader, childID)
+	child.Request.Header.Set(codexParentThreadIDHeader, parentID)
+	child.Request.Header.Set(openAISubagentHeader, "collab_spawn")
+	body := []byte(`{"model":"gpt-6-sol","input":[{"type":"agent_message","content":[{"type":"encrypted_content","encrypted_content":"cipher"}]}]}`)
+	parentHash := svc.GenerateSessionHash(child, body)
+	cache.sessionBindings[svc.openAISessionCacheKey(parentHash)] = 39101
+	ctx := svc.WithOpenAIGuardianParentAffinity(child.Request.Context(), child, body, "gpt-6-sol")
+	scope := openAIRejectionScope(ctx).session
+	require.NotEmpty(t, scope)
+	require.NotEqual(t, parentHash, scope)
+	svc.AvoidOpenAIStateAccount(ctx, groupID, scope, 39101)
+
+	selectedChild, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", parentHash, "gpt-6-sol",
+		nil, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.NotNil(t, selectedChild)
+	require.Equal(t, int64(39102), selectedChild.Account.ID,
+		"the child scope must carry avoidance into parent-affinity selection")
+	require.Equal(t, int64(39101), cache.sessionBindings[svc.openAISessionCacheKey(parentHash)],
+		"the child rejection must not delete or replace the shared parent binding")
+	if selectedChild.ReleaseFunc != nil {
+		selectedChild.ReleaseFunc()
+	}
+
+	parent, _ := newOpenAIUpstreamErrorTestContext(t)
+	parent.Request.Header.Set("session-id", parentID)
+	parentCtx := parent.Request.Context()
+	selectedParent, _, err := svc.SelectAccountWithScheduler(parentCtx, &groupID, "", parentHash, "gpt-6-sol",
+		nil, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.NotNil(t, selectedParent)
+	require.Equal(t, int64(39101), selectedParent.Account.ID,
+		"the parent must continue to select its healthy sticky owner")
+	if selectedParent.ReleaseFunc != nil {
+		selectedParent.ReleaseFunc()
+	}
+
+	root, _ := newOpenAIUpstreamErrorTestContext(t)
+	root.Request.Header.Set("session-id", "root-session-id")
+	root.Request.Header.Set(openAIWSThreadIDHeader, "root-thread-id")
+	rootBody := []byte(`{"model":"gpt-6-sol","input":"parent request"}`)
+	rootHash := svc.GenerateSessionHash(root, rootBody)
+	rootCtx := WithOpenAITerminalRejectionScope(root.Request.Context(), root, rootBody)
+	rootScope := openAIRejectionScope(rootCtx).session
+	require.NotEmpty(t, rootScope)
+	require.False(t, openAIRejectionScope(rootCtx).preserveBinding)
+	cache.sessionBindings[svc.openAISessionCacheKey(rootHash)] = 39101
+	svc.AvoidOpenAIStateAccount(rootCtx, groupID, rootScope, 39101)
+	selectedRoot, _, err := svc.SelectAccountWithScheduler(rootCtx, &groupID, "", rootHash, "gpt-6-sol",
+		nil, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.NotNil(t, selectedRoot)
+	require.Equal(t, int64(39102), selectedRoot.Account.ID,
+		"a root thread's own rejection must rebind its session owner")
+	require.NotEqual(t, int64(39101), cache.sessionBindings[svc.openAISessionCacheKey(rootHash)])
+	if selectedRoot.ReleaseFunc != nil {
+		selectedRoot.ReleaseFunc()
+	}
+}
+
+func TestOpenAITerminalRejectionScopeFreezesOriginalIdentity(t *testing.T) {
+	c, _ := newOpenAIUpstreamErrorTestContext(t)
+	c.Request.Header.Set(openAIWSThreadIDHeader, "child-thread")
+	c.Request.Header.Set(codexParentThreadIDHeader, "parent-thread")
+	original := WithOpenAITerminalRejectionScope(c.Request.Context(), c, nil)
+	require.NotEmpty(t, openAIRejectionScope(original).session)
+	require.True(t, openAIRejectionScope(original).preserveBinding)
+	c.Request.Header.Set(openAIWSThreadIDHeader, "account-namespaced-thread")
+	c.Request.Header.Del(codexParentThreadIDHeader)
+	require.Same(t, original, WithOpenAITerminalRejectionScope(original, c, nil))
+}
+
+func TestOpenAITerminalRejectionCanceledRequestDoesNotAvoid(t *testing.T) {
+	withResilienceSettings(t, nil)
+	svc, store, _ := terminalRejectionTestService()
+	account := terminalRejectionTestAccount(1, "relay-a.example")
+	state := resilience.NewRequestState()
+	state.SetSession(9, "v2:canceled-session", svc.openAISessionRecorder())
+	ctx, cancel := context.WithCancel(resilience.WithRequestState(t.Context(), state))
+	cancel()
+	for range resilience.Current().Session.StreakThreshold {
+		svc.noteOpenAITerminalRejection(ctx, account, http.StatusBadRequest, nil, []byte(terminalRejectionBody), ctx.Err())
+	}
+	avoid, err := store.SessionAvoid(t.Context(), 9, "v2:canceled-session")
+	require.NoError(t, err)
+	require.Empty(t, avoid)
+}
+
+func TestOpenAITerminalRejectionStreakUsesChildThreadScope(t *testing.T) {
+	withResilienceSettings(t, nil)
+	svc, store, cache := terminalRejectionTestService()
+	account := terminalRejectionTestAccount(1, "relay-a.example")
+	c, _ := newOpenAIUpstreamErrorTestContext(t)
+	c.Request.Header.Set("session-id", "parent-session-id")
+	c.Request.Header.Set(openAIWSThreadIDHeader, "child-thread-id")
+	c.Request.Header.Set(codexParentThreadIDHeader, "parent-thread-id")
+	c.Request.Header.Set(openAISubagentHeader, "collab_spawn")
+	body := []byte(`{"model":"gpt-6-sol","input":[{"type":"agent_message","content":[{"type":"encrypted_content","encrypted_content":"cipher"}]}]}`)
+	parentSession := svc.GenerateSessionHash(c, body)
+	state := resilience.NewRequestState()
+	state.SetSession(9, parentSession, svc.openAISessionRecorder())
+	ctx := resilience.WithRequestState(c.Request.Context(), state)
+	ctx = WithOpenAITerminalRejectionScope(ctx, c, body)
+	ctx = svc.WithOpenAIGuardianParentAffinity(ctx, c, body, "gpt-6-sol")
+	c.Request = c.Request.WithContext(ctx)
+	cache.bindings[svc.openAISessionCacheKey(parentSession)] = account.ID
+
+	for range resilience.Current().Session.StreakThreshold {
+		svc.noteOpenAITerminalRejection(ctx, account, http.StatusBadRequest, nil, []byte(terminalRejectionBody), errors.New("terminal"))
+	}
+	scope := openAIRejectionScope(ctx).session
+	require.NotEmpty(t, scope)
+	require.NotEqual(t, parentSession, scope)
+	threadAvoid, err := store.SessionAvoid(t.Context(), 9, scope)
+	require.NoError(t, err)
+	require.Contains(t, threadAvoid, account.ID)
+	parentAvoid, err := store.SessionAvoid(t.Context(), 9, parentSession)
+	require.NoError(t, err)
+	require.Empty(t, parentAvoid, "child rejection must not avoid the parent session")
+	require.Equal(t, account.ID, cache.bindings[svc.openAISessionCacheKey(parentSession)],
+		"child rejection must keep the parent's healthy sticky owner")
+}

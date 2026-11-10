@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -224,6 +225,94 @@ func TestGrokContentPolicy403SharedErrorFallbackDoesNotMutate(t *testing.T) {
 	require.Zero(t, repo.tempUnschedCalls)
 	require.Zero(t, repo.rateLimitedCalls)
 	require.Zero(t, repo.updateCalls)
+}
+
+func TestGrokMessagesNonFailoverSkipsOpenAIAccountSideEffects(t *testing.T) {
+	withResilienceSettings(t, nil)
+	repo := &openAIModelAvailabilityRepo{}
+	rl := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, accountRepo: repo, rateLimitService: rl}
+	account := &Account{ID: 811, Platform: PlatformGrok, Type: AccountTypeAPIKey, Credentials: map[string]any{
+		"api_key":                    "test-key",
+		"base_url":                   "https://relay.example/v1",
+		"temp_unschedulable_enabled": true,
+		"temp_unschedulable_rules": []any{map[string]any{
+			"error_code": float64(http.StatusBadRequest), "keywords": []any{"invalid request"}, "duration_minutes": float64(10),
+		}},
+	}}
+	body := `{"error":{"type":"invalid_request_error","message":"invalid request"}}`
+	svc.httpUpstream = &httpUpstreamRecorder{resp: newOpenAIUpstreamErrorResponse(http.StatusBadRequest, body)}
+	c, recorder := newOpenAIUpstreamErrorTestContext(t)
+	_, err := svc.ForwardAsAnthropic(c.Request.Context(), c, account,
+		[]byte(`{"model":"grok-4.5","max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`), "", "")
+	require.Error(t, err)
+	var failure *UpstreamFailoverError
+	require.NotErrorAs(t, err, &failure)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Zero(t, repo.tempCalls, "the Grok error policy owns this non-failover response")
+	require.Zero(t, repo.setErrorCalls)
+	require.Empty(t, repo.modelRateLimitCalls)
+}
+
+func TestGrokGenericInference404WithoutCustomPolicyKeepsModelCooldown(t *testing.T) {
+	withResilienceSettings(t, nil)
+	repo := &openAIModelAvailabilityRepo{}
+	svc := &OpenAIGatewayService{accountRepo: repo, rateLimitService: NewRateLimitService(repo, nil, &config.Config{}, nil, nil)}
+	account := &Account{ID: 812, Platform: PlatformGrok, Type: AccountTypeAPIKey}
+	body := []byte(`{"message":"not found"}`)
+
+	svc.handleGrokAccountUpstreamError(withGrokTeamRateLimitModel(context.Background(), "grok-4.3"), account, http.StatusNotFound, nil, body)
+	require.Len(t, repo.modelRateLimitCalls, 1)
+	require.Equal(t, "grok-4.3", repo.modelRateLimitCalls[0].scope)
+}
+
+func TestGrokCustomGenericInference404UsesSharedCustomPolicy(t *testing.T) {
+	withResilienceSettings(t, nil)
+	const genericHTML = `<html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><hr><center>nginx</center></body></html>`
+	for _, tc := range []struct {
+		name, body string
+	}{
+		{name: "empty body", body: ""},
+		{name: "generic json", body: `{"message":"not found"}`},
+		{name: "generic html", body: genericHTML},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &openAIModelAvailabilityRepo{}
+			upstream := &httpUpstreamRecorder{responses: []*http.Response{
+				newOpenAIUpstreamErrorResponse(http.StatusNotFound, tc.body),
+			}}
+			svc := &OpenAIGatewayService{
+				cfg:              &config.Config{},
+				httpUpstream:     upstream,
+				accountRepo:      repo,
+				rateLimitService: NewRateLimitService(repo, nil, &config.Config{}, nil, nil),
+			}
+			account := &Account{
+				ID:       808,
+				Platform: PlatformGrok,
+				Type:     AccountTypeAPIKey,
+				Credentials: map[string]any{
+					"api_key":                    "test-key",
+					"base_url":                   "https://relay.example/v1",
+					"custom_error_codes_enabled": true,
+					"custom_error_codes":         []any{float64(http.StatusNotFound)},
+				},
+				Extra: map[string]any{
+					"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeOff,
+				},
+			}
+			c, recorder := newOpenAIUpstreamErrorTestContext(t)
+			_, err := svc.Forward(c.Request.Context(), c, account, []byte(`{"model":"grok-4.3","stream":false,"input":"hello"}`))
+			var failover *UpstreamFailoverError
+			require.Error(t, err)
+			require.ErrorAs(t, err, &failover)
+			require.Len(t, upstream.bodies, 1)
+			require.Equal(t, 1, repo.setErrorCalls)
+			require.Empty(t, repo.modelRateLimitCalls)
+			require.Zero(t, repo.tempCalls)
+			require.Empty(t, recorder.Body.String())
+		})
+	}
 }
 
 func TestGrokContentPolicy403MediaResponseBypassesCustomErrorCodes(t *testing.T) {

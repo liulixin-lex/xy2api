@@ -20,6 +20,7 @@ var effortFamilies = []struct {
 	{family: "claude-fable-5", levels: effortLowMediumHighXHighMax},
 	{family: "claude-sonnet-4-6", levels: effortLowMediumHighMax},
 	{family: "claude-sonnet-5-5", levels: effortLowMediumHighXHighMax},
+	{family: "claude-haiku-5-5", levels: effortLowMediumHighXHighMax},
 	{family: "claude-sonnet-5", levels: effortLowMediumHighXHighMax},
 	{family: "claude-opus-4-8", levels: effortLowMediumHighXHighMax},
 	{family: "claude-opus-4-7", levels: effortLowMediumHighXHighMax},
@@ -64,11 +65,10 @@ func normalizeEffortModelID(model string) string {
 	id = strings.TrimSuffix(id, "-thinking")
 	// OpenRouter uses dotted minor versions for some models. Normalize them
 	// before effort, thinking, and billing family lookups.
-	if id == "claude-opus-5.5" {
-		id = "claude-opus-5-5"
-	}
-	if id == "claude-sonnet-5.5" {
-		id = "claude-sonnet-5-5"
+	for _, family := range []string{"opus", "sonnet", "haiku"} {
+		if id == "claude-"+family+"-5.5" {
+			id = "claude-" + family + "-5-5"
+		}
 	}
 	if mapped, ok := ModelIDReverseOverrides[id]; ok {
 		id = mapped

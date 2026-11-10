@@ -99,6 +99,8 @@ type FirstOutputTimeouts struct {
 
 // BudgetSettings tunes the per-request attempt and time budget.
 type BudgetSettings struct {
+	BudgetStart                       string              `json:"budget_start"`
+	BudgetCutAttribution              string              `json:"budget_cut_attribution"`
 	Enabled                           bool                `json:"enabled"`
 	MaxAttempts                       int                 `json:"max_attempts"`
 	PreOutputBudgetSeconds            int                 `json:"pre_output_budget_seconds"`
@@ -203,6 +205,8 @@ func Defaults() Settings {
 		// accounts produced a first byte within seconds. The last candidate is
 		// governed only by the remaining request budget (Budget.AttemptTimeout).
 		Budget: BudgetSettings{
+			BudgetStart:                       BudgetStartArrival,
+			BudgetCutAttribution:              BudgetAttributionObserve,
 			Enabled:                           true,
 			MaxAttempts:                       4,
 			PreOutputBudgetSeconds:            240,
@@ -276,6 +280,8 @@ func (s Settings) Validate() error {
 	check(in(s.Balance.PauseSeconds, 30, 3600), "balance.pause_seconds must be 30-3600")
 
 	b := s.Budget
+	check(b.BudgetStart == BudgetStartArrival || b.BudgetStart == BudgetStartBodyEOF, "budget.budget_start must be arrival or body_eof")
+	check(b.BudgetCutAttribution == BudgetAttributionOff || b.BudgetCutAttribution == BudgetAttributionObserve || b.BudgetCutAttribution == BudgetAttributionEnforce, "budget.budget_cut_attribution must be off, observe or enforce")
 	check(in(b.MaxAttempts, 1, 10), "budget.max_attempts must be 1-10")
 	check(in(b.PreOutputBudgetSeconds, 60, 290), "budget.pre_output_budget_seconds must be 60-290")
 	for name, v := range map[string]int{
@@ -367,6 +373,12 @@ func Parse(raw string) (Settings, error) {
 
 // normalize fills nil collections so callers never branch on nil.
 func (s *Settings) normalize() {
+	if s.Budget.BudgetStart == "" {
+		s.Budget.BudgetStart = BudgetStartArrival
+	}
+	if s.Budget.BudgetCutAttribution == "" {
+		s.Budget.BudgetCutAttribution = BudgetAttributionObserve
+	}
 	if s.Failure.BalanceKeywordsExtra == nil {
 		s.Failure.BalanceKeywordsExtra = []string{}
 	}

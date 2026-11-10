@@ -100,7 +100,7 @@ func resilienceInServiceRetryAllowedWithBody(ctx context.Context, accountID int6
 }
 
 func isUnrecoverableAccountFailure(status int, body []byte) bool {
-	switch classifyUpstreamHTTP(status, nil, body, "").Category {
+	switch classifyInferenceUpstreamHTTP(status, nil, body, "").Category {
 	case resilience.CategoryBalance, resilience.CategoryAuth, resilience.CategoryModelUnsupported:
 		return true
 	default:

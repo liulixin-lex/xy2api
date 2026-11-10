@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +41,8 @@ func TestReaderPostgresReadOnlyToolMatrix(t *testing.T) {
 	// The disposable database is reused by other integration fixtures. Reset
 	// only this fixture's aggregate group so old date/minute buckets cannot
 	// accumulate across reruns or interfere with the boundary assertions.
+	// This fixed retention watermark precedes the historical rollup windows
+	// below; deriving it from NOW() would let those windows age into retention.
 	for _, stmt := range []string{
 		`DELETE FROM usage_group_daily_rollups WHERE group_id=7017`,
 		`DELETE FROM channel_monitor_v2_error_metrics_1m WHERE group_id=7017`,
@@ -62,7 +65,7 @@ func TestReaderPostgresReadOnlyToolMatrix(t *testing.T) {
 		`INSERT INTO channel_monitor_v2_metrics_1m(bucket_start,platform,group_id,model,success_requests,error_requests,computed_at) VALUES(date_trunc('minute',NOW()-INTERVAL '10 minutes'),'openai',7017,'gpt-test',10,1,NOW()) ON CONFLICT DO NOTHING`,
 		`INSERT INTO channel_monitor_v2_error_metrics_1m(bucket_start,platform,group_id,model,error_category,taxonomy_version,error_requests) VALUES(date_trunc('minute',NOW()-INTERVAL '10 minutes'),'openai',7017,'gpt-test','transient',1,1) ON CONFLICT DO NOTHING`,
 		`UPDATE channel_monitor_v2_watermarks SET usage_coverage_start=NOW()-INTERVAL '2 days',error_coverage_start=NOW()-INTERVAL '2 days',data_through=NOW() WHERE id=1`,
-		`UPDATE usage_group_rollup_state SET closed_before=CURRENT_DATE,retained_from=NOW()-INTERVAL '7 days',timezone_name='UTC' WHERE id=1`,
+		`UPDATE usage_group_rollup_state SET closed_before=CURRENT_DATE,retained_from='2026-10-01T00:00:00Z',timezone_name='UTC' WHERE id=1`,
 		`INSERT INTO usage_group_daily_rollups(bucket_date,group_id,actual_cost) VALUES(CURRENT_DATE-1,7017,3.0) ON CONFLICT DO NOTHING`,
 		`INSERT INTO ops_alert_rules(id,name,metric_type,operator,threshold) VALUES(78001,'reader-rule','error_rate','>',0.1) ON CONFLICT(id) DO NOTHING`,
 		`INSERT INTO ops_alert_events(id,rule_id,severity,title,description) VALUES(78002,78001,'warning','canary-alert-title','canary-alert-description') ON CONFLICT(id) DO NOTHING`,
@@ -101,6 +104,25 @@ func TestReaderPostgresReadOnlyToolMatrix(t *testing.T) {
 	require.Equal(t, "2s", statementTimeout)
 	require.Equal(t, "100ms", lockTimeout)
 	require.NoError(t, txn.Rollback())
+	t.Run("recent health tolerates malformed budget attribution", func(t *testing.T) {
+		// Keep this fixture inside a rolled-back transaction so the tool matrix
+		// below still checks its original row counts and ownership boundaries.
+		tx, err := writer.BeginTx(ctx, nil)
+		require.NoError(t, err)
+		defer func() { _ = tx.Rollback() }()
+		now := time.Now().UTC()
+		before, err := recentHealthObservations(ctx, tx, []int64{7101}, now)
+		require.NoError(t, err)
+		for i, applied := range []any{true, false, "not-a-boolean", nil, 7, map[string]any{"bad": true}} {
+			raw, err := json.Marshal([]map[string]any{{"account_id": 7101, "kind": "stream_failed", "resilience_category": "TRANSIENT", "budget_cut_applied": applied}})
+			require.NoError(t, err)
+			_, err = tx.ExecContext(ctx, `INSERT INTO ops_error_logs(error_phase,error_type,status_code,request_id,created_at,upstream_errors) VALUES('upstream','upstream_error',502,$1,$2,$3::jsonb)`, "budget-applied-"+strconv.Itoa(i), now.Add(-time.Second), string(raw))
+			require.NoError(t, err)
+		}
+		after, err := recentHealthObservations(ctx, tx, []int64{7101}, now)
+		require.NoError(t, err)
+		require.Len(t, after[7101], len(before[7101])+5)
+	})
 	qreader := NewQueryReader(&ReaderDB{ro})
 	mini := miniredis.RunT(t)
 	redisClient := redis.NewClient(&redis.Options{Addr: mini.Addr()})
@@ -226,7 +248,7 @@ func testReaderGroupRollupWindows(t *testing.T, ctx context.Context, writer *sql
 	_, err = writer.ExecContext(ctx, `INSERT INTO usage_group_daily_rollups(bucket_date,group_id,actual_cost) VALUES('2026-11-01',7017,1),('2026-11-02',7017,2) ON CONFLICT(bucket_date,group_id) DO UPDATE SET actual_cost=EXCLUDED.actual_cost`)
 	require.NoError(t, err)
 	defer func() {
-		_, _ = writer.ExecContext(context.Background(), `UPDATE usage_group_rollup_state SET timezone_name='UTC',closed_before=CURRENT_DATE WHERE id=1`)
+		_, _ = writer.ExecContext(context.Background(), `UPDATE usage_group_rollup_state SET timezone_name='UTC',closed_before=CURRENT_DATE,retained_from='2026-10-01T00:00:00Z' WHERE id=1`)
 	}()
 	for _, tc := range []struct {
 		name, zone, start, end string
@@ -238,7 +260,7 @@ func testReaderGroupRollupWindows(t *testing.T, ctx context.Context, writer *sql
 		{"Shanghai UTC window intersects two days", "Asia/Shanghai", "2026-11-01T00:00:00Z", "2026-11-02T00:00:00Z", []string{"2026-11-02", "2026-11-01"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := writer.ExecContext(ctx, `UPDATE usage_group_rollup_state SET timezone_name=$1,closed_before='2026-11-03' WHERE id=1`, tc.zone)
+			_, err := writer.ExecContext(ctx, `UPDATE usage_group_rollup_state SET timezone_name=$1,closed_before='2026-12-01',retained_from='2026-10-01T00:00:00Z' WHERE id=1`, tc.zone)
 			require.NoError(t, err)
 			got, err := reader.Query(ctx, QueryRequest{Tool: "xy2api.groups.get_usage_summary", Actor: actor, Cursor: cursor, Input: QueryInput{GroupID: 7017, StartTime: tc.start, EndTime: tc.end, Limit: 100}})
 			require.NoError(t, err)

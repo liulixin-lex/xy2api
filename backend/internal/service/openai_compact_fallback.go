@@ -121,12 +121,10 @@ func isOpenAICompactModelFailure(statusCode int, upstreamMsg string, upstreamBod
 
 func isExplicitOpenAIModelAvailabilityMessage(value string) bool {
 	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "" {
-		return false
+	if isExplicitOpenAIModelNotFoundMessage(value) {
+		return true
 	}
 	for _, phrase := range []string{
-		"model not found",
-		"model does not exist",
 		"model is unavailable",
 		"model is not available",
 		"model is unsupported",
@@ -143,12 +141,21 @@ func isExplicitOpenAIModelAvailabilityMessage(value string) bool {
 	// treating unrelated feature errors such as "model output is not supported"
 	// as a signal to change models.
 	if strings.HasPrefix(value, "the model ") || strings.HasPrefix(value, "model ") {
-		return strings.Contains(value, " does not exist") ||
-			strings.Contains(value, " was not found") ||
-			strings.Contains(value, " is unavailable") ||
+		return strings.Contains(value, " is unavailable") ||
 			strings.Contains(value, " is not available")
 	}
 	return false
+}
+
+// The missing-model subset shares the existing compact phrases. Temporary
+// unavailability is deliberately excluded from the default-status 404 mapping.
+func isExplicitOpenAIModelNotFoundMessage(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if strings.Contains(value, "model not found") || strings.Contains(value, "model does not exist") {
+		return true
+	}
+	return (strings.HasPrefix(value, "the model ") || strings.HasPrefix(value, "model ")) &&
+		(strings.Contains(value, " does not exist") || strings.Contains(value, " was not found"))
 }
 
 func openAICompactFallbackErrorResponse(resp *http.Response, signal *openAICompactFallbackSignal) (*http.Response, []byte) {

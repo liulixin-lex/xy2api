@@ -54,6 +54,22 @@
               >
               <p v-if="field.hint" class="input-hint">{{ t(`admin.resilience.settings.fields.${field.key}Hint`) }}</p>
             </div>
+            <template v-if="section.key === 'budget'">
+              <div>
+                <label for="resilience-budget-start" class="input-label">{{ t('admin.resilience.settings.fields.budgetStart') }}</label>
+                <select id="resilience-budget-start" v-model="draft.budget.budget_start" class="input" :disabled="saving" data-testid="resilience-field-budgetStart">
+                  <option value="arrival">arrival</option><option value="body_eof">body_eof</option>
+                </select>
+                <p class="input-hint">{{ t('admin.resilience.settings.fields.budgetStartHint') }}</p>
+              </div>
+              <div>
+                <label for="resilience-budget-attribution" class="input-label">{{ t('admin.resilience.settings.fields.budgetAttribution') }}</label>
+                <select id="resilience-budget-attribution" v-model="draft.budget.budget_cut_attribution" class="input" :disabled="saving" data-testid="resilience-field-budgetAttribution">
+                  <option value="off">off</option><option value="observe">observe</option><option value="enforce">enforce</option>
+                </select>
+                <p class="input-hint">{{ t('admin.resilience.settings.fields.budgetAttributionHint') }}</p>
+              </div>
+            </template>
             <div v-if="section.key === 'keepalive'" class="sm:col-span-2">
               <label for="resilience-edges" class="input-label">{{ t('admin.resilience.settings.fields.edges') }}</label>
               <input id="resilience-edges" v-model="edgesText" type="text" class="input" :disabled="saving" data-testid="resilience-field-edges">

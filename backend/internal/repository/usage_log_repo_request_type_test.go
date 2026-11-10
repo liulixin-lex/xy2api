@@ -108,6 +108,24 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			sqlmock.AnyArg(), // attempt_first_output_ms
 			sqlmock.AnyArg(), // anthropic_cache_ttl_policy
 			sqlmock.AnyArg(), // anthropic_cache_ttl_applied
+			sqlmock.AnyArg(), // body_bytes
+			sqlmock.AnyArg(), // first_read_ms
+			sqlmock.AnyArg(), // body_eof_ms
+			sqlmock.AnyArg(), // anchor_basis
+			sqlmock.AnyArg(), // anchor_eligible
+			sqlmock.AnyArg(), // body_receipt_repeat
+			sqlmock.AnyArg(), // pre_dispatch_ms
+			sqlmock.AnyArg(), // keepalive_commit_ms
+			sqlmock.AnyArg(), // wire_status
+			sqlmock.AnyArg(), // dispatch_count
+			sqlmock.AnyArg(), // min_dispatch_remaining_ms
+			sqlmock.AnyArg(), // final_deadline_ms
+			sqlmock.AnyArg(), // client_family
+			sqlmock.AnyArg(), // client_cancel_ms
+			sqlmock.AnyArg(), // cancel_stage
+			sqlmock.AnyArg(), // cdn_observed
+			sqlmock.AnyArg(), // budget_start_mode
+			sqlmock.AnyArg(), // budget_t0_unix_ms
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(99), createdAt))
 
@@ -208,6 +226,24 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			sqlmock.AnyArg(), // attempt_first_output_ms
 			sqlmock.AnyArg(), // anthropic_cache_ttl_policy
 			sqlmock.AnyArg(), // anthropic_cache_ttl_applied
+			sqlmock.AnyArg(), // body_bytes
+			sqlmock.AnyArg(), // first_read_ms
+			sqlmock.AnyArg(), // body_eof_ms
+			sqlmock.AnyArg(), // anchor_basis
+			sqlmock.AnyArg(), // anchor_eligible
+			sqlmock.AnyArg(), // body_receipt_repeat
+			sqlmock.AnyArg(), // pre_dispatch_ms
+			sqlmock.AnyArg(), // keepalive_commit_ms
+			sqlmock.AnyArg(), // wire_status
+			sqlmock.AnyArg(), // dispatch_count
+			sqlmock.AnyArg(), // min_dispatch_remaining_ms
+			sqlmock.AnyArg(), // final_deadline_ms
+			sqlmock.AnyArg(), // client_family
+			sqlmock.AnyArg(), // client_cancel_ms
+			sqlmock.AnyArg(), // cancel_stage
+			sqlmock.AnyArg(), // cdn_observed
+			sqlmock.AnyArg(), // budget_start_mode
+			sqlmock.AnyArg(), // budget_t0_unix_ms
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(100), createdAt))
 
@@ -289,8 +325,8 @@ func TestPrepareUsageLogInsert_PersistsNativeCompactionV2WithoutChangingRequestT
 
 	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
 	// created_at and origin_group_id follow native_compaction_v2.
-	require.Equal(t, "boolean", usageLogInsertArgTypes[len(usageLogInsertArgTypes)-7])
-	require.Equal(t, true, prepared.args[len(prepared.args)-7])
+	require.Equal(t, "boolean", usageLogInsertArgTypes[60])
+	require.Equal(t, true, prepared.args[60])
 	require.Equal(t, int16(service.RequestTypeStream), prepared.args[30])
 	require.Equal(t, service.RequestTypeStream, log.RequestType)
 	require.True(t, log.Stream)
@@ -977,6 +1013,24 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullInt64{},  // attempt_first_output_ms
 			sql.NullString{}, // anthropic_cache_ttl_policy
 			sql.NullBool{},   // anthropic_cache_ttl_applied
+			sql.NullInt64{},  // body_bytes
+			sql.NullInt64{},  // first_read_ms
+			sql.NullInt64{},  // body_eof_ms
+			sql.NullString{}, // anchor_basis
+			sql.NullBool{},   // anchor_eligible
+			sql.NullInt64{},  // body_receipt_repeat
+			sql.NullInt64{},  // pre_dispatch_ms
+			sql.NullInt64{},  // keepalive_commit_ms
+			sql.NullInt64{},  // wire_status
+			sql.NullInt64{},  // dispatch_count
+			sql.NullInt64{},  // min_dispatch_remaining_ms
+			sql.NullInt64{},  // final_deadline_ms
+			sql.NullString{}, // client_family
+			sql.NullInt64{},  // client_cancel_ms
+			sql.NullString{}, // cancel_stage
+			sql.NullString{}, // cdn_observed
+			sql.NullString{}, // budget_start_mode
+			sql.NullInt64{},  // budget_t0_unix_ms
 		}})
 		require.NoError(t, err)
 		require.Equal(t, 2, log.ImageCount)
@@ -1062,6 +1116,24 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullInt64{},  // attempt_first_output_ms
 			sql.NullString{}, // anthropic_cache_ttl_policy
 			sql.NullBool{},   // anthropic_cache_ttl_applied
+			sql.NullInt64{},  // body_bytes
+			sql.NullInt64{},  // first_read_ms
+			sql.NullInt64{},  // body_eof_ms
+			sql.NullString{}, // anchor_basis
+			sql.NullBool{},   // anchor_eligible
+			sql.NullInt64{},  // body_receipt_repeat
+			sql.NullInt64{},  // pre_dispatch_ms
+			sql.NullInt64{},  // keepalive_commit_ms
+			sql.NullInt64{},  // wire_status
+			sql.NullInt64{},  // dispatch_count
+			sql.NullInt64{},  // min_dispatch_remaining_ms
+			sql.NullInt64{},  // final_deadline_ms
+			sql.NullString{}, // client_family
+			sql.NullInt64{},  // client_cancel_ms
+			sql.NullString{}, // cancel_stage
+			sql.NullString{}, // cdn_observed
+			sql.NullString{}, // budget_start_mode
+			sql.NullInt64{},  // budget_t0_unix_ms
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -1130,6 +1202,24 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullInt64{},  // attempt_first_output_ms
 			sql.NullString{}, // anthropic_cache_ttl_policy
 			sql.NullBool{},   // anthropic_cache_ttl_applied
+			sql.NullInt64{},  // body_bytes
+			sql.NullInt64{},  // first_read_ms
+			sql.NullInt64{},  // body_eof_ms
+			sql.NullString{}, // anchor_basis
+			sql.NullBool{},   // anchor_eligible
+			sql.NullInt64{},  // body_receipt_repeat
+			sql.NullInt64{},  // pre_dispatch_ms
+			sql.NullInt64{},  // keepalive_commit_ms
+			sql.NullInt64{},  // wire_status
+			sql.NullInt64{},  // dispatch_count
+			sql.NullInt64{},  // min_dispatch_remaining_ms
+			sql.NullInt64{},  // final_deadline_ms
+			sql.NullString{}, // client_family
+			sql.NullInt64{},  // client_cancel_ms
+			sql.NullString{}, // cancel_stage
+			sql.NullString{}, // cdn_observed
+			sql.NullString{}, // budget_start_mode
+			sql.NullInt64{},  // budget_t0_unix_ms
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -1200,6 +1290,24 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullInt64{Valid: true, Int64: 5000},  // attempt_first_output_ms
 			sql.NullString{},                         // anthropic_cache_ttl_policy
 			sql.NullBool{},                           // anthropic_cache_ttl_applied
+			sql.NullInt64{},                          // body_bytes
+			sql.NullInt64{},                          // first_read_ms
+			sql.NullInt64{},                          // body_eof_ms
+			sql.NullString{},                         // anchor_basis
+			sql.NullBool{},                           // anchor_eligible
+			sql.NullInt64{},                          // body_receipt_repeat
+			sql.NullInt64{},                          // pre_dispatch_ms
+			sql.NullInt64{},                          // keepalive_commit_ms
+			sql.NullInt64{},                          // wire_status
+			sql.NullInt64{},                          // dispatch_count
+			sql.NullInt64{},                          // min_dispatch_remaining_ms
+			sql.NullInt64{},                          // final_deadline_ms
+			sql.NullString{},                         // client_family
+			sql.NullInt64{},                          // client_cancel_ms
+			sql.NullString{},                         // cancel_stage
+			sql.NullString{},                         // cdn_observed
+			sql.NullString{},                         // budget_start_mode
+			sql.NullInt64{},                          // budget_t0_unix_ms
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)

@@ -36,6 +36,7 @@ type openAICompactSSEKeepalive struct {
 	generation uint64
 	done       chan struct{}
 	lastWrite  time.Time
+	lastQueue  time.Time
 	// bytes 是心跳已写出的注释字节数。心跳不构成语义响应，handler 的
 	// "Forward 期间是否已写响应"判定（failover 放弃换号的依据）必须扣除
 	// 这部分字节，见 OpenAICompactKeepaliveAdjustedWrittenSize。
@@ -173,19 +174,31 @@ func (k *openAICompactSSEKeepalive) resume(firstDelay, interval time.Duration) {
 				return
 			case <-timer.C:
 			}
-			if !k.beat(generation) {
+			ok, next := k.scheduledBeat(generation, interval)
+			if !ok {
 				return
 			}
-			timer.Reset(interval)
+			timer.Reset(next)
 		}
 	}()
 }
 
-// beat 在锁内提交（首次）响应头并写出一条 SSE 注释行；返回 false 表示心跳已
-// 停止或下游写入失败，goroutine 应退出。
-func (k *openAICompactSSEKeepalive) beat(generation uint64) bool {
+func (k *openAICompactSSEKeepalive) scheduledBeat(generation uint64, interval time.Duration) (bool, time.Duration) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
+	if k.stopped || k.closed || generation != k.generation || (k.ctx != nil && k.ctx.Err() != nil) {
+		return k.beatLocked(generation), interval
+	}
+	if !k.lastQueue.IsZero() {
+		if remaining := interval - time.Since(k.lastQueue); remaining > 0 {
+			return true, remaining
+		}
+	}
+	return k.beatLocked(generation), interval
+}
+
+// beatLocked writes a heartbeat under k.mu and reports whether to continue.
+func (k *openAICompactSSEKeepalive) beatLocked(generation uint64) bool {
 	if k.stopped || k.closed || generation != k.generation {
 		return false
 	}
@@ -202,7 +215,7 @@ func (k *openAICompactSSEKeepalive) beat(generation uint64) bool {
 		header.Set("X-Accel-Buffering", "no")
 		k.writer.WriteHeader(http.StatusOK)
 		k.started = true
-		k.noteCommitted()
+		k.noteCommitted("request")
 	}
 	frame := k.frame
 	if len(frame) == 0 {
@@ -223,6 +236,49 @@ func (k *openAICompactSSEKeepalive) beat(generation uint64) bool {
 	return true
 }
 
+// WriteSlotWaitHeartbeat coordinates queue pings with an existing request
+// heartbeat. Recent request heartbeats satisfy the queue's interval; otherwise
+// write under the same lock without stopping the request heartbeat.
+func WriteSlotWaitHeartbeat(c *gin.Context, frame []byte, interval time.Duration, source string) (handled, committed bool, err error) {
+	k := keepaliveFrom(c)
+	if k == nil {
+		return false, false, nil
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.closed {
+		return false, false, nil
+	}
+	age := time.Since(k.lastWrite)
+	if k.started && age >= 0 && age < interval {
+		return true, k.started, nil
+	}
+	if !k.started {
+		header := k.writer.Header()
+		header.Set("Content-Type", "text/event-stream")
+		header.Set("Cache-Control", "no-cache")
+		header.Set("Connection", "keep-alive")
+		header.Set("X-Accel-Buffering", "no")
+		k.writer.WriteHeader(http.StatusOK)
+		k.started = true
+		k.noteCommitted(source)
+	}
+	n, err := k.writer.Write(frame)
+	if err == nil && n != len(frame) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		k.closed = true
+		k.markStoppedLocked()
+		return true, true, err
+	}
+	k.bytes += n
+	k.lastWrite = time.Now()
+	k.lastQueue = k.lastWrite
+	k.writer.Flush()
+	return true, true, nil
+}
+
 // writeOpenAIStreamKeepalive preserves the request heartbeat for a later attempt.
 func writeOpenAIStreamKeepalive(c *gin.Context, w gin.ResponseWriter, frame []byte, refreshClock bool) (int, error) {
 	if k := keepaliveFrom(c); k != nil {
@@ -233,7 +289,7 @@ func writeOpenAIStreamKeepalive(c *gin.Context, w gin.ResponseWriter, frame []by
 			if !k.started {
 				k.writer.WriteHeader(http.StatusOK)
 				k.started = true
-				k.noteCommitted()
+				k.noteCommitted("request")
 			}
 			n, err := k.writer.Write(frame)
 			if err == nil && n != len(frame) {

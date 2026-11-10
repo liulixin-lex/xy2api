@@ -324,6 +324,12 @@ func TestNewConfiguredCodexModelDescriptorUsesProviderMetadataAndSafeFallback(t 
 	require.Equal(t, "high", *claudeSonnet55.DefaultReasoningLevel)
 	require.Equal(t, []string{"low", "medium", "high", "xhigh", "max"}, effortsFromConfiguredCodexLevels(claudeSonnet55.SupportedReasoningLevels))
 
+	claudeHaiku55 := newConfiguredCodexModelDescriptor("claude-haiku-5-5")
+	require.Equal(t, int64(1_000_000), claudeHaiku55.ContextWindow)
+	require.Equal(t, int64(1_000_000), claudeHaiku55.MaxContextWindow)
+	require.Equal(t, "medium", *claudeHaiku55.DefaultReasoningLevel)
+	require.Equal(t, []string{"low", "medium", "high", "xhigh", "max"}, effortsFromConfiguredCodexLevels(claudeHaiku55.SupportedReasoningLevels))
+
 	providerQualifiedClaude := newConfiguredCodexModelDescriptor("anthropic/claude-sonnet-4-6")
 	require.Equal(t, "Claude Sonnet 4.6", providerQualifiedClaude.DisplayName)
 	require.Equal(t, []string{"low", "medium", "high", "max"}, effortsFromConfiguredCodexLevels(providerQualifiedClaude.SupportedReasoningLevels))

@@ -55,9 +55,10 @@ const (
 
 // Kinds of failures after output (metric label and log reason).
 const (
-	postOutputEvent      = "stream_failed"
-	postOutputReadError  = "stream_read_error"
-	postOutputNoTerminal = "missing_terminal"
+	postOutputEvent            = "stream_failed"
+	postOutputReadError        = "stream_read_error"
+	postOutputNoTerminal       = "missing_terminal"
+	postOutputModelUnavailable = "model_unavailable_after_output"
 )
 
 // noteResiliencePostOutputFailure reports an upstream failure of account
@@ -68,38 +69,71 @@ func noteResiliencePostOutputFailure(ctx context.Context, rl *RateLimitService, 
 	return noteResiliencePostOutputFailureWithCategory(ctx, rl, account, attempt, kind, resilience.CategoryTransient)
 }
 
+// noteResilienceClientGoneSkip logs, at Info level and once per dropped
+// report, a failure report ignored because the client had already left, so
+// the upstream failures hidden by the drain can be measured.
+func noteResilienceClientGoneSkip(ctx context.Context, account *Account, reason string, category resilience.Category) {
+	if account == nil {
+		return
+	}
+	slog.Info("resilience.client_gone_skip", append(resilience.EventFields(ctx),
+		"group_id", resilience.StateFrom(ctx).GroupID(),
+		"account_id", account.ID,
+		"platform", account.Platform,
+		"reason", reason,
+		"category", string(category),
+	)...)
+}
+
 func noteResiliencePostOutputFailureWithCategory(ctx context.Context, rl *RateLimitService, account *Account, attempt any, kind string, factCategory resilience.Category) bool {
 	if account == nil || !resilience.Current().FailureOn() {
 		return false
 	}
 	st := resilience.StateFrom(ctx)
+	// After a client leaves with output delivered, the upstream is drained
+	// and then cancelled (design §8.2); however that drain ends, the request
+	// is the client's cancellation, not a failure of the account.
+	// ClientGone is also true once the handler has returned, so a report made
+	// after the handler returns must not rely on this entry point.
+	if st.ClientGone() {
+		noteResilienceClientGoneSkip(ctx, account, kind, factCategory)
+		return false
+	}
 	st.MarkAccountFailed(account.ID)
 	if !st.ReportStreamFailure(account.ID, attempt) {
 		return false
 	}
-	confirmedPostOutput := kind == postOutputEvent || kind == postOutputReadError || kind == postOutputNoTerminal
+	modelUnavailable := kind == postOutputModelUnavailable
+	confirmedPostOutput := kind == postOutputEvent || kind == postOutputReadError || kind == postOutputNoTerminal || modelUnavailable
 	if confirmedPostOutput {
 		recordPostOutputFailureFact(ctx, account, kind, factCategory, time.Now())
 	}
 	_, session := st.SessionIdentity()
 	rebindGuard := ""
-	if confirmedPostOutput && account.Platform == PlatformOpenAI && resilience.Current().PostOutputRebindOn() && session != "" {
+	if !modelUnavailable && confirmedPostOutput && account.Platform == PlatformOpenAI && resilience.Current().PostOutputRebindOn() && session != "" {
 		rebindGuard = "none"
 	}
-	if confirmedPostOutput && account.Platform == PlatformOpenAI && !openAIEncryptedContentRebindGuarded(ctx) {
-		st.SessionFailureAfterOutput(ctx, account.ID, resilience.CategoryTransient)
-	} else {
-		if rebindGuard != "" && openAIEncryptedContentRebindGuarded(ctx) {
-			rebindGuard = "blocked"
+	// Q2 reports a failed turn and a stream failure without a session failure,
+	// streak or P1-B rebind; its account-model cooldown is handled separately.
+	if !modelUnavailable {
+		if confirmedPostOutput && account.Platform == PlatformOpenAI && !openAIEncryptedContentRebindGuarded(ctx) {
+			st.SessionFailureAfterOutput(ctx, account.ID, resilience.CategoryTransient)
+		} else {
+			if rebindGuard != "" && openAIEncryptedContentRebindGuarded(ctx) {
+				rebindGuard = "blocked"
+			}
+			st.SessionFailure(ctx, account.ID, resilience.CategoryTransient)
 		}
-		st.SessionFailure(ctx, account.ID, resilience.CategoryTransient)
 	}
 	// The 200 that carried the failure must not end the conversation's
 	// failed-turn streak (design §9.7).
 	st.MarkTurnFailed()
 	groupID := st.GroupID()
 	resilience.Count(resilience.MetricPostOutputFailure, groupID, account.ID, kind)
-	failures, cooled := rl.notePostOutputFailure(ctx, account)
+	failures, cooled := 0, false
+	if !modelUnavailable {
+		failures, cooled = rl.notePostOutputFailure(ctx, account)
+	}
 	fields := append(resilience.EventFields(ctx),
 		"group_id", groupID,
 		"account_id", account.ID,

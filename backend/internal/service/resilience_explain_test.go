@@ -79,3 +79,19 @@ func TestResilienceExplainShowsModelRestriction(t *testing.T) {
 		require.Equal(t, want, out.ModelRestriction, model)
 	}
 }
+
+func TestResilienceExplainLastResortPrefersUnavoided(t *testing.T) {
+	r, store, accounts, _ := newFallbackFixture(t)
+	avoided := healthyAccount(lrAccountA)
+	avoided.Priority = 1
+	cooled := softAccount(lrAccountB)
+	cooled.Priority = 5
+	accounts.byGroup[10] = []Account{avoided, cooled}
+	require.NoError(t, store.AddSessionAvoid(t.Context(), 10, lrSession, lrAccountA, time.Minute))
+
+	out, err := r.Explain(t.Context(), 10, lrSession, "")
+	require.NoError(t, err)
+	require.Zero(t, out.HealthyCount)
+	require.NotNil(t, out.LastResort)
+	require.Equal(t, lrAccountB, out.LastResort.AccountID)
+}

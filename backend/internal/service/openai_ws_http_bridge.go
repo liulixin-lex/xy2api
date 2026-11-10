@@ -370,14 +370,8 @@ func buildOpenAIWSHTTPBridgeErrorEvent(statusCode int, message string) []byte {
 }
 
 func buildOpenAIWSHTTPBridgeFailedEvent(responseID, model string, source []byte, fallbackMessage string) []byte {
-	errorType := strings.TrimSpace(gjson.GetBytes(source, "error.type").String())
-	if errorType == "" {
-		errorType = strings.TrimSpace(gjson.GetBytes(source, "response.error.type").String())
-	}
-	code := strings.TrimSpace(gjson.GetBytes(source, "error.code").String())
-	if code == "" {
-		code = strings.TrimSpace(gjson.GetBytes(source, "response.error.code").String())
-	}
+	errorType := strings.TrimSpace(openAIStreamErrorField(source, "type").String())
+	code := strings.TrimSpace(openAIStreamErrorField(source, "code").String())
 	if code == "" {
 		code = "upstream_error"
 	}
@@ -389,6 +383,9 @@ func buildOpenAIWSHTTPBridgeFailedEvent(responseID, model string, source []byte,
 		message = "Upstream response failed"
 	}
 	errorBody := map[string]any{"code": code, "message": message}
+	if param := openAIStreamErrorField(source, "param"); param.Exists() && param.Type != gjson.Null {
+		errorBody["param"] = param.Value()
+	}
 	if errorType != "" {
 		errorBody["type"] = errorType
 	}

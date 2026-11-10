@@ -238,6 +238,7 @@ func (s *OpenAIGatewayService) fetchModelProtocolCatalog(ctx context.Context, ur
 		return nil, err
 	}
 	req.Header = headers.Clone()
+	noteOpenAIDispatch(req.Context(), "model_catalog")
 	resp, err := s.httpUpstream.Do(req, proxyURL, accountID, maxInt(concurrency, 1))
 	if err != nil {
 		return nil, err

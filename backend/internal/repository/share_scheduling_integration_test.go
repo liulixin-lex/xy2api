@@ -265,6 +265,17 @@ func TestShareSchedulingAccountAttempts(t *testing.T) {
 	require.Empty(t, only.Successes)
 	require.Len(t, only.Failures, 1, "attempts of other accounts are left out")
 
+	// Use the same attempt group so existing top-N ordering remains covered.
+	for _, applied := range []any{true, false, "not-a-boolean", nil, 7, map[string]any{"bad": true}} {
+		ev := event(accounts[0], "failover", 502, "TRANSIENT")
+		ev["budget_cut_applied"] = applied
+		insertRow(502, now.Add(-time.Minute), ev)
+	}
+	guarded, err := repo.AccountAttempts(ctx, accounts, now.Add(-30*time.Minute), now)
+	require.NoError(t, err)
+	require.Len(t, guarded.Failures, 3)
+	require.Equal(t, int64(7), guarded.Failures[0].Count, "only true is excluded; malformed attribution remains a failure")
+
 	// Over the row limit the largest groups are kept, ties in column order,
 	// so a truncated read drops the fewest attempts and is repeatable.
 	limit := shareSchedulingMaxAttemptGroups
@@ -274,7 +285,7 @@ func TestShareSchedulingAccountAttempts(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []service.ShareSchedulingAttemptCount{
 		{ShareSchedulingUpstreamAttempt: service.ShareSchedulingUpstreamAttempt{AccountID: accounts[0], Kind: "failover", StatusCode: 502,
-			Category: "TRANSIENT", Message: "upstream failed"}, Count: 2},
+			Category: "TRANSIENT", Message: "upstream failed"}, Count: 7},
 		{ShareSchedulingUpstreamAttempt: service.ShareSchedulingUpstreamAttempt{AccountID: accounts[1], Kind: "request_error",
 			Message: "upstream failed"}, Count: 1},
 	}, capped.Failures)

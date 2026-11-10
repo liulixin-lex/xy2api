@@ -130,7 +130,15 @@ func (r *ResilienceService) AvailabilityFallbackGroup(ctx context.Context, apiKe
 	}
 	resilience.Count(resilience.MetricFallbackGroup, primary.ID, 0, strconv.FormatInt(fallback.ID, 10))
 	if !remembered {
-		slog.Warn("resilience.fallback_group", "group_id", primary.ID, "fallback_group_id", fallback.ID, "api_key_id", apiKey.ID)
+		reason := "no_servable_account"
+		accounts, _ := r.groupAccountsForLastResort(ctx, r.fallbackAccounts, primary.ID)
+		for i := range accounts {
+			if _, _, why := resiliencePenaltyOf(&accounts[i], "", now); why == "balance_exhausted" {
+				reason = why
+				break
+			}
+		}
+		slog.Warn("resilience.fallback_group", "group_id", primary.ID, "fallback_group_id", fallback.ID, "api_key_id", apiKey.ID, "reason", reason)
 	}
 	return fallback
 }

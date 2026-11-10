@@ -66,6 +66,29 @@ func TestGeminiNativeModelsUsesAccountMappings(t *testing.T) {
 	}
 }
 
+func TestGeminiNativeModelsNoAccountsReturnsUnavailable(t *testing.T) {
+	groupID := int64(45)
+	repo := &geminiAllowlistAccountRepoStub{gatewayModelsAccountRepoStub: gatewayModelsAccountRepoStub{byGroup: map[int64][]service.Account{groupID: {}}}}
+	h := &GatewayHandler{geminiCompatService: service.NewGeminiMessagesCompatService(repo, nil, nil, nil, nil, nil, nil, nil, nil)}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1beta/models", nil)
+	c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{GroupID: &groupID, Group: &service.Group{ID: groupID, Platform: service.PlatformGemini}})
+	h.GeminiV1BetaListModels(c)
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	var body struct {
+		Error struct {
+			Code    int    `json:"code"`
+			Status  string `json:"status"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Equal(t, http.StatusServiceUnavailable, body.Error.Code)
+	require.Equal(t, "UNAVAILABLE", body.Error.Status)
+	require.Contains(t, body.Error.Message, "No available Gemini accounts")
+}
+
 func TestAppendUpstreamGeminiModelsPreservesMetadata(t *testing.T) {
 	body := []byte(`{"models":[{"name":"models/gemini-native","inputTokenLimit":123,"custom":{"a":true}}],"nextPageToken":"next","other":42}`)
 	extra := []gemini.Model{gemini.FallbackModel("gemini-native"), gemini.FallbackModel("gemini-synced-custom"), gemini.FallbackModel("gemini-synced-custom")}

@@ -130,7 +130,7 @@ func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, respon
 
 	code := strings.ToLower(strings.TrimSpace(extractUpstreamErrorCode(responseBody)))
 	message := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(responseBody)))
-	param := strings.ToLower(strings.TrimSpace(gjson.GetBytes(responseBody, "error.param").String()))
+	param := strings.ToLower(strings.TrimSpace(openAIStreamErrorField(responseBody, "param").String()))
 	if code == "invalid_function_parameters" &&
 		openAIResponsesToolParametersParamPattern.MatchString(param) &&
 		openAIResponsesMissingSchemaTypePattern.MatchString(message) {
@@ -564,10 +564,8 @@ func removeOpenAIResponsesRejectedReasoningContentAtIndex(body []byte, index int
 
 func removeOpenAIResponsesRejectedNamespaceAtIndex(body []byte, index int) ([]byte, string, bool, error) {
 	itemPath := fmt.Sprintf("input.%d", index)
-	itemType := strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, itemPath+".type").String()))
-	switch itemType {
-	case "function_call", "tool_call", "custom_tool_call", "mcp_tool_call":
-	default:
+	item := gjson.GetBytes(body, itemPath)
+	if !isOpenAIResponsesToolCallItemType(item.Get("type").String()) && !isNamedStandaloneFunctionCallOutputJSON(item) {
 		return nil, "", false, nil
 	}
 

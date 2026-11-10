@@ -228,6 +228,10 @@ func (s *OpenAIGatewayService) ParseOpenAIImagesRequest(c *gin.Context, body []b
 		}
 	}
 
+	if strings.TrimSpace(req.Prompt) == "" {
+		return nil, fmt.Errorf("prompt is required")
+	}
+
 	applyOpenAIImagesDefaults(req)
 	// Composite middleware preserves multipart bodies, including their public
 	// alias. Validate and forward the resolved model without altering uploads.
