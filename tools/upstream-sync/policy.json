@@ -4416,6 +4416,42 @@
     {
       "path": "backend/internal/pkg/googleapi/status.go",
       "value": "return \"UNAVAILABLE\""
+    },
+    {
+      "path": "backend/internal/service/openai_function_call_output.go",
+      "value": "func isNamedStandaloneFunctionCallOutput(itemType, callID, name any) bool {"
+    },
+    {
+      "path": "backend/internal/service/openai_tool_continuation.go",
+      "value": "!item.IsObject() || isNamedStandaloneFunctionCallOutputJSON(item)"
+    },
+    {
+      "path": "backend/internal/service/openai_responses_input_compat.go",
+      "value": "if callID == \"\" && strings.TrimSpace(firstNonEmptyString(item[\"type\"])) == \"function_call_output\" &&"
+    },
+    {
+      "path": "backend/internal/service/openai_responses_namespace.go",
+      "value": "isNamedStandaloneFunctionCallOutputJSON(item) ||"
+    },
+    {
+      "path": "backend/internal/service/openai_responses_rejected_field_retry.go",
+      "value": "!isNamedStandaloneFunctionCallOutputJSON(item)"
+    },
+    {
+      "path": "backend/internal/service/openai_codex_transform.go",
+      "value": "isCodexToolCallContextItemType(typ) && (!ok || strings.TrimSpace(callID) == \"\")"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_grok_model_input.go",
+      "value": "!ok || isNamedStandaloneFunctionCallOutput(grokStringValue(item[\"type\"]), item[\"call_id\"], item[\"name\"])"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "zap.String(\"fco_call_id_shape\", validation.InvalidCallIDShape)"
+    },
+    {
+      "path": "backend/internal/handler/openai_gateway_handler.go",
+      "value": "zap.String(\"fco_item_index\", index), zap.String(\"fco_bad_item_count\", count)"
     }
   ],
   "forbidden_module_paths": [
