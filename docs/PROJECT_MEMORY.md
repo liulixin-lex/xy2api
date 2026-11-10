@@ -10,7 +10,7 @@
 
 - **背景**：用户 2026-11-09 17:40 UTC 要求把已知问题全部并入 0.5.13，可并行开发，全部完成并确认没有问题后再发版；同日方针为不设长观察期、不做影子模式、不做无用测试与兜底。原定的 0.5.12.1（G9 观测补齐）因发布流水线只接受三段式版本号改名为 0.5.13。并入范围按逐项清单裁定，没有并入的项写明理由（见下方“未纳入”与“未结事项”）。
 - **交付范围**：
-  - **预算（默认模式不变）**：补齐预算与迟发尝试的观测（迟发计数与指标、`abuse_guard` 字段、预算快照模式；`ttfo_lower_bound` 的模型标签先归一到内置目录、未知记 `other`，标签数有上限）；`body_eof` 下没有单次计时器的新尝试和等待按到达时刻截止，有计时器的尝试仍用对应截止，`arrival` 行为不变；统计查询对预算截断标记的缺失、空值和非布尔值按 false 处理，不再让整条查询失败；Ent schema 纳入迁移 292 的 18 个观测列（含 TEXT 的 `SchemaType`），运行时仍只走 SQL 迁移，不做 Ent 自动迁移。无新迁移，默认仍为 `budget_start=arrival`、`budget_cut_attribution=observe`。
+  - **预算（默认模式不变）**：补齐预算与迟发尝试的观测（迟发计数与指标、`abuse_guard` 字段、预算快照模式；`ttfo_lower_bound` 的模型标签先归一到内置目录、未知记 `other`，标签数有上限）；`body_eof` 下没有单次计时器的新尝试和等待按到达时刻截止，有计时器的尝试仍用对应截止，`arrival` 行为不变；统计查询（三处 SQL）先用 `->>` 取出预算截断标记的文本，只有文本恰为 `true` 或 `false` 时才转成布尔值，因此 JSON 布尔 `true` 与字符串 `"true"` 同样按 true 处理；缺失、空值和其他任何值都按 false 处理，不再让整条查询失败；Ent schema 纳入迁移 292 的 18 个观测列（含 TEXT 的 `SchemaType`），运行时仍只走 SQL 迁移，不做 Ent 自动迁移。无新迁移，默认仍为 `budget_start=arrival`、`budget_cut_attribution=observe`。
   - **错误分类与换号**：OpenAI 上游 409 `device_binding_required` 复用账号访问失效策略，暂停调度并换号；Messages 续链不再在坏号上全量重放，WS 握手直接换号、不回落 HTTP。泛称推理 404 增加 FastAPI `detail` 与 Anthropic 根 `type=error` 两种信封（内层须有泛称证据）。Grok 的 Responses、Chat、Messages 入口接入共享自定义错误码策略，Messages 的不换号错误不再重复执行通用 OpenAI 账号处罚；Grok 兼容管线的 404、容量 429 与模型专属额度记账对齐到账号×模型。Chat/Messages 的 Responses 兼容转换处理未包装的流内模型不可用错误：输出前换号，输出后只记账号×模型失败，不重放。
   - **心跳与 Gemini**：Gemini 流式文本请求只剩唯一候选时，复用首包前心跳覆盖等响应头和首内容，不新增截止（边界见下）。Gemini 上游回退为 JSON 时：原生入口已提交心跳则转成 SSE `data:` 帧，未提交或命中 SDK 豁免时逐字节透传；Messages/Chat 兼容入口由原先的空回答改为输出有效内容并按实际用量计费，空正文和非法 JSON 走现有的上游无效响应出口。Google 风格错误体中 HTTP 503 的 `status` 由 `INTERNAL` 改为 `UNAVAILABLE`（全局生效，HTTP 状态码不变）。用户消息队列等待（含 throttle）的 ping 改走共享请求心跳；`keepalive_committed` 增加 `source`（`request`/`slot_wait`/`queue_wait`），首输出截止日志增加 `staged` 标记。
   - **Claude**：Haiku 5.5 在官方 Anthropic 端点（OAuth/setup-token，以及 base URL 为空或命中官方域名的 API Key 账号）的生成请求上，本地拒绝 assistant prefill 和旧版 computer 工具；Bedrock、其他托管平台和自定义 base URL 中转交由上游判断；补 Bedrock 默认模型映射；count_tokens 不套用新规则。OAuth 伪装路径对 Fable 5/5.1 与 Mythos 不再补默认 `temperature`，客户端显式参数保持原样。
@@ -31,7 +31,7 @@
   - 发布头 `7798ae9490341aef3e9e6392215ab9e1ce68b213` 只比冻结头多一次 Node 24 升级（3 个 workflow、3 份 README），`backend/` 与 `frontend/` 的 tree 与冻结头逐字节相同，门禁和冒烟结论按 tree 相等沿用。PR #218 在该头上 4 个 run、20/20 首次通过，包括本地跑不了的 Docker Compose simple-mode、MCP 隔离 PostgreSQL 和 Windows 插件归档。
   - 真实上游冒烟（目标 `e71d6f646`）：三个上游样本的普通流与 Chat 流共 6 个用例，客户端侧全部成功，两侧都读到 EOF、终态完整，帧比较一致。验收脚本首次判 FAIL，定位为脚本误判：对上游实际为 Responses 的 Chat 用例按 Chat 协议查终态。修正为按每侧实际协议检查（截断反例仍全部判 FAIL）并经两路签字后，离线重判本次保留的证据为 PASS，没有重发真实请求；原 FAIL 记录保留。冒烟只覆盖普通流和 Chat 流，不覆盖 409、自定义 404、Gemini 心跳与 JSON 回退、Haiku 拒绝等专用分支，这些由定向回归和门禁覆盖。冒烟工具在 0.5.12 时的挂起根因仍未证实，新工具下没有复现。
   - 两路发布核验均 6/6 PASS，镜像 index 一致，详见版本速览。
-  - **预算启用门**：在同一最终二进制上做 arrival / body_eof / enforce 三种模式 × 29 个场景的开关差分。首轮正式结果 FAIL（492 项 errors），原因是比较器把每次运行必然不同的字段做了严格比较、一个读侧场景的允许差异没有建模、一个场景的夹具让三个请求共用会话导致 sticky 粘连；按两路签字的提案修正比较器、只重录该场景后，`--require-full` PASS（0 errors、0 REVIEW），两路各自重跑复核签字，原 FAIL 记录保留。**生产开关没有切换**，仍为 `arrival + observe`；是否切换、何时切换由用户决定，切换按两步短验证执行，切 `enforce` 前再只读确认高级调度仍为关闭。
+  - **预算启用门**：用冻结产品源码 `e71d6f646`（backend tree 与发布头相同）构建测试二进制，做 arrival / body_eof / enforce 三种模式的开关差分，覆盖 29 个场景、每种模式重复 3 次，共 288 个执行单元；同一批次内三种模式使用同一个测试二进制。首轮正式比较 FAIL（492 项 errors），原因是比较器把每次运行必然不同的字段做了严格比较、一个读侧场景的允许差异没有建模、一个场景的测试夹具让三个请求共用会话导致 sticky 粘连。按两路签字的提案修正比较器；该场景只改测试夹具（三个请求改用独立会话），产品文件不变，用新的测试二进制重录该场景的 9 次执行，其余 279 次保留原录制及原二进制哈希，没有在同一个二进制上重跑整份矩阵。合并后的矩阵用修正后的比较器重新比较，`--require-full` PASS（0 errors、0 REVIEW），两路各自重跑 `--require-full` 比较并签字；原 FAIL 记录保留。**生产开关没有切换**，仍为 `arrival + observe`；是否切换、何时切换由用户决定，切换按两步短验证执行，切 `enforce` 前再只读确认高级调度仍为关闭。
   - 未验证：真实上游冒烟以外的生产行为以切流后的观察为准；Windows 原生 job 只在 PR CI 上跑过。
 
 ### 0.5.13 生产切换结果
@@ -71,7 +71,7 @@
   - Anthropic OAuth/setup-token 的用户消息队列等待 ping 仍可能中断请求心跳（队列缺省关闭）；已提交心跳后的请求级 4xx 仍按既有 `server_error` 结束；Gemini 唯一候选首个事件前没有心跳；Haiku 5.5 的 prefill/旧版 computer 工具拒绝及 Bedrock 映射未覆盖。（2026-11-10 追记：用户消息队列等待 ping、Gemini 唯一候选首包前心跳、Haiku 5.5 本地拒绝与 Bedrock 映射已随 0.5.13 交付，边界见 0.5.13 小节；已提交心跳后的请求级 4xx 仍按 `server_error` 结束，0.5.13 未改。）
 - **验证摘要**：
   - 最终头 `26f1d9327533a347bfff4494b5a3e3617820c568` 的 GitHub CI 共 4 个 run、20/20 SUCCESS（push 8、PR 8、两路 Security Scan 各 2）；全量 13 项门禁 13/13 PASS，各项退出 0，无未执行项。PR #214 合并提交 `45de7b8ac4360ac61af8af32c9289d9fd6f0084f` 与受测头树相同。
-  - 真实上游冒烟 9/9 PASS（6 个客户端样本、3 个自动探测），普通流逐帧一致，Chat 完成标记与 DONE 各一次；两次泄露扫描各 51 个来源、0 命中。该冒烟未覆盖泛称/自定义 404、槽位等待和 temperature 专用分支；泛称 404、Grok 基线边界、槽位心跳与 temperature 有定向回归及门禁证据，Gemini 自定义 404 的专项测试仍缺，不能由冒烟替代。
+  - 真实上游冒烟 9/9 PASS（6 个客户端样本、3 个自动探测），普通流逐帧一致，Chat 完成标记与 DONE 各一次；两次泄露扫描各 51 个来源、0 命中。该冒烟未覆盖泛称/自定义 404、槽位等待和 temperature 专用分支；泛称 404、Grok 基线边界、槽位心跳与 temperature 有定向回归及门禁证据，Gemini 自定义 404 的专项测试仍缺，不能由冒烟替代。（2026-11-10 追记：service 层专项回归已随 0.5.13 补上，真实上游仍未覆盖。）
   - 两路发布核验均通过：relay PM 的镜像仓库核验，以及独立追踪员的完整 Release/GHCR 核验。Release 的 5 个平台包与 checksums、GHCR 双架构镜像及版本标签均一致，详细发布标识见版本速览与任务目录 `RELEASE_0511_VERIFY.md`。以上为既有发布证据摘要，本次只运行本地文档检查。
 
 ### 0.5.11 生产切换结果
@@ -138,8 +138,8 @@
 
 ### 版本与环境速览（2026-11-10，0.5.13 已正式发布，生产切换结果见“0.5.13 生产切换结果”）
 
-- 最新产品版本 **XY2API v0.5.13**：发布提交 `2515d32e00a701652e5413fe0e5767d4c491baed`（PR #218，2026-11-10T03:23:31Z 普通合并，author 为 noreply 身份，合并树 `aa269f42402597630414592394b80b5edf4093f5` 与 PR 头 `7798ae9490341aef3e9e6392215ab9e1ce68b213` 相同），annotated tag `v0.5.13` 对象 `77cba61959facebb54ed2be18c098dfccf6151b0`，tagger 为 noreply，peeled 等于发布提交。Release run `42749192426` 成功，3 个 job 均 success，前端在 Node.js 24 下构建；Release `439918391` 于 2026-11-10T03:39:58Z 发布，正式版、非 draft、非 prerelease，当前 latest。打 tag 时 git 默认 cleanup 删掉了发布说明的 `##` 小标题，tag 未重打，Release 正文已用带标题的发布说明替换。两路独立核验均 6/6 PASS：5 个平台包与 checksums（共 6 个资产）、GHCR 双架构镜像 index `sha256:274248bb640d4796e18a39c9d266f1ca53785b667eba9c01f532a0c9eb1ef648`，`0.5.13`、`latest`、`0.5`、`0` 四个 tag 均指向该 index，OCI revision 等于发布提交、version 为 0.5.13；0.5.12 的 index 未变。兼容基线仍为 Sub2API 0.2.15；无新迁移（完整预算功能依赖既有的 292/293）。
-- 上一版本 **XY2API v0.5.12**：发布提交 `74f9dff733c50402b452fb438d37b9581418fe97`（PR #217，2026-11-09T14:09:49Z 普通合并，合并树与受测候选 `70057792a` 相同），annotated tag `v0.5.12` 对象 `a946ad6336efa3635369f57b66e9b46fe5f3bca7`；Release run `42631979389` 成功，Release `439229768` 于 2026-11-09T14:25:41Z 发布；两路核验 6/6 PASS，镜像 index `sha256:dcb157e322e0603d4d745ea0af5894c334bbafe2191c581bbcba87fef2ee1e2f`，四个 tag 同指，0.5.11 的 index 未变。新增迁移 292/293。
+- 最新产品版本 **XY2API v0.5.13**：发布提交 `2515d32e00a701652e5413fe0e5767d4c491baed`（PR #218 普通合并，GitHub `merged_at` 为 2026-11-10T03:23:32Z，合并提交的提交时间为 03:23:31Z；author 为 noreply 身份，合并树 `aa269f42402597630414592394b80b5edf4093f5` 与 PR 头 `7798ae9490341aef3e9e6392215ab9e1ce68b213` 相同），annotated tag `v0.5.13` 对象 `77cba61959facebb54ed2be18c098dfccf6151b0`，tagger 为 noreply，peeled 等于发布提交。Release run `42749192426` 成功，3 个 job 均 success，前端在 Node.js 24 下构建；Release `439918391` 于 2026-11-10T03:39:58Z 发布，正式版、非 draft、非 prerelease，当前 latest。打 tag 时 git 默认 cleanup 删掉了发布说明的 `##` 小标题，tag 未重打，Release 正文已用带标题的发布说明替换。两路独立核验均 6/6 PASS：5 个平台包与 checksums（共 6 个资产）、GHCR 双架构镜像 index `sha256:274248bb640d4796e18a39c9d266f1ca53785b667eba9c01f532a0c9eb1ef648`，`0.5.13`、`latest`、`0.5`、`0` 四个 tag 均指向该 index，OCI revision 等于发布提交、version 为 0.5.13；0.5.12 的 index 未变。兼容基线仍为 Sub2API 0.2.15；无新迁移（完整预算功能依赖既有的 292/293）。
+- 上一版本 **XY2API v0.5.12**：发布提交 `74f9dff733c50402b452fb438d37b9581418fe97`（PR #217 普通合并，GitHub `merged_at` 为 2026-11-09T14:09:50Z，合并提交的提交时间为 14:09:49Z；合并树与受测候选 `70057792a` 相同），annotated tag `v0.5.12` 对象 `a946ad6336efa3635369f57b66e9b46fe5f3bca7`；Release run `42631979389` 成功，Release `439229768` 于 2026-11-09T14:25:41Z 发布；两路核验 6/6 PASS，镜像 index `sha256:dcb157e322e0603d4d745ea0af5894c334bbafe2191c581bbcba87fef2ee1e2f`，四个 tag 同指，0.5.11 的 index 未变。新增迁移 292/293。
 - 生产：2026-11-09 15:55 UTC 起新槽运行 0.5.12，旧槽 0.5.11 已停止并保留为回滚目标（见“0.5.12 已发布并上线”）。0.5.13 的切换方式与结果见“0.5.13 生产切换结果”。预算开关仍为 `arrival + observe`，没有切换。
 - 0.5.11 与 0.5.12 的 GitHub 合并提交 author 不是 noreply 身份（当时合并未带 `--author-email`），属于公开历史，不改写；0.5.13 起合并带 `--author-email` 与 `--match-head-commit`。
 - 预上线主机仍运行 0.4.2 的浸泡候选 `0ad63fab7`，换成正式镜像需要授权。
@@ -272,7 +272,7 @@
   - 上线后 24 小时按本地 `.work/tasks/20261102-gate-error-volume/handoff/sql/post_release_verify.sql` 只读验收 V1–V6，需要用户在会话内授权。
   - 上游错误率及其告警会因归因口径上升，平台内部错误相应下降，这不代表质量变化。
   - WebSocket 不补记；拿不到发送边界时保守少记。
-  - 带内失败事件（裸 `error`）的补记缺口由 PR #191 修复，已随 0.5.2 发布（2026-11-10 更正，原文为“待合并发版”）；验收用本地修订版 `.work/tasks/20261103-051-errors-scheduling-review/scripts/post_release_verify_inband.sql`。
+  - 带内失败事件（裸 `error`）的补记缺口由 PR #191 修复，已随 0.5.2 发布（2026-11-10 更正，原文为“待合并发版”）；验收用本地修订的 SQL。
 - **账号列表近期表现第 2 版（已随 0.5.2 发布；2026-11-10 更正，原标题为“main 已合入，未发版”）**：PR #192 于 2026-11-03 12:55 UTC 合入（`af1642909`），在 #191 之后。发版与部署需用户授权，并避开 HTTP/1.1 切换的 24 小时对比窗口（到 11-04 12:30 UTC）。上线后只读复核三项指标的显示与查询耗时，需会话内授权。遗留：英文表头说明在高度约 800 的窗口里顶部余量只有约 5px。
 - **0.4.16 升级配置与量化**：本次只发布、未部署或连接生产。升级前由用户确认 `ops_monitoring_enabled` 开启，补齐真实成本、核对 OAuth 参考倍率，按目标组配置利润门/质量门槛/固定账号、成员关系、并发、优先级与可用数告警。错误率依赖运维日志；C1–C7 缓存量化及是否调整会话绑定 TTL 仍待用户自行执行与决策。
 - **0.4.16 已接受边界**：质量状态进程内、多实例各自计算且重启重新积累；Grok 异步视频跨组轮询仍按轮询组计价；批量图片用量不记分组；非调度实例 OAuth 参考倍率可能需重启刷新；利润预览按已保存价格；高流量指标查询与热路径缓存等优化暂缓。完整边界见 v0.4.16 Release 与现行调度文档。
@@ -287,7 +287,7 @@
 
 ## 进行中的工作
 
-- **20261110-release-0513**（2026-11-10 04:20 UTC）：0.5.13 已正式发布并完成两路制品核验，生产切换由切流执行员按已审定的切流包执行，结果见“0.5.13 生产切换结果”。并行进行：预算开关的切换方案起草，交用户决定，开关仍为 `arrival + observe`；0.5.14 的无 `call_id` 具名 `function_call_output` 兼容改进在独立分支开发与审查；本 0.5.12 + 0.5.13 合并记忆 PR 在本地起草，切流结果补齐后再推送并开 PR。
+- **0.5.13 发布与后续**（2026-11-10 04:20 UTC）：0.5.13 已正式发布并完成两路制品核验，生产切换由切流执行员按已审定的切流包执行，结果见“0.5.13 生产切换结果”。并行进行：预算开关的切换方案起草，交用户决定，开关仍为 `arrival + observe`；0.5.14 的无 `call_id` 具名 `function_call_output` 兼容改进在独立分支开发与审查；本 0.5.12 + 0.5.13 合并记忆 PR 在本地起草，切流结果补齐后再推送并开 PR。
 
 - **20261104-release0502-handoff**（2026-11-04 17:22 UTC，发版接力）：用户再次授权继续 0.5.2 发版（包含 #191–#194，新增迁移 289），不部署生产。
   - 版本 PR #195：head `2d41304954e51cf62809cbf38ac8a44cd6fa34ff`，base `746ec14fc`；除两个 macOS `shell` 检查取消外均通过，GitHub Actions 事故已恢复。
@@ -661,7 +661,7 @@ pnpm --dir frontend run build
 - 请求/目标：发布 0.5.12（G2b、预算第一期、加密续接的拒绝改绑与线程作用域）并蓝绿上线。用户 2026-11-09 14:1x UTC 决定不做真实上游冒烟，直接发版上线。
 - 开始状态：受测候选 `70057792a`，PR #217，base main。
 - 完成操作：
-  - 推送前在本地完整复现 CI 的全部 job（含 lint、audit 和 `tools/tests`）；对每个提交的补丁做全量泄露扫描，覆盖中间提交与元数据，不只看最终 diff；未推送范围的提交作者、提交者统一改写为公开 noreply 身份，并删掉一个误提交的日志文件，改写前后提交一一对应，tree 不变或只少该日志文件。
+  - 推送前在本地跑了 CI 中能在本机执行的检查：upstream audit、scheduler-diff、`tools/tests` 96/96、docs 一致性、diff-check、gofmt、默认/`unit`/`gt0512` 三组构建标签下的 build 与 vet、默认标签下的 `go test ./...`、golangci-lint 2.14.0（0 issues）；前端沿用已验证版本的结果。Docker Compose simple-mode、MCP 隔离 PostgreSQL、Windows 插件归档等 job 本地没有执行，只在 PR #217 的 CI（20/20）上跑过，另有测试服务器上的 13 项门禁；对每个提交的补丁做全量泄露扫描，覆盖中间提交与元数据，不只看最终 diff；未推送范围的提交作者、提交者统一改写为公开 noreply 身份，并删掉一个误提交的日志文件，改写前后提交一一对应，tree 不变或只少该日志文件。
   - PR #217 合并为 `74f9dff73`，打 annotated `v0.5.12`（tagger 为 noreply），Release 与 GHCR 两路核验 6/6 PASS。
   - 蓝绿切换第 1 次尝试因新槽 compose 缺 logging 段 NO-GO，补齐后第 2 次尝试成功；切换工具采用结构冻结，各阶段把规范化后的实际配置与可信结构摘要比对，不一致即停。过程与结果见“0.5.12 已发布并上线”。
 - 修改文件：本条为补记，随 0.5.12 + 0.5.13 合并记忆 PR 登记，只改记忆文件。
