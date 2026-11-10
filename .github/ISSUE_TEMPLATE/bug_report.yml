@@ -1,0 +1,72 @@
+name: 问题反馈 / Bug report
+description: 报告一个可以复现的缺陷 / Report a reproducible bug
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前请先搜索[已有 Issue](https://github.com/liulixin-lex/xy2api/issues?q=is%3Aissue)。使用问题请到 [Discussions](https://github.com/liulixin-lex/xy2api/discussions/categories/q-a) 提问；安全漏洞请按[安全策略](https://github.com/liulixin-lex/xy2api/security/policy)私密报告。
+  - type: input
+    id: version
+    attributes:
+      label: 版本 / Version
+      description: 管理后台显示的版本，或 `xy2api --version` 的输出
+      placeholder: "0.6.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: 部署方式 / Deployment
+      options:
+        - Docker Compose
+        - 安装脚本（systemd）/ Install script
+        - 源码构建 / Built from source
+        - 其他 / Other
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 涉及的上游平台 / Upstream platform
+      multiple: true
+      options:
+        - Anthropic (Claude)
+        - OpenAI / Codex
+        - Gemini
+        - Grok / xAI
+        - Antigravity
+        - 其他 / Other
+        - 与平台无关 / Not platform-specific
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 问题描述 / What happened
+      description: 实际发生了什么，你期望发生什么
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤 / Steps to reproduce
+      placeholder: |
+        1. ……
+        2. ……
+        3. 看到错误 ……
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志 / Relevant logs
+      description: 请删除 API Key、Token、密码、邮箱和服务器地址
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 确认 / Checklist
+      options:
+        - label: 我已在最新版本上确认问题仍然存在 / I reproduced this on the latest release
+          required: true
+        - label: 我已删除日志和截图中的敏感信息 / I removed secrets and personal data
+          required: true

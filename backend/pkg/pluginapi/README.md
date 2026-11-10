@@ -34,7 +34,7 @@
 
 `HostService` 是宿主经 go-plugin broker 反向暴露给插件的通用能力层，独立于具体插件类型，供有状态插件使用。它通过 `TransportPlugin.InitHostServices` 在运行时协商：宿主启动后把一个 broker 流 id 交给插件，插件用它拨号回宿主并获得 `HostServiceClient`。
 
-- **可选且向后兼容**：未实现 `InitHostServices` 的旧插件返回 `Unimplemented`，宿主静默跳过，转发能力不受影响。宿主服务有独立的 `HostServiceAPIVersion`，新增能力不会改变传输契约版本，也不会使既有插件失效。
+- **可选且向后兼容**：未实现 `InitHostServices` 的旧插件返回 `Unimplemented`，宿主静默跳过，转发能力不受影响。宿主服务有独立的 `HostServiceAPIVersion`（当前为 2），新增能力不会改变传输契约版本，也不会使既有插件失效。
 - **随进程回收**：宿主服务实例与插件进程生命周期绑定，插件退出时 broker 关闭并自动 `GracefulStop`，无需插件手动清理。
 
 当前提供的通用设施：
@@ -42,6 +42,10 @@
 - **命名空间键值存储（KV）**：`KVGet` / `KVSet` / `KVDelete` / `KVList`，为插件持久化跨请求、跨副本、跨重启的状态。存储由 Redis 支撑，因此多实例部署天然共享同一份状态。
   - **命名空间隔离**：宿主根据服务该连接的运行时注入插件身份（`pluginKey`），插件无法伪造，也无法读写其它插件的命名空间。
   - **护栏**：`namespace` / `key` 仅允许 `[A-Za-z0-9._-]`；单值上限 256 KiB；`ttl_seconds` 为 0 表示不过期、正值有上限；`KVList` 返回条数有上限。
+- **账号目录**（`HostServiceAPIVersion` 2）：
+  - `ListAccounts`：列出插件范围内的账号。`accounts` 字段携带每个账号的 `AccountInfo`：类型化的 `id`、`platform`、`account_type`、`name`、`status`、`schedulable`、`is_shadow`，以及 `metadata_json` 形式的其余可读字段。不含凭据。因限流、临时不可调度或过载而暂停的账号也会列出（`schedulable=false`），供插件自行跳过；已停用或过期的账号由宿主排除。`account_ids` 字段为 v1 插件保留。
+  - `ResolveOutboundIdentity`：返回宿主为该账号真实请求附加的出站身份，包括访问令牌、请求头和代理地址。它与凭据同等敏感，插件不得将其写入日志、诊断消息或持久化存储。
+  - **范围限制**：两个调用都只覆盖插件清单声明的账号能力所对应的账号，插件无法扩大范围。插件没有可用范围时，两个调用都返回 `Unavailable`。
 
 新增宿主设施时，在 `HostService` 上追加 RPC 即可，无需改动传输契约或清单格式。
 
@@ -65,12 +69,12 @@ ui/assets/...
 
 清单必须同时声明：
 
-- `requires.sub2api`：允许的 XY2API 语义化版本范围。
-- `requires.recommended_sub2api_version`：建议使用的宿主版本。
-- `requires.tested_sub2api_versions`：发布者实际验证过的宿主版本。
+- `requires.sub2api`：允许的 Sub2API 兼容基线语义化版本范围。宿主用自身的 Sub2API 兼容基线（`backend/cmd/server/SUB2API_COMPAT_VERSION`，管理页的插件详情中也会显示）与它比较，而不是 XY2API 产品版本。范围由空格或逗号分隔的 `>=`、`<=`、`>`、`<`、`=` 条件组成，须全部满足。
+- `requires.recommended_sub2api_version`：建议使用的宿主 Sub2API 兼容基线。
+- `requires.tested_sub2api_versions`：发布者实际验证过的宿主 Sub2API 兼容基线。
 - `plugin_protocol`、`transport_api`、`ui_bridge`：三个独立协议版本。
 
-宿主版本超出范围时，插件可以安装并查看，但保持“不兼容”状态且不能启用。版本在范围内但未列入已测试版本时，管理员必须再次确认才能启用。
+宿主的兼容基线超出范围时，插件可以安装并查看，但保持“不兼容”状态且不能启用。基线在范围内但未列入已测试版本时，管理员必须再次确认才能启用。
 
 ## UI 隔离与 Bridge
 
@@ -86,11 +90,10 @@ UI 可以发送以下消息。消息按语义分层，鉴权与副作用一致�
 | `plugin.status` | 读取运行时状态（无副作用） | 否 | `Health`（`status_json`） |
 | `ui.resize` / `ui.notify` | 仅 UI 交互 | — | — |
 
-每个请求消息带 `request_id`，宿主以 `<type>.result` 返回结果。
-
 每个请求消息带 `request_id`，宿主以 `<type>.result` 返回结果。配置整体使用 XY2API 的密钥加密后存入数据库；运行中插件会先验证并应用新配置，数据库写入失败时恢复旧配置。
+
 - `config.test` 的结果由插件 UI 自行展示（内联或经 `ui.notify`），宿主不再对成功结果强制弹出提示，避免插件把它当作轻量状态轮询时刷屏。
-- `plugin.status` 是通用的**只读**状态通道：宿主经 `GET /admin/plugins/:id/status` 调用运行中插件的 `Health`，返回 `{healthy, message, status_json}`。`status_json` 是插件自定义的**不透明** JSON 快照（宿主不解析、不参与健康判定），插件必须以无副作用方式生成（不得应用配置、访问上游或触发探测），因此该端点只读、免二次验证。插件未运行时返回 `healthy=false` 且不含 `status_json`。这样带状态面板的插件无需滥用 `config.test` 即可展示实时状态。
+- `plugin.status` 是通用的**只读**状态通道：宿主经 `GET /api/v1/admin/plugins/:id/status` 调用运行中插件的 `Health`，返回 `{healthy, message, status_json}`。`status_json` 是插件自定义的**不透明** JSON 快照（宿主不解析、不参与健康判定），插件必须以无副作用方式生成（不得应用配置、访问上游或触发探测），因此该端点只读、免二次验证。插件未运行时返回 `healthy=false` 且不含 `status_json`。这样带状态面板的插件无需滥用 `config.test` 即可展示实时状态。
 
 ## 协议源码
 

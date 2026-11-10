@@ -9343,14 +9343,14 @@ function localText(zh: string, en: string): string {
 
 const paymentGuideHref = computed(() =>
   locale.value.startsWith("zh")
-    ? "https://github.com/liulixin-lex/xy2api/blob/main/docs/PAYMENT_CN.md"
-    : "https://github.com/liulixin-lex/xy2api/blob/main/docs/PAYMENT.md",
+    ? "https://github.com/liulixin-lex/xy2api/blob/main/docs/guides/payment.md"
+    : "https://github.com/liulixin-lex/xy2api/blob/main/docs/guides/payment.en.md",
 );
 
 const paymentMethodsHref = computed(() =>
   locale.value.startsWith("zh")
-    ? "https://github.com/liulixin-lex/xy2api/blob/main/docs/PAYMENT_CN.md#支持的支付方式"
-    : "https://github.com/liulixin-lex/xy2api/blob/main/docs/PAYMENT.md#supported-payment-methods",
+    ? "https://github.com/liulixin-lex/xy2api/blob/main/docs/guides/payment.md#支持的支付方式"
+    : "https://github.com/liulixin-lex/xy2api/blob/main/docs/guides/payment.en.md#supported-payment-methods",
 );
 
 type SettingsTab =
