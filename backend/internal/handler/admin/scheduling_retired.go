@@ -12,7 +12,14 @@ import (
 // instead of a 404; account availability uses the account schedulable switch.
 func RetiredScheduling(c *gin.Context) {
 	response.ErrorWithDetails(c, http.StatusGone,
-		"Controlled scheduling has been retired; use share scheduling or the account scheduling switch",
+		"Controlled scheduling has been retired; use the account scheduling switch",
 		"SCHEDULING_RETIRED",
-		map[string]string{"replacement": "/api/v1/admin/share-scheduling"})
+		map[string]string{"replacement": "/api/v1/admin/accounts"})
+}
+
+// RetiredShareScheduling answers the removed share decision and rebalance APIs.
+func RetiredShareScheduling(c *gin.Context) {
+	response.ErrorWithDetails(c, http.StatusGone,
+		"This share scheduling endpoint has been retired; sessions follow account priorities and load factors",
+		"SHARE_SCHEDULING_ENDPOINT_RETIRED", nil)
 }

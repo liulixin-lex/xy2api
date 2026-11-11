@@ -32,4 +32,6 @@ func registerRetiredSchedulingRoutes(admin *gin.RouterGroup) {
 	} {
 		admin.Handle(route.method, route.path, adminhandler.RetiredScheduling)
 	}
+	admin.GET("/share-scheduling/groups/:id/decisions", adminhandler.RetiredShareScheduling)
+	admin.POST("/share-scheduling/groups/:id/rebalance", adminhandler.RetiredShareScheduling)
 }

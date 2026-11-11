@@ -50,6 +50,7 @@ type AdminHandlers struct {
 	ShareScheduling        *admin.ShareSchedulingHandler
 	GroupCategory          *admin.GroupCategoryHandler
 	Resilience             *admin.ResilienceHandler
+	ProfitPreview          *admin.ProfitPreviewHandler
 	GroupQualityGate       *admin.GroupQualityGateHandler
 }
 
