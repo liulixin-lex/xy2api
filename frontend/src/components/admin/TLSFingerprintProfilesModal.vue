@@ -345,7 +345,6 @@ const emit = defineEmits<{
   close: []
 }>()
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 void emit // suppress unused warning - emit is used via $emit in template
 
 const { t } = useI18n()

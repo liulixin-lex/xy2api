@@ -55,7 +55,7 @@
         <template #cell-model="{ row }">
           <div class="space-y-0.5 text-xs">
             <div v-if="row.model_mapping_chain && row.model_mapping_chain.includes('→')" class="space-y-0.5">
-              <div v-for="(step, i) in row.model_mapping_chain.split('→')" :key="i"
+              <div v-for="(step, i) in mappingChainSteps(row.model_mapping_chain)" :key="i"
                    class="break-all"
                    :class="i === 0 ? 'font-medium text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'"
                    :style="i > 0 ? `padding-left: ${i * 0.75}rem` : ''">
@@ -593,6 +593,10 @@ import {
 } from '@/utils/imageUsage'
 
 /** Compute the account-billed cost for display: (account_stats_cost ?? total_cost) * rate_multiplier */
+function mappingChainSteps(chain: string): string[] {
+  return chain.split('→')
+}
+
 function accountBilled(row: { total_cost?: number | null; account_stats_cost?: number | null; account_rate_multiplier?: number | null }): number {
   const base = row.account_stats_cost != null ? row.account_stats_cost : (row.total_cost ?? 0)
   const result = base * (row.account_rate_multiplier ?? 1)

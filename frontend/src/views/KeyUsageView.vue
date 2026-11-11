@@ -458,7 +458,6 @@ const isQuerying = ref(false)
 const showResults = ref(false)
 const showLoading = ref(false)
 const showDatePicker = ref(false)
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const resultData = ref<any>(null)
 const now = ref(new Date())
 let resetTimer: ReturnType<typeof setInterval> | null = null
@@ -824,7 +823,6 @@ const usageStatCells = computed<StatCell[]>(() => {
   ]
 })
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const modelStats = computed<any[]>(() => resultData.value?.model_stats || [])
 
 interface DailyUsageRow {

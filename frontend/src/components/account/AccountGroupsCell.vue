@@ -35,7 +35,6 @@
       >
         <div
           v-if="showPopover"
-          ref="popoverRef"
           class="fixed z-50 min-w-48 max-w-96 rounded-lg border border-gray-200 bg-white p-3 shadow-lg dark:border-dark-600 dark:bg-dark-800"
           :style="popoverStyle"
         >
@@ -95,7 +94,6 @@ const props = withDefaults(defineProps<Props>(), {
 const { t } = useI18n()
 
 const moreButtonRef = ref<HTMLElement | null>(null)
-const popoverRef = ref<HTMLElement | null>(null)
 const showPopover = ref(false)
 
 // 显示的分组（最多显示 maxDisplay 个）

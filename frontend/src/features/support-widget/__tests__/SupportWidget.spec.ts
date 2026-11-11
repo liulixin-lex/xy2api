@@ -236,22 +236,28 @@ describe('support bubble left inset', () => {
   })
 })
 
+// Dispatch real PointerEvents: jsdom implements PointerEvent, and VTU's trigger()
+// cannot copy init values such as `button` onto it afterwards.
+async function pointer(target: Element, type: string, clientX: number, clientY: number) {
+  target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, button: 0, isPrimary: true, pointerId: 1, clientX, clientY }))
+  await nextTick()
+}
+
 describe('support bubble drag', () => {
   it('swallows the click that ends a drag, snaps to the nearer edge and remembers it', async () => {
     const wrapper = mountWidget()
     const bubble = wrapper.get('[data-testid="support-bubble"]')
-    const pointer = { button: 0, isPrimary: true, pointerId: 1 }
-    await bubble.trigger('pointerdown', { ...pointer, clientX: 900, clientY: 600 })
-    await bubble.trigger('pointermove', { ...pointer, clientX: 902, clientY: 601 }) // under the 4px threshold
-    await bubble.trigger('pointerup', { ...pointer, clientX: 902, clientY: 601 })
+    await pointer(bubble.element, 'pointerdown', 900, 600)
+    await pointer(bubble.element, 'pointermove', 902, 601) // under the 4px threshold
+    await pointer(bubble.element, 'pointerup', 902, 601)
     await click(bubble.element, 1)
     expect(bubble.attributes('aria-expanded')).toBe('true')
     await click(bubble.element, 1)
 
-    await bubble.trigger('pointerdown', { ...pointer, clientX: 900, clientY: 600 })
-    await bubble.trigger('pointermove', { ...pointer, clientX: 100, clientY: 300 })
+    await pointer(bubble.element, 'pointerdown', 900, 600)
+    await pointer(bubble.element, 'pointermove', 100, 300)
     expect(bubble.attributes('style')).toContain('transition: none')
-    await bubble.trigger('pointerup', { ...pointer, clientX: 100, clientY: 300 })
+    await pointer(bubble.element, 'pointerup', 100, 300)
     await click(bubble.element, 1)
     expect(bubble.attributes('aria-expanded')).toBe('false')
     expect(JSON.parse(localStorage.getItem(BUBBLE_STORAGE_KEY)!)).toMatchObject({ side: 'left' })

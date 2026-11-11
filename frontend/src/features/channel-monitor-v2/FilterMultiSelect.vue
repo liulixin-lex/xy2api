@@ -154,7 +154,8 @@ function toggle(value: string) {
 }
 
 function toggleOpen() {
-  isOpen.value ? close() : open()
+  if (isOpen.value) close()
+  else open()
 }
 
 function open() {
