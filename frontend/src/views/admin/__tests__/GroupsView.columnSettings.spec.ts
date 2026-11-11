@@ -11,8 +11,6 @@ const {
   getUsageSummary,
   getCapacitySummary,
   getLiveCapability,
-  getQualityGateStatus,
-  getQualityGatePolicies,
   listAccounts,
   showError,
   showSuccess,
@@ -27,8 +25,6 @@ const {
   getUsageSummary: vi.fn(),
   getCapacitySummary: vi.fn(),
   getLiveCapability: vi.fn(),
-  getQualityGateStatus: vi.fn(),
-  getQualityGatePolicies: vi.fn(),
   listAccounts: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
@@ -72,10 +68,6 @@ vi.mock('@/api/admin', () => ({
     },
     accounts: {
       list: listAccounts,
-    },
-    groupQualityGate: {
-      getStatus: getQualityGateStatus,
-      getPolicies: getQualityGatePolicies,
     },
   },
 }))
@@ -180,9 +172,6 @@ const DataTableStub = {
       <div v-if="data.length" data-test="capacity-cell">
         <slot name="cell-capacity" :row="data[0]" />
       </div>
-      <div v-if="data.length" data-test="quality-cell">
-        <slot name="cell-quality_gate" :row="data[0]" />
-      </div>
     </div>
   `,
 }
@@ -283,8 +272,6 @@ describe('admin GroupsView column settings', () => {
     getModelAllowlistCandidates.mockResolvedValue([])
     getUsageSummary.mockResolvedValue([])
     getCapacitySummary.mockResolvedValue([])
-    getQualityGateStatus.mockResolvedValue({ generated_at: '2026-11-01T00:00:00Z', stale: false, groups: [] })
-    getQualityGatePolicies.mockResolvedValue({ version: 0, groups: {} })
     getLiveCapability.mockResolvedValue({ supported: false })
     listAccounts.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
     isCurrentStep.mockReturnValue(false)
@@ -322,7 +309,6 @@ describe('admin GroupsView column settings', () => {
       'rate_multiplier',
       'is_exclusive',
       'category',
-      'quality_gate',
       'account_count',
       'capacity',
       'usage',
@@ -350,7 +336,6 @@ describe('admin GroupsView column settings', () => {
       'rate_multiplier',
       'is_exclusive',
       'category',
-      'quality_gate',
       'account_count',
       'status',
       'actions',
@@ -370,7 +355,6 @@ describe('admin GroupsView column settings', () => {
       'rate_multiplier',
       'is_exclusive',
       'category',
-      'quality_gate',
       'account_count',
       'capacity',
       'status',
@@ -395,7 +379,6 @@ describe('admin GroupsView column settings', () => {
       'rate_multiplier',
       'is_exclusive',
       'category',
-      'quality_gate',
       'account_count',
       'capacity',
       'status',
@@ -420,7 +403,6 @@ describe('admin GroupsView column settings', () => {
       'rate_multiplier',
       'is_exclusive',
       'category',
-      'quality_gate',
       'account_count',
       'capacity',
       'usage',
@@ -476,29 +458,5 @@ describe('admin GroupsView column settings', () => {
     const badge = wrapper.getComponent({ name: 'GroupCapacityBadge' })
 
     expect(badge.props()).toMatchObject({ concurrencyUsed: 5, concurrencyMax: 600, concurrencyGroupUsed: 3 })
-  })
-
-  it('summarises the v3 gate as passing/unknown and retest/failing, and flags too few group samples', async () => {
-    listGroups.mockResolvedValue({ items: [createGroup({ id: 18, platform: 'openai' })], total: 1, page: 1, page_size: 20, pages: 1 })
-    const v3 = { enabled: true, max_ttft_p90_seconds: 15, max_error_rate: 0.1, min_cache_keep_rate: 0.5, strict: false }
-    getQualityGatePolicies.mockResolvedValue({ version: 2, groups: { '18': { enabled: false, v3 } } })
-    getQualityGateStatus.mockResolvedValue({
-      generated_at: '2026-11-04T10:00:00Z',
-      stale: false,
-      groups: [{
-        group_id: 18, enabled: true, policy: v3, expected_p90_ms: null, expected_samples: 12,
-        summary: { passing: 3, unknown: 2, retest: 1, failing: 0, pinned: 0 }, accounts: [],
-      }],
-    })
-
-    const wrapper = await mountView()
-    const summary = wrapper.get('[data-test="quality-cell"] [data-testid="group-quality-summary"]')
-    expect(summary.findAll('[data-quality-count]').map((pair) => pair.text())).toEqual([
-      'admin.groupQualityGate.state.passing 3',
-      'admin.groupQualityGate.state.unknown 2',
-      'admin.groupQualityGate.state.retest 1',
-      'admin.groupQualityGate.state.failing 0',
-    ])
-    expect(summary.find('[data-testid="group-quality-samples-insufficient"]').exists()).toBe(true)
   })
 })

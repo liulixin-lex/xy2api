@@ -22,8 +22,7 @@ export async function fetchAllAccountIds(
 ): Promise<number[]> {
   const requestFilters = {
     ...filters,
-    lite: '1',
-    include_scheduler_score: '0'
+    lite: '1'
   }
   const firstPage = await fetchPage(1, SELECT_ALL_PAGE_SIZE, requestFilters)
   const pageCount = Math.max(

@@ -3,9 +3,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 import AccountsView from '../AccountsView.vue'
 
-const { listAccounts, getBatchRecentHealth, clearCapabilityLearning } = vi.hoisted(() => ({
+const { listAccounts, clearCapabilityLearning } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
-  getBatchRecentHealth: vi.fn(),
   clearCapabilityLearning: vi.fn()
 }))
 
@@ -16,15 +15,10 @@ vi.mock('@/api/admin/accountCapability', async () => {
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
-    groupQualityGate: {
-      getStatus: vi.fn().mockResolvedValue({ generated_at: '', stale: false, groups: [] }),
-      getPolicies: vi.fn().mockResolvedValue({ version: 0, groups: {} }),
-    },
     accounts: {
       list: listAccounts,
       listWithEtag: vi.fn(),
       getBatchTodayStats: vi.fn().mockResolvedValue({ stats: {} }),
-      getBatchRecentHealth,
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       delete: vi.fn(),
       batchClearError: vi.fn(),
@@ -114,7 +108,6 @@ describe('admin AccountsView stream-only state in the status column', () => {
       page_size: 20,
       pages: 1
     })
-    getBatchRecentHealth.mockReset().mockResolvedValue({ stats: {} })
     clearCapabilityLearning.mockReset().mockResolvedValue(undefined)
   })
 

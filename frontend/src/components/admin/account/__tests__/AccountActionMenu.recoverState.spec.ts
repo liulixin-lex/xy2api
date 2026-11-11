@@ -9,11 +9,11 @@ vi.mock('vue-i18n', async () => ({
   useI18n: () => ({ t: (key: string) => key })
 }))
 
-describe('AccountActionMenu — group quality gate recovery', () => {
-  it('offers recover state for a gate-only state and emits recover-state', async () => {
-    const account = { id: 1, platform: 'openai', type: 'oauth', status: 'active', schedulable: true } as Account
+describe('AccountActionMenu — recover state', () => {
+  it('offers recover state for an account in error and emits recover-state', async () => {
+    const account = { id: 1, platform: 'openai', type: 'oauth', status: 'error', schedulable: true } as Account
     const wrapper = mount(AccountActionMenu, {
-      props: { show: true, account, anchorRect: new DOMRect(100, 100, 24, 24), qualityRecoverable: true },
+      props: { show: true, account, anchorRect: new DOMRect(100, 100, 24, 24) },
       // 全局 setup 每条用例创建并激活 pinia；挂到应用上，组件里的 auth、权限 store 不再告警。
       global: { plugins: [getActivePinia()!], stubs: { Icon: true } },
       attachTo: document.body

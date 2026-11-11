@@ -18,8 +18,7 @@ const {
   bulkUpdate,
   showError,
   showWarning,
-  showInfo,
-  accountRules
+  showInfo
 } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
   listWithEtag: vi.fn(),
@@ -33,22 +32,16 @@ const {
   bulkUpdate: vi.fn(),
   showError: vi.fn(),
   showWarning: vi.fn(),
-  showInfo: vi.fn(),
-  accountRules: vi.fn()
+  showInfo: vi.fn()
 }))
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
-    groupQualityGate: {
-      getStatus: vi.fn().mockResolvedValue({ generated_at: '', stale: false, groups: [] }),
-      getPolicies: vi.fn().mockResolvedValue({ version: 0, groups: {} }),
-    },
     accounts: {
       list: listAccounts,
       getById,
       listWithEtag,
       getBatchTodayStats,
-      getBatchRecentHealth: vi.fn(async () => ({ stats: {} })),
       getUpstreamBillingProbeSettings,
       delete: vi.fn(),
       batchClearError: vi.fn(),
@@ -58,8 +51,7 @@ vi.mock('@/api/admin', () => ({
       refreshCredentials
     },
     proxies: { getAll: getAllProxies },
-    groups: { getAll: getAllGroups },
-    shareScheduling: { accountRules }
+    groups: { getAll: getAllGroups }
   }
 }))
 
@@ -198,7 +190,6 @@ describe('admin AccountsView lite account list', () => {
     showError.mockReset()
     showWarning.mockReset()
     showInfo.mockReset()
-    accountRules.mockReset().mockResolvedValue([])
   })
 
   afterEach(() => {
@@ -221,24 +212,6 @@ describe('admin AccountsView lite account list', () => {
     await toggle.trigger('click'); await flushPromises()
     expect(setSchedulable).toHaveBeenLastCalledWith(42, true)
     expect(toggle.attributes('aria-checked')).toBe('true')
-    wrapper.unmount()
-  })
-
-  it('names the share groups whose new sessions move after the account stops', async () => {
-    accountRules.mockResolvedValue([
-      { group_id: 18, group_name: 'main', scheduler: 'share', effective: true, priority: 1, load_factor: 30, effective_load_factor: 30, healthy: false, expected_share: 0, share_if_healthy: 0.25 },
-      { group_id: 19, group_name: 'paused', scheduler: 'share', effective: false, priority: 1, load_factor: 30, effective_load_factor: 30, healthy: false, expected_share: 0, share_if_healthy: 0.5 }
-    ])
-    const wrapper = mountView()
-    await flushPromises()
-    await wrapper.get('button[role="switch"]').trigger('click'); await flushPromises()
-    expect(accountRules).toHaveBeenCalledWith(42)
-    expect(showInfo).toHaveBeenCalledTimes(1)
-    expect(showInfo.mock.calls[0][0]).toBe('admin.shareScheduling.accountDisabled')
-
-    accountRules.mockClear()
-    await wrapper.get('button[role="switch"]').trigger('click'); await flushPromises()
-    expect(accountRules).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 

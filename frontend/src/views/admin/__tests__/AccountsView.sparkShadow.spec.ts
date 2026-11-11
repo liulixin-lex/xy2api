@@ -33,15 +33,10 @@ const {
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
-    groupQualityGate: {
-      getStatus: vi.fn().mockResolvedValue({ generated_at: '', stale: false, groups: [] }),
-      getPolicies: vi.fn().mockResolvedValue({ version: 0, groups: {} }),
-    },
     accounts: {
       list: listAccounts,
       listWithEtag,
       getBatchTodayStats,
-      getBatchRecentHealth: vi.fn(async () => ({ stats: {} })),
       duplicate: duplicateAccount,
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       createSparkShadow,

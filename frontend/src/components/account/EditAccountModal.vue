@@ -1765,7 +1765,6 @@
           </div>
         </div>
       </div>
-      <ShareAccountRules v-if="account" :account-id="account.id" />
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <label class="input-label">{{ t('admin.accounts.expiresAt') }}</label>
         <input v-model="expiresAtInput" type="datetime-local" class="input" />
@@ -3247,7 +3246,6 @@ import ProxySelector from '@/components/common/ProxySelector.vue'
 import { useAdminAccessStore } from '@/stores/adminAccess'
 import { REFRESHABLE_ACCOUNT_TYPES, applyOperatorAccountPayloadRules, operatorAccountErrorMessage } from '@/components/account/operatorAccountRules'
 import CodexAccountTicketSettings from '@/components/account/CodexAccountTicketSettings.vue'
-import ShareAccountRules from '@/components/account/ShareAccountRules.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'

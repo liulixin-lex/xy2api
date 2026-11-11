@@ -575,19 +575,6 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/admin/share-scheduling',
-    name: 'AdminShareScheduling',
-    component: () => import('@/views/admin/ShareSchedulingView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      permission: 'share_scheduling',
-      title: 'Share Scheduling',
-      titleKey: 'admin.shareScheduling.title',
-      descriptionKey: 'admin.shareScheduling.subtitle'
-    }
-  },
-  {
     path: '/admin/plugins',
     name: 'AdminPlugins',
     component: () => import('@/views/admin/PluginsView.vue'),

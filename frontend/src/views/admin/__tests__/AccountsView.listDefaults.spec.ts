@@ -9,15 +9,10 @@ const { listAccounts } = vi.hoisted(() => ({
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
-    groupQualityGate: {
-      getStatus: vi.fn().mockResolvedValue({ generated_at: '', stale: false, groups: [] }),
-      getPolicies: vi.fn().mockResolvedValue({ version: 0, groups: {} }),
-    },
     accounts: {
       list: listAccounts,
       listWithEtag: vi.fn(),
       getBatchTodayStats: vi.fn().mockResolvedValue({ stats: {} }),
-      getBatchRecentHealth: vi.fn(async () => ({ stats: {} })),
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       delete: vi.fn(),
       batchClearError: vi.fn(),
@@ -132,7 +127,7 @@ describe('admin AccountsView list defaults and column order', () => {
     // The column settings always save the full list; here "last used" was dragged to the top.
     localStorage.setItem('account-column-order', JSON.stringify([
       'last_used_at', 'id', 'platform_type', 'capacity', 'status', 'schedulable', 'iq_check', 'groups',
-      'today_stats', 'usage', 'proxy', 'priority', 'scheduler_score', 'rate_multiplier',
+      'today_stats', 'usage', 'proxy', 'priority', 'rate_multiplier',
       'upstream_billing_rate', 'created_at', 'expires_at', 'notes'
     ]))
     const wrapper = mountView()
