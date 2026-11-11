@@ -21,6 +21,7 @@
 
 ### 安全
 
+- 改用 Go 1.27.4 构建二进制与镜像，修复标准库 `net/http` 的 [GO-2026-6859](https://pkg.go.dev/vuln/GO-2026-6859)。
 - 升级存在已知漏洞的依赖：OpenAI TOTP Worker 的 certifi，后端的 excelize 与 Docker/moby 相关模块（testcontainers-go 0.45 改用 moby 模块），前端构建链中的 postcss-selector-parser、minimatch、brace-expansion、ajv 与 glob。
 
 ### 升级说明
