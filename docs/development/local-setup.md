@@ -262,7 +262,8 @@ Ent schema 只决定生成的查询代码，不会修改数据库。改了 schem
 | 作业 | 环境 | 内容 |
 |---|---|---|
 | `lint` | Ubuntu | golangci-lint v2.14.0，工作目录 `backend/`，`--timeout=30m` |
-| `backend` | Ubuntu，附 PostgreSQL 18 与 Redis 8.4 服务容器 | 单元测试 → 集成测试 → 创建 MCP 测试库与角色 → `tools/ci/race_suites.py` → 编译 `linux/amd64`、`windows/amd64`、`darwin/arm64` |
+| `backend` | Ubuntu | 单元测试 → 编译 `linux/amd64`、`windows/amd64`、`darwin/arm64` |
+| `integration` | Ubuntu，附 PostgreSQL 18 与 Redis 8.4 服务容器 | 集成测试 → 创建 MCP 测试库与角色 → `tools/ci/race_suites.py` |
 | `windows` | Windows | 在 Windows 上测试未签名开发插件包的安装 |
 | `frontend` | Ubuntu，Node 24 + pnpm 9 | `pnpm install --frozen-lockfile`、`lint:check`、`vitest run`、`build`（含 i18n 检查与类型检查） |
 | `scripts` | Ubuntu，Python 3.12 + Node 24 | `deploy/` 安装脚本语法检查与 `deploy/tests/*-test.sh`；`tools/tests` 单元测试与 `tools/*.mjs` 语法检查 |

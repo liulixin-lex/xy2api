@@ -52,7 +52,7 @@ make generate       # 修改 backend/ent/schema 后重新生成 Ent 与 Wire 代
 ## Pull Request 要求
 
 - 一个 PR 只做一件事；与改动无关的格式化、重命名请单独提交。
-- CI 必须全部通过：`lint`、`backend`、`windows`、`frontend`、`scripts`、`govulncheck`。
+- CI 必须全部通过：`lint`、`backend`、`integration`、`windows`、`frontend`、`scripts`、`govulncheck`。
 - 新功能和缺陷修复需要测试。后端测试使用构建标签区分：`-tags=unit`（单元）、`-tags=integration`（集成，需要 Docker）。
 - 用户可见的变化（新功能、行为或默认值变化、配置项、修复）写进 `CHANGELOG.md` 的 `[Unreleased]` 一节，用中文、一句话，以用户能感知的结果开头。
 - 行为或配置变化同步更新 `docs/` 下对应文档和 `deploy/config.example.yaml`、`deploy/.env.example`。
