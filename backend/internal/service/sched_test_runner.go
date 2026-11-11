@@ -280,7 +280,7 @@ func (s *SchedTestRunnerService) run(record SchedTestRecord, slots chan struct{}
 	} else if busy {
 		record.AbortReason = "busy"
 	} else if ctx.Err() != nil {
-		record.AbortReason = "timeout"
+		record.AbortReason = "busy"
 	}
 	writeCtx, writeCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer writeCancel()
@@ -306,7 +306,9 @@ func (s *SchedTestRunnerService) runTier(ctx context.Context, cancel context.Can
 		keepGoing := func() bool {
 			account, err := s.accounts.GetByID(ctx, record.AccountID)
 			if err != nil || account == nil {
-				partial.AbortReason = "error"
+				if ctx.Err() == nil {
+					partial.AbortReason = "error"
+				}
 				return false
 			}
 			mapped, ok, _ := s.admission.TestRequestModel(ctx, account, record.Model)
@@ -343,7 +345,9 @@ func (s *SchedTestRunnerService) runTier(ctx context.Context, cancel context.Can
 			// Slot waiting can outlive an account update; read again before forwarding.
 			account, err = s.accounts.GetByID(ctx, record.AccountID)
 			if err != nil || account == nil {
-				partial.AbortReason = "error"
+				if ctx.Err() == nil {
+					partial.AbortReason = "error"
+				}
 				return false
 			}
 			mapped, ok, _ = s.admission.TestRequestModel(ctx, account, record.Model)
@@ -381,7 +385,7 @@ func (s *SchedTestRunnerService) runTier(ctx context.Context, cancel context.Can
 					break
 				}
 			}
-			if turnCtx.Err() != nil {
+			if turnCtx.Err() != nil && selected.Outcome != schedquality.OutcomeTimeout && selected.Outcome != schedquality.OutcomeAccountFault {
 				firstOutput := false
 				for _, sample := range samples {
 					if sample.TTFOMs != nil {

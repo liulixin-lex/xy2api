@@ -192,7 +192,7 @@ func TestSchedTestRunnerQueuedModelExpires(t *testing.T) {
 		require.Len(t, a.Turns, 3)
 		require.False(t, b.Done)
 		require.Empty(t, b.Turns)
-		require.Equal(t, "timeout", b.AbortReason)
+		require.Equal(t, "busy", b.AbortReason)
 		require.Equal(t, schedquality.TestTimeout, b.FinishedAt.Sub(b.StartedAt))
 		require.Zero(t, cache.active)
 	})
@@ -231,7 +231,7 @@ func TestSchedTestRunnerSiblingCancellation(t *testing.T) {
 					}
 					ready <- struct{}{}
 					<-ctx.Done()
-					sample := schedquality.AttemptSample{Outcome: schedquality.OutcomeTimeout}
+					sample := schedquality.AttemptSample{Outcome: schedquality.OutcomeOther, Detail: "client_cancel"}
 					if firstOutput {
 						first := 12
 						sample.Outcome = schedquality.OutcomeOK
@@ -286,6 +286,73 @@ func TestSchedTestRunnerSlotRetryInterval(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestSchedTestRunnerRetryCancellationPreservesFirstFailure(t *testing.T) {
+	for _, outcome := range []schedquality.Outcome{schedquality.OutcomeAccountFault, schedquality.OutcomeTimeout} {
+		t.Run(fmt.Sprint(outcome), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				s, store, forward, _, cache := schedTestFixture(10)
+				defer s.Stop()
+				entered := make(chan struct{}, 3)
+				forward.Fn = func(ctx context.Context, _ *gin.Context, _ *Account, _ []byte) (*OpenAIForwardResult, error) {
+					attempt := resilience.StateFrom(ctx).SchedTest().(*SchedTestAttempt)
+					attempt.Sink(schedquality.AttemptSample{Outcome: outcome, Detail: "first_failure"})
+					entered <- struct{}{}
+					<-ctx.Done()
+					attempt.Sink(schedquality.AttemptSample{Outcome: schedquality.OutcomeOther, Detail: "client_cancel"})
+					return nil, ctx.Err()
+				}
+				ticket, err := s.Request(context.Background(), 7, "evidence", false, 0)
+				require.NoError(t, err)
+				require.True(t, ticket.Started)
+				for range 3 {
+					<-entered
+				}
+				s.Stop()
+				r := <-store.finished
+				require.True(t, r.Done)
+				require.Len(t, r.Turns, 3)
+				for _, row := range r.Turns {
+					require.Equal(t, 1, row.Turn)
+					require.Equal(t, outcome, row.Outcome)
+					require.Equal(t, "first_failure", row.Detail)
+				}
+				require.Zero(t, cache.active)
+				require.Empty(t, s.tierLimits)
+			})
+		})
+	}
+}
+
+func TestSchedTestRunnerAccountReadCancellationIsNotError(t *testing.T) {
+	for _, cancelledRead := range []int{1, 2} {
+		t.Run(fmt.Sprint(cancelledRead), func(t *testing.T) {
+			s, _, forward, _, cache := schedTestFixture(1)
+			defer s.Stop()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			reads := 0
+			s.accounts = schedTestAccountFunc(func(ctx context.Context, _ int64) (*Account, error) {
+				reads++
+				if reads == cancelledRead {
+					cancel()
+					return nil, ctx.Err()
+				}
+				return &Account{ID: 7, Concurrency: 1}, nil
+			})
+			forward.Fn = func(context.Context, *gin.Context, *Account, []byte) (*OpenAIForwardResult, error) {
+				t.Error("forward called after account read cancellation")
+				return nil, nil
+			}
+			partial := s.runTier(ctx, cancel, SchedTestRecord{AccountID: 7, Model: "evidence"}, schedquality.TierSmall)
+			require.Equal(t, cancelledRead, reads)
+			require.Empty(t, partial.AbortReason)
+			require.Empty(t, partial.Turns)
+			require.Equal(t, cancelledRead-1, cache.acquires)
+			require.Zero(t, cache.active)
+		})
+	}
 }
 
 func TestSchedTestRunnerPanicReleasesResources(t *testing.T) {
