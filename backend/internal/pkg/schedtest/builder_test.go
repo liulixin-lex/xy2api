@@ -38,14 +38,14 @@ func TestSchedTestBuild(t *testing.T) {
 			if turn == 1 {
 				n := count(body)
 				target := schedquality.TestTiers[tier].Tokens
-				if abs(n-target) > target/20 {
+				if float64(abs(n-target)) > float64(target)*schedquality.TestPromptTolerance {
 					t.Fatalf("tier %s: %d vs %d", tier, n, target)
 				}
 				key = got.Key
 			} else if got.Key != key || !bytes.HasPrefix(got.Input, previous[:len(previous)-1]) {
 				t.Fatal("cache key or input prefix changed")
 			}
-			if turn > 1 && abs(count(body)-previousCount-schedquality.TestTurnGrowthTokens) > schedquality.TestTurnGrowthTokens/20 {
+			if turn > 1 && float64(abs(count(body)-previousCount-schedquality.TestTurnGrowthTokens)) > float64(schedquality.TestTurnGrowthTokens)*schedquality.TestPromptTolerance {
 				t.Fatalf("tier %s turn %d: growth=%d", tier, turn, count(body)-previousCount)
 			}
 			previousCount = count(body)

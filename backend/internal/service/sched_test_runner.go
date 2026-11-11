@@ -78,7 +78,7 @@ func (s *SchedTestRunnerService) Start(ctx context.Context) {
 	s.mu.Unlock()
 	go func() {
 		defer s.wg.Done()
-		ticker := time.NewTicker(time.Hour)
+		ticker := time.NewTicker(schedquality.CleanupInterval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -163,7 +163,7 @@ func (s *SchedTestRunnerService) Recent(ctx context.Context, id int64, limit int
 }
 func (s *SchedTestRunnerService) ReapStale(ctx context.Context) error {
 	now := s.now()
-	return s.store.ReapStale(ctx, now.Add(-schedquality.TestTimeout-time.Minute), now)
+	return s.store.ReapStale(ctx, now.Add(-schedquality.TestStaleAfter), now)
 }
 
 func schedTestCount(body []byte) int {
@@ -180,15 +180,10 @@ func schedTestCount(body []byte) int {
 
 func schedTestEffort(account *Account, model string, tier schedquality.TestTier) string {
 	wanted := schedquality.TestTiers[tier].Effort
-	metadata, ok := account.GetUpstreamModelMetadata(model)
+	metadata, _ := account.GetUpstreamModelMetadata(model)
 	levels := normalizeReasoningLevels(metadata.SupportedReasoningLevels)
 	if len(levels) == 0 && metadata.Reasoning != nil && !*metadata.Reasoning {
 		levels = []string{"none"}
-	}
-	if (!ok || len(levels) == 0) && (isOpenAICodexGPTModel(model) || isDeepSeekCodexModel(model) || isGrokCodexModel(model) || isClaudeCodexModel(model)) {
-		for _, level := range newConfiguredCodexModelDescriptor(model).SupportedReasoningLevels {
-			levels = append(levels, level.Effort)
-		}
 	}
 	best, bestRank := "", -1
 	for _, level := range levels {

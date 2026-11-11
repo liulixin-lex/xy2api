@@ -103,9 +103,9 @@ func Build(tier schedquality.TestTier, turn int, session Session, count func([]b
 		return marshal(req)
 	}
 	low, high := 1, len(corpus)
-	tolerance := max(1, target/100)
+	tolerance := max(1, int(float64(target)*schedquality.TestPromptTolerance))
 	if turn > 1 {
-		tolerance = schedquality.TestTurnGrowthTokens / 20
+		tolerance = int(float64(schedquality.TestTurnGrowthTokens) * schedquality.TestPromptTolerance)
 	}
 	best := render(low)
 	bestN := count(best)

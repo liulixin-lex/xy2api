@@ -25,8 +25,8 @@ func TestSchedTestRepository(t *testing.T) {
 	newRecord := func(at time.Time, running bool) service.SchedTestRecord {
 		return service.SchedTestRecord{AccountID: account, Model: "test-model", Running: running, TestResult: schedquality.TestResult{ID: uuid.NewString(), StartedAt: at, Done: !running}}
 	}
-	old := newRecord(now.Add(-6*time.Hour-time.Minute), false)
-	fresh := newRecord(now.Add(-6*time.Hour+time.Minute), false)
+	old := newRecord(now.Add(-schedquality.TestFreshFor-time.Minute), false)
+	fresh := newRecord(now.Add(-schedquality.TestFreshFor+time.Minute), false)
 	running := newRecord(now, true)
 	for _, v := range []service.SchedTestRecord{old, fresh, running} {
 		if err := repo.Insert(ctx, v); err != nil {
@@ -36,7 +36,7 @@ func TestSchedTestRepository(t *testing.T) {
 	if err := repo.Insert(ctx, newRecord(now, true)); !errors.Is(err, service.ErrSchedTestRunning) {
 		t.Fatalf("expected running conflict: %v", err)
 	}
-	rows, err := repo.Since(ctx, now.Add(-6*time.Hour))
+	rows, err := repo.Since(ctx, now.Add(-schedquality.TestFreshFor))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,8 +89,8 @@ func TestSchedTestRepositoryReapStale(t *testing.T) {
 		age     time.Duration
 		running bool
 	}{
-		{"stale", 7*time.Minute + time.Microsecond, true},
-		{"boundary", 7 * time.Minute, true},
+		{"stale", schedquality.TestStaleAfter + time.Microsecond, true},
+		{"boundary", schedquality.TestStaleAfter, true},
 		{"finished", 8 * time.Minute, false},
 	} {
 		require.NoError(t, repo.Insert(ctx, service.SchedTestRecord{

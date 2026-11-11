@@ -145,8 +145,9 @@ func TestSchedTestRunnerOutcomes(t *testing.T) {
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				s, store, f, _, cache := schedTestFixture(10)
+				s, store, f, admission, cache := schedTestFixture(10)
 				defer s.Stop()
+				admission.Fn = func(context.Context, *Account, string) (string, bool, string) { return "request-model", true, "" }
 				var mu sync.Mutex
 				turns := map[schedquality.TestTier]int{}
 				acquire := s.acquire
@@ -157,6 +158,10 @@ func TestSchedTestRunnerOutcomes(t *testing.T) {
 					return acquire(ctx, account, tier)
 				}
 				f.Fn = func(ctx context.Context, _ *gin.Context, _ *Account, body []byte) (*OpenAIForwardResult, error) {
+					var request struct{ Model string }
+					if json.Unmarshal(body, &request) != nil || request.Model != "request-model" {
+						t.Error("admitted request model was not used")
+					}
 					if scenario.name == "internal_error" {
 						return nil, errors.New("credentials unavailable")
 					}
@@ -395,6 +400,7 @@ func TestSchedTestRunnerTurnDeadline(t *testing.T) {
 					sample := schedquality.AttemptSample{Outcome: schedquality.OutcomeOther}
 					if firstByte {
 						n := 12
+						sample.Outcome = schedquality.OutcomeOK
 						sample.TTFOMs = &n
 					}
 					<-ctx.Done()
@@ -459,6 +465,28 @@ func TestSchedTestRunnerTotalDeadline(t *testing.T) {
 	})
 }
 
+func TestSchedTestRunnerStopCancelsInFlight(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, store, f, _, cache := schedTestFixture(10)
+		f.Fn = func(ctx context.Context, _ *gin.Context, _ *Account, _ []byte) (*OpenAIForwardResult, error) {
+			<-ctx.Done()
+			resilience.StateFrom(ctx).SchedTest().(*SchedTestAttempt).Sink(schedquality.AttemptSample{Outcome: schedquality.OutcomeOther})
+			return nil, ctx.Err()
+		}
+		_, err := s.Request(context.Background(), 7, "evidence", false, 0)
+		require.NoError(t, err)
+		synctest.Wait()
+		require.Equal(t, 3, cache.active)
+		s.Stop()
+		r := <-store.finished
+		require.True(t, r.Done)
+		require.Len(t, r.Turns, 3)
+		require.Zero(t, cache.active)
+		_, err = s.Request(context.Background(), 7, "evidence", false, 0)
+		require.ErrorIs(t, err, context.Canceled)
+	})
+}
+
 func TestSchedTestFinishFailureAndReapStale(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s, store, f, _, _ := schedTestFixture(10)
@@ -476,7 +504,7 @@ func TestSchedTestFinishFailureAndReapStale(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, r.Running)
 		// Seven minutes is the stale cutoff; the repository comparison is strict.
-		<-time.After(7*time.Minute - time.Since(r.StartedAt))
+		<-time.After(schedquality.TestStaleAfter - time.Since(r.StartedAt))
 		require.NoError(t, s.ReapStale(context.Background()))
 		r, _ = store.Latest(context.Background(), 7, "evidence")
 		require.True(t, r.Running)
@@ -534,8 +562,8 @@ func TestSchedTestRunnerEffortCapabilities(t *testing.T) {
 			})
 		})
 	}
-	require.Equal(t, "max", schedTestEffort(&Account{}, "claude-opus-4-6", schedquality.TierLarge))
-	require.Equal(t, "none", schedTestEffort(&Account{}, "gpt-4o", schedquality.TierLarge))
+	require.Equal(t, "xhigh", schedTestEffort(&Account{}, "unknown-model", schedquality.TierLarge))
+	require.Equal(t, "xhigh", schedTestEffort(&Account{}, "gpt-custom", schedquality.TierLarge))
 }
 
 func TestSchedTestBuildWithGatewayTokenEstimator(t *testing.T) {
@@ -543,6 +571,6 @@ func TestSchedTestBuildWithGatewayTokenEstimator(t *testing.T) {
 		body := schedtest.Build(tier, 1, schedtest.Session{ID: "estimator", Model: "gpt-6.1-sol"}, schedTestCount)
 		n := schedTestCount(body)
 		target := schedquality.TestTiers[tier].Tokens
-		require.InDelta(t, target, n, float64(target)/20, "tier %s", tier)
+		require.InDelta(t, target, n, float64(target)*schedquality.TestPromptTolerance, "tier %s", tier)
 	}
 }
