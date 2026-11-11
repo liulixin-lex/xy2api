@@ -182,7 +182,7 @@ func (r *runtimeReader) qualityState(ctx context.Context, q *readerQuery) error 
 		return ErrUnavailable
 	}
 	if in.IncludePolicies {
-		if err := q.require(ctx, "GET /sched-quality/groups/:id/policy"); err != nil {
+		if err := q.require(ctx, "GET /sched-quality/accounts/:id"); err != nil {
 			return err
 		}
 	}

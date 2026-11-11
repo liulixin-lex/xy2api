@@ -360,7 +360,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		return nil, err
 	}
 
-	if s.cfg != nil && (s.cfg.Gateway.OpenAICache.DiagnosticsEnabled || s.cfg.Gateway.OpenAICache.AwareRoutingEnabled) {
+	if s.cfg != nil && s.cfg.Gateway.OpenAICache.DiagnosticsEnabled {
 		s.captureCacheDiagnostic(c, payloadAsJSONBytes(wirePayload))
 	}
 	if s.schedAttemptRecorder != nil {

@@ -82,7 +82,7 @@ func TestProfitControl_LegacyEngineFiltersCandidates(t *testing.T) {
 	svc := &OpenAIGatewayService{
 		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{*cheap, *expensive}},
 		cfg:                &config.Config{},
-		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("false"),
+		rateLimitService:   newOpenAISelectionRateLimitService(),
 		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
 	}
 	groupID := int64(7)
@@ -122,8 +122,6 @@ func TestProfitControl_LegacyEngineFiltersCandidates(t *testing.T) {
 
 // failover：可盈利账号因失败被排除后，剩余不合格账号不得被"放回"候选。
 func TestProfitControl_FailoverDoesNotReadmitExcluded(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
-	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
 	now := time.Now()
 	cheap := upstreamCostTestAccount(51, UpstreamBillingProbeStatusOK, 0.3, now.Add(-time.Minute), 30*time.Minute)
@@ -142,7 +140,7 @@ func TestProfitControl_FailoverDoesNotReadmitExcluded(t *testing.T) {
 	svc := &OpenAIGatewayService{
 		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{*cheap, *expensive}},
 		cfg:                &config.Config{},
-		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		rateLimitService:   newOpenAISelectionRateLimitService(),
 		concurrencyService: NewConcurrencyService(cache),
 	}
 	groupID := int64(7)
@@ -160,35 +158,28 @@ func TestProfitControl_FailoverDoesNotReadmitExcluded(t *testing.T) {
 // 抢槽后终检：候选构建后才变得不合格的账号（状态竞态）在取得槽位前被拦截。
 func TestProfitControl_PostSlotRecheckVetoes(t *testing.T) {
 	now := time.Now()
-	expensive := upstreamCostTestAccount(61, UpstreamBillingProbeStatusOK, 0.8, now.Add(-time.Minute), 30*time.Minute)
-	profitControlTestAccountWithRate(expensive, 0.8)
-	expensive.Status = StatusActive
-	expensive.Schedulable = true
-	expensive.Concurrency = 2
-
+	cheap := upstreamCostTestAccount(61, UpstreamBillingProbeStatusOK, 0.3, now.Add(-time.Minute), 30*time.Minute)
+	profitControlTestAccountWithRate(cheap, 0.3)
+	cheap.Status, cheap.Schedulable, cheap.Concurrency = StatusActive, true, 2
+	expensive := *cheap
+	expensive.RateMultiplier = floatPtr(0.8)
+	expensive.Extra = upstreamCostTestAccount(61, UpstreamBillingProbeStatusOK, 0.8, now.Add(-time.Minute), 30*time.Minute).Extra
 	cache := &upstreamCostTrackingConcurrencyCache{}
-	scheduler := &defaultOpenAIAccountScheduler{service: &OpenAIGatewayService{
-		concurrencyService: NewConcurrencyService(cache),
-	}}
-	ctx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{
-		threshold: 0.5,
-		pricingAt: now,
-	})
-	selectionOrder := []openAIAccountCandidateScore{{
-		account:  expensive,
-		loadInfo: &AccountLoadInfo{AccountID: expensive.ID},
-	}}
-
-	selection, _, err := scheduler.tryAcquireOpenAISelectionOrder(ctx, OpenAIAccountScheduleRequest{Platform: PlatformOpenAI}, selectionOrder)
-	require.NoError(t, err)
-	require.Nil(t, selection, "抢槽终检必须拦截候选构建后才不合格的账号")
-	require.Equal(t, cache.totalAcquires(), cache.releaseCount(expensive.ID), "被拦截账号不得泄漏并发槽位")
+	svc, repo := newUpstreamCostSelectionFixture([]*Account{cheap}, cache)
+	repo.accounts = map[int64]*Account{61: cheap}
+	cache.afterAcquire = func(int64) {
+		repo.accounts[61] = &expensive
+		svc.schedulerSnapshot.cache.(*openAISnapshotCacheStub).accountsByID[61] = &expensive
+	}
+	ctx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{threshold: 0.5, pricingAt: now})
+	selection, err := svc.selectAccountWithLoadAwareness(ctx, nil, PlatformOpenAI, "", "", nil, false, "", true)
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.Nil(t, selection)
+	require.Equal(t, 1, cache.totalAcquires(), "the rate changes only after acquiring")
+	require.Equal(t, cache.totalAcquires(), cache.releaseCount(61), "a veto must release the slot")
 }
 
-// 倍率恢复：探测刷新回落到阈值内后，此前被排除的账号重新参与调度。
 func TestProfitControl_RateRecoveryReadmitsAccount(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
-	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
 	now := time.Now()
 	expensive := upstreamCostTestAccount(71, UpstreamBillingProbeStatusOK, 0.8, now.Add(-time.Minute), 30*time.Minute)
@@ -202,7 +193,7 @@ func TestProfitControl_RateRecoveryReadmitsAccount(t *testing.T) {
 	svc := &OpenAIGatewayService{
 		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{*expensive}},
 		cfg:                &config.Config{},
-		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		rateLimitService:   newOpenAISelectionRateLimitService(),
 		concurrencyService: NewConcurrencyService(cache),
 	}
 	groupID := int64(7)
@@ -342,7 +333,7 @@ func TestProfitControl_LegacyEngineDefersStickyBindingUnderGate(t *testing.T) {
 		return &OpenAIGatewayService{
 			accountRepo:        stubOpenAIAccountRepo{accounts: []Account{*cheap, *expensive}},
 			cfg:                &config.Config{},
-			rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("false"),
+			rateLimitService:   newOpenAISelectionRateLimitService(),
 			concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
 			cache:              cache,
 		}, cache

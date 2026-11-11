@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
+
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/service"
@@ -41,15 +43,6 @@ func (c *profitCountingConcurrencyCache) DecrementAccountWaitCount(context.Conte
 	c.waitRemoves.Add(1)
 	return nil
 }
-
-type slotQualityView struct{}
-
-func (slotQualityView) OrderTier(int64, int64) int { return 2 }
-func (slotQualityView) Enabled(int64) bool         { return true }
-
-func (slotQualityView) MigrationTarget(int64, int64) bool { return false }
-
-func (slotQualityView) ExpectedP90Ms(int64, int64) (int, bool) { return 0, false }
 
 func (c *profitCountingConcurrencyCache) ReleaseAccountSlot(context.Context, int64, string) error {
 	c.accountReleases.Add(1)
@@ -166,7 +159,7 @@ func TestAcquireResponsesAccountSlotProfitRecheck(t *testing.T) {
 	for _, path := range []string{"acquired", "quick", "queued"} {
 		t.Run("quality does not veto/"+path, func(t *testing.T) {
 			qualityGateway := &service.OpenAIGatewayService{}
-			qualityGateway.SetGroupQualityGateView(slotQualityView{})
+			service.NewOpenAISelectionBoard(qualityGateway, func() schedquality.View { return wsPinnedQualityView{} })
 			cache := &profitCountingConcurrencyCache{queued: path == "queued"}
 			h := newHandler(cache)
 			h.gatewayService = qualityGateway

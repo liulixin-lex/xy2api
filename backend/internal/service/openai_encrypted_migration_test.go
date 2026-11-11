@@ -4,9 +4,10 @@ package service
 
 import (
 	"context"
-	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"testing"
 	"time"
+
+	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
@@ -78,8 +79,8 @@ func TestWithOpenAIEncryptedContentMigrationGuard(t *testing.T) {
 	})
 }
 
-func TestEncryptedStateKeepsStickyOwnerAcrossSchedulers(t *testing.T) {
-	for _, mode := range []string{"legacy", "advanced", "nil scheduler fallback"} {
+func TestEncryptedStateKeepsStickyOwnerAcrossSelectionEntrypoints(t *testing.T) {
+	for _, mode := range []string{"load aware", "unified"} {
 		for _, tc := range []struct {
 			name    string
 			body    string
@@ -92,22 +93,16 @@ func TestEncryptedStateKeepsStickyOwnerAcrossSchedulers(t *testing.T) {
 			{"failure exclusion still applies", `{"input":[{"type":"agent_message","content":[{"type":"encrypted_content"}]}]}`, true, 2},
 		} {
 			t.Run(mode+"/"+tc.name, func(t *testing.T) {
-				resetOpenAIAdvancedSchedulerSettingCacheForTest()
-				t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
 				const session = "v2:encrypted-migration"
 				group := int64(7)
-				cache := &gateV3RebindCache{atomicStickyTestCache: &atomicStickyTestCache{bindings: map[string]int64{"openai:" + session: 1}}}
-				advanced := "false"
-				if mode == "advanced" {
-					advanced = "true"
-				}
+				cache := &selectionRebindCache{atomicStickyTestCache: &atomicStickyTestCache{bindings: map[string]int64{"openai:" + session: 1}}}
 				svc := &OpenAIGatewayService{
 					cache: cache, cfg: newSchedulerTestOpenAIWSV2Config(),
 					concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
 					accountRepo: schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{
-						accounts: []Account{gateV3Account(1, 0), gateV3Account(2, 1)},
+						accounts: []Account{selectionFixtureAccount(1, 0), selectionFixtureAccount(2, 1)},
 					}},
-					rateLimitService: newOpenAIAdvancedSchedulerRateLimitService(advanced),
+					rateLimitService: newOpenAISelectionRateLimitService(),
 				}
 				view := selectionTestView(time.Now())
 				view.States[fakeSchedViewKey{7, 1, "gpt-test"}] = schedquality.StateView{State: schedquality.StateCooling}
@@ -120,7 +115,7 @@ func TestEncryptedStateKeepsStickyOwnerAcrossSchedulers(t *testing.T) {
 				}
 				var result *AccountSelectionResult
 				var err error
-				if mode == "legacy" {
+				if mode == "load aware" {
 					result, err = svc.SelectAccountWithLoadAwareness(ctx, &group, session, "gpt-test", excluded)
 				} else {
 					result, _, err = svc.SelectAccountWithScheduler(ctx, &group, "", session, "gpt-test", excluded, OpenAIUpstreamTransportAny, false)

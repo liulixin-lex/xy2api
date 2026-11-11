@@ -148,10 +148,6 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			"model", requestedModel)
 		return nil, fmt.Errorf("%w supporting model: %s (channel pricing restriction)", ErrNoAvailableAccounts, requestedModel)
 	}
-	ctx, shareResult, shareHandled, shareErr := s.shareSchedulingHook(ctx, group, groupID, sessionHash, requestedModel, excludedIDs)
-	if shareHandled {
-		return shareResult, shareErr
-	}
 
 	var stickyAccountID int64
 	var stickySource string
@@ -1648,7 +1644,6 @@ func (s *GatewayService) newSelectionResult(ctx context.Context, account *Accoun
 	if err != nil {
 		return nil, err
 	}
-	s.shareRecordSelection(ctx, hydrated)
 	return attachSelectionProfitGate(ctx, &AccountSelectionResult{
 		Account:     hydrated,
 		Acquired:    acquired,

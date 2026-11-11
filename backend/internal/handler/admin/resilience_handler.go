@@ -2,6 +2,8 @@ package admin
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -17,6 +19,27 @@ import (
 )
 
 const resilienceMaxBody = 2 << 20
+
+// decodeStrictJSON decodes one JSON document, rejecting unknown fields and
+// trailing data so a typo never silently falls back to a default.
+func decodeStrictJSON(c *gin.Context, dst any) bool {
+	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, resilienceMaxBody))
+	if err != nil {
+		response.BadRequest(c, "Request body too large or unreadable")
+		return false
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return false
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		response.BadRequest(c, "Invalid request: trailing data")
+		return false
+	}
+	return true
+}
 
 // ResilienceHandler serves the gateway resilience administration endpoints.
 type ResilienceHandler struct {

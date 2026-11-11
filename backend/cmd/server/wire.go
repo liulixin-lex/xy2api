@@ -139,9 +139,7 @@ func provideCleanup(
 	openAIAutoReset *service.OpenAIQuotaAutoResetService,
 	promptAudit *securityaudit.PromptService,
 	pluginManager *service.PluginManager,
-	shareScheduling *service.ShareSchedulingService,
 	resilienceSvc *service.ResilienceService,
-	groupQualityGate *service.GroupQualityGateService,
 	schedQuality *service.SchedQualityEngineService,
 	schedTests *service.SchedTestRunnerService,
 	schedAttempts *service.SchedAttemptRecorderService,
@@ -186,7 +184,6 @@ func provideCleanup(
 				}
 				return nil
 			}},
-			{"GroupQualityGateService", func() error { groupQualityGate.Stop(); return nil }},
 			{"SupportChatImagePurgeService", func() error {
 				if supportChatPurge != nil {
 					supportChatPurge.Stop()
@@ -195,10 +192,6 @@ func provideCleanup(
 			}},
 			{"UsageBillingRecoveryService", func() error {
 				billingRecovery.Stop()
-				return nil
-			}},
-			{"ShareSchedulingService", func() error {
-				shareScheduling.Stop()
 				return nil
 			}},
 			{"ResilienceService", func() error {

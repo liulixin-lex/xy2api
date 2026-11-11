@@ -595,8 +595,6 @@ type AccountSelectionResult struct {
 	// 调度栈之外做抢槽后终检与准入后粘性绑定。
 	profitGate       *openAIProfitControlGate
 	selectionContext *openAISelectionContext
-	// shareBinding 是份额调度推迟到 handler 准入后执行的绑定写入（nil 表示无）。
-	shareBinding *shareBindingIntent
 }
 
 // ProfitGateActive 报告本次选号是否处于利润门之下。
@@ -870,8 +868,6 @@ type GatewayService struct {
 	tlsFPProfileService   *TLSFingerprintProfileService
 	balanceNotifyService  *BalanceNotifyService
 	userPlatformQuotaRepo UserPlatformQuotaRepository
-	// shareScheduling 由 ProvideShareSchedulingService 注入；nil 时保持原版调度。
-	shareScheduling *ShareSchedulingService
 	// resilience is the xy2api gateway resilience runtime (optional).
 	resilience                *ResilienceService
 	anthropicLatencyHoldMu    sync.Mutex
@@ -971,9 +967,6 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 	if parsed == nil {
 		return ""
 	}
-	if anchor := s.shareSessionHash(parsed); anchor != "" {
-		return anchor
-	}
 
 	// 1. 最高优先级：从 metadata.user_id 提取 session_xxx
 	if parsed.MetadataUserID != "" {
@@ -1027,9 +1020,6 @@ func (s *GatewayService) BindStickySessionAfterProfitAdmission(ctx context.Conte
 	sessionHash = monitorProbeSessionHash(ctx, sessionHash)
 	if sessionHash == "" || accountID <= 0 || s.cache == nil {
 		return nil
-	}
-	if handled, err := applyDeferredShareBinding(ctx, groupID, sessionHash, accountID); handled {
-		return err
 	}
 	if !gatewayProfitControlGateActive(ctx) {
 		return s.BindStickySession(ctx, groupID, sessionHash, accountID)

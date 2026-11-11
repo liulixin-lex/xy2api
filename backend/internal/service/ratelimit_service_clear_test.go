@@ -327,7 +327,7 @@ func TestRateLimitService_RecoverAccountState_InvalidatesOAuthTokenOnErrorRecove
 func TestRateLimitService_RecoverAccountState_DoesNotWriteQualityReset(t *testing.T) {
 	repo := &rateLimitClearRepoStub{getByIDAccount: &Account{ID: 42, Status: StatusActive, Schedulable: true, Extra: map[string]any{"keep": "value"}}}
 	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
-	_, err := svc.RecoverAccountState(context.Background(), 42, AccountRecoveryOptions{ResetGroupQualityGate: true})
+	_, err := svc.RecoverAccountState(context.Background(), 42, AccountRecoveryOptions{})
 	require.NoError(t, err)
 	require.Zero(t, repo.updateExtraCalls, "quality reset timestamps are only written by the locked engine reset")
 	require.Equal(t, map[string]any{"keep": "value"}, repo.getByIDAccount.Extra)

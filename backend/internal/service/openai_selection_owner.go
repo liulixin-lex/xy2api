@@ -168,7 +168,7 @@ func (s *OpenAIGatewayService) selectLegacyAccountByPreviousResponse(
 	if s.checkChannelPricingRestriction(ctx, groupID, requestedModel) {
 		return nil, false, fmt.Errorf("%w supporting model: %s (channel pricing restriction)", ErrNoAvailableAccounts, requestedModel)
 	}
-	selection, err := s.selectAccountByPreviousResponseIDForCapability(withGroupQualityGateExempt(ctx), groupID, previousResponseID, requestedModel, excludedIDs, requiredCapability, requireCompact)
+	selection, err := s.selectAccountByPreviousResponseIDForCapability(withOpenAISelectionExempt(ctx), groupID, previousResponseID, requestedModel, excludedIDs, requiredCapability, requireCompact)
 	if err != nil {
 		return nil, false, err
 	}
@@ -177,7 +177,7 @@ func (s *OpenAIGatewayService) selectLegacyAccountByPreviousResponse(
 	}
 	account := selection.Account
 	scheduler := s
-	compatible, _ := scheduler.isAccountRequestCompatibleReason(withGroupQualityGateExempt(ctx), account, OpenAIAccountScheduleRequest{
+	compatible, _ := scheduler.isAccountRequestCompatibleReason(withOpenAISelectionExempt(ctx), account, OpenAIAccountScheduleRequest{
 		GroupID:                 groupID,
 		Platform:                platform,
 		RequestedModel:          requestedModel,

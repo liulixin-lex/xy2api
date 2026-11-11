@@ -203,7 +203,6 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 				"failure_streak", decision.FailureStreak,
 				"cooldown_ms", decision.Cooldown.Milliseconds(),
 				"block_scope", "account_model",
-				"slow_streak", 0,
 			)
 		}
 	}

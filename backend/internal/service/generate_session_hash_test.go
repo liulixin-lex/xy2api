@@ -4,7 +4,6 @@ package service
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/liulixin-lex/xy2api/internal/domain"
@@ -91,20 +90,6 @@ func TestGenerateSessionHash_MetadataHasHighestPriority(t *testing.T) {
 
 	hash := svc.GenerateSessionHash(parsed)
 	require.Equal(t, "123e4567-e89b-12d3-a456-426614174000", hash, "metadata session_id should have highest priority")
-}
-
-func TestGenerateSessionHash_ShareGroupAnchorKeepsPriority(t *testing.T) {
-	env := newShareTestEnv(t, twoAccountPolicy(), Account{ID: 71}, Account{ID: 72})
-	groupID := shareTestGroupID
-	parsed := mustParseSessionHashRequest(t, anthropicSessionBody("system", []any{msg("user", "prompt")}, ""), &SessionContext{APIKeyID: 73})
-	parsed.GroupID = &groupID
-
-	want := env.gateway.shareSessionHash(parsed)
-	require.True(t, strings.HasPrefix(want, shareAnchorPrefix))
-	require.Equal(t, want, env.gateway.GenerateSessionHash(parsed), "GroupID activates the existing share anchor before the stable fallback")
-
-	parsed.GroupID = nil
-	require.NotEqual(t, want, env.gateway.GenerateSessionHash(parsed), "without a share GroupID the stable fallback remains active")
 }
 
 func TestGenerateSessionHash_SystemPlusMessages(t *testing.T) {
@@ -757,7 +742,7 @@ func TestGenerateSessionHash_StableAnchorSeparatesGroupsAndNULBoundaries(t *test
 	require.NotEqual(t, svc.GenerateSessionHash(nulInSystem), svc.GenerateSessionHash(nulInUser), "escaped NUL bytes cannot impersonate the system-user delimiter")
 }
 
-func TestGenerateSessionHash_StableAnchorIsUnprefixedAndDoesNotMutateBody(t *testing.T) {
+func TestGenerateSessionHash_StableAnchorDoesNotMutateBody(t *testing.T) {
 	svc := &GatewayService{}
 	body := `{"system":"system","messages":[{"role":"user","content":"prompt"}]}`
 	parsed := mustParseSessionHashRequest(t, body, &SessionContext{ClientIP: "192.0.2.1", UserAgent: "client", APIKeyID: 18})
@@ -765,7 +750,6 @@ func TestGenerateSessionHash_StableAnchorIsUnprefixedAndDoesNotMutateBody(t *tes
 
 	hash := svc.GenerateSessionHash(parsed)
 	require.NotEmpty(t, hash)
-	require.False(t, strings.HasPrefix(hash, shareAnchorPrefix), "ordinary fallback hashes are not share anchors")
 	require.Equal(t, original, parsed.Body.Bytes(), "hash calculation must not rewrite request bytes")
 }
 

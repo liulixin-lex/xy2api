@@ -246,13 +246,12 @@ func TestOpenAIGatewayService_GuardianParentAffinitySelectsParentAccountAcrossSc
 				},
 			}
 			cfg := &config.Config{}
-			cfg.Gateway.OpenAIWS.LBTopK = 2
 			cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:" + parentHash: 39001}}
 			svc := &OpenAIGatewayService{
 				accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
 				cache:              cache,
 				cfg:                cfg,
-				rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService(mode.advanced, mode.stickyWeighted),
+				rateLimitService:   newOpenAISelectionRateLimitService(),
 				concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{acquireResults: map[int64]bool{39001: true, 39002: true}}),
 			}
 
@@ -297,7 +296,7 @@ func TestOpenAIGatewayService_GuardianParentAffinityFallsBackWithoutCrossGroupOr
 				accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
 				cache:              cache,
 				cfg:                &config.Config{},
-				rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+				rateLimitService:   newOpenAISelectionRateLimitService(),
 				concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{acquireResults: map[int64]bool{39011: true, 39012: true}}),
 			}
 
@@ -334,7 +333,7 @@ func TestOpenAIGatewayService_GuardianParentHashCollisionPreservesParentBinding(
 				accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
 				cache:              cache,
 				cfg:                &config.Config{},
-				rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService(advanced),
+				rateLimitService:   newOpenAISelectionRateLimitService(),
 				concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{acquireResults: map[int64]bool{39021: true, 39022: true}}),
 			}
 
@@ -373,7 +372,7 @@ func TestOpenAIGatewayService_GuardianParentAffinityHonorsRequiredPrivacy(t *tes
 				accountRepo:        repo,
 				cache:              cache,
 				cfg:                &config.Config{},
-				rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService(advanced),
+				rateLimitService:   newOpenAISelectionRateLimitService(),
 				concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{acquireResults: map[int64]bool{39031: true, 39032: true}}),
 				schedulerSnapshot: &SchedulerSnapshotService{
 					accountRepo: repo,
@@ -465,7 +464,7 @@ func TestOpenAIGatewayService_PreviousResponseHonorsGroupAndRequiredPrivacy(t *t
 				accountRepo:        repo,
 				cache:              cache,
 				cfg:                &config.Config{},
-				rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+				rateLimitService:   newOpenAISelectionRateLimitService(),
 				concurrencyService: NewConcurrencyService(&schedulerTestConcurrencyCache{}),
 				openaiWSStateStore: store,
 				schedulerSnapshot: &SchedulerSnapshotService{
@@ -526,7 +525,7 @@ func TestOpenAIGatewayService_PreviousResponseSimpleModeIgnoresGroupMembership(t
 		accountRepo:        repo,
 		cache:              cache,
 		cfg:                cfg,
-		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		rateLimitService:   newOpenAISelectionRateLimitService(),
 		concurrencyService: NewConcurrencyService(&schedulerTestConcurrencyCache{}),
 		openaiWSStateStore: store,
 		schedulerSnapshot: &SchedulerSnapshotService{

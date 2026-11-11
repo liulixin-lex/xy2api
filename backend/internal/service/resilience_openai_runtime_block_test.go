@@ -3,11 +3,11 @@
 package service
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
-	"github.com/liulixin-lex/xy2api/internal/sharesched"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,20 +18,20 @@ import (
 // server a single-account group whose relay answered 503 was unavailable
 // for 45 s, and its 503s no longer counted as group-level no-account.
 
-func newOpenAIRuntimeBlockEnv(t *testing.T, scheduler sharesched.Scheduler, ids ...int64) *openAIShareTestEnv {
+func newOpenAIRuntimeBlockEnv(t *testing.T, ids ...int64) *openAISelectionTestEnv {
 	t.Helper()
 	withResilienceSettings(t, nil)
-	rules := make([]shareRule, 0, len(ids))
+	rules := make([]selectionTestRule, 0, len(ids))
 	for _, id := range ids {
-		rules = append(rules, shareRule{AccountID: id, Tier: 0, Weight: 1})
+		rules = append(rules, selectionTestRule{AccountID: id, Tier: 0, Weight: 1})
 	}
-	env := newOpenAIShareTestEnv(t, shareTestPolicy(scheduler, rules...), ids...)
+	env := newOpenAISelectionTestEnv(t, selectionTestSetupWithRules(rules...), ids...)
 	env.svc.accountRepo = openAIGroupListingRepo{env.repo}
 	env.svc.resilience = NewResilienceService(nil, newMemResilienceStore())
 	return env
 }
 
-func breakOpenAIModel(t *testing.T, env *openAIShareTestEnv, id int64, failures int, at time.Time) {
+func breakOpenAIModel(t *testing.T, env *openAISelectionTestEnv, id int64, failures int, at time.Time) {
 	t.Helper()
 	for i := 0; i < failures; i++ {
 		// Separate rounds; failures inside an open cooldown no longer escalate.
@@ -44,7 +44,7 @@ func breakOpenAIModel(t *testing.T, env *openAIShareTestEnv, id int64, failures 
 func TestResilienceOpenAILastResortUsesARuntimeBlockedAccount(t *testing.T) {
 	for _, scheduler := range lastResortSchedulers {
 		t.Run(string(scheduler), func(t *testing.T) {
-			env := newOpenAIRuntimeBlockEnv(t, scheduler, lrAccountA)
+			env := newOpenAIRuntimeBlockEnv(t, lrAccountA)
 			breakOpenAIModel(t, env, lrAccountA, 3, time.Now())
 			require.Equal(t, lrAccountA, selectOpenAILastResort(t, env).Account.ID)
 		})
@@ -54,7 +54,7 @@ func TestResilienceOpenAILastResortUsesARuntimeBlockedAccount(t *testing.T) {
 // The shared selection keys, including the final ID tie-break, order soft
 // accounts even when another transient block ends sooner.
 func TestResilienceOpenAILastResortUsesSelectionOrder(t *testing.T) {
-	env := newOpenAIRuntimeBlockEnv(t, sharesched.SchedulerSub2API, lrAccountA, lrAccountB)
+	env := newOpenAIRuntimeBlockEnv(t, lrAccountA, lrAccountB)
 	now := time.Now()
 	breakOpenAIModel(t, env, lrAccountA, 3, now)
 	breakOpenAIModel(t, env, lrAccountB, 3, now.Add(-20*time.Second))
@@ -73,17 +73,16 @@ func TestOpenAIRuntimeBlockedOwnerKeepsTheSessionBinding(t *testing.T) {
 	const key = "openai:" + lrSession
 	for name, advanced := range map[string]bool{"legacy": false, "advanced": true} {
 		t.Run(name, func(t *testing.T) {
-			env := newOpenAIRuntimeBlockEnv(t, sharesched.SchedulerSub2API, lrAccountA, lrAccountB)
+			env := newOpenAIRuntimeBlockEnv(t, lrAccountA, lrAccountB)
 			if advanced {
-				env.svc.rateLimitService = newOpenAIAdvancedSchedulerRateLimitService("true")
-				t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
+				env.svc.rateLimitService = newOpenAISelectionRateLimitService()
 			}
 			env.cache.bind(key, lrAccountA, time.Hour-time.Minute)
 			breakOpenAIModel(t, env, lrAccountA, 3, time.Now())
 
 			st := resilience.NewRequestState()
-			ctx := resilience.WithRequestState(cacheableContext(), st)
-			gid := shareTestGroupID
+			ctx := resilience.WithRequestState(context.Background(), st)
+			gid := selectionTestGroupID
 			sel, _, err := env.svc.SelectAccountWithScheduler(ctx, &gid, "", lrSession, "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
 			require.NoError(t, err)
 			require.Equal(t, lrAccountB, sel.Account.ID, "the healthy account serves meanwhile")

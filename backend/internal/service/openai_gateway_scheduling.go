@@ -1706,77 +1706,10 @@ func WithOpenAIQualityTurnExemption(ctx context.Context, pinned bool) context.Co
 	return context.WithValue(ctx, openAISelectionExemptContextKey{}, pinned)
 }
 
-type openAICandidateOrder struct {
-	rates       openAILegacyUpstreamRateOrder
-	groupID     int64
-	tiers       map[int64]int
-	expectedP90 map[int64]int
-}
-
 var (
 	openAIStickyCapacityRetryDuration = 2 * time.Second
 	openAIStickyCapacityRetryInitial  = 50 * time.Millisecond
 )
-
-func openAIAccountNearCapacity(item accountWithLoad) bool {
-	a := item.account
-	return item.loadInfo != nil && item.loadInfo.LoadRate >= 80 && (a.Concurrency > 0 || a.LoadFactor != nil && *a.LoadFactor > 0)
-}
-
-// openAICandidateLess is the sole legacy comparator. Without low-rate priority
-// it keeps the previous priority/load/LRU order and its stable ties.
-func openAICandidateLess(a, b accountWithLoad, order openAICandidateOrder) bool {
-	if order.tiers != nil {
-		at, bt := order.tiers[a.account.ID], order.tiers[b.account.ID]
-		if at != bt {
-			return at < bt
-		}
-	}
-	if a.account.Priority != b.account.Priority {
-		return a.account.Priority < b.account.Priority
-	}
-	if order.rates.enabled {
-		an, bn := openAIAccountNearCapacity(a), openAIAccountNearCapacity(b)
-		if an != bn {
-			return !an
-		}
-		if cmp := order.rates.compare(a.account, b.account); cmp != 0 {
-			return cmp < 0
-		}
-	}
-	if a.loadInfo != nil && b.loadInfo != nil && a.loadInfo.LoadRate != b.loadInfo.LoadRate {
-		return a.loadInfo.LoadRate < b.loadInfo.LoadRate
-	}
-	switch {
-	case a.account.LastUsedAt == nil && b.account.LastUsedAt != nil:
-		return true
-	case a.account.LastUsedAt != nil && b.account.LastUsedAt == nil:
-		return false
-	case a.account.LastUsedAt != nil && b.account.LastUsedAt != nil:
-		if !a.account.LastUsedAt.Equal(*b.account.LastUsedAt) {
-			return a.account.LastUsedAt.Before(*b.account.LastUsedAt)
-		}
-	}
-	return order.rates.enabled && a.account.ID < b.account.ID
-}
-func (s *OpenAIGatewayService) openAICandidateOrder(groupID *int64, rates openAILegacyUpstreamRateOrder) openAICandidateOrder {
-	return openAICandidateOrder{rates: rates, groupID: derefGroupID(groupID)}
-}
-func (s *OpenAIGatewayService) openAICandidateOrderForItems(groupID *int64, rates openAILegacyUpstreamRateOrder, items []accountWithLoad) openAICandidateOrder {
-	order := s.openAICandidateOrder(groupID, rates)
-	view := s.GroupQualityGateView()
-	if view.Enabled(order.groupID) {
-		order.tiers = make(map[int64]int, len(items))
-		order.expectedP90 = make(map[int64]int, len(items))
-		for _, item := range items {
-			order.tiers[item.account.ID] = view.OrderTier(order.groupID, item.account.ID)
-			if ms, ok := view.ExpectedP90Ms(order.groupID, item.account.ID); ok {
-				order.expectedP90[item.account.ID] = ms
-			}
-		}
-	}
-	return order
-}
 
 // selectOpenAIStickyCapacity is shared by all three sticky saturation paths.
 // The short retry never joins a queue; only the returned final wait plan does.

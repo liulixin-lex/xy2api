@@ -101,17 +101,6 @@ func isExplicitGrokFreeOAuthAccount(account *Account) bool {
 	return false
 }
 
-// filterGrokFreeQuotaAccounts applies a local, rolling soft gate only to
-// FREE Grok OAuth accounts on the OpenAI scheduling hot path.
-// Missing or failed statistics always fail open; upstream quota/rate-limit
-// handling remains authoritative. Admin quota/import probes never call this.
-func (s *defaultOpenAIAccountScheduler) filterGrokFreeQuotaAccounts(ctx context.Context, accounts []Account) []Account {
-	if s == nil || s.service == nil {
-		return accounts
-	}
-	return filterGrokFreeQuotaAccountsCore(ctx, s.service.cfg, s.service.usageLogRepo, &s.grokFreeQuotaGateCache, accounts)
-}
-
 // filterGrokFreeQuotaAccountsForGateway applies the same soft gate on Gateway
 // scheduling (e.g. /v1/web_search) so free accounts near local 95%/1M are not
 // still selected for native search while Responses soft-gates them out.
@@ -122,8 +111,7 @@ func (s *GatewayService) filterGrokFreeQuotaAccountsForGateway(ctx context.Conte
 	return filterGrokFreeQuotaAccountsCore(ctx, s.cfg, s.usageLogRepo, &gatewayGrokFreeQuotaGateCache, accounts)
 }
 
-// Shared caches for non-advanced-scheduler selection paths.
-// Advanced scheduler keeps per-instance sync.Map on defaultOpenAIAccountScheduler.
+// Each gateway shares a cache across its selection paths.
 var gatewayGrokFreeQuotaGateCache sync.Map
 var openaiGrokFreeQuotaGateCache sync.Map
 

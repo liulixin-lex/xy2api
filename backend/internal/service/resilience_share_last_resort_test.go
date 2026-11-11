@@ -3,12 +3,12 @@
 package service
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
-	"github.com/liulixin-lex/xy2api/internal/sharesched"
 	"github.com/stretchr/testify/require"
 )
 
@@ -22,14 +22,14 @@ const (
 )
 
 // lastResortSchedulers lists the schedulers each case runs on.
-var lastResortSchedulers = []sharesched.Scheduler{sharesched.SchedulerSub2API}
+var lastResortSchedulers = []string{"default"}
 
 // newGatewayLastResortEnv builds a group of accounts A and B with the given
 // priorities, both in a soft cooldown.
-func newGatewayLastResortEnv(t *testing.T, scheduler sharesched.Scheduler, priorityA, priorityB int) *shareTestEnv {
+func newGatewayLastResortEnv(t *testing.T, priorityA, priorityB int) *gatewaySelectionTestEnv {
 	t.Helper()
 	withResilienceSettings(t, nil)
-	env := newShareTestEnv(t, shareTestPolicy(scheduler),
+	env := newGatewaySelectionTestEnv(t, selectionTestSetupWithRules(),
 		Account{ID: lrAccountA, Priority: priorityA}, Account{ID: lrAccountB, Priority: priorityB})
 	now := time.Now()
 	softPenalise(env.repo.accountsByID[lrAccountA], now)
@@ -41,11 +41,11 @@ func newGatewayLastResortEnv(t *testing.T, scheduler sharesched.Scheduler, prior
 
 // selectGatewayLastResort selects for the session and applies the
 // handler's admission binding, as the gateway handlers do.
-func selectGatewayLastResort(t *testing.T, env *shareTestEnv) (*AccountSelectionResult, *resilience.RequestState) {
+func selectGatewayLastResort(t *testing.T, env *gatewaySelectionTestEnv) (*AccountSelectionResult, *resilience.RequestState) {
 	t.Helper()
 	st := resilience.NewRequestState()
-	ctx := resilience.WithRequestState(cacheableContext(), st)
-	gid := shareTestGroupID
+	ctx := resilience.WithRequestState(context.Background(), st)
+	gid := selectionTestGroupID
 	result, err := env.gateway.SelectAccountWithLoadAwareness(ctx, &gid, lrSession, "claude-sonnet-4-5", nil, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, result.Account)
@@ -62,7 +62,7 @@ func TestResilienceLastResortFollowsPriorities(t *testing.T) {
 	// A has priority 5, B priority 1: both schedulers prefer B.
 	for _, scheduler := range lastResortSchedulers {
 		t.Run(string(scheduler), func(t *testing.T) {
-			env := newGatewayLastResortEnv(t, scheduler, 5, 1)
+			env := newGatewayLastResortEnv(t, 5, 1)
 			result, _ := selectGatewayLastResort(t, env)
 			require.Equal(t, lrAccountB, result.Account.ID)
 		})
@@ -74,7 +74,7 @@ func TestResilienceLastResortKeepsSoftBinding(t *testing.T) {
 	// better priority. Whoever serves, the binding stays on A.
 	for _, scheduler := range lastResortSchedulers {
 		t.Run(string(scheduler), func(t *testing.T) {
-			env := newGatewayLastResortEnv(t, scheduler, 5, 1)
+			env := newGatewayLastResortEnv(t, 5, 1)
 			env.cache.bind(lrSession, lrAccountA, time.Hour-time.Minute)
 			result, _ := selectGatewayLastResort(t, env)
 			require.Equal(t, lrAccountB, result.Account.ID, "the original order is by priority")
@@ -83,7 +83,7 @@ func TestResilienceLastResortKeepsSoftBinding(t *testing.T) {
 		})
 	}
 	t.Run("bound_busy", func(t *testing.T) {
-		env := newGatewayLastResortEnv(t, sharesched.SchedulerSub2API, 5, 1)
+		env := newGatewayLastResortEnv(t, 5, 1)
 		env.cache.bind(lrSession, lrAccountA, time.Hour-time.Minute)
 		env.conc.busy[lrAccountA] = -1
 		result, _ := selectGatewayLastResort(t, env)
@@ -97,7 +97,7 @@ func TestResilienceLastResortRebindsFromHardBoundAccount(t *testing.T) {
 	// The bound account is out of balance (hard): the session moves.
 	for _, scheduler := range lastResortSchedulers {
 		t.Run(string(scheduler), func(t *testing.T) {
-			env := newGatewayLastResortEnv(t, scheduler, 1, 5)
+			env := newGatewayLastResortEnv(t, 1, 5)
 			until := time.Now().Add(time.Hour)
 			a := env.repo.accountsByID[lrAccountA]
 			a.TempUnschedulableUntil, a.TempUnschedulableReason = &until, resilience.ReasonPrefixBalanceExhausted+": HTTP 402"
@@ -115,12 +115,12 @@ func TestResilienceLastResortRebindsFromAvoidedAccount(t *testing.T) {
 	// takes the binding.
 	for _, scheduler := range lastResortSchedulers {
 		t.Run(string(scheduler), func(t *testing.T) {
-			env := newGatewayLastResortEnv(t, scheduler, 5, 1)
+			env := newGatewayLastResortEnv(t, 5, 1)
 			a := env.repo.accountsByID[lrAccountA]
 			a.TempUnschedulableUntil, a.TempUnschedulableReason = nil, ""
 			r := env.gateway.resilience
-			require.NoError(t, r.store.AddSessionAvoid(t.Context(), shareTestGroupID, lrSession, lrAccountA, time.Minute))
-			r.avoidingSessions.Store(sessionMarkKey(shareTestGroupID, lrSession), time.Now().Add(time.Minute))
+			require.NoError(t, r.store.AddSessionAvoid(t.Context(), selectionTestGroupID, lrSession, lrAccountA, time.Minute))
+			r.avoidingSessions.Store(sessionMarkKey(selectionTestGroupID, lrSession), time.Now().Add(time.Minute))
 			env.cache.bind(lrSession, lrAccountA, time.Hour-time.Minute)
 			result, _ := selectGatewayLastResort(t, env)
 			require.Equal(t, lrAccountB, result.Account.ID)
@@ -139,12 +139,12 @@ func TestResilienceLastResortLogsPriorSessionAvoidance(t *testing.T) {
 			t.Run(name+string(scheduler), func(t *testing.T) {
 				logs := captureOpenAIObservationLogs(t)
 				state := resilience.NewRequestState()
-				ctx := resilience.WithRequestState(cacheableContext(), state)
-				gid := shareTestGroupID
+				ctx := resilience.WithRequestState(context.Background(), state)
+				gid := selectionTestGroupID
 				excluded := map[int64]struct{}{lrAccountB: {}}
 				var selected *AccountSelectionResult
 				if openai {
-					env := newOpenAILastResortEnv(t, scheduler, 1, 5)
+					env := newOpenAILastResortEnv(t, 1, 5)
 					a := env.account(lrAccountA)
 					a.TempUnschedulableUntil, a.TempUnschedulableReason = nil, ""
 					store := env.svc.resilience.store
@@ -155,7 +155,7 @@ func TestResilienceLastResortLogsPriorSessionAvoidance(t *testing.T) {
 						GroupID: &gid, Platform: PlatformOpenAI, SessionHash: lrSession, RequestedModel: "gpt-5.1", ExcludedIDs: excluded,
 					}, avoided)
 				} else {
-					env := newGatewayLastResortEnv(t, scheduler, 1, 5)
+					env := newGatewayLastResortEnv(t, 1, 5)
 					a := env.repo.accountsByID[lrAccountA]
 					a.TempUnschedulableUntil, a.TempUnschedulableReason = nil, ""
 					store := env.gateway.resilience.store
@@ -201,11 +201,11 @@ func TestResilienceLastResortGrantsStickyAllowanceToBoundAccount(t *testing.T) {
 		}
 		for _, scheduler := range lastResortSchedulers {
 			t.Run(name+"/"+string(scheduler)+"/bound", func(t *testing.T) {
-				env := newResilienceGateEnv(t, scheduler, stickyOnly, zone.setup)
+				env := newResilienceGateEnv(t, stickyOnly, zone.setup)
 				env.cache.bind(gateTestSession, gateTestAccount, time.Hour-time.Minute)
 				st := resilience.NewRequestState()
-				ctx := resilience.WithRequestState(cacheableContext(), st)
-				gid := shareTestGroupID
+				ctx := resilience.WithRequestState(context.Background(), st)
+				gid := selectionTestGroupID
 				result, err := env.gateway.SelectAccountWithLoadAwareness(ctx, &gid, gateTestSession, gateTestModel, nil, "", 0)
 				require.NoError(t, err)
 				require.Equal(t, gateTestAccount, result.Account.ID)
@@ -213,18 +213,16 @@ func TestResilienceLastResortGrantsStickyAllowanceToBoundAccount(t *testing.T) {
 				admission := ContextWithSelectionProfitGate(ctx, result)
 				require.NoError(t, env.gateway.BindStickySessionAfterProfitAdmission(admission, &gid, gateTestSession, result.Account.ID))
 				require.Equal(t, gateTestAccount, env.cache.sessionBindings[gateTestSession], "the binding stays")
-				if scheduler == sharesched.SchedulerShare {
-					require.Empty(t, env.cache.replaced)
-				}
+
 				if result.ReleaseFunc != nil {
 					result.ReleaseFunc()
 				}
 			})
 			t.Run(name+"/"+string(scheduler)+"/unbound", func(t *testing.T) {
-				env := newResilienceGateEnv(t, scheduler, stickyOnly, zone.setup)
+				env := newResilienceGateEnv(t, stickyOnly, zone.setup)
 				st := resilience.NewRequestState()
-				ctx := resilience.WithRequestState(cacheableContext(), st)
-				gid := shareTestGroupID
+				ctx := resilience.WithRequestState(context.Background(), st)
+				gid := selectionTestGroupID
 				_, err := env.gateway.SelectAccountWithLoadAwareness(ctx, &gid, gateTestSession, gateTestModel, nil, "", 0)
 				require.ErrorIs(t, err, ErrNoAvailableAccounts, "a new session gets no sticky allowance")
 			})
@@ -233,10 +231,10 @@ func TestResilienceLastResortGrantsStickyAllowanceToBoundAccount(t *testing.T) {
 }
 
 // newOpenAILastResortEnv is newGatewayLastResortEnv for the OpenAI scheduler.
-func newOpenAILastResortEnv(t *testing.T, scheduler sharesched.Scheduler, priorityA, priorityB int) *openAIShareTestEnv {
+func newOpenAILastResortEnv(t *testing.T, priorityA, priorityB int) *openAISelectionTestEnv {
 	t.Helper()
 	withResilienceSettings(t, nil)
-	env := newOpenAIShareTestEnv(t, shareTestPolicy(scheduler), lrAccountA, lrAccountB)
+	env := newOpenAISelectionTestEnv(t, selectionTestSetupWithRules(), lrAccountA, lrAccountB)
 	now := time.Now()
 	env.account(lrAccountA).Priority = priorityA
 	env.account(lrAccountB).Priority = priorityB
@@ -247,11 +245,11 @@ func newOpenAILastResortEnv(t *testing.T, scheduler sharesched.Scheduler, priori
 	return env
 }
 
-func selectOpenAILastResort(t *testing.T, env *openAIShareTestEnv) *AccountSelectionResult {
+func selectOpenAILastResort(t *testing.T, env *openAISelectionTestEnv) *AccountSelectionResult {
 	t.Helper()
 	st := resilience.NewRequestState()
-	ctx := resilience.WithRequestState(cacheableContext(), st)
-	gid := shareTestGroupID
+	ctx := resilience.WithRequestState(context.Background(), st)
+	gid := selectionTestGroupID
 	sel, _, err := env.svc.SelectAccountWithScheduler(ctx, &gid, "", lrSession, "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
 	require.NoError(t, err)
 	require.NotNil(t, sel.Account)
@@ -268,7 +266,7 @@ func selectOpenAILastResort(t *testing.T, env *openAIShareTestEnv) *AccountSelec
 func TestResilienceOpenAILastResortFollowsPriorities(t *testing.T) {
 	for _, scheduler := range lastResortSchedulers {
 		t.Run(string(scheduler), func(t *testing.T) {
-			env := newOpenAILastResortEnv(t, scheduler, 5, 1)
+			env := newOpenAILastResortEnv(t, 5, 1)
 			require.Equal(t, lrAccountB, selectOpenAILastResort(t, env).Account.ID)
 		})
 	}
@@ -278,13 +276,8 @@ func TestResilienceOpenAILastResortKeepsSoftBinding(t *testing.T) {
 	const key = "openai:" + lrSession
 	for _, scheduler := range lastResortSchedulers {
 		t.Run(string(scheduler), func(t *testing.T) {
-			env := newOpenAILastResortEnv(t, scheduler, 5, 1)
-			if scheduler == sharesched.SchedulerSub2API {
-				// The advanced scheduler is where the original scheduler keeps
-				// a soft-penalised binding (design §4.2).
-				env.svc.rateLimitService = newOpenAIAdvancedSchedulerRateLimitService("true")
-				t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
-			}
+			env := newOpenAILastResortEnv(t, 5, 1)
+
 			env.cache.bind(key, lrAccountA, time.Hour-time.Minute)
 			sel := selectOpenAILastResort(t, env)
 			require.Equal(t, lrAccountB, sel.Account.ID, "the original order is by priority")
@@ -293,7 +286,7 @@ func TestResilienceOpenAILastResortKeepsSoftBinding(t *testing.T) {
 		})
 	}
 	t.Run("bound_busy", func(t *testing.T) {
-		env := newOpenAILastResortEnv(t, sharesched.SchedulerSub2API, 5, 1)
+		env := newOpenAILastResortEnv(t, 5, 1)
 		env.cache.bind(key, lrAccountA, time.Hour-time.Minute)
 		env.conc.busy[lrAccountA] = -1
 		sel := selectOpenAILastResort(t, env)

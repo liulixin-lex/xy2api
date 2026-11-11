@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"math"
 	"net/textproto"
 	"net/url"
 	"os"
@@ -1074,10 +1073,8 @@ type GatewayConfig struct {
 	OpenAIWS GatewayOpenAIWSConfig `mapstructure:"openai_ws"`
 	// Live: ChatGPT Frameless Live 会话配置。
 	Live GatewayLiveConfig `mapstructure:"live"`
-	// OpenAIScheduler: OpenAI 高级调度器粘性逃逸配置
-	OpenAIScheduler      GatewayOpenAISchedulerConfig `mapstructure:"openai_scheduler"`
-	OpenAIQualityRouting OpenAIQualityRoutingConfig   `mapstructure:"openai_quality_routing"`
-	OpenAICache          OpenAICacheConfig            `mapstructure:"openai_cache"`
+	OpenAIQualityRouting OpenAIQualityRoutingConfig `mapstructure:"openai_quality_routing"`
+	OpenAICache          OpenAICacheConfig          `mapstructure:"openai_cache"`
 	// OpenAIHTTP2: OpenAI HTTP 上游协议策略（默认启用 HTTP/2，可按代理能力回退 HTTP/1.1）
 	OpenAIHTTP2 GatewayOpenAIHTTP2Config `mapstructure:"openai_http2"`
 	// OpenAIProxyStreamCircuit: Responses SSE 代理断流熔断策略。
@@ -1170,9 +1167,7 @@ type GatewayConfig struct {
 }
 
 type OpenAICacheConfig struct {
-	DiagnosticsEnabled  bool `mapstructure:"diagnostics_enabled"`
-	AwareRoutingEnabled bool `mapstructure:"aware_routing_enabled"`
-	RolloutPercent      int  `mapstructure:"rollout_percent"`
+	DiagnosticsEnabled bool `mapstructure:"diagnostics_enabled"`
 }
 
 // GatewayGrokConfig holds Grok-specific gateway scheduling knobs.
@@ -1404,8 +1399,6 @@ type GatewayOpenAIWSConfig struct {
 	// PayloadLogSampleRate: payload_schema 日志采样率（0-1）
 	PayloadLogSampleRate float64 `mapstructure:"payload_log_sample_rate"`
 
-	// 账号调度与粘连参数
-	LBTopK int `mapstructure:"lb_top_k"`
 	// StickySessionTTLSeconds: session_hash -> account_id 粘连 TTL
 	StickySessionTTLSeconds int `mapstructure:"sticky_session_ttl_seconds"`
 	// SessionHashReadOldFallback: 会话哈希迁移期是否允许“新 key 未命中时回退读旧 SHA-256 key”
@@ -1418,59 +1411,6 @@ type GatewayOpenAIWSConfig struct {
 	StickyResponseIDTTLSeconds int `mapstructure:"sticky_response_id_ttl_seconds"`
 	// StickyPreviousResponseTTLSeconds: 兼容旧键（当新键未设置时回退）
 	StickyPreviousResponseTTLSeconds int `mapstructure:"sticky_previous_response_ttl_seconds"`
-
-	SchedulerScoreWeights GatewayOpenAIWSSchedulerScoreWeights `mapstructure:"scheduler_score_weights"`
-}
-
-// GatewayOpenAIWSSchedulerScoreWeights 账号调度打分权重。
-type GatewayOpenAIWSSchedulerScoreWeights struct {
-	Priority  float64 `mapstructure:"priority"`
-	Load      float64 `mapstructure:"load"`
-	Queue     float64 `mapstructure:"queue"`
-	ErrorRate float64 `mapstructure:"error_rate"`
-	TTFT      float64 `mapstructure:"ttft"`
-	// Reset 倾向「会话窗口最早重置」的账号（use-it-or-lose-it）。
-	// >0 时，剩余重置时间越短的账号得分越高，从而被优先用尽。默认 0（关闭，不改变原有行为）。
-	Reset float64 `mapstructure:"reset"`
-	// QuotaHeadroom 倾向 7d 剩余额度更健康的账号；默认 0（关闭，不改变原有行为）。
-	QuotaHeadroom float64 `mapstructure:"quota_headroom"`
-	// UpstreamCost 倾向上游声明倍率更低的账号；默认 0（关闭，不改变原有行为）。
-	UpstreamCost float64 `mapstructure:"upstream_cost"`
-	// PreviousResponse/SessionSticky 仅在开启 OpenAI 高级调度的粘性加权时生效。
-	PreviousResponse float64 `mapstructure:"previous_response"`
-	SessionSticky    float64 `mapstructure:"session_sticky"`
-}
-
-func (w GatewayOpenAIWSSchedulerScoreWeights) BaseWeightSum() float64 {
-	return w.Priority + w.Load + w.Queue + w.ErrorRate + w.TTFT + w.Reset + w.QuotaHeadroom + w.UpstreamCost
-}
-
-func (w GatewayOpenAIWSSchedulerScoreWeights) TotalWeightSum() float64 {
-	return w.BaseWeightSum() + w.PreviousResponse + w.SessionSticky
-}
-
-func (w GatewayOpenAIWSSchedulerScoreWeights) IsValid() bool {
-	for _, weight := range []float64{
-		w.Priority, w.Load, w.Queue, w.ErrorRate, w.TTFT, w.Reset,
-		w.QuotaHeadroom, w.UpstreamCost, w.PreviousResponse, w.SessionSticky,
-	} {
-		if weight < 0 || math.IsNaN(weight) || math.IsInf(weight, 0) {
-			return false
-		}
-	}
-	baseSum := w.BaseWeightSum()
-	return baseSum > 0 && !math.IsNaN(baseSum) && !math.IsInf(baseSum, 0) &&
-		!math.IsNaN(w.TotalWeightSum()) && !math.IsInf(w.TotalWeightSum(), 0)
-}
-
-// GatewayOpenAISchedulerConfig OpenAI 高级调度器配置。
-type GatewayOpenAISchedulerConfig struct {
-	// StickyEscapeEnabled: 是否允许 session_hash sticky 在账号健康度劣化时临时逃逸
-	StickyEscapeEnabled bool `mapstructure:"sticky_escape_enabled"`
-	// StickyEscapeTTFTMs: TTFT EWMA 超过该阈值时跳过 sticky
-	StickyEscapeTTFTMs int `mapstructure:"sticky_escape_ttft_ms"`
-	// StickyEscapeErrorRate: 错误率 EWMA 超过该阈值时跳过 sticky
-	StickyEscapeErrorRate float64 `mapstructure:"sticky_escape_error_rate"`
 }
 
 // GatewayUsageRecordConfig 使用量记录异步队列配置
@@ -1930,19 +1870,6 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 		cfg.Security.ForwardedClientIPHeaders = normalizeStringSlice(strings.Split(forwardedClientIPHeadersEnv, ","))
 	}
 	cfg.Server.TrustedProxiesConfigured = trustedProxiesConfigured
-	if cfg.Gateway.OpenAIScheduler.StickyEscapeTTFTMs == 0 {
-		cfg.Gateway.OpenAIScheduler.StickyEscapeTTFTMs = 15000
-	}
-	if cfg.Gateway.OpenAIScheduler.StickyEscapeErrorRate == 0 {
-		cfg.Gateway.OpenAIScheduler.StickyEscapeErrorRate = 0.5
-	}
-	// Kept as a backstop: setEnvReachableDefaults now registers this key with its
-	// effective default (true), so IsSet always reports true and this branch no
-	// longer fires. It still guards the default if that registration is dropped.
-	if !cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled && !viper.IsSet("gateway.openai_scheduler.sticky_escape_enabled") {
-		cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled = true
-	}
-
 	cfg.RunMode = NormalizeRunMode(cfg.RunMode)
 	cfg.Server.Mode = strings.ToLower(strings.TrimSpace(cfg.Server.Mode))
 	if cfg.Server.Mode == "" {
@@ -2589,8 +2516,6 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_quality_routing.mode", "enforce")
 	viper.SetDefault("gateway.openai_quality_routing.avoid_seconds", 300)
 	viper.SetDefault("gateway.openai_cache.diagnostics_enabled", false)
-	viper.SetDefault("gateway.openai_cache.aware_routing_enabled", false)
-	viper.SetDefault("gateway.openai_cache.rollout_percent", 0)
 	viper.SetDefault("gateway.openai_ws.read_timeout_seconds", 900)
 	viper.SetDefault("gateway.openai_ws.write_timeout_seconds", 120)
 	viper.SetDefault("gateway.openai_ws.pool_target_utilization", 0.7)
@@ -2604,23 +2529,12 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_ws.retry_jitter_ratio", 0.2)
 	viper.SetDefault("gateway.openai_ws.retry_total_budget_ms", 5000)
 	viper.SetDefault("gateway.openai_ws.payload_log_sample_rate", 0.2)
-	viper.SetDefault("gateway.openai_ws.lb_top_k", 7)
 	viper.SetDefault("gateway.openai_ws.sticky_session_ttl_seconds", 3600)
 	viper.SetDefault("gateway.openai_ws.session_hash_read_old_fallback", true)
 	viper.SetDefault("gateway.openai_ws.session_hash_dual_write_old", true)
 	viper.SetDefault("gateway.openai_ws.metadata_bridge_enabled", true)
 	viper.SetDefault("gateway.openai_ws.sticky_response_id_ttl_seconds", 3600)
 	viper.SetDefault("gateway.openai_ws.sticky_previous_response_ttl_seconds", 3600)
-	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.priority", 1.0)
-	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.load", 1.0)
-	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.queue", 0.7)
-	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.error_rate", 0.8)
-	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.ttft", 0.5)
-	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.reset", 0.0)
-	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.quota_headroom", 0.0)
-	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.upstream_cost", 0.0)
-	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.previous_response", 5.0)
-	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.session_sticky", 3.0)
 	// OpenAI HTTP upstream protocol strategy
 	viper.SetDefault("gateway.openai_http2.enabled", true)
 	viper.SetDefault("gateway.openai_http2.allow_proxy_fallback_to_http1", true)
@@ -2773,15 +2687,6 @@ func setEnvReachableDefaults() {
 	viper.SetDefault("gateway.session_idle_timeout_minutes", 0)
 	viper.SetDefault("gateway.user_message_queue.mode", "")
 	viper.SetDefault("update.proxy_url", "")
-
-	// sticky_escape_enabled is the one exception to the zero-value rule: its
-	// effective default is true, applied post-unmarshal via a viper.IsSet guard.
-	// Registering false would make IsSet always report true and permanently
-	// disable sticky escape, so register the effective default instead. An
-	// explicit false in config or env still wins.
-	viper.SetDefault("gateway.openai_scheduler.sticky_escape_enabled", true)
-	viper.SetDefault("gateway.openai_scheduler.sticky_escape_error_rate", 0.0)
-	viper.SetDefault("gateway.openai_scheduler.sticky_escape_ttft_ms", 0)
 
 	// server.trusted_proxies and security.forwarded_client_ip_headers are the
 	// other exception: load() distinguishes explicit configuration from absence
@@ -3698,9 +3603,6 @@ func (c *Config) Validate() error {
 	if c.Gateway.OpenAIWS.PayloadLogSampleRate < 0 || c.Gateway.OpenAIWS.PayloadLogSampleRate > 1 {
 		return fmt.Errorf("gateway.openai_ws.payload_log_sample_rate must be within [0,1]")
 	}
-	if c.Gateway.OpenAIWS.LBTopK <= 0 {
-		return fmt.Errorf("gateway.openai_ws.lb_top_k must be positive")
-	}
 	if c.Gateway.OpenAIWS.StickySessionTTLSeconds <= 0 {
 		return fmt.Errorf("gateway.openai_ws.sticky_session_ttl_seconds must be positive")
 	}
@@ -3727,35 +3629,6 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.OpenAIProxyStreamCircuit.TTLSeconds < 0 {
 		return fmt.Errorf("gateway.openai_proxy_stream_circuit.ttl_seconds must be non-negative")
-	}
-	weights := c.Gateway.OpenAIWS.SchedulerScoreWeights
-	for _, weight := range []float64{
-		weights.Priority, weights.Load, weights.Queue, weights.ErrorRate, weights.TTFT,
-		weights.Reset, weights.QuotaHeadroom, weights.UpstreamCost,
-		weights.PreviousResponse, weights.SessionSticky,
-	} {
-		if weight < 0 || math.IsNaN(weight) || math.IsInf(weight, 0) {
-			return fmt.Errorf("gateway.openai_ws.scheduler_score_weights.* must be non-negative and finite")
-		}
-	}
-	weightSum := weights.BaseWeightSum()
-	if weightSum <= 0 {
-		return fmt.Errorf("gateway.openai_ws.scheduler_score_weights must not all be zero")
-	}
-	if math.IsNaN(weightSum) || math.IsInf(weightSum, 0) {
-		return fmt.Errorf("gateway.openai_ws.scheduler_score_weights base-weight sum must be finite")
-	}
-	if totalWeightSum := weights.TotalWeightSum(); math.IsNaN(totalWeightSum) || math.IsInf(totalWeightSum, 0) {
-		return fmt.Errorf("gateway.openai_ws.scheduler_score_weights total-weight sum must be finite")
-	}
-	if c.Gateway.OpenAIScheduler.StickyEscapeTTFTMs <= 0 {
-		return fmt.Errorf("gateway.openai_scheduler.sticky_escape_ttft_ms must be positive")
-	}
-	if c.Gateway.OpenAIScheduler.StickyEscapeErrorRate < 0 || c.Gateway.OpenAIScheduler.StickyEscapeErrorRate > 1 {
-		return fmt.Errorf("gateway.openai_scheduler.sticky_escape_error_rate must be between 0 and 1")
-	}
-	if c.Gateway.OpenAICache.RolloutPercent < 0 || c.Gateway.OpenAICache.RolloutPercent > 100 {
-		return fmt.Errorf("gateway.openai_cache.rollout_percent must be between 0 and 100")
 	}
 	if c.Gateway.MaxLineSize < 0 {
 		return fmt.Errorf("gateway.max_line_size must be non-negative")

@@ -979,13 +979,10 @@ var ProviderSet = wire.NewSet(
 	ProvideOAuthRefreshAPI,
 	ProvideGeminiTokenProvider,
 	NewGeminiMessagesCompatService,
-	ProvideShareSchedulingService,
 	NewGroupCategoryService,
 	NewOperatorAccessService,
 	ProvideResilienceService,
 	NewProfitPreviewService,
-	ProvideGroupQualityGateService,
-	wire.Bind(new(GroupQualityGateView), new(*GroupQualityGateService)),
 	ProvideAntigravityTokenProvider,
 	ProvideGrokTokenProvider,
 	ProvideOpenAITokenProvider,
@@ -1174,28 +1171,6 @@ func ProvideClaudeResetCreditService(accounts AccountRepository, tokens *ClaudeT
 	s := NewClaudeResetCreditService(accounts, tokens, proxies, settings)
 	s.ConfigureRedemption(idem, locks)
 	return s
-}
-
-// ProvideShareSchedulingService installs share scheduling into the gateway
-// services after they exist, so their constructors stay stable for tests.
-// Until an administrator enables it every group keeps the original scheduler.
-// The config tells whether the ops monitor runs, whose records the health
-// factor reads (design §11.1).
-func ProvideShareSchedulingService(repo ShareSchedulingRepository, store ShareSchedulingStore, settingRepo SettingRepository, gateway *GatewayService, openai *OpenAIGatewayService, cfg *config.Config) *ShareSchedulingService {
-	s := NewShareSchedulingService(repo, store, settingRepo)
-	s.opsEnabled = cfg == nil || cfg.Ops.Enabled
-	gateway.shareScheduling = s
-	openai.shareScheduling = s
-	s.attachGateways(gateway, openai)
-	s.Start()
-	return s
-}
-
-// ProvideGroupQualityGateService starts the process-local quality evaluator.
-func ProvideGroupQualityGateService(repo GroupQualityGateRepository, accounts AccountRepository, groups GroupRepository) *GroupQualityGateService {
-	svc := NewGroupQualityGateService(repo, accounts, groups)
-	svc.Start()
-	return svc
 }
 
 // ProvideResilienceService creates the gateway resilience runtime, attaches

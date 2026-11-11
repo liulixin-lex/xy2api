@@ -52,13 +52,11 @@ func ProvideAdminHandlers(
 	affiliateHandler *admin.AffiliateHandler,
 	complianceHandler *admin.ComplianceHandler,
 	auditLogHandler *admin.AuditLogHandler,
-	shareSchedulingHandler *admin.ShareSchedulingHandler,
 	groupCategoryHandler *admin.GroupCategoryHandler,
 	resilienceHandler *admin.ResilienceHandler,
 	profitPreviewHandler *admin.ProfitPreviewHandler,
 	schedQualityHandler *admin.SchedQualityHandler,
 	schedAdminService *service.SchedAdminService,
-	groupQualityGateHandler *admin.GroupQualityGateHandler,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
 	iqCheckService *service.IQCheckService,
 	accountIQHandler *admin.AccountIQHandler,
@@ -119,12 +117,10 @@ func ProvideAdminHandlers(
 		Affiliate:              affiliateHandler,
 		Compliance:             complianceHandler,
 		AuditLog:               auditLogHandler,
-		ShareScheduling:        shareSchedulingHandler,
 		GroupCategory:          groupCategoryHandler,
 		Resilience:             resilienceHandler,
 		SchedQuality:           schedQualityHandler,
 		ProfitPreview:          profitPreviewHandler,
-		GroupQualityGate:       groupQualityGateHandler,
 	}
 }
 
@@ -335,12 +331,10 @@ var ProviderSet = wire.NewSet(
 	admin.NewAffiliateHandler,
 	admin.NewComplianceHandler,
 	admin.NewAuditLogHandler,
-	admin.NewShareSchedulingHandler,
 	admin.NewGroupCategoryHandler,
 	admin.NewResilienceHandler,
 	admin.NewProfitPreviewHandler,
 	ProvideSchedQualityHandler,
-	admin.NewGroupQualityGateHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,

@@ -12,7 +12,6 @@ import (
 
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
-	"github.com/liulixin-lex/xy2api/internal/sharesched"
 	"github.com/stretchr/testify/require"
 )
 
@@ -35,8 +34,6 @@ func TestOpenAIStickyBypassFirstOutputTimeoutReselectionRecordsRequestFailure(t 
 	for _, binding := range []string{"retained", "cleared"} {
 		t.Run(binding, func(t *testing.T) {
 			withResilienceSettings(t, nil)
-			resetOpenAIAdvancedSchedulerSettingCacheForTest()
-			t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
 			groupID := int64(10119)
 			accounts := []Account{
 				{ID: 36061, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID}},
@@ -98,8 +95,6 @@ func TestOpenAIStickyBypassStateRepairAvoidanceIsRequestScoped(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			withResilienceSettings(t, nil)
-			resetOpenAIAdvancedSchedulerSettingCacheForTest()
-			t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
 			groupID := int64(10129)
 			accounts := []Account{
 				{ID: 36071, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID}},
@@ -160,8 +155,6 @@ func TestOpenAIStickyBypassStateRepairAvoidanceIsRequestScoped(t *testing.T) {
 
 func TestResilienceOpenAILoadBatchStickyBypassRecordsReason(t *testing.T) {
 	withResilienceSettings(t, nil)
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
-	t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
 	resetAt := time.Now().Add(time.Minute)
 	groupID := int64(10109)
 	accounts := []Account{
@@ -208,8 +201,6 @@ func TestResilienceOpenAILoadBatchStickyBypassRecordsReason(t *testing.T) {
 
 func TestResilienceOpenAILoadBatchStickyDeleteWarns(t *testing.T) {
 	withResilienceSettings(t, nil)
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
-	t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
 	groupID := int64(10110)
 	accounts := []Account{
 		{ID: 36031, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusError, Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID}},
@@ -254,8 +245,6 @@ func (c *stickyDeleteFailureCache) DeleteSessionAccountIDIfOwnerAndReport(ctx co
 
 func TestResilienceOpenAILoadBatchStickyDeleteFailureIsInfo(t *testing.T) {
 	withResilienceSettings(t, nil)
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
-	t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
 	groupID := int64(10111)
 	accounts := []Account{
 		{ID: 36041, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusError, Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID}},
@@ -337,7 +326,7 @@ func TestResilienceOpenAILegacySchedulerKeepsSoftBinding(t *testing.T) {
 	const key = "openai:" + lrSession
 
 	t.Run("last_resort", func(t *testing.T) {
-		env := newOpenAILastResortEnv(t, sharesched.SchedulerSub2API, 5, 1)
+		env := newOpenAILastResortEnv(t, 5, 1)
 		env.cache.bind(key, lrAccountA, time.Hour-time.Minute)
 		sel := selectOpenAILastResort(t, env)
 		require.Equal(t, lrAccountB, sel.Account.ID, "the original order is by priority")
@@ -346,15 +335,15 @@ func TestResilienceOpenAILegacySchedulerKeepsSoftBinding(t *testing.T) {
 
 	t.Run("healthy_alternative", func(t *testing.T) {
 		logs := captureOpenAIObservationLogs(t)
-		env := newOpenAILastResortEnv(t, sharesched.SchedulerSub2API, 5, 1)
+		env := newOpenAILastResortEnv(t, 5, 1)
 		healthy := env.account(lrAccountB)
 		healthy.TempUnschedulableUntil, healthy.TempUnschedulableReason = nil, ""
 		healthy.RateLimitResetAt, healthy.OverloadUntil = nil, nil
 		env.cache.bind(key, lrAccountA, time.Hour-time.Minute)
 
 		st := resilience.NewRequestState()
-		ctx := resilience.WithRequestState(cacheableContext(), st)
-		gid := shareTestGroupID
+		ctx := resilience.WithRequestState(context.Background(), st)
+		gid := selectionTestGroupID
 		sel, _, err := env.svc.SelectAccountWithScheduler(ctx, &gid, "", lrSession, "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
 		require.NoError(t, err)
 		require.Equal(t, lrAccountB, sel.Account.ID)

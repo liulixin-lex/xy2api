@@ -453,8 +453,7 @@ gateway:
     retry_total_budget_ms: 5000
     # payload_schema 日志采样率（0-1）；降低热路径日志放大
     payload_log_sample_rate: 0.2
-    # 调度与粘连参数
-    lb_top_k: 7
+    # 粘连参数
     sticky_session_ttl_seconds: 3600
     # 会话哈希迁移兼容开关：新 key 未命中时回退读取旧 SHA-256 key
     session_hash_read_old_fallback: true
@@ -465,20 +464,6 @@ gateway:
     sticky_response_id_ttl_seconds: 3600
     # 兼容旧键：当 sticky_response_id_ttl_seconds 缺失时回退该值
     sticky_previous_response_ttl_seconds: 3600
-    scheduler_score_weights:
-      priority: 1.0
-      load: 1.0
-      queue: 0.7
-      error_rate: 0.8
-      ttft: 0.5
-      # use-it-or-lose-it：倾向「会话窗口最早重置」的账号，剩余重置时间越短得分越高。
-      # 0 表示关闭（默认，不改变原有行为）；调大可让即将重置的账号被优先用尽。
-      reset: 0.0
-      # 倾向 7d 剩余额度更健康的账号；0 表示关闭（默认，不改变原有行为），小流量灰度可设为 0.3。
-      quota_headroom: 0.0
-      # 倾向上游声明倍率更低的账号；0 表示关闭（默认），建议启用时从 1.5 开始。
-      upstream_cost: 0.0
-  # OpenAI 高级调度器补充配置
   # Session-scoped protection for explicit GPT-5.6+ model downgrades.
   # No extra model calls; healthy session/cache identities are unchanged.
   openai_quality_routing:
@@ -488,20 +473,10 @@ gateway:
     # Names must be GPT-5.6+ names recognized by the shared model normalizer, with
     # different bases; otherwise startup fails. IQ checks use the same pairs.
     rules: []
-  # Privacy-safe cache diagnostics and optional cold-session tie-breaker.
-  # Existing owners, health, priority, capacity and admission remain authoritative.
+  # Privacy-safe cache diagnostics.
   # See docs/guides/caching.md.
   openai_cache:
     diagnostics_enabled: false
-    aware_routing_enabled: false
-    rollout_percent: 0 # 0..100, stable authenticated session cohorts
-  openai_scheduler:
-    # 是否允许 session_hash sticky 在账号健康度恶化时临时逃逸；false 可一键回退旧行为
-    sticky_escape_enabled: true
-    # TTFT EWMA 超过该阈值（毫秒）时跳过 sticky，默认 15s，避免轻微抖动就逃逸
-    sticky_escape_ttft_ms: 15000
-    # 错误率 EWMA 超过该阈值时跳过 sticky，默认 0.5，仅在明显降级时触发
-    sticky_escape_error_rate: 0.5
   # OpenAI HTTP upstream protocol strategy.
   # OpenAI HTTP 上游协议策略（默认 HTTP/2；代理明确不兼容时可临时回退 HTTP/1.1）。
   openai_http2:

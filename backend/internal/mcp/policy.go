@@ -37,7 +37,7 @@ func ToolPolicies() []ToolPolicy {
 		{Name: "xy2api.ops.get_system_events", CatalogKeys: []string{"GET /ops/system-logs"}, Ops: true, Parameters: page("level", "component", "request_id", "client_request_id")},
 		{Name: "xy2api.ops.get_realtime_snapshot", CatalogKeys: []string{"GET /ops/realtime-traffic"}, Ops: true, Realtime: true, Parameters: page("platform", "group_id")},
 		{Name: "xy2api.ops.get_concurrency_snapshot", CatalogKeys: []string{"GET /ops/concurrency"}, Ops: true, Realtime: true, Runtime: true, Parameters: []string{"account_ids"}, Required: []string{"account_ids"}},
-		{Name: "xy2api.routing.get_quality_state", CatalogKeys: []string{"GET /sched-quality/accounts/:id"}, OptionalKeys: []string{"GET /sched-quality/groups/:id/policy"}, Runtime: true, Parameters: []string{"group_id", "include_policies", "limit", "cursor"}},
+		{Name: "xy2api.routing.get_quality_state", CatalogKeys: []string{"GET /sched-quality/accounts/:id"}, OptionalKeys: []string{"GET /sched-quality/accounts/:id"}, Runtime: true, Parameters: []string{"group_id", "include_policies", "limit", "cursor"}},
 		{Name: "xy2api.users.search", CatalogKeys: []string{"GET /users"}, Parameters: page("search", "group_id", "status")},
 		{Name: "xy2api.users.get_usage_summary", CatalogKeys: []string{"GET /users/:id/usage"}, TargetUser: true, Parameters: page("user_id", "model"), Required: []string{"user_id"}},
 		{Name: "xy2api.users.get_subscriptions", CatalogKeys: []string{"GET /users/:id/subscriptions"}, TargetUser: true, Parameters: page("user_id"), Required: []string{"user_id"}},

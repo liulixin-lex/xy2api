@@ -14,7 +14,7 @@ func legacyProfitDiagnosticService(accounts []Account) *OpenAIGatewayService {
 	return &OpenAIGatewayService{
 		accountRepo:        stubOpenAIAccountRepo{accounts: accounts},
 		cfg:                &config.Config{},
-		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("false"),
+		rateLimitService:   newOpenAISelectionRateLimitService(),
 		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
 	}
 }

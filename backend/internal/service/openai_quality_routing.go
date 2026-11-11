@@ -882,7 +882,7 @@ func (s *OpenAIGatewayService) selectAccountWithQualityRouting(
 					return borrowed, decision, nil
 				}
 				cfg := s.schedulingConfig()
-				fallbackAcrossPool := (cfg.LoadBatchEnabled || s.isOpenAIAdvancedSchedulerEnabled(ctx)) && s.concurrencyService != nil
+				fallbackAcrossPool := cfg.LoadBatchEnabled && s.concurrencyService != nil
 				waitingCount := 0
 				if fallbackAcrossPool {
 					// Re-read after borrowing: queue pressure can change during the

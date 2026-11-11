@@ -289,35 +289,7 @@ type SystemSettings struct {
 	SchedQualityTestEnabled bool
 
 	// OpenAI 账号调度
-	OpenAILowUpstreamRatePriorityEnabled                   bool
-	OpenAILowUpstreamRatePriorityScope                     string
-	OpenAILowUpstreamRatePriorityGroupIDs                  []int64
-	OpenAIOAuthSchedulingRateMultiplier                    *float64
-	OpenAIAdvancedSchedulerEnabled                         bool
-	OpenAIAdvancedSchedulerStickyWeightedEnabled           bool
-	OpenAIAdvancedSchedulerSubscriptionPriorityEnabled     bool
-	OpenAIAdvancedSchedulerLBTopK                          string
-	OpenAIAdvancedSchedulerWeightPriority                  string
-	OpenAIAdvancedSchedulerWeightLoad                      string
-	OpenAIAdvancedSchedulerWeightQueue                     string
-	OpenAIAdvancedSchedulerWeightErrorRate                 string
-	OpenAIAdvancedSchedulerWeightTTFT                      string
-	OpenAIAdvancedSchedulerWeightReset                     string
-	OpenAIAdvancedSchedulerWeightQuotaHeadroom             string
-	OpenAIAdvancedSchedulerWeightUpstreamCost              string
-	OpenAIAdvancedSchedulerWeightPreviousResponse          string
-	OpenAIAdvancedSchedulerWeightSessionSticky             string
-	OpenAIAdvancedSchedulerEffectiveLBTopK                 string
-	OpenAIAdvancedSchedulerEffectiveWeightPriority         string
-	OpenAIAdvancedSchedulerEffectiveWeightLoad             string
-	OpenAIAdvancedSchedulerEffectiveWeightQueue            string
-	OpenAIAdvancedSchedulerEffectiveWeightErrorRate        string
-	OpenAIAdvancedSchedulerEffectiveWeightTTFT             string
-	OpenAIAdvancedSchedulerEffectiveWeightReset            string
-	OpenAIAdvancedSchedulerEffectiveWeightQuotaHeadroom    string
-	OpenAIAdvancedSchedulerEffectiveWeightUpstreamCost     string
-	OpenAIAdvancedSchedulerEffectiveWeightPreviousResponse string
-	OpenAIAdvancedSchedulerEffectiveWeightSessionSticky    string
+	OpenAIOAuthSchedulingRateMultiplier *float64
 
 	// 余额不足提醒
 	BalanceLowNotifyEnabled     bool

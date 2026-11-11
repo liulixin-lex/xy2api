@@ -796,10 +796,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			zap.String("layer", scheduleDecision.Layer),
 			zap.Bool("sticky_previous_hit", scheduleDecision.StickyPreviousHit),
 			zap.Bool("sticky_session_hit", scheduleDecision.StickySessionHit),
-			zap.Int("candidate_count", scheduleDecision.CandidateCount),
-			zap.Int("top_k", scheduleDecision.TopK),
 			zap.Int64("latency_ms", scheduleDecision.LatencyMs),
-			zap.Float64("load_skew", scheduleDecision.LoadSkew),
 		)
 		account := selection.Account
 		if previousResponseID != "" && requestPlatform == service.PlatformOpenAI && !account.IsOpenAIApiKey() {
@@ -3197,7 +3194,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			zap.Int64("account_id", account.ID),
 			zap.String("account_name", account.Name),
 			zap.String("schedule_layer", scheduleDecision.Layer),
-			zap.Int("candidate_count", scheduleDecision.CandidateCount),
 		)
 
 		maxReasoningEffort, reasoningEffortMappings, maxReasoningEffortOverLimit, _ := openAIReasoningEffortPolicyForRequest(c, apiKey)
@@ -3234,8 +3230,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "billing check failed")
 			return
 		}
-		var groupQualityTurnPinned atomic.Bool
-		groupQualityTurnPinned.Store(service.OpenAIQualityTurnPinned(firstMessage))
+		var qualityTurnPinned atomic.Bool
+		qualityTurnPinned.Store(service.OpenAIQualityTurnPinned(firstMessage))
 		hooks := &service.OpenAIWSIngressHooks{
 			ClientLifecycleContext:      clientLifecycleCtx,
 			InitialRequestModel:         reqModel,
@@ -3245,7 +3241,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			ReasoningEffortMappings:     reasoningEffortMappings,
 			TurnStarted:                 recordTurnStart,
 			BeforeRequest: func(turn int, payload []byte, originalModel string) error {
-				groupQualityTurnPinned.Store(service.OpenAIQualityTurnPinned(payload))
+				qualityTurnPinned.Store(service.OpenAIQualityTurnPinned(payload))
 				c.Set(securityAuditWSTurnContextKey, turn)
 				service.BeginOpsStreamTurn(c, turn)
 				setCyberTurnBody(turn, payload)
@@ -3329,7 +3325,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// 无法中途换号）。本 turn 的准入与计费共用同一 pricingAt。
 				turnBillingCtx := turnBillingAPIKeys.begin(ctx, h.apiKeyService, turn, apiKey)
 				turnCtx, turnAt := h.gatewayService.WithOpenAITurnPricingContext(turnBillingCtx, apiKey.GroupID)
-				turnAdmissionCtx := service.WithOpenAIQualityTurnExemption(turnCtx, turn == 1 || groupQualityTurnPinned.Load())
+				turnAdmissionCtx := service.WithOpenAIQualityTurnExemption(turnCtx, turn == 1 || qualityTurnPinned.Load())
 				if _, vetoed, reason := h.gatewayService.SelectionAdmissionVetoLatest(turnAdmissionCtx, account); vetoed {
 					reqLog.Info("openai.websocket_turn_profit_vetoed",
 						zap.Int("turn", turn),

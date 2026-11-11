@@ -7,11 +7,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
@@ -509,7 +510,6 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		)
 	}
 
-	s.shareScheduling.observeUsage(ctx, usageLog)
 	// xy2api resilience: a client that left before any output is not billed,
 	// except at upstream cost under the abuse guard (design §8.2).
 	resilienceAnnotateUsage(ctx, usageLog)

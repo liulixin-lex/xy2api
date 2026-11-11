@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
-	"github.com/liulixin-lex/xy2api/internal/sharesched"
 	"github.com/stretchr/testify/require"
 )
 
@@ -411,11 +410,9 @@ func TestOpenAIWSStickyRenewalExtendsOnlyItsOwnBinding(t *testing.T) {
 		name      string
 		owner     int64 // 0: no binding
 		spillover bool
-		share     bool
 		want      time.Duration // 0: not renewed
 	}{
 		{name: "still owned", owner: 7, want: 2 * time.Hour},
-		{name: "configured TTL ignores retired share settings", owner: 7, share: true, want: 2 * time.Hour},
 		{name: "rebound elsewhere", owner: 8},
 		{name: "expired binding is not recreated"},
 		{name: "spillover connection", owner: 7, spillover: true},
@@ -430,13 +427,6 @@ func TestOpenAIWSStickyRenewalExtendsOnlyItsOwnBinding(t *testing.T) {
 			cfg := &config.Config{}
 			cfg.Gateway.OpenAIWS.StickySessionTTLSeconds = 7200
 			svc := &OpenAIGatewayService{cache: cache, cfg: cfg}
-			if row.share {
-				policy := sharesched.DefaultPolicy()
-				policy.Scheduler = sharesched.SchedulerShare
-				svc.shareScheduling = NewShareSchedulingService(nil, nil, nil)
-				svc.shareScheduling.state.Store(&shareSchedulingState{settings: ShareSchedulingSettings{Enabled: true},
-					groups: map[int64]*shareGroupPolicy{groupID: {groupID: groupID, version: 1, policy: policy}}})
-			}
 			renewal := svc.NewOpenAIWSStickyRenewal(&groupID, session, 7, row.spillover)
 			require.NoError(t, renewal.TurnSucceeded(context.Background()))
 			require.Empty(t, cache.refreshed, "renewal is throttled right after the admission bind")

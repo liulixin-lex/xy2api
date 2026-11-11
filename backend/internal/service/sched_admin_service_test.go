@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -222,6 +223,35 @@ func schedAdminFixture() (*SchedAdminService, *schedAdminEngine, *schedAdminAcco
 func schedAdminEvidence(n int) schedquality.Summary {
 	return schedquality.Summary{Samples: n, Sessions: 4, Speed: schedquality.SpeedSummary{N: n, Sessions: 4, P90Ms: 1234, FailBoundMs: 1000}, Error: schedquality.ErrorSummary{N: n, Sessions: 4, Rate: .1, LCB: .01}, Cache: schedquality.CacheSummary{Turns: n, Sessions: 4, Ratio: .8}}
 }
+func TestSchedAdminClearErrorInvalidatesOAuthToken(t *testing.T) {
+	for _, reset := range []bool{false, true} {
+		for _, failure := range []bool{false, true} {
+			t.Run(fmt.Sprintf("reset=%t/invalidation_failure=%t", reset, failure), func(t *testing.T) {
+				s, _, r := schedAdminFixture()
+				r.rows[1].Status, r.rows[1].Type, r.rows[1].ErrorMessage = StatusError, AccountTypeOAuth, "invalid token"
+				cache := &recoverTokenInvalidatorStub{}
+				if failure {
+					cache.err = errors.New("cache unavailable")
+				}
+				s.d.RateLimit = &RateLimitService{tokenCacheInvalidator: cache}
+				if reset {
+					out, err := s.Reset(context.Background(), 1, 9)
+					require.NoError(t, err)
+					require.Empty(t, out.Failed)
+					require.Contains(t, out.Cleared, SchedResetItem{Key: "error", Kind: "error"})
+				} else {
+					ok, err := s.ClearAutoState(context.Background(), 1, "error", 9)
+					require.NoError(t, err)
+					require.True(t, ok)
+				}
+				require.Equal(t, StatusActive, r.rows[1].Status)
+				require.Len(t, cache.accounts, 1)
+				require.Equal(t, int64(1), cache.accounts[0].ID)
+			})
+		}
+	}
+}
+
 func TestSchedAdminSummaryAggregation(t *testing.T) {
 	s, e, r := schedAdminFixture()
 	p := e.snapshot

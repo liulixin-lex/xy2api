@@ -22,7 +22,7 @@ func (s *OpenAIGatewayService) withOpenAISelectionContext(ctx context.Context, g
 	}
 	return context.WithValue(ctx, openAISelectionContextKey{}, gate)
 }
-func withGroupQualityGateExempt(ctx context.Context) context.Context {
+func withOpenAISelectionExempt(ctx context.Context) context.Context {
 	return context.WithValue(ctx, openAISelectionExemptContextKey{}, true)
 }
 func openAISelectionExempt(ctx context.Context) bool {

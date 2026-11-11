@@ -489,21 +489,16 @@ type OpenAIGatewayService struct {
 
 	openaiWSPoolOnce               sync.Once
 	openaiWSStateStoreOnce         sync.Once
-	openaiSchedulerOnce            sync.Once
 	openaiProxyStreamCircuitOnce   sync.Once
 	openaiWSPassthroughDialerOnce  sync.Once
 	openaiModelTransientOnce       sync.Once
-	openaiAccountLatencyHoldOnce   sync.Once
 	openaiRecentSessionOnce        sync.Once
 	agentIdentityTaskMu            sync.Mutex
 	openaiWSPool                   *openAIWSConnPool
 	openaiWSStateStore             OpenAIWSStateStore
-	openaiScheduler                OpenAIAccountScheduler
 	openaiWSPassthroughDialer      openAIWSClientDialer
 	openaiWSSessionPreemptions     openAIWSSessionPreemptRegistry
-	openaiAccountStats             *openAIAccountRuntimeStats
 	openaiModelTransient           *openAIAccountModelTransientState
-	openaiAccountLatencyHold       *openAIAccountLatencyHoldState
 	openaiRecentSession            *openAIRecentSessionSuccess
 	openaiProxyStreamCircuit       *openAIProxyStreamCircuit
 	openaiProxyStreamFailOpenLogAt atomic.Int64
@@ -548,28 +543,8 @@ type OpenAIGatewayService struct {
 	openaiCodexTicketContext     context.Context
 	openaiCodexTicketDone        chan struct{}
 	openaiCodexTicketStopped     bool
-	// shareScheduling 由 ProvideShareSchedulingService 注入；nil 时保持原版调度。
-	shareScheduling *ShareSchedulingService
 	// resilience is the xy2api gateway resilience runtime (optional).
-	resilience           *ResilienceService
-	groupQualityGateView GroupQualityGateView
-}
-
-// SetGroupQualityGateView attaches the shared quality decision view during startup wiring.
-func (s *OpenAIGatewayService) SetGroupQualityGateView(view GroupQualityGateView) {
-	if s == nil {
-		return
-	}
-	s.groupQualityGateView = view
-}
-
-// GroupQualityGateView returns the shared quality decision view. A nil or
-// unconfigured service remains safe for callers and behaves as all groups ungated.
-func (s *OpenAIGatewayService) GroupQualityGateView() GroupQualityGateView {
-	if s == nil || s.groupQualityGateView == nil {
-		return emptyGroupQualityGateView{}
-	}
-	return s.groupQualityGateView
+	resilience *ResilienceService
 }
 
 // RefreshServingPricingKey reloads only the pricing group's snapshot for a
