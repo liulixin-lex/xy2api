@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-11
+
+本版升级存在已知漏洞的依赖并适配新版 Gin，同时修复 standalone Compose 文件不传递 `TOTP_ENCRYPTION_KEY` 等问题。
+
 ### 变更
 
 - 后端依赖小版本更新，包括 Gin 1.12、go-webauthn 0.18 与 testcontainers-go 0.45。
@@ -12,10 +16,18 @@
 ### 修复
 
 - `docker-compose.standalone.yml` 现在传递 `TOTP_ENCRYPTION_KEY`、`UPDATE_PROXY_URL`、`SECURITY_URL_ALLOWLIST_*` 与 `ALIPAY_MOBILE_PRECREATE_DEEP_LINK`，与 `docker-compose.yml` 一致。此前 standalone 部署即使在 `.env` 中设置了 `TOTP_ENCRYPTION_KEY`，每次启动也会随机生成密钥。
+- MiniMax 分组「使用密钥」中的 Codex 提示改为导出 `XY2API_API_KEY`，与生成的 `config.toml` 一致（原先误写为 `SUB2API_API_KEY`）。
+- API Key 用量查询页离开时停止环形动画，再次查询也不再叠加上一次的动画。
 
 ### 安全
 
+- 改用 Go 1.27.4 构建二进制与镜像，修复标准库 `net/http` 的 [GO-2026-6859](https://pkg.go.dev/vuln/GO-2026-6859)。
 - 升级存在已知漏洞的依赖：OpenAI TOTP Worker 的 certifi，后端的 excelize 与 Docker/moby 相关模块（testcontainers-go 0.45 改用 moby 模块），前端构建链中的 postcss-selector-parser、minimatch、brace-expansion、ajv 与 glob。
+
+### 升级说明
+
+- 没有数据库迁移，也没有配置项变化。
+- 使用 `docker-compose.standalone.yml` 的部署：先在 `.env` 中设置固定的 `TOTP_ENCRYPTION_KEY`（`openssl rand -hex 32`），再换用新的 Compose 文件并重建容器。此前设置的值不会生效，2FA 与加密配置使用的是每次启动随机生成的密钥。
 
 ## [0.6.0] - 2026-11-11
 
@@ -1824,7 +1836,8 @@ XY2API 首个独立版本：基于 Sub2API 0.1.184 的代码建立独立的仓�
 - 切换前备份数据库和 Redis；不要让新旧实例长时间同时运行迁移或后台写任务。
 - 切换步骤与兼容边界见 [品牌与迁移兼容边界](https://github.com/liulixin-lex/xy2api/blob/v0.0.1/docs/BRANDING_AND_MIGRATION_COMPATIBILITY.md)。
 
-[Unreleased]: https://github.com/liulixin-lex/xy2api/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/liulixin-lex/xy2api/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/liulixin-lex/xy2api/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/liulixin-lex/xy2api/compare/v0.5.15...v0.6.0
 [0.5.15]: https://github.com/liulixin-lex/xy2api/compare/v0.5.14...v0.5.15
 [0.5.14]: https://github.com/liulixin-lex/xy2api/compare/v0.5.13...v0.5.14
