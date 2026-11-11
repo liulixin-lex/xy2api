@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 修复
+
+- `docker-compose.standalone.yml` 现在传递 `TOTP_ENCRYPTION_KEY`、`UPDATE_PROXY_URL`、`SECURITY_URL_ALLOWLIST_*` 与 `ALIPAY_MOBILE_PRECREATE_DEEP_LINK`，与 `docker-compose.yml` 一致。此前 standalone 部署即使在 `.env` 中设置了 `TOTP_ENCRYPTION_KEY`，每次启动也会随机生成密钥。
+
 ## [0.6.0] - 2026-11-11
 
 本版把仓库整理为面向公众的开源项目：重写文档，精简 CI 与发布流程，官方构建收缩为三个平台。运行时行为与数据库不变。

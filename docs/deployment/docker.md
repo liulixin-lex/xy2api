@@ -89,7 +89,7 @@ docker compose up -d
 | `APP_DATA_VOLUME_NAME` | `xy2api_data` | 仅命名卷版：应用数据卷的实际名称。从 Sub2API 迁移时需要改，见 [从 Sub2API 迁移](migrate-from-sub2api.md) |
 | `UPDATE_PROXY_URL` | 空 | 访问 GitHub（版本检查、价格数据）使用的代理 |
 
-`standalone` 版另外需要 `DATABASE_HOST`、`DATABASE_PASSWORD`、`REDIS_HOST`（必填）以及 `DATABASE_PORT`、`DATABASE_USER`、`DATABASE_DBNAME`、`DATABASE_SSLMODE`、`REDIS_PORT`。数据库在宿主机上时可以用 `host.docker.internal`，该文件已映射到宿主机网关。注意 `standalone` 版不传递 `TOTP_ENCRYPTION_KEY`、`UPDATE_PROXY_URL` 和 `SECURITY_URL_ALLOWLIST_*`，需要用下文的覆盖文件补上。
+`standalone` 版另外需要 `DATABASE_HOST`、`DATABASE_PASSWORD`、`REDIS_HOST`（必填）以及 `DATABASE_PORT`、`DATABASE_USER`、`DATABASE_DBNAME`、`DATABASE_SSLMODE`、`REDIS_PORT`。数据库在宿主机上时可以用 `host.docker.internal`，该文件已映射到宿主机网关。
 
 ## 首次启动的自动初始化
 
