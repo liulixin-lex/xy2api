@@ -16,6 +16,8 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+const resilienceMaxBody = 2 << 20
+
 // ResilienceHandler serves the gateway resilience administration endpoints.
 type ResilienceHandler struct {
 	svc *service.ResilienceService
@@ -36,7 +38,7 @@ func (h *ResilienceHandler) GetSettings(c *gin.Context) {
 // value; unknown fields are rejected.
 // PUT /api/v1/admin/settings/gateway-resilience
 func (h *ResilienceHandler) UpdateSettings(c *gin.Context) {
-	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, shareSchedulingMaxBody))
+	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, resilienceMaxBody))
 	if err != nil {
 		response.BadRequest(c, "Request body too large or unreadable")
 		return

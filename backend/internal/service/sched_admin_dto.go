@@ -142,7 +142,10 @@ type SchedAdminAccountDetailModelsTest struct {
 }
 
 type SchedAdminAccountDetailModelsTestTiers struct {
-	Tier       string   `json:"tier"`
+	Tier string `json:"tier"`
+	// TTFOMs lists only warm turns actually sent, in order, at most two.
+	// A sent turn without first output (first-output timeout, fault, or other) is null;
+	// unsent turns have no entry. Use Timeouts to identify timeouts.
 	TTFOMs     []*int   `json:"ttfo_ms"` // Empty lists must be [].
 	CacheRatio *float64 `json:"cache_ratio"`
 	Faults     int      `json:"faults"`
