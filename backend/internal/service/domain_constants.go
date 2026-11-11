@@ -217,6 +217,8 @@ const DingTalkConnectSyntheticEmailDomain = "@dingtalk-connect.invalid"
 // Setting keys
 const (
 	SettingKeyGroupQualityGatePolicies = "group_quality_gate_policies"
+	SettingKeySchedQualityEnabled      = "sched_quality_enabled"
+	SettingKeySchedQualityTestEnabled  = "sched_quality_test_enabled"
 
 	// 注册设置
 	SettingKeyRegistrationEnabled              = "registration_enabled"                // 是否开放注册

@@ -325,6 +325,8 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		OpenAILowUpstreamRatePriorityScope:                     settings.OpenAILowUpstreamRatePriorityScope,
 		OpenAILowUpstreamRatePriorityGroupIDs:                  settings.OpenAILowUpstreamRatePriorityGroupIDs,
 		OpenAIOAuthSchedulingRateMultiplier:                    settings.OpenAIOAuthSchedulingRateMultiplier,
+		SchedQualityEnabled:                                    settings.SchedQualityEnabled,
+		SchedQualityTestEnabled:                                settings.SchedQualityTestEnabled,
 		OpenAIAdvancedSchedulerEnabled:                         settings.OpenAIAdvancedSchedulerEnabled,
 		OpenAIAdvancedSchedulerStickyWeightedEnabled:           settings.OpenAIAdvancedSchedulerStickyWeightedEnabled,
 		OpenAIAdvancedSchedulerSubscriptionPriorityEnabled:     settings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled,

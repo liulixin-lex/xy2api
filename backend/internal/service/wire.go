@@ -935,6 +935,7 @@ var ProviderSet = wire.NewSet(
 	NewGroupCategoryService,
 	NewOperatorAccessService,
 	ProvideResilienceService,
+	NewProfitPreviewService,
 	ProvideGroupQualityGateService,
 	wire.Bind(new(GroupQualityGateView), new(*GroupQualityGateService)),
 	ProvideAntigravityTokenProvider,
