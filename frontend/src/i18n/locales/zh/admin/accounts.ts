@@ -1347,7 +1347,12 @@ export default {
         diagnosticLegacy: '测试口径：旧版 CLI 形态连通性测试，不作为普通客户端兼容验收。',
         compatibility: 'Claude Code 请求兼容',
         compatibilityDesc: '为要求 Claude Code 形态的 Anthropic API Key 上游适配普通请求，保留业务 system 与工具参数。',
-        compatibilityCapabilities: '范围：claude-opus-4-8、claude-opus-5-5。计数依赖上游支持；Chat 不保证签名思考续轮，thread/compact 不受支持。',
+        compatibilityProfile: '兼容版本',
+        compatibilityV2: 'v2：普通客户端与工具续接',
+        compatibilityV1: 'v1：保留旧版行为',
+        compatibilityNewSessions: '接收新会话',
+        compatibilityDrainDesc: '关闭后仅接收已登记的签名或工具续接。切换版本保留旧会话的协议；关闭整个兼容功能会阻止这些会话继续。',
+        compatibilityCapabilities: '范围：claude-opus-4-8、claude-opus-5-5。v2 支持 Chat 工具续接；需原样保留工具 ID 与完整历史。计数依赖上游支持；thread/compact 不受支持。',
         compatibilityConflict: '请先关闭自动透传；自定义请求头和 Beta 策略须与兼容配置一致。',
         apiKeyPassthrough: '自动透传（仅替换认证）',
         apiKeyPassthroughDesc:

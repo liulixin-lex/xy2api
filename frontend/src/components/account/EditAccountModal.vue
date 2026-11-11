@@ -2178,6 +2178,18 @@
             data-testid="anthropic-compat-toggle"
           />
         </div>
+        <div v-if="anthropicCompatibilityEnabled" class="mt-3 space-y-3">
+          <label class="input-label" for="anthropic-compat-profile">{{ t('admin.accounts.anthropic.compatibilityProfile') }}</label>
+          <select id="anthropic-compat-profile" v-model="anthropicCompatibilityProfile" class="input" data-testid="anthropic-compat-profile">
+            <option value="claude_code_v2">{{ t('admin.accounts.anthropic.compatibilityV2') }}</option>
+            <option value="claude_code_v1">{{ t('admin.accounts.anthropic.compatibilityV1') }}</option>
+          </select>
+          <label class="flex items-center gap-2 text-sm">
+            <input v-model="anthropicCompatibilityNewSessions" type="checkbox" data-testid="anthropic-compat-new-sessions" class="rounded border-gray-300 text-primary-600" />
+            {{ t('admin.accounts.anthropic.compatibilityNewSessions') }}
+          </label>
+          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.anthropic.compatibilityDrainDesc') }}</p>
+        </div>
       </div>
 
       <!-- Anthropic API Key 自动透传开关 -->
@@ -3852,6 +3864,8 @@ type CodexImageToolMode = 'inherit' | 'enabled' | 'disabled' | 'block'
 const codexImageToolMode = ref<CodexImageToolMode>('inherit')
 type AnthropicAPIKeyAuthScheme = 'x_api_key' | 'authorization_bearer'
 const anthropicCompatibilityEnabled = ref(false)
+const anthropicCompatibilityProfile = ref<'claude_code_v1' | 'claude_code_v2'>('claude_code_v2')
+const anthropicCompatibilityNewSessions = ref(true)
 const anthropicPassthroughEnabled = ref(false)
 const anthropicAPIKeyAuthScheme = ref<AnthropicAPIKeyAuthScheme>('x_api_key')
 const webSearchEmulationMode = ref('default')
@@ -4342,6 +4356,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   codexFingerprintMode.value = 'off'
   codexImageToolMode.value = 'inherit'
   anthropicCompatibilityEnabled.value = false
+  anthropicCompatibilityProfile.value = 'claude_code_v2'
+  anthropicCompatibilityNewSessions.value = true
   anthropicPassthroughEnabled.value = false
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
   webSearchEmulationMode.value = 'default'
@@ -4407,7 +4423,9 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     }
   }
   if (newAccount.platform === 'anthropic' && newAccount.type === 'apikey') {
-    anthropicCompatibilityEnabled.value = extra?.anthropic_compat_profile === 'claude_code_v1'
+    anthropicCompatibilityEnabled.value = extra?.anthropic_compat_profile === 'claude_code_v1' || extra?.anthropic_compat_profile === 'claude_code_v2'
+    anthropicCompatibilityProfile.value = extra?.anthropic_compat_profile === 'claude_code_v1' ? 'claude_code_v1' : 'claude_code_v2'
+    anthropicCompatibilityNewSessions.value = extra?.anthropic_compat_new_sessions !== false
     anthropicPassthroughEnabled.value = extra?.anthropic_passthrough === true
     anthropicAPIKeyAuthScheme.value = extra?.anthropic_apikey_auth_scheme === 'authorization_bearer'
       ? 'authorization_bearer'
@@ -5817,7 +5835,8 @@ const handleSubmit = async () => {
     if (props.account.platform === 'anthropic' && props.account.type === 'apikey') {
       const currentExtra = (updatePayload.extra as Record<string, unknown>) || (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }
-      newExtra.anthropic_compat_profile = anthropicCompatibilityEnabled.value ? 'claude_code_v1' : 'off'
+      newExtra.anthropic_compat_profile = anthropicCompatibilityEnabled.value ? anthropicCompatibilityProfile.value : 'off'
+      if (anthropicCompatibilityEnabled.value) newExtra.anthropic_compat_new_sessions = anthropicCompatibilityNewSessions.value
       if (anthropicPassthroughEnabled.value) {
         newExtra.anthropic_passthrough = true
       } else {
