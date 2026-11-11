@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <Transition :css="false" appear @enter="onEnter" @leave="onLeave">
-      <div v-if="show" class="fixed inset-0 z-40" data-base-drawer @keydown.tab="trapFocus">
+      <div v-if="show" class="fixed inset-0" :style="{ zIndex: stackZ }" data-base-drawer @keydown.tab="trapFocus">
         <div data-drawer-overlay class="absolute inset-0 bg-black/55" aria-hidden="true" @click="closeOnOverlay && emit('close')" />
         <section
           ref="panelRef"
@@ -20,7 +20,7 @@
             </div>
             <button
               type="button"
-              class="-mr-2 rounded-xl p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 dark:text-dark-500 dark:hover:bg-dark-700 dark:hover:text-dark-300"
+              class="-mr-2 rounded-xl p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 dark:text-dark-400 dark:hover:bg-dark-700 dark:hover:text-dark-200"
               :aria-label="t('common.close')"
               @click="emit('close')"
             >
@@ -48,7 +48,8 @@ import { isReducedMotion } from '@/composables/useMotionPreference'
 import { motionDuration, motionEase } from '@/utils/motionTokens'
 import { closeOverlay, isTopOverlay, openOverlay } from '@/utils/overlayStack'
 
-// Right-side drawer shell: slots only. Focus handling follows BaseDialog; dialogs opened from the drawer stack above it.
+// Right-side drawer shell: slots only. Focus handling follows BaseDialog; its layer order (z-index, focus, Escape)
+// is the opening order shared with dialogs, so whichever opened last is on top.
 const props = withDefaults(defineProps<{ show: boolean; title?: string; closeOnOverlay?: boolean }>(), {
   title: '',
   closeOnOverlay: true
@@ -61,6 +62,7 @@ const token = Symbol('drawer')
 const panelRef = ref<HTMLElement | null>(null)
 const bodyRef = ref<HTMLElement | null>(null)
 let trigger: HTMLElement | null = null
+const stackZ = ref<number>()
 
 const focusableElements = () => Array.from(panelRef.value?.querySelectorAll<HTMLElement>(
   'button, [href], input, select, textarea, summary, [tabindex]'
@@ -76,9 +78,11 @@ function trapFocus(event: KeyboardEvent) {
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
 }
 
+// Focus goes back to the trigger only when the top layer closes; a layer still open above keeps it.
 function release() {
+  const wasTop = isTopOverlay(token)
   closeOverlay(token)
-  if (trigger?.isConnected) trigger.focus()
+  if (wasTop && trigger?.isConnected) trigger.focus()
   trigger = null
 }
 
@@ -87,7 +91,7 @@ watch(
   async (open) => {
     if (!open) return release()
     trigger = document.activeElement as HTMLElement | null
-    openOverlay(token)
+    stackZ.value = openOverlay(token)
     await nextTick()
     if (!props.show) return
     if (bodyRef.value) bodyRef.value.scrollTop = 0

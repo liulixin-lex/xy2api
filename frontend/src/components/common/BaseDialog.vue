@@ -5,7 +5,7 @@
       <div
         v-if="show"
         class="modal-overlay"
-        :style="zIndexStyle"
+        :style="{ zIndex: stackZ }"
         :aria-labelledby="dialogId"
         role="dialog"
         aria-modal="true"
@@ -77,9 +77,11 @@ function trapFocus(event: KeyboardEvent) {
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
 }
 
+// 只有最上层关闭时才把焦点还给它的触发元素；下层先关时上层继续持有焦点。
 function releaseDialog() {
+  const wasTop = isTopOverlay(dialogToken)
   closeOverlay(dialogToken)
-  if (previousActiveElement?.isConnected) previousActiveElement.focus()
+  if (wasTop && previousActiveElement?.isConnected) previousActiveElement.focus()
   previousActiveElement = null
 }
 
@@ -92,6 +94,7 @@ interface Props {
   closeOnEscape?: boolean
   closeOnClickOutside?: boolean
   showCloseButton?: boolean
+  /** Lowest z-index for this dialog; a dialog is always drawn above the layers opened before it. */
   zIndex?: number
 }
 
@@ -104,15 +107,13 @@ const props = withDefaults(defineProps<Props>(), {
   closeOnEscape: true,
   closeOnClickOutside: false,
   showCloseButton: true,
-  zIndex: 50
+  zIndex: undefined
 })
 
 const emit = defineEmits<Emits>()
 
-// Custom z-index style (overrides the default z-50 from CSS)
-const zIndexStyle = computed(() => {
-  return props.zIndex !== 50 ? { zIndex: props.zIndex } : undefined
-})
+// 层级由打开顺序决定（utils/overlayStack），后打开的在上
+const stackZ = ref<number>()
 
 const widthClasses = computed(() => {
   // Width guidance: narrow=confirm/short prompts, normal=standard forms,
@@ -150,8 +151,8 @@ watch(
     if (isOpen) {
       // 保存当前焦点元素
       previousActiveElement = document.activeElement as HTMLElement
-      // 与抽屉共用一个打开顺序：滚动锁定到最后一个关闭为止，Esc 只关最上层
-      openOverlay(dialogToken)
+      // 与抽屉共用一个打开顺序：后打开的画在上面，滚动锁定到最后一个关闭为止，Esc 只关最上层
+      stackZ.value = openOverlay(dialogToken, props.zIndex)
 
       // 等待DOM更新后设置焦点到对话框
       await nextTick()

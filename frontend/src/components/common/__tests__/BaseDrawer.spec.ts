@@ -70,21 +70,6 @@ describe('BaseDrawer', () => {
     expect(pinned.emitted('close')).toBeUndefined()
   })
 
-  it('leaves Escape and the scroll lock to a dialog opened above it', async () => {
-    document.documentElement.dataset.motion = 'reduced'
-    const drawer = mount(BaseDrawer, { props: { show: true, title: 'Drawer' }, attachTo: document.body, global: { stubs: { Icon: true } } })
-    const dialog = mount(BaseDialog, { props: { show: true, title: 'Confirm' }, global: { stubs: { Icon: true } } })
-
-    pressEscape()
-    expect(dialog.emitted('close')).toHaveLength(1)
-    expect(drawer.emitted('close')).toBeUndefined()
-
-    await dialog.setProps({ show: false })
-    expect(document.body.classList.contains('modal-open')).toBe(true)
-    pressEscape()
-    expect(drawer.emitted('close')).toHaveLength(1)
-  })
-
   it('shows without animation under reduced motion and animates transform and opacity otherwise', async () => {
     document.documentElement.dataset.motion = 'reduced'
     const still = mountWithTrigger()
@@ -105,5 +90,95 @@ describe('BaseDrawer', () => {
     const element = panel()!
     moving.wrapper.unmount()
     expect(element.style.transform).toBe('')
+  })
+})
+
+// Two layers opened from each other: the one opened last is drawn on top (higher z-index, so it takes the
+// clicks), holds focus and gets Escape; closing it hands focus back to the button that opened it.
+describe('BaseDrawer and BaseDialog layer order', () => {
+  const layerZ = (selector: string) => Number(document.querySelector<HTMLElement>(selector)!.style.zIndex)
+  const inside = (selector: string) => !!document.querySelector(selector)?.contains(document.activeElement)
+  const button = (name: string) => document.querySelector<HTMLButtonElement>(`[data-test="${name}"]`)!
+  const press = async (name: string) => {
+    button(name).focus()
+    button(name).click()
+    await flushPromises()
+  }
+
+  // The page opens the first layer; a button inside each layer opens the other one.
+  function mountLayers(first: 'drawer' | 'dialog', dialogZ?: number) {
+    const drawerOpen = ref(false)
+    const dialogOpen = ref(false)
+    const Host = defineComponent({
+      setup: () => () => [
+        h('button', { 'data-test': 'page', onClick: () => { (first === 'drawer' ? drawerOpen : dialogOpen).value = true } }, 'open'),
+        h(BaseDrawer, { show: drawerOpen.value, title: 'Account', onClose: () => { drawerOpen.value = false } }, {
+          default: () => h('button', { 'data-test': 'in-drawer', onClick: () => { dialogOpen.value = true } }, 'reset')
+        }),
+        h(BaseDialog, { show: dialogOpen.value, title: 'Confirm', zIndex: dialogZ, onClose: () => { dialogOpen.value = false } }, {
+          default: () => h('button', { 'data-test': 'in-dialog', onClick: () => { drawerOpen.value = true } }, 'account')
+        })
+      ]
+    })
+    mount(Host, { attachTo: document.body, global: { stubs: { Icon: true } } })
+    return { drawerOpen, dialogOpen }
+  }
+
+  it('puts a confirm dialog opened from the drawer on top', async () => {
+    document.documentElement.dataset.motion = 'reduced'
+    const { drawerOpen, dialogOpen } = mountLayers('drawer')
+    await press('page')
+    await press('in-drawer')
+
+    expect(layerZ('[data-base-dialog]')).toBeGreaterThan(layerZ('[data-base-drawer]'))
+    expect(inside('[data-base-dialog]')).toBe(true)
+
+    pressEscape()
+    await flushPromises()
+    expect([dialogOpen.value, drawerOpen.value]).toEqual([false, true])
+    expect(document.activeElement).toBe(button('in-drawer'))
+
+    pressEscape()
+    await flushPromises()
+    expect(drawerOpen.value).toBe(false)
+    expect(document.activeElement).toBe(button('page'))
+  })
+
+  it('puts a drawer opened from a dialog on top, also above a dialog with a raised z-index', async () => {
+    document.documentElement.dataset.motion = 'reduced'
+    const { drawerOpen, dialogOpen } = mountLayers('dialog', 60)
+    await press('page')
+    await press('in-dialog')
+
+    expect(layerZ('[data-base-dialog]')).toBe(60)
+    expect(layerZ('[data-base-drawer]')).toBeGreaterThan(60)
+    expect(inside('[data-drawer-panel]')).toBe(true)
+
+    pressEscape()
+    await flushPromises()
+    expect([drawerOpen.value, dialogOpen.value]).toEqual([false, true])
+    expect(document.activeElement).toBe(button('in-dialog'))
+
+    pressEscape()
+    await flushPromises()
+    expect(dialogOpen.value).toBe(false)
+    expect(document.activeElement).toBe(button('page'))
+  })
+
+  it('leaves focus and the scroll lock with the upper layer when the lower one closes first', async () => {
+    document.documentElement.dataset.motion = 'reduced'
+    const { drawerOpen, dialogOpen } = mountLayers('drawer')
+    await press('page')
+    await press('in-drawer')
+
+    drawerOpen.value = false
+    await flushPromises()
+    expect(document.querySelector('[data-base-drawer]')).toBeNull()
+    expect(inside('[data-base-dialog]')).toBe(true)
+    expect(document.body.classList.contains('modal-open')).toBe(true)
+
+    dialogOpen.value = false
+    await flushPromises()
+    expect(document.body.classList.contains('modal-open')).toBe(false)
   })
 })
