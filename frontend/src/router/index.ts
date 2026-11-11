@@ -614,6 +614,19 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/email-campaigns',
+    name: 'AdminEmailCampaigns',
+    component: () => import('@/features/email-campaigns/EmailCampaignsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      permission: 'super_only',
+      title: 'Email Campaigns',
+      titleKey: 'admin.emailCampaigns.title',
+      descriptionKey: 'admin.emailCampaigns.description'
+    }
+  },
+  {
     path: '/admin/support-tickets',
     name: 'AdminSupportTickets',
     component: () => import('@/views/admin/SupportTicketsView.vue'),

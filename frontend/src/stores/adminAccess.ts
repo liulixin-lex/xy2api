@@ -85,6 +85,7 @@ export const ADMIN_PAGES_IN_SIDEBAR_ORDER: readonly AdminPageEntry[] = [
   { path: '/admin/share-scheduling', permission: 'share_scheduling' },
   { path: '/admin/plugins', permission: 'super_only' },
   { path: '/admin/announcements', permission: 'announcements' },
+  { path: '/admin/email-campaigns', permission: 'super_only' },
   { path: '/admin/support-tickets', permission: 'support_tickets', gate: 'supportTickets' },
   { path: '/admin/support-tickets/:id(\\d+)', permission: 'support_tickets', gate: 'supportTickets' },
   { path: '/admin/proxies', permission: 'proxies' },

@@ -12,6 +12,7 @@ import resilience from './resilience'
 import groupCategories from './groupCategories'
 import groupQualityGate from './groupQualityGate'
 import operatorAccess from './operatorAccess'
+import emailCampaigns from './emailCampaigns'
 
 export default {
   ...overview,
@@ -28,4 +29,5 @@ export default {
   ...groupCategories,
   ...groupQualityGate,
   ...operatorAccess,
+  ...emailCampaigns,
 }

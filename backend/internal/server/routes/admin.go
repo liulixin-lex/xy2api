@@ -80,6 +80,7 @@ func RegisterAdminRoutes(
 		registerAnnouncementRoutes(admin, h)
 		registerSupportTicketRoutes(admin, h)
 		registerSupportChatRoutes(admin, h)
+		registerEmailCampaignRoutes(v1, admin, h, stepUpAuth, panelRateLimiter)
 
 		// OpenAI OAuth
 		registerOpenAIOAuthRoutes(admin, h)

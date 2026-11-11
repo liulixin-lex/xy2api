@@ -75,6 +75,23 @@ var ServiceEnforcedFields = map[FieldRule]bool{
 }
 
 var catalog = map[string]Entry{
+	"GET /email-campaigns/settings":            {Kind: KindSuperOnly},
+	"PUT /email-campaigns/settings":            {Kind: KindSuperOnly},
+	"POST /email-campaigns/preview":            {Kind: KindSuperOnly},
+	"POST /email-campaigns/render":             {Kind: KindSuperOnly},
+	"POST /email-campaigns/test-send":          {Kind: KindSuperOnly},
+	"POST /email-campaigns":                    {Kind: KindSuperOnly},
+	"GET /email-campaigns":                     {Kind: KindSuperOnly},
+	"GET /email-campaigns/:id":                 {Kind: KindSuperOnly},
+	"GET /email-campaigns/:id/recipients":      {Kind: KindSuperOnly},
+	"POST /email-campaigns/:id/pause":          {Kind: KindSuperOnly},
+	"POST /email-campaigns/:id/resume":         {Kind: KindSuperOnly},
+	"POST /email-campaigns/:id/cancel":         {Kind: KindSuperOnly},
+	"POST /email-campaigns/:id/retry-failed":   {Kind: KindSuperOnly},
+	"GET /email-campaigns/suppressions":        {Kind: KindSuperOnly},
+	"POST /email-campaigns/suppressions":       {Kind: KindSuperOnly},
+	"DELETE /email-campaigns/suppressions/:id": {Kind: KindSuperOnly},
+
 	"GET /accounts/:id/openai-totp":               {Kind: KindSuperOnly},
 	"PUT /accounts/:id/openai-totp":               {Kind: KindSuperOnly},
 	"POST /accounts/:id/openai-totp/rotate":       {Kind: KindSuperOnly},

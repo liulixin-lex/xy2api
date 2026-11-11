@@ -145,6 +145,7 @@ func provideCleanup(
 	imageTasks *service.ImageTaskService,
 	asyncImage *handler.AsyncImageHandler,
 	supportChatPurge *service.SupportChatImagePurgeService,
+	emailCampaignDispatcher *service.EmailCampaignDispatcher,
 	mcpServer *mcp.Server,
 ) func() {
 	return func() {
@@ -168,6 +169,7 @@ func provideCleanup(
 
 		// 应用层清理步骤可并行执行，基础设施资源（Redis/Ent）最后按顺序关闭。
 		parallelSteps := []cleanupStep{
+			{"EmailCampaignDispatcher", func() error { emailCampaignDispatcher.Stop(); return nil }},
 			{"MCPServer", func() error {
 				if mcpServer != nil {
 					mcpServer.Close()

@@ -202,36 +202,7 @@ func (s *EmailService) SendEmailWithConfig(config *SMTPConfig, to, subject, body
 		return err
 	}
 
-	client, err := s.connectSMTP(config)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = client.Close() }()
-
-	auth := smtp.PlainAuth("", config.Username, config.Password, config.Host)
-	if err = client.Auth(auth); err != nil {
-		return fmt.Errorf("smtp auth: %w", err)
-	}
-	if err = client.Mail(message.envelopeFrom); err != nil {
-		return fmt.Errorf("smtp mail: %w", err)
-	}
-	if err = client.Rcpt(message.envelopeTo); err != nil {
-		return fmt.Errorf("smtp rcpt: %w", err)
-	}
-	w, err := client.Data()
-	if err != nil {
-		return fmt.Errorf("smtp data: %w", err)
-	}
-	if _, err = w.Write(message.data); err != nil {
-		return fmt.Errorf("write msg: %w", err)
-	}
-	if err = w.Close(); err != nil {
-		return fmt.Errorf("close writer: %w", err)
-	}
-	// Email is sent successfully after w.Close(), ignore Quit errors
-	// Some SMTP servers return non-standard responses on QUIT
-	_ = client.Quit()
-	return nil
+	return s.sendSMTPMessage(context.Background(), config, message)
 }
 
 // smtpTestRootCAs 仅供单元测试注入自签 CA，生产环境始终为 nil（走系统信任链）。
@@ -254,34 +225,42 @@ func smtpTLSConfig(host string) *tls.Config {
 //   - UseTLS=false：明文连接后若服务器支持 STARTTLS 则机会式升级，
 //     与 smtp.SendMail 的默认行为一致。
 func (s *EmailService) connectSMTP(config *SMTPConfig) (*smtp.Client, error) {
+	return s.connectSMTPContext(context.Background(), config)
+}
+
+func (s *EmailService) connectSMTPContext(ctx context.Context, config *SMTPConfig) (*smtp.Client, error) {
 	addr := fmt.Sprintf("%s:%d", config.Host, config.Port)
 	dialer := &net.Dialer{Timeout: smtpDialTimeout}
 	tlsConfig := smtpTLSConfig(config.Host)
 
 	if config.UseTLS {
-		conn, err := tls.DialWithDialer(dialer, "tcp", addr, tlsConfig)
+		conn, err := (&tls.Dialer{NetDialer: dialer, Config: tlsConfig}).DialContext(ctx, "tcp", addr)
 		if err == nil {
+			stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+			defer stop()
 			return newSMTPClient(conn, config.Host)
 		}
 		var recordErr tls.RecordHeaderError
 		if !errors.As(err, &recordErr) {
-			return nil, fmt.Errorf("tls dial: %w", err)
+			return nil, smtpFailure("tls", fmt.Errorf("tls dial: %w", err), false)
 		}
 		// SMTP 服务器先发问候语：明文问候会让 TLS 握手立刻返回
 		// RecordHeaderError，据此可靠判定对端期望 STARTTLS。
-		return s.connectSMTPStartTLS(dialer, addr, config.Host, tlsConfig, true)
+		return s.connectSMTPStartTLS(ctx, dialer, addr, config.Host, tlsConfig, true)
 	}
 
-	return s.connectSMTPStartTLS(dialer, addr, config.Host, tlsConfig, false)
+	return s.connectSMTPStartTLS(ctx, dialer, addr, config.Host, tlsConfig, false)
 }
 
 // connectSMTPStartTLS 建立明文连接并按需升级 STARTTLS。
 // mandatory 为 true 时服务器必须支持 STARTTLS，否则报错。
-func (s *EmailService) connectSMTPStartTLS(dialer *net.Dialer, addr, host string, tlsConfig *tls.Config, mandatory bool) (*smtp.Client, error) {
-	conn, err := dialer.Dial("tcp", addr)
+func (s *EmailService) connectSMTPStartTLS(ctx context.Context, dialer *net.Dialer, addr, host string, tlsConfig *tls.Config, mandatory bool) (*smtp.Client, error) {
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("smtp dial: %w", err)
 	}
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
 	client, err := newSMTPClient(conn, host)
 	if err != nil {
 		return nil, err
@@ -289,13 +268,13 @@ func (s *EmailService) connectSMTPStartTLS(dialer *net.Dialer, addr, host string
 	if ok, _ := client.Extension("STARTTLS"); !ok {
 		if mandatory {
 			_ = client.Close()
-			return nil, errors.New("smtp server does not support STARTTLS")
+			return nil, smtpFailure("tls", errors.New("smtp server does not support STARTTLS"), false)
 		}
 		return client, nil
 	}
 	if err := client.StartTLS(tlsConfig); err != nil {
 		_ = client.Close()
-		return nil, fmt.Errorf("starttls: %w", err)
+		return nil, smtpFailure("tls", fmt.Errorf("starttls: %w", err), false)
 	}
 	return client, nil
 }

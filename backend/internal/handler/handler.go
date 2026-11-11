@@ -80,6 +80,7 @@ type Handlers struct {
 	BatchImage       *BatchImageHandler
 	SupportTicket    *SupportTicketHandler
 	SupportChat      *SupportChatHandler
+	EmailCampaign    *EmailCampaignHandler
 }
 
 // BuildInfo contains build-time information

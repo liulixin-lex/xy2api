@@ -226,6 +226,7 @@ func ProvideHandlers(
 	batchImageHandler *BatchImageHandler,
 	supportTicketHandler *SupportTicketHandler,
 	supportChatHandler *SupportChatHandler,
+	emailCampaignHandler *EmailCampaignHandler,
 	_ *service.IdempotencyCoordinator,
 	_ *service.IdempotencyCleanupService,
 	_ *service.OpenAIQuotaAutoResetService,
@@ -256,6 +257,7 @@ func ProvideHandlers(
 		BatchImage:       batchImageHandler,
 		SupportTicket:    supportTicketHandler,
 		SupportChat:      supportChatHandler,
+		EmailCampaign:    emailCampaignHandler,
 	}
 }
 
@@ -285,6 +287,7 @@ var ProviderSet = wire.NewSet(
 	ProvideBatchImageHandler,
 	NewSupportTicketHandler,
 	NewSupportChatHandler,
+	NewEmailCampaignHandler,
 
 	// Admin handlers
 	admin.NewDashboardHandler,

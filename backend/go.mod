@@ -53,6 +53,7 @@ require (
 	github.com/tiktoken-go/tokenizer v0.10.0
 	github.com/wechatpay-apiv3/wechatpay-go v0.2.21
 	github.com/xuri/excelize/v2 v2.11.1
+	github.com/yuin/goldmark v1.8.7
 	github.com/zeromicro/go-zero v1.10.3
 	go.uber.org/zap v1.28.0
 	golang.org/x/crypto v0.58.0

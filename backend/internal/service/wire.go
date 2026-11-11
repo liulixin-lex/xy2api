@@ -905,6 +905,8 @@ var ProviderSet = wire.NewSet(
 	NewAnnouncementService,
 	NewSupportTicketService,
 	NewSupportChatService,
+	NewEmailCampaignService,
+	ProvideEmailCampaignDispatcher,
 	ProvideSupportChatImagePurgeService,
 	NewOpenAITOTPService,
 	NewAdminService,
