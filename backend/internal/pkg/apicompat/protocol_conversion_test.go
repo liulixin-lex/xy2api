@@ -63,6 +63,12 @@ func TestProtocolExactTokenLimits(t *testing.T) {
 		back, err := ResponsesToChatCompletionsRequest(out)
 		require.NoError(t, err)
 		require.Equal(t, n, *back.MaxCompletionTokens)
+		wire, err := json.Marshal(out)
+		require.NoError(t, err)
+		var native ResponsesRequest
+		require.NoError(t, json.Unmarshal(wire, &native))
+		require.Equal(t, max(n, nativeResponsesMinMaxOutputTokens), *native.MaxOutputTokens)
+		require.Equal(t, n, *out.MaxOutputTokens, "native wire projection must not mutate the intermediate request")
 	}
 	for _, n := range []int{0, -1} {
 		_, err := ChatCompletionsToResponses(&ChatCompletionsRequest{MaxTokens: &n})
@@ -119,10 +125,33 @@ func TestProtocolFormatAndParallelControls(t *testing.T) {
 		_, err := ChatCompletionsToResponses(&ChatCompletionsRequest{ResponseFormat: json.RawMessage(raw)})
 		requireUnsupportedConversion(t, err, "response_format")
 	}
-	for _, raw := range []string{`{"type":"json_object"}`, `{"type":"json_schema","strict":false,"schema":{"type":"object"}}`, `{"type":"json_schema","description":"hint","schema":{"type":"object"}}`} {
+	t.Run("normalize valid response format type", func(t *testing.T) {
+		responses, err := ChatCompletionsToResponses(&ChatCompletionsRequest{ResponseFormat: json.RawMessage(`{"type":" JSON_OBJECT "}`)})
+		require.NoError(t, err)
+		require.JSONEq(t, `{"type":"json_object"}`, string(responses.Text.Format))
+		back, err := ResponsesToChatCompletionsRequest(responses)
+		require.NoError(t, err)
+		require.JSONEq(t, `{"type":"json_object"}`, string(back.ResponseFormat))
+	})
+	t.Run("nullable strict preserves unspecified intent", func(t *testing.T) {
+		format := json.RawMessage(`{"type":"json_schema","json_schema":{"schema":{"type":"object"},"strict":null}}`)
+		responses, err := ChatCompletionsToResponses(&ChatCompletionsRequest{ResponseFormat: format})
+		require.NoError(t, err)
+		back, err := ResponsesToChatCompletionsRequest(responses)
+		require.NoError(t, err)
+		require.JSONEq(t, string(format), string(back.ResponseFormat))
+	})
+	for _, raw := range []string{`{"type":"json_object"}`, `{"type":"json_schema","strict":false,"schema":{"type":"object"}}`} {
 		_, err := ResponsesToAnthropicRequest(&ResponsesRequest{Input: json.RawMessage(`"hi"`), Text: &ResponsesText{Format: json.RawMessage(raw)}})
 		requireUnsupportedConversion(t, err, "text.format")
 	}
+	t.Run("merge format description without overwriting schema description", func(t *testing.T) {
+		out, err := ResponsesToAnthropicRequest(&ResponsesRequest{Input: json.RawMessage(`"hi"`), Text: &ResponsesText{Format: json.RawMessage(`{"type":"json_schema","description":"format hint","schema":{"type":"object","properties":{},"description":"format hint"}}`)}})
+		require.NoError(t, err)
+		require.JSONEq(t, `{"type":"json_schema","schema":{"type":"object","properties":{},"description":"format hint"}}`, string(out.OutputConfig.Format))
+		_, err = ResponsesToAnthropicRequest(&ResponsesRequest{Input: json.RawMessage(`"hi"`), Text: &ResponsesText{Format: json.RawMessage(`{"type":"json_schema","description":"format hint","schema":{"type":"object","description":"schema hint"}}`)}})
+		requireUnsupportedConversion(t, err, "description")
+	})
 }
 
 func TestProtocolMediaRoundTrips(t *testing.T) {

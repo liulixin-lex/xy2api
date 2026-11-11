@@ -1,6 +1,13 @@
 package apicompat
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
+
+func normalizedResponseFormatType(raw json.RawMessage) string {
+	return strings.ToLower(strings.TrimSpace(rawString(raw)))
+}
 
 // Validate only the format wrapper. Keep schema bytes intact, including numeric
 // precision, annotations and nested constraints; the provider validates schemas.
@@ -17,7 +24,7 @@ func validateResponseFormat(raw json.RawMessage, chat bool) error {
 	if !ok || obj == nil {
 		return unsupportedConversion(field, "expected a format object")
 	}
-	switch rawString(obj["type"]) {
+	switch normalizedResponseFormatType(obj["type"]) {
 	case "text", "json_object":
 		if len(obj) != 1 {
 			return unsupportedConversion(field, "unexpected format fields")
@@ -57,9 +64,9 @@ func validateResponseFormat(raw json.RawMessage, chat bool) error {
 				}
 			}
 		}
-		if value, exists := obj["strict"]; exists {
+		if value, exists := obj["strict"]; exists && len(normalizedRawJSON(value)) > 0 {
 			var strict bool
-			if len(normalizedRawJSON(value)) == 0 || json.Unmarshal(value, &strict) != nil {
+			if json.Unmarshal(value, &strict) != nil {
 				return unsupportedConversion(field+".strict", "expected a boolean")
 			}
 		}
@@ -77,7 +84,7 @@ func responsesTextFormatToAnthropic(raw json.RawMessage) (json.RawMessage, error
 		return nil, nil
 	}
 	obj, _ := rawJSONObject(raw)
-	switch rawString(obj["type"]) {
+	switch normalizedResponseFormatType(obj["type"]) {
 	case "text":
 		return nil, nil
 	case "json_object":
@@ -91,8 +98,13 @@ func responsesTextFormatToAnthropic(raw json.RawMessage) (json.RawMessage, error
 		if string(bytesTrimSpace(obj["strict"])) == "false" {
 			return nil, unsupportedConversion("text.format.strict", "Anthropic structured output cannot disable schema enforcement")
 		}
-		if rawString(obj["description"]) != "" {
-			return nil, unsupportedConversion("text.format.description", "Anthropic has no format-description field; use a schema annotation")
+		if description := rawString(obj["description"]); description != "" {
+			schema, _ := rawJSONObject(obj["schema"])
+			if existing, exists := schema["description"]; exists && rawString(existing) != description {
+				return nil, unsupportedConversion("text.format.description", "format and schema descriptions conflict")
+			}
+			schema["description"] = obj["description"]
+			obj["schema"], _ = json.Marshal(schema)
 		}
 		return json.Marshal(map[string]json.RawMessage{"type": rawJSONString("json_schema"), "schema": obj["schema"]})
 	}

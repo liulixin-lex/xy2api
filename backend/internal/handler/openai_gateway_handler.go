@@ -934,6 +934,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			})
 		}
 		if err != nil {
+			if handleUnsupportedProtocolConversion(c, err, "responses", streamStarted) {
+				return
+			}
 			if result != nil && result.ClientDisconnect {
 				reqLog.Info("openai.client_disconnected",
 					zap.Int64("account_id", account.ID),
@@ -1589,6 +1592,9 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			})
 		}
 		if err != nil {
+			if handleUnsupportedProtocolConversion(c, err, "messages", streamStarted) {
+				return
+			}
 			// A canceled pre-output attempt has no billable result or account failure.
 			if result == nil && errors.Is(err, context.Canceled) && failoverClientGone(c) {
 				reqLog.Info("openai_messages.client_canceled_before_output", zap.Int64("account_id", account.ID))

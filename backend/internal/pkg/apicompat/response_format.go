@@ -16,8 +16,12 @@ func chatResponseFormatToResponsesTextFormatUnchecked(raw json.RawMessage) json.
 	}
 
 	obj, ok := rawJSONObject(raw)
-	if !ok || rawString(obj["type"]) != "json_schema" {
+	if !ok {
 		return raw
+	}
+	formatType := normalizedResponseFormatType(obj["type"])
+	if formatType != "json_schema" {
+		return json.RawMessage(`{"type":"` + formatType + `"}`)
 	}
 
 	schemaRaw := normalizedRawJSON(obj["json_schema"])
@@ -52,8 +56,12 @@ func responsesTextFormatToChatResponseFormatUnchecked(raw json.RawMessage) json.
 	}
 
 	obj, ok := rawJSONObject(raw)
-	if !ok || rawString(obj["type"]) != "json_schema" {
+	if !ok {
 		return raw
+	}
+	formatType := normalizedResponseFormatType(obj["type"])
+	if formatType != "json_schema" {
+		return json.RawMessage(`{"type":"` + formatType + `"}`)
 	}
 	if _, alreadyChatShape := obj["json_schema"]; alreadyChatShape {
 		return raw

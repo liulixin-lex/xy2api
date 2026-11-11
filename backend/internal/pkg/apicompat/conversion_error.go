@@ -5,6 +5,8 @@ import (
 	"fmt"
 )
 
+const nativeResponsesMinMaxOutputTokens = 128
+
 // UnsupportedConversionError identifies input that cannot be converted without
 // losing client intent. Callers can use errors.As, including through json.Marshal.
 // Field is a protocol field path; Reason never includes user content.
@@ -86,13 +88,28 @@ func applyAnthropicOutputControls(req *AnthropicRequest, out *ResponsesRequest) 
 	return nil
 }
 
-// MarshalJSON rejects bridge-only stop sequences at the native Responses wire
-// boundary. Chat and Anthropic can represent stops, but Responses cannot.
-func (r ResponsesRequest) MarshalJSON() ([]byte, error) {
+// NativeWireRequest applies the established native Responses token floor only
+// at the wire boundary. Intermediate Chat/Anthropic conversions retain the
+// client's exact limit. Bridge-only stops cannot cross this boundary.
+func (r ResponsesRequest) NativeWireRequest() (ResponsesRequest, error) {
 	if stops, err := parseStopSequences(r.bridgeStop); err != nil {
-		return nil, err
+		return r, err
 	} else if len(stops) > 0 {
-		return nil, unsupportedConversion("stop", "the Responses wire protocol has no stop-sequence equivalent")
+		return r, unsupportedConversion("stop", "the Responses wire protocol has no stop-sequence equivalent")
+	}
+	if r.MaxOutputTokens != nil && *r.MaxOutputTokens > 0 && *r.MaxOutputTokens < nativeResponsesMinMaxOutputTokens {
+		limit := nativeResponsesMinMaxOutputTokens
+		r.MaxOutputTokens = &limit
+	}
+	return r, nil
+}
+
+// MarshalJSON refuses lossy native wire serialization, including when callers
+// marshal the intermediate request through an interface or enclosing struct.
+func (r ResponsesRequest) MarshalJSON() ([]byte, error) {
+	r, err := r.NativeWireRequest()
+	if err != nil {
+		return nil, err
 	}
 	type wire ResponsesRequest
 	return json.Marshal(wire(r))

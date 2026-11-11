@@ -341,6 +341,9 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 
 		if err != nil {
+			if handleUnsupportedProtocolConversion(c, err, "chat", streamStarted) {
+				return
+			}
 			if service.IsAnthropicCompatCandidateError(err) {
 				fs.FailedAccountIDs[account.ID] = struct{}{}
 				continue

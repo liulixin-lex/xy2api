@@ -324,6 +324,9 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		}
 
 		if err != nil {
+			if handleUnsupportedProtocolConversion(c, err, "responses", streamStarted) {
+				return
+			}
 			if service.IsAnthropicCompatCandidateError(err) {
 				fs.FailedAccountIDs[account.ID] = struct{}{}
 				continue
