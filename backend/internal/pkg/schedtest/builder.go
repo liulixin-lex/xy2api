@@ -18,6 +18,7 @@ var corpus string
 // ID must identify one test, and Model is the admitted request model.
 type Session struct {
 	ID, Model string
+	Effort    string
 	Input     json.RawMessage
 	Answer    string
 }
@@ -52,6 +53,9 @@ func Build(tier schedquality.TestTier, turn int, session Session, count func([]b
 		return nil
 	}
 	spec := schedquality.TestTiers[tier]
+	if session.Effort != "" {
+		spec.Effort = session.Effort
+	}
 	key := session.ID + "/" + tier.String()
 	req := request{Model: session.Model, Stream: true, Store: false, Reasoning: reasoning{spec.Effort, "auto"}, MaxOutputTokens: schedquality.TestOutputCap, PromptCacheKey: key, Instructions: openai.CodexBaseInstructionsForModel(session.Model), Tools: tools}
 	var prefix []json.RawMessage
@@ -99,6 +103,10 @@ func Build(tier schedquality.TestTier, turn int, session Session, count func([]b
 		return marshal(req)
 	}
 	low, high := 1, len(corpus)
+	tolerance := max(1, target/100)
+	if turn > 1 {
+		tolerance = schedquality.TestTurnGrowthTokens / 20
+	}
 	best := render(low)
 	bestN := count(best)
 	if bestN <= 0 {
@@ -114,7 +122,7 @@ func Build(tier schedquality.TestTier, turn int, session Session, count func([]b
 		if abs(n-target) < abs(bestN-target) {
 			best, bestN = candidate, n
 		}
-		if abs(n-target) <= max(1, target/100) {
+		if abs(n-target) <= tolerance {
 			return candidate
 		}
 		if n < target {

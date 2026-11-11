@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
+	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/schedtest"
 )
 
@@ -38,6 +39,7 @@ type SchedTestRunnerService struct {
 	now         func() time.Time
 	count       func([]byte) int
 	wait        func(context.Context, time.Duration) bool
+	acquire     func(context.Context, *Account, schedquality.TestTier) (*AcquireResult, error)
 	lockCache   LeaderLockCache
 	db          *sql.DB
 	owner       string
@@ -52,7 +54,11 @@ func NewSchedTestRunnerService(f SchedTestForwarder, a SchedTestAdmission, c *Co
 		now = time.Now
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &SchedTestRunnerService{forward: f, admission: a, concurrency: c, accounts: accounts, store: store, now: now, count: schedTestCount, wait: schedTestWait, lockCache: lock, db: db, owner: uuid.NewString(), ctx: ctx, cancel: cancel}
+	s := &SchedTestRunnerService{forward: f, admission: a, concurrency: c, accounts: accounts, store: store, now: now, count: schedTestCount, wait: schedTestWait, lockCache: lock, db: db, owner: uuid.NewString(), ctx: ctx, cancel: cancel}
+	s.acquire = func(ctx context.Context, account *Account, _ schedquality.TestTier) (*AcquireResult, error) {
+		return s.concurrency.AcquireAccountSlot(ctx, account.ID, account.Concurrency)
+	}
+	return s
 }
 
 func schedTestWait(ctx context.Context, delay time.Duration) bool {
@@ -172,12 +178,45 @@ func schedTestCount(body []byte) int {
 	return n
 }
 
+func schedTestEffort(account *Account, model string, tier schedquality.TestTier) string {
+	wanted := schedquality.TestTiers[tier].Effort
+	metadata, ok := account.GetUpstreamModelMetadata(model)
+	levels := normalizeReasoningLevels(metadata.SupportedReasoningLevels)
+	if len(levels) == 0 && metadata.Reasoning != nil && !*metadata.Reasoning {
+		levels = []string{"none"}
+	}
+	if (!ok || len(levels) == 0) && (isOpenAICodexGPTModel(model) || isDeepSeekCodexModel(model) || isGrokCodexModel(model) || isClaudeCodexModel(model)) {
+		for _, level := range newConfiguredCodexModelDescriptor(model).SupportedReasoningLevels {
+			levels = append(levels, level.Effort)
+		}
+	}
+	best, bestRank := "", -1
+	for _, level := range levels {
+		if level == wanted {
+			return wanted
+		}
+		rank, valid := reasoningEffortRank(level)
+		if level == "none" {
+			rank, valid = 0, true
+		} else if level == "ultra" {
+			rank, valid = 7, true
+		}
+		if valid && rank > bestRank {
+			best, bestRank = level, rank
+		}
+	}
+	if best != "" {
+		return best
+	}
+	return wanted
+}
+
 func (s *SchedTestRunnerService) run(record SchedTestRecord, account *Account, requestModel string) {
 	ctx, cancel := context.WithTimeout(s.ctx, schedquality.TestTimeout)
 	defer cancel()
-	parallel := 3
+	parallel := schedquality.TestTierParallelMax
 	if account.Concurrency > 0 {
-		parallel = min(3, max(1, account.Concurrency-1))
+		parallel = min(parallel, max(1, account.Concurrency-1))
 	}
 	sem := make(chan struct{}, parallel)
 	var mu sync.Mutex
@@ -185,6 +224,7 @@ func (s *SchedTestRunnerService) run(record SchedTestRecord, account *Account, r
 	sent := 0
 	busy := 0
 	failed := false
+	notSchedulable := false
 	for tier := schedquality.TierSmall; tier <= schedquality.TierLarge; tier++ {
 		wg.Add(1)
 		go func(tier schedquality.TestTier) {
@@ -196,13 +236,20 @@ func (s *SchedTestRunnerService) run(record SchedTestRecord, account *Account, r
 			}
 			defer func() { <-sem }()
 			session := schedtest.Session{ID: record.ID, Model: requestModel}
+			session.Effort = schedTestEffort(account, record.Model, tier)
 			prev := 0
 			for turn := 1; turn <= schedquality.TestTurnsPerTier; turn++ {
+				if ctx.Err() != nil {
+					return
+				}
 				if turn > 1 && !s.wait(ctx, schedquality.TestTurnGap) {
 					return
 				}
 				mapped, ok, _ := s.admission.TestRequestModel(ctx, account, record.Model)
 				if !ok || mapped == "" {
+					mu.Lock()
+					notSchedulable = true
+					mu.Unlock()
 					cancel()
 					return
 				}
@@ -218,24 +265,18 @@ func (s *SchedTestRunnerService) run(record SchedTestRecord, account *Account, r
 				var slot *AcquireResult
 				var err error
 				for {
-					slot, err = s.concurrency.AcquireAccountSlot(slotCtx, account.ID, account.Concurrency)
-					if err != nil || slot.Acquired {
+					slot, err = s.acquire(slotCtx, account, tier)
+					if err != nil || slot == nil || slot.Acquired {
 						break
 					}
-					timer := time.NewTimer(100 * time.Millisecond)
-					select {
-					case <-timer.C:
-					case <-slotCtx.Done():
-						timer.Stop()
-					}
-					if slotCtx.Err() != nil {
+					if !s.wait(slotCtx, 100*time.Millisecond) {
 						break
 					}
 				}
 				slotCancel()
 				if err != nil || slot == nil || !slot.Acquired {
 					mu.Lock()
-					if err != nil && ctx.Err() == nil {
+					if err != nil && !errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
 						failed = true
 					} else {
 						busy++
@@ -246,25 +287,33 @@ func (s *SchedTestRunnerService) run(record SchedTestRecord, account *Account, r
 				mapped, ok, _ = s.admission.TestRequestModel(ctx, account, record.Model)
 				if !ok || mapped != session.Model {
 					slot.ReleaseFunc()
+					mu.Lock()
+					notSchedulable = true
+					mu.Unlock()
 					cancel()
 					return
 				}
-				mu.Lock()
-				sent++
-				mu.Unlock()
+				if ctx.Err() != nil {
+					slot.ReleaseFunc()
+					return
+				}
 				turnCtx, turnCancel := context.WithTimeout(ctx, schedquality.TestTurnTimeout)
-				result, samples, answer, forwardErr := schedTestForward(turnCtx, s.forward, account, record.Model, record.ID+"/"+tier.String(), body, turn > 1, prev)
-				deadline := errors.Is(turnCtx.Err(), context.DeadlineExceeded)
+				result, samples, answer, _ := schedTestForward(turnCtx, s.forward, account, record.Model, record.ID+"/"+tier.String(), body, turn > 1, prev)
+				deadline := errors.Is(turnCtx.Err(), context.DeadlineExceeded) && !errors.Is(ctx.Err(), context.DeadlineExceeded)
 				turnCancel()
 				slot.ReleaseFunc()
-				selected := schedquality.AttemptSample{Outcome: schedquality.OutcomeOther}
-				if len(samples) > 0 {
-					selected = samples[len(samples)-1]
-					for _, sample := range samples {
-						if sample.Outcome == schedquality.OutcomeTimeout || sample.Outcome == schedquality.OutcomeAccountFault {
-							selected = sample
-							break
-						}
+				// Capture begins at transport send. Credential/build failures have no sample.
+				if len(samples) == 0 {
+					mu.Lock()
+					failed = true
+					mu.Unlock()
+					return
+				}
+				selected := samples[len(samples)-1]
+				for _, sample := range samples {
+					if sample.Outcome == schedquality.OutcomeTimeout || sample.Outcome == schedquality.OutcomeAccountFault {
+						selected = sample
+						break
 					}
 				}
 				if deadline && selected.Outcome != schedquality.OutcomeTimeout && selected.Outcome != schedquality.OutcomeAccountFault {
@@ -281,12 +330,14 @@ func (s *SchedTestRunnerService) run(record SchedTestRecord, account *Account, r
 						selected.Outcome = schedquality.OutcomeOther
 					}
 				}
-				if forwardErr != nil && selected.Outcome == schedquality.OutcomeOK {
-					selected.Outcome = schedquality.OutcomeOther
+				var p *int
+				if turn > 1 {
+					previous := prev
+					p = &previous
 				}
-				p := prev
-				row := schedquality.TestTurn{Tier: tier, Turn: turn, Class: selected.Class, Warm: turn > 1, TTFOMs: selected.TTFOMs, Outcome: selected.Outcome, Detail: selected.Detail, PromptTokens: selected.PromptTokens, PrevPromptTokens: &p, CacheReadTokens: selected.CacheReadTokens}
+				row := schedquality.TestTurn{Tier: tier, Turn: turn, Class: selected.Class, Warm: turn > 1, TTFOMs: selected.TTFOMs, Outcome: selected.Outcome, Detail: selected.Detail, PromptTokens: selected.PromptTokens, PrevPromptTokens: p, CacheReadTokens: selected.CacheReadTokens}
 				mu.Lock()
+				sent += len(samples)
 				record.Turns = append(record.Turns, row)
 				if result != nil {
 					record.InputTokens += int64(result.Usage.InputTokens)
@@ -318,6 +369,8 @@ func (s *SchedTestRunnerService) run(record SchedTestRecord, account *Account, r
 		record.Done = true
 	} else if failed {
 		record.AbortReason = "error"
+	} else if notSchedulable {
+		record.AbortReason = "not_schedulable"
 	} else if busy > 0 {
 		record.AbortReason = "busy"
 	} else if ctx.Err() != nil {
@@ -327,7 +380,9 @@ func (s *SchedTestRunnerService) run(record SchedTestRecord, account *Account, r
 	}
 	writeCtx, writeCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer writeCancel()
-	_ = s.store.Finish(writeCtx, record)
+	if err := s.store.Finish(writeCtx, record); err != nil {
+		logger.LegacyPrintf("service.sched_test", "finish_failed: test_id=%s err=%v", record.ID, err)
+	}
 }
 
 var _ SchedTestRunner = (*SchedTestRunnerService)(nil)

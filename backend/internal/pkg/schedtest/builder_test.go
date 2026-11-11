@@ -16,6 +16,7 @@ func TestSchedTestBuild(t *testing.T) {
 		session := Session{ID: "test-one", Model: "gpt-6.1-sol"}
 		var previous []byte
 		var key string
+		previousCount := 0
 		for turn := 1; turn <= 3; turn++ {
 			body := Build(tier, turn, session, count)
 			var got struct {
@@ -44,6 +45,10 @@ func TestSchedTestBuild(t *testing.T) {
 			} else if got.Key != key || !bytes.HasPrefix(got.Input, previous[:len(previous)-1]) {
 				t.Fatal("cache key or input prefix changed")
 			}
+			if turn > 1 && abs(count(body)-previousCount-schedquality.TestTurnGrowthTokens) > schedquality.TestTurnGrowthTokens/20 {
+				t.Fatalf("tier %s turn %d: growth=%d", tier, turn, count(body)-previousCount)
+			}
+			previousCount = count(body)
 			previous = append([]byte(nil), got.Input...)
 			session.Input = got.Input
 			session.Answer = "Example response"
