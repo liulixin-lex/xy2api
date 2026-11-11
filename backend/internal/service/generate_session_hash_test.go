@@ -93,20 +93,6 @@ func TestGenerateSessionHash_MetadataHasHighestPriority(t *testing.T) {
 	require.Equal(t, "123e4567-e89b-12d3-a456-426614174000", hash, "metadata session_id should have highest priority")
 }
 
-func TestGenerateSessionHash_ShareGroupAnchorKeepsPriority(t *testing.T) {
-	env := newShareTestEnv(t, twoAccountPolicy(), Account{ID: 71}, Account{ID: 72})
-	groupID := selectionTestGroupID
-	parsed := mustParseSessionHashRequest(t, anthropicSessionBody("system", []any{msg("user", "prompt")}, ""), &SessionContext{APIKeyID: 73})
-	parsed.GroupID = &groupID
-
-	want := env.gateway.shareSessionHash(parsed)
-	require.True(t, strings.HasPrefix(want, shareAnchorPrefix))
-	require.Equal(t, want, env.gateway.GenerateSessionHash(parsed), "GroupID activates the existing share anchor before the stable fallback")
-
-	parsed.GroupID = nil
-	require.NotEqual(t, want, env.gateway.GenerateSessionHash(parsed), "without a share GroupID the stable fallback remains active")
-}
-
 func TestGenerateSessionHash_SystemPlusMessages(t *testing.T) {
 	svc := &GatewayService{}
 	withSystem := mustParseSessionHashRequest(t, anthropicSessionBody("You are a helpful assistant.", []any{msg("user", "hello")}, ""), nil)

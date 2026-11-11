@@ -971,9 +971,6 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 	if parsed == nil {
 		return ""
 	}
-	if anchor := s.shareSessionHash(parsed); anchor != "" {
-		return anchor
-	}
 
 	// 1. 最高优先级：从 metadata.user_id 提取 session_xxx
 	if parsed.MetadataUserID != "" {
