@@ -117,6 +117,7 @@ describe('KeyUsageView daily detail', () => {
       value: vi.fn().mockReturnValue({ matches: false }),
     })
     vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => window.setTimeout(() => cb(0), 0))
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => window.clearTimeout(id))
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -248,6 +249,7 @@ describe('KeyUsageView subscription feature flag', () => {
       value: vi.fn().mockReturnValue({ matches: false }),
     })
     vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => window.setTimeout(() => cb(0), 0))
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => window.clearTimeout(id))
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -304,5 +306,16 @@ describe('KeyUsageView subscription feature flag', () => {
     expect(wrapper.text()).not.toContain('Subscription Type')
     expect(wrapper.text()).toContain('Wallet Balance')
     wrapper.unmount()
+  })
+
+  it('stops the ring animation when the view unmounts', async () => {
+    const wrapper = await mountAndQuery()
+    wrapper.unmount()
+
+    const frame = vi.fn()
+    vi.stubGlobal('requestAnimationFrame', frame)
+    await new Promise(resolve => setTimeout(resolve, 100))
+
+    expect(frame).not.toHaveBeenCalled()
   })
 })
