@@ -63,6 +63,9 @@ func sessionOf(s AttemptSample) sampleSession {
 	if s.SessionKey != "" {
 		return sampleSession{key: s.SessionKey}
 	}
+	if s.RequestID == "" {
+		return sampleSession{key: s.AttemptID, request: true}
+	}
 	return sampleSession{key: s.RequestID, request: true}
 }
 

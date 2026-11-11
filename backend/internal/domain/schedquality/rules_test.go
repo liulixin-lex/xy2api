@@ -261,6 +261,21 @@ func TestSummarizeAndJudgeAcceptance(t *testing.T) {
 			}
 			expectVerdict(t, Judge(s, p).Error, VerdictFail)
 		}},
+		{"B8_Empty_Session_And_Request_ID_Uses_Attempt_ID", func(t *testing.T) {
+			// Forty attempts without either session identifier remain 40 independent sessions.
+			rows := warmSamples(40, 4, 100)
+			for i := range rows {
+				rows[i].SessionKey, rows[i].RequestID = "", ""
+				if i < 10 {
+					rows[i].Outcome = OutcomeAccountFault
+				}
+			}
+			s := Summarize(rows, time.Time{}, ruleNow)
+			if s.Samples != 40 || s.Sessions != 40 || s.Error.N != 40 || s.Error.Sessions != 40 || s.Error.Bad != 10 {
+				t.Fatalf("attempts without request IDs must not share the session cap: %+v", s)
+			}
+			expectVerdict(t, Judge(s, p).Error, VerdictFail)
+		}},
 		{"B9_Error_Rate_And_Zero_Threshold", func(t *testing.T) {
 			p.MaxErrorRate = 0.8
 			expectVerdict(t, Judge(Summary{Error: ErrorSummary{N: 30, Sessions: 4, Bad: 15, Rate: 0.5, LCB: WilsonLower(15, 30)}}, p).Error, VerdictPass)
@@ -943,7 +958,7 @@ func TestNextAcceptance(t *testing.T) {
 				attempts[i].TTFOMs = ptr(20000)
 			}
 			summary := Summarize(attempts, time.Time{}, ruleNow)
-			row, _, _, _ := nextAt(StateRow{AccountID: 1, Model: "gpt-6.1-sol"}, p, summary, nil, true, ruleNow)
+			row, _, _, _ := nextAt(StateRow{AccountID: 1, Model: "gpt-6.1-sol", GroupID: 2}, p, summary, nil, true, ruleNow)
 			good := testResult(row.Until.Add(time.Second), fullTurns(nil, .95), true)
 			row, _, _, _ = nextAt(row, p, nd, []TestResult{good}, true, good.StartedAt.Add(time.Minute))
 			now := row.Since.Add(time.Minute)
@@ -960,6 +975,11 @@ func TestNextAcceptance(t *testing.T) {
 			n, _, remove, _ := nextAt(row, p, nd, []TestResult{good}, true, later)
 			if n.State != StateNormal || n.Reason != "" || !remove {
 				t.Fatalf("recovered state should remain normal and row should expire: %+v remove=%v", n, remove)
+			}
+			noRow := StateRow{AccountID: row.AccountID, Model: row.Model, GroupID: row.GroupID}
+			summary = Summarize(attempts, noRow.Since, later)
+			if n, changed, remove, want := nextAt(noRow, p, summary, nil, true, later); n != noRow || changed || remove || want {
+				t.Fatalf("old samples must not recreate cooling after row deletion: %+v changed=%v remove=%v want=%v", n, changed, remove, want)
 			}
 			if _, _, remove, _ := nextAt(row, p, nd, nil, true, later.Add(-time.Nanosecond)); remove {
 				t.Fatal("row must survive until its since leaves the six-hour window")
