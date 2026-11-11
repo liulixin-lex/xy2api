@@ -126,7 +126,7 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaNativeAnthropic(
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 
-	resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, clientStream, &schedCapture)
+	resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, forwardedBody, clientStream, &schedCapture)
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 	}
@@ -189,6 +189,7 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 		}
 	}
 	onIdle := func() (*OpenAIForwardResult, error) {
+		noteSchedStall(c)
 		_ = resp.Body.Close()
 		logger.L().Warn("openai cc via native anthropic buffered: data interval timeout",
 			zap.String("request_id", requestID),
@@ -384,6 +385,7 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 	// onIdle 关闭上游连接（解除阻塞的读、归还连接池位），并按已累计 usage
 	// 返回——与 messages 主路径 "stream usage incomplete after timeout" 同语义。
 	onIdle := func() (*OpenAIForwardResult, error) {
+		noteSchedStall(c)
 		_ = resp.Body.Close()
 		if !clientDisconnected {
 			logger.L().Warn("openai cc via native anthropic stream: data interval timeout",

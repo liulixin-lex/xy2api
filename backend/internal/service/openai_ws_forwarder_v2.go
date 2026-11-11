@@ -363,7 +363,10 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if s.cfg != nil && (s.cfg.Gateway.OpenAICache.DiagnosticsEnabled || s.cfg.Gateway.OpenAICache.AwareRoutingEnabled) {
 		s.captureCacheDiagnostic(c, payloadAsJSONBytes(wirePayload))
 	}
-	schedCapture = s.beginSchedAttempt(ctx, account, payloadAsJSONBytes(wirePayload), reqStream)
+	if s.schedAttemptRecorder != nil {
+		body := payloadAsJSONBytes(wirePayload)
+		schedCapture = s.beginSchedAttempt(ctx, account, body, len(body), reqStream)
+	}
 	if err := lease.WriteJSONWithContextTimeout(ctx, wirePayload, s.openAIWSWriteTimeout()); err != nil {
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(

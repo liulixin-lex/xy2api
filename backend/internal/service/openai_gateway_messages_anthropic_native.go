@@ -95,13 +95,13 @@ func (s *OpenAIGatewayService) forwardAnthropicViaNativeAnthropicEndpoint(
 	}
 
 	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, clientStream)
-	upstreamReq, _, err := s.buildNativeAnthropicUpstreamRequest(upstreamCtx, c, account, body, apiKey, targetURL)
+	upstreamReq, forwardedBody, err := s.buildNativeAnthropicUpstreamRequest(upstreamCtx, c, account, body, apiKey, targetURL)
 	releaseUpstreamCtx()
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, clientStream, &schedCapture)
+	resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, forwardedBody, clientStream, &schedCapture)
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 	}
@@ -517,6 +517,7 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 			if s.rateLimitService != nil {
 				s.rateLimitService.HandleStreamTimeout(ctx, account, upstreamModel)
 			}
+			noteSchedStall(c)
 			noteResilienceStall(ctx, s.rateLimitService, account)
 			return s.nativeAnthropicStreamResult(c, resp, usage, firstTokenMs, clientDisconnected, originalModel, billingModel, upstreamModel, reasoningEffort, startTime),
 				fmt.Errorf("stream data interval timeout")

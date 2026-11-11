@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
@@ -37,22 +38,28 @@ func (r *captureServiceRecorder) Begin(in SchedAttemptStart) SchedAttempt {
 func (*captureServiceRecorder) SetObserver(func(schedquality.AttemptSample)) {}
 func (*captureServiceRecorder) Flush(context.Context) error                  { return nil }
 func (*captureServiceAttempt) MarkFirstOutput(time.Time)                     {}
-func (a *captureServiceAttempt) finish(outcome schedquality.Outcome) {
+func (a *captureServiceAttempt) finish(outcome schedquality.Outcome, detail string) {
 	if a.done {
 		panic("duplicate finish")
 	}
 	a.done = true
-	row := schedquality.AttemptSample{AccountID: a.in.AccountID, Outcome: outcome}
+	row := schedquality.AttemptSample{AccountID: a.in.AccountID, Outcome: outcome, Detail: detail}
 	if a.in.Test != nil {
 		a.in.Test.Sink(row)
 	} else {
 		a.r.samples = append(a.r.samples, row)
 	}
 }
-func (a *captureServiceAttempt) FinishOK(*SchedAttemptUsage) { a.finish(schedquality.OutcomeOK) }
-func (a *captureServiceAttempt) FinishFault(string)          { a.finish(schedquality.OutcomeAccountFault) }
-func (a *captureServiceAttempt) FinishOther(string)          { a.finish(schedquality.OutcomeOther) }
-func (a *captureServiceAttempt) FinishTimeout(time.Duration) { a.finish(schedquality.OutcomeTimeout) }
+func (a *captureServiceAttempt) FinishOK(*SchedAttemptUsage) { a.finish(schedquality.OutcomeOK, "") }
+func (a *captureServiceAttempt) FinishFault(detail string) {
+	a.finish(schedquality.OutcomeAccountFault, detail)
+}
+func (a *captureServiceAttempt) FinishOther(detail string) {
+	a.finish(schedquality.OutcomeOther, detail)
+}
+func (a *captureServiceAttempt) FinishTimeout(time.Duration) {
+	a.finish(schedquality.OutcomeTimeout, "")
+}
 
 func TestSchedCaptureTestMarkerIsolation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -141,4 +148,130 @@ func TestSchedCaptureA11IQExcluded(t *testing.T) {
 	require.Equal(t, 1, transport.calls)
 	require.Empty(t, recorder.starts)
 	require.Empty(t, recorder.samples)
+}
+
+func TestSchedCaptureUninstalledDoesNotAllocate(t *testing.T) {
+	st := resilience.NewRequestState()
+	st.SetSchedSelection(resilience.SchedSelection{AccountID: 1, Model: "gpt-5.1"})
+	ctx := resilience.WithRequestState(context.Background(), st)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
+	svc := &OpenAIGatewayService{}
+	account := &Account{ID: 1, Platform: PlatformOpenAI}
+	body := []byte(`{"model":"gpt-5.1","input":"` + strings.Repeat("x", 700000) + `","reasoning":{"effort":"high"}}`)
+	payload := []byte(`{"delta":"answer"}`)
+	var capture *schedAttemptCapture
+	allocs := testing.AllocsPerRun(10, func() {
+		capture = svc.beginSchedAttempt(ctx, account, body, len(body), true)
+		observeSchedPayload(c, payload, "response.output_text.delta")
+	})
+	require.Nil(t, capture)
+	require.Nil(t, st.CurrentAttempt())
+	require.Zero(t, allocs)
+}
+
+func TestSchedCapturePreparedPayloadWithoutReread(t *testing.T) {
+	for _, installed := range []bool{false, true} {
+		t.Run(fmt.Sprint(installed), func(t *testing.T) {
+			st := resilience.NewRequestState()
+			st.SetSchedSelection(resilience.SchedSelection{AccountID: 1, Model: "gpt-5.4"})
+			ctx := resilience.WithRequestState(context.Background(), st)
+			ctx = WithGroupSystemPrompt(ctx, GroupSystemPromptConfig{Prompt: "additional group instruction"}, "gpt-5.4-high")
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
+			body := []byte(`{"model":"gpt-5.4-high","input":"hi"}`)
+			account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test", "base_url": "https://capture.example"}}
+			rec := &captureServiceRecorder{}
+			up := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: http.NoBody}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: up}
+			if installed {
+				svc.SetSchedAttemptRecorder(rec)
+			}
+			req, err := svc.buildUpstreamRequestOpenAIPassthrough(ctx, c, account, body, "test")
+			require.NoError(t, err)
+			req.GetBody = func() (io.ReadCloser, error) { panic("capture must not reread the request body") }
+			var capture *schedAttemptCapture
+			_, err = svc.sendSchedHTTP(ctx, account, req, "", body, false, &capture)
+			require.NoError(t, err)
+			capture.finish(nil, nil)
+			require.Contains(t, string(up.lastBody), "additional group instruction")
+			if installed {
+				require.Len(t, rec.starts, 1)
+				require.Equal(t, len(up.lastBody), rec.starts[0].BodyBytes)
+				require.Greater(t, rec.starts[0].BodyBytes, len(body))
+				require.Equal(t, "high", rec.starts[0].Effort)
+				require.Equal(t, "gpt-5.4", rec.starts[0].Model)
+			} else {
+				require.Nil(t, capture)
+				require.Empty(t, rec.starts)
+			}
+			require.Nil(t, st.CurrentAttempt())
+		})
+	}
+}
+
+func TestSchedCaptureWebSocketFrameKindsAndSupersededTurn(t *testing.T) {
+	st := resilience.NewRequestState()
+	st.SetSchedSelection(resilience.SchedSelection{AccountID: 1, Model: "gpt-5.1"})
+	ctx := resilience.WithRequestState(context.Background(), st)
+	rec := &captureServiceRecorder{}
+	svc := &OpenAIGatewayService{schedAttemptRecorder: rec}
+	account := &Account{ID: 1, Platform: PlatformOpenAI}
+	turns := &schedWSTurnCapture{}
+	inner := &fakePassthroughFrameConn{}
+	deadlineCalls := 0
+	conn := &openAIWSPassthroughFirstOutputFrameConn{
+		inner:      inner,
+		beforeSend: func(payload []byte) { turns.begin(svc, ctx, account, payload) },
+		resolveDeadline: func([]byte) openAIWSPassthroughFirstOutputDeadline {
+			deadlineCalls++
+			return openAIWSPassthroughFirstOutputDeadline{startedAt: time.Now(), timeout: time.Second}
+		},
+	}
+	payload := []byte(`{"type":"response.create","model":"gpt-5.1","input":"hi"}`)
+	require.NoError(t, conn.WriteFrame(ctx, coderws.MessageBinary, payload))
+	require.Len(t, rec.starts, 1)
+	require.Zero(t, deadlineCalls)
+	require.False(t, conn.deadlineState().armed)
+	first := turns.active
+	require.NoError(t, conn.WriteFrame(ctx, coderws.MessageText, payload))
+	require.Len(t, inner.writes, 2)
+	require.Len(t, rec.starts, 2)
+	require.Equal(t, 1, deadlineCalls)
+	require.True(t, conn.deadlineState().armed)
+	require.Len(t, rec.samples, 1)
+	require.Equal(t, schedquality.OutcomeOther, rec.samples[0].Outcome)
+	require.Equal(t, "unfinished", rec.samples[0].Detail)
+	require.Same(t, turns.active, st.CurrentAttempt())
+	first.finish(nil, nil)
+	require.Len(t, rec.samples, 1)
+	turns.observe([]byte(`{"type":"response.completed","response":{"status":"completed"}}`))
+	turns.finish(&OpenAIForwardResult{UpstreamTerminalEvent: "response.completed"}, nil)
+	require.Len(t, rec.samples, 2)
+	require.Equal(t, schedquality.OutcomeOK, rec.samples[1].Outcome)
+	require.Nil(t, st.CurrentAttempt())
+}
+
+func TestSchedCaptureCCBuildFailureDoesNotOwnPriorAttempt(t *testing.T) {
+	st := resilience.NewRequestState()
+	st.SetSchedSelection(resilience.SchedSelection{AccountID: 1, Model: "gpt-5.1"})
+	ctx := resilience.WithRequestState(context.Background(), st)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(ctx)
+	rec := &captureServiceRecorder{}
+	svc := &OpenAIGatewayService{schedAttemptRecorder: rec}
+	account := &Account{ID: 1, Platform: PlatformOpenAI}
+	body := []byte(`{"model":"gpt-5.1","messages":[]}`)
+	prior := svc.beginSchedAttempt(ctx, account, body, len(body), false)
+	owned := prior
+	_, err := svc.sendCCUpstreamRequest(ctx, c, account, "://invalid", body, false, "test", "", "", &owned)
+	require.Error(t, err)
+	require.Nil(t, owned)
+	owned.finish(nil, err)
+	require.Same(t, prior, st.CurrentAttempt())
+	require.Len(t, rec.starts, 1)
+	require.Empty(t, rec.samples)
+	prior.finishUnfinished()
+	require.Len(t, rec.samples, 1)
+	require.Equal(t, "unfinished", rec.samples[0].Detail)
 }

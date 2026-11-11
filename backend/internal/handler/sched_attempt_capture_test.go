@@ -535,3 +535,52 @@ func TestSchedCaptureA8WebSocketHTTPBridge(t *testing.T) {
 	}
 	require.Equal(t, 2, up.calls)
 }
+
+func TestSchedCaptureRawChatTerminalWithoutDone(t *testing.T) {
+	withHandlerResilience(t, nil)
+	for _, entry := range []string{"responses", "chat/completions", "messages"} {
+		for _, terminal := range []string{"finish_reason", "usage"} {
+			t.Run(entry+"/"+terminal, func(t *testing.T) {
+				payload := "data: " + `{"id":"chat_capture","choices":[{"index":0,"delta":{"role":"assistant","content":"answer"},"finish_reason":null}]}` + "\n\n"
+				if terminal == "finish_reason" {
+					payload += "data: " + `{"id":"chat_capture","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}` + "\n\n"
+				} else {
+					payload += "data: " + `{"id":"chat_capture","choices":[],"usage":{"prompt_tokens":12,"completion_tokens":2}}` + "\n\n"
+				}
+				up := &captureUpstream{reply: func(int, *http.Request, []byte) (*http.Response, error) {
+					return captureResponse(http.StatusOK, payload, true), nil
+				}}
+				_, rec, router := captureFixture(t, service.Account{Extra: map[string]any{"openai_responses_mode": "force_chat_completions"}}, up)
+				resp := captureRequest(router, "/v1/"+entry, `{"model":"gpt-5.1","stream":true,"input":"hi","max_tokens":100,"messages":[{"role":"user","content":"hi"}]}`)
+				require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+				require.Equal(t, 1, up.calls)
+				require.Len(t, rec.starts, 1)
+				require.Len(t, rec.samples, 1)
+				require.Equal(t, schedquality.OutcomeOK, rec.samples[0].Outcome, rec.samples[0].Detail)
+			})
+		}
+	}
+}
+
+func TestSchedCaptureStreamStallDetail(t *testing.T) {
+	withHandlerResilience(t, func(s *resilience.Settings) { s.Stall.TextStallSeconds = 1 })
+	for _, passthrough := range []bool{false, true} {
+		t.Run(fmt.Sprint(passthrough), func(t *testing.T) {
+			up := &captureUpstream{reply: func(int, *http.Request, []byte) (*http.Response, error) {
+				reader, writer := io.Pipe()
+				t.Cleanup(func() { _ = writer.Close() })
+				go func() {
+					_, _ = io.WriteString(writer, "data: "+`{"type":"response.output_text.delta","delta":"answer"}`+"\n\n")
+				}()
+				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: reader}, nil
+			}}
+			_, rec, router := captureFixture(t, service.Account{Extra: map[string]any{"openai_passthrough": passthrough}}, up, captureOptions{configure: func(cfg *config.Config) { cfg.Gateway.StreamDataIntervalTimeout = 1 }})
+			resp := captureRequest(router, "/v1/responses", `{"model":"gpt-5.1","stream":true,"input":"hi"}`)
+			require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+			require.Equal(t, 1, up.calls)
+			require.Len(t, rec.samples, 1)
+			require.Equal(t, schedquality.OutcomeAccountFault, rec.samples[0].Outcome)
+			require.Equal(t, string(resilience.CategoryStall), rec.samples[0].Detail)
+		})
+	}
+}

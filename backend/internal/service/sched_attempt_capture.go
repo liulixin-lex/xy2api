@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 )
@@ -19,18 +18,6 @@ import (
 func (s *OpenAIGatewayService) SetSchedAttemptRecorder(r SchedAttemptRecorder) {
 	s.schedAttemptRecorder = r
 }
-
-type schedNoopRecorder struct{}
-type schedNoopAttempt struct{}
-
-func (schedNoopRecorder) Begin(SchedAttemptStart) SchedAttempt         { return schedNoopAttempt{} }
-func (schedNoopRecorder) SetObserver(func(schedquality.AttemptSample)) {}
-func (schedNoopRecorder) Flush(context.Context) error                  { return nil }
-func (schedNoopAttempt) MarkFirstOutput(time.Time)                     {}
-func (schedNoopAttempt) FinishOK(*SchedAttemptUsage)                   {}
-func (schedNoopAttempt) FinishFault(string)                            {}
-func (schedNoopAttempt) FinishTimeout(time.Duration)                   {}
-func (schedNoopAttempt) FinishOther(string)                            {}
 
 // Each send owns this handle. A parent's cleanup never finishes a recursive send.
 type schedAttemptCapture struct {
@@ -46,7 +33,10 @@ type schedAttemptCapture struct {
 	usage                                      *SchedAttemptUsage
 }
 
-func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *Account, body []byte, stream bool) *schedAttemptCapture {
+func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *Account, body []byte, bodyBytes int, stream bool) *schedAttemptCapture {
+	if s.schedAttemptRecorder == nil {
+		return nil
+	}
 	if account == nil || account.Platform != PlatformOpenAI {
 		return nil
 	}
@@ -57,20 +47,16 @@ func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *A
 	}
 	groupID, sessionKey := st.SessionIdentity()
 	effort := ""
-	if parsed := extractOpenAIReasoningEffortFromBody(body); parsed != nil {
+	if parsed := extractOpenAIReasoningEffortFromBody(body, gjson.GetBytes(body, "model").String()); parsed != nil {
 		effort = *parsed
 	}
 	in := SchedAttemptStart{AccountID: account.ID, GroupID: groupID, Model: selection.Model, StickyWarm: selection.StickyWarm,
-		Effort: effort, BodyBytes: len(body), Stream: stream, SessionKey: sessionKey, RequestID: st.GatewayRequestID()}
+		Effort: effort, BodyBytes: bodyBytes, Stream: stream, SessionKey: sessionKey, RequestID: st.GatewayRequestID()}
 	if test, ok := st.SchedTest().(*SchedTestAttempt); ok && test != nil {
 		copy := *test
 		in.Test = &copy
 	}
-	recorder := s.schedAttemptRecorder
-	if recorder == nil {
-		recorder = schedNoopRecorder{}
-	}
-	a := &schedAttemptCapture{state: st, ctx: ctx, started: time.Now(), attempt: recorder.Begin(in)}
+	a := &schedAttemptCapture{state: st, ctx: ctx, started: time.Now(), attempt: s.schedAttemptRecorder.Begin(in)}
 	st.SetCurrentAttempt(a)
 	return a
 }
@@ -117,6 +103,13 @@ func (a *schedAttemptCapture) observe(data []byte) {
 	typ := root.Get("type").String()
 	if isOpenAIWSTerminalEvent(typ) || typ == "error" || typ == "message_stop" || strings.TrimSpace(string(data)) == "[DONE]" {
 		a.markTerminal()
+	}
+	if typ == "" {
+		var terminal openAIRawStreamTerminalState
+		terminal.ObserveDataLine(strings.TrimSpace(string(data)))
+		if terminal.Terminated() {
+			a.markTerminal()
+		}
 	}
 	status := root.Get("status").String()
 	if typ == "response.incomplete" || status == "incomplete" {
@@ -255,6 +248,12 @@ func FinishSchedAttemptAtHandlerExit(ctx context.Context) {
 		a.cancel()
 		return
 	}
+	a.finishUnfinished()
+}
+func (a *schedAttemptCapture) finishUnfinished() {
+	if a == nil {
+		return
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if !a.done {
@@ -268,12 +267,17 @@ func schedTestRequest(ctx context.Context) bool {
 	return ok && test != nil
 }
 func observeSchedPayload(c *gin.Context, data []byte, eventType ...string) {
+	if c == nil || c.Request == nil {
+		return
+	}
+	a := currentSchedAttempt(c.Request.Context())
+	if a == nil {
+		return
+	}
 	if len(eventType) > 0 {
 		data = []byte(openAICompatPayloadWithEventType(string(data), eventType[0]))
 	}
-	if c != nil && c.Request != nil {
-		currentSchedAttempt(c.Request.Context()).observe(data)
-	}
+	a.observe(data)
 }
 func markSchedWSOutput(a *schedAttemptCapture, payload []byte) {
 	if a == nil {
@@ -288,15 +292,10 @@ func markSchedWSOutput(a *schedAttemptCapture, payload []byte) {
 }
 
 // sendSchedHTTP is used only by the enumerated text forwarding paths.
-func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Account, req *http.Request, proxyURL string, stream bool, owner **schedAttemptCapture) (*http.Response, error) {
-	var body []byte
-	if req.GetBody != nil {
-		if r, err := req.GetBody(); err == nil {
-			body, _ = io.ReadAll(r)
-			_ = r.Close()
-		}
-	}
-	*owner = s.beginSchedAttempt(ctx, account, body, stream)
+func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Account, req *http.Request, proxyURL string, body []byte, stream bool, owner **schedAttemptCapture) (*http.Response, error) {
+	// Builders may add group prompts or normalize cache fields after the caller's
+	// payload is prepared; ContentLength is the final wire length without a reread.
+	*owner = s.beginSchedAttempt(ctx, account, body, int(req.ContentLength), stream)
 	resp, err := s.doOpenAIUpstream(req, proxyURL, account)
 	if err != nil {
 		(*owner).noteError(err)
@@ -318,6 +317,20 @@ func (a *schedAttemptCapture) noteError(err error) {
 func noteSchedError(c *gin.Context, err error) {
 	if c != nil && c.Request != nil {
 		currentSchedAttempt(c.Request.Context()).noteError(err)
+	}
+}
+func noteSchedStall(c *gin.Context) {
+	if c == nil || c.Request == nil {
+		return
+	}
+	a := currentSchedAttempt(c.Request.Context())
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.done && a.failure == nil {
+		a.failure = &resilience.Outcome{Source: resilience.SourceStall}
 	}
 }
 func finishSchedRead(c *gin.Context, err error) {
@@ -345,7 +358,8 @@ type schedWSTurnCapture struct {
 func (t *schedWSTurnCapture) begin(s *OpenAIGatewayService, ctx context.Context, account *Account, payload []byte) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.active = s.beginSchedAttempt(ctx, account, payload, true)
+	t.active.finishUnfinished()
+	t.active = s.beginSchedAttempt(ctx, account, payload, len(payload), true)
 }
 func (t *schedWSTurnCapture) observe(payload []byte) {
 	t.mu.Lock()

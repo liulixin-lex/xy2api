@@ -551,7 +551,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if buildErr != nil {
 			return nil, buildErr
 		}
-		resp, err = s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, true, &schedCapture)
+		resp, err = s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, body, true, &schedCapture)
 		if err != nil {
 			if turn == 1 {
 				return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)

@@ -464,11 +464,11 @@ func (c *openAIWSPassthroughFirstOutputFrameConn) WriteFrame(ctx context.Context
 		return errOpenAIWSConnClosed
 	}
 	generation := uint64(0)
-	if (msgType == coderws.MessageText || msgType == coderws.MessageBinary) && strings.TrimSpace(gjson.GetBytes(payload, "type").String()) == "response.create" {
+	if msgType == coderws.MessageText && strings.TrimSpace(gjson.GetBytes(payload, "type").String()) == "response.create" {
 		generation = c.armDeadline(payload)
-		if c.beforeSend != nil {
-			c.beforeSend(payload)
-		}
+	}
+	if c.beforeSend != nil && (msgType == coderws.MessageText || msgType == coderws.MessageBinary) && strings.TrimSpace(gjson.GetBytes(payload, "type").String()) == "response.create" {
+		c.beforeSend(payload)
 	}
 	if err := c.inner.WriteFrame(ctx, msgType, payload); err != nil {
 		c.disarmDeadline(generation)
@@ -952,9 +952,13 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if !ok {
 		return errors.New("openai ws passthrough upstream connection does not support frame relay")
 	}
+	var schedBeforeSend func([]byte)
+	if s.schedAttemptRecorder != nil {
+		schedBeforeSend = func(payload []byte) { schedTurns.begin(s, ctx, account, payload) }
+	}
 	relayUpstreamFrameConn := &openAIWSPassthroughFirstOutputFrameConn{
 		inner:             upstreamFrameConn,
-		beforeSend:        func(payload []byte) { schedTurns.begin(s, ctx, account, payload) },
+		beforeSend:        schedBeforeSend,
 		activeReadTimeout: s.openAIWSPassthroughIdleTimeout(),
 		deadlineChanged:   make(chan struct{}, 1),
 		resolveDeadline: func(payload []byte) openAIWSPassthroughFirstOutputDeadline {
@@ -1379,6 +1383,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			},
 			BeforeWriteClient: func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error {
 				if msgType == coderws.MessageBinary {
+					if s.schedAttemptRecorder == nil {
+						return nil
+					}
 					schedTurns.observe(payload)
 					eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
 					if isOpenAIWSTerminalEvent(eventType) || eventType == "error" {

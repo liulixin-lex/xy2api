@@ -990,7 +990,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			return nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, promptErr.Error(), promptErr)
 		}
 		wirePayload = qualityRotateBody(wirePayload, s.qualityRotation(ctx, account), true)
-		schedCapture = s.beginSchedAttempt(ctx, account, wirePayload, true)
+		schedCapture = s.beginSchedAttempt(ctx, account, wirePayload, len(wirePayload), true)
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(wirePayload), s.openAIWSWriteTimeout()); err != nil {
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",

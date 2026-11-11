@@ -435,7 +435,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 				return nil, fmt.Errorf("build grok retry request: %w", err)
 			}
 		}
-		resp, err = s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, clientStream, &schedCapture)
+		resp, err = s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, responsesBody, clientStream, &schedCapture)
 		if firstEvent.expired() {
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
@@ -978,6 +978,7 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 			)
 			// xy2api resilience (review G1): the stall bookkeeping of the
 			// Responses stream.
+			noteSchedStall(c)
 			s.noteOpenAICompatStall(c, account, model)
 			return nil, usage, acc, fmt.Errorf("stream data interval timeout")
 		}
@@ -1577,6 +1578,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				zap.String("model", originalModel),
 				zap.Duration("interval", stallThreshold),
 			)
+			noteSchedStall(c)
 			s.noteOpenAICompatStall(c, account, originalModel)
 			if canReplayPrelude() {
 				return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, nil, "OpenAI stream stalled before content", upstreamModel, resp.Header)

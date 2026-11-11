@@ -1158,7 +1158,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 		// Send request
 		upstreamStart := time.Now()
-		resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, reqStream, &schedCapture)
+		resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, body, reqStream, &schedCapture)
 		if collabAttempt != nil {
 			collabAttempt.upstreamStatus = 0
 			if resp != nil {

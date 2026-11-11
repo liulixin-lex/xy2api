@@ -131,7 +131,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaNativeAnthropic(
 	reasoningEffort := NormalizeClaudeOutputEffort(gjson.GetBytes(forwardedBody, "output_config.effort").String())
 	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, forwardedBody, upstreamModel)
 
-	resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, clientStream, &schedCapture)
+	resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, forwardedBody, clientStream, &schedCapture)
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 	}
@@ -191,6 +191,7 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 		}
 	}
 	onIdle := func() (*OpenAIForwardResult, error) {
+		noteSchedStall(c)
 		_ = resp.Body.Close()
 		logger.L().Warn("openai responses via native anthropic buffered: data interval timeout",
 			zap.String("request_id", requestID),
@@ -394,6 +395,7 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 		}
 	}
 	onIdle := func() (*OpenAIForwardResult, error) {
+		noteSchedStall(c)
 		_ = resp.Body.Close()
 		logger.L().Warn("openai responses via native anthropic stream: data interval timeout",
 			zap.String("request_id", requestID),
