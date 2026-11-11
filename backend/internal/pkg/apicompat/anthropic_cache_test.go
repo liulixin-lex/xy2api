@@ -117,7 +117,8 @@ func TestAnthropicCacheToolResultMarkers(t *testing.T) {
 		}},
 		{name: "chat_tool_outer_wins", raw: chat(call + `,{"role":"tool","tool_call_id":"call_1","cache_control":{"type":"ephemeral","ttl":"5m"},"content":[{"type":"text","text":"a","cache_control":` + h1 + `}]}`), path: "messages.2.content.0", ttl: "5m"},
 		{name: "chat_tool_media_part", raw: chat(call + `,{"role":"tool","tool_call_id":"call_1","content":[{"type":"text","text":"w=1"},{"type":"image_url","image_url":{"url":"` + testCacheImage + `"},"cache_control":` + h1 + `}]}`), path: "messages.2.content.0", ttl: "1h", check: func(t *testing.T, wire []byte) {
-			require.Equal(t, "w=1", gjson.GetBytes(wire, "messages.2.content.0.content").String())
+			require.Equal(t, "w=1", gjson.GetBytes(wire, "messages.2.content.0.content.0.text").String())
+			require.Equal(t, "image", gjson.GetBytes(wire, "messages.2.content.0.content.1.type").String())
 		}},
 		{name: "chat_legacy_function", raw: chat(`{"role":"assistant","function_call":{"name":"lookup","arguments":"{}"}},{"role":"function","name":"lookup","content":"x","cache_control":` + h1 + `}`), path: "messages.2.content.0", ttl: "1h", check: func(t *testing.T, wire []byte) {
 			require.Equal(t, "call_legacy_1", gjson.GetBytes(wire, "messages.2.content.0.tool_use_id").String())

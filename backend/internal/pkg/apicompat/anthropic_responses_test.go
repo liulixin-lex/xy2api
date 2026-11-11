@@ -86,7 +86,7 @@ func TestAnthropicToResponses_SystemPrompt(t *testing.T) {
 		assert.Equal(t, "Part 2", parts[1].Text)
 	})
 
-	t.Run("billing header skipped", func(t *testing.T) {
+	t.Run("billing-like user text preserved", func(t *testing.T) {
 		req := &AnthropicRequest{
 			Model:     "gpt-5.2",
 			MaxTokens: 100,
@@ -101,8 +101,9 @@ func TestAnthropicToResponses_SystemPrompt(t *testing.T) {
 		require.Len(t, items, 2)
 		var parts []ResponsesContentPart
 		require.NoError(t, json.Unmarshal(items[0].Content, &parts))
-		require.Len(t, parts, 1)
-		assert.Equal(t, "Project prompt", parts[0].Text)
+		require.Len(t, parts, 2)
+		assert.Equal(t, "x-anthropic-billing-header: cc_version=1;", parts[0].Text)
+		assert.Equal(t, "Project prompt", parts[1].Text)
 	})
 }
 
@@ -197,16 +198,16 @@ func TestAnthropicToResponses_ThinkingSignatureBecomesReasoning(t *testing.T) {
 	assert.Equal(t, "function_call", items[3].Type)
 }
 
-func TestAnthropicToResponses_MaxTokensFloor(t *testing.T) {
+func TestAnthropicToResponses_ExactMaxTokens(t *testing.T) {
 	req := &AnthropicRequest{
 		Model:     "gpt-5.2",
-		MaxTokens: 10, // below minMaxOutputTokens (128)
+		MaxTokens: 10, // deliberately below 128
 		Messages:  []AnthropicMessage{{Role: "user", Content: json.RawMessage(`"Hi"`)}},
 	}
 
 	resp, err := AnthropicToResponses(req)
 	require.NoError(t, err)
-	assert.Equal(t, 128, *resp.MaxOutputTokens)
+	assert.Equal(t, 10, *resp.MaxOutputTokens)
 }
 
 // ---------------------------------------------------------------------------
