@@ -1,0 +1,58 @@
+{
+  "group_id": 53,
+  "model": "gpt-6.1-sol",
+  "models": [
+    "gpt-6.1-sol",
+    "gpt-6-astra"
+  ],
+  "at": "…",
+  "stale": false,
+  "global_enabled": true,
+  "accounts": [
+    {
+      "account_id": 479,
+      "name": "…",
+      "rank": 1,
+      "eligible": true,
+      "reject": "",
+      "reject_until": null,
+      "standing": "front",
+      "state": "normal",
+      "level": 0,
+      "until": null,
+      "waiting_test": false,
+      "testing": false,
+      "override": null,
+      "priority": 1,
+      "rate": 0.001,
+      "in_flight": 3,
+      "concurrency": 10,
+      "recently_full_seconds": 0,
+      "can_take_over": true,
+      "ttfo": {
+        "n": 150,
+        "sessions": 38,
+        "p90_ms": 9200,
+        "p90_timeout": false,
+        "fail_bound_ms": 8100,
+        "fail_bound_timeout": false
+      },
+      "error": {
+        "n": 194,
+        "sessions": 41,
+        "rate": 0.005,
+        "lcb": 0.0009
+      },
+      "cache": {
+        "n": 120,
+        "sessions": 30,
+        "ratio": 0.93
+      },
+      "verdicts": {
+        "ttfo": "pass",
+        "error": "pass",
+        "cache": "pass"
+      }
+    }
+  ]
+}

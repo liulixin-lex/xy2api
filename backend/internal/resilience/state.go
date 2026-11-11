@@ -45,6 +45,10 @@ type RequestState struct {
 	// selectionEligibility holds a scheduler-owned, typed request gate. The
 	// generic accessors keep provider account types out of this package.
 	selectionEligibility any
+	schedSelection       SchedSelection
+	schedSelectionSet    bool
+	schedTest            any
+	currentAttempt       AttemptMarker
 
 	// groupID is the API key's group (0 when ungrouped or unknown).
 	groupID int64
@@ -488,6 +492,73 @@ func (s *RequestState) SessionSuccess(ctx context.Context, accountID int64) {
 }
 
 type stateKey struct{}
+
+type SchedSelection struct {
+	AccountID  int64
+	Model      string
+	StickyWarm bool
+}
+
+type AttemptMarker interface{ MarkFirstOutput(at time.Time) }
+
+func (s *RequestState) SetSchedSelection(v SchedSelection) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.schedSelection, s.schedSelectionSet = v, true
+	s.mu.Unlock()
+}
+func (s *RequestState) SchedSelection() (SchedSelection, bool) {
+	if s == nil {
+		return SchedSelection{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.schedSelection, s.schedSelectionSet
+}
+func (s *RequestState) SetSchedTest(v any) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.schedTest = v
+	s.mu.Unlock()
+}
+func (s *RequestState) SchedTest() any {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.schedTest
+}
+func (s *RequestState) SetCurrentAttempt(m AttemptMarker) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.currentAttempt = m
+	s.mu.Unlock()
+}
+func (s *RequestState) CurrentAttempt() AttemptMarker {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.currentAttempt
+}
+func (s *RequestState) ClearCurrentAttemptIf(m AttemptMarker) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.currentAttempt == m {
+		s.currentAttempt = nil
+	}
+}
 
 // SetSelectionEligibility replaces the request's gate on every selection.
 func SetSelectionEligibility[T any](s *RequestState, gate T) {

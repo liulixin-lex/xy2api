@@ -1,0 +1,35 @@
+{
+  "account_id": 479,
+  "model": "gpt-6.1-sol",
+  "samples": 200,
+  "ttfo": {
+    "p90_ms": 12400,
+    "timeout": false,
+    "n": 150
+  },
+  "error": {
+    "rate": 0.005,
+    "n": 194
+  },
+  "cache": {
+    "ratio": 0.81,
+    "n": 120
+  },
+  "groups": {
+    "total": 5,
+    "normal": 4,
+    "cooling": 1,
+    "nodata": 0
+  },
+  "cooling": [
+    {
+      "group_id": 53,
+      "model": "gpt-6.1-sol",
+      "reason": "speed",
+      "until": "2026-11-11T12:04:30Z",
+      "waiting_test": false,
+      "testing": false
+    }
+  ],
+  "cooling_more": 0
+}
