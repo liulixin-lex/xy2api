@@ -162,6 +162,14 @@ func TestAnthropicCompatChatLargeDeltasAndPrefixChain(t *testing.T) {
 
 func TestAnthropicCompatChatInputAndCiphertextBounds(t *testing.T) {
 	s, _, plan, _, state := chatContinuationFixture(t)
+	message, err := json.Marshal(map[string]string{"role": "user", "content": "bounded test message"})
+	require.NoError(t, err)
+	messages := make([]json.RawMessage, 1025)
+	for i := range messages {
+		messages[i] = message
+	}
+	_, err = compatChatPredecessorDigests(bytes.Repeat([]byte{1}, 32), messages)
+	require.ErrorContains(t, err, "message limit")
 	handles := make([]map[string]any, 129)
 	for i := range handles {
 		id, err := compatChatRandomID()

@@ -26,6 +26,7 @@ import (
 const AnthropicCompatChatHandlePrefix = "ccv2_"
 const AnthropicCompatChatKeyPrefix = "anthropic_compat:chat:v2:"
 const AnthropicCompatChatRecordLimit = 1 << 20
+const anthropicCompatChatMessageLimit = 1024
 
 // RegisterChat atomically installs one immutable encrypted turn and all its
 // handle aliases. Re-registering the identical value refreshes its retention.
@@ -248,6 +249,9 @@ func compatChatDigest(seed []byte, domain string, messages []json.RawMessage) (s
 // Every prefix is authenticated as an ordered, length-delimited chain. Compute
 // them once per root key so a long user prompt is not re-serialized per turn.
 func compatChatPredecessorDigests(seed []byte, messages []json.RawMessage) ([]string, error) {
+	if len(messages) > anthropicCompatChatMessageLimit {
+		return nil, compatInvalid("anthropic_compat_history_limit", "Chat continuation input exceeds its bounded message limit")
+	}
 	out := make([]string, len(messages)+1)
 	out[0] = compatDigest(seed, "chat-v2-predecessor-start")
 	for i, raw := range messages {
@@ -316,7 +320,7 @@ func (s *GatewayService) prepareAnthropicCompatChat(ctx context.Context, scope *
 	if len(handles) == 0 {
 		return nil
 	}
-	if len(body) > 8*AnthropicCompatChatRecordLimit || len(state.Messages) > 1024 {
+	if len(body) > 8*AnthropicCompatChatRecordLimit || len(state.Messages) > anthropicCompatChatMessageLimit {
 		return compatInvalid("anthropic_compat_history_limit", "Chat continuation input exceeds its bounded lookup limit")
 	}
 	if len(handles) > anthropicCompatSignatureLimit {
