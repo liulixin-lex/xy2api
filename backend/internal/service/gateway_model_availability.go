@@ -18,8 +18,8 @@ type ModelAvailabilityDiagnosis struct {
 	// eligible account on the queried platform (or, for Anthropic/Gemini, on
 	// the platform plus mixed-scheduled Antigravity accounts).
 	HasAccountsInPool bool
-	// HasModelSupport is true if at least one account's model mapping admits
-	// the requested model.
+	// HasModelSupport intersects account mappings and compatibility profiles,
+	// independently of request-specific capabilities and transient eligibility.
 	HasModelSupport bool
 }
 
@@ -102,7 +102,16 @@ func (s *GatewayService) DiagnoseModelAvailabilityForPlatform(
 			continue
 		}
 		diag.HasAccountsInPool = true
-		if s.isModelSupportedByAccountWithContext(ctx, &accounts[i], requestedModel) {
+		account := &accounts[i]
+		profile, profileErr := ResolveAnthropicCompatProfile(account)
+		supported := false
+		if profileErr == nil && profile != nil {
+			model := anthropicCompatDispatchModel(ctx, requestedModel)
+			supported = anthropicCompatModelSupported(account, model)
+		} else if profileErr == nil {
+			supported = s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)
+		}
+		if supported {
 			diag.HasModelSupport = true
 			return diag
 		}

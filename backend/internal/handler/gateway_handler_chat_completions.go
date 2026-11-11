@@ -96,7 +96,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	}
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
-	compatCtx, compatErr := h.gatewayService.PrepareAnthropicCompatibility(c.Request.Context(), subject.UserID, apiKey.ID, body, "chat", service.ExtractClientSessionID(c), c.Request.Header)
+	compatCtx, compatErr := h.gatewayService.PrepareAnthropicCompatibilityForSelection(c.Request.Context(), subject.UserID, apiKey.ID, body, "chat", service.ExtractClientSessionID(c), c.Request.Header)
 	if compatErr != nil {
 		status, code, message, _ := service.AnthropicCompatErrorDetails(compatErr)
 		h.chatCompletionsErrorResponse(c, status, code, message)

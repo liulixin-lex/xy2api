@@ -2707,6 +2707,9 @@ func (s *GatewayService) isModelSupportedByAccountWithContext(ctx context.Contex
 		}
 		return true
 	}
+	if profile, _ := ResolveAnthropicCompatProfile(account); profile != nil {
+		requestedModel = anthropicCompatDispatchModel(ctx, requestedModel)
+	}
 	return s.isModelSupportedByAccount(account, requestedModel)
 }
 
