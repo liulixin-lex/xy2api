@@ -34,7 +34,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	attempt int,
 	lastFailureReason string,
 	agentTaskRecoveryTried *bool,
-) (*OpenAIForwardResult, error) {
+) (schedResult *OpenAIForwardResult, schedErr error) {
+	var schedCapture *schedAttemptCapture
+	defer func() { schedCapture.finish(schedResult, schedErr) }()
 	if s == nil || account == nil {
 		return nil, wrapOpenAIWSFallback("invalid_state", errors.New("service or account is nil"))
 	}
@@ -361,6 +363,10 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if s.cfg != nil && (s.cfg.Gateway.OpenAICache.DiagnosticsEnabled || s.cfg.Gateway.OpenAICache.AwareRoutingEnabled) {
 		s.captureCacheDiagnostic(c, payloadAsJSONBytes(wirePayload))
 	}
+	if s.schedAttemptRecorder != nil {
+		body := payloadAsJSONBytes(wirePayload)
+		schedCapture = s.beginSchedAttempt(ctx, account, body, len(body), reqStream)
+	}
 	if err := lease.WriteJSONWithContextTimeout(ctx, wirePayload, s.openAIWSWriteTimeout()); err != nil {
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(
@@ -416,6 +422,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			return
 		}
 		clientDisconnected = true
+		schedCapture.cancel()
 		clientDisconnectDrainStartedAt = time.Now()
 		if !upstreamReadDetached {
 			upstreamReadCtx = context.WithoutCancel(ctx)
@@ -633,6 +640,7 @@ readLoop:
 		if eventType == "" {
 			continue
 		}
+		schedCapture.observe(message)
 		responseModelObserver.ObserveOpenAI(message, eventType)
 		eventCount++
 		if firstEventType == "" {

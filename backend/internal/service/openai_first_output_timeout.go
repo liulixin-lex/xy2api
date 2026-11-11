@@ -285,6 +285,7 @@ func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 	if len(plans) > 0 {
 		plan = plans[0]
 	}
+	currentSchedAttempt(ctx).timeout(plan)
 	noteTimeoutPlan(ctx, account, plan)
 	elapsed := time.Since(startTime)
 	staged := resilience.StateFrom(ctx).PreludeTrace().StagedAt.Equal(startTime)

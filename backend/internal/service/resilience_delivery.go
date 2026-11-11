@@ -97,18 +97,20 @@ func (w *deliveryWriter) semanticBytes() int64 {
 }
 
 func (w *deliveryWriter) Write(data []byte) (int, error) {
+	at := time.Now()
 	n, err := w.ResponseWriter.Write(data)
 	w.state.NoteWireStatus(w.Status())
 	w.written.Add(int64(n))
 	if n > 0 {
 		w.observeStream(data[:n])
-		w.observeSemanticOutput(data[:n])
+		w.observeSemanticOutput(data[:n], at)
 		w.noteFirstOutput(len(bytes.TrimSpace(data[:n])) > 0)
 	}
 	return n, err
 }
 
 func (w *deliveryWriter) WriteString(s string) (int, error) {
+	at := time.Now()
 	n, err := w.ResponseWriter.WriteString(s)
 	w.state.NoteWireStatus(w.Status())
 	w.written.Add(int64(n))
@@ -116,7 +118,7 @@ func (w *deliveryWriter) WriteString(s string) (int, error) {
 		w.observeStream([]byte(s[:n]))
 	}
 	if n > 0 {
-		w.observeSemanticOutput([]byte(s[:n]))
+		w.observeSemanticOutput([]byte(s[:n]), at)
 		w.noteFirstOutput(strings.TrimSpace(s[:n]) != "")
 	}
 	return n, err
