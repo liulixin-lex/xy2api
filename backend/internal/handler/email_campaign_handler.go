@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"html"
@@ -217,6 +219,10 @@ func (h *EmailCampaignHandler) Unsubscribe(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	c.Header("Referrer-Policy", "no-referrer")
 	c.Header("X-Content-Type-Options", "nosniff")
-	c.Header("Content-Security-Policy", "default-src 'none'; form-action 'self'; frame-ancestors 'none'")
-	c.Data(status, "text/html; charset=utf-8", []byte(`<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>营销邮件退订 / Unsubscribe</title></head><body>`+body+`</body></html>`))
+	styleHash := sha256.Sum256([]byte(campaignUnsubscribeStyle))
+	c.Header("Content-Security-Policy", "default-src 'none'; style-src 'sha256-"+base64.StdEncoding.EncodeToString(styleHash[:])+"'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+	c.Data(status, "text/html; charset=utf-8", []byte(`<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>营销邮件退订 / Unsubscribe</title><style>`+campaignUnsubscribeStyle+`</style></head><body><main><p class="site">`+html.EscapeString(h.service.SiteName(c.Request.Context()))+`</p><h1>营销邮件退订<br><span>Marketing email preferences</span></h1>`+body+`<p class="note">不影响验证码及系统通知。<br>Verification codes and system notifications are unaffected.</p></main></body></html>`))
 }
+
+// A fixed style hash permits this stylesheet without unsafe-inline or external assets.
+const campaignUnsubscribeStyle = `html{font-family:system-ui,sans-serif;color:#172033;background:#f4f6fa}body{margin:0;min-height:100vh;display:grid;place-items:center}main{box-sizing:border-box;width:calc(100% - 32px);max-width:520px;margin:32px 0;padding:36px;border:1px solid #e2e7ef;border-radius:16px;background:#fff;box-shadow:0 8px 28px #17203312;line-height:1.7;overflow-wrap:anywhere}.site{font-weight:700;color:#4f46e5}h1{font-size:24px;line-height:1.4}h1 span{font-size:17px;font-weight:400;color:#526079}button{font:inherit;padding:12px 20px;border:0;border-radius:8px;background:#4f46e5;color:#fff;cursor:pointer}button:focus-visible{outline:3px solid #a5b4fc;outline-offset:3px}.note{margin-top:28px;font-size:13px;color:#526079}`

@@ -12,7 +12,8 @@
             {{ t('admin.emailCampaigns.description') }}
           </p>
         </div>
-        <div class="flex flex-shrink-0 items-center gap-2">
+        <div class="flex flex-shrink-0 flex-col items-stretch gap-1.5 sm:items-end">
+          <div class="flex items-center gap-2">
           <button
             type="button"
             class="btn btn-secondary"
@@ -35,6 +36,14 @@
               {{ t('admin.emailCampaigns.newCampaign') }}
             </button>
           </span>
+          </div>
+          <p
+            v-if="blockingCampaign"
+            class="text-xs text-amber-700 dark:text-amber-300"
+            data-testid="email-campaign-active-hint"
+          >
+            {{ t('admin.emailCampaigns.setup.activeExists') }}
+          </p>
         </div>
       </section>
 
@@ -141,7 +150,12 @@
             </template>
 
             <template #cell-created_by="{ row }">
-              <span class="text-sm text-gray-600 dark:text-gray-300">{{ row.created_by?.email || '-' }}</span>
+              <span
+                class="block max-w-[12rem] truncate text-sm text-gray-600 dark:text-gray-300"
+                :title="row.created_by?.email || undefined"
+              >
+                {{ row.created_by?.email || '-' }}
+              </span>
             </template>
 
             <template #cell-created_at="{ row }">
@@ -238,6 +252,7 @@ import {
   formatCount,
   isAbortError,
   isActiveStatus,
+  needsPolling,
   progressPercent,
   statusBadgeClass,
 } from './campaignFormat'
@@ -281,17 +296,19 @@ const limitsDirty = computed(
     (limitsForm.per_minute !== settings.value.per_minute || limitsForm.per_day !== settings.value.per_day),
 )
 
-function applySettings(next: CampaignSettings, resetForm: boolean) {
+/** Store fresh settings; the limit inputs follow unless the admin has unsaved edits (or `force`). */
+function applySettings(next: CampaignSettings, force = false) {
+  const keepEdits = !force && limitsDirty.value
   settings.value = next
-  if (resetForm) {
+  if (!keepEdits) {
     limitsForm.per_minute = next.per_minute
     limitsForm.per_day = next.per_day
   }
 }
 
-async function loadSettings(resetForm: boolean) {
+async function loadSettings() {
   try {
-    applySettings(await api.getSettings(), resetForm)
+    applySettings(await api.getSettings())
   } catch (err) {
     appStore.showError(campaignErrorMessage(err, t))
   }
@@ -387,8 +404,9 @@ async function loadActive() {
   }
 }
 
+/** Reload the list, the active campaign and /settings (SMTP or site URL may have changed elsewhere). */
 async function refreshAll(silent = false) {
-  await Promise.all([loadCampaigns(silent), loadActive(), silent ? loadSettings(false) : Promise.resolve()])
+  await Promise.all([loadCampaigns(silent), loadActive(), loadSettings()])
 }
 
 function handlePageChange(page: number) {
@@ -405,9 +423,8 @@ function handlePageSizeChange(size: number) {
 const blockingCampaign = computed(
   () => activeCampaign.value ?? campaigns.value.find((c) => isActiveStatus(c.status)) ?? null,
 )
-const anySending = computed(
-  () => blockingCampaign.value?.status === 'sending' || campaigns.value.some((c) => c.status === 'sending'),
-)
+/** Keep polling while anything is sending, including the last in-flight email of a paused or canceled campaign. */
+const anyInFlight = computed(() => needsPolling(activeCampaign.value) || campaigns.value.some(needsPolling))
 
 const createBlockedReason = computed(() => {
   if (!settings.value) return ''
@@ -466,7 +483,7 @@ function stopPolling() {
   }
 }
 
-watch(anySending, (sending) => {
+watch(anyInFlight, (sending) => {
   if (sending && pollTimer === null) {
     pollTimer = setInterval(() => {
       if (activeTab.value === 'campaigns') void refreshAll(true)
@@ -477,7 +494,6 @@ watch(anySending, (sending) => {
 })
 
 onMounted(() => {
-  void loadSettings(true)
   void refreshAll()
 })
 

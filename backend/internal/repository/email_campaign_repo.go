@@ -63,37 +63,64 @@ const campaignAudienceSQL = `WITH scoped AS (
 func campaignAudienceArgs(q service.EmailCampaignAudienceQuery) []any {
 	return []any{q.From, q.To, q.Cutoff, pq.Array(q.ExcludeUserIDs)}
 }
-func campaignResolve(ctx context.Context, tx *sql.Tx, entries []string) ([]int64, []string, error) {
-	ids := []int64{}
-	missing := []string{}
-	seen := map[int64]bool{}
+
+// Resolve all email and ID entries in one scan, shared by exclusions and suppressions.
+func campaignLookup(ctx context.Context, tx *sql.Tx, entries []string) (map[string][]int64, map[int64]string, error) {
+	emails, ids := []string{}, []int64{}
 	for _, raw := range entries {
 		entry := strings.TrimSpace(raw)
-		id, _ := strconv.ParseInt(entry, 10, 64)
-		rows, e := tx.QueryContext(ctx, `SELECT id FROM users WHERE id=$1 OR (strpos($2,'@')>0 AND lower(btrim(email))=lower($2)) ORDER BY id`, id, entry)
-		if e != nil {
-			return nil, nil, e
+		if strings.Contains(entry, "@") {
+			emails = append(emails, service.NormalizeCampaignEmail(entry))
+		} else if id, err := strconv.ParseInt(entry, 10, 64); err == nil && id > 0 {
+			ids = append(ids, id)
 		}
-		found := false
-		for rows.Next() {
-			var uid int64
-			if e = rows.Scan(&uid); e != nil {
-				_ = rows.Close()
-				return nil, nil, e
+	}
+	byEmail, byID := map[string][]int64{}, map[int64]string{}
+	if len(emails) == 0 && len(ids) == 0 {
+		return byEmail, byID, nil
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT id,lower(btrim(email)) FROM users WHERE lower(btrim(email))=ANY($1::text[]) OR id=ANY($2::bigint[]) ORDER BY id`, pq.Array(emails), pq.Array(ids))
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id int64
+		var email string
+		if err = rows.Scan(&id, &email); err != nil {
+			return nil, nil, err
+		}
+		byEmail[email] = append(byEmail[email], id)
+		byID[id] = email
+	}
+	return byEmail, byID, rows.Err()
+}
+func campaignResolve(ctx context.Context, tx *sql.Tx, entries []string) ([]int64, []string, error) {
+	byEmail, byID, err := campaignLookup(ctx, tx, entries)
+	if err != nil {
+		return nil, nil, err
+	}
+	ids, missing, seen := []int64{}, []string{}, map[int64]bool{}
+	for _, raw := range entries {
+		entry := strings.TrimSpace(raw)
+		if entry == "" {
+			continue
+		}
+		found := byEmail[service.NormalizeCampaignEmail(entry)]
+		if !strings.Contains(entry, "@") {
+			id, _ := strconv.ParseInt(entry, 10, 64)
+			if _, ok := byID[id]; ok {
+				found = []int64{id}
 			}
-			found = true
-			if !seen[uid] {
-				seen[uid] = true
-				ids = append(ids, uid)
-			}
 		}
-		e = rows.Err()
-		_ = rows.Close()
-		if e != nil {
-			return nil, nil, e
-		}
-		if !found {
+		if len(found) == 0 {
 			missing = append(missing, raw)
+		}
+		for _, id := range found {
+			if !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
 		}
 	}
 	return ids, missing, nil
@@ -185,6 +212,9 @@ func (r *emailCampaignRepository) Create(ctx context.Context, in service.EmailCa
 	}
 	c, e := campaignGet(ctx, tx, id)
 	if e != nil {
+		return nil, e
+	}
+	if e = campaignWaiting(ctx, tx, c); e != nil {
 		return nil, e
 	}
 	if e = tx.Commit(); e != nil {
@@ -380,7 +410,7 @@ func (r *emailCampaignRepository) Action(ctx context.Context, id int64, action s
 	if e != nil {
 		return nil, 0, e
 	}
-	_, e = tx.ExecContext(ctx, `UPDATE email_campaigns SET status=$2,pause_reason=$3,consecutive_failures=CASE WHEN $2='sending' THEN 0 ELSE consecutive_failures END,last_error=CASE WHEN $2='sending' THEN '' ELSE last_error END,finished_at=CASE WHEN $2='canceled' THEN now() ELSE NULL END,updated_at=now() WHERE id=$1`, id, next, reason)
+	_, e = tx.ExecContext(ctx, `UPDATE email_campaigns SET status=$2::text,pause_reason=$3,consecutive_failures=CASE WHEN $2::text='sending' THEN 0 ELSE consecutive_failures END,last_error=CASE WHEN $2::text='sending' THEN '' ELSE last_error END,finished_at=CASE WHEN $2::text='canceled' THEN now() ELSE NULL END,updated_at=now() WHERE id=$1`, id, next, reason)
 	if e != nil {
 		return nil, 0, campaignDBError(e)
 	}
@@ -429,9 +459,16 @@ func (r *emailCampaignRepository) AddSuppressions(ctx context.Context, entries [
 		return nil, e
 	}
 	defer func() { _ = tx.Rollback() }()
+	byEmail, byID, e := campaignLookup(ctx, tx, entries)
+	if e != nil {
+		return nil, e
+	}
 	out := &service.EmailCampaignSuppressionResult{NotFound: []string{}}
 	for _, raw := range entries {
 		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
 		var uid *int64
 		email := service.NormalizeCampaignEmail(value)
 		if strings.Contains(value, "@") {
@@ -439,26 +476,16 @@ func (r *emailCampaignRepository) AddSuppressions(ctx context.Context, entries [
 				out.NotFound = append(out.NotFound, raw)
 				continue
 			}
-			var id int64
-			e = tx.QueryRowContext(ctx, `SELECT id FROM users WHERE lower(btrim(email))=$1 ORDER BY id LIMIT 1`, email).Scan(&id)
-			if e == nil {
-				uid = &id
-			} else if !errors.Is(e, sql.ErrNoRows) {
-				return nil, e
+			if matches := byEmail[email]; len(matches) > 0 {
+				uid = &matches[0]
 			}
 		} else {
 			id, err := strconv.ParseInt(value, 10, 64)
-			if err != nil || id <= 0 {
+			var ok bool
+			email, ok = byID[id]
+			if err != nil || !ok || !service.ValidCampaignEmail(email) {
 				out.NotFound = append(out.NotFound, raw)
 				continue
-			}
-			e = tx.QueryRowContext(ctx, `SELECT lower(btrim(email)) FROM users WHERE id=$1`, id).Scan(&email)
-			if errors.Is(e, sql.ErrNoRows) || e == nil && !service.ValidCampaignEmail(email) {
-				out.NotFound = append(out.NotFound, raw)
-				continue
-			}
-			if e != nil {
-				return nil, e
 			}
 			uid = &id
 		}
@@ -489,7 +516,7 @@ func (r *emailCampaignRepository) RemoveSuppression(ctx context.Context, id int6
 	return n > 0, e
 }
 func (r *emailCampaignRepository) Unsubscribe(ctx context.Context, email string, campaign int64) error {
-	_, e := r.db.ExecContext(ctx, `INSERT INTO email_marketing_suppressions(email_norm,user_id,source,campaign_id) VALUES($1,(SELECT id FROM users WHERE lower(btrim(email))=$1 ORDER BY id LIMIT 1),'unsubscribe',(SELECT id FROM email_campaigns WHERE id=$2)) ON CONFLICT(email_norm) DO UPDATE SET source='unsubscribe',campaign_id=COALESCE(EXCLUDED.campaign_id,email_marketing_suppressions.campaign_id),user_id=COALESCE(EXCLUDED.user_id,email_marketing_suppressions.user_id)`, email, campaign)
+	_, e := r.db.ExecContext(ctx, `INSERT INTO email_marketing_suppressions(email_norm,user_id,source,campaign_id) VALUES($1::text,(SELECT id FROM users WHERE lower(btrim(email))=$1::text ORDER BY id LIMIT 1),'unsubscribe',(SELECT id FROM email_campaigns WHERE id=$2)) ON CONFLICT(email_norm) DO UPDATE SET source='unsubscribe',campaign_id=COALESCE(EXCLUDED.campaign_id,email_marketing_suppressions.campaign_id),user_id=COALESCE(EXCLUDED.user_id,email_marketing_suppressions.user_id)`, email, campaign)
 	return e
 }
 func (r *emailCampaignRepository) SendStats(ctx context.Context) (int64, int64, error) {
@@ -498,40 +525,43 @@ func (r *emailCampaignRepository) SendStats(ctx context.Context) (int64, int64, 
 
 // A settings row lock serializes campaign attempts and test sends across all instances.
 // Campaign callers always acquire their campaign row first, then this rate lock.
-func campaignReserve(ctx context.Context, tx *sql.Tx, campaign *int64) (bool, error) {
+func campaignReserve(ctx context.Context, tx *sql.Tx, campaign *int64) (string, error) {
 	_, e := tx.ExecContext(ctx, `INSERT INTO settings(key,value,updated_at) VALUES($1,'{"per_minute":20,"per_day":500}',now()) ON CONFLICT(key) DO NOTHING`, service.EmailCampaignLimitsKey)
 	if e != nil {
-		return false, e
+		return "", e
 	}
 	limits, e := campaignLimits(ctx, tx, true)
 	if e != nil {
-		return false, e
+		return "", e
 	}
 	_, e = tx.ExecContext(ctx, `DELETE FROM email_send_log WHERE sent_at<now()-interval '48 hours'`)
 	if e != nil {
-		return false, e
+		return "", e
 	}
 	minute, day, e := campaignStats(ctx, tx)
 	if e != nil {
-		return false, e
+		return "", e
 	}
-	if minute >= int64(limits.PerMinute) || day >= int64(limits.PerDay) {
-		return false, nil
+	if day >= int64(limits.PerDay) {
+		return "day", nil
+	}
+	if minute >= int64(limits.PerMinute) {
+		return "minute", nil
 	}
 	_, e = tx.ExecContext(ctx, `INSERT INTO email_send_log(campaign_id) VALUES($1)`, campaign)
-	return e == nil, e
+	return "", e
 }
-func (r *emailCampaignRepository) ReserveTestSend(ctx context.Context) (bool, error) {
+func (r *emailCampaignRepository) ReserveTestSend(ctx context.Context) (string, error) {
 	tx, e := r.db.BeginTx(ctx, nil)
 	if e != nil {
-		return false, e
+		return "", e
 	}
 	defer func() { _ = tx.Rollback() }()
-	ok, e := campaignReserve(ctx, tx, nil)
+	limit, e := campaignReserve(ctx, tx, nil)
 	if e != nil {
-		return false, e
+		return "", e
 	}
-	return ok, tx.Commit()
+	return limit, tx.Commit()
 }
 func (r *emailCampaignRepository) Claim(ctx context.Context) (*service.EmailCampaignClaim, error) {
 	tx, e := r.db.BeginTx(ctx, nil)
@@ -542,14 +572,14 @@ func (r *emailCampaignRepository) Claim(ctx context.Context) (*service.EmailCamp
 	var id int64
 	var status string
 	// Prefer stale claims, including canceled campaigns, so they cannot be starved by a new campaign.
-	e = tx.QueryRowContext(ctx, `SELECT c.id,c.status FROM email_campaigns c WHERE c.status IN ('sending','paused') OR EXISTS(SELECT 1 FROM email_campaign_recipients r WHERE r.campaign_id=c.id AND r.status='sending' AND r.claimed_at<now()-interval '10 minutes') ORDER BY EXISTS(SELECT 1 FROM email_campaign_recipients r WHERE r.campaign_id=c.id AND r.status='sending' AND r.claimed_at<now()-interval '10 minutes') DESC,c.id LIMIT 1 FOR UPDATE OF c`).Scan(&id, &status)
+	e = tx.QueryRowContext(ctx, `SELECT c.id,c.status FROM email_campaigns c WHERE c.status IN ('sending','paused') OR EXISTS(SELECT 1 FROM email_campaign_recipients r WHERE r.campaign_id=c.id AND r.status='sending' AND r.claimed_at<now()-interval '5 minutes') ORDER BY EXISTS(SELECT 1 FROM email_campaign_recipients r WHERE r.campaign_id=c.id AND r.status='sending' AND r.claimed_at<now()-interval '5 minutes') DESC,c.id LIMIT 1 FOR UPDATE OF c`).Scan(&id, &status)
 	if errors.Is(e, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if e != nil {
 		return nil, e
 	}
-	recovered, e := tx.ExecContext(ctx, `UPDATE email_campaign_recipients SET status='failed',outcome_uncertain=true,last_error='发送中断，可能已送达' WHERE campaign_id=$1 AND status='sending' AND claimed_at<now()-interval '10 minutes'`, id)
+	recovered, e := tx.ExecContext(ctx, `UPDATE email_campaign_recipients SET status='failed',outcome_uncertain=true,last_error='发送中断，可能已送达' WHERE campaign_id=$1 AND status='sending' AND claimed_at<now()-interval '5 minutes'`, id)
 	if e != nil {
 		return nil, e
 	}
@@ -587,11 +617,11 @@ func (r *emailCampaignRepository) Claim(ctx context.Context) (*service.EmailCamp
 	if inFlight {
 		return nil, tx.Commit()
 	}
-	allowed, e := campaignReserve(ctx, tx, &id)
+	limit, e := campaignReserve(ctx, tx, &id)
 	if e != nil {
 		return nil, e
 	}
-	if !allowed {
+	if limit != "" {
 		return nil, tx.Commit()
 	}
 	var recipient service.EmailCampaignRecipient
@@ -608,6 +638,13 @@ func (r *emailCampaignRepository) Claim(ctx context.Context) (*service.EmailCamp
 		return nil, e
 	}
 	return &service.EmailCampaignClaim{Campaign: c, Recipient: recipient}, nil
+}
+
+// clock_timestamp checks the actual time, not a transaction's start time.
+func (r *emailCampaignRepository) ClaimValid(ctx context.Context, recipient service.EmailCampaignRecipient) (bool, error) {
+	var valid bool
+	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM email_campaign_recipients WHERE campaign_id=$1 AND user_id=$2 AND status='sending' AND claim_version=$3 AND claimed_at > clock_timestamp()-($4::double precision * interval '1 second'))`, recipient.CampaignID, recipient.UserID, recipient.ClaimVersion, service.EmailCampaignClaimLease.Seconds()).Scan(&valid)
+	return valid, err
 }
 func (r *emailCampaignRepository) Eligible(ctx context.Context, recipient service.EmailCampaignRecipient) (string, string, error) {
 	var username, reason string
@@ -637,20 +674,20 @@ func (r *emailCampaignRepository) Finish(ctx context.Context, recipient service.
 		next = "skipped"
 	case "recipient":
 		next = "failed"
-		campaignFailure = true
+		campaignFailure = outcome.CountFailure
 	case "uncertain":
 		uncertain = true
 		campaignFailure = true
-	case "campaign":
+	case "campaign", "retry":
 		next = "pending"
-		campaignFailure = true
+		campaignFailure = outcome.Kind == "campaign"
 		if status == "canceled" {
 			next = "skipped"
 		}
 	default:
 		return fmt.Errorf("unknown email campaign outcome %q", outcome.Kind)
 	}
-	result, e := tx.ExecContext(ctx, `UPDATE email_campaign_recipients SET status=$4,outcome_uncertain=$5,last_error=$6,sent_at=CASE WHEN $4='sent' THEN now() ELSE sent_at END WHERE campaign_id=$1 AND user_id=$2 AND status='sending' AND claim_version=$3`, recipient.CampaignID, recipient.UserID, recipient.ClaimVersion, next, uncertain, outcome.Error)
+	result, e := tx.ExecContext(ctx, `UPDATE email_campaign_recipients SET status=$4::text,outcome_uncertain=$5,last_error=$6,sent_at=CASE WHEN $4::text='sent' THEN now() ELSE sent_at END WHERE campaign_id=$1 AND user_id=$2 AND status='sending' AND claim_version=$3`, recipient.CampaignID, recipient.UserID, recipient.ClaimVersion, next, uncertain, outcome.Error)
 	if e != nil {
 		return e
 	}

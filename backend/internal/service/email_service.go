@@ -238,7 +238,7 @@ func (s *EmailService) connectSMTPContext(ctx context.Context, config *SMTPConfi
 		if err == nil {
 			stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 			defer stop()
-			return newSMTPClient(conn, config.Host)
+			return newSMTPClientContext(ctx, conn, config.Host)
 		}
 		var recordErr tls.RecordHeaderError
 		if !errors.As(err, &recordErr) {
@@ -261,7 +261,7 @@ func (s *EmailService) connectSMTPStartTLS(ctx context.Context, dialer *net.Dial
 	}
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
-	client, err := newSMTPClient(conn, host)
+	client, err := newSMTPClientContext(ctx, conn, host)
 	if err != nil {
 		return nil, err
 	}
@@ -279,8 +279,12 @@ func (s *EmailService) connectSMTPStartTLS(ctx context.Context, dialer *net.Dial
 	return client, nil
 }
 
-func newSMTPClient(conn net.Conn, host string) (*smtp.Client, error) {
-	_ = conn.SetDeadline(time.Now().Add(smtpIOTimeout))
+func newSMTPClientContext(ctx context.Context, conn net.Conn, host string) (*smtp.Client, error) {
+	deadline := time.Now().Add(smtpIOTimeout)
+	if end, ok := ctx.Deadline(); ok && end.Before(deadline) {
+		deadline = end
+	}
+	_ = conn.SetDeadline(deadline)
 	client, err := smtp.NewClient(conn, host)
 	if err != nil {
 		_ = conn.Close()

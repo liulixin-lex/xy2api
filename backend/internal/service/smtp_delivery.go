@@ -61,7 +61,7 @@ func deliverSMTPMessage(client *smtp.Client, config *SMTPConfig, message smtpMes
 		return smtpFailure("data", err, false)
 	}
 	if _, err = w.Write(message.data); err != nil {
-		return smtpFailure("body", err, true)
+		return smtpFailure("body", err, false)
 	}
 	if err = w.Close(); err != nil {
 		return smtpFailure("commit", err, true)

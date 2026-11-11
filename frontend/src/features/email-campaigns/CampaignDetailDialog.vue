@@ -68,11 +68,13 @@
             </span>
           </template>
           <template #cell-last_error="{ row }">
-            <div class="max-w-md text-sm">
-              <span v-if="row.uncertain" class="badge badge-warning mr-1.5">
+            <div class="flex max-w-xs items-center gap-1.5 text-sm xl:max-w-md">
+              <span v-if="row.uncertain" class="badge badge-warning flex-shrink-0">
                 {{ t('admin.emailCampaigns.detail.maybeDelivered') }}
               </span>
-              <span class="break-words text-gray-600 dark:text-gray-300">{{ row.last_error || '-' }}</span>
+              <span class="min-w-0 truncate text-gray-600 dark:text-gray-300" :title="row.last_error || undefined">
+                {{ row.last_error || '-' }}
+              </span>
             </div>
           </template>
           <template #cell-sent_at="{ value }">
@@ -96,11 +98,15 @@
         </summary>
         <div class="bg-gray-100 p-3 dark:bg-dark-900">
           <iframe
+            v-if="detail.preview_html"
             class="h-[32rem] w-full rounded-md border border-gray-200 bg-white dark:border-dark-700"
             sandbox=""
             :srcdoc="detail.preview_html"
             :title="t('admin.emailCampaigns.detail.content')"
           ></iframe>
+          <p v-else class="px-1 py-4 text-sm text-gray-500 dark:text-gray-400" data-testid="email-campaign-preview-unavailable">
+            {{ t('admin.emailCampaigns.detail.previewUnavailable') }}
+          </p>
         </div>
       </details>
     </div>
@@ -179,6 +185,7 @@ import {
   formatCount,
   formatDuration,
   isAbortError,
+  needsPolling,
   progressPercent,
   statusBadgeClass,
 } from './campaignFormat'
@@ -478,10 +485,13 @@ watch(
     recipientPagination.total = 0
     void loadDetail()
     void loadRecipients()
-    pollTimer = setInterval(() => {
-      if (detail.value?.status !== 'sending') return
-      void loadDetail()
+    // Poll while sending, and after pause/cancel until the in-flight email reports back;
+    // then refresh the list once so its row shows the settled counts.
+    pollTimer = setInterval(async () => {
+      if (!needsPolling(detail.value)) return
       void loadRecipients(true)
+      await loadDetail()
+      if (!needsPolling(detail.value)) emit('changed')
     }, POLL_INTERVAL_MS)
   },
   { immediate: true },

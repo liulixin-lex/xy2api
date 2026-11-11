@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"html"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
@@ -29,6 +30,11 @@ var (
 )
 
 const EmailCampaignLimitsKey = "email_campaign_send_limits"
+
+// A worker must stop before stale recovery can hand its row to another worker.
+const EmailCampaignClaimLease = 2 * time.Minute
+
+var campaignURLPlaceholder = regexp.MustCompile(`(?i)%7B%7B(username|site_name)%7D%7D`)
 
 var campaignEmailPattern = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 
@@ -205,9 +211,10 @@ type EmailCampaignClaim struct {
 	Recipient EmailCampaignRecipient
 }
 type EmailCampaignOutcome struct {
-	Kind  string
-	Error string
-	Auth  bool
+	Kind         string
+	Error        string
+	Auth         bool
+	CountFailure bool // Temporary recipient refusals count; permanent refusals do not.
 }
 
 type EmailCampaignRepository interface {
@@ -224,8 +231,9 @@ type EmailCampaignRepository interface {
 	RemoveSuppression(context.Context, int64) (bool, error)
 	Unsubscribe(context.Context, string, int64) error
 	SendStats(context.Context) (int64, int64, error)
-	ReserveTestSend(context.Context) (bool, error)
+	ReserveTestSend(context.Context) (string, error)
 	Claim(context.Context) (*EmailCampaignClaim, error)
+	ClaimValid(context.Context, EmailCampaignRecipient) (bool, error)
 	Eligible(context.Context, EmailCampaignRecipient) (string, string, error)
 	Finish(context.Context, EmailCampaignRecipient, EmailCampaignOutcome) error
 }
@@ -235,15 +243,20 @@ type EmailCampaignService struct {
 	email        *EmailService
 	notification *NotificationEmailService
 	users        UserRepository
+	sendSMTP     func(context.Context, *SMTPConfig, smtpMessage) error
 }
 
 func NewEmailCampaignService(repo EmailCampaignRepository, settings SettingRepository, email *EmailService, notification *NotificationEmailService, users UserRepository) *EmailCampaignService {
-	return &EmailCampaignService{repo, settings, email, notification, users}
+	s := &EmailCampaignService{repo: repo, settings: settings, email: email, notification: notification, users: users}
+	if email != nil {
+		s.sendSMTP = email.sendSMTPMessage
+	}
+	return s
 }
 
 func ValidateEmailCampaignAudience(a EmailCampaignAudience, now time.Time) (EmailCampaignAudienceQuery, error) {
 	q := EmailCampaignAudienceQuery{EmailCampaignAudienceSnapshot: EmailCampaignAudienceSnapshot{EmailCampaignAudience: a, ExcludeUserIDs: []int64{}}}
-	if a.Timezone == "" || len(a.Exclude) > 1000 {
+	if a.Timezone == "" || a.Timezone == "Local" || len(a.Exclude) > 1000 {
 		return q, ErrEmailCampaignInvalidInput
 	}
 	loc, err := time.LoadLocation(a.Timezone)
@@ -372,11 +385,11 @@ func (s *EmailCampaignService) Detail(ctx context.Context, id, admin int64) (*Em
 	if e != nil {
 		return nil, e
 	}
-	r, e := s.RenderForAdmin(ctx, EmailCampaignContent{c.Subject, c.BodyMarkdown}, admin, id)
-	if e != nil {
-		return nil, e
+	detail := &EmailCampaignDetail{EmailCampaign: c, BodyMarkdown: c.BodyMarkdown}
+	if rendered, err := s.RenderForAdmin(ctx, EmailCampaignContent{c.Subject, c.BodyMarkdown}, admin, id); err == nil {
+		detail.PreviewHTML = rendered.HTML
 	}
-	return &EmailCampaignDetail{c, c.BodyMarkdown, r.HTML}, nil
+	return detail, nil
 }
 func (s *EmailCampaignService) Recipients(ctx context.Context, id int64, status, search string, page, size int) (EmailCampaignPage[EmailCampaignRecipient], error) {
 	if status != "" && status != "pending" && status != "sending" && status != "sent" && status != "failed" && status != "skipped" {
@@ -487,7 +500,16 @@ func (s *EmailCampaignService) Render(ctx context.Context, c EmailCampaignConten
 	}
 	subject := sanitizeEmailHeader(replace(c.Subject, false))
 	footer := `<hr><p>不想接收营销邮件？<a href="` + html.EscapeString(link) + `">退订 / Unsubscribe</a><br>To stop receiving marketing emails, unsubscribe here. 不影响验证码及系统通知。</p>`
-	card := notificationEmailCard("#4f46e5", html.EscapeString(subject), replace(body.String(), true)+footer)
+	// Resolve URL placeholders after Markdown rendering, before text substitution:
+	// replacement values must never be interpreted as Markdown or expanded twice.
+	bodyHTML := campaignURLPlaceholder.ReplaceAllStringFunc(body.String(), func(token string) string {
+		value := username
+		if strings.Contains(strings.ToLower(token), "site_name") {
+			value = name
+		}
+		return html.EscapeString(url.QueryEscape(value))
+	})
+	card := notificationEmailCard("#4f46e5", html.EscapeString(subject), replace(bodyHTML, true)+footer)
 	// Replace the card's own site placeholder separately; replacement values are never expanded again.
 	card = strings.ReplaceAll(card, "This email was sent by {{site_name}}.", "This email was sent by "+html.EscapeString(name)+".")
 	return &EmailCampaignRendered{subject, card, replace(c.BodyMarkdown, false) + "\n\n退订营销邮件 / Unsubscribe from marketing emails: " + link + "\n不影响验证码及系统通知。\n", link}, nil
@@ -507,17 +529,35 @@ func (s *EmailCampaignService) TestSend(ctx context.Context, c EmailCampaignCont
 	}
 	msg, e := buildCampaignSMTPMessage(cfg, addr.Address, r)
 	if e != nil {
-		return "", e
+		return "", infraerrors.New(http.StatusBadGateway, "EMAIL_CAMPAIGN_SEND_FAILED", "测试邮件发送失败：阶段 message，SMTP 返回码 0")
 	}
-	ok, e := s.repo.ReserveTestSend(ctx)
+	limit, e := s.repo.ReserveTestSend(ctx)
 	if e != nil {
 		return "", e
 	}
-	if !ok {
-		return "", infraerrors.Conflict("EMAIL_CAMPAIGN_INVALID_STATE", "营销邮件已达发送限速，请稍后重试")
+	if limit != "" {
+		window := "每分钟"
+		if limit == "day" {
+			window = "24 小时"
+		}
+		return "", infraerrors.New(http.StatusTooManyRequests, "EMAIL_CAMPAIGN_RATE_LIMITED", "营销邮件已达"+window+"发送上限，请稍后重试")
 	}
-	if e = s.email.sendSMTPMessage(ctx, cfg, msg); e != nil {
-		return "", e
+	if e = s.sendSMTP(ctx, cfg, msg); e != nil {
+		// SMTP replies may echo credentials; expose only the typed stage and code.
+		stage, code := "connect", 0
+		var delivery *SMTPDeliveryError
+		if errors.As(e, &delivery) {
+			stage, code = delivery.Stage, delivery.Code
+		}
+		return "", infraerrors.Newf(http.StatusBadGateway, "EMAIL_CAMPAIGN_SEND_FAILED", "测试邮件发送失败：阶段 %s，SMTP 返回码 %d", stage, code)
 	}
 	return addr.Address, nil
+}
+
+// SiteName is shared by all public unsubscribe outcomes.
+func (s *EmailCampaignService) SiteName(ctx context.Context) string {
+	if s.notification == nil {
+		return "XY2API"
+	}
+	return s.notification.siteName(ctx)
 }

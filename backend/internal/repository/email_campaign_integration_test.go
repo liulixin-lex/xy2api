@@ -69,7 +69,7 @@ func TestEmailCampaignRepositoryLifecycle(t *testing.T) {
 	require.NoError(t, e)
 	excluded := create("excluded")
 	from, to, days := "2001-01-01", "2001-01-31", 30
-	audience := service.EmailCampaignAudience{Timezone: "UTC", RegisteredFrom: &from, RegisteredTo: &to, InactiveDays: &days, Exclude: []string{strings.ToUpper(excluded.Email), "missing@example.com"}}
+	audience := service.EmailCampaignAudience{Timezone: "UTC", RegisteredFrom: &from, RegisteredTo: &to, InactiveDays: &days, Exclude: []string{strings.ToUpper(excluded.Email), "missing@example.com", "  ", "\t"}}
 	query, e := service.ValidateEmailCampaignAudience(audience, time.Now())
 	require.NoError(t, e)
 	preview, e := repo.Preview(ctx, query, 1, 100)
@@ -80,9 +80,17 @@ func TestEmailCampaignRepositoryLifecycle(t *testing.T) {
 	admin := mustCreateUser(t, client, &service.User{Email: prefix + "admin@example.com", Role: service.RoleAdmin})
 	ids = append(ids, admin.ID)
 	input := service.EmailCampaignCreate{EmailCampaignContent: service.EmailCampaignContent{Subject: "Campaign", BodyMarkdown: "Hello"}, Audience: audience}
+	require.NoError(t, settings.Set(ctx, service.EmailCampaignLimitsKey, `{"per_minute":120,"per_day":1}`))
+	var logID int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO email_send_log(sent_at) VALUES(now()) RETURNING id`).Scan(&logID))
+	t.Cleanup(func() { _, _ = integrationDB.ExecContext(ctx, `DELETE FROM email_send_log WHERE id=$1`, logID) })
 	campaign, e := repo.Create(ctx, input, query, admin.ID)
 	require.NoError(t, e)
 	campaigns = append(campaigns, campaign.ID)
+	require.Equal(t, "day", campaign.WaitingForLimit)
+	detail, e := repo.Get(ctx, campaign.ID)
+	require.NoError(t, e)
+	require.Equal(t, detail.WaitingForLimit, campaign.WaitingForLimit)
 	require.EqualValues(t, 2, campaign.Counts.Pending)
 	_, e = repo.Create(ctx, input, query, admin.ID)
 	require.ErrorIs(t, e, service.ErrEmailCampaignActiveExists)
@@ -134,6 +142,26 @@ func TestEmailCampaignRepositoryLifecycle(t *testing.T) {
 	require.Equal(t, "paused", got.Status)
 	_, _, e = repo.Action(ctx, campaign.ID, "resume")
 	require.NoError(t, e)
+
+	// Cancellation before delivery and permanent recipient errors do not pause the campaign.
+	for _, kind := range []string{"retry", "recipient"} {
+		attempt, err := repo.Claim(ctx)
+		require.NoError(t, err)
+		require.NotNil(t, attempt)
+		require.NoError(t, repo.Finish(ctx, attempt.Recipient, service.EmailCampaignOutcome{Kind: kind, Error: "fixture"}))
+		current, err := repo.Get(ctx, campaign.ID)
+		require.NoError(t, err)
+		require.Zero(t, current.ConsecutiveFailures)
+		if kind == "retry" {
+			require.EqualValues(t, 1, current.Counts.Pending)
+		} else {
+			require.EqualValues(t, 1, current.Counts.Failed)
+		}
+	}
+	_, _, e = repo.Action(ctx, campaign.ID, "pause")
+	require.NoError(t, e)
+	_, _, e = repo.Action(ctx, campaign.ID, "retry-failed")
+	require.NoError(t, e)
 	for i := 1; i <= 5; i++ {
 		attempt, err := repo.Claim(ctx)
 		require.NoError(t, err)
@@ -142,7 +170,7 @@ func TestEmailCampaignRepositoryLifecycle(t *testing.T) {
 		if i == 5 {
 			kind = "recipient"
 		}
-		require.NoError(t, repo.Finish(ctx, attempt.Recipient, service.EmailCampaignOutcome{Kind: kind, Error: "fixture refusal"}))
+		require.NoError(t, repo.Finish(ctx, attempt.Recipient, service.EmailCampaignOutcome{Kind: kind, Error: "fixture refusal", CountFailure: true}))
 	}
 	got, e = repo.Get(ctx, campaign.ID)
 	require.NoError(t, e)
@@ -167,7 +195,15 @@ func TestEmailCampaignRepositoryLifecycle(t *testing.T) {
 	stale, e := repo.Claim(ctx)
 	require.NoError(t, e)
 	require.NotNil(t, stale)
-	_, e = integrationDB.ExecContext(ctx, `UPDATE email_campaign_recipients SET claimed_at=now()-interval '11 minutes' WHERE campaign_id=$1 AND user_id=$2`, campaign.ID, stale.Recipient.UserID)
+	valid, e := repo.ClaimValid(ctx, stale.Recipient)
+	require.NoError(t, e)
+	require.True(t, valid)
+	_, e = integrationDB.ExecContext(ctx, `UPDATE email_campaign_recipients SET claimed_at=now()-interval '3 minutes' WHERE campaign_id=$1 AND user_id=$2`, campaign.ID, stale.Recipient.UserID)
+	require.NoError(t, e)
+	valid, e = repo.ClaimValid(ctx, stale.Recipient)
+	require.NoError(t, e)
+	require.False(t, valid)
+	_, e = integrationDB.ExecContext(ctx, `UPDATE email_campaign_recipients SET claimed_at=now()-interval '6 minutes' WHERE campaign_id=$1 AND user_id=$2`, campaign.ID, stale.Recipient.UserID)
 	require.NoError(t, e)
 	_, e = repo.Claim(ctx)
 	require.NoError(t, e)
@@ -175,6 +211,9 @@ func TestEmailCampaignRepositoryLifecycle(t *testing.T) {
 	require.NoError(t, e)
 	require.Equal(t, "completed", got.Status)
 	require.EqualValues(t, 1, got.Counts.Uncertain)
+	valid, e = repo.ClaimValid(ctx, stale.Recipient)
+	require.NoError(t, e)
+	require.False(t, valid)
 	_, requeued, e := repo.Action(ctx, campaign.ID, "retry-failed")
 	require.NoError(t, e)
 	require.EqualValues(t, 1, requeued)
@@ -182,6 +221,9 @@ func TestEmailCampaignRepositoryLifecycle(t *testing.T) {
 	require.NoError(t, e)
 	require.NotNil(t, retry)
 	require.Greater(t, retry.Recipient.ClaimVersion, stale.Recipient.ClaimVersion)
+	valid, e = repo.ClaimValid(ctx, stale.Recipient)
+	require.NoError(t, e)
+	require.False(t, valid)
 	require.NoError(t, repo.Finish(ctx, stale.Recipient, service.EmailCampaignOutcome{Kind: "sent"}))
 	got, e = repo.Get(ctx, campaign.ID)
 	require.NoError(t, e)

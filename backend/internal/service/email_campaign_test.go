@@ -62,7 +62,7 @@ func TestEmailCampaignSMTPClassification(t *testing.T) {
 	}{
 		{"connect", 0, false, "campaign", false}, {"tls", 0, false, "campaign", false}, {"auth", 535, false, "campaign", true}, {"mail", 550, false, "campaign", false},
 		{"rcpt", 550, false, "recipient", false}, {"rcpt", 450, false, "recipient", false}, {"rcpt", 421, false, "campaign", false}, {"rcpt", 0, false, "campaign", false},
-		{"data", 554, false, "campaign", false}, {"commit", 451, true, "campaign", false}, {"commit", 0, true, "uncertain", false}, {"body", 0, true, "uncertain", false},
+		{"data", 554, false, "campaign", false}, {"commit", 451, true, "campaign", false}, {"commit", 0, true, "uncertain", false}, {"body", 0, false, "campaign", false},
 	} {
 		t.Run(tc.stage+"/"+tc.kind, func(t *testing.T) {
 			var err error = io.EOF
@@ -149,7 +149,7 @@ func TestEmailCampaignAudienceValidation(t *testing.T) {
 		ok   bool
 	}{
 		{"valid DST", EmailCampaignAudience{Timezone: "America/New_York", RegisteredFrom: date("2026-03-08"), RegisteredTo: date("2026-03-08"), InactiveDays: days(30)}, true},
-		{"timezone", EmailCampaignAudience{Timezone: "not/a-zone"}, false}, {"empty zone", EmailCampaignAudience{}, false},
+		{"timezone", EmailCampaignAudience{Timezone: "not/a-zone"}, false}, {"empty zone", EmailCampaignAudience{}, false}, {"Local zone", EmailCampaignAudience{Timezone: "Local"}, false},
 		{"date", EmailCampaignAudience{Timezone: "UTC", RegisteredFrom: date("2026-02-30")}, false},
 		{"reverse", EmailCampaignAudience{Timezone: "UTC", RegisteredFrom: date("2026-03-02"), RegisteredTo: date("2026-03-01")}, false},
 		{"days zero", EmailCampaignAudience{Timezone: "UTC", InactiveDays: days(0)}, false}, {"days max", EmailCampaignAudience{Timezone: "UTC", InactiveDays: days(3651)}, false},
@@ -187,7 +187,7 @@ func TestEmailCampaignSMTPInMemory(t *testing.T) {
 			defer cancel()
 			stop := context.AfterFunc(ctx, func() { _ = sender.Close() })
 			defer stop()
-			client, e := newSMTPClient(sender, "localhost")
+			client, e := newSMTPClientContext(context.Background(), sender, "localhost")
 			require.NoError(t, e)
 			cfg := &SMTPConfig{Host: "localhost", Username: "user", Password: "password", From: "from@example.com", FromName: "Site\r\nInjected"}
 			msg, e := buildCampaignSMTPMessage(cfg, "to@example.com", &EmailCampaignRendered{Subject: "subject\r\nBcc: bad", Text: "plain", HTML: "<p>html</p>", UnsubscribeURL: "https://example.com/api/v1/email-campaigns/unsubscribe?token=test"})

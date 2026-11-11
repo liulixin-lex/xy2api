@@ -185,11 +185,67 @@ describe('EmailCampaignsView', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-testid="email-campaign-new"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="email-campaign-active-hint"]').text()).toBe('admin.emailCampaigns.setup.activeExists')
 
     await wrapper.get('[data-testid="email-campaign-pause"]').trigger('click')
     await flushPromises()
 
     expect(api.pauseCampaign).toHaveBeenCalledWith(7)
     expect(stepUpRun).not.toHaveBeenCalled()
+  })
+
+  it('keeps polling after pause until the in-flight email reports back', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    try {
+      const inFlight = campaign({
+        status: 'paused',
+        pause_reason: 'manual',
+        counts: { total: 10, pending: 5, sending: 1, sent: 4, failed: 0, skipped: 0, uncertain: 0 },
+      })
+      api.listCampaigns.mockResolvedValue(page([inFlight]))
+      mountView()
+      await flushPromises()
+
+      const before = api.listCampaigns.mock.calls.length
+      vi.advanceTimersByTime(5000)
+      await flushPromises()
+      expect(api.listCampaigns.mock.calls.length).toBeGreaterThan(before)
+
+      // The last email failed; nothing is in flight any more, so polling stops.
+      api.listCampaigns.mockResolvedValue(
+        page([{ ...inFlight, counts: { ...inFlight.counts, sending: 0, failed: 1 } }]),
+      )
+      vi.advanceTimersByTime(5000)
+      await flushPromises()
+      const settled = api.listCampaigns.mock.calls.length
+      vi.advanceTimersByTime(15000)
+      await flushPromises()
+      expect(api.listCampaigns.mock.calls.length).toBe(settled)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reloads settings on manual refresh without overwriting unsaved limits', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-testid="email-campaign-per-minute"]').setValue('30')
+
+    api.getSettings.mockResolvedValue({
+      per_minute: 20,
+      per_day: 500,
+      smtp_configured: false,
+      site_url: 'https://example.com',
+      site_url_ok: true,
+      sent_last_minute: 0,
+      sent_last_24h: 0,
+    })
+    const callsBefore = api.getSettings.mock.calls.length
+    await wrapper.get('button[title="common.refresh"]').trigger('click')
+    await flushPromises()
+
+    expect(api.getSettings.mock.calls.length).toBe(callsBefore + 1)
+    expect(wrapper.get('[data-testid="email-campaign-new"]').attributes('disabled')).toBeDefined()
+    expect((wrapper.get('[data-testid="email-campaign-per-minute"]').element as HTMLInputElement).value).toBe('30')
   })
 })

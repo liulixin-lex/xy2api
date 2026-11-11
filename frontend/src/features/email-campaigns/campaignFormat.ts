@@ -1,8 +1,23 @@
-import { extractI18nErrorMessage } from '@/utils/apiError'
+import { extractApiErrorCode, extractI18nErrorMessage } from '@/utils/apiError'
 import { isStepUpBlocked, stepUpBlockReason } from '@/composables/useStepUp'
 import type { Campaign, CampaignStatus } from './types'
 
 type Translate = (key: string, params?: Record<string, unknown>) => string
+
+/**
+ * Reasons whose server message is more useful than a fixed text: the send
+ * failure carries the SMTP stage and code, the rate limit says when to retry.
+ */
+const SERVER_MESSAGE_REASONS = new Set(['EMAIL_CAMPAIGN_RATE_LIMITED', 'EMAIL_CAMPAIGN_SEND_FAILED'])
+
+/** The client falls back to axios' own text when the server sent no message. */
+function serverMessage(err: unknown): string {
+  const message = (err as { message?: unknown } | null)?.message
+  if (typeof message !== 'string') return ''
+  const trimmed = message.trim()
+  if (!trimmed || trimmed.startsWith('Request failed with status code')) return ''
+  return trimmed
+}
 
 /** Localized message for a failed campaign request, by reason code when known. */
 export function campaignErrorMessage(err: unknown, t: Translate): string {
@@ -11,7 +26,17 @@ export function campaignErrorMessage(err: unknown, t: Translate): string {
       ? t('stepUp.adminApiKeyForbidden')
       : t('stepUp.notEnabled')
   }
+  const code = extractApiErrorCode(err)
+  if (code && SERVER_MESSAGE_REASONS.has(code)) {
+    return serverMessage(err) || t(`admin.emailCampaigns.errors.${code}`)
+  }
   return extractI18nErrorMessage(err, t, 'admin.emailCampaigns.errors', t('admin.emailCampaigns.errors.generic'))
+}
+
+/** Still has work in flight: sending, or paused/canceled while the last email has not reported back. */
+export function needsPolling(c: Pick<Campaign, 'status' | 'counts'> | null | undefined): boolean {
+  if (!c) return false
+  return c.status === 'sending' || (c.counts?.sending ?? 0) > 0
 }
 
 /** Whether a request rejection is an abort of a superseded request. */

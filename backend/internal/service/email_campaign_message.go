@@ -22,7 +22,7 @@ func buildCampaignSMTPMessage(config *SMTPConfig, to string, r *EmailCampaignRen
 	}
 	recipient, e := parseSMTPAddress(to, "recipient")
 	if e != nil {
-		return smtpMessage{}, e
+		return smtpMessage{}, smtpFailure("recipient", e, false)
 	}
 	id, e := generateEmailMessageID(from.Address, config.Host)
 	if e != nil {
@@ -54,8 +54,35 @@ func buildCampaignSMTPMessage(config *SMTPConfig, to string, r *EmailCampaignRen
 		return smtpMessage{}, e
 	}
 	var message bytes.Buffer
-	fmt.Fprintf(&message, "From: %s\r\nTo: %s\r\nDate: %s\r\nMessage-ID: %s\r\nSubject: %s\r\n", from.String(), (&mail.Address{Name: recipient.Name, Address: recipient.Address}).String(), time.Now().UTC().Format(time.RFC1123Z), id, mime.QEncoding.Encode("UTF-8", sanitizeEmailHeader(r.Subject)))
+	fmt.Fprintf(&message, "From: %s\r\nTo: %s\r\nDate: %s\r\nMessage-ID: %s\r\nSubject: %s\r\n", from.String(), (&mail.Address{Name: recipient.Name, Address: recipient.Address}).String(), time.Now().UTC().Format(time.RFC1123Z), id, foldCampaignSubject(r.Subject))
 	fmt.Fprintf(&message, "List-Unsubscribe: <%s>\r\nList-Unsubscribe-Post: List-Unsubscribe=One-Click\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=%q\r\n\r\n", r.UnsubscribeURL, multi.Boundary())
 	_, _ = message.Write(body.Bytes())
 	return smtpMessage{from.Address, recipient.Address, message.Bytes()}, nil
+}
+
+// QEncoding emits <=75-byte encoded words. Put each on its own continuation
+// line so even a 200-rune CJK subject stays below the RFC 5322 recommendation.
+func foldCampaignSubject(subject string) string {
+	encoded := mime.QEncoding.Encode("UTF-8", sanitizeEmailHeader(subject))
+	if strings.HasPrefix(encoded, "=?UTF-8?q?") {
+		return "\r\n " + strings.ReplaceAll(encoded, "?= =?", "?=\r\n =?")
+	}
+	// ASCII subjects can be folded at existing spaces without changing their value.
+	words := strings.Split(encoded, " ")
+	var out strings.Builder
+	column := len("Subject: ")
+	for i, word := range words {
+		if i > 0 {
+			if column+1+len(word) > 78 {
+				_, _ = out.WriteString("\r\n ")
+				column = 1
+			} else {
+				_ = out.WriteByte(' ')
+				column++
+			}
+		}
+		_, _ = out.WriteString(word)
+		column += len(word)
+	}
+	return out.String()
 }
