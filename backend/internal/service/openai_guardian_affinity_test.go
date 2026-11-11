@@ -196,7 +196,7 @@ func TestWithOpenAIGuardianParentAffinity_PreservesRequestState(t *testing.T) {
 			c.Request = c.Request.WithContext(withOpenAILegacySessionHash(c.Request.Context(), "child-legacy-hash"))
 			beforeRequest := c.Request
 			beforeQuality := qualityRequest(c.Request.Context())
-			beforeKeys := make(map[string]any, len(c.Keys))
+			beforeKeys := make(map[any]any, len(c.Keys))
 			for key, value := range c.Keys {
 				beforeKeys[key] = value
 			}

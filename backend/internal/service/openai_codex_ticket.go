@@ -413,7 +413,7 @@ func (s *OpenAIGatewayService) fireCodexAccountTicketProbe(ctx context.Context, 
 	if injectedState != "" || s.openAICodexTicketConfig().UnifiedProbeEnabled {
 		req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
 		candidateCtx := context.WithValue(attemptCtx, codexTicketCandidateContextKey{}, true)
-		candidateGin := &gin.Context{Request: req, Keys: map[string]any{}}
+		candidateGin := &gin.Context{Request: req, Keys: map[any]any{}}
 		fpIDs := resolveCodexFingerprintIDsFromRequest(account, req.Header)
 		if fpIDs != nil {
 			fpBody, _, fpErr := applyCodexFingerprintClientMetadataRaw(body, fpIDs)

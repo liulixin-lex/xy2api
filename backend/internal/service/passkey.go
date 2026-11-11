@@ -201,7 +201,7 @@ func (s *PasskeyService) BeginRegistration(
 		waUser,
 		webauthn.WithResidentKeyRequirement(protocol.ResidentKeyRequirementRequired),
 		webauthn.WithExclusions(webauthn.Credentials(waUser.credentials).CredentialDescriptors()),
-		webauthn.WithExtensions(protocol.AuthenticationExtensions{"credProps": true}),
+		webauthn.WithExtensions(webauthn.WithExtensionCredProps()),
 	)
 	if err != nil {
 		return nil, "", fmt.Errorf("begin passkey registration: %w", err)
