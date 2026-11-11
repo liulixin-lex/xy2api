@@ -520,7 +520,8 @@ func TestJudgeTestAcceptance(t *testing.T) {
 			expectVerdict(t, JudgeTest(clean, "gpt-6.1-sol", p).Error, VerdictPass)
 			expectVerdict(t, JudgeTest(one, "gpt-6.1-sol", p).Error, VerdictNoData)
 			two := []TestTurn{testTurn(TierSmall, 1, OutcomeOK, ptr(10)), testTurn(TierSmall, 2, OutcomeAccountFault, nil),
-				testTurn(TierMedium, 1, OutcomeOK, ptr(10)), testTurn(TierMedium, 2, OutcomeAccountFault, nil)}
+				testTurn(TierMedium, 1, OutcomeOK, ptr(10)), testTurn(TierMedium, 2, OutcomeAccountFault, nil),
+				testTurn(TierLarge, 1, OutcomeOK, ptr(5000)), testTurn(TierLarge, 2, OutcomeOK, ptr(5000)), testTurn(TierLarge, 3, OutcomeOK, ptr(5000))}
 			expectVerdict(t, JudgeTest(two, "gpt-6.1-sol", p).Error, VerdictFail)
 		}},
 		{"B17a_One_Fault_Pooled_With_Clean_And_New_Fault", func(t *testing.T) {
@@ -738,6 +739,13 @@ func TestNextAcceptance(t *testing.T) {
 			if n.State != StateNormal || n.Reason != "" || want {
 				t.Fatalf("other dimensions without data cannot block recovery: next=%+v want=%v", n, want)
 			}
+			turns[8].Outcome = OutcomeAccountFault // retains first output; error has one fault and stays nodata
+			tests[0].Turns = turns
+			expectVerdicts(t, JudgeTest(turns, row.Model, p), Verdicts{Speed: VerdictPass})
+			n, _, _, want = nextAt(row, p, nd, tests, true, ruleNow.Add(2*time.Minute))
+			if n.State != StateNormal || n.Reason != "" || want {
+				t.Fatalf("only the causing dimension needs to pass: next=%+v want=%v", n, want)
+			}
 		}},
 		{"C3a_Test_Cache_Fail_ReCools", func(t *testing.T) {
 			row := cooling(ReasonSpeed, ruleNow.Add(-time.Minute), ruleNow, 1)
@@ -767,7 +775,7 @@ func TestNextAcceptance(t *testing.T) {
 			}
 		}},
 		{"C4_Test_Failure_Uses_Next_Ladder_Step", func(t *testing.T) {
-			row := cooling(ReasonSpeed, ruleNow.Add(-time.Minute), ruleNow, 1)
+			row := cooling(ReasonCache, ruleNow.Add(-time.Minute), ruleNow, 1)
 			tests := []TestResult{testResult(ruleNow.Add(time.Second), fullTurns(nil, .5), true)}
 			n, _, _, _ := nextAt(row, p, nd, tests, true, ruleNow.Add(2*time.Minute))
 			if n.State != StateCooling || n.Reason != ReasonTestCache || n.Level != 2 || n.Until.Sub(n.Since) != time.Minute {
@@ -865,6 +873,10 @@ func TestNextAcceptance(t *testing.T) {
 			n, _, _, _ = nextAt(row, p, realSpeed(VerdictFail, p), nil, true, ruleNow.Add(LevelDecayAfter-time.Second))
 			if n.Level != 2 || n.Until.Sub(n.Since) != time.Minute {
 				t.Fatalf("pre-decay ladder step wrong: %+v", n)
+			}
+			n, _, _, _ = nextAt(row, p, realSpeed(VerdictFail, p), nil, true, ruleNow.Add(5*time.Minute))
+			if n.Level != 2 || n.Until.Sub(n.Since) != time.Minute {
+				t.Fatalf("re-degrade after five minutes must preserve level: %+v", n)
 			}
 		}},
 		{"C8_Tests_Off_Still_Uses_Completed_Manual_Test", func(t *testing.T) {
