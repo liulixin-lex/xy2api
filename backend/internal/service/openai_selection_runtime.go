@@ -28,7 +28,7 @@ func (s *OpenAIGatewayService) selectionNow() time.Time {
 }
 
 func (s *OpenAIGatewayService) selectionRequest(ctx context.Context, req OpenAIAccountScheduleRequest, loads map[int64]*AccountLoadInfo) selectionRequest {
-	return selectionRequest{TokenBilled: req.UseUpstreamTokenCost, RequireCompact: req.RequireCompact, SessionHash: req.SessionHash, Loads: loads, Recent: s.recentSessionSuccess(), OAuthRateMultiplier: s.openAIOAuthSchedulingRateMultiplier(ctx)}
+	return selectionRequest{ManualOnly: openAISelectionManualOnly(ctx), TokenBilled: req.UseUpstreamTokenCost, RequireCompact: req.RequireCompact, SessionHash: req.SessionHash, Loads: loads, Recent: s.recentSessionSuccess(), OAuthRateMultiplier: s.openAIOAuthSchedulingRateMultiplier(ctx)}
 }
 
 func (s *OpenAIGatewayService) sortSelectionAccounts(ctx context.Context, accounts []*Account, req OpenAIAccountScheduleRequest, loads map[int64]*AccountLoadInfo) {
@@ -128,7 +128,7 @@ func (s *OpenAIGatewayService) selectionAvailable(accounts []*Account, loads map
 }
 
 func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenAIAccountScheduleRequest, owner *Account, members func() ([]Account, error)) *AccountSelectionResult {
-	if req.Platform != PlatformOpenAI || req.SessionHash == "" || openAINoStickyMigration(ctx) || openAISelectionExempt(ctx) {
+	if req.Platform != PlatformOpenAI || req.SessionHash == "" || openAINoStickyMigration(ctx) || openAISelectionExempt(ctx) || openAISelectionManualOnly(ctx) {
 		return nil
 	}
 	cache, ok := s.cache.(OpenAIStickyRebindCache)
@@ -151,6 +151,9 @@ func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenA
 	possible := migrate
 	for i := range accounts {
 		a := &accounts[i]
+		if a.Platform != req.Platform || req.RequestedModel != "" && !a.IsModelSupported(req.RequestedModel) {
+			continue
+		}
 		if a.ID != owner.ID && a.Priority < owner.Priority && schedquality.CanTakeOver(selectionState(view, gid, a, req.RequestedModel), selectionAuto(view, now), now) && !s.selectionFullMarks.Recently(a.ID, now) {
 			possible = true
 			break

@@ -279,6 +279,8 @@ func TestSchedQualityUnverifiedRetryAndLogs(t *testing.T) {
 	require.Equal(t, q.ReasonUnverified, f.view(10).Reason)
 	require.Equal(t, 1, f.view(10).Level)
 	require.Contains(t, logs.String(), `"via":"no_conclusion"`)
+	require.Contains(t, logs.String(), `"component":"sched_quality"`)
+	require.Contains(t, logs.String(), `"level":"INFO"`)
 	require.NotContains(t, logs.String(), "!BADKEY")
 	f.now = f.now.Add(q.LevelDecayAfter)
 	f.cycle()

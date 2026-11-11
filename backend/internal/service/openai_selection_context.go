@@ -11,6 +11,17 @@ type openAISelectionContext struct {
 }
 type openAISelectionContextKey struct{}
 type openAISelectionExemptContextKey struct{}
+type openAISelectionManualOnlyContextKey struct{}
+
+// Uncollected endpoints use manual placement overrides only.
+func withOpenAISelectionManualOnly(ctx context.Context) context.Context {
+	return context.WithValue(ctx, openAISelectionManualOnlyContextKey{}, true)
+}
+
+func openAISelectionManualOnly(ctx context.Context) bool {
+	manualOnly, _ := ctx.Value(openAISelectionManualOnlyContextKey{}).(bool)
+	return manualOnly
+}
 
 func (s *OpenAIGatewayService) withOpenAISelectionContext(ctx context.Context, groupID *int64) context.Context {
 	if _, suppressed := ctx.Value(openAIProfitControlSuppressCtxKey{}).(struct{}); suppressed {

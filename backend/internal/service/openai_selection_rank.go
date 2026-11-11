@@ -20,6 +20,7 @@ type selectionKey struct {
 }
 
 type selectionRequest struct {
+	ManualOnly          bool
 	TokenBilled         bool
 	RequireCompact      bool
 	SessionHash         string
@@ -58,7 +59,7 @@ func selectionState(view schedquality.View, groupID int64, account *Account, mod
 
 func buildSelectionKey(view schedquality.View, groupID int64, model string, acc *Account, req selectionRequest, now time.Time) selectionKey {
 	key := selectionKey{
-		Standing: int(schedquality.StandingOf(selectionState(view, groupID, acc, model), selectionAuto(view, now), now)),
+		Standing: int(schedquality.StandingOf(selectionState(view, groupID, acc, model), !req.ManualOnly && selectionAuto(view, now), now)),
 		Priority: acc.Priority, RateKnown: !req.TokenBilled, Affinity: 1, ID: acc.ID,
 	}
 	if req.TokenBilled {

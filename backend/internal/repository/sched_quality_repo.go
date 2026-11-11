@@ -330,15 +330,22 @@ func decodeSchedQualityPolicy(raw json.RawMessage) (service.SchedPolicyRecord, e
 			return record, err
 		}
 		record.Policy = schedquality.Policy{Enabled: v.Enabled, TTFTSeconds: v.TTFTSeconds, MaxErrorRate: v.MaxErrorRate, MinCacheRatio: v.MinCacheRatio, TakeoverIdleSeconds: v.TakeoverIdleSeconds}
-	} else if raw := entry["v3"]; len(raw) > 0 && string(raw) != "null" {
+	} else {
 		var v schedQualityPolicyV3
-		if err := json.Unmarshal(raw, &v); err != nil {
-			return record, err
+		if raw := entry["v3"]; len(raw) > 0 && string(raw) != "null" {
+			if err := json.Unmarshal(raw, &v); err != nil {
+				return record, err
+			}
+		} else {
+			v = schedQualityPolicyV3{MaxTTFTP90Seconds: 15, MaxErrorRate: .10, MinCacheKeepRate: .50}
+			if raw := entry["enabled"]; len(raw) > 0 {
+				if err := json.Unmarshal(raw, &v.Enabled); err != nil {
+					return record, err
+				}
+			}
 		}
 		record.Policy = schedquality.Policy{Enabled: v.Enabled, TTFTSeconds: v.MaxTTFTP90Seconds, MaxErrorRate: v.MaxErrorRate, MinCacheRatio: v.MinCacheKeepRate}
 		record.FromV3 = true
-	} else {
-		return record, nil
 	}
 	return record, service.ValidateSchedQualityPolicy(record.Policy)
 }

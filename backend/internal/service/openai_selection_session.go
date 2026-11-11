@@ -56,7 +56,7 @@ func (s *selectionSession) candidateAllowed(view schedquality.View, groupID int6
 }
 
 func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessionHash, model string, owner *Account, candidates []*Account, req selectionRequest) *AccountSelectionResult {
-	if owner == nil || s.cache == nil || s.cacheKey == nil || openAINoStickyMigration(ctx) || openAISelectionExempt(ctx) {
+	if owner == nil || s.cache == nil || s.cacheKey == nil || openAINoStickyMigration(ctx) || openAISelectionExempt(ctx) || req.ManualOnly {
 		return nil
 	}
 	key := s.cacheKey(sessionHash)

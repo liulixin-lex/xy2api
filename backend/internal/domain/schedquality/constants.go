@@ -52,6 +52,7 @@ const (
 	LedgerReadTimeout       = 5 * time.Second
 	CleanupInterval         = time.Hour
 	TakeoverMaxCandidates   = 2
+	BorrowMaxProbes         = 64
 	SummaryMaxAccounts      = 1000
 	SummaryMaxCooling       = 3
 	RecentAttemptsMax       = 50

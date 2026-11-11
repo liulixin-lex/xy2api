@@ -266,7 +266,7 @@ func (t schedQualityTransition) log(ctx context.Context) {
 			via = "pass"
 		}
 	}
-	attrs := []any{"account_id", t.to.AccountID, "model", t.to.Model, "group_id", t.to.GroupID, "from", t.from.State.String(), "to", t.to.State.String(), "reason", string(t.to.Reason), "level", t.to.Level, "speed_n", t.summary.Speed.N, "speed_p90_ms", t.summary.Speed.P90Ms, "speed_p90_timeout", t.summary.Speed.P90Timeout, "error_n", t.summary.Error.N, "error_rate", t.summary.Error.Rate, "error_lcb", t.summary.Error.LCB, "cache_n", t.summary.Cache.Turns, "cache_ratio", t.summary.Cache.Ratio, "speed_verdict", t.verdicts.Speed.String(), "error_verdict", t.verdicts.Error.String(), "cache_verdict", t.verdicts.Cache.String(), "speed_from_test", t.fromTest[0], "error_from_test", t.fromTest[1], "cache_from_test", t.fromTest[2]}
+	attrs := []any{"component", "sched_quality", "account_id", t.to.AccountID, "model", t.to.Model, "group_id", t.to.GroupID, "from", t.from.State.String(), "to", t.to.State.String(), "reason", string(t.to.Reason), "level", t.to.Level, "speed_n", t.summary.Speed.N, "speed_p90_ms", t.summary.Speed.P90Ms, "speed_p90_timeout", t.summary.Speed.P90Timeout, "error_n", t.summary.Error.N, "error_rate", t.summary.Error.Rate, "error_lcb", t.summary.Error.LCB, "cache_n", t.summary.Cache.Turns, "cache_ratio", t.summary.Cache.Ratio, "speed_verdict", t.verdicts.Speed.String(), "error_verdict", t.verdicts.Error.String(), "cache_verdict", t.verdicts.Cache.String(), "speed_from_test", t.fromTest[0], "error_from_test", t.fromTest[1], "cache_from_test", t.fromTest[2]}
 	if via != "" {
 		attrs = append(attrs, "via", via)
 	}

@@ -73,9 +73,9 @@ func TestCompatPlannedFirstOutputTimeoutUsesAttemptOutboundModel(t *testing.T) {
 		require.Equal(t, PlannedFirstOutputTimeoutReason, failover.Reason)
 	}
 	state := svc.getOpenAIAccountModelTransientState()
-	require.True(t, state.isBlocked(account.ID, model, time.Now()), "slow failures use the actual outbound model")
+	require.False(t, state.isBlocked(account.ID, model, time.Now()), "planned timeouts do not feed the transient upstream failure breaker")
 	require.False(t, state.isBlocked(account.ID, "upstream-b", time.Now()), "canonical model is not mapped twice")
-	require.Equal(t, 1, state.size())
+	require.Zero(t, state.size())
 }
 
 func TestUnplannedFirstOutputTimeoutStillHandlesStreamTimeout(t *testing.T) {

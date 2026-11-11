@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/domain"
+	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
 	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
@@ -318,6 +319,7 @@ func (s *OpenAIGatewayService) SelectAccountForTokenCount(
 	platform string,
 ) (*Account, error) {
 	ctx = WithOpenAIProfitControlSuppressed(ctx)
+	ctx = withOpenAISelectionManualOnly(ctx)
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
 	return s.selectAccountForModelWithExclusions(
 		ctx,
@@ -1622,7 +1624,9 @@ func (s *OpenAIGatewayService) isOpenAIAccountBlockedBySchedulingThreshold(ctx c
 }
 
 func (s *OpenAIGatewayService) hydrateSelectedAccount(ctx context.Context, account *Account) (*Account, error) {
-	if account == nil || s.schedulerSnapshot == nil {
+	// DB-backed selection already returns the full account used for admission
+	// and slot acquisition. Rehydrating it from the cache can restore stale limits.
+	if account == nil || s.schedulerSnapshot == nil || s.accountRepo != nil {
 		return account, nil
 	}
 	hydrated, err := s.schedulerSnapshot.GetAccount(ctx, account.ID)
@@ -1879,6 +1883,7 @@ func (s *OpenAIGatewayService) selectOpenAIStickyCapacityResult(ctx context.Cont
 		return nil, nil
 	}
 	// Borrowing acquires before the DB recheck and never changes the binding.
+	acquires, rechecks := 0, 0
 	for _, item := range candidates {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -1888,6 +1893,10 @@ func (s *OpenAIGatewayService) selectOpenAIStickyCapacityResult(ctx context.Cont
 			continue
 		}
 		// A slot error leaves the owner's wait plan.
+		if acquires >= schedquality.BorrowMaxProbes {
+			break
+		}
+		acquires++
 		result, err := s.tryAcquireAccountSlot(ctx, item.account.ID, item.account.Concurrency)
 		if err != nil {
 			return nil, ctx.Err()
@@ -1895,10 +1904,19 @@ func (s *OpenAIGatewayService) selectOpenAIStickyCapacityResult(ctx context.Cont
 		if result == nil || !result.Acquired {
 			continue
 		}
+		if rechecks >= schedquality.BorrowMaxProbes {
+			result.ReleaseFunc()
+			break
+		}
+		rechecks++
 		fresh := s.recheckSelectedOpenAIAccountFromDB(ctx, item.account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
 		if fresh != nil && fresh.Concurrency != item.account.Concurrency {
 			// The slot was taken under a stale limit; take it under the current one.
 			result.ReleaseFunc()
+			if acquires >= schedquality.BorrowMaxProbes {
+				break
+			}
+			acquires++
 			result, err = s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
 			if err != nil {
 				return nil, ctx.Err()
