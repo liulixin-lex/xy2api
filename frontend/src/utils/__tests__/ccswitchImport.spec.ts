@@ -182,7 +182,6 @@ describe('CC Switch usage script', () => {
   // Mirrors CC Switch: substitute the template vars as text, evaluate, read request.url.
   function usageUrlFor(baseUrl: string): string {
     const script = CC_SWITCH_USAGE_SCRIPT.split('{{baseUrl}}').join(baseUrl).split('{{apiKey}}').join('sk-test')
-    // eslint-disable-next-line no-new-func
     const config = new Function(`return ${script}`)() as { request: { url: string } }
     return config.request.url
   }
