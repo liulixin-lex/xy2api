@@ -20,9 +20,9 @@
 
 | 字段 | 起点 | 用途 |
 |---|---|---|
-| `first_token_ms` | 最后一次上游尝试开始 | 使用记录、运维看板与健康分、渠道监控的首字，高级调度的首 Token 评分 |
-| `end_to_end_first_output_ms` | 入站请求开始，含排队、选号和先前失败的尝试 | 账号列表“近期表现”的首字 |
-| `attempt_first_output_ms` | 最终尝试开始，只算可见输出 | [分组质量门槛](group-quality-gate.md)的速度样本，不进入接口 |
+| `first_token_ms` | 最后一次上游尝试开始 | 使用记录、运维看板与健康分、渠道监控的首字 |
+| `end_to_end_first_output_ms` | 入站请求开始，含排队、选号和先前失败的尝试 | 记录客户端实际等待，不参与调度 |
+| `attempt_first_output_ms` | 最终尝试开始，只算可见输出 | 只记录，不进入接口 |
 
 - `first_token_ms` 与 `duration_ms` 都不含此前失败的尝试与换号等待。换过号的请求客户端实际等待更长，各次尝试见运维错误记录的 `upstream_errors`。
 - OpenAI 的 `first_token_ms` 口径由设置 `openai_ttft_mode` 决定：`semantic`（默认）把中转插入的保活帧也记为首个事件；`visible` 只算真实输出。详见[网关韧性](gateway-resilience.md)。
@@ -64,19 +64,9 @@
 
 公开设置（`GET /api/v1/settings/public`）只给出生效结果 `user_usage_cache_hit_rate_enabled`、`user_usage_token_speed_enabled`：显示开关与公开开关都打开才为 `true`。管理员自己的“我的账户 → 使用记录”属于用户页面，同样按公开状态显示。用户接口本来就返回计算所需的 Token 与耗时，公开只决定页面是否展示，不是数据权限控制。
 
-## 账号列表的近期表现
+## 账号列表的近期实测
 
-账号管理的“近期表现”列紧跟“状态”列，可以在列显示里隐藏（隐藏时不请求）。它显示近期失败尝试、续轮首字和缓存保持三项。窗口先按指标资格筛选，再取时间倒序最近 N 个；不足 N 个时只用时间上限内的样本。悬停显示实际样本数和覆盖分钟数。
-
-| 指标 | 统计对象与窗口 | 显示与颜色 |
-|---|---|---|
-| 失败 | 最近 200 个事件，限 60 分钟。事件由成功用量行和门槛软失败尝试组成；失败按每次上游尝试归到账号，被换号救回的尝试也计入 | 失败为 0 时不显示。`calls` ≥20 显示失败率和失败数，按 Wilson 95% 区间下限着色：≥10% 红、≥5% 黄、其余灰；不足 20 时显示灰色失败数。点击打开按账号筛选的“使用记录 → 错误请求”（只含对客失败，条数可能更少） |
-| 首字 | 严格续轮的流式成功请求：会话中相邻上一请求属于同一账号、`model` 相同且间隔不超过 5 分钟。首字取 `COALESCE(NULLIF(end_to_end_first_output_ms, 0), first_token_ms)`。最近 50 个，限 2 小时 | ≥20 个显示 P90；≥50 个才按 10/30/60 秒分档着色。不足 20 显示“样本不足 n” |
-| 缓存保持 | 严格续轮，且本轮与上一轮提示 Token（输入 + 缓存读取 + 缓存写入）都至少 2048。按本轮 `cache_read_tokens` ÷ 上一轮提示 Token 分为 0、(0, 0.5)、[0.5, 0.9)、≥0.9 四档，后两档计为保持。最近 50 个，限 2 小时 | ≥20 个显示保持占比；≥50 个才着色，低于 90% 黄、低于 75% 红。Gemini 使用隐式缓存，不着色 |
-
-三项都只把 `actual_cost > 0 OR output_tokens > 0` 的用量行当作成功请求。失败样本只来自 `ops_error_logs.upstream_errors`，运维监控关闭时不会产生软失败记录。短横线表示近期窗口没有可计入的表现，也用于加载中或加载失败（悬停说明）。
-
-接口为 `POST /api/v1/admin/accounts/recent-health/batch`，请求体 `account_ids` 最多 1000 个，快照缓存 10 秒并支持 ETag。响应 `stats` 中每个账号含 `failure`、`first_output`、`cache` 三个可空对象，并声明 `failure_max_events`、`failure_max_age_seconds`、`sample_max`、`sample_max_age_seconds`、`min_display_samples`、`min_color_samples`。
+账号管理的“近期实测”三列（首字、错误、缓存）与“分组”列来自 OpenAI 质量状态的统计：首字是单次尝试的折算首字 P90，错误只计账号侧故障，缓存是续轮缓存命中率，口径见 [分组质量门槛](group-quality-gate.md#三个数)。这些数按每次上游尝试单独记录，不取自 `usage_logs`，不能与本文的首字字段或缓存读取占比直接比较。
 
 ## 容量列的分组并发
 
