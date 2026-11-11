@@ -179,8 +179,8 @@ func TestSelectionUsesFreshDBConcurrency(t *testing.T) {
 	repo.accounts = map[int64]*Account{41: &latest}
 	selection, err := svc.SelectAccountWithLoadAwareness(context.Background(), nil, "", "", nil)
 	require.NoError(t, err)
-	require.Equal(t, 1, selection.Account.Concurrency)
 	require.Equal(t, []int{1}, cache.limits(stale.ID))
+	require.Equal(t, 1, selection.Account.Concurrency)
 	selection.ReleaseFunc()
 	require.Equal(t, 1, cache.releaseCount(stale.ID))
 }
@@ -248,6 +248,9 @@ func TestOpenAISchedulingRatePlacesOAuthAtConfiguredReference(t *testing.T) {
 }
 
 func TestOpenAIGatewayServiceSelectionUsesConfiguredOAuthReference(t *testing.T) {
+	prior := openAISchedulingRateCache.Load()
+	resetOpenAISchedulingRateTestCache()
+	t.Cleanup(func() { resetOpenAISchedulingRateTestCache(); openAISchedulingRateCache.Store(prior) })
 
 	now := time.Now()
 	cheap := upstreamCostTestAccount(1, UpstreamBillingProbeStatusOK, 0.02, now.Add(-time.Minute), 30*time.Minute)
