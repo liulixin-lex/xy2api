@@ -18,7 +18,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/coder/websocket v1.8.15
 	github.com/dgraph-io/ristretto v0.2.0
-	github.com/gin-contrib/sse v1.1.0
+	github.com/gin-contrib/sse v1.2.1
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-oauth2/oauth2/v4 v4.6.0
 	github.com/go-playground/validator/v10 v10.30.1
