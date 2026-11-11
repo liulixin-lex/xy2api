@@ -36,7 +36,7 @@ func TestBudgetCutSupplementsPlannedWithoutChangingClassification(t *testing.T) 
 	for _, mode := range []string{resilience.BudgetAttributionObserve, resilience.BudgetAttributionEnforce} {
 		t.Run(mode, func(t *testing.T) {
 			st, ctx, plan := budgetCutTestState(t, mode)
-			// Trigger-time profile still owns planned/Reason and sampling; plan owns only cut.
+			// Trigger-time profile still owns planned/Reason; plan owns only cut.
 			profile := st.AttemptProfile()
 			profile.AttemptStart = time.Now().Add(-25 * time.Second)
 			st.SetAttemptProfile(profile)
@@ -50,18 +50,7 @@ func TestBudgetCutSupplementsPlannedWithoutChangingClassification(t *testing.T) 
 			require.True(t, fe.ShouldReportAccountScheduleFailure())
 			_, _, counted := classifyOpenAIAPIKeyHealthFailure(fe)
 			require.False(t, counted, "planned classifier stays exempt")
-			if mode == resilience.BudgetAttributionEnforce {
-				require.Nil(t, svc.openaiAccountLatencyHold)
-				require.Nil(t, svc.openaiModelTransient)
-			} else {
-				key, ok := openAIAccountModelTransientKey(7, "frozen-model")
-				require.True(t, ok)
-				state := svc.getOpenAIAccountLatencyHoldState()
-				state.mu.Lock()
-				sample := state.entries[key]
-				state.mu.Unlock()
-				require.Equal(t, 1.0, sample.weightedSamples)
-			}
+			require.Nil(t, svc.openaiModelTransient, "planned timeouts no longer feed the retired slow-failure breaker")
 			// A mismatched current profile retains the old non-planned classification.
 			st.SetAttemptProfile(resilience.AttemptProfile{AccountID: 8, Model: "later"})
 			fe = svc.newOpenAIFirstOutputTimeoutError(ctx, c, account, nil, "", time.Now(), "alias", "", plan.Effective(), "first_output", nil, plan)
@@ -72,28 +61,6 @@ func TestBudgetCutSupplementsPlannedWithoutChangingClassification(t *testing.T) 
 	}
 	require.False(t, BudgetCutApplied(nil))
 	require.False(t, BudgetCutApplied(&UpstreamFailoverError{}))
-}
-
-type budgetCutScheduler struct {
-	OpenAIAccountScheduler
-	calls   int
-	success bool
-}
-
-func (s *budgetCutScheduler) ReportResult(_ int64, success bool, _ *int) {
-	s.calls++
-	s.success = success
-}
-func TestBudgetCutAppliedStillReportsSchedulerFailureU11(t *testing.T) {
-	_, ctx, plan := budgetCutTestState(t, resilience.BudgetAttributionEnforce)
-	rec := &budgetCutScheduler{}
-	svc := &OpenAIGatewayService{rateLimitService: newOpenAIAdvancedSchedulerRateLimitService("true"), openaiScheduler: rec}
-	t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
-	fe := &UpstreamFailoverError{StatusCode: 504, BudgetCutPlan: &plan, Reason: PlannedFirstOutputTimeoutReason}
-	require.True(t, BudgetCutApplied(fe))
-	svc.ReportOpenAIAccountScheduleResultWithContext(ctx, &Account{ID: 7, Type: AccountTypeOAuth}, "model", false, nil, fe)
-	require.Equal(t, 1, rec.calls)
-	require.False(t, rec.success)
 }
 
 func TestBudgetLateWarningsReachSystemSink(t *testing.T) {

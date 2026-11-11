@@ -1,8 +1,12 @@
+//go:build unit
+
 package service
 
 import (
 	"context"
+	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"testing"
+	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
@@ -105,7 +109,9 @@ func TestEncryptedStateKeepsStickyOwnerAcrossSchedulers(t *testing.T) {
 					}},
 					rateLimitService: newOpenAIAdvancedSchedulerRateLimitService(advanced),
 				}
-				svc.SetGroupQualityGateView(&schedulingQualityView{enabled: true, tiers: map[int64]int{1: GroupQualityGateTierFail}, targets: map[int64]bool{2: true}})
+				view := selectionTestView(time.Now())
+				view.States[fakeSchedViewKey{7, 1, "gpt-test"}] = schedquality.StateView{State: schedquality.StateCooling}
+				NewOpenAISelectionBoard(svc, func() schedquality.View { return view })
 				ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
 				ctx = WithOpenAIEncryptedContentMigrationGuard(ctx, []byte(tc.body))
 				var excluded map[int64]struct{}

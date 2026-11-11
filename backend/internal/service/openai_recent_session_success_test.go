@@ -75,7 +75,7 @@ func TestOpenAIRecentSessionSuccessRegistration(t *testing.T) {
 			svc.RecordOpenAIRecentSessionSuccess(ctx, &group, "session", account, result.UpstreamModel, result)
 			at := svc.recentSessionSuccess().lastSuccess(openAIRecentSessionKey{group, "session", "gpt-5.4"}, account.ID, time.Now())
 			require.Equal(t, name == "completed", !at.IsZero())
-			require.True(t, svc.recentSessionSuccess().lastSuccess(openAIRecentSessionKey{group, "session", "gpt-5.5"}, account.ID, time.Now()).IsZero(), "canonical outbound model must not be mapped again")
+			require.True(t, svc.recentSessionSuccess().lastSuccess(openAIRecentSessionKey{group, "session", "gpt-5.5"}, account.ID, time.Now()).IsZero(), "frozen evidence model must not be mapped again")
 		})
 	}
 }
@@ -100,17 +100,17 @@ func TestOpenAIRecentSessionMappedForwardAndReplacementOrder(t *testing.T) {
 	st.SetRecoveryOutcome("completed")
 	svc.RecordOpenAIRecentSessionSuccess(c.Request.Context(), &group, session, a, result.UpstreamModel, result)
 	order := func() int64 {
-		items := []accountWithLoad{{account: b, loadInfo: &AccountLoadInfo{}}, {account: a, loadInfo: &AccountLoadInfo{LoadRate: 20}}}
-		svc.preferOpenAIReplacementSession(context.Background(), items, &group, session, "alias", openAILegacyUpstreamRateOrder{}, false, OpenAIEndpointCapabilityResponses)
-		return items[0].account.ID
+		items := []*Account{b, a}
+		svc.sortSelectionAccounts(context.Background(), items, OpenAIAccountScheduleRequest{GroupID: &group, SessionHash: session, RequestedModel: "alias"}, map[int64]*AccountLoadInfo{a.ID: {LoadRate: 20}, b.ID: {}})
+		return items[0].ID
 	}
 	require.Equal(t, a.ID, order(), "request alias must find the successful outbound model")
-	// Give B a later success, then return to A. Successful time precedes HRW.
+	// A hit is binary: with both accounts successful, load breaks the tie.
 	future := time.Now().Add(time.Second)
 	svc.recentSessionSuccess().record(openAIRecentSessionKey{group, session, "alias"}, b.ID, future)
 	require.Equal(t, b.ID, order())
 	svc.recentSessionSuccess().record(openAIRecentSessionKey{group, session, "gpt-5.4"}, a.ID, future.Add(time.Second))
-	require.Equal(t, a.ID, order())
+	require.Equal(t, b.ID, order(), "a newer success cannot reorder affinity peers")
 	a.Credentials["model_mapping"] = map[string]any{"alias": "gpt-5.5"}
 	require.Equal(t, b.ID, order(), "changing the mapping must not reuse the old model's history")
 	require.False(t, OpenAIAttemptWarm(OpenAIAccountScheduleDecision{Layer: openAIAccountScheduleLayerLoadBalance}, &AccountSelectionResult{Account: a}, true))
@@ -143,6 +143,7 @@ func TestOpenAIRecentSessionSelectionKeepsEligibility(t *testing.T) {
 			case "no session":
 				session = ""
 			case "outside load band":
+				want = 3
 				loads[3].LoadRate = 21
 			case "full":
 				loads[3].LoadRate = 100
@@ -174,15 +175,7 @@ func TestOpenAIRecentSessionPassthroughModelsMatchEndpoints(t *testing.T) {
 				Credentials: map[string]any{"api_key": "test-key", "base_url": "https://upstream.example",
 					"model_mapping": map[string]any{"alias": "gpt-5.4", "gpt-5.4": "gpt-5.5"}}}
 			other := &Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
-			session := ""
-			for i := 0; i < 100; i++ {
-				key := fmt.Sprintf("mapping-session-%d", i)
-				if openAIReplacementSessionHash(group, key, other.ID) > openAIReplacementSessionHash(group, key, account.ID) {
-					session = key
-					break
-				}
-			}
-			require.NotEmpty(t, session)
+			session := "mapping-session"
 			stream := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_review\",\"model\":\"gpt-5.4\"}}\n\n" +
 				"data: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"content_index\":0,\"delta\":\"hello\"}\n\n" +
 				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_review\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}]}}\n\n"
@@ -223,26 +216,18 @@ func TestOpenAIRecentSessionPassthroughModelsMatchEndpoints(t *testing.T) {
 			st := resilience.StateFrom(c.Request.Context())
 			require.NotNil(t, st.EndToEndFirstOutputMs(), "fixture really delivered content")
 			st.SetRecoveryOutcome("completed")
-			svc.RecordOpenAIRecentSessionSuccess(c.Request.Context(), &group, session, account, scheduleModel, result)
-			require.False(t, svc.recentSessionSuccess().lastSuccess(openAIRecentSessionKey{group, session, sentModel}, account.ID, time.Now()).IsZero(), "write uses actual successful outbound model")
-			// Ordinary text Responses uses ChatCompletions as its minimum capability.
-			capability := OpenAIEndpointCapabilityChatCompletions
-			wantModel := "gpt-5.4"
-			if protocol == "responses" {
-				capability = OpenAIEndpointCapabilityResponses
-			}
-			if protocol == "responses" || protocol == "responses_text" {
-				wantModel = "alias"
-			}
-			require.Equal(t, wantModel, sentModel, "canonical outbound model is not mapped again")
-			items := []accountWithLoad{{account: other, loadInfo: &AccountLoadInfo{}}, {account: account, loadInfo: &AccountLoadInfo{LoadRate: 20}}}
-			svc.preferOpenAIReplacementSession(c.Request.Context(), items, &group, session, "alias", openAILegacyUpstreamRateOrder{}, false, capability)
-			require.Equal(t, account.ID, items[0].account.ID, "recent success must outrank the chosen HRW control winner")
+			evidenceModel := OpenAIAttemptModel(account, "alias")
+			svc.RecordOpenAIRecentSessionSuccess(c.Request.Context(), &group, session, account, evidenceModel, result)
+			require.False(t, svc.recentSessionSuccess().lastSuccess(openAIRecentSessionKey{group, session, evidenceModel}, account.ID, time.Now()).IsZero())
+			require.Equal(t, "alias", evidenceModel, "passthrough evidence stays frozen even when the Chat wire model is mapped")
 			if protocol == "chat" || protocol == "messages" {
-				account.Credentials["model_mapping"] = map[string]any{"alias": "gpt-5.5"}
-				svc.preferOpenAIReplacementSession(c.Request.Context(), items, &group, session, "alias", openAILegacyUpstreamRateOrder{}, false, capability)
-				require.Equal(t, other.ID, items[0].account.ID, "changed outbound model must not reuse old history")
+				require.Equal(t, "gpt-5.4", sentModel)
+			} else {
+				require.Equal(t, "alias", sentModel)
 			}
+			items := []*Account{other, account}
+			svc.sortSelectionAccounts(c.Request.Context(), items, OpenAIAccountScheduleRequest{GroupID: &group, SessionHash: session, RequestedModel: "alias"}, map[int64]*AccountLoadInfo{account.ID: {LoadRate: 20}, other.ID: {}})
+			require.Equal(t, account.ID, items[0].ID, "the frozen evidence key supplies affinity")
 		})
 	}
 }

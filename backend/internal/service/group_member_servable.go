@@ -81,7 +81,7 @@ func groupMemberUsable(group *Group, acc *Account, now time.Time) bool {
 // tiers affect ordering and migration, never member availability.
 // A nil penalty function uses the default resiliencePenaltyOf classifier; it
 // never skips soft-penalty checks.
-func groupMemberServable(group *Group, acc *Account, now time.Time, _ GroupQualityGateView, penalty func(*Account, time.Time) resilience.PenaltyTier) bool {
+func groupMemberServable(group *Group, acc *Account, now time.Time, penalty func(*Account, time.Time) resilience.PenaltyTier) bool {
 	if !groupMemberUsable(group, acc, now) {
 		return false
 	}

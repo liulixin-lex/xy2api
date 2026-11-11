@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
@@ -55,7 +56,7 @@ func (s *selectionSession) candidateAllowed(view schedquality.View, groupID int6
 }
 
 func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessionHash, model string, owner *Account, candidates []*Account, req selectionRequest) *AccountSelectionResult {
-	if owner == nil || s.cache == nil || s.cacheKey == nil || openAINoStickyMigration(ctx) || groupQualityGateExempt(ctx) {
+	if owner == nil || s.cache == nil || s.cacheKey == nil || openAINoStickyMigration(ctx) || openAISelectionExempt(ctx) {
 		return nil
 	}
 	key := s.cacheKey(sessionHash)
@@ -141,4 +142,22 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 		return attachSelectionProfitGate(ctx, &AccountSelectionResult{Account: latest, Acquired: true, ReleaseFunc: slot.ReleaseFunc})
 	}
 	return nil
+}
+
+type openAINoStickyMigrationKey struct{}
+
+func withOpenAINoStickyMigration(ctx context.Context) context.Context {
+	return context.WithValue(ctx, openAINoStickyMigrationKey{}, true)
+}
+
+func openAINoStickyMigration(ctx context.Context) bool {
+	value, _ := ctx.Value(openAINoStickyMigrationKey{}).(bool)
+	return value
+}
+
+func withOpenAIStickyMigrationGuard(ctx context.Context, previousResponseID string, requiredTransport OpenAIUpstreamTransport) context.Context {
+	if strings.TrimSpace(previousResponseID) != "" || (requiredTransport != OpenAIUpstreamTransportAny && requiredTransport != OpenAIUpstreamTransportHTTPSSE) {
+		return withOpenAINoStickyMigration(ctx)
+	}
+	return ctx
 }

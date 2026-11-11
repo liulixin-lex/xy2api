@@ -119,37 +119,3 @@ func TestUpstreamFirstOutputTimeoutLeavesTheAccountSchedulable(t *testing.T) {
 		})
 	}
 }
-
-func TestHandleOpenAITransientError_OAuthAndPoolFastFailureBreakSlowStreak(t *testing.T) {
-	for _, accountType := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
-		t.Run(accountType, func(t *testing.T) {
-			rl, _, account, _ := newPenaltyFixture(t, PlatformOpenAI)
-			account.Type = accountType
-			account.Credentials = map[string]any{
-				"pool_mode":                    true,
-				"pool_mode_retry_status_codes": []any{float64(http.StatusBadGateway)},
-			}
-			svc := &OpenAIGatewayService{rateLimitService: rl}
-			state := svc.getOpenAIAccountModelTransientState()
-			now := time.Now()
-			state.recordSlowFailure(account.ID, "gpt-test", now.Add(-2*time.Second))
-			state.recordSlowFailure(account.ID, "gpt-test", now.Add(-time.Second))
-			key, ok := openAIAccountModelTransientKey(account.ID, "gpt-test")
-			require.True(t, ok)
-			state.mu.Lock()
-			before := state.entries[key]
-			state.mu.Unlock()
-			require.False(t, svc.handleOpenAIAccountUpstreamError(context.Background(), account, http.StatusBadGateway, http.Header{}, []byte(`{"error":{"message":"temporary upstream failure"}}`), "gpt-test"))
-			state.mu.Lock()
-			after := state.entries[key]
-			state.mu.Unlock()
-			require.Zero(t, after.slowStreak)
-			before.slowStreak = 0
-			require.Equal(t, before, after, "only the consecutive slow count changes")
-			next := state.recordSlowFailure(account.ID, "gpt-test", now)
-			require.Equal(t, 1, next.SlowStreak)
-			require.Equal(t, openAIModelTransientLongCooldown, next.Cooldown, "a new slow streak uses the ordinary failure gradient")
-			require.Equal(t, before.blockUntil, next.BlockUntil, "the existing slow block is preserved")
-		})
-	}
-}

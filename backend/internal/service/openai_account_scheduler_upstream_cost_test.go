@@ -126,6 +126,7 @@ func TestAdvancedCostSchedulerUsesTopKOverflowWhenPreferredAccountIsKnownFull(t 
 		expensive.ID: {AccountID: expensive.ID},
 	}}
 	cfg := &config.Config{}
+	cfg.Gateway.Scheduling.LoadBatchEnabled = true
 	cfg.Gateway.OpenAIWS.LBTopK = 1
 	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.UpstreamCost = 1
 	svc := &OpenAIGatewayService{
@@ -273,6 +274,7 @@ func TestAdvancedCostSchedulerKeepsCompactSupportedOverflowAheadOfUnknown(t *tes
 		unknown.ID:   {AccountID: unknown.ID},
 	}}
 	cfg := &config.Config{}
+	cfg.Gateway.Scheduling.LoadBatchEnabled = true
 	cfg.Gateway.OpenAIWS.LBTopK = 1
 	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.UpstreamCost = 1
 	svc := &OpenAIGatewayService{
@@ -631,8 +633,8 @@ func TestOpenAIGatewayServiceLegacyLowRatePriorityIsIndependentFromAdvancedSched
 		loadErr   error
 		wantID    int64
 	}{
-		{name: "switch off keeps load first", loadBatch: true, wantID: 2},
-		{name: "load batch avoids 80 percent before cost", enabled: true, loadBatch: true, wantID: 2},
+		{name: "retired switch does not disable rate order", loadBatch: true, wantID: 1},
+		{name: "rate precedes load below full", enabled: true, loadBatch: true, wantID: 1},
 		{name: "load batch disabled", enabled: true, wantID: 1},
 		{name: "load lookup failure", enabled: true, loadBatch: true, loadErr: errors.New("load unavailable"), wantID: 1},
 	}
@@ -823,33 +825,4 @@ func TestBuildOpenAIAccountLoadPlanUsesCostOnlyForTokenScope(t *testing.T) {
 	require.Equal(t, otherPlan.candidates[0].score, otherPlan.candidates[1].score)
 	require.Equal(t, otherPlan.candidates[1].score, otherPlan.candidates[2].score)
 	require.False(t, otherPlan.includeOverflowFallback)
-}
-
-func TestBuildOpenAIAccountSchedulerScoreSnapshotUpstreamCostIsExactNoOpWithoutSignal(t *testing.T) {
-	accounts := []*Account{
-		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
-		{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
-	}
-	loadMap := map[int64]*AccountLoadInfo{
-		1: {AccountID: 1, LoadRate: 20},
-		2: {AccountID: 2, LoadRate: 80},
-	}
-	weights := GatewayOpenAIWSSchedulerScoreWeightsView{Priority: 1, Load: 1, Queue: 0.7, ErrorRate: 0.8, TTFT: 0.5}
-	baseline := buildOpenAIAccountSchedulerScoreSnapshot(accounts, loadMap, weights, false, floatPtr(defaultOpenAIOAuthSchedulingRateMultiplier))
-	weights.UpstreamCost = 1.5
-	withCost := buildOpenAIAccountSchedulerScoreSnapshot(accounts, loadMap, weights, false, floatPtr(defaultOpenAIOAuthSchedulingRateMultiplier))
-
-	require.Equal(t, baseline, withCost)
-}
-
-func TestBuildOpenAIAccountSchedulerScoreSnapshotUsesUpstreamCostSignal(t *testing.T) {
-	now := time.Now()
-	accounts := []*Account{
-		upstreamCostTestAccount(1, UpstreamBillingProbeStatusOK, 0.03, now.Add(-time.Minute), 30*time.Minute),
-		upstreamCostTestAccount(2, UpstreamBillingProbeStatusOK, 0.8, now.Add(-time.Minute), 30*time.Minute),
-	}
-	weights := GatewayOpenAIWSSchedulerScoreWeightsView{UpstreamCost: 1.5}
-	scores := buildOpenAIAccountSchedulerScoreSnapshot(accounts, nil, weights, false, floatPtr(defaultOpenAIOAuthSchedulingRateMultiplier))
-
-	require.Greater(t, scores[1].BaseScore, scores[2].BaseScore)
 }

@@ -74,9 +74,6 @@ func (r *OpenAIWSStickyRenewal) TurnSucceeded(ctx context.Context) error {
 		return nil
 	}
 	ttl := r.svc.openAIWSSessionStickyTTL()
-	if shareTTL, ok := r.svc.shareScheduling.shareBindingTTL(derefGroupID(r.groupID)); ok {
-		ttl = shareTTL
-	}
 	now, last := time.Now().UnixNano(), r.renewedAt.Load()
 	if time.Duration(now-last) < min(openAIWSStickyRenewInterval, ttl/2) || !r.renewedAt.CompareAndSwap(last, now) {
 		return nil

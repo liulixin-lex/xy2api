@@ -14,12 +14,6 @@ import (
 const openAIQualityMigrationCooldown = 5 * time.Minute
 const openAIQualityMigrationMax = 16384
 
-// OpenAIStickyRebindCache replaces a binding only while its owner is unchanged.
-// Both modern and legacy session hashes use the same atomic operation.
-type OpenAIStickyRebindCache interface {
-	CompareAndSwapSessionAccountID(context.Context, int64, string, int64, int64, time.Duration) (bool, error)
-}
-
 type openAIQualityMigrationKey struct {
 	groupID int64
 	session string
@@ -72,7 +66,7 @@ func (s *openAIQualityMigrationState) note(key openAIQualityMigrationKey, now ti
 
 func (s *OpenAIGatewayService) migrateOpenAIQualityOwner(ctx context.Context, groupID *int64, platform, session, model string, owner int64, excluded map[int64]struct{}, compact bool, capability OpenAIEndpointCapability, preferLow bool, now time.Time) (int64, *AccountSelectionResult) {
 	cache, ok := s.cache.(OpenAIStickyRebindCache)
-	if !ok || session == "" || groupQualityGateExempt(ctx) || s.shareScheduling.shareSchedulingActive(derefGroupID(groupID)) {
+	if !ok || session == "" || openAISelectionExempt(ctx) || s.shareScheduling.shareSchedulingActive(derefGroupID(groupID)) {
 		return owner, nil
 	}
 	if _, failed := excluded[owner]; failed {

@@ -52,7 +52,7 @@ func TestCompactFallbackGateUsesForwardFinalModel(t *testing.T) {
 	require.Contains(t, keys, "iq:gpt-6-astra")
 	require.Contains(t, keys, "iq:gpt-6.1-sol")
 
-	scheduler := &defaultOpenAIAccountScheduler{service: gateway, stats: newOpenAIAccountRuntimeStats()}
+	scheduler := gateway
 	compatible, reason := scheduler.isAccountRequestCompatibleReason(context.Background(), account, OpenAIAccountScheduleRequest{
 		Platform: PlatformOpenAI, RequestedModel: "gpt-6-astra", RequireCompact: true,
 	})

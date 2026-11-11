@@ -22,7 +22,12 @@ type OpenAISelectionBoard struct {
 var _ SchedSelectionBoard = (*OpenAISelectionBoard)(nil)
 
 func NewOpenAISelectionBoard(service *OpenAIGatewayService, view func() schedquality.View) *OpenAISelectionBoard {
-	return &OpenAISelectionBoard{service: service, view: view, now: time.Now, marks: &fullMarks{}}
+	board := &OpenAISelectionBoard{service: service, view: view, now: time.Now, marks: &fullMarks{}}
+	if service != nil {
+		board.marks = &service.selectionFullMarks
+		service.selectionBoard = board
+	}
+	return board
 }
 
 func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model string) ([]SchedBoardRow, error) {
@@ -55,7 +60,7 @@ func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model s
 	}
 	multiplier := s.openAIOAuthSchedulingRateMultiplier(ctx)
 	selectionReq := selectionRequest{TokenBilled: true, Loads: loads, OAuthRateMultiplier: multiplier}
-	checker := &defaultOpenAIAccountScheduler{service: s}
+	checker := s
 	channelRestricted := s.checkChannelPricingRestriction(ctx, &groupID, model)
 	thresholds := s.settingService.GetAccountSchedulingThresholds(ctx)
 	type keyedRow struct {

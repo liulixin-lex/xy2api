@@ -116,7 +116,7 @@ func runModelRejectHandler(t *testing.T, route, platform string, repo *modelReje
 			nil, nil, billing, nil, nil, nil, nil, nil, channels, nil, nil, nil)
 		if repo.recovery {
 			previous := service.Resilience()
-			runtime := service.ProvideResilienceService(nil, nil, nil, nil, repo, nil, nil, &service.GatewayService{}, gateway, nil)
+			runtime := service.ProvideResilienceService(nil, nil, nil, nil, repo, nil, nil, &service.GatewayService{}, gateway)
 			runtime.Stop()
 			t.Cleanup(func() { service.SetResilienceInstance(previous) })
 		}

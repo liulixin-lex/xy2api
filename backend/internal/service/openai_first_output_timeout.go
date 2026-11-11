@@ -313,22 +313,13 @@ func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 		ResponseHeaders: responseHeaders.Clone(), SafeToFailoverAfterWrite: true, Reason: reason,
 	}
 	var warm *bool
-	holdRecorded := false
 	bodyBytes := 0
 	if profile.AccountID == account.ID && !profile.AttemptStart.IsZero() {
 		warmValue := profile.Warm
 		warm = &warmValue
 		bodyBytes = profile.BodyBytes
-		if profile.Warm && profile.Stream && !BudgetCutApplied(fe) {
-			// Below the slow threshold, a timeout cannot tell fast from slow.
-			// Keep the canonical outbound model key used by successful samples.
-			if sample := time.Since(profile.AttemptStart); sample >= openAIAccountLatencySlowThreshold {
-				s.recordOpenAIAccountLatencySample(account, profile.Model, sample, time.Now())
-				holdRecorded = true
-			}
-		}
+
 	}
-	resilience.Count("latency_hold_sample", resilience.StateFrom(ctx).GroupID(), account.ID, fmt.Sprintf("applied=%t,recorded=%t", BudgetCutApplied(fe), holdRecorded))
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 		TimeoutDiagnostics: plan.Diagnostics(),
 		Warm:               warm, BodyBytes: bodyBytes, Effort: reasoningEffort,
@@ -344,10 +335,6 @@ func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 	if !planned && s.rateLimitService != nil {
 		s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
 	}
-	if planned && !BudgetCutApplied(fe) {
-		s.recordOpenAIAccountModelSlowFailure(account, profile.Model, time.Now())
-	}
-	resilience.Count("slow_streak_decision", resilience.StateFrom(ctx).GroupID(), account.ID, fmt.Sprintf("planned=%t,applied=%t,advanced=%t", planned, BudgetCutApplied(fe), planned && !BudgetCutApplied(fe)))
 	resilience.Count(resilience.MetricFirstOutputTimeout, resilience.StateFrom(ctx).GroupID(), account.ID, phase)
 	return fe
 }

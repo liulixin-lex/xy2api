@@ -594,7 +594,7 @@ type AccountSelectionResult struct {
 	// 局部 ctx 上，handler 必须经 ContextWithSelectionProfitGate 重放后才能在
 	// 调度栈之外做抢槽后终检与准入后粘性绑定。
 	profitGate       *openAIProfitControlGate
-	groupQualityGate *openAIGroupQualityGate
+	selectionContext *openAISelectionContext
 	// shareBinding 是份额调度推迟到 handler 准入后执行的绑定写入（nil 表示无）。
 	shareBinding *shareBindingIntent
 }

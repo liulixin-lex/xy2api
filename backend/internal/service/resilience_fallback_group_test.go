@@ -378,14 +378,7 @@ func TestAvailabilityFallbackServableMembers(t *testing.T) {
 				first.Platform, second.Platform = PlatformAntigravity, tc.mixedPlatform
 				first.Extra = map[string]any{"mixed_scheduling": true}
 			}
-			view := &schedulingQualityView{enabled: true, tiers: map[int64]int{}}
-			if tc.originEjected {
-				view.tiers[1] = GroupQualityGateTierFail
-			}
-			if tc.servingEjected {
-				view.tiers[2] = GroupQualityGateTierFail
-			}
-			r.SetGroupQualityGateView(view)
+
 			repo.byGroup[10], repo.byGroup[20] = []Account{first}, []Account{second}
 			got := r.AvailabilityFallbackGroup(context.Background(), key)
 			if tc.wantMove {
@@ -395,7 +388,7 @@ func TestAvailabilityFallbackServableMembers(t *testing.T) {
 				gate := (&OpenAIGatewayService{}).resolveOpenAIProfitControlGate(ctx, &got.ID)
 				require.NotNil(t, gate)
 				require.InDelta(t, 1.5, gate.threshold, 1e-12, "fallback uses its own price and margin")
-				require.True(t, groupMemberServable(got, &second, time.Now(), view, nil))
+				require.True(t, groupMemberServable(got, &second, time.Now(), nil))
 			} else {
 				require.Nil(t, got)
 			}
@@ -404,7 +397,7 @@ func TestAvailabilityFallbackServableMembers(t *testing.T) {
 			require.Equal(t, tc.wantMove, explained.FallbackGroup.WouldMove, "a request-mode explanation uses the fallback member decision")
 			first.Groups, second.Groups = []*Group{origin}, []*Group{serving}
 			require.Equal(t, tc.composite || tc.originCost <= 0.5, groupMemberUsable(origin, &first, time.Now()), "guard denominator uses scheduler platform eligibility")
-			ops := &OpsService{accountRepo: &fallbackOpsAccounts{rows: []Account{first, second}}, groupQualityGateView: view}
+			ops := &OpsService{accountRepo: &fallbackOpsAccounts{rows: []Account{first, second}}}
 			_, stats, _, _, err := ops.GetAccountAvailabilityStats(context.Background(), "", nil)
 			require.NoError(t, err)
 			require.Equal(t, tc.wantOriginAvailable, stats[10].AvailableCount)

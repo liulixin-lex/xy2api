@@ -193,7 +193,7 @@ func (r *ResilienceService) explainGroupHasHealthyAccount(ctx context.Context, g
 	}
 	for i := range accounts {
 		account := &accounts[i]
-		if account.CapabilityExclusion(ctx, model, now) == nil && groupMemberServable(group, account, now, r.groupQualityGateView, nil) {
+		if account.CapabilityExclusion(ctx, model, now) == nil && groupMemberServable(group, account, now, nil) {
 			return true
 		}
 	}

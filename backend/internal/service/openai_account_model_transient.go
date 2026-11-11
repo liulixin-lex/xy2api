@@ -36,13 +36,10 @@ type openAIAccountModelTransientEntry struct {
 	lastFailure   time.Time
 	blockUntil    time.Time
 	lastTouched   time.Time
-	slowStreak    int
-	lastSlow      time.Time
 }
 
 type openAIAccountModelTransientDecision struct {
 	FailureStreak int
-	SlowStreak    int
 	Cooldown      time.Duration
 	BlockUntil    time.Time
 }
@@ -80,14 +77,6 @@ func openAIAccountModelTransientKey(accountID int64, model string) (openAIAccoun
 }
 
 func (s *openAIAccountModelTransientState) recordFailure(accountID int64, model string, now time.Time) openAIAccountModelTransientDecision {
-	return s.recordFailureKind(accountID, model, now, false)
-}
-
-func (s *openAIAccountModelTransientState) recordSlowFailure(accountID int64, model string, now time.Time) openAIAccountModelTransientDecision {
-	return s.recordFailureKind(accountID, model, now, true)
-}
-
-func (s *openAIAccountModelTransientState) recordFailureKind(accountID int64, model string, now time.Time, slow bool) openAIAccountModelTransientDecision {
 	key, ok := openAIAccountModelTransientKey(accountID, model)
 	if s == nil || !ok {
 		return openAIAccountModelTransientDecision{}
@@ -116,22 +105,12 @@ func (s *openAIAccountModelTransientState) recordFailureKind(accountID int64, mo
 	}
 	// Concurrent attempts already in flight belong to the current open round.
 	// They refresh the success fence without extending or escalating the block.
-	if !slow && now.Before(entry.blockUntil) {
+	if now.Before(entry.blockUntil) {
 		entry.lastFailure, entry.lastTouched = now, now
 		s.entries[key] = entry
 		return openAIAccountModelTransientDecision{
-			FailureStreak: entry.failureStreak, SlowStreak: entry.slowStreak, BlockUntil: entry.blockUntil,
+			FailureStreak: entry.failureStreak, BlockUntil: entry.blockUntil,
 		}
-	}
-	if slow {
-		if entry.lastSlow.IsZero() || now.Before(entry.lastSlow) || now.Sub(entry.lastSlow) > openAIModelTransientStreakTTL {
-			entry.slowStreak = 0
-		}
-		entry.slowStreak++
-		entry.lastSlow = now
-	} else {
-		// Preserve lastSlow so an older in-flight success cannot clear its block.
-		entry.slowStreak = 0
 	}
 	entry.failureStreak++
 	entry.lastFailure = now
@@ -139,26 +118,16 @@ func (s *openAIAccountModelTransientState) recordFailureKind(accountID int64, mo
 
 	cooldown := time.Duration(0)
 	switch {
-	case !slow && entry.failureStreak >= 6:
+	case entry.failureStreak >= 6:
 		cooldown = 300 * time.Second
-	case !slow && entry.failureStreak == 5:
+	case entry.failureStreak == 5:
 		cooldown = 180 * time.Second
-	case !slow && entry.failureStreak == 4:
+	case entry.failureStreak == 4:
 		cooldown = 90 * time.Second
 	case entry.failureStreak >= 3:
 		cooldown = openAIModelTransientLongCooldown
 	case entry.failureStreak == 2:
 		cooldown = openAIModelTransientShortCooldown
-	}
-	if entry.slowStreak >= 2 {
-		n := entry.slowStreak - 2
-		slowCooldown := 10 * time.Minute
-		if n < 4 {
-			slowCooldown = time.Minute << n
-		}
-		if slowCooldown > cooldown {
-			cooldown = slowCooldown
-		}
 	}
 	if cooldown > 0 {
 		until := now.Add(cooldown)
@@ -169,7 +138,6 @@ func (s *openAIAccountModelTransientState) recordFailureKind(accountID int64, mo
 	s.entries[key] = entry
 	return openAIAccountModelTransientDecision{
 		FailureStreak: entry.failureStreak,
-		SlowStreak:    entry.slowStreak,
 		Cooldown:      cooldown,
 		BlockUntil:    entry.blockUntil,
 	}
@@ -179,19 +147,6 @@ func (s *openAIAccountModelTransientState) recordSuccess(accountID int64, model 
 	s.recordSuccessAt(accountID, model, time.Time{})
 }
 
-func (s *openAIAccountModelTransientState) resetSlowStreak(accountID int64, model string) {
-	key, ok := openAIAccountModelTransientKey(accountID, model)
-	if s == nil || !ok {
-		return
-	}
-	s.mu.Lock()
-	if entry, exists := s.entries[key]; exists {
-		entry.slowStreak = 0
-		s.entries[key] = entry
-	}
-	s.mu.Unlock()
-}
-
 func (s *openAIAccountModelTransientState) recordSuccessAt(accountID int64, model string, attemptStart time.Time) {
 	key, ok := openAIAccountModelTransientKey(accountID, model)
 	if s == nil || !ok {
@@ -199,7 +154,7 @@ func (s *openAIAccountModelTransientState) recordSuccessAt(accountID int64, mode
 	}
 	s.mu.Lock()
 	entry, ok := s.entries[key]
-	if !ok || (!entry.lastSlow.IsZero() && (attemptStart.IsZero() || !attemptStart.After(entry.lastSlow))) ||
+	if !ok ||
 		(!attemptStart.IsZero() && !attemptStart.After(entry.lastFailure)) {
 		s.mu.Unlock()
 		return

@@ -21,7 +21,7 @@ import (
 // there too while the request is served elsewhere (design §4.2), as under
 // the advanced scheduler and the Gateway.
 
-func TestStickyBypassReasonKeepsFirstReason(t *testing.T) {
+func TestOpenAIStickyBypassReasonKeepsFirstReason(t *testing.T) {
 	state := resilience.NewRequestState()
 	state.NoteStickyBypassReason("owner_excluded")
 	state.NoteStickyBypassReason("capacity")
@@ -31,7 +31,7 @@ func TestStickyBypassReasonKeepsFirstReason(t *testing.T) {
 	require.Equal(t, "capacity", state.StickyBypassReason())
 }
 
-func TestStickyBypassFirstOutputTimeoutReselectionRecordsRequestFailure(t *testing.T) {
+func TestOpenAIStickyBypassFirstOutputTimeoutReselectionRecordsRequestFailure(t *testing.T) {
 	for _, binding := range []string{"retained", "cleared"} {
 		t.Run(binding, func(t *testing.T) {
 			withResilienceSettings(t, nil)
@@ -68,11 +68,7 @@ func TestStickyBypassFirstOutputTimeoutReselectionRecordsRequestFailure(t *testi
 			require.Equal(t, http.StatusGatewayTimeout, timeout.StatusCode)
 			require.Equal(t, PlannedFirstOutputTimeoutReason, timeout.Reason)
 			require.True(t, state.AccountFailed(accounts[0].ID), "the actual timeout reporter marks the failed attempt")
-			holdAt := time.Now()
-			for i := 0; i < openAIAccountLatencyMinSamples; i++ {
-				svc.recordOpenAIAccountLatencySample(&accounts[0], "gpt-test", 11*time.Second, holdAt)
-			}
-			require.True(t, svc.openAIAccountLatencyHoldSnapshot(&accounts[0], "gpt-test", time.Now()).Held)
+
 			// An earlier migration/cleanup can remove the cache entry while RequestState
 			// still retains the original owner for the request's next selection.
 			if binding == "cleared" {
@@ -85,7 +81,7 @@ func TestStickyBypassFirstOutputTimeoutReselectionRecordsRequestFailure(t *testi
 				retry.ReleaseFunc()
 			}
 			if binding == "retained" {
-				require.Equal(t, "latency_migration", state.StickyBypassReason(), "the failed-owner log reason takes precedence over the observed migration")
+				require.Equal(t, "owner_excluded", state.StickyBypassReason(), "the failed-owner log reason takes precedence over the request exclusion")
 			}
 			require.Contains(t, logs.String(), `"reason":"owner_failed_in_request"`)
 			require.NotContains(t, logs.String(), `"reason":"unrecorded"`)
@@ -94,7 +90,7 @@ func TestStickyBypassFirstOutputTimeoutReselectionRecordsRequestFailure(t *testi
 	}
 }
 
-func TestStickyBypassStateRepairAvoidanceIsRequestScoped(t *testing.T) {
+func TestOpenAIStickyBypassStateRepairAvoidanceIsRequestScoped(t *testing.T) {
 	for _, currentStateRepair := range []bool{true, false} {
 		name := "historical avoidance and nonfailure exclusion"
 		if currentStateRepair {
@@ -295,7 +291,7 @@ func TestResilienceOpenAILoadBatchStickyDeleteFailureIsInfo(t *testing.T) {
 	require.Equal(t, 1, strings.Count(logs.String(), `"msg":"openai.sticky_bypass"`))
 }
 
-func TestStickyBypassDeleteNoopDoesNotMarkBindingChange(t *testing.T) {
+func TestOpenAIStickyBypassDeleteNoopDoesNotMarkBindingChange(t *testing.T) {
 	const session = "v2:delete-noop"
 	cache := &atomicStickyTestCache{bindings: map[string]int64{"openai:" + session: 2}}
 	svc := &OpenAIGatewayService{cache: cache}
@@ -308,47 +304,27 @@ func TestStickyBypassDeleteNoopDoesNotMarkBindingChange(t *testing.T) {
 	require.True(t, state.StickyBypassChangesBinding(), "a confirmed owner deletion must still be reported")
 }
 
-type stickyBypassRetryScheduler struct {
-	OpenAIAccountScheduler
-	calls    int
-	selected *Account
-}
-
-func (s *stickyBypassRetryScheduler) Select(ctx context.Context, _ OpenAIAccountScheduleRequest) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
-	s.calls++
-	state := resilience.StateFrom(ctx)
-	if !openAIProxyStreamQuarantineBypassed(ctx) {
-		state.NoteStickyBypassReason("owner_unavailable")
-		state.NoteStickyBypassBindingChange()
-		return nil, OpenAIAccountScheduleDecision{}, ErrNoAvailableAccounts
-	}
-	state.NoteStickyBypassReason("owner_excluded")
-	return &AccountSelectionResult{Account: s.selected}, OpenAIAccountScheduleDecision{SelectedAccountID: s.selected.ID}, nil
-}
-
-func TestStickyBypassProxyRetryUsesFinalPassReason(t *testing.T) {
+func TestOpenAIStickyBypassProxyRetryUsesFinalPassReason(t *testing.T) {
 	withResilienceSettings(t, nil)
-	t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
-	scheduler := &stickyBypassRetryScheduler{selected: &Account{ID: 36052, Platform: PlatformOpenAI}}
+	owner := Account{ID: 36051, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1}
+	target := owner
+	target.ID = 36052
+	target.ProxyID = int64Ptr(5056)
+	repo := &selectionRuntimeRepo{schedulerTestOpenAIAccountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{owner, target}}}
 	svc := &OpenAIGatewayService{
-		cfg:              &config.Config{},
-		rateLimitService: newOpenAIAdvancedSchedulerRateLimitService("true"),
-		openaiScheduler:  scheduler,
-		cache: &schedulerTestGatewayCache{
-			sessionBindings: map[string]int64{"openai:proxy-retry-session": 36051},
-		},
-		openaiProxyStreamCircuit: newOpenAIProxyStreamCircuit(openAIProxyStreamCircuitSettings{
-			failureThreshold: 1, failureWindow: time.Minute, quarantineTTL: 10 * time.Minute, maxEntries: 16,
-		}),
+		cfg: &config.Config{}, accountRepo: repo,
+		cache:                    &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:proxy-retry-session": owner.ID}},
+		openaiProxyStreamCircuit: newOpenAIProxyStreamCircuit(openAIProxyStreamCircuitSettings{failureThreshold: 1, failureWindow: time.Minute, quarantineTTL: 10 * time.Minute, maxEntries: 16}),
 	}
 	svc.openaiProxyStreamCircuit.recordFailure(5056, time.Now())
 	logs := captureOpenAIObservationLogs(t)
 	state := resilience.NewRequestState()
+	state.KeepSticky(owner.ID)
 	ctx := resilience.WithRequestState(context.Background(), state)
-	selection, _, err := svc.SelectAccountWithScheduler(ctx, nil, "", "proxy-retry-session", "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
+	selection, _, err := svc.SelectAccountWithScheduler(ctx, nil, "", "proxy-retry-session", "gpt-5.1", map[int64]struct{}{owner.ID: {}}, OpenAIUpstreamTransportAny, false)
 	require.NoError(t, err)
-	require.Equal(t, scheduler.selected.ID, selection.Account.ID)
-	require.Equal(t, 2, scheduler.calls, "exercise the internal quarantine retry")
+	require.Equal(t, target.ID, selection.Account.ID)
+	require.Positive(t, svc.openaiProxyStreamFailOpenLogAt.Load(), "exercise the internal quarantine retry")
 	require.Equal(t, "owner_excluded", state.StickyBypassReason())
 	require.False(t, state.StickyBypassChangesBinding(), "binding diagnostics also belong to the final pass")
 	require.Contains(t, logs.String(), `"reason":"owner_excluded"`)

@@ -80,7 +80,7 @@ func TestOpenAICompatibleClientCancelDoesNotReportAccountFailure(t *testing.T) {
 			router.ServeHTTP(rec, req)
 
 			require.Equal(t, int32(1), upstream.calls.Load())
-			require.Zero(t, gateway.SnapshotOpenAIAccountSchedulerMetrics().RuntimeStatsAccountCount, "client cancellation must not report an account result")
+
 			require.NotNil(t, state)
 			require.False(t, state.TurnFailed())
 			require.False(t, state.AccountFailed(801))
@@ -168,7 +168,7 @@ func TestOpenAICompatibleWriteDisconnectDoesNotReportAccountFailure(t *testing.T
 
 			require.Equal(t, 1, upstream.calls)
 			require.NoError(t, ctx.Err(), "write failure must be handled even while request context is live")
-			require.Zero(t, gateway.SnapshotOpenAIAccountSchedulerMetrics().RuntimeStatsAccountCount, "client write failure must not report an account result")
+
 			require.NotNil(t, state)
 			require.False(t, state.TurnFailed())
 			require.False(t, state.AccountFailed(801))

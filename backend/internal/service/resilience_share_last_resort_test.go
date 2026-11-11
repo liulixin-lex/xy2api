@@ -12,11 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Review F3: in a share group, last resort is the share plan run once more
-// with soft-penalised accounts counted as eligible, so it follows priorities
-// and the session binding like normal placement. Each case runs on both
-// schedulers; on the original scheduler last resort keeps ordering by
-// priority, then by the end of the penalty.
+// Last resort preserves hard admission and soft-owner bindings after the
+// retired share branch has been disconnected. Fixtures are extracted in W2-C.
 
 const (
 	lrAccountA = int64(1)
@@ -25,7 +22,7 @@ const (
 )
 
 // lastResortSchedulers lists the schedulers each case runs on.
-var lastResortSchedulers = []sharesched.Scheduler{sharesched.SchedulerSub2API, sharesched.SchedulerShare}
+var lastResortSchedulers = []sharesched.Scheduler{sharesched.SchedulerSub2API}
 
 // newGatewayLastResortEnv builds a group of accounts A and B with the given
 // priorities, both in a soft cooldown.
@@ -80,16 +77,13 @@ func TestResilienceLastResortKeepsSoftBinding(t *testing.T) {
 			env := newGatewayLastResortEnv(t, scheduler, 5, 1)
 			env.cache.bind(lrSession, lrAccountA, time.Hour-time.Minute)
 			result, _ := selectGatewayLastResort(t, env)
-			if scheduler == sharesched.SchedulerShare {
-				require.Equal(t, lrAccountA, result.Account.ID, "the bound account serves while it is eligible in the relaxed round")
-			} else {
-				require.Equal(t, lrAccountB, result.Account.ID, "the original order is by priority")
-			}
+			require.Equal(t, lrAccountB, result.Account.ID, "the original order is by priority")
+
 			require.Equal(t, lrAccountA, env.cache.sessionBindings[lrSession], "the soft-penalised owner keeps the binding")
 		})
 	}
-	t.Run("share/bound_busy", func(t *testing.T) {
-		env := newGatewayLastResortEnv(t, sharesched.SchedulerShare, 5, 1)
+	t.Run("bound_busy", func(t *testing.T) {
+		env := newGatewayLastResortEnv(t, sharesched.SchedulerSub2API, 5, 1)
 		env.cache.bind(lrSession, lrAccountA, time.Hour-time.Minute)
 		env.conc.busy[lrAccountA] = -1
 		result, _ := selectGatewayLastResort(t, env)
@@ -293,16 +287,13 @@ func TestResilienceOpenAILastResortKeepsSoftBinding(t *testing.T) {
 			}
 			env.cache.bind(key, lrAccountA, time.Hour-time.Minute)
 			sel := selectOpenAILastResort(t, env)
-			if scheduler == sharesched.SchedulerShare {
-				require.Equal(t, lrAccountA, sel.Account.ID, "the bound account serves while it is eligible in the relaxed round")
-			} else {
-				require.Equal(t, lrAccountB, sel.Account.ID, "the original order is by priority")
-			}
+			require.Equal(t, lrAccountB, sel.Account.ID, "the original order is by priority")
+
 			require.Equal(t, lrAccountA, env.cache.sessionBindings[key], "the soft-penalised owner keeps the binding")
 		})
 	}
-	t.Run("share/bound_busy", func(t *testing.T) {
-		env := newOpenAILastResortEnv(t, sharesched.SchedulerShare, 5, 1)
+	t.Run("bound_busy", func(t *testing.T) {
+		env := newOpenAILastResortEnv(t, sharesched.SchedulerSub2API, 5, 1)
 		env.cache.bind(key, lrAccountA, time.Hour-time.Minute)
 		env.conc.busy[lrAccountA] = -1
 		sel := selectOpenAILastResort(t, env)

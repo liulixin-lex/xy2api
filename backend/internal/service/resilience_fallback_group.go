@@ -172,7 +172,7 @@ func (r *ResilienceService) groupHasHealthyAccount(ctx context.Context, groupID 
 	}
 	for i := range accounts {
 		a := &accounts[i]
-		if groupMemberServable(group, a, now, r.groupQualityGateView, nil) {
+		if groupMemberServable(group, a, now, nil) {
 			return true
 		}
 	}

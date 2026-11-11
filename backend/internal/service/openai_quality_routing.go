@@ -867,7 +867,7 @@ func (s *OpenAIGatewayService) selectAccountWithQualityRouting(
 					borrowed, borrowErr := s.selectOpenAIStickyCapacityBorrow(ctx, selection.Account, OpenAIAccountScheduleRequest{
 						GroupID: group, Platform: platform, SessionHash: session, RequestedModel: model,
 						RequiredTransport: transport, RequiredCapability: capability, RequireCompact: compact,
-						ExcludedIDs: borrowExcluded, UseUpstreamTokenCost: useCost, AdvancedScheduler: s.isOpenAIAdvancedSchedulerEnabled(ctx),
+						ExcludedIDs: borrowExcluded, UseUpstreamTokenCost: useCost,
 					})
 					if borrowErr != nil {
 						return nil, OpenAIAccountScheduleDecision{}, borrowErr
@@ -899,7 +899,6 @@ func (s *OpenAIGatewayService) selectAccountWithQualityRouting(
 							GroupID: group, Platform: platform, SessionHash: session, RequestedModel: model,
 							RequiredTransport: transport, RequiredCapability: capability, RequireCompact: compact,
 							ExcludedIDs: borrowExcluded, UseUpstreamTokenCost: useCost,
-							AdvancedScheduler: s.isOpenAIAdvancedSchedulerEnabled(ctx),
 						})
 						if fallbackErr != nil {
 							return nil, OpenAIAccountScheduleDecision{}, fallbackErr

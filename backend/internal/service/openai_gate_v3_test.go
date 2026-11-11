@@ -127,7 +127,7 @@ func TestGateV3FiveLatencyPartitionPaths(t *testing.T) {
 			defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 			svc, _, accounts := gateV3SelectionFixture()
 			group := int64(7)
-			ctx := svc.withGroupQualityGate(context.Background(), &group)
+			ctx := svc.withOpenAISelectionContext(context.Background(), &group)
 			cache := schedulerTestConcurrencyCache{}
 			if path == "load query failure" {
 				cache.loadBatchErr = errors.New("load unavailable")
@@ -161,41 +161,7 @@ func TestGateV3FiveLatencyPartitionPaths(t *testing.T) {
 		})
 	}
 }
-func TestGateV3OrderingAndPreferences(t *testing.T) {
-	svc, view, accounts := gateV3SelectionFixture()
-	group := int64(7)
-	a, b := &accounts[0], &accounts[1]
-	order := svc.openAICandidateOrderForItems(&group, openAILegacyUpstreamRateOrder{}, []accountWithLoad{{account: a}, {account: b}})
-	require.True(t, openAICandidateLess(accountWithLoad{account: a}, accountWithLoad{account: b}, order))
-	a.Priority, b.Priority = 0, 0
-	view.tiers[2] = 0
-	view.predicted = map[int64]int{1: 10000, 2: 5000}
-	order = svc.openAICandidateOrderForItems(&group, openAILegacyUpstreamRateOrder{enabled: true, rates: map[int64]float64{1: .2, 2: .2}}, []accountWithLoad{{account: a}, {account: b}})
-	predicted := []accountWithLoad{{account: a}, {account: b}}
-	orderOpenAIPredictedPositions(predicted, func(item accountWithLoad) accountWithLoad { return item }, order, nil, false)
-	require.Equal(t, b.ID, predicted[0].account.ID)
-	delete(view.predicted, 1)
-	order = svc.openAICandidateOrderForItems(&group, order.rates, []accountWithLoad{{account: a}, {account: b}})
-	require.True(t, openAICandidateLess(accountWithLoad{account: a}, accountWithLoad{account: b}, order), "missing prediction is neutral")
-	view.tiers = map[int64]int{1: 0, 2: 1, 3: 2}
-	items := []accountWithLoad{}
-	for i := range accounts {
-		accounts[i].Priority = 0
-		items = append(items, accountWithLoad{&accounts[i], &AccountLoadInfo{}})
-	}
-	shuffleOpenAIWithinQualityGroups(items, view.tiers, nil)
-	require.Equal(t, int64(1), items[0].account.ID)
-	require.Equal(t, int64(3), items[2].account.ID)
-	svc.preferOpenAIReplacementSessionWithTiers(context.Background(), items, &group, "session", "gpt-test", openAILegacyUpstreamRateOrder{}, false, "", view.tiers)
-	require.Equal(t, int64(1), items[0].account.ID)
-	require.Equal(t, int64(3), items[2].account.ID)
-	svc.preferOpenAIQualityCacheCandidates(context.Background(), items, "gpt-test", view.tiers)
-	require.Equal(t, int64(1), items[0].account.ID)
-	require.Equal(t, int64(3), items[2].account.ID)
-	view.enabled = false
-	order = svc.openAICandidateOrderForItems(&group, openAILegacyUpstreamRateOrder{}, items)
-	require.Nil(t, order.tiers)
-}
+
 func TestGateV3AdvancedPoolsAndShare(t *testing.T) {
 	group := int64(7)
 	svc := &OpenAIGatewayService{cfg: newSchedulerTestOpenAIWSV2Config()}
@@ -413,34 +379,6 @@ func TestGateV3AdvancedMigration(t *testing.T) {
 			result.ReleaseFunc()
 		})
 	}
-}
-
-func TestGateV3CacheAndSessionPreferenceStayInSegment(t *testing.T) {
-	svc := &OpenAIGatewayService{cfg: &config.Config{}}
-	svc.cfg.Gateway.OpenAICache = config.OpenAICacheConfig{AwareRoutingEnabled: true, RolloutPercent: 100}
-	group := int64(7)
-	view := &schedulingQualityView{enabled: true, tiers: map[int64]int{1: 0, 2: 0, 3: 1, 4: 0}}
-	svc.SetGroupQualityGateView(view)
-	diag := &OpenAICacheDiagnostic{Session: "v2:segments", Prefix: "prefix", Model: "gpt-test", GroupID: group}
-	ctx := context.WithValue(context.Background(), openAICacheDiagnosticKey{}, diag)
-	var items []accountWithLoad
-	for _, id := range []int64{1, 4, 2, 3} {
-		a := gateV3Account(id, 0)
-		sample := openAICacheSample{count: 20, input: 2048, read: float64(id) * 400, at: time.Now()}
-		for n := range sample.recent {
-			sample.recent[n] = sample.at
-		}
-		svc.cacheTelemetry().scores[cacheSampleKey(diag, &a, "gpt-test")] = sample
-		items = append(items, accountWithLoad{&a, &AccountLoadInfo{}})
-	}
-	gateV3Hold(svc, 2, time.Now())
-	svc.preferOpenAIQualityCacheCandidates(ctx, items, "gpt-test", view.tiers)
-	require.Equal(t, []int64{4, 1, 2, 3}, []int64{items[0].account.ID, items[1].account.ID, items[2].account.ID, items[3].account.ID})
-	svc.recentSessionSuccess().record(openAIRecentSessionKey{group, "session", "gpt-test"}, 3, time.Now())
-	svc.recentSessionSuccess().record(openAIRecentSessionKey{group, "session", "gpt-test"}, 2, time.Now())
-	svc.preferOpenAIReplacementSession(ctx, items, &group, "session", "gpt-test", openAILegacyUpstreamRateOrder{}, false, "")
-	require.Equal(t, int64(2), items[2].account.ID)
-	require.Equal(t, int64(3), items[3].account.ID)
 }
 
 func TestGateV3MigrationCooldownLRU(t *testing.T) {

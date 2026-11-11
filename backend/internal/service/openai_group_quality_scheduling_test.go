@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/stretchr/testify/require"
 )
 
@@ -104,7 +105,7 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 		run  func(*testing.T)
 	}
 	cases := []testCase{}
-	env := func(advanced, load bool) (*OpenAIGatewayService, *schedulerTestGatewayCache, *schedulingQualityView) {
+	env := func(advanced, load bool) (*OpenAIGatewayService, *schedulerTestGatewayCache, *fakeSchedView) {
 		cfg := newSchedulerTestOpenAIWSV2Config()
 		cfg.Gateway.Scheduling.LoadBatchEnabled = load
 		cfg.Gateway.Scheduling.StickySessionMaxWaiting = 3
@@ -120,9 +121,10 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 			accounts = append(accounts, acc)
 		}
 		cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{}}
-		view := &schedulingQualityView{tiers: map[int64]int{}}
+		view := selectionTestView(time.Now())
+		view.Takeovers = nil
 		svc := &OpenAIGatewayService{accountRepo: schedulerTestOpenAIAccountRepo{accounts: accounts}, cfg: cfg, cache: cache, rateLimitService: newOpenAIAdvancedSchedulerRateLimitService(strconv.FormatBool(advanced)), concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{})}
-		svc.SetGroupQualityGateView(view)
+		NewOpenAISelectionBoard(svc, func() schedquality.View { return view })
 		return svc, cache, view
 	}
 	qualityBorrowEnv := func(path string) (*OpenAIGatewayService, *schedulerTestGatewayCache, *qualityCapacityCache) {
@@ -134,8 +136,8 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 	cases = append(cases, testCase{"previous_response exemption survives DB recheck and admission", func(t *testing.T) {
 		svc, _, view := env(false, false)
 		gid := int64(groupID)
-		view.enabled = true
-		view.tiers[1] = GroupQualityGateTierFail
+		view.Enabled = true
+		view.States[fakeSchedViewKey{7, 1, "gpt-test"}] = schedquality.StateView{State: schedquality.StateCooling}
 		svc.openaiWSStateStore = NewOpenAIWSStateStore(&stubGatewayCache{})
 		require.NoError(t, svc.openaiWSStateStore.BindResponseAccount(context.Background(), groupID, "resp_previous", 1, time.Hour))
 		selection, err := svc.SelectAccountByPreviousResponseID(context.Background(), &gid, "resp_previous", "gpt-test", nil, false)
@@ -153,8 +155,8 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 		gid := int64(groupID)
 		parentID := "22222222-2222-4222-8222-222222222222"
 		cache.sessionBindings["openai:"+DeriveSessionHashFromSeed(parentID)] = 1
-		view.enabled = true
-		view.tiers[1] = GroupQualityGateTierFail
+		view.Enabled = true
+		view.States[fakeSchedViewKey{7, 1, "gpt-test"}] = schedquality.StateView{State: schedquality.StateCooling}
 		ctx := guardianAffinityTestContext(t, codexAutoReviewModel, "guardian", parentID, "")
 		selection, decision, err := svc.SelectAccountWithScheduler(ctx, &gid, "", "guardian-child-session", codexAutoReviewModel, nil, OpenAIUpstreamTransportAny, false)
 		require.NoError(t, err)
@@ -548,7 +550,7 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 			loads = append(loads, 80, 95)
 		}
 		for _, load := range loads {
-			cases = append(cases, testCase{"quality borrow preserves near-capacity cohort/" + path + "/load=" + strconv.Itoa(load), func(t *testing.T) {
+			cases = append(cases, testCase{"quality borrow uses affinity before load/" + path + "/load=" + strconv.Itoa(load), func(t *testing.T) {
 				resetOpenAIAdvancedSchedulerSettingCacheForTest()
 				defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 				svc, _, conc := qualityBorrowEnv(path)
@@ -581,11 +583,7 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 					OpenAIUpstreamTransportAny, "", "", false, PlatformOpenAI, false, true)
 				require.NoError(t, err)
 				require.NotNil(t, selection)
-				if path == "load aware" && load >= 80 {
-					require.Contains(t, []int64{2, 4}, selection.Account.ID, "recent success must stay inside the best near-capacity and cost cohort")
-				} else {
-					require.Equal(t, int64(3), selection.Account.ID, "recent success outranks only the +20 load band inside the same cohort")
-				}
+				require.Equal(t, int64(3), selection.Account.ID, "affinity precedes non-full load within equal standing, priority and rate")
 				require.True(t, selection.StickyCapacitySpillover)
 				selection.ReleaseFunc()
 			}})
@@ -593,10 +591,10 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 	}
 	cases = append(cases, testCase{"last resort retains profit and hard gates", func(t *testing.T) {
 		svc, _, view := env(false, false)
-		view.enabled = true
-		view.tiers[1] = GroupQualityGateTierFail
+		view.Enabled = true
+		view.States[fakeSchedViewKey{7, 1, "gpt-test"}] = schedquality.StateView{State: schedquality.StateCooling}
 		gid := int64(groupID)
-		ctx := svc.withGroupQualityGate(withResilienceLastResortGate(context.Background()), &gid)
+		ctx := svc.withOpenAISelectionContext(withResilienceLastResortGate(context.Background()), &gid)
 		acc := profitControlWSAccount(1, 0.8, time.Now())
 		ctx = context.WithValue(ctx, openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{groupID: gid, threshold: 0.5})
 		_, veto, reason := svc.SelectionAdmissionVetoLatest(ctx, &acc)
@@ -605,32 +603,6 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 		acc.Schedulable = false
 		require.NotEmpty(t, openAICompatibleAccountEligibilityFailureReason(ctx, &acc, PlatformOpenAI, "gpt-test", false, ""))
 	}})
-	for _, row := range []struct {
-		name                   string
-		low                    bool
-		at, bt, ap, bp, al, bl int
-		ar, br                 float64
-		unlimited, want        bool
-	}{
-		{name: "tier before priority and cost", low: true, at: 0, bt: 2, ap: 9, bp: 0, ar: 0.9, br: 0.1, want: true},
-		{name: "trial after fast", low: true, at: 1, bt: 0, ar: 0.1, br: 0.9, want: false},
-		{name: "trial before other", low: true, at: 1, bt: 2, ar: 0.9, br: 0.1, want: true},
-		{name: "priority before capacity", low: true, ap: 0, bp: 1, al: 90, bl: 0, ar: 0.9, br: 0.1, want: true},
-		{name: "capacity before cost", low: true, al: 80, bl: 0, ar: 0.1, br: 0.9, want: false},
-		{name: "cost before load", low: true, al: 50, bl: 0, ar: 0.1, br: 0.9, want: true},
-		{name: "unlimited neutral", low: true, al: 90, bl: 0, ar: 0.1, br: 0.9, unlimited: true, want: true},
-		{name: "tiers independent of low rate", low: false, at: 2, bt: 0, al: 0, bl: 50, ar: 0.9, br: 0.1, want: false},
-		{name: "no data fast then ID", low: true, ar: 0.2, br: 0.2, want: true},
-	} {
-		cases = append(cases, testCase{row.name, func(t *testing.T) {
-			a, b := &Account{ID: 1, Priority: row.ap, Concurrency: 10}, &Account{ID: 2, Priority: row.bp, Concurrency: 10}
-			if row.unlimited {
-				a.Concurrency = 0
-			}
-			order := openAICandidateOrder{rates: openAILegacyUpstreamRateOrder{enabled: row.low, rates: map[int64]float64{1: row.ar, 2: row.br}}, tiers: map[int64]int{1: row.at, 2: row.bt}, groupID: groupID}
-			require.Equal(t, row.want, openAICandidateLess(accountWithLoad{a, &AccountLoadInfo{LoadRate: row.al}}, accountWithLoad{b, &AccountLoadInfo{LoadRate: row.bl}}, order))
-		}})
-	}
 	for _, tc := range cases {
 		t.Run(tc.name, tc.run)
 	}

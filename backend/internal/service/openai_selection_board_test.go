@@ -82,7 +82,7 @@ func TestSchedBoardOrderAdmissionAndNoMutation(t *testing.T) {
 	require.Equal(t, before, board.marks.at, "a full load snapshot must not mark an account from Board")
 	// W1 exercises exactly the admission/comparator seam; W2 connects the same
 	// attempt order to the public selection entry (D11 end-to-end).
-	checker := &defaultOpenAIAccountScheduler{service: s}
+	checker := s
 	req := OpenAIAccountScheduleRequest{GroupID: ptrInt64Selection(7), Platform: PlatformOpenAI, RequestedModel: "m"}
 	var candidates []*Account
 	for i := range repo.accounts {

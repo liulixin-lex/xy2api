@@ -792,15 +792,9 @@ func TestSchedAdminDetailSchedulingRate(t *testing.T) {
 	s, e, r := schedAdminFixture()
 	a := r.rows[1]
 	a.RateMultiplier = schedAdminFloat(.8)
-	old := openAIAdvancedSchedulerSettingCache.Load()
-	t.Cleanup(func() {
-		if old == nil {
-			openAIAdvancedSchedulerSettingCache.Store((*cachedOpenAIAdvancedSchedulerSetting)(nil))
-		} else {
-			openAIAdvancedSchedulerSettingCache.Store(old)
-		}
-	})
-	openAIAdvancedSchedulerSettingCache.Store(&cachedOpenAIAdvancedSchedulerSetting{expiresAt: time.Now().Add(time.Hour).UnixNano(), oauthSchedulingRateMultiplier: schedAdminFloat(.2)})
+	old := openAISchedulingRateCache.Load()
+	t.Cleanup(func() { openAISchedulingRateCache.Store(old) })
+	publishOpenAISchedulingRate(schedAdminFloat(.2))
 	a.Type = AccountTypeOAuth
 	out, err := s.Detail(context.Background(), 1)
 	require.NoError(t, err)

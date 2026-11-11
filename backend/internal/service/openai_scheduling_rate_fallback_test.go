@@ -75,31 +75,30 @@ func TestOpenAISchedulingRateFallback(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestOpenAISchedulingRateFallbackSharedByBothModes(t *testing.T) {
+func TestOpenAISchedulingRateFallbackSelectionKeys(t *testing.T) {
 	now := time.Now()
 	for _, accountType := range []string{AccountTypeAPIKey, AccountTypeOAuth} {
 		t.Run(accountType, func(t *testing.T) {
-			cheap := &Account{ID: 1, Platform: PlatformOpenAI, Type: accountType, RateMultiplier: floatPtr(0.3)}
-			expensive := &Account{ID: 2, Platform: PlatformOpenAI, Type: accountType, RateMultiplier: floatPtr(0.8)}
-			accounts := []*Account{cheap, expensive}
-			order := newOpenAILegacyUpstreamRateOrder(accounts, now, nil)
-			require.True(t, order.enabled)
-			require.Negative(t, order.compare(cheap, expensive))
-			factors := openAIUpstreamCostFactors(accounts, now, nil)
-			require.Greater(t, factors[cheap.ID], factors[expensive.ID])
+			cheap := &Account{ID: 1, Platform: PlatformOpenAI, Type: accountType, RateMultiplier: floatPtr(.3)}
+			expensive := &Account{ID: 2, Platform: PlatformOpenAI, Type: accountType, RateMultiplier: floatPtr(.8)}
+			req := selectionRequest{TokenBilled: true}
+			a, b := buildSelectionKey(nil, 0, "m", cheap, req, now), buildSelectionKey(nil, 0, "m", expensive, req, now)
+			require.True(t, selectionLess(a, b))
+			require.Equal(t, .3, a.Rate)
+			require.Equal(t, .8, b.Rate)
 			if accountType == AccountTypeOAuth {
-				order = newOpenAILegacyUpstreamRateOrder(accounts, now, floatPtr(0.7))
-				require.False(t, order.enabled)
-				factors = openAIUpstreamCostFactors(accounts, now, floatPtr(0.7))
-				require.Equal(t, factors[cheap.ID], factors[expensive.ID])
+				req.OAuthRateMultiplier = floatPtr(.7)
+				a, b = buildSelectionKey(nil, 0, "m", cheap, req, now), buildSelectionKey(nil, 0, "m", expensive, req, now)
+				require.Equal(t, a.Rate, b.Rate)
+				require.Equal(t, .7, a.Rate)
 			}
 		})
 	}
 }
 
 func TestOpenAIOAuthSchedulingRateRuntimePreservesExplicitClear(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
-	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	resetOpenAISchedulingRateTestCache()
+	defer resetOpenAISchedulingRateTestCache()
 	for _, tt := range []struct {
 		name    string
 		values  map[string]string
@@ -113,7 +112,7 @@ func TestOpenAIOAuthSchedulingRateRuntimePreservesExplicitClear(t *testing.T) {
 		{"unloaded cache warms at startup without scheduling", map[string]string{SettingKeyOpenAIOAuthSchedulingRateMultiplier: "0.2", SettingKeyCodexCLIOnlyEngineFingerprintSignals: "[]"}, floatPtr(0.2), true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			resetOpenAIAdvancedSchedulerSettingCacheForTest()
+			resetOpenAISchedulingRateTestCache()
 			repo := &openAIAdvancedSchedulerSettingRepoStub{values: tt.values}
 			if tt.startup {
 				require.Equal(t, floatPtr(1), cachedOpenAIOAuthSchedulingRateMultiplier())
@@ -140,4 +139,31 @@ func TestOpenAIOAuthSchedulingRateRuntimePreservesExplicitClear(t *testing.T) {
 			}
 		})
 	}
+}
+
+func resetOpenAISchedulingRateTestCache() {
+	openAISchedulingRateCache.Store(nil)
+	openAISchedulingRateSF.Forget(SettingKeyOpenAIOAuthSchedulingRateMultiplier)
+}
+
+type selectionRateOnlyRepo struct {
+	SettingRepository
+	keys []string
+}
+
+func (r *selectionRateOnlyRepo) GetValue(_ context.Context, key string) (string, error) {
+	r.keys = append(r.keys, key)
+	return "0.6", nil
+}
+func TestOpenAISchedulingRateReadsOnlyMultiplier(t *testing.T) {
+	saved := openAISchedulingRateCache.Load()
+	resetOpenAISchedulingRateTestCache()
+	t.Cleanup(func() { resetOpenAISchedulingRateTestCache(); openAISchedulingRateCache.Store(saved) })
+	repo := &selectionRateOnlyRepo{}
+	svc := &OpenAIGatewayService{settingService: &SettingService{settingRepo: repo}}
+	require.Equal(t, floatPtr(.6), svc.openAIOAuthSchedulingRateMultiplier(context.Background()))
+	require.Equal(t, []string{SettingKeyOpenAIOAuthSchedulingRateMultiplier}, repo.keys)
+	svc.settingService.refreshCachedSettings(&SystemSettings{OpenAIOAuthSchedulingRateMultiplier: floatPtr(.4)})
+	require.Equal(t, floatPtr(.4), svc.openAIOAuthSchedulingRateMultiplier(context.Background()))
+	require.Len(t, repo.keys, 1, "settings refresh publishes the independent cache")
 }

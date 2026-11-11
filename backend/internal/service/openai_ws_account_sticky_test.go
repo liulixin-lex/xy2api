@@ -415,7 +415,7 @@ func TestOpenAIWSStickyRenewalExtendsOnlyItsOwnBinding(t *testing.T) {
 		want      time.Duration // 0: not renewed
 	}{
 		{name: "still owned", owner: 7, want: 2 * time.Hour},
-		{name: "share group uses the share TTL", owner: 7, share: true, want: sharesched.BindingTTL},
+		{name: "configured TTL ignores retired share settings", owner: 7, share: true, want: 2 * time.Hour},
 		{name: "rebound elsewhere", owner: 8},
 		{name: "expired binding is not recreated"},
 		{name: "spillover connection", owner: 7, spillover: true},

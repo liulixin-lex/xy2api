@@ -228,7 +228,7 @@ func TestGateV3PredictionOrderTransitivityAndPermutations(t *testing.T) {
 	}
 }
 
-func TestGateV3SameRateSelectionUsesPrediction(t *testing.T) {
+func TestOpenAISelectionIgnoresRetiredPrediction(t *testing.T) {
 	a, b := gateV3Account(1, 0), gateV3Account(2, 0)
 	a.RateMultiplier, b.RateMultiplier = floatPtr(1), floatPtr(1)
 	svc := &OpenAIGatewayService{}
@@ -237,7 +237,7 @@ func TestGateV3SameRateSelectionUsesPrediction(t *testing.T) {
 	group := int64(7)
 	selected, _, _ := svc.selectBestAccount(context.Background(), &group, PlatformOpenAI, []Account{a, b}, "gpt-test", nil, false, "", true)
 	require.NotNil(t, selected)
-	require.Equal(t, b.ID, selected.ID)
+	require.Equal(t, a.ID, selected.ID)
 }
 
 func TestGateV3LatencyHoldStartedWarnFields(t *testing.T) {

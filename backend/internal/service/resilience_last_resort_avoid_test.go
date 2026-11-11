@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/sharesched"
 	"github.com/stretchr/testify/require"
@@ -115,13 +116,15 @@ func TestResilienceOpenAILastResortPrefersUnavoided(t *testing.T) {
 	}
 }
 
-func TestResilienceOpenAIShareLastResortAvoidOutranksQuality(t *testing.T) {
-	env := newOpenAILastResortEnv(t, sharesched.SchedulerShare, 1, 5)
+func TestResilienceOpenAILastResortAvoidOutranksStanding(t *testing.T) {
+	env := newOpenAILastResortEnv(t, sharesched.SchedulerSub2API, 1, 5)
 	a := env.account(lrAccountA)
 	a.TempUnschedulableUntil, a.TempUnschedulableReason = nil, ""
 	r := env.svc.resilience
 	require.NoError(t, r.store.AddSessionAvoid(t.Context(), shareTestGroupID, lrSession, lrAccountA, time.Minute))
 	r.avoidingSessions.Store(sessionMarkKey(shareTestGroupID, lrSession), time.Now().Add(time.Minute))
-	env.svc.SetGroupQualityGateView(&schedulingQualityView{enabled: true, tiers: map[int64]int{lrAccountA: 0, lrAccountB: 1}})
+	view := selectionTestView(time.Now())
+	view.States[fakeSchedViewKey{shareTestGroupID, lrAccountB, "gpt-5.1"}] = schedquality.StateView{State: schedquality.StateCooling}
+	NewOpenAISelectionBoard(env.svc, func() schedquality.View { return view })
 	require.Equal(t, lrAccountB, selectOpenAILastResort(t, env).Account.ID)
 }

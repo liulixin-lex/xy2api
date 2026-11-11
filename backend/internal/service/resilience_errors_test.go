@@ -188,8 +188,13 @@ func TestRecoveryProjectionUsesModelBreakerAcrossExits(t *testing.T) {
 	gate := resilienceOpenAIEligibility(ctx, group, model)
 	now := time.Now()
 	state := svc.getOpenAIAccountModelTransientState()
-	state.recordSlowFailure(1, model, now)
-	breaker := state.recordSlowFailure(1, model, now)
+	setBreaker := func(id int64, until time.Time) {
+		state.mu.Lock()
+		state.entries[openAIAccountModelKey{AccountID: id, Model: model}] = openAIAccountModelTransientEntry{failureStreak: 2, lastFailure: now, blockUntil: until, lastTouched: now}
+		state.mu.Unlock()
+	}
+	breakerEnd := now.Add(time.Minute)
+	setBreaker(1, breakerEnd)
 	check := func(expected time.Time) {
 		t.Helper()
 		repo.byGroup[group] = accounts
@@ -203,26 +208,23 @@ func TestRecoveryProjectionUsesModelBreakerAcrossExits(t *testing.T) {
 		require.Equal(t, resilience.RetryAdvice{Seconds: 10, Source: "recovery"}, svc.RetryAdvice(ctx, &group, model))
 		require.True(t, resilienceNoAccountIsGroupLevel(ctx, group, model))
 	}
-	check(breaker.BlockUntil)
+	check(breakerEnd)
 
 	// Restrictions combine by latest end for an account, earliest for the group.
 	end := now.Add(90 * time.Second)
 	accounts[0].OverloadUntil = &end
 	other := *capabilityTestAccount(4)
 	accounts = append(accounts, other)
-	state.recordSlowFailure(4, model, now)
-	state.recordSlowFailure(4, model, now)
-	state.recordSlowFailure(4, model, now) // 120s, so account 1 recovers first.
+	setBreaker(4, now.Add(2*time.Minute)) // Account 1 recovers first.
 	check(end)
 
 	// A hard timed limit must not hide an even later model breaker.
 	hardEnd := now.Add(6 * time.Minute)
 	accounts[0].RateLimitResetAt = &hardEnd
-	for i := 0; i < 4; i++ {
-		breaker = state.recordSlowFailure(1, model, now)
-	}
+	breakerEnd = now.Add(7 * time.Minute)
+	setBreaker(1, breakerEnd)
 	accounts = accounts[:3]
-	check(breaker.BlockUntil)
+	check(breakerEnd)
 
 	// A request-only capability veto must never become a group-wide failure.
 	nominal := *capabilityTestAccount(5)

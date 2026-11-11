@@ -150,12 +150,6 @@ func (s *OpenAIGatewayService) ReportOpenAIAttemptSuccess(ctx context.Context, a
 		profile := st.AttemptProfile()
 		if profile.AccountID == account.ID {
 			start = profile.AttemptStart
-			if profile.Warm && profile.Stream {
-				first := st.FirstOutput()
-				if !first.IsZero() && first.After(profile.AttemptStart) {
-					s.recordOpenAIAccountLatencySample(account, canonical, first.Sub(profile.AttemptStart), time.Now())
-				}
-			}
 		}
 	}
 	s.clearOpenAIAccountModelTransientStateAt(account.ID, openAIAccountModelTransientModel(canonical), start)

@@ -51,14 +51,14 @@ func TestResilienceOpenAILastResortUsesARuntimeBlockedAccount(t *testing.T) {
 	}
 }
 
-// The block ends first on the account whose breaker opened first: last
-// resort prefers it, as it prefers the earliest end of a soft penalty.
-func TestResilienceOpenAILastResortOrdersRuntimeBlocksByTheirEnd(t *testing.T) {
+// The shared selection keys, including the final ID tie-break, order soft
+// accounts even when another transient block ends sooner.
+func TestResilienceOpenAILastResortUsesSelectionOrder(t *testing.T) {
 	env := newOpenAIRuntimeBlockEnv(t, sharesched.SchedulerSub2API, lrAccountA, lrAccountB)
 	now := time.Now()
 	breakOpenAIModel(t, env, lrAccountA, 3, now)
 	breakOpenAIModel(t, env, lrAccountB, 3, now.Add(-20*time.Second))
-	require.Equal(t, lrAccountB, selectOpenAILastResort(t, env).Account.ID)
+	require.Equal(t, lrAccountA, selectOpenAILastResort(t, env).Account.ID)
 
 	tier, until, _ := env.svc.resilienceOpenAIPenaltyOf(env.account(lrAccountA), "gpt-5.1", now)
 	require.Equal(t, resilience.TierSoft, tier)

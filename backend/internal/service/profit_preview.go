@@ -261,7 +261,7 @@ func (s *GroupQualityGateService) ProfitControlPreview(ctx context.Context, grou
 	out := &ProfitControlPreview{Members: len(accounts), Ceiling: ceiling}
 	for i := range accounts {
 		account := &accounts[i]
-		if !groupMemberServable(&baseGroup, account, now, nil, nil) {
+		if !groupMemberServable(&baseGroup, account, now, nil) {
 			continue
 		}
 		out.Schedulable++

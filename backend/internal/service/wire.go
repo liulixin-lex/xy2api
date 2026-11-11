@@ -773,7 +773,6 @@ func ProvideOpsService(
 	settingService *SettingService,
 	authCacheInvalidationWorker *AuthCacheInvalidationWorker,
 	apiKeyService *APIKeyService,
-	groupQualityGateView GroupQualityGateView,
 ) *OpsService {
 	svc := NewOpsService(
 		opsRepo,
@@ -796,7 +795,6 @@ func ProvideOpsService(
 	}
 	svc.authCacheInvalidationWorker = authCacheInvalidationWorker
 	svc.apiKeyService = apiKeyService
-	svc.SetGroupQualityGateView(groupQualityGateView)
 	svc.StartRuntimeSettingsRefresh(context.Background())
 	return svc
 }
@@ -823,7 +821,7 @@ func ProvideSettingService(settingRepo SettingRepository, groupRepo GroupReposit
 	svc.SetProxyRepository(proxyRepo)
 	// Load once even on instances that only evaluate quality or operations.
 	// The shared loader bounds repository reads with its existing DB timeout.
-	loadOpenAIAdvancedSchedulerRuntimeSettings(context.Background(), settingRepo)
+	loadOpenAISchedulingRate(context.Background(), settingRepo)
 	if err := svc.LoadForwardedClientIPSettings(context.Background()); err != nil {
 		logger.LegacyPrintf("service.setting", "Warning: load forwarded client IP settings failed: %v", err)
 	}
@@ -1213,7 +1211,6 @@ func ProvideResilienceService(
 	rateLimit *RateLimitService,
 	gateway *GatewayService,
 	openai *OpenAIGatewayService,
-	groupQualityGateView GroupQualityGateView,
 ) *ResilienceService {
 	s := NewResilienceService(settingRepo, store)
 	s.ConfigureOutputP99(repo)
@@ -1224,11 +1221,6 @@ func ProvideResilienceService(
 	rateLimit.SetResilienceService(s)
 	gateway.resilience = s
 	openai.resilience = s
-	s.SetGroupQualityGateView(groupQualityGateView)
-	openai.SetGroupQualityGateView(groupQualityGateView)
-	if gate, ok := groupQualityGateView.(*GroupQualityGateService); ok {
-		gate.SetLatencyHoldLookup(openai.OpenAIAccountLatencyHoldStatus)
-	}
 	s.pricingRestricted = func(ctx context.Context, groupID int64, model string) bool {
 		return gateway.checkChannelPricingRestriction(ctx, &groupID, model)
 	}

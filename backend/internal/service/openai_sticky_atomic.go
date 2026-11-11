@@ -61,14 +61,8 @@ func (s *OpenAIGatewayService) deleteOpenAIStickyBinding(ctx context.Context, gr
 	return false, s.cache.DeleteSessionAccountID(ctx, groupID, key)
 }
 
-// openAIStickyBindingTTL is the configured binding TTL (or the share
-// scheduling TTL), shared by the first binding and its renewals.
 func (s *OpenAIGatewayService) openAIStickyBindingTTL(groupID *int64) time.Duration {
-	ttl := s.openAIWSSessionStickyTTL()
-	if shareTTL, ok := s.shareScheduling.shareBindingTTL(derefGroupID(groupID)); ok {
-		ttl = shareTTL
-	}
-	return ttl
+	return s.openAIWSSessionStickyTTL()
 }
 
 // recheckOpenAIStickyOwnerFromDB is recheckSelectedOpenAIAccountFromDB for a

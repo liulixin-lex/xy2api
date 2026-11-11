@@ -72,7 +72,7 @@ func (s *OpenAIGatewayService) openAIQualitySegmentKey(ctx context.Context, comp
 	groupID := int64(0)
 	if len(groupIDs) > 0 {
 		groupID = derefGroupID(groupIDs[0])
-	} else if gate, _ := ctx.Value(groupQualityGateContextKey{}).(*openAIGroupQualityGate); gate != nil {
+	} else if gate, _ := ctx.Value(openAISelectionContextKey{}).(*openAISelectionContext); gate != nil {
 		groupID = gate.groupID
 	}
 	view := s.GroupQualityGateView()

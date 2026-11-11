@@ -4,7 +4,6 @@ import (
 	"context"
 	"math"
 	"sort"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -55,24 +54,6 @@ func newOpenAIAccountLatencyHoldState(maxEntries int) *openAIAccountLatencyHoldS
 type openAIAccountLatencyHoldSnapshot struct {
 	Held      bool
 	HoldUntil time.Time
-}
-
-type openAINoStickyMigrationKey struct{}
-
-func withOpenAINoStickyMigration(ctx context.Context) context.Context {
-	return context.WithValue(ctx, openAINoStickyMigrationKey{}, true)
-}
-
-func openAINoStickyMigration(ctx context.Context) bool {
-	value, _ := ctx.Value(openAINoStickyMigrationKey{}).(bool)
-	return value
-}
-
-func withOpenAIStickyMigrationGuard(ctx context.Context, previousResponseID string, requiredTransport OpenAIUpstreamTransport) context.Context {
-	if strings.TrimSpace(previousResponseID) != "" || (requiredTransport != OpenAIUpstreamTransportAny && requiredTransport != OpenAIUpstreamTransportHTTPSSE) {
-		return withOpenAINoStickyMigration(ctx)
-	}
-	return ctx
 }
 
 func (s *openAIAccountLatencyHoldState) record(accountID int64, model string, sample time.Duration, now time.Time) (openAIAccountLatencyHoldEntry, bool, float64, float64) {

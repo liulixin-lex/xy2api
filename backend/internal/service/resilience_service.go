@@ -117,16 +117,7 @@ type ResilienceService struct {
 
 	// pricingRestricted reports a model the group's channel pricing rejects
 	// before any account is chosen (Explain only).
-	pricingRestricted    func(ctx context.Context, groupID int64, model string) bool
-	groupQualityGateView GroupQualityGateView
-}
-
-// SetGroupQualityGateView attaches the shared quality view used by fallback decisions.
-func (s *ResilienceService) SetGroupQualityGateView(view GroupQualityGateView) {
-	if s == nil {
-		return
-	}
-	s.groupQualityGateView = view
+	pricingRestricted func(ctx context.Context, groupID int64, model string) bool
 }
 
 // NewResilienceService creates the service; Start loads the settings and
