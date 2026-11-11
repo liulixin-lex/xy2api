@@ -135,7 +135,7 @@ func compatCompleteNative(body []byte, headers http.Header, profile *AnthropicCo
 		return false
 	}
 	index := 0
-	if strings.HasPrefix(blocks[0].Get("text").String(), "x-anthropic-billing-header:") {
+	if compatIsBillingHeaderBlock(blocks[0]) {
 		if billingVersion := ccVersionInBillingRe.FindString(blocks[0].Get("text").String()); billingVersion != "" && billingVersion != "cc_version="+ExtractCLIVersion(headers.Get("User-Agent")) {
 			return false
 		}
@@ -144,12 +144,20 @@ func compatCompleteNative(body []byte, headers http.Header, profile *AnthropicCo
 	if index >= len(blocks) || blocks[index].Get("type").String() != "text" || blocks[index].Get("text").String() != profile.SystemIdentity {
 		return false
 	}
+	identityCount := 1
 	for _, block := range blocks[index+1:] {
-		if block.Get("type").String() == "text" && block.Get("text").String() == profile.SystemIdentity {
+		if compatIsBillingHeaderBlock(block) {
 			return false
 		}
+		if block.Get("type").String() == "text" && block.Get("text").String() == profile.SystemIdentity {
+			identityCount++
+		}
 	}
-	return true
+	return identityCount == 1
+}
+
+func compatIsBillingHeaderBlock(block gjson.Result) bool {
+	return block.Get("type").String() == "text" && strings.HasPrefix(block.Get("text").String(), "x-anthropic-billing-header:")
 }
 
 func compatValidUUID(value string) bool {
@@ -243,10 +251,14 @@ func compatInjectBody(body []byte, profile *AnthropicCompatProfile, metadata str
 			return nil, compatInvalid("anthropic_compat_request_unsupported", "system must be text or a block array")
 		}
 	}
-	if identityCount > 1 || identityPosition > 0 {
+	if identityCount > 1 {
 		return nil, compatInvalid("anthropic_compat_history_incompatible", "Existing Claude Code identity must occur exactly once at the start of system")
 	}
-	if identityCount == 0 {
+	if identityPosition > 0 {
+		managedIdentity := blocks[identityPosition]
+		blocks = append(blocks[:identityPosition], blocks[identityPosition+1:]...)
+		blocks = append([]json.RawMessage{managedIdentity}, blocks...)
+	} else if identityCount == 0 {
 		blocks = append([]json.RawMessage{identity}, blocks...)
 	}
 	raw, _ := json.Marshal(blocks)
