@@ -76,6 +76,7 @@ type SchedQualitySnapshot struct { // immutable; everything the admin API shows 
 	Evidence                    map[SchedAccountModel]schedquality.Summary // window since the account reset time
 	Tests                       map[SchedAccountModel]SchedTestRecord      // latest test per pair, running or finished
 	GroupRows                   map[int64][]SchedGroupRow                  // by account id
+	Members                     map[int64][]int64                          // account id -> OpenAI group ids
 	Policies                    map[int64]SchedPolicyRecord
 	Overrides                   []SchedOverride
 	ResetAt                     map[int64]time.Time

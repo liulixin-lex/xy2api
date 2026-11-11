@@ -125,7 +125,16 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []schedq
 			return a.Model < b.Model
 		})
 	}
-	s.snapshot.Store(&SchedQualitySnapshot{Version: version, At: evaluatedAt, GlobalEnabled: d.globalEnabled, TestsEnabled: d.testsEnabled, View: view, Evidence: evidence, Tests: latestTests, GroupRows: groupRows, Policies: cloneSchedPolicies(s.policies), Overrides: copiedOverrides, ResetAt: cloneResetTimes(resets)})
+	members := make(map[int64][]int64)
+	for group, accounts := range s.members {
+		for _, account := range accounts {
+			members[account] = append(members[account], group)
+		}
+	}
+	for account := range members {
+		sort.Slice(members[account], func(i, j int) bool { return members[account][i] < members[account][j] })
+	}
+	s.snapshot.Store(&SchedQualitySnapshot{Version: version, At: evaluatedAt, GlobalEnabled: d.globalEnabled, TestsEnabled: d.testsEnabled, View: view, Evidence: evidence, Tests: latestTests, GroupRows: groupRows, Members: members, Policies: cloneSchedPolicies(s.policies), Overrides: copiedOverrides, ResetAt: cloneResetTimes(resets)})
 	newer := make(map[int64]time.Time)
 	for id, at := range resets {
 		if at.After(s.seenResets[id]) {
