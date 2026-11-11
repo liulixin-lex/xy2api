@@ -32,7 +32,28 @@ jobs:
 
   backend:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Unit tests
+        run: make -C backend test-unit
+
+      - name: Build release targets
+        working-directory: backend
+        run: |
+          for target in linux/amd64 windows/amd64 darwin/arm64; do
+            GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 go build -o /dev/null ./cmd/server
+            echo "built $target"
+          done
+
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:18-alpine
@@ -57,9 +78,6 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
-      - name: Unit tests
-        run: make -C backend test-unit
-
       - name: Integration tests
         run: make -C backend test-integration
 
@@ -77,14 +95,6 @@ jobs:
           STRIPE_HOSTED_TEST_DSN: postgres://postgres:ci_fixture_only@127.0.0.1:15432/ci?sslmode=disable
           MCP_READER_TEST_DSN: postgres://mcp_integration_writer:mcp_fixture_only@127.0.0.1:15432/mcp_readonly_test?sslmode=disable
         run: python3 tools/ci/race_suites.py
-
-      - name: Build release targets
-        working-directory: backend
-        run: |
-          for target in linux/amd64 windows/amd64 darwin/arm64; do
-            GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 go build -o /dev/null ./cmd/server
-            echo "built $target"
-          done
 
   windows:
     runs-on: windows-latest
