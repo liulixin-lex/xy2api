@@ -285,6 +285,9 @@ type SystemSettings struct {
 	PaymentVisibleMethodAlipayEnabled bool
 	PaymentVisibleMethodWxpayEnabled  bool
 
+	SchedQualityEnabled     bool
+	SchedQualityTestEnabled bool
+
 	// OpenAI 账号调度
 	OpenAILowUpstreamRatePriorityEnabled                   bool
 	OpenAILowUpstreamRatePriorityScope                     string

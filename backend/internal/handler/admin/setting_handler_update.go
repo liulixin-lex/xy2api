@@ -281,6 +281,8 @@ type UpdateSettingsRequest struct {
 	OpenAILowUpstreamRatePriorityScope                 *string  `json:"openai_low_upstream_rate_priority_scope"`
 	OpenAILowUpstreamRatePriorityGroupIDs              *[]int64 `json:"openai_low_upstream_rate_priority_group_ids"`
 	OpenAIOAuthSchedulingRateMultiplier                *float64 `json:"openai_oauth_scheduling_rate_multiplier"`
+	SchedQualityEnabled                                *bool    `json:"sched_quality_enabled"`
+	SchedQualityTestEnabled                            *bool    `json:"sched_quality_test_enabled"`
 	OpenAIAdvancedSchedulerEnabled                     *bool    `json:"openai_advanced_scheduler_enabled"`
 	OpenAIAdvancedSchedulerStickyWeightedEnabled       *bool    `json:"openai_advanced_scheduler_sticky_weighted_enabled"`
 	OpenAIAdvancedSchedulerSubscriptionPriorityEnabled *bool    `json:"openai_advanced_scheduler_subscription_priority_enabled"`
@@ -1919,6 +1921,18 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.OpenAIOAuthSchedulingRateMultiplier
 		}(),
+		SchedQualityEnabled: func() bool {
+			if req.SchedQualityEnabled != nil {
+				return *req.SchedQualityEnabled
+			}
+			return previousSettings.SchedQualityEnabled
+		}(),
+		SchedQualityTestEnabled: func() bool {
+			if req.SchedQualityTestEnabled != nil {
+				return *req.SchedQualityTestEnabled
+			}
+			return previousSettings.SchedQualityTestEnabled
+		}(),
 		OpenAIAdvancedSchedulerEnabled: func() bool {
 			if req.OpenAIAdvancedSchedulerEnabled != nil {
 				return *req.OpenAIAdvancedSchedulerEnabled
@@ -2486,6 +2500,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		OpenAILowUpstreamRatePriorityScope:                     updatedSettings.OpenAILowUpstreamRatePriorityScope,
 		OpenAILowUpstreamRatePriorityGroupIDs:                  updatedSettings.OpenAILowUpstreamRatePriorityGroupIDs,
 		OpenAIOAuthSchedulingRateMultiplier:                    updatedSettings.OpenAIOAuthSchedulingRateMultiplier,
+		SchedQualityEnabled:                                    updatedSettings.SchedQualityEnabled,
+		SchedQualityTestEnabled:                                updatedSettings.SchedQualityTestEnabled,
 		OpenAIAdvancedSchedulerEnabled:                         updatedSettings.OpenAIAdvancedSchedulerEnabled,
 		OpenAIAdvancedSchedulerStickyWeightedEnabled:           updatedSettings.OpenAIAdvancedSchedulerStickyWeightedEnabled,
 		OpenAIAdvancedSchedulerSubscriptionPriorityEnabled:     updatedSettings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled,
