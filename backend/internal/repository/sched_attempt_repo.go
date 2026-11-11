@@ -23,7 +23,7 @@ func (r *schedAttemptRepository) InsertBatch(ctx context.Context, rows []schedqu
 	if len(rows) == 0 {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, schedquality.LedgerWriteTimeout)
 	defer cancel()
 	var q strings.Builder
 	q.WriteString(`INSERT INTO account_attempt_samples
@@ -57,14 +57,14 @@ const schedAttemptColumns = `attempt_id, started_at, finished_at, account_id, gr
 	prev_prompt_tokens, cache_read_tokens, session_key, request_id, inserted_at`
 
 func (r *schedAttemptRepository) read(ctx context.Context, where string, args ...any) ([]schedquality.AttemptSample, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, schedquality.LedgerReadTimeout)
 	defer cancel()
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, `SET LOCAL statement_timeout = '5s'`); err != nil {
+	if _, err = tx.ExecContext(ctx, fmt.Sprintf("SET LOCAL statement_timeout = '%dms'", schedquality.LedgerReadTimeout.Milliseconds())); err != nil {
 		return nil, err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT `+schedAttemptColumns+` FROM account_attempt_samples `+where, args...)
@@ -118,7 +118,7 @@ func (r *schedAttemptRepository) LoadRecentByAccount(ctx context.Context, accoun
 }
 
 func (r *schedAttemptRepository) DeleteBefore(ctx context.Context, t time.Time) (int64, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, schedquality.LedgerWriteTimeout)
 	defer cancel()
 	result, err := r.db.ExecContext(ctx, `DELETE FROM account_attempt_samples WHERE started_at < $1`, t)
 	if err != nil {

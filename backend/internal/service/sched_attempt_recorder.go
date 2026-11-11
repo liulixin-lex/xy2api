@@ -61,7 +61,7 @@ var _ SchedAttemptRecorder = (*SchedAttemptRecorderService)(nil)
 func NewSchedAttemptRecorderService(store SchedAttemptStore) *SchedAttemptRecorderService {
 	return &SchedAttemptRecorderService{
 		store: store, now: time.Now, memory: newSchedAttemptSessionMemory(),
-		queue: make([]schedquality.AttemptSample, 8192),
+		queue: make([]schedquality.AttemptSample, schedquality.LedgerQueueSize),
 		wake:  make(chan struct{}, 1), flush: make(chan schedAttemptFlush), done: make(chan struct{}),
 	}
 }
@@ -230,7 +230,7 @@ func (s *SchedAttemptRecorderService) enqueue(row schedquality.AttemptSample) {
 	}
 	s.queue[(s.head+s.count)%len(s.queue)] = row
 	s.count++
-	fullBatch := s.count >= 200
+	fullBatch := s.count >= schedquality.LedgerBatchSize
 	s.queueMu.Unlock()
 	if dropped {
 		s.droppedQueueFull.Add(1)
@@ -292,7 +292,7 @@ func (s *SchedAttemptRecorderService) Flush(ctx context.Context) error {
 func (s *SchedAttemptRecorderService) takeBatch() []schedquality.AttemptSample {
 	s.queueMu.Lock()
 	defer s.queueMu.Unlock()
-	n := min(s.count, 200)
+	n := min(s.count, schedquality.LedgerBatchSize)
 	batch := make([]schedquality.AttemptSample, n)
 	for i := range batch {
 		batch[i] = s.queue[s.head]
@@ -305,14 +305,14 @@ func (s *SchedAttemptRecorderService) takeBatch() []schedquality.AttemptSample {
 
 func (s *SchedAttemptRecorderService) run(ctx context.Context) {
 	defer close(s.done)
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(schedquality.LedgerFlushInterval)
 	defer ticker.Stop()
 	var pending schedAttemptPending
 	for {
 		select {
 		case <-ctx.Done():
 			s.stopped.Store(true)
-			shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			shutdown, cancel := context.WithTimeout(context.Background(), schedquality.LedgerWriteTimeout)
 			_ = s.flushPending(shutdown, &pending, ticker.C)
 			cancel()
 			return
@@ -364,7 +364,7 @@ func (s *SchedAttemptRecorderService) drain(ctx context.Context, pending *schedA
 			}
 			remaining -= len(pending.rows)
 		}
-		writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		writeCtx, cancel := context.WithTimeout(ctx, schedquality.LedgerWriteTimeout)
 		err := s.store.InsertBatch(writeCtx, pending.rows)
 		cancel()
 		if ctx.Err() != nil && err != nil {
@@ -372,7 +372,7 @@ func (s *SchedAttemptRecorderService) drain(ctx context.Context, pending *schedA
 		}
 		if err != nil {
 			pending.failures++
-			if pending.failures <= 3 {
+			if pending.failures <= schedquality.LedgerWriteRetries {
 				return result
 			}
 			s.droppedWriteFailed.Add(uint64(len(pending.rows)))

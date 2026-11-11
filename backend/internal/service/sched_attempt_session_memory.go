@@ -4,6 +4,8 @@ import (
 	"container/list"
 	"sync"
 	"time"
+
+	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 )
 
 type schedAttemptSessionKey struct {
@@ -32,7 +34,7 @@ func newSchedAttemptSessionMemory() *schedAttemptSessionMemory {
 
 func (m *schedAttemptSessionMemory) expire(now time.Time) {
 	for e := m.lru.Back(); e != nil; e = m.lru.Back() {
-		if now.Sub(e.Value.(schedAttemptSession).touchedAt) < time.Hour {
+		if now.Sub(e.Value.(schedAttemptSession).touchedAt) < schedquality.SessionMemoryTTL {
 			return
 		}
 		delete(m.entries, e.Value.(schedAttemptSession).key)
@@ -69,7 +71,7 @@ func (m *schedAttemptSessionMemory) put(v schedAttemptSession) {
 		return
 	}
 	m.entries[v.key] = m.lru.PushFront(v)
-	if len(m.entries) > 65536 {
+	if len(m.entries) > schedquality.SessionMemoryMaxEntries {
 		e := m.lru.Back()
 		delete(m.entries, e.Value.(schedAttemptSession).key)
 		m.lru.Remove(e)

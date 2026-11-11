@@ -166,13 +166,13 @@ func TestSchedAttemptQueueDropsAndRetries(t *testing.T) {
 	r := NewSchedAttemptRecorderService(&fakeSchedAttemptStore{})
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	r.now = func() time.Time { return now }
-	for i := 0; i < 8193; i++ {
+	for i := 0; i < schedquality.LedgerQueueSize+1; i++ {
 		r.Begin(SchedAttemptStart{RequestID: "request"}).FinishOther("failure")
 	}
 	require.EqualValues(t, 1, r.Stats().DroppedQueueFull)
-	require.Equal(t, 8192, r.Stats().QueueDepth)
+	require.Equal(t, schedquality.LedgerQueueSize, r.Stats().QueueDepth)
 	first := r.takeBatch()
-	require.Len(t, first, 200)
+	require.Len(t, first, schedquality.LedgerBatchSize)
 	r.Stop()
 
 	store := &schedAttemptFailStore{}
@@ -180,7 +180,7 @@ func TestSchedAttemptQueueDropsAndRetries(t *testing.T) {
 	r.now = func() time.Time { return now }
 	r.Begin(SchedAttemptStart{RequestID: "retry"}).FinishOther("failure")
 	var pending schedAttemptPending
-	for attempt := 1; attempt <= 3; attempt++ {
+	for attempt := 1; attempt <= schedquality.LedgerWriteRetries; attempt++ {
 		require.NoError(t, r.drain(context.Background(), &pending))
 		require.Len(t, pending.rows, 1)
 		require.Equal(t, "retry", pending.rows[0].RequestID)
@@ -189,20 +189,20 @@ func TestSchedAttemptQueueDropsAndRetries(t *testing.T) {
 		require.Equal(t, attempt, store.calls)
 	}
 	ticks := make(chan time.Time, 1)
-	ticks <- now.Add(time.Second)
+	ticks <- now.Add(schedquality.LedgerFlushInterval)
 	require.Error(t, r.flushPending(context.Background(), &pending, ticks))
 	require.Empty(t, ticks)
 	require.Empty(t, pending.rows)
 	require.Zero(t, pending.failures)
 	require.EqualValues(t, 1, r.Stats().DroppedWriteFailed)
-	require.Equal(t, 4, store.calls)
+	require.Equal(t, schedquality.LedgerWriteRetries+1, store.calls)
 
 	r.Begin(SchedAttemptStart{RequestID: "recovered"}).FinishOther("failure")
 	require.NoError(t, r.drain(context.Background(), &pending))
 	require.Len(t, pending.rows, 1)
 	recovered := &fakeSchedAttemptStore{}
 	r.store = recovered
-	ticks <- now.Add(2 * time.Second)
+	ticks <- now.Add(2 * schedquality.LedgerFlushInterval)
 	require.NoError(t, r.flushPending(context.Background(), &pending, ticks))
 	require.Empty(t, ticks)
 	require.Empty(t, pending.rows)
