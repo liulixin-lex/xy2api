@@ -1,8 +1,8 @@
 /**
  * NavigationProgress 组件单元测试
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { enableAutoUnmount, mount as baseMount } from '@vue/test-utils'
 import { ref } from 'vue'
 import NavigationProgress from '../../common/NavigationProgress.vue'
 
@@ -14,6 +14,11 @@ vi.mock('@/composables/useNavigationLoading', () => ({
     isLoading: mockIsLoading
   })
 }))
+
+// isVisible() reads computed styles, which jsdom only resolves for elements in a document.
+const mount: typeof baseMount = (component, options) => baseMount(component, { attachTo: document.body, ...options })
+
+enableAutoUnmount(afterEach)
 
 describe('NavigationProgress', () => {
   beforeEach(() => {
