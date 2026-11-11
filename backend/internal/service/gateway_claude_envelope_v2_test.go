@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -79,6 +80,71 @@ func TestClaudeAPIKeyCompatV2NativeRecognitionMatchesBuilder(t *testing.T) {
 	require.False(t, compatScope(ctx).NativeCompatibleV2)
 	_, repairedWire, _ := compatBuild(t, s, compatTestContext(), a, ctx, withoutBilling)
 	require.True(t, compatIsBillingHeaderBlock(gjson.GetBytes(repairedWire, "system.0")))
+}
+
+func compatV2NativeRequestFixture(t *testing.T) (*GatewayService, *Account, context.Context, []byte, http.Header) {
+	t.Helper()
+	a := compatTestAccount()
+	a.Extra[AnthropicCompatProfileExtraKey] = AnthropicCompatProfileClaudeCodeV2
+	s := compatTestService(newCompatMemoryStore())
+	body := []byte(`{"model":"claude-opus-5-5","messages":[{"role":"user","content":"hello"}]}`)
+	ctx, err := s.PrepareAnthropicCompatibility(context.Background(), 11, 22, body, "messages", "")
+	require.NoError(t, err)
+	req, wire, _ := compatBuild(t, s, compatTestContext(), a, ctx, body)
+	headers := make(http.Header)
+	for key, values := range req.Header {
+		for _, value := range values {
+			headers.Add(key, value)
+		}
+	}
+	require.True(t, compatCompleteNativeV2(wire, headers, &claudeCodeV2CompatProfile))
+	ctx, err = s.PrepareAnthropicCompatibility(context.Background(), 11, 22, wire, "messages", "", headers)
+	require.NoError(t, err)
+	require.True(t, compatScope(ctx).NativeCompatibleV2)
+	return s, a, ctx, wire, headers
+}
+
+func TestClaudeAPIKeyCompatV2NativeCandidateChecksModel(t *testing.T) {
+	s, a, _, wire, headers := compatV2NativeRequestFixture(t)
+	unsupportedWire, err := sjson.SetBytes(wire, "model", "claude-opus-4-6")
+	require.NoError(t, err)
+	ctx, err := s.PrepareAnthropicCompatibility(context.Background(), 11, 22, unsupportedWire, "messages", "", headers)
+	require.NoError(t, err)
+	require.True(t, compatScope(ctx).NativeCompatibleV2)
+	require.ErrorContains(t, s.anthropicCompatCandidateEligibility(ctx, a, "claude-opus-4-6"), "outside the compatibility profile")
+}
+
+func TestClaudeAPIKeyCompatV2NativePlanChecksModel(t *testing.T) {
+	s, a, _, wire, headers := compatV2NativeRequestFixture(t)
+	unsupportedWire, err := sjson.SetBytes(wire, "model", "claude-opus-4-6")
+	require.NoError(t, err)
+	ctx, err := s.PrepareAnthropicCompatibility(context.Background(), 11, 22, unsupportedWire, "messages", "", headers)
+	require.NoError(t, err)
+	nativeContext := compatTestContext()
+	nativeContext.Request.Header = headers.Clone()
+	_, err = s.newAnthropicCompatPlan(ctx, nativeContext, a, unsupportedWire, "claude-opus-4-6")
+	require.ErrorContains(t, err, "outside the compatibility profile")
+}
+
+func TestClaudeAPIKeyCompatV2NativeCandidateChecksRequiredBetas(t *testing.T) {
+	s, a, ctx, _, _ := compatV2NativeRequestFixture(t)
+	settings := &BetaPolicySettings{Rules: []BetaPolicyRule{{BetaToken: claudeCodeV2CompatProfile.RequiredBetas[0], Action: BetaPolicyActionFilter, Scope: BetaPolicyScopeAll}}}
+	raw, err := json.Marshal(settings)
+	require.NoError(t, err)
+	s.settingService = NewSettingService(&compatPolicySettingRepo{betaPolicySettingRepoStub: betaPolicySettingRepoStub{values: map[string]string{SettingKeyBetaPolicySettings: string(raw)}}}, &config.Config{})
+	require.ErrorContains(t, s.anthropicCompatCandidateEligibility(ctx, a, "claude-opus-5-5"), "filters a required compatibility")
+}
+
+func TestClaudeAPIKeyCompatV2NativePlanChecksRequiredBetas(t *testing.T) {
+	s, a, ctx, wire, headers := compatV2NativeRequestFixture(t)
+	settings := &BetaPolicySettings{Rules: []BetaPolicyRule{{BetaToken: claudeCodeV2CompatProfile.RequiredBetas[0], Action: BetaPolicyActionFilter, Scope: BetaPolicyScopeAll}}}
+	raw, err := json.Marshal(settings)
+	require.NoError(t, err)
+	s.settingService = NewSettingService(&compatPolicySettingRepo{betaPolicySettingRepoStub: betaPolicySettingRepoStub{values: map[string]string{SettingKeyBetaPolicySettings: string(raw)}}}, &config.Config{})
+	nativeContext := compatTestContext()
+	nativeContext.Request.Header = headers.Clone()
+	_, err = s.newAnthropicCompatPlan(ctx, nativeContext, a, wire, "claude-opus-5-5")
+	require.ErrorContains(t, err, "filters a required compatibility")
 }
 
 func TestClaudeAPIKeyCompatProfileMigrationDrainsBoundRevision(t *testing.T) {

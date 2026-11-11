@@ -402,6 +402,14 @@ func (s *GatewayService) newAnthropicCompatPlan(ctx context.Context, c *gin.Cont
 		return nil, compatCandidateError(scope, err)
 	}
 	if scope.Record == nil && scope.Entry == "messages" && compatCompleteNative(body, compatClientHeaders(c), profile) {
+		if profile.ID == AnthropicCompatProfileClaudeCodeV2 {
+			if !profile.SupportsModel(model) {
+				return nil, compatCandidateError(scope, compatInvalid("anthropic_compat_model_unsupported", "Model is outside the compatibility profile capability range"))
+			}
+			if err := s.anthropicCompatBetaEligibility(ctx, account, profile, model, compatClientHeaders(c).Get("anthropic-beta"), scope); err != nil {
+				return nil, err
+			}
+		}
 		plan := &anthropicCompatPlan{Decision: "already_compatible", Profile: profile, Scope: scope}
 		if c != nil {
 			c.Set(anthropicCompatPlanKey, plan)

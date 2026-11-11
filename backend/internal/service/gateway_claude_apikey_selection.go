@@ -59,6 +59,23 @@ func anthropicCompatModelSupported(account *Account, model string) bool {
 	return err == nil && (profile == nil || (account.IsModelSupported(model) && profile.SupportsModel(account.GetMappedModel(model))))
 }
 
+func (s *GatewayService) anthropicCompatBetaEligibility(ctx context.Context, account *Account, profile *AnthropicCompatProfile, model, clientBeta string, scope *anthropicCompatScope) error {
+	betas := strings.Join(profile.RequiredBetas, ",") + "," + clientBeta
+	if override, ok := account.HeaderOverrideValue("anthropic-beta"); ok {
+		betas += "," + override
+	}
+	policy := s.evaluateBetaPolicy(ctx, betas, account, model)
+	if policy.blockErr != nil {
+		return compatCandidateError(scope, compatInvalid("anthropic_compat_configuration_conflict", "Beta policy blocks this compatibility request"))
+	}
+	for _, beta := range strings.Split(betas, ",") {
+		if _, filtered := policy.filterSet[strings.TrimSpace(beta)]; filtered {
+			return compatCandidateError(scope, compatInvalid("anthropic_compat_configuration_conflict", "Beta policy filters a required compatibility or client capability"))
+		}
+	}
+	return nil
+}
+
 func (s *GatewayService) anthropicCompatCandidateEligible(ctx context.Context, account *Account, model string) bool {
 	return s.anthropicCompatCandidateEligibility(ctx, account, model) == nil
 }
@@ -77,7 +94,21 @@ func (s *GatewayService) anthropicCompatCandidateEligibility(ctx context.Context
 	if (scope == nil || scope.Record == nil) && !anthropicCompatAcceptsNewSessions(account) {
 		return compatCandidateError(scope, compatUnavailable("Compatibility account is draining existing sessions"))
 	}
-	if scope != nil && scope.Record == nil && ((profile.ID == AnthropicCompatProfileClaudeCodeV1 && scope.NativeCompatible) || (profile.ID == AnthropicCompatProfileClaudeCodeV2 && scope.NativeCompatibleV2)) {
+	if scope != nil && scope.Record == nil && profile.ID == AnthropicCompatProfileClaudeCodeV1 && scope.NativeCompatible {
+		return nil
+	}
+	if scope != nil && scope.Record == nil && profile.ID == AnthropicCompatProfileClaudeCodeV2 && scope.NativeCompatibleV2 {
+		model = anthropicCompatDispatchModel(ctx, model)
+		if !account.IsModelSupported(model) {
+			return compatCandidateError(scope, compatInvalid("anthropic_compat_model_unsupported", "Account mapping does not admit this model"))
+		}
+		model = account.GetMappedModel(model)
+		if !profile.SupportsModel(model) {
+			return compatCandidateError(scope, compatInvalid("anthropic_compat_model_unsupported", "Model is outside the compatibility profile capability range"))
+		}
+		if err := s.anthropicCompatBetaEligibility(ctx, account, profile, model, scope.ClientBeta, scope); err != nil {
+			return err
+		}
 		return nil
 	}
 	if err := compatChatProfileContinuationError(scope, profile); err != nil {
@@ -100,21 +131,12 @@ func (s *GatewayService) anthropicCompatCandidateEligibility(ctx context.Context
 	if account.AnthropicCompatIdentitySeed() == "" {
 		return compatCandidateError(scope, compatUnavailable("Account compatibility identity has not been initialized"))
 	}
-	betas := strings.Join(profile.RequiredBetas, ",")
+	clientBeta := ""
 	if scope != nil {
-		betas += "," + scope.ClientBeta
+		clientBeta = scope.ClientBeta
 	}
-	if override, ok := account.HeaderOverrideValue("anthropic-beta"); ok {
-		betas += "," + override
-	}
-	policy := s.evaluateBetaPolicy(ctx, betas, account, model)
-	if policy.blockErr != nil {
-		return compatCandidateError(scope, compatInvalid("anthropic_compat_configuration_conflict", "Beta policy blocks this compatibility request"))
-	}
-	for _, beta := range strings.Split(betas, ",") {
-		if _, filtered := policy.filterSet[strings.TrimSpace(beta)]; filtered {
-			return compatCandidateError(scope, compatInvalid("anthropic_compat_configuration_conflict", "Beta policy filters a required compatibility or client capability"))
-		}
+	if err := s.anthropicCompatBetaEligibility(ctx, account, profile, model, clientBeta, scope); err != nil {
+		return err
 	}
 	return nil
 }
