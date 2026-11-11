@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
+	"github.com/liulixin-lex/xy2api/internal/pkg/operatoraccess"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -20,13 +21,28 @@ type qualitySnapshotStub struct {
 
 func (s *qualitySnapshotStub) Snapshot() *service.SchedQualitySnapshot { s.reads++; return s.snapshot }
 
+func TestRuntimeQualityPoliciesKeepAccountsViewPermission(t *testing.T) {
+	now := time.Now().UTC()
+	actor := Actor{UserID: 1, Role: service.RoleOperator, Scope: &operatoraccess.Scope{Perms: operatoraccess.Permissions{Modules: map[operatoraccess.Module]operatoraccess.Level{operatoraccess.ModuleAccounts: operatoraccess.LevelView}}}}
+	policy := corePolicy(t, "xy2api.routing.get_quality_state")
+	require.True(t, policyAllowed(actor, policy))
+	r := &runtimeReader{quality: &qualitySnapshotStub{snapshot: &service.SchedQualitySnapshot{At: now}}}
+	q, err := newReaderQuery(QueryRequest{Tool: policy.Name, Actor: actor, Input: QueryInput{IncludePolicies: true}, RequireSource: func(_ context.Context, key string) error {
+		return additionalSource(actor, policy, key)
+	}}, now)
+	require.NoError(t, err)
+	require.NoError(t, r.qualityState(context.Background(), q))
+	delete(actor.Scope.Perms.Modules, operatoraccess.ModuleAccounts)
+	require.ErrorIs(t, r.qualityState(context.Background(), q), ErrForbidden)
+}
+
 func TestRuntimeQualityUsesSnapshotAndPolicy(t *testing.T) {
 	now := time.Now().UTC()
 	snapshot := &service.SchedQualitySnapshot{At: now, GlobalEnabled: true, GroupRows: map[int64][]service.SchedGroupRow{1: {{GroupID: 2, Model: "a", View: schedquality.StateView{State: schedquality.StateCooling, Reason: schedquality.ReasonSpeed}}, {GroupID: 2, Model: "b"}}}, Policies: map[int64]service.SchedPolicyRecord{2: {Version: 7, Policy: schedquality.Policy{TTFTSeconds: 15}}}}
 	engine := &qualitySnapshotStub{snapshot: snapshot}
 	r := &runtimeReader{quality: engine}
 	req := QueryRequest{RequireSource: func(_ context.Context, key string) error {
-		require.Equal(t, "GET /sched-quality/groups/:id/policy", key)
+		require.Equal(t, "GET /sched-quality/accounts/:id", key)
 		return nil
 	}, Tool: "xy2api.routing.get_quality_state", Actor: testReaderActor(), Input: QueryInput{GroupID: 2, IncludePolicies: true, Limit: 1}, Cursor: testReaderCursor()}
 	q, err := newReaderQuery(req, now)

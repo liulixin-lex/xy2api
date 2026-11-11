@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -191,6 +192,11 @@ func (s *SchedAdminService) clearState(ctx context.Context, a *Account, key stri
 		ok, e := s.d.Accounts.SchedAdminClearError(ctx, a.ID, a.ErrorMessage)
 		if e != nil || !ok {
 			return ok, e
+		}
+		if r := s.d.RateLimit; r != nil && r.tokenCacheInvalidator != nil && a.IsOAuth() {
+			if err := r.tokenCacheInvalidator.InvalidateToken(ctx, a); err != nil {
+				slog.Warn("recover_account_state_invalidate_token_failed", "account_id", a.ID, "error", err)
+			}
 		}
 		if strings.Contains(strings.ToLower(a.ErrorMessage), "403") {
 			e = s.schedAdminCounters(ctx, a.ID, "403")
