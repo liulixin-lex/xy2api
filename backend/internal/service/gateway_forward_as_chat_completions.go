@@ -62,6 +62,7 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	}
 	originalModel := ccReq.Model
 	clientStream := ccReq.Stream
+	normalizeAnthropicCompatChatConversion(ctx, &ccReq)
 
 	// 2. Convert CC → Responses → Anthropic (chained conversion)
 	responsesReq, err := apicompat.ChatCompletionsToResponses(&ccReq)
@@ -114,6 +115,10 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	if err != nil {
 		return nil, fmt.Errorf("marshal anthropic request: %w", err)
 	}
+	anthropicBody, err = restoreAnthropicCompatChatBody(ctx, anthropicBody)
+	if err != nil {
+		return nil, err
+	}
 	if err := validateHaiku55MessagesRequest(anthropicBody, mappedModel, account); err != nil {
 		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
@@ -158,6 +163,9 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	releaseUpstreamCtx()
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
+	}
+	if err := s.prepareAnthropicCompatChatResponse(c, compatPlan(c)); err != nil {
+		return nil, err
 	}
 	// Bill the final Anthropic effort after conversion and account normalization.
 	// For example, OpenAI xhigh is forwarded as output_config.effort=max.

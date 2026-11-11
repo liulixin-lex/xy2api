@@ -136,16 +136,18 @@ type anthropicCompatRecord struct {
 }
 
 type anthropicCompatScope struct {
-	UserID, KeyID    int64
-	Entry            string
-	Anchor           string
-	Signatures       []anthropicCompatOpaque
-	ReadKeys         []string
-	Record           *anthropicCompatRecord
-	HistoryErr       error
-	ChatContinuation bool
-	ClientBeta       string
-	NativeCompatible bool
+	UserID, KeyID      int64
+	Entry              string
+	Anchor             string
+	Signatures         []anthropicCompatOpaque
+	ReadKeys           []string
+	Record             *anthropicCompatRecord
+	HistoryErr         error
+	ChatContinuation   bool
+	ChatState          *anthropicCompatChatRequestState
+	ClientBeta         string
+	NativeCompatible   bool
+	NativeCompatibleV2 bool
 }
 type anthropicCompatOpaque struct{ Type, Value string }
 type anthropicCompatScopeKey struct{}
@@ -295,6 +297,7 @@ func (s *GatewayService) PrepareAnthropicCompatibility(ctx context.Context, user
 	if len(headers) > 0 {
 		scope.ClientBeta = headers[0].Get("anthropic-beta")
 		scope.NativeCompatible = entry == "messages" && compatCompleteNative(body, headers[0], &claudeCodeV1CompatProfile)
+		scope.NativeCompatibleV2 = entry == "messages" && compatCompleteNative(body, headers[0], &claudeCodeV2CompatProfile)
 	}
 	store, _ := s.cache.(AnthropicCompatProvenanceStore)
 	if explicitSession != "" {
@@ -363,6 +366,11 @@ func (s *GatewayService) PrepareAnthropicCompatibility(ctx context.Context, user
 				return ctx, scope.HistoryErr
 			}
 			scope.Anchor = scope.Record.Anchor
+		}
+	}
+	if entry == "chat" {
+		if err := s.prepareAnthropicCompatChat(ctx, scope, body); err != nil {
+			return ctx, err
 		}
 	}
 	return context.WithValue(ctx, anthropicCompatScopeKey{}, scope), nil
@@ -436,7 +444,7 @@ func (s *GatewayService) guardAnthropicCompatAccount(ctx context.Context, accoun
 	if account == nil || account.ID != scope.Record.AccountID {
 		return compatUnavailable("The account bound to signed history is unavailable", AnthropicCompatReasonAccount)
 	}
-	profile, err := ResolveAnthropicCompatProfile(account)
+	profile, err := resolveAnthropicCompatProfile(ctx, account)
 	if err != nil || profile == nil || profile.Revision != scope.Record.ProfileRevision {
 		// v1 stores a revision, not an archived wire profile. A transition may
 		// resume only with the exact original revision; never alias or rewrite it.

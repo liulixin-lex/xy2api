@@ -35,6 +35,7 @@ type anthropicCompatResponseBody struct {
 	blocks                      map[int]*anthropicCompatResponseBlock
 	values                      []anthropicCompatOpaque
 	nextBlockIndex              int
+	chat                        *anthropicCompatChatResponseState
 }
 type anthropicCompatResponseBlock struct {
 	kind     string
@@ -59,7 +60,7 @@ func (s *GatewayService) observeAnthropicCompatResponse(ctx context.Context, res
 	if resp.Request != nil {
 		ctx = resp.Request.Context()
 	}
-	resp.Body = &anthropicCompatResponseBody{source: resp.Body, reader: bufio.NewReaderSize(resp.Body, 32*1024), ctx: ctx, service: s, plan: plan, limit: limit, blocks: make(map[int]*anthropicCompatResponseBlock)}
+	resp.Body = &anthropicCompatResponseBody{source: resp.Body, reader: bufio.NewReaderSize(resp.Body, 32*1024), ctx: ctx, service: s, plan: plan, limit: limit, blocks: make(map[int]*anthropicCompatResponseBlock), chat: newAnthropicCompatChatResponseState(plan)}
 }
 
 func (b *anthropicCompatResponseBody) Close() error { return b.source.Close() }
@@ -216,6 +217,38 @@ func (b *anthropicCompatResponseBody) next() {
 	if typeName == "" && eventName == "error" {
 		typeName = "error"
 	}
+	var chatInitialDelta []byte
+	if b.chat != nil {
+		var err error
+		payload, err = b.chat.observe(typeName, payload)
+		if err != nil {
+			b.incomplete(err)
+			return
+		}
+		// The Chat streaming bridge emits deltas, while some Anthropic-compatible
+		// providers put initial text directly in block_start. Normalize that shape
+		// after the continuation collector has retained the original block.
+		if typeName == "content_block_start" {
+			field := ""
+			switch gjson.GetBytes(payload, "content_block.type").String() {
+			case "text":
+				field = "text"
+			case "thinking":
+				field = "thinking"
+			}
+			if field != "" {
+				value := gjson.GetBytes(payload, "content_block."+field).String()
+				if value != "" {
+					chatInitialDelta, _ = json.Marshal(map[string]any{"type": "content_block_delta", "index": gjson.GetBytes(payload, "index").Int(), "delta": map[string]string{"type": field + "_delta", field: value}})
+					payload, err = sjson.SetBytes(payload, "content_block."+field, "")
+					if err != nil {
+						b.incomplete(err)
+						return
+					}
+				}
+			}
+		}
+	}
 	if len(payload) > 0 && typeName != "" {
 		// Downstream protocol converters consume one JSON data line per event.
 		// Normalize multiline, data-only and comment-interleaved SSE here.
@@ -225,6 +258,9 @@ func (b *anthropicCompatResponseBody) next() {
 			return
 		}
 		event = []byte("event: " + typeName + "\ndata: " + compact.String() + "\n\n")
+		if len(chatInitialDelta) > 0 {
+			event = append(event, []byte("event: content_block_delta\ndata: "+string(chatInitialDelta)+"\n\n")...)
+		}
 	}
 	if typeName == "message_stop" && readErr != nil {
 		b.incomplete(io.ErrUnexpectedEOF)
@@ -332,6 +368,10 @@ func (b *anthropicCompatResponseBody) next() {
 		b.values = signed
 		if b.plan != nil {
 			if err := b.service.registerAnthropicCompat(b.ctx, b.plan, b.values); err != nil {
+				b.incomplete(err)
+				return
+			}
+			if err := b.service.commitAnthropicCompatChat(b.ctx, b.plan, b.chat); err != nil {
 				b.incomplete(err)
 				return
 			}
