@@ -6,7 +6,7 @@
 
 | 工具 | 版本 | 用途 |
 |---|---|---|
-| Go | 与 `backend/go.mod` 的 `go` 指令一致（当前 1.27.3） | 后端。CI 用 `go-version-file: backend/go.mod` 取版本 |
+| Go | 与 `backend/go.mod` 的 `go` 指令一致（当前 1.27.4） | 后端。CI 用 `go-version-file: backend/go.mod` 取版本 |
 | Node.js | 24 | 前端。CI 与 `Dockerfile` 都使用 Node 24 |
 | pnpm | 9 | 前端包管理。不要用 npm 或 yarn |
 | PostgreSQL | 15 及以上 | 运行后端。CI 使用 18 |
