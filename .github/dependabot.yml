@@ -26,6 +26,13 @@ updates:
     groups:
       frontend-minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # vue-tsc and typescript-eslint need the TypeScript compiler API, which 7.x does not ship.
+      - dependency-name: typescript
+        versions: [">=7"]
+      # Tracks the mermaid line that @lobehub/ui depends on (^11), for dependencyRendering.spec.ts.
+      - dependency-name: mermaid
+        update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 5
 
   - package-ecosystem: github-actions
