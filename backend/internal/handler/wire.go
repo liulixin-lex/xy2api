@@ -10,6 +10,10 @@ import (
 	"github.com/google/wire"
 )
 
+func ProvideSchedQualityHandler(s *service.SchedAdminService) *admin.SchedQualityHandler {
+	return admin.NewSchedQualityHandler(s)
+}
+
 // ProvideAdminHandlers creates the AdminHandlers struct
 func ProvideAdminHandlers(
 	dashboardHandler *admin.DashboardHandler,
@@ -52,6 +56,8 @@ func ProvideAdminHandlers(
 	groupCategoryHandler *admin.GroupCategoryHandler,
 	resilienceHandler *admin.ResilienceHandler,
 	profitPreviewHandler *admin.ProfitPreviewHandler,
+	schedQualityHandler *admin.SchedQualityHandler,
+	schedAdminService *service.SchedAdminService,
 	groupQualityGateHandler *admin.GroupQualityGateHandler,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
 	iqCheckService *service.IQCheckService,
@@ -65,6 +71,7 @@ func ProvideAdminHandlers(
 	operatorAccessHandler *admin.OperatorAccessHandler,
 	openAITOTPHandler *admin.OpenAITOTPHandler,
 ) *AdminHandlers {
+	accountHandler.SetSchedQualityService(schedAdminService)
 	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)
 	accountHandler.SetOllamaCloudUsageService(ollamaCloudUsage)
 	accountHandler.SetCodexTicketSettings(settingService)
@@ -115,6 +122,7 @@ func ProvideAdminHandlers(
 		ShareScheduling:        shareSchedulingHandler,
 		GroupCategory:          groupCategoryHandler,
 		Resilience:             resilienceHandler,
+		SchedQuality:           schedQualityHandler,
 		ProfitPreview:          profitPreviewHandler,
 		GroupQualityGate:       groupQualityGateHandler,
 	}
@@ -331,6 +339,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewGroupCategoryHandler,
 	admin.NewResilienceHandler,
 	admin.NewProfitPreviewHandler,
+	ProvideSchedQualityHandler,
 	admin.NewGroupQualityGateHandler,
 
 	// AdminHandlers and Handlers constructors

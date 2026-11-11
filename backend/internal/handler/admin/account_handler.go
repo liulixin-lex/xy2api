@@ -51,6 +51,7 @@ func NewOAuthHandler(oauthService *service.OAuthService) *OAuthHandler {
 
 // AccountHandler handles admin account management
 type AccountHandler struct {
+	schedQuality            SchedQualityAdmin
 	claudeResetCredits      claudeResetReader
 	adminService            service.AdminService
 	oauthService            *service.OAuthService
@@ -75,6 +76,8 @@ type AccountHandler struct {
 	opencodeGoUsage         *service.OpenCodeGoUsageService
 	upstreamBalance         *service.UpstreamBalanceService
 }
+
+func (h *AccountHandler) SetSchedQualityService(s SchedQualityAdmin) { h.schedQuality = s }
 
 // SetUpstreamBillingProbeService attaches the optional remote billing probe service.
 func (h *AccountHandler) SetUpstreamBillingProbeService(probe *service.UpstreamBillingProbeService) {
@@ -736,6 +739,22 @@ func (h *AccountHandler) List(c *gin.Context) {
 		return
 	}
 	listCtx := service.WithIQStatusFilter(c.Request.Context(), iqStatus)
+	if quality := strings.TrimSpace(c.Query("sched_quality")); quality != "" {
+		if quality != "cooling" {
+			response.ErrorFrom(c, infraerrors.BadRequest("INVALID_SCHED_QUALITY", "invalid sched_quality filter"))
+			return
+		}
+		if h.schedQuality == nil {
+			response.Error(c, http.StatusServiceUnavailable, "Scheduling quality service unavailable")
+			return
+		}
+		attention, err := h.schedQuality.Attention(listCtx)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		listCtx = service.WithSchedQualityAccountFilter(listCtx, attention.Cooling)
+	}
 	accounts, total, err := h.adminService.ListAccounts(listCtx, page, pageSize, platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder)
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -1421,37 +1440,11 @@ func (h *AccountHandler) Test(c *gin.Context) {
 // RecoverState handles unified recovery of recoverable account runtime state.
 // POST /api/v1/admin/accounts/:id/recover-state
 func (h *AccountHandler) RecoverState(c *gin.Context) {
-	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.BadRequest(c, "Invalid account ID")
+	if h.schedQuality == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Scheduling quality service unavailable")
 		return
 	}
-
-	if h.rateLimitService == nil {
-		response.Error(c, http.StatusServiceUnavailable, "Rate limit service unavailable")
-		return
-	}
-
-	if _, err := h.rateLimitService.RecoverAccountState(c.Request.Context(), accountID, service.AccountRecoveryOptions{
-		InvalidateToken:       true,
-		ResetGroupQualityGate: true,
-	}); err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-
-	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-
-	item, err := h.buildAccountResponseWithRuntime(c.Request.Context(), account)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, item)
+	NewSchedQualityHandler(h.schedQuality).Reset(c)
 }
 
 // ClearCapabilityLearning removes only learned stream-mode restrictions.

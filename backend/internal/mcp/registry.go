@@ -117,7 +117,7 @@ func (s *Server) call(ctx context.Context, ti *auth.TokenInfo, p ToolPolicy, in 
 		}
 	}
 	if in.IncludePolicies {
-		if e = additionalSource(a, p, "GET /group-quality-gate/policies"); e != nil {
+		if e = additionalSource(a, p, "GET /sched-quality/groups/:id/policy"); e != nil {
 			return fail(e)
 		}
 	}

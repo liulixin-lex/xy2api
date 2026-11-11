@@ -71,6 +71,7 @@ func RegisterAdminRoutes(
 
 		// 网关韧性
 		registerResilienceRoutes(admin, h)
+		registerSchedQualityRoutes(admin, h)
 		registerGroupQualityGateRoutes(admin, h)
 
 		// 分组分类

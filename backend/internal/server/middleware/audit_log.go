@@ -57,6 +57,8 @@ var auditExtraAllowedKeys = map[string]struct{}{
 	"all_groups": {}, "group_count": {}, "guard_endpoint_id": {},
 	"http_status": {}, "latency_ms": {}, "token_applied": {}, "retryable": {},
 	"event_id": {}, "requested_count": {}, "deleted_events": {}, "deleted_jobs": {},
+	"cleared_count": {}, "preserved_count": {}, "failed_count": {},
+	"test_failed_count": {}, "test_ticket_count": {},
 	"matched_count": {}, "snapshot_max_id": {}, "filter_hash": {}, "confirm": {},
 }
 

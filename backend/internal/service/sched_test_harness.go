@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
@@ -51,7 +52,9 @@ func schedTestForward(ctx context.Context, f SchedTestForwarder, account *Accoun
 	req.Header.Set("User-Agent", DefaultOpenAICodexUserAgent)
 	req.Header.Set("originator", openai.CodexDefaultOriginator)
 	c.Request = req
+	InstallDeliveryTracking(c, time.Now())
 	result, err := f.Forward(ctx, c, account, body)
+	FinishSchedAttemptAtHandlerExit(ctx)
 	mu.Lock()
 	captured := append([]schedquality.AttemptSample(nil), samples...)
 	mu.Unlock()

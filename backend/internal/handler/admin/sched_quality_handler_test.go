@@ -244,7 +244,6 @@ func TestSchedQualityWritesAuditWithOperator(t *testing.T) {
 }
 
 func TestSchedQualityPermissionsFinalCatalog(t *testing.T) {
-	t.Skip("needs W2 catalog registration")
 	cases := []struct {
 		method, path string
 		module       operatoraccess.Module
@@ -312,6 +311,7 @@ type schedAdminPermissionService struct {
 	calls     int
 	testModel string
 	testErr   error
+	noTickets bool
 }
 
 func (s *schedAdminPermissionService) Summary(context.Context, []int64, string) (service.SchedAdminSummary, error) {
@@ -341,6 +341,9 @@ func (s *schedAdminPermissionService) ClearOverride(context.Context, int64, int6
 func (s *schedAdminPermissionService) Test(_ context.Context, _ int64, m string, _ int64) (service.SchedAdminTest, error) {
 	s.calls++
 	s.testModel = m
+	if s.noTickets {
+		return service.SchedAdminTest{Tests: []service.SchedAdminTestTests{}}, s.testErr
+	}
 	return service.SchedAdminTest{Tests: []service.SchedAdminTestTests{{Model: "m", TestID: "started", Started: true}}}, s.testErr
 }
 func (s *schedAdminPermissionService) ClearAutoState(context.Context, int64, string, int64) (bool, error) {
@@ -381,7 +384,17 @@ func TestSchedQualityEmptyTestBodyAndPartialFailureAudit(t *testing.T) {
 			require.Equal(t, "sched_quality.test", audit.rows[0].Action)
 			if partial {
 				require.Equal(t, "partial_failure", audit.rows[0].Extra["result"])
+				require.EqualValues(t, 1, audit.rows[0].Extra["test_failed_count"])
+				require.EqualValues(t, 1, audit.rows[0].Extra["test_ticket_count"])
 			}
 		})
 	}
+}
+
+func TestSchedQualityAllTestRequestsFail(t *testing.T) {
+	fake := &schedAdminPermissionService{noTickets: true, testErr: &service.SchedAdminTestErrors{Models: []string{"m"}, Err: errors.New("runner failed")}}
+	r := schedAdminHandlerRouter(NewSchedQualityHandler(fake))
+	w := schedAdminHandlerRequest(r, "POST", "/accounts/1/test", `{"model":"m"}`)
+	require.Equal(t, 500, w.Code, w.Body.String())
+	require.NotContains(t, w.Body.String(), `"tests":[]`)
 }

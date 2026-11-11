@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/lib/pq"
+	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
@@ -15,11 +17,16 @@ type runtimeReader struct {
 	pg       *diagnosticReader
 	cache    service.ConcurrencyCache
 	balances service.UpstreamBalanceStore
-	quality  *service.GroupQualityGateService
+	quality  interface {
+		Snapshot() *service.SchedQualitySnapshot
+	}
+	summaries interface {
+		Summary(context.Context, []int64, string) (service.SchedAdminSummary, error)
+	}
 }
 
-func NewRuntimeReader(db *ReaderDB, cache service.ConcurrencyCache, balanceStore service.UpstreamBalanceStore, quality *service.GroupQualityGateService) RuntimeReader {
-	return &runtimeReader{&diagnosticReader{db}, cache, balanceStore, quality}
+func NewRuntimeReader(db *ReaderDB, cache service.ConcurrencyCache, balanceStore service.UpstreamBalanceStore, quality *service.SchedQualityEngineService, summaries *service.SchedAdminService) RuntimeReader {
+	return &runtimeReader{&diagnosticReader{db}, cache, balanceStore, quality, summaries}
 }
 
 type loadPeeker interface {
@@ -55,7 +62,7 @@ func (r *runtimeReader) QueryRuntime(ctx context.Context, req QueryRequest) (Que
 			if req.Tool == "xy2api.ops.get_concurrency_snapshot" {
 				err = r.concurrency(ctx, q, accounts)
 			} else {
-				err = r.health(ctx, tx, q, accounts)
+				err = r.health(ctx, q, accounts)
 			}
 		}
 		if err == nil {
@@ -175,50 +182,87 @@ func (r *runtimeReader) qualityState(ctx context.Context, q *readerQuery) error 
 		return ErrUnavailable
 	}
 	if in.IncludePolicies {
-		if err := q.require(ctx, "GET /group-quality-gate/policies"); err != nil {
+		if err := q.require(ctx, "GET /sched-quality/groups/:id/policy"); err != nil {
 			return err
 		}
 	}
-	afterAccount := int64(0)
-	if in.Cursor != "" {
-		var err error
-		afterAccount, err = strconv.ParseInt(q.page.Source, 10, 64)
-		if err != nil || afterAccount <= 0 || q.page.ID <= 0 {
-			return ErrInvalidInput
-		}
-	}
-	snap := r.quality.PureSnapshot(in.GroupID, in.AccountID, q.page.ID, afterAccount, q.limit, in.IncludePolicies)
+	snap := r.quality.Snapshot()
 	if snap == nil {
 		return ErrUnavailable
 	}
-	if in.Cursor != "" && !snap.GeneratedAt.Equal(q.page.At) {
-		return ErrInvalidInput
+	afterAccount, afterModel := int64(0), ""
+	if in.Cursor != "" {
+		parts := strings.SplitN(q.page.Source, ":", 2)
+		if len(parts) != 2 {
+			return ErrInvalidInput
+		}
+		var err error
+		afterAccount, err = strconv.ParseInt(parts[0], 10, 64)
+		if err != nil || afterAccount <= 0 || q.page.ID <= 0 || !snap.At.Equal(q.page.At) {
+			return ErrInvalidInput
+		}
+		afterModel = parts[1]
 	}
-	for _, item := range snap.Items {
-		v := item.Account
-		row := map[string]any{"group_id": item.GroupID, "account_id": v.AccountID, "status": v.Status, "tier": v.Tier, "pinned": v.Pinned, "ttft": v.TTFT, "error": v.Error, "cache": v.Cache, "generated_at": snap.GeneratedAt, "stale": snap.Stale, "policy_version": snap.PolicyVersion}
-		if item.Policy != nil {
-			row["policy"] = *item.Policy
+	type qualityRow struct {
+		account int64
+		row     service.SchedGroupRow
+	}
+	rows := []qualityRow{}
+	for account, groupRows := range snap.GroupRows {
+		if in.AccountID > 0 && account != in.AccountID {
+			continue
+		}
+		for _, row := range groupRows {
+			if in.GroupID > 0 && row.GroupID != in.GroupID {
+				continue
+			}
+			if in.Cursor != "" && (row.GroupID < q.page.ID || (row.GroupID == q.page.ID && (account < afterAccount || (account == afterAccount && row.Model <= afterModel)))) {
+				continue
+			}
+			rows = append(rows, qualityRow{account, row})
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		a, b := rows[i], rows[j]
+		if a.row.GroupID != b.row.GroupID {
+			return a.row.GroupID < b.row.GroupID
+		}
+		if a.account != b.account {
+			return a.account < b.account
+		}
+		return a.row.Model < b.row.Model
+	})
+	stale := q.result.GeneratedAt.Sub(snap.At) > schedquality.ViewMaxAge
+	for _, item := range rows[:min(len(rows), q.limit)] {
+		state := item.row.View
+		summary := item.row.Summary
+		row := map[string]any{"group_id": item.row.GroupID, "account_id": item.account, "model": item.row.Model,
+			"state": state.State.String(), "reason": state.Reason, "level": state.Level, "since": state.Since, "until": state.Until,
+			"ttfo":         map[string]any{"n": summary.Speed.N, "sessions": summary.Speed.Sessions, "timeouts": summary.Speed.Timeouts, "p90_ms": summary.Speed.P90Ms, "p90_timeout": summary.Speed.P90Timeout, "fail_bound_ms": summary.Speed.FailBoundMs, "fail_bound_timeout": summary.Speed.FailBoundTimeout},
+			"error":        map[string]any{"n": summary.Error.N, "sessions": summary.Error.Sessions, "bad": summary.Error.Bad, "rate": summary.Error.Rate, "lcb": summary.Error.LCB},
+			"cache":        map[string]any{"turns": summary.Cache.Turns, "sessions": summary.Cache.Sessions, "ratio": summary.Cache.Ratio},
+			"generated_at": snap.At, "stale": stale, "global_enabled": snap.GlobalEnabled,
+			"policy_version": snap.Policies[item.row.GroupID].Version}
+		if in.IncludePolicies {
+			p := snap.Policies[item.row.GroupID].Policy
+			row["policy"] = service.SchedAdminPolicyPolicy{Enabled: p.Enabled, TTFTSeconds: p.TTFTSeconds, MaxErrorRate: p.MaxErrorRate, MinCacheRatio: p.MinCacheRatio, TakeoverIdleSeconds: p.TakeoverIdleSeconds}
 		}
 		q.result.Items = append(q.result.Items, row)
 	}
-	q.source("process.group_quality_snapshot")
+	q.source("process.sched_quality_snapshot")
 	q.result.Window = nil
 	q.noHistoricalRetention()
 	q.result.StateScope = "instance_local; immutable_last_published_snapshot; no_evaluation"
-	if snap.Stale {
+	if stale {
 		q.result.PartialReasons = append(q.result.PartialReasons, "stale_process_snapshot")
 	}
-	if snap.Truncated {
-		last := snap.Items[len(snap.Items)-1]
-		next, err := q.request.Cursor.Encode(q.binding, readerPage{Window: q.window, At: snap.GeneratedAt, ID: last.GroupID, Source: strconv.FormatInt(last.Account.AccountID, 10)})
+	if len(rows) > q.limit {
+		last := rows[q.limit-1]
+		next, err := q.request.Cursor.Encode(q.binding, readerPage{Window: q.window, At: snap.At, ID: last.row.GroupID, Source: strconv.FormatInt(last.account, 10) + ":" + last.row.Model})
 		if err != nil {
 			return err
 		}
 		q.result.NextCursor = next
 	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	return nil
+	return ctx.Err()
 }

@@ -109,6 +109,9 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		nil,                         // shareScheduling
 		nil,                         // resilience
 		nil,                         // groupQualityGate
+		nil,                         // schedQuality
+		nil,                         // schedTests
+		nil,                         // schedAttempts
 		&service.ImageTaskService{}, // imageTasks
 		handler.NewAsyncImageHandler(nil, nil, nil), // asyncImage
 		nil, // supportChatPurge

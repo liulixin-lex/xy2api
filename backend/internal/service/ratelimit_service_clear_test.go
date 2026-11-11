@@ -324,17 +324,13 @@ func TestRateLimitService_RecoverAccountState_InvalidatesOAuthTokenOnErrorRecove
 	require.Equal(t, int64(21), invalidator.accounts[0].ID)
 }
 
-func TestRateLimitService_RecoverAccountState_QualityGateResetOnlyWhenExplicit(t *testing.T) {
+func TestRateLimitService_RecoverAccountState_DoesNotWriteQualityReset(t *testing.T) {
 	repo := &rateLimitClearRepoStub{getByIDAccount: &Account{ID: 42, Status: StatusActive, Schedulable: true, Extra: map[string]any{"keep": "value"}}}
 	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
 	_, err := svc.RecoverAccountState(context.Background(), 42, AccountRecoveryOptions{ResetGroupQualityGate: true})
 	require.NoError(t, err)
-	require.Equal(t, 1, repo.updateExtraCalls)
-	resetAt, ok := repo.getByIDAccount.Extra["group_quality_reset_at"].(string)
-	require.True(t, ok)
-	_, err = time.Parse(time.RFC3339, resetAt)
-	require.NoError(t, err)
-	require.Equal(t, "value", repo.getByIDAccount.Extra["keep"], "the JSONB merge must preserve existing extra fields")
+	require.Zero(t, repo.updateExtraCalls, "quality reset timestamps are only written by the locked engine reset")
+	require.Equal(t, map[string]any{"keep": "value"}, repo.getByIDAccount.Extra)
 
 	testRepo := &rateLimitClearRepoStub{getByIDAccount: &Account{ID: 43, Status: StatusActive, Schedulable: true, Extra: map[string]any{"keep": "value"}}}
 	testSvc := NewRateLimitService(testRepo, nil, &config.Config{}, nil, nil)

@@ -2247,11 +2247,6 @@ func (s *RateLimitService) RecoverAccountState(ctx context.Context, accountID in
 			s.notifyAccountSchedulingBlockCleared(accountID)
 		}
 	}
-	if options.ResetGroupQualityGate {
-		if err := s.accountRepo.UpdateExtra(ctx, accountID, map[string]any{"group_quality_reset_at": time.Now().UTC().Format(time.RFC3339Nano)}); err != nil {
-			return nil, err
-		}
-	}
 
 	return result, nil
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/google/wire"
 	dbent "github.com/liulixin-lex/xy2api/ent"
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/payment"
 	"github.com/liulixin-lex/xy2api/internal/pkg/antigravity"
 	"github.com/liulixin-lex/xy2api/internal/pkg/claude"
@@ -881,8 +882,57 @@ func ProvideAPIKeyService(
 	return svc
 }
 
+// ProvideSchedTestRunnerService uses the gateway's existing admission and forwarding state.
+func ProvideSchedTestRunnerService(openai *OpenAIGatewayService, concurrency *ConcurrencyService, accounts AccountRepository, store SchedTestStore, lock LeaderLockCache, db *sql.DB) *SchedTestRunnerService {
+	return NewSchedTestRunnerService(openai, openai, concurrency, accounts, store, nil, lock, db)
+}
+
+func ProvideSchedQualityEngineService(store SchedQualityStore, attempts SchedAttemptStore, runner *SchedTestRunnerService, settings *SettingService, lock LeaderLockCache, db *sql.DB) *SchedQualityEngineService {
+	engine := NewSchedQualityEngineService(store, attempts, runner, settings, nil)
+	engine.SetLeaderLock(lock, db)
+	return engine
+}
+
+func ProvideOpenAISelectionBoard(openai *OpenAIGatewayService, engine *SchedQualityEngineService) *OpenAISelectionBoard {
+	return NewOpenAISelectionBoard(openai, func() schedquality.View { return engine.Snapshot().View })
+}
+
+func ProvideSchedModelTransientAdmin(openai *OpenAIGatewayService) SchedModelTransientAdmin {
+	return openai.getOpenAIAccountModelTransientState()
+}
+
+func ProvideSchedAdminCapability(admin AdminService) SchedAdminCapability {
+	return admin.(SchedAdminCapability)
+}
+
+func ProvideSchedAdminService(engine *SchedQualityEngineService, board *OpenAISelectionBoard, transient SchedModelTransientAdmin, accounts SchedAdminAccountRepository, groups GroupRepository, attempts SchedAttemptStore, rateLimit *RateLimitService, resilience *ResilienceService, openai *OpenAIGatewayService, capability SchedAdminCapability, runner *SchedTestRunnerService, concurrency *ConcurrencyService, settings *SettingService, recorder *SchedAttemptRecorderService) *SchedAdminService {
+	admin := NewSchedAdminService(SchedAdminDependencies{
+		Engine: engine, Board: board, Transient: transient, Accounts: accounts, Groups: groups,
+		Attempts: attempts, RateLimit: rateLimit, Resilience: resilience, Gateway: openai,
+		Capability: capability, Tests: runner, Thresholds: settings.GetAccountSchedulingThresholds,
+		InFlight: func(ctx context.Context, id int64) (int, error) {
+			counts, err := concurrency.GetAccountConcurrencyBatch(ctx, []int64{id})
+			return counts[id], err
+		},
+	})
+	recorder.SetObserver(engine.Observe)
+	engine.OnAccountReset(admin.ClearLocal)
+	openai.SetSchedAttemptRecorder(recorder)
+	recorder.Start(context.Background())
+	runner.Start(context.Background())
+	engine.Start(context.Background())
+	return admin
+}
+
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
+	NewSchedAttemptRecorderService,
+	ProvideSchedTestRunnerService,
+	ProvideSchedQualityEngineService,
+	ProvideOpenAISelectionBoard,
+	ProvideSchedModelTransientAdmin,
+	ProvideSchedAdminCapability,
+	ProvideSchedAdminService,
 	// Core services
 	ProvideAuthService,
 	NewPasskeyService,

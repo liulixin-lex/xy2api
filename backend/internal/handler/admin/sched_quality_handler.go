@@ -169,8 +169,12 @@ func (h *SchedQualityHandler) Test(c *gin.Context) {
 	v, e := h.service.Test(c.Request.Context(), id, r.Model, schedQualityOperator(c))
 	var failures *service.SchedAdminTestErrors
 	if errors.As(e, &failures) {
-		middleware.SetAuditExtra(c, map[string]any{"result": "partial_failure", "test_failed_count": len(failures.Models), "test_ticket_count": len(v.Tests)})
-		e = nil
+		result := "failure"
+		if len(v.Tests) > 0 {
+			result = "partial_failure"
+			e = nil
+		}
+		middleware.SetAuditExtra(c, map[string]any{"result": result, "test_failed_count": len(failures.Models), "test_ticket_count": len(v.Tests)})
 	}
 	schedQualityReply(c, v, e)
 }
