@@ -76,8 +76,16 @@ func (f *fakeSchedAttemptStore) LoadInsertedAfter(_ context.Context, after time.
 			result = append(result, r)
 		}
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].InsertedAt.Before(result[j].InsertedAt) })
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].InsertedAt.Equal(result[j].InsertedAt) {
+			return result[i].AttemptID < result[j].AttemptID
+		}
+		return result[i].InsertedAt.Before(result[j].InsertedAt)
+	})
 	if limit > 0 && len(result) > limit {
+		for limit < len(result) && result[limit].InsertedAt.Equal(result[limit-1].InsertedAt) {
+			limit++
+		}
 		result = result[:limit]
 	}
 	var latest time.Time
@@ -119,37 +127,96 @@ func (f *fakeSchedAttemptStore) DeleteBefore(_ context.Context, at time.Time) (i
 	return n, nil
 }
 
-// fakeSchedQualityStore shares one lock across cycles and resets; fields hold its in-memory records.
+// fakeSchedQualityStore separates the cycle/reset lock from data access; Version covers all policies.
 type fakeSchedQualityStore struct {
 	mu           sync.Mutex
+	lock         sync.Mutex
+	lockReleased chan struct{}
 	Rows         []schedquality.StateRow
 	OverrideRows []SchedOverride
 	Resets       map[int64]time.Time
 	Members      map[int64][]int64
 	Policies     map[int64]SchedPolicyRecord
+	Version      int64
 	Now          func() time.Time
 }
 
 func (f *fakeSchedQualityStore) RunCycle(_ context.Context, fn func(SchedQualityTx) error) (bool, error) {
-	if !f.mu.TryLock() {
+	if !f.lock.TryLock() {
 		return false, nil
 	}
-	defer f.mu.Unlock()
-	rows := append([]schedquality.StateRow(nil), f.Rows...)
-	overrides := append([]SchedOverride(nil), f.OverrideRows...)
-	if err := fn((*fakeSchedQualityTx)(f)); err != nil {
-		f.Rows, f.OverrideRows = rows, overrides
+	defer f.releaseLock()
+	f.mu.Lock()
+	tx := &fakeSchedQualityTx{
+		store:     f,
+		rows:      append([]schedquality.StateRow(nil), f.Rows...),
+		overrides: append([]SchedOverride(nil), f.OverrideRows...),
+		resets:    make(map[int64]time.Time, len(f.Resets)),
+	}
+	for k, v := range f.Resets {
+		tx.resets[k] = v
+	}
+	f.mu.Unlock()
+	if err := fn(tx); err != nil {
 		return true, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Rows = tx.rows
+	now := f.now()
+	for _, expired := range tx.expired {
+		for i, row := range f.OverrideRows {
+			if fakeSchedExpiredOverride(row, expired, now) {
+				f.OverrideRows = append(f.OverrideRows[:i], f.OverrideRows[i+1:]...)
+				break
+			}
+		}
 	}
 	return true, nil
 }
-func (f *fakeSchedQualityStore) RunReset(_ context.Context, id int64) (time.Time, error) {
+func (f *fakeSchedQualityStore) releaseLock() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	now := time.Now()
-	if f.Now != nil {
-		now = f.Now()
+	f.lock.Unlock()
+	if f.lockReleased != nil {
+		close(f.lockReleased)
+		f.lockReleased = nil
 	}
+}
+func (f *fakeSchedQualityStore) now() time.Time {
+	if f.Now != nil {
+		return f.Now()
+	}
+	return time.Now()
+}
+func (f *fakeSchedQualityStore) RunReset(ctx context.Context, id int64) (time.Time, error) {
+	ctx, cancel := context.WithTimeout(ctx, schedquality.ResetLockTimeout)
+	defer cancel()
+	for {
+		f.mu.Lock()
+		if err := ctx.Err(); err != nil {
+			f.mu.Unlock()
+			return time.Time{}, err
+		}
+		if f.lock.TryLock() {
+			f.mu.Unlock()
+			break
+		}
+		if f.lockReleased == nil {
+			f.lockReleased = make(chan struct{})
+		}
+		released := f.lockReleased
+		f.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return time.Time{}, ctx.Err()
+		case <-released:
+		}
+	}
+	defer f.releaseLock()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	now := f.now()
 	if f.Resets == nil {
 		f.Resets = map[int64]time.Time{}
 	}
@@ -196,13 +263,20 @@ func (f *fakeSchedQualityStore) UpsertOverride(_ context.Context, o SchedOverrid
 func (f *fakeSchedQualityStore) DeleteOverride(_ context.Context, a, g int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return (*fakeSchedQualityTx)(f).DeleteOverrides([]SchedOverride{{AccountID: a, GroupID: g}})
+	for i, row := range f.OverrideRows {
+		if row.AccountID == a && row.GroupID == g {
+			f.OverrideRows = append(f.OverrideRows[:i], f.OverrideRows[i+1:]...)
+			break
+		}
+	}
+	return nil
 }
 func (f *fakeSchedQualityStore) LoadPolicies(_ context.Context) (map[int64]SchedPolicyRecord, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	m := map[int64]SchedPolicyRecord{}
 	for k, v := range f.Policies {
+		v.Version = f.Version
 		m[k] = v
 	}
 	return m, nil
@@ -210,72 +284,100 @@ func (f *fakeSchedQualityStore) LoadPolicies(_ context.Context) (map[int64]Sched
 func (f *fakeSchedQualityStore) SavePolicy(_ context.Context, g, version int64, p schedquality.Policy) (SchedPolicyRecord, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.Version != version {
+		return SchedPolicyRecord{}, ErrSchedPolicyConflict
+	}
 	if f.Policies == nil {
 		f.Policies = map[int64]SchedPolicyRecord{}
 	}
-	if f.Policies[g].Version != version {
-		return SchedPolicyRecord{}, ErrSchedPolicyConflict
-	}
-	r := SchedPolicyRecord{GroupID: g, Version: version + 1, Policy: p}
+	f.Version++
+	r := SchedPolicyRecord{GroupID: g, Version: f.Version, Policy: p}
 	f.Policies[g] = r
 	return r, nil
 }
 
-// fakeSchedQualityTx is the transaction passed to a locked fakeSchedQualityStore cycle.
-type fakeSchedQualityTx fakeSchedQualityStore
+// fakeSchedQualityTx stages changes until a successful cycle commits them.
+type fakeSchedQualityTx struct {
+	store     *fakeSchedQualityStore
+	rows      []schedquality.StateRow
+	overrides []SchedOverride
+	resets    map[int64]time.Time
+	expired   []SchedOverride
+}
 
 func (f *fakeSchedQualityTx) States() ([]schedquality.StateRow, error) {
-	return append([]schedquality.StateRow(nil), f.Rows...), nil
+	f.store.mu.Lock()
+	defer f.store.mu.Unlock()
+	return append([]schedquality.StateRow(nil), f.rows...), nil
 }
 func (f *fakeSchedQualityTx) Overrides() ([]SchedOverride, error) {
-	return append([]SchedOverride(nil), f.OverrideRows...), nil
+	f.store.mu.Lock()
+	defer f.store.mu.Unlock()
+	return append([]SchedOverride(nil), f.overrides...), nil
 }
 func (f *fakeSchedQualityTx) ResetTimes() (map[int64]time.Time, error) {
+	f.store.mu.Lock()
+	defer f.store.mu.Unlock()
 	m := map[int64]time.Time{}
-	for k, v := range f.Resets {
+	for k, v := range f.resets {
 		m[k] = v
 	}
 	return m, nil
 }
 func (f *fakeSchedQualityTx) Upsert(rows []schedquality.StateRow) error {
+	f.store.mu.Lock()
+	defer f.store.mu.Unlock()
 	for _, row := range rows {
 		found := false
-		for i, r := range f.Rows {
+		for i, r := range f.rows {
 			if r.AccountID == row.AccountID && r.Model == row.Model && r.GroupID == row.GroupID {
-				f.Rows[i] = row
+				f.rows[i] = row
 				found = true
 				break
 			}
 		}
 		if !found {
-			f.Rows = append(f.Rows, row)
+			f.rows = append(f.rows, row)
 		}
 	}
 	return nil
 }
 func (f *fakeSchedQualityTx) Delete(keys []schedquality.StateRow) error {
+	f.store.mu.Lock()
+	defer f.store.mu.Unlock()
 	for _, k := range keys {
 		var rows []schedquality.StateRow
-		for _, r := range f.Rows {
+		for _, r := range f.rows {
 			if r.AccountID != k.AccountID || r.Model != k.Model || r.GroupID != k.GroupID {
 				rows = append(rows, r)
 			}
 		}
-		f.Rows = rows
+		f.rows = rows
 	}
 	return nil
 }
 func (f *fakeSchedQualityTx) DeleteOverrides(keys []SchedOverride) error {
+	f.store.mu.Lock()
+	defer f.store.mu.Unlock()
+	now := f.store.now()
 	for _, k := range keys {
 		var rows []SchedOverride
-		for _, r := range f.OverrideRows {
-			if r.AccountID != k.AccountID || r.GroupID != k.GroupID {
+		for _, r := range f.overrides {
+			if fakeSchedExpiredOverride(r, k, now) {
+				f.expired = append(f.expired, k)
+			} else {
 				rows = append(rows, r)
 			}
 		}
-		f.OverrideRows = rows
+		f.overrides = rows
 	}
 	return nil
+}
+
+func fakeSchedExpiredOverride(row, original SchedOverride, now time.Time) bool {
+	return row.AccountID == original.AccountID && row.GroupID == original.GroupID &&
+		row.ExpiresAt != nil && original.ExpiresAt != nil &&
+		row.ExpiresAt.Equal(*original.ExpiresAt) && !row.ExpiresAt.After(now)
 }
 
 // fakeSchedTestRunner records requests and returns preloaded test records.

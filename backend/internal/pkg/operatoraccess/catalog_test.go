@@ -157,3 +157,14 @@ func TestCatalogOpsGETUserinfoRedactions(t *testing.T) {
 		require.Contains(t, entry.Redact, Redaction("ops_upstream_url"), path)
 	}
 }
+
+func TestCatalogResilienceUsesOpsView(t *testing.T) {
+	for _, path := range []string{"/resilience/groups/:id/explain", "/resilience/stats", "/resilience/undelivered"} {
+		entry, ok := Lookup("GET " + path)
+		require.True(t, ok, path)
+		require.Equal(t, KindModule, entry.Kind, path)
+		require.Equal(t, Module("ops"), entry.Module, path)
+		require.Equal(t, LevelView, entry.Level, path)
+		require.Empty(t, entry.AnyOf, path)
+	}
+}

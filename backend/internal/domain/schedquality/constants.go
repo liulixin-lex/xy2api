@@ -37,8 +37,31 @@ const (
 	TestRetention           = 7 * 24 * time.Hour
 	ClassSizeBoundaryTokens = 120000
 	BytesPerTokenEstimate   = 5.3
+	MembersCacheTTL         = 30 * time.Second
+	PoliciesCacheTTL        = 30 * time.Second
+	ResetLockTimeout        = 3 * time.Second
+	EvalStatementTimeout    = 3 * time.Second
+	SessionMemoryMaxEntries = 65536
+	SessionMemoryTTL        = time.Hour
+	LedgerQueueSize         = 8192
+	LedgerBatchSize         = 200
+	LedgerFlushInterval     = time.Second
+	LedgerWriteTimeout      = 5 * time.Second
+	LedgerWriteRetries      = 3
+	LedgerReadTimeout       = 5 * time.Second
+	CleanupInterval         = time.Hour
+	TakeoverMaxCandidates   = 2
+	SummaryMaxAccounts      = 1000
+	SummaryMaxCooling       = 3
+	RecentAttemptsMax       = 50
+	ManualTestMaxModels     = 3
+	PolicyTTFTMinSeconds    = 0.5
+	PolicyTTFTMaxSeconds    = 600
+	TestPromptTolerance     = 0.05
+	TestStaleAfter          = TestTimeout + time.Minute
 )
 
+var TakeoverIdleChoices = [...]int{-1, 0, 300, 900, 1800}
 var CooldownLadder = [...]time.Duration{30 * time.Second, time.Minute, 2 * time.Minute, 5 * time.Minute, 15 * time.Minute, 30 * time.Minute}
 var ClassScaleTable = map[string][4]float64{
 	"gpt-6.1-sol": {0.73, 1, 1.20, 1.43}, "gpt-6-astra": {0.86, 1, 1.12, 1.20},
