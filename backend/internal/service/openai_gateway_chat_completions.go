@@ -76,7 +76,9 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	defaultMappedModel string,
 	compatPromptCacheTenantIsolated bool,
 	rejectedFieldRetryState *openAIResponsesRejectedFieldRetryState,
-) (*OpenAIForwardResult, error) {
+) (schedResult *OpenAIForwardResult, schedErr error) {
+	var schedCapture *schedAttemptCapture
+	defer func() { schedCapture.finish(schedResult, schedErr) }()
 	if c != nil {
 		c.Set(openAIStateRejectionBodyKey, body)
 		defer c.Set(openAIStateRejectionBodyKey, nil)
@@ -392,7 +394,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+	resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, clientStream, &schedCapture)
 	if firstEvent.expired() {
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()
@@ -419,6 +421,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	if resp.StatusCode >= 400 {
 		_ = firstEvent.disarm()
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
+		schedCapture.finishHTTP(resp, respBody)
 		if !agentIdentityTaskRecoveryWasTried(ctx) && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
 			expectedTaskID := account.GetCredential("task_id")
 			if err := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); err != nil {
@@ -463,6 +466,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	} else {
 		result, handleErr = s.handleChatBufferedStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime)
 	}
+	schedCapture.finish(result, handleErr)
 	if next, _, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, nil, handleErr); ok {
 		closeAttempt()
 		ResumeCommittedPreOutputKeepalive(c, time.Duration(resilience.Current().Keepalive.IntervalSeconds)*time.Second)
@@ -825,6 +829,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			return false
 		}
 		clientDisconnected = true
+		cancelSchedClient(c)
 		return true
 	}
 	pendingSSE := make([]string, 0, 4)
@@ -920,6 +925,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				return true
 			}
 		}
+		observeSchedPayload(c, []byte(payload))
 		observer.ObserveOpenAI([]byte(payload), event.Type)
 		refusalDetector.ObservePayload([]byte(payload))
 		s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
@@ -959,6 +965,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 					// 无条件置位：成功路径防 finalizeStream 重复 [DONE]；写失败意味着连接已不可写，
 					// finalizeStream 的 [DONE] 同样发不出去，统一抑制。
 					clientDisconnected = true
+					cancelSchedClient(c)
 				}
 				return true
 			}
@@ -1022,6 +1029,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			} else if c != nil && c.Writer != nil && !clientDisconnected {
 				if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", errorPayload); err != nil {
 					clientDisconnected = true
+					cancelSchedClient(c)
 					logger.L().Info("openai chat_completions stream: client disconnected while writing upstream error",
 						zap.String("request_id", requestID),
 					)
@@ -1079,6 +1087,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 					for _, pending := range pendingSSE {
 						if err := writeClient(pending); err != nil {
 							clientDisconnected = true
+							cancelSchedClient(c)
 							logger.L().Info("openai chat_completions stream: client disconnected while flushing pending chunks",
 								zap.String("request_id", requestID),
 							)
@@ -1092,6 +1101,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				}
 				if err := writeClient(sse); err != nil {
 					clientDisconnected = true
+					cancelSchedClient(c)
 					logger.L().Info("openai chat_completions stream: client disconnected, continuing to drain upstream for billing",
 						zap.String("request_id", requestID),
 					)
@@ -1135,6 +1145,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 					for _, pending := range pendingSSE {
 						if err := writeClient(pending); err != nil {
 							clientDisconnected = true
+							cancelSchedClient(c)
 							logger.L().Info("openai chat_completions stream: client disconnected during pending final flush",
 								zap.String("request_id", requestID),
 							)
@@ -1148,6 +1159,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				}
 				if err := writeClient(sse); err != nil {
 					clientDisconnected = true
+					cancelSchedClient(c)
 					logger.L().Info("openai chat_completions stream: client disconnected during final flush",
 						zap.String("request_id", requestID),
 					)
@@ -1164,6 +1176,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				for _, pending := range pendingSSE {
 					if err := writeClient(pending); err != nil {
 						clientDisconnected = true
+						cancelSchedClient(c)
 						logger.L().Info("openai chat_completions stream: client disconnected during final pending flush",
 							zap.String("request_id", requestID),
 						)
@@ -1178,6 +1191,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			writeStreamHeaders()
 			if err := writeClient("data: [DONE]\n\n"); err != nil {
 				clientDisconnected = true
+				cancelSchedClient(c)
 				logger.L().Info("openai chat_completions stream: client disconnected during done flush",
 					zap.String("request_id", requestID),
 				)
@@ -1247,6 +1261,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			}
 		}
 		if err := scanner.Err(); err != nil {
+			noteSchedError(c, err)
 			if cancelErr := canceledPrelude(); cancelErr != nil {
 				return nil, cancelErr
 			}
@@ -1281,6 +1296,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		line string
 		err  error
 	}
+	schedReadAttempt := currentSchedAttempt(c.Request.Context())
 	events := make(chan scanEvent, 16)
 	done := make(chan struct{})
 	var lastReadAt int64
@@ -1302,6 +1318,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			}
 		}
 		if err := scanner.Err(); err != nil {
+			schedReadAttempt.noteError(err)
 			_ = sendEvent(scanEvent{err: err})
 		}
 	}()
@@ -1418,6 +1435,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 					zap.String("request_id", requestID),
 				)
 				clientDisconnected = true
+				cancelSchedClient(c)
 				continue
 			}
 			noteDownstreamWrite()

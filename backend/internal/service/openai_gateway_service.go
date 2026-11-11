@@ -451,6 +451,7 @@ var ErrNoAvailableCompactAccounts = errors.New("no available accounts support /r
 
 // OpenAIGatewayService handles OpenAI API gateway operations
 type OpenAIGatewayService struct {
+	schedAttemptRecorder  SchedAttemptRecorder
 	openaiCacheOnce       sync.Once
 	openaiCacheTelemetry  *openAICacheTelemetry
 	openaiQualityStates   sync.Map // scoped digest -> *openAIQualityLocal

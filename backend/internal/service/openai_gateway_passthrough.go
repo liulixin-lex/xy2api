@@ -135,7 +135,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	reasoningEffort *string,
 	reqStream bool,
 	startTime time.Time,
-) (*OpenAIForwardResult, error) {
+) (schedResult *OpenAIForwardResult, schedErr error) {
+	var schedCapture *schedAttemptCapture
+	defer func() { schedCapture.finish(schedResult, schedErr) }()
 	requestedModel := reqModel
 	upstreamPassthroughModel := ""
 	if isOpenAIResponsesCompactPath(c) {
@@ -417,7 +419,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		}
 
 		upstreamStart := time.Now()
-		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+		resp, err = s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, reqStream, &schedCapture)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if headerGuard != nil && headerGuard.stopHeaderWait() {
 			if resp != nil && resp.Body != nil {
@@ -442,6 +444,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			// Peek only to identify an invalid task. Restore the body so the existing
 			// passthrough error handling sees the same response after recovery fails.
 			probeBody := s.readUpstreamErrorBody(resp)
+			schedCapture.finishHTTP(resp, probeBody)
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(probeBody))
 			if failure := s.learnOpenAIStreamOnlyHTTPFailure(ctx, c, account, upstreamReq, resp, probeBody, resilience.CapabilityProtocolResponses); failure != nil {
@@ -528,6 +531,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		if reqStream {
 			result, handleErr := s.handleStreamingResponsePassthroughWithReasoning(ctx, resp, c, account, attemptStart, reqModel, upstreamPassthroughModel, reasoningEffortValue)
 			if handleErr != nil {
+				schedCapture.finish(nil, handleErr)
+			}
+			if handleErr != nil {
 				if next, replayErr := s.openAIWebSearchReplayAfterSignal(ctx, c, account, webSearchReplay, body, resp, handleErr); replayErr != nil {
 					return nil, replayErr
 				} else if next != nil {
@@ -591,6 +597,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			imageOutputSizes = result.imageOutputSizes
 		} else {
 			result, handleErr := s.handleNonStreamingResponsePassthrough(ctx, resp, c, account, reqModel, upstreamPassthroughModel)
+			if handleErr != nil {
+				schedCapture.finish(nil, handleErr)
+			}
 			if handleErr != nil {
 				if next, _, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, resp, handleErr); ok {
 					body = next
@@ -2269,7 +2278,14 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	originalModel string,
 	mappedModel string,
 	reasoningEffort string,
-) (*openaiStreamingResultPassthrough, error) {
+) (schedResult *openaiStreamingResultPassthrough, schedErr error) {
+	schedCapture := currentSchedAttempt(ctx)
+	defer func() {
+		if schedResult != nil {
+			schedCapture.noteUsage(schedResult.usage)
+		}
+		schedCapture.finish(nil, schedErr)
+	}()
 	failureModel := firstNonEmpty(mappedModel, canonicalOpenAIAccountSchedulingModel(account, originalModel))
 	preludeTrace := beginOpenAIPreludeTrace(ctx, resilience.Current().NativePreludeWhitelistOn())
 	observer := upstreamResponseModelObserverFromContext(c)
@@ -2400,6 +2416,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		}
 		if err := pendingStage.CommitTo(w); err != nil {
 			clientDisconnected = true
+			cancelSchedClient(c)
 			logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
 			return false
 		}
@@ -2430,6 +2447,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		}
 		if _, err := fmt.Fprint(w, buildOpenAIResponseFailedSSE(ctx, responseID, originalModel, clientErrorPayload, failedMessage)); err != nil {
 			clientDisconnected = true
+			cancelSchedClient(c)
 			return
 		}
 		clientOutputStarted = true
@@ -2502,6 +2520,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		_, err := writeOpenAIStreamKeepalive(c, w, []byte(frame), refreshClock)
 		if err != nil {
 			clientDisconnected = true
+			cancelSchedClient(c)
 			logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] Client disconnected during heartbeat: account=%d", account.ID)
 			return
 		}
@@ -2564,6 +2583,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				}
 			}
 			observeOpenAIPreludeCreated(preludeTrace, sourceEventType)
+			observeSchedPayload(c, dataBytes, sourceEventType)
 			observer.ObserveOpenAI(dataBytes, sourceEventType)
 			if needModelReplace {
 				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
@@ -2780,6 +2800,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				if clientOutputStarted {
 					if _, err := fmt.Fprintln(w, pendingSSEEventLine); err != nil {
 						clientDisconnected = true
+						cancelSchedClient(c)
 						return passthroughLineContinue
 					}
 					flushPending = true
@@ -2823,6 +2844,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			}
 			if _, err := fmt.Fprintln(w, line); err != nil {
 				clientDisconnected = true
+				cancelSchedClient(c)
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
 			} else {
 				clientOutputStarted = true
@@ -3021,7 +3043,14 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	account *Account,
 	originalModel string,
 	mappedModel string,
-) (_ *openaiNonStreamingResultPassthrough, retErr error) {
+) (schedResult *openaiNonStreamingResultPassthrough, schedErr error) {
+	schedCapture := currentSchedAttempt(ctx)
+	defer func() {
+		if schedResult != nil {
+			schedCapture.noteUsage(schedResult.usage)
+		}
+		schedCapture.finish(nil, schedErr)
+	}()
 	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
 		return nil, nonstreamReadError(ctx, resp, err)
@@ -3034,6 +3063,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	if bodyHasSSEFraming(body) {
 		observeOpenAISSEBody(observer, string(body))
 	} else {
+		observeSchedPayload(c, body)
 		observer.ObserveOpenAI(body, strings.TrimSpace(gjson.GetBytes(body, "type").String()))
 	}
 
@@ -3098,6 +3128,7 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 	failureModel := firstNonEmpty(mappedModel, canonicalOpenAIAccountSchedulingModel(account, originalModel))
 	bodyText := string(body)
 	terminalType, terminalSSEEvent, terminalPayload, terminalOK := extractOpenAISSETerminalEvent(bodyText)
+	observeSchedPayload(c, terminalPayload, terminalType)
 	if terminalOK && (terminalType == "response.failed" || terminalType == "error") {
 		msg := extractOpenAISSEErrorMessage(terminalPayload)
 		if msg == "" {

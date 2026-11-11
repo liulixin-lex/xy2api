@@ -21,6 +21,8 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, forwardErr error) {
+	var schedCapture *schedAttemptCapture
+	defer func() { schedCapture.finish(result, forwardErr) }()
 	ctx = WithOpenAITerminalRejectionScope(ctx, c, body)
 	finishStateRejection := beginOpenAIStateRejectionAttempt(ctx, c, account, body)
 	defer func() {
@@ -35,7 +37,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		collabRawBlocked = rawPlan == nil
 		collabRawConflict = rawOutcome == codexCollabConflict
 	}
-	defer func() { s.finishCacheDiagnostic(c, body, result) }()
+	defer func() {
+		if !schedTestRequest(ctx) {
+			s.finishCacheDiagnostic(c, body, result)
+		}
+	}()
 	if c != nil {
 		// Reset before any early return so failover attempts never inherit a plan.
 		c.Set(openAICollabResponseKey, nil)
@@ -1152,7 +1158,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 		// Send request
 		upstreamStart := time.Now()
-		resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+		resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, reqStream, &schedCapture)
 		if collabAttempt != nil {
 			collabAttempt.upstreamStatus = 0
 			if resp != nil {
@@ -1190,6 +1196,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		// Handle error response
 		if resp.StatusCode >= 400 {
 			respBody := s.readUpstreamErrorBody(resp)
+			schedCapture.finishHTTP(resp, respBody)
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 			if failure := s.learnOpenAIStreamOnlyHTTPFailure(ctx, c, account, upstreamReq, resp, respBody, resilience.CapabilityProtocolResponses); failure != nil {
@@ -1336,6 +1343,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if reqStream {
 			streamResult, err := s.handleStreamingResponseWithReasoning(ctx, resp, c, account, attemptStart, originalModel, upstreamModel, reasoningEffortValue)
 			if err != nil {
+				schedCapture.finish(nil, err)
+			}
+			if err != nil {
 				if next, replayErr := s.openAIWebSearchReplayAfterSignal(ctx, c, account, webSearchReplay, body, resp, err); replayErr != nil {
 					return nil, replayErr
 				} else if next != nil {
@@ -1415,6 +1425,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			searchCount = streamResult.searchCount
 		} else {
 			nonStreamResult, err := s.handleNonStreamingResponse(ctx, resp, c, account, originalModel, upstreamModel)
+			if err != nil {
+				schedCapture.finish(nil, err)
+			}
 			if err != nil {
 				if next, _, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, resp, err); ok {
 					body, requestView, reqBody = next, newOpenAIRequestView(next), nil
@@ -1727,7 +1740,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	setOpenAICodexRoutingHintFromBody(req.Header, account, body)
 	logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http", req.Header, body, "not_applicable")
 	s.prepareQualityHTTP(ctx, c, account, req, body)
-	s.captureCacheRequestDiagnostic(c, req)
+	if !schedTestRequest(ctx) {
+		s.captureCacheRequestDiagnostic(c, req)
+	}
 
 	if err := applyMappedGPT55LiteCompatibility(req, account, body); err != nil {
 		return nil, err

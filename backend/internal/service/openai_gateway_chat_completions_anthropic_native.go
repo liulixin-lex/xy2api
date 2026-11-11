@@ -40,7 +40,9 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaNativeAnthropic(
 	account *Account,
 	body []byte,
 	defaultMappedModel string,
-) (*OpenAIForwardResult, error) {
+) (schedResult *OpenAIForwardResult, schedErr error) {
+	var schedCapture *schedAttemptCapture
+	defer func() { schedCapture.finish(schedResult, schedErr) }()
 	startTime := time.Now()
 
 	// 1. Parse Chat Completions request
@@ -124,7 +126,7 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaNativeAnthropic(
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 
-	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+	resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, clientStream, &schedCapture)
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 	}
@@ -132,6 +134,7 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaNativeAnthropic(
 
 	if resp.StatusCode >= 400 {
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
+		schedCapture.finishHTTP(resp, respBody)
 		if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel); foErr != nil {
 			return nil, foErr
 		}
@@ -201,6 +204,7 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 			if errors.Is(rerr, errAnthropicNativeStreamIdle) {
 				return onIdle()
 			}
+			finishSchedRead(c, rerr)
 			logReadErr(rerr)
 			break
 		}
@@ -215,6 +219,7 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 			if errors.Is(rerr, errAnthropicNativeStreamIdle) {
 				return onIdle()
 			}
+			finishSchedRead(c, rerr)
 			logReadErr(rerr)
 			break
 		}
@@ -223,6 +228,7 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 			continue
 		}
 
+		observeSchedPayload(c, []byte(payload))
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			continue
@@ -240,6 +246,8 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 				finalResp.StopReason = apicompat.AnthropicStopReasonPtr(event.Delta.StopReason)
 			}
 		}
+		schedUsage := claudeUsageToOpenAIUsage(&usage)
+		currentSchedAttempt(c.Request.Context()).noteUsage(&schedUsage)
 		if event.Type == "content_block_start" && event.ContentBlock != nil && finalResp != nil {
 			finalResp.Content = append(finalResp.Content, *event.ContentBlock)
 		}
@@ -397,6 +405,7 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 		out := string(reverseToolNamesIfPresent(c, []byte(sse)))
 		if _, err := fmt.Fprint(c.Writer, out); err != nil {
 			clientDisconnected = true
+			cancelSchedClient(c)
 			return false
 		}
 		return false
@@ -421,6 +430,8 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 		// for billing, including converter handlers that consume event usage.
 		syncAnthropicResponsesUsage(anthState, usage)
 		normalizeAnthropicEventUsageForResponses(event, usage)
+		schedUsage := claudeUsageToOpenAIUsage(&usage)
+		currentSchedAttempt(c.Request.Context()).noteUsage(&schedUsage)
 
 		// 客户端已断开：跳过转换与写出，继续读上游直到流结束（usage 完整、
 		// 连接及时归还），不再提前 return。
@@ -447,6 +458,7 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 			if errors.Is(rerr, errAnthropicNativeStreamIdle) {
 				return onIdle()
 			}
+			finishSchedRead(c, rerr)
 			logReadErr(rerr)
 			break
 		}
@@ -460,6 +472,7 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 				return onIdle()
 			}
 			// EOF / 读错误：事件行后流终止，进入 finalize。
+			finishSchedRead(c, rerr)
 			logReadErr(rerr)
 			break
 		}
@@ -468,6 +481,7 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 			continue
 		}
 
+		observeSchedPayload(c, []byte(payload))
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			continue

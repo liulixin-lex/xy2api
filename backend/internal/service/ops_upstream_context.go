@@ -413,6 +413,7 @@ func setOpsUpstreamError(c *gin.Context, upstreamStatusCode int, upstreamMessage
 // It is stored in ops_error_logs.upstream_errors as a JSON array.
 type OpsUpstreamErrorEvent struct {
 	resilience.TimeoutDiagnostics
+	Source           string `json:"source,omitempty"`
 	AtUnixMs         int64  `json:"at_unix_ms,omitempty"`
 	Warm             *bool  `json:"warm,omitempty"`
 	BodyBytes        int    `json:"body_bytes,omitempty"`
@@ -487,6 +488,11 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
 	if c == nil {
 		return
 	}
+	isTest := c.Request != nil && schedTestRequest(c.Request.Context())
+	if isTest {
+		ev.Source = "sched_test"
+		ev.SkipMonitoring = true
+	}
 	if ev.AtUnixMs <= 0 {
 		ev.AtUnixMs = time.Now().UnixMilli()
 	}
@@ -510,7 +516,7 @@ func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
 	if ev.StateFamily == "" && ev.UpstreamResponseBody != "" {
 		ev.StateFamily = string(openAIStateRejection([]byte(ev.UpstreamResponseBody), ev.Message).Family)
 	}
-	if c.Request != nil {
+	if c.Request != nil && !isTest {
 		resilience.StateFrom(c.Request.Context()).MarkAccountFailed(ev.AccountID)
 	}
 

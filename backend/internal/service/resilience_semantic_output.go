@@ -19,7 +19,7 @@ type semanticDeliveryState struct {
 	oversized bool
 }
 
-func (w *deliveryWriter) observeSemanticOutput(p []byte) {
+func (w *deliveryWriter) observeSemanticOutput(p []byte, at time.Time) {
 	st := &w.semantic
 	if st.noted.Load() || w.state == nil || w.Status() >= 400 {
 		return
@@ -35,6 +35,9 @@ func (w *deliveryWriter) observeSemanticOutput(p []byte) {
 		st.noted.Store(true)
 		st.pending = nil
 		w.state.NoteSemanticOutput(time.Now())
+		if attempt := w.state.CurrentAttempt(); attempt != nil {
+			attempt.MarkFirstOutput(at)
+		}
 	}
 	if !stream {
 		if semanticJSONOutput(gjson.ParseBytes(st.pending)) {

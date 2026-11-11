@@ -267,7 +267,11 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+	var schedCapture *schedAttemptCapture
+	resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, stream, &schedCapture)
+	if err != nil {
+		schedCapture.finish(nil, err)
+	}
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
@@ -316,12 +320,14 @@ func (s *OpenAIGatewayService) scanCCStream(
 			continue
 		}
 		if payload == "[DONE]" {
+			observeSchedPayload(c, []byte(payload))
 			st.SawDone = true
 			break
 		}
 		// 观察上游 CC chunk 回显的 model / service_tier（计费以回显为准）。
 		// CC chunk 无 type 字段，按 untyped payload 观察（上游约束：只有终止
 		// 事件与无类型 body 报告实际处理档位）。
+		observeSchedPayload(c, []byte(payload))
 		if observer := upstreamResponseModelObserverFromContext(c); observer != nil {
 			observer.ObserveOpenAI([]byte(payload), "")
 		}
@@ -346,6 +352,7 @@ func (s *OpenAIGatewayService) scanCCStream(
 	}
 
 	if err := scanner.Err(); err != nil {
+		noteSchedError(c, err)
 		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			logger.L().Warn(logPrefix+": stream read error",
 				zap.Error(err),
@@ -391,6 +398,7 @@ func (s *OpenAIGatewayService) readCCUpstreamJSONResponse(
 	}
 	// 观察上游 CC JSON 回显的 model / service_tier（计费以回显为准）。
 	// CC JSON 无 type 字段，按 untyped payload 观察（上游约束）。
+	observeSchedPayload(c, respBody)
 	if observer := upstreamResponseModelObserverFromContext(c); observer != nil {
 		observer.ObserveOpenAI(respBody, "")
 	}

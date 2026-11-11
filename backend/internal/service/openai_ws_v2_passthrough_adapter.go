@@ -361,6 +361,7 @@ func (l *openAIWSPassthroughTurnLifecycle) finishTerminalWrite(succeeded bool, o
 
 type openAIWSPassthroughFirstOutputFrameConn struct {
 	inner             openaiwsv2.FrameConn
+	beforeSend        func(payload []byte)
 	resolveDeadline   func(payload []byte) openAIWSPassthroughFirstOutputDeadline
 	activeReadTimeout time.Duration
 
@@ -463,8 +464,11 @@ func (c *openAIWSPassthroughFirstOutputFrameConn) WriteFrame(ctx context.Context
 		return errOpenAIWSConnClosed
 	}
 	generation := uint64(0)
-	if msgType == coderws.MessageText && strings.TrimSpace(gjson.GetBytes(payload, "type").String()) == "response.create" {
+	if (msgType == coderws.MessageText || msgType == coderws.MessageBinary) && strings.TrimSpace(gjson.GetBytes(payload, "type").String()) == "response.create" {
 		generation = c.armDeadline(payload)
+		if c.beforeSend != nil {
+			c.beforeSend(payload)
+		}
 	}
 	if err := c.inner.WriteFrame(ctx, msgType, payload); err != nil {
 		c.disarmDeadline(generation)
@@ -674,7 +678,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	firstClientMessage []byte,
 	hooks *OpenAIWSIngressHooks,
 	wsDecision OpenAIWSProtocolDecision,
-) error {
+) (schedErr error) {
+	schedTurns := &schedWSTurnCapture{}
+	defer func() { schedTurns.finish(nil, schedErr) }()
 	// The same request context survives scheduler failover attempts. Clear any
 	// reverse mapping installed by the prior account before processing frames.
 	setCodexToolNameReverse(c, nil)
@@ -948,6 +954,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 	relayUpstreamFrameConn := &openAIWSPassthroughFirstOutputFrameConn{
 		inner:             upstreamFrameConn,
+		beforeSend:        func(payload []byte) { schedTurns.begin(s, ctx, account, payload) },
 		activeReadTimeout: s.openAIWSPassthroughIdleTimeout(),
 		deadlineChanged:   make(chan struct{}, 1),
 		resolveDeadline: func(payload []byte) openAIWSPassthroughFirstOutputDeadline {
@@ -1225,6 +1232,19 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		firstTurnStartedAt = hooks.InitialTurnStartedAt
 	}
 	failureAccountSideEffectsApplied := false
+	var firstOutputFailoverErr *UpstreamFailoverError
+	recordFirstOutputTimeout := func(timeoutErr *openAIWSPassthroughFirstOutputTimeoutError) *UpstreamFailoverError {
+		if firstOutputFailoverErr == nil {
+			deadline := timeoutErr.deadline
+			wsProxyID, wsProxyName := opsUpstreamWSProxyAttribution(account)
+			firstOutputFailoverErr = s.newOpenAIFirstOutputTimeoutError(
+				ctx, c, account, wsProxyID, wsProxyName, deadline.startedAt,
+				deadline.requestModel, deadline.reasoningEffort, deadline.timeout,
+				"websocket_first_semantic_output", handshakeHeaders,
+			)
+		}
+		return firstOutputFailoverErr
+	}
 	relayResult, relayExit := openaiwsv2.RunEntry(openaiwsv2.EntryInput{
 		Ctx:                ctx,
 		ClientConn:         policyClientConn,
@@ -1308,6 +1328,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					turnResult.Usage.OutputTokens,
 					turnResult.Usage.CacheReadInputTokens,
 				)
+				schedTurns.finish(turnResult, nil)
 				if hooks != nil && hooks.AfterTurn != nil {
 					hooks.AfterTurn(turnNo, turnResult, nil)
 				}
@@ -1318,6 +1339,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 			},
 			AfterClientWrite: func(msgType coderws.MessageType, payload []byte, writeErr error) {
+				if writeErr != nil {
+					schedTurns.cancel()
+				}
 				if msgType == coderws.MessageText && writeErr == nil {
 					eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
 					markOpenAIWSClientVisibleFailure(c, eventType, payload)
@@ -1327,6 +1351,14 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 			},
 			BeforeRelayCancel: func(exit openaiwsv2.RelayExit) {
+				var timeoutErr *openAIWSPassthroughFirstOutputTimeoutError
+				if errors.As(exit.Err, &timeoutErr) {
+					recordFirstOutputTimeout(timeoutErr)
+				} else if exit.Stage == "read_client" || exit.Stage == "write_client" || ctx.Err() != nil {
+					schedTurns.cancel()
+				} else {
+					schedTurns.finish(nil, exit.Err)
+				}
 				var reroute *OpenAIQualityRerouteError
 				if errors.As(exit.Err, &reroute) {
 					return
@@ -1346,9 +1378,18 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				_ = clientConn.CloseNow()
 			},
 			BeforeWriteClient: func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error {
+				if msgType == coderws.MessageBinary {
+					schedTurns.observe(payload)
+					eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
+					if isOpenAIWSTerminalEvent(eventType) || eventType == "error" {
+						schedTurns.finish(&OpenAIForwardResult{UpstreamTerminalEvent: eventType}, nil)
+					}
+					return nil
+				}
 				if msgType != coderws.MessageText {
 					return nil
 				}
+				schedTurns.observe(payload)
 				eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
 				if observer := qualityObserver.Load(); observer != nil {
 					observer.inspectQualityDeclaration(payload, "response.model", "model")
@@ -1505,23 +1546,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	relayErr := relayExit.Err
 	var firstOutputTimeoutErr *openAIWSPassthroughFirstOutputTimeoutError
 	if errors.As(relayErr, &firstOutputTimeoutErr) {
-		deadline := firstOutputTimeoutErr.deadline
-		// The relay ran over the WebSocket transport, so a missing managed
-		// proxy is an unknown route (http.DefaultClient), not a direct one.
-		wsProxyID, wsProxyName := opsUpstreamWSProxyAttribution(account)
-		failoverErr := s.newOpenAIFirstOutputTimeoutError(
-			ctx,
-			c,
-			account,
-			wsProxyID,
-			wsProxyName,
-			deadline.startedAt,
-			deadline.requestModel,
-			deadline.reasoningEffort,
-			deadline.timeout,
-			"websocket_first_semantic_output",
-			handshakeHeaders,
-		)
+		failoverErr := recordFirstOutputTimeout(firstOutputTimeoutErr)
 		if turnCount == 0 && !relayExit.WroteDownstream {
 			relayErr = failoverErr
 		} else {
