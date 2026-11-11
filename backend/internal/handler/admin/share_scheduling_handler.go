@@ -1,10 +1,7 @@
 package admin
 
 import (
-	"bytes"
 	"encoding/json"
-	"errors"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -28,27 +25,6 @@ type ShareSchedulingHandler struct {
 // NewShareSchedulingHandler creates the handler.
 func NewShareSchedulingHandler(svc *service.ShareSchedulingService) *ShareSchedulingHandler {
 	return &ShareSchedulingHandler{svc: svc}
-}
-
-// decodeStrictJSON decodes one JSON document, rejecting unknown fields and
-// trailing data so a typo never silently falls back to a default.
-func decodeStrictJSON(c *gin.Context, dst any) bool {
-	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, shareSchedulingMaxBody))
-	if err != nil {
-		response.BadRequest(c, "Request body too large or unreadable")
-		return false
-	}
-	dec := json.NewDecoder(bytes.NewReader(body))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(dst); err != nil {
-		response.BadRequest(c, "Invalid request: "+err.Error())
-		return false
-	}
-	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		response.BadRequest(c, "Invalid request: trailing data")
-		return false
-	}
-	return true
 }
 
 func shareGroupID(c *gin.Context) (int64, bool) {

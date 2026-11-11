@@ -43,54 +43,6 @@ type shareGatewayInputs struct {
 	listed   int
 }
 
-// gatewayCandidateGates are the original Sub2API per-account gates of one
-// gateway selection. Share candidates and last-resort selection both run
-// accounts through them, so neither can miss a gate the other applies.
-type gatewayCandidateGates struct {
-	s            *GatewayService
-	groupID      *int64
-	platform     string
-	useMixed     bool
-	model        string
-	channelCheck bool
-}
-
-func (s *GatewayService) newGatewayCandidateGates(ctx context.Context, groupID *int64, platform string, useMixed bool, model string) gatewayCandidateGates {
-	return gatewayCandidateGates{s: s, groupID: groupID, platform: platform, useMixed: useMixed, model: model,
-		channelCheck: s.needsUpstreamChannelRestrictionCheck(ctx, groupID)}
-}
-
-// candidateReason returns the first gate that rejects acc, or "" when all
-// pass, with the expected recovery of a soft penalty (shareSoftRecovery).
-// sticky grants the sticky allowance of the window cost and RPM limits. In a
-// last-resort context the caller has cleared the soft account states, and a
-// per-model rate limit within the soft threshold passes.
-func (g gatewayCandidateGates) candidateReason(ctx context.Context, acc *Account, sticky bool, now time.Time) (sharesched.Reason, time.Time) {
-	s := g.s
-	switch {
-	case !s.isAccountSchedulableForSelection(acc):
-		reason, end := shareAccountStateReason(acc, now)
-		return reason, shareSoftRecovery(acc, g.model, now, resiliencePenaltyOf, end)
-	case !s.isGatewayAccountProfitEligible(ctx, acc):
-		return sharesched.ReasonProfitGate, time.Time{}
-	case !s.isAccountAllowedForPlatform(acc, g.platform, g.useMixed):
-		return sharesched.ReasonPlatformMismatch, time.Time{}
-	case g.model != "" && !s.isModelSupportedByAccountWithContext(ctx, acc, g.model):
-		return sharesched.ReasonModelUnsupported, time.Time{}
-	case g.channelCheck && s.isUpstreamModelRestrictedByChannel(ctx, *g.groupID, acc, g.model):
-		return sharesched.ReasonChannelRestricted, time.Time{}
-	case !s.isAccountSchedulableForModelSelection(ctx, acc, g.model) && !lastResortModelLimitSoft(ctx, acc, g.model, false):
-		return sharesched.ReasonModelRateLimited, shareSoftRecovery(acc, g.model, now, resiliencePenaltyOf, shareModelLimitEnd(ctx, acc, g.model, now))
-	case !s.isAccountSchedulableForQuota(acc):
-		return sharesched.ReasonQuotaExceeded, time.Time{}
-	case !s.isAccountSchedulableForWindowCost(ctx, acc, sticky):
-		return sharesched.ReasonWindowCost, time.Time{}
-	case !s.isAccountSchedulableForRPM(ctx, acc, sticky):
-		return sharesched.ReasonRPMLimit, time.Time{}
-	}
-	return "", time.Time{}
-}
-
 // shareGatewayCandidates lists the group's accounts and runs the original
 // Sub2API gates on each, keeping the failing gate as the reason.
 func (s *GatewayService) shareGatewayCandidates(ctx context.Context, group *Group, groupID *int64, requestedModel string, excludedIDs map[int64]struct{}, boundID int64) (context.Context, *shareGatewayInputs, error) {
@@ -120,7 +72,8 @@ func (s *GatewayService) shareGatewayCandidates(ctx context.Context, group *Grou
 			in.cands = append(in.cands, c)
 			continue
 		}
-		c.Reason, c.RecoverAt = gates.candidateReason(ctx, acc, acc.ID == boundID, now)
+		reason, recoverAt := gates.candidateReason(ctx, acc, acc.ID == boundID, now)
+		c.Reason, c.RecoverAt = sharesched.Reason(reason), recoverAt
 		c.Eligible = c.Reason == ""
 		if c.Reason == sharesched.ReasonChannelRestricted {
 			in.restrict++
@@ -214,7 +167,7 @@ func (s *GatewayService) shareGatewayLastResort(ctx context.Context, gp *shareGr
 	round := svc.newShareLastResortRound(gp.groupID, accounts, requestedModel, excludedIDs, avoided, binding.AccountID, now, nil, nil,
 		func(acc *Account, sticky bool) sharesched.Reason {
 			reason, _ := gates.candidateReason(gateCtx, acc, sticky, now)
-			return reason
+			return sharesched.Reason(reason)
 		})
 	req, _ := svc.newRequest(ctx, gp, platform, requestedModel, sessionHash, binding)
 	exec := &shareExecutor{ctx: ctx, gp: gp, cache: s.cache, concurrency: s.concurrencyService, cfg: s.schedulingConfig(),

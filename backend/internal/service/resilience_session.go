@@ -341,7 +341,7 @@ func shareLastResortHardReason(a *Account, why string, now time.Time) sharesched
 		return sharesched.ReasonModelRateLimited
 	}
 	reason, _ := shareAccountStateReason(a, now)
-	return reason
+	return sharesched.Reason(reason)
 }
 
 // plan runs the share plan over the round with the binding writes of last

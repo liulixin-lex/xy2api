@@ -24,20 +24,20 @@ func TestShareStateReasonSeparatesBalanceExhaustion(t *testing.T) {
 		return &Account{Status: StatusActive, Schedulable: true, TempUnschedulableUntil: &until, TempUnschedulableReason: reason}
 	}
 	reason, recoverAt := shareAccountStateReason(acc(resilience.ReasonPrefixBalanceExhausted+": HTTP 402"), now)
-	require.Equal(t, sharesched.ReasonBalanceExhausted, reason)
+	require.Equal(t, sharesched.ReasonBalanceExhausted, sharesched.Reason(reason))
 	require.True(t, recoverAt.IsZero())
 	reason, recoverAt = shareAccountStateReason(acc(resilience.ReasonPrefixTransient+"TRANSIENT HTTP 502"), now)
-	require.Equal(t, sharesched.ReasonTempUnschedulable, reason)
+	require.Equal(t, sharesched.ReasonTempUnschedulable, sharesched.Reason(reason))
 	require.True(t, recoverAt.Equal(until))
 	reason, recoverAt = shareAccountStateReason(acc("proxy probe failed"), now)
-	require.Equal(t, sharesched.ReasonTempUnschedulable, reason, "other pauses keep the 0.3.0 handling")
+	require.Equal(t, sharesched.ReasonTempUnschedulable, sharesched.Reason(reason), "other pauses keep the 0.3.0 handling")
 	require.True(t, recoverAt.Equal(until))
 
 	off := resilience.Defaults()
 	off.Enabled = false
 	resilience.Publish(off)
 	reason, recoverAt = shareAccountStateReason(acc(resilience.ReasonPrefixBalanceExhausted+": HTTP 402"), now)
-	require.Equal(t, sharesched.ReasonTempUnschedulable, reason, "switch off: 0.3.0 handling")
+	require.Equal(t, sharesched.ReasonTempUnschedulable, sharesched.Reason(reason), "switch off: 0.3.0 handling")
 	require.True(t, recoverAt.Equal(until))
 }
 

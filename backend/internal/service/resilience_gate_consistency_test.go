@@ -223,7 +223,7 @@ func TestResilienceGateConsistency(t *testing.T) {
 				require.Nil(t, cand, "dropped by the schedulable listing")
 				gates := env.gateway.newGatewayCandidateGates(ctx, &gid, PlatformAnthropic, true, gateTestModel)
 				reason, _ := gates.candidateReason(ctx, env.repo.accountsByID[gateTestAccount], false, time.Now())
-				require.Equal(t, row.share, reason, "and rejected by the shared gates")
+				require.Equal(t, gatewayCandidateReason(row.share), reason, "and rejected by the shared gates")
 				return
 			}
 			require.NotNil(t, cand)

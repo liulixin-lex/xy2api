@@ -378,7 +378,7 @@ func (g *openAIShareGates) candidateReason(acc *Account, now time.Time) (sharesc
 	}
 	if !acc.IsSchedulable() {
 		reason, end := shareAccountStateReason(acc, now)
-		return reason, shareSoftRecovery(acc, g.in.model, now, g.s.resilienceOpenAIPenaltyOf, end)
+		return sharesched.Reason(reason), shareSoftRecovery(acc, g.in.model, now, g.s.resilienceOpenAIPenaltyOf, end)
 	}
 	switch reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(g.ctx, acc, g.in.platform, g.in.model, false, g.in.capability); {
 	case reason == "":
@@ -387,7 +387,7 @@ func (g *openAIShareGates) candidateReason(acc *Account, now time.Time) (sharesc
 		return sharesched.ReasonModelRateLimited, shareSoftRecovery(acc, g.in.model, now, g.s.resilienceOpenAIPenaltyOf, shareModelLimitEnd(g.ctx, acc, g.in.model, now))
 	case reason == "not_schedulable":
 		reason, end := shareAccountStateReason(acc, now)
-		return reason, shareSoftRecovery(acc, g.in.model, now, g.s.resilienceOpenAIPenaltyOf, end)
+		return sharesched.Reason(reason), shareSoftRecovery(acc, g.in.model, now, g.s.resilienceOpenAIPenaltyOf, end)
 	case strings.HasPrefix(reason, "quota_auto_pause"):
 		return sharesched.ReasonQuotaAutoPause, time.Time{}
 	case reason == "platform_mismatch":

@@ -9,7 +9,6 @@ import (
 
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
-	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/sharesched"
 )
 
@@ -105,46 +104,10 @@ func (s *ShareSchedulingService) shareMissingBoundCandidate(groupID int64, acc *
 	if recoverAt.IsZero() {
 		return sharesched.Candidate{}, false
 	}
-	s.observeEligibility(acc.ID, false, reason, now)
+	s.observeEligibility(acc.ID, false, sharesched.Reason(reason), now)
 	c := s.shareCandidate(groupID, acc, now)
-	c.Reason, c.RecoverAt = reason, recoverAt
+	c.Reason, c.RecoverAt = sharesched.Reason(reason), recoverAt
 	return c, true
-}
-
-// resiliencePenaltyFunc rates an account's restrictions as gateway
-// resilience does (resiliencePenaltyOf, or the OpenAI variant).
-type resiliencePenaltyFunc func(*Account, string, time.Time) (resilience.PenaltyTier, time.Time, string)
-
-// shareLegacySoftSpillMax is the soft-spill bound of 0.3.0 (its default
-// policy value), kept while gateway resilience is off.
-const shareLegacySoftSpillMax = 300 * time.Second
-
-// shareSoftRecovery is when a soft-penalised account is expected back, or
-// zero when its state is hard or the recovery is unknown. Share scheduling
-// keeps a session's binding through a short outage only on the strength of
-// this time, so it agrees with gateway resilience on soft and hard states
-// (design §4): a temporary state whose reason is empty or not a soft prefix
-// is hard, and so is anything that lasts beyond the hard rate-limit
-// threshold.
-//
-// stateEnd is when the state that rejected the account ends, as the
-// adapter read it. With the resilience master switch off the 0.3.0 rule
-// applies: any state that ends within shareLegacySoftSpillMax.
-func shareSoftRecovery(acc *Account, model string, now time.Time, penalty resiliencePenaltyFunc, stateEnd time.Time) time.Time {
-	if !resilience.Current().FailureOn() {
-		if stateEnd.IsZero() || stateEnd.Sub(now) > shareLegacySoftSpillMax {
-			return time.Time{}
-		}
-		return stateEnd
-	}
-	if penalty == nil {
-		penalty = resiliencePenaltyOf
-	}
-	tier, recoverAt, _ := penalty(acc, model, now)
-	if tier != resilience.TierSoft || recoverAt.IsZero() || recoverAt.Sub(now) > resilience.HardRateLimitThreshold {
-		return time.Time{}
-	}
-	return recoverAt
 }
 
 // shareClassNames interns account class names; building one per candidate
@@ -176,45 +139,6 @@ func shareAccountClass(acc *Account) string {
 		current = shareClassNames.Load()
 	}
 	return name
-}
-
-// shareModelLimitEnd is when the account's rate limit for the model ends;
-// zero when it is not limited.
-func shareModelLimitEnd(ctx context.Context, acc *Account, model string, now time.Time) time.Time {
-	if remaining := acc.GetRateLimitRemainingTimeWithContext(ctx, model); remaining > 0 {
-		return now.Add(remaining)
-	}
-	return time.Time{}
-}
-
-// shareAccountStateReason maps Account.IsSchedulable onto reason codes and
-// the expected recovery time of temporary states.
-func shareAccountStateReason(a *Account, now time.Time) (sharesched.Reason, time.Time) {
-	switch {
-	case a.Status == StatusDisabled:
-		return sharesched.ReasonDisabled, time.Time{}
-	case !a.IsActive():
-		return sharesched.ReasonInactive, time.Time{}
-	case !a.Schedulable:
-		return sharesched.ReasonNotSchedulable, time.Time{}
-	case a.AutoPauseOnExpired && a.ExpiresAt != nil && !now.Before(*a.ExpiresAt):
-		return sharesched.ReasonExpired, time.Time{}
-	case a.OverloadUntil != nil && now.Before(*a.OverloadUntil):
-		return sharesched.ReasonOverloaded, *a.OverloadUntil
-	case a.RateLimitResetAt != nil && now.Before(*a.RateLimitResetAt):
-		return sharesched.ReasonRateLimited, *a.RateLimitResetAt
-	case a.TempUnschedulableUntil != nil && now.Before(*a.TempUnschedulableUntil):
-		if resilience.Current().FailureOn() && resilience.IsBalancePause(a.TempUnschedulableReason) {
-			// Out of balance at the relay is a hard state: the session moves
-			// at once instead of waiting out the pause. With resilience off
-			// it is an ordinary pause, as in 0.3.0.
-			return sharesched.ReasonBalanceExhausted, time.Time{}
-		}
-		return sharesched.ReasonTempUnschedulable, *a.TempUnschedulableUntil
-	case a.IsAPIKeyOrBedrock() && a.IsQuotaExceeded():
-		return sharesched.ReasonQuotaExceeded, time.Time{}
-	}
-	return sharesched.ReasonNotSchedulable, time.Time{}
 }
 
 // shareOutcome is how a plan was served.
