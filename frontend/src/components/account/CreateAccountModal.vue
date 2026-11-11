@@ -3239,6 +3239,18 @@
             data-testid="anthropic-compat-toggle"
           />
         </div>
+        <div v-if="anthropicCompatibilityEnabled" class="mt-3 space-y-3">
+          <label class="input-label" for="anthropic-compat-profile">{{ t('admin.accounts.anthropic.compatibilityProfile') }}</label>
+          <select id="anthropic-compat-profile" v-model="anthropicCompatibilityProfile" class="input" data-testid="anthropic-compat-profile">
+            <option value="claude_code_v2">{{ t('admin.accounts.anthropic.compatibilityV2') }}</option>
+            <option value="claude_code_v1">{{ t('admin.accounts.anthropic.compatibilityV1') }}</option>
+          </select>
+          <label class="flex items-center gap-2 text-sm">
+            <input v-model="anthropicCompatibilityNewSessions" type="checkbox" data-testid="anthropic-compat-new-sessions" class="rounded border-gray-300 text-primary-600" />
+            {{ t('admin.accounts.anthropic.compatibilityNewSessions') }}
+          </label>
+          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.anthropic.compatibilityDrainDesc') }}</p>
+        </div>
       </div>
 
       <!-- Anthropic API Key 自动透传开关 -->
@@ -4614,6 +4626,8 @@ const codexFingerprintModeOptions = computed(() => [
 ])
 type AnthropicAPIKeyAuthScheme = 'x_api_key' | 'authorization_bearer'
 const anthropicCompatibilityEnabled = ref(false)
+const anthropicCompatibilityProfile = ref<'claude_code_v1' | 'claude_code_v2'>('claude_code_v2')
+const anthropicCompatibilityNewSessions = ref(true)
 const anthropicPassthroughEnabled = ref(false)
 const anthropicAPIKeyAuthScheme = ref<AnthropicAPIKeyAuthScheme>('x_api_key')
 const webSearchEmulationMode = ref('default')
@@ -5086,6 +5100,8 @@ watch(
     }
     if (newPlatform !== 'anthropic') {
       anthropicCompatibilityEnabled.value = false
+      anthropicCompatibilityProfile.value = 'claude_code_v2'
+      anthropicCompatibilityNewSessions.value = true
       anthropicPassthroughEnabled.value = false
       anthropicAPIKeyAuthScheme.value = 'x_api_key'
       webSearchEmulationMode.value = 'default'
@@ -5117,6 +5133,8 @@ watch(
     }
     if (platform !== 'anthropic' || category !== 'apikey') {
       anthropicCompatibilityEnabled.value = false
+      anthropicCompatibilityProfile.value = 'claude_code_v2'
+      anthropicCompatibilityNewSessions.value = true
       anthropicPassthroughEnabled.value = false
       anthropicAPIKeyAuthScheme.value = 'x_api_key'
       webSearchEmulationMode.value = 'default'
@@ -5545,6 +5563,8 @@ const resetForm = () => {
   codexCLIOnlyAppServerEnabled.value = false
   codexFingerprintMode.value = 'off'
   anthropicCompatibilityEnabled.value = false
+  anthropicCompatibilityProfile.value = 'claude_code_v2'
+  anthropicCompatibilityNewSessions.value = true
   anthropicPassthroughEnabled.value = false
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
   webSearchEmulationMode.value = 'default'
@@ -5692,7 +5712,8 @@ const buildAnthropicExtra = (base?: Record<string, unknown>): Record<string, unk
   }
 
   const extra: Record<string, unknown> = { ...(base || {}) }
-  extra.anthropic_compat_profile = anthropicCompatibilityEnabled.value ? 'claude_code_v1' : 'off'
+  extra.anthropic_compat_profile = anthropicCompatibilityEnabled.value ? anthropicCompatibilityProfile.value : 'off'
+  if (anthropicCompatibilityEnabled.value) extra.anthropic_compat_new_sessions = anthropicCompatibilityNewSessions.value
   if (anthropicPassthroughEnabled.value) {
     extra.anthropic_passthrough = true
   } else {

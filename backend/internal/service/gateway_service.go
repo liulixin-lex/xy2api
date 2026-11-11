@@ -217,15 +217,6 @@ func anthropicStreamEventIsTerminal(eventName, data string) bool {
 	return gjson.Get(trimmed, "type").String() == "message_stop"
 }
 
-func cloneStringSlice(src []string) []string {
-	if len(src) == 0 {
-		return nil
-	}
-	dst := make([]string, len(src))
-	copy(dst, src)
-	return dst
-}
-
 // IsForceCacheBilling 检查是否启用强制缓存计费
 func IsForceCacheBilling(ctx context.Context) bool {
 	v, _ := ctx.Value(ForceCacheBillingContextKey).(bool)
@@ -859,6 +850,8 @@ type GatewayService struct {
 	userGroupRateSF       singleflight.Group
 	modelsListCache       *gocache.Cache
 	modelsListCacheTTL    time.Duration
+	modelsListCacheMu     sync.Mutex
+	modelsListGeneration  uint64
 	settingService        *SettingService
 	responseHeaderFilter  *responseheaders.CompiledHeaderFilter
 	debugModelRouting     atomic.Bool
@@ -1356,96 +1349,10 @@ func mixedListingModelAllowed(groupPlatform, model string) bool {
 	return groupPlatform == PlatformGemini && isAntigravityGeminiModel(model)
 }
 
+// GetAvailableModels returns account-derived public IDs. Listing handlers also
+// need GetAvailableModelCatalog's fallback restriction, including empty lists.
 func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64, platform string) []string {
-	cacheKey := modelsListCacheKey(groupID, platform)
-	if s.modelsListCache != nil {
-		if cached, found := s.modelsListCache.Get(cacheKey); found {
-			if models, ok := cached.([]string); ok {
-				modelsListCacheHitTotal.Add(1)
-				return cloneStringSlice(models)
-			}
-		}
-	}
-	modelsListCacheMissTotal.Add(1)
-
-	var accounts []Account
-	var err error
-
-	if groupID != nil {
-		accounts, err = s.accountRepo.ListSchedulableByGroupID(ctx, *groupID)
-	} else {
-		accounts, err = s.accountRepo.ListSchedulable(ctx)
-	}
-
-	if err != nil || len(accounts) == 0 {
-		return nil
-	}
-
-	// Filter by platform if specified. Mixed scheduling (a gemini group routing
-	// to antigravity accounts) is honoured here as well, so the advertised list
-	// stays in sync with what the request path can actually serve.
-	if platform != "" {
-		filtered := make([]Account, 0)
-		for _, acc := range accounts {
-			if acc.Platform == platform || mixedListingAccountAllowed(platform, &acc) {
-				filtered = append(filtered, acc)
-			}
-		}
-		accounts = filtered
-	}
-
-	// Collect unique models from all accounts
-	modelSet := make(map[string]struct{})
-	hasAnyMapping := false
-
-	for _, acc := range accounts {
-		// Passthrough routing accepts models independently of model_mapping, so a
-		// stale mapping on a passthrough account must not narrow the public list.
-		// Treat it like an unmapped account: skip its mapping here and let
-		// supplementUnmappedOpenAIModels contribute the default set. Mappings on
-		// the ordinary accounts in the same group still count.
-		if platform == PlatformOpenAI && acc.IsOpenAIPassthroughEnabled() {
-			continue
-		}
-
-		mapping := acc.GetModelMapping()
-		for model := range mapping {
-			// Accounts pulled in through mixed scheduling only contribute the
-			// models that belong to the listing platform (e.g. an antigravity
-			// account's claude-* mappings must not surface on a gemini group).
-			if platform != "" && acc.Platform != platform && !mixedListingModelAllowed(platform, model) {
-				continue
-			}
-			modelSet[model] = struct{}{}
-			hasAnyMapping = true
-		}
-	}
-
-	// If no account has model_mapping, return nil (use default)
-	if !hasAnyMapping {
-		if s.modelsListCache != nil {
-			s.modelsListCache.Set(cacheKey, []string(nil), s.modelsListCacheTTL)
-			modelsListCacheStoreTotal.Add(1)
-		}
-		return nil
-	}
-
-	// Convert to slice
-	models := make([]string, 0, len(modelSet))
-	for model := range modelSet {
-		models = append(models, model)
-	}
-	sort.Strings(models)
-
-	if platform == PlatformOpenAI {
-		models = supplementUnmappedOpenAIModels(accounts, models)
-	}
-
-	if s.modelsListCache != nil {
-		s.modelsListCache.Set(cacheKey, cloneStringSlice(models), s.modelsListCacheTTL)
-		modelsListCacheStoreTotal.Add(1)
-	}
-	return cloneStringSlice(models)
+	return s.GetAvailableModelCatalog(ctx, groupID, platform).Models
 }
 
 func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, groupID int64, model string) (CompositeModelOwnership, error) {
@@ -1455,14 +1362,19 @@ func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, gro
 	}
 
 	cacheKey := compositeModelOwnershipCacheKey(groupID, model)
+	revision := claudeCodeV1CompatProfile.Revision + ":" + claudeCodeV2CompatProfile.Revision
+	s.modelsListCacheMu.Lock()
+	generation := s.modelsListGeneration
 	if s.modelsListCache != nil {
 		if cached, found := s.modelsListCache.Get(cacheKey); found {
-			if ownership, ok := cached.(CompositeModelOwnership); ok {
-				return ownership, nil
+			if entry, ok := cached.(gatewayModelOwnershipCacheEntry); ok && entry.profileRevision == revision {
+				s.modelsListCacheMu.Unlock()
+				return entry.ownership, nil
 			}
 		}
 	}
 
+	s.modelsListCacheMu.Unlock()
 	accounts, err := s.accountRepo.ListSchedulableByGroupID(ctx, groupID)
 	if err != nil {
 		return CompositeModelOwnership{}, err
@@ -1471,7 +1383,7 @@ func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, gro
 	platforms := make(map[string]struct{})
 	for _, account := range accounts {
 		platform := strings.TrimSpace(account.Platform)
-		if !isConcreteRequestPlatform(platform) || !explicitModelMappingClaims(account, model) {
+		if !isConcreteRequestPlatform(platform) || !explicitModelMappingClaims(account, model) || !anthropicCompatModelSupported(&account, model) {
 			continue
 		}
 		platforms[platform] = struct{}{}
@@ -1487,9 +1399,11 @@ func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, gro
 		ownership.Ambiguous = true
 	}
 
-	if s.modelsListCache != nil {
-		s.modelsListCache.Set(cacheKey, ownership, s.modelsListCacheTTL)
+	s.modelsListCacheMu.Lock()
+	if s.modelsListCache != nil && generation == s.modelsListGeneration {
+		s.modelsListCache.Set(cacheKey, gatewayModelOwnershipCacheEntry{ownership, revision}, s.modelsListCacheTTL)
 	}
+	s.modelsListCacheMu.Unlock()
 	return ownership, nil
 }
 
@@ -1503,10 +1417,54 @@ func explicitModelMappingClaims(account Account, model string) bool {
 
 // GetCompositeRouteModels returns public IDs from enabled exact composite routes.
 func (s *GatewayService) GetCompositeRouteModels(ctx context.Context, groupID *int64, endpoint string, includeSystemOne bool) ([]string, error) {
-	if s == nil || s.compositeResolver == nil || groupID == nil {
+	if s == nil || s.compositeResolver == nil || s.compositeResolver.repo == nil || groupID == nil {
 		return nil, nil
 	}
-	return s.compositeResolver.ListExactPublicModels(ctx, *groupID, endpoint, includeSystemOne)
+	routes, err := s.compositeResolver.repo.ListByGroup(ctx, *groupID, false)
+	if err != nil {
+		return nil, err
+	}
+	models := make([]string, 0, len(routes))
+	var anthropicAccounts []Account
+	loadedAnthropic := false
+	for _, route := range routes {
+		if !route.Enabled || route.MatchType != CompositeRouteMatchExact ||
+			(endpoint != "" && normalizeCompositeRouteEndpoint(route.Endpoint) != CompositeRouteEndpointAny && normalizeCompositeRouteEndpoint(route.Endpoint) != endpoint) {
+			continue
+		}
+		model := strings.TrimSpace(route.PublicModel)
+		if model == "" {
+			continue
+		}
+		if route.TargetPlatform == PlatformAnthropic {
+			if !loadedAnthropic {
+				anthropicAccounts, err = s.accountRepo.ListModelAvailabilityCandidates(ctx, groupID, []string{PlatformAnthropic}, false)
+				if err != nil {
+					return nil, err
+				}
+				loadedAnthropic = true
+			}
+			upstream := strings.TrimSpace(route.UpstreamModel)
+			if upstream == "" {
+				upstream = model
+			}
+			restricted, supported := false, false
+			for i := range anthropicAccounts {
+				account := &anthropicAccounts[i]
+				profile, profileErr := ResolveAnthropicCompatProfile(account)
+				restricted = restricted || profile != nil || profileErr != nil
+				supported = supported || (anthropicCompatModelSupported(account, upstream) && s.isModelSupportedByAccount(account, upstream))
+			}
+			if restricted && !supported {
+				continue
+			}
+		}
+		models = append(models, model)
+	}
+	if !includeSystemOne {
+		models = filterSystemOneRouteModels(routes, models, endpoint)
+	}
+	return models, nil
 }
 
 func (s *GatewayService) FilterCompositeCodexModels(ctx context.Context, groupID int64, models []string) ([]string, error) {
@@ -1544,33 +1502,27 @@ func (s *GatewayService) GetSchedulablePlatforms(ctx context.Context, groupID *i
 	return platforms
 }
 
+// Invalidation also covers global/all-platform views of the changed account.
+// The generation prevents an in-flight old read from repopulating the cache.
 func (s *GatewayService) InvalidateAvailableModelsCache(groupID *int64, platform string) {
 	if s == nil || s.modelsListCache == nil {
 		return
 	}
+	s.modelsListCacheMu.Lock()
+	defer s.modelsListCacheMu.Unlock()
+	s.modelsListGeneration++
 	s.invalidateCompositeModelOwnershipCache(groupID)
-
 	normalizedPlatform := strings.TrimSpace(platform)
-	// 完整匹配时精准失效；否则按维度批量失效。
-	if groupID != nil && normalizedPlatform != "" {
-		s.modelsListCache.Delete(modelsListCacheKey(groupID, normalizedPlatform))
-		return
-	}
-
-	targetGroup := derefGroupID(groupID)
 	for key := range s.modelsListCache.Items() {
 		parts := strings.SplitN(key, "|", 2)
 		if len(parts) != 2 {
 			continue
 		}
-		groupPart, parseErr := strconv.ParseInt(parts[0], 10, 64)
-		if parseErr != nil {
+		groupPart, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil || (groupID != nil && groupPart != *groupID && groupPart != 0) {
 			continue
 		}
-		if groupID != nil && groupPart != targetGroup {
-			continue
-		}
-		if normalizedPlatform != "" && parts[1] != normalizedPlatform {
+		if normalizedPlatform != "" && parts[1] != normalizedPlatform && parts[1] != "" {
 			continue
 		}
 		s.modelsListCache.Delete(key)

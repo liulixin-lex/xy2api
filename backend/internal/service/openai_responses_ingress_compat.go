@@ -13,6 +13,16 @@ import (
 // payloads that a few Responses clients still emit. Native Responses input is
 // always authoritative because this path has no separate full-replay attempt.
 func normalizeOpenAIResponsesLegacyIngress(body []byte) ([]byte, bool, error) {
+	return normalizeResponsesLegacyIngressForTarget(body, true)
+}
+
+// Converted Anthropic requests must retain exact token limits; the Responses
+// minimum belongs only to requests that will use the native Responses wire.
+func normalizeConvertedResponsesLegacyIngress(body []byte) ([]byte, bool, error) {
+	return normalizeResponsesLegacyIngressForTarget(body, false)
+}
+
+func normalizeResponsesLegacyIngressForTarget(body []byte, nativeResponses bool) ([]byte, bool, error) {
 	if len(body) == 0 {
 		return body, false, nil
 	}
@@ -43,7 +53,7 @@ func normalizeOpenAIResponsesLegacyIngress(body []byte) ([]byte, bool, error) {
 	if hasMessages {
 		messages, messagesAreArray := messagesValue.([]any)
 		if messagesAreArray && len(messages) > 0 {
-			legacy, err := convertLegacyResponsesMessages(body)
+			legacy, err := convertLegacyResponsesMessages(body, nativeResponses)
 			if err != nil {
 				return body, false, err
 			}
@@ -105,7 +115,7 @@ type convertedLegacyResponsesMessages struct {
 	hasReasoningEffort bool
 }
 
-func convertLegacyResponsesMessages(body []byte) (convertedLegacyResponsesMessages, error) {
+func convertLegacyResponsesMessages(body []byte, nativeResponses bool) (convertedLegacyResponsesMessages, error) {
 	var converted convertedLegacyResponsesMessages
 	var chatRequest apicompat.ChatCompletionsRequest
 	if err := json.Unmarshal(body, &chatRequest); err != nil {
@@ -114,6 +124,15 @@ func convertLegacyResponsesMessages(body []byte) (convertedLegacyResponsesMessag
 	responsesRequest, err := apicompat.ChatCompletionsToResponses(&chatRequest)
 	if err != nil {
 		return converted, fmt.Errorf("normalize legacy Responses messages: %w", err)
+	}
+	// Legacy messages are serialized to the Responses shape before further
+	// routing, so bridge-only stops cannot survive this intermediate boundary.
+	wireRequest, err := responsesRequest.NativeWireRequest()
+	if err != nil {
+		return converted, fmt.Errorf("normalize legacy Responses messages: %w", err)
+	}
+	if nativeResponses {
+		responsesRequest = &wireRequest
 	}
 	if len(responsesRequest.Input) == 0 {
 		return converted, fmt.Errorf("normalize legacy Responses messages: empty input")

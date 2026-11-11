@@ -238,3 +238,34 @@ func TestAnthropicCompatDiagnosticUsesAdapterAndRequiresTerminal(t *testing.T) {
 		})
 	}
 }
+
+func TestAnthropicCompatV2AdmissionLifecycle(t *testing.T) {
+	ctx := context.Background()
+	repo := &upstreamBillingProbeAccountRepo{}
+	svc := &adminServiceImpl{accountRepo: repo}
+	account, err := svc.CreateAccount(ctx, &CreateAccountInput{Name: "v2", Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "fixture"}, Extra: map[string]any{AnthropicCompatProfileExtraKey: AnthropicCompatProfileClaudeCodeV2, AnthropicCompatNewSessionsExtraKey: false}, SkipDefaultGroupBind: true})
+	require.NoError(t, err)
+	require.Len(t, account.AnthropicCompatIdentitySeed(), 64)
+	seed := account.AnthropicCompatIdentitySeed()
+	updated, err := svc.UpdateAccount(ctx, account.ID, &UpdateAccountInput{Extra: map[string]any{}})
+	require.NoError(t, err)
+	require.Equal(t, AnthropicCompatProfileClaudeCodeV2, updated.Extra[AnthropicCompatProfileExtraKey])
+	require.Equal(t, false, updated.Extra[AnthropicCompatNewSessionsExtraKey])
+	require.Equal(t, seed, updated.AnthropicCompatIdentitySeed())
+	for _, invalid := range []any{nil, "false", 0} {
+		for _, entry := range []string{"update", "extra", "bulk"} {
+			t.Run(fmt.Sprintf("%s/%v", entry, invalid), func(t *testing.T) {
+				extra := map[string]any{AnthropicCompatNewSessionsExtraKey: invalid}
+				switch entry {
+				case "update":
+					_, err = svc.UpdateAccount(ctx, account.ID, &UpdateAccountInput{Extra: extra})
+				case "extra":
+					err = svc.UpdateAccountExtra(ctx, account.ID, extra)
+				case "bulk":
+					_, err = svc.BulkUpdateAccounts(ctx, &BulkUpdateAccountsInput{AccountIDs: []int64{account.ID}, Extra: extra})
+				}
+				require.Error(t, err)
+			})
+		}
+	}
+}

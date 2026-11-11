@@ -108,7 +108,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if normalized {
 		body = normalizedBody
 	}
-	legacyIngressBody, legacyIngressChanged, legacyIngressErr := normalizeOpenAIResponsesLegacyIngress(body)
+	legacyUsesNativeResponses := s.resolveUpstreamProtocolFor(ctx, account, APIProtocolResponses, upstreamRoutingModel(account, body, "")) == APIProtocolResponses
+	legacyIngressBody, legacyIngressChanged, legacyIngressErr := normalizeResponsesLegacyIngressForTarget(body, legacyUsesNativeResponses)
 	if legacyIngressErr != nil {
 		return nil, legacyIngressErr
 	}

@@ -2,8 +2,11 @@ package service
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"time"
+
+	"github.com/tidwall/gjson"
 )
 
 type anthropicCompatDispatchModelKey struct{}
@@ -14,44 +17,128 @@ func WithAnthropicCompatDispatchModel(ctx context.Context, model string) context
 	return context.WithValue(ctx, anthropicCompatDispatchModelKey{}, model)
 }
 
-// Apply account-local profile constraints before selecting a candidate. A
-// legitimate request can still use another account when this profile cannot.
-func (s *GatewayService) anthropicCompatCandidateEligible(ctx context.Context, account *Account, model string) bool {
-	profile, err := ResolveAnthropicCompatProfile(account)
+type anthropicCompatRequestEligibilityKey struct{}
+
+// PrepareAnthropicCompatibilityForSelection retains only a capability decision,
+// not a second copy of the body. Provenance resolution still owns signed history.
+func (s *GatewayService) PrepareAnthropicCompatibilityForSelection(ctx context.Context, userID, keyID int64, body []byte, entry, explicitSession string, headers ...http.Header) (context.Context, error) {
+	ctx, err := s.PrepareAnthropicCompatibility(ctx, userID, keyID, body, entry, explicitSession, headers...)
 	if err != nil {
-		return false
+		return ctx, err
 	}
-	if profile == nil {
-		return true
+	if scope := compatScope(ctx); scope != nil && scope.HistoryErr != nil {
+		return ctx, scope.HistoryErr
 	}
-	scope := compatScope(ctx)
-	if scope != nil && scope.Record == nil && scope.NativeCompatible {
-		return true
+	// Invalid Messages field types are user errors regardless of the account.
+	// They must not become retryable candidate rejections.
+	if entry == "messages" || entry == "count_tokens" {
+		if value := gjson.GetBytes(body, "system"); value.Exists() && value.Type != gjson.Null && value.Type != gjson.String && !value.IsArray() {
+			return ctx, compatInvalid("anthropic_compat_request_unsupported", "system must be text or a block array")
+		}
+		if value := gjson.GetBytes(body, "metadata"); value.Exists() && value.Type != gjson.Null && !value.IsObject() {
+			return ctx, compatInvalid("anthropic_compat_request_unsupported", "metadata must be an object")
+		}
 	}
+	if err := compatUnsupportedRequest(body, entry); err != nil {
+		ctx = context.WithValue(ctx, anthropicCompatRequestEligibilityKey{}, err)
+	}
+	return ctx, nil
+}
+
+func anthropicCompatDispatchModel(ctx context.Context, model string) string {
 	if dispatch, ok := ctx.Value(anthropicCompatDispatchModelKey{}).(string); ok && dispatch != "" {
-		model = dispatch
+		return dispatch
 	}
-	model = account.GetMappedModel(model)
-	if !profile.SupportsModel(model) || account.AnthropicCompatIdentitySeed() == "" {
-		return false
-	}
-	betas := strings.Join(profile.RequiredBetas, ",")
-	if scope != nil {
-		betas += "," + scope.ClientBeta
-	}
+	return model
+}
+
+// Persistent support excludes request-specific beta and identity readiness gates.
+// Those affect scheduling, not the model-not-found diagnosis.
+func anthropicCompatModelSupported(account *Account, model string) bool {
+	profile, err := configuredAnthropicCompatProfile(account)
+	return err == nil && (profile == nil || (account.IsModelSupported(model) && profile.SupportsModel(account.GetMappedModel(model))))
+}
+
+func (s *GatewayService) anthropicCompatBetaEligibility(ctx context.Context, account *Account, profile *AnthropicCompatProfile, model, clientBeta string, scope *anthropicCompatScope) error {
+	betas := strings.Join(profile.RequiredBetas, ",") + "," + clientBeta
 	if override, ok := account.HeaderOverrideValue("anthropic-beta"); ok {
 		betas += "," + override
 	}
 	policy := s.evaluateBetaPolicy(ctx, betas, account, model)
 	if policy.blockErr != nil {
-		return false
+		return compatCandidateError(scope, compatInvalid("anthropic_compat_configuration_conflict", "Beta policy blocks this compatibility request"))
 	}
 	for _, beta := range strings.Split(betas, ",") {
 		if _, filtered := policy.filterSet[strings.TrimSpace(beta)]; filtered {
-			return false
+			return compatCandidateError(scope, compatInvalid("anthropic_compat_configuration_conflict", "Beta policy filters a required compatibility or client capability"))
 		}
 	}
-	return true
+	return nil
+}
+
+func (s *GatewayService) anthropicCompatCandidateEligible(ctx context.Context, account *Account, model string) bool {
+	return s.anthropicCompatCandidateEligibility(ctx, account, model) == nil
+}
+
+// Apply account-local constraints before load/slot acquisition. Only unbound
+// requests can receive a candidate-ineligible error and try another account.
+func (s *GatewayService) anthropicCompatCandidateEligibility(ctx context.Context, account *Account, model string) error {
+	scope := compatScope(ctx)
+	profile, err := resolveAnthropicCompatProfile(ctx, account)
+	if err != nil {
+		return compatCandidateError(scope, compatInvalid("anthropic_compat_configuration_conflict", err.Error()))
+	}
+	if profile == nil {
+		return nil
+	}
+	if (scope == nil || scope.Record == nil) && !anthropicCompatAcceptsNewSessions(account) {
+		return compatCandidateError(scope, compatUnavailable("Compatibility account is draining existing sessions"))
+	}
+	if scope != nil && scope.Record == nil && profile.ID == AnthropicCompatProfileClaudeCodeV1 && scope.NativeCompatible {
+		return nil
+	}
+	if scope != nil && scope.Record == nil && profile.ID == AnthropicCompatProfileClaudeCodeV2 && scope.NativeCompatibleV2 {
+		model = anthropicCompatDispatchModel(ctx, model)
+		if !account.IsModelSupported(model) {
+			return compatCandidateError(scope, compatInvalid("anthropic_compat_model_unsupported", "Account mapping does not admit this model"))
+		}
+		model = account.GetMappedModel(model)
+		if !profile.SupportsModel(model) {
+			return compatCandidateError(scope, compatInvalid("anthropic_compat_model_unsupported", "Model is outside the compatibility profile capability range"))
+		}
+		if err := s.anthropicCompatBetaEligibility(ctx, account, profile, model, scope.ClientBeta, scope); err != nil {
+			return err
+		}
+		return nil
+	}
+	if err := compatChatProfileContinuationError(scope, profile); err != nil {
+		return compatCandidateError(scope, err)
+	}
+	if err, _ := ctx.Value(anthropicCompatRequestEligibilityKey{}).(error); err != nil {
+		return compatCandidateError(scope, err)
+	}
+	model = anthropicCompatDispatchModel(ctx, model)
+	if !account.IsModelSupported(model) {
+		return compatCandidateError(scope, compatInvalid("anthropic_compat_model_unsupported", "Account mapping does not admit this model"))
+	}
+	model = account.GetMappedModel(model)
+	if !profile.SupportsModel(model) {
+		return compatCandidateError(scope, compatInvalid("anthropic_compat_model_unsupported", "Model is outside the compatibility profile capability range"))
+	}
+	if scope != nil && scope.Record != nil && scope.Record.Model != "" && scope.Record.Model != model {
+		return compatInvalid("anthropic_compat_history_incompatible", "Signed history requires its original model")
+	}
+	if account.AnthropicCompatIdentitySeed() == "" {
+		return compatCandidateError(scope, compatUnavailable("Account compatibility identity has not been initialized"))
+	}
+	clientBeta := ""
+	if scope != nil {
+		clientBeta = scope.ClientBeta
+	}
+	if err := s.anthropicCompatBetaEligibility(ctx, account, profile, model, clientBeta, scope); err != nil {
+		return err
+	}
+	return nil
 }
 
 // A provenance binding is a routing constraint, not a sticky preference. Use
@@ -90,6 +177,9 @@ func (s *GatewayService) selectAnthropicCompatBoundAccount(ctx context.Context, 
 		if err := s.guardAnthropicCompatAccount(ctx, account); err != nil {
 			return nil, ctx, true, err
 		}
+		if err := s.anthropicCompatCandidateEligibility(ctx, account, model); err != nil {
+			return nil, ctx, true, err
+		}
 		reason, _ := gates.candidateReason(ctx, account, true, time.Now())
 		if reason != "" || s.checkChannelPricingRestriction(ctx, groupID, model) {
 			return nil, ctx, true, compatUnavailable("The account bound to signed history is temporarily unavailable")
@@ -99,6 +189,9 @@ func (s *GatewayService) selectAnthropicCompatBoundAccount(ctx context.Context, 
 			return nil, ctx, true, compatUnavailable("The account bound to signed history cannot be loaded")
 		}
 		if err := s.guardAnthropicCompatAccount(ctx, hydrated); err != nil {
+			return nil, ctx, true, err
+		}
+		if err := s.anthropicCompatCandidateEligibility(ctx, hydrated, model); err != nil {
 			return nil, ctx, true, err
 		}
 		return hydrated, ctx, true, nil

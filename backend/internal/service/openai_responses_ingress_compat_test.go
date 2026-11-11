@@ -3,9 +3,28 @@ package service
 import (
 	"testing"
 
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+func TestNormalizeResponsesLegacyIngressUsesTargetTokenLimit(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"hi"}],"max_tokens":64}`)
+	native, changed, err := normalizeOpenAIResponsesLegacyIngress(body)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, int64(128), gjson.GetBytes(native, "max_output_tokens").Int())
+	converted, changed, err := normalizeConvertedResponsesLegacyIngress(body)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, int64(64), gjson.GetBytes(converted, "max_output_tokens").Int())
+	for _, normalize := range []func([]byte) ([]byte, bool, error){normalizeOpenAIResponsesLegacyIngress, normalizeConvertedResponsesLegacyIngress} {
+		_, _, err = normalize([]byte(`{"model":"test","messages":[{"role":"user","content":"hi"}],"stop":["END"]}`))
+		var unsupported *apicompat.UnsupportedConversionError
+		require.ErrorAs(t, err, &unsupported)
+		require.Equal(t, "stop", unsupported.Field)
+	}
+}
 
 func TestNormalizeOpenAIResponsesLegacyIngressMessagesOnly(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.4","stream":false,"messages":[{"role":"system","content":"repo policy"},{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"q\":\"hello\"}"}}]},{"role":"tool","tool_call_id":"call_1","content":"ok"}],"previous_response_id":"resp_stale"}`)

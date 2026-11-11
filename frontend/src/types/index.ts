@@ -1269,7 +1269,8 @@ export interface Account {
   extra?: (CodexUsageSnapshot & OpenAICompactState & {
     model_rate_limits?: Record<string, { rate_limited_at: string; rate_limit_reset_at: string }>
     antigravity_credits_overages?: Record<string, { activated_at: string; active_until: string }>
-    anthropic_compat_profile?: 'off' | 'claude_code_v1'
+    anthropic_compat_profile?: 'off' | 'claude_code_v1' | 'claude_code_v2'
+    anthropic_compat_new_sessions?: boolean
     upstream_billing_probe_enabled?: boolean
     upstream_billing_rate_sync_enabled?: boolean
     upstream_billing_probe?: UpstreamBillingProbeSnapshot

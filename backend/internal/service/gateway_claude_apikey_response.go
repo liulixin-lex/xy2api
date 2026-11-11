@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/tidwall/gjson"
@@ -33,10 +34,13 @@ type anthropicCompatResponseBody struct {
 	sawStart, sawReason, failed bool
 	blocks                      map[int]*anthropicCompatResponseBlock
 	values                      []anthropicCompatOpaque
+	nextBlockIndex              int
+	chat                        *anthropicCompatChatResponseState
 }
 type anthropicCompatResponseBlock struct {
-	kind   string
-	opaque strings.Builder
+	kind     string
+	opaque   strings.Builder
+	position int
 }
 
 // Diagnostics share protocol completion validation, without storing synthetic
@@ -56,7 +60,7 @@ func (s *GatewayService) observeAnthropicCompatResponse(ctx context.Context, res
 	if resp.Request != nil {
 		ctx = resp.Request.Context()
 	}
-	resp.Body = &anthropicCompatResponseBody{source: resp.Body, reader: bufio.NewReaderSize(resp.Body, 32*1024), ctx: ctx, service: s, plan: plan, limit: limit, blocks: make(map[int]*anthropicCompatResponseBlock)}
+	resp.Body = &anthropicCompatResponseBody{source: resp.Body, reader: bufio.NewReaderSize(resp.Body, 32*1024), ctx: ctx, service: s, plan: plan, limit: limit, blocks: make(map[int]*anthropicCompatResponseBlock), chat: newAnthropicCompatChatResponseState(plan)}
 }
 
 func (b *anthropicCompatResponseBody) Close() error { return b.source.Close() }
@@ -213,6 +217,38 @@ func (b *anthropicCompatResponseBody) next() {
 	if typeName == "" && eventName == "error" {
 		typeName = "error"
 	}
+	var chatInitialDelta []byte
+	if b.chat != nil {
+		var err error
+		payload, err = b.chat.observe(typeName, payload)
+		if err != nil {
+			b.incomplete(err)
+			return
+		}
+		// The Chat streaming bridge emits deltas, while some Anthropic-compatible
+		// providers put initial text directly in block_start. Normalize that shape
+		// after the continuation collector has retained the original block.
+		if typeName == "content_block_start" {
+			field := ""
+			switch gjson.GetBytes(payload, "content_block.type").String() {
+			case "text":
+				field = "text"
+			case "thinking":
+				field = "thinking"
+			}
+			if field != "" {
+				value := gjson.GetBytes(payload, "content_block."+field).String()
+				if value != "" {
+					chatInitialDelta, _ = json.Marshal(map[string]any{"type": "content_block_delta", "index": gjson.GetBytes(payload, "index").Int(), "delta": map[string]string{"type": field + "_delta", field: value}})
+					payload, err = sjson.SetBytes(payload, "content_block."+field, "")
+					if err != nil {
+						b.incomplete(err)
+						return
+					}
+				}
+			}
+		}
+	}
 	if len(payload) > 0 && typeName != "" {
 		// Downstream protocol converters consume one JSON data line per event.
 		// Normalize multiline, data-only and comment-interleaved SSE here.
@@ -222,10 +258,23 @@ func (b *anthropicCompatResponseBody) next() {
 			return
 		}
 		event = []byte("event: " + typeName + "\ndata: " + compact.String() + "\n\n")
+		if len(chatInitialDelta) > 0 {
+			event = append(event, []byte("event: content_block_delta\ndata: "+string(chatInitialDelta)+"\n\n")...)
+		}
 	}
 	if typeName == "message_stop" && readErr != nil {
 		b.incomplete(io.ErrUnexpectedEOF)
 		return
+	}
+	index := 0
+	if typeName == "content_block_start" || typeName == "content_block_delta" || typeName == "content_block_stop" {
+		value := gjson.GetBytes(payload, "index")
+		var err error
+		index, err = strconv.Atoi(value.Raw)
+		if value.Type != gjson.Number || err != nil || index < 0 {
+			b.incomplete(fmt.Errorf("invalid Anthropic content block index"))
+			return
+		}
 	}
 	switch typeName {
 	case "message_start":
@@ -238,17 +287,26 @@ func (b *anthropicCompatResponseBody) next() {
 			b.incomplete(compatUnavailable("Upstream response has too many open content blocks"))
 			return
 		}
-		index := int(gjson.GetBytes(payload, "index").Int())
-		if _, exists := b.blocks[index]; exists {
-			b.incomplete(fmt.Errorf("invalid duplicate Anthropic content block"))
+		if index != b.nextBlockIndex {
+			b.incomplete(fmt.Errorf("invalid duplicate or out-of-order Anthropic content block"))
 			return
 		}
-		block := &anthropicCompatResponseBlock{kind: gjson.GetBytes(payload, "content_block.type").String()}
+		b.nextBlockIndex++
+		block := &anthropicCompatResponseBlock{kind: gjson.GetBytes(payload, "content_block.type").String(), position: -1}
 		switch block.kind {
 		case "thinking":
 			_, _ = block.opaque.WriteString(gjson.GetBytes(payload, "content_block.signature").String())
 		case "redacted_thinking":
 			_, _ = block.opaque.WriteString(gjson.GetBytes(payload, "content_block.data").String())
+		}
+		if block.kind == "thinking" || block.kind == "redacted_thinking" {
+			if len(b.values) >= anthropicCompatSignatureLimit {
+				b.incomplete(compatUnavailable("Signed response exceeds the gateway provenance limit"))
+				return
+			}
+			// Reserve the content position at start, independent of stop order.
+			block.position = len(b.values)
+			b.values = append(b.values, anthropicCompatOpaque{Type: block.kind})
 		}
 		b.opaqueBytes += block.opaque.Len()
 		if b.opaqueBytes > anthropicCompatOpaqueBytesLimit {
@@ -258,7 +316,6 @@ func (b *anthropicCompatResponseBody) next() {
 		b.blocks[index] = block
 	case "content_block_delta":
 		if gjson.GetBytes(payload, "delta.type").String() == "signature_delta" {
-			index := int(gjson.GetBytes(payload, "index").Int())
 			block := b.blocks[index]
 			if block == nil || block.kind != "thinking" {
 				b.incomplete(fmt.Errorf("anthropic signature delta has no open thinking block"))
@@ -272,18 +329,13 @@ func (b *anthropicCompatResponseBody) next() {
 			_, _ = block.opaque.WriteString(gjson.GetBytes(payload, "delta.signature").String())
 		}
 	case "content_block_stop":
-		index := int(gjson.GetBytes(payload, "index").Int())
 		block := b.blocks[index]
 		if block == nil {
 			b.incomplete(fmt.Errorf("anthropic content block stop has no open block"))
 			return
 		}
-		if block.opaque.Len() > 0 {
-			if len(b.values) >= anthropicCompatSignatureLimit {
-				b.incomplete(compatUnavailable("Signed response exceeds the gateway provenance limit"))
-				return
-			}
-			b.values = append(b.values, anthropicCompatOpaque{block.kind, block.opaque.String()})
+		if block.position >= 0 {
+			b.values[block.position].Value = block.opaque.String()
 		}
 		delete(b.blocks, index)
 	case "message_delta":
@@ -307,8 +359,19 @@ func (b *anthropicCompatResponseBody) next() {
 			b.incomplete(fmt.Errorf("incomplete Anthropic successful terminal"))
 			return
 		}
+		signed := b.values[:0]
+		for _, value := range b.values {
+			if value.Value != "" {
+				signed = append(signed, value)
+			}
+		}
+		b.values = signed
 		if b.plan != nil {
 			if err := b.service.registerAnthropicCompat(b.ctx, b.plan, b.values); err != nil {
+				b.incomplete(err)
+				return
+			}
+			if err := b.service.commitAnthropicCompatChat(b.ctx, b.plan, b.chat); err != nil {
 				b.incomplete(err)
 				return
 			}

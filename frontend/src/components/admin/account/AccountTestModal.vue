@@ -772,7 +772,7 @@ const loadAvailableModels = async () => {
       : models
     // Default selection by platform
     if (availableModels.value.length > 0) {
-      if (props.account.extra?.anthropic_compat_profile === 'claude_code_v1') {
+      if (props.account.extra?.anthropic_compat_profile === 'claude_code_v1' || props.account.extra?.anthropic_compat_profile === 'claude_code_v2') {
         const preferred = availableModels.value.find((m) => m.id === 'claude-opus-5-5')
           || availableModels.value.find((m) => m.id === 'claude-opus-4-8')
         selectedModelId.value = preferred?.id || availableModels.value[0].id

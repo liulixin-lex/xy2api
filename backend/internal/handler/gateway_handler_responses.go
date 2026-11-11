@@ -92,7 +92,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 	}
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
-	compatCtx, compatErr := h.gatewayService.PrepareAnthropicCompatibility(c.Request.Context(), subject.UserID, apiKey.ID, body, "responses", service.ExtractClientSessionID(c), c.Request.Header)
+	compatCtx, compatErr := h.gatewayService.PrepareAnthropicCompatibilityForSelection(c.Request.Context(), subject.UserID, apiKey.ID, body, "responses", service.ExtractClientSessionID(c), c.Request.Header)
 	if compatErr != nil {
 		status, code, message, _ := service.AnthropicCompatErrorDetails(compatErr)
 		h.responsesErrorResponse(c, status, code, message)
@@ -324,6 +324,9 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		}
 
 		if err != nil {
+			if handleUnsupportedProtocolConversion(c, err, "responses", streamStarted) {
+				return
+			}
 			if service.IsAnthropicCompatCandidateError(err) {
 				fs.FailedAccountIDs[account.ID] = struct{}{}
 				continue

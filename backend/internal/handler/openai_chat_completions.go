@@ -344,6 +344,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			})
 		}
 		if err != nil {
+			if handleUnsupportedProtocolConversion(c, err, "chat", streamStarted) {
+				return
+			}
 			// A canceled pre-output attempt has no billable result or account failure.
 			if result == nil && errors.Is(err, context.Canceled) && failoverClientGone(c) {
 				reqLog.Info("openai_chat_completions.client_canceled_before_output", zap.Int64("account_id", account.ID))

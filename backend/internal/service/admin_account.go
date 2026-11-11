@@ -1043,9 +1043,10 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
 	updates = RedactAnthropicCompatExtra(updates)
 	_, hasCompat := updates[AnthropicCompatProfileExtraKey]
+	_, hasCompatAdmission := updates[AnthropicCompatNewSessionsExtraKey]
 	_, hasPassthrough := updates["anthropic_passthrough"]
 	_, hasAuthScheme := updates["anthropic_apikey_auth_scheme"]
-	if hasCompat || hasPassthrough || hasAuthScheme {
+	if hasCompat || hasCompatAdmission || hasPassthrough || hasAuthScheme {
 		account, err := s.accountRepo.GetByID(ctx, id)
 		if err != nil {
 			return err
@@ -1099,9 +1100,10 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
 	input.Extra = RedactAnthropicCompatExtra(input.Extra)
 	_, hasCompatUpdate := input.Extra[AnthropicCompatProfileExtraKey]
+	_, hasCompatAdmissionUpdate := input.Extra[AnthropicCompatNewSessionsExtraKey]
 	_, hasAnthropicPassthroughUpdate := input.Extra["anthropic_passthrough"]
 	_, hasAnthropicAuthSchemeUpdate := input.Extra["anthropic_apikey_auth_scheme"]
-	compatPreflight := hasCompatUpdate || hasAnthropicPassthroughUpdate || hasAnthropicAuthSchemeUpdate || len(input.Credentials) > 0
+	compatPreflight := hasCompatUpdate || hasCompatAdmissionUpdate || hasAnthropicPassthroughUpdate || hasAnthropicAuthSchemeUpdate || len(input.Credentials) > 0
 	// Managed probe/session state may only enter through dedicated typed endpoints.
 	input.Extra = preserveManagedOpenAIImportMarker(input.Extra, nil)
 	input.Extra = MergeOpenAICodexTicketExtra(input.Extra, nil)
@@ -1274,7 +1276,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		for _, accountID := range input.AccountIDs {
 			account := targetsByID[accountID]
 			if account == nil {
-				if hasCompatUpdate {
+				if hasCompatUpdate || hasCompatAdmissionUpdate {
 					return nil, ErrAccountNotFound
 				}
 				// Existing credential/extra patches may include stale IDs. Keep

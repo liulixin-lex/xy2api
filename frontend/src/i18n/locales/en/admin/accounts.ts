@@ -1239,7 +1239,12 @@ export default {
         diagnosticLegacy: 'Scope: legacy CLI-shaped connectivity test; does not validate ordinary-client compatibility.',
         compatibility: 'Claude Code request compatibility',
         compatibilityDesc: 'Adapt ordinary requests for Anthropic API Key upstreams that require Claude Code request shape, preserving business system prompts and tool parameters.',
-        compatibilityCapabilities: 'Scope: claude-opus-4-8 and claude-opus-5-5. Token counting requires upstream support. Chat signed-thinking continuation, threads and compact are outside this mode.',
+        compatibilityProfile: 'Compatibility version',
+        compatibilityV2: 'v2: external clients and tool continuation',
+        compatibilityV1: 'v1: preserve legacy behavior',
+        compatibilityNewSessions: 'Accept new sessions',
+        compatibilityDrainDesc: 'When disabled, only registered signed or tool continuations are accepted. Changing versions preserves the protocol of existing sessions; turning compatibility off blocks those continuations.',
+        compatibilityCapabilities: 'Scope: claude-opus-4-8 and claude-opus-5-5. v2 supports Chat tool continuation when tool IDs and complete history are preserved. Token counting requires upstream support; threads and compact are unsupported.',
         compatibilityConflict: 'Disable auto passthrough first. Header overrides and beta policies must agree with the compatibility profile.',
         apiKeyPassthrough: 'Auto passthrough (auth only)',
         apiKeyPassthroughDesc:

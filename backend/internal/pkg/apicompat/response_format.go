@@ -2,15 +2,26 @@ package apicompat
 
 import "encoding/json"
 
-func chatResponseFormatToResponsesTextFormat(raw json.RawMessage) json.RawMessage {
+func chatResponseFormatToResponsesTextFormat(raw json.RawMessage) (json.RawMessage, error) {
+	if err := validateResponseFormat(raw, true); err != nil {
+		return nil, err
+	}
+	return chatResponseFormatToResponsesTextFormatUnchecked(raw), nil
+}
+
+func chatResponseFormatToResponsesTextFormatUnchecked(raw json.RawMessage) json.RawMessage {
 	raw = normalizedRawJSON(raw)
 	if len(raw) == 0 {
 		return nil
 	}
 
 	obj, ok := rawJSONObject(raw)
-	if !ok || rawString(obj["type"]) != "json_schema" {
+	if !ok {
 		return raw
+	}
+	formatType := normalizedResponseFormatType(obj["type"])
+	if formatType != "json_schema" {
+		return json.RawMessage(`{"type":"` + formatType + `"}`)
 	}
 
 	schemaRaw := normalizedRawJSON(obj["json_schema"])
@@ -31,15 +42,26 @@ func chatResponseFormatToResponsesTextFormat(raw json.RawMessage) json.RawMessag
 	return out
 }
 
-func responsesTextFormatToChatResponseFormat(raw json.RawMessage) json.RawMessage {
+func responsesTextFormatToChatResponseFormat(raw json.RawMessage) (json.RawMessage, error) {
+	if err := validateResponseFormat(raw, false); err != nil {
+		return nil, err
+	}
+	return responsesTextFormatToChatResponseFormatUnchecked(raw), nil
+}
+
+func responsesTextFormatToChatResponseFormatUnchecked(raw json.RawMessage) json.RawMessage {
 	raw = normalizedRawJSON(raw)
 	if len(raw) == 0 {
 		return nil
 	}
 
 	obj, ok := rawJSONObject(raw)
-	if !ok || rawString(obj["type"]) != "json_schema" {
+	if !ok {
 		return raw
+	}
+	formatType := normalizedResponseFormatType(obj["type"])
+	if formatType != "json_schema" {
+		return json.RawMessage(`{"type":"` + formatType + `"}`)
 	}
 	if _, alreadyChatShape := obj["json_schema"]; alreadyChatShape {
 		return raw
