@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lib/pq"
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
@@ -70,12 +69,9 @@ func (r *auditLogRepository) BatchInsert(ctx context.Context, logs []*service.Au
 	if err != nil {
 		return 0, err
 	}
-	stmt, err := tx.PrepareContext(ctx, pq.CopyIn(
-		"audit_logs",
-		"created_at", "actor_user_id", "actor_email", "actor_role", "auth_method",
-		"credential_masked", "action", "method", "path", "request_id", "client_ip", "user_agent",
-		"request_body", "status_code", "latency_ms", "extra",
-	))
+	stmt, err := tx.PrepareContext(ctx, "COPY audit_logs (created_at, actor_user_id, actor_email, actor_role, auth_method, "+
+		"credential_masked, action, method, path, request_id, client_ip, user_agent, "+
+		"request_body, status_code, latency_ms, extra) FROM STDIN")
 	if err != nil {
 		_ = tx.Rollback()
 		return 0, err

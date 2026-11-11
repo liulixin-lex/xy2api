@@ -8,11 +8,12 @@ import (
 	"time"
 
 	"github.com/lib/pq"
+	"github.com/lib/pq/pqerror"
 	"github.com/stretchr/testify/require"
 )
 
 func transientDatabaseError(code string) error {
-	return &pq.Error{Code: pq.ErrorCode(code), Message: "database is temporarily unavailable"}
+	return &pq.Error{Code: pqerror.Code(code), Message: "database is temporarily unavailable"}
 }
 
 func TestIsTransientDatabaseInitializationError(t *testing.T) {
