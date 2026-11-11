@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -497,8 +499,15 @@ func BuildAnthropicCompatDiagnosticRequest(account *Account, body []byte, header
 
 func writeAnthropicCompatError(c *gin.Context, entry string, err error) {
 	status, code, message, local := AnthropicCompatErrorDetails(err)
-	if !local || IsAnthropicCompatCandidateError(err) || c == nil || c.Writer.Written() {
+	if c == nil || c.Writer.Written() || IsAnthropicCompatCandidateError(err) {
 		return
+	}
+	if !local {
+		var conversionErr *apicompat.UnsupportedConversionError
+		if !errors.As(err, &conversionErr) {
+			return
+		}
+		status, code, message = http.StatusBadRequest, "invalid_request_error", conversionErr.Error()
 	}
 	switch entry {
 	case "responses":

@@ -8,12 +8,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -358,6 +361,19 @@ func TestClaudeAPIKeyCompatInjectBodyRejectsDuplicateIdentity(t *testing.T) {
 			_, code, _, local := AnthropicCompatErrorDetails(injectErr)
 			require.True(t, local)
 			require.Equal(t, "anthropic_compat_history_incompatible", code)
+		})
+	}
+}
+
+func TestUnsupportedProtocolConversionReturnsClientBadRequest(t *testing.T) {
+	for _, entry := range []string{"messages", "chat", "responses"} {
+		t.Run(entry, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			writeAnthropicCompatError(c, entry, &apicompat.UnsupportedConversionError{Field: "stop", Reason: "no lossless mapping"})
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
+			require.Contains(t, recorder.Body.String(), "invalid_request_error")
+			require.Contains(t, recorder.Body.String(), "stop")
 		})
 	}
 }
