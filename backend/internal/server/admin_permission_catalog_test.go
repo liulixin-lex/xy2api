@@ -41,12 +41,19 @@ func (enumerationSettings) GetMultiple(context.Context, []string) (map[string]st
 	return map[string]string{}, nil
 }
 
-func sentinelJWT(c *gin.Context)         { c.AbortWithStatus(204) }
-func sentinelOptionalJWT(c *gin.Context) { c.AbortWithStatus(204) }
-func sentinelAdminAuth(c *gin.Context)   { c.Set("pra.admin", true); c.AbortWithStatus(204) }
-func sentinelAPIKey(c *gin.Context)      { c.AbortWithStatus(204) }
-func sentinelAudit(c *gin.Context)       { c.AbortWithStatus(204) }
-func sentinelStepUp(c *gin.Context)      { c.AbortWithStatus(204) }
+// Each sentinel records the full Gin chain while it runs: since Gin 1.12,
+// Engine.HandleContext restores the caller's handlers when it returns.
+func sentinel(c *gin.Context) {
+	c.Set("pra.chain", c.HandlerNames())
+	c.AbortWithStatus(204)
+}
+
+func sentinelJWT(c *gin.Context)         { sentinel(c) }
+func sentinelOptionalJWT(c *gin.Context) { sentinel(c) }
+func sentinelAdminAuth(c *gin.Context)   { c.Set("pra.admin", true); sentinel(c) }
+func sentinelAPIKey(c *gin.Context)      { sentinel(c) }
+func sentinelAudit(c *gin.Context)       { sentinel(c) }
+func sentinelStepUp(c *gin.Context)      { sentinel(c) }
 
 // Fill exported handler pointers only: their services deliberately remain nil.
 func enumerationHandlers() *handler.Handlers {
@@ -90,15 +97,10 @@ func probeRoutes(r *gin.Engine) []probedRoute {
 		}
 		req := httptest.NewRequest(route.Method, strings.Join(parts, "/"), nil)
 		rec := httptest.NewRecorder()
-		// Capture the actual Gin chain, including the sentinel, before it aborts.
-		var names []string
-		var admin bool
 		c := gin.CreateTestContextOnly(rec, r)
 		c.Request = req
 		r.HandleContext(c)
-		names = c.HandlerNames()
-		admin = c.GetBool("pra.admin")
-		out = append(out, probedRoute{route.Method, route.Path, admin, names})
+		out = append(out, probedRoute{route.Method, route.Path, c.GetBool("pra.admin"), c.GetStringSlice("pra.chain")})
 	}
 	return out
 }
@@ -278,7 +280,7 @@ func TestUnknownAdminPathsNeverReachAHandler(t *testing.T) {
 		r.HandleContext(c)
 		require.Contains(t, []int{301, 307, 404, 405}, rec.Code)
 		require.False(t, c.GetBool("pra.admin"))
-		require.Equal(t, -1, nameIndex(c.HandlerNames(), "sentinel"))
+		require.Empty(t, c.GetStringSlice("pra.chain"), "no sentinel may run")
 	}
 }
 
