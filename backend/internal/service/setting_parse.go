@@ -1080,30 +1080,6 @@ func parseOpenAIOAuthSchedulingRateMultiplier(settings map[string]string) *float
 	return &value
 }
 
-func normalizeOptionalPositiveIntString(raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", nil
-	}
-	value, err := strconv.Atoi(raw)
-	if err != nil || value <= 0 {
-		return "", fmt.Errorf("invalid positive integer")
-	}
-	return strconv.Itoa(value), nil
-}
-
-func normalizeOptionalNonNegativeFloatString(raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", nil
-	}
-	value, err := strconv.ParseFloat(raw, 64)
-	if err != nil || value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
-		return "", fmt.Errorf("invalid non-negative float")
-	}
-	return strconv.FormatFloat(value, 'f', -1, 64), nil
-}
-
 func parseDefaultSubscriptions(raw string) []DefaultSubscriptionSetting {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
