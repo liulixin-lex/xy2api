@@ -58,7 +58,7 @@
     "vite": "^6.4.6",
     "vite-plugin-checker": "^0.14.5",
     "vitest": "^4.1.12",
-    "vue-tsc": "^2.2.0",
+    "vue-tsc": "^3.3.14",
     "mermaid": "11.17.2",
     "katex": "0.19.1"
   },
