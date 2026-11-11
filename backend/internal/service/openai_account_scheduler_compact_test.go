@@ -12,7 +12,6 @@ import (
 // TestOpenAIGatewayService_SelectAccountWithScheduler_CompactPrefersSupportedOverUnknown
 // 验证 compact 调度时显式支持 (tier=2) 优先于未探测 (tier=1)。
 func TestOpenAIGatewayService_SelectAccountWithScheduler_CompactPrefersSupportedOverUnknown(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
 	ctx := context.Background()
 	groupID := int64(91001)
@@ -66,7 +65,6 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_CompactPrefersSupported
 // TestOpenAIGatewayService_SelectAccountWithScheduler_CompactRejectsExplicitlyUnsupported
 // 验证 force_off / 已探测不支持 (tier=0) 的账号不会被 compact 请求选中。
 func TestOpenAIGatewayService_SelectAccountWithScheduler_CompactRejectsExplicitlyUnsupported(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
 	ctx := context.Background()
 	groupID := int64(91002)
@@ -126,7 +124,7 @@ func newOpenAICompactionSchedulerTestService(accounts []Account, advanced bool) 
 		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
 	}
 	if advanced {
-		svc.rateLimitService = newOpenAIAdvancedSchedulerRateLimitService("true")
+		svc.rateLimitService = newOpenAISelectionRateLimitService()
 	}
 	return svc
 }
@@ -152,7 +150,6 @@ func selectOpenAICompactionSchedulerTestAccount(t *testing.T, svc *OpenAIGateway
 func TestOpenAIGatewayService_SelectAccountWithScheduler_NativeCompactionIgnoresLegacyCompactProbe(t *testing.T) {
 	for _, advanced := range []bool{false, true} {
 		t.Run(map[bool]string{false: "legacy_scheduler", true: "advanced_scheduler"}[advanced], func(t *testing.T) {
-			resetOpenAIAdvancedSchedulerSettingCacheForTest()
 			svc := newOpenAICompactionSchedulerTestService([]Account{{
 				ID:          71012,
 				Platform:    PlatformOpenAI,
@@ -177,7 +174,6 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_NativeCompactionIgnores
 func TestOpenAIGatewayService_SelectAccountWithScheduler_NativeCompactionAllowsForceOff(t *testing.T) {
 	for _, advanced := range []bool{false, true} {
 		t.Run(map[bool]string{false: "legacy_scheduler", true: "advanced_scheduler"}[advanced], func(t *testing.T) {
-			resetOpenAIAdvancedSchedulerSettingCacheForTest()
 			svc := newOpenAICompactionSchedulerTestService([]Account{{
 				ID:          71013,
 				Platform:    PlatformOpenAI,
@@ -202,7 +198,6 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_NativeCompactionAllowsF
 func TestOpenAIGatewayService_SelectAccountWithScheduler_NativeCompactionRequiresResponsesCapability(t *testing.T) {
 	for _, advanced := range []bool{false, true} {
 		t.Run(map[bool]string{false: "legacy_scheduler", true: "advanced_scheduler"}[advanced], func(t *testing.T) {
-			resetOpenAIAdvancedSchedulerSettingCacheForTest()
 			svc := newOpenAICompactionSchedulerTestService([]Account{{
 				ID:          71014,
 				Platform:    PlatformOpenAI,
@@ -228,7 +223,6 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_NativeCompactionRequire
 func TestOpenAIGatewayService_SelectAccountWithScheduler_LegacyCompactionKeepsCompactEligibility(t *testing.T) {
 	for _, advanced := range []bool{false, true} {
 		t.Run(map[bool]string{false: "legacy_scheduler", true: "advanced_scheduler"}[advanced], func(t *testing.T) {
-			resetOpenAIAdvancedSchedulerSettingCacheForTest()
 			svc := newOpenAICompactionSchedulerTestService([]Account{
 				{
 					ID:          71015,
@@ -268,7 +262,6 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LegacyCompactionKeepsCo
 // prevents a confirmed Chat Completions-only API key from silently dropping the
 // compaction trigger through the Responses-to-Chat fallback.
 func TestOpenAIGatewayService_SelectAccountWithScheduler_CompactRequiresResponsesCapability(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
 	ctx := context.Background()
 	groupID := int64(91005)
@@ -312,7 +305,6 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_CompactRequiresResponse
 }
 
 func TestOpenAIGatewayService_SelectAccountWithScheduler_CompactSkipsChatOnlyAccount(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
 	ctx := context.Background()
 	groupID := int64(91006)
@@ -375,7 +367,6 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_CompactSkipsChatOnlyAcc
 // TestOpenAIGatewayService_SelectAccountWithScheduler_CompactFallsBackToUnknown
 // 验证当没有"已知支持"账号时，compact 请求会回退到"未探测"账号。
 func TestOpenAIGatewayService_SelectAccountWithScheduler_CompactFallsBackToUnknown(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
 	ctx := context.Background()
 	groupID := int64(91003)
@@ -429,7 +420,6 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_CompactFallsBackToUnkno
 // TestOpenAIGatewayService_SelectAccountWithScheduler_CompactAllowsGrok verifies
 // that OpenAI-compatible compact routing does not reject Grok accounts.
 func TestOpenAIGatewayService_SelectAccountWithScheduler_CompactAllowsGrok(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
 	ctx := context.Background()
 	groupID := int64(91004)

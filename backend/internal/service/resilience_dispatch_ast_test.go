@@ -103,7 +103,7 @@ func TestOpenAIDispatchASTCoverage(t *testing.T) {
 						continue
 					}
 					// Named non-HTTP exemption: singleflight coordinates cached settings reads.
-					if id, ok := selector.X.(*ast.Ident); ok && (id.Name == "openAIAdvancedSchedulerSettingSF" || id.Name == "openAISchedulingRateSF") && selector.Sel.Name == "Do" {
+					if id, ok := selector.X.(*ast.Ident); ok && id.Name == "openAISchedulingRateSF" && selector.Sel.Name == "Do" {
 						continue
 					}
 					method := selector.Sel.Name

@@ -114,7 +114,6 @@ func probeTestAccounts(platform string) []Account {
 // ---- OpenAI default scheduler ----
 
 func newOpenAIProbeTestService(accounts []Account, inFlight map[int64]int, bindings map[string]int64) (*OpenAIGatewayService, *probeSlotCache, *schedulerTestGatewayCache) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	cfg := &config.Config{}
 	probeTestSchedulingConfig(cfg)
 	slots := newProbeSlotCache(inFlight)

@@ -108,7 +108,7 @@ func (f *selectionRuntimeFixture) selectNow(t *testing.T, ctx context.Context, s
 func TestOpenAISelectionRuntimeStandingPriorityRateAndBoard(t *testing.T) {
 	for _, unavailable := range []bool{false, true} {
 		t.Run(fmt.Sprint("load_unavailable=", unavailable), func(t *testing.T) {
-			a, b, c, d := gateV3Account(1, 1), gateV3Account(2, 2), gateV3Account(3, 2), gateV3Account(4, 3)
+			a, b, c, d := selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2), selectionFixtureAccount(3, 2), selectionFixtureAccount(4, 3)
 			a.RateMultiplier, b.RateMultiplier, c.RateMultiplier, d.RateMultiplier = floatPtr(0), floatPtr(.8), floatPtr(.2), floatPtr(0)
 			f := newSelectionRuntimeFixture(t, a, b, c, d)
 			f.view.States[fakeSchedViewKey{7, 1, "m"}] = schedquality.StateView{State: schedquality.StateCooling}
@@ -134,7 +134,7 @@ func TestOpenAISelectionRuntimeStandingPriorityRateAndBoard(t *testing.T) {
 		})
 	}
 	t.Run("all back still selects", func(t *testing.T) {
-		f := newSelectionRuntimeFixture(t, gateV3Account(1, 1), gateV3Account(2, 2))
+		f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
 		for _, id := range []int64{1, 2} {
 			f.view.States[fakeSchedViewKey{7, id, "m"}] = schedquality.StateView{State: schedquality.StateCooling}
 		}
@@ -146,7 +146,7 @@ func TestOpenAISelectionRuntimeSessionCacheAndOwnerSlotOrder(t *testing.T) {
 	for _, mode := range []string{"immediate", "idle", "migration"} {
 		for _, legacy := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/legacy=%t", mode, legacy), func(t *testing.T) {
-				f := newSelectionRuntimeFixture(t, gateV3Account(10, 5), gateV3Account(1, 1))
+				f := newSelectionRuntimeFixture(t, selectionFixtureAccount(10, 5), selectionFixtureAccount(1, 1))
 				key := "openai:session"
 				ctx := context.Background()
 				if legacy {
@@ -185,16 +185,16 @@ func TestOpenAISelectionRuntimeSessionCacheAndOwnerSlotOrder(t *testing.T) {
 
 func TestOpenAISelectionRuntimeCandidatePoolAndLatestView(t *testing.T) {
 	t.Run("no better member avoids admission pool and loads", func(t *testing.T) {
-		f := newSelectionRuntimeFixture(t, gateV3Account(10, 1), gateV3Account(1, 2))
+		f := newSelectionRuntimeFixture(t, selectionFixtureAccount(10, 1), selectionFixtureAccount(1, 2))
 		f.cache.sessionBindings["openai:session"] = 10
 		require.Equal(t, int64(10), f.selectNow(t, context.Background(), "session", nil).Account.ID)
 		require.Zero(t, f.loads.batches)
 		require.Equal(t, 1, f.repo.lists, "membership is read without building a load pool")
 	})
 	t.Run("exclude and hard admission and full observation", func(t *testing.T) {
-		bad := gateV3Account(2, 1)
+		bad := selectionFixtureAccount(2, 1)
 		bad.Schedulable = false
-		f := newSelectionRuntimeFixture(t, gateV3Account(10, 5), gateV3Account(1, 0), bad, gateV3Account(3, 2), gateV3Account(4, 3))
+		f := newSelectionRuntimeFixture(t, selectionFixtureAccount(10, 5), selectionFixtureAccount(1, 0), bad, selectionFixtureAccount(3, 2), selectionFixtureAccount(4, 3))
 		f.cache.sessionBindings["openai:session"] = 10
 		f.loads.loadMap = map[int64]*AccountLoadInfo{3: {LoadRate: 100, CurrentConcurrency: 10}}
 		require.Equal(t, int64(4), f.selectNow(t, context.Background(), "session", map[int64]struct{}{1: {}}).Account.ID)
@@ -202,7 +202,7 @@ func TestOpenAISelectionRuntimeCandidatePoolAndLatestView(t *testing.T) {
 		require.True(t, f.svc.selectionFullMarks.Recently(3, f.svc.selectionNow()))
 	})
 	t.Run("latest view rejects after slot acquisition", func(t *testing.T) {
-		f := newSelectionRuntimeFixture(t, gateV3Account(10, 5), gateV3Account(1, 1))
+		f := newSelectionRuntimeFixture(t, selectionFixtureAccount(10, 5), selectionFixtureAccount(1, 1))
 		f.cache.sessionBindings["openai:session"] = 10
 		f.loads.after = func(id int64) {
 			if id == 1 {
@@ -219,7 +219,7 @@ func TestOpenAISelectionRuntimeFullOwnerRetryBorrowQueue(t *testing.T) {
 	for _, mode := range []string{"short retry", "borrow", "queue"} {
 		t.Run(mode, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				f := newSelectionRuntimeFixture(t, gateV3Account(10, 1), gateV3Account(1, 2))
+				f := newSelectionRuntimeFixture(t, selectionFixtureAccount(10, 1), selectionFixtureAccount(1, 2))
 				f.cache.sessionBindings["openai:session"] = 10
 				f.loads.acquireResults = map[int64]bool{10: false, 1: mode != "queue"}
 				f.loads.after = func(id int64) {

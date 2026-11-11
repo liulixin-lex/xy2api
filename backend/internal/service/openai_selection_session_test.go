@@ -213,7 +213,7 @@ func TestOpenAISelectionSessionTakeoverRules(t *testing.T) {
 			}
 		})
 	}
-	for _, ctx := range []context.Context{withOpenAIStickyMigrationGuard(context.Background(), "resp_1", OpenAIUpstreamTransportHTTPSSE), withOpenAIStickyMigrationGuard(context.Background(), "", OpenAIUpstreamTransportResponsesWebsocket), withOpenAINoStickyMigration(context.Background()), withGroupQualityGateExempt(context.Background())} {
+	for _, ctx := range []context.Context{withOpenAIStickyMigrationGuard(context.Background(), "resp_1", OpenAIUpstreamTransportHTTPSSE), withOpenAIStickyMigrationGuard(context.Background(), "", OpenAIUpstreamTransportResponsesWebsocket), withOpenAINoStickyMigration(context.Background()), withOpenAISelectionExempt(context.Background())} {
 		f := selectionNewSessionFixture()
 		require.Nil(t, f.selectNow(ctx))
 		require.Empty(t, f.slots.attempts)

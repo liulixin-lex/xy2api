@@ -101,13 +101,12 @@ func TestOpenAICacheDiagnosticUsesFinalRequest(t *testing.T) {
 	}
 }
 
-func TestOpenAICacheDiagnosticPrivacyAndTraining(t *testing.T) {
+func TestOpenAICacheDiagnosticPrivacy(t *testing.T) {
 	s := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "persistent-test-secret"}}}
 	c := cacheTestContext(1, 10)
 	body := []byte(`{"model":"gpt-5.4","instructions":"private secret prompt","prompt_cache_key":"private key","prompt_cache_options":{"mode":"private mode"},"text":{"format":{"type":"private format"}},"input":"dynamic secret"}`)
 	require.Nil(t, s.newCacheDiagnostic(c, body, "wire"), "disabled paths must not fingerprint large bodies")
-	s.cfg.Gateway.OpenAICache.AwareRoutingEnabled = true
-	s.cfg.Gateway.OpenAICache.RolloutPercent = 100
+	s.cfg.Gateway.OpenAICache.DiagnosticsEnabled = true
 	s.GenerateSessionHash(c, body)
 	d := s.newCacheDiagnostic(c, body, "wire")
 	require.NotNil(t, d)
@@ -119,76 +118,9 @@ func TestOpenAICacheDiagnosticPrivacyAndTraining(t *testing.T) {
 	require.NotContains(t, string(encoded), "secret")
 	a := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 	r := &OpenAIForwardResult{Model: "gpt-5.4", CacheDiagnostic: d, Usage: OpenAIUsage{InputTokens: 2048, CacheReadInputTokens: 1536, CacheReadSource: "cache_read_tokens"}}
-	ctx := context.WithValue(context.Background(), openAICacheDiagnosticKey{}, d)
-	now := time.Now()
-	s.observeCacheUsage(r, a, now)
-	_, known := s.cachePreference(ctx, a, "gpt-5.4")
-	require.False(t, known, "a cold request is not a comparable cache sample")
-	for i := 0; i < 20; i++ {
-		s.observeCacheUsage(r, a, now.Add(time.Duration(i+1)*time.Millisecond))
-	}
-	_, known = s.cachePreference(ctx, a, "gpt-5.4")
-	require.True(t, known)
-	before := s.cacheTelemetry().scores[cacheSampleKey(d, a, "gpt-5.4")].count
-	s.observeCacheUsage(r, a, now.Add(31*time.Minute))
-	require.Equal(t, before, s.cacheTelemetry().scores[cacheSampleKey(d, a, "gpt-5.4")].count, "expired sessions cannot train preferences")
+	s.observeCacheUsage(r, a, time.Now())
+	require.Equal(t, a.ID, s.cacheTelemetry().sessions[d.Session].account)
 	s.finishCacheDiagnostic(nil, nil, r)
-}
-
-func TestOpenAICachePreferenceRequiresRecentSamples(t *testing.T) {
-	s := &OpenAIGatewayService{cfg: &config.Config{}}
-	s.cfg.Gateway.OpenAICache = config.OpenAICacheConfig{AwareRoutingEnabled: true, RolloutPercent: 100}
-	d := &OpenAICacheDiagnostic{Session: "v2:recent", Prefix: "prefix", WirePrefix: "prefix", Model: "gpt-5.4", GroupID: 10}
-	ctx := context.WithValue(context.Background(), openAICacheDiagnosticKey{}, d)
-	a := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
-	r := &OpenAIForwardResult{CacheDiagnostic: d, Usage: OpenAIUsage{InputTokens: 2048, CacheReadInputTokens: 1536, CacheReadSource: "cache_read_tokens"}}
-	now := time.Now()
-	s.observeCacheUsage(r, a, now.Add(-43*time.Minute))
-	for i := 0; i < 20; i++ {
-		s.observeCacheUsage(r, a, now.Add(time.Duration(-41+2*i)*time.Minute))
-	}
-	_, known := s.cachePreference(ctx, a, "gpt-5.4")
-	require.False(t, known, "continuous low-frequency traffic must not count expired samples")
-	for i := 0; i < 5; i++ {
-		s.observeCacheUsage(r, a, now.Add(-time.Second+time.Duration(i)*time.Millisecond))
-	}
-	_, known = s.cachePreference(ctx, a, "gpt-5.4")
-	require.False(t, known, "nineteen recent samples must not enable a preference")
-	s.observeCacheUsage(r, a, now.Add(-time.Second+5*time.Millisecond))
-	_, known = s.cachePreference(ctx, a, "gpt-5.4")
-	require.True(t, known, "twenty recent comparable samples must enable a preference")
-}
-
-func TestOpenAICachePreferencePreservesPriorityLoadAndUnknowns(t *testing.T) {
-	s := &OpenAIGatewayService{cfg: &config.Config{}}
-	s.cfg.Gateway.OpenAICache = config.OpenAICacheConfig{AwareRoutingEnabled: true, RolloutPercent: 100}
-	d := &OpenAICacheDiagnostic{Session: "v2:test", Prefix: "prefix", Model: "gpt-5.4", GroupID: 10}
-	ctx := context.WithValue(context.Background(), openAICacheDiagnosticKey{}, d)
-	a := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Priority: 1}
-	b := &Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Priority: 1}
-	c := &Account{ID: 3, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Priority: 2}
-	telemetry := s.cacheTelemetry()
-	sample := openAICacheSample{count: 20, input: 2048, at: time.Now()}
-	for i := range sample.recent {
-		sample.recent[i] = sample.at
-	}
-	telemetry.scores[cacheSampleKey(d, a, "gpt-5.4")] = sample
-	sample.read = 1800
-	telemetry.scores[cacheSampleKey(d, b, "gpt-5.4")] = sample
-	sample.read = 2000
-	telemetry.scores[cacheSampleKey(d, c, "gpt-5.4")] = sample
-	available := []accountWithLoad{{account: a, loadInfo: &AccountLoadInfo{}}, {account: b, loadInfo: &AccountLoadInfo{}}, {account: c, loadInfo: &AccountLoadInfo{}}}
-	s.preferCacheCandidates(ctx, available, "gpt-5.4")
-	require.Equal(t, int64(2), available[0].account.ID)
-	require.Equal(t, int64(3), available[2].account.ID)
-	available[0], available[1] = available[1], available[0]
-	available[1].loadInfo.LoadRate = 10
-	s.preferCacheCandidates(ctx, available, "gpt-5.4")
-	require.Equal(t, int64(1), available[0].account.ID)
-	available[1].loadInfo.LoadRate = 0
-	delete(telemetry.scores, cacheSampleKey(d, b, "gpt-5.4"))
-	s.preferCacheCandidates(ctx, available, "gpt-5.4")
-	require.Equal(t, int64(1), available[0].account.ID, "incomplete cohorts must keep the established order")
 }
 
 type atomicStickyTestCache struct {

@@ -65,5 +65,5 @@ func TestSupportTicketPermissionsDecodeAndLegacyDefault(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, old.Can(ModuleSupportTickets, LevelView))
 	require.NotContains(t, old.Wire().Modules, "support_tickets")
-	require.Len(t, Modules, 18)
+	require.Len(t, Modules, 17)
 }

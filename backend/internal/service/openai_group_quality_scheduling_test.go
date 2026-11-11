@@ -91,7 +91,7 @@ func (r failingAccountRepo) ListSchedulableByGroupIDAndPlatform(ctx context.Cont
 }
 
 // WP2's scenario table uses only the frozen view contract, never evaluator internals.
-func TestOpenAIGroupQualityScheduling(t *testing.T) {
+func TestOpenAIQualitySelection(t *testing.T) {
 	const groupID int64 = 7
 	oldRetryDuration, oldRetryInitial := openAIStickyCapacityRetryDuration, openAIStickyCapacityRetryInitial
 	openAIStickyCapacityRetryDuration = 25 * time.Millisecond
@@ -112,7 +112,6 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 		cfg.Gateway.Scheduling.StickySessionWaitTimeout = 45 * time.Second
 		cfg.Gateway.Scheduling.FallbackMaxWaiting = 100
 		cfg.Gateway.Scheduling.FallbackWaitTimeout = 30 * time.Second
-		cfg.Gateway.OpenAIWS.LBTopK = 3
 		accounts := []Account{}
 		for id := int64(1); id <= 3; id++ {
 			acc := profitControlWSAccount(id, 0.2, time.Now())
@@ -123,7 +122,7 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 		cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{}}
 		view := selectionTestView(time.Now())
 		view.Takeovers = nil
-		svc := &OpenAIGatewayService{accountRepo: schedulerTestOpenAIAccountRepo{accounts: accounts}, cfg: cfg, cache: cache, rateLimitService: newOpenAIAdvancedSchedulerRateLimitService(strconv.FormatBool(advanced)), concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{})}
+		svc := &OpenAIGatewayService{accountRepo: schedulerTestOpenAIAccountRepo{accounts: accounts}, cfg: cfg, cache: cache, rateLimitService: newOpenAISelectionRateLimitService(), concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{})}
 		NewOpenAISelectionBoard(svc, func() schedquality.View { return view })
 		return svc, cache, view
 	}
@@ -456,7 +455,7 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 		repo, ok := svc.accountRepo.(schedulerTestOpenAIAccountRepo)
 		require.True(t, ok)
 		gid := groupID
-		selection, err := svc.selectOpenAIStickyCapacity(withGroupQualityGateExempt(context.Background()), &repo.accounts[0], OpenAIAccountScheduleRequest{GroupID: &gid, Platform: PlatformOpenAI, SessionHash: "pinned", RequestedModel: "gpt-test", AdvancedScheduler: true})
+		selection, err := svc.selectOpenAIStickyCapacity(withOpenAISelectionExempt(context.Background()), &repo.accounts[0], OpenAIAccountScheduleRequest{GroupID: &gid, Platform: PlatformOpenAI, SessionHash: "pinned", RequestedModel: "gpt-test"})
 		require.NoError(t, err)
 		require.Equal(t, int64(1), selection.WaitPlan.AccountID)
 		require.Equal(t, svc.schedulingConfig().FallbackMaxWaiting, selection.WaitPlan.MaxWaiting)
@@ -551,13 +550,8 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 		}
 		for _, load := range loads {
 			cases = append(cases, testCase{"quality borrow uses affinity before load/" + path + "/load=" + strconv.Itoa(load), func(t *testing.T) {
-				resetOpenAIAdvancedSchedulerSettingCacheForTest()
-				defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 				svc, _, conc := qualityBorrowEnv(path)
-				settings := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
-					openAIAdvancedSchedulerSettingKey:              strconv.FormatBool(path == "advanced"),
-					SettingKeyOpenAILowUpstreamRatePriorityEnabled: "true",
-				}}
+				settings := &selectionSettingRepoStub{values: map[string]string{}}
 				svc.rateLimitService = &RateLimitService{settingService: NewSettingService(settings, svc.cfg)}
 				repo, ok := svc.accountRepo.(schedulerTestOpenAIAccountRepo)
 				require.True(t, ok)
@@ -606,5 +600,4 @@ func TestOpenAIGroupQualityScheduling(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, tc.run)
 	}
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 }

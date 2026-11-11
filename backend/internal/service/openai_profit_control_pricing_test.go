@@ -120,7 +120,7 @@ func TestProfitControl_ResponsesCapabilityUsesTextGateAtScheduler(t *testing.T) 
 	svc := &OpenAIGatewayService{
 		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{*expensive}},
 		cfg:                &config.Config{},
-		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		rateLimitService:   newOpenAISelectionRateLimitService(),
 		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
 	}
 	groupID := int64(77)
@@ -137,8 +137,6 @@ func TestProfitControl_ResponsesCapabilityUsesTextGateAtScheduler(t *testing.T) 
 // 账号倍率缺失一律视为非法保守拒绝；OAuth 参考倍率显式清空时，
 // 手工或同步维护的账号倍率继续按同一阈值判断。
 func TestProfitControl_AccountRateSemantics(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
-	t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
 	publishOpenAISchedulingRate(nil)
 	now := time.Now()
 	missing := upstreamCostTestOAuthAccount(2)

@@ -38,7 +38,6 @@ func TestFirstOutputColdFloorUsesMatchingAttemptProfileOnly(t *testing.T) {
 }
 
 func TestLastCandidateUsesSchedulerRequestEligibility(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	r, _, repo, _ := newFallbackFixture(t)
 	SetResilienceInstance(r)
 	t.Cleanup(func() { SetResilienceInstance(nil) })
@@ -75,7 +74,6 @@ func TestLastCandidateUsesSchedulerRequestEligibility(t *testing.T) {
 }
 
 func TestHTTPContinuationEligibilityInMixedAccountGroup(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	r, _, repo, _ := newFallbackFixture(t)
 	group := int64(20)
 	model := "gpt-test"
@@ -124,7 +122,6 @@ func (r *eligibilityCountingGroupRepo) GetByIDLite(ctx context.Context, id int64
 }
 
 func TestSelectionEligibilityReusesPrivacyReadAndSkipsNegativeCache(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	withResilienceSettings(t, nil)
 	group := &Group{ID: 21, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true}
 	model := "gpt-test"

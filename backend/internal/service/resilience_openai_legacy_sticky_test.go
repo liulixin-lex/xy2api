@@ -34,8 +34,6 @@ func TestOpenAIStickyBypassFirstOutputTimeoutReselectionRecordsRequestFailure(t 
 	for _, binding := range []string{"retained", "cleared"} {
 		t.Run(binding, func(t *testing.T) {
 			withResilienceSettings(t, nil)
-			resetOpenAIAdvancedSchedulerSettingCacheForTest()
-			t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
 			groupID := int64(10119)
 			accounts := []Account{
 				{ID: 36061, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID}},
@@ -97,8 +95,6 @@ func TestOpenAIStickyBypassStateRepairAvoidanceIsRequestScoped(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			withResilienceSettings(t, nil)
-			resetOpenAIAdvancedSchedulerSettingCacheForTest()
-			t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
 			groupID := int64(10129)
 			accounts := []Account{
 				{ID: 36071, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID}},
@@ -159,8 +155,6 @@ func TestOpenAIStickyBypassStateRepairAvoidanceIsRequestScoped(t *testing.T) {
 
 func TestResilienceOpenAILoadBatchStickyBypassRecordsReason(t *testing.T) {
 	withResilienceSettings(t, nil)
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
-	t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
 	resetAt := time.Now().Add(time.Minute)
 	groupID := int64(10109)
 	accounts := []Account{
@@ -207,8 +201,6 @@ func TestResilienceOpenAILoadBatchStickyBypassRecordsReason(t *testing.T) {
 
 func TestResilienceOpenAILoadBatchStickyDeleteWarns(t *testing.T) {
 	withResilienceSettings(t, nil)
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
-	t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
 	groupID := int64(10110)
 	accounts := []Account{
 		{ID: 36031, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusError, Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID}},
@@ -253,8 +245,6 @@ func (c *stickyDeleteFailureCache) DeleteSessionAccountIDIfOwnerAndReport(ctx co
 
 func TestResilienceOpenAILoadBatchStickyDeleteFailureIsInfo(t *testing.T) {
 	withResilienceSettings(t, nil)
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
-	t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
 	groupID := int64(10111)
 	accounts := []Account{
 		{ID: 36041, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusError, Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID}},

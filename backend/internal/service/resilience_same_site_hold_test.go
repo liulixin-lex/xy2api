@@ -206,8 +206,7 @@ func TestSameSiteHoldRebindsSoftOwnerUnlessDisabled(t *testing.T) {
 				t.Run("same_site_"+fmtBool(enabled), func(t *testing.T) {
 					env := newOpenAIRuntimeBlockEnv(t, lrAccountA, lrAccountB)
 					if advanced {
-						env.svc.rateLimitService = newOpenAIAdvancedSchedulerRateLimitService("true")
-						t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
+						env.svc.rateLimitService = newOpenAISelectionRateLimitService()
 					}
 					key := env.svc.openAISessionCacheKey(lrSession)
 					env.cache.bind(key, lrAccountA, time.Hour-time.Minute)

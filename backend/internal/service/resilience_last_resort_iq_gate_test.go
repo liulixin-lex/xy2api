@@ -16,15 +16,12 @@ const iqLastResortModel = "gpt-5.1"
 
 type iqLastResortMode struct {
 	name     string
-	advanced bool
-	share    bool
+	multiple bool
 }
 
 func newIQLastResortService(t *testing.T, accounts ...Account) (*OpenAIGatewayService, *schedulerTestOpenAIAccountRepo) {
 	t.Helper()
 	withResilienceSettings(t, nil)
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
-	t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
 	repo := &schedulerTestOpenAIAccountRepo{accounts: accounts}
 	cfg := &config.Config{}
 	cfg.Gateway.Scheduling.LoadBatchEnabled = false
@@ -36,14 +33,6 @@ func newIQLastResortService(t *testing.T, accounts ...Account) (*OpenAIGatewaySe
 		resilience:         NewResilienceService(nil, newMemResilienceStore()),
 	}
 	return svc, repo
-}
-
-func setIQLastResortAdvanced(t *testing.T, enabled bool) {
-	t.Helper()
-	openAIAdvancedSchedulerSettingCache.Store(&cachedOpenAIAdvancedSchedulerSetting{
-		enabled:   enabled,
-		expiresAt: time.Now().Add(time.Minute).UnixNano(),
-	})
 }
 
 func iqLastResortAccount(id int64) Account {
@@ -68,13 +57,12 @@ func selectIQLastResort(t *testing.T, svc *OpenAIGatewayService, model string, r
 }
 
 func TestOpenAILastResortKeepsShortOrdinaryModelLimitSoft(t *testing.T) {
-	for _, mode := range []iqLastResortMode{{name: "legacy"}, {name: "advanced", advanced: true}} {
+	for _, mode := range []iqLastResortMode{{name: "unified"}} {
 		t.Run(mode.name, func(t *testing.T) {
 			reset := time.Now().Add(60 * time.Second)
 			account := iqLastResortAccount(1)
 			account.Extra = iqLastResortExtra(iqLastResortModel, reset)
 			svc, _ := newIQLastResortService(t, account)
-			setIQLastResortAdvanced(t, mode.advanced)
 
 			selection, err := selectIQLastResort(t, svc, iqLastResortModel, false)
 			require.NoError(t, err)
@@ -93,7 +81,7 @@ func TestOpenAILastResortRejectsIQGateRegardlessOfReset(t *testing.T) {
 		{name: "future reset", resetAt: time.Now().Add(60 * time.Second)},
 		{name: "expired reset", resetAt: time.Now().Add(-60 * time.Second)},
 	}
-	modes := []iqLastResortMode{{name: "legacy"}, {name: "advanced", advanced: true}, {name: "share", share: true}}
+	modes := []iqLastResortMode{{name: "single account"}, {name: "multiple accounts", multiple: true}}
 	for _, mode := range modes {
 		for _, resetCase := range resetCases {
 			t.Run(mode.name+"/"+resetCase.name, func(t *testing.T) {
@@ -102,14 +90,13 @@ func TestOpenAILastResortRejectsIQGateRegardlessOfReset(t *testing.T) {
 				tier, _, _ := resiliencePenaltyOf(&account, iqLastResortModel, time.Now())
 				require.Equal(t, resilience.TierHard, tier)
 				var svc *OpenAIGatewayService
-				if mode.share {
+				if mode.multiple {
 					env := newOpenAILastResortEnv(t, 1, 5)
 					env.account(lrAccountA).Extra = iqLastResortExtra("iq:"+iqLastResortModel, resetCase.resetAt)
 					env.account(lrAccountB).Extra = iqLastResortExtra("iq:"+iqLastResortModel, resetCase.resetAt)
 					svc = env.svc
 				} else {
 					svc, _ = newIQLastResortService(t, account)
-					setIQLastResortAdvanced(t, mode.advanced)
 				}
 
 				selection, err := selectIQLastResort(t, svc, iqLastResortModel, false)
@@ -131,7 +118,6 @@ func TestOpenAILastResortRejectsCompactOnlyIQGate(t *testing.T) {
 	}
 	account.Extra = iqLastResortExtra("iq:gpt-5.6-luna", time.Now().Add(-60*time.Second))
 	svc, _ := newIQLastResortService(t, account)
-	setIQLastResortAdvanced(t, false)
 
 	selection, err := selectIQLastResort(t, svc, "public", true)
 	if err == nil {
@@ -141,19 +127,18 @@ func TestOpenAILastResortRejectsCompactOnlyIQGate(t *testing.T) {
 }
 
 func TestOpenAILastResortFreshVerificationRejectsNewIQGate(t *testing.T) {
-	modes := []iqLastResortMode{{name: "legacy"}, {name: "advanced", advanced: true}, {name: "share", share: true}}
+	modes := []iqLastResortMode{{name: "single account"}, {name: "multiple accounts", multiple: true}}
 	for _, mode := range modes {
 		t.Run(mode.name, func(t *testing.T) {
 			var svc *OpenAIGatewayService
 			var repo *schedulerTestOpenAIAccountRepo
-			if mode.share {
+			if mode.multiple {
 				env := newOpenAILastResortEnv(t, 1, 5)
 				svc, repo = env.svc, &env.repo
 			} else {
 				account := iqLastResortAccount(1)
 				account.RateLimitResetAt = timePointer(time.Now().Add(60 * time.Second))
 				svc, repo = newIQLastResortService(t, account)
-				setIQLastResortAdvanced(t, mode.advanced)
 			}
 			_, err := svc.resilience.groupAccountsForLastResort(context.Background(), svc.accountRepo, selectionTestGroupID)
 			require.NoError(t, err)

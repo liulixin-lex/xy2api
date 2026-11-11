@@ -104,12 +104,12 @@ func TestResolveOpenAIProfitControlGate(t *testing.T) {
 
 func TestOpenAIProfitControlVetoReason(t *testing.T) {
 	now := time.Now()
-	prior := openAIAdvancedSchedulerSettingCache.Load()
+	prior := openAISchedulingRateCache.Load()
 	t.Cleanup(func() {
 		if prior != nil {
-			openAIAdvancedSchedulerSettingCache.Store(prior)
+			openAISchedulingRateCache.Store(prior)
 		} else {
-			resetOpenAIAdvancedSchedulerSettingCacheForTest()
+			openAISchedulingRateCache.Store(nil)
 		}
 	})
 	for _, tc := range []struct {
@@ -155,8 +155,6 @@ func TestOpenAIProfitControlVetoReason(t *testing.T) {
 }
 
 func TestProfitControlSchedulerFiltersCandidates(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
-	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
 	now := time.Now()
 	cheap := upstreamCostTestAccount(1, UpstreamBillingProbeStatusOK, 0.3, now.Add(-time.Minute), 30*time.Minute)
@@ -178,7 +176,7 @@ func TestProfitControlSchedulerFiltersCandidates(t *testing.T) {
 	svc := &OpenAIGatewayService{
 		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{*cheap, *expensive, *oauth}},
 		cfg:                cfg,
-		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		rateLimitService:   newOpenAISelectionRateLimitService(),
 		concurrencyService: NewConcurrencyService(cache),
 	}
 	groupID := int64(7)

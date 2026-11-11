@@ -457,7 +457,7 @@ func TestFallbackProfitControlPreview(t *testing.T) {
 				}
 			}
 			repo := &groupAccountsRepo{byGroup: map[int64][]Account{10: rows}}
-			svc := NewGroupQualityGateService(nil, repo, &fallbackGroupRepo{groups: map[int64]*Group{10: group}})
+			svc := NewProfitPreviewService(repo, &fallbackGroupRepo{groups: map[int64]*Group{10: group}})
 			got, err := svc.ProfitControlPreview(context.Background(), 10, &tc.margin)
 			require.NoError(t, err)
 			require.True(t, repo.listedAll, "members query must include inactive accounts")

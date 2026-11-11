@@ -217,16 +217,12 @@ func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedS
 	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
 
 	body := map[string]any{
-		"openai_low_upstream_rate_priority_scope":                 "groups",
-		"openai_low_upstream_rate_priority_group_ids":             []int64{7, 8},
-		"promo_code_enabled":                                      true,
-		"payment_visible_method_alipay_source":                    "easypay",
-		"payment_visible_method_wxpay_source":                     "wxpay",
-		"payment_visible_method_alipay_enabled":                   true,
-		"payment_visible_method_wxpay_enabled":                    false,
-		"openai_advanced_scheduler_enabled":                       true,
-		"openai_oauth_scheduling_rate_multiplier":                 0.05,
-		"openai_advanced_scheduler_subscription_priority_enabled": true,
+		"promo_code_enabled":                      true,
+		"payment_visible_method_alipay_source":    "easypay",
+		"payment_visible_method_wxpay_source":     "wxpay",
+		"payment_visible_method_alipay_enabled":   true,
+		"payment_visible_method_wxpay_enabled":    false,
+		"openai_oauth_scheduling_rate_multiplier": 0.05,
 	}
 	rawBody, err := json.Marshal(body)
 	require.NoError(t, err)
@@ -243,25 +239,17 @@ func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedS
 	require.Equal(t, service.VisibleMethodSourceOfficialWechat, repo.values[service.SettingPaymentVisibleMethodWxpaySource])
 	require.Equal(t, "true", repo.values[service.SettingPaymentVisibleMethodAlipayEnabled])
 	require.Equal(t, "false", repo.values[service.SettingPaymentVisibleMethodWxpayEnabled])
-	require.Equal(t, "true", repo.values["openai_advanced_scheduler_enabled"])
 	require.Equal(t, "0.05", repo.values[service.SettingKeyOpenAIOAuthSchedulingRateMultiplier])
-	require.Equal(t, "true", repo.values[service.SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled])
 
-	require.Equal(t, "groups", repo.values[service.SettingKeyOpenAILowUpstreamRatePriorityScope])
-	require.Equal(t, "[7,8]", repo.values[service.SettingKeyOpenAILowUpstreamRatePriorityGroupIDs])
 	var resp response.Response
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	data, ok := resp.Data.(map[string]any)
 	require.True(t, ok)
-	require.Equal(t, "groups", data["openai_low_upstream_rate_priority_scope"])
-	require.Equal(t, []any{float64(7), float64(8)}, data["openai_low_upstream_rate_priority_group_ids"])
 	require.Equal(t, service.VisibleMethodSourceEasyPayAlipay, data["payment_visible_method_alipay_source"])
 	require.Equal(t, service.VisibleMethodSourceOfficialWechat, data["payment_visible_method_wxpay_source"])
 	require.Equal(t, true, data["payment_visible_method_alipay_enabled"])
 	require.Equal(t, false, data["payment_visible_method_wxpay_enabled"])
-	require.Equal(t, true, data["openai_advanced_scheduler_enabled"])
 	require.Equal(t, 0.05, data["openai_oauth_scheduling_rate_multiplier"])
-	require.Equal(t, true, data["openai_advanced_scheduler_subscription_priority_enabled"])
 }
 
 func TestSettingHandler_UpdateSettings_PreservesLegacyBlankPaymentVisibleMethodSource(t *testing.T) {

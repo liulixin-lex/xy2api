@@ -149,16 +149,12 @@ func TestOpenAIQualityRoutingSchedulersAndIsolation(t *testing.T) {
 	for _, advanced := range []bool{false, true} {
 		for _, weighted := range []bool{false, true} {
 			t.Run(fmt.Sprintf("advanced=%v/weighted=%v", advanced, weighted), func(t *testing.T) {
-				resetOpenAIAdvancedSchedulerSettingCacheForTest()
-				defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 				accounts := []Account{qualityTestAccount(1, "https://bad.example/v1"), qualityTestAccount(2, "https://bad.example/v1/"), qualityTestAccount(3, "https://good.example/v1")}
 				cache := &stubGatewayCache{}
 				s := &OpenAIGatewayService{accountRepo: stubOpenAIAccountRepo{accounts: accounts}, cache: cache, cfg: &config.Config{}}
 				s.cfg.Gateway.OpenAIWS.SessionHashReadOldFallback = true
 				s.cfg.Gateway.OpenAIWS.SessionHashDualWriteOld = true
-				settings := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
-					openAIAdvancedSchedulerSettingKey: fmt.Sprint(advanced), SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled: fmt.Sprint(weighted),
-				}}
+				settings := &selectionSettingRepoStub{values: map[string]string{}}
 				s.rateLimitService = &RateLimitService{settingService: NewSettingService(settings, s.cfg)}
 				c, _, hash := qualityTestContext(s, 10, 0, "gpt-6-astra", "")
 				cache.sessionBindings = map[string]int64{s.openAILegacySessionCacheKey(c.Request.Context(), hash): 1}

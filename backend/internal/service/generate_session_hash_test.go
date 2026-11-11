@@ -4,7 +4,6 @@ package service
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/liulixin-lex/xy2api/internal/domain"
@@ -743,7 +742,7 @@ func TestGenerateSessionHash_StableAnchorSeparatesGroupsAndNULBoundaries(t *test
 	require.NotEqual(t, svc.GenerateSessionHash(nulInSystem), svc.GenerateSessionHash(nulInUser), "escaped NUL bytes cannot impersonate the system-user delimiter")
 }
 
-func TestGenerateSessionHash_StableAnchorIsUnprefixedAndDoesNotMutateBody(t *testing.T) {
+func TestGenerateSessionHash_StableAnchorDoesNotMutateBody(t *testing.T) {
 	svc := &GatewayService{}
 	body := `{"system":"system","messages":[{"role":"user","content":"prompt"}]}`
 	parsed := mustParseSessionHashRequest(t, body, &SessionContext{ClientIP: "192.0.2.1", UserAgent: "client", APIKeyID: 18})
@@ -751,7 +750,6 @@ func TestGenerateSessionHash_StableAnchorIsUnprefixedAndDoesNotMutateBody(t *tes
 
 	hash := svc.GenerateSessionHash(parsed)
 	require.NotEmpty(t, hash)
-	require.False(t, strings.HasPrefix(hash, shareAnchorPrefix), "ordinary fallback hashes are not share anchors")
 	require.Equal(t, original, parsed.Body.Bytes(), "hash calculation must not rewrite request bytes")
 }
 

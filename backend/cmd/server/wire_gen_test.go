@@ -106,9 +106,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		nil,                         // openAIAutoReset
 		nil,                         // promptAudit
 		nil,                         // pluginManager
-		nil,                         // shareScheduling
 		nil,                         // resilience
-		nil,                         // groupQualityGate
 		nil,                         // schedQuality
 		nil,                         // schedTests
 		nil,                         // schedAttempts

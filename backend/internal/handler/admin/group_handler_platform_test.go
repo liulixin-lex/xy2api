@@ -118,7 +118,7 @@ func TestGroupProfitControlPreviewHandler(t *testing.T) {
 		{"10?margin=1", 400, 0, 0}, {"10?margin=abc", 400, 0, 0}, {"bad?margin=0.2", 400, 0, 0}, {"0", 400, 0, 0}, {"99", 404, 0, 0},
 	} {
 		t.Run(tc.query, func(t *testing.T) {
-			h := NewGroupQualityGateHandler(service.NewGroupQualityGateService(nil, profitPreviewAccounts{}, profitPreviewGroups{}))
+			h := NewProfitPreviewHandler(service.NewProfitPreviewService(profitPreviewAccounts{}, profitPreviewGroups{}))
 			router := gin.New()
 			router.GET("/groups/:id", h.ProfitControlPreview)
 			w := httptest.NewRecorder()

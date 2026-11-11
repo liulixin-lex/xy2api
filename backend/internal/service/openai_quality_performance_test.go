@@ -72,8 +72,6 @@ func TestOpenAIQualityHealthyPerformance(t *testing.T) {
 	if addr == "" {
 		t.Skip("set QUALITY_TEST_REDIS_ADDR for five-round Redis/mock-upstream comparison")
 	}
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
-	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	rdb := redis.NewClient(&redis.Options{Addr: addr})
 	defer func() { _ = rdb.Close() }()
 	var calls atomic.Int64

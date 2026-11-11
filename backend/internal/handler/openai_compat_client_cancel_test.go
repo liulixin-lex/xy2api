@@ -27,7 +27,6 @@ func TestOpenAICompatibleClientCancelDoesNotReportAccountFailure(t *testing.T) {
 	original, err := settings.GetAllSettings(context.Background())
 	require.NoError(t, err)
 	enabled := *original
-	enabled.OpenAIAdvancedSchedulerEnabled = true
 	require.NoError(t, settings.UpdateSettings(context.Background(), &enabled))
 	t.Cleanup(func() { require.NoError(t, settings.UpdateSettings(context.Background(), original)) })
 	withHandlerResilience(t, nil)
@@ -114,7 +113,6 @@ func TestOpenAICompatibleWriteDisconnectDoesNotReportAccountFailure(t *testing.T
 	original, err := settings.GetAllSettings(context.Background())
 	require.NoError(t, err)
 	enabled := *original
-	enabled.OpenAIAdvancedSchedulerEnabled = true
 	require.NoError(t, settings.UpdateSettings(context.Background(), &enabled))
 	t.Cleanup(func() { require.NoError(t, settings.UpdateSettings(context.Background(), original)) })
 	withHandlerResilience(t, nil)

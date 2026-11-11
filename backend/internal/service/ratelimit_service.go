@@ -61,8 +61,7 @@ type SuccessfulTestRecoveryResult struct {
 
 // AccountRecoveryOptions 控制账号恢复时的附加行为。
 type AccountRecoveryOptions struct {
-	InvalidateToken       bool
-	ResetGroupQualityGate bool
+	InvalidateToken bool
 }
 
 type geminiUsageCacheEntry struct {
@@ -139,14 +138,6 @@ func (s *RateLimitService) SetTokenCacheInvalidator(invalidator TokenCacheInvali
 
 func (s *RateLimitService) SetAccountRuntimeBlocker(blocker AccountRuntimeBlocker) {
 	s.runtimeBlocker = blocker
-}
-
-func (s *RateLimitService) IsOpenAIAdvancedSchedulerStickyWeightedEnabled(ctx context.Context) bool {
-	if s == nil || s.settingService == nil {
-		return false
-	}
-	gateway := &OpenAIGatewayService{rateLimitService: s}
-	return gateway.isOpenAIAdvancedSchedulerStickyWeightedEnabled(ctx)
 }
 
 func (s *RateLimitService) notifyAccountSchedulingBlocked(account *Account, until time.Time, reason string) {

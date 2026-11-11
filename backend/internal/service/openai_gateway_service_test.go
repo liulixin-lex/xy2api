@@ -1780,7 +1780,7 @@ func TestOpenAIStreamingPostOutputDisconnectQuarantinesSharedProxyWithoutSameStr
 		require.Equal(t, string(resilience.CategoryTransient), events[0].ResilienceCategory)
 	}
 
-	scheduler := &defaultOpenAIAccountScheduler{service: svc}
+	scheduler := svc
 	compatible, reason := scheduler.isAccountRequestCompatibleReason(context.Background(), account, OpenAIAccountScheduleRequest{})
 	require.False(t, compatible, "the next request must exclude accounts sharing the quarantined proxy")
 	require.Equal(t, "proxy_stream_quarantined", reason)
@@ -1828,7 +1828,7 @@ func TestOpenAIStreamingTerminalAndClientCancellationDoNotQuarantineProxy(t *tes
 		require.Error(t, err)
 	}
 
-	scheduler := &defaultOpenAIAccountScheduler{service: svc}
+	scheduler := svc
 	compatible, reason := scheduler.isAccountRequestCompatibleReason(context.Background(), account, OpenAIAccountScheduleRequest{})
 	require.True(t, compatible)
 	require.Empty(t, reason)
@@ -2145,15 +2145,14 @@ func TestOpenAIStreamingInBandFailuresCreateOrReuseOpsAttempt(t *testing.T) {
 		terminal     string
 		wantReason   string
 		wantCategory resilience.Category
-		softFailure  bool
 	}{
-		{name: "native oauth bare error at eof", accountType: AccountTypeOAuth, wantReason: postOutputEvent, softFailure: true},
-		{name: "native api key bare error at eof", accountType: AccountTypeAPIKey, wantReason: postOutputEvent, softFailure: true},
-		{name: "passthrough oauth bare error at eof", passthrough: true, accountType: AccountTypeOAuth, wantReason: postOutputEvent, softFailure: true},
+		{name: "native oauth bare error at eof", accountType: AccountTypeOAuth, wantReason: postOutputEvent},
+		{name: "native api key bare error at eof", accountType: AccountTypeAPIKey, wantReason: postOutputEvent},
+		{name: "passthrough oauth bare error at eof", passthrough: true, accountType: AccountTypeOAuth, wantReason: postOutputEvent},
 		{name: "native api key rate limit bare error is not a soft failure", accountType: AccountTypeAPIKey, errorPayload: `{"type":"error","error":{"type":"rate_limit_error","code":"rate_limit_exceeded","message":"Too many requests"}}`, wantReason: postOutputEvent, wantCategory: resilience.CategoryRateLimit},
 		{name: "native api key capacity bare error is not a soft failure", accountType: AccountTypeAPIKey, errorPayload: `{"type":"error","error":{"type":"server_error","code":"server_is_overloaded","message":"Upstream capacity is overloaded"}}`, wantReason: postOutputEvent, wantCategory: resilience.CategoryCapacityShed},
-		{name: "native direct response.failed after bare error is not duplicated", accountType: AccountTypeOAuth, terminal: "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_failed\",\"status\":\"failed\",\"error\":{\"code\":\"server_error\",\"message\":\"temporary upstream failure\"}}}\n\n", softFailure: true},
-		{name: "passthrough direct response.failed after bare error is not duplicated", passthrough: true, accountType: AccountTypeOAuth, terminal: "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_failed\",\"status\":\"failed\",\"error\":{\"code\":\"server_error\",\"message\":\"temporary upstream failure\"}}}\n\n", softFailure: true},
+		{name: "native direct response.failed after bare error is not duplicated", accountType: AccountTypeOAuth, terminal: "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_failed\",\"status\":\"failed\",\"error\":{\"code\":\"server_error\",\"message\":\"temporary upstream failure\"}}}\n\n"},
+		{name: "passthrough direct response.failed after bare error is not duplicated", passthrough: true, accountType: AccountTypeOAuth, terminal: "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_failed\",\"status\":\"failed\",\"error\":{\"code\":\"server_error\",\"message\":\"temporary upstream failure\"}}}\n\n"},
 	}
 
 	for _, tt := range tests {
@@ -2188,7 +2187,6 @@ func TestOpenAIStreamingInBandFailuresCreateOrReuseOpsAttempt(t *testing.T) {
 				wantCategory = resilience.CategoryTransient
 			}
 			require.Equal(t, string(wantCategory), events[0].ResilienceCategory)
-			require.Equal(t, tt.softFailure, IsGroupQualitySoftFailure(events[0].Kind, events[0].UpstreamStatusCode, events[0].ResilienceCategory, events[0].Message))
 			if tt.wantReason != "" {
 				require.Equal(t, tt.wantReason, events[0].Reason)
 				require.Equal(t, "upstream reported a failure after output", events[0].Message)

@@ -113,7 +113,7 @@ func TestOpenAIOAuthSchedulingRateRuntimePreservesExplicitClear(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			resetOpenAISchedulingRateTestCache()
-			repo := &openAIAdvancedSchedulerSettingRepoStub{values: tt.values}
+			repo := &selectionSettingRepoStub{values: tt.values}
 			if tt.startup {
 				require.Equal(t, floatPtr(1), cachedOpenAIOAuthSchedulingRateMultiplier())
 				ProvideSettingService(repo, nil, nil, nil, nil)

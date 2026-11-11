@@ -75,8 +75,7 @@ func TestOpenAIRuntimeBlockedOwnerKeepsTheSessionBinding(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			env := newOpenAIRuntimeBlockEnv(t, lrAccountA, lrAccountB)
 			if advanced {
-				env.svc.rateLimitService = newOpenAIAdvancedSchedulerRateLimitService("true")
-				t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
+				env.svc.rateLimitService = newOpenAISelectionRateLimitService()
 			}
 			env.cache.bind(key, lrAccountA, time.Hour-time.Minute)
 			breakOpenAIModel(t, env, lrAccountA, 3, time.Now())

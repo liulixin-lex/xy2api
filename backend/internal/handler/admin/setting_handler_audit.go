@@ -2,7 +2,6 @@ package admin
 
 import (
 	"log/slog"
-	"reflect"
 
 	"github.com/liulixin-lex/xy2api/internal/handler/dto"
 	"github.com/liulixin-lex/xy2api/internal/server/middleware"
@@ -525,15 +524,6 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.PaymentVisibleMethodWxpayEnabled != after.PaymentVisibleMethodWxpayEnabled {
 		changed = append(changed, "payment_visible_method_wxpay_enabled")
 	}
-	if before.OpenAILowUpstreamRatePriorityEnabled != after.OpenAILowUpstreamRatePriorityEnabled {
-		changed = append(changed, "openai_low_upstream_rate_priority_enabled")
-	}
-	if before.OpenAILowUpstreamRatePriorityScope != after.OpenAILowUpstreamRatePriorityScope {
-		changed = append(changed, "openai_low_upstream_rate_priority_scope")
-	}
-	if !reflect.DeepEqual(before.OpenAILowUpstreamRatePriorityGroupIDs, after.OpenAILowUpstreamRatePriorityGroupIDs) {
-		changed = append(changed, "openai_low_upstream_rate_priority_group_ids")
-	}
 	if !equalNullableFloat(before.OpenAIOAuthSchedulingRateMultiplier, after.OpenAIOAuthSchedulingRateMultiplier) {
 		changed = append(changed, "openai_oauth_scheduling_rate_multiplier")
 	}
@@ -542,48 +532,6 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.SchedQualityTestEnabled != after.SchedQualityTestEnabled {
 		changed = append(changed, service.SettingKeySchedQualityTestEnabled)
-	}
-	if before.OpenAIAdvancedSchedulerEnabled != after.OpenAIAdvancedSchedulerEnabled {
-		changed = append(changed, "openai_advanced_scheduler_enabled")
-	}
-	if before.OpenAIAdvancedSchedulerStickyWeightedEnabled != after.OpenAIAdvancedSchedulerStickyWeightedEnabled {
-		changed = append(changed, "openai_advanced_scheduler_sticky_weighted_enabled")
-	}
-	if before.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled != after.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled {
-		changed = append(changed, "openai_advanced_scheduler_subscription_priority_enabled")
-	}
-	if before.OpenAIAdvancedSchedulerLBTopK != after.OpenAIAdvancedSchedulerLBTopK {
-		changed = append(changed, "openai_advanced_scheduler_lb_top_k")
-	}
-	if before.OpenAIAdvancedSchedulerWeightPriority != after.OpenAIAdvancedSchedulerWeightPriority {
-		changed = append(changed, "openai_advanced_scheduler_weight_priority")
-	}
-	if before.OpenAIAdvancedSchedulerWeightLoad != after.OpenAIAdvancedSchedulerWeightLoad {
-		changed = append(changed, "openai_advanced_scheduler_weight_load")
-	}
-	if before.OpenAIAdvancedSchedulerWeightQueue != after.OpenAIAdvancedSchedulerWeightQueue {
-		changed = append(changed, "openai_advanced_scheduler_weight_queue")
-	}
-	if before.OpenAIAdvancedSchedulerWeightErrorRate != after.OpenAIAdvancedSchedulerWeightErrorRate {
-		changed = append(changed, "openai_advanced_scheduler_weight_error_rate")
-	}
-	if before.OpenAIAdvancedSchedulerWeightTTFT != after.OpenAIAdvancedSchedulerWeightTTFT {
-		changed = append(changed, "openai_advanced_scheduler_weight_ttft")
-	}
-	if before.OpenAIAdvancedSchedulerWeightReset != after.OpenAIAdvancedSchedulerWeightReset {
-		changed = append(changed, "openai_advanced_scheduler_weight_reset")
-	}
-	if before.OpenAIAdvancedSchedulerWeightQuotaHeadroom != after.OpenAIAdvancedSchedulerWeightQuotaHeadroom {
-		changed = append(changed, "openai_advanced_scheduler_weight_quota_headroom")
-	}
-	if before.OpenAIAdvancedSchedulerWeightUpstreamCost != after.OpenAIAdvancedSchedulerWeightUpstreamCost {
-		changed = append(changed, "openai_advanced_scheduler_weight_upstream_cost")
-	}
-	if before.OpenAIAdvancedSchedulerWeightPreviousResponse != after.OpenAIAdvancedSchedulerWeightPreviousResponse {
-		changed = append(changed, "openai_advanced_scheduler_weight_previous_response")
-	}
-	if before.OpenAIAdvancedSchedulerWeightSessionSticky != after.OpenAIAdvancedSchedulerWeightSessionSticky {
-		changed = append(changed, "openai_advanced_scheduler_weight_session_sticky")
 	}
 	// 余额、订阅到期与账号限额通知
 	if before.BalanceLowNotifyEnabled != after.BalanceLowNotifyEnabled {

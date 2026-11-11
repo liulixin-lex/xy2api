@@ -4,7 +4,6 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -20,8 +19,6 @@ func TestStickyBypassBalancePause(t *testing.T) {
 			for _, pause := range []string{"active", "expired", "disabled", "request_failed"} {
 				t.Run(platform+"/"+mode+"/"+pause, func(t *testing.T) {
 					withResilienceSettings(t, nil)
-					resetOpenAIAdvancedSchedulerSettingCacheForTest()
-					t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
 					groupID := int64(10)
 					until := time.Now().Add(time.Minute)
 					accounts := []Account{
@@ -41,7 +38,7 @@ func TestStickyBypassBalancePause(t *testing.T) {
 						cache:       &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:balance-session": 1}},
 						cfg:         cfg, concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
 						resilience:       NewResilienceService(nil, newMemResilienceStore()),
-						rateLimitService: newOpenAIAdvancedSchedulerRateLimitService(fmt.Sprint(mode == "advanced"), "false"),
+						rateLimitService: newOpenAISelectionRateLimitService(),
 					}
 					state := resilience.NewRequestState()
 					ctx := resilience.WithRequestState(context.Background(), state)
