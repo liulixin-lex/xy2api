@@ -63,7 +63,9 @@ func TestClaudeAPIKeyCompatStreamSignedBlocksUseContentOrder(t *testing.T) {
 	s.observeAnthropicCompatResponse(ctx, resp, plan)
 	_, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
-	require.Equal(t, []anthropicCompatOpaque{{"thinking", "first"}, {"redacted_thinking", "second"}, {"thinking", "first"}}, resp.Body.(*anthropicCompatResponseBody).values)
+	observer, ok := resp.Body.(*anthropicCompatResponseBody)
+	require.True(t, ok)
+	require.Equal(t, []anthropicCompatOpaque{{"thinking", "first"}, {"redacted_thinking", "second"}, {"thinking", "first"}}, observer.values)
 	require.Equal(t, 1, store.registers)
 	require.Len(t, store.records, 2, "only persistence keys may be deduplicated")
 }

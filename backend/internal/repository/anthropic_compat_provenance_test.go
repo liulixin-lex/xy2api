@@ -18,7 +18,9 @@ func newCompatProvenanceTestCache(t *testing.T) (*gatewayCache, *miniredis.Minir
 	server.SetTime(time.Now())
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
-	return NewGatewayCache(client).(*gatewayCache), server
+	cache, ok := NewGatewayCache(client).(*gatewayCache)
+	require.True(t, ok)
+	return cache, server
 }
 
 func TestAnthropicCompatProvenanceDuplicateKeysAreIdempotentAtCapacity(t *testing.T) {

@@ -103,13 +103,16 @@ func (s *GatewayService) DiagnoseModelAvailabilityForPlatform(
 		}
 		diag.HasAccountsInPool = true
 		account := &accounts[i]
-		profile, profileErr := ResolveAnthropicCompatProfile(account)
+		profile, profileErr := configuredAnthropicCompatProfile(account)
 		supported := false
 		if profileErr == nil && profile != nil {
 			model := anthropicCompatDispatchModel(ctx, requestedModel)
 			supported = anthropicCompatModelSupported(account, model)
 		} else if profileErr == nil {
 			supported = s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)
+		} else {
+			// Malformed readiness must never turn a configured model into a 404.
+			supported = account.IsModelSupported(anthropicCompatDispatchModel(ctx, requestedModel))
 		}
 		if supported {
 			diag.HasModelSupport = true

@@ -55,7 +55,7 @@ func anthropicCompatDispatchModel(ctx context.Context, model string) string {
 // Persistent support excludes request-specific beta and identity readiness gates.
 // Those affect scheduling, not the model-not-found diagnosis.
 func anthropicCompatModelSupported(account *Account, model string) bool {
-	profile, err := ResolveAnthropicCompatProfile(account)
+	profile, err := configuredAnthropicCompatProfile(account)
 	return err == nil && (profile == nil || (account.IsModelSupported(model) && profile.SupportsModel(account.GetMappedModel(model))))
 }
 
@@ -67,18 +67,21 @@ func (s *GatewayService) anthropicCompatCandidateEligible(ctx context.Context, a
 // requests can receive a candidate-ineligible error and try another account.
 func (s *GatewayService) anthropicCompatCandidateEligibility(ctx context.Context, account *Account, model string) error {
 	scope := compatScope(ctx)
-	profile, err := ResolveAnthropicCompatProfile(account)
+	profile, err := resolveAnthropicCompatProfile(ctx, account)
 	if err != nil {
 		return compatCandidateError(scope, compatInvalid("anthropic_compat_configuration_conflict", err.Error()))
 	}
 	if profile == nil {
 		return nil
 	}
-	if scope != nil && scope.Record == nil && scope.NativeCompatible {
+	if (scope == nil || scope.Record == nil) && !anthropicCompatAcceptsNewSessions(account) {
+		return compatCandidateError(scope, compatUnavailable("Compatibility account is draining existing sessions"))
+	}
+	if scope != nil && scope.Record == nil && ((profile.ID == AnthropicCompatProfileClaudeCodeV1 && scope.NativeCompatible) || (profile.ID == AnthropicCompatProfileClaudeCodeV2 && scope.NativeCompatibleV2)) {
 		return nil
 	}
-	if scope != nil && scope.ChatContinuation {
-		return compatCandidateError(scope, compatChatContinuationError())
+	if err := compatChatProfileContinuationError(scope, profile); err != nil {
+		return compatCandidateError(scope, err)
 	}
 	if err, _ := ctx.Value(anthropicCompatRequestEligibilityKey{}).(error); err != nil {
 		return compatCandidateError(scope, err)

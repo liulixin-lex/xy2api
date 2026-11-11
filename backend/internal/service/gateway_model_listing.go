@@ -32,7 +32,7 @@ func (s *GatewayService) GetAvailableModelCatalog(ctx context.Context, groupID *
 	cacheKey := modelsListCacheKey(groupID, platform)
 	// Profile revisions version cached capabilities; they do not migrate signed
 	// history. Account edits still require invalidation or the short cache TTL.
-	revision := claudeCodeV1CompatProfile.Revision
+	revision := claudeCodeV1CompatProfile.Revision + ":" + claudeCodeV2CompatProfile.Revision
 	s.modelsListCacheMu.Lock()
 	generation := s.modelsListGeneration
 	if s.modelsListCache != nil {
@@ -88,7 +88,7 @@ func (s *GatewayService) GetAvailableModelCatalog(ctx context.Context, groupID *
 	modelSet := make(map[string]struct{})
 	for i := range accounts {
 		account := &accounts[i]
-		profile, profileErr := ResolveAnthropicCompatProfile(account)
+		profile, profileErr := configuredAnthropicCompatProfile(account)
 		if profileErr != nil || profile != nil {
 			catalog.RestrictFallback = true
 			if profileErr == nil {
@@ -113,7 +113,7 @@ func (s *GatewayService) GetAvailableModelCatalog(ctx context.Context, groupID *
 		// mixed pool. Compatibility accounts only contribute their intersection.
 		for i := range accounts {
 			account := &accounts[i]
-			profile, err := ResolveAnthropicCompatProfile(account)
+			profile, err := configuredAnthropicCompatProfile(account)
 			if err == nil && profile == nil && account.Platform == PlatformAnthropic && len(account.GetModelMapping()) == 0 {
 				for _, model := range claude.DefaultModels {
 					modelSet[model.ID] = struct{}{}

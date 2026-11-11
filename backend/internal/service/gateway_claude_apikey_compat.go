@@ -106,6 +106,9 @@ func compatClientHeaders(c *gin.Context) http.Header {
 }
 
 func compatCompleteNative(body []byte, headers http.Header, profile *AnthropicCompatProfile) bool {
+	if profile != nil && profile.ID == AnthropicCompatProfileClaudeCodeV2 {
+		return compatCompleteNativeV2(body, headers, profile)
+	}
 	if profile == nil || !claudeCliUserAgentRe.MatchString(headers.Get("User-Agent")) || headers.Get("X-App") != "cli" || headers.Get("anthropic-version") != profile.APIVersion {
 		return false
 	}
@@ -137,7 +140,7 @@ func compatCompleteNative(body []byte, headers http.Header, profile *AnthropicCo
 		return false
 	}
 	index := 0
-	if compatIsBillingHeaderBlock(blocks[0]) {
+	if strings.HasPrefix(blocks[0].Get("text").String(), "x-anthropic-billing-header:") {
 		if billingVersion := ccVersionInBillingRe.FindString(blocks[0].Get("text").String()); billingVersion != "" && billingVersion != "cc_version="+ExtractCLIVersion(headers.Get("User-Agent")) {
 			return false
 		}
@@ -146,16 +149,70 @@ func compatCompleteNative(body []byte, headers http.Header, profile *AnthropicCo
 	if index >= len(blocks) || blocks[index].Get("type").String() != "text" || blocks[index].Get("text").String() != profile.SystemIdentity {
 		return false
 	}
-	identityCount := 1
 	for _, block := range blocks[index+1:] {
-		if compatIsBillingHeaderBlock(block) {
+		if block.Get("type").String() == "text" && block.Get("text").String() == profile.SystemIdentity {
 			return false
 		}
-		if block.Get("type").String() == "text" && block.Get("text").String() == profile.SystemIdentity {
-			identityCount++
+	}
+	return true
+}
+
+func compatCompleteNativeV2(body []byte, headers http.Header, profile *AnthropicCompatProfile) bool {
+	if profile == nil || !claudeCliUserAgentRe.MatchString(headers.Get("User-Agent")) || headers.Get("X-App") != "cli" || headers.Get("anthropic-version") != profile.APIVersion {
+		return false
+	}
+	if !compatValidNativeMetadata(body, headers) || !compatHasRequiredBetas(headers, profile) {
+		return false
+	}
+	system := gjson.GetBytes(body, "system")
+	if !system.IsArray() {
+		return false
+	}
+	blocks := system.Array()
+	if len(blocks) < 2 || !compatIsBillingHeaderBlock(blocks[0]) {
+		return false
+	}
+	billing := blocks[0].Get("text").String()
+	if !compatV2Billing.MatchString(billing) || ccVersionInBillingRe.FindString(billing) != "cc_version="+ExtractCLIVersion(headers.Get("User-Agent")) {
+		return false
+	}
+	identityIndex := 1
+	if identityIndex >= len(blocks) || blocks[identityIndex].Get("type").String() != "text" || blocks[identityIndex].Get("text").String() != profile.SystemIdentity {
+		return false
+	}
+	for _, block := range blocks[identityIndex+1:] {
+		if block.Get("type").String() != "text" || block.Get("text").Type != gjson.String || block.Get("text").String() == profile.SystemIdentity || compatIsBillingHeaderBlock(block) {
+			return false
 		}
 	}
-	return identityCount == 1
+	return true
+}
+
+func compatValidNativeMetadata(body []byte, headers http.Header) bool {
+	metadata := ParseMetadataUserID(gjson.GetBytes(body, "metadata.user_id").String())
+	if metadata == nil || len(metadata.DeviceID) != 64 || !compatValidUUID(metadata.SessionID) || (metadata.AccountUUID != "" && !compatValidUUID(metadata.AccountUUID)) {
+		return false
+	}
+	if device, err := hex.DecodeString(metadata.DeviceID); err != nil || len(device) != 32 {
+		return false
+	}
+	if session := headers.Get("X-Claude-Code-Session-Id"); session != "" && !strings.EqualFold(session, metadata.SessionID) {
+		return false
+	}
+	return true
+}
+
+func compatHasRequiredBetas(headers http.Header, profile *AnthropicCompatProfile) bool {
+	betas := make(map[string]bool)
+	for _, beta := range strings.Split(headers.Get("anthropic-beta"), ",") {
+		betas[strings.TrimSpace(beta)] = true
+	}
+	for _, beta := range profile.RequiredBetas {
+		if !betas[beta] {
+			return false
+		}
+	}
+	return true
 }
 
 func compatIsBillingHeaderBlock(block gjson.Result) bool {
@@ -179,7 +236,7 @@ func (s *GatewayService) beginAnthropicCompatAttempt(ctx context.Context, c *gin
 	if err := s.guardAnthropicCompatAccount(ctx, account); err != nil {
 		return ctx, err
 	}
-	profile, err := ResolveAnthropicCompatProfile(account)
+	profile, err := resolveAnthropicCompatProfile(ctx, account)
 	if err != nil {
 		return ctx, compatCandidateError(compatScope(ctx), compatInvalid("anthropic_compat_configuration_conflict", err.Error()))
 	}
@@ -228,6 +285,9 @@ func compatUUID(digest string) string {
 }
 
 func compatInjectBody(body []byte, profile *AnthropicCompatProfile, metadata string) ([]byte, error) {
+	if profile.ID == AnthropicCompatProfileClaudeCodeV2 {
+		return compatInjectBodyV2(body, profile, metadata)
+	}
 	system := gjson.GetBytes(body, "system")
 	identity, _ := json.Marshal(map[string]string{"type": "text", "text": profile.SystemIdentity})
 	var blocks []json.RawMessage
@@ -253,14 +313,10 @@ func compatInjectBody(body []byte, profile *AnthropicCompatProfile, metadata str
 			return nil, compatInvalid("anthropic_compat_request_unsupported", "system must be text or a block array")
 		}
 	}
-	if identityCount > 1 {
+	if identityCount > 1 || identityPosition > 0 {
 		return nil, compatInvalid("anthropic_compat_history_incompatible", "Existing Claude Code identity must occur exactly once at the start of system")
 	}
-	if identityPosition > 0 {
-		managedIdentity := blocks[identityPosition]
-		blocks = append(blocks[:identityPosition], blocks[identityPosition+1:]...)
-		blocks = append([]json.RawMessage{managedIdentity}, blocks...)
-	} else if identityCount == 0 {
+	if identityCount == 0 {
 		blocks = append([]json.RawMessage{identity}, blocks...)
 	}
 	raw, _ := json.Marshal(blocks)
@@ -328,7 +384,7 @@ func (s *GatewayService) newAnthropicCompatPlan(ctx context.Context, c *gin.Cont
 	if err := s.guardAnthropicCompatAccount(ctx, account); err != nil {
 		return nil, err
 	}
-	profile, err := ResolveAnthropicCompatProfile(account)
+	profile, err := resolveAnthropicCompatProfile(ctx, account)
 	if err != nil {
 		return nil, compatCandidateError(compatScope(ctx), compatInvalid("anthropic_compat_configuration_conflict", err.Error()))
 	}
@@ -339,8 +395,11 @@ func (s *GatewayService) newAnthropicCompatPlan(ctx context.Context, c *gin.Cont
 	if scope == nil {
 		return nil, compatUnavailable("Authenticated compatibility request scope is unavailable")
 	}
-	if scope.ChatContinuation {
-		return nil, compatCandidateError(scope, compatChatContinuationError())
+	if scope.Record == nil && !anthropicCompatAcceptsNewSessions(account) {
+		return nil, compatCandidateError(scope, compatUnavailable("Compatibility account is draining existing sessions"))
+	}
+	if err := compatChatProfileContinuationError(scope, profile); err != nil {
+		return nil, compatCandidateError(scope, err)
 	}
 	if scope.Record == nil && scope.Entry == "messages" && compatCompleteNative(body, compatClientHeaders(c), profile) {
 		plan := &anthropicCompatPlan{Decision: "already_compatible", Profile: profile, Scope: scope}
@@ -452,7 +511,7 @@ func applyAnthropicCompatHeaders(headers http.Header, plan *anthropicCompatPlan)
 		deleteHeaderAllForms(headers, name)
 		setHeaderRaw(headers, name, value)
 	}
-	if getHeaderRaw(headers, "X-Claude-Code-Session-Id") != "" {
+	if plan.Profile.ID == AnthropicCompatProfileClaudeCodeV2 || getHeaderRaw(headers, "X-Claude-Code-Session-Id") != "" {
 		deleteHeaderAllForms(headers, "X-Claude-Code-Session-Id")
 		setHeaderRaw(headers, "X-Claude-Code-Session-Id", ParseMetadataUserID(plan.Metadata).SessionID)
 	}

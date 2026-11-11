@@ -146,7 +146,7 @@ func ensureAnthropicCompatSeedSQL(extraExpr, credentialPlaceholder string) strin
 		}
 	}
 	valid += " AND (extra->'anthropic_apikey_auth_scheme') IS NOT DISTINCT FROM ((" + extraExpr + ")->'anthropic_apikey_auth_scheme')"
-	return "CASE WHEN platform = 'anthropic' AND type = 'apikey' AND (((" + extraExpr + ") ->> 'anthropic_compat_profile') = 'claude_code_v1' OR (extra ->> 'anthropic_compat_identity_seed') ~ '^[0-9a-f]{64}$') THEN " +
+	return "CASE WHEN platform = 'anthropic' AND type = 'apikey' AND (((" + extraExpr + ") ->> 'anthropic_compat_profile') IN ('claude_code_v1', 'claude_code_v2') OR (extra ->> 'anthropic_compat_identity_seed') ~ '^[0-9a-f]{64}$') THEN " +
 		"jsonb_set(" + extraExpr + ", '{anthropic_compat_identity_seed}', CASE WHEN " + valid +
 		" THEN to_jsonb(extra ->> 'anthropic_compat_identity_seed') ELSE to_jsonb(replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '')) END, true) ELSE " + extraExpr + " END"
 }
