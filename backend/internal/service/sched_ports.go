@@ -120,8 +120,9 @@ type SchedQualityTx interface {
 	ResetTimes() (map[int64]time.Time, error)
 	Upsert(rows []schedquality.StateRow) error
 	Delete(keys []schedquality.StateRow) error
-	// DeleteOverrides deletes only when the key and original expires_at still match
-	// and the current expiry has passed.
+	// DeleteOverrides requires the key and original expires_at to still match.
+	// It deletes expired overrides or overrides for an OpenAI group the account left.
+	// The all-groups override (group_id=0) is only removed when expired.
 	DeleteOverrides(expired []SchedOverride) error
 }
 

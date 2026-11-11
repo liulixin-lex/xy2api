@@ -6,7 +6,6 @@
 import dashboardAPI from './dashboard'
 import usersAPI from './users'
 import groupsAPI from './groups'
-import groupQualityGateAPI from './groupQualityGate'
 import accountsAPI from './accounts'
 import proxiesAPI from './proxies'
 import redeemAPI from './redeem'
@@ -37,8 +36,8 @@ import riskControlAPI from './riskControl'
 import adminComplianceAPI from './compliance'
 import auditAPI from './audit'
 import pluginsAPI from './plugins'
-import shareSchedulingAPI from './shareScheduling'
 import resilienceAPI from './resilience'
+import schedQualityAPI from './schedQuality'
 import accessAPI from './access'
 
 /**
@@ -48,7 +47,6 @@ export const adminAPI = {
   dashboard: dashboardAPI,
   users: usersAPI,
   groups: groupsAPI,
-  groupQualityGate: groupQualityGateAPI,
   accounts: accountsAPI,
   proxies: proxiesAPI,
   redeem: redeemAPI,
@@ -79,8 +77,8 @@ export const adminAPI = {
   compliance: adminComplianceAPI,
   audit: auditAPI,
   plugins: pluginsAPI,
-  shareScheduling: shareSchedulingAPI,
   resilience: resilienceAPI,
+  schedQuality: schedQualityAPI,
   access: accessAPI
 }
 
@@ -88,7 +86,6 @@ export {
   dashboardAPI,
   usersAPI,
   groupsAPI,
-  groupQualityGateAPI,
   accountsAPI,
   proxiesAPI,
   redeemAPI,
@@ -119,8 +116,8 @@ export {
   adminComplianceAPI,
   auditAPI,
   pluginsAPI,
-  shareSchedulingAPI,
   resilienceAPI,
+  schedQualityAPI,
   accessAPI
 }
 

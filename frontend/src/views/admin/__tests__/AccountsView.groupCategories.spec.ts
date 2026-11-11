@@ -26,17 +26,12 @@ const {
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
-    groupQualityGate: {
-      getStatus: vi.fn().mockResolvedValue({ generated_at: '', stale: false, groups: [] }),
-      getPolicies: vi.fn().mockResolvedValue({ version: 0, groups: {} }),
-    },
     accounts: {
       list: listAccounts,
       listWithEtag,
       getById,
       update: updateAccount,
       getBatchTodayStats: vi.fn(async () => ({ stats: {} })),
-      getBatchRecentHealth: vi.fn(async () => ({ stats: {} })),
       getUpstreamBillingProbeSettings: vi.fn(async () => ({ enabled: true })),
       batchClearError: vi.fn(),
       batchRefresh: vi.fn(),

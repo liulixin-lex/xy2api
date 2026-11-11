@@ -44,7 +44,7 @@ import { gsap } from 'gsap'
 import { adminAPI } from '@/api/admin'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { useStateMotion } from '@/composables/useStateMotion'
-import type { GroupProfitControlPreview } from '@/types/groupQualityGate'
+import type { GroupProfitControlPreview } from '@/types/groupProfitControl'
 import {
   effectiveProfitMarginPercent,
   formatProfitCeiling,

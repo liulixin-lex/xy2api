@@ -13,7 +13,6 @@ export type AdminModuleId =
   | 'groups'
   | 'channels'
   | 'accounts'
-  | 'share_scheduling'
   | 'announcements'
   | 'support_tickets'
   | 'proxies'
@@ -34,7 +33,6 @@ export const ADMIN_MODULE_IDS: readonly AdminModuleId[] = [
   'groups',
   'channels',
   'accounts',
-  'share_scheduling',
   'announcements',
   'support_tickets',
   'proxies',

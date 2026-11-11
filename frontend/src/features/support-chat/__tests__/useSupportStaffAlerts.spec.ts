@@ -176,8 +176,8 @@ describe('staff support alerts', () => {
     const committed = new Map<string, string>()
     const unpublished = new Map<string, string>()
     const key = 'support_alert_last_id:1'
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation((name: string) => (name === key ? committed.get(name) ?? null : null))
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation((name: string, value: string) => { unpublished.set(name, value) })
+    vi.spyOn(localStorage, 'getItem').mockImplementation((name: string) => (name === key ? committed.get(name) ?? null : null))
+    vi.spyOn(localStorage, 'setItem').mockImplementation((name: string, value: string) => { unpublished.set(name, value) })
     const names: string[] = []
     let queue: Promise<unknown> = Promise.resolve()
     const request = vi.fn((name: string, callback: () => unknown) => {

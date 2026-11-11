@@ -198,32 +198,8 @@ vi.mock("vue-i18n", async () => {
     "admin.settings.paymentVisibleMethods.sourceRequiredError": "{title} 已启用，请先选择支付来源。",
     "admin.settings.payment.configGuide": "查看支付配置说明",
     "admin.settings.payment.findProvider": "查看支持的支付方式",
-    "admin.settings.openaiExperimentalScheduler.title": "OpenAI 实验调度策略",
-    "admin.settings.openaiExperimentalScheduler.description": "默认关闭。开启后仅影响本网关在 OpenAI 账号间的实验性调度选择逻辑，不代表上游 OpenAI 官方能力。",
-    "admin.settings.openaiExperimentalScheduler.lowRatePriorityTitle": "低倍率优先",
-    "admin.settings.openaiExperimentalScheduler.lowRatePriorityDescription": "开启后，候选账号依次按优先级 → 接近满载的置后 → 计费倍率（低的在前）→ 同倍率按预计首字（快的在前）→ 负载 → 最近使用排序。本组开了质量门槛时，先按质量档排序，以上顺序只在同一档内生效。启用实验调度策略后，此开关不生效。",
-    "admin.settings.openaiExperimentalScheduler.oauthRateTitle": "OAuth 调度参考倍率",
-    "admin.settings.openaiExperimentalScheduler.oauthRatePriorityDescription": "OAuth 账号按此参考倍率参与低倍率优先排序；留空时使用各自的账号倍率。API Key 账号优先使用有效探测倍率，无有效探测时使用账号倍率。",
-    "admin.settings.openaiExperimentalScheduler.oauthRateWeightedDescription": "计算“计费倍率”得分时，OAuth 账号使用此参考倍率；留空时使用各自的账号倍率。API Key 账号优先使用有效探测倍率，无有效探测时使用账号倍率。",
-    "admin.settings.openaiExperimentalScheduler.oauthRateInvalid": "OAuth 调度参考倍率必须是非负数字，或留空以使用账号倍率。",
-    "admin.settings.openaiExperimentalScheduler.stickyWeightedTitle": "粘性加权",
-    "admin.settings.openaiExperimentalScheduler.stickyWeightedDescription": "开启后 previous_response_id 和 session_hash 粘性进入高级调度打分；关闭时仍按旧逻辑硬命中粘性账号。",
-    "admin.settings.openaiExperimentalScheduler.subscriptionPriorityTitle": "订阅优先",
-    "admin.settings.openaiExperimentalScheduler.subscriptionPriorityDescription": "开启后先在 ChatGPT 订阅账号池中按权值选取；订阅池拿不到席位时再回退到非订阅账号池。",
-    "admin.settings.openaiExperimentalScheduler.weightsTitle": "调度权值覆盖",
-    "admin.settings.openaiExperimentalScheduler.weightsDescription": "留空时使用配置/环境变量值；配置未设置时使用内置默认值。页面非空设置优先。",
-    "admin.settings.openaiExperimentalScheduler.defaultPlaceholder": "配置/默认：{value}",
-    "admin.settings.openaiExperimentalScheduler.topKLabel": "TopK",
-    "admin.settings.openaiExperimentalScheduler.priorityWeight": "优先级",
-    "admin.settings.openaiExperimentalScheduler.loadWeight": "负载",
-    "admin.settings.openaiExperimentalScheduler.queueWeight": "排队",
-    "admin.settings.openaiExperimentalScheduler.errorRateWeight": "错误率",
-    "admin.settings.openaiExperimentalScheduler.ttftWeight": "首包延迟",
-    "admin.settings.openaiExperimentalScheduler.resetWeight": "重置窗口",
-    "admin.settings.openaiExperimentalScheduler.quotaHeadroomWeight": "额度余量",
-    "admin.settings.openaiExperimentalScheduler.upstreamCostWeight": "计费倍率",
-    "admin.settings.openaiExperimentalScheduler.previousResponseWeight": "previous_response 粘性",
-    "admin.settings.openaiExperimentalScheduler.sessionStickyWeight": "session_hash 粘性",
+    "admin.settings.scheduling.oauthRateTitle": "OAuth 调度参考倍率",
+    "admin.settings.scheduling.oauthRateInvalid": "OAuth 调度参考倍率必须是非负数字，或留空以使用账号倍率。",
     "admin.settings.upstreamBillingProbe.title": "上游倍率自动探测",
     "admin.settings.upstreamBillingProbe.description": "定期获取 OpenAI API Key 所连接上游 XY2API 站点声明的计费倍率。",
     "admin.settings.upstreamBillingProbe.enabled": "启用全局自动探测",
@@ -263,17 +239,6 @@ vi.mock("vue-i18n", async () => {
 });
 
 const AppLayoutStub = { template: "<div><slot /></div>" };
-// 低倍率优先“指定分组”的分组多选：列出候选分组，点击即选中。
-const GroupSelectorStub = defineComponent({
-  props: { modelValue: { type: Array, default: () => [] }, groups: { type: Array, default: () => [] }, platform: String },
-  emits: ["update:modelValue"],
-  setup(props, { emit }) {
-    return () =>
-      h("div", { "data-testid": "group-selector-stub", "data-platform": props.platform }, (props.groups as { id: number; name: string }[]).map((group) =>
-        h("button", { type: "button", "data-group": group.id, onClick: () => emit("update:modelValue", [...(props.modelValue as number[]), group.id]) }, group.name),
-      ));
-  },
-});
 const ToggleStub = defineComponent({
   props: {
     modelValue: {
@@ -518,33 +483,7 @@ const baseSettingsResponse = {
   payment_visible_method_wxpay_source: "invalid-source",
   payment_visible_method_alipay_enabled: true,
   payment_visible_method_wxpay_enabled: true,
-  openai_low_upstream_rate_priority_enabled: false,
   openai_oauth_scheduling_rate_multiplier: 1,
-  openai_advanced_scheduler_enabled: false,
-  openai_advanced_scheduler_sticky_weighted_enabled: false,
-  openai_advanced_scheduler_subscription_priority_enabled: false,
-  openai_advanced_scheduler_lb_top_k: "",
-  openai_advanced_scheduler_weight_priority: "",
-  openai_advanced_scheduler_weight_load: "",
-  openai_advanced_scheduler_weight_queue: "",
-  openai_advanced_scheduler_weight_error_rate: "",
-  openai_advanced_scheduler_weight_ttft: "",
-  openai_advanced_scheduler_weight_reset: "",
-  openai_advanced_scheduler_weight_quota_headroom: "",
-  openai_advanced_scheduler_weight_upstream_cost: "",
-  openai_advanced_scheduler_weight_previous_response: "",
-  openai_advanced_scheduler_weight_session_sticky: "",
-  openai_advanced_scheduler_effective_lb_top_k: "7",
-  openai_advanced_scheduler_effective_weight_priority: "1",
-  openai_advanced_scheduler_effective_weight_load: "1",
-  openai_advanced_scheduler_effective_weight_queue: "0.7",
-  openai_advanced_scheduler_effective_weight_error_rate: "0.8",
-  openai_advanced_scheduler_effective_weight_ttft: "0.5",
-  openai_advanced_scheduler_effective_weight_reset: "0",
-  openai_advanced_scheduler_effective_weight_quota_headroom: "0",
-  openai_advanced_scheduler_effective_weight_upstream_cost: "0",
-  openai_advanced_scheduler_effective_weight_previous_response: "5",
-  openai_advanced_scheduler_effective_weight_session_sticky: "3",
   balance_low_notify_enabled: false,
   balance_low_notify_threshold: 0,
   balance_low_notify_recharge_url: "",
@@ -573,8 +512,6 @@ function mountView() {
         PaymentProviderDialog: true,
         GroupBadge: true,
         GroupOptionItem: true,
-        GroupSelector: GroupSelectorStub,
-        ShareSchedulingSettings: true,
         GatewayResilienceSettings: true,
         ProxySelector: true,
         ImageUpload: ImageUploadStub,
@@ -1450,7 +1387,6 @@ describe("admin SettingsView payment visible method controls", () => {
           PaymentProviderDialog: true,
           GroupBadge: true,
           GroupOptionItem: true,
-          ShareSchedulingSettings: true,
           GatewayResilienceSettings: true,
           ProxySelector: true,
           ImageUpload: ImageUploadStub,
@@ -1469,22 +1405,12 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(getProviders).toHaveBeenCalledTimes(2);
   });
 
-  it("always shows the original upstream scheduling settings", async () => {
+  it("always shows the OAuth reference rate without the retired scheduler switches", async () => {
     const wrapper = mountView(); await flushPromises(); await openGatewayTab(wrapper);
-    expect(wrapper.find('[data-testid="openai-advanced-scheduler-toggle"]').exists()).toBe(true);
-    expect(wrapper.find('[data-testid="scheduling-mode-settings"]').exists()).toBe(false);
-  });
-
-  it("renders advanced scheduler copy as local experimental gateway policy", async () => {
-    const wrapper = mountView();
-
-    await flushPromises();
-
-    expect(wrapper.text()).toContain("OpenAI 实验调度策略");
-    expect(wrapper.text()).toContain(
-      "默认关闭。开启后仅影响本网关在 OpenAI 账号间的实验性调度选择逻辑",
-    );
-    expect(wrapper.text()).not.toContain("OpenAI 高级调度器");
+    expect(wrapper.find('[data-testid="openai-oauth-scheduling-rate-multiplier"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain("OAuth 调度参考倍率");
+    expect(wrapper.find('[data-testid="openai-advanced-scheduler-toggle"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="openai-low-rate-priority-toggle"]').exists()).toBe(false);
   });
 
   it("summarizes target and other-model actions, then switches to all models", async () => {
@@ -1655,11 +1581,9 @@ describe("admin SettingsView payment visible method controls", () => {
     });
   });
 
-  it.each([false, true])("clears the OAuth rate without losing zero (weighted=%s)", async (weighted) => {
+  it("clears the OAuth rate without losing zero", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
-      openai_low_upstream_rate_priority_enabled: !weighted,
-      openai_advanced_scheduler_enabled: weighted,
       openai_oauth_scheduling_rate_multiplier: 0.7,
     });
     const wrapper = mountView();
@@ -1689,7 +1613,6 @@ describe("admin SettingsView payment visible method controls", () => {
   it("loads and preserves an explicitly cleared OAuth rate", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
-      openai_advanced_scheduler_enabled: true,
       openai_oauth_scheduling_rate_multiplier: null,
     });
     const wrapper = mountView();
@@ -1700,123 +1623,6 @@ describe("admin SettingsView payment visible method controls", () => {
     await flushPromises();
     expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
       openai_oauth_scheduling_rate_multiplier: null,
-    }));
-  });
-
-  it("places and explains rate controls for both scheduling modes", async () => {
-    const wrapper = mountView();
-
-    await flushPromises();
-    expect(
-      wrapper.find('[data-testid="openai-oauth-scheduling-rate-multiplier"]').exists(),
-    ).toBe(false);
-
-    const lowRateToggle = wrapper.get('[data-testid="openai-low-rate-priority-toggle"]');
-    await lowRateToggle.setValue(true);
-    const priorityModeText = wrapper.text();
-    expect(priorityModeText).toContain(
-      "OAuth 账号按此参考倍率参与低倍率优先排序；留空时使用各自的账号倍率。",
-    );
-    expect(priorityModeText.indexOf("低倍率优先")).toBeLessThan(
-      priorityModeText.indexOf("OAuth 调度参考倍率"),
-    );
-    expect(priorityModeText.indexOf("OAuth 调度参考倍率")).toBeLessThan(
-      priorityModeText.indexOf("OpenAI 实验调度策略"),
-    );
-
-    const oauthRateInput = wrapper.get(
-      '[data-testid="openai-oauth-scheduling-rate-multiplier"]',
-    );
-    await oauthRateInput.setValue("0.05");
-    await wrapper.find("form").trigger("submit.prevent");
-    await flushPromises();
-
-    expect(updateSettings).toHaveBeenCalledWith(
-      expect.objectContaining({
-        openai_low_upstream_rate_priority_enabled: true,
-        openai_oauth_scheduling_rate_multiplier: 0.05,
-      }),
-    );
-
-    await wrapper
-      .get('[data-testid="openai-advanced-scheduler-toggle"]')
-      .setValue(true);
-    expect(
-      wrapper.find('[data-testid="openai-low-rate-priority-toggle"]').exists(),
-    ).toBe(false);
-    expect(
-      wrapper.find('[data-testid="openai-oauth-scheduling-rate-multiplier"]').exists(),
-    ).toBe(true);
-    const weightedModeText = wrapper.text();
-    expect(weightedModeText).toContain(
-      "计算“计费倍率”得分时，OAuth 账号使用此参考倍率；留空时使用各自的账号倍率。",
-    );
-    expect(weightedModeText).not.toContain(
-      "OAuth 账号按此参考倍率参与低倍率优先排序；",
-    );
-    expect(weightedModeText.indexOf("订阅优先")).toBeLessThan(
-      weightedModeText.indexOf("OAuth 调度参考倍率"),
-    );
-    expect(weightedModeText.indexOf("OAuth 调度参考倍率")).toBeLessThan(
-      weightedModeText.indexOf("调度权值覆盖"),
-    );
-    expect(weightedModeText).toContain("计费倍率");
-  });
-
-  it("limits low-rate priority to selected OpenAI groups and warns that none selected means off", async () => {
-    getGroups.mockResolvedValue([
-      { id: 18, name: "主力", platform: "openai", status: "active", subscription_type: "standard" },
-      { id: 7, name: "Claude", platform: "anthropic", status: "active", subscription_type: "standard" },
-      { id: 53, name: "企业", platform: "openai", status: "inactive", subscription_type: "standard" },
-    ]);
-    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, openai_low_upstream_rate_priority_enabled: true });
-    const wrapper = mountView();
-    await flushPromises();
-
-    const scope = wrapper.get('[data-testid="openai-low-rate-priority-scope"]');
-    expect(scope.get<HTMLInputElement>('[data-testid="openai-low-rate-priority-scope-all"]').element.checked).toBe(true);
-    expect(scope.find('[data-testid="openai-low-rate-priority-groups"]').exists()).toBe(false);
-
-    await scope.get('[data-testid="openai-low-rate-priority-scope-groups"]').setValue(true);
-    const selector = wrapper.get('[data-testid="openai-low-rate-priority-groups"]');
-    expect(selector.findAll("button").map((button) => button.attributes("data-group"))).toEqual(["18", "53"]);
-    expect(wrapper.get('[data-testid="openai-low-rate-priority-groups-empty"]').text()).toBe("admin.settings.openaiExperimentalScheduler.lowRatePriorityScopeEmpty");
-
-    await wrapper.find("form").trigger("submit.prevent");
-    await flushPromises();
-    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({
-      openai_low_upstream_rate_priority_scope: "groups",
-      openai_low_upstream_rate_priority_group_ids: [],
-    }));
-
-    await selector.get('[data-group="53"]').trigger("click");
-    await selector.get('[data-group="18"]').trigger("click");
-    expect(wrapper.find('[data-testid="openai-low-rate-priority-groups-empty"]').exists()).toBe(false);
-    await wrapper.find("form").trigger("submit.prevent");
-    await flushPromises();
-    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({
-      openai_low_upstream_rate_priority_scope: "groups",
-      openai_low_upstream_rate_priority_group_ids: [18, 53],
-    }));
-  });
-
-  it("loads a stored group scope and keeps the default scope as all", async () => {
-    getSettings.mockResolvedValueOnce({
-      ...baseSettingsResponse,
-      openai_low_upstream_rate_priority_enabled: true,
-      openai_low_upstream_rate_priority_scope: "groups",
-      openai_low_upstream_rate_priority_group_ids: [18],
-    });
-    const wrapper = mountView();
-    await flushPromises();
-    expect(wrapper.get<HTMLInputElement>('[data-testid="openai-low-rate-priority-scope-groups"]').element.checked).toBe(true);
-    expect(wrapper.find('[data-testid="openai-low-rate-priority-groups-empty"]').exists()).toBe(false);
-    await wrapper.get('[data-testid="openai-low-rate-priority-scope-all"]').setValue(true);
-    await wrapper.find("form").trigger("submit.prevent");
-    await flushPromises();
-    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({
-      openai_low_upstream_rate_priority_scope: "all",
-      openai_low_upstream_rate_priority_group_ids: [18],
     }));
   });
 
@@ -1885,7 +1691,6 @@ describe("admin SettingsView payment visible method controls", () => {
           PaymentProviderDialog: true,
           GroupBadge: true,
           GroupOptionItem: true,
-          ShareSchedulingSettings: true,
           GatewayResilienceSettings: true,
           ProxySelector: true,
           ImageUpload: ImageUploadStub,

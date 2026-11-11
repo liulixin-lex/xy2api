@@ -166,7 +166,7 @@ func (f *fakeSchedQualityStore) RunCycle(_ context.Context, fn func(SchedQuality
 	now := f.now()
 	for _, expired := range tx.expired {
 		for i, row := range f.OverrideRows {
-			if fakeSchedExpiredOverride(row, expired, now) {
+			if fakeSchedExpiredOverride(row, expired, now, f.Members) {
 				f.OverrideRows = append(f.OverrideRows[:i], f.OverrideRows[i+1:]...)
 				break
 			}
@@ -363,7 +363,7 @@ func (f *fakeSchedQualityTx) DeleteOverrides(keys []SchedOverride) error {
 	for _, k := range keys {
 		var rows []SchedOverride
 		for _, r := range f.overrides {
-			if fakeSchedExpiredOverride(r, k, now) {
+			if fakeSchedExpiredOverride(r, k, now, f.store.Members) {
 				f.expired = append(f.expired, k)
 			} else {
 				rows = append(rows, r)
@@ -374,10 +374,26 @@ func (f *fakeSchedQualityTx) DeleteOverrides(keys []SchedOverride) error {
 	return nil
 }
 
-func fakeSchedExpiredOverride(row, original SchedOverride, now time.Time) bool {
-	return row.AccountID == original.AccountID && row.GroupID == original.GroupID &&
-		row.ExpiresAt != nil && original.ExpiresAt != nil &&
-		row.ExpiresAt.Equal(*original.ExpiresAt) && !row.ExpiresAt.After(now)
+func fakeSchedExpiredOverride(row, original SchedOverride, now time.Time, members map[int64][]int64) bool {
+	if row.AccountID != original.AccountID || row.GroupID != original.GroupID {
+		return false
+	}
+	if (row.ExpiresAt == nil) != (original.ExpiresAt == nil) ||
+		(row.ExpiresAt != nil && !row.ExpiresAt.Equal(*original.ExpiresAt)) {
+		return false
+	}
+	if row.ExpiresAt != nil && !row.ExpiresAt.After(now) {
+		return true
+	}
+	if row.GroupID == 0 {
+		return false
+	}
+	for _, id := range members[row.GroupID] {
+		if id == row.AccountID {
+			return false
+		}
+	}
+	return true
 }
 
 // fakeSchedTestRunner records requests and returns preloaded test records.

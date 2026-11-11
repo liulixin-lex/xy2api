@@ -1,0 +1,25 @@
+{
+  "group_id": 53,
+  "version": 63,
+  "policy": {
+    "enabled": true,
+    "ttft_seconds": 10,
+    "max_error_rate": 0.05,
+    "min_cache_ratio": 0.9,
+    "takeover_idle_seconds": 0
+  },
+  "class_limits_ms": {
+    "gpt-6.1-sol": {
+      "light": 7300,
+      "regular": 10000,
+      "heavy": 12000,
+      "xheavy": 14300
+    },
+    "default": {
+      "light": 7500,
+      "regular": 10000,
+      "heavy": 12000,
+      "xheavy": 14000
+    }
+  }
+}
