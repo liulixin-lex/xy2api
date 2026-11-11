@@ -77,6 +77,9 @@ func (s *GatewayService) anthropicCompatCandidateEligibility(ctx context.Context
 	if scope != nil && scope.Record == nil && scope.NativeCompatible {
 		return nil
 	}
+	if scope != nil && scope.ChatContinuation {
+		return compatCandidateError(scope, compatChatContinuationError())
+	}
 	if err, _ := ctx.Value(anthropicCompatRequestEligibilityKey{}).(error); err != nil {
 		return compatCandidateError(scope, err)
 	}

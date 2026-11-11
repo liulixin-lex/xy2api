@@ -337,6 +337,9 @@ func (s *GatewayService) newAnthropicCompatPlan(ctx context.Context, c *gin.Cont
 	if scope == nil {
 		return nil, compatUnavailable("Authenticated compatibility request scope is unavailable")
 	}
+	if scope.ChatContinuation {
+		return nil, compatCandidateError(scope, compatChatContinuationError())
+	}
 	if scope.Record == nil && scope.Entry == "messages" && compatCompleteNative(body, compatClientHeaders(c), profile) {
 		plan := &anthropicCompatPlan{Decision: "already_compatible", Profile: profile, Scope: scope}
 		if c != nil {

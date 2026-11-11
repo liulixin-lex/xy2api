@@ -143,6 +143,7 @@ type anthropicCompatScope struct {
 	ReadKeys         []string
 	Record           *anthropicCompatRecord
 	HistoryErr       error
+	ChatContinuation bool
 	ClientBeta       string
 	NativeCompatible bool
 }
@@ -216,17 +217,20 @@ func extractAnthropicCompatOpaque(body []byte, entry string) ([]anthropicCompatO
 		})
 	} else {
 		gjson.GetBytes(body, "messages").ForEach(func(_, msg gjson.Result) bool {
-			if entry == "chat" && compatChatHasContinuation(msg) {
-				decodeErr = compatChatContinuationError()
-			}
 			msg.Get("content").ForEach(func(_, block gjson.Result) bool { return add(block) })
 			return true
 		})
 	}
-	if entry == "chat" && len(values) > 0 {
-		decodeErr = compatChatContinuationError()
-	}
 	return values, decodeErr
+}
+
+func compatChatRequestHasContinuation(body []byte) bool {
+	found := false
+	gjson.GetBytes(body, "messages").ForEach(func(_, msg gjson.Result) bool {
+		found = compatChatHasContinuation(msg)
+		return !found
+	})
+	return found
 }
 
 // Chat conversion retains tool_call IDs but drops signed thinking envelopes.
@@ -285,6 +289,9 @@ func validAnthropicCompatRecord(record anthropicCompatRecord) bool {
 func (s *GatewayService) PrepareAnthropicCompatibility(ctx context.Context, userID, keyID int64, body []byte, entry, explicitSession string, headers ...http.Header) (context.Context, error) {
 	values, err := extractAnthropicCompatOpaque(body, entry)
 	scope := &anthropicCompatScope{UserID: userID, KeyID: keyID, Entry: entry, Anchor: uuid.NewString(), Signatures: values, HistoryErr: err}
+	if entry == "chat" {
+		scope.ChatContinuation = compatChatRequestHasContinuation(body)
+	}
 	if len(headers) > 0 {
 		scope.ClientBeta = headers[0].Get("anthropic-beta")
 		scope.NativeCompatible = entry == "messages" && compatCompleteNative(body, headers[0], &claudeCodeV1CompatProfile)

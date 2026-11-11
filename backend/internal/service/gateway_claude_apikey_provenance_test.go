@@ -86,9 +86,10 @@ func TestClaudeAPIKeyCompatStreamRejectsAmbiguousBlockIndexes(t *testing.T) {
 	}
 }
 
-func TestClaudeAPIKeyCompatChatContinuationExplicitlyUnsupported(t *testing.T) {
+func TestClaudeAPIKeyCompatChatContinuationIsProfileSpecificCandidateConstraint(t *testing.T) {
 	// Standard Chat IDs identify tool calls but carry no signed reasoning or
-	// authenticated provenance. Even a client-selected session is not proof.
+	// authenticated provenance. Keep that capability requirement separate from
+	// malformed history so ordinary Anthropic candidates remain eligible.
 	for _, messages := range []string{
 		`[{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]}]`,
 		`[{"role":"tool","tool_call_id":"call_1","content":"ok"}]`,
@@ -101,11 +102,20 @@ func TestClaudeAPIKeyCompatChatContinuationExplicitlyUnsupported(t *testing.T) {
 			body := []byte(`{"model":"claude-opus-5-5","messages":` + messages + `}`)
 			ctx, err := s.PrepareAnthropicCompatibility(context.Background(), 11, 22, body, "chat", "claimed-session")
 			require.NoError(t, err)
-			_, err = s.beginAnthropicCompatAttempt(ctx, compatTestContext(), compatTestAccount(), body, "chat")
-			require.ErrorContains(t, err, "Chat")
-			require.False(t, IsAnthropicCompatCandidateError(err))
-			off := *compatTestAccount()
+			scope := compatScope(ctx)
+			require.True(t, scope.ChatContinuation)
+			require.NoError(t, scope.HistoryErr)
+
+			compat := compatTestAccount()
+			require.False(t, s.anthropicCompatCandidateEligible(ctx, compat, "claude-opus-5-5"), "compatibility candidate must be filtered before slot acquisition")
+
+			off := *compat
 			off.Extra = nil
+			require.True(t, s.anthropicCompatCandidateEligible(ctx, &off, "claude-opus-5-5"), "ordinary Anthropic candidates must remain eligible")
+
+			_, err = s.newAnthropicCompatPlan(ctx, compatTestContext(), compat, body, "claude-opus-5-5")
+			require.ErrorContains(t, err, "Chat")
+			require.True(t, IsAnthropicCompatCandidateError(err))
 			_, err = s.beginAnthropicCompatAttempt(ctx, compatTestContext(), &off, body, "chat")
 			require.NoError(t, err, "legacy requests retain their existing path")
 		})
