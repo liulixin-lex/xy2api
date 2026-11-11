@@ -112,6 +112,43 @@ func TestSchedAttemptSessionAndTestIsolation(t *testing.T) {
 	require.Len(t, store.Rows, 7)
 }
 
+func TestSchedAttemptSessionUnknownUsage(t *testing.T) {
+	store := &fakeSchedAttemptStore{}
+	r := NewSchedAttemptRecorderService(store)
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r.now = func() time.Time { return now }
+	var observed []schedquality.AttemptSample
+	r.SetObserver(func(s schedquality.AttemptSample) { observed = append(observed, s) })
+	in := SchedAttemptStart{AccountID: 1, GroupID: 2, Model: "gpt-6.1-sol", SessionKey: "session", StickyWarm: true, Stream: true, Effort: "xhigh", BodyBytes: 800000}
+	r.Begin(in).FinishOK(&SchedAttemptUsage{PromptTokens: 100})
+	now = now.Add(4 * time.Minute)
+	interrupted := r.Begin(in)
+	now = now.Add(time.Second)
+	interrupted.MarkFirstOutput(now)
+	interrupted.FinishOK(nil)
+	interrupted.FinishOK(&SchedAttemptUsage{PromptTokens: 200, CacheReadTokens: 100})
+	require.Len(t, observed, 2)
+	require.True(t, observed[1].Warm)
+	require.Equal(t, schedquality.ClassRegular, observed[1].Class)
+	require.Equal(t, 1000, *observed[1].TTFOMs)
+	require.Nil(t, observed[1].PromptTokens)
+	require.Nil(t, observed[1].PrevPromptTokens)
+	require.Nil(t, observed[1].CacheReadTokens)
+
+	now = now.Add(4 * time.Minute)
+	r.Begin(in).FinishOK(&SchedAttemptUsage{PromptTokens: 160000})
+	require.Len(t, observed, 3)
+	require.True(t, observed[2].Warm)
+	require.Nil(t, observed[2].PrevPromptTokens)
+	require.Equal(t, schedquality.ClassOf(in.Effort, schedquality.EstimateTokens(in.BodyBytes)), observed[2].Class)
+	require.Equal(t, schedquality.ClassXHeavy, observed[2].Class)
+	r.Stop()
+	require.Len(t, store.Rows, 3)
+	require.Nil(t, store.Rows[1].PromptTokens)
+	require.Nil(t, store.Rows[1].PrevPromptTokens)
+	require.Nil(t, store.Rows[1].CacheReadTokens)
+}
+
 type schedAttemptFailStore struct {
 	fakeSchedAttemptStore
 	muCalls sync.Mutex
@@ -126,8 +163,7 @@ func (s *schedAttemptFailStore) InsertBatch(context.Context, []schedquality.Atte
 }
 
 func TestSchedAttemptQueueDropsAndRetries(t *testing.T) {
-	store := &schedAttemptFailStore{}
-	r := NewSchedAttemptRecorderService(store)
+	r := NewSchedAttemptRecorderService(&fakeSchedAttemptStore{})
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	r.now = func() time.Time { return now }
 	for i := 0; i < 8193; i++ {
@@ -137,11 +173,42 @@ func TestSchedAttemptQueueDropsAndRetries(t *testing.T) {
 	require.Equal(t, 8192, r.Stats().QueueDepth)
 	first := r.takeBatch()
 	require.Len(t, first, 200)
-	var pending []schedquality.AttemptSample
-	require.Error(t, r.drain(context.Background(), &pending))
-	require.EqualValues(t, 7992, r.Stats().DroppedWriteFailed)
-	store.muCalls.Lock()
-	require.Equal(t, 40*4, store.calls)
-	store.muCalls.Unlock()
+	r.Stop()
+
+	store := &schedAttemptFailStore{}
+	r = NewSchedAttemptRecorderService(store)
+	r.now = func() time.Time { return now }
+	r.Begin(SchedAttemptStart{RequestID: "retry"}).FinishOther("failure")
+	var pending schedAttemptPending
+	for attempt := 1; attempt <= 3; attempt++ {
+		require.NoError(t, r.drain(context.Background(), &pending))
+		require.Len(t, pending.rows, 1)
+		require.Equal(t, "retry", pending.rows[0].RequestID)
+		require.Equal(t, attempt, pending.failures)
+		require.Zero(t, r.Stats().DroppedWriteFailed)
+		require.Equal(t, attempt, store.calls)
+	}
+	ticks := make(chan time.Time, 1)
+	ticks <- now.Add(time.Second)
+	require.Error(t, r.flushPending(context.Background(), &pending, ticks))
+	require.Empty(t, ticks)
+	require.Empty(t, pending.rows)
+	require.Zero(t, pending.failures)
+	require.EqualValues(t, 1, r.Stats().DroppedWriteFailed)
+	require.Equal(t, 4, store.calls)
+
+	r.Begin(SchedAttemptStart{RequestID: "recovered"}).FinishOther("failure")
+	require.NoError(t, r.drain(context.Background(), &pending))
+	require.Len(t, pending.rows, 1)
+	recovered := &fakeSchedAttemptStore{}
+	r.store = recovered
+	ticks <- now.Add(2 * time.Second)
+	require.NoError(t, r.flushPending(context.Background(), &pending, ticks))
+	require.Empty(t, ticks)
+	require.Empty(t, pending.rows)
+	require.Zero(t, pending.failures)
+	require.Len(t, recovered.Rows, 1)
+	require.Equal(t, "recovered", recovered.Rows[0].RequestID)
+	require.EqualValues(t, 1, r.Stats().DroppedWriteFailed)
 	r.Stop()
 }

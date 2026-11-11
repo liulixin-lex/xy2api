@@ -15,7 +15,7 @@ type schedAttemptSession struct {
 	key          schedAttemptSessionKey
 	accountID    int64
 	model        string
-	promptTokens int
+	promptTokens *int
 	finishedAt   time.Time
 	touchedAt    time.Time
 }

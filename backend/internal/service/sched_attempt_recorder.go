@@ -18,6 +18,11 @@ type schedAttemptFlush struct {
 	done chan error
 }
 
+type schedAttemptPending struct {
+	rows     []schedquality.AttemptSample
+	failures int
+}
+
 type SchedAttemptRecorderStats struct {
 	QueueDepth         int
 	DroppedQueueFull   uint64
@@ -119,10 +124,10 @@ func (s *SchedAttemptRecorderService) Begin(in SchedAttemptStart) SchedAttempt {
 		row.Warm = in.StickyWarm && ok && prev.accountID == in.AccountID && prev.model == in.Model &&
 			at.Sub(prev.finishedAt) <= schedquality.WarmMaxGap
 		if row.Warm {
-			row.PrevPromptTokens = &prev.promptTokens
+			row.PrevPromptTokens = prev.promptTokens
 		}
 	}
-	if row.Warm {
+	if row.PrevPromptTokens != nil {
 		estTokens = *row.PrevPromptTokens
 	}
 	row.Class = schedquality.ClassOf(in.Effort, estTokens)
@@ -209,13 +214,9 @@ func (h *schedAttemptHandle) finish(outcome schedquality.Outcome, detail string,
 	}
 	s.enqueue(row)
 	if outcome == schedquality.OutcomeOK && row.SessionKey != "" {
-		prompt := 0
-		if row.PromptTokens != nil {
-			prompt = *row.PromptTokens
-		}
 		s.memory.put(schedAttemptSession{
 			key: schedAttemptSessionKey{row.GroupID, row.SessionKey}, accountID: row.AccountID,
-			model: row.Model, promptTokens: prompt, finishedAt: row.FinishedAt,
+			model: row.Model, promptTokens: row.PromptTokens, finishedAt: row.FinishedAt,
 		})
 	}
 }
@@ -306,23 +307,25 @@ func (s *SchedAttemptRecorderService) run(ctx context.Context) {
 	defer close(s.done)
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
-	var pending []schedquality.AttemptSample
+	var pending schedAttemptPending
 	for {
 		select {
 		case <-ctx.Done():
 			s.stopped.Store(true)
 			shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = s.drain(shutdown, &pending)
+			_ = s.flushPending(shutdown, &pending, ticker.C)
 			cancel()
 			return
 		case <-ticker.C:
 			_ = s.drain(ctx, &pending)
 		case <-s.wake:
-			_ = s.drain(ctx, &pending)
+			if pending.failures == 0 {
+				_ = s.drain(ctx, &pending)
+			}
 		case req := <-s.flush:
 			flushCtx, cancel := context.WithCancel(req.ctx)
 			stop := context.AfterFunc(ctx, cancel)
-			err := s.drain(flushCtx, &pending)
+			err := s.flushPending(flushCtx, &pending, ticker.C)
 			stop()
 			cancel()
 			req.done <- err
@@ -330,38 +333,53 @@ func (s *SchedAttemptRecorderService) run(ctx context.Context) {
 	}
 }
 
-func (s *SchedAttemptRecorderService) drain(ctx context.Context, pending *[]schedquality.AttemptSample) error {
+func (s *SchedAttemptRecorderService) flushPending(ctx context.Context, pending *schedAttemptPending, ticks <-chan time.Time) error {
+	var result error
+	for {
+		if pending.failures > 0 {
+			select {
+			case <-ticks:
+			case <-ctx.Done():
+				return errors.Join(result, ctx.Err())
+			}
+		}
+		result = errors.Join(result, s.drain(ctx, pending))
+		if len(pending.rows) == 0 || ctx.Err() != nil {
+			return result
+		}
+	}
+}
+
+func (s *SchedAttemptRecorderService) drain(ctx context.Context, pending *schedAttemptPending) error {
 	remaining := s.Stats().QueueDepth
 	var result error
-	for len(*pending) > 0 || remaining > 0 {
+	for len(pending.rows) > 0 || remaining > 0 {
 		if err := ctx.Err(); err != nil {
 			return errors.Join(result, err)
 		}
-		if len(*pending) == 0 {
-			*pending = s.takeBatch()
-			if len(*pending) == 0 {
+		if len(pending.rows) == 0 {
+			pending.rows = s.takeBatch()
+			if len(pending.rows) == 0 {
 				break
 			}
-			remaining -= len(*pending)
+			remaining -= len(pending.rows)
 		}
-		var err error
-		for attempt := 0; attempt <= 3; attempt++ {
-			writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			err = s.store.InsertBatch(writeCtx, *pending)
-			cancel()
-			if err == nil || ctx.Err() != nil {
-				break
-			}
-		}
+		writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		err := s.store.InsertBatch(writeCtx, pending.rows)
+		cancel()
 		if ctx.Err() != nil && err != nil {
 			return errors.Join(result, ctx.Err())
 		}
 		if err != nil {
-			s.droppedWriteFailed.Add(uint64(len(*pending)))
+			pending.failures++
+			if pending.failures <= 3 {
+				return result
+			}
+			s.droppedWriteFailed.Add(uint64(len(pending.rows)))
 			s.warnDrop("write_failed", &s.lastWriteWarning, err)
 			result = errors.Join(result, err)
 		}
-		*pending = nil
+		*pending = schedAttemptPending{}
 	}
 	return result
 }

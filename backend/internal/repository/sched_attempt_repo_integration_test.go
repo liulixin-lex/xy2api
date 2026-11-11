@@ -4,6 +4,7 @@ package repository
 
 import (
 	"context"
+	"sort"
 	"testing"
 	"time"
 
@@ -27,7 +28,8 @@ func TestSchedAttemptRepositoryIdempotenceAndDelayedInsert(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM account_attempt_samples WHERE account_id=$1`, account)
 	})
-	start := time.Now().UTC().Truncate(time.Microsecond)
+	var start time.Time
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT now()`).Scan(&start))
 	first := schedAttemptTestRow(account, start)
 	late := schedAttemptTestRow(account, start.Add(-45*time.Second))
 	require.NoError(t, repo.InsertBatch(ctx, []schedquality.AttemptSample{first, first}))
@@ -67,21 +69,22 @@ func TestSchedAttemptRepositoryOverlappingSlowStatement(t *testing.T) {
 		_, _ = integrationDB.ExecContext(ctx, `DROP FUNCTION IF EXISTS sched_attempt_test_delay()`)
 		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM account_attempt_samples WHERE account_id=$1`, account)
 	})
-	start := time.Now().UTC().Add(-time.Second)
+	var start time.Time
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT now() - interval '1 second'`).Scan(&start))
 	slow := schedAttemptTestRow(account, start)
 	slow.RequestID = "slow"
 	fast := schedAttemptTestRow(account, start)
 	finished := make(chan error, 1)
 	go func() { finished <- repo.InsertBatch(ctx, []schedquality.AttemptSample{slow}) }()
-	deadline := time.Now().Add(3 * time.Second)
+	waitCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
 	for {
 		var running bool
-		err := integrationDB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE wait_event='PgSleep' AND query LIKE '%INSERT INTO account_attempt_samples%')`).Scan(&running)
+		err := integrationDB.QueryRowContext(waitCtx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE wait_event='PgSleep' AND query LIKE '%INSERT INTO account_attempt_samples%')`).Scan(&running)
 		require.NoError(t, err)
 		if running {
 			break
 		}
-		require.True(t, time.Now().Before(deadline), "slow statement did not start")
 	}
 	require.NoError(t, repo.InsertBatch(ctx, []schedquality.AttemptSample{fast}))
 	rows, cursor, err := repo.LoadInsertedAfter(ctx, start, 100)
@@ -103,15 +106,20 @@ func TestSchedAttemptRepositoryInsertedPageKeepsTimestampGroup(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM account_attempt_samples WHERE account_id=$1`, account)
 	})
-	start := time.Now().UTC().Truncate(time.Microsecond)
-	batch := make([]schedquality.AttemptSample, 200)
-	ids := make(map[string]bool, len(batch))
-	for i := range batch {
-		batch[i] = schedAttemptTestRow(account, start)
-		ids[batch[i].AttemptID] = true
+	var start time.Time
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT now()`).Scan(&start))
+	ids := make(map[string]bool)
+	for _, n := range []int{200, 40, 10} {
+		batch := make([]schedquality.AttemptSample, n)
+		for i := range batch {
+			batch[i] = schedAttemptTestRow(account, start)
+			ids[batch[i].AttemptID] = true
+		}
+		require.NoError(t, repo.InsertBatch(ctx, batch))
 	}
-	require.NoError(t, repo.InsertBatch(ctx, batch))
-	rows, cursor, err := repo.LoadInsertedAfter(ctx, start.Add(-time.Second), 50)
+	var base time.Time
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT min(inserted_at) - interval '1 microsecond' FROM account_attempt_samples WHERE account_id=$1`, account).Scan(&base))
+	rows, cursor, err := repo.LoadInsertedAfter(ctx, base, 50)
 	require.NoError(t, err)
 	require.Len(t, rows, 200)
 	for _, row := range rows {
@@ -119,8 +127,26 @@ func TestSchedAttemptRepositoryInsertedPageKeepsTimestampGroup(t *testing.T) {
 		delete(ids, row.AttemptID)
 		require.True(t, cursor.Equal(row.InsertedAt))
 	}
+	for _, c := range []struct{ limit, want int }{{1, 40}, {40, 40}, {45, 50}, {50, 50}, {0, 50}} {
+		page, maxInserted, err := repo.LoadInsertedAfter(ctx, cursor, c.limit)
+		require.NoError(t, err)
+		require.Len(t, page, c.want, "limit %d", c.limit)
+		require.True(t, maxInserted.Equal(page[len(page)-1].InsertedAt))
+		require.True(t, sort.SliceIsSorted(page, func(i, j int) bool {
+			if !page[i].InsertedAt.Equal(page[j].InsertedAt) {
+				return page[i].InsertedAt.Before(page[j].InsertedAt)
+			}
+			return page[i].AttemptID < page[j].AttemptID
+		}))
+	}
+	last, lastCursor, err := repo.LoadInsertedAfter(ctx, cursor, 50)
+	require.NoError(t, err)
+	for _, row := range last {
+		require.True(t, ids[row.AttemptID])
+		delete(ids, row.AttemptID)
+	}
 	require.Empty(t, ids)
-	next, nextCursor, err := repo.LoadInsertedAfter(ctx, cursor, 50)
+	next, nextCursor, err := repo.LoadInsertedAfter(ctx, lastCursor, 50)
 	require.NoError(t, err)
 	require.Empty(t, next)
 	require.True(t, nextCursor.IsZero())
