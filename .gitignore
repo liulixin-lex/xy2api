@@ -16,10 +16,9 @@ backend/cmd/server/server
 backend/.gocache/
 .gocache/
 
-# Frontend build output embedded into the backend binary (`-tags=embed`).
-# Only a placeholder is kept so `//go:embed all:dist` always matches.
-backend/internal/web/dist/*
-!backend/internal/web/dist/.keep
+# Frontend build output embedded into the backend binary (`-tags=embed`);
+# build the frontend first (`make build` does both).
+backend/internal/web/dist/
 
 # Runtime data and local configuration (may contain secrets).
 backend/data/
