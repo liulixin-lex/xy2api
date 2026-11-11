@@ -61,9 +61,6 @@ checksum:
   name_template: checksums.txt
   algorithm: sha256
 
-changelog:
-  disable: true
-
 dockers_v2:
   - id: ghcr
     ids: [xy2api]
