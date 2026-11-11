@@ -31,7 +31,7 @@ func (w *schedTestWriter) Write(b []byte) (int, error) {
 }
 func (w *schedTestWriter) Flush() {}
 
-func schedTestForward(ctx context.Context, f SchedTestForwarder, account *Account, model, session string, body []byte, warm bool, prev int) (*OpenAIForwardResult, []schedquality.AttemptSample, string, error) {
+func schedTestForward(ctx context.Context, f SchedTestForwarder, account *Account, model string, body []byte, warm bool, prev int) (*OpenAIForwardResult, []schedquality.AttemptSample, string, error) {
 	var mu sync.Mutex
 	var samples []schedquality.AttemptSample
 	state := resilience.NewRequestState()
@@ -41,7 +41,6 @@ func schedTestForward(ctx context.Context, f SchedTestForwarder, account *Accoun
 		defer mu.Unlock()
 		samples = append(samples, sample)
 	}})
-	state.SetSession(0, session, nil)
 	ctx = resilience.WithRequestState(ctx, state)
 	writer := &schedTestWriter{header: make(http.Header)}
 	c, _ := gin.CreateTestContext(writer)

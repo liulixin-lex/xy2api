@@ -24,6 +24,7 @@ const (
 	TestMinTurns            = 6
 	TestClearTurns          = 15
 	TestSlotWait            = 10 * time.Second
+	TestSlotRetryInterval   = 2 * time.Second
 	TestTurnTimeout         = 120 * time.Second
 	TestTimeout             = 6 * time.Minute
 	TestRetryEvery          = 60 * time.Second

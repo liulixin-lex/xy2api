@@ -21,7 +21,7 @@ import (
 
 type schedTestMemoryStore struct {
 	mu          sync.Mutex
-	record      *SchedTestRecord
+	records     map[SchedAccountModel]SchedTestRecord
 	finished    chan SchedTestRecord
 	finishErr   error
 	finishCalls int
@@ -30,10 +30,11 @@ type schedTestMemoryStore struct {
 func (s *schedTestMemoryStore) Insert(_ context.Context, r SchedTestRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.record != nil && s.record.Running && r.Running {
+	key := SchedAccountModel{AccountID: r.AccountID, Model: r.Model}
+	if s.records[key].Running && r.Running {
 		return ErrSchedTestRunning
 	}
-	s.record = &r
+	s.records[key] = r
 	return nil
 }
 func (s *schedTestMemoryStore) Finish(_ context.Context, r SchedTestRecord) error {
@@ -41,18 +42,18 @@ func (s *schedTestMemoryStore) Finish(_ context.Context, r SchedTestRecord) erro
 	defer s.mu.Unlock()
 	s.finishCalls++
 	if s.finishErr == nil {
-		s.record = &r
+		s.records[SchedAccountModel{AccountID: r.AccountID, Model: r.Model}] = r
 	}
 	s.finished <- r
 	return s.finishErr
 }
-func (s *schedTestMemoryStore) Latest(context.Context, int64, string) (*SchedTestRecord, error) {
+func (s *schedTestMemoryStore) Latest(_ context.Context, id int64, model string) (*SchedTestRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.record == nil {
+	r, ok := s.records[SchedAccountModel{AccountID: id, Model: model}]
+	if !ok {
 		return nil, nil
 	}
-	r := *s.record
 	return &r, nil
 }
 func (s *schedTestMemoryStore) Since(context.Context, time.Time) ([]SchedTestRecord, error) {
@@ -65,10 +66,13 @@ func (s *schedTestMemoryStore) DeleteBefore(context.Context, time.Time) error { 
 func (s *schedTestMemoryStore) ReapStale(_ context.Context, before, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.record != nil && s.record.Running && s.record.StartedAt.Before(before) {
-		s.record.Running = false
-		s.record.AbortReason = "timeout"
-		s.record.FinishedAt = now
+	for key, r := range s.records {
+		if r.Running && r.StartedAt.Before(before) {
+			r.Running = false
+			r.AbortReason = "timeout"
+			r.FinishedAt = now
+			s.records[key] = r
+		}
 	}
 	return nil
 }
@@ -104,7 +108,7 @@ func (c *schedTestSlotCache) ReleaseAccountSlot(context.Context, int64, string) 
 }
 
 func schedTestFixture(concurrency int) (*SchedTestRunnerService, *schedTestMemoryStore, *fakeSchedTestForwarder, *fakeSchedTestAdmission, *schedTestSlotCache) {
-	store := &schedTestMemoryStore{finished: make(chan SchedTestRecord, 1)}
+	store := &schedTestMemoryStore{finished: make(chan SchedTestRecord, 4), records: make(map[SchedAccountModel]SchedTestRecord)}
 	forward := &fakeSchedTestForwarder{}
 	admission := &fakeSchedTestAdmission{}
 	cache := &schedTestSlotCache{}
@@ -440,7 +444,8 @@ func TestSchedTestRunnerTotalDeadline(t *testing.T) {
 			case <-time.After(100 * time.Second):
 				return schedTestOK(ctx, 1), nil
 			case <-ctx.Done():
-				resilience.StateFrom(ctx).SchedTest().(*SchedTestAttempt).Sink(schedquality.AttemptSample{Outcome: schedquality.OutcomeOther})
+				first := 12
+				resilience.StateFrom(ctx).SchedTest().(*SchedTestAttempt).Sink(schedquality.AttemptSample{Outcome: schedquality.OutcomeOK, TTFOMs: &first})
 				return nil, ctx.Err()
 			}
 		}
@@ -456,6 +461,8 @@ func TestSchedTestRunnerTotalDeadline(t *testing.T) {
 				ok++
 			} else {
 				require.Equal(t, schedquality.OutcomeOther, row.Outcome)
+				require.Equal(t, "cancelled", row.Detail)
+				require.NotNil(t, row.TTFOMs)
 			}
 		}
 		require.Equal(t, 3, ok)
@@ -470,7 +477,8 @@ func TestSchedTestRunnerStopCancelsInFlight(t *testing.T) {
 		s, store, f, _, cache := schedTestFixture(10)
 		f.Fn = func(ctx context.Context, _ *gin.Context, _ *Account, _ []byte) (*OpenAIForwardResult, error) {
 			<-ctx.Done()
-			resilience.StateFrom(ctx).SchedTest().(*SchedTestAttempt).Sink(schedquality.AttemptSample{Outcome: schedquality.OutcomeOther})
+			first := 12
+			resilience.StateFrom(ctx).SchedTest().(*SchedTestAttempt).Sink(schedquality.AttemptSample{Outcome: schedquality.OutcomeOK, TTFOMs: &first})
 			return nil, ctx.Err()
 		}
 		_, err := s.Request(context.Background(), 7, "evidence", false, 0)
@@ -481,6 +489,10 @@ func TestSchedTestRunnerStopCancelsInFlight(t *testing.T) {
 		r := <-store.finished
 		require.True(t, r.Done)
 		require.Len(t, r.Turns, 3)
+		for _, row := range r.Turns {
+			require.Equal(t, schedquality.OutcomeOther, row.Outcome)
+			require.Equal(t, "cancelled", row.Detail)
+		}
 		require.Zero(t, cache.active)
 		_, err = s.Request(context.Background(), 7, "evidence", false, 0)
 		require.ErrorIs(t, err, context.Canceled)

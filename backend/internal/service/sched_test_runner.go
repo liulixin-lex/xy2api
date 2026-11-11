@@ -44,9 +44,15 @@ type SchedTestRunnerService struct {
 	db          *sql.DB
 	owner       string
 	mu          sync.Mutex
+	tierLimits  map[int64]*schedTestTierLimit
 	cancel      context.CancelFunc
 	ctx         context.Context
 	wg          sync.WaitGroup
+}
+
+type schedTestTierLimit struct {
+	slots chan struct{}
+	tests int
 }
 
 func NewSchedTestRunnerService(f SchedTestForwarder, a SchedTestAdmission, c *ConcurrencyService, accounts schedTestAccountReader, store SchedTestStore, now func() time.Time, lock LeaderLockCache, db *sql.DB) *SchedTestRunnerService {
@@ -54,7 +60,7 @@ func NewSchedTestRunnerService(f SchedTestForwarder, a SchedTestAdmission, c *Co
 		now = time.Now
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &SchedTestRunnerService{forward: f, admission: a, concurrency: c, accounts: accounts, store: store, now: now, count: schedTestCount, wait: schedTestWait, lockCache: lock, db: db, owner: uuid.NewString(), ctx: ctx, cancel: cancel}
+	s := &SchedTestRunnerService{forward: f, admission: a, concurrency: c, accounts: accounts, store: store, now: now, count: schedTestCount, wait: schedTestWait, lockCache: lock, db: db, owner: uuid.NewString(), ctx: ctx, cancel: cancel, tierLimits: make(map[int64]*schedTestTierLimit)}
 	s.acquire = func(ctx context.Context, account *Account, _ schedquality.TestTier) (*AcquireResult, error) {
 		return s.concurrency.AcquireAccountSlot(ctx, account.ID, account.Concurrency)
 	}
@@ -122,6 +128,9 @@ func (s *SchedTestRunnerService) Request(ctx context.Context, accountID int64, m
 	if err != nil {
 		return ticket, err
 	}
+	if account == nil {
+		return ticket, errors.New("sched test account not found")
+	}
 	requestModel, ok, _ := s.admission.TestRequestModel(ctx, account, model)
 	record := SchedTestRecord{AccountID: accountID, Model: model, Auto: auto, OperatorID: operatorID, Running: ok, TestResult: schedquality.TestResult{ID: uuid.NewString(), StartedAt: s.now()}}
 	if !ok || requestModel == "" {
@@ -141,8 +150,32 @@ func (s *SchedTestRunnerService) Request(ctx context.Context, accountID int64, m
 		return ticket, nil
 	}
 	ticket.Started = true
+	limit := s.tierLimits[accountID]
+	if limit == nil {
+		parallel := schedquality.TestTierParallelMax
+		if account.Concurrency > 0 {
+			parallel = min(parallel, max(1, account.Concurrency-1))
+		}
+		limit = &schedTestTierLimit{slots: make(chan struct{}, parallel)}
+		s.tierLimits[accountID] = limit
+	}
+	limit.tests++
 	s.wg.Add(1)
-	go func() { defer s.wg.Done(); s.run(record, account, requestModel) }()
+	go func() {
+		defer s.wg.Done()
+		defer func() {
+			s.mu.Lock()
+			limit.tests--
+			if limit.tests == 0 {
+				delete(s.tierLimits, accountID)
+			}
+			s.mu.Unlock()
+			if recovered := recover(); recovered != nil {
+				logger.LegacyPrintf("service.sched_test", "runner_panic: test_id=%s panic=%v", record.ID, recovered)
+			}
+		}()
+		s.run(record, limit.slots)
+	}()
 	return ticket, nil
 }
 
@@ -206,178 +239,190 @@ func schedTestEffort(account *Account, model string, tier schedquality.TestTier)
 	return wanted
 }
 
-func (s *SchedTestRunnerService) run(record SchedTestRecord, account *Account, requestModel string) {
+func (s *SchedTestRunnerService) run(record SchedTestRecord, slots chan struct{}) {
 	ctx, cancel := context.WithTimeout(s.ctx, schedquality.TestTimeout)
 	defer cancel()
-	parallel := schedquality.TestTierParallelMax
-	if account.Concurrency > 0 {
-		parallel = min(parallel, max(1, account.Concurrency-1))
-	}
-	sem := make(chan struct{}, parallel)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	sent := 0
-	busy := 0
-	failed := false
-	notSchedulable := false
+	failed, busy, notSchedulable := false, false, false
+	base := record
 	for tier := schedquality.TierSmall; tier <= schedquality.TierLarge; tier++ {
 		wg.Add(1)
 		go func(tier schedquality.TestTier) {
 			defer wg.Done()
 			select {
-			case sem <- struct{}{}:
+			case slots <- struct{}{}:
 			case <-ctx.Done():
 				return
 			}
-			defer func() { <-sem }()
-			session := schedtest.Session{ID: record.ID, Model: requestModel}
-			session.Effort = schedTestEffort(account, record.Model, tier)
-			prev := 0
-			for turn := 1; turn <= schedquality.TestTurnsPerTier; turn++ {
-				if ctx.Err() != nil {
-					return
-				}
-				if turn > 1 && !s.wait(ctx, schedquality.TestTurnGap) {
-					return
-				}
-				mapped, ok, _ := s.admission.TestRequestModel(ctx, account, record.Model)
-				if !ok || mapped == "" {
-					mu.Lock()
-					notSchedulable = true
-					mu.Unlock()
-					cancel()
-					return
-				}
-				session.Model = mapped
-				body := schedtest.Build(tier, turn, session, s.count)
-				if len(body) == 0 {
-					mu.Lock()
-					failed = true
-					mu.Unlock()
-					return
-				}
-				slotCtx, slotCancel := context.WithTimeout(ctx, schedquality.TestSlotWait)
-				var slot *AcquireResult
-				var err error
-				for {
-					slot, err = s.acquire(slotCtx, account, tier)
-					if err != nil || slot == nil || slot.Acquired {
-						break
-					}
-					if !s.wait(slotCtx, 100*time.Millisecond) {
-						break
-					}
-				}
-				slotCancel()
-				if err != nil || slot == nil || !slot.Acquired {
-					mu.Lock()
-					if err != nil && !errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
-						failed = true
-					} else {
-						busy++
-					}
-					mu.Unlock()
-					return
-				}
-				mapped, ok, _ = s.admission.TestRequestModel(ctx, account, record.Model)
-				if !ok || mapped != session.Model {
-					slot.ReleaseFunc()
-					mu.Lock()
-					notSchedulable = true
-					mu.Unlock()
-					cancel()
-					return
-				}
-				if ctx.Err() != nil {
-					slot.ReleaseFunc()
-					return
-				}
-				turnCtx, turnCancel := context.WithTimeout(ctx, schedquality.TestTurnTimeout)
-				result, samples, answer, _ := schedTestForward(turnCtx, s.forward, account, record.Model, record.ID+"/"+tier.String(), body, turn > 1, prev)
-				deadline := errors.Is(turnCtx.Err(), context.DeadlineExceeded) && !errors.Is(ctx.Err(), context.DeadlineExceeded)
-				turnCancel()
-				slot.ReleaseFunc()
-				// Capture begins at transport send. Credential/build failures have no sample.
-				if len(samples) == 0 {
-					mu.Lock()
-					failed = true
-					mu.Unlock()
-					return
-				}
-				selected := samples[len(samples)-1]
-				for _, sample := range samples {
-					if sample.Outcome == schedquality.OutcomeTimeout || sample.Outcome == schedquality.OutcomeAccountFault {
-						selected = sample
-						break
-					}
-				}
-				if deadline && selected.Outcome != schedquality.OutcomeTimeout && selected.Outcome != schedquality.OutcomeAccountFault {
-					firstOutput := false
-					for _, sample := range samples {
-						if sample.TTFOMs != nil {
-							firstOutput = true
-							break
-						}
-					}
-					if !firstOutput {
-						selected.Outcome = schedquality.OutcomeTimeout
-					} else {
-						selected.Outcome = schedquality.OutcomeOther
-					}
-				}
-				var p *int
-				if turn > 1 {
-					previous := prev
-					p = &previous
-				}
-				row := schedquality.TestTurn{Tier: tier, Turn: turn, Class: selected.Class, Warm: turn > 1, TTFOMs: selected.TTFOMs, Outcome: selected.Outcome, Detail: selected.Detail, PromptTokens: selected.PromptTokens, PrevPromptTokens: p, CacheReadTokens: selected.CacheReadTokens}
-				mu.Lock()
-				sent += len(samples)
-				record.Turns = append(record.Turns, row)
-				if result != nil {
-					record.InputTokens += int64(result.Usage.InputTokens)
-					record.CachedTokens += int64(result.Usage.CacheReadInputTokens)
-					record.OutputTokens += int64(result.Usage.OutputTokens)
-				}
-				mu.Unlock()
-				if result != nil && result.Usage.InputTokens > 0 {
-					prev = result.Usage.InputTokens
-				} else if selected.PromptTokens != nil {
-					prev = *selected.PromptTokens
-				}
-				var parsed struct {
-					Input json.RawMessage `json:"input"`
-				}
-				_ = json.Unmarshal(body, &parsed)
-				session.Input = parsed.Input
-				session.Answer = answer
-				if selected.Outcome != schedquality.OutcomeOK {
-					return
-				}
-			}
+			defer func() { <-slots }()
+			partial := s.runTier(ctx, cancel, base, tier)
+			mu.Lock()
+			defer mu.Unlock()
+			record.Turns = append(record.Turns, partial.Turns...)
+			record.InputTokens += partial.InputTokens
+			record.CachedTokens += partial.CachedTokens
+			record.OutputTokens += partial.OutputTokens
+			failed = failed || partial.AbortReason == "error"
+			busy = busy || partial.AbortReason == "busy"
+			notSchedulable = notSchedulable || partial.AbortReason == "not_schedulable"
 		}(tier)
 	}
 	wg.Wait()
 	record.Running = false
 	record.FinishedAt = s.now()
-	if sent > 0 {
+	if len(record.Turns) > 0 {
 		record.Done = true
 	} else if failed {
 		record.AbortReason = "error"
 	} else if notSchedulable {
 		record.AbortReason = "not_schedulable"
-	} else if busy > 0 {
+	} else if busy {
 		record.AbortReason = "busy"
 	} else if ctx.Err() != nil {
 		record.AbortReason = "timeout"
-	} else {
-		record.AbortReason = "not_schedulable"
 	}
 	writeCtx, writeCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer writeCancel()
 	if err := s.store.Finish(writeCtx, record); err != nil {
 		logger.LegacyPrintf("service.sched_test", "finish_failed: test_id=%s err=%v", record.ID, err)
 	}
+}
+
+func (s *SchedTestRunnerService) runTier(ctx context.Context, cancel context.CancelFunc, record SchedTestRecord, tier schedquality.TestTier) (partial SchedTestRecord) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			partial.AbortReason = "error"
+			logger.LegacyPrintf("service.sched_test", "tier_panic: test_id=%s tier=%s panic=%v", record.ID, tier, recovered)
+		}
+	}()
+	session := schedtest.Session{ID: record.ID}
+	var prev *int
+	for turn := 1; turn <= schedquality.TestTurnsPerTier; turn++ {
+		if ctx.Err() != nil || turn > 1 && !s.wait(ctx, schedquality.TestTurnGap) {
+			return partial
+		}
+		// Scope the slot and its cancellation to this round, including panic exits.
+		keepGoing := func() bool {
+			account, err := s.accounts.GetByID(ctx, record.AccountID)
+			if err != nil || account == nil {
+				partial.AbortReason = "error"
+				return false
+			}
+			mapped, ok, _ := s.admission.TestRequestModel(ctx, account, record.Model)
+			if !ok || mapped == "" {
+				partial.AbortReason = "not_schedulable"
+				cancel()
+				return false
+			}
+			slotCtx, slotCancel := context.WithTimeout(ctx, schedquality.TestSlotWait)
+			defer slotCancel()
+			var slot *AcquireResult
+			for slotCtx.Err() == nil {
+				slot, err = s.acquire(slotCtx, account, tier)
+				if err != nil || slot == nil || slot.Acquired {
+					break
+				}
+				if !s.wait(slotCtx, schedquality.TestSlotRetryInterval) {
+					break
+				}
+			}
+			slotCancel()
+			if err != nil || slot == nil || !slot.Acquired {
+				if err != nil && !errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+					partial.AbortReason = "error"
+				} else if ctx.Err() == nil {
+					partial.AbortReason = "busy"
+				}
+				return false
+			}
+			defer slot.ReleaseFunc()
+			if ctx.Err() != nil {
+				return false
+			}
+			// Slot waiting can outlive an account update; read again before forwarding.
+			account, err = s.accounts.GetByID(ctx, record.AccountID)
+			if err != nil || account == nil {
+				partial.AbortReason = "error"
+				return false
+			}
+			mapped, ok, _ = s.admission.TestRequestModel(ctx, account, record.Model)
+			if !ok || mapped == "" {
+				partial.AbortReason = "not_schedulable"
+				cancel()
+				return false
+			}
+			session.Model = mapped
+			session.Effort = schedTestEffort(account, record.Model, tier)
+			body := schedtest.Build(tier, turn, session, s.count)
+			if len(body) == 0 {
+				partial.AbortReason = "error"
+				return false
+			}
+			if ctx.Err() != nil {
+				return false
+			}
+			prevTokens := 0
+			if prev != nil {
+				prevTokens = *prev
+			}
+			turnCtx, turnCancel := context.WithTimeout(ctx, schedquality.TestTurnTimeout)
+			defer turnCancel()
+			result, samples, answer, _ := schedTestForward(turnCtx, s.forward, account, record.Model, body, turn > 1, prevTokens)
+			// Capture begins at transport send. Credential/build failures have no sample.
+			if len(samples) == 0 {
+				partial.AbortReason = "error"
+				return false
+			}
+			selected := samples[len(samples)-1]
+			for _, sample := range samples {
+				if sample.Outcome == schedquality.OutcomeTimeout || sample.Outcome == schedquality.OutcomeAccountFault {
+					selected = sample
+					break
+				}
+			}
+			if turnCtx.Err() != nil {
+				firstOutput := false
+				for _, sample := range samples {
+					if sample.TTFOMs != nil {
+						firstOutput = true
+						break
+					}
+				}
+				selected.Outcome = schedquality.OutcomeOther
+				selected.Detail = "cancelled"
+				if ctx.Err() == nil && errors.Is(turnCtx.Err(), context.DeadlineExceeded) && !firstOutput {
+					selected.Outcome = schedquality.OutcomeTimeout
+				}
+			}
+			partial.Turns = append(partial.Turns, schedquality.TestTurn{
+				Tier: tier, Turn: turn, Class: selected.Class, Warm: turn > 1,
+				TTFOMs: selected.TTFOMs, Outcome: selected.Outcome, Detail: selected.Detail,
+				PromptTokens: selected.PromptTokens, PrevPromptTokens: prev, CacheReadTokens: selected.CacheReadTokens,
+			})
+			if result != nil {
+				partial.InputTokens += int64(result.Usage.InputTokens)
+				partial.CachedTokens += int64(result.Usage.CacheReadInputTokens)
+				partial.OutputTokens += int64(result.Usage.OutputTokens)
+			}
+			// Unknown usage must not reuse zero or an earlier round's prompt count.
+			prev = selected.PromptTokens
+			if result != nil && result.Usage.InputTokens > 0 {
+				prompt := result.Usage.InputTokens
+				prev = &prompt
+			}
+			var parsed struct {
+				Input json.RawMessage `json:"input"`
+			}
+			_ = json.Unmarshal(body, &parsed)
+			session.Input, session.Answer = parsed.Input, answer
+			return selected.Outcome == schedquality.OutcomeOK
+		}()
+		if !keepGoing {
+			return partial
+		}
+	}
+	return partial
 }
 
 var _ SchedTestRunner = (*SchedTestRunnerService)(nil)

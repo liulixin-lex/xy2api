@@ -43,7 +43,7 @@ func TestSchedTestHarness(t *testing.T) {
 		_, _ = c.Writer.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"))
 		return &OpenAIForwardResult{}, nil
 	}}
-	_, samples, answer, err := schedTestForward(context.Background(), forwarder, account, "evidence", "session", []byte(`{}`), true, 42)
+	_, samples, answer, err := schedTestForward(context.Background(), forwarder, account, "evidence", []byte(`{}`), true, 42)
 	if err != nil || len(samples) != 1 || samples[0].Outcome != schedquality.OutcomeOK || answer != "hello" {
 		t.Fatalf("samples=%v answer=%q err=%v", samples, answer, err)
 	}
