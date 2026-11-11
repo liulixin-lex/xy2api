@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"math"
 	"slices"
 	"sort"
@@ -26,7 +28,6 @@ type SchedAdminAccountRepository interface {
 type SchedAdminGroupRepository interface {
 	GetByID(context.Context, int64) (*Group, error)
 }
-type SchedAdminAudit interface{ Record(*AuditLog) }
 type SchedAdminCapability interface {
 	ClearAccountCapabilityLearning(context.Context, int64) error
 }
@@ -43,7 +44,6 @@ type SchedAdminDependencies struct {
 	Gateway    *OpenAIGatewayService
 	Capability SchedAdminCapability
 	Tests      SchedTestRunner
-	Audit      SchedAdminAudit
 	InFlight   func(context.Context, int64) (int, error)
 	Thresholds func(context.Context) map[string]int
 	Now        func() time.Time
@@ -107,11 +107,6 @@ func (s *SchedAdminService) group(ctx context.Context, id int64) (*Group, error)
 	}
 	return g, nil
 }
-func (s *SchedAdminService) audit(op int64, action string, extra map[string]any) {
-	if s.d.Audit != nil {
-		s.d.Audit.Record(&AuditLog{ActorUserID: &op, Action: action, CreatedAt: s.d.Now().UTC(), StatusCode: 200, Extra: extra})
-	}
-}
 func schedAdminMember(a *Account, g int64) bool {
 	if g == 0 {
 		return true
@@ -151,7 +146,6 @@ func (s *SchedAdminService) SetOverride(ctx context.Context, o SchedOverride) er
 	if e = s.d.Engine.SetOverride(ctx, o); e != nil {
 		return e
 	}
-	s.audit(o.OperatorID, "sched_quality.override", map[string]any{"account_id": o.AccountID, "group_id": o.GroupID, "mode": schedAdminOverrideMode(o.Mode), "expires_at": o.ExpiresAt, "reason": o.Reason})
 	return nil
 }
 func (s *SchedAdminService) ClearOverride(ctx context.Context, a, g, op int64) error {
@@ -170,7 +164,6 @@ func (s *SchedAdminService) ClearOverride(ctx context.Context, a, g, op int64) e
 	if e = s.d.Engine.ClearOverride(ctx, a, g); e != nil {
 		return e
 	}
-	s.audit(op, "sched_quality.clear_override", map[string]any{"account_id": a, "group_id": g})
 	return nil
 }
 func schedAdminOverrideMode(m schedquality.Override) string {
@@ -243,6 +236,16 @@ func schedAdminModels(p *SchedQualitySnapshot, id int64, group bool) []string {
 	})
 	return out
 }
+
+// SchedAdminTestErrors reports individual requests that failed after all models were attempted.
+type SchedAdminTestErrors struct {
+	Models []string
+	Err    error
+}
+
+func (e *SchedAdminTestErrors) Error() string { return e.Err.Error() }
+func (e *SchedAdminTestErrors) Unwrap() error { return e.Err }
+
 func (s *SchedAdminService) Test(ctx context.Context, id int64, model string, op int64) (SchedAdminTest, error) {
 	out := SchedAdminTest{Tests: []SchedAdminTestTests{}}
 	a, e := s.account(ctx, id)
@@ -283,14 +286,19 @@ func (s *SchedAdminService) Test(ctx context.Context, id int64, model string, op
 			}
 		}
 	}
+	failures := &SchedAdminTestErrors{}
 	for _, m := range models {
 		t, e := s.d.Tests.Request(ctx, id, m, false, op)
 		if e != nil {
-			return out, e
+			failures.Models = append(failures.Models, m)
+			failures.Err = errors.Join(failures.Err, fmt.Errorf("%s: %w", m, e))
+			continue
 		}
 		out.Tests = append(out.Tests, SchedAdminTestTests{Model: t.Model, TestID: t.TestID, Started: t.Started, Why: t.Why})
 	}
-	s.audit(op, "sched_quality.test", map[string]any{"account_id": id, "models": models, "tickets": out.Tests})
+	if failures.Err != nil {
+		return out, failures
+	}
 	return out, nil
 }
 func schedAdminPolicy(r SchedPolicyRecord) SchedAdminPolicy {
@@ -323,6 +331,5 @@ func (s *SchedAdminService) UpdatePolicy(ctx context.Context, g, version int64, 
 	if e != nil {
 		return SchedAdminPolicy{}, e
 	}
-	s.audit(op, "sched_quality.policy", map[string]any{"group_id": g, "version": r.Version, "policy": p})
 	return schedAdminPolicy(r), nil
 }

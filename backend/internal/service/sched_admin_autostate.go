@@ -68,11 +68,7 @@ func (s *SchedAdminService) autoStates(ctx context.Context, a *Account, now time
 		out = append(out, SchedAutoState{Key: key, Kind: kind, Scope: "account", Until: until, Clearable: clear, Why: why})
 	}
 	if a.Status == StatusError {
-		why := ""
-		if !a.Schedulable {
-			why = "schedulable_remains_off"
-		}
-		add("error", "error", nil, true, why)
+		add("error", "error", nil, true, "")
 	}
 	if a.RateLimitResetAt != nil && now.Before(*a.RateLimitResetAt) {
 		add("rate_limit", "rate_limit", a.RateLimitResetAt, true, "")
@@ -82,11 +78,7 @@ func (s *SchedAdminService) autoStates(ctx context.Context, a *Account, now time
 	}
 	if a.TempUnschedulableUntil != nil && now.Before(*a.TempUnschedulableUntil) {
 		source := schedAdminTempSource(a.TempUnschedulableReason)
-		why := ""
-		if source == "usage" || source == "rule" {
-			why = "rule_still_enabled"
-		}
-		add("temp", "temp_"+source, a.TempUnschedulableUntil, true, why)
+		add("temp", "temp_"+source, a.TempUnschedulableUntil, true, "")
 	}
 	if limits, ok := a.Extra["model_rate_limits"].(map[string]any); ok {
 		for key, v := range limits {
@@ -108,7 +100,7 @@ func (s *SchedAdminService) autoStates(ctx context.Context, a *Account, now time
 		}
 	}
 	if s.d.Resilience != nil {
-		out = append(out, s.d.Resilience.schedAdminLocalStates(a.ID, now)...)
+		out = append(out, s.d.Resilience.schedAdminLocalStates(a, now)...)
 	}
 	if a.ProxyID != nil {
 		if v := s.d.Gateway.schedAdminProxyState(*a.ProxyID, now); v != nil {
@@ -188,7 +180,6 @@ func (s *SchedAdminService) ClearAutoState(ctx context.Context, id int64, key st
 			if !ok {
 				return false, infraerrors.Conflict("STATE_CHANGED", "State has changed")
 			}
-			s.audit(op, "sched_quality.clear_auto_state", map[string]any{"account_id": id, "key": key})
 			return true, nil
 		}
 	}
@@ -217,23 +208,9 @@ func (s *SchedAdminService) clearState(ctx context.Context, a *Account, key stri
 		if e != nil || !ok {
 			return ok, e
 		}
-		if s.d.RateLimit != nil && s.d.RateLimit.tempUnschedCache != nil {
-			cache := s.d.RateLimit.tempUnschedCache
-			if conditional, ok := cache.(interface {
-				SchedAdminDeleteTempIf(context.Context, int64, string, *time.Time) (bool, error)
-			}); ok {
-				cleared, e := conditional.SchedAdminDeleteTempIf(ctx, a.ID, a.TempUnschedulableReason, a.TempUnschedulableUntil)
-				if e != nil {
-					return false, e
-				}
-				if !cleared {
-					return false, infraerrors.Conflict("STATE_CHANGED", "Cached state has changed")
-				}
-			} else {
-				return false, infraerrors.ServiceUnavailable("CONDITIONAL_CACHE_REQUIRED", "Conditional temporary state cache is required")
-			}
-		}
-		return true, s.schedAdminCounters(ctx, a.ID, schedAdminTempSource(a.TempUnschedulableReason))
+		cacheErr := s.clearTempCache(ctx, a)
+		counterErr := s.schedAdminCounters(ctx, a.ID, schedAdminTempSource(a.TempUnschedulableReason))
+		return cacheErr == nil && counterErr == nil, errors.Join(cacheErr, counterErr)
 	case "same_site":
 		return s.d.Resilience.schedAdminClearSameSite(a.ID), nil
 	case "post_output":
@@ -266,6 +243,31 @@ func (s *SchedAdminService) clearState(ctx context.Context, a *Account, key stri
 	}
 	return false, nil
 }
+func (s *SchedAdminService) clearTempCache(ctx context.Context, a *Account) error {
+	if s.d.RateLimit == nil || s.d.RateLimit.tempUnschedCache == nil {
+		return nil
+	}
+	cache := s.d.RateLimit.tempUnschedCache
+	conditional, ok := cache.(interface {
+		SchedAdminDeleteTempIf(context.Context, int64, string, *time.Time) (bool, error)
+	})
+	if !ok {
+		return infraerrors.ServiceUnavailable("CONDITIONAL_CACHE_REQUIRED", "Conditional temporary state cache is required")
+	}
+	cleared, err := conditional.SchedAdminDeleteTempIf(ctx, a.ID, a.TempUnschedulableReason, a.TempUnschedulableUntil)
+	if err != nil || cleared {
+		return err
+	}
+	current, err := s.account(ctx, a.ID)
+	if err != nil {
+		return err
+	}
+	if current.TempUnschedulableUntil != nil || current.TempUnschedulableReason != "" {
+		return infraerrors.Conflict("STATE_CHANGED", "State has changed")
+	}
+	return cache.DeleteTempUnsched(ctx, a.ID)
+}
+
 func (s *SchedAdminService) Reset(ctx context.Context, id, op int64) (SchedResetResult, error) {
 	out := SchedResetResult{Cleared: []SchedResetItem{}, Preserved: []SchedResetItem{}, Failed: []SchedResetItem{}}
 	a, e := s.account(ctx, id)
@@ -327,15 +329,13 @@ func (s *SchedAdminService) Reset(ctx context.Context, id, op int64) (SchedReset
 		}
 		finish(v.Key, v.Kind, ok, e)
 	}
-	if rl := s.d.RateLimit; rl != nil {
-		if rl.openAI403CounterCache != nil {
-			finish("403_counter", "403_counter", true, s.schedAdminCounters(ctx, id, "403"))
-		}
-		if rl.timeoutCounterCache != nil {
-			finish("stream_timeout_counter", "stream_timeout_counter", true, s.schedAdminCounters(ctx, id, "stream_timeout"))
-		}
-		if rl.openAIAPIKeyHealth != nil {
-			finish("health_counter", "health_counter", true, s.schedAdminCounters(ctx, id, "health"))
+	for _, source := range []string{"403", "stream_timeout", "health"} {
+		if err := s.schedAdminCounters(ctx, id, source); err != nil {
+			key, kind := "temp", "temp_"+source
+			if a.Status == StatusError && ((source == "403" && strings.Contains(a.ErrorMessage, "403")) || (source == "stream_timeout" && strings.Contains(strings.ToLower(a.ErrorMessage), "timeout"))) {
+				key, kind = "error", "error"
+			}
+			finish(key, kind, false, err)
 		}
 	}
 	s.ClearLocal(id, out.ResetAt)
@@ -354,6 +354,5 @@ func (s *SchedAdminService) Reset(ctx context.Context, id, op int64) (SchedReset
 		}
 	}
 	out.Preserved = append(out.Preserved, SchedResetItem{Key: "session_avoid", Kind: "session_avoid", Why: "expires_within_10m"})
-	s.audit(op, "sched_quality.reset", map[string]any{"account_id": id, "reset_at": out.ResetAt, "cleared": out.Cleared, "preserved": out.Preserved, "failed": out.Failed})
 	return out, nil
 }

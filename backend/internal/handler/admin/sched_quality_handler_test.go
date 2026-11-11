@@ -6,7 +6,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -96,17 +98,22 @@ func (s *schedAdminHandlerTests) Request(_ context.Context, _ int64, m string, _
 	return ticket, nil
 }
 
-type schedAdminHandlerAudit struct{ rows []*service.AuditLog }
+type schedAdminHandlerAudit struct {
+	service.AuditLogRepository
+	rows []*service.AuditLog
+}
 
-func (a *schedAdminHandlerAudit) Record(v *service.AuditLog) { a.rows = append(a.rows, v) }
+func (a *schedAdminHandlerAudit) BatchInsert(_ context.Context, rows []*service.AuditLog) (int64, error) {
+	a.rows = append(a.rows, rows...)
+	return int64(len(rows)), nil
+}
 
-func schedAdminHandlerFixture() (*SchedQualityHandler, *schedAdminHandlerEngine, *schedAdminHandlerAccounts, *schedAdminHandlerAudit) {
+func schedAdminHandlerFixture() (*SchedQualityHandler, *schedAdminHandlerEngine, *schedAdminHandlerAccounts) {
 	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
 	engine := &schedAdminHandlerEngine{p: &service.SchedQualitySnapshot{At: now, GlobalEnabled: true, GroupRows: map[int64][]service.SchedGroupRow{}, Evidence: map[service.SchedAccountModel]schedquality.Summary{}}, version: 63}
 	repo := &schedAdminHandlerAccounts{a: &service.Account{ID: 1, Name: "one", Platform: service.PlatformOpenAI, Status: service.StatusActive, Schedulable: true, GroupIDs: []int64{1}}}
-	audit := &schedAdminHandlerAudit{}
-	s := service.NewSchedAdminService(service.SchedAdminDependencies{Engine: engine, Accounts: repo, Groups: schedAdminHandlerGroups{}, Board: schedAdminHandlerBoard{}, Tests: &schedAdminHandlerTests{ticket: service.SchedTestTicket{TestID: "ticket", Started: true}}, Audit: audit, Now: func() time.Time { return now }})
-	return NewSchedQualityHandler(s), engine, repo, audit
+	s := service.NewSchedAdminService(service.SchedAdminDependencies{Engine: engine, Accounts: repo, Groups: schedAdminHandlerGroups{}, Board: schedAdminHandlerBoard{}, Tests: &schedAdminHandlerTests{ticket: service.SchedTestTicket{TestID: "ticket", Started: true}}, Now: func() time.Time { return now }})
+	return NewSchedQualityHandler(s), engine, repo
 }
 func schedAdminHandlerRoutes(r *gin.Engine, h *SchedQualityHandler) {
 	g := r.Group("/api/v1/admin/sched-quality")
@@ -122,10 +129,11 @@ func schedAdminHandlerRoutes(r *gin.Engine, h *SchedQualityHandler) {
 	g.PUT("/groups/:id/policy", h.UpdatePolicy)
 	g.GET("/groups/:id/board", h.Board)
 }
-func schedAdminHandlerRouter(h *SchedQualityHandler) *gin.Engine {
+func schedAdminHandlerRouter(h *SchedQualityHandler, middlewareHandlers ...gin.HandlerFunc) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(func(c *gin.Context) { c.Set("user", middleware.AuthSubject{UserID: 7}); c.Next() })
+	r.Use(middlewareHandlers...)
 	schedAdminHandlerRoutes(r, h)
 	return r
 }
@@ -150,7 +158,7 @@ func TestSchedQualityContractShapes(t *testing.T) {
 	}{{"POST", "/accounts/summary", `{"account_ids":[1]}`, []string{"at", "stale", "global_enabled", "accounts"}}, {"GET", "/accounts/attention", "", []string{"cooling"}}, {"GET", "/accounts/1", "", []string{"account", "at", "stale", "global_enabled", "tests_enabled", "reset_at", "models", "groups", "auto_states", "recent_attempts"}}, {"POST", "/accounts/1/reset", "", []string{"reset_at", "cleared", "preserved", "failed"}}, {"POST", "/accounts/1/test", `{"model":"m"}`, []string{"tests"}}, {"GET", "/groups/1/policy", "", []string{"group_id", "version", "policy", "class_limits_ms"}}, {"PUT", "/groups/1/policy", `{"expected_version":63,"policy":{"enabled":true,"ttft_seconds":10,"takeover_idle_seconds":-1}}`, []string{"group_id", "version", "policy", "class_limits_ms"}}, {"GET", "/groups/1/board", "", []string{"group_id", "model", "models", "at", "stale", "global_enabled", "accounts"}}, {"DELETE", "/accounts/1/auto-states/error", "", []string{"cleared"}}}
 	for _, tc := range cases {
 		t.Run(tc.method+tc.path, func(t *testing.T) {
-			h, _, repo, _ := schedAdminHandlerFixture()
+			h, _, repo := schedAdminHandlerFixture()
 			if tc.method == "DELETE" {
 				repo.a.Status = service.StatusError
 			}
@@ -170,7 +178,7 @@ func TestSchedQualityContractShapes(t *testing.T) {
 	}
 }
 func TestSchedQualityValidationAndNotFound(t *testing.T) {
-	h, _, _, _ := schedAdminHandlerFixture()
+	h, _, _ := schedAdminHandlerFixture()
 	r := schedAdminHandlerRouter(h)
 	cases := []struct {
 		method, path, body string
@@ -190,7 +198,7 @@ func TestSchedQualityValidationAndNotFound(t *testing.T) {
 	require.Equal(t, 400, schedAdminHandlerRequest(r, "POST", "/accounts/summary", string(body)).Code)
 }
 func TestSchedQualityGlobalPolicyConflict(t *testing.T) {
-	h, e, _, _ := schedAdminHandlerFixture()
+	h, e, _ := schedAdminHandlerFixture()
 	r := schedAdminHandlerRouter(h)
 	e.conflict = true
 	body := `{"expected_version":63,"policy":{"ttft_seconds":10}}`
@@ -201,16 +209,19 @@ func TestSchedQualityGlobalPolicyConflict(t *testing.T) {
 }
 
 func TestSchedQualityResetMissingAccount(t *testing.T) {
-	h, engine, _, audit := schedAdminHandlerFixture()
+	h, engine, _ := schedAdminHandlerFixture()
 	r := schedAdminHandlerRouter(h)
 	require.Equal(t, 404, schedAdminHandlerRequest(r, "POST", "/accounts/999/reset", "").Code)
 	engine.resetErr = sql.ErrNoRows
 	require.Equal(t, 404, schedAdminHandlerRequest(r, "POST", "/accounts/1/reset", "").Code)
-	require.Empty(t, audit.rows)
 }
 func TestSchedQualityWritesAuditWithOperator(t *testing.T) {
-	h, e, repo, audit := schedAdminHandlerFixture()
-	r := schedAdminHandlerRouter(h)
+	h, e, repo := schedAdminHandlerFixture()
+	audit := &schedAdminHandlerAudit{}
+	auditService := service.NewAuditLogService(audit, nil)
+	auditService.Start()
+	r := schedAdminHandlerRouter(h, gin.HandlerFunc(middleware.NewAuditLogMiddleware(auditService)))
+	require.Equal(t, 200, schedAdminHandlerRequest(r, "POST", "/accounts/summary", `{"account_ids":[1]}`).Code)
 	require.Equal(t, 200, schedAdminHandlerRequest(r, "PUT", "/accounts/1/override", `{"group_id":0,"mode":"exempt","reason":"repair","expires_at":null}`).Code)
 	require.Equal(t, int64(7), e.override.OperatorID)
 	require.Equal(t, 200, schedAdminHandlerRequest(r, "DELETE", "/accounts/1/override?group_id=0", "").Code)
@@ -218,11 +229,18 @@ func TestSchedQualityWritesAuditWithOperator(t *testing.T) {
 	repo.a.Status = service.StatusError
 	require.Equal(t, 200, schedAdminHandlerRequest(r, "DELETE", "/accounts/1/auto-states/error", "").Code)
 	require.Equal(t, 200, schedAdminHandlerRequest(r, "POST", "/accounts/1/reset", "").Code)
-	require.Len(t, audit.rows, 5)
+	require.Equal(t, 200, schedAdminHandlerRequest(r, "PUT", "/groups/1/policy", `{"expected_version":63,"policy":{"ttft_seconds":10}}`).Code)
+	auditService.Stop()
+	require.Len(t, audit.rows, 6)
 	for _, a := range audit.rows {
 		require.Equal(t, int64(7), *a.ActorUserID)
 	}
-	require.Equal(t, "repair", audit.rows[0].Extra["reason"])
+	require.Contains(t, audit.rows[0].RequestBody, `"reason":"repair"`)
+	for i, action := range []string{"override", "clear_override", "test", "clear_auto_state", "reset", "policy"} {
+		require.Equal(t, "sched_quality."+action, audit.rows[i].Action)
+		require.NotEmpty(t, audit.rows[i].Method)
+		require.NotEmpty(t, audit.rows[i].Path)
+	}
 }
 
 func TestSchedQualityPermissionsFinalCatalog(t *testing.T) {
@@ -242,6 +260,8 @@ func TestSchedQualityPermissionsFinalCatalog(t *testing.T) {
 			require.Equal(t, tc.level, entry.Level)
 			if tc.module == "accounts" {
 				require.Equal(t, []operatoraccess.Redaction{"account"}, entry.Redact)
+			} else {
+				require.Empty(t, entry.Redact)
 			}
 			for _, level := range []operatoraccess.Level{operatoraccess.LevelView, operatoraccess.LevelManage} {
 				perms := operatoraccess.Permissions{Modules: map[operatoraccess.Module]operatoraccess.Level{tc.module: level}}
@@ -253,17 +273,114 @@ func TestSchedQualityPermissionsFinalCatalog(t *testing.T) {
 				} else {
 					require.Empty(t, decision.Reason)
 				}
+				fake := &schedAdminPermissionService{}
 				r := gin.New()
 				r.Use(func(c *gin.Context) {
 					c.Set("user_role", service.RoleOperator)
 					c.Request = c.Request.WithContext(operatoraccess.WithScope(c.Request.Context(), &operatoraccess.Scope{UserID: 7, Perms: perms}))
 					c.Next()
 				}, middleware.AdminPermission())
-				r.Handle(tc.method, path, func(c *gin.Context) { c.JSON(200, gin.H{"data": gin.H{"id": 1}}) })
+				schedAdminHandlerRoutes(r, NewSchedQualityHandler(fake))
 				w := httptest.NewRecorder()
 				actual := strings.ReplaceAll(strings.ReplaceAll(path, ":id", "1"), ":key", "error")
-				r.ServeHTTP(w, httptest.NewRequest(tc.method, actual, strings.NewReader(`{}`)))
+				if tc.method == "DELETE" && strings.HasSuffix(tc.path, "/override") {
+					actual += "?group_id=0"
+				}
+				body := `{"account_ids":[1],"group_id":0,"mode":"demote","reason":"repair","expected_version":1,"policy":{"ttft_seconds":10}}`
+				req := httptest.NewRequest(tc.method, actual, strings.NewReader(body))
+				req.Header.Set("Content-Type", "application/json")
+				r.ServeHTTP(w, req)
 				require.Equal(t, want, w.Code, w.Body.String())
+				if want == 403 {
+					require.Zero(t, fake.calls)
+				} else {
+					require.Equal(t, 1, fake.calls)
+					if strings.HasSuffix(tc.path, "/reset") {
+						require.Contains(t, w.Body.String(), operatoraccess.ErrorDetailHidden)
+						require.NotContains(t, w.Body.String(), "upstream.example")
+					}
+					if strings.HasSuffix(tc.path, "/board") {
+						require.Contains(t, w.Body.String(), "https://upstream.example/group")
+					}
+				}
+			}
+		})
+	}
+}
+
+type schedAdminPermissionService struct {
+	calls     int
+	testModel string
+	testErr   error
+}
+
+func (s *schedAdminPermissionService) Summary(context.Context, []int64, string) (service.SchedAdminSummary, error) {
+	s.calls++
+	return service.SchedAdminSummary{Accounts: []service.SchedAdminAccountSummary{}}, nil
+}
+func (s *schedAdminPermissionService) Attention(context.Context) (service.SchedAdminAttention, error) {
+	s.calls++
+	return service.SchedAdminAttention{Cooling: []int64{}}, nil
+}
+func (s *schedAdminPermissionService) Detail(context.Context, int64) (service.SchedAdminAccountDetail, error) {
+	s.calls++
+	return service.SchedAdminAccountDetail{}, nil
+}
+func (s *schedAdminPermissionService) Reset(context.Context, int64, int64) (service.SchedResetResult, error) {
+	s.calls++
+	return service.SchedResetResult{Failed: []service.SchedResetItem{{Key: "temp", Kind: "temp_auth", Error: "connection failed at https://upstream.example/private"}}}, nil
+}
+func (s *schedAdminPermissionService) SetOverride(context.Context, service.SchedOverride) error {
+	s.calls++
+	return nil
+}
+func (s *schedAdminPermissionService) ClearOverride(context.Context, int64, int64, int64) error {
+	s.calls++
+	return nil
+}
+func (s *schedAdminPermissionService) Test(_ context.Context, _ int64, m string, _ int64) (service.SchedAdminTest, error) {
+	s.calls++
+	s.testModel = m
+	return service.SchedAdminTest{Tests: []service.SchedAdminTestTests{{Model: "m", TestID: "started", Started: true}}}, s.testErr
+}
+func (s *schedAdminPermissionService) ClearAutoState(context.Context, int64, string, int64) (bool, error) {
+	s.calls++
+	return true, nil
+}
+func (s *schedAdminPermissionService) Policy(context.Context, int64) (service.SchedAdminPolicy, error) {
+	s.calls++
+	return service.SchedAdminPolicy{}, nil
+}
+func (s *schedAdminPermissionService) UpdatePolicy(context.Context, int64, int64, schedquality.Policy, int64) (service.SchedAdminPolicy, error) {
+	s.calls++
+	return service.SchedAdminPolicy{}, nil
+}
+func (s *schedAdminPermissionService) Board(context.Context, int64, string) (service.SchedAdminBoard, error) {
+	s.calls++
+	return service.SchedAdminBoard{Accounts: []service.SchedAdminBoardAccounts{{Name: "https://upstream.example/group"}}}, nil
+}
+
+func TestSchedQualityEmptyTestBodyAndPartialFailureAudit(t *testing.T) {
+	for _, partial := range []bool{false, true} {
+		t.Run(strconv.FormatBool(partial), func(t *testing.T) {
+			fake := &schedAdminPermissionService{}
+			if partial {
+				fake.testErr = &service.SchedAdminTestErrors{Models: []string{"failed-model"}, Err: errors.New("runner failed")}
+			}
+			audit := &schedAdminHandlerAudit{}
+			auditService := service.NewAuditLogService(audit, nil)
+			auditService.Start()
+			r := schedAdminHandlerRouter(NewSchedQualityHandler(fake), gin.HandlerFunc(middleware.NewAuditLogMiddleware(auditService)))
+			w := schedAdminHandlerRequest(r, "POST", "/accounts/1/test", "")
+			require.Equal(t, 200, w.Code, w.Body.String())
+			require.Contains(t, w.Body.String(), `"test_id":"started"`)
+			require.Empty(t, fake.testModel)
+			require.Equal(t, 1, fake.calls)
+			auditService.Stop()
+			require.Len(t, audit.rows, 1)
+			require.Equal(t, "sched_quality.test", audit.rows[0].Action)
+			if partial {
+				require.Equal(t, "partial_failure", audit.rows[0].Extra["result"])
 			}
 		})
 	}

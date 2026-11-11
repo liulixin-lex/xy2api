@@ -179,7 +179,7 @@ func TestSchedAdminHealthCounterResetBeforeThreshold(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, result.Failed)
 	for _, key := range []string{"403_counter", "stream_timeout_counter", "health_counter"} {
-		require.Contains(t, result.Cleared, service.SchedResetItem{Key: key, Kind: key})
+		require.NotContains(t, result.Cleared, service.SchedResetItem{Key: key, Kind: key})
 	}
 	exists, err := cache.rdb.Exists(ctx, cache.openAIAPIKeyHealthKey(a.ID), cache.openAIAPIKeyHealthKey(a.ID)+":sequence", fmt.Sprintf("%s%d", openAI403CounterPrefix, a.ID), fmt.Sprintf("%s%d", timeoutCounterPrefix, a.ID)).Result()
 	require.NoError(t, err)
@@ -188,4 +188,81 @@ func TestSchedAdminHealthCounterResetBeforeThreshold(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 1, n)
 	require.False(t, tripped)
+}
+
+type schedAdminReplacingCache struct {
+	*tempUnschedCache
+	replace func() error
+}
+
+func (c *schedAdminReplacingCache) SchedAdminDeleteTempIf(ctx context.Context, id int64, reason string, until *time.Time) (bool, error) {
+	cleared, err := c.tempUnschedCache.SchedAdminDeleteTempIf(ctx, id, reason, until)
+	if err == nil && !cleared && c.replace != nil {
+		err = c.replace()
+	}
+	return cleared, err
+}
+
+func TestSchedAdminStaleRedisTempAndConcurrentReplacement(t *testing.T) {
+	for _, replacement := range []bool{false, true} {
+		t.Run(fmt.Sprint(replacement), func(t *testing.T) {
+			ctx := context.Background()
+			repo := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
+			cache := &schedAdminReplacingCache{tempUnschedCache: &tempUnschedCache{rdb: testRedis(t)}}
+			ttl := NewTimeoutCounterCache(cache.rdb)
+			rl := service.NewRateLimitService(repo, nil, nil, nil, cache)
+			rl.SetTimeoutCounterCache(ttl)
+			s := service.NewSchedAdminService(service.SchedAdminDependencies{Accounts: repo, RateLimit: rl})
+			a := mustCreateAccount(t, testEntClient(t), &service.Account{Name: "sched-admin-stale-cache", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey})
+			now := time.Now().UTC().Truncate(time.Microsecond)
+			old := &service.TempUnschedState{UntilUnix: now.Add(2 * time.Hour).Unix(), MatchedKeyword: "rule", ErrorMessage: "old longer pause"}
+			require.NoError(t, cache.SetTempUnsched(ctx, a.ID, old))
+			until := now.Add(time.Hour)
+			current := &service.TempUnschedState{UntilUnix: until.Unix(), MatchedKeyword: "stream_timeout", ErrorMessage: "current shorter pause"}
+			raw, err := json.Marshal(current)
+			require.NoError(t, err)
+			require.NoError(t, repo.SetTempUnschedulable(ctx, a.ID, until, string(raw)))
+			require.NoError(t, cache.SetTempUnsched(ctx, a.ID, current))
+			for i := 0; i < 2; i++ {
+				_, err = ttl.IncrementTimeoutCount(ctx, a.ID, 5)
+				require.NoError(t, err)
+			}
+			if replacement {
+				cache.replace = func() error {
+					nextUntil := now.Add(3 * time.Hour)
+					if err := repo.SetTempUnschedulable(ctx, a.ID, nextUntil, "auth:new pause"); err != nil {
+						return err
+					}
+					return cache.SetTempUnsched(ctx, a.ID, &service.TempUnschedState{UntilUnix: nextUntil.Unix(), ErrorMessage: "auth:new pause"})
+				}
+			}
+			ok, err := s.ClearAutoState(ctx, a.ID, "temp", 7)
+			if replacement {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), "State has changed")
+				require.False(t, ok)
+			} else {
+				require.NoError(t, err)
+				require.True(t, ok)
+			}
+			got, err := repo.GetByID(ctx, a.ID)
+			require.NoError(t, err)
+			detail, err := rl.GetTempUnschedStatus(ctx, a.ID)
+			require.NoError(t, err)
+			cached, err := cache.GetTempUnsched(ctx, a.ID)
+			require.NoError(t, err)
+			if replacement {
+				require.Equal(t, "auth:new pause", got.TempUnschedulableReason)
+				require.Equal(t, "auth:new pause", cached.ErrorMessage)
+				require.Equal(t, "auth:new pause", detail.ErrorMessage)
+			} else {
+				require.Nil(t, got.TempUnschedulableUntil)
+				require.Nil(t, detail)
+				require.Nil(t, cached)
+			}
+			count, err := ttl.GetTimeoutCount(ctx, a.ID)
+			require.NoError(t, err)
+			require.Zero(t, count)
+		})
+	}
 }

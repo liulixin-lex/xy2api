@@ -27,16 +27,13 @@ func (r *ResilienceService) schedAdminResetLocalStates(id int64) []SchedAutoStat
 	return out
 }
 
-func (r *ResilienceService) schedAdminLocalStates(id int64, now time.Time) []SchedAutoState {
+func (r *ResilienceService) schedAdminLocalStates(a *Account, now time.Time) []SchedAutoState {
 	out := []SchedAutoState{}
 	if r == nil {
 		return out
 	}
-	r.sameSiteHold.mu.RLock()
-	entry, ok := r.sameSiteHold.accounts[id]
-	r.sameSiteHold.mu.RUnlock()
-	if ok && now.Before(entry.until) {
-		until := entry.until
+	id := a.ID
+	if until := r.sameSiteHold.until(a, now); !until.IsZero() {
 		out = append(out, SchedAutoState{Key: "same_site", Kind: "same_site", Scope: "account", Until: &until, Clearable: true})
 	}
 	r.postOutput.mu.Lock()

@@ -13,6 +13,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
 
@@ -150,10 +151,6 @@ func (g schedAdminGroups) GetByID(_ context.Context, id int64) (*Group, error) {
 	return g[id], nil
 }
 
-type schedAdminAuditLog struct{ rows []*AuditLog }
-
-func (a *schedAdminAuditLog) Record(row *AuditLog) { a.rows = append(a.rows, row) }
-
 type schedAdminBoard struct {
 	rows  []SchedBoardRow
 	model string
@@ -215,20 +212,20 @@ func (c *schedAdminTempCache) SchedAdminDeleteTempIf(_ context.Context, _ int64,
 	return true, nil
 }
 
-func schedAdminFixture() (*SchedAdminService, *schedAdminEngine, *schedAdminAccounts, *schedAdminAuditLog) {
+func schedAdminFixture() (*SchedAdminService, *schedAdminEngine, *schedAdminAccounts) {
 	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
 	engine := &schedAdminEngine{snapshot: &SchedQualitySnapshot{At: now, GlobalEnabled: true, TestsEnabled: true, Evidence: map[SchedAccountModel]schedquality.Summary{}, GroupRows: map[int64][]SchedGroupRow{}, Tests: map[SchedAccountModel]SchedTestRecord{}, Policies: map[int64]SchedPolicyRecord{}}, resetAt: now}
 	repo := &schedAdminAccounts{rows: map[int64]*Account{1: {ID: 1, Name: "one", Status: StatusActive, Schedulable: true, Platform: PlatformOpenAI, GroupIDs: []int64{1}, Extra: map[string]any{}}}, fail: map[string]error{}}
-	audit := &schedAdminAuditLog{}
-	svc := NewSchedAdminService(SchedAdminDependencies{Engine: engine, Accounts: repo, Groups: schedAdminGroups{1: {ID: 1, Name: "group", Platform: PlatformOpenAI}}, Now: func() time.Time { return now }, Audit: audit})
-	return svc, engine, repo, audit
+	svc := NewSchedAdminService(SchedAdminDependencies{Engine: engine, Accounts: repo, Groups: schedAdminGroups{1: {ID: 1, Name: "group", Platform: PlatformOpenAI}}, Now: func() time.Time { return now }})
+	return svc, engine, repo
 }
 func schedAdminEvidence(n int) schedquality.Summary {
 	return schedquality.Summary{Samples: n, Sessions: 4, Speed: schedquality.SpeedSummary{N: n, Sessions: 4, P90Ms: 1234, FailBoundMs: 1000}, Error: schedquality.ErrorSummary{N: n, Sessions: 4, Rate: .1, LCB: .01}, Cache: schedquality.CacheSummary{Turns: n, Sessions: 4, Ratio: .8}}
 }
 func TestSchedAdminSummaryAggregation(t *testing.T) {
-	s, e, r, _ := schedAdminFixture()
+	s, e, r := schedAdminFixture()
 	p := e.snapshot
+	p.Members = map[int64][]int64{1: {1, 2, 3, 4, 5, 6, 7}}
 	p.At = p.At.Add(-time.Minute - time.Nanosecond)
 	p.Evidence[SchedAccountModel{1, "a"}] = schedAdminEvidence(40)
 	p.Evidence[SchedAccountModel{1, "b"}] = schedAdminEvidence(80)
@@ -266,7 +263,7 @@ func TestSchedAdminSummaryAggregation(t *testing.T) {
 	require.Equal(t, []int64{1}, attention.Cooling)
 }
 func TestSchedAdminDetailTestEvidenceAndLedger(t *testing.T) {
-	s, e, _, _ := schedAdminFixture()
+	s, e, _ := schedAdminFixture()
 	p := e.snapshot
 	p.Policies[1] = SchedPolicyRecord{Policy: schedquality.Policy{Enabled: true, TTFTSeconds: 10}}
 	p.GroupRows[1] = []SchedGroupRow{{GroupID: 1, Model: "m", View: schedquality.StateView{State: schedquality.StateCooling, Verdicts: schedquality.Verdicts{Speed: schedquality.VerdictFail, Error: schedquality.VerdictFail, Cache: schedquality.VerdictPass}, FromTest: [3]bool{true, true, true}}, Summary: schedAdminEvidence(100), Test: schedquality.TestSummary{SpeedTurns: 8, SpeedWarm: 6, MaxTTFOMs: 9012, AnyTimeout: true, ErrorTurns: 9, Faults: 2, CacheTurns: 6, CacheRatio: .97}}}
@@ -296,7 +293,7 @@ func TestSchedAdminDetailTestEvidenceAndLedger(t *testing.T) {
 	require.Nil(t, out.Groups[0].ByModel[0].TTFO.P90Ms)
 }
 func TestSchedAdminBoardUsesOneSnapshotAndSelectionOrder(t *testing.T) {
-	s, e, _, _ := schedAdminFixture()
+	s, e, _ := schedAdminFixture()
 	e.snapshot.Evidence[SchedAccountModel{1, "m"}] = schedAdminEvidence(40)
 	e.snapshot.GroupRows[1] = []SchedGroupRow{{GroupID: 1, Model: "m", View: schedquality.StateView{State: schedquality.StateCooling, Until: e.resetAt.Add(time.Minute)}}}
 	board := &schedAdminBoard{rows: []SchedBoardRow{{AccountID: 1, Rank: 4, Eligible: false, Reject: "rate_limit", Standing: schedquality.StandBack, Concurrency: 7}}}
@@ -311,14 +308,12 @@ func TestSchedAdminBoardUsesOneSnapshotAndSelectionOrder(t *testing.T) {
 	require.Equal(t, 1234, *out.Accounts[0].TTFO.P90Ms)
 	require.NotNil(t, out.Accounts[0].Until)
 }
-func TestSchedAdminOverrideAndTestAudit(t *testing.T) {
-	s, e, _, audit := schedAdminFixture()
+func TestSchedAdminOverrideAndTestTickets(t *testing.T) {
+	s, e, _ := schedAdminFixture()
 	ctx := context.Background()
 	o := SchedOverride{AccountID: 1, GroupID: 1, Mode: schedquality.OverrideDemote, Reason: "operator choice", OperatorID: 7}
 	require.NoError(t, s.SetOverride(ctx, o))
 	require.Len(t, e.overrides, 1)
-	require.Equal(t, int64(7), *audit.rows[0].ActorUserID)
-	require.Equal(t, int64(1), audit.rows[0].Extra["group_id"])
 	o.GroupID = 9
 	require.Error(t, s.SetOverride(ctx, o))
 	o.GroupID = 0
@@ -344,7 +339,6 @@ func TestSchedAdminOverrideAndTestAudit(t *testing.T) {
 	require.Len(t, runner.Requests, 3)
 	require.Equal(t, "a", runner.Requests[0].Model)
 	require.False(t, runner.Requests[0].Auto)
-	require.Equal(t, "sched_quality.test", audit.rows[len(audit.rows)-1].Action)
 	clear(e.snapshot.Evidence)
 	e.snapshot.Evidence[SchedAccountModel{2, "fallback"}] = schedAdminEvidence(90)
 	e.snapshot.GroupRows[2] = []SchedGroupRow{{GroupID: 1, Model: "fallback"}}
@@ -355,7 +349,7 @@ func TestSchedAdminOverrideAndTestAudit(t *testing.T) {
 	require.Equal(t, "fallback", runner.Requests[0].Model)
 }
 func TestSchedAdminNarrowClearAndTempConflict(t *testing.T) {
-	s, e, r, audit := schedAdminFixture()
+	s, e, r := schedAdminFixture()
 	a := r.rows[1]
 	until := e.resetAt.Add(time.Hour)
 	a.Status = StatusError
@@ -398,11 +392,10 @@ func TestSchedAdminNarrowClearAndTempConflict(t *testing.T) {
 	require.Nil(t, a.TempUnschedulableUntil)
 	require.Nil(t, cache.state)
 	require.True(t, cache.cleared)
-	require.Equal(t, "sched_quality.clear_auto_state", audit.rows[len(audit.rows)-1].Action)
 }
 func TestSchedAdminSameSiteClearRemovesContribution(t *testing.T) {
 	withResilienceSettings(t, nil)
-	s, e, r, _ := schedAdminFixture()
+	s, e, r := schedAdminFixture()
 	a := r.rows[1]
 	a.Credentials = map[string]any{"base_url": "https://same.example"}
 	b := *a
@@ -419,7 +412,7 @@ func TestSchedAdminSameSiteClearRemovesContribution(t *testing.T) {
 	require.NotContains(t, runtime.sameSiteHold.accounts, int64(1))
 }
 func TestSchedAdminResetClearsCountersPreservesSharedAndManual(t *testing.T) {
-	s, e, r, audit := schedAdminFixture()
+	s, e, r := schedAdminFixture()
 	a := r.rows[1]
 	a.Schedulable = false
 	proxy := int64(9)
@@ -463,7 +456,7 @@ func TestSchedAdminResetClearsCountersPreservesSharedAndManual(t *testing.T) {
 	for _, item := range result.Cleared {
 		cleared[item.Key] = true
 	}
-	for _, key := range []string{"quality", "same_site", "post_output", "model_transient:m", "403_counter", "temp", "model_limit:old"} {
+	for _, key := range []string{"quality", "same_site", "post_output", "model_transient:m", "temp", "model_limit:old"} {
 		require.True(t, cleared[key], key)
 	}
 	preserved := map[string]string{}
@@ -474,10 +467,9 @@ func TestSchedAdminResetClearsCountersPreservesSharedAndManual(t *testing.T) {
 	require.Equal(t, "iq_gate", preserved["iq:m"])
 	require.Equal(t, "manual_off", preserved["manual_off"])
 	require.Equal(t, "expires_within_10m", preserved["session_avoid"])
-	require.Equal(t, "sched_quality.reset", audit.rows[len(audit.rows)-1].Action)
 }
 func TestSchedAdminResetContinuesAfterFailureAndClearLocalCallback(t *testing.T) {
-	s, e, r, _ := schedAdminFixture()
+	s, e, r := schedAdminFixture()
 	until := e.resetAt.Add(time.Hour)
 	r.rows[1].RateLimitResetAt = &until
 	r.rows[1].OverloadUntil = &until
@@ -503,7 +495,7 @@ func TestSchedAdminResetContinuesAfterFailureAndClearLocalCallback(t *testing.T)
 	require.Empty(t, s.d.Transient.List(1))
 }
 func TestSchedAdminEmptyJSONLists(t *testing.T) {
-	s, _, _, _ := schedAdminFixture()
+	s, _, _ := schedAdminFixture()
 	out, err := s.Detail(context.Background(), 1)
 	require.NoError(t, err)
 	raw, err := json.Marshal(out)
@@ -525,7 +517,7 @@ func (c *schedAdminCapabilityClear) ClearAccountCapabilityLearning(context.Conte
 }
 
 func TestSchedAdminAutoStatesProxyCapabilityAndReadonly(t *testing.T) {
-	s, e, r, _ := schedAdminFixture()
+	s, e, r := schedAdminFixture()
 	a := r.rows[1]
 	a.Type = AccountTypeAPIKey
 	a.Credentials = map[string]any{"api_key": "test"}
@@ -568,7 +560,7 @@ func TestSchedAdminAutoStatesProxyCapabilityAndReadonly(t *testing.T) {
 }
 
 func TestSchedAdminResetPreservesReadonlyAfterReread(t *testing.T) {
-	s, e, r, _ := schedAdminFixture()
+	s, e, r := schedAdminFixture()
 	a := r.rows[1]
 	a.Credentials = map[string]any{"account_scheduling_threshold": 50}
 	a.Extra["codex_7d_used_percent"] = 90.0
@@ -588,7 +580,7 @@ func TestSchedAdminResetPreservesReadonlyAfterReread(t *testing.T) {
 }
 
 func TestSchedAdminCodexTicketPreserved(t *testing.T) {
-	s, _, r, _ := schedAdminFixture()
+	s, _, r := schedAdminFixture()
 	a := r.rows[1]
 	a.Type = AccountTypeOAuth
 	a.Extra[codexAccountTicketConfigKey] = codexAccountTicketConfig{Enabled: true, Model: openAICodexTicketDefaultModel, Revision: "revision-1"}
@@ -606,7 +598,7 @@ func TestSchedAdminCodexTicketPreserved(t *testing.T) {
 }
 
 func TestSchedAdminParentStateMatchesShadowCredentialGate(t *testing.T) {
-	s, _, r, _ := schedAdminFixture()
+	s, _, r := schedAdminFixture()
 	parentID := int64(2)
 	r.rows[1].ParentAccountID = &parentID
 	r.rows[2] = &Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: false}
@@ -624,9 +616,13 @@ func TestSchedAdminParentStateMatchesShadowCredentialGate(t *testing.T) {
 type schedAdminTimeoutCounter struct {
 	TimeoutCounterCache
 	count int
+	err   error
 }
 
 func (c *schedAdminTimeoutCounter) ResetTimeoutCount(context.Context, int64) error {
+	if c.err != nil {
+		return c.err
+	}
 	c.count = 0
 	return nil
 }
@@ -634,11 +630,36 @@ func (c *schedAdminTimeoutCounter) ResetTimeoutCount(context.Context, int64) err
 type schedAdminHealthCounter struct {
 	OpenAIAPIKeyHealthCache
 	count int
+	err   error
 }
 
 func (c *schedAdminHealthCounter) SchedAdminClearHealth(context.Context, int64) error {
+	if c.err != nil {
+		return c.err
+	}
 	c.count = 0
 	return nil
+}
+
+func TestSchedAdminResetCountersOnlyReportFailures(t *testing.T) {
+	s, _, _ := schedAdminFixture()
+	c403 := &schedAdminCounter{}
+	timeout := &schedAdminTimeoutCounter{}
+	health := &schedAdminHealthCounter{}
+	s.d.RateLimit = &RateLimitService{openAI403CounterCache: c403, timeoutCounterCache: timeout, openAIAPIKeyHealth: health}
+	out, err := s.Reset(context.Background(), 1, 7)
+	require.NoError(t, err)
+	require.Equal(t, []SchedResetItem{{Key: "quality", Kind: "quality"}}, out.Cleared)
+	require.Empty(t, out.Failed)
+	c403.err, timeout.err, health.err = errors.New("403 failed"), errors.New("timeout failed"), errors.New("health failed")
+	out, err = s.Reset(context.Background(), 1, 7)
+	require.NoError(t, err)
+	require.Equal(t, []SchedResetItem{{Key: "quality", Kind: "quality"}}, out.Cleared)
+	require.ElementsMatch(t, []SchedResetItem{
+		{Key: "temp", Kind: "temp_403", Error: "403 failed"},
+		{Key: "temp", Kind: "temp_stream_timeout", Error: "timeout failed"},
+		{Key: "temp", Kind: "temp_health", Error: "health failed"},
+	}, out.Failed)
 }
 
 func TestSchedAdminTempSourcesClearOnlyOwnCounters(t *testing.T) {
@@ -655,7 +676,7 @@ func TestSchedAdminTempSourcesClearOnlyOwnCounters(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.source, func(t *testing.T) {
-			s, e, r, _ := schedAdminFixture()
+			s, e, r := schedAdminFixture()
 			a := r.rows[1]
 			until := e.resetAt.Add(time.Hour)
 			a.TempUnschedulableReason, a.TempUnschedulableUntil = tc.reason, &until
@@ -670,9 +691,7 @@ func TestSchedAdminTempSourcesClearOnlyOwnCounters(t *testing.T) {
 			for _, state := range states {
 				if state.Key == "temp" {
 					require.Equal(t, "temp_"+tc.source, state.Kind)
-					if tc.source == "usage" || tc.source == "rule" {
-						require.Equal(t, "rule_still_enabled", state.Why)
-					}
+					require.Empty(t, state.Why)
 				}
 			}
 			ok, err := s.ClearAutoState(context.Background(), 1, "temp", 7)
@@ -691,5 +710,141 @@ func TestSchedAdminTempSourcesClearOnlyOwnCounters(t *testing.T) {
 			_, retry := s.d.Gateway.openaiOAuth429RetryStartedAt.Load(int64(1))
 			require.True(t, retry)
 		})
+	}
+}
+
+func TestSchedAdminSnapshotMembersIncludeUnsampledGroups(t *testing.T) {
+	f := newQualityFixture(t)
+	f.store.Members = map[int64][]int64{10: {1, 2}, 20: {1}, 30: {1}}
+	f.cycle()
+	p := f.e.Snapshot()
+	require.Equal(t, map[int64][]int64{1: {10, 20, 30}, 2: {10}}, p.Members)
+	require.Empty(t, p.GroupRows)
+	s := NewSchedAdminService(SchedAdminDependencies{Engine: f.e, Now: func() time.Time { return f.now }})
+	out, err := s.Summary(context.Background(), []int64{1, 2}, "")
+	require.NoError(t, err)
+	require.Equal(t, SchedAdminAccountSummaryGroups{Total: 3, Nodata: 3}, out.Accounts[0].Groups)
+	require.Equal(t, SchedAdminAccountSummaryGroups{Total: 1, Nodata: 1}, out.Accounts[1].Groups)
+	f.e.members[10][0] = 99
+	require.Equal(t, []int64{10, 20, 30}, p.Members[1])
+}
+
+type schedAdminFailingRunner struct {
+	SchedTestRunner
+	requested []string
+}
+
+func (r *schedAdminFailingRunner) Request(_ context.Context, _ int64, m string, _ bool, _ int64) (SchedTestTicket, error) {
+	r.requested = append(r.requested, m)
+	if m == "b" {
+		return SchedTestTicket{}, errors.New("runner failed")
+	}
+	return SchedTestTicket{Model: m, TestID: m + "-ticket", Started: true}, nil
+}
+func TestSchedAdminTestRetainsTicketsAfterModelFailure(t *testing.T) {
+	s, e, _ := schedAdminFixture()
+	for i, m := range []string{"a", "b", "c"} {
+		e.snapshot.Evidence[SchedAccountModel{1, m}] = schedAdminEvidence(40 - i)
+	}
+	runner := &schedAdminFailingRunner{}
+	s.d.Tests = runner
+	out, err := s.Test(context.Background(), 1, "", 7)
+	var failures *SchedAdminTestErrors
+	require.ErrorAs(t, err, &failures)
+	require.Equal(t, []string{"b"}, failures.Models)
+	require.Equal(t, []string{"a", "b", "c"}, runner.requested)
+	require.Len(t, out.Tests, 2)
+	require.Equal(t, "a-ticket", out.Tests[0].TestID)
+	require.Equal(t, "c-ticket", out.Tests[1].TestID)
+}
+
+func TestSchedAdminBoardMapsRequestModelPerAccount(t *testing.T) {
+	s, e, r := schedAdminFixture()
+	a := r.rows[1]
+	a.Type = AccountTypeAPIKey
+	a.Credentials = map[string]any{"model_mapping": map[string]any{"alias": "upstream-a"}}
+	r.rows[2] = &Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"model_mapping": map[string]any{"alias": "upstream-b"}}}
+	until := e.resetAt.Add(time.Hour)
+	for i, m := range []string{"upstream-a", "upstream-b"} {
+		id := int64(i + 1)
+		v := schedAdminEvidence(40 + i)
+		v.Speed.P90Ms = 1234 + i
+		e.snapshot.Evidence[SchedAccountModel{id, m}] = v
+		e.snapshot.GroupRows[id] = []SchedGroupRow{{GroupID: 1, Model: m, View: schedquality.StateView{State: schedquality.StateCooling, Level: i + 1, Until: until, Verdicts: schedquality.Verdicts{Speed: schedquality.VerdictFail}}}}
+		e.snapshot.Tests[SchedAccountModel{id, m}] = SchedTestRecord{Running: true}
+	}
+	board := &schedAdminBoard{rows: []SchedBoardRow{{AccountID: 1}, {AccountID: 2}}}
+	s.d.Board = board
+	out, err := s.Board(context.Background(), 1, "alias")
+	require.NoError(t, err)
+	require.Equal(t, "alias", board.model)
+	for i, row := range out.Accounts {
+		require.Equal(t, 1234+i, *row.TTFO.P90Ms)
+		require.Equal(t, i+1, row.Level)
+		require.Equal(t, "cooling", row.State)
+		require.True(t, row.Testing)
+		require.NotNil(t, row.Until)
+		require.Equal(t, "fail", row.Verdicts.TTFO)
+	}
+}
+
+func TestSchedAdminDetailSchedulingRate(t *testing.T) {
+	s, e, r := schedAdminFixture()
+	a := r.rows[1]
+	a.RateMultiplier = schedAdminFloat(.8)
+	old := openAIAdvancedSchedulerSettingCache.Load()
+	t.Cleanup(func() {
+		if old == nil {
+			openAIAdvancedSchedulerSettingCache.Store((*cachedOpenAIAdvancedSchedulerSetting)(nil))
+		} else {
+			openAIAdvancedSchedulerSettingCache.Store(old)
+		}
+	})
+	openAIAdvancedSchedulerSettingCache.Store(&cachedOpenAIAdvancedSchedulerSetting{expiresAt: time.Now().Add(time.Hour).UnixNano(), oauthSchedulingRateMultiplier: schedAdminFloat(.2)})
+	a.Type = AccountTypeOAuth
+	out, err := s.Detail(context.Background(), 1)
+	require.NoError(t, err)
+	require.Equal(t, .2, out.Account.Rate)
+	a.Type = AccountTypeAPIKey
+	received, fresh := e.resetAt.Add(-time.Minute), e.resetAt.Add(time.Hour)
+	a.Extra[UpstreamBillingProbeExtraKey] = &UpstreamBillingProbeSnapshot{Status: UpstreamBillingProbeStatusOK, ReceivedAt: &received, FreshUntil: &fresh, Data: map[string]any{"billing_scope": "token", "resolved_rate_multiplier": .3, "peak_rate_enabled": false}}
+	out, err = s.Detail(context.Background(), 1)
+	require.NoError(t, err)
+	require.Equal(t, .3, out.Account.Rate)
+}
+
+func TestSchedAdminSameSiteListChecksSwitchAndGeneration(t *testing.T) {
+	withResilienceSettings(t, nil)
+	s, e, r := schedAdminFixture()
+	local := &ResilienceService{}
+	s.d.Resilience = local
+	local.sameSiteHold.generation = resilience.SameSiteHoldGeneration()
+	local.sameSiteHold.accounts = map[int64]openAISameSiteFailure{1: {until: e.resetAt.Add(time.Hour)}}
+	list := func() bool {
+		states, err := s.AutoStates(context.Background(), 1)
+		require.NoError(t, err)
+		for _, state := range states {
+			if state.Key == "same_site" {
+				return true
+			}
+		}
+		return false
+	}
+	require.True(t, list())
+	local.sameSiteHold.generation++
+	require.False(t, list())
+	local.sameSiteHold.generation = resilience.SameSiteHoldGeneration()
+	settings := *resilience.Current()
+	settings.SameSiteHold.Enabled = false
+	resilience.Publish(settings)
+	require.False(t, list())
+	r.rows[1].Status = StatusError
+	r.rows[1].Schedulable = false
+	states, err := s.AutoStates(context.Background(), 1)
+	require.NoError(t, err)
+	for _, state := range states {
+		if state.Clearable {
+			require.Empty(t, state.Why)
+		}
 	}
 }

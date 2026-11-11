@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"io"
 	"strconv"
 	"time"
 
@@ -59,6 +60,7 @@ func schedQualityReply(c *gin.Context, data any, e error) {
 	response.Success(c, data)
 }
 func (h *SchedQualityHandler) Summary(c *gin.Context) {
+	middleware.SkipAudit(c)
 	var r struct {
 		AccountIDs []int64 `json:"account_ids" binding:"required,dive,gt=0"`
 		Model      string  `json:"model"`
@@ -87,6 +89,7 @@ func (h *SchedQualityHandler) Detail(c *gin.Context) {
 	schedQualityReply(c, v, e)
 }
 func (h *SchedQualityHandler) Reset(c *gin.Context) {
+	middleware.SetAuditAction(c, "sched_quality.reset")
 	id, ok := schedQualityID(c)
 	if !ok {
 		return
@@ -110,9 +113,11 @@ func (h *SchedQualityHandler) Reset(c *gin.Context) {
 	for _, x := range v.Failed {
 		out.Failed = append(out.Failed, service.SchedAdminResetFailed{Key: x.Key, Kind: x.Kind, Error: x.Error})
 	}
+	middleware.SetAuditExtra(c, map[string]any{"cleared_count": len(v.Cleared), "preserved_count": len(v.Preserved), "failed_count": len(v.Failed)})
 	schedQualityReply(c, out, nil)
 }
 func (h *SchedQualityHandler) SetOverride(c *gin.Context) {
+	middleware.SetAuditAction(c, "sched_quality.override")
 	id, ok := schedQualityID(c)
 	if !ok {
 		return
@@ -135,6 +140,7 @@ func (h *SchedQualityHandler) SetOverride(c *gin.Context) {
 	schedQualityReply(c, nil, e)
 }
 func (h *SchedQualityHandler) ClearOverride(c *gin.Context) {
+	middleware.SetAuditAction(c, "sched_quality.clear_override")
 	id, ok := schedQualityID(c)
 	if !ok {
 		return
@@ -148,6 +154,7 @@ func (h *SchedQualityHandler) ClearOverride(c *gin.Context) {
 	schedQualityReply(c, nil, e)
 }
 func (h *SchedQualityHandler) Test(c *gin.Context) {
+	middleware.SetAuditAction(c, "sched_quality.test")
 	id, ok := schedQualityID(c)
 	if !ok {
 		return
@@ -155,14 +162,20 @@ func (h *SchedQualityHandler) Test(c *gin.Context) {
 	var r struct {
 		Model string `json:"model"`
 	}
-	if e := c.ShouldBindJSON(&r); e != nil {
+	if e := c.ShouldBindJSON(&r); e != nil && !errors.Is(e, io.EOF) {
 		response.BadRequest(c, e.Error())
 		return
 	}
 	v, e := h.service.Test(c.Request.Context(), id, r.Model, schedQualityOperator(c))
+	var failures *service.SchedAdminTestErrors
+	if errors.As(e, &failures) {
+		middleware.SetAuditExtra(c, map[string]any{"result": "partial_failure", "test_failed_count": len(failures.Models), "test_ticket_count": len(v.Tests)})
+		e = nil
+	}
 	schedQualityReply(c, v, e)
 }
 func (h *SchedQualityHandler) ClearAutoState(c *gin.Context) {
+	middleware.SetAuditAction(c, "sched_quality.clear_auto_state")
 	id, ok := schedQualityID(c)
 	if !ok {
 		return
@@ -183,6 +196,7 @@ func (h *SchedQualityHandler) Policy(c *gin.Context) {
 	schedQualityReply(c, v, e)
 }
 func (h *SchedQualityHandler) UpdatePolicy(c *gin.Context) {
+	middleware.SetAuditAction(c, "sched_quality.policy")
 	id, ok := schedQualityID(c)
 	if !ok {
 		return
