@@ -33,6 +33,9 @@ func (s *OpenAIGatewayService) TestRequestModel(ctx context.Context, account *Ac
 		if OpenAIAttemptModel(account, model) != evidenceModel || !account.IsModelSupported(model) {
 			continue
 		}
+		if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, account) {
+			return "", false, "account_scheduling_threshold"
+		}
 		req := OpenAIAccountScheduleRequest{Platform: PlatformOpenAI, RequestedModel: model}
 		if reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx, account, PlatformOpenAI, model, false, "", s); reason != "" {
 			return "", false, reason

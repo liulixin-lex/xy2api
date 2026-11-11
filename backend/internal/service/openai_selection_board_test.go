@@ -195,3 +195,90 @@ func TestSchedBoardRejectUntilAndProfit(t *testing.T) {
 		require.Equal(t, openAIProfitFilterReasonInvalidAccountRate, rows[0].Reject)
 	})
 }
+
+func TestSchedBoardSchedulingThresholdReadOnly(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		setup  func(*Account, time.Time)
+		paused bool
+	}{
+		{"global_threshold", func(*Account, time.Time) {}, true},
+		{"below_threshold", func(a *Account, _ time.Time) { a.Extra["codex_7d_used_percent"] = 79.0 }, false},
+		{"account_override", func(a *Account, _ time.Time) { a.Credentials = map[string]any{"account_scheduling_threshold": 90} }, false},
+		{"expired_window", func(a *Account, now time.Time) {
+			a.Extra["codex_7d_reset_at"] = now.Add(-time.Second).Format(time.RFC3339)
+		}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s, a, writes := selectionThresholdFixture(t)
+			now := time.Now()
+			tt.setup(a, now)
+			before := *a
+			repo := &selectionBoardRepo{AccountRepository: writes, accounts: []Account{*a}}
+			s.accountRepo = repo
+			board := NewOpenAISelectionBoard(s, func() schedquality.View { return selectionTestView(now) })
+			board.now = func() time.Time { return now }
+			rows, err := board.Board(context.Background(), 7, "m")
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			require.Equal(t, !tt.paused, rows[0].Eligible)
+			if tt.paused {
+				require.Equal(t, "account_scheduling_threshold", rows[0].Reject)
+				require.Zero(t, rows[0].Rank)
+				require.False(t, rows[0].CanTakeOver)
+				decision := EvaluateAccountSchedulingThreshold(a, s.settingService.GetAccountSchedulingThresholds(context.Background()), now)
+				require.Equal(t, decision.Until, rows[0].RejectUntil)
+			} else {
+				require.Empty(t, rows[0].Reject)
+				require.Nil(t, rows[0].RejectUntil)
+			}
+			require.Zero(t, writes.tempCalls)
+			require.Equal(t, before, *a)
+			require.Equal(t, before, repo.accounts[0])
+			require.Empty(t, board.marks.at)
+		})
+	}
+}
+
+func TestSchedBoardUpstreamChannelRestriction(t *testing.T) {
+	channel := newTestChannelService(makeStandardRepo(Channel{
+		ID: 1, Status: StatusActive, GroupIDs: []int64{7}, RestrictModels: true,
+		BillingModelSource: BillingModelSourceUpstream,
+		ModelPricing:       []ChannelModelPricing{{Platform: PlatformOpenAI, Models: []string{"allowed"}}},
+	}, map[int64]string{7: PlatformOpenAI}))
+	blocked, allowed := selectionTestAccount(1, 1), selectionTestAccount(2, 2)
+	blocked.Credentials = map[string]any{"model_mapping": map[string]any{"m": "blocked"}}
+	allowed.Credentials = map[string]any{"model_mapping": map[string]any{"m": "allowed"}}
+	s := &OpenAIGatewayService{channelService: channel, accountRepo: &selectionBoardRepo{accounts: []Account{*blocked, *allowed}}}
+	ctx := context.Background()
+	require.True(t, s.needsUpstreamChannelRestrictionCheck(ctx, ptrInt64Selection(7)))
+	require.False(t, s.checkChannelPricingRestriction(ctx, ptrInt64Selection(7), "m"), "the group-level check cannot resolve account mapping")
+	board := NewOpenAISelectionBoard(s, func() schedquality.View { return selectionTestView(time.Now()) })
+	rows, err := board.Board(ctx, 7, "m")
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	require.Equal(t, allowed.ID, rows[0].AccountID)
+	require.Equal(t, 1, rows[0].Rank)
+	require.True(t, rows[0].Eligible)
+	require.Equal(t, blocked.ID, rows[1].AccountID)
+	require.Equal(t, "channel_upstream_restricted", rows[1].Reject)
+	require.False(t, rows[1].Eligible)
+	require.Zero(t, rows[1].Rank)
+	require.False(t, rows[1].CanTakeOver)
+	model, ok, reason := s.TestRequestModel(ctx, blocked, "blocked")
+	require.True(t, ok, "test admission has no group and must not inherit a channel restriction")
+	require.Equal(t, "m", model)
+	require.Empty(t, reason)
+}
+
+func TestSchedBoardRejectUntilInjectedClock(t *testing.T) {
+	ctx := context.Background()
+	a := selectionTestAccount(1, 1)
+	wallNow := time.Now()
+	setAccountModelRateLimitSnapshot(a, "m", wallNow.Add(time.Hour), "limited", wallNow)
+	now := wallNow.Add(-24 * time.Hour)
+	remaining := a.GetRateLimitRemainingTimeWithContext(ctx, "m")
+	until := selectionRejectUntil(ctx, &OpenAIGatewayService{}, a, "m", "model_rate_limited", now)
+	require.NotNil(t, until)
+	require.WithinDuration(t, now.Add(remaining), *until, time.Second)
+}

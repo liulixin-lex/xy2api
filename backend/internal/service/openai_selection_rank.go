@@ -9,13 +9,14 @@ import (
 )
 
 type selectionKey struct {
-	Standing int
-	Priority int
-	Rate     float64
-	Affinity int
-	LoadRate int
-	LastUsed int64
-	ID       int64
+	Standing  int
+	Priority  int
+	RateKnown bool
+	Rate      float64
+	Affinity  int
+	LoadRate  int
+	LastUsed  int64
+	ID        int64
 }
 
 type selectionRequest struct {
@@ -58,10 +59,11 @@ func selectionState(view schedquality.View, groupID int64, account *Account, mod
 func buildSelectionKey(view schedquality.View, groupID int64, model string, acc *Account, req selectionRequest, now time.Time) selectionKey {
 	key := selectionKey{
 		Standing: int(schedquality.StandingOf(selectionState(view, groupID, acc, model), selectionAuto(view, now), now)),
-		Priority: acc.Priority, Affinity: 1, ID: acc.ID,
+		Priority: acc.Priority, RateKnown: !req.TokenBilled, Affinity: 1, ID: acc.ID,
 	}
 	if req.TokenBilled {
 		if rate, ok := openAISchedulingRate(acc, now, req.OAuthRateMultiplier); ok {
+			key.RateKnown = true
 			key.Rate = rate
 		}
 	}
@@ -84,7 +86,10 @@ func selectionLess(a, b selectionKey) bool {
 	if a.Priority != b.Priority {
 		return a.Priority < b.Priority
 	}
-	if a.Rate != b.Rate {
+	if a.RateKnown != b.RateKnown {
+		return a.RateKnown
+	}
+	if a.RateKnown && a.Rate != b.Rate {
 		return a.Rate < b.Rate
 	}
 	if a.Affinity != b.Affinity {

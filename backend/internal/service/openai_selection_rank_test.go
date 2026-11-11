@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"container/list"
 	"log/slog"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -29,7 +30,9 @@ func TestOpenAISelectionComparator(t *testing.T) {
 	}{
 		{"standing", selectionKey{Standing: 0, Priority: 2}, selectionKey{Standing: 1, Priority: 1}},
 		{"priority", selectionKey{Priority: 1, Rate: 100, LoadRate: 100}, selectionKey{Priority: 2, Rate: 0, LoadRate: 0}},
-		{"rate", selectionKey{Rate: 1, Affinity: 1, LoadRate: 100}, selectionKey{Rate: 2}},
+		{"rate", selectionKey{RateKnown: true, Rate: 1, Affinity: 1, LoadRate: 100}, selectionKey{RateKnown: true, Rate: 2}},
+		{"known_before_unknown_rate", selectionKey{RateKnown: true, Rate: 100, Affinity: 1, LoadRate: 100}, selectionKey{}},
+		{"unknown_rates_use_affinity", selectionKey{Affinity: 0, ID: 2}, selectionKey{Affinity: 1, ID: 1}},
 		{"affinity", selectionKey{Affinity: 0, LoadRate: 100}, selectionKey{Affinity: 1}},
 		{"load", selectionKey{LoadRate: 1, LastUsed: 100}, selectionKey{LoadRate: 2}},
 		{"last_used", selectionKey{LastUsed: 0, ID: 2}, selectionKey{LastUsed: 1, ID: 1}},
@@ -103,6 +106,37 @@ func TestOpenAISelectionKeyInputs(t *testing.T) {
 	req.OAuthRateMultiplier = &ra
 	a.Type = AccountTypeOAuth
 	require.Equal(t, ra, buildSelectionKey(view, 7, "m", a, req, now).Rate)
+}
+
+func TestOpenAISelectionUnknownRate(t *testing.T) {
+	now := time.Now()
+	view := selectionTestView(now)
+	for _, tt := range []struct {
+		name  string
+		setup func(*Account)
+	}{
+		{"unsupported_type", func(a *Account) { a.Type = "unsupported" }},
+		{"nan", func(a *Account) { rate := math.NaN(); a.RateMultiplier = &rate }},
+		{"infinite", func(a *Account) { rate := math.Inf(1); a.RateMultiplier = &rate }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			unknown, known := selectionTestAccount(1, 1), selectionTestAccount(2, 1)
+			tt.setup(unknown)
+			req := selectionRequest{TokenBilled: true}
+			uk, kk := buildSelectionKey(view, 7, "m", unknown, req, now), buildSelectionKey(view, 7, "m", known, req, now)
+			require.False(t, uk.RateKnown)
+			require.Zero(t, uk.Rate, "unknown rates must stay JSON-safe for the board")
+			require.True(t, kk.RateKnown)
+			require.True(t, selectionLess(kk, uk))
+			require.False(t, selectionLess(uk, kk))
+			req.TokenBilled = false
+			uk, kk = buildSelectionKey(view, 7, "m", unknown, req, now), buildSelectionKey(view, 7, "m", known, req, now)
+			require.Equal(t, kk.RateKnown, uk.RateKnown)
+			require.Zero(t, kk.Rate)
+			require.Zero(t, uk.Rate)
+			require.True(t, selectionLess(uk, kk), "non-token requests ignore rates and fall through to ID")
+		})
+	}
 }
 
 func TestOpenAISelectionFullMarks(t *testing.T) {

@@ -35,6 +35,9 @@ func (f *selectionSlotsFake) tryAcquireAccountSlot(_ context.Context, id int64, 
 }
 
 type selectionBindingFake struct {
+	key       string
+	ttlKeys   []string
+	casKeys   []string
 	owner     int64
 	remaining time.Duration
 	reads     int
@@ -43,16 +46,21 @@ type selectionBindingFake struct {
 	casError  bool
 }
 
-func (f *selectionBindingFake) GetSessionAccountIDWithTTL(context.Context, int64, string) (int64, time.Duration, error) {
+func (f *selectionBindingFake) GetSessionAccountIDWithTTL(_ context.Context, _ int64, key string) (int64, time.Duration, error) {
 	f.reads++
+	f.ttlKeys = append(f.ttlKeys, key)
+	if key != f.key {
+		return 0, 0, nil
+	}
 	return f.owner, f.remaining, nil
 }
-func (f *selectionBindingFake) CompareAndSwapSessionAccountID(_ context.Context, _ int64, _ string, old, target int64, _ time.Duration) (bool, error) {
+func (f *selectionBindingFake) CompareAndSwapSessionAccountID(_ context.Context, _ int64, key string, old, target int64, _ time.Duration) (bool, error) {
+	f.casKeys = append(f.casKeys, key)
 	*f.events = append(*f.events, fmt.Sprintf("cas:%d", target))
 	if f.casError {
 		return false, errors.New("cache down")
 	}
-	if f.casFail || f.owner != old {
+	if key != f.key || f.casFail || f.owner != old {
 		return false, nil
 	}
 	f.owner = target
@@ -74,8 +82,8 @@ func selectionNewSessionFixture() *selectionSessionFixture {
 	f := &selectionSessionFixture{now: time.Date(2026, 11, 11, 10, 0, 0, 0, time.UTC), owner: selectionTestAccount(10, 5), candidates: []*Account{selectionTestAccount(1, 1), selectionTestAccount(2, 2), selectionTestAccount(3, 3)}}
 	f.view = selectionTestView(f.now)
 	f.slots = &selectionSlotsFake{failed: map[int64]bool{}, events: &f.events}
-	f.binding = &selectionBindingFake{owner: 10, remaining: 29 * time.Minute, events: &f.events}
-	f.session = &selectionSession{view: func() schedquality.View { return f.view }, now: func() time.Time { return f.now }, slots: f.slots, cache: f.binding, bindings: f.binding, marks: &fullMarks{}, bindingTTL: 30 * time.Minute, recheck: func(_ context.Context, a *Account) *Account {
+	f.binding = &selectionBindingFake{key: "openai:session", owner: 10, remaining: 29 * time.Minute, events: &f.events}
+	f.session = &selectionSession{view: func() schedquality.View { return f.view }, now: func() time.Time { return f.now }, slots: f.slots, cache: f.binding, cacheKey: (&OpenAIGatewayService{}).openAISessionCacheKey, bindings: f.binding, marks: &fullMarks{}, bindingTTL: 30 * time.Minute, recheck: func(_ context.Context, a *Account) *Account {
 		f.events = append(f.events, fmt.Sprintf("check:%d", a.ID))
 		return a
 	}}
@@ -86,6 +94,59 @@ func (f *selectionSessionFixture) selectNow(ctx context.Context) *AccountSelecti
 }
 func (f *selectionSessionFixture) state(id int64, st schedquality.StateView) {
 	f.view.States[fakeSchedViewKey{7, id, "m"}] = st
+}
+
+func TestOpenAISelectionSessionCacheKey(t *testing.T) {
+	for _, mode := range []string{"immediate", "idle", "migration"} {
+		for _, legacyOnly := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/legacy_only=%t", mode, legacyOnly), func(t *testing.T) {
+				f := selectionNewSessionFixture()
+				f.candidates = f.candidates[:1]
+				if legacyOnly {
+					f.binding.key = "openai:legacy"
+				}
+				if mode == "idle" {
+					f.view.Takeovers[7] = fakeSchedTakeover{Idle: time.Minute, Enabled: true}
+				} else if mode == "migration" {
+					f.state(f.owner.ID, schedquality.StateView{State: schedquality.StateCooling})
+				}
+				result := f.session.selectOwner(context.Background(), 7, " session ", "m", f.owner, f.candidates, selectionRequest{})
+				if legacyOnly {
+					require.Nil(t, result)
+					require.Equal(t, f.owner.ID, f.binding.owner)
+					require.Zero(t, f.slots.held)
+				} else {
+					require.NotNil(t, result)
+					require.Equal(t, int64(1), f.binding.owner)
+					result.ReleaseFunc()
+				}
+				if mode == "idle" {
+					require.NotEmpty(t, f.binding.ttlKeys)
+				}
+				if mode != "idle" || !legacyOnly {
+					require.Equal(t, []string{"openai:session"}, f.binding.casKeys)
+				} else {
+					require.Empty(t, f.binding.casKeys)
+					require.Empty(t, f.slots.attempts)
+				}
+				for _, key := range f.binding.ttlKeys {
+					require.Equal(t, "openai:session", key)
+				}
+			})
+		}
+	}
+	for _, mode := range []string{"missing_converter", "blank_hash"} {
+		t.Run(mode, func(t *testing.T) {
+			f := selectionNewSessionFixture()
+			if mode == "missing_converter" {
+				f.session.cacheKey = nil
+			}
+			require.Nil(t, f.session.selectOwner(context.Background(), 7, " ", "m", f.owner, f.candidates, selectionRequest{}))
+			require.Empty(t, f.slots.attempts)
+			require.Empty(t, f.binding.ttlKeys)
+			require.Empty(t, f.binding.casKeys)
+		})
+	}
 }
 
 func TestOpenAISelectionSessionTakeoverRules(t *testing.T) {

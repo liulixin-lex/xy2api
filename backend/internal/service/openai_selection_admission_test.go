@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -102,4 +103,43 @@ func TestSchedTestAdmissionHardGatesAndNoMutation(t *testing.T) {
 		require.Empty(t, reason)
 	})
 }
+func selectionThresholdFixture(t *testing.T) (*OpenAIGatewayService, *Account, *rateLimitAccountRepoStub) {
+	t.Helper()
+	reset := func() {
+		accountSchedulingThresholdsSF.Forget(SettingKeyAccountSchedulingThresholds)
+		accountSchedulingThresholdsCache.Store(&cachedAccountSchedulingThresholds{})
+	}
+	reset()
+	t.Cleanup(reset)
+	settingsRepo := newMockSettingRepo()
+	settingsRepo.data[SettingKeyAccountSchedulingThresholds] = `{"openai":80}`
+	settings := NewSettingService(settingsRepo, &config.Config{})
+	repo := &rateLimitAccountRepoStub{}
+	rl := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	rl.SetSettingService(settings)
+	a := selectionTestAccount(1, 1)
+	a.Extra = map[string]any{
+		"codex_7d_used_percent": 85.0,
+		"codex_7d_reset_at":     time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
+	}
+	return &OpenAIGatewayService{rateLimitService: rl, settingService: settings}, a, repo
+}
+
+func TestSchedTestAdmissionSchedulingThreshold(t *testing.T) {
+	s, account, repo := selectionThresholdFixture(t)
+	decision := EvaluateAccountSchedulingThreshold(account, s.settingService.GetAccountSchedulingThresholds(context.Background()), time.Now())
+	require.True(t, decision.ShouldPause)
+	model, ok, reason := s.TestRequestModel(context.Background(), account, "m")
+	require.False(t, ok)
+	require.Empty(t, model)
+	require.Equal(t, "account_scheduling_threshold", reason)
+	require.Equal(t, 1, repo.tempCalls)
+	require.Equal(t, account.ID, repo.lastTempID)
+	require.Equal(t, decision.Until, account.TempUnschedulableUntil)
+	require.True(t, IsAccountSchedulingThresholdReason(repo.lastTempReason))
+	require.False(t, account.IsSchedulable())
+	require.True(t, s.isOpenAIAccountBlockedBySchedulingThreshold(context.Background(), account))
+	require.Equal(t, 1, repo.tempCalls, "real selection sees the same pause without rewriting it")
+}
+
 func ptrInt64Selection(v int64) *int64 { return &v }

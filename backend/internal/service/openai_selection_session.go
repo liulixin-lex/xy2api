@@ -20,6 +20,7 @@ type selectionSession struct {
 	now        func() time.Time
 	slots      selectionSessionSlots
 	cache      OpenAIStickyRebindCache
+	cacheKey   func(string) string
 	bindings   gatewaySessionBindingReader
 	marks      *fullMarks
 	bindingTTL time.Duration
@@ -53,8 +54,12 @@ func (s *selectionSession) candidateAllowed(view schedquality.View, groupID int6
 	return target.Priority < owner.Priority && schedquality.CanTakeOver(state, auto, now) && !s.marks.Recently(target.ID, now)
 }
 
-func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, key, model string, owner *Account, candidates []*Account, req selectionRequest) *AccountSelectionResult {
-	if owner == nil || key == "" || s.cache == nil || openAINoStickyMigration(ctx) || groupQualityGateExempt(ctx) {
+func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessionHash, model string, owner *Account, candidates []*Account, req selectionRequest) *AccountSelectionResult {
+	if owner == nil || s.cache == nil || s.cacheKey == nil || openAINoStickyMigration(ctx) || groupQualityGateExempt(ctx) {
+		return nil
+	}
+	key := s.cacheKey(sessionHash)
+	if key == "" {
 		return nil
 	}
 	now, view := s.now(), s.view()

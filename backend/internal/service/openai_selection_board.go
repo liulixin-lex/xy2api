@@ -57,6 +57,7 @@ func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model s
 	selectionReq := selectionRequest{TokenBilled: true, Loads: loads, OAuthRateMultiplier: multiplier}
 	checker := &defaultOpenAIAccountScheduler{service: s}
 	channelRestricted := s.checkChannelPricingRestriction(ctx, &groupID, model)
+	thresholds := s.settingService.GetAccountSchedulingThresholds(ctx)
 	type keyedRow struct {
 		row SchedBoardRow
 		key selectionKey
@@ -66,7 +67,12 @@ func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model s
 		account := &accounts[i]
 		reason := openAICompatibleAccountEligibilityFailureReason(ctx, account, req.Platform, model, false, req.RequiredCapability, s)
 		ok := reason == ""
+		threshold := EvaluateAccountSchedulingThreshold(account, thresholds, now)
+		if ok && threshold.ShouldPause {
+			ok, reason = false, "account_scheduling_threshold"
+		}
 		if ok {
+			// The shared check includes per-account upstream channel restrictions.
 			ok, reason = checker.isAccountRequestCompatibleReason(ctx, account, req)
 		}
 		if channelRestricted {
@@ -75,7 +81,11 @@ func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model s
 		key := buildSelectionKey(view, groupID, model, account, selectionReq, now)
 		row := SchedBoardRow{AccountID: account.ID, Eligible: ok, Reject: reason, Standing: schedquality.Standing(key.Standing), Priority: key.Priority, Rate: key.Rate, Concurrency: account.Concurrency}
 		if !ok {
-			row.RejectUntil = selectionRejectUntil(ctx, s, account, model, reason, now)
+			if reason == "account_scheduling_threshold" {
+				row.RejectUntil = threshold.Until
+			} else {
+				row.RejectUntil = selectionRejectUntil(ctx, s, account, model, reason, now)
+			}
 		}
 		currentlyFull := false
 		if load := loads[account.ID]; load != nil {
@@ -133,7 +143,7 @@ func selectionRejectUntil(ctx context.Context, s *OpenAIGatewayService, a *Accou
 			return nil
 		}
 		if remaining := a.GetRateLimitRemainingTimeWithContext(ctx, model); remaining > 0 {
-			until = time.Now().Add(remaining)
+			until = now.Add(remaining)
 		}
 	case "runtime_blocked":
 		// IQ and ticket gates have no timed expiry. Same-site precedes the model breaker.
