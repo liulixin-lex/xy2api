@@ -4,9 +4,18 @@
 
 ## [Unreleased]
 
+### 变更
+
+- 后端依赖小版本更新，包括 Gin 1.12、go-webauthn 0.18 与 testcontainers-go 0.45。
+- 前端依赖更新，包括 TypeScript 6.0、@vitejs/plugin-vue 6 与 @vueuse/core 15。
+
 ### 修复
 
 - `docker-compose.standalone.yml` 现在传递 `TOTP_ENCRYPTION_KEY`、`UPDATE_PROXY_URL`、`SECURITY_URL_ALLOWLIST_*` 与 `ALIPAY_MOBILE_PRECREATE_DEEP_LINK`，与 `docker-compose.yml` 一致。此前 standalone 部署即使在 `.env` 中设置了 `TOTP_ENCRYPTION_KEY`，每次启动也会随机生成密钥。
+
+### 安全
+
+- 升级存在已知漏洞的依赖：OpenAI TOTP Worker 的 certifi，后端的 excelize 与 Docker/moby 相关模块（testcontainers-go 0.45 改用 moby 模块），前端构建链中的 postcss-selector-parser、minimatch、brace-expansion、ajv 与 glob。
 
 ## [0.6.0] - 2026-11-11
 
