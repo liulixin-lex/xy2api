@@ -40,6 +40,10 @@ type SchedAttemptRecorder interface {
 type SchedAttemptStore interface {
 	InsertBatch(ctx context.Context, rows []schedquality.AttemptSample) error
 	LoadStartedSince(ctx context.Context, since time.Time) ([]schedquality.AttemptSample, error)
+	// LoadInsertedAfter returns rows with inserted_at > after, ordered by inserted_at
+	// then attempt_id. It completes the final timestamp group even beyond limit.
+	// maxInserted is the greatest returned inserted_at, or zero when no rows are
+	// returned; callers keep their previous cursor in that case.
 	LoadInsertedAfter(ctx context.Context, after time.Time, limit int) (rows []schedquality.AttemptSample, maxInserted time.Time, err error)
 	LoadRecentByAccount(ctx context.Context, accountID int64, limit int) ([]schedquality.AttemptSample, error)
 	DeleteBefore(ctx context.Context, t time.Time) (int64, error)
@@ -57,6 +61,8 @@ type SchedOverride struct {
 	Reason             string
 	OperatorID         int64
 }
+
+// SchedPolicyRecord.Version is the version of the entire group_quality_gate_policies setting.
 type SchedPolicyRecord struct {
 	GroupID, Version int64
 	Policy           schedquality.Policy
@@ -91,7 +97,9 @@ type SchedQualityEngine interface {
 	SetOverride(ctx context.Context, o SchedOverride) error
 	ClearOverride(ctx context.Context, accountID, groupID int64) error
 	Policy(ctx context.Context, groupID int64) (SchedPolicyRecord, error)
-	UpdatePolicy(ctx context.Context, groupID, expectedVersion int64, p schedquality.Policy) (SchedPolicyRecord, error) // ErrSchedPolicyConflict
+	// UpdatePolicy compares the entire setting's version, updates this group's v4,
+	// and increments the setting version; a mismatch returns ErrSchedPolicyConflict.
+	UpdatePolicy(ctx context.Context, groupID, expectedVersion int64, p schedquality.Policy) (SchedPolicyRecord, error)
 }
 type SchedQualityStore interface {
 	// RunCycle opens a transaction and tries the advisory lock. locked=false: fn is not called.
@@ -112,6 +120,8 @@ type SchedQualityTx interface {
 	ResetTimes() (map[int64]time.Time, error)
 	Upsert(rows []schedquality.StateRow) error
 	Delete(keys []schedquality.StateRow) error
+	// DeleteOverrides deletes only when the key and original expires_at still match
+	// and the current expiry has passed.
 	DeleteOverrides(expired []SchedOverride) error
 }
 
