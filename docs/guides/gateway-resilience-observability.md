@@ -97,11 +97,11 @@ SLA 口径：选号阶段找不到可用账号的无号 503 计入 SLA；余额�
 
 ### Info（只写应用标准输出）
 
-`resilience.keepalive_committed`（`source` 为 `request`、`slot_wait` 或 `queue_wait`）、`resilience.undelivered`（阶段、耗时、推断的 CDN 切断与 `edge`）、`resilience.transient_cooldown`、`resilience.transient_lifted`、`resilience.model_breaker`、`resilience.unclassified`、`resilience.content_policy_refusal`、`resilience.content_policy_no_failover`、`resilience.request_repair_replay`、`resilience.web_search_replay`、`resilience.web_search_declaration_learned`、`resilience.pre_created_delta`、`resilience.capability_learned`、`resilience.client_gone_skip`（客户端已离开时跳过的上游故障）、`anthropic_account_latency_sticky_kept`、`sched_quality.state`（见下）。
+`resilience.keepalive_committed`（`source` 为 `request`、`slot_wait` 或 `queue_wait`）、`resilience.undelivered`（阶段、耗时、推断的 CDN 切断与 `edge`）、`resilience.transient_cooldown`、`resilience.transient_lifted`、`resilience.model_breaker`、`resilience.unclassified`、`resilience.content_policy_refusal`、`resilience.content_policy_no_failover`、`resilience.request_repair_replay`、`resilience.web_search_replay`、`resilience.web_search_declaration_learned`、`resilience.pre_created_delta`、`resilience.capability_learned`、`resilience.client_gone_skip`（客户端已离开时跳过的上游故障）、`anthropic_account_latency_sticky_kept`。
 
 ### 质量状态
 
-OpenAI 账号 × 模型 × 分组的质量状态（见 [分组质量门槛](group-quality-gate.md)）在进入冷却、再冷却一轮、回到正常与被管理员恢复时各写一条 Info 日志 `sched_quality.state`，只写应用标准输出：
+OpenAI 账号 × 模型 × 分组的质量状态（见 [分组质量门槛](group-quality-gate.md)）在进入冷却、再冷却一轮、回到正常与被管理员恢复时各写一条 Info 日志 `sched_quality.state`（组件 `sched_quality`）。它虽是 Info 级，也写入运维监控的系统日志，可按组件筛选：
 
 | 字段 | 含义 |
 |---|---|
