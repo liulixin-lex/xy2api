@@ -82,7 +82,6 @@ export const ADMIN_PAGES_IN_SIDEBAR_ORDER: readonly AdminPageEntry[] = [
   { path: '/admin/channels/monitor', permission: 'channels', gate: 'channelMonitor', hideInSimpleMode: true },
   { path: '/admin/subscriptions', permission: 'subscriptions', gate: 'subscription', hideInSimpleMode: true },
   { path: '/admin/accounts', permission: 'accounts' },
-  { path: '/admin/share-scheduling', permission: 'share_scheduling' },
   { path: '/admin/plugins', permission: 'super_only' },
   { path: '/admin/announcements', permission: 'announcements' },
   { path: '/admin/support-tickets', permission: 'support_tickets', gate: 'supportTickets' },

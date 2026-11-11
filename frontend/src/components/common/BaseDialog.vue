@@ -5,7 +5,7 @@
       <div
         v-if="show"
         class="modal-overlay"
-        :style="zIndexStyle"
+        :style="{ zIndex: stackZ }"
         :aria-labelledby="dialogId"
         role="dialog"
         aria-modal="true"
@@ -46,14 +46,13 @@
 </template>
 
 <script lang="ts">
-// Track open instances independently of transition DOM and unmount ordering.
-const openDialogs = new Set<symbol>()
 let dialogIdCounter = 0
 </script>
 
 <script setup lang="ts">
 import { computed, watch, onMounted, onUnmounted, ref, nextTick, useId } from 'vue'
 import Icon from '@/components/icons/Icon.vue'
+import { closeOverlay, isTopOverlay, openOverlay } from '@/utils/overlayStack'
 
 // 生成唯一ID以避免多个对话框时ID冲突
 const dialogId = `modal-title-${useId()}-${++dialogIdCounter}`
@@ -78,12 +77,11 @@ function trapFocus(event: KeyboardEvent) {
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
 }
 
+// 只有最上层关闭时才把焦点还给它的触发元素；下层先关时上层继续持有焦点。
 function releaseDialog() {
-  openDialogs.delete(dialogToken)
-  if (openDialogs.size === 0) {
-    document.body.classList.remove('modal-open')
-  }
-  if (previousActiveElement?.isConnected) previousActiveElement.focus()
+  const wasTop = isTopOverlay(dialogToken)
+  closeOverlay(dialogToken)
+  if (wasTop && previousActiveElement?.isConnected) previousActiveElement.focus()
   previousActiveElement = null
 }
 
@@ -96,6 +94,7 @@ interface Props {
   closeOnEscape?: boolean
   closeOnClickOutside?: boolean
   showCloseButton?: boolean
+  /** Lowest z-index for this dialog; a dialog is always drawn above the layers opened before it. */
   zIndex?: number
 }
 
@@ -108,15 +107,13 @@ const props = withDefaults(defineProps<Props>(), {
   closeOnEscape: true,
   closeOnClickOutside: false,
   showCloseButton: true,
-  zIndex: 50
+  zIndex: undefined
 })
 
 const emit = defineEmits<Emits>()
 
-// Custom z-index style (overrides the default z-50 from CSS)
-const zIndexStyle = computed(() => {
-  return props.zIndex !== 50 ? { zIndex: props.zIndex } : undefined
-})
+// 层级由打开顺序决定（utils/overlayStack），后打开的在上
+const stackZ = ref<number>()
 
 const widthClasses = computed(() => {
   // Width guidance: narrow=confirm/short prompts, normal=standard forms,
@@ -141,7 +138,7 @@ const handleClose = () => {
 const handleEscape = (event: KeyboardEvent) => {
   const activeDialog = (document.activeElement as HTMLElement | null)?.closest('[data-base-dialog]')
   if (activeDialog && activeDialog !== dialogRef.value?.closest('[data-base-dialog]')) return
-  if (!event.defaultPrevented && props.show && props.closeOnEscape && event.key === 'Escape' && [...openDialogs].pop() === dialogToken) {
+  if (!event.defaultPrevented && props.show && props.closeOnEscape && event.key === 'Escape' && isTopOverlay(dialogToken)) {
     event.preventDefault()
     emit('close')
   }
@@ -154,9 +151,8 @@ watch(
     if (isOpen) {
       // 保存当前焦点元素
       previousActiveElement = document.activeElement as HTMLElement
-      openDialogs.add(dialogToken)
-      // 使用CSS类而不是直接操作style,更易于管理多个对话框
-      document.body.classList.add('modal-open')
+      // 与抽屉共用一个打开顺序：后打开的画在上面，滚动锁定到最后一个关闭为止，Esc 只关最上层
+      stackZ.value = openOverlay(dialogToken, props.zIndex)
 
       // 等待DOM更新后设置焦点到对话框
       await nextTick()

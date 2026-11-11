@@ -11,15 +11,10 @@ const { listAccounts, listWithEtag, getUpstreamBalances } = vi.hoisted(() => ({
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
-    groupQualityGate: {
-      getStatus: vi.fn().mockResolvedValue({ generated_at: '', stale: false, groups: [] }),
-      getPolicies: vi.fn().mockResolvedValue({ version: 0, groups: {} }),
-    },
     accounts: {
       list: listAccounts,
       listWithEtag,
       getBatchTodayStats: vi.fn().mockResolvedValue({ stats: {} }),
-      getBatchRecentHealth: vi.fn().mockResolvedValue({ stats: {} }),
       getUpstreamBalances,
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       getUpstreamBillingRatesWithEtag: vi.fn().mockResolvedValue({ notModified: true, etag: null, data: null }),
@@ -273,7 +268,6 @@ describe('admin AccountsView upstream balance column', () => {
 
   it('does not ask while the upstream balance column is hidden', async () => {
     localStorage.setItem('account-hidden-columns', JSON.stringify(['upstream_balance']))
-    localStorage.setItem('account-hidden-columns-version', 'scheduler-score-hidden-by-default')
     mountView()
     await flushPromises()
     await vi.advanceTimersByTimeAsync(30_000)
@@ -556,7 +550,6 @@ describe('admin AccountsView upstream balance column', () => {
 
   it('asks right away when the column is shown again from the open tools menu', async () => {
     localStorage.setItem('account-hidden-columns', JSON.stringify(['upstream_balance']))
-    localStorage.setItem('account-hidden-columns-version', 'scheduler-score-hidden-by-default')
     const wrapper = mountView()
     await flushPromises()
     expect(getUpstreamBalances).not.toHaveBeenCalled()

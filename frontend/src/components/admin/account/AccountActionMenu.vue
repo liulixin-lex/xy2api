@@ -86,8 +86,7 @@ import { IQ_GATE_KEY_PREFIX } from './iqCheckPresentation'
 import { useAuthStore } from '@/stores/auth'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 
-// qualityRecoverable：账号在已加载门槛状态的某个分组里不达标或待复测。“恢复状态”会清空该号在各组的门槛状态与坏记忆，之后按从未测过处理。
-const props = withDefaults(defineProps<{ show: boolean; account: Account | null; anchorRect: DOMRect | null; qualityRecoverable?: boolean }>(), { qualityRecoverable: false })
+const props = defineProps<{ show: boolean; account: Account | null; anchorRect: DOMRect | null }>()
 const emit = defineEmits(['iq-run', 'iq-records', 'close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow', 'manage-openai-totp'])
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -152,7 +151,7 @@ const isRateLimited = computed(() => {
 const isOverloaded = computed(() => props.account?.overload_until && new Date(props.account.overload_until) > new Date())
 const isTempUnschedulable = computed(() => props.account?.temp_unschedulable_until && new Date(props.account.temp_unschedulable_until) > new Date())
 const hasRecoverableState = computed(() => {
-  return props.account?.status === 'error' || Boolean(isRateLimited.value) || Boolean(isOverloaded.value) || Boolean(isTempUnschedulable.value) || props.qualityRecoverable
+  return props.account?.status === 'error' || Boolean(isRateLimited.value) || Boolean(isOverloaded.value) || Boolean(isTempUnschedulable.value)
 })
 const isAntigravityOAuth = computed(() => props.account?.platform === 'antigravity' && props.account?.type === 'oauth')
 const isOpenAIOAuth = computed(() => props.account?.platform === 'openai' && props.account?.type === 'oauth')

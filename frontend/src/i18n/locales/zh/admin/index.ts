@@ -7,10 +7,8 @@ import settings from './settings'
 import audit from './audit'
 import promptAudit from './promptAudit'
 import plugins from './plugins'
-import shareScheduling from './shareScheduling'
 import resilience from './resilience'
 import groupCategories from './groupCategories'
-import groupQualityGate from './groupQualityGate'
 import operatorAccess from './operatorAccess'
 
 export default {
@@ -23,9 +21,7 @@ export default {
   ...audit,
   ...promptAudit,
   ...plugins,
-  ...shareScheduling,
   ...resilience,
   ...groupCategories,
-  ...groupQualityGate,
   ...operatorAccess,
 }

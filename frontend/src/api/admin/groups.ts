@@ -15,7 +15,7 @@ import type {
   UpdateGroupRequest,
   PaginatedResponse
 } from '@/types'
-import type { GroupProfitControlPreview } from '@/types/groupQualityGate'
+import type { GroupProfitControlPreview } from '@/types/groupProfitControl'
 
 export interface LiveCapability {
   supported: boolean

@@ -11,7 +11,6 @@ export default {
       groups: 'Groups',
       channels: 'Channels',
       accounts: 'Accounts',
-      share_scheduling: 'Share scheduling',
       support_tickets: 'Customer support',
       announcements: 'Announcements',
       proxies: 'IP management',
