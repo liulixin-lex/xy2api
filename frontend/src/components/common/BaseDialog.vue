@@ -46,14 +46,13 @@
 </template>
 
 <script lang="ts">
-// Track open instances independently of transition DOM and unmount ordering.
-const openDialogs = new Set<symbol>()
 let dialogIdCounter = 0
 </script>
 
 <script setup lang="ts">
 import { computed, watch, onMounted, onUnmounted, ref, nextTick, useId } from 'vue'
 import Icon from '@/components/icons/Icon.vue'
+import { closeOverlay, isTopOverlay, openOverlay } from '@/utils/overlayStack'
 
 // 生成唯一ID以避免多个对话框时ID冲突
 const dialogId = `modal-title-${useId()}-${++dialogIdCounter}`
@@ -79,10 +78,7 @@ function trapFocus(event: KeyboardEvent) {
 }
 
 function releaseDialog() {
-  openDialogs.delete(dialogToken)
-  if (openDialogs.size === 0) {
-    document.body.classList.remove('modal-open')
-  }
+  closeOverlay(dialogToken)
   if (previousActiveElement?.isConnected) previousActiveElement.focus()
   previousActiveElement = null
 }
@@ -141,7 +137,7 @@ const handleClose = () => {
 const handleEscape = (event: KeyboardEvent) => {
   const activeDialog = (document.activeElement as HTMLElement | null)?.closest('[data-base-dialog]')
   if (activeDialog && activeDialog !== dialogRef.value?.closest('[data-base-dialog]')) return
-  if (!event.defaultPrevented && props.show && props.closeOnEscape && event.key === 'Escape' && [...openDialogs].pop() === dialogToken) {
+  if (!event.defaultPrevented && props.show && props.closeOnEscape && event.key === 'Escape' && isTopOverlay(dialogToken)) {
     event.preventDefault()
     emit('close')
   }
@@ -154,9 +150,8 @@ watch(
     if (isOpen) {
       // 保存当前焦点元素
       previousActiveElement = document.activeElement as HTMLElement
-      openDialogs.add(dialogToken)
-      // 使用CSS类而不是直接操作style,更易于管理多个对话框
-      document.body.classList.add('modal-open')
+      // 与抽屉共用一个打开顺序：滚动锁定到最后一个关闭为止，Esc 只关最上层
+      openOverlay(dialogToken)
 
       // 等待DOM更新后设置焦点到对话框
       await nextTick()

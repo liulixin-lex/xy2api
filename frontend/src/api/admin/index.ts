@@ -37,6 +37,7 @@ import adminComplianceAPI from './compliance'
 import auditAPI from './audit'
 import pluginsAPI from './plugins'
 import resilienceAPI from './resilience'
+import schedQualityAPI from './schedQuality'
 import accessAPI from './access'
 
 /**
@@ -77,6 +78,7 @@ export const adminAPI = {
   audit: auditAPI,
   plugins: pluginsAPI,
   resilience: resilienceAPI,
+  schedQuality: schedQualityAPI,
   access: accessAPI
 }
 
@@ -115,6 +117,7 @@ export {
   auditAPI,
   pluginsAPI,
   resilienceAPI,
+  schedQualityAPI,
   accessAPI
 }
 
