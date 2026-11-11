@@ -4,11 +4,20 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-11
+
+本版完善普通客户端使用 Claude Code 专用上游的兼容能力，新增 v2 版本、Chat 签名工具续接及会话排空，并修复协议语义丢失与兼容账号准入问题。
+
 ### 新增
 
 - Anthropic API Key 账号新增 `claude_code_v2` 请求兼容版本，统一 Claude Code 身份、billing 版本和会话头，普通客户端可通过现有 Messages、Responses HTTP、Chat 与计数接口使用已验证的上游能力。
 - v2 Chat 工具调用使用加密的服务端续接状态，校验完整历史、并行工具集合及参数后恢复原始思考签名和上游工具 ID；支持工具完成后的后续用户轮次。
 - 账号新增“接收新会话”开关，可停止兼容新会话准入，同时让已登记会话按原 profile revision 继续处理。
+
+### 变更
+
+- 前端构建工具迁移到 ESLint 9，并升级 Pinia、marked、jsdom 与 vue-tsc；仓库统一使用 pnpm 9.15.9。
+- 更新后端 SSE、参数验证、配置加载及腾讯云公共 SDK 依赖。
 
 ### 修复
 
