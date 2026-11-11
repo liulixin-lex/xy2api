@@ -8,7 +8,7 @@
 |---|---|---|
 | Go | 与 `backend/go.mod` 的 `go` 指令一致（当前 1.27.4） | 后端。CI 用 `go-version-file: backend/go.mod` 取版本 |
 | Node.js | 24 | 前端。CI 与 `Dockerfile` 都使用 Node 24 |
-| pnpm | 9 | 前端包管理。不要用 npm 或 yarn |
+| pnpm | 9（`frontend/package.json` 的 `packageManager`，当前 9.15.9） | 前端包管理。不要用 npm 或 yarn；pnpm 10 及以后的版本会忽略 `package.json` 中的 `pnpm.overrides`，生成的锁文件无法通过 CI |
 | PostgreSQL | 15 及以上 | 运行后端。CI 使用 18 |
 | Redis | 7 及以上 | 运行后端。CI 使用 8.4 |
 | Docker | 任意可用版本 | 集成测试通过 testcontainers 启动 PostgreSQL 与 Redis |
@@ -19,7 +19,7 @@
 本机 Go 版本低于 `go.mod` 要求时，`go` 命令会按 `GOTOOLCHAIN` 设置下载对应工具链或直接报错。
 
 ```bash
-npm install -g pnpm@9
+corepack enable   # 按 frontend/package.json 的 packageManager 使用 pnpm 9.15.9；也可以 npm install -g pnpm@9
 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
 ```
 
