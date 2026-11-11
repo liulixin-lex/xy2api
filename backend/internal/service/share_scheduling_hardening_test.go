@@ -23,7 +23,7 @@ func shareRecorderField(r *shareStatsRecorder, field string) int64 {
 }
 
 func TestShareSchedulingWaitSkipsCancelledRequests(t *testing.T) {
-	conc := newShareTestConcurrency()
+	conc := newSelectionTestConcurrency()
 	conc.busy[1] = -1
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

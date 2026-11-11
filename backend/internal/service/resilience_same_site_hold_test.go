@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
-	"github.com/liulixin-lex/xy2api/internal/sharesched"
 	"github.com/stretchr/testify/require"
 )
 
@@ -205,7 +204,7 @@ func TestSameSiteHoldRebindsSoftOwnerUnlessDisabled(t *testing.T) {
 		t.Run("advanced_"+fmtBool(advanced), func(t *testing.T) {
 			for _, enabled := range []bool{true, false} {
 				t.Run("same_site_"+fmtBool(enabled), func(t *testing.T) {
-					env := newOpenAIRuntimeBlockEnv(t, sharesched.SchedulerSub2API, lrAccountA, lrAccountB)
+					env := newOpenAIRuntimeBlockEnv(t, lrAccountA, lrAccountB)
 					if advanced {
 						env.svc.rateLimitService = newOpenAIAdvancedSchedulerRateLimitService("true")
 						t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
@@ -224,8 +223,8 @@ func TestSameSiteHoldRebindsSoftOwnerUnlessDisabled(t *testing.T) {
 						resilience.Publish(settings)
 					}
 					st := resilience.NewRequestState()
-					ctx := resilience.WithRequestState(cacheableContext(), st)
-					group := shareTestGroupID
+					ctx := resilience.WithRequestState(context.Background(), st)
+					group := selectionTestGroupID
 					sel, _, err := env.svc.SelectAccountWithScheduler(ctx, &group, "", lrSession, "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
 					require.NoError(t, err)
 					require.Equal(t, lrAccountB, sel.Account.ID)

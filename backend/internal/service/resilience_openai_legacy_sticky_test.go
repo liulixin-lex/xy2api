@@ -12,7 +12,6 @@ import (
 
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
-	"github.com/liulixin-lex/xy2api/internal/sharesched"
 	"github.com/stretchr/testify/require"
 )
 
@@ -337,7 +336,7 @@ func TestResilienceOpenAILegacySchedulerKeepsSoftBinding(t *testing.T) {
 	const key = "openai:" + lrSession
 
 	t.Run("last_resort", func(t *testing.T) {
-		env := newOpenAILastResortEnv(t, sharesched.SchedulerSub2API, 5, 1)
+		env := newOpenAILastResortEnv(t, 5, 1)
 		env.cache.bind(key, lrAccountA, time.Hour-time.Minute)
 		sel := selectOpenAILastResort(t, env)
 		require.Equal(t, lrAccountB, sel.Account.ID, "the original order is by priority")
@@ -346,15 +345,15 @@ func TestResilienceOpenAILegacySchedulerKeepsSoftBinding(t *testing.T) {
 
 	t.Run("healthy_alternative", func(t *testing.T) {
 		logs := captureOpenAIObservationLogs(t)
-		env := newOpenAILastResortEnv(t, sharesched.SchedulerSub2API, 5, 1)
+		env := newOpenAILastResortEnv(t, 5, 1)
 		healthy := env.account(lrAccountB)
 		healthy.TempUnschedulableUntil, healthy.TempUnschedulableReason = nil, ""
 		healthy.RateLimitResetAt, healthy.OverloadUntil = nil, nil
 		env.cache.bind(key, lrAccountA, time.Hour-time.Minute)
 
 		st := resilience.NewRequestState()
-		ctx := resilience.WithRequestState(cacheableContext(), st)
-		gid := shareTestGroupID
+		ctx := resilience.WithRequestState(context.Background(), st)
+		gid := selectionTestGroupID
 		sel, _, err := env.svc.SelectAccountWithScheduler(ctx, &gid, "", lrSession, "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
 		require.NoError(t, err)
 		require.Equal(t, lrAccountB, sel.Account.ID)

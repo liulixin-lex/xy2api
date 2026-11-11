@@ -26,7 +26,7 @@ func TestOpenAIShareCapabilityReasonAndOnlySelection(t *testing.T) {
 				env.account(2).Credentials = map[string]any{"model_mapping": map[string]any{"different-model": "different-model"}}
 			}
 			ctx := resilience.WithCapabilityRequest(context.Background(), "responses", false)
-			gid := shareTestGroupID
+			gid := selectionTestGroupID
 			in := openAIShareSelection{groupID: &gid, platform: PlatformOpenAI, model: "gpt-5.1", transport: OpenAIUpstreamTransportAny}
 			cands, _, stats, err := env.svc.shareOpenAICandidates(ctx, in, 0)
 			require.NoError(t, err)

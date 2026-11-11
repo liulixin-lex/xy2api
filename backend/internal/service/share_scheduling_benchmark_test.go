@@ -23,58 +23,58 @@ func meterCall(ctx context.Context, metric string) {
 	servertiming.Record(ctx, metric, now, now, 1)
 }
 
-type meteredCache struct{ *shareTestCache }
+type meteredCache struct{ *selectionTestCache }
 
 func (c meteredCache) GetSessionAccountID(ctx context.Context, groupID int64, key string) (int64, error) {
 	meterCall(ctx, servertiming.MetricRedis)
-	return c.shareTestCache.GetSessionAccountID(ctx, groupID, key)
+	return c.selectionTestCache.GetSessionAccountID(ctx, groupID, key)
 }
 
 func (c meteredCache) GetSessionAccountIDWithTTL(ctx context.Context, groupID int64, key string) (int64, time.Duration, error) {
 	meterCall(ctx, servertiming.MetricRedis)
-	return c.shareTestCache.GetSessionAccountIDWithTTL(ctx, groupID, key)
+	return c.selectionTestCache.GetSessionAccountIDWithTTL(ctx, groupID, key)
 }
 
 func (c meteredCache) SetSessionAccountID(ctx context.Context, groupID int64, key string, accountID int64, ttl time.Duration) error {
 	meterCall(ctx, servertiming.MetricRedis)
-	return c.shareTestCache.SetSessionAccountID(ctx, groupID, key, accountID, ttl)
+	return c.selectionTestCache.SetSessionAccountID(ctx, groupID, key, accountID, ttl)
 }
 
 func (c meteredCache) SetSessionAccountIDIfAbsent(ctx context.Context, groupID int64, key string, accountID int64, ttl time.Duration) (bool, error) {
 	meterCall(ctx, servertiming.MetricRedis)
-	return c.shareTestCache.SetSessionAccountIDIfAbsent(ctx, groupID, key, accountID, ttl)
+	return c.selectionTestCache.SetSessionAccountIDIfAbsent(ctx, groupID, key, accountID, ttl)
 }
 
 func (c meteredCache) RefreshSessionTTL(ctx context.Context, groupID int64, key string, ttl time.Duration) error {
 	meterCall(ctx, servertiming.MetricRedis)
-	return c.shareTestCache.RefreshSessionTTL(ctx, groupID, key, ttl)
+	return c.selectionTestCache.RefreshSessionTTL(ctx, groupID, key, ttl)
 }
 
 func (c meteredCache) DeleteSessionAccountID(ctx context.Context, groupID int64, key string) error {
 	meterCall(ctx, servertiming.MetricRedis)
-	return c.shareTestCache.DeleteSessionAccountID(ctx, groupID, key)
+	return c.selectionTestCache.DeleteSessionAccountID(ctx, groupID, key)
 }
 
-type meteredConcurrency struct{ *shareTestConcurrency }
+type meteredConcurrency struct{ *selectionTestConcurrency }
 
 func (c meteredConcurrency) AcquireAccountSlot(ctx context.Context, accountID int64, limit int, requestID string) (bool, error) {
 	meterCall(ctx, servertiming.MetricRedis)
-	return c.shareTestConcurrency.AcquireAccountSlot(ctx, accountID, limit, requestID)
+	return c.selectionTestConcurrency.AcquireAccountSlot(ctx, accountID, limit, requestID)
 }
 
 func (c meteredConcurrency) IncrementAccountWaitCount(ctx context.Context, accountID int64, maxWait int) (bool, error) {
 	meterCall(ctx, servertiming.MetricRedis)
-	return c.shareTestConcurrency.IncrementAccountWaitCount(ctx, accountID, maxWait)
+	return c.selectionTestConcurrency.IncrementAccountWaitCount(ctx, accountID, maxWait)
 }
 
 func (c meteredConcurrency) GetAccountWaitingCount(ctx context.Context, accountID int64) (int, error) {
 	meterCall(ctx, servertiming.MetricRedis)
-	return c.shareTestConcurrency.GetAccountWaitingCount(ctx, accountID)
+	return c.selectionTestConcurrency.GetAccountWaitingCount(ctx, accountID)
 }
 
 func (c meteredConcurrency) GetAccountsLoadBatch(ctx context.Context, accounts []AccountWithConcurrency) (map[int64]*AccountLoadInfo, error) {
 	meterCall(ctx, servertiming.MetricRedis)
-	return c.shareTestConcurrency.GetAccountsLoadBatch(ctx, accounts)
+	return c.selectionTestConcurrency.GetAccountsLoadBatch(ctx, accounts)
 }
 
 type meteredAccountRepo struct{ *mockAccountRepoForPlatform }
@@ -135,7 +135,7 @@ func runCost(t *testing.T, env *shareTestEnv, requests int) selectionCost {
 	rng := rand.New(rand.NewPCG(1, 2))
 	var out selectionCost
 	sessions := 0
-	gid := shareTestGroupID
+	gid := selectionTestGroupID
 	for i := range requests {
 		key := fmt.Sprintf("cost-%d", sessions)
 		if sessions == 0 || rng.IntN(5) == 0 {
@@ -188,7 +188,7 @@ func BenchmarkShareSchedulingSelection500(b *testing.B) {
 	for _, scheduler := range []sharesched.Scheduler{sharesched.SchedulerSub2API, sharesched.SchedulerShare} {
 		b.Run(string(scheduler), func(b *testing.B) {
 			env := newShareCostEnv(b, scheduler)
-			gid := shareTestGroupID
+			gid := selectionTestGroupID
 			ctx := cacheableContext()
 			b.ResetTimer()
 			for i := range b.N {

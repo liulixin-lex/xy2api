@@ -246,7 +246,7 @@ func newShareAdminEnv(t *testing.T, accounts ...Account) *shareAdminEnv {
 	env.gateway.accountRepo = shareAdminAccountRepo{env.repo}
 	env.gateway.groupRepo = shareAdminGroupRepo{env.gateway.groupRepo.(*mockGroupRepoForGateway)}
 	env.share.attachGateways(env.gateway, nil)
-	env.gateway.groupRepo.(shareAdminGroupRepo).groups[shareTestGroupID].Name = "share-group"
+	env.gateway.groupRepo.(shareAdminGroupRepo).groups[selectionTestGroupID].Name = "share-group"
 	return &shareAdminEnv{shareTestEnv: env, policies: repo, store: store, settings: settings}
 }
 
@@ -257,7 +257,7 @@ var (
 
 func (e *shareAdminEnv) save(t *testing.T, expected int64, update ShareSchedulingPolicyUpdate) (*ShareSchedulingPolicyView, error) {
 	t.Helper()
-	return e.share.SavePolicy(context.Background(), shareTestGroupID, expected, update, 9)
+	return e.share.SavePolicy(context.Background(), selectionTestGroupID, expected, update, 9)
 }
 
 func (e *shareAdminEnv) member(t *testing.T, views []ShareSchedulingMemberView, id int64) ShareSchedulingMemberView {
@@ -320,8 +320,8 @@ func TestShareAdminSavePolicyCASAndBroadcasts(t *testing.T) {
 	require.True(t, view.Effective)
 	require.True(t, view.Enabled)
 	require.Equal(t, int64(9), *view.UpdatedBy)
-	require.Equal(t, []int64{shareTestGroupID}, env.store.published)
-	require.Equal(t, int64(1), env.share.groupPolicy(shareTestGroupID).version, "the saving instance reloads at once")
+	require.Equal(t, []int64{selectionTestGroupID}, env.store.published)
+	require.Equal(t, int64(1), env.share.groupPolicy(selectionTestGroupID).version, "the saving instance reloads at once")
 
 	_, err = env.save(t, 0, shareUpdate)
 	require.ErrorIs(t, err, ErrShareSchedulingVersionConflict)
@@ -338,10 +338,10 @@ func TestShareAdminSaveKeepsStoredRules(t *testing.T) {
 	env := newShareAdminEnv(t, Account{ID: 1}, Account{ID: 2})
 	stored := `{"schema":1,"scheduler":"shadow","accounts":[{"account_id":1,"tier":2,"weight":33}],` +
 		`"defaults":{"tier":"account_priority","weight":"equal"},"affinity":{"enabled":true,"key":"auto","ttl_seconds":3600}}`
-	env.policies.rows = map[int64]ShareSchedulingPolicyRow{shareTestGroupID: {GroupID: shareTestGroupID, Version: 4,
+	env.policies.rows = map[int64]ShareSchedulingPolicyRow{selectionTestGroupID: {GroupID: selectionTestGroupID, Version: 4,
 		Scheduler: "shadow", Policy: []byte(stored), UpdatedAt: time.Now()}}
 
-	view, err := env.share.GetPolicy(context.Background(), shareTestGroupID)
+	view, err := env.share.GetPolicy(context.Background(), selectionTestGroupID)
 	require.NoError(t, err)
 	require.Equal(t, "sub2api", view.Scheduler, "a stored shadow policy is shown as the original scheduler")
 	require.True(t, view.LegacyShadow)
@@ -354,7 +354,7 @@ func TestShareAdminSaveKeepsStoredRules(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "share", view.Scheduler)
 	require.False(t, view.LegacyShadow)
-	saved := env.policies.rows[shareTestGroupID]
+	saved := env.policies.rows[selectionTestGroupID]
 	require.Equal(t, "share", saved.Scheduler)
 	var doc map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(saved.Policy, &doc))
@@ -373,18 +373,18 @@ func TestShareAdminSaveRecordsSwitchAnchor(t *testing.T) {
 
 	_, err = env.save(t, view.Version, shareUpdate)
 	require.NoError(t, err)
-	first := env.store.switched[shareTestGroupID]
+	first := env.store.switched[selectionTestGroupID]
 	require.False(t, first.IsZero())
-	require.True(t, first.Equal(env.policies.rows[shareTestGroupID].UpdatedAt), "the anchor is the committed update time")
+	require.True(t, first.Equal(env.policies.rows[selectionTestGroupID].UpdatedAt), "the anchor is the committed update time")
 
 	time.Sleep(2 * time.Millisecond)
 	_, err = env.save(t, 2, ShareSchedulingPolicyUpdate{Scheduler: sharesched.SchedulerShare})
 	require.NoError(t, err)
-	require.True(t, env.store.switched[shareTestGroupID].Equal(first), "changing session keeping is no switch")
+	require.True(t, env.store.switched[selectionTestGroupID].Equal(first), "changing session keeping is no switch")
 
 	_, err = env.save(t, 3, sub2apiUpdate)
 	require.NoError(t, err)
-	require.True(t, env.store.switched[shareTestGroupID].After(first), "switching back is a switch")
+	require.True(t, env.store.switched[selectionTestGroupID].After(first), "switching back is a switch")
 }
 
 func TestShareSharesFollowPrioritiesWeightsAndHealth(t *testing.T) {
@@ -423,10 +423,10 @@ func TestShareAdminMemberViewListsEveryMemberWithShares(t *testing.T) {
 	disabled := Account{ID: 4, Status: StatusDisabled, Priority: 1, Concurrency: 2}
 	env := newShareAdminEnv(t, Account{ID: 1}, Account{ID: 2}, Account{ID: 3, Priority: 2, Concurrency: 7}, disabled)
 	accountIn(env.repo.accounts, 4).Status = StatusDisabled
-	accountIn(env.repo.accounts, 1).GroupIDs = []int64{31, shareTestGroupID, 30}
+	accountIn(env.repo.accounts, 1).GroupIDs = []int64{31, selectionTestGroupID, 30}
 	env.policies.usage = map[int64]ShareSchedulingUsage{1: {Requests: 30}, 2: {Requests: 10}}
 
-	view, err := env.share.GetPolicy(context.Background(), shareTestGroupID)
+	view, err := env.share.GetPolicy(context.Background(), selectionTestGroupID)
 	require.NoError(t, err)
 	require.Equal(t, int64(0), view.Version)
 	require.Equal(t, "sub2api", view.Scheduler)
@@ -459,7 +459,7 @@ func TestShareAdminMemberViewListsEveryMemberWithShares(t *testing.T) {
 
 	resetAt := time.Now().Add(time.Hour)
 	accountIn(env.repo.accounts, 1).RateLimitResetAt = &resetAt
-	view, err = env.share.GetPolicy(context.Background(), shareTestGroupID)
+	view, err = env.share.GetPolicy(context.Background(), selectionTestGroupID)
 	require.NoError(t, err)
 	one = env.member(t, view.Members, 1)
 	require.False(t, one.Healthy)
@@ -474,13 +474,13 @@ func TestShareAdminMemberViewListsEveryMemberWithShares(t *testing.T) {
 func TestShareAdminMemberRequestsAreCachedNotTheirShares(t *testing.T) {
 	env := newShareAdminEnv(t, Account{ID: 1}, Account{ID: 2})
 	env.policies.usage = map[int64]ShareSchedulingUsage{1: {Requests: 4}}
-	_, err := env.share.GetPolicy(context.Background(), shareTestGroupID)
+	_, err := env.share.GetPolicy(context.Background(), selectionTestGroupID)
 	require.NoError(t, err)
 
 	lf := 1
 	accountIn(env.repo.accounts, 1).LoadFactor = &lf
 	env.policies.usage = map[int64]ShareSchedulingUsage{1: {Requests: 99}}
-	view, err := env.share.GetPolicy(context.Background(), shareTestGroupID)
+	view, err := env.share.GetPolicy(context.Background(), selectionTestGroupID)
 	require.NoError(t, err)
 	require.Equal(t, 1, env.policies.usageCalls, "the counts come from the cache")
 	one := env.member(t, view.Members, 1)
@@ -488,21 +488,21 @@ func TestShareAdminMemberRequestsAreCachedNotTheirShares(t *testing.T) {
 	require.InDelta(t, 0.5, one.ExpectedShare, 1e-9, "a changed load factor shows at once")
 
 	env.share.admin.mu.Lock()
-	entry := env.share.admin.requests[shareTestGroupID]
+	entry := env.share.admin.requests[selectionTestGroupID]
 	entry.at = entry.at.Add(-shareAdminSummaryTTL)
-	env.share.admin.requests[shareTestGroupID] = entry
+	env.share.admin.requests[selectionTestGroupID] = entry
 	env.share.admin.mu.Unlock()
-	view, err = env.share.GetPolicy(context.Background(), shareTestGroupID)
+	view, err = env.share.GetPolicy(context.Background(), selectionTestGroupID)
 	require.NoError(t, err)
 	require.Equal(t, int64(99), env.member(t, view.Members, 1).ActualRequests1h)
 }
 
 func TestShareAdminInvalidStoredPolicyShowsRunningDefaults(t *testing.T) {
 	env := newShareAdminEnv(t, Account{ID: 1}, Account{ID: 2})
-	env.policies.rows = map[int64]ShareSchedulingPolicyRow{shareTestGroupID: {GroupID: shareTestGroupID, Version: 4,
+	env.policies.rows = map[int64]ShareSchedulingPolicyRow{selectionTestGroupID: {GroupID: selectionTestGroupID, Version: 4,
 		Scheduler: "share", Policy: []byte(`{"scheduler":"share","retired":true}`), UpdatedAt: time.Now()}}
 
-	view, err := env.share.GetPolicy(context.Background(), shareTestGroupID)
+	view, err := env.share.GetPolicy(context.Background(), selectionTestGroupID)
 	require.NoError(t, err)
 	require.NotNil(t, view.Invalid)
 	require.Equal(t, "sub2api", view.Scheduler, "the request path skips an undecodable row")
@@ -516,17 +516,17 @@ func TestShareAdminInvalidStoredPolicyShowsRunningDefaults(t *testing.T) {
 
 	_, err = env.save(t, 4, shareUpdate)
 	require.NoError(t, err, "saving replaces an undecodable row")
-	_, err = sharesched.DecodePolicy(env.policies.rows[shareTestGroupID].Policy)
+	_, err = sharesched.DecodePolicy(env.policies.rows[selectionTestGroupID].Policy)
 	require.NoError(t, err)
 }
 
 func TestShareAdminListGroupsSummaries(t *testing.T) {
 	env := newShareAdminEnv(t, Account{ID: 1}, Account{ID: 2})
-	g := env.gateway.groupRepo.(shareAdminGroupRepo).groups[shareTestGroupID]
+	g := env.gateway.groupRepo.(shareAdminGroupRepo).groups[selectionTestGroupID]
 	g.AccountCount, g.ActiveAccountCount = 5, 3
-	env.policies.summaries = map[int64]ShareSchedulingGroupSummary{shareTestGroupID: {Requests: 40, CacheReadTokens: 300, PromptTokens: 1000}}
+	env.policies.summaries = map[int64]ShareSchedulingGroupSummary{selectionTestGroupID: {Requests: 40, CacheReadTokens: 300, PromptTokens: 1000}}
 	now := time.Now()
-	env.store.add(shareStatsKindCache, shareTestGroupID, now, map[string]int64{
+	env.store.add(shareStatsKindCache, selectionTestGroupID, now, map[string]int64{
 		shareStatsRequestsField: 10, shareStatsPromptTokensField: 1000,
 		shareStatsClassTokensPrefix + shareCacheMissSwitchSaturate: 150, shareStatsClassTokensPrefix + shareCacheHit: 850})
 
@@ -574,7 +574,7 @@ func TestShareAdminPreviewWarnings(t *testing.T) {
 	accountIn(env.repo.accounts, 3).RateLimitResetAt = &resetAt
 	env.cache.bind("s-a", 1, time.Hour)
 
-	preview, err := env.share.Preview(context.Background(), shareTestGroupID, shareUpdate)
+	preview, err := env.share.Preview(context.Background(), selectionTestGroupID, shareUpdate)
 	require.NoError(t, err)
 	require.True(t, preview.EffectiveAfter)
 	require.Equal(t, 1, *preview.ActivePriority)
@@ -589,7 +589,7 @@ func TestShareAdminPreviewWarnings(t *testing.T) {
 	require.Len(t, env.cache.sessionBindings, 1, "preview writes nothing")
 	require.Empty(t, env.policies.rows)
 
-	preview, err = env.share.Preview(context.Background(), shareTestGroupID, sub2apiUpdate)
+	preview, err = env.share.Preview(context.Background(), selectionTestGroupID, sub2apiUpdate)
 	require.NoError(t, err)
 	require.False(t, preview.EffectiveAfter)
 	require.Empty(t, preview.Warnings, "switching back to the original scheduler has no share risk")
@@ -599,7 +599,7 @@ func TestShareAdminPreviewWarnings(t *testing.T) {
 		accountIn(env.repo.accounts, id).RateLimitResetAt = &resetAt
 	}
 	env.share.state.Store(&shareSchedulingState{settings: ShareSchedulingSettings{}, groups: env.share.state.Load().groups})
-	preview, err = env.share.Preview(context.Background(), shareTestGroupID, shareUpdate)
+	preview, err = env.share.Preview(context.Background(), selectionTestGroupID, shareUpdate)
 	require.NoError(t, err)
 	require.False(t, preview.EffectiveAfter)
 	require.Nil(t, preview.ActivePriority)
@@ -617,7 +617,7 @@ func TestShareAdminExplainHasNoSideEffects(t *testing.T) {
 	env.cache.bind("explained", 2, time.Hour-time.Minute)
 	env.conc.mockConcurrencyCache.loadMap = map[int64]*AccountLoadInfo{1: {AccountID: 1, LoadRate: 120}}
 
-	out, err := env.share.Explain(context.Background(), shareTestGroupID, ShareSchedulingExplainInput{
+	out, err := env.share.Explain(context.Background(), selectionTestGroupID, ShareSchedulingExplainInput{
 		Model: "claude-sonnet-4-5", SessionHash: "explained", EstimatedTokens: 20_000})
 	require.NoError(t, err)
 	require.False(t, out.SimulatedNewSession)
@@ -644,7 +644,7 @@ func TestShareAdminExplainHasNoSideEffects(t *testing.T) {
 // the plan is that of a new session; an empty model filters nothing.
 func TestShareAdminExplainSimulatesNewSessionsWithoutModel(t *testing.T) {
 	env := newShareAdminEnv(t, Account{ID: 1}, Account{ID: 2})
-	out, err := env.share.Explain(context.Background(), shareTestGroupID, ShareSchedulingExplainInput{})
+	out, err := env.share.Explain(context.Background(), selectionTestGroupID, ShareSchedulingExplainInput{})
 	require.NoError(t, err)
 	require.True(t, out.SimulatedNewSession)
 	require.Equal(t, "sub2api", out.Scheduler, "explain also works for a group on the original scheduler")
@@ -672,13 +672,13 @@ func shareReportEnv(t *testing.T) *shareAdminEnv {
 func TestShareAdminReportOnOriginalScheduler(t *testing.T) {
 	env := shareReportEnv(t)
 	now := time.Now()
-	env.store.add(shareStatsKindCache, shareTestGroupID, now, map[string]int64{
+	env.store.add(shareStatsKindCache, selectionTestGroupID, now, map[string]int64{
 		shareStatsRequestsField: 8, shareStatsPromptTokensField: 1000,
 		shareStatsClassPrefix + shareCacheMissSwitchFailover: 2, shareStatsClassTokensPrefix + shareCacheMissSwitchFailover: 250,
 		shareStatsClassPrefix + shareCacheHit: 6, shareStatsClassTokensPrefix + shareCacheHit: 750})
-	env.store.add(shareStatsKindShare, shareTestGroupID, now, map[string]int64{shareStatsReasonPrefix + "new_session": 5})
+	env.store.add(shareStatsKindShare, selectionTestGroupID, now, map[string]int64{shareStatsReasonPrefix + "new_session": 5})
 
-	report, err := env.share.Report(context.Background(), shareTestGroupID, time.Hour)
+	report, err := env.share.Report(context.Background(), selectionTestGroupID, time.Hour)
 	require.NoError(t, err)
 	require.Equal(t, "sub2api", report.Scheduler)
 	require.Equal(t, int64(3600), report.WindowSeconds)
@@ -719,9 +719,9 @@ func TestShareAdminReportComparesWithTheWindowBeforeTheSwitch(t *testing.T) {
 
 	// The switch happened 20 minutes ago: the current window starts there.
 	anchor := time.Now().Add(-20 * time.Minute)
-	env.store.switched[shareTestGroupID] = anchor
+	env.store.switched[selectionTestGroupID] = anchor
 	before := anchor.Add(-30 * time.Minute)
-	env.store.add(shareStatsKindCache, shareTestGroupID, before, map[string]int64{
+	env.store.add(shareStatsKindCache, selectionTestGroupID, before, map[string]int64{
 		shareStatsRequestsField: 4, shareStatsPromptTokensField: 400,
 		shareStatsClassPrefix + shareCacheMissSwitchPolicy: 1, shareStatsClassTokensPrefix + shareCacheMissSwitchPolicy: 100})
 	var windows [][2]time.Time
@@ -732,7 +732,7 @@ func TestShareAdminReportComparesWithTheWindowBeforeTheSwitch(t *testing.T) {
 	}
 
 	env.store.exactReads = nil
-	report, err := env.share.Report(context.Background(), shareTestGroupID, time.Hour)
+	report, err := env.share.Report(context.Background(), selectionTestGroupID, time.Hour)
 	require.NoError(t, err)
 	require.Equal(t, []bool{true, true}, env.store.exactReads, "both counter kinds are read from the switch on, nothing before it")
 	require.Equal(t, "share", report.Scheduler)
@@ -755,19 +755,19 @@ func TestShareAdminReportComparesWithTheWindowBeforeTheSwitch(t *testing.T) {
 
 	// The production shape of the readiness review: every warm migration
 	// was forced by the bound account, none is active.
-	env.store.add(shareStatsKindShare, shareTestGroupID, time.Now(), map[string]int64{
+	env.store.add(shareStatsKindShare, selectionTestGroupID, time.Now(), map[string]int64{
 		shareStatsHotMigrationField: 488, shareStatsHotPrefix + string(sharesched.ReasonRebindUnavailable): 306,
 		shareStatsHotPrefix + string(sharesched.ReasonFailoverNext): 150, shareStatsHotPrefix + string(sharesched.ReasonResilFailureStreak): 32})
-	report, err = env.share.Report(context.Background(), shareTestGroupID, time.Hour)
+	report, err = env.share.Report(context.Background(), selectionTestGroupID, time.Hour)
 	require.NoError(t, err)
 	require.Equal(t, &ShareSchedulingHotMigrations{Total: 488, Active: 0,
 		ByReason: map[string]int64{"rebind_unavailable": 306, "failover_next": 150, "resil_failure_streak": 32}},
 		report.Details.HotMigrations, "passive migrations count in the total only")
 
-	env.store.add(shareStatsKindShare, shareTestGroupID, time.Now(), map[string]int64{
+	env.store.add(shareStatsKindShare, selectionTestGroupID, time.Now(), map[string]int64{
 		shareStatsHotMigrationField: 3, shareStatsHotPrefix + string(sharesched.ReasonRealignCold): 1,
 		shareStatsHotPrefix + string(sharesched.ReasonSpillRebind): 1, shareStatsHotPrefix + "return_deadline": 1})
-	report, err = env.share.Report(context.Background(), shareTestGroupID, time.Hour)
+	report, err = env.share.Report(context.Background(), selectionTestGroupID, time.Hour)
 	require.NoError(t, err)
 	require.Equal(t, int64(491), report.Details.HotMigrations.Total)
 	require.Equal(t, int64(1), report.Details.HotMigrations.Active,
@@ -778,17 +778,17 @@ func TestShareAdminReportBaselineFallbacks(t *testing.T) {
 	env := shareReportEnv(t)
 	_, err := env.save(t, 0, shareUpdate)
 	require.NoError(t, err)
-	delete(env.store.switched, shareTestGroupID)
+	delete(env.store.switched, selectionTestGroupID)
 
-	report, err := env.share.Report(context.Background(), shareTestGroupID, time.Hour)
+	report, err := env.share.Report(context.Background(), selectionTestGroupID, time.Hour)
 	require.NoError(t, err)
 	require.Equal(t, ShareAnchorPolicyUpdatedAt, *report.AnchorSource, "without a switch record the policy's update time anchors")
-	require.True(t, report.SwitchedAt.Equal(env.policies.rows[shareTestGroupID].UpdatedAt))
+	require.True(t, report.SwitchedAt.Equal(env.policies.rows[selectionTestGroupID].UpdatedAt))
 	require.NotNil(t, report.Baseline)
 
-	env.store.switched[shareTestGroupID] = time.Now().Add(-ShareCacheCounterRetention)
+	env.store.switched[selectionTestGroupID] = time.Now().Add(-ShareCacheCounterRetention)
 	env.store.exactReads = nil
-	report, err = env.share.Report(context.Background(), shareTestGroupID, 2*time.Hour)
+	report, err = env.share.Report(context.Background(), selectionTestGroupID, 2*time.Hour)
 	require.NoError(t, err)
 	require.Equal(t, []bool{false, false}, env.store.exactReads, "a window the switch does not cut is read as usual")
 	require.Equal(t, ShareBaselineOutOfRetention, *report.BaselineUnavailable)
@@ -819,7 +819,7 @@ func TestShareAdminAccountRulesShowExpectedShares(t *testing.T) {
 	rules, err = env.share.AccountRules(ctx, 1)
 	require.NoError(t, err)
 	lf := 3
-	require.Equal(t, []ShareSchedulingAccountRule{{GroupID: shareTestGroupID, GroupName: "share-group", Scheduler: "share",
+	require.Equal(t, []ShareSchedulingAccountRule{{GroupID: selectionTestGroupID, GroupName: "share-group", Scheduler: "share",
 		Effective: true, Priority: 1, LoadFactor: &lf, EffectiveLoadFactor: 3, Healthy: true, ExpectedShare: 0.75, ShareIfHealthy: 0.75}}, rules)
 
 	rules, err = env.share.AccountRules(ctx, 3)

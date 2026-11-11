@@ -59,7 +59,7 @@ func newShareInstancePair(t *testing.T, accounts ...Account) (a, b *shareAdminEn
 
 func TestShareSchedulingInstancesStayConsistent(t *testing.T) {
 	a, b := newShareInstancePair(t, Account{ID: 1}, Account{ID: 2}, Account{ID: 3})
-	require.Nil(t, b.share.groupPolicy(shareTestGroupID), "nothing is stored yet")
+	require.Nil(t, b.share.groupPolicy(selectionTestGroupID), "nothing is stored yet")
 	// Load factors 5:3:2 in one priority, on both instances' account views.
 	for _, env := range []*shareAdminEnv{a, b} {
 		for id, load := range map[int64]int{1: 5, 2: 3, 3: 2} {
@@ -75,7 +75,7 @@ func TestShareSchedulingInstancesStayConsistent(t *testing.T) {
 	_, err = a.save(t, 0, shareUpdate)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
-		gp := b.share.groupPolicy(shareTestGroupID)
+		gp := b.share.groupPolicy(selectionTestGroupID)
 		return b.share.Settings().Enabled && gp != nil && gp.version == 1
 	}, 2*time.Second, 10*time.Millisecond, "the other instance follows the broadcast")
 
@@ -110,10 +110,10 @@ func TestShareSchedulingInstancesStayConsistent(t *testing.T) {
 	_, err = b.save(t, 1, sub2apiUpdate)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
-		gp := a.share.state.Load().groups[shareTestGroupID]
+		gp := a.share.state.Load().groups[selectionTestGroupID]
 		return gp != nil && gp.version == 2
 	}, 2*time.Second, 10*time.Millisecond)
-	require.Nil(t, a.share.groupPolicy(shareTestGroupID), "the group is back on the original scheduler")
+	require.Nil(t, a.share.groupPolicy(selectionTestGroupID), "the group is back on the original scheduler")
 	a.cache.mu.Lock()
 	defer a.cache.mu.Unlock()
 	require.Len(t, a.cache.sessionBindings, bindings)

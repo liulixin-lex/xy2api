@@ -17,8 +17,8 @@ import (
 type openAIShareTestEnv struct {
 	svc   *OpenAIGatewayService
 	share *ShareSchedulingService
-	cache *shareTestCache
-	conc  *shareTestConcurrency
+	cache *selectionTestCache
+	conc  *selectionTestConcurrency
 	repo  schedulerTestOpenAIAccountRepo
 }
 
@@ -30,18 +30,18 @@ func newOpenAIShareTestEnv(t *testing.T, setup shareTestSetup, ids ...int64) *op
 	accounts := make([]Account, 0, len(ids))
 	for _, id := range ids {
 		acc := Account{ID: id, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive,
-			Schedulable: true, Concurrency: 5, AccountGroups: []AccountGroup{{GroupID: shareTestGroupID}}}
+			Schedulable: true, Concurrency: 5, AccountGroups: []AccountGroup{{GroupID: selectionTestGroupID}}}
 		setup.apply(&acc)
 		accounts = append(accounts, acc)
 	}
 	repo := schedulerTestOpenAIAccountRepo{accounts: accounts}
-	cache := newShareTestCache()
-	conc := newShareTestConcurrency()
+	cache := newSelectionTestCache()
+	conc := newSelectionTestConcurrency()
 	share := NewShareSchedulingService(nil, nil, nil)
 	share.attributionRate = 1
 	share.state.Store(&shareSchedulingState{
 		settings: ShareSchedulingSettings{Enabled: true},
-		groups:   map[int64]*shareGroupPolicy{shareTestGroupID: {groupID: shareTestGroupID, version: 1, policy: policy}},
+		groups:   map[int64]*shareGroupPolicy{selectionTestGroupID: {groupID: selectionTestGroupID, version: 1, policy: policy}},
 	})
 	cfg := &config.Config{}
 	cfg.Gateway.Scheduling.FallbackWaitTimeout = 30 * time.Second
@@ -53,7 +53,7 @@ func newOpenAIShareTestEnv(t *testing.T, setup shareTestSetup, ids ...int64) *op
 
 func (e *openAIShareTestEnv) selectAccount(t *testing.T, ctx context.Context, previousResponseID, sessionHash string, excluded map[int64]struct{}) (*AccountSelectionResult, OpenAIAccountScheduleDecision) {
 	t.Helper()
-	gid := shareTestGroupID
+	gid := selectionTestGroupID
 	result, decision, err := e.svc.SelectAccountWithScheduler(ctx, &gid, previousResponseID, sessionHash, "gpt-5.1", excluded, OpenAIUpstreamTransportAny, false)
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -152,7 +152,7 @@ func TestOpenAIShareSchedulingAdmissionBindKeepsPlannedBinding(t *testing.T) {
 
 	// The WebSocket ingress binds after every admission; a spill that keeps
 	// the binding must survive it.
-	gid := shareTestGroupID
+	gid := selectionTestGroupID
 	ctx := ContextWithSelectionProfitGate(context.Background(), result)
 	require.NoError(t, env.svc.BindStickySessionAfterProfitAdmission(ctx, &gid, "keep", other))
 	require.Equal(t, target, env.cache.sessionBindings["openai:keep"])
@@ -168,7 +168,7 @@ func TestOpenAIShareSchedulingFallbackWaitDefersBinding(t *testing.T) {
 	require.NotNil(t, result.WaitPlan)
 	require.NotContains(t, env.cache.sessionBindings, "openai:queued")
 
-	gid := shareTestGroupID
+	gid := selectionTestGroupID
 	ctx := ContextWithSelectionProfitGate(context.Background(), result)
 	require.NoError(t, env.svc.BindStickySessionAfterProfitAdmission(ctx, &gid, "queued", result.Account.ID))
 	require.Equal(t, []string{"openai:queued"}, env.cache.created)
@@ -183,7 +183,7 @@ func TestOpenAIShareSchedulingFailoverAndExhaustion(t *testing.T) {
 	require.Equal(t, other, result.Account.ID)
 	require.Equal(t, int64(1), env.counter(shareStatsReasonPrefix+string(sharesched.ReasonFailoverNext)))
 
-	gid := shareTestGroupID
+	gid := selectionTestGroupID
 	_, _, err := env.svc.SelectAccountWithScheduler(context.Background(), &gid, "", "fo", "gpt-5.1",
 		map[int64]struct{}{1: {}, 2: {}}, OpenAIUpstreamTransportAny, false)
 	require.True(t, errors.Is(err, ErrNoAvailableAccounts))
@@ -193,7 +193,7 @@ func TestOpenAIShareSchedulingFailoverAndExhaustion(t *testing.T) {
 func TestOpenAIShareSchedulingHonoursResponseOwner(t *testing.T) {
 	env := newOpenAIShareTestEnv(t, twoAccountPolicy(), 1, 2)
 	target, other := openAIShareTarget(t, "chain")
-	require.NoError(t, env.svc.getOpenAIWSStateStore().BindResponseAccount(context.Background(), shareTestGroupID, "resp_owner", other, time.Hour))
+	require.NoError(t, env.svc.getOpenAIWSStateStore().BindResponseAccount(context.Background(), selectionTestGroupID, "resp_owner", other, time.Hour))
 
 	result, decision := env.selectAccount(t, context.Background(), "resp_owner", "chain", nil)
 	require.Equal(t, other, result.Account.ID, "the response owner wins over the HRW target %d", target)
@@ -225,7 +225,7 @@ func TestOpenAIShareSchedulingShadowAndBypasses(t *testing.T) {
 	require.Zero(t, env.counter(shareStatsRequestsField), "no share decision is made or compared")
 
 	share := newOpenAIShareTestEnv(t, twoAccountPolicy(), 1, 2)
-	gid := shareTestGroupID
+	gid := selectionTestGroupID
 	_, decision, _ = share.svc.SelectAccountWithScheduler(context.Background(), &gid, "", "compact", "gpt-5.1", nil, OpenAIUpstreamTransportAny, true)
 	require.NotEqual(t, openAIAccountScheduleLayerShare, decision.Layer, "compact keeps its tiered original selection")
 	_, _, _ = share.svc.SelectAccountWithSchedulerForImages(context.Background(), &gid, "image", "gpt-image-1", nil, OpenAIImagesCapabilityBasic)
@@ -241,7 +241,7 @@ func TestOpenAIShareSchedulingRecordsTraceAndTTL(t *testing.T) {
 	require.Equal(t, result.Account.ID, trace.accountID)
 	require.Equal(t, sharesched.ReasonNewSession, trace.reason)
 
-	gid := shareTestGroupID
+	gid := selectionTestGroupID
 	require.NoError(t, env.svc.BindStickySession(context.Background(), &gid, "ttl", 1))
 	require.Equal(t, time.Hour, env.cache.ttls["openai:ttl"])
 }

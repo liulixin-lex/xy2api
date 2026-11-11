@@ -3,6 +3,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -18,7 +19,7 @@ import (
 func TestLastResortSessionLimitIsNotCachedForTheGroup(t *testing.T) {
 	for _, scheduler := range lastResortSchedulers {
 		t.Run(string(scheduler), func(t *testing.T) {
-			env := newResilienceGateEnv(t, scheduler,
+			env := newResilienceGateEnv(t,
 				func(a *Account, now time.Time) {
 					a.Type = AccountTypeOAuth
 					a.Extra = map[string]any{"max_sessions": 1}
@@ -26,13 +27,13 @@ func TestLastResortSessionLimitIsNotCachedForTheGroup(t *testing.T) {
 				},
 				func(_ *GatewayService, l *resilienceGateLimits) { l.full[gateTestAccount] = true })
 			st := resilience.NewRequestState()
-			ctx := resilience.WithRequestState(cacheableContext(), st)
-			gid := shareTestGroupID
+			ctx := resilience.WithRequestState(context.Background(), st)
+			gid := selectionTestGroupID
 			_, err := env.gateway.SelectAccountWithLoadAwareness(ctx, &gid, "sess-new", gateTestModel, nil, "", 0)
 			require.ErrorIs(t, err, ErrNoAvailableAccounts)
 			require.True(t, st.LastResortSessionLimited())
 
-			next := resilience.WithRequestState(cacheableContext(), resilience.NewRequestState())
+			next := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
 			require.NoError(t, resilienceNegativeCacheHit(next, &gid, gateTestModel, "", nil), "no group-wide cached 503")
 		})
 	}

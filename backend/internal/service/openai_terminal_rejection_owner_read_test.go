@@ -33,7 +33,7 @@ func TestEnc252XRootDoesNotClearChangedOwner(t *testing.T) {
 }
 
 type enc252XOwnerReadFailureCache struct {
-	*shareTestCache
+	*selectionTestCache
 	calls   int
 	failed  bool
 	unknown bool
@@ -48,7 +48,7 @@ func (c *enc252XOwnerReadFailureCache) GetSessionAccountID(ctx context.Context, 
 		}
 		return 0, errors.New("synthetic one-shot cache read timeout")
 	}
-	return c.shareTestCache.GetSessionAccountID(ctx, g, k)
+	return c.selectionTestCache.GetSessionAccountID(ctx, g, k)
 }
 func TestEnc252XChildAvoidanceSurvivesOwnerReadFailure(t *testing.T) {
 	for _, unknown := range []bool{false, true} {
@@ -60,24 +60,24 @@ func TestEnc252XChildAvoidanceSurvivesOwnerReadFailure(t *testing.T) {
 
 func testChildAvoidancePreservesUnknownOwner(t *testing.T, unknown bool) {
 	withResilienceSettings(t, nil)
-	env := newOpenAIShareTestEnv(t, twoAccountPolicy(), 1, 2)
+	env := newOpenAISelectionTestEnv(t, twoAccountSelectionSetup(), 1, 2)
 	env.svc.resilience = NewResilienceService(nil, newMemResilienceStore())
 	const session = "root-thread"
-	_, owner := openAIShareTarget(t, session)
+	_, owner := openAISelectionTarget(t, session)
 	env.cache.bind("openai:"+session, owner, 0)
-	cache := &enc252XOwnerReadFailureCache{shareTestCache: env.cache, unknown: unknown}
+	cache := &enc252XOwnerReadFailureCache{selectionTestCache: env.cache, unknown: unknown}
 	env.svc.cache = cache
 	c, _ := newOpenAIUpstreamErrorTestContext(t)
 	c.Request.Header.Set("session-id", session)
 	c.Request.Header.Set(openAIWSThreadIDHeader, "child-thread")
 	c.Request.Header.Set(codexParentThreadIDHeader, session)
-	ctx := env.svc.WithOpenAIGuardianParentAffinity(cacheableContext(), c, []byte(`{"model":"gpt-5.1","input":"turn"}`), "gpt-5.1")
-	env.svc.AvoidOpenAIStateAccount(ctx, shareTestGroupID, openAIRejectionScope(ctx).session, owner)
+	ctx := env.svc.WithOpenAIGuardianParentAffinity(context.Background(), c, []byte(`{"model":"gpt-5.1","input":"turn"}`), "gpt-5.1")
+	env.svc.AvoidOpenAIStateAccount(ctx, selectionTestGroupID, openAIRejectionScope(ctx).session, owner)
 	result, _ := env.selectAccount(t, ctx, "", session, nil)
 	if result.ReleaseFunc != nil {
 		result.ReleaseFunc()
 	}
-	group := shareTestGroupID
+	group := selectionTestGroupID
 	require.NoError(t, env.svc.BindStickySessionAfterProfitAdmission(ctx, &group, session, result.Account.ID))
 	require.True(t, cache.failed)
 	require.True(t, preserveOpenAIRejectionBinding(ctx, session))

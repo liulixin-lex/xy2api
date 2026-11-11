@@ -95,7 +95,7 @@ func TestGenerateSessionHash_MetadataHasHighestPriority(t *testing.T) {
 
 func TestGenerateSessionHash_ShareGroupAnchorKeepsPriority(t *testing.T) {
 	env := newShareTestEnv(t, twoAccountPolicy(), Account{ID: 71}, Account{ID: 72})
-	groupID := shareTestGroupID
+	groupID := selectionTestGroupID
 	parsed := mustParseSessionHashRequest(t, anthropicSessionBody("system", []any{msg("user", "prompt")}, ""), &SessionContext{APIKeyID: 73})
 	parsed.GroupID = &groupID
 

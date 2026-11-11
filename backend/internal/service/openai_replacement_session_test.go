@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
-	"github.com/liulixin-lex/xy2api/internal/sharesched"
 	"github.com/stretchr/testify/require"
 )
 
@@ -54,7 +53,7 @@ func TestOpenAILegacyReplacementSessionTriesNextSlot(t *testing.T) {
 }
 
 func TestOpenAIShareCompactReplacementKeepsLowestLoad(t *testing.T) {
-	env := newOpenAIShareTestEnv(t, shareTestPolicy(sharesched.SchedulerShare), 1, 2, 3)
+	env := newOpenAISelectionTestEnv(t, selectionTestSetupWithRules(), 1, 2, 3)
 	env.svc.cfg.Gateway.Scheduling.LoadBatchEnabled = true
 	for _, id := range []int64{2, 3} {
 		env.account(id).Extra = map[string]any{"openai_compact_supported": true}
@@ -64,13 +63,13 @@ func TestOpenAIShareCompactReplacementKeepsLowestLoad(t *testing.T) {
 	})
 	session := "compact-replacement"
 	env.cache.bind("openai:"+session, 1, time.Hour)
-	group := shareTestGroupID
-	require.True(t, env.share.shareSchedulingActive(group))
+	group := selectionTestGroupID
+
 	result, decision, err := env.svc.SelectAccountWithScheduler(context.Background(), &group, "", session, "gpt-5.1",
 		map[int64]struct{}{1: {}}, OpenAIUpstreamTransportAny, true)
 	require.NoError(t, err)
 	require.True(t, result.Acquired)
 	defer result.ReleaseFunc()
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
-	require.Equal(t, int64(2), result.Account.ID, "share compact bypass keeps the original minimum-load order")
+	require.Equal(t, int64(2), result.Account.ID, "compact requests keep the selection order")
 }

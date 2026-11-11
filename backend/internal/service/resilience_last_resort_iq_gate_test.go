@@ -9,7 +9,6 @@ import (
 
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
-	"github.com/liulixin-lex/xy2api/internal/sharesched"
 	"github.com/stretchr/testify/require"
 )
 
@@ -49,7 +48,7 @@ func setIQLastResortAdvanced(t *testing.T, enabled bool) {
 
 func iqLastResortAccount(id int64) Account {
 	return Account{ID: id, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive,
-		Schedulable: true, Concurrency: 2, AccountGroups: []AccountGroup{{GroupID: shareTestGroupID}}}
+		Schedulable: true, Concurrency: 2, AccountGroups: []AccountGroup{{GroupID: selectionTestGroupID}}}
 }
 
 func iqLastResortExtra(key string, resetAt time.Time) map[string]any {
@@ -62,7 +61,7 @@ func iqLastResortExtra(key string, resetAt time.Time) map[string]any {
 
 func selectIQLastResort(t *testing.T, svc *OpenAIGatewayService, model string, requireCompact bool) (*AccountSelectionResult, error) {
 	t.Helper()
-	groupID := shareTestGroupID
+	groupID := selectionTestGroupID
 	ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
 	selection, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "iq-last-resort-session", model, nil, OpenAIUpstreamTransportAny, requireCompact)
 	return selection, err
@@ -104,7 +103,7 @@ func TestOpenAILastResortRejectsIQGateRegardlessOfReset(t *testing.T) {
 				require.Equal(t, resilience.TierHard, tier)
 				var svc *OpenAIGatewayService
 				if mode.share {
-					env := newOpenAILastResortEnv(t, sharesched.SchedulerShare, 1, 5)
+					env := newOpenAILastResortEnv(t, 1, 5)
 					env.account(lrAccountA).Extra = iqLastResortExtra("iq:"+iqLastResortModel, resetCase.resetAt)
 					env.account(lrAccountB).Extra = iqLastResortExtra("iq:"+iqLastResortModel, resetCase.resetAt)
 					svc = env.svc
@@ -148,7 +147,7 @@ func TestOpenAILastResortFreshVerificationRejectsNewIQGate(t *testing.T) {
 			var svc *OpenAIGatewayService
 			var repo *schedulerTestOpenAIAccountRepo
 			if mode.share {
-				env := newOpenAILastResortEnv(t, sharesched.SchedulerShare, 1, 5)
+				env := newOpenAILastResortEnv(t, 1, 5)
 				svc, repo = env.svc, &env.repo
 			} else {
 				account := iqLastResortAccount(1)
@@ -156,7 +155,7 @@ func TestOpenAILastResortFreshVerificationRejectsNewIQGate(t *testing.T) {
 				svc, repo = newIQLastResortService(t, account)
 				setIQLastResortAdvanced(t, mode.advanced)
 			}
-			_, err := svc.resilience.groupAccountsForLastResort(context.Background(), svc.accountRepo, shareTestGroupID)
+			_, err := svc.resilience.groupAccountsForLastResort(context.Background(), svc.accountRepo, selectionTestGroupID)
 			require.NoError(t, err)
 
 			for i := range repo.accounts {
@@ -194,7 +193,7 @@ func TestOpenAILastResortFreshCompactGateUsesFreshMapping(t *testing.T) {
 	gateway := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{OpenAICompactModel: "gpt-6.1-sol"}}}
 	resilienceService := NewResilienceService(nil, nil)
 
-	_, ok := resilienceService.verifyLastResortAccount(context.Background(), accounts, shareTestGroupID, &planned, "gpt-6-astra", true,
+	_, ok := resilienceService.verifyLastResortAccount(context.Background(), accounts, selectionTestGroupID, &planned, "gpt-6-astra", true,
 		resiliencePenaltyOf, func(account *Account) string {
 			return gateway.openAICodexTicketOutboundModel(account, "gpt-6-astra", true)
 		})

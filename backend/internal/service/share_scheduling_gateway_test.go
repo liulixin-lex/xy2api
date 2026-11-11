@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -15,128 +14,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const shareTestGroupID = int64(7)
-
-// shareTestCache adds the TTL read and SET NX of the Redis gateway cache and
-// records every binding write.
-type shareTestCache struct {
-	*mockGatewayCacheForPlatform
-	mu        sync.Mutex
-	remaining map[string]time.Duration
-	ttls      map[string]time.Duration
-	refreshed []string
-	replaced  []string
-	created   []string
-}
-
-func newShareTestCache() *shareTestCache {
-	return &shareTestCache{mockGatewayCacheForPlatform: &mockGatewayCacheForPlatform{sessionBindings: map[string]int64{}},
-		remaining: map[string]time.Duration{}, ttls: map[string]time.Duration{}}
-}
-
-func (c *shareTestCache) bind(key string, accountID int64, remaining time.Duration) {
-	c.sessionBindings[key] = accountID
-	c.remaining[key] = remaining
-}
-
-func (c *shareTestCache) GetSessionAccountID(_ context.Context, _ int64, key string) (int64, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if id, ok := c.sessionBindings[key]; ok {
-		return id, nil
-	}
-	return 0, ErrStickySessionNotFound
-}
-
-func (c *shareTestCache) GetSessionAccountIDWithTTL(_ context.Context, _ int64, key string) (int64, time.Duration, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	id, ok := c.sessionBindings[key]
-	if !ok {
-		return 0, 0, ErrStickySessionNotFound
-	}
-	return id, c.remaining[key], nil
-}
-
-func (c *shareTestCache) SetSessionAccountID(_ context.Context, _ int64, key string, accountID int64, ttl time.Duration) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.sessionBindings[key], c.ttls[key] = accountID, ttl
-	c.replaced = append(c.replaced, key)
-	return nil
-}
-
-func (c *shareTestCache) SetSessionAccountIDIfAbsent(_ context.Context, _ int64, key string, accountID int64, ttl time.Duration) (bool, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if _, ok := c.sessionBindings[key]; ok {
-		return false, nil
-	}
-	c.sessionBindings[key], c.ttls[key] = accountID, ttl
-	c.created = append(c.created, key)
-	return true, nil
-}
-
-func (c *shareTestCache) RefreshSessionTTL(_ context.Context, _ int64, key string, ttl time.Duration) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.ttls[key] = ttl
-	c.refreshed = append(c.refreshed, key)
-	return nil
-}
-
-// shareTestConcurrency rejects the first busy[id] slot requests of an
-// account and tracks the wait queue.
-type shareTestConcurrency struct {
-	*mockConcurrencyCache
-	mu       sync.Mutex
-	busy     map[int64]int
-	attempts map[int64]int
-	waiting  map[int64]int
-	maxSeen  map[int64]int
-}
-
-func newShareTestConcurrency() *shareTestConcurrency {
-	return &shareTestConcurrency{mockConcurrencyCache: &mockConcurrencyCache{}, busy: map[int64]int{},
-		attempts: map[int64]int{}, waiting: map[int64]int{}, maxSeen: map[int64]int{}}
-}
-
-func (c *shareTestConcurrency) AcquireAccountSlot(_ context.Context, accountID int64, _ int, _ string) (bool, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.attempts[accountID]++
-	if c.busy[accountID] != 0 {
-		if c.busy[accountID] > 0 {
-			c.busy[accountID]--
-		}
-		return false, nil
-	}
-	return true, nil
-}
-
-func (c *shareTestConcurrency) IncrementAccountWaitCount(_ context.Context, accountID int64, maxWait int) (bool, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.waiting[accountID] >= maxWait {
-		return false, nil
-	}
-	c.waiting[accountID]++
-	c.maxSeen[accountID] = max(c.maxSeen[accountID], c.waiting[accountID])
-	return true, nil
-}
-
-func (c *shareTestConcurrency) DecrementAccountWaitCount(_ context.Context, accountID int64) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.waiting[accountID]--
-	return nil
-}
-
 type shareTestEnv struct {
 	gateway *GatewayService
 	share   *ShareSchedulingService
-	cache   *shareTestCache
-	conc    *shareTestConcurrency
+	cache   *selectionTestCache
+	conc    *selectionTestConcurrency
 	repo    *mockAccountRepoForPlatform
 }
 
@@ -190,7 +72,7 @@ func newShareTestEnv(t testing.TB, setup shareTestSetup, accounts ...Account) *s
 		if acc.Concurrency == 0 {
 			acc.Concurrency = 5
 		}
-		acc.AccountGroups = []AccountGroup{{GroupID: shareTestGroupID}}
+		acc.AccountGroups = []AccountGroup{{GroupID: selectionTestGroupID}}
 		repo.accounts = append(repo.accounts, acc)
 	}
 	for i := range repo.accounts {
@@ -200,18 +82,18 @@ func newShareTestEnv(t testing.TB, setup shareTestSetup, accounts ...Account) *s
 	cfg.Gateway.Scheduling.LoadBatchEnabled = true
 	cfg.Gateway.Scheduling.FallbackWaitTimeout = 30 * time.Second
 	cfg.Gateway.Scheduling.FallbackMaxWaiting = 100
-	cache := newShareTestCache()
-	conc := newShareTestConcurrency()
+	cache := newSelectionTestCache()
+	conc := newSelectionTestConcurrency()
 	share := NewShareSchedulingService(nil, nil, nil)
 	share.attributionRate = 1
 	share.state.Store(&shareSchedulingState{
 		settings: ShareSchedulingSettings{Enabled: true},
-		groups:   map[int64]*shareGroupPolicy{shareTestGroupID: {groupID: shareTestGroupID, version: 3, policy: policy}},
+		groups:   map[int64]*shareGroupPolicy{selectionTestGroupID: {groupID: selectionTestGroupID, version: 3, policy: policy}},
 	})
 	gateway := &GatewayService{
 		accountRepo: repo,
 		groupRepo: &mockGroupRepoForGateway{groups: map[int64]*Group{
-			shareTestGroupID: {ID: shareTestGroupID, Platform: PlatformAnthropic, Status: StatusActive, Hydrated: true},
+			selectionTestGroupID: {ID: selectionTestGroupID, Platform: PlatformAnthropic, Status: StatusActive, Hydrated: true},
 		}},
 		cache:              cache,
 		cfg:                cfg,
@@ -223,7 +105,7 @@ func newShareTestEnv(t testing.TB, setup shareTestSetup, accounts ...Account) *s
 
 func (e *shareTestEnv) selectAccount(t *testing.T, ctx context.Context, sessionHash string, excluded map[int64]struct{}) *AccountSelectionResult {
 	t.Helper()
-	gid := shareTestGroupID
+	gid := selectionTestGroupID
 	result, err := e.gateway.SelectAccountWithLoadAwareness(ctx, &gid, sessionHash, "claude-sonnet-4-5", excluded, "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -247,17 +129,6 @@ func (e *shareTestEnv) counter(field string) int64 {
 // protecting: 40 KB is about 10k tokens.
 func cacheableContext() context.Context {
 	return withShareRequestProfile(context.Background(), make([]byte, 40_000))
-}
-
-// accountIn returns the account with id from a listing the test repository
-// serves.
-func accountIn(accounts []Account, id int64) *Account {
-	for i := range accounts {
-		if accounts[i].ID == id {
-			return &accounts[i]
-		}
-	}
-	return nil
 }
 
 func twoAccountPolicy() shareTestSetup {
@@ -531,7 +402,7 @@ func TestShareSchedulingFallbackWaitDefersBinding(t *testing.T) {
 	require.NotContains(t, env.cache.sessionBindings, "queued", "nothing binds before the wait succeeds")
 	require.NotNil(t, result.shareBinding)
 
-	gid := shareTestGroupID
+	gid := selectionTestGroupID
 	ctx := ContextWithSelectionProfitGate(context.Background(), result)
 	require.NoError(t, env.gateway.BindStickySessionAfterProfitAdmission(ctx, &gid, "queued", result.Account.ID))
 	require.Equal(t, result.Account.ID, env.cache.sessionBindings["queued"])
@@ -540,7 +411,7 @@ func TestShareSchedulingFallbackWaitDefersBinding(t *testing.T) {
 
 func TestShareSchedulingModelRoutingRestrictsThenFallsBack(t *testing.T) {
 	env := newShareTestEnv(t, twoAccountPolicy(), Account{ID: 1}, Account{ID: 2})
-	group := env.gateway.groupRepo.(*mockGroupRepoForGateway).groups[shareTestGroupID]
+	group := env.gateway.groupRepo.(*mockGroupRepoForGateway).groups[selectionTestGroupID]
 	group.ModelRoutingEnabled = true
 	group.ModelRouting = map[string][]int64{"claude-sonnet-4-5": {2}}
 
@@ -580,7 +451,7 @@ func TestShareSchedulingStoredShadowRunsOriginal(t *testing.T) {
 
 func TestShareSchedulingBindStickySessionUsesBindingTTL(t *testing.T) {
 	env := newShareTestEnv(t, twoAccountPolicy(), Account{ID: 1}, Account{ID: 2})
-	gid := shareTestGroupID
+	gid := selectionTestGroupID
 	require.NoError(t, env.gateway.BindStickySession(context.Background(), &gid, "ttl", 1))
 	require.Equal(t, sharesched.BindingTTL, env.cache.ttls["ttl"], "idle time is derived from the binding TTL, so every write must use it")
 
@@ -601,7 +472,7 @@ func TestShareSchedulingStatisticsNeverCarryRawSessionKeys(t *testing.T) {
 
 func TestShareSessionHashAnchorsConversations(t *testing.T) {
 	env := newShareTestEnv(t, twoAccountPolicy(), Account{ID: 1}, Account{ID: 2})
-	gid := shareTestGroupID
+	gid := selectionTestGroupID
 	parse := func(t *testing.T, body string, apiKeyID int64) *ParsedRequest {
 		t.Helper()
 		parsed, err := ParseGatewayRequest(NewRequestBodyRef([]byte(body)), PlatformAnthropic)
@@ -627,7 +498,7 @@ func TestShareSessionHashAnchorsConversations(t *testing.T) {
 	prefix, err := sharesched.DecodePolicy([]byte(`{"schema":1,"scheduler":"share","affinity":{"key":"prefix"}}`))
 	require.NoError(t, err)
 	env.share.state.Store(&shareSchedulingState{settings: state.settings, groups: map[int64]*shareGroupPolicy{
-		shareTestGroupID: {groupID: shareTestGroupID, version: 4, policy: prefix}}})
+		selectionTestGroupID: {groupID: selectionTestGroupID, version: 4, policy: prefix}}})
 	other := `{"model":"m","system":"you are helpful","messages":[{"role":"user","content":"a different task"}]}`
 	p1 := env.gateway.GenerateSessionHash(parse(t, turn1, 11))
 	require.Equal(t, h1, p1)
@@ -664,7 +535,7 @@ func TestShareAffinityKeyFollowsSessionKeeping(t *testing.T) {
 }
 
 func TestReadShareBindingIdleTime(t *testing.T) {
-	cache := newShareTestCache()
+	cache := newSelectionTestCache()
 	cache.bind("k", 5, 50*time.Minute)
 	binding, err := readShareBinding(context.Background(), cache, 1, "k", time.Hour)
 	require.NoError(t, err)

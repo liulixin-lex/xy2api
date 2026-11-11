@@ -27,7 +27,7 @@ func TestShareSchedulingWeightsAreLoadFactorsEverywhere(t *testing.T) {
 			}
 			p := shareTestPolicy(sharesched.SchedulerShare)
 			env := newShareTestEnv(t, p, Account{ID: 1, Priority: 2, Concurrency: 10, LoadFactor: &load}, Account{ID: 2, Priority: 3, Concurrency: 10})
-			gid := shareTestGroupID
+			gid := selectionTestGroupID
 			_, inputs, err := env.gateway.shareGatewayCandidates(context.Background(), nil, &gid, "", nil, 0)
 			require.NoError(t, err)
 			views, _ := env.share.shareMemberViews(gid, env.repo.accounts, nil, time.Now())
@@ -54,7 +54,7 @@ func TestShareSchedulingWeightsAreLoadFactorsEverywhere(t *testing.T) {
 
 // shareSlowSlotCache blocks slot requests until their context ends.
 type shareSlowSlotCache struct {
-	*shareTestConcurrency
+	*selectionTestConcurrency
 	deadline time.Time
 }
 
@@ -65,7 +65,7 @@ func (c *shareSlowSlotCache) AcquireAccountSlot(ctx context.Context, _ int64, _ 
 }
 
 func TestShareSchedulingWaitBudgetBoundsSlowSlotCalls(t *testing.T) {
-	cache := &shareSlowSlotCache{shareTestConcurrency: newShareTestConcurrency()}
+	cache := &shareSlowSlotCache{selectionTestConcurrency: newSelectionTestConcurrency()}
 	parent, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	exec := &shareExecutor{ctx: parent, concurrency: NewConcurrencyService(cache)}
@@ -102,11 +102,11 @@ func TestShareSchedulingCommittedSaveNeedsNoReadBack(t *testing.T) {
 	view, err := env.save(t, 0, shareUpdate)
 	require.NoError(t, err, "a committed save is reported as saved")
 	require.Equal(t, int64(1), view.Version)
-	require.Equal(t, view.Version, env.share.groupPolicy(shareTestGroupID).version, "this node runs the saved policy at once")
+	require.Equal(t, view.Version, env.share.groupPolicy(selectionTestGroupID).version, "this node runs the saved policy at once")
 
 	raw, _ := json.Marshal(twoAccountPolicy().policy)
-	env.share.installGroup(&ShareSchedulingPolicyRow{GroupID: shareTestGroupID, Version: 0, Policy: raw})
-	require.Equal(t, int64(1), env.share.groupPolicy(shareTestGroupID).version, "a late older row never replaces a newer one")
+	env.share.installGroup(&ShareSchedulingPolicyRow{GroupID: selectionTestGroupID, Version: 0, Policy: raw})
+	require.Equal(t, int64(1), env.share.groupPolicy(selectionTestGroupID).version, "a late older row never replaces a newer one")
 }
 
 // shareHeldSettings returns its value, then holds the first read until

@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGateV3ShareSameSiteHoldOverridesSoftSpill(t *testing.T) {
+func TestOpenAISameSiteHoldOverridesSoftPenalty(t *testing.T) {
 	for _, tc := range []struct {
 		name, penalty     string
 		missing, disabled bool
@@ -24,11 +24,10 @@ func TestGateV3ShareSameSiteHoldOverridesSoftSpill(t *testing.T) {
 		{name: "longer soft penalty has another reason", penalty: "longer"},
 		{name: "missing owner with short limit", penalty: "rate", missing: true},
 		{name: "missing owner with model limit", penalty: "model", missing: true},
-		{name: "disabled retains ordinary soft spill", penalty: "rate", disabled: true},
 		{name: "disabled hold alone retains healthy owner", disabled: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			env := newOpenAIRuntimeBlockEnv(t, sharesched.SchedulerShare, 1, 2)
+			env := newOpenAIRuntimeBlockEnv(t, 1, 2)
 			const session = "same-site-share-owner"
 			owner, other := env.account(1), env.account(2)
 			owner.Credentials = map[string]any{"base_url": "https://site-a.example/v1"}
@@ -67,14 +66,14 @@ func TestGateV3ShareSameSiteHoldOverridesSoftSpill(t *testing.T) {
 				resilience.Publish(settings)
 			}
 			env.cache.bind("openai:"+session, 1, time.Hour-30*time.Second)
-			ctx := cacheableContext()
+			ctx := context.Background()
 			result, _ := env.selectAccount(t, ctx, "", session, nil)
 			wantServing := int64(2)
 			if tc.disabled && tc.penalty == "" {
 				wantServing = 1
 			}
 			require.Equal(t, wantServing, result.Account.ID)
-			group := shareTestGroupID
+			group := selectionTestGroupID
 			require.NoError(t, env.svc.BindStickySessionAfterProfitAdmission(ContextWithSelectionProfitGate(ctx, result), &group, session, result.Account.ID))
 			if result.ReleaseFunc != nil {
 				result.ReleaseFunc()
@@ -84,9 +83,6 @@ func TestGateV3ShareSameSiteHoldOverridesSoftSpill(t *testing.T) {
 				wantOwner = 1
 			}
 			require.Equal(t, wantOwner, env.cache.sessionBindings["openai:"+session])
-			if !tc.disabled {
-				require.Zero(t, env.counter(shareStatsReasonPrefix+string(sharesched.ReasonSoftSpill)))
-			}
 			owner.RateLimitResetAt = nil
 			owner.TempUnschedulableUntil = nil
 			owner.Extra = nil
@@ -108,7 +104,7 @@ func TestGateV3ShareSameSiteHoldOverridesSoftSpill(t *testing.T) {
 	}
 	for _, overlap := range []bool{false, true} {
 		t.Run("single held account remains last resort/soft="+fmtBool(overlap), func(t *testing.T) {
-			env := newOpenAIRuntimeBlockEnv(t, sharesched.SchedulerShare, lrAccountA)
+			env := newOpenAIRuntimeBlockEnv(t, lrAccountA)
 			a := env.account(lrAccountA)
 			if overlap {
 				until := time.Now().Add(time.Minute)

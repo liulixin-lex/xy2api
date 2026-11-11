@@ -44,7 +44,7 @@ func shareAdaptiveEnv(t *testing.T) *shareAdminEnv {
 
 func (e *shareAdminEnv) weight(t *testing.T, id int64, now time.Time) shareWeightBreakdown {
 	t.Helper()
-	return e.share.shareWeight(shareTestGroupID, accountIn(e.repo.accounts, id), now)
+	return e.share.shareWeight(selectionTestGroupID, accountIn(e.repo.accounts, id), now)
 }
 
 // TestShareHealthDownweightsUnstableAccounts is R1 end to end: the refresh
@@ -69,7 +69,7 @@ func TestShareHealthDownweightsUnstableAccounts(t *testing.T) {
 
 	// Candidates are weighed at the current time.
 	env.share.refreshHealth(context.Background(), time.Now())
-	gid := shareTestGroupID
+	gid := selectionTestGroupID
 	_, in, err := env.gateway.shareGatewayCandidates(context.Background(), nil, &gid, "", nil, 0)
 	require.NoError(t, err)
 	counts := map[int64]int{}
@@ -86,7 +86,7 @@ func TestShareHealthMemberViewExplainAndPreview(t *testing.T) {
 	env := shareAdaptiveEnv(t)
 	env.share.refreshHealth(context.Background(), time.Now())
 
-	view, err := env.share.GetPolicy(context.Background(), shareTestGroupID)
+	view, err := env.share.GetPolicy(context.Background(), selectionTestGroupID)
 	require.NoError(t, err)
 	m := env.member(t, view.Members, 13)
 	require.InDelta(t, 0.2, *m.HealthFactor, 1e-9)
@@ -102,7 +102,7 @@ func TestShareHealthMemberViewExplainAndPreview(t *testing.T) {
 	require.InDelta(t, 1.0/3, m.BaseShare, 1e-9, "the base share weighs load factors only")
 	require.InDelta(t, 20.0/170, m.ExpectedShare, 1e-9)
 
-	explained, err := env.share.Explain(context.Background(), shareTestGroupID, ShareSchedulingExplainInput{})
+	explained, err := env.share.Explain(context.Background(), selectionTestGroupID, ShareSchedulingExplainInput{})
 	require.NoError(t, err)
 	for _, e := range explained.Entries {
 		if e.AccountID == 12 {
@@ -113,7 +113,7 @@ func TestShareHealthMemberViewExplainAndPreview(t *testing.T) {
 		}
 	}
 
-	preview, err := env.share.Preview(context.Background(), shareTestGroupID, shareUpdate)
+	preview, err := env.share.Preview(context.Background(), selectionTestGroupID, shareUpdate)
 	require.NoError(t, err)
 	downweighted := map[int64]float64{}
 	for _, w := range preview.Warnings {
@@ -129,7 +129,7 @@ func TestShareHealthInsufficientDataIsNotDownweighted(t *testing.T) {
 	delete(env.policies.attempts.Successes, 12)
 	env.policies.attempts.Failures = env.policies.attempts.Failures[:1]
 	env.share.refreshHealth(context.Background(), time.Now())
-	view, err := env.share.GetPolicy(context.Background(), shareTestGroupID)
+	view, err := env.share.GetPolicy(context.Background(), selectionTestGroupID)
 	require.NoError(t, err)
 	m := env.member(t, view.Members, 12)
 	require.True(t, m.Health.Insufficient)
@@ -154,7 +154,7 @@ func TestShareHealthFallsBackToLoadFactors(t *testing.T) {
 		env := shareAdaptiveEnv(t)
 		env.share.refreshHealth(ctx, now.Add(-6*time.Minute))
 		plain(t, env, now)
-		view, err := env.share.GetPolicy(ctx, shareTestGroupID)
+		view, err := env.share.GetPolicy(ctx, selectionTestGroupID)
 		require.NoError(t, err)
 		require.Nil(t, env.member(t, view.Members, 13).Health)
 		require.Nil(t, env.member(t, view.Members, 13).HealthFactor)
@@ -244,13 +244,13 @@ func TestShareRampAfterObservedOutage(t *testing.T) {
 	require.InDelta(t, 25, w.Effective, 1e-9)
 	require.InDelta(t, 100, env.weight(t, 12, recovered.Add(shareRampDuration)).Effective, 1e-9, "full weight after ten minutes")
 
-	view, err := env.share.GetPolicy(ctx, shareTestGroupID)
+	view, err := env.share.GetPolicy(ctx, selectionTestGroupID)
 	require.NoError(t, err)
 	m := env.member(t, view.Members, 12)
 	require.NotNil(t, m.Ramp)
 	require.Equal(t, ShareRampReenabled, m.Ramp.Cause)
 	require.True(t, m.Ramp.FullAt.Equal(recovered.Add(shareRampDuration)))
-	preview, err := env.share.Preview(ctx, shareTestGroupID, shareUpdate)
+	preview, err := env.share.Preview(ctx, selectionTestGroupID, shareUpdate)
 	require.NoError(t, err)
 	var ramping []int64
 	for _, warning := range preview.Warnings {
@@ -301,11 +301,11 @@ func TestShareHealthOfOriginalGroupsOnDemand(t *testing.T) {
 	env := shareAdaptiveEnv(t)
 	_, err := env.save(t, 1, sub2apiUpdate)
 	require.NoError(t, err)
-	require.Nil(t, env.share.groupPolicy(shareTestGroupID))
+	require.Nil(t, env.share.groupPolicy(selectionTestGroupID))
 	ctx := context.Background()
 
 	require.Equal(t, 1, env.policies.attemptCalls, "the view returned by the save reads the health once")
-	preview, err := env.share.Preview(ctx, shareTestGroupID, shareUpdate)
+	preview, err := env.share.Preview(ctx, selectionTestGroupID, shareUpdate)
 	require.NoError(t, err)
 	m := env.member(t, preview.Members, 13)
 	require.InDelta(t, 0.2, *m.HealthFactor, 1e-9)
@@ -313,17 +313,17 @@ func TestShareHealthOfOriginalGroupsOnDemand(t *testing.T) {
 	require.InDelta(t, 1.0/3, m.BaseShare, 1e-9)
 	require.Equal(t, 1, env.policies.attemptCalls)
 
-	view, err := env.share.GetPolicy(ctx, shareTestGroupID)
+	view, err := env.share.GetPolicy(ctx, selectionTestGroupID)
 	require.NoError(t, err)
 	require.InDelta(t, 0.5, *env.member(t, view.Members, 12).HealthFactor, 1e-9)
 	require.Equal(t, 1, env.policies.attemptCalls, "reused for 60 seconds")
 
 	env.share.admin.mu.Lock()
-	entry := env.share.admin.health[shareTestGroupID]
+	entry := env.share.admin.health[selectionTestGroupID]
 	entry.at = entry.at.Add(-shareHealthOnDemandTTL)
-	env.share.admin.health[shareTestGroupID] = entry
+	env.share.admin.health[selectionTestGroupID] = entry
 	env.share.admin.mu.Unlock()
-	_, err = env.share.GetPolicy(ctx, shareTestGroupID)
+	_, err = env.share.GetPolicy(ctx, selectionTestGroupID)
 	require.NoError(t, err)
 	require.Equal(t, 2, env.policies.attemptCalls)
 
@@ -333,7 +333,7 @@ func TestShareHealthOfOriginalGroupsOnDemand(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 1, env.policies.attemptCalls, "the saved view already shows the health")
 		env.settings.values[SettingKeyOpsMonitoringEnabled] = "false"
-		preview, err := env.share.Preview(ctx, shareTestGroupID, shareUpdate)
+		preview, err := env.share.Preview(ctx, selectionTestGroupID, shareUpdate)
 		require.NoError(t, err)
 		require.Nil(t, env.member(t, preview.Members, 13).HealthFactor, "a cached health is dropped once the monitor is off")
 		require.Nil(t, env.member(t, preview.Members, 13).Health)
@@ -348,14 +348,14 @@ func TestShareHealthOfOriginalGroupsOnDemand(t *testing.T) {
 		t.Cleanup(func() { resilience.Publish(orig) })
 		_, err := env.save(t, 1, sub2apiUpdate)
 		require.NoError(t, err)
-		preview, err := env.share.Preview(ctx, shareTestGroupID, shareUpdate)
+		preview, err := env.share.Preview(ctx, selectionTestGroupID, shareUpdate)
 		require.NoError(t, err)
 		require.Nil(t, env.member(t, preview.Members, 13).HealthFactor)
 		require.Zero(t, env.policies.attemptCalls)
 	})
 	t.Run("share groups use the refresh", func(t *testing.T) {
 		env := shareAdaptiveEnv(t)
-		_, err := env.share.Preview(ctx, shareTestGroupID, shareUpdate)
+		_, err := env.share.Preview(ctx, selectionTestGroupID, shareUpdate)
 		require.NoError(t, err)
 		require.Zero(t, env.policies.attemptCalls, "a share group is never read on demand")
 	})
@@ -368,7 +368,7 @@ func TestShareHealthAppliesRightAfterSwitch(t *testing.T) {
 	env := shareAdaptiveEnv(t)
 	_, err := env.save(t, 1, sub2apiUpdate)
 	require.NoError(t, err)
-	_, err = env.share.Preview(context.Background(), shareTestGroupID, shareUpdate)
+	_, err = env.share.Preview(context.Background(), selectionTestGroupID, shareUpdate)
 	require.NoError(t, err)
 	calls := env.policies.attemptCalls
 
@@ -377,7 +377,7 @@ func TestShareHealthAppliesRightAfterSwitch(t *testing.T) {
 	require.InDelta(t, 0.2, *env.member(t, view.Members, 13).HealthFactor, 1e-9, "the saved view shows the health")
 	require.Equal(t, calls, env.policies.attemptCalls, "the confirmation's health is reused")
 	require.InDelta(t, 20, env.weight(t, 13, time.Now()).Effective, 1e-9, "placement is down-weighted at once")
-	gid := shareTestGroupID
+	gid := selectionTestGroupID
 	_, in, err := env.gateway.shareGatewayCandidates(context.Background(), nil, &gid, "", nil, 0)
 	require.NoError(t, err)
 	for _, c := range in.cands {
@@ -402,13 +402,13 @@ func TestShareHealthRefreshesWhenAnotherInstanceSwitches(t *testing.T) {
 
 	// Another instance saved the switch; this one gets the broadcast.
 	env.policies.mu.Lock()
-	row := env.policies.rows[shareTestGroupID]
+	row := env.policies.rows[selectionTestGroupID]
 	row.Version, row.Scheduler = 3, "share"
 	row.Policy = sharesched.NewPolicyDocument(sharesched.SchedulerShare, true)
-	env.policies.rows[shareTestGroupID] = row
+	env.policies.rows[selectionTestGroupID] = row
 	env.policies.mu.Unlock()
-	env.share.onChange(ctx, shareTestGroupID)
-	require.NotNil(t, env.share.groupPolicy(shareTestGroupID))
+	env.share.onChange(ctx, selectionTestGroupID)
+	require.NotNil(t, env.share.groupPolicy(selectionTestGroupID))
 	require.Eventually(t, func() bool {
 		return env.weight(t, 13, time.Now()).Effective == 20
 	}, 5*time.Second, 10*time.Millisecond)
@@ -438,7 +438,7 @@ func TestShareFactorsSerializeCleanly(t *testing.T) {
 	lf := 7
 	accountIn(env.repo.accounts, 12).LoadFactor = &lf
 	env.share.refreshHealth(context.Background(), now)
-	view, err := env.share.GetPolicy(context.Background(), shareTestGroupID)
+	view, err := env.share.GetPolicy(context.Background(), selectionTestGroupID)
 	require.NoError(t, err)
 	raw, err := json.Marshal(env.member(t, view.Members, 11))
 	require.NoError(t, err)

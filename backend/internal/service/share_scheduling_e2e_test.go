@@ -26,7 +26,7 @@ import (
 // shareSimCache is the session binding store on the simulated clock: a
 // binding expires and reports its remaining TTL from its last write.
 type shareSimCache struct {
-	*shareTestCache
+	*selectionTestCache
 	now     *time.Time
 	touched map[string]time.Time
 }
@@ -55,7 +55,7 @@ func (c *shareSimCache) GetSessionAccountID(ctx context.Context, groupID int64, 
 	if _, ok := c.remaining(key); !ok {
 		return 0, ErrStickySessionNotFound
 	}
-	return c.shareTestCache.GetSessionAccountID(ctx, groupID, key)
+	return c.selectionTestCache.GetSessionAccountID(ctx, groupID, key)
 }
 
 func (c *shareSimCache) GetSessionAccountIDWithTTL(ctx context.Context, groupID int64, key string) (int64, time.Duration, error) {
@@ -63,19 +63,19 @@ func (c *shareSimCache) GetSessionAccountIDWithTTL(ctx context.Context, groupID 
 	if !ok {
 		return 0, 0, ErrStickySessionNotFound
 	}
-	id, err := c.shareTestCache.GetSessionAccountID(ctx, groupID, key)
+	id, err := c.selectionTestCache.GetSessionAccountID(ctx, groupID, key)
 	return id, left, err
 }
 
 func (c *shareSimCache) SetSessionAccountID(ctx context.Context, groupID int64, key string, accountID int64, ttl time.Duration) error {
-	err := c.shareTestCache.SetSessionAccountID(ctx, groupID, key, accountID, ttl)
+	err := c.selectionTestCache.SetSessionAccountID(ctx, groupID, key, accountID, ttl)
 	c.touch(key)
 	return err
 }
 
 func (c *shareSimCache) SetSessionAccountIDIfAbsent(ctx context.Context, groupID int64, key string, accountID int64, ttl time.Duration) (bool, error) {
 	c.remaining(key) // drop an expired binding first, like Redis would
-	ok, err := c.shareTestCache.SetSessionAccountIDIfAbsent(ctx, groupID, key, accountID, ttl)
+	ok, err := c.selectionTestCache.SetSessionAccountIDIfAbsent(ctx, groupID, key, accountID, ttl)
 	if ok {
 		c.touch(key)
 	}
@@ -83,7 +83,7 @@ func (c *shareSimCache) SetSessionAccountIDIfAbsent(ctx context.Context, groupID
 }
 
 func (c *shareSimCache) RefreshSessionTTL(ctx context.Context, groupID int64, key string, ttl time.Duration) error {
-	err := c.shareTestCache.RefreshSessionTTL(ctx, groupID, key, ttl)
+	err := c.selectionTestCache.RefreshSessionTTL(ctx, groupID, key, ttl)
 	c.touch(key)
 	return err
 }
@@ -128,7 +128,7 @@ func newShareE2E(t *testing.T, setup shareTestSetup, accounts ...Account) *share
 	env.share.store = &shareMemoryStore{}
 	e := &shareE2E{t: t, env: env, now: time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC), turns: map[string]int{}, version: 3,
 		upstream: &shareSyntheticUpstream{ttl: 5 * time.Minute, cached: map[int64]map[string]shareSimPrefix{}}}
-	e.cache = &shareSimCache{shareTestCache: env.cache, now: &e.now, touched: map[string]time.Time{}}
+	e.cache = &shareSimCache{selectionTestCache: env.cache, now: &e.now, touched: map[string]time.Time{}}
 	env.gateway.cache = e.cache
 	return e
 }
@@ -473,7 +473,7 @@ func (s shareFlakySettings) GetValue(ctx context.Context, key string) (string, e
 }
 
 // shareDownCache fails binding reads, like an unreachable Redis.
-type shareDownCache struct{ *shareTestCache }
+type shareDownCache struct{ *selectionTestCache }
 
 func (shareDownCache) GetSessionAccountIDWithTTL(context.Context, int64, string) (int64, time.Duration, error) {
 	return 0, 0, errShareStoreDown
@@ -520,7 +520,7 @@ func TestShareSchedulingE2ESwitchesFallBackWithoutMigrating(t *testing.T) {
 	// its existing binding.
 	_, err = env.share.UpdateSettings(ctx, false)
 	require.NoError(t, err)
-	require.Nil(t, env.share.groupPolicy(shareTestGroupID))
+	require.Nil(t, env.share.groupPolicy(selectionTestGroupID))
 	served("global switch off")
 
 	// Group switch back to the original scheduler.
@@ -528,7 +528,7 @@ func TestShareSchedulingE2ESwitchesFallBackWithoutMigrating(t *testing.T) {
 	require.NoError(t, err)
 	_, err = env.save(t, 1, sub2apiUpdate)
 	require.NoError(t, err)
-	require.Nil(t, env.share.groupPolicy(shareTestGroupID))
+	require.Nil(t, env.share.groupPolicy(selectionTestGroupID))
 	served("group switch off")
 
 	// Back on share scheduling, the policy store goes down: the last known
@@ -537,7 +537,7 @@ func TestShareSchedulingE2ESwitchesFallBackWithoutMigrating(t *testing.T) {
 	require.NoError(t, err)
 	repo.down.Store(true)
 	require.Error(t, env.share.reloadAll(ctx))
-	require.NotNil(t, env.share.groupPolicy(shareTestGroupID), "the last known policy stays in effect")
+	require.NotNil(t, env.share.groupPolicy(selectionTestGroupID), "the last known policy stays in effect")
 	served("policy store down")
 
 	// A cold start without the store runs the original scheduler.
@@ -546,7 +546,7 @@ func TestShareSchedulingE2ESwitchesFallBackWithoutMigrating(t *testing.T) {
 	cold := NewShareSchedulingService(repo, &shareBusStore{shareAdminStore: env.store}, shareFlakySettings{shareMemorySettings: env.settings, down: settingsDown})
 	cold.Start()
 	t.Cleanup(cold.Stop)
-	require.Nil(t, cold.groupPolicy(shareTestGroupID))
+	require.Nil(t, cold.groupPolicy(selectionTestGroupID))
 	env.gateway.shareScheduling = cold
 	served("cold start without store")
 
