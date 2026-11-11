@@ -24,6 +24,7 @@ type schedQualityData struct {
 	tests                       map[SchedAccountModel][]SchedTestRecord
 	finished                    map[SchedAccountModel][]schedquality.TestResult
 	summaries                   map[schedQualitySummaryKey]schedquality.Summary
+	models                      map[int64]map[string]struct{}
 	globalEnabled, testsEnabled bool
 }
 
@@ -66,7 +67,7 @@ func (v *schedQualityView) TakeoverIdle(g int64) (time.Duration, bool) {
 	return time.Duration(p.Policy.TakeoverIdleSeconds) * time.Second, true
 }
 
-func (s *SchedQualityEngineService) publish(d *schedQualityData, states []schedquality.StateRow, overrides []SchedOverride, resets map[int64]time.Time) map[int64]time.Time {
+func (s *SchedQualityEngineService) publish(d *schedQualityData, states []schedquality.StateRow, overrides []SchedOverride, resets map[int64]time.Time, evaluatedAt time.Time) map[int64]time.Time {
 	old := s.snapshot.Load()
 	version := int64(1)
 	if old != nil {
@@ -83,7 +84,7 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []schedq
 		active[o.AccountID] = append(active[o.AccountID], o)
 	}
 	keys, rows := s.rowKeys(d, states)
-	view := &schedQualityView{version: version, at: d.now, globalEnabled: d.globalEnabled, states: make(map[schedQualityKey]schedquality.StateView), policies: cloneSchedPolicies(s.policies), overrides: active}
+	view := &schedQualityView{version: version, at: evaluatedAt, globalEnabled: d.globalEnabled, states: make(map[schedQualityKey]schedquality.StateView), policies: cloneSchedPolicies(s.policies), overrides: active}
 	evidence := make(map[SchedAccountModel]schedquality.Summary)
 	for pair := range d.samples {
 		evidence[pair] = d.summary(pair, resets[pair.AccountID])
@@ -124,11 +125,13 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []schedq
 			return a.Model < b.Model
 		})
 	}
-	s.snapshot.Store(&SchedQualitySnapshot{Version: version, At: d.now, GlobalEnabled: d.globalEnabled, TestsEnabled: d.testsEnabled, View: view, Evidence: evidence, Tests: latestTests, GroupRows: groupRows, Policies: cloneSchedPolicies(s.policies), Overrides: copiedOverrides, ResetAt: cloneResetTimes(resets)})
+	s.snapshot.Store(&SchedQualitySnapshot{Version: version, At: evaluatedAt, GlobalEnabled: d.globalEnabled, TestsEnabled: d.testsEnabled, View: view, Evidence: evidence, Tests: latestTests, GroupRows: groupRows, Policies: cloneSchedPolicies(s.policies), Overrides: copiedOverrides, ResetAt: cloneResetTimes(resets)})
 	newer := make(map[int64]time.Time)
 	for id, at := range resets {
 		if at.After(s.seenResets[id]) {
-			newer[id] = at
+			if old != nil && old.Version > 0 {
+				newer[id] = at
+			}
 			s.seenResets[id] = at
 		}
 	}
@@ -169,6 +172,25 @@ func schedQualitySince(reset, since time.Time) time.Time {
 }
 
 func (s *SchedQualityEngineService) rowKeys(d *schedQualityData, rows []schedquality.StateRow) ([]schedQualityKey, map[schedQualityKey]schedquality.StateRow) {
+	if d.models == nil {
+		d.models = make(map[int64]map[string]struct{})
+		add := func(pair SchedAccountModel) {
+			if d.models[pair.AccountID] == nil {
+				d.models[pair.AccountID] = make(map[string]struct{})
+			}
+			d.models[pair.AccountID][pair.Model] = struct{}{}
+		}
+		for pair, samples := range d.samples {
+			if len(samples) > 0 {
+				add(pair)
+			}
+		}
+		for pair, tests := range d.tests {
+			if len(tests) > 0 {
+				add(pair)
+			}
+		}
+	}
 	previous := make(map[schedQualityKey]schedquality.StateRow, len(rows))
 	keys := make(map[schedQualityKey]bool)
 	for _, r := range rows {
@@ -178,15 +200,8 @@ func (s *SchedQualityEngineService) rowKeys(d *schedQualityData, rows []schedqua
 	}
 	for group, accounts := range s.members {
 		for _, account := range accounts {
-			for pair, samples := range d.samples {
-				if pair.AccountID == account && len(samples) > 0 {
-					keys[schedQualityKey{account, pair.Model, group}] = true
-				}
-			}
-			for pair, tests := range d.tests {
-				if pair.AccountID == account && len(tests) > 0 {
-					keys[schedQualityKey{account, pair.Model, group}] = true
-				}
+			for model := range d.models[account] {
+				keys[schedQualityKey{account, model, group}] = true
 			}
 		}
 	}

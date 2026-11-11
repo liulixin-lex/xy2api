@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -15,9 +16,15 @@ import (
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/tidwall/sjson"
+	"golang.org/x/time/rate"
 )
 
 const schedQualityCycleLockID int64 = 734891260129
+
+var (
+	schedQualityResetWarnings  = rate.NewLimiter(rate.Every(time.Minute), 1)
+	schedQualityPolicyWarnings = rate.NewLimiter(rate.Every(time.Minute), 1)
+)
 
 type schedQualityRepository struct{ db *sql.DB }
 
@@ -152,7 +159,7 @@ func loadSchedQualityOverrides(ctx context.Context, q interface {
 func loadSchedQualityResets(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }) (map[int64]time.Time, error) {
-	rows, err := q.QueryContext(ctx, `SELECT id,(extra->>'group_quality_reset_at')::timestamptz FROM accounts WHERE extra ? 'group_quality_reset_at' AND NULLIF(extra->>'group_quality_reset_at','') IS NOT NULL`)
+	rows, err := q.QueryContext(ctx, `SELECT id,extra->>'group_quality_reset_at' FROM accounts WHERE extra ? 'group_quality_reset_at' AND NULLIF(extra->>'group_quality_reset_at','') IS NOT NULL`)
 	if err != nil {
 		return nil, err
 	}
@@ -160,9 +167,22 @@ func loadSchedQualityResets(ctx context.Context, q interface {
 	out := make(map[int64]time.Time)
 	for rows.Next() {
 		var id int64
-		var at time.Time
-		if err := rows.Scan(&id, &at); err != nil {
+		var raw string
+		if err := rows.Scan(&id, &raw); err != nil {
 			return nil, err
+		}
+		var at time.Time
+		for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05Z07", "2006-01-02 15:04:05Z07:00", "2006-01-02 15:04:05Z07:00:00"} {
+			at, err = time.Parse(layout, raw)
+			if err == nil {
+				break
+			}
+		}
+		if err != nil {
+			if schedQualityResetWarnings.Allow() {
+				slog.WarnContext(ctx, "sched_quality.invalid_reset_time", "account_id", id)
+			}
+			continue
 		}
 		out[id] = at
 	}
@@ -251,10 +271,6 @@ type schedQualityPolicyRoot struct {
 	Version int64                      `json:"version"`
 	Groups  map[string]json.RawMessage `json:"groups"`
 }
-type schedQualityPolicyEntry struct {
-	V4 *schedQualityPolicyV4 `json:"v4"`
-	V3 *schedQualityPolicyV3 `json:"v3"`
-}
 type schedQualityPolicyV4 struct {
 	Enabled             bool    `json:"enabled"`
 	TTFTSeconds         float64 `json:"ttft_seconds"`
@@ -277,27 +293,54 @@ func decodeSchedQualityPolicies(raw string) (map[int64]service.SchedPolicyRecord
 		}
 	}
 	out := make(map[int64]service.SchedPolicyRecord)
+	warn := func(group string, err error) {
+		if schedQualityPolicyWarnings.Allow() {
+			slog.Warn("sched_quality.invalid_policy", "group_id", group, "error", err)
+		}
+	}
 	for key, rawEntry := range root.Groups {
 		id, err := strconv.ParseInt(key, 10, 64)
 		if err != nil || id <= 0 {
-			return nil, 0, fmt.Errorf("invalid policy group %q", key)
+			warn(key, errors.New("invalid policy group ID"))
+			continue
 		}
-		var entry schedQualityPolicyEntry
-		if err := json.Unmarshal(rawEntry, &entry); err != nil {
-			return nil, 0, err
+		record, err := decodeSchedQualityPolicy(rawEntry)
+		if err != nil {
+			warn(key, err)
+			continue
 		}
-		record := service.SchedPolicyRecord{GroupID: id, Version: root.Version}
-		if entry.V4 != nil {
-			v := entry.V4
-			record.Policy = schedquality.Policy{Enabled: v.Enabled, TTFTSeconds: v.TTFTSeconds, MaxErrorRate: v.MaxErrorRate, MinCacheRatio: v.MinCacheRatio, TakeoverIdleSeconds: v.TakeoverIdleSeconds}
-		} else if entry.V3 != nil {
-			v := entry.V3
-			record.Policy = schedquality.Policy{Enabled: v.Enabled, TTFTSeconds: v.MaxTTFTP90Seconds, MaxErrorRate: v.MaxErrorRate, MinCacheRatio: v.MinCacheKeepRate, TakeoverIdleSeconds: 0}
-			record.FromV3 = true
-		}
+		record.GroupID, record.Version = id, root.Version
 		out[id] = record
 	}
 	return out, root.Version, nil
+}
+
+func decodeSchedQualityPolicy(raw json.RawMessage) (service.SchedPolicyRecord, error) {
+	var entry map[string]json.RawMessage
+	var record service.SchedPolicyRecord
+	if err := json.Unmarshal(raw, &entry); err != nil {
+		return record, err
+	}
+	if entry == nil {
+		return record, errors.New("policy entry must be an object")
+	}
+	if raw := entry["v4"]; len(raw) > 0 && string(raw) != "null" {
+		var v schedQualityPolicyV4
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return record, err
+		}
+		record.Policy = schedquality.Policy{Enabled: v.Enabled, TTFTSeconds: v.TTFTSeconds, MaxErrorRate: v.MaxErrorRate, MinCacheRatio: v.MinCacheRatio, TakeoverIdleSeconds: v.TakeoverIdleSeconds}
+	} else if raw := entry["v3"]; len(raw) > 0 && string(raw) != "null" {
+		var v schedQualityPolicyV3
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return record, err
+		}
+		record.Policy = schedquality.Policy{Enabled: v.Enabled, TTFTSeconds: v.MaxTTFTP90Seconds, MaxErrorRate: v.MaxErrorRate, MinCacheRatio: v.MinCacheKeepRate}
+		record.FromV3 = true
+	} else {
+		return record, nil
+	}
+	return record, service.ValidateSchedQualityPolicy(record.Policy)
 }
 func (r *schedQualityRepository) LoadPolicies(ctx context.Context) (map[int64]service.SchedPolicyRecord, error) {
 	var raw string

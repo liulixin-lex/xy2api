@@ -178,6 +178,8 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) error {
 	var resets map[int64]time.Time
 	defer func() { s.mu.Unlock(); s.notify(resets) }()
 	now := s.now()
+	// Bound local evidence even when any subsequent read fails.
+	s.window.take(now)
 	if err := s.loadEvidence(ctx, now); err != nil {
 		return err
 	}
@@ -301,7 +303,7 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) error {
 			slog.ErrorContext(ctx, "sched_quality.reap_tests", "error", err)
 		}
 	}
-	resets = s.publish(d, states, overrides, resetAt)
+	resets = s.publish(d, states, overrides, resetAt, now)
 	return nil
 }
 
@@ -341,7 +343,7 @@ func (s *SchedQualityEngineService) rebuild(ctx context.Context) (map[int64]time
 	if err != nil {
 		return nil, err
 	}
-	return s.publish(d, states, overrides, resets), nil
+	return s.publish(d, states, overrides, resets, s.snapshot.Load().At), nil
 }
 
 func (s *SchedQualityEngineService) Reset(ctx context.Context, id int64) (time.Time, error) {

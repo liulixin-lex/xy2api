@@ -3,8 +3,11 @@
 package repository
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +16,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"golang.org/x/time/rate"
 )
 
 func qualityRepoFixture(t *testing.T) (*schedQualityRepository, int64, int64) {
@@ -21,7 +25,7 @@ func qualityRepoFixture(t *testing.T) (*schedQualityRepository, int64, int64) {
 	r := &schedQualityRepository{db: integrationDB}
 	var account, group int64
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO accounts(name,platform,type,credentials,extra) VALUES('quality','openai','apikey','{}','{}') RETURNING id`).Scan(&account))
-	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO groups(name,platform) VALUES('quality','openai') RETURNING id`).Scan(&group))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO groups(name,platform) VALUES($1,'openai') RETURNING id`, fmt.Sprintf("quality-%d", account)).Scan(&group))
 	_, err := integrationDB.ExecContext(ctx, `INSERT INTO account_groups(account_id,group_id) VALUES($1,$2)`, account, group)
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -284,4 +288,76 @@ func TestSchedQualityLoadRowsConsistentRead(t *testing.T) {
 		require.Equal(t, fmt.Sprint(states[0].Level), overrides[0].Reason)
 		require.Equal(t, int64(states[0].Level), resets[a].Unix())
 	}
+}
+
+func TestSchedQualityInvalidResetTimeDoesNotBlockReads(t *testing.T) {
+	r, valid, _ := qualityRepoFixture(t)
+	_, invalid, _ := qualityRepoFixture(t)
+	_, fromDatabase, _ := qualityRepoFixture(t)
+	ctx := context.Background()
+	at := time.Date(2026, 11, 11, 12, 0, 0, 123456789, time.UTC)
+	_, err := integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=jsonb_set(extra,'{group_quality_reset_at}',to_jsonb($2::text)) WHERE id=$1`, valid, at.Format(time.RFC3339Nano))
+	require.NoError(t, err)
+	databaseAt, err := r.RunReset(ctx, fromDatabase)
+	require.NoError(t, err)
+	var logs bytes.Buffer
+	logger, limiter := slog.Default(), schedQualityResetWarnings
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	schedQualityResetWarnings = rate.NewLimiter(rate.Every(time.Minute), 1)
+	t.Cleanup(func() { slog.SetDefault(logger); schedQualityResetWarnings = limiter })
+	for _, bad := range []string{`"not-a-timestamp"`, `{"invalid":true}`, `"2026-99-99 99:99:99+00"`} {
+		_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=jsonb_set(extra,'{group_quality_reset_at}',$2::jsonb) WHERE id=$1`, invalid, bad)
+		require.NoError(t, err)
+		_, _, resets, err := r.LoadRows(ctx)
+		require.NoError(t, err)
+		require.Len(t, resets, 2)
+		require.True(t, at.Equal(resets[valid]), "RFC3339Nano precision must survive")
+		require.True(t, databaseAt.Equal(resets[fromDatabase]), "clock_timestamp text must still parse")
+		require.NotContains(t, resets, invalid)
+		locked, err := r.RunCycle(ctx, func(tx service.SchedQualityTx) error {
+			current, err := tx.ResetTimes()
+			require.Equal(t, resets, current)
+			return err
+		})
+		require.NoError(t, err)
+		require.True(t, locked)
+	}
+	require.Equal(t, 1, strings.Count(logs.String(), `"msg":"sched_quality.invalid_reset_time"`), "repeated invalid reads must produce only one warning per minute")
+}
+
+func TestSchedQualityInvalidPolicyEntryDoesNotBlockOtherGroups(t *testing.T) {
+	r, _, valid := qualityRepoFixture(t)
+	_, _, invalid := qualityRepoFixture(t)
+	_, _, validV4 := qualityRepoFixture(t)
+	ctx := context.Background()
+	p := q.Policy{Enabled: true, TTFTSeconds: 12, MaxErrorRate: .05, MinCacheRatio: .8}
+	v4 := `{"enabled":true,"ttft_seconds":12,"max_error_rate":0.05,"min_cache_ratio":0.8,"takeover_idle_seconds":0}`
+	var logs bytes.Buffer
+	logger, limiter := slog.Default(), schedQualityPolicyWarnings
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	schedQualityPolicyWarnings = rate.NewLimiter(rate.Every(time.Minute), 1)
+	t.Cleanup(func() {
+		slog.SetDefault(logger)
+		schedQualityPolicyWarnings = limiter
+		_, err := integrationDB.ExecContext(ctx, `DELETE FROM settings WHERE key=$1`, service.SettingKeyGroupQualityGatePolicies)
+		require.NoError(t, err)
+	})
+	for _, bad := range []string{`[]`, `{"v4":{"enabled":"invalid"}}`, `{"v4":{"enabled":true,"ttft_seconds":-1}}`} {
+		raw := fmt.Sprintf(`{"version":7,"groups":{"%d":{"v4":%s},"%d":%s,"%d":{"v4":%s,"v3":"invalid legacy"},"bad-id":{}}}`, valid, v4, invalid, bad, validV4, v4)
+		_, err := integrationDB.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, service.SettingKeyGroupQualityGatePolicies, raw)
+		require.NoError(t, err)
+		policies, err := r.LoadPolicies(ctx)
+		require.NoError(t, err)
+		require.Equal(t, p, policies[valid].Policy)
+		require.Equal(t, p, policies[validV4].Policy, "unused invalid v3 must not mask a valid v4")
+		require.Equal(t, q.Policy{}, policies[invalid].Policy)
+		require.Equal(t, int64(7), policies[invalid].Version)
+		saved, err := r.SavePolicy(ctx, valid, 7, p)
+		require.NoError(t, err, "an unrelated invalid entry cannot prevent CAS writes")
+		require.Equal(t, int64(8), saved.Version)
+		var after string
+		require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1`, service.SettingKeyGroupQualityGatePolicies).Scan(&after))
+		require.Equal(t, bad, gjson.Get(after, fmt.Sprintf("groups.%d", invalid)).Raw)
+	}
+	require.Equal(t, 1, strings.Count(logs.String(), `"msg":"sched_quality.invalid_policy"`))
 }

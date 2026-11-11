@@ -684,3 +684,94 @@ func TestSchedQualitySingleWriterStateCommit(t *testing.T) {
 	require.Equal(t, f.view(10), second.Snapshot().View.StateOf(10, 1, pair.Model))
 	require.Empty(t, f.runner.Requests)
 }
+
+func TestSchedQualityInitialResetTimesAreBaseline(t *testing.T) {
+	f := newQualityFixture(t)
+	ctx := context.Background()
+	historical := map[int64]time.Time{1: f.now.Add(-72 * time.Hour), 2: f.now.Add(-24 * time.Hour)}
+	f.store.Resets = cloneResetTimes(historical)
+	var calls []int64
+	f.e.OnAccountReset(func(id int64, at time.Time) { calls = append(calls, id) })
+	failed := true
+	f.e.attempts = &qualityPageStore{fakeSchedAttemptStore: f.ledger, read: func(time.Time, int) ([]q.AttemptSample, time.Time, error) {
+		if failed {
+			return nil, time.Time{}, errors.New("ledger unavailable at startup")
+		}
+		return nil, time.Time{}, nil
+	}}
+	require.Error(t, f.e.cycle(ctx))
+	require.Empty(t, calls)
+	f.now = f.now.Add(time.Minute)
+	failed = false
+	f.cycle()
+	require.Empty(t, calls, "the first successful publication must not replay historical resets")
+	require.Equal(t, historical, f.e.seenResets)
+	f.store.Resets[1] = f.now
+	f.cycle()
+	require.Equal(t, []int64{1}, calls)
+	f.cycle()
+	require.Equal(t, []int64{1}, calls, "unchanged timestamps must not notify again")
+}
+
+func TestSchedQualityFailedCyclesTrimLocalWindow(t *testing.T) {
+	f := newQualityFixture(t)
+	pair := SchedAccountModel{1, "offline"}
+	f.e.attempts = &qualityPageStore{fakeSchedAttemptStore: f.ledger, read: func(time.Time, int) ([]q.AttemptSample, time.Time, error) {
+		require.Empty(t, f.e.window.pending, "local evidence must be drained before reading the ledger")
+		return nil, time.Time{}, errors.New("ledger unavailable")
+	}}
+	for cycle := 0; cycle < 10; cycle++ {
+		for i := 0; i < 40; i++ {
+			f.e.Observe(q.AttemptSample{AttemptID: fmt.Sprintf("%d-%d", cycle, i), AccountID: 1, Model: pair.Model, StartedAt: f.now, Outcome: q.OutcomeOK})
+		}
+		require.Error(t, f.e.cycle(context.Background()))
+		require.Len(t, f.e.window.recent[pair], min((cycle+1)*40, q.WindowMaxSamples))
+		f.now = f.now.Add(q.EvalInterval)
+	}
+	f.now = f.now.Add(q.WindowMaxAge)
+	require.Error(t, f.e.cycle(context.Background()))
+	require.Empty(t, f.e.window.recent)
+	require.Empty(t, f.e.window.acute)
+	require.Empty(t, f.e.window.pending)
+	require.Zero(t, f.e.Snapshot().Version)
+}
+
+func TestSchedQualityMutationsPreserveEvaluationAge(t *testing.T) {
+	f := newQualityFixture(t)
+	f.cool()
+	ctx := context.Background()
+	evaluatedAt := f.e.Snapshot().At
+	cold := f.view(10)
+	f.e.attempts = &qualityPageStore{fakeSchedAttemptStore: f.ledger, read: func(time.Time, int) ([]q.AttemptSample, time.Time, error) {
+		return nil, time.Time{}, errors.New("ledger unavailable")
+	}}
+	f.now = f.now.Add(q.ViewMaxAge + time.Second)
+	require.Error(t, f.e.cycle(ctx))
+	mutations := []struct {
+		name  string
+		apply func() error
+	}{
+		{"set override", func() error { return f.e.SetOverride(ctx, SchedOverride{AccountID: 2, Mode: q.OverrideDemote}) }},
+		{"clear override", func() error { return f.e.ClearOverride(ctx, 2, 0) }},
+		{"policy", func() error { _, err := f.e.UpdatePolicy(ctx, 10, 0, f.store.Policies[10].Policy); return err }},
+		{"reset", func() error { _, err := f.e.Reset(ctx, 2); return err }},
+	}
+	for _, mutation := range mutations {
+		t.Run(mutation.name, func(t *testing.T) {
+			version := f.e.Snapshot().Version
+			require.NoError(t, mutation.apply())
+			snapshot := f.e.Snapshot()
+			require.Equal(t, version+1, snapshot.Version)
+			require.Equal(t, evaluatedAt, snapshot.At)
+			require.Equal(t, evaluatedAt, snapshot.View.At())
+			require.Equal(t, cold.State, f.view(10).State)
+			auto := snapshot.View.GlobalEnabled() && f.now.Sub(snapshot.View.At()) <= q.ViewMaxAge
+			require.Equal(t, q.StandFront, q.StandingOf(f.view(10), auto, f.now), "a mutation cannot make stale automatic cooling effective again")
+			f.now = f.now.Add(q.EvalInterval)
+		})
+	}
+	f.e.attempts = f.ledger
+	f.cycle()
+	require.Equal(t, f.now, f.e.Snapshot().At)
+	require.Equal(t, f.now, f.e.Snapshot().View.At())
+}
