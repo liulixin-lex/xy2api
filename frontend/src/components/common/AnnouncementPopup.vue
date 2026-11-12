@@ -3,10 +3,19 @@
     <Transition name="popup-fade">
       <div
         v-if="displayedAnnouncement"
-        class="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto bg-gradient-to-br from-black/70 via-black/60 to-black/70 p-4 pt-[8vh]"
+        ref="rootRef"
+        class="fixed inset-0 flex items-start justify-center overflow-y-auto bg-gradient-to-br from-black/70 via-black/60 to-black/70 p-4 pt-[8vh]"
+        :style="{ zIndex: layer.zIndex.value }"
+        role="dialog"
+        aria-modal="true"
+        :aria-labelledby="titleId"
+        data-announcement-popup
+        @keydown.tab="layer.trapTab"
       >
         <div
-          class="w-full max-w-[680px] overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/5 dark:bg-dark-800 dark:ring-white/10"
+          ref="panelRef"
+          tabindex="-1"
+          class="w-full max-w-[680px] overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/5 focus:outline-none dark:bg-dark-800 dark:ring-white/10"
           @click.stop
         >
           <!-- Header with warm gradient -->
@@ -34,7 +43,7 @@
               </div>
 
               <!-- Title -->
-              <h2 class="mb-2 text-2xl font-bold leading-tight text-gray-900 dark:text-white">
+              <h2 :id="titleId" class="mb-2 text-2xl font-bold leading-tight text-gray-900 dark:text-white">
                 {{ displayedAnnouncement.title }}
               </h2>
 
@@ -88,12 +97,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { useAnnouncementStore } from '@/stores/announcements'
 import { formatRelativeWithDateTime } from '@/utils/format'
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import type { Announcement, UserAnnouncement } from '@/types'
 import '@/styles/announcement-markdown.css'
 
@@ -136,6 +146,19 @@ function handleDismiss() {
   }
   announcementStore.dismissPopup()
 }
+
+// The popup can arrive while a form or the step-up dialog is open: it is a modal layer of the overlay stack, drawn
+// above them, with focus and Escape of its own; Escape does what its button does (close, or mark read and close),
+// and focus goes back to the layer below.
+const titleId = `announcement-popup-${useId()}`
+const rootRef = ref<HTMLElement | null>(null)
+const panelRef = ref<HTMLElement | null>(null)
+const layer = useOverlayLayer(() => !!displayedAnnouncement.value, {
+  root: rootRef,
+  panel: panelRef,
+  floor: 120,
+  onEscape: handleDismiss
+})
 
 // Manage body overflow — only set, never unset (bell component handles restore)
 watch(

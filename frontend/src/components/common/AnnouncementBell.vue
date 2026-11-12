@@ -25,6 +25,12 @@
           v-if="isModalOpen"
           class="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-gradient-to-br from-black/70 via-black/60 to-black/70 p-4 pt-[8vh]"
           @click="closeModal"
+          ref="listRef"
+          :style="{ zIndex: listLayer.zIndex.value, outline: 'none' }"
+          tabindex="-1"
+          @keydown.tab="listLayer.trapTab"
+          role="dialog"
+          aria-modal="true"
         >
           <div
             class="w-full max-w-[620px] overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/5 dark:bg-dark-800 dark:ring-white/10"
@@ -185,6 +191,12 @@
           v-if="detailModalOpen && selectedAnnouncement"
           class="fixed inset-0 z-[110] flex items-start justify-center overflow-y-auto bg-gradient-to-br from-black/70 via-black/60 to-black/70 p-4 pt-[6vh]"
           @click="closeDetail"
+          ref="detailRef"
+          :style="{ zIndex: detailLayer.zIndex.value, outline: 'none' }"
+          tabindex="-1"
+          @keydown.tab="detailLayer.trapTab"
+          role="dialog"
+          aria-modal="true"
         >
           <div
             class="w-full max-w-[780px] overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/5 dark:bg-dark-800 dark:ring-white/10"
@@ -312,7 +324,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import { marked } from 'marked'
@@ -322,6 +334,7 @@ import { useAnnouncementStore } from '@/stores/announcements'
 import { formatRelativeTime, formatRelativeWithDateTime } from '@/utils/format'
 import type { UserAnnouncement } from '@/types'
 import Icon from '@/components/icons/Icon.vue'
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import '@/styles/announcement-markdown.css'
 
 const { t } = useI18n()
@@ -397,22 +410,14 @@ async function markAllAsRead() {
   }
 }
 
-function handleEscape(e: KeyboardEvent) {
-  if (e.key === 'Escape') {
-    if (detailModalOpen.value) {
-      closeDetail()
-    } else if (isModalOpen.value) {
-      closeModal()
-    }
-  }
-}
-
-onMounted(() => {
-  document.addEventListener('keydown', handleEscape)
-})
+// Both modals are layers of the overlay stack: Escape closes the top one only (the detail above the list, or an
+// announcement popup above either), focus goes back to the element that opened it.
+const listRef = ref<HTMLElement | null>(null)
+const listLayer = useOverlayLayer(() => isModalOpen.value, { root: listRef, floor: 100, onEscape: closeModal })
+const detailRef = ref<HTMLElement | null>(null)
+const detailLayer = useOverlayLayer(() => detailModalOpen.value && !!selectedAnnouncement.value, { root: detailRef, floor: 110, onEscape: closeDetail })
 
 onBeforeUnmount(() => {
-  document.removeEventListener('keydown', handleEscape)
   document.body.style.overflow = ''
 })
 
