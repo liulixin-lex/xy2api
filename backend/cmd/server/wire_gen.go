@@ -91,10 +91,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	privacyClientFactory := providePrivacyClientFactory()
 	usageLogRepository := repository.NewUsageLogRepository(client, db)
 	usageBillingRepository := repository.NewUsageBillingRepository(client, db)
-	gatewayCache, err := repository.NewGatewayCacheWithManagedProvenance(redisClient, client)
-	if err != nil {
-		return nil, err
-	}
+	gatewayCache := repository.NewGatewayCache(redisClient)
 	schedulerOutboxRepository := repository.NewSchedulerOutboxRepository(db)
 	schedulerSnapshotService := service.ProvideSchedulerSnapshotService(schedulerCache, schedulerOutboxRepository, accountRepository, groupRepository, configConfig)
 	pricingRemoteClient := repository.ProvidePricingRemoteClient(configConfig)

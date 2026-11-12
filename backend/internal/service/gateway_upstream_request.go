@@ -19,8 +19,7 @@ import (
 )
 
 func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token, tokenType, modelID string, reqStream bool, mimicClaudeCode bool) (*http.Request, []byte, error) {
-	originalMessages := gjson.GetBytes(body, "messages").Raw
-	compat, compatErr := s.newAnthropicCompatPlan(ctx, c, account, body, modelID)
+	compat, compatErr := s.newAnthropicCompatPlan(ctx, c, account, modelID)
 	if compatErr != nil {
 		return nil, nil, compatErr
 	}
@@ -123,16 +122,15 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	if compat != nil && compat.Active {
 		finalBetaHeader, compatErr = compatResolveBeta(compat, clientHeaders.Get("anthropic-beta"), finalBetaHeader, effectiveDropSet)
 		if compatErr != nil {
+			logAnthropicCompatAttempt(ctx, account, modelID, "ineligible", "required_beta_filtered")
 			return nil, nil, compatErr
 		}
+		finalBetaHeader = filterSonnet55ToolsetBeta(finalBetaHeader, body, modelID)
 		finalBetaShouldSet = true
 	}
 
 	// 能力维度 body sanitize：与最终 anthropic-beta header 对称
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, finalBetaHeader); changed {
-		if compat != nil && compat.Active {
-			return nil, nil, compatInvalid("anthropic_compat_request_unsupported", "Explicit request capabilities require beta support unavailable in this compatibility plan")
-		}
 		body = sanitized
 	}
 
@@ -152,12 +150,6 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		}
 	}
 	body = s.finalizeAnthropicCache(ctx, account, body, modelID)
-	if compat != nil && compat.Active && compat.Scope.Record != nil && originalMessages != gjson.GetBytes(body, "messages").Raw {
-		return nil, nil, compatInvalid("anthropic_compat_history_incompatible", "Cache policy would modify signed history")
-	}
-	if err := finalizeAnthropicCompatPlan(compat, body, finalBetaHeader); err != nil {
-		return nil, nil, err
-	}
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, err
@@ -232,6 +224,9 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	// 放在所有 header 逻辑之后，确保配置值对同名头拥有最终决定权。
 	account.ApplyHeaderOverrides(req.Header)
 	filterSonnet55ToolsetBetaHeader(req.Header, body, modelID)
+	if compat != nil {
+		compat.Beta = finalBetaHeader
+	}
 	applyAnthropicCompatHeaders(req.Header, compat)
 
 	// === DEBUG: 打印上游转发请求（headers + body 摘要），与 CLIENT_ORIGINAL 对比 ===
@@ -253,6 +248,9 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		logClaudeMimicDebug(req, body, account, tokenType, mimicClaudeCode)
 	}
 
+	if compat != nil {
+		logAnthropicCompatAttempt(ctx, account, modelID, "adapted", "")
+	}
 	return req, body, nil
 }
 

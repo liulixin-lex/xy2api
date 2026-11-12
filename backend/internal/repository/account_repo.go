@@ -139,17 +139,12 @@ func ensureCodexFingerprintSeedSQL(extraExpr string) string {
 
 // The per-row generation stays inside the same UPDATE as enabling the profile.
 // Two independent UUIDs provide a random identity seed without requiring pgcrypto.
-func ensureAnthropicCompatSeedSQL(extraExpr, credentialPlaceholder string) string {
-	valid := "(extra ->> 'anthropic_compat_identity_seed') ~ '^[0-9a-f]{64}$'"
-	if credentialPlaceholder != "" {
-		for _, key := range []string{"api_key", "base_url", "auth_scheme"} {
-			valid += " AND (credentials->'" + key + "') IS NOT DISTINCT FROM ((COALESCE(credentials, '{}'::jsonb) || " + credentialPlaceholder + "::jsonb)->'" + key + "')"
-		}
-	}
-	valid += " AND (extra->'anthropic_apikey_auth_scheme') IS NOT DISTINCT FROM ((" + extraExpr + ")->'anthropic_apikey_auth_scheme')"
-	return "CASE WHEN platform = 'anthropic' AND type = 'apikey' AND (((" + extraExpr + ") ->> 'anthropic_compat_profile') IN ('claude_code_v1', 'claude_code_v2') OR (extra ->> 'anthropic_compat_identity_seed') ~ '^[0-9a-f]{64}$') THEN " +
-		"jsonb_set(" + extraExpr + ", '{anthropic_compat_identity_seed}', CASE WHEN " + valid +
-		" THEN to_jsonb(extra ->> 'anthropic_compat_identity_seed') ELSE to_jsonb(replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '')) END, true) ELSE " + extraExpr + " END"
+func ensureAnthropicCompatSeedSQL(extraExpr, rotationIDsPlaceholder string) string {
+	// Credential equivalence is decided in Go under transaction row locks.
+	valid := "(extra ->> 'anthropic_compat_identity_seed') ~ '^[0-9a-f]{64}$' AND NOT (id = ANY(" + rotationIDsPlaceholder + "::bigint[]))"
+	return "CASE WHEN platform = 'anthropic' AND type = 'apikey' AND (((" + extraExpr + ") ->> 'anthropic_compat_profile') IN ('claude_code') OR (extra ->> 'anthropic_compat_identity_seed') ~ '^[0-9a-f]{64}$') THEN " +
+		"jsonb_set((" + extraExpr + "), '{anthropic_compat_identity_seed}', CASE WHEN " + valid +
+		" THEN to_jsonb(extra ->> 'anthropic_compat_identity_seed') ELSE to_jsonb(replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '')) END, true) ELSE (" + extraExpr + ") END"
 }
 
 func stripCodexFingerprintSeedFromExtraUpdate(extra map[string]any) map[string]any {
@@ -3024,7 +3019,8 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 			iqConditions = append(iqConditions, "extra->'"+key+"' IS DISTINCT FROM $1::jsonb->'"+key+"'")
 		}
 	}
-	durableSchedulerChange := shouldEnqueueSchedulerOutboxForExtraUpdates(updates) || clearProbeSnapshot || len(iqConditions) > 0
+	ensureCompatSeed := service.ShouldEnsureAnthropicCompatSeedForExtraUpdates(updates)
+	durableSchedulerChange := shouldEnqueueSchedulerOutboxForExtraUpdates(updates) || clearProbeSnapshot || len(iqConditions) > 0 || ensureCompatSeed
 	baseCtx := ctx
 	contextTx := dbent.TxFromContext(ctx)
 	client := clientFromContext(ctx, r.client)
@@ -3051,8 +3047,17 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	if service.ShouldEnsureCodexFingerprintSeedForExtraUpdates(updates) {
 		extraExpression = ensureCodexFingerprintSeedSQL(extraExpression)
 	}
-	if service.ShouldEnsureAnthropicCompatSeedForExtraUpdates(updates) {
-		extraExpression = ensureAnthropicCompatSeedSQL(extraExpression, "")
+	extraArgs := []any{string(payload), id}
+	if ensureCompatSeed {
+		if tx == nil && contextTx == nil {
+			return errors.New("compatibility seed update requires a transaction")
+		}
+		rotationIDs, err := anthropicCompatRotationIDs(ctx, client, []int64{id}, nil, updates)
+		if err != nil {
+			return err
+		}
+		extraArgs = append(extraArgs, pq.Array(rotationIDs))
+		extraExpression = ensureAnthropicCompatSeedSQL(extraExpression, "$3")
 	}
 	identityChanged := false
 	if len(iqConditions) > 0 {
@@ -3080,7 +3085,7 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	result, err := client.ExecContext(
 		ctx,
 		"UPDATE accounts SET extra = "+extraExpression+", updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL",
-		string(payload), id,
+		extraArgs...,
 	)
 
 	if err != nil {
@@ -3340,6 +3345,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 
 	setClauses := make([]string, 0, 8)
 	args := make([]any, 0, 8)
+	compatRotationArg := -1
 
 	idx := 1
 	ollamaProxyIdentityChanged := ""
@@ -3597,7 +3603,10 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			extraExpression = ensureCodexFingerprintSeedSQL(extraExpression)
 		}
 		if updates.EnsureAnthropicCompatSeed {
-			extraExpression = ensureAnthropicCompatSeedSQL(extraExpression, credentialPlaceholder)
+			compatRotationArg = len(args)
+			args = append(args, nil) // populated under transaction row locks below
+			extraExpression = ensureAnthropicCompatSeedSQL(extraExpression, "$"+itoa(idx))
+			idx++
 		}
 		setClauses = append(setClauses, "extra = "+extraExpression)
 	}
@@ -3635,6 +3644,16 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			ctx = dbent.NewTxContext(ctx, tx)
 			exec = tx.Client()
 		}
+	}
+	if compatRotationArg >= 0 {
+		if tx == nil && contextTx == nil {
+			return 0, errors.New("compatibility seed update requires a transaction")
+		}
+		rotationIDs, err := anthropicCompatRotationIDs(ctx, exec, ids, updates.Credentials, updates.Extra)
+		if err != nil {
+			return 0, err
+		}
+		args[compatRotationArg] = pq.Array(rotationIDs)
 	}
 	targetClient := clientFromContext(ctx, r.client)
 	if updates.IQTargets != nil && targetClient == nil {

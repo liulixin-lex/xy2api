@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/claude"
 	middleware2 "github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
@@ -21,10 +22,10 @@ func TestGatewayModels_ClaudeAPIKeyProfileIntersection(t *testing.T) {
 		profile string
 		want    []string
 	}{
-		{"unmapped", nil, service.AnthropicCompatProfileClaudeCodeV1, []string{"claude-opus-4-8", "claude-opus-5-5"}},
-		{"public aliases", map[string]any{"public-opus": "claude-opus-5-5", "unsupported": "claude-sonnet-4-6"}, service.AnthropicCompatProfileClaudeCodeV1, []string{"public-opus"}},
-		{"empty intersection", map[string]any{"unsupported": "claude-sonnet-4-6"}, service.AnthropicCompatProfileClaudeCodeV1, []string{}},
-		{"wildcard with exact override", map[string]any{"claude-opus-*": "claude-opus-5-5", "claude-opus-4-8": "unsupported"}, service.AnthropicCompatProfileClaudeCodeV1, nil},
+		{"unmapped", nil, service.AnthropicCompatProfileClaudeCode, claude.DefaultModelIDs()},
+		{"public aliases", map[string]any{"public-opus": "claude-opus-5-5", "unsupported": "claude-sonnet-4-6"}, service.AnthropicCompatProfileClaudeCode, []string{"public-opus", "unsupported"}},
+		{"empty intersection", map[string]any{"unsupported": "gpt-5"}, service.AnthropicCompatProfileClaudeCode, []string{}},
+		{"wildcard with exact override", map[string]any{"claude-opus-*": "claude-opus-5-5", "claude-opus-4-8": "unsupported"}, service.AnthropicCompatProfileClaudeCode, nil},
 		{"invalid profile", nil, "unknown-profile", []string{}},
 	} {
 		for _, platform := range []string{service.PlatformAnthropic, service.PlatformComposite} {
@@ -69,7 +70,7 @@ func TestGatewayModels_ClaudeAPIKeyInvalidationUpdatesRetrievalAndETag(t *testin
 	group := &service.Group{ID: 914, Platform: service.PlatformAnthropic}
 	account := service.Account{ID: 71, Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey,
 		Credentials: map[string]any{"model_mapping": map[string]any{"public-opus": "claude-opus-5-5"}},
-		Extra:       map[string]any{service.AnthropicCompatProfileExtraKey: service.AnthropicCompatProfileClaudeCodeV1}}
+		Extra:       map[string]any{service.AnthropicCompatProfileExtraKey: service.AnthropicCompatProfileClaudeCode}}
 	repo := &gatewayModelsAccountRepoStub{byGroup: map[int64][]service.Account{group.ID: {account}}}
 	h := newGatewayModelsHandlerForTest(repo)
 	request := func(etag string) *httptest.ResponseRecorder {
@@ -89,7 +90,7 @@ func TestGatewayModels_ClaudeAPIKeyInvalidationUpdatesRetrievalAndETag(t *testin
 	require.Equal(t, http.StatusNotModified, request(etag).Code)
 	require.Equal(t, http.StatusOK, requestModelForTest(h, group, "public-opus", "").Code)
 	require.Equal(t, http.StatusNotFound, requestModelForTest(h, group, "claude-sonnet-4-6", "").Code)
-	account.Credentials = map[string]any{"model_mapping": map[string]any{"public-opus": "claude-sonnet-4-6"}}
+	account.Credentials = map[string]any{"model_mapping": map[string]any{"public-opus": "gpt-5"}}
 	repo.byGroup[group.ID] = []service.Account{account}
 	h.gatewayService.InvalidateAvailableModelsCache(&group.ID, service.PlatformAnthropic)
 	updated := request(etag)
@@ -106,7 +107,7 @@ func TestGatewayModels_ClaudeAPIKeyCompositeRouteAliases(t *testing.T) {
 	repo := &gatewayModelsAccountRepoStub{byGroup: map[int64][]service.Account{group.ID: {{
 		ID: 71, Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey,
 		Credentials: map[string]any{"model_mapping": map[string]any{"dispatch-opus": "claude-opus-5-5"}},
-		Extra:       map[string]any{service.AnthropicCompatProfileExtraKey: service.AnthropicCompatProfileClaudeCodeV1},
+		Extra:       map[string]any{service.AnthropicCompatProfileExtraKey: service.AnthropicCompatProfileClaudeCode},
 	}}}}
 	routes := &gatewayModelsRouteRepoStub{routes: []service.CompositeModelRoute{
 		{PublicModel: "public-opus", UpstreamModel: "dispatch-opus", TargetPlatform: service.PlatformAnthropic, MatchType: service.CompositeRouteMatchExact, Enabled: true},

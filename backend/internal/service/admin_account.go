@@ -375,9 +375,7 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 	if err := NormalizeProtocolRulesCredentials(input.Credentials); err != nil {
 		return nil, err
 	}
-	if err := s.validateAnthropicCompatConfiguration(ctx, &Account{Platform: input.Platform, Type: input.Type, Credentials: input.Credentials, Extra: accountExtra}); err != nil {
-		return nil, err
-	}
+
 	duplicate, err := buildAccountForCreate(input, accountExtra)
 	if err != nil {
 		return nil, err
@@ -547,9 +545,6 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 }
 
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
-	if err := s.validateAnthropicCompatConfiguration(ctx, &Account{Platform: input.Platform, Type: input.Type, Credentials: input.Credentials, Extra: input.Extra}); err != nil {
-		return nil, err
-	}
 	input.Extra = managedOpenAICreateExtra(input)
 	if err := s.operatorAccountCreateRules(ctx, input); err != nil {
 		return nil, err
@@ -829,9 +824,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if err := prepareAnthropicCompatAccountUpdate(account, &previousForToken); err != nil {
 		return nil, err
 	}
-	if err := s.validateAnthropicCompatConfiguration(ctx, account); err != nil {
-		return nil, err
-	}
+
 	if requestedRateSyncEnabledUpdate != nil && *requestedRateSyncEnabledUpdate {
 		if requestedProbeEnabledUpdate != nil && !*requestedProbeEnabledUpdate {
 			return nil, infraerrors.BadRequest(
@@ -1048,7 +1041,7 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 			candidate.Extra = make(map[string]any)
 		}
 		maps.Copy(candidate.Extra, updates)
-		if err := s.validateAnthropicCompatConfiguration(ctx, &candidate); err != nil {
+		if _, err := ResolveAnthropicCompatProfile(&candidate); err != nil {
 			return err
 		}
 	}
@@ -1287,7 +1280,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 				candidate.Credentials = make(map[string]any)
 			}
 			maps.Copy(candidate.Credentials, input.Credentials)
-			if err := s.validateAnthropicCompatConfiguration(ctx, &candidate); err != nil {
+			if _, err := ResolveAnthropicCompatProfile(&candidate); err != nil {
 				return nil, err
 			}
 		}

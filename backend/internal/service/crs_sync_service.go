@@ -549,6 +549,7 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 			continue
 		}
 
+		previous := *existing
 		existing.Extra = extra
 		existing.Name = defaultName(src.Name, src.ID)
 		existing.Platform = PlatformAnthropic
@@ -561,6 +562,13 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 		existing.Priority = priority
 		existing.Status = status
 		existing.Schedulable = src.Schedulable
+		if err := prepareAnthropicCompatAccountUpdate(existing, &previous); err != nil {
+			item.Action = "failed"
+			item.Error = "update failed: " + err.Error()
+			result.Failed++
+			result.Items = append(result.Items, item)
+			continue
+		}
 
 		if err := s.accountRepo.Update(ctx, existing); err != nil {
 			item.Action = "failed"

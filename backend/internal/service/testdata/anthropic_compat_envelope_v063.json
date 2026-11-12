@@ -1,0 +1,22 @@
+[
+  {
+    "name": "plain",
+    "body": "{\"system\":\"Business policy\",\"tools\":[ {\"name\":\"lookup\", \"input_schema\":{\"type\":\"object\"}} ],\"messages\":[ {\"role\":\"user\", \"content\":\"hello\"} ]}",
+    "system": "[{\"text\":\"x-anthropic-billing-header: cc_version=2.1.114.7be; cc_entrypoint=cli;\",\"type\":\"text\"},{\"text\":\"You are Claude Code, Anthropic's official CLI for Claude.\",\"type\":\"text\"},{\"text\":\"Business policy\",\"type\":\"text\"}]"
+  },
+  {
+    "name": "native-markers-cache",
+    "body": "{\"system\":[{\"type\":\"text\",\"text\":\"x-anthropic-billing-header: cc_version=2.1.114.abc; cc_entrypoint=cli;\"},{\"type\":\"text\",\"cache_control\": {\"ttl\":\"1h\", \"type\":\"ephemeral\"}, \"text\":\"You are Claude Code, Anthropic's official CLI for Claude.\"},{ \"type\":\"text\", \"text\":\"Keep \u003cxml\u003e \u0026 business\", \"cache_control\":{\"type\":\"ephemeral\"} }],\"tools\":[ {\"name\":\"lookup\",\"input_schema\":{\"type\":\"object\"}} ],\"messages\":[{\"role\":\"user\",\"content\":\"hello\"},{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"thought\",\"signature\":\"opaque\"},{\"type\":\"text\",\"text\":\"answer\"}]}]}",
+    "system": "[{\"text\":\"x-anthropic-billing-header: cc_version=2.1.114.7be; cc_entrypoint=cli;\",\"type\":\"text\"},{\"cache_control\":{\"ttl\":\"1h\",\"type\":\"ephemeral\"},\"text\":\"You are Claude Code, Anthropic's official CLI for Claude.\",\"type\":\"text\"},{\"type\":\"text\",\"text\":\"Keep \\u003cxml\\u003e \\u0026 business\",\"cache_control\":{\"type\":\"ephemeral\"}}]"
+  },
+  {
+    "name": "duplicates",
+    "body": "{\"system\":[{\"type\":\"text\",\"text\":\"You are Claude Code, Anthropic's official CLI for Claude.\"},{\"text\":\"You are Claude Code, Anthropic's official CLI for Claude.\",\"type\":\"text\"},{\"type\":\"text\",\"text\":\"x-anthropic-billing-header: cc_version=2.0.1;\"},{\"type\":\"text\",\"text\":\"business\"}],\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+    "system": "[{\"text\":\"x-anthropic-billing-header: cc_version=2.1.114.7be; cc_entrypoint=cli;\",\"type\":\"text\"},{\"text\":\"You are Claude Code, Anthropic's official CLI for Claude.\",\"type\":\"text\"},{\"type\":\"text\",\"text\":\"business\"}]"
+  },
+  {
+    "name": "empty",
+    "body": "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+    "system": "[{\"text\":\"x-anthropic-billing-header: cc_version=2.1.114.7be; cc_entrypoint=cli;\",\"type\":\"text\"},{\"text\":\"You are Claude Code, Anthropic's official CLI for Claude.\",\"type\":\"text\"}]"
+  }
+]

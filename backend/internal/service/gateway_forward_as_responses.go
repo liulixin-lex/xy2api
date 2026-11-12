@@ -37,12 +37,7 @@ func (s *GatewayService) ForwardAsResponses(
 	parsed *ParsedRequest,
 ) (result *ForwardResult, err error) {
 	startTime := time.Now()
-	defer func() {
-		writeUnsupportedParameterError(c, err)
-		writeAnthropicCompatError(c, "responses", err)
-		s.logAnthropicCompatOutcome(ctx, c, account, "responses", err)
-	}()
-	ctx, err = s.beginAnthropicCompatAttempt(ctx, c, account, body, "responses")
+	err = beginAnthropicForwardAttempt(ctx, c, account, body)
 	if err != nil {
 		return nil, err
 	}
@@ -58,12 +53,6 @@ func (s *GatewayService) ForwardAsResponses(
 	}
 	if normalized {
 		body = normalizedBody
-	}
-
-	if compatPreservesHistory(c) {
-		if capabilityErr := compatUnsupportedRequest(body, "responses"); capabilityErr != nil {
-			return nil, capabilityErr
-		}
 	}
 
 	// 1. Lower Codex client-side tools to function tools understood by Anthropic.
@@ -96,9 +85,6 @@ func (s *GatewayService) ForwardAsResponses(
 		if normalized != originalModel {
 			mappedModel = normalized
 		}
-	}
-	if scope := compatScope(ctx); compatPreservesHistory(c) && scope != nil && len(scope.Signatures) > 0 && !isClaude55SignedThinkingModel(mappedModel) {
-		return nil, compatInvalid("anthropic_compat_history_incompatible", "This model cannot preserve signed Responses thinking envelopes")
 	}
 	responsesReq.Model = mappedModel
 	anthropicReq, err := apicompat.ResponsesToAnthropicRequest(&responsesReq)
@@ -139,9 +125,8 @@ func (s *GatewayService) ForwardAsResponses(
 	}
 
 	// 7. Enforce cache_control block limit
-	if !compatPreservesHistory(c) {
-		anthropicBody = enforceConvertedCacheControlLimit(anthropicBody)
-	}
+
+	anthropicBody = enforceConvertedCacheControlLimit(anthropicBody)
 
 	// 8. Get access token
 	token, tokenType, err := s.GetAccessToken(ctx, account)
@@ -225,8 +210,6 @@ func (s *GatewayService) ForwardAsResponses(
 		writeResponsesError(c, mapUpstreamStatusCode(resp.StatusCode), "server_error", SanitizeUpstreamErrorMessage(upstreamMsg))
 		return nil, fmt.Errorf("upstream error: %d %s", resp.StatusCode, upstreamMsg)
 	}
-
-	s.observeAnthropicCompatResponse(ctx, resp, compatPlan(c))
 
 	// 13. Handle normal response (convert Anthropic → Responses)
 	var handleErr error
@@ -425,7 +408,6 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 
 	// Accumulate the final Anthropic response from streaming events
 	var finalResp *apicompat.AnthropicResponse
-	sawMessageStop := false
 	var usage ClaudeUsage
 
 	for scanner.Scan() {
@@ -453,10 +435,6 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 				zap.String("event_type", eventType),
 			)
 			continue
-		}
-
-		if event.Type == "message_stop" {
-			sawMessageStop = true
 		}
 
 		// message_start carries the initial response structure
@@ -504,19 +482,6 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 				zap.String("request_id", requestID),
 			)
 		}
-	}
-
-	if anthropicCompatObserved(resp) && (scanner.Err() != nil || !sawMessageStop) {
-		readErr := scanner.Err()
-		if readErr == nil {
-			readErr = fmt.Errorf("upstream stream ended without message_stop")
-		}
-		if _, _, _, local := AnthropicCompatErrorDetails(readErr); !local {
-			writeAnthropicCompatError(c, "responses", &AnthropicCompatError{http.StatusBadGateway, "anthropic_compat_incomplete_response", "Upstream stream ended before completion"})
-		} else {
-			writeAnthropicCompatError(c, "responses", readErr)
-		}
-		return &ForwardResult{RequestID: requestID, UpstreamHeaders: resp.Header, Usage: usage, Model: originalModel, UpstreamModel: mappedModel, ReasoningEffort: reasoningEffort, Duration: time.Since(startTime)}, readErr
 	}
 
 	if finalResp == nil {
@@ -706,17 +671,6 @@ func appendRawJSON(existing json.RawMessage, fragment string) json.RawMessage {
 		return json.RawMessage(fragment)
 	}
 	return json.RawMessage(string(existing) + fragment)
-}
-
-// Conversion errors are emitted once, before upstream work, with the same
-// contract for Chat and Responses. The handler owns errors after SSE starts.
-func writeUnsupportedParameterError(c *gin.Context, err error) {
-	var conversion *apicompat.UnsupportedConversionError
-	if c == nil || c.Writer.Written() || !errors.As(err, &conversion) {
-		return
-	}
-	MarkResponseCommitted(c)
-	c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "code": "unsupported_parameter", "param": conversion.Field, "message": conversion.Error()}})
 }
 
 // writeResponsesError writes an error response in OpenAI Responses API format.
