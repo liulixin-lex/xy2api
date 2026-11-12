@@ -727,13 +727,12 @@ func TestSchedQualityFailedCyclesTrimLocalWindow(t *testing.T) {
 			f.e.Observe(q.AttemptSample{AttemptID: fmt.Sprintf("%d-%d", cycle, i), AccountID: 1, Model: pair.Model, StartedAt: f.now, Outcome: q.OutcomeOK})
 		}
 		require.Error(t, f.e.cycle(context.Background()))
-		require.Len(t, f.e.window.recent[pair], min((cycle+1)*40, q.WindowMaxSamples))
+		require.Len(t, f.e.window.samples[pair], min((cycle+1)*40, q.WindowMaxSamples))
 		f.now = f.now.Add(q.EvalInterval)
 	}
 	f.now = f.now.Add(q.WindowMaxAge)
 	require.Error(t, f.e.cycle(context.Background()))
-	require.Empty(t, f.e.window.recent)
-	require.Empty(t, f.e.window.acute)
+	require.Empty(t, f.e.window.samples)
 	require.Empty(t, f.e.window.pending)
 	require.Zero(t, f.e.Snapshot().Version)
 }
