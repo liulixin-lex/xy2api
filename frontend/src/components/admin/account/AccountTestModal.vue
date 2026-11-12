@@ -378,7 +378,7 @@ import Select from '@/components/common/Select.vue'
 import TextArea from '@/components/common/TextArea.vue'
 import { Icon } from '@/components/icons'
 import { useClipboard } from '@/composables/useClipboard'
-import { useModalLayer } from '@/composables/useModalLayer'
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { buildApiUrl } from '@/api/client'
 import { ADMIN_UI_REQUEST_HEADER } from '@/api/adminUIRequest'
 import { adminAPI } from '@/api/admin'
@@ -423,7 +423,7 @@ const previewImageUrl = ref('')
 const lightboxRef = ref<HTMLElement | null>(null)
 const lightboxCloseRef = ref<HTMLElement | null>(null)
 // The lightbox opens above this dialog: top modal layer of the overlay stack, Escape closes it alone.
-const lightbox = useModalLayer(() => !!previewImageUrl.value, {
+const lightbox = useOverlayLayer(() => !!previewImageUrl.value, {
   root: lightboxRef,
   floor: 100,
   initialFocus: () => lightboxCloseRef.value,

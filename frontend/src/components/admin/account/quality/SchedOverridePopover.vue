@@ -136,7 +136,7 @@ watch(
     groupId.value = props.defaultGroupId ?? 0
     duration.value = props.batch ? 'oneHour' : 'forever'
     reason.value = ''
-    stackZ.value = openOverlay(token, { modal: false, root: () => rootRef.value, panel: () => rootRef.value })
+    stackZ.value = openOverlay(token, { modal: false, root: () => rootRef.value, panel: () => rootRef.value, onCovered: () => { if (props.show) emit('close') } })
     await nextTick()
     place()
     document.addEventListener('pointerdown', onPointerDown, true)

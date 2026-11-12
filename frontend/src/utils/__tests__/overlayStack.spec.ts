@@ -212,4 +212,56 @@ describe('overlay focus rules', () => {
     await settle()
     expect(document.activeElement).toBe(document.body)
   })
+
+  it('lets a sub-layer (a teleported menu) keep focus while the layer below re-renders, and closes it under a new modal', () => {
+    const board = layer('board')
+    board.open()
+    const trigger = button(board.panel, 'model')
+    trigger.focus()
+    // The menu lives in the body, outside the board, as Select teleports it.
+    const menu = document.createElement('div')
+    menu.tabIndex = -1
+    document.body.appendChild(menu)
+    const menuToken = Symbol('menu')
+    const covered = vi.fn()
+    const menuZ = openOverlay(menuToken, { modal: false, floor: 100000020, root: () => menu, panel: () => menu, onCovered: covered })
+    expect(menuZ).toBe(100000020)
+    expect(board.root.inert).toBe(false)
+    menu.focus()
+
+    // A board refresh: holdFocus belongs to the top layer only, so it leaves the menu alone.
+    const restore = holdFocus(board.token)
+    restore()
+    expect(document.activeElement).toBe(menu)
+
+    // A modal opening above closes the menu and is stacked on the board, not on the menu's own z-index.
+    const dialog = layer('dialog')
+    const dialogZ = dialog.open()
+    expect(covered).toHaveBeenCalledTimes(1)
+    expect(dialogZ).toBeLessThan(1000)
+    closeOverlay(menuToken)
+    dialog.close()
+    board.close()
+  })
+
+  it('returns focus from a closing menu only when it was inside the menu', () => {
+    const app = page()
+    const trigger = button(app, 'tools')
+    trigger.focus()
+    const menu = document.createElement('div')
+    const item = button(menu, 'item')
+    document.body.appendChild(menu)
+    const token = Symbol('menu')
+    openOverlay(token, { modal: false, root: () => menu, panel: () => menu })
+    item.focus()
+    closeOverlay(token)
+    expect(document.activeElement).toBe(trigger)
+
+    // Clicked somewhere else first: focus stays there.
+    openOverlay(token, { modal: false, root: () => menu, panel: () => menu })
+    const other = button(app, 'search')
+    other.focus()
+    closeOverlay(token)
+    expect(document.activeElement).toBe(other)
+  })
 })

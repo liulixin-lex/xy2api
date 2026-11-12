@@ -84,7 +84,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores'
 import { totpAPI } from '@/api'
 import type { StepUpController } from '@/composables/useStepUp'
-import { useModalLayer } from '@/composables/useModalLayer'
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 
 const props = defineProps<{
   controller: StepUpController
@@ -111,7 +111,7 @@ watch(
 
 // The dialog is often asked for from inside another dialog: it is the top modal layer of the overlay stack, takes
 // focus on its first cell and gives it back to the layer below when it closes; Escape cancels.
-const layer = useModalLayer(() => props.controller.visible.value, {
+const layer = useOverlayLayer(() => props.controller.visible.value, {
   root: rootRef,
   panel: panelRef,
   floor: 60,

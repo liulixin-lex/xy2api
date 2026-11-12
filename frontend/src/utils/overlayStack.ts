@@ -7,7 +7,10 @@
 //   no layer is left); else the element with the same data-* attributes there; else the new top layer's panel;
 //   with no layer left, the element that opened the first layer from the page. A layer reused from inside itself
 //   keeps its earlier opener. If a re-render right after the close drops focus to the body, it goes to the target's
-//   new copy (see settleFocus).
+//   new copy (see settleFocus). Focus the user has already moved out of the closing layer stays where it is.
+// - A sub-layer (modal: false) is a menu or popover opened from the page or a layer, possibly teleported out of
+//   it (a Select menu in a dialog). While open it is the top layer, so the layer below neither answers Escape nor
+//   pulls focus back with holdFocus; it makes nothing inert.
 const OVERLAY_BASE_Z = 50
 
 interface FocusRef {
@@ -22,6 +25,7 @@ interface Layer {
   root: () => HTMLElement | null
   panel: () => HTMLElement | null
   opener: FocusRef
+  onCovered?: () => void
 }
 
 export interface OverlayOptions {
@@ -33,6 +37,8 @@ export interface OverlayOptions {
   root: () => HTMLElement | null
   /** Element that takes focus when nothing better is left in this layer. */
   panel: () => HTMLElement | null
+  /** Sub-layers: called when a modal layer opens above; the sub-layer should close (a menu under a new dialog). */
+  onCovered?: () => void
 }
 
 const layers: Layer[] = []
@@ -145,9 +151,15 @@ export function openOverlay(token: symbol, options: OverlayOptions): number {
   // return to once it closes, so the earlier opener stays. Only a first opening sets the page opener.
   const opener = previous && focused.el && previous.root()?.contains(focused.el) ? previous.opener : focused
   if (!previous && !layers.length) pageOpener = focused
-  const z = Math.max(options.floor ?? OVERLAY_BASE_Z, ...layers.map((layer) => layer.z + 1))
-  layers.push({ token, z, modal: options.modal ?? true, root: options.root, panel: options.panel, opener })
+  const modal = options.modal ?? true
+  // A modal layer closes the sub-layers (menus, popovers) below it and is not stacked on their own, much higher
+  // z-index, so toasts and tips stay above dialogs.
+  const covered = modal ? layers.filter((layer) => !layer.modal && layer.onCovered) : []
+  const below = layers.filter((layer) => !covered.includes(layer))
+  const z = Math.max(options.floor ?? OVERLAY_BASE_Z, ...below.map((layer) => layer.z + 1))
+  layers.push({ token, z, modal, root: options.root, panel: options.panel, opener, onCovered: options.onCovered })
   syncOverlays()
+  covered.forEach((layer) => layer.onCovered?.())
   return z
 }
 
@@ -162,8 +174,11 @@ export function closeOverlay(token: symbol) {
   const page = pageOpener
   if (!layers.length) pageOpener = null
   if (index !== layers.length) return
+  // The user already moved focus somewhere else (clicked outside a menu): leave it there.
+  const active = document.activeElement
+  if (active instanceof HTMLElement && active !== document.body && active.isConnected && !root?.contains(active)) return
   focusTarget(closed, page)?.focus()
-  settleFocus(closed, page)
+  if (closed.modal) settleFocus(closed, page)
 }
 
 /**
