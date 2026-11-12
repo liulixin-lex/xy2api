@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"net/http"
 	"strconv"
 	"time"
 
@@ -31,10 +32,13 @@ func NewPaymentHandler(paymentService *service.PaymentService, configService *se
 // GET /api/v1/admin/payment/dashboard
 func (h *PaymentHandler) GetDashboard(c *gin.Context) {
 	days := 30
-	if d := c.Query("days"); d != "" {
-		if v, err := strconv.Atoi(d); err == nil && v > 0 {
-			days = v
+	if query := c.Request.URL.Query(); query.Has("days") {
+		v, err := strconv.Atoi(query.Get("days"))
+		if err != nil || v < 1 || v > 90 {
+			response.Error(c, http.StatusBadRequest, "days must be an integer between 1 and 90")
+			return
 		}
+		days = v
 	}
 	stats, err := h.paymentService.GetDashboardStats(c.Request.Context(), days)
 	if err != nil {

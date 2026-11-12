@@ -6,6 +6,7 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -267,11 +268,7 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 	if req != nil && req.URL != nil {
 		targetHost = req.URL.Host
 	}
-	proxyInfo := "direct"
-	if proxyURL != "" {
-		proxyInfo = proxyURL
-	}
-	slog.Debug("tls_fingerprint_enabled", "account_id", accountID, "target", targetHost, "proxy", proxyInfo, "profile", profile.Name)
+	slog.Debug("tls_fingerprint_enabled", "account_id", accountID, "target", targetHost, "proxy_fingerprint", upstreamLogFingerprint(proxyURL), "profile", profile.Name)
 
 	if err := s.validateRequestHost(req); err != nil {
 		return nil, err
@@ -586,7 +583,7 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 			atomic.AddInt64(&entry.inFlight, 1)
 		}
 		s.mu.RUnlock()
-		slog.Debug("tls_fingerprint_reusing_client", "account_id", accountID, "cache_key", cacheKey)
+		slog.Debug("tls_fingerprint_reusing_client", "account_id", accountID, "pool_fingerprint", upstreamLogFingerprint(cacheKey))
 		return entry, nil
 	}
 	s.mu.RUnlock()
@@ -600,12 +597,12 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 				atomic.AddInt64(&entry.inFlight, 1)
 			}
 			s.mu.Unlock()
-			slog.Debug("tls_fingerprint_reusing_client", "account_id", accountID, "cache_key", cacheKey)
+			slog.Debug("tls_fingerprint_reusing_client", "account_id", accountID, "pool_fingerprint", upstreamLogFingerprint(cacheKey))
 			return entry, nil
 		}
 		slog.Debug("tls_fingerprint_evicting_stale_client",
 			"account_id", accountID,
-			"cache_key", cacheKey,
+			"pool_fingerprint", upstreamLogFingerprint(cacheKey),
 			"proxy_changed", entry.proxyKey != proxyKey,
 			"pool_changed", entry.poolKey != poolKey)
 		s.removeClientLocked(cacheKey, entry)
@@ -623,7 +620,7 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 	}
 
 	// 创建带 TLS 指纹的 Transport
-	slog.Debug("tls_fingerprint_creating_new_client", "account_id", accountID, "cache_key", cacheKey, "proxy", proxyKey)
+	slog.Debug("tls_fingerprint_creating_new_client", "account_id", accountID, "pool_fingerprint", upstreamLogFingerprint(cacheKey), "proxy_fingerprint", upstreamLogFingerprint(proxyKey))
 	transport, err := buildUpstreamTransportWithTLSFingerprint(settings, parsedProxy, profile)
 	if err != nil {
 		s.mu.Unlock()
@@ -1198,7 +1195,7 @@ func (s *httpUpstreamService) recordOpenAIHTTP2Failure(profile service.HTTPUpstr
 	activated, until := state.recordFailure(time.Now(), settings.fallbackErrorThreshold, settings.fallbackWindow, settings.fallbackTTL)
 	if activated {
 		slog.Warn("openai_http2_proxy_fallback_activated",
-			"proxy", proxyKey,
+			"proxy_fingerprint", upstreamLogFingerprint(proxyKey),
 			"fallback_until", until.Format(time.RFC3339))
 	}
 }
@@ -1290,7 +1287,9 @@ func (s *openAIHTTP2FallbackState) recordFailure(now time.Time, threshold int, w
 func normalizeProxyURL(raw string) (string, *url.URL, error) {
 	_, parsed, err := proxyurl.Parse(raw)
 	if err != nil {
-		return "", nil, err
+		// Parse errors may contain the original URL or its username, even when
+		// the password is redacted. Keep those details out of callers' logs.
+		return "", nil, errors.New("invalid proxy URL")
 	}
 	if parsed == nil {
 		return directProxyKey, nil, nil
@@ -1316,6 +1315,15 @@ func normalizeProxyURL(raw string) (string, *url.URL, error) {
 		}
 	}
 	return parsed.String(), parsed, nil
+}
+
+// upstreamLogFingerprint identifies a proxy or pool without exposing the
+// credential-bearing keys used internally to keep their connections separate.
+func upstreamLogFingerprint(key string) string {
+	if key == "" || key == directProxyKey {
+		return directProxyKey
+	}
+	return fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(key)))
 }
 
 // defaultPoolSettings 获取默认连接池配置

@@ -3,12 +3,30 @@
 package service
 
 import (
+	"context"
+	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
 	dbent "github.com/liulixin-lex/xy2api/ent"
+	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
+
+func TestPaymentDashboardRejectsUnboundedDaysBeforeQuery(t *testing.T) {
+	for _, days := range []int{-1, 0, 91, 2147483647, int(^uint(0) >> 1)} {
+		t.Run(strconv.Itoa(days), func(t *testing.T) {
+			require.NotPanics(t, func() {
+				stats, err := (&PaymentService{}).GetDashboardStats(context.Background(), days)
+				require.Nil(t, stats)
+				require.Error(t, err)
+				code, _ := infraerrors.ToHTTP(err)
+				require.Equal(t, http.StatusBadRequest, code)
+			})
+		})
+	}
+}
 
 func TestComputeBasicStatsGroupsAmountsByCurrency(t *testing.T) {
 	t.Parallel()
