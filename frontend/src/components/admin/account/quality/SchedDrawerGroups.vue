@@ -2,7 +2,7 @@
   <p v-if="!groups.length" class="sq-text-3 text-sm">—</p>
   <div v-else class="-mx-3 overflow-x-auto">
     <!-- Fixed column widths, shared with the test table so 首字 lines up at any drawer width (ui-proposal 7.2). -->
-    <table class="sq-table table-fixed min-w-[560px]">
+    <table class="sq-table table-fixed min-w-[600px]">
       <colgroup>
         <col />
         <col class="w-[112px]" />
@@ -24,14 +24,18 @@
           :class="{ 'sq-target': group.group_id === targetGroupId }"
           :data-sq-group-row="group.group_id"
         >
-          <td class="truncate">
-            <button v-if="canViewGroups" type="button" class="sq-link sq-focus" :data-sq-trigger="`board:${group.group_id}`" @click="emit('board', group)">{{ group.name }}</button>
-            <template v-else>{{ group.name }}</template>
+          <!-- Every row shows the override in effect for its group next to the name, to every reader; the action
+               beside it needs accounts:manage. -->
+          <td>
+            <div class="flex min-w-0 items-center gap-1.5">
+              <button v-if="canViewGroups" type="button" class="sq-link sq-focus min-w-0 truncate" :data-sq-trigger="`board:${group.group_id}`" @click="emit('board', group)">{{ group.name }}</button>
+              <span v-else class="min-w-0 truncate">{{ group.name }}</span>
+              <SchedOverrideCapsule v-if="group.override" class="shrink-0" :mode="group.override.mode" />
+            </div>
           </td>
-          <!-- A group without state rows has its name, its override (shown to every reader) and the action; no state
-               word and no numbers (contract delta D3). -->
+          <!-- A group without state rows: no state word and no numbers (contract delta D3). -->
           <template v-if="!group.by_model.length">
-            <td><SchedOverrideCapsule v-if="group.override" :mode="group.override.mode" /></td>
+            <td />
             <td v-for="dim in SCHED_DIMS" :key="dim" />
           </template>
           <template v-else>

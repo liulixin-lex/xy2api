@@ -1250,6 +1250,8 @@ const resetAutoRefreshCache = () => {
 
 type AccountLoadOptions = {
   refreshTodayStats?: boolean
+  /** After a recovery: the summary refreshes even with a layer open, and the load waits for it. */
+  forceSummary?: boolean
 }
 
 const load = async (options: AccountLoadOptions = {}) => {
@@ -1259,9 +1261,10 @@ const load = async (options: AccountLoadOptions = {}) => {
   pendingTodayStatsRefresh.value = false
   requestParams.lite = '1'
   await baseLoad()
-  refreshSchedSummary()
+  const summary = refreshSchedSummary({ force: options.forceSummary })
   refreshRecentStats()
   if (options.refreshTodayStats !== false) await refreshTodayStatsBatch()
+  if (options.forceSummary) await summary
 }
 
 const reload = async () => {
@@ -1549,10 +1552,8 @@ const rereadAfterRecover = async (id: number) => {
     console.error('Failed to reload account after recovery:', error)
   }
 }
-const reloadAfterRecover = async () => {
-  await load()
-  await refreshSchedSummary({ force: true })
-}
+// One list load with one summary request, refreshed even with the drawer open.
+const reloadAfterRecover = () => load({ forceSummary: true })
 const refreshAfterRecover = async (id: number) => {
   if (tempUnschedAcc.value?.id === id) showTempUnsched.value = false
   enterAutoRefreshSilentWindow()

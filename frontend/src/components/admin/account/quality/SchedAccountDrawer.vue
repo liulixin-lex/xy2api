@@ -161,7 +161,7 @@
         </div>
         <div v-if="test" class="-mx-3 overflow-x-auto">
           <!-- Same fixed widths as the groups table: 首字 sits under its 首字 (ui-proposal 7.2). -->
-          <table class="sq-table table-fixed min-w-[560px]">
+          <table class="sq-table table-fixed min-w-[600px]">
             <colgroup>
               <col />
               <col class="w-[112px]" />

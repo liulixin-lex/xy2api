@@ -430,3 +430,45 @@ describe('AccountsView — recovery refresh (R2-RT-FB)', () => {
     wrapper.unmount()
   })
 })
+
+describe('AccountsView — one summary request per recovery refresh', () => {
+  it('sends one summary request after a recovery under the quality filter', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-test="filter-cooling"]').trigger('click')
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await flushPromises()
+    const answer = deferred()
+    sched.reset.mockReturnValueOnce(answer.promise)
+    await openMenuFor(wrapper, 2)
+    recoverItem()!.click()
+    await flushPromises()
+    const lists = listAccounts.mock.calls.length
+    const summaries = sched.summary.mock.calls.length
+    answer.resolve(clean)
+    await flushPromises()
+    expect(listAccounts.mock.calls.length).toBe(lists + 1)
+    expect(sched.summary.mock.calls.length).toBe(summaries + 1)
+    wrapper.unmount()
+  })
+
+  it('sends one summary request after a batch recovery', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    document.querySelector<HTMLInputElement>('[data-test="row"] input')!.click()
+    await flushPromises()
+    await wrapper.get('[data-test="select-page"]').trigger('click')
+    const answer = deferred()
+    sched.reset.mockImplementation(() => answer.promise)
+    await wrapper.get('[data-test="bulk-sched-reset"]').trigger('click')
+    await flushPromises()
+    document.querySelector<HTMLElement>('[data-sq-batch-confirm]')!.click()
+    await flushPromises()
+    expect(sched.reset).toHaveBeenCalledTimes(4)
+    const summaries = sched.summary.mock.calls.length
+    answer.resolve(clean)
+    await flushPromises()
+    expect(sched.summary.mock.calls.length).toBe(summaries + 1)
+    wrapper.unmount()
+  })
+})
