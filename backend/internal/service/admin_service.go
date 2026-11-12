@@ -404,6 +404,7 @@ type UpdateGroupInput struct {
 }
 
 type CreateAccountInput struct {
+	ProxyMode                string // Selected after scoped authorization, inside the write transaction.
 	ManagedOpenAILoginMarker string // Internal provenance, never populated by HTTP binding.
 	IQTargets                *domain.IQTargetsPatch
 	Name                     string
@@ -438,6 +439,7 @@ type ShadowOptions struct {
 }
 
 type UpdateAccountInput struct {
+	ProxyMode               string // Selected after scoped authorization, inside the write transaction.
 	IQTargets               *domain.IQTargetsPatch
 	IQPreserveTokenRotation bool // Internal provider-issued token refresh, not an API field.
 	Name                    string

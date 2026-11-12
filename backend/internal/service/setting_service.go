@@ -117,6 +117,7 @@ type WebSearchManagerBuilder func(cfg *WebSearchEmulationConfig, proxyURLs map[i
 
 // SettingService 系统设置服务
 type SettingService struct {
+	scopedAdminKeyRepo                 ScopedAdminKeyRepository
 	claudeCacheMu                      sync.Mutex
 	claudeCacheSnapshot                atomic.Pointer[cachedClaudeCachePolicy]
 	claudeCacheGroupRepo               GroupRepository

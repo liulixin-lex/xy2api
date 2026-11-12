@@ -344,6 +344,8 @@
     "292_usage_logs_budget_timing.sql": "e86f9b7aa7e996bd65636c80fe612b5365e349624ef270a44c55d30d606eddd9",
     "293_ops_error_logs_resilience_timing.sql": "b4eea5f2d4834063b68851632e3ae0553f992c0c0e77abb2a9ae5a6cd387c054",
     "294_sched_quality.sql": "d693056c25882d74820c12673e289a7f61cba06a3ec4c707d92fd424486cb53c",
-    "295_remove_retired_share_scheduling_permission.sql": "e1acf839e5e3066428c0e6b994d554cb47fb540f601647731ea7ed0760ac4cde"
+    "295_remove_retired_share_scheduling_permission.sql": "e1acf839e5e3066428c0e6b994d554cb47fb540f601647731ea7ed0760ac4cde",
+    "296_scoped_admin_api_keys.sql": "03445774e2dfad32da9e23279193d1bca02953896bc3d3b8a87ba0b36b6ed577",
+    "297_management_mcp_oauth.sql": "f6fe0510dfe1ce2ef2b1ec91bd51ec0c559cb4336edaeea459cfd977edcdf3d8"
   }
 }

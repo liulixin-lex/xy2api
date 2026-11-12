@@ -38,6 +38,7 @@ services:
       # in config.yaml.
       # - ./codex-instructions.md.tmpl:/app/data/codex-instructions.md.tmpl:ro
     environment:
+      - MANAGEMENT_MCP_PUBLIC_URL=${MANAGEMENT_MCP_PUBLIC_URL:-}
       # =======================================================================
       # Auto Setup (REQUIRED for Docker deployment)
       # =======================================================================

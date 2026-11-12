@@ -94,6 +94,7 @@ jobs:
           SCHEDULING_TEST_REDIS_ADDR: 127.0.0.1:16379
           STRIPE_HOSTED_TEST_DSN: postgres://postgres:ci_fixture_only@127.0.0.1:15432/ci?sslmode=disable
           MCP_READER_TEST_DSN: postgres://mcp_integration_writer:mcp_fixture_only@127.0.0.1:15432/mcp_readonly_test?sslmode=disable
+          SCOPED_ADMIN_TEST_DSN: host=127.0.0.1 port=15432 user=postgres password=ci_fixture_only dbname=ci sslmode=disable
         run: python3 tools/ci/race_suites.py
 
   windows:

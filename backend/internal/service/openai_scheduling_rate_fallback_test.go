@@ -116,7 +116,7 @@ func TestOpenAIOAuthSchedulingRateRuntimePreservesExplicitClear(t *testing.T) {
 			repo := &selectionSettingRepoStub{values: tt.values}
 			if tt.startup {
 				require.Equal(t, floatPtr(1), cachedOpenAIOAuthSchedulingRateMultiplier())
-				ProvideSettingService(repo, nil, nil, nil, nil)
+				ProvideSettingService(nil, repo, nil, nil, nil, nil)
 			}
 			svc := &OpenAIGatewayService{
 				rateLimitService: &RateLimitService{settingService: &SettingService{

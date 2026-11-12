@@ -221,11 +221,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 		return
 	}
 
-	out := make([]dto.AdminUsageLog, 0, len(records))
-	for i := range records {
-		out = append(out, *dto.UsageLogFromServiceAdmin(&records[i]))
-	}
-	response.Paginated(c, out, result.Total, params.Page, params.PageSize)
+	response.Paginated(c, adminUsageLogResponses(c, records), result.Total, params.Page, params.PageSize)
 }
 
 // Stats handles getting usage statistics with filters

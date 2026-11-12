@@ -42,6 +42,7 @@ services:
       # Copy config.example.yaml to config.yaml, modify it, then uncomment:
       # - ./config.yaml:/app/data/config.yaml
     environment:
+      - MANAGEMENT_MCP_PUBLIC_URL=${MANAGEMENT_MCP_PUBLIC_URL:-}
       # =======================================================================
       # Auto Setup (REQUIRED for Docker deployment)
       # =======================================================================
