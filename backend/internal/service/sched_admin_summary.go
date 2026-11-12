@@ -22,13 +22,29 @@ func (s *SchedAdminService) Summary(_ context.Context, ids []int64, model string
 	}
 	p, now := s.snapshot(), s.d.Now()
 	out.At, out.Stale, out.GlobalEnabled = schedAdminStamp(p.At), now.Sub(p.At) > schedquality.ViewMaxAge, p.GlobalEnabled
+	model = strings.TrimSpace(model)
+	type modelEvidence struct {
+		model   string
+		samples int
+	}
+	var defaults map[int64]modelEvidence
+	if model == "" && len(ids) > 0 {
+		defaults = make(map[int64]modelEvidence, len(ids))
+		for _, id := range ids {
+			defaults[id] = modelEvidence{}
+		}
+		for key, evidence := range p.Evidence {
+			best, requested := defaults[key.AccountID]
+			if requested && evidence.Samples > 0 && (evidence.Samples > best.samples || (evidence.Samples == best.samples && key.Model < best.model)) {
+				defaults[key.AccountID] = modelEvidence{model: key.Model, samples: evidence.Samples}
+			}
+		}
+	}
 	for _, id := range ids {
 		x := SchedAdminAccountSummary{AccountID: id, Cooling: []SchedAdminAccountSummaryCooling{}}
-		m := strings.TrimSpace(model)
+		m := model
 		if m == "" {
-			if models := schedAdminModels(p, id, false); len(models) > 0 {
-				m = models[0]
-			}
+			m = defaults[id].model
 		}
 		v := p.Evidence[SchedAccountModel{id, m}]
 		if m != "" && v.Samples > 0 {
