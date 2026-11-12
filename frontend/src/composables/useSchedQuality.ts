@@ -11,7 +11,8 @@ const pageHidden = () => typeof document !== 'undefined' && document.hidden
 /**
  * Summary of the accounts on the current list page. The view calls refresh() wherever it refreshes the list
  * (load, page change, incremental refresh). Like the list's incremental refresh, a call is skipped while the page is
- * hidden or `paused()` is true (a dialog or the drawer is open); the next list refresh catches up.
+ * hidden or `paused()` is true (a dialog or the drawer is open); the next list refresh catches up. `force` skips the
+ * pause only: the refresh right after an action (a recovery) must not wait for the drawer to close.
  */
 export function useSchedQualitySummary(paused: () => boolean = () => false) {
   const view = shallowRef<Omit<SchedAccountsSummary, 'accounts'> | null>(null)
@@ -20,8 +21,8 @@ export function useSchedQualitySummary(paused: () => boolean = () => false) {
   let seq = 0
   let controller: AbortController | null = null
 
-  async function refresh(accountIds: number[]) {
-    if (pageHidden() || paused()) return
+  async function refresh(accountIds: number[], options: { force?: boolean } = {}) {
+    if (pageHidden() || (paused() && !options.force)) return
     controller?.abort()
     controller = null
     const current = ++seq
@@ -60,6 +61,8 @@ export function useSchedQualitySummary(paused: () => boolean = () => false) {
  * Loads while `key` is not null (the drawer's account, the board's group and model), then every 5 s; ticks are
  * skipped while the page is hidden or a request is still running. A new key drops the previous data, and a response
  * for an older key is discarded. Running tests show up through this refresh; call refresh() right after an action.
+ * The promise of refresh() settles when the newest refresh for the current key is in: a refresh replaced by another one
+ * waits for that one, so awaiting it means fresh data is on screen (a recovery holds its lock on it).
  */
 export function useSchedQualityPoll<T>(key: WatchSource<string | number | null>, load: (signal: AbortSignal) => Promise<T>) {
   const data = shallowRef<T | null>(null)
@@ -68,9 +71,19 @@ export function useSchedQualityPoll<T>(key: WatchSource<string | number | null>,
   let open = false
   let seq = 0
   let controller: AbortController | null = null
+  /** The latest refresh() promise, and the key period it belongs to (stop() starts a new one). */
+  let newest: Promise<void> = Promise.resolve()
+  let period = 0
 
-  async function refresh() {
-    if (!open) return
+  function refresh(): Promise<void> {
+    if (!open) return Promise.resolve()
+    const at = period
+    const mine: Promise<void> = fetchOnce().then(() => (at === period && newest !== mine ? newest : undefined))
+    newest = mine
+    return mine
+  }
+
+  async function fetchOnce() {
     controller?.abort()
     const current = ++seq
     const ctrl = new AbortController()
@@ -102,6 +115,7 @@ export function useSchedQualityPoll<T>(key: WatchSource<string | number | null>,
 
   function stop() {
     seq++
+    period++
     controller?.abort()
     controller = null
     loading.value = false

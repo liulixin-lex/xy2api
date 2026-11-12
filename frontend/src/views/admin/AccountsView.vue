@@ -1250,6 +1250,8 @@ const resetAutoRefreshCache = () => {
 
 type AccountLoadOptions = {
   refreshTodayStats?: boolean
+  /** After a recovery: the summary refreshes even with a layer open, and the load waits for it. */
+  forceSummary?: boolean
 }
 
 const load = async (options: AccountLoadOptions = {}) => {
@@ -1259,9 +1261,10 @@ const load = async (options: AccountLoadOptions = {}) => {
   pendingTodayStatsRefresh.value = false
   requestParams.lite = '1'
   await baseLoad()
-  refreshSchedSummary()
+  const summary = refreshSchedSummary({ force: options.forceSummary })
   refreshRecentStats()
   if (options.refreshTodayStats !== false) await refreshTodayStatsBatch()
+  if (options.forceSummary) await summary
 }
 
 const reload = async () => {
@@ -1477,9 +1480,9 @@ const sqLayersOpen = computed(() =>
 // Refreshed with the list; skipped while the page is hidden or a dialog / the drawer is open (spec A.6). Managers
 // get it even with the groups column hidden: the row menu decides "recover state" from it (contract delta F1).
 const sqSummary = useSchedQualitySummary(() => isAnyModalOpen.value)
-const refreshSchedSummary = () => {
-  if (canManage.value || !hiddenColumns.has('sq_groups')) void sqSummary.refresh(accounts.value.map(account => account.id))
-}
+// `force` also refreshes with a layer open (after a recovery); the promise settles when the summary is in.
+const refreshSchedSummary = (options: { force?: boolean } = {}) =>
+  canManage.value || !hiddenColumns.has('sq_groups') ? sqSummary.refresh(accounts.value.map(account => account.id), options) : Promise.resolve()
 // With the quality filter on, an override or membership change can move a row out of the result (contract delta
 // D2): closing the drawer, a quality layer or the groups dialog reloads the list, not only the summary.
 watch(sqLayersOpen, (open) => {
@@ -1535,24 +1538,32 @@ const openSchedBatch = (action: SchedBatchAction, anchor: HTMLElement) => {
 
 // "Recover state" (contract delta F): the row menu, the drawer and the temporary-pause dialog run it at once; the
 // batch confirms the count first. After a recovery the row is read again from the server (nothing is patched from the
-// reset result), the summary is refreshed, and under the quality filter the list is loaded again.
+// reset result) and the summary is refreshed, even with the drawer open; under the quality filter, and after a batch,
+// the list is loaded again instead. The recovery lock holds until these are in.
 const { recover: recoverAccount, recoverMany, batchRunning: recoveryBatchRunning } = useAccountRecovery()
 const menuRecoverable = (a: Account | null) => !!a && canRecover(a, sqSummary.byAccount.value.get(a.id), Date.now())
-const refreshAfterRecover = async (id: number) => {
-  if (tempUnschedAcc.value?.id === id) showTempUnsched.value = false
+// A list load or row update that landed meanwhile replaced the row object and wins over this late read.
+const rereadAfterRecover = async (id: number) => {
+  const before = accounts.value.find(account => account.id === id)
   try {
-    patchAccountInList(await adminAPI.accounts.getById(id))
+    const fresh = await adminAPI.accounts.getById(id)
+    if (accounts.value.find(account => account.id === id) === before) patchAccountInList(fresh)
   } catch (error) {
     console.error('Failed to reload account after recovery:', error)
   }
+}
+// One list load with one summary request, refreshed even with the drawer open.
+const reloadAfterRecover = () => load({ forceSummary: true })
+const refreshAfterRecover = async (id: number) => {
+  if (tempUnschedAcc.value?.id === id) showTempUnsched.value = false
   enterAutoRefreshSilentWindow()
-  if (params.sched_quality) await load()
-  else refreshSchedSummary()
+  if (params.sched_quality) await reloadAfterRecover()
+  else await Promise.all([rereadAfterRecover(id), refreshSchedSummary({ force: true })])
 }
 const recoverOne = (a: Account) => recoverAccount({ id: a.id, name: a.name }, () => refreshAfterRecover(a.id))
 // Recovered accounts leave the selection; failed and not-run ones stay for a retry.
 const handleBatchRecover = async (ids: number[]) => {
-  const { recovered } = await recoverMany(ids, () => load())
+  const { recovered } = await recoverMany(ids, reloadAfterRecover)
   removeSelectedAccounts(recovered)
 }
 const openIqRecordsById = async (id: number) => {

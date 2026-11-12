@@ -11,7 +11,7 @@ import { IQ_GATE_KEY_PREFIX } from '@/components/admin/account/iqCheckPresentati
 
 // "Recover state" (contract delta F): one click runs the existing reset, one toast tells the result. The row menu,
 // the drawer and the temporary-pause dialog share one lock per account with the batch recovery; it holds until the
-// request and the refresh after it are done.
+// request and every refresh after it are done: the page's (row, summary, list) and the open drawer's.
 
 export type RecoverableRow = Pick<Account, 'status' | 'rate_limit_reset_at' | 'overload_until' | 'temp_unschedulable_until' | 'extra'> &
   Pick<AccountWithCapability, 'capability_learned'>
@@ -52,7 +52,7 @@ export function useAccountRecovery() {
   let disposed = false
   onScopeDispose(() => { disposed = true })
 
-  /** One account: the reset, one toast, then `refresh` (row, summary, list, drawer). */
+  /** One account: the reset, one toast, then `refresh` (the page's row, summary, list) with the open drawer's reload. */
   async function recover(account: { id: number; name: string }, refresh?: () => Promise<unknown> | void) {
     if (!canManage.value || pending.has(account.id)) return
     pending.add(account.id)
@@ -66,8 +66,7 @@ export function useAccountRecovery() {
       }
       if (ok) appStore.showSuccess(t('admin.schedQuality.recover.ok', { name: account.name }))
       else appStore.showError(t('admin.schedQuality.recover.failed', { name: account.name }))
-      markSchedChanged()
-      await refresh?.()
+      await Promise.all([markSchedChanged(), refresh?.()])
     } finally {
       pending.delete(account.id)
     }
@@ -103,8 +102,7 @@ export function useAccountRecovery() {
         if (failed.length) appStore.showError(t('admin.schedQuality.recover.batchPartial', { ok: recovered.length, failed: failed.length }))
         else appStore.showSuccess(t('admin.schedQuality.recover.batchOk', { n: recovered.length }))
       }
-      markSchedChanged()
-      await refresh?.()
+      await Promise.all([markSchedChanged(), refresh?.()])
     } finally {
       queue.forEach((id) => pending.delete(id))
       batchRunning.value = false

@@ -99,12 +99,6 @@ export interface AccountRecentStatsBatch {
   items: AccountRecentStats[]
 }
 
-// ---- GET /accounts/attention ----
-
-export interface SchedAttention {
-  cooling: number[]
-}
-
 // ---- GET /accounts/:id ----
 
 export interface SchedClassStat {

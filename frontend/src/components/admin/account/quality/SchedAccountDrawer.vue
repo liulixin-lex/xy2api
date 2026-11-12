@@ -95,6 +95,8 @@
         <div class="mb-3 flex items-center gap-1.5">
           <h3 class="sq-section-title">{{ t('admin.schedQuality.drawer.byGroup') }}</h3>
           <SchedPauseMark :global-enabled="detail.global_enabled" :stale="detail.stale" />
+          <!-- The all-groups override, shown to every reader; the header buttons change it. -->
+          <SchedOverrideCapsule v-if="allGroupsOverride" class="ml-1.5" :mode="allGroupsOverride.mode" all-groups />
         </div>
         <SchedDrawerGroups
           :groups="detail.groups"
@@ -158,13 +160,20 @@
           </div>
         </div>
         <div v-if="test" class="-mx-3 overflow-x-auto">
-          <table class="sq-table">
+          <!-- Same fixed widths as the groups table: 首字 sits under its 首字 (ui-proposal 7.2). -->
+          <table class="sq-table table-fixed min-w-[600px]">
+            <colgroup>
+              <col />
+              <col class="w-[112px]" />
+              <col class="w-[84px]" />
+              <col class="w-[264px]" />
+            </colgroup>
             <thead>
               <tr>
                 <th scope="col">{{ t('admin.schedQuality.col.class') }}</th>
-                <th class="w-[112px]" aria-hidden="true" />
-                <th scope="col" class="sq-r w-[84px]">{{ t('admin.schedQuality.dim.ttfo') }}</th>
-                <th class="w-[264px]" aria-hidden="true" />
+                <th aria-hidden="true" />
+                <th scope="col" class="sq-r">{{ t('admin.schedQuality.dim.ttfo') }}</th>
+                <th aria-hidden="true" />
               </tr>
             </thead>
             <tbody>
@@ -252,12 +261,13 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import SchedPauseMark from './SchedPauseMark.vue'
 import SchedDrawerGroups from './SchedDrawerGroups.vue'
 import SchedOverridePopover from './SchedOverridePopover.vue'
+import SchedOverrideCapsule from './SchedOverrideCapsule.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
 import type {
   SchedAccountGroup, SchedAutoState, SchedOverrideMode, SchedOverrideRequest, SchedRecentAttempt, SchedRequestClass, SchedTestTier
 } from '@/types/schedQuality'
 import { secondsUntil, useSchedQualityClock, useSchedQualityPoll } from '@/composables/useSchedQuality'
-import { closeSchedDrawer, markSchedChanged, openSchedBoard, openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
+import { closeSchedDrawer, markSchedChanged, openSchedBoard, openSchedDrawer, trackSchedReload, useSchedLayers } from '@/composables/useSchedLayers'
 import { isRecovering, useAccountRecovery } from '@/composables/useAccountRecovery'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 import {
@@ -295,8 +305,8 @@ const groupsRef = ref<HTMLElement | null>(null)
 
 const poll = useSchedQualityPoll(() => drawer.accountId, (signal) => schedQualityAPI.accountDetail(drawer.accountId!, { signal }))
 const detail = computed(() => poll.data.value)
-// Any quality action (here, in the reset dialog, in batches) refreshes the open drawer.
-watch(changed, () => { if (drawer.accountId !== null) void poll.refresh() })
+// Any quality action (here, in the row menu, in batches) reloads the open drawer; a recovery waits for this reload.
+watch(changed, () => { if (drawer.accountId !== null) trackSchedReload(poll.refresh()) })
 
 // Keep focus inside the drawer when a refresh re-renders the control that had it (spec 0.2, R6).
 let restoreFocus: (() => void) | null = null
@@ -424,7 +434,7 @@ async function startTest() {
     testBusy.value = false
   }
   if (result === 'failed' && drawer.accountId === id) testFailedRefreshes.value = 2
-  markSchedChanged()
+  void markSchedChanged()
 }
 
 const allGroupsOverride = computed(() => detail.value?.all_groups_override ?? null)
@@ -451,7 +461,7 @@ async function applyOverride(request: SchedOverrideRequest) {
   try {
     await schedQualityAPI.setOverride(id, request)
     popover.open = false
-    markSchedChanged()
+    void markSchedChanged()
   } catch {
     popover.failed = true
   } finally {
@@ -473,7 +483,7 @@ async function clearOverride(groupId: number, markAt: number) {
   if (id === null) return
   try {
     await schedQualityAPI.clearOverride(id, groupId)
-    markSchedChanged()
+    void markSchedChanged()
   } catch {
     flash(failedGroups, markAt)
   }
@@ -517,7 +527,7 @@ async function runClear(item: SchedAutoState) {
   if (id === null) return
   try {
     const result = await schedQualityAPI.clearAutoState(id, item.key)
-    if (result.cleared) markSchedChanged()
+    if (result.cleared) void markSchedChanged()
     else flash(failedKeys, item.key)
   } catch {
     flash(failedKeys, item.key)
