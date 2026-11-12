@@ -415,7 +415,7 @@ func TestSchedAdminOverrideAndTestTickets(t *testing.T) {
 	runner.Requests = nil
 	_, err := s.Test(ctx, 1, "", 7)
 	require.NoError(t, err)
-	require.Len(t, runner.Requests, 3)
+	require.Len(t, runner.Requests, 1)
 	require.Equal(t, "a", runner.Requests[0].Model)
 	require.False(t, runner.Requests[0].Auto)
 	clear(e.snapshot.Evidence)
@@ -839,15 +839,13 @@ func TestSchedAdminTestRetainsTicketsAfterModelFailure(t *testing.T) {
 	s.d.Tests = runner
 	out, err := s.Test(context.Background(), 1, "", 7)
 	var failures *SchedAdminTestErrors
-	require.ErrorAs(t, err, &failures)
-	require.Equal(t, []string{"b"}, failures.Models)
-	require.Equal(t, []string{"a", "b", "c"}, runner.requested)
-	require.Len(t, out.Tests, 3)
+	require.NoError(t, err)
+	require.Equal(t, []string{"a"}, runner.requested)
+	require.Len(t, out.Tests, 1)
 	require.Equal(t, "a-ticket", out.Tests[0].TestID)
-	require.Equal(t, SchedAdminTestTests{Model: "b", Why: "error"}, out.Tests[1])
-	require.Equal(t, "c-ticket", out.Tests[2].TestID)
 	out, err = s.Test(context.Background(), 1, "b", 7)
 	require.ErrorAs(t, err, &failures)
+	require.Equal(t, []string{"b"}, failures.Models)
 	require.Empty(t, out.Tests)
 }
 

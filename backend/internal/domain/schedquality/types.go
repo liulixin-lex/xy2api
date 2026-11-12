@@ -10,6 +10,7 @@ type Verdict int8      // VerdictNoData, VerdictPass, VerdictMarginal, VerdictFa
 type Standing int8     // StandFront, StandBack
 type TestTier int8     // TierSmall, TierMedium, TierLarge
 type Reason string     // cooling: "speed" | "error" | "cache" | "acute_timeout" | "test_speed" | "test_error" | "test_cache"; normal: "" | "unverified"
+type Via string
 
 const (
 	ClassLight RequestClass = iota
@@ -54,7 +55,7 @@ const (
 	ReasonAcuteTimeout Reason = "acute_timeout"
 	ReasonTestSpeed    Reason = "test_speed"
 	ReasonTestError    Reason = "test_error"
-	ReasonTestCache    Reason = "test_cache"
+	ReasonTestCache    Reason = "test_cache" // Read-only compatibility for existing rows.
 	ReasonUnverified   Reason = "unverified"
 )
 
