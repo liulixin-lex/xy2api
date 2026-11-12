@@ -52,6 +52,8 @@ func SkipAudit(c *gin.Context) {
 // scalar, non-secret operation summaries. Request bodies and arbitrary maps
 // are never accepted through this channel.
 var auditExtraAllowedKeys = map[string]struct{}{
+	"admin_key_id": {}, "full_access": {}, "full_access_before": {},
+	"mcp_grant_id": {}, "mcp_tool": {},
 	"result": {}, "error_code": {}, "enabled": {}, "blocking_enabled": {},
 	"config_version": {}, "endpoint_count": {}, "scanner_count": {},
 	"all_groups": {}, "group_count": {}, "guard_endpoint_id": {},
@@ -224,6 +226,8 @@ func NewAuditLogMiddleware(auditService *service.AuditLogService) AuditLogMiddle
 			if v, ok := auditSensitiveReads[routeKey]; ok {
 				record = true
 				action = v
+			} else if c.GetString("auth_method") == service.AuditAuthMethodMCPOAuth {
+				record = true
 			}
 		}
 		if !record {

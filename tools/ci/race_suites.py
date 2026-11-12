@@ -88,6 +88,22 @@ SUITES = [
         timeout="5m",
     ),
     Suite(
+        name="management-access",
+        packages=[
+            "internal/managementmcp",
+            "internal/pkg/adminaccess",
+            "internal/service",
+            "internal/repository",
+            "internal/handler/admin",
+            "internal/server/middleware",
+            "internal/server/routes",
+        ],
+        run=r"^Test(MCP|ScopedAdmin|AdminFullAccess|CustomAdmin)",
+        env=["SCOPED_ADMIN_TEST_DSN"],
+        flags=["-p", "2"],
+        timeout="15m",
+    ),
+    Suite(
         name="mcp-postgres",
         packages=["internal/mcp"],
         run=r"^(TestCore|TestOAuthPostgres|TestReader|TestRuntime)",

@@ -744,6 +744,7 @@ const flagPayment = makeSidebarFlag(FeatureFlags.payment)
 const flagAvailableChannels = makeSidebarFlag(FeatureFlags.availableChannels)
 const flagSubscription = makeSidebarFlag(FeatureFlags.subscription)
 const flagSupportTickets = makeSidebarFlag(FeatureFlags.supportTickets)
+const flagMCP = makeSidebarFlag(FeatureFlags.mcp)
 
 // 购买入口文案随站点计费模式切换：仅充值 → 「充值」，仅订阅 → 「订阅」，否则「充值/订阅」。
 const purchaseNavLabel = computed(() => {
@@ -785,6 +786,7 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     { path: '/redeem', label: t('nav.redeem'), icon: GiftIcon, hideInSimpleMode: true },
     { path: '/affiliate', label: t('nav.affiliate'), icon: UsersIcon, hideInSimpleMode: true, featureFlag: flagAffiliate },
     ...(withDashboard ? [{ path: '/support-tickets', label: t('nav.supportTickets'), icon: TicketIcon, featureFlag: flagSupportTickets, badgeCount: supportBadges.userBadge.value }] : []),
+    { path: '/settings/mcp', label: t('managementMcp.title'), icon: KeyIcon, featureFlag: flagMCP },
     { path: '/profile', label: t('nav.profile'), icon: UserIcon },
     ...customMenuItemsForUser.value.map((item): NavItem => ({
       path: `/custom/${item.id}`,

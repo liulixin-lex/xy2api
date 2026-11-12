@@ -134,6 +134,7 @@ export const FeatureFlags = {
     mode: 'opt-in',
     label: 'Affiliate',
   }),
+  mcp: defineFlag({ key: 'mcp_enabled', mode: 'opt-in', label: 'Management MCP' }),
   supportTickets: defineFlag({
     key: 'support_ticket_enabled',
     mode: 'opt-in',

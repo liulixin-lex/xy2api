@@ -70,6 +70,7 @@ type OpenAITOTPConfig struct {
 }
 
 type Config struct {
+	ManagementMCP           ManagementMCPConfig           `mapstructure:"management_mcp"`
 	MCP                     MCPConfig                     `mapstructure:"mcp"`
 	OpenAITOTP              OpenAITOTPConfig              `mapstructure:"openai_totp"`
 	UsageExport             usageexport.Config            `mapstructure:"usage_export"`
@@ -2027,6 +2028,7 @@ func configureConfigSource(setConfigFile, addConfigPath func(string)) {
 
 func setDefaults() {
 	viper.SetDefault("run_mode", RunModeStandard)
+	viper.SetDefault("management_mcp.public_url", "")
 	viper.SetDefault("mcp.enabled", false)
 	viper.SetDefault("mcp.public_url", "")
 	viper.SetDefault("mcp.oauth_hmac_secret", "")
@@ -2738,6 +2740,9 @@ func setEnvReachableDefaults() {
 }
 
 func (c *Config) Validate() error {
+	if err := c.ManagementMCP.Validate(); err != nil {
+		return err
+	}
 	// Absolute Redis snapshots could overwrite usage committed by atomic billing.
 	if c.Database.UserPlatformQuotaFlusherEnabled {
 		return fmt.Errorf("atomic billing requires database.user_platform_quota_flusher_enabled=false; flush legacy quota snapshots before upgrading")

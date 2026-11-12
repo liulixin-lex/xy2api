@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 新增
+
+- 管理员可创建按操作、分组、平台和账号类型授权的机器密钥，支持 IP 限制、轮换、撤销和审计；新增默认关闭的 OAuth 管理 MCP，保留原有只读 MCP 与操作员权限。见 [管理员密钥](docs/guides/admin-api-keys.md) 和 [管理 MCP](docs/guides/management-mcp.md)。
+
 ### 变更
 
 - OpenAI Chat Completions 与 Responses 转 Anthropic 时保留常见客户端的默认参数与可用工具行为，兼容 null 与对象联合 schema，按模型适配推理和采样；无法表达的工具 schema 返回统一参数错误。

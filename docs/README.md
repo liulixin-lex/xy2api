@@ -34,7 +34,7 @@
 | 调度与可用性 | [账号调度](guides/scheduling.md) · [网关韧性](guides/gateway-resilience.md)（[设置](guides/gateway-resilience-settings.md) · [罚则与选号](guides/gateway-resilience-routing.md) · [客户端行为](guides/gateway-resilience-client.md) · [观测](guides/gateway-resilience-observability.md)） · [分组质量门槛](guides/group-quality-gate.md) |
 | 分组与模型 | [分组](guides/groups.md) · [提示词缓存](guides/caching.md) · [智商检测](guides/iq-check.md) · [模型降档识别](guides/quality-routing.md) · [Codex STATE](guides/codex-state.md) · [渠道监控](guides/channel-monitor.md) |
 | 计费与运营 | [内置支付](guides/payment.md)（[English](guides/payment.en.md)） · [用量指标与导出](guides/usage.md) · [上游余额](guides/upstream-balance.md) · [在线客服与工单](guides/customer-support.md) |
-| 管理与集成 | [管理员与权限](guides/admin-permissions.md) · [OpenAI 账号 2FA 导入](guides/openai-totp.md) · [只读 MCP](guides/mcp.md) |
+| 管理与集成 | [管理员与权限](guides/admin-permissions.md) · [OpenAI 账号 2FA 导入](guides/openai-totp.md) · [只读 MCP](guides/mcp.md) · [管理 MCP](guides/management-mcp.md) · [管理员密钥](guides/admin-api-keys.md) |
 
 ## API 参考
 

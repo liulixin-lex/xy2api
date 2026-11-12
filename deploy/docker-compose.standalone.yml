@@ -28,6 +28,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
+      - MANAGEMENT_MCP_PUBLIC_URL=${MANAGEMENT_MCP_PUBLIC_URL:-}
       # =======================================================================
       # Auto Setup
       # =======================================================================

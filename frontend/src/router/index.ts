@@ -317,6 +317,30 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/settings/mcp',
+    name: 'MCP',
+    component: () => import('@/views/user/MCPView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'MCP Connection',
+      titleKey: 'managementMcp.title',
+      descriptionKey: 'managementMcp.description'
+    }
+  },
+  {
+    path: '/oauth/management-mcp/authorize',
+    name: 'MCPOAuthAuthorize',
+    component: () => import('@/views/auth/MCPOAuthAuthorizeView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Authorize MCP Application',
+      titleKey: 'managementMcp.consentTitle'
+    }
+  },
+
+  {
     path: '/mcp/authorize',
     name: 'MCPAuthorize',
     component: () => import('@/features/mcp/MCPAuthorizeView.vue'),

@@ -37,7 +37,7 @@ func IsSensitiveCredentialKey(key string) bool {
 //   - 非敏感键：完全由 incoming 决定（用户可以编辑、删除非敏感字段）。
 //   - 敏感键：incoming 显式提供则覆盖（用户主动旋转 token），否则保留 existing。
 func MergePreservingSensitiveCreds(existing, incoming map[string]any) map[string]any {
-	out := make(map[string]any, len(incoming)+len(SensitiveCredentialKeys))
+	out := make(map[string]any)
 	for k, v := range incoming {
 		out[k] = v
 	}
