@@ -10,13 +10,33 @@
 
 ### 变更
 
-- OpenAI Chat Completions 与 Responses 转 Anthropic 时保留常见客户端的默认参数与可用工具行为，兼容 null 与对象联合 schema，按模型适配推理和采样；无法表达的工具 schema 返回统一参数错误。
-- 管理后台：Claude Code 请求兼容改为一个开关加「接收新会话」开关，去掉版本选择（开启写 `claude_code`）；批量编辑两项都可选不修改 / 开启 / 关闭；兼容账号测试分两步显示普通客户端回合与签名续接的结果；「使用密钥」弹窗为 Anthropic 分组补充普通客户端的 Base URL 与端点。
+- Claude Code 请求兼容的配置值统一为 `claude_code`，不再区分版本，导入旧导出时 `claude_code_v1`、`claude_code_v2` 自动改为 `claude_code`；管理后台改为一个「Claude Code 请求兼容」开关加一个「接收新会话」开关，批量编辑两项都可选不修改 / 开启 / 关闭。
+- Claude Code 请求兼容支持账号模型映射中的全部 Claude 模型（此前只支持 `claude-opus-4-8`、`claude-opus-5-5`），`/v1/models` 按同样规则列出；haiku、sonnet 等模型需用「测试连接」逐个确认。
+- 兼容账号的签名历史与续接改为与普通 API Key 账号一致：会话按粘性调度留在同一账号，上游的签名错误与普通账号一样交给请求整流器处理。
+- 「接收新会话」关闭后，只继续已绑定在该账号上的会话，新会话不再分到该账号。
+- 兼容账号的配置冲突（如 Beta 策略过滤了必需的 beta）、没有身份种子或不支持所请求的模型时，该账号不参与选号，不再返回兼容专属错误；分组内没有其他可用账号时返回通常的「没有可用账号」错误。
+- 兼容账号的「测试连接」先检查账号是否就绪，再分两步测试普通客户端回合（thinking + 工具调用）与签名续接，分别显示结果。
+- 兼容账号的身份种子只在 API Key、端点或认证方式实际变化时更换，单个编辑、批量编辑与 CRS 同步规则一致。
+- 日志 `gateway.anthropic_compat_attempt` 只对兼容账号记录，字段改为 `request_id`、`account_id`、`entry`、`model`、`decision`（`adapted` / `ineligible`）与 `reason`。
+- 「使用密钥」弹窗为 Anthropic 分组补充普通客户端的 Anthropic 兼容与 OpenAI 兼容 Base URL 和端点。
+- Chat Completions、Responses 转 Anthropic Messages 的字段按 Anthropic 官方 OpenAI SDK 兼容文档处理：官方支持的映射、官方忽略的忽略；保留 `reasoning_effort`、结构化输出、联合工具 schema 等网关扩展。见 [协议转换字段表](docs/platforms/anthropic.md#协议转换字段表)。
+- 协议转换错误统一返回 400 `invalid_request_error`，带 `code: unsupported_parameter` 和出错字段 `param`。
+- 协议转换中，`response_format` 的 `json_object` 不再报错而是被忽略（模型可能输出普通文本，需要保证 JSON 时改用 `json_schema`）；`json_schema` 的 `strict: false` 也映射为结构化输出。
+- 协议转换中，Responses 里 Anthropic 不支持的 OpenAI 专有工具（`local_shell`、`image_generation`、`file_search` 等）改为丢弃，此前会原样发给上游；`tool_choice` 指定被丢弃的工具时返回 400。
+- 协议转换中，`web_search_preview` 与 `web_search` 一样映射为 Anthropic 联网搜索；支持 `xhigh` 档位的 Claude 模型直接使用 `xhigh`，此前改为 `max`。
+- **不兼容：** 协议转换中，工具 schema 的根不是 object、或联合分支显式声明了非 object 类型时返回 400，此前会被替换为空 schema 后转发。
+
+### 移除
+
+- Claude Code 请求兼容的 v1 线协议、签名来源校验与 Chat 工具续接（`ccv2_` 工具 ID），以及兼容专属的错误码（如 `anthropic_compat_state_unavailable`、`anthropic_compat_history_incompatible`）。升级前使用 `ccv2_` 工具 ID 的 Chat 会话，之后按普通 Chat 历史转发。
 
 ### 修复
 
 - 修复自定义端点的兼容账号在多轮对话第二轮被误判「凭据或端点已变化」而拒绝的问题。
-- Anthropic API Key 的 Claude Code 兼容统一为 `claude_code` 并自动迁移已有配置；所有 Claude 模型按账号映射筛选，签名历史沿用通用过滤、整流和会话粘性调度，仅在凭据实际变化时更新身份，并提供两轮签名续接诊断。
+- 兼容账号不再在网关侧拒绝普通账号能通过的请求：去掉签名块数量与大小上限、未知签名历史、billing 块格式、system 或 tools 变化、Chat 工具续接、beta 能力不足等兼容专属的拒绝，以及签名登记失败时先返回 200 再报错的问题。
+- 协议转换中，Claude 4.6 及以后的模型带 `reasoning_effort` 或 `reasoning` 时改用 adaptive thinking，修复 Claude 4.7 及以后（5.5 以外）的模型被上游拒绝的问题；Sonnet 4.5、Haiku 4.5 等没有 effort 档位的模型不再发送 effort。
+- 协议转换中，丢弃上游不接受的采样参数（Claude 4.7 及以后的非默认 `temperature`、`top_p`，Claude 4.6 及以前与 `temperature` 同时出现的 `top_p`），Cherry Studio 等客户端的默认采样参数不再导致 400。
+- 协议转换中，只含空白的 `stop` 被丢弃，`tool_choice` 的 `allowed_tools` 按 `mode` 映射，工具 schema 的类型数组（如 `["object","null"]`）保留属性，不再报错或丢失属性。
 
 ### 安全
 
@@ -27,6 +47,20 @@
 - 订单看板查询限定为 1–90 天，非法天数返回错误，避免超大统计范围耗尽资源。
 - 代理日志与解析错误移除代理凭据；不同凭据继续使用独立连接池。
 - 运维 WebSocket 连接上限按 32 位整数校验，配置越界时记录错误并使用默认值。
+
+### 升级说明
+
+- 迁移 `298_anthropic_compat_profile_final.sql` 在启动时自动把 Anthropic API Key 账号的 `anthropic_compat_profile` 从 `claude_code_v1`、`claude_code_v2` 改为 `claude_code`。新版本只认 `off` 与 `claude_code`。
+- Claude Code 请求兼容现在放开账号模型映射中的全部 Claude 模型，但 haiku、sonnet 等模型在只接受 Claude Code 的上游上能否使用未经网关实测；开放前用账号「测试连接」逐个模型确认，不通过的从映射中去掉。
+- 迁移后、新实例的调度快照重建完成前，仍可能读到旧值，确认重建完成后再切流量。蓝绿并存期间，旧实例读到 `claude_code` 会把兼容账号判为不合格，切换应尽快完成。
+- 兼容账号上的签名类 400 重试沿用「设置 → 网关服务 → 请求整流器」中的「API Key 签名整流」开关（新部署默认关闭），建议开启；关闭时，在普通账号与兼容账号之间切换过的会话之后每轮都会 400，只能新开会话。签名重试只在 `/v1/messages` 与 count_tokens 上发生，Chat Completions、Responses 入口没有（与普通账号相同）。见 [签名重试](docs/platforms/anthropic.md#签名重试)。
+- 回滚到 v0.6.3 前，先执行下面的 SQL 把 `claude_code` 改回 `claude_code_v2`，否则旧版本不认识 `claude_code`，兼容账号会被判为候选不合格：
+
+  ```sql
+  UPDATE accounts SET extra = jsonb_set(extra, '{anthropic_compat_profile}', '"claude_code_v2"') WHERE platform='anthropic' AND type='apikey' AND extra->>'anthropic_compat_profile'='claude_code';
+  ```
+
+  v0.6.3 的兼容账号只接受它自己登记过的 thinking 签名，回滚后在新版本中产生的带 thinking 的会话不能再用兼容账号继续，需要新开会话。
 
 ## [0.6.3] - 2026-11-12
 
