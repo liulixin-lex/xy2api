@@ -139,6 +139,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	var schedCapture *schedAttemptCapture
 	defer func() { schedCapture.finish(schedResult, schedErr) }()
 	requestedModel := reqModel
+	schedEffortChanged := false
 	upstreamPassthroughModel := ""
 	if isOpenAIResponsesCompactPath(c) {
 		compactMappedModel := s.resolveOpenAICompactFallbackModel(account, reqModel)
@@ -149,6 +150,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			}
 			body = nextBody
 			upstreamPassthroughModel = compactMappedModel
+			schedEffortChanged = true
 			attemptImageIntentInvalidated = true
 		}
 	}
@@ -180,6 +182,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		}
 		if normalized {
 			body = normalizedBody
+			schedEffortChanged = true
 		}
 		reqStream = gjson.GetBytes(body, "stream").Bool()
 
@@ -225,6 +228,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		}
 		if normalized {
 			body = normalizedBody
+			schedEffortChanged = true
 		}
 		if account.IsOpenAIOAuthLike() {
 			aliasedBody, reverse, aliased, aliasErr := aliasOpenAIOAuthReservedToolNamesBody(body)
@@ -378,6 +382,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	requestRepair.passthrough = true
 	requestRepair.encryptedTried = true // rs/cmp stripping remains exclusive to the native path.
 	requestRepair.m3 = s.armOpenAIM3(c, account, body)
+	schedEffort := reasoningEffortValue
 	replayAttempt := false
 	for {
 		if replayAttempt {
@@ -395,6 +400,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			actualModel = reqModel
 		}
 		SetOpsUpstreamModel(c, actualModel)
+		if (schedEffortChanged || replayAttempt) && s.schedAttemptRecorder != nil && account.Platform == PlatformOpenAI {
+			schedEffort = optionalStringValue(extractOpenAIReasoningEffortFromBody(body, actualModel))
+		}
 		attemptStart := resetOpenAIRepairAttempt(ctx, account, actualModel, reqStream, body, replayAttempt)
 		replayAttempt = true
 		firstOutputTimeout := time.Duration(0)
@@ -419,7 +427,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		}
 
 		upstreamStart := time.Now()
-		resp, err = s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, body, reqStream, &schedCapture)
+		resp, err = s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, schedEffort, reqStream, &schedCapture)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if headerGuard != nil && headerGuard.stopHeaderWait() {
 			if resp != nil && resp.Body != nil {

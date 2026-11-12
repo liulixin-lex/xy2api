@@ -96,7 +96,7 @@ func TestSchedTestHarnessFinishesUnfinished(t *testing.T) {
 	recorder := NewSchedAttemptRecorderService(&fakeSchedAttemptStore{})
 	gw := &OpenAIGatewayService{schedAttemptRecorder: recorder}
 	forward := &fakeSchedTestForwarder{Fn: func(ctx context.Context, _ *gin.Context, a *Account, body []byte) (*OpenAIForwardResult, error) {
-		gw.beginSchedAttempt(ctx, a, body, len(body), true)
+		gw.beginSchedAttempt(ctx, a, "", len(body), true)
 		return nil, nil
 	}}
 	_, samples, _, err := schedTestForward(context.Background(), forward, &Account{ID: 1, Platform: PlatformOpenAI}, "m", []byte(`{"model":"m"}`), false, 0)

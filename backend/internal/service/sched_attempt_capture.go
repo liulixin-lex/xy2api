@@ -33,7 +33,7 @@ type schedAttemptCapture struct {
 	usage                                      *SchedAttemptUsage
 }
 
-func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *Account, body []byte, bodyBytes int, stream bool) *schedAttemptCapture {
+func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *Account, effort string, bodyBytes int, stream bool) *schedAttemptCapture {
 	if s.schedAttemptRecorder == nil {
 		return nil
 	}
@@ -46,10 +46,6 @@ func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *A
 		return nil
 	}
 	groupID, sessionKey := st.SessionIdentity()
-	effort := ""
-	if parsed := extractOpenAIReasoningEffortFromBody(body, gjson.GetBytes(body, "model").String()); parsed != nil {
-		effort = *parsed
-	}
 	in := SchedAttemptStart{AccountID: account.ID, GroupID: groupID, Model: selection.Model, StickyWarm: selection.StickyWarm,
 		Effort: effort, BodyBytes: bodyBytes, Stream: stream, SessionKey: sessionKey, RequestID: st.GatewayRequestID()}
 	if test, ok := st.SchedTest().(*SchedTestAttempt); ok && test != nil {
@@ -292,10 +288,10 @@ func markSchedWSOutput(a *schedAttemptCapture, payload []byte) {
 }
 
 // sendSchedHTTP is used only by the enumerated text forwarding paths.
-func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Account, req *http.Request, proxyURL string, body []byte, stream bool, owner **schedAttemptCapture) (*http.Response, error) {
+func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Account, req *http.Request, proxyURL string, effort string, stream bool, owner **schedAttemptCapture) (*http.Response, error) {
 	// Builders may add group prompts or normalize cache fields after the caller's
 	// payload is prepared; ContentLength is the final wire length without a reread.
-	*owner = s.beginSchedAttempt(ctx, account, body, int(req.ContentLength), stream)
+	*owner = s.beginSchedAttempt(ctx, account, effort, int(req.ContentLength), stream)
 	resp, err := s.doOpenAIUpstream(req, proxyURL, account)
 	if err != nil {
 		(*owner).noteError(err)
@@ -355,11 +351,11 @@ type schedWSTurnCapture struct {
 	active *schedAttemptCapture
 }
 
-func (t *schedWSTurnCapture) begin(s *OpenAIGatewayService, ctx context.Context, account *Account, payload []byte) {
+func (t *schedWSTurnCapture) begin(s *OpenAIGatewayService, ctx context.Context, account *Account, effort string, payloadBytes int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.active.finishUnfinished()
-	t.active = s.beginSchedAttempt(ctx, account, payload, len(payload), true)
+	t.active = s.beginSchedAttempt(ctx, account, effort, payloadBytes, true)
 }
 func (t *schedWSTurnCapture) observe(payload []byte) {
 	t.mu.Lock()

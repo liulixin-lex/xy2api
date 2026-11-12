@@ -123,7 +123,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 		return nil, err
 	}
 	var schedCapture *schedAttemptCapture
-	resp, err := s.sendCCUpstreamRequest(ctx, c, account, targetURL, chatBody, clientStream, apiKey, account.GetOpenAIUserAgent(), "", &schedCapture)
+	resp, err := s.sendCCUpstreamRequest(ctx, c, account, targetURL, chatBody, clientStream, apiKey, account.GetOpenAIUserAgent(), "", ccAttemptCapture{effort: optionalStringValue(reasoningEffort), owner: &schedCapture})
 	defer func() { schedCapture.finish(schedResult, schedErr) }()
 	if err != nil {
 		return nil, err
