@@ -32,9 +32,15 @@
           @click="onHeaderOverride(mode, $event)"
         >{{ headerOverrideLabel(mode) }}</button>
       </template>
-      <button type="button" class="btn btn-primary btn-sm" data-sq-trigger="drawer-reset" @click="openSchedReset({ id: detail.account.id, name: detail.account.name })">
-        {{ t('admin.schedQuality.action.reset') }}
-      </button>
+      <button
+        v-if="recoverable"
+        type="button"
+        class="btn btn-primary btn-sm"
+        :disabled="recovering"
+        :aria-busy="recovering"
+        data-sq-trigger="drawer-reset"
+        @click="startRecover"
+      >{{ t('admin.schedQuality.action.reset') }}</button>
     </template>
 
     <!-- Loading -->
@@ -89,6 +95,8 @@
         <div class="mb-3 flex items-center gap-1.5">
           <h3 class="sq-section-title">{{ t('admin.schedQuality.drawer.byGroup') }}</h3>
           <SchedPauseMark :global-enabled="detail.global_enabled" :stale="detail.stale" />
+          <!-- The all-groups override, shown to every reader; the header buttons change it. -->
+          <SchedOverrideCapsule v-if="allGroupsOverride" class="ml-1.5" :mode="allGroupsOverride.mode" all-groups />
         </div>
         <SchedDrawerGroups
           :groups="detail.groups"
@@ -142,39 +150,37 @@
       <section class="mt-8">
         <div class="mb-3 flex items-center justify-between gap-3">
           <h3 class="sq-section-title">{{ t('admin.schedQuality.drawer.test') }}</h3>
-          <div v-if="test" class="flex items-center gap-2 text-[13px]">
+          <div v-if="test" class="flex items-center gap-2 text-[13px]" data-sq-test-head>
+            <span class="text-xs font-medium text-gray-700 dark:text-gray-300">{{ t(`admin.schedQuality.test.${test.kind === 'screen' ? 'screen' : 'full'}`) }}</span>
             <span v-if="test.running" class="sq-test">{{ t('admin.schedQuality.state.testing') }}</span>
             <template v-else>
               <span class="sq-text-3 sq-num">{{ fmtTestTime(test.at) }}</span>
-              <span
-                v-tip="testBad ? t('admin.schedQuality.tip.testFault') : t('admin.schedQuality.tip.testOk')"
-                role="img"
-                tabindex="0"
-                :aria-label="testBad ? t('admin.schedQuality.tip.testFault') : t('admin.schedQuality.tip.testOk')"
-                :class="['sq-mark sq-focus', testBad ? 'sq-mark--bad' : 'sq-mark--ok']"
-              />
+              <span :class="testEnd === 'done' ? 'sq-text' : 'text-gray-500 dark:text-dark-400'">{{ t(`admin.schedQuality.test.${testEnd}`) }}</span>
             </template>
           </div>
         </div>
         <div v-if="test" class="-mx-3 overflow-x-auto">
-          <table class="sq-table">
+          <!-- Same fixed widths as the groups table: 首字 sits under its 首字 (ui-proposal 7.2). -->
+          <table class="sq-table table-fixed min-w-[600px]">
+            <colgroup>
+              <col />
+              <col class="w-[112px]" />
+              <col class="w-[84px]" />
+              <col class="w-[264px]" />
+            </colgroup>
             <thead>
               <tr>
                 <th scope="col">{{ t('admin.schedQuality.col.class') }}</th>
-                <th class="w-[112px]" aria-hidden="true" />
-                <th scope="col" class="sq-r w-[84px]">{{ t('admin.schedQuality.dim.ttfo') }}</th>
-                <th class="w-[84px]" aria-hidden="true" />
-                <th scope="col" class="sq-r w-[84px]">{{ t('admin.schedQuality.dim.cache') }}</th>
-                <th class="w-[96px]" aria-hidden="true" />
+                <th aria-hidden="true" />
+                <th scope="col" class="sq-r">{{ t('admin.schedQuality.dim.ttfo') }}</th>
+                <th aria-hidden="true" />
               </tr>
             </thead>
             <tbody>
-              <tr v-for="tier in TIERS" :key="tier">
+              <tr v-for="tier in testTiers" :key="tier">
                 <td>{{ t(`admin.schedQuality.tier.${tier}`) }}</td>
                 <td />
                 <td class="sq-r sq-num">{{ tierTtfo(tier) }}</td>
-                <td />
-                <td class="sq-r sq-num">{{ tierCache(tier) }}</td>
                 <td />
               </tr>
             </tbody>
@@ -255,12 +261,14 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import SchedPauseMark from './SchedPauseMark.vue'
 import SchedDrawerGroups from './SchedDrawerGroups.vue'
 import SchedOverridePopover from './SchedOverridePopover.vue'
+import SchedOverrideCapsule from './SchedOverrideCapsule.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
 import type {
   SchedAccountGroup, SchedAutoState, SchedOverrideMode, SchedOverrideRequest, SchedRecentAttempt, SchedRequestClass, SchedTestTier
 } from '@/types/schedQuality'
 import { secondsUntil, useSchedQualityClock, useSchedQualityPoll } from '@/composables/useSchedQuality'
-import { closeSchedDrawer, markSchedChanged, openSchedBoard, openSchedDrawer, openSchedReset, useSchedLayers } from '@/composables/useSchedLayers'
+import { closeSchedDrawer, markSchedChanged, openSchedBoard, openSchedDrawer, trackSchedReload, useSchedLayers } from '@/composables/useSchedLayers'
+import { isRecovering, useAccountRecovery } from '@/composables/useAccountRecovery'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 import {
   attemptResult, attemptWeak, enumWord, fmtCacheRatio, fmtClock, fmtCountdown, fmtErrorRate, fmtTestTime, fmtTtfo, kindName,
@@ -276,11 +284,14 @@ const props = defineProps<{
   onIqCheck?: (accountId: number) => void
   /** Opens the account edit dialog; the link is hidden when not given. */
   onEdit?: (accountId: number) => void
+  /** Reads the account back on the page after a recovery from here. */
+  onRecovered?: (accountId: number) => Promise<void> | void
 }>()
 
 const OVERRIDE_MODES: SchedOverrideMode[] = ['demote', 'exempt']
 const CLASSES: SchedRequestClass[] = ['light', 'regular', 'heavy', 'xheavy']
 const TIERS: SchedTestTier[] = ['small', 'medium', 'large']
+const SCREEN_TIERS: SchedTestTier[] = ['small']
 const RECENT_SHORT = 10
 const RECENT_LONG = 50
 
@@ -294,8 +305,8 @@ const groupsRef = ref<HTMLElement | null>(null)
 
 const poll = useSchedQualityPoll(() => drawer.accountId, (signal) => schedQualityAPI.accountDetail(drawer.accountId!, { signal }))
 const detail = computed(() => poll.data.value)
-// Any quality action (here, in the reset dialog, in batches) refreshes the open drawer.
-watch(changed, () => { if (drawer.accountId !== null) void poll.refresh() })
+// Any quality action (here, in the row menu, in batches) reloads the open drawer; a recovery waits for this reload.
+watch(changed, () => { if (drawer.accountId !== null) trackSchedReload(poll.refresh()) })
 
 // Keep focus inside the drawer when a refresh re-renders the control that had it (spec 0.2, R6).
 let restoreFocus: (() => void) | null = null
@@ -364,13 +375,15 @@ const classValue = (cls: SchedRequestClass) => fmtTtfo(card.value?.ttfo.by_class
 const groupNames = computed(() => new Map(detail.value?.groups.map((g) => [g.group_id, g.name]) ?? []))
 const scopeGroups = computed(() => detail.value?.groups.map((g) => ({ id: g.group_id, name: g.name })) ?? [])
 
-// Test of the selected model.
+// Test of the selected model (contract delta E): a screen shows only the small tier; the end word follows `clean`,
+// and a test without any round is void.
 const test = computed(() => card.value?.test ?? null)
 const testRunning = computed(() => !!test.value?.running)
-const testBad = computed(() => {
+const testTiers = computed(() => (test.value?.kind === 'screen' ? SCREEN_TIERS : TIERS))
+const testEnd = computed(() => {
   const value = test.value
-  if (!value) return false
-  return (!value.done && !value.running) || value.tiers.some((tier) => tier.faults > 0 || tier.timeouts > 0)
+  if (!value?.tiers.length) return 'aborted'
+  return value.clean ? 'done' : 'unfinished'
 })
 function tierTtfo(tier: SchedTestTier) {
   const row = test.value?.tiers.find((x) => x.tier === tier)
@@ -379,7 +392,6 @@ function tierTtfo(tier: SchedTestTier) {
   const values = row.ttfo_ms.filter((v): v is number => v !== null)
   return values.length ? fmtTtfo(Math.max(...values), false, t) : '—'
 }
-const tierCache = (tier: SchedTestTier) => fmtCacheRatio(test.value?.tiers.find((x) => x.tier === tier)?.cache_ratio)
 
 // Recent requests of the selected model.
 const recent = computed(() => detail.value?.recent_attempts.filter((a) => a.model === tab.value) ?? [])
@@ -390,6 +402,21 @@ const resultWord = (attempt: SchedRecentAttempt) => {
 }
 
 // Header actions.
+// 恢复 shows when there is something it clears: a cooling group row or a clearable auto state other than the shared
+// proxy circuit (contract delta F3).
+const { recover } = useAccountRecovery()
+const recoverable = computed(() => {
+  const value = detail.value
+  if (!value) return false
+  return value.groups.some((group) => group.by_model.some((row) => row.state === 'cooling')) ||
+    value.auto_states.some((item) => item.clearable && item.kind !== 'proxy_circuit')
+})
+const recovering = computed(() => !!detail.value && isRecovering(detail.value.account.id))
+function startRecover() {
+  const account = detail.value?.account
+  if (account) void recover({ id: account.id, name: account.name }, () => props.onRecovered?.(account.id))
+}
+
 const testBusy = ref(false)
 const testFailed = computed(() => testFailedRefreshes.value > 0)
 watch(detail, () => { if (testFailedRefreshes.value > 0) testFailedRefreshes.value-- })
@@ -407,10 +434,10 @@ async function startTest() {
     testBusy.value = false
   }
   if (result === 'failed' && drawer.accountId === id) testFailedRefreshes.value = 2
-  markSchedChanged()
+  void markSchedChanged()
 }
 
-const allGroupsOverride = computed(() => detail.value?.groups.map((g) => g.override).find((o) => o?.all_groups) ?? null)
+const allGroupsOverride = computed(() => detail.value?.all_groups_override ?? null)
 const headerOverrideLabel = (mode: SchedOverrideMode) =>
   allGroupsOverride.value?.mode === mode
     ? t(mode === 'demote' ? 'admin.schedQuality.action.undoDemote' : 'admin.schedQuality.action.undoExempt')
@@ -434,7 +461,7 @@ async function applyOverride(request: SchedOverrideRequest) {
   try {
     await schedQualityAPI.setOverride(id, request)
     popover.open = false
-    markSchedChanged()
+    void markSchedChanged()
   } catch {
     popover.failed = true
   } finally {
@@ -456,7 +483,7 @@ async function clearOverride(groupId: number, markAt: number) {
   if (id === null) return
   try {
     await schedQualityAPI.clearOverride(id, groupId)
-    markSchedChanged()
+    void markSchedChanged()
   } catch {
     flash(failedGroups, markAt)
   }
@@ -500,7 +527,7 @@ async function runClear(item: SchedAutoState) {
   if (id === null) return
   try {
     const result = await schedQualityAPI.clearAutoState(id, item.key)
-    if (result.cleared) markSchedChanged()
+    if (result.cleared) void markSchedChanged()
     else flash(failedKeys, item.key)
   } catch {
     flash(failedKeys, item.key)

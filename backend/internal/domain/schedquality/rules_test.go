@@ -510,21 +510,21 @@ func TestJudgeTestAcceptance(t *testing.T) {
 			p.TTFTSeconds = 1.542
 			expectVerdict(t, JudgeTest(turns, "gpt-6.1-sol", p).Speed, VerdictPass)
 		}},
-		{"B16_Cache_Ratio_Threshold_And_Pooling", func(t *testing.T) {
+		{"B16_Cache_Always_Nodata_Regardless_Of_Threshold_And_Pooling", func(t *testing.T) {
 			turns := fullTurns(nil, .88)
 			p.MinCacheRatio = .90
-			expectVerdict(t, JudgeTest(turns, "gpt-6.1-sol", p).Cache, VerdictFail)
+			expectVerdict(t, JudgeTest(turns, "gpt-6.1-sol", p).Cache, VerdictNoData)
 			p.MinCacheRatio = .85
-			expectVerdict(t, JudgeTest(turns, "gpt-6.1-sol", p).Cache, VerdictPass)
+			expectVerdict(t, JudgeTest(turns, "gpt-6.1-sol", p).Cache, VerdictNoData)
 			four := []TestTurn{turns[1], turns[2], turns[4], turns[5]}
 			p.MinCacheRatio = .90
 			expectVerdict(t, JudgeTest(four, "gpt-6.1-sol", p).Cache, VerdictNoData)
-			expectVerdict(t, JudgeTest(append(four, turns...), "gpt-6.1-sol", p).Cache, VerdictFail)
-			// Tests use their own cache filter; the real-window 2048-token minimum does not apply.
+			expectVerdict(t, JudgeTest(append(four, turns...), "gpt-6.1-sol", p).Cache, VerdictNoData)
+			// Cache values remain available for display, even below the real-window token minimum.
 			for i := range turns {
 				turns[i].PrevPromptTokens, turns[i].PromptTokens, turns[i].CacheReadTokens = ptr(1), ptr(2), ptr(1)
 			}
-			expectVerdict(t, JudgeTest(turns, "gpt-6.1-sol", p).Cache, VerdictPass)
+			expectVerdict(t, JudgeTest(turns, "gpt-6.1-sol", p).Cache, VerdictNoData)
 		}},
 		{"B17_Clean_One_Fault_And_Two_Faults", func(t *testing.T) {
 			clean := fullTurns(nil, .95)
@@ -561,7 +561,7 @@ func TestJudgeTestAcceptance(t *testing.T) {
 			partial := fullTurns(nil, .95)[:5]
 			partial = append(partial, testTurn(TierMedium, 3, OutcomeOther, nil), testTurn(TierLarge, 1, OutcomeOther, nil))
 			expectVerdicts(t, JudgeTest(partial, "gpt-6.1-sol", p), Verdicts{})
-			expectVerdicts(t, JudgeTest(append(partial, partial...), "gpt-6.1-sol", p), Verdicts{Speed: VerdictPass, Error: VerdictPass, Cache: VerdictPass})
+			expectVerdicts(t, JudgeTest(append(partial, partial...), "gpt-6.1-sol", p), Verdicts{Speed: VerdictPass, Error: VerdictPass})
 			partial[5].TTFOMs = ptr(3000)
 			expectVerdicts(t, JudgeTest(partial, "gpt-6.1-sol", p), Verdicts{})
 			cancelled := fullTurns(nil, .95)
@@ -608,10 +608,10 @@ func TestEffectiveAcceptance(t *testing.T) {
 			turns := fullTurns(nil, .5)
 			eff, from := Effective(nd, []TestResult{testResult(start, turns, true)}, "gpt-6.1-sol", p,
 				time.Time{}, ruleNow.Add(-2*time.Minute), ruleNow)
-			if eff.Cache != VerdictFail || !from[2] {
+			if eff.Cache != VerdictNoData || from[2] {
 				t.Fatalf("effective cache=%s fromTest=%v", eff.Cache, from)
 			}
-			if from != [3]bool{true, true, true} || eff.Speed != VerdictPass || eff.Error != VerdictPass {
+			if from != [3]bool{true, true, false} || eff.Speed != VerdictPass || eff.Error != VerdictPass {
 				t.Fatalf("each non-nodata test verdict must identify its source: effective=%+v fromTest=%v", eff, from)
 			}
 			summary := SummarizeTests([]TestResult{testResult(start, turns, true)}, "gpt-6.1-sol", p, time.Time{}, ruleNow.Add(-2*time.Minute), ruleNow)
@@ -638,15 +638,15 @@ func TestEffectiveAcceptance(t *testing.T) {
 						reset, since = tc.test.StartedAt, time.Time{}
 					}
 					eff, _ := Effective(nd, []TestResult{tc.test}, "gpt-6.1-sol", p, reset, since, ruleNow)
-					if eff.Cache != VerdictNoData {
-						t.Fatalf("excluded test contributed cache verdict %s", eff.Cache)
+					if eff.Speed != VerdictNoData {
+						t.Fatalf("excluded test contributed speed verdict %s", eff.Speed)
 					}
 					if display := SummarizeTests([]TestResult{tc.test}, "gpt-6.1-sol", p, reset, since, ruleNow); display != (TestSummary{}) {
 						t.Fatalf("display counted an excluded test: %+v", display)
 					}
 					eff, _ = Effective(nd, []TestResult{tc.test, good}, "gpt-6.1-sol", p, reset, since, ruleNow)
 					display := SummarizeTests([]TestResult{tc.test, good}, "gpt-6.1-sol", p, reset, since, ruleNow)
-					if eff.Cache != VerdictFail || display.Tests != 1 || display.CacheTurns != 6 {
+					if eff.Speed != VerdictPass || display.Tests != 1 || display.CacheTurns != 6 {
 						t.Fatalf("only eligible test should count: effective=%+v display=%+v", eff, display)
 					}
 				})
@@ -654,7 +654,7 @@ func TestEffectiveAcceptance(t *testing.T) {
 			// Start-time boundaries apply even if completion was recent or lies in the future.
 			boundary := testResult(ruleNow.Add(-TestFreshFor), good.Turns, true)
 			boundary.FinishedAt = ruleNow.Add(time.Hour)
-			if eff, _ := Effective(nd, []TestResult{boundary}, "gpt-6.1-sol", p, time.Time{}, time.Time{}, ruleNow); eff.Cache != VerdictFail {
+			if eff, _ := Effective(nd, []TestResult{boundary}, "gpt-6.1-sol", p, time.Time{}, time.Time{}, ruleNow); eff.Speed != VerdictPass {
 				t.Fatalf("exactly six-hour-old start is fresh: %+v", eff)
 			}
 			for _, offset := range []time.Duration{time.Nanosecond, -time.Nanosecond} {
@@ -662,9 +662,9 @@ func TestEffectiveAcceptance(t *testing.T) {
 				eff, _ := Effective(nd, []TestResult{old}, "gpt-6.1-sol", p, time.Time{}, ruleNow.Add(-2*time.Minute), ruleNow)
 				want := VerdictNoData
 				if offset > 0 {
-					want = VerdictFail
+					want = VerdictPass
 				}
-				expectVerdict(t, eff.Cache, want)
+				expectVerdict(t, eff.Speed, want)
 			}
 		}},
 		{"B20b_Aborted_Test_Does_Not_Break_Pooling", func(t *testing.T) {
@@ -675,7 +675,7 @@ func TestEffectiveAcceptance(t *testing.T) {
 			}
 			eff, _ := Effective(nd, tests, "gpt-6.1-sol", p, time.Time{}, ruleNow.Add(-5*time.Minute), ruleNow)
 			s := SummarizeTests(tests, "gpt-6.1-sol", p, time.Time{}, ruleNow.Add(-5*time.Minute), ruleNow)
-			if eff.Cache != VerdictFail || s.Tests != 2 || s.CacheTurns != 12 || s.CacheRatio >= .9 {
+			if eff.Cache != VerdictNoData || s.Tests != 2 || s.CacheTurns != 12 || s.CacheRatio >= .9 {
 				t.Fatalf("effective=%+v tests=%+v", eff, s)
 			}
 		}},
@@ -703,7 +703,8 @@ func TestEffectiveAcceptance(t *testing.T) {
 }
 
 func nextAt(prev StateRow, p Policy, summary Summary, tests []TestResult, testsEnabled bool, now time.Time) (StateRow, bool, bool, bool) {
-	return Next(prev, Inputs{Policy: p, Summary: summary, Tests: tests, TestsEnabled: testsEnabled}, now)
+	next, changed, remove, wantTest, _ := Next(prev, Inputs{Policy: p, Summary: summary, Tests: tests, TestsEnabled: testsEnabled}, now)
+	return next, changed, remove, wantTest
 }
 
 func cooling(reason Reason, since time.Time, until time.Time, level int) StateRow {
@@ -722,7 +723,7 @@ func TestNextAcceptance(t *testing.T) {
 		{"C1_Normal_Fail_Enters_First_Cooldown", func(t *testing.T) {
 			now := ruleNow
 			n, changed, remove, _ := nextAt(StateRow{AccountID: 1, Model: "gpt-6.1-sol", GroupID: 2}, p, realSpeed(VerdictFail, p), nil, true, now)
-			if n.State != StateCooling || n.Reason != ReasonSpeed || n.Level != 1 || n.Until.Sub(now) != 30*time.Second || !changed || remove {
+			if n.State != StateCooling || n.Reason != ReasonSpeed || n.Level != 1 || n.Until.Sub(now) != 5*time.Minute || !changed || remove {
 				t.Fatalf("next=%+v changed=%v remove=%v", n, changed, remove)
 			}
 		}},
@@ -762,20 +763,20 @@ func TestNextAcceptance(t *testing.T) {
 				t.Fatalf("only the causing dimension needs to pass: next=%+v want=%v", n, want)
 			}
 		}},
-		{"C3a_Test_Cache_Fail_ReCools", func(t *testing.T) {
+		{"C3a_Test_Cache_Does_Not_Block_Recovery", func(t *testing.T) {
 			row := cooling(ReasonSpeed, ruleNow.Add(-time.Minute), ruleNow, 1)
 			tests := []TestResult{testResult(ruleNow.Add(time.Second), fullTurns(nil, .5), true)}
 			n, _, _, _ := nextAt(row, p, nd, tests, true, ruleNow.Add(2*time.Minute))
-			if n.State != StateCooling || n.Reason != ReasonTestCache || n.Level != 2 || n.Until.Sub(n.Since) != time.Minute {
+			if n.State != StateNormal || n.Reason != "" || n.Level != 1 {
 				t.Fatalf("next=%+v", n)
 			}
 		}},
-		{"C3b_One_Slow_Waits_Then_Pooled_Outcome", func(t *testing.T) {
+		{"C3b_One_Slow_Clean_Recovers_Unless_Pooled_Failure", func(t *testing.T) {
 			row := cooling(ReasonSpeed, ruleNow.Add(-time.Minute), ruleNow, 1)
 			first := testResult(ruleNow.Add(time.Second), fullTurns(map[int]bool{0: true}, .95), true)
 			now := ruleNow.Add(2 * time.Minute)
 			n, _, _, want := nextAt(row, p, nd, []TestResult{first}, true, now)
-			if n.State != StateCooling || !want {
+			if n.State != StateNormal || n.Reason != "" || want {
 				t.Fatalf("first result next=%+v wantTest=%v", n, want)
 			}
 			second := testResult(now.Add(time.Second), fullTurns(nil, .95), true)
@@ -791,9 +792,9 @@ func TestNextAcceptance(t *testing.T) {
 		}},
 		{"C4_Test_Failure_Uses_Next_Ladder_Step", func(t *testing.T) {
 			row := cooling(ReasonCache, ruleNow.Add(-time.Minute), ruleNow, 1)
-			tests := []TestResult{testResult(ruleNow.Add(time.Second), fullTurns(nil, .5), true)}
+			tests := []TestResult{testResult(ruleNow.Add(time.Second), fullTurns(map[int]bool{0: true, 1: true}, .5), true)}
 			n, _, _, _ := nextAt(row, p, nd, tests, true, ruleNow.Add(2*time.Minute))
-			if n.State != StateCooling || n.Reason != ReasonTestCache || n.Level != 2 || n.Until.Sub(n.Since) != time.Minute {
+			if n.State != StateCooling || n.Reason != ReasonTestSpeed || n.Level != 2 || n.Until.Sub(n.Since) != 15*time.Minute {
 				t.Fatalf("next=%+v", n)
 			}
 		}},
@@ -882,15 +883,15 @@ func TestNextAcceptance(t *testing.T) {
 				t.Fatalf("decay at boundary next=%+v remove=%v", n, remove)
 			}
 			n, _, _, _ = nextAt(row, p, realSpeed(VerdictFail, p), nil, true, ruleNow.Add(LevelDecayAfter))
-			if n.State != StateCooling || n.Level != 1 || n.Until.Sub(n.Since) != 30*time.Second {
+			if n.State != StateCooling || n.Level != 1 || n.Until.Sub(n.Since) != 5*time.Minute {
 				t.Fatalf("same-evaluation decay did not precede cooling: %+v", n)
 			}
 			n, _, _, _ = nextAt(row, p, realSpeed(VerdictFail, p), nil, true, ruleNow.Add(LevelDecayAfter-time.Second))
-			if n.Level != 2 || n.Until.Sub(n.Since) != time.Minute {
+			if n.Level != 2 || n.Until.Sub(n.Since) != 15*time.Minute {
 				t.Fatalf("pre-decay ladder step wrong: %+v", n)
 			}
 			n, _, _, _ = nextAt(row, p, realSpeed(VerdictFail, p), nil, true, ruleNow.Add(5*time.Minute))
-			if n.Level != 2 || n.Until.Sub(n.Since) != time.Minute {
+			if n.Level != 2 || n.Until.Sub(n.Since) != 15*time.Minute {
 				t.Fatalf("re-degrade after five minutes must preserve level: %+v", n)
 			}
 		}},
@@ -911,7 +912,7 @@ func TestNextAcceptance(t *testing.T) {
 				t.Fatalf("manual pass next=%+v want=%v", n, want)
 			}
 		}},
-		{"C9_Cooldown_Ladder_Caps_At_Thirty_Minutes", func(t *testing.T) {
+		{"C9_Cooldown_Ladder_Caps_At_Two_Hours", func(t *testing.T) {
 			row := StateRow{AccountID: 1, Model: "gpt-6.1-sol"}
 			got := make([]time.Duration, 0, 7)
 			for i := 0; i < 7; i++ {
@@ -922,20 +923,20 @@ func TestNextAcceptance(t *testing.T) {
 				row, _, _, _ = nextAt(row, p, realSpeed(VerdictFail, p), nil, true, now)
 				got = append(got, row.Until.Sub(row.Since))
 			}
-			want := []time.Duration{30 * time.Second, time.Minute, 2 * time.Minute, 5 * time.Minute, 15 * time.Minute, 30 * time.Minute, 30 * time.Minute}
+			want := []time.Duration{5 * time.Minute, 15 * time.Minute, 30 * time.Minute, time.Hour, 2 * time.Hour, 2 * time.Hour, 2 * time.Hour}
 			for i := range want {
 				if got[i] != want[i] {
 					t.Fatalf("ladder = %v", got)
 				}
 			}
-			if row.Level != 6 {
-				t.Fatalf("level must cap at 6: %+v", row)
+			if row.Level != 5 {
+				t.Fatalf("level must cap at 5: %+v", row)
 			}
 		}},
 		{"C10_Exact_Thirty_Minute_Decay_Before_New_Failure", func(t *testing.T) {
 			row := StateRow{AccountID: 1, Model: "gpt-6.1-sol", State: StateNormal, Level: 4, Since: ruleNow.Add(-LevelDecayAfter)}
 			n, _, _, _ := nextAt(row, p, realSpeed(VerdictFail, p), nil, true, ruleNow)
-			if n.Until.Sub(n.Since) != 30*time.Second || n.Level != 1 {
+			if n.Until.Sub(n.Since) != 5*time.Minute || n.Level != 1 {
 				t.Fatalf("real failure after decay: %+v", n)
 			}
 			n, _, _, _ = nextAt(row, p, nd, nil, true, ruleNow)
@@ -943,11 +944,11 @@ func TestNextAcceptance(t *testing.T) {
 				t.Fatalf("acute scenario setup requires pure decay: %+v", n)
 			}
 			n, _, _, _ = nextAt(row, p, Summary{Acute: true}, nil, true, ruleNow)
-			if n.Until.Sub(n.Since) != 30*time.Second || n.Level != 1 || n.Reason != ReasonAcuteTimeout {
+			if n.Until.Sub(n.Since) != 5*time.Minute || n.Level != 1 || n.Reason != ReasonAcuteTimeout {
 				t.Fatalf("acute failure after decay: %+v", n)
 			}
 			n, _, _, _ = nextAt(row, p, realSpeed(VerdictFail, p), nil, true, ruleNow.Add(-time.Second))
-			if n.Until.Sub(n.Since) != 15*time.Minute || n.Level != 5 {
+			if n.Until.Sub(n.Since) != 2*time.Hour || n.Level != 5 {
 				t.Fatalf("one second before decay must retain old level: %+v", n)
 			}
 		}},

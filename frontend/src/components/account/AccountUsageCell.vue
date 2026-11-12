@@ -1,5 +1,6 @@
 <template>
-  <div ref="rootRef" v-if="showUsageWindows">
+  <!-- Text lines are 18px high, like the other multi-line cells of the account list (ui-proposal 6.2). -->
+  <div ref="rootRef" v-if="showUsageWindows" class="leading-[18px]">
     <!-- Anthropic OAuth and Setup Token accounts: fetch real usage data -->
     <template
       v-if="
@@ -37,7 +38,7 @@
       <!-- Usage data -->
       <div v-else-if="usageInfo" class="space-y-1">
         <!-- API error (degraded response) -->
-        <div v-if="usageInfo.error" class="text-xs text-amber-600 dark:text-amber-400 truncate max-w-[200px]" :title="usageInfo.error">
+        <div v-if="usageInfo.error" class="text-xs leading-[18px] text-amber-600 dark:text-amber-400 truncate max-w-[200px]" :title="usageInfo.error">
           {{ usageInfo.error }}
         </div>
         <!-- 5h Window -->
@@ -124,11 +125,11 @@
 
     <!-- OpenAI Codex accounts: ticket status; usage querying remains OAuth-only. -->
     <template v-else-if="account.platform === 'openai' && (account.type === 'oauth' || account.type === 'setup-token')">
-      <div v-if="codexTurnTickets.length" class="mb-1 space-y-0.5">
+      <div v-if="codexTurnTickets.length" class="mb-1">
         <div
           v-for="ticket in codexTurnTickets"
           :key="ticket.model"
-          class="flex items-center gap-1 text-[10px] leading-4"
+          class="flex items-center gap-1 text-[10px]"
         >
           <span class="truncate font-medium text-gray-500 dark:text-gray-400" :title="ticket.model">STATE · {{ shortCodexTicketModel(ticket.model) }}</span>
           <span v-if="ticket.ready" class="text-emerald-600 dark:text-emerald-400">{{ formatCodexTicketRemaining(ticket.remaining_seconds) }}</span>
@@ -435,7 +436,7 @@
             {{ grokQuotaUnknownLabel }}
           </div>
         </template>
-        <div v-if="usageInfo.error" class="truncate text-xs text-amber-600 dark:text-amber-400 max-w-[200px]" :title="usageInfo.error">
+        <div v-if="usageInfo.error" class="truncate text-xs leading-[18px] text-amber-600 dark:text-amber-400 max-w-[200px]" :title="usageInfo.error">
           {{ usageErrorLabel }}
         </div>
         <div v-if="grokRetryAfterLabel" class="text-[10px] text-amber-600 dark:text-amber-400">

@@ -28,8 +28,8 @@ describe('useSchedQualitySummary', () => {
     const scope = effectScope()
     const result = scope.run(() => useSchedQualitySummary(() => paused.value))!
 
-    await result.refresh([479, 503], 'gpt-6.1-sol')
-    expect(summary).toHaveBeenCalledWith([479, 503], 'gpt-6.1-sol', expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    await result.refresh([479, 503])
+    expect(summary).toHaveBeenCalledWith([479, 503], expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(result.state.value).toBe('loaded')
     expect(result.byAccount.value.get(479)?.cooling[0].group_id).toBe(53)
     expect(result.view.value).toEqual({ at: '…', stale: false, global_enabled: true })
@@ -100,6 +100,35 @@ describe('useSchedQualityPoll', () => {
     await flush()
     expect(load.mock.calls[0][0].aborted).toBe(true)
     expect(poll.data.value).toBe('second')
+    scope.stop()
+  })
+
+  it('settles a replaced refresh only when its replacement is in, but at once when the key changes', async () => {
+    const key = ref<number | null>(1)
+    const answers: Array<(value: string) => void> = []
+    const load = vi.fn((signal: AbortSignal) => new Promise<string>((resolve, reject) => {
+      answers.push(resolve)
+      signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+    }))
+    const scope = effectScope()
+    const poll = scope.run(() => useSchedQualityPoll(key, load))!
+    await nextTick()
+    let firstDone = false
+    void poll.refresh().then(() => { firstDone = true })
+    // Replaced by another refresh of the same key: the first promise waits for the newest one.
+    void poll.refresh()
+    await flush()
+    expect(firstDone).toBe(false)
+    answers.at(-1)!('newest')
+    await flush()
+    expect([firstDone, poll.data.value]).toEqual([true, 'newest'])
+
+    let staleDone = false
+    void poll.refresh().then(() => { staleDone = true })
+    key.value = 2
+    await nextTick()
+    await flush()
+    expect(staleDone).toBe(true)
     scope.stop()
   })
 })

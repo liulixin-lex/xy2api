@@ -216,7 +216,7 @@ func (c *schedAdminTempCache) SchedAdminDeleteTempIf(_ context.Context, _ int64,
 func schedAdminFixture() (*SchedAdminService, *schedAdminEngine, *schedAdminAccounts) {
 	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
 	engine := &schedAdminEngine{snapshot: &SchedQualitySnapshot{At: now, GlobalEnabled: true, TestsEnabled: true, Evidence: map[SchedAccountModel]schedquality.Summary{}, GroupRows: map[int64][]SchedGroupRow{}, Tests: map[SchedAccountModel]SchedTestRecord{}, Policies: map[int64]SchedPolicyRecord{}}, resetAt: now}
-	repo := &schedAdminAccounts{rows: map[int64]*Account{1: {ID: 1, Name: "one", Status: StatusActive, Schedulable: true, Platform: PlatformOpenAI, GroupIDs: []int64{1}, Extra: map[string]any{}}}, fail: map[string]error{}}
+	repo := &schedAdminAccounts{rows: map[int64]*Account{1: {ID: 1, Name: "one", Status: StatusActive, Schedulable: true, Platform: PlatformOpenAI, GroupIDs: []int64{1}, Groups: []*Group{{ID: 1, Name: "group", Platform: PlatformOpenAI}}, Extra: map[string]any{}}}, fail: map[string]error{}}
 	svc := NewSchedAdminService(SchedAdminDependencies{Engine: engine, Accounts: repo, Groups: schedAdminGroups{1: {ID: 1, Name: "group", Platform: PlatformOpenAI}}, Now: func() time.Time { return now }})
 	return svc, engine, repo
 }
@@ -271,8 +271,8 @@ func TestSchedAdminSummaryAggregation(t *testing.T) {
 	require.Equal(t, "b", *out.Accounts[0].Model)
 	require.Equal(t, 80, out.Accounts[0].Samples)
 	require.Equal(t, SchedAdminAccountSummaryGroups{Total: 7, Cooling: 5, Normal: 1, Nodata: 1}, out.Accounts[0].Groups)
-	require.Len(t, out.Accounts[0].Cooling, 3)
-	require.Equal(t, 2, out.Accounts[0].CoolingMore)
+	require.Len(t, out.Accounts[0].Cooling, 5)
+	require.Zero(t, out.Accounts[0].CoolingMore)
 	require.Nil(t, out.Accounts[1].Model)
 	require.Nil(t, out.Accounts[1].TTFO.P90Ms)
 	out, err = s.Summary(context.Background(), []int64{1}, "a")
@@ -415,7 +415,7 @@ func TestSchedAdminOverrideAndTestTickets(t *testing.T) {
 	runner.Requests = nil
 	_, err := s.Test(ctx, 1, "", 7)
 	require.NoError(t, err)
-	require.Len(t, runner.Requests, 3)
+	require.Len(t, runner.Requests, 1)
 	require.Equal(t, "a", runner.Requests[0].Model)
 	require.False(t, runner.Requests[0].Auto)
 	clear(e.snapshot.Evidence)
@@ -830,7 +830,7 @@ func (r *schedAdminFailingRunner) Request(_ context.Context, _ int64, m string, 
 	}
 	return SchedTestTicket{Model: m, TestID: m + "-ticket", Started: true}, nil
 }
-func TestSchedAdminTestRetainsTicketsAfterModelFailure(t *testing.T) {
+func TestSchedAdminTestDefaultSingleModelAndFailure(t *testing.T) {
 	s, e, _ := schedAdminFixture()
 	for i, m := range []string{"a", "b", "c"} {
 		e.snapshot.Evidence[SchedAccountModel{1, m}] = schedAdminEvidence(40 - i)
@@ -839,15 +839,13 @@ func TestSchedAdminTestRetainsTicketsAfterModelFailure(t *testing.T) {
 	s.d.Tests = runner
 	out, err := s.Test(context.Background(), 1, "", 7)
 	var failures *SchedAdminTestErrors
-	require.ErrorAs(t, err, &failures)
-	require.Equal(t, []string{"b"}, failures.Models)
-	require.Equal(t, []string{"a", "b", "c"}, runner.requested)
-	require.Len(t, out.Tests, 3)
+	require.NoError(t, err)
+	require.Equal(t, []string{"a"}, runner.requested)
+	require.Len(t, out.Tests, 1)
 	require.Equal(t, "a-ticket", out.Tests[0].TestID)
-	require.Equal(t, SchedAdminTestTests{Model: "b", Why: "error"}, out.Tests[1])
-	require.Equal(t, "c-ticket", out.Tests[2].TestID)
 	out, err = s.Test(context.Background(), 1, "b", 7)
 	require.ErrorAs(t, err, &failures)
+	require.Equal(t, []string{"b"}, failures.Models)
 	require.Empty(t, out.Tests)
 }
 
@@ -856,8 +854,8 @@ func TestSchedAdminBoardMapsRequestModelPerAccount(t *testing.T) {
 	a := r.rows[1]
 	a.Type = AccountTypeAPIKey
 	a.Credentials = map[string]any{"model_mapping": map[string]any{"alias": "upstream-a", "secondary": "upstream-secondary", "z-alias": "upstream-a"}}
-	r.rows[2] = &Account{ID: 2, GroupIDs: []int64{1}, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"model_mapping": map[string]any{"alias": "upstream-b"}}}
-	r.rows[3] = &Account{ID: 3, GroupIDs: []int64{1}, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"model_mapping": map[string]any{"secondary": "upstream-secondary", "tertiary": "upstream-tertiary"}}}
+	r.rows[2] = &Account{ID: 2, GroupIDs: []int64{1}, Groups: a.Groups, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"model_mapping": map[string]any{"alias": "upstream-b"}}}
+	r.rows[3] = &Account{ID: 3, GroupIDs: []int64{1}, Groups: a.Groups, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"model_mapping": map[string]any{"secondary": "upstream-secondary", "tertiary": "upstream-tertiary"}}}
 	until := e.resetAt.Add(time.Hour)
 	for i, m := range []string{"upstream-a", "upstream-b"} {
 		id := int64(i + 1)

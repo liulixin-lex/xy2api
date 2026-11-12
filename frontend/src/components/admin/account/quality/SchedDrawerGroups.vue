@@ -1,13 +1,20 @@
 <template>
   <p v-if="!groups.length" class="sq-text-3 text-sm">—</p>
   <div v-else class="-mx-3 overflow-x-auto">
-    <table class="sq-table">
+    <!-- Fixed column widths, shared with the test table so 首字 lines up at any drawer width (ui-proposal 7.2). -->
+    <table class="sq-table table-fixed min-w-[600px]">
+      <colgroup>
+        <col />
+        <col class="w-[112px]" />
+        <col v-for="dim in SCHED_DIMS" :key="dim" class="w-[84px]" />
+        <col class="w-[96px]" />
+      </colgroup>
       <thead>
         <tr>
           <th scope="col">{{ t('admin.schedQuality.col.group') }}</th>
-          <th scope="col" class="w-[112px]">{{ t('admin.schedQuality.col.state') }}</th>
-          <th v-for="dim in SCHED_DIMS" :key="dim" scope="col" class="sq-r w-[84px]">{{ t(`admin.schedQuality.dim.${dim}`) }}</th>
-          <th scope="col" class="sq-r w-[96px]"><span class="sr-only">{{ t('admin.accounts.columns.actions') }}</span></th>
+          <th scope="col">{{ t('admin.schedQuality.col.state') }}</th>
+          <th v-for="dim in SCHED_DIMS" :key="dim" scope="col" class="sq-r">{{ t(`admin.schedQuality.dim.${dim}`) }}</th>
+          <th scope="col" class="sq-r"><span class="sr-only">{{ t('admin.accounts.columns.actions') }}</span></th>
         </tr>
       </thead>
       <tbody>
@@ -17,19 +24,31 @@
           :class="{ 'sq-target': group.group_id === targetGroupId }"
           :data-sq-group-row="group.group_id"
         >
+          <!-- Every row shows the override in effect for its group next to the name, to every reader; the action
+               beside it needs accounts:manage. -->
           <td>
-            <button v-if="canViewGroups" type="button" class="sq-link sq-focus" :data-sq-trigger="`board:${group.group_id}`" @click="emit('board', group)">{{ group.name }}</button>
-            <template v-else>{{ group.name }}</template>
+            <div class="flex min-w-0 items-center gap-1.5">
+              <button v-if="canViewGroups" type="button" class="sq-link sq-focus min-w-0 truncate" :data-sq-trigger="`board:${group.group_id}`" @click="emit('board', group)">{{ group.name }}</button>
+              <span v-else class="min-w-0 truncate">{{ group.name }}</span>
+              <SchedOverrideCapsule v-if="group.override" class="shrink-0" :mode="group.override.mode" />
+            </div>
           </td>
-          <td>
-            <span :class="stateOf(group).cls">{{ stateOf(group).text }}</span>
-          </td>
-          <td v-for="dim in SCHED_DIMS" :key="dim" class="sq-r sq-num">
-            <template v-for="cell in [cellOf(group, dim)]" :key="cell.kind">
-              <span v-if="cell.kind === 'shape'" role="img" :aria-label="cell.label" :class="['sq-shape', `sq-shape--${cell.verdict}`]" />
-              <span v-else v-tip="cell.tip" tabindex="0" :aria-label="cell.label" :class="['sq-focus', cell.cls]">{{ cell.text }}</span>
-            </template>
-          </td>
+          <!-- A group without state rows: no state word and no numbers (contract delta D3). -->
+          <template v-if="!group.by_model.length">
+            <td />
+            <td v-for="dim in SCHED_DIMS" :key="dim" />
+          </template>
+          <template v-else>
+            <td>
+              <span :class="stateOf(group).cls">{{ stateOf(group).text }}</span>
+            </td>
+            <td v-for="dim in SCHED_DIMS" :key="dim" class="sq-r sq-num">
+              <template v-for="cell in [cellOf(group, dim)]" :key="cell.kind">
+                <span v-if="cell.kind === 'shape'" role="img" :aria-label="cell.label" :class="['sq-shape', `sq-shape--${cell.verdict}`]" />
+                <span v-else v-tip="cell.tip" tabindex="0" :aria-label="cell.label" :class="['sq-focus', cell.cls]">{{ cell.text }}</span>
+              </template>
+            </td>
+          </template>
           <td class="sq-r">
             <span v-if="failedGroups.has(group.group_id)" class="sq-fail-word mr-2">{{ t('admin.schedQuality.result.failed') }}</span>
             <button
@@ -48,6 +67,7 @@
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+import SchedOverrideCapsule from './SchedOverrideCapsule.vue'
 import type { SchedAccountGroup, SchedGroupModelRow, SchedModelEvidence, SchedOverrideMode, SchedVerdict } from '@/types/schedQuality'
 import { secondsUntil } from '@/composables/useSchedQuality'
 import { useAdminPermission } from '@/composables/useAdminPermission'

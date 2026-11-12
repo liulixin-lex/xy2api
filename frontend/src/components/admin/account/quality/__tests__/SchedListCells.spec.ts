@@ -1,9 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 
-import type { SchedAccountSummary } from '@/types/schedQuality'
+import type { SchedAccountSummary, SchedAccountSummaryOverride } from '@/types/schedQuality'
 import summaryFixture from '@/__tests__/fixtures/schedQuality/account_summary.json'
-import SchedNumberCell from '../SchedNumberCell.vue'
 import SchedGroupsCell from '../SchedGroupsCell.vue'
 
 vi.mock('vue-i18n', async () => ({
@@ -11,72 +10,51 @@ vi.mock('vue-i18n', async () => ({
   useI18n: () => ({
     t: (key: string, params?: Record<string, unknown>) =>
       ({
-        'admin.schedQuality.result.timeout': '超时',
         'admin.schedQuality.state.cooling': '冷却',
         'admin.schedQuality.state.testing': '测试中',
         'admin.schedQuality.state.normal': '正常',
-        'admin.schedQuality.state.nodata': '暂无数据'
+        'admin.schedQuality.state.nodata': '暂无数据',
+        'admin.schedQuality.state.exempted': '豁免',
+        'admin.schedQuality.state.demoted': '后排',
+        'admin.schedQuality.override.allGroups': '全部分组',
+        'admin.schedQuality.override.forever': '一直',
+        'admin.schedQuality.tip.until': `至 ${params?.time}`,
+        'admin.schedQuality.more': `+${params?.n}`
       })[key] ?? (params ? `${key}:${JSON.stringify(params)}` : key)
   })
 }))
 
+type TipTarget = HTMLElement & { __tipText?: string }
+
 const base = (summaryFixture as { accounts: SchedAccountSummary[] }).accounts[0]
 const summary = (patch: Partial<SchedAccountSummary> = {}): SchedAccountSummary => ({ ...structuredClone(base), ...patch })
-const names: Record<number, string> = { 53: '晨星组', 54: '北辰组', 55: '青岚组', 56: '白露组' }
+const cooling = (group_id: number, testing = false) => ({ ...base.cooling[0], group_id, testing })
+const override = (group_id: number, mode: 'exempt' | 'demote', expires_at: string | null = null): SchedAccountSummaryOverride => ({ group_id, mode, expires_at })
+const names: Record<number, string> = { 53: '晨星组', 54: '北辰组', 55: '青岚组', 56: '白露组', 57: '霜降组' }
 const groupName = (id: number) => names[id] ?? `#${id}`
 
-describe('SchedNumberCell', () => {
-  const cell = (dim: 'ttfo' | 'error' | 'cache', s?: SchedAccountSummary, extra: Record<string, unknown> = {}) =>
-    mount(SchedNumberCell, { props: { accountId: 479, dim, summary: s, ...extra } })
-
-  it('shows the three numbers in the neutral text colour, never a verdict colour', () => {
-    const texts = (['ttfo', 'error', 'cache'] as const).map((dim) => cell(dim, summary()))
-    expect(texts.map((w) => w.text())).toEqual(['12.4s', '0.5%', '81%'])
-    for (const w of texts) {
-      expect(w.get('button').classes()).toContain('sq-text')
-      expect(w.get('button').classes().some((c) => c.startsWith('sq-v-'))).toBe(false)
-    }
-  })
-
-  it('shows the timeout word for a timed-out p90 and a dash for missing values', () => {
-    const timedOut = summary({ ttfo: { p90_ms: null, timeout: true, n: 150 } })
-    expect(cell('ttfo', timedOut).text()).toBe('超时')
-    expect(cell('ttfo', timedOut).get('button').classes()).toContain('sq-text')
-    const empty = summary({ model: null, ttfo: { p90_ms: null, timeout: false, n: 3 }, error: { rate: null, n: 3 }, cache: { ratio: null, n: 0 } })
-    for (const dim of ['ttfo', 'error', 'cache'] as const) {
-      const w = cell(dim, empty)
-      expect(w.text()).toBe('—')
-      expect(w.get('button').classes()).toContain('sq-text-3')
-    }
-    expect(cell('error', undefined).text()).toBe('—')
-  })
-
-  it('keeps only the first-output number in the Tab order and opens the drawer on click', async () => {
-    const first = cell('ttfo', summary(), { focusable: true })
-    const second = cell('error', summary())
-    expect(first.get('button').attributes('tabindex')).toBe('0')
-    expect(second.get('button').attributes('tabindex')).toBe('-1')
-    await first.get('button').trigger('click')
-    expect(first.emitted('open')).toHaveLength(1)
-  })
-
-  it('shows a skeleton while the first summary is loading', () => {
-    expect(cell('ttfo', undefined, { loading: true }).find('.skeleton').exists()).toBe(true)
-  })
-})
+const cell = (s: SchedAccountSummary, openai = true) => mount(SchedGroupsCell, { props: { summary: s, openai, groupName } })
+const capsules = (w: ReturnType<typeof cell>) => w.findAll('.sq-capsule').map((c) => c.text().replace(/\s+/g, ' '))
+const more = (w: ReturnType<typeof cell>) => w.findAll('button').filter((b) => !b.classes().includes('sq-capsule')).map((b) => b.text())
 
 describe('SchedGroupsCell', () => {
-  const cell = (s: SchedAccountSummary) => mount(SchedGroupsCell, { props: { summary: s, groupName } })
-  const capsules = (w: ReturnType<typeof cell>) => w.findAll('.sq-capsule').map((c) => c.text().replace(/\s+/g, ' '))
-
-  it('shows a dot and the normal word when nothing is cooling', () => {
+  it('shows a dot and the normal word when nothing is cooling or overridden', () => {
     const w = cell(summary({ cooling: [], groups: { total: 3, normal: 3, cooling: 0, nodata: 0 } }))
     expect(w.text()).toBe('正常')
     expect(w.find('.sq-dot').exists()).toBe(true)
     expect(w.find('.sq-capsule').exists()).toBe(false)
   })
 
-  it('shows one capsule with only the group name and the state word', async () => {
+  it('shows no data when every group of the account has none, and a dash for a non-OpenAI account', () => {
+    const w = cell(summary({ model: null, cooling: [], groups: { total: 2, normal: 0, cooling: 0, nodata: 2 } }))
+    expect(w.text()).toBe('暂无数据')
+    expect(w.get('button').classes()).toContain('sq-text-3')
+    const other = cell(summary({ overrides: [override(0, 'exempt')] }), false)
+    expect(other.text()).toBe('—')
+    expect(other.find('button').exists()).toBe(false)
+  })
+
+  it('shows one capsule with only the group name and the state word and opens the drawer on its group', async () => {
     const w = cell(summary())
     expect(capsules(w)).toEqual(['晨星组 冷却'])
     expect(w.get('.sq-capsule').classes()).toContain('sq-capsule--cool')
@@ -84,20 +62,62 @@ describe('SchedGroupsCell', () => {
     expect(w.emitted('open')?.[0][0]).toEqual({ model: 'gpt-6.1-sol', groupId: 53 })
   })
 
-  it('shows three capsules and +1 for four cooling groups; a testing group reads 测试中', async () => {
-    const cooling = [53, 54, 55].map((group_id, i) => ({ ...base.cooling[0], group_id, testing: i === 1 }))
-    const w = cell(summary({ cooling, cooling_more: 1, groups: { total: 5, normal: 1, cooling: 4, nodata: 0 } }))
-    expect(capsules(w)).toEqual(['晨星组 冷却', '北辰组 测试中', '青岚组 冷却'])
-    expect(w.findAll('.sq-capsule')[1].classes()).toContain('sq-capsule--test')
-    const more = w.findAll('button').at(-1)!
-    expect(more.text()).toBe('admin.schedQuality.more:{"n":1}')
-    await more.trigger('click')
+  it('shows three capsules and +1 for four cooling groups; a testing group reads 测试中 and comes first', async () => {
+    const w = cell(summary({ cooling: [cooling(53), cooling(54, true), cooling(55), cooling(56)] }))
+    expect(capsules(w)).toEqual(['北辰组 测试中', '晨星组 冷却', '青岚组 冷却'])
+    expect(w.findAll('.sq-capsule')[0].classes()).toContain('sq-capsule--test')
+    expect(more(w)).toEqual(['+1'])
+    await w.findAll('button').at(-1)!.trigger('click')
     expect(w.emitted('open')?.[0][0]).toEqual({ model: 'gpt-6.1-sol', toGroups: true })
   })
 
-  it('shows no data when every group of the account has none', () => {
-    const w = cell(summary({ model: null, cooling: [], groups: { total: 2, normal: 0, cooling: 0, nodata: 2 } }))
-    expect(w.text()).toBe('暂无数据')
-    expect(w.get('button').classes()).toContain('sq-text-3')
+  // Scenario 28.
+  it('shows one capsule per group with the override winning over its cooling', () => {
+    const w = cell(summary({ cooling: [cooling(53), cooling(54)], overrides: [override(53, 'exempt')] }))
+    expect(capsules(w)).toEqual(['晨星组 豁免', '北辰组 冷却'])
+    expect(more(w)).toEqual([])
+  })
+
+  it('shows the all-groups override and 4 own exceptions as the first 3 and +2', () => {
+    const w = cell(summary({
+      cooling: [cooling(53)],
+      overrides: [override(0, 'demote'), override(53, 'exempt'), override(54, 'demote'), override(55, 'exempt'), override(56, 'exempt')]
+    }))
+    expect(capsules(w)).toEqual(['全部分组 后排', '晨星组 豁免', '北辰组 后排'])
+    expect(more(w)).toEqual(['+2'])
+  })
+
+  it('shows only the all-groups capsule, without +N, when the other groups are normal or covered by it', async () => {
+    const w = cell(summary({ cooling: [cooling(53), cooling(54, true)], overrides: [override(0, 'exempt')] }))
+    expect(capsules(w)).toEqual(['全部分组 豁免'])
+    expect(more(w)).toEqual([])
+    expect(w.get('.sq-capsule').classes()).toContain('sq-capsule--all')
+    // The all-groups capsule opens the drawer at its top.
+    await w.get('.sq-capsule').trigger('click')
+    expect(w.emitted('open')?.[0][0]).toEqual({ model: 'gpt-6.1-sol' })
+  })
+
+  // Scenario 34: exempt and demote share one colour (manual, dashed) and differ by icon and word; cooling and
+  // testing keep their own colours.
+  it('gives exempt and demote one manual colour, told apart by icon and word, unlike cooling and testing', () => {
+    const kinds = (w: ReturnType<typeof cell>) => w.findAll('.sq-capsule').map((c) => [c.attributes('data-sq-kind'), ...c.classes().filter((name) => name.startsWith('sq-capsule--'))])
+    const manual = cell(summary({ cooling: [cooling(55, true)], overrides: [override(53, 'exempt'), override(54, 'demote')] }))
+    expect(kinds(manual)).toEqual([['exempt', 'sq-capsule--manual'], ['demote', 'sq-capsule--manual'], ['testing', 'sq-capsule--test']])
+    const [exempt, demote, testing] = manual.findAll('.sq-capsule')
+    expect(exempt.find('svg path').attributes('d')).not.toBe(demote.find('svg path').attributes('d'))
+    expect(testing.find('svg').exists()).toBe(false)
+    expect(kinds(cell(summary()))).toEqual([['cooling', 'sq-capsule--cool']])
+  })
+
+  it('puts the expiry of an override in its tip and its accessible name', () => {
+    const later = new Date(Date.now() + 3 * 86_400_000)
+    later.setHours(18, 30, 0, 0)
+    const w = cell(summary({ cooling: [], overrides: [override(0, 'exempt', later.toISOString()), override(54, 'demote')] }))
+    const [all, own] = w.findAll('.sq-capsule')
+    const day = `${String(later.getMonth() + 1).padStart(2, '0')}-${String(later.getDate()).padStart(2, '0')}`
+    expect((all.element as TipTarget).__tipText).toBe(`至 ${day} 18:30`)
+    expect(all.attributes('aria-label')).toBe(`全部分组 豁免 至 ${day} 18:30`)
+    expect((own.element as TipTarget).__tipText).toBe('一直')
+    expect(own.attributes('aria-label')).toBe('北辰组 后排 一直')
   })
 })

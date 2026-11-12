@@ -3,6 +3,16 @@ package schedquality
 import "time"
 
 const (
+	ViaGateOff     Via = "gate_off"
+	ViaRealPass    Via = "real_pass"
+	ViaTestPass    Via = "test_pass"
+	ViaScreenClean Via = "screen_clean"
+	ViaTestsOff    Via = "tests_off"
+	ViaWaitMax     Via = "wait_max"
+	ViaReset       Via = "reset"
+)
+
+const (
 	WindowMaxSamples        = 200
 	WindowMaxAge            = 6 * time.Hour
 	SessionShareCap         = 0.25
@@ -54,9 +64,8 @@ const (
 	TakeoverMaxCandidates   = 2
 	BorrowMaxProbes         = 64
 	SummaryMaxAccounts      = 1000
-	SummaryMaxCooling       = 3
 	RecentAttemptsMax       = 50
-	ManualTestMaxModels     = 3
+	ManualTestMaxModels     = 1
 	PolicyTTFTMinSeconds    = 0.5
 	PolicyTTFTMaxSeconds    = 600
 	TestPromptTolerance     = 0.05
@@ -64,7 +73,7 @@ const (
 )
 
 var TakeoverIdleChoices = [...]int{-1, 0, 300, 900, 1800}
-var CooldownLadder = [...]time.Duration{30 * time.Second, time.Minute, 2 * time.Minute, 5 * time.Minute, 15 * time.Minute, 30 * time.Minute}
+var CooldownLadder = [...]time.Duration{5 * time.Minute, 15 * time.Minute, 30 * time.Minute, time.Hour, 2 * time.Hour}
 var ClassScaleTable = map[string][4]float64{
 	"gpt-6.1-sol": {0.73, 1, 1.20, 1.43}, "gpt-6-astra": {0.86, 1, 1.12, 1.20},
 	"gpt-5.6-sol": {0.90, 1, 1.18, 1.62}, "default": {0.75, 1, 1.20, 1.40},
@@ -80,3 +89,4 @@ type TestTierSpec struct {
 }
 
 var TestTiers = [3]TestTierSpec{{15000, "low"}, {60000, "high"}, {130000, "xhigh"}}
+var AutoTestTiers = [...]TestTier{TierSmall}

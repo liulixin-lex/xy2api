@@ -7,6 +7,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ip"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"go.uber.org/zap"
 )
 
@@ -76,6 +77,9 @@ func Logger() gin.HandlerFunc {
 		}
 		if model != "" {
 			fields = append(fields, zap.String("model", model))
+		}
+		if requestID := resilience.StateFrom(c.Request.Context()).GatewayRequestID(); requestID != "" {
+			fields = append(fields, zap.String("gateway_request_id", requestID))
 		}
 
 		l := logger.FromContext(c.Request.Context()).With(fields...)

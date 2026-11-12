@@ -40,6 +40,7 @@ import type {
   OpenCodeGoUsageSettings,
   OpenCodeGoUsageState
 } from '@/types'
+import type { AccountRecentStatsBatch } from '@/types/schedQuality'
 
 /**
  * List all accounts with pagination
@@ -623,6 +624,16 @@ export async function getBatchTodayStats(accountIds: number[]): Promise<BatchTod
   return data
 }
 
+/** Recent status of up to 1000 accounts (contract delta C4); one item per account, by account id. */
+export async function getRecentStats(accountIds: number[], options?: { signal?: AbortSignal }): Promise<AccountRecentStatsBatch> {
+  const { data } = await apiClient.post<AccountRecentStatsBatch>(
+    '/admin/accounts/recent-stats/batch',
+    { account_ids: accountIds },
+    { signal: options?.signal }
+  )
+  return data
+}
+
 /** 上游余额列（xy-upstream-balance）。state=ok 表示有当前身份下的成功值；其余见 docs/guides/upstream-balance.md。 */
 export type UpstreamBalanceState = 'ok' | 'unavailable' | 'not_applicable'
 /** null 表示口径未知（new-api 只用 Key 查询时通常为 null）。 */
@@ -820,7 +831,7 @@ export async function exportData(options?: {
     sort_by?: string
     sort_order?: 'asc' | 'desc'
     group_category?: string
-    /** "cooling" (contract clarification K11 / K24). */
+    /** "normal" | "cooling" | "exempt" | "demote" (contract delta D2, clarification K24). */
     sched_quality?: string
   }
   includeProxies?: boolean
@@ -1249,6 +1260,7 @@ export const accountsAPI = {
   getBatchUsage,
   getTodayStats,
   getBatchTodayStats,
+  getRecentStats,
   getUpstreamBalances,
   clearRateLimit,
   resetAccountQuota,

@@ -60,6 +60,15 @@ func TestSchedTestAdmissionHardGatesAndNoMutation(t *testing.T) {
 		{"model_limit", func(s *OpenAIGatewayService, a *Account) {
 			setAccountModelRateLimitSnapshot(a, "m", future, "limited", now)
 		}, "model_rate_limited"},
+		{"ticket", func(s *OpenAIGatewayService, a *Account) {
+			s.cfg = &config.Config{}
+			s.cfg.Gateway.OpenAICodexTicket.Enabled = true
+			a.Type = AccountTypeOAuth
+			a.Extra = map[string]any{
+				codexAccountTicketConfigKey: codexAccountTicketConfig{Enabled: true, Models: []string{"m"}, Revision: "test", TicketPlan: codexTicketPlanPro},
+				codexTicketSchedulingKey:    map[string]codexTicketSchedulingEntry{},
+			}
+		}, "runtime_blocked"},
 		{"transient", func(s *OpenAIGatewayService, a *Account) {
 			s.getOpenAIAccountModelTransientState().recordFailure(a.ID, "m", now)
 			s.getOpenAIAccountModelTransientState().recordFailure(a.ID, "m", now)
@@ -80,6 +89,9 @@ func TestSchedTestAdmissionHardGatesAndNoMutation(t *testing.T) {
 			_, ok, reason := s.TestRequestModel(context.Background(), a, "m")
 			require.False(t, ok)
 			require.Equal(t, tt.reason, reason)
+			if reason == "runtime_blocked" {
+				require.Equal(t, "paused", schedTestAdmissionBlockedBy(a, "m", reason, now))
+			}
 			for k, v := range state.entries {
 				old := before[k]
 				v.lastTouched = old.lastTouched
@@ -143,3 +155,78 @@ func TestSchedTestAdmissionSchedulingThreshold(t *testing.T) {
 }
 
 func ptrInt64Selection(v int64) *int64 { return &v }
+
+func TestSchedTestAdmissionBlockedBy(t *testing.T) {
+	now := time.Now()
+	future, expired := now.Add(time.Hour), now.Add(-time.Second)
+	for _, tc := range []struct {
+		name, reason, want string
+		setup              func(*Account)
+	}{
+		{"status_before_overload", "not_schedulable", "disabled", func(a *Account) { a.Status = StatusDisabled; a.OverloadUntil = &future }},
+		{"unknown_error", "not_schedulable", "other", func(a *Account) { a.Status = StatusError; a.ErrorMessage = "auth: private old error" }},
+		{"switch_before_rate", "not_schedulable", "disabled", func(a *Account) { a.Schedulable = false; a.RateLimitResetAt = &future }},
+		{"expired_before_overload", "not_schedulable", "disabled", func(a *Account) { a.AutoPauseOnExpired = true; a.ExpiresAt = &expired; a.OverloadUntil = &future }},
+		{"overload_before_rate", "not_schedulable", "overloaded", func(a *Account) { a.OverloadUntil = &future; a.RateLimitResetAt = &future }},
+		{"rate_before_temp", "not_schedulable", "rate_limited", func(a *Account) {
+			a.RateLimitResetAt = &future
+			a.TempUnschedulableUntil = &future
+			a.TempUnschedulableReason = "balance: private"
+		}},
+		{"balance", "not_schedulable", "balance", func(a *Account) { a.TempUnschedulableUntil = &future; a.TempUnschedulableReason = "balance: private" }},
+		{"auth", "not_schedulable", "auth", func(a *Account) { a.TempUnschedulableUntil = &future; a.TempUnschedulableReason = "auth: private" }},
+		{"oauth_401", "not_schedulable", "auth", func(a *Account) {
+			a.TempUnschedulableUntil = &future
+			a.TempUnschedulableReason = "OAuth 401: private upstream message"
+		}},
+		{"authentication_401", "not_schedulable", "auth", func(a *Account) {
+			a.TempUnschedulableUntil = &future
+			a.TempUnschedulableReason = "Authentication failed (401): invalid or expired credentials"
+		}},
+		{"stored_threshold", "not_schedulable", "quota", func(a *Account) {
+			a.TempUnschedulableUntil = &future
+			a.TempUnschedulableReason = BuildAccountSchedulingThresholdReason("private")
+		}},
+		{"legacy_temp", "not_schedulable", "paused", func(a *Account) {
+			a.TempUnschedulableUntil = &future
+			a.TempUnschedulableReason = "401 invalid credentials private"
+		}},
+		{"temp_before_quota", "not_schedulable", "paused", func(a *Account) {
+			a.TempUnschedulableUntil = &future
+			a.Type = AccountTypeAPIKey
+			a.Extra = map[string]any{"quota_limit": 1.0, "quota_used": 1.0}
+		}},
+		{"quota_after_expired_temp", "not_schedulable", "quota", func(a *Account) {
+			a.TempUnschedulableUntil = &expired
+			a.Type = AccountTypeAPIKey
+			a.Extra = map[string]any{"quota_limit": 1.0, "quota_used": 1.0}
+		}},
+		{"unresolved", "not_schedulable", "other", nil},
+		{"threshold_before_disabled", "account_scheduling_threshold", "quota", func(a *Account) { a.Schedulable = false }},
+		{"reverse_model_before_disabled", "no_model", "model", func(a *Account) { a.Schedulable = false }},
+		{"ownership", "account_model_not_owned", "model", nil},
+		{"unsupported", "model_not_supported", "model", nil},
+		{"model_limit", "model_rate_limited", "model", nil},
+		{"channel", "channel_upstream_restricted", "other", nil},
+		{"quota_pause", "quota_auto_pause_5h", "quota", nil},
+		{"quota_reset", "quota_auto_reset_pending_7d", "quota", nil},
+		{"quota_credit", "quota_auto_reset_credit_check_5h", "quota", nil},
+		{"runtime_iq", "runtime_blocked", "model", func(a *Account) {
+			a.Extra = map[string]any{"model_rate_limits": map[string]any{"iq:m": map[string]any{}}}
+		}},
+		{"runtime_unknown", "runtime_blocked", "paused", nil},
+		{"proxy", "proxy_stream_quarantined", "paused", nil},
+		{"parent", "shadow_parent_unhealthy", "other", nil},
+		{"capability", "capability_mismatch", "other", nil},
+		{"raw", "private upstream message", "other", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := selectionTestAccount(1, 1)
+			if tc.setup != nil {
+				tc.setup(a)
+			}
+			require.Equal(t, tc.want, schedTestAdmissionBlockedBy(a, "m", tc.reason, now))
+		})
+	}
+	require.Equal(t, "other", schedTestAdmissionBlockedBy(nil, "m", "no_model", now))
+}

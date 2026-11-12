@@ -11,7 +11,19 @@
       >
         <div class="py-1">
           <template v-if="account">
-            <!-- 三组：检测与查看 → 账号操作 → 恢复；文字统一中性色，图标统一灰色 -->
+            <!-- 恢复状态只在恢复解得了某个状态时出现，排第一；其后检测与查看 → 账号操作 → 删除。文字统一中性色，图标统一灰色 -->
+            <template v-if="canManage && recoverable">
+              <button
+                :class="[ITEM, 'aria-disabled:cursor-not-allowed aria-disabled:opacity-50']"
+                :aria-disabled="recovering || undefined"
+                data-test="menu-recover-state"
+                @click="onRecover"
+              >
+                <Icon name="sync" size="sm" :class="ICON" />
+                {{ t('admin.accounts.recoverState') }}
+              </button>
+              <div :class="DIVIDER"></div>
+            </template>
             <button v-if="canManage" :class="ITEM" @click="$emit('test', account); $emit('close')">
               <Icon name="play" size="sm" :class="ICON" />
               {{ t('admin.accounts.testConnection') }}
@@ -60,16 +72,17 @@
               <Icon name="shield" size="sm" :class="ICON" />
               {{ t('admin.accounts.setPrivacy') }}
             </button>
-            <div v-if="canManage" :class="DIVIDER"></div>
-            <!-- 对任何账号显示：打开恢复确认流（已清除 / 保留 / 失败） -->
-            <button v-if="canManage" :class="ITEM" @click="$emit('recover-state', account); $emit('close')">
-              <Icon name="sync" size="sm" :class="ICON" />
-              {{ t('admin.accounts.recoverState') }}
-            </button>
             <button v-if="canManage && hasQuotaLimit" :class="ITEM" @click="$emit('reset-quota', account); $emit('close')">
               <Icon name="dollar" size="sm" :class="ICON" />
               {{ t('admin.accounts.resetQuota') }}
             </button>
+            <template v-if="canManage">
+              <div :class="DIVIDER"></div>
+              <button :class="[ITEM, '!text-red-600 dark:!text-red-400']" data-test="menu-delete" @click="$emit('delete', account); $emit('close')">
+                <Icon name="trash" size="sm" class="shrink-0 text-red-500 dark:text-red-400" />
+                {{ t('common.delete') }}
+              </button>
+            </template>
           </template>
         </div>
       </div>
@@ -87,8 +100,16 @@ import type { Account } from '@/types'
 import { useAuthStore } from '@/stores/auth'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 
-const props = defineProps<{ show: boolean; account: Account | null; anchorRect: DOMRect | null }>()
-const emit = defineEmits(['iq-run', 'iq-records', 'close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow', 'manage-openai-totp'])
+const props = defineProps<{
+  show: boolean
+  account: Account | null
+  anchorRect: DOMRect | null
+  /** A recovery can clear something on this account (contract delta F1). */
+  recoverable?: boolean
+  /** Its recovery is still running; the item stays first but does nothing. */
+  recovering?: boolean
+}>()
+const emit = defineEmits(['iq-run', 'iq-records', 'close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow', 'manage-openai-totp', 'delete'])
 const { t } = useI18n()
 const auth = useAuthStore()
 const { canManage } = useAdminPermission('accounts')
@@ -143,14 +164,6 @@ const isShadow = computed(() => props.account?.parent_account_id != null)
 const isOpenAIOAuthParent = computed(() => isOpenAIOAuth.value && !isShadow.value)
 const supportsPrivacy = computed(() => (isAntigravityOAuth.value || isOpenAIOAuth.value) && !isShadow.value)
 const canRenewCredentials = computed(() => canManage.value && (props.account?.type === 'oauth' || props.account?.type === 'setup-token') && !isShadow.value)
-// 第二组（账号操作）有任一项时才画分隔线。
-const hasAccountActions = computed(() =>
-  (canDuplicate.value && canPlace.value) ||
-  canRenewCredentials.value ||
-  (auth.isAdmin && isOpenAIOAuthParent.value) ||
-  (isOpenAIOAuthParent.value && canPlace.value) ||
-  (canManage.value && supportsPrivacy.value)
-)
 const hasQuotaLimit = computed(() => {
   return (props.account?.type === 'apikey' || props.account?.type === 'bedrock') && (
     (props.account?.quota_limit ?? 0) > 0 ||
@@ -158,6 +171,20 @@ const hasQuotaLimit = computed(() => {
     (props.account?.quota_weekly_limit ?? 0) > 0
   )
 })
+// 第二组（账号操作）有任一项时才画分隔线。
+const hasAccountActions = computed(() =>
+  (canDuplicate.value && canPlace.value) ||
+  canRenewCredentials.value ||
+  (auth.isAdmin && isOpenAIOAuthParent.value) ||
+  (isOpenAIOAuthParent.value && canPlace.value) ||
+  (canManage.value && supportsPrivacy.value) ||
+  (canManage.value && hasQuotaLimit.value)
+)
+
+function onRecover() {
+  if (!props.recovering) emit('recover-state', props.account)
+  emit('close')
+}
 
 // A sub-layer of the overlay stack (design spec 0.2): while open, Escape closes it before the layer or page
 // below, re-renders below keep their hands off its focus, and a dialog opening above closes it.

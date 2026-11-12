@@ -5,7 +5,8 @@ import "time"
 // Next is section 7. prev.State == StateNormal with zero Since means "no row".
 // remove = delete the row; wantTest = this row is waiting for test evidence. Next does not know whether a test is
 // running: the executor asks the runner, which starts one only if none is running and TestRetryEvery has passed.
-func Next(prev StateRow, in Inputs, now time.Time) (next StateRow, changed, remove, wantTest bool) {
+// via identifies only cooling-to-normal transitions.
+func Next(prev StateRow, in Inputs, now time.Time) (next StateRow, changed, remove, wantTest bool, via Via) {
 	next = prev
 	defer func() {
 		remove = !prev.Since.IsZero() && next.State == StateNormal && next.Level == 0 && now.Sub(next.Since) >= WindowMaxAge
@@ -52,6 +53,7 @@ func Next(prev StateRow, in Inputs, now time.Time) (next StateRow, changed, remo
 	}
 	if !in.Policy.Enabled {
 		recover(false)
+		via = ViaGateOff
 		return
 	}
 	if in.Summary.Acute {
@@ -63,20 +65,42 @@ func Next(prev StateRow, in Inputs, now time.Time) (next StateRow, changed, remo
 		return
 	}
 	var caused Verdict
+	var causedByTest bool
 	switch next.Reason {
 	case ReasonSpeed, ReasonTestSpeed, ReasonAcuteTimeout:
-		caused = eff.Speed
+		caused, causedByTest = eff.Speed, fromTest[0]
 	case ReasonError, ReasonTestError:
-		caused = eff.Error
+		caused, causedByTest = eff.Error, fromTest[1]
 	case ReasonCache, ReasonTestCache:
-		caused = eff.Cache
+		caused, causedByTest = eff.Cache, fromTest[2]
 	}
 	if caused == VerdictPass {
 		recover(true)
-	} else if !in.TestsEnabled || now.Sub(next.Until) >= TestWaitMax {
+		if causedByTest {
+			via = ViaTestPass
+		} else {
+			via = ViaRealPass
+		}
+	} else if hasCleanCurrentTest(in.Tests, in.ResetAt, prev.Since, now) {
+		recover(true)
+		via = ViaScreenClean
+	} else if !in.TestsEnabled {
 		recover(false)
+		via = ViaTestsOff
+	} else if now.Sub(next.Until) >= TestWaitMax {
+		recover(false)
+		via = ViaWaitMax
 	} else {
 		wantTest = true
 	}
 	return
+}
+
+func hasCleanCurrentTest(tests []TestResult, resetAt, rowSince, now time.Time) bool {
+	for _, test := range tests {
+		if testInCurrentRound(test, resetAt, rowSince, now) && TestClean(test) {
+			return true
+		}
+	}
+	return false
 }

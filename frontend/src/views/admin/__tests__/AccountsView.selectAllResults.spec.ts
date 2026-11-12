@@ -31,6 +31,7 @@ vi.mock('@/api/admin', () => ({
       list: listAccounts,
       listWithEtag,
       getBatchTodayStats,
+      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
       getUpstreamBillingProbeSettings,
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       batchDelete: vi.fn(),
@@ -102,6 +103,11 @@ const AccountTableFiltersStub = {
   emits: ['change'],
   template: '<button data-test="change-filter" @click="$emit(\'change\')">change filter</button>'
 }
+
+// The bulk bar shows only while something is selected (R2 ui-proposal 6.1 #7): tick the first row to bring it up.
+const selectFirstRow = (wrapper: ReturnType<typeof mountView>) =>
+  wrapper.findAll('[data-test="data-table"] input')[0].trigger('change')
+const bar = (wrapper: ReturnType<typeof mountView>) => wrapper.findComponent(AccountBulkActionsBarStub)
 
 const mountView = () => mount(AccountsView, {
   global: {
@@ -180,13 +186,15 @@ describe('admin AccountsView select all filtered results', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     const wrapper = mountView()
     await flushPromises()
+    await selectFirstRow(wrapper)
     await wrapper.get('[data-test="select-page"]').trigger('click')
     await wrapper.get('[data-test="refresh-token"]').trigger('click')
     await flushPromises()
 
     expect(batchRefresh).toHaveBeenCalledWith([1, 2, 3])
     expect(listAccounts).toHaveBeenCalledTimes(2)
-    expect(wrapper.getComponent(AccountBulkActionsBarStub).props('selectedIds')).toEqual(expectedIds)
+    if (expectedIds.length) expect(bar(wrapper).props('selectedIds')).toEqual(expectedIds)
+    else expect(bar(wrapper).exists()).toBe(false)
     expect(wrapper.findAll<HTMLInputElement>('[data-test="data-table"] input').map(input => input.element.checked))
       .toEqual([1, 2, 3].map(id => expectedIds.includes(id)))
     if (result.failed > 0) {
@@ -222,6 +230,7 @@ describe('admin AccountsView select all filtered results', () => {
     const wrapper = mountView()
     await flushPromises()
 
+    await selectFirstRow(wrapper)
     await wrapper.get('[data-test="select-all-results"]').trigger('click')
     await flushPromises()
 
@@ -234,8 +243,7 @@ describe('admin AccountsView select all filtered results', () => {
 
     await wrapper.get('[data-test="change-filter"]').trigger('click')
 
-    expect(wrapper.get('[data-test="selected-count"]').text()).toBe('0')
-    expect(wrapper.get('[data-test="all-results-selected"]').text()).toBe('false')
+    expect(bar(wrapper).exists()).toBe(false)
   })
 
   it('keeps the original page selection when loading all results fails', async () => {
@@ -256,6 +264,7 @@ describe('admin AccountsView select all filtered results', () => {
     const wrapper = mountView()
     await flushPromises()
 
+    await selectFirstRow(wrapper)
     await wrapper.get('[data-test="select-page"]').trigger('click')
     expect(wrapper.get('[data-test="selected-count"]').text()).toBe('20')
 

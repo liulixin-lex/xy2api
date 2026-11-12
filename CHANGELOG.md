@@ -6,10 +6,20 @@
 
 ### 新增
 
+- 账号列表新增“近期状况”一列：首字（最近 10 分钟 P50）、错误（最近 100 条结果的失败占比）、缓存（最近 30 分钟命中率）三小行，按账号汇总真实请求，所有平台都算，按档位着色，只用于展示、不参与选号；点击打开该账号的使用记录。接口 `POST /api/v1/admin/accounts/recent-stats/batch`（最多 1000 个账号，权限同账号列表的查看）；运维监控未开启时错误为空。见 [分组质量门槛](docs/guides/group-quality-gate.md#账号列表)。
+- 账号列表的分组列显示人工覆盖：“豁免”“后排”胶囊（含“全部分组”）用同一种颜色，悬停显示到期时间。质量状态筛选改为下拉“全部质量状态”，选项 正常、冷却中、豁免、后排；账号列表接口的 `sched_quality` 增加 `normal`、`exempt`、`demote`，全选所有结果、按筛选批量更新、导出、上游倍率查询同样生效。
+- 质量状态的可观测性：每个实例每 5 分钟一条运行汇总 `sched_quality.summary`；每次测试结束一条 `sched_quality.test`，作废时写明被什么挡住（`blocked_by`）；每次清理一条 `sched_quality.cleanup`；会话改绑成功一条 `sched_quality.takeover`；单次评估超过 5 秒写一条 Warn。`sched_quality.state` 增加 `until` 与 `via`。访问日志增加 `gateway_request_id`，与尝试记录的 `request_id` 相同。见 [观测与排障](docs/guides/gateway-resilience-observability.md#质量状态)。
 - 管理员可创建按操作、分组、平台和账号类型授权的机器密钥，支持 IP 限制、轮换、撤销和审计；新增默认关闭的 OAuth 管理 MCP，保留原有只读 MCP 与操作员权限。见 [管理员密钥](docs/guides/admin-api-keys.md) 和 [管理 MCP](docs/guides/management-mcp.md)。
 
 ### 变更
 
+- OpenAI 质量状态的自动测试改为筛查：冷却到点、缺少真实数据时只跑小档 3 轮（约 5 万输入 Token，原来一次约 62 万）；筛查干净（发出的轮次全部正常完成）即回到正常，与合格恢复同等对待，不算未经验证。手动测试仍是小、中、大三档，不指定模型时只测 1 个（该账号真实样本最多的模型）。见 [主动测试](docs/guides/group-quality-gate.md#主动测试)。
+- 测试不再给缓存下结论（自动、手动都不给），不再产生冷却原因 `test_cache`；缓存只看真实数据。
+- 冷却阶梯改为 5 分钟、15 分钟、30 分钟、1 小时、2 小时五级（原为 30 秒起、最长 30 分钟）。
+- `sched_quality.state` 的 `via` 改为 `gate_off`、`real_pass`、`test_pass`、`screen_clean`、`tests_off`、`wait_max`（管理员恢复仍为 `reset`），原来的 `pass`、`no_conclusion` 不再出现。
+- 管理后台账号列表：“近期实测”三列与模型下拉由“近期状况”一列取代；归组按平台着色；“恢复状态”只在账号有可恢复的状态时出现，点一下即执行，结果用一条轻提示，不再弹确认框与“已清除 / 保留 / 失败”结果框（批量恢复保留一次确认）；批量条只在勾选后出现，按钮去掉“批量”前缀，“重置状态”等收进“更多”，按筛选的“批量更新”移到工具栏“更多操作”；行操作只留“编辑”与“更多”；没有保存过列设置时默认隐藏账号 ID、创建时间、过期时间，“恢复默认列”同时恢复显隐与顺序；`/` 聚焦搜索、Shift 连选、Esc 清除勾选。
+- 账号抽屉：测试区标出“筛查”或“三档”与“完成 / 未完成 / 作废”，去掉缓存列；“各分组”列出账号所属的每个 OpenAI 分组，没有状态的分组也能设置、取消覆盖；头部“恢复”只在有冷却中的分组或可清的自动状态时出现。
+- 质量摘要 `POST /api/v1/admin/sched-quality/accounts/summary` 返回全部冷却中的分组（`cooling_more` 恒为 0）并增加 `overrides`；`GET /accounts/attention` 增加 `exempt`、`demote`；账号详情增加 `all_groups_override`，测试对象增加 `kind`（`screen` / `full`）与 `clean`。
 - Claude Code 请求兼容的配置值统一为 `claude_code`，不再区分版本，导入旧导出时 `claude_code_v1`、`claude_code_v2` 自动改为 `claude_code`；管理后台改为一个「Claude Code 请求兼容」开关加一个「接收新会话」开关，批量编辑两项都可选不修改 / 开启 / 关闭。
 - Claude Code 请求兼容支持账号模型映射中的全部 Claude 模型（此前只支持 `claude-opus-4-8`、`claude-opus-5-5`），`/v1/models` 按同样规则列出；haiku、sonnet 等模型需用「测试连接」逐个确认。
 - 兼容账号的签名历史与续接改为与普通 API Key 账号一致：会话按粘性调度留在同一账号，上游的签名错误与普通账号一样交给请求整流器处理。
@@ -50,6 +60,10 @@
 
 ### 升级说明
 
+- 质量状态的改动没有数据库迁移。升级时正在冷却的行按原来的到点时刻结束，下一轮起按新阶梯；级数大于 4 的旧行下一轮取 2 小时。旧版本留下的 `test_cache` 冷却行照常读取：真实缓存不合格时再冷却，否则经干净的筛查或到点满 10 分钟恢复。
+- 自动测试的用量大幅下降：一次筛查约 5 万输入 Token；持续不合格的账号到了最高一级每 2 小时到点筛查一次。筛查只跑小档，拦不住所有问题，放回的账号由真实请求与逐级加长的冷却继续把关。
+- 新事件按现有规则写入运维监控的系统日志（组件 `sched_quality`）；访问日志只在开启“将访问日志写入数据库”时落库。
+- 回退到 0.6.3 时，质量状态的字段与取值两个版本都能读；已写下的到点时刻照常生效，下一轮起回到旧阶梯与旧的测试规则。
 - 迁移 `298_anthropic_compat_profile_final.sql` 在启动时自动把 Anthropic API Key 账号的 `anthropic_compat_profile` 从 `claude_code_v1`、`claude_code_v2` 改为 `claude_code`。新版本只认 `off` 与 `claude_code`。
 - Claude Code 请求兼容现在放开账号模型映射中的全部 Claude 模型，但 haiku、sonnet 等模型在只接受 Claude Code 的上游上能否使用未经网关实测；开放前用账号「测试连接」逐个模型确认，不通过的从映射中去掉。
 - 迁移后、新实例的调度快照重建完成前，仍可能读到旧值，确认重建完成后再切流量。蓝绿并存期间，旧实例读到 `claude_code` 会把兼容账号判为不合格，切换应尽快完成。

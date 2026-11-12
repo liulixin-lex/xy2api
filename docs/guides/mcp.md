@@ -26,7 +26,7 @@ XY2API 内置一个只读的 MCP（Model Context Protocol）服务，让外部 A
 | `xy2api.requests.get_attempts` | 读取某条错误记录的逐次上游尝试（分页） | `ops` 或 `usage`；该行属于已恢复的上游记录时另需 `ops` |
 | `xy2api.requests.search_ingress_rejections` | 入口拒绝的分钟级聚合 | `ops` |
 | `xy2api.accounts.search` | 按名称、平台、状态、分组查找上游账号摘要 | `accounts`、`channels`、`groups`、`usage` 任一 |
-| `xy2api.accounts.get_health` | 最多 100 个指定账号的近期实测（首字、错误、缓存与各分组质量状态）和已存的[上游余额](upstream-balance.md)快照 | `accounts` |
+| `xy2api.accounts.get_health` | 最多 100 个指定账号的[质量状态](group-quality-gate.md#三个数)摘要（首字、错误、缓存三个数与各分组状态）和已存的[上游余额](upstream-balance.md)快照 | `accounts` |
 | `xy2api.groups.search` | 分组 ID、名称、平台、状态与分类 | `groups`、`usage`、`users` 任一 |
 | `xy2api.groups.get_usage_summary` | 指定分组已闭合自然日的费用汇总 | `groups` |
 | `xy2api.channels.search` | 渠道元数据和分组绑定 | `channels` |

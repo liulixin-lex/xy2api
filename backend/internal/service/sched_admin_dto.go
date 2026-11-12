@@ -20,15 +20,22 @@ type SchedAdminSummary struct {
 }
 
 type SchedAdminAccountSummary struct {
-	AccountID   int64                             `json:"account_id"`
-	Model       *string                           `json:"model"`
-	Samples     int                               `json:"samples"`
-	TTFO        SchedAdminAccountSummaryTTFO      `json:"ttfo"`
-	Error       SchedAdminAccountSummaryError     `json:"error"`
-	Cache       SchedAdminAccountSummaryCache     `json:"cache"`
-	Groups      SchedAdminAccountSummaryGroups    `json:"groups"`
-	Cooling     []SchedAdminAccountSummaryCooling `json:"cooling"` // Empty lists must be [].
-	CoolingMore int                               `json:"cooling_more"`
+	AccountID   int64                              `json:"account_id"`
+	Model       *string                            `json:"model"`
+	Samples     int                                `json:"samples"`
+	TTFO        SchedAdminAccountSummaryTTFO       `json:"ttfo"`
+	Error       SchedAdminAccountSummaryError      `json:"error"`
+	Cache       SchedAdminAccountSummaryCache      `json:"cache"`
+	Groups      SchedAdminAccountSummaryGroups     `json:"groups"`
+	Cooling     []SchedAdminAccountSummaryCooling  `json:"cooling"` // Empty lists must be [].
+	CoolingMore int                                `json:"cooling_more"`
+	Overrides   []SchedAdminAccountSummaryOverride `json:"overrides"` // Empty lists must be [].
+}
+
+type SchedAdminAccountSummaryOverride struct {
+	GroupID   int64   `json:"group_id"`
+	Mode      string  `json:"mode"`
+	ExpiresAt *string `json:"expires_at"`
 }
 
 type SchedAdminAccountSummaryTTFO struct {
@@ -64,16 +71,17 @@ type SchedAdminAccountSummaryCooling struct {
 }
 
 type SchedAdminAccountDetail struct {
-	Account        SchedAdminAccountDetailAccount          `json:"account"`
-	At             string                                  `json:"at"`
-	Stale          bool                                    `json:"stale"`
-	GlobalEnabled  bool                                    `json:"global_enabled"`
-	TestsEnabled   bool                                    `json:"tests_enabled"`
-	ResetAt        *string                                 `json:"reset_at"`
-	Models         []SchedAdminAccountDetailModels         `json:"models"`          // Empty lists must be [].
-	Groups         []SchedAdminAccountDetailGroups         `json:"groups"`          // Empty lists must be [].
-	AutoStates     []SchedAdminAccountDetailAutoStates     `json:"auto_states"`     // Empty lists must be [].
-	RecentAttempts []SchedAdminAccountDetailRecentAttempts `json:"recent_attempts"` // Empty lists must be [].
+	Account           SchedAdminAccountDetailAccount          `json:"account"`
+	At                string                                  `json:"at"`
+	Stale             bool                                    `json:"stale"`
+	GlobalEnabled     bool                                    `json:"global_enabled"`
+	TestsEnabled      bool                                    `json:"tests_enabled"`
+	ResetAt           *string                                 `json:"reset_at"`
+	AllGroupsOverride *SchedAdminOverride                     `json:"all_groups_override"`
+	Models            []SchedAdminAccountDetailModels         `json:"models"`          // Empty lists must be [].
+	Groups            []SchedAdminAccountDetailGroups         `json:"groups"`          // Empty lists must be [].
+	AutoStates        []SchedAdminAccountDetailAutoStates     `json:"auto_states"`     // Empty lists must be [].
+	RecentAttempts    []SchedAdminAccountDetailRecentAttempts `json:"recent_attempts"` // Empty lists must be [].
 }
 
 type SchedAdminAccountDetailAccount struct {
@@ -136,6 +144,8 @@ type SchedAdminAccountDetailModelsTest struct {
 	Done         bool                                     `json:"done"`
 	AbortReason  string                                   `json:"abort_reason"`
 	Auto         bool                                     `json:"auto"`
+	Kind         string                                   `json:"kind"`
+	Clean        bool                                     `json:"clean"`
 	Tiers        []SchedAdminAccountDetailModelsTestTiers `json:"tiers"` // Empty lists must be [].
 	InputTokens  int                                      `json:"input_tokens"`
 	CachedTokens int                                      `json:"cached_tokens"`
@@ -273,6 +283,8 @@ type SchedAdminClearAutoState struct {
 
 type SchedAdminAttention struct {
 	Cooling []int64 `json:"cooling"` // Empty lists must be [].
+	Exempt  []int64 `json:"exempt"`  // Empty lists must be [].
+	Demote  []int64 `json:"demote"`  // Empty lists must be [].
 }
 
 type SchedAdminPolicy struct {

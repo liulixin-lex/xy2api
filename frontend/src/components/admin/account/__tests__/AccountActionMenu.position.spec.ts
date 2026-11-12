@@ -32,7 +32,8 @@ function setViewport(width: number, height: number) {
 
 async function mountMenu(anchorRect = new DOMRect(950, 720, 32, 24)) {
   const wrapper = mount(AccountActionMenu, {
-    props: { show: true, account, anchorRect },
+    // A rate-limited account: 恢复状态 is on the menu (contract delta F1).
+    props: { show: true, account, anchorRect, recoverable: true },
     global: { stubs: { Icon: true } }
   })
   await flushPromises()

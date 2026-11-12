@@ -3,7 +3,6 @@ export default {
   schedQuality: {
     list: {
       recent: 'Recent',
-      mainModel: 'Main model',
       groups: 'Groups',
       membership: 'Membership',
     },
@@ -12,8 +11,16 @@ export default {
       error: 'Errors',
       cache: 'Cache',
     },
+    recent: {
+      samples: '{n} samples',
+      sep: ', ',
+    },
     filter: {
+      all: 'All quality states',
+      normal: 'Normal',
       cooling: 'Cooling',
+      exempt: 'Exempt',
+      demote: 'Demoted',
     },
     more: '+{n}',
     state: {
@@ -61,6 +68,13 @@ export default {
       medium: 'Medium',
       large: 'Large',
     },
+    test: {
+      screen: 'Screen',
+      full: 'Three tiers',
+      done: 'Done',
+      unfinished: 'Unfinished',
+      aborted: 'Void',
+    },
     scope: {
       account: 'Account',
       proxy: 'Proxy',
@@ -96,9 +110,11 @@ export default {
       forever: 'Always',
       reason: 'Reason',
     },
-    reset: {
-      cleared: 'Cleared',
-      preserved: 'Kept',
+    recover: {
+      ok: '{name} recovered',
+      failed: '{name} recovery failed',
+      batchOk: 'Recovered {n}',
+      batchPartial: 'Recovered {ok} · Failed {failed}',
     },
     proxy: {
       title: 'Proxy isolation',
@@ -178,16 +194,14 @@ export default {
       accountRate: 'Account rate',
     },
     tip: {
-      source: '{model} · {n}',
       samples: '{n} samples',
       testRounds: 'Test · {n} rounds',
       recentlyFull: 'Just full',
       noTakeover: 'No takeover',
-      testOk: 'No faults',
-      testFault: 'Faults',
       globalOff: 'Quality off',
       stale: 'Stale',
       editMembership: 'Edit groups',
+      until: 'Until {time}',
     },
     aria: {
       pass: 'Pass',

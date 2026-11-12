@@ -1,26 +1,31 @@
 <template>
-  <span v-if="loading" class="skeleton inline-block h-3.5 w-10 align-middle" />
+  <span v-if="!openai" class="sq-text-3 text-sm">—</span>
+  <span v-else-if="loading" class="skeleton inline-block h-3.5 w-10 align-middle" />
   <span v-else-if="!summary" />
   <span v-else class="flex flex-nowrap items-center gap-1.5 max-md:flex-wrap max-md:justify-end" data-sq-groups>
-    <template v-if="summary.cooling.length">
+    <template v-if="capsules.length">
       <button
-        v-for="item in summary.cooling"
-        :key="item.group_id"
+        v-for="item in capsules.slice(0, MAX_SHOWN)"
+        :key="item.key"
         type="button"
-        v-tip="truncated[item.group_id] ? groupName(item.group_id) : ''"
-        :class="['sq-capsule sq-focus', item.testing ? 'sq-capsule--test' : 'sq-capsule--cool', { 'sq-capsule--new': isNew(item) }]"
-        :data-sq-trigger="`cap:${summary.account_id}:${item.group_id}`"
-        @click.stop="emit('open', { model: item.model, groupId: item.group_id })"
+        v-tip="tipOf(item)"
+        :class="['sq-capsule sq-focus', CLASS[item.kind], { 'sq-capsule--all': item.groupId === 0, 'sq-capsule--new': isNew(item) }]"
+        :aria-label="ariaOf(item)"
+        :data-sq-trigger="`cap:${summary.account_id}:${item.groupId}`"
+        :data-sq-kind="item.kind"
+        @click.stop="open(item)"
       >
-        <span :ref="(el) => measure(item.group_id, el)" class="sq-capsule__name">{{ groupName(item.group_id) }}</span> <span class="sq-capsule__state">{{ t(item.testing ? 'admin.schedQuality.state.testing' : 'admin.schedQuality.state.cooling') }}</span>
+        <svg v-if="item.kind === 'exempt'" class="sq-capsule__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.4-2.9 8.3-7 10-4.1-1.7-7-5.6-7-10V6z" /></svg>
+        <svg v-else-if="item.kind === 'demote'" class="sq-capsule__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 20h14" /></svg>
+        <span :ref="(el) => measure(item.key, el)" class="sq-capsule__name">{{ nameOf(item) }}</span> <span class="sq-capsule__state">{{ t(STATE_KEY[item.kind]) }}</span>
       </button>
       <button
-        v-if="summary.cooling_more > 0"
+        v-if="capsules.length > MAX_SHOWN"
         type="button"
         class="sq-plain sq-focus sq-text-3 text-xs"
         :data-sq-trigger="`grp:${summary.account_id}`"
         @click.stop="emit('open', { model: summary.model, toGroups: true })"
-      >{{ t('admin.schedQuality.more', { n: summary.cooling_more }) }}</button>
+      >{{ t('admin.schedQuality.more', { n: capsules.length - MAX_SHOWN }) }}</button>
     </template>
     <button
       v-else-if="summary.groups.total === summary.groups.nodata"
@@ -40,16 +45,20 @@
 </template>
 
 <script setup lang="ts">
-import { reactive } from 'vue'
+import { computed, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { SchedAccountSummary, SchedAccountSummaryCooling } from '@/types/schedQuality'
+import type { SchedAccountSummary } from '@/types/schedQuality'
 import { vTip } from '@/utils/tip'
 
-// Groups column of the account list (design spec A.3): capsules `{group} 冷却` / `{group} 测试中` (at most 3, then +N),
-// otherwise `正常` with a dot or `暂无数据`. Kept on one line so row heights stay stable for the virtualizer.
+// Groups column of the account list (ui-proposal section 4, contract delta E): one capsule per group, the group's own
+// override winning over its cooling; the all-groups override is one capsule that stands for every group without its
+// own override. Order: all groups, own overrides, testing, cooling; at most 3, then +N (N = candidates - 3).
+// Otherwise `正常` with a dot or `暂无数据`; non-OpenAI accounts show a dash. Kept on one line for the virtualizer.
 const props = defineProps<{
   summary?: SchedAccountSummary
   loading?: boolean
+  /** Only OpenAI accounts are under the quality gate. */
+  openai?: boolean
   groupName: (id: number) => string
   /** Capsule keys (`account:group:state`) that newly appeared on this refresh and get the one-time emphasis. */
   fresh?: Set<string>
@@ -57,17 +66,86 @@ const props = defineProps<{
 const emit = defineEmits<{ open: [target: { model: string | null; groupId?: number; toGroups?: boolean }] }>()
 const { t } = useI18n()
 
-const capsuleKey = (item: SchedAccountSummaryCooling) =>
-  `${props.summary?.account_id}:${item.group_id}:${item.testing ? 'testing' : 'cooling'}`
-const isNew = (item: SchedAccountSummaryCooling) => !!props.fresh?.has(capsuleKey(item))
+const MAX_SHOWN = 3
+type Kind = 'exempt' | 'demote' | 'testing' | 'cooling'
+const STATE_KEY: Record<Kind, string> = {
+  exempt: 'admin.schedQuality.state.exempted',
+  demote: 'admin.schedQuality.state.demoted',
+  testing: 'admin.schedQuality.state.testing',
+  cooling: 'admin.schedQuality.state.cooling'
+}
+const RANK: Record<Kind, number> = { exempt: 1, demote: 1, testing: 2, cooling: 3 }
+// Exempt and demote share one manual colour (D35); the icon and the word tell them apart.
+const CLASS: Record<Kind, string> = { exempt: 'sq-capsule--manual', demote: 'sq-capsule--manual', testing: 'sq-capsule--test', cooling: 'sq-capsule--cool' }
 
-// A capsule whose group name is cut off shows the full name in a tip.
-const truncated = reactive<Record<number, boolean>>({})
-function measure(groupId: number, el: unknown) {
+interface Capsule {
+  key: string
+  /** 0 = all groups. */
+  groupId: number
+  kind: Kind
+  model: string | null
+  expiresAt: string | null
+}
+
+const capsules = computed<Capsule[]>(() => {
+  const s = props.summary
+  if (!s) return []
+  const items: Capsule[] = []
+  let all = false
+  const own = new Set<number>()
+  for (const o of s.overrides) {
+    if (o.group_id === 0) all = true
+    else own.add(o.group_id)
+    items.push({ key: `o:${o.group_id}`, groupId: o.group_id, kind: o.mode, model: s.model, expiresAt: o.expires_at })
+  }
+  // Cooling under any override is not shown here (the drawer has it).
+  if (!all) {
+    for (const c of s.cooling) {
+      if (own.has(c.group_id)) continue
+      items.push({ key: `c:${c.group_id}`, groupId: c.group_id, kind: c.testing ? 'testing' : 'cooling', model: c.model, expiresAt: null })
+    }
+  }
+  return items.sort((a, b) => (a.groupId === 0 ? -1 : b.groupId === 0 ? 1 : RANK[a.kind] - RANK[b.kind] || a.groupId - b.groupId))
+})
+
+const nameOf = (item: Capsule) => (item.groupId === 0 ? t('admin.schedQuality.override.allGroups') : props.groupName(item.groupId))
+const manual = (item: Capsule) => item.kind === 'exempt' || item.kind === 'demote'
+
+// Expiry of an override: `至 18:30` today, `至 11-14 18:30` later, `一直` without one.
+const pad = (n: number) => String(n).padStart(2, '0')
+function until(at: string | null): string {
+  if (!at) return t('admin.schedQuality.override.forever')
+  const d = new Date(at)
+  const time = `${pad(d.getHours())}:${pad(d.getMinutes())}`
+  const today = new Date()
+  const sameDay = d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate()
+  return t('admin.schedQuality.tip.until', { time: sameDay ? time : `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${time}` })
+}
+
+const tipOf = (item: Capsule) => {
+  const name = item.groupId !== 0 && truncated[item.key] ? nameOf(item) : ''
+  if (!manual(item)) return name
+  return name ? `${name} ${until(item.expiresAt)}` : until(item.expiresAt)
+}
+const ariaOf = (item: Capsule) =>
+  [nameOf(item), t(STATE_KEY[item.kind]), ...(manual(item) ? [until(item.expiresAt)] : [])].join(' ')
+
+// The all-groups capsule opens the drawer at its top; a group capsule scrolls to that group's row.
+function open(item: Capsule) {
+  if (item.groupId === 0) emit('open', { model: item.model })
+  else emit('open', { model: item.model, groupId: item.groupId })
+}
+
+const isNew = (item: Capsule) =>
+  !manual(item) && !!props.fresh?.has(`${props.summary?.account_id}:${item.groupId}:${item.kind}`)
+
+// A capsule whose group name is cut off shows the full name in its tip.
+const truncated = reactive<Record<string, boolean>>({})
+function measure(key: string, el: unknown) {
   if (!(el instanceof HTMLElement)) return
   requestAnimationFrame(() => {
     const cut = el.scrollWidth > el.clientWidth
-    if (truncated[groupId] !== cut) truncated[groupId] = cut
+    if (truncated[key] !== cut) truncated[key] = cut
   })
 }
 </script>

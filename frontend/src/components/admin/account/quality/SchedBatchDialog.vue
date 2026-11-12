@@ -6,7 +6,7 @@
     </p>
     <template #footer>
       <button type="button" class="btn btn-secondary btn-sm" @click="close">{{ t('admin.schedQuality.action.cancel') }}</button>
-      <button type="button" class="btn btn-primary btn-sm" data-sq-batch-confirm @click="run()">{{ actionName }}</button>
+      <button type="button" class="btn btn-primary btn-sm" data-sq-batch-confirm @click="confirm">{{ action === 'reset' ? t('admin.schedQuality.action.confirm') : actionName }}</button>
     </template>
   </BaseDialog>
 
@@ -57,11 +57,13 @@ import SchedOverridePopover from './SchedOverridePopover.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
 import type { SchedOverrideRequest } from '@/types/schedQuality'
 import { markSchedChanged } from '@/composables/useSchedLayers'
+import { useAdminPermission } from '@/composables/useAdminPermission'
 import { testResult } from '@/utils/schedQualityFormat'
 
 // Batch quality actions of the account list (design spec A.5, B.11). Reset and test confirm first, demote and exempt
-// use the override popover; then each account is called one by one, four at a time, and listed with its result.
-// A run works on what it was started with (action, request, accounts), never on the props of a later opening.
+// use the override popover. A confirmed reset (恢复) hands the accounts back (`recover`) and runs in the background
+// with one toast (contract delta F3). The others call each account one by one, four at a time, and list it with its
+// result. A run works on what it was started with (action, request, accounts), never on the props of a later opening.
 // Closing the results stops it: accounts not yet called are "not run" and answers still on their way are dropped.
 // Until those answers are in, the run is busy and no other batch can start.
 export type SchedBatchAction = 'reset' | 'test' | 'demote' | 'exempt'
@@ -85,8 +87,9 @@ const props = defineProps<{
   /** Scope choices for demote / exempt: every OpenAI group. */
   groups: Array<{ id: number; name: string }>
 }>()
-const emit = defineEmits<{ close: []; done: []; busy: [running: boolean] }>()
+const emit = defineEmits<{ close: []; done: []; busy: [running: boolean]; recover: [accountIds: number[]] }>()
 const { t } = useI18n()
+const { canManage } = useAdminPermission('accounts')
 
 const phase = ref<'confirm' | 'popover' | 'results' | null>(null)
 /** The run on screen; null before the first run of an opening. */
@@ -106,13 +109,23 @@ watch(() => props.action, (action) => {
   phase.value = action === 'reset' || action === 'test' ? 'confirm' : 'popover'
 }, { immediate: true })
 
+// A confirmation not yet given closes when accounts:manage is withdrawn.
+watch(canManage, (allowed) => {
+  if (!allowed && (phase.value === 'confirm' || phase.value === 'popover')) close()
+})
+
+function confirm() {
+  if (props.action !== 'reset') {
+    void run()
+    return
+  }
+  const ids = props.accounts.map((account) => account.id)
+  close()
+  if (canManage.value) emit('recover', ids)
+}
+
 async function callOne(action: SchedBatchAction, id: number, request?: SchedOverrideRequest): Promise<Result> {
   try {
-    if (action === 'reset') {
-      // HTTP 200 still lists the states that could not be cleared: any of them makes the account a failure.
-      const { failed } = await schedQualityAPI.reset(id)
-      return failed.length ? 'failed' : 'ok'
-    }
     if (action === 'test') {
       return testResult((await schedQualityAPI.startTest(id)).tests)
     }
@@ -144,7 +157,7 @@ async function run(request?: SchedOverrideRequest) {
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, live.length) }, worker))
   } finally {
     running--
-    markSchedChanged()
+    void markSchedChanged()
     emit('busy', false)
     emit('done')
   }

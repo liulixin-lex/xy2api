@@ -115,7 +115,7 @@ func (a *schedAdminHandlerAudit) BatchInsert(_ context.Context, rows []*service.
 func schedAdminHandlerFixture() (*SchedQualityHandler, *schedAdminHandlerEngine, *schedAdminHandlerAccounts) {
 	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
 	engine := &schedAdminHandlerEngine{p: &service.SchedQualitySnapshot{At: now, GlobalEnabled: true, GroupRows: map[int64][]service.SchedGroupRow{}, Evidence: map[service.SchedAccountModel]schedquality.Summary{}}, version: 63}
-	repo := &schedAdminHandlerAccounts{a: &service.Account{ID: 1, Name: "one", Platform: service.PlatformOpenAI, Status: service.StatusActive, Schedulable: true, GroupIDs: []int64{1}}}
+	repo := &schedAdminHandlerAccounts{a: &service.Account{ID: 1, Name: "one", Platform: service.PlatformOpenAI, Status: service.StatusActive, Schedulable: true, GroupIDs: []int64{1}, Groups: []*service.Group{{ID: 1, Name: "group", Platform: service.PlatformOpenAI}}}}
 	s := service.NewSchedAdminService(service.SchedAdminDependencies{Engine: engine, Accounts: repo, Groups: schedAdminHandlerGroups{}, Board: schedAdminHandlerBoard{}, Tests: &schedAdminHandlerTests{ticket: service.SchedTestTicket{TestID: "ticket", Started: true}}, Now: func() time.Time { return now }})
 	return NewSchedQualityHandler(s), engine, repo
 }
@@ -159,7 +159,7 @@ func TestSchedQualityContractShapes(t *testing.T) {
 	cases := []struct {
 		method, path, body string
 		keys               []string
-	}{{"POST", "/accounts/summary", `{"account_ids":[1]}`, []string{"at", "stale", "global_enabled", "accounts"}}, {"GET", "/accounts/attention", "", []string{"cooling"}}, {"GET", "/accounts/1", "", []string{"account", "at", "stale", "global_enabled", "tests_enabled", "reset_at", "models", "groups", "auto_states", "recent_attempts"}}, {"POST", "/accounts/1/reset", "", []string{"reset_at", "cleared", "preserved", "failed"}}, {"POST", "/accounts/1/test", `{"model":"m"}`, []string{"tests"}}, {"GET", "/groups/1/policy", "", []string{"group_id", "version", "policy", "class_limits_ms"}}, {"PUT", "/groups/1/policy", `{"expected_version":63,"policy":{"enabled":true,"ttft_seconds":10,"takeover_idle_seconds":-1}}`, []string{"group_id", "version", "policy", "class_limits_ms"}}, {"GET", "/groups/1/board", "", []string{"group_id", "model", "models", "at", "stale", "global_enabled", "accounts"}}, {"DELETE", "/accounts/1/auto-states/error", "", []string{"cleared"}}}
+	}{{"POST", "/accounts/summary", `{"account_ids":[1]}`, []string{"at", "stale", "global_enabled", "accounts"}}, {"GET", "/accounts/attention", "", []string{"cooling", "exempt", "demote"}}, {"GET", "/accounts/1", "", []string{"account", "at", "stale", "global_enabled", "tests_enabled", "reset_at", "all_groups_override", "models", "groups", "auto_states", "recent_attempts"}}, {"POST", "/accounts/1/reset", "", []string{"reset_at", "cleared", "preserved", "failed"}}, {"POST", "/accounts/1/test", `{"model":"m"}`, []string{"tests"}}, {"GET", "/groups/1/policy", "", []string{"group_id", "version", "policy", "class_limits_ms"}}, {"PUT", "/groups/1/policy", `{"expected_version":63,"policy":{"enabled":true,"ttft_seconds":10,"takeover_idle_seconds":-1}}`, []string{"group_id", "version", "policy", "class_limits_ms"}}, {"GET", "/groups/1/board", "", []string{"group_id", "model", "models", "at", "stale", "global_enabled", "accounts"}}, {"DELETE", "/accounts/1/auto-states/error", "", []string{"cleared"}}}
 	for _, tc := range cases {
 		t.Run(tc.method+tc.path, func(t *testing.T) {
 			h, _, repo := schedAdminHandlerFixture()
@@ -174,9 +174,15 @@ func TestSchedQualityContractShapes(t *testing.T) {
 			require.ElementsMatch(t, tc.keys, keys)
 			if tc.path == "/accounts/1" {
 				require.Equal(t, "null", string(data["reset_at"]))
-				for _, key := range []string{"models", "groups", "auto_states", "recent_attempts"} {
+				require.Equal(t, "null", string(data["all_groups_override"]))
+				for _, key := range []string{"models", "auto_states", "recent_attempts"} {
 					require.Equal(t, "[]", string(data[key]))
 				}
+				var groups []service.SchedAdminAccountDetailGroups
+				require.NoError(t, json.Unmarshal(data["groups"], &groups))
+				require.Len(t, groups, 1)
+				require.Equal(t, int64(1), groups[0].GroupID)
+				require.Equal(t, []service.SchedAdminAccountDetailGroupsByModel{}, groups[0].ByModel)
 			}
 		})
 	}
@@ -383,16 +389,16 @@ func (s *schedAdminPermissionService) Board(context.Context, int64, string) (ser
 	return service.SchedAdminBoard{Accounts: []service.SchedAdminBoardAccounts{{Name: "https://upstream.example/group"}}}, nil
 }
 
-func TestSchedQualityEmptyTestBodyAndPartialFailureAudit(t *testing.T) {
-	for _, partial := range []bool{false, true} {
-		t.Run(strconv.FormatBool(partial), func(t *testing.T) {
+func TestSchedQualityEmptyTestBodySingleModelAudit(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		t.Run(strconv.FormatBool(failed), func(t *testing.T) {
 			_, engine, repo := schedAdminHandlerFixture()
 			for i, m := range []string{"a", "b", "c"} {
 				engine.p.Evidence[service.SchedAccountModel{AccountID: 1, Model: m}] = schedquality.Summary{Samples: 40 - i}
 			}
 			runner := &schedAdminHandlerTests{ticket: service.SchedTestTicket{TestID: "started", Started: true}}
-			if partial {
-				runner.failModel = "b"
+			if failed {
+				runner.failModel = "a"
 			}
 			s := service.NewSchedAdminService(service.SchedAdminDependencies{Engine: engine, Accounts: repo, Tests: runner})
 			audit := &schedAdminHandlerAudit{}
@@ -400,24 +406,19 @@ func TestSchedQualityEmptyTestBodyAndPartialFailureAudit(t *testing.T) {
 			auditService.Start()
 			r := schedAdminHandlerRouter(NewSchedQualityHandler(s), gin.HandlerFunc(middleware.NewAuditLogMiddleware(auditService)))
 			w := schedAdminHandlerRequest(r, "POST", "/accounts/1/test", "")
-			require.Equal(t, 200, w.Code, w.Body.String())
-			var tests []service.SchedAdminTestTests
-			require.NoError(t, json.Unmarshal(schedAdminHandlerData(t, w)["tests"], &tests))
-			require.Len(t, tests, 3)
-			require.True(t, tests[0].Started)
-			require.True(t, tests[2].Started)
-			if partial {
-				require.Equal(t, service.SchedAdminTestTests{Model: "b", Why: "error"}, tests[1])
-			} else {
-				require.True(t, tests[1].Started)
-			}
 			auditService.Stop()
 			require.Len(t, audit.rows, 1)
 			require.Equal(t, "sched_quality.test", audit.rows[0].Action)
-			if partial {
-				require.Equal(t, "partial_failure", audit.rows[0].Extra["result"])
+			if failed {
+				require.Equal(t, 500, w.Code, w.Body.String())
+				require.Equal(t, "failure", audit.rows[0].Extra["result"])
 				require.EqualValues(t, 1, audit.rows[0].Extra["test_failed_count"])
-				require.EqualValues(t, 2, audit.rows[0].Extra["test_ticket_count"])
+				require.EqualValues(t, 0, audit.rows[0].Extra["test_ticket_count"])
+			} else {
+				require.Equal(t, 200, w.Code, w.Body.String())
+				var tests []service.SchedAdminTestTests
+				require.NoError(t, json.Unmarshal(schedAdminHandlerData(t, w)["tests"], &tests))
+				require.Equal(t, []service.SchedAdminTestTests{{Model: "a", TestID: "started", Started: true}}, tests)
 			}
 		})
 	}
