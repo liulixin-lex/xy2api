@@ -24,6 +24,7 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 	if c.Request.Context().Err() != nil {
 		return
 	}
+	c.Request = c.Request.WithContext(service.WithOpenAISelectionManualOnly(c.Request.Context()))
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok || apiKey.Group == nil {
 		h.errorResponse(c, http.StatusUnauthorized, "invalid_request_error", "API key group is required")

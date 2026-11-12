@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/lib/pq"
+	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
@@ -37,12 +39,39 @@ func (r *schedTestRepository) Insert(ctx context.Context, v service.SchedTestRec
 	if v.Turns == nil {
 		turns = []byte("[]")
 	}
-	_, err = r.db.ExecContext(ctx, `INSERT INTO account_quality_tests (id,account_id,model,trigger,operator_id,status,abort_reason,started_at,finished_at,turns,input_tokens,cached_tokens,output_tokens) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, v.ID, v.AccountID, v.Model, trigger, v.OperatorID, status, v.AbortReason, v.StartedAt, finished, string(turns), v.InputTokens, v.CachedTokens, v.OutputTokens)
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	// The pair lock also serializes first tests, before any history row exists.
+	lockID := advisoryLockHash(fmt.Sprintf("sched_test:%d:%s", v.AccountID, v.Model))
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, lockID); err != nil {
+		return err
+	}
+	var lastStatus int
+	var lastStartedAt time.Time
+	err = tx.QueryRowContext(ctx, `SELECT status,started_at FROM account_quality_tests WHERE account_id=$1 AND model=$2 ORDER BY (status=0) DESC,started_at DESC LIMIT 1`, v.AccountID, v.Model).Scan(&lastStatus, &lastStartedAt)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if err == nil {
+		if lastStatus == 0 {
+			return service.ErrSchedTestRunning
+		}
+		if v.StartedAt.Sub(lastStartedAt) < schedquality.TestRetryEvery {
+			return service.ErrSchedTestTooSoon
+		}
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO account_quality_tests (id,account_id,model,trigger,operator_id,status,abort_reason,started_at,finished_at,turns,input_tokens,cached_tokens,output_tokens) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, v.ID, v.AccountID, v.Model, trigger, v.OperatorID, status, v.AbortReason, v.StartedAt, finished, string(turns), v.InputTokens, v.CachedTokens, v.OutputTokens)
 	var pqErr *pq.Error
 	if errors.As(err, &pqErr) && pqErr.Code == "23505" && pqErr.Constraint == "uq_quality_tests_running" {
 		return service.ErrSchedTestRunning
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 func (r *schedTestRepository) Finish(ctx context.Context, v service.SchedTestRecord) error {
 	turns, err := json.Marshal(v.Turns)

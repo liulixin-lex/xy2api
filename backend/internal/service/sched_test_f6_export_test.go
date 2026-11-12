@@ -33,6 +33,12 @@ func (r *schedF6Accounts) ListSchedulableByPlatform(context.Context, string) ([]
 }
 func (r *schedF6Accounts) UpdateExtra(context.Context, int64, map[string]any) error { return nil }
 func (r *schedF6Accounts) UpdateLastUsed(context.Context, int64) error              { return nil }
+func (r *schedF6Accounts) SetRateLimited(_ context.Context, id int64, resetAt time.Time) error {
+	if id == r.account.ID {
+		r.account.RateLimitResetAt = &resetAt
+	}
+	return nil
+}
 
 type schedF6Slots struct{ ConcurrencyCache }
 
@@ -73,7 +79,8 @@ func NewSchedTestF6Fixture(t *testing.T, account *Account, up HTTPUpstream) (*Op
 	billing := NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 	t.Cleanup(billing.Stop)
 	token := NewOpenAITokenProvider(repo, nil, nil)
-	gw := NewOpenAIGatewayService(repo, usage, nil, nil, nil, nil, nil, cfg, nil, slots, NewBillingService(cfg, nil), nil, billing, up, &DeferredService{}, token, nil, nil, nil, nil, nil, nil)
+	rateLimits := NewRateLimitService(repo, nil, cfg, nil, nil)
+	gw := NewOpenAIGatewayService(repo, usage, nil, nil, nil, nil, nil, cfg, nil, slots, NewBillingService(cfg, nil), rateLimits, billing, up, &DeferredService{}, token, nil, nil, nil, nil, nil, nil)
 	store := &fakeSchedAttemptStore{}
 	recorder := NewSchedAttemptRecorderService(store)
 	observed := 0

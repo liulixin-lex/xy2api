@@ -13,6 +13,11 @@ type openAISelectionContextKey struct{}
 type openAISelectionExemptContextKey struct{}
 type openAISelectionManualOnlyContextKey struct{}
 
+// WithOpenAISelectionManualOnly marks an uncollected handler entry point.
+func WithOpenAISelectionManualOnly(ctx context.Context) context.Context {
+	return withOpenAISelectionManualOnly(ctx)
+}
+
 // Uncollected endpoints use manual placement overrides only.
 func withOpenAISelectionManualOnly(ctx context.Context) context.Context {
 	return context.WithValue(ctx, openAISelectionManualOnlyContextKey{}, true)

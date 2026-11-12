@@ -9,13 +9,14 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
 func TestSchedTestHarness(t *testing.T) {
-	account := &Account{ID: 37}
+	account := &Account{ID: 37, Type: AccountTypeOAuth, Platform: PlatformOpenAI, Extra: map[string]any{"codex_cli_only": true}}
 	forwarder := &fakeSchedTestForwarder{Fn: func(ctx context.Context, c *gin.Context, a *Account, body []byte) (*OpenAIForwardResult, error) {
 		state := resilience.StateFrom(ctx)
 		selection, ok := state.SchedSelection()
@@ -33,6 +34,20 @@ func TestSchedTestHarness(t *testing.T) {
 		wantHeaders := http.Header{
 			"Content-Type": {"application/json"}, "Accept": {"text/event-stream"},
 			"User-Agent": {DefaultOpenAICodexUserAgent}, "Originator": {openai.CodexDefaultOriginator},
+			"Session_id": {c.GetHeader("session_id")}, "X-Codex-Window-Id": {c.GetHeader("session_id") + ":0"},
+		}
+		if _, err := uuid.Parse(c.GetHeader("session_id")); err != nil {
+			t.Error("invalid synthetic Codex session")
+		}
+		version, ok := openai.ParseCodexEngineVersion(DefaultOpenAICodexUserAgent)
+		if !ok {
+			t.Fatal("default Codex version is not detectable")
+		}
+		detection := NewOpenAICodexClientRestrictionDetector(nil).Detect(c, account, CodexRestrictionPolicy{
+			MinCodexVersion: version, MaxCodexVersion: version, EngineFingerprintSignals: openai.DefaultEngineFingerprintSignals,
+		}, body)
+		if !detection.Matched || detection.Reason != CodexClientRestrictionReasonMatchedUA {
+			t.Errorf("Codex client gate rejected internal request: %+v", detection)
 		}
 		if !reflect.DeepEqual(wantHeaders, c.Request.Header) {
 			t.Error("internal request contains unexpected client identity")
