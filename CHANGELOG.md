@@ -18,6 +18,9 @@
 - 网关 API 及其别名响应固定使用 sandbox CSP，阻止上游 HTML 在站点同源执行；覆盖错误、流式与 Google query-key 路由。
 - 审计、审核、CRS、Vertex 令牌客户端停止跟随重定向，3xx 错误仅保留状态码与目标主机；补充白名单开关及初始密码说明。
 - 重定向错误处理同步覆盖 `securityaudit/prompt_qwen3guard.go`、`securityaudit/prompt_service.go`、`pkg/typesafe/client.go`；新增 `backend/internal/pkg/httpclient/redirect.go` 及 `redirect_test.go` 供客户端共享策略（前三个路径相对 `backend/internal`）。
+- 订单看板查询限定为 1–90 天，非法天数返回错误，避免超大统计范围耗尽资源。
+- 代理日志与解析错误移除代理凭据；不同凭据继续使用独立连接池。
+- 运维 WebSocket 连接上限按 32 位整数校验，配置越界时记录错误并使用默认值。
 
 ## [0.6.3] - 2026-11-12
 

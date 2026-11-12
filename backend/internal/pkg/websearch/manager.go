@@ -9,12 +9,12 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
-	"net/url"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/pkg/proxyurl"
 	"github.com/liulixin-lex/xy2api/internal/pkg/proxyutil"
 	"github.com/redis/go-redis/v9"
 )
@@ -412,13 +412,13 @@ func newHTTPClient(proxyURL string) (*http.Client, error) {
 		TLSHandshakeTimeout:   proxyTLSTimeout,
 		ResponseHeaderTimeout: searchDataTimeout,
 	}
-	if proxyURL != "" {
-		parsed, err := url.Parse(proxyURL)
-		if err != nil {
-			return nil, fmt.Errorf("invalid proxy URL %q: %w", proxyURL, err)
-		}
+	_, parsed, err := proxyurl.Parse(proxyURL)
+	if err != nil {
+		return nil, err
+	}
+	if parsed != nil {
 		if err := proxyutil.ConfigureTransportProxy(transport, parsed); err != nil {
-			return nil, fmt.Errorf("configure proxy: %w", err)
+			return nil, errors.New("configure proxy failed")
 		}
 	}
 	return &http.Client{Transport: transport, Timeout: searchRequestTimeout}, nil

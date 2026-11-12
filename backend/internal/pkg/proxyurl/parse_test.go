@@ -1,9 +1,48 @@
 package proxyurl
 
 import (
+	"errors"
+	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
+
+func TestParseErrorsNeverExposeProxyCredentials(t *testing.T) {
+	const username, password = "demo+user@example", "demo+secret:/@"
+	userinfo := url.UserPassword(username, password).String()
+	for _, tc := range []struct {
+		name, raw, reason string
+	}{
+		{"unclosed_ipv6_host", "http://" + userinfo + "@[:8080", "invalid proxy URL"},
+		{"invalid_port", "https://" + userinfo + "@proxy.example:bad-port", "invalid proxy URL"},
+		{"space_in_host", "http://" + userinfo + "@proxy.exa mple:8080", "invalid proxy URL"},
+		{"invalid_userinfo_escape", "http://" + userinfo + "%ZZ@proxy.example:8080", "invalid proxy URL"},
+		{"invalid_path_escape", "socks5://" + userinfo + "@proxy.example:1080/%ZZ", "invalid proxy URL"},
+		{"invalid_fragment_escape", "socks5h://" + userinfo + "@proxy.example:1080/#%ZZ", "invalid proxy URL"},
+		{"control_character", "http://" + userinfo + "@proxy.example:8080/private\npath", "invalid proxy URL"},
+		{"missing_host", "http://" + userinfo + "@", "missing host"},
+		{"missing_hostname", "https://" + userinfo + "@:8080", "missing host"},
+		{"unsupported_scheme", "ftp://" + userinfo + "@proxy.example:21", "unsupported proxy scheme"},
+		{"secret_in_scheme", "demo-secret://" + userinfo + "@proxy.example:8080", "unsupported proxy scheme"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			trimmed, parsed, err := Parse(tc.raw)
+			require.ErrorContains(t, err, tc.reason)
+			require.Empty(t, trimmed)
+			require.Nil(t, parsed)
+			var rawError *url.Error
+			require.False(t, errors.As(err, &rawError), "raw URL errors must not escape through wrapping")
+			require.NotContains(t, err.Error(), tc.raw)
+			for _, secret := range []string{username, password, "demo-secret"} {
+				for _, variant := range []string{secret, url.QueryEscape(secret), url.PathEscape(secret), url.User(secret).String()} {
+					require.NotContains(t, strings.ToLower(err.Error()), strings.ToLower(variant))
+				}
+			}
+		})
+	}
+}
 
 func TestParse_空字符串直连(t *testing.T) {
 	trimmed, parsed, err := Parse("")
@@ -120,7 +159,7 @@ func TestParse_含密码URL脱敏(t *testing.T) {
 		t.Error("升级后应保留 UserInfo")
 	}
 
-	// 场景 2: 带密码但缺少 host（触发 Redacted 脱敏路径）
+	// 场景 2: 带密码但缺少 host（错误不包含任何 URL 字段）
 	_, _, err = Parse("http://user:secret_password@:0/")
 	if err == nil {
 		t.Fatal("缺少 host 应返回错误")

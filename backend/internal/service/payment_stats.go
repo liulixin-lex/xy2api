@@ -12,13 +12,14 @@ import (
 	dbent "github.com/liulixin-lex/xy2api/ent"
 	"github.com/liulixin-lex/xy2api/ent/paymentauditlog"
 	"github.com/liulixin-lex/xy2api/ent/paymentorder"
+	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 )
 
 // --- Dashboard & Analytics ---
 
 func (s *PaymentService) GetDashboardStats(ctx context.Context, days int) (*DashboardStats, error) {
-	if days <= 0 {
-		days = 30
+	if days < 1 || days > 90 {
+		return nil, infraerrors.BadRequest("INVALID_DAYS", "days must be an integer between 1 and 90")
 	}
 	now := time.Now()
 	since := now.AddDate(0, 0, -days)

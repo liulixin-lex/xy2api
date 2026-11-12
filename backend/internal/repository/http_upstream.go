@@ -267,11 +267,7 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 	if req != nil && req.URL != nil {
 		targetHost = req.URL.Host
 	}
-	proxyInfo := "direct"
-	if proxyURL != "" {
-		proxyInfo = proxyURL
-	}
-	slog.Debug("tls_fingerprint_enabled", "account_id", accountID, "target", targetHost, "proxy", proxyInfo, "profile", profile.Name)
+	slog.Debug("tls_fingerprint_enabled", "account_id", accountID, "target", targetHost, "proxy", proxyLogAddress(proxyURL), "profile", profile.Name)
 
 	if err := s.validateRequestHost(req); err != nil {
 		return nil, err
@@ -586,7 +582,7 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 			atomic.AddInt64(&entry.inFlight, 1)
 		}
 		s.mu.RUnlock()
-		slog.Debug("tls_fingerprint_reusing_client", "account_id", accountID, "cache_key", cacheKey)
+		slog.Debug("tls_fingerprint_reusing_client", "account_id", accountID, "profile", upstreamProfile, "proxy", proxyLogAddress(proxyURL))
 		return entry, nil
 	}
 	s.mu.RUnlock()
@@ -600,13 +596,13 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 				atomic.AddInt64(&entry.inFlight, 1)
 			}
 			s.mu.Unlock()
-			slog.Debug("tls_fingerprint_reusing_client", "account_id", accountID, "cache_key", cacheKey)
+			slog.Debug("tls_fingerprint_reusing_client", "account_id", accountID, "profile", upstreamProfile, "proxy", proxyLogAddress(proxyURL))
 			return entry, nil
 		}
 		slog.Debug("tls_fingerprint_evicting_stale_client",
 			"account_id", accountID,
-			"cache_key", cacheKey,
-			"proxy_changed", entry.proxyKey != proxyKey,
+			"profile", upstreamProfile,
+			"proxy", proxyLogAddress(proxyURL),
 			"pool_changed", entry.poolKey != poolKey)
 		s.removeClientLocked(cacheKey, entry)
 	}
@@ -623,7 +619,7 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 	}
 
 	// 创建带 TLS 指纹的 Transport
-	slog.Debug("tls_fingerprint_creating_new_client", "account_id", accountID, "cache_key", cacheKey, "proxy", proxyKey)
+	slog.Debug("tls_fingerprint_creating_new_client", "account_id", accountID, "profile", upstreamProfile, "proxy", proxyLogAddress(proxyURL))
 	transport, err := buildUpstreamTransportWithTLSFingerprint(settings, parsedProxy, profile)
 	if err != nil {
 		s.mu.Unlock()
@@ -1198,7 +1194,7 @@ func (s *httpUpstreamService) recordOpenAIHTTP2Failure(profile service.HTTPUpstr
 	activated, until := state.recordFailure(time.Now(), settings.fallbackErrorThreshold, settings.fallbackWindow, settings.fallbackTTL)
 	if activated {
 		slog.Warn("openai_http2_proxy_fallback_activated",
-			"proxy", proxyKey,
+			"proxy", proxyLogAddress(proxyKey),
 			"fallback_until", until.Format(time.RFC3339))
 	}
 }
@@ -1316,6 +1312,31 @@ func normalizeProxyURL(raw string) (string, *url.URL, error) {
 		}
 	}
 	return parsed.String(), parsed, nil
+}
+
+// proxyLogAddress returns only the proxy's public endpoint. Authentication,
+// path, query, and fragment are deliberately omitted from every log message.
+func proxyLogAddress(raw string) string {
+	_, parsed, err := proxyurl.Parse(raw)
+	if err != nil {
+		return "invalid"
+	}
+	if parsed == nil {
+		return directProxyKey
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	port := parsed.Port()
+	if port == "" {
+		switch scheme {
+		case "http":
+			port = "80"
+		case "https":
+			port = "443"
+		case "socks5", "socks5h":
+			port = "1080"
+		}
+	}
+	return scheme + "://" + net.JoinHostPort(parsed.Hostname(), port)
 }
 
 // defaultPoolSettings 获取默认连接池配置
@@ -1483,7 +1504,7 @@ func buildUpstreamTransportWithTLSFingerprint(settings poolSettings, proxyURL *u
 		switch scheme {
 		case "socks5", "socks5h":
 			// SOCKS5 代理：使用 SOCKS5ProxyDialer
-			slog.Debug("tls_fingerprint_transport_socks5", "proxy", proxyURL.Host)
+			slog.Debug("tls_fingerprint_transport_socks5", "proxy", proxyLogAddress(proxyURL.String()))
 			socks5Dialer := tlsfingerprint.NewSOCKS5ProxyDialer(profile, proxyURL)
 			transport.DialTLSContext = socks5Dialer.DialTLSContext
 		case "https":
@@ -1492,7 +1513,7 @@ func buildUpstreamTransportWithTLSFingerprint(settings poolSettings, proxyURL *u
 			return buildUpstreamTransport(settings, proxyURL, upstreamProtocolModeDefault)
 		case "http":
 			// HTTP/HTTPS 代理：使用 HTTPProxyDialer（CONNECT 隧道）
-			slog.Debug("tls_fingerprint_transport_http_connect", "proxy", proxyURL.Host)
+			slog.Debug("tls_fingerprint_transport_http_connect", "proxy", proxyLogAddress(proxyURL.String()))
 			httpDialer := tlsfingerprint.NewHTTPProxyDialer(profile, proxyURL)
 			transport.DialTLSContext = httpDialer.DialTLSContext
 		default:
