@@ -3,6 +3,7 @@ package schedquality
 import "time"
 
 // JudgeTest is section 6 on the pooled turns of one round; only pass | fail | nodata; fail is decided before pass.
+// Tests never produce a cache verdict.
 func JudgeTest(turns []TestTurn, model string, p Policy) Verdicts {
 	var v Verdicts
 	if !p.Enabled {
@@ -27,13 +28,32 @@ func JudgeTest(turns []TestTurn, model string, p Policy) Verdicts {
 			v.Error = VerdictPass
 		}
 	}
-	if s.CacheTurns >= TestMinTurns {
-		v.Cache = VerdictPass
-		if s.CacheRatio < p.MinCacheRatio {
-			v.Cache = VerdictFail
+	return v
+}
+
+// TestClean reports whether one completed test record contains only full, successful tier runs.
+func TestClean(test TestResult) bool {
+	if !test.Done || len(test.Turns) == 0 {
+		return false
+	}
+	var turns [len(TestTiers)][TestTurnsPerTier]bool
+	var counts [len(TestTiers)]int
+	for _, turn := range test.Turns {
+		if turn.Tier < TierSmall || turn.Tier > TierLarge || turn.Turn < 1 || turn.Turn > TestTurnsPerTier || turn.Outcome != OutcomeOK {
+			return false
+		}
+		if turns[turn.Tier][turn.Turn-1] {
+			return false
+		}
+		turns[turn.Tier][turn.Turn-1] = true
+		counts[turn.Tier]++
+	}
+	for _, count := range counts {
+		if count != 0 && count != TestTurnsPerTier {
+			return false
 		}
 	}
-	return v
+	return true
 }
 
 // Effective merges real and test verdicts per dimension (section 6). It pools the turns of every test that is done,
@@ -66,19 +86,23 @@ func SummarizeTests(tests []TestResult, model string, p Policy, resetAt, rowSinc
 }
 
 func pooledTestTurns(tests []TestResult, resetAt, rowSince, now time.Time) ([]TestTurn, int) {
-	since := rowSince
-	if resetAt.After(since) {
-		since = resetAt
-	}
 	var turns []TestTurn
 	count := 0
 	for _, test := range tests {
-		if test.Done && test.StartedAt.After(since) && !test.StartedAt.Before(now.Add(-TestFreshFor)) {
+		if testInCurrentRound(test, resetAt, rowSince, now) {
 			turns = append(turns, test.Turns...)
 			count++
 		}
 	}
 	return turns, count
+}
+
+func testInCurrentRound(test TestResult, resetAt, rowSince, now time.Time) bool {
+	since := rowSince
+	if resetAt.After(since) {
+		since = resetAt
+	}
+	return test.Done && test.StartedAt.After(since) && !test.StartedAt.Before(now.Add(-TestFreshFor))
 }
 
 func summarizeTestTurns(turns []TestTurn, model string, p Policy) TestSummary {

@@ -214,7 +214,7 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) error {
 			since := schedQualitySince(resetAt[key.account], prev.Since)
 			summary := d.summary(SchedAccountModel{key.account, key.model}, since)
 			in := schedquality.Inputs{Policy: s.policies[key.group].Policy, Summary: summary, Tests: d.finished[SchedAccountModel{key.account, key.model}], TestsEnabled: d.testsEnabled, ResetAt: resetAt[key.account]}
-			next, changed, remove, wantTest := schedquality.Next(prev, in, now)
+			next, changed, remove, wantTest, _ := schedquality.Next(prev, in, now)
 			if remove {
 				if _, ok := previous[key]; ok {
 					deleted = append(deleted, prev)
