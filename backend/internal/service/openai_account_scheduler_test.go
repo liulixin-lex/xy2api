@@ -2947,10 +2947,6 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceTopKExcludes
 	}
 }
 
-func intPtrForTest(v int) *int {
-	return &v
-}
-
 func TestClamp01_AllBranches(t *testing.T) {
 	require.Equal(t, 0.0, clamp01(-0.2))
 	require.Equal(t, 1.0, clamp01(1.3))
@@ -3002,10 +2998,6 @@ func TestOpenAISelection_IsAccountTransportCompatible_Branches(t *testing.T) {
 
 	account.Extra["openai_apikey_responses_websockets_v2_mode"] = OpenAIWSIngressModeOff
 	require.False(t, scheduler.isAccountTransportCompatible(account, OpenAIUpstreamTransportResponsesWebsocketV2Ingress))
-}
-
-func int64PtrForTest(v int64) *int64 {
-	return &v
 }
 
 func TestOpenAIGatewayService_SelectAccountWithScheduler_StickyWeightedFallbackSkipsOutOfGroupStickyAccount(t *testing.T) {

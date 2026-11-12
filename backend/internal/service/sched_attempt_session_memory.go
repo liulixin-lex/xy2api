@@ -34,10 +34,11 @@ func newSchedAttemptSessionMemory() *schedAttemptSessionMemory {
 
 func (m *schedAttemptSessionMemory) expire(now time.Time) {
 	for e := m.lru.Back(); e != nil; e = m.lru.Back() {
-		if now.Sub(e.Value.(schedAttemptSession).touchedAt) < schedquality.SessionMemoryTTL {
+		entry, _ := e.Value.(schedAttemptSession)
+		if now.Sub(entry.touchedAt) < schedquality.SessionMemoryTTL {
 			return
 		}
-		delete(m.entries, e.Value.(schedAttemptSession).key)
+		delete(m.entries, entry.key)
 		m.lru.Remove(e)
 	}
 }
@@ -50,7 +51,7 @@ func (m *schedAttemptSessionMemory) get(key schedAttemptSessionKey, now time.Tim
 	if !ok {
 		return schedAttemptSession{}, false
 	}
-	v := e.Value.(schedAttemptSession)
+	v, _ := e.Value.(schedAttemptSession)
 	v.touchedAt = now
 	e.Value = v
 	m.lru.MoveToFront(e)
@@ -63,7 +64,8 @@ func (m *schedAttemptSessionMemory) put(v schedAttemptSession) {
 	m.expire(v.finishedAt)
 	v.touchedAt = v.finishedAt
 	if e, ok := m.entries[v.key]; ok {
-		if e.Value.(schedAttemptSession).finishedAt.After(v.finishedAt) {
+		entry, _ := e.Value.(schedAttemptSession)
+		if entry.finishedAt.After(v.finishedAt) {
 			return
 		}
 		e.Value = v
@@ -73,7 +75,8 @@ func (m *schedAttemptSessionMemory) put(v schedAttemptSession) {
 	m.entries[v.key] = m.lru.PushFront(v)
 	if len(m.entries) > schedquality.SessionMemoryMaxEntries {
 		e := m.lru.Back()
-		delete(m.entries, e.Value.(schedAttemptSession).key)
+		entry, _ := e.Value.(schedAttemptSession)
+		delete(m.entries, entry.key)
 		m.lru.Remove(e)
 	}
 }

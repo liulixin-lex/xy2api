@@ -169,7 +169,9 @@ func TestProfitControl_PostSlotRecheckVetoes(t *testing.T) {
 	repo.accounts = map[int64]*Account{61: cheap}
 	cache.afterAcquire = func(int64) {
 		repo.accounts[61] = &expensive
-		svc.schedulerSnapshot.cache.(*openAISnapshotCacheStub).accountsByID[61] = &expensive
+		snapshotCache, ok := svc.schedulerSnapshot.cache.(*openAISnapshotCacheStub)
+		require.True(t, ok)
+		snapshotCache.accountsByID[61] = &expensive
 	}
 	ctx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{threshold: 0.5, pricingAt: now})
 	selection, err := svc.selectAccountWithLoadAwareness(ctx, nil, PlatformOpenAI, "", "", nil, false, "", true)

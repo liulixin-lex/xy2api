@@ -20,7 +20,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/cespare/xxhash/v2"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
@@ -1093,49 +1092,6 @@ func parseRawJSONView(raw []byte) gjson.Result {
 	return gjson.Parse(*(*string)(unsafe.Pointer(&raw)))
 }
 
-func extractTextFromSystemRaw(raw []byte) string {
-	system := parseRawJSONView(raw)
-	switch system.Type {
-	case gjson.String:
-		return system.String()
-	case gjson.JSON:
-		if !system.IsArray() {
-			return ""
-		}
-		var builder strings.Builder
-		system.ForEach(func(_, part gjson.Result) bool {
-			if text := part.Get("text").String(); text != "" {
-				_, _ = builder.WriteString(text)
-			}
-			return true
-		})
-		return builder.String()
-	}
-	return ""
-}
-
-func extractTextFromContentRaw(content gjson.Result) string {
-	switch content.Type {
-	case gjson.String:
-		return content.String()
-	case gjson.JSON:
-		if !content.IsArray() {
-			return ""
-		}
-		var builder strings.Builder
-		content.ForEach(func(_, part gjson.Result) bool {
-			if part.Get("type").String() == "text" {
-				if text := part.Get("text").String(); text != "" {
-					_, _ = builder.WriteString(text)
-				}
-			}
-			return true
-		})
-		return builder.String()
-	}
-	return ""
-}
-
 func appendResponsesSessionAnchorFromRaw(builder *strings.Builder, raw []byte) {
 	if builder == nil || len(raw) == 0 {
 		return
@@ -1193,11 +1149,6 @@ func appendResponsesContentText(builder *strings.Builder, content gjson.Result) 
 		}
 		return true
 	})
-}
-
-func (s *GatewayService) hashContent(content string) string {
-	h := xxhash.Sum64String(content)
-	return strconv.FormatUint(h, 36)
 }
 
 // GetAccessToken 获取账号凭证

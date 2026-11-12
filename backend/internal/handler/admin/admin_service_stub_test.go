@@ -11,47 +11,43 @@ import (
 )
 
 type stubAdminService struct {
-	users                               []service.User
-	apiKeys                             []service.APIKey
-	groups                              []service.Group
-	accounts                            []service.Account
-	iqTargetSettings                    map[int64][]domain.IQTargetSettings
-	iqTargetSummaries                   map[int64][]domain.IQTargetSummary
-	iqTargetSummariesErr                error
-	iqSummariesContextValue             any
-	accountSchedulerScoreFilterAccounts []service.Account
-	openAISchedulerScorePoolAccounts    []service.Account
-	schedulerScoreFilterCalls           int
-	openAISchedulerScorePoolCalls       int
-	proxies                             []service.Proxy
-	proxyCounts                         []service.ProxyWithAccountCount
-	redeems                             []service.RedeemCode
-	boundAuthIdentity                   *service.AdminBindAuthIdentityInput
-	boundAuthIdentityFor                int64
-	createdAccounts                     []*service.CreateAccountInput
-	createdGroups                       []*service.CreateGroupInput
-	updatedGroups                       []*service.UpdateGroupInput
-	deletedGroupIDs                     []int64
-	guardedDeletedGroupIDs              []int64
-	deleteGroupIfEmptyErr               error
-	advancedGroupOperationCalls         int
-	lastListGroupsIsExclusive           *bool
-	createdProxies                      []*service.CreateProxyInput
-	updatedProxyIDs                     []int64
-	updatedProxies                      []*service.UpdateProxyInput
-	testedProxyIDs                      []int64
-	getUserErr                          error
-	createAccountErr                    error
-	createSparkShadowErr                error
-	updateAccountErr                    error
-	lastUpdateAccountInput              *service.UpdateAccountInput
-	bulkUpdateAccountErr                error
-	lastBulkUpdateAccountInput          *service.BulkUpdateAccountsInput
-	getAccountResult                    *service.Account
-	updateAccountCalls                  int
-	updateAccountExtraCalls             int
-	checkMixedErr                       error
-	lastMixedCheck                      struct {
+	users                       []service.User
+	apiKeys                     []service.APIKey
+	groups                      []service.Group
+	accounts                    []service.Account
+	iqTargetSettings            map[int64][]domain.IQTargetSettings
+	iqTargetSummaries           map[int64][]domain.IQTargetSummary
+	iqTargetSummariesErr        error
+	iqSummariesContextValue     any
+	proxies                     []service.Proxy
+	proxyCounts                 []service.ProxyWithAccountCount
+	redeems                     []service.RedeemCode
+	boundAuthIdentity           *service.AdminBindAuthIdentityInput
+	boundAuthIdentityFor        int64
+	createdAccounts             []*service.CreateAccountInput
+	createdGroups               []*service.CreateGroupInput
+	updatedGroups               []*service.UpdateGroupInput
+	deletedGroupIDs             []int64
+	guardedDeletedGroupIDs      []int64
+	deleteGroupIfEmptyErr       error
+	advancedGroupOperationCalls int
+	lastListGroupsIsExclusive   *bool
+	createdProxies              []*service.CreateProxyInput
+	updatedProxyIDs             []int64
+	updatedProxies              []*service.UpdateProxyInput
+	testedProxyIDs              []int64
+	getUserErr                  error
+	createAccountErr            error
+	createSparkShadowErr        error
+	updateAccountErr            error
+	lastUpdateAccountInput      *service.UpdateAccountInput
+	bulkUpdateAccountErr        error
+	lastBulkUpdateAccountInput  *service.BulkUpdateAccountsInput
+	getAccountResult            *service.Account
+	updateAccountCalls          int
+	updateAccountExtraCalls     int
+	checkMixedErr               error
+	lastMixedCheck              struct {
 		accountID int64
 		platform  string
 		groupIDs  []int64

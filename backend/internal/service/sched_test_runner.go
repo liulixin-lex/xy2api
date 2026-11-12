@@ -224,9 +224,10 @@ func schedTestEffort(account *Account, model string, tier schedquality.TestTier)
 			return wanted
 		}
 		rank, valid := reasoningEffortRank(level)
-		if level == "none" {
+		switch level {
+		case "none":
 			rank, valid = 0, true
-		} else if level == "ultra" {
+		case "ultra":
 			rank, valid = 7, true
 		}
 		if valid && rank > bestRank {

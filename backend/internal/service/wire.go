@@ -900,7 +900,11 @@ func ProvideSchedModelTransientAdmin(openai *OpenAIGatewayService) SchedModelTra
 }
 
 func ProvideSchedAdminCapability(admin AdminService) SchedAdminCapability {
-	return admin.(SchedAdminCapability)
+	capability, ok := admin.(SchedAdminCapability)
+	if !ok {
+		panic("AdminService does not implement SchedAdminCapability")
+	}
+	return capability
 }
 
 func ProvideSchedAdminService(engine *SchedQualityEngineService, board *OpenAISelectionBoard, transient SchedModelTransientAdmin, accounts SchedAdminAccountRepository, groups GroupRepository, attempts SchedAttemptStore, rateLimit *RateLimitService, resilience *ResilienceService, openai *OpenAIGatewayService, capability SchedAdminCapability, runner *SchedTestRunnerService, concurrency *ConcurrencyService, settings *SettingService, recorder *SchedAttemptRecorderService) *SchedAdminService {

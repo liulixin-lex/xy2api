@@ -846,13 +846,6 @@ func equalPlatformQuotaSettings(before, after map[string]*service.DefaultPlatfor
 	return true
 }
 
-func stringSetting(value *string, fallback string) string {
-	if value == nil {
-		return fallback
-	}
-	return *value
-}
-
 func equalSupportTicketConfig(a, b service.SupportTicketConfig) bool {
 	return a.MaxOpenPerUser == b.MaxOpenPerUser && a.Notice == b.Notice &&
 		a.ChatWelcome == b.ChatWelcome && a.ChatImageRetentionDays == b.ChatImageRetentionDays &&

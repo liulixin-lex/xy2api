@@ -1357,7 +1357,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			BeforeRelayCancel: func(exit openaiwsv2.RelayExit) {
 				var timeoutErr *openAIWSPassthroughFirstOutputTimeoutError
 				if errors.As(exit.Err, &timeoutErr) {
-					recordFirstOutputTimeout(timeoutErr)
+					_ = recordFirstOutputTimeout(timeoutErr)
 				} else if exit.Stage == "read_client" || exit.Stage == "write_client" || ctx.Err() != nil {
 					schedTurns.cancel()
 				} else {

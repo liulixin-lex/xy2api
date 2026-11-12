@@ -294,7 +294,7 @@ func (s *SchedAdminService) Test(ctx context.Context, id int64, model string, op
 			failures.Err = errors.Join(failures.Err, fmt.Errorf("%s: %w", m, e))
 			continue
 		}
-		out.Tests = append(out.Tests, SchedAdminTestTests{Model: t.Model, TestID: t.TestID, Started: t.Started, Why: t.Why})
+		out.Tests = append(out.Tests, SchedAdminTestTests(t))
 	}
 	if failures.Err != nil {
 		return out, failures

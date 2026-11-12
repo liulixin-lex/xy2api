@@ -26,28 +26,28 @@ func (r *schedAttemptRepository) InsertBatch(ctx context.Context, rows []schedqu
 	ctx, cancel := context.WithTimeout(ctx, schedquality.LedgerWriteTimeout)
 	defer cancel()
 	var q strings.Builder
-	q.WriteString(`INSERT INTO account_attempt_samples
+	_, _ = q.WriteString(`INSERT INTO account_attempt_samples
 		(attempt_id, started_at, finished_at, account_id, group_id, model, request_class,
 		stream, warm, ttfo_ms, censored_ms, outcome, detail, prompt_tokens, prev_prompt_tokens,
 		cache_read_tokens, session_key, request_id) VALUES `)
 	args := make([]any, 0, len(rows)*18)
 	for i, row := range rows {
 		if i > 0 {
-			q.WriteByte(',')
+			_ = q.WriteByte(',')
 		}
-		q.WriteByte('(')
+		_ = q.WriteByte('(')
 		for j := 0; j < 18; j++ {
 			if j > 0 {
-				q.WriteByte(',')
+				_ = q.WriteByte(',')
 			}
 			fmt.Fprintf(&q, "$%d", i*18+j+1)
 		}
-		q.WriteByte(')')
+		_ = q.WriteByte(')')
 		args = append(args, row.AttemptID, row.StartedAt, row.FinishedAt, row.AccountID, row.GroupID,
 			row.Model, row.Class, row.Stream, row.Warm, row.TTFOMs, row.CensoredMs, row.Outcome,
 			row.Detail, row.PromptTokens, row.PrevPromptTokens, row.CacheReadTokens, row.SessionKey, row.RequestID)
 	}
-	q.WriteString(` ON CONFLICT (attempt_id) DO NOTHING`)
+	_, _ = q.WriteString(` ON CONFLICT (attempt_id) DO NOTHING`)
 	_, err := r.db.ExecContext(ctx, q.String(), args...)
 	return err
 }
@@ -63,7 +63,7 @@ func (r *schedAttemptRepository) read(ctx context.Context, where string, args ..
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err = tx.ExecContext(ctx, fmt.Sprintf("SET LOCAL statement_timeout = '%dms'", schedquality.LedgerReadTimeout.Milliseconds())); err != nil {
 		return nil, err
 	}
@@ -71,7 +71,7 @@ func (r *schedAttemptRepository) read(ctx context.Context, where string, args ..
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var result []schedquality.AttemptSample
 	for rows.Next() {
 		var row schedquality.AttemptSample

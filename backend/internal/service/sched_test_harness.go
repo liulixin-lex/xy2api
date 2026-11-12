@@ -72,7 +72,7 @@ func schedTestResponseText(body string) string {
 			Delta string `json:"delta"`
 		}
 		if json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &event) == nil && event.Type == "response.output_text.delta" {
-			answer.WriteString(event.Delta)
+			_, _ = answer.WriteString(event.Delta)
 		}
 	}
 	return answer.String()

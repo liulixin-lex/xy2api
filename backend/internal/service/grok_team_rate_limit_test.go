@@ -3,6 +3,7 @@
 package service
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -72,4 +73,27 @@ func TestGrokTeamModelRateLimitFilterUsesMappedUpstreamModel(t *testing.T) {
 	markGrokTeamModelRateLimit(account, "grok-4.5", now.Add(time.Hour))
 
 	require.Empty(t, filterGrokTeamModelRateLimitedAccounts([]Account{*account}, "gpt-5", now))
+}
+
+// filterGrokTeamModelRateLimitedAccounts drops candidates whose team is under a
+// model-scoped rate-limit cool. Accounts without team_id pass through.
+func filterGrokTeamModelRateLimitedAccounts(accounts []Account, model string, now time.Time) []Account {
+	if len(accounts) == 0 || strings.TrimSpace(model) == "" {
+		return accounts
+	}
+	out := accounts[:0]
+	kept := false
+	for i := range accounts {
+		upstreamModel := canonicalOpenAIAccountSchedulingModel(&accounts[i], model)
+		if isGrokTeamModelRateLimited(&accounts[i], upstreamModel, now) {
+			continue
+		}
+		out = append(out, accounts[i])
+		kept = true
+	}
+	if !kept && len(out) == 0 {
+		// All filtered — return empty (caller treats as no capacity).
+		return nil
+	}
+	return out
 }

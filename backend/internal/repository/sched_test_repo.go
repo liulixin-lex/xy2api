@@ -97,7 +97,7 @@ func (r *schedTestRepository) query(ctx context.Context, q string, args ...any) 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var result []service.SchedTestRecord
 	for rows.Next() {
 		v, err := scanSchedTest(rows)

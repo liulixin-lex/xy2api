@@ -118,7 +118,7 @@ func loadSchedQualityStates(ctx context.Context, q interface {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []schedquality.StateRow
 	for rows.Next() {
 		var row schedquality.StateRow
@@ -140,7 +140,7 @@ func loadSchedQualityOverrides(ctx context.Context, q interface {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []service.SchedOverride
 	for rows.Next() {
 		var o service.SchedOverride
@@ -163,7 +163,7 @@ func loadSchedQualityResets(ctx context.Context, q interface {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make(map[int64]time.Time)
 	for rows.Next() {
 		var id int64
@@ -194,7 +194,7 @@ func (r *schedQualityRepository) LoadMembers(ctx context.Context) (map[int64][]i
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make(map[int64][]int64)
 	for rows.Next() {
 		var g int64
@@ -363,7 +363,7 @@ func (r *schedQualityRepository) LoadPolicies(ctx context.Context) (map[int64]se
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make(map[int64]service.SchedPolicyRecord)
 	for rows.Next() {
 		var id int64

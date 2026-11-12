@@ -1072,7 +1072,7 @@ type GatewayConfig struct {
 	// OpenAIWS: OpenAI Responses WebSocket 配置（默认开启，可按需回滚到 HTTP）
 	OpenAIWS GatewayOpenAIWSConfig `mapstructure:"openai_ws"`
 	// Live: ChatGPT Frameless Live 会话配置。
-	Live GatewayLiveConfig `mapstructure:"live"`
+	Live                 GatewayLiveConfig          `mapstructure:"live"`
 	OpenAIQualityRouting OpenAIQualityRoutingConfig `mapstructure:"openai_quality_routing"`
 	OpenAICache          OpenAICacheConfig          `mapstructure:"openai_cache"`
 	// OpenAIHTTP2: OpenAI HTTP 上游协议策略（默认启用 HTTP/2，可按代理能力回退 HTTP/1.1）
