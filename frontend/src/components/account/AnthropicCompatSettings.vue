@@ -10,7 +10,7 @@
       <select v-if="bulk" :id="`${id}-enabled`" :value="toOption(enabled)" class="input w-32 shrink-0 text-sm" data-testid="anthropic-compat-toggle" @change="enabled = fromOption($event)">
         <option v-for="option in bulkOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
       </select>
-      <Toggle v-else :id="`${id}-enabled`" :model-value="enabled === true" :disabled="passthrough" :aria-describedby="`${id}-desc`" data-testid="anthropic-compat-toggle" @update:model-value="enabled = $event" />
+      <Toggle v-else :id="`${id}-enabled`" :model-value="enabled === true" :disabled="passthrough" :aria-describedby="`${id}-desc`" class="disabled:cursor-not-allowed disabled:opacity-50" data-testid="anthropic-compat-toggle" @update:model-value="enabled = $event" />
     </div>
     <div v-if="enabled !== false" class="mt-3 flex items-start justify-between gap-4">
       <div class="space-y-1">

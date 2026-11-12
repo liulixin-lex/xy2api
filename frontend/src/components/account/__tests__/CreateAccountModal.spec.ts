@@ -978,6 +978,20 @@ describe('CreateAccountModal Claude Code compatibility', () => {
     wrapper.unmount()
   })
 
+  it('keeps compatibility and auto passthrough mutually exclusive', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'admin.accounts.claudeConsole')
+    const compat = () => wrapper.get('[data-testid="anthropic-compat-toggle"]')
+    const passthrough = () => wrapper.get('[data-testid="anthropic-passthrough-toggle"]')
+    await passthrough().trigger('click')
+    expect(compat().attributes('disabled')).toBeDefined()
+    await passthrough().trigger('click')
+    expect(compat().attributes('disabled')).toBeUndefined()
+    await compat().trigger('click')
+    expect(passthrough().attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
   it('resets the compatibility choice when switching away from Anthropic', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'admin.accounts.claudeConsole')

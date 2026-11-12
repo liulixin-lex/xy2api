@@ -52,8 +52,11 @@ describe('UseKeyModal', () => {
     })
 
     const guide = () => wrapper.find('[data-testid="anthropic-client-guide"]')
-    const values = guide().findAll('dd').map((dd) => dd.text())
-    expect(values).toEqual(['https://example.com', 'https://example.com/v1', '/v1/messages, /v1/chat/completions, /v1/responses'])
+    const values = () => guide().findAll('dd').map((dd) => dd.text())
+    const expected = ['https://example.com', 'https://example.com/v1', '/v1/messages, /v1/chat/completions, /v1/responses']
+    expect(values()).toEqual(expected)
+    await wrapper.setProps({ baseUrl: 'https://example.com/v1//' })
+    expect(values()).toEqual(expected)
 
     await wrapper.setProps({ claudeCodeOnly: true })
     expect(guide().exists()).toBe(false)

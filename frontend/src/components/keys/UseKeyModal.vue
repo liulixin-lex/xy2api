@@ -672,7 +672,7 @@ const platformNote = computed(() => {
 const showPlatformNote = computed(() => activeClientTab.value !== 'opencode')
 
 // Site root without a trailing /v1: Anthropic clients append /v1/messages themselves.
-const apiRoot = computed(() => (props.baseUrl || window.location.origin).replace(/\/v1\/?$/, '').replace(/\/+$/, ''))
+const apiRoot = computed(() => (props.baseUrl || window.location.origin).replace(/\/+$/, '').replace(/\/v1$/, ''))
 const showAnthropicClientGuide = computed(() => props.platform === 'anthropic' && !props.claudeCodeOnly)
 
 function resetCodexModelManifest() {
