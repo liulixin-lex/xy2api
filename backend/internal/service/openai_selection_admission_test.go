@@ -60,6 +60,15 @@ func TestSchedTestAdmissionHardGatesAndNoMutation(t *testing.T) {
 		{"model_limit", func(s *OpenAIGatewayService, a *Account) {
 			setAccountModelRateLimitSnapshot(a, "m", future, "limited", now)
 		}, "model_rate_limited"},
+		{"ticket", func(s *OpenAIGatewayService, a *Account) {
+			s.cfg = &config.Config{}
+			s.cfg.Gateway.OpenAICodexTicket.Enabled = true
+			a.Type = AccountTypeOAuth
+			a.Extra = map[string]any{
+				codexAccountTicketConfigKey: codexAccountTicketConfig{Enabled: true, Models: []string{"m"}, Revision: "test", TicketPlan: codexTicketPlanPro},
+				codexTicketSchedulingKey:    map[string]codexTicketSchedulingEntry{},
+			}
+		}, "runtime_blocked"},
 		{"transient", func(s *OpenAIGatewayService, a *Account) {
 			s.getOpenAIAccountModelTransientState().recordFailure(a.ID, "m", now)
 			s.getOpenAIAccountModelTransientState().recordFailure(a.ID, "m", now)
@@ -80,6 +89,9 @@ func TestSchedTestAdmissionHardGatesAndNoMutation(t *testing.T) {
 			_, ok, reason := s.TestRequestModel(context.Background(), a, "m")
 			require.False(t, ok)
 			require.Equal(t, tt.reason, reason)
+			if reason == "runtime_blocked" {
+				require.Equal(t, "paused", schedTestAdmissionBlockedBy(a, "m", reason, now))
+			}
 			for k, v := range state.entries {
 				old := before[k]
 				v.lastTouched = old.lastTouched
@@ -163,6 +175,14 @@ func TestSchedTestAdmissionBlockedBy(t *testing.T) {
 		}},
 		{"balance", "not_schedulable", "balance", func(a *Account) { a.TempUnschedulableUntil = &future; a.TempUnschedulableReason = "balance: private" }},
 		{"auth", "not_schedulable", "auth", func(a *Account) { a.TempUnschedulableUntil = &future; a.TempUnschedulableReason = "auth: private" }},
+		{"oauth_401", "not_schedulable", "auth", func(a *Account) {
+			a.TempUnschedulableUntil = &future
+			a.TempUnschedulableReason = "OAuth 401: private upstream message"
+		}},
+		{"authentication_401", "not_schedulable", "auth", func(a *Account) {
+			a.TempUnschedulableUntil = &future
+			a.TempUnschedulableReason = "Authentication failed (401): invalid or expired credentials"
+		}},
 		{"stored_threshold", "not_schedulable", "quota", func(a *Account) {
 			a.TempUnschedulableUntil = &future
 			a.TempUnschedulableReason = BuildAccountSchedulingThresholdReason("private")
@@ -187,7 +207,7 @@ func TestSchedTestAdmissionBlockedBy(t *testing.T) {
 		{"ownership", "account_model_not_owned", "model", nil},
 		{"unsupported", "model_not_supported", "model", nil},
 		{"model_limit", "model_rate_limited", "model", nil},
-		{"channel", "channel_upstream_restricted", "model", nil},
+		{"channel", "channel_upstream_restricted", "other", nil},
 		{"quota_pause", "quota_auto_pause_5h", "quota", nil},
 		{"quota_reset", "quota_auto_reset_pending_7d", "quota", nil},
 		{"quota_credit", "quota_auto_reset_credit_check_5h", "quota", nil},

@@ -750,7 +750,7 @@ func TestSchedTestRunnerAbortAndDirtyEvents(t *testing.T) {
 				} else {
 					require.Zero(t, obs.counts["tests_aborted"])
 				}
-				require.NotContains(t, logs.String(), "private")
+				require.NotContains(t, fmt.Sprint(event), "private")
 			})
 		})
 	}

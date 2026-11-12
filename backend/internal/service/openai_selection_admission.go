@@ -42,7 +42,7 @@ func schedTestAdmissionBlockedBy(account *Account, evidenceModel, reason string,
 		return "other"
 	}
 	switch reason {
-	case "no_model", "account_model_not_owned", "model_not_supported", "model_rate_limited", "channel_upstream_restricted":
+	case "no_model", "account_model_not_owned", "model_not_supported", "model_rate_limited":
 		return "model"
 	case "account_scheduling_threshold":
 		return "quota"
@@ -65,7 +65,9 @@ func schedTestAdmissionBlockedBy(account *Account, evidenceModel, reason string,
 			switch {
 			case strings.HasPrefix(account.TempUnschedulableReason, "balance:"):
 				return "balance"
-			case strings.HasPrefix(account.TempUnschedulableReason, "auth:"):
+			case strings.HasPrefix(account.TempUnschedulableReason, "auth:"),
+				strings.HasPrefix(account.TempUnschedulableReason, "OAuth 401:"),
+				strings.HasPrefix(account.TempUnschedulableReason, "Authentication failed (401):"):
 				return "auth"
 			case IsAccountSchedulingThresholdReason(account.TempUnschedulableReason):
 				return "quota"
