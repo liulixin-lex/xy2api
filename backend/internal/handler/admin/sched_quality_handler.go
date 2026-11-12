@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -170,11 +171,17 @@ func (h *SchedQualityHandler) Test(c *gin.Context) {
 	var failures *service.SchedAdminTestErrors
 	if errors.As(e, &failures) {
 		result := "failure"
+		ticketCount := 0
+		for _, ticket := range v.Tests {
+			if ticket.Why != "error" {
+				ticketCount++
+			}
+		}
 		if len(v.Tests) > 0 {
 			result = "partial_failure"
 			e = nil
 		}
-		middleware.SetAuditExtra(c, map[string]any{"result": result, "test_failed_count": len(failures.Models), "test_ticket_count": len(v.Tests)})
+		middleware.SetAuditExtra(c, map[string]any{"result": result, "test_failed_count": len(failures.Models), "test_ticket_count": ticketCount})
 	}
 	schedQualityReply(c, v, e)
 }
@@ -184,11 +191,12 @@ func (h *SchedQualityHandler) ClearAutoState(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if c.Param("key") == "" {
+	key := strings.TrimPrefix(c.Param("key"), "/")
+	if key == "" {
 		response.BadRequest(c, "Invalid state key")
 		return
 	}
-	v, e := h.service.ClearAutoState(c.Request.Context(), id, c.Param("key"), schedQualityOperator(c))
+	v, e := h.service.ClearAutoState(c.Request.Context(), id, key, schedQualityOperator(c))
 	schedQualityReply(c, service.SchedAdminClearAutoState{Cleared: v}, e)
 }
 func (h *SchedQualityHandler) Policy(c *gin.Context) {

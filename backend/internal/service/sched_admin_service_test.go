@@ -842,17 +842,22 @@ func TestSchedAdminTestRetainsTicketsAfterModelFailure(t *testing.T) {
 	require.ErrorAs(t, err, &failures)
 	require.Equal(t, []string{"b"}, failures.Models)
 	require.Equal(t, []string{"a", "b", "c"}, runner.requested)
-	require.Len(t, out.Tests, 2)
+	require.Len(t, out.Tests, 3)
 	require.Equal(t, "a-ticket", out.Tests[0].TestID)
-	require.Equal(t, "c-ticket", out.Tests[1].TestID)
+	require.Equal(t, SchedAdminTestTests{Model: "b", Why: "error"}, out.Tests[1])
+	require.Equal(t, "c-ticket", out.Tests[2].TestID)
+	out, err = s.Test(context.Background(), 1, "b", 7)
+	require.ErrorAs(t, err, &failures)
+	require.Empty(t, out.Tests)
 }
 
 func TestSchedAdminBoardMapsRequestModelPerAccount(t *testing.T) {
 	s, e, r := schedAdminFixture()
 	a := r.rows[1]
 	a.Type = AccountTypeAPIKey
-	a.Credentials = map[string]any{"model_mapping": map[string]any{"alias": "upstream-a"}}
-	r.rows[2] = &Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"model_mapping": map[string]any{"alias": "upstream-b"}}}
+	a.Credentials = map[string]any{"model_mapping": map[string]any{"alias": "upstream-a", "secondary": "upstream-secondary", "z-alias": "upstream-a"}}
+	r.rows[2] = &Account{ID: 2, GroupIDs: []int64{1}, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"model_mapping": map[string]any{"alias": "upstream-b"}}}
+	r.rows[3] = &Account{ID: 3, GroupIDs: []int64{1}, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"model_mapping": map[string]any{"secondary": "upstream-secondary", "tertiary": "upstream-tertiary"}}}
 	until := e.resetAt.Add(time.Hour)
 	for i, m := range []string{"upstream-a", "upstream-b"} {
 		id := int64(i + 1)
@@ -862,18 +867,46 @@ func TestSchedAdminBoardMapsRequestModelPerAccount(t *testing.T) {
 		e.snapshot.GroupRows[id] = []SchedGroupRow{{GroupID: 1, Model: m, View: schedquality.StateView{State: schedquality.StateCooling, Level: i + 1, Until: until, Verdicts: schedquality.Verdicts{Speed: schedquality.VerdictFail}}}}
 		e.snapshot.Tests[SchedAccountModel{id, m}] = SchedTestRecord{Running: true}
 	}
-	board := &schedAdminBoard{rows: []SchedBoardRow{{AccountID: 1}, {AccountID: 2}}}
+	e.snapshot.Evidence[SchedAccountModel{1, "upstream-secondary"}] = schedAdminEvidence(5)
+	e.snapshot.GroupRows[1] = append(e.snapshot.GroupRows[1], SchedGroupRow{GroupID: 1, Model: "upstream-secondary"})
+	for _, m := range []string{"upstream-secondary", "upstream-tertiary"} {
+		e.snapshot.Evidence[SchedAccountModel{3, m}] = schedAdminEvidence(10)
+		e.snapshot.GroupRows[3] = append(e.snapshot.GroupRows[3], SchedGroupRow{GroupID: 1, Model: m})
+	}
+	e.snapshot.Evidence[SchedAccountModel{3, "upstream-tertiary"}] = schedAdminEvidence(15)
+	e.snapshot.Evidence[SchedAccountModel{3, "unmapped"}] = schedAdminEvidence(200)
+	e.snapshot.GroupRows[3] = append(e.snapshot.GroupRows[3], SchedGroupRow{GroupID: 1, Model: "unmapped"})
+	board := &schedAdminBoard{rows: []SchedBoardRow{{AccountID: 1}, {AccountID: 2}, {AccountID: 3}}}
 	s.d.Board = board
-	out, err := s.Board(context.Background(), 1, "alias")
+	out, err := s.Board(context.Background(), 1, "")
 	require.NoError(t, err)
+	require.Equal(t, []string{"alias", "secondary", "tertiary"}, out.Models)
+	require.Equal(t, "alias", out.Model)
 	require.Equal(t, "alias", board.model)
-	for i, row := range out.Accounts {
+	for i, row := range out.Accounts[:2] {
+		require.Equal(t, []string{"upstream-a", "upstream-b"}[i], row.EvidenceModel)
 		require.Equal(t, 1234+i, *row.TTFO.P90Ms)
 		require.Equal(t, i+1, row.Level)
 		require.Equal(t, "cooling", row.State)
 		require.True(t, row.Testing)
 		require.NotNil(t, row.Until)
 		require.Equal(t, "fail", row.Verdicts.TTFO)
+	}
+	wants := []map[string]string{{"upstream-a": "alias", "upstream-secondary": "secondary"}, {"upstream-b": "alias"}, {"upstream-secondary": "secondary", "upstream-tertiary": "tertiary", "unmapped": ""}}
+	for i, want := range wants {
+		detail, err := s.Detail(context.Background(), int64(i+1))
+		require.NoError(t, err)
+		got := map[string]string{}
+		for _, model := range detail.Models {
+			got[model.Model] = model.RequestModel
+		}
+		require.Equal(t, want, got)
+	}
+	out, err = s.Board(context.Background(), 1, "secondary")
+	require.NoError(t, err)
+	for _, i := range []int{0, 2} {
+		require.Equal(t, "upstream-secondary", out.Accounts[i].EvidenceModel)
+		require.Equal(t, map[int]int{0: 5, 2: 10}[i], out.Accounts[i].TTFO.N)
 	}
 }
 

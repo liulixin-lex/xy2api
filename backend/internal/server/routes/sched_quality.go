@@ -15,7 +15,7 @@ func registerSchedQualityRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	g.PUT("/accounts/:id/override", q.SetOverride)
 	g.DELETE("/accounts/:id/override", q.ClearOverride)
 	g.POST("/accounts/:id/test", q.Test)
-	g.DELETE("/accounts/:id/auto-states/:key", q.ClearAutoState)
+	g.DELETE("/accounts/:id/auto-states/*key", q.ClearAutoState)
 	g.GET("/groups/:id/policy", q.Policy)
 	g.PUT("/groups/:id/policy", q.UpdatePolicy)
 	g.GET("/groups/:id/board", q.Board)

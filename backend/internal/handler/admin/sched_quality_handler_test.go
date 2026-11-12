@@ -89,10 +89,14 @@ func (schedAdminHandlerBoard) Board(context.Context, int64, string) ([]service.S
 
 type schedAdminHandlerTests struct {
 	service.SchedTestRunner
-	ticket service.SchedTestTicket
+	ticket    service.SchedTestTicket
+	failModel string
 }
 
 func (s *schedAdminHandlerTests) Request(_ context.Context, _ int64, m string, _ bool, _ int64) (service.SchedTestTicket, error) {
+	if m == s.failModel && m != "" {
+		return service.SchedTestTicket{}, errors.New("runner failed")
+	}
 	ticket := s.ticket
 	ticket.Model = m
 	return ticket, nil
@@ -124,7 +128,7 @@ func schedAdminHandlerRoutes(r *gin.Engine, h *SchedQualityHandler) {
 	g.PUT("/accounts/:id/override", h.SetOverride)
 	g.DELETE("/accounts/:id/override", h.ClearOverride)
 	g.POST("/accounts/:id/test", h.Test)
-	g.DELETE("/accounts/:id/auto-states/:key", h.ClearAutoState)
+	g.DELETE("/accounts/:id/auto-states/*key", h.ClearAutoState)
 	g.GET("/groups/:id/policy", h.Policy)
 	g.PUT("/groups/:id/policy", h.UpdatePolicy)
 	g.GET("/groups/:id/board", h.Board)
@@ -264,7 +268,7 @@ func TestSchedQualityPermissionsFinalCatalog(t *testing.T) {
 		method, path string
 		module       operatoraccess.Module
 		level        operatoraccess.Level
-	}{{"POST", "/accounts/summary", "accounts", operatoraccess.LevelView}, {"GET", "/accounts/attention", "accounts", operatoraccess.LevelView}, {"GET", "/accounts/:id", "accounts", operatoraccess.LevelView}, {"POST", "/accounts/:id/reset", "accounts", operatoraccess.LevelManage}, {"PUT", "/accounts/:id/override", "accounts", operatoraccess.LevelManage}, {"DELETE", "/accounts/:id/override", "accounts", operatoraccess.LevelManage}, {"POST", "/accounts/:id/test", "accounts", operatoraccess.LevelManage}, {"DELETE", "/accounts/:id/auto-states/:key", "accounts", operatoraccess.LevelManage}, {"GET", "/groups/:id/policy", "groups", operatoraccess.LevelView}, {"PUT", "/groups/:id/policy", "groups", operatoraccess.LevelManage}, {"GET", "/groups/:id/board", "groups", operatoraccess.LevelView}}
+	}{{"POST", "/accounts/summary", "accounts", operatoraccess.LevelView}, {"GET", "/accounts/attention", "accounts", operatoraccess.LevelView}, {"GET", "/accounts/:id", "accounts", operatoraccess.LevelView}, {"POST", "/accounts/:id/reset", "accounts", operatoraccess.LevelManage}, {"PUT", "/accounts/:id/override", "accounts", operatoraccess.LevelManage}, {"DELETE", "/accounts/:id/override", "accounts", operatoraccess.LevelManage}, {"POST", "/accounts/:id/test", "accounts", operatoraccess.LevelManage}, {"DELETE", "/accounts/:id/auto-states/*key", "accounts", operatoraccess.LevelManage}, {"GET", "/groups/:id/policy", "groups", operatoraccess.LevelView}, {"PUT", "/groups/:id/policy", "groups", operatoraccess.LevelManage}, {"GET", "/groups/:id/board", "groups", operatoraccess.LevelView}}
 	for _, tc := range cases {
 		t.Run(tc.method+tc.path, func(t *testing.T) {
 			path := "/api/v1/admin/sched-quality" + tc.path
@@ -297,7 +301,7 @@ func TestSchedQualityPermissionsFinalCatalog(t *testing.T) {
 				}, middleware.AdminPermission())
 				schedAdminHandlerRoutes(r, NewSchedQualityHandler(fake))
 				w := httptest.NewRecorder()
-				actual := strings.ReplaceAll(strings.ReplaceAll(path, ":id", "1"), ":key", "error")
+				actual := strings.ReplaceAll(strings.ReplaceAll(path, ":id", "1"), "*key", "error")
 				if tc.method == "DELETE" && strings.HasSuffix(tc.path, "/override") {
 					actual += "?group_id=0"
 				}
@@ -382,26 +386,38 @@ func (s *schedAdminPermissionService) Board(context.Context, int64, string) (ser
 func TestSchedQualityEmptyTestBodyAndPartialFailureAudit(t *testing.T) {
 	for _, partial := range []bool{false, true} {
 		t.Run(strconv.FormatBool(partial), func(t *testing.T) {
-			fake := &schedAdminPermissionService{}
-			if partial {
-				fake.testErr = &service.SchedAdminTestErrors{Models: []string{"failed-model"}, Err: errors.New("runner failed")}
+			_, engine, repo := schedAdminHandlerFixture()
+			for i, m := range []string{"a", "b", "c"} {
+				engine.p.Evidence[service.SchedAccountModel{AccountID: 1, Model: m}] = schedquality.Summary{Samples: 40 - i}
 			}
+			runner := &schedAdminHandlerTests{ticket: service.SchedTestTicket{TestID: "started", Started: true}}
+			if partial {
+				runner.failModel = "b"
+			}
+			s := service.NewSchedAdminService(service.SchedAdminDependencies{Engine: engine, Accounts: repo, Tests: runner})
 			audit := &schedAdminHandlerAudit{}
 			auditService := service.NewAuditLogService(audit, nil)
 			auditService.Start()
-			r := schedAdminHandlerRouter(NewSchedQualityHandler(fake), gin.HandlerFunc(middleware.NewAuditLogMiddleware(auditService)))
+			r := schedAdminHandlerRouter(NewSchedQualityHandler(s), gin.HandlerFunc(middleware.NewAuditLogMiddleware(auditService)))
 			w := schedAdminHandlerRequest(r, "POST", "/accounts/1/test", "")
 			require.Equal(t, 200, w.Code, w.Body.String())
-			require.Contains(t, w.Body.String(), `"test_id":"started"`)
-			require.Empty(t, fake.testModel)
-			require.Equal(t, 1, fake.calls)
+			var tests []service.SchedAdminTestTests
+			require.NoError(t, json.Unmarshal(schedAdminHandlerData(t, w)["tests"], &tests))
+			require.Len(t, tests, 3)
+			require.True(t, tests[0].Started)
+			require.True(t, tests[2].Started)
+			if partial {
+				require.Equal(t, service.SchedAdminTestTests{Model: "b", Why: "error"}, tests[1])
+			} else {
+				require.True(t, tests[1].Started)
+			}
 			auditService.Stop()
 			require.Len(t, audit.rows, 1)
 			require.Equal(t, "sched_quality.test", audit.rows[0].Action)
 			if partial {
 				require.Equal(t, "partial_failure", audit.rows[0].Extra["result"])
 				require.EqualValues(t, 1, audit.rows[0].Extra["test_failed_count"])
-				require.EqualValues(t, 1, audit.rows[0].Extra["test_ticket_count"])
+				require.EqualValues(t, 2, audit.rows[0].Extra["test_ticket_count"])
 			}
 		})
 	}
