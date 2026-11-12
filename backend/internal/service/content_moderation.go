@@ -1810,6 +1810,9 @@ func (s *ContentModerationService) callModerationOnceWithInput(ctx context.Conte
 	if httpStatus != nil {
 		*httpStatus = resp.StatusCode
 	}
+	if err := httpclient.RedirectError(resp); err != nil {
+		return nil, err
+	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
@@ -1841,10 +1844,7 @@ const contentModerationProxyURLCacheTTL = time.Minute
 // 代理解析/构建失败直接返回错误，绝不回退直连（避免 IP 关联风险）。
 func (s *ContentModerationService) moderationHTTPClient(ctx context.Context, cfg *ContentModerationConfig) (*http.Client, error) {
 	if cfg == nil || cfg.ProxyID == nil {
-		if s.httpClient == nil {
-			return http.DefaultClient, nil
-		}
-		return s.httpClient, nil
+		return httpclient.WithoutRedirects(s.httpClient), nil
 	}
 	proxyURL, err := s.resolveModerationProxyURL(ctx, *cfg.ProxyID)
 	if err != nil {
@@ -1854,7 +1854,7 @@ func (s *ContentModerationService) moderationHTTPClient(ctx context.Context, cfg
 	if err != nil {
 		return nil, fmt.Errorf("build moderation proxy client: %w", err)
 	}
-	return client, nil
+	return httpclient.WithoutRedirects(client), nil
 }
 
 func (s *ContentModerationService) resolveModerationProxyURL(ctx context.Context, proxyID int64) (string, error) {
