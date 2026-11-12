@@ -143,6 +143,7 @@ func provideCleanup(
 	schedQuality *service.SchedQualityEngineService,
 	schedTests *service.SchedTestRunnerService,
 	schedAttempts *service.SchedAttemptRecorderService,
+	schedObs *service.SchedObservabilityService,
 	imageTasks *service.ImageTaskService,
 	asyncImage *handler.AsyncImageHandler,
 	supportChatPurge *service.SupportChatImagePurgeService,
@@ -157,6 +158,9 @@ func provideCleanup(
 		}
 		if schedAttempts != nil {
 			schedAttempts.Stop()
+		}
+		if schedObs != nil {
+			schedObs.Stop()
 		}
 		// Async image tasks run in this process. Let them finish (bounded by
 		// image_tasks.drain_timeout_seconds) while Redis and the database are

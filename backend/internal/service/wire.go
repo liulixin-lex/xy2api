@@ -885,7 +885,7 @@ func ProvideAPIKeyService(
 	return svc
 }
 
-func ProvideSchedObs() SchedObs { return nopSchedObs{} }
+func ProvideSchedObs(obs *SchedObservabilityService) SchedObs { return obs }
 
 // ProvideSchedTestRunnerService uses the gateway's existing admission and forwarding state.
 func ProvideSchedTestRunnerService(openai *OpenAIGatewayService, concurrency *ConcurrencyService, accounts AccountRepository, store SchedTestStore, lock LeaderLockCache, db *sql.DB, obs SchedObs) *SchedTestRunnerService {
@@ -914,7 +914,7 @@ func ProvideSchedAdminCapability(admin AdminService) SchedAdminCapability {
 	return capability
 }
 
-func ProvideSchedAdminService(engine *SchedQualityEngineService, board *OpenAISelectionBoard, transient SchedModelTransientAdmin, accounts SchedAdminAccountRepository, groups GroupRepository, attempts SchedAttemptStore, rateLimit *RateLimitService, resilience *ResilienceService, openai *OpenAIGatewayService, capability SchedAdminCapability, runner *SchedTestRunnerService, concurrency *ConcurrencyService, settings *SettingService, recorder *SchedAttemptRecorderService) *SchedAdminService {
+func ProvideSchedAdminService(engine *SchedQualityEngineService, board *OpenAISelectionBoard, transient SchedModelTransientAdmin, accounts SchedAdminAccountRepository, groups GroupRepository, attempts SchedAttemptStore, rateLimit *RateLimitService, resilience *ResilienceService, openai *OpenAIGatewayService, capability SchedAdminCapability, runner *SchedTestRunnerService, concurrency *ConcurrencyService, settings *SettingService, recorder *SchedAttemptRecorderService, obs *SchedObservabilityService) *SchedAdminService {
 	admin := NewSchedAdminService(SchedAdminDependencies{
 		Engine: engine, Board: board, Transient: transient, Accounts: accounts, Groups: groups,
 		Attempts: attempts, RateLimit: rateLimit, Resilience: resilience, Gateway: openai,
@@ -927,6 +927,7 @@ func ProvideSchedAdminService(engine *SchedQualityEngineService, board *OpenAISe
 	recorder.SetObserver(engine.Observe)
 	engine.OnAccountReset(admin.ClearLocal)
 	openai.SetSchedAttemptRecorder(recorder)
+	obs.Start(context.Background())
 	recorder.Start(context.Background())
 	runner.Start(context.Background())
 	engine.Start(context.Background())
@@ -937,6 +938,7 @@ func ProvideSchedAdminService(engine *SchedQualityEngineService, board *OpenAISe
 var ProviderSet = wire.NewSet(
 	NewSchedAttemptRecorderService,
 	ProvideSchedTestRunnerService,
+	NewSchedObservabilityService,
 	ProvideSchedObs,
 	ProvideSchedQualityEngineService,
 	ProvideOpenAISelectionBoard,
@@ -954,6 +956,7 @@ var ProviderSet = wire.NewSet(
 	NewGroupService,
 	NewCompositeRouteResolver,
 	NewAccountService,
+	NewAccountRecentStatsService,
 	NewProxyService,
 	NewRedeemService,
 	NewPromoService,
