@@ -174,6 +174,12 @@ func (s *GatewayService) selectAnthropicCompatBoundAccount(ctx context.Context, 
 		if account.ID != scope.Record.AccountID {
 			continue
 		}
+		// Snapshot metadata omits endpoint and other account configuration. All
+		// owner checks and the returned selection must share this full account.
+		account, err = s.hydrateSelectedAccount(ctx, account)
+		if err != nil {
+			return nil, ctx, true, compatUnavailable("The account bound to signed history cannot be loaded")
+		}
 		if err := s.guardAnthropicCompatAccount(ctx, account); err != nil {
 			return nil, ctx, true, err
 		}
@@ -184,17 +190,7 @@ func (s *GatewayService) selectAnthropicCompatBoundAccount(ctx context.Context, 
 		if reason != "" || s.checkChannelPricingRestriction(ctx, groupID, model) {
 			return nil, ctx, true, compatUnavailable("The account bound to signed history is temporarily unavailable")
 		}
-		hydrated, err := s.hydrateSelectedAccount(ctx, account)
-		if err != nil {
-			return nil, ctx, true, compatUnavailable("The account bound to signed history cannot be loaded")
-		}
-		if err := s.guardAnthropicCompatAccount(ctx, hydrated); err != nil {
-			return nil, ctx, true, err
-		}
-		if err := s.anthropicCompatCandidateEligibility(ctx, hydrated, model); err != nil {
-			return nil, ctx, true, err
-		}
-		return hydrated, ctx, true, nil
+		return account, ctx, true, nil
 	}
 	return nil, ctx, true, compatUnavailable("The account bound to signed history is outside the available account pool")
 }
@@ -205,18 +201,16 @@ func (s *GatewayService) selectAnthropicCompatBoundWithLoad(ctx context.Context,
 		return nil, handled, err
 	}
 	if s.concurrencyService == nil {
-		result, err := s.newSelectionResult(ctx, account, true, func() {}, nil)
-		return result, true, err
+		return attachSelectionProfitGate(ctx, &AccountSelectionResult{Account: account, Acquired: true, ReleaseFunc: func() {}}), true, nil
 	}
 	slot, err := s.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency)
 	if err != nil {
 		return nil, true, compatUnavailable("The account bound to signed history has no available slot")
 	}
 	if slot.Acquired {
-		result, err := s.newSelectionResult(ctx, account, true, slot.ReleaseFunc, nil)
-		return result, true, err
+		return attachSelectionProfitGate(ctx, &AccountSelectionResult{Account: account, Acquired: true, ReleaseFunc: slot.ReleaseFunc}), true, nil
 	}
 	cfg := s.schedulingConfig()
-	result, err := s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{AccountID: account.ID, MaxConcurrency: account.Concurrency, Timeout: cfg.StickySessionWaitTimeout, MaxWaiting: cfg.StickySessionMaxWaiting})
-	return result, true, err
+	return attachSelectionProfitGate(ctx, &AccountSelectionResult{Account: account,
+		WaitPlan: &AccountWaitPlan{AccountID: account.ID, MaxConcurrency: account.Concurrency, Timeout: cfg.StickySessionWaitTimeout, MaxWaiting: cfg.StickySessionMaxWaiting}}), true, nil
 }
