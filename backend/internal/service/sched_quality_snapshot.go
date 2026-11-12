@@ -109,7 +109,7 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []schedq
 		state := schedquality.StateView{State: row.State, Level: row.Level, Reason: row.Reason, Since: row.Since, Until: row.Until, Verdicts: effective, FromTest: fromTest, GroupOverride: overrideRef(active[key.account], key.group), AllOverride: overrideRef(active[key.account], 0)}
 		if exists {
 			if row.State == schedquality.StateCooling && !d.now.Before(row.Until) {
-				_, _, _, state.WaitingTest = schedquality.Next(row, schedquality.Inputs{Policy: policy, Summary: summary, Tests: d.finished[pair], TestsEnabled: d.testsEnabled, ResetAt: resets[key.account]}, d.now)
+			_, _, _, state.WaitingTest, _ = schedquality.Next(row, schedquality.Inputs{Policy: policy, Summary: summary, Tests: d.finished[pair], TestsEnabled: d.testsEnabled, ResetAt: resets[key.account]}, d.now)
 			}
 			view.states[key] = state
 		}
