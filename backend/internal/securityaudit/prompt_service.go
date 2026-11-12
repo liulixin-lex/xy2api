@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/liulixin-lex/xy2api/internal/pkg/httpclient"
 )
 
 type PromptService struct {
@@ -257,6 +259,10 @@ func (s *PromptService) Probe(ctx context.Context, request ProbeRequest) ProbeRe
 		}
 		return s.finishProbe(endpoint.ID, started, ProbeResult{Status: "failed", ErrorCode: code, Message: "无法连接审计节点", Retryable: true, TokenApplied: tokenApplied})
 	}
+	if err := httpclient.RedirectError(resp); err != nil {
+		_ = resp.Body.Close()
+		return s.finishProbe(endpoint.ID, started, ProbeResult{Status: "failed", ErrorCode: "redirect_refused", Message: err.Error(), HTTPStatus: resp.StatusCode, TokenApplied: tokenApplied})
+	}
 	responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxGuardResponseBytes+1))
 	_ = resp.Body.Close()
 	if readErr != nil {
@@ -281,7 +287,11 @@ func (s *PromptService) Probe(ctx context.Context, request ProbeRequest) ProbeRe
 		if code == "" {
 			code = ErrorCodeInvalidResponse
 		}
-		return s.finishProbe(endpoint.ID, started, ProbeResult{Status: "failed", ErrorCode: code, Message: "审计节点模型调用失败", HTTPStatus: status, Retryable: retryable, TokenApplied: tokenApplied})
+		message := "审计节点模型调用失败"
+		if status >= 300 && status < 400 {
+			message = scanErr.Error()
+		}
+		return s.finishProbe(endpoint.ID, started, ProbeResult{Status: "failed", ErrorCode: code, Message: message, HTTPStatus: status, Retryable: retryable, TokenApplied: tokenApplied})
 	}
 	code, retryable := "probe_http_error", resp.StatusCode == 429 || resp.StatusCode >= 500
 	if resp.StatusCode == 401 || resp.StatusCode == 403 {

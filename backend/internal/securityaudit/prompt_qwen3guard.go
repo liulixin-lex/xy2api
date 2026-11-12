@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/liulixin-lex/xy2api/internal/pkg/httpclient"
 )
 
 type ScannerDefinition struct {
@@ -69,6 +71,9 @@ type GuardError struct {
 func (e *GuardError) Error() string {
 	if e == nil {
 		return "<nil>"
+	}
+	if e.HTTPStatus >= 300 && e.HTTPStatus < 400 && e.Cause != nil {
+		return e.Cause.Error()
 	}
 	return e.Code
 }
@@ -231,6 +236,9 @@ func (s *OpenAICompatibleScanner) Scan(ctx context.Context, endpoint ActiveEndpo
 		return nil, &GuardError{Code: ErrorCodeUnavailable, Retryable: true, Timeout: timeout, Cause: err}
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if err := httpclient.RedirectError(resp); err != nil {
+		return nil, &GuardError{Code: ErrorCodeUnavailable, HTTPStatus: resp.StatusCode, Cause: err}
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		retryable := resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500
 		return nil, &GuardError{Code: ErrorCodeUnavailable, HTTPStatus: resp.StatusCode, Retryable: retryable}

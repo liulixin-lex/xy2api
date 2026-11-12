@@ -3,6 +3,8 @@ package securityaudit
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -37,13 +39,19 @@ func TestNormalizeBaseURLAllowsAdministratorConfiguredDestinations(t *testing.T)
 	require.Equal(t, "https://guard.example.com/v1/chat/completions", url)
 }
 
-func TestHTTPClientUsesDirectStandardDialer(t *testing.T) {
-	client, err := NewSecureHTTPClient(ActiveEndpoint{BaseURL: "https://guard.example.com", TimeoutMS: 1000})
+func TestHTTPClientTransportCanReachConfiguredService(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client, err := NewSecureHTTPClient(ActiveEndpoint{BaseURL: server.URL, TimeoutMS: 1000})
 	require.NoError(t, err)
-	transport, ok := client.Transport.(*http.Transport)
-	require.True(t, ok)
-	require.Nil(t, transport.Proxy)
-	require.NotNil(t, transport.DialContext)
+	require.NotNil(t, client.Transport)
+	resp, err := client.Get(server.URL)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNoContent, resp.StatusCode)
+	require.NoError(t, resp.Body.Close())
 }
 
 func TestOpenAICompatibleScannerRequestContract(t *testing.T) {
@@ -66,22 +74,63 @@ func TestOpenAICompatibleScannerRequestContract(t *testing.T) {
 	require.Equal(t, EventPass, result.Decision)
 }
 
-func TestOpenAICompatibleScannerFollowsRedirectAndRejectsOversize(t *testing.T) {
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Safety: Safe\nCategories: None"}}]}`))
-	}))
-	defer target.Close()
-	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, target.URL, http.StatusFound) }))
-	defer redirect.Close()
-	result, err := NewOpenAICompatibleScanner().Scan(context.Background(), ActiveEndpoint{ID: "redirect", BaseURL: redirect.URL, Model: DefaultGuardModel, TimeoutMS: 1000}, "hello", AllScannerIDs)
-	require.NoError(t, err)
-	require.Equal(t, EventPass, result.Decision)
+func TestOpenAICompatibleScannerRejectsOversize(t *testing.T) {
 	oversize := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(strings.Repeat("x", int(maxGuardResponseBytes)+1)))
 	}))
 	defer oversize.Close()
-	_, err = NewOpenAICompatibleScanner().Scan(context.Background(), ActiveEndpoint{ID: "large", BaseURL: oversize.URL, Model: DefaultGuardModel, TimeoutMS: 1000}, "hello", AllScannerIDs)
+	_, err := NewOpenAICompatibleScanner().Scan(context.Background(), ActiveEndpoint{ID: "large", BaseURL: oversize.URL, Model: DefaultGuardModel, TimeoutMS: 1000}, "hello", AllScannerIDs)
 	require.Error(t, err)
+}
+
+func TestPromptAuditRejectsRedirects(t *testing.T) {
+	for _, status := range []int{301, 302, 303, 307, 308} {
+		for _, mode := range []string{"scanner", "probe", "probe_fallback"} {
+			t.Run(fmt.Sprintf("%s/%d", mode, status), func(t *testing.T) {
+				var second atomic.Int64
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path == "/second" {
+						second.Add(1)
+						_, _ = io.Copy(io.Discard, r.Body)
+						return
+					}
+					if mode == "probe_fallback" && r.URL.Path == "/v1/models" {
+						w.WriteHeader(http.StatusNotFound)
+						return
+					}
+					w.Header().Set("Location", "http://redirect-user:redirect-password@"+r.Host+"/%zz?token=query-secret#fragment-secret")
+					w.WriteHeader(status)
+					_, _ = io.WriteString(w, "body-secret audit-token private-prompt")
+				}))
+				defer server.Close()
+				want := fmt.Sprintf("redirect refused: status=%d host=unknown", status)
+				if mode == "scanner" {
+					_, err := NewOpenAICompatibleScanner().Scan(context.Background(), ActiveEndpoint{ID: "redirect", BaseURL: server.URL, Model: DefaultGuardModel, Token: "audit-token", TimeoutMS: 1000}, "private-prompt", AllScannerIDs)
+					require.Zero(t, second.Load())
+					var guardErr *GuardError
+					require.ErrorAs(t, err, &guardErr)
+					require.Equal(t, status, guardErr.HTTPStatus)
+					require.False(t, guardErr.Retryable)
+					require.EqualError(t, err, want)
+					require.NotContains(t, err.Error(), "redirect-password")
+					require.NotContains(t, err.Error(), "query-secret")
+					require.NotContains(t, err.Error(), "fragment-secret")
+					require.NotContains(t, err.Error(), "body-secret")
+				} else {
+					result := newProbeTestService().Probe(context.Background(), ProbeRequest{Endpoint: probeEndpoint(server.URL, "audit-token")})
+					require.Zero(t, second.Load())
+					require.False(t, result.OK)
+					require.False(t, result.Retryable)
+					require.Equal(t, status, result.HTTPStatus)
+					require.Equal(t, want, result.Message)
+					require.NotContains(t, result.Message, "redirect-password")
+					require.NotContains(t, result.Message, "query-secret")
+					require.NotContains(t, result.Message, "fragment-secret")
+					require.NotContains(t, result.Message, "body-secret")
+				}
+			})
+		}
+	}
 }
 
 func TestOpenAICompatibleScannerClassifiesHTTPConnectionAndTimeoutFailures(t *testing.T) {
