@@ -59,6 +59,22 @@ func TestRedirectErrorRevealsOnlyStatusAndHost(t *testing.T) {
 	}
 }
 
+func TestWithoutRedirectsClosesUnderlyingIdleConnections(t *testing.T) {
+	base := &idleClosingTransport{}
+	WithoutRedirects(&http.Client{Transport: base}).CloseIdleConnections()
+	require.True(t, base.closed)
+}
+
+type idleClosingTransport struct {
+	closed bool
+}
+
+func (*idleClosingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Request: req}, nil
+}
+
+func (t *idleClosingTransport) CloseIdleConnections() { t.closed = true }
+
 func TestWithoutRedirectsSanitizesRealRedirectResponsesBeforeClientParsing(t *testing.T) {
 	for _, status := range []int{301, 302, 303, 307, 308} {
 		t.Run(strconv.Itoa(status), func(t *testing.T) {

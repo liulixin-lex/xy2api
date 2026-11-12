@@ -11,6 +11,12 @@ type locationSanitizer struct {
 	base http.RoundTripper
 }
 
+func (t *locationSanitizer) CloseIdleConnections() {
+	if closer, ok := t.base.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
+}
+
 func (t *locationSanitizer) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := t.base.RoundTrip(req)
 	if err != nil || resp == nil || resp.StatusCode < 300 || resp.StatusCode >= 400 {
