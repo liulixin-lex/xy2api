@@ -1113,6 +1113,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	rejectedFieldRetryState := openAIResponsesRejectedFieldRetryStateForRequest(c, body)
 	requestRepair := armOpenAIRequestRepair(c, account, rejectedFieldRetryState)
 	requestRepair.m3 = s.armOpenAIM3(c, account, body)
+	schedEffort := reasoningEffortValue
 	replayAttempt := false
 	for {
 		if replayAttempt {
@@ -1124,6 +1125,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		body, requestView, reqBody = derivedBody, newOpenAIRequestView(derivedBody), nil
 		requestRepair.setBody(body)
+		if replayAttempt && s.schedAttemptRecorder != nil && account.Platform == PlatformOpenAI {
+			// Repairs can change the outbound model and invalidate the parsed effort.
+			schedEffort = optionalStringValue(extractOpenAIReasoningEffortFromBody(body, gjson.GetBytes(body, "model").String()))
+		}
 		attemptStart := resetOpenAIRepairAttempt(ctx, account, upstreamModel, reqStream, body, replayAttempt)
 		replayAttempt = true
 		firstOutputTimeout := time.Duration(0)
@@ -1158,7 +1163,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 		// Send request
 		upstreamStart := time.Now()
-		resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, body, reqStream, &schedCapture)
+		resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, schedEffort, reqStream, &schedCapture)
 		if collabAttempt != nil {
 			collabAttempt.upstreamStatus = 0
 			if resp != nil {

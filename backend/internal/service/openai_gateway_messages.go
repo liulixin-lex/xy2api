@@ -369,8 +369,16 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	// xy2api resilience (review G1): the first-output deadline bounds the
 	// header wait and the first upstream line of a streaming conversion.
+	reasoningEffortValue := gjson.GetBytes(responsesBody, "reasoning.effort").String()
 	upstreamCtx, firstEvent := s.armOpenAICompatFirstEvent(ctx, upstreamCtx, account, clientStream, upstreamModel,
-		gjson.GetBytes(responsesBody, "reasoning.effort").String(), startTime)
+		reasoningEffortValue, startTime)
+	schedEffort := ""
+	if s.schedAttemptRecorder != nil && account.Platform == PlatformOpenAI {
+		schedEffort = normalizeOpenAIReasoningEffortForModel(reasoningEffortValue, upstreamModel)
+		if strings.TrimSpace(reasoningEffortValue) == "" {
+			schedEffort = deriveOpenAIReasoningEffortFromModelCandidates([]string{upstreamModel})
+		}
+	}
 	defer firstEvent.close()
 	var upstreamReq *http.Request
 	if account.Platform == PlatformGrok {
@@ -435,7 +443,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 				return nil, fmt.Errorf("build grok retry request: %w", err)
 			}
 		}
-		resp, err = s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, responsesBody, clientStream, &schedCapture)
+		resp, err = s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, schedEffort, clientStream, &schedCapture)
 		if firstEvent.expired() {
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()

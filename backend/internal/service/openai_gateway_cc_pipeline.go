@@ -192,6 +192,11 @@ func (s *OpenAIGatewayService) resolveCCFallbackTarget(account *Account) (apiKey
 	return apiKey, targetURL, nil
 }
 
+type ccAttemptCapture struct {
+	effort string
+	owner  **schedAttemptCapture
+}
+
 // sendCCUpstreamRequest 构建并发送 CC 上游请求：分离的上游 context、OpenAI HTTP
 // profile、标准头（含流式 Accept 切换）、客户端 header 白名单透传、自定义 UA 与
 // 账号级 header 覆写，最后经代理发出。传输层失败（DNS/TCP/TLS，无 HTTP 响应）
@@ -208,11 +213,13 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	bearerToken string,
 	userAgent string,
 	grokCacheIdentity string,
-	captureOwner ...**schedAttemptCapture,
+	capture ...ccAttemptCapture,
 ) (*http.Response, error) {
 	var schedCapture *schedAttemptCapture
-	if len(captureOwner) > 0 {
-		defer func() { *captureOwner[0] = schedCapture }()
+	effort := ""
+	if len(capture) > 0 {
+		effort = capture[0].effort
+		defer func() { *capture[0].owner = schedCapture }()
 	}
 	// DeepSeek thinking mode 要求历史 assistant 回传 reasoning_content。
 	// Responses→CC 回退在加密-only / 缺 reasoning item 且缓存未命中时会漏掉该
@@ -272,7 +279,7 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, body, stream, &schedCapture)
+	resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, effort, stream, &schedCapture)
 	if err != nil {
 		schedCapture.finish(nil, err)
 	}
