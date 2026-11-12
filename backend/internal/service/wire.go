@@ -9,6 +9,7 @@ import (
 	"github.com/google/wire"
 	dbent "github.com/liulixin-lex/xy2api/ent"
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/payment"
 	"github.com/liulixin-lex/xy2api/internal/pkg/antigravity"
 	"github.com/liulixin-lex/xy2api/internal/pkg/claude"
@@ -772,7 +773,6 @@ func ProvideOpsService(
 	settingService *SettingService,
 	authCacheInvalidationWorker *AuthCacheInvalidationWorker,
 	apiKeyService *APIKeyService,
-	groupQualityGateView GroupQualityGateView,
 ) *OpsService {
 	svc := NewOpsService(
 		opsRepo,
@@ -795,7 +795,6 @@ func ProvideOpsService(
 	}
 	svc.authCacheInvalidationWorker = authCacheInvalidationWorker
 	svc.apiKeyService = apiKeyService
-	svc.SetGroupQualityGateView(groupQualityGateView)
 	svc.StartRuntimeSettingsRefresh(context.Background())
 	return svc
 }
@@ -822,7 +821,7 @@ func ProvideSettingService(settingRepo SettingRepository, groupRepo GroupReposit
 	svc.SetProxyRepository(proxyRepo)
 	// Load once even on instances that only evaluate quality or operations.
 	// The shared loader bounds repository reads with its existing DB timeout.
-	loadOpenAIAdvancedSchedulerRuntimeSettings(context.Background(), settingRepo)
+	loadOpenAISchedulingRate(context.Background(), settingRepo)
 	if err := svc.LoadForwardedClientIPSettings(context.Background()); err != nil {
 		logger.LegacyPrintf("service.setting", "Warning: load forwarded client IP settings failed: %v", err)
 	}
@@ -881,8 +880,61 @@ func ProvideAPIKeyService(
 	return svc
 }
 
+// ProvideSchedTestRunnerService uses the gateway's existing admission and forwarding state.
+func ProvideSchedTestRunnerService(openai *OpenAIGatewayService, concurrency *ConcurrencyService, accounts AccountRepository, store SchedTestStore, lock LeaderLockCache, db *sql.DB) *SchedTestRunnerService {
+	return NewSchedTestRunnerService(openai, openai, concurrency, accounts, store, nil, lock, db)
+}
+
+func ProvideSchedQualityEngineService(store SchedQualityStore, attempts SchedAttemptStore, runner *SchedTestRunnerService, settings *SettingService, lock LeaderLockCache, db *sql.DB) *SchedQualityEngineService {
+	engine := NewSchedQualityEngineService(store, attempts, runner, settings, nil)
+	engine.SetLeaderLock(lock, db)
+	return engine
+}
+
+func ProvideOpenAISelectionBoard(openai *OpenAIGatewayService, engine *SchedQualityEngineService) *OpenAISelectionBoard {
+	return NewOpenAISelectionBoard(openai, func() schedquality.View { return engine.Snapshot().View })
+}
+
+func ProvideSchedModelTransientAdmin(openai *OpenAIGatewayService) SchedModelTransientAdmin {
+	return openai.getOpenAIAccountModelTransientState()
+}
+
+func ProvideSchedAdminCapability(admin AdminService) SchedAdminCapability {
+	capability, ok := admin.(SchedAdminCapability)
+	if !ok {
+		panic("AdminService does not implement SchedAdminCapability")
+	}
+	return capability
+}
+
+func ProvideSchedAdminService(engine *SchedQualityEngineService, board *OpenAISelectionBoard, transient SchedModelTransientAdmin, accounts SchedAdminAccountRepository, groups GroupRepository, attempts SchedAttemptStore, rateLimit *RateLimitService, resilience *ResilienceService, openai *OpenAIGatewayService, capability SchedAdminCapability, runner *SchedTestRunnerService, concurrency *ConcurrencyService, settings *SettingService, recorder *SchedAttemptRecorderService) *SchedAdminService {
+	admin := NewSchedAdminService(SchedAdminDependencies{
+		Engine: engine, Board: board, Transient: transient, Accounts: accounts, Groups: groups,
+		Attempts: attempts, RateLimit: rateLimit, Resilience: resilience, Gateway: openai,
+		Capability: capability, Tests: runner, Thresholds: settings.GetAccountSchedulingThresholds,
+		InFlight: func(ctx context.Context, id int64) (int, error) {
+			counts, err := concurrency.GetAccountConcurrencyBatch(ctx, []int64{id})
+			return counts[id], err
+		},
+	})
+	recorder.SetObserver(engine.Observe)
+	engine.OnAccountReset(admin.ClearLocal)
+	openai.SetSchedAttemptRecorder(recorder)
+	recorder.Start(context.Background())
+	runner.Start(context.Background())
+	engine.Start(context.Background())
+	return admin
+}
+
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
+	NewSchedAttemptRecorderService,
+	ProvideSchedTestRunnerService,
+	ProvideSchedQualityEngineService,
+	ProvideOpenAISelectionBoard,
+	ProvideSchedModelTransientAdmin,
+	ProvideSchedAdminCapability,
+	ProvideSchedAdminService,
 	// Core services
 	ProvideAuthService,
 	NewPasskeyService,
@@ -931,12 +983,10 @@ var ProviderSet = wire.NewSet(
 	ProvideOAuthRefreshAPI,
 	ProvideGeminiTokenProvider,
 	NewGeminiMessagesCompatService,
-	ProvideShareSchedulingService,
 	NewGroupCategoryService,
 	NewOperatorAccessService,
 	ProvideResilienceService,
-	ProvideGroupQualityGateService,
-	wire.Bind(new(GroupQualityGateView), new(*GroupQualityGateService)),
+	NewProfitPreviewService,
 	ProvideAntigravityTokenProvider,
 	ProvideGrokTokenProvider,
 	ProvideOpenAITokenProvider,
@@ -1127,28 +1177,6 @@ func ProvideClaudeResetCreditService(accounts AccountRepository, tokens *ClaudeT
 	return s
 }
 
-// ProvideShareSchedulingService installs share scheduling into the gateway
-// services after they exist, so their constructors stay stable for tests.
-// Until an administrator enables it every group keeps the original scheduler.
-// The config tells whether the ops monitor runs, whose records the health
-// factor reads (design §11.1).
-func ProvideShareSchedulingService(repo ShareSchedulingRepository, store ShareSchedulingStore, settingRepo SettingRepository, gateway *GatewayService, openai *OpenAIGatewayService, cfg *config.Config) *ShareSchedulingService {
-	s := NewShareSchedulingService(repo, store, settingRepo)
-	s.opsEnabled = cfg == nil || cfg.Ops.Enabled
-	gateway.shareScheduling = s
-	openai.shareScheduling = s
-	s.attachGateways(gateway, openai)
-	s.Start()
-	return s
-}
-
-// ProvideGroupQualityGateService starts the process-local quality evaluator.
-func ProvideGroupQualityGateService(repo GroupQualityGateRepository, accounts AccountRepository, groups GroupRepository) *GroupQualityGateService {
-	svc := NewGroupQualityGateService(repo, accounts, groups)
-	svc.Start()
-	return svc
-}
-
 // ProvideResilienceService creates the gateway resilience runtime, attaches
 // it to the gateway services and starts the settings refresh. With no stored
 // settings every capability uses its documented default.
@@ -1162,7 +1190,6 @@ func ProvideResilienceService(
 	rateLimit *RateLimitService,
 	gateway *GatewayService,
 	openai *OpenAIGatewayService,
-	groupQualityGateView GroupQualityGateView,
 ) *ResilienceService {
 	s := NewResilienceService(settingRepo, store)
 	s.ConfigureOutputP99(repo)
@@ -1173,11 +1200,6 @@ func ProvideResilienceService(
 	rateLimit.SetResilienceService(s)
 	gateway.resilience = s
 	openai.resilience = s
-	s.SetGroupQualityGateView(groupQualityGateView)
-	openai.SetGroupQualityGateView(groupQualityGateView)
-	if gate, ok := groupQualityGateView.(*GroupQualityGateService); ok {
-		gate.SetLatencyHoldLookup(openai.OpenAIAccountLatencyHoldStatus)
-	}
 	s.pricingRestricted = func(ctx context.Context, groupID int64, model string) bool {
 		return gateway.checkChannelPricingRestriction(ctx, &groupID, model)
 	}

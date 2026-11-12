@@ -30,13 +30,11 @@ describe('fetchAllAccountIds', () => {
     expect(fetchPage).toHaveBeenCalledTimes(3)
     expect(fetchPage).toHaveBeenNthCalledWith(1, 1, 1000, {
       ...filters,
-      lite: '1',
-      include_scheduler_score: '0'
+      lite: '1'
     })
     expect(fetchPage).toHaveBeenNthCalledWith(3, 3, 1000, {
       ...filters,
-      lite: '1',
-      include_scheduler_score: '0'
+      lite: '1'
     })
   })
 

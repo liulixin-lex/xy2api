@@ -14,7 +14,7 @@ import (
 
 func TestCatalogKeysAreWellFormed(t *testing.T) {
 	keys := Keys()
-	require.Len(t, keys, 538)
+	require.Len(t, keys, 536)
 	require.True(t, sort.StringsAreSorted(keys))
 	seen := map[string]bool{}
 	for _, key := range keys {
@@ -102,7 +102,7 @@ func TestCatalogMatchesApprovedTable(t *testing.T) {
 	raw, err := os.ReadFile("testdata/pra_catalog.json")
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(raw, &rows))
-	require.Len(t, rows, 538)
+	require.Len(t, rows, 536)
 	keys := []string{}
 	used := map[FieldRule]bool{}
 	for _, row := range rows {
@@ -155,5 +155,16 @@ func TestCatalogOpsGETUserinfoRedactions(t *testing.T) {
 		entry, ok := Lookup("GET " + path)
 		require.True(t, ok, path)
 		require.Contains(t, entry.Redact, Redaction("ops_upstream_url"), path)
+	}
+}
+
+func TestCatalogResilienceUsesOpsView(t *testing.T) {
+	for _, path := range []string{"/resilience/groups/:id/explain", "/resilience/stats", "/resilience/undelivered"} {
+		entry, ok := Lookup("GET " + path)
+		require.True(t, ok, path)
+		require.Equal(t, KindModule, entry.Kind, path)
+		require.Equal(t, Module("ops"), entry.Module, path)
+		require.Equal(t, LevelView, entry.Level, path)
+		require.Empty(t, entry.AnyOf, path)
 	}
 }

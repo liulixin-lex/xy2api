@@ -21,7 +21,6 @@ func WithRequestReplaySafety(ctx context.Context, body []byte, gemini bool) cont
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ctx = withShareRequestProfile(ctx, body)
 	return context.WithValue(ctx, requestReplaySafetyContextKey{}, requestBodyReplaySafe(body, gemini))
 }
 

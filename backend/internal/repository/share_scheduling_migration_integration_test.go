@@ -8,16 +8,22 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/liulixin-lex/xy2api/internal/sharesched"
+	"encoding/json"
+
 	dbmigrations "github.com/liulixin-lex/xy2api/migrations"
 	"github.com/stretchr/testify/require"
 )
 
-const shareSchedulingMigration = "270_share_scheduling.sql"
+type historicalSharePolicy struct {
+	Scheduler string          `json:"scheduler"`
+	Accounts  json.RawMessage `json:"accounts"`
+}
 
-func applyShareSchedulingMigration(ctx context.Context, t *testing.T, tx *sql.Tx) {
+const historicalPolicyMigration = "270_share_scheduling.sql"
+
+func applyHistoricalPolicyMigration(ctx context.Context, t *testing.T, tx *sql.Tx) {
 	t.Helper()
-	body, err := dbmigrations.FS.ReadFile(shareSchedulingMigration)
+	body, err := dbmigrations.FS.ReadFile(historicalPolicyMigration)
 	require.NoError(t, err)
 	_, err = tx.ExecContext(ctx, string(body))
 	require.NoError(t, err)
@@ -31,7 +37,7 @@ VALUES($1,'anthropic','oauth','active',true,$2,'{}'::jsonb,'{}'::jsonb) RETURNIN
 	return id
 }
 
-func TestShareSchedulingMigrationImportsDrafts(t *testing.T) {
+func TestHistoricalPolicyMigrationImportsDrafts(t *testing.T) {
 	tx := testTx(t)
 	ctx := context.Background()
 	_, err := tx.ExecContext(ctx, "DELETE FROM share_scheduling_policies")
@@ -71,22 +77,23 @@ func TestShareSchedulingMigrationImportsDrafts(t *testing.T) {
 		groupID, legacy, emptyGroupID, fmt.Sprintf(`{"accounts":[{"account_id":%d,"priority":3,"traffic_weight":2}]}`, outsider))
 	require.NoError(t, err)
 
-	applyShareSchedulingMigration(ctx, t, tx)
-	applyShareSchedulingMigration(ctx, t, tx) // replay keeps the first import
+	applyHistoricalPolicyMigration(ctx, t, tx)
+	applyHistoricalPolicyMigration(ctx, t, tx) // replay keeps the first import
 
-	read := func(group int64) (sharesched.Policy, string, string, int64) {
+	read := func(group int64) (historicalSharePolicy, string, string, int64) {
 		var raw, scheduler, importedFrom string
 		var version int64
 		require.NoError(t, tx.QueryRowContext(ctx, `SELECT policy::text,scheduler,imported_from,version FROM share_scheduling_policies WHERE group_id=$1`, group).
 			Scan(&raw, &scheduler, &importedFrom, &version))
-		policy, err := sharesched.DecodePolicy([]byte(raw))
-		require.NoError(t, err, "imported drafts must decode under the strict policy rules: %s", raw)
+		var policy historicalSharePolicy
+		err := json.Unmarshal([]byte(raw), &policy)
+		require.NoError(t, err, "imported drafts must contain valid historical JSON: %s", raw)
 		return policy, scheduler, importedFrom, version
 	}
 
 	policy, scheduler, importedFrom, version := read(groupID)
 	require.Equal(t, "sub2api", scheduler, "imported drafts never change routing")
-	require.Equal(t, sharesched.SchedulerSub2API, policy.Scheduler)
+	require.Equal(t, "sub2api", policy.Scheduler)
 	require.Equal(t, "scheduling_group_policies:v4", importedFrom)
 	require.Equal(t, int64(1), version)
 	// The imported rules are kept as stored; current versions ignore them
@@ -101,14 +108,14 @@ func TestShareSchedulingMigrationImportsDrafts(t *testing.T) {
 	require.JSONEq(t, fmt.Sprintf(`[{"account_id":%d,"tier":3,"weight":2}]`, outsider), string(policy.Accounts), "group 0 keeps any live account")
 }
 
-func TestShareSchedulingMigrationWithoutLegacyTable(t *testing.T) {
+func TestHistoricalPolicyMigrationWithoutLegacyTable(t *testing.T) {
 	tx := testTx(t)
 	ctx := context.Background()
 	_, err := tx.ExecContext(ctx, "DROP TABLE scheduling_group_policies")
 	require.NoError(t, err)
 	_, err = tx.ExecContext(ctx, "DELETE FROM share_scheduling_policies")
 	require.NoError(t, err)
-	applyShareSchedulingMigration(ctx, t, tx)
+	applyHistoricalPolicyMigration(ctx, t, tx)
 	var count int
 	require.NoError(t, tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM share_scheduling_policies").Scan(&count))
 	require.Zero(t, count)

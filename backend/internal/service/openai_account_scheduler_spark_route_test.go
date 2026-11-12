@@ -15,13 +15,13 @@ func TestSparkRoutingByModel(t *testing.T) {
 	normalModel := "gpt-5.3-codex"
 	sparkCreds := map[string]any{"model_mapping": defaultSparkShadowModelMapping()}
 
-	newScheduler := func(snapshot map[int64]*Account) *defaultOpenAIAccountScheduler {
-		return &defaultOpenAIAccountScheduler{service: &OpenAIGatewayService{
+	newScheduler := func(snapshot map[int64]*Account) *OpenAIGatewayService {
+		return &OpenAIGatewayService{
 			schedulerSnapshot: &SchedulerSnapshotService{
 				cache: &openAISnapshotCacheStub{accountsByID: snapshot},
 			},
 			cfg: &config.Config{},
-		}}
+		}
 	}
 	sparkReq := OpenAIAccountScheduleRequest{RequestedModel: sparkModel, Platform: PlatformOpenAI}
 	normalReq := OpenAIAccountScheduleRequest{RequestedModel: normalModel, Platform: PlatformOpenAI}
@@ -68,8 +68,8 @@ func TestSparkRoutingByModel(t *testing.T) {
 // TestParentHealthSchedulerIntegration 通过 isAccountRequestCompatible 验证「母账号不可调度时影子被
 // 调度器拒绝」这一联动在调度器层面端到端生效。
 //
-// 使用的接缝：defaultOpenAIAccountScheduler.isAccountRequestCompatible，它通过
-// s.service.schedulerSnapshot.GetAccount(ctx, parentID) 解析母账号；
+// 使用的接缝：OpenAIGatewayService.isAccountRequestCompatible，它通过
+// s.schedulerSnapshot.GetAccount(ctx, parentID) 解析母账号；
 // openAISnapshotCacheStub.accountsByID 提供对应的测试桩。
 func TestParentHealthSchedulerIntegration(t *testing.T) {
 	ctx := context.Background()
@@ -92,7 +92,7 @@ func TestParentHealthSchedulerIntegration(t *testing.T) {
 		Platform:       PlatformOpenAI,
 	}
 
-	makeScheduler := func(parent *Account) *defaultOpenAIAccountScheduler {
+	makeScheduler := func(parent *Account) *OpenAIGatewayService {
 		snapshotCache := &openAISnapshotCacheStub{
 			accountsByID: map[int64]*Account{parent.ID: parent},
 		}
@@ -101,7 +101,7 @@ func TestParentHealthSchedulerIntegration(t *testing.T) {
 			schedulerSnapshot: snapshotSvc,
 			cfg:               &config.Config{},
 		}
-		return &defaultOpenAIAccountScheduler{service: svc}
+		return svc
 	}
 
 	t.Run("unhealthy_parent_status_error_rejects_shadow", func(t *testing.T) {
@@ -187,7 +187,7 @@ func TestParentHealthSchedulerFallsBackToRepoWhenSnapshotMissesParent(t *testing
 	}
 
 	repo := schedulerTestOpenAIAccountRepo{accounts: []Account{parent}}
-	scheduler := &defaultOpenAIAccountScheduler{service: &OpenAIGatewayService{
+	scheduler := &OpenAIGatewayService{
 		accountRepo: repo,
 		schedulerSnapshot: &SchedulerSnapshotService{
 			cache:       &openAISnapshotCacheStub{},
@@ -201,7 +201,7 @@ func TestParentHealthSchedulerFallsBackToRepoWhenSnapshotMissesParent(t *testing
 			},
 		},
 		cfg: &config.Config{},
-	}}
+	}
 
 	require.True(t, scheduler.isAccountRequestCompatible(ctx, shadow, OpenAIAccountScheduleRequest{
 		RequestedModel: "gpt-5.3-codex-spark",

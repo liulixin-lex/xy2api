@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
-	"github.com/liulixin-lex/xy2api/internal/sharesched"
 	"github.com/stretchr/testify/require"
 )
 
@@ -54,7 +53,7 @@ func TestResilienceSchedulingMatrix(t *testing.T) {
 		}
 	}
 
-	for _, scheduler := range []sharesched.Scheduler{sharesched.SchedulerSub2API, sharesched.SchedulerShare} {
+	for _, scheduler := range []string{"default"} {
 		for _, size := range []int{1, 2} {
 			for _, penalty := range []string{"soft", "hard", "streak"} {
 				for _, withFallback := range []bool{false, true} {
@@ -65,12 +64,12 @@ func TestResilienceSchedulingMatrix(t *testing.T) {
 						ctx := context.Background()
 
 						accounts := []Account{{ID: penalised, Priority: 1, Concurrency: 5}}
-						rules := []shareRule{{AccountID: penalised, Tier: 1, Weight: 1}}
+						rules := []selectionTestRule{{AccountID: penalised, Tier: 1, Weight: 1}}
 						if size == 2 {
 							accounts = append(accounts, Account{ID: healthy, Priority: 1, Concurrency: 5})
-							rules = append(rules, shareRule{AccountID: healthy, Tier: 1, Weight: 1})
+							rules = append(rules, selectionTestRule{AccountID: healthy, Tier: 1, Weight: 1})
 						}
-						env := newShareTestEnv(t, shareTestPolicy(scheduler, rules...), accounts...)
+						env := newGatewaySelectionTestEnv(t, selectionTestSetupWithRules(rules...), accounts...)
 						penalise[penalty](env.repo.accountsByID[penalised])
 
 						store := newMemResilienceStore()
@@ -78,34 +77,34 @@ func TestResilienceSchedulingMatrix(t *testing.T) {
 						env.gateway.accountRepo = groupListingRepo{env.repo}
 						env.gateway.resilience = r
 
-						primary := &Group{ID: shareTestGroupID, Platform: PlatformAnthropic, Status: StatusActive, Hydrated: true}
+						primary := &Group{ID: selectionTestGroupID, Platform: PlatformAnthropic, Status: StatusActive, Hydrated: true}
 						if withFallback {
 							fb := fallbackID
 							primary.AvailabilityFallbackGroupID = &fb
 						}
 						r.ConfigureFallbackGroups(
 							&groupAccountsRepo{byGroup: map[int64][]Account{
-								shareTestGroupID: env.repo.accounts,
-								fallbackID:       {{ID: fallbackAcc, Platform: PlatformAnthropic, Status: StatusActive, Schedulable: true}},
+								selectionTestGroupID: env.repo.accounts,
+								fallbackID:           {{ID: fallbackAcc, Platform: PlatformAnthropic, Status: StatusActive, Schedulable: true}},
 							}},
 							&fallbackGroupRepo{groups: map[int64]*Group{
-								shareTestGroupID: primary,
-								fallbackID:       {ID: fallbackID, Platform: PlatformAnthropic, Status: StatusActive, Hydrated: true},
+								selectionTestGroupID: primary,
+								fallbackID:           {ID: fallbackID, Platform: PlatformAnthropic, Status: StatusActive, Hydrated: true},
 							}},
 						)
 						if penalty == "streak" {
 							rec := env.gateway.gatewaySessionRecorder()
 							require.NotNil(t, rec)
 							for range resilience.Current().Session.StreakThreshold {
-								rec.Failure(ctx, shareTestGroupID, session, penalised, resilience.CategoryTransient)
+								rec.Failure(ctx, selectionTestGroupID, session, penalised, resilience.CategoryTransient)
 							}
-							avoid, err := store.SessionAvoid(ctx, shareTestGroupID, session)
+							avoid, err := store.SessionAvoid(ctx, selectionTestGroupID, session)
 							require.NoError(t, err)
 							require.Contains(t, avoid, penalised)
 						}
 
 						// Step 1: the API key middleware picks the group.
-						gid := shareTestGroupID
+						gid := selectionTestGroupID
 						key := &APIKey{ID: 77, GroupID: &gid, Group: primary}
 						if fb := r.AvailabilityFallbackGroup(ctx, key); fb != nil {
 							require.Equal(t, "fallback", expected, "moved to the fallback group")
@@ -116,7 +115,7 @@ func TestResilienceSchedulingMatrix(t *testing.T) {
 
 						// Step 2: selection in the group.
 						st := resilience.NewRequestState()
-						reqCtx := resilience.WithRequestState(cacheableContext(), st)
+						reqCtx := resilience.WithRequestState(context.Background(), st)
 						result, err := env.gateway.SelectAccountWithLoadAwareness(reqCtx, &gid, session, "claude-sonnet-4-5", nil, "", 0)
 						if expected == "none" {
 							require.ErrorIs(t, err, ErrNoAvailableAccounts)

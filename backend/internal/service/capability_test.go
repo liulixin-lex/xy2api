@@ -151,7 +151,7 @@ func TestCapabilitySelectionSkipsLearnedAndReportsNoAccountReason(t *testing.T) 
 	require.True(t, IsCapabilityOnlySelectionError(err))
 	require.True(t, errors.Is(err, ErrNoAvailableAccounts))
 	require.Contains(t, err.Error(), "capability_stream_only")
-	advanced := &defaultOpenAIAccountScheduler{service: svc}
+	advanced := svc
 	compatible, reason := advanced.isAccountRequestCompatibleReason(ctx, a, OpenAIAccountScheduleRequest{Platform: PlatformOpenAI, RequestedModel: "gpt-test"})
 	require.False(t, compatible)
 	require.Equal(t, resilience.ReasonCapabilityStreamOnly, reason)

@@ -99,6 +99,7 @@
 
         <!-- Submit Button -->
         <button
+          ref="submitButtonRef"
           type="submit"
           :disabled="authActionDisabled || (turnstileEnabled && !turnstileToken)"
           class="btn btn-primary w-full"
@@ -222,7 +223,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, reactive, onMounted, watch } from 'vue'
+import { computed, nextTick, ref, reactive, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { AuthLayout } from '@/components/layout'
@@ -727,10 +728,17 @@ async function handle2FAVerify(code: string): Promise<void> {
   }
 }
 
-function handle2FACancel(): void {
+// The login button is the step-up dialog's way back: it was disabled while the login request ran, so the
+// dialog had no focused opener to return to when it opened (overlayStack).
+const submitButtonRef = ref<HTMLButtonElement | null>(null)
+
+async function handle2FACancel(): Promise<void> {
   show2FAModal.value = false
   totpTempToken.value = ''
   totpUserEmailMasked.value = ''
+  await nextTick()
+  const button = submitButtonRef.value
+  if (button?.isConnected && !button.disabled && !isLoading.value) button.focus()
 }
 </script>
 

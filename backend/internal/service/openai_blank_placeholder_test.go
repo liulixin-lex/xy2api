@@ -573,35 +573,40 @@ func TestResponsesBlankPlaceholderStageResetDropsMemoryAndSpool(t *testing.T) {
 	}
 }
 
-func TestResponsesBlankPlaceholderSuccessLatencyUsesRealOutput(t *testing.T) {
+type placeholderOutputMarker struct {
+	at    time.Time
+	calls int
+}
+
+func (m *placeholderOutputMarker) MarkFirstOutput(at time.Time) { m.at = at; m.calls++ }
+
+func TestResponsesBlankPlaceholderMarksOnlyRealOutput(t *testing.T) {
 	withResilienceSettings(t, nil)
 	for _, visible := range []bool{false, true} {
 		c, state := newSSEDeliveryContext(t, "text/event-stream")
 		account := &Account{ID: 9029, Platform: PlatformOpenAI}
 		start := time.Now().Add(-11 * time.Second)
+		marker := &placeholderOutputMarker{}
+		state.SetCurrentAttempt(marker)
 		state.SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: start, Warm: true, Stream: true})
 		_, err := c.Writer.WriteString("event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\" \"}\n\n")
 		require.NoError(t, err)
 		require.True(t, state.FirstOutput().IsZero())
+		require.Zero(t, marker.calls)
 		if visible {
 			_, err = c.Writer.WriteString("event: response.output_text.done\ndata: {\"type\":\"response.output_text.done\",\"text\":\" result\"}\n\n")
 			require.NoError(t, err)
 		}
 		_, err = c.Writer.WriteString("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n")
 		require.NoError(t, err)
-		svc := &OpenAIGatewayService{}
-		svc.ReportOpenAIAttemptSuccess(c.Request.Context(), account, "model")
-		latency := svc.getOpenAIAccountLatencyHoldState()
-		latency.mu.Lock()
-		entry, sampled := latency.entries[openAIAccountModelKey{AccountID: account.ID, Model: "model"}]
-		latency.mu.Unlock()
-		require.Equal(t, visible, sampled)
 		if visible {
-			require.Equal(t, float64(1), entry.weightedSamples)
-			require.Equal(t, float64(1), entry.weightedSlow, "sample is real output minus this attempt's start")
+			require.Equal(t, 1, marker.calls)
+			require.GreaterOrEqual(t, marker.at.Sub(start), 11*time.Second)
 			require.GreaterOrEqual(t, *state.AttemptFirstOutputMs(), int64(11000))
 		} else {
 			require.Nil(t, state.AttemptFirstOutputMs())
+			require.Zero(t, marker.calls)
+			require.True(t, marker.at.IsZero())
 		}
 	}
 }

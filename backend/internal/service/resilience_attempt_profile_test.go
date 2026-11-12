@@ -38,7 +38,6 @@ func TestFirstOutputColdFloorUsesMatchingAttemptProfileOnly(t *testing.T) {
 }
 
 func TestLastCandidateUsesSchedulerRequestEligibility(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	r, _, repo, _ := newFallbackFixture(t)
 	SetResilienceInstance(r)
 	t.Cleanup(func() { SetResilienceInstance(nil) })
@@ -75,7 +74,6 @@ func TestLastCandidateUsesSchedulerRequestEligibility(t *testing.T) {
 }
 
 func TestHTTPContinuationEligibilityInMixedAccountGroup(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	r, _, repo, _ := newFallbackFixture(t)
 	group := int64(20)
 	model := "gpt-test"
@@ -124,7 +122,6 @@ func (r *eligibilityCountingGroupRepo) GetByIDLite(ctx context.Context, id int64
 }
 
 func TestSelectionEligibilityReusesPrivacyReadAndSkipsNegativeCache(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	withResilienceSettings(t, nil)
 	group := &Group{ID: 21, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true}
 	model := "gpt-test"
@@ -192,39 +189,4 @@ func TestFirstOutputWarmToColdUsesSameAttemptStartAndColdFloor(t *testing.T) {
 	require.Equal(t, 75*time.Second, cold)
 	require.Equal(t, start.Add(warm), start.Add(warmAfterHeaders), "headers do not renew the warm deadline")
 	require.Equal(t, start.Add(cold), start.Add(coldAfterHeaders), "headers do not renew the cold deadline")
-}
-
-func TestReportOpenAIAttemptSuccessSamplesOnlyWarmStreams(t *testing.T) {
-	for _, tt := range []struct {
-		name   string
-		warm   bool
-		stream bool
-		sample bool
-	}{
-		{name: "warm stream", warm: true, stream: true, sample: true},
-		{name: "cold stream", stream: true},
-		{name: "warm nonstream", warm: true},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			svc := &OpenAIGatewayService{}
-			account := &Account{ID: 7, Platform: PlatformOpenAI}
-			start := time.Now().Add(-12 * time.Second)
-			st := resilience.NewRequestState()
-			ctx := resilience.WithRequestState(context.Background(), st)
-			st.SetAttemptProfile(resilience.AttemptProfile{AccountID: account.ID, AttemptStart: start, Warm: tt.warm, Stream: tt.stream})
-			st.NoteFirstOutput(start.Add(11 * time.Second))
-			svc.ReportOpenAIAttemptSuccess(ctx, account, "gpt-test")
-			key, ok := openAIAccountModelTransientKey(account.ID, "gpt-test")
-			require.True(t, ok)
-			state := svc.getOpenAIAccountLatencyHoldState()
-			state.mu.Lock()
-			entry, sampled := state.entries[key]
-			state.mu.Unlock()
-			require.Equal(t, tt.sample, sampled)
-			if tt.sample {
-				require.Equal(t, float64(1), entry.weightedSamples)
-				require.Equal(t, float64(1), entry.weightedSlow, "sample uses delivered content minus attempt start")
-			}
-		})
-	}
 }

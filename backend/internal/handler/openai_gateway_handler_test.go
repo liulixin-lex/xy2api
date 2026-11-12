@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
+
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
@@ -2040,7 +2042,7 @@ type openAIResponsesWSUsageLogCase struct {
 	apiKeyCredential string
 	// accountRateMultiplier 覆盖账号倍率（利润门测试用）。
 	accountRateMultiplier *float64
-	qualityView           service.GroupQualityGateView
+	qualityView           schedquality.View
 	gatewayCache          service.GatewayCache
 	// acquireAccountSlot 非 nil 时决定每次账号抢槽是否成功（默认总成功）。
 	acquireAccountSlot func() bool
@@ -2083,12 +2085,13 @@ func (c *wsQualityPinnedGatewayCache) DeleteSessionAccountID(_ context.Context, 
 
 type wsPinnedQualityView struct{}
 
-func (wsPinnedQualityView) OrderTier(int64, int64) int { return 2 }
-func (wsPinnedQualityView) Enabled(int64) bool         { return true }
-
-func (wsPinnedQualityView) MigrationTarget(int64, int64) bool { return false }
-
-func (wsPinnedQualityView) ExpectedP90Ms(int64, int64) (int, bool) { return 0, false }
+func (wsPinnedQualityView) Version() int64                           { return 1 }
+func (wsPinnedQualityView) At() time.Time                            { return time.Now() }
+func (wsPinnedQualityView) GlobalEnabled() bool                      { return true }
+func (wsPinnedQualityView) TakeoverIdle(int64) (time.Duration, bool) { return 0, true }
+func (wsPinnedQualityView) StateOf(int64, int64, string) schedquality.StateView {
+	return schedquality.StateView{State: schedquality.StateCooling}
+}
 
 func wsResponseAccountCacheKey(responseID string) string {
 	digest := sha256.Sum256([]byte(responseID))
@@ -2146,17 +2149,16 @@ func TestOpenAIResponsesWebSocket_LaterTurnShortWaitsForBusyAccount(t *testing.T
 
 type wsTurnQualityView struct{ failing atomic.Bool }
 
-func (v *wsTurnQualityView) OrderTier(int64, int64) int {
+func (*wsTurnQualityView) Version() int64                           { return 1 }
+func (*wsTurnQualityView) At() time.Time                            { return time.Now() }
+func (*wsTurnQualityView) GlobalEnabled() bool                      { return true }
+func (*wsTurnQualityView) TakeoverIdle(int64) (time.Duration, bool) { return 0, true }
+func (v *wsTurnQualityView) StateOf(int64, int64, string) schedquality.StateView {
 	if v.failing.Load() {
-		return 2
+		return schedquality.StateView{State: schedquality.StateCooling}
 	}
-	return 0
+	return schedquality.StateView{}
 }
-func (*wsTurnQualityView) Enabled(int64) bool { return true }
-
-func (*wsTurnQualityView) MigrationTarget(int64, int64) bool { return false }
-
-func (*wsTurnQualityView) ExpectedP90Ms(int64, int64) (int, bool) { return 0, false }
 
 func TestOpenAIResponsesWebSocket_QualityTurnAdmissionThroughHooks(t *testing.T) {
 	for _, row := range []struct {
@@ -3250,7 +3252,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		nil, // userPlatformQuotaRepo
 	)
 	if tc.qualityView != nil {
-		gatewaySvc.SetGroupQualityGateView(tc.qualityView)
+		service.NewOpenAISelectionBoard(gatewaySvc, func() schedquality.View { return tc.qualityView })
 	}
 
 	cache := &concurrencyCacheMock{

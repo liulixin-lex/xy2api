@@ -890,6 +890,12 @@ func lockAndMergeAccountProbeExtra(
 		return nil, err
 	}
 	extra := service.MergeOpenAICodexTicketExtra(incomingExtra, currentExtra)
+	// A reset can happen after the caller's read; only the locked row is authoritative.
+	if resetAt, ok := currentExtra["group_quality_reset_at"]; ok {
+		extra["group_quality_reset_at"] = resetAt
+	} else {
+		delete(extra, "group_quality_reset_at")
+	}
 	for key := range extraModelRateLimits(extra) {
 		if domain.IsIQGateKey(key) {
 			delete(extraModelRateLimits(extra), key)
@@ -1291,6 +1297,9 @@ func (r *accountRepository) accountListFilteredQuery(platform, accountType, stat
 
 func (r *accountRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, *pagination.PaginationResult, error) {
 	q := applyIQStatusFilter(ctx, r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode))
+	if ids, enabled := service.SchedQualityAccountFilter(ctx); enabled {
+		q = q.Where(dbaccount.IDIn(ids...))
+	}
 	q = applyAccountGroupCategoryFilter(ctx, q)
 	// Clone before Count so interceptor-appended predicates (SoftDeleteMixin's
 	// deleted_at IS NULL) don't accumulate on the shared builder and pollute the

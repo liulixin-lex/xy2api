@@ -128,7 +128,7 @@ func (s *accountRepoStubForBulkUpdate) ListAllWithFilters(context.Context, strin
 	return nil, nil
 }
 
-func (s *accountRepoStubForBulkUpdate) ListWithFilters(_ context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]Account, *pagination.PaginationResult, error) {
+func (s *accountRepoStubForBulkUpdate) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]Account, *pagination.PaginationResult, error) {
 	s.listCalled = true
 	s.lastListParams = params
 	s.lastListFilters.platform = platform
@@ -139,6 +139,18 @@ func (s *accountRepoStubForBulkUpdate) ListWithFilters(_ context.Context, params
 	s.lastListFilters.privacyMode = privacyMode
 	if s.listErr != nil {
 		return nil, nil, s.listErr
+	}
+	if ids, filtered := SchedQualityAccountFilter(ctx); filtered {
+		rows := make([]Account, 0)
+		for _, account := range s.listData {
+			for _, id := range ids {
+				if account.ID == id {
+					rows = append(rows, account)
+					break
+				}
+			}
+		}
+		return rows, &pagination.PaginationResult{Total: int64(len(rows))}, nil
 	}
 	if s.listResult != nil {
 		return s.listData, s.listResult, nil
@@ -317,6 +329,47 @@ func TestAdminServiceBulkUpdateAccounts_ResolvesIDsFromFilters(t *testing.T) {
 	require.Equal(t, 2, result.Success)
 	require.Equal(t, 0, result.Failed)
 	require.Equal(t, []int64{7, 11}, result.SuccessIDs)
+}
+
+func TestAdminServiceBulkUpdateAccounts_CoolingFilter(t *testing.T) {
+	for _, tc := range []struct {
+		name, quality string
+		ids           []int64
+		bound         bool
+		wantIDs       []int64
+		invalid       bool
+	}{
+		{name: "cooling", quality: "cooling", ids: []int64{7}, bound: true, wantIDs: []int64{7}},
+		{name: "empty", quality: "cooling", ids: []int64{}, bound: true, wantIDs: []int64{}},
+		{name: "unresolved", quality: "cooling", invalid: true},
+		{name: "invalid", quality: "normal", invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &accountRepoStubForBulkUpdate{listData: []Account{{ID: 7}, {ID: 11}}}
+			svc := &adminServiceImpl{accountRepo: repo}
+			ctx := context.Background()
+			if tc.bound {
+				ctx = WithSchedQualityAccountFilter(ctx, tc.ids)
+			}
+			schedulable := true
+			result, err := svc.BulkUpdateAccounts(ctx, &BulkUpdateAccountsInput{
+				Filters: &BulkUpdateAccountFilters{SchedQuality: tc.quality}, Schedulable: &schedulable,
+			})
+			if tc.invalid {
+				requireApplicationErrorReason(t, err, "INVALID_SCHED_QUALITY")
+				require.False(t, repo.listCalled)
+				require.Zero(t, repo.bulkUpdateCalls)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.wantIDs, result.SuccessIDs)
+			if len(tc.wantIDs) == 0 {
+				require.Zero(t, repo.bulkUpdateCalls)
+			} else {
+				require.Equal(t, tc.wantIDs, repo.bulkUpdateIDs)
+			}
+		})
+	}
 }
 
 func TestAdminServiceBulkUpdateAccounts_NormalizesOpenAISettings(t *testing.T) {

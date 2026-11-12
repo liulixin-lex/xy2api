@@ -23,8 +23,8 @@ XY2API 把你的 Claude、OpenAI、Gemini、Grok 等上游账号统一接到一�
 
 - **多上游、原生协议**：Anthropic Messages、OpenAI Chat Completions 与 Responses（HTTP 与 WebSocket）、Gemini、Grok、Antigravity，以及 Kimi、智谱 GLM、DeepSeek、MiniMax、OpenCode Go、Kiro 等；同时支持 OAuth 订阅账号和 API Key。
 - **直接用现有客户端**：Claude Code、Codex CLI、Gemini CLI、Grok CLI、OpenCode，以及任何兼容 OpenAI 或 Anthropic 的 SDK；支持一键导入 CC Switch。
-- **调度与韧性**：粘性会话提高提示词缓存命中，按用户和账号限制并发与速率，可选份额调度，首个输出前自动换号，兜底分组，请求预算，经过 CDN 也不断流的保活。
-- **质量控制**：分组质量门槛、OpenAI 会话质量路由、定期模型质量（智商）检测、渠道监控。
+- **调度与韧性**：严格分层的优先级与会话接管，粘性会话提高提示词缓存命中，按用户和账号限制并发与速率，首个输出前自动换号，兜底分组，请求预算，经过 CDN 也不断流的保活。
+- **质量控制**：分组质量门槛（冷却与分级主动测试）、OpenAI 会话质量路由、定期模型质量（智商）检测、渠道监控。
 - **计费**：按 Token 精确计量（含缓存读写），分组倍率、订阅、余额与兑换码；内置易支付、支付宝、微信支付和 Stripe 充值。
 - **管理**：Web 管理后台、普通管理员分级权限、用量导出、在线客服与工单、插件，以及供 AI 辅助排障的只读 MCP。
 

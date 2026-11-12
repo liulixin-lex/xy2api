@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
-	"github.com/liulixin-lex/xy2api/internal/sharesched"
 	"github.com/stretchr/testify/require"
 )
 
@@ -155,7 +154,7 @@ func TestBalancePauseIsHardUntilItEnds(t *testing.T) {
 	require.Equal(t, "balance_exhausted", why)
 	require.False(t, lastResortTierAllowed(tier, account.ID, nil), "no last resort")
 	reason, recoverAt := shareAccountStateReason(account, now)
-	require.Equal(t, sharesched.ReasonBalanceExhausted, reason)
+	require.Equal(t, gatewayCandidateReason("balance_exhausted"), reason)
 	require.True(t, recoverAt.IsZero(), "share sessions move at once")
 
 	ended := now.Add(-time.Second)

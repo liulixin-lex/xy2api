@@ -47,10 +47,10 @@ type AdminHandlers struct {
 	Affiliate              *admin.AffiliateHandler
 	Compliance             *admin.ComplianceHandler
 	AuditLog               *admin.AuditLogHandler
-	ShareScheduling        *admin.ShareSchedulingHandler
 	GroupCategory          *admin.GroupCategoryHandler
 	Resilience             *admin.ResilienceHandler
-	GroupQualityGate       *admin.GroupQualityGateHandler
+	SchedQuality           *admin.SchedQualityHandler
+	ProfitPreview          *admin.ProfitPreviewHandler
 }
 
 // Handlers contains all HTTP handlers

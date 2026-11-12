@@ -125,6 +125,7 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 
 const { t } = useI18n()
 
@@ -197,6 +198,20 @@ const dropdownPosition = ref<'bottom' | 'top'>('bottom')
 const triggerRect = ref<DOMRect | null>(null)
 const dropdownViewportPadding = 8
 const dropdownMinimumWidth = 200
+const DROPDOWN_Z = 100000020
+
+// The open menu is a sub-layer of whatever it was opened from (page, dialog, drawer, board): while open it owns
+// Escape and keeps focus even when the layer below re-renders (overlayStack).
+const menuLayer = useOverlayLayer(isOpen, {
+  root: dropdownRef,
+  modal: false,
+  floor: DROPDOWN_Z,
+  onEscape: () => {
+    isOpen.value = false
+    triggerRef.value?.focus()
+  },
+  onCovered: () => { isOpen.value = false }
+})
 
 // i18n placeholders
 const placeholderText = computed(() => props.placeholder ?? t('common.selectOption'))
@@ -232,7 +247,7 @@ const dropdownStyle = computed(() => {
     left: `${left}px`,
     minWidth: `${minWidth}px`,
     maxWidth: `${availableWidth}px`,
-    zIndex: '100000020'
+    zIndex: String(menuLayer.zIndex.value ?? DROPDOWN_Z)
   }
   if (props.matchTriggerWidth) style.width = `${minWidth}px`
 
@@ -338,9 +353,16 @@ const findPrevEnabledIndex = (startIndex: number): number => {
   return -1
 }
 
-watch(filteredOptions, () => {
+// A new search query highlights the first match. New options for the same query (the owner refreshed them, e.g.
+// a board polling while the menu is open) keep the highlighted option when it is still there.
+let highlightQuery = ''
+watch(filteredOptions, (next, previous) => {
   if (!isOpen.value) return
-  focusedIndex.value = findNextEnabledIndex(0)
+  const sameQuery = highlightQuery === searchQuery.value
+  highlightQuery = searchQuery.value
+  const current = sameQuery ? previous?.[focusedIndex.value] : undefined
+  const kept = current === undefined ? -1 : next.findIndex((option) => getOptionValue(option) === getOptionValue(current))
+  focusedIndex.value = kept >= 0 && !isOptionDisabled(next[kept]) ? kept : findNextEnabledIndex(0)
   if (focusedIndex.value >= 0) scrollToFocused()
 })
 
@@ -384,6 +406,7 @@ watch(() => props.disabled, (disabled) => {
 })
 
 watch(isOpen, (open) => {
+  highlightQuery = ''
   if (open) {
     calculateDropdownPosition()
     // Reset focused index to current selection or first item

@@ -130,54 +130,57 @@
     </div>
 
     <!-- 删除确认：吊销凭据需验证当前密码，防止被窃会话静默移除 Passkey -->
-    <div v-if="deleteTarget" class="fixed inset-0 z-50 overflow-y-auto">
-      <div class="flex min-h-full items-center justify-center p-4">
-        <div class="fixed inset-0 bg-black/50 transition-opacity" @click="closeDeleteDialog"></div>
-        <div
-          class="relative w-full max-w-md transform rounded-xl bg-white p-6 shadow-xl transition-all dark:bg-dark-800"
-        >
-          <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
-            {{ t('profile.passkey.deleteTitle') }}
-          </h3>
-          <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
-            {{ t('profile.passkey.deleteConfirm', { name: deleteTarget.name }) }}
-          </p>
-          <form class="mt-4 space-y-4" @submit.prevent="confirmDelete">
-            <div>
-              <label for="passkey-delete-password" class="input-label">{{
-                t('profile.currentPassword')
-              }}</label>
-              <input
-                id="passkey-delete-password"
-                v-model="deletePassword"
-                type="password"
-                autocomplete="current-password"
-                class="input"
-                :placeholder="t('profile.passkey.passwordPlaceholder')"
-                autofocus
-              />
-            </div>
-            <div class="flex justify-end gap-3">
-              <button type="button" class="btn btn-secondary" :disabled="busy" @click="closeDeleteDialog">
-                {{ t('common.cancel') }}
-              </button>
-              <button
-                type="submit"
-                class="btn btn-danger"
-                :disabled="busy || deletePassword.length === 0"
-              >
-                {{ busy ? t('common.processing') : t('common.delete') }}
-              </button>
-            </div>
-          </form>
+    <Teleport to="body">
+      <div v-if="deleteTarget" class="fixed inset-0 z-50 overflow-y-auto" ref="deleteDialogRef" :style="{ zIndex: deleteDialogLayer.zIndex.value, outline: 'none' }" tabindex="-1" @keydown.tab="deleteDialogLayer.trapTab" role="dialog" aria-modal="true" :aria-labelledby="deleteTitleId">
+        <div class="flex min-h-full items-center justify-center p-4">
+          <div class="fixed inset-0 bg-black/50 transition-opacity" @click="closeDeleteDialog"></div>
+          <div
+            class="relative w-full max-w-md transform rounded-xl bg-white p-6 shadow-xl transition-all dark:bg-dark-800"
+          >
+            <h3 :id="deleteTitleId" class="text-lg font-semibold text-gray-900 dark:text-white">
+              {{ t('profile.passkey.deleteTitle') }}
+            </h3>
+            <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
+              {{ t('profile.passkey.deleteConfirm', { name: deleteTarget.name }) }}
+            </p>
+            <form class="mt-4 space-y-4" @submit.prevent="confirmDelete">
+              <div>
+                <label for="passkey-delete-password" class="input-label">{{
+                  t('profile.currentPassword')
+                }}</label>
+                <input
+                  id="passkey-delete-password"
+                  v-model="deletePassword"
+                  type="password"
+                  autocomplete="current-password"
+                  class="input"
+                  :placeholder="t('profile.passkey.passwordPlaceholder')"
+                  autofocus
+                />
+              </div>
+              <div class="flex justify-end gap-3">
+                <button type="button" class="btn btn-secondary" :disabled="busy" @click="closeDeleteDialog">
+                  {{ t('common.cancel') }}
+                </button>
+                <button
+                  type="submit"
+                  class="btn btn-danger"
+                  :disabled="busy || deletePassword.length === 0"
+                >
+                  {{ busy ? t('common.processing') : t('common.delete') }}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       </div>
-    </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
+import { ref, watch, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { passkeyAPI, type PasskeyCredentialSummary } from '@/api'
 import { Icon } from '@/components/icons'
@@ -194,6 +197,10 @@ const showAddForm = ref(false)
 const newName = ref('')
 const newPassword = ref('')
 const deleteTarget = ref<PasskeyCredentialSummary | null>(null)
+// The delete confirmation is a modal layer of the overlay stack, teleported out of #app (design spec 0.2).
+const deleteDialogRef = ref<HTMLElement | null>(null)
+const deleteTitleId = `passkey-delete-title-${useId()}`
+const deleteDialogLayer = useOverlayLayer(() => !!deleteTarget.value, { root: deleteDialogRef, floor: 50, initialFocus: () => deleteDialogRef.value?.querySelector<HTMLElement>('input, button') ?? null, onEscape: () => { if (!busy.value) closeDeleteDialog() } })
 const deletePassword = ref('')
 const credentials = ref<PasskeyCredentialSummary[]>([])
 

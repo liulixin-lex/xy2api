@@ -34,6 +34,8 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (forwardResult *OpenAIForwardResult, forwardErr error) {
+	var schedCapture *schedAttemptCapture
+	defer func() { schedCapture.finish(forwardResult, forwardErr) }()
 	if c != nil {
 		c.Set(openAIStateRejectionBodyKey, body)
 		defer c.Set(openAIStateRejectionBodyKey, nil)
@@ -433,7 +435,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 				return nil, fmt.Errorf("build grok retry request: %w", err)
 			}
 		}
-		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+		resp, err = s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, responsesBody, clientStream, &schedCapture)
 		if firstEvent.expired() {
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
@@ -447,6 +449,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			break
 		}
 		respBody := s.readUpstreamErrorBody(resp)
+		schedCapture.finishHTTP(resp, respBody)
 		if resp.Body != nil {
 			_ = resp.Body.Close()
 		}
@@ -480,6 +483,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if resp.StatusCode >= 400 {
 		_ = firstEvent.disarm()
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
+		schedCapture.finishHTTP(resp, respBody)
 		if !agentIdentityTaskRecoveryWasTried(ctx) && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
 			expectedTaskID := account.GetCredential("task_id")
 			if err := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); err != nil {
@@ -550,6 +554,8 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		// Client wants JSON: buffer the streaming response and assemble a JSON reply.
 		result, handleErr = s.handleAnthropicBufferedStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime)
 	}
+
+	schedCapture.finish(result, handleErr)
 
 	// cyber_policy：标记已设、error 已按 Anthropic 格式发给客户端。丢弃 result、返回哨兵，
 	// 使 handler 落入 tokens=0 免费用量行（对齐 /v1/responses），不计费、不 failover。
@@ -861,6 +867,7 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 		line string
 		err  error
 	}
+	schedReadAttempt := currentSchedAttempt(c.Request.Context())
 	events := make(chan scanEvent, 16)
 	done := make(chan struct{})
 	go func() {
@@ -873,6 +880,7 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 			}
 		}
 		if err := scanner.Err(); err != nil {
+			schedReadAttempt.noteError(err)
 			select {
 			case events <- scanEvent{err: err}:
 			case <-done:
@@ -891,6 +899,7 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 					payload = string(restoreCodexToolNamesFromContext(c, []byte(payload)))
 					var event apicompat.ResponsesStreamEvent
 					if err := json.Unmarshal([]byte(payload), &event); err == nil {
+						observeSchedPayload(c, []byte(payload))
 						s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
 						acc.ProcessEvent(&event)
 						if response := openAICompatTerminalResponse(&event, []byte(payload)); isOpenAICompatResponsesTerminalEvent(event.Type) && response != nil {
@@ -938,6 +947,7 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 				)
 				continue
 			}
+			observeSchedPayload(c, []byte(payload))
 			s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
 
 			acc.ProcessEvent(&event)
@@ -968,6 +978,7 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 			)
 			// xy2api resilience (review G1): the stall bookkeeping of the
 			// Responses stream.
+			noteSchedStall(c)
 			s.noteOpenAICompatStall(c, account, model)
 			return nil, usage, acc, fmt.Errorf("stream data interval timeout")
 		}
@@ -1069,6 +1080,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			return false
 		}
 		clientDisconnected = true
+		cancelSchedClient(c)
 		return true
 	}
 	var streamFailoverErr error
@@ -1164,6 +1176,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				return true
 			}
 		}
+		observeSchedPayload(c, []byte(payload))
 		observer.ObserveOpenAI([]byte(payload), event.Type)
 		s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
 
@@ -1206,6 +1219,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 							c.Writer.Flush()
 						}
 						clientDisconnected = true
+						cancelSchedClient(c)
 					}
 					return true
 				}
@@ -1305,6 +1319,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				writeStreamHeaders()
 				if err := writeClient(sse); err != nil {
 					clientDisconnected = true
+					cancelSchedClient(c)
 					logger.L().Info("openai messages stream: client disconnected, continuing to drain upstream for billing",
 						zap.String("request_id", requestID),
 					)
@@ -1342,6 +1357,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				writeStreamHeaders()
 				if err := writeClient(sse); err != nil {
 					clientDisconnected = true
+					cancelSchedClient(c)
 					logger.L().Info("openai messages stream: client disconnected during final flush",
 						zap.String("request_id", requestID),
 					)
@@ -1421,6 +1437,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			}
 		}
 		if err := scanner.Err(); err != nil {
+			noteSchedError(c, err)
 			if cancelErr := canceledPrelude(); cancelErr != nil {
 				return nil, cancelErr
 			}
@@ -1452,6 +1469,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		line string
 		err  error
 	}
+	schedReadAttempt := currentSchedAttempt(c.Request.Context())
 	events := make(chan scanEvent, 16)
 	done := make(chan struct{})
 	var lastReadAt int64
@@ -1473,6 +1491,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			}
 		}
 		if err := scanner.Err(); err != nil {
+			schedReadAttempt.noteError(err)
 			_ = sendEvent(scanEvent{err: err})
 		}
 	}()
@@ -1559,6 +1578,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				zap.String("model", originalModel),
 				zap.Duration("interval", stallThreshold),
 			)
+			noteSchedStall(c)
 			s.noteOpenAICompatStall(c, account, originalModel)
 			if canReplayPrelude() {
 				return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, nil, "OpenAI stream stalled before content", upstreamModel, resp.Header)
@@ -1590,6 +1610,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 					zap.String("request_id", requestID),
 				)
 				clientDisconnected = true
+				cancelSchedClient(c)
 				continue
 			}
 			noteDownstreamWrite()

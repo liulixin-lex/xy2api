@@ -4,26 +4,30 @@
     <Transition name="modal" appear>
       <div
         v-if="show"
+        ref="rootRef"
         class="modal-overlay"
-        :style="zIndexStyle"
+        :style="{ zIndex: stackZ }"
         :aria-labelledby="dialogId"
         role="dialog"
         aria-modal="true"
         data-base-dialog
-        @keydown.tab="trapFocus"
+        @keydown.tab="trapTab($event, dialogRef)"
         @click.self="handleClose"
       >
         <!-- Modal panel -->
         <div ref="dialogRef" :class="['modal-content', widthClasses]" tabindex="-1" @click.stop>
           <!-- Header -->
           <div class="modal-header">
-            <h3 :id="dialogId" class="modal-title">
-              {{ title }}
+            <h3 :id="dialogId" class="modal-title flex min-w-0 items-center gap-1.5">
+              <slot name="title">{{ title }}</slot>
             </h3>
+            <div v-if="$slots['header-actions']" class="ml-auto mr-2 flex items-center gap-2">
+              <slot name="header-actions"></slot>
+            </div>
             <button
               v-if="showCloseButton"
               @click="emit('close')"
-              class="-mr-2 rounded-xl p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 focus-visible:ring-offset-2 dark:text-dark-500 dark:hover:bg-dark-700 dark:hover:text-dark-300 dark:focus-visible:ring-offset-dark-900"
+              class="-mr-2 rounded-xl p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 dark:text-dark-400 dark:hover:bg-dark-700 dark:hover:text-dark-200"
               aria-label="Close modal"
             >
               <Icon name="x" size="md" />
@@ -46,46 +50,23 @@
 </template>
 
 <script lang="ts">
-// Track open instances independently of transition DOM and unmount ordering.
-const openDialogs = new Set<symbol>()
 let dialogIdCounter = 0
 </script>
 
 <script setup lang="ts">
 import { computed, watch, onMounted, onUnmounted, ref, nextTick, useId } from 'vue'
 import Icon from '@/components/icons/Icon.vue'
+import { closeOverlay, holdFocus, isTopOverlay, openOverlay, syncOverlays, trapTab } from '@/utils/overlayStack'
 
 // 生成唯一ID以避免多个对话框时ID冲突
 const dialogId = `modal-title-${useId()}-${++dialogIdCounter}`
 const dialogToken = Symbol('dialog')
 
-// 焦点管理
+// 焦点与叠放按 utils/overlayStack：打开时聚焦面板本身，Tab / Shift+Tab 留在层内，下层与页面 inert，
+// 关闭时焦点交给仍可见的打开者。
+const rootRef = ref<HTMLElement | null>(null)
 const dialogRef = ref<HTMLElement | null>(null)
 const modalBodyRef = ref<HTMLElement | null>(null)
-let previousActiveElement: HTMLElement | null = null
-
-const focusableElements = () => Array.from(dialogRef.value?.querySelectorAll<HTMLElement>(
-  'button, [href], input, select, textarea, summary, [tabindex]'
-) ?? []).filter(element => !element.matches(':disabled, [tabindex="-1"]') &&
-  !element.closest('[hidden], [inert], [aria-hidden="true"]') &&
-  (element.checkVisibility?.({ checkVisibilityCSS: true }) ?? true))
-
-function trapFocus(event: KeyboardEvent) {
-  const elements = focusableElements()
-  const first = elements[0], last = elements[elements.length - 1]
-  if (!first) { event.preventDefault(); dialogRef.value?.focus(); return }
-  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
-  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
-}
-
-function releaseDialog() {
-  openDialogs.delete(dialogToken)
-  if (openDialogs.size === 0) {
-    document.body.classList.remove('modal-open')
-  }
-  if (previousActiveElement?.isConnected) previousActiveElement.focus()
-  previousActiveElement = null
-}
 
 type DialogWidth = 'narrow' | 'normal' | 'wide' | 'extra-wide' | 'full'
 
@@ -96,7 +77,10 @@ interface Props {
   closeOnEscape?: boolean
   closeOnClickOutside?: boolean
   showCloseButton?: boolean
+  /** Lowest z-index for this dialog; a dialog is always drawn above the layers opened before it. */
   zIndex?: number
+  /** Changing it while open brings the dialog back to the top, with the focused element as its new opener. */
+  raiseKey?: number
 }
 
 interface Emits {
@@ -108,15 +92,14 @@ const props = withDefaults(defineProps<Props>(), {
   closeOnEscape: true,
   closeOnClickOutside: false,
   showCloseButton: true,
-  zIndex: 50
+  zIndex: undefined,
+  raiseKey: 0
 })
 
 const emit = defineEmits<Emits>()
 
-// Custom z-index style (overrides the default z-50 from CSS)
-const zIndexStyle = computed(() => {
-  return props.zIndex !== 50 ? { zIndex: props.zIndex } : undefined
-})
+// 层级由打开顺序决定（utils/overlayStack），后打开的在上
+const stackZ = ref<number>()
 
 const widthClasses = computed(() => {
   // Width guidance: narrow=confirm/short prompts, normal=standard forms,
@@ -139,41 +122,33 @@ const handleClose = () => {
 }
 
 const handleEscape = (event: KeyboardEvent) => {
-  const activeDialog = (document.activeElement as HTMLElement | null)?.closest('[data-base-dialog]')
-  if (activeDialog && activeDialog !== dialogRef.value?.closest('[data-base-dialog]')) return
-  if (!event.defaultPrevented && props.show && props.closeOnEscape && event.key === 'Escape' && [...openDialogs].pop() === dialogToken) {
+  if (!event.defaultPrevented && props.show && props.closeOnEscape && event.key === 'Escape' && isTopOverlay(dialogToken)) {
     event.preventDefault()
     emit('close')
   }
 }
 
-// Prevent body scroll when modal is open and manage focus
+async function open() {
+  stackZ.value = openOverlay(dialogToken, { floor: props.zIndex, root: () => rootRef.value, panel: () => dialogRef.value })
+  await nextTick()
+  if (!props.show) return
+  syncOverlays()
+  if (modalBodyRef.value) modalBodyRef.value.scrollTop = 0
+  dialogRef.value?.focus()
+}
+
 watch(
   () => props.show,
-  async (isOpen) => {
-    if (isOpen) {
-      // 保存当前焦点元素
-      previousActiveElement = document.activeElement as HTMLElement
-      openDialogs.add(dialogToken)
-      // 使用CSS类而不是直接操作style,更易于管理多个对话框
-      document.body.classList.add('modal-open')
-
-      // 等待DOM更新后设置焦点到对话框
-      await nextTick()
-      if (!props.show) return
-      if (modalBodyRef.value) {
-        modalBodyRef.value.scrollTop = 0
-      }
-      if (dialogRef.value) {
-        const target = focusableElements()[0] ?? dialogRef.value
-        target.focus()
-      }
-    } else {
-      releaseDialog()
-    }
+  (isOpen) => {
+    if (isOpen) void open()
+    else closeOverlay(dialogToken)
   },
   { immediate: true }
 )
+
+watch(() => props.raiseKey, () => {
+  if (props.show) void open()
+})
 
 onMounted(() => {
   document.addEventListener('keydown', handleEscape)
@@ -181,7 +156,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener('keydown', handleEscape)
-  // 确保组件卸载时移除滚动锁定
-  releaseDialog()
+  closeOverlay(dialogToken)
 })
+
+defineExpose({ holdFocus: () => holdFocus(dialogToken) })
 </script>

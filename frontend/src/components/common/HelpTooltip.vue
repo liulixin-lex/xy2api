@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, useTemplateRef, nextTick } from 'vue'
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 
 const props = withDefaults(defineProps<{
   content?: string
@@ -23,6 +24,10 @@ function openTooltip() {
 function closeTooltip() {
   show.value = false
 }
+
+// Opened by a click it is a sub-layer of the overlay stack: Escape closes it first, also inside a dialog, and a
+// dialog opening above closes it. The hover variant stays a plain tooltip that neither takes focus nor registers.
+const clickLayer = useOverlayLayer(() => show.value && props.trigger === 'click', { root: tooltipRef, modal: false, floor: 99999, onEscape: closeTooltip })
 
 function onEnter() {
   if (props.trigger !== 'hover') return
@@ -64,12 +69,6 @@ function onDocumentClick(event: MouseEvent) {
   closeTooltip()
 }
 
-function onDocumentKeydown(event: KeyboardEvent) {
-  if (props.trigger !== 'click') return
-  if (event.key === 'Escape') {
-    closeTooltip()
-  }
-}
 
 function onViewportChange() {
   if (!show.value) return
@@ -88,14 +87,12 @@ function updatePosition() {
 
 onMounted(() => {
   document.addEventListener('click', onDocumentClick, true)
-  document.addEventListener('keydown', onDocumentKeydown)
   window.addEventListener('resize', onViewportChange)
   window.addEventListener('scroll', onViewportChange, true)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', onDocumentClick, true)
-  document.removeEventListener('keydown', onDocumentKeydown)
   window.removeEventListener('resize', onViewportChange)
   window.removeEventListener('scroll', onViewportChange, true)
 })
@@ -137,7 +134,7 @@ onBeforeUnmount(() => {
           'fixed z-[99999] -translate-x-1/2 -translate-y-full rounded-lg bg-gray-900 p-3 text-xs leading-relaxed text-white shadow-xl ring-1 ring-white/10 selection:bg-primary-200 selection:text-gray-900 before:absolute before:inset-x-0 before:top-full before:h-3 dark:bg-gray-800 dark:selection:bg-primary-200 dark:selection:text-gray-900',
           props.widthClass,
         ]"
-        :style="{ top: `calc(${tooltipStyle.top} - 8px)`, left: tooltipStyle.left }"
+        :style="{ top: `calc(${tooltipStyle.top} - 8px)`, left: tooltipStyle.left, zIndex: clickLayer.zIndex.value }"
         @mouseleave="onTooltipLeave"
       >
         <button

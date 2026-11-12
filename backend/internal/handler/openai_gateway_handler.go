@@ -403,6 +403,7 @@ func NewOpenAIGatewayHandler(
 // Responses handles OpenAI Responses API endpoint
 // POST /openai/v1/responses
 func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
+	defer func() { service.FinishSchedAttemptAtHandlerExit(c.Request.Context()) }()
 	// 局部兜底：确保该 handler 内部任何 panic 都不会击穿到进程级。
 	streamStarted := false
 	defer h.recoverResponsesPanic(c, &streamStarted)
@@ -795,10 +796,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			zap.String("layer", scheduleDecision.Layer),
 			zap.Bool("sticky_previous_hit", scheduleDecision.StickyPreviousHit),
 			zap.Bool("sticky_session_hit", scheduleDecision.StickySessionHit),
-			zap.Int("candidate_count", scheduleDecision.CandidateCount),
-			zap.Int("top_k", scheduleDecision.TopK),
 			zap.Int64("latency_ms", scheduleDecision.LatencyMs),
-			zap.Float64("load_skew", scheduleDecision.LoadSkew),
 		)
 		account := selection.Account
 		if previousResponseID != "" && requestPlatform == service.PlatformOpenAI && !account.IsOpenAIApiKey() {
@@ -855,6 +853,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// reasoning item（含耦合的 id/summary），避免非透传上游 400 拒绝 Kiro reasoning 形态。
 		attemptBody := h.deriveOpenAIForwardAttemptBody(reqLog, forwardBody, account, &passthroughFailoverState)
 		if st := resilience.StateFrom(c.Request.Context()); st != nil {
+			st.SetSchedSelection(resilience.SchedSelection{AccountID: account.ID, Model: service.OpenAIAttemptModel(account, forwardModel), StickyWarm: service.OpenAIAttemptWarm(scheduleDecision, selection, switchCount > 0 || sameAccountRetryCount[account.ID] > 0)})
 			st.SetAttemptProfile(resilience.AttemptProfile{
 				AccountID: account.ID, AttemptStart: forwardStart,
 				Model:     service.OpenAIAttemptModel(account, forwardModel),
@@ -988,7 +987,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 							h.handleFailoverExhausted(c, failoverErr, c.Writer.Written() || streamStarted)
 							return
 						}
-						h.gatewayService.RecordOpenAIAccountSwitch()
 						logger.FromContext(c.Request.Context()).Warn("resilience.m3_state_switch",
 							zap.Int64("group_id", derefGroupID(apiKey.GroupID)),
 							zap.Int64("account_id", account.ID),
@@ -1045,7 +1043,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 							continue
 						}
 					}
-					h.gatewayService.RecordOpenAIAccountSwitch()
 					failedAccountIDs[account.ID] = struct{}{}
 					lastFailoverErr = failoverErr
 					if switchCount >= maxAccountSwitches {
@@ -1111,7 +1108,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			h.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, forwardModel, requireCompact, result), openAIForwardSucceededForScheduling(result), nil)
 		}
 
-		h.gatewayService.RecordOpenAIRecentSessionSuccess(c.Request.Context(), apiKey.GroupID, sessionHash, account, openAIAccountScheduleModel(c, account, forwardModel, requireCompact, result), result)
+		if selected, ok := resilience.StateFrom(c.Request.Context()).SchedSelection(); ok && selected.AccountID == account.ID {
+			h.gatewayService.RecordOpenAIRecentSessionSuccess(c.Request.Context(), apiKey.GroupID, sessionHash, account, selected.Model, result)
+		}
 		// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 		submitResponsesUsage(result)
 		reqLog.Debug("openai.request_completed",
@@ -1268,6 +1267,7 @@ func (h *OpenAIGatewayHandler) logOpenAIRemoteCompactOutcome(c *gin.Context, sta
 // Messages handles Anthropic Messages API requests routed to OpenAI platform.
 // POST /v1/messages (when group platform is OpenAI)
 func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
+	defer func() { service.FinishSchedAttemptAtHandlerExit(c.Request.Context()) }()
 	streamStarted := false
 	defer h.recoverAnthropicMessagesPanic(c, &streamStarted)
 
@@ -1510,6 +1510,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		// 应用渠道模型映射到请求体
 		forwardBody := mappedBodyForMessages(channelMappingMsg.Mapped, channelMappingMsg.MappedModel)
 		if st := resilience.StateFrom(c.Request.Context()); st != nil {
+			st.SetSchedSelection(resilience.SchedSelection{AccountID: account.ID, Model: service.OpenAIAttemptModel(account, currentRoutingModel), StickyWarm: service.OpenAIAttemptWarm(scheduleDecision, selection, switchCount > 0 || sameAccountRetryCount[account.ID] > 0)})
 			st.SetAttemptProfile(resilience.AttemptProfile{
 				AccountID: account.ID, AttemptStart: forwardStart,
 				Model:     service.OpenAIAttemptModel(account, currentRoutingModel),
@@ -1658,7 +1659,6 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 							continue
 						}
 					}
-					h.gatewayService.RecordOpenAIAccountSwitch()
 					failedAccountIDs[account.ID] = struct{}{}
 					lastFailoverErr = failoverErr
 					if switchCount >= maxAccountSwitches {
@@ -1709,7 +1709,9 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			h.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, currentRoutingModel, false, result), true, nil)
 		}
 
-		h.gatewayService.RecordOpenAIRecentSessionSuccess(c.Request.Context(), apiKey.GroupID, sessionHash, account, openAIAccountScheduleModel(c, account, currentRoutingModel, false, result), result)
+		if selected, ok := resilience.StateFrom(c.Request.Context()).SchedSelection(); ok && selected.AccountID == account.ID {
+			h.gatewayService.RecordOpenAIRecentSessionSuccess(c.Request.Context(), apiKey.GroupID, sessionHash, account, selected.Model, result)
+		}
 		submitMessagesUsage(result)
 		reqLog.Debug("openai_messages.request_completed",
 			zap.Int64("account_id", account.ID),
@@ -2669,6 +2671,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 // ResponsesWebSocket handles OpenAI Responses API WebSocket ingress endpoint
 // GET /openai/v1/responses (Upgrade: websocket)
 func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
+	defer func() { service.FinishSchedAttemptAtHandlerExit(c.Request.Context()) }()
 	if !isOpenAIWSUpgradeRequest(c.Request) {
 		h.errorResponse(c, http.StatusUpgradeRequired, "invalid_request_error", "WebSocket upgrade required (Upgrade: websocket)")
 		return
@@ -3015,7 +3018,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		if ctx.Err() != nil {
 			return false
 		}
-		h.gatewayService.RecordOpenAIAccountSwitch()
 		failedAccountIDs[account.ID] = struct{}{}
 		lastFailoverErr = failoverErr
 		if switchCount >= maxAccountSwitches {
@@ -3172,6 +3174,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				reqLog.Warn("openai.websocket_bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}
 		}
+		initialSchedWarm := service.OpenAIAttemptWarm(scheduleDecision, selection, switchCount > 0 || sameAccountRetryCount[account.ID] > 0)
+		resilience.StateFrom(ctx).SetSchedSelection(resilience.SchedSelection{AccountID: account.ID, Model: service.OpenAIAttemptModel(account, wsForwardModel), StickyWarm: initialSchedWarm})
 		// Successful turns renew the binding the connection still owns.
 		stickyRenewal := h.gatewayService.NewOpenAIWSStickyRenewal(apiKey.GroupID, sessionHash, account.ID, selection.StickyCapacitySpillover)
 
@@ -3196,7 +3200,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			zap.Int64("account_id", account.ID),
 			zap.String("account_name", account.Name),
 			zap.String("schedule_layer", scheduleDecision.Layer),
-			zap.Int("candidate_count", scheduleDecision.CandidateCount),
 		)
 
 		maxReasoningEffort, reasoningEffortMappings, maxReasoningEffortOverLimit, _ := openAIReasoningEffortPolicyForRequest(c, apiKey)
@@ -3233,8 +3236,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "billing check failed")
 			return
 		}
-		var groupQualityTurnPinned atomic.Bool
-		groupQualityTurnPinned.Store(service.OpenAIQualityTurnPinned(firstMessage))
+		var qualityTurnPinned atomic.Bool
+		qualityTurnPinned.Store(service.OpenAIQualityTurnPinned(firstMessage))
 		hooks := &service.OpenAIWSIngressHooks{
 			ClientLifecycleContext:      clientLifecycleCtx,
 			InitialRequestModel:         reqModel,
@@ -3244,7 +3247,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			ReasoningEffortMappings:     reasoningEffortMappings,
 			TurnStarted:                 recordTurnStart,
 			BeforeRequest: func(turn int, payload []byte, originalModel string) error {
-				groupQualityTurnPinned.Store(service.OpenAIQualityTurnPinned(payload))
+				qualityTurnPinned.Store(service.OpenAIQualityTurnPinned(payload))
 				c.Set(securityAuditWSTurnContextKey, turn)
 				service.BeginOpsStreamTurn(c, turn)
 				setCyberTurnBody(turn, payload)
@@ -3311,6 +3314,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					return "", newOpenAIWSUnsupportedModelSwitchError(mapping.MappedModel)
 				}
 				turnChannelMapping.Store(&openAIWSTurnChannelMappingSnapshot{turn: turn, mapping: mapping})
+				turnWarm := initialSchedWarm
+				if turn > 1 {
+					turnWarm = !selection.StickyCapacitySpillover
+				}
+				resilience.StateFrom(ctx).SetSchedSelection(resilience.SchedSelection{AccountID: account.ID, Model: service.OpenAIAttemptModel(account, mapping.MappedModel), StickyWarm: turnWarm})
 				return mapping.MappedModel, nil
 			},
 			BeforeTurn: func(turn int) error {
@@ -3323,7 +3331,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// 无法中途换号）。本 turn 的准入与计费共用同一 pricingAt。
 				turnBillingCtx := turnBillingAPIKeys.begin(ctx, h.apiKeyService, turn, apiKey)
 				turnCtx, turnAt := h.gatewayService.WithOpenAITurnPricingContext(turnBillingCtx, apiKey.GroupID)
-				turnAdmissionCtx := service.WithOpenAIQualityTurnExemption(turnCtx, turn == 1 || groupQualityTurnPinned.Load())
+				turnAdmissionCtx := service.WithOpenAIQualityTurnExemption(turnCtx, turn == 1 || qualityTurnPinned.Load())
 				if _, vetoed, reason := h.gatewayService.SelectionAdmissionVetoLatest(turnAdmissionCtx, account); vetoed {
 					reqLog.Info("openai.websocket_turn_profit_vetoed",
 						zap.Int("turn", turn),

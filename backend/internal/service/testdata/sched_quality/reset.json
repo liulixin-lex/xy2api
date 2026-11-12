@@ -1,0 +1,27 @@
+{
+  "reset_at": "…",
+  "cleared": [
+    {
+      "key": "quality",
+      "kind": "quality"
+    },
+    {
+      "key": "model_transient:gpt-5.6-sol",
+      "kind": "model_transient"
+    }
+  ],
+  "preserved": [
+    {
+      "key": "iq:gpt-6-astra",
+      "kind": "iq_gate",
+      "why": "iq_gate"
+    }
+  ],
+  "failed": [
+    {
+      "key": "rate_limit",
+      "kind": "rate_limit",
+      "error": "…"
+    }
+  ]
+}

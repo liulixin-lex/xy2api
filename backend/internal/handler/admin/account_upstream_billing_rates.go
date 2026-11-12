@@ -69,6 +69,9 @@ func (h *AccountHandler) GetUpstreamBillingRates(c *gin.Context) {
 		return
 	}
 
+	if !h.bindSchedQualityAccountFilter(c, c.Query("sched_quality")) {
+		return
+	}
 	accounts, total, err := h.adminService.ListAccounts(
 		service.WithIQStatusFilter(c.Request.Context(), iqStatus), page, pageSize, platform, accountType, status,
 		search, groupID, privacyMode, sortBy, sortOrder,

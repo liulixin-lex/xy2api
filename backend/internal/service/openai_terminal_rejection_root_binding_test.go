@@ -22,13 +22,12 @@ func TestOpenAITerminalRejectionRootRebindKeepsNewChildrenOnOwner(t *testing.T) 
 				{ID: 39102, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID}, Credentials: map[string]any{"plan_type": "team"}},
 			}
 			cfg := &config.Config{}
-			cfg.Gateway.OpenAIWS.LBTopK = 2
 			store := newMemResilienceStore()
 			repo := schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}}
 			cache := &atomicStickyTestCache{bindings: make(map[string]int64)}
 			svc := &OpenAIGatewayService{
 				cfg: cfg, accountRepo: repo, cache: cache, resilience: NewResilienceService(nil, store),
-				rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("false", "false"),
+				rateLimitService:   newOpenAISelectionRateLimitService(),
 				concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{acquireResults: map[int64]bool{39101: true, 39102: true}}),
 			}
 

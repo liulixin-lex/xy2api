@@ -10,8 +10,6 @@ import (
 )
 
 func TestQualityTransactionProbe(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
-	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	body := []byte(`{"model":"gpt-6-astra","prompt_cache_key":"transaction-session","input":"hello"}`)
 	repo := stubOpenAIAccountRepo{accounts: []Account{
 		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 10, Priority: 1, Credentials: map[string]any{"base_url": "https://bad.example/v1"}},

@@ -1,12 +1,12 @@
 <template>
   <Teleport to="body">
-    <div v-if="show && anchorRect">
+    <div v-if="show && anchorRect" ref="rootRef">
       <!-- Backdrop: click anywhere outside to close -->
-      <div class="fixed inset-0 z-[9998]" @click="emit('close')"></div>
+      <div class="fixed inset-0" :style="{ zIndex: layer.zIndex.value }" @click="emit('close')"></div>
       <div
         ref="menuRef"
         class="action-menu-content fixed z-[9999] w-52 overflow-y-auto overscroll-contain rounded-xl bg-white shadow-lg ring-1 ring-black/5 dark:bg-dark-800"
-        :style="menuStyle"
+        :style="[menuStyle, { zIndex: (layer.zIndex.value ?? 9998) + 1 }]"
         @click.stop
       >
         <div class="py-1">
@@ -60,8 +60,9 @@
               <Icon name="shield" size="sm" :class="ICON" />
               {{ t('admin.accounts.setPrivacy') }}
             </button>
-            <div v-if="canManage && (hasRecoverableState || hasQuotaLimit)" :class="DIVIDER"></div>
-            <button v-if="canManage && hasRecoverableState" :class="ITEM" @click="$emit('recover-state', account); $emit('close')">
+            <div v-if="canManage" :class="DIVIDER"></div>
+            <!-- 对任何账号显示：打开恢复确认流（已清除 / 保留 / 失败） -->
+            <button v-if="canManage" :class="ITEM" @click="$emit('recover-state', account); $emit('close')">
               <Icon name="sync" size="sm" :class="ICON" />
               {{ t('admin.accounts.recoverState') }}
             </button>
@@ -77,17 +78,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, onUnmounted } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { useResizeObserver, useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { Icon } from '@/components/icons'
 import type { Account } from '@/types'
-import { IQ_GATE_KEY_PREFIX } from './iqCheckPresentation'
 import { useAuthStore } from '@/stores/auth'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 
-// qualityRecoverable：账号在已加载门槛状态的某个分组里不达标或待复测。“恢复状态”会清空该号在各组的门槛状态与坏记忆，之后按从未测过处理。
-const props = withDefaults(defineProps<{ show: boolean; account: Account | null; anchorRect: DOMRect | null; qualityRecoverable?: boolean }>(), { qualityRecoverable: false })
+const props = defineProps<{ show: boolean; account: Account | null; anchorRect: DOMRect | null }>()
 const emit = defineEmits(['iq-run', 'iq-records', 'close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow', 'manage-openai-totp'])
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -135,25 +135,6 @@ const canDuplicate = computed(() => {
   if (!props.account || props.account.parent_account_id != null) return false
   return ['apikey', 'upstream', 'bedrock', 'service_account'].includes(props.account.type)
 })
-const isRateLimited = computed(() => {
-  if (props.account?.rate_limit_reset_at && new Date(props.account.rate_limit_reset_at) > new Date()) {
-    return true
-  }
-  const modelLimits = (props.account?.extra as Record<string, unknown> | undefined)?.model_rate_limits as
-    | Record<string, { rate_limit_reset_at: string }>
-    | undefined
-  if (modelLimits) {
-    const now = new Date()
-    // IQ gates are not cleared by "recover state"; they lift only after a passing recheck.
-    return Object.entries(modelLimits).some(([key, info]) => !key.startsWith(IQ_GATE_KEY_PREFIX) && new Date(info.rate_limit_reset_at) > now)
-  }
-  return false
-})
-const isOverloaded = computed(() => props.account?.overload_until && new Date(props.account.overload_until) > new Date())
-const isTempUnschedulable = computed(() => props.account?.temp_unschedulable_until && new Date(props.account.temp_unschedulable_until) > new Date())
-const hasRecoverableState = computed(() => {
-  return props.account?.status === 'error' || Boolean(isRateLimited.value) || Boolean(isOverloaded.value) || Boolean(isTempUnschedulable.value) || props.qualityRecoverable
-})
 const isAntigravityOAuth = computed(() => props.account?.platform === 'antigravity' && props.account?.type === 'oauth')
 const isOpenAIOAuth = computed(() => props.account?.platform === 'openai' && props.account?.type === 'oauth')
 // 影子账号(链接型,持 parent_account_id)不持凭据、type 不可变,凭据/隐私类操作对其无效。
@@ -178,23 +159,8 @@ const hasQuotaLimit = computed(() => {
   )
 })
 
-const handleKeydown = (event: KeyboardEvent) => {
-  if (event.key === 'Escape') emit('close')
-}
-
-watch(
-  () => props.show,
-  (visible) => {
-    if (visible) {
-      window.addEventListener('keydown', handleKeydown)
-    } else {
-      window.removeEventListener('keydown', handleKeydown)
-    }
-  },
-  { immediate: true }
-)
-
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleKeydown)
-})
+// A sub-layer of the overlay stack (design spec 0.2): while open, Escape closes it before the layer or page
+// below, re-renders below keep their hands off its focus, and a dialog opening above closes it.
+const rootRef = ref<HTMLElement | null>(null)
+const layer = useOverlayLayer(() => props.show && !!props.anchorRect, { root: rootRef, modal: false, floor: 9998, onEscape: () => emit('close') })
 </script>

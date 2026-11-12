@@ -282,8 +282,9 @@
       <div
         v-if="openMoreJobId"
         class="fixed z-[9999] w-44 overflow-hidden rounded-xl bg-white py-1 text-sm shadow-lg ring-1 ring-black/5 dark:bg-dark-800 dark:ring-white/10"
-        :style="moreMenuStyle"
+        :style="[moreMenuStyle, { zIndex: moreMenuLayer.zIndex.value }]"
         @click.stop
+        ref="moreMenuRef"
       >
         <template v-for="job in batchJobs" :key="job.id">
           <template v-if="job.id === openMoreJobId">
@@ -753,6 +754,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -1395,6 +1397,11 @@ function toggleChildRows(batchId: string) {
 function closeMoreMenu() {
   openMoreJobId.value = ''
 }
+
+// The row menu is a sub-layer of the overlay stack (design spec 0.2): Escape closes it first and a dialog opening
+// above closes it.
+const moreMenuRef = ref<HTMLElement | null>(null)
+const moreMenuLayer = useOverlayLayer(() => !!openMoreJobId.value, { root: moreMenuRef, modal: false, floor: 9999, onEscape: closeMoreMenu })
 
 function toggleMoreMenu(job: BatchImageJobRow, event: MouseEvent) {
   if (openMoreJobId.value === job.id) {

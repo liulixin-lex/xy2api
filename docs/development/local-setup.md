@@ -147,7 +147,7 @@ python3 tools/ci/race_suites.py resilience gateway-reliability
 | 套件 | 内容 | 构建标签 | 必需的环境变量 |
 |---|---|---|---|
 | `resilience` | 网关韧性测试文件中的全部测试（`internal/resilience`，以及 service、handler、handler/admin、server/middleware 中的 resilience 测试文件） | `unit` | 无 |
-| `gateway-reliability` | 指定的网关可靠性、请求体重放安全与份额调度测试 | `unit` | 无 |
+| `gateway-reliability` | 指定的网关可靠性与请求体重放安全测试 | `unit` | 无 |
 | `openai-cache` | OpenAI 缓存计量、用量换算与粘性容量测试 | `unit` | `SCHEDULING_TEST_REDIS_ADDR` |
 | `stripe-hosted` | Stripe 托管模式的数据库测试 | `unit` | `STRIPE_HOSTED_TEST_DSN` |
 | `mcp-postgres` | 只读 MCP 的 PostgreSQL 测试 | `integration` | `MCP_READER_TEST_DSN` |
@@ -275,7 +275,7 @@ Ent schema 只决定生成的查询代码，不会修改数据库。改了 schem
 
 - `make lint` 与 `make test` 通过。
 - 改动了 repository、SQL 或迁移：`make -C backend test-integration` 通过；本机没有 Docker 时在 PR 中说明。
-- 改动了网关韧性、份额调度、OpenAI 缓存、支付或 MCP 相关代码：运行 `tools/ci/race_suites.py` 中对应的套件。
+- 改动了网关韧性、OpenAI 缓存、支付或 MCP 相关代码：运行 `tools/ci/race_suites.py` 中对应的套件。
 - 改动了 Ent schema 或 Wire provider：生成代码已提交，并已补写迁移。
 - 改动了 `package.json`：`pnpm-lock.yaml` 已提交。
 - 新增或修改界面文案：`zh` 与 `en` 两套键都已添加。

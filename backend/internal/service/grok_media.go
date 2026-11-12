@@ -352,7 +352,7 @@ func (s *OpenAIGatewayService) SelectMediaVideoRequestAccount(
 		return nil, decision, ErrNoAvailableAccounts
 	}
 	ctx = s.withOpenAIGroupPrivacyRequirement(WithOpenAIProfitControlSuppressed(ctx), groupID)
-	scheduler := &defaultOpenAIAccountScheduler{service: s}
+	scheduler := s
 	selection, _, err := scheduler.selectBySessionHash(ctx, OpenAIAccountScheduleRequest{
 		GroupID: groupID, Platform: platform, SessionHash: sessionHash,
 		StickyAccountID: accountID, PreserveStickyBinding: true, DisableStickyEscape: true,

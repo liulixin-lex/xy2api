@@ -114,7 +114,6 @@ func probeTestAccounts(platform string) []Account {
 // ---- OpenAI default scheduler ----
 
 func newOpenAIProbeTestService(accounts []Account, inFlight map[int64]int, bindings map[string]int64) (*OpenAIGatewayService, *probeSlotCache, *schedulerTestGatewayCache) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	cfg := &config.Config{}
 	probeTestSchedulingConfig(cfg)
 	slots := newProbeSlotCache(inFlight)
@@ -354,8 +353,8 @@ func TestMonitorProbeGatewayWaitsWhenGroupFull(t *testing.T) {
 // ---- Share scheduling ----
 
 func TestMonitorProbeShareTakesSlotSkippedByLoadRate(t *testing.T) {
-	setup := func() *shareTestEnv {
-		env := newShareTestEnv(t, twoAccountPolicy(), Account{ID: 1}, Account{ID: 2})
+	setup := func() *gatewaySelectionTestEnv {
+		env := newGatewaySelectionTestEnv(t, twoAccountSelectionSetup(), Account{ID: 1}, Account{ID: 2})
 		// Account 1 is full by load rate yet has free slots; account 2 is busy.
 		env.conc.mockConcurrencyCache.loadMap = map[int64]*AccountLoadInfo{1: {AccountID: 1, CurrentConcurrency: 3, LoadRate: 100}}
 		env.conc.busy[2] = -1
@@ -386,13 +385,13 @@ func TestMonitorProbeShareTakesSlotSkippedByLoadRate(t *testing.T) {
 }
 
 func TestMonitorProbeShareSkipsAffinityWait(t *testing.T) {
-	env := newShareTestEnv(t, twoAccountPolicy(), Account{ID: 1}, Account{ID: 2})
-	target, other := env.targetFor(t, "wait")
+	env := newGatewaySelectionTestEnv(t, twoAccountSelectionSetup(), Account{ID: 1}, Account{ID: 2})
+	target, other := int64(1), int64(2)
 	env.cache.bind("wait", target, time.Hour-30*time.Second)
 	env.conc.busy[target] = 2
 
 	start := time.Now()
-	result := env.selectAccount(t, monitorprobe.WithProbe(cacheableContext(), 11), "wait", nil)
+	result := env.selectAccount(t, monitorprobe.WithProbe(context.Background(), 11), "wait", nil)
 	require.True(t, result.Acquired)
 	require.Equal(t, other, result.Account.ID, "a probe does not wait for a bound account")
 	require.Less(t, time.Since(start), 200*time.Millisecond)

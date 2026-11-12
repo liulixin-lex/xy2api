@@ -203,7 +203,6 @@
 
         <!-- Tab: Gateway -->
         <div v-show="activeTab === 'gateway'" class="space-y-6">
-          <ShareSchedulingSettings v-if="activeTab === 'gateway' && !loading && !loadFailed" />
           <GatewayResilienceSettings v-if="activeTab === 'gateway' && !loading && !loadFailed" />
           <!-- Overload Cooldown (529) Settings -->
           <div class="card">
@@ -5114,238 +5113,31 @@
                 </div>
               </div>
 
-              <div
-                v-if="!form.openai_advanced_scheduler_enabled"
-                class="flex items-center justify-between border-t border-gray-100 pt-5 dark:border-dark-700"
-              >
-                <div>
-                  <label
-                    class="text-sm font-medium text-gray-700 dark:text-gray-300"
-                  >
-                    {{ t("admin.settings.openaiExperimentalScheduler.lowRatePriorityTitle") }}
-                  </label>
-                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    {{
-                      t("admin.settings.openaiExperimentalScheduler.lowRatePriorityDescription")
-                    }}
-                  </p>
-                </div>
-                <Toggle
-                  v-model="form.openai_low_upstream_rate_priority_enabled"
-                  data-testid="openai-low-rate-priority-toggle"
-                />
+              <!-- 质量调度（设计 D.4）：名称在左、控件在右，与「允许未分组 Key 调度」同样的行样式 -->
+              <div class="flex min-h-[52px] items-center justify-between border-t border-gray-100 pt-4 dark:border-dark-700">
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300" for="sched-quality-enabled">{{ t("admin.schedQuality.settings.enabled") }}</label>
+                <Toggle id="sched-quality-enabled" v-model="form.sched_quality_enabled" data-testid="sched-quality-enabled" />
               </div>
-
-              <!-- 低倍率优先的适用范围：全部分组 / 指定的 OpenAI 分组；指定但未选分组等于关闭 -->
-              <div
-                v-if="!form.openai_advanced_scheduler_enabled && form.openai_low_upstream_rate_priority_enabled"
-                class="border-t border-gray-100 pt-5 dark:border-dark-700"
-                data-testid="openai-low-rate-priority-scope"
-              >
-                <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
-                  <div class="min-w-0">
-                    <p id="openai-low-rate-priority-scope-label" class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                      {{ t("admin.settings.openaiExperimentalScheduler.lowRatePriorityScopeTitle") }}
-                    </p>
-                    <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                      {{ t("admin.settings.openaiExperimentalScheduler.lowRatePriorityScopeDescription") }}
-                    </p>
-                  </div>
-                  <div
-                    role="radiogroup"
-                    aria-labelledby="openai-low-rate-priority-scope-label"
-                    class="flex shrink-0 items-center gap-4"
-                  >
-                    <label
-                      v-for="scope in LOW_RATE_PRIORITY_SCOPES"
-                      :key="scope"
-                      class="flex cursor-pointer items-center gap-2 whitespace-nowrap"
-                    >
-                      <input
-                        v-model="form.openai_low_upstream_rate_priority_scope"
-                        type="radio"
-                        :value="scope"
-                        class="h-4 w-4 text-primary-600"
-                        :data-testid="`openai-low-rate-priority-scope-${scope}`"
-                      />
-                      <span class="text-sm text-gray-700 dark:text-gray-300">
-                        {{ t(`admin.settings.openaiExperimentalScheduler.lowRatePriorityScope.${scope}`) }}
-                      </span>
-                    </label>
-                  </div>
-                </div>
-                <template v-if="form.openai_low_upstream_rate_priority_scope === 'groups'">
-                  <GroupSelector
-                    v-model="form.openai_low_upstream_rate_priority_group_ids"
-                    class="mt-3"
-                    :groups="openaiGroups"
-                    platform="openai"
-                    data-testid="openai-low-rate-priority-groups"
-                  />
-                  <p
-                    v-if="!form.openai_low_upstream_rate_priority_group_ids.length"
-                    class="mt-2 text-xs text-amber-600 dark:text-amber-400"
-                    role="status"
-                    data-testid="openai-low-rate-priority-groups-empty"
-                  >
-                    {{ t("admin.settings.openaiExperimentalScheduler.lowRatePriorityScopeEmpty") }}
-                  </p>
-                </template>
+              <div class="flex min-h-[52px] items-center justify-between border-t border-gray-100 pt-4 dark:border-dark-700">
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300" for="sched-quality-test-enabled">{{ t("admin.schedQuality.settings.tests") }}</label>
+                <Toggle id="sched-quality-test-enabled" v-model="form.sched_quality_test_enabled" data-testid="sched-quality-test-enabled" />
               </div>
-
-              <div
-                v-if="!form.openai_advanced_scheduler_enabled && form.openai_low_upstream_rate_priority_enabled"
-                class="flex flex-col items-stretch gap-3 border-t border-gray-100 pt-5 sm:flex-row sm:items-start sm:justify-between sm:gap-6 dark:border-dark-700"
-              >
-                <div class="min-w-0">
-                  <label
-                    class="text-sm font-medium text-gray-700 dark:text-gray-300"
-                    for="openai-oauth-scheduling-rate-multiplier"
-                  >
-                    {{ t("admin.settings.openaiExperimentalScheduler.oauthRateTitle") }}
-                  </label>
-                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    {{ t("admin.settings.openaiExperimentalScheduler.oauthRatePriorityDescription") }}
-                  </p>
-                </div>
-                <div class="relative w-full shrink-0 sm:w-32">
+              <div class="flex min-h-[52px] items-center justify-between gap-3 border-t border-gray-100 pt-4 dark:border-dark-700">
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300" for="openai-oauth-scheduling-rate-multiplier">{{ t("admin.schedQuality.settings.oauthRate") }}</label>
+                <div class="flex items-center gap-2">
+                  <span v-if="!oauthRateValid" id="openai-oauth-rate-invalid" class="sq-fail-word" data-testid="openai-oauth-rate-invalid">{{ t("admin.schedQuality.state.invalid") }}</span>
                   <input
                     id="openai-oauth-scheduling-rate-multiplier"
                     v-model.number="form.openai_oauth_scheduling_rate_multiplier"
-                    class="input pr-8"
+                    :class="['input w-28 text-right sq-num', { 'input-error': !oauthRateValid }]"
+                    :aria-invalid="!oauthRateValid"
+                    :aria-describedby="oauthRateValid ? undefined : 'openai-oauth-rate-invalid'"
+                    :placeholder="t('admin.schedQuality.settings.accountRate')"
                     data-testid="openai-oauth-scheduling-rate-multiplier"
                     min="0"
                     step="0.01"
                     type="number"
                   />
-                  <span
-                    class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400"
-                  >x</span>
-                </div>
-              </div>
-
-              <div class="flex items-center justify-between border-t border-gray-100 pt-5 dark:border-dark-700">
-                <div>
-                  <label
-                    class="text-sm font-medium text-gray-700 dark:text-gray-300"
-                  >
-                    {{ t("admin.settings.openaiExperimentalScheduler.title") }}
-                  </label>
-                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    {{
-                      t("admin.settings.openaiExperimentalScheduler.description")
-                    }}
-                  </p>
-                </div>
-                <Toggle
-                  v-model="form.openai_advanced_scheduler_enabled"
-                  data-testid="openai-advanced-scheduler-toggle"
-                />
-              </div>
-
-              <div
-                v-if="form.openai_advanced_scheduler_enabled"
-                class="flex items-center justify-between border-t border-gray-100 pt-5 dark:border-dark-700"
-              >
-                <div>
-                  <label
-                    class="text-sm font-medium text-gray-700 dark:text-gray-300"
-                  >
-                    {{ t("admin.settings.openaiExperimentalScheduler.stickyWeightedTitle") }}
-                  </label>
-                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    {{
-                      t("admin.settings.openaiExperimentalScheduler.stickyWeightedDescription")
-                    }}
-                  </p>
-                </div>
-                <Toggle v-model="form.openai_advanced_scheduler_sticky_weighted_enabled" />
-              </div>
-
-              <div
-                v-if="form.openai_advanced_scheduler_enabled"
-                class="flex items-center justify-between border-t border-gray-100 pt-5 dark:border-dark-700"
-              >
-                <div>
-                  <label
-                    class="text-sm font-medium text-gray-700 dark:text-gray-300"
-                  >
-                    {{ t("admin.settings.openaiExperimentalScheduler.subscriptionPriorityTitle") }}
-                  </label>
-                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    {{
-                      t("admin.settings.openaiExperimentalScheduler.subscriptionPriorityDescription")
-                    }}
-                  </p>
-                </div>
-                <Toggle v-model="form.openai_advanced_scheduler_subscription_priority_enabled" />
-              </div>
-
-              <div
-                v-if="form.openai_advanced_scheduler_enabled"
-                class="flex flex-col items-stretch gap-3 border-t border-gray-100 pt-5 sm:flex-row sm:items-start sm:justify-between sm:gap-6 dark:border-dark-700"
-              >
-                <div class="min-w-0">
-                  <label
-                    class="text-sm font-medium text-gray-700 dark:text-gray-300"
-                    for="openai-oauth-scheduling-rate-multiplier"
-                  >
-                    {{ t("admin.settings.openaiExperimentalScheduler.oauthRateTitle") }}
-                  </label>
-                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    {{ t("admin.settings.openaiExperimentalScheduler.oauthRateWeightedDescription") }}
-                  </p>
-                </div>
-                <div class="relative w-full shrink-0 sm:w-32">
-                  <input
-                    id="openai-oauth-scheduling-rate-multiplier"
-                    v-model.number="form.openai_oauth_scheduling_rate_multiplier"
-                    class="input pr-8"
-                    data-testid="openai-oauth-scheduling-rate-multiplier"
-                    min="0"
-                    step="0.01"
-                    type="number"
-                  />
-                  <span
-                    class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400"
-                  >x</span>
-                </div>
-              </div>
-
-              <div
-                v-if="form.openai_advanced_scheduler_enabled"
-                class="border-t border-gray-100 pt-5 dark:border-dark-700"
-              >
-                <div>
-                  <label
-                    class="text-sm font-medium text-gray-700 dark:text-gray-300"
-                  >
-                    {{ t("admin.settings.openaiExperimentalScheduler.weightsTitle") }}
-                  </label>
-                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    {{
-                      t("admin.settings.openaiExperimentalScheduler.weightsDescription")
-                    }}
-                  </p>
-                </div>
-
-                <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
-                  <label
-                    v-for="field in openAIAdvancedSchedulerWeightFields"
-                    :key="field.key"
-                    class="block"
-                  >
-                    <span class="text-xs font-medium text-gray-600 dark:text-gray-400">
-                      {{ field.label }}
-                    </span>
-                    <input
-                      v-model="form[field.key]"
-                      class="input mt-1"
-                      inputmode="decimal"
-                      :placeholder="field.placeholder"
-                      type="text"
-                    />
-                  </label>
                 </div>
               </div>
             </div>
@@ -6316,87 +6108,97 @@
           </div>
 
           <!-- Web Search Test Dialog -->
-          <div
-            v-if="wsTestDialogOpen"
-            class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-            @click.self="wsTestDialogOpen = false"
-          >
+          <Teleport to="body">
             <div
-              class="mx-4 w-full max-w-lg rounded-xl bg-white p-6 shadow-xl dark:bg-dark-800"
+              v-if="wsTestDialogOpen"
+              class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+              @click.self="wsTestDialogOpen = false"
+              ref="wsTestRef"
+              :style="{ zIndex: wsTestLayer.zIndex.value, outline: 'none' }"
+              tabindex="-1"
+              @keydown.tab="wsTestLayer.trapTab"
+              role="dialog"
+              aria-modal="true"
+              :aria-labelledby="wsTestTitleId"
             >
-              <h3
-                class="mb-4 text-lg font-semibold text-gray-900 dark:text-white"
-              >
-                {{ t("admin.settings.webSearchEmulation.testResultTitle") }}
-              </h3>
-              <div class="flex items-center gap-2">
-                <input
-                  v-model="wsTestQuery"
-                  type="text"
-                  class="input flex-1 text-sm"
-                  :placeholder="
-                    t('admin.settings.webSearchEmulation.testDefaultQuery')
-                  "
-                  @keyup.enter="testWebSearchProvider()"
-                />
-                <button
-                  type="button"
-                  class="btn btn-primary btn-sm"
-                  :disabled="wsTestLoading"
-                  @click="testWebSearchProvider()"
-                >
-                  {{
-                    wsTestLoading
-                      ? t("admin.settings.webSearchEmulation.testing")
-                      : t("admin.settings.webSearchEmulation.test")
-                  }}
-                </button>
-              </div>
-              <!-- Test results -->
               <div
-                v-if="wsTestResult"
-                class="mt-4 max-h-80 overflow-y-auto rounded-lg bg-gray-50 p-4 dark:bg-dark-700"
+                class="mx-4 w-full max-w-lg rounded-xl bg-white p-6 shadow-xl dark:bg-dark-800"
               >
-                <p
-                  class="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300"
+                <h3
+                  :id="wsTestTitleId"
+                  class="mb-4 text-lg font-semibold text-gray-900 dark:text-white"
                 >
-                  {{
-                    t("admin.settings.webSearchEmulation.testResultProvider")
-                  }}: {{ wsTestResult.provider }}
-                </p>
-                <div
-                  v-if="wsTestResult.results.length === 0"
-                  class="text-sm text-gray-400"
-                >
-                  {{ t("admin.settings.webSearchEmulation.testNoResults") }}
-                </div>
-                <div
-                  v-for="(r, rIdx) in wsTestResult.results"
-                  :key="rIdx"
-                  class="mt-2 border-t border-gray-200 pt-2 first:mt-0 first:border-0 first:pt-0 dark:border-dark-600"
-                >
-                  <a
-                    :href="r.url"
-                    target="_blank"
-                    class="text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
-                    >{{ r.title }}</a
+                  {{ t("admin.settings.webSearchEmulation.testResultTitle") }}
+                </h3>
+                <div class="flex items-center gap-2">
+                  <input
+                    v-model="wsTestQuery"
+                    type="text"
+                    class="input flex-1 text-sm"
+                    :placeholder="
+                      t('admin.settings.webSearchEmulation.testDefaultQuery')
+                    "
+                    @keyup.enter="testWebSearchProvider()"
+                  />
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-sm"
+                    :disabled="wsTestLoading"
+                    @click="testWebSearchProvider()"
                   >
-                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    {{ r.snippet }}
-                  </p>
+                    {{
+                      wsTestLoading
+                        ? t("admin.settings.webSearchEmulation.testing")
+                        : t("admin.settings.webSearchEmulation.test")
+                    }}
+                  </button>
                 </div>
-              </div>
-              <div class="mt-4 flex justify-end">
-                <button
-                  type="button"
-                  class="btn btn-secondary btn-sm"
-                  @click="wsTestDialogOpen = false"
+                <!-- Test results -->
+                <div
+                  v-if="wsTestResult"
+                  class="mt-4 max-h-80 overflow-y-auto rounded-lg bg-gray-50 p-4 dark:bg-dark-700"
                 >
-                  {{ t("common.close") }}
-                </button>
+                  <p
+                    class="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    {{
+                      t("admin.settings.webSearchEmulation.testResultProvider")
+                    }}: {{ wsTestResult.provider }}
+                  </p>
+                  <div
+                    v-if="wsTestResult.results.length === 0"
+                    class="text-sm text-gray-400"
+                  >
+                    {{ t("admin.settings.webSearchEmulation.testNoResults") }}
+                  </div>
+                  <div
+                    v-for="(r, rIdx) in wsTestResult.results"
+                    :key="rIdx"
+                    class="mt-2 border-t border-gray-200 pt-2 first:mt-0 first:border-0 first:pt-0 dark:border-dark-600"
+                  >
+                    <a
+                      :href="r.url"
+                      target="_blank"
+                      class="text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
+                      >{{ r.title }}</a
+                    >
+                    <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{ r.snippet }}
+                    </p>
+                  </div>
+                </div>
+                <div class="mt-4 flex justify-end">
+                  <button
+                    type="button"
+                    class="btn btn-secondary btn-sm"
+                    @click="wsTestDialogOpen = false"
+                  >
+                    {{ t("common.close") }}
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
+          </Teleport>
 
         <!-- Usage Records Settings -->
         <div class="card">
@@ -7987,173 +7789,191 @@
         </div>
 
         <!-- Affiliate add/edit modal -->
-        <div
-          v-if="affiliateModal.open"
-          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          @click.self="closeAffiliateModal"
-        >
-          <div class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-dark-900">
-            <h3 class="mb-4 text-lg font-semibold">
-              {{ affiliateModal.mode === 'add' ? t('admin.settings.features.affiliate.modal.addTitle') : t('admin.settings.features.affiliate.modal.editTitle') }}
-            </h3>
-            <div class="space-y-4">
-              <div v-if="affiliateModal.mode === 'add'">
-                <label class="input-label">{{ t('admin.settings.features.affiliate.modal.userLabel') }}</label>
-                <!-- Chip showing the picked user; clicking it re-opens the search -->
-                <div
-                  v-if="affiliateModal.selectedUser"
-                  class="flex items-center justify-between rounded-md border border-primary-200 bg-primary-50 px-3 py-2 dark:border-primary-700/50 dark:bg-primary-900/20"
-                >
-                  <div class="text-sm">
-                    <span class="font-medium text-gray-900 dark:text-white">{{ affiliateModal.selectedUser.email }}</span>
-                    <span class="ml-1 text-xs text-gray-500">({{ affiliateModal.selectedUser.username }})</span>
-                  </div>
-                  <button
-                    type="button"
-                    class="text-lg leading-none text-gray-400 hover:text-red-600"
-                    :title="t('admin.settings.features.affiliate.modal.changeUser')"
-                    @click="clearSelectedAffiliateUser"
-                  >
-                    ×
-                  </button>
-                </div>
-                <!-- Search input + result dropdown — hidden once a selection is made -->
-                <template v-else>
-                  <input
-                    v-model="affiliateModal.userQuery"
-                    type="text"
-                    class="input"
-                    :placeholder="t('admin.settings.features.affiliate.modal.userPlaceholder')"
-                    @input="onAffiliateUserSearchInput"
-                  />
+        <Teleport to="body">
+          <div
+            v-if="affiliateModal.open"
+            class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+            @click.self="closeAffiliateModal"
+            ref="affiliateEditRef"
+            :style="{ zIndex: affiliateEditLayer.zIndex.value, outline: 'none' }"
+            tabindex="-1"
+            @keydown.tab="affiliateEditLayer.trapTab"
+            role="dialog"
+            aria-modal="true"
+            :aria-labelledby="affiliateEditTitleId"
+          >
+            <div class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-dark-900">
+              <h3 :id="affiliateEditTitleId" class="mb-4 text-lg font-semibold">
+                {{ affiliateModal.mode === 'add' ? t('admin.settings.features.affiliate.modal.addTitle') : t('admin.settings.features.affiliate.modal.editTitle') }}
+              </h3>
+              <div class="space-y-4">
+                <div v-if="affiliateModal.mode === 'add'">
+                  <label class="input-label">{{ t('admin.settings.features.affiliate.modal.userLabel') }}</label>
+                  <!-- Chip showing the picked user; clicking it re-opens the search -->
                   <div
-                    v-if="affiliateModal.userResults.length > 0"
-                    class="mt-1 max-h-40 overflow-y-auto rounded border border-gray-200 dark:border-dark-700"
+                    v-if="affiliateModal.selectedUser"
+                    class="flex items-center justify-between rounded-md border border-primary-200 bg-primary-50 px-3 py-2 dark:border-primary-700/50 dark:bg-primary-900/20"
                   >
+                    <div class="text-sm">
+                      <span class="font-medium text-gray-900 dark:text-white">{{ affiliateModal.selectedUser.email }}</span>
+                      <span class="ml-1 text-xs text-gray-500">({{ affiliateModal.selectedUser.username }})</span>
+                    </div>
                     <button
-                      v-for="u in affiliateModal.userResults"
-                      :key="u.id"
                       type="button"
-                      class="w-full px-3 py-1.5 text-left text-sm hover:bg-gray-100 dark:hover:bg-dark-800"
-                      @click="selectAffiliateUser(u)"
+                      class="text-lg leading-none text-gray-400 hover:text-red-600"
+                      :title="t('admin.settings.features.affiliate.modal.changeUser')"
+                      @click="clearSelectedAffiliateUser"
                     >
-                      {{ u.email }} <span class="text-xs text-gray-500">({{ u.username }})</span>
+                      ×
                     </button>
                   </div>
-                </template>
-              </div>
-              <div v-else>
-                <label class="input-label">{{ t('admin.settings.features.affiliate.modal.userLabel') }}</label>
-                <input
-                  type="text"
-                  class="input"
-                  :value="affiliateModal.editingEntry ? affiliateModal.editingEntry.email : ''"
-                  disabled
-                />
-              </div>
-
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.affiliate.modal.codeLabel') }}</label>
-                <input
-                  v-model="affiliateModal.code"
-                  type="text"
-                  class="input font-mono"
-                  :placeholder="t('admin.settings.features.affiliate.modal.codePlaceholder')"
-                  maxlength="32"
-                />
-                <p class="mt-1 text-xs text-gray-400">
-                  {{ t('admin.settings.features.affiliate.modal.codeHint') }}
-                </p>
-              </div>
-
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.affiliate.modal.rateLabel') }}</label>
-                <div class="relative">
-                  <input
-                    v-model="affiliateModal.rate"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max="100"
-                    class="input pr-8"
-                    :placeholder="t('admin.settings.features.affiliate.modal.ratePlaceholder')"
-                  />
-                  <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">%</span>
+                  <!-- Search input + result dropdown — hidden once a selection is made -->
+                  <template v-else>
+                    <input
+                      v-model="affiliateModal.userQuery"
+                      type="text"
+                      class="input"
+                      :placeholder="t('admin.settings.features.affiliate.modal.userPlaceholder')"
+                      @input="onAffiliateUserSearchInput"
+                    />
+                    <div
+                      v-if="affiliateModal.userResults.length > 0"
+                      class="mt-1 max-h-40 overflow-y-auto rounded border border-gray-200 dark:border-dark-700"
+                    >
+                      <button
+                        v-for="u in affiliateModal.userResults"
+                        :key="u.id"
+                        type="button"
+                        class="w-full px-3 py-1.5 text-left text-sm hover:bg-gray-100 dark:hover:bg-dark-800"
+                        @click="selectAffiliateUser(u)"
+                      >
+                        {{ u.email }} <span class="text-xs text-gray-500">({{ u.username }})</span>
+                      </button>
+                    </div>
+                  </template>
                 </div>
-                <p class="mt-1 text-xs text-gray-400">
-                  {{ t('admin.settings.features.affiliate.modal.rateHint') }}
+                <div v-else>
+                  <label class="input-label">{{ t('admin.settings.features.affiliate.modal.userLabel') }}</label>
+                  <input
+                    type="text"
+                    class="input"
+                    :value="affiliateModal.editingEntry ? affiliateModal.editingEntry.email : ''"
+                    disabled
+                  />
+                </div>
+
+                <div>
+                  <label class="input-label">{{ t('admin.settings.features.affiliate.modal.codeLabel') }}</label>
+                  <input
+                    v-model="affiliateModal.code"
+                    type="text"
+                    class="input font-mono"
+                    :placeholder="t('admin.settings.features.affiliate.modal.codePlaceholder')"
+                    maxlength="32"
+                  />
+                  <p class="mt-1 text-xs text-gray-400">
+                    {{ t('admin.settings.features.affiliate.modal.codeHint') }}
+                  </p>
+                </div>
+
+                <div>
+                  <label class="input-label">{{ t('admin.settings.features.affiliate.modal.rateLabel') }}</label>
+                  <div class="relative">
+                    <input
+                      v-model="affiliateModal.rate"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      class="input pr-8"
+                      :placeholder="t('admin.settings.features.affiliate.modal.ratePlaceholder')"
+                    />
+                    <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">%</span>
+                  </div>
+                  <p class="mt-1 text-xs text-gray-400">
+                    {{ t('admin.settings.features.affiliate.modal.rateHint') }}
+                  </p>
+                </div>
+              </div>
+
+              <div class="mt-6 flex items-center justify-between gap-3">
+                <p
+                  v-if="!affiliateModalCanSubmit"
+                  class="text-xs text-gray-500 dark:text-gray-400"
+                >
+                  {{ t('admin.settings.features.affiliate.modal.errorEmpty') }}
                 </p>
+                <span v-else></span>
+                <div class="flex gap-2">
+                  <button type="button" class="btn btn-secondary" @click="closeAffiliateModal">
+                    {{ t('common.cancel') }}
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-primary"
+                    :disabled="affiliateModal.saving || !affiliateModalCanSubmit"
+                    @click="submitAffiliateModal"
+                  >
+                    {{ affiliateModal.saving ? t('common.saving') : t('common.save') }}
+                  </button>
+                </div>
               </div>
             </div>
+          </div>
+        </Teleport>
 
-            <div class="mt-6 flex items-center justify-between gap-3">
-              <p
-                v-if="!affiliateModalCanSubmit"
-                class="text-xs text-gray-500 dark:text-gray-400"
-              >
-                {{ t('admin.settings.features.affiliate.modal.errorEmpty') }}
+        <!-- Affiliate batch rate modal -->
+        <Teleport to="body">
+          <div
+            v-if="affiliateBatchModal.open"
+            class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+            @click.self="affiliateBatchModal.open = false"
+            ref="affiliateBatchRef"
+            :style="{ zIndex: affiliateBatchLayer.zIndex.value, outline: 'none' }"
+            tabindex="-1"
+            @keydown.tab="affiliateBatchLayer.trapTab"
+            role="dialog"
+            aria-modal="true"
+            :aria-labelledby="affiliateBatchTitleId"
+          >
+            <div class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-dark-900">
+              <h3 :id="affiliateBatchTitleId" class="mb-4 text-lg font-semibold">
+                {{ t('admin.settings.features.affiliate.batchModal.title', { count: affiliateState.selected.length }) }}
+              </h3>
+              <p class="mb-4 text-sm text-gray-500">
+                {{ t('admin.settings.features.affiliate.batchModal.hint') }}
               </p>
-              <span v-else></span>
-              <div class="flex gap-2">
-                <button type="button" class="btn btn-secondary" @click="closeAffiliateModal">
+              <div class="relative">
+                <input
+                  v-model="affiliateBatchModal.rate"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="100"
+                  class="input pr-8"
+                  :placeholder="t('admin.settings.features.affiliate.batchModal.placeholder')"
+                />
+                <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">%</span>
+              </div>
+              <p class="mt-2 text-xs text-gray-400">
+                {{ t('admin.settings.features.affiliate.batchModal.clearHint') }}
+              </p>
+              <div class="mt-6 flex justify-end gap-2">
+                <button type="button" class="btn btn-secondary" @click="affiliateBatchModal.open = false">
                   {{ t('common.cancel') }}
                 </button>
                 <button
                   type="button"
                   class="btn btn-primary"
-                  :disabled="affiliateModal.saving || !affiliateModalCanSubmit"
-                  @click="submitAffiliateModal"
+                  :disabled="affiliateBatchModal.saving"
+                  @click="submitAffiliateBatchModal"
                 >
-                  {{ affiliateModal.saving ? t('common.saving') : t('common.save') }}
+                  {{ affiliateBatchModal.saving ? t('common.saving') : t('common.save') }}
                 </button>
               </div>
             </div>
           </div>
-        </div>
-
-        <!-- Affiliate batch rate modal -->
-        <div
-          v-if="affiliateBatchModal.open"
-          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          @click.self="affiliateBatchModal.open = false"
-        >
-          <div class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-dark-900">
-            <h3 class="mb-4 text-lg font-semibold">
-              {{ t('admin.settings.features.affiliate.batchModal.title', { count: affiliateState.selected.length }) }}
-            </h3>
-            <p class="mb-4 text-sm text-gray-500">
-              {{ t('admin.settings.features.affiliate.batchModal.hint') }}
-            </p>
-            <div class="relative">
-              <input
-                v-model="affiliateBatchModal.rate"
-                type="number"
-                step="0.01"
-                min="0"
-                max="100"
-                class="input pr-8"
-                :placeholder="t('admin.settings.features.affiliate.batchModal.placeholder')"
-              />
-              <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">%</span>
-            </div>
-            <p class="mt-2 text-xs text-gray-400">
-              {{ t('admin.settings.features.affiliate.batchModal.clearHint') }}
-            </p>
-            <div class="mt-6 flex justify-end gap-2">
-              <button type="button" class="btn btn-secondary" @click="affiliateBatchModal.open = false">
-                {{ t('common.cancel') }}
-              </button>
-              <button
-                type="button"
-                class="btn btn-primary"
-                :disabled="affiliateBatchModal.saving"
-                @click="submitAffiliateBatchModal"
-              >
-                {{ affiliateBatchModal.saving ? t('common.saving') : t('common.save') }}
-              </button>
-            </div>
-          </div>
-        </div>
+        </Teleport>
 
         </div><!-- /Tab: Features -->
 
@@ -9220,7 +9040,8 @@
 
 <script setup lang="ts">
 import CodexTicketProxyPool from '@/components/account/CodexTicketProxyPool.vue'
-import { ref, reactive, computed, onMounted, watch } from "vue";
+import { ref, reactive, computed, nextTick, onMounted, useId, watch } from "vue";
+import { useOverlayLayer } from "@/composables/useOverlayLayer";
 import { listPlatformIds } from "@/constants/platformCatalog";
 import { useI18n } from "vue-i18n";
 import { adminAPI } from "@/api";
@@ -9244,7 +9065,6 @@ import type {
   UpdateSettingsRequest,
   DefaultSubscriptionSetting,
   DefaultPlatformQuotasMap,
-  LowRatePriorityScope,
   OpenAIFastPolicyRule,
   WeChatConnectMode,
   WebSearchEmulationConfig,
@@ -9285,7 +9105,6 @@ import PaymentProviderList from "@/components/payment/PaymentProviderList.vue";
 import PaymentProviderDialog from "@/components/payment/PaymentProviderDialog.vue";
 import GroupBadge from "@/components/common/GroupBadge.vue";
 import GroupOptionItem from "@/components/common/GroupOptionItem.vue";
-import GroupSelector from "@/components/common/GroupSelector.vue";
 import Toggle from "@/components/common/Toggle.vue";
 import ProxySelector from "@/components/common/ProxySelector.vue";
 import ImageUpload from "@/components/common/ImageUpload.vue";
@@ -9313,7 +9132,6 @@ import { extractApiErrorMessage, extractI18nErrorMessage } from "@/utils/apiErro
 import { useAppStore } from "@/stores";
 import { useAdminSettingsStore } from "@/stores/adminSettings";
 import ClaudeCacheFallbackSettings from "@/views/admin/settings/ClaudeCacheFallbackSettings.vue";
-import ShareSchedulingSettings from "@/views/admin/settings/ShareSchedulingSettings.vue";
 import GatewayResilienceSettings from "@/views/admin/settings/GatewayResilienceSettings.vue";
 import { normalizeVisibleMethod } from "@/components/payment/paymentFlow";
 import StripeModeSelector from "@/components/payment/StripeModeSelector.vue";
@@ -9447,9 +9265,11 @@ const adminApiKeyMasked = ref("");
 const adminApiKeyOperating = ref(false);
 const newAdminApiKey = ref("");
 const subscriptionGroups = ref<AdminGroup[]>([]);
-// 低倍率优先“指定分组”的候选，只列 OpenAI 分组。
-const openaiGroups = ref<AdminGroup[]>([]);
-const LOW_RATE_PRIORITY_SCOPES: LowRatePriorityScope[] = ["all", "groups"];
+// OAuth 倍率：留空（用各账号自己的倍率），或非负数字（设计 D.4）。
+const oauthRateValid = computed(() => {
+  const value = form.openai_oauth_scheduling_rate_multiplier;
+  return value === "" || value === null || (typeof value === "number" && Number.isFinite(value) && value >= 0);
+});
 
 // Upstream billing probe state
 const upstreamBillingProbeLoading = ref(true);
@@ -10008,24 +9828,9 @@ type SettingsForm = Omit<
   github_oauth_client_secret: string;
   google_oauth_client_secret: string;
   force_email_on_third_party_signup: boolean;
-  openai_low_upstream_rate_priority_enabled: boolean;
-  openai_low_upstream_rate_priority_scope: LowRatePriorityScope;
-  openai_low_upstream_rate_priority_group_ids: number[];
   openai_oauth_scheduling_rate_multiplier: number | "" | null;
-  openai_advanced_scheduler_enabled: boolean;
-  openai_advanced_scheduler_sticky_weighted_enabled: boolean;
-  openai_advanced_scheduler_subscription_priority_enabled: boolean;
-  openai_advanced_scheduler_lb_top_k: string;
-  openai_advanced_scheduler_weight_priority: string;
-  openai_advanced_scheduler_weight_load: string;
-  openai_advanced_scheduler_weight_queue: string;
-  openai_advanced_scheduler_weight_error_rate: string;
-  openai_advanced_scheduler_weight_ttft: string;
-  openai_advanced_scheduler_weight_reset: string;
-  openai_advanced_scheduler_weight_quota_headroom: string;
-  openai_advanced_scheduler_weight_upstream_cost: string;
-  openai_advanced_scheduler_weight_previous_response: string;
-  openai_advanced_scheduler_weight_session_sticky: string;
+  sched_quality_enabled: boolean;
+  sched_quality_test_enabled: boolean;
   // 充值赠送阶梯编辑态：允许留空的行，提交时清洗为 RechargeBonusTier[]
   payment_recharge_bonus_tiers: RechargeBonusTierDraft[];
   payment_recharge_bonus_mode: RechargeBonusMode;
@@ -10267,24 +10072,9 @@ const form = reactive<SettingsForm>({
   max_claude_code_version: "",
   // 分组隔离
   allow_ungrouped_key_scheduling: false,
-  openai_low_upstream_rate_priority_enabled: false,
-  openai_low_upstream_rate_priority_scope: "all",
-  openai_low_upstream_rate_priority_group_ids: [],
   openai_oauth_scheduling_rate_multiplier: 1,
-  openai_advanced_scheduler_enabled: false,
-  openai_advanced_scheduler_sticky_weighted_enabled: false,
-  openai_advanced_scheduler_subscription_priority_enabled: false,
-  openai_advanced_scheduler_lb_top_k: "",
-  openai_advanced_scheduler_weight_priority: "",
-  openai_advanced_scheduler_weight_load: "",
-  openai_advanced_scheduler_weight_queue: "",
-  openai_advanced_scheduler_weight_error_rate: "",
-  openai_advanced_scheduler_weight_ttft: "",
-  openai_advanced_scheduler_weight_reset: "",
-  openai_advanced_scheduler_weight_quota_headroom: "",
-  openai_advanced_scheduler_weight_upstream_cost: "",
-  openai_advanced_scheduler_weight_previous_response: "",
-  openai_advanced_scheduler_weight_session_sticky: "",
+  sched_quality_enabled: true,
+  sched_quality_test_enabled: true,
   // Gateway forwarding behavior
   openai_ttft_mode: "semantic",
   enable_fingerprint_unification: true,
@@ -10424,110 +10214,6 @@ function syncCaptchaProviderSelection(): void {
   }
 }
 
-type OpenAIAdvancedSchedulerOverrideKey =
-  | "openai_advanced_scheduler_lb_top_k"
-  | "openai_advanced_scheduler_weight_priority"
-  | "openai_advanced_scheduler_weight_load"
-  | "openai_advanced_scheduler_weight_queue"
-  | "openai_advanced_scheduler_weight_error_rate"
-  | "openai_advanced_scheduler_weight_ttft"
-  | "openai_advanced_scheduler_weight_reset"
-  | "openai_advanced_scheduler_weight_quota_headroom"
-  | "openai_advanced_scheduler_weight_upstream_cost"
-  | "openai_advanced_scheduler_weight_previous_response"
-  | "openai_advanced_scheduler_weight_session_sticky";
-
-type OpenAIAdvancedSchedulerEffectiveKey =
-  | "openai_advanced_scheduler_effective_lb_top_k"
-  | "openai_advanced_scheduler_effective_weight_priority"
-  | "openai_advanced_scheduler_effective_weight_load"
-  | "openai_advanced_scheduler_effective_weight_queue"
-  | "openai_advanced_scheduler_effective_weight_error_rate"
-  | "openai_advanced_scheduler_effective_weight_ttft"
-  | "openai_advanced_scheduler_effective_weight_reset"
-  | "openai_advanced_scheduler_effective_weight_quota_headroom"
-  | "openai_advanced_scheduler_effective_weight_upstream_cost"
-  | "openai_advanced_scheduler_effective_weight_previous_response"
-  | "openai_advanced_scheduler_effective_weight_session_sticky";
-
-const openAIAdvancedSchedulerWeightFields = computed<
-  Array<{
-    key: OpenAIAdvancedSchedulerOverrideKey;
-    label: string;
-    placeholder: string;
-  }>
->(() => {
-  const placeholder = (
-    effectiveKey: OpenAIAdvancedSchedulerEffectiveKey,
-    fallbackValue: string,
-  ) => {
-    const effectiveValue = String(
-      (form as Record<string, unknown>)[effectiveKey] ?? "",
-    ).trim();
-    return t("admin.settings.openaiExperimentalScheduler.defaultPlaceholder", {
-      value: effectiveValue || fallbackValue,
-    });
-  };
-
-  return [
-    {
-      key: "openai_advanced_scheduler_lb_top_k",
-      label: t("admin.settings.openaiExperimentalScheduler.topKLabel"),
-      placeholder: placeholder("openai_advanced_scheduler_effective_lb_top_k", "7"),
-    },
-    {
-      key: "openai_advanced_scheduler_weight_priority",
-      label: t("admin.settings.openaiExperimentalScheduler.priorityWeight"),
-      placeholder: placeholder("openai_advanced_scheduler_effective_weight_priority", "1"),
-    },
-    {
-      key: "openai_advanced_scheduler_weight_load",
-      label: t("admin.settings.openaiExperimentalScheduler.loadWeight"),
-      placeholder: placeholder("openai_advanced_scheduler_effective_weight_load", "1"),
-    },
-    {
-      key: "openai_advanced_scheduler_weight_queue",
-      label: t("admin.settings.openaiExperimentalScheduler.queueWeight"),
-      placeholder: placeholder("openai_advanced_scheduler_effective_weight_queue", "0.7"),
-    },
-    {
-      key: "openai_advanced_scheduler_weight_error_rate",
-      label: t("admin.settings.openaiExperimentalScheduler.errorRateWeight"),
-      placeholder: placeholder("openai_advanced_scheduler_effective_weight_error_rate", "0.8"),
-    },
-    {
-      key: "openai_advanced_scheduler_weight_ttft",
-      label: t("admin.settings.openaiExperimentalScheduler.ttftWeight"),
-      placeholder: placeholder("openai_advanced_scheduler_effective_weight_ttft", "0.5"),
-    },
-    {
-      key: "openai_advanced_scheduler_weight_reset",
-      label: t("admin.settings.openaiExperimentalScheduler.resetWeight"),
-      placeholder: placeholder("openai_advanced_scheduler_effective_weight_reset", "0"),
-    },
-    {
-      key: "openai_advanced_scheduler_weight_quota_headroom",
-      label: t("admin.settings.openaiExperimentalScheduler.quotaHeadroomWeight"),
-      placeholder: placeholder("openai_advanced_scheduler_effective_weight_quota_headroom", "0"),
-    },
-    {
-      key: "openai_advanced_scheduler_weight_upstream_cost",
-      label: t("admin.settings.openaiExperimentalScheduler.upstreamCostWeight"),
-      placeholder: placeholder("openai_advanced_scheduler_effective_weight_upstream_cost", "0"),
-    },
-    {
-      key: "openai_advanced_scheduler_weight_previous_response",
-      label: t("admin.settings.openaiExperimentalScheduler.previousResponseWeight"),
-      placeholder: placeholder("openai_advanced_scheduler_effective_weight_previous_response", "5"),
-    },
-    {
-      key: "openai_advanced_scheduler_weight_session_sticky",
-      label: t("admin.settings.openaiExperimentalScheduler.sessionStickyWeight"),
-      placeholder: placeholder("openai_advanced_scheduler_effective_weight_session_sticky", "3"),
-    },
-  ];
-});
-
 const authSourceDefaults = reactive<AuthSourceDefaultsState>(
   buildAuthSourceDefaultsState({}),
 );
@@ -10596,6 +10282,7 @@ const wsTestQuery = ref("");
 const wsTestLoading = ref(false);
 const wsTestResult = ref<WebSearchTestResult | null>(null);
 const wsTestDialogOpen = ref(false);
+const wsTestRef = ref<HTMLElement | null>(null);
 
 function openTestDialog() {
   wsTestResult.value = null;
@@ -10694,6 +10381,9 @@ async function copyApiKey(idx: number) {
 }
 
 async function testWebSearchProvider() {
+  // The test button is disabled while the request runs: keep focus in the dialog (the button again, or the query
+  // input when Enter started it) unless another layer opened above meanwhile.
+  const restoreFocus = wsTestLayer.holdFocus();
   wsTestLoading.value = true;
   wsTestResult.value = null;
   try {
@@ -10705,6 +10395,8 @@ async function testWebSearchProvider() {
     appStore.showError(extractApiErrorMessage(err, t("common.error")));
   } finally {
     wsTestLoading.value = false;
+    await nextTick();
+    restoreFocus();
   }
 }
 
@@ -11533,10 +11225,8 @@ async function loadGroupOptions() {
       (group) =>
         group.subscription_type === "subscription" && group.status === "active",
     );
-    openaiGroups.value = groups.filter((group) => group.platform === "openai");
   } catch (_error: unknown) {
     subscriptionGroups.value = [];
-    openaiGroups.value = [];
   }
 }
 
@@ -11764,12 +11454,9 @@ async function saveSettings() {
       claudeOAuthSystemPromptBlocksJSON;
 
     const oauthSchedulingRate = form.openai_oauth_scheduling_rate_multiplier;
-    if (
-      oauthSchedulingRate !== "" &&
-      oauthSchedulingRate !== null &&
-      (!Number.isFinite(oauthSchedulingRate) || oauthSchedulingRate < 0)
-    ) {
-      appStore.showError(t("admin.settings.openaiExperimentalScheduler.oauthRateInvalid"));
+    // 不合法时输入框旁已显示「无效」，不保存（设计 D.4）。
+    if (!oauthRateValid.value) {
+      document.getElementById("openai-oauth-scheduling-rate-multiplier")?.focus();
       return;
     }
 
@@ -12037,42 +11724,10 @@ async function saveSettings() {
       payment_alipay_force_qrcode: form.payment_alipay_force_qrcode,
       payment_alipay_mobile_precreate_deep_link:
         form.payment_alipay_mobile_precreate_deep_link,
-      openai_low_upstream_rate_priority_enabled:
-        form.openai_low_upstream_rate_priority_enabled,
-      openai_low_upstream_rate_priority_scope:
-        form.openai_low_upstream_rate_priority_scope,
-      openai_low_upstream_rate_priority_group_ids: [
-        ...new Set(form.openai_low_upstream_rate_priority_group_ids),
-      ].sort((a, b) => a - b),
       openai_oauth_scheduling_rate_multiplier:
         oauthSchedulingRate === "" ? null : oauthSchedulingRate,
-      openai_advanced_scheduler_enabled: form.openai_advanced_scheduler_enabled,
-      openai_advanced_scheduler_sticky_weighted_enabled:
-        form.openai_advanced_scheduler_sticky_weighted_enabled,
-      openai_advanced_scheduler_subscription_priority_enabled:
-        form.openai_advanced_scheduler_subscription_priority_enabled,
-      openai_advanced_scheduler_lb_top_k:
-        form.openai_advanced_scheduler_lb_top_k.trim(),
-      openai_advanced_scheduler_weight_priority:
-        form.openai_advanced_scheduler_weight_priority.trim(),
-      openai_advanced_scheduler_weight_load:
-        form.openai_advanced_scheduler_weight_load.trim(),
-      openai_advanced_scheduler_weight_queue:
-        form.openai_advanced_scheduler_weight_queue.trim(),
-      openai_advanced_scheduler_weight_error_rate:
-        form.openai_advanced_scheduler_weight_error_rate.trim(),
-      openai_advanced_scheduler_weight_ttft:
-        form.openai_advanced_scheduler_weight_ttft.trim(),
-      openai_advanced_scheduler_weight_reset:
-        form.openai_advanced_scheduler_weight_reset.trim(),
-      openai_advanced_scheduler_weight_quota_headroom:
-        form.openai_advanced_scheduler_weight_quota_headroom.trim(),
-      openai_advanced_scheduler_weight_upstream_cost:
-        form.openai_advanced_scheduler_weight_upstream_cost.trim(),
-      openai_advanced_scheduler_weight_previous_response:
-        form.openai_advanced_scheduler_weight_previous_response.trim(),
-      openai_advanced_scheduler_weight_session_sticky:
-        form.openai_advanced_scheduler_weight_session_sticky.trim(),
+      sched_quality_enabled: form.sched_quality_enabled,
+      sched_quality_test_enabled: form.sched_quality_test_enabled,
       // 余额、订阅到期与账号限额通知
       balance_low_notify_enabled: form.balance_low_notify_enabled,
       balance_low_notify_threshold:
@@ -13621,6 +13276,17 @@ watch(
     }
   },
 );
+
+// The hand-built dialogs of this page are modal layers of the overlay stack, teleported out of #app (design spec
+// 0.2): the page is inert below them, Tab stays inside, Escape closes the top one, focus goes back to its opener.
+const wsTestTitleId = `ws-test-title-${useId()}`;
+const affiliateEditTitleId = `affiliate-edit-title-${useId()}`;
+const affiliateBatchTitleId = `affiliate-batch-title-${useId()}`;
+const wsTestLayer = useOverlayLayer(() => wsTestDialogOpen.value, { root: wsTestRef, floor: 50, onEscape: () => { wsTestDialogOpen.value = false; } });
+const affiliateEditRef = ref<HTMLElement | null>(null);
+const affiliateEditLayer = useOverlayLayer(() => affiliateModal.open, { root: affiliateEditRef, floor: 50, onEscape: () => closeAffiliateModal() });
+const affiliateBatchRef = ref<HTMLElement | null>(null);
+const affiliateBatchLayer = useOverlayLayer(() => affiliateBatchModal.open, { root: affiliateBatchRef, floor: 50, onEscape: () => { affiliateBatchModal.open = false; } });
 </script>
 
 <style scoped>

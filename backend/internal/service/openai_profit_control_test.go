@@ -104,12 +104,12 @@ func TestResolveOpenAIProfitControlGate(t *testing.T) {
 
 func TestOpenAIProfitControlVetoReason(t *testing.T) {
 	now := time.Now()
-	prior := openAIAdvancedSchedulerSettingCache.Load()
+	prior := openAISchedulingRateCache.Load()
 	t.Cleanup(func() {
 		if prior != nil {
-			openAIAdvancedSchedulerSettingCache.Store(prior)
+			openAISchedulingRateCache.Store(prior)
 		} else {
-			resetOpenAIAdvancedSchedulerSettingCacheForTest()
+			openAISchedulingRateCache.Store(nil)
 		}
 	})
 	for _, tc := range []struct {
@@ -138,7 +138,7 @@ func TestOpenAIProfitControlVetoReason(t *testing.T) {
 		{name: "oauth cleared reference uses raw", raw: floatPtr(0.2), oauth: true, threshold: 0.7},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			openAIAdvancedSchedulerSettingCache.Store(&cachedOpenAIAdvancedSchedulerSetting{oauthSchedulingRateMultiplier: tc.reference, expiresAt: time.Now().Add(time.Hour).UnixNano()})
+			publishOpenAISchedulingRate(tc.reference)
 			account := upstreamCostTestAccount(1, UpstreamBillingProbeStatusOK, tc.probe, now.Add(-tc.age), 30*time.Minute)
 			account.RateMultiplier = tc.raw
 			if tc.oauth {
@@ -155,8 +155,6 @@ func TestOpenAIProfitControlVetoReason(t *testing.T) {
 }
 
 func TestProfitControlSchedulerFiltersCandidates(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
-	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
 	now := time.Now()
 	cheap := upstreamCostTestAccount(1, UpstreamBillingProbeStatusOK, 0.3, now.Add(-time.Minute), 30*time.Minute)
@@ -178,7 +176,7 @@ func TestProfitControlSchedulerFiltersCandidates(t *testing.T) {
 	svc := &OpenAIGatewayService{
 		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{*cheap, *expensive, *oauth}},
 		cfg:                cfg,
-		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		rateLimitService:   newOpenAISelectionRateLimitService(),
 		concurrencyService: NewConcurrencyService(cache),
 	}
 	groupID := int64(7)
@@ -209,7 +207,7 @@ func TestProfitControlSchedulerFiltersCandidates(t *testing.T) {
 	})
 
 	t.Run("oauth reference rate is admitted", func(t *testing.T) {
-		openAIAdvancedSchedulerSettingCache.Store(&cachedOpenAIAdvancedSchedulerSetting{oauthSchedulingRateMultiplier: floatPtr(0.1), expiresAt: time.Now().Add(time.Hour).UnixNano()})
+		publishOpenAISchedulingRate(floatPtr(0.1))
 		// 阈值 0.2 排除两个 API Key；OAuth 手工倍率 0.1 可参与调度。
 		profitControlTestAccountWithRate(oauth, 0.1)
 		svc.accountRepo = schedulerTestOpenAIAccountRepo{accounts: []Account{*cheap, *expensive, *oauth}}

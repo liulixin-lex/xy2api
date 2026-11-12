@@ -20,7 +20,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/cespare/xxhash/v2"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
@@ -585,9 +584,7 @@ type AccountSelectionResult struct {
 	// 局部 ctx 上，handler 必须经 ContextWithSelectionProfitGate 重放后才能在
 	// 调度栈之外做抢槽后终检与准入后粘性绑定。
 	profitGate       *openAIProfitControlGate
-	groupQualityGate *openAIGroupQualityGate
-	// shareBinding 是份额调度推迟到 handler 准入后执行的绑定写入（nil 表示无）。
-	shareBinding *shareBindingIntent
+	selectionContext *openAISelectionContext
 }
 
 // ProfitGateActive 报告本次选号是否处于利润门之下。
@@ -863,12 +860,10 @@ type GatewayService struct {
 	tlsFPProfileService   *TLSFingerprintProfileService
 	balanceNotifyService  *BalanceNotifyService
 	userPlatformQuotaRepo UserPlatformQuotaRepository
-	// shareScheduling 由 ProvideShareSchedulingService 注入；nil 时保持原版调度。
-	shareScheduling *ShareSchedulingService
 	// resilience is the xy2api gateway resilience runtime (optional).
 	resilience                *ResilienceService
 	anthropicLatencyHoldMu    sync.Mutex
-	anthropicLatencyHold      atomic.Pointer[openAIAccountLatencyHoldState]
+	anthropicLatencyHold      atomic.Pointer[anthropicLatencyHoldState]
 	anthropicLatencyHoldReset atomic.Uint64
 	anthropicStickyMigration  map[anthropicStickyMigrationKey]time.Time
 }
@@ -964,9 +959,6 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 	if parsed == nil {
 		return ""
 	}
-	if anchor := s.shareSessionHash(parsed); anchor != "" {
-		return anchor
-	}
 
 	// 1. 最高优先级：从 metadata.user_id 提取 session_xxx
 	if parsed.MetadataUserID != "" {
@@ -1020,9 +1012,6 @@ func (s *GatewayService) BindStickySessionAfterProfitAdmission(ctx context.Conte
 	sessionHash = monitorProbeSessionHash(ctx, sessionHash)
 	if sessionHash == "" || accountID <= 0 || s.cache == nil {
 		return nil
-	}
-	if handled, err := applyDeferredShareBinding(ctx, groupID, sessionHash, accountID); handled {
-		return err
 	}
 	if !gatewayProfitControlGateActive(ctx) {
 		return s.BindStickySession(ctx, groupID, sessionHash, accountID)
@@ -1096,49 +1085,6 @@ func parseRawJSONView(raw []byte) gjson.Result {
 	return gjson.Parse(*(*string)(unsafe.Pointer(&raw)))
 }
 
-func extractTextFromSystemRaw(raw []byte) string {
-	system := parseRawJSONView(raw)
-	switch system.Type {
-	case gjson.String:
-		return system.String()
-	case gjson.JSON:
-		if !system.IsArray() {
-			return ""
-		}
-		var builder strings.Builder
-		system.ForEach(func(_, part gjson.Result) bool {
-			if text := part.Get("text").String(); text != "" {
-				_, _ = builder.WriteString(text)
-			}
-			return true
-		})
-		return builder.String()
-	}
-	return ""
-}
-
-func extractTextFromContentRaw(content gjson.Result) string {
-	switch content.Type {
-	case gjson.String:
-		return content.String()
-	case gjson.JSON:
-		if !content.IsArray() {
-			return ""
-		}
-		var builder strings.Builder
-		content.ForEach(func(_, part gjson.Result) bool {
-			if part.Get("type").String() == "text" {
-				if text := part.Get("text").String(); text != "" {
-					_, _ = builder.WriteString(text)
-				}
-			}
-			return true
-		})
-		return builder.String()
-	}
-	return ""
-}
-
 func appendResponsesSessionAnchorFromRaw(builder *strings.Builder, raw []byte) {
 	if builder == nil || len(raw) == 0 {
 		return
@@ -1196,11 +1142,6 @@ func appendResponsesContentText(builder *strings.Builder, content gjson.Result) 
 		}
 		return true
 	})
-}
-
-func (s *GatewayService) hashContent(content string) string {
-	h := xxhash.Sum64String(content)
-	return strconv.FormatUint(h, 36)
 }
 
 // GetAccessToken 获取账号凭证

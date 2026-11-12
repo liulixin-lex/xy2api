@@ -13,11 +13,6 @@ import (
 
 const openAICacheSessionGinKey = "openai_cache_routing_session_v2"
 
-func sha256SumCacheCohort(session string) int {
-	digest := sha256.Sum256([]byte(session))
-	return int(digest[0]) * 100 / 256
-}
-
 func (s *OpenAIGatewayService) cacheIdentityDigest(domain, value string) string {
 	secret := ""
 	if s != nil && s.cfg != nil {

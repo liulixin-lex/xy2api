@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
-	"github.com/liulixin-lex/xy2api/internal/sharesched"
 )
 
 // lastResortCandidateTTL bounds how long the group account list used by
@@ -203,36 +202,6 @@ func (m lastResortLogMeta) penaltyReason() string {
 	return strings.Join(parts, ",")
 }
 
-func lastResortShareLogMeta(round *shareLastResortRound, avoided map[int64]struct{}, skipped map[int64]sharesched.Reason) lastResortLogMeta {
-	meta := lastResortLogMeta{candidates: len(round.cands)}
-	for _, candidate := range round.cands {
-		if _, ok := avoided[candidate.AccountID]; ok {
-			meta.addReason("session_avoid")
-		}
-		if reason := round.penaltyReasons[candidate.AccountID]; reason != "" {
-			meta.addReason(reason)
-		}
-		if candidate.Eligible && !candidate.Excluded {
-			continue
-		}
-		if candidate.Excluded {
-			if _, isAvoided := avoided[candidate.AccountID]; !isAvoided {
-				meta.addReason("request_excluded")
-			}
-		} else {
-			reason := string(candidate.Reason)
-			if reason == "" {
-				reason = "ineligible"
-			}
-			meta.addReason(reason)
-		}
-	}
-	for _, reason := range skipped {
-		meta.addReason(string(reason))
-	}
-	return meta
-}
-
 // pickLastResort tries accounts the session does not avoid first. Within
 // each group it keeps priority (lower first), latency hold preference and
 // the earliest end of the penalty (design §4.3).
@@ -250,138 +219,6 @@ func pickLastResort(cands []lastResortCandidate) []lastResortCandidate {
 		return cands[i].recoverAt.Before(cands[j].recoverAt)
 	})
 	return cands
-}
-
-// shareLastResortRound is the last-resort round of a share group (design
-// §4.3): the share plan runs once more over the group with soft-penalised
-// accounts, and accounts the session only avoids, counted as eligible, so
-// tiers, drain, weights and cache domains apply exactly as in normal
-// placement. Hard states and every other gate still exclude.
-type shareLastResortRound struct {
-	cands          []sharesched.Candidate
-	penaltyReasons map[int64]string
-	// accounts are the eligible accounts with their soft restrictions
-	// cleared, as they serve.
-	accounts  map[int64]*Account
-	recoverAt map[int64]time.Time
-	avoided   map[int64]struct{}
-	// keep is the bound account unless it is hard-penalised, avoided or
-	// rejected by a gate: the binding stays with it whichever account
-	// serves, as a soft-penalised owner keeps it in normal selection
-	// (design §4.2).
-	keep int64
-	// rebind marks a binding to an account the session avoids: the
-	// session is placed afresh and its binding moves to the serving account.
-	rebind bool
-}
-
-// newShareLastResortRound evaluates the group's accounts for the round.
-// include filters the accounts the scheduler considers at all; penalty is
-// the scheduler's view of soft and hard states (resiliencePenaltyOf when
-// nil); gate applies its original gates, in a last-resort context, to an
-// account whose soft restrictions are cleared.
-func (s *ShareSchedulingService) newShareLastResortRound(groupID int64, accounts []Account, model string, excluded, avoided map[int64]struct{}, boundID int64, now time.Time,
-	include func(*Account) bool, penalty func(*Account, string, time.Time) (resilience.PenaltyTier, time.Time, string),
-	gate func(acc *Account, sticky bool) sharesched.Reason) *shareLastResortRound {
-	if penalty == nil {
-		penalty = resiliencePenaltyOf
-	}
-	r := &shareLastResortRound{accounts: map[int64]*Account{}, recoverAt: map[int64]time.Time{}, penaltyReasons: map[int64]string{}, avoided: avoided}
-	for i := range accounts {
-		acc := accounts[i]
-		if include != nil && !include(&acc) {
-			continue
-		}
-		c := s.shareCandidate(groupID, &acc, now)
-		tier, recoverAt, why := penalty(&acc, model, now)
-		if why != "" {
-			r.penaltyReasons[acc.ID] = why
-		}
-		_, isAvoided := avoided[acc.ID]
-		if acc.ID == boundID && !isAvoided && tier != resilience.TierHard {
-			r.keep = acc.ID
-		}
-		if acc.ID == boundID && isAvoided {
-			r.rebind = true
-		}
-		switch _, failed := excluded[acc.ID]; {
-		case failed:
-			// Failed in this request: as in normal placement it is
-			// excluded and only anchors the spill order.
-			c.Excluded, c.Eligible = true, true
-		case tier == resilience.TierHard:
-			c.Reason = shareLastResortHardReason(&acc, why, now)
-		case !lastResortTierAllowed(tier, acc.ID, avoided):
-			// Healthy accounts the first round could not use stay out.
-			c.Reason = sharesched.ReasonIneligible
-		default:
-			candidate := withoutSoftPenalties(acc, now)
-			if c.Reason = gate(candidate, acc.ID == boundID); c.Reason == "" {
-				c.Eligible = true
-				// Read-only for eligible accounts: when the account last
-				// failed a health gate, which defers tier return.
-				c.StableSince = s.observeEligibility(acc.ID, true, "", now)
-				r.accounts[acc.ID], r.recoverAt[acc.ID] = candidate, recoverAt
-			} else if acc.ID == boundID {
-				r.keep = 0
-			}
-		}
-		r.cands = append(r.cands, c)
-	}
-	return r
-}
-
-// shareLastResortHardReason names the hard state that keeps an account out
-// of the round.
-func shareLastResortHardReason(a *Account, why string, now time.Time) sharesched.Reason {
-	switch why {
-	case "balance_exhausted":
-		return sharesched.ReasonBalanceExhausted
-	case "model_rate_limited":
-		return sharesched.ReasonModelRateLimited
-	}
-	reason, _ := shareAccountStateReason(a, now)
-	return reason
-}
-
-// plan runs the share plan over the round with the binding writes of last
-// resort: a soft-penalised owner keeps the binding, a binding to an avoided
-// account moves, and anything else follows the plan.
-func (r *shareLastResortRound) plan(req sharesched.Request) sharesched.Decision {
-	if r.rebind {
-		req.Binding = sharesched.Binding{}
-	}
-	d := sharesched.Plan(req, r.cands)
-	switch {
-	case r.rebind:
-		d.Write, d.Spill = sharesched.WriteReplace, sharesched.WriteReplace
-	case r.keep > 0:
-		if len(d.Steps) == 0 || d.Steps[0].AccountID != r.keep {
-			d.Write = sharesched.WriteNone
-		}
-		d.Spill = sharesched.WriteNone
-	}
-	return d
-}
-
-// preferUnavoided runs after the plan and any quality ordering. It keeps
-// their order within each group and retains avoided accounts as a final
-// fallback. Binding writes stay as planned: an avoided owner already
-// cleared the binding in plan; other owners keep their relative order.
-func (r *shareLastResortRound) preferUnavoided(d sharesched.Decision) sharesched.Decision {
-	if len(r.avoided) == 0 || len(d.Steps) < 2 {
-		return d
-	}
-	first := d.Steps[0].AccountID
-	sort.SliceStable(d.Steps, func(i, j int) bool {
-		_, a := r.avoided[d.Steps[i].AccountID]
-		_, b := r.avoided[d.Steps[j].AccountID]
-		return !a && b
-	})
-	if d.Steps[0].AccountID != first {
-		d.Target = d.Steps[0].AccountID
-	}
-	return d
 }
 
 // lastResortGroupCache keeps the group account list for a short time.
@@ -511,9 +348,6 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 	if s == nil || s.resilience == nil || groupID == nil || s.accountRepo == nil || !resilience.Current().LastResortOn() || ctx.Err() != nil {
 		return nil
 	}
-	if gp := s.shareScheduling.groupPolicy(*groupID); gp != nil && gp.policy.Scheduler == sharesched.SchedulerShare {
-		return s.shareGatewayLastResort(ctx, gp, group, groupID, sessionHash, requestedModel, excludedIDs, avoided)
-	}
 	platform, hasForcePlatform, err := s.resolvePlatform(ctx, groupID, group, requestedModel)
 	if err != nil {
 		return nil
@@ -618,14 +452,13 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 func (s *GatewayService) noteLastResort(ctx context.Context, groupID *int64, account *Account, recoverAt time.Time, avoided map[int64]struct{}, meta lastResortLogMeta) {
 	resilience.StateFrom(ctx).SetLastResort(account.ID)
 	s.resilience.noteLastResortSelected(account.ID)
-	s.shareScheduling.noteResilienceReason(derefGroupID(groupID), sharesched.ReasonLastResortSoft)
 	resilience.Count(resilience.MetricLastResort, derefGroupID(groupID), account.ID, account.Platform)
 	slog.Warn("resilience.last_resort", append(resilience.EventFields(ctx),
 		"group_id", derefGroupID(groupID),
 		"account_id", account.ID,
 		"platform", account.Platform,
 		"recover_at", recoverAt,
-		"reason", string(sharesched.ReasonLastResortSoft),
+		"reason", "last_resort_soft",
 		"candidates", meta.candidates,
 		"penalty_reason", meta.penaltyReason(),
 	)...)
@@ -692,9 +525,6 @@ func (s *GatewayService) bindGatewayStickySession(ctx context.Context, groupID *
 		return nil
 	}
 	ttl := stickySessionTTL
-	if shareTTL, ok := s.shareScheduling.shareBindingTTL(derefGroupID(groupID)); ok {
-		ttl = shareTTL
-	}
 	return s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, accountID, ttl)
 }
 
@@ -753,157 +583,6 @@ func resilienceBindAllowed(ctx context.Context, accountID int64) bool {
 	st := resilience.StateFrom(ctx)
 	kept := st.KeptSticky()
 	return kept == 0 || kept == accountID || st.Avoided(kept)
-}
-
-// resilienceOpenAILastResort is the OpenAI-scheduler variant of last-resort
-// selection. It reuses the scheduler's per-account request gate on a copy
-// with the soft restrictions cleared. Requests that share scheduling places
-// run the share plan's last-resort round instead.
-func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, req OpenAIAccountScheduleRequest, avoided map[int64]struct{}) *AccountSelectionResult {
-	if s == nil || s.resilience == nil || req.GroupID == nil || s.accountRepo == nil || !resilience.Current().LastResortOn() || ctx.Err() != nil {
-		return nil
-	}
-	if gp := s.shareScheduling.groupPolicy(*req.GroupID); gp != nil && gp.policy.Scheduler == sharesched.SchedulerShare &&
-		!req.RequireCompact && req.RequiredImageCapability == "" && !s.qualityOwnsSticky(ctx, req.GroupID, req.SessionHash) {
-		return s.shareOpenAILastResort(ctx, gp, req, avoided)
-	}
-	accounts, err := s.resilience.groupAccountsForLastResort(ctx, s.accountRepo, *req.GroupID)
-	if err != nil {
-		slog.Warn("resilience.last_resort_list_failed", "group_id", *req.GroupID, "error", err)
-		return nil
-	}
-	platform := NormalizeOpenAICompatiblePlatform(req.Platform)
-	gate := &defaultOpenAIAccountScheduler{service: s, stats: newOpenAIAccountRuntimeStats()}
-	gateCtx := withResilienceLastResortGate(ctx)
-	now := time.Now()
-	var cands []lastResortCandidate
-	meta := lastResortLogMeta{candidates: len(accounts)}
-	for i := range accounts {
-		acc := accounts[i]
-		_, isAvoided := avoided[acc.ID]
-		if isAvoided {
-			meta.addReason("session_avoid")
-		}
-		if _, excluded := req.ExcludedIDs[acc.ID]; excluded {
-			if !isAvoided {
-				meta.addReason("request_excluded")
-			}
-			continue
-		}
-		if acc.Platform != platform || !acc.IsOpenAICompatible() {
-			meta.addReason("platform_mismatch")
-			continue
-		}
-		compactOutboundModel := ""
-		if req.RequireCompact {
-			compactOutboundModel = s.openAICodexTicketOutboundModel(&acc, req.RequestedModel, true)
-		}
-		if iqGateBlocksRequest(&acc, req.RequestedModel, req.RequireCompact, compactOutboundModel) {
-			meta.addReason("threshold")
-			continue
-		}
-		tier, recoverAt, penaltyReason := s.resilienceOpenAIPenaltyOf(&acc, req.RequestedModel, now)
-		meta.addReason(penaltyReason)
-		if !lastResortTierAllowed(tier, acc.ID, avoided) {
-			if tier == resilience.TierNone {
-				meta.addReason("tier_none")
-			}
-			continue
-		}
-		candidate := withoutSoftPenalties(acc, now)
-		if reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(gateCtx, candidate, platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability, s); reason != "" &&
-			(reason != "model_rate_limited" || !lastResortModelLimitSoft(gateCtx, candidate, req.RequestedModel, req.RequireCompact, compactOutboundModel)) {
-			meta.addReason(reason)
-			continue
-		}
-		if ok, reason := gate.isAccountRequestCompatibleReason(gateCtx, candidate, req); !ok {
-			meta.addReason(string(reason))
-			continue
-		}
-		if !gate.isAccountTransportCompatible(candidate, req.RequiredTransport) {
-			meta.addReason("transport_mismatch")
-			continue
-		}
-		held := resilience.Current().Enabled && s.openAIAccountLatencyHoldSnapshot(candidate, canonicalOpenAIAccountSchedulingModel(candidate, req.RequestedModel), now).Held
-		cands = append(cands, lastResortCandidate{account: candidate, recoverAt: recoverAt, held: held, avoided: isAvoided})
-	}
-	cands = pickLastResort(cands)
-	if len(cands) == 0 {
-		return nil
-	}
-	// Take the first candidate with a free slot; when all are busy, wait
-	// for the best one. Codex accounts under upstream pressure take slots
-	// only up to their adaptive limit.
-	verified := cands[:0]
-	var compactOutboundForFresh func(*Account) string
-	if req.RequireCompact {
-		compactOutboundForFresh = func(fresh *Account) string {
-			return s.openAICodexTicketOutboundModel(fresh, req.RequestedModel, true)
-		}
-	}
-	for _, c := range cands {
-		acc, ok := s.resilience.verifyLastResortAccount(ctx, s.accountRepo, *req.GroupID, c.account, req.RequestedModel, req.RequireCompact, s.resilienceOpenAIPenaltyOf, compactOutboundForFresh)
-		if !ok {
-			meta.addReason("verify_failed")
-			continue
-		}
-		c.account = acc
-		verified = append(verified, c)
-		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, s.codexEffectiveConcurrency(ctx, acc.ID, acc.Concurrency))
-		if err == nil && result != nil && result.Acquired {
-			s.noteOpenAILastResort(ctx, req.GroupID, acc, c.recoverAt, avoided, meta)
-			return attachSelectionProfitGate(gateCtx, &AccountSelectionResult{Account: acc, Acquired: true, ReleaseFunc: result.ReleaseFunc})
-		}
-		meta.addReason("capacity")
-	}
-	if len(verified) == 0 {
-		return nil
-	}
-	cfg := s.schedulingConfig()
-	acc := verified[0].account
-	s.noteOpenAILastResort(ctx, req.GroupID, acc, verified[0].recoverAt, avoided, meta)
-	return attachSelectionProfitGate(gateCtx, &AccountSelectionResult{
-		Account: acc,
-		WaitPlan: &AccountWaitPlan{
-			AccountID:      acc.ID,
-			MaxConcurrency: s.codexEffectiveConcurrency(ctx, acc.ID, acc.Concurrency),
-			Timeout:        cfg.FallbackWaitTimeout,
-			MaxWaiting:     cfg.FallbackMaxWaiting,
-		},
-	})
-}
-
-func (s *OpenAIGatewayService) noteOpenAILastResort(ctx context.Context, groupID *int64, account *Account, recoverAt time.Time, avoided map[int64]struct{}, meta lastResortLogMeta) {
-	if account != nil && account.IsOpenAI() {
-		gate, _ := ctx.Value(groupQualityGateContextKey{}).(*openAIGroupQualityGate)
-		if gate != nil && gate.service != nil && !gate.exempt && !groupQualityGateExempt(ctx) &&
-			gate.service.GroupQualityGateView().Enabled(gate.groupID) &&
-			gate.service.GroupQualityGateView().OrderTier(gate.groupID, account.ID) == GroupQualityGateTierFail {
-			slog.Warn("group_quality_gate.last_resort", "group_id", gate.groupID, "account_id", account.ID)
-		}
-	}
-	resilience.StateFrom(ctx).SetLastResort(account.ID)
-	s.resilience.noteLastResortSelected(account.ID)
-	s.shareScheduling.noteResilienceReason(derefGroupID(groupID), sharesched.ReasonLastResortSoft)
-	resilience.Count(resilience.MetricLastResort, derefGroupID(groupID), account.ID, account.Platform)
-	slog.Warn("resilience.last_resort", append(resilience.EventFields(ctx),
-		"group_id", derefGroupID(groupID),
-		"account_id", account.ID,
-		"platform", account.Platform,
-		"recover_at", recoverAt,
-		"reason", string(sharesched.ReasonLastResortSoft),
-		"candidates", meta.candidates,
-		"penalty_reason", meta.penaltyReason(),
-	)...)
-	if _, sessionAvoided := avoided[account.ID]; sessionAvoided {
-		slog.Warn("resilience.last_resort_avoided", append(resilience.EventFields(ctx),
-			"group_id", derefGroupID(groupID),
-			"account_id", account.ID,
-			"reason", "session_avoid",
-			"candidates", meta.candidates,
-			"penalty_reason", meta.penaltyReason(),
-		)...)
-	}
 }
 
 type resilienceLastResortGateKey struct{}

@@ -36,7 +36,7 @@ func (s *OpenAIGatewayService) withResilienceOpenAIEligibility(ctx context.Conte
 	}}
 	gate.httpContinuation = strings.TrimSpace(previousResponseID) != "" && gate.req.Platform == PlatformOpenAI &&
 		(transport == OpenAIUpstreamTransportAny || transport == OpenAIUpstreamTransportHTTPSSE)
-	scheduler := &defaultOpenAIAccountScheduler{service: s}
+	scheduler := s
 	gate.full = func(candidate *Account) bool {
 		return scheduler.isAccountRequestCompatible(gate.ctx, candidate, gate.req)
 	}
@@ -84,7 +84,7 @@ func (g *openAIResilienceEligibility) allows(account *Account, allowIO, recovery
 	if !g.req.RequireCompact && g.req.RequiredImageCapability == "" && capabilityEligibilityReason(g.ctx, candidate, g.req.RequestedModel, now) != "" {
 		return false
 	}
-	scheduler := &defaultOpenAIAccountScheduler{service: g.service}
+	scheduler := g.service
 	if !scheduler.isAccountTransportCompatible(candidate, g.req.RequiredTransport) {
 		return false
 	}

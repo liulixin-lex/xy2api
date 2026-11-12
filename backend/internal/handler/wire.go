@@ -10,6 +10,10 @@ import (
 	"github.com/google/wire"
 )
 
+func ProvideSchedQualityHandler(s *service.SchedAdminService) *admin.SchedQualityHandler {
+	return admin.NewSchedQualityHandler(s)
+}
+
 // ProvideAdminHandlers creates the AdminHandlers struct
 func ProvideAdminHandlers(
 	dashboardHandler *admin.DashboardHandler,
@@ -48,10 +52,11 @@ func ProvideAdminHandlers(
 	affiliateHandler *admin.AffiliateHandler,
 	complianceHandler *admin.ComplianceHandler,
 	auditLogHandler *admin.AuditLogHandler,
-	shareSchedulingHandler *admin.ShareSchedulingHandler,
 	groupCategoryHandler *admin.GroupCategoryHandler,
 	resilienceHandler *admin.ResilienceHandler,
-	groupQualityGateHandler *admin.GroupQualityGateHandler,
+	profitPreviewHandler *admin.ProfitPreviewHandler,
+	schedQualityHandler *admin.SchedQualityHandler,
+	schedAdminService *service.SchedAdminService,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
 	iqCheckService *service.IQCheckService,
 	accountIQHandler *admin.AccountIQHandler,
@@ -64,6 +69,7 @@ func ProvideAdminHandlers(
 	operatorAccessHandler *admin.OperatorAccessHandler,
 	openAITOTPHandler *admin.OpenAITOTPHandler,
 ) *AdminHandlers {
+	accountHandler.SetSchedQualityService(schedAdminService)
 	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)
 	accountHandler.SetOllamaCloudUsageService(ollamaCloudUsage)
 	accountHandler.SetCodexTicketSettings(settingService)
@@ -111,10 +117,10 @@ func ProvideAdminHandlers(
 		Affiliate:              affiliateHandler,
 		Compliance:             complianceHandler,
 		AuditLog:               auditLogHandler,
-		ShareScheduling:        shareSchedulingHandler,
 		GroupCategory:          groupCategoryHandler,
 		Resilience:             resilienceHandler,
-		GroupQualityGate:       groupQualityGateHandler,
+		SchedQuality:           schedQualityHandler,
+		ProfitPreview:          profitPreviewHandler,
 	}
 }
 
@@ -325,10 +331,10 @@ var ProviderSet = wire.NewSet(
 	admin.NewAffiliateHandler,
 	admin.NewComplianceHandler,
 	admin.NewAuditLogHandler,
-	admin.NewShareSchedulingHandler,
 	admin.NewGroupCategoryHandler,
 	admin.NewResilienceHandler,
-	admin.NewGroupQualityGateHandler,
+	admin.NewProfitPreviewHandler,
+	ProvideSchedQualityHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,

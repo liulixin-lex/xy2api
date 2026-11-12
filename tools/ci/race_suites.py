@@ -62,7 +62,7 @@ SUITES = [
         packages=["internal/service", "internal/handler", "internal/handler/admin"],
         run=r"^(TestGPT61Sol(NativeHTTP|HTTPValidation|WS)|TestNonstreamReadErrorSafety$|TestRequestBodyReplaySafety$"
         r"|TestOpenAIQualityRoutingInertWithoutOptIn$|TestGatewayBufferedReadFailureAuthenticatedFailover$"
-        r"|TestRetiredSchedulingRoutesAnswerGone$|TestShareScheduling|TestOpenAIShareScheduling|TestShareAttribution)",
+        r"|TestRetiredSchedulingRoutesAnswerGone$)",
         flags=["-p", "1", "-parallel", "1"],
     ),
     Suite(

@@ -1,6 +1,6 @@
 # 提示词缓存
 
-本文说明 XY2API 与上游提示词缓存相关的全部行为：Claude 请求的自动补缓存断点、Anthropic 缓存 TTL 偏好、缓存用量的计量与计费，以及 OpenAI 请求的缓存计量、会话标识与缓存感知选路。管理员用它决定是否开启这些功能、如何核对缓存费用；调用方用它了解网关会不会改动请求里的缓存声明。
+本文说明 XY2API 与上游提示词缓存相关的全部行为：Claude 请求的自动补缓存断点、Anthropic 缓存 TTL 偏好、缓存用量的计量与计费，以及 OpenAI 请求的缓存计量、会话标识与缓存诊断。管理员用它决定是否开启这些功能、如何核对缓存费用；调用方用它了解网关会不会改动请求里的缓存声明。
 
 ## 概览
 
@@ -11,7 +11,7 @@
 | 缓存写入计费分类覆盖 | 单个账号的结算 | 账号设置 | 关闭 |
 | OpenAI 缓存计量 | OpenAI Responses、Chat 转换、HTTP SSE、WebSocket | 始终生效 | — |
 | 统一 OpenAI 会话标识 | OpenAI API Key 账号 | 「设置 → 网关服务 → 请求转发行为」 | 开启 |
-| OpenAI 缓存诊断与缓存感知选路 | OpenAI 调度 | `gateway.openai_cache` | 关闭 |
+| OpenAI 缓存诊断 | OpenAI 请求 | `gateway.openai_cache.diagnostics_enabled` | 关闭 |
 | Anthropic / Gemini 稳定兜底会话键 | 没有会话标识的请求 | 无开关 | 始终生效 |
 
 自动补缓存、TTL 偏好和计费分类覆盖各自配置，不会互相开启。网关接受缓存声明不代表上游一定创建或命中缓存：最小缓存长度、前缀变化、请求间隔、账号路由与上游实现都会影响结果，请以上游返回的 `cache_creation_input_tokens` 和 `cache_read_input_tokens` 为准。XY2API 的用量不能替代上游供应商的独立账单。
@@ -216,27 +216,24 @@ Responses、Chat Completions 转换、HTTP SSE 与原生 WebSocket 的缓存读�
 
 已认证 GPT 会话的本地粘性绑定按 API 密钥、分组、客户端请求的模型和稳定会话信号隔离，经持久 JWT secret 做 HMAC 后生成带版本的 `v2:` 键。绑定由 Redis 脚本维护：首次写入者持有，只有当前所有者能续期和删除。并发的冷请求会读取首个所有者并重新选择，释放临时抢到的槽位；所有者确实没有容量时，单次溢出不改变长期绑定。准入前的占位最多保留 30 秒。
 
-无显式身份时，内容回退只使用开头连续的 system / developer 指令、工具定义和首条 user，之后动态变化的 system / developer 消息不改变已有身份。网关不改写用户的提示词或工具顺序，前缀复用仍取决于客户端保持内容不变。利润门模式下，准入成功后才绑定；`previous_response_id`、任务所有者、质量保护与权重调度的优先级仍高于缓存。
+无显式身份时，内容回退只使用开头连续的 system / developer 指令、工具定义和首条 user，之后动态变化的 system / developer 消息不改变已有身份。网关不改写用户的提示词或工具顺序，前缀复用仍取决于客户端保持内容不变。利润门模式下，准入成功后才绑定；`previous_response_id`、任务所有者与[质量状态](group-quality-gate.md)（后排迁出、接管）的优先级仍高于缓存。
 
-### 缓存诊断与缓存感知选路
+### 缓存诊断
 
 ```yaml
 gateway:
   openai_cache:
     diagnostics_enabled: false
-    aware_routing_enabled: false
-    rollout_percent: 0
 ```
 
-对应环境变量 `GATEWAY_OPENAI_CACHE_DIAGNOSTICS_ENABLED`、`GATEWAY_OPENAI_CACHE_AWARE_ROUTING_ENABLED`、`GATEWAY_OPENAI_CACHE_ROLLOUT_PERCENT`。`rollout_percent` 取值 0–100，按稳定的认证会话选择灰度样本。
+对应环境变量 `GATEWAY_OPENAI_CACHE_DIAGNOSTICS_ENABLED`。
 
-- **诊断**：日志区分冷请求、间隔超过 30 分钟、前缀变化、账号变化和可比的续请求，记录原始 usage 与结算后的 token 桶和成本。会话、前缀与请求 ID 只记录 HMAC，不记录提示词、客户端缓存键或会话头。前缀指纹只概括稳定的 instructions、tools、格式、reasoning 与开头的 system / developer 内容，不做上游 tokenizer 级别的比较，“可比”只是近似条件，实际命中以返回的缓存 usage 为准。两项都关闭时不会额外解析大请求的前缀。
-- **缓存感知选路**：只用于没有有效绑定的新选择，只在既有优先级、负载等排序条件相同的候选之间打破平局。每个候选需要至少 20 个最近 30 分钟内的可比续请求样本，否则保持原顺序；只用输入不少于 1024 token、带明确缓存 usage 且桶总量合理的请求训练。学习数据保存在进程内（最多 2048 个会话、4096 个候选统计），重启后重新积累，多实例结果可能不同。评分只作启发式排序，不替代自定义价格、上游账单或利润计算。
-- **建议**：先只开启诊断，按模型、账号、缓存模式、格式和长度比较相同前缀的续请求；再从 1% 开启选路偏好，观察缓存 token 比例、首字延迟、错误与切换率、结算与上游账单。回退只需关闭 `aware_routing_enabled` 并把比例归零。
+- **诊断**：日志区分冷请求、间隔超过 30 分钟、前缀变化、账号变化和可比的续请求，记录原始 usage 与结算后的 token 桶和成本。会话、前缀与请求 ID 只记录 HMAC，不记录提示词、客户端缓存键或会话头。前缀指纹只概括稳定的 instructions、tools、格式、reasoning 与开头的 system / developer 内容，不做上游 tokenizer 级别的比较，“可比”只是近似条件，实际命中以返回的缓存 usage 为准。关闭时不会额外解析大请求的前缀。
+- **用法**：按模型、账号、缓存模式、格式和长度比较相同前缀的续请求的缓存 token 比例与首字延迟。诊断只写日志，不影响选号。
 
 ## Anthropic 与 Gemini 稳定兜底会话键
 
-这项处理没有开关，只用于既没有分享调度锚点、也没有 `metadata.user_id` 会话的请求；Claude Code 这类带 metadata 的客户端不受影响。
+这项处理没有开关，只用于没有 `metadata.user_id` 会话的请求；Claude Code 这类带 metadata 的客户端不受影响。
 
 - **组成**：客户端 IP、规范化后的 User-Agent、API 密钥、分组，以及规范化后的 system 与首条 user 文本，一起计算哈希。
 - **规范化**：去掉 `<system-reminder>` 标签内的内容、开头的 billing 行与多余空白；首条 user 只剩 reminder 时，顺延到下一条有文本的 user。

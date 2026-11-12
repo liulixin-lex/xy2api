@@ -59,9 +59,9 @@ export async function list(
     search?: string
     privacy_mode?: string
     iq_status?: string
+    sched_quality?: string
     group_category?: string
     lite?: string
-    include_scheduler_score?: string
     sort_by?: string
     sort_order?: 'asc' | 'desc'
   },
@@ -138,6 +138,7 @@ export async function getUpstreamBillingRatesWithEtag(
     search?: string
     privacy_mode?: string
     iq_status?: string
+    sched_quality?: string
     group_category?: string
     sort_by?: string
     sort_order?: 'asc' | 'desc'
@@ -173,9 +174,9 @@ export async function listWithEtag(
     search?: string
     privacy_mode?: string
     iq_status?: string
+    sched_quality?: string
     group_category?: string
     lite?: string
-    include_scheduler_score?: string
     sort_by?: string
     sort_order?: 'asc' | 'desc'
   },
@@ -459,16 +460,6 @@ export async function clearRateLimit(id: number): Promise<Account> {
 }
 
 /**
- * Recover account runtime state in one call
- * @param id - Account ID
- * @returns Updated account
- */
-export async function recoverState(id: number): Promise<Account> {
-  const { data } = await apiClient.post<Account>(`/admin/accounts/${id}/recover-state`)
-  return data
-}
-
-/**
  * Reset account quota usage
  * @param id - Account ID
  * @returns Updated account
@@ -627,74 +618,6 @@ export interface BatchTodayStatsResponse {
  */
 export async function getBatchTodayStats(accountIds: number[]): Promise<BatchTodayStatsResponse> {
   const { data } = await apiClient.post<BatchTodayStatsResponse>('/admin/accounts/today-stats/batch', {
-    account_ids: accountIds
-  })
-  return data
-}
-
-/** 失败：最近 200 次请求（限 60 分钟）里的供应商侧软失败尝试，口径同分组质量门槛。 */
-export interface AccountRecentFailureStats {
-  calls: number
-  failures: number
-  // Wilson 95% 区间，0–1
-  wilson_low: number
-  wilson_high: number
-  first_output_timeouts: number
-  stream_failures: number
-  other_failures: number
-  span_seconds: number
-}
-
-/** 首字：最近 50 个严格续轮流式请求（限 2 小时）的可见首字。 */
-export interface AccountRecentFirstOutputStats {
-  samples: number
-  p50_ms: number
-  p90_ms: number
-  // 可见首字 ≥10s 的占比，0–1
-  slow_share: number
-  span_seconds: number
-}
-
-/** 缓存：最近 50 个前后两轮提示都 ≥2048 Token 的严格续轮（限 2 小时），按本轮读取 ÷ 上一轮提示分四档。 */
-export interface AccountRecentCacheStats {
-  samples: number
-  // kept = mid + full
-  kept: number
-  zero: number
-  partial: number
-  mid: number
-  full: number
-  read_tokens: number
-  prompt_tokens: number
-  span_seconds: number
-}
-
-/** 账号列表“近期表现”列；某项没有样本时为 null，三项都没有时账号可能不在 stats 里。 */
-export interface AccountRecentHealth {
-  failure: AccountRecentFailureStats | null
-  first_output: AccountRecentFirstOutputStats | null
-  cache: AccountRecentCacheStats | null
-}
-
-/** 列表一侧的批量加载状态，不是接口字段。 */
-export type AccountRecentHealthLoadState = 'loading' | 'loaded' | 'failed'
-
-export interface BatchRecentHealthResponse {
-  stats: Record<string, AccountRecentHealth>
-  failure_max_events: number
-  failure_max_age_seconds: number
-  sample_max: number
-  sample_max_age_seconds: number
-  min_display_samples: number
-  min_color_samples: number
-}
-
-/**
- * 批量获取账号近期表现：失败（最近 200 次 / 60 分钟）、续轮首字与缓存保持（最近 50 个 / 2 小时）
- * @param accountIds - 账号 ID 列表（最多 1000 个）
- */
-export async function getBatchRecentHealth(accountIds: number[]): Promise<BatchRecentHealthResponse> {
-  const { data } = await apiClient.post<BatchRecentHealthResponse>('/admin/accounts/recent-health/batch', {
     account_ids: accountIds
   })
   return data
@@ -897,6 +820,8 @@ export async function exportData(options?: {
     sort_by?: string
     sort_order?: 'asc' | 'desc'
     group_category?: string
+    /** "cooling" (contract clarification K11 / K24). */
+    sched_quality?: string
   }
   includeProxies?: boolean
 }): Promise<AdminDataPayload> {
@@ -905,7 +830,7 @@ export async function exportData(options?: {
     params.ids = options.ids.join(',')
   } else if (options?.filters) {
     const { platform, type, status, group, privacy_mode, search, sort_by, sort_order } = options.filters
-    const { group_category } = options.filters
+    const { group_category, sched_quality } = options.filters
     if (platform) params.platform = platform
     if (type) params.type = type
     if (status) params.status = status
@@ -915,6 +840,7 @@ export async function exportData(options?: {
     if (sort_by) params.sort_by = sort_by
     if (sort_order) params.sort_order = sort_order
     if (group_category) params.group_category = group_category
+    if (sched_quality) params.sched_quality = sched_quality
   }
   if (options?.includeProxies === false) {
     params.include_proxies = 'false'
@@ -1323,10 +1249,8 @@ export const accountsAPI = {
   getBatchUsage,
   getTodayStats,
   getBatchTodayStats,
-  getBatchRecentHealth,
   getUpstreamBalances,
   clearRateLimit,
-  recoverState,
   resetAccountQuota,
   getTempUnschedulableStatus,
   resetTempUnschedulable,

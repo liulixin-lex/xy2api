@@ -22,6 +22,7 @@ import (
 // ChatCompletions handles OpenAI Chat Completions API requests.
 // POST /v1/chat/completions
 func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
+	defer func() { service.FinishSchedAttemptAtHandlerExit(c.Request.Context()) }()
 	streamStarted := false
 	defer h.recoverResponsesPanic(c, &streamStarted)
 
@@ -264,6 +265,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		}
 		if st := resilience.StateFrom(c.Request.Context()); st != nil {
+			st.SetSchedSelection(resilience.SchedSelection{AccountID: account.ID, Model: service.OpenAIAttemptModel(account, forwardModel), StickyWarm: service.OpenAIAttemptWarm(scheduleDecision, selection, switchCount > 0 || sameAccountRetryCount[account.ID] > 0)})
 			st.SetAttemptProfile(resilience.AttemptProfile{
 				AccountID: account.ID, AttemptStart: forwardStart,
 				Model:     service.OpenAIAttemptModel(account, forwardModel),
@@ -410,7 +412,6 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 							continue
 						}
 					}
-					h.gatewayService.RecordOpenAIAccountSwitch()
 					failedAccountIDs[account.ID] = struct{}{}
 					lastFailoverErr = failoverErr
 					if switchCount >= maxAccountSwitches {
@@ -465,7 +466,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			h.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, reqModel, false, result), true, nil)
 		}
 
-		h.gatewayService.RecordOpenAIRecentSessionSuccess(c.Request.Context(), apiKey.GroupID, sessionHash, account, openAIAccountScheduleModel(c, account, reqModel, false, result), result)
+		if selected, ok := resilience.StateFrom(c.Request.Context()).SchedSelection(); ok && selected.AccountID == account.ID {
+			h.gatewayService.RecordOpenAIRecentSessionSuccess(c.Request.Context(), apiKey.GroupID, sessionHash, account, selected.Model, result)
+		}
 		submitChatUsage(result)
 		reqLog.Debug("openai_chat_completions.request_completed",
 			zap.Int64("account_id", account.ID),

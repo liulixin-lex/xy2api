@@ -8,6 +8,7 @@ import (
 	"time"
 
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
+	"github.com/liulixin-lex/xy2api/internal/pkg/operatoraccess"
 	"github.com/liulixin-lex/xy2api/internal/util/logredact"
 )
 
@@ -215,6 +216,8 @@ func redactAuditValue(value any, depth int) any {
 		return "<depth limit exceeded>"
 	}
 	switch v := value.(type) {
+	case string:
+		return operatoraccess.StripURLUserinfo(v)
 	case map[string]any:
 		out := make(map[string]any, len(v))
 		for k, item := range v {

@@ -126,7 +126,7 @@ func TestUpstreamRetryWaitFromRealSnapshotThroughHandler(t *testing.T) {
 				nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 			t.Cleanup(gateway.StopOpenAICodexTicketHarvester)
 			previous := service.Resilience()
-			runtime := service.ProvideResilienceService(nil, nil, nil, nil, repo, nil, nil, &service.GatewayService{}, gateway, nil)
+			runtime := service.ProvideResilienceService(nil, nil, nil, nil, repo, nil, nil, &service.GatewayService{}, gateway)
 			runtime.Stop()
 			t.Cleanup(func() { service.SetResilienceInstance(previous) })
 			if kind != "missing" {

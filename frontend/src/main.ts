@@ -10,6 +10,7 @@ import { recoverFromChunkLoadError } from '@/utils/chunkLoadError'
 import { initMotionPreference } from '@/composables/useMotionPreference'
 import './style.css'
 import './styles/motion.css'
+import './styles/schedQuality.css'
 
 function initIOSViewportZoomFix() {
   // iOS Safari 在输入框字号小于 16px 时聚焦会自动放大页面，且失焦后不会恢复。

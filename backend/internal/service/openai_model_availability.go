@@ -258,7 +258,6 @@ func (s *OpenAIGatewayService) recordOpenAIModelAvailabilityFailure(account *Acc
 			"failure_streak", decision.FailureStreak,
 			"cooldown_ms", decision.Cooldown.Milliseconds(),
 			"block_scope", "account_model",
-			"slow_streak", 0,
 			"reason", string(openAIModelUnavailableReason),
 		)
 	}

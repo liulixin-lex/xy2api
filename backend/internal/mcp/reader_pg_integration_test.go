@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -104,25 +103,7 @@ func TestReaderPostgresReadOnlyToolMatrix(t *testing.T) {
 	require.Equal(t, "2s", statementTimeout)
 	require.Equal(t, "100ms", lockTimeout)
 	require.NoError(t, txn.Rollback())
-	t.Run("recent health tolerates malformed budget attribution", func(t *testing.T) {
-		// Keep this fixture inside a rolled-back transaction so the tool matrix
-		// below still checks its original row counts and ownership boundaries.
-		tx, err := writer.BeginTx(ctx, nil)
-		require.NoError(t, err)
-		defer func() { _ = tx.Rollback() }()
-		now := time.Now().UTC()
-		before, err := recentHealthObservations(ctx, tx, []int64{7101}, now)
-		require.NoError(t, err)
-		for i, applied := range []any{true, false, "not-a-boolean", nil, 7, map[string]any{"bad": true}} {
-			raw, err := json.Marshal([]map[string]any{{"account_id": 7101, "kind": "stream_failed", "resilience_category": "TRANSIENT", "budget_cut_applied": applied}})
-			require.NoError(t, err)
-			_, err = tx.ExecContext(ctx, `INSERT INTO ops_error_logs(error_phase,error_type,status_code,request_id,created_at,upstream_errors) VALUES('upstream','upstream_error',502,$1,$2,$3::jsonb)`, "budget-applied-"+strconv.Itoa(i), now.Add(-time.Second), string(raw))
-			require.NoError(t, err)
-		}
-		after, err := recentHealthObservations(ctx, tx, []int64{7101}, now)
-		require.NoError(t, err)
-		require.Len(t, after[7101], len(before[7101])+5)
-	})
+
 	qreader := NewQueryReader(&ReaderDB{ro})
 	mini := miniredis.RunT(t)
 	redisClient := redis.NewClient(&redis.Options{Addr: mini.Addr()})
@@ -134,7 +115,9 @@ func TestReaderPostgresReadOnlyToolMatrix(t *testing.T) {
 	beforeRedis := mini.Dump()
 	capture := &readerRedisCapture{}
 	redisClient.AddHook(capture)
-	rreader := NewRuntimeReader(&ReaderDB{ro}, repository.NewConcurrencyCache(redisClient, 5, 60), balance, service.NewGroupQualityGateService(nil, nil, nil))
+	quality := service.NewSchedQualityEngineService(nil, nil, nil, nil, nil)
+	summaries := service.NewSchedAdminService(service.SchedAdminDependencies{Engine: quality})
+	rreader := NewRuntimeReader(&ReaderDB{ro}, repository.NewConcurrencyCache(redisClient, 5, 60), balance, quality, summaries)
 	actor := testReaderActor()
 	actor.UserID = 7007
 	actor.Role = "admin"

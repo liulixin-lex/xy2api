@@ -276,7 +276,7 @@
 
     <!-- Generate Codes Dialog -->
     <Teleport to="body">
-      <div v-if="showGenerateDialog" class="fixed inset-0 z-50 flex items-center justify-center">
+      <div v-if="showGenerateDialog" class="fixed inset-0 z-50 flex items-center justify-center" ref="generateRef" :style="{ zIndex: generateLayer.zIndex.value, outline: 'none' }" tabindex="-1" @keydown.tab="generateLayer.trapTab" role="dialog" aria-modal="true">
         <div class="fixed inset-0 bg-black/50" @click="showGenerateDialog = false"></div>
         <div
           class="relative z-10 w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-dark-800"
@@ -416,6 +416,12 @@
       <div
         v-if="showBatchUpdateDialog"
         class="fixed inset-0 z-50 flex items-center justify-center p-4"
+        ref="batchUpdateRef"
+        :style="{ zIndex: batchUpdateLayer.zIndex.value, outline: 'none' }"
+        tabindex="-1"
+        @keydown.tab="batchUpdateLayer.trapTab"
+        role="dialog"
+        aria-modal="true"
       >
         <div class="fixed inset-0 bg-black/50" @click="closeBatchUpdateDialog"></div>
         <div
@@ -527,7 +533,7 @@
 
     <!-- Generated Codes Result Dialog -->
     <Teleport to="body">
-      <div v-if="showResultDialog" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div v-if="showResultDialog" class="fixed inset-0 z-50 flex items-center justify-center p-4" ref="resultRef" :style="{ zIndex: resultLayer.zIndex.value, outline: 'none' }" tabindex="-1" @keydown.tab="resultLayer.trapTab" role="dialog" aria-modal="true">
         <div class="fixed inset-0 bg-black/50" @click="closeResultDialog"></div>
         <div class="relative z-10 w-full max-w-lg rounded-xl bg-white shadow-xl dark:bg-dark-800">
           <!-- Header -->
@@ -613,6 +619,7 @@
 </template>
 
 <script setup lang="ts">
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -1203,4 +1210,13 @@ onUnmounted(() => {
   clearTimeout(searchTimeout)
   abortController?.abort()
 })
+
+// Hand-built modals are layers of the overlay stack (design spec 0.2): drawn in opening order, the page inert
+// below, focus and Tab inside, Escape closes the top one, focus goes back when it closes.
+const generateRef = ref<HTMLElement | null>(null)
+const generateLayer = useOverlayLayer(() => !!showGenerateDialog.value, { root: generateRef, floor: 50, onEscape: () => { showGenerateDialog.value = false } })
+const batchUpdateRef = ref<HTMLElement | null>(null)
+const batchUpdateLayer = useOverlayLayer(() => !!showBatchUpdateDialog.value, { root: batchUpdateRef, floor: 50, onEscape: () => closeBatchUpdateDialog() })
+const resultRef = ref<HTMLElement | null>(null)
+const resultLayer = useOverlayLayer(() => !!showResultDialog.value, { root: resultRef, floor: 50, onEscape: () => closeResultDialog() })
 </script>

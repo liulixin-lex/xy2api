@@ -54,6 +54,8 @@ interface Props {
   alwaysShowRate?: boolean
   /** 平台图标；所在位置已表明平台时（如账号自己的分组）可关闭，平台主题色不变 */
   showPlatformIcon?: boolean
+  /** 中性灰色，不用平台主题色（账号列表「归组」一格，避免与质量结论色混淆） */
+  neutral?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -63,7 +65,8 @@ const props = withDefaults(defineProps<Props>(), {
   userRateMultiplier: null,
   peakRateEnabled: false,
   alwaysShowRate: false,
-  showPlatformIcon: true
+  showPlatformIcon: true,
+  neutral: false
 })
 
 const { t } = useI18n()
@@ -189,6 +192,7 @@ const peakRateClass = computed(() => {
 
 // Badge color based on platform and subscription type
 const badgeClass = computed(() => {
+  if (props.neutral) return 'bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-dark-300'
   if (props.platform === 'anthropic') {
     // Claude: orange theme
     return isSubscription.value

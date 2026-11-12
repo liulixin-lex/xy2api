@@ -19,7 +19,7 @@ const (
 type openAIRecentSessionKey struct {
 	group   int64
 	session string
-	model   string // Actual outbound model; never apply account mapping again.
+	model   string // Frozen scheduling evidence key; never map it again.
 }
 
 type openAIRecentAccountSuccess struct {
@@ -46,12 +46,12 @@ func (s *OpenAIGatewayService) recentSessionSuccess() *openAIRecentSessionSucces
 }
 
 // RecordOpenAIRecentSessionSuccess is called only after HTTP forwarding completes.
-// outboundModel is the handler's resolved success-report model, already canonical.
+// evidenceModel is the frozen scheduling evidence key captured before forwarding.
 // Usage submission also accepts partial failures, so it must not populate this history.
-func (s *OpenAIGatewayService) RecordOpenAIRecentSessionSuccess(ctx context.Context, groupID *int64, session string, account *Account, outboundModel string, result *OpenAIForwardResult) {
+func (s *OpenAIGatewayService) RecordOpenAIRecentSessionSuccess(ctx context.Context, groupID *int64, session string, account *Account, evidenceModel string, result *OpenAIForwardResult) {
 	if s == nil || account == nil || account.Platform != PlatformOpenAI || result == nil ||
 		result.PartialFailure || result.ClientDisconnect || result.OpenAIWSMode || ctx.Err() != nil ||
-		session == "" || strings.TrimSpace(outboundModel) == "" {
+		session == "" || strings.TrimSpace(evidenceModel) == "" {
 		return
 	}
 	st := resilience.StateFrom(ctx)
@@ -61,7 +61,7 @@ func (s *OpenAIGatewayService) RecordOpenAIRecentSessionSuccess(ctx context.Cont
 	if outcome := st.RecoveryOutcome(); outcome == nil || *outcome != "completed" {
 		return
 	}
-	key := openAIRecentSessionKey{derefGroupID(groupID), session, strings.TrimSpace(outboundModel)}
+	key := openAIRecentSessionKey{derefGroupID(groupID), session, strings.TrimSpace(evidenceModel)}
 	s.recentSessionSuccess().record(key, account.ID, time.Now())
 }
 

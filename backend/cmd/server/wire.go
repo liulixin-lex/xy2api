@@ -139,15 +139,25 @@ func provideCleanup(
 	openAIAutoReset *service.OpenAIQuotaAutoResetService,
 	promptAudit *securityaudit.PromptService,
 	pluginManager *service.PluginManager,
-	shareScheduling *service.ShareSchedulingService,
 	resilienceSvc *service.ResilienceService,
-	groupQualityGate *service.GroupQualityGateService,
+	schedQuality *service.SchedQualityEngineService,
+	schedTests *service.SchedTestRunnerService,
+	schedAttempts *service.SchedAttemptRecorderService,
 	imageTasks *service.ImageTaskService,
 	asyncImage *handler.AsyncImageHandler,
 	supportChatPurge *service.SupportChatImagePurgeService,
 	mcpServer *mcp.Server,
 ) func() {
 	return func() {
+		if schedQuality != nil {
+			schedQuality.Stop()
+		}
+		if schedTests != nil {
+			schedTests.Stop()
+		}
+		if schedAttempts != nil {
+			schedAttempts.Stop()
+		}
 		// Async image tasks run in this process. Let them finish (bounded by
 		// image_tasks.drain_timeout_seconds) while Redis and the database are
 		// still open, so each one ends with a stored result and billing status.
@@ -174,7 +184,6 @@ func provideCleanup(
 				}
 				return nil
 			}},
-			{"GroupQualityGateService", func() error { groupQualityGate.Stop(); return nil }},
 			{"SupportChatImagePurgeService", func() error {
 				if supportChatPurge != nil {
 					supportChatPurge.Stop()
@@ -183,10 +192,6 @@ func provideCleanup(
 			}},
 			{"UsageBillingRecoveryService", func() error {
 				billingRecovery.Stop()
-				return nil
-			}},
-			{"ShareSchedulingService", func() error {
-				shareScheduling.Stop()
 				return nil
 			}},
 			{"ResilienceService", func() error {

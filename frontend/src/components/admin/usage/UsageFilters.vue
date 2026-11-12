@@ -553,7 +553,7 @@ const setUserKeyword = (email: string) => {
 
 const getUserSearchRevision = () => userSearchSequence
 
-// 供外部（如账号列表“近期表现”失败行跳转）在程序化设置 account_id 后回显账号名
+// 供外部（如带 account_id 的链接跳转）在程序化设置 account_id 后回显账号名
 const setAccountKeyword = (name: string) => {
   if (accountSearchTimeout) clearTimeout(accountSearchTimeout)
   accountKeyword.value = name

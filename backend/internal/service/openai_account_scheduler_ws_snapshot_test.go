@@ -42,7 +42,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_UsesWSPassthroughSnapsh
 		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{*account}},
 		cache:              &schedulerTestGatewayCache{},
 		cfg:                cfg,
-		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		rateLimitService:   newOpenAISelectionRateLimitService(),
 		schedulerSnapshot:  &SchedulerSnapshotService{cache: snapshotCache},
 		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
 	}

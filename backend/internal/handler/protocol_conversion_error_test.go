@@ -22,12 +22,6 @@ import (
 func TestOpenAIProtocolConversionRejectsBeforeUpstreamAndHealthReporting(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	settings := service.NewSettingService(&contentModerationHandlerSettingRepo{values: map[string]string{}}, &config.Config{})
-	original, err := settings.GetAllSettings(context.Background())
-	require.NoError(t, err)
-	enabled := *original
-	enabled.OpenAIAdvancedSchedulerEnabled = true
-	require.NoError(t, settings.UpdateSettings(context.Background(), &enabled))
-	t.Cleanup(func() { require.NoError(t, settings.UpdateSettings(context.Background(), original)) })
 	withHandlerResilience(t, nil)
 	cases := []struct{ name, platform, endpoint, body, field string }{
 		{"chat_stop", service.PlatformOpenAI, EndpointChatCompletions, `{"model":"gpt-5.4","messages":[{"role":"user","content":"hi"}],"stop":["END"],"stream":true}`, "stop"},
@@ -79,7 +73,6 @@ func TestOpenAIProtocolConversionRejectsBeforeUpstreamAndHealthReporting(t *test
 			require.Equal(t, "invalid_request_error", gjson.Get(rec.Body.String(), "error.type").String())
 			require.Contains(t, gjson.Get(rec.Body.String(), "error.message").String(), tc.field)
 			require.Zero(t, upstream.calls)
-			require.Zero(t, gateway.SnapshotOpenAIAccountSchedulerMetrics().RuntimeStatsAccountCount)
 			require.Empty(t, repo.setErrorIDs)
 			require.Empty(t, repo.setTempIDs)
 			require.Empty(t, repo.rateLimitIDs)

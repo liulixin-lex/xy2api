@@ -10,7 +10,6 @@ import (
 
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
-	"github.com/liulixin-lex/xy2api/internal/sharesched"
 	"github.com/stretchr/testify/require"
 )
 
@@ -74,9 +73,9 @@ type resilienceGateRow struct {
 	setup func(svc *GatewayService, limits *resilienceGateLimits)
 	// ctx adds request state the gate reads.
 	ctx func(ctx context.Context) context.Context
-	// share is the reason the share adapter gives the candidate; empty when
+	// reason is the candidate rejection; empty when
 	// the gate applies at admission (session limit).
-	share sharesched.Reason
+	reason gatewayCandidateReason
 	// unlisted marks states the schedulable listing already drops.
 	unlisted bool
 }
@@ -95,46 +94,46 @@ func resilienceGateRows() []resilienceGateRow {
 		}
 	}
 	return []resilienceGateRow{
-		{name: "platform", share: sharesched.ReasonPlatformMismatch, unlisted: true,
+		{name: "platform", reason: "platform_mismatch", unlisted: true,
 			account: func(a *Account, _ time.Time) { a.Platform = PlatformAntigravity }},
-		{name: "model", share: sharesched.ReasonModelUnsupported,
+		{name: "model", reason: "model_unsupported",
 			account: func(a *Account, _ time.Time) {
 				a.Credentials = map[string]any{"model_mapping": map[string]any{"claude-other": "claude-other"}}
 			}},
-		{name: "channel_restriction", share: sharesched.ReasonChannelRestricted,
+		{name: "channel_restriction", reason: "channel_restricted",
 			account: func(a *Account, _ time.Time) {
 				a.Credentials = map[string]any{"model_mapping": map[string]any{gateTestModel: "claude-unpriced"}}
 			},
 			setup: func(svc *GatewayService, _ *resilienceGateLimits) {
 				svc.channelService = newTestChannelService(makeStandardRepo(Channel{
-					ID: 1, Status: StatusActive, GroupIDs: []int64{shareTestGroupID}, RestrictModels: true,
+					ID: 1, Status: StatusActive, GroupIDs: []int64{selectionTestGroupID}, RestrictModels: true,
 					BillingModelSource: BillingModelSourceUpstream,
 					ModelPricing:       []ChannelModelPricing{{Platform: PlatformAnthropic, Models: []string{gateTestModel}}},
-				}, map[int64]string{shareTestGroupID: PlatformAnthropic}))
+				}, map[int64]string{selectionTestGroupID: PlatformAnthropic}))
 			}},
-		{name: "profit_gate", share: sharesched.ReasonProfitGate,
+		{name: "profit_gate", reason: "profit_gate",
 			account: func(a *Account, _ time.Time) { rate := 5.0; a.RateMultiplier = &rate },
 			ctx: func(ctx context.Context) context.Context {
 				return context.WithValue(ctx, openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{
-					groupID: shareTestGroupID, platform: PlatformAnthropic, threshold: 1, pricingAt: time.Now()})
+					groupID: selectionTestGroupID, platform: PlatformAnthropic, threshold: 1, pricingAt: time.Now()})
 			}},
-		{name: "quota", share: sharesched.ReasonQuotaExceeded, unlisted: true,
+		{name: "quota", reason: "quota_exceeded", unlisted: true,
 			account: func(a *Account, _ time.Time) { a.Extra = map[string]any{"quota_limit": 10.0, "quota_used": 10.0} }},
-		{name: "window_cost", share: sharesched.ReasonWindowCost,
+		{name: "window_cost", reason: "window_cost",
 			account: oauth(map[string]any{"window_cost_limit": 10.0}),
 			setup:   func(_ *GatewayService, l *resilienceGateLimits) { l.windowCost[gateTestAccount] = 100 }},
-		{name: "rpm", share: sharesched.ReasonRPMLimit,
+		{name: "rpm", reason: "rpm_limit",
 			account: oauth(map[string]any{"base_rpm": 10}),
 			setup:   func(_ *GatewayService, l *resilienceGateLimits) { l.rpm[gateTestAccount] = 100 }},
 		{name: "session_limit",
 			account: oauth(map[string]any{"max_sessions": 1}),
 			setup:   func(_ *GatewayService, l *resilienceGateLimits) { l.full[gateTestAccount] = true }},
-		{name: "model_rate_limit_hard", share: sharesched.ReasonModelRateLimited,
+		{name: "model_rate_limit_hard", reason: "model_rate_limited",
 			account: func(a *Account, now time.Time) {
 				a.Extra = map[string]any{modelRateLimitsKey: map[string]any{
 					gateTestModel: map[string]any{"rate_limit_reset_at": now.Add(time.Hour).Format(time.RFC3339)}}}
 			}},
-		{name: "hard_state", share: sharesched.ReasonBalanceExhausted, unlisted: true,
+		{name: "hard_state", reason: "balance_exhausted", unlisted: true,
 			account: func(a *Account, now time.Time) {
 				until := now.Add(time.Hour)
 				a.TempUnschedulableUntil, a.TempUnschedulableReason = &until, resilience.ReasonPrefixBalanceExhausted+": HTTP 402"
@@ -144,10 +143,10 @@ func resilienceGateRows() []resilienceGateRow {
 
 // newResilienceGateEnv builds a one-account group on the given scheduler with
 // the account changed by mutate.
-func newResilienceGateEnv(t *testing.T, scheduler sharesched.Scheduler, mutate func(*Account, time.Time), setup func(*GatewayService, *resilienceGateLimits)) *shareTestEnv {
+func newResilienceGateEnv(t *testing.T, mutate func(*Account, time.Time), setup func(*GatewayService, *resilienceGateLimits)) *gatewaySelectionTestEnv {
 	t.Helper()
 	withResilienceSettings(t, nil)
-	env := newShareTestEnv(t, shareTestPolicy(scheduler, shareRule{AccountID: gateTestAccount, Tier: 1, Weight: 1}),
+	env := newGatewaySelectionTestEnv(t, selectionTestSetupWithRules(selectionTestRule{AccountID: gateTestAccount, Tier: 1, Weight: 1}),
 		Account{ID: gateTestAccount, Priority: 1})
 	if mutate != nil {
 		mutate(env.repo.accountsByID[gateTestAccount], time.Now())
@@ -175,7 +174,7 @@ func softPenalise(a *Account, now time.Time) {
 // top must still be rejected.
 func TestResilienceGateConsistency(t *testing.T) {
 	for _, row := range resilienceGateRows() {
-		for _, scheduler := range []sharesched.Scheduler{sharesched.SchedulerSub2API, sharesched.SchedulerShare} {
+		for _, scheduler := range []string{"default"} {
 			for _, soft := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s/%s/soft=%v", row.name, scheduler, soft), func(t *testing.T) {
 					mutate := row.account
@@ -187,13 +186,13 @@ func TestResilienceGateConsistency(t *testing.T) {
 							}
 						}
 					}
-					env := newResilienceGateEnv(t, scheduler, mutate, row.setup)
+					env := newResilienceGateEnv(t, mutate, row.setup)
 					st := resilience.NewRequestState()
-					ctx := resilience.WithRequestState(cacheableContext(), st)
+					ctx := resilience.WithRequestState(context.Background(), st)
 					if row.ctx != nil {
 						ctx = row.ctx(ctx)
 					}
-					gid := shareTestGroupID
+					gid := selectionTestGroupID
 					result, err := env.gateway.SelectAccountWithLoadAwareness(ctx, &gid, gateTestSession, gateTestModel, nil, "", 0)
 					if err == nil && result != nil && result.ReleaseFunc != nil {
 						result.ReleaseFunc()
@@ -203,36 +202,23 @@ func TestResilienceGateConsistency(t *testing.T) {
 				})
 			}
 		}
-		t.Run(row.name+"/share_candidate", func(t *testing.T) {
-			env := newResilienceGateEnv(t, sharesched.SchedulerShare, row.account, row.setup)
-			ctx := cacheableContext()
+		t.Run(row.name+"/candidate", func(t *testing.T) {
+			env := newResilienceGateEnv(t, row.account, row.setup)
+			ctx := context.Background()
 			if row.ctx != nil {
 				ctx = row.ctx(ctx)
 			}
-			gid := shareTestGroupID
-			group := &Group{ID: shareTestGroupID, Platform: PlatformAnthropic, Status: StatusActive, Hydrated: true}
-			_, in, err := env.gateway.shareGatewayCandidates(ctx, group, &gid, gateTestModel, nil, 0)
+			gid := selectionTestGroupID
+			accounts, _, err := env.gateway.listSchedulableAccounts(ctx, &gid, PlatformAnthropic, false)
 			require.NoError(t, err)
-			var cand *sharesched.Candidate
-			for i := range in.cands {
-				if in.cands[i].AccountID == gateTestAccount {
-					cand = &in.cands[i]
-				}
-			}
 			if row.unlisted {
-				require.Nil(t, cand, "dropped by the schedulable listing")
-				gates := env.gateway.newGatewayCandidateGates(ctx, &gid, PlatformAnthropic, true, gateTestModel)
-				reason, _ := gates.candidateReason(ctx, env.repo.accountsByID[gateTestAccount], false, time.Now())
-				require.Equal(t, row.share, reason, "and rejected by the shared gates")
-				return
+				require.Nil(t, accountIn(accounts, gateTestAccount), "dropped by the schedulable listing")
+			} else {
+				require.NotNil(t, accountIn(accounts, gateTestAccount))
 			}
-			require.NotNil(t, cand)
-			if row.share == "" {
-				require.True(t, cand.Eligible, "admission gates apply when the plan is served")
-				return
-			}
-			require.False(t, cand.Eligible)
-			require.Equal(t, row.share, cand.Reason)
+			gates := env.gateway.newGatewayCandidateGates(ctx, &gid, PlatformAnthropic, true, gateTestModel)
+			reason, _ := gates.candidateReason(ctx, env.repo.accountsByID[gateTestAccount], false, time.Now())
+			require.Equal(t, row.reason, reason, "shared candidate gates preserve each rejection reason")
 		})
 	}
 }
@@ -304,12 +290,12 @@ func TestResilienceLastResortRelaxesSoftPenaltiesOnly(t *testing.T) {
 		},
 	}
 	for name, mutate := range soft {
-		for _, scheduler := range []sharesched.Scheduler{sharesched.SchedulerSub2API, sharesched.SchedulerShare} {
+		for _, scheduler := range []string{"default"} {
 			t.Run(fmt.Sprintf("%s/%s", name, scheduler), func(t *testing.T) {
-				env := newResilienceGateEnv(t, scheduler, mutate, nil)
+				env := newResilienceGateEnv(t, mutate, nil)
 				st := resilience.NewRequestState()
-				ctx := resilience.WithRequestState(cacheableContext(), st)
-				gid := shareTestGroupID
+				ctx := resilience.WithRequestState(context.Background(), st)
+				gid := selectionTestGroupID
 				result, err := env.gateway.SelectAccountWithLoadAwareness(ctx, &gid, gateTestSession, gateTestModel, nil, "", 0)
 				require.NoError(t, err)
 				require.Equal(t, gateTestAccount, result.Account.ID)
@@ -343,16 +329,16 @@ func resilienceOpenAIGateRows() []resilienceOpenAIGateRow {
 			},
 			setup: func(svc *OpenAIGatewayService) {
 				svc.channelService = newTestChannelService(makeStandardRepo(Channel{
-					ID: 1, Status: StatusActive, GroupIDs: []int64{shareTestGroupID}, RestrictModels: true,
+					ID: 1, Status: StatusActive, GroupIDs: []int64{selectionTestGroupID}, RestrictModels: true,
 					BillingModelSource: BillingModelSourceUpstream,
 					ModelPricing:       []ChannelModelPricing{{Platform: PlatformOpenAI, Models: []string{"gpt-5.1"}}},
-				}, map[int64]string{shareTestGroupID: PlatformOpenAI}))
+				}, map[int64]string{selectionTestGroupID: PlatformOpenAI}))
 			}},
 		{name: "profit_gate",
 			account: func(a *Account) { rate := 5.0; a.RateMultiplier = &rate },
 			ctx: func(ctx context.Context) context.Context {
 				return context.WithValue(ctx, openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{
-					groupID: shareTestGroupID, platform: PlatformOpenAI, threshold: 1, pricingAt: time.Now()})
+					groupID: selectionTestGroupID, platform: PlatformOpenAI, threshold: 1, pricingAt: time.Now()})
 			}},
 		{name: "compact_unsupported", compact: true,
 			account: func(a *Account) { a.Extra = map[string]any{"openai_compact_supported": false} }},
@@ -363,11 +349,11 @@ func resilienceOpenAIGateRows() []resilienceOpenAIGateRow {
 // TestResilienceGateConsistency.
 func TestResilienceOpenAIGateConsistency(t *testing.T) {
 	for _, row := range resilienceOpenAIGateRows() {
-		for _, scheduler := range []sharesched.Scheduler{sharesched.SchedulerSub2API, sharesched.SchedulerShare} {
+		for _, scheduler := range []string{"default"} {
 			for _, soft := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s/%s/soft=%v", row.name, scheduler, soft), func(t *testing.T) {
 					withResilienceSettings(t, nil)
-					env := newOpenAIShareTestEnv(t, shareTestPolicy(scheduler, shareRule{AccountID: gateTestAccount, Tier: 1, Weight: 1}), gateTestAccount)
+					env := newOpenAISelectionTestEnv(t, selectionTestSetupWithRules(selectionTestRule{AccountID: gateTestAccount, Tier: 1, Weight: 1}), gateTestAccount)
 					acc := env.account(gateTestAccount)
 					row.account(acc)
 					if soft {
@@ -379,11 +365,11 @@ func TestResilienceOpenAIGateConsistency(t *testing.T) {
 						row.setup(env.svc)
 					}
 					st := resilience.NewRequestState()
-					ctx := resilience.WithRequestState(cacheableContext(), st)
+					ctx := resilience.WithRequestState(context.Background(), st)
 					if row.ctx != nil {
 						ctx = row.ctx(ctx)
 					}
-					gid := shareTestGroupID
+					gid := selectionTestGroupID
 					sel, _, err := env.svc.SelectAccountWithScheduler(ctx, &gid, "", gateTestSession, "gpt-5.1", nil, OpenAIUpstreamTransportAny, row.compact)
 					if err == nil && sel != nil && sel.ReleaseFunc != nil {
 						sel.ReleaseFunc()

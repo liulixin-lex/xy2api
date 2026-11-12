@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -99,4 +100,19 @@ func TestApplyGrokUpstreamFailure_SpendingLimitRemainsRecoverable(t *testing.T) 
 	require.Zero(t, repo.tempUnschedCalls)
 	// Without a billing-period snapshot, use a short recoverable probe cooldown.
 	require.WithinDuration(t, time.Now().Add(grokSpendingLimitProbeCooldown), repo.lastRateLimitResetAt, 2*time.Second)
+}
+
+func filterGrokModelQuotaBlockedAccounts(accounts []Account, model string, now time.Time) []Account {
+	if len(accounts) == 0 || strings.TrimSpace(model) == "" {
+		return accounts
+	}
+	out := make([]Account, 0, len(accounts))
+	for i := range accounts {
+		upstreamModel := canonicalOpenAIAccountSchedulingModel(&accounts[i], model)
+		if isGrokModelQuotaBlocked(accounts[i].ID, upstreamModel, now) {
+			continue
+		}
+		out = append(out, accounts[i])
+	}
+	return out
 }

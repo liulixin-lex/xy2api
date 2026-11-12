@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { nextTick } from 'vue'
 import { enableAutoUnmount, mount } from '@vue/test-utils'
 import BaseDialog from '../BaseDialog.vue'
 
@@ -47,5 +48,25 @@ describe('dialog body scroll lock', () => {
     await wrapper.setProps({ show: true })
     wrapper.unmount()
     expect(locked()).toBe(false)
+  })
+
+  it('keeps focus and the lock in the upper dialog when the lower one closes first', async () => {
+    const opener = document.createElement('button')
+    document.body.appendChild(opener)
+    opener.focus()
+    const lower = mount(BaseDialog, { props: { show: true, title: 'Lower' }, attachTo: document.body, global: { stubs: { Icon: true } } })
+    const upper = mount(BaseDialog, { props: { show: true, title: 'Upper' }, attachTo: document.body, global: { stubs: { Icon: true } }, slots: { default: '<input data-test="upper-field" />' } })
+    await nextTick()
+    await nextTick()
+    const field = document.querySelector<HTMLElement>('[data-test="upper-field"]')!
+    field.focus()
+
+    await lower.setProps({ show: false })
+    expect(document.activeElement).toBe(field)
+    expect(locked()).toBe(true)
+
+    await upper.setProps({ show: false })
+    expect(locked()).toBe(false)
+    opener.remove()
   })
 })

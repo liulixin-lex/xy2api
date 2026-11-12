@@ -867,7 +867,7 @@ func (s *OpenAIGatewayService) selectAccountWithQualityRouting(
 					borrowed, borrowErr := s.selectOpenAIStickyCapacityBorrow(ctx, selection.Account, OpenAIAccountScheduleRequest{
 						GroupID: group, Platform: platform, SessionHash: session, RequestedModel: model,
 						RequiredTransport: transport, RequiredCapability: capability, RequireCompact: compact,
-						ExcludedIDs: borrowExcluded, UseUpstreamTokenCost: useCost, AdvancedScheduler: s.isOpenAIAdvancedSchedulerEnabled(ctx),
+						ExcludedIDs: borrowExcluded, UseUpstreamTokenCost: useCost,
 					})
 					if borrowErr != nil {
 						return nil, OpenAIAccountScheduleDecision{}, borrowErr
@@ -882,7 +882,7 @@ func (s *OpenAIGatewayService) selectAccountWithQualityRouting(
 					return borrowed, decision, nil
 				}
 				cfg := s.schedulingConfig()
-				fallbackAcrossPool := (cfg.LoadBatchEnabled || s.isOpenAIAdvancedSchedulerEnabled(ctx)) && s.concurrencyService != nil
+				fallbackAcrossPool := cfg.LoadBatchEnabled && s.concurrencyService != nil
 				waitingCount := 0
 				if fallbackAcrossPool {
 					// Re-read after borrowing: queue pressure can change during the
@@ -899,7 +899,6 @@ func (s *OpenAIGatewayService) selectAccountWithQualityRouting(
 							GroupID: group, Platform: platform, SessionHash: session, RequestedModel: model,
 							RequiredTransport: transport, RequiredCapability: capability, RequireCompact: compact,
 							ExcludedIDs: borrowExcluded, UseUpstreamTokenCost: useCost,
-							AdvancedScheduler: s.isOpenAIAdvancedSchedulerEnabled(ctx),
 						})
 						if fallbackErr != nil {
 							return nil, OpenAIAccountScheduleDecision{}, fallbackErr

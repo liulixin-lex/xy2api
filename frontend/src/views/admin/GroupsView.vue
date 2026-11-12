@@ -323,40 +323,9 @@
             </div>
           </template>
 
-          <template #cell-quality_gate="{ row }">
-            <!-- 两行窄格（同“账号数”列的可用/总量写法），列放在账号数前，1440px 宽时不被右侧固定的操作列遮住 -->
-            <span
-              v-if="qualityGateGroup(row.id)"
-              data-testid="group-quality-summary"
-              class="flex flex-col whitespace-nowrap text-xs leading-5 tabular-nums text-gray-500 dark:text-gray-400"
-              :title="groupQualitySummaryTitle(qualityGateGroup(row.id)!, t)"
-            >
-              <span v-for="line in QUALITY_SUMMARY_LINES" :key="line.join()" class="flex gap-1.5">
-                <span v-for="kind in line" :key="kind" :data-quality-count="kind">
-                  {{ t(`admin.groupQualityGate.state.${kind}`) }}
-                  <span class="font-medium" :class="qualityCountClass(kind, qualityGateGroup(row.id)!.summary[kind])">{{ qualityGateGroup(row.id)!.summary[kind] }}</span>
-                </span>
-              </span>
-              <span
-                v-if="qualityGateGroup(row.id)!.expected_p90_ms == null"
-                data-testid="group-quality-samples-insufficient"
-                class="text-[11px] leading-4 text-amber-700 dark:text-amber-400"
-              >{{ t("admin.groupQualityGate.groupSamplesShort") }}</span>
-            </span>
-            <span
-              v-else-if="qualityGateViews.get(row.id)?.kind === 'pending'"
-              data-testid="group-quality-pending"
-              class="whitespace-nowrap text-xs text-gray-500 dark:text-gray-400"
-            >{{ t("admin.groupQualityGate.state.pending") }}</span>
-            <span
-              v-else-if="qualityGateViews.get(row.id)?.kind === 'failed'"
-              data-testid="group-quality-failed"
-              class="whitespace-nowrap text-xs text-red-600 dark:text-red-400"
-            >{{ t("admin.groupQualityGate.state.failed") }}</span>
-            <span
-              v-else-if="qualityGateViews.get(row.id)?.kind === 'off'"
-              class="text-sm text-gray-400 dark:text-dark-500"
-            >—</span>
+          <template #cell-sched_gate="{ row }">
+            <span v-if="schedGateText(row)" class="sq-num whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">{{ schedGateText(row) }}</span>
+            <span v-else class="text-sm text-gray-500 dark:text-dark-400">—</span>
           </template>
 
           <template #cell-capacity="{ row }">
@@ -422,6 +391,17 @@
 
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
+              <button
+                v-if="!authStore.isSimpleMode && row.platform === 'openai'"
+                type="button"
+                data-testid="group-sched-board"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                :data-sq-trigger="`group-board:${row.id}`"
+                @click="openSchedBoard({ id: row.id, name: row.name })"
+              >
+                <Icon name="chart" size="sm" />
+                <span class="text-xs">{{ t("admin.schedQuality.action.board") }}</span>
+              </button>
               <button
                 v-if="canManage"
                 @click="handleEdit(row)"
@@ -3009,12 +2989,11 @@
           />
         </div>
 
-        <!-- 分组质量门槛（仅 openai 平台，仅编辑对话框；与分组分两次保存） -->
-        <GroupQualityGateField
+        <!-- 质量门槛（仅 OpenAI 分组的编辑弹窗；与分组分两次保存，带版本号） -->
+        <GroupSchedPolicyField
           v-if="editForm.platform === 'openai' && editingGroup && !authStore.isSimpleMode"
-          ref="editQualityGateRef"
+          ref="editSchedPolicyRef"
           :group-id="editingGroup.id"
-          @saved="applyQualityGatePolicy"
         />
 
         <!-- 支持的模型系列（仅 antigravity 平台） -->
@@ -3875,7 +3854,7 @@
           <button
             type="submit"
             form="edit-group-form"
-            :disabled="submitting"
+            :disabled="submitting || editSchedPolicyRef?.valid === false"
             class="btn btn-primary"
             data-tour="group-form-submit"
           >
@@ -4415,6 +4394,7 @@
       @close="showRPMOverridesModal = false"
       @success="loadGroups"
     />
+    <SchedQualityLayers />
   </AppLayout>
 </template>
 
@@ -4460,9 +4440,12 @@ import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
 import CodexManifestAccountsField from "@/components/admin/group/CodexManifestAccountsField.vue";
 import GroupProfitControlPreview from "@/components/admin/group/GroupProfitControlPreview.vue";
-import GroupQualityGateField from "@/components/admin/group/GroupQualityGateField.vue";
-import { useGroupQualityGateStatus } from "@/composables/useGroupQualityGateStatus";
-import { groupQualityGateView, groupQualitySummaryTitle } from "@/components/admin/account/groupQualityPresentation";
+import GroupSchedPolicyField from "@/components/admin/group/GroupSchedPolicyField.vue";
+import SchedQualityLayers from "@/components/admin/account/quality/SchedQualityLayers.vue";
+import { openSchedBoard } from "@/composables/useSchedLayers";
+import schedQualityAPI from "@/api/admin/schedQuality";
+import type { SchedPolicy } from "@/types/schedQuality";
+import { policyShort } from "@/utils/schedQualityFormat";
 import LongContextPricingFields from "@/components/admin/group/LongContextPricingFields.vue";
 import GroupSystemPromptFields from "@/components/admin/group/GroupSystemPromptFields.vue";
 import GroupCategoryFilter from "@/components/admin/group/GroupCategoryFilter.vue";
@@ -4631,8 +4614,6 @@ const canAdjustBalance = computed(() => has("users.balance_adjust"));
 const adminAccess = useAdminAccessStore();
 // 复制账号还可由账号管理权限授权，分组管理权限仍由页面控制。
 const canCopyAccounts = computed(() => canAdjustBalance.value || adminAccess.can("accounts:manage"));
-// 质量门槛的策略与状态读取需要账号查看权限；没有时不显示门槛列、不请求。
-const canViewQualityGate = computed(() => adminAccess.can("accounts:view"));
 // Catalog §2.2.1 and R8-4: omit protected fields, including normalized NULL prices.
 const operatorGroupPriceFields = [
   "platform",
@@ -4705,9 +4686,7 @@ const allColumns = computed<Column[]>(() => {
     { key: "rate_multiplier", label: t("admin.groups.columns.rateMultiplier"), sortable: true },
     { key: "is_exclusive", label: t("admin.groups.columns.type"), sortable: true },
     { key: "category", label: t("admin.groupCategories.column"), sortable: false },
-    ...(canViewQualityGate.value
-      ? [{ key: "quality_gate", label: t("admin.groupQualityGate.column"), sortable: false }]
-      : []),
+    { key: "sched_gate", label: t("admin.schedQuality.policy.column"), sortable: false },
     basic[3],
     { key: "capacity", label: t("admin.groups.columns.capacity"), sortable: false },
     { key: "usage", label: t("admin.groups.columns.usage"), sortable: false },
@@ -4797,40 +4776,6 @@ const hasVisibleUsageSummaryConsumer = computed(
 );
 const hasVisibleCapacityColumn = computed(() => !authStore.isSimpleMode && isColumnVisible("capacity"));
 
-// 门槛列，开没开以策略为准：已评估显示“达标 n 未知 m / 待复测 r 不达标 f”（本组样本不足时再加一行），刚开还没评估显示“等待评估”，
-// 关闭显示“—”，读取失败明文提示。可见时随列表刷新，最多 60 秒拉一次。
-const {
-  sources: qualityGateSources,
-  refresh: refreshQualityGateStatus,
-  applyPolicy: applyQualityGatePolicy,
-} = useGroupQualityGateStatus();
-const qualityGateViews = computed(
-  () => new Map(groups.value.map((group) => [group.id, groupQualityGateView(group, qualityGateSources.value)])),
-);
-const qualityGateGroup = (groupId: number) => {
-  const view = qualityGateViews.value.get(groupId);
-  return view?.kind === "evaluated" ? view.group : undefined;
-};
-// 两行：达标、未知 / 待复测、不达标；固定账号数在悬停说明里。
-const QUALITY_SUMMARY_LINES = [
-  ["passing", "unknown"],
-  ["retest", "failing"],
-] as const;
-// 计数为 0 时不着色；未知照常参与调度，也不着色，免得看起来像达标或异常。
-const QUALITY_COUNT_CLASSES: Record<"passing" | "unknown" | "retest" | "failing", string> = {
-  passing: "text-emerald-700 dark:text-emerald-400",
-  unknown: "text-gray-700 dark:text-gray-300",
-  retest: "text-amber-700 dark:text-amber-400",
-  failing: "text-red-600 dark:text-red-400",
-};
-const qualityCountClass = (kind: keyof typeof QUALITY_COUNT_CLASSES, count: number) =>
-  count > 0 ? QUALITY_COUNT_CLASSES[kind] : "text-gray-700 dark:text-gray-300";
-const refreshQualityGateColumn = () => {
-  if (!authStore.isSimpleMode && canViewQualityGate.value && isColumnVisible("quality_gate")) {
-    void refreshQualityGateStatus();
-  }
-};
-
 const toggleColumn = (key: string) => {
   const validKeys = getValidHiddenColumnKeys();
   if (!validKeys.has(key)) return;
@@ -4849,9 +4794,35 @@ const toggleColumn = (key: string) => {
   if (wasHidden && key === "capacity") {
     loadCapacitySummary();
   }
-  if (wasHidden && key === "quality_gate") {
-    refreshQualityGateColumn();
+  if (wasHidden && key === "sched_gate") {
+    void loadSchedGates();
   }
+};
+
+// 「门槛」列：每个 OpenAI 分组的三个阈值简写，未启用为“—”（设计 D.3）。随列表刷新逐组读取，并发 4。
+const schedGates = reactive(new Map<number, SchedPolicy | null>());
+let schedGateSeq = 0;
+const loadSchedGates = async () => {
+  if (authStore.isSimpleMode || !isColumnVisible("sched_gate")) return;
+  const seq = ++schedGateSeq;
+  const ids = groups.value.filter((group) => group.platform === "openai").map((group) => group.id);
+  let next = 0;
+  const worker = async () => {
+    while (next < ids.length) {
+      const id = ids[next++];
+      try {
+        const record = await schedQualityAPI.getGroupPolicy(id);
+        if (seq === schedGateSeq) schedGates.set(id, record.policy);
+      } catch {
+        if (seq === schedGateSeq) schedGates.set(id, null);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(4, ids.length) }, worker));
+};
+const schedGateText = (group: AdminGroup) => {
+  const policy = group.platform === "openai" ? schedGates.get(group.id) : null;
+  return policy?.enabled ? policyShort(policy, t) : "";
 };
 
 const columns = computed<Column[]>(() =>
@@ -5197,8 +5168,8 @@ type CodexManifestAccountsFieldExpose = {
   resetValidation: () => void;
 };
 const editCodexManifestRef = ref<CodexManifestAccountsFieldExpose | null>(null);
-const editQualityGateRef = ref<InstanceType<typeof GroupQualityGateField> | null>(null);
 const editProfitPreviewRef = ref<InstanceType<typeof GroupProfitControlPreview> | null>(null);
+const editSchedPolicyRef = ref<InstanceType<typeof GroupSchedPolicyField> | null>(null);
 const createCodexManifestDefaults = (): CodexModelsManifestConfig => ({
   enabled: false,
   account_ids: [],
@@ -5950,7 +5921,7 @@ const loadGroups = async () => {
     if (hasVisibleCapacityColumn.value) {
       loadCapacitySummary();
     }
-    refreshQualityGateColumn();
+    void loadSchedGates();
   } catch (error: any) {
     if (
       signal.aborted ||
@@ -6596,10 +6567,7 @@ const handleUpdateGroup = async () => {
   if (!validateProfitControlForm(editForm)) {
     return;
   }
-  if (editQualityGateRef.value && !editQualityGateRef.value.validate()) {
-    appStore.showError(t("admin.groupQualityGate.fixErrors"));
-    return;
-  }
+  if (editSchedPolicyRef.value && !editSchedPolicyRef.value.valid) return;
   if (!validateGroupReasoningMultipliers(editForm.model_pricing)) return;
   // 模型白名单：开启且没有任何条目时阻止提交，与后端 400 对齐。
   if (
@@ -6778,12 +6746,12 @@ const handleUpdateGroup = async () => {
       await adminAPI.groups.update(groupId, requestData);
       savedEditGroupRequestKey = groupRequestKey;
     }
-    // 分组之后再存分类与门槛；它们失败时各自提示“分组已保存，…未保存”。
+    // 分组之后再存分类；失败时提示“分组已保存，分类未保存”。
     const categoriesSaved = (await editCategoryFieldRef.value?.save(groupId)) !== false;
-    const qualityGateSaved = (await editQualityGateRef.value?.save(groupId)) !== false;
+    // 质量门槛单独保存；没保存成功（冲突、失败）时对话框保留，再次保存时分组没改就不重复提交。
+    const policySaved = (await editSchedPolicyRef.value?.save()) !== false;
     loadGroups();
-    // 门槛未保存时保留对话框与门槛输入，修正或确认后再次保存。
-    if (!qualityGateSaved) return;
+    if (!policySaved) return;
     if (categoriesSaved) appStore.showSuccess(t("admin.groups.groupUpdated"));
     closeEditModal();
   } catch (error: any) {

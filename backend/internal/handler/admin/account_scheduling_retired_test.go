@@ -36,6 +36,6 @@ func TestRetiredSchedulingRoutesAnswerGone(t *testing.T) {
 		}
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 		require.Equal(t, "SCHEDULING_RETIRED", body.Reason)
-		require.Equal(t, "/api/v1/admin/share-scheduling", body.Metadata["replacement"])
+		require.Equal(t, "/api/v1/admin/accounts", body.Metadata["replacement"])
 	}
 }

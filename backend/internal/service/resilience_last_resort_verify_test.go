@@ -17,14 +17,14 @@ import (
 func TestGatewayLastResortSkipsAccountsDisabledAfterTheGroupListWasCached(t *testing.T) {
 	for _, scheduler := range lastResortSchedulers {
 		t.Run(string(scheduler), func(t *testing.T) {
-			env := newGatewayLastResortEnv(t, scheduler, 1, 1)
-			_, err := env.gateway.resilience.groupAccountsForLastResort(context.Background(), env.gateway.accountRepo, shareTestGroupID)
+			env := newGatewayLastResortEnv(t, 1, 1)
+			_, err := env.gateway.resilience.groupAccountsForLastResort(context.Background(), env.gateway.accountRepo, selectionTestGroupID)
 			require.NoError(t, err)
 			env.repo.accountsByID[lrAccountA].Schedulable = false
 			env.repo.accountsByID[lrAccountB].Schedulable = false
 
-			ctx := resilience.WithRequestState(cacheableContext(), resilience.NewRequestState())
-			gid := shareTestGroupID
+			ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+			gid := selectionTestGroupID
 			result, err := env.gateway.SelectAccountWithLoadAwareness(ctx, &gid, lrSession, "claude-sonnet-4-5", nil, "", 0)
 			if err == nil {
 				require.Nil(t, result.Account, "a disabled account was dispatched as the last resort")
@@ -37,8 +37,8 @@ func TestGatewayLastResortSkipsAccountsDisabledAfterTheGroupListWasCached(t *tes
 func TestGatewayLastResortServesTheStillSchedulableAccount(t *testing.T) {
 	for _, scheduler := range lastResortSchedulers {
 		t.Run(string(scheduler), func(t *testing.T) {
-			env := newGatewayLastResortEnv(t, scheduler, 1, 5)
-			_, err := env.gateway.resilience.groupAccountsForLastResort(context.Background(), env.gateway.accountRepo, shareTestGroupID)
+			env := newGatewayLastResortEnv(t, 1, 5)
+			_, err := env.gateway.resilience.groupAccountsForLastResort(context.Background(), env.gateway.accountRepo, selectionTestGroupID)
 			require.NoError(t, err)
 			env.repo.accountsByID[lrAccountA].Schedulable = false
 			result, _ := selectGatewayLastResort(t, env)
@@ -50,14 +50,14 @@ func TestGatewayLastResortServesTheStillSchedulableAccount(t *testing.T) {
 func TestOpenAILastResortSkipsAccountsDisabledAfterTheGroupListWasCached(t *testing.T) {
 	for _, scheduler := range lastResortSchedulers {
 		t.Run(string(scheduler), func(t *testing.T) {
-			env := newOpenAILastResortEnv(t, scheduler, 1, 1)
-			_, err := env.svc.resilience.groupAccountsForLastResort(context.Background(), env.svc.accountRepo, shareTestGroupID)
+			env := newOpenAILastResortEnv(t, 1, 1)
+			_, err := env.svc.resilience.groupAccountsForLastResort(context.Background(), env.svc.accountRepo, selectionTestGroupID)
 			require.NoError(t, err)
 			env.account(lrAccountA).Status = StatusDisabled
 			env.account(lrAccountB).Schedulable = false
 
-			ctx := resilience.WithRequestState(cacheableContext(), resilience.NewRequestState())
-			gid := shareTestGroupID
+			ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+			gid := selectionTestGroupID
 			sel, _, err := env.svc.SelectAccountWithScheduler(ctx, &gid, "", lrSession, "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
 			if err == nil && sel != nil {
 				require.Nil(t, sel.Account, "a disabled account was dispatched as the last resort")

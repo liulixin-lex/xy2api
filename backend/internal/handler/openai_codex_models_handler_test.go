@@ -17,6 +17,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	middleware2 "github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
@@ -129,6 +130,50 @@ func TestCodexModelsCanceledRequestDoesNotWriteResponse(t *testing.T) {
 
 	if c.Writer.Written() {
 		t.Fatalf("canceled request wrote an HTTP response: status=%d body=%q", recorder.Code, recorder.Body.String())
+	}
+}
+
+type codexModelsSelectionView struct {
+	manual schedquality.Override
+}
+
+func (codexModelsSelectionView) Version() int64                           { return 1 }
+func (codexModelsSelectionView) At() time.Time                            { return time.Now() }
+func (codexModelsSelectionView) GlobalEnabled() bool                      { return true }
+func (codexModelsSelectionView) TakeoverIdle(int64) (time.Duration, bool) { return 0, false }
+func (v codexModelsSelectionView) StateOf(_ int64, accountID int64, _ string) schedquality.StateView {
+	if accountID == 11 {
+		return schedquality.StateView{State: schedquality.StateCooling, AllOverride: schedquality.OverrideRef{Mode: v.manual}}
+	}
+	return schedquality.StateView{}
+}
+
+func TestCodexModelsSelectionUsesManualOverridesOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	groupID := int64(7)
+	accounts := []service.Account{
+		{ID: 11, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Priority: 0, Concurrency: 2, GroupIDs: []int64{groupID}, Credentials: map[string]any{"api_key": "first", "base_url": "https://first.example/v1"}},
+		{ID: 22, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Priority: 0, Concurrency: 2, GroupIDs: []int64{groupID}, Credentials: map[string]any{"api_key": "second", "base_url": "https://second.example/v1"}},
+	}
+	for _, tc := range []struct {
+		name   string
+		manual schedquality.Override
+		want   int64
+	}{
+		{"automatic_cooling_ignored", schedquality.OverrideNone, 11},
+		{"manual_demote_applies", schedquality.OverrideDemote, 22},
+		{"manual_exempt_applies", schedquality.OverrideExempt, 11},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := &codexModelsFailoverHTTPUpstream{}
+			cfg := &config.Config{RunMode: config.RunModeSimple}
+			gateway := service.NewOpenAIGatewayService(codexModelsFailoverAccountRepo{accounts: accounts}, nil, nil, nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, upstream, nil, nil, nil, nil, nil, nil, nil, nil)
+			service.NewOpenAISelectionBoard(gateway, func() schedquality.View { return codexModelsSelectionView{manual: tc.manual} })
+			h := &OpenAIGatewayHandler{gatewayService: gateway}
+			recorder := performCodexModelsRequestForGroup(t, h, &service.Group{ID: groupID, Platform: service.PlatformOpenAI}, "")
+			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+			require.Equal(t, []int64{tc.want}, upstream.calls())
+		})
 	}
 }
 

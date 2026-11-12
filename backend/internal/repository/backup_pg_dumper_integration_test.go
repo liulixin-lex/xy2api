@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/url"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -38,17 +39,17 @@ func TestPgDumperRealPostgresBackupAndAtomicRestore(t *testing.T) {
 			// Execute the actual version-matched client inside the dedicated test
 			// database container; no host PostgreSQL tools are required in CI.
 			if name == "pg_restore" {
-				// SQL rendering needs no database connection. Bind only the two
-				// private test files, never the host's whole temporary directory.
-				dockerArgs := []string{"run", "--rm", "--network", "none", "--read-only", "--entrypoint", name}
-				for _, arg := range args {
+				// Copy only the private test files; remote Docker daemons cannot
+				// bind paths from the test runner's filesystem.
+				for i, arg := range args {
 					path := strings.TrimPrefix(arg, "--use-list=")
 					if strings.HasSuffix(path, ".dump") || strings.HasPrefix(arg, "--use-list=") {
-						dockerArgs = append(dockerArgs, "--volume", path+":"+path+":ro")
+						dest := "/tmp/" + filepath.Base(path)
+						output, copyErr := exec.CommandContext(ctx, "docker", "cp", path, container.GetContainerID()+":"+dest).CombinedOutput()
+						require.NoError(t, copyErr, string(output))
+						args[i] = strings.TrimSuffix(arg, path) + dest
 					}
 				}
-				dockerArgs = append(dockerArgs, postgresImageTag)
-				return exec.CommandContext(ctx, "docker", append(dockerArgs, args...)...)
 			}
 			dockerArgs := []string{"exec", "-i", "--env", "PGPASSWORD", container.GetContainerID(), name}
 			return exec.CommandContext(ctx, "docker", append(dockerArgs, args...)...)

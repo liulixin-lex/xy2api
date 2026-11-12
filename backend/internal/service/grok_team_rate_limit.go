@@ -112,29 +112,6 @@ func isGrokTeamModelRateLimited(account *Account, model string, now time.Time) b
 	return true
 }
 
-// filterGrokTeamModelRateLimitedAccounts drops candidates whose team is under a
-// model-scoped rate-limit cool. Accounts without team_id pass through.
-func filterGrokTeamModelRateLimitedAccounts(accounts []Account, model string, now time.Time) []Account {
-	if len(accounts) == 0 || strings.TrimSpace(model) == "" {
-		return accounts
-	}
-	out := accounts[:0]
-	kept := false
-	for i := range accounts {
-		upstreamModel := canonicalOpenAIAccountSchedulingModel(&accounts[i], model)
-		if isGrokTeamModelRateLimited(&accounts[i], upstreamModel, now) {
-			continue
-		}
-		out = append(out, accounts[i])
-		kept = true
-	}
-	if !kept && len(out) == 0 {
-		// All filtered — return empty (caller treats as no capacity).
-		return nil
-	}
-	return out
-}
-
 // resolveGrokTeamRateLimitUntil derives a team cool window from an observed
 // account rate-limit reset, with sane clamps.
 func resolveGrokTeamRateLimitUntil(resetAt, now time.Time) time.Time {

@@ -1,0 +1,16 @@
+{
+  "tests": [
+    {
+      "model": "gpt-6.1-sol",
+      "test_id": "…",
+      "started": true,
+      "why": ""
+    },
+    {
+      "model": "gpt-6-astra",
+      "test_id": "",
+      "started": false,
+      "why": "already_running"
+    }
+  ]
+}

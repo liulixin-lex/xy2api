@@ -31,11 +31,11 @@ handles authentication, account scheduling, failover, usage metering and billing
   OpenCode Go, Kiro and others. OAuth subscription accounts and API keys are both supported.
 - **Works with existing clients** — Claude Code, Codex CLI, Gemini CLI, Grok CLI, OpenCode and any
   OpenAI- or Anthropic-compatible SDK. One-click configuration export for CC Switch.
-- **Scheduling and resilience** — sticky sessions for prompt-cache hits, per-account concurrency
-  and rate limits, optional share scheduling, failover before first output, fallback groups,
-  request budgets and CDN-safe keepalives.
-- **Quality controls** — per-group quality gates, OpenAI session quality routing, periodic
-  model-quality ("IQ") checks and channel monitoring.
+- **Scheduling and resilience** — strict priority tiers with session takeover, sticky sessions for
+  prompt-cache hits, per-account concurrency and rate limits, failover before first output,
+  fallback groups, request budgets and CDN-safe keepalives.
+- **Quality controls** — per-group quality gates with cooldowns and graded active tests, OpenAI
+  session quality routing, periodic model-quality ("IQ") checks and channel monitoring.
 - **Billing** — token-level metering including cache reads and writes, per-group rates,
   subscriptions, balances and redeem codes; built-in EasyPay, Alipay, WeChat Pay and Stripe top-up.
 - **Administration** — web dashboard, role-based admin permissions, usage export, customer support

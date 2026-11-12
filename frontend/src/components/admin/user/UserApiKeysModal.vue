@@ -55,7 +55,7 @@
       v-if="groupSelectorKeyId !== null && dropdownPosition"
       ref="dropdownRef"
       class="animate-in fade-in slide-in-from-top-2 fixed z-[100000020] w-64 overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-black/5 duration-200 dark:bg-dark-800 dark:ring-white/10"
-      :style="{ top: dropdownPosition.top + 'px', left: dropdownPosition.left + 'px' }"
+      :style="{ top: dropdownPosition.top + 'px', left: dropdownPosition.left + 'px', zIndex: groupSelectorLayer.zIndex.value }"
     >
       <div class="max-h-64 overflow-y-auto p-1.5">
         <!-- Unbind option -->
@@ -107,6 +107,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, type ComponentPublicInstance } from 'vue'
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
@@ -229,12 +230,9 @@ const changeGroup = async (key: ApiKey, newGroupId: number | null) => {
   }
 }
 
-const handleKeyDown = (event: KeyboardEvent) => {
-  if (event.key === 'Escape' && groupSelectorKeyId.value !== null) {
-    event.stopPropagation()
-    closeGroupSelector()
-  }
-}
+// A sub-layer of the overlay stack (design spec 0.2): while open, Escape closes it before the layer or page
+// below, re-renders below keep their hands off its focus, and a dialog opening above closes it.
+const groupSelectorLayer = useOverlayLayer(() => groupSelectorKeyId.value !== null && !!dropdownPosition.value, { root: dropdownRef, modal: false, floor: 100000020, onEscape: () => closeGroupSelector() })
 
 const handleClickOutside = (event: MouseEvent) => {
   const target = event.target as HTMLElement
@@ -254,11 +252,9 @@ const handleClose = () => {
 
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
-  document.addEventListener('keydown', handleKeyDown, true)
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
-  document.removeEventListener('keydown', handleKeyDown, true)
 })
 </script>

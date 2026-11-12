@@ -63,7 +63,6 @@ type OpsService struct {
 	ingressRejectAggregator     *OpsIngressRejectAggregator
 	authCacheInvalidationWorker *AuthCacheInvalidationWorker
 	apiKeyService               *APIKeyService
-	groupQualityGateView        GroupQualityGateView
 
 	// cleanupReloader 由 wire 在 OpsCleanupService 构造完成后通过 SetCleanupReloader 注入。
 	// 解耦避免 OpsService -> OpsCleanupService 的硬依赖（cleanup 也读 settings，会循环）。
@@ -86,14 +85,6 @@ type OpsService struct {
 	runtimeRefreshSuccess        atomic.Uint64
 	runtimeRefreshFailure        atomic.Uint64
 	runtimeRefreshLastFailureLog atomic.Int64
-}
-
-// SetGroupQualityGateView attaches the shared quality view used by availability reporting.
-func (s *OpsService) SetGroupQualityGateView(view GroupQualityGateView) {
-	if s == nil {
-		return
-	}
-	s.groupQualityGateView = view
 }
 
 // CleanupReloader 由 OpsCleanupService 实现。

@@ -9,29 +9,28 @@ import (
 type Module string
 
 const (
-	ModuleDashboard       Module = "dashboard"
-	ModuleOps             Module = "ops"
-	ModuleUsers           Module = "users"
-	ModuleGroups          Module = "groups"
-	ModuleChannels        Module = "channels"
-	ModuleAccounts        Module = "accounts"
-	ModuleShareScheduling Module = "share_scheduling"
-	ModuleAnnouncements   Module = "announcements"
-	ModuleSupportTickets  Module = "support_tickets"
-	ModuleProxies         Module = "proxies"
-	ModuleSecurityAudit   Module = "security_audit"
-	ModuleRedeemCodes     Module = "redeem_codes"
-	ModulePromoCodes      Module = "promo_codes"
-	ModuleAffiliates      Module = "affiliates"
-	ModuleOrders          Module = "orders"
-	ModuleUsage           Module = "usage"
-	ModuleAuditLogs       Module = "audit_logs"
-	ModuleSubscriptions   Module = "subscriptions"
+	ModuleDashboard      Module = "dashboard"
+	ModuleOps            Module = "ops"
+	ModuleUsers          Module = "users"
+	ModuleGroups         Module = "groups"
+	ModuleChannels       Module = "channels"
+	ModuleAccounts       Module = "accounts"
+	ModuleAnnouncements  Module = "announcements"
+	ModuleSupportTickets Module = "support_tickets"
+	ModuleProxies        Module = "proxies"
+	ModuleSecurityAudit  Module = "security_audit"
+	ModuleRedeemCodes    Module = "redeem_codes"
+	ModulePromoCodes     Module = "promo_codes"
+	ModuleAffiliates     Module = "affiliates"
+	ModuleOrders         Module = "orders"
+	ModuleUsage          Module = "usage"
+	ModuleAuditLogs      Module = "audit_logs"
+	ModuleSubscriptions  Module = "subscriptions"
 )
 
 // Modules lists the available permission modules in UI order.
 var Modules = []Module{ModuleDashboard, ModuleOps, ModuleUsers, ModuleGroups, ModuleChannels,
-	ModuleAccounts, ModuleShareScheduling, ModuleAnnouncements, ModuleSupportTickets, ModuleProxies, ModuleSecurityAudit,
+	ModuleAccounts, ModuleAnnouncements, ModuleSupportTickets, ModuleProxies, ModuleSecurityAudit,
 	ModuleRedeemCodes, ModulePromoCodes, ModuleAffiliates, ModuleOrders, ModuleUsage,
 	ModuleAuditLogs, ModuleSubscriptions}
 

@@ -371,6 +371,7 @@ func orderPinnedCodexModelsBySelection(body []byte, allowlist GroupModelAllowlis
 }
 
 func (s *OpenAIGatewayService) fetchScheduledOpenAIModels(ctx context.Context, group *Group, maxSwitches int, fetch func(context.Context, *Account) (*OpenAIModelsResponse, error)) ([]pinnedOpenAIModelsResult, error) {
+	ctx = withOpenAISelectionManualOnly(ctx)
 	if maxSwitches <= 0 {
 		maxSwitches = 3
 	}

@@ -1,15 +1,11 @@
 package service
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
-	"math"
 	"net/http"
-	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -18,8 +14,6 @@ import (
 )
 
 type openAICacheDiagnosticKey struct{}
-
-const openAICacheMinSamples = 20
 
 func openAICacheModelLabel(model string) string {
 	if len(model) == 0 || len(model) > 100 {
@@ -46,23 +40,14 @@ type openAICacheHistory struct {
 	at      time.Time
 }
 
-type openAICacheSample struct {
-	count                    int
-	sampleCursor             int
-	recent                   [openAICacheMinSamples]time.Time
-	input, read, write, ttft float64
-	at                       time.Time
-}
-
 type openAICacheTelemetry struct {
 	mu       sync.Mutex
 	sessions map[string]openAICacheHistory
-	scores   map[string]openAICacheSample
 }
 
 func (s *OpenAIGatewayService) cacheTelemetry() *openAICacheTelemetry {
 	s.openaiCacheOnce.Do(func() {
-		s.openaiCacheTelemetry = &openAICacheTelemetry{sessions: make(map[string]openAICacheHistory), scores: make(map[string]openAICacheSample)}
+		s.openaiCacheTelemetry = &openAICacheTelemetry{sessions: make(map[string]openAICacheHistory)}
 	})
 	return s.openaiCacheTelemetry
 }
@@ -94,7 +79,7 @@ func openAICachePrefix(body []byte) string {
 }
 
 func (s *OpenAIGatewayService) newCacheDiagnostic(c *gin.Context, body []byte, source string) *OpenAICacheDiagnostic {
-	if s.cfg == nil || (!s.cfg.Gateway.OpenAICache.DiagnosticsEnabled && !s.cfg.Gateway.OpenAICache.AwareRoutingEnabled) || c == nil || getAPIKeyIDFromContext(c) <= 0 {
+	if s.cfg == nil || !s.cfg.Gateway.OpenAICache.DiagnosticsEnabled || c == nil || getAPIKeyIDFromContext(c) <= 0 {
 		return nil
 	}
 	digest := s.cacheIdentityDigest("openai-prefix-v1", fmt.Sprintf("%d:%d:%s", getAPIKeyIDFromContext(c), getOpenAIGroupIDFromContext(c), openAICachePrefix(body)))
@@ -145,7 +130,7 @@ func (s *OpenAIGatewayService) captureCacheDiagnostic(c *gin.Context, body []byt
 }
 
 func (s *OpenAIGatewayService) captureCacheRequestDiagnostic(c *gin.Context, req *http.Request) {
-	if s.cfg == nil || (!s.cfg.Gateway.OpenAICache.DiagnosticsEnabled && !s.cfg.Gateway.OpenAICache.AwareRoutingEnabled) || req == nil || req.GetBody == nil {
+	if s.cfg == nil || !s.cfg.Gateway.OpenAICache.DiagnosticsEnabled || req == nil || req.GetBody == nil {
 		return
 	}
 	body, err := req.GetBody()
@@ -190,10 +175,6 @@ func (s *OpenAIGatewayService) logCacheSettlement(result *OpenAIForwardResult, u
 	slog.Info("openai_cache_settled_usage", "session_digest", result.CacheDiagnostic.Session, "request_id_hmac", s.cacheIdentityDigest("openai-request", result.RequestID), "input_tokens", usage.InputTokens, "cache_read_tokens", usage.CacheReadTokens, "cache_write_tokens", usage.CacheCreationTokens, "total_cost", usage.TotalCost, "actual_cost", usage.ActualCost)
 }
 
-func cacheSampleKey(d *OpenAICacheDiagnostic, account *Account, model string) string {
-	return fmt.Sprintf("%d:%s:%s:%s:%s:%s:%d:%d", d.GroupID, strings.ToLower(model), account.Type, d.Prefix, d.Mode, d.Format, d.LengthBucket, account.ID)
-}
-
 // Only comparable continuations train the preference. Cold requests, expired
 // sessions, prefix changes and account switches are reported separately.
 func (s *OpenAIGatewayService) observeCacheUsage(result *OpenAIForwardResult, account *Account, now time.Time) {
@@ -229,126 +210,8 @@ func (s *OpenAIGatewayService) observeCacheUsage(result *OpenAIForwardResult, ac
 	}
 	t.sessions[d.Session] = openAICacheHistory{account.ID, d.WirePrefix, now}
 	usage := result.Usage
-	if reason == "comparable_continuation" && usage.InputTokens >= 1024 && usage.CacheReadSource != "" && usage.CacheReadInputTokens <= usage.InputTokens && usage.CacheCreationInputTokens <= usage.InputTokens-usage.CacheReadInputTokens {
-		key := cacheSampleKey(d, account, d.Model)
-		value := t.scores[key]
-		if now.Sub(value.at) > 30*time.Minute {
-			value = openAICacheSample{}
-		}
-		alpha := 0.2
-		if value.count == 0 {
-			alpha = 1
-		}
-		value.input = (1-alpha)*value.input + alpha*float64(usage.InputTokens)
-		value.read = (1-alpha)*value.read + alpha*float64(usage.CacheReadInputTokens)
-		value.write = (1-alpha)*value.write + alpha*float64(usage.CacheCreationInputTokens)
-		if result.FirstTokenMs != nil {
-			value.ttft = (1-alpha)*value.ttft + alpha*float64(max(*result.FirstTokenMs, 0))
-		}
-		value.recent[value.sampleCursor] = now
-		value.sampleCursor = (value.sampleCursor + 1) % len(value.recent)
-		value.count = min(value.count+1, len(value.recent))
-		value.at = now
-		if len(t.scores) >= 4096 {
-			for oldKey, sample := range t.scores {
-				if now.Sub(sample.at) > 30*time.Minute {
-					delete(t.scores, oldKey)
-				}
-			}
-		}
-		if _, known := t.scores[key]; known || len(t.scores) < 4096 {
-			t.scores[key] = value
-		}
-	}
 	t.mu.Unlock()
 	if s.cfg != nil && s.cfg.Gateway.OpenAICache.DiagnosticsEnabled {
 		slog.Info("openai_cache_usage", "session_digest", d.Session, "prefix_hmac", d.WirePrefix, "fingerprint_source", d.Source, "account_id", account.ID, "group_id", d.GroupID, "model", d.Model, "cache_mode", d.Mode, "format", d.Format, "length_bucket", d.LengthBucket, "reason", reason, "input_tokens", usage.InputTokens, "cache_read_tokens", usage.CacheReadInputTokens, "cache_write_tokens", usage.CacheCreationInputTokens, "read_source", usage.CacheReadSource, "write_source", usage.CacheWriteSource, "request_id_hmac", s.cacheIdentityDigest("openai-request", result.RequestID))
-	}
-}
-
-func (s *OpenAIGatewayService) cachePreference(ctx context.Context, account *Account, model string) (float64, bool) {
-	if s.cfg == nil || !s.cfg.Gateway.OpenAICache.AwareRoutingEnabled || account == nil || !account.IsOpenAI() {
-		return 0, false
-	}
-	d, _ := ctx.Value(openAICacheDiagnosticKey{}).(*OpenAICacheDiagnostic)
-	if d == nil || d.Session == "" || d.Prefix == "" {
-		return 0, false
-	}
-	// Stable session cohort; restarting the process does not change rollout.
-	cohort := sha256SumCacheCohort(d.Session)
-	if cohort >= s.cfg.Gateway.OpenAICache.RolloutPercent {
-		return 0, false
-	}
-	t := s.cacheTelemetry()
-	t.mu.Lock()
-	value := t.scores[cacheSampleKey(d, account, normalizeOpenAIModelForUpstream(account, account.GetMappedModel(model)))]
-	t.mu.Unlock()
-	if value.count < openAICacheMinSamples || value.input <= 0 || time.Since(value.at) > 30*time.Minute {
-		return 0, false
-	}
-	now := time.Now()
-	for _, sampleAt := range value.recent {
-		if sampleAt.IsZero() || now.Sub(sampleAt) > 30*time.Minute {
-			return 0, false
-		}
-	}
-	// Normalized input cost plus a bounded TTFT penalty. This is a tie-breaker,
-	// not a replacement for account health, priority, ownership or admission.
-	readDiscount := 0.1
-	if strings.Contains(model, "gpt-6.1-sol") {
-		readDiscount = 0.05
-	}
-	cost := (value.input - (1-readDiscount)*value.read + 0.25*value.write) / value.input
-	return cost*account.BillingRateMultiplier() + 0.1*math.Min(value.ttft/15000, 1), true
-}
-
-func (s *OpenAIGatewayService) preferCacheCandidates(ctx context.Context, available []accountWithLoad, model string) {
-	// Sort only complete comparable cohorts. Missing evidence keeps the existing
-	// order and cannot promote an unknown account ahead of a measured account.
-	for start := 0; start < len(available); {
-		end := start + 1
-		for end < len(available) && available[end].account.Priority == available[start].account.Priority && available[end].loadInfo.LoadRate == available[start].loadInfo.LoadRate {
-			end++
-		}
-		scores := make(map[int64]float64)
-		complete := true
-		for _, candidate := range available[start:end] {
-			value, known := s.cachePreference(ctx, candidate.account, model)
-			if !known {
-				complete = false
-				break
-			}
-			scores[candidate.account.ID] = value
-		}
-		if complete {
-			block := available[start:end]
-			sort.SliceStable(block, func(i, j int) bool { return scores[block[i].account.ID] < scores[block[j].account.ID] })
-		}
-		start = end
-	}
-}
-
-func (s *OpenAIGatewayService) preferCacheScoredCandidates(ctx context.Context, candidates []openAIAccountCandidateScore, model string) {
-	for start := 0; start < len(candidates); {
-		end := start + 1
-		first := candidates[start]
-		for end < len(candidates) && candidates[end].account.Priority == first.account.Priority && candidates[end].loadInfo.LoadRate == first.loadInfo.LoadRate && candidates[end].loadInfo.WaitingCount == first.loadInfo.WaitingCount && candidates[end].score == first.score && candidates[end].errorRate == first.errorRate && candidates[end].ttft == first.ttft && openAICompactSupportTier(candidates[end].account) == openAICompactSupportTier(first.account) {
-			end++
-		}
-		scores := make(map[int64]float64)
-		complete := true
-		for _, candidate := range candidates[start:end] {
-			value, known := s.cachePreference(ctx, candidate.account, model)
-			if !known {
-				complete = false
-				break
-			}
-			scores[candidate.account.ID] = value
-		}
-		if complete {
-			block := candidates[start:end]
-			sort.SliceStable(block, func(i, j int) bool { return scores[block[i].account.ID] < scores[block[j].account.ID] })
-		}
-		start = end
 	}
 }

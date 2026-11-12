@@ -5,7 +5,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/monitorprobe"
-	"github.com/liulixin-lex/xy2api/internal/sharesched"
 )
 
 // A channel monitor probe (monitorprobe.IsProbe) measures the model on a free
@@ -69,17 +68,4 @@ func monitorProbeRoutedWait(ctx context.Context, routed []accountWithLoad) []acc
 		return nil
 	}
 	return routed
-}
-
-// monitorProbeAcquire is the extra pass of a probe in share scheduling,
-// before the fallback wait: the plan's steps again, without the load gate,
-// so a step skipped as saturated is tried for a slot within its limit. Plans
-// without the load gate (last resort) have tried every step already.
-func (e *shareExecutor) monitorProbeAcquire(d sharesched.Decision) *shareOutcome {
-	if !e.loadGate || !monitorprobe.IsProbe(e.ctx) {
-		return nil
-	}
-	e.loadGate = false
-	defer func() { e.loadGate = true }()
-	return e.acquire(d)
 }

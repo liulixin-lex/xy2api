@@ -45,7 +45,6 @@ func releaseLegacySchedulerDecisionSelection(selection *AccountSelectionResult) 
 }
 
 func TestLegacySchedulerDecision_StickySessionLayer(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	ctx := context.Background()
 	groupID := int64(38100)
 	for _, loadBatch := range []bool{true, false} {
@@ -90,7 +89,6 @@ func TestLegacySchedulerDecision_StickySessionLayer(t *testing.T) {
 }
 
 func TestLegacySchedulerDecision_PreviousResponseRouting(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	ctx := context.Background()
 	groupID := int64(38110)
 	responseID := "resp_legacy_route"

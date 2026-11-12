@@ -208,7 +208,12 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	bearerToken string,
 	userAgent string,
 	grokCacheIdentity string,
+	captureOwner ...**schedAttemptCapture,
 ) (*http.Response, error) {
+	var schedCapture *schedAttemptCapture
+	if len(captureOwner) > 0 {
+		defer func() { *captureOwner[0] = schedCapture }()
+	}
 	// DeepSeek thinking mode 要求历史 assistant 回传 reasoning_content。
 	// Responses→CC 回退在加密-only / 缺 reasoning item 且缓存未命中时会漏掉该
 	// 字段，上游 400 "The `reasoning_content` in the thinking mode must be
@@ -267,7 +272,10 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+	resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, body, stream, &schedCapture)
+	if err != nil {
+		schedCapture.finish(nil, err)
+	}
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
@@ -316,12 +324,14 @@ func (s *OpenAIGatewayService) scanCCStream(
 			continue
 		}
 		if payload == "[DONE]" {
+			observeSchedPayload(c, []byte(payload))
 			st.SawDone = true
 			break
 		}
 		// 观察上游 CC chunk 回显的 model / service_tier（计费以回显为准）。
 		// CC chunk 无 type 字段，按 untyped payload 观察（上游约束：只有终止
 		// 事件与无类型 body 报告实际处理档位）。
+		observeSchedPayload(c, []byte(payload))
 		if observer := upstreamResponseModelObserverFromContext(c); observer != nil {
 			observer.ObserveOpenAI([]byte(payload), "")
 		}
@@ -346,6 +356,7 @@ func (s *OpenAIGatewayService) scanCCStream(
 	}
 
 	if err := scanner.Err(); err != nil {
+		noteSchedError(c, err)
 		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			logger.L().Warn(logPrefix+": stream read error",
 				zap.Error(err),
@@ -391,6 +402,7 @@ func (s *OpenAIGatewayService) readCCUpstreamJSONResponse(
 	}
 	// 观察上游 CC JSON 回显的 model / service_tier（计费以回显为准）。
 	// CC JSON 无 type 字段，按 untyped payload 观察（上游约束）。
+	observeSchedPayload(c, respBody)
 	if observer := upstreamResponseModelObserverFromContext(c); observer != nil {
 		observer.ObserveOpenAI(respBody, "")
 	}

@@ -35,7 +35,6 @@ func TestSelectGrokMediaVideoRequestAccountPreservesOwner(t *testing.T) {
 			var acquired, released []int64
 			cache := &schedulerTestGatewayCache{}
 			cfg := &config.Config{}
-			cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled = true
 			cfg.Gateway.Scheduling.StickySessionWaitTimeout = time.Second
 			cfg.Gateway.Scheduling.StickySessionMaxWaiting = 3
 			svc := &OpenAIGatewayService{
@@ -82,7 +81,7 @@ func TestSelectGrokMediaVideoRequestAccountPreservesOwner(t *testing.T) {
 	}
 }
 
-func TestGrokVideoStickySelectionIgnoresHealthEscape(t *testing.T) {
+func TestGrokVideoStickySelectionKeepsTaskOwner(t *testing.T) {
 	groupID := int64(24)
 	account := Account{ID: 1, Platform: PlatformGrok, Type: AccountTypeAPIKey,
 		Status: StatusActive, Schedulable: true, Concurrency: 50, GroupIDs: []int64{groupID}}
@@ -90,19 +89,11 @@ func TestGrokVideoStickySelectionIgnoresHealthEscape(t *testing.T) {
 		accountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{account}},
 		cache:       &schedulerTestGatewayCache{},
 	}
-	stats := newOpenAIAccountRuntimeStats()
-	for range 20 {
-		stats.report(1, false, nil)
-	}
-	scheduler := &defaultOpenAIAccountScheduler{service: svc, stats: stats}
+	scheduler := svc
 	req := OpenAIAccountScheduleRequest{GroupID: &groupID, Platform: PlatformGrok,
 		SessionHash: "task", StickyAccountID: 1, PreserveStickyBinding: true}
-	selection, escaped, err := scheduler.selectBySessionHash(context.Background(), req)
-	require.NoError(t, err)
-	require.Nil(t, selection)
-	require.True(t, escaped)
 	req.DisableStickyEscape = true
-	selection, escaped, err = scheduler.selectBySessionHash(context.Background(), req)
+	selection, escaped, err := scheduler.selectBySessionHash(context.Background(), req)
 	require.NoError(t, err)
 	require.False(t, escaped)
 	require.True(t, selection.Acquired)
