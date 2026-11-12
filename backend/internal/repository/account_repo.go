@@ -4033,8 +4033,8 @@ func (r *accountRepository) loadAccountGroupIDs(ctx context.Context, accountID i
 }
 
 func mergeGroupIDs(a []int64, b []int64) []int64 {
-	seen := make(map[int64]struct{}, len(a)+len(b))
-	out := make([]int64, 0, len(a)+len(b))
+	seen := make(map[int64]struct{})
+	out := make([]int64, 0)
 	for _, id := range a {
 		if id <= 0 {
 			continue

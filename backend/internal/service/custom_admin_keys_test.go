@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
@@ -36,6 +37,10 @@ func TestScopedAdminKeySecret(t *testing.T) {
 	}
 	if key == hash || !verifyScopedAdminKey(key, hash) || verifyScopedAdminKey(key+"x", hash) {
 		t.Fatal("密钥摘要校验错误")
+	}
+	secret, err := hex.DecodeString(strings.TrimPrefix(key, "adm_sc_abc_"))
+	if err != nil || len(secret) != 32 {
+		t.Fatal("管理员密钥必须包含 256 位服务端随机秘密")
 	}
 	if !scopedAdminIPAllowed([]string{"192.0.2.0/24"}, "192.0.2.5") || scopedAdminIPAllowed([]string{"192.0.2.0/24"}, "198.51.100.1") {
 		t.Fatal("IP 范围错误")

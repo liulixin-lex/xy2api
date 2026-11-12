@@ -207,10 +207,24 @@ type noStoreResponse struct{ http.ResponseWriter }
 
 func (w noStoreResponse) WriteHeader(status int) {
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// JSONResponse uses JSON for protocol messages and plain text for errors.
+	// Never let a fallback response be sniffed or declared as executable HTML.
+	if mediaType, _, err := mime.ParseMediaType(w.Header().Get("Content-Type")); err == nil && mediaType == "application/json" {
+		w.Header().Set("Content-Type", "application/json")
+	} else {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	}
 	w.ResponseWriter.WriteHeader(status)
 }
 func (w noStoreResponse) Write(p []byte) (int, error) {
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if mediaType, _, err := mime.ParseMediaType(w.Header().Get("Content-Type")); err == nil && mediaType == "application/json" {
+		w.Header().Set("Content-Type", "application/json")
+	} else {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	}
 	return w.ResponseWriter.Write(p)
 }
 func (w noStoreResponse) Flush() {

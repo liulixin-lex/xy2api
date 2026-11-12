@@ -86,6 +86,9 @@ func generateScopedAdminKey(id string) (string, string, error) {
 	return key, hex.EncodeToString(hash[:]), nil
 }
 func verifyScopedAdminKey(key, hash string) bool {
+	// These bearer credentials contain 256 random bits from crypto/rand, not
+	// user-chosen passwords. SHA-256 is appropriate for their stored digest;
+	// password stretching would add per-request cost without increasing entropy.
 	h := sha256.Sum256([]byte(key))
 	return subtle.ConstantTimeCompare([]byte(hex.EncodeToString(h[:])), []byte(hash)) == 1
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -85,7 +86,41 @@ func rpc(t *testing.T, handler http.Handler, token, method string, params any) (
 	var result map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result), w.Body.String())
 	require.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+	mediaType, _, err := mime.ParseMediaType(w.Header().Get("Content-Type"))
+	require.NoError(t, err)
+	require.Equal(t, "application/json", mediaType)
+	if w.Code == http.StatusOK {
+		require.Equal(t, "nosniff", w.Header().Get("X-Content-Type-Options"))
+	}
 	return w.Code, result
+}
+
+func TestMCPResponseCannotRenderHTML(t *testing.T) {
+	for _, contentType := range []string{"", "text/html", "application/json", "application/json; charset=utf-8"} {
+		for _, explicitStatus := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/explicit=%t", contentType, explicitStatus), func(t *testing.T) {
+				recorder := httptest.NewRecorder()
+				writer := noStoreResponse{recorder}
+				writer.Header().Set("Content-Type", contentType)
+				if explicitStatus {
+					writer.WriteHeader(http.StatusBadRequest)
+				}
+				body := `<script>alert(1)</script>`
+				_, err := writer.Write([]byte(body))
+				require.NoError(t, err)
+				response := recorder.Result()
+				defer func() { _ = response.Body.Close() }()
+				wantType := "text/plain; charset=utf-8"
+				if strings.HasPrefix(contentType, "application/json") {
+					wantType = "application/json"
+				}
+				require.Equal(t, wantType, response.Header.Get("Content-Type"))
+				require.Equal(t, "nosniff", response.Header.Get("X-Content-Type-Options"))
+				require.Equal(t, "no-store", response.Header.Get("Cache-Control"))
+				require.Equal(t, body, recorder.Body.String())
+			})
+		}
+	}
 }
 
 func rpcObject(t *testing.T, value any) map[string]any {
