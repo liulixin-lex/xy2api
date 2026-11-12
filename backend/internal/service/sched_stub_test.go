@@ -403,6 +403,7 @@ type fakeSchedTestRunner struct {
 	Records  map[SchedAccountModel][]SchedTestRecord
 	Ticket   SchedTestTicket
 	Err      error
+	ReapRows int64
 }
 type fakeSchedTestRequest struct {
 	AccountID  int64
@@ -444,7 +445,11 @@ func (f *fakeSchedTestRunner) Recent(_ context.Context, id int64, limit int) ([]
 	}
 	return out, f.Err
 }
-func (f *fakeSchedTestRunner) ReapStale(context.Context) (int64, error) { return 0, f.Err }
+func (f *fakeSchedTestRunner) ReapStale(context.Context) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.ReapRows, f.Err
+}
 
 // fakeSchedView exposes preconfigured state and takeover settings.
 type fakeSchedView struct {

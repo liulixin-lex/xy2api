@@ -172,7 +172,9 @@ func (s *SchedQualityEngineService) loadEvidence(ctx context.Context, now time.T
 	return nil
 }
 
-func (s *SchedQualityEngineService) cycle(ctx context.Context) error {
+func (s *SchedQualityEngineService) cycle(ctx context.Context) (cycleErr error) {
+	started := s.now()
+	defer func() { s.obs.Cycle(s.now().Sub(started), cycleErr != nil) }()
 	s.mu.Lock()
 	var resets map[int64]time.Time
 	defer func() { s.mu.Unlock(); s.notify(resets) }()
@@ -215,7 +217,7 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) error {
 			since := schedQualitySince(resetAt[key.account], prev.Since)
 			summary := d.summary(SchedAccountModel{key.account, key.model}, since)
 			in := schedquality.Inputs{Policy: s.policies[key.group].Policy, Summary: summary, Tests: d.finished[SchedAccountModel{key.account, key.model}], TestsEnabled: d.testsEnabled, ResetAt: resetAt[key.account]}
-			next, changed, remove, wantTest, _ := schedquality.Next(prev, in, now)
+			next, changed, remove, wantTest, via := schedquality.Next(prev, in, now)
 			if remove {
 				if _, ok := previous[key]; ok {
 					deleted = append(deleted, prev)
@@ -231,7 +233,7 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) error {
 			}
 			if changed && (prev.State != next.State || !prev.Since.Equal(next.Since)) {
 				verdicts, fromTest := schedquality.Effective(schedquality.Judge(summary, in.Policy), in.Tests, key.model, in.Policy, in.ResetAt, prev.Since, now)
-				transitions = append(transitions, schedQualityTransition{from: prev, to: next, summary: summary, verdicts: verdicts, fromTest: fromTest, policy: in.Policy, test: schedquality.SummarizeTests(in.Tests, key.model, in.Policy, in.ResetAt, prev.Since, now)})
+				transitions = append(transitions, schedQualityTransition{from: prev, to: next, summary: summary, verdicts: verdicts, fromTest: fromTest, via: via, test: schedquality.SummarizeTests(in.Tests, key.model, in.Policy, in.ResetAt, prev.Since, now)})
 			}
 			if wantTest && d.globalEnabled && d.testsEnabled {
 				wanted[SchedAccountModel{key.account, key.model}] = true
@@ -281,6 +283,11 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) error {
 		}
 	} else {
 		for _, tr := range transitions {
+			if tr.to.State == schedquality.StateCooling {
+				s.obs.Count("cooled", 1)
+			} else if tr.from.State == schedquality.StateCooling {
+				s.obs.Count("released", 1)
+			}
 			tr.log(ctx)
 		}
 		pairs := make([]SchedAccountModel, 0, len(wanted))
@@ -298,8 +305,13 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) error {
 				slog.ErrorContext(ctx, "sched_quality.request_test", "account_id", pair.AccountID, "model", pair.Model, "error", err)
 			}
 		}
-		if _, err := s.runner.ReapStale(ctx); err != nil {
-			slog.ErrorContext(ctx, "sched_quality.reap_tests", "error", err)
+		started := s.now()
+		rows, err := s.runner.ReapStale(ctx)
+		attrs := []any{"component", "sched_quality", "kind", "stale", "rows", rows, "duration_ms", s.now().Sub(started).Milliseconds()}
+		if err != nil {
+			slog.ErrorContext(ctx, "sched_quality.cleanup", append(attrs, "error", schedTestStoreErrorClass(err))...)
+		} else if rows > 0 {
+			slog.InfoContext(ctx, "sched_quality.cleanup", attrs...)
 		}
 	}
 	resets = s.publish(d, states, overrides, resetAt, now)
@@ -362,7 +374,7 @@ func (s *SchedQualityEngineService) Reset(ctx context.Context, id int64) (time.T
 		tr := schedQualityTransition{
 			from:    schedquality.StateRow{AccountID: id, Model: row.Model, GroupID: row.GroupID, State: row.View.State, Level: row.View.Level, Reason: row.View.Reason, Since: row.View.Since, Until: row.View.Until},
 			to:      schedquality.StateRow{AccountID: id, Model: row.Model, GroupID: row.GroupID, Since: at},
-			summary: row.Summary, verdicts: row.View.Verdicts, fromTest: row.View.FromTest, test: row.Test, via: "reset",
+			summary: row.Summary, verdicts: row.View.Verdicts, fromTest: row.View.FromTest, test: row.Test, via: schedquality.ViaReset,
 		}
 		tr.log(ctx)
 	}
@@ -412,7 +424,12 @@ func (s *SchedQualityEngineService) cleanup(ctx context.Context) {
 		return
 	}
 	defer release()
-	if _, err := s.attempts.DeleteBefore(ctx, s.now().Add(-schedquality.LedgerRetention)); err != nil {
-		slog.ErrorContext(ctx, "sched_quality.cleanup", "error", err)
+	started := s.now()
+	rows, err := s.attempts.DeleteBefore(ctx, started.Add(-schedquality.LedgerRetention))
+	attrs := []any{"component", "sched_quality", "kind", "ledger", "rows", rows, "duration_ms", s.now().Sub(started).Milliseconds()}
+	if err != nil {
+		slog.ErrorContext(ctx, "sched_quality.cleanup", append(attrs, "error", schedTestStoreErrorClass(err))...)
+		return
 	}
+	slog.InfoContext(ctx, "sched_quality.cleanup", attrs...)
 }
