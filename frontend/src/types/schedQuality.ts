@@ -20,7 +20,8 @@ export type SchedReason =
   | 'test_cache'
   | 'unverified'
   | ''
-export type SchedTestTicketWhy = '' | 'already_running' | 'too_soon' | 'not_schedulable'
+/** error: the model was not accepted because of an internal error (contract clarification K28). */
+export type SchedTestTicketWhy = '' | 'already_running' | 'too_soon' | 'not_schedulable' | 'error'
 /** -1 off, 0 immediately, otherwise idle seconds. */
 export type SchedTakeoverIdleSeconds = -1 | 0 | 300 | 900 | 1800
 
@@ -104,7 +105,10 @@ export interface SchedTest {
 }
 
 export interface SchedModelEvidence {
+  /** Evidence key. */
   model: string
+  /** Request model that maps to this evidence key for the account; "" when none (contract clarification K27). */
+  request_model: string
   samples: number
   sessions: number
   from: string | null
@@ -264,6 +268,8 @@ export interface SchedEvidenceNumbers {
 export interface SchedBoardAccount extends SchedEvidenceNumbers {
   account_id: number
   name: string
+  /** Evidence key behind this row's numbers and state (contract clarification K27). */
+  evidence_model: string
   rank: number
   eligible: boolean
   reject: string
@@ -286,7 +292,9 @@ export interface SchedBoardAccount extends SchedEvidenceNumbers {
 
 export interface SchedBoard {
   group_id: number
+  /** Request model of this board. */
   model: string
+  /** Request models with samples in the group, most samples first. */
   models: string[]
   at: string
   stale: boolean

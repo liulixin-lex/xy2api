@@ -9,6 +9,11 @@ import { closeSchedBoard, markSchedChanged, openSchedBoard, useSchedLayers } fro
 
 const api = vi.hoisted(() => ({ groupBoard: vi.fn(), getGroupPolicy: vi.fn() }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: api }))
+const perms = vi.hoisted(() => ({ granted: [] as string[] }))
+vi.mock('@/composables/useAdminPermission', async () => {
+  const { computed } = await vi.importActual<typeof import('vue')>('vue')
+  return { useAdminPermission: (module: string) => ({ canView: computed(() => perms.granted.includes(`${module}:view`)) }) }
+})
 vi.mock('vue-i18n', async () => ({
   ...(await vi.importActual<typeof import('vue-i18n')>('vue-i18n')),
   useI18n: () => ({
@@ -40,6 +45,7 @@ const rows = () => Array.from(document.querySelectorAll<HTMLElement>('[data-sq-b
 beforeEach(() => {
   document.body.innerHTML = ''
   closeSchedBoard()
+  perms.granted = ['accounts:view', 'groups:view']
   document.documentElement.dataset.motion = 'reduced'
   api.groupBoard.mockReset().mockResolvedValue(board())
   api.getGroupPolicy.mockReset().mockResolvedValue(policyFixture)
@@ -80,13 +86,40 @@ describe('GroupSchedBoard', () => {
     expect(cooling.querySelector('[data-sq-no-takeover]')).toBeNull()
   })
 
-  it('opens the account drawer on the board model from an account link', async () => {
+  it('opens the account drawer on the evidence model of the row from an account link (K27)', async () => {
+    const b = board()
+    b.accounts[1].evidence_model = 'upstream-a'
+    api.groupBoard.mockResolvedValue(b)
     mount(GroupSchedBoard, { attachTo: document.body })
-    openSchedBoard({ id: 53, name: '晨星组' })
+    openSchedBoard({ id: 53, name: '晨星组' }, 'alias-a')
     await flushPromises()
     document.querySelector<HTMLElement>('[data-sq-trigger="account:3"]')!.click()
     const { drawer } = useSchedLayers()
-    expect([drawer.accountId, drawer.model]).toEqual([3, 'gpt-6.1-sol'])
+    expect([drawer.accountId, drawer.model]).toEqual([3, 'upstream-a'])
+  })
+
+  it('shows account names as text without accounts:view', async () => {
+    perms.granted = ['groups:view']
+    mount(GroupSchedBoard, { attachTo: document.body })
+    openSchedBoard({ id: 53, name: '晨星组' })
+    await flushPromises()
+    expect(document.querySelector('[data-sq-trigger^="account:"]')).toBeNull()
+    expect(rows()[0].querySelectorAll('td')[1].textContent!.trim()).toBe('acc-7')
+  })
+
+  it('shows an unknown state as the fallback word and an unknown verdict uncoloured', async () => {
+    const b = board()
+    Object.assign(b.accounts[0], { state: 'future' })
+    b.accounts[1].verdicts.ttfo = 'future' as never
+    api.groupBoard.mockResolvedValue(b)
+    mount(GroupSchedBoard, { attachTo: document.body })
+    openSchedBoard({ id: 53, name: '晨星组' })
+    await flushPromises()
+    const state = rows()[0].querySelector('[data-sq-state]')!
+    expect([state.textContent, state.className]).toEqual(['admin.schedQuality.unknown', 'sq-text-3'])
+    const ttfo = rows()[1].querySelector('td:nth-last-child(3) span')!
+    expect(ttfo.className).toBe('sq-focus sq-text')
+    expect(ttfo.getAttribute('aria-label')).toContain('admin.schedQuality.unknown')
   })
 
   for (const theme of ['light', 'dark']) {

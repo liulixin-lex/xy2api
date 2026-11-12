@@ -57,6 +57,7 @@ import SchedOverridePopover from './SchedOverridePopover.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
 import type { SchedOverrideRequest } from '@/types/schedQuality'
 import { markSchedChanged } from '@/composables/useSchedLayers'
+import { testResult } from '@/utils/schedQualityFormat'
 
 // Batch quality actions of the account list (design spec A.5, B.11). Reset and test confirm first, demote and exempt
 // use the override popover; then each account is called one by one, four at a time, and listed with its result.
@@ -113,9 +114,7 @@ async function callOne(action: SchedBatchAction, id: number, request?: SchedOver
       return failed.length ? 'failed' : 'ok'
     }
     if (action === 'test') {
-      const { tests } = await schedQualityAPI.startTest(id)
-      if (tests.some((ticket) => ticket.started)) return 'ok'
-      return tests.length && tests.every((ticket) => ticket.why === 'already_running') ? 'testing' : 'failed'
+      return testResult((await schedQualityAPI.startTest(id)).tests)
     }
     await schedQualityAPI.setOverride(id, request!)
     return 'ok'

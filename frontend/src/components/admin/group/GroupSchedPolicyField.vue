@@ -1,8 +1,8 @@
 <template>
   <section class="border-t border-gray-200 pt-4 dark:border-dark-700" data-sq-policy>
-    <div v-if="conflict" class="mb-4 flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 dark:border-red-500/30 dark:bg-red-500/10" role="status">
+    <div v-if="conflict || saveFailed" class="mb-4 flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 dark:border-red-500/30 dark:bg-red-500/10" role="status" data-sq-policy-failed>
       <span class="sq-fail-word text-sm">{{ t('admin.schedQuality.result.failed') }}</span>
-      <button type="button" class="btn btn-secondary btn-sm" data-sq-policy-reload @click="reload">{{ t('admin.schedQuality.action.reload') }}</button>
+      <button v-if="conflict" type="button" class="btn btn-secondary btn-sm" data-sq-policy-reload @click="reload">{{ t('admin.schedQuality.action.reload') }}</button>
     </div>
     <div v-if="loadFailed" class="flex items-center gap-3">
       <span class="sq-fail-word text-sm">{{ t('admin.schedQuality.result.failed') }}</span>
@@ -25,7 +25,7 @@
       <label :for="ids.ttft" class="text-gray-700 dark:text-gray-300">{{ t('admin.schedQuality.policy.ttft') }}</label>
       <div class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
         <span class="inline-flex items-center gap-2">
-          <input :id="ids.ttft" v-model="form.ttft" type="number" step="0.1" min="0.5" max="600" :aria-invalid="!valid.ttft" :class="['input w-24 py-1.5 text-right sq-num', { 'input-error': !valid.ttft }]" />
+          <input :id="ids.ttft" v-model="form.ttft" type="number" step="0.1" min="0.5" max="600" :aria-invalid="!valid.ttft" :class="['input w-24 py-1.5 text-right sq-num', { 'input-error': !valid.ttft }]" @input="edited.ttft = true" />
           <span class="sq-text-3">{{ t('admin.schedQuality.policy.seconds') }}</span>
         </span>
         <span class="inline-flex flex-wrap gap-x-3 text-[13px]" data-sq-class-limits>
@@ -37,13 +37,13 @@
 
       <label :for="ids.error" class="text-gray-700 dark:text-gray-300">{{ t('admin.schedQuality.policy.error') }}</label>
       <span class="inline-flex items-center gap-2">
-        <input :id="ids.error" v-model="form.errorPct" type="number" step="0.1" min="0" max="100" :aria-invalid="!valid.error" :class="['input w-24 py-1.5 text-right sq-num', { 'input-error': !valid.error }]" />
+        <input :id="ids.error" v-model="form.errorPct" type="number" step="0.1" min="0" max="100" :aria-invalid="!valid.error" :class="['input w-24 py-1.5 text-right sq-num', { 'input-error': !valid.error }]" @input="edited.error = true" />
         <span class="sq-text-3">{{ t('admin.schedQuality.policy.percent') }}</span>
       </span>
 
       <label :for="ids.cache" class="text-gray-700 dark:text-gray-300">{{ t('admin.schedQuality.policy.cache') }}</label>
       <span class="inline-flex items-center gap-2">
-        <input :id="ids.cache" v-model="form.cachePct" type="number" step="1" min="0" max="100" :aria-invalid="!valid.cache" :class="['input w-24 py-1.5 text-right sq-num', { 'input-error': !valid.cache }]" />
+        <input :id="ids.cache" v-model="form.cachePct" type="number" step="1" min="0" max="100" :aria-invalid="!valid.cache" :class="['input w-24 py-1.5 text-right sq-num', { 'input-error': !valid.cache }]" @input="edited.cache = true" />
         <span class="sq-text-3">{{ t('admin.schedQuality.policy.percent') }}</span>
       </span>
 
@@ -97,8 +97,9 @@ import type { SchedBoard, SchedGroupPolicy, SchedPolicy, SchedRequestClass, Sche
 import { trialVerdicts } from '@/utils/schedQualityVerdict'
 
 // Quality gate block of the OpenAI group edit dialog (design spec D.1, D.2). Saved on its own with the policy
-// version; a 409 shows "失败 + 重新载入". The trial recomputes the verdicts of the group's accounts from the board's
-// evidence numbers on every input change, without requests; verdicts under saved thresholds always come from the API.
+// version; a 409 shows "失败 + 重新载入", any other error "失败". The trial recomputes the verdicts of the group's
+// accounts from the board's evidence numbers on every input change, without requests; verdicts under saved
+// thresholds always come from the API. Models of the trial are the board's request models (K27).
 type TrialKind = 'pass' | 'fail' | 'nodata'
 const TRIAL_KINDS: TrialKind[] = ['pass', 'fail', 'nodata']
 const CONVERTED_CLASSES: SchedRequestClass[] = ['light', 'heavy', 'xheavy']
@@ -112,11 +113,15 @@ const record = shallowRef<SchedGroupPolicy | null>(null)
 const loaded = computed(() => record.value !== null)
 const loadFailed = ref(false)
 const conflict = ref(false)
+const saveFailed = ref(false)
 const form = reactive({ enabled: false, ttft: '10', errorPct: '5', cachePct: '90', takeover: 0 as SchedTakeoverIdleSeconds })
-const model = ref<string>('')
+// The inputs show rounded values; a field the user has not typed in keeps the API value as is.
+const edited = reactive({ ttft: false, error: false, cache: false })
+const model = ref('')
 
 const pct = (ratio: number) => String(+(ratio * 100).toFixed(2))
 function fillForm(policy: SchedPolicy) {
+  Object.assign(edited, { ttft: false, error: false, cache: false })
   Object.assign(form, {
     enabled: policy.enabled,
     ttft: String(policy.ttft_seconds),
@@ -132,18 +137,14 @@ async function reload() {
     const value = await schedQualityAPI.getGroupPolicy(props.groupId)
     record.value = value
     conflict.value = false
+    saveFailed.value = false
     fillForm(value.policy)
-    const models = Object.keys(value.class_limits_ms).filter((key) => key !== 'default')
-    if (!models.includes(model.value)) model.value = models[0] ?? ''
   } catch {
     loadFailed.value = true
   }
 }
 watch(() => props.groupId, reload, { immediate: true })
 
-const modelOptions = computed(() =>
-  Object.keys(record.value?.class_limits_ms ?? {}).filter((key) => key !== 'default').map((key) => ({ value: key, label: key }))
-)
 const takeoverOptions = computed(() => TAKEOVER_VALUES.map((value) => ({
   value,
   label: value === -1
@@ -161,13 +162,16 @@ const valid = computed(() => ({
 }))
 const isValid = computed(() => valid.value.ttft && valid.value.error && valid.value.cache)
 
-const current = computed<SchedPolicy>(() => ({
-  enabled: form.enabled,
-  ttft_seconds: num(form.ttft),
-  max_error_rate: Number((num(form.errorPct) / 100).toFixed(6)),
-  min_cache_ratio: Number((num(form.cachePct) / 100).toFixed(6)),
-  takeover_idle_seconds: form.takeover
-}))
+const current = computed<SchedPolicy>(() => {
+  const saved = record.value?.policy
+  return {
+    enabled: form.enabled,
+    ttft_seconds: saved && !edited.ttft ? saved.ttft_seconds : num(form.ttft),
+    max_error_rate: saved && !edited.error ? saved.max_error_rate : Number((num(form.errorPct) / 100).toFixed(6)),
+    min_cache_ratio: saved && !edited.cache ? saved.min_cache_ratio : Number((num(form.cachePct) / 100).toFixed(6)),
+    takeover_idle_seconds: form.takeover
+  }
+})
 const lastValid = ref<SchedPolicy | null>(null)
 watch(current, (value) => { if (isValid.value) lastValid.value = value }, { immediate: true })
 
@@ -179,18 +183,29 @@ const converted = computed(() => {
   return CONVERTED_CLASSES.map((cls) => ({ cls, value: (x * limits[cls] / limits.regular).toFixed(1) }))
 })
 
-// Trial on the board of the selected model.
+// Trial on the board of the selected model. The first load asks without a model and takes the board's default and
+// its model list; picking another model loads that board.
 const board = shallowRef<SchedBoard | null>(null)
-watch(() => [props.groupId, model.value] as const, async ([id, m]) => {
+const models = ref<string[]>([])
+const modelOptions = computed(() => models.value.map((m) => ({ value: m, label: m })))
+async function loadBoard(id: number, m: string) {
   board.value = null
-  if (!m) return
   try {
-    const value = await schedQualityAPI.groupBoard(id, m)
-    if (props.groupId === id && model.value === m) board.value = value
+    const value = await schedQualityAPI.groupBoard(id, m || undefined)
+    if (props.groupId !== id || model.value !== m) return
+    board.value = value
+    models.value = value.models
+    model.value = value.model
   } catch {
     // No trial without board data.
   }
+}
+watch(() => props.groupId, (id) => {
+  model.value = ''
+  models.value = []
+  void loadBoard(id, '')
 }, { immediate: true })
+watch(model, (m) => { if (m && board.value?.model !== m) void loadBoard(props.groupId, m) })
 
 const trial = computed(() => {
   const groups: Record<TrialKind, string[]> & { total: number } = { pass: [], fail: [], nodata: [], total: 0 }
@@ -222,12 +237,14 @@ async function save(): Promise<boolean> {
   if (!record.value) return !loadFailed.value
   if (!isValid.value) return false
   if (!changed.value) return true
+  saveFailed.value = false
   try {
     record.value = await schedQualityAPI.updateGroupPolicy(props.groupId, { expected_version: record.value.version, policy: current.value })
     conflict.value = false
     return true
   } catch (error) {
     if ((error as { status?: number })?.status === 409) conflict.value = true
+    else saveFailed.value = true
     return false
   }
 }

@@ -15,6 +15,7 @@
   "models": [
     {
       "model": "gpt-6.1-sol",
+      "request_model": "gpt-6.1-sol",
       "samples": 200,
       "sessions": 41,
       "from": "2026-11-11T10:08:00Z",

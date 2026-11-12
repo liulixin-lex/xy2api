@@ -1,4 +1,6 @@
-import type { SchedReason, SchedRecentAttempt, SchedVerdict } from '@/types/schedQuality'
+import type {
+  SchedOutcome, SchedReason, SchedRecentAttempt, SchedRequestClass, SchedState, SchedTestTicket, SchedVerdict
+} from '@/types/schedQuality'
 
 // Display rules shared by the list, the drawer, the board and the group settings (design spec A.1, B, C, D).
 
@@ -9,6 +11,21 @@ type Translate = (key: string, values?: Record<string, unknown>) => string
 type HasKey = (key: string) => boolean
 
 export const DASH = '—'
+
+export const SCHED_VERDICTS: readonly SchedVerdict[] = ['pass', 'marginal', 'fail', 'nodata']
+export const SCHED_STATES: readonly SchedState[] = ['normal', 'cooling']
+export const SCHED_CLASSES: readonly SchedRequestClass[] = ['light', 'regular', 'heavy', 'xheavy']
+const SCHED_OUTCOMES: readonly SchedOutcome[] = ['ok', 'timeout', 'account_fault', 'other']
+
+/** A finite enum value from the API, or null when this UI does not know it: shown as the fallback word, neutral. */
+export function known<T extends string>(value: string | null | undefined, values: readonly T[]): T | null {
+  return (values as readonly string[]).includes(value ?? '') ? (value as T) : null
+}
+
+/** Word of a finite enum value under `prefix`; unknown values show the fallback word. */
+export function enumWord<T extends string>(value: string, values: readonly T[], prefix: string, t: Translate): string {
+  return known(value, values) ? t(`${prefix}.${value}`) : t('admin.schedQuality.unknown')
+}
 
 /** First output: `{x.x}s`, the timeout word, or a dash. */
 export function fmtTtfo(ms: number | null | undefined, timeout: boolean, t: Translate): string {
@@ -69,12 +86,23 @@ export function causeDim(reason: SchedReason): SchedDim | null {
   return null
 }
 
-/** Result word of a recent attempt (spec B.7). */
-export function attemptResult(attempt: SchedRecentAttempt): 'ok' | 'timeout' | 'failed' | 'canceled' {
+/** Result word of a recent attempt (spec B.7); null for an outcome this UI does not know. */
+export function attemptResult(attempt: SchedRecentAttempt): 'ok' | 'timeout' | 'failed' | 'canceled' | null {
+  if (!known(attempt.outcome, SCHED_OUTCOMES)) return null
   if (attempt.outcome === 'ok') return 'ok'
   if (attempt.outcome === 'timeout') return 'timeout'
   if (attempt.outcome === 'other' && (attempt.detail === 'client_cancel' || attempt.detail === 'unfinished')) return 'canceled'
   return 'failed'
+}
+
+/**
+ * Account result of one test request (spec B.11, contract clarification K28), for the batch and the drawer alike:
+ * ok when a model started and none hit an internal error, testing when every model is already running, otherwise
+ * failed. A request that throws is failed too.
+ */
+export function testResult(tests: SchedTestTicket[]): 'ok' | 'testing' | 'failed' {
+  if (tests.some((ticket) => ticket.started) && !tests.some((ticket) => ticket.why === 'error')) return 'ok'
+  return tests.length && tests.every((ticket) => ticket.why === 'already_running') ? 'testing' : 'failed'
 }
 
 /** Attempts that do not count toward any verdict are shown in the secondary colour. */
