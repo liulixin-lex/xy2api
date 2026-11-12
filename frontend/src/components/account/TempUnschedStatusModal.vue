@@ -113,11 +113,13 @@
         <button type="button" class="btn btn-secondary" @click="handleClose">
           {{ t('common.close') }}
         </button>
-        <!-- 与行菜单「恢复状态」同一个确认流（恢复确认 → 已清除 / 保留 / 失败），弹在本弹窗之上 -->
+        <!-- 与行菜单「恢复状态」相同：点一下直接恢复，结果是一条轻提示；进行中置灰 -->
         <button
+          v-if="canManage"
           type="button"
           class="btn btn-primary"
-          :disabled="!account"
+          :disabled="!account || recovering"
+          :aria-busy="recovering"
           data-test="temp-unsched-recover"
           @click="account && emit('recover', account)"
         >
@@ -136,10 +138,13 @@ import { adminAPI } from '@/api/admin'
 import type { Account, TempUnschedulableStatus } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import { formatDateTime } from '@/utils/format'
+import { useAdminPermission } from '@/composables/useAdminPermission'
 
 const props = defineProps<{
   show: boolean
   account: Account | null
+  /** The account's recovery is still running. */
+  recovering?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -149,6 +154,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const { canManage } = useAdminPermission('accounts')
 
 const loading = ref(false)
 const status = ref<TempUnschedulableStatus | null>(null)

@@ -61,6 +61,13 @@ export default {
       medium: 'Medium',
       large: 'Large',
     },
+    test: {
+      screen: 'Screen',
+      full: 'Three tiers',
+      done: 'Done',
+      unfinished: 'Unfinished',
+      aborted: 'Void',
+    },
     scope: {
       account: 'Account',
       proxy: 'Proxy',
@@ -96,9 +103,11 @@ export default {
       forever: 'Always',
       reason: 'Reason',
     },
-    reset: {
-      cleared: 'Cleared',
-      preserved: 'Kept',
+    recover: {
+      ok: '{name} recovered',
+      failed: '{name} recovery failed',
+      batchOk: 'Recovered {n}',
+      batchPartial: 'Recovered {ok} · Failed {failed}',
     },
     proxy: {
       title: 'Proxy isolation',
@@ -183,8 +192,6 @@ export default {
       testRounds: 'Test · {n} rounds',
       recentlyFull: 'Just full',
       noTakeover: 'No takeover',
-      testOk: 'No faults',
-      testFault: 'Faults',
       globalOff: 'Quality off',
       stale: 'Stale',
       editMembership: 'Edit groups',

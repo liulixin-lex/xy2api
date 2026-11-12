@@ -8,6 +8,8 @@ export type SchedStanding = 'front' | 'back'
 export type SchedOverrideMode = 'exempt' | 'demote'
 export type SchedRequestClass = 'light' | 'regular' | 'heavy' | 'xheavy'
 export type SchedTestTier = 'small' | 'medium' | 'large'
+/** screen: started automatically, no medium or large rounds; full: the rest (contract delta A9). */
+export type SchedTestKind = 'screen' | 'full'
 export type SchedOutcome = 'ok' | 'timeout' | 'account_fault' | 'other'
 /** Cooling: speed | error | cache | acute_timeout | test_*; normal: '' | unverified. */
 export type SchedReason =
@@ -86,6 +88,7 @@ export interface SchedTestTierResult {
   tier: SchedTestTier
   /** Warm turns actually sent, in order, at most two; null for a turn without first output (see timeouts). */
   ttfo_ms: (number | null)[]
+  /** Kept for the record; no longer shown or judged (contract delta A3). */
   cache_ratio: number | null
   faults: number
   timeouts: number
@@ -98,6 +101,10 @@ export interface SchedTest {
   done: boolean
   abort_reason: string
   auto: boolean
+  kind: SchedTestKind
+  /** Every tier with rounds has exactly rounds 1–3, all ok (contract delta A4). */
+  clean: boolean
+  /** Only tiers with at least one round. */
   tiers: SchedTestTierResult[]
   input_tokens: number
   cached_tokens: number
@@ -192,7 +199,10 @@ export interface SchedAccountDetail {
   tests_enabled: boolean
   reset_at: string | null
   models: SchedModelEvidence[]
+  /** Every OpenAI group of the account; by_model is empty for a group without state rows (contract delta D3). */
   groups: SchedAccountGroup[]
+  /** The override covering every group, if any. */
+  all_groups_override: SchedOverride | null
   auto_states: SchedAutoState[]
   recent_attempts: SchedRecentAttempt[]
 }

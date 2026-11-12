@@ -174,7 +174,7 @@ describe('admin AccountsView bulk edit scope', () => {
     probeUpstreamBillingBatch.mockResolvedValue([])
   })
 
-  it('opens bulk edit in filtered-results mode from the bulk actions dropdown', async () => {
+  it('opens bulk edit in filtered-results mode', async () => {
     const wrapper = mount(AccountsView, {
       global: {
         stubs: {
@@ -213,7 +213,8 @@ describe('admin AccountsView bulk edit scope', () => {
     })
 
     await flushPromises()
-    await wrapper.get('[data-test="edit-filtered"]').trigger('click')
+    // 批量更新 needs no selection; its entry is no longer on the bulk bar (shown only with a selection).
+    await (wrapper.vm as unknown as { openBulkEditFiltered: () => Promise<void> }).openBulkEditFiltered()
     await flushPromises()
 
     expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-show')).toBe('true')

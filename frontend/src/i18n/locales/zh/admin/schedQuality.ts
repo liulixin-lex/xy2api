@@ -61,6 +61,13 @@ export default {
       medium: '中',
       large: '大',
     },
+    test: {
+      screen: '筛查',
+      full: '三档',
+      done: '完成',
+      unfinished: '未完成',
+      aborted: '作废',
+    },
     scope: {
       account: '账号',
       proxy: '代理',
@@ -96,9 +103,11 @@ export default {
       forever: '一直',
       reason: '理由',
     },
-    reset: {
-      cleared: '已清除',
-      preserved: '保留',
+    recover: {
+      ok: '{name} 已恢复',
+      failed: '{name} 恢复失败',
+      batchOk: '已恢复 {n}',
+      batchPartial: '已恢复 {ok} · 失败 {failed}',
     },
     proxy: {
       title: '代理隔离',
@@ -183,8 +192,6 @@ export default {
       testRounds: '测试 {n} 轮',
       recentlyFull: '刚占满',
       noTakeover: '暂不接管',
-      testOk: '无故障',
-      testFault: '有故障',
       globalOff: '质量调度 关',
       stale: '数据过期',
       editMembership: '编辑归组',

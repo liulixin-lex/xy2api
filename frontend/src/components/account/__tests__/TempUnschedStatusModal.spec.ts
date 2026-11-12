@@ -7,8 +7,16 @@ vi.mock('@/api/admin', () => ({ adminAPI: { accounts: mocks } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => mocks }))
 vi.mock('@/utils/format', () => ({ formatDateTime: () => 'date' }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+const perms = await vi.hoisted(async () => {
+  const { reactive } = await import('vue')
+  return reactive({ manage: true })
+})
+vi.mock('@/composables/useAdminPermission', async () => {
+  const { computed } = await vi.importActual<typeof import('vue')>('vue')
+  return { useAdminPermission: () => ({ canView: computed(() => true), canManage: computed(() => perms.manage) }) }
+})
 enableAutoUnmount(afterEach)
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => { vi.clearAllMocks(); perms.manage = true })
 function deferred() {
   let resolve!: (value: unknown) => void
   let reject!: (value: unknown) => void
@@ -29,13 +37,26 @@ describe('temporary unschedulable status requests', () => {
     old.resolve(active('old-error')); await flushPromises()
     expect(w.text()).toContain('current-error'); expect(w.text()).not.toContain('old-error')
   })
-  it('hands the current account to the shared reset flow instead of recovering here', async () => {
+  it('hands the current account to the one-click recovery of the page', async () => {
     mocks.getTempUnschedulableStatus.mockResolvedValueOnce(active('old-error')).mockResolvedValueOnce(active('current-error'))
     const w = await open(); await flushPromises()
     await w.setProps({ account: { id: 2, name: 'second' } as Account })
     await w.get('[data-test="temp-unsched-recover"]').trigger('click')
     expect(w.emitted('recover')?.[0][0]).toMatchObject({ id: 2, name: 'second' })
     expect(w.text()).not.toContain('admin.accounts.recoverStateHint')
+  })
+  it('greys the recover button while the account is being recovered, and hides it without accounts:manage (F3)', async () => {
+    mocks.getTempUnschedulableStatus.mockResolvedValue(active('current-error'))
+    const w = await open(); await flushPromises()
+    await w.setProps({ recovering: true })
+    const button = w.get('[data-test="temp-unsched-recover"]')
+    expect(button.attributes('disabled')).toBeDefined()
+    expect(button.attributes('aria-busy')).toBe('true')
+    await button.trigger('click')
+    expect(w.emitted('recover')).toBeUndefined()
+    perms.manage = false
+    await flushPromises()
+    expect(w.find('[data-test="temp-unsched-recover"]').exists()).toBe(false)
   })
   it('ignores old errors without dismissing the current loading state', async () => {
     const old = deferred(); const current = deferred()

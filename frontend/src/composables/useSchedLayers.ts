@@ -1,7 +1,7 @@
 import { reactive, ref } from 'vue'
 
-// One account drawer, one group board and one reset flow for the whole admin UI (design spec 0.2): opening one that
-// is already open swaps its content and brings it to the top. SchedQualityLayers renders them.
+// One account drawer and one group board for the whole admin UI (design spec 0.2): opening one that is already open
+// swaps its content and brings it to the top. SchedQualityLayers renders them.
 
 export interface DrawerRequest {
   accountId: number | null
@@ -22,14 +22,8 @@ export interface BoardRequest {
   raise: number
 }
 
-export interface ResetRequest {
-  accountId: number | null
-  accountName: string
-}
-
 const drawer = reactive<DrawerRequest>({ accountId: null, accountName: '', model: null, groupId: null, toGroups: false, raise: 0 })
 const board = reactive<BoardRequest>({ groupId: null, groupName: '', model: null, raise: 0 })
-const reset = reactive<ResetRequest>({ accountId: null, accountName: '' })
 /** Bumped after any action that changes an account's quality state, so lists refresh. */
 const changed = ref(0)
 
@@ -60,19 +54,10 @@ export function closeSchedBoard() {
   board.groupId = null
 }
 
-export function openSchedReset(account: { id: number; name: string }) {
-  reset.accountId = account.id
-  reset.accountName = account.name
-}
-
-export function closeSchedReset() {
-  reset.accountId = null
-}
-
 export function markSchedChanged() {
   changed.value++
 }
 
 export function useSchedLayers() {
-  return { drawer, board, reset, changed }
+  return { drawer, board, changed }
 }
