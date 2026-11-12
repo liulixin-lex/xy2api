@@ -158,10 +158,16 @@
         <Transition name="fade">
           <div
             v-if="previewImageUrl"
-            class="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4"
+            ref="lightboxRef"
+            class="fixed inset-0 flex items-center justify-center bg-black/80 p-4"
+            :style="{ zIndex: lightbox.zIndex.value }"
+            role="dialog"
+            aria-modal="true"
             @click.self="previewImageUrl = ''"
+            @keydown.tab="lightbox.trapTab"
           >
             <button
+              ref="lightboxCloseRef"
               class="absolute right-4 top-4 rounded-full bg-black/50 p-2 text-white transition-colors hover:bg-black/70"
               @click="previewImageUrl = ''"
             >
@@ -249,6 +255,7 @@ import Select from '@/components/common/Select.vue'
 import TextArea from '@/components/common/TextArea.vue'
 import { Icon } from '@/components/icons'
 import { useClipboard } from '@/composables/useClipboard'
+import { useModalLayer } from '@/composables/useModalLayer'
 import { buildApiUrl } from '@/api/client'
 import { adminAPI } from '@/api/admin'
 import type { Account, ClaudeModel } from '@/types'
@@ -293,6 +300,15 @@ const openAITestModeOptions = computed(() => [
   { value: 'compact', label: t('admin.accounts.openai.testModeCompact') }
 ])
 const previewImageUrl = ref('')
+const lightboxRef = ref<HTMLElement | null>(null)
+const lightboxCloseRef = ref<HTMLElement | null>(null)
+// The lightbox opens above this dialog: top modal layer of the overlay stack, Escape closes it alone.
+const lightbox = useModalLayer(() => !!previewImageUrl.value, {
+  root: lightboxRef,
+  floor: 100,
+  initialFocus: () => lightboxCloseRef.value,
+  onEscape: () => { previewImageUrl.value = '' }
+})
 const prioritizedGeminiModels = ['gemini-3.1-flash-image', 'gemini-2.5-flash-image', 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3-flash-preview', 'gemini-3-pro-preview', 'gemini-2.0-flash']
 const supportsGeminiImageTest = computed(() => {
   const modelID = selectedModelId.value.toLowerCase()
