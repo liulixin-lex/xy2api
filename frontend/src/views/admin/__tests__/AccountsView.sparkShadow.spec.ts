@@ -39,6 +39,7 @@ vi.mock('@/api/admin', () => ({
       getBatchTodayStats,
       duplicate: duplicateAccount,
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
+      getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       createSparkShadow,
       delete: vi.fn(),
       batchClearError: vi.fn(),
