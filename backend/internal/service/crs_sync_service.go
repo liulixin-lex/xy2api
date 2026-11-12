@@ -251,6 +251,7 @@ func (s *CRSSyncService) fetchCRSExport(ctx context.Context, baseURL, username, 
 	if err != nil {
 		return nil, fmt.Errorf("create http client failed: %w", err)
 	}
+	client = httpclient.WithoutRedirects(client)
 
 	adminToken, err := crsLogin(ctx, client, normalizedURL, username, password)
 	if err != nil {
@@ -1350,6 +1351,9 @@ func crsLogin(ctx context.Context, client *http.Client, baseURL, username, passw
 		return "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if err := httpclient.RedirectError(resp); err != nil {
+		return "", err
+	}
 
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -1385,6 +1389,9 @@ func crsExportAccounts(ctx context.Context, client *http.Client, baseURL, adminT
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if err := httpclient.RedirectError(resp); err != nil {
+		return nil, err
+	}
 
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 5<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {

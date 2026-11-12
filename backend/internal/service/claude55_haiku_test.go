@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -118,10 +120,10 @@ func TestHaiku55BridgeConvertsToAdaptiveThinking(t *testing.T) {
 		require.Equal(t, "any", gjson.GetBytes(upstream.lastBody, "tool_choice.type").String(), "Haiku 5.5 accepts forced tool use")
 
 		rec, upstream, err := run(t, chat, "claude-haiku-5-5", invalid)
-		require.Error(t, err)
-		require.Equal(t, http.StatusBadRequest, rec.Code)
-		require.Contains(t, rec.Body.String(), "non-default temperature")
-		require.Nil(t, upstream.lastReq)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.NotNil(t, upstream.lastReq)
+		require.False(t, gjson.GetBytes(upstream.lastBody, "temperature").Exists())
 
 		// Haiku 4.5 keeps the manual thinking budget.
 		_, upstream, err = run(t, chat, "claude-haiku-4-5", strings.Replace(body, `"xhigh"`, `"high"`, 1))
@@ -171,4 +173,11 @@ func TestHaiku55OAuthForwardSendsTopPWithoutTemperature(t *testing.T) {
 		require.Equal(t, 0.99, gjson.GetBytes(upstream.lastBody, "top_p").Float(), typ)
 		require.False(t, gjson.GetBytes(upstream.lastBody, "temperature").Exists(), typ)
 	}
+}
+
+func TestClaude55NativeValidationRetainsErrorContract(t *testing.T) {
+	err := validateClaude55Parameters([]byte(`{"thinking":{"type":"enabled"}}`), "claude-sonnet-5-5")
+	require.EqualError(t, err, "claude-sonnet-5-5 requires adaptive thinking or thinking.type=between_tools; omit thinking or use one of those modes")
+	var conversion *apicompat.UnsupportedConversionError
+	require.False(t, errors.As(err, &conversion))
 }
