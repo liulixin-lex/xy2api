@@ -140,8 +140,8 @@ func (s *SchedQualityEngineService) loadEvidence(ctx context.Context, now time.T
 			return err
 		}
 		cursor = now.Add(-schedquality.WindowMaxAge)
+		s.window.merge(rows, now)
 		for _, row := range rows {
-			s.window.add(row)
 			if row.InsertedAt.After(cursor) {
 				cursor = row.InsertedAt
 			}
@@ -155,9 +155,7 @@ func (s *SchedQualityEngineService) loadEvidence(ctx context.Context, now time.T
 		if err != nil {
 			return err
 		}
-		for _, row := range rows {
-			s.window.add(row)
-		}
+		s.window.merge(rows, now)
 		if len(rows) == 0 {
 			break
 		}
@@ -179,11 +177,11 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) error {
 	defer func() { s.mu.Unlock(); s.notify(resets) }()
 	now := s.now()
 	// Bound local evidence even when any subsequent read fails.
-	s.window.take(now)
+	samples := s.window.take(now)
 	if err := s.loadEvidence(ctx, now); err != nil {
 		return err
 	}
-	d, err := s.inputs(ctx, now)
+	d, err := s.inputs(ctx, now, samples)
 	if err != nil {
 		return err
 	}
@@ -307,7 +305,7 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) error {
 	return nil
 }
 
-func (s *SchedQualityEngineService) inputs(ctx context.Context, now time.Time) (*schedQualityData, error) {
+func (s *SchedQualityEngineService) inputs(ctx context.Context, now time.Time, samples map[SchedAccountModel][]schedquality.AttemptSample) (*schedQualityData, error) {
 	if err := s.refreshConfig(ctx, now); err != nil {
 		return nil, err
 	}
@@ -315,7 +313,7 @@ func (s *SchedQualityEngineService) inputs(ctx context.Context, now time.Time) (
 	if err != nil {
 		return nil, err
 	}
-	d := &schedQualityData{now: now, samples: s.window.take(now), tests: make(map[SchedAccountModel][]SchedTestRecord, len(tests)), finished: make(map[SchedAccountModel][]schedquality.TestResult), summaries: make(map[schedQualitySummaryKey]schedquality.Summary), globalEnabled: true, testsEnabled: true}
+	d := &schedQualityData{now: now, samples: samples, tests: make(map[SchedAccountModel][]SchedTestRecord, len(tests)), finished: make(map[SchedAccountModel][]schedquality.TestResult), summaries: make(map[schedQualitySummaryKey]schedquality.Summary), globalEnabled: true, testsEnabled: true}
 	if s.switches != nil {
 		d.globalEnabled = s.switches.SchedQualityEnabled(ctx)
 		d.testsEnabled = s.switches.SchedQualityTestEnabled(ctx)
@@ -335,7 +333,8 @@ func (s *SchedQualityEngineService) inputs(ctx context.Context, now time.Time) (
 }
 
 func (s *SchedQualityEngineService) rebuild(ctx context.Context) (map[int64]time.Time, error) {
-	d, err := s.inputs(ctx, s.now())
+	now := s.now()
+	d, err := s.inputs(ctx, now, s.window.take(now))
 	if err != nil {
 		return nil, err
 	}
