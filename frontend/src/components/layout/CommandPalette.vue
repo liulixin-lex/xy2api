@@ -4,6 +4,8 @@
       <div
         v-if="open"
         class="modal-overlay items-start pt-[12vh]"
+        ref="rootRef"
+        :style="{ zIndex: layer.zIndex.value }"
         data-test="command-palette"
         @mousedown.self="closePalette"
       >
@@ -87,6 +89,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import Icon from '@/components/icons/Icon.vue'
 import { searchEntries, useCommandPalette, type CommandEntry } from '@/composables/useCommandPalette'
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -99,6 +102,9 @@ const activeIndex = ref(0)
 const inputRef = ref<HTMLInputElement | null>(null)
 const listRef = ref<HTMLElement | null>(null)
 let previousFocus: HTMLElement | null = null
+const rootRef = ref<HTMLElement | null>(null)
+// A modal layer of the overlay stack: the page is inert below it. The input keeps its own Tab / Escape handling.
+const layer = useOverlayLayer(() => open.value, { root: rootRef, initialFocus: () => inputRef.value, onEscape: () => closePalette() })
 
 const currentPath = computed(() => route.path)
 const results = computed(() => searchEntries(entries.value, query.value))

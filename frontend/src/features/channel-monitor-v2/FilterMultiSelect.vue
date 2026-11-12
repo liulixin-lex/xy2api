@@ -80,6 +80,7 @@
 
 <script setup lang="ts">
 import type { CSSProperties } from 'vue'
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { useI18n } from 'vue-i18n'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -136,7 +137,7 @@ const dropdownStyle = computed<CSSProperties>(() => {
     top: `${rect.bottom + 4}px`,
     minWidth: `${minWidth}px`,
     maxWidth: `${availableWidth}px`,
-    zIndex: '100000020',
+    zIndex: String(menuLayer.zIndex.value ?? 100000020),
   }
 })
 
@@ -166,6 +167,10 @@ function open() {
 function close() {
   isOpen.value = false
 }
+
+// A sub-layer of the overlay stack (design spec 0.2): while open, Escape closes it before the layer or page
+// below, re-renders below keep their hands off its focus, and a dialog opening above closes it.
+const menuLayer = useOverlayLayer(isOpen, { root: dropdownRef, modal: false, floor: 100000020, onEscape: close })
 
 function positionDropdown() {
   const trigger = triggerRef.value
@@ -199,9 +204,6 @@ function onDocumentMouseDown(event: MouseEvent) {
   close()
 }
 
-function onDocumentKeyDown(event: KeyboardEvent) {
-  if (event.key === 'Escape') close()
-}
 
 function onWindowChange() {
   if (isOpen.value) positionDropdown()
@@ -212,12 +214,10 @@ watch(isOpen, async (open) => {
     await nextTick()
     positionDropdown()
     document.addEventListener('mousedown', onDocumentMouseDown)
-    document.addEventListener('keydown', onDocumentKeyDown)
     window.addEventListener('resize', onWindowChange)
     window.addEventListener('scroll', onWindowChange, true)
   } else {
     document.removeEventListener('mousedown', onDocumentMouseDown)
-    document.removeEventListener('keydown', onDocumentKeyDown)
     window.removeEventListener('resize', onWindowChange)
     window.removeEventListener('scroll', onWindowChange, true)
   }
@@ -225,7 +225,6 @@ watch(isOpen, async (open) => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('mousedown', onDocumentMouseDown)
-  document.removeEventListener('keydown', onDocumentKeyDown)
   window.removeEventListener('resize', onWindowChange)
   window.removeEventListener('scroll', onWindowChange, true)
 })

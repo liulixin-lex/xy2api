@@ -1,6 +1,7 @@
 <template>
   <div class="relative" ref="containerRef">
     <button
+      ref="triggerRef"
       type="button"
       @click="toggle"
       :disabled="disabled"
@@ -23,7 +24,7 @@
     </button>
 
     <Transition name="select-dropdown">
-      <div v-if="isOpen" class="select-dropdown">
+      <div v-if="isOpen" ref="dropdownRef" class="select-dropdown">
         <!-- Search and Batch Test Header -->
         <div class="select-header">
           <div class="select-search">
@@ -170,6 +171,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import Icon from '@/components/icons/Icon.vue'
@@ -208,6 +210,25 @@ const isOpen = ref(false)
 const searchQuery = ref('')
 const containerRef = ref<HTMLElement | null>(null)
 const searchInputRef = ref<HTMLInputElement | null>(null)
+const triggerRef = ref<HTMLButtonElement | null>(null)
+const dropdownRef = ref<HTMLElement | null>(null)
+
+const closeDropdown = () => {
+  isOpen.value = false
+  searchQuery.value = ''
+}
+
+// The open list is a sub-layer of the dialog it sits in (overlayStack): the first Escape only closes the list and
+// returns focus to its button, keeping the form and its unsaved input; the next Escape is the dialog's.
+useOverlayLayer(isOpen, {
+  root: dropdownRef,
+  modal: false,
+  onEscape: () => {
+    closeDropdown()
+    triggerRef.value?.focus()
+  },
+  onCovered: closeDropdown
+})
 
 // Test state
 const testResults = reactive<Record<number, ProxyTestResult>>({})
@@ -298,21 +319,12 @@ const handleClickOutside = (event: MouseEvent) => {
   }
 }
 
-const handleEscape = (event: KeyboardEvent) => {
-  if (event.key === 'Escape' && isOpen.value) {
-    isOpen.value = false
-    searchQuery.value = ''
-  }
-}
-
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
-  document.addEventListener('keydown', handleEscape)
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
-  document.removeEventListener('keydown', handleEscape)
 })
 </script>
 

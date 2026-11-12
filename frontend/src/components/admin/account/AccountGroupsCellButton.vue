@@ -1,10 +1,10 @@
 <template>
   <button
     type="button"
+    v-tip="t('admin.schedQuality.tip.editMembership')"
     data-testid="account-groups-cell"
-    class="-mx-1 flex min-w-0 max-w-56 flex-wrap items-center gap-1 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 dark:hover:bg-dark-700"
+    class="sq-focus -mx-1 flex min-w-0 max-w-56 flex-wrap items-center gap-1 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-gray-100 dark:hover:bg-dark-700"
     :aria-label="t('admin.groupCategories.editAccountGroupsAria', { name: accountName })"
-    :title="groups.length ? groups.map((group) => group.name).join('、') : undefined"
     @click="emit('open')"
   >
     <template v-if="groups.length">
@@ -17,7 +17,7 @@
           :subscription-type="group.subscription_type"
           :rate-multiplier="group.rate_multiplier"
           :show-rate="false"
-          :title="group.name"
+          neutral
           class="max-w-40"
         />
         <span v-if="hiddenCount > 0 && index === visibleGroups.length - 1" class="whitespace-nowrap text-xs font-medium text-gray-500 dark:text-gray-400">+{{ hiddenCount }}</span>
@@ -31,6 +31,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import GroupBadge from '@/components/common/GroupBadge.vue'
+import { vTip } from '@/utils/tip'
 import type { Group } from '@/types'
 
 // 账号列表的分组单元格：整格是一个按钮，点开“编辑分组”；没有分组时显示“—”也能点。
@@ -47,7 +48,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-// 最多显示 2 个标签，名称尽量完整，其余收进 +N（按钮 title 列出全部分组）。
+// 最多显示 2 个标签，其余收进 +N，在点开的编辑弹窗里看全部分组；徽章用中性色（设计 A.9）。
 const MAX_VISIBLE = 2
 const visibleGroups = computed(() => props.groups.slice(0, MAX_VISIBLE))
 const hiddenCount = computed(() => Math.max(0, props.groups.length - MAX_VISIBLE))

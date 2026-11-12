@@ -59,6 +59,7 @@ export async function list(
     search?: string
     privacy_mode?: string
     iq_status?: string
+    sched_quality?: string
     group_category?: string
     lite?: string
     sort_by?: string
@@ -137,6 +138,7 @@ export async function getUpstreamBillingRatesWithEtag(
     search?: string
     privacy_mode?: string
     iq_status?: string
+    sched_quality?: string
     group_category?: string
     sort_by?: string
     sort_order?: 'asc' | 'desc'
@@ -172,6 +174,7 @@ export async function listWithEtag(
     search?: string
     privacy_mode?: string
     iq_status?: string
+    sched_quality?: string
     group_category?: string
     lite?: string
     sort_by?: string
@@ -453,16 +456,6 @@ export async function clearRateLimit(id: number): Promise<Account> {
   const { data } = await apiClient.post<Account>(
     `/admin/accounts/${id}/clear-rate-limit`
   )
-  return data
-}
-
-/**
- * Recover account runtime state in one call
- * @param id - Account ID
- * @returns Updated account
- */
-export async function recoverState(id: number): Promise<Account> {
-  const { data } = await apiClient.post<Account>(`/admin/accounts/${id}/recover-state`)
   return data
 }
 
@@ -827,6 +820,8 @@ export async function exportData(options?: {
     sort_by?: string
     sort_order?: 'asc' | 'desc'
     group_category?: string
+    /** "cooling" (contract clarification K11 / K24). */
+    sched_quality?: string
   }
   includeProxies?: boolean
 }): Promise<AdminDataPayload> {
@@ -835,7 +830,7 @@ export async function exportData(options?: {
     params.ids = options.ids.join(',')
   } else if (options?.filters) {
     const { platform, type, status, group, privacy_mode, search, sort_by, sort_order } = options.filters
-    const { group_category } = options.filters
+    const { group_category, sched_quality } = options.filters
     if (platform) params.platform = platform
     if (type) params.type = type
     if (status) params.status = status
@@ -845,6 +840,7 @@ export async function exportData(options?: {
     if (sort_by) params.sort_by = sort_by
     if (sort_order) params.sort_order = sort_order
     if (group_category) params.group_category = group_category
+    if (sched_quality) params.sched_quality = sched_quality
   }
   if (options?.includeProxies === false) {
     params.include_proxies = 'false'
@@ -1255,7 +1251,6 @@ export const accountsAPI = {
   getBatchTodayStats,
   getUpstreamBalances,
   clearRateLimit,
-  recoverState,
   resetAccountQuota,
   getTempUnschedulableStatus,
   resetTempUnschedulable,

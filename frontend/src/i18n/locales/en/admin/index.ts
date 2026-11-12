@@ -10,6 +10,7 @@ import plugins from './plugins'
 import resilience from './resilience'
 import groupCategories from './groupCategories'
 import operatorAccess from './operatorAccess'
+import schedQuality from './schedQuality'
 
 export default {
   ...overview,
@@ -24,4 +25,5 @@ export default {
   ...resilience,
   ...groupCategories,
   ...operatorAccess,
+  ...schedQuality,
 }

@@ -62,6 +62,12 @@
       <div
         v-if="dialogVisible"
         class="fixed inset-0 z-[140] flex items-center justify-center overflow-y-auto bg-gray-950/60 p-4"
+        ref="agreementRef"
+        :style="{ zIndex: agreementLayer.zIndex.value, outline: 'none' }"
+        tabindex="-1"
+        @keydown.tab="agreementLayer.trapTab"
+        role="dialog"
+        aria-modal="true"
       >
         <div class="w-full max-w-[600px] overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/10 dark:bg-dark-900 dark:ring-white/10">
           <div class="border-b border-gray-100 bg-white px-6 py-6 dark:border-dark-800 dark:bg-dark-900">
@@ -143,7 +149,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import type { LoginAgreementDocument } from '@/types'
@@ -213,6 +220,11 @@ function documentIcon(index: number, title: string): 'document' | 'shield' | 'gl
   }
   return 'document'
 }
+
+// Hand-built modals are layers of the overlay stack (design spec 0.2): drawn in opening order, the page inert
+// below, focus and Tab inside, Escape closes the top one, focus goes back when it closes.
+const agreementRef = ref<HTMLElement | null>(null)
+const agreementLayer = useOverlayLayer(() => dialogVisible.value, { root: agreementRef, floor: 140, onEscape: () => emit('reject') })
 </script>
 
 <style scoped>

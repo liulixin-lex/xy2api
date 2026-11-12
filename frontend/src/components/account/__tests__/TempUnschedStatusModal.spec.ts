@@ -2,7 +2,7 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import TempUnschedStatusModal from '../TempUnschedStatusModal.vue'
 import type { Account } from '@/types'
-const mocks = vi.hoisted(() => ({ getTempUnschedulableStatus: vi.fn(), recoverState: vi.fn(), showError: vi.fn() }))
+const mocks = vi.hoisted(() => ({ getTempUnschedulableStatus: vi.fn(), showError: vi.fn() }))
 vi.mock('@/api/admin', () => ({ adminAPI: { accounts: mocks } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => mocks }))
 vi.mock('@/utils/format', () => ({ formatDateTime: () => 'date' }))
@@ -29,14 +29,13 @@ describe('temporary unschedulable status requests', () => {
     old.resolve(active('old-error')); await flushPromises()
     expect(w.text()).toContain('current-error'); expect(w.text()).not.toContain('old-error')
   })
-  it('keeps recovery disabled while loading a different account', async () => {
-    const current = deferred()
-    mocks.getTempUnschedulableStatus.mockResolvedValueOnce(active('old-error')).mockReturnValueOnce(current.promise)
+  it('hands the current account to the shared reset flow instead of recovering here', async () => {
+    mocks.getTempUnschedulableStatus.mockResolvedValueOnce(active('old-error')).mockResolvedValueOnce(active('current-error'))
     const w = await open(); await flushPromises()
-    await w.setProps({ account: { id: 2 } as Account })
-    expect(w.get('button.btn-primary').attributes('disabled')).toBeDefined()
-    current.resolve(active('current-error')); await flushPromises()
-    expect(w.get('button.btn-primary').attributes('disabled')).toBeUndefined()
+    await w.setProps({ account: { id: 2, name: 'second' } as Account })
+    await w.get('[data-test="temp-unsched-recover"]').trigger('click')
+    expect(w.emitted('recover')?.[0][0]).toMatchObject({ id: 2, name: 'second' })
+    expect(w.text()).not.toContain('admin.accounts.recoverStateHint')
   })
   it('ignores old errors without dismissing the current loading state', async () => {
     const old = deferred(); const current = deferred()

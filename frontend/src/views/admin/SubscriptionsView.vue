@@ -760,7 +760,7 @@
     <!-- Subscription Guide Modal -->
     <teleport to="body">
       <transition name="modal">
-        <div v-if="showGuideModal" class="fixed inset-0 z-50 flex items-center justify-center p-4" @mousedown.self="showGuideModal = false">
+        <div v-if="showGuideModal" class="fixed inset-0 z-50 flex items-center justify-center p-4" @mousedown.self="showGuideModal = false" ref="guideRef" :style="{ zIndex: guideLayer.zIndex.value, outline: 'none' }" tabindex="-1" @keydown.tab="guideLayer.trapTab" role="dialog" aria-modal="true">
           <div class="fixed inset-0 bg-black/50" @click="showGuideModal = false"></div>
           <div class="relative max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-2xl dark:bg-dark-800">
             <button type="button" class="absolute right-4 top-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200" @click="showGuideModal = false">
@@ -840,6 +840,7 @@
 </template>
 
 <script setup lang="ts">
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -1630,6 +1631,11 @@ onUnmounted(() => {
     clearTimeout(userSearchTimeout)
   }
 })
+
+// Hand-built modals are layers of the overlay stack (design spec 0.2): drawn in opening order, the page inert
+// below, focus and Tab inside, Escape closes the top one, focus goes back when it closes.
+const guideRef = ref<HTMLElement | null>(null)
+const guideLayer = useOverlayLayer(() => showGuideModal.value, { root: guideRef, floor: 50, onEscape: () => { showGuideModal.value = false } })
 </script>
 
 <style scoped>

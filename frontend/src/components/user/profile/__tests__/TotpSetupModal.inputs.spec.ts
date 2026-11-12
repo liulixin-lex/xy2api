@@ -7,6 +7,7 @@ vi.mock('@/api', () => ({ totpAPI: api }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError: vi.fn(), showSuccess: vi.fn() }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('qrcode', () => ({ default: { toDataURL: vi.fn() } }))
+// The dialogs teleport to the body as overlay layers; render them in place so the wrapper can query them.
 enableAutoUnmount(afterEach)
 
 beforeEach(() => {
@@ -17,7 +18,7 @@ beforeEach(() => {
 })
 
 async function openCodeStep() {
-  const wrapper = mount(TotpSetupModal, { attachTo: document.body })
+  const wrapper = mount(TotpSetupModal, { attachTo: document.body, global: { stubs: { teleport: true } } })
   await flushPromises()
   await wrapper.get('input[type="password"]').setValue('password')
   await wrapper.get('.btn-primary').trigger('click')

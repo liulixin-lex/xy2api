@@ -80,8 +80,9 @@
                   <div
                     v-if="showAccountToolsDropdown"
                     class="fixed z-[9999] origin-top-right overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-dark-700 dark:bg-dark-800"
-                    :style="accountToolsDropdownStyle"
+                    :style="[accountToolsDropdownStyle, { zIndex: accountToolsLayer.zIndex.value }]"
                     @click.stop
+                    ref="accountToolsMenuRef"
                   >
                     <div class="overflow-y-auto p-2" :style="{ maxHeight: `${accountToolsDropdownPosition.maxHeight}px` }">
                       <!-- 数据导入、导出与 CRS 同步只对超级管理员开放 -->
@@ -199,16 +200,21 @@
           @select-all-results="handleSelectAllResults"
           :scheduling-busy="selIds.some(id => togglingSchedulable.has(id))"
           @toggle-schedulable="handleBulkToggleSchedulable"
+          :sched-busy="sqBatchBusy"
+          @sched-action="openSchedBatch"
         />
         <div ref="accountTableRef" class="flex min-h-0 flex-1 flex-col overflow-hidden">
         <DataTable
           ref="dataTableRef"
           :columns="cols"
-          :data="accounts"
+          :data="displayAccounts"
           :loading="loading"
           row-key="id"
           :server-side-sort="true"
+          :page-sorts="sqPageSorts"
+          :page-sort="pageSort"
           @sort="handleSort"
+          @page-sort="onPageSort"
           default-sort-key="last_used_at"
           default-sort-order="desc"
           :sort-storage-key="ACCOUNT_SORT_STORAGE_KEY"
@@ -305,6 +311,49 @@
           <template #cell-status="{ row }">
             <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
             <AccountStreamOnlyBadge :account="row" @cleared="patchAccountInList($event as Account)" />
+          </template>
+          <template #header-group-sq_recent>
+            <div class="flex items-center justify-center gap-2 normal-case tracking-normal">
+              <span class="uppercase tracking-wider">{{ t('admin.schedQuality.list.recent') }}</span>
+              <Select v-model="sqModel" :options="sqModelOptions" :searchable="false" :aria-label="t('admin.schedQuality.aria.model')" class="sq-select-sm w-[120px] text-left" />
+            </div>
+          </template>
+          <template v-for="dim in SCHED_DIMS" :key="dim" #[`header-sq_${dim}`]="{ column }">
+            <button type="button" class="sq-focus inline-flex items-center gap-1 rounded font-normal normal-case tracking-normal" :data-test="`sq-sort-${dim}`" @click.stop="cyclePageSort(`sq_${dim}`)">
+              <span>{{ column.label }}</span>
+              <span class="inline-flex h-5 w-3 flex-col items-center justify-center" aria-hidden="true">
+                <svg class="h-2.5 w-2.5" :class="sqSortClass(`sq_${dim}`, 'asc')" fill="currentColor" viewBox="0 0 10 10"><path d="M5 2L1.5 6.5h7L5 2z" /></svg>
+                <svg class="-mt-0.5 h-2.5 w-2.5" :class="sqSortClass(`sq_${dim}`, 'desc')" fill="currentColor" viewBox="0 0 10 10"><path d="M5 8L1.5 3.5h7L5 8z" /></svg>
+              </span>
+            </button>
+          </template>
+          <template #header-sq_groups="{ column }">
+            <span class="inline-flex items-center gap-1.5">{{ column.label }}<SchedPauseMark :global-enabled="sqSummary.view.value?.global_enabled" :stale="sqSummary.view.value?.stale" /></span>
+          </template>
+          <template v-for="dim in SCHED_DIMS" :key="dim" #[`cell-sq_${dim}`]="{ row }">
+            <SchedNumberCell
+              :account-id="row.id"
+              :dim="dim"
+              :summary="sqSummary.byAccount.value.get(row.id)"
+              :loading="sqLoading(row.id)"
+              :focusable="dim === 'ttfo'"
+              @open="openSchedFromNumber(row)"
+            />
+          </template>
+          <template #cell-sq_groups="{ row }">
+            <SchedGroupsCell
+              :summary="sqSummary.byAccount.value.get(row.id)"
+              :loading="sqLoading(row.id)"
+              :group-name="sqGroupName"
+              :fresh="sqFresh"
+              @open="(target) => openSchedFromGroups(row, target)"
+            />
+          </template>
+          <template #mobile-sort-extra>
+            <div v-if="!hiddenColumns.has('sq_recent') || !hiddenColumns.has('sq_groups')" class="flex items-center gap-2">
+              <Select v-model="sqModel" :options="sqModelOptions" :searchable="false" :aria-label="t('admin.schedQuality.aria.model')" class="sq-select-sm w-[120px]" />
+              <SchedPauseMark :global-enabled="sqSummary.view.value?.global_enabled" :stale="sqSummary.view.value?.stale" />
+            </div>
           </template>
           <template #header-schedulable="{ column }"><div class="flex items-center gap-1"><span>{{ column.label }}</span><HelpTooltip :content="t('admin.accounts.schedulableHint')" width-class="w-72" /></div></template>
           <template #cell-schedulable="{ row }">
@@ -464,7 +513,7 @@
     <ScheduledTestsPanel v-if="schedulePanelMounted" :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" :readonly="!canManage" @close="closeSchedulePanel" />
     <IQCheckResultsModal v-if="iqRecordsAccount" :show="true" :account="iqRecordsAccount" @close="iqRecordsAccount = null" @updated="handleIQSummaryUpdated" />
     <AccountGroupsDialog v-if="groupsDialogAccount" :account="groupsDialogAccount" :groups="groups" @close="groupsDialogAccount = null" @updated="handleAccountUpdated" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @iq-run="handleRunIQCheck" @iq-records="iqRecordsAccount = $event" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @manage-openai-totp="handleManageOpenAITotp" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @iq-run="handleRunIQCheck" @iq-records="iqRecordsAccount = $event" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="(a: Account) => openSchedReset({ id: a.id, name: a.name })" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @manage-openai-totp="handleManageOpenAITotp" />
     <OpenAILoginImportDialog v-if="authStore.isAdmin && showOpenAILogin" :show="showOpenAILogin" :proxies="proxies" :groups="groups" @close="showOpenAILogin = false" @imported="handleDataImported" />
     <OpenAITotpDialog v-if="authStore.isAdmin && openAITotpAccount" :show="true" :account="openAITotpAccount" @close="openAITotpAccount = null" />
     <SyncFromCrsModal v-if="syncModalMounted" :show="showSync" @close="showSync = false" @synced="handleCrsSynced" />
@@ -481,7 +530,9 @@
       @close="showBulkEdit = false"
       @updated="handleBulkUpdated"
     />
-    <TempUnschedStatusModal v-if="tempUnschedModalMounted" :show="showTempUnsched" :account="tempUnschedAcc" @close="showTempUnsched = false" @reset="handleTempUnschedReset" />
+    <TempUnschedStatusModal v-if="tempUnschedModalMounted" :show="showTempUnsched" :account="tempUnschedAcc" @close="showTempUnsched = false" @recover="(a: Account) => openSchedReset({ id: a.id, name: a.name })" />
+    <SchedQualityLayers :on-iq-check="openIqRecordsById" :on-edit="openEditById" @reset-done="refreshAfterSchedReset" />
+    <SchedBatchDialog :action="sqBatch.action" :accounts="sqBatch.accounts" :anchor="sqBatch.anchor" :groups="sqOpenAIGroups" @close="sqBatch.action = null" @busy="(running) => (sqBatchBusy = running)" @done="load()" />
     <ConfirmDialog :show="showDeleteDialog" :title="t('admin.accounts.deleteAccount')" :message="t('admin.accounts.deleteConfirm', { name: deletingAcc?.name })" :confirm-text="t('common.delete')" :cancel-text="t('common.cancel')" :danger="true" @confirm="confirmDelete" @cancel="showDeleteDialog = false" />
     <ConfirmDialog :show="showCreateShadowDialog" :title="t('admin.accounts.createSparkShadow')" :message="t('admin.accounts.createSparkShadowConfirm', { name: creatingShadowAcc?.name })" @confirm="confirmCreateSparkShadow" @cancel="showCreateShadowDialog = false" />
     <ConfirmDialog :show="showExportDataDialog" :title="t('admin.accounts.dataExport')" :message="t('admin.accounts.dataExportConfirmMessage')" :confirm-text="t('admin.accounts.dataExportConfirm')" :cancel-text="t('common.cancel')" @confirm="handleExportData" @cancel="showExportDataDialog = false">
@@ -497,7 +548,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, shallowRef, toRaw, watch } from 'vue'
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { useEventListener, useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -517,6 +569,15 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
+import Select from '@/components/common/Select.vue'
+import SchedNumberCell from '@/components/admin/account/quality/SchedNumberCell.vue'
+import SchedGroupsCell from '@/components/admin/account/quality/SchedGroupsCell.vue'
+import SchedPauseMark from '@/components/admin/account/quality/SchedPauseMark.vue'
+import SchedQualityLayers from '@/components/admin/account/quality/SchedQualityLayers.vue'
+import SchedBatchDialog, { type SchedBatchAction } from '@/components/admin/account/quality/SchedBatchDialog.vue'
+import { useSchedQualitySummary } from '@/composables/useSchedQuality'
+import { openSchedDrawer, openSchedReset, useSchedLayers } from '@/composables/useSchedLayers'
+import { SCHED_DIMS } from '@/utils/schedQualityFormat'
 import Pagination from '@/components/common/Pagination.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import AccountTableActions from '@/components/admin/account/AccountTableActions.vue'
@@ -607,6 +668,8 @@ type AccountBulkEditTarget =
         group_category?: string
         search?: string
         privacy_mode?: string
+        iq_status?: string
+        sched_quality?: string
         sort_by?: string
         sort_order?: AccountSortOrder
       }
@@ -720,6 +783,10 @@ useIntervalFn(() => { upstreamBillingNow.value = Date.now() }, 60_000)
 const showAccountToolsDropdown = ref(false)
 const accountToolsDropdownRef = ref<HTMLElement | null>(null)
 const accountToolsTriggerRef = ref<HTMLElement | null>(null)
+// A sub-layer of the overlay stack (design spec 0.2): while open, Escape closes it before the layer or page
+// below, re-renders below keep their hands off its focus, and a dialog opening above closes it.
+const accountToolsMenuRef = ref<HTMLElement | null>(null)
+const accountToolsLayer = useOverlayLayer(() => showAccountToolsDropdown.value, { root: accountToolsMenuRef, modal: false, floor: 9999, onEscape: () => { showAccountToolsDropdown.value = false } })
 const accountToolsDropdownPosition = reactive({
   top: null as number | null,
   bottom: null as number | null,
@@ -1097,6 +1164,8 @@ const toggleColumn = (key: string) => {
     hiddenColumns.add(key)
   }
   saveColumnsToStorage()
+  if ((key === 'sq_recent' || key === 'sq_groups') && wasHidden) refreshSchedSummary()
+  if (key === 'sq_recent' && !wasHidden) pageSort.value = null
   if ((key === 'today_stats' || key === 'usage') && wasHidden) {
     refreshTodayStatsBatch().catch((error) => {
       console.error('Failed to load account today stats after showing column:', error)
@@ -1211,6 +1280,7 @@ const load = async (options: AccountLoadOptions = {}) => {
   pendingTodayStatsRefresh.value = false
   requestParams.lite = '1'
   await baseLoad()
+  refreshSchedSummary()
   if (options.refreshTodayStats !== false) await refreshTodayStatsBatch()
 }
 
@@ -1219,6 +1289,7 @@ const reload = async () => {
   resetAutoRefreshCache()
   pendingTodayStatsRefresh.value = false
   await baseReload()
+  refreshSchedSummary()
   await refreshTodayStatsBatch()
 }
 
@@ -1241,6 +1312,7 @@ const buildUpstreamBillingRateFilters = () => {
     search: typeof rawParams.search === 'string' ? rawParams.search : '',
     privacy_mode: typeof rawParams.privacy_mode === 'string' ? rawParams.privacy_mode : '',
     iq_status: typeof rawParams.iq_status === 'string' ? rawParams.iq_status : '',
+    sched_quality: typeof rawParams.sched_quality === 'string' ? rawParams.sched_quality : '',
     group_category: typeof rawParams.group_category === 'string' ? rawParams.group_category : '',
     sort_by: sortState.sort_by,
     sort_order: sortState.sort_order
@@ -1369,6 +1441,7 @@ const handlePageSizeChange = (size: number) => {
 }
 
 const handleSort = (key: string, order: AccountSortOrder) => {
+  pageSort.value = null
   sortState.sort_by = key
   sortState.sort_order = order
   const requestParams = params as any
@@ -1387,6 +1460,7 @@ watch(loading, (isLoading, wasLoading) => {
   }
   if (wasLoading && !isLoading && pendingTodayStatsRefresh.value) {
     pendingTodayStatsRefresh.value = false
+    refreshSchedSummary()
     refreshTodayStatsBatch().catch((error) => {
       console.error('Failed to refresh account today stats after table load:', error)
     })
@@ -1409,6 +1483,139 @@ watch(accounts, (rows) => {
   )
 })
 
+// ---- Quality scheduling columns (design spec A): three neutral numbers, the groups column, the drawer and batches.
+const { drawer: sqDrawer, board: sqBoard, reset: sqReset } = useSchedLayers()
+const sqBatch = reactive<{ action: SchedBatchAction | null; accounts: Array<{ id: number; name: string }>; anchor: HTMLElement | null }>({
+  action: null,
+  accounts: [],
+  anchor: null
+})
+const sqLayersOpen = computed(() =>
+  sqDrawer.accountId !== null || sqBoard.groupId !== null || sqReset.accountId !== null || sqBatch.action !== null
+)
+// Refreshed with the list; skipped while the page is hidden or a dialog / the drawer is open (spec A.6).
+const sqSummary = useSchedQualitySummary(() => isAnyModalOpen.value)
+const sqModel = ref('')
+const sqModelsSeen = reactive(new Set<string>())
+const sqModelOptions = computed(() => [
+  { value: '', label: t('admin.schedQuality.list.mainModel') },
+  ...[...sqModelsSeen].sort().map(model => ({ value: model, label: model }))
+])
+const sqColumnsVisible = () => !hiddenColumns.has('sq_recent') || !hiddenColumns.has('sq_groups')
+const refreshSchedSummary = () => {
+  if (sqColumnsVisible()) void sqSummary.refresh(accounts.value.map(account => account.id), sqModel.value || undefined)
+}
+watch(sqModel, () => refreshSchedSummary())
+watch(sqLayersOpen, (open) => { if (!open) refreshSchedSummary() })
+const sqLoading = (id: number) => sqSummary.state.value === 'loading' && !sqSummary.byAccount.value.has(id)
+const sqGroupName = (id: number) => groupsByID.value.get(id)?.name ?? `#${id}`
+const sqOpenAIGroups = computed(() => groups.value.filter(group => group.platform === 'openai').map(group => ({ id: group.id, name: group.name })))
+
+// A capsule gets its one-time emphasis only when a row already on screen newly shows it on refresh (spec F.3).
+const sqFresh = shallowRef(new Set<string>())
+let sqSeen = new Set<string>()
+let sqShownAccounts = new Set<number>()
+watch(sqSummary.byAccount, (map) => {
+  const keys = new Set<string>()
+  const fresh = new Set<string>()
+  for (const summary of map.values()) {
+    if (summary.model) sqModelsSeen.add(summary.model)
+    for (const item of summary.cooling) {
+      const key = `${summary.account_id}:${item.group_id}:${item.testing ? 'testing' : 'cooling'}`
+      keys.add(key)
+      if (sqShownAccounts.has(summary.account_id) && !sqSeen.has(key)) fresh.add(key)
+    }
+  }
+  sqSeen = keys
+  sqShownAccounts = new Set(map.keys())
+  sqFresh.value = fresh
+  if (fresh.size) setTimeout(() => { if (sqFresh.value === fresh) sqFresh.value = new Set() }, 1000)
+})
+
+// Sorting by the three numbers reorders only the current page (spec A.2): descending, ascending, off; dashes last,
+// timeouts largest.
+type SqSortKey = 'sq_ttfo' | 'sq_error' | 'sq_cache'
+const pageSort = ref<{ key: SqSortKey; order: 'asc' | 'desc' } | null>(null)
+const cyclePageSort = (key: SqSortKey) => {
+  const current = pageSort.value
+  if (current?.key !== key) pageSort.value = { key, order: 'desc' }
+  else pageSort.value = current.order === 'desc' ? { key, order: 'asc' } : null
+}
+const onPageSort = (key: string) => {
+  if (key) cyclePageSort(key as SqSortKey)
+  else pageSort.value = null
+}
+const sqSortValue = (id: number, key: SqSortKey): number | null => {
+  const summary = sqSummary.byAccount.value.get(id)
+  if (!summary) return null
+  if (key === 'sq_ttfo') return summary.ttfo.timeout ? Infinity : summary.ttfo.p90_ms
+  return key === 'sq_error' ? summary.error.rate : summary.cache.ratio
+}
+const displayAccounts = computed(() => {
+  const sort = pageSort.value
+  if (!sort) return accounts.value
+  return accounts.value
+    .map((row, index) => ({ row, index, value: sqSortValue(row.id, sort.key) }))
+    .sort((a, b) => {
+      if (a.value === b.value) return a.index - b.index
+      if (a.value === null) return 1
+      if (b.value === null) return -1
+      return sort.order === 'asc' ? (a.value < b.value ? -1 : 1) : (a.value < b.value ? 1 : -1)
+    })
+    .map(item => item.row)
+})
+const sqAriaSort = (key: SqSortKey) =>
+  pageSort.value?.key === key ? (pageSort.value.order === 'asc' ? 'ascending' : 'descending') : 'none'
+const sqSortClass = (key: SqSortKey, order: 'asc' | 'desc') =>
+  pageSort.value?.key === key && pageSort.value.order === order ? 'text-primary-700 dark:text-primary-400' : 'text-gray-300 dark:text-dark-500'
+const sqPageSorts = computed(() =>
+  hiddenColumns.has('sq_recent') ? [] : SCHED_DIMS.map(dim => ({ key: `sq_${dim}`, label: t(`admin.schedQuality.dim.${dim}`) }))
+)
+const sqRecentColumns = computed(() =>
+  SCHED_DIMS.map(dim => ({
+    key: `sq_${dim}`,
+    label: t(`admin.schedQuality.dim.${dim}`),
+    sortable: false,
+    group: 'sq_recent',
+    class: 'min-w-16 text-right',
+    headerClass: 'font-normal normal-case tracking-normal',
+    ariaSort: sqAriaSort(`sq_${dim}` as SqSortKey)
+  }))
+)
+
+// Entry points of the drawer: numbers keep the summary's model, capsules their own model and group.
+const openSchedFromNumber = (row: AccountListItem) =>
+  openSchedDrawer({ id: row.id, name: row.name }, { model: sqSummary.byAccount.value.get(row.id)?.model ?? null })
+const openSchedFromGroups = (row: AccountListItem, target: { model: string | null; groupId?: number; toGroups?: boolean }) =>
+  openSchedDrawer({ id: row.id, name: row.name }, { model: target.model, groupId: target.groupId ?? null, toGroups: target.toGroups })
+
+// One batch at a time: a closed batch is busy until the answers still on their way are in.
+const sqBatchBusy = ref(false)
+const openSchedBatch = (action: SchedBatchAction, anchor: HTMLElement) => {
+  if (sqBatchBusy.value || sqBatch.action !== null) return
+  const names = new Map(accounts.value.map(account => [account.id, account.name]))
+  sqBatch.accounts = selIds.value.map(id => ({ id, name: names.get(id) ?? `#${id}` }))
+  sqBatch.anchor = anchor
+  sqBatch.action = action
+}
+
+// After a reset the row is read again from the server; nothing is patched from the reset result.
+const refreshAfterSchedReset = async (id: number) => {
+  if (tempUnschedAcc.value?.id === id) showTempUnsched.value = false
+  try {
+    patchAccountInList(await adminAPI.accounts.getById(id))
+  } catch (error) {
+    console.error('Failed to reload account after reset:', error)
+  }
+  enterAutoRefreshSilentWindow()
+  refreshSchedSummary()
+}
+const openIqRecordsById = async (id: number) => {
+  const account = await loadAccountDetails({ id })
+  if (account) iqRecordsAccount.value = account
+}
+const openEditById = (id: number) => handleEdit({ id } as AccountListItem)
+
 const isAnyModalOpen = computed(() => {
   return (
     showCreate.value ||
@@ -1427,7 +1634,8 @@ const isAnyModalOpen = computed(() => {
     showSchedulePanel.value ||
     showErrorPassthrough.value ||
     groupsDialogAccount.value !== null ||
-    showTLSFingerprintProfiles.value
+    showTLSFingerprintProfiles.value ||
+    sqLayersOpen.value
   )
 })
 
@@ -1692,6 +1900,7 @@ const refreshAccountsIncrementally = async () => {
     }
     upstreamBillingNow.value = Date.now()
 
+    refreshSchedSummary()
     await refreshTodayStatsBatch()
   } catch (error) {
     console.error('Auto refresh failed:', error)
@@ -2018,11 +2227,13 @@ const allColumns = computed(() => {
     { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false },
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
+    { key: 'sq_recent', label: t('admin.schedQuality.list.recent'), sortable: false },
+    { key: 'sq_groups', label: t('admin.schedQuality.list.groups'), sortable: false },
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
     { key: 'iq_check', label: t('admin.accounts.iqCheck'), sortable: false }
   ]
   if (!authStore.isSimpleMode) {
-    c.push({ key: 'groups', label: t('admin.accounts.columns.groups'), sortable: false })
+    c.push({ key: 'groups', label: t('admin.schedQuality.list.membership'), sortable: false })
   }
   c.push({ key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false })
   c.push({ key: 'usage', label: t('admin.accounts.columns.usageWindows'), sortable: false })
@@ -2065,7 +2276,7 @@ const cols = computed(() => {
   return [
     ...pinned('select'),
     ...pinned('name'),
-    ...orderedToggleableColumns.value.filter(col => !hiddenColumns.has(col.key)),
+    ...orderedToggleableColumns.value.filter(col => !hiddenColumns.has(col.key)).flatMap(col => (col.key === 'sq_recent' ? sqRecentColumns.value : [col])),
     ...pinned('actions')
   ]
 })
@@ -2315,6 +2526,7 @@ const buildBulkEditFilterSnapshot = () => {
     search: typeof rawParams.search === 'string' ? rawParams.search : '',
     privacy_mode: typeof rawParams.privacy_mode === 'string' ? rawParams.privacy_mode : '',
     iq_status: typeof rawParams.iq_status === 'string' ? rawParams.iq_status : '',
+    sched_quality: typeof rawParams.sched_quality === 'string' ? rawParams.sched_quality : '',
     group_category: typeof rawParams.group_category === 'string' ? rawParams.group_category : '',
     sort_by: typeof rawParams.sort_by === 'string' ? rawParams.sort_by : '',
     sort_order: sortOrder
@@ -2399,6 +2611,7 @@ const buildAccountQueryFilters = () => ({
   group: params.group || '',
   privacy_mode: params.privacy_mode || '',
   iq_status: params.iq_status || '',
+  sched_quality: params.sched_quality || '',
   group_category: params.group_category || '',
   search: params.search || '',
   sort_by: sortState.sort_by,
@@ -2644,17 +2857,6 @@ const handleRefresh = async (a: Account) => {
     console.error('Failed to refresh credentials:', error)
   }
 }
-const handleRecoverState = async (a: Account) => {
-  try {
-    const updated = await adminAPI.accounts.recoverState(a.id)
-    patchAccountInList(updated)
-    enterAutoRefreshSilentWindow()
-    appStore.showSuccess(t('admin.accounts.recoverStateSuccess'))
-  } catch (error: any) {
-    console.error('Failed to recover account state:', error)
-    appStore.showError(error?.message || t('admin.accounts.recoverStateFailed'))
-  }
-}
 const handleResetQuota = async (a: Account) => {
   try {
     const updated = await adminAPI.accounts.resetAccountQuota(a.id)
@@ -2774,12 +2976,6 @@ const handleToggleIQCheck = async (a: Account, enabled: boolean) => {
   } finally { togglingIQCheck.value.delete(a.id) }
 }
 const handleShowTempUnsched = (a: Account) => { tempUnschedAcc.value = a; showTempUnsched.value = true }
-const handleTempUnschedReset = async (updated: Account) => {
-  showTempUnsched.value = false
-  tempUnschedAcc.value = null
-  patchAccountInList(updated)
-  enterAutoRefreshSilentWindow()
-}
 const formatExpiresAt = (value: number | null) => {
   if (!value) return '-'
   return formatDateTime(

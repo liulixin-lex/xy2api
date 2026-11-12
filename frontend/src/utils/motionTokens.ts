@@ -12,7 +12,8 @@ const FALLBACKS: Record<string, string> = {
   '--motion-exit': '160ms',
   '--ease-out': 'cubic-bezier(0.16, 1, 0.3, 1)',
   '--ease-out-soft': 'cubic-bezier(0.22, 1, 0.36, 1)',
-  '--ease-in': 'cubic-bezier(0.4, 0, 1, 1)'
+  '--ease-in': 'cubic-bezier(0.4, 0, 1, 1)',
+  '--ease-emphasized': 'cubic-bezier(0.22, 1.06, 0.36, 1)'
 }
 
 function token(name: string) {

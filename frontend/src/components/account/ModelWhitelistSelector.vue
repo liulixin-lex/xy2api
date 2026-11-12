@@ -3,8 +3,10 @@
     <!-- Multi-select Dropdown -->
     <div class="relative mb-3">
       <div
+        ref="triggerRef"
+        tabindex="-1"
         @click="toggleDropdown"
-        class="cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-2 dark:border-dark-500 dark:bg-dark-700"
+        class="cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:border-dark-500 dark:bg-dark-700"
       >
         <div class="grid grid-cols-2 gap-1.5">
           <span
@@ -35,6 +37,7 @@
       <!-- Dropdown List -->
       <div
         v-if="showDropdown"
+        ref="dropdownRef"
         class="absolute left-0 right-0 top-full z-50 mt-1 rounded-lg border border-gray-200 bg-white shadow-lg dark:border-dark-600 dark:bg-dark-700"
       >
         <div class="sticky top-0 border-b border-gray-200 bg-white p-2 dark:border-dark-600 dark:bg-dark-700">
@@ -146,6 +149,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { accountsAPI } from '@/api/admin/accounts'
@@ -240,6 +244,24 @@ const toggleDropdown = () => {
   showDropdown.value = !showDropdown.value
   if (!showDropdown.value) searchQuery.value = ''
 }
+
+const triggerRef = ref<HTMLElement | null>(null)
+const dropdownRef = ref<HTMLElement | null>(null)
+const closeDropdown = () => {
+  showDropdown.value = false
+  searchQuery.value = ''
+}
+// The open list is a sub-layer of the dialog it sits in (overlayStack): the first Escape only closes the list and
+// returns focus to the selected-models box, keeping the form and its unsaved input; the next Escape is the dialog's.
+useOverlayLayer(showDropdown, {
+  root: dropdownRef,
+  modal: false,
+  onEscape: () => {
+    closeDropdown()
+    triggerRef.value?.focus()
+  },
+  onCovered: closeDropdown
+})
 
 const removeModel = (model: string) => {
   emit('update:modelValue', props.modelValue.filter(m => m !== model))

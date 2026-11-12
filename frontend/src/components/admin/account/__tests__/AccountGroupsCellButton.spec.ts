@@ -12,7 +12,7 @@ vi.mock('vue-i18n', async () => {
 })
 
 const group = (id: number) => ({ id, name: `Group ${id}`, platform: 'openai' }) as Group
-const GroupBadgeStub = { props: ['name', 'showPlatformIcon'], template: '<span data-test="badge" :data-icon="String(showPlatformIcon)">{{ name }}</span>' }
+const GroupBadgeStub = { props: { name: String, showPlatformIcon: Boolean, neutral: Boolean }, template: '<span data-test="badge" :data-icon="String(showPlatformIcon)" :data-neutral="String(neutral)">{{ name }}</span>' }
 
 const mountCell = (groups: Group[]) => mount(AccountGroupsCellButton, {
   props: { groups, accountName: 'acc-1' },
@@ -20,14 +20,14 @@ const mountCell = (groups: Group[]) => mount(AccountGroupsCellButton, {
 })
 
 describe('AccountGroupsCellButton', () => {
-  it('is a single button with up to 2 badges, each titled with its full name, and a plain +N', async () => {
+  it('is a single button with up to 2 neutral badges and a plain +N, without a native title', async () => {
     const wrapper = mountCell([group(1), group(2), group(3), group(4), group(5)])
     const buttons = wrapper.findAll('button')
     expect(buttons).toHaveLength(1)
     expect(buttons[0].attributes('type')).toBe('button')
     expect(buttons[0].attributes('aria-label')).toBe('admin.groupCategories.editAccountGroupsAria:{"name":"acc-1"}')
-    expect(buttons[0].attributes('title')).toBe('Group 1、Group 2、Group 3、Group 4、Group 5')
-    expect(wrapper.findAll('[data-test="badge"]').map((badge) => [badge.text(), badge.attributes('title')])).toEqual([['Group 1', 'Group 1'], ['Group 2', 'Group 2']])
+    expect(buttons[0].attributes('title')).toBeUndefined()
+    expect(wrapper.findAll('[data-test="badge"]').map((badge) => [badge.text(), badge.attributes('title'), badge.attributes('data-neutral')])).toEqual([['Group 1', undefined, 'true'], ['Group 2', undefined, 'true']])
     expect(wrapper.text()).toContain('+3')
 
     await buttons[0].trigger('click')

@@ -1125,7 +1125,8 @@
         :style="{
           top: dropdownPosition.top !== undefined ? dropdownPosition.top + 'px' : undefined,
           bottom: dropdownPosition.bottom !== undefined ? dropdownPosition.bottom + 'px' : undefined,
-          left: dropdownPosition.left + 'px'
+          left: dropdownPosition.left + 'px',
+          zIndex: groupSelectorLayer.zIndex.value
         }"
       >
         <!-- Search box -->
@@ -1189,6 +1190,7 @@
 
 <script setup lang="ts">
 	import { ref, reactive, computed, watch, onMounted, onUnmounted, type ComponentPublicInstance } from 'vue'
+	import { useOverlayLayer } from '@/composables/useOverlayLayer'
 	import { useI18n } from 'vue-i18n'
 	import { useAppStore } from '@/stores/app'
 	import { useOnboardingStore } from '@/stores/onboarding'
@@ -1413,6 +1415,9 @@ const copiedKeyId = ref<number | null>(null)
 const groupSelectorKeyId = ref<number | null>(null)
 const publicSettings = ref<PublicSettings | null>(null)
 const dropdownRef = ref<HTMLElement | null>(null)
+	// A sub-layer of the overlay stack (design spec 0.2): while open, Escape closes it before the layer or page
+	// below, re-renders below keep their hands off its focus, and a dialog opening above closes it.
+	const groupSelectorLayer = useOverlayLayer(() => groupSelectorKeyId.value !== null && !!dropdownPosition.value, { root: dropdownRef, modal: false, floor: 100000020, onEscape: () => { groupSelectorKeyId.value = null; dropdownPosition.value = null } })
 const columnDropdownRef = ref<HTMLElement | null>(null)
 const dropdownPosition = ref<{ top?: number; bottom?: number; left: number } | null>(null)
 const groupButtonRefs = ref<Map<number, HTMLElement>>(new Map())

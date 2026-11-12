@@ -37,6 +37,7 @@
           v-if="showPopover"
           class="fixed z-50 min-w-48 max-w-96 rounded-lg border border-gray-200 bg-white p-3 shadow-lg dark:border-dark-600 dark:bg-dark-800"
           :style="popoverStyle"
+          ref="popoverRef"
         >
           <div class="mb-2 flex items-center justify-between">
             <span class="text-xs font-medium text-gray-500 dark:text-gray-400">
@@ -77,7 +78,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed } from 'vue'
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { useI18n } from 'vue-i18n'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import type { Group } from '@/types'
@@ -135,22 +137,13 @@ const popoverStyle = computed(() => {
 
   return {
     top: `${top}px`,
-    left: `${left}px`
+    left: `${left}px`,
+    zIndex: popoverLayer.zIndex.value
   }
 })
 
-// 关闭 popover 的键盘事件
-const handleKeydown = (e: KeyboardEvent) => {
-  if (e.key === 'Escape') {
-    showPopover.value = false
-  }
-}
-
-onMounted(() => {
-  window.addEventListener('keydown', handleKeydown)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleKeydown)
-})
+// A sub-layer of the overlay stack (design spec 0.2): while open, Escape closes it before the layer or page
+// below, re-renders below keep their hands off its focus, and a dialog opening above closes it.
+const popoverRef = ref<HTMLElement | null>(null)
+const popoverLayer = useOverlayLayer(() => showPopover.value, { root: popoverRef, modal: false, floor: 50, onEscape: () => { showPopover.value = false } })
 </script>

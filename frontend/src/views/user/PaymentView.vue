@@ -253,7 +253,7 @@
     <!-- Renewal Plan Selection Modal -->
     <Teleport to="body">
       <Transition name="modal">
-        <div v-if="showRenewalModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" @click.self="closeRenewalModal">
+        <div v-if="showRenewalModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" @click.self="closeRenewalModal" ref="renewalRef" :style="{ zIndex: renewalLayer.zIndex.value, outline: 'none' }" tabindex="-1" @keydown.tab="renewalLayer.trapTab" role="dialog" aria-modal="true">
           <div class="relative flex max-h-full w-full max-w-lg flex-col rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-dark-700 dark:bg-dark-900">
             <!-- Close button -->
             <button class="absolute right-4 top-4 rounded-lg p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-dark-700 dark:hover:text-gray-200" @click="closeRenewalModal">
@@ -270,7 +270,7 @@
     <!-- Image Preview Overlay -->
     <Teleport to="body">
       <Transition name="modal">
-        <div v-if="previewImage" class="fixed inset-0 z-[60] flex items-center justify-center bg-black/70" @click="previewImage = ''">
+        <div v-if="previewImage" class="fixed inset-0 z-[60] flex items-center justify-center bg-black/70" @click="previewImage = ''" ref="imagePreviewRef" :style="{ zIndex: imagePreviewLayer.zIndex.value, outline: 'none' }" tabindex="-1" @keydown.tab="imagePreviewLayer.trapTab" role="dialog" aria-modal="true">
           <img :src="previewImage" alt="" class="max-h-[85vh] max-w-[90vw] rounded-xl object-contain shadow-2xl" />
         </div>
       </Transition>
@@ -279,6 +279,7 @@
 </template>
 
 <script setup lang="ts">
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
@@ -1238,4 +1239,11 @@ onMounted(async () => {
     subscriptionStore.fetchActiveSubscriptions().catch(() => {})
   }
 })
+
+// Hand-built modals are layers of the overlay stack (design spec 0.2): drawn in opening order, the page inert
+// below, focus and Tab inside, Escape closes the top one, focus goes back when it closes.
+const renewalRef = ref<HTMLElement | null>(null)
+const renewalLayer = useOverlayLayer(() => showRenewalModal.value, { root: renewalRef, floor: 50, onEscape: () => closeRenewalModal() })
+const imagePreviewRef = ref<HTMLElement | null>(null)
+const imagePreviewLayer = useOverlayLayer(() => !!previewImage.value, { root: imagePreviewRef, floor: 60, onEscape: () => { previewImage.value = '' } })
 </script>

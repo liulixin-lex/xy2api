@@ -145,7 +145,8 @@ describe('AccountActionMenu viewport positioning', () => {
 
   it('still closes on Escape and backdrop clicks', async () => {
     const wrapper = await mountMenu()
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    // Escape reaches the overlay stack through the document, where the menu is the top (sub-)layer.
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }))
     const backdrop = getMenu().previousElementSibling as HTMLElement
     backdrop.click()
 
