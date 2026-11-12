@@ -15,7 +15,7 @@ func (h *AccountHandler) bindSchedQualityAccountFilter(c *gin.Context, quality s
 	if quality == "" {
 		return true
 	}
-	if quality != "cooling" {
+	if !service.ValidSchedQualityFilter(quality) {
 		response.ErrorFrom(c, infraerrors.BadRequest("INVALID_SCHED_QUALITY", "invalid sched_quality filter"))
 		return false
 	}
@@ -27,6 +27,7 @@ func (h *AccountHandler) bindSchedQualityAccountFilter(c *gin.Context, quality s
 	if response.ErrorFrom(c, err) {
 		return false
 	}
-	c.Request = c.Request.WithContext(service.WithSchedQualityAccountFilter(c.Request.Context(), attention.Cooling))
+	filter := attention.Filter(quality)
+	c.Request = c.Request.WithContext(service.WithSchedQualityAccountFilter(c.Request.Context(), filter.IDs, filter.Exclude))
 	return true
 }
