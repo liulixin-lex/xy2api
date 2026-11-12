@@ -1,7 +1,10 @@
 import { defineComponent, h } from 'vue'
-import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import EmailVerifyView from '@/views/auth/EmailVerifyView.vue'
+import { clearRegistrationPassword, rememberRegistrationPassword, takeRegistrationPassword } from '../registrationState'
+
+enableAutoUnmount(afterEach)
 
 const {
   pushMock,
@@ -107,6 +110,19 @@ vi.mock('@/api/client', () => ({
   },
 }))
 
+function mountVerification() {
+  return mount(EmailVerifyView, {
+    global: {
+      stubs: {
+        AuthLayout: { template: '<div><slot /><slot name="footer" /></div>' },
+        Icon: true,
+        TurnstileWidget: true,
+        transition: false
+      }
+    }
+  })
+}
+
 describe('EmailVerifyView', () => {
   beforeEach(() => {
     pushMock.mockReset()
@@ -124,6 +140,7 @@ describe('EmailVerifyView', () => {
     createTurnstileResetMock.mockReset()
     verifyActionMock.mockReset()
     authStoreState.pendingAuthSession = null
+    clearRegistrationPassword()
     sessionStorage.clear()
     localStorage.clear()
 
@@ -136,6 +153,92 @@ describe('EmailVerifyView', () => {
     sendVerifyCodeMock.mockResolvedValue({ countdown: 60 })
     sendPendingOAuthVerifyCodeMock.mockResolvedValue({ countdown: 60 })
     setTokenMock.mockResolvedValue({})
+  })
+
+  afterEach(() => {
+    for (const storage of [sessionStorage, localStorage]) {
+      for (let i = 0; i < storage.length; i++) {
+        expect(storage.getItem(storage.key(i)!)).not.toMatch(/secret-(123|456)/)
+      }
+    }
+  })
+
+  it('discards a legacy stored password instead of using it after a refresh', async () => {
+    sessionStorage.setItem('register_data', JSON.stringify({
+      email: 'fresh@example.com', password: 'secret-123', aff_code: 'AFF123'
+    }))
+    mountVerification()
+    await flushPromises()
+
+    expect(pushMock).toHaveBeenCalledWith('/register')
+    expect(sendVerifyCodeMock).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem('register_data')).not.toContain('password')
+  })
+
+  it('allows a failed verification to retry with the password kept only in memory', async () => {
+    rememberRegistrationPassword('fresh@example.com', 'secret-123')
+    sessionStorage.setItem('register_data', JSON.stringify({ email: 'fresh@example.com', aff_code: 'AFF123' }))
+    registerMock.mockRejectedValueOnce(new Error('invalid code')).mockResolvedValueOnce({})
+    const wrapper = mountVerification()
+    await flushPromises()
+    await wrapper.get('#code').setValue('123456')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(showErrorMock).toHaveBeenCalled()
+    expect(sessionStorage.getItem('register_data')).not.toContain('password')
+    expect(takeRegistrationPassword('fresh@example.com')).toBe('')
+
+    await wrapper.get('#code').setValue('654321')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(registerMock).toHaveBeenLastCalledWith(expect.objectContaining({
+      password: 'secret-123', verify_code: '654321', aff_code: 'AFF123'
+    }))
+    expect(pushMock).toHaveBeenCalledWith('/dashboard')
+    expect(wrapper.find('form').exists()).toBe(false)
+  })
+
+  it.each(['back', 'unmount'])('clears the password when leaving a failed verification via %s', async (exit) => {
+    rememberRegistrationPassword('fresh@example.com', 'secret-123')
+    sessionStorage.setItem('register_data', JSON.stringify({ email: 'fresh@example.com' }))
+    registerMock.mockRejectedValueOnce(new Error('invalid code'))
+    const wrapper = mountVerification()
+    await flushPromises()
+    await wrapper.get('#code').setValue('123456')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(registerMock).toHaveBeenCalledOnce()
+
+    if (exit === 'back') {
+      await wrapper.findAll('button').find((button) => button.text().includes('auth.backToRegistration'))!.trigger('click')
+      expect(pushMock).toHaveBeenCalledWith('/register')
+      expect(wrapper.find('form').exists()).toBe(false)
+    } else {
+      wrapper.unmount()
+    }
+    pushMock.mockClear()
+    mountVerification()
+    await flushPromises()
+    expect(pushMock).toHaveBeenCalledWith('/register')
+    expect(sendVerifyCodeMock).toHaveBeenCalledOnce()
+    expect(registerMock).toHaveBeenCalledOnce()
+    expect(takeRegistrationPassword('fresh@example.com')).toBe('')
+  })
+
+  it('returns to registration without sending a code when a refresh loses the in-memory password', async () => {
+    sessionStorage.setItem('register_data', JSON.stringify({
+      email: 'fresh@example.com', promo_code: 'PROMO', invitation_code: 'INVITE', aff_code: 'AFF123'
+    }))
+    mount(EmailVerifyView, {
+      global: { stubs: { AuthLayout: { template: '<div><slot /></div>' }, Icon: true } }
+    })
+    await flushPromises()
+
+    expect(pushMock).toHaveBeenCalledWith('/register')
+    expect(sendVerifyCodeMock).not.toHaveBeenCalled()
+    expect(JSON.parse(sessionStorage.getItem('register_data')!)).toEqual({
+      email: 'fresh@example.com', promo_code: 'PROMO', invitation_code: 'INVITE', aff_code: 'AFF123'
+    })
   })
 
   it('acquires a fresh Tencent proof for each resend action', async () => {
@@ -151,11 +254,11 @@ describe('EmailVerifyView', () => {
     verifyActionMock
       .mockResolvedValueOnce({ token: 'ticket-1', randstr: '@rand-1' })
       .mockResolvedValueOnce({ token: 'ticket-2', randstr: '@rand-2' })
+    rememberRegistrationPassword('fresh@example.com', 'secret-123')
     sessionStorage.setItem(
       'register_data',
       JSON.stringify({
         email: 'fresh@example.com',
-        password: 'secret-123',
         tencent_captcha_ticket: 'initial-ticket',
         tencent_captcha_randstr: '@initial-rand',
       })
@@ -206,11 +309,11 @@ describe('EmailVerifyView', () => {
       provider: 'wechat',
       redirect: '/profile',
     }
+    rememberRegistrationPassword('fresh@example.com', 'secret-123')
     sessionStorage.setItem(
       'register_data',
       JSON.stringify({
         email: 'fresh@example.com',
-        password: 'secret-123',
       })
     )
 
@@ -242,11 +345,11 @@ describe('EmailVerifyView', () => {
       registration_email_suffix_whitelist: [],
     })
     sendVerifyCodeMock.mockRejectedValue(new Error('send failed'))
+    rememberRegistrationPassword('fresh@example.com', 'secret-123')
     sessionStorage.setItem(
       'register_data',
       JSON.stringify({
         email: 'fresh@example.com',
-        password: 'secret-123',
         turnstile_token: 'initial-proof',
       })
     )
@@ -285,11 +388,11 @@ describe('EmailVerifyView', () => {
       site_name: 'XY2API',
       registration_email_suffix_whitelist: ['allowed.com'],
     })
+    rememberRegistrationPassword('fresh@example.com', 'secret-123')
     sessionStorage.setItem(
       'register_data',
       JSON.stringify({
         email: 'fresh@example.com',
-        password: 'secret-123',
       })
     )
 
@@ -321,11 +424,11 @@ describe('EmailVerifyView', () => {
       registration_email_suffix_whitelist: ['allowed.com'],
       registration_email_domain_quota_enabled: true,
     })
+    rememberRegistrationPassword('first@custom.example', 'secret-123')
     sessionStorage.setItem(
       'register_data',
       JSON.stringify({
         email: 'first@custom.example',
-        password: 'secret-123',
       })
     )
 
@@ -360,11 +463,11 @@ describe('EmailVerifyView', () => {
       reason: 'EMAIL_DOMAIN_REGISTRATION_LIMIT',
       message: 'raw backend message',
     })
+    rememberRegistrationPassword('second@custom.example', 'secret-123')
     sessionStorage.setItem(
       'register_data',
       JSON.stringify({
         email: 'second@custom.example',
-        password: 'secret-123',
       })
     )
 
@@ -397,11 +500,11 @@ describe('EmailVerifyView', () => {
       reason: 'EMAIL_FORMAT_NOT_ALLOWED',
       message: 'raw backend message',
     })
+    rememberRegistrationPassword('"a.b.c"@gmail.com', 'secret-123')
     sessionStorage.setItem(
       'register_data',
       JSON.stringify({
         email: '"a.b.c"@gmail.com',
-        password: 'secret-123',
       })
     )
 
@@ -431,11 +534,11 @@ describe('EmailVerifyView', () => {
       registration_email_suffix_whitelist: ['allowed.com'],
       registration_email_domain_quota_enabled: true,
     })
+    rememberRegistrationPassword('second@custom.example', 'secret-123')
     sessionStorage.setItem(
       'register_data',
       JSON.stringify({
         email: 'second@custom.example',
-        password: 'secret-123',
       })
     )
     registerMock.mockRejectedValueOnce({
@@ -473,11 +576,11 @@ describe('EmailVerifyView', () => {
       site_name: 'XY2API',
       registration_email_suffix_whitelist: ['allowed.com'],
     })
+    rememberRegistrationPassword('first@custom.example', 'secret-123')
     sessionStorage.setItem(
       'register_data',
       JSON.stringify({
         email: 'first@custom.example',
-        password: 'secret-123',
       })
     )
 
@@ -511,11 +614,11 @@ describe('EmailVerifyView', () => {
       site_name: 'XY2API',
       registration_email_suffix_whitelist: ['allowed.com'],
     })
+    rememberRegistrationPassword('fresh@example.com', 'secret-123')
     sessionStorage.setItem(
       'register_data',
       JSON.stringify({
         email: 'fresh@example.com',
-        password: 'secret-123',
       })
     )
 
@@ -558,11 +661,11 @@ describe('EmailVerifyView', () => {
       provider: 'oidc',
       redirect: '/profile/security',
     })
+    rememberRegistrationPassword('fresh@example.com', 'secret-123')
     sessionStorage.setItem(
       'register_data',
       JSON.stringify({
         email: 'fresh@example.com',
-        password: 'secret-123',
       })
     )
 
@@ -596,11 +699,11 @@ describe('EmailVerifyView', () => {
       provider: 'wechat',
       redirect: '/profile',
     }
+    rememberRegistrationPassword('fresh@example.com', 'secret-123')
     sessionStorage.setItem(
       'register_data',
       JSON.stringify({
         email: 'fresh@example.com',
-        password: 'secret-123',
         aff_code: 'AFF123',
       })
     )
@@ -660,11 +763,11 @@ describe('EmailVerifyView', () => {
       site_name: 'XY2API',
       registration_email_suffix_whitelist: ['allowed.com'],
     })
+    rememberRegistrationPassword('fresh@example.com', 'secret-123')
     sessionStorage.setItem(
       'register_data',
       JSON.stringify({
         email: 'fresh@example.com',
-        password: 'secret-123',
         turnstile_token: 'send-code-token',
       })
     )
@@ -732,11 +835,11 @@ describe('EmailVerifyView', () => {
       site_name: 'XY2API',
       registration_email_suffix_whitelist: ['allowed.com'],
     })
+    rememberRegistrationPassword('fresh@example.com', 'secret-123')
     sessionStorage.setItem(
       'register_data',
       JSON.stringify({
         email: 'fresh@example.com',
-        password: 'secret-123',
         turnstile_token: 'send-code-token',
       })
     )
@@ -789,11 +892,11 @@ describe('EmailVerifyView', () => {
       site_name: 'XY2API',
       registration_email_suffix_whitelist: ['allowed.com'],
     })
+    rememberRegistrationPassword('fresh@example.com', 'secret-123')
     sessionStorage.setItem(
       'register_data',
       JSON.stringify({
         email: 'fresh@example.com',
-        password: 'secret-123',
       })
     )
     apiClientPostMock.mockResolvedValue({
@@ -841,11 +944,11 @@ describe('EmailVerifyView', () => {
   })
 
   it('keeps the normal email registration flow unchanged', async () => {
+    rememberRegistrationPassword('normal@example.com', 'secret-456')
     sessionStorage.setItem(
       'register_data',
       JSON.stringify({
         email: 'normal@example.com',
-        password: 'secret-456',
         promo_code: 'PROMO',
         invitation_code: 'INVITE',
       })
@@ -891,11 +994,11 @@ describe('EmailVerifyView', () => {
       site_name: 'XY2API',
       registration_email_suffix_whitelist: [],
     })
+    rememberRegistrationPassword('normal@example.com', 'secret-456')
     sessionStorage.setItem(
       'register_data',
       JSON.stringify({
         email: 'normal@example.com',
-        password: 'secret-456',
         tencent_captcha_ticket: 'send-code-ticket',
         tencent_captcha_randstr: '@send-code-rand',
       })
@@ -925,7 +1028,6 @@ describe('EmailVerifyView', () => {
     }))
     expect(JSON.parse(sessionStorage.getItem('register_data') || '{}')).toEqual({
       email: 'normal@example.com',
-      password: 'secret-456',
     })
 
     await wrapper.get('#code').setValue('654321')

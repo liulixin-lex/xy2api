@@ -366,7 +366,7 @@
 
 <script setup lang="ts">
 import { computed, ref, reactive, onMounted, onUnmounted, watch } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { onBeforeRouteLeave, useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { AuthLayout } from '@/components/layout'
 import LinuxDoOAuthSection from '@/components/auth/LinuxDoOAuthSection.vue'
@@ -399,6 +399,7 @@ import {
   resolveAffiliateReferralCode
 } from '@/utils/oauthAffiliate'
 import type { LoginAgreementDocument } from '@/types'
+import { clearRegistrationPassword, rememberRegistrationPassword } from './registrationState'
 
 const { t, locale } = useI18n()
 // Persistent compatibility key: keep existing user consent across the XY2API cutover.
@@ -506,6 +507,8 @@ const formData = reactive({
   invitation_code: '',
   aff_code: ''
 })
+let handingOffPassword = false
+clearRegistrationPassword()
 
 const errors = reactive({
   email: '',
@@ -560,6 +563,24 @@ function syncAffiliateReferralCode(): string {
 // ==================== Lifecycle ====================
 
 onMounted(async () => {
+  // Restore only non-sensitive fields, including drafts left by older versions.
+  const registerDataStr = sessionStorage.getItem('register_data')
+  if (registerDataStr) {
+    try {
+      const draft = JSON.parse(registerDataStr)
+      for (const field of ['email', 'promo_code', 'invitation_code', 'aff_code'] as const) {
+        if (typeof draft[field] === 'string') formData[field] = draft[field]
+      }
+      sessionStorage.setItem('register_data', JSON.stringify({
+        email: formData.email,
+        promo_code: formData.promo_code || undefined,
+        invitation_code: formData.invitation_code || undefined,
+        aff_code: formData.aff_code || undefined
+      }))
+    } catch {
+      sessionStorage.removeItem('register_data')
+    }
+  }
   syncAffiliateReferralCode()
 
   try {
@@ -617,7 +638,17 @@ watch(
   }
 )
 
+onBeforeRouteLeave((to) => {
+  if (to.path !== '/email-verify') {
+    handingOffPassword = false
+    clearRegistrationPassword()
+  }
+})
+
 onUnmounted(() => {
+  formData.password = ''
+  confirmPassword.value = ''
+  if (!handingOffPassword) clearRegistrationPassword()
   if (promoValidateTimeout) {
     clearTimeout(promoValidateTimeout)
   }
@@ -1045,6 +1076,8 @@ async function handleRegister(): Promise<void> {
     return
   }
 
+  if (!formData.password) return
+
   isLoading.value = true
 
   try {
@@ -1055,12 +1088,11 @@ async function handleRegister(): Promise<void> {
 
     // If email verification is enabled, redirect to verification page
     if (emailVerifyEnabled.value) {
-      // Store registration data in sessionStorage
+      // Persist only the draft; the password is handed off once in memory.
       sessionStorage.setItem(
         'register_data',
         JSON.stringify({
           email: formData.email,
-          password: formData.password,
           turnstile_token:
             turnstileEnabled.value || aliyunCaptchaEnabled.value ? turnstileToken.value : undefined,
           tencent_captcha_ticket: tencentCaptchaEnabled.value ? turnstileToken.value : undefined,
@@ -1072,7 +1104,13 @@ async function handleRegister(): Promise<void> {
       )
 
       // Navigate to email verification page
-      await router.push('/email-verify')
+      rememberRegistrationPassword(formData.email, formData.password)
+      handingOffPassword = true
+      const navigationFailure = await router.push('/email-verify')
+      if (navigationFailure) {
+        handingOffPassword = false
+        clearRegistrationPassword()
+      }
       return
     }
 
@@ -1088,6 +1126,10 @@ async function handleRegister(): Promise<void> {
       invitation_code: formData.invitation_code || undefined,
       ...(affCode ? { aff_code: affCode } : {})
     })
+    formData.password = ''
+    confirmPassword.value = ''
+    clearRegistrationPassword()
+    sessionStorage.removeItem('register_data')
     clearAffiliateReferralCode()
 
     // Show success toast
@@ -1096,6 +1138,8 @@ async function handleRegister(): Promise<void> {
     // Redirect to dashboard
     await router.push('/dashboard')
   } catch (error: unknown) {
+    handingOffPassword = false
+    clearRegistrationPassword()
     // Handle registration error
     errorMessage.value = buildRegistrationErrorMessage(error, t('auth.registrationFailed'))
 
