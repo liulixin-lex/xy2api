@@ -18,16 +18,17 @@
                 <h2 :id="titleId" class="truncate text-lg font-semibold text-gray-900 dark:text-white">{{ title }}</h2>
               </slot>
             </div>
+            <!-- 关闭图标在 Tab 顺序里排第一（设计 B.13），视觉上在最右 -->
             <div class="flex flex-wrap items-center gap-2 md:flex-nowrap">
-              <slot name="header-actions" />
               <button
                 type="button"
-                class="-mr-2 rounded-xl p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 dark:text-dark-400 dark:hover:bg-dark-700 dark:hover:text-dark-200 max-md:absolute max-md:right-4 max-md:top-4"
+                class="-mr-2 rounded-xl p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 dark:text-dark-400 dark:hover:bg-dark-700 dark:hover:text-dark-200 md:order-last max-md:absolute max-md:right-4 max-md:top-4"
                 :aria-label="closeLabel || t('common.close')"
                 @click="emit('close')"
               >
                 <Icon name="x" size="md" />
               </button>
+              <slot name="header-actions" />
             </div>
           </header>
           <div ref="bodyRef" class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-6">

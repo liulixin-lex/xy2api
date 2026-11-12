@@ -19,7 +19,7 @@
         :options="modelOptions"
         :searchable="false"
         :aria-label="t('admin.schedQuality.aria.model')"
-        class="w-[150px] text-xs"
+        class="sq-select-sm w-[150px]"
         @update:model-value="(value) => (requested = String(value))"
       />
     </template>
