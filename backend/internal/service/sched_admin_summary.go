@@ -22,13 +22,29 @@ func (s *SchedAdminService) Summary(_ context.Context, ids []int64, model string
 	}
 	p, now := s.snapshot(), s.d.Now()
 	out.At, out.Stale, out.GlobalEnabled = schedAdminStamp(p.At), now.Sub(p.At) > schedquality.ViewMaxAge, p.GlobalEnabled
+	model = strings.TrimSpace(model)
+	type modelEvidence struct {
+		model   string
+		samples int
+	}
+	var defaults map[int64]modelEvidence
+	if model == "" && len(ids) > 0 {
+		defaults = make(map[int64]modelEvidence, len(ids))
+		for _, id := range ids {
+			defaults[id] = modelEvidence{}
+		}
+		for key, evidence := range p.Evidence {
+			best, requested := defaults[key.AccountID]
+			if requested && evidence.Samples > 0 && (evidence.Samples > best.samples || (evidence.Samples == best.samples && key.Model < best.model)) {
+				defaults[key.AccountID] = modelEvidence{model: key.Model, samples: evidence.Samples}
+			}
+		}
+	}
 	for _, id := range ids {
 		x := SchedAdminAccountSummary{AccountID: id, Cooling: []SchedAdminAccountSummaryCooling{}}
-		m := strings.TrimSpace(model)
+		m := model
 		if m == "" {
-			if models := schedAdminModels(p, id, false); len(models) > 0 {
-				m = models[0]
-			}
+			m = defaults[id].model
 		}
 		v := p.Evidence[SchedAccountModel{id, m}]
 		if m != "" && v.Samples > 0 {
@@ -180,7 +196,7 @@ func (s *SchedAdminService) Detail(ctx context.Context, id int64) (SchedAdminAcc
 			return out, e
 		}
 		policy := p.Policies[g].Policy
-		x := SchedAdminAccountDetailGroups{GroupID: g, Name: gr.Name, GateEnabled: policy.Enabled, Policy: SchedAdminAccountDetailGroupsPolicy{TTFTSeconds: policy.TTFTSeconds, MaxErrorRate: policy.MaxErrorRate, MinCacheRatio: policy.MinCacheRatio, TakeoverIdleSeconds: policy.TakeoverIdleSeconds}, Override: s.override(p, id, g, now), ByModel: []SchedAdminAccountDetailGroupsByModel{}}
+		x := SchedAdminAccountDetailGroups{GroupID: g, Name: gr.Name, GateEnabled: policy.Enabled, Policy: SchedAdminAccountDetailGroupsPolicy{TTFTSeconds: policy.TTFTSeconds, MaxErrorRate: policy.MaxErrorRate, MinCacheRatio: policy.MinCacheRatio, TakeoverIdleSeconds: policy.TakeoverIdleSeconds}, Override: s.override(ctx, p, id, g, now), ByModel: []SchedAdminAccountDetailGroupsByModel{}}
 		sort.Slice(groupRows[g], func(i, j int) bool { return groupRows[g][i].Model < groupRows[g][j].Model })
 		for _, r := range groupRows[g] {
 			x.ByModel = append(x.ByModel, schedAdminGroupModel(r, policy, p.Tests[SchedAccountModel{id, r.Model}].Running))
@@ -327,7 +343,7 @@ func (s *SchedAdminService) Board(ctx context.Context, g int64, model string) (S
 				break
 			}
 		}
-		x := SchedAdminBoardAccounts{AccountID: r.AccountID, Name: names[r.AccountID], Rank: r.Rank, Eligible: r.Eligible, Reject: r.Reject, Standing: r.Standing.String(), State: w.State.String(), Level: w.Level, WaitingTest: w.WaitingTest, Testing: p.Tests[SchedAccountModel{r.AccountID, model}].Running, Override: s.override(p, r.AccountID, g, now), Priority: r.Priority, Rate: r.Rate, InFlight: r.InFlight, Concurrency: r.Concurrency, RecentlyFullSeconds: r.RecentlyFullSeconds, CanTakeOver: r.CanTakeOver, TTFO: SchedAdminBoardAccountsTTFO{N: v.Speed.N, Sessions: v.Speed.Sessions, P90Ms: schedAdminMetric(v.Speed.N, v.Speed.Sessions, v.Speed.P90Ms), P90Timeout: v.Speed.P90Timeout, FailBoundMs: schedAdminMetric(v.Speed.N, v.Speed.Sessions, v.Speed.FailBoundMs), FailBoundTimeout: v.Speed.FailBoundTimeout}, Error: SchedAdminBoardAccountsError{N: v.Error.N, Sessions: v.Error.Sessions, Rate: schedAdminRatio(v.Error.N, v.Error.Sessions, v.Error.Rate), Lcb: schedAdminRatio(v.Error.N, v.Error.Sessions, v.Error.LCB)}, Cache: SchedAdminBoardAccountsCache{N: v.Cache.Turns, Sessions: v.Cache.Sessions, Ratio: schedAdminRatio(v.Cache.Turns, v.Cache.Sessions, v.Cache.Ratio)}, Verdicts: SchedAdminBoardAccountsVerdicts{TTFO: w.Verdicts.Speed.String(), Error: w.Verdicts.Error.String(), Cache: w.Verdicts.Cache.String()}}
+		x := SchedAdminBoardAccounts{AccountID: r.AccountID, Name: names[r.AccountID], Rank: r.Rank, Eligible: r.Eligible, Reject: r.Reject, Standing: r.Standing.String(), State: w.State.String(), Level: w.Level, WaitingTest: w.WaitingTest, Testing: p.Tests[SchedAccountModel{r.AccountID, model}].Running, Override: s.override(ctx, p, r.AccountID, g, now), Priority: r.Priority, Rate: r.Rate, InFlight: r.InFlight, Concurrency: r.Concurrency, RecentlyFullSeconds: r.RecentlyFullSeconds, CanTakeOver: r.CanTakeOver, TTFO: SchedAdminBoardAccountsTTFO{N: v.Speed.N, Sessions: v.Speed.Sessions, P90Ms: schedAdminMetric(v.Speed.N, v.Speed.Sessions, v.Speed.P90Ms), P90Timeout: v.Speed.P90Timeout, FailBoundMs: schedAdminMetric(v.Speed.N, v.Speed.Sessions, v.Speed.FailBoundMs), FailBoundTimeout: v.Speed.FailBoundTimeout}, Error: SchedAdminBoardAccountsError{N: v.Error.N, Sessions: v.Error.Sessions, Rate: schedAdminRatio(v.Error.N, v.Error.Sessions, v.Error.Rate), Lcb: schedAdminRatio(v.Error.N, v.Error.Sessions, v.Error.LCB)}, Cache: SchedAdminBoardAccountsCache{N: v.Cache.Turns, Sessions: v.Cache.Sessions, Ratio: schedAdminRatio(v.Cache.Turns, v.Cache.Sessions, v.Cache.Ratio)}, Verdicts: SchedAdminBoardAccountsVerdicts{TTFO: w.Verdicts.Speed.String(), Error: w.Verdicts.Error.String(), Cache: w.Verdicts.Cache.String()}}
 		if r.RejectUntil != nil {
 			x.RejectUntil = schedAdminTime(*r.RejectUntil)
 		}

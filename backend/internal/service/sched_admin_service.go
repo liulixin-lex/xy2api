@@ -12,6 +12,7 @@ import (
 
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
+	"github.com/liulixin-lex/xy2api/internal/pkg/operatoraccess"
 )
 
 // SchedAdminAccountRepository adds conditional, narrowly scoped mutations to account reads.
@@ -139,7 +140,7 @@ func (s *SchedAdminService) SetOverride(ctx context.Context, o SchedOverride) er
 	if o.Mode != schedquality.OverrideExempt && o.Mode != schedquality.OverrideDemote {
 		return infraerrors.BadRequest("INVALID_OVERRIDE", "Invalid override mode")
 	}
-	o.Reason = strings.TrimSpace(o.Reason)
+	o.Reason = operatoraccess.StripURLUserinfo(strings.TrimSpace(o.Reason))
 	if o.ExpiresAt != nil && !o.ExpiresAt.After(s.d.Now()) {
 		return infraerrors.BadRequest("INVALID_OVERRIDE", "Expiry must be in the future")
 	}
@@ -175,7 +176,7 @@ func schedAdminOverrideMode(m schedquality.Override) string {
 	}
 	return ""
 }
-func (s *SchedAdminService) override(p *SchedQualitySnapshot, a, g int64, now time.Time) *SchedAdminOverride {
+func (s *SchedAdminService) override(ctx context.Context, p *SchedQualitySnapshot, a, g int64, now time.Time) *SchedAdminOverride {
 	var all, group *SchedOverride
 	for i := range p.Overrides {
 		o := &p.Overrides[i]
@@ -200,7 +201,11 @@ func (s *SchedAdminService) override(p *SchedQualitySnapshot, a, g int64, now ti
 	if o.ExpiresAt != nil {
 		expiry = schedAdminTime(*o.ExpiresAt)
 	}
-	return &SchedAdminOverride{Mode: schedAdminOverrideMode(o.Mode), AllGroups: o.GroupID == 0, ExpiresAt: expiry, Reason: o.Reason}
+	reason := operatoraccess.StripURLUserinfo(o.Reason)
+	if scope := operatoraccess.ScopeFrom(ctx); scope != nil && !scope.Has(operatoraccess.FlagAccountsUpstreamAddress) {
+		reason = operatoraccess.ScrubURLs(reason)
+	}
+	return &SchedAdminOverride{Mode: schedAdminOverrideMode(o.Mode), AllGroups: o.GroupID == 0, ExpiresAt: expiry, Reason: reason}
 }
 func schedAdminModels(p *SchedQualitySnapshot, id int64, group bool) []string {
 	counts := map[string]int{}

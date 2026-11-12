@@ -292,6 +292,45 @@ func TestSchedAdminSummaryAggregation(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []int64{1}, attention.Cooling)
 }
+
+func TestSchedAdminSummaryDefaultIndexPreservesResults(t *testing.T) {
+	s, e, repo := schedAdminFixture()
+	for key, samples := range map[SchedAccountModel]int{
+		{1, "b"}: 50, {1, "a"}: 50, {1, "zero"}: 0,
+		{2, "a"}: 30, {2, "z"}: 80,
+		{3, "test-only"}: 0, {99, "unrequested"}: 1000,
+	} {
+		e.snapshot.Evidence[key] = schedAdminEvidence(samples)
+	}
+	e.snapshot.Tests[SchedAccountModel{3, "test-only"}] = SchedTestRecord{Running: true}
+	e.snapshot.Members = map[int64][]int64{1: {1, 2}, 2: {1}, 3: {2}}
+	e.snapshot.GroupRows[1] = []SchedGroupRow{{GroupID: 1, Model: "b", View: schedquality.StateView{State: schedquality.StateCooling}, Summary: schedAdminEvidence(50)}}
+	ids := []int64{2, 1, 3, 4, 1}
+	ctx := context.Background()
+	for _, input := range []string{"", "  ", " a "} {
+		out, err := s.Summary(ctx, ids, input)
+		require.NoError(t, err)
+		selected := []string{"z", "a", "", "", "a"}
+		if input == " a " {
+			selected = []string{"a", "a", "a", "a", "a"}
+		}
+		for i, id := range ids {
+			expected, err := s.Summary(ctx, []int64{id}, selected[i])
+			require.NoError(t, err)
+			require.Equal(t, expected.Accounts[0], out.Accounts[i])
+			if selected[i] == "" {
+				require.Nil(t, out.Accounts[i].Model)
+				require.Zero(t, out.Accounts[i].Samples)
+			}
+		}
+		if input == "" {
+			require.Equal(t, "z", *out.Accounts[0].Model)
+			require.Equal(t, "a", *out.Accounts[1].Model)
+		}
+	}
+	require.Zero(t, repo.reads)
+}
+
 func TestSchedAdminDetailTestEvidenceAndLedger(t *testing.T) {
 	s, e, _ := schedAdminFixture()
 	p := e.snapshot
@@ -388,6 +427,16 @@ func TestSchedAdminOverrideAndTestTickets(t *testing.T) {
 	require.Len(t, runner.Requests, 1)
 	require.Equal(t, "fallback", runner.Requests[0].Model)
 }
+
+func TestSchedAdminOverrideReasonStripsURLCredentialsBeforeEngine(t *testing.T) {
+	s, e, _ := schedAdminFixture()
+	reason := "maintenance https://proxy-user:proxy-secret@relay.example/private; retry socks5://second-user:second-secret@other.example:1080/path done"
+	err := s.SetOverride(context.Background(), SchedOverride{AccountID: 1, GroupID: 1, Mode: schedquality.OverrideDemote, Reason: reason, OperatorID: 7})
+	require.NoError(t, err)
+	require.Len(t, e.overrides, 1)
+	require.Equal(t, "maintenance https://***@relay.example/private; retry socks5://***@other.example:1080/path done", e.overrides[0].Reason)
+}
+
 func TestSchedAdminNarrowClearAndTempConflict(t *testing.T) {
 	s, e, r := schedAdminFixture()
 	a := r.rows[1]
