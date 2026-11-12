@@ -119,6 +119,7 @@ func TestRecentStatsHandlerValidatesIDs(t *testing.T) {
 				require.Zero(t, repo.calls)
 			} else {
 				require.Len(t, recentStatsData(t, w)["items"], 1000)
+				require.Equal(t, ids, repo.ids)
 			}
 		})
 	}

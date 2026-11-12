@@ -2,11 +2,8 @@ package service
 
 import (
 	"context"
-	"sort"
 	"sync"
 	"time"
-
-	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 )
 
 const (
@@ -35,6 +32,7 @@ type AccountRecentStatsRow struct {
 }
 
 type AccountRecentStatsRepository interface {
+	// IDs are positive, unique, sorted, and bounded by the request handler.
 	Batch(context.Context, []int64, time.Time, bool) ([]AccountRecentStatsRow, error)
 }
 
@@ -84,14 +82,11 @@ func NewAccountRecentStatsService(repo AccountRecentStatsRepository, ops *OpsSer
 	return &AccountRecentStatsService{repo: repo, ops: ops, now: time.Now, cache: make(map[int64]AccountRecentStatsRow)}
 }
 
-func (s *AccountRecentStatsService) Batch(ctx context.Context, accountIDs []int64) (AccountRecentStats, error) {
+// Batch accepts the positive, unique, sorted IDs validated by the handler.
+func (s *AccountRecentStatsService) Batch(ctx context.Context, ids []int64) (AccountRecentStats, error) {
 	monitoring := s.ops.IsMonitoringEnabled(ctx)
 	asOf := s.now().UTC().Truncate(recentStatsCutoffInterval)
-	out := AccountRecentStats{AsOf: asOf, Items: make([]AccountRecentStatsItem, 0, len(accountIDs))}
-	ids, err := NormalizeRecentStatsAccountIDs(accountIDs)
-	if err != nil {
-		return out, err
-	}
+	out := AccountRecentStats{AsOf: asOf, Items: make([]AccountRecentStatsItem, 0, len(ids))}
 	rows := make(map[int64]AccountRecentStatsRow, len(ids))
 	missing := make([]int64, 0, len(ids))
 	s.mu.Lock()
@@ -133,26 +128,6 @@ func (s *AccountRecentStatsService) Batch(ctx context.Context, accountIDs []int6
 		out.Items = append(out.Items, recentStatsItem(rows[id], monitoring))
 	}
 	return out, nil
-}
-
-func NormalizeRecentStatsAccountIDs(accountIDs []int64) ([]int64, error) {
-	seen := make(map[int64]struct{}, len(accountIDs))
-	ids := make([]int64, 0, len(accountIDs))
-	for _, id := range accountIDs {
-		if id <= 0 {
-			return nil, infraerrors.BadRequest("INVALID_ACCOUNT_IDS", "Account ids must be positive integers")
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
-		if len(ids) > RecentStatsMaxAccounts {
-			return nil, infraerrors.BadRequest("TOO_MANY_ACCOUNT_IDS", "Too many account ids")
-		}
-	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	return ids, nil
 }
 
 func recentStatsItem(row AccountRecentStatsRow, monitoring bool) AccountRecentStatsItem {
