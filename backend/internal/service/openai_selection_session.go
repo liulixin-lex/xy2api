@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -138,6 +139,13 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 			}
 			continue
 		}
+		kind := "takeover"
+		if migrate {
+			kind = "migrate"
+		}
+		slog.InfoContext(ctx, "sched_quality.takeover", "component", "sched_quality",
+			"kind", kind, "gateway_request_id", resilience.StateFrom(ctx).GatewayRequestID(),
+			"group_id", groupID, "model", model, "from_account_id", owner.ID, "to_account_id", latest.ID)
 		resilience.StateFrom(ctx).ClearKeptStickyIfOwner(owner.ID)
 		return attachSelectionProfitGate(ctx, &AccountSelectionResult{Account: latest, Acquired: true, ReleaseFunc: slot.ReleaseFunc})
 	}
