@@ -12,8 +12,7 @@
         :data-sq-trigger="`cap:${summary.account_id}:${item.group_id}`"
         @click.stop="emit('open', { model: item.model, groupId: item.group_id })"
       >
-        <span :ref="(el) => measure(item.group_id, el)" class="sq-capsule__name">{{ groupName(item.group_id) }}</span>
-        <span class="sq-capsule__state">{{ t(item.testing ? 'admin.schedQuality.state.testing' : 'admin.schedQuality.state.cooling') }}</span>
+        <span :ref="(el) => measure(item.group_id, el)" class="sq-capsule__name">{{ groupName(item.group_id) }}</span> <span class="sq-capsule__state">{{ t(item.testing ? 'admin.schedQuality.state.testing' : 'admin.schedQuality.state.cooling') }}</span>
       </button>
       <button
         v-if="summary.cooling_more > 0"

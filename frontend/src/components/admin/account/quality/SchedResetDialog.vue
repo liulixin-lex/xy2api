@@ -6,7 +6,7 @@
         <h4 class="text-xs font-medium text-gray-500 dark:text-dark-400">{{ column.title }}</h4>
         <ul v-if="column.items.length" class="mt-1.5 space-y-1 text-sm text-gray-900 dark:text-gray-100">
           <li v-for="item in column.items" :key="item.key">
-            {{ kindName(item.kind, t, te) }}<span v-if="modelFromResetKey(item.key, item.kind)" class="ml-1.5 sq-text-3">{{ modelFromResetKey(item.key, item.kind) }}</span>
+            {{ kindName(item.kind, t, te) }} <span v-if="modelFromResetKey(item.key, item.kind)" class="sq-text-3">{{ modelFromResetKey(item.key, item.kind) }}</span>
           </li>
         </ul>
         <p v-else class="mt-1.5 text-sm sq-text-3">—</p>

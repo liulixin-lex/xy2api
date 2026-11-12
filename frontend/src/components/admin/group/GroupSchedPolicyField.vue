@@ -30,8 +30,7 @@
         </span>
         <span class="inline-flex flex-wrap gap-x-3 text-[13px]" data-sq-class-limits>
           <span v-for="item in converted" :key="item.cls">
-            <span class="sq-text-3">{{ t(`admin.schedQuality.class.${item.cls}`) }}</span>
-            <b class="sq-num ml-1.5 font-medium text-gray-700 dark:text-gray-300">{{ item.value }}s</b>
+            <span class="sq-text-3">{{ t(`admin.schedQuality.class.${item.cls}`) }}</span> <b class="sq-num font-medium text-gray-700 dark:text-gray-300">{{ item.value }}s</b>
           </span>
         </span>
       </div>
