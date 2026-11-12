@@ -831,7 +831,7 @@ export async function exportData(options?: {
     sort_by?: string
     sort_order?: 'asc' | 'desc'
     group_category?: string
-    /** "cooling" (contract clarification K11 / K24). */
+    /** "normal" | "cooling" | "exempt" | "demote" (contract delta D2, clarification K24). */
     sched_quality?: string
   }
   includeProxies?: boolean
