@@ -59,10 +59,10 @@ func TestLoggerGatewayRequestIDMatchesAttemptLedger(t *testing.T) {
 	var localIDs []string
 	router := gin.New()
 	router.Use(RequestLogger(), Logger())
-	router.POST("/v1/responses", func(c *gin.Context) {
-		state := resilience.NewRequestState()
+	router.POST("/v1/responses", ClientRequestID(), func(c *gin.Context) {
+		state := resilience.StateFrom(c.Request.Context())
+		require.NotNil(t, state)
 		state.SetSchedSelection(resilience.SchedSelection{AccountID: account.ID, Model: "gpt-5.1"})
-		c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
 		localIDs = append(localIDs, state.GatewayRequestID())
 		_, err := gateway.Forward(c.Request.Context(), c, account, body)
 		require.NoError(t, err)
@@ -71,11 +71,14 @@ func TestLoggerGatewayRequestIDMatchesAttemptLedger(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(string(body)))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-Request-ID", "client-reused")
+		req.Header.Set("X-Client-Request-ID", "client-forged")
 		req.Header.Set("gateway_request_id", "forged")
 		req.Header.Set("X-Gateway-Request-ID", "also-forged")
 		response := httptest.NewRecorder()
 		router.ServeHTTP(response, req)
 		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		require.NotEmpty(t, response.Header().Get("X-Client-Request-ID"))
+		require.NotEqual(t, "client-forged", response.Header().Get("X-Client-Request-ID"))
 	}
 	require.NoError(t, recorder.Flush(context.Background()))
 	require.Len(t, store.rows, 2)
@@ -95,6 +98,7 @@ func TestLoggerGatewayRequestIDMatchesAttemptLedger(t *testing.T) {
 		require.NotEqual(t, "forged", row.RequestID)
 		require.NotEqual(t, "also-forged", row.RequestID)
 		require.NotEqual(t, "client-reused", row.RequestID)
+		require.NotEqual(t, "client-forged", row.RequestID)
 	}
 }
 

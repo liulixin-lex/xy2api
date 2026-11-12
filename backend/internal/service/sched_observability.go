@@ -61,7 +61,6 @@ func (s *SchedObservabilityService) Cycle(d time.Duration, failed bool) {
 		return
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.window.cycles++
 	if failed {
 		s.window.cyclesFailed++
@@ -69,20 +68,24 @@ func (s *SchedObservabilityService) Cycle(d time.Duration, failed bool) {
 	if ms := d.Milliseconds(); ms > s.window.cycleMSMax {
 		s.window.cycleMSMax = ms
 	}
-	if d > 5*time.Second && !s.window.slowWarned {
+	warn := d > 5*time.Second && !s.window.slowWarned
+	if warn {
 		s.window.slowWarned = true
+	}
+	s.mu.Unlock()
+	if warn {
 		slog.Warn("sched_quality.cycle", "component", "sched_quality", "duration_ms", d.Milliseconds())
 	}
 }
 
 func (s *SchedObservabilityService) summary(ctx context.Context) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	w := s.window
+	s.window = schedObsWindow{}
+	s.mu.Unlock()
 	slog.InfoContext(ctx, "sched_quality.summary", "component", "sched_quality",
 		"cycles", w.cycles, "cycles_failed", w.cyclesFailed, "cycle_ms_max", w.cycleMSMax,
 		"tests", w.tests, "tests_aborted", w.testsAborted, "cooled", w.cooled, "released", w.released)
-	s.window = schedObsWindow{}
 }
 
 func (s *SchedObservabilityService) Start(ctx context.Context) {
