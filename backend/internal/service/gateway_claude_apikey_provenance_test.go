@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,7 +12,10 @@ import (
 	"testing"
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
+	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestClaudeAPIKeyCompatSignedHistoryKeepsOrderAndMultiplicity(t *testing.T) {
@@ -216,16 +220,26 @@ func TestClaudeAPIKeyCompatProvenanceBindingFailuresAreTerminal(t *testing.T) {
 
 func TestClaudeAPIKeyCompatRegistrationTypedReasons(t *testing.T) {
 	for _, test := range []struct {
-		cause  error
-		reason AnthropicCompatReason
+		cause           error
+		reason          AnthropicCompatReason
+		label, category string
 	}{
-		{AnthropicCompatRegistrationConflict, AnthropicCompatReasonRegistrationConflict},
-		{AnthropicCompatRegistrationCapacity, AnthropicCompatReasonRegistrationCapacity},
-		{AnthropicCompatRegistrationInvalid, AnthropicCompatReasonRegistrationInvalid},
+		{AnthropicCompatRegistrationConflict, AnthropicCompatReasonRegistrationConflict, "conflict", "provenance_conflict"},
+		{AnthropicCompatRegistrationCapacity, AnthropicCompatReasonRegistrationCapacity, "capacity", "provenance_capacity"},
+		{AnthropicCompatRegistrationInvalid, AnthropicCompatReasonRegistrationInvalid, "invalid", "provenance_invalid"},
+		{compatTestRedisError("WRONGTYPE private-redis-key"), "anthropic_compat_state_unavailable", "other", "WRONGTYPE"},
+		{context.Canceled, "anthropic_compat_state_unavailable", "other", "context_canceled"},
 	} {
-		t.Run(string(test.reason), func(t *testing.T) {
+		t.Run(test.category, func(t *testing.T) {
 			store := newCompatMemoryStore()
 			s, plan, ctx := compatObserverFixture(t, store)
+			core, logs := observer.New(zap.WarnLevel)
+			ctx = logger.IntoContext(ctx, zap.New(core))
+			if errors.Is(test.cause, context.Canceled) {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
 			store.registerErr = fmt.Errorf("store: %w", test.cause)
 			err := s.registerAnthropicCompat(ctx, plan, []anthropicCompatOpaque{{"thinking", "signed"}})
 			require.Equal(t, test.reason, AnthropicCompatErrorReason(fmt.Errorf("outer: %w", err)))
@@ -234,6 +248,26 @@ func TestClaudeAPIKeyCompatRegistrationTypedReasons(t *testing.T) {
 			require.Equal(t, http.StatusServiceUnavailable, status)
 			require.Equal(t, "anthropic_compat_state_unavailable", code)
 			require.Zero(t, store.registers)
+			entries := logs.FilterMessage("gateway.anthropic_compat_registration_failed").All()
+			require.Len(t, entries, 1)
+			fields := entries[0].ContextMap()
+			require.Equal(t, test.label, fields["reason"])
+			require.Equal(t, test.category, fields["redis_error_category"])
+			require.Equal(t, plan.Record.AccountID, fields["account_id"])
+			require.Equal(t, int64(1), fields["signature_blocks"])
+			require.GreaterOrEqual(t, fields["duration_ms"], int64(0))
+			require.Contains(t, fields, "ctx_error")
+			if ctx.Err() != nil {
+				require.Equal(t, ctx.Err().Error(), fields["ctx_error"])
+			}
+			logged := fmt.Sprint(fields)
+			require.NotContains(t, logged, "private-redis-key")
+			require.NotContains(t, logged, "signed")
 		})
 	}
 }
+
+type compatTestRedisError string
+
+func (e compatTestRedisError) Error() string { return string(e) }
+func (compatTestRedisError) RedisError()     {}

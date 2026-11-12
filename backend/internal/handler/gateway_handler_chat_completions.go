@@ -99,6 +99,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	compatCtx, compatErr := h.gatewayService.PrepareAnthropicCompatibilityForSelection(c.Request.Context(), subject.UserID, apiKey.ID, body, "chat", service.ExtractClientSessionID(c), c.Request.Header)
 	if compatErr != nil {
 		status, code, message, _ := service.AnthropicCompatErrorDetails(compatErr)
+		logAnthropicCompatSelectionError(c, reqLog, "chat", compatErr, status, code)
 		h.chatCompletionsErrorResponse(c, status, code, message)
 		return
 	}
@@ -207,6 +208,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, selectionSessionHash, reqModel, fs.FailedAccountIDs, "", int64(0))
 		if err != nil {
 			if status, code, message, local := service.AnthropicCompatErrorDetails(err); local {
+				logAnthropicCompatSelectionError(c, reqLog, "chat", err, status, code)
 				h.chatCompletionsErrorResponse(c, status, code, message)
 				return
 			}
