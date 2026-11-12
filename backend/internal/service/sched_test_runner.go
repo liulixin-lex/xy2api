@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -100,13 +101,56 @@ func (s *SchedTestRunnerService) Start(ctx context.Context) {
 			case <-ticker.C:
 				release, ok := tryAcquireSingletonLeaderLock(s.ctx, s.lockCache, s.db, "sched-test-retention", s.owner, 5*time.Minute)
 				if ok {
-					_, _ = s.store.DeleteBefore(s.ctx, s.now().Add(-schedquality.TestRetention))
+					s.cleanup(s.ctx)
 					release()
 				}
 			}
 		}
 	}()
 }
+func (s *SchedTestRunnerService) cleanup(ctx context.Context) {
+	started := s.now()
+	rows, err := s.store.DeleteBefore(ctx, started.Add(-schedquality.TestRetention))
+	attrs := []any{"component", "sched_quality", "kind", "tests", "rows", rows, "duration_ms", s.now().Sub(started).Milliseconds()}
+	if err != nil {
+		slog.ErrorContext(ctx, "sched_quality.cleanup", append(attrs, "error", schedTestStoreErrorClass(err))...)
+		return
+	}
+	slog.InfoContext(ctx, "sched_quality.cleanup", attrs...)
+}
+
+func schedTestStoreErrorClass(err error) string {
+	var timeout interface{ Timeout() bool }
+	if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &timeout) && timeout.Timeout() {
+		return "timeout"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "internal"
+	}
+	return "db"
+}
+
+func (s *SchedTestRunnerService) logTest(ctx context.Context, record SchedTestRecord, blockedBy string) {
+	result := "aborted"
+	if record.Done {
+		result = "dirty"
+		if schedquality.TestClean(record.TestResult) {
+			result = "clean"
+		}
+	} else {
+		s.obs.Count("tests_aborted", 1)
+	}
+	attrs := []any{"component", "sched_quality", "test_id", record.ID, "account_id", record.AccountID, "model", record.Model, "auto", record.Auto,
+		"result", result, "input_tokens", record.InputTokens, "cached_tokens", record.CachedTokens, "duration_ms", record.FinishedAt.Sub(record.StartedAt).Milliseconds()}
+	if !record.Done {
+		attrs = append(attrs, "abort_reason", record.AbortReason)
+		if record.AbortReason == "not_schedulable" {
+			attrs = append(attrs, "blocked_by", blockedBy)
+		}
+	}
+	slog.InfoContext(ctx, "sched_quality.test", attrs...)
+}
+
 func (s *SchedTestRunnerService) Stop() { s.mu.Lock(); s.cancel(); s.mu.Unlock(); s.wg.Wait() }
 
 func (s *SchedTestRunnerService) Request(ctx context.Context, accountID int64, model string, auto bool, operatorID int64) (SchedTestTicket, error) {
@@ -136,7 +180,7 @@ func (s *SchedTestRunnerService) Request(ctx context.Context, accountID int64, m
 	if account == nil {
 		return ticket, errors.New("sched test account not found")
 	}
-	requestModel, ok, _ := s.admission.TestRequestModel(ctx, account, model)
+	requestModel, ok, reason := s.admission.TestRequestModel(ctx, account, model)
 	record := SchedTestRecord{AccountID: accountID, Model: model, Auto: auto, OperatorID: operatorID, Running: ok, TestResult: schedquality.TestResult{ID: uuid.NewString(), StartedAt: s.now()}}
 	if !ok || requestModel == "" {
 		record.Running = false
@@ -154,7 +198,9 @@ func (s *SchedTestRunnerService) Request(ctx context.Context, accountID int64, m
 		return ticket, err
 	}
 	ticket.TestID = record.ID
+	s.obs.Count("tests", 1)
 	if !record.Running {
+		s.logTest(ctx, record, schedTestAdmissionBlockedBy(account, model, reason, s.now()))
 		return ticket, nil
 	}
 	ticket.Started = true
@@ -179,7 +225,7 @@ func (s *SchedTestRunnerService) Request(ctx context.Context, accountID int64, m
 			}
 			s.mu.Unlock()
 			if recovered := recover(); recovered != nil {
-				logger.LegacyPrintf("service.sched_test", "runner_panic: test_id=%s panic=%v", record.ID, recovered)
+				logger.LegacyPrintf("service.sched_test", "runner_panic: test_id=%s error=internal", record.ID)
 			}
 		}()
 		s.run(record, limit.slots)
@@ -254,8 +300,13 @@ func (s *SchedTestRunnerService) run(record SchedTestRecord, slots chan struct{}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	failed, busy, notSchedulable := false, false, false
+	blockedBy := ""
 	base := record
-	for tier := schedquality.TierSmall; tier <= schedquality.TierLarge; tier++ {
+	tiers := []schedquality.TestTier{schedquality.TierSmall, schedquality.TierMedium, schedquality.TierLarge}
+	if record.Auto {
+		tiers = schedquality.AutoTestTiers[:]
+	}
+	for _, tier := range tiers {
 		wg.Add(1)
 		go func(tier schedquality.TestTier) {
 			defer wg.Done()
@@ -265,7 +316,7 @@ func (s *SchedTestRunnerService) run(record SchedTestRecord, slots chan struct{}
 				return
 			}
 			defer func() { <-slots }()
-			partial := s.runTier(ctx, cancel, base, tier)
+			partial, blocked := s.runTier(ctx, cancel, base, tier)
 			mu.Lock()
 			defer mu.Unlock()
 			record.Turns = append(record.Turns, partial.Turns...)
@@ -275,6 +326,9 @@ func (s *SchedTestRunnerService) run(record SchedTestRecord, slots chan struct{}
 			failed = failed || partial.AbortReason == "error"
 			busy = busy || partial.AbortReason == "busy"
 			notSchedulable = notSchedulable || partial.AbortReason == "not_schedulable"
+			if blockedBy == "" {
+				blockedBy = blocked
+			}
 		}(tier)
 	}
 	wg.Wait()
@@ -294,22 +348,23 @@ func (s *SchedTestRunnerService) run(record SchedTestRecord, slots chan struct{}
 	writeCtx, writeCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer writeCancel()
 	if err := s.store.Finish(writeCtx, record); err != nil {
-		logger.LegacyPrintf("service.sched_test", "finish_failed: test_id=%s err=%v", record.ID, err)
+		logger.LegacyPrintf("service.sched_test", "finish_failed: test_id=%s error=%s", record.ID, schedTestStoreErrorClass(err))
 	}
+	s.logTest(writeCtx, record, blockedBy)
 }
 
-func (s *SchedTestRunnerService) runTier(ctx context.Context, cancel context.CancelFunc, record SchedTestRecord, tier schedquality.TestTier) (partial SchedTestRecord) {
+func (s *SchedTestRunnerService) runTier(ctx context.Context, cancel context.CancelFunc, record SchedTestRecord, tier schedquality.TestTier) (partial SchedTestRecord, blockedBy string) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			partial.AbortReason = "error"
-			logger.LegacyPrintf("service.sched_test", "tier_panic: test_id=%s tier=%s panic=%v", record.ID, tier, recovered)
+			logger.LegacyPrintf("service.sched_test", "tier_panic: test_id=%s tier=%s error=internal", record.ID, tier)
 		}
 	}()
 	session := schedtest.Session{ID: record.ID}
 	var prev *int
 	for turn := 1; turn <= schedquality.TestTurnsPerTier; turn++ {
 		if ctx.Err() != nil || turn > 1 && !s.wait(ctx, schedquality.TestTurnGap) {
-			return partial
+			return partial, blockedBy
 		}
 		// Scope the slot and its cancellation to this round, including panic exits.
 		keepGoing := func() bool {
@@ -320,9 +375,10 @@ func (s *SchedTestRunnerService) runTier(ctx context.Context, cancel context.Can
 				}
 				return false
 			}
-			mapped, ok, _ := s.admission.TestRequestModel(ctx, account, record.Model)
+			mapped, ok, reason := s.admission.TestRequestModel(ctx, account, record.Model)
 			if !ok || mapped == "" {
 				partial.AbortReason = "not_schedulable"
+				blockedBy = schedTestAdmissionBlockedBy(account, record.Model, reason, s.now())
 				cancel()
 				return false
 			}
@@ -359,9 +415,10 @@ func (s *SchedTestRunnerService) runTier(ctx context.Context, cancel context.Can
 				}
 				return false
 			}
-			mapped, ok, _ = s.admission.TestRequestModel(ctx, account, record.Model)
+			mapped, ok, reason = s.admission.TestRequestModel(ctx, account, record.Model)
 			if !ok || mapped == "" {
 				partial.AbortReason = "not_schedulable"
+				blockedBy = schedTestAdmissionBlockedBy(account, record.Model, reason, s.now())
 				cancel()
 				return false
 			}
@@ -432,10 +489,10 @@ func (s *SchedTestRunnerService) runTier(ctx context.Context, cancel context.Can
 			return selected.Outcome == schedquality.OutcomeOK
 		}()
 		if !keepGoing {
-			return partial
+			return partial, blockedBy
 		}
 	}
-	return partial
+	return partial, blockedBy
 }
 
 var _ SchedTestRunner = (*SchedTestRunnerService)(nil)

@@ -345,7 +345,7 @@ func TestSchedTestRunnerAccountReadCancellationIsNotError(t *testing.T) {
 				t.Error("forward called after account read cancellation")
 				return nil, nil
 			}
-			partial := s.runTier(ctx, cancel, SchedTestRecord{AccountID: 7, Model: "evidence"}, schedquality.TierSmall)
+			partial, _ := s.runTier(ctx, cancel, SchedTestRecord{AccountID: 7, Model: "evidence"}, schedquality.TierSmall)
 			require.Equal(t, cancelledRead, reads)
 			require.Empty(t, partial.AbortReason)
 			require.Empty(t, partial.Turns)
