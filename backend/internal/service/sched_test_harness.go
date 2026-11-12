@@ -12,9 +12,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
+	"github.com/tidwall/gjson"
 )
 
 type schedTestWriter struct {
@@ -51,6 +53,13 @@ func schedTestForward(ctx context.Context, f SchedTestForwarder, account *Accoun
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("User-Agent", DefaultOpenAICodexUserAgent)
 	req.Header.Set("originator", openai.CodexDefaultOriginator)
+	// Synthetic Codex session/window IDs stay stable across this tier's turns.
+	sessionID := uuid.NewString()
+	if key := gjson.GetBytes(body, "prompt_cache_key").String(); key != "" {
+		sessionID = uuid.NewSHA1(uuid.NameSpaceOID, []byte(key)).String()
+	}
+	req.Header.Set("session_id", sessionID)
+	req.Header.Set("x-codex-window-id", sessionID+":0")
 	c.Request = req
 	InstallDeliveryTracking(c, time.Now())
 	result, err := f.Forward(ctx, c, account, body)
