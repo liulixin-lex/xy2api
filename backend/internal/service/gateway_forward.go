@@ -93,11 +93,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	if parsed == nil {
 		return nil, fmt.Errorf("parse request: empty request")
 	}
-	defer func() {
-		s.logAnthropicCompatOutcome(ctx, c, account, "messages", err)
-	}()
 	// Account-specific body normalization and cache generation belong to this
 	// attempt. A fresh BodyRef shares immutable bytes without copying the body.
+	ctx, err = beginAnthropicCompatRequest(ctx, c, account, parsed.Body.Bytes(), "messages")
+	if err != nil {
+		return nil, err
+	}
 	attemptParsed := *parsed
 	attemptParsed.Body = NewRequestBodyRef(parsed.Body.Bytes())
 	parsed = &attemptParsed
@@ -166,7 +167,8 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 
 	// Beta policy: evaluate once; block check + cache filter set for buildUpstreamRequest.
 	// Always overwrite the cache to prevent stale values from a previous retry with a different account.
-	if account.Platform == PlatformAnthropic && c != nil {
+	// Compatibility evaluates policy after account model mapping in the builder.
+	if account.Platform == PlatformAnthropic && c != nil && account.GetExtraString(AnthropicCompatProfileExtraKey) != AnthropicCompatProfileClaudeCode {
 		policy := s.evaluateBetaPolicy(ctx, c.GetHeader("anthropic-beta"), account, parsed.Model)
 		if policy.blockErr != nil {
 

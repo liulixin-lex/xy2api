@@ -22,7 +22,6 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 	"go.uber.org/zap"
 )
 
@@ -142,15 +141,8 @@ func (s *GatewayService) newAnthropicCompatPlan(ctx context.Context, c *gin.Cont
 	}
 	request := compatRequest(ctx)
 	if request == nil {
-		headers := http.Header{}
-		if c != nil && c.Request != nil {
-			headers = c.Request.Header
-		}
-		ctx = WithAnthropicCompatRequest(ctx, 0, 0, body, "messages", headers.Get("X-Claude-Code-Session-Id"), headers)
+		ctx = WithAnthropicCompatRequest(ctx, 0, 0, body, "messages", ExtractClientSessionID(c), compatClientHeaders(c))
 		request = compatRequest(ctx)
-		if c != nil && c.Request != nil {
-			c.Request = c.Request.WithContext(ctx)
-		}
 	}
 	requestedModel := anthropicCompatDispatchModel(ctx, request.Model)
 	if !profile.SupportsModel(model) || requestedModel != "" && (!account.IsModelSupported(requestedModel) || !profile.SupportsModel(account.GetMappedModel(requestedModel))) {
@@ -162,6 +154,13 @@ func (s *GatewayService) newAnthropicCompatPlan(ctx context.Context, c *gin.Cont
 	if reason := s.anthropicCompatReadiness(ctx, account, profile, model, request.ClientBeta); reason != "" {
 		logAnthropicCompatAttempt(ctx, account, model, "ineligible", reason)
 		return nil, ErrNoAvailableAccounts
+	}
+	if c != nil {
+		filters := s.evaluateBetaPolicy(ctx, "", account, model).filterSet
+		if filters == nil {
+			filters = map[string]struct{}{}
+		}
+		c.Set(betaPolicyFilterSetKey, filters)
 	}
 	metadata, err := compatIdentity(account, request.UserID, request.KeyID, compatSessionAnchor(ctx, request))
 	if err != nil {
@@ -224,21 +223,6 @@ func logAnthropicCompatAttempt(ctx context.Context, account *Account, model, dec
 	logger.L().Info("gateway.anthropic_compat_attempt", zap.String("request_id", requestID), zap.Int64("account_id", account.ID), zap.String("entry", entry), zap.String("model", model), zap.String("decision", decision), zap.String("reason", reason))
 }
 
-func (s *GatewayService) logAnthropicCompatOutcome(ctx context.Context, c *gin.Context, account *Account, entry string, err error) {
-	if account == nil {
-		return
-	}
-	model := ""
-	if request := compatRequest(ctx); request != nil {
-		model = request.Model
-	} else if c != nil {
-		model = c.GetString("ops_request_model")
-	}
-	if err == nil || !errors.Is(err, ErrNoAvailableAccounts) {
-		logAnthropicCompatAttempt(ctx, account, model, "adapted", "")
-	}
-}
-
 // BuildAnthropicCompatDiagnosticRequest keeps the diagnostic on the same
 // deterministic envelope, identity and header adapter as live requests.
 func BuildAnthropicCompatDiagnosticRequest(account *Account, body []byte, headers http.Header) ([]byte, http.Header, error) {
@@ -251,17 +235,10 @@ func BuildAnthropicCompatDiagnosticRequest(account *Account, body []byte, header
 		return body, out, nil
 	}
 	model := gjson.GetBytes(body, "model").String()
-	mapped := account.GetMappedModel(model)
-	if !account.IsModelSupported(model) || !profile.SupportsModel(mapped) {
+	if !profile.SupportsModel(model) {
 		return nil, nil, fmt.Errorf("model %q is not supported by the compatibility account", model)
 	}
-	if mapped != model {
-		body, err = sjson.SetBytes(body, "model", mapped)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-	request := &anthropicCompatRequest{UserID: 0, KeyID: 0, Entry: "diagnostic", Anchor: uuid.NewString(), Model: mapped}
+	request := &anthropicCompatRequest{Entry: "diagnostic", Anchor: uuid.NewString()}
 	metadata, err := compatIdentity(account, request.UserID, request.KeyID, request.Anchor)
 	if err != nil {
 		return nil, nil, err
@@ -423,4 +400,31 @@ func (b *anthropicCompatDiagnosticBody) observeEvent(event []byte) ([]byte, erro
 		return event, nil
 	}
 	return []byte("event: " + kind + "\ndata: " + compact.String() + "\n\n"), nil
+}
+
+// beginAnthropicCompatRequest validates hydrated account configuration before
+// passthrough or other early forwarding paths can bypass the envelope adapter.
+func beginAnthropicCompatRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, entry string) (context.Context, error) {
+	if account == nil {
+		return ctx, nil
+	}
+	mode := account.GetExtraString(AnthropicCompatProfileExtraKey)
+	if mode == "" || mode == AnthropicCompatProfileOff {
+		return ctx, nil
+	}
+	if compatRequest(ctx) == nil {
+		ctx = WithAnthropicCompatRequest(ctx, 0, 0, body, entry, ExtractClientSessionID(c), compatClientHeaders(c))
+	}
+	if _, err := ResolveAnthropicCompatProfile(account); err != nil {
+		logAnthropicCompatAttempt(ctx, account, gjson.GetBytes(body, "model").String(), "ineligible", "configuration_conflict")
+		return ctx, ErrNoAvailableAccounts
+	}
+	return ctx, nil
+}
+
+func compatClientHeaders(c *gin.Context) http.Header {
+	if c != nil && c.Request != nil {
+		return c.Request.Header
+	}
+	return nil
 }

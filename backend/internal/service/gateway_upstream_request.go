@@ -122,6 +122,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	if compat != nil && compat.Active {
 		finalBetaHeader, compatErr = compatResolveBeta(compat, clientHeaders.Get("anthropic-beta"), finalBetaHeader, effectiveDropSet)
 		if compatErr != nil {
+			logAnthropicCompatAttempt(ctx, account, modelID, "ineligible", "required_beta_filtered")
 			return nil, nil, compatErr
 		}
 		finalBetaShouldSet = true
@@ -246,6 +247,9 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		logClaudeMimicDebug(req, body, account, tokenType, mimicClaudeCode)
 	}
 
+	if compat != nil {
+		logAnthropicCompatAttempt(ctx, account, modelID, "adapted", "")
+	}
 	return req, body, nil
 }
 

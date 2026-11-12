@@ -35,9 +35,10 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	parsed *ParsedRequest,
 ) (result *ForwardResult, err error) {
 	startTime := time.Now()
-	defer func() {
-		s.logAnthropicCompatOutcome(ctx, c, account, "chat", err)
-	}()
+	ctx, err = beginAnthropicCompatRequest(ctx, c, account, body, "chat")
+	if err != nil {
+		return nil, err
+	}
 	ctx, cacheDecision := s.beginClaudeCacheAttempt(ctx, parsed, account)
 	defer func() {
 		finishAnthropicCacheTTLAttempt(ctx, result)
@@ -273,9 +274,6 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			continue
-		}
-
-		if event.Type == "message_stop" {
 		}
 
 		// message_start carries the initial response structure and cache usage

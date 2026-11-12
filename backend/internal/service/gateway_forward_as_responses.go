@@ -37,9 +37,10 @@ func (s *GatewayService) ForwardAsResponses(
 	parsed *ParsedRequest,
 ) (result *ForwardResult, err error) {
 	startTime := time.Now()
-	defer func() {
-		s.logAnthropicCompatOutcome(ctx, c, account, "responses", err)
-	}()
+	ctx, err = beginAnthropicCompatRequest(ctx, c, account, body, "responses")
+	if err != nil {
+		return nil, err
+	}
 	ctx, cacheDecision := s.beginClaudeCacheAttempt(ctx, parsed, account)
 	defer func() {
 		finishAnthropicCacheTTLAttempt(ctx, result)
@@ -434,9 +435,6 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 				zap.String("event_type", eventType),
 			)
 			continue
-		}
-
-		if event.Type == "message_stop" {
 		}
 
 		// message_start carries the initial response structure

@@ -33,7 +33,7 @@ func compatSystemEnvelope(system gjson.Result) ([]json.RawMessage, json.RawMessa
 				if identity == nil {
 					fields := map[string]json.RawMessage{}
 					_ = json.Unmarshal([]byte(block.Raw), &fields)
-					canonical := map[string]json.RawMessage{"type": json.RawMessage(`"text"`), "text": fields["text"]}
+					canonical := map[string]json.RawMessage{"type": fields["type"], "text": fields["text"]}
 					if cc, ok := fields["cache_control"]; ok {
 						canonical["cache_control"] = cc
 					}

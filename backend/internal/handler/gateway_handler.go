@@ -168,7 +168,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
-	c.Request = c.Request.WithContext(service.WithAnthropicCompatRequest(c.Request.Context(), subject.UserID, apiKey.ID, body, "messages", service.ClaudeCodeSessionIDFromHeader(c), c.Request.Header))
+	c.Request = c.Request.WithContext(service.WithAnthropicCompatRequest(c.Request.Context(), subject.UserID, apiKey.ID, body, "messages", service.ExtractClientSessionID(c), c.Request.Header))
 	c.Request = c.Request.WithContext(h.gatewayService.WithClaudeCacheFallbackRequest(c.Request.Context(), apiKey, body))
 	body = parsedReq.Body.Bytes()
 	reqModel := parsedReq.Model
@@ -2292,7 +2292,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
-	c.Request = c.Request.WithContext(service.WithAnthropicCompatRequest(c.Request.Context(), subject.UserID, apiKey.ID, body, "count_tokens", service.ClaudeCodeSessionIDFromHeader(c), c.Request.Header))
+	c.Request = c.Request.WithContext(service.WithAnthropicCompatRequest(c.Request.Context(), subject.UserID, apiKey.ID, body, "count_tokens", service.ExtractClientSessionID(c), c.Request.Header))
 	body = parsedReq.Body.Bytes()
 	// count_tokens 走 messages 严格校验时，复用已解析请求，避免二次反序列化。
 	SetClaudeCodeClientContext(c, body, parsedReq)

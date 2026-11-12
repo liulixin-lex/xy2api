@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -17,14 +18,26 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-func TestAnthropicCompatEnvelopeGoldenMatchesV063AcceptedShape(t *testing.T) {
-	body := []byte(`{"model":"claude-opus-5-5","system":"Business policy","tools":[{"name":"lookup","input_schema":{"type":"object","properties":{"q":{"type":"string"}},"required":["q"]}}],"messages":[{"role":"user","content":"hello"}]}`)
-	profile := &claudeCodeCompatProfile
-	wire, err := compatInjectBody(body, profile, "user_derived_identity")
+// Fixtures were captured by running the adapter from e893fef5f (v0.6.3).
+func TestAnthropicCompatEnvelopeGoldenMatchesAcceptedShape(t *testing.T) {
+	raw, err := os.ReadFile("testdata/anthropic_compat_envelope_v063.json")
 	require.NoError(t, err)
-	require.Equal(t, `[{"text":"x-anthropic-billing-header: cc_version=2.1.114.7be; cc_entrypoint=cli;","type":"text"},{"text":"You are Claude Code, Anthropic's official CLI for Claude.","type":"text"},{"text":"Business policy","type":"text"}]`, gjson.GetBytes(wire, "system").Raw)
-	require.Equal(t, gjson.GetBytes(body, "tools").Raw, gjson.GetBytes(wire, "tools").Raw)
-	require.Equal(t, gjson.GetBytes(body, "messages").Raw, gjson.GetBytes(wire, "messages").Raw)
+	var cases []struct{ Name, Body, System string }
+	require.NoError(t, json.Unmarshal(raw, &cases))
+	for _, tc := range cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			body := []byte(tc.Body)
+			wire, err := compatInjectBody(body, &claudeCodeCompatProfile, "derived")
+			require.NoError(t, err)
+			require.Equal(t, tc.System, gjson.GetBytes(wire, "system").Raw)
+			for _, field := range []string{"tools", "messages"} {
+				require.Equal(t, gjson.GetBytes(body, field).Raw, gjson.GetBytes(wire, field).Raw, field)
+			}
+			repeat, err := compatInjectBody(wire, &claudeCodeCompatProfile, "derived")
+			require.NoError(t, err)
+			require.Equal(t, wire, repeat)
+		})
+	}
 }
 
 func TestAnthropicCompatEnvelopeDropsAllBillingAndDuplicateIdentity(t *testing.T) {
@@ -99,10 +112,11 @@ func TestAnthropicCompatSignatureRetryRebuildsEnvelope(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Len(t, upstream.requestBodies, 2)
+	firstIdentity := gjson.GetBytes(upstream.requestBodies[0], "metadata.user_id").String()
 	for _, wire := range upstream.requestBodies {
 		require.True(t, strings.HasPrefix(gjson.GetBytes(wire, "system.0.text").String(), "x-anthropic-billing-header:"))
 		require.Equal(t, claudeCodeSystemPrompt, gjson.GetBytes(wire, "system.1.text").String())
-		require.Equal(t, "user_"+gjson.GetBytes(upstream.requestBodies[0], "metadata.user_id").String()[5:]+"", gjson.GetBytes(wire, "metadata.user_id").String())
+		require.Equal(t, firstIdentity, gjson.GetBytes(wire, "metadata.user_id").String())
 	}
 	require.Contains(t, gjson.GetBytes(upstream.requestBodies[0], "messages").Raw, "bad-signature")
 	require.NotContains(t, gjson.GetBytes(upstream.requestBodies[1], "messages").Raw, "bad-signature")

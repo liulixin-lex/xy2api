@@ -18,12 +18,16 @@ import (
 // ForwardCountTokens 转发 count_tokens 请求到上游 API
 // 特点：不记录使用量、仅支持非流式响应
 func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context, account *Account, parsed *ParsedRequest) (retErr error) {
-	defer func() { s.logAnthropicCompatOutcome(ctx, c, account, "count_tokens", retErr) }()
 	if parsed == nil {
 		s.countTokensError(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return fmt.Errorf("parse request: empty request")
 	}
 
+	var compatErr error
+	ctx, compatErr = beginAnthropicCompatRequest(ctx, c, account, parsed.Body.Bytes(), "count_tokens")
+	if compatErr != nil {
+		return compatErr
+	}
 	attemptParsed := *parsed
 	attemptParsed.Body = NewRequestBodyRef(parsed.Body.Bytes())
 	parsed = &attemptParsed
@@ -146,7 +150,9 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	// 构建上游请求
 	upstreamReq, wireBody, err := s.buildCountTokensRequest(ctx, c, account, body, token, tokenType, reqModel, shouldMimicClaudeCode)
 	if err != nil {
-
+		if errors.Is(err, ErrNoAvailableAccounts) {
+			return err
+		}
 		s.countTokensError(c, http.StatusInternalServerError, "api_error", "Failed to build request")
 		return err
 	}
@@ -540,6 +546,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	if compat != nil && compat.Active {
 		finalBetaHeader, compatErr = compatResolveBeta(compat, clientHeaders.Get("anthropic-beta"), finalBetaHeader, ctEffectiveDropSet)
 		if compatErr != nil {
+			logAnthropicCompatAttempt(ctx, account, modelID, "ineligible", "required_beta_filtered")
 			return nil, nil, compatErr
 		}
 		finalBetaShouldSet = true
@@ -562,7 +569,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 			return nil, nil, err
 		}
 		body = s.finalizeAnthropicCache(ctx, account, body, modelID)
-		if next, ok := deleteJSONPathBytes(body, "metadata.user_id"); ok {
+		if next, ok := deleteJSONPathBytes(body, "metadata"); ok {
 			body = next
 		}
 	}
@@ -642,6 +649,9 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 		logClaudeMimicDebug(req, body, account, tokenType, mimicClaudeCode)
 	}
 
+	if compat != nil {
+		logAnthropicCompatAttempt(ctx, account, modelID, "adapted", "")
+	}
 	return req, body, nil
 }
 

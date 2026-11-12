@@ -96,7 +96,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	}
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
-	c.Request = c.Request.WithContext(service.WithAnthropicCompatRequest(c.Request.Context(), subject.UserID, apiKey.ID, body, "chat", service.ClaudeCodeSessionIDFromHeader(c), c.Request.Header))
+	c.Request = c.Request.WithContext(service.WithAnthropicCompatRequest(c.Request.Context(), subject.UserID, apiKey.ID, body, "chat", service.ExtractClientSessionID(c), c.Request.Header))
 	c.Request = c.Request.WithContext(h.gatewayService.WithClaudeCacheFallbackRequest(c.Request.Context(), apiKey, body))
 	c.Request = c.Request.WithContext(service.WithRequestReplaySafety(c.Request.Context(), body, false))
 	setOpsRequestContext(c, reqModel, reqStream)
