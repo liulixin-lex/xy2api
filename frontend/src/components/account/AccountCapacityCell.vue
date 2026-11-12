@@ -1,5 +1,6 @@
 <template>
-  <div class="flex flex-col gap-0.5">
+  <!-- One badge per 18px line, like the other multi-line cells of the account list (ui-proposal 6.2). -->
+  <div class="grid auto-rows-[18px] items-center">
     <!-- 并发槽位 -->
     <CapacityBadge :color-class="concurrencyClass" :tooltip="concurrencyTooltip" :current="currentConcurrency" :max="account.concurrency" :extra="account.current_group_concurrency">
       <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
