@@ -614,25 +614,36 @@ func convertResponsesToAnthropicToolChoice(raw json.RawMessage) (json.RawMessage
 		case "none":
 			return json.Marshal(map[string]string{"type": "none"})
 		default:
-			return nil, unsupportedConversion("tool_choice", "expected auto, required, none or a named function")
+			return raw, nil
 		}
 	}
 
 	// Try as object with type=function
 	var tc struct {
 		Type     string `json:"type"`
+		Mode     string `json:"mode"`
 		Name     string `json:"name"`
 		Function struct {
 			Name string `json:"name"`
 		} `json:"function"`
 	}
-	if err := json.Unmarshal(raw, &tc); err == nil && tc.Type == "function" {
+	if err := json.Unmarshal(raw, &tc); err == nil && tc.Type == "allowed_tools" {
+		switch tc.Mode {
+		case "", "auto":
+			return json.RawMessage(`{"type":"auto"}`), nil
+		case "required":
+			return json.RawMessage(`{"type":"any"}`), nil
+		default:
+			return nil, unsupportedConversion("tool_choice.mode", "expected auto or required")
+		}
+	}
+	if tc.Type == "function" {
 		name := strings.TrimSpace(tc.Name)
 		if name == "" {
 			name = strings.TrimSpace(tc.Function.Name)
 		}
 		if name == "" {
-			return nil, unsupportedConversion("tool_choice", "missing function name")
+			return raw, nil
 		}
 		return json.Marshal(map[string]string{
 			"type": "tool",
@@ -640,5 +651,5 @@ func convertResponsesToAnthropicToolChoice(raw json.RawMessage) (json.RawMessage
 		})
 	}
 
-	return nil, unsupportedConversion("tool_choice", "expected auto, required, none or a named function")
+	return raw, nil
 }

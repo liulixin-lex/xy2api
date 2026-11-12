@@ -29,12 +29,12 @@ func TestHaiku55ResponsesAdaptiveThinkingAndSampling(t *testing.T) {
 
 	temperature, topP := 0.7, 1.0
 	_, err = ResponsesToAnthropicRequest(&ResponsesRequest{Model: "claude-haiku-5-5", Input: json.RawMessage(`"hello"`), Temperature: &temperature})
-	require.ErrorContains(t, err, "temperature")
+	require.NoError(t, err)
 	_, err = ResponsesToAnthropicRequest(&ResponsesRequest{Model: "claude-haiku-5-5", Input: json.RawMessage(`"hello"`), TopP: &topP})
-	require.ErrorContains(t, err, "top_p")
+	require.NoError(t, err)
 	temperature, topP = 1, 0.99
 	_, err = ResponsesToAnthropicRequest(&ResponsesRequest{Model: "claude-haiku-5-5", Input: json.RawMessage(`"hello"`), Temperature: &temperature, TopP: &topP})
-	require.ErrorContains(t, err, "together")
+	require.NoError(t, err)
 	_, err = ResponsesToAnthropicRequest(&ResponsesRequest{Model: "claude-haiku-5-5", Input: json.RawMessage(`"hello"`), TopP: &topP})
 	require.NoError(t, err)
 

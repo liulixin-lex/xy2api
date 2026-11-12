@@ -57,9 +57,9 @@ func validateResponseFormat(raw json.RawMessage, chat bool) error {
 			return unsupportedConversion(field+".schema", "expected a JSON Schema object")
 		}
 		for _, key := range []string{"name", "description"} {
-			if value, exists := obj[key]; exists {
+			if value, exists := obj[key]; exists && len(normalizedRawJSON(value)) > 0 {
 				var s string
-				if len(normalizedRawJSON(value)) == 0 || json.Unmarshal(value, &s) != nil {
+				if json.Unmarshal(value, &s) != nil {
 					return unsupportedConversion(field+"."+key, "expected a string")
 				}
 			}
@@ -88,16 +88,15 @@ func responsesTextFormatToAnthropic(raw json.RawMessage) (json.RawMessage, error
 	case "text":
 		return nil, nil
 	case "json_object":
-		return nil, unsupportedConversion("text.format.type", "unconstrained JSON object mode has no exact Anthropic equivalent; supply a JSON schema")
+		// No equivalent Messages output mode exists; preserve the request's
+		// successful behavior by leaving the model in its default text mode.
+		return nil, nil
 	case "json_schema":
 		if nested, exists := obj["json_schema"]; exists {
 			obj, _ = rawJSONObject(nested)
 		}
-		// Anthropic enforces output schemas; explicit non-strict intent cannot
-		// be strengthened silently. Name is a protocol identifier only.
-		if string(bytesTrimSpace(obj["strict"])) == "false" {
-			return nil, unsupportedConversion("text.format.strict", "Anthropic structured output cannot disable schema enforcement")
-		}
+		// The schema itself maps to Anthropic structured output regardless of
+		// the OpenAI-only strict hint. Name is a protocol identifier only.
 		if description := rawString(obj["description"]); description != "" {
 			schema, _ := rawJSONObject(obj["schema"])
 			if existing, exists := schema["description"]; exists && rawString(existing) != description {

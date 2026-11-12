@@ -143,7 +143,7 @@ func TestProtocolFormatAndParallelControls(t *testing.T) {
 	})
 	for _, raw := range []string{`{"type":"json_object"}`, `{"type":"json_schema","strict":false,"schema":{"type":"object"}}`} {
 		_, err := ResponsesToAnthropicRequest(&ResponsesRequest{Input: json.RawMessage(`"hi"`), Text: &ResponsesText{Format: json.RawMessage(raw)}})
-		requireUnsupportedConversion(t, err, "text.format")
+		require.NoError(t, err)
 	}
 	t.Run("merge format description without overwriting schema description", func(t *testing.T) {
 		out, err := ResponsesToAnthropicRequest(&ResponsesRequest{Input: json.RawMessage(`"hi"`), Text: &ResponsesText{Format: json.RawMessage(`{"type":"json_schema","description":"format hint","schema":{"type":"object","properties":{},"description":"format hint"}}`)}})

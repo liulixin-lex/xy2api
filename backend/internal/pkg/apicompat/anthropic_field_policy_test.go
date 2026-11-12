@@ -105,27 +105,79 @@ func TestAnthropicPolicyMappedFields(t *testing.T) {
 
 func TestAnthropicPolicyRejectedFields(t *testing.T) {
 	for _, entry := range []string{"chat", "responses"} {
-		for _, tc := range []struct{ field, value string }{{"n", "2"}, {"n", "0"}, {"n", "-1"}, {"n", "1.5"}, {"temperature", "-0.1"}, {"tool_choice", `"future"`}, {"tool_choice", `{"type":"function"}`}, {"tools", `[{"type":"future"}]`}, {"tools", `[{"type":"custom","name":"patch"}]`}} {
+		for _, tc := range []struct{ field, value string }{{"n", "2"}, {"n", "0"}, {"n", "-1"}, {"n", "1.5"}, {"temperature", "-0.1"}} {
 			t.Run(entry+tc.field+tc.value, func(t *testing.T) {
 				_, err := anthropicPolicyRequest(t, entry, `"`+tc.field+`":`+tc.value)
 				requireUnsupportedConversion(t, err, tc.field)
 			})
 		}
-		_, err := anthropicPolicyRequest(t, entry, `"temperature":1,"top_p":0.99`)
-		requireUnsupportedConversion(t, err, "top_p")
-		for _, kind := range []string{"json_object"} {
-			format := `"text":{"format":{"type":"` + kind + `"}}`
-			field := "text.format"
-			if entry == "chat" {
-				format = `"response_format":{"type":"` + kind + `"}`
-				field = "response_format"
-			}
-			_, err := anthropicPolicyRequest(t, entry, format)
-			requireUnsupportedConversion(t, err, field)
-		}
 	}
-	_, err := anthropicPolicyRequest(t, "chat", `"stop":"  "`)
-	requireUnsupportedConversion(t, err, "stop")
+
+}
+
+func TestAnthropicLegacySuccessInputsRemainSuccessful(t *testing.T) {
+	for _, entry := range []string{"chat", "responses"} {
+		t.Run(entry+"/all_optional_nulls_are_absent", func(t *testing.T) {
+			base, err := anthropicPolicyRequest(t, entry, `"stream":null`)
+			require.NoError(t, err)
+			nulls := `"n":null,"temperature":null,"top_p":null,"stop":null,"max_tokens":null,"max_completion_tokens":null,"max_output_tokens":null,"response_format":null,"text":null,"tools":null,"tool_choice":null,"function_call":null,"functions":null,"stream_options":null,"reasoning":null,"reasoning_effort":null,"store":null,"metadata":null,"service_tier":null,"user":null,"seed":null,"logprobs":null,"top_logprobs":null,"presence_penalty":null,"frequency_penalty":null,"logit_bias":null,"prediction":null,"audio":null,"modalities":null,"stream":null,"parallel_tool_calls":null,"instructions":null`
+			got, err := anthropicPolicyRequest(t, entry, nulls)
+			require.NoError(t, err)
+			require.Equal(t, base, got)
+		})
+		t.Run(entry+"/temperature_and_top_p", func(t *testing.T) {
+			out, err := anthropicPolicyRequest(t, entry, `"temperature":0.7,"top_p":0.9`)
+			require.NoError(t, err)
+			require.Equal(t, 0.7, *out.Temperature)
+			require.Equal(t, 0.9, *out.TopP)
+		})
+		t.Run(entry+"/json_object_is_ignored", func(t *testing.T) {
+			format := `"text":{"format":{"type":"json_object"}}`
+			if entry == "chat" {
+				format = `"response_format":{"type":"json_object"}`
+			}
+			out, err := anthropicPolicyRequest(t, entry, format)
+			require.NoError(t, err)
+			require.Nil(t, out.OutputConfig)
+		})
+		t.Run(entry+"/non_strict_schema", func(t *testing.T) {
+			format := `"text":{"format":{"type":"json_schema","strict":false,"schema":{"type":"object"}}}`
+			if entry == "chat" {
+				format = `"response_format":{"type":"json_schema","json_schema":{"name":"response","strict":false,"schema":{"type":"object"}}}`
+			}
+			out, err := anthropicPolicyRequest(t, entry, format)
+			require.NoError(t, err)
+			require.NotNil(t, out.OutputConfig)
+			require.JSONEq(t, `{"type":"json_schema","schema":{"type":"object"}}`, string(out.OutputConfig.Format))
+		})
+		t.Run(entry+"/null_is_absent", func(t *testing.T) {
+			out, err := anthropicPolicyRequest(t, entry, `"n":null,"temperature":null,"top_p":null,"stop":null,"response_format":null,"tools":null,"stream_options":null,"max_tokens":null,"max_completion_tokens":null,"reasoning":null,"reasoning_effort":null`)
+			require.NoError(t, err)
+			require.Nil(t, out.Temperature)
+			require.Nil(t, out.TopP)
+			require.Empty(t, out.StopSeqs)
+			require.Empty(t, out.Tools)
+		})
+		t.Run(entry+"/unknown_tool_is_dropped", func(t *testing.T) {
+			definition := `[{"type":"future_tool","name":"lookup"}]`
+			if entry == "chat" {
+				definition = `[{"type":"future_tool","name":"lookup"}]`
+			}
+			out, err := anthropicPolicyRequest(t, entry, `"tools":`+definition)
+			require.NoError(t, err)
+			require.Empty(t, out.Tools)
+		})
+	}
+	_, err := anthropicPolicyRequest(t, "chat", `"tools":[{"type":"future_tool","name":"lookup"}],"tool_choice":{"type":"function","function":{"name":"lookup"}}`)
+	requireUnsupportedConversion(t, err, "tool_choice")
+	_, err = anthropicPolicyRequest(t, "responses", `"tools":[{"type":"future_tool","name":"lookup"}],"tool_choice":{"type":"function","name":"lookup"}`)
+	requireUnsupportedConversion(t, err, "tool_choice")
+	for _, entry := range []string{"chat", "responses"} {
+		out, err := anthropicPolicyRequest(t, entry, `"tool_choice":"future_choice"`)
+		require.NoError(t, err)
+		require.JSONEq(t, `"future_choice"`, string(out.ToolChoice))
+	}
+
 }
 
 func TestAnthropicReasoningExtensionEfforts(t *testing.T) {

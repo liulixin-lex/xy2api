@@ -109,9 +109,9 @@ func ChatCompletionsToResponses(req *ChatCompletionsRequest) (*ResponsesRequest,
 	// tool_choice: strings and Responses-shaped objects pass through; a named
 	// Chat choice nests the name under "function" and must be flattened.
 	// Legacy function_call needs mapping.
-	if len(req.ToolChoice) > 0 {
+	if len(normalizedRawJSON(req.ToolChoice)) > 0 {
 		out.ToolChoice = convertChatToolChoiceToResponses(req.ToolChoice)
-	} else if len(req.FunctionCall) > 0 {
+	} else if len(normalizedRawJSON(req.FunctionCall)) > 0 {
 		tc, err := convertChatFunctionCallToToolChoice(req.FunctionCall)
 		if err != nil {
 			return nil, fmt.Errorf("convert function_call: %w", err)

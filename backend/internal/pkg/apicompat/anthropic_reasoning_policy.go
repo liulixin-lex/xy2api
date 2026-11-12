@@ -2,6 +2,8 @@ package apicompat
 
 import (
 	"encoding/json"
+	"slices"
+
 	"github.com/liulixin-lex/xy2api/internal/pkg/claude"
 )
 
@@ -34,7 +36,7 @@ func mapAnthropicReasoning(req *ResponsesRequest, out *AnthropicRequest) error {
 			if effort == "none" || effort == "minimal" {
 				effort = "low"
 			}
-			out.Thinking = &AnthropicThinking{Type: "adaptive"}
+			out.Thinking = &AnthropicThinking{Type: claude.ThinkingModeForModel(req.Model)}
 		}
 		if out.OutputConfig == nil {
 			out.OutputConfig = &AnthropicOutputConfig{}
@@ -43,6 +45,27 @@ func mapAnthropicReasoning(req *ResponsesRequest, out *AnthropicRequest) error {
 		return nil
 	}
 	if effort == "" {
+		return nil
+	}
+	if claude.ThinkingModeForModel(req.Model) == "adaptive" {
+		if effort == "none" || effort == "minimal" {
+			effort = "low"
+		}
+		// Preserve the existing non-5.5 xhigh -> max effort mapping; only the
+		// thinking mode changes for these model generations.
+		if effort == "xhigh" {
+			effort = "max"
+		}
+		levels := claude.EffortLevelsForModel(req.Model)
+		if len(levels) > 0 && !slices.Contains(levels, effort) {
+			// xhigh lies between high and max; use the deepest supported tier.
+			effort = levels[len(levels)-1]
+		}
+		out.Thinking = &AnthropicThinking{Type: "adaptive"}
+		if out.OutputConfig == nil {
+			out.OutputConfig = &AnthropicOutputConfig{}
+		}
+		out.OutputConfig.Effort = effort
 		return nil
 	}
 	if effort == "none" {

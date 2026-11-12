@@ -134,7 +134,6 @@ func TestAnthropicConversionParameterErrorsBeforeUpstream(t *testing.T) {
 		for _, tc := range []struct{ model, field, fields string }{
 			{"claude-sonnet-4-5", "n", `"n":2`},
 			{"claude-sonnet-5-5", "n", `"n":2`},
-			{"claude-sonnet-5-5", "temperature", `"temperature":0.7`},
 			{"claude-sonnet-5-5", "tool_choice", `"tool_choice":"required"`},
 			{"claude-sonnet-5-5", "reasoning", `"reasoning":{"effort":"invalid"},"reasoning_effort":"invalid"`},
 		} {
@@ -173,5 +172,35 @@ func TestUnsupportedParameterStreamErrorContract(t *testing.T) {
 				require.Contains(t, rec.Body.String(), `"type":"invalid_request_error"`)
 			}
 		})
+	}
+}
+
+func TestAnthropicCommonClientDefaultsReachUpstream(t *testing.T) {
+	for _, entry := range []string{"chat", "responses"} {
+		f := newHandlerCompatFixture(t)
+		f.account.Extra = nil
+		f.response = func(uint64) string {
+			return "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_defaults\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-opus-4-8\",\"content\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\n" +
+				"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n" +
+				"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n\n" +
+				"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n" +
+				"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n" +
+				"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+		}
+		input := `"input":"hi","tools":[{"type":"file_search","name":"files"}]`
+		if entry == "chat" {
+			input = `"messages":[{"role":"user","content":"hi"}],"tools":[{"type":"future_tool","name":"files"}]`
+		}
+		rec := httptest.NewRecorder()
+		f.call(entry, `{"model":"claude-opus-4-8",`+input+`,"n":null,"temperature":0.7,"top_p":0.8,"stop":["\n"],"response_format":{"type":"json_object"},"reasoning_effort":"high","reasoning":{"effort":"high"}}`, rec)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.Len(t, f.wire, 1)
+		wire := <-f.wire
+		require.False(t, gjson.GetBytes(wire.body, "temperature").Exists())
+		require.False(t, gjson.GetBytes(wire.body, "top_p").Exists())
+		require.False(t, gjson.GetBytes(wire.body, "tools").Exists())
+		require.False(t, gjson.GetBytes(wire.body, "stop_sequences").Exists())
+		require.Equal(t, "adaptive", gjson.GetBytes(wire.body, "thinking.type").String())
+		require.Equal(t, "high", gjson.GetBytes(wire.body, "output_config.effort").String())
 	}
 }

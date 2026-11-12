@@ -25,20 +25,19 @@ func anthropicToolSchema(raw json.RawMessage, field string) (json.RawMessage, er
 	return json.Marshal(schema)
 }
 
-func anthropicSchemaBranchIsObject(schema map[string]json.RawMessage) bool {
-	if schema == nil {
-		return false
-	}
-	if raw, ok := schema["type"]; ok {
-		return rawString(raw) == "object"
-	}
-	_, hasProperties := schema["properties"]
-	return hasProperties
-}
-
 func lowerAnthropicObjectSchema(schema map[string]json.RawMessage, field string) error {
-	if typ, exists := schema["type"]; exists && rawString(typ) != "object" {
-		return unsupportedConversion(field+".type", "tool schema root must have type object")
+	// An omitted/null type imposes no type constraint, so required-only union
+	// branches are compatible with object. Normalize nullable object unions.
+	if typ := normalizedRawJSON(schema["type"]); len(typ) > 0 && rawString(typ) != "object" {
+		var types []string
+		if json.Unmarshal(typ, &types) != nil || !slices.Contains(types, "object") {
+			return unsupportedConversion(field+".type", "tool schema root must allow type object")
+		}
+	}
+	for _, name := range []string{"properties", "required", "oneOf", "anyOf", "allOf"} {
+		if raw, exists := schema[name]; exists && len(normalizedRawJSON(raw)) == 0 {
+			delete(schema, name)
+		}
 	}
 	var rootRequired []string
 	if raw, exists := schema["required"]; exists && json.Unmarshal(raw, &rootRequired) != nil {
@@ -66,7 +65,7 @@ func lowerAnthropicObjectSchema(schema map[string]json.RawMessage, field string)
 		branchProperties := map[string]json.RawMessage{}
 		for i, branch := range branches {
 			branchField := fmt.Sprintf("%s.%s[%d]", field, keyword, i)
-			if branch == nil || !anthropicSchemaBranchIsObject(branch) {
+			if branch == nil {
 				return unsupportedConversion(branchField, "expected an object schema branch")
 			}
 			if err := lowerAnthropicObjectSchema(branch, branchField); err != nil {

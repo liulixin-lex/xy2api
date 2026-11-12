@@ -122,9 +122,6 @@ func (s *GatewayService) ForwardAsResponses(
 	if err != nil {
 		return nil, fmt.Errorf("marshal anthropic request: %w", err)
 	}
-	if err := validateClaude55Parameters(anthropicBody, mappedModel); err != nil {
-		return nil, err
-	}
 	if err := validateHaiku55MessagesRequest(anthropicBody, mappedModel, account); err != nil {
 		return nil, &apicompat.UnsupportedConversionError{Field: "messages", Reason: err.Error()}
 	}

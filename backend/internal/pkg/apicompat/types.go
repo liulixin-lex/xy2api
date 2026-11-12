@@ -677,7 +677,10 @@ type ResponsesStreamEvent struct {
 
 // ChatCompletionsRequest is the request body for POST /v1/chat/completions.
 type ChatCompletionsRequest struct {
-	anthropicN json.RawMessage
+	anthropicN                json.RawMessage
+	anthropicDroppedToolNames map[string]bool
+	anthropicToolNames        []string
+	anthropicNativeTools      map[int]ResponsesTool
 
 	CacheControl         *AnthropicCacheControl `json:"cache_control,omitempty"`
 	PromptCacheKey       string                 `json:"prompt_cache_key,omitempty"`

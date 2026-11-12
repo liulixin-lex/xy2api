@@ -113,9 +113,6 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	if err != nil {
 		return nil, err
 	}
-	if err := validateClaude55Parameters(anthropicBody, mappedModel); err != nil {
-		return nil, err
-	}
 	if err := validateHaiku55MessagesRequest(anthropicBody, mappedModel, account); err != nil {
 		return nil, &apicompat.UnsupportedConversionError{Field: "messages", Reason: err.Error()}
 	}
