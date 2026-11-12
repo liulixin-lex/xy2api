@@ -162,7 +162,8 @@ func TestIQTargetViewsDeriveAccountPauseWithStatePriority(t *testing.T) {
 			require.Equal(t, tc.state, summaries[a.ID][0].State)
 		})
 	}
-	_, err = integrationDB.ExecContext(ctx, `UPDATE account_iq_targets SET enabled=true,paused_reason='',not_before=now()+interval '1 hour' WHERE account_id=$1`, a.ID)
+	// Make the target due despite small host/container clock differences.
+	_, err = integrationDB.ExecContext(ctx, `UPDATE account_iq_targets SET enabled=true,paused_reason='',next_run_at=now()-interval '1 minute',not_before=now()+interval '1 hour' WHERE account_id=$1`, a.ID)
 	require.NoError(t, err)
 	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET schedulable=true WHERE id=$1`, a.ID)
 	require.NoError(t, err)
