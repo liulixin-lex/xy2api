@@ -8,14 +8,13 @@ import { useAdminAccessStore } from '@/stores/adminAccess'
 import type { AdminModuleId, AdminLevel } from '@/types/adminAccess'
 import type { AccountRecentStats, AccountRecentStatsBatch, SchedAccountSummary } from '@/types/schedQuality'
 import summaryFixture from '@/__tests__/fixtures/schedQuality/account_summary.json'
-import resetFixture from '@/__tests__/fixtures/schedQuality/reset.json'
-import { closeSchedDrawer, closeSchedReset, useSchedLayers } from '@/composables/useSchedLayers'
+import { closeSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
 
 const { listAccounts, getById, getRecentStats, sched } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
   getById: vi.fn(),
   getRecentStats: vi.fn(),
-  sched: { summary: vi.fn(), reset: vi.fn(), startTest: vi.fn(), accountDetail: vi.fn(), groupBoard: vi.fn(), getGroupPolicy: vi.fn() }
+  sched: { summary: vi.fn(), reset: vi.fn(), startTest: vi.fn(), setOverride: vi.fn(), accountDetail: vi.fn(), groupBoard: vi.fn(), getGroupPolicy: vi.fn() }
 }))
 
 vi.mock('@/api/admin/schedQuality', () => ({ default: sched }))
@@ -56,6 +55,7 @@ const DataTableStub = defineComponent({
       h('div', { 'data-test': 'columns' }, (props.columns as Array<{ key: string }>).map((column) => column.key).join(',')),
       ...(props.data as Array<{ id: number }>).map((row) =>
         h('div', { 'data-test': 'row', 'data-id': row.id }, [
+          slots['cell-select']?.({ row }),
           h('span', { 'data-test': 'recent' }, slots['cell-sq_recent']?.({ row })),
           h('span', { 'data-test': 'groups' }, slots['cell-sq_groups']?.({ row })),
           h('span', { 'data-test': 'actions' }, slots['cell-actions']?.({ row }))
@@ -79,25 +79,15 @@ const PaginationStub = defineComponent({
   }
 })
 
-const ActionMenuStub = defineComponent({
-  props: ['show', 'account'],
-  emits: ['recover-state'],
-  setup(props, { emit }) {
-    // The real menu emits the account it was opened for; here that is the first row.
-    return () => h('button', { 'data-test': 'menu-recover', onClick: () => emit('recover-state', props.account ?? account(1, 'acc-sol')) }, 'recover')
-  }
-})
-
 // Selects the page and starts quality batches; its buttons are disabled while a batch is busy.
 const BulkBarStub = defineComponent({
   props: ['schedBusy'],
-  emits: ['select-page', 'select-all-results', 'edit-filtered', 'sched-action'],
+  emits: ['select-page', 'select-all-results', 'sched-action'],
   setup(props, { emit }) {
     return () => h('div', [
       h('button', { 'data-test': 'select-page', onClick: () => emit('select-page') }),
       h('button', { 'data-test': 'select-all-results', onClick: () => emit('select-all-results') }),
-      h('button', { 'data-test': 'edit-filtered', onClick: () => emit('edit-filtered') }),
-      ...['reset', 'test'].map((action) => h('button', {
+      ...['reset', 'demote', 'test'].map((action) => h('button', {
         'data-test': `bulk-sched-${action}`,
         disabled: props.schedBusy,
         onClick: (event: MouseEvent) => emit('sched-action', action, event.currentTarget)
@@ -133,7 +123,7 @@ function mountView(stubs: Record<string, unknown> = {}) {
         AppLayout: { template: '<div><slot /></div>' },
         TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>' },
         DataTable: DataTableStub,
-        AccountActionMenu: ActionMenuStub,
+        AccountActionMenu: true,
         AccountStatusIndicator: true,
         AccountTableActions: true,
         AccountTableFilters: FiltersStub,
@@ -159,6 +149,12 @@ function mountView(stubs: Record<string, unknown> = {}) {
   })
 }
 
+// The bulk bar shows only while something is selected.
+const selectFirstRow = async () => {
+  document.querySelector<HTMLInputElement>('[data-test="row"] input[type="checkbox"]')!.click()
+  await flushPromises()
+}
+
 function seedOperator(modules: Partial<Record<AdminModuleId, AdminLevel>>) {
   getActivePinia()!.state.value.auth = { user: { id: 7, role: 'operator' }, runMode: 'standard' }
   const access = useAdminAccessStore()
@@ -180,7 +176,6 @@ beforeEach(() => {
   localStorage.clear()
   document.body.innerHTML = ''
   closeSchedDrawer()
-  closeSchedReset()
   document.documentElement.dataset.motion = 'reduced'
   listAccounts.mockReset().mockResolvedValue({ items: [account(1, 'acc-sol'), account(2, 'acc-astra'), account(3, 'acc-slow'), account(4, 'acc-empty')], total: 4, page: 1, page_size: 20, pages: 1 })
   sched.summary.mockReset().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: summaries() })
@@ -301,44 +296,22 @@ describe('AccountsView quality columns', () => {
     wrapper.unmount()
   })
 
-  it('runs "recover state" from the row menu through the shared reset flow and reads the row again instead of using the result', async () => {
-    sched.reset.mockResolvedValue(resetFixture)
-    getById.mockResolvedValue({ ...account(1, 'acc-sol-renamed'), status: 'active' })
-    const wrapper = mountView()
-    await flushPromises()
-    await wrapper.findComponent(ActionMenuStub).get('[data-test="menu-recover"]').trigger('click')
-    await flushPromises()
-    expect(useSchedLayers().reset.accountId).toBe(1)
-
-    document.querySelector<HTMLElement>('[data-sq-reset-confirm]')!.click()
-    await flushPromises()
-    expect(sched.reset).toHaveBeenCalledWith(1)
-    expect(document.querySelector('[data-sq-reset-result]')).not.toBeNull()
-
-    document.querySelector<HTMLElement>('[data-sq-reset-result]')!.closest('.modal-content')!.querySelector<HTMLElement>('.modal-footer button')!.click()
-    await flushPromises()
-    expect(getById).toHaveBeenCalledWith(1)
-    expect(document.querySelector('[data-test="row"][data-id="1"]')).not.toBeNull()
-    // The row now holds the account read back, never the reset result.
-    expect((wrapper.vm as unknown as { accounts: Array<{ id: number; name: string }> }).accounts.find((a) => a.id === 1)?.name).toBe('acc-sol-renamed')
-    wrapper.unmount()
-  })
-
   it('opens no new quality batch until the closed one has its late answers in', async () => {
     const many = Array.from({ length: 6 }, (_, i) => account(i + 1, `acc-${i + 1}`))
     listAccounts.mockResolvedValue({ items: many, total: 6, page: 1, page_size: 20, pages: 1 })
     const pending: Array<() => void> = []
-    sched.reset.mockReset().mockImplementation(() => new Promise((resolve) => pending.push(() => resolve({ ...resetFixture, failed: [] }))))
+    sched.setOverride.mockReset().mockImplementation(() => new Promise<void>((resolve) => pending.push(resolve)))
     sched.startTest.mockReset().mockResolvedValue({ tests: [{ model: 'm', test_id: 't', started: true, why: '' }] })
     const wrapper = mountView()
     await flushPromises()
     const bar = (selector: string) => wrapper.findComponent(BulkBarStub).get(selector)
+    await selectFirstRow()
     await bar('[data-test="select-page"]').trigger('click')
-    await bar('[data-test="bulk-sched-reset"]').trigger('click')
+    await bar('[data-test="bulk-sched-demote"]').trigger('click')
     await flushPromises()
-    document.querySelector<HTMLElement>('[data-sq-batch-confirm]')!.click()
+    document.querySelector<HTMLElement>('[data-sq-popover] .btn-primary')!.click()
     await flushPromises()
-    expect(sched.reset).toHaveBeenCalledTimes(4)
+    expect(sched.setOverride).toHaveBeenCalledTimes(4)
 
     // Close the results with four answers outstanding, then try a new batch at once.
     document.querySelector('[data-sq-batch-results]')!.closest('.modal-content')!.querySelector<HTMLElement>('.modal-footer .btn-secondary')!.click()
@@ -353,14 +326,14 @@ describe('AccountsView quality columns', () => {
 
     pending.forEach((answer) => answer())
     await flushPromises()
-    expect(sched.reset).toHaveBeenCalledTimes(4)
+    expect(sched.setOverride).toHaveBeenCalledTimes(4)
     expect(bar('[data-test="bulk-sched-test"]').attributes('disabled')).toBeUndefined()
     await bar('[data-test="bulk-sched-test"]').trigger('click')
     await flushPromises()
     testConfirm()!.click()
     await flushPromises()
     expect(sched.startTest.mock.calls.map(([id]) => id)).toEqual([1, 2, 3, 4, 5, 6])
-    expect(sched.reset).toHaveBeenCalledTimes(4)
+    expect(sched.setOverride).toHaveBeenCalledTimes(4)
     wrapper.unmount()
   })
 
@@ -372,9 +345,11 @@ describe('AccountsView quality columns', () => {
     await flushPromises()
     listAccounts.mockClear()
     const bar = (selector: string) => wrapper.findComponent(BulkBarStub).get(selector)
+    await selectFirstRow()
     await bar('[data-test="select-all-results"]').trigger('click')
     await flushPromises()
-    await bar('[data-test="edit-filtered"]').trigger('click')
+    // 批量更新 (edit by filter) is in the toolbar's 更多操作.
+    await (wrapper.vm as unknown as { openBulkEditFiltered: () => Promise<void> }).openBulkEditFiltered()
     await flushPromises()
     expect(listAccounts.mock.calls.length).toBeGreaterThanOrEqual(2)
     for (const [, , filters] of listAccounts.mock.calls) expect(filters).toMatchObject({ sched_quality: 'cooling' })

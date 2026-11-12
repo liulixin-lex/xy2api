@@ -11,17 +11,15 @@ import detailFixture from '@/__tests__/fixtures/schedQuality/account_detail.json
 import summaryFixture from '@/__tests__/fixtures/schedQuality/account_summary.json'
 import boardFixture from '@/__tests__/fixtures/schedQuality/board.json'
 import policyFixture from '@/__tests__/fixtures/schedQuality/policy.json'
-import resetFixture from '@/__tests__/fixtures/schedQuality/reset.json'
 import SchedAccountDrawer from '../SchedAccountDrawer.vue'
 import SchedGroupsCell from '../SchedGroupsCell.vue'
 import AccountRecentStatsCell from '@/components/admin/account/AccountRecentStatsCell.vue'
-import SchedResetDialog from '../SchedResetDialog.vue'
 import SchedBatchDialog from '../SchedBatchDialog.vue'
 import SchedOverridePopover from '../SchedOverridePopover.vue'
 import SchedPauseMark from '../SchedPauseMark.vue'
 import GroupSchedBoard from '@/components/admin/group/GroupSchedBoard.vue'
 import GroupSchedPolicyField from '@/components/admin/group/GroupSchedPolicyField.vue'
-import { closeSchedBoard, closeSchedDrawer, closeSchedReset, openSchedBoard, openSchedDrawer, openSchedReset } from '@/composables/useSchedLayers'
+import { closeSchedBoard, closeSchedDrawer, openSchedBoard, openSchedDrawer } from '@/composables/useSchedLayers'
 
 const api = vi.hoisted(() => ({ accountDetail: vi.fn(), groupBoard: vi.fn(), getGroupPolicy: vi.fn(), reset: vi.fn(), startTest: vi.fn(), setOverride: vi.fn() }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: api }))
@@ -82,12 +80,10 @@ beforeEach(() => {
   document.body.innerHTML = ''
   closeSchedDrawer()
   closeSchedBoard()
-  closeSchedReset()
   document.documentElement.dataset.motion = 'reduced'
   api.accountDetail.mockResolvedValue(detail())
   api.groupBoard.mockResolvedValue(board())
   api.getGroupPolicy.mockResolvedValue(policyFixture)
-  api.reset.mockResolvedValue(resetFixture)
   api.startTest.mockResolvedValue({ tests: [{ model: 'gpt-6.1-sol', test_id: 'x', started: true, why: '' }] })
 })
 afterAll(() => { delete document.documentElement.dataset.motion })
@@ -111,7 +107,6 @@ describe('quality UI copy', () => {
         h(SchedPauseMark, { globalEnabled: true, stale: true }),
         h(SchedAccountDrawer),
         h(GroupSchedBoard),
-        h(SchedResetDialog),
         h(GroupSchedPolicyField, { groupId: 53 }),
         h(SchedOverridePopover, { show: true, mode: 'demote', anchor: null, groups: [{ id: 53, name: '晨星组' }] }),
         h(SchedBatchDialog, { action: 'test', accounts: [{ id: 1, name: 'acc-1' }, { id: 2, name: 'acc-2' }], anchor: null, groups: [] })
@@ -120,9 +115,7 @@ describe('quality UI copy', () => {
     mount(Host, { attachTo: document.body, global: { plugins: [i18n] } })
     openSchedDrawer({ id: 479, name: 'acc-03' })
     openSchedBoard({ id: 53, name: '晨星组' })
-    openSchedReset({ id: 479, name: 'acc-03' })
     await flushPromises()
-    document.querySelector<HTMLElement>('[data-sq-reset-confirm]')!.click()
     document.querySelector<HTMLElement>('[data-sq-batch-confirm]')!.click()
     await flushPromises()
 

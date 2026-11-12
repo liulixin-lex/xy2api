@@ -131,9 +131,6 @@
 
 /* Fills for non-text marks. */
 .sq-dot { display: inline-block; width: 6px; height: 6px; border-radius: 9999px; background: var(--sq-pass-fill); }
-.sq-mark { display: inline-block; width: 8px; height: 8px; }
-.sq-mark--ok { border-radius: 9999px; background: var(--sq-pass-fill); }
-.sq-mark--bad { border-radius: 1px; background: var(--sq-fail-fill); }
 .sq-full { display: inline-block; width: 4px; height: 10px; border-radius: 1px; background: var(--sq-full-fill); }
 .sq-icon-mark { color: var(--sq-mark-fill); border-radius: 4px; }
 

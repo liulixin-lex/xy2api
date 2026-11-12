@@ -60,18 +60,6 @@ export function rejectName(reject: string, t: Translate, te: HasKey): string {
   return te(key) ? t(key) : t('admin.schedQuality.unknown')
 }
 
-const MODEL_KEY_PREFIX: Record<string, string> = {
-  model_limit: 'model_limit:',
-  model_transient: 'model_transient:',
-  iq_gate: 'iq:'
-}
-
-/** Model name encoded in a reset item key (spec B.9); empty when the key carries none. */
-export function modelFromResetKey(key: string, kind: string): string {
-  const prefix = MODEL_KEY_PREFIX[kind]
-  return prefix && key.startsWith(prefix) && key.length > prefix.length ? key.slice(prefix.length) : ''
-}
-
 /** Parent account id from a `parent_blocked:<id>` auto-state key. */
 export function parentIdFromKey(key: string): number | null {
   const match = /^parent_blocked:(\d+)$/.exec(key)

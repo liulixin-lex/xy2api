@@ -70,6 +70,8 @@
         "done": true,
         "abort_reason": "",
         "auto": true,
+        "kind": "full",
+        "clean": true,
         "tiers": [
           {
             "tier": "small",
@@ -156,6 +158,7 @@
       ]
     }
   ],
+  "all_groups_override": null,
   "auto_states": [
     {
       "key": "model_limit:gpt-6-astra",

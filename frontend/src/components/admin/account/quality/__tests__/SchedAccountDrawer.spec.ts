@@ -1,13 +1,16 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 
-import type { SchedAccountDetail } from '@/types/schedQuality'
+import type { SchedAccountDetail, SchedTest } from '@/types/schedQuality'
+import { fmtTestTime } from '@/utils/schedQualityFormat'
 import detailFixture from '@/__tests__/fixtures/schedQuality/account_detail.json'
 import SchedAccountDrawer from '../SchedAccountDrawer.vue'
 import { closeSchedBoard, closeSchedDrawer, openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
 
-const api = vi.hoisted(() => ({ accountDetail: vi.fn(), startTest: vi.fn(), setOverride: vi.fn(), clearOverride: vi.fn(), clearAutoState: vi.fn() }))
+const api = vi.hoisted(() => ({ accountDetail: vi.fn(), startTest: vi.fn(), setOverride: vi.fn(), clearOverride: vi.fn(), clearAutoState: vi.fn(), reset: vi.fn() }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: api }))
+const toast = vi.hoisted(() => ({ showSuccess: vi.fn(), showError: vi.fn() }))
+vi.mock('@/stores/app', () => ({ useAppStore: () => toast }))
 // Reactive, so a permission change after mount reaches the mounted drawer.
 const perms = await vi.hoisted(async () => {
   const { reactive } = await import('vue')
@@ -62,6 +65,10 @@ beforeEach(() => {
   api.accountDetail.mockReset().mockResolvedValue(detail())
   api.startTest.mockReset()
   api.clearOverride.mockReset()
+  api.setOverride.mockReset()
+  api.reset.mockReset()
+  toast.showSuccess.mockReset()
+  toast.showError.mockReset()
 })
 
 afterEach(() => {
@@ -226,7 +233,8 @@ describe('SchedAccountDrawer', () => {
 
   it('shows 失败 next to the header button when cancelling the all-groups override fails', async () => {
     const d = detail()
-    d.groups[0].override = { mode: 'demote', all_groups: true, expires_at: null, reason: '' }
+    d.all_groups_override = { mode: 'demote', all_groups: true, expires_at: null, reason: '' }
+    d.groups[0].override = d.all_groups_override
     api.accountDetail.mockResolvedValue(d)
     api.clearOverride.mockRejectedValue({ status: 500 })
     mount(SchedAccountDrawer, { attachTo: document.body })
@@ -295,5 +303,155 @@ describe('SchedAccountDrawer', () => {
     await flushPromises()
     expect(document.querySelector('[data-sq-popover]')).toBeNull()
     expect(api.setOverride).not.toHaveBeenCalled()
+  })
+})
+
+async function openWith(d: SchedAccountDetail, props: Record<string, unknown> = {}) {
+  api.accountDetail.mockResolvedValue(d)
+  const wrapper = mount(SchedAccountDrawer, { props, attachTo: document.body })
+  openSchedDrawer({ id: 479, name: 'acc-03' })
+  await flushPromises()
+  return wrapper
+}
+const trigger = (name: string) => document.querySelector<HTMLElement>(`[data-sq-trigger="${name}"]`)
+
+describe('SchedAccountDrawer — member groups and the all-groups override (contract delta D3, scenario 30)', () => {
+  it('lists a member group without state rows with only its name and the override action, which sets and cancels', async () => {
+    const d = detail()
+    d.groups.push({ group_id: 55, name: '南风组', gate_enabled: false, policy: d.groups[0].policy, override: null, by_model: [] })
+    await openWith(d)
+    const tds = Array.from(row(55).querySelectorAll('td'))
+    expect(tds[0].textContent!.trim()).toBe('南风组')
+    expect(tds.slice(1, 5).map((td) => td.textContent!.trim())).toEqual(['', '', '', ''])
+    expect(trigger('override:55')!.textContent).toBe('admin.schedQuality.action.demote')
+
+    trigger('override:55')!.click()
+    await flushPromises()
+    const after = structuredClone(d)
+    after.groups[2].override = { mode: 'demote', all_groups: false, expires_at: null, reason: '' }
+    api.accountDetail.mockResolvedValue(after)
+    document.querySelector<HTMLElement>('[data-sq-popover] .btn-primary')!.click()
+    await flushPromises()
+    expect(api.setOverride).toHaveBeenCalledWith(479, expect.objectContaining({ group_id: 55, mode: 'demote' }))
+
+    expect(trigger('override:55')!.textContent).toBe('admin.schedQuality.action.undoDemote')
+    expect(Array.from(row(55).querySelectorAll('td')).slice(1, 5).map((td) => td.textContent!.trim())).toEqual(['', '', '', ''])
+    trigger('override:55')!.click()
+    await flushPromises()
+    expect(api.clearOverride).toHaveBeenCalledWith(479, 55)
+  })
+
+  it('reads the all-groups override from the detail root, so an account in no group can still cancel it', async () => {
+    const d = detail()
+    d.groups = []
+    d.all_groups_override = { mode: 'exempt', all_groups: true, expires_at: null, reason: '' }
+    await openWith(d)
+    const section = panel().querySelector('[data-sq-section="groups"]')!
+    expect(section.querySelector('table')).toBeNull()
+    expect(section.textContent).toContain('—')
+    expect(trigger('drawer-exempt')!.textContent).toBe('admin.schedQuality.action.undoExempt')
+    expect(trigger('drawer-demote')!.textContent).toBe('admin.schedQuality.action.demote')
+    trigger('drawer-exempt')!.click()
+    await flushPromises()
+    expect(api.clearOverride).toHaveBeenCalledWith(479, 0)
+  })
+})
+
+describe('SchedAccountDrawer — test area (contract delta E, scenario 31)', () => {
+  const at = detailFixture.models[0].test.at
+  const head = () => panel().querySelector('[data-sq-test-head]')!
+  const words = () => Array.from(head().querySelectorAll('span')).map((el) => el.textContent)
+  const table = () => head().closest('section')!.querySelector('table')!
+  const tierRows = () => Array.from(table().querySelectorAll('tbody tr')).map((tr) => Array.from(tr.querySelectorAll('td')).map((td) => td.textContent))
+  const withTest = (test: Partial<SchedTest>) => {
+    const d = detail()
+    Object.assign(d.models[0].test!, test)
+    return d
+  }
+  const small = { tier: 'small' as const, ttfo_ms: [3100, 2900], cache_ratio: 0.99, faults: 0, timeouts: 0 }
+
+  it('marks a clean screen 筛查 · time · 完成, with only the small tier and no cache column', async () => {
+    await openWith(withTest({ kind: 'screen', clean: true, tiers: [small] }))
+    expect(words()).toEqual(['admin.schedQuality.test.screen', fmtTestTime(at), 'admin.schedQuality.test.done'])
+    expect(Array.from(table().querySelectorAll('thead th')).map((th) => th.textContent)).toEqual(['admin.schedQuality.col.class', '', 'admin.schedQuality.dim.ttfo', ''])
+    expect(tierRows()).toEqual([['admin.schedQuality.tier.small', '', '3.1s', '']])
+    expect(table().textContent).not.toContain('99%')
+    // No shape or colour that reads as a verdict.
+    expect(head().querySelector('[role="img"]')).toBeNull()
+  })
+
+  it('marks a full test that ended unclean 三档 · time · 未完成, with three tiers and — for a tier without rounds', async () => {
+    const medium = { tier: 'medium' as const, ttfo_ms: [null], cache_ratio: null, faults: 0, timeouts: 1 }
+    await openWith(withTest({ kind: 'full', clean: false, auto: false, tiers: [small, medium] }))
+    expect(words()).toEqual(['admin.schedQuality.test.full', fmtTestTime(at), 'admin.schedQuality.test.unfinished'])
+    expect(tierRows().map((cells) => cells[2])).toEqual(['3.1s', 'admin.schedQuality.result.timeout', '—'])
+  })
+
+  it('calls a test without any round 作废', async () => {
+    await openWith(withTest({ kind: 'screen', clean: false, done: false, abort_reason: 'not_schedulable', tiers: [] }))
+    expect(words()).toEqual(['admin.schedQuality.test.screen', fmtTestTime(at), 'admin.schedQuality.test.aborted'])
+  })
+
+  it('shows the kind with 测试中 while the test runs', async () => {
+    await openWith(withTest({ kind: 'screen', clean: false, running: true, done: false, tiers: [] }))
+    expect(words()).toEqual(['admin.schedQuality.test.screen', 'admin.schedQuality.state.testing'])
+  })
+})
+
+describe('SchedAccountDrawer — 恢复 (contract delta F2, F3)', () => {
+  const withoutCooling = (d: SchedAccountDetail) => {
+    d.groups.forEach((group) => group.by_model.forEach((r) => { r.state = 'normal' }))
+    return d
+  }
+  const proxy = { key: 'proxy_circuit:7', kind: 'proxy_circuit', scope: 'proxy' as const, model: '', until: null, count: null, shared: 4, clearable: true, why: '' }
+
+  it('shows 恢复 only for a cooling group row or a clearable auto state other than the shared proxy circuit', async () => {
+    await openWith(detail())
+    expect(trigger('drawer-reset')).not.toBeNull()
+
+    closeSchedDrawer()
+    await openWith(withoutCooling(detail()))
+    // The clearable model limit of the fixture.
+    expect(trigger('drawer-reset')).not.toBeNull()
+
+    closeSchedDrawer()
+    const onlyProxy = withoutCooling(detail())
+    onlyProxy.auto_states = [proxy, { ...proxy, key: 'iq:gpt-6-astra', kind: 'iq_gate', scope: 'model', clearable: false }]
+    await openWith(onlyProxy)
+    expect(trigger('drawer-reset')).toBeNull()
+    // The single clear of the proxy circuit is still there.
+    expect(trigger('auto:proxy_circuit:7')).not.toBeNull()
+  })
+
+  it('runs at once with one toast and no dialog, and stays greyed until the refresh after it is done (scenario 38)', async () => {
+    let answer!: (value: unknown) => void
+    api.reset.mockReturnValue(new Promise((resolve) => { answer = resolve }))
+    let refreshed!: () => void
+    const onRecovered = vi.fn(() => new Promise<void>((resolve) => { refreshed = resolve }))
+    await openWith(detail(), { onRecovered })
+    const loads = api.accountDetail.mock.calls.length
+
+    trigger('drawer-reset')!.click()
+    await flushPromises()
+    trigger('drawer-reset')!.click()
+    await flushPromises()
+    expect(api.reset).toHaveBeenCalledTimes(1)
+    expect(api.reset).toHaveBeenCalledWith(479)
+    expect(trigger('drawer-reset')!.getAttribute('aria-busy')).toBe('true')
+    expect(document.querySelector('.modal-content')).toBeNull()
+
+    api.accountDetail.mockResolvedValue(withoutCooling(detail()))
+    answer({ reset_at: 'x', cleared: [], preserved: [{ key: 'session_avoid', kind: 'session_avoid', why: '' }], failed: [] })
+    await flushPromises()
+    expect(toast.showSuccess.mock.calls).toEqual([['admin.schedQuality.recover.ok:{"name":"…"}']])
+    expect(toast.showError).not.toHaveBeenCalled()
+    expect(onRecovered).toHaveBeenCalledWith(479)
+    expect(api.accountDetail.mock.calls.length).toBeGreaterThan(loads)
+    expect(trigger('drawer-reset')!.getAttribute('aria-busy')).toBe('true')
+
+    refreshed()
+    await flushPromises()
+    expect(trigger('drawer-reset')!.getAttribute('aria-busy')).toBe('false')
+    expect(document.querySelector('.modal-content')).toBeNull()
   })
 })

@@ -192,7 +192,7 @@
       </template>
       <template #table>
         <AccountBulkActionsBar
-          v-if="canManage"
+          v-if="canManage && selIds.length > 0"
           :selected-ids="selIds"
           :total-results="pagination.total"
           :selecting-all="selectingAllResults"
@@ -204,13 +204,13 @@
           :iq-busy="runningIQBatch"
           @run-iq-check="handleBulkRunIQCheck"
           @edit-selected="openBulkEditSelected"
-          @edit-filtered="openBulkEditFiltered"
           @clear="clearSelection"
           @select-page="selectPage"
           @select-all-results="handleSelectAllResults"
           :scheduling-busy="selIds.some(id => togglingSchedulable.has(id))"
           @toggle-schedulable="handleBulkToggleSchedulable"
           :sched-busy="sqBatchBusy"
+          :recover-busy="recoveryBatchRunning || selIds.some(isRecovering)"
           @sched-action="openSchedBatch"
         />
         <div ref="accountTableRef" class="account-table flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -485,7 +485,7 @@
     <ScheduledTestsPanel v-if="schedulePanelMounted" :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" :readonly="!canManage" @close="closeSchedulePanel" />
     <IQCheckResultsModal v-if="iqRecordsAccount" :show="true" :account="iqRecordsAccount" @close="iqRecordsAccount = null" @updated="handleIQSummaryUpdated" />
     <AccountGroupsDialog v-if="groupsDialogAccount" :account="groupsDialogAccount" :groups="groups" @close="groupsDialogAccount = null" @updated="handleAccountUpdated" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @iq-run="handleRunIQCheck" @iq-records="iqRecordsAccount = $event" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="(a: Account) => openSchedReset({ id: a.id, name: a.name })" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @manage-openai-totp="handleManageOpenAITotp" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @iq-run="handleRunIQCheck" @iq-records="iqRecordsAccount = $event" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" :recoverable="menuRecoverable(menu.acc)" :recovering="!!menu.acc && isRecovering(menu.acc.id)" @recover-state="recoverOne" @delete="handleDelete" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @manage-openai-totp="handleManageOpenAITotp" />
     <OpenAILoginImportDialog v-if="authStore.isAdmin && showOpenAILogin" :show="showOpenAILogin" :proxies="proxies" :groups="groups" @close="showOpenAILogin = false" @imported="handleDataImported" />
     <OpenAITotpDialog v-if="authStore.isAdmin && openAITotpAccount" :show="true" :account="openAITotpAccount" @close="openAITotpAccount = null" />
     <SyncFromCrsModal v-if="syncModalMounted" :show="showSync" @close="showSync = false" @synced="handleCrsSynced" />
@@ -502,9 +502,9 @@
       @close="showBulkEdit = false"
       @updated="handleBulkUpdated"
     />
-    <TempUnschedStatusModal v-if="tempUnschedModalMounted" :show="showTempUnsched" :account="tempUnschedAcc" @close="showTempUnsched = false" @recover="(a: Account) => openSchedReset({ id: a.id, name: a.name })" />
-    <SchedQualityLayers :on-iq-check="openIqRecordsById" :on-edit="openEditById" @reset-done="refreshAfterSchedReset" />
-    <SchedBatchDialog :action="sqBatch.action" :accounts="sqBatch.accounts" :anchor="sqBatch.anchor" :groups="sqOpenAIGroups" @close="sqBatch.action = null" @busy="(running) => (sqBatchBusy = running)" @done="load()" />
+    <TempUnschedStatusModal v-if="tempUnschedModalMounted" :show="showTempUnsched" :account="tempUnschedAcc" @close="showTempUnsched = false" :recovering="!!tempUnschedAcc && isRecovering(tempUnschedAcc.id)" @recover="recoverOne" />
+    <SchedQualityLayers :on-iq-check="openIqRecordsById" :on-edit="openEditById" :on-recovered="refreshAfterRecover" />
+    <SchedBatchDialog :action="sqBatch.action" :accounts="sqBatch.accounts" :anchor="sqBatch.anchor" :groups="sqOpenAIGroups" @close="sqBatch.action = null" @busy="(running) => (sqBatchBusy = running)" @done="load()" @recover="handleBatchRecover" />
     <ConfirmDialog :show="showDeleteDialog" :title="t('admin.accounts.deleteAccount')" :message="t('admin.accounts.deleteConfirm', { name: deletingAcc?.name })" :confirm-text="t('common.delete')" :cancel-text="t('common.cancel')" :danger="true" @confirm="confirmDelete" @cancel="showDeleteDialog = false" />
     <ConfirmDialog :show="showCreateShadowDialog" :title="t('admin.accounts.createSparkShadow')" :message="t('admin.accounts.createSparkShadowConfirm', { name: creatingShadowAcc?.name })" @confirm="confirmCreateSparkShadow" @cancel="showCreateShadowDialog = false" />
     <ConfirmDialog :show="showExportDataDialog" :title="t('admin.accounts.dataExport')" :message="t('admin.accounts.dataExportConfirmMessage')" :confirm-text="t('admin.accounts.dataExportConfirm')" :cancel-text="t('common.cancel')" @confirm="handleExportData" @cancel="showExportDataDialog = false">
@@ -547,7 +547,8 @@ import SchedQualityLayers from '@/components/admin/account/quality/SchedQualityL
 import SchedBatchDialog, { type SchedBatchAction } from '@/components/admin/account/quality/SchedBatchDialog.vue'
 import { useSchedQualitySummary } from '@/composables/useSchedQuality'
 import { useAccountRecentStats } from '@/composables/useAccountRecentStats'
-import { openSchedDrawer, openSchedReset, useSchedLayers } from '@/composables/useSchedLayers'
+import { openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
+import { canRecover, isRecovering, useAccountRecovery } from '@/composables/useAccountRecovery'
 import { vTip } from '@/utils/tip'
 import AccountRecentStatsCell from '@/components/admin/account/AccountRecentStatsCell.vue'
 import Pagination from '@/components/common/Pagination.vue'
@@ -1464,14 +1465,14 @@ watch(accounts, (rows) => {
 })
 
 // ---- Quality scheduling: the groups column, the drawer and batches (design spec A, contract delta D, F).
-const { drawer: sqDrawer, board: sqBoard, reset: sqReset } = useSchedLayers()
+const { drawer: sqDrawer, board: sqBoard } = useSchedLayers()
 const sqBatch = reactive<{ action: SchedBatchAction | null; accounts: Array<{ id: number; name: string }>; anchor: HTMLElement | null }>({
   action: null,
   accounts: [],
   anchor: null
 })
 const sqLayersOpen = computed(() =>
-  sqDrawer.accountId !== null || sqBoard.groupId !== null || sqReset.accountId !== null || sqBatch.action !== null
+  sqDrawer.accountId !== null || sqBoard.groupId !== null || sqBatch.action !== null
 )
 // Refreshed with the list; skipped while the page is hidden or a dialog / the drawer is open (spec A.6). Managers
 // get it even with the groups column hidden: the row menu decides "recover state" from it (contract delta F1).
@@ -1532,16 +1533,27 @@ const openSchedBatch = (action: SchedBatchAction, anchor: HTMLElement) => {
   sqBatch.action = action
 }
 
-// After a reset the row is read again from the server; nothing is patched from the reset result.
-const refreshAfterSchedReset = async (id: number) => {
+// "Recover state" (contract delta F): the row menu, the drawer and the temporary-pause dialog run it at once; the
+// batch confirms the count first. After a recovery the row is read again from the server (nothing is patched from the
+// reset result), the summary is refreshed, and under the quality filter the list is loaded again.
+const { recover: recoverAccount, recoverMany, batchRunning: recoveryBatchRunning } = useAccountRecovery()
+const menuRecoverable = (a: Account | null) => !!a && canRecover(a, sqSummary.byAccount.value.get(a.id), Date.now())
+const refreshAfterRecover = async (id: number) => {
   if (tempUnschedAcc.value?.id === id) showTempUnsched.value = false
   try {
     patchAccountInList(await adminAPI.accounts.getById(id))
   } catch (error) {
-    console.error('Failed to reload account after reset:', error)
+    console.error('Failed to reload account after recovery:', error)
   }
   enterAutoRefreshSilentWindow()
-  refreshSchedSummary()
+  if (params.sched_quality) await load()
+  else refreshSchedSummary()
+}
+const recoverOne = (a: Account) => recoverAccount({ id: a.id, name: a.name }, () => refreshAfterRecover(a.id))
+// Recovered accounts leave the selection; failed and not-run ones stay for a retry.
+const handleBatchRecover = async (ids: number[]) => {
+  const { recovered } = await recoverMany(ids, () => load())
+  removeSelectedAccounts(recovered)
 }
 const openIqRecordsById = async (id: number) => {
   const account = await loadAccountDetails({ id })
@@ -2915,6 +2927,7 @@ const confirmCreateSparkShadow = async () => {
     appStore.showError(error?.response?.data?.message || t('admin.accounts.createSparkShadowFailed'))
   }
 }
+const handleDelete = (a: Account) => { deletingAcc.value = a; showDeleteDialog.value = true }
 const confirmDelete = async () => { if(!deletingAcc.value) return; try { await adminAPI.accounts.delete(deletingAcc.value.id); invalidateUpstreamBalances([deletingAcc.value.id]); showDeleteDialog.value = false; deletingAcc.value = null; reload() } catch (error) { console.error('Failed to delete account:', error) } }
 const setSchedulableLocally = (accountId: number, schedulable: boolean) => {
   accounts.value = accounts.value.map((account) => (account.id === accountId ? { ...account, schedulable } : account))

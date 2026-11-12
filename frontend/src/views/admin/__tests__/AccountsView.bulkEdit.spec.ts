@@ -115,10 +115,9 @@ const ProbeDataTableStub = {
 
 const AccountBulkActionsBarStub = {
   props: ['selectedIds'],
-  emits: ['edit-filtered', 'probe-upstream-billing'],
+  emits: ['probe-upstream-billing'],
   template: `
     <div>
-      <button data-test="edit-filtered" @click="$emit('edit-filtered')">edit filtered</button>
       <button data-test="probe-upstream-billing" @click="$emit('probe-upstream-billing')">probe</button>
     </div>
   `
@@ -175,7 +174,7 @@ describe('admin AccountsView bulk edit scope', () => {
     probeUpstreamBillingBatch.mockResolvedValue([])
   })
 
-  it('opens bulk edit in filtered-results mode from the bulk actions dropdown', async () => {
+  it('opens bulk edit in filtered-results mode', async () => {
     const wrapper = mount(AccountsView, {
       global: {
         stubs: {
@@ -214,7 +213,8 @@ describe('admin AccountsView bulk edit scope', () => {
     })
 
     await flushPromises()
-    await wrapper.get('[data-test="edit-filtered"]').trigger('click')
+    // 批量更新 needs no selection; its entry is the toolbar's 更多操作 (the bulk bar shows only with a selection).
+    await (wrapper.vm as unknown as { openBulkEditFiltered: () => Promise<void> }).openBulkEditFiltered()
     await flushPromises()
 
     expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-show')).toBe('true')
