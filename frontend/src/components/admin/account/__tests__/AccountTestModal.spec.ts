@@ -24,7 +24,10 @@ vi.mock('@/composables/useClipboard', () => ({
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
   const messages: Record<string, string> = {
-    'admin.accounts.imagePromptDefault': 'Generate a cute orange cat astronaut sticker on a clean pastel background.'
+    'admin.accounts.imagePromptDefault': 'Generate a cute orange cat astronaut sticker on a clean pastel background.',
+    'admin.accounts.anthropic.compatStepPassed': '{step} passed',
+    'admin.accounts.anthropic.compatStepFailed': '{step} failed',
+    'admin.accounts.errorPrefix': 'Error: {message}'
   }
   return {
     ...actual,
@@ -36,7 +39,7 @@ vi.mock('vue-i18n', async () => {
         if (key === 'admin.accounts.imagePreviewAlt' && params?.index) {
           return `test-image-${params.index}`
         }
-        return messages[key] || key
+        return (messages[key] || key).replace(/\{(\w+)\}/g, (_, name) => String(params?.[name] ?? ''))
       }
     })
   }
@@ -219,5 +222,58 @@ describe('AccountTestModal', () => {
       prompt: '',
       mode: 'compact'
     })
+  })
+
+  it('renders status lines from the test stream', async () => {
+    getAvailableModels.mockResolvedValue([{ id: 'gpt-5.4', display_name: 'GPT-5.4' }])
+    global.fetch = vi.fn().mockResolvedValue(
+      createStreamResponse([
+        'data: {"type":"status","text":"已通过 /v1/chat/completions 验证"}\n',
+        'data: {"type":"test_complete","success":true}\n'
+      ])
+    ) as any
+
+    const wrapper = mountModal({ id: 42, name: 'OpenAI OAuth', platform: 'openai', type: 'oauth', status: 'active' })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    await (wrapper.vm as any).startTest()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('已通过 /v1/chat/completions 验证')
+  })
+
+  it('renders both Claude Code compatibility diagnostic steps with the failure reason', async () => {
+    getAvailableModels.mockResolvedValue([{ id: 'claude-sonnet-4-5', display_name: 'Claude Sonnet 4.5' }])
+    global.fetch = vi.fn().mockResolvedValue(
+      createStreamResponse([
+        'data: {"type":"test_start","model":"claude-sonnet-4-5","test_scope":"ordinary_client_compatibility","compat_profile":"claude_code_v2","compat_revision":"rev-7"}\n',
+        'data: {"type":"content","text":"calling tool"}\n',
+        'data: {"type":"compat_step","code":"adapted_turn","status":"passed"}\n',
+        'data: {"type":"compat_step","code":"signed_continuation","status":"failed","error":"invalid signature"}\n',
+        'data: {"type":"test_complete","success":false,"error":"signed continuation failed"}\n'
+      ])
+    ) as any
+
+    const wrapper = mountModal({
+      id: 503,
+      name: 'Compat',
+      platform: 'anthropic',
+      type: 'apikey',
+      status: 'active',
+      extra: { anthropic_compat_profile: 'claude_code_v2' }
+    })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    await (wrapper.vm as any).startTest()
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain('admin.accounts.anthropic.diagnosticOrdinary')
+    expect(text).toContain('claude_code_v2 / rev-7')
+    expect(text).toContain('admin.accounts.anthropic.compatStepAdaptedTurn passed')
+    expect(text).toContain('admin.accounts.anthropic.compatStepSignedContinuation failed')
+    expect(text).toContain('Error: invalid signature')
+    expect(text.indexOf('calling tool')).toBeLessThan(text.indexOf('admin.accounts.anthropic.compatStepAdaptedTurn passed'))
+    expect(text).toContain('signed continuation failed')
   })
 })

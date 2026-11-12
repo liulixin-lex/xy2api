@@ -243,6 +243,23 @@
           </p>
         </section>
 
+        <section
+          v-if="showAnthropicClientGuide"
+          data-testid="anthropic-client-guide"
+          class="rounded-lg border border-gray-200 px-4 py-3 dark:border-dark-700"
+        >
+          <h3 class="text-sm font-medium text-gray-900 dark:text-white">{{ t('keys.useKeyModal.anthropicClients.title') }}</h3>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('keys.useKeyModal.anthropicClients.description') }}</p>
+          <dl class="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+            <dt class="text-gray-500 dark:text-gray-400">{{ t('keys.useKeyModal.anthropicClients.anthropicBaseUrl') }}</dt>
+            <dd class="break-all font-mono text-gray-900 dark:text-gray-100">{{ apiRoot }}</dd>
+            <dt class="text-gray-500 dark:text-gray-400">{{ t('keys.useKeyModal.anthropicClients.openaiBaseUrl') }}</dt>
+            <dd class="break-all font-mono text-gray-900 dark:text-gray-100">{{ apiRoot }}/v1</dd>
+            <dt class="text-gray-500 dark:text-gray-400">{{ t('keys.useKeyModal.anthropicClients.endpoints') }}</dt>
+            <dd class="font-mono text-gray-900 dark:text-gray-100">/v1/messages, /v1/chat/completions, /v1/responses</dd>
+          </dl>
+        </section>
+
         <!-- Usage Note -->
         <div v-if="showPlatformNote" class="flex items-start gap-3 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800">
           <Icon name="infoCircle" size="md" class="text-blue-500 flex-shrink-0 mt-0.5" />
@@ -654,6 +671,10 @@ const platformNote = computed(() => {
 
 const showPlatformNote = computed(() => activeClientTab.value !== 'opencode')
 
+// Site root without a trailing /v1: Anthropic clients append /v1/messages themselves.
+const apiRoot = computed(() => (props.baseUrl || window.location.origin).replace(/\/v1\/?$/, '').replace(/\/+$/, ''))
+const showAnthropicClientGuide = computed(() => props.platform === 'anthropic' && !props.claudeCodeOnly)
+
 function resetCodexModelManifest() {
   codexModelManifestController?.abort()
   codexModelManifestController = null
@@ -738,7 +759,7 @@ const comment = (value: string) => wrapToken('text-slate-500', value)
 const currentFiles = computed((): FileConfig[] => {
   const baseUrl = props.baseUrl || window.location.origin
   const apiKey = props.apiKey
-  const baseRoot = baseUrl.replace(/\/v1\/?$/, '').replace(/\/+$/, '')
+  const baseRoot = apiRoot.value
   const ensureV1 = (value: string) => {
     const trimmed = value.replace(/\/+$/, '')
     return trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`

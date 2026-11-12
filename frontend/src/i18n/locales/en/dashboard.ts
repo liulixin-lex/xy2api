@@ -268,6 +268,13 @@ export default {
         modelsCount: '{count} models ready to download',
         errorDescription: 'The catalog could not be fetched with this API key.',
       },
+      anthropicClients: {
+        title: 'Other clients',
+        description: 'Clients such as Cline, Cherry Studio, new-api relays or the OpenAI SDK use the same API key. Pick the Base URL that matches the client protocol:',
+        anthropicBaseUrl: 'Anthropic-compatible Base URL',
+        openaiBaseUrl: 'OpenAI-compatible Base URL',
+        endpoints: 'Endpoints',
+      },
       opencode: {
         title: 'OpenCode Example',
         subtitle: 'opencode.json',

@@ -35,41 +35,7 @@
         </p>
       </div>
 
-      <div v-if="allAnthropicAPIKey" class="border-t border-gray-200 pt-4 dark:border-dark-600" data-testid="bulk-anthropic-compat-section">
-        <div class="flex items-center justify-between gap-4">
-          <div>
-            <label for="bulk-anthropic-compat-apply" class="input-label mb-0">{{ t('admin.accounts.anthropic.compatibility') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.anthropic.compatibilityDesc') }}</p>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.anthropic.compatibilityCapabilities') }}</p>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.anthropic.compatibilityConflict') }}</p>
-          </div>
-          <input id="bulk-anthropic-compat-apply" v-model="enableAnthropicCompatibility" type="checkbox" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
-        </div>
-        <button
-          type="button"
-          role="switch"
-          :aria-checked="anthropicCompatibilityEnabled"
-          :aria-label="t('admin.accounts.anthropic.compatibility')"
-          :disabled="!enableAnthropicCompatibility"
-          data-testid="bulk-anthropic-compat-toggle"
-          :class="['relative mt-3 inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:cursor-not-allowed disabled:opacity-50', anthropicCompatibilityEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600']"
-          @click="anthropicCompatibilityEnabled = !anthropicCompatibilityEnabled"
-        >
-          <span :class="['pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200', anthropicCompatibilityEnabled ? 'translate-x-5' : 'translate-x-0']" />
-        </button>
-        <div v-if="enableAnthropicCompatibility && anthropicCompatibilityEnabled" class="mt-3 space-y-3">
-          <label class="input-label" for="bulk-anthropic-compat-profile">{{ t('admin.accounts.anthropic.compatibilityProfile') }}</label>
-          <select id="bulk-anthropic-compat-profile" v-model="anthropicCompatibilityProfile" class="input" data-testid="anthropic-compat-profile">
-            <option value="claude_code_v2">{{ t('admin.accounts.anthropic.compatibilityV2') }}</option>
-            <option value="claude_code_v1">{{ t('admin.accounts.anthropic.compatibilityV1') }}</option>
-          </select>
-          <label class="flex items-center gap-2 text-sm">
-            <input v-model="anthropicCompatibilityNewSessions" type="checkbox" data-testid="anthropic-compat-new-sessions" class="rounded border-gray-300 text-primary-600" />
-            {{ t('admin.accounts.anthropic.compatibilityNewSessions') }}
-          </label>
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.anthropic.compatibilityDrainDesc') }}</p>
-        </div>
-      </div>
+      <AnthropicCompatSettings v-if="allAnthropicAPIKey" v-model="anthropicCompat" bulk />
 
       <!-- OpenAI passthrough -->
       <div
@@ -1599,6 +1565,8 @@ import {
   getPresetMappingsByPlatform
 } from '@/composables/useModelWhitelist'
 import HeaderOverrideEditor from '@/components/account/HeaderOverrideEditor.vue'
+import AnthropicCompatSettings from '@/components/account/AnthropicCompatSettings.vue'
+import { applyAnthropicCompatExtra, type AnthropicCompatDraft } from '@/components/account/anthropicCompat'
 import {
   buildHeaderOverridesObject,
   isHeaderOverrideCapable,
@@ -1692,10 +1660,9 @@ const allOpenAIOAuthOnly = computed(() => {
 })
 
 const allAnthropicAPIKey = computed(() => targetSelectedPlatforms.value.length === 1 && targetSelectedPlatforms.value[0] === 'anthropic' && targetSelectedTypes.value.length > 0 && targetSelectedTypes.value.every(t => t === 'apikey'))
-const enableAnthropicCompatibility = ref(false)
-const anthropicCompatibilityEnabled = ref(false)
-const anthropicCompatibilityProfile = ref<'claude_code_v1' | 'claude_code_v2'>('claude_code_v2')
-const anthropicCompatibilityNewSessions = ref(true)
+const keepAnthropicCompat = (): AnthropicCompatDraft => ({ enabled: null, newSessions: null })
+const anthropicCompat = ref(keepAnthropicCompat())
+const anthropicCompatChanged = computed(() => allAnthropicAPIKey.value && (anthropicCompat.value.enabled !== null || anthropicCompat.value.newSessions !== null))
 
 const allOpenAIAPIKey = computed(() => {
   return (
@@ -2093,9 +2060,8 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     }
   }
 
-  if (enableAnthropicCompatibility.value && allAnthropicAPIKey.value) {
-    ensureExtra().anthropic_compat_profile = anthropicCompatibilityEnabled.value ? anthropicCompatibilityProfile.value : 'off'
-    if (anthropicCompatibilityEnabled.value) ensureExtra().anthropic_compat_new_sessions = anthropicCompatibilityNewSessions.value
+  if (anthropicCompatChanged.value) {
+    applyAnthropicCompatExtra(ensureExtra(), anthropicCompat.value)
   }
 
   if (enableOpenAIPassthrough.value) {
@@ -2333,7 +2299,7 @@ const handleSubmit = async () => {
 
   const hasAnyFieldEnabled =
     enableBaseUrl.value ||
-    (enableAnthropicCompatibility.value && allAnthropicAPIKey.value) ||
+    anthropicCompatChanged.value ||
     enableOpenAIPassthrough.value ||
     enableOpenAIFlattenNamespaces.value ||
     (enableOpenAICollaborationPlaintext.value && allOpenAIPassthroughCapable.value) ||
@@ -2501,10 +2467,7 @@ watch(
       enableRateMultiplier.value = false
       enableStatus.value = false
       enableGroups.value = false
-      enableAnthropicCompatibility.value = false
-      anthropicCompatibilityEnabled.value = false
-      anthropicCompatibilityProfile.value = 'claude_code_v2'
-      anthropicCompatibilityNewSessions.value = true
+      anthropicCompat.value = keepAnthropicCompat()
       enableOpenAIPassthrough.value = false
       enableOpenAIFlattenNamespaces.value = false
       enableOpenAICollaborationPlaintext.value = false

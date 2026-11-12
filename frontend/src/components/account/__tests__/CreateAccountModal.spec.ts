@@ -952,54 +952,43 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
 })
 
 describe('CreateAccountModal Claude Code compatibility', () => {
-  it.each([false, true])('creates an explicit profile (enabled=%s)', async (enabled) => {
-    createAccountMock.mockReset().mockResolvedValue({ id: 42, platform: 'anthropic', type: 'apikey' })
-    const wrapper = mountModal()
+  const fillAnthropicAPIKey = async (wrapper: ReturnType<typeof mountModal>) => {
     await selectButtonByText(wrapper, 'admin.accounts.claudeConsole')
     await wrapper.get('form#create-account-form input[type="text"]').setValue('compatibility account')
     await wrapper.get('form#create-account-form input[type="password"]').setValue('fixture')
+  }
+
+  it.each([
+    { enabled: false, newSessions: true, expected: { anthropic_compat_profile: 'off' } },
+    { enabled: true, newSessions: true, expected: { anthropic_compat_profile: 'claude_code_v2', anthropic_compat_new_sessions: true } },
+    { enabled: true, newSessions: false, expected: { anthropic_compat_profile: 'claude_code_v2', anthropic_compat_new_sessions: false } }
+  ])('writes the compatibility extra (enabled=$enabled, newSessions=$newSessions)', async ({ enabled, newSessions, expected }) => {
+    createAccountMock.mockReset().mockResolvedValue({ id: 42, platform: 'anthropic', type: 'apikey' })
+    const wrapper = mountModal()
+    await fillAnthropicAPIKey(wrapper)
+    expect(wrapper.find('[data-testid="anthropic-compat-new-sessions"]').exists()).toBe(false)
     if (enabled) await wrapper.get('[data-testid="anthropic-compat-toggle"]').trigger('click')
+    if (!newSessions) await wrapper.get('[data-testid="anthropic-compat-new-sessions"]').trigger('click')
     await wrapper.get('form#create-account-form').trigger('submit.prevent')
     await flushPromises()
     expect(createAccountMock).toHaveBeenCalledTimes(1)
-    expect(createAccountMock.mock.calls[0]?.[0]?.extra?.anthropic_compat_profile).toBe(enabled ? 'claude_code_v2' : 'off')
-    if (enabled) expect(createAccountMock.mock.calls[0]?.[0]?.extra?.anthropic_compat_new_sessions).toBe(true)
+    const extra = createAccountMock.mock.calls[0]?.[0]?.extra
+    expect(extra).toMatchObject(expected)
+    if (!enabled) expect(extra).not.toHaveProperty('anthropic_compat_new_sessions')
     wrapper.unmount()
   })
 
-  it.each(['claude_code_v1', 'claude_code_v2'])('saves the chosen profile and disabled new sessions (%s)', async (profile) => {
-    createAccountMock.mockReset().mockResolvedValue({ id: 42, platform: 'anthropic', type: 'apikey' })
-    const wrapper = mountModal()
-    await selectButtonByText(wrapper, 'admin.accounts.claudeConsole')
-    await wrapper.get('form#create-account-form input[type="text"]').setValue('compatibility account')
-    await wrapper.get('form#create-account-form input[type="password"]').setValue('fixture')
-    await wrapper.get('[data-testid="anthropic-compat-toggle"]').trigger('click')
-    expect((wrapper.get('[data-testid="anthropic-compat-profile"]').element as HTMLSelectElement).value).toBe('claude_code_v2')
-    await wrapper.get('[data-testid="anthropic-compat-profile"]').setValue(profile)
-    await wrapper.get('[data-testid="anthropic-compat-new-sessions"]').setValue(false)
-    await wrapper.get('form#create-account-form').trigger('submit.prevent')
-    await flushPromises()
-    expect(createAccountMock).toHaveBeenCalledTimes(1)
-    expect(createAccountMock.mock.calls[0]?.[0]?.extra).toMatchObject({
-      anthropic_compat_profile: profile,
-      anthropic_compat_new_sessions: false
-    })
-    wrapper.unmount()
-  })
-
-  it('resets the version and new-session choice when switching away from Anthropic', async () => {
+  it('resets the compatibility choice when switching away from Anthropic', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'admin.accounts.claudeConsole')
     await wrapper.get('[data-testid="anthropic-compat-toggle"]').trigger('click')
-    await wrapper.get('[data-testid="anthropic-compat-profile"]').setValue('claude_code_v1')
-    await wrapper.get('[data-testid="anthropic-compat-new-sessions"]').setValue(false)
+    await wrapper.get('[data-testid="anthropic-compat-new-sessions"]').trigger('click')
     await selectButtonByText(wrapper, 'OpenAI')
     await selectButtonByText(wrapper, 'Anthropic')
     await selectButtonByText(wrapper, 'admin.accounts.claudeConsole')
     expect(wrapper.get('[data-testid="anthropic-compat-toggle"]').attributes('aria-checked')).toBe('false')
     await wrapper.get('[data-testid="anthropic-compat-toggle"]').trigger('click')
-    expect((wrapper.get('[data-testid="anthropic-compat-profile"]').element as HTMLSelectElement).value).toBe('claude_code_v2')
-    expect((wrapper.get('[data-testid="anthropic-compat-new-sessions"]').element as HTMLInputElement).checked).toBe(true)
+    expect(wrapper.get('[data-testid="anthropic-compat-new-sessions"]').attributes('aria-checked')).toBe('true')
     wrapper.unmount()
   })
 })

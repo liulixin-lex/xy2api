@@ -40,6 +40,27 @@ describe('UseKeyModal', () => {
     saveAsMock.mockClear()
   })
 
+  it('shows ordinary-client base URLs for Anthropic groups that are not Claude Code-only', async () => {
+    const wrapper = mount(UseKeyModal, {
+      props: { show: true, apiKey: 'sk-anthropic-test', baseUrl: 'https://example.com/v1/', platform: 'anthropic' },
+      global: {
+        stubs: {
+          BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' },
+          Icon: { template: '<span />' }
+        }
+      }
+    })
+
+    const guide = () => wrapper.find('[data-testid="anthropic-client-guide"]')
+    const values = guide().findAll('dd').map((dd) => dd.text())
+    expect(values).toEqual(['https://example.com', 'https://example.com/v1', '/v1/messages, /v1/chat/completions, /v1/responses'])
+
+    await wrapper.setProps({ claudeCodeOnly: true })
+    expect(guide().exists()).toBe(false)
+    await wrapper.setProps({ claudeCodeOnly: false, platform: 'openai' })
+    expect(guide().exists()).toBe(false)
+  })
+
   it('shows only Claude Code for Claude Code-only groups', async () => {
     const wrapper = mount(UseKeyModal, {
       props: {
