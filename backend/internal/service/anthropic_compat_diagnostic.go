@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/liulixin-lex/xy2api/internal/pkg/claude"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -49,13 +50,6 @@ func BuildAnthropicCompatDiagnosticRequest(account *Account, body []byte, header
 	return body, out, nil
 }
 
-func anthropicCompatDiagnosticThinking(model string) (map[string]any, map[string]any) {
-	if isClaudeVersionAtLeast(model, 4, 6) {
-		return map[string]any{"type": "adaptive"}, map[string]any{"effort": "high"}
-	}
-	return map[string]any{"type": "enabled", "budget_tokens": 1024}, nil
-}
-
 // testAnthropicCompatConnection sends two ordinary-client turns directly to the
 // account upstream and checks acceptance of the signed assistant history.
 func (s *AccountTestService) testAnthropicCompatConnection(c *gin.Context, account *Account, model, apiURL, token string, profile *AnthropicCompatProfile) error {
@@ -70,14 +64,16 @@ func (s *AccountTestService) testAnthropicCompatConnection(c *gin.Context, accou
 	s.sendEvent(c, start)
 
 	messages := []map[string]any{{"role": "user", "content": "Calculate 17 × 23, then call compat_ping with no arguments to check the connection."}}
-	thinking, outputConfig := anthropicCompatDiagnosticThinking(model)
+	thinking := map[string]any{"type": claude.ThinkingModeForModel(model)}
 	payload := map[string]any{
 		"model": model, "max_tokens": 4096, "stream": true,
 		"tools":    []map[string]any{{"name": "compat_ping", "description": "Check the connection; takes no arguments.", "input_schema": map[string]any{"type": "object", "properties": map[string]any{}}}},
 		"thinking": thinking,
 	}
-	if outputConfig != nil {
-		payload["output_config"] = outputConfig
+	if thinking["type"] == "adaptive" {
+		payload["output_config"] = map[string]any{"effort": "high"}
+	} else {
+		thinking["budget_tokens"] = 1024
 	}
 	if profile == nil {
 		messages = []map[string]any{{"role": "user", "content": "Reply with OK."}}

@@ -390,7 +390,9 @@ func removeCustomFieldFromTools(body []byte) []byte {
 // cache_control.ttl 被剥离、tool search 被过滤。
 var claudeVersionRe = regexp.MustCompile(`claude-(?:haiku|sonnet|opus)-(\d+)(?:[-.](\d+))?`)
 
-func isClaudeVersionAtLeast(modelID string, minMajor, minMinor int) bool {
+// isBedrockClaude45OrNewer 判断 Bedrock 模型 ID 是否为 Claude 4.5 或更新版本
+// Claude 4.5+ 支持 cache_control 中的 ttl 字段（"5m" 和 "1h"）
+func isBedrockClaude45OrNewer(modelID string) bool {
 	lower := strings.ToLower(modelID)
 	if isBedrockFable5(lower) {
 		return true
@@ -401,13 +403,7 @@ func isClaudeVersionAtLeast(modelID string, minMajor, minMinor int) bool {
 	}
 	major, _ := strconv.Atoi(matches[1])
 	minor, _ := strconv.Atoi(matches[2])
-	return major > minMajor || (major == minMajor && minor >= minMinor)
-}
-
-// isBedrockClaude45OrNewer 判断 Bedrock 模型 ID 是否为 Claude 4.5 或更新版本
-// Claude 4.5+ 支持 cache_control 中的 ttl 字段（"5m" 和 "1h"）
-func isBedrockClaude45OrNewer(modelID string) bool {
-	return isClaudeVersionAtLeast(modelID, 4, 5)
+	return major > 4 || (major == 4 && minor >= 5)
 }
 
 // sanitizeBedrockCacheControl 清理 system 和 messages 中 cache_control 里
@@ -691,10 +687,17 @@ var bedrockToolUseIDRe = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
 // isBedrockOpus47OrNewer 判断 Bedrock 模型 ID 是否为 Claude Opus 4.7 或更新版本
 // Opus 4.7 仅支持 thinking.type: "adaptive"，不支持 "enabled"
 func isBedrockOpus47OrNewer(modelID string) bool {
-	if !strings.Contains(strings.ToLower(modelID), "opus") {
+	lower := strings.ToLower(modelID)
+	if !strings.Contains(lower, "opus") {
 		return false
 	}
-	return isClaudeVersionAtLeast(modelID, 4, 7)
+	matches := claudeVersionRe.FindStringSubmatch(lower)
+	if matches == nil {
+		return false
+	}
+	major, _ := strconv.Atoi(matches[1])
+	minor, _ := strconv.Atoi(matches[2])
+	return major > 4 || (major == 4 && minor >= 7)
 }
 
 func isBedrockFable5(modelID string) bool {

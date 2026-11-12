@@ -53,11 +53,19 @@ func TestAnthropicCompatDiagnosticTwoTurns(t *testing.T) {
 	for _, tc := range []struct {
 		name, model                                                       string
 		tool, failSecond, truncated, unsigned, unknownDelta, nonEndSecond bool
+		budget                                                            bool
 	}{
 		{name: "tool_continuation", model: "claude-opus-5-5", tool: true},
 		{name: "no_tool_followup", model: "claude-opus-5-5"},
 		{name: "opus_4_8_adaptive", model: "claude-opus-4-8", tool: true},
-		{name: "haiku_4_5_budget", model: "claude-haiku-4-5", tool: true},
+		{name: "haiku_4_5_budget", model: "claude-haiku-4-5", tool: true, budget: true},
+		{name: "opus_4_6_adaptive", model: "claude-opus-4-6", tool: true},
+		{name: "sonnet_5_adaptive", model: "claude-sonnet-5", tool: true},
+		{name: "fable_adaptive", model: "claude-fable-5-2", tool: true},
+		{name: "mythos_adaptive", model: "claude-mythos-5-1", tool: true},
+		{name: "mythos_preview_adaptive", model: "claude-mythos-preview", tool: true},
+		{name: "dated_opus_4_budget", model: "claude-opus-4-20250514", tool: true, budget: true},
+		{name: "dated_sonnet_4_budget", model: "claude-sonnet-4-20250514", tool: true, budget: true},
 		{name: "unknown_delta_is_omitted", model: "claude-opus-5-5", tool: true, unknownDelta: true},
 		{name: "continuation_non_end_terminal", model: "claude-opus-5-5", tool: true, nonEndSecond: true},
 		{name: "upstream_rejects_signature", model: "claude-opus-5-5", tool: true, failSecond: true},
@@ -172,13 +180,14 @@ func TestAnthropicCompatDiagnosticTwoTurns(t *testing.T) {
 			} else {
 				require.Equal(t, gjson.String, gjson.GetBytes(bodies[1], "messages.2.content").Type)
 			}
-			if tc.model == "claude-opus-5-5" || tc.model == "claude-opus-4-8" {
+			if !tc.budget {
 				require.Equal(t, "adaptive", gjson.GetBytes(bodies[0], "thinking.type").String())
 				require.False(t, gjson.GetBytes(bodies[0], "thinking.budget_tokens").Exists())
 				require.Equal(t, "high", gjson.GetBytes(bodies[0], "output_config.effort").String())
 			} else {
 				require.Equal(t, "enabled", gjson.GetBytes(bodies[0], "thinking.type").String())
 				require.Equal(t, int64(1024), gjson.GetBytes(bodies[0], "thinking.budget_tokens").Int())
+				require.False(t, gjson.GetBytes(bodies[0], "output_config").Exists())
 			}
 			require.NotContains(t, rec.Body.String(), "compat_revision")
 			if tc.unknownDelta {
@@ -186,27 +195,6 @@ func TestAnthropicCompatDiagnosticTwoTurns(t *testing.T) {
 			}
 
 		})
-	}
-}
-
-func TestAnthropicCompatDiagnosticThinkingModes(t *testing.T) {
-	for _, tc := range []struct {
-		model, mode string
-	}{
-		{"claude-opus-4-5", "enabled"},
-		{"claude-opus-4-6", "adaptive"},
-		{"claude-opus-4-8", "adaptive"},
-		{"claude-sonnet-5", "adaptive"},
-		{"claude-fable-5-2", "adaptive"},
-	} {
-		thinking, output := anthropicCompatDiagnosticThinking(tc.model)
-		require.Equal(t, tc.mode, thinking["type"])
-		if tc.mode == "adaptive" {
-			require.Equal(t, "high", output["effort"])
-		} else {
-			require.Nil(t, output)
-			require.Equal(t, 1024, thinking["budget_tokens"])
-		}
 	}
 }
 
