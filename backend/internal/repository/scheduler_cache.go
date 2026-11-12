@@ -1032,6 +1032,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"codex_fingerprint_mode",
 		"codex_fingerprint_seed",
 		service.AnthropicCompatProfileExtraKey,
+		service.AnthropicCompatNewSessionsExtraKey,
 		service.AnthropicCompatIdentitySeedExtraKey,
 		"anthropic_passthrough",
 		"codex_5h_used_percent",
