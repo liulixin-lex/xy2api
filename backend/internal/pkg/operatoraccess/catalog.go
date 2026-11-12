@@ -82,7 +82,7 @@ var catalog = map[string]Entry{
 	"PUT /sched-quality/accounts/:id/override":            {Kind: KindModule, Module: "accounts", Level: LevelManage, Redact: []Redaction{"account"}},
 	"DELETE /sched-quality/accounts/:id/override":         {Kind: KindModule, Module: "accounts", Level: LevelManage, Redact: []Redaction{"account"}},
 	"POST /sched-quality/accounts/:id/test":               {Kind: KindModule, Module: "accounts", Level: LevelManage, Redact: []Redaction{"account"}},
-	"DELETE /sched-quality/accounts/:id/auto-states/:key": {Kind: KindModule, Module: "accounts", Level: LevelManage, Redact: []Redaction{"account"}},
+	"DELETE /sched-quality/accounts/:id/auto-states/*key": {Kind: KindModule, Module: "accounts", Level: LevelManage, Redact: []Redaction{"account"}},
 	"GET /sched-quality/groups/:id/policy":                {Kind: KindModule, Module: "groups", Level: LevelView},
 	"PUT /sched-quality/groups/:id/policy":                {Kind: KindModule, Module: "groups", Level: LevelManage},
 	"GET /sched-quality/groups/:id/board":                 {Kind: KindModule, Module: "groups", Level: LevelView},

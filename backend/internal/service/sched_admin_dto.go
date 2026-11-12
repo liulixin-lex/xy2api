@@ -86,15 +86,16 @@ type SchedAdminAccountDetailAccount struct {
 }
 
 type SchedAdminAccountDetailModels struct {
-	Model    string                             `json:"model"`
-	Samples  int                                `json:"samples"`
-	Sessions int                                `json:"sessions"`
-	From     *string                            `json:"from"`
-	To       *string                            `json:"to"`
-	TTFO     SchedAdminAccountDetailModelsTTFO  `json:"ttfo"`
-	Error    SchedAdminAccountDetailModelsError `json:"error"`
-	Cache    SchedAdminAccountDetailModelsCache `json:"cache"`
-	Test     *SchedAdminAccountDetailModelsTest `json:"test"`
+	RequestModel string                             `json:"request_model"`
+	Model        string                             `json:"model"`
+	Samples      int                                `json:"samples"`
+	Sessions     int                                `json:"sessions"`
+	From         *string                            `json:"from"`
+	To           *string                            `json:"to"`
+	TTFO         SchedAdminAccountDetailModelsTTFO  `json:"ttfo"`
+	Error        SchedAdminAccountDetailModelsError `json:"error"`
+	Cache        SchedAdminAccountDetailModelsCache `json:"cache"`
+	Test         *SchedAdminAccountDetailModelsTest `json:"test"`
 }
 
 type SchedAdminAccountDetailModelsTTFO struct {
@@ -300,6 +301,7 @@ type SchedAdminBoard struct {
 }
 
 type SchedAdminBoardAccounts struct {
+	EvidenceModel       string                          `json:"evidence_model"`
 	AccountID           int64                           `json:"account_id"`
 	Name                string                          `json:"name"`
 	Rank                int                             `json:"rank"`

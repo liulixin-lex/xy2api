@@ -207,9 +207,9 @@ func (s *SchedAdminService) override(ctx context.Context, p *SchedQualitySnapsho
 	}
 	return &SchedAdminOverride{Mode: schedAdminOverrideMode(o.Mode), AllGroups: o.GroupID == 0, ExpiresAt: expiry, Reason: reason}
 }
-func schedAdminModels(p *SchedQualitySnapshot, id int64, group bool) []string {
+func schedAdminModels(p *SchedQualitySnapshot, id int64, groupAccounts map[int64]*Account) []string {
 	counts := map[string]int{}
-	if !group {
+	if groupAccounts == nil {
 		for k, v := range p.Evidence {
 			if k.AccountID == id && v.Samples > 0 {
 				counts[k.Model] += v.Samples
@@ -222,8 +222,8 @@ func schedAdminModels(p *SchedQualitySnapshot, id int64, group bool) []string {
 				if r.GroupID == id && !seen[r.Model] {
 					seen[r.Model] = true
 					v := p.Evidence[SchedAccountModel{a, r.Model}]
-					if v.Samples > 0 {
-						counts[r.Model] += v.Samples
+					if model := openAIRequestModelForEvidence(groupAccounts[a], r.Model); v.Samples > 0 && model != "" {
+						counts[model] += v.Samples
 					}
 				}
 			}
@@ -265,7 +265,7 @@ func (s *SchedAdminService) Test(ctx context.Context, id int64, model string, op
 	if strings.TrimSpace(model) != "" {
 		models = append(models, strings.TrimSpace(model))
 	} else {
-		models = schedAdminModels(p, id, false)
+		models = schedAdminModels(p, id, nil)
 		if len(models) > schedquality.ManualTestMaxModels {
 			models = models[:schedquality.ManualTestMaxModels]
 		}
@@ -297,11 +297,15 @@ func (s *SchedAdminService) Test(ctx context.Context, id int64, model string, op
 		if e != nil {
 			failures.Models = append(failures.Models, m)
 			failures.Err = errors.Join(failures.Err, fmt.Errorf("%s: %w", m, e))
+			out.Tests = append(out.Tests, SchedAdminTestTests{Model: m, Why: "error"})
 			continue
 		}
 		out.Tests = append(out.Tests, SchedAdminTestTests(t))
 	}
 	if failures.Err != nil {
+		if len(failures.Models) == len(out.Tests) {
+			out.Tests = []SchedAdminTestTests{}
+		}
 		return out, failures
 	}
 	return out, nil
