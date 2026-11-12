@@ -11,6 +11,8 @@ const { listAccounts, getUpstreamBalances } = vi.hoisted(() => ({
   getUpstreamBalances: vi.fn()
 }))
 
+// AccountsView loads the quality summary on mount; a real request would fail after the test file finishes.
+vi.mock('@/api/admin/schedQuality', () => ({ default: { summary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }) } }))
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {

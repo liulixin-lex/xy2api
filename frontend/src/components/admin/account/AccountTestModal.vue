@@ -788,11 +788,7 @@ const loadAvailableModels = async () => {
       : models
     // Default selection by platform
     if (availableModels.value.length > 0) {
-      if (props.account.extra?.anthropic_compat_profile === 'claude_code_v1' || props.account.extra?.anthropic_compat_profile === 'claude_code_v2') {
-        const preferred = availableModels.value.find((m) => m.id === 'claude-opus-5-5')
-          || availableModels.value.find((m) => m.id === 'claude-opus-4-8')
-        selectedModelId.value = preferred?.id || availableModels.value[0].id
-      } else if (props.account.platform === 'gemini') {
+      if (props.account.platform === 'gemini') {
         selectedModelId.value = availableModels.value[0].id
       } else {
         // Try to select Sonnet as default, otherwise use first model
@@ -958,12 +954,25 @@ const startTest = async () => {
   }
 }
 
+const compatStepLabelKeys: Record<string, string> = {
+  adapted_turn: 'admin.accounts.anthropic.compatStepAdaptedTurn',
+  signed_continuation: 'admin.accounts.anthropic.compatStepSignedContinuation'
+}
+
+const flushStreamingContent = () => {
+  if (streamingContent.value) {
+    addLine(streamingContent.value, 'text-green-300')
+    streamingContent.value = ''
+  }
+}
+
 const handleEvent = (event: {
   type: string
   actual_account_id?: number
   test_scope?: string
   compat_profile?: string
-  compat_revision?: string
+  code?: string
+  status?: string
   text?: string
   model?: string
   success?: boolean
@@ -983,8 +992,8 @@ const handleEvent = (event: {
           ? 'admin.accounts.anthropic.diagnosticOrdinary'
           : 'admin.accounts.anthropic.diagnosticLegacy'), 'text-gray-400')
       }
-      if (event.compat_profile && event.compat_revision) {
-        addLine(`${event.compat_profile} / ${event.compat_revision}`, 'text-gray-400')
+      if (event.compat_profile) {
+        addLine(event.compat_profile, 'text-gray-400')
       }
       addLine(t('admin.accounts.connectedToApi'), 'text-green-400')
       if (event.model) {
@@ -1057,12 +1066,25 @@ const handleEvent = (event: {
       }
       break
 
-    case 'test_complete':
-      // Move streaming content to output lines
-      if (streamingContent.value) {
-        addLine(streamingContent.value, 'text-green-300')
-        streamingContent.value = ''
+    case 'compat_step': {
+      // Text streamed by this step belongs above its result line.
+      flushStreamingContent()
+      const passed = event.status === 'passed'
+      const labelKey = compatStepLabelKeys[event.code || '']
+      addLine(
+        t(passed ? 'admin.accounts.anthropic.compatStepPassed' : 'admin.accounts.anthropic.compatStepFailed', {
+          step: labelKey ? t(labelKey) : event.code || ''
+        }),
+        passed ? 'text-green-400' : 'text-red-400'
+      )
+      if (event.error) {
+        addLine(t('admin.accounts.errorPrefix', { message: event.error }), 'text-red-400')
       }
+      break
+    }
+
+    case 'test_complete':
+      flushStreamingContent()
       if (event.success) {
         status.value = 'success'
       } else {
@@ -1074,10 +1096,7 @@ const handleEvent = (event: {
     case 'error':
       status.value = 'error'
       errorMessage.value = event.error || t('common.unknownError')
-      if (streamingContent.value) {
-        addLine(streamingContent.value, 'text-green-300')
-        streamingContent.value = ''
-      }
+      flushStreamingContent()
       break
   }
 }

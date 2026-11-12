@@ -272,6 +272,13 @@ export default {
         modelsCount: '已获取 {count} 个模型',
         errorDescription: '无法使用当前 API Key 获取模型目录。'
       },
+      anthropicClients: {
+        title: '其他客户端',
+        description: 'Cline、Cherry Studio、new-api 中转、OpenAI SDK 等客户端使用同一 API 密钥，按客户端协议填写 Base URL：',
+        anthropicBaseUrl: 'Anthropic 兼容 Base URL',
+        openaiBaseUrl: 'OpenAI 兼容 Base URL',
+        endpoints: '端点'
+      },
       opencode: {
         title: 'OpenCode 配置示例',
         subtitle: 'opencode.json',

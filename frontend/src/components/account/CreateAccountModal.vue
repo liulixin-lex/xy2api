@@ -3216,42 +3216,11 @@
         </div>
       </div>
 
-      <div
+      <AnthropicCompatSettings
         v-if="form.platform === 'anthropic' && accountCategory === 'apikey'"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-        data-testid="anthropic-compat-section"
-      >
-        <div class="flex items-center justify-between gap-4">
-          <div>
-            <label for="anthropic-compat-toggle" class="input-label mb-0">{{ t('admin.accounts.anthropic.compatibility') }}</label>
-            <p id="anthropic-compat-description" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.anthropic.compatibilityDesc') }}
-            </p>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.anthropic.compatibilityCapabilities') }}</p>
-            <p v-if="anthropicPassthroughEnabled" class="mt-1 text-xs text-amber-700 dark:text-amber-400">{{ t('admin.accounts.anthropic.compatibilityConflict') }}</p>
-          </div>
-          <Toggle
-            id="anthropic-compat-toggle"
-            v-model="anthropicCompatibilityEnabled"
-            :disabled="anthropicPassthroughEnabled"
-            aria-describedby="anthropic-compat-description"
-            :aria-label="t('admin.accounts.anthropic.compatibility')"
-            data-testid="anthropic-compat-toggle"
-          />
-        </div>
-        <div v-if="anthropicCompatibilityEnabled" class="mt-3 space-y-3">
-          <label class="input-label" for="anthropic-compat-profile">{{ t('admin.accounts.anthropic.compatibilityProfile') }}</label>
-          <select id="anthropic-compat-profile" v-model="anthropicCompatibilityProfile" class="input" data-testid="anthropic-compat-profile">
-            <option value="claude_code_v2">{{ t('admin.accounts.anthropic.compatibilityV2') }}</option>
-            <option value="claude_code_v1">{{ t('admin.accounts.anthropic.compatibilityV1') }}</option>
-          </select>
-          <label class="flex items-center gap-2 text-sm">
-            <input v-model="anthropicCompatibilityNewSessions" type="checkbox" data-testid="anthropic-compat-new-sessions" class="rounded border-gray-300 text-primary-600" />
-            {{ t('admin.accounts.anthropic.compatibilityNewSessions') }}
-          </label>
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.anthropic.compatibilityDrainDesc') }}</p>
-        </div>
-      </div>
+        v-model="anthropicCompat"
+        :passthrough="anthropicPassthroughEnabled"
+      />
 
       <!-- Anthropic API Key 自动透传开关 -->
       <div
@@ -3267,7 +3236,8 @@
           </div>
           <button
             type="button"
-            :disabled="anthropicCompatibilityEnabled"
+            :disabled="anthropicCompat.enabled === true"
+            data-testid="anthropic-passthrough-toggle"
             @click="anthropicPassthroughEnabled = !anthropicPassthroughEnabled"
             :class="[
               'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
@@ -4055,6 +4025,8 @@ import CnBaseUrlPresets from '@/components/account/CnBaseUrlPresets.vue'
 import OpenCodeGoProtocolRulesEditor from '@/components/account/OpenCodeGoProtocolRulesEditor.vue'
 import HeaderOverrideEditor from '@/components/account/HeaderOverrideEditor.vue'
 import NewApiWalletSection from '@/components/account/NewApiWalletSection.vue'
+import AnthropicCompatSettings from '@/components/account/AnthropicCompatSettings.vue'
+import { anthropicCompatDraftFromExtra, applyAnthropicCompatExtra } from '@/components/account/anthropicCompat'
 import { applyNewApiWalletCredentials, emptyNewApiWalletDraft, isNewApiWalletUserIdValid, type NewApiWalletDraft } from '@/components/account/newApiWalletCredentials'
 import { accountLongContextOverrideHasNoEffect } from '@/components/account/longContextBilling'
 import {
@@ -4625,9 +4597,7 @@ const codexFingerprintModeOptions = computed(() => [
   { value: 'full' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintFull') },
 ])
 type AnthropicAPIKeyAuthScheme = 'x_api_key' | 'authorization_bearer'
-const anthropicCompatibilityEnabled = ref(false)
-const anthropicCompatibilityProfile = ref<'claude_code_v1' | 'claude_code_v2'>('claude_code_v2')
-const anthropicCompatibilityNewSessions = ref(true)
+const anthropicCompat = ref(anthropicCompatDraftFromExtra())
 const anthropicPassthroughEnabled = ref(false)
 const anthropicAPIKeyAuthScheme = ref<AnthropicAPIKeyAuthScheme>('x_api_key')
 const webSearchEmulationMode = ref('default')
@@ -5099,9 +5069,7 @@ watch(
       codexCLIOnlyAppServerEnabled.value = false
     }
     if (newPlatform !== 'anthropic') {
-      anthropicCompatibilityEnabled.value = false
-      anthropicCompatibilityProfile.value = 'claude_code_v2'
-      anthropicCompatibilityNewSessions.value = true
+      anthropicCompat.value = anthropicCompatDraftFromExtra()
       anthropicPassthroughEnabled.value = false
       anthropicAPIKeyAuthScheme.value = 'x_api_key'
       webSearchEmulationMode.value = 'default'
@@ -5132,9 +5100,7 @@ watch(
       codexCLIOnlyAppServerEnabled.value = false
     }
     if (platform !== 'anthropic' || category !== 'apikey') {
-      anthropicCompatibilityEnabled.value = false
-      anthropicCompatibilityProfile.value = 'claude_code_v2'
-      anthropicCompatibilityNewSessions.value = true
+      anthropicCompat.value = anthropicCompatDraftFromExtra()
       anthropicPassthroughEnabled.value = false
       anthropicAPIKeyAuthScheme.value = 'x_api_key'
       webSearchEmulationMode.value = 'default'
@@ -5562,9 +5528,7 @@ const resetForm = () => {
   codexCLIOnlyEnabled.value = false
   codexCLIOnlyAppServerEnabled.value = false
   codexFingerprintMode.value = 'off'
-  anthropicCompatibilityEnabled.value = false
-  anthropicCompatibilityProfile.value = 'claude_code_v2'
-  anthropicCompatibilityNewSessions.value = true
+  anthropicCompat.value = anthropicCompatDraftFromExtra()
   anthropicPassthroughEnabled.value = false
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
   webSearchEmulationMode.value = 'default'
@@ -5712,8 +5676,7 @@ const buildAnthropicExtra = (base?: Record<string, unknown>): Record<string, unk
   }
 
   const extra: Record<string, unknown> = { ...(base || {}) }
-  extra.anthropic_compat_profile = anthropicCompatibilityEnabled.value ? anthropicCompatibilityProfile.value : 'off'
-  if (anthropicCompatibilityEnabled.value) extra.anthropic_compat_new_sessions = anthropicCompatibilityNewSessions.value
+  applyAnthropicCompatExtra(extra, anthropicCompat.value)
   if (anthropicPassthroughEnabled.value) {
     extra.anthropic_passthrough = true
   } else {

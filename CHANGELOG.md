@@ -11,6 +11,7 @@
 ### 变更
 
 - OpenAI Chat Completions 与 Responses 转 Anthropic 时保留常见客户端的默认参数与可用工具行为，兼容 null 与对象联合 schema，按模型适配推理和采样；无法表达的工具 schema 返回统一参数错误。
+- 管理后台：Claude Code 请求兼容改为一个开关加「接收新会话」开关，去掉版本选择（开启写 `claude_code`）；批量编辑两项都可选不修改 / 开启 / 关闭；兼容账号测试分两步显示普通客户端回合与签名续接的结果；「使用密钥」弹窗为 Anthropic 分组补充普通客户端的 Base URL 与端点。
 
 ### 修复
 

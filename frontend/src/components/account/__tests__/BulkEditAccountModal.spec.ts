@@ -1055,65 +1055,47 @@ describe('BulkEditAccountModal', () => {
 })
 
 describe('BulkEditAccountModal Claude Code compatibility', () => {
-  it.each([false, true])('applies an explicit profile without enabling unrelated settings (enabled=%s)', async (enabled) => {
+  const submitCompat = async (compat: string, newSessions?: string) => {
     vi.mocked(adminAPI.accounts.bulkUpdate).mockReset().mockResolvedValue({ success: 2, failed: 0, results: [] } as any)
     const wrapper = mountModal({ selectedPlatforms: ['anthropic'], selectedTypes: ['apikey'] })
-    expect(wrapper.get('[data-testid="bulk-anthropic-compat-toggle"]').attributes('disabled')).toBeDefined()
-    await wrapper.get('#bulk-anthropic-compat-apply').setValue(true)
-    if (enabled) await wrapper.get('[data-testid="bulk-anthropic-compat-toggle"]').trigger('click')
-    await wrapper.get('form').trigger('submit.prevent')
-    await flushPromises()
-    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0]?.[1]?.extra).toEqual(enabled
-      ? { anthropic_compat_profile: 'claude_code_v2', anthropic_compat_new_sessions: true }
-      : { anthropic_compat_profile: 'off' })
-    wrapper.unmount()
-  })
-
-  it.each(['claude_code_v1', 'claude_code_v2'])('bulk saves the explicit version and drain setting (%s)', async (profile) => {
-    vi.mocked(adminAPI.accounts.bulkUpdate).mockReset().mockResolvedValue({ success: 2, failed: 0, results: [] } as any)
-    const wrapper = mountModal({ selectedPlatforms: ['anthropic'], selectedTypes: ['apikey'] })
-    await wrapper.get('#bulk-anthropic-compat-apply').setValue(true)
-    await wrapper.get('[data-testid="bulk-anthropic-compat-toggle"]').trigger('click')
-    expect((wrapper.get('[data-testid="anthropic-compat-profile"]').element as HTMLSelectElement).value).toBe('claude_code_v2')
-    await wrapper.get('[data-testid="anthropic-compat-profile"]').setValue(profile)
-    await wrapper.get('[data-testid="anthropic-compat-new-sessions"]').setValue(false)
-    await wrapper.get('form').trigger('submit.prevent')
-    await flushPromises()
-    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
-      extra: { anthropic_compat_profile: profile, anthropic_compat_new_sessions: false }
-    })
-    wrapper.unmount()
-  })
-
-  it('does not submit compatibility changes after its apply checkbox is cleared', async () => {
-    vi.mocked(adminAPI.accounts.bulkUpdate).mockReset().mockResolvedValue({ success: 2, failed: 0, results: [] } as any)
-    const wrapper = mountModal({ selectedPlatforms: ['anthropic'], selectedTypes: ['apikey'] })
-    await wrapper.get('#bulk-anthropic-compat-apply').setValue(true)
-    await wrapper.get('[data-testid="bulk-anthropic-compat-toggle"]').trigger('click')
-    await wrapper.get('[data-testid="anthropic-compat-new-sessions"]').setValue(false)
-    await wrapper.get('#bulk-anthropic-compat-apply').setValue(false)
+    await wrapper.get('[data-testid="anthropic-compat-toggle"]').setValue(compat)
+    if (newSessions !== undefined) await wrapper.get('[data-testid="anthropic-compat-new-sessions"]').setValue(newSessions)
     await wrapper.get('#bulk-edit-rate-multiplier-enabled').setValue(true)
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0]?.[1]).not.toHaveProperty('extra')
+    return { wrapper, updates: vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0]?.[1] }
+  }
+
+  it.each([
+    { compat: '', newSessions: '', extra: undefined },
+    { compat: 'on', newSessions: '', extra: { anthropic_compat_profile: 'claude_code' } },
+    { compat: 'on', newSessions: 'off', extra: { anthropic_compat_profile: 'claude_code', anthropic_compat_new_sessions: false } },
+    { compat: '', newSessions: 'on', extra: { anthropic_compat_new_sessions: true } },
+    { compat: 'off', newSessions: undefined, extra: { anthropic_compat_profile: 'off' } }
+  ])('writes only the keys that are not left unchanged (compat=$compat, newSessions=$newSessions)', async ({ compat, newSessions, extra }) => {
+    const { wrapper, updates } = await submitCompat(compat, newSessions)
+    if (extra) expect(updates?.extra).toEqual(extra)
+    else expect(updates).not.toHaveProperty('extra')
     wrapper.unmount()
   })
 
-  it('resets the bulk version and drain setting when reopened', async () => {
+  it('hides the new-session setting while compatibility is being turned off', async () => {
     const wrapper = mountModal({ selectedPlatforms: ['anthropic'], selectedTypes: ['apikey'] })
-    await wrapper.get('#bulk-anthropic-compat-apply').setValue(true)
-    await wrapper.get('[data-testid="bulk-anthropic-compat-toggle"]').trigger('click')
-    await wrapper.get('[data-testid="anthropic-compat-profile"]').setValue('claude_code_v1')
-    await wrapper.get('[data-testid="anthropic-compat-new-sessions"]').setValue(false)
+    await wrapper.get('[data-testid="anthropic-compat-new-sessions"]').setValue('off')
+    await wrapper.get('[data-testid="anthropic-compat-toggle"]').setValue('off')
+    expect(wrapper.find('[data-testid="anthropic-compat-new-sessions"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('resets both settings to unchanged when reopened', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['anthropic'], selectedTypes: ['apikey'] })
+    await wrapper.get('[data-testid="anthropic-compat-toggle"]').setValue('on')
+    await wrapper.get('[data-testid="anthropic-compat-new-sessions"]').setValue('off')
     await wrapper.setProps({ show: false })
     await wrapper.setProps({ show: true })
-    expect((wrapper.get('#bulk-anthropic-compat-apply').element as HTMLInputElement).checked).toBe(false)
-    await wrapper.get('#bulk-anthropic-compat-apply').setValue(true)
-    await wrapper.get('[data-testid="bulk-anthropic-compat-toggle"]').trigger('click')
-    expect((wrapper.get('[data-testid="anthropic-compat-profile"]').element as HTMLSelectElement).value).toBe('claude_code_v2')
-    expect((wrapper.get('[data-testid="anthropic-compat-new-sessions"]').element as HTMLInputElement).checked).toBe(true)
+    expect((wrapper.get('[data-testid="anthropic-compat-toggle"]').element as HTMLSelectElement).value).toBe('')
+    expect((wrapper.get('[data-testid="anthropic-compat-new-sessions"]').element as HTMLSelectElement).value).toBe('')
     wrapper.unmount()
   })
 })
