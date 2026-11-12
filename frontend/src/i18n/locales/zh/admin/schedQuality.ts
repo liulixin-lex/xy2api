@@ -2,8 +2,7 @@
 export default {
   schedQuality: {
     list: {
-      recent: '近期实测',
-      mainModel: '主模型',
+      recent: '近期状况',
       groups: '分组',
       membership: '归组',
     },
@@ -12,8 +11,16 @@ export default {
       error: '错误',
       cache: '缓存',
     },
+    recent: {
+      samples: '{n} 次',
+      sep: '，',
+    },
     filter: {
+      all: '全部质量状态',
+      normal: '正常',
       cooling: '冷却中',
+      exempt: '豁免',
+      demote: '后排',
     },
     more: '+{n}',
     state: {
@@ -187,7 +194,6 @@ export default {
       accountRate: '账号倍率',
     },
     tip: {
-      source: '{model} · {n}',
       samples: '{n} 条',
       testRounds: '测试 {n} 轮',
       recentlyFull: '刚占满',
@@ -195,6 +201,7 @@ export default {
       globalOff: '质量调度 关',
       stale: '数据过期',
       editMembership: '编辑归组',
+      until: '至 {time}',
     },
     aria: {
       pass: '达标',

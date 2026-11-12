@@ -15,6 +15,7 @@ vi.mock('@/api/admin', () => ({
       list: listAccounts,
       listWithEtag: vi.fn(),
       getBatchTodayStats: vi.fn().mockResolvedValue({ stats: {} }),
+      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       delete: vi.fn(),
@@ -137,11 +138,33 @@ describe('admin AccountsView list defaults and column order', () => {
     await flushPromises()
 
     const columns = tableColumns(wrapper)
-    expect(columns.slice(0, 5)).toEqual(['select', 'name', 'last_used_at', 'id', 'platform_type'])
+    expect(columns.slice(0, 5)).toEqual(['select', 'name', 'last_used_at', 'platform_type', 'capacity'])
     expect(columns.at(-1)).toBe('actions')
   })
 
+  // Scenario 35: account ID, created and expires are hidden only for a browser without saved column settings.
+  it('hides account ID, created and expires by default and puts priority right after scheduling', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    expect(tableColumns(wrapper)).toEqual([
+      'select', 'name', 'platform_type', 'capacity', 'status', 'sq_recent', 'sq_groups', 'schedulable', 'priority',
+      'iq_check', 'groups', 'usage', 'upstream_billing_rate', 'upstream_balance', 'last_used_at', 'actions'
+    ])
+    expect(localStorage.getItem('account-hidden-columns')).toBeNull()
+  })
+
+  it('keeps saved column settings as they are', async () => {
+    localStorage.setItem('account-hidden-columns', JSON.stringify(['notes', 'proxy']))
+    const wrapper = mountView()
+    await flushPromises()
+    const columns = tableColumns(wrapper)
+    expect(columns).toEqual(expect.arrayContaining(['id', 'created_at', 'expires_at', 'today_stats', 'rate_multiplier']))
+    expect(columns).not.toContain('notes')
+    expect(columns).not.toContain('proxy')
+  })
+
   it('reorders the table and saves the order when a column is dragged in the column settings', async () => {
+    localStorage.setItem('account-hidden-columns', '[]')
     const wrapper = mountView()
     await flushPromises()
     expect(tableColumns(wrapper).slice(0, 4)).toEqual(['select', 'name', 'id', 'platform_type'])
@@ -151,9 +174,28 @@ describe('admin AccountsView list defaults and column order', () => {
 
     expect(tableColumns(wrapper).slice(0, 4)).toEqual(['select', 'name', 'platform_type', 'id'])
     expect(JSON.parse(localStorage.getItem('account-column-order') || '[]').slice(0, 2)).toEqual(['platform_type', 'id'])
+  })
 
-    await wrapper.get('[data-test="reset-column-order"]').trigger('click')
-    expect(tableColumns(wrapper).slice(0, 4)).toEqual(['select', 'name', 'id', 'platform_type'])
+  it('restores both visibility and order with "restore default columns", offered only when either differs', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('button[title="admin.accounts.moreActions"]').trigger('click')
+    expect(wrapper.find('[data-test="reset-columns"]').exists()).toBe(false)
+
+    // Show the account ID column and drag platform/type before it.
+    await wrapper.findAll('[data-test="column-setting"] button')[0].trigger('click')
+    await wrapper.get('[data-test="swap-first-two"]').trigger('click')
+    expect(tableColumns(wrapper).slice(0, 4)).toEqual(['select', 'name', 'platform_type', 'id'])
+
+    await wrapper.get('[data-test="reset-columns"]').trigger('click')
+    expect(tableColumns(wrapper).slice(0, 4)).toEqual(['select', 'name', 'platform_type', 'capacity'])
+    expect(tableColumns(wrapper)).not.toContain('id')
     expect(localStorage.getItem('account-column-order')).toBeNull()
+    expect(localStorage.getItem('account-hidden-columns')).toBeNull()
+    expect(wrapper.find('[data-test="reset-columns"]').exists()).toBe(false)
+
+    // Only the visibility differing from the default also offers it.
+    await wrapper.findAll('[data-test="column-setting"] button')[0].trigger('click')
+    expect(wrapper.find('[data-test="reset-columns"]').exists()).toBe(true)
   })
 })

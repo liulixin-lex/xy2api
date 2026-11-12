@@ -34,6 +34,7 @@ vi.mock('@/api/admin', () => ({
       getById,
       update: updateAccount,
       getBatchTodayStats: vi.fn(async () => ({ stats: {} })),
+      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
       getUpstreamBillingProbeSettings: vi.fn(async () => ({ enabled: true })),
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       batchClearError: vi.fn(),

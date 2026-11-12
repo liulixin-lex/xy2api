@@ -35,6 +35,63 @@ func (s *OpenAIGatewayService) TestRequestModel(ctx context.Context, account *Ac
 	return model, true, ""
 }
 
+// schedTestAdmissionBlockedBy diagnoses the existing rejection using only the
+// loaded account. Keep the ordering in sync with Account.IsSchedulable.
+func schedTestAdmissionBlockedBy(account *Account, evidenceModel, reason string, now time.Time) string {
+	if account == nil {
+		return "other"
+	}
+	switch reason {
+	case "no_model", "account_model_not_owned", "model_not_supported", "model_rate_limited", "channel_upstream_restricted":
+		return "model"
+	case "account_scheduling_threshold":
+		return "quota"
+	case "not_schedulable":
+		switch {
+		case !account.IsActive():
+			if account.Status == StatusError {
+				return "other"
+			}
+			return "disabled"
+		case !account.Schedulable:
+			return "disabled"
+		case account.AutoPauseOnExpired && account.ExpiresAt != nil && !now.Before(*account.ExpiresAt):
+			return "disabled"
+		case account.OverloadUntil != nil && now.Before(*account.OverloadUntil):
+			return "overloaded"
+		case account.RateLimitResetAt != nil && now.Before(*account.RateLimitResetAt):
+			return "rate_limited"
+		case account.TempUnschedulableUntil != nil && now.Before(*account.TempUnschedulableUntil):
+			switch {
+			case strings.HasPrefix(account.TempUnschedulableReason, "balance:"):
+				return "balance"
+			case strings.HasPrefix(account.TempUnschedulableReason, "auth:"):
+				return "auth"
+			case IsAccountSchedulingThresholdReason(account.TempUnschedulableReason):
+				return "quota"
+			default:
+				return "paused"
+			}
+		case account.IsAPIKeyOrBedrock() && account.IsQuotaExceeded():
+			return "quota"
+		}
+	case "runtime_blocked":
+		model := openAIRequestModelForEvidence(account, evidenceModel)
+		if iqGateBlocksRequest(account, model, false, "") {
+			return "model"
+		}
+		// The shared runtime reason does not identify ticket vs transient
+		// failures; do not repeat ticket lookups just to classify the log.
+		return "paused"
+	case "proxy_stream_quarantined":
+		return "paused"
+	}
+	if strings.HasPrefix(reason, "quota_auto_pause") || strings.HasPrefix(reason, "quota_auto_reset_pending_") || strings.HasPrefix(reason, "quota_auto_reset_credit_check_") {
+		return "quota"
+	}
+	return "other"
+}
+
 // openAIRequestModelForEvidence reverses model mapping without checking admission.
 func openAIRequestModelForEvidence(account *Account, evidenceModel string) string {
 	evidenceModel = strings.TrimSpace(evidenceModel)

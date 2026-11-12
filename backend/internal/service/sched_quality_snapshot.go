@@ -109,7 +109,7 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []schedq
 		state := schedquality.StateView{State: row.State, Level: row.Level, Reason: row.Reason, Since: row.Since, Until: row.Until, Verdicts: effective, FromTest: fromTest, GroupOverride: overrideRef(active[key.account], key.group), AllOverride: overrideRef(active[key.account], 0)}
 		if exists {
 			if row.State == schedquality.StateCooling && !d.now.Before(row.Until) {
-				_, _, _, state.WaitingTest = schedquality.Next(row, schedquality.Inputs{Policy: policy, Summary: summary, Tests: d.finished[pair], TestsEnabled: d.testsEnabled, ResetAt: resets[key.account]}, d.now)
+				_, _, _, state.WaitingTest, _ = schedquality.Next(row, schedquality.Inputs{Policy: policy, Summary: summary, Tests: d.finished[pair], TestsEnabled: d.testsEnabled, ResetAt: resets[key.account]}, d.now)
 			}
 			view.states[key] = state
 		}
@@ -249,26 +249,17 @@ type schedQualityTransition struct {
 	summary  schedquality.Summary
 	verdicts schedquality.Verdicts
 	fromTest [3]bool
-	policy   schedquality.Policy
 	test     schedquality.TestSummary
-	via      string
+	via      schedquality.Via
 }
 
 func (t schedQualityTransition) log(ctx context.Context) {
-	via := t.via
-	if via == "" && t.from.State == schedquality.StateCooling && t.to.State == schedquality.StateNormal {
-		switch {
-		case t.to.Reason == schedquality.ReasonUnverified && !t.policy.Enabled:
-			via = "gate_off"
-		case t.to.Reason == schedquality.ReasonUnverified:
-			via = "no_conclusion"
-		default:
-			via = "pass"
-		}
-	}
 	attrs := []any{"component", "sched_quality", "account_id", t.to.AccountID, "model", t.to.Model, "group_id", t.to.GroupID, "from", t.from.State.String(), "to", t.to.State.String(), "reason", string(t.to.Reason), "level", t.to.Level, "speed_n", t.summary.Speed.N, "speed_p90_ms", t.summary.Speed.P90Ms, "speed_p90_timeout", t.summary.Speed.P90Timeout, "error_n", t.summary.Error.N, "error_rate", t.summary.Error.Rate, "error_lcb", t.summary.Error.LCB, "cache_n", t.summary.Cache.Turns, "cache_ratio", t.summary.Cache.Ratio, "speed_verdict", t.verdicts.Speed.String(), "error_verdict", t.verdicts.Error.String(), "cache_verdict", t.verdicts.Cache.String(), "speed_from_test", t.fromTest[0], "error_from_test", t.fromTest[1], "cache_from_test", t.fromTest[2]}
-	if via != "" {
-		attrs = append(attrs, "via", via)
+	if t.to.State == schedquality.StateCooling {
+		attrs = append(attrs, "until", t.to.Until)
+	}
+	if t.via != "" {
+		attrs = append(attrs, "via", t.via)
 	}
 	attrs = append(attrs, "test_speed_n", t.test.SpeedTurns, "test_speed_slow", t.test.SlowTurns, "test_max_ttfo_ms", t.test.MaxTTFOMs, "test_error_n", t.test.ErrorTurns, "test_faults", t.test.Faults, "test_cache_n", t.test.CacheTurns, "test_cache_ratio", t.test.CacheRatio)
 	slog.InfoContext(ctx, "sched_quality.state", attrs...)

@@ -14,7 +14,7 @@ import (
 
 func TestCatalogKeysAreWellFormed(t *testing.T) {
 	keys := Keys()
-	require.Len(t, keys, 542)
+	require.Len(t, keys, 543)
 	require.True(t, sort.StringsAreSorted(keys))
 	seen := map[string]bool{}
 	for _, key := range keys {
@@ -102,7 +102,7 @@ func TestCatalogMatchesApprovedTable(t *testing.T) {
 	raw, err := os.ReadFile("testdata/pra_catalog.json")
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(raw, &rows))
-	require.Len(t, rows, 542)
+	require.Len(t, rows, 543)
 	keys := []string{}
 	used := map[FieldRule]bool{}
 	for _, row := range rows {
@@ -156,6 +156,14 @@ func TestCatalogOpsGETUserinfoRedactions(t *testing.T) {
 		require.True(t, ok, path)
 		require.Contains(t, entry.Redact, Redaction("ops_upstream_url"), path)
 	}
+}
+
+func TestCatalogRecentStatsMatchesAccountList(t *testing.T) {
+	list, ok := Lookup("GET /accounts")
+	require.True(t, ok)
+	recent, ok := Lookup("POST /accounts/recent-stats/batch")
+	require.True(t, ok)
+	require.Equal(t, list, recent)
 }
 
 func TestCatalogResilienceUsesOpsView(t *testing.T) {

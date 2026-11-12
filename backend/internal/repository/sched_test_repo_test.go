@@ -44,7 +44,7 @@ func TestSchedTestRepository(t *testing.T) {
 	if len(rows) != 2 || rows[0].ID != fresh.ID || rows[1].ID != running.ID || !rows[1].Running {
 		t.Fatalf("unexpected fresh rows: %+v", rows)
 	}
-	runner := service.NewSchedTestRunnerService(nil, nil, nil, nil, repo, func() time.Time { return now }, nil, nil)
+	runner := service.NewSchedTestRunnerService(nil, nil, nil, nil, repo, func() time.Time { return now }, nil, nil, nil)
 	defer runner.Stop()
 	byPair, err := runner.Fresh(ctx)
 	require.NoError(t, err)
@@ -99,9 +99,14 @@ func TestSchedTestRepositoryReapStale(t *testing.T) {
 			TestResult: schedquality.TestResult{ID: uuid.NewString(), StartedAt: now.Add(-tc.age), Done: !tc.running},
 		}))
 	}
-	runner := service.NewSchedTestRunnerService(nil, nil, nil, nil, repo, func() time.Time { return now }, nil, nil)
+	runner := service.NewSchedTestRunnerService(nil, nil, nil, nil, repo, func() time.Time { return now }, nil, nil, nil)
 	defer runner.Stop()
-	require.NoError(t, runner.ReapStale(ctx))
+	rowsAffected, err := runner.ReapStale(ctx)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, rowsAffected)
+	rowsAffected, err = runner.ReapStale(ctx)
+	require.NoError(t, err)
+	require.Zero(t, rowsAffected)
 	stale, err := repo.Latest(ctx, account, "stale")
 	require.NoError(t, err)
 	require.False(t, stale.Running)
@@ -195,4 +200,43 @@ func TestSchedTestRepositoryAtomicAdmission(t *testing.T) {
 		require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM account_quality_tests WHERE account_id=$1 AND model='concurrent'`, account).Scan(&rows))
 		require.Equal(t, 1, rows)
 	})
+}
+
+func TestSchedTestRepositoryDeleteBeforeRows(t *testing.T) {
+	ctx := context.Background()
+	repo := NewSchedTestRepository(integrationDB)
+	before := time.Now().UTC().Truncate(time.Microsecond).Add(-schedquality.TestRetention)
+	account := int64(81370005)
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM account_quality_tests WHERE account_id=$1`, account)
+	})
+	for _, tc := range []struct {
+		model         string
+		started       time.Time
+		running, done bool
+	}{
+		{"old_done", before.Add(-time.Microsecond), false, true},
+		{"old_aborted", before.Add(-time.Microsecond), false, false},
+		{"old_running", before.Add(-time.Microsecond), true, false},
+		{"boundary", before, false, true},
+		{"fresh", before.Add(time.Microsecond), false, true},
+	} {
+		require.NoError(t, repo.Insert(ctx, service.SchedTestRecord{AccountID: account, Model: tc.model, Running: tc.running, TestResult: schedquality.TestResult{ID: uuid.NewString(), StartedAt: tc.started, Done: tc.done}}))
+	}
+	rows, err := repo.DeleteBefore(ctx, before)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, rows)
+	for _, model := range []string{"old_done", "old_aborted"} {
+		record, err := repo.Latest(ctx, account, model)
+		require.NoError(t, err)
+		require.Nil(t, record)
+	}
+	for _, model := range []string{"old_running", "boundary", "fresh"} {
+		record, err := repo.Latest(ctx, account, model)
+		require.NoError(t, err)
+		require.NotNil(t, record)
+	}
+	rows, err = repo.DeleteBefore(ctx, before)
+	require.NoError(t, err)
+	require.Zero(t, rows)
 }

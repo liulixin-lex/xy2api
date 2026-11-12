@@ -90,8 +90,6 @@ type MoreAction = 'reset-status' | 'refresh-token' | 'probe-upstream-billing' | 
 const emit = defineEmits([
   'delete',
   'edit-selected',
-  // Until the toolbar takes 批量更新 over (FA), the view still binds it here.
-  'edit-filtered',
   'clear',
   'select-page',
   'select-all-results',

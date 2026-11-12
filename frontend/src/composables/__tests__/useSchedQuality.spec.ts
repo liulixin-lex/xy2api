@@ -28,8 +28,8 @@ describe('useSchedQualitySummary', () => {
     const scope = effectScope()
     const result = scope.run(() => useSchedQualitySummary(() => paused.value))!
 
-    await result.refresh([479, 503], 'gpt-6.1-sol')
-    expect(summary).toHaveBeenCalledWith([479, 503], 'gpt-6.1-sol', expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    await result.refresh([479, 503])
+    expect(summary).toHaveBeenCalledWith([479, 503], expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(result.state.value).toBe('loaded')
     expect(result.byAccount.value.get(479)?.cooling[0].group_id).toBe(53)
     expect(result.view.value).toEqual({ at: '…', stale: false, global_enabled: true })

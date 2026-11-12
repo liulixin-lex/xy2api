@@ -20,7 +20,7 @@ export function useSchedQualitySummary(paused: () => boolean = () => false) {
   let seq = 0
   let controller: AbortController | null = null
 
-  async function refresh(accountIds: number[], model?: string) {
+  async function refresh(accountIds: number[]) {
     if (pageHidden() || paused()) return
     controller?.abort()
     controller = null
@@ -34,7 +34,7 @@ export function useSchedQualitySummary(paused: () => boolean = () => false) {
     controller = ctrl
     state.value = 'loading'
     try {
-      const { accounts, ...rest } = await schedQualityAPI.summary(accountIds, model, { signal: ctrl.signal })
+      const { accounts, ...rest } = await schedQualityAPI.summary(accountIds, { signal: ctrl.signal })
       if (current !== seq) return
       view.value = rest
       byAccount.value = new Map(accounts.map((account) => [account.account_id, account]))

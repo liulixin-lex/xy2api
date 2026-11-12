@@ -25,6 +25,7 @@ vi.mock('@/api/admin', () => ({
       list: listAccounts,
       listWithEtag,
       getBatchTodayStats,
+      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       delete: vi.fn(),
@@ -65,14 +66,14 @@ vi.mock('vue-i18n', async () => {
   }
 })
 
-// Render the per-column header slots so we can assert the usage-window header hint.
+// Render the per-column header slots so we can assert which headers carry a hint.
 const DataTableStub = {
   props: ['columns', 'data'],
   template: `
     <div data-test="data-table">
       <template v-for="column in columns" :key="column.key">
-        <div v-if="column.key === 'usage'" data-test="usage-header">
-          <slot :name="'header-' + column.key" :column="column" />
+        <div v-if="['usage', 'capacity', 'schedulable'].includes(column.key)" data-test="plain-header">
+          <slot :name="'header-' + column.key" :column="column">{{ column.label }}</slot>
         </div>
         <div v-if="column.key === 'upstream_billing_rate'" data-test="upstream-billing-header">
           <slot :name="'header-' + column.key" :column="column" />
@@ -171,18 +172,16 @@ describe('admin AccountsView usage windows hint', () => {
     expect(wrapper.get('[data-test="account-filters"]').attributes('data-group-count')).toBe('1')
   })
 
-  it('renders an explanatory tooltip next to the usage windows column header', async () => {
+  it('shows the capacity, scheduling and usage windows headers as plain names (ui-proposal 6.1 #12)', async () => {
     const wrapper = mountView()
     await flushPromises()
 
-    const header = wrapper.find('[data-test="usage-header"]')
-    expect(header.exists()).toBe(true)
-    // Column label is still shown alongside the help icon.
-    expect(header.text()).toContain('admin.accounts.columns.usageWindows')
-
-    const hint = wrapper.find('[data-test="usage-windows-hint"]')
-    expect(hint.exists()).toBe(true)
-    expect(hint.text()).toBe('admin.accounts.usageWindowsHint')
+    expect(wrapper.findAll('[data-test="plain-header"]').map(header => header.text())).toEqual([
+      'admin.accounts.columns.capacity',
+      'admin.accounts.columns.schedulable',
+      'admin.accounts.columns.usageWindows'
+    ])
+    expect(wrapper.findAll('[data-test="plain-header"] [data-test="usage-windows-hint"]')).toHaveLength(0)
   })
 
   it('keeps Ollama Cloud in the single usage column and ignores legacy column preferences', async () => {

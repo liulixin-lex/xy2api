@@ -3,10 +3,29 @@ package service
 import (
 	"context"
 	"errors"
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
-	"time"
 )
+
+// SchedObs receives the counters of the periodic sched_quality.summary event. Implementations must be safe for concurrent use.
+type SchedObs interface {
+	Count(name string, n int64)         // tests, tests_aborted, cooled, released
+	Cycle(d time.Duration, failed bool) // cycles, cycles_failed, cycle_ms_max
+}
+
+type nopSchedObs struct{}
+
+func (nopSchedObs) Count(string, int64)       {}
+func (nopSchedObs) Cycle(time.Duration, bool) {}
+
+func schedObsOrNop(o SchedObs) SchedObs {
+	if o == nil {
+		return nopSchedObs{}
+	}
+	return o
+}
 
 var ErrSchedPolicyConflict = errors.New("sched policy conflict")
 
@@ -149,7 +168,7 @@ type SchedTestRunner interface {
 	// Fresh returns every test of each pair started within TestFreshFor, ordered by start time, the running one included.
 	Fresh(ctx context.Context) (map[SchedAccountModel][]SchedTestRecord, error)
 	Recent(ctx context.Context, accountID int64, limit int) ([]SchedTestRecord, error)
-	ReapStale(ctx context.Context) error // still running after TestTimeout + 1m -> aborted(timeout)
+	ReapStale(ctx context.Context) (int64, error) // still running after TestTimeout + 1m -> aborted(timeout)
 }
 
 // What the runner needs from existing code; it is developed against fakes of these two.

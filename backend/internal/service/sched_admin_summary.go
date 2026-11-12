@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 
@@ -41,7 +42,7 @@ func (s *SchedAdminService) Summary(_ context.Context, ids []int64, model string
 		}
 	}
 	for _, id := range ids {
-		x := SchedAdminAccountSummary{AccountID: id, Cooling: []SchedAdminAccountSummaryCooling{}}
+		x := SchedAdminAccountSummary{AccountID: id, Cooling: []SchedAdminAccountSummaryCooling{}, Overrides: []SchedAdminAccountSummaryOverride{}}
 		m := model
 		if m == "" {
 			m = defaults[id].model
@@ -71,6 +72,7 @@ func (s *SchedAdminService) Summary(_ context.Context, ids []int64, model string
 			}
 			return rows[i].GroupID < rows[j].GroupID
 		})
+		coolingAt := map[int64]int{}
 		for _, r := range rows {
 			state, member := groups[r.GroupID]
 			if !member {
@@ -78,8 +80,13 @@ func (s *SchedAdminService) Summary(_ context.Context, ids []int64, model string
 			}
 			if r.View.State == schedquality.StateCooling {
 				groups[r.GroupID] = 2
+				testing := p.Tests[SchedAccountModel{id, r.Model}].Running
+				cooling := SchedAdminAccountSummaryCooling{GroupID: r.GroupID, Model: r.Model, Reason: string(r.View.Reason), Until: schedAdminTime(r.View.Until), WaitingTest: r.View.WaitingTest, Testing: testing}
 				if state != 2 {
-					x.Cooling = append(x.Cooling, SchedAdminAccountSummaryCooling{GroupID: r.GroupID, Model: r.Model, Reason: string(r.View.Reason), Until: schedAdminTime(r.View.Until), WaitingTest: r.View.WaitingTest, Testing: p.Tests[SchedAccountModel{id, r.Model}].Running})
+					coolingAt[r.GroupID] = len(x.Cooling)
+					x.Cooling = append(x.Cooling, cooling)
+				} else if index, ok := coolingAt[r.GroupID]; ok && testing && !x.Cooling[index].Testing {
+					x.Cooling[index] = cooling
 				}
 			} else if state != 2 && schedAdminHasReal(r.Summary) {
 				groups[r.GroupID] = 1
@@ -96,10 +103,17 @@ func (s *SchedAdminService) Summary(_ context.Context, ids []int64, model string
 				x.Groups.Nodata++
 			}
 		}
-		if len(x.Cooling) > schedquality.SummaryMaxCooling {
-			x.CoolingMore = len(x.Cooling) - schedquality.SummaryMaxCooling
-			x.Cooling = x.Cooling[:schedquality.SummaryMaxCooling]
+		for _, o := range p.Overrides {
+			if o.AccountID != id || (o.GroupID != 0 && !slices.Contains(p.Members[id], o.GroupID)) || (o.ExpiresAt != nil && !now.Before(*o.ExpiresAt)) {
+				continue
+			}
+			var expiresAt *string
+			if o.ExpiresAt != nil {
+				expiresAt = schedAdminTime(*o.ExpiresAt)
+			}
+			x.Overrides = append(x.Overrides, SchedAdminAccountSummaryOverride{GroupID: o.GroupID, Mode: schedAdminOverrideMode(o.Mode), ExpiresAt: expiresAt})
 		}
+		sort.Slice(x.Overrides, func(i, j int) bool { return x.Overrides[i].GroupID < x.Overrides[j].GroupID })
 		out.Accounts = append(out.Accounts, x)
 	}
 	return out, nil
@@ -109,18 +123,40 @@ func schedAdminHasReal(v schedquality.Summary) bool {
 }
 func (s *SchedAdminService) Attention(_ context.Context) (SchedAdminAttention, error) {
 	p := s.snapshot()
-	out := SchedAdminAttention{Cooling: []int64{}}
+	out := SchedAdminAttention{Cooling: []int64{}, Exempt: []int64{}, Demote: []int64{}}
 	for id, rows := range p.GroupRows {
 		for _, r := range rows {
-			if r.View.State == schedquality.StateCooling {
+			if r.View.State == schedquality.StateCooling && slices.Contains(p.Members[id], r.GroupID) {
 				out.Cooling = append(out.Cooling, id)
 				break
 			}
 		}
 	}
+	now := s.d.Now()
+	exempt, demote := map[int64]bool{}, map[int64]bool{}
+	for _, o := range p.Overrides {
+		if (o.GroupID != 0 && !slices.Contains(p.Members[o.AccountID], o.GroupID)) || (o.ExpiresAt != nil && !now.Before(*o.ExpiresAt)) {
+			continue
+		}
+		switch o.Mode {
+		case schedquality.OverrideExempt:
+			if !exempt[o.AccountID] {
+				exempt[o.AccountID] = true
+				out.Exempt = append(out.Exempt, o.AccountID)
+			}
+		case schedquality.OverrideDemote:
+			if !demote[o.AccountID] {
+				demote[o.AccountID] = true
+				out.Demote = append(out.Demote, o.AccountID)
+			}
+		}
+	}
 	sort.Slice(out.Cooling, func(i, j int) bool { return out.Cooling[i] < out.Cooling[j] })
+	sort.Slice(out.Exempt, func(i, j int) bool { return out.Exempt[i] < out.Exempt[j] })
+	sort.Slice(out.Demote, func(i, j int) bool { return out.Demote[i] < out.Demote[j] })
 	return out, nil
 }
+
 func schedAdminMetric(n, sessions, value int) *int {
 	if !schedAdminEnough(n, sessions) {
 		return nil
@@ -186,16 +222,16 @@ func (s *SchedAdminService) Detail(ctx context.Context, id int64) (SchedAdminAcc
 	for _, r := range p.GroupRows[id] {
 		groupRows[r.GroupID] = append(groupRows[r.GroupID], r)
 	}
-	gids := make([]int64, 0, len(groupRows))
-	for g := range groupRows {
-		gids = append(gids, g)
-	}
-	sort.Slice(gids, func(i, j int) bool { return gids[i] < gids[j] })
-	for _, g := range gids {
-		gr, e := s.group(ctx, g)
-		if e != nil {
-			return out, e
+	groups := make([]*Group, 0, len(a.Groups))
+	for _, group := range a.Groups {
+		if group != nil && group.Platform == PlatformOpenAI {
+			groups = append(groups, group)
 		}
+	}
+	sort.Slice(groups, func(i, j int) bool { return groups[i].ID < groups[j].ID })
+	out.AllGroupsOverride = s.override(ctx, p, id, 0, now)
+	for _, gr := range groups {
+		g := gr.ID
 		policy := p.Policies[g].Policy
 		x := SchedAdminAccountDetailGroups{GroupID: g, Name: gr.Name, GateEnabled: policy.Enabled, Policy: SchedAdminAccountDetailGroupsPolicy{TTFTSeconds: policy.TTFTSeconds, MaxErrorRate: policy.MaxErrorRate, MinCacheRatio: policy.MinCacheRatio, TakeoverIdleSeconds: policy.TakeoverIdleSeconds}, Override: s.override(ctx, p, id, g, now), ByModel: []SchedAdminAccountDetailGroupsByModel{}}
 		sort.Slice(groupRows[g], func(i, j int) bool { return groupRows[g][i].Model < groupRows[g][j].Model })
@@ -233,6 +269,17 @@ func schedAdminTestDetail(t SchedTestRecord) *SchedAdminAccountDetailModelsTest 
 	t.Turns = append([]schedquality.TestTurn(nil), t.Turns...)
 	sort.SliceStable(t.Turns, func(i, j int) bool { return t.Turns[i].Turn < t.Turns[j].Turn })
 	x := &SchedAdminAccountDetailModelsTest{ID: t.ID, At: schedAdminStamp(t.StartedAt), Running: t.Running, Done: t.Done, AbortReason: t.AbortReason, Auto: t.Auto, Tiers: []SchedAdminAccountDetailModelsTestTiers{}, InputTokens: int(t.InputTokens), CachedTokens: int(t.CachedTokens), OutputTokens: int(t.OutputTokens)}
+	x.Clean = schedquality.TestClean(t.TestResult)
+	x.Kind = "full"
+	if t.Auto {
+		x.Kind = "screen"
+		for _, turn := range t.Turns {
+			if turn.Tier == schedquality.TierMedium || turn.Tier == schedquality.TierLarge {
+				x.Kind = "full"
+				break
+			}
+		}
+	}
 	for tier := schedquality.TierSmall; tier <= schedquality.TierLarge; tier++ {
 		v := SchedAdminAccountDetailModelsTestTiers{Tier: tier.String(), TTFOMs: []*int{}}
 		input, cached, found := 0, 0, false

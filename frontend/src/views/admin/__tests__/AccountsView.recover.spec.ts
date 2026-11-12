@@ -187,6 +187,21 @@ describe('AccountsView — recover state', () => {
     wrapper.unmount()
   })
 
+  it('still offers 恢复状态 for a cooling-only account with the quality columns hidden (scenario 37)', async () => {
+    localStorage.setItem('account-hidden-columns', JSON.stringify(['sq_groups', 'sq_recent']))
+    const wrapper = mountView()
+    await flushPromises()
+    // Managers load the summary whatever columns are shown.
+    expect(sched.summary).toHaveBeenCalled()
+    const offered: number[] = []
+    for (const id of [2, 3]) {
+      await openMenuFor(wrapper, id)
+      if (recoverItem()) offered.push(id)
+    }
+    expect(offered).toEqual([2])
+    wrapper.unmount()
+  })
+
   it('runs from the row menu at once: one request, one toast, no dialog; the row and the summary are read again (scenarios 38–39)', async () => {
     const answer = deferred()
     sched.reset.mockReturnValueOnce(answer.promise)

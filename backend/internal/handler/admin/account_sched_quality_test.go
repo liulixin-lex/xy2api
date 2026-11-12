@@ -6,83 +6,122 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
 type schedQualityListAdmin struct {
 	service.AdminService
-	ids      []int64
+	filter   service.SchedQualityFilter
 	filtered bool
 	calls    int
 	filters  *service.BulkUpdateAccountFilters
+	matched  []int64
 }
 
+func (s *schedQualityListAdmin) selectAccounts(ctx context.Context, group int64) []service.Account {
+	s.calls++
+	s.filter, s.filtered = service.SchedQualityAccountFilter(ctx)
+	s.matched = []int64{}
+	rows := []service.Account{}
+	for id := int64(1); id <= 6; id++ {
+		member := id%2 == 0
+		if group > 0 && !member {
+			continue
+		}
+		if s.filtered && slices.Contains(s.filter.IDs, id) == s.filter.Exclude {
+			continue
+		}
+		s.matched = append(s.matched, id)
+		rows = append(rows, service.Account{ID: id, Name: strconv.FormatInt(id, 10), Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey})
+	}
+	return rows
+}
+func (s *schedQualityListAdmin) ListIQTargetSummaries(context.Context, []int64) (map[int64][]domain.IQTargetSummary, error) {
+	return map[int64][]domain.IQTargetSummary{}, nil
+}
 func (s *schedQualityListAdmin) BulkUpdateAccounts(ctx context.Context, input *service.BulkUpdateAccountsInput) (*service.BulkUpdateAccountsResult, error) {
-	s.calls++
-	s.ids, s.filtered = service.SchedQualityAccountFilter(ctx)
 	s.filters = input.Filters
-	return &service.BulkUpdateAccountsResult{}, nil
+	group, _ := strconv.ParseInt(input.Filters.Group, 10, 64)
+	s.selectAccounts(ctx, group)
+	return &service.BulkUpdateAccountsResult{SuccessIDs: s.matched}, nil
 }
-
-func (s *schedQualityListAdmin) ListAccounts(ctx context.Context, _ int, _ int, _, _, _, _ string, _ int64, _ string, _, _ string) ([]service.Account, int64, error) {
-	s.calls++
-	s.ids, s.filtered = service.SchedQualityAccountFilter(ctx)
-	return []service.Account{}, 0, nil
+func (s *schedQualityListAdmin) ListAccounts(ctx context.Context, _, _ int, _, _, _, _ string, group int64, _ string, _, _ string) ([]service.Account, int64, error) {
+	rows := s.selectAccounts(ctx, group)
+	return rows, int64(len(rows)), nil
 }
 
 type schedQualityAttention struct {
 	SchedQualityAdmin
-	cooling []int64
-	err     error
+	value service.SchedAdminAttention
+	err   error
 }
 
 func (s schedQualityAttention) Attention(context.Context) (service.SchedAdminAttention, error) {
-	return service.SchedAdminAttention{Cooling: s.cooling}, s.err
+	return s.value, s.err
 }
 
-func TestAccountSchedQualitySecondaryFilters(t *testing.T) {
+func TestAccountSchedQualityFiveFilterPaths(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	attention := service.SchedAdminAttention{Cooling: []int64{1, 2}, Exempt: []int64{2, 3}, Demote: []int64{4}}
 	for _, route := range []struct {
-		name, method, path string
-		register           func(*gin.Engine, *AccountHandler)
+		name, method, path, query string
+		register                  func(*gin.Engine, *AccountHandler)
 	}{
-		{"bulk", "POST", "/accounts/bulk-update", func(r *gin.Engine, h *AccountHandler) { r.POST("/accounts/bulk-update", h.BulkUpdate) }},
-		{"export", "GET", "/accounts/data", func(r *gin.Engine, h *AccountHandler) { r.GET("/accounts/data", h.ExportData) }},
-		{"billing", "GET", "/accounts/upstream-billing-rates", func(r *gin.Engine, h *AccountHandler) {
+		{"list", "GET", "/accounts", "", func(r *gin.Engine, h *AccountHandler) { r.GET("/accounts", h.List) }},
+		{"select_all", "GET", "/accounts", "&lite=1&page=1&page_size=1000", func(r *gin.Engine, h *AccountHandler) { r.GET("/accounts", h.List) }},
+		{"bulk", "POST", "/accounts/bulk-update", "", func(r *gin.Engine, h *AccountHandler) { r.POST("/accounts/bulk-update", h.BulkUpdate) }},
+		{"export", "GET", "/accounts/data", "", func(r *gin.Engine, h *AccountHandler) { r.GET("/accounts/data", h.ExportData) }},
+		{"billing", "GET", "/accounts/upstream-billing-rates", "", func(r *gin.Engine, h *AccountHandler) {
 			r.GET("/accounts/upstream-billing-rates", h.GetUpstreamBillingRates)
 		}},
 	} {
 		for _, tc := range []struct {
-			name, quality string
-			ids           []int64
-			err           error
-			unavailable   bool
-			code          int
+			name, quality, group string
+			empty, unavailable   bool
+			err                  error
+			code                 int
+			want                 []int64
 		}{
-			{name: "cooling", quality: "cooling", ids: []int64{2, 4}, code: 200},
-			{name: "empty_cooling", quality: "cooling", ids: []int64{}, code: 200},
-			{name: "unfiltered", code: 200},
-			{name: "invalid", quality: "normal", code: 400},
-			{name: "unavailable", quality: "cooling", unavailable: true, code: 503},
-			{name: "attention_error", quality: "cooling", err: errors.New("attention unavailable"), code: 500},
+			{name: "cooling", quality: "cooling", code: 200, want: []int64{1, 2}},
+			{name: "exempt", quality: "exempt", code: 200, want: []int64{2, 3}},
+			{name: "demote", quality: "demote", code: 200, want: []int64{4}},
+			{name: "normal", quality: "normal", code: 200, want: []int64{5, 6}},
+			{name: "exempt_group", quality: "exempt", group: "1", code: 200, want: []int64{2}},
+			{name: "demote_group", quality: "demote", group: "1", code: 200, want: []int64{4}},
+			{name: "normal_group", quality: "normal", group: "1", code: 200, want: []int64{6}},
+			{name: "empty_cooling", quality: "cooling", empty: true, code: 200, want: []int64{}},
+			{name: "empty_exempt", quality: "exempt", empty: true, code: 200, want: []int64{}},
+			{name: "empty_demote", quality: "demote", empty: true, code: 200, want: []int64{}},
+			{name: "normal_empty_union", quality: "normal", empty: true, code: 200, want: []int64{1, 2, 3, 4, 5, 6}},
+			{name: "unfiltered", code: 200, want: []int64{1, 2, 3, 4, 5, 6}},
+			{name: "invalid", quality: "unknown", code: 400},
+			{name: "unavailable", quality: "normal", unavailable: true, code: 503},
+			{name: "attention_error", quality: "exempt", err: errors.New("attention unavailable"), code: 500},
 		} {
 			t.Run(route.name+"/"+tc.name, func(t *testing.T) {
 				admin := &schedQualityListAdmin{}
 				h := &AccountHandler{adminService: admin}
+				value := attention
+				if tc.empty {
+					value = service.SchedAdminAttention{}
+				}
 				if !tc.unavailable {
-					h.schedQuality = schedQualityAttention{cooling: tc.ids, err: tc.err}
+					h.schedQuality = schedQualityAttention{value: value, err: tc.err}
 				}
 				r := gin.New()
 				route.register(r, h)
-				path, body := route.path+"?sched_quality="+tc.quality, ""
+				path, body := route.path+"?sched_quality="+tc.quality+"&group="+tc.group+route.query, ""
 				if route.name == "bulk" {
 					path = route.path
-					body = `{"filters":{"sched_quality":"` + tc.quality + `"},"schedulable":true}`
+					body = `{"filters":{"sched_quality":"` + tc.quality + `","group":"` + tc.group + `"},"schedulable":true}`
 				}
 				req := httptest.NewRequest(route.method, path, strings.NewReader(body))
 				req.Header.Set("Content-Type", "application/json")
@@ -94,38 +133,18 @@ func TestAccountSchedQualitySecondaryFilters(t *testing.T) {
 					return
 				}
 				require.Equal(t, 1, admin.calls)
-				require.Equal(t, tc.quality == "cooling", admin.filtered)
-				require.Equal(t, tc.ids, admin.ids)
+				require.Equal(t, tc.quality != "", admin.filtered)
+				require.Equal(t, tc.quality == "normal", admin.filter.Exclude)
+				require.Equal(t, tc.want, admin.matched)
+				if tc.quality == "normal" && !tc.empty {
+					require.Equal(t, []int64{1, 2, 3, 4}, admin.filter.IDs)
+				}
 				if route.name == "bulk" {
 					require.Equal(t, tc.quality, admin.filters.SchedQuality)
 				}
 			})
 		}
 	}
-}
-func TestAccountSchedQualityCoolingFilter(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	for _, ids := range [][]int64{{2, 4}, {}} {
-		t.Run(string(rune('0'+len(ids))), func(t *testing.T) {
-			admin := &schedQualityListAdmin{}
-			h := &AccountHandler{adminService: admin, schedQuality: schedQualityAttention{cooling: ids}}
-			r := gin.New()
-			r.GET("/accounts", h.List)
-			w := httptest.NewRecorder()
-			r.ServeHTTP(w, httptest.NewRequest("GET", "/accounts?sched_quality=cooling", nil))
-			require.Equal(t, 200, w.Code, w.Body.String())
-			require.True(t, admin.filtered)
-			require.Equal(t, ids, admin.ids)
-			require.Equal(t, 1, admin.calls)
-		})
-	}
-	admin := &schedQualityListAdmin{}
-	r := gin.New()
-	r.GET("/accounts", (&AccountHandler{adminService: admin}).List)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest("GET", "/accounts?sched_quality=normal", nil))
-	require.Equal(t, 400, w.Code)
-	require.Zero(t, admin.calls)
 }
 func TestAccountRecoverStateUsesQualityReset(t *testing.T) {
 	h, _, _ := schedAdminHandlerFixture()

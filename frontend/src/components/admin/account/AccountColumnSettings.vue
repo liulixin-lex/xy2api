@@ -34,11 +34,11 @@
     <button
       v-if="customized"
       type="button"
-      data-test="reset-column-order"
+      data-test="reset-columns"
       class="mt-1 w-full rounded-md px-3 py-2 text-left text-xs text-primary-600 transition-colors hover:bg-gray-100 dark:text-primary-400 dark:hover:bg-dark-700"
       @click="emit('reset')"
     >
-      {{ t('admin.accounts.resetColumnOrder') }}
+      {{ t('admin.accounts.resetColumns') }}
     </button>
   </div>
 </template>
@@ -57,6 +57,7 @@ interface ColumnSetting {
 const props = defineProps<{
   columns: ColumnSetting[]
   isVisible: (key: string) => boolean
+  /** Visibility or order differs from the default: offer "restore default columns" (both at once). */
   customized?: boolean
 }>()
 
