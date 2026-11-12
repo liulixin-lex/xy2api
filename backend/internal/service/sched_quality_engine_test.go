@@ -121,24 +121,28 @@ func TestSchedQualityPooledTests(t *testing.T) {
 			f.cool()
 			f.due()
 			f.test(1, false)
+			f.runner.Records[SchedAccountModel{1, "gpt-6.1-sol"}][0].Turns[6].Outcome = q.OutcomeOther
 			f.cycle()
-			require.Equal(t, q.StateNormal, f.view(10).State)
-			require.False(t, f.view(10).WaitingTest)
-			require.Zero(t, f.e.Snapshot().GroupRows[1][0].Test.SpeedWarm)
+			require.Equal(t, q.StateCooling, f.view(10).State)
+			require.True(t, f.view(10).WaitingTest)
+			require.Equal(t, 6, f.e.Snapshot().GroupRows[1][0].Test.SpeedWarm)
 			f.now = f.now.Add(q.TestRetryEvery)
 			f.cycle()
-			require.Empty(t, f.runner.Requests)
+			require.Len(t, f.runner.Requests, 2)
 			f.test(secondSlow, false)
+			logs := captureSchedObsLogs(t)
 			f.cycle()
 			if secondSlow == 0 {
 				require.Equal(t, q.StateNormal, f.view(10).State)
 				require.Empty(t, f.view(10).Reason)
-			} else {
-				require.Equal(t, q.StateNormal, f.view(10).State)
 				require.Equal(t, 1, f.view(10).Level)
-				require.Empty(t, f.view(10).Reason)
+				require.Contains(t, logs.String(), `"via":"test_pass"`)
+			} else {
+				require.Equal(t, q.StateCooling, f.view(10).State)
+				require.Equal(t, 2, f.view(10).Level)
+				require.Equal(t, q.ReasonTestSpeed, f.view(10).Reason)
 			}
-			require.Equal(t, 1, f.e.Snapshot().GroupRows[1][0].Test.Tests)
+			require.Zero(t, f.e.Snapshot().GroupRows[1][0].Test.Tests)
 		})
 	}
 }
@@ -237,10 +241,14 @@ func TestSchedQualityOtherTestDimensionBlocksRecovery(t *testing.T) {
 	f := newQualityFixture(t)
 	f.cool()
 	f.due()
-	f.test(0, true)
+	f.test(0, false)
+	turns := f.runner.Records[SchedAccountModel{1, "gpt-6.1-sol"}][0].Turns
+	turns[0].Outcome, turns[3].Outcome = q.OutcomeAccountFault, q.OutcomeAccountFault
+	logs := captureSchedObsLogs(t)
 	f.cycle()
-	require.Equal(t, q.StateNormal, f.view(10).State)
-	require.Empty(t, f.view(10).Reason)
+	require.Equal(t, q.StateCooling, f.view(10).State)
+	require.Equal(t, q.ReasonTestError, f.view(10).Reason)
+	require.Equal(t, "pass", schedTestLogEvent(t, logs, "sched_quality.state")["speed_verdict"])
 }
 
 type qualityRetryRunner struct {
@@ -278,7 +286,7 @@ func TestSchedQualityUnverifiedRetryAndLogs(t *testing.T) {
 	f.cycle()
 	require.Equal(t, q.ReasonUnverified, f.view(10).Reason)
 	require.Equal(t, 1, f.view(10).Level)
-	require.Contains(t, logs.String(), `"via":"no_conclusion"`)
+	require.Contains(t, logs.String(), `"via":"wait_max"`)
 	require.Contains(t, logs.String(), `"component":"sched_quality"`)
 	require.Contains(t, logs.String(), `"level":"INFO"`)
 	require.NotContains(t, logs.String(), "!BADKEY")
@@ -659,7 +667,7 @@ func TestSchedQualityPolicyValidationAndCAS(t *testing.T) {
 	}
 }
 
-func TestSchedQualitySingleWriterStateCommit(t *testing.T) {
+func TestSchedQualityEngineSingleWriterStateCommit(t *testing.T) {
 	f := newQualityFixture(t)
 	f.samples(16)
 	pair := SchedAccountModel{1, "gpt-6.1-sol"}
@@ -667,7 +675,9 @@ func TestSchedQualitySingleWriterStateCommit(t *testing.T) {
 	entered, release, missed := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	hs := &qualityHookStore{fakeSchedQualityStore: f.store, hook: func() { close(entered); <-release }, missed: missed}
 	f.e.store = hs
-	second := NewSchedQualityEngineService(hs, f.ledger, f.runner, f.switches, func() time.Time { return f.now }, nil)
+	firstObs, secondObs := NewSchedObservabilityService(), NewSchedObservabilityService()
+	f.e.obs = firstObs
+	second := NewSchedQualityEngineService(hs, f.ledger, f.runner, f.switches, func() time.Time { return f.now }, secondObs)
 	require.NoError(t, second.refreshConfig(context.Background(), f.now))
 	done := make(chan error, 2)
 	go func() { done <- f.e.cycle(context.Background()) }()
@@ -680,11 +690,16 @@ func TestSchedQualitySingleWriterStateCommit(t *testing.T) {
 	require.NoError(t, <-done)
 	require.Len(t, f.store.Rows, 1)
 	require.Equal(t, 1, f.store.Rows[0].Level)
+	require.EqualValues(t, 1, firstObs.window.cooled)
+	require.Zero(t, secondObs.window.cooled)
+	require.EqualValues(t, 1, firstObs.window.cycles)
+	require.EqualValues(t, 1, secondObs.window.cycles)
 	hs.hook = nil
 	hs.missed = nil
 	require.NoError(t, second.cycle(context.Background()))
 	require.Equal(t, f.view(10), second.Snapshot().View.StateOf(10, 1, pair.Model))
 	require.Empty(t, f.runner.Requests)
+	require.Zero(t, secondObs.window.cooled)
 }
 
 func TestSchedQualityInitialResetTimesAreBaseline(t *testing.T) {
