@@ -11,7 +11,7 @@ import { closeSchedDrawer, closeSchedReset, useSchedLayers } from '@/composables
 const { listAccounts, getById, sched } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
   getById: vi.fn(),
-  sched: { summary: vi.fn(), reset: vi.fn(), accountDetail: vi.fn(), groupBoard: vi.fn(), getGroupPolicy: vi.fn() }
+  sched: { summary: vi.fn(), reset: vi.fn(), startTest: vi.fn(), accountDetail: vi.fn(), groupBoard: vi.fn(), getGroupPolicy: vi.fn() }
 }))
 
 vi.mock('@/api/admin/schedQuality', () => ({ default: sched }))
@@ -23,6 +23,7 @@ vi.mock('@/api/admin', () => ({
       getById,
       getBatchTodayStats: vi.fn().mockResolvedValue({ stats: {} }),
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
+      getUpstreamBalances: vi.fn().mockResolvedValue({ balances: [] }),
       delete: vi.fn(),
       batchClearError: vi.fn(),
       batchRefresh: vi.fn(),
@@ -69,6 +70,22 @@ const ActionMenuStub = defineComponent({
   }
 })
 
+// Selects the page and starts quality batches; its buttons are disabled while a batch is busy.
+const BulkBarStub = defineComponent({
+  props: ['schedBusy'],
+  emits: ['select-page', 'sched-action'],
+  setup(props, { emit }) {
+    return () => h('div', [
+      h('button', { 'data-test': 'select-page', onClick: () => emit('select-page') }),
+      ...['reset', 'test'].map((action) => h('button', {
+        'data-test': `bulk-sched-${action}`,
+        disabled: props.schedBusy,
+        onClick: (event: MouseEvent) => emit('sched-action', action, event.currentTarget)
+      }))
+    ])
+  }
+})
+
 const account = (id: number, name: string) => ({ id, name, platform: 'openai', type: 'oauth', status: 'active', schedulable: true, group_ids: [53] })
 const base = (summaryFixture as { accounts: SchedAccountSummary[] }).accounts[0]
 const summaries = (): SchedAccountSummary[] => [
@@ -90,7 +107,7 @@ function mountView() {
         AccountStatusIndicator: true,
         AccountTableActions: true,
         AccountTableFilters: true,
-        AccountBulkActionsBar: true,
+        AccountBulkActionsBar: BulkBarStub,
         Pagination: true,
         ConfirmDialog: true,
         ImportDataModal: true,
@@ -180,6 +197,46 @@ describe('AccountsView quality columns', () => {
     expect(document.querySelector('[data-test="row"][data-id="1"]')).not.toBeNull()
     // The row now holds the account read back, never the reset result.
     expect((wrapper.vm as unknown as { accounts: Array<{ id: number; name: string }> }).accounts.find((a) => a.id === 1)?.name).toBe('acc-sol-renamed')
+    wrapper.unmount()
+  })
+
+  it('opens no new quality batch until the closed one has its late answers in', async () => {
+    const many = Array.from({ length: 6 }, (_, i) => account(i + 1, `acc-${i + 1}`))
+    listAccounts.mockResolvedValue({ items: many, total: 6, page: 1, page_size: 20, pages: 1 })
+    const pending: Array<() => void> = []
+    sched.reset.mockReset().mockImplementation(() => new Promise((resolve) => pending.push(() => resolve({ ...resetFixture, failed: [] }))))
+    sched.startTest.mockReset().mockResolvedValue({ tests: [{ model: 'm', test_id: 't', started: true, why: '' }] })
+    const wrapper = mountView()
+    await flushPromises()
+    const bar = (selector: string) => wrapper.findComponent(BulkBarStub).get(selector)
+    await bar('[data-test="select-page"]').trigger('click')
+    await bar('[data-test="bulk-sched-reset"]').trigger('click')
+    await flushPromises()
+    document.querySelector<HTMLElement>('[data-sq-batch-confirm]')!.click()
+    await flushPromises()
+    expect(sched.reset).toHaveBeenCalledTimes(4)
+
+    // Close the results with four answers outstanding, then try a new batch at once.
+    document.querySelector('[data-sq-batch-results]')!.closest('.modal-content')!.querySelector<HTMLElement>('.modal-footer .btn-secondary')!.click()
+    await flushPromises()
+    expect(bar('[data-test="bulk-sched-test"]').attributes('disabled')).toBeDefined()
+    ;(bar('[data-test="bulk-sched-test"]').element as HTMLButtonElement).disabled = false
+    await bar('[data-test="bulk-sched-test"]').trigger('click')
+    await flushPromises()
+    const testConfirm = () => Array.from(document.querySelectorAll<HTMLElement>('[data-sq-batch-confirm]'))
+      .find((el) => el.textContent?.trim() === 'admin.schedQuality.action.test')
+    expect(testConfirm()).toBeUndefined()
+
+    pending.forEach((answer) => answer())
+    await flushPromises()
+    expect(sched.reset).toHaveBeenCalledTimes(4)
+    expect(bar('[data-test="bulk-sched-test"]').attributes('disabled')).toBeUndefined()
+    await bar('[data-test="bulk-sched-test"]').trigger('click')
+    await flushPromises()
+    testConfirm()!.click()
+    await flushPromises()
+    expect(sched.startTest.mock.calls.map(([id]) => id)).toEqual([1, 2, 3, 4, 5, 6])
+    expect(sched.reset).toHaveBeenCalledTimes(4)
     wrapper.unmount()
   })
 })

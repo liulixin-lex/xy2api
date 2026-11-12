@@ -30,7 +30,7 @@
         </tr>
       </thead>
       <tbody>
-        <tr v-for="row in rows" :key="row.id" :data-sq-batch-row="row.id">
+        <tr v-for="row in rows" :key="row.id" :data-sq-batch-row="row.id" :data-sq-batch-result="row.result ?? 'running'">
           <td class="max-w-[16rem] truncate">{{ row.name }}</td>
           <td class="sq-r">
             <span v-if="row.result === null" class="spinner ml-auto inline-block h-3.5 w-3.5 align-middle text-gray-400" aria-hidden="true" />
@@ -50,7 +50,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import SchedOverridePopover from './SchedOverridePopover.vue'
@@ -60,16 +60,22 @@ import { markSchedChanged } from '@/composables/useSchedLayers'
 
 // Batch quality actions of the account list (design spec A.5, B.11). Reset and test confirm first, demote and exempt
 // use the override popover; then each account is called one by one, four at a time, and listed with its result.
+// A run works on what it was started with (action, request, accounts), never on the props of a later opening.
+// Closing the results stops it: accounts not yet called are "not run" and answers still on their way are dropped.
+// Until those answers are in, the run is busy and no other batch can start.
 export type SchedBatchAction = 'reset' | 'test' | 'demote' | 'exempt'
-type Result = 'ok' | 'failed' | 'testing'
+type Result = 'ok' | 'failed' | 'testing' | 'skipped'
+interface Row { id: number; name: string; result: Result | null }
+interface Batch { action: SchedBatchAction; request?: SchedOverrideRequest; rows: Row[]; next: number; stopped: boolean }
 
 const CONCURRENCY = 4
 const RESULT_KEY: Record<Result, string> = {
   ok: 'admin.schedQuality.result.ok',
   failed: 'admin.schedQuality.result.failed',
-  testing: 'admin.schedQuality.state.testing'
+  testing: 'admin.schedQuality.state.testing',
+  skipped: 'admin.schedQuality.result.skipped'
 }
-const RESULT_CLASS: Record<Result, string> = { ok: 'sq-pass-word', failed: 'sq-fail-word text-sm font-semibold', testing: 'sq-test' }
+const RESULT_CLASS: Record<Result, string> = { ok: 'sq-pass-word', failed: 'sq-fail-word text-sm font-semibold', testing: 'sq-test', skipped: 'sq-text-3' }
 
 const props = defineProps<{
   action: SchedBatchAction | null
@@ -78,27 +84,35 @@ const props = defineProps<{
   /** Scope choices for demote / exempt: every OpenAI group. */
   groups: Array<{ id: number; name: string }>
 }>()
-const emit = defineEmits<{ close: []; done: [] }>()
+const emit = defineEmits<{ close: []; done: []; busy: [running: boolean] }>()
 const { t } = useI18n()
 
 const phase = ref<'confirm' | 'popover' | 'results' | null>(null)
-const rows = ref<Array<{ id: number; name: string; result: Result | null }>>([])
-const actionName = computed(() => (props.action ? t(`admin.schedQuality.action.${props.action}`) : ''))
+/** The run on screen; null before the first run of an opening. */
+const batch = shallowRef<Batch | null>(null)
+const rows = ref<Row[]>([])
+const actionName = computed(() => {
+  const action = batch.value?.action ?? props.action
+  return action ? t(`admin.schedQuality.action.${action}`) : ''
+})
 const count = (result: Result) => rows.value.filter((row) => row.result === result).length
+let running = 0
 
 watch(() => props.action, (action) => {
-  if (!action) return
+  if (!action || running) return
+  batch.value = null
   rows.value = []
   phase.value = action === 'reset' || action === 'test' ? 'confirm' : 'popover'
 }, { immediate: true })
 
-async function callOne(id: number, request?: SchedOverrideRequest): Promise<Result> {
+async function callOne(action: SchedBatchAction, id: number, request?: SchedOverrideRequest): Promise<Result> {
   try {
-    if (props.action === 'reset') {
-      await schedQualityAPI.reset(id)
-      return 'ok'
+    if (action === 'reset') {
+      // HTTP 200 still lists the states that could not be cleared: any of them makes the account a failure.
+      const { failed } = await schedQualityAPI.reset(id)
+      return failed.length ? 'failed' : 'ok'
     }
-    if (props.action === 'test') {
+    if (action === 'test') {
       const { tests } = await schedQualityAPI.startTest(id)
       if (tests.some((ticket) => ticket.started)) return 'ok'
       return tests.length && tests.every((ticket) => ticket.why === 'already_running') ? 'testing' : 'failed'
@@ -111,21 +125,38 @@ async function callOne(id: number, request?: SchedOverrideRequest): Promise<Resu
 }
 
 async function run(request?: SchedOverrideRequest) {
-  rows.value = props.accounts.map((account) => ({ ...account, result: null }))
+  const action = props.action
+  if (!action || running || phase.value === 'results') return
+  const current: Batch = { action, request, rows: props.accounts.map((account) => ({ ...account, result: null })), next: 0, stopped: false }
+  batch.value = current
+  rows.value = current.rows
+  const live = rows.value
   phase.value = 'results'
-  let next = 0
+  running++
+  emit('busy', true)
   const worker = async () => {
-    while (next < rows.value.length) {
-      const row = rows.value[next++]
-      row.result = await callOne(row.id, request)
+    while (!current.stopped && current.next < live.length) {
+      const index = current.next++
+      const result = await callOne(current.action, live[index].id, current.request)
+      if (!current.stopped) live[index].result = result
     }
   }
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, rows.value.length) }, worker))
-  markSchedChanged()
-  emit('done')
+  try {
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, live.length) }, worker))
+  } finally {
+    running--
+    markSchedChanged()
+    emit('busy', false)
+    emit('done')
+  }
 }
 
 function close() {
+  const current = batch.value
+  if (current && !current.stopped && phase.value === 'results') {
+    current.stopped = true
+    rows.value.slice(current.next).forEach((row) => { row.result = 'skipped' })
+  }
   phase.value = null
   emit('close')
 }

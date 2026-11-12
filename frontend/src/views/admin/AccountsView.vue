@@ -199,6 +199,7 @@
           @select-all-results="handleSelectAllResults"
           :scheduling-busy="selIds.some(id => togglingSchedulable.has(id))"
           @toggle-schedulable="handleBulkToggleSchedulable"
+          :sched-busy="sqBatchBusy"
           @sched-action="openSchedBatch"
         />
         <div ref="accountTableRef" class="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -530,7 +531,7 @@
     />
     <TempUnschedStatusModal v-if="tempUnschedModalMounted" :show="showTempUnsched" :account="tempUnschedAcc" @close="showTempUnsched = false" @recover="(a: Account) => openSchedReset({ id: a.id, name: a.name })" />
     <SchedQualityLayers :on-iq-check="openIqRecordsById" :on-edit="openEditById" @reset-done="refreshAfterSchedReset" />
-    <SchedBatchDialog :action="sqBatch.action" :accounts="sqBatch.accounts" :anchor="sqBatch.anchor" :groups="sqOpenAIGroups" @close="sqBatch.action = null" @done="load()" />
+    <SchedBatchDialog :action="sqBatch.action" :accounts="sqBatch.accounts" :anchor="sqBatch.anchor" :groups="sqOpenAIGroups" @close="sqBatch.action = null" @busy="(running) => (sqBatchBusy = running)" @done="load()" />
     <ConfirmDialog :show="showDeleteDialog" :title="t('admin.accounts.deleteAccount')" :message="t('admin.accounts.deleteConfirm', { name: deletingAcc?.name })" :confirm-text="t('common.delete')" :cancel-text="t('common.cancel')" :danger="true" @confirm="confirmDelete" @cancel="showDeleteDialog = false" />
     <ConfirmDialog :show="showCreateShadowDialog" :title="t('admin.accounts.createSparkShadow')" :message="t('admin.accounts.createSparkShadowConfirm', { name: creatingShadowAcc?.name })" @confirm="confirmCreateSparkShadow" @cancel="showCreateShadowDialog = false" />
     <ConfirmDialog :show="showExportDataDialog" :title="t('admin.accounts.dataExport')" :message="t('admin.accounts.dataExportConfirmMessage')" :confirm-text="t('admin.accounts.dataExportConfirm')" :cancel-text="t('common.cancel')" @confirm="handleExportData" @cancel="showExportDataDialog = false">
@@ -1579,7 +1580,10 @@ const openSchedFromNumber = (row: AccountListItem) =>
 const openSchedFromGroups = (row: AccountListItem, target: { model: string | null; groupId?: number; toGroups?: boolean }) =>
   openSchedDrawer({ id: row.id, name: row.name }, { model: target.model, groupId: target.groupId ?? null, toGroups: target.toGroups })
 
+// One batch at a time: a closed batch is busy until the answers still on their way are in.
+const sqBatchBusy = ref(false)
 const openSchedBatch = (action: SchedBatchAction, anchor: HTMLElement) => {
+  if (sqBatchBusy.value || sqBatch.action !== null) return
   const names = new Map(accounts.value.map(account => [account.id, account.name]))
   sqBatch.accounts = selIds.value.map(id => ({ id, name: names.get(id) ?? `#${id}` }))
   sqBatch.anchor = anchor

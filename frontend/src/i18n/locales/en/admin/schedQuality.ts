@@ -30,6 +30,7 @@ export default {
       timeout: 'Timeout',
       failed: 'Failed',
       canceled: 'Canceled',
+      skipped: 'Not run',
     },
     drawer: {
       priority: 'Priority',

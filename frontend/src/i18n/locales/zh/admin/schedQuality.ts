@@ -30,6 +30,7 @@ export default {
       timeout: '超时',
       failed: '失败',
       canceled: '取消',
+      skipped: '未执行',
     },
     drawer: {
       priority: '优先级',

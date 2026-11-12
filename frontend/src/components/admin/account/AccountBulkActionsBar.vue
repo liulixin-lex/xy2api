@@ -50,6 +50,8 @@
           type="button"
           class="btn btn-secondary btn-sm"
           :data-test="`bulk-sched-${action}`"
+          :disabled="schedBusy"
+          :aria-busy="schedBusy"
           @click="$emit('sched-action', action, $event.currentTarget)"
         >{{ t(`admin.schedQuality.action.${action}`) }}</button>
         <span class="mx-1 w-px self-stretch bg-gray-300 dark:bg-dark-600" aria-hidden="true" />
@@ -79,6 +81,8 @@ defineProps<{
   allResultsSelected: boolean
   schedulingBusy?: boolean
   iqBusy?: boolean
+  /** A quality batch is still running. */
+  schedBusy?: boolean
 }>()
 
 defineEmits([
