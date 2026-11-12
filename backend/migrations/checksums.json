@@ -343,6 +343,7 @@
     "291_readonly_mcp_control_limits.sql": "89bf7fb4f44d9657a0e302794d4aa988915995bdefcf3f2150ccba521b664aa6",
     "292_usage_logs_budget_timing.sql": "e86f9b7aa7e996bd65636c80fe612b5365e349624ef270a44c55d30d606eddd9",
     "293_ops_error_logs_resilience_timing.sql": "b4eea5f2d4834063b68851632e3ae0553f992c0c0e77abb2a9ae5a6cd387c054",
-    "294_sched_quality.sql": "d693056c25882d74820c12673e289a7f61cba06a3ec4c707d92fd424486cb53c"
+    "294_sched_quality.sql": "d693056c25882d74820c12673e289a7f61cba06a3ec4c707d92fd424486cb53c",
+    "295_remove_retired_share_scheduling_permission.sql": "e1acf839e5e3066428c0e6b994d554cb47fb540f601647731ea7ed0760ac4cde"
   }
 }
