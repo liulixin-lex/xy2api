@@ -38,7 +38,7 @@ func newQualityFixture(t *testing.T) *qualityFixture {
 	f.ledger = &fakeSchedAttemptStore{Now: func() time.Time { return f.now }}
 	f.runner = &fakeSchedTestRunner{Records: map[SchedAccountModel][]SchedTestRecord{}}
 	f.switches = &qualitySwitches{true, true}
-	f.e = NewSchedQualityEngineService(f.store, f.ledger, f.runner, f.switches, func() time.Time { return f.now })
+	f.e = NewSchedQualityEngineService(f.store, f.ledger, f.runner, f.switches, func() time.Time { return f.now }, nil)
 	return f
 }
 func (f *qualityFixture) cycle() { f.t.Helper(); require.NoError(f.t, f.e.cycle(context.Background())) }
@@ -445,7 +445,7 @@ func TestSchedQualityStartupRecovery(t *testing.T) {
 	require.NoError(t, f.ledger.InsertBatch(context.Background(), f.e.window.take(f.now)[SchedAccountModel{1, "gpt-6.1-sol"}]))
 	f.cycle()
 	before := f.view(10)
-	fresh := NewSchedQualityEngineService(f.store, f.ledger, f.runner, f.switches, func() time.Time { return f.now })
+	fresh := NewSchedQualityEngineService(f.store, f.ledger, f.runner, f.switches, func() time.Time { return f.now }, nil)
 	fresh.Start(context.Background())
 	fresh.Stop()
 	after := fresh.Snapshot().View.StateOf(10, 1, "gpt-6.1-sol")
@@ -563,7 +563,7 @@ func TestSchedQualityTwoEnginesSingleWriter(t *testing.T) {
 	entered, release, missed := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	hs := &qualityHookStore{fakeSchedQualityStore: f.store, hook: func() { close(entered); <-release }, missed: missed}
 	f.e.store = hs
-	second := NewSchedQualityEngineService(hs, f.ledger, f.runner, f.switches, func() time.Time { return f.now })
+	second := NewSchedQualityEngineService(hs, f.ledger, f.runner, f.switches, func() time.Time { return f.now }, nil)
 	require.NoError(t, second.refreshConfig(context.Background(), f.now))
 	results := make(chan error, 2)
 	go func() { results <- f.e.cycle(context.Background()) }()
@@ -667,7 +667,7 @@ func TestSchedQualitySingleWriterStateCommit(t *testing.T) {
 	entered, release, missed := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	hs := &qualityHookStore{fakeSchedQualityStore: f.store, hook: func() { close(entered); <-release }, missed: missed}
 	f.e.store = hs
-	second := NewSchedQualityEngineService(hs, f.ledger, f.runner, f.switches, func() time.Time { return f.now })
+	second := NewSchedQualityEngineService(hs, f.ledger, f.runner, f.switches, func() time.Time { return f.now }, nil)
 	require.NoError(t, second.refreshConfig(context.Background(), f.now))
 	done := make(chan error, 2)
 	go func() { done <- f.e.cycle(context.Background()) }()

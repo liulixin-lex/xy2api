@@ -44,7 +44,7 @@ func TestSchedTestRepository(t *testing.T) {
 	if len(rows) != 2 || rows[0].ID != fresh.ID || rows[1].ID != running.ID || !rows[1].Running {
 		t.Fatalf("unexpected fresh rows: %+v", rows)
 	}
-	runner := service.NewSchedTestRunnerService(nil, nil, nil, nil, repo, func() time.Time { return now }, nil, nil)
+	runner := service.NewSchedTestRunnerService(nil, nil, nil, nil, repo, func() time.Time { return now }, nil, nil, nil)
 	defer runner.Stop()
 	byPair, err := runner.Fresh(ctx)
 	require.NoError(t, err)
@@ -99,9 +99,11 @@ func TestSchedTestRepositoryReapStale(t *testing.T) {
 			TestResult: schedquality.TestResult{ID: uuid.NewString(), StartedAt: now.Add(-tc.age), Done: !tc.running},
 		}))
 	}
-	runner := service.NewSchedTestRunnerService(nil, nil, nil, nil, repo, func() time.Time { return now }, nil, nil)
+	runner := service.NewSchedTestRunnerService(nil, nil, nil, nil, repo, func() time.Time { return now }, nil, nil, nil)
 	defer runner.Stop()
-	require.NoError(t, runner.ReapStale(ctx))
+	rowsAffected, err := runner.ReapStale(ctx)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, rowsAffected)
 	stale, err := repo.Latest(ctx, account, "stale")
 	require.NoError(t, err)
 	require.False(t, stale.Running)

@@ -444,7 +444,7 @@ func (f *fakeSchedTestRunner) Recent(_ context.Context, id int64, limit int) ([]
 	}
 	return out, f.Err
 }
-func (f *fakeSchedTestRunner) ReapStale(context.Context) error { return f.Err }
+func (f *fakeSchedTestRunner) ReapStale(context.Context) (int64, error) { return 0, f.Err }
 
 // fakeSchedView exposes preconfigured state and takeover settings.
 type fakeSchedView struct {

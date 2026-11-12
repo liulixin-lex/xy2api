@@ -26,8 +26,8 @@ type SchedTestStore interface {
 	Latest(context.Context, int64, string) (*SchedTestRecord, error)
 	Since(context.Context, time.Time) ([]SchedTestRecord, error)
 	Recent(context.Context, int64, int) ([]SchedTestRecord, error)
-	ReapStale(context.Context, time.Time, time.Time) error
-	DeleteBefore(context.Context, time.Time) error
+	ReapStale(context.Context, time.Time, time.Time) (int64, error)
+	DeleteBefore(context.Context, time.Time) (int64, error)
 }
 
 type schedTestAccountReader interface {
@@ -46,6 +46,7 @@ type SchedTestRunnerService struct {
 	acquire     func(context.Context, *Account, schedquality.TestTier) (*AcquireResult, error)
 	lockCache   LeaderLockCache
 	db          *sql.DB
+	obs         SchedObs
 	owner       string
 	mu          sync.Mutex
 	tierLimits  map[int64]*schedTestTierLimit
@@ -59,12 +60,12 @@ type schedTestTierLimit struct {
 	tests int
 }
 
-func NewSchedTestRunnerService(f SchedTestForwarder, a SchedTestAdmission, c *ConcurrencyService, accounts schedTestAccountReader, store SchedTestStore, now func() time.Time, lock LeaderLockCache, db *sql.DB) *SchedTestRunnerService {
+func NewSchedTestRunnerService(f SchedTestForwarder, a SchedTestAdmission, c *ConcurrencyService, accounts schedTestAccountReader, store SchedTestStore, now func() time.Time, lock LeaderLockCache, db *sql.DB, obs SchedObs) *SchedTestRunnerService {
 	if now == nil {
 		now = time.Now
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &SchedTestRunnerService{forward: f, admission: a, concurrency: c, accounts: accounts, store: store, now: now, count: schedTestCount, wait: schedTestWait, lockCache: lock, db: db, owner: uuid.NewString(), ctx: ctx, cancel: cancel, tierLimits: make(map[int64]*schedTestTierLimit)}
+	s := &SchedTestRunnerService{forward: f, admission: a, concurrency: c, accounts: accounts, store: store, now: now, count: schedTestCount, wait: schedTestWait, lockCache: lock, db: db, obs: schedObsOrNop(obs), owner: uuid.NewString(), ctx: ctx, cancel: cancel, tierLimits: make(map[int64]*schedTestTierLimit)}
 	s.acquire = func(ctx context.Context, account *Account, _ schedquality.TestTier) (*AcquireResult, error) {
 		return s.concurrency.AcquireAccountSlot(ctx, account.ID, account.Concurrency)
 	}
@@ -99,7 +100,7 @@ func (s *SchedTestRunnerService) Start(ctx context.Context) {
 			case <-ticker.C:
 				release, ok := tryAcquireSingletonLeaderLock(s.ctx, s.lockCache, s.db, "sched-test-retention", s.owner, 5*time.Minute)
 				if ok {
-					_ = s.store.DeleteBefore(s.ctx, s.now().Add(-schedquality.TestRetention))
+					_, _ = s.store.DeleteBefore(s.ctx, s.now().Add(-schedquality.TestRetention))
 					release()
 				}
 			}
@@ -201,7 +202,7 @@ func (s *SchedTestRunnerService) Fresh(ctx context.Context) (map[SchedAccountMod
 func (s *SchedTestRunnerService) Recent(ctx context.Context, id int64, limit int) ([]SchedTestRecord, error) {
 	return s.store.Recent(ctx, id, limit)
 }
-func (s *SchedTestRunnerService) ReapStale(ctx context.Context) error {
+func (s *SchedTestRunnerService) ReapStale(ctx context.Context) (int64, error) {
 	now := s.now()
 	return s.store.ReapStale(ctx, now.Add(-schedquality.TestStaleAfter), now)
 }

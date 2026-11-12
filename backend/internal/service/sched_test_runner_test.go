@@ -67,19 +67,21 @@ func (s *schedTestMemoryStore) Since(context.Context, time.Time) ([]SchedTestRec
 func (s *schedTestMemoryStore) Recent(context.Context, int64, int) ([]SchedTestRecord, error) {
 	return nil, nil
 }
-func (s *schedTestMemoryStore) DeleteBefore(context.Context, time.Time) error { return nil }
-func (s *schedTestMemoryStore) ReapStale(_ context.Context, before, now time.Time) error {
+func (s *schedTestMemoryStore) DeleteBefore(context.Context, time.Time) (int64, error) { return 0, nil }
+func (s *schedTestMemoryStore) ReapStale(_ context.Context, before, now time.Time) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	var affected int64
 	for key, r := range s.records {
 		if r.Running && r.StartedAt.Before(before) {
 			r.Running = false
 			r.AbortReason = "timeout"
 			r.FinishedAt = now
 			s.records[key] = r
+			affected++
 		}
 	}
-	return nil
+	return affected, nil
 }
 
 type schedTestAccounts struct{ account *Account }
@@ -118,7 +120,7 @@ func schedTestFixture(concurrency int) (*SchedTestRunnerService, *schedTestMemor
 	admission := &fakeSchedTestAdmission{}
 	cache := &schedTestSlotCache{}
 	account := &Account{ID: 7, Concurrency: concurrency}
-	s := NewSchedTestRunnerService(forward, admission, NewConcurrencyService(cache), schedTestAccounts{account}, store, time.Now, nil, nil)
+	s := NewSchedTestRunnerService(forward, admission, NewConcurrencyService(cache), schedTestAccounts{account}, store, time.Now, nil, nil, nil)
 	s.count = func(b []byte) int { return len(b) / 4 }
 	return s, store, forward, admission, cache
 }
@@ -522,11 +524,15 @@ func TestSchedTestFinishFailureAndReapStale(t *testing.T) {
 		require.True(t, r.Running)
 		// Seven minutes is the stale cutoff; the repository comparison is strict.
 		<-time.After(schedquality.TestStaleAfter - time.Since(r.StartedAt))
-		require.NoError(t, s.ReapStale(context.Background()))
+		rows, err := s.ReapStale(context.Background())
+		require.NoError(t, err)
+		require.Zero(t, rows)
 		r, _ = store.Latest(context.Background(), 7, "evidence")
 		require.True(t, r.Running)
 		<-time.After(time.Nanosecond)
-		require.NoError(t, s.ReapStale(context.Background()))
+		rows, err = s.ReapStale(context.Background())
+		require.NoError(t, err)
+		require.EqualValues(t, 1, rows)
 		r, _ = store.Latest(context.Background(), 7, "evidence")
 		require.False(t, r.Running)
 		require.False(t, r.Done)

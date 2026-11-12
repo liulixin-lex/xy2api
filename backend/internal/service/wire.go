@@ -885,13 +885,15 @@ func ProvideAPIKeyService(
 	return svc
 }
 
+func ProvideSchedObs() SchedObs { return nopSchedObs{} }
+
 // ProvideSchedTestRunnerService uses the gateway's existing admission and forwarding state.
-func ProvideSchedTestRunnerService(openai *OpenAIGatewayService, concurrency *ConcurrencyService, accounts AccountRepository, store SchedTestStore, lock LeaderLockCache, db *sql.DB) *SchedTestRunnerService {
-	return NewSchedTestRunnerService(openai, openai, concurrency, accounts, store, nil, lock, db)
+func ProvideSchedTestRunnerService(openai *OpenAIGatewayService, concurrency *ConcurrencyService, accounts AccountRepository, store SchedTestStore, lock LeaderLockCache, db *sql.DB, obs SchedObs) *SchedTestRunnerService {
+	return NewSchedTestRunnerService(openai, openai, concurrency, accounts, store, nil, lock, db, obs)
 }
 
-func ProvideSchedQualityEngineService(store SchedQualityStore, attempts SchedAttemptStore, runner *SchedTestRunnerService, settings *SettingService, lock LeaderLockCache, db *sql.DB) *SchedQualityEngineService {
-	engine := NewSchedQualityEngineService(store, attempts, runner, settings, nil)
+func ProvideSchedQualityEngineService(store SchedQualityStore, attempts SchedAttemptStore, runner *SchedTestRunnerService, settings *SettingService, lock LeaderLockCache, db *sql.DB, obs SchedObs) *SchedQualityEngineService {
+	engine := NewSchedQualityEngineService(store, attempts, runner, settings, nil, obs)
 	engine.SetLeaderLock(lock, db)
 	return engine
 }
@@ -935,6 +937,7 @@ func ProvideSchedAdminService(engine *SchedQualityEngineService, board *OpenAISe
 var ProviderSet = wire.NewSet(
 	NewSchedAttemptRecorderService,
 	ProvideSchedTestRunnerService,
+	ProvideSchedObs,
 	ProvideSchedQualityEngineService,
 	ProvideOpenAISelectionBoard,
 	ProvideSchedModelTransientAdmin,

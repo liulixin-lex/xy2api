@@ -19,7 +19,7 @@ func newSchedQualityBenchmark(b *testing.B) (*SchedQualityEngineService, time.Ti
 	store := &fakeSchedQualityStore{Members: make(map[int64][]int64), Policies: make(map[int64]SchedPolicyRecord), Now: func() time.Time { return now }}
 	runner := &fakeSchedTestRunner{Records: make(map[SchedAccountModel][]SchedTestRecord)}
 	ledger := &fakeSchedAttemptStore{}
-	e := NewSchedQualityEngineService(store, ledger, runner, &qualitySwitches{true, true}, func() time.Time { return now })
+	e := NewSchedQualityEngineService(store, ledger, runner, &qualitySwitches{true, true}, func() time.Time { return now }, nil)
 	for group := int64(1); group <= 90; group++ {
 		store.Policies[group] = SchedPolicyRecord{GroupID: group, Policy: q.Policy{Enabled: true, TTFTSeconds: 10, MaxErrorRate: .05, MinCacheRatio: .8}}
 		for member := int64(0); member < 40; member++ {

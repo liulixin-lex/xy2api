@@ -42,17 +42,18 @@ type SchedQualityEngineService struct {
 	lockCache  LeaderLockCache
 	db         *sql.DB
 	instanceID string
+	obs        SchedObs
 }
 
 const schedQualityLedgerPageSize = 5000
 
 var _ SchedQualityEngine = (*SchedQualityEngineService)(nil)
 
-func NewSchedQualityEngineService(store SchedQualityStore, attempts SchedAttemptStore, runner SchedTestRunner, switches schedQualitySwitches, now func() time.Time) *SchedQualityEngineService {
+func NewSchedQualityEngineService(store SchedQualityStore, attempts SchedAttemptStore, runner SchedTestRunner, switches schedQualitySwitches, now func() time.Time, obs SchedObs) *SchedQualityEngineService {
 	if now == nil {
 		now = time.Now
 	}
-	s := &SchedQualityEngineService{store: store, attempts: attempts, runner: runner, switches: switches, now: now, seenResets: make(map[int64]time.Time), instanceID: uuid.NewString()}
+	s := &SchedQualityEngineService{store: store, attempts: attempts, runner: runner, switches: switches, now: now, seenResets: make(map[int64]time.Time), instanceID: uuid.NewString(), obs: schedObsOrNop(obs)}
 	s.snapshot.Store(&SchedQualitySnapshot{View: &schedQualityView{}})
 	return s
 }
@@ -297,7 +298,7 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) error {
 				slog.ErrorContext(ctx, "sched_quality.request_test", "account_id", pair.AccountID, "model", pair.Model, "error", err)
 			}
 		}
-		if err := s.runner.ReapStale(ctx); err != nil {
+		if _, err := s.runner.ReapStale(ctx); err != nil {
 			slog.ErrorContext(ctx, "sched_quality.reap_tests", "error", err)
 		}
 	}

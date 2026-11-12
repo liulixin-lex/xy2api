@@ -143,11 +143,17 @@ func (r *schedTestRepository) Since(ctx context.Context, since time.Time) ([]ser
 func (r *schedTestRepository) Recent(ctx context.Context, id int64, limit int) ([]service.SchedTestRecord, error) {
 	return r.query(ctx, `SELECT `+schedTestColumns+` FROM account_quality_tests WHERE account_id=$1 ORDER BY started_at DESC,id DESC LIMIT $2`, id, limit)
 }
-func (r *schedTestRepository) ReapStale(ctx context.Context, before, now time.Time) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE account_quality_tests SET status=2,abort_reason='timeout',finished_at=$2 WHERE status=0 AND started_at < $1`, before, now)
-	return err
+func (r *schedTestRepository) ReapStale(ctx context.Context, before, now time.Time) (int64, error) {
+	result, err := r.db.ExecContext(ctx, `UPDATE account_quality_tests SET status=2,abort_reason='timeout',finished_at=$2 WHERE status=0 AND started_at < $1`, before, now)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
-func (r *schedTestRepository) DeleteBefore(ctx context.Context, before time.Time) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM account_quality_tests WHERE started_at < $1 AND status<>0`, before)
-	return err
+func (r *schedTestRepository) DeleteBefore(ctx context.Context, before time.Time) (int64, error) {
+	result, err := r.db.ExecContext(ctx, `DELETE FROM account_quality_tests WHERE started_at < $1 AND status<>0`, before)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
