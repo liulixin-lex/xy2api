@@ -158,6 +158,7 @@ func TestRecentStatsScenario22Classification(t *testing.T) {
 		{name: "balance", event: `"resilience_category":"BALANCE","upstream_status_code":503`},
 		{name: "client_error", event: `"resilience_category":"CLIENT_ERROR","upstream_status_code":503`},
 		{name: "unsupported", event: `"resilience_category":"MODEL_UNSUPPORTED","upstream_status_code":503`},
+		{name: "upstream_request_restriction", event: `"resilience_category":"UPSTREAM_REQUEST_RESTRICTION","upstream_status_code":503`},
 		{name: "client_cancel_category", event: `"resilience_category":"CLIENT_CANCEL","upstream_status_code":503`},
 		{name: "client_owner", event: `"owner":"client","upstream_status_code":503`},
 		{name: "billing", event: `"kind":"billing_error","upstream_status_code":503`},

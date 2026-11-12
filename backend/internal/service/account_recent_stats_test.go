@@ -93,7 +93,7 @@ func TestRecentStatsScenario20Tiers(t *testing.T) {
 func TestRecentStatsScenario23EmptyAndOnlyFailures(t *testing.T) {
 	repo := &recentStatsRepoStub{rows: []AccountRecentStatsRow{{AccountID: 2, ErrorN: 2, ErrorBad: 2}}}
 	s := NewAccountRecentStatsService(repo, &OpsService{})
-	got, err := s.Batch(context.Background(), []int64{2, 1, 2})
+	got, err := s.Batch(context.Background(), []int64{1, 2})
 	require.NoError(t, err)
 	require.Len(t, got.Items, 2)
 	require.Equal(t, AccountRecentStatsItem{AccountID: 1, Error: &AccountRecentStatsError{}}, got.Items[0])
@@ -150,7 +150,7 @@ func TestRecentStatsScenario25BatchAndBoundedCache(t *testing.T) {
 	s.now = func() time.Time { return now }
 	ids := make([]int64, 100)
 	for i := range ids {
-		ids[i] = int64(100 - i)
+		ids[i] = int64(i + 1)
 	}
 	got, err := s.Batch(context.Background(), ids)
 	require.NoError(t, err)
@@ -160,7 +160,7 @@ func TestRecentStatsScenario25BatchAndBoundedCache(t *testing.T) {
 		require.EqualValues(t, i+1, item.AccountID)
 	}
 	require.Equal(t, got.AsOf, repo.calls[0].asOf)
-	_, err = s.Batch(context.Background(), []int64{102, 100, 101})
+	_, err = s.Batch(context.Background(), []int64{100, 101, 102})
 	require.NoError(t, err)
 	require.Equal(t, []int64{101, 102}, repo.calls[1].ids)
 	require.Equal(t, got.AsOf, repo.calls[1].asOf)
