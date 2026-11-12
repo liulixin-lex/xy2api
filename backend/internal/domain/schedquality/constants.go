@@ -64,7 +64,6 @@ const (
 	TakeoverMaxCandidates   = 2
 	BorrowMaxProbes         = 64
 	SummaryMaxAccounts      = 1000
-	SummaryMaxCooling       = 3
 	RecentAttemptsMax       = 50
 	ManualTestMaxModels     = 1
 	PolicyTTFTMinSeconds    = 0.5

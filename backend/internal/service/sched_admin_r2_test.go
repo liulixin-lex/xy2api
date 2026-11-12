@@ -105,12 +105,18 @@ func TestSchedAdminDetailGroupsWithoutState(t *testing.T) {
 	s, e, repo := schedAdminFixture()
 	p := e.snapshot
 	repo.rows[1].GroupIDs = []int64{3, 2, 1}
-	s.d.Groups = schedAdminGroups{1: {ID: 1, Name: "one", Platform: PlatformOpenAI}, 2: {ID: 2, Name: "two", Platform: PlatformOpenAI}, 3: {ID: 3, Platform: PlatformAnthropic}}
+	repo.rows[1].Groups = []*Group{{ID: 3, Platform: PlatformAnthropic}, nil, {ID: 2, Name: "two", Platform: PlatformOpenAI}, {ID: 1, Name: "one", Platform: PlatformOpenAI}}
+	loadedGroups := append([]*Group(nil), repo.rows[1].Groups...)
+	s.d.Groups = nil
+	p.GroupRows[1] = []SchedGroupRow{{GroupID: 99, Model: "former-member", View: schedquality.StateView{State: schedquality.StateCooling}}}
 	p.Overrides = []SchedOverride{{AccountID: 1, Mode: schedquality.OverrideExempt, Reason: "all"}, {AccountID: 1, GroupID: 2, Mode: schedquality.OverrideDemote}}
 	p.Policies[2] = SchedPolicyRecord{Policy: schedquality.Policy{Enabled: true, TTFTSeconds: 10}}
 	out, err := s.Detail(context.Background(), 1)
 	require.NoError(t, err)
 	require.Len(t, out.Groups, 2)
+	require.Equal(t, loadedGroups, repo.rows[1].Groups)
+	require.Equal(t, "one", out.Groups[0].Name)
+	require.Equal(t, "two", out.Groups[1].Name)
 	require.Equal(t, &SchedAdminOverride{Mode: "exempt", AllGroups: true, Reason: "all"}, out.AllGroupsOverride)
 	for i, g := range out.Groups {
 		require.Equal(t, int64(i+1), g.GroupID)
@@ -121,6 +127,7 @@ func TestSchedAdminDetailGroupsWithoutState(t *testing.T) {
 	require.Equal(t, "demote", out.Groups[1].Override.Mode)
 	require.True(t, out.Groups[1].GateEnabled)
 	repo.rows[1].GroupIDs = nil
+	repo.rows[1].Groups = nil
 	out, err = s.Detail(context.Background(), 1)
 	require.NoError(t, err)
 	require.Empty(t, out.Groups)

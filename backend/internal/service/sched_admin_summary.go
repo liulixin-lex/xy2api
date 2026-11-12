@@ -222,23 +222,16 @@ func (s *SchedAdminService) Detail(ctx context.Context, id int64) (SchedAdminAcc
 	for _, r := range p.GroupRows[id] {
 		groupRows[r.GroupID] = append(groupRows[r.GroupID], r)
 	}
-	gids := append([]int64(nil), a.GroupIDs...)
+	groups := make([]*Group, 0, len(a.Groups))
 	for _, group := range a.Groups {
-		if group != nil && !slices.Contains(gids, group.ID) {
-			gids = append(gids, group.ID)
+		if group != nil && group.Platform == PlatformOpenAI {
+			groups = append(groups, group)
 		}
 	}
-	sort.Slice(gids, func(i, j int) bool { return gids[i] < gids[j] })
-	gids = slices.Compact(gids)
+	sort.Slice(groups, func(i, j int) bool { return groups[i].ID < groups[j].ID })
 	out.AllGroupsOverride = s.override(ctx, p, id, 0, now)
-	for _, g := range gids {
-		gr, e := s.group(ctx, g)
-		if e != nil {
-			return out, e
-		}
-		if gr.Platform != PlatformOpenAI {
-			continue
-		}
+	for _, gr := range groups {
+		g := gr.ID
 		policy := p.Policies[g].Policy
 		x := SchedAdminAccountDetailGroups{GroupID: g, Name: gr.Name, GateEnabled: policy.Enabled, Policy: SchedAdminAccountDetailGroupsPolicy{TTFTSeconds: policy.TTFTSeconds, MaxErrorRate: policy.MaxErrorRate, MinCacheRatio: policy.MinCacheRatio, TakeoverIdleSeconds: policy.TakeoverIdleSeconds}, Override: s.override(ctx, p, id, g, now), ByModel: []SchedAdminAccountDetailGroupsByModel{}}
 		sort.Slice(groupRows[g], func(i, j int) bool { return groupRows[g][i].Model < groupRows[g][j].Model })
