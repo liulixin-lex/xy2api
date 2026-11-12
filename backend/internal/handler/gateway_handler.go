@@ -168,14 +168,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
-	compatCtx, compatErr := h.gatewayService.PrepareAnthropicCompatibilityForSelection(c.Request.Context(), subject.UserID, apiKey.ID, body, "messages", service.ExtractClientSessionID(c), c.Request.Header)
-	if compatErr != nil {
-		status, code, message, _ := service.AnthropicCompatErrorDetails(compatErr)
-		logAnthropicCompatSelectionError(c, reqLog, "messages", compatErr, status, code)
-		h.errorResponse(c, status, code, message)
-		return
-	}
-	c.Request = c.Request.WithContext(compatCtx)
+	c.Request = c.Request.WithContext(service.WithAnthropicCompatRequest(c.Request.Context(), subject.UserID, apiKey.ID, body, "messages", service.ClaudeCodeSessionIDFromHeader(c), c.Request.Header))
 	c.Request = c.Request.WithContext(h.gatewayService.WithClaudeCacheFallbackRequest(c.Request.Context(), apiKey, body))
 	body = parsedReq.Body.Bytes()
 	reqModel := parsedReq.Model
@@ -303,6 +296,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		APIKeyID:  apiKey.ID,
 	}
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
+	c.Request = c.Request.WithContext(service.WithAnthropicCompatSessionHash(c.Request.Context(), sessionHash))
 
 	// [DEBUG-STICKY] 打印会话 hash 生成结果
 	reqLog.Info("sticky.session_hash_generated",
@@ -362,11 +356,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		for {
 			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, "", int64(0)) // Gemini 不使用会话限制
 			if err != nil {
-				if status, code, message, local := service.AnthropicCompatErrorDetails(err); local {
-					logAnthropicCompatSelectionError(c, reqLog, "messages", err, status, code)
-					h.errorResponse(c, status, code, message)
-					return
-				}
 				if failoverClientGone(c) {
 					recordSelectionExhausted(c.Request.Context())
 					reqLog.Info("gateway.account_select_aborted_client_disconnected", zap.Error(err))
@@ -539,7 +528,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				accountReleaseFunc()
 			}
 			if err != nil {
-				if service.IsAnthropicCompatCandidateError(err) {
+				if errors.Is(err, service.ErrNoAvailableAccounts) {
 					fs.FailedAccountIDs[account.ID] = struct{}{}
 					continue
 				}
@@ -716,11 +705,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(selectionCtx, currentAPIKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, parsedReq.MetadataUserID, subject.UserID)
 			if err != nil {
-				if status, code, message, local := service.AnthropicCompatErrorDetails(err); local {
-					logAnthropicCompatSelectionError(c, reqLog, "messages", err, status, code)
-					h.errorResponse(c, status, code, message)
-					return
-				}
 				if failoverClientGone(c) {
 					recordSelectionExhausted(c.Request.Context())
 					reqLog.Info("gateway.account_select_aborted_client_disconnected", zap.Error(err))
@@ -1048,7 +1032,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 
 			if err != nil {
-				if service.IsAnthropicCompatCandidateError(err) {
+				if errors.Is(err, service.ErrNoAvailableAccounts) {
 					fs.FailedAccountIDs[account.ID] = struct{}{}
 					continue
 				}
@@ -2308,14 +2292,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
-	compatCtx, compatErr := h.gatewayService.PrepareAnthropicCompatibilityForSelection(c.Request.Context(), subject.UserID, apiKey.ID, body, "count_tokens", service.ExtractClientSessionID(c), c.Request.Header)
-	if compatErr != nil {
-		status, code, message, _ := service.AnthropicCompatErrorDetails(compatErr)
-		logAnthropicCompatSelectionError(c, reqLog, "count_tokens", compatErr, status, code)
-		h.errorResponse(c, status, code, message)
-		return
-	}
-	c.Request = c.Request.WithContext(compatCtx)
+	c.Request = c.Request.WithContext(service.WithAnthropicCompatRequest(c.Request.Context(), subject.UserID, apiKey.ID, body, "count_tokens", service.ClaudeCodeSessionIDFromHeader(c), c.Request.Header))
 	body = parsedReq.Body.Bytes()
 	// count_tokens 走 messages 严格校验时，复用已解析请求，避免二次反序列化。
 	SetClaudeCodeClientContext(c, body, parsedReq)
@@ -2363,6 +2340,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	}
 	parsedReq.GroupID = apiKey.GroupID
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
+	c.Request = c.Request.WithContext(service.WithAnthropicCompatSessionHash(c.Request.Context(), sessionHash))
 	sessionKey := sessionHash
 	platform := service.PlatformAnthropic
 	if forcePlatform, ok := middleware2.GetForcePlatformFromContext(c); ok {
@@ -2382,11 +2360,6 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	for {
 		account, err := h.gatewayService.SelectAccountForModelWithExclusions(c.Request.Context(), apiKey.GroupID, sessionKey, parsedReq.Model, excluded)
 		if err != nil {
-			if status, code, message, local := service.AnthropicCompatErrorDetails(err); local {
-				logAnthropicCompatSelectionError(c, reqLog, "count_tokens", err, status, code)
-				h.errorResponse(c, status, code, message)
-				return
-			}
 			reqLog.Warn("gateway.count_tokens_select_account_failed", zap.Error(err))
 			cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, parsedReq.Model, parsedReq.Model, platform)
 			if !cls.ModelNotFound {
@@ -2398,7 +2371,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 		if err := h.gatewayService.ForwardCountTokens(c.Request.Context(), c, account, parsedReq); err != nil {
 			h.gatewayService.ReleaseAccountSession(context.Background(), account, sessionKey)
-			if service.IsAnthropicCompatCandidateError(err) {
+			if errors.Is(err, service.ErrNoAvailableAccounts) {
 				excluded[account.ID] = struct{}{}
 				continue
 			}

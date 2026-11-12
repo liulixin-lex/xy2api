@@ -96,14 +96,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	}
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
-	compatCtx, compatErr := h.gatewayService.PrepareAnthropicCompatibilityForSelection(c.Request.Context(), subject.UserID, apiKey.ID, body, "chat", service.ExtractClientSessionID(c), c.Request.Header)
-	if compatErr != nil {
-		status, code, message, _ := service.AnthropicCompatErrorDetails(compatErr)
-		logAnthropicCompatSelectionError(c, reqLog, "chat", compatErr, status, code)
-		h.chatCompletionsErrorResponse(c, status, code, message)
-		return
-	}
-	c.Request = c.Request.WithContext(compatCtx)
+	c.Request = c.Request.WithContext(service.WithAnthropicCompatRequest(c.Request.Context(), subject.UserID, apiKey.ID, body, "chat", service.ClaudeCodeSessionIDFromHeader(c), c.Request.Header))
 	c.Request = c.Request.WithContext(h.gatewayService.WithClaudeCacheFallbackRequest(c.Request.Context(), apiKey, body))
 	c.Request = c.Request.WithContext(service.WithRequestReplaySafety(c.Request.Context(), body, false))
 	setOpsRequestContext(c, reqModel, reqStream)
@@ -188,6 +181,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		APIKeyID:  apiKey.ID,
 	}
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
+	c.Request = c.Request.WithContext(service.WithAnthropicCompatSessionHash(c.Request.Context(), sessionHash))
 	groupPlatform := effectiveAPIKeyPlatform(c, apiKey)
 	selectionSessionHash := sessionHash
 	if groupPlatform == service.PlatformGemini && selectionSessionHash != "" {
@@ -207,11 +201,6 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, selectionSessionHash, reqModel, fs.FailedAccountIDs, "", int64(0))
 		if err != nil {
-			if status, code, message, local := service.AnthropicCompatErrorDetails(err); local {
-				logAnthropicCompatSelectionError(c, reqLog, "chat", err, status, code)
-				h.chatCompletionsErrorResponse(c, status, code, message)
-				return
-			}
 			if failoverClientGone(c) {
 				recordSelectionExhausted(c.Request.Context())
 				reqLog.Info("gateway.cc.account_select_aborted_client_disconnected", zap.Error(err))
@@ -346,7 +335,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			if handleUnsupportedProtocolConversion(c, err, "chat", streamStarted) {
 				return
 			}
-			if service.IsAnthropicCompatCandidateError(err) {
+			if errors.Is(err, service.ErrNoAvailableAccounts) {
 				fs.FailedAccountIDs[account.ID] = struct{}{}
 				continue
 			}

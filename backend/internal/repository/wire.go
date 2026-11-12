@@ -140,7 +140,7 @@ var ProviderSet = wire.NewSet(
 	NewUserPlatformQuotaServiceAdapter, // T14: adapter → service.UserPlatformQuotaRepository
 
 	// Cache implementations
-	NewGatewayCacheWithManagedProvenance,
+	NewGatewayCache,
 	NewBillingCache,
 	NewAPIKeyCache,
 	NewTempUnschedCache,

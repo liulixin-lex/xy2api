@@ -66,7 +66,6 @@ type TestEvent struct {
 	ActualAccountID int64  `json:"actual_account_id,omitempty"`
 	TestScope       string `json:"test_scope,omitempty"`
 	CompatProfile   string `json:"compat_profile,omitempty"`
-	CompatRevision  string `json:"compat_revision,omitempty"`
 }
 
 const AccountTestModeAnthropicCompatibility = "compatibility"
@@ -601,7 +600,6 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	}
 	if profile != nil {
 		startEvent.CompatProfile = profile.ID
-		startEvent.CompatRevision = profile.Revision
 	}
 	s.sendEvent(c, startEvent)
 

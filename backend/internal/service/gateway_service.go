@@ -1303,12 +1303,11 @@ func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, gro
 	}
 
 	cacheKey := compositeModelOwnershipCacheKey(groupID, model)
-	revision := claudeCodeV1CompatProfile.Revision + ":" + claudeCodeV2CompatProfile.Revision
 	s.modelsListCacheMu.Lock()
 	generation := s.modelsListGeneration
 	if s.modelsListCache != nil {
 		if cached, found := s.modelsListCache.Get(cacheKey); found {
-			if entry, ok := cached.(gatewayModelOwnershipCacheEntry); ok && entry.profileRevision == revision {
+			if entry, ok := cached.(gatewayModelOwnershipCacheEntry); ok {
 				s.modelsListCacheMu.Unlock()
 				return entry.ownership, nil
 			}
@@ -1342,7 +1341,7 @@ func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, gro
 
 	s.modelsListCacheMu.Lock()
 	if s.modelsListCache != nil && generation == s.modelsListGeneration {
-		s.modelsListCache.Set(cacheKey, gatewayModelOwnershipCacheEntry{ownership, revision}, s.modelsListCacheTTL)
+		s.modelsListCache.Set(cacheKey, gatewayModelOwnershipCacheEntry{ownership}, s.modelsListCacheTTL)
 	}
 	s.modelsListCacheMu.Unlock()
 	return ownership, nil

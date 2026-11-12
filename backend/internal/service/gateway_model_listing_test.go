@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/pkg/claude"
 	gocache "github.com/patrickmn/go-cache"
 	"github.com/stretchr/testify/require"
 )
@@ -31,7 +32,7 @@ func TestGetAvailableModels_ClaudeCompatCacheLifecycle(t *testing.T) {
 	ownership, err := s.resolveCompositeModelOwnership(ctx, groupID, "public-opus")
 	require.NoError(t, err)
 	require.True(t, ownership.Matched)
-	a.Credentials = map[string]any{"model_mapping": map[string]any{"public-opus": "claude-sonnet-4-6"}}
+	a.Credentials = map[string]any{"model_mapping": map[string]any{"public-opus": "gpt-5"}}
 	repo.byGroup[groupID] = []Account{a}
 	repo.all = []Account{a}
 	require.Equal(t, []string{"public-opus"}, s.GetAvailableModels(ctx, &groupID, PlatformAnthropic), "account edits remain cached until invalidation or TTL")
@@ -47,15 +48,8 @@ func TestGetAvailableModels_ClaudeCompatCacheLifecycle(t *testing.T) {
 	ownership, err = s.resolveCompositeModelOwnership(ctx, groupID, "public-opus")
 	require.NoError(t, err)
 	require.False(t, ownership.Matched)
-	// A prior profile revision cannot supply a cached catalog or ownership.
-	key := modelsListCacheKey(&groupID, PlatformAnthropic)
-	s.modelsListCache.Set(key, gatewayModelsListCacheEntry{AvailableModelCatalog{Models: []string{"stale-model"}}, "old-profile-revision"}, time.Minute)
-	require.Empty(t, s.GetAvailableModels(ctx, &groupID, PlatformAnthropic))
-	s.modelsListCache.Set(compositeModelOwnershipCacheKey(groupID, "public-opus"), gatewayModelOwnershipCacheEntry{CompositeModelOwnership{Matched: true, TargetPlatform: PlatformAnthropic}, "old-profile-revision"}, time.Minute)
-	ownership, err = s.resolveCompositeModelOwnership(ctx, groupID, "public-opus")
-	require.NoError(t, err)
-	require.False(t, ownership.Matched)
 	// Disabling the profile preserves the exact public alias after TTL expiry.
+	key := modelsListCacheKey(&groupID, PlatformAnthropic)
 	a.Extra = map[string]any{AnthropicCompatProfileExtraKey: AnthropicCompatProfileOff}
 	repo.byGroup[groupID] = []Account{a}
 	cached, _ := s.modelsListCache.Get(key)
@@ -90,13 +84,13 @@ func TestGetAvailableModels_ClaudeCompatInvalidationDuringRead(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("catalog query did not start")
 	}
-	a.Credentials = map[string]any{"model_mapping": map[string]any{"unsupported": "claude-sonnet-4-6"}}
+	a.Credentials = map[string]any{"model_mapping": map[string]any{"unsupported": "gpt-5"}}
 	repo.byGroup[groupID] = []Account{a}
 	s.InvalidateAvailableModelsCache(&groupID, PlatformAnthropic)
 	close(repo.release)
 	select {
 	case catalog := <-done:
-		require.Len(t, catalog.Models, 2)
+		require.Len(t, catalog.Models, len(claude.DefaultModels))
 	case <-time.After(3 * time.Second):
 		t.Fatal("catalog query did not finish")
 	}

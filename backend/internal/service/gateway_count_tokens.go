@@ -24,12 +24,6 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 		return fmt.Errorf("parse request: empty request")
 	}
 
-	var compatErr error
-	ctx, compatErr = s.beginAnthropicCompatAttempt(ctx, c, account, parsed.Body.Bytes(), "count_tokens")
-	if compatErr != nil {
-		writeAnthropicCompatError(c, "messages", compatErr)
-		return compatErr
-	}
 	attemptParsed := *parsed
 	attemptParsed.Body = NewRequestBodyRef(parsed.Body.Bytes())
 	parsed = &attemptParsed
@@ -79,10 +73,9 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	reqModel := parsed.Model
 
 	// Pre-filter: strip empty text blocks to prevent upstream 400.
-	if !compatPreservesHistory(c) {
-		if err := replaceBody(StripEmptyTextBlocks(body)); err != nil {
-			return err
-		}
+
+	if err := replaceBody(StripEmptyTextBlocks(body)); err != nil {
+		return err
 	}
 
 	isClaudeCodeCT := IsClaudeCodeClient(ctx) || isClaudeCodeClient(c.GetHeader("User-Agent"), parsed.MetadataUserID)
@@ -153,11 +146,8 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	// 构建上游请求
 	upstreamReq, wireBody, err := s.buildCountTokensRequest(ctx, c, account, body, token, tokenType, reqModel, shouldMimicClaudeCode)
 	if err != nil {
-		if _, _, _, local := AnthropicCompatErrorDetails(err); local {
-			writeAnthropicCompatError(c, "messages", err)
-		} else {
-			s.countTokensError(c, http.StatusInternalServerError, "api_error", "Failed to build request")
-		}
+
+		s.countTokensError(c, http.StatusInternalServerError, "api_error", "Failed to build request")
 		return err
 	}
 	// 先记录首发 wire body；如果后面进入 400 retry，retry 会基于未签名的逻辑 body 重新构建。
@@ -223,12 +213,6 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 		if err := replaceBody(acceptedWireBody); err != nil {
 			return err
 		}
-	}
-
-	if plan := compatPlan(c); plan != nil && plan.Active && (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed || resp.StatusCode == http.StatusNotImplemented) {
-		err := compatInvalid("anthropic_compat_count_tokens_unsupported", "Upstream does not provide the count_tokens endpoint")
-		writeAnthropicCompatError(c, "messages", err)
-		return err
 	}
 
 	// 处理错误响应
@@ -473,7 +457,6 @@ func (s *GatewayService) buildCountTokensRequestAnthropicAPIKeyPassthrough(
 
 // buildCountTokensRequest 构建 count_tokens 上游请求
 func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token, tokenType, modelID string, mimicClaudeCode bool) (*http.Request, []byte, error) {
-	originalMessages := gjson.GetBytes(body, "messages").Raw
 	compat, compatErr := s.newAnthropicCompatPlan(ctx, c, account, body, modelID)
 	if compatErr != nil {
 		return nil, nil, compatErr
@@ -564,9 +547,6 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 
 	// 能力维度 body sanitize：与最终 anthropic-beta header 对称
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, finalBetaHeader); changed {
-		if compat != nil && compat.Active {
-			return nil, nil, compatInvalid("anthropic_compat_request_unsupported", "Explicit request capabilities require beta support unavailable in this compatibility plan")
-		}
 		body = sanitized
 	}
 
@@ -582,13 +562,9 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 			return nil, nil, err
 		}
 		body = s.finalizeAnthropicCache(ctx, account, body, modelID)
-		if compat.Scope.Record != nil && originalMessages != gjson.GetBytes(body, "messages").Raw {
-			return nil, nil, compatInvalid("anthropic_compat_history_incompatible", "Cache policy would modify signed history")
+		if next, ok := deleteJSONPathBytes(body, "metadata.user_id"); ok {
+			body = next
 		}
-		if err := finalizeAnthropicCompatPlan(compat, body, finalBetaHeader); err != nil {
-			return nil, nil, err
-		}
-		body = projectAnthropicCompatCountBody(body)
 	}
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))
 	if err != nil {
@@ -654,6 +630,9 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	// 账号级请求头覆写（仅 anthropic/openai api_key 账号启用时生效；OAuth 路径 no-op）
 	account.ApplyHeaderOverrides(req.Header)
 	filterSonnet55ToolsetBetaHeader(req.Header, body, modelID)
+	if compat != nil {
+		compat.Beta = finalBetaHeader
+	}
 	applyAnthropicCompatHeaders(req.Header, compat)
 
 	if c != nil && tokenType == "oauth" {

@@ -36,25 +36,13 @@ func (s *GatewayService) ForwardAsChatCompletions(
 ) (result *ForwardResult, err error) {
 	startTime := time.Now()
 	defer func() {
-		writeUnsupportedParameterError(c, err)
-		writeAnthropicCompatError(c, "chat", err)
 		s.logAnthropicCompatOutcome(ctx, c, account, "chat", err)
 	}()
-	ctx, err = s.beginAnthropicCompatAttempt(ctx, c, account, body, "chat")
-	if err != nil {
-		return nil, err
-	}
 	ctx, cacheDecision := s.beginClaudeCacheAttempt(ctx, parsed, account)
 	defer func() {
 		finishAnthropicCacheTTLAttempt(ctx, result)
 		finishClaudeCacheAttempt(cacheDecision, result)
 	}()
-
-	if compatPreservesHistory(c) {
-		if capabilityErr := compatUnsupportedRequest(body, "chat"); capabilityErr != nil {
-			return nil, capabilityErr
-		}
-	}
 
 	// 1. Parse Chat Completions request
 	var ccReq apicompat.ChatCompletionsRequest
@@ -63,7 +51,6 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	}
 	originalModel := ccReq.Model
 	clientStream := ccReq.Stream
-	normalizeAnthropicCompatChatConversion(ctx, &ccReq)
 
 	// 2. Convert CC → Responses → Anthropic (chained conversion)
 	responsesReq, err := apicompat.ChatCompletionsToResponses(&ccReq)
@@ -109,10 +96,6 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	if err != nil {
 		return nil, fmt.Errorf("marshal anthropic request: %w", err)
 	}
-	anthropicBody, err = restoreAnthropicCompatChatBody(ctx, anthropicBody)
-	if err != nil {
-		return nil, err
-	}
 	if err := validateHaiku55MessagesRequest(anthropicBody, mappedModel, account); err != nil {
 		return nil, &apicompat.UnsupportedConversionError{Field: "messages", Reason: err.Error()}
 	}
@@ -130,9 +113,8 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	}
 
 	// 7. Enforce cache_control block limit
-	if !compatPreservesHistory(c) {
-		anthropicBody = enforceConvertedCacheControlLimit(anthropicBody)
-	}
+
+	anthropicBody = enforceConvertedCacheControlLimit(anthropicBody)
 
 	// 8. Get access token
 	token, tokenType, err := s.GetAccessToken(ctx, account)
@@ -156,9 +138,6 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	releaseUpstreamCtx()
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
-	}
-	if err := s.prepareAnthropicCompatChatResponse(c, compatPlan(c)); err != nil {
-		return nil, err
 	}
 	// Bill the final Anthropic effort after conversion and account normalization.
 	// For example, OpenAI xhigh is forwarded as output_config.effort=max.
@@ -219,8 +198,6 @@ func (s *GatewayService) ForwardAsChatCompletions(
 		return nil, fmt.Errorf("upstream error: %d %s", resp.StatusCode, upstreamMsg)
 	}
 
-	s.observeAnthropicCompatResponse(ctx, resp, compatPlan(c))
-
 	// 13. Handle normal response
 	// Read Anthropic SSE → convert to Responses events → convert to CC format
 	var handleErr error
@@ -275,7 +252,6 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
 
 	var finalResp *apicompat.AnthropicResponse
-	sawMessageStop := false
 	var usage ClaudeUsage
 
 	for scanner.Scan() {
@@ -300,7 +276,6 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 		}
 
 		if event.Type == "message_stop" {
-			sawMessageStop = true
 		}
 
 		// message_start carries the initial response structure and cache usage
@@ -344,19 +319,6 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 				zap.String("request_id", requestID),
 			)
 		}
-	}
-
-	if anthropicCompatObserved(resp) && (scanner.Err() != nil || !sawMessageStop) {
-		readErr := scanner.Err()
-		if readErr == nil {
-			readErr = fmt.Errorf("upstream stream ended without message_stop")
-		}
-		if _, _, _, local := AnthropicCompatErrorDetails(readErr); !local {
-			writeAnthropicCompatError(c, "chat", &AnthropicCompatError{http.StatusBadGateway, "anthropic_compat_incomplete_response", "Upstream stream ended before completion"})
-		} else {
-			writeAnthropicCompatError(c, "chat", readErr)
-		}
-		return &ForwardResult{RequestID: requestID, UpstreamHeaders: resp.Header, Usage: usage, Model: originalModel, UpstreamModel: mappedModel, ReasoningEffort: reasoningEffort, Duration: time.Since(startTime)}, readErr
 	}
 
 	if finalResp == nil {

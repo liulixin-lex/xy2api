@@ -18,26 +18,21 @@ type AvailableModelCatalog struct {
 }
 
 type gatewayModelsListCacheEntry struct {
-	catalog         AvailableModelCatalog
-	profileRevision string
+	catalog AvailableModelCatalog
 }
 
 type gatewayModelOwnershipCacheEntry struct {
-	ownership       CompositeModelOwnership
-	profileRevision string
+	ownership CompositeModelOwnership
 }
 
 func (s *GatewayService) GetAvailableModelCatalog(ctx context.Context, groupID *int64, platform string) AvailableModelCatalog {
 	platform = strings.TrimSpace(platform)
 	cacheKey := modelsListCacheKey(groupID, platform)
-	// Profile revisions version cached capabilities; they do not migrate signed
-	// history. Account edits still require invalidation or the short cache TTL.
-	revision := claudeCodeV1CompatProfile.Revision + ":" + claudeCodeV2CompatProfile.Revision
 	s.modelsListCacheMu.Lock()
 	generation := s.modelsListGeneration
 	if s.modelsListCache != nil {
 		if cached, found := s.modelsListCache.Get(cacheKey); found {
-			if entry, ok := cached.(gatewayModelsListCacheEntry); ok && entry.profileRevision == revision {
+			if entry, ok := cached.(gatewayModelsListCacheEntry); ok {
 				s.modelsListCacheMu.Unlock()
 				modelsListCacheHitTotal.Add(1)
 				entry.catalog.Models = slices.Clone(entry.catalog.Models)
@@ -133,7 +128,7 @@ func (s *GatewayService) GetAvailableModelCatalog(ctx context.Context, groupID *
 	}
 	s.modelsListCacheMu.Lock()
 	if s.modelsListCache != nil && generation == s.modelsListGeneration {
-		entry := gatewayModelsListCacheEntry{catalog: catalog, profileRevision: revision}
+		entry := gatewayModelsListCacheEntry{catalog: catalog}
 		entry.catalog.Models = slices.Clone(catalog.Models)
 		s.modelsListCache.Set(cacheKey, entry, s.modelsListCacheTTL)
 		modelsListCacheStoreTotal.Add(1)

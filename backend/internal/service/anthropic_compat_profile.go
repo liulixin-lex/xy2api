@@ -16,39 +16,28 @@ const (
 	// AnthropicCompatIdentitySeedExtraKey is server-managed and must not be returned or exported.
 	AnthropicCompatIdentitySeedExtraKey = "anthropic_compat_identity_seed"
 	AnthropicCompatProfileOff           = "off"
-	AnthropicCompatProfileClaudeCodeV1  = "claude_code_v1"
-	AnthropicCompatProfileClaudeCodeV2  = "claude_code_v2"
+	AnthropicCompatProfileClaudeCode    = "claude_code"
 	AnthropicCompatNewSessionsExtraKey  = "anthropic_compat_new_sessions"
 )
 
 // AnthropicCompatProfile is a fixed wire contract, independent of authentication.
 // ResolveAnthropicCompatProfile returns a fresh copy so callers cannot mutate the shared definition.
 type AnthropicCompatProfile struct {
-	ID, Revision, UserAgent, APIVersion, SystemIdentity string
-	RequiredBetas                                       []string
+	ID, UserAgent, APIVersion, SystemIdentity string
+	RequiredBetas                             []string
 }
 
-var claudeCodeV2CompatProfile = AnthropicCompatProfile{
-	ID:             AnthropicCompatProfileClaudeCodeV2,
-	Revision:       "claude_code_v2.20261111",
+var claudeCodeCompatProfile = AnthropicCompatProfile{
+	ID:             AnthropicCompatProfileClaudeCode,
 	UserAgent:      "claude-cli/2.1.114 (external, sdk-cli)",
 	APIVersion:     "2023-06-01",
 	SystemIdentity: claudeCodeSystemPrompt,
-	RequiredBetas:  []string{"claude-code-20250219", "interleaved-thinking-2025-05-14", "context-management-2025-06-27", "prompt-caching-scope-2026-01-05", "advisor-tool-2026-03-01"},
-}
-
-var claudeCodeV1CompatProfile = AnthropicCompatProfile{
-	ID:             AnthropicCompatProfileClaudeCodeV1,
-	Revision:       "claude_code_v1.20261110",
-	UserAgent:      "claude-cli/2.1.114 (external, sdk-cli)",
-	APIVersion:     "2023-06-01",
-	SystemIdentity: claudeCodeSystemPrompt,
-	// This combination is the measured baseline, not proof that each token is individually required.
+	// All Claude models retain the v0.6.3 five-beta baseline. Haiku and Sonnet on CC-only upstreams have not been verified by the gateway; administrators must test each model.
 	RequiredBetas: []string{"claude-code-20250219", "interleaved-thinking-2025-05-14", "context-management-2025-06-27", "prompt-caching-scope-2026-01-05", "advisor-tool-2026-03-01"},
 }
 
 func (p *AnthropicCompatProfile) SupportsModel(model string) bool {
-	return p != nil && (p.ID == AnthropicCompatProfileClaudeCodeV1 || p.ID == AnthropicCompatProfileClaudeCodeV2) && (model == "claude-opus-4-8" || model == "claude-opus-5-5")
+	return p != nil && strings.HasPrefix(model, "claude-")
 }
 
 func anthropicCompatProfileValue(extra map[string]any) (string, error) {
@@ -57,8 +46,8 @@ func anthropicCompatProfileValue(extra map[string]any) (string, error) {
 		return AnthropicCompatProfileOff, nil
 	}
 	value, ok := raw.(string)
-	if !ok || (value != AnthropicCompatProfileOff && value != AnthropicCompatProfileClaudeCodeV1 && value != AnthropicCompatProfileClaudeCodeV2) {
-		return "", infraerrors.BadRequest("ANTHROPIC_COMPAT_PROFILE_INVALID", "anthropic_compat_profile must be off, claude_code_v1 or claude_code_v2")
+	if !ok || (value != AnthropicCompatProfileOff && value != AnthropicCompatProfileClaudeCode) {
+		return "", infraerrors.BadRequest("ANTHROPIC_COMPAT_PROFILE_INVALID", "anthropic_compat_profile must be off, claude_code")
 	}
 	return value, nil
 }
@@ -96,10 +85,7 @@ func configuredAnthropicCompatProfile(account *Account) (*AnthropicCompatProfile
 	if err := ValidateAnthropicCompatProfileExtra(account.Platform, account.Type, account.Extra); err != nil {
 		return nil, err
 	}
-	profile := claudeCodeV1CompatProfile
-	if mode == AnthropicCompatProfileClaudeCodeV2 {
-		profile = claudeCodeV2CompatProfile
-	}
+	profile := claudeCodeCompatProfile
 	profile.RequiredBetas = append([]string(nil), profile.RequiredBetas...)
 	return &profile, nil
 }
@@ -152,29 +138,6 @@ func validateAnthropicCompatProfileHeaders(account *Account, profile *AnthropicC
 		}
 	}
 	return profile, nil
-}
-
-// A stored history revision selects its original adapter. Changing the default
-// only affects new sessions; disabling compatibility is an explicit hard stop.
-func resolveAnthropicCompatProfile(ctx context.Context, account *Account) (*AnthropicCompatProfile, error) {
-	profile, err := configuredAnthropicCompatProfile(account)
-	if err != nil || profile == nil {
-		return profile, err
-	}
-	if scope := compatScope(ctx); scope != nil && scope.Record != nil {
-		switch scope.Record.ProfileRevision {
-		case claudeCodeV1CompatProfile.Revision:
-			copy := claudeCodeV1CompatProfile
-			profile = &copy
-		case claudeCodeV2CompatProfile.Revision:
-			copy := claudeCodeV2CompatProfile
-			profile = &copy
-		default:
-			return nil, compatInvalid("anthropic_compat_history_incompatible", "Signed history requires an unavailable compatibility revision", AnthropicCompatReasonProfile)
-		}
-		profile.RequiredBetas = append([]string(nil), profile.RequiredBetas...)
-	}
-	return validateAnthropicCompatProfileHeaders(account, profile)
 }
 
 func anthropicCompatAcceptsNewSessions(account *Account) bool {
@@ -305,5 +268,5 @@ func (s *adminServiceImpl) validateAnthropicCompatConfiguration(ctx context.Cont
 
 func ShouldEnsureAnthropicCompatSeedForExtraUpdates(updates map[string]any) bool {
 	_, authScheme := updates["anthropic_apikey_auth_scheme"]
-	return updates[AnthropicCompatProfileExtraKey] == AnthropicCompatProfileClaudeCodeV1 || updates[AnthropicCompatProfileExtraKey] == AnthropicCompatProfileClaudeCodeV2 || authScheme
+	return updates[AnthropicCompatProfileExtraKey] == AnthropicCompatProfileClaudeCode || authScheme
 }
