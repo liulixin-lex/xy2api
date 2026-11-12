@@ -1,0 +1,185 @@
+/*
+ * Quality scheduling UI tokens (design/tokens.md). Light values on :root, dark on .dark; components only use the
+ * semantic classes below. Verdicts are colour + shape, never words.
+ */
+:root {
+  --sq-cool-fg: #b91c1c; --sq-cool-bg: #fef2f2; --sq-cool-bd: #fecaca;
+  --sq-test-fg: #1d4ed8; --sq-test-bg: #eff6ff; --sq-test-bd: #bfdbfe;
+  --sq-pass-fg: #047857;
+  --sq-marg-fg: #b45309;
+  --sq-fail-fg: #b91c1c;
+  --sq-none-fg: #6b7280;
+  --sq-pass-fill: #059669;
+  --sq-fail-fill: #dc2626;
+  --sq-none-fill: #6b7280;
+  --sq-full-fill: #d97706;
+  --sq-mark-fill: #6b7280;
+  --sq-text: #111827;
+  --sq-text-2: #374151;
+  --sq-text-3: #6b7280;
+  --sq-link: #0f766e;
+  --sq-line: #e5e7eb;
+  --sq-line-soft: #f3f4f6;
+  --sq-tile: #f9fafb;
+  --sq-target: #f0fdfa;
+  --sq-tab-bg: #f0fdfa;
+  --sq-tab-fg: #0f766e;
+  --sq-ring: #0d9488;
+  --sq-tip-bg: #111827;
+}
+
+.dark {
+  --sq-cool-fg: #fca5a5; --sq-cool-bg: rgba(248, 113, 113, 0.12); --sq-cool-bd: rgba(248, 113, 113, 0.3);
+  --sq-test-fg: #93c5fd; --sq-test-bg: rgba(96, 165, 250, 0.12); --sq-test-bd: rgba(96, 165, 250, 0.3);
+  --sq-pass-fg: #34d399;
+  --sq-marg-fg: #fbbf24;
+  --sq-fail-fg: #f87171;
+  --sq-none-fg: #94a3b8;
+  --sq-pass-fill: #34d399;
+  --sq-fail-fill: #f87171;
+  --sq-none-fill: #64748b;
+  --sq-full-fill: #fbbf24;
+  --sq-mark-fill: #94a3b8;
+  --sq-text: #f3f4f6;
+  --sq-text-2: #d1d5db;
+  --sq-text-3: #94a3b8;
+  --sq-link: #2dd4bf;
+  --sq-line: #334155;
+  --sq-line-soft: #1e293b;
+  --sq-tile: rgba(30, 41, 59, 0.5);
+  --sq-target: rgba(19, 78, 74, 0.3);
+  --sq-tab-bg: rgba(19, 78, 74, 0.3);
+  --sq-tab-fg: #2dd4bf;
+  --sq-tip-bg: #1f2937;
+}
+
+/* Solid 2px focus ring for every new focusable element (spec F.1). */
+.sq-focus:focus { outline: none; }
+.sq-focus:focus-visible { outline: 2px solid var(--sq-ring); outline-offset: 2px; }
+
+.sq-num { font-variant-numeric: tabular-nums; }
+.sq-text { color: var(--sq-text); }
+.sq-text-2 { color: var(--sq-text-2); }
+.sq-text-3 { color: var(--sq-text-3); }
+.sq-cool { color: var(--sq-cool-fg); }
+.sq-test { color: var(--sq-test-fg); }
+
+/* Clickable number / text with no button chrome. */
+.sq-plain {
+  border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.sq-plain:hover { text-decoration: underline; text-underline-offset: 4px; }
+
+.sq-link {
+  border-radius: 4px;
+  color: var(--sq-link);
+  font-weight: 500;
+}
+.sq-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.sq-weak, .sq-weak .sq-link { color: var(--sq-text-3); }
+
+/* Capsule: group name + state word (spec A.3). Name truncates, the state word never does. */
+.sq-capsule {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  max-width: 11em;
+  padding: 0 8px;
+  border: 1px solid;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  line-height: 20px;
+}
+.sq-capsule__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sq-capsule__state { flex-shrink: 0; }
+.sq-capsule--cool { color: var(--sq-cool-fg); background: var(--sq-cool-bg); border-color: var(--sq-cool-bd); }
+.sq-capsule--test { color: var(--sq-test-fg); background: var(--sq-test-bg); border-color: var(--sq-test-bd); }
+
+/* One-time emphasis when a capsule newly appears on refresh (spec F.3); reduced motion cuts it via motion.css. */
+.sq-capsule--new { animation: sq-capsule-in var(--motion-base) var(--ease-emphasized); }
+@keyframes sq-capsule-in {
+  from { transform: scale(0.92); opacity: 0.4; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+/* Verdict on a number: colour, plus underline and weight so it reads without colour (tokens.md section 3). */
+.sq-v-pass { color: var(--sq-pass-fg); }
+.sq-v-marginal { color: var(--sq-marg-fg); text-decoration: underline dotted 1px; text-underline-offset: 4px; }
+.sq-v-fail { color: var(--sq-fail-fg); font-weight: 600; text-decoration: underline dotted 2px; text-underline-offset: 4px; }
+.sq-v-nodata { color: var(--sq-text-3); }
+
+/* Verdict shapes (no number): filled circle, ring, filled square, dash. */
+.sq-shape { display: inline-block; flex-shrink: 0; vertical-align: middle; }
+.sq-shape--pass { width: 8px; height: 8px; border-radius: 9999px; background: var(--sq-pass-fg); }
+.sq-shape--marginal { width: 8px; height: 8px; border-radius: 9999px; border: 2px solid var(--sq-marg-fg); }
+.sq-shape--fail { width: 8px; height: 8px; border-radius: 1px; background: var(--sq-fail-fg); }
+.sq-shape--nodata { width: 8px; height: 2px; background: var(--sq-text-3); }
+
+/* Fills for non-text marks. */
+.sq-dot { display: inline-block; width: 6px; height: 6px; border-radius: 9999px; background: var(--sq-pass-fill); }
+.sq-mark { display: inline-block; width: 8px; height: 8px; }
+.sq-mark--ok { border-radius: 9999px; background: var(--sq-pass-fill); }
+.sq-mark--bad { border-radius: 1px; background: var(--sq-fail-fill); }
+.sq-full { display: inline-block; width: 4px; height: 10px; border-radius: 1px; background: var(--sq-full-fill); }
+.sq-icon-mark { color: var(--sq-mark-fill); border-radius: 4px; }
+
+/* Tables inside the drawer and the board: header line, faint row lines, 10/12 cell padding. */
+.sq-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.sq-table th {
+  padding: 0 12px 8px;
+  border-bottom: 1px solid var(--sq-line);
+  color: var(--sq-text-3);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+}
+.sq-table td { padding: 10px 12px; border-top: 1px solid var(--sq-line-soft); color: var(--sq-text); white-space: nowrap; }
+.sq-table tbody tr:first-child td { border-top: 0; }
+.sq-table .sq-r { text-align: right; }
+.sq-table tr.sq-target td { background: var(--sq-target); }
+.sq-table tr.sq-weak td { color: var(--sq-text-3); }
+.sq-table tr.sq-split td { border-top: 1px solid var(--sq-line); }
+
+.sq-btn-xs { padding: 3px 10px; border-radius: 8px; font-size: 12px; line-height: 16px; }
+
+.sq-tile { padding: 12px 16px; border: 1px solid var(--sq-line); border-radius: 12px; background: var(--sq-tile); }
+
+.sq-tab { padding: 6px 12px; border-radius: 8px; font-size: 13px; font-weight: 500; color: var(--sq-text-3); }
+.sq-tab[aria-selected='true'] { background: var(--sq-tab-bg); color: var(--sq-tab-fg); }
+
+.sq-section-title { font-size: 14px; font-weight: 600; color: var(--sq-text); }
+
+/* Short hover tip (spec E): one line, gray-900, white 12px. */
+.sq-tip {
+  position: fixed;
+  z-index: 1000;
+  max-width: 320px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--sq-tip-bg);
+  color: #fff;
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Trial bar (spec D.2). */
+.sq-trial-bar { display: flex; gap: 2px; width: min(280px, 100%); height: 10px; border-radius: 9999px; overflow: hidden; }
+.sq-trial-seg { height: 100%; cursor: pointer; }
+.sq-trial-seg--pass { background: var(--sq-pass-fill); }
+.sq-trial-seg--fail { background: var(--sq-fail-fill); }
+.sq-trial-seg--nodata { background: var(--sq-none-fill); }
+
+/* "失败" as a short status word next to a control (no underline, unlike a failing number). */
+.sq-fail-word { color: var(--sq-fail-fg); font-size: 12px; font-weight: 500; }
+.sq-pass-word { color: var(--sq-pass-fg); }
+
+/* Compact model select (list header, board header, group settings): 28px high, 12px text. */
+.sq-select-sm button.select-trigger { height: 28px; padding: 0 8px; border-radius: 8px; font-size: 12px; font-weight: 400; letter-spacing: normal; text-transform: none; }

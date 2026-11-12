@@ -323,6 +323,11 @@
             </div>
           </template>
 
+          <template #cell-sched_gate="{ row }">
+            <span v-if="schedGateText(row)" class="sq-num whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">{{ schedGateText(row) }}</span>
+            <span v-else class="text-sm text-gray-500 dark:text-dark-400">—</span>
+          </template>
+
           <template #cell-capacity="{ row }">
             <GroupCapacityBadge
               v-if="capacityMap.get(row.id)"
@@ -386,6 +391,17 @@
 
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
+              <button
+                v-if="!authStore.isSimpleMode && row.platform === 'openai'"
+                type="button"
+                data-testid="group-sched-board"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                :data-sq-trigger="`group-board:${row.id}`"
+                @click="openSchedBoard({ id: row.id, name: row.name })"
+              >
+                <Icon name="chart" size="sm" />
+                <span class="text-xs">{{ t("admin.schedQuality.action.board") }}</span>
+              </button>
               <button
                 v-if="canManage"
                 @click="handleEdit(row)"
@@ -2973,6 +2989,13 @@
           />
         </div>
 
+        <!-- 质量门槛（仅 OpenAI 分组的编辑弹窗；与分组分两次保存，带版本号） -->
+        <GroupSchedPolicyField
+          v-if="editForm.platform === 'openai' && editingGroup && !authStore.isSimpleMode"
+          ref="editSchedPolicyRef"
+          :group-id="editingGroup.id"
+        />
+
         <!-- 支持的模型系列（仅 antigravity 平台） -->
         <div v-if="editForm.platform === 'antigravity'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
@@ -3831,7 +3854,7 @@
           <button
             type="submit"
             form="edit-group-form"
-            :disabled="submitting"
+            :disabled="submitting || editSchedPolicyRef?.valid === false"
             class="btn btn-primary"
             data-tour="group-form-submit"
           >
@@ -4371,6 +4394,7 @@
       @close="showRPMOverridesModal = false"
       @success="loadGroups"
     />
+    <SchedQualityLayers />
   </AppLayout>
 </template>
 
@@ -4416,6 +4440,12 @@ import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
 import CodexManifestAccountsField from "@/components/admin/group/CodexManifestAccountsField.vue";
 import GroupProfitControlPreview from "@/components/admin/group/GroupProfitControlPreview.vue";
+import GroupSchedPolicyField from "@/components/admin/group/GroupSchedPolicyField.vue";
+import SchedQualityLayers from "@/components/admin/account/quality/SchedQualityLayers.vue";
+import { openSchedBoard } from "@/composables/useSchedLayers";
+import schedQualityAPI from "@/api/admin/schedQuality";
+import type { SchedPolicy } from "@/types/schedQuality";
+import { policyShort } from "@/utils/schedQualityFormat";
 import LongContextPricingFields from "@/components/admin/group/LongContextPricingFields.vue";
 import GroupSystemPromptFields from "@/components/admin/group/GroupSystemPromptFields.vue";
 import GroupCategoryFilter from "@/components/admin/group/GroupCategoryFilter.vue";
@@ -4656,6 +4686,7 @@ const allColumns = computed<Column[]>(() => {
     { key: "rate_multiplier", label: t("admin.groups.columns.rateMultiplier"), sortable: true },
     { key: "is_exclusive", label: t("admin.groups.columns.type"), sortable: true },
     { key: "category", label: t("admin.groupCategories.column"), sortable: false },
+    { key: "sched_gate", label: t("admin.schedQuality.policy.column"), sortable: false },
     basic[3],
     { key: "capacity", label: t("admin.groups.columns.capacity"), sortable: false },
     { key: "usage", label: t("admin.groups.columns.usage"), sortable: false },
@@ -4763,6 +4794,35 @@ const toggleColumn = (key: string) => {
   if (wasHidden && key === "capacity") {
     loadCapacitySummary();
   }
+  if (wasHidden && key === "sched_gate") {
+    void loadSchedGates();
+  }
+};
+
+// 「门槛」列：每个 OpenAI 分组的三个阈值简写，未启用为“—”（设计 D.3）。随列表刷新逐组读取，并发 4。
+const schedGates = reactive(new Map<number, SchedPolicy | null>());
+let schedGateSeq = 0;
+const loadSchedGates = async () => {
+  if (authStore.isSimpleMode || !isColumnVisible("sched_gate")) return;
+  const seq = ++schedGateSeq;
+  const ids = groups.value.filter((group) => group.platform === "openai").map((group) => group.id);
+  let next = 0;
+  const worker = async () => {
+    while (next < ids.length) {
+      const id = ids[next++];
+      try {
+        const record = await schedQualityAPI.getGroupPolicy(id);
+        if (seq === schedGateSeq) schedGates.set(id, record.policy);
+      } catch {
+        if (seq === schedGateSeq) schedGates.set(id, null);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(4, ids.length) }, worker));
+};
+const schedGateText = (group: AdminGroup) => {
+  const policy = group.platform === "openai" ? schedGates.get(group.id) : null;
+  return policy?.enabled ? policyShort(policy, t) : "";
 };
 
 const columns = computed<Column[]>(() =>
@@ -5109,6 +5169,7 @@ type CodexManifestAccountsFieldExpose = {
 };
 const editCodexManifestRef = ref<CodexManifestAccountsFieldExpose | null>(null);
 const editProfitPreviewRef = ref<InstanceType<typeof GroupProfitControlPreview> | null>(null);
+const editSchedPolicyRef = ref<InstanceType<typeof GroupSchedPolicyField> | null>(null);
 const createCodexManifestDefaults = (): CodexModelsManifestConfig => ({
   enabled: false,
   account_ids: [],
@@ -5860,6 +5921,7 @@ const loadGroups = async () => {
     if (hasVisibleCapacityColumn.value) {
       loadCapacitySummary();
     }
+    void loadSchedGates();
   } catch (error: any) {
     if (
       signal.aborted ||
@@ -6505,6 +6567,7 @@ const handleUpdateGroup = async () => {
   if (!validateProfitControlForm(editForm)) {
     return;
   }
+  if (editSchedPolicyRef.value && !editSchedPolicyRef.value.valid) return;
   if (!validateGroupReasoningMultipliers(editForm.model_pricing)) return;
   // 模型白名单：开启且没有任何条目时阻止提交，与后端 400 对齐。
   if (
@@ -6685,7 +6748,10 @@ const handleUpdateGroup = async () => {
     }
     // 分组之后再存分类；失败时提示“分组已保存，分类未保存”。
     const categoriesSaved = (await editCategoryFieldRef.value?.save(groupId)) !== false;
+    // 质量门槛单独保存；没保存成功（冲突、失败）时对话框保留，再次保存时分组没改就不重复提交。
+    const policySaved = (await editSchedPolicyRef.value?.save()) !== false;
     loadGroups();
+    if (!policySaved) return;
     if (categoriesSaved) appStore.showSuccess(t("admin.groups.groupUpdated"));
     closeEditModal();
   } catch (error: any) {

@@ -60,8 +60,9 @@
               <Icon name="shield" size="sm" :class="ICON" />
               {{ t('admin.accounts.setPrivacy') }}
             </button>
-            <div v-if="canManage && (hasRecoverableState || hasQuotaLimit)" :class="DIVIDER"></div>
-            <button v-if="canManage && hasRecoverableState" :class="ITEM" @click="$emit('recover-state', account); $emit('close')">
+            <div v-if="canManage" :class="DIVIDER"></div>
+            <!-- 对任何账号显示：打开恢复确认流（已清除 / 保留 / 失败） -->
+            <button v-if="canManage" :class="ITEM" @click="$emit('recover-state', account); $emit('close')">
               <Icon name="sync" size="sm" :class="ICON" />
               {{ t('admin.accounts.recoverState') }}
             </button>
@@ -82,7 +83,6 @@ import { useResizeObserver, useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { Icon } from '@/components/icons'
 import type { Account } from '@/types'
-import { IQ_GATE_KEY_PREFIX } from './iqCheckPresentation'
 import { useAuthStore } from '@/stores/auth'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 
@@ -133,25 +133,6 @@ const DIVIDER = 'my-1 border-t border-gray-100 dark:border-dark-700'
 const canDuplicate = computed(() => {
   if (!props.account || props.account.parent_account_id != null) return false
   return ['apikey', 'upstream', 'bedrock', 'service_account'].includes(props.account.type)
-})
-const isRateLimited = computed(() => {
-  if (props.account?.rate_limit_reset_at && new Date(props.account.rate_limit_reset_at) > new Date()) {
-    return true
-  }
-  const modelLimits = (props.account?.extra as Record<string, unknown> | undefined)?.model_rate_limits as
-    | Record<string, { rate_limit_reset_at: string }>
-    | undefined
-  if (modelLimits) {
-    const now = new Date()
-    // IQ gates are not cleared by "recover state"; they lift only after a passing recheck.
-    return Object.entries(modelLimits).some(([key, info]) => !key.startsWith(IQ_GATE_KEY_PREFIX) && new Date(info.rate_limit_reset_at) > now)
-  }
-  return false
-})
-const isOverloaded = computed(() => props.account?.overload_until && new Date(props.account.overload_until) > new Date())
-const isTempUnschedulable = computed(() => props.account?.temp_unschedulable_until && new Date(props.account.temp_unschedulable_until) > new Date())
-const hasRecoverableState = computed(() => {
-  return props.account?.status === 'error' || Boolean(isRateLimited.value) || Boolean(isOverloaded.value) || Boolean(isTempUnschedulable.value)
 })
 const isAntigravityOAuth = computed(() => props.account?.platform === 'antigravity' && props.account?.type === 'oauth')
 const isOpenAIOAuth = computed(() => props.account?.platform === 'openai' && props.account?.type === 'oauth')

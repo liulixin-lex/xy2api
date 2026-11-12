@@ -59,6 +59,7 @@ export async function list(
     search?: string
     privacy_mode?: string
     iq_status?: string
+    sched_quality?: string
     group_category?: string
     lite?: string
     sort_by?: string
@@ -137,6 +138,7 @@ export async function getUpstreamBillingRatesWithEtag(
     search?: string
     privacy_mode?: string
     iq_status?: string
+    sched_quality?: string
     group_category?: string
     sort_by?: string
     sort_order?: 'asc' | 'desc'
@@ -172,6 +174,7 @@ export async function listWithEtag(
     search?: string
     privacy_mode?: string
     iq_status?: string
+    sched_quality?: string
     group_category?: string
     lite?: string
     sort_by?: string
@@ -453,16 +456,6 @@ export async function clearRateLimit(id: number): Promise<Account> {
   const { data } = await apiClient.post<Account>(
     `/admin/accounts/${id}/clear-rate-limit`
   )
-  return data
-}
-
-/**
- * Recover account runtime state in one call
- * @param id - Account ID
- * @returns Updated account
- */
-export async function recoverState(id: number): Promise<Account> {
-  const { data } = await apiClient.post<Account>(`/admin/accounts/${id}/recover-state`)
   return data
 }
 
@@ -1255,7 +1248,6 @@ export const accountsAPI = {
   getBatchTodayStats,
   getUpstreamBalances,
   clearRateLimit,
-  recoverState,
   resetAccountQuota,
   getTempUnschedulableStatus,
   resetTempUnschedulable,

@@ -42,8 +42,17 @@
         </button>
       </template>
     </div>
-    <div class="flex gap-2">
+    <div class="flex flex-wrap justify-end gap-2">
       <template v-if="selectedIds.length > 0">
+        <button
+          v-for="action in SCHED_ACTIONS"
+          :key="action"
+          type="button"
+          class="btn btn-secondary btn-sm"
+          :data-test="`bulk-sched-${action}`"
+          @click="$emit('sched-action', action, $event.currentTarget)"
+        >{{ t(`admin.schedQuality.action.${action}`) }}</button>
+        <span class="mx-1 w-px self-stretch bg-gray-300 dark:bg-dark-600" aria-hidden="true" />
         <button @click="$emit('delete')" class="btn btn-danger btn-sm">{{ t('admin.accounts.bulkActions.delete') }}</button>
         <button @click="$emit('reset-status')" class="btn btn-secondary btn-sm">{{ t('admin.accounts.bulkActions.resetStatus') }}</button>
         <button @click="$emit('refresh-token')" class="btn btn-secondary btn-sm">{{ t('admin.accounts.bulkActions.refreshToken') }}</button>
@@ -83,8 +92,11 @@ defineEmits([
   'reset-status',
   'refresh-token',
   'probe-upstream-billing',
-  'run-iq-check'
+  'run-iq-check',
+  'sched-action'
 ])
+
+const SCHED_ACTIONS = ['reset', 'demote', 'exempt', 'test'] as const
 
 const { t } = useI18n()
 </script>

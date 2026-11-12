@@ -15,6 +15,18 @@
     <Select :model-value="filters.iq_status" :aria-label="t('admin.accounts.allIQStatuses')" class="min-w-0 w-full sm:w-44" :options="iqOpts" @update:model-value="updateIQStatus" @change="$emit('change')" />
     <GroupCategoryFilter :model-value="filters.group_category ?? ''" class="min-w-0 w-full sm:w-44" @update:model-value="(value: string) => $emit('update:filters', { ...filters, group_category: value })" @change="$emit('change')" />
     <Select :model-value="filters.group" :aria-label="t('admin.accounts.allGroups')" class="min-w-0 w-full sm:w-44" :options="gOpts" @update:model-value="updateGroup" @change="$emit('change')" />
+    <button
+      type="button"
+      :aria-pressed="filters.sched_quality === 'cooling'"
+      :class="[
+        'sq-focus h-10 rounded-xl border px-4 text-sm font-medium transition-colors',
+        filters.sched_quality === 'cooling'
+          ? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
+          : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200 dark:hover:bg-dark-700'
+      ]"
+      data-test="filter-sched-cooling"
+      @click="toggleCooling"
+    >{{ t('admin.schedQuality.filter.cooling') }}</button>
   </div>
 </template>
 
@@ -31,6 +43,11 @@ const updateStatus = (value: string | number | boolean | null) => { emit('update
 const updatePrivacyMode = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, privacy_mode: value }) }
 const updateIQStatus = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, iq_status: value }) }
 const updateGroup = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, group: value }) }
+// "冷却中" filter: the list API filters by sched_quality=cooling (contract clarification K11).
+const toggleCooling = () => {
+  emit('update:filters', { ...props.filters, sched_quality: props.filters.sched_quality === 'cooling' ? '' : 'cooling' })
+  emit('change')
+}
 const pOpts = computed(() => [{ value: '', label: t('admin.accounts.allPlatforms') }, ...CONCRETE_PLATFORM_OPTIONS])
 const tOpts = computed(() => [{ value: '', label: t('admin.accounts.allTypes') }, { value: 'oauth', label: t('admin.accounts.oauthType') }, { value: 'setup-token', label: t('admin.accounts.setupToken') }, { value: 'apikey', label: t('admin.accounts.apiKey') }, { value: 'bedrock', label: 'AWS Bedrock' }])
 const sOpts = computed(() => [{ value: '', label: t('admin.accounts.allStatus') }, { value: 'active', label: t('admin.accounts.status.active') }, { value: 'inactive', label: t('admin.accounts.status.inactive') }, { value: 'error', label: t('admin.accounts.status.error') }, { value: 'rate_limited', label: t('admin.accounts.status.rateLimited') }, { value: 'temp_unschedulable', label: t('admin.accounts.status.tempUnschedulable') }, { value: 'unschedulable', label: t('admin.accounts.status.unschedulable') }])

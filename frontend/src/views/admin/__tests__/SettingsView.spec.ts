@@ -198,8 +198,11 @@ vi.mock("vue-i18n", async () => {
     "admin.settings.paymentVisibleMethods.sourceRequiredError": "{title} 已启用，请先选择支付来源。",
     "admin.settings.payment.configGuide": "查看支付配置说明",
     "admin.settings.payment.findProvider": "查看支持的支付方式",
-    "admin.settings.scheduling.oauthRateTitle": "OAuth 调度参考倍率",
-    "admin.settings.scheduling.oauthRateInvalid": "OAuth 调度参考倍率必须是非负数字，或留空以使用账号倍率。",
+    "admin.schedQuality.settings.enabled": "质量调度",
+    "admin.schedQuality.settings.tests": "主动测试",
+    "admin.schedQuality.settings.oauthRate": "OAuth 倍率",
+    "admin.schedQuality.settings.accountRate": "账号倍率",
+    "admin.schedQuality.state.invalid": "无效",
     "admin.settings.upstreamBillingProbe.title": "上游倍率自动探测",
     "admin.settings.upstreamBillingProbe.description": "定期获取 OpenAI API Key 所连接上游 XY2API 站点声明的计费倍率。",
     "admin.settings.upstreamBillingProbe.enabled": "启用全局自动探测",
@@ -484,6 +487,8 @@ const baseSettingsResponse = {
   payment_visible_method_alipay_enabled: true,
   payment_visible_method_wxpay_enabled: true,
   openai_oauth_scheduling_rate_multiplier: 1,
+  sched_quality_enabled: true,
+  sched_quality_test_enabled: true,
   balance_low_notify_enabled: false,
   balance_low_notify_threshold: 0,
   balance_low_notify_recharge_url: "",
@@ -1405,10 +1410,19 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(getProviders).toHaveBeenCalledTimes(2);
   });
 
-  it("always shows the OAuth reference rate without the retired scheduler switches", async () => {
+  it("shows the two quality switches and the OAuth rate under short names, without the retired scheduler switches", async () => {
     const wrapper = mountView(); await flushPromises(); await openGatewayTab(wrapper);
-    expect(wrapper.find('[data-testid="openai-oauth-scheduling-rate-multiplier"]').exists()).toBe(true);
-    expect(wrapper.text()).toContain("OAuth 调度参考倍率");
+    expect(wrapper.find('[data-testid="openai-oauth-scheduling-rate-multiplier"]').attributes("placeholder")).toBe("账号倍率");
+    expect(wrapper.text()).toContain("OAuth 倍率");
+    expect(wrapper.text()).toContain("质量调度");
+    expect(wrapper.text()).toContain("主动测试");
+    await wrapper.get('[data-testid="sched-quality-test-enabled"]').setValue(false);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({
+      sched_quality_enabled: true,
+      sched_quality_test_enabled: false,
+    }));
     expect(wrapper.find('[data-testid="openai-advanced-scheduler-toggle"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="openai-low-rate-priority-toggle"]').exists()).toBe(false);
   });
@@ -1607,7 +1621,10 @@ describe("admin SettingsView payment visible method controls", () => {
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
     expect(updateSettings).not.toHaveBeenCalled();
-    expect(showError).toHaveBeenCalledWith("OAuth 调度参考倍率必须是非负数字，或留空以使用账号倍率。");
+    expect(wrapper.get('[data-testid="openai-oauth-rate-invalid"]').text()).toBe("无效");
+    expect(input.attributes("aria-invalid")).toBe("true");
+    await input.setValue("1.2");
+    expect(wrapper.find('[data-testid="openai-oauth-rate-invalid"]').exists()).toBe(false);
   });
 
   it("loads and preserves an explicitly cleared OAuth rate", async () => {

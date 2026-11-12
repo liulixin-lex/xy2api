@@ -32,34 +32,36 @@
     </template>
 
     <template v-else>
-      <div v-if="selectable || mobileSortColumns.length" class="flex flex-wrap items-center justify-end gap-2 px-1">
+      <div v-if="selectable || mobileSortColumns.length || pageSorts.length || $slots['mobile-sort-extra']" class="flex flex-wrap items-center justify-end gap-2 px-1">
         <!-- 手机端没有表头，排序放到卡片上方 -->
-        <div v-if="mobileSortColumns.length" class="mr-auto flex min-w-0 items-center gap-2" data-test="mobile-sort">
+        <div v-if="mobileSortColumns.length || pageSorts.length" class="mr-auto flex min-w-0 items-center gap-2" data-test="mobile-sort">
           <label :for="mobileSortSelectId" class="flex-shrink-0 text-sm font-medium text-gray-600 dark:text-gray-300">
             {{ t('common.sortBy') }}
           </label>
           <select
             :id="mobileSortSelectId"
             class="input h-9 min-w-0 max-w-[11rem] py-1 text-sm"
-            :value="sortKey"
+            :value="pageSort?.key || sortKey"
             data-test="mobile-sort-key"
             @change="onMobileSortChange(($event.target as HTMLSelectElement).value)"
           >
-            <option v-if="!sortKey" value="" disabled>{{ t('common.sortPlaceholder') }}</option>
+            <option v-if="!sortKey && !pageSort" value="" disabled>{{ t('common.sortPlaceholder') }}</option>
             <option v-for="column in mobileSortColumns" :key="column.key" :value="column.key">{{ column.label }}</option>
+            <option v-for="option in pageSorts" :key="option.key" :value="option.key">{{ option.label }}</option>
           </select>
           <button
-            v-if="sortKey"
+            v-if="pageSort || sortKey"
             type="button"
             class="btn btn-secondary btn-icon h-9 w-9 flex-shrink-0"
-            :aria-label="sortOrder === 'asc' ? t('common.sortAscending') : t('common.sortDescending')"
-            :title="sortOrder === 'asc' ? t('common.sortAscending') : t('common.sortDescending')"
+            :aria-label="mobileSortOrder === 'asc' ? t('common.sortAscending') : t('common.sortDescending')"
+            :title="mobileSortOrder === 'asc' ? t('common.sortAscending') : t('common.sortDescending')"
             data-test="mobile-sort-order"
-            @click="handleSort(sortKey)"
+            @click="pageSort ? emit('pageSort', pageSort.key) : handleSort(sortKey)"
           >
-            <Icon :name="sortOrder === 'asc' ? 'arrowUp' : 'arrowDown'" size="sm" />
+            <Icon :name="mobileSortOrder === 'asc' ? 'arrowUp' : 'arrowDown'" size="sm" />
           </button>
         </div>
+        <slot name="mobile-sort-extra" />
         <label v-if="selectable" class="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300">
           <input
             type="checkbox"
@@ -130,10 +132,11 @@
   >
     <table class="w-full min-w-max">
       <thead class="table-header bg-gray-50 dark:bg-dark-800">
-        <tr>
+        <tr v-for="(headerRow, rowIndex) in headerRows" :key="rowIndex">
           <th
-            v-if="selectable"
+            v-if="selectable && rowIndex === 0"
             scope="col"
+            :rowspan="headerRows.length"
             class="sticky-header-cell w-11 min-w-11 px-3 py-3 text-center"
           >
             <input
@@ -147,53 +150,65 @@
               @change="toggleAllVisible(($event.target as HTMLInputElement).checked)"
             />
           </th>
-          <th
-            v-for="(column, index) in columns"
-            :key="column.key"
-            scope="col"
-            :aria-sort="column.sortable ? getColumnAriaSort(column.key) : undefined"
-            :class="[
-              'sticky-header-cell py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-dark-400',
-              getAdaptivePaddingClass(),
-              { 'cursor-pointer hover:bg-gray-100 dark:hover:bg-dark-700': column.sortable },
-              getStickyColumnClass(column, index),
-              column.class
-            ]"
-            @click="column.sortable && handleSort(column.key)"
-          >
-            <div :class="['flex items-center space-x-1', getHeaderContentAlignmentClass(column)]">
-              <slot
-                :name="`header-${column.key}`"
-                :column="column"
-                :sort-key="sortKey"
-                :sort-order="sortOrder"
-              >
-                <span>{{ column.label }}</span>
-              </slot>
-              <span
-                v-if="column.sortable"
-                class="inline-flex h-5 w-4 flex-col items-center justify-center"
-                aria-hidden="true"
-              >
-                <svg
-                  class="h-2.5 w-2.5"
-                  :class="getSortIndicatorClass(column.key, 'asc')"
-                  fill="currentColor"
-                  viewBox="0 0 10 10"
+          <template v-for="cell in headerRow" :key="cell.key">
+            <th
+              v-if="cell.kind === 'group'"
+              scope="colgroup"
+              :colspan="cell.span"
+              :class="['sticky-header-cell pb-1 pt-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-dark-400', getAdaptivePaddingClass()]"
+            >
+              <slot :name="`header-group-${cell.group}`" :group="cell.group" />
+            </th>
+            <th
+              v-else
+              scope="col"
+              :rowspan="cell.rowspan"
+              :aria-sort="cell.column.ariaSort ?? (cell.column.sortable ? getColumnAriaSort(cell.column.key) : undefined)"
+              :class="[
+                'sticky-header-cell text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-dark-400',
+                headerRows.length > 1 && cell.rowspan === 1 ? 'pb-3 pt-1' : 'py-3',
+                getAdaptivePaddingClass(),
+                { 'cursor-pointer hover:bg-gray-100 dark:hover:bg-dark-700': cell.column.sortable },
+                getStickyColumnClass(cell.column, cell.index),
+                cell.column.class,
+                cell.column.headerClass
+              ]"
+              @click="cell.column.sortable && handleSort(cell.column.key)"
+            >
+              <div :class="['flex items-center space-x-1', getHeaderContentAlignmentClass(cell.column)]">
+                <slot
+                  :name="`header-${cell.column.key}`"
+                  :column="cell.column"
+                  :sort-key="sortKey"
+                  :sort-order="sortOrder"
                 >
-                  <path d="M5 2L1.5 6.5h7L5 2z" />
-                </svg>
-                <svg
-                  class="-mt-0.5 h-2.5 w-2.5"
-                  :class="getSortIndicatorClass(column.key, 'desc')"
-                  fill="currentColor"
-                  viewBox="0 0 10 10"
+                  <span>{{ cell.column.label }}</span>
+                </slot>
+                <span
+                  v-if="cell.column.sortable"
+                  class="inline-flex h-5 w-4 flex-col items-center justify-center"
+                  aria-hidden="true"
                 >
-                  <path d="M5 8L1.5 3.5h7L5 8z" />
-                </svg>
-              </span>
-            </div>
-          </th>
+                  <svg
+                    class="h-2.5 w-2.5"
+                    :class="getSortIndicatorClass(cell.column.key, 'asc')"
+                    fill="currentColor"
+                    viewBox="0 0 10 10"
+                  >
+                    <path d="M5 2L1.5 6.5h7L5 2z" />
+                  </svg>
+                  <svg
+                    class="-mt-0.5 h-2.5 w-2.5"
+                    :class="getSortIndicatorClass(cell.column.key, 'desc')"
+                    fill="currentColor"
+                    viewBox="0 0 10 10"
+                  >
+                    <path d="M5 8L1.5 3.5h7L5 8z" />
+                  </svg>
+                </span>
+              </div>
+            </th>
+          </template>
         </tr>
       </thead>
       <tbody class="table-body bg-white dark:bg-dark-900">
@@ -289,6 +304,7 @@ const emit = defineEmits<{
   rowClick: [row: any]
   'update:selectedKeys': [keys: Array<string | number>]
   selectionChange: [keys: Array<string | number>]
+  pageSort: [key: string]
 }>()
 
 // 表格容器引用
@@ -479,6 +495,13 @@ interface Props {
   rowSelectable?: (row: any) => boolean
   /** Selected row keys. Keys outside the current data page are preserved. */
   selectedKeys?: Array<string | number>
+  /**
+   * Sorts the parent applies to the current page only. They are offered in the mobile sort bar next to the column
+   * sorts; choosing one emits `pageSort` with its key (the parent cycles the order), choosing a column emits `pageSort`
+   * with '' first.
+   */
+  pageSorts?: Array<{ key: string; label: string }>
+  pageSort?: { key: string; order: 'asc' | 'desc' } | null
   /** Accessible label for a row selection checkbox. */
   selectionLabel?: string | ((row: any) => string)
 }
@@ -491,7 +514,9 @@ const props = withDefaults(defineProps<Props>(), {
   defaultSortOrder: 'asc',
   serverSideSort: false,
   selectable: false,
-  selectedKeys: () => []
+  selectedKeys: () => [],
+  pageSorts: () => [],
+  pageSort: null
 })
 
 const sortKey = ref<string>('')
@@ -648,8 +673,40 @@ const dataColumns = computed(() => props.columns.filter((column) => column.key !
 const mobileSortColumns = computed(() => dataColumns.value.filter((column) => column.sortable && column.label))
 const mobileSortSelectId = `data-table-sort-${useId()}`
 const onMobileSortChange = (key: string) => {
+  if (props.pageSorts.some((option) => option.key === key)) {
+    emit('pageSort', key)
+    return
+  }
+  if (props.pageSort) emit('pageSort', '')
   if (key && key !== sortKey.value) handleSort(key)
 }
+const mobileSortOrder = computed(() => props.pageSort?.order ?? sortOrder.value)
+
+// Header rows: one row, or two when some columns share a group header (the group cell spans them, other columns
+// span both rows).
+type HeaderCell =
+  | { kind: 'column'; key: string; column: Column; index: number; rowspan: number }
+  | { kind: 'group'; key: string; group: string; span: number }
+const headerRows = computed<HeaderCell[][]>(() => {
+  const columns = props.columns
+  if (!columns.some((column) => column.group)) {
+    return [columns.map((column, index) => ({ kind: 'column' as const, key: column.key, column, index, rowspan: 1 }))]
+  }
+  const top: HeaderCell[] = []
+  const bottom: HeaderCell[] = []
+  columns.forEach((column, index) => {
+    if (!column.group) {
+      top.push({ kind: 'column', key: column.key, column, index, rowspan: 2 })
+      return
+    }
+    bottom.push({ kind: 'column', key: column.key, column, index, rowspan: 1 })
+    if (columns[index - 1]?.group === column.group) return
+    let span = 1
+    while (columns[index + span]?.group === column.group) span++
+    top.push({ kind: 'group', key: `group:${column.group}:${index}`, group: column.group, span })
+  })
+  return [top, bottom]
+})
 const columnsSignature = computed(() =>
   props.columns.map((column) => `${column.key}:${column.sortable ? '1' : '0'}`).join('|')
 )

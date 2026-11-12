@@ -528,8 +528,6 @@ export default {
       scheduling: {
         title: '网关调度设置',
         description: '控制 API Key 的调度行为',
-        oauthRateTitle: 'OAuth 调度参考倍率',
-        oauthRateInvalid: 'OAuth 调度参考倍率必须是非负数字，或留空以使用账号倍率。',
         allowUngroupedKey: '允许未分组 Key 调度',
         allowUngroupedKeyHint: '关闭后，未分配到任何分组的 API Key 将无法发起请求（返回 403）。建议保持关闭以确保所有 Key 都归属明确的分组。',
         accountSchedulingThresholdsTitle: '平台账号自动停调阈值',

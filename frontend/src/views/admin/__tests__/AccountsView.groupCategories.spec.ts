@@ -198,7 +198,8 @@ describe('admin AccountsView group categories', () => {
     // 第三个分组收进“+1”，完整名单在单元格的 title 里
     const cell = wrapper.get('[data-account-name="acc-7"] [data-testid="account-groups-cell"]')
     expect(cell.text()).toContain('+1')
-    expect(cell.attributes('title')).toBe('Gamma、Alpha、Beta')
+    // 不再用原生 title 拼全部分组名（设计 A.9），被省略的分组在编辑弹窗里看
+    expect(cell.attributes('title')).toBeUndefined()
     wrapper.unmount()
   })
 

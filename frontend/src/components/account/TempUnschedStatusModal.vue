@@ -29,10 +29,6 @@
       </div>
 
       <div v-else class="space-y-4">
-        <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
-          {{ t('admin.accounts.recoverStateHint') }}
-        </div>
-
         <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
           <p class="text-xs text-gray-500 dark:text-gray-400">
             {{ t('admin.accounts.tempUnschedulable.accountName') }}
@@ -117,32 +113,14 @@
         <button type="button" class="btn btn-secondary" @click="handleClose">
           {{ t('common.close') }}
         </button>
+        <!-- 与行菜单「恢复状态」同一个确认流（恢复确认 → 已清除 / 保留 / 失败），弹在本弹窗之上 -->
         <button
           type="button"
           class="btn btn-primary"
-          :disabled="!isActive || resetting"
-          @click="handleReset"
+          :disabled="!account"
+          data-test="temp-unsched-recover"
+          @click="account && emit('recover', account)"
         >
-          <svg
-            v-if="resetting"
-            class="-ml-1 mr-2 h-4 w-4 animate-spin"
-            fill="none"
-            viewBox="0 0 24 24"
-          >
-            <circle
-              class="opacity-25"
-              cx="12"
-              cy="12"
-              r="10"
-              stroke="currentColor"
-              stroke-width="4"
-            ></circle>
-            <path
-              class="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-            ></path>
-          </svg>
           {{ t('admin.accounts.recoverState') }}
         </button>
       </div>
@@ -166,14 +144,13 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: []
-  reset: [account: Account]
+  recover: [account: Account]
 }>()
 
 const { t } = useI18n()
 const appStore = useAppStore()
 
 const loading = ref(false)
-const resetting = ref(false)
 const status = ref<TempUnschedulableStatus | null>(null)
 let requestVersion = 0
 
@@ -254,21 +231,6 @@ const loadStatus = async () => {
 
 const handleClose = () => {
   emit('close')
-}
-
-const handleReset = async () => {
-  if (!props.account) return
-  resetting.value = true
-  try {
-    const updated = await adminAPI.accounts.recoverState(props.account.id)
-    appStore.showSuccess(t('admin.accounts.recoverStateSuccess'))
-    emit('reset', updated)
-    handleClose()
-  } catch (error: any) {
-    appStore.showError(error?.message || t('admin.accounts.recoverStateFailed'))
-  } finally {
-    resetting.value = false
-  }
 }
 
 watch(

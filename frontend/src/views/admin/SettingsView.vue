@@ -5113,28 +5113,31 @@
                 </div>
               </div>
 
-              <div
-                class="flex flex-col items-stretch gap-3 border-t border-gray-100 pt-5 sm:flex-row sm:items-center sm:justify-between sm:gap-6 dark:border-dark-700"
-              >
-                <label
-                  class="text-sm font-medium text-gray-700 dark:text-gray-300"
-                  for="openai-oauth-scheduling-rate-multiplier"
-                >
-                  {{ t("admin.settings.scheduling.oauthRateTitle") }}
-                </label>
-                <div class="relative w-full shrink-0 sm:w-32">
+              <!-- 质量调度（设计 D.4）：名称在左、控件在右，与「允许未分组 Key 调度」同样的行样式 -->
+              <div class="flex min-h-[52px] items-center justify-between border-t border-gray-100 pt-4 dark:border-dark-700">
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300" for="sched-quality-enabled">{{ t("admin.schedQuality.settings.enabled") }}</label>
+                <Toggle id="sched-quality-enabled" v-model="form.sched_quality_enabled" data-testid="sched-quality-enabled" />
+              </div>
+              <div class="flex min-h-[52px] items-center justify-between border-t border-gray-100 pt-4 dark:border-dark-700">
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300" for="sched-quality-test-enabled">{{ t("admin.schedQuality.settings.tests") }}</label>
+                <Toggle id="sched-quality-test-enabled" v-model="form.sched_quality_test_enabled" data-testid="sched-quality-test-enabled" />
+              </div>
+              <div class="flex min-h-[52px] items-center justify-between gap-3 border-t border-gray-100 pt-4 dark:border-dark-700">
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300" for="openai-oauth-scheduling-rate-multiplier">{{ t("admin.schedQuality.settings.oauthRate") }}</label>
+                <div class="flex items-center gap-2">
+                  <span v-if="!oauthRateValid" id="openai-oauth-rate-invalid" class="sq-fail-word" data-testid="openai-oauth-rate-invalid">{{ t("admin.schedQuality.state.invalid") }}</span>
                   <input
                     id="openai-oauth-scheduling-rate-multiplier"
                     v-model.number="form.openai_oauth_scheduling_rate_multiplier"
-                    class="input pr-8"
+                    :class="['input w-28 text-right sq-num', { 'input-error': !oauthRateValid }]"
+                    :aria-invalid="!oauthRateValid"
+                    :aria-describedby="oauthRateValid ? undefined : 'openai-oauth-rate-invalid'"
+                    :placeholder="t('admin.schedQuality.settings.accountRate')"
                     data-testid="openai-oauth-scheduling-rate-multiplier"
                     min="0"
                     step="0.01"
                     type="number"
                   />
-                  <span
-                    class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400"
-                  >x</span>
                 </div>
               </div>
             </div>
@@ -9233,6 +9236,11 @@ const adminApiKeyMasked = ref("");
 const adminApiKeyOperating = ref(false);
 const newAdminApiKey = ref("");
 const subscriptionGroups = ref<AdminGroup[]>([]);
+// OAuth 倍率：留空（用各账号自己的倍率），或非负数字（设计 D.4）。
+const oauthRateValid = computed(() => {
+  const value = form.openai_oauth_scheduling_rate_multiplier;
+  return value === "" || value === null || (typeof value === "number" && Number.isFinite(value) && value >= 0);
+});
 
 // Upstream billing probe state
 const upstreamBillingProbeLoading = ref(true);
@@ -9792,6 +9800,8 @@ type SettingsForm = Omit<
   google_oauth_client_secret: string;
   force_email_on_third_party_signup: boolean;
   openai_oauth_scheduling_rate_multiplier: number | "" | null;
+  sched_quality_enabled: boolean;
+  sched_quality_test_enabled: boolean;
   // 充值赠送阶梯编辑态：允许留空的行，提交时清洗为 RechargeBonusTier[]
   payment_recharge_bonus_tiers: RechargeBonusTierDraft[];
   payment_recharge_bonus_mode: RechargeBonusMode;
@@ -10034,6 +10044,8 @@ const form = reactive<SettingsForm>({
   // 分组隔离
   allow_ungrouped_key_scheduling: false,
   openai_oauth_scheduling_rate_multiplier: 1,
+  sched_quality_enabled: true,
+  sched_quality_test_enabled: true,
   // Gateway forwarding behavior
   openai_ttft_mode: "semantic",
   enable_fingerprint_unification: true,
@@ -11407,12 +11419,9 @@ async function saveSettings() {
       claudeOAuthSystemPromptBlocksJSON;
 
     const oauthSchedulingRate = form.openai_oauth_scheduling_rate_multiplier;
-    if (
-      oauthSchedulingRate !== "" &&
-      oauthSchedulingRate !== null &&
-      (!Number.isFinite(oauthSchedulingRate) || oauthSchedulingRate < 0)
-    ) {
-      appStore.showError(t("admin.settings.scheduling.oauthRateInvalid"));
+    // 不合法时输入框旁已显示「无效」，不保存（设计 D.4）。
+    if (!oauthRateValid.value) {
+      document.getElementById("openai-oauth-scheduling-rate-multiplier")?.focus();
       return;
     }
 
@@ -11682,6 +11691,8 @@ async function saveSettings() {
         form.payment_alipay_mobile_precreate_deep_link,
       openai_oauth_scheduling_rate_multiplier:
         oauthSchedulingRate === "" ? null : oauthSchedulingRate,
+      sched_quality_enabled: form.sched_quality_enabled,
+      sched_quality_test_enabled: form.sched_quality_test_enabled,
       // 余额、订阅到期与账号限额通知
       balance_low_notify_enabled: form.balance_low_notify_enabled,
       balance_low_notify_threshold:
