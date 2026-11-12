@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 变更
+
+- OpenAI Chat Completions 与 Responses 转 Anthropic 时保留常见客户端的默认参数与可用工具行为，兼容 null 与对象联合 schema，按模型适配推理和采样；无法表达的工具 schema 返回统一参数错误。
+
 ### 修复
 
 - 修复自定义端点的兼容账号在多轮对话第二轮被误判「凭据或端点已变化」而拒绝的问题。

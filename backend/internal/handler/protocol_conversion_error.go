@@ -31,12 +31,12 @@ func handleUnsupportedProtocolConversion(c *gin.Context, err error, protocol str
 		service.MarkOpsStreamError(c, "invalid_request_error", message, http.StatusBadRequest)
 		switch protocol {
 		case "responses":
-			writeResponsesFailedSSEWithOpeningStatus(c, http.StatusBadRequest, "invalid_request_error", "unsupported_conversion", message, true)
+			writeResponsesFailedSSEWithOpeningStatus(c, http.StatusBadRequest, "invalid_request_error", "unsupported_parameter", message, true)
 		case "chat":
-			writeChatCompletionsErrorSSE(c, "invalid_request_error", "unsupported_conversion", message, http.StatusBadRequest)
+			writeChatCompletionsErrorSSE(c, "invalid_request_error", "unsupported_parameter", message, http.StatusBadRequest)
 		default:
 			if beginResilienceTerminal(c) {
-				payload, _ := json.Marshal(gin.H{"type": "error", "error": gin.H{"type": "invalid_request_error", "message": message}})
+				payload, _ := json.Marshal(gin.H{"type": "error", "error": gin.H{"type": "invalid_request_error", "code": "unsupported_parameter", "message": message}})
 				_, _ = fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", payload)
 				c.Writer.Flush()
 			}
@@ -46,7 +46,7 @@ func handleUnsupportedProtocolConversion(c *gin.Context, err error, protocol str
 	if !beginResilienceTerminal(c) {
 		return true
 	}
-	payload := gin.H{"error": gin.H{"type": "invalid_request_error", "code": "unsupported_conversion", "param": conversion.Field, "message": message}}
+	payload := gin.H{"error": gin.H{"type": "invalid_request_error", "code": "unsupported_parameter", "param": conversion.Field, "message": message}}
 	if protocol == "messages" {
 		payload["type"] = "error"
 	}
