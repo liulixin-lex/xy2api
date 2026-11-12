@@ -26,11 +26,7 @@
   "reg": "registerAccountRoutes",
   "module": "accounts",
   "level": "view",
-  "any_of": [
-   "channels",
-   "groups",
-   "usage"
-  ],
+  "any_of": [],
   "flags": [],
   "target": null,
   "fields": null,
