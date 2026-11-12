@@ -830,7 +830,7 @@ func (r *schedAdminFailingRunner) Request(_ context.Context, _ int64, m string, 
 	}
 	return SchedTestTicket{Model: m, TestID: m + "-ticket", Started: true}, nil
 }
-func TestSchedAdminTestRetainsTicketsAfterModelFailure(t *testing.T) {
+func TestSchedAdminTestDefaultSingleModelAndFailure(t *testing.T) {
 	s, e, _ := schedAdminFixture()
 	for i, m := range []string{"a", "b", "c"} {
 		e.snapshot.Evidence[SchedAccountModel{1, m}] = schedAdminEvidence(40 - i)

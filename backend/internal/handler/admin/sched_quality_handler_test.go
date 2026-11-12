@@ -389,16 +389,16 @@ func (s *schedAdminPermissionService) Board(context.Context, int64, string) (ser
 	return service.SchedAdminBoard{Accounts: []service.SchedAdminBoardAccounts{{Name: "https://upstream.example/group"}}}, nil
 }
 
-func TestSchedQualityEmptyTestBodyAndPartialFailureAudit(t *testing.T) {
-	for _, partial := range []bool{false, true} {
-		t.Run(strconv.FormatBool(partial), func(t *testing.T) {
+func TestSchedQualityEmptyTestBodySingleModelAudit(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		t.Run(strconv.FormatBool(failed), func(t *testing.T) {
 			_, engine, repo := schedAdminHandlerFixture()
 			for i, m := range []string{"a", "b", "c"} {
 				engine.p.Evidence[service.SchedAccountModel{AccountID: 1, Model: m}] = schedquality.Summary{Samples: 40 - i}
 			}
 			runner := &schedAdminHandlerTests{ticket: service.SchedTestTicket{TestID: "started", Started: true}}
-			if partial {
-				runner.failModel = "b"
+			if failed {
+				runner.failModel = "a"
 			}
 			s := service.NewSchedAdminService(service.SchedAdminDependencies{Engine: engine, Accounts: repo, Tests: runner})
 			audit := &schedAdminHandlerAudit{}
@@ -406,24 +406,19 @@ func TestSchedQualityEmptyTestBodyAndPartialFailureAudit(t *testing.T) {
 			auditService.Start()
 			r := schedAdminHandlerRouter(NewSchedQualityHandler(s), gin.HandlerFunc(middleware.NewAuditLogMiddleware(auditService)))
 			w := schedAdminHandlerRequest(r, "POST", "/accounts/1/test", "")
-			require.Equal(t, 200, w.Code, w.Body.String())
-			var tests []service.SchedAdminTestTests
-			require.NoError(t, json.Unmarshal(schedAdminHandlerData(t, w)["tests"], &tests))
-			require.Len(t, tests, 3)
-			require.True(t, tests[0].Started)
-			require.True(t, tests[2].Started)
-			if partial {
-				require.Equal(t, service.SchedAdminTestTests{Model: "b", Why: "error"}, tests[1])
-			} else {
-				require.True(t, tests[1].Started)
-			}
 			auditService.Stop()
 			require.Len(t, audit.rows, 1)
 			require.Equal(t, "sched_quality.test", audit.rows[0].Action)
-			if partial {
-				require.Equal(t, "partial_failure", audit.rows[0].Extra["result"])
+			if failed {
+				require.Equal(t, 500, w.Code, w.Body.String())
+				require.Equal(t, "failure", audit.rows[0].Extra["result"])
 				require.EqualValues(t, 1, audit.rows[0].Extra["test_failed_count"])
-				require.EqualValues(t, 2, audit.rows[0].Extra["test_ticket_count"])
+				require.EqualValues(t, 0, audit.rows[0].Extra["test_ticket_count"])
+			} else {
+				require.Equal(t, 200, w.Code, w.Body.String())
+				var tests []service.SchedAdminTestTests
+				require.NoError(t, json.Unmarshal(schedAdminHandlerData(t, w)["tests"], &tests))
+				require.Equal(t, []service.SchedAdminTestTests{{Model: "a", TestID: "started", Started: true}}, tests)
 			}
 		})
 	}

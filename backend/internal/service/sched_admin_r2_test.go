@@ -157,3 +157,90 @@ func TestSchedAdminDetailTestKind(t *testing.T) {
 		})
 	}
 }
+
+func TestSchedAdminDetailTestClean(t *testing.T) {
+	for _, tc := range []struct {
+		name                string
+		auto, done, running bool
+		counts              [3]int
+		outcome             schedquality.Outcome
+		clean               bool
+	}{
+		{name: "screen", auto: true, done: true, counts: [3]int{3}, clean: true},
+		{name: "manual_full", done: true, counts: [3]int{3, 3, 3}, clean: true},
+		{name: "legacy_auto_full", auto: true, done: true, counts: [3]int{3, 3, 3}, clean: true},
+		{name: "manual_small_only", done: true, counts: [3]int{3}, clean: true},
+		{name: "manual_partial_medium", done: true, counts: [3]int{3, 1}},
+		{name: "incomplete_screen", auto: true, done: true, counts: [3]int{2}},
+		{name: "timeout", auto: true, done: true, counts: [3]int{3}, outcome: schedquality.OutcomeTimeout},
+		{name: "fault", done: true, counts: [3]int{3}, outcome: schedquality.OutcomeAccountFault},
+		{name: "other", done: true, counts: [3]int{3}, outcome: schedquality.OutcomeOther},
+		{name: "empty", auto: true, done: true},
+		{name: "running", auto: true, running: true, counts: [3]int{3}},
+		{name: "aborted", auto: true, counts: [3]int{3}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, e, _ := schedAdminFixture()
+			record := SchedTestRecord{Auto: tc.auto, Running: tc.running, TestResult: schedquality.TestResult{Done: tc.done}}
+			for tier, count := range tc.counts {
+				for turn := 1; turn <= count; turn++ {
+					record.Turns = append(record.Turns, schedquality.TestTurn{Tier: schedquality.TestTier(tier), Turn: turn, Outcome: schedquality.OutcomeOK, TTFOMs: schedAdminInt(120000)})
+				}
+			}
+			if tc.outcome != 0 {
+				record.Turns[len(record.Turns)-1].Outcome = tc.outcome
+			}
+			e.snapshot.Tests[SchedAccountModel{1, "m"}] = record
+			detail, err := s.Detail(context.Background(), 1)
+			require.NoError(t, err)
+			require.Len(t, detail.Models, 1)
+			require.NotNil(t, detail.Models[0].Test)
+			require.Equal(t, tc.clean, detail.Models[0].Test.Clean)
+			require.Equal(t, schedquality.TestClean(record.TestResult), detail.Models[0].Test.Clean)
+			raw, err := json.Marshal(detail.Models[0].Test)
+			require.NoError(t, err)
+			var object map[string]any
+			require.NoError(t, json.Unmarshal(raw, &object))
+			require.Equal(t, tc.clean, object["clean"])
+		})
+	}
+}
+
+func TestSchedAdminManualDefaultRegistersOneModel(t *testing.T) {
+	for _, tc := range []struct {
+		name, model, want string
+		own               map[string]int
+		fallback          bool
+	}{
+		{name: "most_samples", own: map[string]int{"a": 40, "b": 100, "c": 90}, want: "b"},
+		{name: "sample_tie_by_name", own: map[string]int{"z": 100, "m": 100, "a": 100}, want: "a"},
+		{name: "group_fallback_and_tie", fallback: true, want: "a"},
+		{name: "specified_model", model: " z ", own: map[string]int{"a": 100, "z": 1}, want: "z"},
+		{name: "no_samples"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, e, _ := schedAdminFixture()
+			for model, n := range tc.own {
+				e.snapshot.Evidence[SchedAccountModel{1, model}] = schedAdminEvidence(n)
+			}
+			if tc.fallback {
+				e.snapshot.Evidence[SchedAccountModel{2, "z"}] = schedAdminEvidence(100)
+				e.snapshot.Evidence[SchedAccountModel{2, "a"}] = schedAdminEvidence(100)
+				e.snapshot.Evidence[SchedAccountModel{3, "outside"}] = schedAdminEvidence(1000)
+				e.snapshot.GroupRows[2] = []SchedGroupRow{{GroupID: 1, Model: "z"}, {GroupID: 1, Model: "a"}}
+				e.snapshot.GroupRows[3] = []SchedGroupRow{{GroupID: 99, Model: "outside"}}
+			}
+			runner := &fakeSchedTestRunner{Ticket: SchedTestTicket{Model: tc.want, TestID: "ticket", Started: true}}
+			s.d.Tests = runner
+			out, err := s.Test(context.Background(), 1, tc.model, 7)
+			require.NoError(t, err)
+			if tc.want == "" {
+				require.Empty(t, runner.Requests)
+				require.Equal(t, []SchedAdminTestTests{}, out.Tests)
+				return
+			}
+			require.Equal(t, []fakeSchedTestRequest{{AccountID: 1, Model: tc.want, Auto: false, OperatorID: 7}}, runner.Requests)
+			require.Equal(t, []SchedAdminTestTests{{Model: tc.want, TestID: "ticket", Started: true}}, out.Tests)
+		})
+	}
+}

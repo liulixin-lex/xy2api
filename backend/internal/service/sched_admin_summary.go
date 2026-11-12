@@ -276,6 +276,7 @@ func schedAdminTestDetail(t SchedTestRecord) *SchedAdminAccountDetailModelsTest 
 	t.Turns = append([]schedquality.TestTurn(nil), t.Turns...)
 	sort.SliceStable(t.Turns, func(i, j int) bool { return t.Turns[i].Turn < t.Turns[j].Turn })
 	x := &SchedAdminAccountDetailModelsTest{ID: t.ID, At: schedAdminStamp(t.StartedAt), Running: t.Running, Done: t.Done, AbortReason: t.AbortReason, Auto: t.Auto, Tiers: []SchedAdminAccountDetailModelsTestTiers{}, InputTokens: int(t.InputTokens), CachedTokens: int(t.CachedTokens), OutputTokens: int(t.OutputTokens)}
+	x.Clean = schedquality.TestClean(t.TestResult)
 	x.Kind = "full"
 	if t.Auto {
 		x.Kind = "screen"

@@ -145,6 +145,7 @@ type SchedAdminAccountDetailModelsTest struct {
 	AbortReason  string                                   `json:"abort_reason"`
 	Auto         bool                                     `json:"auto"`
 	Kind         string                                   `json:"kind"`
+	Clean        bool                                     `json:"clean"`
 	Tiers        []SchedAdminAccountDetailModelsTestTiers `json:"tiers"` // Empty lists must be [].
 	InputTokens  int                                      `json:"input_tokens"`
 	CachedTokens int                                      `json:"cached_tokens"`
