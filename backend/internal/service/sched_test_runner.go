@@ -14,9 +14,13 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/schedtest"
 )
 
-var ErrSchedTestRunning = errors.New("sched test already running")
+var (
+	ErrSchedTestRunning = errors.New("sched test already running")
+	ErrSchedTestTooSoon = errors.New("sched test retry interval has not elapsed")
+)
 
 type SchedTestStore interface {
+	// Insert atomically checks running tests and TestRetryEvery across instances.
 	Insert(context.Context, SchedTestRecord) error
 	Finish(context.Context, SchedTestRecord) error
 	Latest(context.Context, int64, string) (*SchedTestRecord, error)
@@ -106,7 +110,7 @@ func (s *SchedTestRunnerService) Stop() { s.mu.Lock(); s.cancel(); s.mu.Unlock()
 
 func (s *SchedTestRunnerService) Request(ctx context.Context, accountID int64, model string, auto bool, operatorID int64) (SchedTestTicket, error) {
 	ticket := SchedTestTicket{Model: model}
-	// Serialize local check-and-insert; the database unique index handles other instances.
+	// Local checks avoid unnecessary admission work; Insert rechecks under a database lock.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.ctx.Err(); err != nil {
@@ -141,6 +145,9 @@ func (s *SchedTestRunnerService) Request(ctx context.Context, accountID int64, m
 	}
 	if err = s.store.Insert(ctx, record); errors.Is(err, ErrSchedTestRunning) {
 		ticket.Why = "already_running"
+		return ticket, nil
+	} else if errors.Is(err, ErrSchedTestTooSoon) {
+		ticket.Why = "too_soon"
 		return ticket, nil
 	} else if err != nil {
 		return ticket, err

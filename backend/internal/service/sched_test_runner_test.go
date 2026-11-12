@@ -31,8 +31,13 @@ func (s *schedTestMemoryStore) Insert(_ context.Context, r SchedTestRecord) erro
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := SchedAccountModel{AccountID: r.AccountID, Model: r.Model}
-	if s.records[key].Running && r.Running {
-		return ErrSchedTestRunning
+	if last, ok := s.records[key]; ok {
+		if last.Running {
+			return ErrSchedTestRunning
+		}
+		if r.StartedAt.Sub(last.StartedAt) < schedquality.TestRetryEvery {
+			return ErrSchedTestTooSoon
+		}
 	}
 	s.records[key] = r
 	return nil
