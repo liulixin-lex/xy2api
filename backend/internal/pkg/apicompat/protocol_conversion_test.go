@@ -104,7 +104,11 @@ func TestProtocolFormatAndParallelControls(t *testing.T) {
 			got, err := ResponsesToAnthropicRequest(responses)
 			require.NoError(t, err)
 			require.NotNil(t, got.OutputConfig)
-			require.Equal(t, "low", got.OutputConfig.Effort)
+			if model == "claude-sonnet-4-5" {
+				require.Empty(t, got.OutputConfig.Effort)
+			} else {
+				require.Equal(t, "low", got.OutputConfig.Effort)
+			}
 			var output map[string]json.RawMessage
 			require.NoError(t, json.Unmarshal(got.OutputConfig.Format, &output))
 			require.Equal(t, string(schema), string(output["schema"]), "schema precision must survive")
@@ -143,7 +147,7 @@ func TestProtocolFormatAndParallelControls(t *testing.T) {
 	})
 	for _, raw := range []string{`{"type":"json_object"}`, `{"type":"json_schema","strict":false,"schema":{"type":"object"}}`} {
 		_, err := ResponsesToAnthropicRequest(&ResponsesRequest{Input: json.RawMessage(`"hi"`), Text: &ResponsesText{Format: json.RawMessage(raw)}})
-		requireUnsupportedConversion(t, err, "text.format")
+		require.NoError(t, err)
 	}
 	t.Run("merge format description without overwriting schema description", func(t *testing.T) {
 		out, err := ResponsesToAnthropicRequest(&ResponsesRequest{Input: json.RawMessage(`"hi"`), Text: &ResponsesText{Format: json.RawMessage(`{"type":"json_schema","description":"format hint","schema":{"type":"object","properties":{},"description":"format hint"}}`)}})

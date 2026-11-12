@@ -63,6 +63,8 @@ Docker Compose 只把 Compose 文件里列出的变量传进容器，其他变�
 
 管理员只能通过设置向导或自动初始化创建。`config.yaml` 里的 `default.admin_email` / `default.admin_password` 不会被使用。
 
+可以在首次启动前设置 `ADMIN_PASSWORD` 预设初始密码；首次登录后请到“个人资料”修改密码。
+
 ## 密钥
 
 | 配置项 | 环境变量 | 说明 |
@@ -101,9 +103,9 @@ Gemini OAuth 需要的 `GEMINI_OAUTH_CLIENT_ID`、`GEMINI_OAUTH_CLIENT_SECRET`�
 | `cors.allowed_origins` | `[]` | 允许跨域的来源；为空时不允许跨域请求 |
 | `security.url_allowlist.enabled` | `false` | 开启后上游、价格数据和 CRS 同步地址必须在 `upstream_hosts`、`pricing_hosts`、`crs_hosts` 中 |
 | `security.url_allowlist.allow_insecure_http` | `true` | 白名单关闭时是否允许 `http://` 地址 |
-| `security.url_allowlist.allow_private_hosts` | `true` | 是否允许本地和私有 IP |
+| `security.url_allowlist.allow_private_hosts` | `true` | 白名单开启时是否允许本地和私有 IP；不是全局出站私网开关，见下表 |
 | `security.response_headers.enabled` | `true` | 过滤上游返回的敏感响应头 |
-| `security.csp.enabled` / `policy` | `true` / 内置策略 | Content-Security-Policy；静态资源放在其他域名时需要调整 |
+| `security.csp.enabled` / `policy` | `true` / 内置策略 | 页面 Content-Security-Policy；静态资源放在其他域名时需要调整。网关 API 始终使用固定的 sandbox 策略 |
 | `security.trust_forwarded_ip_for_api_key_acl` | `true` | 是否信任转发头里的客户端 IP，见 [反向代理](reverse-proxy.md#客户端-ip-与可信代理) |
 | `billing.circuit_breaker.enabled` | `true` | 计费服务异常时拒绝请求，不放行未计费的调用 |
 | `turnstile.required` | `false` | release 模式下强制要求配置 Turnstile 人机验证 |
@@ -118,7 +120,20 @@ security:
     allow_insecure_http: false   # 设置后 http:// 上游地址会被拒绝：invalid url scheme: http
 ```
 
-对应的环境变量是 `SECURITY_URL_ALLOWLIST_ENABLED`、`SECURITY_URL_ALLOWLIST_ALLOW_INSECURE_HTTP`、`SECURITY_URL_ALLOWLIST_ALLOW_PRIVATE_HOSTS`。关闭 URL 校验或响应头过滤时，请在网络层限制出站目标、阻断私网和回环地址。
+对应的环境变量是 `SECURITY_URL_ALLOWLIST_ENABLED`、`SECURITY_URL_ALLOWLIST_ALLOW_INSECURE_HTTP`、`SECURITY_URL_ALLOWLIST_ALLOW_PRIVATE_HOSTS`。这些选项的作用取决于具体出站路径：
+
+| 出站路径 | 实际策略 |
+| --- | --- |
+| 普通账号网关（OpenAI、Gemini、兼容接口等） | `enabled=false` 时只校验初始地址的格式和 HTTP(S) 协议；`allow_insecure_http=false` 仍拒绝初始 `http://` 地址，但 `allow_private_hosts=false` 不参与 DNS 解析结果或私网检查。要启用这些私网检查，必须开启白名单并配置允许的上游域名 |
+| CRS 同步 | 与普通网关相同：`enabled=false` 时 `allow_private_hosts` 不生效，`allow_insecure_http` 仍约束初始地址；开启白名单后检查 `crs_hosts` 与解析后的 IP |
+| 提示词审计、内容审核 | 使用各自的专用客户端，不读取上述 URL 白名单开关；超级管理员配置的内网或回环服务仍可访问。审核配置代理时通过所选代理发送 |
+| 联网搜索代理 | 不读取上述 URL 白名单开关；代理地址的保存检查与实际请求使用自己的策略，不能依赖 `allow_private_hosts=false` 限制它 |
+| 普通管理员（operator）保存上游或代理地址 | 独立执行公网地址和 DNS 检查，无论部署白名单是否开启都会拒绝私网、回环地址；这不等于超级管理员配置或历史数据也经过相同的保存路径 |
+| Vertex 服务账号换取令牌 | 令牌端点固定为 Google；代理客户端不读取上述 URL 白名单开关 |
+
+提示词审计、内容审核（含 TypeSafe）、CRS 登录和导出、Vertex 服务账号令牌客户端均不跟随重定向，直连与配置代理时一致；收到 3xx 会报错，只显示状态码与目标主机。请直接配置最终端点，升级后在后台执行一次审核端点测试，确认服务不依赖重定向。
+
+以上开关不构成全局出站隔离；需要统一限制目标、私网与回环访问时，请同时在网络层控制出站流量。网关 API 响应始终带有 `Content-Security-Policy: sandbox; default-src 'none'`，不受页面 CSP 开关、上游响应头复制或过滤配置影响。
 
 登录、注册、2FA 和发送验证码接口自带基于 Redis 的限流，Redis 不可用时拒绝请求；这只是兜底，入口处仍应有 CDN、WAF 或反向代理限流。
 

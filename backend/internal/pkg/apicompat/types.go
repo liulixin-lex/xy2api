@@ -248,6 +248,11 @@ type AnthropicDelta struct {
 
 // ResponsesRequest is the request body for POST /v1/responses.
 type ResponsesRequest struct {
+	// Conversion-only intent never enters native OpenAI wire requests.
+	anthropicN          json.RawMessage
+	anthropicChatSource *ChatCompletionsRequest
+	anthropicAliases    anthropicRequestAliases
+
 	CacheControl         *AnthropicCacheControl `json:"cache_control,omitempty"`
 	PromptCacheRetention string                 `json:"prompt_cache_retention,omitempty"`
 	SafetyIdentifier     string                 `json:"safety_identifier,omitempty"`
@@ -672,6 +677,9 @@ type ResponsesStreamEvent struct {
 
 // ChatCompletionsRequest is the request body for POST /v1/chat/completions.
 type ChatCompletionsRequest struct {
+	anthropicN                json.RawMessage
+	anthropicDroppedToolNames map[string]bool
+
 	CacheControl         *AnthropicCacheControl `json:"cache_control,omitempty"`
 	PromptCacheKey       string                 `json:"prompt_cache_key,omitempty"`
 	PromptCacheRetention string                 `json:"prompt_cache_retention,omitempty"`

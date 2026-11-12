@@ -1852,11 +1852,11 @@ func TestOpus55ResponsesAdaptiveThinkingAndToolChoice(t *testing.T) {
 		require.ErrorContains(t, err, "forced tool_choice")
 	}
 	_, err := ResponsesToAnthropicRequest(&ResponsesRequest{Model: "claude-opus-5-5", Input: json.RawMessage(`"hello"`), Reasoning: &ResponsesReasoning{Effort: "none"}})
-	require.ErrorContains(t, err, "reasoning effort")
+	require.NoError(t, err, "legal efforts map to the nearest supported level")
 	old, err := ResponsesToAnthropicRequest(&ResponsesRequest{Model: "claude-opus-5", Input: json.RawMessage(`"hello"`), Reasoning: &ResponsesReasoning{Effort: "xhigh"}})
 	require.NoError(t, err)
-	require.Equal(t, "max", old.OutputConfig.Effort)
-	require.Equal(t, "enabled", old.Thinking.Type)
+	require.Equal(t, "xhigh", old.OutputConfig.Effort)
+	require.Equal(t, "adaptive", old.Thinking.Type)
 }
 
 func TestOpus55SignedThinkingResponsesRoundTrip(t *testing.T) {
@@ -1906,12 +1906,12 @@ func TestSonnet55ResponsesThinkingAndSampling(t *testing.T) {
 	}
 	temperature := 0.7
 	_, err := ResponsesToAnthropicRequest(&ResponsesRequest{Model: "claude-sonnet-5-5", Input: json.RawMessage(`"hello"`), Temperature: &temperature})
-	require.ErrorContains(t, err, "temperature")
+	require.NoError(t, err)
 	topP := 0.5
 	_, err = ResponsesToAnthropicRequest(&ResponsesRequest{Model: "claude-sonnet-5-5", Input: json.RawMessage(`"hello"`), TopP: &topP})
-	require.ErrorContains(t, err, "top_p")
+	require.NoError(t, err)
 	_, err = ResponsesToAnthropicRequest(&ResponsesRequest{Model: "claude-sonnet-5-5", Input: json.RawMessage(`"hello"`), Reasoning: &ResponsesReasoning{Effort: "minimal"}})
-	require.ErrorContains(t, err, "reasoning effort")
+	require.NoError(t, err, "legal efforts map to the nearest supported level")
 
 	temperature, topP = 1, 0.99
 	_, err = ResponsesToAnthropicRequest(&ResponsesRequest{Model: "claude-sonnet-5-5", Input: json.RawMessage(`"hello"`), Temperature: &temperature, TopP: &topP})

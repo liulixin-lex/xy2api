@@ -8,6 +8,20 @@
 
 - 管理员可创建按操作、分组、平台和账号类型授权的机器密钥，支持 IP 限制、轮换、撤销和审计；新增默认关闭的 OAuth 管理 MCP，保留原有只读 MCP 与操作员权限。见 [管理员密钥](docs/guides/admin-api-keys.md) 和 [管理 MCP](docs/guides/management-mcp.md)。
 
+### 变更
+
+- OpenAI Chat Completions 与 Responses 转 Anthropic 时保留常见客户端的默认参数与可用工具行为，兼容 null 与对象联合 schema，按模型适配推理和采样；无法表达的工具 schema 返回统一参数错误。
+
+### 修复
+
+- 修复自定义端点的兼容账号在多轮对话第二轮被误判「凭据或端点已变化」而拒绝的问题。
+
+### 安全
+
+- 网关 API 及其别名响应固定使用 sandbox CSP，阻止上游 HTML 在站点同源执行；覆盖错误、流式与 Google query-key 路由。
+- 审计、审核、CRS、Vertex 令牌客户端停止跟随重定向，3xx 错误仅保留状态码与目标主机；补充白名单开关及初始密码说明。
+- 重定向错误处理同步覆盖 `securityaudit/prompt_qwen3guard.go`、`securityaudit/prompt_service.go`、`pkg/typesafe/client.go`；新增 `backend/internal/pkg/httpclient/redirect.go` 及 `redirect_test.go` 供客户端共享策略（前三个路径相对 `backend/internal`）。
+
 ## [0.6.3] - 2026-11-12
 
 本版重写 OpenAI 分组的调度：只保留一条选号链，优先级严格分层并默认立即接管会话；质量门槛改为按每次上游尝试统计，账号只有正常与冷却两种状态，冷却到点用真实数据或主动分级测试确认合格才恢复。份额调度、OpenAI 实验调度策略与旧的质量门槛一并移除。

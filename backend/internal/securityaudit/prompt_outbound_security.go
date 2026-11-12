@@ -9,6 +9,7 @@ import (
 	"time"
 
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
+	"github.com/liulixin-lex/xy2api/internal/pkg/httpclient"
 )
 
 const maxGuardResponseBytes int64 = 256 * 1024
@@ -82,8 +83,8 @@ func NewSecureHTTPClient(endpoint ActiveEndpoint) (*http.Client, error) {
 	if timeout <= 0 {
 		timeout = DefaultTimeoutMS * time.Millisecond
 	}
-	return &http.Client{
+	return httpclient.WithoutRedirects(&http.Client{
 		Transport: transport,
 		Timeout:   timeout,
-	}, nil
+	}), nil
 }

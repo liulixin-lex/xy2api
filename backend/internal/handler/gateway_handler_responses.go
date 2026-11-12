@@ -95,6 +95,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 	compatCtx, compatErr := h.gatewayService.PrepareAnthropicCompatibilityForSelection(c.Request.Context(), subject.UserID, apiKey.ID, body, "responses", service.ExtractClientSessionID(c), c.Request.Header)
 	if compatErr != nil {
 		status, code, message, _ := service.AnthropicCompatErrorDetails(compatErr)
+		logAnthropicCompatSelectionError(c, reqLog, "responses", compatErr, status, code)
 		h.responsesErrorResponse(c, status, code, message)
 		return
 	}
@@ -205,6 +206,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(requestCtx, apiKey.GroupID, sessionHash, reqModel, fs.FailedAccountIDs, "", int64(0))
 		if err != nil {
 			if status, code, message, local := service.AnthropicCompatErrorDetails(err); local {
+				logAnthropicCompatSelectionError(c, reqLog, "responses", err, status, code)
 				h.responsesErrorResponse(c, status, code, message)
 				return
 			}

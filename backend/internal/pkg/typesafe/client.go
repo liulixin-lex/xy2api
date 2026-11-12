@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/liulixin-lex/xy2api/internal/pkg/httpclient"
 )
 
 const (
@@ -146,6 +148,9 @@ func Evaluate(ctx context.Context, client *http.Client, baseURL, key string, inp
 		return nil, 0, errors.New("typesafe transport unavailable")
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if err := httpclient.RedirectError(resp); err != nil {
+		return nil, resp.StatusCode, err
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// Do not log provider error bodies: they may echo user input or credentials.
 		return nil, resp.StatusCode, fmt.Errorf("typesafe API status %d", resp.StatusCode)
