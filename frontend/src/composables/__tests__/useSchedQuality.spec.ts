@@ -102,6 +102,35 @@ describe('useSchedQualityPoll', () => {
     expect(poll.data.value).toBe('second')
     scope.stop()
   })
+
+  it('settles a replaced refresh only when its replacement is in, but at once when the key changes', async () => {
+    const key = ref<number | null>(1)
+    const answers: Array<(value: string) => void> = []
+    const load = vi.fn((signal: AbortSignal) => new Promise<string>((resolve, reject) => {
+      answers.push(resolve)
+      signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+    }))
+    const scope = effectScope()
+    const poll = scope.run(() => useSchedQualityPoll(key, load))!
+    await nextTick()
+    let firstDone = false
+    void poll.refresh().then(() => { firstDone = true })
+    // Replaced by another refresh of the same key: the first promise waits for the newest one.
+    void poll.refresh()
+    await flush()
+    expect(firstDone).toBe(false)
+    answers.at(-1)!('newest')
+    await flush()
+    expect([firstDone, poll.data.value]).toEqual([true, 'newest'])
+
+    let staleDone = false
+    void poll.refresh().then(() => { staleDone = true })
+    key.value = 2
+    await nextTick()
+    await flush()
+    expect(staleDone).toBe(true)
+    scope.stop()
+  })
 })
 
 describe('cooling countdown', () => {

@@ -478,6 +478,39 @@ describe('SchedAccountDrawer — red-team revisions (R2-RT-FB)', () => {
     expect(api.accountDetail).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps 恢复 locked while the detail reload that replaced its own is still pending (P0-1, re-check)', async () => {
+    const d = detail()
+    d.groups[0].override = { mode: 'exempt', all_groups: false, expires_at: null, reason: '' }
+    await openWith(d, { onRecovered: async () => {} })
+    // Every detail reload waits for the test; a cancelled one fails as the transport does.
+    const answers: Array<(value: SchedAccountDetail) => void> = []
+    let aborted = 0
+    api.accountDetail.mockImplementation((_id: number, { signal }: { signal: AbortSignal }) => new Promise((resolve, reject) => {
+      answers.push(resolve)
+      signal.addEventListener('abort', () => { aborted++; reject(new DOMException('aborted', 'AbortError')) }, { once: true })
+    }))
+    api.reset.mockResolvedValue({ reset_at: 'x', cleared: [], preserved: [], failed: [] })
+    api.clearOverride.mockResolvedValue(undefined)
+    trigger('drawer-reset')!.click()
+    await flushPromises()
+    expect(trigger('drawer-reset')!.getAttribute('aria-busy')).toBe('true')
+    expect(answers).toHaveLength(1)
+
+    // Cancelling the override reloads the detail again: the recovery's reload is aborted and replaced.
+    trigger('override:53')!.click()
+    await flushPromises()
+    expect(api.clearOverride).toHaveBeenCalledWith(479, 53)
+    expect([answers.length, aborted]).toEqual([2, 1])
+    expect(trigger('drawer-reset')!.getAttribute('aria-busy')).toBe('true')
+    trigger('drawer-reset')!.click()
+    await flushPromises()
+    expect(api.reset).toHaveBeenCalledTimes(1)
+
+    answers[1](detail())
+    await flushPromises()
+    expect(trigger('drawer-reset')!.getAttribute('aria-busy')).toBe('false')
+  })
+
   it('shows the override of a group without state rows to every reader; only the action needs accounts:manage (P1-2)', async () => {
     const d = detail()
     d.groups.push({ group_id: 55, name: '南风组', gate_enabled: false, policy: d.groups[0].policy, override: { mode: 'demote', all_groups: false, expires_at: null, reason: '' }, by_model: [] })
