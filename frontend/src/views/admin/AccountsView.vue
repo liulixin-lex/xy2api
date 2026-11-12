@@ -666,6 +666,8 @@ type AccountBulkEditTarget =
         group_category?: string
         search?: string
         privacy_mode?: string
+        iq_status?: string
+        sched_quality?: string
         sort_by?: string
         sort_order?: AccountSortOrder
       }
@@ -1304,6 +1306,7 @@ const buildUpstreamBillingRateFilters = () => {
     search: typeof rawParams.search === 'string' ? rawParams.search : '',
     privacy_mode: typeof rawParams.privacy_mode === 'string' ? rawParams.privacy_mode : '',
     iq_status: typeof rawParams.iq_status === 'string' ? rawParams.iq_status : '',
+    sched_quality: typeof rawParams.sched_quality === 'string' ? rawParams.sched_quality : '',
     group_category: typeof rawParams.group_category === 'string' ? rawParams.group_category : '',
     sort_by: sortState.sort_by,
     sort_order: sortState.sort_order
@@ -2517,6 +2520,7 @@ const buildBulkEditFilterSnapshot = () => {
     search: typeof rawParams.search === 'string' ? rawParams.search : '',
     privacy_mode: typeof rawParams.privacy_mode === 'string' ? rawParams.privacy_mode : '',
     iq_status: typeof rawParams.iq_status === 'string' ? rawParams.iq_status : '',
+    sched_quality: typeof rawParams.sched_quality === 'string' ? rawParams.sched_quality : '',
     group_category: typeof rawParams.group_category === 'string' ? rawParams.group_category : '',
     sort_by: typeof rawParams.sort_by === 'string' ? rawParams.sort_by : '',
     sort_order: sortOrder
@@ -2601,6 +2605,7 @@ const buildAccountQueryFilters = () => ({
   group: params.group || '',
   privacy_mode: params.privacy_mode || '',
   iq_status: params.iq_status || '',
+  sched_quality: params.sched_quality || '',
   group_category: params.group_category || '',
   search: params.search || '',
   sort_by: sortState.sort_by,

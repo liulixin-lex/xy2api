@@ -1,9 +1,11 @@
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { defineComponent, h } from 'vue'
 
 import zhSched from '@/i18n/locales/zh/admin/schedQuality'
+import enSched from '@/i18n/locales/en/admin/schedQuality'
+import { kindName, rejectName } from '@/utils/schedQualityFormat'
 import type { SchedAccountDetail, SchedAccountSummary, SchedBoard } from '@/types/schedQuality'
 import detailFixture from '@/__tests__/fixtures/schedQuality/account_detail.json'
 import summaryFixture from '@/__tests__/fixtures/schedQuality/account_summary.json'
@@ -67,10 +69,11 @@ const detail = () => {
 }
 const board = (): SchedBoard => {
   const b = structuredClone(boardFixture) as SchedBoard
-  b.accounts.push({ ...structuredClone(b.accounts[0]), account_id: 2, eligible: false, reject: 'rate_limit', reject_until: new Date(Date.now() + 60_000).toISOString() })
+  b.accounts.push({ ...structuredClone(b.accounts[0]), account_id: 2, eligible: false, reject: 'model_rate_limited', reject_until: new Date(Date.now() + 60_000).toISOString() })
   return b
 }
 
+enableAutoUnmount(afterEach)
 beforeEach(() => {
   document.body.innerHTML = ''
   closeSchedDrawer()
@@ -120,5 +123,25 @@ describe('quality UI copy', () => {
     // No sentences: no sentence punctuation, and no run of words longer than a name.
     expect(texts.filter((text) => /[。，！？；]/.test(text))).toEqual([])
     expect(texts.flatMap(nonData).filter((token) => token.length > 8)).toEqual([])
+  })
+
+  it('names every reject code the board can return (G4 D1) and the auto_states kind (D6) with a short word', () => {
+    // Normal path of the board's admission checks, then the codes a second admission check can pass through.
+    const codes = [
+      'platform_mismatch', 'model_rate_limited', 'not_schedulable', 'quota_auto_pause_5h', 'quota_auto_pause_7d',
+      'model_not_supported', 'profit_threshold', 'profit_invalid_account_rate', 'account_scheduling_threshold',
+      'privacy_not_set', 'runtime_blocked', 'proxy_stream_quarantined', 'shadow_parent_unhealthy',
+      'channel_upstream_restricted', 'channel_pricing_restricted',
+      'quota_auto_reset_pending_5h', 'quota_auto_reset_pending_7d', 'quota_auto_reset_credit_check_5h', 'quota_auto_reset_credit_check_7d'
+    ]
+    const { t, te } = i18n.global
+    const zh = codes.map((code) => rejectName(code, t, te))
+    expect(zh).not.toContain('其他')
+    expect(zh.filter((word) => word.replace(/\s/g, '').length > 4)).toEqual([])
+    expect(Object.keys(zhSched.schedQuality.reject).sort()).toEqual([...codes].sort())
+    expect(Object.keys(enSched.schedQuality.reject).sort()).toEqual([...codes].sort())
+    expect(rejectName('account_nil', t, te)).toBe('其他')
+    expect(kindName('auto_states', t, te)).toBe('自动状态')
+    expect(zhSched.schedQuality.result.skipped).toBe('未执行')
   })
 })

@@ -73,16 +73,27 @@ const ActionMenuStub = defineComponent({
 // Selects the page and starts quality batches; its buttons are disabled while a batch is busy.
 const BulkBarStub = defineComponent({
   props: ['schedBusy'],
-  emits: ['select-page', 'sched-action'],
+  emits: ['select-page', 'select-all-results', 'edit-filtered', 'sched-action'],
   setup(props, { emit }) {
     return () => h('div', [
       h('button', { 'data-test': 'select-page', onClick: () => emit('select-page') }),
+      h('button', { 'data-test': 'select-all-results', onClick: () => emit('select-all-results') }),
+      h('button', { 'data-test': 'edit-filtered', onClick: () => emit('edit-filtered') }),
       ...['reset', 'test'].map((action) => h('button', {
         'data-test': `bulk-sched-${action}`,
         disabled: props.schedBusy,
         onClick: (event: MouseEvent) => emit('sched-action', action, event.currentTarget)
       }))
     ])
+  }
+})
+
+// Turns on the "cooling" filter the way the real filter bar does.
+const FiltersStub = defineComponent({
+  props: ['filters'],
+  emits: ['update:filters', 'change'],
+  setup(props, { emit }) {
+    return () => h('button', { 'data-test': 'filter-cooling', onClick: () => { emit('update:filters', { ...props.filters, sched_quality: 'cooling' }); emit('change') } })
   }
 })
 
@@ -106,7 +117,7 @@ function mountView() {
         AccountActionMenu: ActionMenuStub,
         AccountStatusIndicator: true,
         AccountTableActions: true,
-        AccountTableFilters: true,
+        AccountTableFilters: FiltersStub,
         AccountBulkActionsBar: BulkBarStub,
         Pagination: true,
         ConfirmDialog: true,
@@ -237,6 +248,23 @@ describe('AccountsView quality columns', () => {
     await flushPromises()
     expect(sched.startTest.mock.calls.map(([id]) => id)).toEqual([1, 2, 3, 4, 5, 6])
     expect(sched.reset).toHaveBeenCalledTimes(4)
+    wrapper.unmount()
+  })
+
+  it('keeps the cooling filter in the secondary account queries: select all results and edit by filter (K24)', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.findComponent(FiltersStub).trigger('click')
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await flushPromises()
+    listAccounts.mockClear()
+    const bar = (selector: string) => wrapper.findComponent(BulkBarStub).get(selector)
+    await bar('[data-test="select-all-results"]').trigger('click')
+    await flushPromises()
+    await bar('[data-test="edit-filtered"]').trigger('click')
+    await flushPromises()
+    expect(listAccounts.mock.calls.length).toBeGreaterThanOrEqual(2)
+    for (const [, , filters] of listAccounts.mock.calls) expect(filters).toMatchObject({ sched_quality: 'cooling' })
     wrapper.unmount()
   })
 })

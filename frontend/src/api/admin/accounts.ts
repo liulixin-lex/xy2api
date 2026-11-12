@@ -820,6 +820,8 @@ export async function exportData(options?: {
     sort_by?: string
     sort_order?: 'asc' | 'desc'
     group_category?: string
+    /** "cooling" (contract clarification K11 / K24). */
+    sched_quality?: string
   }
   includeProxies?: boolean
 }): Promise<AdminDataPayload> {
@@ -828,7 +830,7 @@ export async function exportData(options?: {
     params.ids = options.ids.join(',')
   } else if (options?.filters) {
     const { platform, type, status, group, privacy_mode, search, sort_by, sort_order } = options.filters
-    const { group_category } = options.filters
+    const { group_category, sched_quality } = options.filters
     if (platform) params.platform = platform
     if (type) params.type = type
     if (status) params.status = status
@@ -838,6 +840,7 @@ export async function exportData(options?: {
     if (sort_by) params.sort_by = sort_by
     if (sort_order) params.sort_order = sort_order
     if (group_category) params.group_category = group_category
+    if (sched_quality) params.sched_quality = sched_quality
   }
   if (options?.includeProxies === false) {
     params.include_proxies = 'false'
