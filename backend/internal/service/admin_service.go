@@ -482,14 +482,15 @@ type BulkUpdateAccountsInput struct {
 }
 
 type BulkUpdateAccountFilters struct {
-	IQStatus    string
-	Platform    string
-	Type        string
-	Status      string
-	Group       string
-	Search      string
-	PrivacyMode string
-	Category    string
+	SchedQuality string
+	IQStatus     string
+	Platform     string
+	Type         string
+	Status       string
+	Group        string
+	Search       string
+	PrivacyMode  string
+	Category     string
 }
 
 // BulkUpdateAccountResult captures the result for a single account update.

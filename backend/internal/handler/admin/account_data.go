@@ -104,6 +104,9 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 	if !bindGroupCategoryQuery(c, service.WithAccountGroupCategoryFilter) {
 		return
 	}
+	if !h.bindSchedQualityAccountFilter(c, c.Query("sched_quality")) {
+		return
+	}
 	ctx := c.Request.Context()
 
 	selectedIDs, err := parseAccountIDs(c)

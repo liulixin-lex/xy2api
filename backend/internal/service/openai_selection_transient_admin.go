@@ -22,7 +22,7 @@ func (s *openAIAccountModelTransientState) listAt(accountID int64, now time.Time
 		if key.AccountID != accountID || (!entry.lastFailure.IsZero() && now.Sub(entry.lastFailure) > openAIModelTransientStreakTTL) {
 			continue
 		}
-		item := SchedLocalPenalty{Key: "model_transient:" + key.Model, Kind: "model_transient", Scope: "account", Model: key.Model}
+		item := SchedLocalPenalty{Key: "model_transient:" + key.Model, Kind: "model_transient", Scope: "model", Model: key.Model}
 		if now.Before(entry.blockUntil) {
 			until := entry.blockUntil
 			item.Until = &until

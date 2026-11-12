@@ -183,7 +183,7 @@ func TestSchedQualityValidationAndNotFound(t *testing.T) {
 	cases := []struct {
 		method, path, body string
 		code               int
-	}{{"GET", "/accounts/nope", "", 400}, {"GET", "/accounts/0", "", 400}, {"GET", "/accounts/999", "", 404}, {"GET", "/groups/999/policy", "", 404}, {"GET", "/groups/999/board", "", 404}, {"POST", "/accounts/summary", `{"account_ids":[0]}`, 400}, {"POST", "/accounts/summary", `{}`, 400}, {"PUT", "/accounts/1/override", `{"group_id":9,"mode":"demote","reason":"x"}`, 404}, {"PUT", "/accounts/1/override", `{"group_id":2,"mode":"demote","reason":"x"}`, 400}, {"PUT", "/accounts/1/override", `{"group_id":0,"mode":"bad","reason":"x"}`, 400}, {"PUT", "/accounts/1/override", `{"group_id":0,"mode":"demote","reason":" "}`, 400}, {"PUT", "/accounts/1/override", `{"group_id":0,"mode":"demote","reason":"x","expires_at":"2020-01-01T00:00:00Z"}`, 400}, {"DELETE", "/accounts/1/override?group_id=bad", "", 400}, {"POST", "/accounts/1/test", "bad", 400}, {"DELETE", "/accounts/1/auto-states/nope", "", 404}, {"PUT", "/groups/1/policy", `{"policy":{"ttft_seconds":10}}`, 400}, {"PUT", "/groups/1/policy", `{"expected_version":63,"policy":{"ttft_seconds":0.1}}`, 400}, {"PUT", "/groups/1/policy", `{"expected_version":63,"policy":{"ttft_seconds":10,"takeover_idle_seconds":1}}`, 400}}
+	}{{"GET", "/accounts/nope", "", 400}, {"GET", "/accounts/0", "", 400}, {"GET", "/accounts/999", "", 404}, {"GET", "/groups/999/policy", "", 404}, {"GET", "/groups/999/board", "", 404}, {"POST", "/accounts/summary", `{"account_ids":[0]}`, 400}, {"POST", "/accounts/summary", `{}`, 400}, {"PUT", "/accounts/1/override", `{"group_id":9,"mode":"demote","reason":"x"}`, 404}, {"PUT", "/accounts/1/override", `{"group_id":2,"mode":"demote","reason":"x"}`, 400}, {"PUT", "/accounts/1/override", `{"group_id":0,"mode":"bad","reason":"x"}`, 400}, {"PUT", "/accounts/1/override", `{"group_id":0,"mode":"demote","reason":"x","expires_at":"2020-01-01T00:00:00Z"}`, 400}, {"DELETE", "/accounts/1/override?group_id=bad", "", 400}, {"POST", "/accounts/1/test", "bad", 400}, {"DELETE", "/accounts/1/auto-states/nope", "", 404}, {"PUT", "/groups/1/policy", `{"policy":{"ttft_seconds":10}}`, 400}, {"PUT", "/groups/1/policy", `{"expected_version":63,"policy":{"ttft_seconds":0.1}}`, 400}, {"PUT", "/groups/1/policy", `{"expected_version":63,"policy":{"ttft_seconds":10,"takeover_idle_seconds":1}}`, 400}}
 	for _, tc := range cases {
 		t.Run(tc.method+tc.path+tc.body, func(t *testing.T) {
 			w := schedAdminHandlerRequest(r, tc.method, tc.path, tc.body)
@@ -197,6 +197,22 @@ func TestSchedQualityValidationAndNotFound(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"account_ids": ids})
 	require.Equal(t, 400, schedAdminHandlerRequest(r, "POST", "/accounts/summary", string(body)).Code)
 }
+func TestSchedQualityOverrideAllowsEmptyReason(t *testing.T) {
+	for _, reason := range []string{"", "   "} {
+		t.Run(reason, func(t *testing.T) {
+			h, e, _ := schedAdminHandlerFixture()
+			body, err := json.Marshal(map[string]any{"group_id": 0, "mode": "demote", "reason": reason})
+			require.NoError(t, err)
+			w := schedAdminHandlerRequest(schedAdminHandlerRouter(h), "PUT", "/accounts/1/override", string(body))
+			require.Equal(t, 200, w.Code, w.Body.String())
+			require.Equal(t, int64(1), e.override.AccountID)
+			require.Equal(t, int64(7), e.override.OperatorID)
+			require.Equal(t, schedquality.OverrideDemote, e.override.Mode)
+			require.Empty(t, e.override.Reason)
+		})
+	}
+}
+
 func TestSchedQualityGlobalPolicyConflict(t *testing.T) {
 	h, e, _ := schedAdminHandlerFixture()
 	r := schedAdminHandlerRouter(h)

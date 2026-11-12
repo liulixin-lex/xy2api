@@ -140,8 +140,8 @@ func (s *SchedAdminService) SetOverride(ctx context.Context, o SchedOverride) er
 		return infraerrors.BadRequest("INVALID_OVERRIDE", "Invalid override mode")
 	}
 	o.Reason = strings.TrimSpace(o.Reason)
-	if o.Reason == "" || (o.ExpiresAt != nil && !o.ExpiresAt.After(s.d.Now())) {
-		return infraerrors.BadRequest("INVALID_OVERRIDE", "Reason and a future expiry are required")
+	if o.ExpiresAt != nil && !o.ExpiresAt.After(s.d.Now()) {
+		return infraerrors.BadRequest("INVALID_OVERRIDE", "Expiry must be in the future")
 	}
 	if e = s.d.Engine.SetOverride(ctx, o); e != nil {
 		return e

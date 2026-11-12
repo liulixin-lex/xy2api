@@ -126,7 +126,7 @@ func (h *SchedQualityHandler) SetOverride(c *gin.Context) {
 		GroupID   *int64     `json:"group_id" binding:"required,gte=0"`
 		Mode      string     `json:"mode" binding:"required,oneof=exempt demote"`
 		ExpiresAt *time.Time `json:"expires_at"`
-		Reason    string     `json:"reason" binding:"required"`
+		Reason    string     `json:"reason"`
 	}
 	if e := c.ShouldBindJSON(&r); e != nil {
 		response.BadRequest(c, e.Error())

@@ -338,6 +338,16 @@ func TestSchedAdminBoardUsesOneSnapshotAndSelectionOrder(t *testing.T) {
 	require.Equal(t, 1234, *out.Accounts[0].TTFO.P90Ms)
 	require.NotNil(t, out.Accounts[0].Until)
 }
+func TestSchedAdminModelTransientScope(t *testing.T) {
+	s, _, _ := schedAdminFixture()
+	transient := newOpenAIAccountModelTransientState(10)
+	transient.recordFailure(1, "m", time.Now())
+	s.d.Transient = transient
+	states, err := s.AutoStates(context.Background(), 1)
+	require.NoError(t, err)
+	require.Contains(t, states, SchedAutoState{Key: "model_transient:m", Kind: "model_transient", Scope: "model", Model: "m", Clearable: true})
+}
+
 func TestSchedAdminOverrideAndTestTickets(t *testing.T) {
 	s, e, _ := schedAdminFixture()
 	ctx := context.Background()

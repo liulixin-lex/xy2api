@@ -198,14 +198,15 @@ type BulkUpdateAccountsRequest struct {
 }
 
 type BulkUpdateAccountFilters struct {
-	IQStatus    string `json:"iq_status"`
-	Platform    string `json:"platform"`
-	Type        string `json:"type"`
-	Status      string `json:"status"`
-	Group       string `json:"group"`
-	Search      string `json:"search"`
-	PrivacyMode string `json:"privacy_mode"`
-	Category    string `json:"group_category"`
+	IQStatus     string `json:"iq_status"`
+	SchedQuality string `json:"sched_quality"`
+	Platform     string `json:"platform"`
+	Type         string `json:"type"`
+	Status       string `json:"status"`
+	Group        string `json:"group"`
+	Search       string `json:"search"`
+	PrivacyMode  string `json:"privacy_mode"`
+	Category     string `json:"group_category"`
 }
 
 // CheckMixedChannelRequest represents check mixed channel risk request
@@ -493,23 +494,10 @@ func (h *AccountHandler) List(c *gin.Context) {
 	if !bindGroupCategoryQuery(c, service.WithAccountGroupCategoryFilter) {
 		return
 	}
-	listCtx := service.WithIQStatusFilter(c.Request.Context(), iqStatus)
-	if quality := strings.TrimSpace(c.Query("sched_quality")); quality != "" {
-		if quality != "cooling" {
-			response.ErrorFrom(c, infraerrors.BadRequest("INVALID_SCHED_QUALITY", "invalid sched_quality filter"))
-			return
-		}
-		if h.schedQuality == nil {
-			response.Error(c, http.StatusServiceUnavailable, "Scheduling quality service unavailable")
-			return
-		}
-		attention, err := h.schedQuality.Attention(listCtx)
-		if err != nil {
-			response.ErrorFrom(c, err)
-			return
-		}
-		listCtx = service.WithSchedQualityAccountFilter(listCtx, attention.Cooling)
+	if !h.bindSchedQualityAccountFilter(c, c.Query("sched_quality")) {
+		return
 	}
+	listCtx := service.WithIQStatusFilter(c.Request.Context(), iqStatus)
 	accounts, total, err := h.adminService.ListAccounts(listCtx, page, pageSize, platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder)
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -2229,6 +2217,9 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		return
 	}
 
+	if req.Filters != nil && !h.bindSchedQualityAccountFilter(c, req.Filters.SchedQuality) {
+		return
+	}
 	result, err := h.adminService.BulkUpdateAccounts(c.Request.Context(), &service.BulkUpdateAccountsInput{
 		AccountIDs:            req.AccountIDs,
 		Filters:               toServiceBulkUpdateAccountFilters(req.Filters),
@@ -2274,14 +2265,15 @@ func toServiceBulkUpdateAccountFilters(filters *BulkUpdateAccountFilters) *servi
 		return nil
 	}
 	return &service.BulkUpdateAccountFilters{
-		Platform:    filters.Platform,
-		Type:        filters.Type,
-		Status:      filters.Status,
-		Group:       filters.Group,
-		Search:      filters.Search,
-		PrivacyMode: filters.PrivacyMode,
-		IQStatus:    filters.IQStatus,
-		Category:    filters.Category,
+		Platform:     filters.Platform,
+		Type:         filters.Type,
+		Status:       filters.Status,
+		Group:        filters.Group,
+		Search:       filters.Search,
+		PrivacyMode:  filters.PrivacyMode,
+		IQStatus:     filters.IQStatus,
+		SchedQuality: filters.SchedQuality,
+		Category:     filters.Category,
 	}
 }
 

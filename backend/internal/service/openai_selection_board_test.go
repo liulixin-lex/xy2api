@@ -109,6 +109,36 @@ func TestSchedBoardOrderAdmissionAndNoMutation(t *testing.T) {
 	require.Empty(t, events)
 }
 
+func TestSchedBoardRecentlyFullExpires(t *testing.T) {
+	now := time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC)
+	view := selectionTestView(now)
+	s := &OpenAIGatewayService{accountRepo: &selectionBoardRepo{accounts: []Account{*selectionTestAccount(1, 1)}}}
+	board := NewOpenAISelectionBoard(s, func() schedquality.View { return view })
+	board.marks.Mark(1, now)
+	for _, tc := range []struct {
+		name    string
+		elapsed time.Duration
+		seconds int
+	}{
+		{"same_second", 0, 0},
+		{"before_expiry", schedquality.TakeoverFullCooloff - time.Second, int(schedquality.TakeoverFullCooloff/time.Second) - 1},
+		{"at_expiry", schedquality.TakeoverFullCooloff, 0},
+		{"after_expiry", schedquality.TakeoverFullCooloff + time.Second, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			at := now.Add(tc.elapsed)
+			view.ViewAt = at
+			board.now = func() time.Time { return at }
+			rows, err := board.Board(context.Background(), 7, "m")
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			require.Equal(t, tc.seconds, rows[0].RecentlyFullSeconds)
+			require.Equal(t, tc.elapsed >= schedquality.TakeoverFullCooloff, rows[0].CanTakeOver)
+			require.Equal(t, now, board.marks.last(1), "board reads must not mutate full marks")
+		})
+	}
+}
+
 func TestSchedBoardTakeoverEligibility(t *testing.T) {
 	cases := []struct {
 		name  string

@@ -97,7 +97,7 @@ func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model s
 			row.InFlight = load.CurrentConcurrency
 			currentlyFull = account.Concurrency > 0 && load.CurrentConcurrency >= account.Concurrency
 		}
-		if at := b.marks.last(account.ID); !at.IsZero() {
+		if at := b.marks.last(account.ID); !at.IsZero() && now.Sub(at) < schedquality.TakeoverFullCooloff {
 			row.RecentlyFullSeconds = max(0, int(now.Sub(at)/time.Second))
 		}
 		idle, takeover := view.TakeoverIdle(groupID)
