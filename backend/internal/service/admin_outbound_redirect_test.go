@@ -39,7 +39,7 @@ func adminOutboundServer(t *testing.T, status int, successBody string, check fun
 			_, _ = io.WriteString(w, successBody)
 			return
 		}
-		w.Header().Set("Location", "http://redirect-user:redirect-password@"+r.Host+"/second?token=query-secret#fragment-secret")
+		w.Header().Set("Location", "http://redirect-user:redirect-password@"+r.Host+"/%zz?token=query-secret#fragment-secret")
 		w.WriteHeader(status)
 		_, _ = io.WriteString(w, "body-secret")
 	}))
@@ -49,7 +49,15 @@ func adminOutboundServer(t *testing.T, status int, successBody string, check fun
 
 func requireAdminRedirectError(t *testing.T, status int, err error) {
 	t.Helper()
-	require.EqualError(t, err, fmt.Sprintf("redirect refused: status=%d host=127.0.0.1", status))
+	require.EqualError(t, err, fmt.Sprintf("redirect refused: status=%d host=unknown", status))
+	requireNoRedirectSecrets(t, err.Error())
+}
+
+func requireNoRedirectSecrets(t *testing.T, value string) {
+	t.Helper()
+	for _, secret := range []string{"redirect-user", "redirect-password", "query-secret", "fragment-secret", "body-secret", "login-password", "export-secret"} {
+		require.NotContains(t, value, secret)
+	}
 }
 
 func TestContentModerationRejectsRedirects(t *testing.T) {
@@ -76,6 +84,8 @@ func TestContentModerationRejectsRedirects(t *testing.T) {
 					svc := NewContentModerationService(nil, nil, nil, nil, nil, nil, nil, nil)
 					cfg := defaultContentModerationConfig()
 					cfg.Engine, cfg.BaseURL = engine, server.URL
+					cfg.APIKeys = []string{"api-secret"}
+					cfg.RetryCount = 0
 					if mode == "default" {
 						svc.httpClient = nil
 					}
@@ -89,15 +99,17 @@ func TestContentModerationRejectsRedirects(t *testing.T) {
 						}}
 						cfg.ProxyID = moderationProxyIDPtr(7)
 					}
-					var gotStatus int
-					result, err := svc.callModerationOnceWithInput(context.Background(), cfg, "api-secret", "private-prompt", &gotStatus)
+					result, err := svc.callModeration(context.Background(), cfg, "private-prompt")
 					require.Zero(t, second.Load(), "redirect destination must never receive the request")
-					require.Equal(t, status, gotStatus)
+					keyStatus := svc.apiKeyStatusForHash(0, scopedModerationKeyHash("api-secret", engine), "", false)
+					requireNoRedirectSecrets(t, keyStatus.LastError)
+					require.Equal(t, status, keyStatus.LastHTTPStatus)
 					if status == http.StatusOK {
 						require.NoError(t, err)
 						require.NotNil(t, result)
 					} else {
 						requireAdminRedirectError(t, status, err)
+						require.Equal(t, fmt.Sprintf("redirect refused: status=%d host=unknown", status), keyStatus.LastError)
 					}
 				})
 			}
@@ -125,7 +137,7 @@ func TestCRSRejectsRedirects(t *testing.T) {
 						require.Equal(t, "Bearer export-secret", r.Header.Get("Authorization"))
 					}
 					if status != http.StatusOK && ((stage == "login") == login) {
-						w.Header().Set("Location", "http://redirect-user:redirect-password@"+r.Host+"/second?token=query-secret")
+						w.Header().Set("Location", "http://redirect-user:redirect-password@"+r.Host+"/%zz?token=query-secret#fragment-secret")
 						w.WriteHeader(status)
 						_, _ = io.WriteString(w, "body-secret login-password export-secret")
 						return

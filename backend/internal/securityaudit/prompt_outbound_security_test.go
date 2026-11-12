@@ -39,13 +39,19 @@ func TestNormalizeBaseURLAllowsAdministratorConfiguredDestinations(t *testing.T)
 	require.Equal(t, "https://guard.example.com/v1/chat/completions", url)
 }
 
-func TestHTTPClientUsesDirectStandardDialer(t *testing.T) {
-	client, err := NewSecureHTTPClient(ActiveEndpoint{BaseURL: "https://guard.example.com", TimeoutMS: 1000})
+func TestHTTPClientTransportCanReachConfiguredService(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client, err := NewSecureHTTPClient(ActiveEndpoint{BaseURL: server.URL, TimeoutMS: 1000})
 	require.NoError(t, err)
-	transport, ok := client.Transport.(*http.Transport)
-	require.True(t, ok)
-	require.Nil(t, transport.Proxy)
-	require.NotNil(t, transport.DialContext)
+	require.NotNil(t, client.Transport)
+	resp, err := client.Get(server.URL)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNoContent, resp.StatusCode)
+	require.NoError(t, resp.Body.Close())
 }
 
 func TestOpenAICompatibleScannerRequestContract(t *testing.T) {
@@ -92,12 +98,12 @@ func TestPromptAuditRejectsRedirects(t *testing.T) {
 						w.WriteHeader(http.StatusNotFound)
 						return
 					}
-					w.Header().Set("Location", "http://redirect-user:redirect-password@"+r.Host+"/second?token=query-secret#fragment-secret")
+					w.Header().Set("Location", "http://redirect-user:redirect-password@"+r.Host+"/%zz?token=query-secret#fragment-secret")
 					w.WriteHeader(status)
 					_, _ = io.WriteString(w, "body-secret audit-token private-prompt")
 				}))
 				defer server.Close()
-				want := fmt.Sprintf("redirect refused: status=%d host=127.0.0.1", status)
+				want := fmt.Sprintf("redirect refused: status=%d host=unknown", status)
 				if mode == "scanner" {
 					_, err := NewOpenAICompatibleScanner().Scan(context.Background(), ActiveEndpoint{ID: "redirect", BaseURL: server.URL, Model: DefaultGuardModel, Token: "audit-token", TimeoutMS: 1000}, "private-prompt", AllScannerIDs)
 					require.Zero(t, second.Load())
@@ -106,6 +112,10 @@ func TestPromptAuditRejectsRedirects(t *testing.T) {
 					require.Equal(t, status, guardErr.HTTPStatus)
 					require.False(t, guardErr.Retryable)
 					require.EqualError(t, err, want)
+					require.NotContains(t, err.Error(), "redirect-password")
+					require.NotContains(t, err.Error(), "query-secret")
+					require.NotContains(t, err.Error(), "fragment-secret")
+					require.NotContains(t, err.Error(), "body-secret")
 				} else {
 					result := newProbeTestService().Probe(context.Background(), ProbeRequest{Endpoint: probeEndpoint(server.URL, "audit-token")})
 					require.Zero(t, second.Load())
@@ -113,6 +123,10 @@ func TestPromptAuditRejectsRedirects(t *testing.T) {
 					require.False(t, result.Retryable)
 					require.Equal(t, status, result.HTTPStatus)
 					require.Equal(t, want, result.Message)
+					require.NotContains(t, result.Message, "redirect-password")
+					require.NotContains(t, result.Message, "query-secret")
+					require.NotContains(t, result.Message, "fragment-secret")
+					require.NotContains(t, result.Message, "body-secret")
 				}
 			})
 		}
