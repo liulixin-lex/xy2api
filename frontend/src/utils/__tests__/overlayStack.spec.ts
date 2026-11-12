@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { closeOverlay, holdFocus, openOverlay, trapTab } from '../overlayStack'
 
@@ -22,9 +22,20 @@ function button(parent: HTMLElement, trigger: string) {
 }
 
 afterEach(() => {
+  vi.useRealTimers()
   document.body.innerHTML = ''
   document.body.className = ''
 })
+
+function page() {
+  const main = document.createElement('main')
+  main.id = 'app'
+  document.body.appendChild(main)
+  return main
+}
+
+// MutationObserver callbacks run as microtasks.
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 describe('overlay focus rules', () => {
   it('returns to the opener, or to the element with the same data-* in the new top layer after a re-render', () => {
@@ -113,5 +124,92 @@ describe('overlay focus rules', () => {
     trapTab(new KeyboardEvent('keydown', { key: 'Tab', cancelable: true }), drawer.panel)
     expect(document.activeElement).toBe(first)
     drawer.close()
+  })
+
+  it('keeps the page entry when a single drawer is reused from inside itself, also when the entry re-renders', () => {
+    const app = page()
+    const entry = button(app, 'num:479:ttfo')
+    entry.focus()
+    const drawer = layer('drawer')
+    drawer.open()
+    // The drawer switches to the parent account from its own link, which the new content no longer has.
+    const parent = button(drawer.panel, 'parent:503')
+    parent.focus()
+    drawer.open()
+    parent.remove()
+    drawer.close()
+    expect(document.activeElement).toBe(entry)
+
+    drawer.open()
+    const again = button(drawer.panel, 'parent:503')
+    again.focus()
+    drawer.open()
+    again.remove()
+    entry.remove()
+    const fresh = button(app, 'num:479:ttfo')
+    drawer.close()
+    expect(document.activeElement).toBe(fresh)
+  })
+
+  it('never returns focus into the layer that is fading out', () => {
+    const app = page()
+    const entry = button(app, 'account:479')
+    entry.focus()
+    const board = layer('board')
+    board.open()
+    // The board lists the same account; the page entry is gone when the board closes.
+    const row = button(board.panel, 'account:479')
+    entry.remove()
+    // The board root stays in the document during its leave animation.
+    board.close()
+    expect(row.isConnected).toBe(true)
+    expect(document.activeElement).not.toBe(row)
+  })
+
+  it('moves focus to the re-rendered entry when the page re-renders right after the close', async () => {
+    const app = page()
+    const entry = button(app, 'num:479:ttfo')
+    entry.focus()
+    const drawer = layer('drawer')
+    drawer.open()
+    button(drawer.panel, 'recent-toggle').focus()
+    drawer.close()
+    expect(document.activeElement).toBe(entry)
+
+    // The list refreshes once the drawer is gone and replaces the row.
+    entry.remove()
+    const fresh = button(app, 'num:479:ttfo')
+    await settle()
+    expect(document.activeElement).toBe(fresh)
+  })
+
+  it('waits for an entry that is hidden or missing at the close and stops at the next input', async () => {
+    const app = page()
+    const entry = button(app, 'num:479:ttfo')
+    entry.focus()
+    const drawer = layer('drawer')
+    drawer.open()
+    entry.remove()
+    drawer.close()
+    expect(document.activeElement).toBe(document.body)
+
+    // A hidden copy (the other layout) is no target; the visible one, rendered later, is.
+    const hidden = button(app, 'num:479:ttfo')
+    hidden.checkVisibility = () => false
+    await settle()
+    expect(document.activeElement).toBe(document.body)
+    const shown = button(app, 'num:479:ttfo')
+    await settle()
+    expect(document.activeElement).toBe(shown)
+
+    // After a key press the user decides where focus goes.
+    shown.focus()
+    drawer.open()
+    shown.remove()
+    drawer.close()
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' }))
+    button(app, 'num:479:ttfo')
+    await settle()
+    expect(document.activeElement).toBe(document.body)
   })
 })

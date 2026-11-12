@@ -5,7 +5,9 @@
 //   a modal layer is open. Non-modal layers (popovers) neither lock nor make anything inert.
 // - When the top layer closes, focus goes to: its opener if still usable in the new top layer (or in the page when
 //   no layer is left); else the element with the same data-* attributes there; else the new top layer's panel;
-//   with no layer left, the element that opened the first layer from the page.
+//   with no layer left, the element that opened the first layer from the page. A layer reused from inside itself
+//   keeps its earlier opener. If a re-render right after the close drops focus to the body, it goes to the target's
+//   new copy (see settleFocus).
 const OVERLAY_BASE_Z = 50
 
 interface FocusRef {
@@ -50,30 +52,70 @@ const visible = (el: HTMLElement) => el.checkVisibility?.({ checkVisibilityCSS: 
 
 const insideLayer = (el: Element) => layers.some((layer) => layer.root()?.contains(el))
 
-/** Usable focus target: connected, visible, not inert, and inside `scope` (null = the page outside any layer). */
-function usable(el: HTMLElement | null, scope: HTMLElement | null): el is HTMLElement {
-  if (!el || !el.isConnected || el.closest('[inert]') || !visible(el)) return false
-  return scope ? scope.contains(el) : !insideLayer(el)
+/** The active page: #app (teleported tips, menus and toasts outside it are no return targets). */
+const pageRoot = () => document.getElementById('app')
+
+/**
+ * Usable focus target: connected, enabled, visible, not inert, inside `scope` (null = the page outside any layer)
+ * and not inside `leaving` (a layer that has just closed and may still be fading out).
+ */
+function usable(el: HTMLElement | null, scope: HTMLElement | null, leaving?: HTMLElement | null): el is HTMLElement {
+  if (!el || !el.isConnected || el.matches(':disabled') || el.closest('[inert]') || !visible(el)) return false
+  if (leaving?.contains(el)) return false
+  if (scope) return scope.contains(el)
+  const page = pageRoot()
+  return (!page || page.contains(el)) && !insideLayer(el)
 }
 
-function findByData(data: Record<string, string>, scope: HTMLElement | null): HTMLElement | null {
+function findByData(data: Record<string, string>, scope: HTMLElement | null, leaving?: HTMLElement | null): HTMLElement | null {
   const entries = Object.entries(data)
   if (!entries.length) return null
   const selector = entries.map(([name, value]) => `[${name}="${value.replace(/["\\]/g, '\\$&')}"]`).join('')
-  const found = Array.from((scope ?? document).querySelectorAll<HTMLElement>(selector))
-  return found.find((el) => usable(el, scope)) ?? null
+  const found = Array.from((scope ?? pageRoot() ?? document).querySelectorAll<HTMLElement>(selector))
+  return found.find((el) => usable(el, scope, leaving)) ?? null
 }
 
-function restoreFocus(closed: Layer) {
+/** The element itself when still usable, else its re-rendered copy (same data-*) in `scope`. */
+const resolve = (ref: FocusRef, scope: HTMLElement | null, leaving?: HTMLElement | null) =>
+  (usable(ref.el, scope, leaving) ? ref.el : null) ?? findByData(ref.data, scope, leaving)
+
+/** Where focus goes once `closed` has left the stack; null while nothing is usable. */
+function focusTarget(closed: Layer, page: FocusRef | null): HTMLElement | null {
   const top = layers[layers.length - 1]
-  const scope = top ? top.root() : null
-  const target =
-    (usable(closed.opener.el, scope) ? closed.opener.el : null) ??
-    findByData(closed.opener.data, scope) ??
-    (top
-      ? top.panel()
-      : (pageOpener && (usable(pageOpener.el, null) ? pageOpener.el : findByData(pageOpener.data, null))) ?? null)
-  target?.focus()
+  const leaving = closed.root()
+  if (top) return resolve(closed.opener, top.root(), leaving) ?? top.panel()
+  return resolve(closed.opener, null, leaving) ?? (page ? resolve(page, null, leaving) : null)
+}
+
+// A close often triggers a re-render of what lies below (the list refreshes once the drawer is gone), which can
+// replace the element focus just went to or bring it back only later. Until the next pointer or key input, a new
+// layer, or 1 s, focus that has fallen to the body goes to the target's current copy.
+const SETTLE_MS = 1000
+let stopSettling: (() => void) | null = null
+
+function settleFocus(closed: Layer, page: FocusRef | null) {
+  stopSettling?.()
+  if (typeof MutationObserver === 'undefined') return
+  const top = layers[layers.length - 1]
+  const retry = () => {
+    if (layers[layers.length - 1] !== top) return stop()
+    const active = document.activeElement
+    if (active && active !== document.body && active.isConnected) return
+    focusTarget(closed, page)?.focus()
+  }
+  const observer = new MutationObserver(retry)
+  const timer = setTimeout(() => stop(), SETTLE_MS)
+  function stop() {
+    observer.disconnect()
+    clearTimeout(timer)
+    window.removeEventListener('pointerdown', stop, true)
+    window.removeEventListener('keydown', stop, true)
+    if (stopSettling === stop) stopSettling = null
+  }
+  observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'inert', 'class', 'style'] })
+  window.addEventListener('pointerdown', stop, true)
+  window.addEventListener('keydown', stop, true)
+  stopSettling = stop
 }
 
 /** Re-applies inert and the scroll lock; call after a layer's root has rendered. */
@@ -95,10 +137,14 @@ export function syncOverlays() {
  * Returns its z-index: at least `floor` and above every other open layer.
  */
 export function openOverlay(token: symbol, options: OverlayOptions): number {
-  const opener = snapshot(document.activeElement)
+  stopSettling?.()
+  const focused = snapshot(document.activeElement)
   const index = layers.findIndex((layer) => layer.token === token)
-  if (index !== -1) layers.splice(index, 1)
-  if (!layers.length) pageOpener = opener
+  const previous = index === -1 ? null : layers.splice(index, 1)[0]
+  // Reused from inside itself (a drawer switching to the parent account): an element of the layer is no place to
+  // return to once it closes, so the earlier opener stays. Only a first opening sets the page opener.
+  const opener = previous && focused.el && previous.root()?.contains(focused.el) ? previous.opener : focused
+  if (!previous && !layers.length) pageOpener = focused
   const z = Math.max(options.floor ?? OVERLAY_BASE_Z, ...layers.map((layer) => layer.z + 1))
   layers.push({ token, z, modal: options.modal ?? true, root: options.root, panel: options.panel, opener })
   syncOverlays()
@@ -113,8 +159,11 @@ export function closeOverlay(token: symbol) {
   const root = closed.root()
   if (root) root.inert = false
   syncOverlays()
-  if (index === layers.length) restoreFocus(closed)
+  const page = pageOpener
   if (!layers.length) pageOpener = null
+  if (index !== layers.length) return
+  focusTarget(closed, page)?.focus()
+  settleFocus(closed, page)
 }
 
 /**
