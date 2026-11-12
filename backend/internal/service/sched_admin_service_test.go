@@ -271,8 +271,8 @@ func TestSchedAdminSummaryAggregation(t *testing.T) {
 	require.Equal(t, "b", *out.Accounts[0].Model)
 	require.Equal(t, 80, out.Accounts[0].Samples)
 	require.Equal(t, SchedAdminAccountSummaryGroups{Total: 7, Cooling: 5, Normal: 1, Nodata: 1}, out.Accounts[0].Groups)
-	require.Len(t, out.Accounts[0].Cooling, 3)
-	require.Equal(t, 2, out.Accounts[0].CoolingMore)
+	require.Len(t, out.Accounts[0].Cooling, 5)
+	require.Zero(t, out.Accounts[0].CoolingMore)
 	require.Nil(t, out.Accounts[1].Model)
 	require.Nil(t, out.Accounts[1].TTFO.P90Ms)
 	out, err = s.Summary(context.Background(), []int64{1}, "a")
@@ -830,7 +830,7 @@ func (r *schedAdminFailingRunner) Request(_ context.Context, _ int64, m string, 
 	}
 	return SchedTestTicket{Model: m, TestID: m + "-ticket", Started: true}, nil
 }
-func TestSchedAdminTestRetainsTicketsAfterModelFailure(t *testing.T) {
+func TestSchedAdminTestDefaultSingleModelAndFailure(t *testing.T) {
 	s, e, _ := schedAdminFixture()
 	for i, m := range []string{"a", "b", "c"} {
 		e.snapshot.Evidence[SchedAccountModel{1, m}] = schedAdminEvidence(40 - i)
