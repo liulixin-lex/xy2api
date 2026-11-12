@@ -33,6 +33,9 @@ func diagnosticStream(blocks ...map[string]any) string {
 		if block["type"] == "tool_use" {
 			emit("content_block_delta", map[string]any{"index": i, "delta": map[string]any{"type": "input_json_delta", "partial_json": "{}"}})
 		}
+		if block["unknown_delta"] == true {
+			emit("content_block_delta", map[string]any{"index": i, "delta": map[string]any{"type": "future_delta"}})
+		}
 		emit("content_block_stop", map[string]any{"index": i})
 	}
 	reason := "end_turn"
@@ -47,21 +50,26 @@ func diagnosticStream(blocks ...map[string]any) string {
 func TestAnthropicCompatDiagnosticTwoTurns(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, tc := range []struct {
-		name, model                           string
-		tool, failSecond, truncated, unsigned bool
+		name, model                                                       string
+		tool, failSecond, truncated, unsigned, unknownDelta, nonEndSecond bool
 	}{
 		{name: "tool_continuation", model: "claude-opus-5-5", tool: true},
 		{name: "no_tool_followup", model: "claude-opus-5-5"},
-		{name: "budget_thinking", model: "claude-opus-4-8", tool: true},
+		{name: "opus_4_8_adaptive", model: "claude-opus-4-8", tool: true},
+		{name: "unknown_delta_is_omitted", model: "claude-opus-5-5", tool: true, unknownDelta: true},
+		{name: "continuation_non_end_terminal", model: "claude-opus-5-5", tool: true, nonEndSecond: true},
 		{name: "upstream_rejects_signature", model: "claude-opus-5-5", tool: true, failSecond: true},
 		{name: "truncated_first_turn", model: "claude-opus-5-5", truncated: true},
 		{name: "unsigned_first_turn", model: "claude-opus-5-5", unsigned: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			account := compatConfigTestAccount()
-			account.Extra[AnthropicCompatProfileExtraKey] = "claude_code"
+			account.Extra[AnthropicCompatProfileExtraKey] = AnthropicCompatProfileClaudeCodeV2
 			account.Credentials["model_mapping"] = map[string]any{"chosen": tc.model}
 			firstBlocks := []map[string]any{{"type": "thinking", "thinking": "initial", "signature": "signed", "extension": "preserved"}, {"type": "redacted_thinking", "data": "opaque-redacted"}, {"type": "text", "text": "Checking."}}
+			if tc.unknownDelta {
+				firstBlocks = append(firstBlocks, map[string]any{"type": "text", "text": "ignored", "unknown_delta": true, "drop_me": true})
+			}
 			if tc.unsigned {
 				firstBlocks = []map[string]any{{"type": "text", "text": "OK"}}
 			}
@@ -78,13 +86,16 @@ func TestAnthropicCompatDiagnosticTwoTurns(t *testing.T) {
 				status := 200
 				if len(bodies) == 2 {
 					stream = diagnosticStream(map[string]any{"type": "text", "text": "OK"})
+					if tc.nonEndSecond {
+						stream = strings.Replace(stream, `"stop_reason":"end_turn"`, `"stop_reason":"tool_use"`, 1)
+					}
 					if tc.failSecond {
 						status = 400
 						stream = `{"error":{"message":"invalid signature"}}`
 					}
 				}
 				if tc.truncated {
-					stream = strings.TrimSuffix(stream, "\n\n")
+					stream = stream[:strings.LastIndex(stream, "event: message_stop")]
 				}
 				return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(stream))}, nil
 			}}
@@ -123,6 +134,9 @@ func TestAnthropicCompatDiagnosticTwoTurns(t *testing.T) {
 			require.Equal(t, !failed, last.Success)
 			if failed {
 				require.Contains(t, rec.Body.String(), `"success":false`)
+				if tc.unsigned {
+					require.Contains(t, rec.Body.String(), "模型本次没有返回 thinking")
+				}
 			}
 			if tc.truncated || tc.unsigned {
 				require.Len(t, bodies, 1)
@@ -156,16 +170,41 @@ func TestAnthropicCompatDiagnosticTwoTurns(t *testing.T) {
 			} else {
 				require.Equal(t, gjson.String, gjson.GetBytes(bodies[1], "messages.2.content").Type)
 			}
-			if tc.model == "claude-opus-5-5" {
+			if tc.model == "claude-opus-5-5" || tc.model == "claude-opus-4-8" {
 				require.Equal(t, "adaptive", gjson.GetBytes(bodies[0], "thinking.type").String())
 				require.False(t, gjson.GetBytes(bodies[0], "thinking.budget_tokens").Exists())
+				require.Equal(t, "high", gjson.GetBytes(bodies[0], "output_config.effort").String())
 			} else {
 				require.Equal(t, "enabled", gjson.GetBytes(bodies[0], "thinking.type").String())
 				require.Equal(t, int64(1024), gjson.GetBytes(bodies[0], "thinking.budget_tokens").Int())
 			}
 			require.NotContains(t, rec.Body.String(), "compat_revision")
+			if tc.unknownDelta {
+				require.NotContains(t, string(bodies[1]), "drop_me")
+			}
 
 		})
+	}
+}
+
+func TestAnthropicCompatDiagnosticThinkingModes(t *testing.T) {
+	for _, tc := range []struct {
+		model, mode string
+	}{
+		{"claude-opus-4-5", "enabled"},
+		{"claude-opus-4-6", "adaptive"},
+		{"claude-opus-4-8", "adaptive"},
+		{"claude-sonnet-5", "adaptive"},
+		{"claude-fable-5-2", "adaptive"},
+	} {
+		thinking, output := anthropicCompatDiagnosticThinking(tc.model)
+		require.Equal(t, tc.mode, thinking["type"])
+		if tc.mode == "adaptive" {
+			require.Equal(t, "high", output["effort"])
+		} else {
+			require.Nil(t, output)
+			require.Equal(t, 1024, thinking["budget_tokens"])
+		}
 	}
 }
 
@@ -173,7 +212,7 @@ func TestAnthropicCompatDiagnosticOffAndLegacyControls(t *testing.T) {
 	for _, tc := range []struct{ name, profile, mode string }{
 		{"off_default", AnthropicCompatProfileOff, ""},
 		{"off_explicit_control", AnthropicCompatProfileOff, AccountTestModeAnthropicCompatibility},
-		{"legacy_cli", "claude_code", AccountTestModeAnthropicLegacyCLI},
+		{"legacy_cli", AnthropicCompatProfileClaudeCodeV2, AccountTestModeAnthropicLegacyCLI},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			account := compatConfigTestAccount()
@@ -198,38 +237,6 @@ func TestAnthropicCompatDiagnosticOffAndLegacyControls(t *testing.T) {
 			require.Equal(t, 1, calls)
 			require.NotContains(t, rec.Body.String(), `"compat_step"`)
 			require.Contains(t, rec.Body.String(), `"success":true`)
-		})
-	}
-}
-
-func TestAnthropicCompatDiagnosticStreamCompletion(t *testing.T) {
-	complete := diagnosticStream(map[string]any{"type": "thinking", "thinking": "initial", "signature": "signed"})
-	for _, tc := range []struct {
-		name, stream string
-		valid        bool
-	}{
-		{"complete", complete, true},
-		{"multiline_data", strings.Replace(complete, `data: {"delta":`, `data: {`+"\ndata: "+`"delta":`, 1), true},
-		{"crlf", strings.ReplaceAll(complete, "\n", "\r\n"), true},
-		{"truncated", strings.TrimRight(complete, "\n"), false},
-		{"missing_start", complete[strings.Index(complete, "event: content_block_start"):], false},
-		{"missing_stop_reason", strings.Replace(complete, `"stop_reason":"end_turn"`, `"stop_reason":null`, 1), false},
-		{"event_mismatch", strings.Replace(complete, "event: message_stop", "event: error", 1), false},
-		{"open_block", strings.Replace(complete, "event: content_block_stop\ndata: {\"index\":0,\"type\":\"content_block_stop\"}\n\n", "", 1), false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			rec := httptest.NewRecorder()
-			c, _ := gin.CreateTestContext(rec)
-			c.Request = httptest.NewRequest("POST", "/test", nil)
-			blocks, reason, err := (&AccountTestService{}).readAnthropicCompatDiagnosticTurn(c, &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(tc.stream))})
-			if tc.valid {
-				require.NoError(t, err)
-				require.Equal(t, "end_turn", reason)
-				require.Len(t, blocks, 1)
-				require.Equal(t, "signed-suffix", gjson.GetBytes(blocks[0], "signature").String())
-			} else {
-				require.Error(t, err)
-			}
 		})
 	}
 }

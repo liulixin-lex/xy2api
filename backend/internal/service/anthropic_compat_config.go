@@ -70,7 +70,7 @@ func prepareAnthropicCompatExtra(account, previous *Account, create bool) (map[s
 		return nil, err
 	}
 	seed := ""
-	if !create && previous != nil && !anthropicCompatIdentityChanged(previous, &candidate) {
+	if !create && previous != nil && !AnthropicCompatIdentityChanged(previous, &candidate) {
 		seed = previous.AnthropicCompatIdentitySeed()
 	}
 	if seed == "" && (profile != nil || (!create && previous != nil && previous.AnthropicCompatIdentitySeed() != "")) {
@@ -89,7 +89,8 @@ func prepareAnthropicCompatExtra(account, previous *Account, create bool) (map[s
 	return prepared, nil
 }
 
-func anthropicCompatIdentityChanged(previous, next *Account) bool {
+// AnthropicCompatIdentityChanged applies the shared seed-rotation comparison.
+func AnthropicCompatIdentityChanged(previous, next *Account) bool {
 	if previous == nil || next == nil {
 		return true
 	}

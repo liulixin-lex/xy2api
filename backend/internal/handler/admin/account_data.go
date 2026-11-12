@@ -504,6 +504,16 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			}
 			accountInput.IQTargets = targetPatch
 		}
+		if item.Platform == service.PlatformAnthropic && item.Type == service.AccountTypeAPIKey && item.Extra != nil {
+			if profile, ok := item.Extra[service.AnthropicCompatProfileExtraKey].(string); ok && (profile == "claude_code_v1" || profile == "claude_code_v2") {
+				extra := make(map[string]any, len(item.Extra))
+				for key, value := range item.Extra {
+					extra[key] = value
+				}
+				extra[service.AnthropicCompatProfileExtraKey] = "claude_code"
+				accountInput.Extra = extra
+			}
+		}
 		created, err := h.adminService.CreateAccount(ctx, accountInput)
 		if err != nil {
 			result.AccountFailed++

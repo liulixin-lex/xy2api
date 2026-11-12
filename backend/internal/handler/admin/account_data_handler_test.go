@@ -340,6 +340,24 @@ func TestImportDataReusesProxyAndSkipsDefaultGroup(t *testing.T) {
 	}
 }
 
+func TestImportDataNormalizesLegacyAnthropicCompatProfiles(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	body, err := json.Marshal(DataImportRequest{Data: DataPayload{Type: dataType, Version: dataVersion, Proxies: []DataProxy{}, Accounts: []DataAccount{
+		{Name: "compat-v1", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Credentials: map[string]any{"api_key": "fixture"}, Extra: map[string]any{service.AnthropicCompatProfileExtraKey: "claude_code_v1"}},
+		{Name: "compat-v2", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Credentials: map[string]any{"api_key": "fixture"}, Extra: map[string]any{service.AnthropicCompatProfileExtraKey: "claude_code_v2"}},
+	}}})
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Len(t, adminSvc.createdAccounts, 2)
+	for _, account := range adminSvc.createdAccounts {
+		require.Equal(t, "claude_code", account.Extra[service.AnthropicCompatProfileExtraKey])
+	}
+}
+
 func TestExportDataExcludesCodexTicketMaterial(t *testing.T) {
 	router, adminSvc := setupAccountDataRouter()
 	extra := map[string]any{

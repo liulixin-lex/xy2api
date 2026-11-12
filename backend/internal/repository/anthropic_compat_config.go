@@ -47,9 +47,7 @@ func anthropicCompatRotationIDs(ctx context.Context, exec sqlExecutor, ids []int
 		}
 		maps.Copy(next.Credentials, credentials)
 		maps.Copy(next.Extra, extra)
-		oldKey, oldURL, oldBearer := service.NormalizeAnthropicCompatCredentials(&previous)
-		newKey, newURL, newBearer := service.NormalizeAnthropicCompatCredentials(&next)
-		if oldKey != newKey || oldURL != newURL || oldBearer != newBearer {
+		if service.AnthropicCompatIdentityChanged(&previous, &next) {
 			rotated = append(rotated, id)
 		}
 	}

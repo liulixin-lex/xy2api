@@ -279,7 +279,7 @@ func TestAnthropicCompatDisabledSeedStillTracksCredentialChanges(t *testing.T) {
 }
 
 func compatConfigTestAccount() *Account {
-	return &Account{ID: 71, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "fixture", "base_url": "https://api.anthropic.com"}, Extra: map[string]any{AnthropicCompatProfileExtraKey: "claude_code", AnthropicCompatIdentitySeedExtraKey: strings.Repeat("ab", 32)}}
+	return &Account{ID: 71, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "fixture", "base_url": "https://api.anthropic.com"}, Extra: map[string]any{AnthropicCompatProfileExtraKey: AnthropicCompatProfileClaudeCodeV2, AnthropicCompatIdentitySeedExtraKey: strings.Repeat("ab", 32)}}
 }
 
 func TestNormalizeAnthropicCompatCredentials(t *testing.T) {
