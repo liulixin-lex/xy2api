@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -99,15 +100,22 @@ type handlerCompatFixture struct {
 	usage    *handlerCompatUsage
 	accounts *handlerCompatAccounts
 	wire     chan handlerCompatWire
+	response func(uint64) string
 }
 
 func newHandlerCompatFixture(t *testing.T, channels ...*service.ChannelService) *handlerCompatFixture {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	f := &handlerCompatFixture{wire: make(chan handlerCompatWire, 4)}
+	var calls atomic.Uint64
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		f.wire <- handlerCompatWire{body, r.Header.Clone()}
+		if f.response != nil {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, f.response(calls.Add(1)))
+			return
+		}
 		http.Error(w, "unexpected upstream request", http.StatusBadGateway)
 	}))
 	t.Cleanup(upstream.Close)
