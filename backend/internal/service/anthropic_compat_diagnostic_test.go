@@ -137,7 +137,7 @@ func TestAnthropicCompatDiagnosticTwoTurns(t *testing.T) {
 			if failed {
 				require.Contains(t, rec.Body.String(), `"success":false`)
 				if tc.unsigned {
-					require.Contains(t, rec.Body.String(), "模型本次没有返回 thinking")
+					require.Contains(t, rec.Body.String(), "The model did not return thinking in this turn")
 				}
 			}
 			if tc.truncated || tc.unsigned {
@@ -207,6 +207,39 @@ func TestAnthropicCompatDiagnosticThinkingModes(t *testing.T) {
 			require.Nil(t, output)
 			require.Equal(t, 1024, thinking["budget_tokens"])
 		}
+	}
+}
+
+func TestAnthropicCompatDiagnosticRejectsUnreadyAccount(t *testing.T) {
+	for _, tc := range []struct{ name, action, reason string }{
+		{"missing_seed", "", "identity_uninitialized"},
+		{"filtered_beta", BetaPolicyActionFilter, "required_beta_filtered"},
+		{"blocked_beta", BetaPolicyActionBlock, "beta_policy_blocked"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			account := compatTestAccount()
+			policy := BetaPolicySettings{Rules: []BetaPolicyRule{{BetaToken: "context-management-2025-06-27", Scope: BetaPolicyScopeAPIKey, Action: tc.action}}}
+			if tc.action == "" {
+				delete(account.Extra, AnthropicCompatIdentitySeedExtraKey)
+			}
+			raw, err := json.Marshal(policy)
+			require.NoError(t, err)
+			cfg := &config.Config{}
+			settings := NewSettingService(&betaPolicySettingRepoStub{values: map[string]string{SettingKeyBetaPolicySettings: string(raw)}}, cfg)
+			upstream := &systemOneHTTPUpstream{do: func(*http.Request) (*http.Response, error) {
+				t.Fatal("unready account must not send an upstream request")
+				return nil, nil
+			}}
+			svc := &AccountTestService{accountRepo: &systemOnePolicyAccountRepo{account: account}, httpUpstream: upstream, settingService: settings, cfg: cfg}
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest("POST", "/test", nil)
+			require.ErrorContains(t, svc.TestAccountConnection(c, account.ID, "claude-opus-5-5", "", ""), tc.reason)
+			require.Contains(t, rec.Body.String(), `"code":"adapted_turn"`)
+			require.Contains(t, rec.Body.String(), `"status":"failed"`)
+			require.Contains(t, rec.Body.String(), `"success":false`)
+			require.NotContains(t, rec.Body.String(), "signed_continuation")
+		})
 	}
 }
 

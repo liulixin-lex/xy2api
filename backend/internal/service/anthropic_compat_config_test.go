@@ -282,6 +282,32 @@ func compatTestAccount() *Account {
 	return &Account{ID: 71, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "synthetic-upstream-key", "base_url": "https://api.anthropic.com"}, Extra: map[string]any{AnthropicCompatProfileExtraKey: AnthropicCompatProfileClaudeCode, AnthropicCompatIdentitySeedExtraKey: strings.Repeat("ab", 32)}}
 }
 
+func TestCRSSyncAnthropicCompatIdentitySeed(t *testing.T) {
+	for _, tc := range []struct {
+		name, apiKey string
+		rotated      bool
+	}{
+		{"unchanged", "synthetic-upstream-key", false},
+		{"changed", "changed-upstream-key", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			account := compatTestAccount()
+			account.Extra["crs_account_id"] = "crs-openai-1" // Existing CRS export fixture ID.
+			seed := account.AnthropicCompatIdentitySeed()
+			repo := newCRSLongContextAccountRepo(account)
+			result := runCRSOpenAILongContextSync(t, repo, crsOpenAILongContextSource{
+				collection: "claudeConsoleAccounts", credentials: map[string]any{"api_key": tc.apiKey},
+			})
+			require.Equal(t, 1, result.Updated)
+			require.Zero(t, result.Failed)
+			stored := repo.accounts["crs-openai-1"]
+			require.Equal(t, tc.apiKey, stored.GetCredential("api_key"))
+			require.Len(t, stored.AnthropicCompatIdentitySeed(), 64)
+			require.Equal(t, tc.rotated, seed != stored.AnthropicCompatIdentitySeed())
+		})
+	}
+}
+
 func TestNormalizeAnthropicCompatCredentials(t *testing.T) {
 	for _, tc := range []struct {
 		name            string

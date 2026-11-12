@@ -132,6 +132,9 @@ func (s *AccountTestService) testAnthropicCompatConnection(c *gin.Context, accou
 		s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 		return nil
 	}
+	if reason := (&GatewayService{settingService: s.settingService}).anthropicCompatReadiness(c.Request.Context(), account, profile, model, ""); reason != "" {
+		return fail("adapted_turn", fmt.Errorf("Compatibility account is not ready: %s", reason))
+	}
 	content, err := sendTurn()
 	if err != nil {
 		return fail("adapted_turn", err)
@@ -155,7 +158,7 @@ func (s *AccountTestService) testAnthropicCompatConnection(c *gin.Context, accou
 		}
 	}
 	if !thinkingReturned {
-		return fail("adapted_turn", fmt.Errorf("模型本次没有返回 thinking"))
+		return fail("adapted_turn", fmt.Errorf("The model did not return thinking in this turn"))
 	}
 	if !signed {
 		return fail("adapted_turn", fmt.Errorf("Model returned thinking without signed history"))
