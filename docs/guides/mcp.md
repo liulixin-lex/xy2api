@@ -24,7 +24,7 @@ XY2API 内置一个只读的 MCP（Model Context Protocol）服务，让外部 A
 | `xy2api.requests.get_attempts` | 读取某条错误记录的逐次上游尝试（分页） | `ops` 或 `usage`；该行属于已恢复的上游记录时另需 `ops` |
 | `xy2api.requests.search_ingress_rejections` | 入口拒绝的分钟级聚合 | `ops` |
 | `xy2api.accounts.search` | 按名称、平台、状态、分组查找上游账号摘要 | `accounts`、`channels`、`groups`、`usage` 任一 |
-| `xy2api.accounts.get_health` | 最多 100 个指定账号的近期健康指标和已存的[上游余额](upstream-balance.md)快照 | `accounts` |
+| `xy2api.accounts.get_health` | 最多 100 个指定账号的近期实测（首字、错误、缓存与各分组质量状态）和已存的[上游余额](upstream-balance.md)快照 | `accounts` |
 | `xy2api.groups.search` | 分组 ID、名称、平台、状态与分类 | `groups`、`usage`、`users` 任一 |
 | `xy2api.groups.get_usage_summary` | 指定分组已闭合自然日的费用汇总 | `groups` |
 | `xy2api.channels.search` | 渠道元数据和分组绑定 | `channels` |
@@ -35,7 +35,7 @@ XY2API 内置一个只读的 MCP（Model Context Protocol）服务，让外部 A
 | `xy2api.ops.get_system_events` | 系统事件元数据（级别、组件、关联 ID），不含正文 | `ops` |
 | `xy2api.ops.get_realtime_snapshot` | 平台/分组级的近期来源行速率与已结算 Token 聚合 | `ops`（需开启实时监控） |
 | `xy2api.ops.get_concurrency_snapshot` | 1–100 个指定账号的当前在途、等待与分组并发 | `ops`（需开启实时监控） |
-| `xy2api.routing.get_quality_state` | 本进程的分组/账号质量门槛快照；`include_policies=true` 同时读取策略 | `accounts` |
+| `xy2api.routing.get_quality_state` | 本进程的[质量状态](group-quality-gate.md)快照（分组 × 账号 × 模型的正常 / 冷却与三个数）；`include_policies=true` 同时读取策略 | `accounts` |
 | `xy2api.users.search` | 普通用户的安全摘要（不含邮箱，不支持按 API Key 文本搜索） | `users`、`groups`、`subscriptions` 任一 |
 | `xy2api.users.get_usage_summary` | 指定普通用户的用量聚合 | `users`，且目标必须是普通用户 |
 | `xy2api.users.get_subscriptions` | 指定普通用户的订阅与限额 | `users` 或 `subscriptions`，且目标必须是普通用户 |

@@ -4,6 +4,57 @@
 
 ## [Unreleased]
 
+本版重写 OpenAI 分组的调度：只保留一条选号链，优先级严格分层并默认立即接管会话；质量门槛改为按每次上游尝试统计，账号只有正常与冷却两种状态，冷却到点用真实数据或主动分级测试确认合格才恢复。份额调度、OpenAI 实验调度策略与旧的质量门槛一并移除。
+
+### 新增
+
+- OpenAI 账号质量状态：每次真正发往上游的请求记一条尝试，按账号 × 模型统计折算首字 P90、错误率与续轮缓存命中率。开了质量门槛的分组把这三个数与阈值直接比较，有把握变差时让账号在本组冷却（排到后排，不是停用），冷却从 30 秒起逐轮加长、最长 30 分钟，到点确认合格才恢复。5 分钟内连续 3 次首输出超时的急性保护对所有 OpenAI 分组生效。见 [分组质量门槛](docs/guides/group-quality-gate.md)。
+- 主动分级测试：冷却到点而缺少真实数据时，网关向账号发小 / 中 / 大三档（1.5 万 / 6 万 / 13 万 Token）各 3 轮的 Codex 形态请求，量出同样的三个数；管理员也可以随时手动测试。测试不向用户计费，但消耗上游额度，见升级说明。
+- 会话接管：OpenAI 分组里更高优先级的账号有空位时，把绑在较低优先级账号上的会话改绑过去；分组可选关、立即，或距上次请求 5 / 15 / 30 分钟。见 [调度](docs/guides/scheduling.md#会话接管)。
+- 人工覆盖“豁免”与“后排”：按本组或全部分组设置，可带期限。
+- 管理后台：账号列表新增“近期实测”三列（首字、错误、缓存）、“分组”列（冷却中的分组）、“冷却中”筛选与批量恢复 / 后排 / 豁免 / 测试；账号抽屉显示三个数、各分组状态、可逐项清除的自动状态清单、测试结果与最近请求；分组列表新增“看板”，按当前选号顺序列出本组账号与被排除的原因；分组设置可按当前数据即时试算阈值。
+- “系统设置 → 网关服务 → 网关调度设置”新增“质量调度”（`sched_quality_enabled`）与“主动测试”（`sched_quality_test_enabled`）开关，默认开启。
+- 管理接口 `/api/v1/admin/sched-quality/` 下 11 个接口；账号列表接口新增筛选参数 `sched_quality=cooling`。
+- 日志 `sched_quality.state`（每次状态变化一条，`via` 区分合格恢复与到时放行）、`sched_quality.view_stale`、`sched_quality.cycle`。
+- 数据表 `account_attempt_samples`、`account_quality_states`、`account_quality_overrides`、`account_quality_tests`。
+
+### 变更
+
+- OpenAI 选号顺序改为：硬准入 → 站位（前排 / 后排）→ 优先级 → 倍率 → 会话亲和 → 负载 → 最近使用 → 账号 ID。新会话放置、失败换号、满载借号、迁出与接管的目标、末位兜底都用这一个顺序。优先级严格分层；倍率不再需要开关，对所有 OpenAI 分组生效。
+- 所有 OpenAI 分组默认立即接管，包括没有开质量门槛的分组。
+- 质量门槛的阈值：首字上限改为 0.5–600 秒、可填小数，针对常规请求，按固定的折算表换算到轻 / 重 / 超重请求；错误上限与缓存下限放开到 0–100%。错误只计账号侧故障（`TRANSIENT`、`STALL` 与无法归类的上游失败），首输出超时改算慢；缓存改为续轮缓存命中率（Σ 缓存读 ÷ Σ 上一轮提示量），不再是“保持 ≥50%”的比例。
+- 质量不再分 0 / 1 / 2 三档，只有正常与冷却；冷却的账号在本组后排，本组没有其他可用账号时仍会用到。
+- **不兼容：** 账号行菜单“恢复状态”（`POST /api/v1/admin/accounts/:id/recover-state`）改为与抽屉“恢复”相同：整个账号重新统计并清除全部可清的自动状态，返回 `{reset_at, cleared, preserved, failed}`。
+- 账号列表原“分组”列改名“归组”。
+- “OAuth 调度参考倍率”从实验调度区块移到“网关调度设置”，改名“OAuth 倍率”；设置键 `openai_oauth_scheduling_rate_multiplier` 不变。
+- 网关韧性的统计、未送达与选号解释接口只需要“运维”模块的查看权限。
+- 只读 MCP 的 `xy2api.routing.get_quality_state` 与 `xy2api.accounts.get_health` 改读新的质量状态。
+- `budget.budget_cut_attribution` 为 `enforce` 时，被预算截短的首输出超时在质量状态里不算超时。
+
+### 移除
+
+- **不兼容：** 份额调度。页面、设置键 `share_scheduling_settings`、普通管理员权限模块 `share_scheduling`（模块由 18 个变为 17 个；已退役的 `/scheduling/*` 与份额 `410` 接口改挂“账号管理”权限），以及接口（前缀 `/api/v1/admin/share-scheduling`）`GET` / `PUT /settings`、`GET /groups`、`GET` / `PUT /groups/:id/policy`、`POST /groups/:id/preview`、`POST /groups/:id/explain`、`GET /groups/:id/report`、`GET /accounts/:id/rules`。已退役的 `GET /groups/:id/decisions` 与 `POST /groups/:id/rebalance` 仍返回 `410`。
+- **不兼容：** OpenAI 实验调度策略。设置键 `openai_advanced_scheduler_enabled`、`openai_advanced_scheduler_sticky_weighted_enabled`、`openai_advanced_scheduler_subscription_priority_enabled`、`openai_advanced_scheduler_lb_top_k`，以及 `openai_advanced_scheduler_weight_` 后接 `priority`、`load`、`queue`、`error_rate`、`ttft`、`reset`、`quota_headroom`、`upstream_cost`、`previous_response`、`session_sticky` 的 10 个权重键；设置响应字段 `openai_advanced_scheduler_effective_lb_top_k` 与 10 个 `openai_advanced_scheduler_effective_weight_*`；配置项 `gateway.openai_ws.lb_top_k`、`gateway.openai_ws.scheduler_score_weights.*`、`gateway.openai_scheduler.sticky_escape_enabled`、`gateway.openai_scheduler.sticky_escape_ttft_ms`、`gateway.openai_scheduler.sticky_escape_error_rate`。
+- **不兼容：** 低倍率优先开关 `openai_low_upstream_rate_priority_enabled`、`openai_low_upstream_rate_priority_scope`、`openai_low_upstream_rate_priority_group_ids`（倍率改为固定的排序项）。
+- **不兼容：** 旧质量门槛接口 `GET /api/v1/admin/group-quality-gate/policies`、`PUT /api/v1/admin/group-quality-gate/policies/:group_id`、`GET /api/v1/admin/group-quality-gate/status`（由 `/api/v1/admin/sched-quality/groups/:id/policy` 与分组看板取代），以及“严格模式”和固定账号 `pinned_account_ids`。
+- **不兼容：** 账号近期表现接口 `POST /api/v1/admin/accounts/recent-health/batch`；账号列表接口的 `include_scheduler_score` 参数与 `scheduler_score`、`scheduler_scores` 字段；账号列表的“近期表现”“份额”“调度权值”列。
+- OpenAI 判慢让位、慢失败冷却（连续首输出超时 1–10 分钟）、负载 ≥80% 置后、按预计首字重排与质量迁出的 5 分钟冷却，由质量状态的首字维与急性保护取代；日志 `openai_account_latency_hold_started`、`openai_account_latency_sticky_migrated` 与 `group_quality_gate.*`，计数 `slow_streak_decision`、`latency_hold_sample`。Claude 判慢让位不变。
+- OpenAI 缓存感知选路：配置项 `gateway.openai_cache.aware_routing_enabled` 与 `gateway.openai_cache.rollout_percent`（环境变量 `GATEWAY_OPENAI_CACHE_AWARE_ROUTING_ENABLED`、`GATEWAY_OPENAI_CACHE_ROLLOUT_PERCENT`）；缓存诊断只看 `diagnostics_enabled`。
+
+### 升级说明
+
+- 迁移 `294_sched_quality.sql` 新建四张表，启动时自动执行。尝试记录与测试记录各保留 7 天，每小时清理。
+- 上线后质量状态从空开始：所有账号显示“暂无数据”，随真实流量累积，每一维至少 30 条、4 个会话才有数。
+- 质量门槛策略仍存于设置键 `group_quality_gate_policies`，新版写在每组的 `v4`。没有 `v4` 的分组由 `v3` 换算（不写回）：`enabled` 不变，`max_ttft_p90_seconds` → `ttft_seconds`，`max_error_rate` 不变，`min_cache_keep_rate` → `min_cache_ratio`，`takeover_idle_seconds` 为 `0`（立即接管）；`strict` 不再生效。只保存过更早格式、没有 `v3` 的分组，先按旧的启用状态补出 `v3`（首字 15 秒、错误 10%、缓存保持 50%），再按上面的规则换算。**错误与缓存的统计口径与旧版不同**（旧的缓存 50% / 70% 是“保持率”，新值是命中率），上线后请在各分组的看板与试算里对照新数据重新确认三个阈值。
+- 所有 OpenAI 分组默认立即接管。不需要的分组在分组设置的“接管”里选“关”或“N 分钟”；关闭“质量调度”会同时停止全部接管与冷却对排序的影响。
+- 原先的 `pinned_account_ids`（固定账号）不再生效，请改用“豁免”。
+- 主动测试会消耗上游额度：一次约 21 万未命中缓存 + 41 万命中缓存的输入 Token，约 1 分钟。它只在冷却到点且缺少真实数据时自动发起；冷却阶梯最长 30 分钟，持续不合格的账号最多每 30 分钟测一次（每小时约 42 万未命中 + 83 万命中缓存）。不需要时关闭“主动测试”（`sched_quality_test_enabled`），冷却到点即恢复。
+- 建议上线当天挑 10 个真实数据三项都合格、流量充足的账号各手动测试一次，在抽屉里对比测试三档的续轮首字与同档的真实 P90、测试与真实的缓存命中率；测试首字系统性偏高或健康账号测试不合格时，先关闭“主动测试”。
+- 发布后观察质量状态的变化：运维监控的系统日志按组件 `sched_quality` 筛选（事件 `sched_quality.state`，字段见 [观测与排障](docs/guides/gateway-resilience-observability.md#质量状态)）。
+- 迁移 `295_remove_retired_share_scheduling_permission.sql` 在升级时自动从已存的普通管理员权限中移除已退役的份额调度模块（`share_scheduling`），无需手动处理。
+- 被移除的设置值留在数据库里，不再读取；配置文件里残留的已移除配置项会被忽略；份额调度遗留的 Redis 统计键自然过期。
+- 回滚到上一版本：新表与新设置对它没有影响；`v3` 字段没有被改写，上一版本按 `v3` 运行（新版里改过的阈值不会带回）。迁移 `295` 移除的份额调度权限不会自动恢复；普通管理员需要在上一版本使用份额调度时，由超级管理员重新授予。
+
 ## [0.6.1] - 2026-11-11
 
 本版升级存在已知漏洞的依赖并适配新版 Gin，同时修复 standalone Compose 文件不传递 `TOTP_ENCRYPTION_KEY` 等问题。

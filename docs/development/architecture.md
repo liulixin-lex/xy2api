@@ -44,10 +44,9 @@
 | `internal/handler/` | HTTP 处理器：网关、用户端、`admin/` 管理端、`dto/` 传输对象 |
 | `internal/service/` | 业务逻辑：网关转发、账号调度、计费与定价、运维监控、支付、插件宿主等 |
 | `internal/repository/` | 数据访问：Ent 与原生 SQL 查询、Redis 缓存、上游 HTTP 客户端、迁移执行器 |
-| `internal/domain/` | 跨层共享的常量与领域类型，例如平台清单、角色、状态 |
+| `internal/domain/` | 跨层共享的常量与领域类型，例如平台清单、角色、状态；`schedquality/` 是 OpenAI 质量状态的纯规则与全部常量（请求档、统计、结论、冷却、主动测试判定） |
 | `internal/pkg/` | 通用工具包，以及各上游协议的适配代码（`claude`、`openai`、`gemini`、`antigravity`、`xai`、`apicompat`、`tlsfingerprint` 等） |
 | `internal/resilience/` | 网关韧性规则：上游失败分类、请求预算、惩罚与余额暂停、首包前保活。纯函数，不做 I/O |
-| `internal/sharesched/` | 份额调度内核：策略校验、加权排序、单请求放置计划。纯函数，不做 I/O |
 | `internal/payment/` | 支付渠道抽象、注册与负载均衡 |
 | `internal/mcp/` | 需要认证的只读诊断 MCP 接口 |
 | `internal/securityaudit/` | 提示词审计 |
@@ -106,7 +105,7 @@
    - API Key 鉴权（`internal/server/middleware/api_key_auth.go`）依次从 `Authorization: Bearer`、`x-api-key`、`x-goog-api-key` 读取 Key，查询参数里的 Key 会被拒绝。它分两层：鉴权（Key 有效、用户状态、IP 限制）总是执行；计费执行（过期、配额、订阅、余额）在 `/v1/usage` 等只读端点上跳过。鉴权结果有两级缓存：进程内缓存和 Redis。
 4. **按分组平台分派。** 路由处理函数根据 Key 所属分组的平台选择处理器：OpenAI、Grok 与多协议 API Key 平台走 `OpenAIGatewayHandler`（`openai_gateway_handler.go`），其余平台（Claude、Gemini、Antigravity 等）走 `GatewayHandler`（`gateway_handler.go`、`gemini_v1beta_handler.go`），再由它们调用对应平台的 service。
 5. **准入与预占。** 处理器先占用户并发槽位（等待有上限），再调用 `BillingCacheService.CheckBillingEligibility` 检查余额、订阅和配额，然后按估算预占在途额度。
-6. **选号。** 进入失败切换循环（`internal/handler/failover_loop.go`）。每一轮调用 service 选号（Claude 系为 `gateway_scheduling.go` 的 `SelectAccountWithLoadAwareness`，OpenAI 系为 `openai_account_scheduler.go`），综合粘性会话、分组与模型、账号可调度状态、负载和优先级。可调度账号列表来自 Redis 中的调度快照，快照由 `scheduler_snapshot_service.go` 根据数据库的 scheduler outbox 事件重建。选中账号后占账号并发槽位，槽位满时进入等待队列。调度规则见 [账号调度](../guides/scheduling.md)。
+6. **选号。** 进入失败切换循环（`internal/handler/failover_loop.go`）。每一轮调用 service 选号（Claude 系为 `gateway_scheduling.go` 的 `SelectAccountWithLoadAwareness`，OpenAI 系为 `openai_gateway_scheduling.go` 与 `openai_selection_*.go`），综合粘性会话、分组与模型、账号可调度状态、负载和优先级。可调度账号列表来自 Redis 中的调度快照，快照由 `scheduler_snapshot_service.go` 根据数据库的 scheduler outbox 事件重建。选中账号后占账号并发槽位，槽位满时进入等待队列。调度规则见 [账号调度](../guides/scheduling.md)。
 7. **转发。** service 按平台改写请求，经 repository 的上游 HTTP 客户端发出，按账号的代理与 TLS 指纹配置出站。命中插件绑定的 OpenAI OAuth 账号改由插件进程发出上游请求，见 [插件开发](plugins.md)。
 8. **失败处理。** 上游失败经 `internal/resilience` 分类后，决定同账号重试、切换账号、临时停调度或直接返回。一旦已经向客户端写出响应内容，就不再切换账号。见 [网关韧性](../guides/gateway-resilience.md)。
 9. **计费。** 转发成功后，处理器调用 `GatewayService.RecordUsage`（`gateway_usage_billing.go`）：按定价计算费用，写 `usage_logs`，扣减余额或累计订阅、配额用量。计费任务在请求处理器返回前同步执行，不受客户端断开影响（`internal/handler/durable_usage_task.go`）。每次计费是一条至多应用一次的命令（`usage_billing.go`），失败由恢复流程补偿。用量口径见 [用量指标与导出](../guides/usage.md)。
