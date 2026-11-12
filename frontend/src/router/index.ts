@@ -594,8 +594,7 @@ const routes: RouteRecordRaw[] = [
       requiresAdmin: true,
       permission: 'accounts',
       title: 'Account Management',
-      titleKey: 'admin.accounts.title',
-      descriptionKey: 'admin.accounts.description'
+      titleKey: 'admin.accounts.title'
     }
   },
   {

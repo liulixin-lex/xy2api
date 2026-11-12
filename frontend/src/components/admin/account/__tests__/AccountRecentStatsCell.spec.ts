@@ -37,8 +37,8 @@ const stats = (patch: Partial<AccountRecentStats> = {}): AccountRecentStats => (
   cache: { ratio: 0.62, n: 52, tier: 'bad' },
   ...patch
 })
-const cell = (props: Record<string, unknown>) =>
-  mount(AccountRecentStatsCell, { props: { accountId: 7, ...props }, global: { stubs: { RouterLink: RouterLinkStub } } })
+const cell = (props: Record<string, unknown>, attach = false) =>
+  mount(AccountRecentStatsCell, { props: { accountId: 7, ...props }, attachTo: attach ? document.body : undefined, global: { stubs: { RouterLink: RouterLinkStub } } })
 const values = (w: ReturnType<typeof cell>) => w.findAll('.acc-recent__v').map((v) => v.text())
 const labels = (w: ReturnType<typeof cell>) => w.findAll('.acc-recent__l').map((v) => v.text())
 
@@ -87,8 +87,8 @@ describe('AccountRecentStatsCell', () => {
     expect(values(gap)).toEqual(['—', '2.0%', '62%'])
     expect(labels(gap)).toEqual(['首字', '错误', '缓存'])
     for (const w of [none, missing]) {
-      expect(w.get('[data-test="recent-stats"]').text()).toBe('—')
-      expect(w.findAll('[data-test="recent-empty"]')).toHaveLength(1)
+      expect(w.get('[data-test="recent-stats"]').text().startsWith('—')).toBe(true)
+      expect(w.findAll('[data-test="recent-empty"]').map((e) => e.text())).toEqual(['—'])
       expect(labels(w)).toEqual([])
       expect(w.get('[data-test="recent-stats"]').attributes('aria-label')).toBe('近期状况 —')
     }
@@ -96,6 +96,27 @@ describe('AccountRecentStatsCell', () => {
     expect(labels(loading)).toEqual([])
     // Data already shown stays while a refresh is loading.
     expect(values(cell({ stats: stats(), loading: true }))).toEqual(['2.8s', '2.0%', '62%'])
+  })
+
+  // Red team FA-1: the sample counts are a lasting description, with or without the link and without DOM focus.
+  it.each([true, false])('describes each cell with its sample counts without DOM focus (link=%s)', (link) => {
+    const w = cell({ stats: stats(), link })
+    const id = w.get('[data-test="recent-stats"]').attributes('aria-describedby')
+    expect(id).toBeTruthy()
+    expect(w.get('#' + id).text()).toContain('37 次')
+    w.unmount()
+  })
+
+  it('keeps the sample description while the focus tip comes and goes', async () => {
+    const w = cell({ stats: stats(), link: true }, true)
+    const link = w.get('[data-test="recent-stats"]')
+    const id = link.attributes('aria-describedby')!
+    expect(w.get('#' + id).text()).toBe('首字 37 次，错误 100 次，缓存 52 次')
+    ;(link.element as HTMLElement).focus()
+    expect(link.attributes('aria-describedby')?.split(' ')).toEqual([id, 'sq-tip'])
+    ;(link.element as HTMLElement).blur()
+    expect(link.attributes('aria-describedby')).toBe(id)
+    w.unmount()
   })
 
   it('links the whole cell to the account\'s usage records only with that permission', () => {

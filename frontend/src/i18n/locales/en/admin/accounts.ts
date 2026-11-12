@@ -156,7 +156,6 @@ export default {
         }
       },
       title: 'Account Management',
-      description: 'Manage AI platform accounts and credentials',
       createAccount: 'Create Account',
       autoRefresh: 'Auto Refresh',
       enableAutoRefresh: 'Enable auto refresh',
