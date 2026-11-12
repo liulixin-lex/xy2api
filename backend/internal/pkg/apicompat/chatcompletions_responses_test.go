@@ -300,8 +300,8 @@ func TestChatCompletionsToResponses_MaxTokens(t *testing.T) {
 		resp, err := ChatCompletionsToResponses(req)
 		require.NoError(t, err)
 		require.NotNil(t, resp.MaxOutputTokens)
-		// Below minMaxOutputTokens (128), should be clamped
-		assert.Equal(t, minMaxOutputTokens, *resp.MaxOutputTokens)
+		// Preserve the exact requested ceiling, including values below 128.
+		assert.Equal(t, 100, *resp.MaxOutputTokens)
 	})
 
 	t.Run("max_completion_tokens_preferred", func(t *testing.T) {
@@ -413,7 +413,7 @@ func TestChatCompletionsToResponses_ImageURL(t *testing.T) {
 	assert.Equal(t, "data:image/png;base64,abc123", parts[1].ImageURL)
 }
 
-func TestChatCompletionsToResponses_EmptyBase64ImageURLSkipped(t *testing.T) {
+func TestChatCompletionsToResponses_EmptyBase64ImageURLRejected(t *testing.T) {
 	content := `[{"type":"text","text":"Describe this"},{"type":"image_url","image_url":{"url":"data:image/png;base64,"}}]`
 	req := &ChatCompletionsRequest{
 		Model: "gpt-4o",
@@ -422,20 +422,12 @@ func TestChatCompletionsToResponses_EmptyBase64ImageURLSkipped(t *testing.T) {
 		},
 	}
 	resp, err := ChatCompletionsToResponses(req)
-	require.NoError(t, err)
-
-	var items []ResponsesInputItem
-	require.NoError(t, json.Unmarshal(resp.Input, &items))
-	require.Len(t, items, 1)
-
-	var parts []ResponsesContentPart
-	require.NoError(t, json.Unmarshal(items[0].Content, &parts))
-	require.Len(t, parts, 1)
-	assert.Equal(t, "input_text", parts[0].Type)
-	assert.Equal(t, "Describe this", parts[0].Text)
+	require.Nil(t, resp)
+	var unsupported *UnsupportedConversionError
+	require.ErrorAs(t, err, &unsupported)
 }
 
-func TestChatCompletionsToResponses_WhitespaceOnlyBase64ImageURLSkipped(t *testing.T) {
+func TestChatCompletionsToResponses_WhitespaceOnlyBase64ImageURLRejected(t *testing.T) {
 	content := `[{"type":"text","text":"Describe this"},{"type":"image_url","image_url":{"url":"data:image/png;base64,   "}}]`
 	req := &ChatCompletionsRequest{
 		Model: "gpt-4o",
@@ -444,17 +436,9 @@ func TestChatCompletionsToResponses_WhitespaceOnlyBase64ImageURLSkipped(t *testi
 		},
 	}
 	resp, err := ChatCompletionsToResponses(req)
-	require.NoError(t, err)
-
-	var items []ResponsesInputItem
-	require.NoError(t, json.Unmarshal(resp.Input, &items))
-	require.Len(t, items, 1)
-
-	var parts []ResponsesContentPart
-	require.NoError(t, json.Unmarshal(items[0].Content, &parts))
-	require.Len(t, parts, 1)
-	assert.Equal(t, "input_text", parts[0].Type)
-	assert.Equal(t, "Describe this", parts[0].Text)
+	require.Nil(t, resp)
+	var unsupported *UnsupportedConversionError
+	require.ErrorAs(t, err, &unsupported)
 }
 
 func TestChatCompletionsToResponses_FilePartFileData(t *testing.T) {
@@ -506,10 +490,8 @@ func TestChatCompletionsToResponses_FilePartFileID(t *testing.T) {
 	assert.Empty(t, parts[0].FileData)
 }
 
-func TestChatCompletionsToResponses_EmptyFilePartSkipped(t *testing.T) {
-	// A file part with neither file_data nor file_id carries nothing the
-	// Responses API can use; dropping it (like empty image URLs) avoids an
-	// upstream 400 on an empty input_file part.
+func TestChatCompletionsToResponses_EmptyFilePartRejected(t *testing.T) {
+	// Missing media must fail explicitly, including in a mixed text message.
 	content := `[{"type":"text","text":"Describe this"},{"type":"file","file":{"filename":"empty.pdf"}}]`
 	req := &ChatCompletionsRequest{
 		Model: "gpt-4o",
@@ -518,16 +500,9 @@ func TestChatCompletionsToResponses_EmptyFilePartSkipped(t *testing.T) {
 		},
 	}
 	resp, err := ChatCompletionsToResponses(req)
-	require.NoError(t, err)
-
-	var items []ResponsesInputItem
-	require.NoError(t, json.Unmarshal(resp.Input, &items))
-	require.Len(t, items, 1)
-
-	var parts []ResponsesContentPart
-	require.NoError(t, json.Unmarshal(items[0].Content, &parts))
-	require.Len(t, parts, 1)
-	assert.Equal(t, "input_text", parts[0].Type)
+	require.Nil(t, resp)
+	var unsupported *UnsupportedConversionError
+	require.ErrorAs(t, err, &unsupported)
 }
 
 func TestChatCompletionsToResponses_EmptyContentNeverNull(t *testing.T) {
@@ -541,7 +516,6 @@ func TestChatCompletionsToResponses_EmptyContentNeverNull(t *testing.T) {
 		{"null content", json.RawMessage(`null`)},
 		{"empty array content", json.RawMessage(`[]`)},
 		{"only empty text part", json.RawMessage(`[{"type":"text","text":""}]`)},
-		{"only empty base64 image part", json.RawMessage(`[{"type":"image_url","image_url":{"url":"data:image/png;base64,"}}]`)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -997,7 +971,12 @@ func TestChatCompletionsToResponses_ToolArrayContent(t *testing.T) {
 	require.Len(t, items, 3)
 	assert.Equal(t, "function_call_output", items[2].Type)
 	assert.Equal(t, "call_1", items[2].CallID)
-	assert.Equal(t, "image width: 100; image height: 200", items[2].Output)
+	var output []ResponsesContentPart
+	require.NoError(t, json.Unmarshal(items[2].outputRaw, &output))
+	require.Len(t, output, 3)
+	assert.Equal(t, "image width: 100", output[0].Text)
+	assert.Equal(t, "data:image/png;base64,ignored", output[1].ImageURL)
+	assert.Equal(t, "; image height: 200", output[2].Text)
 }
 
 func TestResponsesToChatCompletions_Incomplete(t *testing.T) {

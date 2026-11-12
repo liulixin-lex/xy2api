@@ -63,9 +63,6 @@ func AnthropicToChatCompletionsRequest(req *AnthropicRequest) (*ChatCompletionsR
 
 	if req.MaxTokens > 0 {
 		v := req.MaxTokens
-		if v < minMaxOutputTokens {
-			v = minMaxOutputTokens
-		}
 		out.MaxCompletionTokens = &v
 	}
 
@@ -104,6 +101,20 @@ func AnthropicToChatCompletionsRequest(req *AnthropicRequest) (*ChatCompletionsR
 
 	parallelToolCalls := true
 	out.ParallelToolCalls = &parallelToolCalls
+	controls := &ResponsesRequest{Text: &ResponsesText{}}
+	if err := applyAnthropicOutputControls(req, controls); err != nil {
+		return nil, err
+	}
+	if controls.ParallelToolCalls != nil {
+		out.ParallelToolCalls = controls.ParallelToolCalls
+	}
+	if len(req.StopSeqs) > 0 {
+		out.Stop, _ = json.Marshal(req.StopSeqs)
+	}
+	out.ResponseFormat, err = responsesTextFormatToChatResponseFormat(controls.Text.Format)
+	if err != nil {
+		return nil, err
+	}
 
 	return out, nil
 }
@@ -115,7 +126,7 @@ func anthropicToChatMessages(system json.RawMessage, msgs []AnthropicMessage) ([
 	var messages []ChatMessage
 
 	// System prompt → system message. parseAnthropicSystemContentParts handles
-	// both string and []block forms and filters the billing header.
+	// both string and []block forms without rewriting user system text.
 	if len(system) > 0 {
 		sysParts, err := parseAnthropicSystemContentParts(system)
 		if err != nil {
@@ -211,13 +222,22 @@ func anthropicUserToChatMessages(raw json.RawMessage) ([]ChatMessage, error) {
 				parts = append(parts, ChatContentPart{Type: "text", Text: b.Text})
 			}
 		case "image":
-			if uri := anthropicImageToDataURI(b.Source); uri != "" {
-				hasImage = true
-				parts = append(parts, ChatContentPart{
-					Type:     "image_url",
-					ImageURL: &ChatImageURL{URL: uri},
-				})
+			part, err := anthropicMediaToResponses(b)
+			if err != nil {
+				return nil, err
 			}
+			hasImage = true
+			parts = append(parts, ChatContentPart{Type: "image_url", ImageURL: &ChatImageURL{URL: part.ImageURL}})
+		case "document":
+			part, err := anthropicMediaToResponses(b)
+			if err != nil {
+				return nil, err
+			}
+			if part.FileURL != "" {
+				return nil, unsupportedConversion("content.source", "Chat file parts cannot represent a document URL")
+			}
+			hasImage = true
+			parts = append(parts, ChatContentPart{Type: "file", File: &ChatFile{Filename: part.Filename, FileData: part.FileData}})
 		}
 	}
 	if len(toolResultImageParts) > 0 {

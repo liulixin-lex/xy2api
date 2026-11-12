@@ -168,7 +168,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
-	compatCtx, compatErr := h.gatewayService.PrepareAnthropicCompatibility(c.Request.Context(), subject.UserID, apiKey.ID, body, "messages", service.ExtractClientSessionID(c), c.Request.Header)
+	compatCtx, compatErr := h.gatewayService.PrepareAnthropicCompatibilityForSelection(c.Request.Context(), subject.UserID, apiKey.ID, body, "messages", service.ExtractClientSessionID(c), c.Request.Header)
 	if compatErr != nil {
 		status, code, message, _ := service.AnthropicCompatErrorDetails(compatErr)
 		h.errorResponse(c, status, code, message)
@@ -1232,13 +1232,13 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		availableModels := h.compositeAvailableModels(c.Request.Context(), groupID, "", true)
 		if apiKey != nil && apiKey.Group != nil && apiKey.Group.ModelAllowlistEnabled() {
 			source := availableModels
-			if len(source) == 0 {
+			if source == nil {
 				source = defaultModelIDsForPlatform(service.PlatformComposite)
 			}
 			writeAllowlistedModelsList(c, service.PlatformComposite, apiKey.Group.ModelAllowlist.FilterForListing(source))
 			return
 		}
-		if len(availableModels) > 0 {
+		if availableModels != nil {
 			writeModelsList(c, service.PlatformComposite, availableModels)
 			return
 		}
@@ -1247,14 +1247,15 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	}
 
 	// Get available models from account configurations for the selected group platform.
-	availableModels := h.gatewayService.GetAvailableModels(c.Request.Context(), groupID, platform)
+	catalog := h.gatewayService.GetAvailableModelCatalog(c.Request.Context(), groupID, platform)
+	availableModels := catalog.Models
 	if apiKey != nil && apiKey.Group != nil && apiKey.Group.ModelAllowlistEnabled() {
-		source := modelListingSource(platform, availableModels, defaultModelIDsForPlatform(platform))
+		source := modelListingSource(platform, catalog, defaultModelIDsForPlatform(platform))
 		writeAllowlistedModelsList(c, platform, apiKey.Group.ModelAllowlist.FilterForListing(source))
 		return
 	}
 
-	if len(availableModels) > 0 {
+	if len(availableModels) > 0 || catalog.RestrictFallback {
 		writeModelsList(c, platform, availableModels)
 		return
 	}
@@ -1331,7 +1332,7 @@ func (h *GatewayHandler) codexModelIDsForGroup(ctx context.Context, group *servi
 		availableModels := h.compositeAvailableModels(ctx, groupID, service.CompositeRouteEndpointResponses, false)
 		fallbackModels := defaultCodexModelIDsForPlatform(service.PlatformComposite)
 		models := availableModels
-		if len(models) == 0 {
+		if models == nil {
 			models = fallbackModels
 		}
 		if group.ModelAllowlistEnabled() {
@@ -1343,12 +1344,13 @@ func (h *GatewayHandler) codexModelIDsForGroup(ctx context.Context, group *servi
 		return models
 	}
 
-	availableModels := h.gatewayService.GetAvailableModels(ctx, groupID, platform)
+	catalog := h.gatewayService.GetAvailableModelCatalog(ctx, groupID, platform)
+	availableModels := catalog.Models
 	fallbackModels := defaultCodexModelIDsForPlatform(platform)
 	if group.ModelAllowlistEnabled() {
-		return group.ModelAllowlist.FilterForListing(modelListingSource(platform, availableModels, fallbackModels))
+		return group.ModelAllowlist.FilterForListing(modelListingSource(platform, catalog, fallbackModels))
 	}
-	if len(availableModels) > 0 {
+	if len(availableModels) > 0 || catalog.RestrictFallback {
 		return availableModels
 	}
 	return fallbackModels
@@ -1363,13 +1365,16 @@ func (h *GatewayHandler) compositeAvailableModels(ctx context.Context, groupID *
 	}
 	seen := make(map[string]struct{})
 	models := make([]string, 0)
+	restrictFallback := false
 	schedulablePlatforms := h.gatewayService.GetSchedulablePlatforms(ctx, groupID)
 	for _, platform := range domain.CompositePrecedencePlatformIDs() {
 		if platform == service.PlatformTypeSafe && !includeSystemOne {
 			continue
 		}
-		platformModels := h.gatewayService.GetAvailableModels(ctx, groupID, platform)
-		if len(platformModels) == 0 {
+		catalog := h.gatewayService.GetAvailableModelCatalog(ctx, groupID, platform)
+		restrictFallback = restrictFallback || catalog.RestrictFallback
+		platformModels := catalog.Models
+		if len(platformModels) == 0 && !catalog.RestrictFallback {
 			// CN 供应商没有静态默认模型列表（defaultModelIDsForPlatform 的
 			// default 分支是 Claude 列表），composite 下只暴露账号映射键。
 			if _, ok := schedulablePlatforms[platform]; ok && !service.IsMultiProtocolAPIKeyProvider(platform) {
@@ -1397,6 +1402,9 @@ func (h *GatewayHandler) compositeAvailableModels(ctx context.Context, groupID *
 				models = append(models, model)
 			}
 		}
+	}
+	if len(models) == 0 && !restrictFallback {
+		return nil
 	}
 	return models
 }
@@ -1516,8 +1524,12 @@ func writeOpenAIModelsList(c *gin.Context, modelIDs []string) {
 
 // modelListingSource 汇总模型列表过滤的候选来源：账号映射键（availableModels）
 // 与平台默认列表（fallbackModels）。账号映射为空时回落默认列表；Anthropic
-// 平台两者取并集，其余平台以账号映射键为准。
-func modelListingSource(platform string, availableModels, fallbackModels []string) []string {
+// 平台两者取并集，其余平台以账号映射键为准。兼容配置的能力交集不得补回默认模型。
+func modelListingSource(platform string, catalog service.AvailableModelCatalog, fallbackModels []string) []string {
+	availableModels := catalog.Models
+	if catalog.RestrictFallback {
+		return availableModels
+	}
 	if len(availableModels) == 0 {
 		return fallbackModels
 	}
@@ -2293,7 +2305,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
-	compatCtx, compatErr := h.gatewayService.PrepareAnthropicCompatibility(c.Request.Context(), subject.UserID, apiKey.ID, body, "count_tokens", service.ExtractClientSessionID(c), c.Request.Header)
+	compatCtx, compatErr := h.gatewayService.PrepareAnthropicCompatibilityForSelection(c.Request.Context(), subject.UserID, apiKey.ID, body, "count_tokens", service.ExtractClientSessionID(c), c.Request.Header)
 	if compatErr != nil {
 		status, code, message, _ := service.AnthropicCompatErrorDetails(compatErr)
 		h.errorResponse(c, status, code, message)

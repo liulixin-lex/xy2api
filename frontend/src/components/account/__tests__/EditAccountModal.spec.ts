@@ -1971,7 +1971,53 @@ describe('EditAccountModal Claude Code compatibility', () => {
     expect(wrapper.get('[data-testid="anthropic-compat-toggle"]').attributes('aria-checked')).toBe(String(enabled))
     await wrapper.get('[data-testid="anthropic-compat-toggle"]').trigger('click')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
-    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.anthropic_compat_profile).toBe(enabled ? 'off' : 'claude_code_v1')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.anthropic_compat_profile).toBe(enabled ? 'off' : 'claude_code_v2')
+    wrapper.unmount()
+  })
+
+  it.each([
+    { profile: 'claude_code_v1', newSessions: undefined, expected: true },
+    { profile: 'claude_code_v1', newSessions: false, expected: false },
+    { profile: 'claude_code_v2', newSessions: true, expected: true },
+    { profile: 'claude_code_v2', newSessions: false, expected: false }
+  ])('preserves existing $profile and new-session setting $newSessions on an ordinary save', async ({ profile, newSessions, expected }) => {
+    const account = buildAccount()
+    account.platform = 'anthropic'
+    account.type = 'apikey'
+    account.credentials = { api_key: 'fixture' }
+    account.extra = { anthropic_compat_profile: profile, anthropic_compat_new_sessions: newSessions }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    expect((wrapper.get('[data-testid="anthropic-compat-profile"]').element as HTMLSelectElement).value).toBe(profile)
+    expect((wrapper.get('[data-testid="anthropic-compat-new-sessions"]').element as HTMLInputElement).checked).toBe(expected)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      anthropic_compat_profile: profile,
+      anthropic_compat_new_sessions: expected
+    })
+    wrapper.unmount()
+  })
+
+  it('upgrades a v1 account to v2 while draining new sessions', async () => {
+    const account = buildAccount()
+    account.platform = 'anthropic'
+    account.type = 'apikey'
+    account.credentials = { api_key: 'fixture' }
+    account.extra = { anthropic_compat_profile: 'claude_code_v1' }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="anthropic-compat-profile"]').setValue('claude_code_v2')
+    await wrapper.get('[data-testid="anthropic-compat-new-sessions"]').setValue(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      anthropic_compat_profile: 'claude_code_v2',
+      anthropic_compat_new_sessions: false
+    })
     wrapper.unmount()
   })
 })

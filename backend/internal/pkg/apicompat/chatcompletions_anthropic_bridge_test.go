@@ -254,17 +254,17 @@ func TestAnthropicToChatCompletionsRequest_TemperaturePreservedForNonReasoningMo
 	require.Equal(t, 0.9, *out.TopP)
 }
 
-func TestAnthropicToChatCompletionsRequest_MaxTokensFloor(t *testing.T) {
+func TestAnthropicToChatCompletionsRequest_ExactMaxTokens(t *testing.T) {
 	req := &AnthropicRequest{
 		Model:     "claude-sonnet-4-20250514",
-		MaxTokens: 10, // below minMaxOutputTokens (128)
+		MaxTokens: 10, // deliberately below 128
 		Messages:  []AnthropicMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}},
 	}
 
 	out, err := AnthropicToChatCompletionsRequest(req)
 	require.NoError(t, err)
 	require.NotNil(t, out.MaxCompletionTokens)
-	require.Equal(t, minMaxOutputTokens, *out.MaxCompletionTokens)
+	require.Equal(t, 10, *out.MaxCompletionTokens)
 }
 
 func TestAnthropicToChatCompletionsRequest_ReasoningEffortMapping(t *testing.T) {

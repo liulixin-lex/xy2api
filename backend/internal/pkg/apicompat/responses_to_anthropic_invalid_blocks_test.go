@@ -85,28 +85,24 @@ func TestResponsesToAnthropic_ReasoningItemSummaryOnlyStillDropped(t *testing.T)
 }
 
 // 未知 item type 的 content 以前会被逐字透传，把 Responses 专有分片带进上游请求。
-func TestResponsesToAnthropic_UnknownItemTypeContentIsSanitized(t *testing.T) {
-	messages := responsesToAnthropicMessages(t, `[
+func TestResponsesToAnthropic_UnknownItemTypeContentIsRejected(t *testing.T) {
+	_, err := ResponsesToAnthropicRequest(&ResponsesRequest{Input: json.RawMessage(`[
 		{"type":"web_search_call","id":"ws_1","content":[{"type":"web_search_result","text":"payload"}]}
-	]`)
-
-	requireAnthropicMessagesAreSendable(t, messages)
-	require.Empty(t, messages, "整条内容都无法映射时不应发出消息")
+	]`)})
+	var unsupported *UnsupportedConversionError
+	require.ErrorAs(t, err, &unsupported)
 }
 
-// 未知 item type 里夹带的可识别文本仍然保留，不做无谓丢弃。
-func TestResponsesToAnthropic_UnknownItemTypeKeepsRecognizableText(t *testing.T) {
-	messages := responsesToAnthropicMessages(t, `[
+// Reject mixed known/unknown content rather than dropping part of the input.
+func TestResponsesToAnthropic_UnknownItemTypeRejectsPartialLoss(t *testing.T) {
+	_, err := ResponsesToAnthropicRequest(&ResponsesRequest{Input: json.RawMessage(`[
 		{"type":"some_future_item","content":[
 			{"type":"input_text","text":"keep me"},
 			{"type":"reasoning_text","text":"drop me"}
 		]}
-	]`)
-
-	requireAnthropicMessagesAreSendable(t, messages)
-	require.Len(t, messages, 1)
-	require.Contains(t, string(messages[0].Content), "keep me")
-	require.NotContains(t, string(messages[0].Content), "drop me")
+	]`)})
+	var unsupported *UnsupportedConversionError
+	require.ErrorAs(t, err, &unsupported)
 }
 
 // data URI 形式的 input_file 要变成 Anthropic document，供后续 Gemini inlineData 使用。
@@ -125,26 +121,26 @@ func TestResponsesToAnthropic_InputFileDataURIBecomesDocument(t *testing.T) {
 	require.Contains(t, string(messages[0].Content), `"data":"JVBERi0="`)
 }
 
-// 只有 file_id、没有 data URI 的 input_file 仍然无法转换，整条消息丢掉。
-func TestResponsesToAnthropic_UserMessageWithOnlyUnknownPartsIsDropped(t *testing.T) {
-	messages := responsesToAnthropicMessages(t, `[
+// Provider-scoped file IDs require an explicit conversion error.
+func TestResponsesToAnthropic_UserMessageWithOnlyUnknownPartsIsRejected(t *testing.T) {
+	_, err := ResponsesToAnthropicRequest(&ResponsesRequest{Input: json.RawMessage(`[
 		{"type":"message","role":"user","content":[{"type":"input_file","file_id":"file_1"}]}
-	]`)
-
-	requireAnthropicMessagesAreSendable(t, messages)
-	require.Empty(t, messages)
+	]`)})
+	var unsupported *UnsupportedConversionError
+	require.ErrorAs(t, err, &unsupported)
 }
 
-// assistant 侧同理：以前会退化成单个空 text 块，Anthropic 同样拒收。
-func TestResponsesToAnthropic_AssistantMessageWithOnlyUnknownPartsIsDropped(t *testing.T) {
+// A refusal has a text representation and must survive conversion.
+func TestResponsesToAnthropic_AssistantRefusalIsPreserved(t *testing.T) {
 	messages := responsesToAnthropicMessages(t, `[
 		{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]},
 		{"type":"message","role":"assistant","content":[{"type":"refusal","refusal":"no"}]}
 	]`)
 
 	requireAnthropicMessagesAreSendable(t, messages)
-	require.Len(t, messages, 1)
-	require.Equal(t, "user", messages[0].Role)
+	require.Len(t, messages, 2)
+	require.Equal(t, "assistant", messages[1].Role)
+	require.Contains(t, string(messages[1].Content), `"no"`)
 }
 
 // 完整的 Codex 工具续接回放：tool_use / tool_result 配对必须保持不变，

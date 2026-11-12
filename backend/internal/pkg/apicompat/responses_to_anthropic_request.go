@@ -13,6 +13,16 @@ import (
 // enables Anthropic platform groups to accept OpenAI Responses API requests
 // by converting them to the native /v1/messages format before forwarding upstream.
 func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, error) {
+	if req == nil {
+		return nil, unsupportedConversion("request", "request is nil")
+	}
+	if err := validateTokenLimit("max_output_tokens", req.MaxOutputTokens); err != nil {
+		return nil, err
+	}
+	stops, err := parseStopSequences(req.bridgeStop)
+	if err != nil {
+		return nil, err
+	}
 	spec, is55 := claude.Claude55(req.Model)
 	system, messages, err := convertResponsesInputToAnthropic(req.Instructions, req.Input, is55, req.chatCacheControls...)
 	if err != nil {
@@ -26,6 +36,16 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 		Temperature:  req.Temperature,
 		TopP:         req.TopP,
 		Stream:       req.Stream,
+		StopSeqs:     stops,
+	}
+	if req.Text != nil {
+		format, err := responsesTextFormatToAnthropic(req.Text.Format)
+		if err != nil {
+			return nil, err
+		}
+		if len(format) > 0 {
+			out.OutputConfig = &AnthropicOutputConfig{Format: format}
+		}
 	}
 
 	if len(system) > 0 {
@@ -53,6 +73,20 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 			return nil, fmt.Errorf("convert tool_choice: %w", err)
 		}
 		out.ToolChoice = tc
+	}
+	// Without tools, this flag cannot affect generation. Avoid introducing a
+	// tool_choice on an otherwise ordinary request with no tools.
+	if req.ParallelToolCalls != nil && len(out.Tools) > 0 {
+		choice := map[string]any{"type": "auto"}
+		if len(out.ToolChoice) > 0 {
+			if err := json.Unmarshal(out.ToolChoice, &choice); err != nil || choice == nil {
+				return nil, unsupportedConversion("tool_choice", "expected a tool choice object")
+			}
+		}
+		if choice["type"] != "none" {
+			choice["disable_parallel_tool_use"] = !*req.ParallelToolCalls
+		}
+		out.ToolChoice, _ = json.Marshal(choice)
 	}
 
 	// The 5.5 models reject manual thinking; Opus and Sonnet 5.5 also reject
@@ -102,19 +136,33 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 			return nil, fmt.Errorf("%s does not support reasoning effort %q; use low, medium, high, xhigh or max", req.Model, effort)
 		}
 		out.Thinking = &AnthropicThinking{Type: "adaptive"}
-		out.OutputConfig = &AnthropicOutputConfig{Effort: effort}
+		if out.OutputConfig == nil {
+			out.OutputConfig = &AnthropicOutputConfig{}
+		}
+		out.OutputConfig.Effort = effort
 		return out, nil
 	}
 
 	// reasoning.effort → output_config.effort + thinking
 	if req.Reasoning != nil && req.Reasoning.Effort != "" {
 		effort := mapResponsesEffortToAnthropic(req.Reasoning.Effort)
-		out.OutputConfig = &AnthropicOutputConfig{Effort: effort}
+		if effort == "none" {
+			out.Thinking = &AnthropicThinking{Type: "disabled"}
+			return out, nil
+		}
+		if out.OutputConfig == nil {
+			out.OutputConfig = &AnthropicOutputConfig{}
+		}
+		out.OutputConfig.Effort = effort
 		// Enable thinking for non-low efforts
 		if effort != "low" {
+			if out.MaxTokens <= 1024 {
+				return nil, unsupportedConversion("max_output_tokens", "limit cannot accommodate Anthropic's minimum thinking budget")
+			}
+			budget := min(defaultThinkingBudget(effort), out.MaxTokens-1)
 			out.Thinking = &AnthropicThinking{
 				Type:         "enabled",
-				BudgetTokens: defaultThinkingBudget(effort),
+				BudgetTokens: budget,
 			}
 		}
 	}
@@ -159,9 +207,9 @@ func mapResponsesEffortToAnthropic(effort string) string {
 func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMessage, preserveThinking bool, chatCacheControls ...*AnthropicCacheControl) (json.RawMessage, []AnthropicMessage, error) {
 	var systemParts []string
 	var systemBlocks []AnthropicContentBlock
-	if strings.TrimSpace(instructions) != "" {
-		systemParts = append(systemParts, strings.TrimSpace(instructions))
-		systemBlocks = append(systemBlocks, AnthropicContentBlock{Type: "text", Text: strings.TrimSpace(instructions)})
+	if instructions != "" {
+		systemParts = append(systemParts, instructions)
+		systemBlocks = append(systemBlocks, AnthropicContentBlock{Type: "text", Text: instructions})
 	}
 
 	// Try as plain string input.
@@ -177,15 +225,27 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 
 	var items []ResponsesInputItem
 	if err := json.Unmarshal(inputRaw, &items); err != nil {
-		return nil, nil, fmt.Errorf("parse responses input: %w", err)
+		return nil, nil, unsupportedConversion("input", "expected a string or input item array")
 	}
 	restoreChatCacheControls(items, chatCacheControls)
 
 	var messages []AnthropicMessage
 
 	for _, item := range items {
+		if item.Type != "" && item.Type != "message" && item.Type != "function_call" && item.Type != "function_call_output" && item.Type != "reasoning" {
+			return nil, nil, unsupportedConversion("input.type", "unsupported Responses input item")
+		}
 		switch {
 		case item.Role == "system" || item.Role == "developer":
+			validated, err := convertResponsesUserToAnthropicContent(item.Content)
+			if err != nil {
+				return nil, nil, err
+			}
+			for _, block := range parseContentBlocks(validated) {
+				if block.Type != "text" {
+					return nil, nil, unsupportedConversion("input.content", "Anthropic system messages only support text")
+				}
+			}
 			text := extractTextFromContent(item.Content)
 			if text != "" {
 				systemParts = append(systemParts, text)
@@ -222,7 +282,10 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 
 		case item.Type == "function_call_output":
 			// function_call_output → user message with tool_result block
-			contentJSON := responsesFunctionOutputToAnthropicContent(item)
+			contentJSON, err := responsesFunctionOutputToAnthropicContent(item)
+			if err != nil {
+				return nil, nil, err
+			}
 			block := AnthropicContentBlock{
 				Type:      "tool_result",
 				ToolUseID: fromResponsesCallIDToAnthropic(item.CallID),
@@ -284,25 +347,7 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 			})
 
 		default:
-			// 未知 role/type —— 尽量当作 user 消息保留其中的文本/图片。
-			// 必须走与真实 user 消息同一套白名单转换：直接透传 item.Content 会把
-			// Responses 专有的分片类型（reasoning_text、web_search_call 的载荷等）
-			// 原样发给 Anthropic，上游只会回 400 把整轮打挂。
-			if item.Content == nil {
-				continue
-			}
-			content, err := convertResponsesUserToAnthropicContent(item.Content)
-			if err != nil {
-				return nil, nil, err
-			}
-			content = applyMessageCacheControlJSON(content, item.CacheControl)
-			if anthropicContentIsEmpty(content) {
-				continue
-			}
-			messages = append(messages, AnthropicMessage{
-				Role:    "user",
-				Content: content,
-			})
+			return nil, nil, unsupportedConversion("input.role", "unsupported message role")
 		}
 	}
 
@@ -329,18 +374,27 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 	return system, messages, nil
 }
 
-func responsesFunctionOutputToAnthropicContent(item ResponsesInputItem) json.RawMessage {
+func responsesFunctionOutputToAnthropicContent(item ResponsesInputItem) (json.RawMessage, error) {
 	if len(item.outputRaw) == 0 {
 		output := item.Output
 		if output == "" {
 			output = "(empty)"
 		}
 		content, _ := json.Marshal(output)
-		return content
+		return content, nil
 	}
 
 	var parts []ResponsesContentPart
 	if err := json.Unmarshal(item.outputRaw, &parts); err == nil {
+		// Ordinary tool data can be an array of untyped JSON objects. Keep it
+		// opaque; only a typed content array opts into media conversion.
+		typed := false
+		for _, part := range parts {
+			typed = typed || part.Type != ""
+		}
+		if len(parts) > 0 && !typed {
+			return json.Marshal(item.Output)
+		}
 		blocks := make([]AnthropicContentBlock, 0, len(parts))
 		for _, part := range parts {
 			switch part.Type {
@@ -348,24 +402,30 @@ func responsesFunctionOutputToAnthropicContent(item ResponsesInputItem) json.Raw
 				if part.Text != "" {
 					blocks = append(blocks, AnthropicContentBlock{Type: "text", Text: part.Text})
 				}
-			case "input_image":
-				if source := dataURIToAnthropicImageSource(part.ImageURL); source != nil {
-					blocks = append(blocks, AnthropicContentBlock{Type: "image", Source: source})
+			case "input_image", "input_file":
+				// The final part's cache marker is already lifted to tool_result.
+				part.CacheControl = nil
+				block, err := responsesMediaToAnthropic(part)
+				if err != nil {
+					return nil, err
 				}
+				blocks = append(blocks, block)
+			default:
+				return nil, unsupportedConversion("input.output", "unsupported tool output content part")
 			}
 		}
 		if len(blocks) > 0 {
 			content, _ := json.Marshal(blocks)
-			return content
+			return content, nil
 		}
 		if len(parts) == 0 {
 			content, _ := json.Marshal("(empty)")
-			return content
+			return content, nil
 		}
 	}
 
 	content, _ := json.Marshal(item.Output)
-	return content
+	return content, nil
 }
 
 // normalizeAnthropicToolPairing rebuilds the message sequence so it satisfies
@@ -550,8 +610,7 @@ func convertResponsesUserToAnthropicContent(raw json.RawMessage) (json.RawMessag
 	// Array of content parts → Anthropic content blocks.
 	var parts []ResponsesContentPart
 	if err := json.Unmarshal(raw, &parts); err != nil {
-		// Pass through as-is if we can't parse
-		return raw, nil
+		return nil, unsupportedConversion("content", "expected a string or content part array")
 	}
 
 	var blocks []AnthropicContentBlock
@@ -565,24 +624,14 @@ func convertResponsesUserToAnthropicContent(raw json.RawMessage) (json.RawMessag
 					Text:         p.Text,
 				})
 			}
-		case "input_image":
-			src := dataURIToAnthropicImageSource(p.ImageURL)
-			if src != nil {
-				blocks = append(blocks, AnthropicContentBlock{
-					CacheControl: p.CacheControl,
-					Type:         "image",
-					Source:       src,
-				})
+		case "input_image", "input_file":
+			block, err := responsesMediaToAnthropic(p)
+			if err != nil {
+				return nil, err
 			}
-		case "input_file":
-			src := dataURIToAnthropicFileSource(p.FileData)
-			if src != nil {
-				blocks = append(blocks, AnthropicContentBlock{
-					CacheControl: p.CacheControl,
-					Type:         "document",
-					Source:       src,
-				})
-			}
+			blocks = append(blocks, block)
+		default:
+			return nil, unsupportedConversion("content.type", "unsupported user content part")
 		}
 	}
 
@@ -608,7 +657,7 @@ func convertResponsesAssistantToAnthropicContent(raw json.RawMessage) (json.RawM
 	// Array of content parts → Anthropic content blocks.
 	var parts []ResponsesContentPart
 	if err := json.Unmarshal(raw, &parts); err != nil {
-		return raw, nil
+		return nil, unsupportedConversion("content", "expected a string or content part array")
 	}
 
 	var blocks []AnthropicContentBlock
@@ -622,6 +671,10 @@ func convertResponsesAssistantToAnthropicContent(raw json.RawMessage) (json.RawM
 					Text:         p.Text,
 				})
 			}
+		case "refusal":
+			blocks = append(blocks, AnthropicContentBlock{Type: "text", Text: p.Refusal, CacheControl: p.CacheControl})
+		default:
+			return nil, unsupportedConversion("content.type", "unsupported assistant content part")
 		}
 	}
 
@@ -669,12 +722,6 @@ func dataURIToAnthropicImageSource(dataURI string) *AnthropicImageSource {
 		MediaType: mediaType,
 		Data:      data,
 	}
-}
-
-// dataURIToAnthropicFileSource parses a data URI into a document source.
-// file_id-only parts are not convertible here and stay dropped.
-func dataURIToAnthropicFileSource(fileData string) *AnthropicImageSource {
-	return dataURIToAnthropicImageSource(fileData)
 }
 
 // mergeConsecutiveMessages merges consecutive messages with the same role

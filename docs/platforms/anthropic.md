@@ -92,7 +92,8 @@ $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 
 ### 启用
 
-- 仅适用于 `platform=anthropic`、`type=apikey` 的账号。在账号创建、编辑或批量编辑中打开「Claude Code 请求兼容」，对应字段 `extra.anthropic_compat_profile`，取值 `off`（默认）或 `claude_code_v1`。
+- 仅适用于 `platform=anthropic`、`type=apikey` 的账号。在账号创建、编辑或批量编辑中打开「Claude Code 请求兼容」，对应字段 `extra.anthropic_compat_profile`，取值 `off`（默认）、`claude_code_v1`（旧版）或 `claude_code_v2`。新启用时界面选择 v2；已有 v1 不自动升级。
+- `extra.anthropic_compat_new_sessions` 为布尔值，默认 `true`。设为 `false` 后只接收已登记的签名或 Chat 工具续接；普通无状态请求和未登记的原生会话不再进入该账号。独立账号诊断仍可测试。
 - 只有字段缺失或精确字符串 `off` 表示关闭；空串、`null`、`OFF` 等其他值在保存时返回 `ANTHROPIC_COMPAT_PROFILE_INVALID`；对非 Anthropic API Key 账号设置返回 `ANTHROPIC_COMPAT_PROFILE_ACCOUNT_INVALID`。
 - 与「自动透传（仅替换认证）」（`anthropic_passthrough`）互斥，需先关闭自动透传。自定义请求头和 Beta 策略必须与兼容配置一致，矛盾的配置在保存时拒绝。
 - 适用模型：映射后为 `claude-opus-4-8` 或 `claude-opus-5-5`，并且账号的模型准入允许该模型。
@@ -103,32 +104,41 @@ $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 | 入口 | 支持 | 不支持 |
 |---|---|---|
 | `/v1/messages` | 文本、流式、工具往返；来源可验证的思考签名续轮 | 外来的未知签名不能迁入新的兼容会话 |
-| `/v1/responses`（HTTP） | 已有转换覆盖的文本、工具和明确标记的 Anthropic thinking 信封 | 任意密文、上游保存的 `previous_response_id`、WebSocket |
-| `/v1/chat/completions` | 文本、流式和普通工具 | 无法回传签名的客户端不能无损续接签名思考 |
+| `/v1/responses`（HTTP） | 已有转换覆盖的文本、工具；`claude-opus-5-5` 支持明确标记的 Anthropic thinking 信封续接 | 任意密文、上游保存的 `previous_response_id`、WebSocket |
+| `/v1/chat/completions` | v2：文本、流式、工具往返；从网关工具 ID 开始的完整历史可恢复签名思考 | v1 不支持 Chat 工具/签名续接；没有网关工具 ID 的纯文本签名思考不能无损续接 |
 | `count_tokens` | 相同 prompt 的独立计数 | 依赖上游计数端点，不支持时不伪造数值 |
 
 Message Threads、compact 以及依赖上游保存状态的续接不受支持。某个模型或请求成功，不代表其他模型和全部功能都可用，启用前请在目标账号上逐项验证所需能力。
 
 ### 工作方式
 
-- 兼容层统一设置受控的 User-Agent、`X-App`、API 版本（`2023-06-01`）、Beta 组合、最小身份文本块，以及按租户隔离的 `metadata.user_id`。调用方的其他 metadata、业务 system 的角色和内容、工具名称与 schema、工具调用 ID 和显式生成参数保持不变；不会把强制工具选择改为 auto，也不会为了让请求成功而删除签名或工具历史。
+- v2 仅规范化 system 开头可识别的 Claude Code identity/billing 块，输出顺序为 billing、identity、原业务块；billing 的版本与 User-Agent 保持一致。业务块、缓存属性及顺序不变，位于业务指令后的身份块、未知 billing 格式或冲突属性明确拒绝。v1 保留原行为，包括旧身份位置校验。
+- 兼容层统一设置受控的 User-Agent、`X-App`、API 版本（`2023-06-01`）、Beta 组合、最小身份文本块，以及按租户隔离的 `metadata.user_id`。调用方的其他 metadata、业务 system 的角色和内容、工具名称与 schema、显式生成参数保持不变（v2 Chat 工具 ID 使用下述可续接句柄）；不会把强制工具选择改为 auto，也不会为了让请求成功而删除签名或工具历史。
 - 已经是完整一致的原生 Claude Code 请求、无需改写时走原路径。仅伪造 User-Agent 不能绕过检查。
 - 会话头 `X-Claude-Code-Session-Id` 由适配器管理，不能用账号的静态请求头覆盖。会话身份按用户、网关密钥、上游账号与显式会话隔离；没有明确会话的请求各自使用独立锚点。
 - 每次换号都从原始请求重新构造，不沿用上一个账号的派生状态，继续消耗原请求的预算。
 
 ### 签名历史
 
-网关在租户与密钥范围内为 `thinking.signature`、`redacted_thinking.data` 建立来源索引，只保存来源约束，不保存原始签名或请求正文。已知历史绑定原上游账号、profile、模型、最终 system/tools 等配置；关键配置改变后旧历史会明确报不兼容，不会跨账号删除历史后重试。
+网关在租户与密钥范围内为 `thinking.signature`、`redacted_thinking.data` 建立来源索引，这个来源索引只保存来源约束，不保存原始签名或请求正文。v2 Chat 另存加密的 assistant 块，见下文。已知历史绑定原上游账号、profile revision、模型、最终 system/tools 等配置。账号从 v1 切换到 v2 后，已有记录仍按原 revision 构造请求；关闭兼容或修改凭据、端点、业务 system/tools 等关键配置后旧历史会明确报不兼容，不会跨账号删除历史后重试。
 
 | 限制 | 值 |
 |---|---|
-| 每个请求最多不同签名数 | 128 |
+| 每个请求最多签名块数（重复块也计数） | 128 |
 | 请求或响应累计 opaque 数据 | 各不超过 1 MiB |
 | 来源闲置有效期 | 24 小时（成功续轮会刷新） |
 
-超限或来源过期时明确报错，不截断历史。流式内容实时返回，上游完整成功后网关先保存本轮签名来源，再发送结束信号；登记失败时客户端收到协议错误，真实用量照常结算。
+上述来源校验上限同时适用于 v1/v2；重复签名也按实际块数与字节计入，防止绕过资源限制。超限或来源过期时明确报错，不截断历史。流式内容实时返回，上游完整成功后网关先保存本轮签名来源，再发送结束信号；登记失败时客户端收到协议错误，真实用量照常结算。
 
 **注意**：所有携带思考签名、redacted 数据或 Anthropic Responses 思考信封的请求，都会在选号前查询来源索引，包括未开启兼容的 API Key 账号和 OAuth 账号。查询失败（例如 Redis 故障）时返回 `503 anthropic_compat_state_unavailable`，不会向上游发请求。没有签名的请求不受影响。
+
+### v2 Chat 工具续接
+
+Chat 客户端通常只回传工具 ID，不回传 Anthropic 签名。v2 将响应的工具 ID 替换成不可猜测的 `ccv2_` 句柄，在 Redis 中用 AES-GCM 保存该 assistant 的原始块。加密密钥与索引分域派生；认证数据绑定用户、网关 API key 和随机 turn ID。
+
+客户端需保留完整历史、全部并行工具调用及对应结果。网关校验前序历史、可见文本、工具名称/参数和完整工具集合，再恢复原签名、块顺序及上游工具 ID。工具后的普通 assistant 回复也沿已验证的工具链登记，供后续用户轮次恢复。未知、篡改、混用、缺失或过期的句柄明确拒绝，不能换号或丢签名后重试。没有网关工具句柄的初始纯文本签名续接不在此能力范围内；需要该能力的客户端应使用 Messages 或 Responses 保留思考信封。
+
+Chat 状态使用独立命名空间，上限 10,000 个 turn、256 MiB 记录与索引字节预算，单条密文不超过 1 MiB，有效期 24 小时。每个请求最多 128 个不同工具句柄、64 次纯文本后继查询、1,024 条消息，Chat 输入不超过 8 MiB。成功终态须在状态保存成功后发送；容量不足或 Redis 故障返回明确错误，并保留实际用量。Redis 与托管密钥须一起备份；不能只恢复其中一个。
 
 ### 验证与观测
 
@@ -138,10 +148,10 @@ Message Threads、compact 以及依赖上游保存状态的续接不受支持。
 
 ### 上线与回滚
 
-1. 升级后所有账号默认关闭兼容。确认数据库与 Redis 可用：来源索引存于 Redis，所用 HMAC 根密钥由服务端持久保存、跨实例共享，两者都应纳入备份与恢复流程。
+1. 升级保留已有账号配置，未配置的账号默认关闭兼容。确认数据库与 Redis 可用：来源索引存于 Redis，所用 HMAC 根密钥由服务端持久保存、跨实例共享，两者都应纳入备份与恢复流程。
 2. 先在隔离流量中按目标模型验证三个入口的流式与非流式、业务 system、工具往返、签名续轮和计数，并确认实际命中目标账号。
 3. 只把验证过的能力接入普通流量，观察上游拒绝、真实完成率、签名错误、首字延迟和用量。
-4. 回滚时先停止该账号承接普通流量，等在途请求结束并处理已绑定的会话，再关闭兼容。只关开关而继续接普通请求，会恢复上游原来的拒绝。
+4. 回滚时先将 `anthropic_compat_new_sessions=false`，保持兼容开启并等待在途及已登记会话退出，再关闭兼容。单纯切换默认版本不会改写已登记会话；回滚到不包含 v2 实现的旧程序前必须先完成这些会话。只关开关而继续接普通请求，会恢复上游原来的拒绝。
 
 ## 限制与注意事项
 

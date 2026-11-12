@@ -51,7 +51,7 @@ func (s *GatewayService) ForwardAsResponses(
 		finishClaudeCacheAttempt(cacheDecision, result)
 	}()
 
-	normalizedBody, normalized, err := normalizeOpenAIResponsesLegacyIngress(body)
+	normalizedBody, normalized, err := normalizeConvertedResponsesLegacyIngress(body)
 	if err != nil {
 		return nil, err
 	}

@@ -57,6 +57,18 @@
         >
           <span :class="['pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200', anthropicCompatibilityEnabled ? 'translate-x-5' : 'translate-x-0']" />
         </button>
+        <div v-if="enableAnthropicCompatibility && anthropicCompatibilityEnabled" class="mt-3 space-y-3">
+          <label class="input-label" for="bulk-anthropic-compat-profile">{{ t('admin.accounts.anthropic.compatibilityProfile') }}</label>
+          <select id="bulk-anthropic-compat-profile" v-model="anthropicCompatibilityProfile" class="input" data-testid="anthropic-compat-profile">
+            <option value="claude_code_v2">{{ t('admin.accounts.anthropic.compatibilityV2') }}</option>
+            <option value="claude_code_v1">{{ t('admin.accounts.anthropic.compatibilityV1') }}</option>
+          </select>
+          <label class="flex items-center gap-2 text-sm">
+            <input v-model="anthropicCompatibilityNewSessions" type="checkbox" data-testid="anthropic-compat-new-sessions" class="rounded border-gray-300 text-primary-600" />
+            {{ t('admin.accounts.anthropic.compatibilityNewSessions') }}
+          </label>
+          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.anthropic.compatibilityDrainDesc') }}</p>
+        </div>
       </div>
 
       <!-- OpenAI passthrough -->
@@ -1682,6 +1694,8 @@ const allOpenAIOAuthOnly = computed(() => {
 const allAnthropicAPIKey = computed(() => targetSelectedPlatforms.value.length === 1 && targetSelectedPlatforms.value[0] === 'anthropic' && targetSelectedTypes.value.length > 0 && targetSelectedTypes.value.every(t => t === 'apikey'))
 const enableAnthropicCompatibility = ref(false)
 const anthropicCompatibilityEnabled = ref(false)
+const anthropicCompatibilityProfile = ref<'claude_code_v1' | 'claude_code_v2'>('claude_code_v2')
+const anthropicCompatibilityNewSessions = ref(true)
 
 const allOpenAIAPIKey = computed(() => {
   return (
@@ -2080,7 +2094,8 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
   }
 
   if (enableAnthropicCompatibility.value && allAnthropicAPIKey.value) {
-    ensureExtra().anthropic_compat_profile = anthropicCompatibilityEnabled.value ? 'claude_code_v1' : 'off'
+    ensureExtra().anthropic_compat_profile = anthropicCompatibilityEnabled.value ? anthropicCompatibilityProfile.value : 'off'
+    if (anthropicCompatibilityEnabled.value) ensureExtra().anthropic_compat_new_sessions = anthropicCompatibilityNewSessions.value
   }
 
   if (enableOpenAIPassthrough.value) {
@@ -2488,6 +2503,8 @@ watch(
       enableGroups.value = false
       enableAnthropicCompatibility.value = false
       anthropicCompatibilityEnabled.value = false
+      anthropicCompatibilityProfile.value = 'claude_code_v2'
+      anthropicCompatibilityNewSessions.value = true
       enableOpenAIPassthrough.value = false
       enableOpenAIFlattenNamespaces.value = false
       enableOpenAICollaborationPlaintext.value = false

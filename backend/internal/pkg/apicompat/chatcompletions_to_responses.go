@@ -18,6 +18,12 @@ type chatMessageContent struct {
 // true. store is always false and reasoning.encrypted_content is always
 // included so that the response translator has full context.
 func ChatCompletionsToResponses(req *ChatCompletionsRequest) (*ResponsesRequest, error) {
+	if req == nil {
+		return nil, unsupportedConversion("request", "request is nil")
+	}
+	if _, err := parseStopSequences(req.Stop); err != nil {
+		return nil, err
+	}
 	if err := openai.ValidateGPT61SolReasoningEffort(req.Model, req.ReasoningEffort); err != nil {
 		return nil, err
 	}
@@ -44,6 +50,7 @@ func ChatCompletionsToResponses(req *ChatCompletionsRequest) (*ResponsesRequest,
 		PromptCacheRetention: req.PromptCacheRetention,
 		SafetyIdentifier:     req.SafetyIdentifier,
 		ParallelToolCalls:    req.ParallelToolCalls,
+		bridgeStop:           append(json.RawMessage(nil), req.Stop...),
 	}
 	out.chatCacheControls = chatInputCacheControls(input)
 
@@ -58,18 +65,17 @@ func ChatCompletionsToResponses(req *ChatCompletionsRequest) (*ResponsesRequest,
 	out.Store = &storeFalse
 
 	// max_tokens / max_completion_tokens → max_output_tokens, prefer max_completion_tokens
-	maxTokens := 0
-	if req.MaxTokens != nil {
-		maxTokens = *req.MaxTokens
-	}
+	maxTokens := req.MaxTokens
+	limitField := "max_tokens"
 	if req.MaxCompletionTokens != nil {
-		maxTokens = *req.MaxCompletionTokens
+		maxTokens = req.MaxCompletionTokens
+		limitField = "max_completion_tokens"
 	}
-	if maxTokens > 0 {
-		v := maxTokens
-		if v < minMaxOutputTokens {
-			v = minMaxOutputTokens
-		}
+	if err := validateTokenLimit(limitField, maxTokens); err != nil {
+		return nil, err
+	}
+	if maxTokens != nil {
+		v := *maxTokens
 		out.MaxOutputTokens = &v
 	}
 
@@ -81,7 +87,11 @@ func ChatCompletionsToResponses(req *ChatCompletionsRequest) (*ResponsesRequest,
 		}
 	}
 
-	if format := chatResponseFormatToResponsesTextFormat(req.ResponseFormat); len(format) > 0 {
+	format, err := chatResponseFormatToResponsesTextFormat(req.ResponseFormat)
+	if err != nil {
+		return nil, err
+	}
+	if len(format) > 0 {
 		if out.Text == nil {
 			out.Text = &ResponsesText{}
 		}
@@ -202,7 +212,7 @@ func chatMessageToResponsesItems(m ChatMessage) ([]ResponsesInputItem, error) {
 	case "function":
 		return chatFunctionToResponses(m)
 	default:
-		return chatUserToResponses(m)
+		return nil, unsupportedConversion("messages.role", "unsupported message role")
 	}
 }
 
@@ -349,9 +359,7 @@ func parseAssistantContent(raw json.RawMessage) (string, error) {
 
 	var parts []map[string]any
 	if err := json.Unmarshal(raw, &parts); err != nil {
-		// Keep compatibility with prior behavior: unsupported assistant content
-		// formats are ignored instead of failing the whole request conversion.
-		return "", nil
+		return "", unsupportedConversion("content", "expected a string or content part array")
 	}
 
 	var b strings.Builder
@@ -387,12 +395,14 @@ func parseAssistantContent(raw json.RawMessage) (string, error) {
 					return "", err
 				}
 			}
-		default:
+		case "text", "output_text":
 			if text != "" {
 				if err := write(text); err != nil {
 					return "", err
 				}
 			}
+		default:
+			return "", unsupportedConversion("content.type", "unsupported assistant content part")
 		}
 	}
 
@@ -402,6 +412,22 @@ func parseAssistantContent(raw json.RawMessage) (string, error) {
 // chatToolToResponses converts a tool result message (role=tool) into a
 // function_call_output item.
 func chatToolToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
+	parsed, err := parseChatMessageContent(m.Content)
+	if err != nil {
+		return nil, err
+	}
+	if parsed.Text == nil {
+		parts, err := convertChatContentPartsToResponses(parsed.Parts)
+		if err != nil {
+			return nil, err
+		}
+		for _, part := range parts {
+			if part.Type == "input_image" || part.Type == "input_file" {
+				raw, _ := json.Marshal(parts)
+				return []ResponsesInputItem{{Type: "function_call_output", CallID: m.ToolCallID, outputRaw: raw}}, nil
+			}
+		}
+	}
 	output, err := parseChatContent(m.Content)
 	if err != nil {
 		return nil, err
@@ -421,22 +447,10 @@ func chatToolToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
 // assigned to the matching legacy call (see legacyFunctionCallIDs); without a
 // matching call the Name field is used as call_id.
 func chatFunctionToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
-	output, err := parseChatContent(m.Content)
-	if err != nil {
-		return nil, err
+	if m.ToolCallID == "" {
+		m.ToolCallID = m.Name
 	}
-	if output == "" {
-		output = "(empty)"
-	}
-	callID := m.ToolCallID
-	if callID == "" {
-		callID = m.Name
-	}
-	return []ResponsesInputItem{{
-		Type:   "function_call_output",
-		CallID: callID,
-		Output: output,
-	}}, nil
+	return chatToolToResponses(m)
 }
 
 // parseChatContent returns the string value of a ChatMessage Content field.
@@ -468,14 +482,17 @@ func parseChatMessageContent(raw json.RawMessage) (chatMessageContent, error) {
 		return chatMessageContent{Parts: parts}, nil
 	}
 
-	return chatMessageContent{}, fmt.Errorf("parse content as string or parts array")
+	return chatMessageContent{}, unsupportedConversion("content", "expected a string or content part array")
 }
 
 func marshalChatInputContent(content chatMessageContent) (json.RawMessage, error) {
 	if content.Text != nil {
 		return json.Marshal(*content.Text)
 	}
-	parts := convertChatContentPartsToResponses(content.Parts)
+	parts, err := convertChatContentPartsToResponses(content.Parts)
+	if err != nil {
+		return nil, err
+	}
 	if len(parts) == 0 {
 		// A nil slice marshals to JSON null, which the upstream Responses API
 		// rejects ("expected an array of objects or string, but got null").
@@ -485,7 +502,7 @@ func marshalChatInputContent(content chatMessageContent) (json.RawMessage, error
 	return json.Marshal(parts)
 }
 
-func convertChatContentPartsToResponses(parts []ChatContentPart) []ResponsesContentPart {
+func convertChatContentPartsToResponses(parts []ChatContentPart) ([]ResponsesContentPart, error) {
 	var responseParts []ResponsesContentPart
 	for _, p := range parts {
 		switch p.Type {
@@ -499,28 +516,36 @@ func convertChatContentPartsToResponses(parts []ChatContentPart) []ResponsesCont
 				})
 			}
 		case "image_url":
-			if p.ImageURL != nil && p.ImageURL.URL != "" && !isEmptyBase64DataURI(p.ImageURL.URL) {
-				responseParts = append(responseParts, ResponsesContentPart{
-					PromptCacheBreakpoint: p.PromptCacheBreakpoint,
-					CacheControl:          p.CacheControl,
-					Type:                  "input_image",
-					ImageURL:              p.ImageURL.URL,
-				})
+			if p.ImageURL == nil || p.ImageURL.URL == "" || isEmptyBase64DataURI(p.ImageURL.URL) {
+				return nil, unsupportedConversion("content.image_url", "missing or empty image source")
 			}
+			if p.ImageURL.Detail != "" && p.ImageURL.Detail != "auto" && p.ImageURL.Detail != "low" && p.ImageURL.Detail != "high" {
+				return nil, unsupportedConversion("content.image_url.detail", "expected auto, low or high")
+			}
+			responseParts = append(responseParts, ResponsesContentPart{
+				PromptCacheBreakpoint: p.PromptCacheBreakpoint,
+				CacheControl:          p.CacheControl,
+				Type:                  "input_image",
+				ImageURL:              p.ImageURL.URL,
+				Detail:                p.ImageURL.Detail,
+			})
 		case "file":
-			if p.File != nil && (p.File.FileData != "" || p.File.FileID != "") {
-				responseParts = append(responseParts, ResponsesContentPart{
-					PromptCacheBreakpoint: p.PromptCacheBreakpoint,
-					CacheControl:          p.CacheControl,
-					Type:                  "input_file",
-					Filename:              p.File.Filename,
-					FileData:              p.File.FileData,
-					FileID:                p.File.FileID,
-				})
+			if p.File == nil || (p.File.FileData == "" && p.File.FileID == "") || (p.File.FileData != "" && p.File.FileID != "") {
+				return nil, unsupportedConversion("content.file", "expected exactly one file_data or file_id source")
 			}
+			responseParts = append(responseParts, ResponsesContentPart{
+				PromptCacheBreakpoint: p.PromptCacheBreakpoint,
+				CacheControl:          p.CacheControl,
+				Type:                  "input_file",
+				Filename:              p.File.Filename,
+				FileData:              p.File.FileData,
+				FileID:                p.File.FileID,
+			})
+		default:
+			return nil, unsupportedConversion("content.type", "unsupported Chat content part")
 		}
 	}
-	return responseParts
+	return responseParts, nil
 }
 
 func isEmptyBase64DataURI(raw string) bool {

@@ -46,6 +46,9 @@ func ResponsesToChatCompletionsRequestWithOptions(req *ResponsesRequest, opts *R
 	if req == nil {
 		return nil, fmt.Errorf("responses request is nil")
 	}
+	if err := validateTokenLimit("max_output_tokens", req.MaxOutputTokens); err != nil {
+		return nil, err
+	}
 
 	messages, err := responsesInputToChatMessagesWithOptions(req.Instructions, req.Input, opts)
 	if err != nil {
@@ -65,6 +68,7 @@ func ResponsesToChatCompletionsRequestWithOptions(req *ResponsesRequest, opts *R
 		PromptCacheOptions:   req.PromptCacheOptions,
 		PromptCacheRetention: req.PromptCacheRetention,
 		SafetyIdentifier:     req.SafetyIdentifier,
+		Stop:                 append(json.RawMessage(nil), req.bridgeStop...),
 	}
 	if req.Reasoning != nil {
 		out.ReasoningEffort = req.Reasoning.Effort
@@ -98,7 +102,10 @@ func ResponsesToChatCompletionsRequestWithOptions(req *ResponsesRequest, opts *R
 		}
 	}
 	if req.Text != nil {
-		out.ResponseFormat = responsesTextFormatToChatResponseFormat(req.Text.Format)
+		out.ResponseFormat, err = responsesTextFormatToChatResponseFormat(req.Text.Format)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return out, nil
@@ -563,7 +570,10 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 			}
 			delete(mediaByCallID, callID)
 
-			outputText, media, rewritten := extractToolOutputMedia(outputRaw)
+			outputText, media, rewritten, mediaErr := extractChatToolOutputMedia(outputRaw)
+			if mediaErr != nil {
+				return nil, nil, mediaErr
+			}
 			if rewritten {
 				if callID != "" {
 					mediaByCallID[callID] = media
@@ -604,7 +614,7 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 			pendingReasoning = ""
 			lastTurnReasoning = ""
 			continue
-		case "input_image":
+		case "input_image", "input_file":
 			content, err := chatContentFromSingleResponsesPart(itemType, item)
 			if err != nil {
 				return nil, nil, err
@@ -1019,10 +1029,10 @@ func responsesContentToChatContent(raw json.RawMessage, role string) (json.RawMe
 
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &obj); err == nil {
-		return chatContentFromSingleResponsesPart(rawString(obj["type"]), obj)
+		return responsesContentPartsToChatContent([]json.RawMessage{raw}, role)
 	}
 
-	return raw, nil
+	return nil, unsupportedConversion("content", "expected text or content parts")
 }
 
 func responsesContentPartsToChatContent(rawParts []json.RawMessage, role string) (json.RawMessage, error) {
@@ -1033,7 +1043,7 @@ func responsesContentPartsToChatContent(rawParts []json.RawMessage, role string)
 	for _, rawPart := range rawParts {
 		var part map[string]json.RawMessage
 		if err := json.Unmarshal(rawPart, &part); err != nil {
-			continue
+			return nil, unsupportedConversion("content", "expected content part objects")
 		}
 		partType := rawString(part["type"])
 		switch partType {
@@ -1045,18 +1055,44 @@ func responsesContentPartsToChatContent(rawParts []json.RawMessage, role string)
 			textParts = append(textParts, text)
 			chatParts = append(chatParts, ChatContentPart{Type: "text", Text: text})
 		case "input_image", "image_url":
+			if rawString(part["file_id"]) != "" {
+				return nil, unsupportedConversion("content.file_id", "Chat image parts require a URL or data URI")
+			}
 			imageURL := rawString(part["image_url"])
 			if imageURL == "" {
 				imageURL = rawNestedString(part["image_url"], "url")
 			}
 			if imageURL == "" {
-				continue
+				return nil, unsupportedConversion("content.image_url", "missing image source")
+			}
+			detail := rawString(part["detail"])
+			if detail == "" {
+				detail = rawNestedString(part["image_url"], "detail")
+			}
+			if detail != "" && detail != "auto" && detail != "low" && detail != "high" {
+				return nil, unsupportedConversion("content.image_url.detail", "expected auto, low or high")
 			}
 			hasNonText = true
 			chatParts = append(chatParts, ChatContentPart{
 				Type:     "image_url",
-				ImageURL: &ChatImageURL{URL: imageURL},
+				ImageURL: &ChatImageURL{URL: imageURL, Detail: detail},
 			})
+		case "input_file":
+			if rawString(part["file_url"]) != "" || rawString(part["detail"]) != "" {
+				return nil, unsupportedConversion("content.input_file", "Chat file parts cannot represent file_url or detail")
+			}
+			file := &ChatFile{Filename: rawString(part["filename"]), FileData: rawString(part["file_data"]), FileID: rawString(part["file_id"])}
+			if (file.FileData == "") == (file.FileID == "") {
+				return nil, unsupportedConversion("content.input_file", "expected exactly one file_data or file_id source")
+			}
+			hasNonText = true
+			chatParts = append(chatParts, ChatContentPart{Type: "file", File: file})
+		case "refusal":
+			text := rawString(part["refusal"])
+			textParts = append(textParts, text)
+			chatParts = append(chatParts, ChatContentPart{Type: "text", Text: text})
+		default:
+			return nil, unsupportedConversion("content.type", "unsupported Responses content part")
 		}
 	}
 
@@ -1065,8 +1101,7 @@ func responsesContentPartsToChatContent(rawParts []json.RawMessage, role string)
 		return joined, nil
 	}
 	if role != "user" {
-		joined, _ := json.Marshal(strings.Join(textParts, "\n\n"))
-		return joined, nil
+		return nil, unsupportedConversion("content", "Chat media parts require a user message")
 	}
 	if len(chatParts) == 0 {
 		empty, _ := json.Marshal("")
@@ -1076,19 +1111,11 @@ func responsesContentPartsToChatContent(rawParts []json.RawMessage, role string)
 }
 
 func chatContentFromSingleResponsesPart(partType string, part map[string]json.RawMessage) (json.RawMessage, error) {
-	switch partType {
-	case "input_image", "image_url":
-		imageURL := rawString(part["image_url"])
-		if imageURL == "" {
-			imageURL = rawNestedString(part["image_url"], "url")
-		}
-		return json.Marshal([]ChatContentPart{{
-			Type:     "image_url",
-			ImageURL: &ChatImageURL{URL: imageURL},
-		}})
-	default:
-		return json.Marshal(rawString(part["text"]))
+	raw, err := json.Marshal(part)
+	if err != nil {
+		return nil, err
 	}
+	return responsesContentPartsToChatContent([]json.RawMessage{raw}, "user")
 }
 
 // customToolInputSchema 是 custom/freeform 工具降级为 function 工具时的参数 schema。

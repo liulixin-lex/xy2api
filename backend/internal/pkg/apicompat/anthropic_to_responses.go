@@ -13,6 +13,9 @@ import (
 // Chat Completions intermediary round-trip (e.g. thinking, cache_control,
 // structured system prompts).
 func AnthropicToResponses(req *AnthropicRequest) (*ResponsesRequest, error) {
+	if req == nil {
+		return nil, unsupportedConversion("request", "request is nil")
+	}
 	if err := openai.ValidateGPT61SolReasoningEffort(req.Model, gpt61SolAnthropicReasoningEffort(req)); err != nil {
 		return nil, err
 	}
@@ -47,12 +50,15 @@ func AnthropicToResponses(req *AnthropicRequest) (*ResponsesRequest, error) {
 	parallelToolCalls := true
 	out.ParallelToolCalls = &parallelToolCalls
 	out.Text = &ResponsesText{Verbosity: "medium"}
+	if len(req.StopSeqs) > 0 {
+		out.bridgeStop, _ = json.Marshal(req.StopSeqs)
+	}
+	if err := applyAnthropicOutputControls(req, out); err != nil {
+		return nil, err
+	}
 
 	if req.MaxTokens > 0 {
 		v := req.MaxTokens
-		if v < minMaxOutputTokens {
-			v = minMaxOutputTokens
-		}
 		out.MaxOutputTokens = &v
 	}
 
@@ -168,12 +174,12 @@ func convertAnthropicToResponsesInput(system json.RawMessage, msgs []AnthropicMe
 }
 
 // parseAnthropicSystemContentParts handles the Anthropic system field which can
-// be a plain string or an array of text blocks. Claude Code may include an
-// x-anthropic-billing-header block; airgate drops it before sending to Codex.
+// be a plain string or an array of text blocks. Ordinary system text is retained;
+// envelope normalization is a separate, explicitly invoked operation.
 func parseAnthropicSystemContentParts(raw json.RawMessage) ([]ResponsesContentPart, error) {
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
-		if isAnthropicBillingHeaderText(s) || s == "" {
+		if s == "" {
 			return nil, nil
 		}
 		return []ResponsesContentPart{{Type: "input_text", Text: s}}, nil
@@ -184,15 +190,14 @@ func parseAnthropicSystemContentParts(raw json.RawMessage) ([]ResponsesContentPa
 	}
 	var parts []ResponsesContentPart
 	for _, b := range blocks {
-		if b.Type == "text" && b.Text != "" && !isAnthropicBillingHeaderText(b.Text) {
+		if b.Type != "text" {
+			return nil, unsupportedConversion("system", "expected text blocks")
+		}
+		if b.Text != "" {
 			parts = append(parts, ResponsesContentPart{Type: "input_text", Text: b.Text})
 		}
 	}
 	return parts, nil
-}
-
-func isAnthropicBillingHeaderText(text string) bool {
-	return strings.HasPrefix(text, "x-anthropic-billing-header: ")
 }
 
 // anthropicMsgToResponsesItems converts a single Anthropic message into one
@@ -256,10 +261,12 @@ func anthropicUserToResponses(raw json.RawMessage) ([]ResponsesInputItem, error)
 			if b.Text != "" {
 				parts = append(parts, ResponsesContentPart{Type: "input_text", Text: b.Text})
 			}
-		case "image":
-			if uri := anthropicImageToDataURI(b.Source); uri != "" {
-				parts = append(parts, ResponsesContentPart{Type: "input_image", ImageURL: uri})
+		case "image", "document":
+			part, err := anthropicMediaToResponses(b)
+			if err != nil {
+				return nil, err
 			}
+			parts = append(parts, part)
 		}
 	}
 	parts = append(parts, toolResultImageParts...)
@@ -373,6 +380,9 @@ func fromResponsesCallID(id string) string {
 // anthropicImageToDataURI converts an AnthropicImageSource to a data URI string.
 // Returns "" if the source is nil or has no data.
 func anthropicImageToDataURI(src *AnthropicImageSource) string {
+	if src != nil && src.Type == "url" && validRemoteMediaURL(src.URL) {
+		return src.URL
+	}
 	if src == nil || src.Data == "" {
 		return ""
 	}

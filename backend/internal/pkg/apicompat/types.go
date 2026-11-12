@@ -41,7 +41,8 @@ type AnthropicRequest struct {
 
 // AnthropicOutputConfig controls output generation parameters.
 type AnthropicOutputConfig struct {
-	Effort string `json:"effort,omitempty"` // "low" | "medium" | "high" | "max"
+	Effort string          `json:"effort,omitempty"` // "low" | "medium" | "high" | "max"
+	Format json.RawMessage `json:"format,omitempty"`
 }
 
 // AnthropicThinking configures extended thinking in the Anthropic API.
@@ -74,6 +75,7 @@ type AnthropicContentBlock struct {
 
 	// type=image
 	Source *AnthropicImageSource `json:"source,omitempty"`
+	Title  string                `json:"title,omitempty"` // document filename
 
 	// type=tool_use
 	ID    string          `json:"id,omitempty"`
@@ -114,9 +116,10 @@ func (b AnthropicContentBlock) MarshalJSON() ([]byte, error) {
 
 // AnthropicImageSource describes the source data for an image content block.
 type AnthropicImageSource struct {
-	Type      string `json:"type"` // "base64"
-	MediaType string `json:"media_type"`
-	Data      string `json:"data"`
+	Type      string `json:"type"` // "base64" | "url"
+	MediaType string `json:"media_type,omitempty"`
+	Data      string `json:"data,omitempty"`
+	URL       string `json:"url,omitempty"`
 }
 
 // AnthropicTool describes a tool available to the model.
@@ -269,6 +272,8 @@ type ResponsesRequest struct {
 
 	// Chat tool/function markers by Input index, for the Anthropic converter only.
 	chatCacheControls []*AnthropicCacheControl
+	// Stops survive in-memory Chat/Anthropic chains, never the Responses wire.
+	bridgeStop json.RawMessage
 }
 
 // ResponsesReasoning configures reasoning effort in the Responses API.
@@ -344,11 +349,13 @@ type ResponsesContentPart struct {
 	Text                  string                 `json:"text,omitempty"`
 	Refusal               string                 `json:"refusal,omitempty"`   // type=refusal
 	ImageURL              string                 `json:"image_url,omitempty"` // data URI for input_image
+	Detail                string                 `json:"detail,omitempty"`
 
 	// input_file fields.
 	Filename string `json:"filename,omitempty"`
 	FileData string `json:"file_data,omitempty"` // data URI
 	FileID   string `json:"file_id,omitempty"`
+	FileURL  string `json:"file_url,omitempty"`
 }
 
 // ResponsesTool describes a tool in the Responses API.
@@ -911,11 +918,3 @@ func (d ChatDelta) reasoningText() *string {
 	}
 	return d.Reasoning
 }
-
-// ---------------------------------------------------------------------------
-// Shared constants
-// ---------------------------------------------------------------------------
-
-// minMaxOutputTokens is the floor for max_output_tokens in a Responses request.
-// Very small values may cause upstream API errors, so we enforce a minimum.
-const minMaxOutputTokens = 128

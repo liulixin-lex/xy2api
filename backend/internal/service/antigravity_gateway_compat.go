@@ -73,11 +73,13 @@ func (s *AntigravityGatewayService) ForwardAsChatCompletions(
 
 	responsesRequest, err := apicompat.ChatCompletionsToResponses(&request)
 	if err != nil {
-		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		_ = s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return nil, err
 	}
 	claudeRequest, err := apicompat.ResponsesToAnthropicRequest(responsesRequest)
 	if err != nil {
-		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		_ = s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return nil, err
 	}
 	preserveChatCompletionTokenLimit(&request, claudeRequest)
 	claudeRequest.Stream = request.Stream
@@ -120,7 +122,8 @@ func (s *AntigravityGatewayService) ForwardAsResponses(
 
 	claudeRequest, err := apicompat.ResponsesToAnthropicRequest(&request)
 	if err != nil {
-		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		_ = s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return nil, err
 	}
 	claudeRequest.Stream = request.Stream
 	claudeBody, err := json.Marshal(claudeRequest)

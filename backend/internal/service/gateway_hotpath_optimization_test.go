@@ -118,6 +118,30 @@ type modelsListAccountRepoStub struct {
 	listAllCalls     atomic.Int64
 }
 
+func (s *modelsListAccountRepoStub) ListModelAvailabilityCandidates(ctx context.Context, groupID *int64, platforms []string, _ bool) ([]Account, error) {
+	var accounts []Account
+	if groupID != nil {
+		s.listByGroupCalls.Add(1)
+		accounts = s.byGroup[*groupID]
+	} else {
+		s.listAllCalls.Add(1)
+		accounts = s.all
+	}
+	if s.err != nil {
+		return nil, s.err
+	}
+	var result []Account
+	for _, account := range accounts {
+		for _, platform := range platforms {
+			if account.Platform == platform {
+				result = append(result, account)
+				break
+			}
+		}
+	}
+	return result, nil
+}
+
 type stickyGatewayCacheHotpathStub struct {
 	GatewayCache
 
@@ -647,7 +671,7 @@ func TestGetAvailableModels_ErrorAndGlobalListBranches(t *testing.T) {
 	}
 	models := svcOK.GetAvailableModels(context.Background(), nil, "")
 	require.Equal(t, []string{"claude-3-5-sonnet", "gemini-2.5-pro"}, models)
-	require.Equal(t, int64(1), okRepo.listAllCalls.Load())
+	require.Equal(t, int64(2), okRepo.listAllCalls.Load())
 }
 
 func TestGetAvailableModels_OpenAIPassthroughUsesDefaultFallback(t *testing.T) {

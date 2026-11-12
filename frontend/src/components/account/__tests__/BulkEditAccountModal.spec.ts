@@ -1064,7 +1064,56 @@ describe('BulkEditAccountModal Claude Code compatibility', () => {
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0]?.[1]?.extra).toEqual({ anthropic_compat_profile: enabled ? 'claude_code_v1' : 'off' })
+    expect(vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0]?.[1]?.extra).toEqual(enabled
+      ? { anthropic_compat_profile: 'claude_code_v2', anthropic_compat_new_sessions: true }
+      : { anthropic_compat_profile: 'off' })
+    wrapper.unmount()
+  })
+
+  it.each(['claude_code_v1', 'claude_code_v2'])('bulk saves the explicit version and drain setting (%s)', async (profile) => {
+    vi.mocked(adminAPI.accounts.bulkUpdate).mockReset().mockResolvedValue({ success: 2, failed: 0, results: [] } as any)
+    const wrapper = mountModal({ selectedPlatforms: ['anthropic'], selectedTypes: ['apikey'] })
+    await wrapper.get('#bulk-anthropic-compat-apply').setValue(true)
+    await wrapper.get('[data-testid="bulk-anthropic-compat-toggle"]').trigger('click')
+    expect((wrapper.get('[data-testid="anthropic-compat-profile"]').element as HTMLSelectElement).value).toBe('claude_code_v2')
+    await wrapper.get('[data-testid="anthropic-compat-profile"]').setValue(profile)
+    await wrapper.get('[data-testid="anthropic-compat-new-sessions"]').setValue(false)
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      extra: { anthropic_compat_profile: profile, anthropic_compat_new_sessions: false }
+    })
+    wrapper.unmount()
+  })
+
+  it('does not submit compatibility changes after its apply checkbox is cleared', async () => {
+    vi.mocked(adminAPI.accounts.bulkUpdate).mockReset().mockResolvedValue({ success: 2, failed: 0, results: [] } as any)
+    const wrapper = mountModal({ selectedPlatforms: ['anthropic'], selectedTypes: ['apikey'] })
+    await wrapper.get('#bulk-anthropic-compat-apply').setValue(true)
+    await wrapper.get('[data-testid="bulk-anthropic-compat-toggle"]').trigger('click')
+    await wrapper.get('[data-testid="anthropic-compat-new-sessions"]').setValue(false)
+    await wrapper.get('#bulk-anthropic-compat-apply').setValue(false)
+    await wrapper.get('#bulk-edit-rate-multiplier-enabled').setValue(true)
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0]?.[1]).not.toHaveProperty('extra')
+    wrapper.unmount()
+  })
+
+  it('resets the bulk version and drain setting when reopened', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['anthropic'], selectedTypes: ['apikey'] })
+    await wrapper.get('#bulk-anthropic-compat-apply').setValue(true)
+    await wrapper.get('[data-testid="bulk-anthropic-compat-toggle"]').trigger('click')
+    await wrapper.get('[data-testid="anthropic-compat-profile"]').setValue('claude_code_v1')
+    await wrapper.get('[data-testid="anthropic-compat-new-sessions"]').setValue(false)
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+    expect((wrapper.get('#bulk-anthropic-compat-apply').element as HTMLInputElement).checked).toBe(false)
+    await wrapper.get('#bulk-anthropic-compat-apply').setValue(true)
+    await wrapper.get('[data-testid="bulk-anthropic-compat-toggle"]').trigger('click')
+    expect((wrapper.get('[data-testid="anthropic-compat-profile"]').element as HTMLSelectElement).value).toBe('claude_code_v2')
+    expect((wrapper.get('[data-testid="anthropic-compat-new-sessions"]').element as HTMLInputElement).checked).toBe(true)
     wrapper.unmount()
   })
 })

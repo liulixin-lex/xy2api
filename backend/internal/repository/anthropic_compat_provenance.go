@@ -49,21 +49,43 @@ func (c *gatewayCache) Lookup(ctx context.Context, keys []string) ([][]byte, err
 }
 
 var registerAnthropicCompatProvenance = redis.NewScript(`
+local ttl = tonumber(ARGV[2])
+local capacity = tonumber(ARGV[3])
+if not ttl or ttl < 1 or ttl ~= math.floor(ttl) or not capacity or capacity < 1 or ARGV[1] == '' then
+  return redis.error_reply('PROVENANCE_INVALID invalid compatibility provenance registration')
+end
 local now = redis.call('TIME')
 local ms = now[1] * 1000 + math.floor(now[2] / 1000)
-redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ms)
+-- Redis scripts do not roll back writes on error. Validate every key and the
+-- live capacity before even pruning expired index members.
+local live = redis.call('ZCARD', KEYS[1]) - redis.call('ZCOUNT', KEYS[1], '-inf', ms)
 local added = 0
+local seen = {}
+local unique = {}
 for i = 2, #KEYS do
-  local current = redis.call('GET', KEYS[i])
-  if current and current ~= ARGV[1] then return redis.error_reply('provenance constraint conflict') end
-  if not redis.call('ZSCORE', KEYS[1], KEYS[i]) then added = added + 1 end
+  local key = KEYS[i]
+  if key == '' or key == KEYS[1] then
+    return redis.error_reply('PROVENANCE_INVALID invalid compatibility provenance registration')
+  end
+  if not seen[key] then
+    seen[key] = true
+    unique[#unique + 1] = key
+    local current = redis.call('GET', key)
+    if current and current ~= ARGV[1] then return redis.error_reply('PROVENANCE_CONFLICT provenance constraint conflict') end
+    local score = redis.call('ZSCORE', KEYS[1], key)
+    if not score or tonumber(score) <= ms then added = added + 1 end
+  end
 end
-if redis.call('ZCARD', KEYS[1]) + added > tonumber(ARGV[3]) then return redis.error_reply('provenance capacity exceeded') end
-for i = 2, #KEYS do
-  redis.call('SET', KEYS[i], ARGV[1], 'PX', ARGV[2])
-  redis.call('ZADD', KEYS[1], ms + tonumber(ARGV[2]), KEYS[i])
+if live + added > capacity then return redis.error_reply('PROVENANCE_CAPACITY provenance capacity exceeded') end
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ms)
+for _, key in ipairs(unique) do
+  redis.call('SET', key, ARGV[1], 'PX', ARGV[2])
+  redis.call('ZADD', KEYS[1], ms + ttl, key)
 end
-redis.call('PEXPIRE', KEYS[1], ARGV[2])
+-- A short-lived registration must not erase capacity accounting for other,
+-- longer-lived records. The latest member determines the index lifetime.
+local latest = redis.call('ZREVRANGE', KEYS[1], 0, 0, 'WITHSCORES')
+if #latest > 0 then redis.call('PEXPIREAT', KEYS[1], tonumber(latest[2])) end
 return 1
 `)
 
@@ -71,13 +93,28 @@ func (c *gatewayCache) Register(ctx context.Context, keys []string, value []byte
 	if len(keys) == 0 {
 		return nil
 	}
-	if len(keys) > 512 || ttl <= 0 || len(value) == 0 {
-		return fmt.Errorf("invalid compatibility provenance registration")
+	if len(keys) > 512 || ttl.Milliseconds() < 1 || len(value) == 0 {
+		return service.AnthropicCompatRegistrationInvalid
+	}
+	for _, key := range keys {
+		if key == "" || key == anthropicCompatProvenanceIndex {
+			return service.AnthropicCompatRegistrationInvalid
+		}
 	}
 	all := make([]string, 1, len(keys)+1)
 	all[0] = anthropicCompatProvenanceIndex
 	all = append(all, keys...)
-	return registerAnthropicCompatProvenance.Run(ctx, c.rdb, all, string(value), ttl.Milliseconds(), anthropicCompatProvenanceCapacity).Err()
+	err := registerAnthropicCompatProvenance.Run(ctx, c.rdb, all, string(value), ttl.Milliseconds(), anthropicCompatProvenanceCapacity).Err()
+	switch {
+	case redis.HasErrorPrefix(err, "PROVENANCE_CONFLICT"):
+		return service.AnthropicCompatRegistrationConflict
+	case redis.HasErrorPrefix(err, "PROVENANCE_CAPACITY"):
+		return service.AnthropicCompatRegistrationCapacity
+	case redis.HasErrorPrefix(err, "PROVENANCE_INVALID"):
+		return service.AnthropicCompatRegistrationInvalid
+	default:
+		return err
+	}
 }
 
 var _ service.AnthropicCompatProvenanceStore = (*gatewayCache)(nil)
