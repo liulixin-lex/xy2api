@@ -96,6 +96,7 @@ var catalog = map[string]Entry{
 	"POST /accounts/openai-login/:task_id/import":         {Kind: KindSuperOnly},
 
 	"GET /accounts":                                                            {Kind: KindModule, Module: "accounts", Level: LevelView, AnyOf: []Module{"channels", "groups", "usage"}, Redact: []Redaction{"account"}},
+	"POST /accounts/recent-stats/batch":                                        {Kind: KindModule, Module: "accounts", Level: LevelView, AnyOf: []Module{"channels", "groups", "usage"}, Redact: []Redaction{"account"}},
 	"POST /accounts":                                                           {Kind: KindModule, Module: "accounts", Level: LevelManage, Redact: []Redaction{"account"}, Fields: "account_create"},
 	"DELETE /accounts/:id":                                                     {Kind: KindModule, Module: "accounts", Level: LevelManage, Redact: []Redaction{"account"}},
 	"GET /accounts/:id":                                                        {Kind: KindModule, Module: "accounts", Level: LevelView, AnyOf: []Module{"channels", "groups", "usage"}, Redact: []Redaction{"account"}},

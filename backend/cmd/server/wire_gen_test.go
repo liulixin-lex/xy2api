@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -52,6 +53,9 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 	idempotencyCleanupSvc := service.NewIdempotencyCleanupService(nil, cfg)
 	schedulerSnapshotSvc := service.NewSchedulerSnapshotService(nil, nil, nil, nil, cfg)
 	opsSystemLogSinkSvc := service.NewOpsSystemLogSink(nil)
+	schedObs := service.NewSchedObservabilityService()
+	schedObs.Start(context.Background())
+	t.Cleanup(schedObs.Stop)
 
 	cleanup := provideCleanup(
 		nil, // usage export engine
@@ -110,6 +114,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		nil,                         // schedQuality
 		nil,                         // schedTests
 		nil,                         // schedAttempts
+		schedObs,                    // schedObs
 		&service.ImageTaskService{}, // imageTasks
 		handler.NewAsyncImageHandler(nil, nil, nil), // asyncImage
 		nil, // supportChatPurge
