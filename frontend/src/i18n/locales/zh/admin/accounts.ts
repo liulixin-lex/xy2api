@@ -177,7 +177,7 @@ export default {
       toolActions: '工具',
       viewColumns: '列显示',
       dragToReorderColumns: '拖动调整列顺序',
-      resetColumnOrder: '恢复默认列顺序',
+      resetColumns: '恢复默认列',
       selectedCount: '已选 {count}',
       dataExportConfirmMessage: '导出的数据包含账号与代理的敏感信息，请妥善保存。',
       dataExportConfirm: '确认导出',
@@ -447,7 +447,6 @@ export default {
       },
       iqDiagnosticLabels: { request_id: '请求 ID', latency: '耗时', tokens: 'Token', http_status: 'HTTP 状态', error: '错误', retry_after: 'Retry-After', failure: '失败位置' },
       iqCheckStatus: { smart: '聪明', degraded: '降智', unknown: '未知' },
-      schedulableHint: '开启后账号参与API请求调度',
       schedulableEnabled: '调度已开启',
       schedulableDisabled: '调度已关闭',
       failedToToggleSchedulable: '切换调度状态失败',
@@ -482,8 +481,6 @@ export default {
         expiresAt: '过期时间',
         actions: '操作'
       },
-      capacityHint: '第一个徽标是并发：当前 / 上限；按分组筛选时第三个绿色数字是本分组内的当前并发。其余徽标按账号设置出现：5h 窗口费用、活跃会话、RPM，以及 D / W / 总额度。',
-      usageWindowsHint: '“5h / 7d”是上游账号（如 OpenAI ChatGPT、Claude）官方的滚动用量窗口限制，由上游对账号设定，并非 xy2api 配置，也与你映射的模型无关。窗口滚动到期后用量会自动重置，无法在 xy2api 端解除该限制。',
       ollamaCloud: {
         title: 'Ollama Cloud 用量',
         sessionSecurityHint: '浏览器会话会加密落库，且只发送到固定的 Ollama 官方设置页。',

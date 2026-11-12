@@ -20,7 +20,7 @@ vi.mock('vue-i18n', async () => {
 })
 
 const defaultFilters = () => ({
-  platform: '', type: '', status: '', privacy_mode: '', iq_status: '', group: '',
+  platform: '', type: '', status: '', privacy_mode: '', iq_status: '', group: '', sched_quality: '',
   search: 'existing search', lite: '1', sort_by: 'priority', sort_order: 'asc'
 })
 
@@ -51,7 +51,8 @@ describe('AccountTableFilters', () => {
       'admin.accounts.allStatus',
       'admin.accounts.allPrivacyModes',
       'admin.accounts.allIQStatuses',
-      'admin.accounts.allGroups'
+      'admin.accounts.allGroups',
+      'admin.schedQuality.filter.all'
     ])
     expect(selects.every(select => select.isVisible())).toBe(true)
     // The only expandable controls are the selects' own triggers; there is no panel toggle.
@@ -59,7 +60,7 @@ describe('AccountTableFilters', () => {
   })
 
   it('preserves every option and emits a merged filter snapshot plus change for every selection', async () => {
-    const filters = { ...defaultFilters(), platform: 'openai', type: 'oauth', status: 'active', privacy_mode: '__unset__', iq_status: 'smart', group: '42' }
+    const filters = { ...defaultFilters(), platform: 'openai', type: 'oauth', status: 'active', privacy_mode: '__unset__', iq_status: 'smart', group: '42', sched_quality: 'cooling' }
     const wrapper = mountFilters(filters)
     const expectedOptions = [
       ['platform', ['', ...CONCRETE_PLATFORM_OPTIONS.map(option => option.value)]],
@@ -67,7 +68,9 @@ describe('AccountTableFilters', () => {
       ['status', ['', 'active', 'inactive', 'error', 'rate_limited', 'temp_unschedulable', 'unschedulable']],
       ['privacy_mode', ['', '__unset__', 'training_off', 'training_set_cf_blocked', 'training_set_failed']],
       ['iq_status', ['', 'smart', 'degraded', 'unknown']],
-      ['group', ['', 'ungrouped', '42']]
+      ['group', ['', 'ungrouped', '42']],
+      // One quality-state dropdown after the groups filter (D34, D38).
+      ['sched_quality', ['', 'normal', 'cooling', 'exempt', 'demote']]
     ] as const
     let changes = 0
     for (const [index, [key, values]] of expectedOptions.entries()) {

@@ -54,9 +54,10 @@ describe('AccountTableFilters group categories', () => {
     await flushPromises()
 
     const selects = wrapper.findAllComponents(Select)
-    expect(selects.map(select => select.get('button').attributes('aria-label')).slice(-2)).toEqual([
+    expect(selects.map(select => select.get('button').attributes('aria-label')).slice(-3)).toEqual([
       'admin.groupCategories.allCategories',
-      'admin.accounts.allGroups'
+      'admin.accounts.allGroups',
+      'admin.schedQuality.filter.all'
     ])
     const categoryFilter = selects[5]
     expect(categoryFilter.props('options').map(option => option.value)).toEqual(['', '3', '5'])

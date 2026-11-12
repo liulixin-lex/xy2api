@@ -26,6 +26,9 @@
   --sq-tab-fg: #0f766e;
   --sq-ring: #0d9488;
   --sq-tip-bg: #111827;
+  /* Recent-status tiers (text colour only) and manual overrides (one colour for exempt and demote). */
+  --sq-tier-good: #047857; --sq-tier-mid: #b45309; --sq-tier-bad: #991b1b;
+  --sq-manual-fg: #6d28d9; --sq-manual-bg: #f5f3ff; --sq-manual-bd: #a78bfa;
 }
 
 .dark {
@@ -51,6 +54,8 @@
   --sq-tab-bg: rgba(19, 78, 74, 0.3);
   --sq-tab-fg: #2dd4bf;
   --sq-tip-bg: #1f2937;
+  --sq-tier-good: #6ee7b7; --sq-tier-mid: #fbbf24; --sq-tier-bad: #f87171;
+  --sq-manual-fg: #c4b5fd; --sq-manual-bg: rgba(167, 139, 250, 0.14); --sq-manual-bd: rgba(167, 139, 250, 0.6);
 }
 
 /* Solid 2px focus ring for every new focusable element (spec F.1). */
@@ -99,6 +104,10 @@
 .sq-capsule__state { flex-shrink: 0; }
 .sq-capsule--cool { color: var(--sq-cool-fg); background: var(--sq-cool-bg); border-color: var(--sq-cool-bd); }
 .sq-capsule--test { color: var(--sq-test-fg); background: var(--sq-test-bg); border-color: var(--sq-test-bd); }
+/* Manual override (exempt, demote): one colour, dashed border, its own small icon (D35). */
+.sq-capsule--manual { color: var(--sq-manual-fg); background: var(--sq-manual-bg); border-color: var(--sq-manual-bd); border-style: dashed; }
+.sq-capsule--all { max-width: none; }
+.sq-capsule__icon { width: 12px; height: 12px; margin-left: -2px; flex-shrink: 0; }
 
 /* One-time emphasis when a capsule newly appears on refresh (spec F.3); reduced motion cuts it via motion.css. */
 .sq-capsule--new { animation: sq-capsule-in var(--motion-base) var(--ease-emphasized); }
@@ -155,7 +164,7 @@
 
 .sq-section-title { font-size: 14px; font-weight: 600; color: var(--sq-text); }
 
-/* Short hover tip (spec E): one line, gray-900, white 12px. */
+/* Short hover tip (spec E): gray-900, white 12px; one line unless the text has line breaks. */
 .sq-tip {
   position: fixed;
   z-index: 1000;
@@ -166,7 +175,7 @@
   color: #fff;
   font-size: 12px;
   line-height: 16px;
-  white-space: nowrap;
+  white-space: pre;
   pointer-events: none;
 }
 
