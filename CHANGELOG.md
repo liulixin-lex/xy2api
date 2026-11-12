@@ -26,8 +26,8 @@
 - 质量不再分 0 / 1 / 2 三档，只有正常与冷却；冷却的账号在本组后排，本组没有其他可用账号时仍会用到。
 - **不兼容：** 账号行菜单“恢复状态”（`POST /api/v1/admin/accounts/:id/recover-state`）改为与抽屉“恢复”相同：整个账号重新统计并清除全部可清的自动状态，返回 `{reset_at, cleared, preserved, failed}`。
 - 账号列表原“分组”列改名“归组”。
-- “OAuth 调度参考倍率”从实验调度区块移到“网关调度设置”，改名“OAuth 倍率”；设置键 `openai_oauth_scheduling_rate_multiplier` 不变。
-- 网关韧性的统计、未送达与选号解释接口只需要“运维”模块的查看权限。
+- “OAuth 调度参考倍率”从“OpenAI 实验调度策略”区块移到“网关调度设置”，改名“OAuth 倍率”；设置键 `openai_oauth_scheduling_rate_multiplier` 不变。
+- 网关韧性的统计、未送达与选号解释接口只需要“运维监控”模块的查看权限。
 - 只读 MCP 的 `xy2api.routing.get_quality_state` 与 `xy2api.accounts.get_health` 改读新的质量状态。
 - `budget.budget_cut_attribution` 为 `enforce` 时，被预算截短的首输出超时在质量状态里不算超时。
 

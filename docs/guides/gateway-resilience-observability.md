@@ -28,7 +28,7 @@ SLA 口径：选号阶段找不到可用账号的无号 503 计入 SLA；余额�
 
 - 账号列表与详情带 `capability_learned`：`[{protocol, mode: "stream_only", expires_at}]`，没有记录时为空数组。
 - 选号解释的响应含 `enabled`、`healthy_count`、`accounts[]`（`account_id`、`priority`、`tier`、`reason`、`recover_at`、`session_failures`、`avoided`、`capability_learned`）、`last_resort`、`fallback_group`、`session`，以及填了模型时的 `model_restriction`。
-- 统计、未送达与选号解释接口需要“运维”模块的查看权限；设置接口只对超级管理员开放（见 [管理员与权限](admin-permissions.md)）。
+- 统计、未送达与选号解释接口需要“运维监控”模块的查看权限；设置接口只对超级管理员开放（见 [管理员与权限](admin-permissions.md)）。
 
 ## 未送达请求
 
