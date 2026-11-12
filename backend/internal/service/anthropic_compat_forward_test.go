@@ -46,7 +46,7 @@ func TestAnthropicCompatForwardingUsesOrdinaryHistoryAndResponses(t *testing.T) 
 				rec := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(rec)
 				c.Request = httptest.NewRequest(http.MethodPost, "/v1/"+entry, strings.NewReader(body))
-				ctx := WithAnthropicCompatRequest(context.Background(), 11, 22, []byte(body), entry, "session", nil)
+				ctx := WithAnthropicCompatRequest(context.Background(), 11, 22, []byte(body), entry, "session", nil, "")
 				parsed, err := ParseGatewayRequest(NewRequestBodyRef([]byte(body)), PlatformAnthropic)
 				require.NoError(t, err)
 				var result *ForwardResult
@@ -99,7 +99,7 @@ func TestAnthropicCompatCountCandidateFailureDoesNotWriteResponse(t *testing.T) 
 			parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
 			require.NoError(t, err)
 			svc := &GatewayService{cfg: &config.Config{}}
-			ctx := WithAnthropicCompatRequest(context.Background(), 1, 2, body, "count_tokens", "session", nil)
+			ctx := WithAnthropicCompatRequest(context.Background(), 1, 2, body, "count_tokens", "session", nil, "")
 			err = svc.ForwardCountTokens(ctx, c, account, parsed)
 			require.ErrorIs(t, err, ErrNoAvailableAccounts)
 			require.False(t, c.Writer.Written(), "handler must be able to try the next candidate")
@@ -114,9 +114,10 @@ func TestAnthropicCompatAttemptLogsOnlyAdapterDecisions(t *testing.T) {
 	body := []byte(`{"model":"claude-opus-5-5","messages":[{"role":"user","content":"hello"}]}`)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest("POST", "/v1/messages", nil)
-	ctx := context.WithValue(context.Background(), ctxkey.RequestID, "compat-test-request")
+	ctx := context.WithValue(context.Background(), ctxkey.RequestID, "must-not-log-context-id")
 	ctx = logger.IntoContext(ctx, zap.NewNop().With(zap.String("password", "must-not-log")))
-	ctx = WithAnthropicCompatRequest(ctx, 1, 2, body, "messages", "session", nil)
+	c.Writer.Header().Set("X-Request-ID", "compat-test-request")
+	ctx = WithAnthropicCompatRequest(ctx, 1, 2, body, "messages", "session", nil, c.Writer.Header().Get("X-Request-ID"))
 	svc := &GatewayService{cfg: &config.Config{}}
 	for range 2 {
 		_, _, err := svc.buildUpstreamRequest(ctx, c, account, body, "fixture-key", "apikey", "claude-opus-5-5", false, false)
@@ -151,6 +152,7 @@ func TestAnthropicCompatAttemptLogsOnlyAdapterDecisions(t *testing.T) {
 		require.Equal(t, "claude-opus-5-5", event.Fields["model"])
 		require.NotContains(t, event.Fields, "password")
 		require.NotContains(t, fmt.Sprint(event.Fields), "fixture-key")
+		require.NotContains(t, fmt.Sprint(event.Fields), "must-not-log-context-id")
 	}
 }
 
@@ -203,7 +205,7 @@ func TestAnthropicCompatSonnetToolsetBetaMatchesOrdinaryFiltering(t *testing.T) 
 					c, _ := gin.CreateTestContext(httptest.NewRecorder())
 					c.Request = httptest.NewRequest("POST", "/v1/"+entry, nil)
 					c.Request.Header.Set("anthropic-beta", claude.BetaFineGrainedToolStreaming+","+claude.BetaContext1M)
-					ctx := WithAnthropicCompatRequest(context.Background(), 1, 2, body, entry, "session", c.Request.Header)
+					ctx := WithAnthropicCompatRequest(context.Background(), 1, 2, body, entry, "session", c.Request.Header, "")
 					svc := &GatewayService{cfg: &config.Config{}}
 					var req *http.Request
 					var err error

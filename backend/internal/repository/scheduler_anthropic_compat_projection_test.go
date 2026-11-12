@@ -90,7 +90,7 @@ func TestAnthropicCompatAdmissionUsesStickyOwnerAndMapping(t *testing.T) {
 				gateway := service.NewGatewayService(nil, nil, nil, nil, nil, nil, nil, sticky, cfg, service.NewSchedulerSnapshotService(snapshot, nil, nil, nil, cfg), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, settings, nil, nil, nil, nil, nil, nil)
 				// Includes more than the deleted 128-block history cap and unregistered signatures.
 				history := []byte(`{"messages":[{"role":"assistant","content":[` + strings.Repeat(`{"type":"thinking","thinking":"old","signature":"unknown"},`, 130) + `{"type":"text","text":"answer"}]}]}`)
-				ctx := service.WithAnthropicCompatRequest(context.Background(), 1, 2, history, "messages", "session", nil)
+				ctx := service.WithAnthropicCompatRequest(context.Background(), 1, 2, history, "messages", "session", nil, "")
 				if tc.owner > 0 {
 					require.NoError(t, sticky.SetSessionAccountID(ctx, 0, "session", tc.owner, time.Hour))
 				}

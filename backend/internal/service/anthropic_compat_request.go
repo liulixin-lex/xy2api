@@ -15,7 +15,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
@@ -28,17 +27,17 @@ type anthropicCompatStickyKey struct{}
 
 // Request-local identity inputs contain no signed history or persisted state.
 type anthropicCompatRequest struct {
-	UserID, KeyID                                  int64
-	Entry, Anchor, RandomAnchor, ClientBeta, Model string
-	logged                                         sync.Map
+	UserID, KeyID                                             int64
+	Entry, Anchor, RandomAnchor, ClientBeta, Model, RequestID string
+	logged                                                    sync.Map
 }
 
-func WithAnthropicCompatRequest(ctx context.Context, userID, keyID int64, body []byte, entry, explicitSession string, headers http.Header) context.Context {
+func WithAnthropicCompatRequest(ctx context.Context, userID, keyID int64, body []byte, entry, explicitSession string, headers http.Header, requestID string) context.Context {
 	anchor := strings.TrimSpace(explicitSession)
 	if anchor == "" {
 		anchor = compatMetadataSession(gjson.GetBytes(body, "metadata.user_id").String())
 	}
-	request := &anthropicCompatRequest{UserID: userID, KeyID: keyID, Entry: entry, Anchor: anchor, RandomAnchor: uuid.NewString(), ClientBeta: headers.Get("anthropic-beta"), Model: gjson.GetBytes(body, "model").String()}
+	request := &anthropicCompatRequest{UserID: userID, KeyID: keyID, Entry: entry, RequestID: requestID, Anchor: anchor, RandomAnchor: uuid.NewString(), ClientBeta: headers.Get("anthropic-beta"), Model: gjson.GetBytes(body, "model").String()}
 	return context.WithValue(ctx, anthropicCompatRequestKey{}, request)
 }
 
@@ -205,9 +204,9 @@ func logAnthropicCompatAttempt(ctx context.Context, account *Account, model, dec
 	if account == nil || account.GetExtraString(AnthropicCompatProfileExtraKey) != AnthropicCompatProfileClaudeCode {
 		return
 	}
-	entry := "messages"
+	entry, requestID := "messages", ""
 	if request := compatRequest(ctx); request != nil {
-		entry = request.Entry
+		entry, requestID = request.Entry, request.RequestID
 		if model == "" {
 			model = request.Model
 		}
@@ -215,7 +214,6 @@ func logAnthropicCompatAttempt(ctx context.Context, account *Account, model, dec
 			return
 		}
 	}
-	requestID, _ := ctx.Value(ctxkey.RequestID).(string)
 	logger.L().Info("gateway.anthropic_compat_attempt", zap.String("request_id", requestID), zap.Int64("account_id", account.ID), zap.String("entry", entry), zap.String("model", model), zap.String("decision", decision), zap.String("reason", reason))
 }
 

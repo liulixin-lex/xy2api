@@ -74,7 +74,7 @@ func TestAnthropicCompatSessionAnchorPrecedence(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			body := []byte(`{"metadata":{"user_id":` + mustJSONString(tc.metadata) + `}}`)
 			headers := make(http.Header)
-			ctx := WithAnthropicCompatRequest(context.Background(), 1, 2, body, "messages", tc.explicit, headers)
+			ctx := WithAnthropicCompatRequest(context.Background(), 1, 2, body, "messages", tc.explicit, headers, "")
 			ctx = WithAnthropicCompatSessionHash(ctx, tc.sticky)
 			require.Equal(t, tc.want, compatSessionAnchor(ctx, compatRequest(ctx)))
 		})
@@ -106,7 +106,7 @@ func TestAnthropicCompatSignatureRetryRebuildsEnvelope(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(body)))
-	ctx := WithAnthropicCompatRequest(c.Request.Context(), 11, 22, body, "messages", "session-1", c.Request.Header)
+	ctx := WithAnthropicCompatRequest(c.Request.Context(), 11, 22, body, "messages", "session-1", c.Request.Header, "")
 	c.Request = c.Request.WithContext(ctx)
 	result, err := svc.Forward(ctx, c, account, parsed)
 	require.NoError(t, err)

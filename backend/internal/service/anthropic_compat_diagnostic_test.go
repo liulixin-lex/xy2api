@@ -145,7 +145,7 @@ func TestAnthropicCompatDiagnosticTwoTurns(t *testing.T) {
 			if failed {
 				require.Contains(t, rec.Body.String(), `"success":false`)
 				if tc.unsigned {
-					require.Contains(t, rec.Body.String(), "The model did not return thinking in this turn")
+					require.Contains(t, rec.Body.String(), "the model did not return thinking in this turn")
 				}
 			}
 			if tc.truncated || tc.unsigned {

@@ -23,8 +23,7 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 		return fmt.Errorf("parse request: empty request")
 	}
 
-	var compatErr error
-	compatErr = beginAnthropicForwardAttempt(ctx, c, account, parsed.Body.Bytes())
+	compatErr := beginAnthropicForwardAttempt(ctx, c, account, parsed.Body.Bytes())
 	if compatErr != nil {
 		return compatErr
 	}

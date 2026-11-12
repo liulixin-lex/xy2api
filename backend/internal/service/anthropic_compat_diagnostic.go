@@ -27,7 +27,7 @@ func BuildAnthropicCompatDiagnosticRequest(account *Account, body []byte, header
 		return body, out, nil
 	}
 	if !profile.SupportsModel(gjson.GetBytes(body, "model").String()) {
-		return nil, nil, fmt.Errorf("Diagnostic model is outside the profile capability range")
+		return nil, nil, fmt.Errorf("diagnostic model is outside the profile capability range")
 	}
 	anchor := headers.Get("X-Claude-Code-Session-Id")
 	if anchor == "" {
@@ -117,7 +117,7 @@ func (s *AccountTestService) testAnthropicCompatConnection(c *gin.Context, accou
 		}
 		resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 		if err != nil {
-			return nil, fmt.Errorf("Request failed: %w", err)
+			return nil, fmt.Errorf("request failed: %w", err)
 		}
 		return s.readAnthropicCompatDiagnosticTurn(c, resp)
 	}
@@ -129,7 +129,7 @@ func (s *AccountTestService) testAnthropicCompatConnection(c *gin.Context, accou
 		return nil
 	}
 	if reason := (&GatewayService{settingService: s.settingService}).anthropicCompatReadiness(c.Request.Context(), account, profile, model, ""); reason != "" {
-		return fail("adapted_turn", fmt.Errorf("Compatibility account is not ready: %s", reason))
+		return fail("adapted_turn", fmt.Errorf("compatibility account is not ready: %s", reason))
 	}
 	content, err := sendTurn()
 	if err != nil {
@@ -148,16 +148,16 @@ func (s *AccountTestService) testAnthropicCompatConnection(c *gin.Context, accou
 		case "tool_use":
 			id := gjson.GetBytes(block, "id").String()
 			if id == "" {
-				return fail("adapted_turn", fmt.Errorf("Diagnostic tool call has no ID"))
+				return fail("adapted_turn", fmt.Errorf("diagnostic tool call has no ID"))
 			}
 			results = append(results, map[string]any{"type": "tool_result", "tool_use_id": id, "content": "OK"})
 		}
 	}
 	if !thinkingReturned {
-		return fail("adapted_turn", fmt.Errorf("The model did not return thinking in this turn"))
+		return fail("adapted_turn", fmt.Errorf("the model did not return thinking in this turn"))
 	}
 	if !signed {
-		return fail("adapted_turn", fmt.Errorf("Model returned thinking without signed history"))
+		return fail("adapted_turn", fmt.Errorf("model returned thinking without signed history"))
 	}
 	messages = append(messages, map[string]any{"role": "assistant", "content": content})
 	if len(results) > 0 {
@@ -204,10 +204,10 @@ func (s *AccountTestService) readAnthropicCompatDiagnosticTurn(c *gin.Context, r
 	}
 	stream, err := io.ReadAll(io.LimitReader(resp.Body, (8<<20)+1))
 	if err != nil {
-		return nil, fmt.Errorf("Diagnostic stream read error: %w", err)
+		return nil, fmt.Errorf("diagnostic stream read error: %w", err)
 	}
 	if len(stream) > 8<<20 {
-		return nil, fmt.Errorf("Diagnostic SSE stream is too large")
+		return nil, fmt.Errorf("diagnostic SSE stream is too large")
 	}
 	blocks := []json.RawMessage{}
 	omit := make(map[int]bool)
@@ -221,7 +221,7 @@ func (s *AccountTestService) readAnthropicCompatDiagnosticTurn(c *gin.Context, r
 			return
 		}
 		if !gjson.ValidBytes(data) {
-			consumeErr = fmt.Errorf("Invalid diagnostic SSE JSON")
+			consumeErr = fmt.Errorf("invalid diagnostic SSE JSON")
 			return
 		}
 		kind := gjson.GetBytes(data, "type").String()
@@ -230,7 +230,7 @@ func (s *AccountTestService) readAnthropicCompatDiagnosticTurn(c *gin.Context, r
 		}
 		index := int(gjson.GetBytes(data, "index").Int())
 		if strings.HasPrefix(kind, "content_block_") && (!started || index < 0) {
-			consumeErr = fmt.Errorf("Invalid diagnostic content block index")
+			consumeErr = fmt.Errorf("invalid diagnostic content block index")
 			return
 		}
 		switch kind {
@@ -242,7 +242,7 @@ func (s *AccountTestService) readAnthropicCompatDiagnosticTurn(c *gin.Context, r
 		case "content_block_start":
 			block := gjson.GetBytes(data, "content_block")
 			if !block.IsObject() || index != len(blocks) {
-				consumeErr = fmt.Errorf("Invalid diagnostic content block")
+				consumeErr = fmt.Errorf("invalid diagnostic content block")
 				return
 			}
 			activeBlock, partialJSON = index, ""
@@ -252,7 +252,7 @@ func (s *AccountTestService) readAnthropicCompatDiagnosticTurn(c *gin.Context, r
 			}
 		case "content_block_delta":
 			if index != activeBlock {
-				consumeErr = fmt.Errorf("Diagnostic delta has no content block")
+				consumeErr = fmt.Errorf("diagnostic delta has no content block")
 				return
 			}
 			delta := gjson.GetBytes(data, "delta")
@@ -284,13 +284,13 @@ func (s *AccountTestService) readAnthropicCompatDiagnosticTurn(c *gin.Context, r
 			}
 		case "content_block_stop":
 			if index != activeBlock {
-				consumeErr = fmt.Errorf("Diagnostic stop has no open content block")
+				consumeErr = fmt.Errorf("diagnostic stop has no open content block")
 				return
 			}
 			activeBlock = -1
 			if partialJSON != "" {
 				if !gjson.Valid(partialJSON) || !gjson.Parse(partialJSON).IsObject() {
-					consumeErr = fmt.Errorf("Incomplete diagnostic tool arguments")
+					consumeErr = fmt.Errorf("incomplete diagnostic tool arguments")
 					return
 				}
 				blocks[index], err = sjson.SetRawBytes(blocks[index], "input", []byte(partialJSON))
@@ -304,10 +304,10 @@ func (s *AccountTestService) readAnthropicCompatDiagnosticTurn(c *gin.Context, r
 				reason = value
 			}
 		case "error":
-			consumeErr = fmt.Errorf("Upstream diagnostic error: %s", gjson.GetBytes(data, "error.message").String())
+			consumeErr = fmt.Errorf("upstream diagnostic error: %s", gjson.GetBytes(data, "error.message").String())
 		case "message_stop":
 			if !started || reason == "" || activeBlock >= 0 {
-				consumeErr = fmt.Errorf("Incomplete Anthropic diagnostic terminal event")
+				consumeErr = fmt.Errorf("incomplete Anthropic diagnostic terminal event")
 				return
 			}
 			stopped = true
@@ -317,7 +317,7 @@ func (s *AccountTestService) readAnthropicCompatDiagnosticTurn(c *gin.Context, r
 		return nil, consumeErr
 	}
 	if !stopped {
-		return nil, fmt.Errorf("Compatibility diagnostic ended without a complete Anthropic terminal event")
+		return nil, fmt.Errorf("compatibility diagnostic ended without a complete Anthropic terminal event")
 	}
 	content := make([]json.RawMessage, 0, len(blocks))
 	for i, block := range blocks {
