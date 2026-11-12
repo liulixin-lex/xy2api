@@ -1,5 +1,5 @@
 import { nextTick, onUnmounted, ref, toValue, watch, type Ref, type WatchSource } from 'vue'
-import { closeOverlay, isTopOverlay, openOverlay, syncOverlays, trapTab } from '@/utils/overlayStack'
+import { closeOverlay, holdFocus, isTopOverlay, openOverlay, syncOverlays, trapTab } from '@/utils/overlayStack'
 
 interface OverlayLayerOptions {
   /** Outermost element of the layer (made inert while a modal layer is above it). */
@@ -36,7 +36,7 @@ export function useOverlayLayer(show: WatchSource<boolean>, options: OverlayLaye
   const panel = () => options.panel?.value ?? options.root.value
 
   function onKeydown(event: KeyboardEvent) {
-    if (event.key !== 'Escape' || event.defaultPrevented || !isTopOverlay(token)) return
+    if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented || !isTopOverlay(token)) return
     event.preventDefault()
     options.onEscape?.()
   }
@@ -72,6 +72,12 @@ export function useOverlayLayer(show: WatchSource<boolean>, options: OverlayLaye
   return {
     zIndex,
     /** Keeps Tab and Shift+Tab inside a modal layer; bind to keydown.tab on the root. */
-    trapTab: (event: KeyboardEvent) => trapTab(event, panel())
+    trapTab: (event: KeyboardEvent) => trapTab(event, panel()),
+    /**
+     * Call before an async step or busy state that may remove or disable the focused element; call the returned
+     * function once it has rendered. Focus goes back to that element, else to the one with the same data-*, else
+     * to the panel. Does nothing unless this layer is on top (a layer opened above in the meantime keeps focus).
+     */
+    holdFocus: () => holdFocus(token)
   }
 }
