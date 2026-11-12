@@ -124,16 +124,9 @@ func schedAdminHasReal(v schedquality.Summary) bool {
 func (s *SchedAdminService) Attention(_ context.Context) (SchedAdminAttention, error) {
 	p := s.snapshot()
 	out := SchedAdminAttention{Cooling: []int64{}, Exempt: []int64{}, Demote: []int64{}}
-	for id, rows := range p.GroupRows {
-		for _, r := range rows {
-			if r.View.State == schedquality.StateCooling && slices.Contains(p.Members[id], r.GroupID) {
-				out.Cooling = append(out.Cooling, id)
-				break
-			}
-		}
-	}
 	now := s.d.Now()
 	exempt, demote := map[int64]bool{}, map[int64]bool{}
+	covered := map[[2]int64]bool{}
 	for _, o := range p.Overrides {
 		if (o.GroupID != 0 && !slices.Contains(p.Members[o.AccountID], o.GroupID)) || (o.ExpiresAt != nil && !now.Before(*o.ExpiresAt)) {
 			continue
@@ -148,6 +141,20 @@ func (s *SchedAdminService) Attention(_ context.Context) (SchedAdminAttention, e
 			if !demote[o.AccountID] {
 				demote[o.AccountID] = true
 				out.Demote = append(out.Demote, o.AccountID)
+			}
+		default:
+			continue
+		}
+		covered[[2]int64{o.AccountID, o.GroupID}] = true
+	}
+	for id, rows := range p.GroupRows {
+		if covered[[2]int64{id, 0}] {
+			continue
+		}
+		for _, r := range rows {
+			if r.View.State == schedquality.StateCooling && slices.Contains(p.Members[id], r.GroupID) && !covered[[2]int64{id, r.GroupID}] {
+				out.Cooling = append(out.Cooling, id)
+				break
 			}
 		}
 	}
