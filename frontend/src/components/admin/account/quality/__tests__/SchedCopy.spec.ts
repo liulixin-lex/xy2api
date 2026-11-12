@@ -49,12 +49,14 @@ function nonData(text: string) {
   return rest.split(/\s+/).filter(Boolean)
 }
 
+// Visible text and tips; screen-reader-only descriptions are checked on their own (they may join items with the
+// list separator).
 function rendered(): string[] {
   const out: string[] = []
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     const text = node.textContent?.trim()
-    if (text) out.push(text)
+    if (text && !node.parentElement?.closest('.sr-only')) out.push(text)
   }
   document.querySelectorAll<HTMLElement & { __tipText?: string }>('*').forEach((el) => { if (el.__tipText) out.push(el.__tipText) })
   return out
@@ -126,6 +128,9 @@ describe('quality UI copy', () => {
     // No sentences: no sentence punctuation, and no run of words longer than a name.
     expect(texts.filter((text) => /[。，！？；]/.test(text))).toEqual([])
     expect(texts.flatMap(nonData).filter((token) => token.length > 8)).toEqual([])
+    const described = Array.from(document.querySelectorAll('.sr-only'), (el) => el.textContent?.trim() ?? '').filter(Boolean)
+    expect(described.length).toBeGreaterThan(0)
+    expect(described.flatMap((text) => text.split(zhSched.schedQuality.recent.sep)).flatMap(nonData).filter((token) => !copyTokens.has(token))).toEqual([])
   })
 
   it('names every reject code the board can return (G4 D1) and the auto_states kind (D6) with a short word', () => {

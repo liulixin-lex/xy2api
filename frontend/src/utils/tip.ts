@@ -3,7 +3,8 @@ import type { Directive } from 'vue'
 /**
  * v-tip="text": short tip (design spec E): shown after 400ms hover or at once on keyboard focus, hidden on
  * leave, blur, scroll or Escape (Escape only closes the tip, not the layer under it). One shared element with
- * role="tooltip"; the target points to it with aria-describedby while it is shown. No native title. Empty text = no tip. Line breaks in the text are kept. v-tip.focus: keyboard focus only.
+ * role="tooltip"; while it is shown the target's aria-describedby also points to it (the target's own description
+ * stays). No native title. Empty text = no tip. Line breaks in the text are kept. v-tip.focus: keyboard focus only.
  */
 const TIP_ID = 'sq-tip'
 const HOVER_DELAY_MS = 400
@@ -40,6 +41,12 @@ function place(target: HTMLElement, el: HTMLElement) {
   el.style.top = `${above >= 8 ? above : rect.bottom + GAP}px`
 }
 
+const describedBy = (el: HTMLElement) => (el.getAttribute('aria-describedby') ?? '').split(/\s+/).filter((id) => id && id !== TIP_ID)
+const setDescribedBy = (el: HTMLElement, ids: string[]) => {
+  if (ids.length) el.setAttribute('aria-describedby', ids.join(' '))
+  else el.removeAttribute('aria-describedby')
+}
+
 function show(target: TipTarget) {
   clearTimeout(timer)
   const text = target.__tipText
@@ -50,7 +57,7 @@ function show(target: TipTarget) {
   el.hidden = false
   place(target, el)
   current = target
-  target.setAttribute('aria-describedby', TIP_ID)
+  setDescribedBy(target, [...describedBy(target), TIP_ID])
   document.addEventListener('keydown', onKeydown, true)
   window.addEventListener('scroll', hide, true)
 }
@@ -58,7 +65,7 @@ function show(target: TipTarget) {
 function hide() {
   clearTimeout(timer)
   if (tipEl) tipEl.hidden = true
-  current?.removeAttribute('aria-describedby')
+  if (current) setDescribedBy(current, describedBy(current))
   current = null
   document.removeEventListener('keydown', onKeydown, true)
   window.removeEventListener('scroll', hide, true)

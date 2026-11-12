@@ -58,6 +58,7 @@ const DataTableStub = defineComponent({
           slots['cell-select']?.({ row }),
           h('span', { 'data-test': 'recent' }, slots['cell-sq_recent']?.({ row })),
           h('span', { 'data-test': 'groups' }, slots['cell-sq_groups']?.({ row })),
+          h('span', { 'data-test': 'membership' }, slots['cell-groups']?.({ row })),
           h('span', { 'data-test': 'actions' }, slots['cell-actions']?.({ row }))
         ]))
     ])
@@ -258,6 +259,11 @@ describe('AccountsView quality columns', () => {
     expect(viewer.find('[data-test="tools-bulk-edit-filtered"]').exists()).toBe(false)
     expect(rowCell(1, 'recent').querySelector('a')).toBeNull()
     expect(rowCell(1, 'recent').querySelector('[data-test="recent-stats"]')!.tagName).toBe('DIV')
+    // Membership is plain badges for a viewer: no button, no edit name, no Tab stop (red team FA-2).
+    const membership = rowCell(1, 'membership').querySelector<HTMLElement>('[data-testid="account-groups-cell"]')!
+    expect(membership.textContent).toContain('晨星组')
+    expect([membership.tagName, membership.getAttribute('aria-label'), membership.tabIndex]).toEqual(['SPAN', null, -1])
+    expect(rowCell(1, 'membership').querySelector('button')).toBeNull()
     viewer.unmount()
 
     seedOperator({ accounts: 'manage', usage: 'view' })
@@ -267,6 +273,7 @@ describe('AccountsView quality columns', () => {
     await manager.get('button[title="admin.accounts.moreActions"]').trigger('click')
     expect(manager.find('[data-test="tools-bulk-edit-filtered"]').exists()).toBe(true)
     expect(rowCell(1, 'recent').querySelector('a')!.getAttribute('href')).toBe('/admin/usage?account_id=1')
+    expect(rowCell(1, 'membership').querySelector('button[data-testid="account-groups-cell"]')!.getAttribute('aria-label')).toBe('admin.groupCategories.editAccountGroupsAria:{"name":"acc-sol"}')
     manager.unmount()
   })
 

@@ -358,7 +358,7 @@
             />
           </template>
           <template #cell-groups="{ row }">
-            <AccountGroupsCellButton :groups="accountGroupsForRow(row)" :account-name="row.name" @open="canPlaceGroups && (groupsDialogAccount = row)" />
+            <AccountGroupsCellButton :groups="accountGroupsForRow(row)" :account-name="row.name" :readonly="!canPlaceGroups" @open="canPlaceGroups && (groupsDialogAccount = row)" />
           </template>
           <template #cell-usage="{ row }">
             <AccountUsageCell

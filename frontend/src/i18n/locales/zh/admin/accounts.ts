@@ -156,7 +156,6 @@ export default {
         }
       },
       title: '账号管理',
-      description: '管理 AI 平台账号和 Cookie',
       createAccount: '添加账号',
       autoRefresh: '自动刷新',
       enableAutoRefresh: '启用自动刷新',

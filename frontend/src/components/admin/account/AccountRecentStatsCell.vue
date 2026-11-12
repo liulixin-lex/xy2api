@@ -5,6 +5,7 @@
     v-tip.focus="link ? focusTip : ''"
     :class="['acc-recent', link ? 'acc-recent--link sq-focus' : '']"
     :aria-label="ariaLabel"
+    :aria-describedby="countsText ? countsId : undefined"
     data-test="recent-stats"
   >
     <template v-if="loading && !stats">
@@ -21,11 +22,12 @@
         >{{ line.text }}</span>
       </template>
     </template>
+    <span v-if="countsText" :id="countsId" class="sr-only">{{ countsText }}</span>
   </component>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, useId } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import type { AccountRecentStats, RecentStatsTier } from '@/types/schedQuality'
@@ -90,13 +92,14 @@ const lines = computed<Line[]>(() => {
   ]
 })
 
-// Keyboard focus on the link shows the three sample counts; the tip is also its aria description while shown.
-const focusTip = computed(() =>
-  lines.value
-    .filter((line) => line.n !== null)
-    .map((line) => `${line.label} ${t('admin.schedQuality.recent.samples', { n: line.n })}`)
-    .join('\n')
+// Sample counts: a lasting screen-reader description of the cell (hidden node), and the tip that keyboard focus
+// on the link shows. No counts before the stats arrive; none for errors while ops monitoring is off.
+const counts = computed(() =>
+  lines.value.filter((line) => line.n !== null).map((line) => `${line.label} ${t('admin.schedQuality.recent.samples', { n: line.n })}`)
 )
+const countsText = computed(() => counts.value.join(t('admin.schedQuality.recent.sep')))
+const countsId = `recent-n-${useId()}`
+const focusTip = computed(() => counts.value.join('\n'))
 const ariaLabel = computed(() =>
   lines.value.some((line) => line.value !== null)
     ? lines.value.map((line) => `${line.label} ${line.text}`).join(t('admin.schedQuality.recent.sep'))
