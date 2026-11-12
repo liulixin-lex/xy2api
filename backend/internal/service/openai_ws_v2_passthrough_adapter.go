@@ -954,9 +954,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 	var schedBeforeSend func([]byte)
 	if s.schedAttemptRecorder != nil {
-		schedBeforeSend = func(payload []byte) {
-			schedTurns.begin(s, ctx, account, optionalStringValue(usageMeta.reasoningEffort.Load()), len(payload))
-		}
+		schedBeforeSend = func(payload []byte) { schedTurns.begin(s, ctx, account, payload) }
 	}
 	relayUpstreamFrameConn := &openAIWSPassthroughFirstOutputFrameConn{
 		inner:             upstreamFrameConn,

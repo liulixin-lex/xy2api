@@ -546,16 +546,12 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	turnStart := time.Now()
 	rejectedFieldRetryState := newOpenAIResponsesRejectedFieldRetryState(body)
 	var resp *http.Response
-	var reasoningEffort *string
 	for {
 		upstreamReq, buildErr := buildUpstreamRequest(body)
 		if buildErr != nil {
 			return nil, buildErr
 		}
-		if s.schedAttemptRecorder != nil && account.Platform == PlatformOpenAI {
-			reasoningEffort = ApplyThinkingEnabledFallback(extractOpenAIReasoningEffortFromBody(body, actualModel, originalModel), body, actualModel)
-		}
-		resp, err = s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, optionalStringValue(reasoningEffort), true, &schedCapture)
+		resp, err = s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, body, true, &schedCapture)
 		if err != nil {
 			if turn == 1 {
 				return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
@@ -663,9 +659,6 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	qualityReplayComplete := false
 	resultWithUsage := func() *OpenAIForwardResult {
 		imageCount := imageCounter.Count()
-		if s.schedAttemptRecorder == nil || account.Platform != PlatformOpenAI {
-			reasoningEffort = ApplyThinkingEnabledFallback(extractOpenAIReasoningEffortFromBody(body, actualModel, originalModel), body, actualModel)
-		}
 		result := &OpenAIForwardResult{
 			RequestID:                     responseID,
 			Usage:                         usage,
@@ -675,7 +668,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			UpstreamResponseModelConflict: responseModelObserver.Conflict(),
 			UpstreamResponseServiceTier:   responseModelObserver.ServiceTier(),
 			ServiceTier:                   resolvedOpenAIUpstreamServiceTierFromObserver(responseModelObserver, extractOpenAIServiceTierFromBody(body)),
-			ReasoningEffort:               reasoningEffort,
+			ReasoningEffort:               ApplyThinkingEnabledFallback(extractOpenAIReasoningEffortFromBody(body, mappedModel, originalModel), body, mappedModel),
 			RequestedReasoningEffort:      CanonicalRequestedReasoningEffort(body, originalModel, mappedModel),
 			Stream:                        reqStream,
 			OpenAIWSMode:                  true,

@@ -365,8 +365,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	}
 	if s.schedAttemptRecorder != nil {
 		body := payloadAsJSONBytes(wirePayload)
-		effort := optionalStringValue(extractOpenAIReasoningEffort(wirePayload, openAIWSPayloadString(wirePayload, "model")))
-		schedCapture = s.beginSchedAttempt(ctx, account, effort, len(body), reqStream)
+		schedCapture = s.beginSchedAttempt(ctx, account, body, len(body), reqStream)
 	}
 	if err := lease.WriteJSONWithContextTimeout(ctx, wirePayload, s.openAIWSWriteTimeout()); err != nil {
 		lease.MarkBroken()

@@ -162,7 +162,7 @@ func TestSchedCaptureUninstalledDoesNotAllocate(t *testing.T) {
 	payload := []byte(`{"delta":"answer"}`)
 	var capture *schedAttemptCapture
 	allocs := testing.AllocsPerRun(10, func() {
-		capture = svc.beginSchedAttempt(ctx, account, "high", len(body), true)
+		capture = svc.beginSchedAttempt(ctx, account, body, len(body), true)
 		observeSchedPayload(c, payload, "response.output_text.delta")
 	})
 	require.Nil(t, capture)
@@ -191,7 +191,7 @@ func TestSchedCapturePreparedPayloadWithoutReread(t *testing.T) {
 			require.NoError(t, err)
 			req.GetBody = func() (io.ReadCloser, error) { panic("capture must not reread the request body") }
 			var capture *schedAttemptCapture
-			_, err = svc.sendSchedHTTP(ctx, account, req, "", "high", false, &capture)
+			_, err = svc.sendSchedHTTP(ctx, account, req, "", body, false, &capture)
 			require.NoError(t, err)
 			capture.finish(nil, nil)
 			require.Contains(t, string(up.lastBody), "additional group instruction")
@@ -222,7 +222,7 @@ func TestSchedCaptureWebSocketFrameKindsAndSupersededTurn(t *testing.T) {
 	deadlineCalls := 0
 	conn := &openAIWSPassthroughFirstOutputFrameConn{
 		inner:      inner,
-		beforeSend: func(payload []byte) { turns.begin(svc, ctx, account, "", len(payload)) },
+		beforeSend: func(payload []byte) { turns.begin(svc, ctx, account, payload) },
 		resolveDeadline: func([]byte) openAIWSPassthroughFirstOutputDeadline {
 			deadlineCalls++
 			return openAIWSPassthroughFirstOutputDeadline{startedAt: time.Now(), timeout: time.Second}
@@ -262,9 +262,9 @@ func TestSchedCaptureCCBuildFailureDoesNotOwnPriorAttempt(t *testing.T) {
 	svc := &OpenAIGatewayService{schedAttemptRecorder: rec}
 	account := &Account{ID: 1, Platform: PlatformOpenAI}
 	body := []byte(`{"model":"gpt-5.1","messages":[]}`)
-	prior := svc.beginSchedAttempt(ctx, account, "", len(body), false)
+	prior := svc.beginSchedAttempt(ctx, account, body, len(body), false)
 	owned := prior
-	_, err := svc.sendCCUpstreamRequest(ctx, c, account, "://invalid", body, false, "test", "", "", ccAttemptCapture{owner: &owned})
+	_, err := svc.sendCCUpstreamRequest(ctx, c, account, "://invalid", body, false, "test", "", "", &owned)
 	require.Error(t, err)
 	require.Nil(t, owned)
 	owned.finish(nil, err)

@@ -338,7 +338,7 @@ func TestSchedCaptureA10WebSocketTwoTurns(t *testing.T) {
 				require.NoError(t, err)
 				defer conn.CloseNow()
 				for turn := 0; turn < 2; turn++ {
-					require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(fmt.Sprintf(`{"type":"response.create","model":"gpt-5.1","input":"hi","reasoning":{"effort":%q}}`, []string{"high", "low"}[turn]))))
+					require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","input":"hi"}`)))
 					_, _, err = conn.Read(ctx)
 					if turn == 0 {
 						require.NoError(t, err)
@@ -367,8 +367,6 @@ func TestSchedCaptureA10WebSocketTwoTurns(t *testing.T) {
 					t.Fatal("websocket handler did not exit")
 				}
 				require.Len(t, rec.starts, 2)
-				require.Equal(t, "high", rec.starts[0].Effort)
-				require.Equal(t, "low", rec.starts[1].Effort)
 				require.Len(t, rec.samples, 2)
 			})
 		}
@@ -559,42 +557,6 @@ func TestSchedCaptureRawChatTerminalWithoutDone(t *testing.T) {
 				require.Len(t, rec.starts, 1)
 				require.Len(t, rec.samples, 1)
 				require.Equal(t, schedquality.OutcomeOK, rec.samples[0].Outcome, rec.samples[0].Detail)
-			})
-		}
-	}
-}
-
-func TestSchedCapturePreparedEffortAcrossHTTPPaths(t *testing.T) {
-	withHandlerResilience(t, nil)
-	for _, mode := range []string{"responses", "passthrough", "raw"} {
-		for _, entry := range []string{"responses", "chat/completions", "messages"} {
-			if mode == "passthrough" && entry != "responses" {
-				continue
-			}
-			t.Run(mode+"/"+entry, func(t *testing.T) {
-				up := &captureUpstream{reply: func(int, *http.Request, []byte) (*http.Response, error) {
-					if mode == "raw" {
-						return captureResponse(200, `{"id":"chat_effort","choices":[{"message":{"role":"assistant","content":"answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":2}}`, false), nil
-					}
-					return captureResponse(200, captureSSE(), true), nil
-				}}
-				extra := map[string]any{}
-				if mode == "passthrough" {
-					extra["openai_passthrough"] = true
-				} else if mode == "raw" {
-					extra["openai_responses_mode"] = "force_chat_completions"
-				}
-				_, rec, router := captureFixture(t, service.Account{Extra: extra}, up)
-				body := `{"model":"gpt-5.1","stream":false,"max_tokens":100,"messages":[{"role":"user","content":"hi"}],"reasoning_effort":"high","output_config":{"effort":"high"}}`
-				if entry == "responses" {
-					body = `{"model":"gpt-5.1","input":"hi","stream":false,"reasoning":{"effort":"high"}}`
-				}
-				resp := captureRequest(router, "/v1/"+entry, body)
-				require.Equal(t, 200, resp.Code, resp.Body.String())
-				require.Equal(t, 1, up.calls)
-				require.Len(t, rec.starts, 1)
-				require.Equal(t, "high", rec.starts[0].Effort, string(up.bodies[0]))
-				require.Equal(t, len(up.bodies[0]), rec.starts[0].BodyBytes)
 			})
 		}
 	}
