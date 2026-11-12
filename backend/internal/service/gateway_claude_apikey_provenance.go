@@ -8,13 +8,17 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
+	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
 )
 
 // AnthropicCompatProvenanceStore stores digests and routing constraints only.
@@ -158,6 +162,14 @@ func compatScope(ctx context.Context) *anthropicCompatScope {
 	}
 	scope, _ := ctx.Value(anthropicCompatScopeKey{}).(*anthropicCompatScope)
 	return scope
+}
+
+// AnthropicCompatBoundAccountID exposes only the routing owner for diagnostics.
+func AnthropicCompatBoundAccountID(ctx context.Context) int64 {
+	if scope := compatScope(ctx); scope != nil && scope.Record != nil {
+		return scope.Record.AccountID
+	}
+	return 0
 }
 
 func compatDigest(seed []byte, parts ...string) string {
@@ -376,10 +388,30 @@ func (s *GatewayService) PrepareAnthropicCompatibility(ctx context.Context, user
 	return context.WithValue(ctx, anthropicCompatScopeKey{}, scope), nil
 }
 
-func (s *GatewayService) registerAnthropicCompat(ctx context.Context, plan *anthropicCompatPlan, values []anthropicCompatOpaque) error {
+func (s *GatewayService) registerAnthropicCompat(ctx context.Context, plan *anthropicCompatPlan, values []anthropicCompatOpaque) (resultErr error) {
 	if plan == nil || !plan.Active {
 		return nil
 	}
+	started := time.Now()
+	var storeErr error
+	defer func() {
+		if resultErr == nil {
+			return
+		}
+		reason := "other"
+		switch AnthropicCompatErrorReason(resultErr) {
+		case AnthropicCompatReasonRegistrationConflict, AnthropicCompatReasonConstraints:
+			reason = "conflict"
+		case AnthropicCompatReasonRegistrationCapacity:
+			reason = "capacity"
+		case AnthropicCompatReasonRegistrationInvalid, AnthropicCompatReasonInvalidRecord:
+			reason = "invalid"
+		}
+		logger.FromContext(ctx).Warn("gateway.anthropic_compat_registration_failed",
+			zap.Int64("account_id", plan.Record.AccountID), zap.String("reason", reason),
+			zap.Any("ctx_error", ctx.Err()), zap.String("redis_error_category", compatRegistrationErrorCategory(storeErr)),
+			zap.Int64("duration_ms", time.Since(started).Milliseconds()), zap.Int("signature_blocks", len(values)))
+	}()
 	if plan.Scope == nil || !validAnthropicCompatRecord(plan.Record) {
 		return compatUnavailable("Signed response provenance is incomplete", AnthropicCompatReasonInvalidRecord)
 	}
@@ -421,19 +453,57 @@ func (s *GatewayService) registerAnthropicCompat(ctx context.Context, plan *anth
 		return compatUnavailable("Signed response provenance encoding failed")
 	}
 	// This is part of the active upstream attempt, including its drain deadline.
-	if err = store.Register(ctx, keys, raw, anthropicCompatProvenanceTTL); err != nil {
+	if storeErr = store.Register(ctx, keys, raw, anthropicCompatProvenanceTTL); storeErr != nil {
 		reason := AnthropicCompatReason("anthropic_compat_state_unavailable")
 		switch {
-		case errors.Is(err, AnthropicCompatRegistrationConflict):
+		case errors.Is(storeErr, AnthropicCompatRegistrationConflict):
 			reason = AnthropicCompatReasonRegistrationConflict
-		case errors.Is(err, AnthropicCompatRegistrationCapacity):
+		case errors.Is(storeErr, AnthropicCompatRegistrationCapacity):
 			reason = AnthropicCompatReasonRegistrationCapacity
-		case errors.Is(err, AnthropicCompatRegistrationInvalid):
+		case errors.Is(storeErr, AnthropicCompatRegistrationInvalid):
 			reason = AnthropicCompatReasonRegistrationInvalid
 		}
 		return compatUnavailable("Signed response provenance could not be saved", reason)
 	}
 	return nil
+}
+
+// Classify the store failure without logging Redis messages, keys or values.
+func compatRegistrationErrorCategory(err error) string {
+	switch {
+	case err == nil:
+		return "none"
+	case errors.Is(err, AnthropicCompatRegistrationConflict):
+		return "provenance_conflict"
+	case errors.Is(err, AnthropicCompatRegistrationCapacity):
+		return "provenance_capacity"
+	case errors.Is(err, AnthropicCompatRegistrationInvalid):
+		return "provenance_invalid"
+	case errors.Is(err, context.Canceled):
+		return "context_canceled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "context_deadline"
+	}
+	var networkErr net.Error
+	if errors.As(err, &networkErr) {
+		if networkErr.Timeout() {
+			return "timeout"
+		}
+		return "network"
+	}
+	var redisErr interface {
+		error
+		RedisError()
+	}
+	if errors.As(err, &redisErr) {
+		category, _, _ := strings.Cut(redisErr.Error(), " ")
+		switch category {
+		case "WRONGTYPE", "READONLY", "OOM", "NOSCRIPT", "LOADING", "CLUSTERDOWN", "NOAUTH", "NOPERM":
+			return category
+		}
+		return "redis"
+	}
+	return "other"
 }
 
 func (s *GatewayService) guardAnthropicCompatAccount(ctx context.Context, account *Account) error {

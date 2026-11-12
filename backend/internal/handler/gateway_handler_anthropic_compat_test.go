@@ -21,11 +21,14 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
+	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/tlsfingerprint"
 	"github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // This fixture uses the real handlers, scheduler, request builders, response
@@ -366,10 +369,13 @@ func handlerCompatChatAssistant(t *testing.T, body string, stream bool) map[stri
 	return message
 }
 
-func (f *handlerCompatFixture) call(entry, body string, writer http.ResponseWriter) *gin.Context {
+func (f *handlerCompatFixture) call(entry, body string, writer http.ResponseWriter, contexts ...context.Context) *gin.Context {
 	c, _ := gin.CreateTestContext(writer)
 	path := map[string]string{"messages": "/v1/messages", "responses": "/v1/responses", "chat": "/v1/chat/completions", "count_tokens": "/v1/messages/count_tokens"}[entry]
 	c.Request = httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	if len(contexts) > 0 {
+		c.Request = c.Request.WithContext(contexts[0])
+	}
 	c.Request.Header.Set("Content-Type", "application/json")
 	c.Request.Header.Set("User-Agent", "ordinary-sdk/1.0")
 	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, f.group))
@@ -386,6 +392,52 @@ func (f *handlerCompatFixture) call(entry, body string, writer http.ResponseWrit
 		f.handler.CountTokens(c)
 	}
 	return c
+}
+
+func TestAnthropicCompatHandlersLogLocalSelectionRejection(t *testing.T) {
+	for _, entry := range []string{"messages", "responses", "chat"} {
+		t.Run(entry, func(t *testing.T) {
+			f := newHandlerCompatFixture(t)
+			f.account.Extra[service.AnthropicCompatProfileExtraKey] = service.AnthropicCompatProfileClaudeCodeV2
+			request := handlerCompatRequest(entry, false)
+			first := httptest.NewRecorder()
+			f.call(entry, request, first)
+			require.Equal(t, http.StatusOK, first.Code, first.Body.String())
+			<-f.wire
+			var followup string
+			if entry == "chat" {
+				assistant := handlerCompatChatAssistant(t, first.Body.String(), false)
+				calls := assistant["tool_calls"].([]any)
+				handle := calls[0].(map[string]any)["id"].(string)
+				var body map[string]any
+				require.NoError(t, json.Unmarshal([]byte(request), &body))
+				body["messages"] = append(body["messages"].([]any), assistant,
+					map[string]any{"role": "tool", "tool_call_id": handle, "content": "found"})
+				encoded, err := json.Marshal(body)
+				require.NoError(t, err)
+				followup = string(encoded)
+			} else {
+				followup = handlerCompatFollowup(t, entry, request, first.Body.String(), false)
+			}
+			f.account.Credentials["api_key"] = "synthetic-rotated-key"
+			core, logs := observer.New(zap.WarnLevel)
+			ctx := logger.IntoContext(context.Background(), zap.New(core).With(zap.String("request_id", "selection-rejected-request")))
+			rec := httptest.NewRecorder()
+			f.call(entry, followup, rec, ctx)
+			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+			require.Empty(t, f.wire, "selection must reject before contacting upstream")
+			entries := logs.FilterMessage("gateway.anthropic_compat_selection_rejected").All()
+			require.Len(t, entries, 1)
+			fields := entries[0].ContextMap()
+			require.Equal(t, int64(http.StatusBadRequest), fields["status"])
+			require.Equal(t, "anthropic_compat_history_incompatible", fields["code"])
+			require.Equal(t, string(service.AnthropicCompatReasonCredential), fields["reason"])
+			require.Equal(t, f.account.ID, fields["account_id"])
+			require.Equal(t, "selection-rejected-request", fields["request_id"])
+			require.NotContains(t, fmt.Sprint(fields), "synthetic-signed-thinking")
+			require.NotContains(t, fmt.Sprint(fields), "synthetic-rotated-key")
+		})
+	}
 }
 
 func TestAnthropicCompatHandlersCountSkipsInapplicableCandidate(t *testing.T) {
