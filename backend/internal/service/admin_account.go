@@ -1416,11 +1416,11 @@ func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filte
 		return nil, nil
 	}
 	if quality := strings.TrimSpace(filters.SchedQuality); quality != "" {
-		if quality != "cooling" {
+		if !ValidSchedQualityFilter(quality) {
 			return nil, infraerrors.BadRequest("INVALID_SCHED_QUALITY", "invalid sched_quality filter")
 		}
 		if _, bound := SchedQualityAccountFilter(ctx); !bound {
-			return nil, infraerrors.BadRequest("INVALID_SCHED_QUALITY", "sched_quality filter requires cooling account IDs")
+			return nil, infraerrors.BadRequest("INVALID_SCHED_QUALITY", "sched_quality filter requires resolved account IDs")
 		}
 	}
 

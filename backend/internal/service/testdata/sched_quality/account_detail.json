@@ -104,7 +104,8 @@
         ],
         "input_tokens": 626000,
         "cached_tokens": 414000,
-        "output_tokens": 2900
+        "output_tokens": 2900,
+        "kind": "full"
       }
     }
   ],
@@ -181,5 +182,6 @@
       "outcome": "ok",
       "detail": ""
     }
-  ]
+  ],
+  "all_groups_override": null
 }

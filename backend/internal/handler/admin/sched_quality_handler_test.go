@@ -159,7 +159,7 @@ func TestSchedQualityContractShapes(t *testing.T) {
 	cases := []struct {
 		method, path, body string
 		keys               []string
-	}{{"POST", "/accounts/summary", `{"account_ids":[1]}`, []string{"at", "stale", "global_enabled", "accounts"}}, {"GET", "/accounts/attention", "", []string{"cooling"}}, {"GET", "/accounts/1", "", []string{"account", "at", "stale", "global_enabled", "tests_enabled", "reset_at", "models", "groups", "auto_states", "recent_attempts"}}, {"POST", "/accounts/1/reset", "", []string{"reset_at", "cleared", "preserved", "failed"}}, {"POST", "/accounts/1/test", `{"model":"m"}`, []string{"tests"}}, {"GET", "/groups/1/policy", "", []string{"group_id", "version", "policy", "class_limits_ms"}}, {"PUT", "/groups/1/policy", `{"expected_version":63,"policy":{"enabled":true,"ttft_seconds":10,"takeover_idle_seconds":-1}}`, []string{"group_id", "version", "policy", "class_limits_ms"}}, {"GET", "/groups/1/board", "", []string{"group_id", "model", "models", "at", "stale", "global_enabled", "accounts"}}, {"DELETE", "/accounts/1/auto-states/error", "", []string{"cleared"}}}
+	}{{"POST", "/accounts/summary", `{"account_ids":[1]}`, []string{"at", "stale", "global_enabled", "accounts"}}, {"GET", "/accounts/attention", "", []string{"cooling", "exempt", "demote"}}, {"GET", "/accounts/1", "", []string{"account", "at", "stale", "global_enabled", "tests_enabled", "reset_at", "all_groups_override", "models", "groups", "auto_states", "recent_attempts"}}, {"POST", "/accounts/1/reset", "", []string{"reset_at", "cleared", "preserved", "failed"}}, {"POST", "/accounts/1/test", `{"model":"m"}`, []string{"tests"}}, {"GET", "/groups/1/policy", "", []string{"group_id", "version", "policy", "class_limits_ms"}}, {"PUT", "/groups/1/policy", `{"expected_version":63,"policy":{"enabled":true,"ttft_seconds":10,"takeover_idle_seconds":-1}}`, []string{"group_id", "version", "policy", "class_limits_ms"}}, {"GET", "/groups/1/board", "", []string{"group_id", "model", "models", "at", "stale", "global_enabled", "accounts"}}, {"DELETE", "/accounts/1/auto-states/error", "", []string{"cleared"}}}
 	for _, tc := range cases {
 		t.Run(tc.method+tc.path, func(t *testing.T) {
 			h, _, repo := schedAdminHandlerFixture()
@@ -174,9 +174,15 @@ func TestSchedQualityContractShapes(t *testing.T) {
 			require.ElementsMatch(t, tc.keys, keys)
 			if tc.path == "/accounts/1" {
 				require.Equal(t, "null", string(data["reset_at"]))
-				for _, key := range []string{"models", "groups", "auto_states", "recent_attempts"} {
+				require.Equal(t, "null", string(data["all_groups_override"]))
+				for _, key := range []string{"models", "auto_states", "recent_attempts"} {
 					require.Equal(t, "[]", string(data[key]))
 				}
+				var groups []service.SchedAdminAccountDetailGroups
+				require.NoError(t, json.Unmarshal(data["groups"], &groups))
+				require.Len(t, groups, 1)
+				require.Equal(t, int64(1), groups[0].GroupID)
+				require.Equal(t, []service.SchedAdminAccountDetailGroupsByModel{}, groups[0].ByModel)
 			}
 		})
 	}
