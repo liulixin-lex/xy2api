@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
+	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -83,7 +84,12 @@ func (s *GatewayService) logAnthropicCompatOutcome(ctx context.Context, c *gin.C
 			decision = "candidate_ineligible"
 		}
 	}
-	logger.L().Info("gateway.anthropic_compat_attempt",
+	requestID, _ := ctx.Value(ctxkey.RequestID).(string)
+	if requestID == "" && c != nil && c.Request != nil {
+		requestID, _ = c.Request.Context().Value(ctxkey.RequestID).(string)
+	}
+	logger.FromContext(ctx).Info("gateway.anthropic_compat_attempt",
+		zap.String("request_id", requestID),
 		zap.String("profile", profile), zap.String("profile_revision", revision),
 		zap.String("entrypoint", entry), zap.String("decision", decision), zap.String("source", source),
 		zap.Int64("account_id", account.ID), zap.String("terminal", terminal), zap.String("error_class", errorClass))

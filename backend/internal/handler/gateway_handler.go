@@ -171,6 +171,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	compatCtx, compatErr := h.gatewayService.PrepareAnthropicCompatibilityForSelection(c.Request.Context(), subject.UserID, apiKey.ID, body, "messages", service.ExtractClientSessionID(c), c.Request.Header)
 	if compatErr != nil {
 		status, code, message, _ := service.AnthropicCompatErrorDetails(compatErr)
+		logAnthropicCompatSelectionError(c, reqLog, "messages", compatErr, status, code)
 		h.errorResponse(c, status, code, message)
 		return
 	}
@@ -362,6 +363,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, "", int64(0)) // Gemini 不使用会话限制
 			if err != nil {
 				if status, code, message, local := service.AnthropicCompatErrorDetails(err); local {
+					logAnthropicCompatSelectionError(c, reqLog, "messages", err, status, code)
 					h.errorResponse(c, status, code, message)
 					return
 				}
@@ -715,6 +717,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(selectionCtx, currentAPIKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, parsedReq.MetadataUserID, subject.UserID)
 			if err != nil {
 				if status, code, message, local := service.AnthropicCompatErrorDetails(err); local {
+					logAnthropicCompatSelectionError(c, reqLog, "messages", err, status, code)
 					h.errorResponse(c, status, code, message)
 					return
 				}
@@ -2308,6 +2311,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	compatCtx, compatErr := h.gatewayService.PrepareAnthropicCompatibilityForSelection(c.Request.Context(), subject.UserID, apiKey.ID, body, "count_tokens", service.ExtractClientSessionID(c), c.Request.Header)
 	if compatErr != nil {
 		status, code, message, _ := service.AnthropicCompatErrorDetails(compatErr)
+		logAnthropicCompatSelectionError(c, reqLog, "count_tokens", compatErr, status, code)
 		h.errorResponse(c, status, code, message)
 		return
 	}
@@ -2379,6 +2383,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		account, err := h.gatewayService.SelectAccountForModelWithExclusions(c.Request.Context(), apiKey.GroupID, sessionKey, parsedReq.Model, excluded)
 		if err != nil {
 			if status, code, message, local := service.AnthropicCompatErrorDetails(err); local {
+				logAnthropicCompatSelectionError(c, reqLog, "count_tokens", err, status, code)
 				h.errorResponse(c, status, code, message)
 				return
 			}
