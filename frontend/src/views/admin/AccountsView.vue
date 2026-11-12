@@ -80,8 +80,9 @@
                   <div
                     v-if="showAccountToolsDropdown"
                     class="fixed z-[9999] origin-top-right overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-dark-700 dark:bg-dark-800"
-                    :style="accountToolsDropdownStyle"
+                    :style="[accountToolsDropdownStyle, { zIndex: accountToolsLayer.zIndex.value }]"
                     @click.stop
+                    ref="accountToolsMenuRef"
                   >
                     <div class="overflow-y-auto p-2" :style="{ maxHeight: `${accountToolsDropdownPosition.maxHeight}px` }">
                       <!-- 数据导入、导出与 CRS 同步只对超级管理员开放 -->
@@ -548,6 +549,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, shallowRef, toRaw, watch } from 'vue'
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { useEventListener, useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -781,6 +783,10 @@ useIntervalFn(() => { upstreamBillingNow.value = Date.now() }, 60_000)
 const showAccountToolsDropdown = ref(false)
 const accountToolsDropdownRef = ref<HTMLElement | null>(null)
 const accountToolsTriggerRef = ref<HTMLElement | null>(null)
+// A sub-layer of the overlay stack (design spec 0.2): while open, Escape closes it before the layer or page
+// below, re-renders below keep their hands off its focus, and a dialog opening above closes it.
+const accountToolsMenuRef = ref<HTMLElement | null>(null)
+const accountToolsLayer = useOverlayLayer(() => showAccountToolsDropdown.value, { root: accountToolsMenuRef, modal: false, floor: 9999, onEscape: () => { showAccountToolsDropdown.value = false } })
 const accountToolsDropdownPosition = reactive({
   top: null as number | null,
   bottom: null as number | null,

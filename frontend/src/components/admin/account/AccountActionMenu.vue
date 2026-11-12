@@ -1,12 +1,12 @@
 <template>
   <Teleport to="body">
-    <div v-if="show && anchorRect">
+    <div v-if="show && anchorRect" ref="rootRef">
       <!-- Backdrop: click anywhere outside to close -->
-      <div class="fixed inset-0 z-[9998]" @click="emit('close')"></div>
+      <div class="fixed inset-0" :style="{ zIndex: layer.zIndex.value }" @click="emit('close')"></div>
       <div
         ref="menuRef"
         class="action-menu-content fixed z-[9999] w-52 overflow-y-auto overscroll-contain rounded-xl bg-white shadow-lg ring-1 ring-black/5 dark:bg-dark-800"
-        :style="menuStyle"
+        :style="[menuStyle, { zIndex: (layer.zIndex.value ?? 9998) + 1 }]"
         @click.stop
       >
         <div class="py-1">
@@ -78,7 +78,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, onUnmounted } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { useResizeObserver, useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { Icon } from '@/components/icons'
@@ -158,23 +159,8 @@ const hasQuotaLimit = computed(() => {
   )
 })
 
-const handleKeydown = (event: KeyboardEvent) => {
-  if (event.key === 'Escape') emit('close')
-}
-
-watch(
-  () => props.show,
-  (visible) => {
-    if (visible) {
-      window.addEventListener('keydown', handleKeydown)
-    } else {
-      window.removeEventListener('keydown', handleKeydown)
-    }
-  },
-  { immediate: true }
-)
-
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleKeydown)
-})
+// A sub-layer of the overlay stack (design spec 0.2): while open, Escape closes it before the layer or page
+// below, re-renders below keep their hands off its focus, and a dialog opening above closes it.
+const rootRef = ref<HTMLElement | null>(null)
+const layer = useOverlayLayer(() => props.show && !!props.anchorRect, { root: rootRef, modal: false, floor: 9998, onEscape: () => emit('close') })
 </script>

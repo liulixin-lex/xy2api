@@ -1,65 +1,113 @@
 <template>
-  <div class="fixed inset-0 z-50 overflow-y-auto" @click.self="$emit('close')">
-    <div class="flex min-h-full items-center justify-center p-4">
-      <div class="fixed inset-0 bg-black/50 transition-opacity" @click="$emit('close')"></div>
+  <Teleport to="body">
+    <div class="fixed inset-0 z-50 overflow-y-auto" @click.self="$emit('close')" ref="rootRef" :style="{ zIndex: layer.zIndex.value, outline: 'none' }" tabindex="-1" role="dialog" aria-modal="true" @keydown.tab="layer.trapTab">
+      <div class="flex min-h-full items-center justify-center p-4">
+        <div class="fixed inset-0 bg-black/50 transition-opacity" @click="$emit('close')"></div>
 
-      <div class="relative w-full max-w-md transform rounded-xl bg-white p-6 shadow-xl transition-all dark:bg-dark-800">
-        <!-- Header -->
-        <div class="mb-6 text-center">
-          <h3 class="text-xl font-semibold text-gray-900 dark:text-white">
-            {{ t('profile.totp.setupTitle') }}
-          </h3>
-          <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
-            {{ stepDescription }}
-          </p>
-        </div>
-
-        <!-- Step 0: Identity Verification -->
-        <div v-if="step === 0" class="space-y-6">
-          <!-- Loading verification method -->
-          <div v-if="methodLoading" class="flex items-center justify-center py-8">
-            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
+        <div class="relative w-full max-w-md transform rounded-xl bg-white p-6 shadow-xl transition-all dark:bg-dark-800">
+          <!-- Header -->
+          <div class="mb-6 text-center">
+            <h3 class="text-xl font-semibold text-gray-900 dark:text-white">
+              {{ t('profile.totp.setupTitle') }}
+            </h3>
+            <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
+              {{ stepDescription }}
+            </p>
           </div>
 
-          <template v-else>
-            <!-- Email verification -->
-            <div v-if="verificationMethod === 'email'" class="space-y-4">
-              <div>
-                <label class="input-label">{{ t('profile.totp.emailCode') }}</label>
-                <div class="flex gap-2">
+          <!-- Step 0: Identity Verification -->
+          <div v-if="step === 0" class="space-y-6">
+            <!-- Loading verification method -->
+            <div v-if="methodLoading" class="flex items-center justify-center py-8">
+              <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
+            </div>
+
+            <template v-else>
+              <!-- Email verification -->
+              <div v-if="verificationMethod === 'email'" class="space-y-4">
+                <div>
+                  <label class="input-label">{{ t('profile.totp.emailCode') }}</label>
+                  <div class="flex gap-2">
+                    <input
+                      v-model="verifyForm.emailCode"
+                      type="text"
+                      maxlength="6"
+                      inputmode="numeric"
+                      class="input flex-1"
+                      :placeholder="t('profile.totp.enterEmailCode')"
+                    />
+                    <button
+                      type="button"
+                      class="btn btn-secondary whitespace-nowrap"
+                      :disabled="sendingCode || codeCooldown > 0"
+                      @click="handleSendCode"
+                    >
+                      {{ codeCooldown > 0 ? `${codeCooldown}s` : (sendingCode ? t('common.sending') : t('profile.totp.sendCode')) }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Password verification -->
+              <div v-else class="space-y-4">
+                <div>
+                  <label class="input-label">{{ t('profile.currentPassword') }}</label>
                   <input
-                    v-model="verifyForm.emailCode"
-                    type="text"
-                    maxlength="6"
-                    inputmode="numeric"
-                    class="input flex-1"
-                    :placeholder="t('profile.totp.enterEmailCode')"
+                    v-model="verifyForm.password"
+                    type="password"
+                    autocomplete="current-password"
+                    class="input"
+                    :placeholder="t('profile.totp.enterPassword')"
                   />
+                </div>
+              </div>
+
+              <div class="flex justify-end gap-3 pt-4">
+                <button type="button" class="btn btn-secondary" @click="$emit('close')">
+                  {{ t('common.cancel') }}
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-primary"
+                  :disabled="!canProceedFromVerify || setupLoading"
+                  @click="handleVerifyAndSetup"
+                >
+                  {{ setupLoading ? t('common.loading') : t('common.next') }}
+                </button>
+              </div>
+            </template>
+          </div>
+
+          <!-- Step 1: Show QR Code -->
+          <div v-if="step === 1" class="space-y-6">
+            <!-- QR Code and Secret -->
+            <template v-if="setupData">
+              <div class="flex justify-center">
+                <div class="rounded-lg border border-gray-200 p-4 bg-white dark:border-dark-600 dark:bg-white">
+                  <img :src="qrCodeDataUrl" alt="QR Code" class="h-48 w-48" />
+                </div>
+              </div>
+
+              <div class="text-center">
+                <p class="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                  {{ t('profile.totp.manualEntry') }}
+                </p>
+                <div class="flex items-center justify-center gap-2">
+                  <code class="rounded bg-gray-100 px-3 py-2 font-mono text-sm dark:bg-dark-700">
+                    {{ setupData.secret }}
+                  </code>
                   <button
                     type="button"
-                    class="btn btn-secondary whitespace-nowrap"
-                    :disabled="sendingCode || codeCooldown > 0"
-                    @click="handleSendCode"
+                    class="rounded p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-dark-700"
+                    @click="copySecret"
                   >
-                    {{ codeCooldown > 0 ? `${codeCooldown}s` : (sendingCode ? t('common.sending') : t('profile.totp.sendCode')) }}
+                    <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
+                    </svg>
                   </button>
                 </div>
               </div>
-            </div>
-
-            <!-- Password verification -->
-            <div v-else class="space-y-4">
-              <div>
-                <label class="input-label">{{ t('profile.currentPassword') }}</label>
-                <input
-                  v-model="verifyForm.password"
-                  type="password"
-                  autocomplete="current-password"
-                  class="input"
-                  :placeholder="t('profile.totp.enterPassword')"
-                />
-              </div>
-            </div>
+            </template>
 
             <div class="flex justify-end gap-3 pt-4">
               <button type="button" class="btn btn-secondary" @click="$emit('close')">
@@ -68,107 +116,62 @@
               <button
                 type="button"
                 class="btn btn-primary"
-                :disabled="!canProceedFromVerify || setupLoading"
-                @click="handleVerifyAndSetup"
+                :disabled="!setupData"
+                @click="step = 2"
               >
-                {{ setupLoading ? t('common.loading') : t('common.next') }}
+                {{ t('common.next') }}
               </button>
             </div>
-          </template>
-        </div>
+          </div>
 
-        <!-- Step 1: Show QR Code -->
-        <div v-if="step === 1" class="space-y-6">
-          <!-- QR Code and Secret -->
-          <template v-if="setupData">
-            <div class="flex justify-center">
-              <div class="rounded-lg border border-gray-200 p-4 bg-white dark:border-dark-600 dark:bg-white">
-                <img :src="qrCodeDataUrl" alt="QR Code" class="h-48 w-48" />
+          <!-- Step 2: Verify Code -->
+          <div v-if="step === 2" class="space-y-6">
+            <form @submit.prevent="handleVerify">
+              <div class="mb-6">
+                <label class="input-label text-center block mb-3">
+                  {{ t('profile.totp.enterCode') }}
+                </label>
+                <div class="flex justify-center gap-2">
+                  <input
+                    v-for="(_, index) in 6"
+                    :key="index"
+                    :ref="(el) => setInputRef(el, index)"
+                    :value="code[index]"
+                    type="text"
+                    maxlength="1"
+                    inputmode="numeric"
+                    pattern="[0-9]"
+                    class="h-12 w-10 rounded-lg border border-gray-300 text-center text-lg font-semibold focus:border-primary-500 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-700"
+                    @input="handleCodeInput($event, index)"
+                    @keydown="handleKeydown($event, index)"
+                    @paste="handlePaste"
+                  />
+                </div>
               </div>
-            </div>
 
-            <div class="text-center">
-              <p class="text-sm text-gray-500 dark:text-gray-400 mb-2">
-                {{ t('profile.totp.manualEntry') }}
-              </p>
-              <div class="flex items-center justify-center gap-2">
-                <code class="rounded bg-gray-100 px-3 py-2 font-mono text-sm dark:bg-dark-700">
-                  {{ setupData.secret }}
-                </code>
+              <div class="flex justify-end gap-3">
+                <button type="button" class="btn btn-secondary" @click="step = 1">
+                  {{ t('common.back') }}
+                </button>
                 <button
-                  type="button"
-                  class="rounded p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-dark-700"
-                  @click="copySecret"
+                  type="submit"
+                  class="btn btn-primary"
+                  :disabled="verifying || code.join('').length !== 6"
                 >
-                  <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
-                  </svg>
+                  {{ verifying ? t('common.verifying') : t('profile.totp.verify') }}
                 </button>
               </div>
-            </div>
-          </template>
-
-          <div class="flex justify-end gap-3 pt-4">
-            <button type="button" class="btn btn-secondary" @click="$emit('close')">
-              {{ t('common.cancel') }}
-            </button>
-            <button
-              type="button"
-              class="btn btn-primary"
-              :disabled="!setupData"
-              @click="step = 2"
-            >
-              {{ t('common.next') }}
-            </button>
+            </form>
           </div>
-        </div>
-
-        <!-- Step 2: Verify Code -->
-        <div v-if="step === 2" class="space-y-6">
-          <form @submit.prevent="handleVerify">
-            <div class="mb-6">
-              <label class="input-label text-center block mb-3">
-                {{ t('profile.totp.enterCode') }}
-              </label>
-              <div class="flex justify-center gap-2">
-                <input
-                  v-for="(_, index) in 6"
-                  :key="index"
-                  :ref="(el) => setInputRef(el, index)"
-                  :value="code[index]"
-                  type="text"
-                  maxlength="1"
-                  inputmode="numeric"
-                  pattern="[0-9]"
-                  class="h-12 w-10 rounded-lg border border-gray-300 text-center text-lg font-semibold focus:border-primary-500 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-700"
-                  @input="handleCodeInput($event, index)"
-                  @keydown="handleKeydown($event, index)"
-                  @paste="handlePaste"
-                />
-              </div>
-            </div>
-
-            <div class="flex justify-end gap-3">
-              <button type="button" class="btn btn-secondary" @click="step = 1">
-                {{ t('common.back') }}
-              </button>
-              <button
-                type="submit"
-                class="btn btn-primary"
-                :disabled="verifying || code.join('').length !== 6"
-              >
-                {{ verifying ? t('common.verifying') : t('profile.totp.verify') }}
-              </button>
-            </div>
-          </form>
         </div>
       </div>
     </div>
-  </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue'
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { totpAPI } from '@/api'
@@ -180,6 +183,11 @@ const emit = defineEmits<{
   close: []
   success: []
 }>()
+
+// A modal layer of the overlay stack (design spec 0.2), teleported out of #app: the page is inert below it, Tab
+// stays inside, Escape works like its cancel button, and focus goes back to where it was opened from.
+const rootRef = ref<HTMLElement | null>(null)
+const layer = useOverlayLayer(() => true, { root: rootRef, floor: 50, initialFocus: () => rootRef.value?.querySelector<HTMLElement>('input:not([tabindex="-1"]), button') ?? null, onEscape: () => emit('close') })
 
 const { t } = useI18n()
 const appStore = useAppStore()

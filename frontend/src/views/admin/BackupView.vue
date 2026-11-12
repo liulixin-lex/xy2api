@@ -305,7 +305,7 @@
     <!-- Cloudflare R2 Setup Guide Modal -->
     <teleport to="body">
       <transition name="modal">
-        <div v-if="showR2Guide" class="fixed inset-0 z-50 flex items-center justify-center p-4" @mousedown.self="showR2Guide = false">
+        <div v-if="showR2Guide" class="fixed inset-0 z-50 flex items-center justify-center p-4" @mousedown.self="showR2Guide = false" ref="r2GuideRef" :style="{ zIndex: r2GuideLayer.zIndex.value, outline: 'none' }" tabindex="-1" @keydown.tab="r2GuideLayer.trapTab" role="dialog" aria-modal="true">
           <div class="fixed inset-0 bg-black/50" @click="showR2Guide = false"></div>
           <div class="relative max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-2xl dark:bg-dark-800">
             <button type="button" class="absolute right-4 top-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200" @click="showR2Guide = false">
@@ -392,6 +392,12 @@
           v-if="downloadPartsModalOpen"
           class="fixed inset-0 z-50 flex items-center justify-center p-4"
           @mousedown.self="closeDownloadParts"
+          ref="downloadPartsRef"
+          :style="{ zIndex: downloadPartsLayer.zIndex.value, outline: 'none' }"
+          tabindex="-1"
+          @keydown.tab="downloadPartsLayer.trapTab"
+          role="dialog"
+          aria-modal="true"
         >
           <div class="fixed inset-0 bg-black/50" @click="closeDownloadParts"></div>
           <div class="relative max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-2xl dark:bg-dark-800">
@@ -431,6 +437,7 @@
 </template>
 
 <script setup lang="ts">
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api'
@@ -966,6 +973,13 @@ onBeforeUnmount(() => {
   stopRestorePolling()
   document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
+
+// Hand-built modals are layers of the overlay stack (design spec 0.2): drawn in opening order, the page inert
+// below, focus and Tab inside, Escape closes the top one, focus goes back when it closes.
+const r2GuideRef = ref<HTMLElement | null>(null)
+const r2GuideLayer = useOverlayLayer(() => showR2Guide.value, { root: r2GuideRef, floor: 50, onEscape: () => { showR2Guide.value = false } })
+const downloadPartsRef = ref<HTMLElement | null>(null)
+const downloadPartsLayer = useOverlayLayer(() => downloadPartsModalOpen.value, { root: downloadPartsRef, floor: 50, onEscape: () => closeDownloadParts() })
 </script>
 
 <style scoped>

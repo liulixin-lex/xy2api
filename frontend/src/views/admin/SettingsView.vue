@@ -6108,87 +6108,95 @@
           </div>
 
           <!-- Web Search Test Dialog -->
-          <div
-            v-if="wsTestDialogOpen"
-            class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-            @click.self="wsTestDialogOpen = false"
-          >
+          <Teleport to="body">
             <div
-              class="mx-4 w-full max-w-lg rounded-xl bg-white p-6 shadow-xl dark:bg-dark-800"
+              v-if="wsTestDialogOpen"
+              class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+              @click.self="wsTestDialogOpen = false"
+              ref="wsTestRef"
+              :style="{ zIndex: wsTestLayer.zIndex.value, outline: 'none' }"
+              tabindex="-1"
+              @keydown.tab="wsTestLayer.trapTab"
+              role="dialog"
+              aria-modal="true"
             >
-              <h3
-                class="mb-4 text-lg font-semibold text-gray-900 dark:text-white"
-              >
-                {{ t("admin.settings.webSearchEmulation.testResultTitle") }}
-              </h3>
-              <div class="flex items-center gap-2">
-                <input
-                  v-model="wsTestQuery"
-                  type="text"
-                  class="input flex-1 text-sm"
-                  :placeholder="
-                    t('admin.settings.webSearchEmulation.testDefaultQuery')
-                  "
-                  @keyup.enter="testWebSearchProvider()"
-                />
-                <button
-                  type="button"
-                  class="btn btn-primary btn-sm"
-                  :disabled="wsTestLoading"
-                  @click="testWebSearchProvider()"
-                >
-                  {{
-                    wsTestLoading
-                      ? t("admin.settings.webSearchEmulation.testing")
-                      : t("admin.settings.webSearchEmulation.test")
-                  }}
-                </button>
-              </div>
-              <!-- Test results -->
               <div
-                v-if="wsTestResult"
-                class="mt-4 max-h-80 overflow-y-auto rounded-lg bg-gray-50 p-4 dark:bg-dark-700"
+                class="mx-4 w-full max-w-lg rounded-xl bg-white p-6 shadow-xl dark:bg-dark-800"
               >
-                <p
-                  class="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300"
+                <h3
+                  class="mb-4 text-lg font-semibold text-gray-900 dark:text-white"
                 >
-                  {{
-                    t("admin.settings.webSearchEmulation.testResultProvider")
-                  }}: {{ wsTestResult.provider }}
-                </p>
-                <div
-                  v-if="wsTestResult.results.length === 0"
-                  class="text-sm text-gray-400"
-                >
-                  {{ t("admin.settings.webSearchEmulation.testNoResults") }}
-                </div>
-                <div
-                  v-for="(r, rIdx) in wsTestResult.results"
-                  :key="rIdx"
-                  class="mt-2 border-t border-gray-200 pt-2 first:mt-0 first:border-0 first:pt-0 dark:border-dark-600"
-                >
-                  <a
-                    :href="r.url"
-                    target="_blank"
-                    class="text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
-                    >{{ r.title }}</a
+                  {{ t("admin.settings.webSearchEmulation.testResultTitle") }}
+                </h3>
+                <div class="flex items-center gap-2">
+                  <input
+                    v-model="wsTestQuery"
+                    type="text"
+                    class="input flex-1 text-sm"
+                    :placeholder="
+                      t('admin.settings.webSearchEmulation.testDefaultQuery')
+                    "
+                    @keyup.enter="testWebSearchProvider()"
+                  />
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-sm"
+                    :disabled="wsTestLoading"
+                    @click="testWebSearchProvider()"
                   >
-                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    {{ r.snippet }}
-                  </p>
+                    {{
+                      wsTestLoading
+                        ? t("admin.settings.webSearchEmulation.testing")
+                        : t("admin.settings.webSearchEmulation.test")
+                    }}
+                  </button>
                 </div>
-              </div>
-              <div class="mt-4 flex justify-end">
-                <button
-                  type="button"
-                  class="btn btn-secondary btn-sm"
-                  @click="wsTestDialogOpen = false"
+                <!-- Test results -->
+                <div
+                  v-if="wsTestResult"
+                  class="mt-4 max-h-80 overflow-y-auto rounded-lg bg-gray-50 p-4 dark:bg-dark-700"
                 >
-                  {{ t("common.close") }}
-                </button>
+                  <p
+                    class="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    {{
+                      t("admin.settings.webSearchEmulation.testResultProvider")
+                    }}: {{ wsTestResult.provider }}
+                  </p>
+                  <div
+                    v-if="wsTestResult.results.length === 0"
+                    class="text-sm text-gray-400"
+                  >
+                    {{ t("admin.settings.webSearchEmulation.testNoResults") }}
+                  </div>
+                  <div
+                    v-for="(r, rIdx) in wsTestResult.results"
+                    :key="rIdx"
+                    class="mt-2 border-t border-gray-200 pt-2 first:mt-0 first:border-0 first:pt-0 dark:border-dark-600"
+                  >
+                    <a
+                      :href="r.url"
+                      target="_blank"
+                      class="text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
+                      >{{ r.title }}</a
+                    >
+                    <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{ r.snippet }}
+                    </p>
+                  </div>
+                </div>
+                <div class="mt-4 flex justify-end">
+                  <button
+                    type="button"
+                    class="btn btn-secondary btn-sm"
+                    @click="wsTestDialogOpen = false"
+                  >
+                    {{ t("common.close") }}
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
+          </Teleport>
 
         <!-- Usage Records Settings -->
         <div class="card">
@@ -7779,173 +7787,189 @@
         </div>
 
         <!-- Affiliate add/edit modal -->
-        <div
-          v-if="affiliateModal.open"
-          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          @click.self="closeAffiliateModal"
-        >
-          <div class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-dark-900">
-            <h3 class="mb-4 text-lg font-semibold">
-              {{ affiliateModal.mode === 'add' ? t('admin.settings.features.affiliate.modal.addTitle') : t('admin.settings.features.affiliate.modal.editTitle') }}
-            </h3>
-            <div class="space-y-4">
-              <div v-if="affiliateModal.mode === 'add'">
-                <label class="input-label">{{ t('admin.settings.features.affiliate.modal.userLabel') }}</label>
-                <!-- Chip showing the picked user; clicking it re-opens the search -->
-                <div
-                  v-if="affiliateModal.selectedUser"
-                  class="flex items-center justify-between rounded-md border border-primary-200 bg-primary-50 px-3 py-2 dark:border-primary-700/50 dark:bg-primary-900/20"
-                >
-                  <div class="text-sm">
-                    <span class="font-medium text-gray-900 dark:text-white">{{ affiliateModal.selectedUser.email }}</span>
-                    <span class="ml-1 text-xs text-gray-500">({{ affiliateModal.selectedUser.username }})</span>
-                  </div>
-                  <button
-                    type="button"
-                    class="text-lg leading-none text-gray-400 hover:text-red-600"
-                    :title="t('admin.settings.features.affiliate.modal.changeUser')"
-                    @click="clearSelectedAffiliateUser"
-                  >
-                    ×
-                  </button>
-                </div>
-                <!-- Search input + result dropdown — hidden once a selection is made -->
-                <template v-else>
-                  <input
-                    v-model="affiliateModal.userQuery"
-                    type="text"
-                    class="input"
-                    :placeholder="t('admin.settings.features.affiliate.modal.userPlaceholder')"
-                    @input="onAffiliateUserSearchInput"
-                  />
+        <Teleport to="body">
+          <div
+            v-if="affiliateModal.open"
+            class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+            @click.self="closeAffiliateModal"
+            ref="affiliateEditRef"
+            :style="{ zIndex: affiliateEditLayer.zIndex.value, outline: 'none' }"
+            tabindex="-1"
+            @keydown.tab="affiliateEditLayer.trapTab"
+            role="dialog"
+            aria-modal="true"
+          >
+            <div class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-dark-900">
+              <h3 class="mb-4 text-lg font-semibold">
+                {{ affiliateModal.mode === 'add' ? t('admin.settings.features.affiliate.modal.addTitle') : t('admin.settings.features.affiliate.modal.editTitle') }}
+              </h3>
+              <div class="space-y-4">
+                <div v-if="affiliateModal.mode === 'add'">
+                  <label class="input-label">{{ t('admin.settings.features.affiliate.modal.userLabel') }}</label>
+                  <!-- Chip showing the picked user; clicking it re-opens the search -->
                   <div
-                    v-if="affiliateModal.userResults.length > 0"
-                    class="mt-1 max-h-40 overflow-y-auto rounded border border-gray-200 dark:border-dark-700"
+                    v-if="affiliateModal.selectedUser"
+                    class="flex items-center justify-between rounded-md border border-primary-200 bg-primary-50 px-3 py-2 dark:border-primary-700/50 dark:bg-primary-900/20"
                   >
+                    <div class="text-sm">
+                      <span class="font-medium text-gray-900 dark:text-white">{{ affiliateModal.selectedUser.email }}</span>
+                      <span class="ml-1 text-xs text-gray-500">({{ affiliateModal.selectedUser.username }})</span>
+                    </div>
                     <button
-                      v-for="u in affiliateModal.userResults"
-                      :key="u.id"
                       type="button"
-                      class="w-full px-3 py-1.5 text-left text-sm hover:bg-gray-100 dark:hover:bg-dark-800"
-                      @click="selectAffiliateUser(u)"
+                      class="text-lg leading-none text-gray-400 hover:text-red-600"
+                      :title="t('admin.settings.features.affiliate.modal.changeUser')"
+                      @click="clearSelectedAffiliateUser"
                     >
-                      {{ u.email }} <span class="text-xs text-gray-500">({{ u.username }})</span>
+                      ×
                     </button>
                   </div>
-                </template>
-              </div>
-              <div v-else>
-                <label class="input-label">{{ t('admin.settings.features.affiliate.modal.userLabel') }}</label>
-                <input
-                  type="text"
-                  class="input"
-                  :value="affiliateModal.editingEntry ? affiliateModal.editingEntry.email : ''"
-                  disabled
-                />
-              </div>
-
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.affiliate.modal.codeLabel') }}</label>
-                <input
-                  v-model="affiliateModal.code"
-                  type="text"
-                  class="input font-mono"
-                  :placeholder="t('admin.settings.features.affiliate.modal.codePlaceholder')"
-                  maxlength="32"
-                />
-                <p class="mt-1 text-xs text-gray-400">
-                  {{ t('admin.settings.features.affiliate.modal.codeHint') }}
-                </p>
-              </div>
-
-              <div>
-                <label class="input-label">{{ t('admin.settings.features.affiliate.modal.rateLabel') }}</label>
-                <div class="relative">
-                  <input
-                    v-model="affiliateModal.rate"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max="100"
-                    class="input pr-8"
-                    :placeholder="t('admin.settings.features.affiliate.modal.ratePlaceholder')"
-                  />
-                  <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">%</span>
+                  <!-- Search input + result dropdown — hidden once a selection is made -->
+                  <template v-else>
+                    <input
+                      v-model="affiliateModal.userQuery"
+                      type="text"
+                      class="input"
+                      :placeholder="t('admin.settings.features.affiliate.modal.userPlaceholder')"
+                      @input="onAffiliateUserSearchInput"
+                    />
+                    <div
+                      v-if="affiliateModal.userResults.length > 0"
+                      class="mt-1 max-h-40 overflow-y-auto rounded border border-gray-200 dark:border-dark-700"
+                    >
+                      <button
+                        v-for="u in affiliateModal.userResults"
+                        :key="u.id"
+                        type="button"
+                        class="w-full px-3 py-1.5 text-left text-sm hover:bg-gray-100 dark:hover:bg-dark-800"
+                        @click="selectAffiliateUser(u)"
+                      >
+                        {{ u.email }} <span class="text-xs text-gray-500">({{ u.username }})</span>
+                      </button>
+                    </div>
+                  </template>
                 </div>
-                <p class="mt-1 text-xs text-gray-400">
-                  {{ t('admin.settings.features.affiliate.modal.rateHint') }}
+                <div v-else>
+                  <label class="input-label">{{ t('admin.settings.features.affiliate.modal.userLabel') }}</label>
+                  <input
+                    type="text"
+                    class="input"
+                    :value="affiliateModal.editingEntry ? affiliateModal.editingEntry.email : ''"
+                    disabled
+                  />
+                </div>
+
+                <div>
+                  <label class="input-label">{{ t('admin.settings.features.affiliate.modal.codeLabel') }}</label>
+                  <input
+                    v-model="affiliateModal.code"
+                    type="text"
+                    class="input font-mono"
+                    :placeholder="t('admin.settings.features.affiliate.modal.codePlaceholder')"
+                    maxlength="32"
+                  />
+                  <p class="mt-1 text-xs text-gray-400">
+                    {{ t('admin.settings.features.affiliate.modal.codeHint') }}
+                  </p>
+                </div>
+
+                <div>
+                  <label class="input-label">{{ t('admin.settings.features.affiliate.modal.rateLabel') }}</label>
+                  <div class="relative">
+                    <input
+                      v-model="affiliateModal.rate"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      class="input pr-8"
+                      :placeholder="t('admin.settings.features.affiliate.modal.ratePlaceholder')"
+                    />
+                    <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">%</span>
+                  </div>
+                  <p class="mt-1 text-xs text-gray-400">
+                    {{ t('admin.settings.features.affiliate.modal.rateHint') }}
+                  </p>
+                </div>
+              </div>
+
+              <div class="mt-6 flex items-center justify-between gap-3">
+                <p
+                  v-if="!affiliateModalCanSubmit"
+                  class="text-xs text-gray-500 dark:text-gray-400"
+                >
+                  {{ t('admin.settings.features.affiliate.modal.errorEmpty') }}
                 </p>
+                <span v-else></span>
+                <div class="flex gap-2">
+                  <button type="button" class="btn btn-secondary" @click="closeAffiliateModal">
+                    {{ t('common.cancel') }}
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-primary"
+                    :disabled="affiliateModal.saving || !affiliateModalCanSubmit"
+                    @click="submitAffiliateModal"
+                  >
+                    {{ affiliateModal.saving ? t('common.saving') : t('common.save') }}
+                  </button>
+                </div>
               </div>
             </div>
+          </div>
+        </Teleport>
 
-            <div class="mt-6 flex items-center justify-between gap-3">
-              <p
-                v-if="!affiliateModalCanSubmit"
-                class="text-xs text-gray-500 dark:text-gray-400"
-              >
-                {{ t('admin.settings.features.affiliate.modal.errorEmpty') }}
+        <!-- Affiliate batch rate modal -->
+        <Teleport to="body">
+          <div
+            v-if="affiliateBatchModal.open"
+            class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+            @click.self="affiliateBatchModal.open = false"
+            ref="affiliateBatchRef"
+            :style="{ zIndex: affiliateBatchLayer.zIndex.value, outline: 'none' }"
+            tabindex="-1"
+            @keydown.tab="affiliateBatchLayer.trapTab"
+            role="dialog"
+            aria-modal="true"
+          >
+            <div class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-dark-900">
+              <h3 class="mb-4 text-lg font-semibold">
+                {{ t('admin.settings.features.affiliate.batchModal.title', { count: affiliateState.selected.length }) }}
+              </h3>
+              <p class="mb-4 text-sm text-gray-500">
+                {{ t('admin.settings.features.affiliate.batchModal.hint') }}
               </p>
-              <span v-else></span>
-              <div class="flex gap-2">
-                <button type="button" class="btn btn-secondary" @click="closeAffiliateModal">
+              <div class="relative">
+                <input
+                  v-model="affiliateBatchModal.rate"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="100"
+                  class="input pr-8"
+                  :placeholder="t('admin.settings.features.affiliate.batchModal.placeholder')"
+                />
+                <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">%</span>
+              </div>
+              <p class="mt-2 text-xs text-gray-400">
+                {{ t('admin.settings.features.affiliate.batchModal.clearHint') }}
+              </p>
+              <div class="mt-6 flex justify-end gap-2">
+                <button type="button" class="btn btn-secondary" @click="affiliateBatchModal.open = false">
                   {{ t('common.cancel') }}
                 </button>
                 <button
                   type="button"
                   class="btn btn-primary"
-                  :disabled="affiliateModal.saving || !affiliateModalCanSubmit"
-                  @click="submitAffiliateModal"
+                  :disabled="affiliateBatchModal.saving"
+                  @click="submitAffiliateBatchModal"
                 >
-                  {{ affiliateModal.saving ? t('common.saving') : t('common.save') }}
+                  {{ affiliateBatchModal.saving ? t('common.saving') : t('common.save') }}
                 </button>
               </div>
             </div>
           </div>
-        </div>
-
-        <!-- Affiliate batch rate modal -->
-        <div
-          v-if="affiliateBatchModal.open"
-          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          @click.self="affiliateBatchModal.open = false"
-        >
-          <div class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-dark-900">
-            <h3 class="mb-4 text-lg font-semibold">
-              {{ t('admin.settings.features.affiliate.batchModal.title', { count: affiliateState.selected.length }) }}
-            </h3>
-            <p class="mb-4 text-sm text-gray-500">
-              {{ t('admin.settings.features.affiliate.batchModal.hint') }}
-            </p>
-            <div class="relative">
-              <input
-                v-model="affiliateBatchModal.rate"
-                type="number"
-                step="0.01"
-                min="0"
-                max="100"
-                class="input pr-8"
-                :placeholder="t('admin.settings.features.affiliate.batchModal.placeholder')"
-              />
-              <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">%</span>
-            </div>
-            <p class="mt-2 text-xs text-gray-400">
-              {{ t('admin.settings.features.affiliate.batchModal.clearHint') }}
-            </p>
-            <div class="mt-6 flex justify-end gap-2">
-              <button type="button" class="btn btn-secondary" @click="affiliateBatchModal.open = false">
-                {{ t('common.cancel') }}
-              </button>
-              <button
-                type="button"
-                class="btn btn-primary"
-                :disabled="affiliateBatchModal.saving"
-                @click="submitAffiliateBatchModal"
-              >
-                {{ affiliateBatchModal.saving ? t('common.saving') : t('common.save') }}
-              </button>
-            </div>
-          </div>
-        </div>
+        </Teleport>
 
         </div><!-- /Tab: Features -->
 
@@ -9013,6 +9037,7 @@
 <script setup lang="ts">
 import CodexTicketProxyPool from '@/components/account/CodexTicketProxyPool.vue'
 import { ref, reactive, computed, onMounted, watch } from "vue";
+import { useOverlayLayer } from "@/composables/useOverlayLayer";
 import { listPlatformIds } from "@/constants/platformCatalog";
 import { useI18n } from "vue-i18n";
 import { adminAPI } from "@/api";
@@ -10253,6 +10278,7 @@ const wsTestQuery = ref("");
 const wsTestLoading = ref(false);
 const wsTestResult = ref<WebSearchTestResult | null>(null);
 const wsTestDialogOpen = ref(false);
+const wsTestRef = ref<HTMLElement | null>(null);
 
 function openTestDialog() {
   wsTestResult.value = null;
@@ -13241,6 +13267,14 @@ watch(
     }
   },
 );
+
+// The hand-built dialogs of this page are modal layers of the overlay stack, teleported out of #app (design spec
+// 0.2): the page is inert below them, Tab stays inside, Escape closes the top one, focus goes back to its opener.
+const wsTestLayer = useOverlayLayer(() => wsTestDialogOpen.value, { root: wsTestRef, floor: 50, onEscape: () => { wsTestDialogOpen.value = false; } });
+const affiliateEditRef = ref<HTMLElement | null>(null);
+const affiliateEditLayer = useOverlayLayer(() => affiliateModal.open, { root: affiliateEditRef, floor: 50, onEscape: () => closeAffiliateModal() });
+const affiliateBatchRef = ref<HTMLElement | null>(null);
+const affiliateBatchLayer = useOverlayLayer(() => affiliateBatchModal.open, { root: affiliateBatchRef, floor: 50, onEscape: () => { affiliateBatchModal.open = false; } });
 </script>
 
 <style scoped>

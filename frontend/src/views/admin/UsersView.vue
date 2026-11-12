@@ -708,7 +708,8 @@
       <div
         v-if="activeMenuId !== null && menuPosition"
         class="action-menu-content fixed z-[9999] w-48 overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-black/5 dark:bg-dark-800 dark:ring-white/10"
-        :style="{ top: menuPosition.top + 'px', left: menuPosition.left + 'px' }"
+        :style="{ top: menuPosition.top + 'px', left: menuPosition.left + 'px', zIndex: actionMenuLayer.zIndex.value }"
+        ref="actionMenuRef"
       >
         <div class="py-1">
           <template v-for="user in users" :key="user.id">
@@ -838,6 +839,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
@@ -1527,6 +1529,10 @@ const refreshCurrentPageSecondaryData = () => {
 // Action Menu State
 const activeMenuId = ref<number | null>(null)
 const menuPosition = ref<{ top: number; left: number } | null>(null)
+// A sub-layer of the overlay stack (design spec 0.2): while open, Escape closes it before the layer or page
+// below, re-renders below keep their hands off its focus, and a dialog opening above closes it.
+const actionMenuRef = ref<HTMLElement | null>(null)
+const actionMenuLayer = useOverlayLayer(() => activeMenuId.value !== null && !!menuPosition.value, { root: actionMenuRef, modal: false, floor: 9999, onEscape: () => closeActionMenu() })
 
 const openActionMenu = (user: AdminUser, e: MouseEvent) => {
   if (activeMenuId.value === user.id) {
