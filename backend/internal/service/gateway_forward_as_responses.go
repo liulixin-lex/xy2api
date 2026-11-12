@@ -37,7 +37,7 @@ func (s *GatewayService) ForwardAsResponses(
 	parsed *ParsedRequest,
 ) (result *ForwardResult, err error) {
 	startTime := time.Now()
-	ctx, err = beginAnthropicCompatRequest(ctx, c, account, body, "responses")
+	err = beginAnthropicForwardAttempt(ctx, c, account, body)
 	if err != nil {
 		return nil, err
 	}

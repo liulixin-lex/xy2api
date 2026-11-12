@@ -95,7 +95,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	}
 	// Account-specific body normalization and cache generation belong to this
 	// attempt. A fresh BodyRef shares immutable bytes without copying the body.
-	ctx, err = beginAnthropicCompatRequest(ctx, c, account, parsed.Body.Bytes(), "messages")
+	err = beginAnthropicForwardAttempt(ctx, c, account, parsed.Body.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +171,6 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	if account.Platform == PlatformAnthropic && c != nil && account.GetExtraString(AnthropicCompatProfileExtraKey) != AnthropicCompatProfileClaudeCode {
 		policy := s.evaluateBetaPolicy(ctx, c.GetHeader("anthropic-beta"), account, parsed.Model)
 		if policy.blockErr != nil {
-
 			return nil, policy.blockErr
 		}
 		filterSet := policy.filterSet

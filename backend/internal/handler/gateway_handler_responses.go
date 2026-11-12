@@ -186,7 +186,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		APIKeyID:  apiKey.ID,
 	}
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
-	requestCtx = service.WithAnthropicCompatSessionHash(requestCtx, sessionHash)
+	requestCtx = service.WithAnthropicCompatSessionHash(c.Request.Context(), sessionHash)
 	c.Request = c.Request.WithContext(requestCtx)
 
 	// 3. Account selection + failover loop

@@ -15,8 +15,11 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/pkg/tlsfingerprint"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
+	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 type handlerCompatStore struct{ service.GatewayCache }
@@ -46,6 +49,14 @@ func (r *handlerCompatUsage) Create(_ context.Context, log *service.UsageLog) (b
 type handlerCompatAccounts struct {
 	service.AccountRepository
 	penalties int
+	account   *service.Account
+}
+
+func (r *handlerCompatAccounts) ListModelAvailabilityCandidates(context.Context, *int64, []string, bool) ([]service.Account, error) {
+	if r.account == nil || !r.account.Schedulable {
+		return nil, nil
+	}
+	return []service.Account{*r.account}, nil
 }
 
 func (r *handlerCompatAccounts) SetError(context.Context, int64, string) error {
@@ -105,7 +116,7 @@ func newHandlerCompatFixture(t *testing.T, channels ...*service.ChannelService) 
 	f.key = &service.APIKey{ID: 8102, UserID: 8103, GroupID: &f.group.ID, Group: f.group, Status: service.StatusActive, User: &service.User{ID: 8103, Concurrency: 10, Balance: 100}}
 	f.store = &handlerCompatStore{}
 	f.usage = &handlerCompatUsage{}
-	f.accounts = &handlerCompatAccounts{}
+	f.accounts = &handlerCompatAccounts{account: f.account}
 	f.snapshot = &fakeSchedulerCache{accounts: []*service.Account{f.account}}
 	cfg := &config.Config{RunMode: config.RunModeSimple}
 	cfg.Default.RateMultiplier = 1
@@ -140,4 +151,33 @@ func (f *handlerCompatFixture) call(entry, body string, writer http.ResponseWrit
 		f.handler.CountTokens(c)
 	}
 	return c
+}
+
+func TestGatewayDrainingCompatAccountUsesOrdinaryUnavailableError(t *testing.T) {
+	withHandlerResilience(t, nil)
+	var ordinary string
+	for _, draining := range []bool{false, true} {
+		f := newHandlerCompatFixture(t)
+		resilience.ProcessNegativeCache().InvalidateGroup(f.group.ID)
+		if draining {
+			f.account.Extra = map[string]any{service.AnthropicCompatProfileExtraKey: service.AnthropicCompatProfileClaudeCode, service.AnthropicCompatNewSessionsExtraKey: false, service.AnthropicCompatIdentitySeedExtraKey: strings.Repeat("ab", 32)}
+		} else {
+			// An ordinary account with a stale model-mapping snapshot is also
+			// temporarily unavailable, although persistent configuration supports it.
+			persisted := *f.account
+			f.accounts.account = &persisted
+			f.account.Credentials = map[string]any{"model_mapping": map[string]any{"other-model": "claude-opus-5-5"}}
+		}
+		recorder := httptest.NewRecorder()
+		f.call("messages", `{"model":"claude-opus-5-5","max_tokens":64,"messages":[{"role":"user","content":"hello"}]}`, recorder)
+		require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+		require.Equal(t, "api_error", gjson.Get(recorder.Body.String(), "error.type").String())
+		require.NotContains(t, recorder.Body.String(), "anthropic_compat")
+		require.Empty(t, f.wire, "no ineligible account may be forwarded")
+		if !draining {
+			ordinary = recorder.Body.String()
+		} else {
+			require.JSONEq(t, ordinary, recorder.Body.String())
+		}
+	}
 }

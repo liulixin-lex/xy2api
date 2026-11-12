@@ -65,5 +65,8 @@ func compatInjectBody(body []byte, profile *AnthropicCompatProfile, metadata str
 	if err != nil {
 		return nil, err
 	}
+	if value := gjson.GetBytes(result, "metadata"); value.Exists() && !value.IsObject() {
+		return sjson.SetBytes(result, "metadata", map[string]string{"user_id": metadata})
+	}
 	return sjson.SetBytes(result, "metadata.user_id", metadata)
 }

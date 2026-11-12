@@ -130,7 +130,7 @@ type anthropicCompatPlan struct {
 	Metadata, Beta string
 }
 
-func (s *GatewayService) newAnthropicCompatPlan(ctx context.Context, c *gin.Context, account *Account, body []byte, model string) (*anthropicCompatPlan, error) {
+func (s *GatewayService) newAnthropicCompatPlan(ctx context.Context, c *gin.Context, account *Account, model string) (*anthropicCompatPlan, error) {
 	profile, err := ResolveAnthropicCompatProfile(account)
 	if err != nil {
 		logAnthropicCompatAttempt(ctx, account, model, "ineligible", "configuration_conflict")
@@ -141,8 +141,8 @@ func (s *GatewayService) newAnthropicCompatPlan(ctx context.Context, c *gin.Cont
 	}
 	request := compatRequest(ctx)
 	if request == nil {
-		ctx = WithAnthropicCompatRequest(ctx, 0, 0, body, "messages", ExtractClientSessionID(c), compatClientHeaders(c))
-		request = compatRequest(ctx)
+		logAnthropicCompatAttempt(ctx, account, model, "ineligible", "request_context_missing")
+		return nil, ErrNoAvailableAccounts
 	}
 	requestedModel := anthropicCompatDispatchModel(ctx, request.Model)
 	if !profile.SupportsModel(model) || requestedModel != "" && (!account.IsModelSupported(requestedModel) || !profile.SupportsModel(account.GetMappedModel(requestedModel))) {
@@ -402,29 +402,27 @@ func (b *anthropicCompatDiagnosticBody) observeEvent(event []byte) ([]byte, erro
 	return []byte("event: " + kind + "\ndata: " + compact.String() + "\n\n"), nil
 }
 
-// beginAnthropicCompatRequest validates hydrated account configuration before
-// passthrough or other early forwarding paths can bypass the envelope adapter.
-func beginAnthropicCompatRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, entry string) (context.Context, error) {
+// beginAnthropicForwardAttempt clears account-local state on every forwarding
+// attempt, then validates compatibility before any passthrough early return.
+func beginAnthropicForwardAttempt(ctx context.Context, c *gin.Context, account *Account, body []byte) error {
+	if c != nil {
+		c.Set(toolNameRewriteKey, nil)
+		c.Set(betaPolicyFilterSetKey, nil)
+	}
 	if account == nil {
-		return ctx, nil
+		return nil
 	}
 	mode := account.GetExtraString(AnthropicCompatProfileExtraKey)
 	if mode == "" || mode == AnthropicCompatProfileOff {
-		return ctx, nil
+		return nil
 	}
 	if compatRequest(ctx) == nil {
-		ctx = WithAnthropicCompatRequest(ctx, 0, 0, body, entry, ExtractClientSessionID(c), compatClientHeaders(c))
+		logAnthropicCompatAttempt(ctx, account, gjson.GetBytes(body, "model").String(), "ineligible", "request_context_missing")
+		return ErrNoAvailableAccounts
 	}
 	if _, err := ResolveAnthropicCompatProfile(account); err != nil {
 		logAnthropicCompatAttempt(ctx, account, gjson.GetBytes(body, "model").String(), "ineligible", "configuration_conflict")
-		return ctx, ErrNoAvailableAccounts
-	}
-	return ctx, nil
-}
-
-func compatClientHeaders(c *gin.Context) http.Header {
-	if c != nil && c.Request != nil {
-		return c.Request.Header
+		return ErrNoAvailableAccounts
 	}
 	return nil
 }

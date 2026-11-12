@@ -121,3 +121,18 @@ func TestAnthropicCompatSignatureRetryRebuildsEnvelope(t *testing.T) {
 	require.Contains(t, gjson.GetBytes(upstream.requestBodies[0], "messages").Raw, "bad-signature")
 	require.NotContains(t, gjson.GetBytes(upstream.requestBodies[1], "messages").Raw, "bad-signature")
 }
+
+func TestAnthropicCompatEnvelopeNormalizesNonObjectMetadata(t *testing.T) {
+	for _, metadata := range []string{`[1]`, `[]`, `"legacy"`, `42`, `true`, `null`, `{"other":"keep"}`} {
+		t.Run(metadata, func(t *testing.T) {
+			body := []byte(`{"metadata":` + metadata + `,"messages":[{"role":"user","content":"hello"}]}`)
+			wire, err := compatInjectBody(body, &claudeCodeCompatProfile, "derived")
+			require.NoError(t, err)
+			require.True(t, gjson.GetBytes(wire, "metadata").IsObject())
+			require.Equal(t, "derived", gjson.GetBytes(wire, "metadata.user_id").String())
+			if strings.HasPrefix(metadata, "{") {
+				require.Equal(t, "keep", gjson.GetBytes(wire, "metadata.other").String())
+			}
+		})
+	}
+}

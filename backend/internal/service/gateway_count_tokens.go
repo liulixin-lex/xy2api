@@ -24,7 +24,7 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	}
 
 	var compatErr error
-	ctx, compatErr = beginAnthropicCompatRequest(ctx, c, account, parsed.Body.Bytes(), "count_tokens")
+	compatErr = beginAnthropicForwardAttempt(ctx, c, account, parsed.Body.Bytes())
 	if compatErr != nil {
 		return compatErr
 	}
@@ -463,7 +463,7 @@ func (s *GatewayService) buildCountTokensRequestAnthropicAPIKeyPassthrough(
 
 // buildCountTokensRequest 构建 count_tokens 上游请求
 func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token, tokenType, modelID string, mimicClaudeCode bool) (*http.Request, []byte, error) {
-	compat, compatErr := s.newAnthropicCompatPlan(ctx, c, account, body, modelID)
+	compat, compatErr := s.newAnthropicCompatPlan(ctx, c, account, modelID)
 	if compatErr != nil {
 		return nil, nil, compatErr
 	}
@@ -549,6 +549,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 			logAnthropicCompatAttempt(ctx, account, modelID, "ineligible", "required_beta_filtered")
 			return nil, nil, compatErr
 		}
+		finalBetaHeader = filterSonnet55ToolsetBeta(finalBetaHeader, body, modelID)
 		finalBetaShouldSet = true
 	}
 

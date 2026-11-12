@@ -58,15 +58,11 @@ func (s *GatewayService) anthropicCompatCandidateEligible(ctx context.Context, a
 	return reason == ""
 }
 
-// Freeze admission to the original sticky owner before scheduling can bind a
-// newly selected account. Cache misses admit no new sessions to draining accounts.
-func (s *GatewayService) withAnthropicCompatStickyOwner(ctx context.Context, groupID *int64, sessionHash string) context.Context {
+// Reuse the first ordinary sticky lookup, before scheduling can replace the
+// binding. Compatibility admission never performs its own cache read.
+func withAnthropicCompatStickyOwner(ctx context.Context, owner int64) context.Context {
 	if _, ok := ctx.Value(anthropicCompatStickyKey{}).(int64); ok {
 		return ctx
-	}
-	owner := prefetchedStickyAccountIDFromContext(ctx, groupID)
-	if owner == 0 && sessionHash != "" && s.cache != nil {
-		owner, _ = s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 	}
 	return context.WithValue(ctx, anthropicCompatStickyKey{}, owner)
 }

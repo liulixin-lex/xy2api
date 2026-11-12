@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -129,4 +130,40 @@ func (*compatAdmissionSettings) GetValue(_ context.Context, key string) (string,
 		return `{"rules":[{"beta_token":"claude-code-20250219","action":"block","scope":"all"}]}`, nil
 	}
 	return "", service.ErrSettingNotFound
+}
+
+// Count real sticky-cache reads while still exercising projected scheduling accounts.
+type ordinaryStickyReadCounter struct {
+	service.GatewayCache
+	reads int
+}
+
+func (c *ordinaryStickyReadCounter) GetSessionAccountID(ctx context.Context, group int64, hash string) (int64, error) {
+	c.reads++
+	return c.GatewayCache.GetSessionAccountID(ctx, group, hash)
+}
+func TestLegacyOrdinarySchedulingDoesNotReadCompatStickyOwner(t *testing.T) {
+	for _, forcePlatform := range []bool{false, true} {
+		for _, bound := range []bool{false, true} {
+			t.Run(fmt.Sprintf("single=%t/bound=%t", forcePlatform, bound), func(t *testing.T) {
+				cache, _ := newSchedulerCacheUnitWithRedis(t)
+				sticky := &ordinaryStickyReadCounter{GatewayCache: NewGatewayCache(cache.rdb)}
+				account := &service.Account{ID: 503, Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "fixture", "base_url": "https://ordinary.example"}, Extra: map[string]any{service.AnthropicCompatProfileExtraKey: service.AnthropicCompatProfileOff}}
+				snapshot := &compatAdmissionSnapshot{accounts: []*service.Account{account}}
+				cfg := &config.Config{}
+				gateway := service.NewGatewayService(nil, nil, nil, nil, nil, nil, nil, sticky, cfg, service.NewSchedulerSnapshotService(snapshot, nil, nil, nil, cfg), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+				ctx := context.Background()
+				if forcePlatform {
+					ctx = context.WithValue(ctx, ctxkey.ForcePlatform, service.PlatformAnthropic)
+				}
+				if bound {
+					require.NoError(t, sticky.SetSessionAccountID(ctx, 0, "ordinary", account.ID, time.Hour))
+				}
+				selected, err := gateway.SelectAccountForModelWithExclusions(ctx, nil, "ordinary", "claude-sonnet-5-5", nil)
+				require.NoError(t, err)
+				require.Equal(t, account.ID, selected.ID)
+				require.Equal(t, 1, sticky.reads, "ordinary pools need only the existing sticky selection read")
+			})
+		}
+	}
 }

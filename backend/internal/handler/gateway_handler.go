@@ -1033,6 +1033,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 			if err != nil {
 				if errors.Is(err, service.ErrNoAvailableAccounts) {
+					h.gatewayService.ReleaseAccountSession(context.Background(), account, sessionKey)
+					delete(sessionSlotAccounts, account.ID)
 					fs.FailedAccountIDs[account.ID] = struct{}{}
 					continue
 				}

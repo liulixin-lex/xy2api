@@ -35,7 +35,7 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	parsed *ParsedRequest,
 ) (result *ForwardResult, err error) {
 	startTime := time.Now()
-	ctx, err = beginAnthropicCompatRequest(ctx, c, account, body, "chat")
+	err = beginAnthropicForwardAttempt(ctx, c, account, body)
 	if err != nil {
 		return nil, err
 	}

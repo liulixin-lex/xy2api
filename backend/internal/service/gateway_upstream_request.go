@@ -19,7 +19,7 @@ import (
 )
 
 func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token, tokenType, modelID string, reqStream bool, mimicClaudeCode bool) (*http.Request, []byte, error) {
-	compat, compatErr := s.newAnthropicCompatPlan(ctx, c, account, body, modelID)
+	compat, compatErr := s.newAnthropicCompatPlan(ctx, c, account, modelID)
 	if compatErr != nil {
 		return nil, nil, compatErr
 	}
@@ -125,6 +125,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 			logAnthropicCompatAttempt(ctx, account, modelID, "ineligible", "required_beta_filtered")
 			return nil, nil, compatErr
 		}
+		finalBetaHeader = filterSonnet55ToolsetBeta(finalBetaHeader, body, modelID)
 		finalBetaShouldSet = true
 	}
 
