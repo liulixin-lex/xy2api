@@ -13,6 +13,7 @@ import (
 
 	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/liulixin-lex/xy2api/internal/pkg/antigravity"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/pkg/claude"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/tidwall/gjson"
@@ -631,47 +632,58 @@ func validateClaude55Parameters(body []byte, model string) error {
 		return nil
 	}
 	modelName := spec.ID
+	invalid := func(field, format string, args ...any) error {
+		return &apicompat.UnsupportedConversionError{Field: field, Reason: fmt.Sprintf(format, args...)}
+	}
 	effort := gjson.GetBytes(body, "output_config.effort").String()
 	switch gjson.GetBytes(body, "thinking.type").String() {
 	case "disabled", "enabled":
 		if spec.BetweenTools {
-			return fmt.Errorf("%s requires adaptive thinking or thinking.type=between_tools; omit thinking or use one of those modes", modelName)
+			return invalid("thinking.type", "%s requires adaptive thinking or thinking.type=between_tools; omit thinking or use one of those modes", modelName)
 		}
 		if gjson.GetBytes(body, "thinking.type").String() == "enabled" || spec.DisabledThinkingMaxEffort == "" {
-			return fmt.Errorf("%s requires adaptive thinking; omit thinking or use thinking.type=adaptive and output_config.effort", modelName)
+			return invalid("thinking.type", "%s requires adaptive thinking; omit thinking or use thinking.type=adaptive and output_config.effort", modelName)
 		}
 		if effort == "xhigh" || effort == "max" {
-			return fmt.Errorf("%s thinking.type=disabled supports only low, medium or high effort", modelName)
+			return invalid("output_config.effort", "%s thinking.type=disabled supports only low, medium or high effort", modelName)
 		}
 		if gjson.GetBytes(body, "thinking.block_binding").Exists() {
-			return fmt.Errorf("%s thinking.type=disabled does not support thinking.block_binding", modelName)
+			return invalid("thinking.block_binding", "%s thinking.type=disabled does not support thinking.block_binding", modelName)
 		}
 	case "between_tools":
 		if !spec.BetweenTools {
 			if spec.DisabledThinkingMaxEffort != "" {
-				return fmt.Errorf("%s does not support thinking.type=between_tools; omit thinking or use thinking.type=adaptive and output_config.effort", modelName)
+				return invalid("thinking.type", "%s does not support thinking.type=between_tools; omit thinking or use thinking.type=adaptive and output_config.effort", modelName)
 			}
-			return fmt.Errorf("%s requires adaptive thinking; thinking.type=between_tools is unsupported", modelName)
+			return invalid("thinking.type", "%s requires adaptive thinking; thinking.type=between_tools is unsupported", modelName)
 		}
 		if effort == "xhigh" || effort == "max" {
-			return fmt.Errorf("%s thinking.type=between_tools supports only low, medium or high effort", modelName)
+			return invalid("output_config.effort", "%s thinking.type=between_tools supports only low, medium or high effort", modelName)
 		}
 		for _, field := range []string{"thinking.display", "thinking.budget_tokens", "thinking.block_binding"} {
 			if gjson.GetBytes(body, field).Exists() {
-				return fmt.Errorf("%s thinking.type=between_tools does not support %s", modelName, field)
+				return invalid(field, "%s thinking.type=between_tools does not support %s", modelName, field)
 			}
 		}
 	}
 	if !spec.ForcedToolChoice {
 		if gjson.GetBytes(body, "tool_choice").String() == "required" {
-			return fmt.Errorf("%s does not support forced tool_choice; use auto or none", modelName)
+			return invalid("tool_choice", "%s does not support forced tool_choice; use auto or none", modelName)
 		}
 		switch gjson.GetBytes(body, "tool_choice.type").String() {
 		case "any", "tool", "function", "custom", "namespace":
-			return fmt.Errorf("%s does not support forced tool_choice; use auto or none", modelName)
+			return invalid("tool_choice", "%s does not support forced tool_choice; use auto or none", modelName)
 		}
 	}
-	return spec.CheckSampling(gjsonSamplingValue(body, "temperature"), gjsonSamplingValue(body, "top_p"), gjson.GetBytes(body, "top_k").Exists())
+	if err := spec.CheckSampling(gjsonSamplingValue(body, "temperature"), gjsonSamplingValue(body, "top_p"), gjson.GetBytes(body, "top_k").Exists()); err != nil {
+		for _, field := range []string{"temperature", "top_p", "top_k"} {
+			if strings.Contains(err.Error(), field) {
+				return invalid(field, "%s", err.Error())
+			}
+		}
+		return invalid("sampling", "%s", err.Error())
+	}
+	return nil
 }
 
 func gjsonSamplingValue(body []byte, path string) claude.SamplingValue {

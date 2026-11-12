@@ -36,6 +36,7 @@ func (s *GatewayService) ForwardAsChatCompletions(
 ) (result *ForwardResult, err error) {
 	startTime := time.Now()
 	defer func() {
+		writeUnsupportedParameterError(c, err)
 		writeAnthropicCompatError(c, "chat", err)
 		s.logAnthropicCompatOutcome(ctx, c, account, "chat", err)
 	}()
@@ -86,16 +87,9 @@ func (s *GatewayService) ForwardAsChatCompletions(
 			mappedModel = normalized
 		}
 	}
-	if err := validateClaude55Parameters(body, mappedModel); err != nil {
-		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
-		return nil, err
-	}
 	responsesReq.Model = mappedModel
 	anthropicReq, err := apicompat.ResponsesToAnthropicRequest(responsesReq)
 	if err != nil {
-		if isClaude55SignedThinkingModel(mappedModel) {
-			writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
-		}
 		return nil, fmt.Errorf("convert responses to anthropic: %w", err)
 	}
 
@@ -119,9 +113,11 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	if err != nil {
 		return nil, err
 	}
-	if err := validateHaiku55MessagesRequest(anthropicBody, mappedModel, account); err != nil {
-		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	if err := validateClaude55Parameters(anthropicBody, mappedModel); err != nil {
 		return nil, err
+	}
+	if err := validateHaiku55MessagesRequest(anthropicBody, mappedModel, account); err != nil {
+		return nil, &apicompat.UnsupportedConversionError{Field: "messages", Reason: err.Error()}
 	}
 
 	// 6. Apply Claude Code mimicry for OAuth accounts.

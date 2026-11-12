@@ -2,7 +2,6 @@ package apicompat
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/claude"
@@ -16,188 +15,21 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 	if req == nil {
 		return nil, unsupportedConversion("request", "request is nil")
 	}
-	if err := validateTokenLimit("max_output_tokens", req.MaxOutputTokens); err != nil {
+	_, is55 := claude.Claude55(req.Model)
+	out := &AnthropicRequest{CacheControl: req.CacheControl, Model: req.Model, Stream: req.Stream}
+	if err := applyAnthropicFieldPolicies(req, out); err != nil {
 		return nil, err
 	}
-	stops, err := parseStopSequences(req.bridgeStop)
-	if err != nil {
-		return nil, err
-	}
-	spec, is55 := claude.Claude55(req.Model)
 	system, messages, err := convertResponsesInputToAnthropic(req.Instructions, req.Input, is55, req.chatCacheControls...)
 	if err != nil {
 		return nil, err
 	}
-
-	out := &AnthropicRequest{
-		CacheControl: req.CacheControl,
-		Model:        req.Model,
-		Messages:     messages,
-		Temperature:  req.Temperature,
-		TopP:         req.TopP,
-		Stream:       req.Stream,
-		StopSeqs:     stops,
-	}
-	if req.Text != nil {
-		format, err := responsesTextFormatToAnthropic(req.Text.Format)
-		if err != nil {
-			return nil, err
-		}
-		if len(format) > 0 {
-			out.OutputConfig = &AnthropicOutputConfig{Format: format}
-		}
-	}
-
+	out.Messages = messages
 	if len(system) > 0 {
 		out.System = system
 	}
 
-	// max_output_tokens → max_tokens
-	if req.MaxOutputTokens != nil && *req.MaxOutputTokens > 0 {
-		out.MaxTokens = *req.MaxOutputTokens
-	}
-	if out.MaxTokens == 0 {
-		// Anthropic requires max_tokens; default to a sensible value.
-		out.MaxTokens = 8192
-	}
-
-	// Convert tools
-	if len(req.Tools) > 0 {
-		out.Tools = convertResponsesToAnthropicTools(req.Tools)
-	}
-
-	// Convert tool_choice (reverse of convertAnthropicToolChoiceToResponses)
-	if len(req.ToolChoice) > 0 {
-		tc, err := convertResponsesToAnthropicToolChoice(req.ToolChoice)
-		if err != nil {
-			return nil, fmt.Errorf("convert tool_choice: %w", err)
-		}
-		out.ToolChoice = tc
-	}
-	// Without tools, this flag cannot affect generation. Avoid introducing a
-	// tool_choice on an otherwise ordinary request with no tools.
-	if req.ParallelToolCalls != nil && len(out.Tools) > 0 {
-		choice := map[string]any{"type": "auto"}
-		if len(out.ToolChoice) > 0 {
-			if err := json.Unmarshal(out.ToolChoice, &choice); err != nil || choice == nil {
-				return nil, unsupportedConversion("tool_choice", "expected a tool choice object")
-			}
-		}
-		if choice["type"] != "none" {
-			choice["disable_parallel_tool_use"] = !*req.ParallelToolCalls
-		}
-		out.ToolChoice, _ = json.Marshal(choice)
-	}
-
-	// The 5.5 models reject manual thinking; Opus and Sonnet 5.5 also reject
-	// forced tool use. Sonnet 5.5 additionally supports between_tools to
-	// disable up-front thinking. Resolve the upstream model before
-	// conversion: client aliases need not identify a Claude model.
-	if is55 {
-		var choice struct {
-			Type string `json:"type"`
-		}
-		if len(out.ToolChoice) > 0 {
-			if err := json.Unmarshal(out.ToolChoice, &choice); err != nil {
-				return nil, fmt.Errorf("invalid tool_choice: %w", err)
-			}
-		}
-		if !spec.ForcedToolChoice && (choice.Type == "any" || choice.Type == "tool") {
-			return nil, fmt.Errorf("%s does not support forced tool_choice; use auto or none", req.Model)
-		}
-		if err := spec.CheckSampling(claude.SamplingFloat(req.Temperature), claude.SamplingFloat(req.TopP), false); err != nil {
-			return nil, err
-		}
-		effort := spec.DefaultEffort
-		if req.Reasoning != nil && req.Reasoning.Effort != "" {
-			effort = req.Reasoning.Effort
-		}
-		if effort == "none" {
-			switch {
-			case spec.BetweenTools:
-				// OpenAI's no-reasoning request maps to Sonnet 5.5's lowest
-				// thinking mode. between_tools still preserves signed progress
-				// blocks produced during tool use.
-				out.Thinking = &AnthropicThinking{Type: "between_tools"}
-				if out.OutputConfig == nil {
-					out.OutputConfig = &AnthropicOutputConfig{}
-				}
-				out.OutputConfig.Effort = "low"
-				return out, nil
-			case spec.DisabledThinkingMaxEffort != "":
-				// Lower effort, not disabled thinking, is the lever on Haiku 5.5:
-				// at low it can skip thinking on simple requests.
-				effort = "low"
-			}
-		}
-		switch effort {
-		case "low", "medium", "high", "xhigh", "max":
-		default:
-			return nil, fmt.Errorf("%s does not support reasoning effort %q; use low, medium, high, xhigh or max", req.Model, effort)
-		}
-		out.Thinking = &AnthropicThinking{Type: "adaptive"}
-		if out.OutputConfig == nil {
-			out.OutputConfig = &AnthropicOutputConfig{}
-		}
-		out.OutputConfig.Effort = effort
-		return out, nil
-	}
-
-	// reasoning.effort → output_config.effort + thinking
-	if req.Reasoning != nil && req.Reasoning.Effort != "" {
-		effort := mapResponsesEffortToAnthropic(req.Reasoning.Effort)
-		if effort == "none" {
-			out.Thinking = &AnthropicThinking{Type: "disabled"}
-			return out, nil
-		}
-		if out.OutputConfig == nil {
-			out.OutputConfig = &AnthropicOutputConfig{}
-		}
-		out.OutputConfig.Effort = effort
-		// Enable thinking for non-low efforts
-		if effort != "low" {
-			if out.MaxTokens <= 1024 {
-				return nil, unsupportedConversion("max_output_tokens", "limit cannot accommodate Anthropic's minimum thinking budget")
-			}
-			budget := min(defaultThinkingBudget(effort), out.MaxTokens-1)
-			out.Thinking = &AnthropicThinking{
-				Type:         "enabled",
-				BudgetTokens: budget,
-			}
-		}
-	}
-
 	return out, nil
-}
-
-// defaultThinkingBudget returns a sensible thinking budget based on effort level.
-func defaultThinkingBudget(effort string) int {
-	switch effort {
-	case "low":
-		return 1024
-	case "medium":
-		return 4096
-	case "high":
-		return 10240
-	case "max":
-		return 32768
-	default:
-		return 10240
-	}
-}
-
-// mapResponsesEffortToAnthropic converts OpenAI Responses reasoning effort to
-// Anthropic effort levels. Reverse of mapAnthropicEffortToResponses.
-//
-//	low    → low
-//	medium → medium
-//	high   → high
-//	xhigh  → max
-func mapResponsesEffortToAnthropic(effort string) string {
-	if effort == "xhigh" {
-		return "max"
-	}
-	return effort // low→low, medium→medium, high→high, unknown→passthrough
 }
 
 // convertResponsesInputToAnthropic extracts system prompt and messages from
@@ -762,94 +594,6 @@ func parseContentBlocks(raw json.RawMessage) []AnthropicContentBlock {
 	return nil
 }
 
-// convertResponsesToAnthropicTools maps Responses API tools to Anthropic format.
-// Reverse of convertAnthropicToolsToResponses.
-func convertResponsesToAnthropicTools(tools []ResponsesTool) []AnthropicTool {
-	var out []AnthropicTool
-	for _, t := range tools {
-		switch t.Type {
-		case "web_search", "google_search", "web_search_20250305":
-			out = append(out, AnthropicTool{
-				CacheControl: t.CacheControl,
-				DeferLoading: t.DeferLoading,
-				Custom:       t.Custom,
-				Type:         "web_search_20250305",
-				Name:         "web_search",
-			})
-		case "function":
-			out = append(out, AnthropicTool{
-				CacheControl: t.CacheControl,
-				DeferLoading: t.DeferLoading,
-				Custom:       t.Custom,
-				Name:         t.Name,
-				Description:  t.Description,
-				InputSchema:  normalizeAnthropicInputSchema(t.Parameters),
-			})
-		case "custom":
-			out = append(out, AnthropicTool{
-				CacheControl: t.CacheControl,
-				DeferLoading: t.DeferLoading,
-				Custom:       t.Custom,
-				Name:         t.Name,
-				Description:  t.Description,
-				InputSchema:  normalizeAnthropicInputSchema(t.Parameters),
-			})
-		default:
-			// Pass through unknown tool types
-			out = append(out, AnthropicTool{
-				CacheControl: t.CacheControl,
-				DeferLoading: t.DeferLoading,
-				Custom:       t.Custom,
-				Type:         t.Type,
-				Name:         t.Name,
-				Description:  t.Description,
-				InputSchema:  normalizeAnthropicInputSchema(t.Parameters),
-			})
-		}
-	}
-	return out
-}
-
-// normalizeAnthropicInputSchema ensures input_schema is a valid object schema.
-// Codex 会把部分内置工具（例如 codex_app 的 automation_update）的 parameters
-// 根节点声明成对象分支的 oneOf/anyOf，Anthropic 只接受 object 根节点，这里把
-// 顶层联合摊平成单个 object schema。
-func normalizeAnthropicInputSchema(schema json.RawMessage) json.RawMessage {
-	const emptyObjectSchema = `{"type":"object","properties":{}}`
-
-	trimmed := strings.TrimSpace(string(schema))
-	if trimmed == "" || trimmed == "null" {
-		return json.RawMessage(emptyObjectSchema)
-	}
-
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(schema, &m); err != nil {
-		return json.RawMessage(`{"type":"object","properties":{}}`)
-	}
-
-	flattenAnthropicRootUnions(m)
-
-	typeRaw, ok := m["type"]
-	if !ok || strings.TrimSpace(string(typeRaw)) == "" || string(typeRaw) == "null" {
-		m["type"] = json.RawMessage(`"object"`)
-	} else {
-		var typ string
-		if err := json.Unmarshal(typeRaw, &typ); err != nil || typ != "object" {
-			return json.RawMessage(emptyObjectSchema)
-		}
-	}
-
-	if _, ok := m["properties"]; !ok {
-		m["properties"] = json.RawMessage(`{}`)
-	}
-
-	out, err := json.Marshal(m)
-	if err != nil {
-		return json.RawMessage(emptyObjectSchema)
-	}
-	return out
-}
-
 // convertResponsesToAnthropicToolChoice maps Responses tool_choice to Anthropic format.
 // Reverse of convertAnthropicToolChoiceToResponses.
 //
@@ -870,7 +614,7 @@ func convertResponsesToAnthropicToolChoice(raw json.RawMessage) (json.RawMessage
 		case "none":
 			return json.Marshal(map[string]string{"type": "none"})
 		default:
-			return raw, nil
+			return nil, unsupportedConversion("tool_choice", "expected auto, required, none or a named function")
 		}
 	}
 
@@ -888,7 +632,7 @@ func convertResponsesToAnthropicToolChoice(raw json.RawMessage) (json.RawMessage
 			name = strings.TrimSpace(tc.Function.Name)
 		}
 		if name == "" {
-			return raw, nil
+			return nil, unsupportedConversion("tool_choice", "missing function name")
 		}
 		return json.Marshal(map[string]string{
 			"type": "tool",
@@ -896,6 +640,5 @@ func convertResponsesToAnthropicToolChoice(raw json.RawMessage) (json.RawMessage
 		})
 	}
 
-	// Pass through unknown
-	return raw, nil
+	return nil, unsupportedConversion("tool_choice", "expected auto, required, none or a named function")
 }

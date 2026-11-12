@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/server/middleware"
 	"github.com/liulixin-lex/xy2api/internal/service"
@@ -106,6 +107,71 @@ func TestGatewayNonClaudeConversionRejectsWithoutUpstream(t *testing.T) {
 			require.Contains(t, rec.Body.String(), "response_format")
 			require.Empty(t, f.wire)
 			require.Zero(t, f.accounts.penalties)
+		})
+	}
+}
+
+func TestUnsupportedParameterErrorContract(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, protocol := range []string{"chat", "responses", "messages"} {
+		t.Run(protocol, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+			err := fmt.Errorf("convert request: %w", &apicompat.UnsupportedConversionError{Field: "n", Reason: "only 1 is supported"})
+			require.True(t, handleUnsupportedProtocolConversion(c, err, protocol, false))
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			require.Equal(t, "invalid_request_error", gjson.Get(rec.Body.String(), "error.type").String())
+			require.Equal(t, "unsupported_parameter", gjson.Get(rec.Body.String(), "error.code").String())
+			require.Equal(t, "n", gjson.Get(rec.Body.String(), "error.param").String())
+			require.Contains(t, gjson.Get(rec.Body.String(), "error.message").String(), "n")
+		})
+	}
+}
+
+func TestAnthropicConversionParameterErrorsBeforeUpstream(t *testing.T) {
+	for _, entry := range []string{"chat", "responses"} {
+		for _, tc := range []struct{ model, field, fields string }{
+			{"claude-sonnet-4-5", "n", `"n":2`},
+			{"claude-sonnet-5-5", "n", `"n":2`},
+			{"claude-sonnet-5-5", "temperature", `"temperature":0.7`},
+			{"claude-sonnet-5-5", "tool_choice", `"tool_choice":"required"`},
+			{"claude-sonnet-5-5", "reasoning", `"reasoning":{"effort":"invalid"},"reasoning_effort":"invalid"`},
+		} {
+			t.Run(entry+tc.model+tc.field, func(t *testing.T) {
+				f := newHandlerCompatFixture(t)
+				f.account.Extra = nil
+				input := `"input":"hi"`
+				if entry == "chat" {
+					input = `"messages":[{"role":"user","content":"hi"}]`
+				}
+				body := fmt.Sprintf(`{"model":%q,%s,%s}`, tc.model, input, tc.fields)
+				rec := httptest.NewRecorder()
+				f.call(entry, body, rec)
+				require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+				require.Equal(t, "invalid_request_error", gjson.Get(rec.Body.String(), "error.type").String())
+				require.Equal(t, "unsupported_parameter", gjson.Get(rec.Body.String(), "error.code").String())
+				require.Contains(t, gjson.Get(rec.Body.String(), "error.message").String(), tc.field)
+				require.Empty(t, f.wire)
+				require.Zero(t, f.accounts.penalties)
+			})
+		}
+	}
+}
+
+func TestUnsupportedParameterStreamErrorContract(t *testing.T) {
+	for _, protocol := range []string{"chat", "responses", "messages"} {
+		t.Run(protocol, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+			require.True(t, handleUnsupportedProtocolConversion(c, &apicompat.UnsupportedConversionError{Field: "n", Reason: "only 1 is supported"}, protocol, true))
+			require.Contains(t, rec.Body.String(), `"code":"unsupported_parameter"`)
+			if protocol == "responses" {
+				require.Contains(t, rec.Body.String(), `"message":"unsupported protocol conversion at n: only 1 is supported"`)
+			} else {
+				require.Contains(t, rec.Body.String(), `"type":"invalid_request_error"`)
+			}
 		})
 	}
 }

@@ -52,6 +52,9 @@ func ChatCompletionsToResponses(req *ChatCompletionsRequest) (*ResponsesRequest,
 		ParallelToolCalls:    req.ParallelToolCalls,
 		bridgeStop:           append(json.RawMessage(nil), req.Stop...),
 	}
+	source := *req
+	out.anthropicChatSource = &source
+	out.anthropicN = req.anthropicN
 	out.chatCacheControls = chatInputCacheControls(input)
 
 	// Reasoning models (gpt-5.x) do not accept sampling parameters.

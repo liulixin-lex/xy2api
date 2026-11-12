@@ -38,6 +38,7 @@ func (s *GatewayService) ForwardAsResponses(
 ) (result *ForwardResult, err error) {
 	startTime := time.Now()
 	defer func() {
+		writeUnsupportedParameterError(c, err)
 		writeAnthropicCompatError(c, "responses", err)
 		s.logAnthropicCompatOutcome(ctx, c, account, "responses", err)
 	}()
@@ -96,19 +97,12 @@ func (s *GatewayService) ForwardAsResponses(
 			mappedModel = normalized
 		}
 	}
-	if err := validateClaude55Parameters(body, mappedModel); err != nil {
-		writeResponsesError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
-		return nil, err
-	}
 	if scope := compatScope(ctx); compatPreservesHistory(c) && scope != nil && len(scope.Signatures) > 0 && !isClaude55SignedThinkingModel(mappedModel) {
 		return nil, compatInvalid("anthropic_compat_history_incompatible", "This model cannot preserve signed Responses thinking envelopes")
 	}
 	responsesReq.Model = mappedModel
 	anthropicReq, err := apicompat.ResponsesToAnthropicRequest(&responsesReq)
 	if err != nil {
-		if isClaude55SignedThinkingModel(mappedModel) {
-			writeResponsesError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
-		}
 		return nil, fmt.Errorf("convert responses to anthropic: %w", err)
 	}
 
@@ -128,9 +122,11 @@ func (s *GatewayService) ForwardAsResponses(
 	if err != nil {
 		return nil, fmt.Errorf("marshal anthropic request: %w", err)
 	}
-	if err := validateHaiku55MessagesRequest(anthropicBody, mappedModel, account); err != nil {
-		writeResponsesError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	if err := validateClaude55Parameters(anthropicBody, mappedModel); err != nil {
 		return nil, err
+	}
+	if err := validateHaiku55MessagesRequest(anthropicBody, mappedModel, account); err != nil {
+		return nil, &apicompat.UnsupportedConversionError{Field: "messages", Reason: err.Error()}
 	}
 
 	// 6. Apply Claude Code mimicry for OAuth accounts (non-Claude-Code endpoints).
@@ -713,6 +709,17 @@ func appendRawJSON(existing json.RawMessage, fragment string) json.RawMessage {
 		return json.RawMessage(fragment)
 	}
 	return json.RawMessage(string(existing) + fragment)
+}
+
+// Conversion errors are emitted once, before upstream work, with the same
+// contract for Chat and Responses. The handler owns errors after SSE starts.
+func writeUnsupportedParameterError(c *gin.Context, err error) {
+	var conversion *apicompat.UnsupportedConversionError
+	if c == nil || c.Writer.Written() || !errors.As(err, &conversion) {
+		return
+	}
+	MarkResponseCommitted(c)
+	c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "code": "unsupported_parameter", "param": conversion.Field, "message": conversion.Error()}})
 }
 
 // writeResponsesError writes an error response in OpenAI Responses API format.
