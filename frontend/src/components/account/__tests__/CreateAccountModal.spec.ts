@@ -960,8 +960,8 @@ describe('CreateAccountModal Claude Code compatibility', () => {
 
   it.each([
     { enabled: false, newSessions: true, expected: { anthropic_compat_profile: 'off' } },
-    { enabled: true, newSessions: true, expected: { anthropic_compat_profile: 'claude_code_v2', anthropic_compat_new_sessions: true } },
-    { enabled: true, newSessions: false, expected: { anthropic_compat_profile: 'claude_code_v2', anthropic_compat_new_sessions: false } }
+    { enabled: true, newSessions: true, expected: { anthropic_compat_profile: 'claude_code', anthropic_compat_new_sessions: true } },
+    { enabled: true, newSessions: false, expected: { anthropic_compat_profile: 'claude_code', anthropic_compat_new_sessions: false } }
   ])('writes the compatibility extra (enabled=$enabled, newSessions=$newSessions)', async ({ enabled, newSessions, expected }) => {
     createAccountMock.mockReset().mockResolvedValue({ id: 42, platform: 'anthropic', type: 'apikey' })
     const wrapper = mountModal()

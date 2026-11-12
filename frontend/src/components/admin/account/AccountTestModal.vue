@@ -971,7 +971,6 @@ const handleEvent = (event: {
   actual_account_id?: number
   test_scope?: string
   compat_profile?: string
-  compat_revision?: string
   code?: string
   status?: string
   text?: string
@@ -993,8 +992,8 @@ const handleEvent = (event: {
           ? 'admin.accounts.anthropic.diagnosticOrdinary'
           : 'admin.accounts.anthropic.diagnosticLegacy'), 'text-gray-400')
       }
-      if (event.compat_profile && event.compat_revision) {
-        addLine(`${event.compat_profile} / ${event.compat_revision}`, 'text-gray-400')
+      if (event.compat_profile) {
+        addLine(event.compat_profile, 'text-gray-400')
       }
       addLine(t('admin.accounts.connectedToApi'), 'text-green-400')
       if (event.model) {

@@ -1977,23 +1977,22 @@ describe('EditAccountModal Claude Code compatibility', () => {
   }
 
   it.each([
-    { profile: 'claude_code_v1', newSessions: undefined, expected: true },
-    { profile: 'claude_code_v1', newSessions: false, expected: false },
-    { profile: 'claude_code_v2', newSessions: true, expected: true },
-    { profile: 'claude_code_v2', newSessions: false, expected: false }
-  ])('reads $profile as enabled and saves it as claude_code_v2 (new sessions $newSessions)', async ({ profile, newSessions, expected }) => {
-    const wrapper = mountCompatAccount({ anthropic_compat_profile: profile, anthropic_compat_new_sessions: newSessions })
+    { newSessions: undefined, expected: true },
+    { newSessions: true, expected: true },
+    { newSessions: false, expected: false }
+  ])('keeps an enabled account and its new-session setting $newSessions on an ordinary save', async ({ newSessions, expected }) => {
+    const wrapper = mountCompatAccount({ anthropic_compat_profile: 'claude_code', anthropic_compat_new_sessions: newSessions })
     expect(wrapper.get('[data-testid="anthropic-compat-toggle"]').attributes('aria-checked')).toBe('true')
     expect(wrapper.get('[data-testid="anthropic-compat-new-sessions"]').attributes('aria-checked')).toBe(String(expected))
     expect(await savedExtra(wrapper)).toMatchObject({
-      anthropic_compat_profile: 'claude_code_v2',
+      anthropic_compat_profile: 'claude_code',
       anthropic_compat_new_sessions: expected
     })
     wrapper.unmount()
   })
 
   it('turns compatibility off without writing the new-session setting', async () => {
-    const wrapper = mountCompatAccount({ anthropic_compat_profile: 'claude_code_v2' })
+    const wrapper = mountCompatAccount({ anthropic_compat_profile: 'claude_code' })
     await wrapper.get('[data-testid="anthropic-compat-toggle"]').trigger('click')
     expect(wrapper.find('[data-testid="anthropic-compat-new-sessions"]').exists()).toBe(false)
     const extra = await savedExtra(wrapper)
@@ -2007,7 +2006,7 @@ describe('EditAccountModal Claude Code compatibility', () => {
     await wrapper.get('[data-testid="anthropic-compat-toggle"]').trigger('click')
     await wrapper.get('[data-testid="anthropic-compat-new-sessions"]').trigger('click')
     expect(await savedExtra(wrapper)).toMatchObject({
-      anthropic_compat_profile: 'claude_code_v2',
+      anthropic_compat_profile: 'claude_code',
       anthropic_compat_new_sessions: false
     })
     wrapper.unmount()

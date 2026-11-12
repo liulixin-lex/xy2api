@@ -246,7 +246,7 @@ describe('AccountTestModal', () => {
     getAvailableModels.mockResolvedValue([{ id: 'claude-sonnet-4-5', display_name: 'Claude Sonnet 4.5' }])
     global.fetch = vi.fn().mockResolvedValue(
       createStreamResponse([
-        'data: {"type":"test_start","model":"claude-sonnet-4-5","test_scope":"ordinary_client_compatibility","compat_profile":"claude_code_v2","compat_revision":"rev-7"}\n',
+        'data: {"type":"test_start","model":"claude-sonnet-4-5","test_scope":"ordinary_client_compatibility","compat_profile":"claude_code"}\n',
         'data: {"type":"content","text":"calling tool"}\n',
         'data: {"type":"compat_step","code":"adapted_turn","status":"passed"}\n',
         'data: {"type":"compat_step","code":"signed_continuation","status":"failed","error":"invalid signature"}\n',
@@ -260,7 +260,7 @@ describe('AccountTestModal', () => {
       platform: 'anthropic',
       type: 'apikey',
       status: 'active',
-      extra: { anthropic_compat_profile: 'claude_code_v2' }
+      extra: { anthropic_compat_profile: 'claude_code' }
     })
     await wrapper.setProps({ show: true })
     await flushPromises()
@@ -269,7 +269,7 @@ describe('AccountTestModal', () => {
 
     const text = wrapper.text()
     expect(text).toContain('admin.accounts.anthropic.diagnosticOrdinary')
-    expect(text).toContain('claude_code_v2 / rev-7')
+    expect(wrapper.findAll('div.text-gray-400').map((line) => line.text())).toContain('claude_code')
     expect(text).toContain('admin.accounts.anthropic.compatStepAdaptedTurn passed')
     expect(text).toContain('admin.accounts.anthropic.compatStepSignedContinuation failed')
     expect(text).toContain('Error: invalid signature')

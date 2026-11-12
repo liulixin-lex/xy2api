@@ -7,16 +7,14 @@ export interface AnthropicCompatDraft {
 }
 
 export function anthropicCompatDraftFromExtra(extra?: Record<string, unknown> | null): AnthropicCompatDraft {
-  const profile = extra?.anthropic_compat_profile
   return {
-    // 旧值 claude_code_v1 同样视为开启，保存时统一写 claude_code_v2。
-    enabled: profile === 'claude_code_v1' || profile === 'claude_code_v2',
+    enabled: extra?.anthropic_compat_profile === 'claude_code',
     newSessions: extra?.anthropic_compat_new_sessions !== false
   }
 }
 
 export function applyAnthropicCompatExtra(extra: Record<string, unknown>, draft: AnthropicCompatDraft): void {
-  if (draft.enabled !== null) extra.anthropic_compat_profile = draft.enabled ? 'claude_code_v2' : 'off'
+  if (draft.enabled !== null) extra.anthropic_compat_profile = draft.enabled ? 'claude_code' : 'off'
   // 关闭兼容时「接收新会话」没有意义，不写。
   if (draft.enabled !== false && draft.newSessions !== null) extra.anthropic_compat_new_sessions = draft.newSessions
 }

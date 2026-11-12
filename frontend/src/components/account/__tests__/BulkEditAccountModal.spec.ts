@@ -1069,8 +1069,8 @@ describe('BulkEditAccountModal Claude Code compatibility', () => {
 
   it.each([
     { compat: '', newSessions: '', extra: undefined },
-    { compat: 'on', newSessions: '', extra: { anthropic_compat_profile: 'claude_code_v2' } },
-    { compat: 'on', newSessions: 'off', extra: { anthropic_compat_profile: 'claude_code_v2', anthropic_compat_new_sessions: false } },
+    { compat: 'on', newSessions: '', extra: { anthropic_compat_profile: 'claude_code' } },
+    { compat: 'on', newSessions: 'off', extra: { anthropic_compat_profile: 'claude_code', anthropic_compat_new_sessions: false } },
     { compat: '', newSessions: 'on', extra: { anthropic_compat_new_sessions: true } },
     { compat: 'off', newSessions: undefined, extra: { anthropic_compat_profile: 'off' } }
   ])('writes only the keys that are not left unchanged (compat=$compat, newSessions=$newSessions)', async ({ compat, newSessions, extra }) => {
