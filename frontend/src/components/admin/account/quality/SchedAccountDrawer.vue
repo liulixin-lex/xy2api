@@ -428,7 +428,7 @@ function openPopover(mode: SchedOverrideMode, groupId: number, anchor: HTMLEleme
 
 async function applyOverride(request: SchedOverrideRequest) {
   const id = drawer.accountId
-  if (id === null) return
+  if (id === null || !canManage.value) return
   popover.busy = true
   popover.failed = false
   try {
@@ -515,8 +515,15 @@ function clearAuto(item: SchedAutoState) {
 function confirmProxyClear() {
   const item = proxyItem.value
   proxyItem.value = null
-  if (item) void runClear(item)
+  if (item && canManage.value) void runClear(item)
 }
+
+// A write layer opened before accounts:manage was withdrawn closes with it.
+watch(canManage, (allowed) => {
+  if (allowed) return
+  popover.open = false
+  proxyItem.value = null
+})
 
 defineExpose({ refresh: () => poll.refresh() })
 </script>

@@ -132,13 +132,14 @@ function cellOf(group: SchedAccountGroup, dim: SchedDim): Cell {
     tip,
     label: verdict === 'nodata' ? `${dimName(dim)} ${text}` : t('admin.schedQuality.aria.cell', { dim: dimName(dim), value: text, verdict: verdictWord(verdict) })
   })
-  if (own.from === 'test') return value(valueText(row, dim), t('admin.schedQuality.tip.testRounds', { n: own.n }))
-  if (sameWindow(row, props.card)) {
-    if (verdict) return shape(verdict)
+  const other = (): Cell => {
     const word = verdictWord(null)
     return { kind: 'value', text: word, cls: 'sq-text-3', tip: '', label: `${dimName(dim)} ${word}` }
   }
+  if (own.from === 'test') return value(valueText(row, dim), t('admin.schedQuality.tip.testRounds', { n: own.n }))
+  if (sameWindow(row, props.card)) return verdict ? shape(verdict) : other()
   if (!hasValue(row, dim)) {
+    if (!verdict) return other()
     if (row.state === 'cooling' && causeDim(row.reason) === dim) return shape('fail')
     return { kind: 'value', text: '—', cls: 'sq-text-3', tip: t('admin.schedQuality.tip.samples', { n: own.n }), label: `${dimName(dim)} ${verdictWord('nodata')}` }
   }

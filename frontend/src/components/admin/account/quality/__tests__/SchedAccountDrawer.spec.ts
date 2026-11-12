@@ -8,7 +8,11 @@ import { closeSchedBoard, closeSchedDrawer, openSchedDrawer, useSchedLayers } fr
 
 const api = vi.hoisted(() => ({ accountDetail: vi.fn(), startTest: vi.fn(), setOverride: vi.fn(), clearOverride: vi.fn(), clearAutoState: vi.fn() }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: api }))
-const perms = vi.hoisted(() => ({ granted: [] as string[] }))
+// Reactive, so a permission change after mount reaches the mounted drawer.
+const perms = await vi.hoisted(async () => {
+  const { reactive } = await import('vue')
+  return reactive({ granted: [] as string[] })
+})
 vi.mock('@/composables/useAdminPermission', async () => {
   const { computed } = await vi.importActual<typeof import('vue')>('vue')
   return {
@@ -265,5 +269,31 @@ describe('SchedAccountDrawer', () => {
     const first = recent.querySelectorAll('tbody tr')[0].querySelectorAll('td')
     expect([first[2].textContent, first[4].textContent]).toEqual(['admin.schedQuality.unknown', 'admin.schedQuality.unknown'])
     expect(panel().textContent).not.toMatch(/admin\.schedQuality\.(class|result|aria|state)\.future/)
+  })
+
+  it('shows the fallback word for an unknown verdict on a dimension without numbers, even when cooling names it', async () => {
+    const d = detail()
+    d.groups[1].by_model[0].cache.verdict = 'future' as never
+    api.accountDetail.mockResolvedValue(d)
+    mount(SchedAccountDrawer, { attachTo: document.body })
+    openSchedDrawer({ id: 479, name: 'acc-03' })
+    await flushPromises()
+    const cache = cells(54)[2]
+    expect(cache.querySelector('.sq-shape--fail')).toBeNull()
+    expect(cache.textContent).toContain('admin.schedQuality.unknown')
+  })
+
+  it('closes an open override popover when accounts:manage is withdrawn', async () => {
+    api.setOverride.mockReset()
+    mount(SchedAccountDrawer, { attachTo: document.body })
+    openSchedDrawer({ id: 479, name: 'acc-03' })
+    await flushPromises()
+    document.querySelector<HTMLElement>('[data-sq-trigger="drawer-demote"]')!.click()
+    await flushPromises()
+    expect(document.querySelector('[data-sq-popover]')).not.toBeNull()
+    perms.granted = ['accounts:view', 'groups:view']
+    await flushPromises()
+    expect(document.querySelector('[data-sq-popover]')).toBeNull()
+    expect(api.setOverride).not.toHaveBeenCalled()
   })
 })
