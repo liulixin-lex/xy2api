@@ -1,6 +1,6 @@
 <template>
   <Teleport to="body">
-    <div class="fixed inset-0 z-50 overflow-y-auto" ref="rootRef" :style="{ zIndex: layer.zIndex.value, outline: 'none' }" tabindex="-1" role="dialog" aria-modal="true" @keydown.tab="layer.trapTab">
+    <div class="fixed inset-0 z-50 overflow-y-auto" ref="rootRef" :style="{ zIndex: layer.zIndex.value, outline: 'none' }" tabindex="-1" role="dialog" aria-modal="true" :aria-labelledby="titleId" @keydown.tab="layer.trapTab">
       <div class="flex min-h-full items-center justify-center p-4">
         <div class="fixed inset-0 bg-black/50 transition-opacity"></div>
 
@@ -12,7 +12,7 @@
                 <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
               </svg>
             </div>
-            <h3 class="mt-4 text-xl font-semibold text-gray-900 dark:text-white">
+            <h3 :id="titleId" class="mt-4 text-xl font-semibold text-gray-900 dark:text-white">
               {{ t('profile.totp.loginTitle') }}
             </h3>
             <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
@@ -77,7 +77,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted } from 'vue'
+import { ref, watch, nextTick, onMounted, useId } from 'vue'
 import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores'
@@ -95,6 +95,7 @@ const emit = defineEmits<{
 // A modal layer of the overlay stack (design spec 0.2), teleported out of #app: the page is inert below it, Tab
 // stays inside, Escape works like its cancel button, and focus goes back to where it was opened from.
 const rootRef = ref<HTMLElement | null>(null)
+const titleId = `totp-login-title-${useId()}`
 const layer = useOverlayLayer(() => true, { root: rootRef, floor: 50, initialFocus: () => rootRef.value?.querySelector<HTMLElement>('input:not([tabindex="-1"]), button') ?? null, onEscape: () => { if (!verifying.value) emit('cancel') } })
 
 const { t } = useI18n()

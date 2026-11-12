@@ -1,6 +1,6 @@
 <template>
   <Teleport to="body">
-    <div class="fixed inset-0 z-50 overflow-y-auto" @click.self="$emit('close')" ref="rootRef" :style="{ zIndex: layer.zIndex.value, outline: 'none' }" tabindex="-1" role="dialog" aria-modal="true" @keydown.tab="layer.trapTab">
+    <div class="fixed inset-0 z-50 overflow-y-auto" @click.self="$emit('close')" ref="rootRef" :style="{ zIndex: layer.zIndex.value, outline: 'none' }" tabindex="-1" role="dialog" aria-modal="true" :aria-labelledby="titleId" @keydown.tab="layer.trapTab">
       <div class="flex min-h-full items-center justify-center p-4">
         <div class="fixed inset-0 bg-black/50 transition-opacity" @click="$emit('close')"></div>
 
@@ -12,7 +12,7 @@
                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
               </svg>
             </div>
-            <h3 class="mt-4 text-center text-xl font-semibold text-gray-900 dark:text-white">
+            <h3 :id="titleId" class="mt-4 text-center text-xl font-semibold text-gray-900 dark:text-white">
               {{ t('profile.totp.disableTitle') }}
             </h3>
             <p class="mt-2 text-center text-sm text-gray-500 dark:text-gray-400">
@@ -85,7 +85,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, useId } from 'vue'
 import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -100,6 +100,7 @@ const emit = defineEmits<{
 // A modal layer of the overlay stack (design spec 0.2), teleported out of #app: the page is inert below it, Tab
 // stays inside, Escape works like its cancel button, and focus goes back to where it was opened from.
 const rootRef = ref<HTMLElement | null>(null)
+const titleId = `totp-disable-title-${useId()}`
 const layer = useOverlayLayer(() => true, { root: rootRef, floor: 50, initialFocus: () => rootRef.value?.querySelector<HTMLElement>('input:not([tabindex="-1"]), button') ?? null, onEscape: () => emit('close') })
 
 const { t } = useI18n()

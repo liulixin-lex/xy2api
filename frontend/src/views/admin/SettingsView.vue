@@ -6119,11 +6119,13 @@
               @keydown.tab="wsTestLayer.trapTab"
               role="dialog"
               aria-modal="true"
+              :aria-labelledby="wsTestTitleId"
             >
               <div
                 class="mx-4 w-full max-w-lg rounded-xl bg-white p-6 shadow-xl dark:bg-dark-800"
               >
                 <h3
+                  :id="wsTestTitleId"
                   class="mb-4 text-lg font-semibold text-gray-900 dark:text-white"
                 >
                   {{ t("admin.settings.webSearchEmulation.testResultTitle") }}
@@ -7798,9 +7800,10 @@
             @keydown.tab="affiliateEditLayer.trapTab"
             role="dialog"
             aria-modal="true"
+            :aria-labelledby="affiliateEditTitleId"
           >
             <div class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-dark-900">
-              <h3 class="mb-4 text-lg font-semibold">
+              <h3 :id="affiliateEditTitleId" class="mb-4 text-lg font-semibold">
                 {{ affiliateModal.mode === 'add' ? t('admin.settings.features.affiliate.modal.addTitle') : t('admin.settings.features.affiliate.modal.editTitle') }}
               </h3>
               <div class="space-y-4">
@@ -7931,9 +7934,10 @@
             @keydown.tab="affiliateBatchLayer.trapTab"
             role="dialog"
             aria-modal="true"
+            :aria-labelledby="affiliateBatchTitleId"
           >
             <div class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-dark-900">
-              <h3 class="mb-4 text-lg font-semibold">
+              <h3 :id="affiliateBatchTitleId" class="mb-4 text-lg font-semibold">
                 {{ t('admin.settings.features.affiliate.batchModal.title', { count: affiliateState.selected.length }) }}
               </h3>
               <p class="mb-4 text-sm text-gray-500">
@@ -9036,7 +9040,7 @@
 
 <script setup lang="ts">
 import CodexTicketProxyPool from '@/components/account/CodexTicketProxyPool.vue'
-import { ref, reactive, computed, onMounted, watch } from "vue";
+import { ref, reactive, computed, nextTick, onMounted, useId, watch } from "vue";
 import { useOverlayLayer } from "@/composables/useOverlayLayer";
 import { listPlatformIds } from "@/constants/platformCatalog";
 import { useI18n } from "vue-i18n";
@@ -10377,6 +10381,9 @@ async function copyApiKey(idx: number) {
 }
 
 async function testWebSearchProvider() {
+  // The test button is disabled while the request runs: keep focus in the dialog (the button again, or the query
+  // input when Enter started it) unless another layer opened above meanwhile.
+  const restoreFocus = wsTestLayer.holdFocus();
   wsTestLoading.value = true;
   wsTestResult.value = null;
   try {
@@ -10388,6 +10395,8 @@ async function testWebSearchProvider() {
     appStore.showError(extractApiErrorMessage(err, t("common.error")));
   } finally {
     wsTestLoading.value = false;
+    await nextTick();
+    restoreFocus();
   }
 }
 
@@ -13270,6 +13279,9 @@ watch(
 
 // The hand-built dialogs of this page are modal layers of the overlay stack, teleported out of #app (design spec
 // 0.2): the page is inert below them, Tab stays inside, Escape closes the top one, focus goes back to its opener.
+const wsTestTitleId = `ws-test-title-${useId()}`;
+const affiliateEditTitleId = `affiliate-edit-title-${useId()}`;
+const affiliateBatchTitleId = `affiliate-batch-title-${useId()}`;
 const wsTestLayer = useOverlayLayer(() => wsTestDialogOpen.value, { root: wsTestRef, floor: 50, onEscape: () => { wsTestDialogOpen.value = false; } });
 const affiliateEditRef = ref<HTMLElement | null>(null);
 const affiliateEditLayer = useOverlayLayer(() => affiliateModal.open, { root: affiliateEditRef, floor: 50, onEscape: () => closeAffiliateModal() });

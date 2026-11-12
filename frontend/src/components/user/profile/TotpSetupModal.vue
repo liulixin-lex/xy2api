@@ -1,13 +1,13 @@
 <template>
   <Teleport to="body">
-    <div class="fixed inset-0 z-50 overflow-y-auto" @click.self="$emit('close')" ref="rootRef" :style="{ zIndex: layer.zIndex.value, outline: 'none' }" tabindex="-1" role="dialog" aria-modal="true" @keydown.tab="layer.trapTab">
+    <div class="fixed inset-0 z-50 overflow-y-auto" @click.self="$emit('close')" ref="rootRef" :style="{ zIndex: layer.zIndex.value, outline: 'none' }" tabindex="-1" role="dialog" aria-modal="true" :aria-labelledby="titleId" @keydown.tab="layer.trapTab">
       <div class="flex min-h-full items-center justify-center p-4">
         <div class="fixed inset-0 bg-black/50 transition-opacity" @click="$emit('close')"></div>
 
         <div class="relative w-full max-w-md transform rounded-xl bg-white p-6 shadow-xl transition-all dark:bg-dark-800">
           <!-- Header -->
           <div class="mb-6 text-center">
-            <h3 class="text-xl font-semibold text-gray-900 dark:text-white">
+            <h3 :id="titleId" class="text-xl font-semibold text-gray-900 dark:text-white">
               {{ t('profile.totp.setupTitle') }}
             </h3>
             <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
@@ -70,6 +70,7 @@
                   type="button"
                   class="btn btn-primary"
                   :disabled="!canProceedFromVerify || setupLoading"
+                  data-setup-next
                   @click="handleVerifyAndSetup"
                 >
                   {{ setupLoading ? t('common.loading') : t('common.next') }}
@@ -117,6 +118,7 @@
                 type="button"
                 class="btn btn-primary"
                 :disabled="!setupData"
+                data-setup-next
                 @click="step = 2"
               >
                 {{ t('common.next') }}
@@ -170,7 +172,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, watch, computed, useId } from 'vue'
 import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -187,6 +189,7 @@ const emit = defineEmits<{
 // A modal layer of the overlay stack (design spec 0.2), teleported out of #app: the page is inert below it, Tab
 // stays inside, Escape works like its cancel button, and focus goes back to where it was opened from.
 const rootRef = ref<HTMLElement | null>(null)
+const titleId = `totp-setup-title-${useId()}`
 const layer = useOverlayLayer(() => true, { root: rootRef, floor: 50, initialFocus: () => rootRef.value?.querySelector<HTMLElement>('input:not([tabindex="-1"]), button') ?? null, onEscape: () => emit('close') })
 
 const { t } = useI18n()
@@ -362,6 +365,9 @@ const handleSendCode = async () => {
 }
 
 const handleVerifyAndSetup = async () => {
+  // The button is disabled while the request runs and the step is replaced by the QR code: keep focus in this
+  // dialog (its next button, or the button again after a failure) unless another layer opened above meanwhile.
+  const restoreFocus = layer.holdFocus()
   setupLoading.value = true
 
   try {
@@ -375,6 +381,8 @@ const handleVerifyAndSetup = async () => {
     appStore.showError(extractApiErrorMessage(err, t('profile.totp.setupFailed')))
   } finally {
     setupLoading.value = false
+    await nextTick()
+    restoreFocus()
   }
 }
 

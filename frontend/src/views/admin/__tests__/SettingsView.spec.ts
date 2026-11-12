@@ -36,6 +36,7 @@ const {
   adminSettingsFetch,
   showError,
   showSuccess,
+  testWebSearchEmulation,
 } = vi.hoisted(() => ({
   getSettings: vi.fn(),
   updateSettings: vi.fn(),
@@ -77,6 +78,7 @@ const {
   adminSettingsFetch: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
+  testWebSearchEmulation: vi.fn(),
 }));
 
 const localeRef = vi.hoisted(() => ({ value: "zh-CN" }));
@@ -97,6 +99,7 @@ vi.mock("@/api", () => ({
       getStreamTimeoutSettings,
       getRectifierSettings,
       getBetaPolicySettings,
+      testWebSearchEmulation,
     },
     accounts: {
       getUpstreamBillingProbeSettings,
@@ -2127,5 +2130,108 @@ describe("admin SettingsView platform quota matrix", () => {
     const quotas = payload["default_platform_quotas"] as Record<string, Record<string, unknown>>;
     // 不管输入是什么，提交值应为 null（而非 "" 或 NaN）
     expect(quotas["anthropic"]?.["daily"]).toBe(null);
+  });
+});
+
+// The web-search test dialog (RT r3 R11): its test button is disabled while the request runs (a browser then drops
+// the button's focus); when the answer is in, focus is back in the dialog unless another layer opened above.
+describe("admin SettingsView web search test dialog focus", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    getSettings.mockResolvedValue({ ...baseSettingsResponse });
+    getWebSearchEmulationConfig.mockResolvedValue({ enabled: false, providers: [] });
+    getAdminApiKey.mockResolvedValue({ exists: false, masked_key: "" });
+    getOverloadCooldownSettings.mockResolvedValue({});
+    getRateLimit429CooldownSettings.mockResolvedValue({});
+    getStreamTimeoutSettings.mockResolvedValue({});
+    getRectifierSettings.mockResolvedValue({});
+    getBetaPolicySettings.mockResolvedValue({});
+    getGroups.mockResolvedValue([]);
+    listProxies.mockResolvedValue({ items: [] });
+    getProviders.mockResolvedValue({ data: [] });
+  });
+
+  let settle: { resolve: (value: unknown) => void; reject: (error: unknown) => void };
+
+  async function runTest() {
+    testWebSearchEmulation.mockImplementation(() => new Promise((resolve, reject) => { settle = { resolve, reject }; }));
+    const wrapper = mountView();
+    await flushPromises();
+    (wrapper.vm as unknown as { openTestDialog: () => void }).openTestDialog();
+    await flushPromises();
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-modal="true"]')!;
+    const button = Array.from(dialog.querySelectorAll<HTMLButtonElement>("button"))
+      .find((el) => el.textContent?.trim() === "admin.settings.webSearchEmulation.test")!;
+    button.focus();
+    button.click();
+    await flushPromises();
+    expect(button.disabled).toBe(true);
+    button.blur();
+    return { wrapper, dialog, button };
+  }
+
+  it("puts focus back on the test button when results arrive", async () => {
+    const { wrapper, button } = await runTest();
+    settle.resolve({ provider: "fixture", results: [{ title: "Result 0", url: "https://example.test", snippet: "" }] });
+    await flushPromises();
+    expect(document.body.textContent).toContain("Result 0");
+    expect(document.activeElement).toBe(button);
+    wrapper.unmount();
+  });
+
+  it("puts focus back on the test button when the request fails", async () => {
+    const { wrapper, button } = await runTest();
+    settle.reject(new Error("down"));
+    await flushPromises();
+    expect(showError).toHaveBeenCalled();
+    expect(document.activeElement).toBe(button);
+    wrapper.unmount();
+  });
+
+  it("leaves focus in a layer opened above during the request", async () => {
+    const { wrapper } = await runTest();
+    const { openOverlay, closeOverlay } = await import("@/utils/overlayStack");
+    const upper = document.createElement("div");
+    const other = document.createElement("button");
+    upper.appendChild(other);
+    document.body.appendChild(upper);
+    const token = Symbol("upper");
+    openOverlay(token, { root: () => upper, panel: () => upper });
+    other.focus();
+    settle.resolve({ provider: "fixture", results: [] });
+    await flushPromises();
+    expect(document.activeElement).toBe(other);
+    closeOverlay(token);
+    wrapper.unmount();
+  });
+
+  it("names each of its dialogs by the visible title, with ids that differ when all are open (R13)", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    const vm = wrapper.vm as unknown as {
+      openTestDialog: () => void;
+      affiliateModal: { open: boolean; mode: string };
+      affiliateBatchModal: { open: boolean };
+    };
+    const names = () => Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')).map((dialog) => {
+      const id = dialog.getAttribute("aria-labelledby");
+      const title = id ? document.getElementById(id) : null;
+      return { id, inside: !!title && dialog.contains(title), text: title?.textContent?.trim() };
+    });
+    vm.openTestDialog();
+    vm.affiliateModal.mode = "add";
+    vm.affiliateModal.open = true;
+    vm.affiliateBatchModal.open = true;
+    await flushPromises();
+    const all = names();
+    expect(all).toHaveLength(3);
+    expect(all.every((entry) => entry.inside && !!entry.text)).toBe(true);
+    expect(new Set(all.map((entry) => entry.id)).size).toBe(3);
+    expect(all.map((entry) => entry.text)).toContain("admin.settings.features.affiliate.modal.addTitle");
+
+    vm.affiliateModal.mode = "edit";
+    await flushPromises();
+    expect(names().map((entry) => entry.text)).toContain("admin.settings.features.affiliate.modal.editTitle");
+    wrapper.unmount();
   });
 });
