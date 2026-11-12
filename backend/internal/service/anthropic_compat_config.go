@@ -112,5 +112,5 @@ func prepareAnthropicCompatAccountUpdate(account, previous *Account) error {
 
 func ShouldEnsureAnthropicCompatSeedForExtraUpdates(updates map[string]any) bool {
 	_, authScheme := updates["anthropic_apikey_auth_scheme"]
-	return updates[AnthropicCompatProfileExtraKey] == "claude_code" || authScheme
+	return updates[AnthropicCompatProfileExtraKey] == AnthropicCompatProfileClaudeCode || authScheme
 }

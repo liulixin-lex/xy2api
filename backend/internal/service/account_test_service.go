@@ -593,7 +593,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	// Send test_start event
 	startEvent := TestEvent{Type: "test_start", Model: testModelID, ActualAccountID: account.ID, TestScope: "legacy_cli_connectivity"}
 	if profile != nil {
-		startEvent.CompatProfile = "claude_code"
+		startEvent.CompatProfile = AnthropicCompatProfileClaudeCode
 	}
 	s.sendEvent(c, startEvent)
 

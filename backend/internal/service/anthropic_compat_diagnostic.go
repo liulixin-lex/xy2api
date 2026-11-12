@@ -15,7 +15,7 @@ import (
 )
 
 // BuildAnthropicCompatDiagnosticRequest shares the production profile, identity,
-// body and header functions. Diagnostics use an isolated session and never access the provenance store.
+// body and header functions with one isolated session for both turns.
 func BuildAnthropicCompatDiagnosticRequest(account *Account, body []byte, headers http.Header) ([]byte, http.Header, error) {
 	profile, err := ResolveAnthropicCompatProfile(account)
 	if err != nil {
@@ -26,14 +26,13 @@ func BuildAnthropicCompatDiagnosticRequest(account *Account, body []byte, header
 		return body, out, nil
 	}
 	if !profile.SupportsModel(gjson.GetBytes(body, "model").String()) {
-		return nil, nil, compatInvalid("anthropic_compat_model_unsupported", "Diagnostic model is outside the profile capability range")
+		return nil, nil, fmt.Errorf("Diagnostic model is outside the profile capability range")
 	}
 	anchor := headers.Get("X-Claude-Code-Session-Id")
 	if anchor == "" {
 		anchor = uuid.NewString()
 	}
-	scope := &anthropicCompatScope{Entry: "diagnostic", Anchor: anchor}
-	metadata, err := compatIdentity(profile, account, scope)
+	metadata, err := compatIdentity(account, 0, 0, anchor)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -58,7 +57,7 @@ func anthropicCompatDiagnosticThinking(model string) (map[string]any, map[string
 }
 
 // testAnthropicCompatConnection sends two ordinary-client turns directly to the
-// account upstream. The adapter and response validator have no provenance store.
+// account upstream and checks acceptance of the signed assistant history.
 func (s *AccountTestService) testAnthropicCompatConnection(c *gin.Context, account *Account, model, apiURL, token string, profile *AnthropicCompatProfile) error {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -66,7 +65,7 @@ func (s *AccountTestService) testAnthropicCompatConnection(c *gin.Context, accou
 	c.Header("X-Accel-Buffering", "no")
 	start := TestEvent{Type: "test_start", Model: model, ActualAccountID: account.ID, TestScope: "ordinary_client_compatibility"}
 	if profile != nil {
-		start.CompatProfile = "claude_code"
+		start.CompatProfile = AnthropicCompatProfileClaudeCode
 	}
 	s.sendEvent(c, start)
 
@@ -302,7 +301,9 @@ func (s *AccountTestService) readAnthropicCompatDiagnosticTurn(c *gin.Context, r
 				}
 			}
 		case "message_delta":
-			reason = gjson.GetBytes(data, "delta.stop_reason").String()
+			if value := gjson.GetBytes(data, "delta.stop_reason").String(); value != "" {
+				reason = value
+			}
 		case "error":
 			consumeErr = fmt.Errorf("Upstream diagnostic error: %s", gjson.GetBytes(data, "error.message").String())
 		case "message_stop":

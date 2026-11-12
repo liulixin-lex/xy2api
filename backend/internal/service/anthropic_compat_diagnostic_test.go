@@ -43,6 +43,7 @@ func diagnosticStream(blocks ...map[string]any) string {
 		reason = "tool_use"
 	}
 	emit("message_delta", map[string]any{"delta": map[string]any{"stop_reason": reason}})
+	emit("message_delta", map[string]any{"delta": map[string]any{}, "usage": map[string]any{"cache_read_input_tokens": 2}})
 	emit("message_stop", map[string]any{})
 	return out.String()
 }
@@ -56,6 +57,7 @@ func TestAnthropicCompatDiagnosticTwoTurns(t *testing.T) {
 		{name: "tool_continuation", model: "claude-opus-5-5", tool: true},
 		{name: "no_tool_followup", model: "claude-opus-5-5"},
 		{name: "opus_4_8_adaptive", model: "claude-opus-4-8", tool: true},
+		{name: "haiku_4_5_budget", model: "claude-haiku-4-5", tool: true},
 		{name: "unknown_delta_is_omitted", model: "claude-opus-5-5", tool: true, unknownDelta: true},
 		{name: "continuation_non_end_terminal", model: "claude-opus-5-5", tool: true, nonEndSecond: true},
 		{name: "upstream_rejects_signature", model: "claude-opus-5-5", tool: true, failSecond: true},
@@ -63,8 +65,8 @@ func TestAnthropicCompatDiagnosticTwoTurns(t *testing.T) {
 		{name: "unsigned_first_turn", model: "claude-opus-5-5", unsigned: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			account := compatConfigTestAccount()
-			account.Extra[AnthropicCompatProfileExtraKey] = AnthropicCompatProfileClaudeCodeV2
+			account := compatTestAccount()
+			account.Extra[AnthropicCompatProfileExtraKey] = AnthropicCompatProfileClaudeCode
 			account.Credentials["model_mapping"] = map[string]any{"chosen": tc.model}
 			firstBlocks := []map[string]any{{"type": "thinking", "thinking": "initial", "signature": "signed", "extension": "preserved"}, {"type": "redacted_thinking", "data": "opaque-redacted"}, {"type": "text", "text": "Checking."}}
 			if tc.unknownDelta {
@@ -212,10 +214,10 @@ func TestAnthropicCompatDiagnosticOffAndLegacyControls(t *testing.T) {
 	for _, tc := range []struct{ name, profile, mode string }{
 		{"off_default", AnthropicCompatProfileOff, ""},
 		{"off_explicit_control", AnthropicCompatProfileOff, AccountTestModeAnthropicCompatibility},
-		{"legacy_cli", AnthropicCompatProfileClaudeCodeV2, AccountTestModeAnthropicLegacyCLI},
+		{"legacy_cli", AnthropicCompatProfileClaudeCode, AccountTestModeAnthropicLegacyCLI},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			account := compatConfigTestAccount()
+			account := compatTestAccount()
 			account.Extra[AnthropicCompatProfileExtraKey] = tc.profile
 			calls := 0
 			upstream := &systemOneHTTPUpstream{do: func(req *http.Request) (*http.Response, error) {

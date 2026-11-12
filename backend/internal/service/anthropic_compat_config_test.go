@@ -28,11 +28,11 @@ func TestAnthropicCompatConfigurationAndSeedLifecycle(t *testing.T) {
 		{"uppercase-off", PlatformAnthropic, AccountTypeAPIKey, map[string]any{AnthropicCompatProfileExtraKey: "OFF"}, nil},
 		{"unknown", PlatformAnthropic, AccountTypeAPIKey, map[string]any{AnthropicCompatProfileExtraKey: "latest"}, nil},
 		{"nonstring", PlatformAnthropic, AccountTypeAPIKey, map[string]any{AnthropicCompatProfileExtraKey: true}, nil},
-		{"platform", PlatformOpenAI, AccountTypeAPIKey, map[string]any{AnthropicCompatProfileExtraKey: "claude_code"}, nil},
-		{"type", PlatformAnthropic, AccountTypeOAuth, map[string]any{AnthropicCompatProfileExtraKey: "claude_code"}, nil},
-		{"passthrough", PlatformAnthropic, AccountTypeAPIKey, map[string]any{AnthropicCompatProfileExtraKey: "claude_code", "anthropic_passthrough": true}, nil},
-		{"headers", PlatformAnthropic, AccountTypeAPIKey, map[string]any{AnthropicCompatProfileExtraKey: "claude_code"}, map[string]any{credKeyHeaderOverrideEnabled: true, credKeyHeaderOverrides: map[string]any{"user-agent": "other"}}},
-		{"session-header", PlatformAnthropic, AccountTypeAPIKey, map[string]any{AnthropicCompatProfileExtraKey: "claude_code"}, map[string]any{credKeyHeaderOverrideEnabled: true, credKeyHeaderOverrides: map[string]any{"x-claude-code-session-id": "shared-session"}}},
+		{"platform", PlatformOpenAI, AccountTypeAPIKey, map[string]any{AnthropicCompatProfileExtraKey: AnthropicCompatProfileClaudeCode}, nil},
+		{"type", PlatformAnthropic, AccountTypeOAuth, map[string]any{AnthropicCompatProfileExtraKey: AnthropicCompatProfileClaudeCode}, nil},
+		{"passthrough", PlatformAnthropic, AccountTypeAPIKey, map[string]any{AnthropicCompatProfileExtraKey: AnthropicCompatProfileClaudeCode, "anthropic_passthrough": true}, nil},
+		{"headers", PlatformAnthropic, AccountTypeAPIKey, map[string]any{AnthropicCompatProfileExtraKey: AnthropicCompatProfileClaudeCode}, map[string]any{credKeyHeaderOverrideEnabled: true, credKeyHeaderOverrides: map[string]any{"user-agent": "other"}}},
+		{"session-header", PlatformAnthropic, AccountTypeAPIKey, map[string]any{AnthropicCompatProfileExtraKey: AnthropicCompatProfileClaudeCode}, map[string]any{credKeyHeaderOverrideEnabled: true, credKeyHeaderOverrides: map[string]any{"x-claude-code-session-id": "shared-session"}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			in := create(tc.extra)
@@ -46,7 +46,7 @@ func TestAnthropicCompatConfigurationAndSeedLifecycle(t *testing.T) {
 		})
 	}
 	injected := strings.Repeat("a", 64)
-	created, err := svc.CreateAccount(ctx, create(map[string]any{AnthropicCompatProfileExtraKey: "claude_code", AnthropicCompatIdentitySeedExtraKey: injected, "quota_limit": 100}))
+	created, err := svc.CreateAccount(ctx, create(map[string]any{AnthropicCompatProfileExtraKey: AnthropicCompatProfileClaudeCode, AnthropicCompatIdentitySeedExtraKey: injected, "quota_limit": 100}))
 	require.NoError(t, err)
 	seed := created.AnthropicCompatIdentitySeed()
 	require.Len(t, seed, 64)
@@ -55,7 +55,7 @@ func TestAnthropicCompatConfigurationAndSeedLifecycle(t *testing.T) {
 	updated, err := svc.UpdateAccount(ctx, created.ID, &UpdateAccountInput{Extra: map[string]any{}})
 	require.NoError(t, err)
 	require.Equal(t, seed, updated.AnthropicCompatIdentitySeed())
-	require.Equal(t, "claude_code", updated.Extra[AnthropicCompatProfileExtraKey])
+	require.Equal(t, AnthropicCompatProfileClaudeCode, updated.Extra[AnthropicCompatProfileExtraKey])
 	require.NotContains(t, updated.Extra, "quota_limit")
 	updated, err = svc.UpdateAccount(ctx, created.ID, &UpdateAccountInput{Extra: map[string]any{AnthropicCompatIdentitySeedExtraKey: injected}, Credentials: map[string]any{"api_key": "changed"}})
 	require.NoError(t, err)
@@ -107,7 +107,7 @@ func TestAnthropicCompatRejectsMalformedProfileAtWriteEntrypoints(t *testing.T) 
 	for _, value := range []any{"", nil, "OFF", "claude_code_v1", "claude_code_v2"} {
 		for _, entry := range []string{"create", "update", "extra", "bulk"} {
 			t.Run(fmt.Sprintf("%v/%s", value, entry), func(t *testing.T) {
-				account := compatConfigTestAccount()
+				account := compatTestAccount()
 				repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: account}}
 				svc := &adminServiceImpl{accountRepo: repo}
 				extra := map[string]any{AnthropicCompatProfileExtraKey: value}
@@ -127,7 +127,7 @@ func TestAnthropicCompatRejectsMalformedProfileAtWriteEntrypoints(t *testing.T) 
 				require.Len(t, repo.accounts, 1)
 				require.Empty(t, repo.bulkUpdates)
 				require.Empty(t, repo.updates)
-				require.Equal(t, "claude_code", repo.accounts[account.ID].Extra[AnthropicCompatProfileExtraKey])
+				require.Equal(t, AnthropicCompatProfileClaudeCode, repo.accounts[account.ID].Extra[AnthropicCompatProfileExtraKey])
 			})
 		}
 	}
@@ -141,9 +141,9 @@ func TestAnthropicCompatBulkPreflightRejectsMissingExplicitProfileAndLoadedConfl
 		extra       map[string]any
 		missing     bool
 	}{
-		{"explicit-profile-missing", AnthropicCompatProfileOff, nil, map[string]any{AnthropicCompatProfileExtraKey: "claude_code"}, true},
-		{"loaded-profile-header-conflict", "claude_code", map[string]any{credKeyHeaderOverrideEnabled: true, credKeyHeaderOverrides: map[string]any{"user-agent": "other"}}, nil, false},
-		{"loaded-profile-passthrough-conflict", "claude_code", nil, map[string]any{"anthropic_passthrough": true}, false},
+		{"explicit-profile-missing", AnthropicCompatProfileOff, nil, map[string]any{AnthropicCompatProfileExtraKey: AnthropicCompatProfileClaudeCode}, true},
+		{"loaded-profile-header-conflict", AnthropicCompatProfileClaudeCode, map[string]any{credKeyHeaderOverrideEnabled: true, credKeyHeaderOverrides: map[string]any{"user-agent": "other"}}, nil, false},
+		{"loaded-profile-passthrough-conflict", AnthropicCompatProfileClaudeCode, nil, map[string]any{"anthropic_passthrough": true}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{
@@ -169,13 +169,13 @@ func TestAnthropicCompatAdmissionLifecycle(t *testing.T) {
 	ctx := context.Background()
 	repo := &upstreamBillingProbeAccountRepo{}
 	svc := &adminServiceImpl{accountRepo: repo}
-	account, err := svc.CreateAccount(ctx, &CreateAccountInput{Name: "compat", Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "fixture"}, Extra: map[string]any{AnthropicCompatProfileExtraKey: "claude_code", AnthropicCompatNewSessionsExtraKey: false}, SkipDefaultGroupBind: true})
+	account, err := svc.CreateAccount(ctx, &CreateAccountInput{Name: "compat", Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "fixture"}, Extra: map[string]any{AnthropicCompatProfileExtraKey: AnthropicCompatProfileClaudeCode, AnthropicCompatNewSessionsExtraKey: false}, SkipDefaultGroupBind: true})
 	require.NoError(t, err)
 	require.Len(t, account.AnthropicCompatIdentitySeed(), 64)
 	seed := account.AnthropicCompatIdentitySeed()
 	updated, err := svc.UpdateAccount(ctx, account.ID, &UpdateAccountInput{Extra: map[string]any{}})
 	require.NoError(t, err)
-	require.Equal(t, "claude_code", updated.Extra[AnthropicCompatProfileExtraKey])
+	require.Equal(t, AnthropicCompatProfileClaudeCode, updated.Extra[AnthropicCompatProfileExtraKey])
 	require.Equal(t, false, updated.Extra[AnthropicCompatNewSessionsExtraKey])
 	require.Equal(t, seed, updated.AnthropicCompatIdentitySeed())
 	for _, invalid := range []any{nil, "false", 0} {
@@ -200,8 +200,8 @@ func TestAnthropicCompatProfileWriteEntrypoints(t *testing.T) {
 	for _, entry := range []string{"create_import", "edit", "extra", "bulk", "duplicate"} {
 		t.Run(entry, func(t *testing.T) {
 			ctx := context.Background()
-			extraInput := map[string]any{AnthropicCompatProfileExtraKey: "claude_code"}
-			account := compatConfigTestAccount()
+			extraInput := map[string]any{AnthropicCompatProfileExtraKey: AnthropicCompatProfileClaudeCode}
+			account := compatTestAccount()
 			repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: account}}
 			svc := &adminServiceImpl{accountRepo: repo}
 			var extra map[string]any
@@ -229,8 +229,8 @@ func TestAnthropicCompatProfileWriteEntrypoints(t *testing.T) {
 				extra = copied.Extra
 				require.NotEqual(t, account.AnthropicCompatIdentitySeed(), copied.AnthropicCompatIdentitySeed())
 			}
-			require.Equal(t, "claude_code", extra[AnthropicCompatProfileExtraKey])
-			require.Equal(t, "claude_code", extraInput[AnthropicCompatProfileExtraKey], "caller input must be preserved")
+			require.Equal(t, AnthropicCompatProfileClaudeCode, extra[AnthropicCompatProfileExtraKey])
+			require.Equal(t, AnthropicCompatProfileClaudeCode, extraInput[AnthropicCompatProfileExtraKey], "caller input must be preserved")
 		})
 	}
 }
@@ -252,7 +252,7 @@ func TestAnthropicCompatCredentialIdentitySeedChanges(t *testing.T) {
 		{name: "bearer", extra: map[string]any{anthropicAPIKeyAuthSchemeExtraKey: AnthropicAPIKeyAuthSchemeAuthorizationBearer}, changed: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			account := compatConfigTestAccount()
+			account := compatTestAccount()
 			account.Credentials = map[string]any{"api_key": "fixture"}
 			seed := account.AnthropicCompatIdentitySeed()
 			repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: account}}
@@ -264,7 +264,7 @@ func TestAnthropicCompatCredentialIdentitySeedChanges(t *testing.T) {
 }
 
 func TestAnthropicCompatDisabledSeedStillTracksCredentialChanges(t *testing.T) {
-	account := compatConfigTestAccount()
+	account := compatTestAccount()
 	account.Extra[AnthropicCompatProfileExtraKey] = AnthropicCompatProfileOff
 	seed := account.AnthropicCompatIdentitySeed()
 	repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: account}}
@@ -278,8 +278,8 @@ func TestAnthropicCompatDisabledSeedStillTracksCredentialChanges(t *testing.T) {
 	require.NotEqual(t, seed, changed.AnthropicCompatIdentitySeed())
 }
 
-func compatConfigTestAccount() *Account {
-	return &Account{ID: 71, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "fixture", "base_url": "https://api.anthropic.com"}, Extra: map[string]any{AnthropicCompatProfileExtraKey: AnthropicCompatProfileClaudeCodeV2, AnthropicCompatIdentitySeedExtraKey: strings.Repeat("ab", 32)}}
+func compatTestAccount() *Account {
+	return &Account{ID: 71, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "synthetic-upstream-key", "base_url": "https://api.anthropic.com"}, Extra: map[string]any{AnthropicCompatProfileExtraKey: AnthropicCompatProfileClaudeCode, AnthropicCompatIdentitySeedExtraKey: strings.Repeat("ab", 32)}}
 }
 
 func TestNormalizeAnthropicCompatCredentials(t *testing.T) {

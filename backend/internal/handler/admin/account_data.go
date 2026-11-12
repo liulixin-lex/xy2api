@@ -510,7 +510,7 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 				for key, value := range item.Extra {
 					extra[key] = value
 				}
-				extra[service.AnthropicCompatProfileExtraKey] = "claude_code"
+				extra[service.AnthropicCompatProfileExtraKey] = service.AnthropicCompatProfileClaudeCode
 				accountInput.Extra = extra
 			}
 		}

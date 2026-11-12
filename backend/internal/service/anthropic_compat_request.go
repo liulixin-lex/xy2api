@@ -1,17 +1,13 @@
 package service
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -221,185 +217,6 @@ func logAnthropicCompatAttempt(ctx context.Context, account *Account, model, dec
 	}
 	requestID, _ := ctx.Value(ctxkey.RequestID).(string)
 	logger.L().Info("gateway.anthropic_compat_attempt", zap.String("request_id", requestID), zap.Int64("account_id", account.ID), zap.String("entry", entry), zap.String("model", model), zap.String("decision", decision), zap.String("reason", reason))
-}
-
-// BuildAnthropicCompatDiagnosticRequest keeps the diagnostic on the same
-// deterministic envelope, identity and header adapter as live requests.
-func BuildAnthropicCompatDiagnosticRequest(account *Account, body []byte, headers http.Header) ([]byte, http.Header, error) {
-	profile, err := ResolveAnthropicCompatProfile(account)
-	if err != nil {
-		return nil, nil, err
-	}
-	out := headers.Clone()
-	if profile == nil {
-		return body, out, nil
-	}
-	model := gjson.GetBytes(body, "model").String()
-	if !profile.SupportsModel(model) {
-		return nil, nil, fmt.Errorf("model %q is not supported by the compatibility account", model)
-	}
-	request := &anthropicCompatRequest{Entry: "diagnostic", Anchor: uuid.NewString()}
-	metadata, err := compatIdentity(account, request.UserID, request.KeyID, request.Anchor)
-	if err != nil {
-		return nil, nil, err
-	}
-	beta, err := compatResolveBeta(&anthropicCompatPlan{Profile: profile}, headers.Get("anthropic-beta"), "", nil)
-	if err != nil {
-		return nil, nil, err
-	}
-	adapted, err := compatInjectBody(body, profile, metadata)
-	if err != nil {
-		return nil, nil, err
-	}
-	applyAnthropicCompatHeaders(out, &anthropicCompatPlan{Active: true, Profile: profile, Metadata: metadata, Beta: beta})
-	return adapted, out, nil
-}
-
-type anthropicCompatDiagnosticBody struct {
-	source                           io.ReadCloser
-	reader                           *bufio.Reader
-	pending                          []byte
-	done                             bool
-	sawStart, sawStopReason, sawStop bool
-	openBlocks                       int
-	terminalErr                      error
-}
-
-func newAnthropicCompatDiagnosticBody(_ context.Context, source io.ReadCloser) io.ReadCloser {
-	return &anthropicCompatDiagnosticBody{source: source, reader: bufio.NewReaderSize(source, 32*1024)}
-}
-
-func (b *anthropicCompatDiagnosticBody) Close() error { return b.source.Close() }
-func (b *anthropicCompatDiagnosticBody) Read(p []byte) (int, error) {
-	if len(p) == 0 {
-		return 0, nil
-	}
-	if len(b.pending) > 0 {
-		n := copy(p, b.pending)
-		b.pending = b.pending[n:]
-		return n, nil
-	}
-	if b.terminalErr != nil {
-		err := b.terminalErr
-		b.terminalErr = nil
-		return 0, err
-	}
-	if b.done {
-		return 0, io.EOF
-	}
-	frame, err := b.readEvent()
-	if len(frame) == 0 {
-		if errors.Is(err, io.EOF) && b.sawStop {
-			b.done = true
-			return 0, io.EOF
-		}
-		b.done = true
-		b.terminalErr = io.ErrUnexpectedEOF
-		return 0, b.terminalErr
-	}
-	if err != nil {
-		b.done = true
-		b.terminalErr = io.ErrUnexpectedEOF
-		return 0, b.terminalErr
-	}
-	normalized, validationErr := b.observeEvent(frame)
-	if validationErr != nil {
-		b.done = true
-		b.terminalErr = validationErr
-		return 0, validationErr
-	}
-	b.pending = normalized
-	n := copy(p, b.pending)
-	b.pending = b.pending[n:]
-	return n, nil
-}
-
-func (b *anthropicCompatDiagnosticBody) readEvent() ([]byte, error) {
-	var event []byte
-	lineBytes := 0
-	var lineFirst byte
-	for {
-		fragment, err := b.reader.ReadSlice('\n')
-		if len(event)+len(fragment) > 8<<20 {
-			return nil, bufio.ErrTooLong
-		}
-		if lineBytes == 0 && len(fragment) > 0 {
-			lineFirst = fragment[0]
-		}
-		lineBytes += len(fragment)
-		event = append(event, fragment...)
-		if errors.Is(err, bufio.ErrBufferFull) {
-			continue
-		}
-		if err != nil {
-			return event, err
-		}
-		if lineBytes == 1 && lineFirst == '\n' || lineBytes == 2 && lineFirst == '\r' && bytes.HasSuffix(fragment, []byte("\n")) {
-			return event, nil
-		}
-		lineBytes = 0
-	}
-}
-
-func (b *anthropicCompatDiagnosticBody) observeEvent(event []byte) ([]byte, error) {
-	var eventName string
-	var data []string
-	for _, raw := range strings.Split(string(event), "\n") {
-		line := strings.TrimSuffix(raw, "\r")
-		if strings.HasPrefix(line, "event:") {
-			eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-		} else if strings.HasPrefix(line, "data:") {
-			value := strings.TrimPrefix(line, "data:")
-			if strings.HasPrefix(value, " ") {
-				value = value[1:]
-			}
-			data = append(data, value)
-		}
-	}
-	if len(data) == 0 {
-		return event, nil
-	}
-	payload := []byte(strings.Join(data, "\n"))
-	if !json.Valid(payload) {
-		return nil, fmt.Errorf("invalid Anthropic diagnostic event JSON")
-	}
-	kind := gjson.GetBytes(payload, "type").String()
-	if eventName != "" && kind != "" && eventName != kind {
-		return nil, fmt.Errorf("Anthropic diagnostic event name does not match payload")
-	}
-	if kind == "" {
-		kind = eventName
-	}
-	switch kind {
-	case "message_start":
-		b.sawStart = true
-	case "content_block_start":
-		b.openBlocks++
-	case "content_block_stop":
-		if b.openBlocks == 0 {
-			return nil, fmt.Errorf("Anthropic diagnostic block stop has no open block")
-		}
-		b.openBlocks--
-	case "message_delta":
-		if gjson.GetBytes(payload, "delta.stop_reason").String() != "" {
-			b.sawStopReason = true
-		}
-	case "message_stop":
-		if !b.sawStart || !b.sawStopReason || b.openBlocks != 0 {
-			return nil, fmt.Errorf("incomplete Anthropic diagnostic response")
-		}
-		b.sawStop = true
-	case "error":
-		return nil, fmt.Errorf("Anthropic diagnostic upstream returned an error event")
-	}
-	var compact bytes.Buffer
-	if err := json.Compact(&compact, payload); err != nil {
-		return nil, err
-	}
-	if kind == "" {
-		return event, nil
-	}
-	return []byte("event: " + kind + "\ndata: " + compact.String() + "\n\n"), nil
 }
 
 // beginAnthropicForwardAttempt clears account-local state on every forwarding

@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"encoding/hex"
 	"maps"
 	"strings"

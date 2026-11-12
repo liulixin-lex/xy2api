@@ -24,7 +24,7 @@ func TestAnthropicCompatBulkSeedsAndAdminLifecyclePostgres(t *testing.T) {
 		ids = append(ids, account.ID)
 		t.Cleanup(func() { _ = repo.Delete(ctx, account.ID) })
 	}
-	result, err := svc.BulkUpdateAccounts(ctx, &service.BulkUpdateAccountsInput{AccountIDs: ids, Extra: map[string]any{service.AnthropicCompatProfileExtraKey: "claude_code", service.AnthropicCompatIdentitySeedExtraKey: "untrusted"}})
+	result, err := svc.BulkUpdateAccounts(ctx, &service.BulkUpdateAccountsInput{AccountIDs: ids, Extra: map[string]any{service.AnthropicCompatProfileExtraKey: service.AnthropicCompatProfileClaudeCode, service.AnthropicCompatIdentitySeedExtraKey: "untrusted"}})
 	require.NoError(t, err)
 	require.Equal(t, 2, result.Success)
 	one, err := repo.GetByID(ctx, ids[0])
@@ -37,7 +37,7 @@ func TestAnthropicCompatBulkSeedsAndAdminLifecyclePostgres(t *testing.T) {
 	updated, err := svc.UpdateAccount(ctx, one.ID, &service.UpdateAccountInput{Extra: map[string]any{}})
 	require.NoError(t, err)
 	require.Equal(t, seed, updated.AnthropicCompatIdentitySeed())
-	require.Equal(t, "claude_code", updated.Extra[service.AnthropicCompatProfileExtraKey])
+	require.Equal(t, service.AnthropicCompatProfileClaudeCode, updated.Extra[service.AnthropicCompatProfileExtraKey])
 	require.NotContains(t, updated.Extra, "quota_limit")
 	_, err = svc.BulkUpdateAccounts(ctx, &service.BulkUpdateAccountsInput{
 		AccountIDs: ids, Credentials: map[string]any{"api_key": " fixture ", "base_url": " https://relay.example/// "},
@@ -59,7 +59,7 @@ func TestAnthropicCompatBulkSeedsAndAdminLifecyclePostgres(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, seed, updated.AnthropicCompatIdentitySeed(), "changing the auth scheme must rotate the seed")
 	seed = updated.AnthropicCompatIdentitySeed()
-	require.NoError(t, svc.UpdateAccountExtra(ctx, one.ID, map[string]any{service.AnthropicCompatProfileExtraKey: "claude_code", service.AnthropicCompatIdentitySeedExtraKey: "untrusted"}))
+	require.NoError(t, svc.UpdateAccountExtra(ctx, one.ID, map[string]any{service.AnthropicCompatProfileExtraKey: service.AnthropicCompatProfileClaudeCode, service.AnthropicCompatIdentitySeedExtraKey: "untrusted"}))
 	updated, err = repo.GetByID(ctx, one.ID)
 	require.NoError(t, err)
 	require.Equal(t, seed, updated.AnthropicCompatIdentitySeed())
