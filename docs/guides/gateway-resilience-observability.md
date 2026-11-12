@@ -101,21 +101,75 @@ SLA 口径：选号阶段找不到可用账号的无号 503 计入 SLA；余额�
 
 ### 质量状态
 
-OpenAI 账号 × 模型 × 分组的质量状态（见 [分组质量门槛](group-quality-gate.md)）在进入冷却、再冷却一轮、回到正常与被管理员恢复时各写一条 Info 日志 `sched_quality.state`（组件 `sched_quality`）。它虽是 Info 级，也写入运维监控的系统日志，可按组件筛选：
+OpenAI 质量状态（见 [分组质量门槛](group-quality-gate.md)）写下面五种日志，都带组件 `sched_quality`。Info 级的也写入运维监控的系统日志，可按组件筛选。字段只有数值、短的取值与内部 ID，不含请求或响应内容、错误原文、凭据、邮箱或 IP。
+
+| 事件 | 何时写 | 级别 |
+|---|---|---|
+| `sched_quality.summary` | 每个实例每 5 分钟一条（启动 5 分钟后第一条） | Info |
+| `sched_quality.state` | 进入冷却、再冷却一轮、回到正常、被管理员恢复 | Info |
+| `sched_quality.test` | 每次测试结束一条，含作废的 | Info |
+| `sched_quality.takeover` | 会话改绑成功一条；改绑失败不写 | Info |
+| `sched_quality.cleanup` | 每次清理真正执行一条 | Info；失败为 Error |
+
+另有 `sched_quality.cycle`：单次评估超过 5 秒时写一条 Warn（`duration_ms`），同一个 5 分钟内只写第一条；评估本身失败仍记 Error。正常的评估不逐条写日志。
+
+**`sched_quality.summary`**：
+
+| 字段 | 含义 |
+|---|---|
+| `cycles`、`cycles_failed` | 这 5 分钟里的评估次数与失败次数；每个实例每 5 秒评估一次，正常约 60 |
+| `cycle_ms_max` | 最慢一次评估的毫秒数 |
+| `tests`、`tests_aborted` | 本实例开始的测试数、作废的测试数 |
+| `cooled`、`released` | 进入冷却（含再冷却一轮）、回到正常的状态行次。只计评估成功提交的变化，多实例时只记在写入的那个实例上；管理员恢复不计 |
+
+**`sched_quality.state`**：
 
 | 字段 | 含义 |
 |---|---|
 | `account_id`、`model`、`group_id` | 状态行；`model` 是调度模型名 |
 | `from`、`to` | `normal` 或 `cooling` |
-| `reason` | 冷却原因 `speed`、`error`、`cache`、`acute_timeout`、`test_speed`、`test_error`、`test_cache`；回到正常时为空或 `unverified` |
-| `level` | 冷却级数（0–6） |
-| `via` | 只在回到正常时出现：`pass`（导致冷却的维度合格）、`no_conclusion`（主动测试关闭或到点后 10 分钟仍没有结论，放行）、`gate_off`（分组没开门槛，到点放行）、`reset`（管理员恢复） |
+| `reason` | 冷却原因 `speed`、`error`、`cache`、`acute_timeout`、`test_speed`、`test_error`（旧版本留下的行可能是 `test_cache`）；回到正常时为空或 `unverified` |
+| `level` | 冷却级数（0–5；旧版本留下的行可能为 6） |
+| `until` | 只在进入或留在冷却时出现：这一轮的到点时刻 |
+| `via` | 只在回到正常时出现，按到点顺序取第一个成立的：`gate_off`（分组没开门槛）、`real_pass`（导致冷却的维度按真实数据合格）、`test_pass`（按测试合格）、`screen_clean`（这一轮有干净的测试）、`tests_off`（主动测试关闭，放行）、`wait_max`（到点满 10 分钟，放行）；管理员恢复为 `reset` |
 | `speed_n`、`speed_p90_ms`、`speed_p90_timeout`、`error_n`、`error_rate`、`error_lcb`、`cache_n`、`cache_ratio` | 本行窗口里的三个数与各自的条数 |
 | `speed_verdict`、`error_verdict`、`cache_verdict` | 各维的有效结论：`pass`、`marginal`、`fail`、`nodata` |
-| `speed_from_test`、`error_from_test`、`cache_from_test` | 该维结论是否来自主动测试 |
-| `test_speed_n`、`test_speed_slow`、`test_max_ttfo_ms`、`test_error_n`、`test_faults`、`test_cache_n`、`test_cache_ratio` | 这一轮主动测试合并后的轮数、超限轮数、最大续轮首字、故障轮数与缓存命中率 |
+| `speed_from_test`、`error_from_test`、`cache_from_test` | 该维结论是否来自主动测试（缓存维恒为 false） |
+| `test_speed_n`、`test_speed_slow`、`test_max_ttfo_ms`、`test_error_n`、`test_faults`、`test_cache_n`、`test_cache_ratio` | 这一轮测试合并后的轮数、超限轮数、最大续轮首字、故障轮数与缓存命中率（缓存两项只作记录） |
 
-“合格恢复”与“到时放行”按 `via` 分开统计。评估本身失败记 Error 级 `sched_quality.cycle`（写入系统日志）。
+`gate_off`、`tests_off`、`wait_max` 放行的是“未经验证”的恢复，`real_pass`、`test_pass`、`screen_clean` 不是。
+
+**`sched_quality.test`**：
+
+| 字段 | 含义 |
+|---|---|
+| `test_id`、`account_id`、`model` | 测试记录与测的模型 |
+| `auto` | `true` 为自动筛查，`false` 为手动测试 |
+| `result` | `clean`（干净）、`dirty`（已结束但不干净）、`aborted`（作废） |
+| `abort_reason` | 只在作废时出现：`not_schedulable`、`busy`、`error`、`timeout` |
+| `blocked_by` | 只在因硬准入作废（`not_schedulable`）时出现，说明被什么挡住：`rate_limited`（限流）、`balance`（余额）、`auth`（鉴权）、`paused`（其他临时暂停，含分不清的）、`disabled`（停用、调度关闭、已过期）、`overloaded`（过载）、`quota`（额度或用量阈值）、`model`（模型不支持或被限，含智商门）、`other` |
+| `input_tokens`、`cached_tokens` | 这次测试的输入 Token 与其中命中缓存的部分 |
+| `duration_ms` | 从开始到结束的毫秒数 |
+
+**`sched_quality.takeover`**：
+
+| 字段 | 含义 |
+|---|---|
+| `kind` | `takeover`（接管到更高优先级的账号）或 `migrate`（属主在后排时迁出） |
+| `gateway_request_id` | 触发改绑的请求的网关本地 ID |
+| `group_id`、`model` | 分组与调度模型名 |
+| `from_account_id`、`to_account_id` | 原属主与新属主 |
+
+**`sched_quality.cleanup`**：
+
+| 字段 | 含义 |
+|---|---|
+| `kind` | `ledger`（过期的尝试记录）、`tests`（过期的测试记录）、`stale`（回收进程重启遗留的在跑测试；只在回收到记录时写） |
+| `rows` | 删除或回收的行数 |
+| `duration_ms` | 耗时毫秒数 |
+| `error` | 只在失败时出现：`db`、`timeout` 或 `internal` |
+
+尝试记录与测试记录每小时清理一次，由一个实例执行。
 
 ### 请求关联字段
 
@@ -124,12 +178,14 @@ OpenAI 账号 × 模型 × 分组的质量状态（见 [分组质量门槛](grou
 | 字段 | 含义 |
 |---|---|
 | `request_id` | 请求 ID，与运维错误记录、访问日志相同 |
-| `gateway_request_id` | 网关为每个请求生成的本地 ID，客户端无法指定 |
+| `gateway_request_id` | 网关为每个请求生成的本地 ID，客户端无法指定；与质量状态尝试记录（`account_attempt_samples`）的 `request_id` 相同 |
 | `model` | 入站请求的模型 |
 | `delivered_bytes` | 已送达客户端的内容字节（开场与心跳不算） |
 | `ms_since_first_output` | 距第一次写出内容的毫秒数，尚未输出时为 0 |
 | `prelude_release_event` | 结束开场暂存、开始向客户端输出的那个上游事件类型 |
 | `prelude_release_ms` | 上一项距 `response.created` 的毫秒数 |
+
+访问日志（组件 `http.access`）也带 `gateway_request_id`，取同一个本地 ID；客户端传来的同名请求头不会改变它，没有经过网关的请求（如管理接口）不带这个字段，原有的 `request_id` 不变。访问日志是否写入系统日志仍由运维监控“系统日志”里的“将访问日志写入数据库”决定（默认关）。
 
 ## 排障
 
@@ -142,5 +198,11 @@ OpenAI 账号 × 模型 × 分组的质量状态（见 [分组质量门槛](grou
 **某个账号余额已补足但仍不被选中**：账号列表中原因以 `balance:` 开头时，点“恢复状态”立即放回，并复位暂停档位。
 
 **非流式请求总是 503 并提示改用 stream**：账号被学为仅流式。在账号列表清除学习记录，或让客户端改发流式请求。
+
+**OpenAI 账号的冷却、恢复或会话搬动看不明白**：在运维监控的系统日志里按组件 `sched_quality` 筛选（字段见 [质量状态](#质量状态)）。
+
+1. 先看 `sched_quality.summary` 是否每 5 分钟按时出现、周期是否变慢：每个实例约 60 次评估；`cycles_failed` 大于 0、`cycle_ms_max` 变大或出现 `sched_quality.cycle` 的 Warn，说明评估变慢或失败，多半是数据库慢。`tests` 与 `tests_aborted` 可用来核对测试次数。
+2. 再按账号看 `sched_quality.state`：何时冷却、原因、`until` 到点时刻，靠什么回到正常（`via`）；以及 `sched_quality.test`：筛查是否干净、用了多少 Token，作废时被什么挡住（`blocked_by`）。
+3. 会话搬动看 `sched_quality.takeover`：用其中的 `gateway_request_id` 对上访问日志的同名字段与尝试记录的 `request_id`，找到触发改绑的那条请求（访问日志要开启“将访问日志写入数据库”才在系统日志里）。
 
 **设置保存后其他实例行为没变**：其他实例每 10 秒刷新；若长时间未生效，查找 `resilience.settings_refresh_failed`。
