@@ -14,7 +14,7 @@ import policyFixture from '@/__tests__/fixtures/schedQuality/policy.json'
 import resetFixture from '@/__tests__/fixtures/schedQuality/reset.json'
 import SchedAccountDrawer from '../SchedAccountDrawer.vue'
 import SchedGroupsCell from '../SchedGroupsCell.vue'
-import SchedNumberCell from '../SchedNumberCell.vue'
+import AccountRecentStatsCell from '@/components/admin/account/AccountRecentStatsCell.vue'
 import SchedResetDialog from '../SchedResetDialog.vue'
 import SchedBatchDialog from '../SchedBatchDialog.vue'
 import SchedOverridePopover from '../SchedOverridePopover.vue'
@@ -97,10 +97,16 @@ describe('quality UI copy', () => {
     const summary = (summaryFixture as { accounts: SchedAccountSummary[] }).accounts[0]
     const Host = defineComponent({
       setup: () => () => [
-        h(SchedNumberCell, { accountId: 479, dim: 'ttfo', summary }),
-        h(SchedGroupsCell, { summary, groupName: () => '晨星组' }),
-        h(SchedGroupsCell, { summary: { ...summary, cooling: [], groups: { total: 2, normal: 0, cooling: 0, nodata: 2 } }, groupName: () => '' }),
-        h(SchedGroupsCell, { summary: { ...summary, cooling: [{ ...summary.cooling[0], testing: true }], cooling_more: 2 }, groupName: () => '北辰组' }),
+        h(AccountRecentStatsCell, { accountId: 479, stats: { account_id: 479, ttft: { p50_ms: 2800, n: 37, tier: 'good' }, error: null, cache: { ratio: null, n: 0, tier: null } } }),
+        h(AccountRecentStatsCell, { accountId: 480 }),
+        h(SchedGroupsCell, { summary, openai: true, groupName: () => '晨星组' }),
+        h(SchedGroupsCell, { summary: { ...summary, cooling: [], groups: { total: 2, normal: 0, cooling: 0, nodata: 2 } }, openai: true, groupName: () => '' }),
+        h(SchedGroupsCell, { summary: { ...summary, cooling: [{ ...summary.cooling[0], testing: true }] }, openai: true, groupName: () => '北辰组' }),
+        h(SchedGroupsCell, {
+          summary: { ...summary, overrides: [{ group_id: 0, mode: 'exempt', expires_at: null }, { group_id: 53, mode: 'demote', expires_at: '2026-11-14T10:30:00Z' }] },
+          openai: true,
+          groupName: () => '晨星组'
+        }),
         h(SchedPauseMark, { globalEnabled: false }),
         h(SchedPauseMark, { globalEnabled: true, stale: true }),
         h(SchedAccountDrawer),

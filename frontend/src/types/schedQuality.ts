@@ -43,17 +43,28 @@ export interface SchedAccountSummaryCooling {
   testing: boolean
 }
 
+/** A current manual override; group_id 0 covers every group (contract delta D1). */
+export interface SchedAccountSummaryOverride {
+  group_id: number
+  mode: SchedOverrideMode
+  expires_at: string | null
+}
+
 export interface SchedAccountSummary {
   account_id: number
   model: string | null
   samples: number
+  /** ttfo, error and cache are kept by the API but no longer shown in the list (contract delta C5). */
   ttfo: { p90_ms: number | null; timeout: boolean; n: number }
   error: { rate: number | null; n: number }
   cache: { ratio: number | null; n: number }
   groups: { total: number; normal: number; cooling: number; nodata: number }
-  /** At most 3; the rest are counted in cooling_more. */
+  /** One item per cooling group, all of them. */
   cooling: SchedAccountSummaryCooling[]
+  /** Always 0. */
   cooling_more: number
+  /** Group 0 first, then by group id. */
+  overrides: SchedAccountSummaryOverride[]
 }
 
 export interface SchedAccountsSummary {
@@ -65,7 +76,25 @@ export interface SchedAccountsSummary {
 
 export interface SchedAccountsSummaryRequest {
   account_ids: number[]
-  model?: string
+}
+
+// ---- POST /admin/accounts/recent-stats/batch (contract delta C4) ----
+
+/** Set by the backend from its own thresholds; null below the sample minimum. */
+export type RecentStatsTier = 'good' | 'mid' | 'bad' | null
+
+export interface AccountRecentStats {
+  account_id: number
+  ttft: { p50_ms: number | null; n: number; tier: RecentStatsTier }
+  /** null while ops monitoring is off. */
+  error: { rate: number | null; bad: number; n: number; tier: RecentStatsTier } | null
+  cache: { ratio: number | null; n: number; tier: RecentStatsTier }
+}
+
+export interface AccountRecentStatsBatch {
+  as_of: string
+  /** One item per requested account, by account id. */
+  items: AccountRecentStats[]
 }
 
 // ---- GET /accounts/attention ----

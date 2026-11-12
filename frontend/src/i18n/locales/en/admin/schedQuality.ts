@@ -3,7 +3,6 @@ export default {
   schedQuality: {
     list: {
       recent: 'Recent',
-      mainModel: 'Main model',
       groups: 'Groups',
       membership: 'Membership',
     },
@@ -12,8 +11,16 @@ export default {
       error: 'Errors',
       cache: 'Cache',
     },
+    recent: {
+      samples: '{n} samples',
+      sep: ', ',
+    },
     filter: {
+      all: 'All quality states',
+      normal: 'Normal',
       cooling: 'Cooling',
+      exempt: 'Exempt',
+      demote: 'Demoted',
     },
     more: '+{n}',
     state: {
@@ -178,7 +185,6 @@ export default {
       accountRate: 'Account rate',
     },
     tip: {
-      source: '{model} · {n}',
       samples: '{n} samples',
       testRounds: 'Test · {n} rounds',
       recentlyFull: 'Just full',
@@ -188,6 +194,7 @@ export default {
       globalOff: 'Quality off',
       stale: 'Stale',
       editMembership: 'Edit groups',
+      until: 'Until {time}',
     },
     aria: {
       pass: 'Pass',

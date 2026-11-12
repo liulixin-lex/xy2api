@@ -44,6 +44,7 @@ vi.mock('@/api/admin', () => ({
       listWithEtag,
       getUpstreamBillingRatesWithEtag,
       getBatchTodayStats,
+      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
       getUpstreamBillingProbeSettings,
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       delete: vi.fn(),
@@ -220,7 +221,8 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-target-mode')).toBe('filtered')
   })
 
-  it('renders the created_at column by default', async () => {
+  it('renders the created_at column once the saved column settings show it', async () => {
+    localStorage.setItem('account-hidden-columns', '[]')
     listAccounts.mockResolvedValue({
       items: [
         {

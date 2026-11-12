@@ -52,14 +52,14 @@ describe('AccountColumnSettings', () => {
     expect(rowLabels(wrapper)).toEqual(['Status', 'Last used', 'ID'])
   })
 
-  it('toggles visibility from the label and only offers reset for a customised order', async () => {
+  it('toggles visibility from the label and only offers "restore default columns" when visibility or order differs from the default', async () => {
     const wrapper = mountSettings()
     await wrapper.findAll('[data-test="column-setting"] button')[1].trigger('click')
     expect(wrapper.emitted('toggle')).toEqual([['status']])
-    expect(wrapper.find('[data-test="reset-column-order"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="reset-columns"]').exists()).toBe(false)
 
     await wrapper.setProps({ customized: true })
-    await wrapper.get('[data-test="reset-column-order"]').trigger('click')
+    await wrapper.get('[data-test="reset-columns"]').trigger('click')
     expect(wrapper.emitted('reset')).toEqual([[]])
   })
 

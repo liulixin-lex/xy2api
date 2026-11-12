@@ -21,12 +21,8 @@ const base = '/admin/sched-quality'
 type RequestOptions = { signal?: AbortSignal }
 
 /** Summary for the account list; at most 1000 accounts per call. */
-export async function summary(accountIds: number[], model?: string, options?: RequestOptions): Promise<SchedAccountsSummary> {
-  const { data } = await apiClient.post<SchedAccountsSummary>(
-    `${base}/accounts/summary`,
-    { account_ids: accountIds, ...(model ? { model } : {}) },
-    { signal: options?.signal }
-  )
+export async function summary(accountIds: number[], options?: RequestOptions): Promise<SchedAccountsSummary> {
+  const { data } = await apiClient.post<SchedAccountsSummary>(`${base}/accounts/summary`, { account_ids: accountIds }, { signal: options?.signal })
   return data
 }
 

@@ -177,7 +177,7 @@ export default {
       toolActions: 'Tools',
       viewColumns: 'Columns',
       dragToReorderColumns: 'Drag to reorder columns',
-      resetColumnOrder: 'Reset column order',
+      resetColumns: 'Restore default columns',
       selectedCount: '{count} selected',
       dataExportConfirmMessage: 'The exported data contains sensitive account and proxy information. Store it securely.',
       dataExportConfirm: 'Confirm Export',
@@ -449,7 +449,6 @@ export default {
       },
       iqDiagnosticLabels: { request_id: 'Request ID', latency: 'Timing', tokens: 'Tokens', http_status: 'HTTP status', error: 'Error', retry_after: 'Retry-After', failure: 'Failed at' },
       iqCheckStatus: { smart: 'Smart', degraded: 'Degraded', unknown: 'Unknown' },
-      schedulableHint: 'Enable to include this account in API request scheduling',
       schedulableEnabled: 'Scheduling enabled',
       schedulableDisabled: 'Scheduling disabled',
       failedToToggleSchedulable: 'Failed to toggle scheduling status',
@@ -636,8 +635,6 @@ export default {
         expiresAt: 'Expires At',
         actions: 'Actions'
       },
-      capacityHint: 'The first badge is concurrency: current / limit. When the list is filtered to a group, a third green number shows the current concurrency in that group. Other badges appear per account settings: 5h window cost, active sessions, RPM, and D / W / total quota.',
-      usageWindowsHint: '"5h / 7d" are the upstream account\'s official rolling usage windows (e.g. OpenAI ChatGPT, Claude). They are imposed by the upstream provider on the account itself — not configured by xy2api, and unrelated to the models you map. Usage resets automatically once each window rolls over, and the limit cannot be lifted from within xy2api.',
       ollamaCloud: {
         title: 'Ollama Cloud usage',
         sessionSecurityHint: 'The browser session is encrypted at rest and sent only to the fixed official settings URL.',
