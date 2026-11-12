@@ -14,6 +14,7 @@
 
 ### 安全
 
+- 注册密码仅在内存中传递，不再写入浏览器存储；刷新邮箱验证页后回到注册页并回填非敏感字段。
 - 网关 API 及其别名响应固定使用 sandbox CSP，阻止上游 HTML 在站点同源执行；覆盖错误、流式与 Google query-key 路由。
 - 审计、审核、CRS、Vertex 令牌客户端停止跟随重定向，3xx 错误仅保留状态码与目标主机；补充白名单开关及初始密码说明。
 - 重定向错误处理同步覆盖 `securityaudit/prompt_qwen3guard.go`、`securityaudit/prompt_service.go`、`pkg/typesafe/client.go`；新增 `backend/internal/pkg/httpclient/redirect.go` 及 `redirect_test.go` 供客户端共享策略（前三个路径相对 `backend/internal`）。

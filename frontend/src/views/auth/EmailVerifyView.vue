@@ -206,6 +206,7 @@ import {
   loadAffiliateReferralCode,
   oauthAffiliatePayload
 } from '@/utils/oauthAffiliate'
+import { clearRegistrationPassword, takeRegistrationPassword } from './registrationState'
 
 const { t, locale } = useI18n()
 
@@ -225,7 +226,7 @@ const verifyCode = ref<string>('')
 const countdown = ref<number>(0)
 let countdownTimer: ReturnType<typeof setInterval> | null = null
 
-// Registration data from sessionStorage
+// Non-sensitive registration draft from sessionStorage; password stays in memory.
 type PendingAuthTokenField = 'pending_auth_token' | 'pending_oauth_token'
 type PendingAuthSessionSummary = {
   token: string
@@ -332,7 +333,7 @@ onMounted(async () => {
     try {
       const registerData = JSON.parse(registerDataStr)
       email.value = registerData.email || ''
-      password.value = registerData.password || ''
+      password.value = takeRegistrationPassword(email.value)
       initialTurnstileToken.value =
         registerData.tencent_captcha_ticket || registerData.turnstile_token || ''
       initialTencentCaptchaRandstr.value = registerData.tencent_captcha_randstr || ''
@@ -350,7 +351,10 @@ onMounted(async () => {
           }
         : null
       hasRegisterData.value = !!(email.value && password.value)
+      // Also discard passwords persisted by older versions before doing any async work.
+      clearStoredCaptchaProof()
     } catch {
+      sessionStorage.removeItem('register_data')
       hasRegisterData.value = false
     }
   } else if (activePendingSession) {
@@ -358,6 +362,12 @@ onMounted(async () => {
     pendingAuthTokenField.value = activePendingSession.token_field
     pendingProvider.value = activePendingSession.provider
     pendingRedirect.value = activePendingSession.redirect || ''
+  }
+
+  if (!hasRegisterData.value) {
+    clearPassword()
+    await router.push('/register')
+    return
   }
 
   // Load public settings
@@ -388,6 +398,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  clearPassword()
   if (countdownTimer) {
     clearInterval(countdownTimer)
     countdownTimer = null
@@ -566,6 +577,7 @@ async function sendCode(): Promise<void> {
       ? getPendingOAuthSendCodeSessionResponse(response as PendingOAuthSendVerifyCodeResponse)
       : null
     if (pendingSendCodeSession) {
+      clearPassword()
       sessionStorage.removeItem('register_data')
       persistPendingOAuthSession(
         pendingSendCodeSession.provider || pendingProvider.value,
@@ -607,12 +619,19 @@ function clearStoredCaptchaProof(): void {
 
   try {
     const registerData = JSON.parse(registerDataStr) as Record<string, unknown>
-    delete registerData.turnstile_token
-    delete registerData.tencent_captcha_ticket
-    delete registerData.tencent_captcha_randstr
-    sessionStorage.setItem('register_data', JSON.stringify(registerData))
+    sessionStorage.setItem('register_data', JSON.stringify({
+      email: registerData.email,
+      promo_code: registerData.promo_code,
+      invitation_code: registerData.invitation_code,
+      aff_code: registerData.aff_code,
+      pending_auth_token: registerData.pending_auth_token,
+      pending_auth_token_field: registerData.pending_auth_token_field,
+      pending_provider: registerData.pending_provider,
+      pending_redirect: registerData.pending_redirect,
+      pending_adoption_decision: registerData.pending_adoption_decision
+    }))
   } catch {
-    // Invalid registration state is handled by the existing onMounted parser.
+    sessionStorage.removeItem('register_data')
   }
 }
 
@@ -656,6 +675,8 @@ function validateForm(): boolean {
 async function handleVerify(): Promise<void> {
   errorMessage.value = ''
 
+  if (!hasRegisterData.value) return
+
   if (!validateForm()) {
     return
   }
@@ -669,6 +690,8 @@ async function handleVerify(): Promise<void> {
   if (!(await acquireCreateAccountActionProof())) {
     return
   }
+
+  if (!password.value) return
 
   isLoading.value = true
 
@@ -705,6 +728,7 @@ async function handleVerify(): Promise<void> {
         payload
       )
       if (isPendingOAuthSessionResponse(data)) {
+        clearPassword()
         sessionStorage.removeItem('register_data')
         persistPendingOAuthSession(data.provider || pendingProvider.value, data.redirect)
         await router.push(resolvePendingOAuthCallbackRoute(data.provider || pendingProvider.value))
@@ -736,6 +760,7 @@ async function handleVerify(): Promise<void> {
     }
 
     // Clear session data
+    clearPassword()
     sessionStorage.removeItem('register_data')
     clearAllAffiliateReferralCodes()
 
@@ -758,7 +783,14 @@ async function handleVerify(): Promise<void> {
   }
 }
 
+function clearPassword(): void {
+  password.value = ''
+  hasRegisterData.value = false
+  clearRegistrationPassword()
+}
+
 function handleBack(): void {
+  clearPassword()
   // Clear session data
   sessionStorage.removeItem('register_data')
 

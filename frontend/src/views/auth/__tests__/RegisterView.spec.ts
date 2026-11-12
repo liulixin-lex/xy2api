@@ -1,20 +1,29 @@
-import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import RegisterView from '@/views/auth/RegisterView.vue'
+import EmailVerifyView from '@/views/auth/EmailVerifyView.vue'
+import { createMemoryHistory, createRouter, RouterView, type Router } from 'vue-router'
+import { clearRegistrationPassword, takeRegistrationPassword } from '../registrationState'
+
+enableAutoUnmount(afterEach)
 
 const {
   getPublicSettingsMock,
   registerMock,
+  sendVerifyCodeMock,
   showErrorMock,
   pushMock,
   verifyActionMock,
-  appStoreMock
+  appStoreMock,
+  routerState
 } = vi.hoisted(() => ({
   getPublicSettingsMock: vi.fn(),
   registerMock: vi.fn(),
+  sendVerifyCodeMock: vi.fn(),
   showErrorMock: vi.fn(),
   pushMock: vi.fn(),
   verifyActionMock: vi.fn(),
+  routerState: { router: null as Router | null },
   appStoreMock: {
     cachedPublicSettings: null as { promo_code_enabled?: boolean } | null,
     showError: (...args: unknown[]) => showErrorMock(...args),
@@ -40,10 +49,17 @@ const publicSettings = {
   google_oauth_enabled: false
 }
 
-vi.mock('vue-router', () => ({
-  useRouter: () => ({ push: pushMock }),
-  useRoute: () => ({ query: {} })
-}))
+vi.mock('vue-router', async () => {
+  const actual = await vi.importActual<typeof import('vue-router')>('vue-router')
+  return {
+    ...actual,
+    onBeforeRouteLeave: (guard: Parameters<typeof actual.onBeforeRouteLeave>[0]) => {
+      if (routerState.router) actual.onBeforeRouteLeave(guard)
+    },
+    useRouter: () => routerState.router || { push: pushMock },
+    useRoute: () => routerState.router ? actual.useRoute() : { query: {} }
+  }
+})
 
 vi.mock('vue-i18n', () => ({
   createI18n: () => ({
@@ -69,13 +85,15 @@ vi.mock('@/api/auth', async () => {
   const actual = await vi.importActual<typeof import('@/api/auth')>('@/api/auth')
   return {
     ...actual,
-    getPublicSettings: (...args: unknown[]) => getPublicSettingsMock(...args)
+    getPublicSettings: (...args: unknown[]) => getPublicSettingsMock(...args),
+    sendVerifyCode: (...args: unknown[]) => sendVerifyCodeMock(...args)
   }
 })
 
-function mountRegister() {
-  return mount(RegisterView, {
+function mountRegister(router?: Router) {
+  return mount(router ? RouterView : RegisterView, {
     global: {
+      plugins: router ? [router] : [],
       stubs: {
         AuthLayout: { template: '<div><slot /><slot name="footer" /></div>' },
         Icon: true,
@@ -99,15 +117,56 @@ describe('RegisterView', () => {
   beforeEach(() => {
     getPublicSettingsMock.mockReset()
     registerMock.mockReset()
+    sendVerifyCodeMock.mockReset()
     showErrorMock.mockReset()
     pushMock.mockReset()
     verifyActionMock.mockReset()
     appStoreMock.cachedPublicSettings = null
-    sessionStorage.removeItem('register_data')
+    routerState.router = null
+    clearRegistrationPassword()
+    sessionStorage.clear()
+    localStorage.clear()
     verifyActionMock.mockResolvedValue({ token: 'ticket', randstr: 'randstr' })
     getPublicSettingsMock.mockResolvedValue(publicSettings)
     registerMock.mockResolvedValue({})
+    sendVerifyCodeMock.mockResolvedValue({ countdown: 60 })
   })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+    for (const storage of [sessionStorage, localStorage]) {
+      for (let i = 0; i < storage.length; i++) {
+        expect(storage.getItem(storage.key(i)!)).not.toContain('secret-123')
+      }
+    }
+  })
+
+  async function startVerificationFlow() {
+    getPublicSettingsMock.mockResolvedValue({
+      ...publicSettings, turnstile_enabled: false, email_verify_enabled: true
+    })
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/register', component: RegisterView },
+        { path: '/email-verify', component: EmailVerifyView },
+        { path: '/dashboard', component: { template: '<div>Dashboard</div>' } }
+      ]
+    })
+    routerState.router = router
+    await router.push('/register')
+    const wrapper = mountRegister(router)
+    await flushPromises()
+    await wrapper.get('#email').setValue('user@example.com')
+    await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('#confirmPassword').setValue('secret-123')
+    await wrapper.get('#affiliate_code').setValue('AFF123')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(router.currentRoute.value.path).toBe('/email-verify')
+    return { wrapper, router }
+  }
 
   it('does not flash the promo-code field before disabled settings finish loading', async () => {
     let resolveSettings!: (settings: typeof publicSettings) => void
@@ -177,6 +236,8 @@ describe('RegisterView', () => {
       invitation_code: undefined
     })
     expect(pushMock).toHaveBeenCalledWith('/dashboard')
+    expect((wrapper.get('#password').element as HTMLInputElement).value).toBe('')
+    expect((wrapper.get('#confirmPassword').element as HTMLInputElement).value).toBe('')
   })
 
   it('requires matching confirmation before storing only the registration fields for email verification', async () => {
@@ -201,11 +262,106 @@ describe('RegisterView', () => {
     await flushPromises()
 
     expect(JSON.parse(sessionStorage.getItem('register_data')!)).toEqual({
-      email: 'user@example.com',
-      password: 'secret-123'
+      email: 'user@example.com'
     })
     expect(pushMock).toHaveBeenCalledWith('/email-verify')
     expect(registerMock).not.toHaveBeenCalled()
+  })
+
+  it('hands the password to verification in memory and never writes it to browser storage', async () => {
+    const writes: string[] = []
+    for (const name of ['sessionStorage', 'localStorage'] as const) {
+      const storage = globalThis[name]
+      vi.stubGlobal(name, new Proxy(storage, {
+        get(target, key) {
+          if (key === 'setItem') return (item: string, value: string) => {
+            writes.push(value)
+            target.setItem(item, value)
+          }
+          const value = Reflect.get(target, key, target)
+          return typeof value === 'function' ? value.bind(target) : value
+        }
+      }))
+    }
+    const { wrapper, router } = await startVerificationFlow()
+    expect(JSON.parse(sessionStorage.getItem('register_data')!)).toEqual({
+      email: 'user@example.com', aff_code: 'AFF123'
+    })
+    await wrapper.get('#code').setValue('123456')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(registerMock).toHaveBeenCalledWith(expect.objectContaining({
+      email: 'user@example.com', password: 'secret-123', aff_code: 'AFF123', verify_code: '123456'
+    }))
+    expect(sessionStorage.getItem('register_data')).toBeNull()
+    expect(router.currentRoute.value.path).toBe('/dashboard')
+    expect(writes.length).toBeGreaterThan(0)
+    expect(writes.every((value) => !value.includes('secret-123'))).toBe(true)
+  })
+
+  it('returns from a refreshed verification page with a populated draft and empty password fields', async () => {
+    const { wrapper, router } = await startVerificationFlow()
+    wrapper.unmount()
+    const refreshed = mountRegister(router)
+    await flushPromises()
+
+    expect(router.currentRoute.value.path).toBe('/register')
+    expect((refreshed.get('#email').element as HTMLInputElement).value).toBe('user@example.com')
+    expect((refreshed.get('#affiliate_code').element as HTMLInputElement).value).toBe('AFF123')
+    expect((refreshed.get('#password').element as HTMLInputElement).value).toBe('')
+    expect((refreshed.get('#confirmPassword').element as HTMLInputElement).value).toBe('')
+    expect(sendVerifyCodeMock).toHaveBeenCalledOnce()
+    expect(registerMock).not.toHaveBeenCalled()
+  })
+
+  it('clears the password on browser back and requires a new one before verification can resume', async () => {
+    const { wrapper, router } = await startVerificationFlow()
+    router.back()
+    await flushPromises()
+
+    expect(router.currentRoute.value.path).toBe('/register')
+    expect((wrapper.get('#password').element as HTMLInputElement).value).toBe('')
+    await router.push('/email-verify')
+    await flushPromises()
+    expect(router.currentRoute.value.path).toBe('/register')
+    expect(sendVerifyCodeMock).toHaveBeenCalledOnce()
+    expect(registerMock).not.toHaveBeenCalled()
+  })
+
+  it('restores non-sensitive registration fields after verification is refreshed', async () => {
+    sessionStorage.setItem('register_data', JSON.stringify({
+      email: 'user@example.com', password: 'secret-123', promo_code: 'PROMO', invitation_code: 'INVITE', aff_code: 'AFF123'
+    }))
+    getPublicSettingsMock.mockResolvedValueOnce({ ...publicSettings, promo_code_enabled: true })
+    const wrapper = mountRegister()
+    await flushPromises()
+
+    expect((wrapper.get('#email').element as HTMLInputElement).value).toBe('user@example.com')
+    expect((wrapper.get('#promo_code').element as HTMLInputElement).value).toBe('PROMO')
+    expect((wrapper.get('#affiliate_code').element as HTMLInputElement).value).toBe('AFF123')
+    expect((wrapper.get('#password').element as HTMLInputElement).value).toBe('')
+    expect((wrapper.get('#confirmPassword').element as HTMLInputElement).value).toBe('')
+    expect(JSON.parse(sessionStorage.getItem('register_data')!)).toEqual({
+      email: 'user@example.com', promo_code: 'PROMO', invitation_code: 'INVITE', aff_code: 'AFF123'
+    })
+  })
+
+  it('discards the password handoff when navigation to verification is cancelled', async () => {
+    getPublicSettingsMock.mockResolvedValueOnce({
+      ...publicSettings, turnstile_enabled: false, email_verify_enabled: true
+    })
+    pushMock.mockResolvedValueOnce({ type: 4 })
+    const wrapper = mountRegister()
+    await flushPromises()
+    await wrapper.get('#email').setValue('user@example.com')
+    await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('#confirmPassword').setValue('secret-123')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(takeRegistrationPassword('user@example.com')).toBe('')
+    expect(sessionStorage.getItem('register_data')).not.toContain('password')
   })
 
   it('keeps the optional affiliate invitation field before Turnstile', async () => {
