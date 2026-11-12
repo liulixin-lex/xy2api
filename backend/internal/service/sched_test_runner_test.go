@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lib/pq"
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/pkg/schedtest"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
@@ -777,6 +778,7 @@ func TestSchedTestCleanupEvents(t *testing.T) {
 		{"deleted", 4, nil, ""}, {"empty", 0, nil, ""},
 		{"database", 0, errors.New("private database details"), "db"},
 		{"timeout", 0, fmt.Errorf("private wrapped: %w", context.DeadlineExceeded), "timeout"},
+		{"query_canceled", 0, fmt.Errorf("private wrapped: %w", &pq.Error{Code: "57014", Message: "private database details"}), "timeout"},
 		{"internal", 0, context.Canceled, "internal"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
