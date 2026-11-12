@@ -1,5 +1,5 @@
 <template>
-  <BaseDialog :show="reset.accountId !== null" :title="t('admin.schedQuality.action.reset')" :width="result ? 'normal' : 'narrow'" @close="close">
+  <BaseDialog ref="dialogRef" :show="reset.accountId !== null" :title="t('admin.schedQuality.action.reset')" :width="result ? 'normal' : 'narrow'" @close="close">
     <p class="text-sm font-medium text-gray-900 dark:text-white">{{ reset.accountName }}</p>
     <div v-if="result" class="mt-4 grid gap-4 sm:grid-cols-3" data-sq-reset-result>
       <section v-for="column in columns" :key="column.key" :data-column="column.key">
@@ -28,7 +28,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
@@ -45,6 +45,7 @@ const { reset } = useSchedLayers()
 const busy = ref(false)
 const failed = ref(false)
 const result = ref<SchedResetResult | null>(null)
+const dialogRef = ref<{ holdFocus: () => () => void } | null>(null)
 let doneFor: number | null = null
 
 watch(() => reset.accountId, () => {
@@ -71,7 +72,10 @@ async function run() {
   try {
     const response = await schedQualityAPI.reset(id)
     if (reset.accountId !== id) return
+    // The confirm buttons give way to the result: keep focus inside the dialog (spec 0.2).
+    const restore = dialogRef.value?.holdFocus()
     result.value = response
+    void nextTick(() => restore?.())
     doneFor = id
     markSchedChanged()
   } catch {
