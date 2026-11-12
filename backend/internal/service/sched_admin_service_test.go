@@ -378,6 +378,16 @@ func TestSchedAdminOverrideAndTestTickets(t *testing.T) {
 	require.Len(t, runner.Requests, 1)
 	require.Equal(t, "fallback", runner.Requests[0].Model)
 }
+
+func TestSchedAdminOverrideReasonStripsURLCredentialsBeforeEngine(t *testing.T) {
+	s, e, _ := schedAdminFixture()
+	reason := "maintenance https://proxy-user:proxy-secret@relay.example/private; retry socks5://second-user:second-secret@other.example:1080/path done"
+	err := s.SetOverride(context.Background(), SchedOverride{AccountID: 1, GroupID: 1, Mode: schedquality.OverrideDemote, Reason: reason, OperatorID: 7})
+	require.NoError(t, err)
+	require.Len(t, e.overrides, 1)
+	require.Equal(t, "maintenance https://***@relay.example/private; retry socks5://***@other.example:1080/path done", e.overrides[0].Reason)
+}
+
 func TestSchedAdminNarrowClearAndTempConflict(t *testing.T) {
 	s, e, r := schedAdminFixture()
 	a := r.rows[1]
