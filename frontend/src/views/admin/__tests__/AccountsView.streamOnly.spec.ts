@@ -8,6 +8,8 @@ const { listAccounts, clearCapabilityLearning } = vi.hoisted(() => ({
   clearCapabilityLearning: vi.fn()
 }))
 
+// AccountsView loads the quality summary on mount; a real request would fail after the test file finishes.
+vi.mock('@/api/admin/schedQuality', () => ({ default: { summary: vi.fn().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: [] }) } }))
 vi.mock('@/api/admin/accountCapability', async () => {
   const actual = await vi.importActual<typeof import('@/api/admin/accountCapability')>('@/api/admin/accountCapability')
   return { ...actual, clearCapabilityLearning }
