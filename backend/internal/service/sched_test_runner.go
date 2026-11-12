@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/schedtest"
@@ -126,6 +127,10 @@ func schedTestStoreErrorClass(err error) string {
 	}
 	if errors.Is(err, context.Canceled) {
 		return "internal"
+	}
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) && pqErr.Code == "57014" {
+		return "timeout"
 	}
 	return "db"
 }
