@@ -91,7 +91,7 @@ func TestSchedAdminAttentionActiveOverrideRecords(t *testing.T) {
 	}
 	out, err := s.Attention(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, SchedAdminAttention{Cooling: []int64{1}, Exempt: []int64{1, 2, 3, 4}, Demote: []int64{1, 4}}, out)
+	require.Equal(t, SchedAdminAttention{Cooling: []int64{}, Exempt: []int64{1, 2, 3, 4}, Demote: []int64{1, 4}}, out)
 	require.Contains(t, out.Filter("normal").IDs, int64(1))
 	require.True(t, out.Filter("normal").Exclude)
 	e.snapshot.Overrides = nil
@@ -249,5 +249,47 @@ func TestSchedAdminManualDefaultRegistersOneModel(t *testing.T) {
 			require.Equal(t, []fakeSchedTestRequest{{AccountID: 1, Model: tc.want, Auto: false, OperatorID: 7}}, runner.Requests)
 			require.Equal(t, []SchedAdminTestTests{{Model: tc.want, TestID: "ticket", Started: true}}, out.Tests)
 		})
+	}
+}
+
+func TestSchedAdminAttentionCoolingMatchesVisibleCapsules(t *testing.T) {
+	s, e, _ := schedAdminFixture()
+	p, now := e.snapshot, s.d.Now()
+	p.Members = map[int64][]int64{1: {10}, 2: {10}, 3: {10, 20}, 4: {10}, 5: {10}, 6: {10}, 7: {10}, 8: {10}}
+	for _, id := range []int64{1, 2, 3, 4, 5, 6, 8} {
+		p.GroupRows[id] = []SchedGroupRow{{GroupID: 10, Model: "m", View: schedquality.StateView{State: schedquality.StateCooling}}}
+	}
+	p.GroupRows[3] = append(p.GroupRows[3], SchedGroupRow{GroupID: 20, Model: "m", View: schedquality.StateView{State: schedquality.StateCooling}})
+	p.Overrides = []SchedOverride{
+		{AccountID: 1, GroupID: 10, Mode: schedquality.OverrideExempt},
+		{AccountID: 2, Mode: schedquality.OverrideDemote},
+		{AccountID: 3, GroupID: 10, Mode: schedquality.OverrideExempt},
+		{AccountID: 4, GroupID: 10, Mode: schedquality.OverrideExempt, ExpiresAt: &now},
+		{AccountID: 4, Mode: schedquality.OverrideDemote},
+		{AccountID: 5, GroupID: 10, Mode: schedquality.OverrideExempt, ExpiresAt: &now},
+		{AccountID: 5, Mode: schedquality.OverrideDemote, ExpiresAt: &now},
+		{AccountID: 6, GroupID: 10, Mode: schedquality.OverrideDemote},
+		{AccountID: 6, Mode: schedquality.OverrideExempt},
+		{AccountID: 8, GroupID: 99, Mode: schedquality.OverrideExempt},
+	}
+	out, err := s.Attention(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, SchedAdminAttention{Cooling: []int64{3, 5, 8}, Exempt: []int64{1, 3, 6}, Demote: []int64{2, 4, 6}}, out)
+	normal := out.Filter("normal")
+	require.True(t, normal.Exclude)
+	require.Equal(t, []int64{1, 2, 3, 4, 5, 6, 8}, normal.IDs)
+	require.NotContains(t, normal.IDs, int64(7))
+	summary, err := s.Summary(context.Background(), []int64{1, 2, 3, 4, 5, 6, 7, 8}, "")
+	require.NoError(t, err)
+	for _, account := range summary.Accounts {
+		want := 1
+		if account.AccountID == 3 {
+			want = 2
+		}
+		if account.AccountID == 7 {
+			want = 0
+		}
+		require.Len(t, account.Cooling, want, "summary retains covered cooling for account %d", account.AccountID)
+		require.Equal(t, want, account.Groups.Cooling)
 	}
 }

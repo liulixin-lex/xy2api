@@ -28,14 +28,14 @@ func (r *accountRecentStatsRepository) Batch(ctx context.Context, ids []int64, a
 	for rows.Next() {
 		var row service.AccountRecentStatsRow
 		if err := rows.Scan(&row.AccountID, &row.TTFTP50MS, &row.TTFTN, &row.CacheRatio, &row.CacheN); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		positions[row.AccountID] = len(result)
 		result = append(result, row)
 	}
 	err = rows.Err()
-	rows.Close()
+	_ = rows.Close()
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +46,7 @@ func (r *accountRecentStatsRepository) Batch(ctx context.Context, ids []int64, a
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var id, n, bad int64
 		if err := rows.Scan(&id, &n, &bad); err != nil {
