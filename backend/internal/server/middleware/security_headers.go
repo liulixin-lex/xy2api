@@ -1,10 +1,13 @@
 package middleware
 
 import (
+	"bufio"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
 	"log"
+	"net"
+	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -12,6 +15,7 @@ import (
 )
 
 const (
+	gatewayAPICSP = "sandbox; default-src 'none'"
 	// CSPNonceKey is the context key for storing the CSP nonce
 	CSPNonceKey = "csp_nonce"
 	// NonceTemplate is the placeholder in CSP policy for nonce
@@ -131,7 +135,12 @@ func SecurityHeaders(cfg config.CSPConfig, getFrameSrcOrigins func() []string) g
 		c.Header("X-Frame-Options", "DENY")
 		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
 		if isAPIRoutePath(c) {
+			writer := &gatewayCSPWriter{ResponseWriter: c.Writer}
+			c.Writer = writer
+			writer.enforcePolicy()
 			c.Next()
+			// Gin commits status-only responses after the middleware returns.
+			writer.enforcePolicy()
 			return
 		}
 
@@ -150,6 +159,58 @@ func SecurityHeaders(cfg config.CSPConfig, getFrameSrcOrigins func() []string) g
 		c.Next()
 	}
 }
+
+// gatewayCSPWriter fixes the policy at each commit path, after upstream header
+// copying/removal and before the first byte or streaming flush reaches the client.
+// Embedding Gin's writer preserves status tracking, push and close notification.
+type gatewayCSPWriter struct {
+	gin.ResponseWriter
+}
+
+func (w *gatewayCSPWriter) enforcePolicy() {
+	if w.Written() {
+		return
+	}
+	header := w.Header()
+	for key := range header {
+		if strings.EqualFold(key, "Content-Security-Policy") {
+			delete(header, key)
+		}
+	}
+	header.Set("Content-Security-Policy", gatewayAPICSP)
+}
+
+func (w *gatewayCSPWriter) WriteHeader(status int) {
+	w.enforcePolicy()
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *gatewayCSPWriter) WriteHeaderNow() {
+	w.enforcePolicy()
+	w.ResponseWriter.WriteHeaderNow()
+}
+
+func (w *gatewayCSPWriter) Write(body []byte) (int, error) {
+	w.enforcePolicy()
+	return w.ResponseWriter.Write(body)
+}
+
+func (w *gatewayCSPWriter) WriteString(body string) (int, error) {
+	w.enforcePolicy()
+	return w.ResponseWriter.WriteString(body)
+}
+
+func (w *gatewayCSPWriter) Flush() {
+	w.enforcePolicy()
+	w.ResponseWriter.Flush()
+}
+
+func (w *gatewayCSPWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	w.enforcePolicy()
+	return w.ResponseWriter.Hijack()
+}
+
+func (w *gatewayCSPWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func isAPIRoutePath(c *gin.Context) bool {
 	if c == nil || c.Request == nil || c.Request.URL == nil {

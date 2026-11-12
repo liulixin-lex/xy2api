@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 变更
+
+- OpenAI Chat Completions 与 Responses 转 Anthropic 时保留常见客户端的默认参数与可用工具行为，兼容 null 与对象联合 schema，按模型适配推理和采样；无法表达的工具 schema 返回统一参数错误。
+
 ### 修复
 
 - 修复自定义端点的兼容账号在多轮对话第二轮被误判「凭据或端点已变化」而拒绝的问题。
@@ -11,6 +15,9 @@
 ### 安全
 
 - 注册密码仅在内存中传递，不再写入浏览器存储；刷新邮箱验证页后回到注册页并回填非敏感字段。
+- 网关 API 及其别名响应固定使用 sandbox CSP，阻止上游 HTML 在站点同源执行；覆盖错误、流式与 Google query-key 路由。
+- 审计、审核、CRS、Vertex 令牌客户端停止跟随重定向，3xx 错误仅保留状态码与目标主机；补充白名单开关及初始密码说明。
+- 重定向错误处理同步覆盖 `securityaudit/prompt_qwen3guard.go`、`securityaudit/prompt_service.go`、`pkg/typesafe/client.go`；新增 `backend/internal/pkg/httpclient/redirect.go` 及 `redirect_test.go` 供客户端共享策略（前三个路径相对 `backend/internal`）。
 
 ## [0.6.3] - 2026-11-12
 
