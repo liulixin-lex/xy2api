@@ -470,6 +470,7 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	}
 	accountExtra = MergeCapabilityLearningExtra(accountExtra, nil)
 	accountExtra = MergeOpenAICodexTicketExtra(accountExtra, nil)
+	delete(accountExtra, "group_quality_reset_at")
 	if err := ValidateIQTargetsPatch(input.Platform, input.IQTargets); err != nil {
 		return nil, err
 	}
@@ -774,6 +775,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		delete(normalizedExtra, OllamaCloudUsageSnapshotExtraKey)
 		delete(normalizedExtra, OpenCodeGoUsageAutoRefreshExtraKey)
 		delete(normalizedExtra, OpenCodeGoUsageSnapshotExtraKey)
+		delete(normalizedExtra, "group_quality_reset_at")
 		// 保留配额用量和专用服务受管字段，防止普通账号编辑意外覆盖。
 		for _, key := range []string{
 			"quota_used",
@@ -781,6 +783,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			"quota_daily_start",
 			"quota_weekly_used",
 			"quota_weekly_start",
+			"group_quality_reset_at",
 			grokBillingExtraKey,
 			UpstreamBillingProbeEnabledExtraKey,
 			UpstreamBillingRateSyncEnabledExtraKey,
@@ -1054,6 +1057,7 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 	updates = MergeOpenAICodexTicketExtra(updates, nil)
 	updates = sanitizedCodexFingerprintExtraUpdates(updates)
 	updates = stripOpenAIAutoResetCreditManagedExtra(updates, true)
+	delete(updates, "group_quality_reset_at")
 	delete(updates, UpstreamBillingProbeEnabledExtraKey)
 	delete(updates, UpstreamBillingRateSyncEnabledExtraKey)
 	delete(updates, UpstreamBillingProbeExtraKey)

@@ -72,7 +72,7 @@ func (r *schedQualityRepository) RunReset(ctx context.Context, accountID int64) 
 		return time.Time{}, err
 	}
 	var at time.Time
-	if err = tx.QueryRowContext(ctx, `UPDATE accounts SET extra = jsonb_set(COALESCE(extra,'{}'::jsonb),'{group_quality_reset_at}',to_jsonb(clock_timestamp()::text),true) WHERE id=$1 RETURNING (extra->>'group_quality_reset_at')::timestamptz`, accountID).Scan(&at); err != nil {
+	if err = tx.QueryRowContext(ctx, `UPDATE accounts SET extra = jsonb_set(COALESCE(extra,'{}'::jsonb),'{group_quality_reset_at}',to_jsonb(to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')),true) WHERE id=$1 RETURNING (extra->>'group_quality_reset_at')::timestamptz`, accountID).Scan(&at); err != nil {
 		return time.Time{}, err
 	}
 	if _, err = tx.ExecContext(ctx, `DELETE FROM account_quality_states WHERE account_id=$1`, accountID); err != nil {

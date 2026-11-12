@@ -113,6 +113,12 @@ func TestSchedQualityResetUsesDatabaseTimeAfterLock(t *testing.T) {
 	require.NoError(t, got.err)
 	require.True(t, got.at.After(begin))
 	require.False(t, got.at.Before(releaseAt))
+	var resetText string
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT extra->>'group_quality_reset_at' FROM accounts WHERE id=$1`, a).Scan(&resetText))
+	parsed, err := time.Parse(time.RFC3339Nano, resetText)
+	require.NoError(t, err, "reset time must remain readable by the previous version")
+	require.Same(t, time.UTC, parsed.Location())
+	require.True(t, got.at.Equal(parsed))
 	states, _, resets, err := r.LoadRows(ctx)
 	require.NoError(t, err)
 	require.Empty(t, states)

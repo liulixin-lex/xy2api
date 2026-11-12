@@ -890,6 +890,12 @@ func lockAndMergeAccountProbeExtra(
 		return nil, err
 	}
 	extra := service.MergeOpenAICodexTicketExtra(incomingExtra, currentExtra)
+	// A reset can happen after the caller's read; only the locked row is authoritative.
+	if resetAt, ok := currentExtra["group_quality_reset_at"]; ok {
+		extra["group_quality_reset_at"] = resetAt
+	} else {
+		delete(extra, "group_quality_reset_at")
+	}
 	for key := range extraModelRateLimits(extra) {
 		if domain.IsIQGateKey(key) {
 			delete(extraModelRateLimits(extra), key)
