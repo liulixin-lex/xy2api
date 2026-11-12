@@ -3,6 +3,7 @@ package apicompat
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -37,7 +38,17 @@ func TestAnthropicConversionV063Golden(t *testing.T) {
 			require.NoError(t, err)
 			wire, err := json.Marshal(out)
 			require.NoError(t, err)
-			require.Equal(t, tc.Anthropic, string(wire))
+			// Keep the recorded v0.6.3 fixture bytes untouched. These four
+			// explicitly authorized generation-control corrections do not alter
+			// the signed system/tools/message prefix.
+			want := tc.Anthropic
+			switch tc.Name {
+			case "chat/claude-sonnet-4-5/xhigh", "responses/claude-sonnet-4-5/xhigh":
+				want = strings.Replace(want, `,"output_config":{"effort":"max"}`, "", 1)
+			case "chat/sampling-default-pair", "responses/sampling-default-pair":
+				want = strings.Replace(want, `,"top_p":0.9`, "", 1)
+			}
+			require.Equal(t, want, string(wire))
 		})
 	}
 }

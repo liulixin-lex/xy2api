@@ -12,7 +12,7 @@ import (
 // required intersections. Never discard non-object branches or rewrite them to
 // empty schemas. Nested property schemas remain opaque JSON.
 func anthropicToolSchema(raw json.RawMessage, field string) (json.RawMessage, error) {
-	if len(normalizedRawJSON(raw)) == 0 {
+	if len(normalizedRawJSON(raw)) == 0 || emptySchemaArray(raw) {
 		return json.RawMessage(`{"type":"object","properties":{}}`), nil
 	}
 	schema, ok := rawJSONObject(raw)
@@ -38,6 +38,9 @@ func lowerAnthropicObjectSchema(schema map[string]json.RawMessage, field string)
 		if raw, exists := schema[name]; exists && len(normalizedRawJSON(raw)) == 0 {
 			delete(schema, name)
 		}
+	}
+	if emptySchemaArray(schema["properties"]) {
+		delete(schema, "properties")
 	}
 	var rootRequired []string
 	if raw, exists := schema["required"]; exists && json.Unmarshal(raw, &rootRequired) != nil {
@@ -127,4 +130,10 @@ func appendRequiredNames(into, names []string) []string {
 func anthropicSchemaJSONEqual(left, right json.RawMessage) bool {
 	var a, b bytes.Buffer
 	return json.Compact(&a, left) == nil && json.Compact(&b, right) == nil && a.String() == b.String()
+}
+
+// PHP encodes empty associative arrays as []; accept only the empty form.
+func emptySchemaArray(raw json.RawMessage) bool {
+	var items []json.RawMessage
+	return len(raw) > 0 && json.Unmarshal(raw, &items) == nil && len(items) == 0
 }

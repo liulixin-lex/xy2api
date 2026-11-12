@@ -25,6 +25,10 @@ func mapAnthropicReasoning(req *ResponsesRequest, out *AnthropicRequest) error {
 	default:
 		return unsupportedConversion("reasoning.effort", "expected none, minimal, low, medium, high or xhigh (max is also supported by the gateway)")
 	}
+	if effort == "none" && claude.SupportsDisabledThinking(req.Model) {
+		out.Thinking = &AnthropicThinking{Type: "disabled"}
+		return nil
+	}
 	if spec, ok := claude.Claude55(req.Model); ok {
 		if effort == "" {
 			effort = spec.DefaultEffort
@@ -51,21 +55,18 @@ func mapAnthropicReasoning(req *ResponsesRequest, out *AnthropicRequest) error {
 		if effort == "none" || effort == "minimal" {
 			effort = "low"
 		}
-		// Preserve the existing non-5.5 xhigh -> max effort mapping; only the
-		// thinking mode changes for these model generations.
-		if effort == "xhigh" {
-			effort = "max"
-		}
 		levels := claude.EffortLevelsForModel(req.Model)
 		if len(levels) > 0 && !slices.Contains(levels, effort) {
 			// xhigh lies between high and max; use the deepest supported tier.
 			effort = levels[len(levels)-1]
 		}
 		out.Thinking = &AnthropicThinking{Type: "adaptive"}
-		if out.OutputConfig == nil {
-			out.OutputConfig = &AnthropicOutputConfig{}
+		if len(levels) > 0 {
+			if out.OutputConfig == nil {
+				out.OutputConfig = &AnthropicOutputConfig{}
+			}
+			out.OutputConfig.Effort = effort
 		}
-		out.OutputConfig.Effort = effort
 		return nil
 	}
 	if effort == "none" {
@@ -78,10 +79,17 @@ func mapAnthropicReasoning(req *ResponsesRequest, out *AnthropicRequest) error {
 	if effort == "xhigh" {
 		effort = "max"
 	}
-	if out.OutputConfig == nil {
-		out.OutputConfig = &AnthropicOutputConfig{}
+	levels := claude.EffortLevelsForModel(req.Model)
+	if len(levels) > 0 || !claude.IsClaudeModel(req.Model) {
+		if out.OutputConfig == nil {
+			out.OutputConfig = &AnthropicOutputConfig{}
+		}
+		mapped := effort
+		if len(levels) > 0 && !slices.Contains(levels, mapped) {
+			mapped = levels[len(levels)-1]
+		}
+		out.OutputConfig.Effort = mapped
 	}
-	out.OutputConfig.Effort = effort
 	if effort != "low" {
 		if out.MaxTokens <= 1024 {
 			return unsupportedConversion("max_output_tokens", "limit cannot accommodate Anthropic's minimum thinking budget")

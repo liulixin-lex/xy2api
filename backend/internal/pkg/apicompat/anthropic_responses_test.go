@@ -1855,7 +1855,7 @@ func TestOpus55ResponsesAdaptiveThinkingAndToolChoice(t *testing.T) {
 	require.NoError(t, err, "legal efforts map to the nearest supported level")
 	old, err := ResponsesToAnthropicRequest(&ResponsesRequest{Model: "claude-opus-5", Input: json.RawMessage(`"hello"`), Reasoning: &ResponsesReasoning{Effort: "xhigh"}})
 	require.NoError(t, err)
-	require.Equal(t, "max", old.OutputConfig.Effort)
+	require.Equal(t, "xhigh", old.OutputConfig.Effort)
 	require.Equal(t, "adaptive", old.Thinking.Type)
 }
 

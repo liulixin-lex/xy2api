@@ -129,7 +129,7 @@ func TestAnthropicLegacySuccessInputsRemainSuccessful(t *testing.T) {
 			out, err := anthropicPolicyRequest(t, entry, `"temperature":0.7,"top_p":0.9`)
 			require.NoError(t, err)
 			require.Equal(t, 0.7, *out.Temperature)
-			require.Equal(t, 0.9, *out.TopP)
+			require.Nil(t, out.TopP)
 		})
 		t.Run(entry+"/json_object_is_ignored", func(t *testing.T) {
 			format := `"text":{"format":{"type":"json_object"}}`
@@ -213,8 +213,9 @@ func TestAnthropicReasoningExtensionEfforts(t *testing.T) {
 					if want == "none" || want == "minimal" {
 						want = "low"
 					}
-					if model == "claude-sonnet-4-5" && want == "xhigh" {
-						want = "max"
+					if model == "claude-sonnet-4-5" {
+						require.Nil(t, out.OutputConfig)
+						return
 					}
 					require.Equal(t, want, out.OutputConfig.Effort)
 					if model == "claude-sonnet-5-5" && effort == "none" {
@@ -238,7 +239,7 @@ func TestAnthropicResponsesFieldAliasesDoNotChangeNativeWire(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{"END"}, out.StopSeqs)
 	require.Equal(t, 21, out.MaxTokens)
-	require.Equal(t, "low", out.OutputConfig.Effort)
+	require.Empty(t, out.OutputConfig.Effort)
 	require.JSONEq(t, `{"type":"json_schema","schema":{"type":"object"}}`, string(out.OutputConfig.Format))
 }
 

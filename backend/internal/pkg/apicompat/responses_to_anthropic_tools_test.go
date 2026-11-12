@@ -18,7 +18,7 @@ func TestAnthropicToolSchemaPreservesObject(t *testing.T) {
 }
 
 func TestAnthropicToolSchemasRejectLoss(t *testing.T) {
-	for _, schema := range []string{`{"oneOf":[{"type":"object"},{"type":"string"}]}`, `{"anyOf":[{"type":"object"},{"type":"array"}]}`, `{"type":"object","allOf":[{"type":"object"},{"type":"number"}]}`, `{"type":"string"}`, `{"type":["string","null"]}`, `true`, `[]`} {
+	for _, schema := range []string{`{"oneOf":[{"type":"object"},{"type":"string"}]}`, `{"anyOf":[{"type":"object"},{"type":"array"}]}`, `{"type":"object","allOf":[{"type":"object"},{"type":"number"}]}`, `{"type":"string"}`, `{"type":["string","null"]}`, `true`, `[{}]`} {
 		for _, entry := range []string{"chat", "responses"} {
 			t.Run(entry+schema, func(t *testing.T) {
 				input := `"tools":[{"type":"function","name":"probe","parameters":` + schema + `}]`

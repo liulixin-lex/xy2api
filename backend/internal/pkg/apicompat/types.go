@@ -679,8 +679,6 @@ type ResponsesStreamEvent struct {
 type ChatCompletionsRequest struct {
 	anthropicN                json.RawMessage
 	anthropicDroppedToolNames map[string]bool
-	anthropicToolNames        []string
-	anthropicNativeTools      map[int]ResponsesTool
 
 	CacheControl         *AnthropicCacheControl `json:"cache_control,omitempty"`
 	PromptCacheKey       string                 `json:"prompt_cache_key,omitempty"`

@@ -71,14 +71,9 @@ func (r *ChatCompletionsRequest) UnmarshalJSON(data []byte) error {
 	}
 	r.anthropicN = aux.N
 	type rawTool struct {
-		Type         string                 `json:"type"`
-		Name         string                 `json:"name"`
-		Function     *ChatFunction          `json:"function"`
-		InputSchema  json.RawMessage        `json:"input_schema"`
-		Parameters   json.RawMessage        `json:"parameters"`
-		CacheControl *AnthropicCacheControl `json:"cache_control"`
-		Custom       json.RawMessage        `json:"custom"`
-		DeferLoading *bool                  `json:"defer_loading"`
+		Type     string        `json:"type"`
+		Name     string        `json:"name"`
+		Function *ChatFunction `json:"function"`
 	}
 	var tools []rawTool
 	if err := json.Unmarshal(data, &struct {
@@ -86,22 +81,9 @@ func (r *ChatCompletionsRequest) UnmarshalJSON(data []byte) error {
 	}{Tools: &tools}); err != nil {
 		return err
 	}
-	r.anthropicToolNames = make([]string, len(tools))
 	r.anthropicDroppedToolNames = nil
-	r.anthropicNativeTools = nil
-	for i, tool := range tools {
-		r.anthropicToolNames[i] = tool.Name
-		if nativeAnthropicToolType.MatchString(tool.Type) {
-			schema := tool.InputSchema
-			if len(normalizedRawJSON(schema)) == 0 {
-				schema = tool.Parameters
-			}
-			if r.anthropicNativeTools == nil {
-				r.anthropicNativeTools = make(map[int]ResponsesTool)
-			}
-			r.anthropicNativeTools[i] = ResponsesTool{Type: tool.Type, Name: tool.Name, Parameters: schema, CacheControl: tool.CacheControl, Custom: tool.Custom, DeferLoading: tool.DeferLoading}
-		}
-		if (tool.Type == "function" && tool.Function != nil) || knownAnthropicServerTool(tool.Type) || nativeAnthropicToolType.MatchString(tool.Type) {
+	for _, tool := range tools {
+		if (tool.Type == "function" && tool.Function != nil) || knownAnthropicServerTool(tool.Type) {
 			continue
 		}
 		name := tool.Name
@@ -222,6 +204,11 @@ func mapAnthropicSampling(req *ResponsesRequest, out *AnthropicRequest) error {
 			topP = nil
 		}
 	}
+	// The official OpenAI SDK compatibility docs reject temperature + top_p
+	// together. On Claude <=4.6 keep temperature and drop the redundant top_p.
+	if claude.IsClaudeModel(req.Model) && !claude.RejectsNonDefaultSampling(req.Model) && temperature != nil {
+		topP = nil
+	}
 	out.Temperature, out.TopP = temperature, topP
 	return nil
 }
@@ -251,19 +238,9 @@ func mapAnthropicTools(req *ResponsesRequest, out *AnthropicRequest) error {
 		tools = nil
 		for i, tool := range source.Tools {
 			field := fmt.Sprintf("tools[%d]", i)
-			var converted []ResponsesTool
-			if nativeAnthropicToolType.MatchString(tool.Type) {
-				if native, ok := source.anthropicNativeTools[i]; ok {
-					converted = []ResponsesTool{native}
-				} else {
-					name := ""
-					if i < len(source.anthropicToolNames) {
-						name = source.anthropicToolNames[i]
-					}
-					converted = []ResponsesTool{{Type: tool.Type, Name: name, CacheControl: tool.CacheControl, Custom: tool.Custom, DeferLoading: tool.DeferLoading}}
-				}
-			} else {
-				converted = convertChatToolsToResponses([]ChatTool{tool}, nil)
+			converted := convertChatToolsToResponses([]ChatTool{tool}, nil)
+			if tool.Type == "web_search_preview" {
+				converted = []ResponsesTool{{Type: "web_search_preview"}}
 			}
 			if len(converted) == 0 {
 				logDroppedAnthropicTool(field+".type", tool.Type)
@@ -287,7 +264,7 @@ func mapAnthropicTools(req *ResponsesRequest, out *AnthropicRequest) error {
 		}
 		if knownAnthropicServerTool(tool.Type) || nativeAnthropicToolType.MatchString(tool.Type) {
 			typ, name := tool.Type, tool.Name
-			if typ == "web_search" || typ == "google_search" || typ == "web_search_20250305" {
+			if typ == "web_search" || typ == "web_search_preview" || typ == "google_search" || typ == "web_search_20250305" {
 				typ, name = "web_search_20250305", "web_search"
 			}
 			server := AnthropicTool{CacheControl: tool.CacheControl, DeferLoading: tool.DeferLoading, Custom: tool.Custom, Type: typ, Name: name}
@@ -327,7 +304,7 @@ var nativeAnthropicToolType = regexp.MustCompile(`^[a-z][a-z0-9_]*_[0-9]{8}$`)
 // extensions. Unknown types must never be passed through to Anthropic.
 func knownAnthropicServerTool(typ string) bool {
 	switch typ {
-	case "web_search", "google_search", "web_search_20250305", "code_execution":
+	case "web_search", "web_search_preview", "google_search", "web_search_20250305", "code_execution":
 		return true
 	}
 	return false
@@ -385,7 +362,7 @@ func droppedAnthropicToolChoice(req *ResponsesRequest) bool {
 			if tool.Function != nil {
 				toolName = tool.Function.Name
 			}
-			if selected(tool.Type, toolName) && (tool.Type != "function" || tool.Function == nil) && !knownAnthropicServerTool(tool.Type) && !nativeAnthropicToolType.MatchString(tool.Type) {
+			if selected(tool.Type, toolName) && (tool.Type != "function" || tool.Function == nil) && !knownAnthropicServerTool(tool.Type) {
 				return true
 			}
 		}

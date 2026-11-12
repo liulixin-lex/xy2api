@@ -2,8 +2,9 @@ package apicompat
 
 import (
 	"encoding/json"
-	"github.com/stretchr/testify/require"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestAnthropicObjectCompatibleSchemas(t *testing.T) {
@@ -62,7 +63,12 @@ func TestAnthropicSamplingAndThinkingByVersion(t *testing.T) {
 					require.Nil(t, out.Temperature)
 					require.Nil(t, out.TopP)
 				}
-				require.Equal(t, "high", out.OutputConfig.Effort)
+				if model == "claude-sonnet-4-5" {
+					require.Nil(t, out.OutputConfig)
+				} else {
+					require.Equal(t, "high", out.OutputConfig.Effort)
+				}
+				require.Nil(t, out.TopP)
 			})
 		}
 	}
@@ -106,15 +112,72 @@ func TestAnthropicDroppedToolSelectionAndOriginalFieldPath(t *testing.T) {
 	requireUnsupportedConversion(t, err, "tools[1].function.parameters.type")
 }
 
-func TestAnthropicNativeDatedToolFromChatPreservesSchema(t *testing.T) {
+func TestAnthropicNativeDatedToolFromChatIsDropped(t *testing.T) {
 	var chat ChatCompletionsRequest
 	require.NoError(t, json.Unmarshal([]byte(`{"model":"claude-opus-4-8","messages":[{"role":"user","content":"run shell"}],"tools":[{"type":"bash_20250124","name":"bash","input_schema":{"type":"object","properties":{"command":{"type":"string"}}}}]}`), &chat))
 	intermediate, err := ChatCompletionsToResponses(&chat)
 	require.NoError(t, err)
 	out, err := ResponsesToAnthropicRequest(intermediate)
 	require.NoError(t, err)
-	require.Len(t, out.Tools, 1)
-	require.Equal(t, "bash_20250124", out.Tools[0].Type)
-	require.Equal(t, "bash", out.Tools[0].Name)
-	require.JSONEq(t, `{"type":"object","properties":{"command":{"type":"string"}}}`, string(out.Tools[0].InputSchema))
+	require.Empty(t, out.Tools)
+}
+
+func TestAnthropicReasoningNoneAndSupportedEfforts(t *testing.T) {
+	for _, entry := range []string{"chat", "responses"} {
+		for _, tc := range []struct{ model, effort, thinking, outputEffort string }{
+			{"claude-sonnet-4-6", "none", "disabled", ""},
+			{"claude-opus-4-7", "none", "disabled", ""},
+			{"anthropic/claude-opus-4.8", "none", "disabled", ""},
+			{"claude-opus-4-8", "xhigh", "adaptive", "xhigh"},
+			{"claude-sonnet-5", "xhigh", "adaptive", "xhigh"},
+			{"claude-fable-5-2", "xhigh", "adaptive", "xhigh"},
+			{"claude-opus-4-6", "xhigh", "adaptive", "max"},
+			{"claude-sonnet-5", "none", "adaptive", "low"},
+			{"claude-fable-5", "none", "adaptive", "low"},
+			{"claude-mythos-preview", "none", "adaptive", "low"},
+			{"claude-sonnet-4-5", "high", "enabled", ""},
+			{"claude-haiku-4-5", "high", "enabled", ""},
+			{"claude-opus-4-5", "xhigh", "enabled", "high"},
+			{"deepseek-v4", "xhigh", "enabled", "max"},
+		} {
+			t.Run(entry+tc.model+tc.effort, func(t *testing.T) {
+				fields := `"model":"` + tc.model + `","reasoning_effort":"` + tc.effort + `","reasoning":{"effort":"` + tc.effort + `"}`
+				out, err := anthropicPolicyRequest(t, entry, fields)
+				require.NoError(t, err)
+				require.Equal(t, tc.thinking, out.Thinking.Type)
+				if tc.outputEffort == "" {
+					require.Nil(t, out.OutputConfig)
+				} else {
+					require.Equal(t, tc.outputEffort, out.OutputConfig.Effort)
+				}
+			})
+		}
+	}
+}
+
+func TestAnthropicPHPEmptySchemaAndSearchPreview(t *testing.T) {
+	for _, entry := range []string{"chat", "responses"} {
+		for _, schema := range []string{`[]`, `[ ]`, `{"type":"object","properties":[]}`} {
+			tool := `{"type":"function","name":"lookup","parameters":` + schema + `}`
+			if entry == "chat" {
+				tool = `{"type":"function","function":{"name":"lookup","parameters":` + schema + `}}`
+			}
+			out, err := anthropicPolicyRequest(t, entry, `"tools":[`+tool+`]`)
+			require.NoError(t, err)
+			require.JSONEq(t, `{"type":"object","properties":{}}`, string(out.Tools[0].InputSchema))
+		}
+		out, err := anthropicPolicyRequest(t, entry, `"tools":[{"type":"web_search_preview"}]`)
+		require.NoError(t, err)
+		want, err := anthropicPolicyRequest(t, entry, `"tools":[{"type":"web_search"}]`)
+		require.NoError(t, err)
+		require.Equal(t, want.Tools, out.Tools)
+		out, err = anthropicPolicyRequest(t, entry, `"model":"us.anthropic.claude-sonnet-4-6","temperature":0.7,"top_p":0.8`)
+		require.NoError(t, err)
+		require.Equal(t, 0.7, *out.Temperature)
+		require.Nil(t, out.TopP)
+		out, err = anthropicPolicyRequest(t, entry, `"model":"deepseek-v4","temperature":0.7,"top_p":0.8`)
+		require.NoError(t, err)
+		require.Equal(t, 0.7, *out.Temperature)
+		require.Equal(t, 0.8, *out.TopP)
+	}
 }

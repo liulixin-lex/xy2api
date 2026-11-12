@@ -104,7 +104,11 @@ func TestProtocolFormatAndParallelControls(t *testing.T) {
 			got, err := ResponsesToAnthropicRequest(responses)
 			require.NoError(t, err)
 			require.NotNil(t, got.OutputConfig)
-			require.Equal(t, "low", got.OutputConfig.Effort)
+			if model == "claude-sonnet-4-5" {
+				require.Empty(t, got.OutputConfig.Effort)
+			} else {
+				require.Equal(t, "low", got.OutputConfig.Effort)
+			}
 			var output map[string]json.RawMessage
 			require.NoError(t, json.Unmarshal(got.OutputConfig.Format, &output))
 			require.Equal(t, string(schema), string(output["schema"]), "schema precision must survive")

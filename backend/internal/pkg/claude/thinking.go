@@ -3,6 +3,7 @@ package claude
 import (
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 var thinkingModelVersion = regexp.MustCompile(`^claude-(?:opus|sonnet|haiku|fable|mythos)-([0-9]{1,2})(?:[-.]([0-9]{1,2}))?(?:[-@][0-9]{8})?(?:-v[0-9]+:[0-9]+)?$`)
@@ -15,6 +16,18 @@ func ThinkingModeForModel(model string) string {
 		return "adaptive"
 	}
 	return "enabled"
+}
+
+// SupportsDisabledThinking reports whether reasoning_effort=none can turn
+// thinking off. Claude 5+ and Mythos Preview keep thinking enabled.
+func SupportsDisabledThinking(model string) bool {
+	return !claudeVersionAtLeast(model, 5, 0)
+}
+
+// IsClaudeModel recognizes normalized Claude IDs, including provider prefixes.
+// Conversion policies use it to leave other providers' native behavior intact.
+func IsClaudeModel(model string) bool {
+	return strings.HasPrefix(normalizeEffortModelID(model), "claude-")
 }
 
 // RejectsNonDefaultSampling describes the OpenAI SDK compatibility sampling
