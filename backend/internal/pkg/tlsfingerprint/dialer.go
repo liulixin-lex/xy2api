@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 
 	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/proxy"
@@ -50,6 +51,25 @@ type HTTPProxyDialer struct {
 type SOCKS5ProxyDialer struct {
 	profile  *Profile
 	proxyURL *url.URL
+}
+
+func proxyLogAddress(proxyURL *url.URL) string {
+	if proxyURL == nil {
+		return "direct"
+	}
+	scheme := strings.ToLower(proxyURL.Scheme)
+	port := proxyURL.Port()
+	if port == "" {
+		switch scheme {
+		case "http":
+			port = "80"
+		case "https":
+			port = "443"
+		case "socks5", "socks5h":
+			port = "1080"
+		}
+	}
+	return scheme + "://" + net.JoinHostPort(proxyURL.Hostname(), port)
 }
 
 // Default TLS fingerprint values captured from Claude Code (Node.js 24.x)
@@ -141,7 +161,7 @@ func NewSOCKS5ProxyDialer(profile *Profile, proxyURL *url.URL) *SOCKS5ProxyDiale
 // DialTLSContext establishes a TLS connection through SOCKS5 proxy with the configured fingerprint.
 // Flow: SOCKS5 CONNECT to target -> TLS handshake with utls on the tunnel
 func (d *SOCKS5ProxyDialer) DialTLSContext(ctx context.Context, network, addr string) (net.Conn, error) {
-	slog.Debug("tls_fingerprint_socks5_connecting", "proxy", d.proxyURL.Host, "target", addr)
+	slog.Debug("tls_fingerprint_socks5_connecting", "proxy", proxyLogAddress(d.proxyURL), "target", addr)
 
 	// Step 1: Create SOCKS5 dialer
 	var auth *proxy.Auth
@@ -182,7 +202,7 @@ func (d *SOCKS5ProxyDialer) DialTLSContext(ctx context.Context, network, addr st
 // DialTLSContext establishes a TLS connection through HTTP proxy with the configured fingerprint.
 // Flow: TCP connect to proxy -> CONNECT tunnel -> TLS handshake with utls
 func (d *HTTPProxyDialer) DialTLSContext(ctx context.Context, network, addr string) (net.Conn, error) {
-	slog.Debug("tls_fingerprint_http_proxy_connecting", "proxy", d.proxyURL.Host, "target", addr)
+	slog.Debug("tls_fingerprint_http_proxy_connecting", "proxy", proxyLogAddress(d.proxyURL), "target", addr)
 
 	// Step 1: TCP connect to proxy server
 	var proxyAddr string
@@ -203,7 +223,7 @@ func (d *HTTPProxyDialer) DialTLSContext(ctx context.Context, network, addr stri
 		slog.Debug("tls_fingerprint_http_proxy_connect_failed", "error", err)
 		return nil, fmt.Errorf("connect to proxy: %w", err)
 	}
-	slog.Debug("tls_fingerprint_http_proxy_connected", "proxy_addr", proxyAddr)
+	slog.Debug("tls_fingerprint_http_proxy_connected", "proxy", proxyLogAddress(d.proxyURL))
 
 	// Step 2: Send CONNECT request to establish tunnel
 	req := &http.Request{

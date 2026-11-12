@@ -234,6 +234,25 @@ func TestSOCKS5ProxyDialerBasic(t *testing.T) {
 	}
 }
 
+func TestProxyLogAddressOmitsCredentialsAndIncludesPort(t *testing.T) {
+	for _, tc := range []struct{ raw, want string }{
+		{"http://demo:secret@proxy.example.com:8080/private?token=secret", "http://proxy.example.com:8080"},
+		{"https://demo:secret@[::1]", "https://[::1]:443"},
+		{"socks5h://demo:secret@proxy.example.com", "socks5h://proxy.example.com:1080"},
+	} {
+		got := proxyLogAddress(mustParseURL(tc.raw))
+		if got != tc.want {
+			t.Errorf("proxyLogAddress(%q) = %q, want %q", tc.raw, got, tc.want)
+		}
+		if strings.Contains(got, "demo") || strings.Contains(got, "secret") || strings.Contains(got, "token") {
+			t.Errorf("proxyLogAddress leaked userinfo or URL data: %q", got)
+		}
+	}
+	if got := proxyLogAddress(nil); got != "direct" {
+		t.Errorf("direct proxyLogAddress() = %q, want direct", got)
+	}
+}
+
 // TestBuildClientHelloSpec tests ClientHello spec construction.
 func TestBuildClientHelloSpec(t *testing.T) {
 	// Test with nil profile (should use defaults)

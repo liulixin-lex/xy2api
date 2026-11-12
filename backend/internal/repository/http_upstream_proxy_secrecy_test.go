@@ -3,6 +3,7 @@ package repository
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net"
@@ -16,6 +17,53 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
+
+func TestProxyLogAddressOnlyIncludesPublicEndpoint(t *testing.T) {
+	for _, tc := range []struct{ raw, want string }{
+		{"", "direct"},
+		{"http://demo:secret@proxy.example:8080/private?token=secret#secret", "http://proxy.example:8080"},
+		{"https://demo:secret@[::1]:8443/", "https://[::1]:8443"},
+		{"socks5://demo:secret@proxy.example:1080", "socks5h://proxy.example:1080"},
+		{"http://demo:secret@proxy.example/private", "http://proxy.example:80"},
+		{"https://demo:secret@[::1]/", "https://[::1]:443"},
+		{"socks5h://demo:secret@proxy.example", "socks5h://proxy.example:1080"},
+		{"http://demo:secret@[:8080", "invalid"},
+	} {
+		require.Equal(t, tc.want, proxyLogAddress(tc.raw))
+	}
+}
+
+func TestProxyPoolLogFieldsDoNotDependOnCredentials(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	svc, ok := NewHTTPUpstream(nil).(*httpUpstreamService)
+	require.True(t, ok)
+	for _, credentials := range [][2]string{{"demo-a", "secret-a"}, {"demo-b", "secret-b"}} {
+		proxy := (&url.URL{Scheme: "http", Host: "proxy.example:8080", User: url.UserPassword(credentials[0], credentials[1]), Path: "/private-route", RawQuery: "token=" + credentials[1], Fragment: credentials[1]}).String()
+		_, err := svc.getClientEntryWithTLS(proxy, 7, 1, &tlsfingerprint.Profile{Name: "test"}, service.HTTPUpstreamProfileOpenAI, false, false)
+		require.NoError(t, err)
+	}
+	var created []map[string]any
+	for _, line := range bytes.Split(bytes.TrimSpace(logs.Bytes()), []byte("\n")) {
+		var event map[string]any
+		require.NoError(t, json.Unmarshal(line, &event))
+		if event["msg"] == "tls_fingerprint_creating_new_client" {
+			delete(event, "time")
+			created = append(created, event)
+		}
+	}
+	require.Len(t, created, 2)
+	require.Equal(t, created[0], created[1], "log fields must not encode credential differences")
+	require.Equal(t, "http://proxy.example:8080", created[0]["proxy"])
+	require.Equal(t, "openai", created[0]["profile"])
+	require.Equal(t, float64(7), created[0]["account_id"])
+	require.NotContains(t, logs.String(), "sha256:")
+	require.NotContains(t, logs.String(), `"cache_key"`)
+	require.NotContains(t, logs.String(), `"pool_fingerprint"`)
+	require.NotContains(t, logs.String(), `"proxy_fingerprint"`)
+}
 
 func TestHTTPUpstreamProxyCredentialsStayOutOfLogsAndErrors(t *testing.T) {
 	var logs bytes.Buffer
@@ -68,7 +116,14 @@ func TestHTTPUpstreamProxyCredentialsStayOutOfLogsAndErrors(t *testing.T) {
 			proxy.Host = net.JoinHostPort("[", "8080")
 			_, _, err = normalizeProxyURL(proxy.String())
 			require.Error(t, err)
+			_, err = svc.DoWithTLS(req, proxy.String(), 7, 1, profile)
+			require.Error(t, err)
 			assertProxySecretsAbsent(t, logs.String()+err.Error(), username, password)
+			require.Contains(t, logs.String(), `"proxy":"invalid"`)
+			require.NotContains(t, logs.String(), "sha256:")
+			require.NotContains(t, logs.String(), `"cache_key"`)
+			require.NotContains(t, logs.String(), `"pool_fingerprint"`)
+			require.NotContains(t, logs.String(), `"proxy_fingerprint"`)
 		})
 	}
 }

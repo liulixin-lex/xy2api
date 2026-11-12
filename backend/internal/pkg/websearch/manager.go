@@ -414,9 +414,7 @@ func newHTTPClient(proxyURL string) (*http.Client, error) {
 	}
 	_, parsed, err := proxyurl.Parse(proxyURL)
 	if err != nil {
-		// Do not propagate parser errors: url.Error can include the entire URL,
-		// and a redacted URL can still expose the proxy username.
-		return nil, errors.New("invalid proxy URL")
+		return nil, err
 	}
 	if parsed != nil {
 		if err := proxyutil.ConfigureTransportProxy(transport, parsed); err != nil {
