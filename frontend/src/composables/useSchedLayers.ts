@@ -1,4 +1,4 @@
-import { reactive, ref } from 'vue'
+import { nextTick, reactive, ref } from 'vue'
 
 // One account drawer and one group board for the whole admin UI (design spec 0.2): opening one that is already open
 // swaps its content and brings it to the top. SchedQualityLayers renders them.
@@ -24,8 +24,10 @@ export interface BoardRequest {
 
 const drawer = reactive<DrawerRequest>({ accountId: null, accountName: '', model: null, groupId: null, toGroups: false, raise: 0 })
 const board = reactive<BoardRequest>({ groupId: null, groupName: '', model: null, raise: 0 })
-/** Bumped after any action that changes an account's quality state, so lists refresh. */
+/** Bumped after any action that changes an account's quality state, so lists and the open layers reload. */
 const changed = ref(0)
+/** Reloads the open layers started for a change; markSchedChanged() waits for them. */
+const reloads = new Set<Promise<unknown>>()
 
 export function openSchedDrawer(account: { id: number; name?: string }, options: { model?: string | null; groupId?: number | null; toGroups?: boolean } = {}) {
   const reopening = drawer.accountId !== null
@@ -54,8 +56,18 @@ export function closeSchedBoard() {
   board.groupId = null
 }
 
-export function markSchedChanged() {
+/** Signals a quality change; resolves once the reloads it started in the open layers are in. */
+export async function markSchedChanged(): Promise<void> {
   changed.value++
+  // Watchers on `changed` run in the next flush and hand their reloads to trackSchedReload().
+  await nextTick()
+  await Promise.allSettled([...reloads])
+}
+
+/** An open layer reloading because of a change. */
+export function trackSchedReload(load: Promise<unknown>) {
+  reloads.add(load)
+  void load.finally(() => reloads.delete(load))
 }
 
 export function useSchedLayers() {

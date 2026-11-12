@@ -5,7 +5,8 @@ import { defineComponent, h } from 'vue'
 import AccountsView from '../AccountsView.vue'
 import type { SchedAccountSummary } from '@/types/schedQuality'
 import summaryFixture from '@/__tests__/fixtures/schedQuality/account_summary.json'
-import { closeSchedDrawer } from '@/composables/useSchedLayers'
+import detailFixture from '@/__tests__/fixtures/schedQuality/account_detail.json'
+import { closeSchedDrawer, openSchedDrawer } from '@/composables/useSchedLayers'
 
 // "Recover state" on the account list (contract delta F; acceptance scenarios 37–41).
 
@@ -31,6 +32,7 @@ vi.mock('@/api/admin', () => ({
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       getUpstreamBalances: vi.fn().mockResolvedValue({ balances: [] }),
       getTempUnschedulableStatus: vi.fn().mockResolvedValue({ active: false }),
+      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
       delete: vi.fn(),
       batchClearError: vi.fn(),
       batchRefresh: vi.fn(),
@@ -145,7 +147,7 @@ function mountView() {
   })
 }
 
-type View = { openMenu: (a: unknown, e: unknown) => void; handleShowTempUnsched: (a: unknown) => void; accounts: Array<{ id: number; name: string }> }
+type View = { openMenu: (a: unknown, e: unknown) => void; handleShowTempUnsched: (a: unknown) => void; load: () => Promise<void>; accounts: Array<{ id: number; name: string }> }
 const vm = (wrapper: ReturnType<typeof mountView>) => wrapper.vm as unknown as View
 async function openMenuFor(wrapper: ReturnType<typeof mountView>, id: number) {
   vm(wrapper).openMenu(vm(wrapper).accounts.find((a) => a.id === id), { currentTarget: document.body })
@@ -335,6 +337,96 @@ describe('AccountsView — recover state', () => {
     vm(wrapper).handleShowTempUnsched(vm(wrapper).accounts[0])
     await flushPromises()
     expect(sched.reset).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+})
+
+describe('AccountsView — recovery refresh (R2-RT-FB)', () => {
+  it('keeps a row recovery locked until the summary refresh is in (P0-1)', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const summary = deferred()
+    sched.summary.mockReturnValueOnce(summary.promise)
+    await openMenuFor(wrapper, 2)
+    recoverItem()!.click()
+    await flushPromises()
+    expect(getById).toHaveBeenCalledWith(2)
+    await openMenuFor(wrapper, 2)
+    expect(recoverItem()!.getAttribute('aria-disabled')).toBe('true')
+    recoverItem()!.click()
+    await flushPromises()
+    expect(sched.reset).toHaveBeenCalledTimes(1)
+
+    summary.resolve({ at: '', stale: false, global_enabled: true, accounts: [summaryOf(1, 0), summaryOf(2, 0), summaryOf(3, 0), summaryOf(4, 0)] })
+    await flushPromises()
+    // The summary now says no cooling: the item is gone.
+    await openMenuFor(wrapper, 2)
+    expect(recoverItem()).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('refreshes the summary at once when recovering from the open drawer, and holds the lock for it (P1-1)', async () => {
+    const detail = structuredClone(detailFixture)
+    detail.account = { ...detail.account, id: 2, name: 'acc-2' }
+    sched.accountDetail.mockResolvedValue(detail)
+    const wrapper = mountView()
+    await flushPromises()
+    openSchedDrawer({ id: 2, name: 'acc-2' })
+    await flushPromises()
+    const before = sched.summary.mock.calls.length
+    const summary = deferred()
+    sched.summary.mockReturnValueOnce(summary.promise)
+    document.querySelector<HTMLElement>('[data-sq-trigger="drawer-reset"]')!.click()
+    await flushPromises()
+    expect(sched.reset).toHaveBeenCalledWith(2)
+    expect(getById).toHaveBeenCalledWith(2)
+    expect(sched.summary.mock.calls.length).toBe(before + 1)
+    expect(document.querySelector('[data-sq-trigger="drawer-reset"]')!.getAttribute('aria-busy')).toBe('true')
+    summary.resolve({ at: '', stale: false, global_enabled: true, accounts: [summaryOf(2, 0)] })
+    await flushPromises()
+    expect(document.querySelector('[data-sq-trigger="drawer-reset"]')!.getAttribute('aria-busy')).toBe('false')
+    wrapper.unmount()
+  })
+
+  it('drops a late row read when a newer list load landed meanwhile (P0-2)', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const stale = deferred()
+    getById.mockReturnValueOnce(stale.promise)
+    await openMenuFor(wrapper, 1)
+    recoverItem()!.click()
+    await flushPromises()
+    expect(getById).toHaveBeenCalledWith(1)
+    listAccounts.mockResolvedValue({ items: ROWS.map((a) => (a.id === 1 ? { ...a, name: 'newer row', status: 'error' } : a)), total: 4, page: 1, page_size: 20, pages: 1 })
+    await vm(wrapper).load()
+    expect(vm(wrapper).accounts[0].name).toBe('newer row')
+    stale.resolve({ ...ROWS[0], name: 'older row', status: 'active' })
+    await flushPromises()
+    expect(vm(wrapper).accounts[0].name).toBe('newer row')
+    wrapper.unmount()
+  })
+
+  it('keeps the batch accounts locked until the list and the summary reload are in (P0-1)', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    document.querySelector<HTMLInputElement>('[data-test="row"] input')!.click()
+    await flushPromises()
+    await wrapper.get('[data-test="select-page"]').trigger('click')
+    const summary = deferred()
+    // Every summary refresh from here on (closing the confirmation, the list reload, the recovery's own) waits.
+    sched.summary.mockReturnValue(summary.promise)
+    await wrapper.get('[data-test="bulk-sched-reset"]').trigger('click')
+    await flushPromises()
+    document.querySelector<HTMLElement>('[data-sq-batch-confirm]')!.click()
+    await flushPromises()
+    expect(sched.reset).toHaveBeenCalledTimes(4)
+    expect(wrapper.findComponent(BulkBarStub).props('recoverBusy')).toBe(true)
+    await openMenuFor(wrapper, 1)
+    expect(recoverItem()!.getAttribute('aria-disabled')).toBe('true')
+
+    summary.resolve({ at: '', stale: false, global_enabled: true, accounts: [] })
+    await flushPromises()
+    expect(wrapper.findComponent(BulkBarStub).exists()).toBe(false)
     wrapper.unmount()
   })
 })

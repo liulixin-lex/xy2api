@@ -335,7 +335,9 @@ describe('SchedAccountDrawer — member groups and the all-groups override (cont
     expect(api.setOverride).toHaveBeenCalledWith(479, expect.objectContaining({ group_id: 55, mode: 'demote' }))
 
     expect(trigger('override:55')!.textContent).toBe('admin.schedQuality.action.undoDemote')
-    expect(Array.from(row(55).querySelectorAll('td')).slice(1, 5).map((td) => td.textContent!.trim())).toEqual(['', '', '', ''])
+    // The override itself shows in the state cell; still no numbers (R2-RT-FB P1-2).
+    expect(Array.from(row(55).querySelectorAll('td')).slice(1, 5).map((td) => td.textContent!.trim()))
+      .toEqual(['admin.schedQuality.state.demoted', '', '', ''])
     trigger('override:55')!.click()
     await flushPromises()
     expect(api.clearOverride).toHaveBeenCalledWith(479, 55)
@@ -453,5 +455,76 @@ describe('SchedAccountDrawer — 恢复 (contract delta F2, F3)', () => {
     await flushPromises()
     expect(trigger('drawer-reset')!.getAttribute('aria-busy')).toBe('false')
     expect(document.querySelector('.modal-content')).toBeNull()
+  })
+})
+
+describe('SchedAccountDrawer — red-team revisions (R2-RT-FB)', () => {
+  it('keeps 恢复 locked until its own detail reload is in, and reloads it once (P0-1)', async () => {
+    await openWith(detail(), { onRecovered: async () => {} })
+    let reloaded!: (value: SchedAccountDetail) => void
+    api.accountDetail.mockReturnValue(new Promise((resolve) => { reloaded = resolve }))
+    api.reset.mockResolvedValue({ reset_at: 'x', cleared: [], preserved: [], failed: [] })
+    trigger('drawer-reset')!.click()
+    await flushPromises()
+    expect(api.accountDetail).toHaveBeenCalledTimes(2)
+    expect(trigger('drawer-reset')!.getAttribute('aria-busy')).toBe('true')
+    trigger('drawer-reset')!.click()
+    await flushPromises()
+    expect(api.reset).toHaveBeenCalledTimes(1)
+
+    reloaded(detail())
+    await flushPromises()
+    expect(trigger('drawer-reset')!.getAttribute('aria-busy')).toBe('false')
+    expect(api.accountDetail).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows the override of a group without state rows to every reader; only the action needs accounts:manage (P1-2)', async () => {
+    const d = detail()
+    d.groups.push({ group_id: 55, name: '南风组', gate_enabled: false, policy: d.groups[0].policy, override: { mode: 'demote', all_groups: false, expires_at: null, reason: '' }, by_model: [] })
+    perms.granted = ['accounts:view', 'groups:view']
+    await openWith(d)
+    const capsule = row(55).querySelector('[data-sq-override]')!
+    expect([capsule.getAttribute('data-sq-override'), capsule.textContent!.trim()]).toEqual(['demote', 'admin.schedQuality.state.demoted'])
+    expect(trigger('override:55')).toBeNull()
+    // Still no state word and no numbers.
+    expect(Array.from(row(55).querySelectorAll('td')).slice(2, 5).map((td) => td.textContent!.trim())).toEqual(['', '', ''])
+
+    closeSchedDrawer()
+    perms.granted = ALL
+    await openWith(d)
+    expect(row(55).querySelector('[data-sq-override="demote"]')).not.toBeNull()
+    expect(trigger('override:55')!.textContent).toBe('admin.schedQuality.action.undoDemote')
+  })
+
+  it('shows the all-groups override to every reader, also for an account in no group (P1-2)', async () => {
+    const d = detail()
+    d.groups = []
+    d.all_groups_override = { mode: 'exempt', all_groups: true, expires_at: null, reason: '' }
+    perms.granted = ['accounts:view']
+    await openWith(d)
+    const capsule = panel().querySelector('[data-sq-section="groups"] [data-sq-override="exempt"]')!
+    expect(capsule.textContent!.replace(/\s+/g, ' ').trim()).toBe('admin.schedQuality.override.allGroups admin.schedQuality.state.exempted')
+    expect(trigger('drawer-exempt')).toBeNull()
+
+    closeSchedDrawer()
+    await openWith(detail())
+    expect(panel().querySelector('[data-sq-section="groups"] [data-sq-override]')).toBeNull()
+  })
+
+  it('gives the test table and the groups table the same fixed widths, so 首字 lines up at any width (P2-1)', async () => {
+    await openWith(detail())
+    const groups = panel().querySelector<HTMLTableElement>('[data-sq-section="groups"] table')!
+    const test = panel().querySelector<HTMLTableElement>('[data-sq-test-head]')!.closest('section')!.querySelector('table')!
+    const widths = (table: HTMLTableElement) => Array.from(table.querySelectorAll('col')).map((col) => Number(/w-\[(\d+)px\]/.exec(col.className)?.[1] ?? 0))
+    for (const table of [groups, test]) expect(table.className).toMatch(/\btable-fixed\b.*\bmin-w-\[560px\]/)
+    // Column 2 is 首字 in both; same width, same distance from the right edge, same flexible first column.
+    const g = widths(groups)
+    const tt = widths(test)
+    expect([g[0], tt[0]]).toEqual([0, 0])
+    expect(g[2]).toBe(tt[2])
+    expect(g.slice(1).reduce((a, b) => a + b, 0)).toBe(tt.slice(1).reduce((a, b) => a + b, 0))
+    expect(g[1]).toBe(tt[1])
+    expect(groups.querySelectorAll('thead th')[2].textContent).toBe('admin.schedQuality.dim.ttfo')
+    expect(test.querySelectorAll('thead th')[2].textContent).toBe('admin.schedQuality.dim.ttfo')
   })
 })

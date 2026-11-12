@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
-import { defineComponent } from 'vue'
+import { defineComponent, watch } from 'vue'
 
 import { canRecover, isRecovering, useAccountRecovery, type RecoverableRow } from '../useAccountRecovery'
-import { useSchedLayers } from '../useSchedLayers'
+import { trackSchedReload, useSchedLayers } from '../useSchedLayers'
 
 const api = vi.hoisted(() => ({ reset: vi.fn() }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: api }))
@@ -86,7 +86,7 @@ const clean = { reset_at: 'x', cleared: [{ key: 'quality', kind: 'quality' }], p
 describe('recover (contract delta F2, scenarios 38–39)', () => {
   it.each([
     ['everything cleared', async () => clean, 'showSuccess', 'admin.schedQuality.recover.ok:{"name":"acc-1"}'],
-    ['only kept items left', async () => ({ ...clean, preserved: [{ key: 'session_avoid', kind: 'session_avoid', why: '' }] }), 'showSuccess', 'admin.schedQuality.recover.ok:{"name":"acc-1"}'],
+    ['only kept items (nothing cleared)', async () => ({ reset_at: 'x', cleared: [], preserved: [{ key: 'session_avoid', kind: 'session_avoid', why: '' }], failed: [] }), 'showSuccess', 'admin.schedQuality.recover.ok:{"name":"acc-1"}'],
     ['a failed item in a 200 answer', async () => ({ ...clean, failed: [{ key: 'rate_limit', kind: 'rate_limit', error: 'x' }] }), 'showError', 'admin.schedQuality.recover.failed:{"name":"acc-1"}'],
     ['a request error', async () => { throw new Error('down') }, 'showError', 'admin.schedQuality.recover.failed:{"name":"acc-1"}']
   ] as const)('gives exactly one toast for %s, then refreshes', async (_name, answer, kind, text) => {
@@ -122,6 +122,32 @@ describe('recover (contract delta F2, scenarios 38–39)', () => {
     refreshed()
     await first
     expect(isRecovering(1)).toBe(false)
+  })
+
+  it('holds the lock until the reload of an open layer is in, for a single and a batch recovery (R2-RT-FB P0-1)', async () => {
+    api.reset.mockResolvedValue(clean)
+    const reloads: Array<() => void> = []
+    // An open drawer reloads on every change and hands the reload over, as SchedAccountDrawer does.
+    const stop = watch(useSchedLayers().changed, () => trackSchedReload(new Promise<void>((resolve) => reloads.push(resolve))))
+    try {
+      const { recovery } = withRecovery()
+      const single = recovery.recover({ id: 1, name: 'acc-1' }, async () => {})
+      await flushPromises()
+      expect(reloads).toHaveLength(1)
+      expect(isRecovering(1)).toBe(true)
+      reloads[0]()
+      await single
+      expect(isRecovering(1)).toBe(false)
+
+      const batch = recovery.recoverMany([2, 3], async () => {})
+      await flushPromises()
+      expect([isRecovering(2), isRecovering(3), recovery.batchRunning.value]).toEqual([true, true, true])
+      reloads[1]()
+      await batch
+      expect([isRecovering(2), isRecovering(3), recovery.batchRunning.value]).toEqual([false, false, false])
+    } finally {
+      stop()
+    }
   })
 
   it('checks accounts:manage at the click and sends nothing without it (scenario 41)', async () => {

@@ -157,7 +157,7 @@ async function run(request?: SchedOverrideRequest) {
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, live.length) }, worker))
   } finally {
     running--
-    markSchedChanged()
+    void markSchedChanged()
     emit('busy', false)
     emit('done')
   }

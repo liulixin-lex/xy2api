@@ -1,13 +1,20 @@
 <template>
   <p v-if="!groups.length" class="sq-text-3 text-sm">—</p>
   <div v-else class="-mx-3 overflow-x-auto">
-    <table class="sq-table">
+    <!-- Fixed column widths, shared with the test table so 首字 lines up at any drawer width (ui-proposal 7.2). -->
+    <table class="sq-table table-fixed min-w-[560px]">
+      <colgroup>
+        <col />
+        <col class="w-[112px]" />
+        <col v-for="dim in SCHED_DIMS" :key="dim" class="w-[84px]" />
+        <col class="w-[96px]" />
+      </colgroup>
       <thead>
         <tr>
           <th scope="col">{{ t('admin.schedQuality.col.group') }}</th>
-          <th scope="col" class="w-[112px]">{{ t('admin.schedQuality.col.state') }}</th>
-          <th v-for="dim in SCHED_DIMS" :key="dim" scope="col" class="sq-r w-[84px]">{{ t(`admin.schedQuality.dim.${dim}`) }}</th>
-          <th scope="col" class="sq-r w-[96px]"><span class="sr-only">{{ t('admin.accounts.columns.actions') }}</span></th>
+          <th scope="col">{{ t('admin.schedQuality.col.state') }}</th>
+          <th v-for="dim in SCHED_DIMS" :key="dim" scope="col" class="sq-r">{{ t(`admin.schedQuality.dim.${dim}`) }}</th>
+          <th scope="col" class="sq-r"><span class="sr-only">{{ t('admin.accounts.columns.actions') }}</span></th>
         </tr>
       </thead>
       <tbody>
@@ -17,13 +24,14 @@
           :class="{ 'sq-target': group.group_id === targetGroupId }"
           :data-sq-group-row="group.group_id"
         >
-          <td>
+          <td class="truncate">
             <button v-if="canViewGroups" type="button" class="sq-link sq-focus" :data-sq-trigger="`board:${group.group_id}`" @click="emit('board', group)">{{ group.name }}</button>
             <template v-else>{{ group.name }}</template>
           </td>
-          <!-- A group without state rows has only its name and the override action (contract delta D3). -->
+          <!-- A group without state rows has its name, its override (shown to every reader) and the action; no state
+               word and no numbers (contract delta D3). -->
           <template v-if="!group.by_model.length">
-            <td />
+            <td><SchedOverrideCapsule v-if="group.override" :mode="group.override.mode" /></td>
             <td v-for="dim in SCHED_DIMS" :key="dim" />
           </template>
           <template v-else>
@@ -55,6 +63,7 @@
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+import SchedOverrideCapsule from './SchedOverrideCapsule.vue'
 import type { SchedAccountGroup, SchedGroupModelRow, SchedModelEvidence, SchedOverrideMode, SchedVerdict } from '@/types/schedQuality'
 import { secondsUntil } from '@/composables/useSchedQuality'
 import { useAdminPermission } from '@/composables/useAdminPermission'

@@ -11,7 +11,8 @@ const pageHidden = () => typeof document !== 'undefined' && document.hidden
 /**
  * Summary of the accounts on the current list page. The view calls refresh() wherever it refreshes the list
  * (load, page change, incremental refresh). Like the list's incremental refresh, a call is skipped while the page is
- * hidden or `paused()` is true (a dialog or the drawer is open); the next list refresh catches up.
+ * hidden or `paused()` is true (a dialog or the drawer is open); the next list refresh catches up. `force` skips the
+ * pause only: the refresh right after an action (a recovery) must not wait for the drawer to close.
  */
 export function useSchedQualitySummary(paused: () => boolean = () => false) {
   const view = shallowRef<Omit<SchedAccountsSummary, 'accounts'> | null>(null)
@@ -20,8 +21,8 @@ export function useSchedQualitySummary(paused: () => boolean = () => false) {
   let seq = 0
   let controller: AbortController | null = null
 
-  async function refresh(accountIds: number[]) {
-    if (pageHidden() || paused()) return
+  async function refresh(accountIds: number[], options: { force?: boolean } = {}) {
+    if (pageHidden() || (paused() && !options.force)) return
     controller?.abort()
     controller = null
     const current = ++seq
