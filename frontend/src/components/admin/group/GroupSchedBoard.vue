@@ -54,7 +54,14 @@
           >
             <td class="sq-r sq-num sq-text-3">{{ row.eligible ? row.rank : '—' }}</td>
             <td>
-              <button type="button" class="sq-link sq-focus" :data-sq-trigger="`account:${row.account_id}`" @click="openSchedDrawer({ id: row.account_id, name: row.name }, { model: data.model })">{{ row.name }}</button>
+              <button
+                v-if="canViewAccounts"
+                type="button"
+                class="sq-link sq-focus"
+                :data-sq-trigger="`account:${row.account_id}`"
+                @click="openSchedDrawer({ id: row.account_id, name: row.name }, { model: row.evidence_model || null })"
+              >{{ row.name }}</button>
+              <template v-else>{{ row.name }}</template>
             </td>
             <td>
               <span class="inline-flex items-center gap-1.5">
@@ -114,13 +121,19 @@ import schedQualityAPI from '@/api/admin/schedQuality'
 import type { SchedBoardAccount, SchedTakeoverIdleSeconds } from '@/types/schedQuality'
 import { secondsUntil, useSchedQualityClock, useSchedQualityPoll } from '@/composables/useSchedQuality'
 import { closeSchedBoard, openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
-import { DASH, fmtCacheRatio, fmtCountdown, fmtErrorRate, fmtTtfo, rejectName, SCHED_DIMS, verdictClass, type SchedDim } from '@/utils/schedQualityFormat'
+import { useAdminPermission } from '@/composables/useAdminPermission'
+import {
+  DASH, fmtCacheRatio, fmtCountdown, fmtErrorRate, fmtTtfo, known, rejectName, SCHED_DIMS, SCHED_STATES, SCHED_VERDICTS, verdictClass,
+  type SchedDim
+} from '@/utils/schedQualityFormat'
 import { vTip } from '@/utils/tip'
 
 // Group board (design spec C): the group's accounts in the API's selection order (never re-sorted here), refreshed
 // every 5 s while open. Accounts held back by hard admission come last in the secondary colour with their reason.
 const { t, te } = useI18n()
 const { board, changed } = useSchedLayers()
+// The account link needs accounts:view; the name is plain text otherwise.
+const { canView: canViewAccounts } = useAdminPermission('accounts')
 const now = useSchedQualityClock()
 const shellRef = ref<{ holdFocus: () => () => void } | null>(null)
 
@@ -163,6 +176,7 @@ function stateOf(row: SchedBoardAccount): { text: string; cls: string } {
   }
   if (row.override?.mode === 'demote') return { text: t('admin.schedQuality.state.demoted'), cls: 'sq-text' }
   if (row.override?.mode === 'exempt') return { text: t('admin.schedQuality.state.exempted'), cls: 'sq-text' }
+  if (!known(row.state, SCHED_STATES)) return { text: t('admin.schedQuality.unknown'), cls: 'sq-text-3' }
   if (row.state === 'cooling') {
     if (row.testing) return { text: t('admin.schedQuality.state.testing'), cls: 'sq-test' }
     const left = secondsUntil(row.until, now.value)
@@ -183,19 +197,20 @@ function valueText(row: SchedBoardAccount, dim: SchedDim) {
   return dim === 'error' ? fmtErrorRate(row.error.rate) : fmtCacheRatio(row.cache.ratio)
 }
 
+// An unknown verdict leaves the number uncoloured and is read out as the fallback word.
 function valueClass(row: SchedBoardAccount, dim: SchedDim) {
   if (valueText(row, dim) === DASH) return 'sq-text-3'
   if (!row.eligible) return ''
-  const verdict = row.verdicts[dim]
-  return verdict === 'nodata' ? 'sq-text' : verdictClass(verdict)
+  const verdict = known(row.verdicts[dim], SCHED_VERDICTS)
+  return verdict && verdict !== 'nodata' ? verdictClass(verdict) : 'sq-text'
 }
 
 function valueLabel(row: SchedBoardAccount, dim: SchedDim) {
   const name = t(`admin.schedQuality.dim.${dim}`)
   const text = valueText(row, dim)
-  const verdict = row.verdicts[dim]
+  const verdict = known(row.verdicts[dim], SCHED_VERDICTS)
   if (text === DASH) return `${name} ${t('admin.schedQuality.aria.nodata')}`
   if (!row.eligible || verdict === 'nodata') return `${name} ${text}`
-  return t('admin.schedQuality.aria.cell', { dim: name, value: text, verdict: t(`admin.schedQuality.aria.${verdict}`) })
+  return t('admin.schedQuality.aria.cell', { dim: name, value: text, verdict: t(verdict ? `admin.schedQuality.aria.${verdict}` : 'admin.schedQuality.unknown') })
 }
 </script>

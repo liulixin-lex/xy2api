@@ -25,6 +25,10 @@ import { closeSchedBoard, closeSchedDrawer, closeSchedReset, openSchedBoard, ope
 
 const api = vi.hoisted(() => ({ accountDetail: vi.fn(), groupBoard: vi.fn(), getGroupPolicy: vi.fn(), reset: vi.fn(), startTest: vi.fn(), setOverride: vi.fn() }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: api }))
+vi.mock('@/composables/useAdminPermission', async () => {
+  const { computed } = await vi.importActual<typeof import('vue')>('vue')
+  return { useAdminPermission: () => ({ canView: computed(() => true), canManage: computed(() => true) }) }
+})
 
 // Acceptance item 3 of WP7: every text the new components render (visible text and tips) is data or comes from
 // design/copy.md, and none is a sentence. Existing keys reused by the design (column "操作", close) are listed too.

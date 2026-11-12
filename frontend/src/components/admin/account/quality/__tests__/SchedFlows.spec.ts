@@ -83,6 +83,24 @@ describe('batch flow', () => {
     expect(wrapper.emitted('done')).toHaveLength(1)
   })
 
+  it('counts a test where a model hit an internal error as failed, with started tickets kept apart (K28)', async () => {
+    api.startTest.mockImplementation(async (id: number) => ({
+      tests: id === 1
+        ? [{ model: 'a', test_id: 't1', started: true, why: '' }, { model: 'b', test_id: '', started: false, why: 'error' }]
+        : id === 2
+          ? [{ model: 'a', test_id: 't2', started: true, why: '' }, { model: 'b', test_id: '', started: false, why: 'too_soon' }]
+          : [{ model: 'a', test_id: '', started: false, why: 'already_running' }, { model: 'b', test_id: '', started: false, why: 'error' }]
+    }))
+    mount(SchedBatchDialog, { props: { action: 'test', accounts, anchor: null, groups: [] }, attachTo: document.body })
+    await flushPromises()
+    await click('[data-sq-batch-confirm]')
+    expect(results()).toEqual([
+      ['acc-a', 'admin.schedQuality.result.failed'],
+      ['acc-b', 'admin.schedQuality.result.ok'],
+      ['acc-c', 'admin.schedQuality.result.failed']
+    ])
+  })
+
   it('runs a batch reset four at a time and marks request failures', async () => {
     let running = 0
     let peak = 0

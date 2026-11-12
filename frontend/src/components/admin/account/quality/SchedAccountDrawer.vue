@@ -14,7 +14,8 @@
         <span class="sq-text-3">{{ t('admin.schedQuality.drawer.concurrency') }}<b class="sq-num ml-1.5 font-medium text-gray-700 dark:text-gray-300">{{ detail.account.in_flight }} / {{ detail.account.concurrency }}</b></span>
       </div>
     </template>
-    <template v-if="detail" #header-actions>
+    <template v-if="detail && canManage" #header-actions>
+      <span v-if="testFailed" class="sq-fail-word text-sm" data-sq-test-failed>{{ t('admin.schedQuality.result.failed') }}</span>
       <button
         type="button"
         class="btn btn-secondary btn-sm aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
@@ -22,14 +23,15 @@
         data-sq-trigger="drawer-test"
         @click="startTest"
       >{{ t('admin.schedQuality.action.test') }}</button>
-      <button
-        v-for="mode in OVERRIDE_MODES"
-        :key="mode"
-        type="button"
-        class="btn btn-secondary btn-sm"
-        :data-sq-trigger="`drawer-${mode}`"
-        @click="onHeaderOverride(mode, $event)"
-      >{{ headerOverrideLabel(mode) }}</button>
+      <template v-for="mode in OVERRIDE_MODES" :key="mode">
+        <span v-if="failedGroups.has(0) && allGroupsOverride?.mode === mode" class="sq-fail-word text-sm">{{ t('admin.schedQuality.result.failed') }}</span>
+        <button
+          type="button"
+          class="btn btn-secondary btn-sm"
+          :data-sq-trigger="`drawer-${mode}`"
+          @click="onHeaderOverride(mode, $event)"
+        >{{ headerOverrideLabel(mode) }}</button>
+      </template>
       <button type="button" class="btn btn-primary btn-sm" data-sq-trigger="drawer-reset" @click="openSchedReset({ id: detail.account.id, name: detail.account.name })">
         {{ t('admin.schedQuality.action.reset') }}
       </button>
@@ -95,7 +97,7 @@
           :now="now"
           :target-group-id="targetGroupId"
           :failed-groups="failedGroups"
-          @board="(group) => openSchedBoard({ id: group.group_id, name: group.name }, tab)"
+          @board="(group) => openSchedBoard({ id: group.group_id, name: group.name }, card?.request_model || null)"
           @override="(group, mode, anchor) => openPopover(mode, group.group_id, anchor)"
           @undo="undoOverride"
         />
@@ -114,7 +116,7 @@
                 <td class="sq-r w-[96px]">
                   <span v-if="failedKeys.has(item.key)" class="sq-fail-word mr-2">{{ t('admin.schedQuality.result.failed') }}</span>
                   <button
-                    v-if="item.clearable"
+                    v-if="item.clearable && canManage"
                     type="button"
                     class="btn btn-secondary sq-btn-xs sq-focus"
                     :data-sq-trigger="`auto:${item.key}`"
@@ -200,9 +202,9 @@
                 <tr v-for="(attempt, index) in shownRecent" :key="`${attempt.at}-${index}`" :class="{ 'sq-weak': attemptWeak(attempt) }">
                   <td class="sq-num sq-text-3">{{ fmtClock(attempt.at) }}</td>
                   <td>{{ groupNames.get(attempt.group_id) ?? `#${attempt.group_id}` }}</td>
-                  <td>{{ t(`admin.schedQuality.class.${attempt.class}`) }}</td>
+                  <td>{{ enumWord(attempt.class, SCHED_CLASSES, 'admin.schedQuality.class', t) }}</td>
                   <td class="sq-r sq-num">{{ fmtTtfo(attempt.ttfo_ms, false, t) }}</td>
-                  <td class="sq-r">{{ t(`admin.schedQuality.result.${attemptResult(attempt)}`) }}</td>
+                  <td class="sq-r">{{ resultWord(attempt) }}</td>
                 </tr>
               </tbody>
             </table>
@@ -254,11 +256,15 @@ import SchedPauseMark from './SchedPauseMark.vue'
 import SchedDrawerGroups from './SchedDrawerGroups.vue'
 import SchedOverridePopover from './SchedOverridePopover.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
-import type { SchedAccountGroup, SchedAutoState, SchedOverrideMode, SchedOverrideRequest, SchedRequestClass, SchedTestTier } from '@/types/schedQuality'
+import type {
+  SchedAccountGroup, SchedAutoState, SchedOverrideMode, SchedOverrideRequest, SchedRecentAttempt, SchedRequestClass, SchedTestTier
+} from '@/types/schedQuality'
 import { secondsUntil, useSchedQualityClock, useSchedQualityPoll } from '@/composables/useSchedQuality'
 import { closeSchedDrawer, markSchedChanged, openSchedBoard, openSchedDrawer, openSchedReset, useSchedLayers } from '@/composables/useSchedLayers'
+import { useAdminPermission } from '@/composables/useAdminPermission'
 import {
-  attemptResult, attemptWeak, fmtCacheRatio, fmtClock, fmtCountdown, fmtErrorRate, fmtTestTime, fmtTtfo, kindName, parentIdFromKey
+  attemptResult, attemptWeak, enumWord, fmtCacheRatio, fmtClock, fmtCountdown, fmtErrorRate, fmtTestTime, fmtTtfo, kindName,
+  parentIdFromKey, SCHED_CLASSES, testResult
 } from '@/utils/schedQualityFormat'
 import { vRovingTabs } from '@/utils/rovingTabs'
 import { vTip } from '@/utils/tip'
@@ -280,6 +286,8 @@ const RECENT_LONG = 50
 
 const { t, te } = useI18n()
 const { drawer, changed } = useSchedLayers()
+// Write actions need accounts:manage; without it they are not shown.
+const { canManage } = useAdminPermission('accounts')
 const now = useSchedQualityClock()
 const shellRef = ref<{ body: HTMLElement | null; holdFocus: () => () => void } | null>(null)
 const groupsRef = ref<HTMLElement | null>(null)
@@ -294,6 +302,10 @@ let restoreFocus: (() => void) | null = null
 watch(() => poll.data.value, () => { restoreFocus = shellRef.value?.holdFocus() ?? null }, { flush: 'pre' })
 watch(() => poll.data.value, () => { restoreFocus?.(); restoreFocus = null }, { flush: 'post' })
 
+// A failed test (K28, same rule as the batch) shows "失败" next to 测试 through the refresh the test triggers and
+// until the next one; another account clears it.
+const testFailedRefreshes = ref(0)
+
 // Model tab: the requested model when the detail has it, else the first one.
 const tab = ref<string | null>(null)
 const targetGroupId = ref<number | null>(null)
@@ -302,6 +314,7 @@ let pendingScroll = true
 
 watch(() => [drawer.accountId, drawer.raise] as const, ([id], previous) => {
   targetGroupId.value = drawer.groupId
+  if (id !== previous?.[0]) testFailedRefreshes.value = 0
   recentAll.value = false
   pendingScroll = true
   if (previous && id === previous[0]) void poll.refresh()
@@ -371,21 +384,30 @@ const tierCache = (tier: SchedTestTier) => fmtCacheRatio(test.value?.tiers.find(
 // Recent requests of the selected model.
 const recent = computed(() => detail.value?.recent_attempts.filter((a) => a.model === tab.value) ?? [])
 const shownRecent = computed(() => recent.value.slice(0, recentAll.value ? RECENT_LONG : RECENT_SHORT))
+const resultWord = (attempt: SchedRecentAttempt) => {
+  const result = attemptResult(attempt)
+  return t(result ? `admin.schedQuality.result.${result}` : 'admin.schedQuality.unknown')
+}
 
 // Header actions.
 const testBusy = ref(false)
+const testFailed = computed(() => testFailedRefreshes.value > 0)
+watch(detail, () => { if (testFailedRefreshes.value > 0) testFailedRefreshes.value-- })
 async function startTest() {
   const id = drawer.accountId
   if (id === null || testRunning.value || testBusy.value) return
   testBusy.value = true
+  testFailedRefreshes.value = 0
+  let result: ReturnType<typeof testResult> = 'failed'
   try {
-    await schedQualityAPI.startTest(id, tab.value ?? undefined)
+    result = testResult((await schedQualityAPI.startTest(id, tab.value ?? undefined)).tests)
   } catch {
-    // The refresh below shows the state either way.
+    // A request error is a failed test.
   } finally {
     testBusy.value = false
-    markSchedChanged()
   }
+  if (result === 'failed' && drawer.accountId === id) testFailedRefreshes.value = 2
+  markSchedChanged()
 }
 
 const allGroupsOverride = computed(() => detail.value?.groups.map((g) => g.override).find((o) => o?.all_groups) ?? null)
@@ -395,7 +417,7 @@ const headerOverrideLabel = (mode: SchedOverrideMode) =>
     : t(`admin.schedQuality.action.${mode}`)
 
 function onHeaderOverride(mode: SchedOverrideMode, event: MouseEvent) {
-  if (allGroupsOverride.value?.mode === mode) void clearOverride(0)
+  if (allGroupsOverride.value?.mode === mode) void clearOverride(0, 0)
   else openPopover(mode, 0, event.currentTarget as HTMLElement)
 }
 
@@ -420,7 +442,7 @@ async function applyOverride(request: SchedOverrideRequest) {
   }
 }
 
-// Failures of one-click actions show "失败" next to the control for 2 s.
+// Failures of one-click actions show "失败" next to the control for 2 s; group 0 is the header button.
 const failedGroups = reactive(new Set<number>())
 const failedKeys = reactive(new Set<string>())
 function flash<T>(set: Set<T>, key: T) {
@@ -428,19 +450,20 @@ function flash<T>(set: Set<T>, key: T) {
   setTimeout(() => set.delete(key), 2000)
 }
 
-async function clearOverride(groupId: number) {
+/** `markAt` is the row (or 0, the header) whose control was clicked. */
+async function clearOverride(groupId: number, markAt: number) {
   const id = drawer.accountId
   if (id === null) return
   try {
     await schedQualityAPI.clearOverride(id, groupId)
     markSchedChanged()
   } catch {
-    flash(failedGroups, groupId)
+    flash(failedGroups, markAt)
   }
 }
 
 function undoOverride(group: SchedAccountGroup) {
-  void clearOverride(group.override?.all_groups ? 0 : group.group_id)
+  void clearOverride(group.override?.all_groups ? 0 : group.group_id, group.group_id)
 }
 
 // Auto states.

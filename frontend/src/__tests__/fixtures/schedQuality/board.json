@@ -12,6 +12,7 @@
     {
       "account_id": 479,
       "name": "…",
+      "evidence_model": "gpt-6.1-sol",
       "rank": 1,
       "eligible": true,
       "reject": "",

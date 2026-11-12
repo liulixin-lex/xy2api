@@ -18,7 +18,8 @@
           :data-sq-group-row="group.group_id"
         >
           <td>
-            <button type="button" class="sq-link sq-focus" :data-sq-trigger="`board:${group.group_id}`" @click="emit('board', group)">{{ group.name }}</button>
+            <button v-if="canViewGroups" type="button" class="sq-link sq-focus" :data-sq-trigger="`board:${group.group_id}`" @click="emit('board', group)">{{ group.name }}</button>
+            <template v-else>{{ group.name }}</template>
           </td>
           <td>
             <span :class="stateOf(group).cls">{{ stateOf(group).text }}</span>
@@ -32,6 +33,7 @@
           <td class="sq-r">
             <span v-if="failedGroups.has(group.group_id)" class="sq-fail-word mr-2">{{ t('admin.schedQuality.result.failed') }}</span>
             <button
+              v-if="canManage"
               type="button"
               class="btn btn-secondary sq-btn-xs sq-focus"
               :data-sq-trigger="`override:${group.group_id}`"
@@ -48,7 +50,10 @@
 import { useI18n } from 'vue-i18n'
 import type { SchedAccountGroup, SchedGroupModelRow, SchedModelEvidence, SchedOverrideMode, SchedVerdict } from '@/types/schedQuality'
 import { secondsUntil } from '@/composables/useSchedQuality'
-import { causeDim, fmtCacheRatio, fmtCountdown, fmtErrorRate, fmtTtfo, SCHED_DIMS, verdictClass, type SchedDim } from '@/utils/schedQualityFormat'
+import { useAdminPermission } from '@/composables/useAdminPermission'
+import {
+  causeDim, fmtCacheRatio, fmtCountdown, fmtErrorRate, fmtTtfo, known, SCHED_DIMS, SCHED_STATES, SCHED_VERDICTS, verdictClass, type SchedDim
+} from '@/utils/schedQualityFormat'
 import { vTip } from '@/utils/tip'
 
 // "各分组" table of the drawer (design spec B.4). A row on the same window as the cards above shows only verdict
@@ -69,6 +74,9 @@ const emit = defineEmits<{
   undo: [group: SchedAccountGroup]
 }>()
 const { t } = useI18n()
+// The group link needs groups:view (plain name otherwise); the row button needs accounts:manage.
+const { canView: canViewGroups } = useAdminPermission('groups')
+const { canManage } = useAdminPermission('accounts')
 
 const rowOf = (group: SchedAccountGroup): SchedGroupModelRow | undefined => group.by_model.find((row) => row.model === props.model)
 
@@ -88,6 +96,7 @@ function sameWindow(row: SchedGroupModelRow, card?: SchedModelEvidence) {
 
 function stateOf(group: SchedAccountGroup): { text: string; cls: string } {
   const row = rowOf(group)
+  if (row && !known(row.state, SCHED_STATES)) return { text: t('admin.schedQuality.unknown'), cls: 'sq-text-3' }
   if (row?.state === 'cooling') {
     if (row.testing) return { text: t('admin.schedQuality.state.testing'), cls: 'sq-test' }
     const left = secondsUntil(row.until, props.now)
@@ -103,7 +112,7 @@ const valueText = (row: SchedGroupModelRow, dim: SchedDim) =>
   dim === 'ttfo' ? fmtTtfo(row.ttfo.p90_ms, row.ttfo.p90_timeout, t) : dim === 'error' ? fmtErrorRate(row.error.rate) : fmtCacheRatio(row.cache.ratio)
 
 const dimName = (dim: SchedDim) => t(`admin.schedQuality.dim.${dim}`)
-const verdictWord = (verdict: SchedVerdict) => t(`admin.schedQuality.aria.${verdict}`)
+const verdictWord = (verdict: SchedVerdict | null) => t(verdict ? `admin.schedQuality.aria.${verdict}` : 'admin.schedQuality.unknown')
 
 type Cell =
   | { kind: 'shape'; verdict: SchedVerdict; label: string }
@@ -114,30 +123,26 @@ function cellOf(group: SchedAccountGroup, dim: SchedDim): Cell {
   const shape = (verdict: SchedVerdict): Cell => ({ kind: 'shape', verdict, label: `${dimName(dim)} ${verdictWord(verdict)}` })
   if (!row) return shape('nodata')
   const own = row[dim]
-  if (own.from === 'test') {
-    const text = valueText(row, dim)
-    const verdict = own.verdict
-    return {
-      kind: 'value',
-      text,
-      cls: verdict === 'nodata' ? 'sq-text' : verdictClass(verdict),
-      tip: t('admin.schedQuality.tip.testRounds', { n: own.n }),
-      label: verdict === 'nodata' ? `${dimName(dim)} ${text}` : t('admin.schedQuality.aria.cell', { dim: dimName(dim), value: text, verdict: verdictWord(verdict) })
-    }
+  // An unknown verdict is neutral: the number uncoloured, or the fallback word instead of a shape.
+  const verdict = known(own.verdict, SCHED_VERDICTS)
+  const value = (text: string, tip: string): Cell => ({
+    kind: 'value',
+    text,
+    cls: verdict && verdict !== 'nodata' ? verdictClass(verdict) : 'sq-text',
+    tip,
+    label: verdict === 'nodata' ? `${dimName(dim)} ${text}` : t('admin.schedQuality.aria.cell', { dim: dimName(dim), value: text, verdict: verdictWord(verdict) })
+  })
+  if (own.from === 'test') return value(valueText(row, dim), t('admin.schedQuality.tip.testRounds', { n: own.n }))
+  if (sameWindow(row, props.card)) {
+    if (verdict) return shape(verdict)
+    const word = verdictWord(null)
+    return { kind: 'value', text: word, cls: 'sq-text-3', tip: '', label: `${dimName(dim)} ${word}` }
   }
-  if (sameWindow(row, props.card)) return shape(own.verdict)
   if (!hasValue(row, dim)) {
     if (row.state === 'cooling' && causeDim(row.reason) === dim) return shape('fail')
     return { kind: 'value', text: '—', cls: 'sq-text-3', tip: t('admin.schedQuality.tip.samples', { n: own.n }), label: `${dimName(dim)} ${verdictWord('nodata')}` }
   }
-  const text = valueText(row, dim)
-  return {
-    kind: 'value',
-    text,
-    cls: own.verdict === 'nodata' ? 'sq-text' : verdictClass(own.verdict),
-    tip: t('admin.schedQuality.tip.samples', { n: own.n }),
-    label: own.verdict === 'nodata' ? `${dimName(dim)} ${text}` : t('admin.schedQuality.aria.cell', { dim: dimName(dim), value: text, verdict: verdictWord(own.verdict) })
-  }
+  return value(valueText(row, dim), t('admin.schedQuality.tip.samples', { n: own.n }))
 }
 
 function actionLabel(group: SchedAccountGroup) {
