@@ -2,10 +2,8 @@ package service
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/hex"
 	"maps"
-	"reflect"
 	"strings"
 
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
@@ -50,26 +48,6 @@ func anthropicCompatProfileValue(extra map[string]any) (string, error) {
 		return "", infraerrors.BadRequest("ANTHROPIC_COMPAT_PROFILE_INVALID", "anthropic_compat_profile must be off, claude_code")
 	}
 	return value, nil
-}
-
-// ValidateAnthropicCompatProfileExtra validates explicitly supplied configuration.
-func ValidateAnthropicCompatProfileExtra(platform, accountType string, extra map[string]any) error {
-	_, admissionPresent := extra[AnthropicCompatNewSessionsExtraKey]
-	if _, present := extra[AnthropicCompatProfileExtraKey]; !present && !admissionPresent {
-		return nil
-	}
-	if admissionPresent {
-		if _, ok := extra[AnthropicCompatNewSessionsExtraKey].(bool); !ok {
-			return infraerrors.BadRequest("ANTHROPIC_COMPAT_ADMISSION_INVALID", "anthropic_compat_new_sessions must be a boolean")
-		}
-	}
-	if _, err := anthropicCompatProfileValue(extra); err != nil {
-		return err
-	}
-	if platform != PlatformAnthropic || accountType != AccountTypeAPIKey {
-		return infraerrors.BadRequest("ANTHROPIC_COMPAT_PROFILE_ACCOUNT_INVALID", "Claude Code request compatibility is only available for Anthropic API Key accounts")
-	}
-	return nil
 }
 
 // Static capabilities do not depend on secrets, header overrides or beta policy.
@@ -164,109 +142,4 @@ func RedactAnthropicCompatExtra(extra map[string]any) map[string]any {
 	redacted := maps.Clone(extra)
 	delete(redacted, AnthropicCompatIdentitySeedExtraKey)
 	return redacted
-}
-
-// prepareAnthropicCompatExtra preserves only this feature's omitted setting and managed seed.
-// Other extra keys retain the existing full-replacement semantics of account editing.
-func prepareAnthropicCompatExtra(account, previous *Account, create bool) (map[string]any, error) {
-	prepared := RedactAnthropicCompatExtra(account.Extra)
-	if prepared == nil {
-		prepared = make(map[string]any)
-	}
-	if !create && previous != nil {
-		for _, key := range []string{AnthropicCompatProfileExtraKey, AnthropicCompatNewSessionsExtraKey} {
-			if _, provided := prepared[key]; !provided {
-				if value, exists := previous.Extra[key]; exists {
-					prepared[key] = value
-				}
-			}
-		}
-	}
-	if err := ValidateAnthropicCompatProfileExtra(account.Platform, account.Type, prepared); err != nil {
-		return nil, err
-	}
-	candidate := *account
-	candidate.Extra = prepared
-	profile, err := ResolveAnthropicCompatProfile(&candidate)
-	if err != nil {
-		return nil, err
-	}
-	seed := ""
-	if !create && previous != nil {
-		seed = previous.AnthropicCompatIdentitySeed()
-	}
-	if seed == "" && profile != nil {
-		bytes := make([]byte, 32)
-		if _, err := rand.Read(bytes); err != nil {
-			return nil, err
-		}
-		seed = hex.EncodeToString(bytes)
-	}
-	if seed != "" {
-		prepared[AnthropicCompatIdentitySeedExtraKey] = seed
-	}
-	if len(prepared) == 0 && account.Extra == nil {
-		return nil, nil
-	}
-	return prepared, nil
-}
-
-func anthropicCompatIdentityChanged(previous, next *Account) bool {
-	if previous == nil || next == nil {
-		return true
-	}
-	if previous.Platform != next.Platform || previous.Type != next.Type {
-		return true
-	}
-	for _, key := range []string{"api_key", "base_url", "auth_scheme"} {
-		if !reflect.DeepEqual(previous.Credentials[key], next.Credentials[key]) {
-			return true
-		}
-	}
-	return !reflect.DeepEqual(previous.Extra["anthropic_apikey_auth_scheme"], next.Extra["anthropic_apikey_auth_scheme"])
-}
-
-func prepareAnthropicCompatAccountUpdate(account, previous *Account) error {
-	trusted := *previous
-	if anthropicCompatIdentityChanged(previous, account) {
-		trusted.Extra = RedactAnthropicCompatExtra(previous.Extra)
-	}
-	extra, err := prepareAnthropicCompatExtra(account, &trusted, false)
-	if err == nil {
-		account.Extra = extra
-	}
-	return err
-}
-
-func (s *adminServiceImpl) validateAnthropicCompatConfiguration(ctx context.Context, account *Account) error {
-	profile, err := ResolveAnthropicCompatProfile(account)
-	if err != nil || profile == nil || s.settingService == nil {
-		return err
-	}
-	settings, err := s.settingService.GetBetaPolicySettings(ctx)
-	if err != nil {
-		return err
-	}
-	for _, rule := range settings.Rules {
-		if !betaPolicyScopeMatches(rule.Scope, false, false) {
-			continue
-		}
-		for _, beta := range profile.RequiredBetas {
-			if rule.BetaToken != beta {
-				continue
-			}
-			for _, model := range []string{"claude-opus-4-8", "claude-opus-5-5"} {
-				action, _ := resolveRuleAction(rule, model)
-				if action == BetaPolicyActionBlock || action == BetaPolicyActionFilter {
-					return infraerrors.BadRequest("ANTHROPIC_COMPAT_PROFILE_BETA_CONFLICT", "beta policy conflicts with Claude Code compatibility baseline: "+beta)
-				}
-			}
-		}
-	}
-	return nil
-}
-
-func ShouldEnsureAnthropicCompatSeedForExtraUpdates(updates map[string]any) bool {
-	_, authScheme := updates["anthropic_apikey_auth_scheme"]
-	return updates[AnthropicCompatProfileExtraKey] == AnthropicCompatProfileClaudeCode || authScheme
 }

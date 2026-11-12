@@ -514,16 +514,12 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	if len(modes) > 0 {
 		mode = modes[0]
 	}
+
 	profile, profileErr := ResolveAnthropicCompatProfile(account)
 	if profileErr != nil {
 		return s.sendErrorAndEnd(c, profileErr.Error())
 	}
 	ordinaryDiagnostic := account.Platform == PlatformAnthropic && account.Type == AccountTypeAPIKey && (mode == AccountTestModeAnthropicCompatibility || (profile != nil && mode != AccountTestModeAnthropicLegacyCLI))
-	if ordinaryDiagnostic {
-		if err := (&adminServiceImpl{settingService: s.settingService}).validateAnthropicCompatConfiguration(ctx, account); err != nil {
-			return s.sendErrorAndEnd(c, err.Error())
-		}
-	}
 
 	// Determine the model to use
 	testModelID := modelID
@@ -576,6 +572,10 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported account type: %s", account.Type))
 	}
 
+	if ordinaryDiagnostic {
+		return s.testAnthropicCompatConnection(c, account, testModelID, apiURL, authToken, profile)
+	}
+
 	// Set SSE headers
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
@@ -588,18 +588,12 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create test payload")
 	}
-	if ordinaryDiagnostic {
-		payload = map[string]any{"model": testModelID, "messages": []map[string]any{{"role": "user", "content": "Reply with OK."}}, "max_tokens": 64, "stream": true}
-	}
 	payloadBytes, _ := json.Marshal(payload)
 
 	// Send test_start event
 	startEvent := TestEvent{Type: "test_start", Model: testModelID, ActualAccountID: account.ID, TestScope: "legacy_cli_connectivity"}
-	if ordinaryDiagnostic {
-		startEvent.TestScope = "ordinary_client_compatibility"
-	}
 	if profile != nil {
-		startEvent.CompatProfile = profile.ID
+		startEvent.CompatProfile = "claude_code"
 	}
 	s.sendEvent(c, startEvent)
 
@@ -630,24 +624,6 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 
 	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
 	account.ApplyHeaderOverrides(req.Header)
-	if ordinaryDiagnostic {
-		// Begin with an ordinary client shape. The production adapter owns all CLI fields.
-		ordinaryHeaders := make(http.Header)
-		ordinaryHeaders.Set("Content-Type", "application/json")
-		ordinaryHeaders.Set("User-Agent", "XY2API-account-diagnostic/1.0")
-		ordinaryHeaders.Set("anthropic-version", "2023-06-01")
-		account.ApplyHeaderOverrides(ordinaryHeaders)
-		adapted, headers, err := BuildAnthropicCompatDiagnosticRequest(account, payloadBytes, ordinaryHeaders)
-		if err != nil {
-			return s.sendErrorAndEnd(c, err.Error())
-		}
-		req.Header = headers
-		setAnthropicAPIKeyAuthHeader(req.Header, account, authToken, account.GetBaseURL())
-		req.Body = io.NopCloser(bytes.NewReader(adapted))
-		req.ContentLength = int64(len(adapted))
-		req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(adapted)), nil }
-	}
-
 	// Get proxy URL
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -665,7 +641,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		errMsg := fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body))
 
 		// 403 表示账号被上游封禁，标记为 error 状态
-		if resp.StatusCode == http.StatusForbidden && !ordinaryDiagnostic {
+		if resp.StatusCode == http.StatusForbidden {
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
 
@@ -673,10 +649,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	}
 
 	// Process SSE stream
-	if ordinaryDiagnostic {
-		resp.Body = newAnthropicCompatDiagnosticBody(ctx, resp.Body)
-	}
-	return s.processClaudeStream(c, resp.Body, ordinaryDiagnostic)
+	return s.processClaudeStream(c, resp.Body)
 }
 
 func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Context, ctx context.Context, account *Account, testModelID string) error {
@@ -2873,18 +2846,13 @@ func createOpenAIChatCompletionsTestPayload(modelID string, prompt string) map[s
 }
 
 // processClaudeStream processes the SSE stream from Claude API
-func (s *AccountTestService) processClaudeStream(c *gin.Context, body io.Reader, strictModes ...bool) error {
+func (s *AccountTestService) processClaudeStream(c *gin.Context, body io.Reader) error {
 	reader := bufio.NewReader(body)
-	strict := len(strictModes) > 0 && strictModes[0]
-	seenStopReason := false
 
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
-				if strict {
-					return s.sendErrorAndEnd(c, "Compatibility diagnostic ended without a complete Anthropic terminal event")
-				}
 				s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 				return nil
 			}
@@ -2898,9 +2866,6 @@ func (s *AccountTestService) processClaudeStream(c *gin.Context, body io.Reader,
 
 		jsonStr := sseDataPrefix.ReplaceAllString(line, "")
 		if jsonStr == "[DONE]" {
-			if strict {
-				return s.sendErrorAndEnd(c, "Compatibility diagnostic received a non-Anthropic terminal event")
-			}
 			s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 			return nil
 		}
@@ -2913,11 +2878,6 @@ func (s *AccountTestService) processClaudeStream(c *gin.Context, body io.Reader,
 		eventType, _ := data["type"].(string)
 
 		switch eventType {
-		case "message_delta":
-			if delta, ok := data["delta"].(map[string]any); ok {
-				reason, _ := delta["stop_reason"].(string)
-				seenStopReason = seenStopReason || reason != ""
-			}
 		case "content_block_delta":
 			if delta, ok := data["delta"].(map[string]any); ok {
 				if text, ok := delta["text"].(string); ok {
@@ -2925,9 +2885,6 @@ func (s *AccountTestService) processClaudeStream(c *gin.Context, body io.Reader,
 				}
 			}
 		case "message_stop":
-			if strict && !seenStopReason {
-				return s.sendErrorAndEnd(c, "Compatibility diagnostic is missing stop_reason")
-			}
 			s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 			return nil
 		case "error":
@@ -3345,6 +3302,12 @@ func (s *AccountTestService) sendEvent(c *gin.Context, event TestEvent) {
 		}
 	}
 	eventJSON, _ := json.Marshal(event)
+	if event.Type == "test_complete" && !event.Success {
+		eventJSON, _ = json.Marshal(struct {
+			TestEvent
+			Success bool `json:"success"`
+		}{TestEvent: event, Success: false})
+	}
 	if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", eventJSON); err != nil {
 		log.Printf("failed to write SSE event: %v", err)
 		return
