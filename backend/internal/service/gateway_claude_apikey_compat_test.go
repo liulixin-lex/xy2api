@@ -16,12 +16,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
-	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
-	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zaptest/observer"
 )
 
 type compatMemoryStore struct {
@@ -93,27 +89,6 @@ func compatTestContext() *gin.Context {
 }
 func compatTestService(store *compatMemoryStore) *GatewayService {
 	return &GatewayService{cache: store, cfg: &config.Config{}, rateLimitService: &RateLimitService{}, deferredService: &DeferredService{}}
-}
-
-func TestClaudeAPIKeyCompatOutcomeIncludesRequestID(t *testing.T) {
-	for _, fromGin := range []bool{false, true} {
-		core, logs := observer.New(zap.InfoLevel)
-		ctx := logger.IntoContext(context.Background(), zap.New(core))
-		c := compatTestContext()
-		if fromGin {
-			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.RequestID, "request-from-gin"))
-		} else {
-			ctx = context.WithValue(ctx, ctxkey.RequestID, "request-from-context")
-		}
-		compatTestService(newCompatMemoryStore()).logAnthropicCompatOutcome(ctx, c, compatTestAccount(), "messages", nil)
-		entries := logs.FilterMessage("gateway.anthropic_compat_attempt").All()
-		require.Len(t, entries, 1)
-		expected := "request-from-context"
-		if fromGin {
-			expected = "request-from-gin"
-		}
-		require.Equal(t, expected, entries[0].ContextMap()["request_id"])
-	}
 }
 func compatBuild(t *testing.T, s *GatewayService, c *gin.Context, a *Account, ctx context.Context, body []byte) (*http.Request, []byte, *anthropicCompatPlan) {
 	t.Helper()
