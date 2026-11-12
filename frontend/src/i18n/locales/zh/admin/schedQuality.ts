@@ -2,8 +2,7 @@
 export default {
   schedQuality: {
     list: {
-      recent: '近期实测',
-      mainModel: '主模型',
+      recent: '近期状况',
       groups: '分组',
       membership: '归组',
     },
@@ -12,8 +11,16 @@ export default {
       error: '错误',
       cache: '缓存',
     },
+    recent: {
+      samples: '{n} 次',
+      sep: '，',
+    },
     filter: {
+      all: '全部质量状态',
+      normal: '正常',
       cooling: '冷却中',
+      exempt: '豁免',
+      demote: '后排',
     },
     more: '+{n}',
     state: {
@@ -61,6 +68,13 @@ export default {
       medium: '中',
       large: '大',
     },
+    test: {
+      screen: '筛查',
+      full: '三档',
+      done: '完成',
+      unfinished: '未完成',
+      aborted: '作废',
+    },
     scope: {
       account: '账号',
       proxy: '代理',
@@ -96,9 +110,11 @@ export default {
       forever: '一直',
       reason: '理由',
     },
-    reset: {
-      cleared: '已清除',
-      preserved: '保留',
+    recover: {
+      ok: '{name} 已恢复',
+      failed: '{name} 恢复失败',
+      batchOk: '已恢复 {n}',
+      batchPartial: '已恢复 {ok} · 失败 {failed}',
     },
     proxy: {
       title: '代理隔离',
@@ -178,16 +194,14 @@ export default {
       accountRate: '账号倍率',
     },
     tip: {
-      source: '{model} · {n}',
       samples: '{n} 条',
       testRounds: '测试 {n} 轮',
       recentlyFull: '刚占满',
       noTakeover: '暂不接管',
-      testOk: '无故障',
-      testFault: '有故障',
       globalOff: '质量调度 关',
       stale: '数据过期',
       editMembership: '编辑归组',
+      until: '至 {time}',
     },
     aria: {
       pass: '达标',

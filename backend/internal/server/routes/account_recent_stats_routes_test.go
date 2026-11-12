@@ -38,10 +38,10 @@ func TestAccountRecentStatsRouteOperatorPermissions(t *testing.T) {
 		status int
 	}{
 		{"accounts view", "accounts", operatoraccess.LevelView, http.StatusOK},
-		{"channels view", "channels", operatoraccess.LevelView, http.StatusOK},
-		{"groups view", "groups", operatoraccess.LevelView, http.StatusOK},
-		{"usage view", "usage", operatoraccess.LevelView, http.StatusOK},
-		{"no account list access", "accounts", operatoraccess.LevelNone, http.StatusForbidden},
+		{"channels view only", "channels", operatoraccess.LevelView, http.StatusForbidden},
+		{"groups view only", "groups", operatoraccess.LevelView, http.StatusForbidden},
+		{"usage view only", "usage", operatoraccess.LevelView, http.StatusForbidden},
+		{"no accounts view", "accounts", operatoraccess.LevelNone, http.StatusForbidden},
 		{"ops view only", "ops", operatoraccess.LevelView, http.StatusForbidden},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

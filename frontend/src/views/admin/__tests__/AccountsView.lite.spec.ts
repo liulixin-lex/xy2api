@@ -44,6 +44,7 @@ vi.mock('@/api/admin', () => ({
       getById,
       listWithEtag,
       getBatchTodayStats,
+      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
       getUpstreamBillingProbeSettings,
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       delete: vi.fn(),
@@ -450,8 +451,7 @@ describe('admin AccountsView lite account list', () => {
     const wrapper = mountView(false)
     await flushPromises()
 
-    const trigger = wrapper.findAll('button').find(button => button.text() === 'common.more')!
-    await trigger.trigger('click')
+    await wrapper.get('[data-test="row-more"]').trigger('click')
     const menu = new DOMWrapper(document.body.querySelector('.action-menu-content')!)
     menu.element.dispatchEvent(new Event('scroll'))
     await flushPromises()
@@ -490,9 +490,7 @@ describe('admin AccountsView lite account list', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    const editButton = wrapper.findAll('button').find(button => button.text().includes('common.edit'))
-    expect(editButton).toBeTruthy()
-    await editButton!.trigger('click')
+    await wrapper.get('[data-test="row-edit"]').trigger('click')
     await flushPromises()
     expect(getById).toHaveBeenCalledWith(42)
     expect(wrapper.get('[data-test="edit-account"]').text()).toBe('compact row')
@@ -548,8 +546,7 @@ describe('admin AccountsView lite account list', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    const editButton = wrapper.findAll('button').find(button => button.text().includes('common.edit'))
-    await editButton!.trigger('click')
+    await wrapper.get('[data-test="row-edit"]').trigger('click')
     await flushPromises()
 
     expect(showError).toHaveBeenCalledWith('detail failed')

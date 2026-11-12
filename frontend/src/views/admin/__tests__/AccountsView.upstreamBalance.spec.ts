@@ -17,6 +17,7 @@ vi.mock('@/api/admin', () => ({
       list: listAccounts,
       listWithEtag,
       getBatchTodayStats: vi.fn().mockResolvedValue({ stats: {} }),
+      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
       getUpstreamBalances,
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       getUpstreamBillingRatesWithEtag: vi.fn().mockResolvedValue({ notModified: true, etag: null, data: null }),
@@ -426,7 +427,7 @@ describe('admin AccountsView upstream balance column', () => {
     await flushPromises()
     expect(balanceText(wrapper, 1)).toBe('$12.34')
 
-    wrapper.getComponent({ name: 'AccountBulkActionsBar' }).vm.$emit('edit-filtered')
+    await (wrapper.vm as unknown as { openBulkEditFiltered: () => Promise<void> }).openBulkEditFiltered()
     await flushPromises()
     getUpstreamBalances.mockRejectedValue(new Error('boom'))
     // 按筛选批量编辑：所选列表为空，但当前页账号都可能被改了。

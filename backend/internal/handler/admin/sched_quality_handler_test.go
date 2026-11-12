@@ -115,7 +115,7 @@ func (a *schedAdminHandlerAudit) BatchInsert(_ context.Context, rows []*service.
 func schedAdminHandlerFixture() (*SchedQualityHandler, *schedAdminHandlerEngine, *schedAdminHandlerAccounts) {
 	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
 	engine := &schedAdminHandlerEngine{p: &service.SchedQualitySnapshot{At: now, GlobalEnabled: true, GroupRows: map[int64][]service.SchedGroupRow{}, Evidence: map[service.SchedAccountModel]schedquality.Summary{}}, version: 63}
-	repo := &schedAdminHandlerAccounts{a: &service.Account{ID: 1, Name: "one", Platform: service.PlatformOpenAI, Status: service.StatusActive, Schedulable: true, GroupIDs: []int64{1}}}
+	repo := &schedAdminHandlerAccounts{a: &service.Account{ID: 1, Name: "one", Platform: service.PlatformOpenAI, Status: service.StatusActive, Schedulable: true, GroupIDs: []int64{1}, Groups: []*service.Group{{ID: 1, Name: "group", Platform: service.PlatformOpenAI}}}}
 	s := service.NewSchedAdminService(service.SchedAdminDependencies{Engine: engine, Accounts: repo, Groups: schedAdminHandlerGroups{}, Board: schedAdminHandlerBoard{}, Tests: &schedAdminHandlerTests{ticket: service.SchedTestTicket{TestID: "ticket", Started: true}}, Now: func() time.Time { return now }})
 	return NewSchedQualityHandler(s), engine, repo
 }

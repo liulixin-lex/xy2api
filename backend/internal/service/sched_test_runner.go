@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/schedtest"
@@ -127,6 +128,10 @@ func schedTestStoreErrorClass(err error) string {
 	if errors.Is(err, context.Canceled) {
 		return "internal"
 	}
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) && pqErr.Code == "57014" {
+		return "timeout"
+	}
 	return "db"
 }
 
@@ -225,7 +230,7 @@ func (s *SchedTestRunnerService) Request(ctx context.Context, accountID int64, m
 			}
 			s.mu.Unlock()
 			if recovered := recover(); recovered != nil {
-				logger.LegacyPrintf("service.sched_test", "runner_panic: test_id=%s error=internal", record.ID)
+				logger.LegacyPrintf("service.sched_test", "runner_panic: test_id=%s panic=%v", record.ID, recovered)
 			}
 		}()
 		s.run(record, limit.slots)
@@ -348,7 +353,7 @@ func (s *SchedTestRunnerService) run(record SchedTestRecord, slots chan struct{}
 	writeCtx, writeCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer writeCancel()
 	if err := s.store.Finish(writeCtx, record); err != nil {
-		logger.LegacyPrintf("service.sched_test", "finish_failed: test_id=%s error=%s", record.ID, schedTestStoreErrorClass(err))
+		logger.LegacyPrintf("service.sched_test", "finish_failed: test_id=%s err=%v", record.ID, err)
 	}
 	s.logTest(writeCtx, record, blockedBy)
 }
@@ -357,7 +362,7 @@ func (s *SchedTestRunnerService) runTier(ctx context.Context, cancel context.Can
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			partial.AbortReason = "error"
-			logger.LegacyPrintf("service.sched_test", "tier_panic: test_id=%s tier=%s error=internal", record.ID, tier)
+			logger.LegacyPrintf("service.sched_test", "tier_panic: test_id=%s tier=%s panic=%v", record.ID, tier, recovered)
 		}
 	}()
 	session := schedtest.Session{ID: record.ID}

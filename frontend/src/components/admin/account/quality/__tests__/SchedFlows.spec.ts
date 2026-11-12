@@ -2,13 +2,18 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { afterEach } from 'vitest'
 
-import resetFixture from '@/__tests__/fixtures/schedQuality/reset.json'
-import SchedResetDialog from '../SchedResetDialog.vue'
 import SchedBatchDialog from '../SchedBatchDialog.vue'
-import { closeSchedReset, openSchedReset } from '@/composables/useSchedLayers'
 
 const api = vi.hoisted(() => ({ reset: vi.fn(), startTest: vi.fn(), setOverride: vi.fn() }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: api }))
+const perms = await vi.hoisted(async () => {
+  const { reactive } = await import('vue')
+  return reactive({ manage: true })
+})
+vi.mock('@/composables/useAdminPermission', async () => {
+  const { computed } = await vi.importActual<typeof import('vue')>('vue')
+  return { useAdminPermission: () => ({ canView: computed(() => true), canManage: computed(() => perms.manage) }) }
+})
 vi.mock('vue-i18n', async () => ({
   ...(await vi.importActual<typeof import('vue-i18n')>('vue-i18n')),
   useI18n: () => ({
@@ -21,7 +26,7 @@ enableAutoUnmount(afterEach)
 beforeEach(() => {
   // Leave transitions of dialogs from the previous test never finish in jsdom.
   document.body.innerHTML = ''
-  closeSchedReset()
+  perms.manage = true
   Object.values(api).forEach((fn) => fn.mockReset())
   document.documentElement.dataset.motion = 'reduced'
 })
@@ -31,30 +36,6 @@ const click = async (selector: string) => {
   document.querySelector<HTMLElement>(selector)!.click()
   await flushPromises()
 }
-
-describe('reset flow', () => {
-  it('confirms with the account name, then lists cleared, kept and failed items as short names in the same dialog', async () => {
-    api.reset.mockResolvedValue({ ...resetFixture, failed: [...resetFixture.failed, { key: 'x', kind: 'brand_new', error: 'boom' }] })
-    const wrapper = mount(SchedResetDialog, { attachTo: document.body })
-    openSchedReset({ id: 479, name: 'acc-03' })
-    await flushPromises()
-    expect(document.body.textContent).toContain('acc-03')
-    expect(document.querySelector('[data-sq-reset-result]')).toBeNull()
-
-    await click('[data-sq-reset-confirm]')
-    expect(api.reset).toHaveBeenCalledWith(479)
-    const column = (key: string) => Array.from(document.querySelectorAll(`[data-column="${key}"] li`)).map((li) => li.textContent?.replace(/\s+/g, ' ').trim())
-    expect(column('cleared')).toEqual(['admin.schedQuality.kind.quality', 'admin.schedQuality.kind.model_transient gpt-5.6-sol'])
-    expect(column('preserved')).toEqual(['admin.schedQuality.kind.iq_gate gpt-6-astra'])
-    expect(column('failed')).toEqual(['admin.schedQuality.kind.rate_limit', 'admin.schedQuality.unknown'])
-    // Neither the reset time nor reasons or errors are shown.
-    expect(document.body.textContent).not.toContain('boom')
-
-    document.querySelector<HTMLElement>('.modal-footer button')!.click()
-    await flushPromises()
-    expect(wrapper.emitted('done')?.[0]).toEqual([479])
-  })
-})
 
 describe('batch flow', () => {
   const accounts = [{ id: 1, name: 'acc-a' }, { id: 2, name: 'acc-b' }, { id: 3, name: 'acc-c' }]
@@ -101,26 +82,30 @@ describe('batch flow', () => {
     ])
   })
 
-  it('runs a batch reset four at a time and marks request failures', async () => {
-    let running = 0
-    let peak = 0
-    const many = Array.from({ length: 9 }, (_, i) => ({ id: i + 1, name: `acc-${i + 1}` }))
-    api.reset.mockImplementation(async (id: number) => {
-      running++
-      peak = Math.max(peak, running)
-      await new Promise((resolve) => setTimeout(resolve))
-      running--
-      if (id === 5) throw new Error('down')
-      return { ...resetFixture, failed: [] }
-    })
-    mount(SchedBatchDialog, { props: { action: 'reset', accounts: many, anchor: null, groups: [] }, attachTo: document.body })
+  it('confirms a batch recovery with the account count and 取消 / 确定, then hands the accounts back without a result table (F3)', async () => {
+    const wrapper = mount(SchedBatchDialog, { props: { action: 'reset', accounts, anchor: null, groups: [] }, attachTo: document.body })
     await flushPromises()
+    const dialog = document.querySelector<HTMLElement>('[data-sq-batch-confirm]')!.closest('.modal-content')!
+    expect(dialog.textContent).toContain('admin.schedQuality.action.reset')
+    expect(Array.from(dialog.querySelectorAll('p span')).map((el) => el.textContent)).toEqual(['admin.schedQuality.col.account', '3'])
+    expect(Array.from(dialog.querySelectorAll('.modal-footer button')).map((b) => b.textContent?.trim()))
+      .toEqual(['admin.schedQuality.action.cancel', 'admin.schedQuality.action.confirm'])
+
     await click('[data-sq-batch-confirm]')
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(wrapper.emitted('recover')).toEqual([[[1, 2, 3]]])
+    expect(wrapper.emitted('close')).toHaveLength(1)
+    expect(api.reset).not.toHaveBeenCalled()
+    expect(document.querySelector('[data-sq-batch-results]')).toBeNull()
+  })
+
+  it('closes an unconfirmed batch recovery when accounts:manage is withdrawn, and sends nothing (F3, scenario 41)', async () => {
+    const wrapper = mount(SchedBatchDialog, { props: { action: 'reset', accounts, anchor: null, groups: [] }, attachTo: document.body })
     await flushPromises()
-    expect(peak).toBe(4)
-    expect(results().filter(([, result]) => result === 'admin.schedQuality.result.failed').map(([name]) => name)).toEqual(['acc-5'])
-    expect(results()).toHaveLength(9)
+    perms.manage = false
+    await flushPromises()
+    expect(wrapper.emitted('close')).toHaveLength(1)
+    expect(wrapper.emitted('recover')).toBeUndefined()
+    expect(api.reset).not.toHaveBeenCalled()
   })
 
   // One answer per account, released by the test.
@@ -129,34 +114,6 @@ describe('batch flow', () => {
     const call = (id: number) => new Promise((resolve, reject) => { pending.set(id, { resolve, reject }) })
     return { pending, call }
   }
-  const totals = () => Array.from(document.querySelectorAll('.modal-footer p span.font-medium')).map((el) => el.textContent)
-
-  it('counts a reset that answers 200 with failed items as failed, per account and in the totals', async () => {
-    const answers: Record<number, () => Promise<unknown>> = {
-      1: async () => ({ ...resetFixture, failed: [] }),
-      2: async () => ({ ...resetFixture, failed: [{ key: 'rate_limit', kind: 'rate_limit', error: 'x' }] }),
-      3: async () => { throw new Error('network') }
-    }
-    api.reset.mockImplementation((id: number) => answers[id]())
-    mount(SchedBatchDialog, { props: { action: 'reset', accounts, anchor: null, groups: [] }, attachTo: document.body })
-    await flushPromises()
-    await click('[data-sq-batch-confirm]')
-    expect(results()).toEqual([
-      ['acc-a', 'admin.schedQuality.result.ok'],
-      ['acc-b', 'admin.schedQuality.result.failed'],
-      ['acc-c', 'admin.schedQuality.result.failed']
-    ])
-    expect(totals()).toEqual(['1', '2'])
-  })
-
-  it('counts an all-clear batch reset as success', async () => {
-    api.reset.mockResolvedValue({ ...resetFixture, failed: [] })
-    mount(SchedBatchDialog, { props: { action: 'reset', accounts, anchor: null, groups: [] }, attachTo: document.body })
-    await flushPromises()
-    await click('[data-sq-batch-confirm]')
-    expect(results().map(([, result]) => result)).toEqual(Array(3).fill('admin.schedQuality.result.ok'))
-    expect(totals()).toEqual(['3', '0'])
-  })
 
   it('keeps the action, request and accounts it started with when the props change mid-run', async () => {
     const answers = deferred()
@@ -182,16 +139,16 @@ describe('batch flow', () => {
 
   it('stops at close: later accounts are not run, late answers are dropped, and no batch starts until they are in', async () => {
     const answers = deferred()
-    api.reset.mockImplementation((id: number) => answers.call(id))
+    api.setOverride.mockImplementation((id: number) => answers.call(id))
     api.startTest.mockResolvedValue({ tests: [{ model: 'm', test_id: 't', started: true, why: '' }] })
     const many = Array.from({ length: 8 }, (_, i) => ({ id: i + 1, name: `acc-${i + 1}` }))
-    const wrapper = mount(SchedBatchDialog, { props: { action: 'reset', accounts: many, anchor: null, groups: [] }, attachTo: document.body })
+    const wrapper = mount(SchedBatchDialog, { props: { action: 'demote', accounts: many, anchor: null, groups: [] }, attachTo: document.body })
     await flushPromises()
-    await click('[data-sq-batch-confirm]')
+    await click('[data-sq-popover] .btn-primary')
     expect(wrapper.emitted('busy')).toEqual([[true]])
-    answers.pending.get(1)!.resolve({ ...resetFixture, failed: [] })
+    answers.pending.get(1)!.resolve(undefined)
     await flushPromises()
-    expect(api.reset).toHaveBeenCalledTimes(5)
+    expect(api.setOverride).toHaveBeenCalledTimes(5)
 
     // Close the results while 2, 3, 4 and 5 are on their way.
     await click('[data-sq-batch-results] ~ * button, .modal-footer .btn-secondary')
@@ -208,9 +165,9 @@ describe('batch flow', () => {
       .find((el) => el.textContent?.trim() === 'admin.schedQuality.action.test')
     expect(testConfirm()).toBeUndefined()
 
-    for (const id of [2, 3, 4, 5]) answers.pending.get(id)!.resolve({ ...resetFixture, failed: [] })
+    for (const id of [2, 3, 4, 5]) answers.pending.get(id)!.resolve(undefined)
     await flushPromises()
-    expect(api.reset).toHaveBeenCalledTimes(5)
+    expect(api.setOverride).toHaveBeenCalledTimes(5)
     expect(state()).toEqual(['ok', 'running', 'running', 'running', 'running', 'skipped', 'skipped', 'skipped'])
     expect(wrapper.emitted('busy')).toEqual([[true], [false]])
     expect(wrapper.emitted('done')).toHaveLength(1)
@@ -221,7 +178,7 @@ describe('batch flow', () => {
     testConfirm()!.click()
     await flushPromises()
     expect(api.startTest.mock.calls.map(([id]) => id)).toEqual([20])
-    expect(api.reset).toHaveBeenCalledTimes(5)
+    expect(api.setOverride).toHaveBeenCalledTimes(5)
     expect(results().slice(-1)).toEqual([['acc-20', 'admin.schedQuality.result.ok']])
   })
 })

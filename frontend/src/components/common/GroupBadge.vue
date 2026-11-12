@@ -54,8 +54,6 @@ interface Props {
   alwaysShowRate?: boolean
   /** 平台图标；所在位置已表明平台时（如账号自己的分组）可关闭，平台主题色不变 */
   showPlatformIcon?: boolean
-  /** 中性灰色，不用平台主题色（账号列表「归组」一格，避免与质量结论色混淆） */
-  neutral?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -65,8 +63,7 @@ const props = withDefaults(defineProps<Props>(), {
   userRateMultiplier: null,
   peakRateEnabled: false,
   alwaysShowRate: false,
-  showPlatformIcon: true,
-  neutral: false
+  showPlatformIcon: true
 })
 
 const { t } = useI18n()
@@ -190,63 +187,37 @@ const peakRateClass = computed(() => {
   return 'px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
 })
 
-// Badge color based on platform and subscription type
+// Badge colour by platform. Standard groups: light = upstream sub2api hues (Anthropic orange: amber is the "mid"
+// tier colour of the account list), dark = 300 text on the 400 hue at 12% (ui-proposal section 3).
+const STANDARD_BADGE: Partial<Record<GroupPlatform, string>> = {
+  openai: 'bg-green-50 text-green-700 dark:bg-green-500/[0.12] dark:text-green-300',
+  anthropic: 'bg-orange-50 text-orange-700 dark:bg-orange-400/[0.12] dark:text-orange-300',
+  gemini: 'bg-sky-50 text-sky-700 dark:bg-sky-400/[0.12] dark:text-sky-300',
+  antigravity: 'bg-fuchsia-50 text-fuchsia-700 dark:bg-fuchsia-400/[0.12] dark:text-fuchsia-300',
+  grok: 'bg-zinc-100 text-zinc-700 dark:bg-zinc-400/[0.12] dark:text-zinc-300',
+  kimi: 'bg-pink-50 text-pink-700 dark:bg-pink-400/[0.12] dark:text-pink-300',
+  zhipu: 'bg-indigo-50 text-indigo-700 dark:bg-indigo-400/[0.12] dark:text-indigo-300',
+  deepseek: 'bg-teal-50 text-teal-700 dark:bg-teal-400/[0.12] dark:text-teal-300',
+  minimax: 'bg-rose-50 text-rose-700 dark:bg-rose-400/[0.12] dark:text-rose-300',
+  composite: 'bg-cyan-50 text-cyan-800 dark:bg-cyan-400/[0.12] dark:text-cyan-300'
+}
+const SUBSCRIPTION_BADGE: Partial<Record<GroupPlatform, string>> = {
+  anthropic: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
+  openai: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+  gemini: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+  antigravity: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
+  grok: 'bg-zinc-200 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-100',
+  kimi: 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400',
+  zhipu: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400',
+  deepseek: 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400',
+  minimax: 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400',
+  composite: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-300'
+}
 const badgeClass = computed(() => {
-  if (props.neutral) return 'bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-dark-300'
-  if (props.platform === 'anthropic') {
-    // Claude: orange theme
-    return isSubscription.value
-      ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
-      : 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400'
-  } else if (props.platform === 'openai') {
-    // OpenAI: green theme
-    return isSubscription.value
-      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-      : 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400'
+  const platform = props.platform
+  if (isSubscription.value) {
+    return (platform && SUBSCRIPTION_BADGE[platform]) || 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400'
   }
-  if (props.platform === 'gemini') {
-    return isSubscription.value
-      ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
-      : 'bg-sky-50 text-sky-700 dark:bg-sky-900/20 dark:text-sky-400'
-  }
-  if (props.platform === 'antigravity') {
-    return isSubscription.value
-      ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
-      : 'bg-fuchsia-50 text-fuchsia-700 dark:bg-fuchsia-900/20 dark:text-fuchsia-400'
-  }
-  if (props.platform === 'grok') {
-    return isSubscription.value
-      ? 'bg-zinc-200 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-100'
-      : 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200'
-  }
-  if (props.platform === 'kimi') {
-    return isSubscription.value
-      ? 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400'
-      : 'bg-pink-50 text-pink-700 dark:bg-pink-900/20 dark:text-pink-400'
-  }
-  if (props.platform === 'zhipu') {
-    return isSubscription.value
-      ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
-      : 'bg-indigo-50 text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-400'
-  }
-  if (props.platform === 'deepseek') {
-    return isSubscription.value
-      ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400'
-      : 'bg-teal-50 text-teal-700 dark:bg-teal-900/20 dark:text-teal-400'
-  }
-  if (props.platform === 'minimax') {
-    return isSubscription.value
-      ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400'
-      : 'bg-rose-50 text-rose-700 dark:bg-rose-900/20 dark:text-rose-400'
-  }
-  if (props.platform === 'composite') {
-    return isSubscription.value
-      ? 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-300'
-      : 'bg-cyan-50 text-cyan-800 dark:bg-cyan-900/20 dark:text-cyan-300'
-  }
-  // Fallback: original colors
-  return isSubscription.value
-    ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400'
-    : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+  return (platform && STANDARD_BADGE[platform]) || 'bg-gray-100 text-gray-700 dark:bg-slate-400/[0.14] dark:text-slate-300'
 })
 </script>

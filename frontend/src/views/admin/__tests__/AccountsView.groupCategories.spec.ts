@@ -34,6 +34,7 @@ vi.mock('@/api/admin', () => ({
       getById,
       update: updateAccount,
       getBatchTodayStats: vi.fn(async () => ({ stats: {} })),
+      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
       getUpstreamBillingProbeSettings: vi.fn(async () => ({ enabled: true })),
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       batchClearError: vi.fn(),
@@ -87,6 +88,7 @@ const DataTableStub = defineComponent({
   template: `
     <div>
       <div v-for="row in data" :key="row.id" :data-account-name="row.name">
+        <slot name="cell-select" :row="row" />
         <slot name="cell-groups" :row="row" />
       </div>
     </div>
@@ -212,6 +214,8 @@ describe('admin AccountsView group categories', () => {
     await pickCategory(wrapper)
 
     expect(listAccounts).toHaveBeenLastCalledWith(1, expect.any(Number), expect.objectContaining({ group_category: '3' }), expect.anything())
+    // The bulk bar shows only while something is selected.
+    await wrapper.findAll('[data-account-name] input[type="checkbox"]')[0].trigger('change')
     await wrapper.get('[data-test="select-all-results"]').trigger('click')
     await flushPromises()
     expect(listAccounts).toHaveBeenLastCalledWith(1, 1000, expect.objectContaining({ group_category: '3', lite: '1' }))

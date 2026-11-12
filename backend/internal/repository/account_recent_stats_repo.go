@@ -59,7 +59,7 @@ func (r *accountRecentStatsRepository) Batch(ctx context.Context, ids []int64, a
 }
 
 const accountRecentStatsMetricsSQL = `
-WITH ids AS (SELECT DISTINCT unnest($1::bigint[]) account_id), u AS (
+WITH ids AS (SELECT unnest($1::bigint[]) account_id), u AS (
  SELECT u.account_id,u.created_at,u.first_token_ms,u.cache_read_tokens::bigint r,
   CASE WHEN input_tokens>=0 AND cache_read_tokens>=0 AND cache_creation_tokens>=0
    THEN input_tokens::bigint+cache_read_tokens::bigint+cache_creation_tokens::bigint END t
@@ -81,7 +81,7 @@ FROM ids i LEFT JOIN metrics m USING(account_id) ORDER BY i.account_id`
 // 100 cannot enter the final 100 after merging failures. Events are filtered
 // before ranking and retain the reference SQL's attribution and tie order.
 const accountRecentStatsErrorsSQL = `
-WITH ids AS (SELECT DISTINCT unnest($1::bigint[]) account_id), u AS (
+WITH ids AS (SELECT unnest($1::bigint[]) account_id), u AS (
  SELECT i.account_id,u.id,u.created_at FROM ids i CROSS JOIN LATERAL (
   SELECT id,created_at FROM usage_logs
   WHERE account_id=i.account_id AND created_at >= $2::timestamptz-interval '24 hours' AND created_at < $2
@@ -110,7 +110,7 @@ WITH ids AS (SELECT DISTINCT unnest($1::bigint[]) account_id), u AS (
  WHERE NOT COALESCE(e.is_business_limited,false)
   AND COALESCE(e.recovery_outcome,'') NOT IN ('client_cancel','budget_exhausted')
   AND COALESCE(v.j->>'owner','provider')<>'client'
-  AND COALESCE(v.j->>'resilience_category','') NOT IN ('BALANCE','CLIENT_ERROR','MODEL_UNSUPPORTED','CLIENT_CANCEL')
+  AND COALESCE(v.j->>'resilience_category','') NOT IN ('BALANCE','CLIENT_ERROR','MODEL_UNSUPPORTED','UPSTREAM_REQUEST_RESTRICTION','CLIENT_CANCEL')
   AND COALESCE(v.j->>'kind','') NOT IN ('billing_error','subscription_error','invalid_request_error','model_not_found','not_found_error')
   AND (v.j->>'resilience_category' IN ('TRANSIENT','STALL','CAPACITY_SHED','AUTH','RATE_LIMIT','RATE_LIMIT_RESET','FIRST_OUTPUT_TIMEOUT')
    OR v.j->>'kind'='first_output_timeout' OR v.j->>'stage'='account_auth'

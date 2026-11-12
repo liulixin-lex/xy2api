@@ -158,12 +158,15 @@ func TestCatalogOpsGETUserinfoRedactions(t *testing.T) {
 	}
 }
 
-func TestCatalogRecentStatsMatchesAccountList(t *testing.T) {
-	list, ok := Lookup("GET /accounts")
-	require.True(t, ok)
+func TestCatalogRecentStatsMatchesAccountStats(t *testing.T) {
 	recent, ok := Lookup("POST /accounts/recent-stats/batch")
 	require.True(t, ok)
-	require.Equal(t, list, recent)
+	require.Empty(t, recent.AnyOf)
+	for _, key := range []string{"POST /accounts/today-stats/batch", "POST /sched-quality/accounts/summary"} {
+		entry, ok := Lookup(key)
+		require.True(t, ok, key)
+		require.Equal(t, entry, recent, key)
+	}
 }
 
 func TestCatalogResilienceUsesOpsView(t *testing.T) {

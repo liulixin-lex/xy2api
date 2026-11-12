@@ -216,7 +216,7 @@ func (c *schedAdminTempCache) SchedAdminDeleteTempIf(_ context.Context, _ int64,
 func schedAdminFixture() (*SchedAdminService, *schedAdminEngine, *schedAdminAccounts) {
 	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
 	engine := &schedAdminEngine{snapshot: &SchedQualitySnapshot{At: now, GlobalEnabled: true, TestsEnabled: true, Evidence: map[SchedAccountModel]schedquality.Summary{}, GroupRows: map[int64][]SchedGroupRow{}, Tests: map[SchedAccountModel]SchedTestRecord{}, Policies: map[int64]SchedPolicyRecord{}}, resetAt: now}
-	repo := &schedAdminAccounts{rows: map[int64]*Account{1: {ID: 1, Name: "one", Status: StatusActive, Schedulable: true, Platform: PlatformOpenAI, GroupIDs: []int64{1}, Extra: map[string]any{}}}, fail: map[string]error{}}
+	repo := &schedAdminAccounts{rows: map[int64]*Account{1: {ID: 1, Name: "one", Status: StatusActive, Schedulable: true, Platform: PlatformOpenAI, GroupIDs: []int64{1}, Groups: []*Group{{ID: 1, Name: "group", Platform: PlatformOpenAI}}, Extra: map[string]any{}}}, fail: map[string]error{}}
 	svc := NewSchedAdminService(SchedAdminDependencies{Engine: engine, Accounts: repo, Groups: schedAdminGroups{1: {ID: 1, Name: "group", Platform: PlatformOpenAI}}, Now: func() time.Time { return now }})
 	return svc, engine, repo
 }
@@ -854,8 +854,8 @@ func TestSchedAdminBoardMapsRequestModelPerAccount(t *testing.T) {
 	a := r.rows[1]
 	a.Type = AccountTypeAPIKey
 	a.Credentials = map[string]any{"model_mapping": map[string]any{"alias": "upstream-a", "secondary": "upstream-secondary", "z-alias": "upstream-a"}}
-	r.rows[2] = &Account{ID: 2, GroupIDs: []int64{1}, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"model_mapping": map[string]any{"alias": "upstream-b"}}}
-	r.rows[3] = &Account{ID: 3, GroupIDs: []int64{1}, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"model_mapping": map[string]any{"secondary": "upstream-secondary", "tertiary": "upstream-tertiary"}}}
+	r.rows[2] = &Account{ID: 2, GroupIDs: []int64{1}, Groups: a.Groups, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"model_mapping": map[string]any{"alias": "upstream-b"}}}
+	r.rows[3] = &Account{ID: 3, GroupIDs: []int64{1}, Groups: a.Groups, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"model_mapping": map[string]any{"secondary": "upstream-secondary", "tertiary": "upstream-tertiary"}}}
 	until := e.resetAt.Add(time.Hour)
 	for i, m := range []string{"upstream-a", "upstream-b"} {
 		id := int64(i + 1)

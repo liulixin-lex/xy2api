@@ -152,3 +152,68 @@ func TestSchedObsContextCancellation(t *testing.T) {
 		require.Empty(t, output.String())
 	})
 }
+
+type schedObsBlockedLogHandler struct {
+	slog.Handler
+	entered chan struct{}
+	resume  <-chan struct{}
+}
+
+func (h *schedObsBlockedLogHandler) Handle(ctx context.Context, record slog.Record) error {
+	close(h.entered)
+	<-h.resume
+	return h.Handler.Handle(ctx, record)
+}
+
+func TestSchedObsBlockedLoggingDoesNotBlockCounters(t *testing.T) {
+	for _, event := range []string{"summary", "cycle"} {
+		t.Run(event, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				output := captureSchedObsLogs(t)
+				base := slog.Default()
+				s := NewSchedObservabilityService()
+				s.Count("tests", 1)
+				resume := make(chan struct{})
+				unblock := sync.OnceFunc(func() { close(resume) })
+				defer unblock()
+				handler := &schedObsBlockedLogHandler{Handler: base.Handler(), entered: make(chan struct{}), resume: resume}
+				slog.SetDefault(slog.New(handler))
+				logged := make(chan struct{})
+				go func() {
+					if event == "summary" {
+						s.summary(context.Background())
+					} else {
+						s.Cycle(6*time.Second, false)
+					}
+					close(logged)
+				}()
+				<-handler.entered
+				counted := make(chan struct{})
+				go func() {
+					s.Count("tests", 1)
+					s.Cycle(time.Second, false)
+					close(counted)
+				}()
+				synctest.Wait()
+				select {
+				case <-counted:
+				default:
+					t.Fatal("blocked log writer must not block Count or Cycle")
+				}
+				unblock()
+				<-logged
+				slog.SetDefault(base)
+				s.summary(context.Background())
+				records := schedObsLogRecords(t, output)
+				require.Len(t, records, 2)
+				require.Equal(t, "sched_quality."+event, records[0]["msg"])
+				wantTests, wantCycles := float64(1), float64(1)
+				if event == "cycle" {
+					wantTests, wantCycles = 2, 2
+				}
+				require.Equal(t, wantTests, records[1]["tests"])
+				require.Equal(t, wantCycles, records[1]["cycles"])
+			})
+		})
+	}
+}

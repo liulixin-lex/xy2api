@@ -40,6 +40,7 @@ import type {
   OpenCodeGoUsageSettings,
   OpenCodeGoUsageState
 } from '@/types'
+import type { AccountRecentStatsBatch } from '@/types/schedQuality'
 
 /**
  * List all accounts with pagination
@@ -620,6 +621,16 @@ export async function getBatchTodayStats(accountIds: number[]): Promise<BatchTod
   const { data } = await apiClient.post<BatchTodayStatsResponse>('/admin/accounts/today-stats/batch', {
     account_ids: accountIds
   })
+  return data
+}
+
+/** Recent status of up to 1000 accounts (contract delta C4); one item per account, by account id. */
+export async function getRecentStats(accountIds: number[], options?: { signal?: AbortSignal }): Promise<AccountRecentStatsBatch> {
+  const { data } = await apiClient.post<AccountRecentStatsBatch>(
+    '/admin/accounts/recent-stats/batch',
+    { account_ids: accountIds },
+    { signal: options?.signal }
+  )
   return data
 }
 
@@ -1249,6 +1260,7 @@ export const accountsAPI = {
   getBatchUsage,
   getTodayStats,
   getBatchTodayStats,
+  getRecentStats,
   getUpstreamBalances,
   clearRateLimit,
   resetAccountQuota,

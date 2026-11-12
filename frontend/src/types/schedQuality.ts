@@ -8,6 +8,8 @@ export type SchedStanding = 'front' | 'back'
 export type SchedOverrideMode = 'exempt' | 'demote'
 export type SchedRequestClass = 'light' | 'regular' | 'heavy' | 'xheavy'
 export type SchedTestTier = 'small' | 'medium' | 'large'
+/** screen: started automatically, no medium or large rounds; full: the rest (contract delta A9). */
+export type SchedTestKind = 'screen' | 'full'
 export type SchedOutcome = 'ok' | 'timeout' | 'account_fault' | 'other'
 /** Cooling: speed | error | cache | acute_timeout | test_*; normal: '' | unverified. */
 export type SchedReason =
@@ -43,17 +45,28 @@ export interface SchedAccountSummaryCooling {
   testing: boolean
 }
 
+/** A current manual override; group_id 0 covers every group (contract delta D1). */
+export interface SchedAccountSummaryOverride {
+  group_id: number
+  mode: SchedOverrideMode
+  expires_at: string | null
+}
+
 export interface SchedAccountSummary {
   account_id: number
   model: string | null
   samples: number
+  /** ttfo, error and cache are kept by the API but no longer shown in the list (contract delta C5). */
   ttfo: { p90_ms: number | null; timeout: boolean; n: number }
   error: { rate: number | null; n: number }
   cache: { ratio: number | null; n: number }
   groups: { total: number; normal: number; cooling: number; nodata: number }
-  /** At most 3; the rest are counted in cooling_more. */
+  /** One item per cooling group, all of them. */
   cooling: SchedAccountSummaryCooling[]
+  /** Always 0. */
   cooling_more: number
+  /** Group 0 first, then by group id. */
+  overrides: SchedAccountSummaryOverride[]
 }
 
 export interface SchedAccountsSummary {
@@ -65,7 +78,25 @@ export interface SchedAccountsSummary {
 
 export interface SchedAccountsSummaryRequest {
   account_ids: number[]
-  model?: string
+}
+
+// ---- POST /admin/accounts/recent-stats/batch (contract delta C4) ----
+
+/** Set by the backend from its own thresholds; null below the sample minimum. */
+export type RecentStatsTier = 'good' | 'mid' | 'bad' | null
+
+export interface AccountRecentStats {
+  account_id: number
+  ttft: { p50_ms: number | null; n: number; tier: RecentStatsTier }
+  /** null while ops monitoring is off. */
+  error: { rate: number | null; bad: number; n: number; tier: RecentStatsTier } | null
+  cache: { ratio: number | null; n: number; tier: RecentStatsTier }
+}
+
+export interface AccountRecentStatsBatch {
+  as_of: string
+  /** One item per requested account, by account id. */
+  items: AccountRecentStats[]
 }
 
 // ---- GET /accounts/attention ----
@@ -86,6 +117,7 @@ export interface SchedTestTierResult {
   tier: SchedTestTier
   /** Warm turns actually sent, in order, at most two; null for a turn without first output (see timeouts). */
   ttfo_ms: (number | null)[]
+  /** Kept for the record; no longer shown or judged (contract delta A3). */
   cache_ratio: number | null
   faults: number
   timeouts: number
@@ -98,6 +130,10 @@ export interface SchedTest {
   done: boolean
   abort_reason: string
   auto: boolean
+  kind: SchedTestKind
+  /** Every tier with rounds has exactly rounds 1–3, all ok (contract delta A4). */
+  clean: boolean
+  /** Only tiers with at least one round. */
   tiers: SchedTestTierResult[]
   input_tokens: number
   cached_tokens: number
@@ -192,7 +228,10 @@ export interface SchedAccountDetail {
   tests_enabled: boolean
   reset_at: string | null
   models: SchedModelEvidence[]
+  /** Every OpenAI group of the account; by_model is empty for a group without state rows (contract delta D3). */
   groups: SchedAccountGroup[]
+  /** The override covering every group, if any. */
+  all_groups_override: SchedOverride | null
   auto_states: SchedAutoState[]
   recent_attempts: SchedRecentAttempt[]
 }

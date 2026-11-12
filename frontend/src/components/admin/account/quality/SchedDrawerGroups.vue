@@ -21,15 +21,22 @@
             <button v-if="canViewGroups" type="button" class="sq-link sq-focus" :data-sq-trigger="`board:${group.group_id}`" @click="emit('board', group)">{{ group.name }}</button>
             <template v-else>{{ group.name }}</template>
           </td>
-          <td>
-            <span :class="stateOf(group).cls">{{ stateOf(group).text }}</span>
-          </td>
-          <td v-for="dim in SCHED_DIMS" :key="dim" class="sq-r sq-num">
-            <template v-for="cell in [cellOf(group, dim)]" :key="cell.kind">
-              <span v-if="cell.kind === 'shape'" role="img" :aria-label="cell.label" :class="['sq-shape', `sq-shape--${cell.verdict}`]" />
-              <span v-else v-tip="cell.tip" tabindex="0" :aria-label="cell.label" :class="['sq-focus', cell.cls]">{{ cell.text }}</span>
-            </template>
-          </td>
+          <!-- A group without state rows has only its name and the override action (contract delta D3). -->
+          <template v-if="!group.by_model.length">
+            <td />
+            <td v-for="dim in SCHED_DIMS" :key="dim" />
+          </template>
+          <template v-else>
+            <td>
+              <span :class="stateOf(group).cls">{{ stateOf(group).text }}</span>
+            </td>
+            <td v-for="dim in SCHED_DIMS" :key="dim" class="sq-r sq-num">
+              <template v-for="cell in [cellOf(group, dim)]" :key="cell.kind">
+                <span v-if="cell.kind === 'shape'" role="img" :aria-label="cell.label" :class="['sq-shape', `sq-shape--${cell.verdict}`]" />
+                <span v-else v-tip="cell.tip" tabindex="0" :aria-label="cell.label" :class="['sq-focus', cell.cls]">{{ cell.text }}</span>
+              </template>
+            </td>
+          </template>
           <td class="sq-r">
             <span v-if="failedGroups.has(group.group_id)" class="sq-fail-word mr-2">{{ t('admin.schedQuality.result.failed') }}</span>
             <button

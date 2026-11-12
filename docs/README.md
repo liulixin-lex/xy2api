@@ -19,7 +19,7 @@
 
 | 平台 | 内容 |
 |---|---|
-| [Anthropic（Claude）](platforms/anthropic.md) | OAuth 与 API Key 账号、Claude Code 兼容模式 |
+| [Anthropic（Claude）](platforms/anthropic.md) | OAuth 与 API Key 账号、Claude Code 请求兼容、协议转换字段表 |
 | [OpenAI / Codex](platforms/openai.md) | OAuth 与 API Key 账号、Codex CLI、Responses WebSocket、模型支持 |
 | [Gemini](platforms/gemini.md) | Code Assist / AI Studio OAuth 与 API Key |
 | [Grok / xAI](platforms/grok.md) | 订阅 OAuth 与 API Key、Grok CLI、图片与视频 |
