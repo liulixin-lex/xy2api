@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -136,7 +137,11 @@ func TestHaiku55BridgePrefillRejectsConvertedMessages(t *testing.T) {
 			_, err = svc.ForwardAsResponses(context.Background(), c, account, []byte(body), nil)
 		}
 		require.ErrorContains(t, err, "assistant prefill")
-		require.Equal(t, http.StatusBadRequest, rec.Code)
+		var conversion *apicompat.UnsupportedConversionError
+		require.ErrorAs(t, err, &conversion)
+		require.Equal(t, "messages", conversion.Field)
+		require.False(t, c.Writer.Written(), "the handler owns protocol conversion error responses")
+		require.Empty(t, rec.Body.String())
 		require.Nil(t, upstream.lastReq)
 	}
 }

@@ -615,8 +615,10 @@ func TestClaude55BridgeUsesMappedModelBeforeThinkingConversion(t *testing.T) {
 					result, err = svc.ForwardAsResponses(context.Background(), c, account, []byte(body), nil)
 				}
 				if forced {
-					require.Error(t, err)
-					require.Equal(t, 400, rec.Code)
+					var conversion *apicompat.UnsupportedConversionError
+					require.ErrorAs(t, err, &conversion)
+					require.False(t, c.Writer.Written(), "the handler owns protocol conversion error responses")
+					require.Empty(t, rec.Body.String())
 					require.Nil(t, upstream.lastReq)
 				} else {
 					require.NoError(t, err)
