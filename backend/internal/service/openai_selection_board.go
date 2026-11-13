@@ -26,6 +26,9 @@ func NewOpenAISelectionBoard(service *OpenAIGatewayService, view func() schedqua
 	if service != nil {
 		board.marks = &service.selectionFullMarks
 		service.selectionBoard = board
+		if service.resilience != nil {
+			service.resilience.sessionResetAt = func(accountID int64) time.Time { return service.selectionView().ResetAt(accountID) }
+		}
 	}
 	return board
 }
