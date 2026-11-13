@@ -42,6 +42,7 @@ export default {
       normal: '正常',
       observing: '观察中',
       disabled: '停用',
+      manual: '手动',
       substandard: '不达标',
       exempted: '豁免',
       invalid: '无效',

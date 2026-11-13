@@ -14,7 +14,8 @@ const hasRenderableContent = (nodes: VNodeArrayChildren): boolean =>
  * 桌面表格的单行。拆成独立组件后，DataTable 因虚拟滚动重渲染时，
  * props 未变的行直接跳过，只有新进入窗口的行才执行单元格插槽；
  * 插槽内读取的响应式数据由本行自己的渲染副作用追踪，数据变化时仍按行更新。
- * 插槽 `row-detail` 有内容时，在本行下面多渲染一行通栏；虚拟滚动只测量主行（`rowEl`）。
+ * 插槽 `row-detail` 有内容时，在本行下面多渲染一行通栏。虚拟滚动只测量主行（`rowEl`），所以有详情行时父组件传
+ * `hasDetails`，表格改为全量渲染。
  */
 export default defineComponent({
   name: 'DataTableRow',
