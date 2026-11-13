@@ -98,3 +98,12 @@ func DescribeDecision(e Evaluation, samples []AttemptSample, p Policy) DecisionB
 	}
 	return b
 }
+
+type Decision struct {
+	At     time.Time
+	Scope  Scope
+	Action string
+	Level  int
+	Until  time.Time
+	Basis  DecisionBasis
+}
