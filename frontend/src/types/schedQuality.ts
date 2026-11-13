@@ -5,7 +5,7 @@ export type SchedVerdict = 'pass' | 'marginal' | 'fail' | 'nodata'
 export type SchedVerdictFrom = 'real'
 export type SchedState = 'normal' | 'cooling'
 export type SchedStanding = 'front' | 'back'
-export type SchedOverrideMode = 'exempt' | 'demote'
+export type SchedOverrideMode = 'exempt'
 export type SchedRequestClass = 'light' | 'regular' | 'heavy' | 'xheavy'
 export type SchedOutcome = 'ok' | 'timeout' | 'account_fault' | 'other'
 /** Cooling: speed | error | cache | acute_timeout; normal: '' | unverified. */

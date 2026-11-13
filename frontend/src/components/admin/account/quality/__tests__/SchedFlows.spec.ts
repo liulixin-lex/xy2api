@@ -80,16 +80,16 @@ describe('batch flow', () => {
     const answers = deferred()
     api.setOverride.mockImplementation((id: number) => answers.call(id))
     const many = Array.from({ length: 6 }, (_, i) => ({ id: i + 1, name: `acc-${i + 1}` }))
-    const wrapper = mount(SchedBatchDialog, { props: { action: 'demote', accounts: many, anchor: null, groups: [] }, attachTo: document.body })
+    const wrapper = mount(SchedBatchDialog, { props: { action: 'exempt', accounts: many, anchor: null, groups: [] }, attachTo: document.body })
     await flushPromises()
     // The popover confirms with an empty reason: it is sent as is (contract clarification K22).
     document.querySelector<HTMLElement>('[data-sq-popover] .btn-primary')!.click()
     await flushPromises()
     const request = api.setOverride.mock.calls[0][1]
-    expect(request).toMatchObject({ group_id: 0, mode: 'demote', reason: '' })
+    expect(request).toMatchObject({ group_id: 0, mode: 'exempt', reason: '' })
     expect(api.setOverride).toHaveBeenCalledTimes(4)
 
-    await wrapper.setProps({ action: 'exempt', accounts: [{ id: 99, name: 'other' }] })
+    await wrapper.setProps({ action: 'reset', accounts: [{ id: 99, name: 'other' }] })
     for (const id of [1, 2, 3, 4]) answers.pending.get(id)!.resolve(undefined)
     await flushPromises()
     for (const id of [5, 6]) answers.pending.get(id)!.resolve(undefined)
@@ -102,7 +102,7 @@ describe('batch flow', () => {
     const answers = deferred()
     api.setOverride.mockImplementation((id: number) => answers.call(id))
     const many = Array.from({ length: 8 }, (_, i) => ({ id: i + 1, name: `acc-${i + 1}` }))
-    const wrapper = mount(SchedBatchDialog, { props: { action: 'demote', accounts: many, anchor: null, groups: [] }, attachTo: document.body })
+    const wrapper = mount(SchedBatchDialog, { props: { action: 'exempt', accounts: many, anchor: null, groups: [] }, attachTo: document.body })
     await flushPromises()
     await click('[data-sq-popover] .btn-primary')
     expect(wrapper.emitted('busy')).toEqual([[true]])

@@ -12,7 +12,6 @@
 
   <SchedOverridePopover
     :show="phase === 'popover'"
-    :mode="action === 'exempt' ? 'exempt' : 'demote'"
     :anchor="anchor"
     :groups="groups"
     :default-group-id="0"
@@ -59,13 +58,13 @@ import type { SchedOverrideRequest } from '@/types/schedQuality'
 import { markSchedChanged } from '@/composables/useSchedLayers'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 
-// Batch quality actions of the account list (design spec A.5, B.11). Reset confirms first, demote and exempt use the
-// override popover. A confirmed reset (恢复) hands the accounts back (`recover`) and runs in the background
-// with one toast (contract delta F3). The others call each account one by one, four at a time, and list it with its
+// Batch quality actions of the account list (design spec A.5, B.11). Reset confirms first, exempt uses the override
+// popover. A confirmed reset (恢复) hands the accounts back (`recover`) and runs in the background
+// with one toast (contract delta F3). Exempt calls each account one by one, four at a time, and list it with its
 // result. A run works on what it was started with (action, request, accounts), never on the props of a later opening.
 // Closing the results stops it: accounts not yet called are "not run" and answers still on their way are dropped.
 // Until those answers are in, the run is busy and no other batch can start.
-export type SchedBatchAction = 'reset' | 'demote' | 'exempt'
+export type SchedBatchAction = 'reset' | 'exempt'
 type Result = 'ok' | 'failed' | 'skipped'
 interface Row { id: number; name: string; result: Result | null }
 interface Batch { action: SchedBatchAction; request: SchedOverrideRequest; rows: Row[]; next: number; stopped: boolean }
@@ -82,7 +81,7 @@ const props = defineProps<{
   action: SchedBatchAction | null
   accounts: Array<{ id: number; name: string }>
   anchor: HTMLElement | null
-  /** Scope choices for demote / exempt: every OpenAI group. */
+  /** Scope choices for exempt: every OpenAI group. */
   groups: Array<{ id: number; name: string }>
 }>()
 const emit = defineEmits<{ close: []; done: []; busy: [running: boolean]; recover: [accountIds: number[]] }>()

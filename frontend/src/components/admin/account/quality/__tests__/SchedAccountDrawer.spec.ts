@@ -182,7 +182,7 @@ describe('SchedAccountDrawer', () => {
     mount(SchedAccountDrawer, { attachTo: document.body })
     openSchedDrawer({ id: 479, name: 'acc-03' })
     await flushPromises()
-    for (const trigger of ['drawer-demote', 'drawer-exempt', 'drawer-reset', 'auto:model_limit:gpt-6-astra', 'override:53', 'board:53']) {
+    for (const trigger of ['drawer-exempt', 'drawer-reset', 'auto:model_limit:gpt-6-astra', 'override:53', 'board:53']) {
       expect(document.querySelector(`[data-sq-trigger="${trigger}"]`)).toBeNull()
     }
     expect(row(53).querySelector('td')!.textContent!.trim()).toBe(detail().groups[0].name)
@@ -198,15 +198,15 @@ describe('SchedAccountDrawer', () => {
 
   it('shows 失败 next to the header button when cancelling the all-groups override fails', async () => {
     const d = detail()
-    d.all_groups_override = { mode: 'demote', all_groups: true, expires_at: null, reason: '' }
+    d.all_groups_override = { mode: 'exempt', all_groups: true, expires_at: null, reason: '' }
     d.groups[0].override = d.all_groups_override
     api.accountDetail.mockResolvedValue(d)
     api.clearOverride.mockRejectedValue({ status: 500 })
     mount(SchedAccountDrawer, { attachTo: document.body })
     openSchedDrawer({ id: 479, name: 'acc-03' })
     await flushPromises()
-    const header = document.querySelector<HTMLElement>('[data-sq-trigger="drawer-demote"]')!
-    expect(header.textContent).toBe('admin.schedQuality.action.undoDemote')
+    const header = document.querySelector<HTMLElement>('[data-sq-trigger="drawer-exempt"]')!
+    expect(header.textContent).toBe('admin.schedQuality.action.undoExempt')
     header.click()
     await flushPromises()
     expect(api.clearOverride).toHaveBeenCalledWith(479, 0)
@@ -261,7 +261,7 @@ describe('SchedAccountDrawer', () => {
     mount(SchedAccountDrawer, { attachTo: document.body })
     openSchedDrawer({ id: 479, name: 'acc-03' })
     await flushPromises()
-    document.querySelector<HTMLElement>('[data-sq-trigger="drawer-demote"]')!.click()
+    document.querySelector<HTMLElement>('[data-sq-trigger="drawer-exempt"]')!.click()
     await flushPromises()
     expect(document.querySelector('[data-sq-popover]')).not.toBeNull()
     perms.granted = ['accounts:view', 'groups:view']
@@ -288,20 +288,20 @@ describe('SchedAccountDrawer — member groups and the all-groups override (cont
     const tds = Array.from(row(55).querySelectorAll('td'))
     expect(tds[0].textContent!.trim()).toBe('南风组')
     expect(tds.slice(1, 5).map((td) => td.textContent!.trim())).toEqual(['', '', '', ''])
-    expect(trigger('override:55')!.textContent).toBe('admin.schedQuality.action.demote')
+    expect(trigger('override:55')!.textContent).toBe('admin.schedQuality.action.exempt')
 
     trigger('override:55')!.click()
     await flushPromises()
     const after = structuredClone(d)
-    after.groups[2].override = { mode: 'demote', all_groups: false, expires_at: null, reason: '' }
+    after.groups[2].override = { mode: 'exempt', all_groups: false, expires_at: null, reason: '' }
     api.accountDetail.mockResolvedValue(after)
     document.querySelector<HTMLElement>('[data-sq-popover] .btn-primary')!.click()
     await flushPromises()
-    expect(api.setOverride).toHaveBeenCalledWith(479, expect.objectContaining({ group_id: 55, mode: 'demote' }))
+    expect(api.setOverride).toHaveBeenCalledWith(479, expect.objectContaining({ group_id: 55, mode: 'exempt' }))
 
-    expect(trigger('override:55')!.textContent).toBe('admin.schedQuality.action.undoDemote')
+    expect(trigger('override:55')!.textContent).toBe('admin.schedQuality.action.undoExempt')
     // The override shows next to the group name; still no state word and no numbers.
-    expect(row(55).querySelector('td:first-child [data-sq-override="demote"]')).not.toBeNull()
+    expect(row(55).querySelector('td:first-child [data-sq-override="exempt"]')).not.toBeNull()
     expect(Array.from(row(55).querySelectorAll('td')).slice(1, 5).map((td) => td.textContent!.trim())).toEqual(['', '', '', ''])
     trigger('override:55')!.click()
     await flushPromises()
@@ -317,7 +317,6 @@ describe('SchedAccountDrawer — member groups and the all-groups override (cont
     expect(section.querySelector('table')).toBeNull()
     expect(section.textContent).toContain('—')
     expect(trigger('drawer-exempt')!.textContent).toBe('admin.schedQuality.action.undoExempt')
-    expect(trigger('drawer-demote')!.textContent).toBe('admin.schedQuality.action.demote')
     trigger('drawer-exempt')!.click()
     await flushPromises()
     expect(api.clearOverride).toHaveBeenCalledWith(479, 0)
@@ -437,11 +436,11 @@ describe('SchedAccountDrawer — red-team revisions (R2-RT-FB)', () => {
 
   it('shows the override of a group without state rows to every reader; only the action needs accounts:manage (P1-2)', async () => {
     const d = detail()
-    d.groups.push({ group_id: 55, name: '南风组', gate_enabled: false, policy: d.groups[0].policy, override: { mode: 'demote', all_groups: false, expires_at: null, reason: '' }, by_model: [] })
+    d.groups.push({ group_id: 55, name: '南风组', gate_enabled: false, policy: d.groups[0].policy, override: { mode: 'exempt', all_groups: false, expires_at: null, reason: '' }, by_model: [] })
     perms.granted = ['accounts:view', 'groups:view']
     await openWith(d)
     const capsule = row(55).querySelector('[data-sq-override]')!
-    expect([capsule.getAttribute('data-sq-override'), capsule.textContent!.trim()]).toEqual(['demote', 'admin.schedQuality.state.demoted'])
+    expect([capsule.getAttribute('data-sq-override'), capsule.textContent!.trim()]).toEqual(['exempt', 'admin.schedQuality.state.exempted'])
     expect(trigger('override:55')).toBeNull()
     // Still no state word and no numbers.
     expect(Array.from(row(55).querySelectorAll('td')).slice(2, 5).map((td) => td.textContent!.trim())).toEqual(['', '', ''])
@@ -449,23 +448,23 @@ describe('SchedAccountDrawer — red-team revisions (R2-RT-FB)', () => {
     closeSchedDrawer()
     perms.granted = ALL
     await openWith(d)
-    expect(row(55).querySelector('[data-sq-override="demote"]')).not.toBeNull()
-    expect(trigger('override:55')!.textContent).toBe('admin.schedQuality.action.undoDemote')
+    expect(row(55).querySelector('[data-sq-override="exempt"]')).not.toBeNull()
+    expect(trigger('override:55')!.textContent).toBe('admin.schedQuality.action.undoExempt')
   })
 
   it('shows the override in effect next to the name on every row, with or without state rows, to every reader', async () => {
     const d = detail()
-    // 晨星组 has state rows and its own exemption; 北辰组 has state rows and falls under the all-groups demotion;
-    // 南风组 has none and its own demotion.
-    d.all_groups_override = { mode: 'demote', all_groups: true, expires_at: null, reason: '' }
+    // 晨星组 has state rows and its own exemption; 北辰组 has state rows and falls under the all-groups exemption;
+    // 南风组 has none and its own exemption.
+    d.all_groups_override = { mode: 'exempt', all_groups: true, expires_at: null, reason: '' }
     d.groups[0].override = { mode: 'exempt', all_groups: false, expires_at: null, reason: '' }
     d.groups[1].override = d.all_groups_override
-    d.groups.push({ group_id: 55, name: '南风组', gate_enabled: false, policy: d.groups[0].policy, override: { mode: 'demote', all_groups: false, expires_at: null, reason: '' }, by_model: [] })
+    d.groups.push({ group_id: 55, name: '南风组', gate_enabled: false, policy: d.groups[0].policy, override: { mode: 'exempt', all_groups: false, expires_at: null, reason: '' }, by_model: [] })
     const shown = () => [53, 54, 55].map((id) => row(id).querySelector('td:first-child [data-sq-override]')?.getAttribute('data-sq-override') ?? null)
 
     perms.granted = ['accounts:view']
     await openWith(d)
-    expect(shown()).toEqual(['exempt', 'demote', 'demote'])
+    expect(shown()).toEqual(['exempt', 'exempt', 'exempt'])
     // The state words of rows with state rows stay as they were.
     expect(row(53).querySelector('td:nth-child(2)')!.textContent).toContain('admin.schedQuality.state.cooling')
     expect([53, 54, 55].map((id) => trigger(`override:${id}`))).toEqual([null, null, null])
@@ -473,9 +472,9 @@ describe('SchedAccountDrawer — red-team revisions (R2-RT-FB)', () => {
     closeSchedDrawer()
     perms.granted = ALL
     await openWith(d)
-    expect(shown()).toEqual(['exempt', 'demote', 'demote'])
+    expect(shown()).toEqual(['exempt', 'exempt', 'exempt'])
     expect([53, 54, 55].map((id) => trigger(`override:${id}`)!.textContent)).toEqual([
-      'admin.schedQuality.action.undoExempt', 'admin.schedQuality.action.undoDemote', 'admin.schedQuality.action.undoDemote'
+      'admin.schedQuality.action.undoExempt', 'admin.schedQuality.action.undoExempt', 'admin.schedQuality.action.undoExempt'
     ])
   })
 

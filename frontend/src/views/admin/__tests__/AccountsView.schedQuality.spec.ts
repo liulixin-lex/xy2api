@@ -88,7 +88,7 @@ const BulkBarStub = defineComponent({
     return () => h('div', [
       h('button', { 'data-test': 'select-page', onClick: () => emit('select-page') }),
       h('button', { 'data-test': 'select-all-results', onClick: () => emit('select-all-results') }),
-      ...['reset', 'demote', 'test'].map((action) => h('button', {
+      ...['reset', 'exempt'].map((action) => h('button', {
         'data-test': `bulk-sched-${action}`,
         disabled: props.schedBusy,
         onClick: (event: MouseEvent) => emit('sched-action', action, event.currentTarget)
@@ -314,7 +314,7 @@ describe('AccountsView quality columns', () => {
     const bar = (selector: string) => wrapper.findComponent(BulkBarStub).get(selector)
     await selectFirstRow()
     await bar('[data-test="select-page"]').trigger('click')
-    await bar('[data-test="bulk-sched-demote"]').trigger('click')
+    await bar('[data-test="bulk-sched-exempt"]').trigger('click')
     await flushPromises()
     document.querySelector<HTMLElement>('[data-sq-popover] .btn-primary')!.click()
     await flushPromises()

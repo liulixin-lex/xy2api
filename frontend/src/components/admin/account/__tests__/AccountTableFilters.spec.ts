@@ -70,7 +70,7 @@ describe('AccountTableFilters', () => {
       ['iq_status', ['', 'smart', 'degraded', 'unknown']],
       ['group', ['', 'ungrouped', '42']],
       // One quality-state dropdown after the groups filter (D34, D38).
-      ['sched_quality', ['', 'normal', 'cooling', 'exempt', 'demote']]
+      ['sched_quality', ['', 'normal', 'cooling', 'exempt']]
     ] as const
     let changes = 0
     for (const [index, [key, values]] of expectedOptions.entries()) {

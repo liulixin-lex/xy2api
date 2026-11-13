@@ -99,7 +99,7 @@ describe('quality UI copy', () => {
         h(SchedGroupsCell, { summary, openai: true, groupName: () => '晨星组' }),
         h(SchedGroupsCell, { summary: { ...summary, cooling: [], groups: { total: 2, normal: 0, cooling: 0, nodata: 2 } }, openai: true, groupName: () => '' }),
         h(SchedGroupsCell, {
-          summary: { ...summary, overrides: [{ group_id: 0, mode: 'exempt', expires_at: null }, { group_id: 53, mode: 'demote', expires_at: '2026-11-14T10:30:00Z' }] },
+          summary: { ...summary, overrides: [{ group_id: 0, mode: 'exempt', expires_at: null }, { group_id: 53, mode: 'exempt', expires_at: '2026-11-14T10:30:00Z' }] },
           openai: true,
           groupName: () => '晨星组'
         }),
@@ -108,7 +108,7 @@ describe('quality UI copy', () => {
         h(SchedAccountDrawer),
         h(GroupSchedBoard),
         h(GroupSchedPolicyField, { groupId: 53 }),
-        h(SchedOverridePopover, { show: true, mode: 'demote', anchor: null, groups: [{ id: 53, name: '晨星组' }] }),
+        h(SchedOverridePopover, { show: true, anchor: null, groups: [{ id: 53, name: '晨星组' }] }),
         h(SchedBatchDialog, { action: 'reset', accounts: [{ id: 1, name: 'acc-1' }, { id: 2, name: 'acc-2' }], anchor: null, groups: [] })
       ]
     })

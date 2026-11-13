@@ -54,8 +54,7 @@ const qOpts = computed(() => [
   { value: '', label: t('admin.schedQuality.filter.all') },
   { value: 'normal', label: t('admin.schedQuality.filter.normal') },
   { value: 'cooling', label: t('admin.schedQuality.filter.cooling') },
-  { value: 'exempt', label: t('admin.schedQuality.filter.exempt') },
-  { value: 'demote', label: t('admin.schedQuality.filter.demote') }
+  { value: 'exempt', label: t('admin.schedQuality.filter.exempt') }
 ])
 const gOpts = computed(() => [
   { value: '', label: t('admin.accounts.allGroups') },

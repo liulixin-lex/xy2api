@@ -16,7 +16,6 @@
         @click.stop="open(item)"
       >
         <svg v-if="item.kind === 'exempt'" class="sq-capsule__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.4-2.9 8.3-7 10-4.1-1.7-7-5.6-7-10V6z" /></svg>
-        <svg v-else-if="item.kind === 'demote'" class="sq-capsule__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 20h14" /></svg>
         <span :ref="(el) => measure(item.key, el)" class="sq-capsule__name">{{ nameOf(item) }}</span> <span class="sq-capsule__state">{{ t(STATE_KEY[item.kind]) }}</span>
       </button>
       <button
@@ -67,15 +66,13 @@ const emit = defineEmits<{ open: [target: { model: string | null; groupId?: numb
 const { t } = useI18n()
 
 const MAX_SHOWN = 3
-type Kind = 'exempt' | 'demote' | 'cooling'
+type Kind = 'exempt' | 'cooling'
 const STATE_KEY: Record<Kind, string> = {
   exempt: 'admin.schedQuality.state.exempted',
-  demote: 'admin.schedQuality.state.demoted',
   cooling: 'admin.schedQuality.state.cooling'
 }
-const RANK: Record<Kind, number> = { exempt: 1, demote: 1, cooling: 2 }
-// Exempt and demote share one manual colour (D35); the icon and the word tell them apart.
-const CLASS: Record<Kind, string> = { exempt: 'sq-capsule--manual', demote: 'sq-capsule--manual', cooling: 'sq-capsule--cool' }
+const RANK: Record<Kind, number> = { exempt: 1, cooling: 2 }
+const CLASS: Record<Kind, string> = { exempt: 'sq-capsule--manual', cooling: 'sq-capsule--cool' }
 
 interface Capsule {
   key: string
@@ -108,7 +105,7 @@ const capsules = computed<Capsule[]>(() => {
 })
 
 const nameOf = (item: Capsule) => (item.groupId === 0 ? t('admin.schedQuality.override.allGroups') : props.groupName(item.groupId))
-const manual = (item: Capsule) => item.kind === 'exempt' || item.kind === 'demote'
+const manual = (item: Capsule) => item.kind === 'exempt'
 
 // Expiry of an override: `至 18:30` today, `至 11-14 18:30` later, `一直` without one.
 const pad = (n: number) => String(n).padStart(2, '0')

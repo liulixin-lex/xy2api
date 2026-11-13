@@ -25,7 +25,7 @@
   --sq-tab-fg: #0f766e;
   --sq-ring: #0d9488;
   --sq-tip-bg: #111827;
-  /* Recent-status tiers (text colour only) and manual overrides (one colour for exempt and demote). */
+  /* Recent-status tiers (text colour only) and exemptions. */
   --sq-tier-good: #047857; --sq-tier-mid: #b45309; --sq-tier-bad: #991b1b;
   --sq-manual-fg: #6d28d9; --sq-manual-bg: #f5f3ff; --sq-manual-bd: #a78bfa;
 }
@@ -100,7 +100,7 @@
 .sq-capsule__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .sq-capsule__state { flex-shrink: 0; }
 .sq-capsule--cool { color: var(--sq-cool-fg); background: var(--sq-cool-bg); border-color: var(--sq-cool-bd); }
-/* Manual override (exempt, demote): one colour, dashed border, its own small icon (D35). */
+/* Exemption: dashed border and its own small icon (D35). */
 .sq-capsule--manual { color: var(--sq-manual-fg); background: var(--sq-manual-bg); border-color: var(--sq-manual-bd); border-style: dashed; }
 .sq-capsule--all { max-width: none; }
 .sq-capsule__icon { width: 12px; height: 12px; margin-left: -2px; flex-shrink: 0; }

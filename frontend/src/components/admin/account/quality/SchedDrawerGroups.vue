@@ -29,7 +29,7 @@
             <div class="flex min-w-0 items-center gap-1.5">
               <button v-if="canViewGroups" type="button" class="sq-link sq-focus min-w-0 truncate" :data-sq-trigger="`board:${group.group_id}`" @click="emit('board', group)">{{ group.name }}</button>
               <span v-else class="min-w-0 truncate">{{ group.name }}</span>
-              <SchedOverrideCapsule v-if="group.override" class="shrink-0" :mode="group.override.mode" />
+              <SchedOverrideCapsule v-if="group.override" class="shrink-0" />
             </div>
           </td>
           <!-- A group without state rows: no state word and no numbers (contract delta D3). -->
@@ -67,7 +67,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import SchedOverrideCapsule from './SchedOverrideCapsule.vue'
-import type { SchedAccountGroup, SchedGroupModelRow, SchedModelEvidence, SchedOverrideMode, SchedVerdict } from '@/types/schedQuality'
+import type { SchedAccountGroup, SchedGroupModelRow, SchedModelEvidence, SchedVerdict } from '@/types/schedQuality'
 import { secondsUntil } from '@/composables/useSchedQuality'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 import {
@@ -88,7 +88,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   board: [group: SchedAccountGroup]
-  override: [group: SchedAccountGroup, mode: SchedOverrideMode, anchor: HTMLElement]
+  override: [group: SchedAccountGroup, anchor: HTMLElement]
   undo: [group: SchedAccountGroup]
 }>()
 const { t } = useI18n()
@@ -162,18 +162,14 @@ function cellOf(group: SchedAccountGroup, dim: SchedDim): Cell {
   return value(valueText(row, dim), t('admin.schedQuality.tip.samples', { n: own.n }))
 }
 
-function actionLabel(group: SchedAccountGroup) {
-  const mode = group.override?.mode
-  if (mode === 'exempt') return t('admin.schedQuality.action.undoExempt')
-  if (mode === 'demote') return t('admin.schedQuality.action.undoDemote')
-  return t(rowOf(group)?.state === 'cooling' ? 'admin.schedQuality.action.exempt' : 'admin.schedQuality.action.demote')
-}
+const actionLabel = (group: SchedAccountGroup) =>
+  t(group.override ? 'admin.schedQuality.action.undoExempt' : 'admin.schedQuality.action.exempt')
 
 function onAction(group: SchedAccountGroup, event: MouseEvent) {
   if (group.override) {
     emit('undo', group)
     return
   }
-  emit('override', group, rowOf(group)?.state === 'cooling' ? 'exempt' : 'demote', event.currentTarget as HTMLElement)
+  emit('override', group, event.currentTarget as HTMLElement)
 }
 </script>

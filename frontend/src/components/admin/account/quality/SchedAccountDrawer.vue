@@ -15,15 +15,13 @@
       </div>
     </template>
     <template v-if="detail && canManage" #header-actions>
-      <template v-for="mode in OVERRIDE_MODES" :key="mode">
-        <span v-if="failedGroups.has(0) && allGroupsOverride?.mode === mode" class="sq-fail-word text-sm">{{ t('admin.schedQuality.result.failed') }}</span>
-        <button
-          type="button"
-          class="btn btn-secondary btn-sm"
-          :data-sq-trigger="`drawer-${mode}`"
-          @click="onHeaderOverride(mode, $event)"
-        >{{ headerOverrideLabel(mode) }}</button>
-      </template>
+      <span v-if="failedGroups.has(0)" class="sq-fail-word text-sm">{{ t('admin.schedQuality.result.failed') }}</span>
+      <button
+        type="button"
+        class="btn btn-secondary btn-sm"
+        data-sq-trigger="drawer-exempt"
+        @click="onHeaderOverride"
+      >{{ t(allGroupsOverride ? 'admin.schedQuality.action.undoExempt' : 'admin.schedQuality.action.exempt') }}</button>
       <button
         v-if="recoverable"
         type="button"
@@ -88,7 +86,7 @@
           <h3 class="sq-section-title">{{ t('admin.schedQuality.drawer.byGroup') }}</h3>
           <SchedPauseMark :global-enabled="detail.global_enabled" :stale="detail.stale" />
           <!-- The all-groups override, shown to every reader; the header buttons change it. -->
-          <SchedOverrideCapsule v-if="allGroupsOverride" class="ml-1.5" :mode="allGroupsOverride.mode" all-groups />
+          <SchedOverrideCapsule v-if="allGroupsOverride" class="ml-1.5" all-groups />
         </div>
         <SchedDrawerGroups
           :groups="detail.groups"
@@ -98,7 +96,7 @@
           :target-group-id="targetGroupId"
           :failed-groups="failedGroups"
           @board="(group) => openSchedBoard({ id: group.group_id, name: group.name }, card?.request_model || null)"
-          @override="(group, mode, anchor) => openPopover(mode, group.group_id, anchor)"
+          @override="(group, anchor) => openPopover(group.group_id, anchor)"
           @undo="undoOverride"
         />
       </section>
@@ -180,7 +178,6 @@
 
   <SchedOverridePopover
     :show="popover.open"
-    :mode="popover.mode"
     :anchor="popover.anchor"
     :groups="scopeGroups"
     :default-group-id="popover.groupId"
@@ -213,7 +210,7 @@ import SchedOverridePopover from './SchedOverridePopover.vue'
 import SchedOverrideCapsule from './SchedOverrideCapsule.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
 import type {
-  SchedAccountGroup, SchedAutoState, SchedOverrideMode, SchedOverrideRequest, SchedRecentAttempt, SchedRequestClass
+  SchedAccountGroup, SchedAutoState, SchedOverrideRequest, SchedRecentAttempt, SchedRequestClass
 } from '@/types/schedQuality'
 import { secondsUntil, useSchedQualityClock, useSchedQualityPoll } from '@/composables/useSchedQuality'
 import { closeSchedDrawer, markSchedChanged, openSchedBoard, openSchedDrawer, trackSchedReload, useSchedLayers } from '@/composables/useSchedLayers'
@@ -237,7 +234,6 @@ const props = defineProps<{
   onRecovered?: (accountId: number) => Promise<void> | void
 }>()
 
-const OVERRIDE_MODES: SchedOverrideMode[] = ['demote', 'exempt']
 const CLASSES: SchedRequestClass[] = ['light', 'regular', 'heavy', 'xheavy']
 const RECENT_SHORT = 10
 const RECENT_LONG = 50
@@ -342,19 +338,14 @@ function startRecover() {
 }
 
 const allGroupsOverride = computed(() => detail.value?.all_groups_override ?? null)
-const headerOverrideLabel = (mode: SchedOverrideMode) =>
-  allGroupsOverride.value?.mode === mode
-    ? t(mode === 'demote' ? 'admin.schedQuality.action.undoDemote' : 'admin.schedQuality.action.undoExempt')
-    : t(`admin.schedQuality.action.${mode}`)
-
-function onHeaderOverride(mode: SchedOverrideMode, event: MouseEvent) {
-  if (allGroupsOverride.value?.mode === mode) void clearOverride(0, 0)
-  else openPopover(mode, 0, event.currentTarget as HTMLElement)
+function onHeaderOverride(event: MouseEvent) {
+  if (allGroupsOverride.value) void clearOverride(0, 0)
+  else openPopover(0, event.currentTarget as HTMLElement)
 }
 
-const popover = reactive({ open: false, mode: 'demote' as SchedOverrideMode, groupId: 0, anchor: null as HTMLElement | null, busy: false, failed: false })
-function openPopover(mode: SchedOverrideMode, groupId: number, anchor: HTMLElement) {
-  Object.assign(popover, { open: true, mode, groupId, anchor, busy: false, failed: false })
+const popover = reactive({ open: false, groupId: 0, anchor: null as HTMLElement | null, busy: false, failed: false })
+function openPopover(groupId: number, anchor: HTMLElement) {
+  Object.assign(popover, { open: true, groupId, anchor, busy: false, failed: false })
 }
 
 async function applyOverride(request: SchedOverrideRequest) {

@@ -33,7 +33,7 @@ function board(): SchedBoard {
     accounts: [
       account(7, { rank: 1, can_take_over: false }),
       account(3, { rank: 2, state: 'cooling', until: new Date(Date.now() + 90_000).toISOString(), standing: 'back', verdicts: { ttfo: 'fail', error: 'pass', cache: 'marginal' } }),
-      account(5, { rank: 3, override: { mode: 'demote', all_groups: true, expires_at: null, reason: '' }, recently_full_seconds: 12 }),
+      account(5, { rank: 3, override: { mode: 'exempt', all_groups: true, expires_at: null, reason: '' }, recently_full_seconds: 12 }),
       account(9, { rank: 0, eligible: false, reject: 'rate_limit', reject_until: new Date(Date.now() + 130_000).toISOString(), verdicts: { ttfo: 'fail', error: 'fail', cache: 'fail' } }),
       account(1, { rank: 0, eligible: false, reject: 'brand_new' })
     ]
@@ -66,7 +66,7 @@ describe('GroupSchedBoard', () => {
     mount(GroupSchedBoard, { attachTo: document.body })
     openSchedBoard({ id: 53, name: '晨星组' })
     await flushPromises()
-    const [first, cooling, demoted, limited, unknown] = rows()
+    const [first, cooling, exempted, limited, unknown] = rows()
     expect(limited.classList.contains('sq-weak')).toBe(true)
     expect(limited.classList.contains('sq-split')).toBe(true)
     expect(limited.querySelector('[data-sq-state]')!.textContent).toMatch(/^admin\.schedQuality\.reject\.rate_limit 2:(09|10)$/)
@@ -79,8 +79,8 @@ describe('GroupSchedBoard', () => {
     expect(Array.from(cooling.querySelectorAll('td:nth-last-child(-n+3) span')).map((el) => el.className)).toEqual([
       'sq-focus sq-v-fail', 'sq-focus sq-v-pass', 'sq-focus sq-v-marginal'
     ])
-    expect(demoted.querySelector('[data-sq-state]')!.textContent).toBe('admin.schedQuality.state.demoted')
-    expect(demoted.querySelector('.sq-full')).not.toBeNull()
+    expect(exempted.querySelector('[data-sq-state]')!.textContent).toBe('admin.schedQuality.state.exempted')
+    expect(exempted.querySelector('.sq-full')).not.toBeNull()
     // No-takeover mark: front, eligible, cannot take over, the group takes over, view live.
     expect(first.querySelector('[data-sq-no-takeover]')).not.toBeNull()
     expect(cooling.querySelector('[data-sq-no-takeover]')).toBeNull()
