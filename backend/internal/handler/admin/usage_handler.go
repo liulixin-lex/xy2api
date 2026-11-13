@@ -232,7 +232,7 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 		return
 	}
 
-	var stats *usagestats.UsageStats
+	var stats *usagestats.AdminRequestStats
 	// nocache: 绕过缓存直接回源,刷新者本人拿最新;不回写缓存(管理台"我刷新我自己拿最新"语义,非全局失效)。
 	if parseBoolQueryWithDefault(c.Query("nocache"), false) {
 		s, err := h.usageService.AdminRequestStats(c.Request.Context(), filters)

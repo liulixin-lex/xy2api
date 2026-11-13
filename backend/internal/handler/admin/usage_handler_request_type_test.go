@@ -32,9 +32,9 @@ func (s *adminUsageRepoCapture) ListAdminRequests(ctx context.Context, params pa
 	}, nil
 }
 
-func (s *adminUsageRepoCapture) AdminRequestStats(ctx context.Context, filters usagestats.UsageLogFilters) (*usagestats.UsageStats, error) {
+func (s *adminUsageRepoCapture) AdminRequestStats(ctx context.Context, filters usagestats.UsageLogFilters) (*usagestats.AdminRequestStats, error) {
 	s.statsFilters = filters
-	return &usagestats.UsageStats{}, nil
+	return &usagestats.AdminRequestStats{}, nil
 }
 
 func newAdminUsageRequestTypeTestRouter(repo *adminUsageRepoCapture) *gin.Engine {
