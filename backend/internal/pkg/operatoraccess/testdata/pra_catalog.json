@@ -6993,6 +6993,20 @@
  },
  {
   "method": "GET",
+  "path": "/usage/attempts",
+  "group": "admin",
+  "reg": "registerUsageRoutes",
+  "module": "usage",
+  "level": "view",
+  "any_of": [],
+  "flags": [],
+  "target": null,
+  "fields": null,
+  "redact": [],
+  "ws": false
+ },
+ {
+  "method": "GET",
   "path": "/usage/stats",
   "group": "admin",
   "reg": "registerUsageRoutes",
