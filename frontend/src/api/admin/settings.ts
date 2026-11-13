@@ -708,7 +708,6 @@ export interface SystemSettings {
   openai_oauth_scheduling_rate_multiplier?: number | null;
   /** Always present in responses (contract clarification K11, G4 D7). */
   sched_quality_enabled: boolean;
-  sched_quality_test_enabled: boolean;
 
   // 余额、订阅到期与账号限额通知
   balance_low_notify_enabled: boolean;
@@ -1022,7 +1021,6 @@ export interface UpdateSettingsRequest {
   /** Omit to preserve the override; null clears it; zero is an explicit rate. */
   openai_oauth_scheduling_rate_multiplier?: number | null;
   sched_quality_enabled?: boolean;
-  sched_quality_test_enabled?: boolean;
   // 余额、订阅到期与账号限额通知
   balance_low_notify_enabled?: boolean;
   balance_low_notify_threshold?: number;

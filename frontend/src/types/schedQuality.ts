@@ -1,72 +1,59 @@
-// Admin API types for /admin/sched-quality (contract section 13). Field names match the JSON exactly;
-// the backend DTOs live in backend/internal/service/sched_admin_dto.go.
+// Admin API types for /admin/sched-quality (sched-v2 contract §6). Field names match the JSON exactly.
 
-export type SchedVerdict = 'pass' | 'marginal' | 'fail' | 'nodata'
-export type SchedVerdictFrom = 'real' | 'test'
-export type SchedState = 'normal' | 'cooling'
-export type SchedStanding = 'front' | 'back'
-export type SchedOverrideMode = 'exempt' | 'demote'
-export type SchedRequestClass = 'light' | 'regular' | 'heavy' | 'xheavy'
-export type SchedTestTier = 'small' | 'medium' | 'large'
-/** screen: started automatically, no medium or large rounds; full: the rest (contract delta A9). */
-export type SchedTestKind = 'screen' | 'full'
-export type SchedOutcome = 'ok' | 'timeout' | 'account_fault' | 'other'
-/** Cooling: speed | error | cache | acute_timeout | test_*; normal: '' | unverified. */
-export type SchedReason =
-  | 'speed'
-  | 'error'
-  | 'cache'
-  | 'acute_timeout'
-  | 'test_speed'
-  | 'test_error'
-  | 'test_cache'
-  | 'unverified'
-  | ''
-/** error: the model was not accepted because of an internal error (contract clarification K28). */
-export type SchedTestTicketWhy = '' | 'already_running' | 'too_soon' | 'not_schedulable' | 'error'
+export type SchedOverrideMode = 'exempt'
 /** -1 off, 0 immediately, otherwise idle seconds. */
 export type SchedTakeoverIdleSeconds = -1 | 0 | 300 | 900 | 1800
 
-export interface SchedOverride {
-  mode: SchedOverrideMode
-  all_groups: boolean
+// ---- POST /accounts/summary (contract §4.11, §6.1) ----
+
+export type SchedDim = 'ttfo' | 'error' | 'cache'
+/** Account-level state word: 正常 / 观察中 / 停用. 「不达标」 only exists per group and model. */
+export type SchedAccountState = 'normal' | 'observing' | 'disabled'
+
+/** The stop shown in the status column: one word for manual and automatic, the source told apart by colour. */
+export interface SchedStop {
+  source: 'manual' | 'auto'
+  /** Fixed reason code; the UI maps it to a short word. */
+  reason: string
+  until: string | null
+}
+
+/** red: this dimension makes the account substandard in some group (exempt included); short: n below the minimum. */
+export interface SchedMark {
+  n: number
+  short: boolean
+  red: boolean
+}
+
+export interface SchedSubstandard {
+  group_id: number
+  model: string
+  dims: SchedDim[]
+  until: string
+  /** The renewal is based on requests in other groups. */
+  other_group: boolean
+  exempt: boolean
+}
+
+/** group_id 0 = every group. */
+export interface SchedExemption {
+  group_id: number
   expires_at: string | null
   reason: string
 }
 
-// ---- POST /accounts/summary ----
-
-export interface SchedAccountSummaryCooling {
-  group_id: number
-  model: string
-  reason: SchedReason
-  until: string | null
-  waiting_test: boolean
-  testing: boolean
-}
-
-/** A current manual override; group_id 0 covers every group (contract delta D1). */
-export interface SchedAccountSummaryOverride {
-  group_id: number
-  mode: SchedOverrideMode
-  expires_at: string | null
-}
-
 export interface SchedAccountSummary {
   account_id: number
-  model: string | null
-  samples: number
-  /** ttfo, error and cache are kept by the API but no longer shown in the list (contract delta C5). */
-  ttfo: { p90_ms: number | null; timeout: boolean; n: number }
-  error: { rate: number | null; n: number }
-  cache: { ratio: number | null; n: number }
-  groups: { total: number; normal: number; cooling: number; nodata: number }
-  /** One item per cooling group, all of them. */
-  cooling: SchedAccountSummaryCooling[]
-  /** Always 0. */
-  cooling_more: number
-  /** Group 0 first, then by group id. */
-  overrides: SchedAccountSummaryOverride[]
+  status: SchedAccountState
+  /** Latest manual recovery. */
+  reset_at: string | null
+  stop: SchedStop | null
+  /** Every group and model of the account, the last 60 minutes (from the latest recovery at most). */
+  ttfo: SchedMark & { p50_ms: number | null }
+  error: SchedMark & { rate: number | null }
+  cache: SchedMark & { ratio: number | null }
+  substandard: SchedSubstandard[]
+  exemptions: SchedExemption[]
 }
 
 export interface SchedAccountsSummary {
@@ -76,87 +63,7 @@ export interface SchedAccountsSummary {
   accounts: SchedAccountSummary[]
 }
 
-export interface SchedAccountsSummaryRequest {
-  account_ids: number[]
-}
-
-// ---- POST /admin/accounts/recent-stats/batch (contract delta C4) ----
-
-/** Set by the backend from its own thresholds; null below the sample minimum. */
-export type RecentStatsTier = 'good' | 'mid' | 'bad' | null
-
-export interface AccountRecentStats {
-  account_id: number
-  ttft: { p50_ms: number | null; n: number; tier: RecentStatsTier }
-  /** null while ops monitoring is off. */
-  error: { rate: number | null; bad: number; n: number; tier: RecentStatsTier } | null
-  cache: { ratio: number | null; n: number; tier: RecentStatsTier }
-}
-
-export interface AccountRecentStatsBatch {
-  as_of: string
-  /** One item per requested account, by account id. */
-  items: AccountRecentStats[]
-}
-
-// ---- GET /accounts/:id ----
-
-export interface SchedClassStat {
-  class: SchedRequestClass
-  n: number
-  p90_ms: number | null
-}
-
-export interface SchedTestTierResult {
-  tier: SchedTestTier
-  /** Warm turns actually sent, in order, at most two; null for a turn without first output (see timeouts). */
-  ttfo_ms: (number | null)[]
-  /** Kept for the record; no longer shown or judged (contract delta A3). */
-  cache_ratio: number | null
-  faults: number
-  timeouts: number
-}
-
-export interface SchedTest {
-  id: string
-  at: string
-  running: boolean
-  done: boolean
-  abort_reason: string
-  auto: boolean
-  kind: SchedTestKind
-  /** Every tier with rounds has exactly rounds 1–3, all ok (contract delta A4). */
-  clean: boolean
-  /** Only tiers with at least one round. */
-  tiers: SchedTestTierResult[]
-  input_tokens: number
-  cached_tokens: number
-  output_tokens: number
-}
-
-export interface SchedModelEvidence {
-  /** Evidence key. */
-  model: string
-  /** Request model that maps to this evidence key for the account; "" when none (contract clarification K27). */
-  request_model: string
-  samples: number
-  sessions: number
-  from: string | null
-  to: string | null
-  ttfo: {
-    n: number
-    sessions: number
-    timeouts: number
-    p90_ms: number | null
-    p90_timeout: boolean
-    fail_bound_ms: number | null
-    fail_bound_timeout: boolean
-    by_class: SchedClassStat[]
-  }
-  error: { n: number; sessions: number; bad: number; rate: number | null; lcb: number | null }
-  cache: { turns: number; sessions: number; ratio: number | null }
-  test: SchedTest | null
-}
+// ---- GET /accounts/:id (contract §4.11) ----
 
 export interface SchedGroupThresholds {
   ttft_seconds: number
@@ -165,27 +72,45 @@ export interface SchedGroupThresholds {
   takeover_idle_seconds: SchedTakeoverIdleSeconds
 }
 
-export interface SchedGroupModelRow {
-  model: string
-  state: SchedState
-  level: number
-  reason: SchedReason
-  since: string | null
-  until: string | null
-  waiting_test: boolean
-  testing: boolean
-  ttfo: { verdict: SchedVerdict; from: SchedVerdictFrom | null; n: number; p90_ms: number | null; p90_timeout: boolean; limit_ms: number }
-  error: { verdict: SchedVerdict; from: SchedVerdictFrom | null; n: number; rate: number | null; limit: number }
-  cache: { verdict: SchedVerdict; from: SchedVerdictFrom | null; n: number; ratio: number | null; limit: number }
+export interface SchedPolicy extends SchedGroupThresholds {
+  enabled: boolean
 }
 
-export interface SchedAccountGroup {
+/** One dimension of one group and model: the evidence the verdict used (contract §4.3) and the verdict. */
+export interface SchedDimDetail {
+  /** Where the evidence came from: this group, or every group merged when this group had too few. */
+  scope: 'own' | 'merged'
+  window_min: number
+  n: number
+  lcb: number | null
+  verdict: 'pass' | 'fail' | 'short'
+}
+
+export interface SchedGroupModelDetail {
+  model: string
+  /** The internal state; an exemption does not change it. */
+  failing: boolean
+  dims: SchedDim[]
+  /** Ladder level 0–5. */
+  level: number
+  since: string | null
+  until: string | null
+  /** Groups whose requests renewed this round (到点例外). */
+  other_group_ids: number[]
+  exempt: boolean
+  /** bad = requests over the line (timeouts included). */
+  ttfo: SchedDimDetail & { bad: number }
+  error: SchedDimDetail & { bad: number }
+  cache: SchedDimDetail & { ratio: number | null }
+}
+
+export interface SchedAccountGroupDetail {
   group_id: number
   name: string
-  gate_enabled: boolean
-  policy: SchedGroupThresholds
-  override: SchedOverride | null
-  by_model: SchedGroupModelRow[]
+  policy: SchedPolicy
+  /** The exemption in effect for this group (its own or the all-groups one). */
+  exemption: SchedExemption | null
+  by_model: SchedGroupModelDetail[]
 }
 
 export interface SchedAutoState {
@@ -202,41 +127,28 @@ export interface SchedAutoState {
   why: string
 }
 
-export interface SchedRecentAttempt {
-  at: string
-  group_id: number
-  model: string
-  class: SchedRequestClass
-  stream: boolean
-  warm: boolean
-  ttfo_ms: number | null
-  outcome: SchedOutcome
-  detail: string
-}
-
 export interface SchedAccountDetail {
   account: { id: number; name: string; priority: number; rate: number; concurrency: number; in_flight: number }
   at: string
   stale: boolean
   global_enabled: boolean
-  tests_enabled: boolean
+  status: SchedAccountState
+  stop: SchedStop | null
   reset_at: string | null
-  models: SchedModelEvidence[]
-  /** Every OpenAI group of the account; by_model is empty for a group without state rows (contract delta D3). */
-  groups: SchedAccountGroup[]
-  /** The override covering every group, if any. */
-  all_groups_override: SchedOverride | null
+  groups: SchedAccountGroupDetail[]
   auto_states: SchedAutoState[]
-  recent_attempts: SchedRecentAttempt[]
+  exemptions: SchedExemption[]
 }
 
-// ---- POST /accounts/:id/reset (also POST /admin/accounts/:id/recover-state) ----
+// ---- POST /accounts/:id/reset (contract §6.5) ----
 
+/** `kind` values are fixed codes; the UI maps them to short words. */
 export interface SchedResetResult {
+  account_id: number
   reset_at: string | null
-  cleared: { key: string; kind: string }[]
-  preserved: { key: string; kind: string; why: string }[]
-  failed: { key: string; kind: string; error: string }[]
+  cleared: string[]
+  kept: { kind: string; until: string | null }[]
+  failed: { kind: string }[]
 }
 
 // ---- PUT /accounts/:id/override ----
@@ -250,19 +162,6 @@ export interface SchedOverrideRequest {
   reason: string
 }
 
-// ---- POST /accounts/:id/test ----
-
-export interface SchedTestTicket {
-  model: string
-  test_id: string
-  started: boolean
-  why: SchedTestTicketWhy
-}
-
-export interface SchedTestStart {
-  tests: SchedTestTicket[]
-}
-
 // ---- DELETE /accounts/:id/auto-states/:key ----
 
 export interface SchedClearAutoState {
@@ -271,18 +170,10 @@ export interface SchedClearAutoState {
 
 // ---- GET | PUT /groups/:id/policy ----
 
-export interface SchedPolicy extends SchedGroupThresholds {
-  enabled: boolean
-}
-
-export type SchedClassLimits = Record<SchedRequestClass, number>
-
 export interface SchedGroupPolicy {
   group_id: number
   version: number
   policy: SchedPolicy
-  /** Per model, plus "default" for every other model. */
-  class_limits_ms: Record<string, SchedClassLimits>
 }
 
 export interface SchedGroupPolicyUpdate {
@@ -290,48 +181,58 @@ export interface SchedGroupPolicyUpdate {
   policy: SchedPolicy
 }
 
-// ---- GET /groups/:id/board?model= ----
+// ---- POST /groups/summary (contract §6.1, §6.3, §6.4) ----
 
-export interface SchedEvidenceNumbers {
-  ttfo: { n: number; sessions: number; p90_ms: number | null; p90_timeout: boolean; fail_bound_ms: number | null; fail_bound_timeout: boolean }
-  error: { n: number; sessions: number; rate: number | null; lcb: number | null }
-  cache: { n: number; sessions: number; ratio: number | null }
+export interface SchedGroupSummary extends SchedPolicy {
+  group_id: number
+  /** Each account counted once: stopped, else substandard (after exemptions) in any model, else normal. */
+  accounts: { normal: number; below: number; stopped: number }
+  /** The last 60 minutes of the group's requests: user-side first output P50, failed share, cache, count. */
+  last60: { ttfo_p50_ms: number | null; failed_rate: number | null; cache_ratio: number | null; requests: number }
 }
 
-export interface SchedBoardAccount extends SchedEvidenceNumbers {
+export interface SchedGroupsSummary {
+  at: string
+  stale: boolean
+  groups: SchedGroupSummary[]
+}
+
+// ---- POST /groups/:id/policy/preview (contract §4.10) ----
+
+export interface SchedPolicyPreview {
+  now: { normal: number; below: number }
+  after: { normal: number; below: number }
+  /** Accounts that would turn substandard under the new lines. */
+  changed: { account_id: number; name: string; model: string; dims: SchedDim[] }[]
+}
+
+// ---- GET /groups/:id/order?model= (contract §5.7) ----
+
+export interface SchedOrderRow {
+  /** 1-based; hard-unavailable accounts come last with layer `stopped`. */
+  rank: number
   account_id: number
   name: string
-  /** Evidence key behind this row's numbers and state (contract clarification K27). */
-  evidence_model: string
-  rank: number
-  eligible: boolean
-  reject: string
-  reject_until: string | null
-  standing: SchedStanding
-  state: SchedState
-  level: number
+  layer: 'normal' | 'below' | 'stopped'
+  dims: SchedDim[]
   until: string | null
-  waiting_test: boolean
-  testing: boolean
-  override: SchedOverride | null
+  exempt: boolean
   priority: number
   rate: number
+  load_rate: number
   in_flight: number
   concurrency: number
-  recently_full_seconds: number
-  can_take_over: boolean
-  verdicts: { ttfo: SchedVerdict; error: SchedVerdict; cache: SchedVerdict }
+  last_used_at: string | null
 }
 
-export interface SchedBoard {
+export interface SchedOrder {
   group_id: number
-  /** Request model of this board. */
+  /** Request model of this order. */
   model: string
-  /** Request models with samples in the group, most samples first. */
+  /** Request models of the group, most requests first. */
   models: string[]
   at: string
   stale: boolean
   global_enabled: boolean
-  /** In current selection order; render as given. */
-  accounts: SchedBoardAccount[]
+  rows: SchedOrderRow[]
 }

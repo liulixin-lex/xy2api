@@ -3,11 +3,6 @@ import { defineComponent, h, nextTick, ref, watch } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import { defineLazyComponent, useLazyMount } from '../useLazyMount'
 
-const getTempUnschedulableStatus = vi.fn()
-vi.mock('@/api/admin', () => ({ adminAPI: { accounts: { getTempUnschedulableStatus: (...args: unknown[]) => getTempUnschedulableStatus(...args) } } }))
-vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError: vi.fn(), showSuccess: vi.fn() }) }))
-vi.mock('@/utils/format', () => ({ formatDateTime: () => 'date' }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 
 // 与账号页弹窗同样的写法：只在 show 从 false 变为 true 时加载数据（watch 不带 immediate）
 const loadModels = vi.fn()
@@ -77,30 +72,5 @@ describe('defineLazyComponent', () => {
     await nextTick()
     expect(loadModels).toHaveBeenLastCalledWith(2)
     expect(second.get('[data-test="models"]').text()).toBe('model-for-2')
-  })
-
-  it('loads the temporary-unschedulable reason on the first open', async () => {
-    getTempUnschedulableStatus.mockReset().mockResolvedValue({ active: true, state: null })
-    const TempUnschedStatusModal = defineLazyComponent(() => import('@/components/account/TempUnschedStatusModal.vue'))
-    const Host = defineComponent({
-      setup() {
-        const show = ref(false)
-        const account = ref<{ id: number; name: string } | null>(null)
-        const mounted = useLazyMount(show)
-        return { show, account, mounted }
-      },
-      render() {
-        return this.mounted ? h(TempUnschedStatusModal, { show: this.show, account: this.account }) : null
-      }
-    })
-    const wrapper = mount(Host, {
-      global: { stubs: { BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' } } }
-    })
-    ;(wrapper.vm as any).account = { id: 42, name: 'acc' }
-    ;(wrapper.vm as any).show = true
-    await vi.waitFor(() => expect(getTempUnschedulableStatus).toHaveBeenCalledWith(42), { timeout: 5000 })
-    await flushPromises()
-    expect(getTempUnschedulableStatus).toHaveBeenCalledTimes(1)
-    wrapper.unmount()
   })
 })

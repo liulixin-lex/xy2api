@@ -11,7 +11,7 @@
         data-sq-popover
         @keydown.tab="trapTab($event, rootRef)"
       >
-        <h3 :id="titleId" class="text-sm font-semibold text-gray-900 dark:text-white">{{ t(`admin.schedQuality.action.${mode}`) }}</h3>
+        <h3 :id="titleId" class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.schedQuality.action.exempt') }}</h3>
         <div class="mt-3 grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-3 text-sm">
           <label :for="scopeId" class="text-gray-700 dark:text-gray-300">{{ t('admin.schedQuality.override.scope') }}</label>
           <Select :id="scopeId" ref="scopeRef" v-model="groupId" :options="scopeOptions" :searchable="false" />
@@ -49,17 +49,16 @@ import { gsap } from 'gsap'
 import { isReducedMotion } from '@/composables/useMotionPreference'
 import { motionDuration, motionEase } from '@/utils/motionTokens'
 import Select from '@/components/common/Select.vue'
-import type { SchedOverrideMode, SchedOverrideRequest } from '@/types/schedQuality'
+import type { SchedOverrideRequest } from '@/types/schedQuality'
 import { closeOverlay, isTopOverlay, openOverlay, trapTab } from '@/utils/overlayStack'
 
-// Demote / exempt popover (design spec B.8): non-modal, anchored under its button, closed by Escape, an outside click
+// Exempt popover (design spec B.8): non-modal, anchored under its button, closed by Escape, an outside click
 // or Cancel. Scope 0 = every group of the account.
 type Duration = 'oneHour' | 'today' | 'forever'
 const DURATIONS: Duration[] = ['oneHour', 'today', 'forever']
 
 const props = defineProps<{
   show: boolean
-  mode: SchedOverrideMode
   anchor: HTMLElement | null
   groups: Array<{ id: number; name: string }>
   defaultGroupId?: number
@@ -96,7 +95,7 @@ function expiresAt(): string | null {
   return end.toISOString()
 }
 
-const confirm = () => emit('confirm', { group_id: groupId.value, mode: props.mode, expires_at: expiresAt(), reason: reason.value.trim() })
+const confirm = () => emit('confirm', { group_id: groupId.value, mode: 'exempt', expires_at: expiresAt(), reason: reason.value.trim() })
 
 function place() {
   const anchor = props.anchor?.getBoundingClientRect()

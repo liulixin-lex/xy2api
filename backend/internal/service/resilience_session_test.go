@@ -331,7 +331,6 @@ func TestAvoidedAccountExcludedButUsableAsLastResort(t *testing.T) {
 	store := svc.resilience.store
 	groupID := int64(7)
 	require.NoError(t, store.AddSessionAvoid(context.Background(), 7, "sess", 61, time.Minute))
-	svc.resilience.avoidingSessions.Store(sessionMarkKey(7, "sess"), time.Now().Add(time.Minute))
 
 	result, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "sess", "claude-sonnet-4", nil, "", 0)
 	require.NoError(t, err)
@@ -413,10 +412,8 @@ func TestSessionMarksAreSwept(t *testing.T) {
 	now := time.Now()
 	r.markSessionFailures(7, "gone", -time.Second)
 	r.markSessionFailures(7, "live", time.Minute)
-	r.avoidingSessions.Store(sessionMarkKey(7, "gone"), now.Add(-time.Second))
-	r.avoidingSessions.Store(sessionMarkKey(7, "live"), now.Add(time.Minute))
 	r.sweepSessionMarks(now)
-	for _, m := range []*sync.Map{&r.failingSessions, &r.avoidingSessions} {
+	for _, m := range []*sync.Map{&r.failingSessions} {
 		_, gone := m.Load(sessionMarkKey(7, "gone"))
 		_, live := m.Load(sessionMarkKey(7, "live"))
 		require.False(t, gone, "a session that never returns does not stay in memory")
@@ -474,4 +471,16 @@ func lastResortGroupIDs(r *ResilienceService) []int64 {
 	}
 	slices.Sort(ids)
 	return ids
+}
+
+func TestSessionAvoidReadsFailureRecordedByAnotherInstance(t *testing.T) {
+	withResilienceSettings(t, nil)
+	store := newMemResilienceStore()
+	first := NewResilienceService(nil, store)
+	second := NewResilienceService(nil, store)
+	ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+	require.NoError(t, first.store.AddSessionAvoid(ctx, 7, "shared-session", 101, 2*time.Minute))
+	group := int64(7)
+	require.Contains(t, second.sessionAvoid(ctx, &group, "shared-session"), int64(101))
+	require.True(t, resilience.StateFrom(ctx).Avoided(101))
 }

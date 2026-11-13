@@ -37,7 +37,6 @@ func TestResilienceGatewayLastResortPrefersUnavoided(t *testing.T) {
 					a.TempUnschedulableUntil, a.TempUnschedulableReason = nil, ""
 					r := env.gateway.resilience
 					require.NoError(t, r.store.AddSessionAvoid(t.Context(), selectionTestGroupID, lrSession, lrAccountA, time.Minute))
-					r.avoidingSessions.Store(sessionMarkKey(selectionTestGroupID, lrSession), time.Now().Add(time.Minute))
 				}
 				if tc.only {
 					env.repo.accountsByID[lrAccountB].Schedulable = false
@@ -70,7 +69,6 @@ func TestResilienceGeminiLastResortPrefersUnavoided(t *testing.T) {
 			a.TempUnschedulableUntil, a.TempUnschedulableReason = nil, ""
 			r := env.gateway.resilience
 			require.NoError(t, r.store.AddSessionAvoid(t.Context(), selectionTestGroupID, lrSession, lrAccountA, time.Minute))
-			r.avoidingSessions.Store(sessionMarkKey(selectionTestGroupID, lrSession), time.Now().Add(time.Minute))
 			st := resilience.NewRequestState()
 			ctx := resilience.WithRequestState(context.Background(), st)
 			gid := selectionTestGroupID
@@ -97,7 +95,6 @@ func TestResilienceOpenAILastResortPrefersUnavoided(t *testing.T) {
 					a.TempUnschedulableUntil, a.TempUnschedulableReason = nil, ""
 					r := env.svc.resilience
 					require.NoError(t, r.store.AddSessionAvoid(t.Context(), selectionTestGroupID, lrSession, lrAccountA, time.Minute))
-					r.avoidingSessions.Store(sessionMarkKey(selectionTestGroupID, lrSession), time.Now().Add(time.Minute))
 				}
 				if tc.only {
 					env.account(lrAccountB).Schedulable = false
@@ -122,7 +119,6 @@ func TestResilienceOpenAILastResortAvoidOutranksStanding(t *testing.T) {
 	a.TempUnschedulableUntil, a.TempUnschedulableReason = nil, ""
 	r := env.svc.resilience
 	require.NoError(t, r.store.AddSessionAvoid(t.Context(), selectionTestGroupID, lrSession, lrAccountA, time.Minute))
-	r.avoidingSessions.Store(sessionMarkKey(selectionTestGroupID, lrSession), time.Now().Add(time.Minute))
 	view := selectionTestView(time.Now())
 	view.States[fakeSchedViewKey{selectionTestGroupID, lrAccountB, "gpt-5.1"}] = schedquality.StateView{State: schedquality.StateCooling}
 	NewOpenAISelectionBoard(env.svc, func() schedquality.View { return view })

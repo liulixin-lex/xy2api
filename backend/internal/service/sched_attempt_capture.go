@@ -24,6 +24,7 @@ type schedAttemptCapture struct {
 	mu                                         sync.Mutex
 	state                                      *resilience.RequestState
 	ctx                                        context.Context
+	accountID                                  int64
 	attempt                                    SchedAttempt
 	sendErr                                    error
 	started                                    time.Time
@@ -34,16 +35,25 @@ type schedAttemptCapture struct {
 }
 
 func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *Account, body []byte, bodyBytes int, stream bool) *schedAttemptCapture {
-	if s.schedAttemptRecorder == nil {
-		return nil
-	}
 	if account == nil || account.Platform != PlatformOpenAI {
 		return nil
 	}
 	st := resilience.StateFrom(ctx)
 	selection, ok := st.SchedSelection()
-	if !ok || selection.AccountID != account.ID {
+	record := s.schedAttemptRecorder != nil && ok && selection.AccountID == account.ID
+	change := pendingOpenAIStickyChange(ctx)
+	if !record && (change == nil || change.target != account.ID) {
 		return nil
+	}
+	a := &schedAttemptCapture{state: st, ctx: ctx, accountID: account.ID, started: time.Now(), attempt: schedAttemptNoop{}}
+	if change != nil && change.target == account.ID {
+		change.mu.Lock()
+		change.activeAttempt, change.attemptSucceeded, change.attemptCanceled = a, false, false
+		change.mu.Unlock()
+	}
+	if !record {
+		st.SetCurrentAttempt(a)
+		return a
 	}
 	groupID, sessionKey := st.SessionIdentity()
 	effort := ""
@@ -56,7 +66,7 @@ func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *A
 		copy := *test
 		in.Test = &copy
 	}
-	a := &schedAttemptCapture{state: st, ctx: ctx, started: time.Now(), attempt: s.schedAttemptRecorder.Begin(in)}
+	a.attempt = s.schedAttemptRecorder.Begin(in)
 	st.SetCurrentAttempt(a)
 	return a
 }
@@ -177,6 +187,7 @@ func (a *schedAttemptCapture) timeout(plan resilience.TimeoutPlan) {
 		return
 	}
 	a.done = true
+	noteOpenAIStickyAttemptOutcome(a, false)
 	if plan.Applied() {
 		a.attempt.FinishOther("budget_cut")
 	} else {
@@ -204,6 +215,14 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 	}
 	a.done = true
 	defer a.state.ClearCurrentAttemptIf(a)
+	// Binding follows actual delivery evidence, independently of the legacy
+	// sample outcome (which still records cancellation after output as OK).
+	canceled := a.client || errors.Is(a.ctx.Err(), context.Canceled)
+	success := !canceled && a.ctx.Err() == nil && err == nil && a.failure == nil &&
+		(!a.expectTerminal || a.terminal) && !a.benignIncomplete &&
+		(result == nil || !result.PartialFailure && (result.UpstreamTerminalEvent == "" || result.UpstreamTerminalEvent == "response.completed" || result.UpstreamTerminalEvent == "response.done"))
+
+	noteOpenAIStickyAttemptOutcome(a, success)
 	// This is the sole mapping from send evidence to scheduler outcomes.
 	if a.client || a.ctx.Err() != nil || errors.Is(err, context.Canceled) {
 		if a.first {
@@ -250,11 +269,13 @@ func FinishSchedAttemptAtHandlerExit(ctx context.Context) {
 	if a == nil {
 		return
 	}
-	if ctx.Err() != nil {
+	if errors.Is(ctx.Err(), context.Canceled) {
 		a.cancel()
+		CompleteOpenAIStickyChange(ctx, a.accountID, false, true)
 		return
 	}
 	a.finishUnfinished()
+	CompleteOpenAIStickyChange(ctx, a.accountID, false, false)
 }
 func (a *schedAttemptCapture) finishUnfinished() {
 	if a == nil {
@@ -264,6 +285,7 @@ func (a *schedAttemptCapture) finishUnfinished() {
 	defer a.mu.Unlock()
 	if !a.done {
 		a.done = true
+		noteOpenAIStickyAttemptOutcome(a, false)
 		a.attempt.FinishOther("unfinished")
 		a.state.ClearCurrentAttemptIf(a)
 	}
@@ -343,10 +365,11 @@ func finishSchedRead(c *gin.Context, err error) {
 	if c == nil || c.Request == nil {
 		return
 	}
-	if errors.Is(err, io.EOF) {
-		err = nil
+	// EOF may precede buffered delivery or a protocol conversion's final
+	// output. The forwarding function owns successful completion.
+	if !errors.Is(err, io.EOF) {
+		currentSchedAttempt(c.Request.Context()).noteError(err)
 	}
-	currentSchedAttempt(c.Request.Context()).finish(nil, err)
 }
 
 func cancelSchedClient(c *gin.Context) {
@@ -380,12 +403,18 @@ func (t *schedWSTurnCapture) finish(result *OpenAIForwardResult, err error) {
 		err = errors.New("missing terminal event")
 	}
 	t.active.finish(result, err)
+	if t.active != nil {
+		FinishOpenAIStickyForward(t.active.ctx, t.active.accountID, result, err)
+	}
 	t.active = nil
 }
 func (t *schedWSTurnCapture) cancel() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.active.cancel()
+	if t.active != nil {
+		CompleteOpenAIStickyChange(t.active.ctx, t.active.accountID, false, true)
+	}
 }
 
 func (a *schedAttemptCapture) markTerminal() {

@@ -1,188 +1,57 @@
 {
-  "account": {
-    "id": 479,
-    "name": "…",
-    "priority": 2,
-    "rate": 0.075,
-    "concurrency": 100,
-    "in_flight": 3
-  },
-  "at": "2026-11-11T12:01:30Z",
+  "account": { "id": 479, "name": "acc-03", "priority": 2, "rate": 0.075, "concurrency": 100, "in_flight": 3 },
+  "at": "2026-11-11T12:00:00Z",
   "stale": false,
   "global_enabled": true,
-  "tests_enabled": true,
+  "status": "normal",
+  "stop": null,
   "reset_at": null,
-  "models": [
-    {
-      "model": "gpt-6.1-sol",
-      "request_model": "gpt-6.1-sol",
-      "samples": 200,
-      "sessions": 41,
-      "from": "2026-11-11T10:08:00Z",
-      "to": "2026-11-11T12:01:22Z",
-      "ttfo": {
-        "n": 150,
-        "sessions": 38,
-        "timeouts": 6,
-        "p90_ms": 12400,
-        "p90_timeout": false,
-        "fail_bound_ms": 11100,
-        "fail_bound_timeout": false,
-        "by_class": [
-          {
-            "class": "light",
-            "n": 31,
-            "p90_ms": 3900
-          },
-          {
-            "class": "regular",
-            "n": 62,
-            "p90_ms": 12400
-          },
-          {
-            "class": "heavy",
-            "n": 30,
-            "p90_ms": 15600
-          },
-          {
-            "class": "xheavy",
-            "n": 27,
-            "p90_ms": 17500
-          }
-        ]
-      },
-      "error": {
-        "n": 194,
-        "sessions": 41,
-        "bad": 1,
-        "rate": 0.005,
-        "lcb": 0.0009
-      },
-      "cache": {
-        "turns": 120,
-        "sessions": 30,
-        "ratio": 0.81
-      },
-      "test": {
-        "id": "…",
-        "at": "2026-11-11T11:58:10Z",
-        "running": false,
-        "done": true,
-        "abort_reason": "",
-        "auto": true,
-        "kind": "full",
-        "clean": true,
-        "tiers": [
-          {
-            "tier": "small",
-            "ttfo_ms": [
-              3100,
-              2900
-            ],
-            "cache_ratio": 0.99,
-            "faults": 0,
-            "timeouts": 0
-          },
-          {
-            "tier": "medium",
-            "ttfo_ms": [
-              5200,
-              4900
-            ],
-            "cache_ratio": 0.98,
-            "faults": 0,
-            "timeouts": 0
-          },
-          {
-            "tier": "large",
-            "ttfo_ms": [
-              7900,
-              8600
-            ],
-            "cache_ratio": 0.97,
-            "faults": 0,
-            "timeouts": 0
-          }
-        ],
-        "input_tokens": 626000,
-        "cached_tokens": 414000,
-        "output_tokens": 2900
-      }
-    }
-  ],
   "groups": [
     {
       "group_id": 53,
-      "name": "…",
-      "gate_enabled": true,
-      "policy": {
-        "ttft_seconds": 10,
-        "max_error_rate": 0.05,
-        "min_cache_ratio": 0.9,
-        "takeover_idle_seconds": 0
-      },
-      "override": null,
+      "name": "晨星组",
+      "policy": { "enabled": true, "ttft_seconds": 10, "max_error_rate": 0.05, "min_cache_ratio": 0.7, "takeover_idle_seconds": 900 },
+      "exemption": null,
       "by_model": [
         {
           "model": "gpt-6.1-sol",
-          "state": "cooling",
-          "level": 3,
-          "reason": "speed",
-          "since": "2026-11-11T11:59:30Z",
-          "until": "2026-11-11T12:04:30Z",
-          "waiting_test": false,
-          "testing": false,
-          "ttfo": {
-            "verdict": "fail",
-            "from": "real",
-            "n": 150,
-            "p90_ms": 12400,
-            "p90_timeout": false,
-            "limit_ms": 10000
-          },
-          "error": {
-            "verdict": "pass",
-            "from": "real",
-            "n": 194,
-            "rate": 0.005,
-            "limit": 0.05
-          },
-          "cache": {
-            "verdict": "fail",
-            "from": "real",
-            "n": 120,
-            "ratio": 0.81,
-            "limit": 0.9
-          }
+          "failing": true,
+          "dims": ["ttfo"],
+          "level": 2,
+          "since": "2026-11-11T11:50:00Z",
+          "until": "2026-11-11T12:30:00Z",
+          "other_group_ids": [],
+          "exempt": false,
+          "ttfo": { "scope": "own", "window_min": 30, "n": 42, "bad": 11, "lcb": 0.15, "verdict": "fail" },
+          "error": { "scope": "own", "window_min": 60, "n": 88, "bad": 2, "lcb": 0.003, "verdict": "pass" },
+          "cache": { "scope": "merged", "window_min": 120, "n": 12, "ratio": 0.62, "lcb": null, "verdict": "short" }
+        }
+      ]
+    },
+    {
+      "group_id": 54,
+      "name": "北辰组",
+      "policy": { "enabled": true, "ttft_seconds": 15, "max_error_rate": 0.08, "min_cache_ratio": 0.6, "takeover_idle_seconds": -1 },
+      "exemption": null,
+      "by_model": [
+        {
+          "model": "gpt-6.1-sol",
+          "failing": false,
+          "dims": [],
+          "level": 0,
+          "since": null,
+          "until": null,
+          "other_group_ids": [],
+          "exempt": false,
+          "ttfo": { "scope": "own", "window_min": 60, "n": 0, "bad": 0, "lcb": null, "verdict": "short" },
+          "error": { "scope": "merged", "window_min": 60, "n": 120, "bad": 3, "lcb": 0.008, "verdict": "pass" },
+          "cache": { "scope": "merged", "window_min": 60, "n": 40, "ratio": 0.81, "lcb": null, "verdict": "pass" }
         }
       ]
     }
   ],
-  "all_groups_override": null,
   "auto_states": [
-    {
-      "key": "model_limit:gpt-6-astra",
-      "kind": "model_limit",
-      "scope": "model",
-      "model": "gpt-6-astra",
-      "until": "2026-11-11T12:01:50Z",
-      "count": null,
-      "shared": 0,
-      "clearable": true,
-      "why": ""
-    }
+    { "key": "model_limit:gpt-6-astra", "kind": "model_limit", "scope": "model", "model": "gpt-6-astra", "until": "2026-11-11T12:01:50Z", "count": null, "shared": 0, "clearable": true, "why": "" }
   ],
-  "recent_attempts": [
-    {
-      "at": "2026-11-11T12:01:22Z",
-      "group_id": 53,
-      "model": "gpt-6.1-sol",
-      "class": "heavy",
-      "stream": true,
-      "warm": true,
-      "ttfo_ms": 18200,
-      "outcome": "ok",
-      "detail": ""
-    }
-  ]
+  "exemptions": []
 }

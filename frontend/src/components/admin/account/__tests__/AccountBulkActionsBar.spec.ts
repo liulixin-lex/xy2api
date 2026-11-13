@@ -40,11 +40,11 @@ describe('AccountBulkActionsBar', () => {
     expect(wrapper.emitted('select-all-results')).toHaveLength(1)
   })
 
-  it('groups the actions as 恢复 后排 豁免 测试 | 启用调度 停止调度 | 编辑 更多, without 批量更新', () => {
+  it('groups the actions as 恢复 豁免 | 启用调度 停止调度 | 编辑 更多, without 批量更新', () => {
     const wrapper = mountBar()
     const actions = wrapper.findAll('[data-test="bulk-actions"] > *').map(el => (el.element.tagName === 'SPAN' ? '|' : el.text()))
     expect(actions).toEqual([
-      'admin.schedQuality.action.reset', 'admin.schedQuality.action.demote', 'admin.schedQuality.action.exempt', 'admin.schedQuality.action.test', '|',
+      'admin.schedQuality.action.reset', 'admin.schedQuality.action.exempt', '|',
       'admin.accounts.bulkActions.enableScheduling', 'admin.accounts.bulkActions.disableScheduling', '|',
       'admin.accounts.bulkActions.edit', 'common.more'
     ])
@@ -71,12 +71,12 @@ describe('AccountBulkActionsBar', () => {
     }
   })
 
-  it('greys only 恢复 while a recovery runs, and all four quality actions while a quality batch runs', async () => {
+  it('greys only 恢复 while a recovery runs, and every quality action while a quality batch runs', async () => {
     const wrapper = mountBar({ recoverBusy: true })
-    const disabled = () => ['reset', 'demote', 'exempt', 'test'].map(action => wrapper.get(`[data-test="bulk-sched-${action}"]`).attributes('disabled') !== undefined)
-    expect(disabled()).toEqual([true, false, false, false])
+    const disabled = () => ['reset', 'exempt'].map(action => wrapper.get(`[data-test="bulk-sched-${action}"]`).attributes('disabled') !== undefined)
+    expect(disabled()).toEqual([true, false])
     expect(wrapper.get('[data-test="bulk-sched-reset"]').attributes('aria-busy')).toBe('true')
     await wrapper.setProps({ recoverBusy: false, schedBusy: true })
-    expect(disabled()).toEqual([true, true, true, true])
+    expect(disabled()).toEqual([true, true])
   })
 })

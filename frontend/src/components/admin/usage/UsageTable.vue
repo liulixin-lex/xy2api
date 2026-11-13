@@ -245,22 +245,15 @@
           </div>
         </template>
 
-        <!-- 合并首字/总耗时的健康度列：左侧色条上端随首字档、下端随总耗时档，中段(40%-60%)短渐变过渡，便于纵向扫视整体健康状况 -->
+        <!-- 首字与总耗时：首字超过该组首字上限（ttfo_over）时为黄色，其余默认色 -->
         <template #cell-latency="{ row }">
-          <div class="flex items-stretch gap-2">
-            <span
-              class="w-1 shrink-0 rounded-full"
-              :class="row.first_token_ms != null
-                ? ['bg-gradient-to-b from-40% to-60%', LATENCY_BAR_FROM_CLASSES[firstTokenSeverity(row.first_token_ms)], LATENCY_BAR_TO_CLASSES[durationSeverity(row.duration_ms ?? 0)]]
-                : LATENCY_BAR_CLASSES[durationSeverity(row.duration_ms ?? 0)]"
-              aria-hidden="true"
-            ></span>
+          <div>
             <div class="grid grid-cols-[max-content_max-content] items-baseline gap-x-2 gap-y-0.5 text-xs">
               <span class="text-gray-400 dark:text-gray-500">{{ t('usage.latencyFirstToken') }}</span>
-              <span v-if="row.first_token_ms != null" class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(row.first_token_ms)]">{{ formatDuration(row.first_token_ms) }}</span>
+              <span v-if="row.first_token_ms != null" :class="['font-medium tabular-nums', firstTokenClass(row)]">{{ formatDuration(row.first_token_ms) }}</span>
               <span v-else class="text-gray-400 dark:text-gray-500">-</span>
               <span class="text-gray-400 dark:text-gray-500">{{ t('usage.latencyDuration') }}</span>
-              <span class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[durationSeverity(row.duration_ms ?? 0)]">{{ formatDuration(row.duration_ms) }}</span>
+              <span class="font-medium tabular-nums text-gray-900 dark:text-gray-100">{{ formatDuration(row.duration_ms) }}</span>
               <template v-if="props.showTokenSpeed && hasUsageTokenMetrics(row)">
                 <span class="text-gray-500 dark:text-gray-400" :title="t('usage.outputTpsHint')">{{ t('usage.outputTps') }}</span>
                 <span data-testid="usage-token-speed" class="whitespace-nowrap font-medium tabular-nums text-gray-700 dark:text-gray-300" :title="t('usage.outputTpsHint')">{{ formatTokenSpeed(row) }}</span>
@@ -269,8 +262,39 @@
           </div>
         </template>
 
-        <template #cell-created_at="{ value }">
-          <span class="text-sm text-gray-600 dark:text-gray-400">{{ formatDateTime(value) }}</span>
+        <template #cell-created_at="{ row, value }">
+          <span class="inline-flex items-center gap-1">
+            <button
+              v-if="expandable && row.gateway_request_id"
+              type="button"
+              class="sq-focus -ml-1 inline-flex h-6 w-6 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-dark-700 dark:hover:text-gray-200"
+              :aria-expanded="expanded.has(row.gateway_request_id)"
+              :aria-label="t('admin.schedQuality.usage.attempts')"
+              data-usage-expand
+              @click.stop="toggleExpanded(row.gateway_request_id)"
+            ><Icon :name="expanded.has(row.gateway_request_id) ? 'chevronDown' : 'chevronRight'" size="xs" /></button>
+            <span class="text-sm text-gray-600 dark:text-gray-400">{{ formatDateTime(value) }}</span>
+          </span>
+        </template>
+
+        <template #cell-result="{ row }">
+          <UsageResultCell :row="row" />
+        </template>
+
+        <template #cell-first_token="{ row }">
+          <span :class="['sq-num text-sm', firstTokenClass(row)]">{{ row.first_token_ms != null ? formatDuration(row.first_token_ms) : '—' }}</span>
+        </template>
+
+        <template #cell-duration="{ row }">
+          <span class="sq-num text-sm text-gray-900 dark:text-gray-100">{{ row.duration_ms != null ? formatDuration(row.duration_ms) : '—' }}</span>
+        </template>
+
+        <template #cell-cache="{ row }">
+          <span class="sq-num text-sm text-gray-900 dark:text-gray-100">{{ formatCacheRatio(row) }}</span>
+        </template>
+
+        <template #row-detail="{ row }">
+          <UsageAttempts v-if="expandable && row.gateway_request_id && expanded.has(row.gateway_request_id)" :gateway-request-id="row.gateway_request_id" :at="row.created_at" />
         </template>
 
         <template #cell-request_id="{ row }">
@@ -554,7 +578,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { formatDateTime, formatReasoningEffort, reasoningEffortValuesEqual } from '@/utils/format'
@@ -562,14 +586,6 @@ import { formatCacheTokens, formatMultiplier } from '@/utils/formatters'
 import { formatTokenPricePerMillion } from '@/utils/usagePricing'
 import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
 import { resolveUsageRequestType } from '@/utils/usageRequestType'
-import {
-  LATENCY_BAR_CLASSES,
-  LATENCY_BAR_FROM_CLASSES,
-  LATENCY_BAR_TO_CLASSES,
-  LATENCY_TEXT_CLASSES,
-  durationSeverity,
-  firstTokenSeverity,
-} from '@/utils/latencyHealth'
 import {
   BILLING_MODE_TOKEN,
   getBillingModeLabel,
@@ -604,7 +620,9 @@ function accountBilled(row: { total_cost?: number | null; account_stats_cost?: n
 }
 
 
-import { formatCacheHitRate, formatTokenSpeed, hasUsageTokenMetrics } from '@/utils/usageMetrics'
+import { cacheReadRatio, formatCacheHitRate, formatTokenSpeed, hasUsageTokenMetrics } from '@/utils/usageMetrics'
+import UsageResultCell from './UsageResultCell.vue'
+import UsageAttempts from './UsageAttempts.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import IpGeoCell from '@/components/common/IpGeoCell.vue'
@@ -628,6 +646,8 @@ interface Props {
   showFallbackOrigin?: boolean
   /** 嵌入统一卡片内使用：去掉自身卡片外观 */
   flat?: boolean
+  /** 管理端：行可展开，列出这条请求试过的每个号 */
+  expandable?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -640,7 +660,8 @@ const props = withDefaults(defineProps<Props>(), {
   showAccountBilling: true,
   showUpstreamEndpoint: true,
   showFallbackOrigin: false,
-  flat: false
+  flat: false,
+  expandable: false
 })
 const emit = defineEmits<{
   userClick: [userID: number, email?: string]
@@ -654,6 +675,15 @@ const copiedRequestId = ref<string | null>(null)
 const showAccountBilling = props.showAccountBilling
 const showUpstreamEndpoint = props.showUpstreamEndpoint
 const ipGeoBatchLoading = ref(false)
+
+// 展开的请求（按网关请求号）；首字超过该组首字上限为黄色（FINAL §6，契约 §6.2）。
+const expanded = reactive(new Set<string>())
+const toggleExpanded = (id: string) => (expanded.has(id) ? expanded.delete(id) : expanded.add(id))
+const firstTokenClass = (row: AdminUsageLog) => (row.ttfo_over ? 'text-amber-600 dark:text-amber-400' : 'text-gray-900 dark:text-gray-100')
+const formatCacheRatio = (row: AdminUsageLog) => {
+  const ratio = cacheReadRatio(row)
+  return ratio == null ? '—' : `${Math.round(ratio)}%`
+}
 
 const showIpGeoToolbar = computed(() => props.columns.some((col) => col.key === 'ip_address'))
 
