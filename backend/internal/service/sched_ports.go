@@ -43,7 +43,10 @@ type SchedAttemptStart struct {
 	SessionKey, RequestID string
 	Test                  *SchedTestAttempt
 }
-type SchedAttemptUsage struct{ PromptTokens, CacheReadTokens int }
+type SchedAttemptUsage struct {
+	// PromptTokens is total input; InputTokens excludes cache reads and writes.
+	PromptTokens, InputTokens, CacheReadTokens, CacheCreationTokens int
+}
 type SchedAttempt interface { // never nil; a disabled recorder returns a no-op handle
 	MarkFirstOutput(at time.Time)  // first call wins
 	FinishOK(u *SchedAttemptUsage) // nil when usage is unknown

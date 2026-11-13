@@ -1,86 +1,65 @@
 import { onScopeDispose, reactive, ref } from 'vue'
-import { useI18n } from 'vue-i18n'
 import schedQualityAPI from '@/api/admin/schedQuality'
-import type { Account } from '@/types'
-import type { SchedAccountSummary } from '@/types/schedQuality'
-import { useAppStore } from '@/stores/app'
+import type { SchedResetResult } from '@/types/schedQuality'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 import { markSchedChanged } from '@/composables/useSchedLayers'
-import { activeStreamOnly, type AccountWithCapability } from '@/utils/accountCapability'
-import { IQ_GATE_KEY_PREFIX } from '@/components/admin/account/iqCheckPresentation'
 
-// "Recover state" (contract delta F): one click runs the existing reset, one toast tells the result. The row menu,
-// the drawer and the temporary-pause dialog share one lock per account with the batch recovery; it holds until the
-// request and every refresh after it are done: the page's (row, summary, list) and the open drawer's.
+// 恢复 (FINAL §5, contract §6.5): one click or a batch, any time. Each account keeps one result line (what was
+// cleared, what is left) until it is closed or the account is recovered again. The row button, the drawer and the batch
+// share one lock per account; it holds until the request and the refreshes after it are done.
 
-export type RecoverableRow = Pick<Account, 'status' | 'rate_limit_reset_at' | 'overload_until' | 'temp_unschedulable_until' | 'extra'> &
-  Pick<AccountWithCapability, 'capability_learned'>
+export interface RecoveryLine {
+  /** When the answer came in (ms). */
+  at: number
+  /** null: the request itself failed. */
+  result: SchedResetResult | null
+}
 
 const CONCURRENCY = 4
 
-/** Ends after `now`; missing or invalid is none, equal to `now` has ended. */
-function activeUntil(value: string | null | undefined, now: number) {
-  if (!value) return false
-  const at = Date.parse(value)
-  return Number.isFinite(at) && at > now
-}
-
-/**
- * Whether a recovery can clear something on this account (F1), from the list row and its quality summary only.
- * Manual off, schedulable off, quota, expiry, IQ gate, parent block, overrides and recent stats are not counted.
- * Without a summary yet, only the row decides.
- */
-export function canRecover(row: RecoverableRow, summary: Pick<SchedAccountSummary, 'groups'> | undefined, now: number): boolean {
-  if (row.status === 'error') return true
-  if ([row.rate_limit_reset_at, row.overload_until, row.temp_unschedulable_until].some((at) => activeUntil(at, now))) return true
-  const limits = row.extra?.model_rate_limits ?? {}
-  if (Object.entries(limits).some(([key, info]) => !key.startsWith(IQ_GATE_KEY_PREFIX) && activeUntil(info?.rate_limit_reset_at, now))) return true
-  if (activeStreamOnly(row.capability_learned, now).length) return true
-  return (summary?.groups.cooling ?? 0) > 0
-}
-
 const pending = reactive(new Set<number>())
 const batchRunning = ref(false)
+/** Result lines by account id, shared by the list and the drawer. */
+export const recoveryLines = reactive(new Map<number, RecoveryLine>())
 
 /** Account ids being recovered, single or in a batch. */
 export const isRecovering = (id: number) => pending.has(id)
 
+/** The recovery went through with nothing failed. */
+export const recoveredFully = (line: RecoveryLine) => !!line.result && line.result.failed.length === 0
+
+async function resetOne(id: number): Promise<RecoveryLine> {
+  try {
+    return { at: Date.now(), result: await schedQualityAPI.reset(id) }
+  } catch {
+    return { at: Date.now(), result: null }
+  }
+}
+
 export function useAccountRecovery() {
-  const { t } = useI18n()
-  const appStore = useAppStore()
   const { canManage } = useAdminPermission('accounts')
   let disposed = false
   onScopeDispose(() => { disposed = true })
 
-  /** One account: the reset, one toast, then `refresh` (the page's row, summary, list) with the open drawer's reload. */
-  async function recover(account: { id: number; name: string }, refresh?: () => Promise<unknown> | void) {
-    if (!canManage.value || pending.has(account.id)) return
-    pending.add(account.id)
+  /** One account: the reset, its result line, then `refresh` (the page's row and summary) with the open drawer's reload. */
+  async function recover(id: number, refresh?: () => Promise<unknown> | void) {
+    if (!canManage.value || pending.has(id)) return
+    pending.add(id)
     try {
-      let ok = false
-      try {
-        // Kept items (session avoidance and the like) are not failures.
-        ok = (await schedQualityAPI.reset(account.id)).failed.length === 0
-      } catch {
-        // A request error is a failure.
-      }
-      if (ok) appStore.showSuccess(t('admin.schedQuality.recover.ok', { name: account.name }))
-      else appStore.showError(t('admin.schedQuality.recover.failed', { name: account.name }))
+      recoveryLines.set(id, await resetOne(id))
       await Promise.all([markSchedChanged(), refresh?.()])
     } finally {
-      pending.delete(account.id)
+      pending.delete(id)
     }
   }
 
   /**
    * A batch, four at a time. Accounts already being recovered are left out. Dispatch stops when accounts:manage is
-   * withdrawn or the page goes; answers already on their way still count. One toast with the counts, then `refresh`.
-   * Returns the ids that recovered and the ids that failed; the rest were not run.
+   * withdrawn or the page goes; answers already on their way still count. Returns the ids that recovered fully.
    */
   async function recoverMany(ids: number[], refresh?: () => Promise<unknown> | void) {
     const recovered: number[] = []
-    const failed: number[] = []
-    if (batchRunning.value || !canManage.value) return { recovered, failed }
+    if (batchRunning.value || !canManage.value) return recovered
     const queue = ids.filter((id) => !pending.has(id))
     queue.forEach((id) => pending.add(id))
     batchRunning.value = true
@@ -88,27 +67,20 @@ export function useAccountRecovery() {
     const worker = async () => {
       while (next < queue.length && canManage.value && !disposed) {
         const id = queue[next++]
-        try {
-          if ((await schedQualityAPI.reset(id)).failed.length === 0) recovered.push(id)
-          else failed.push(id)
-        } catch {
-          failed.push(id)
-        }
+        const line = await resetOne(id)
+        recoveryLines.set(id, line)
+        if (recoveredFully(line)) recovered.push(id)
       }
     }
     try {
       await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker))
-      if (recovered.length || failed.length) {
-        if (failed.length) appStore.showError(t('admin.schedQuality.recover.batchPartial', { ok: recovered.length, failed: failed.length }))
-        else appStore.showSuccess(t('admin.schedQuality.recover.batchOk', { n: recovered.length }))
-      }
       await Promise.all([markSchedChanged(), refresh?.()])
     } finally {
       queue.forEach((id) => pending.delete(id))
       batchRunning.value = false
     }
-    return { recovered, failed }
+    return recovered
   }
 
-  return { recover, recoverMany, isRecovering, batchRunning }
+  return { recover, recoverMany, batchRunning }
 }

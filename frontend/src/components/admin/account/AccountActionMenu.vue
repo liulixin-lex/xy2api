@@ -11,19 +11,7 @@
       >
         <div class="py-1">
           <template v-if="account">
-            <!-- 恢复状态只在恢复解得了某个状态时出现，排第一；其后检测与查看 → 账号操作 → 删除。文字统一中性色，图标统一灰色 -->
-            <template v-if="canManage && recoverable">
-              <button
-                :class="[ITEM, 'aria-disabled:cursor-not-allowed aria-disabled:opacity-50']"
-                :aria-disabled="recovering || undefined"
-                data-test="menu-recover-state"
-                @click="onRecover"
-              >
-                <Icon name="sync" size="sm" :class="ICON" />
-                {{ t('admin.accounts.recoverState') }}
-              </button>
-              <div :class="DIVIDER"></div>
-            </template>
+            <!-- 检测与查看 → 账号操作 → 删除。文字统一中性色，图标统一灰色（恢复在行内） -->
             <button v-if="canManage" :class="ITEM" @click="$emit('test', account); $emit('close')">
               <Icon name="play" size="sm" :class="ICON" />
               {{ t('admin.accounts.testConnection') }}
@@ -104,12 +92,8 @@ const props = defineProps<{
   show: boolean
   account: Account | null
   anchorRect: DOMRect | null
-  /** A recovery can clear something on this account (contract delta F1). */
-  recoverable?: boolean
-  /** Its recovery is still running; the item stays first but does nothing. */
-  recovering?: boolean
 }>()
-const emit = defineEmits(['iq-run', 'iq-records', 'close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow', 'manage-openai-totp', 'delete'])
+const emit = defineEmits(['iq-run', 'iq-records', 'close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'reset-quota', 'set-privacy', 'create-spark-shadow', 'manage-openai-totp', 'delete'])
 const { t } = useI18n()
 const auth = useAuthStore()
 const { canManage } = useAdminPermission('accounts')
@@ -180,11 +164,6 @@ const hasAccountActions = computed(() =>
   (canManage.value && supportsPrivacy.value) ||
   (canManage.value && hasQuotaLimit.value)
 )
-
-function onRecover() {
-  if (!props.recovering) emit('recover-state', props.account)
-  emit('close')
-}
 
 // A sub-layer of the overlay stack (design spec 0.2): while open, Escape closes it before the layer or page
 // below, re-renders below keep their hands off its focus, and a dialog opening above closes it.
