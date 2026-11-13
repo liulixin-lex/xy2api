@@ -238,7 +238,7 @@ func TestSchedAdminClearErrorInvalidatesOAuthToken(t *testing.T) {
 					out, err := s.Reset(context.Background(), 1, 9)
 					require.NoError(t, err)
 					require.Empty(t, out.Failed)
-					require.Contains(t, out.Cleared, SchedResetItem{Key: "error", Kind: "error"})
+					require.Contains(t, out.Cleared, "error")
 				} else {
 					ok, err := s.ClearAutoState(context.Background(), 1, "error", 9)
 					require.NoError(t, err)
@@ -527,7 +527,7 @@ func TestSchedAdminResetClearsCountersPreservesSharedAndManual(t *testing.T) {
 	result, err := s.Reset(context.Background(), 1, 7)
 	require.NoError(t, err)
 	require.Empty(t, result.Failed)
-	require.Equal(t, e.resetAt, result.ResetAt)
+	require.Equal(t, schedAdminTime(e.resetAt), result.ResetAt)
 	require.Zero(t, counter.count)
 	require.Empty(t, runtime.postOutput.failures)
 	require.Empty(t, runtime.sameSiteHold.accounts)
@@ -541,21 +541,8 @@ func TestSchedAdminResetClearsCountersPreservesSharedAndManual(t *testing.T) {
 	require.Contains(t, gateway.openaiProxyStreamCircuit.entries, proxy)
 	_, ok := gateway.openaiOAuth429RetryStartedAt.Load(int64(1))
 	require.False(t, ok)
-	cleared := map[string]bool{}
-	for _, item := range result.Cleared {
-		cleared[item.Key] = true
-	}
-	for _, key := range []string{"quality", "same_site", "post_output", "model_transient:m", "temp", "model_limit:old"} {
-		require.True(t, cleared[key], key)
-	}
-	preserved := map[string]string{}
-	for _, x := range result.Preserved {
-		preserved[x.Key] = x.Why
-	}
-	require.Equal(t, "shared_proxy", preserved["proxy_circuit"])
-	require.Equal(t, "iq_gate", preserved["iq:m"])
-	require.Equal(t, "manual_off", preserved["manual_off"])
-	require.Equal(t, "expires_within_10m", preserved["session_avoid"])
+	require.ElementsMatch(t, []string{"quality", "session_avoid", "same_site", "post_output", "model_transient", "temp_balance", "model_limit"}, result.Cleared)
+	require.ElementsMatch(t, []SchedAdminResetKept{{Kind: "proxy_circuit", Until: schedAdminTime(e.resetAt.Add(time.Hour))}, {Kind: "iq_gate"}, {Kind: "manual_off"}}, result.Kept)
 }
 func TestSchedAdminResetContinuesAfterFailureAndClearLocalCallback(t *testing.T) {
 	s, e, r := schedAdminFixture()
@@ -568,7 +555,9 @@ func TestSchedAdminResetContinuesAfterFailureAndClearLocalCallback(t *testing.T)
 	s.d.RateLimit = &RateLimitService{openAI403CounterCache: counter}
 	result, err := s.Reset(context.Background(), 1, 7)
 	require.NoError(t, err)
-	require.Len(t, result.Failed, 2)
+	require.ElementsMatch(t, []SchedAdminResetFailed{{Kind: "quality"}, {Kind: "rate_limit"}}, result.Failed)
+	require.Nil(t, result.ResetAt)
+	require.NotContains(t, result.Cleared, "session_avoid")
 	require.Nil(t, r.rows[1].OverloadUntil)
 	require.NotNil(t, r.rows[1].RateLimitResetAt)
 	require.Zero(t, counter.count)
@@ -661,8 +650,8 @@ func TestSchedAdminResetPreservesReadonlyAfterReread(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, result.Failed)
 	found := map[string]bool{}
-	for _, item := range result.Preserved {
-		found[item.Key] = true
+	for _, item := range result.Kept {
+		found[item.Kind] = true
 	}
 	require.True(t, found["expired"])
 	require.True(t, found["quota_auto_pause"])
@@ -682,7 +671,7 @@ func TestSchedAdminCodexTicketPreserved(t *testing.T) {
 	require.Error(t, err)
 	result, err := s.Reset(context.Background(), 1, 7)
 	require.NoError(t, err)
-	require.Contains(t, result.Preserved, SchedResetItem{Key: key, Kind: "codex_ticket", Why: "codex_ticket"})
+	require.Contains(t, result.Kept, SchedAdminResetKept{Kind: "codex_ticket"})
 	require.Contains(t, a.Extra, codexAccountTicketConfigKey)
 }
 
@@ -738,16 +727,16 @@ func TestSchedAdminResetCountersOnlyReportFailures(t *testing.T) {
 	s.d.RateLimit = &RateLimitService{openAI403CounterCache: c403, timeoutCounterCache: timeout, openAIAPIKeyHealth: health}
 	out, err := s.Reset(context.Background(), 1, 7)
 	require.NoError(t, err)
-	require.Equal(t, []SchedResetItem{{Key: "quality", Kind: "quality"}}, out.Cleared)
+	require.Equal(t, []string{"quality", "session_avoid"}, out.Cleared)
 	require.Empty(t, out.Failed)
 	c403.err, timeout.err, health.err = errors.New("403 failed"), errors.New("timeout failed"), errors.New("health failed")
 	out, err = s.Reset(context.Background(), 1, 7)
 	require.NoError(t, err)
-	require.Equal(t, []SchedResetItem{{Key: "quality", Kind: "quality"}}, out.Cleared)
-	require.ElementsMatch(t, []SchedResetItem{
-		{Key: "temp", Kind: "temp_403", Error: "403 failed"},
-		{Key: "temp", Kind: "temp_stream_timeout", Error: "timeout failed"},
-		{Key: "temp", Kind: "temp_health", Error: "health failed"},
+	require.Equal(t, []string{"quality", "session_avoid"}, out.Cleared)
+	require.ElementsMatch(t, []SchedAdminResetFailed{
+		{Kind: "temp_403"},
+		{Kind: "temp_stream_timeout"},
+		{Kind: "temp_health"},
 	}, out.Failed)
 }
 
@@ -762,6 +751,8 @@ func TestSchedAdminTempSourcesClearOnlyOwnCounters(t *testing.T) {
 		{"balance", "balance:exhausted[step=3]: empty"},
 		{"transient", "transient:transport failure"},
 		{"auth", "auth:expired token"},
+		{"rule", `{"source":"unknown-source"}`},
+		{"rule", `unrecognized reason`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.source, func(t *testing.T) {
@@ -961,4 +952,18 @@ func TestSchedAdminSameSiteListChecksSwitchAndGeneration(t *testing.T) {
 			require.Empty(t, state.Why)
 		}
 	}
+}
+
+func TestSchedAdminResetFailureRemovesEarlierClearedKind(t *testing.T) {
+	s, _, r := schedAdminFixture()
+	r.rows[1].Status, r.rows[1].ErrorMessage = StatusError, "auth:403 rejected"
+	s.d.RateLimit = &RateLimitService{openAI403CounterCache: &schedAdminCounter{err: errors.New("private infrastructure detail")}}
+	out, err := s.Reset(context.Background(), 1, 7)
+	require.NoError(t, err)
+	require.Equal(t, []SchedAdminResetFailed{{Kind: "error"}}, out.Failed)
+	require.NotContains(t, out.Cleared, "error")
+	require.Contains(t, out.Cleared, "session_avoid")
+	raw, err := json.Marshal(out)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "private infrastructure detail")
 }
