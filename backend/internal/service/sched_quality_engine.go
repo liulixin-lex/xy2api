@@ -221,6 +221,11 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) (cycleErr error) 
 	after := s.processedAt
 	if after.IsZero() {
 		after = now.Add(-5 * time.Minute)
+	} else if late := s.window.newFinishedAt; !late.IsZero() && !late.After(after) {
+		after = late.Add(-time.Microsecond)
+		if floor := now.Add(-5 * time.Minute); after.Before(floor) {
+			after = floor
+		}
 	}
 	locked, err := s.store.RunCycle(ctx, func(tx SchedQualityTx) error {
 		var err error
@@ -281,6 +286,7 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) (cycleErr error) 
 			}
 		}
 	}
+	s.window.newFinishedAt = time.Time{}
 	notifications = s.publish(d, states, overrides, resets, now)
 	return nil
 }
