@@ -243,27 +243,18 @@ type SchedAdminAccountDetailRecentAttempts struct {
 }
 
 type SchedAdminReset struct {
-	ResetAt   *string                    `json:"reset_at"`
-	Cleared   []SchedAdminResetCleared   `json:"cleared"`   // Empty lists must be [].
-	Preserved []SchedAdminResetPreserved `json:"preserved"` // Empty lists must be [].
-	Failed    []SchedAdminResetFailed    `json:"failed"`    // Empty lists must be [].
+	AccountID int64                   `json:"account_id"`
+	ResetAt   *string                 `json:"reset_at"`
+	Cleared   []string                `json:"cleared"`
+	Kept      []SchedAdminResetKept   `json:"kept"`
+	Failed    []SchedAdminResetFailed `json:"failed"`
 }
-
-type SchedAdminResetCleared struct {
-	Key  string `json:"key"`
-	Kind string `json:"kind"`
+type SchedAdminResetKept struct {
+	Kind  string  `json:"kind"`
+	Until *string `json:"until"`
 }
-
-type SchedAdminResetPreserved struct {
-	Key  string `json:"key"`
-	Kind string `json:"kind"`
-	Why  string `json:"why"`
-}
-
 type SchedAdminResetFailed struct {
-	Key   string `json:"key"`
-	Kind  string `json:"kind"`
-	Error string `json:"error"`
+	Kind string `json:"kind"`
 }
 
 type SchedAdminTest struct {
