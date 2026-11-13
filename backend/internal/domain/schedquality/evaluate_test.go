@@ -174,7 +174,7 @@ func TestEvaluateSampleEligibility(t *testing.T) {
 		{"non-stream", func(s *AttemptSample) { s.Stream = false }, 0, 0, 1, 0},
 		{"first-output-timeout", func(s *AttemptSample) { s.Outcome = OutcomeTimeout; s.TTFOMs = nil }, 1, 1, 1, 1},
 		{"after-output-failure", func(s *AttemptSample) { s.Outcome = OutcomeAccountFault }, 1, 0, 1, 1},
-		{"other-is-error", func(s *AttemptSample) { s.Outcome = OutcomeOther }, 1, 0, 1, 1},
+		{"legacy-other-excluded", func(s *AttemptSample) { s.Outcome = OutcomeOther }, 1, 0, 0, 0},
 		{"canceled-excludes-error-only", func(s *AttemptSample) { s.ClientCanceled = true; s.Outcome = OutcomeOther }, 1, 0, 0, 0},
 		{"exact-limit", func(s *AttemptSample) { s.TTFOMs = sampleInt(1000) }, 1, 0, 1, 0},
 		{"wrong-account", func(s *AttemptSample) { s.AccountID++ }, 0, 0, 0, 0},
@@ -193,7 +193,7 @@ func TestEvaluateSampleEligibility(t *testing.T) {
 	}
 	rows := evaluationSamples(250, 10, time.Minute)
 	for i := range rows {
-		rows[i].Outcome = OutcomeOther
+		rows[i].Outcome = OutcomeAccountFault
 	}
 	e := evaluateFixture(append(rows, rows...))
 	if e.Error.N != 250 || e.Error.Bad != 250 || e.Verdicts.Error != VerdictFail {

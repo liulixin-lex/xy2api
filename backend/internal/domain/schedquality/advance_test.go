@@ -29,7 +29,7 @@ func TestAdvanceCooldownLadder(t *testing.T) {
 	} {
 		prev := evaluationState()
 		prev.Level = tc.level
-		prev.EvidenceSince = evaluationNow.Add(-time.Hour)
+		prev.EvidenceSince = evaluationNow.Add(-15 * time.Minute)
 		next, _ := Advance(prev, evaluationPolicy(), slowEvaluationSamples(20, 10, 10*time.Minute), evaluationNow)
 		if next.State != StateCooling || next.Level != tc.wantLevel || next.Until.Sub(evaluationNow) != tc.duration || next.EvidenceSince != prev.EvidenceSince {
 			t.Fatalf("level %d: %+v", tc.level, next)
@@ -46,7 +46,7 @@ func TestAdvanceNormalDecayBoundary(t *testing.T) {
 		{29 * time.Minute, 5, 120 * time.Minute}, {30 * time.Minute, 1, 20 * time.Minute},
 	} {
 		prev := evaluationState()
-		prev.Level, prev.Since = 4, evaluationNow.Add(-tc.normal)
+		prev.Level, prev.EvidenceSince = 4, evaluationNow.Add(-tc.normal)
 		next, _ := Advance(prev, evaluationPolicy(), slowEvaluationSamples(20, 10, 10*time.Minute), evaluationNow)
 		if next.Level != tc.level || next.Until.Sub(evaluationNow) != tc.duration {
 			t.Fatalf("normal %v: %+v", tc.normal, next)

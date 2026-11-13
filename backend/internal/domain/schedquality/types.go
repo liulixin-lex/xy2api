@@ -23,6 +23,7 @@ const (
 	OutcomeTimeout
 	OutcomeAccountFault
 	OutcomeOther
+	OutcomeCanceled
 )
 const (
 	StateNormal State = iota
@@ -82,6 +83,8 @@ func (o Outcome) String() string {
 		return "account_fault"
 	case OutcomeOther:
 		return "other"
+	case OutcomeCanceled:
+		return "canceled"
 	}
 	return ""
 }
@@ -215,6 +218,7 @@ type StateRow struct {
 	Reason        Reason
 	Since, Until  time.Time
 	EvidenceSince time.Time
+	Basis         *DecisionBasis
 }
 type Inputs struct {
 	Policy       Policy
