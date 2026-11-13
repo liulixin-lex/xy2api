@@ -6,15 +6,14 @@ import { getActivePinia } from 'pinia'
 import AccountsView from '../AccountsView.vue'
 import { useAdminAccessStore } from '@/stores/adminAccess'
 import type { AdminModuleId, AdminLevel } from '@/types/adminAccess'
-import type { AccountRecentStats, AccountRecentStatsBatch, SchedAccountSummary } from '@/types/schedQuality'
+import type { SchedAccountSummary } from '@/types/schedQuality'
 import summaryFixture from '@/__tests__/fixtures/schedQuality/account_summary.json'
 import { closeSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
 
-const { listAccounts, getById, getRecentStats, sched } = vi.hoisted(() => ({
+const { listAccounts, getById, sched } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
   getById: vi.fn(),
-  getRecentStats: vi.fn(),
-  sched: { summary: vi.fn(), reset: vi.fn(), startTest: vi.fn(), setOverride: vi.fn(), accountDetail: vi.fn(), groupBoard: vi.fn(), getGroupPolicy: vi.fn() }
+  sched: { summary: vi.fn(), reset: vi.fn(), setOverride: vi.fn(), accountDetail: vi.fn(), groupBoard: vi.fn(), getGroupPolicy: vi.fn() }
 }))
 
 vi.mock('@/api/admin/schedQuality', () => ({ default: sched }))
@@ -25,7 +24,6 @@ vi.mock('@/api/admin', () => ({
       listWithEtag: vi.fn(),
       getById,
       getBatchTodayStats: vi.fn().mockResolvedValue({ stats: {} }),
-      getRecentStats,
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       getUpstreamBalances: vi.fn().mockResolvedValue({ balances: [] }),
       delete: vi.fn(),
@@ -47,7 +45,7 @@ vi.mock('vue-i18n', async () => {
   }
 })
 
-// Renders rows in the order given, with the recent status, groups and actions cells.
+// Renders rows in the order given, with the groups, membership and actions cells.
 const DataTableStub = defineComponent({
   props: ['columns', 'data'],
   setup(props, { slots }) {
@@ -56,7 +54,6 @@ const DataTableStub = defineComponent({
       ...(props.data as Array<{ id: number }>).map((row) =>
         h('div', { 'data-test': 'row', 'data-id': row.id }, [
           slots['cell-select']?.({ row }),
-          h('span', { 'data-test': 'recent' }, slots['cell-sq_recent']?.({ row })),
           h('span', { 'data-test': 'groups' }, slots['cell-sq_groups']?.({ row })),
           h('span', { 'data-test': 'membership' }, slots['cell-groups']?.({ row })),
           h('span', { 'data-test': 'actions' }, slots['cell-actions']?.({ row }))
@@ -88,7 +85,7 @@ const BulkBarStub = defineComponent({
     return () => h('div', [
       h('button', { 'data-test': 'select-page', onClick: () => emit('select-page') }),
       h('button', { 'data-test': 'select-all-results', onClick: () => emit('select-all-results') }),
-      ...['reset', 'demote', 'test'].map((action) => h('button', {
+      ...['reset', 'exempt'].map((action) => h('button', {
         'data-test': `bulk-sched-${action}`,
         disabled: props.schedBusy,
         onClick: (event: MouseEvent) => emit('sched-action', action, event.currentTarget)
@@ -102,7 +99,7 @@ const FiltersStub = defineComponent({
   props: ['filters'],
   emits: ['update:filters', 'change'],
   setup(props, { emit }) {
-    return () => h('button', { 'data-test': 'filter-cooling', onClick: () => { emit('update:filters', { ...props.filters, sched_quality: 'cooling' }); emit('change') } })
+    return () => h('button', { 'data-test': 'filter-cooling', onClick: () => { emit('update:filters', { ...props.filters, sched_quality: 'substandard' }); emit('change') } })
   }
 })
 
@@ -125,7 +122,6 @@ function mountView(stubs: Record<string, unknown> = {}) {
         TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>' },
         DataTable: DataTableStub,
         AccountActionMenu: true,
-        AccountStatusIndicator: true,
         AccountTableActions: true,
         AccountTableFilters: FiltersStub,
         AccountBulkActionsBar: BulkBarStub,
@@ -137,7 +133,6 @@ function mountView(stubs: Record<string, unknown> = {}) {
         AccountStatsModal: true,
         ScheduledTestsPanel: true,
         SyncFromCrsModal: true,
-        TempUnschedStatusModal: true,
         ErrorPassthroughRulesModal: true,
         TLSFingerprintProfilesModal: true,
         CreateAccountModal: true,
@@ -163,14 +158,6 @@ function seedOperator(modules: Partial<Record<AdminModuleId, AdminLevel>>) {
   access.loaded = true
 }
 
-const stats = (id: number, ttftMs: number): AccountRecentStats => ({
-  account_id: id,
-  ttft: { p50_ms: ttftMs, n: 30, tier: 'good' },
-  error: { rate: 0, bad: 0, n: 100, tier: 'good' },
-  cache: { ratio: 0.9, n: 40, tier: 'good' }
-})
-const batch = (items: AccountRecentStats[]): AccountRecentStatsBatch => ({ as_of: '2026-11-12T12:00:00Z', items })
-
 const rowCell = (id: number, cell: string) => document.querySelector<HTMLElement>(`[data-test="row"][data-id="${id}"] [data-test="${cell}"]`)!
 
 beforeEach(() => {
@@ -181,7 +168,6 @@ beforeEach(() => {
   listAccounts.mockReset().mockResolvedValue({ items: [account(1, 'acc-sol'), account(2, 'acc-astra'), account(3, 'acc-slow'), account(4, 'acc-empty')], total: 4, page: 1, page_size: 20, pages: 1 })
   sched.summary.mockReset().mockResolvedValue({ at: '', stale: false, global_enabled: true, accounts: summaries() })
   sched.accountDetail.mockReset().mockReturnValue(new Promise(() => {}))
-  getRecentStats.mockReset().mockImplementation(async (ids: number[]) => batch(ids.map((id) => stats(id, 2800))))
 })
 afterAll(() => { delete document.documentElement.dataset.motion })
 
@@ -196,59 +182,17 @@ describe('AccountsView quality columns', () => {
     wrapper.unmount()
   })
 
-  it('loads the summary for managers even with the groups column hidden', async () => {
+  it('loads the summary for every reader, even with the groups column hidden: the status column comes from it', async () => {
     localStorage.setItem('account-hidden-columns', JSON.stringify(['sq_groups']))
-    const wrapper = mountView()
-    await flushPromises()
-    expect(sched.summary).toHaveBeenCalledTimes(1)
-    wrapper.unmount()
-
-    sched.summary.mockClear()
     seedOperator({ accounts: 'view' })
     const viewer = mountView()
     await flushPromises()
-    expect(sched.summary).not.toHaveBeenCalled()
+    expect(sched.summary).toHaveBeenCalledTimes(1)
     viewer.unmount()
   })
 
-  // Scenario 26: a slow response for an earlier page never replaces the current page's recent status.
-  it('keeps the current page\'s recent status when an earlier, slower response arrives late', async () => {
-    let answerFirst: (value: AccountRecentStatsBatch) => void = () => {}
-    getRecentStats
-      .mockImplementationOnce(() => new Promise((resolve) => { answerFirst = resolve }))
-      .mockImplementationOnce(async (ids: number[]) => batch(ids.map((id) => stats(id, 4100))))
-    const wrapper = mountView()
-    await flushPromises()
-    expect(rowCell(1, 'recent').querySelectorAll('[data-test="recent-skeleton"]')).toHaveLength(3)
-
-    listAccounts.mockResolvedValueOnce({ items: [account(5, 'acc-five')], total: 5, page: 2, page_size: 4, pages: 2 })
-    await wrapper.get('[data-test="next-page"]').trigger('click')
-    await flushPromises()
-    expect(getRecentStats.mock.calls.map(([ids]) => ids)).toEqual([[1, 2, 3, 4], [5]])
-    expect(rowCell(5, 'recent').querySelector('[data-test="recent-ttft"]')!.textContent).toBe('4.1s')
-
-    answerFirst(batch([1, 2, 3, 4, 5].map((id) => stats(id, 12600))))
-    await flushPromises()
-    expect(rowCell(5, 'recent').querySelector('[data-test="recent-ttft"]')!.textContent).toBe('4.1s')
-    wrapper.unmount()
-  })
-
-  it('requests no recent status while the column is hidden and loads it once the column is shown', async () => {
-    localStorage.setItem('account-hidden-columns', JSON.stringify(['sq_recent']))
-    const wrapper = mountView()
-    await flushPromises()
-    expect(getRecentStats).not.toHaveBeenCalled()
-    expect(wrapper.get('[data-test="columns"]').text().split(',')).not.toContain('sq_recent')
-
-    ;(wrapper.vm as unknown as { toggleColumn: (key: string) => void }).toggleColumn('sq_recent')
-    await flushPromises()
-    expect(getRecentStats).toHaveBeenCalledWith([1, 2, 3, 4], expect.anything())
-    expect(rowCell(1, 'recent').querySelector('[data-test="recent-ttft"]')!.textContent).toBe('2.8s')
-    wrapper.unmount()
-  })
-
-  // Scenario 36: a read-only viewer gets no write entry; without usage records the recent status is plain text.
-  it('gives a view-only operator no write entries and no usage link without the usage permission', async () => {
+  // Scenario 36: a read-only viewer gets no write entry.
+  it('gives a view-only operator no write entries', async () => {
     const tools = { AccountTableActions: { template: '<div><slot name="after" /></div>' }, Teleport: true }
     seedOperator({ accounts: 'view' })
     const viewer = mountView(tools)
@@ -257,8 +201,6 @@ describe('AccountsView quality columns', () => {
     expect(viewer.find('[data-test="row-more"]').exists()).toBe(true)
     await viewer.get('button[title="admin.accounts.moreActions"]').trigger('click')
     expect(viewer.find('[data-test="tools-bulk-edit-filtered"]').exists()).toBe(false)
-    expect(rowCell(1, 'recent').querySelector('a')).toBeNull()
-    expect(rowCell(1, 'recent').querySelector('[data-test="recent-stats"]')!.tagName).toBe('DIV')
     // Membership is plain badges for a viewer: no button, no edit name, no Tab stop (red team FA-2).
     const membership = rowCell(1, 'membership').querySelector<HTMLElement>('[data-testid="account-groups-cell"]')!
     expect(membership.textContent).toContain('晨星组')
@@ -266,13 +208,12 @@ describe('AccountsView quality columns', () => {
     expect(rowCell(1, 'membership').querySelector('button')).toBeNull()
     viewer.unmount()
 
-    seedOperator({ accounts: 'manage', usage: 'view' })
+    seedOperator({ accounts: 'manage' })
     const manager = mountView(tools)
     await flushPromises()
     expect(manager.find('[data-test="row-edit"]').exists()).toBe(true)
     await manager.get('button[title="admin.accounts.moreActions"]').trigger('click')
     expect(manager.find('[data-test="tools-bulk-edit-filtered"]').exists()).toBe(true)
-    expect(rowCell(1, 'recent').querySelector('a')!.getAttribute('href')).toBe('/admin/usage?account_id=1')
     expect(rowCell(1, 'membership').querySelector('button[data-testid="account-groups-cell"]')!.getAttribute('aria-label')).toBe('admin.groupCategories.editAccountGroupsAria:{"name":"acc-sol"}')
     manager.unmount()
   })
@@ -299,7 +240,7 @@ describe('AccountsView quality columns', () => {
     closeSchedDrawer()
     await flushPromises()
     expect(listAccounts).toHaveBeenCalledTimes(1)
-    expect(listAccounts.mock.calls[0][2]).toMatchObject({ sched_quality: 'cooling' })
+    expect(listAccounts.mock.calls[0][2]).toMatchObject({ sched_quality: 'substandard' })
     wrapper.unmount()
   })
 
@@ -308,13 +249,13 @@ describe('AccountsView quality columns', () => {
     listAccounts.mockResolvedValue({ items: many, total: 6, page: 1, page_size: 20, pages: 1 })
     const pending: Array<() => void> = []
     sched.setOverride.mockReset().mockImplementation(() => new Promise<void>((resolve) => pending.push(resolve)))
-    sched.startTest.mockReset().mockResolvedValue({ tests: [{ model: 'm', test_id: 't', started: true, why: '' }] })
+    sched.reset.mockReset().mockResolvedValue({ reset_at: null, cleared: [], preserved: [], failed: [] })
     const wrapper = mountView()
     await flushPromises()
     const bar = (selector: string) => wrapper.findComponent(BulkBarStub).get(selector)
     await selectFirstRow()
     await bar('[data-test="select-page"]').trigger('click')
-    await bar('[data-test="bulk-sched-demote"]').trigger('click')
+    await bar('[data-test="bulk-sched-exempt"]').trigger('click')
     await flushPromises()
     document.querySelector<HTMLElement>('[data-sq-popover] .btn-primary')!.click()
     await flushPromises()
@@ -323,23 +264,22 @@ describe('AccountsView quality columns', () => {
     // Close the results with four answers outstanding, then try a new batch at once.
     document.querySelector('[data-sq-batch-results]')!.closest('.modal-content')!.querySelector<HTMLElement>('.modal-footer .btn-secondary')!.click()
     await flushPromises()
-    expect(bar('[data-test="bulk-sched-test"]').attributes('disabled')).toBeDefined()
-    ;(bar('[data-test="bulk-sched-test"]').element as HTMLButtonElement).disabled = false
-    await bar('[data-test="bulk-sched-test"]').trigger('click')
+    expect(bar('[data-test="bulk-sched-reset"]').attributes('disabled')).toBeDefined()
+    ;(bar('[data-test="bulk-sched-reset"]').element as HTMLButtonElement).disabled = false
+    await bar('[data-test="bulk-sched-reset"]').trigger('click')
     await flushPromises()
-    const testConfirm = () => Array.from(document.querySelectorAll<HTMLElement>('[data-sq-batch-confirm]'))
-      .find((el) => el.textContent?.trim() === 'admin.schedQuality.action.test')
-    expect(testConfirm()).toBeUndefined()
+    const resetConfirm = () => document.querySelector<HTMLElement>('[data-sq-batch-confirm]')
+    expect(resetConfirm()).toBeNull()
 
     pending.forEach((answer) => answer())
     await flushPromises()
     expect(sched.setOverride).toHaveBeenCalledTimes(4)
-    expect(bar('[data-test="bulk-sched-test"]').attributes('disabled')).toBeUndefined()
-    await bar('[data-test="bulk-sched-test"]').trigger('click')
+    expect(bar('[data-test="bulk-sched-reset"]').attributes('disabled')).toBeUndefined()
+    await bar('[data-test="bulk-sched-reset"]').trigger('click')
     await flushPromises()
-    testConfirm()!.click()
+    resetConfirm()!.click()
     await flushPromises()
-    expect(sched.startTest.mock.calls.map(([id]) => id)).toEqual([1, 2, 3, 4, 5, 6])
+    expect(sched.reset.mock.calls.map(([id]) => id).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6])
     expect(sched.setOverride).toHaveBeenCalledTimes(4)
     wrapper.unmount()
   })
@@ -359,7 +299,7 @@ describe('AccountsView quality columns', () => {
     await (wrapper.vm as unknown as { openBulkEditFiltered: () => Promise<void> }).openBulkEditFiltered()
     await flushPromises()
     expect(listAccounts.mock.calls.length).toBeGreaterThanOrEqual(2)
-    for (const [, , filters] of listAccounts.mock.calls) expect(filters).toMatchObject({ sched_quality: 'cooling' })
+    for (const [, , filters] of listAccounts.mock.calls) expect(filters).toMatchObject({ sched_quality: 'substandard' })
     wrapper.unmount()
   })
 })

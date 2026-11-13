@@ -90,7 +90,13 @@ func schedUsage(u *OpenAIUsage) *SchedAttemptUsage {
 	if u == nil || u.InputTokens <= 0 {
 		return nil
 	}
-	return &SchedAttemptUsage{PromptTokens: u.InputTokens, CacheReadTokens: u.CacheReadInputTokens}
+	read, creation := max(u.CacheReadInputTokens, 0), max(u.CacheCreationInputTokens, 0)
+	return &SchedAttemptUsage{
+		PromptTokens:        u.InputTokens,
+		InputTokens:         max(u.InputTokens-read-creation, 0),
+		CacheReadTokens:     read,
+		CacheCreationTokens: creation,
+	}
 }
 func (a *schedAttemptCapture) noteUsage(u *OpenAIUsage) {
 	if a == nil {
@@ -238,7 +244,7 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 		}
 	}
 	if failure != nil {
-		category := resilience.Classify(*failure, nil).Category
+		category := classifyUpstreamOutcome(*failure).Category
 		switch category {
 		case resilience.CategoryBalance, resilience.CategoryAuth, resilience.CategoryRateLimitReset, resilience.CategoryRateLimit, resilience.CategoryCapacityShed, resilience.CategoryModelUnsupported, resilience.CategoryClientError, resilience.CategoryUpstreamRequestRestriction:
 			a.attempt.FinishOther(string(category))
