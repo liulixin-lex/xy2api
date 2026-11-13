@@ -13,11 +13,3 @@ func (s *SettingService) SchedQualityEnabled(ctx context.Context) bool {
 	}
 	return s.getGatewayForwardingSettingsCached(ctx).schedQualityEnabled
 }
-
-// SchedQualityTestEnabled returns the automatic test switch, defaulting to enabled.
-func (s *SettingService) SchedQualityTestEnabled(ctx context.Context) bool {
-	if s == nil || s.settingRepo == nil {
-		return true
-	}
-	return s.getGatewayForwardingSettingsCached(ctx).schedQualityTestEnabled
-}

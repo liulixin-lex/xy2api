@@ -63,7 +63,8 @@ type SchedAttemptRecorder interface {
 }
 type SchedAttemptStore interface {
 	InsertBatch(ctx context.Context, rows []schedquality.AttemptSample) error
-	LoadStartedSince(ctx context.Context, since time.Time) ([]schedquality.AttemptSample, error)
+	LoadFinishedSince(ctx context.Context, since time.Time) ([]schedquality.AttemptSample, error)
+	LoadPreviousAttempts(ctx context.Context, current []schedquality.AttemptSample) (map[string]*schedquality.AttemptSample, error)
 	// LoadInsertedAfter returns rows with inserted_at > after, ordered by inserted_at
 	// then attempt_id. It completes the final timestamp group even beyond limit.
 	// maxInserted is the greatest returned inserted_at, or zero when no rows are

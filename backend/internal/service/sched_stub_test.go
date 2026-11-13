@@ -56,17 +56,6 @@ func (f *fakeSchedAttemptStore) InsertBatch(_ context.Context, rows []schedquali
 	}
 	return nil
 }
-func (f *fakeSchedAttemptStore) LoadStartedSince(_ context.Context, since time.Time) ([]schedquality.AttemptSample, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	var result []schedquality.AttemptSample
-	for _, r := range f.Rows {
-		if r.StartedAt.After(since) {
-			result = append(result, r)
-		}
-	}
-	return result, nil
-}
 func (f *fakeSchedAttemptStore) LoadInsertedAfter(_ context.Context, after time.Time, limit int) ([]schedquality.AttemptSample, time.Time, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
