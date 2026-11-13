@@ -27,6 +27,7 @@ type selectionSession struct {
 	marks      *fullMarks
 	bindingTTL time.Duration
 	recheck    func(context.Context, *Account) *Account
+	resetAt    func(int64) time.Time
 }
 
 func (s *selectionSession) takeoverReady(ctx context.Context, view schedquality.View, groupID int64, key string, owner int64, now time.Time) bool {
@@ -85,11 +86,11 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 	if pending := pendingOpenAIStickyChange(ctx); pending != nil && pending.key == key {
 		expected.LegacyKey = pending.expected.LegacyKey
 	}
-	avoided, err := s.store.SessionAvoid(ctx, groupID, strings.TrimSpace(sessionHash))
+	avoided, err := sessionAvoidAfterReset(ctx, s.store, groupID, strings.TrimSpace(sessionHash), s.resetAt)
 	if err != nil {
 		return nil
 	}
-	failedTargets, err := s.store.SessionAvoid(ctx, groupID, stickyChangeAvoidSession(sessionHash))
+	failedTargets, err := sessionAvoidAfterReset(ctx, s.store, groupID, stickyChangeAvoidSession(sessionHash), s.resetAt)
 	if err != nil {
 		return nil
 	}
@@ -166,6 +167,7 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 		resilience.StateFrom(ctx).SetStickyChange(&openAIStickyChange{
 			groupID: groupID, session: strings.TrimSpace(sessionHash), key: key, model: model,
 			kind: kind, expected: expected, target: latest.ID, ttl: s.bindingTTL, cache: s.cache,
+			resetAt: s.resetAt,
 		})
 		return attachSelectionProfitGate(ctx, &AccountSelectionResult{Account: latest, Acquired: true, ReleaseFunc: slot.ReleaseFunc})
 	}

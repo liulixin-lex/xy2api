@@ -71,12 +71,13 @@ var recordSessionBindingFailureScript = redis.NewScript(`
 if redis.call('GET', KEYS[2]) ~= ARGV[4] or redis.call('GET', KEYS[3]) ~= ARGV[5] then return 0 end
 ` + resilienceAvoidAddLua)
 
-func (c *gatewayCache) RecordSessionBindingFailure(ctx context.Context, groupID int64, bindingKey, avoidSession string, expected service.StickySessionBinding, target int64, ttl time.Duration) (bool, error) {
+func (c *gatewayCache) RecordSessionBindingFailure(ctx context.Context, groupID int64, bindingKey, avoidSession string, expected service.StickySessionBinding, target int64, ttl time.Duration, resetAt ...time.Time) (bool, error) {
 	if expected.AccountID <= 0 || expected.Generation == "" || target <= 0 || bindingKey == "" || avoidSession == "" || ttl <= 0 {
 		return false, errors.New("invalid versioned sticky binding failure")
 	}
 	keys := append([]string{sessionKey(resilienceSessionAvoidPrefix, groupID, avoidSession)}, sessionBindingKeys(groupID, bindingKey)...)
+	keys = append(keys, sessionKey(resilienceSessionAvoidWrittenPrefix, groupID, avoidSession))
 	now := time.Now()
-	n, err := recordSessionBindingFailureScript.Run(ctx, c.rdb, keys, target, now.Add(ttl).UnixMilli(), now.UnixMilli(), expected.AccountID, expected.Generation).Int64()
+	n, err := recordSessionBindingFailureScript.Run(ctx, c.rdb, keys, target, now.Add(ttl).UnixMilli(), now.UnixMilli(), expected.AccountID, expected.Generation, avoidResetMillis(resetAt)).Int64()
 	return n == 1, err
 }
