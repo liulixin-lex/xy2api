@@ -734,10 +734,10 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 		)
 	`, buildWhere(conditions))
 
-	return r.readUsageStats(ctx, query, args, filters, false)
+	return r.readUsageStats(ctx, query, args, filters, nil)
 }
 
-func (r *usageLogRepository) readUsageStats(ctx context.Context, query string, args []any, filters UsageLogFilters, requestFacts bool) (*UsageStats, error) {
+func (r *usageLogRepository) readUsageStats(ctx context.Context, query string, args []any, filters UsageLogFilters, requestFacts *usagestats.AdminRequestStats) (*UsageStats, error) {
 	stats := &UsageStats{}
 	var totalAccountCost float64
 	useAccountCostForEndpoint := filters.AccountID > 0 && filters.UserID == 0 && filters.APIKeyID == 0
@@ -771,7 +771,7 @@ func (r *usageLogRepository) readUsageStats(ctx context.Context, query string, a
 			&accountCost,
 			&averageDurationMs,
 		}
-		if requestFacts {
+		if requestFacts != nil {
 			targets = append(targets, &success, &rescued, &failed, &p50, &cacheRatio)
 		}
 		if err := rows.Scan(targets...); err != nil {
@@ -786,8 +786,10 @@ func (r *usageLogRepository) readUsageStats(ctx context.Context, query string, a
 
 		switch {
 		case inboundGrouped == 1 && upstreamGrouped == 1:
-			stats.Success, stats.Rescued, stats.Failed = success, rescued, failed
-			stats.TTFOP50Ms, stats.CacheRatio = p50, cacheRatio
+			if requestFacts != nil {
+				requestFacts.Success, requestFacts.Rescued, requestFacts.Failed = success, rescued, failed
+				requestFacts.TTFOP50Ms, requestFacts.CacheRatio = p50, cacheRatio
+			}
 			stats.TotalRequests = requests
 			stats.TotalInputTokens = inputTokens
 			stats.TotalOutputTokens = outputTokens
