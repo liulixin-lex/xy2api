@@ -510,3 +510,6 @@ var _ SchedTestRunner = (*fakeSchedTestRunner)(nil)
 var _ schedquality.View = (*fakeSchedView)(nil)
 var _ SchedTestForwarder = (*fakeSchedTestForwarder)(nil)
 var _ SchedTestAdmission = (*fakeSchedTestAdmission)(nil)
+
+func (*fakeSchedView) GroupEnabled(int64) bool { return true }
+func (*fakeSchedView) ResetAt(int64) time.Time { return time.Time{} }
