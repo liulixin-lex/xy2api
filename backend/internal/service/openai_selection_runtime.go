@@ -131,15 +131,15 @@ func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenA
 	if req.Platform != PlatformOpenAI || req.SessionHash == "" || openAINoStickyMigration(ctx) || openAISelectionExempt(ctx) || openAISelectionManualOnly(ctx) {
 		return nil
 	}
-	cache, ok := s.cache.(OpenAIStickyRebindCache)
-	if !ok {
+	cache, ok := s.cache.(OpenAIStickyVersionedCache)
+	if !ok || s.resilience == nil {
 		return nil
 	}
 	now, view := s.selectionNow(), s.selectionView()
 	gid := derefGroupID(req.GroupID)
 	migrate := schedquality.StandingOf(selectionState(view, gid, owner, req.RequestedModel), selectionAuto(view, now), now) == schedquality.StandBack
 	bindings, _ := s.cache.(gatewaySessionBindingReader)
-	session := selectionSession{view: s.selectionView, now: s.selectionNow, slots: s, cache: cache, cacheKey: s.openAISessionCacheKey, bindings: bindings, marks: &s.selectionFullMarks, bindingTTL: s.openAIStickyBindingTTL(req.GroupID)}
+	session := selectionSession{view: s.selectionView, now: s.selectionNow, slots: s, cache: cache, store: s.resilience.store, cacheKey: s.openAISessionCacheKey, bindings: bindings, marks: &s.selectionFullMarks, bindingTTL: s.openAIStickyBindingTTL(req.GroupID)}
 	if !migrate && !session.takeoverReady(ctx, view, gid, s.openAISessionCacheKey(req.SessionHash), owner.ID, now) {
 		return nil
 	}
@@ -182,7 +182,6 @@ func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenA
 	selection := session.selectOwner(ctx, gid, req.SessionHash, req.RequestedModel, owner, candidates, s.selectionRequest(ctx, req, loads))
 	if selection != nil {
 		resilience.StateFrom(ctx).NoteStickyBypassReason("quality_migration")
-		resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
 	}
 	return selection
 }

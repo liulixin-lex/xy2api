@@ -114,3 +114,20 @@ func TestSessionAvoidNeverShortensExistingFailureMemory(t *testing.T) {
 	require.Contains(t, avoid, int64(1))
 	require.Contains(t, avoid, int64(2))
 }
+
+func TestStickyBindingGenerationAdoptsExistingScalar(t *testing.T) {
+	client := redis.NewClient(&redis.Options{Addr: miniredis.RunT(t).Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	cache := &gatewayCache{rdb: client}
+	ctx := context.Background()
+	const session = "openai:legacy-synthetic"
+	require.NoError(t, client.Set(ctx, buildSessionKey(7, session), 101, time.Minute).Err())
+	expected, err := cache.GetSessionBinding(ctx, 7, session)
+	require.NoError(t, err)
+	require.EqualValues(t, 101, expected.AccountID)
+	require.NotEmpty(t, expected.Generation)
+	require.Equal(t, "101", client.Get(ctx, buildSessionKey(7, session)).Val(), "scalar owner format remains readable")
+	changed, err := cache.CommitSessionBinding(ctx, 7, session, expected, 102, time.Minute)
+	require.NoError(t, err)
+	require.True(t, changed)
+}

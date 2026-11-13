@@ -20,6 +20,10 @@ type selectionRuntimeRepo struct {
 	lists int
 }
 
+func (r *selectionRuntimeRepo) ListByGroup(context.Context, int64) ([]Account, error) {
+	return append([]Account(nil), r.accounts...), nil
+}
+
 func (r *selectionRuntimeRepo) ListSchedulableByGroupIDAndPlatform(ctx context.Context, group int64, platform string) ([]Account, error) {
 	r.lists++
 	return r.schedulerTestOpenAIAccountRepo.ListSchedulableByGroupIDAndPlatform(ctx, group, platform)
@@ -39,13 +43,18 @@ func (c *selectionRuntimeCache) GetSessionAccountIDWithTTL(ctx context.Context, 
 	id, err := c.GetSessionAccountID(ctx, group, key)
 	return id, c.remaining, err
 }
-func (c *selectionRuntimeCache) CompareAndSwapSessionAccountID(_ context.Context, _ int64, key string, old, next int64, _ time.Duration) (bool, error) {
+func (c *selectionRuntimeCache) CommitSessionBinding(_ context.Context, _ int64, key string, expected StickySessionBinding, next int64, _ time.Duration) (bool, error) {
 	c.casKeys = append(c.casKeys, key)
-	if c.sessionBindings[key] != old {
+	if c.sessionBindings[key] != expected.AccountID {
 		return false, nil
 	}
 	c.sessionBindings[key] = next
 	return true, nil
+}
+
+func (c *selectionRuntimeCache) GetSessionBinding(ctx context.Context, group int64, key string) (StickySessionBinding, error) {
+	id, err := c.GetSessionAccountID(ctx, group, key)
+	return StickySessionBinding{AccountID: id, Generation: "g1"}, err
 }
 
 type selectionRuntimeLoads struct {
@@ -84,7 +93,7 @@ func newSelectionRuntimeFixture(t *testing.T, accounts ...Account) *selectionRun
 	cfg.Gateway.Scheduling.StickySessionWaitTimeout = 45 * time.Second
 	cfg.Gateway.OpenAIWS.SessionHashReadOldFallback = true
 	f.loads = &selectionRuntimeLoads{schedulerTestConcurrencyCache: schedulerTestConcurrencyCache{acquiredIDs: &f.attempts, releasedIDs: &f.releases}}
-	f.svc = &OpenAIGatewayService{cfg: cfg, cache: f.cache, accountRepo: f.repo, concurrencyService: NewConcurrencyService(f.loads)}
+	f.svc = &OpenAIGatewayService{cfg: cfg, cache: f.cache, accountRepo: f.repo, resilience: NewResilienceService(nil, newMemResilienceStore()), concurrencyService: NewConcurrencyService(f.loads)}
 	now := time.Now()
 	f.view = selectionTestView(now)
 	board := NewOpenAISelectionBoard(f.svc, func() schedquality.View { return f.view })
@@ -97,6 +106,7 @@ func (f *selectionRuntimeFixture) selectNow(t *testing.T, ctx context.Context, s
 	result, _, err := f.svc.SelectAccountWithSchedulerForCapability(ctx, ptrInt64Selection(7), "", session, "m", excluded, OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityResponses, false, false, true, PlatformOpenAI)
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	CompleteOpenAIStickyChange(ctx, result.Account.ID, true, false)
 	t.Cleanup(func() {
 		if result.ReleaseFunc != nil {
 			result.ReleaseFunc()
@@ -167,8 +177,8 @@ func TestOpenAISelectionRuntimeSessionCacheAndOwnerSlotOrder(t *testing.T) {
 					require.Equal(t, int64(10), f.cache.sessionBindings[key])
 					require.Zero(t, f.cache.sessionBindings["openai:session"])
 					if mode != "idle" {
-						require.Equal(t, []int64{1, 10}, f.attempts)
-						require.Equal(t, []int64{1}, f.releases)
+						require.Equal(t, []int64{10}, f.attempts)
+						require.Empty(t, f.releases)
 					}
 				} else {
 					require.Equal(t, int64(1), result.Account.ID)

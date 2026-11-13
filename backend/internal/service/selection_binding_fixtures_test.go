@@ -21,13 +21,18 @@ type selectionRebindCache struct {
 func (c *selectionRebindCache) RefreshSessionTTL(context.Context, int64, string, time.Duration) error {
 	return nil
 }
-func (c *selectionRebindCache) CompareAndSwapSessionAccountID(_ context.Context, _ int64, key string, owner, target int64, _ time.Duration) (bool, error) {
+func (c *selectionRebindCache) CommitSessionBinding(_ context.Context, _ int64, key string, expected StickySessionBinding, target int64, _ time.Duration) (bool, error) {
 	c.calls++
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.err != nil || c.fail || c.bindings[key] != owner {
+	if c.err != nil || c.fail || c.bindings[key] != expected.AccountID {
 		return false, c.err
 	}
 	c.bindings[key] = target
 	return true, nil
+}
+
+func (c *selectionRebindCache) GetSessionBinding(ctx context.Context, group int64, key string) (StickySessionBinding, error) {
+	id, err := c.GetSessionAccountID(ctx, group, key)
+	return StickySessionBinding{AccountID: id, Generation: "g1"}, err
 }

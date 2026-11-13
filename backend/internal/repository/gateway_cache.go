@@ -120,23 +120,6 @@ func (c *gatewayCache) DeleteSessionAccountIDIfOwnerAndReport(ctx context.Contex
 
 var _ service.OpenAIStickyAtomicCache = (*gatewayCache)(nil)
 
-var compareAndSwapStickyAccountScript = redis.NewScript(`
-if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
-redis.call('SET', KEYS[1], ARGV[2], 'PX', ARGV[3])
-redis.call('SET', KEYS[2], ARGV[4], 'PX', ARGV[3])
-return 1
-`)
-
-func (c *gatewayCache) CompareAndSwapSessionAccountID(ctx context.Context, groupID int64, key string, owner, target int64, ttl time.Duration) (bool, error) {
-	if owner <= 0 || target <= 0 || key == "" || ttl <= 0 {
-		return false, errors.New("invalid sticky binding replacement")
-	}
-	changed, err := compareAndSwapStickyAccountScript.Run(ctx, c.rdb, sessionBindingKeys(groupID, key), owner, target, ttl.Milliseconds(), uuid.NewString()).Int64()
-	return changed == 1, err
-}
-
-var _ service.OpenAIStickyRebindCache = (*gatewayCache)(nil)
-
 var refreshSessionBindingScript = redis.NewScript(`
 if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
 redis.call('PEXPIRE', KEYS[1], ARGV[1])

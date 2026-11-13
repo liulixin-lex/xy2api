@@ -5,12 +5,6 @@ import (
 	"time"
 )
 
-// OpenAIStickyRebindCache replaces a binding only while its owner is unchanged.
-// Both modern and legacy session hashes use the same atomic operation.
-type OpenAIStickyRebindCache interface {
-	CompareAndSwapSessionAccountID(context.Context, int64, string, int64, int64, time.Duration) (bool, error)
-}
-
 // StickySessionBinding identifies one incarnation of a session's owner.
 // Generation is opaque and must never be reused after deletion or expiry.
 type StickySessionBinding struct {

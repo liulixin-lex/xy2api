@@ -159,6 +159,9 @@ func (s *OpenAIGatewayService) getStickySessionAccountID(ctx context.Context, gr
 }
 
 func (s *OpenAIGatewayService) setStickySessionAccountID(ctx context.Context, groupID *int64, sessionHash string, accountID int64, ttl time.Duration) error {
+	if preservePendingOpenAIStickyBinding(ctx, groupID, sessionHash) {
+		return nil
+	}
 	if s.qualityOwnsSticky(ctx, groupID, sessionHash) {
 		return nil
 	}
@@ -234,6 +237,9 @@ func (s *OpenAIGatewayService) refreshStickySessionTTL(ctx context.Context, grou
 }
 
 func (s *OpenAIGatewayService) deleteStickySessionAccountID(ctx context.Context, groupID *int64, sessionHash string) error {
+	if preservePendingOpenAIStickyBinding(ctx, groupID, sessionHash) {
+		return nil
+	}
 	if s.qualityOwnsSticky(ctx, groupID, sessionHash) {
 		return nil
 	}
