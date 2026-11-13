@@ -364,12 +364,6 @@ type schedQualityPolicyV4 struct {
 	MinCacheRatio       float64 `json:"min_cache_ratio"`
 	TakeoverIdleSeconds int     `json:"takeover_idle_seconds"`
 }
-type schedQualityPolicyV3 struct {
-	Enabled           bool    `json:"enabled"`
-	MaxTTFTP90Seconds float64 `json:"max_ttft_p90_seconds"`
-	MaxErrorRate      float64 `json:"max_error_rate"`
-	MinCacheKeepRate  float64 `json:"min_cache_keep_rate"`
-}
 
 func decodeSchedQualityPolicies(raw string) (map[int64]service.SchedPolicyRecord, int64, error) {
 	root := schedQualityPolicyRoot{Groups: map[string]json.RawMessage{}}
@@ -410,29 +404,18 @@ func decodeSchedQualityPolicy(raw json.RawMessage) (service.SchedPolicyRecord, e
 	if entry == nil {
 		return record, errors.New("policy entry must be an object")
 	}
-	if raw := entry["v4"]; len(raw) > 0 && string(raw) != "null" {
-		var v schedQualityPolicyV4
-		if err := json.Unmarshal(raw, &v); err != nil {
-			return record, err
-		}
-		record.Policy = schedquality.Policy{Enabled: v.Enabled, TTFTSeconds: v.TTFTSeconds, MaxErrorRate: v.MaxErrorRate, MinCacheRatio: v.MinCacheRatio, TakeoverIdleSeconds: v.TakeoverIdleSeconds}
-	} else {
-		var v schedQualityPolicyV3
-		if raw := entry["v3"]; len(raw) > 0 && string(raw) != "null" {
-			if err := json.Unmarshal(raw, &v); err != nil {
-				return record, err
-			}
-		} else {
-			v = schedQualityPolicyV3{MaxTTFTP90Seconds: 15, MaxErrorRate: .10, MinCacheKeepRate: .50}
-			if raw := entry["enabled"]; len(raw) > 0 {
-				if err := json.Unmarshal(raw, &v.Enabled); err != nil {
-					return record, err
-				}
-			}
-		}
-		record.Policy = schedquality.Policy{Enabled: v.Enabled, TTFTSeconds: v.MaxTTFTP90Seconds, MaxErrorRate: v.MaxErrorRate, MinCacheRatio: v.MinCacheKeepRate}
-		record.FromV3 = true
+
+	rawV4 := entry["v4"]
+	if len(rawV4) == 0 || string(rawV4) == "null" {
+		record.Policy = schedquality.DefaultPolicy()
+		return record, nil
 	}
+	var v schedQualityPolicyV4
+	if err := json.Unmarshal(rawV4, &v); err != nil {
+		return record, err
+	}
+	record.Policy = schedquality.Policy{Enabled: v.Enabled, TTFTSeconds: v.TTFTSeconds, MaxErrorRate: v.MaxErrorRate, MinCacheRatio: v.MinCacheRatio, TakeoverIdleSeconds: v.TakeoverIdleSeconds}
+
 	return record, service.ValidateSchedQualityPolicy(record.Policy)
 }
 func (r *schedQualityRepository) LoadPolicies(ctx context.Context) (map[int64]service.SchedPolicyRecord, error) {
@@ -456,7 +439,10 @@ func (r *schedQualityRepository) LoadPolicies(ctx context.Context) (map[int64]se
 		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		record := policies[id]
+		record, ok := policies[id]
+		if !ok {
+			record.Policy = schedquality.DefaultPolicy()
+		}
 		record.GroupID, record.Version = id, version
 		out[id] = record
 	}

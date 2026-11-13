@@ -254,3 +254,7 @@ type View interface {
 	StateOf(groupID, accountID int64, model string) StateView
 	TakeoverIdle(groupID int64) (idle time.Duration, enabled bool)
 }
+
+func DefaultPolicy() Policy {
+	return Policy{TTFTSeconds: 15, MaxErrorRate: .10, MinCacheRatio: .5, TakeoverIdleSeconds: 900}
+}

@@ -125,6 +125,7 @@ type SchedGroupRow struct {
 	Test          schedquality.TestSummary // the tests pooled for this row (zero value when none)
 }
 type SchedQualityEngine interface {
+	PreviewPolicy(ctx context.Context, groupID int64, p schedquality.Policy) ([]SchedPolicyChange, error)
 	Start(ctx context.Context)
 	Stop()
 	Observe(sample schedquality.AttemptSample)

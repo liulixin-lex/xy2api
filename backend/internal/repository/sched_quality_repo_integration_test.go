@@ -143,7 +143,7 @@ func TestSchedQualityPolicyConflictAndPreservesRawJSON(t *testing.T) {
 	require.NoError(t, err)
 	policies, err := r.LoadPolicies(ctx)
 	require.NoError(t, err)
-	require.True(t, policies[g].FromV3)
+	require.False(t, policies[g].FromV3)
 	require.Equal(t, int64(7), policies[g].Version)
 	require.Equal(t, float64(15), policies[g].Policy.TTFTSeconds)
 	p := q.Policy{Enabled: true, TTFTSeconds: 12.5, MaxErrorRate: .05, MinCacheRatio: .8, TakeoverIdleSeconds: 900}
@@ -356,7 +356,7 @@ func TestSchedQualityInvalidPolicyEntryDoesNotBlockOtherGroups(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, p, policies[valid].Policy)
 		require.Equal(t, p, policies[validV4].Policy, "unused invalid v3 must not mask a valid v4")
-		require.Equal(t, q.Policy{}, policies[invalid].Policy)
+		require.Equal(t, q.DefaultPolicy(), policies[invalid].Policy)
 		require.Equal(t, int64(7), policies[invalid].Version)
 		saved, err := r.SavePolicy(ctx, valid, 7, p)
 		require.NoError(t, err, "an unrelated invalid entry cannot prevent CAS writes")
