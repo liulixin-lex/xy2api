@@ -1886,6 +1886,8 @@ export type UsageResult = 1 | 2 | 3 | 4
 export interface AdminUsageLog extends UsageLog {
   // Request layer (sched-v2 contract §6.1). Rows without a usage log (most failures) come from the request table;
   // rows written before the upgrade have no result (null).
+  /** usage = a usage log row, unbilled = a request without a bill; ids of the two are separate (contract §6.1). */
+  source?: 'usage' | 'unbilled'
   gateway_request_id?: string | null
   result?: UsageResult | null
   /** Account switches inside this request. */
@@ -1896,6 +1898,8 @@ export interface AdminUsageLog extends UsageLog {
   takeover?: boolean | null
   /** User-side first output above the group's line; null when the group has no line or there is no first output. */
   ttfo_over?: boolean | null
+  /** The attempt table has rows for this request (contract v1.9 §6.1); only then can the row open. */
+  has_attempts?: boolean
   // 网关韧性：无号兜底时原请求分组（服务分组见 group / group_id，仅管理员可见；用户端的 group 已是原分组）
   origin_group_id?: number | null
   origin_group_name?: string

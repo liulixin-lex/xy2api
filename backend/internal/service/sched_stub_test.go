@@ -133,6 +133,7 @@ type fakeSchedQualityStore struct {
 	lock         sync.Mutex
 	lockReleased chan struct{}
 	Rows         []schedquality.StateRow
+	Decisions    []schedquality.Decision
 	OverrideRows []SchedOverride
 	Resets       map[int64]time.Time
 	Members      map[int64][]int64
@@ -163,6 +164,7 @@ func (f *fakeSchedQualityStore) RunCycle(_ context.Context, fn func(SchedQuality
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.Rows = tx.rows
+	f.Decisions = append(f.Decisions, tx.decisions...)
 	now := f.now()
 	for _, expired := range tx.expired {
 		for i, row := range f.OverrideRows {
@@ -300,6 +302,7 @@ func (f *fakeSchedQualityStore) SavePolicy(_ context.Context, g, version int64, 
 type fakeSchedQualityTx struct {
 	store     *fakeSchedQualityStore
 	rows      []schedquality.StateRow
+	decisions []schedquality.Decision
 	overrides []SchedOverride
 	resets    map[int64]time.Time
 	expired   []SchedOverride
@@ -513,3 +516,41 @@ var _ SchedTestAdmission = (*fakeSchedTestAdmission)(nil)
 
 func (*fakeSchedView) GroupEnabled(int64) bool { return true }
 func (*fakeSchedView) ResetAt(int64) time.Time { return time.Time{} }
+
+func (f *fakeSchedQualityTx) InsertDecisions(rows []schedquality.Decision) error {
+	f.decisions = append(f.decisions, rows...)
+	return nil
+}
+func (f *fakeSchedQualityStore) DeleteDecisionsBefore(context.Context, time.Time) (int64, error) {
+	return 0, nil
+}
+
+func (f *fakeSchedAttemptStore) LoadFinishedSince(_ context.Context, since time.Time) ([]schedquality.AttemptSample, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var rows []schedquality.AttemptSample
+	for _, r := range f.Rows {
+		if !r.FinishedAt.Before(since) {
+			rows = append(rows, r)
+		}
+	}
+	return rows, nil
+}
+func (f *fakeSchedAttemptStore) LoadPreviousAttempts(_ context.Context, current []schedquality.AttemptSample) (map[string]*schedquality.AttemptSample, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make(map[string]*schedquality.AttemptSample)
+	for _, c := range current {
+		for _, r := range f.Rows {
+			if r.GroupID != c.GroupID || r.SessionKey != c.SessionKey || r.Model != c.Model || !r.StartedAt.Before(c.StartedAt) || r.StartedAt.Before(c.StartedAt.Add(-7*24*time.Hour)) {
+				continue
+			}
+			old := out[c.AttemptID]
+			if old == nil || r.StartedAt.After(old.StartedAt) || r.StartedAt.Equal(old.StartedAt) && r.AttemptID > old.AttemptID {
+				copy := r
+				out[c.AttemptID] = &copy
+			}
+		}
+	}
+	return out, nil
+}

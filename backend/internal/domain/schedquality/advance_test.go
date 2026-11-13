@@ -29,7 +29,7 @@ func TestAdvanceCooldownLadder(t *testing.T) {
 	} {
 		prev := evaluationState()
 		prev.Level = tc.level
-		prev.EvidenceSince = evaluationNow.Add(-time.Hour)
+		prev.EvidenceSince = evaluationNow.Add(-15 * time.Minute)
 		next, _ := Advance(prev, evaluationPolicy(), slowEvaluationSamples(20, 10, 10*time.Minute), evaluationNow)
 		if next.State != StateCooling || next.Level != tc.wantLevel || next.Until.Sub(evaluationNow) != tc.duration || next.EvidenceSince != prev.EvidenceSince {
 			t.Fatalf("level %d: %+v", tc.level, next)
@@ -46,7 +46,7 @@ func TestAdvanceNormalDecayBoundary(t *testing.T) {
 		{29 * time.Minute, 5, 120 * time.Minute}, {30 * time.Minute, 1, 20 * time.Minute},
 	} {
 		prev := evaluationState()
-		prev.Level, prev.Since = 4, evaluationNow.Add(-tc.normal)
+		prev.Level, prev.EvidenceSince = 4, evaluationNow.Add(-tc.normal)
 		next, _ := Advance(prev, evaluationPolicy(), slowEvaluationSamples(20, 10, 10*time.Minute), evaluationNow)
 		if next.Level != tc.level || next.Until.Sub(evaluationNow) != tc.duration {
 			t.Fatalf("normal %v: %+v", tc.normal, next)
@@ -151,7 +151,7 @@ func TestAdvanceTimedReleaseAndManualRestore(t *testing.T) {
 
 func TestAdvanceExemptionOnlyChangesPlacement(t *testing.T) {
 	next, e := Advance(evaluationState(), evaluationPolicy(), slowEvaluationSamples(6, 10, time.Minute), evaluationNow)
-	v := StateView{State: next.State, Level: next.Level, Reason: next.Reason, Verdicts: e.Verdicts,
+	v := StateView{Failing: next.State == StateCooling, State: next.State, Level: next.Level, Reason: next.Reason, Verdicts: e.Verdicts,
 		GroupOverride: OverrideRef{Mode: OverrideExempt, Expires: evaluationNow.Add(time.Minute)}}
 	if next.State != StateCooling || e.Verdicts.Speed != VerdictFail || StandingOf(v, true, evaluationNow) != StandFront || StandingOf(v, true, evaluationNow.Add(time.Minute)) != StandBack {
 		t.Fatal("exemption must preserve internal state and expire at its deadline")

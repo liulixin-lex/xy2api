@@ -21,7 +21,7 @@ type SchedQualityAdmin interface {
 	Summary(context.Context, []int64, string) (service.SchedAdminSummary, error)
 	Attention(context.Context) (service.SchedAdminAttention, error)
 	Detail(context.Context, int64) (service.SchedAdminAccountDetail, error)
-	Reset(context.Context, int64, int64) (service.SchedResetResult, error)
+	Reset(context.Context, int64, int64) (service.SchedAdminReset, error)
 	SetOverride(context.Context, service.SchedOverride) error
 	ClearOverride(context.Context, int64, int64, int64) error
 	Test(context.Context, int64, string, int64) (service.SchedAdminTest, error)
@@ -100,22 +100,8 @@ func (h *SchedQualityHandler) Reset(c *gin.Context) {
 		schedQualityReply(c, nil, e)
 		return
 	}
-	out := service.SchedAdminReset{Cleared: []service.SchedAdminResetCleared{}, Preserved: []service.SchedAdminResetPreserved{}, Failed: []service.SchedAdminResetFailed{}}
-	if !v.ResetAt.IsZero() {
-		stamp := v.ResetAt.UTC().Format(time.RFC3339Nano)
-		out.ResetAt = &stamp
-	}
-	for _, x := range v.Cleared {
-		out.Cleared = append(out.Cleared, service.SchedAdminResetCleared{Key: x.Key, Kind: x.Kind})
-	}
-	for _, x := range v.Preserved {
-		out.Preserved = append(out.Preserved, service.SchedAdminResetPreserved{Key: x.Key, Kind: x.Kind, Why: x.Why})
-	}
-	for _, x := range v.Failed {
-		out.Failed = append(out.Failed, service.SchedAdminResetFailed{Key: x.Key, Kind: x.Kind, Error: x.Error})
-	}
-	middleware.SetAuditExtra(c, map[string]any{"cleared_count": len(v.Cleared), "preserved_count": len(v.Preserved), "failed_count": len(v.Failed)})
-	schedQualityReply(c, out, nil)
+	middleware.SetAuditExtra(c, map[string]any{"cleared_count": len(v.Cleared), "kept_count": len(v.Kept), "failed_count": len(v.Failed)})
+	schedQualityReply(c, v, nil)
 }
 func (h *SchedQualityHandler) SetOverride(c *gin.Context) {
 	middleware.SetAuditAction(c, "sched_quality.override")

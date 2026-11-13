@@ -37,9 +37,8 @@ type SchedTestAttempt struct { // set only by the test runner
 }
 type SchedAttemptStart struct {
 	AccountID, GroupID    int64
-	Model, Effort         string
-	Stream, StickyWarm    bool
-	BodyBytes             int
+	Model                 string
+	Stream                bool
 	SessionKey, RequestID string
 	Test                  *SchedTestAttempt
 }
@@ -47,12 +46,15 @@ type SchedAttemptUsage struct {
 	// PromptTokens is total input; InputTokens excludes cache reads and writes.
 	PromptTokens, InputTokens, CacheReadTokens, CacheCreationTokens int
 }
-type SchedAttempt interface { // never nil; a disabled recorder returns a no-op handle
-	MarkFirstOutput(at time.Time)  // first call wins
-	FinishOK(u *SchedAttemptUsage) // nil when usage is unknown
-	FinishFault(detail string)
-	FinishTimeout(waited time.Duration)
-	FinishOther(detail string)
+type SchedAttemptFinish struct {
+	Outcome schedquality.Outcome
+	Detail  string
+	Waited  time.Duration
+	Usage   *SchedAttemptUsage
+}
+type SchedAttempt interface {
+	MarkFirstOutput(at time.Time)
+	Finish(SchedAttemptFinish)
 }
 type SchedAttemptRecorder interface {
 	Begin(in SchedAttemptStart) SchedAttempt
@@ -91,6 +93,7 @@ type SchedPolicyRecord struct {
 	FromV3           bool
 }
 type SchedQualitySnapshot struct {
+	GroupModels                 map[int64][]SchedModelCount
 	Accounts                    map[int64]schedquality.AccountSummary // immutable; everything the admin API shows comes from one snapshot
 	Version                     int64
 	At                          time.Time
@@ -104,15 +107,27 @@ type SchedQualitySnapshot struct {
 	Overrides                   []SchedOverride
 	ResetAt                     map[int64]time.Time
 }
+type SchedModelCount struct {
+	Model    string
+	Requests int
+}
+type SchedPolicyChange struct {
+	AccountID int64
+	Model     string
+	Dims      []schedquality.Dimension
+}
+
 type SchedGroupRow struct {
-	Evaluation schedquality.Evaluation
-	GroupID    int64
-	Model      string
-	View       schedquality.StateView
-	Summary    schedquality.Summary     // the window this row is judged on (starts at row.Since when a row exists)
-	Test       schedquality.TestSummary // the tests pooled for this row (zero value when none)
+	OtherGroupIDs []int64
+	Evaluation    schedquality.Evaluation
+	GroupID       int64
+	Model         string
+	View          schedquality.StateView
+	Summary       schedquality.Summary     // the window this row is judged on (starts at row.Since when a row exists)
+	Test          schedquality.TestSummary // the tests pooled for this row (zero value when none)
 }
 type SchedQualityEngine interface {
+	PreviewPolicy(ctx context.Context, groupID int64, p schedquality.Policy) ([]SchedPolicyChange, error)
 	Start(ctx context.Context)
 	Stop()
 	Observe(sample schedquality.AttemptSample)
@@ -127,6 +142,7 @@ type SchedQualityEngine interface {
 	UpdatePolicy(ctx context.Context, groupID, expectedVersion int64, p schedquality.Policy) (SchedPolicyRecord, error)
 }
 type SchedQualityStore interface {
+	DeleteDecisionsBefore(ctx context.Context, before time.Time) (int64, error)
 	// RunCycle opens a transaction and tries the advisory lock. locked=false: fn is not called.
 	RunCycle(ctx context.Context, fn func(tx SchedQualityTx) error) (locked bool, err error)
 	// RunReset blocks for the same lock (3s), then sets the reset time to clock_timestamp() (taken after the lock) and deletes the account's rows.
@@ -144,6 +160,7 @@ type SchedQualityTx interface {
 	Overrides() ([]SchedOverride, error)
 	ResetTimes() (map[int64]time.Time, error)
 	Upsert(rows []schedquality.StateRow) error
+	InsertDecisions(rows []schedquality.Decision) error
 	Delete(keys []schedquality.StateRow) error
 	// DeleteOverrides requires the key and original expires_at to still match.
 	// It deletes expired overrides or overrides for an OpenAI group the account left.

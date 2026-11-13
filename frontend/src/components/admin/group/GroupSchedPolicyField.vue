@@ -14,7 +14,7 @@
 
       <label :for="ids.ttft" class="text-gray-700 dark:text-gray-300">{{ t('admin.schedQuality.policy.ttft') }}</label>
       <span class="inline-flex items-center gap-2">
-        <input :id="ids.ttft" v-model="form.ttft" type="number" step="0.1" min="0.1" :aria-invalid="!valid.ttft" :class="['input w-24 py-1.5 text-right sq-num', { 'input-error': !valid.ttft }]" @input="edited.ttft = true" />
+        <input :id="ids.ttft" v-model="form.ttft" type="number" step="0.1" min="0" :aria-invalid="!valid.ttft" :class="['input w-24 py-1.5 text-right sq-num', { 'input-error': !valid.ttft }]" @input="edited.ttft = true" />
         <span class="sq-text-3">{{ t('admin.schedQuality.policy.seconds') }}</span>
       </span>
 
@@ -36,7 +36,8 @@
       <template v-if="changed">
         <span class="self-start pt-0.5 text-gray-700 dark:text-gray-300">{{ t('admin.schedQuality.policy.preview') }}</span>
         <div class="min-w-0" data-sq-preview>
-          <span v-if="!preview" class="skeleton inline-block h-3.5 w-32" />
+          <span v-if="previewFailed" class="sq-fail-word text-sm">{{ t('admin.schedQuality.result.failed') }}</span>
+          <span v-else-if="!preview" class="skeleton inline-block h-3.5 w-32" />
           <template v-else>
             <div class="flex flex-wrap gap-x-5 gap-y-1 sq-num">
               <span><span class="sq-text-3">{{ t('admin.schedQuality.state.normal') }}</span> {{ preview.now.normal }} → {{ preview.after.normal }}</span>
@@ -122,7 +123,7 @@ const takeoverOptions = computed(() => TAKEOVER_VALUES.map((value) => ({
 const num = (value: string | number) => (String(value).trim() === '' ? NaN : Number(value))
 const inRange = (value: number, min: number, max: number) => Number.isFinite(value) && value >= min && value <= max
 const valid = computed(() => ({
-  ttft: inRange(num(form.ttft), 0.1, Infinity),
+  ttft: num(form.ttft) > 0 && Number.isFinite(num(form.ttft)),
   error: inRange(num(form.errorPct), MIN_ERROR_PCT, 100),
   cache: inRange(num(form.cachePct), 0, 100)
 }))
@@ -148,6 +149,7 @@ const changed = computed(() => {
 
 // Preview of the edited values, after typing stops; an answer for older values is dropped.
 const preview = shallowRef<SchedPolicyPreview | null>(null)
+const previewFailed = ref(false)
 let previewSeq = 0
 const runPreview = useDebounceFn(async () => {
   const seq = ++previewSeq
@@ -156,12 +158,13 @@ const runPreview = useDebounceFn(async () => {
     const value = await schedQualityAPI.previewGroupPolicy(props.groupId, { expected_version: record.value.version, policy: current.value })
     if (seq === previewSeq) preview.value = value
   } catch {
-    // No preview: the counts stay out until the next change.
+    if (seq === previewSeq) previewFailed.value = true
   }
 }, 400)
 watch(current, () => {
   previewSeq++
   preview.value = null
+  previewFailed.value = false
   void runPreview()
 }, { deep: true })
 

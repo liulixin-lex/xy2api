@@ -108,9 +108,5 @@ func requireCaptureCategory(t *testing.T, rec *captureServiceRecorder, want resi
 	t.Helper()
 	require.Len(t, rec.samples, 1)
 	require.Equal(t, string(want), rec.samples[0].Detail)
-	wantOutcome := schedquality.OutcomeOther
-	if want == resilience.CategoryTransient {
-		wantOutcome = schedquality.OutcomeAccountFault
-	}
-	require.Equal(t, wantOutcome, rec.samples[0].Outcome)
+	require.Equal(t, schedquality.OutcomeAccountFault, rec.samples[0].Outcome)
 }

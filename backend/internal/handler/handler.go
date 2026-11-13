@@ -14,7 +14,6 @@ type AdminHandlers struct {
 	User                   *admin.UserHandler
 	Group                  *admin.GroupHandler
 	Account                *admin.AccountHandler
-	AccountRecentStats     *admin.AccountRecentStatsHandler
 	AccountIQ              *admin.AccountIQHandler
 	Announcement           *admin.AnnouncementHandler
 	DataManagement         *admin.DataManagementHandler
