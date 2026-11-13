@@ -1,13 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
-import type { SchedBoard, SchedGroupPolicy } from '@/types/schedQuality'
-import boardFixture from '@/__tests__/fixtures/schedQuality/board.json'
+import type { SchedGroupPolicy } from '@/types/schedQuality'
 import policyFixture from '@/__tests__/fixtures/schedQuality/policy.json'
 import GroupSchedPolicyField from '../GroupSchedPolicyField.vue'
-import Select from '@/components/common/Select.vue'
 
-const api = vi.hoisted(() => ({ getGroupPolicy: vi.fn(), updateGroupPolicy: vi.fn(), groupBoard: vi.fn() }))
+const api = vi.hoisted(() => ({ getGroupPolicy: vi.fn(), updateGroupPolicy: vi.fn(), previewGroupPolicy: vi.fn() }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: api }))
 vi.mock('vue-i18n', async () => ({
   ...(await vi.importActual<typeof import('vue-i18n')>('vue-i18n')),
@@ -15,19 +13,10 @@ vi.mock('vue-i18n', async () => ({
 }))
 
 const policy = () => structuredClone(policyFixture) as SchedGroupPolicy
-// The contract board account (TTFT p90 9.2 s, fail bound 8.1 s; error 0.5 %; cache 93 %) plus one without enough data.
-function board(): SchedBoard {
-  const b = structuredClone(boardFixture) as SchedBoard
-  const thin = structuredClone(b.accounts[0])
-  Object.assign(thin, { account_id: 2, name: 'acc-thin', ttfo: { ...thin.ttfo, n: 12 }, error: { ...thin.error, n: 12 }, cache: { ...thin.cache, n: 3 } })
-  b.accounts.push(thin)
-  return b
-}
-
-const counts = (w: ReturnType<typeof mount>) =>
-  ['pass', 'fail', 'nodata'].map((kind) => w.get(`[data-sq-trial="${kind}"]`).text())
-
 const save = (w: ReturnType<typeof mount>) => (w.vm as unknown as { save: () => Promise<boolean> }).save()
+const ttft = (w: ReturnType<typeof mount>) => w.get('input[step="0.1"][min="0.1"]')
+const error = (w: ReturnType<typeof mount>) => w.get('input[step="0.1"][min="5"]')
+const cache = (w: ReturnType<typeof mount>) => w.get('input[step="1"][max="100"]')
 
 async function mountField() {
   const w = mount(GroupSchedPolicyField, { props: { groupId: 53 }, global: { stubs: { Select: true } } })
@@ -38,62 +27,81 @@ async function mountField() {
 beforeEach(() => {
   api.getGroupPolicy.mockReset().mockResolvedValue(policy())
   api.updateGroupPolicy.mockReset()
-  api.groupBoard.mockReset().mockResolvedValue(board())
+  api.previewGroupPolicy.mockReset().mockResolvedValue({
+    now: { normal: 5, below: 1 },
+    after: { normal: 4, below: 2 },
+    changed: [{ account_id: 7, name: 'acc-7', model: 'gpt-6.1-sol', dims: ['ttfo'] }]
+  })
 })
+afterEach(() => { vi.useRealTimers() })
 
 describe('GroupSchedPolicyField', () => {
-  it('shows the stored thresholds', async () => {
-    const w = await mountField()
-    expect((w.get('input[type="number"][step="0.1"][min="0.5"]').element as HTMLInputElement).value).toBe('10')
-    expect(w.find('[data-sq-class-limits]').exists()).toBe(false)
-    expect(api.groupBoard.mock.calls).toEqual([[53, undefined]])
-  })
-
-  it('takes the trial models from the board, first without a model (K27)', async () => {
-    api.groupBoard.mockImplementation(async (_id: number, model?: string) => ({ ...board(), model: model ?? 'm-custom', models: ['m-custom', 'gpt-6.1-sol'] }))
-    const w = await mountField()
-    expect(api.groupBoard.mock.calls).toEqual([[53, undefined]])
-    const modelSelect = w.findAllComponents(Select)[0]
-    expect(modelSelect.props('options')).toEqual([{ value: 'm-custom', label: 'm-custom' }, { value: 'gpt-6.1-sol', label: 'gpt-6.1-sol' }])
-    expect(modelSelect.props('modelValue')).toBe('m-custom')
-
-    modelSelect.vm.$emit('update:modelValue', 'gpt-6.1-sol')
-    await flushPromises()
-    expect(api.groupBoard.mock.calls).toEqual([[53, undefined], [53, 'gpt-6.1-sol']])
-  })
-
-  it('keeps the API precision of untouched thresholds: 0.875 round-trips and an unchanged block sends no PUT', async () => {
+  it('keeps the API precision of untouched lines: an unchanged block sends no PUT, a typed field goes as typed', async () => {
     const p = policy()
-    Object.assign(p.policy, { min_cache_ratio: 0.875, max_error_rate: 0.01234 })
+    Object.assign(p.policy, { min_cache_ratio: 0.875, max_error_rate: 0.0625 })
     api.getGroupPolicy.mockResolvedValue(p)
     const w = await mountField()
-    const cache = w.get('input[max="100"][step="1"]')
-    expect((cache.element as HTMLInputElement).value).toBe('88')
-    expect((w.get('input[max="100"][step="0.1"]').element as HTMLInputElement).value).toBe('1.23')
+    expect((cache(w).element as HTMLInputElement).value).toBe('88')
+    expect((error(w).element as HTMLInputElement).value).toBe('6.25')
     expect(await save(w)).toBe(true)
     expect(api.updateGroupPolicy).not.toHaveBeenCalled()
 
-    // Another field changed: the untouched thresholds go back exactly as they came.
     api.updateGroupPolicy.mockResolvedValueOnce({ ...p, version: 64, policy: { ...p.policy, enabled: false } })
     await w.get('[role="switch"]').trigger('click')
     expect(await save(w)).toBe(true)
     expect(api.updateGroupPolicy).toHaveBeenLastCalledWith(53, {
       expected_version: 63,
-      policy: { enabled: false, ttft_seconds: 10, max_error_rate: 0.01234, min_cache_ratio: 0.875, takeover_idle_seconds: 0 }
+      policy: { enabled: false, ttft_seconds: 10, max_error_rate: 0.0625, min_cache_ratio: 0.875, takeover_idle_seconds: 900 }
     })
 
-    // A field the user typed in is taken as typed.
-    await cache.setValue('88')
+    await cache(w).setValue('88')
     expect(await save(w)).toBe(true)
-    expect(api.updateGroupPolicy).toHaveBeenLastCalledWith(53, {
-      expected_version: 64,
-      policy: { enabled: false, ttft_seconds: 10, max_error_rate: 0.01234, min_cache_ratio: 0.88, takeover_idle_seconds: 0 }
-    })
+    expect(api.updateGroupPolicy).toHaveBeenLastCalledWith(53, expect.objectContaining({ policy: expect.objectContaining({ min_cache_ratio: 0.88 }) }))
+  })
+
+  it('refuses an error line under 5% and a first-output line of 0, marking them without text (FINAL §3)', async () => {
+    const w = await mountField()
+    await error(w).setValue('4.9')
+    expect(error(w).attributes('aria-invalid')).toBe('true')
+    expect(error(w).classes()).toContain('input-error')
+    await error(w).setValue('5')
+    expect(error(w).attributes('aria-invalid')).toBe('false')
+    await ttft(w).setValue('0')
+    expect(ttft(w).attributes('aria-invalid')).toBe('true')
+    expect((w.vm as unknown as { valid: boolean }).valid).toBe(false)
+    expect(await save(w)).toBe(false)
+    expect(api.updateGroupPolicy).not.toHaveBeenCalled()
+  })
+
+  it('previews edited lines once typing stops: counts now → after and the accounts that would turn substandard', async () => {
+    vi.useFakeTimers()
+    const w = await mountField()
+    expect(w.find('[data-sq-preview]').exists()).toBe(false)
+
+    await ttft(w).setValue('9')
+    await ttft(w).setValue('8')
+    vi.advanceTimersByTime(400)
+    await flushPromises()
+    expect(api.previewGroupPolicy.mock.calls).toEqual([[53, {
+      expected_version: 63,
+      policy: { enabled: true, ttft_seconds: 8, max_error_rate: 0.05, min_cache_ratio: 0.9, takeover_idle_seconds: 900 }
+    }]])
+    const text = w.get('[data-sq-preview]').text().replace(/\s+/g, ' ')
+    expect(text).toContain('admin.schedQuality.state.normal 5 → 4')
+    expect(text).toContain('admin.schedQuality.state.substandard 1 → 2')
+    expect(w.findAll('[data-sq-preview-changed] li > span').map((el) => el.text())).toEqual(['acc-7', 'gpt-6.1-sol', 'admin.schedQuality.state.substandard·admin.schedQuality.dim.ttfo'])
+
+    // Back to the saved value: no preview, no request.
+    await ttft(w).setValue('10')
+    vi.advanceTimersByTime(400)
+    await flushPromises()
+    expect(w.find('[data-sq-preview]').exists()).toBe(false)
+    expect(api.previewGroupPolicy).toHaveBeenCalledTimes(1)
   })
 
   it('shows 失败 without reload on a save error other than 409, and clears it on the next good save', async () => {
     const w = await mountField()
-    await w.get('input[min="0.5"]').setValue('12')
+    await ttft(w).setValue('12')
     api.updateGroupPolicy.mockRejectedValueOnce({ status: 500, message: 'boom' })
     expect(await save(w)).toBe(false)
     expect(w.get('[data-sq-policy-failed]').text()).toBe('admin.schedQuality.result.failed')
@@ -104,60 +112,28 @@ describe('GroupSchedPolicyField', () => {
     expect(w.find('[data-sq-policy-failed]').exists()).toBe(false)
   })
 
-  it('marks out-of-range values without text, keeps the trial on the last valid value and blocks saving', async () => {
-    const w = await mountField()
-    const ttft = w.get('input[min="0.5"]')
-    await ttft.setValue('0.4')
-    expect(ttft.attributes('aria-invalid')).toBe('true')
-    expect(ttft.classes()).toContain('input-error')
-    await w.get('input[max="100"][step="1"]').setValue('101')
-    expect(w.get('input[max="100"][step="1"]').attributes('aria-invalid')).toBe('true')
-    expect((w.vm as unknown as { valid: boolean }).valid).toBe(false)
-    expect(await (w.vm as unknown as { save: () => Promise<boolean> }).save()).toBe(false)
-    expect(api.updateGroupPolicy).not.toHaveBeenCalled()
-    expect(w.text()).not.toMatch(/[。.]$/)
-  })
-
-  it('recomputes the trial from the board numbers on every change without any request', async () => {
-    const w = await mountField()
-    expect(counts(w)).toEqual(['1', '0', '1'])
-    const calls = api.groupBoard.mock.calls.length + api.getGroupPolicy.mock.calls.length
-
-    await w.get('input[min="0.5"]').setValue('8')
-    expect(counts(w)).toEqual(['0', '1', '1'])
-    await w.get('input[min="0.5"]').setValue('10')
-    await w.get('input[max="100"][step="1"]').setValue('95')
-    expect(counts(w)).toEqual(['0', '1', '1'])
-    expect(api.groupBoard.mock.calls.length + api.getGroupPolicy.mock.calls.length).toBe(calls)
-
-    await w.get('[data-sq-trial="fail"]').trigger('click')
-    expect(w.get('[data-sq-trial="fail"]').attributes('aria-expanded')).toBe('true')
-    expect(w.get('[data-sq-trial-names]').text()).toBe('…')
-  })
-
   it('saves with the version, and on a conflict shows failed + reload, which reads the server values back', async () => {
     const w = await mountField()
-    await w.get('input[min="0.5"]').setValue('12.5')
+    await ttft(w).setValue('12.5')
     api.updateGroupPolicy.mockRejectedValueOnce({ status: 409, message: 'conflict' })
-    expect(await (w.vm as unknown as { save: () => Promise<boolean> }).save()).toBe(false)
+    expect(await save(w)).toBe(false)
     expect(api.updateGroupPolicy).toHaveBeenCalledWith(53, {
       expected_version: 63,
-      policy: { enabled: true, ttft_seconds: 12.5, max_error_rate: 0.05, min_cache_ratio: 0.9, takeover_idle_seconds: 0 }
+      policy: { enabled: true, ttft_seconds: 12.5, max_error_rate: 0.05, min_cache_ratio: 0.9, takeover_idle_seconds: 900 }
     })
-    expect(w.text()).toContain('admin.schedQuality.result.failed')
 
     api.getGroupPolicy.mockResolvedValueOnce({ ...policy(), version: 64, policy: { ...policy().policy, ttft_seconds: 11 } })
     await w.get('[data-sq-policy-reload]').trigger('click')
     await flushPromises()
-    expect((w.get('input[min="0.5"]').element as HTMLInputElement).value).toBe('11')
+    expect((ttft(w).element as HTMLInputElement).value).toBe('11')
     expect(w.find('[data-sq-policy-reload]').exists()).toBe(false)
 
     api.updateGroupPolicy.mockResolvedValueOnce({ ...policy(), version: 65 })
-    await w.get('input[max="100"][step="0.1"]').setValue('2.5')
-    expect(await (w.vm as unknown as { save: () => Promise<boolean> }).save()).toBe(true)
+    await error(w).setValue('7.5')
+    expect(await save(w)).toBe(true)
     expect(api.updateGroupPolicy).toHaveBeenLastCalledWith(53, expect.objectContaining({
       expected_version: 64,
-      policy: expect.objectContaining({ ttft_seconds: 11, max_error_rate: 0.025 })
+      policy: expect.objectContaining({ ttft_seconds: 11, max_error_rate: 0.075 })
     }))
   })
 })

@@ -18,6 +18,24 @@ export default {
     },
     more: '+{n}',
     samples: '{n}',
+    groupHead: {
+      lines: 'Lines',
+      accounts: 'Accounts',
+      last60: 'Last 60 min',
+    },
+    groupCol: {
+      sq_ttft: 'TTFT',
+      sq_error: 'Errors',
+      sq_cache: 'Cache',
+      sq_takeover: 'Takeover',
+      sq_normal: 'Normal',
+      sq_below: 'Below',
+      sq_stopped: 'Off',
+      sq_p50: 'TTFT',
+      sq_failed: 'Failed',
+      sq_cache60: 'Cache',
+      sq_requests: 'Requests',
+    },
     level: 'L{n}',
     mark: {
       merged: 'M',
@@ -49,6 +67,8 @@ export default {
       recent: 'Recent requests',
     },
     col: {
+      load: 'Load',
+      lastUsed: 'Last used',
       until: 'Back at',
       level: 'Level',
       group: 'Group',
@@ -80,7 +100,7 @@ export default {
       expand: 'Expand',
       collapse: 'Collapse',
       reload: 'Reload',
-      board: 'Board',
+      board: 'Order',
     },
     override: {
       scope: 'Scope',
@@ -153,6 +173,7 @@ export default {
     },
     unknown: 'Other',
     policy: {
+      preview: 'After',
       off: 'Off',
       gate: 'Quality gate',
       ttft: 'TTFT limit',

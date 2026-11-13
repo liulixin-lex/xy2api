@@ -18,6 +18,24 @@ export default {
     },
     more: '+{n}',
     samples: '{n}次',
+    groupHead: {
+      lines: '门槛',
+      accounts: '账号',
+      last60: '近 60 分钟',
+    },
+    groupCol: {
+      sq_ttft: '首字',
+      sq_error: '报错',
+      sq_cache: '缓存',
+      sq_takeover: '接管',
+      sq_normal: '正常',
+      sq_below: '不达标',
+      sq_stopped: '停用',
+      sq_p50: '首字',
+      sq_failed: '失败',
+      sq_cache60: '缓存',
+      sq_requests: '请求',
+    },
     level: '{n}级',
     mark: {
       merged: '合',
@@ -49,6 +67,8 @@ export default {
       recent: '最近请求',
     },
     col: {
+      load: '负载',
+      lastUsed: '最近使用',
       until: '恢复',
       level: '阶梯',
       group: '分组',
@@ -80,7 +100,7 @@ export default {
       expand: '展开',
       collapse: '收起',
       reload: '重新载入',
-      board: '看板',
+      board: '选号顺序',
     },
     override: {
       scope: '范围',
@@ -153,6 +173,7 @@ export default {
     },
     unknown: '其他',
     policy: {
+      preview: '改后',
       off: '关',
       gate: '质量门槛',
       ttft: '首字上限',

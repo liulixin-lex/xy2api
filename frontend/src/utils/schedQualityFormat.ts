@@ -1,8 +1,8 @@
 import type {
-  SchedAccountSummary, SchedGroupModelDetail, SchedGroupThresholds, SchedMark, SchedReason, SchedState, SchedVerdict, SchedDim
+  SchedAccountSummary, SchedGroupModelDetail, SchedGroupSummary, SchedGroupThresholds, SchedMark, SchedDim, SchedTakeoverIdleSeconds
 } from '@/types/schedQuality'
 
-// Display rules shared by the list, the drawer, the board and the group settings (design spec A.1, B, C, D).
+// Display rules of the three scheduling pages (FINAL §6, §7): words, numbers and the two colours, red and grey.
 
 export type { SchedDim }
 export const SCHED_DIMS: SchedDim[] = ['ttfo', 'error', 'cache']
@@ -11,20 +11,6 @@ type Translate = (key: string, values?: Record<string, unknown>) => string
 type HasKey = (key: string) => boolean
 
 export const DASH = '—'
-
-export const SCHED_VERDICTS: readonly SchedVerdict[] = ['pass', 'marginal', 'fail', 'nodata']
-export const SCHED_STATES: readonly SchedState[] = ['normal', 'cooling']
-
-/** A finite enum value from the API, or null when this UI does not know it: shown as the fallback word, neutral. */
-export function known<T extends string>(value: string | null | undefined, values: readonly T[]): T | null {
-  return (values as readonly string[]).includes(value ?? '') ? (value as T) : null
-}
-
-/** First output: `{x.x}s`, the timeout word, or a dash. */
-export function fmtTtfo(ms: number | null | undefined, timeout: boolean, t: Translate): string {
-  if (timeout) return t('admin.schedQuality.result.timeout')
-  return ms == null ? DASH : `${(ms / 1000).toFixed(1)}s`
-}
 
 /** Error rate with one decimal. */
 export const fmtErrorRate = (rate: number | null | undefined) => (rate == null ? DASH : `${(rate * 100).toFixed(1)}%`)
@@ -47,36 +33,10 @@ export function kindName(kind: string, t: Translate, te: HasKey): string {
   return te(key) ? t(key) : t('admin.schedQuality.unknown')
 }
 
-/** Hard-admission reason word on the board; unknown codes show the fallback word. */
-export function rejectName(reject: string, t: Translate, te: HasKey): string {
-  const key = `admin.schedQuality.reject.${reject}`
-  return te(key) ? t(key) : t('admin.schedQuality.unknown')
-}
-
 /** Parent account id from a `parent_blocked:<id>` auto-state key. */
 export function parentIdFromKey(key: string): number | null {
   const match = /^parent_blocked:(\d+)$/.exec(key)
   return match ? Number(match[1]) : null
-}
-
-/** Dimension a cooling reason points to. */
-export function causeDim(reason: SchedReason): SchedDim | null {
-  if (reason === 'speed' || reason === 'acute_timeout') return 'ttfo'
-  if (reason === 'error') return 'error'
-  if (reason === 'cache') return 'cache'
-  return null
-}
-
-/** Class of a number carrying a verdict. */
-export const verdictClass = (verdict: SchedVerdict) => `sq-v-${verdict}`
-
-/** Gate column of the group list: `{ttft}s · {error}% · {cache}%`. */
-export function policyShort(policy: { ttft_seconds: number; max_error_rate: number; min_cache_ratio: number }, t: Translate): string {
-  return t('admin.schedQuality.policy.short', {
-    ttft: String(+policy.ttft_seconds.toFixed(2)),
-    error: String(+(policy.max_error_rate * 100).toFixed(2)),
-    cache: String(Math.round(policy.min_cache_ratio * 100))
-  })
 }
 
 /** `HH:mm` on the day of `now`, otherwise `MM-DD HH:mm` (local time). */
@@ -154,4 +114,43 @@ export function dimDetail(row: SchedGroupModelDetail, dim: SchedDim): { text: st
   if (dim === 'ttfo') return { text: `${row.ttfo.bad}/${d.n}`, n: null, cls, merged }
   if (dim === 'error') return { text: fmtErrorRate(row.error.bad / d.n), n: d.n, cls, merged }
   return { text: fmtCacheRatio(row.cache.ratio), n: d.n, cls, merged }
+}
+
+/** 接管 as shown: 关 / 立即 / n 分钟. */
+export function takeoverText(value: SchedTakeoverIdleSeconds, t: Translate): string {
+  if (value === -1) return t('admin.schedQuality.policy.takeoverOff')
+  if (value === 0) return t('admin.schedQuality.policy.takeoverNow')
+  return t('admin.schedQuality.policy.takeoverMin', { n: value / 60 })
+}
+
+/** Scheduling columns of the group list, in order, with the header group each one sits under. */
+export const GROUP_SCHED_COLUMNS = [
+  ['sq_ttft', 'lines'], ['sq_error', 'lines'], ['sq_cache', 'lines'], ['sq_takeover', null],
+  ['sq_normal', 'accounts'], ['sq_below', 'accounts'], ['sq_stopped', 'accounts'],
+  ['sq_p50', 'last60'], ['sq_failed', 'last60'], ['sq_cache60', 'last60'], ['sq_requests', 'last60']
+] as const
+export type GroupSchedColumn = (typeof GROUP_SCHED_COLUMNS)[number][0]
+
+/**
+ * One cell of the group list. Lines of a group whose switch is off are grey; a substandard count above zero is red and
+ * zero counts are grey; the last 60 minutes are plain numbers, a dash without requests.
+ */
+export function groupCell(s: SchedGroupSummary, col: GroupSchedColumn, t: Translate): { text: string; cls: string } {
+  const lines = policyParts(s)
+  const off = s.enabled ? '' : 'sq-text-3'
+  const count = (n: number, bad = false) => ({ text: String(n), cls: n === 0 ? 'sq-text-3' : bad ? 'sq-cool' : '' })
+  const recent = (text: string) => ({ text: s.last60.requests ? text : DASH, cls: s.last60.requests ? '' : 'sq-text-3' })
+  switch (col) {
+    case 'sq_ttft': return { text: lines.ttfo, cls: off }
+    case 'sq_error': return { text: lines.error, cls: off }
+    case 'sq_cache': return { text: lines.cache, cls: off }
+    case 'sq_takeover': return { text: takeoverText(s.takeover_idle_seconds, t), cls: off }
+    case 'sq_normal': return count(s.accounts.normal)
+    case 'sq_below': return count(s.accounts.below, true)
+    case 'sq_stopped': return count(s.accounts.stopped)
+    case 'sq_p50': return recent(fmtSeconds(s.last60.ttfo_p50_ms))
+    case 'sq_failed': return recent(fmtErrorRate(s.last60.failed_rate))
+    case 'sq_cache60': return recent(fmtCacheRatio(s.last60.cache_ratio))
+    case 'sq_requests': return count(s.last60.requests)
+  }
 }

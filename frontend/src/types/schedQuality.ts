@@ -1,27 +1,8 @@
 // Admin API types for /admin/sched-quality (sched-v2 contract §6). Field names match the JSON exactly.
 
-export type SchedVerdict = 'pass' | 'marginal' | 'fail' | 'nodata'
-export type SchedVerdictFrom = 'real'
-export type SchedState = 'normal' | 'cooling'
-export type SchedStanding = 'front' | 'back'
 export type SchedOverrideMode = 'exempt'
-/** Cooling: speed | error | cache | acute_timeout; normal: '' | unverified. */
-export type SchedReason =
-  | 'speed'
-  | 'error'
-  | 'cache'
-  | 'acute_timeout'
-  | 'unverified'
-  | ''
 /** -1 off, 0 immediately, otherwise idle seconds. */
 export type SchedTakeoverIdleSeconds = -1 | 0 | 300 | 900 | 1800
-
-export interface SchedOverride {
-  mode: SchedOverrideMode
-  all_groups: boolean
-  expires_at: string | null
-  reason: string
-}
 
 // ---- POST /accounts/summary (contract §4.11, §6.1) ----
 
@@ -200,46 +181,58 @@ export interface SchedGroupPolicyUpdate {
   policy: SchedPolicy
 }
 
-// ---- GET /groups/:id/board?model= ----
+// ---- POST /groups/summary (contract §6.1, §6.3, §6.4) ----
 
-export interface SchedEvidenceNumbers {
-  ttfo: { n: number; sessions: number; p90_ms: number | null; p90_timeout: boolean; fail_bound_ms: number | null; fail_bound_timeout: boolean }
-  error: { n: number; sessions: number; rate: number | null; lcb: number | null }
-  cache: { n: number; sessions: number; ratio: number | null }
+export interface SchedGroupSummary extends SchedPolicy {
+  group_id: number
+  /** Each account counted once: stopped, else substandard (after exemptions) in any model, else normal. */
+  accounts: { normal: number; below: number; stopped: number }
+  /** The last 60 minutes of the group's requests: user-side first output P50, failed share, cache, count. */
+  last60: { ttfo_p50_ms: number | null; failed_rate: number | null; cache_ratio: number | null; requests: number }
 }
 
-export interface SchedBoardAccount extends SchedEvidenceNumbers {
+export interface SchedGroupsSummary {
+  at: string
+  stale: boolean
+  groups: SchedGroupSummary[]
+}
+
+// ---- POST /groups/:id/policy/preview (contract §4.10) ----
+
+export interface SchedPolicyPreview {
+  now: { normal: number; below: number }
+  after: { normal: number; below: number }
+  /** Accounts that would turn substandard under the new lines. */
+  changed: { account_id: number; name: string; model: string; dims: SchedDim[] }[]
+}
+
+// ---- GET /groups/:id/order?model= (contract §5.7) ----
+
+export interface SchedOrderRow {
+  /** 1-based; hard-unavailable accounts come last with layer `stopped`. */
+  rank: number
   account_id: number
   name: string
-  /** Evidence key behind this row's numbers and state (contract clarification K27). */
-  evidence_model: string
-  rank: number
-  eligible: boolean
-  reject: string
-  reject_until: string | null
-  standing: SchedStanding
-  state: SchedState
-  level: number
+  layer: 'normal' | 'below' | 'stopped'
+  dims: SchedDim[]
   until: string | null
-  override: SchedOverride | null
+  exempt: boolean
   priority: number
   rate: number
+  load_rate: number
   in_flight: number
   concurrency: number
-  recently_full_seconds: number
-  can_take_over: boolean
-  verdicts: { ttfo: SchedVerdict; error: SchedVerdict; cache: SchedVerdict }
+  last_used_at: string | null
 }
 
-export interface SchedBoard {
+export interface SchedOrder {
   group_id: number
-  /** Request model of this board. */
+  /** Request model of this order. */
   model: string
-  /** Request models with samples in the group, most samples first. */
+  /** Request models of the group, most requests first. */
   models: string[]
   at: string
   stale: boolean
   global_enabled: boolean
-  /** In current selection order; render as given. */
-  accounts: SchedBoardAccount[]
+  rows: SchedOrderRow[]
 }

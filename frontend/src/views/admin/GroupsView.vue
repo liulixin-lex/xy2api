@@ -323,10 +323,11 @@
             </div>
           </template>
 
-          <template #cell-sched_gate="{ row }">
-            <span v-if="schedGateText(row)" class="sq-num whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">{{ schedGateText(row) }}</span>
+          <template v-for="[key] in GROUP_SCHED_COLUMNS" :key="key" #[`cell-${key}`]="{ row }">
+            <GroupSchedCell v-if="row.platform === 'openai'" :col="key" :summary="schedSummary.get(row.id)" :loading="schedSummaryLoading" />
             <span v-else class="text-sm text-gray-500 dark:text-dark-400">—</span>
           </template>
+          <template v-for="head in GROUP_SCHED_HEADS" :key="head" #[`header-group-sq_${head}`]>{{ t(`admin.schedQuality.groupHead.${head}`) }}</template>
 
           <template #cell-capacity="{ row }">
             <GroupCapacityBadge
@@ -4399,7 +4400,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, watch } from "vue";
+import { ref, reactive, computed, onMounted, onUnmounted, shallowRef, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useAppStore } from "@/stores/app";
 import { useAuthStore } from "@/stores/auth";
@@ -4443,9 +4444,10 @@ import GroupProfitControlPreview from "@/components/admin/group/GroupProfitContr
 import GroupSchedPolicyField from "@/components/admin/group/GroupSchedPolicyField.vue";
 import SchedQualityLayers from "@/components/admin/account/quality/SchedQualityLayers.vue";
 import { openSchedBoard } from "@/composables/useSchedLayers";
+import GroupSchedCell from "@/components/admin/group/GroupSchedCell.vue";
 import schedQualityAPI from "@/api/admin/schedQuality";
-import type { SchedPolicy } from "@/types/schedQuality";
-import { policyShort } from "@/utils/schedQualityFormat";
+import type { SchedGroupSummary } from "@/types/schedQuality";
+import { GROUP_SCHED_COLUMNS } from "@/utils/schedQualityFormat";
 import LongContextPricingFields from "@/components/admin/group/LongContextPricingFields.vue";
 import GroupSystemPromptFields from "@/components/admin/group/GroupSystemPromptFields.vue";
 import GroupCategoryFilter from "@/components/admin/group/GroupCategoryFilter.vue";
@@ -4686,7 +4688,13 @@ const allColumns = computed<Column[]>(() => {
     { key: "rate_multiplier", label: t("admin.groups.columns.rateMultiplier"), sortable: true },
     { key: "is_exclusive", label: t("admin.groups.columns.type"), sortable: true },
     { key: "category", label: t("admin.groupCategories.column"), sortable: false },
-    { key: "sched_gate", label: t("admin.schedQuality.policy.column"), sortable: false },
+    ...GROUP_SCHED_COLUMNS.map(([key, head]) => ({
+      key,
+      label: t(`admin.schedQuality.groupCol.${key}`),
+      sortable: false,
+      class: "text-right",
+      ...(head ? { group: `sq_${head}` } : {}),
+    })),
     basic[3],
     { key: "capacity", label: t("admin.groups.columns.capacity"), sortable: false },
     { key: "usage", label: t("admin.groups.columns.usage"), sortable: false },
@@ -4794,35 +4802,34 @@ const toggleColumn = (key: string) => {
   if (wasHidden && key === "capacity") {
     loadCapacitySummary();
   }
-  if (wasHidden && key === "sched_gate") {
-    void loadSchedGates();
+  if (wasHidden && key.startsWith("sq_")) {
+    void loadSchedSummary();
   }
 };
 
-// 「门槛」列：每个 OpenAI 分组的三个阈值简写，未启用为“—”（设计 D.3）。随列表刷新逐组读取，并发 4。
-const schedGates = reactive(new Map<number, SchedPolicy | null>());
-let schedGateSeq = 0;
-const loadSchedGates = async () => {
-  if (authStore.isSimpleMode || !isColumnVisible("sched_gate")) return;
-  const seq = ++schedGateSeq;
+// Scheduling columns (FINAL §7): lines, 接管, account counts and the last 60 minutes of the OpenAI groups on the
+// page, one request per list refresh; skipped while every scheduling column is hidden.
+const GROUP_SCHED_HEADS = ["lines", "accounts", "last60"] as const;
+const schedSummary = shallowRef(new Map<number, SchedGroupSummary>());
+const schedSummaryLoading = ref(false);
+let schedSummarySeq = 0;
+const loadSchedSummary = async () => {
+  if (authStore.isSimpleMode || !GROUP_SCHED_COLUMNS.some(([key]) => isColumnVisible(key))) return;
   const ids = groups.value.filter((group) => group.platform === "openai").map((group) => group.id);
-  let next = 0;
-  const worker = async () => {
-    while (next < ids.length) {
-      const id = ids[next++];
-      try {
-        const record = await schedQualityAPI.getGroupPolicy(id);
-        if (seq === schedGateSeq) schedGates.set(id, record.policy);
-      } catch {
-        if (seq === schedGateSeq) schedGates.set(id, null);
-      }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(4, ids.length) }, worker));
-};
-const schedGateText = (group: AdminGroup) => {
-  const policy = group.platform === "openai" ? schedGates.get(group.id) : null;
-  return policy?.enabled ? policyShort(policy, t) : "";
+  const seq = ++schedSummarySeq;
+  if (!ids.length) {
+    schedSummary.value = new Map();
+    return;
+  }
+  schedSummaryLoading.value = true;
+  try {
+    const { groups: rows } = await schedQualityAPI.groupsSummary(ids);
+    if (seq === schedSummarySeq) schedSummary.value = new Map(rows.map((row) => [row.group_id, row]));
+  } catch (error) {
+    if (seq === schedSummarySeq) console.error("Failed to load group scheduling summary:", error);
+  } finally {
+    if (seq === schedSummarySeq) schedSummaryLoading.value = false;
+  }
 };
 
 const columns = computed<Column[]>(() =>
@@ -5921,7 +5928,7 @@ const loadGroups = async () => {
     if (hasVisibleCapacityColumn.value) {
       loadCapacitySummary();
     }
-    void loadSchedGates();
+    void loadSchedSummary();
   } catch (error: any) {
     if (
       signal.aborted ||

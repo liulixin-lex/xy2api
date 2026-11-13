@@ -1,13 +1,12 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 
-import type { SchedBoard, SchedBoardAccount } from '@/types/schedQuality'
-import boardFixture from '@/__tests__/fixtures/schedQuality/board.json'
-import policyFixture from '@/__tests__/fixtures/schedQuality/policy.json'
+import type { SchedOrder } from '@/types/schedQuality'
+import orderFixture from '@/__tests__/fixtures/schedQuality/order.json'
 import GroupSchedBoard from '../GroupSchedBoard.vue'
-import { closeSchedBoard, markSchedChanged, openSchedBoard, useSchedLayers } from '@/composables/useSchedLayers'
+import { closeSchedBoard, closeSchedDrawer, markSchedChanged, openSchedBoard, useSchedLayers } from '@/composables/useSchedLayers'
 
-const api = vi.hoisted(() => ({ groupBoard: vi.fn(), getGroupPolicy: vi.fn() }))
+const api = vi.hoisted(() => ({ groupOrder: vi.fn() }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: api }))
 const perms = vi.hoisted(() => ({ granted: [] as string[] }))
 vi.mock('@/composables/useAdminPermission', async () => {
@@ -16,86 +15,59 @@ vi.mock('@/composables/useAdminPermission', async () => {
 })
 vi.mock('vue-i18n', async () => ({
   ...(await vi.importActual<typeof import('vue-i18n')>('vue-i18n')),
-  useI18n: () => ({
-    t: (key: string, params?: Record<string, unknown>) => (params ? `${key}:${JSON.stringify(params)}` : key),
-    te: (key: string) => key !== 'admin.schedQuality.reject.brand_new'
-  })
+  useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => (params ? `${key}:${JSON.stringify(params)}` : key) })
 }))
 
 enableAutoUnmount(afterEach)
 
-const base = (boardFixture as SchedBoard).accounts[0]
-const account = (id: number, patch: Partial<SchedBoardAccount>): SchedBoardAccount => ({ ...structuredClone(base), account_id: id, name: `acc-${id}`, ...patch })
-
-function board(): SchedBoard {
-  return {
-    ...(structuredClone(boardFixture) as SchedBoard),
-    accounts: [
-      account(7, { rank: 1, can_take_over: false }),
-      account(3, { rank: 2, state: 'cooling', until: new Date(Date.now() + 90_000).toISOString(), standing: 'back', verdicts: { ttfo: 'fail', error: 'pass', cache: 'marginal' } }),
-      account(5, { rank: 3, override: { mode: 'exempt', all_groups: true, expires_at: null, reason: '' }, recently_full_seconds: 12 }),
-      account(9, { rank: 0, eligible: false, reject: 'rate_limit', reject_until: new Date(Date.now() + 130_000).toISOString(), verdicts: { ttfo: 'fail', error: 'fail', cache: 'fail' } }),
-      account(1, { rank: 0, eligible: false, reject: 'brand_new' })
-    ]
-  }
-}
-
+const order = () => structuredClone(orderFixture) as SchedOrder
 const rows = () => Array.from(document.querySelectorAll<HTMLElement>('[data-sq-board-row]'))
+const state = (row: HTMLElement) => row.querySelector('[data-sq-state]')!.textContent
 
 beforeEach(() => {
   document.body.innerHTML = ''
   closeSchedBoard()
+  closeSchedDrawer()
   perms.granted = ['accounts:view', 'groups:view']
   document.documentElement.dataset.motion = 'reduced'
-  api.groupBoard.mockReset().mockResolvedValue(board())
-  api.getGroupPolicy.mockReset().mockResolvedValue(policyFixture)
+  api.groupOrder.mockReset().mockResolvedValue(order())
 })
 afterAll(() => { delete document.documentElement.dataset.motion })
 
-describe('GroupSchedBoard', () => {
-  it('renders the accounts in the order the API gives, never re-sorted', async () => {
+describe('GroupSchedBoard — selection order (FINAL §1, §7)', () => {
+  it('renders the rows in the order the API gives, never re-sorted, with the keys of the order', async () => {
     mount(GroupSchedBoard, { attachTo: document.body })
     openSchedBoard({ id: 53, name: '晨星组' }, 'gpt-6.1-sol')
     await flushPromises()
-    expect(api.groupBoard).toHaveBeenCalledWith(53, 'gpt-6.1-sol', expect.objectContaining({ signal: expect.any(AbortSignal) }))
-    expect(rows().map((tr) => tr.dataset.sqBoardRow)).toEqual(['7', '3', '5', '9', '1'])
-    expect(rows().map((tr) => tr.querySelector('td')!.textContent)).toEqual(['1', '2', '3', '—', '—'])
+    expect(api.groupOrder).toHaveBeenCalledWith(53, 'gpt-6.1-sol', expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(rows().map((tr) => tr.dataset.sqBoardRow)).toEqual(['7', '5', '3', '9'])
+    expect(rows().map((tr) => tr.querySelector('td')!.textContent)).toEqual(['1', '2', '3', '—'])
+    const cells = Array.from(rows()[0].querySelectorAll('td')).map((td) => td.textContent!.trim())
+    expect(cells.slice(3, 6)).toEqual(['1', '0.075', '1 / 10'])
   })
 
-  it('shows weak rows for hard admission with their reason, a countdown when it has an end, and the fallback word', async () => {
+  it('reads the layers: 正常 (exempt marked), 不达标·dims · until in red after a split, 停用 greyed at the end', async () => {
     mount(GroupSchedBoard, { attachTo: document.body })
     openSchedBoard({ id: 53, name: '晨星组' })
     await flushPromises()
-    const [first, cooling, exempted, limited, unknown] = rows()
-    expect(limited.classList.contains('sq-weak')).toBe(true)
-    expect(limited.classList.contains('sq-split')).toBe(true)
-    expect(limited.querySelector('[data-sq-state]')!.textContent).toMatch(/^admin\.schedQuality\.reject\.rate_limit 2:(09|10)$/)
-    // Numbers of weak rows are not coloured by verdict.
-    expect(limited.querySelectorAll('[class*="sq-v-"]')).toHaveLength(0)
-    expect(unknown.querySelector('[data-sq-state]')!.textContent).toBe('admin.schedQuality.unknown')
-    expect(unknown.classList.contains('sq-split')).toBe(false)
-
-    expect(cooling.querySelector('[data-sq-state]')!.textContent).toMatch(/^admin\.schedQuality\.state\.cooling 1:(29|30)$/)
-    expect(Array.from(cooling.querySelectorAll('td:nth-last-child(-n+3) span')).map((el) => el.className)).toEqual([
-      'sq-focus sq-v-fail', 'sq-focus sq-v-pass', 'sq-focus sq-v-marginal'
-    ])
-    expect(exempted.querySelector('[data-sq-state]')!.textContent).toBe('admin.schedQuality.state.exempted')
-    expect(exempted.querySelector('.sq-full')).not.toBeNull()
-    // No-takeover mark: front, eligible, cannot take over, the group takes over, view live.
-    expect(first.querySelector('[data-sq-no-takeover]')).not.toBeNull()
-    expect(cooling.querySelector('[data-sq-no-takeover]')).toBeNull()
+    const [first, exempt, below, stopped] = rows()
+    expect(state(first)).toBe('admin.schedQuality.state.normal')
+    expect(exempt.querySelector('[data-sq-override="exempt"]')).not.toBeNull()
+    expect(state(below)).toMatch(/^admin\.schedQuality\.state\.substandard·admin\.schedQuality\.dim\.ttfo·admin\.schedQuality\.dim\.cache · \S+/)
+    expect(below.querySelector('[data-sq-state]')!.className).toBe('sq-cool')
+    expect(below.classList.contains('sq-split')).toBe(true)
+    expect(state(stopped)).toBe('admin.schedQuality.state.disabled')
+    expect(stopped.classList.contains('sq-weak')).toBe(true)
+    expect(stopped.classList.contains('sq-split')).toBe(true)
   })
 
-  it('opens the account drawer on the evidence model of the row from an account link (K27)', async () => {
-    const b = board()
-    b.accounts[1].evidence_model = 'upstream-a'
-    api.groupBoard.mockResolvedValue(b)
+  it('opens the account drawer at this group and model from an account link', async () => {
     mount(GroupSchedBoard, { attachTo: document.body })
-    openSchedBoard({ id: 53, name: '晨星组' }, 'alias-a')
+    openSchedBoard({ id: 53, name: '晨星组' })
     await flushPromises()
     document.querySelector<HTMLElement>('[data-sq-trigger="account:3"]')!.click()
     const { drawer } = useSchedLayers()
-    expect([drawer.accountId, drawer.model]).toEqual([3, 'upstream-a'])
+    expect([drawer.accountId, drawer.groupId, drawer.model]).toEqual([3, 53, 'gpt-6.1-sol'])
   })
 
   it('shows account names as text without accounts:view', async () => {
@@ -105,21 +77,6 @@ describe('GroupSchedBoard', () => {
     await flushPromises()
     expect(document.querySelector('[data-sq-trigger^="account:"]')).toBeNull()
     expect(rows()[0].querySelectorAll('td')[1].textContent!.trim()).toBe('acc-7')
-  })
-
-  it('shows an unknown state as the fallback word and an unknown verdict uncoloured', async () => {
-    const b = board()
-    Object.assign(b.accounts[0], { state: 'future' })
-    b.accounts[1].verdicts.ttfo = 'future' as never
-    api.groupBoard.mockResolvedValue(b)
-    mount(GroupSchedBoard, { attachTo: document.body })
-    openSchedBoard({ id: 53, name: '晨星组' })
-    await flushPromises()
-    const state = rows()[0].querySelector('[data-sq-state]')!
-    expect([state.textContent, state.className]).toEqual(['admin.schedQuality.unknown', 'sq-text-3'])
-    const ttfo = rows()[1].querySelector('td:nth-last-child(3) span')!
-    expect(ttfo.className).toBe('sq-focus sq-text')
-    expect(ttfo.getAttribute('aria-label')).toContain('admin.schedQuality.unknown')
   })
 
   for (const theme of ['light', 'dark']) {
@@ -142,11 +99,11 @@ describe('GroupSchedBoard', () => {
       const before = highlighted()
       expect(before).toBe(1)
 
-      // A refresh of the board lands while the menu is open.
-      api.groupBoard.mockResolvedValue({ ...board(), at: new Date().toISOString() })
+      // A refresh of the order lands while the menu is open.
+      api.groupOrder.mockResolvedValue({ ...order(), at: new Date().toISOString() })
       markSchedChanged()
       await flushPromises()
-      expect(api.groupBoard).toHaveBeenCalledTimes(2)
+      expect(api.groupOrder).toHaveBeenCalledTimes(2)
       expect(document.activeElement).toBe(menu)
       // The refreshed options keep the highlighted model.
       expect(highlighted()).toBe(before)
@@ -162,7 +119,7 @@ describe('GroupSchedBoard', () => {
       expect(useSchedLayers().board.groupId).toBe(53)
       expect(document.activeElement).toBe(trigger)
 
-      // The next Escape is the board's.
+      // The next Escape is the dialog's.
       trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
       await flushPromises()
       expect(useSchedLayers().board.groupId).toBeNull()

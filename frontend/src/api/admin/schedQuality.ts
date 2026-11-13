@@ -1,15 +1,17 @@
 /**
- * Admin quality scheduling API (contract section 13), prefix /admin/sched-quality.
+ * Admin scheduling API (sched-v2 contract §6.1), prefix /admin/sched-quality.
  */
 
 import { apiClient } from '../client'
 import type {
   SchedAccountDetail,
   SchedAccountsSummary,
-  SchedBoard,
   SchedClearAutoState,
   SchedGroupPolicy,
   SchedGroupPolicyUpdate,
+  SchedGroupsSummary,
+  SchedOrder,
+  SchedPolicyPreview,
   SchedOverrideRequest,
   SchedResetResult
 } from '@/types/schedQuality'
@@ -59,9 +61,21 @@ export async function updateGroupPolicy(groupId: number, update: SchedGroupPolic
   return data
 }
 
-/** Without a model the server uses the model with the most samples in the group. */
-export async function groupBoard(groupId: number, model?: string, options?: RequestOptions): Promise<SchedBoard> {
-  const { data } = await apiClient.get<SchedBoard>(`${base}/groups/${groupId}/board`, {
+/** Lines, account counts and the last 60 minutes of the groups on the list; at most 1000 groups per call. */
+export async function groupsSummary(groupIds: number[], options?: RequestOptions): Promise<SchedGroupsSummary> {
+  const { data } = await apiClient.post<SchedGroupsSummary>(`${base}/groups/summary`, { group_ids: groupIds }, { signal: options?.signal })
+  return data
+}
+
+/** The group under the edited lines, before saving; writes nothing. */
+export async function previewGroupPolicy(groupId: number, update: SchedGroupPolicyUpdate): Promise<SchedPolicyPreview> {
+  const { data } = await apiClient.post<SchedPolicyPreview>(`${base}/groups/${groupId}/policy/preview`, update)
+  return data
+}
+
+/** The selection order of this moment; without a model the server uses the group's busiest model. */
+export async function groupOrder(groupId: number, model?: string, options?: RequestOptions): Promise<SchedOrder> {
+  const { data } = await apiClient.get<SchedOrder>(`${base}/groups/${groupId}/order`, {
     params: model ? { model } : undefined,
     signal: options?.signal
   })
@@ -77,7 +91,9 @@ export const schedQualityAPI = {
   clearAutoState,
   getGroupPolicy,
   updateGroupPolicy,
-  groupBoard
+  previewGroupPolicy,
+  groupsSummary,
+  groupOrder
 }
 
 export default schedQualityAPI
