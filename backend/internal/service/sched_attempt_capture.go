@@ -77,10 +77,16 @@ func (a *schedAttemptCapture) MarkFirstOutput(at time.Time) {
 	a.attempt.MarkFirstOutput(at)
 }
 func schedUsage(u *OpenAIUsage) *SchedAttemptUsage {
-	if u == nil || u.InputTokens <= 0 {
+	if u == nil || u.InputTokens <= 0 && u.CacheReadInputTokens <= 0 && u.CacheCreationInputTokens <= 0 {
 		return nil
 	}
-	return &SchedAttemptUsage{PromptTokens: u.InputTokens, CacheReadTokens: u.CacheReadInputTokens}
+	read, creation := max(u.CacheReadInputTokens, 0), max(u.CacheCreationInputTokens, 0)
+	return &SchedAttemptUsage{
+		PromptTokens:        u.InputTokens,
+		InputTokens:         max(u.InputTokens-read-creation, 0),
+		CacheReadTokens:     read,
+		CacheCreationTokens: creation,
+	}
 }
 func (a *schedAttemptCapture) noteUsage(u *OpenAIUsage) {
 	if a == nil {
