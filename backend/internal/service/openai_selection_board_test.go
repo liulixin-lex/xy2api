@@ -52,6 +52,7 @@ func TestSchedBoardOrderAdmissionAndNoMutation(t *testing.T) {
 	repo := &selectionBoardRepo{accounts: []Account{*e, *d, *c, *b, *a}}
 	view := selectionTestView(now)
 	view.States[fakeSchedViewKey{7, 1, "m"}] = schedquality.StateView{Failing: true, Dims: []schedquality.Dimension{schedquality.DimensionError}, Until: future}
+	view.States[fakeSchedViewKey{7, 5, "m"}] = schedquality.StateView{Failing: true, Dims: []schedquality.Dimension{schedquality.DimensionTTFO}, Until: future, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}}
 	loads := map[int64]*AccountLoadInfo{1: {LoadRate: 10, CurrentConcurrency: 1}, 2: {LoadRate: 100, CurrentConcurrency: 5}}
 	events := []string{}
 	binding := &selectionBindingFake{owner: 10, events: &events}
@@ -76,6 +77,9 @@ func TestSchedBoardOrderAdmissionAndNoMutation(t *testing.T) {
 	require.Equal(t, "account-two", rows[0].Name)
 	require.Equal(t, "normal", rows[0].Layer)
 	require.Equal(t, 100, rows[0].LoadRate)
+	require.Equal(t, "normal", rows[1].Layer)
+	require.True(t, rows[1].Exempt)
+	require.Equal(t, []schedquality.Dimension{schedquality.DimensionTTFO}, rows[1].Dims, "an exemption changes ordering without hiding internal evidence")
 	require.Equal(t, "below", rows[2].Layer)
 	require.Equal(t, []schedquality.Dimension{schedquality.DimensionError}, rows[2].Dims)
 	require.Equal(t, &future, rows[2].Until)
