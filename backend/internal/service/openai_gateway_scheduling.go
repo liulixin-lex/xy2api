@@ -944,6 +944,7 @@ func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.C
 	if err == nil {
 		planOpenAIStickyReplacement(ctx, groupID, sessionHash, requestedModel, &AccountSelectionResult{Account: account})
 	}
+	s.recordOpenAISelectionFlags(ctx, groupID, requestedModel, &AccountSelectionResult{Account: account})
 	return account, err
 }
 
@@ -1157,6 +1158,7 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 }
 
 func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, useUpstreamTokenCost bool) (selection *AccountSelectionResult, selectionErr error) {
+	defer func() { s.recordOpenAISelectionFlags(ctx, groupID, requestedModel, selection) }()
 	excludedIDs = mergeExcluded(excludedIDs, s.stickyChangeAvoid(ctx, groupID, sessionHash))
 	if NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !openAINoStickyMigration(ctx) && !openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx) {
 		s.prepareOpenAIStickyChange(ctx, groupID, sessionHash)
