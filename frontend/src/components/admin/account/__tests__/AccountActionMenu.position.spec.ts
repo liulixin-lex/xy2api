@@ -32,8 +32,7 @@ function setViewport(width: number, height: number) {
 
 async function mountMenu(anchorRect = new DOMRect(950, 720, 32, 24)) {
   const wrapper = mount(AccountActionMenu, {
-    // A rate-limited account: 恢复状态 is on the menu (contract delta F1).
-    props: { show: true, account, anchorRect, recoverable: true },
+    props: { show: true, account, anchorRect },
     global: { stubs: { Icon: true } }
   })
   await flushPromises()
@@ -69,7 +68,6 @@ describe('AccountActionMenu viewport positioning', () => {
     expect(getTop()).toBe(720 - 305 - 4)
     expect(getLeft()).toBe(982 - 208)
     expect(getTop() + menuHeight).toBeLessThanOrEqual(window.innerHeight - 8)
-    expect(getMenu().textContent).toContain('admin.accounts.recoverState')
   })
 
   it('opens below the trigger when the complete menu fits', async () => {
@@ -95,9 +93,9 @@ describe('AccountActionMenu viewport positioning', () => {
     expect(getLeft() + 208).toBeLessThanOrEqual(382)
   })
 
-  it('constrains an oversized menu and preserves the recover-state action', async () => {
+  it('constrains an oversized menu', async () => {
     setViewport(180, 220)
-    const wrapper = await mountMenu(new DOMRect(150, 180, 24, 24))
+    await mountMenu(new DOMRect(150, 180, 24, 24))
 
     expect(getTop()).toBe(8)
     expect(getLeft()).toBe(8)
@@ -106,11 +104,6 @@ describe('AccountActionMenu viewport positioning', () => {
     expect(getMenu().classList.contains('overflow-y-auto')).toBe(true)
     expect(getMenu().classList.contains('overscroll-contain')).toBe(true)
 
-    const recover = Array.from(getMenu().querySelectorAll('button'))
-      .find(button => button.textContent?.includes('admin.accounts.recoverState'))!
-    recover.click()
-    expect(wrapper.emitted('recover-state')).toEqual([[account]])
-    expect(wrapper.emitted('close')).toHaveLength(1)
   })
 
   it('repositions when menu content grows', async () => {

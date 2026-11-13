@@ -1,0 +1,14 @@
+{
+  "group_id": 53,
+  "model": "gpt-6.1-sol",
+  "models": ["gpt-6.1-sol", "gpt-6-astra"],
+  "at": "2026-11-11T12:00:00Z",
+  "stale": false,
+  "global_enabled": true,
+  "rows": [
+    { "rank": 1, "account_id": 7, "name": "acc-7", "layer": "normal", "dims": [], "until": null, "exempt": false, "priority": 1, "rate": 0.075, "load_rate": 0.1, "in_flight": 1, "concurrency": 10, "last_used_at": "2026-11-11T11:59:00Z" },
+    { "rank": 2, "account_id": 5, "name": "acc-5", "layer": "normal", "dims": [], "until": null, "exempt": true, "priority": 2, "rate": 0.1, "load_rate": 0.5, "in_flight": 5, "concurrency": 10, "last_used_at": null },
+    { "rank": 3, "account_id": 3, "name": "acc-3", "layer": "below", "dims": ["ttfo", "cache"], "until": "2026-11-11T12:30:00Z", "exempt": false, "priority": 1, "rate": 0.075, "load_rate": 0, "in_flight": 0, "concurrency": 10, "last_used_at": "2026-11-11T11:40:00Z" },
+    { "rank": 4, "account_id": 9, "name": "acc-9", "layer": "stopped", "dims": [], "until": null, "exempt": false, "priority": 1, "rate": 0.075, "load_rate": 1, "in_flight": 10, "concurrency": 10, "last_used_at": "2026-11-11T11:58:00Z" }
+  ]
+}
