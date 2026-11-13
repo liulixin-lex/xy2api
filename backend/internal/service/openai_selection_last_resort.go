@@ -59,8 +59,13 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 	now := s.selectionNow()
 	var cands []lastResortCandidate
 	meta := lastResortLogMeta{candidates: len(accounts)}
+	failedTargets := s.stickyChangeAvoid(ctx, req.GroupID, req.SessionHash)
 	for i := range accounts {
 		acc := accounts[i]
+		if _, excluded := failedTargets[acc.ID]; excluded {
+			meta.addReason("failed_change_target")
+			continue
+		}
 		_, isAvoided := avoided[acc.ID]
 		if isAvoided {
 			meta.addReason("session_avoid")

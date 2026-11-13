@@ -120,7 +120,6 @@ func TestResilienceLastResortRebindsFromAvoidedAccount(t *testing.T) {
 			a.TempUnschedulableUntil, a.TempUnschedulableReason = nil, ""
 			r := env.gateway.resilience
 			require.NoError(t, r.store.AddSessionAvoid(t.Context(), selectionTestGroupID, lrSession, lrAccountA, time.Minute))
-			r.avoidingSessions.Store(sessionMarkKey(selectionTestGroupID, lrSession), time.Now().Add(time.Minute))
 			env.cache.bind(lrSession, lrAccountA, time.Hour-time.Minute)
 			result, _ := selectGatewayLastResort(t, env)
 			require.Equal(t, lrAccountB, result.Account.ID)
