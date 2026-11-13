@@ -21,22 +21,6 @@
  },
  {
   "method": "POST",
-  "path": "/accounts/recent-stats/batch",
-  "group": "admin",
-  "reg": "registerAccountRoutes",
-  "module": "accounts",
-  "level": "view",
-  "any_of": [],
-  "flags": [],
-  "target": null,
-  "fields": null,
-  "redact": [
-   "account"
-  ],
-  "ws": false
- },
- {
-  "method": "POST",
   "path": "/accounts",
   "group": "admin",
   "reg": "registerAccountRoutes",
