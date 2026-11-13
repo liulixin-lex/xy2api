@@ -54,16 +54,13 @@ func TestOpenAISelectionStanding(t *testing.T) {
 		want    schedquality.Standing
 	}{
 		{"normal", schedquality.StateView{}, true, 0, schedquality.StandFront},
-		{"cooling", schedquality.StateView{State: schedquality.StateCooling}, true, 0, schedquality.StandBack},
-		{"disabled", schedquality.StateView{State: schedquality.StateCooling}, false, 0, schedquality.StandFront},
-		{"stale_cooling", schedquality.StateView{State: schedquality.StateCooling}, true, 61 * time.Second, schedquality.StandFront},
-		{"exactly_60_seconds", schedquality.StateView{State: schedquality.StateCooling}, true, 60 * time.Second, schedquality.StandBack},
-		{"stale_demote", schedquality.StateView{GroupOverride: schedquality.OverrideRef{Mode: schedquality.OverrideDemote}}, true, 61 * time.Second, schedquality.StandBack},
-		{"disabled_demote", schedquality.StateView{GroupOverride: schedquality.OverrideRef{Mode: schedquality.OverrideDemote}}, false, 0, schedquality.StandBack},
-		{"exempt_cooling", schedquality.StateView{State: schedquality.StateCooling, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}}, true, 0, schedquality.StandFront},
-		{"group_demote_over_all_exempt", schedquality.StateView{GroupOverride: schedquality.OverrideRef{Mode: schedquality.OverrideDemote}, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}}, true, 0, schedquality.StandBack},
-		{"expired_group_falls_back_to_all", schedquality.StateView{State: schedquality.StateCooling, GroupOverride: schedquality.OverrideRef{Mode: schedquality.OverrideDemote, Expires: now}, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}}, true, 0, schedquality.StandFront},
-		{"expired_without_view_refresh", schedquality.StateView{GroupOverride: schedquality.OverrideRef{Mode: schedquality.OverrideDemote, Expires: now}}, true, 0, schedquality.StandFront},
+		{"below", schedquality.StateView{Failing: true}, true, 0, schedquality.StandBack},
+		{"disabled", schedquality.StateView{Failing: true}, false, 0, schedquality.StandFront},
+		{"stale_below", schedquality.StateView{Failing: true}, true, 61 * time.Second, schedquality.StandFront},
+		{"exactly_60_seconds", schedquality.StateView{Failing: true}, true, 60 * time.Second, schedquality.StandBack},
+		{"exempt_failing", schedquality.StateView{Failing: true, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}}, true, 0, schedquality.StandFront},
+		{"expired_exempt", schedquality.StateView{Failing: true, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt, Expires: now}}, true, 0, schedquality.StandBack},
+		{"expired_group_falls_back_to_all", schedquality.StateView{Failing: true, GroupOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt, Expires: now}, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}}, true, 0, schedquality.StandFront},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -78,7 +75,7 @@ func TestOpenAISelectionStanding(t *testing.T) {
 	}
 	t.Run("override_in_other_group", func(t *testing.T) {
 		view := selectionTestView(now)
-		view.States[fakeSchedViewKey{8, 1, "m"}] = schedquality.StateView{AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}, State: schedquality.StateCooling}
+		view.States[fakeSchedViewKey{8, 1, "m"}] = schedquality.StateView{AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}, Failing: true}
 		require.Equal(t, 0, buildSelectionKey(view, 8, "m", selectionTestAccount(1, 1), selectionRequest{}, now).Standing)
 	})
 }
@@ -166,11 +163,11 @@ func TestOpenAISelectionStaleViewWarningRateLimited(t *testing.T) {
 	}()
 	now := time.Now()
 	view := selectionTestView(now.Add(-schedquality.ViewMaxAge - time.Second))
-	require.False(t, selectionAuto(view, now))
-	require.False(t, selectionAuto(view, now.Add(time.Second)))
+	require.False(t, selectionAuto(view, 7, now))
+	require.False(t, selectionAuto(view, 7, now.Add(time.Second)))
 	require.Equal(t, 1, strings.Count(logs.String(), "sched_quality.view_stale"))
-	require.False(t, selectionAuto(view, now.Add(schedquality.ViewMaxAge)))
+	require.False(t, selectionAuto(view, 7, now.Add(schedquality.ViewMaxAge)))
 	require.Equal(t, 2, strings.Count(logs.String(), "sched_quality.view_stale"))
 	view.ViewAt = now
-	require.True(t, selectionAuto(view, now), "refresh restores automatic state")
+	require.True(t, selectionAuto(view, 7, now), "refresh restores automatic state")
 }
