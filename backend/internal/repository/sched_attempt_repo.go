@@ -93,10 +93,6 @@ func (r *schedAttemptRepository) read(ctx context.Context, where string, args ..
 	return result, nil
 }
 
-func (r *schedAttemptRepository) LoadStartedSince(ctx context.Context, since time.Time) ([]schedquality.AttemptSample, error) {
-	return r.read(ctx, `WHERE started_at > $1 ORDER BY started_at, attempt_id`, since)
-}
-
 func (r *schedAttemptRepository) LoadInsertedAfter(ctx context.Context, after time.Time, limit int) ([]schedquality.AttemptSample, time.Time, error) {
 	rows, err := r.read(ctx, `WHERE inserted_at > $1 AND inserted_at <= (
 		SELECT max(inserted_at) FROM (

@@ -157,7 +157,8 @@ func (s *SchedAdminService) Attention(ctx context.Context) (SchedAdminAttention,
 				out.Exempt = append(out.Exempt, a.ID)
 			}
 			for _, r := range x.Substandard {
-				if !r.Exempt {
+				enabled := schedAdminEffective(p, now, p.Policies[r.GroupID].Policy.Enabled)
+				if x.Stop == nil && schedAdminBelow(p, a.ID, r.GroupID, r.Exempt, enabled) {
 					out.Substandard = append(out.Substandard, a.ID)
 					break
 				}

@@ -17,6 +17,7 @@ func TestSchedAdminSummaryAllModelsMarksAndStatus(t *testing.T) {
 	s, e, r := schedAdminFixture()
 	p := e.snapshot
 	now := s.d.Now()
+	p.Policies[1] = SchedPolicyRecord{Policy: schedquality.Policy{Enabled: true}}
 	p.Accounts[1] = schedquality.AccountSummary{Speed: schedquality.SpeedEvidence{N: 4, P50Ms: schedAdminInt(120)}, Error: schedquality.ErrorEvidence{N: 60, Rate: .1}, Cache: schedquality.CacheEvidence{Turns: 5, InputTokens: 100, Ratio: .8}}
 	p.GroupRows[1] = []SchedGroupRow{{GroupID: 1, Model: "a", View: schedquality.StateView{Failing: true, Dims: []schedquality.Dimension{schedquality.DimensionCache}, Until: now.Add(time.Minute)}}, {GroupID: 1, Model: "b", View: schedquality.StateView{Failing: true, Dims: []schedquality.Dimension{schedquality.DimensionError}, Until: now.Add(time.Minute)}}}
 	p.Overrides = []SchedOverride{{AccountID: 1, Mode: schedquality.OverrideExempt}}
@@ -58,6 +59,44 @@ func TestSchedAdminSummaryAllModelsMarksAndStatus(t *testing.T) {
 	attention, err = s.Attention(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, []int64{1}, attention.Substandard)
+}
+func TestSchedAdminAttentionUsesEffectiveLayerPreservingInternalRed(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		configure func(*SchedQualitySnapshot, *Account)
+		below     bool
+	}{
+		{"enabled", func(*SchedQualitySnapshot, *Account) {}, true},
+		{"global off", func(p *SchedQualitySnapshot, _ *Account) { p.GlobalEnabled = false }, false},
+		{"group off", func(p *SchedQualitySnapshot, _ *Account) { p.Policies[1] = SchedPolicyRecord{} }, false},
+		{"missing policy", func(p *SchedQualitySnapshot, _ *Account) { delete(p.Policies, 1) }, false},
+		{"fresh boundary", func(p *SchedQualitySnapshot, _ *Account) { p.At = p.At.Add(-schedquality.ViewMaxAge) }, true},
+		{"stale", func(p *SchedQualitySnapshot, _ *Account) { p.At = p.At.Add(-schedquality.ViewMaxAge - time.Nanosecond) }, false},
+		{"exempt", func(p *SchedQualitySnapshot, _ *Account) {
+			p.Overrides = []SchedOverride{{AccountID: 1, Mode: schedquality.OverrideExempt}}
+		}, false},
+		{"stopped", func(_ *SchedQualitySnapshot, a *Account) { a.Schedulable = false }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, e, r := schedAdminFixture()
+			p := e.snapshot
+			p.Policies[1] = SchedPolicyRecord{Policy: schedquality.Policy{Enabled: true}}
+			p.GroupRows[1] = []SchedGroupRow{{GroupID: 1, Model: "synthetic", View: schedquality.StateView{Failing: true, Dims: []schedquality.Dimension{schedquality.DimensionError}}}}
+			s.d.Groups = schedAdminGroupMembers{schedAdminGroups{1: {ID: 1, Platform: PlatformOpenAI}}, []int64{1}}
+			s.d.Usage = &schedAdminUsage{}
+			tc.configure(p, r.rows[1])
+			attention, err := s.Attention(context.Background())
+			require.NoError(t, err)
+			require.Equal(t, tc.below, len(attention.Substandard) == 1)
+			groups, err := s.GroupsSummary(context.Background(), []int64{1})
+			require.NoError(t, err)
+			require.Equal(t, len(attention.Substandard), groups.Groups[0].Accounts.Below)
+			summary, err := s.Summary(context.Background(), []int64{1})
+			require.NoError(t, err)
+			require.True(t, summary.Accounts[0].Error.Red)
+			require.Len(t, summary.Accounts[0].Substandard, 1)
+		})
+	}
 }
 func TestSchedAdminDetailEvidenceAndEmptyLists(t *testing.T) {
 	s, e, _ := schedAdminFixture()

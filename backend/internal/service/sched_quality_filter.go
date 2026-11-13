@@ -22,21 +22,21 @@ func SchedQualityAccountFilter(ctx context.Context) (SchedQualityFilter, bool) {
 }
 
 func ValidSchedQualityFilter(quality string) bool {
-	return quality == "" || quality == "cooling" || quality == "normal" || quality == "exempt" || quality == "demote"
+	return quality == "" || quality == "substandard" || quality == "normal" || quality == "exempt" || quality == "observing"
 }
 
 func (a SchedAdminAttention) Filter(quality string) SchedQualityFilter {
 	switch quality {
-	case "cooling":
-		return SchedQualityFilter{IDs: a.Cooling}
+	case "substandard":
+		return SchedQualityFilter{IDs: a.Substandard}
 	case "exempt":
 		return SchedQualityFilter{IDs: a.Exempt}
-	case "demote":
-		return SchedQualityFilter{IDs: a.Demote}
+	case "observing":
+		return SchedQualityFilter{IDs: a.Observing}
 	case "normal":
-		ids := append([]int64{}, a.Cooling...)
+		ids := append([]int64{}, a.Substandard...)
 		ids = append(ids, a.Exempt...)
-		ids = append(ids, a.Demote...)
+		ids = append(ids, a.Observing...)
 		slices.Sort(ids)
 		return SchedQualityFilter{IDs: slices.Compact(ids), Exclude: true}
 	}
