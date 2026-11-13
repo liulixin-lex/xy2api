@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -18,17 +17,18 @@ import (
 )
 
 type SchedQualityAdmin interface {
-	Summary(context.Context, []int64, string) (service.SchedAdminSummary, error)
+	Summary(context.Context, []int64) (service.SchedAdminSummary, error)
 	Attention(context.Context) (service.SchedAdminAttention, error)
 	Detail(context.Context, int64) (service.SchedAdminAccountDetail, error)
 	Reset(context.Context, int64, int64) (service.SchedAdminReset, error)
 	SetOverride(context.Context, service.SchedOverride) error
 	ClearOverride(context.Context, int64, int64, int64) error
-	Test(context.Context, int64, string, int64) (service.SchedAdminTest, error)
 	ClearAutoState(context.Context, int64, string, int64) (bool, error)
 	Policy(context.Context, int64) (service.SchedAdminPolicy, error)
 	UpdatePolicy(context.Context, int64, int64, schedquality.Policy, int64) (service.SchedAdminPolicy, error)
-	Board(context.Context, int64, string) (service.SchedAdminBoard, error)
+	Order(context.Context, int64, string) (service.SchedAdminOrder, error)
+	GroupsSummary(context.Context, []int64) (service.SchedAdminGroupsSummary, error)
+	PreviewPolicy(context.Context, int64, int64, schedquality.Policy) (service.SchedAdminPolicyPreview, error)
 }
 type SchedQualityHandler struct{ service SchedQualityAdmin }
 
@@ -64,7 +64,6 @@ func (h *SchedQualityHandler) Summary(c *gin.Context) {
 	middleware.SkipAudit(c)
 	var r struct {
 		AccountIDs []int64 `json:"account_ids" binding:"required,dive,gt=0"`
-		Model      string  `json:"model"`
 	}
 	if e := c.ShouldBindJSON(&r); e != nil {
 		response.BadRequest(c, e.Error())
@@ -74,7 +73,7 @@ func (h *SchedQualityHandler) Summary(c *gin.Context) {
 		response.BadRequest(c, "Too many account ids")
 		return
 	}
-	v, e := h.service.Summary(c.Request.Context(), r.AccountIDs, r.Model)
+	v, e := h.service.Summary(c.Request.Context(), r.AccountIDs)
 	schedQualityReply(c, v, e)
 }
 func (h *SchedQualityHandler) Attention(c *gin.Context) {
@@ -111,7 +110,7 @@ func (h *SchedQualityHandler) SetOverride(c *gin.Context) {
 	}
 	var r struct {
 		GroupID   *int64     `json:"group_id" binding:"required,gte=0"`
-		Mode      string     `json:"mode" binding:"required,oneof=exempt demote"`
+		Mode      string     `json:"mode" binding:"required,oneof=exempt"`
 		ExpiresAt *time.Time `json:"expires_at"`
 		Reason    string     `json:"reason"`
 	}
@@ -119,11 +118,7 @@ func (h *SchedQualityHandler) SetOverride(c *gin.Context) {
 		response.BadRequest(c, e.Error())
 		return
 	}
-	mode := schedquality.OverrideExempt
-	if r.Mode == "demote" {
-		mode = schedquality.OverrideDemote
-	}
-	e := h.service.SetOverride(c.Request.Context(), service.SchedOverride{AccountID: id, GroupID: *r.GroupID, Mode: mode, ExpiresAt: r.ExpiresAt, Reason: r.Reason, OperatorID: schedQualityOperator(c)})
+	e := h.service.SetOverride(c.Request.Context(), service.SchedOverride{AccountID: id, GroupID: *r.GroupID, Mode: schedquality.OverrideExempt, ExpiresAt: r.ExpiresAt, Reason: r.Reason, OperatorID: schedQualityOperator(c)})
 	schedQualityReply(c, nil, e)
 }
 func (h *SchedQualityHandler) ClearOverride(c *gin.Context) {
@@ -139,37 +134,6 @@ func (h *SchedQualityHandler) ClearOverride(c *gin.Context) {
 	}
 	e = h.service.ClearOverride(c.Request.Context(), id, g, schedQualityOperator(c))
 	schedQualityReply(c, nil, e)
-}
-func (h *SchedQualityHandler) Test(c *gin.Context) {
-	middleware.SetAuditAction(c, "sched_quality.test")
-	id, ok := schedQualityID(c)
-	if !ok {
-		return
-	}
-	var r struct {
-		Model string `json:"model"`
-	}
-	if e := c.ShouldBindJSON(&r); e != nil && !errors.Is(e, io.EOF) {
-		response.BadRequest(c, e.Error())
-		return
-	}
-	v, e := h.service.Test(c.Request.Context(), id, r.Model, schedQualityOperator(c))
-	var failures *service.SchedAdminTestErrors
-	if errors.As(e, &failures) {
-		result := "failure"
-		ticketCount := 0
-		for _, ticket := range v.Tests {
-			if ticket.Why != "error" {
-				ticketCount++
-			}
-		}
-		if len(v.Tests) > 0 {
-			result = "partial_failure"
-			e = nil
-		}
-		middleware.SetAuditExtra(c, map[string]any{"result": result, "test_failed_count": len(failures.Models), "test_ticket_count": ticketCount})
-	}
-	schedQualityReply(c, v, e)
 }
 func (h *SchedQualityHandler) ClearAutoState(c *gin.Context) {
 	middleware.SetAuditAction(c, "sched_quality.clear_auto_state")
@@ -199,24 +163,78 @@ func (h *SchedQualityHandler) UpdatePolicy(c *gin.Context) {
 	if !ok {
 		return
 	}
+	version, p, ok := schedQualityPolicyRequest(c)
+	if !ok {
+		return
+	}
+	v, e := h.service.UpdatePolicy(c.Request.Context(), id, version, p, schedQualityOperator(c))
+	schedQualityReply(c, v, e)
+}
+func schedQualityPolicyRequest(c *gin.Context) (int64, schedquality.Policy, bool) {
 	var r struct {
-		Version *int64                          `json:"expected_version" binding:"required,gte=0"`
-		Policy  *service.SchedAdminPolicyPolicy `json:"policy" binding:"required"`
+		Version *int64 `json:"expected_version"`
+		Policy  *struct {
+			Enabled             *bool    `json:"enabled"`
+			TTFTSeconds         *float64 `json:"ttft_seconds"`
+			MaxErrorRate        *float64 `json:"max_error_rate"`
+			MinCacheRatio       *float64 `json:"min_cache_ratio"`
+			TakeoverIdleSeconds *int     `json:"takeover_idle_seconds"`
+		} `json:"policy"`
+	}
+	invalid := func() {
+		response.ErrorFrom(c, infraerrors.BadRequest("INVALID_SCHED_POLICY", "All policy fields and a nonnegative expected_version are required"))
+	}
+	if e := c.ShouldBindJSON(&r); e != nil {
+		invalid()
+		return 0, schedquality.Policy{}, false
+	}
+	if r.Version == nil || *r.Version < 0 || r.Policy == nil {
+		invalid()
+		return 0, schedquality.Policy{}, false
+	}
+	p := r.Policy
+	if p.Enabled == nil || p.TTFTSeconds == nil || p.MaxErrorRate == nil || p.MinCacheRatio == nil || p.TakeoverIdleSeconds == nil {
+		invalid()
+		return 0, schedquality.Policy{}, false
+	}
+	value := schedquality.Policy{Enabled: *p.Enabled, TTFTSeconds: *p.TTFTSeconds, MaxErrorRate: *p.MaxErrorRate, MinCacheRatio: *p.MinCacheRatio, TakeoverIdleSeconds: *p.TakeoverIdleSeconds}
+	if e := service.ValidateSchedQualityPolicy(value); e != nil {
+		response.ErrorFrom(c, e)
+		return 0, value, false
+	}
+	return *r.Version, value, true
+}
+func (h *SchedQualityHandler) Order(c *gin.Context) {
+	id, ok := schedQualityID(c)
+	if !ok {
+		return
+	}
+	v, e := h.service.Order(c.Request.Context(), id, c.Query("model"))
+	schedQualityReply(c, v, e)
+}
+func (h *SchedQualityHandler) GroupsSummary(c *gin.Context) {
+	middleware.SkipAudit(c)
+	var r struct {
+		GroupIDs []int64 `json:"group_ids" binding:"required,dive,gt=0"`
 	}
 	if e := c.ShouldBindJSON(&r); e != nil {
 		response.BadRequest(c, e.Error())
 		return
 	}
-	p := r.Policy
-	v, e := h.service.UpdatePolicy(c.Request.Context(), id, *r.Version, schedquality.Policy{Enabled: p.Enabled, TTFTSeconds: p.TTFTSeconds, MaxErrorRate: p.MaxErrorRate, MinCacheRatio: p.MinCacheRatio, TakeoverIdleSeconds: p.TakeoverIdleSeconds}, schedQualityOperator(c))
+	v, e := h.service.GroupsSummary(c.Request.Context(), r.GroupIDs)
 	schedQualityReply(c, v, e)
 }
-func (h *SchedQualityHandler) Board(c *gin.Context) {
+func (h *SchedQualityHandler) PreviewPolicy(c *gin.Context) {
+	middleware.SkipAudit(c)
 	id, ok := schedQualityID(c)
 	if !ok {
 		return
 	}
-	v, e := h.service.Board(c.Request.Context(), id, c.Query("model"))
+	version, p, ok := schedQualityPolicyRequest(c)
+	if !ok {
+		return
+	}
+	v, e := h.service.PreviewPolicy(c.Request.Context(), id, version, p)
 	schedQualityReply(c, v, e)
 }
 

@@ -323,7 +323,6 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		PaymentVisibleMethodWxpayEnabled:        settings.PaymentVisibleMethodWxpayEnabled,
 		OpenAIOAuthSchedulingRateMultiplier:     settings.OpenAIOAuthSchedulingRateMultiplier,
 		SchedQualityEnabled:                     settings.SchedQualityEnabled,
-		SchedQualityTestEnabled:                 settings.SchedQualityTestEnabled,
 		BalanceLowNotifyEnabled:                 settings.BalanceLowNotifyEnabled,
 		BalanceLowNotifyThreshold:               settings.BalanceLowNotifyThreshold,
 		BalanceLowNotifyRechargeURL:             settings.BalanceLowNotifyRechargeURL,

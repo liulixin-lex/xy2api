@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/liulixin-lex/xy2api/internal/pkg/usagestats"
 )
 
-func (r *usageLogRepository) AdminRequestStats(ctx context.Context, filters UsageLogFilters) (*UsageStats, error) {
+func (r *usageLogRepository) AdminRequestStats(ctx context.Context, filters UsageLogFilters) (*usagestats.AdminRequestStats, error) {
 	where, args, err := adminRequestWhere(filters)
 	if err != nil {
 		return nil, err
@@ -56,5 +58,11 @@ func (r *usageLogRepository) AdminRequestStats(ctx context.Context, filters Usag
 		)
 	`, where)
 
-	return r.readUsageStats(ctx, query, args, filters, true)
+	stats := &usagestats.AdminRequestStats{}
+	base, err := r.readUsageStats(ctx, query, args, filters, stats)
+	if err != nil {
+		return nil, err
+	}
+	stats.UsageStats = *base
+	return stats, nil
 }

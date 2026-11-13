@@ -285,8 +285,7 @@ type SystemSettings struct {
 	PaymentVisibleMethodAlipayEnabled bool
 	PaymentVisibleMethodWxpayEnabled  bool
 
-	SchedQualityEnabled     bool
-	SchedQualityTestEnabled bool
+	SchedQualityEnabled bool
 
 	// OpenAI 账号调度
 	OpenAIOAuthSchedulingRateMultiplier *float64
