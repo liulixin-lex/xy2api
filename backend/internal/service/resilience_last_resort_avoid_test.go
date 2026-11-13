@@ -120,7 +120,7 @@ func TestResilienceOpenAILastResortAvoidOutranksStanding(t *testing.T) {
 	r := env.svc.resilience
 	require.NoError(t, r.store.AddSessionAvoid(t.Context(), selectionTestGroupID, lrSession, lrAccountA, time.Minute))
 	view := selectionTestView(time.Now())
-	view.States[fakeSchedViewKey{selectionTestGroupID, lrAccountB, "gpt-5.1"}] = schedquality.StateView{State: schedquality.StateCooling}
+	view.States[fakeSchedViewKey{selectionTestGroupID, lrAccountB, "gpt-5.1"}] = schedquality.StateView{Failing: true}
 	NewOpenAISelectionBoard(env.svc, func() schedquality.View { return view })
 	require.Equal(t, lrAccountB, selectOpenAILastResort(t, env).Account.ID)
 }

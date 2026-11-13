@@ -31,7 +31,7 @@ func newQualityFixture(t *testing.T) *qualityFixture {
 	f.store = &fakeSchedQualityStore{Now: func() time.Time { return f.now }, Members: map[int64][]int64{10: {1}}, Policies: map[int64]SchedPolicyRecord{10: {GroupID: 10, Policy: q.Policy{Enabled: true, TTFTSeconds: 1, MaxErrorRate: .05, MinCacheRatio: .8, TakeoverIdleSeconds: 900}}}}
 	f.ledger = &fakeSchedAttemptStore{Now: func() time.Time { return f.now }}
 	f.switches = &qualitySwitches{true}
-	f.e = NewSchedQualityEngineService(f.store, f.ledger, nil, f.switches, func() time.Time { return f.now }, nil)
+	f.e = NewSchedQualityEngineService(f.store, f.ledger, f.switches, func() time.Time { return f.now }, nil)
 	return f
 }
 func engineSamples(n int, at time.Time, stream bool) []q.AttemptSample {

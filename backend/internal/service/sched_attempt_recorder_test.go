@@ -54,7 +54,6 @@ func TestSchedAttemptLifecycle(t *testing.T) {
 	require.Equal(t, 1000, *observed[2].TTFOMs)
 	require.Equal(t, schedquality.Outcome(5), observed[3].Outcome)
 	require.Nil(t, observed[4].PromptTokens)
-	require.Nil(t, observed[4].PrevPromptTokens)
 	require.Nil(t, observed[4].CacheReadTokens)
 	for _, row := range observed {
 		id, err := uuid.Parse(row.AttemptID)

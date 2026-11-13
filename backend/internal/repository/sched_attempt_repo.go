@@ -53,8 +53,8 @@ func (r *schedAttemptRepository) InsertBatch(ctx context.Context, rows []schedqu
 }
 
 const schedAttemptColumns = `attempt_id, started_at, finished_at, account_id, group_id, model,
-	request_class, stream, warm, ttfo_ms, censored_ms, outcome, detail, prompt_tokens,
-	prev_prompt_tokens, cache_read_tokens, session_key, request_id, inserted_at, input_tokens, cache_creation_tokens`
+	stream, ttfo_ms, censored_ms, outcome, detail, prompt_tokens,
+	cache_read_tokens, session_key, request_id, inserted_at, input_tokens, cache_creation_tokens`
 
 func (r *schedAttemptRepository) read(ctx context.Context, where string, args ...any) ([]schedquality.AttemptSample, error) {
 	ctx, cancel := context.WithTimeout(ctx, schedquality.LedgerReadTimeout)
@@ -105,10 +105,6 @@ func (r *schedAttemptRepository) LoadInsertedAfter(ctx context.Context, after ti
 		latest = rows[len(rows)-1].InsertedAt
 	}
 	return rows, latest, err
-}
-
-func (r *schedAttemptRepository) LoadRecentByAccount(ctx context.Context, accountID int64, limit int) ([]schedquality.AttemptSample, error) {
-	return r.read(ctx, `WHERE account_id = $1 ORDER BY started_at DESC, attempt_id DESC LIMIT NULLIF($2, 0)`, accountID, limit)
 }
 
 func (r *schedAttemptRepository) DeleteBefore(ctx context.Context, t time.Time) (int64, error) {

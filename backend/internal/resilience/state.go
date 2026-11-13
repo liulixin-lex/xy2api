@@ -47,7 +47,6 @@ type RequestState struct {
 	selectionEligibility any
 	schedSelection       SchedSelection
 	schedSelectionSet    bool
-	schedTest            any
 	currentAttempt       AttemptMarker
 
 	// groupID is the API key's group (0 when ungrouped or unknown).
@@ -518,22 +517,6 @@ func (s *RequestState) SchedSelection() (SchedSelection, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.schedSelection, s.schedSelectionSet
-}
-func (s *RequestState) SetSchedTest(v any) {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	s.schedTest = v
-	s.mu.Unlock()
-}
-func (s *RequestState) SchedTest() any {
-	if s == nil {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.schedTest
 }
 func (s *RequestState) SetCurrentAttempt(m AttemptMarker) {
 	if s == nil {

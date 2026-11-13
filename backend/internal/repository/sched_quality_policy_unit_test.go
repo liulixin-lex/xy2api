@@ -21,7 +21,6 @@ func TestSchedQualityPolicyDoesNotReadLegacyFields(t *testing.T) {
 			record := policies[7]
 			require.Equal(t, int64(7), record.GroupID)
 			require.Equal(t, version, record.Version)
-			require.False(t, record.FromV3)
 			require.Equal(t, schedquality.DefaultPolicy(), record.Policy)
 			require.Equal(t, before, raw, "conversion never rewrites persisted input")
 		})

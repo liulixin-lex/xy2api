@@ -14,14 +14,6 @@ func WilsonLower(bad, n int) float64 {
 	return (p + z2/(2*float64(n)) - WilsonZ*math.Sqrt((p*(1-p)+z2/(4*float64(n)))/float64(n))) / (1 + z2/float64(n))
 }
 
-// Both scale tables have exact hundredths; round upward without float division.
-func normalizedMs(ms int, scale float64) int {
-	k := int64(math.Round(scale * 100))
-	return int((int64(ms)*100 + k - 1) / k)
-}
-
-func speedLimitMs(p Policy) int { return int(math.Round(p.TTFTSeconds * 1000)) }
-
 type latency struct {
 	ms      int
 	timeout bool
@@ -34,8 +26,4 @@ func sortLatencies(values []latency) {
 		}
 		return values[i].ms < values[j].ms
 	})
-}
-
-func evidenceOutcome(o Outcome) bool {
-	return o == OutcomeOK || o == OutcomeTimeout || o == OutcomeAccountFault
 }
