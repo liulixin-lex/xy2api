@@ -1886,6 +1886,8 @@ export type UsageResult = 1 | 2 | 3 | 4
 export interface AdminUsageLog extends UsageLog {
   // Request layer (sched-v2 contract §6.1). Rows without a usage log (most failures) come from the request table;
   // rows written before the upgrade have no result (null).
+  /** usage = a usage log row, unbilled = a request without a bill; ids of the two are separate (contract §6.1). */
+  source?: 'usage' | 'unbilled'
   gateway_request_id?: string | null
   result?: UsageResult | null
   /** Account switches inside this request. */

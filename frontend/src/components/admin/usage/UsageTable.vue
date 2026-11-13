@@ -20,6 +20,7 @@
       <DataTable
         :columns="columns"
         :data="data"
+        :row-key="rowKey"
         :loading="loading"
         :server-side-sort="serverSideSort"
         :default-sort-key="defaultSortKey"
@@ -156,8 +157,10 @@
         </template>
 
         <template #cell-tokens="{ row }">
+          <!-- 无账单请求未观测到用量：不编造 0 -->
+          <span v-if="row.source === 'unbilled' && row.input_tokens == null && row.output_tokens == null" class="text-sm text-gray-400 dark:text-gray-500">—</span>
           <!-- 图片生成请求（仅按次计费时显示图片格式） -->
-          <div v-if="isImageUsage(row)" class="flex items-center gap-1.5">
+          <div v-else-if="isImageUsage(row)" class="flex items-center gap-1.5">
             <svg class="h-4 w-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
@@ -205,8 +208,9 @@
                 </div>
               </div>
             </div>
-            <!-- Token Detail Tooltip -->
+            <!-- Token Detail Tooltip（账单明细只有 usage 行才有） -->
             <div
+              v-if="row.source !== 'unbilled'"
               class="group relative"
               @mouseenter="showTokenTooltip($event, row)"
               @mouseleave="hideTokenTooltip"
@@ -219,7 +223,8 @@
         </template>
 
         <template #cell-cost="{ row }">
-          <div class="text-sm">
+          <span v-if="row.source === 'unbilled' && row.actual_cost == null" class="text-sm text-gray-400 dark:text-gray-500">—</span>
+          <div v-else class="text-sm">
             <div class="flex items-center gap-1.5">
               <span class="font-medium text-green-600 dark:text-green-400">${{ row.actual_cost?.toFixed(6) || '0.000000' }}</span>
               <span
@@ -230,6 +235,7 @@
               >{{ t('admin.usage.longContext') }}</span>
               <!-- Cost Detail Tooltip -->
               <div
+                v-if="row.source !== 'unbilled'"
                 class="group relative"
                 @mouseenter="showTooltip($event, row)"
                 @mouseleave="hideTooltip"
@@ -245,15 +251,22 @@
           </div>
         </template>
 
-        <!-- 首字与总耗时：首字超过该组首字上限（ttfo_over）时为黄色，其余默认色 -->
+        <!-- 合并首字/总耗时的健康度列：左侧色条上端随首字档、下端随总耗时档，中段(40%-60%)短渐变过渡，便于纵向扫视整体健康状况 -->
         <template #cell-latency="{ row }">
-          <div>
+          <div class="flex items-stretch gap-2">
+            <span
+              class="w-1 shrink-0 rounded-full"
+              :class="row.first_token_ms != null
+                ? ['bg-gradient-to-b from-40% to-60%', LATENCY_BAR_FROM_CLASSES[firstTokenSeverity(row.first_token_ms)], LATENCY_BAR_TO_CLASSES[durationSeverity(row.duration_ms ?? 0)]]
+                : LATENCY_BAR_CLASSES[durationSeverity(row.duration_ms ?? 0)]"
+              aria-hidden="true"
+            ></span>
             <div class="grid grid-cols-[max-content_max-content] items-baseline gap-x-2 gap-y-0.5 text-xs">
               <span class="text-gray-400 dark:text-gray-500">{{ t('usage.latencyFirstToken') }}</span>
-              <span v-if="row.first_token_ms != null" :class="['font-medium tabular-nums', firstTokenClass(row)]">{{ formatDuration(row.first_token_ms) }}</span>
+              <span v-if="row.first_token_ms != null" class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(row.first_token_ms)]">{{ formatDuration(row.first_token_ms) }}</span>
               <span v-else class="text-gray-400 dark:text-gray-500">-</span>
               <span class="text-gray-400 dark:text-gray-500">{{ t('usage.latencyDuration') }}</span>
-              <span class="font-medium tabular-nums text-gray-900 dark:text-gray-100">{{ formatDuration(row.duration_ms) }}</span>
+              <span class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[durationSeverity(row.duration_ms ?? 0)]">{{ formatDuration(row.duration_ms) }}</span>
               <template v-if="props.showTokenSpeed && hasUsageTokenMetrics(row)">
                 <span class="text-gray-500 dark:text-gray-400" :title="t('usage.outputTpsHint')">{{ t('usage.outputTps') }}</span>
                 <span data-testid="usage-token-speed" class="whitespace-nowrap font-medium tabular-nums text-gray-700 dark:text-gray-300" :title="t('usage.outputTpsHint')">{{ formatTokenSpeed(row) }}</span>
@@ -265,7 +278,7 @@
         <template #cell-created_at="{ row, value }">
           <span class="inline-flex items-center gap-1">
             <button
-              v-if="expandable && row.gateway_request_id"
+              v-if="expandable && row.gateway_request_id && hasAttempts(row)"
               type="button"
               class="sq-focus -ml-1 inline-flex h-6 w-6 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-dark-700 dark:hover:text-gray-200"
               :aria-expanded="expanded.has(row.gateway_request_id)"
@@ -587,6 +600,14 @@ import { formatTokenPricePerMillion } from '@/utils/usagePricing'
 import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
 import { resolveUsageRequestType } from '@/utils/usageRequestType'
 import {
+  LATENCY_BAR_CLASSES,
+  LATENCY_BAR_FROM_CLASSES,
+  LATENCY_BAR_TO_CLASSES,
+  LATENCY_TEXT_CLASSES,
+  durationSeverity,
+  firstTokenSeverity,
+} from '@/utils/latencyHealth'
+import {
   BILLING_MODE_TOKEN,
   getBillingModeLabel,
   getBillingModeBadgeClass,
@@ -676,9 +697,12 @@ const showAccountBilling = props.showAccountBilling
 const showUpstreamEndpoint = props.showUpstreamEndpoint
 const ipGeoBatchLoading = ref(false)
 
-// 展开的请求（按网关请求号）；首字超过该组首字上限为黄色（FINAL §6，契约 §6.2）。
+// 展开的请求（按网关请求号）；只有 OpenAI 的请求有尝试记录可展开。首字超过该组首字上限为黄色（FINAL §6，契约 §6.2）。
 const expanded = reactive(new Set<string>())
 const toggleExpanded = (id: string) => (expanded.has(id) ? expanded.delete(id) : expanded.add(id))
+const hasAttempts = (row: AdminUsageLog) => row.group?.platform === 'openai'
+// usage 行与无账单行的 id 来自两张表：行键带上来源（契约 §6.1）。
+const rowKey = (row: AdminUsageLog) => `${row.source ?? 'usage'}:${row.id}`
 const firstTokenClass = (row: AdminUsageLog) => (row.ttfo_over ? 'text-amber-600 dark:text-amber-400' : 'text-gray-900 dark:text-gray-100')
 const formatCacheRatio = (row: AdminUsageLog) => {
   const ratio = cacheReadRatio(row)

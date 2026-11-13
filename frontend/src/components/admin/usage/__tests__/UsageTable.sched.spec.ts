@@ -29,7 +29,7 @@ const DataTableStub = {
 }
 
 const row = (patch: Record<string, unknown> = {}) => ({
-  id: 1, gateway_request_id: 'gw-1', created_at: '2026-11-11T12:00:00Z', result: 2, switches: 1, fallback: false, takeover: false,
+  id: 1, source: 'usage', group: { platform: 'openai' }, gateway_request_id: 'gw-1', created_at: '2026-11-11T12:00:00Z', result: 2, switches: 1, fallback: false, takeover: false,
   ttfo_over: false, first_token_ms: 4100, duration_ms: 19800, input_tokens: 800, cache_read_tokens: 3000, cache_creation_tokens: 200,
   ...patch
 })
@@ -38,12 +38,21 @@ const mountTable = (data: unknown[], expandable = true) =>
 
 beforeEach(() => {
   api.listAttempts.mockReset().mockResolvedValue([
-    { attempt_id: 'a1', account_id: 9, account_name: 'acc-9', started_at: '2026-11-11T12:00:00Z', ttfo_ms: null, duration_ms: 900, outcome: 3, error_class: 'CAPACITY_SHED', fallback: false, takeover: false },
-    { attempt_id: 'a2', account_id: 2, account_name: 'acc-2', started_at: '2026-11-11T12:00:01Z', ttfo_ms: 3200, duration_ms: 18900, outcome: 1, error_class: null, fallback: true, takeover: false }
+    { attempt_id: 'a1', account_id: 9, account_name: 'acc-9', started_at: '2026-11-11T12:00:00Z', ttfo_ms: null, duration_ms: 900, outcome: 3, error_class: 'CAPACITY_SHED' },
+    { attempt_id: 'a2', account_id: 2, account_name: 'acc-2', started_at: '2026-11-11T12:00:01Z', ttfo_ms: 3200, duration_ms: 18900, outcome: 1, error_class: null }
   ])
 })
 
 describe('UsageTable — request results (FINAL §6)', () => {
+  it('shows a dash for the unknown tokens and cost of a request without a bill, and no billing tooltips', () => {
+    const w = mount(UsageTable, {
+      props: { data: [row({ source: 'unbilled', input_tokens: null, output_tokens: null, actual_cost: null, total_cost: null })], columns: [] } as never,
+      global: { stubs: { DataTable: { props: ['data'], template: '<div><div v-for="r in data" :key="r.id"><slot name="cell-tokens" :row="r" /><slot name="cell-cost" :row="r" /></div></div>' }, Icon: true } }
+    })
+    expect(w.text()).toBe('——')
+    expect(w.find('.group.relative').exists()).toBe(false)
+  })
+
   it('shows the result with 兜底, 接管 and 换号 n 次 marks only when they apply', () => {
     const w = mountTable([row(), row({ gateway_request_id: 'gw-2', result: 1, switches: 0, fallback: true, takeover: true })])
     const [rescued, success] = w.findAll('[data-usage-result]')
@@ -70,7 +79,7 @@ describe('UsageTable — request results (FINAL §6)', () => {
     const attempts = w.findAll('[data-usage-attempt]')
     expect(attempts.map((tr) => tr.findAll('td').map((td) => td.text()))).toEqual([
       ['1', 'acc-9', 'admin.schedQuality.usage.outcome.failed', 'admin.schedQuality.usage.errorClass.CAPACITY_SHED', '—', '0.9s'],
-      ['2', 'acc-2 admin.schedQuality.usage.fallback', 'admin.schedQuality.usage.outcome.success', '—', '3.2s', '18.9s']
+      ['2', 'acc-2', 'admin.schedQuality.usage.outcome.success', '—', '3.2s', '18.9s']
     ])
     await toggle.trigger('click')
     expect(w.find('[data-usage-attempts]').exists()).toBe(false)
@@ -78,5 +87,7 @@ describe('UsageTable — request results (FINAL §6)', () => {
 
     expect(mountTable([row()], false).find('[data-usage-expand]').exists()).toBe(false)
     expect(mountTable([row({ gateway_request_id: null })]).find('[data-usage-expand]').exists()).toBe(false)
+    // Only OpenAI requests have attempt records.
+    expect(mountTable([row({ group: { platform: 'anthropic' } })]).find('[data-usage-expand]').exists()).toBe(false)
   })
 })

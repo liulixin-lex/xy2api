@@ -17,7 +17,7 @@ const WORDS: Record<string, string> = {
   'admin.schedQuality.dim.error': '报错',
   'admin.schedQuality.dim.cache': '缓存',
   'admin.schedQuality.kind.rate_limit': '限流',
-  'admin.schedQuality.kind.manual_off': '手动',
+  'admin.schedQuality.state.manual': '手动',
   'admin.schedQuality.override.allGroups': '全部分组'
 }
 vi.mock('vue-i18n', async () => ({

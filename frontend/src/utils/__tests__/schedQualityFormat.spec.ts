@@ -35,11 +35,13 @@ describe('statusText (FINAL §2, §5)', () => {
     expect(statusText({ status: 'observing', stop: null, reset_at: null }, now, t, te)).toBe('admin.schedQuality.state.observing')
   })
 
-  it('writes a stop as 停用·reason·until, the fallback word for an unknown reason, and no time without an end', () => {
+  it('writes a stop as 停用·reason·until, 停用·手动 for a manual one, the fallback word for an unknown reason', () => {
     const until = new Date(local(14, 14, 20)).toISOString()
     expect(statusText({ status: 'disabled', stop: { source: 'auto', reason: 'rate_limit', until }, reset_at: null }, now, t, te))
       .toBe('admin.schedQuality.state.disabled·admin.schedQuality.kind.rate_limit·11-14 14:20')
-    expect(statusText({ status: 'disabled', stop: { source: 'manual', reason: 'brand_new', until: null }, reset_at: null }, now, t, te))
+    expect(statusText({ status: 'disabled', stop: { source: 'manual', reason: 'manual_off', until: null }, reset_at: null }, now, t, te))
+      .toBe('admin.schedQuality.state.disabled·admin.schedQuality.state.manual')
+    expect(statusText({ status: 'disabled', stop: { source: 'auto', reason: 'brand_new', until: null }, reset_at: null }, now, t, te))
       .toBe('admin.schedQuality.state.disabled·admin.schedQuality.unknown')
     expect(statusText({ status: 'normal', stop: null, reset_at: null }, now, t, te)).toBe('admin.schedQuality.state.normal')
   })

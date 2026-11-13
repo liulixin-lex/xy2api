@@ -69,15 +69,15 @@ export const recoveredRecently = (resetAt: string | null, now: number) =>
   resetAt !== null && now - Date.parse(resetAt) < RECOVERY_WINDOW_MS
 
 /**
- * Status column (FINAL §2): 正常, 观察中 (with 恢复于 time right after a recovery), or 停用·reason·until. The stop
- * reason uses the short word of its code; unknown codes show the fallback word.
+ * Status column (FINAL §2): 正常, 观察中 (with 恢复于 time right after a recovery), or 停用·reason·until. A manual stop
+ * reads 停用·手动; an automatic one uses the short word of its fixed code (contract 02 §5), unknown codes the fallback.
  */
 export function statusText(summary: Pick<SchedAccountSummary, 'status' | 'stop' | 'reset_at'>, now: number, t: Translate, te: HasKey): string {
   const sep = ' · '
   if (summary.status === 'disabled') {
     const parts = [t('admin.schedQuality.state.disabled')]
     if (summary.stop) {
-      parts.push(kindName(summary.stop.reason, t, te))
+      parts.push(summary.stop.source === 'manual' ? t('admin.schedQuality.state.manual') : kindName(summary.stop.reason, t, te))
       if (summary.stop.until) parts.push(fmtAt(summary.stop.until, now))
     }
     return parts.join('·')

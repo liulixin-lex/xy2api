@@ -42,6 +42,7 @@ export default {
       normal: 'Normal',
       observing: 'Observing',
       disabled: 'Off',
+      manual: 'manual',
       substandard: 'Below',
       exempted: 'Exempt',
       invalid: 'Invalid',

@@ -129,8 +129,6 @@ export interface UsageAttempt {
   duration_ms: number | null
   outcome: 1 | 2 | 3 | 5
   error_class: string | null
-  fallback: boolean
-  takeover: boolean
 }
 
 /** The attempts of one request, oldest first; `at` is the request time, to hit the index. */
