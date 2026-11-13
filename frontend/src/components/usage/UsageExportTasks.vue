@@ -3,7 +3,8 @@
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
         <h3 class="font-medium text-gray-900 dark:text-gray-100">{{ t('usageExports.title') }}</h3>
-        <p class="mt-1 text-sm text-gray-600 dark:text-gray-300">{{ t('usageExports.retention') }}</p>
+        <!-- 管理端只放短状态词（FINAL §7）；用户端保持原句 -->
+        <p class="mt-1 text-sm text-gray-600 dark:text-gray-300">{{ t(scope === 'admin' ? 'usageExports.retentionShort' : 'usageExports.retention') }}</p>
       </div>
       <button type="button" class="btn btn-secondary" :disabled="loading" @click="refresh">{{ t('common.refresh') }}</button>
     </div>

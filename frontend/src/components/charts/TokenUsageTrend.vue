@@ -3,7 +3,7 @@
     <h3 class="mb-2 text-sm font-semibold text-gray-900 dark:text-white">
       {{ t('admin.dashboard.tokenUsageTrend') }}
     </h3>
-    <p class="mb-4 text-xs text-gray-500 dark:text-gray-400">{{ t('usage.cacheReadRatioTrendHint') }}</p>
+    <p v-if="hint" class="mb-4 text-xs text-gray-500 dark:text-gray-400">{{ t('usage.cacheReadRatioTrendHint') }}</p>
     <div v-if="loading" class="flex h-48 items-center justify-center">
       <LoadingSpinner />
     </div>
@@ -51,10 +51,12 @@ ChartJS.register(
 
 const { t } = useI18n()
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   trendData: TrendDataPoint[]
   loading?: boolean
-}>()
+  /** The explanation under the title; the admin usage page has none (FINAL §7). */
+  hint?: boolean
+}>(), { hint: true })
 
 const isDarkMode = computed(() => {
   return document.documentElement.classList.contains('dark')
