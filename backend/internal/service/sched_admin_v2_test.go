@@ -143,6 +143,25 @@ func (u *schedAdminUsage) GroupLast60(_ context.Context, ids []int64, at time.Ti
 func (e *schedAdminEngine) PreviewPolicy(_ context.Context, g int64, p schedquality.Policy) ([]SchedPolicyChange, error) {
 	return e.changes, nil
 }
+func TestSchedAdminUnconfiguredPolicyUsesEngineDefaults(t *testing.T) {
+	s, e, _ := schedAdminFixture()
+	s.d.Groups = schedAdminGroupMembers{schedAdminGroups{1: {ID: 1, Platform: PlatformOpenAI}}, []int64{1}}
+	s.d.Usage = &schedAdminUsage{}
+	check := func(expected schedquality.Policy) {
+		t.Helper()
+		detail, err := s.Detail(context.Background(), 1)
+		require.NoError(t, err)
+		require.Equal(t, schedAdminPolicyFields(expected), detail.Groups[0].Policy)
+		groups, err := s.GroupsSummary(context.Background(), []int64{1})
+		require.NoError(t, err)
+		require.Equal(t, schedAdminPolicyFields(expected), groups.Groups[0].SchedAdminPolicyPolicy)
+	}
+	check(schedquality.DefaultPolicy())
+	configured := schedquality.DefaultPolicy()
+	configured.TakeoverIdleSeconds = 0
+	e.snapshot.Policies[1] = SchedPolicyRecord{Policy: configured}
+	check(configured)
+}
 func TestSchedAdminGroupCountsAndPreview(t *testing.T) {
 	s, e, r := schedAdminFixture()
 	now := s.d.Now()
