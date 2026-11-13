@@ -173,9 +173,9 @@ func errorSample(s AttemptSample) bool { return !s.ClientCanceled }
 
 func cacheSample(s AttemptSample) bool {
 	return s.Continuation && s.SessionKey != "" && s.Outcome == OutcomeOK && !s.ClientCanceled &&
-		s.PromptTokens != nil && s.CacheReadTokens != nil && s.CacheWriteTokens != nil &&
-		*s.PromptTokens >= 0 && *s.CacheReadTokens >= 0 && *s.CacheWriteTokens >= 0 &&
-		int64(*s.PromptTokens)+int64(*s.CacheReadTokens)+int64(*s.CacheWriteTokens) > 0
+		s.InputTokens != nil && s.CacheReadTokens != nil && s.CacheCreationTokens != nil &&
+		*s.InputTokens >= 0 && *s.CacheReadTokens >= 0 && *s.CacheCreationTokens >= 0 &&
+		int64(*s.InputTokens)+int64(*s.CacheReadTokens)+int64(*s.CacheCreationTokens) > 0
 }
 
 func selectEvidence(rows []AttemptSample, group int64, now time.Time, short, long time.Duration, minN int, eligible func(AttemptSample) bool, other bool) ([]AttemptSample, EvidenceWindow) {
@@ -272,7 +272,7 @@ func cacheEvidence(rows []AttemptSample, window EvidenceWindow, p Policy) CacheE
 	sessions := make(map[session]tokens)
 	for _, s := range rows {
 		read := int64(*s.CacheReadTokens)
-		input := int64(*s.PromptTokens) + read + int64(*s.CacheWriteTokens)
+		input := int64(*s.InputTokens) + read + int64(*s.CacheCreationTokens)
 		e.ReadTokens += read
 		e.InputTokens += input
 		key := session{s.GroupID, s.SessionKey}

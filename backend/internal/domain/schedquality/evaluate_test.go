@@ -26,7 +26,7 @@ func evaluationSamples(n int, group int64, age time.Duration) []AttemptSample {
 			AccountID: evaluationScope.AccountID, Model: evaluationScope.Model, GroupID: group,
 			StartedAt: finish.Add(-time.Second), FinishedAt: finish, Outcome: OutcomeOK,
 			SessionKey: "synthetic-session", Stream: true, TTFOMs: sampleInt(500),
-			PromptTokens: sampleInt(10), CacheReadTokens: sampleInt(80), CacheWriteTokens: sampleInt(10),
+			InputTokens: sampleInt(10), CacheReadTokens: sampleInt(80), CacheCreationTokens: sampleInt(10),
 		}
 	}
 	return rows

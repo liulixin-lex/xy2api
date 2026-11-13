@@ -140,7 +140,7 @@ type AttemptSample struct {
 	Outcome                                         Outcome
 	Detail                                          string
 	PromptTokens, PrevPromptTokens, CacheReadTokens *int
-	CacheWriteTokens                                *int
+	InputTokens, CacheCreationTokens                *int // Uncached input and cache writes; PromptTokens remains total input.
 	SessionKey, RequestID                           string
 	InsertedAt                                      time.Time
 }

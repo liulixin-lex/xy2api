@@ -29,7 +29,7 @@ func TestEvaluateCacheRules(t *testing.T) {
 				if i%tc.sessions < tc.lowSessions {
 					read = tc.read
 				}
-				rows[i].PromptTokens, rows[i].CacheReadTokens, rows[i].CacheWriteTokens = sampleInt(100-read), sampleInt(read), sampleInt(0)
+				rows[i].InputTokens, rows[i].CacheReadTokens, rows[i].CacheCreationTokens = sampleInt(100-read), sampleInt(read), sampleInt(0)
 			}
 			e := evaluateFixture(rows)
 			if e.Verdicts.Cache != tc.want {
@@ -43,9 +43,9 @@ func TestEvaluateCacheRules(t *testing.T) {
 	for i := range rows {
 		rows[i].Continuation = true
 		rows[i].SessionKey = string(rune('a' + i%2))
-		rows[i].PromptTokens, rows[i].CacheReadTokens, rows[i].CacheWriteTokens = sampleInt(1), sampleInt(0), sampleInt(0)
+		rows[i].InputTokens, rows[i].CacheReadTokens, rows[i].CacheCreationTokens = sampleInt(1), sampleInt(0), sampleInt(0)
 		if i < 2 {
-			rows[i].PromptTokens, rows[i].CacheReadTokens = sampleInt(100), sampleInt(900)
+			rows[i].InputTokens, rows[i].CacheReadTokens = sampleInt(100), sampleInt(900)
 		}
 	}
 	e := evaluateFixture(rows)
@@ -54,7 +54,7 @@ func TestEvaluateCacheRules(t *testing.T) {
 	}
 	// Writes are part of all input, with no minimum prompt length or prior-size clamp.
 	for i := range rows {
-		rows[i].PromptTokens, rows[i].CacheReadTokens, rows[i].CacheWriteTokens = sampleInt(1), sampleInt(8), sampleInt(2)
+		rows[i].InputTokens, rows[i].CacheReadTokens, rows[i].CacheCreationTokens = sampleInt(1), sampleInt(8), sampleInt(2)
 	}
 	e = evaluateFixture(rows)
 	if e.Cache.InputTokens != 330 || e.Cache.ReadTokens != 240 || e.Verdicts.Cache != VerdictFail {
@@ -72,12 +72,12 @@ func TestEvaluateCacheEligibility(t *testing.T) {
 		{"cold", func(s *AttemptSample) { s.Continuation = false; s.Warm = true }, 0},
 		{"no-session", func(s *AttemptSample) { s.SessionKey = "" }, 0},
 		{"unknown-usage", func(s *AttemptSample) { s.CacheReadTokens = nil }, 0},
-		{"unknown-writes", func(s *AttemptSample) { s.CacheWriteTokens = nil }, 0},
+		{"unknown-writes", func(s *AttemptSample) { s.CacheCreationTokens = nil }, 0},
 		{"failed", func(s *AttemptSample) { s.Outcome = OutcomeAccountFault }, 0},
 		{"zero-total", func(s *AttemptSample) {
-			s.PromptTokens, s.CacheReadTokens, s.CacheWriteTokens = sampleInt(0), sampleInt(0), sampleInt(0)
+			s.InputTokens, s.CacheReadTokens, s.CacheCreationTokens = sampleInt(0), sampleInt(0), sampleInt(0)
 		}, 0},
-		{"negative-input", func(s *AttemptSample) { s.PromptTokens = sampleInt(-1) }, 0},
+		{"negative-input", func(s *AttemptSample) { s.InputTokens = sampleInt(-1) }, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rows := evaluationSamples(1, 10, time.Minute)
