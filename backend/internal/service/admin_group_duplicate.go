@@ -205,8 +205,8 @@ func (s *adminServiceImpl) RecoverDuplicateGroup(ctx context.Context, id int64, 
 	return hydrated, nil
 }
 
-// DuplicateGroup creates an inactive copy of a group's configuration and exact
-// account priorities. The repository commits the group, bindings, and outbox
+// DuplicateGroup creates an inactive copy of a group's configuration and
+// account memberships. The repository commits the group, bindings, and outbox
 // event atomically so a failed binding never leaves an orphan group.
 func (s *adminServiceImpl) DuplicateGroup(ctx context.Context, id int64, actorScope, operationKey string) (*Group, error) {
 	if err := s.ValidateSimpleModeGroupOperation(AdminGroupOperationDuplicate); err != nil {
