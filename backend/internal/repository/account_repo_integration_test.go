@@ -1762,3 +1762,16 @@ func idsOfAccounts(accounts []service.Account) []int64 {
 	}
 	return out
 }
+
+func (s *AccountRepoSuite) TestCapacityOrderUsesAccountPriority() {
+	group := mustCreateGroup(s.T(), s.client, &service.Group{Name: "synthetic-capacity-order"})
+	first := mustCreateAccount(s.T(), s.client, &service.Account{Name: "synthetic-first", Priority: 1})
+	second := mustCreateAccount(s.T(), s.client, &service.Account{Name: "synthetic-second", Priority: 9})
+	mustBindAccountToGroup(s.T(), s.client, first.ID, group.ID, 100)
+	mustBindAccountToGroup(s.T(), s.client, second.ID, group.ID, 1)
+	rows, err := s.repo.ListSchedulableCapacityByGroupIDs(s.ctx, []int64{group.ID})
+	s.Require().NoError(err)
+	s.Require().Len(rows, 2)
+	s.Equal(first.ID, rows[0].AccountID, "retained database member priority cannot override account priority")
+	s.Equal(second.ID, rows[1].AccountID)
+}

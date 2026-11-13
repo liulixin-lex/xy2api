@@ -14,19 +14,19 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-type selectionAffinityCache struct {
+type selectionModelCache struct {
 	capturePinnedCache
 	session string
 }
 
-func (c *selectionAffinityCache) GetSessionAccountID(_ context.Context, _ int64, key string) (int64, error) {
+func (c *selectionModelCache) GetSessionAccountID(_ context.Context, _ int64, key string) (int64, error) {
 	if strings.HasPrefix(key, "openai:") {
 		c.session = strings.TrimPrefix(key, "openai:")
 	}
 	return 0, nil
 }
 
-func TestOpenAISelectionHandlerFrozenAffinityModel(t *testing.T) {
+func TestOpenAISelectionHandlerFrozenEvidenceModel(t *testing.T) {
 	for _, name := range []string{"compact", "chat", "codex"} {
 		t.Run(name, func(t *testing.T) {
 			withHandlerResilience(t, nil)
@@ -59,7 +59,7 @@ func TestOpenAISelectionHandlerFrozenAffinityModel(t *testing.T) {
 				}
 				return captureResponse(200, captureSSE(), true), nil
 			}}
-			cache := &selectionAffinityCache{}
+			cache := &selectionModelCache{}
 			h, recorder, router := captureFixture(t, account, up, captureOptions{repo: repo, cache: cache})
 			response := captureRequest(router, path, body)
 			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
@@ -85,8 +85,8 @@ func TestOpenAISelectionHandlerFrozenAffinityModel(t *testing.T) {
 				}
 				return selected.Account.ID
 			}
-			require.Equal(t, other.ID, selectAccount(""), "without affinity the ID tie-break selects the control account")
-			require.Equal(t, account.ID, selectAccount(session), "a real handler success is found under the same frozen evidence key")
+			require.Equal(t, other.ID, selectAccount(""), "the ID tie-break selects the control account")
+			require.Equal(t, other.ID, selectAccount(session), "recent success does not add an affinity sorting key")
 		})
 	}
 }

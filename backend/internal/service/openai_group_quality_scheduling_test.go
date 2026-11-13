@@ -549,7 +549,7 @@ func TestOpenAIQualitySelection(t *testing.T) {
 			loads = append(loads, 80, 95)
 		}
 		for _, load := range loads {
-			cases = append(cases, testCase{"quality borrow uses affinity before load/" + path + "/load=" + strconv.Itoa(load), func(t *testing.T) {
+			cases = append(cases, testCase{"quality borrow uses load after rate/" + path + "/load=" + strconv.Itoa(load), func(t *testing.T) {
 				svc, _, conc := qualityBorrowEnv(path)
 				settings := &selectionSettingRepoStub{values: map[string]string{}}
 				svc.rateLimitService = &RateLimitService{settingService: NewSettingService(settings, svc.cfg)}
@@ -568,7 +568,6 @@ func TestOpenAIQualitySelection(t *testing.T) {
 				svc.accountRepo = repo
 				conc.loadRates = map[int64]int{1: 0, 2: 0, 3: load, 4: 0, 5: 0}
 				session := "quality-recent-success-session"
-				svc.recentSessionSuccess().record(openAIRecentSessionKey{groupID, session, "gpt-test"}, 3, time.Now())
 				q := &openAIQualityRequest{scope: "quality-borrow-recent", group: groupID, apiID: 93, session: session, model: "gpt-test", loaded: true,
 					state: OpenAIQualityState{Generation: 1, Owner: 1, Binding: 1}}
 				ctx := context.WithValue(withOpenAIQualityRouting(context.Background()), openAIQualityContextKey{}, q)
@@ -577,7 +576,7 @@ func TestOpenAIQualitySelection(t *testing.T) {
 					OpenAIUpstreamTransportAny, "", "", false, PlatformOpenAI, false, true)
 				require.NoError(t, err)
 				require.NotNil(t, selection)
-				require.Equal(t, int64(3), selection.Account.ID, "affinity precedes non-full load within equal standing, priority and rate")
+				require.Equal(t, int64(4), selection.Account.ID, "lower load wins within equal standing, priority and rate")
 				require.True(t, selection.StickyCapacitySpillover)
 				selection.ReleaseFunc()
 			}})
