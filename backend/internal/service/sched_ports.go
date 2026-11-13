@@ -189,6 +189,13 @@ type SchedTestAdmission interface { // implemented by WP4 in openai_selection_ad
 // ---- WP4 ----
 type SchedBoardRow struct {
 	AccountID             int64
+	Name                  string
+	Layer                 string // normal | below | stopped
+	Dims                  []schedquality.Dimension
+	Until                 *time.Time
+	Exempt                bool
+	LoadRate              int
+	LastUsedAt            *time.Time
 	Rank                  int
 	Eligible              bool
 	Reject                string     // first hard-admission reason when not eligible
