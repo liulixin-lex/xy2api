@@ -103,7 +103,11 @@ func (s *OpenAIGatewayService) prepareOpenAIStickyChange(ctx context.Context, gr
 	}
 	key := s.openAISessionCacheKey(session)
 	expected, err := cache.GetSessionBinding(ctx, derefGroupID(groupID), key)
-	if (err == nil && expected.AccountID <= 0 || errors.Is(err, ErrStickySessionNotFound)) && s.openAISessionHashReadOldFallbackEnabled() {
+	if aliases, ok := s.cache.(OpenAIStickyAliasCache); ok {
+		if legacy := s.openAILegacySessionCacheKey(ctx, session); legacy != "" && (s.openAISessionHashReadOldFallbackEnabled() || s.openAISessionHashDualWriteOldEnabled()) {
+			expected, err = aliases.ResolveSessionBinding(ctx, derefGroupID(groupID), key, legacy, s.openAISessionHashReadOldFallbackEnabled())
+		}
+	} else if (err == nil && expected.AccountID <= 0 || errors.Is(err, ErrStickySessionNotFound)) && s.openAISessionHashReadOldFallbackEnabled() {
 		if legacyKey := s.openAILegacySessionCacheKey(ctx, session); legacyKey != "" {
 			key = legacyKey
 			expected, err = cache.GetSessionBinding(ctx, derefGroupID(groupID), key)

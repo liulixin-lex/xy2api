@@ -50,7 +50,43 @@ func (c *selectionRuntimeCache) CommitSessionBinding(_ context.Context, _ int64,
 		return false, nil
 	}
 	c.sessionBindings[key] = next
+	if expected.LegacyKey != "" && c.sessionBindings[expected.LegacyKey] != 0 {
+		c.sessionBindings[expected.LegacyKey] = next
+	}
 	return true, nil
+}
+
+func (c *selectionRuntimeCache) ResolveSessionBinding(ctx context.Context, group int64, primary, legacy string, fallback bool) (StickySessionBinding, error) {
+	if c.sessionBindings[primary] == 0 && fallback {
+		c.sessionBindings[primary] = c.sessionBindings[legacy]
+	}
+	binding, err := c.GetSessionBinding(ctx, group, primary)
+	binding.LegacyKey = legacy
+	if c.sessionBindings[legacy] != 0 && binding.AccountID != 0 {
+		c.sessionBindings[legacy] = binding.AccountID
+	}
+	return binding, err
+}
+
+func (c *selectionRuntimeCache) SyncSessionBindingAlias(_ context.Context, _ int64, primary, legacy string, owner int64, _ time.Duration, create bool) error {
+	current := c.sessionBindings[primary]
+	if current > 0 && (owner == 0 || current == owner) && (create || c.sessionBindings[legacy] != 0) {
+		c.sessionBindings[legacy] = current
+	}
+	return nil
+}
+
+func (c *selectionRuntimeCache) DeleteSessionBindingAliases(_ context.Context, _ int64, primary, legacy string, owner int64) (bool, error) {
+	current := c.sessionBindings[primary]
+	if current == 0 {
+		current = c.sessionBindings[legacy]
+	}
+	if owner != 0 && current != owner {
+		return false, nil
+	}
+	delete(c.sessionBindings, primary)
+	delete(c.sessionBindings, legacy)
+	return current != 0, nil
 }
 
 func (c *selectionRuntimeCache) GetSessionBinding(ctx context.Context, group int64, key string) (StickySessionBinding, error) {
@@ -178,10 +214,10 @@ func TestOpenAISelectionRuntimeSessionCacheAndOwnerSlotOrder(t *testing.T) {
 				require.Equal(t, int64(1), f.cache.sessionBindings[key])
 				require.Equal(t, []int64{1}, f.attempts, "migration runs before taking the owner slot")
 				if legacy {
-					require.Zero(t, f.cache.sessionBindings["openai:session"])
+					require.EqualValues(t, 1, f.cache.sessionBindings["openai:session"])
 				}
 				for _, actualKey := range append(f.cache.ttlKeys, f.cache.casKeys...) {
-					require.Equal(t, key, actualKey)
+					require.Equal(t, "openai:session", actualKey, "all requests use the canonical primary binding")
 				}
 			})
 		}

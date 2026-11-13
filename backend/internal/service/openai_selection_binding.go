@@ -10,6 +10,16 @@ import (
 type StickySessionBinding struct {
 	AccountID  int64
 	Generation string
+	// LegacyKey is an alias of the canonical key, never a second CAS authority.
+	LegacyKey string
+}
+
+// Alias operations share the primary owner's generation and never let an
+// alias outlive it. Resolution adopts a legacy-only owner without changing it.
+type OpenAIStickyAliasCache interface {
+	ResolveSessionBinding(context.Context, int64, string, string, bool) (StickySessionBinding, error)
+	SyncSessionBindingAlias(context.Context, int64, string, string, int64, time.Duration, bool) error
+	DeleteSessionBindingAliases(context.Context, int64, string, string, int64) (bool, error)
 }
 
 type OpenAIStickyVersionedCache interface {

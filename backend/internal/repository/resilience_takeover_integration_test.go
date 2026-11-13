@@ -44,3 +44,7 @@ func TestTakeoverFailureSharedForTwoMinutes(t *testing.T) {
 	require.Empty(t, avoid)
 	require.Zero(t, second.Exists(ctx, key).Val())
 }
+
+func TestStickyBindingAliasesIntegration(t *testing.T) {
+	testStickyBindingAliases(t, integrationRedis.Options().Addr)
+}

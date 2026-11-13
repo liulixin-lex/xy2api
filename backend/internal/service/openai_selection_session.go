@@ -82,6 +82,9 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 	if err != nil || expected.AccountID != owner.ID {
 		return nil
 	}
+	if pending := pendingOpenAIStickyChange(ctx); pending != nil && pending.key == key {
+		expected.LegacyKey = pending.expected.LegacyKey
+	}
 	avoided, err := s.store.SessionAvoid(ctx, groupID, strings.TrimSpace(sessionHash))
 	if err != nil {
 		return nil

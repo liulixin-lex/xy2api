@@ -40,6 +40,10 @@ var commitSessionBindingScript = redis.NewScript(`
 if redis.call('GET', KEYS[1]) ~= ARGV[1] or redis.call('GET', KEYS[2]) ~= ARGV[2] then return 0 end
 redis.call('SET', KEYS[1], ARGV[3], 'PX', ARGV[5])
 redis.call('SET', KEYS[2], ARGV[4], 'PX', ARGV[5])
+if #KEYS == 4 and redis.call('EXISTS', KEYS[3]) == 1 then
+  redis.call('SET', KEYS[3], ARGV[3], 'PX', ARGV[6])
+  redis.call('SET', KEYS[4], ARGV[4], 'PX', ARGV[6])
+end
 return 1
 `)
 
@@ -47,7 +51,11 @@ func (c *gatewayCache) CommitSessionBinding(ctx context.Context, groupID int64, 
 	if expected.AccountID <= 0 || expected.Generation == "" || target <= 0 || sessionHash == "" || ttl <= 0 {
 		return false, errors.New("invalid versioned sticky binding replacement")
 	}
-	n, err := commitSessionBindingScript.Run(ctx, c.rdb, sessionBindingKeys(groupID, sessionHash), expected.AccountID, expected.Generation, target, uuid.NewString(), ttl.Milliseconds()).Int64()
+	keys := sessionBindingKeys(groupID, sessionHash)
+	if expected.LegacyKey != "" && expected.LegacyKey != sessionHash {
+		keys = append(keys, sessionBindingKeys(groupID, expected.LegacyKey)...)
+	}
+	n, err := commitSessionBindingScript.Run(ctx, c.rdb, keys, expected.AccountID, expected.Generation, target, uuid.NewString(), ttl.Milliseconds(), min(ttl, 10*time.Minute).Milliseconds()).Int64()
 	return n == 1, err
 }
 
