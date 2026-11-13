@@ -214,12 +214,12 @@ describe('SchedAccountDrawer', () => {
     expect(row(53).textContent).not.toContain('admin.schedQuality.result.failed')
   })
 
-  it('shows unknown verdicts, states, classes and outcomes as the fallback word in a neutral style', async () => {
+  it('shows unknown verdicts, states and outcomes as the fallback word in a neutral style', async () => {
     const d = detail()
     d.groups[0].by_model[0].ttfo.verdict = 'future' as never
     Object.assign(d.groups[1].by_model[0], { state: 'future' })
     d.groups[1].by_model[0].error.verdict = 'future' as never
-    Object.assign(d.recent_attempts[0], { class: 'future', outcome: 'future' })
+    Object.assign(d.recent_attempts[0], { outcome: 'future' })
     api.accountDetail.mockResolvedValue(d)
     mount(SchedAccountDrawer, { attachTo: document.body })
     openSchedDrawer({ id: 479, name: 'acc-03' })
@@ -240,7 +240,7 @@ describe('SchedAccountDrawer', () => {
     const recent = Array.from(panel().querySelectorAll('section'))
       .find((el) => el.querySelector('h3')?.textContent === 'admin.schedQuality.drawer.recent')!
     const first = recent.querySelectorAll('tbody tr')[0].querySelectorAll('td')
-    expect([first[2].textContent, first[4].textContent]).toEqual(['admin.schedQuality.unknown', 'admin.schedQuality.unknown'])
+    expect(first[3].textContent).toBe('admin.schedQuality.unknown')
     expect(panel().textContent).not.toMatch(/admin\.schedQuality\.(class|result|aria|state)\.future/)
   })
 

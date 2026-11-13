@@ -27,7 +27,6 @@ function board(): SchedBoard {
 const counts = (w: ReturnType<typeof mount>) =>
   ['pass', 'fail', 'nodata'].map((kind) => w.get(`[data-sq-trial="${kind}"]`).text())
 
-const limits = (w: ReturnType<typeof mount>) => w.findAll('[data-sq-class-limits] > span').map((item) => item.text())
 const save = (w: ReturnType<typeof mount>) => (w.vm as unknown as { save: () => Promise<boolean> }).save()
 
 async function mountField() {
@@ -43,28 +42,24 @@ beforeEach(() => {
 })
 
 describe('GroupSchedPolicyField', () => {
-  it('shows the stored thresholds and the light / heavy / x-heavy limits of the selected model', async () => {
+  it('shows the stored thresholds', async () => {
     const w = await mountField()
     expect((w.get('input[type="number"][step="0.1"][min="0.5"]').element as HTMLInputElement).value).toBe('10')
-    expect(w.findAll('[data-sq-class-limits] > span').map((item) => item.text())).toEqual([
-      'admin.schedQuality.class.light 7.3s', 'admin.schedQuality.class.heavy 12.0s', 'admin.schedQuality.class.xheavy 14.3s'
-    ])
+    expect(w.find('[data-sq-class-limits]').exists()).toBe(false)
     expect(api.groupBoard.mock.calls).toEqual([[53, undefined]])
   })
 
-  it('takes the trial models from the board, first without a model, and the factors from class_limits_ms[model] ?? default (K27)', async () => {
+  it('takes the trial models from the board, first without a model (K27)', async () => {
     api.groupBoard.mockImplementation(async (_id: number, model?: string) => ({ ...board(), model: model ?? 'm-custom', models: ['m-custom', 'gpt-6.1-sol'] }))
     const w = await mountField()
     expect(api.groupBoard.mock.calls).toEqual([[53, undefined]])
     const modelSelect = w.findAllComponents(Select)[0]
     expect(modelSelect.props('options')).toEqual([{ value: 'm-custom', label: 'm-custom' }, { value: 'gpt-6.1-sol', label: 'gpt-6.1-sol' }])
     expect(modelSelect.props('modelValue')).toBe('m-custom')
-    expect(limits(w)).toEqual(['admin.schedQuality.class.light 7.5s', 'admin.schedQuality.class.heavy 12.0s', 'admin.schedQuality.class.xheavy 14.0s'])
 
     modelSelect.vm.$emit('update:modelValue', 'gpt-6.1-sol')
     await flushPromises()
     expect(api.groupBoard.mock.calls).toEqual([[53, undefined], [53, 'gpt-6.1-sol']])
-    expect(limits(w)).toEqual(['admin.schedQuality.class.light 7.3s', 'admin.schedQuality.class.heavy 12.0s', 'admin.schedQuality.class.xheavy 14.3s'])
   })
 
   it('keeps the API precision of untouched thresholds: 0.875 round-trips and an unchanged block sends no PUT', async () => {

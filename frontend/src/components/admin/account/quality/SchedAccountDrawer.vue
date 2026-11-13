@@ -48,7 +48,7 @@
     </div>
 
     <template v-else>
-      <!-- Model tabs, cards, per-class first output -->
+      <!-- Model tabs and cards -->
       <section>
         <div v-if="detail.models.length" v-roving-tabs role="tablist" :aria-label="t('admin.schedQuality.aria.model')" class="mb-3 flex flex-wrap gap-1">
           <button
@@ -70,12 +70,6 @@
               tabindex="0"
               :class="['sq-focus sq-num mt-1 inline-block text-2xl font-semibold leading-8', tile.text === '—' ? 'sq-text-3' : 'sq-text']"
             >{{ tile.text }}</span>
-          </div>
-        </div>
-        <div class="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-[13px] md:grid-cols-4">
-          <div v-for="cls in CLASSES" :key="cls" class="flex gap-2">
-            <span class="sq-text-3">{{ t(`admin.schedQuality.class.${cls}`) }}</span>
-            <b class="sq-num font-medium text-gray-700 dark:text-gray-300">{{ classValue(cls) }}</b>
           </div>
         </div>
       </section>
@@ -146,7 +140,6 @@
                 <tr>
                   <th scope="col">{{ t('admin.schedQuality.col.time') }}</th>
                   <th scope="col">{{ t('admin.schedQuality.col.group') }}</th>
-                  <th scope="col">{{ t('admin.schedQuality.col.class') }}</th>
                   <th scope="col" class="sq-r w-[84px]">{{ t('admin.schedQuality.dim.ttfo') }}</th>
                   <th scope="col" class="sq-r w-[84px]">{{ t('admin.schedQuality.col.result') }}</th>
                 </tr>
@@ -155,7 +148,6 @@
                 <tr v-for="(attempt, index) in shownRecent" :key="`${attempt.at}-${index}`" :class="{ 'sq-weak': attemptWeak(attempt) }">
                   <td class="sq-num sq-text-3">{{ fmtClock(attempt.at) }}</td>
                   <td>{{ groupNames.get(attempt.group_id) ?? `#${attempt.group_id}` }}</td>
-                  <td>{{ enumWord(attempt.class, SCHED_CLASSES, 'admin.schedQuality.class', t) }}</td>
                   <td class="sq-r sq-num">{{ fmtTtfo(attempt.ttfo_ms, false, t) }}</td>
                   <td class="sq-r">{{ resultWord(attempt) }}</td>
                 </tr>
@@ -210,15 +202,15 @@ import SchedOverridePopover from './SchedOverridePopover.vue'
 import SchedOverrideCapsule from './SchedOverrideCapsule.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
 import type {
-  SchedAccountGroup, SchedAutoState, SchedOverrideRequest, SchedRecentAttempt, SchedRequestClass
+  SchedAccountGroup, SchedAutoState, SchedOverrideRequest, SchedRecentAttempt
 } from '@/types/schedQuality'
 import { secondsUntil, useSchedQualityClock, useSchedQualityPoll } from '@/composables/useSchedQuality'
 import { closeSchedDrawer, markSchedChanged, openSchedBoard, openSchedDrawer, trackSchedReload, useSchedLayers } from '@/composables/useSchedLayers'
 import { isRecovering, useAccountRecovery } from '@/composables/useAccountRecovery'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 import {
-  attemptResult, attemptWeak, enumWord, fmtCacheRatio, fmtClock, fmtCountdown, fmtErrorRate, fmtTtfo, kindName,
-  parentIdFromKey, SCHED_CLASSES
+  attemptResult, attemptWeak, fmtCacheRatio, fmtClock, fmtCountdown, fmtErrorRate, fmtTtfo, kindName,
+  parentIdFromKey
 } from '@/utils/schedQualityFormat'
 import { vRovingTabs } from '@/utils/rovingTabs'
 import { vTip } from '@/utils/tip'
@@ -234,7 +226,6 @@ const props = defineProps<{
   onRecovered?: (accountId: number) => Promise<void> | void
 }>()
 
-const CLASSES: SchedRequestClass[] = ['light', 'regular', 'heavy', 'xheavy']
 const RECENT_SHORT = 10
 const RECENT_LONG = 50
 
@@ -308,7 +299,6 @@ const tiles = computed(() => {
     { dim: 'cache', text: fmtCacheRatio(c?.cache.ratio), tip: c ? t('admin.schedQuality.tip.samples', { n: c.cache.turns }) : '' }
   ]
 })
-const classValue = (cls: SchedRequestClass) => fmtTtfo(card.value?.ttfo.by_class.find((b) => b.class === cls)?.p90_ms, false, t)
 
 const groupNames = computed(() => new Map(detail.value?.groups.map((g) => [g.group_id, g.name]) ?? []))
 const scopeGroups = computed(() => detail.value?.groups.map((g) => ({ id: g.group_id, name: g.name })) ?? [])

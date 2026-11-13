@@ -6,7 +6,6 @@ export type SchedVerdictFrom = 'real'
 export type SchedState = 'normal' | 'cooling'
 export type SchedStanding = 'front' | 'back'
 export type SchedOverrideMode = 'exempt'
-export type SchedRequestClass = 'light' | 'regular' | 'heavy' | 'xheavy'
 export type SchedOutcome = 'ok' | 'timeout' | 'account_fault' | 'other'
 /** Cooling: speed | error | cache | acute_timeout; normal: '' | unverified. */
 export type SchedReason =
@@ -72,12 +71,6 @@ export interface SchedAccountsSummaryRequest {
 
 // ---- GET /accounts/:id ----
 
-export interface SchedClassStat {
-  class: SchedRequestClass
-  n: number
-  p90_ms: number | null
-}
-
 export interface SchedModelEvidence {
   /** Evidence key. */
   model: string
@@ -95,7 +88,6 @@ export interface SchedModelEvidence {
     p90_timeout: boolean
     fail_bound_ms: number | null
     fail_bound_timeout: boolean
-    by_class: SchedClassStat[]
   }
   error: { n: number; sessions: number; bad: number; rate: number | null; lcb: number | null }
   cache: { turns: number; sessions: number; ratio: number | null }
@@ -147,7 +139,6 @@ export interface SchedRecentAttempt {
   at: string
   group_id: number
   model: string
-  class: SchedRequestClass
   stream: boolean
   warm: boolean
   ttfo_ms: number | null
@@ -202,14 +193,10 @@ export interface SchedPolicy extends SchedGroupThresholds {
   enabled: boolean
 }
 
-export type SchedClassLimits = Record<SchedRequestClass, number>
-
 export interface SchedGroupPolicy {
   group_id: number
   version: number
   policy: SchedPolicy
-  /** Per model, plus "default" for every other model. */
-  class_limits_ms: Record<string, SchedClassLimits>
 }
 
 export interface SchedGroupPolicyUpdate {

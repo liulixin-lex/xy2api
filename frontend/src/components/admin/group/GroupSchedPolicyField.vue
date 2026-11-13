@@ -23,17 +23,10 @@
       </div>
 
       <label :for="ids.ttft" class="text-gray-700 dark:text-gray-300">{{ t('admin.schedQuality.policy.ttft') }}</label>
-      <div class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
-        <span class="inline-flex items-center gap-2">
-          <input :id="ids.ttft" v-model="form.ttft" type="number" step="0.1" min="0.5" max="600" :aria-invalid="!valid.ttft" :class="['input w-24 py-1.5 text-right sq-num', { 'input-error': !valid.ttft }]" @input="edited.ttft = true" />
-          <span class="sq-text-3">{{ t('admin.schedQuality.policy.seconds') }}</span>
-        </span>
-        <span class="inline-flex flex-wrap gap-x-3 text-[13px]" data-sq-class-limits>
-          <span v-for="item in converted" :key="item.cls">
-            <span class="sq-text-3">{{ t(`admin.schedQuality.class.${item.cls}`) }}</span> <b class="sq-num font-medium text-gray-700 dark:text-gray-300">{{ item.value }}s</b>
-          </span>
-        </span>
-      </div>
+      <span class="inline-flex items-center gap-2">
+        <input :id="ids.ttft" v-model="form.ttft" type="number" step="0.1" min="0.5" max="600" :aria-invalid="!valid.ttft" :class="['input w-24 py-1.5 text-right sq-num', { 'input-error': !valid.ttft }]" @input="edited.ttft = true" />
+        <span class="sq-text-3">{{ t('admin.schedQuality.policy.seconds') }}</span>
+      </span>
 
       <label :for="ids.error" class="text-gray-700 dark:text-gray-300">{{ t('admin.schedQuality.policy.error') }}</label>
       <span class="inline-flex items-center gap-2">
@@ -93,7 +86,7 @@ import { useI18n } from 'vue-i18n'
 import Toggle from '@/components/common/Toggle.vue'
 import Select from '@/components/common/Select.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
-import type { SchedBoard, SchedGroupPolicy, SchedPolicy, SchedRequestClass, SchedTakeoverIdleSeconds } from '@/types/schedQuality'
+import type { SchedBoard, SchedGroupPolicy, SchedPolicy, SchedTakeoverIdleSeconds } from '@/types/schedQuality'
 import { trialVerdicts } from '@/utils/schedQualityVerdict'
 
 // Quality gate block of the OpenAI group edit dialog (design spec D.1, D.2). Saved on its own with the policy
@@ -102,7 +95,6 @@ import { trialVerdicts } from '@/utils/schedQualityVerdict'
 // thresholds always come from the API. Models of the trial are the board's request models (K27).
 type TrialKind = 'pass' | 'fail' | 'nodata'
 const TRIAL_KINDS: TrialKind[] = ['pass', 'fail', 'nodata']
-const CONVERTED_CLASSES: SchedRequestClass[] = ['light', 'heavy', 'xheavy']
 const TAKEOVER_VALUES: SchedTakeoverIdleSeconds[] = [-1, 0, 300, 900, 1800]
 
 const props = defineProps<{ groupId: number }>()
@@ -174,14 +166,6 @@ const current = computed<SchedPolicy>(() => {
 })
 const lastValid = ref<SchedPolicy | null>(null)
 watch(current, (value) => { if (isValid.value) lastValid.value = value }, { immediate: true })
-
-// Converted limits for the other classes: X × (class limit / regular limit) of the selected model.
-const converted = computed(() => {
-  const limits = record.value?.class_limits_ms[model.value] ?? record.value?.class_limits_ms.default
-  const x = lastValid.value?.ttft_seconds
-  if (!limits || !x || !limits.regular) return []
-  return CONVERTED_CLASSES.map((cls) => ({ cls, value: (x * limits[cls] / limits.regular).toFixed(1) }))
-})
 
 // Trial on the board of the selected model. The first load asks without a model and takes the board's default and
 // its model list; picking another model loads that board.

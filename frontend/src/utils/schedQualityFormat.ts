@@ -1,5 +1,5 @@
 import type {
-  SchedOutcome, SchedReason, SchedRecentAttempt, SchedRequestClass, SchedState, SchedVerdict
+  SchedOutcome, SchedReason, SchedRecentAttempt, SchedState, SchedVerdict
 } from '@/types/schedQuality'
 
 // Display rules shared by the list, the drawer, the board and the group settings (design spec A.1, B, C, D).
@@ -14,17 +14,11 @@ export const DASH = '—'
 
 export const SCHED_VERDICTS: readonly SchedVerdict[] = ['pass', 'marginal', 'fail', 'nodata']
 export const SCHED_STATES: readonly SchedState[] = ['normal', 'cooling']
-export const SCHED_CLASSES: readonly SchedRequestClass[] = ['light', 'regular', 'heavy', 'xheavy']
 const SCHED_OUTCOMES: readonly SchedOutcome[] = ['ok', 'timeout', 'account_fault', 'other']
 
 /** A finite enum value from the API, or null when this UI does not know it: shown as the fallback word, neutral. */
 export function known<T extends string>(value: string | null | undefined, values: readonly T[]): T | null {
   return (values as readonly string[]).includes(value ?? '') ? (value as T) : null
-}
-
-/** Word of a finite enum value under `prefix`; unknown values show the fallback word. */
-export function enumWord<T extends string>(value: string, values: readonly T[], prefix: string, t: Translate): string {
-  return known(value, values) ? t(`${prefix}.${value}`) : t('admin.schedQuality.unknown')
 }
 
 /** First output: `{x.x}s`, the timeout word, or a dash. */

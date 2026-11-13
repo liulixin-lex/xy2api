@@ -42,17 +42,10 @@ export default {
     col: {
       group: 'Group',
       state: 'State',
-      class: 'Class',
       time: 'Time',
       result: 'Result',
       account: 'Account',
       rank: '#',
-    },
-    class: {
-      light: 'Light',
-      regular: 'Regular',
-      heavy: 'Heavy',
-      xheavy: 'X-heavy',
     },
     scope: {
       account: 'Account',

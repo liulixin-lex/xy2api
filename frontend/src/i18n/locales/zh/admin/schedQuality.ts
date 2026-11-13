@@ -42,17 +42,10 @@ export default {
     col: {
       group: '分组',
       state: '状态',
-      class: '档',
       time: '时间',
       result: '结果',
       account: '账号',
       rank: '#',
-    },
-    class: {
-      light: '轻',
-      regular: '常规',
-      heavy: '重',
-      xheavy: '超重',
     },
     scope: {
       account: '账号',
