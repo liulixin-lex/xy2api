@@ -206,24 +206,19 @@ type SchedTestAdmission interface { // implemented by WP4 in openai_selection_ad
 
 // ---- WP4 ----
 type SchedBoardRow struct {
-	AccountID             int64
-	Name                  string
-	Layer                 string // normal | below | stopped
-	Dims                  []schedquality.Dimension
-	Until                 *time.Time
-	Exempt                bool
-	LoadRate              int
-	LastUsedAt            *time.Time
-	Rank                  int
-	Eligible              bool
-	Reject                string     // first hard-admission reason when not eligible
-	RejectUntil           *time.Time // when that reason has an expiry (rate limit, temporary pause, model limit ...), else nil
-	Standing              schedquality.Standing
-	Priority              int
-	Rate                  float64
-	InFlight, Concurrency int
-	RecentlyFullSeconds   int  // 0 when not marked
-	CanTakeOver           bool // Eligible && group takeover enabled && schedquality.CanTakeOver && not recently full
+	AccountID   int64
+	Name        string
+	Rank        int
+	Layer       string // normal | below | stopped
+	Dims        []schedquality.Dimension
+	Until       *time.Time
+	Exempt      bool
+	Priority    int
+	Rate        float64
+	LoadRate    int
+	InFlight    int
+	Concurrency int
+	LastUsedAt  *time.Time
 }
 type SchedSelectionBoard interface {
 	// Board orders the group's accounts for one assumed request: streaming text, token-billed, no session, HTTP.

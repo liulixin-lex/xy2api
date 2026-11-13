@@ -10,21 +10,19 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
-// OpenAISelectionBoard shares the gateway's admission and the selection chain's
-// view and full marks. It never acquires slots or records full observations.
+// OpenAISelectionBoard uses the gateway's admission, view and ordering.
+// It never acquires slots or records full observations.
 type OpenAISelectionBoard struct {
 	service *OpenAIGatewayService
 	view    func() schedquality.View
 	now     func() time.Time
-	marks   *fullMarks
 }
 
 var _ SchedSelectionBoard = (*OpenAISelectionBoard)(nil)
 
 func NewOpenAISelectionBoard(service *OpenAIGatewayService, view func() schedquality.View) *OpenAISelectionBoard {
-	board := &OpenAISelectionBoard{service: service, view: view, now: time.Now, marks: &fullMarks{}}
+	board := &OpenAISelectionBoard{service: service, view: view, now: time.Now}
 	if service != nil {
-		board.marks = &service.selectionFullMarks
 		service.selectionBoard = board
 		if service.resilience != nil {
 			service.resilience.sessionResetAt = func(accountID int64) time.Time { return service.selectionView().ResetAt(accountID) }
@@ -87,7 +85,7 @@ func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model s
 			ok, reason = false, "channel_pricing_restricted"
 		}
 		key := buildSelectionKey(view, groupID, model, account, selectionReq, now)
-		row := SchedBoardRow{AccountID: account.ID, Eligible: ok, Reject: reason, Standing: schedquality.Standing(key.Standing), Priority: key.Priority, Rate: key.Rate, Concurrency: account.Concurrency}
+		row := SchedBoardRow{AccountID: account.ID, Priority: key.Priority, Rate: key.Rate, Concurrency: account.Concurrency}
 		row.Name, row.Layer = account.Name, "normal"
 		row.LoadRate, row.LastUsedAt = key.LoadRate, account.LastUsedAt
 		state := selectionState(view, groupID, account, model)
@@ -106,29 +104,22 @@ func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model s
 		if !ok {
 			row.Layer = "stopped"
 			if reason == "account_scheduling_threshold" {
-				row.RejectUntil = threshold.Until
+				row.Until = threshold.Until
 			} else {
-				row.RejectUntil = selectionRejectUntil(ctx, s, account, model, reason, now)
+				row.Until = selectionRejectUntil(ctx, s, account, model, reason, now)
 			}
-			row.Until = row.RejectUntil
 		}
-		currentlyFull := false
 		if load := loads[account.ID]; load != nil {
 			row.InFlight = load.CurrentConcurrency
-			currentlyFull = account.Concurrency > 0 && load.CurrentConcurrency >= account.Concurrency
 		}
-		if at := b.marks.last(account.ID); !at.IsZero() && now.Sub(at) < schedquality.TakeoverFullCooloff {
-			row.RecentlyFullSeconds = max(0, int(now.Sub(at)/time.Second))
-		}
-		idle, takeover := view.TakeoverIdle(groupID)
-		row.CanTakeOver = ok && takeover && idle >= 0 && (selectionAuto(view, groupID, now) && schedquality.StandingOf(selectionState(view, groupID, account, model), true, now) == schedquality.StandFront) && !currentlyFull && !b.marks.Recently(account.ID, now)
 		ordered = append(ordered, keyedRow{row, key})
 	}
 	sort.SliceStable(ordered, func(i, j int) bool {
-		if ordered[i].row.Eligible != ordered[j].row.Eligible {
-			return ordered[i].row.Eligible
+		iStopped, jStopped := ordered[i].row.Layer == "stopped", ordered[j].row.Layer == "stopped"
+		if iStopped != jStopped {
+			return !iStopped
 		}
-		if !ordered[i].row.Eligible {
+		if iStopped {
 			return ordered[i].row.AccountID < ordered[j].row.AccountID
 		}
 		return selectionLess(ordered[i].key, ordered[j].key)
