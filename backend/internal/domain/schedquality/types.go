@@ -135,10 +135,12 @@ type AttemptSample struct {
 	Model                                           string
 	Class                                           RequestClass
 	Stream, Warm                                    bool
+	ClientCanceled, Continuation                    bool
 	TTFOMs, CensoredMs                              *int
 	Outcome                                         Outcome
 	Detail                                          string
 	PromptTokens, PrevPromptTokens, CacheReadTokens *int
+	InputTokens, CacheCreationTokens                *int // Uncached input and cache writes; PromptTokens remains total input.
 	SessionKey, RequestID                           string
 	InsertedAt                                      time.Time
 }
@@ -205,13 +207,14 @@ type TestSummary struct { // the pooled turns of one row's current round, for di
 }
 
 type StateRow struct {
-	AccountID    int64
-	Model        string
-	GroupID      int64
-	State        State
-	Level        int
-	Reason       Reason
-	Since, Until time.Time
+	AccountID     int64
+	Model         string
+	GroupID       int64
+	State         State
+	Level         int
+	Reason        Reason
+	Since, Until  time.Time
+	EvidenceSince time.Time
 }
 type Inputs struct {
 	Policy       Policy

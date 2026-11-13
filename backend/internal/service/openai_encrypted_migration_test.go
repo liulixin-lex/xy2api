@@ -98,6 +98,7 @@ func TestEncryptedStateKeepsStickyOwnerAcrossSelectionEntrypoints(t *testing.T) 
 				cache := &selectionRebindCache{atomicStickyTestCache: &atomicStickyTestCache{bindings: map[string]int64{"openai:" + session: 1}}}
 				svc := &OpenAIGatewayService{
 					cache: cache, cfg: newSchedulerTestOpenAIWSV2Config(),
+					resilience:         NewResilienceService(nil, newMemResilienceStore()),
 					concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
 					accountRepo: schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{
 						accounts: []Account{selectionFixtureAccount(1, 0), selectionFixtureAccount(2, 1)},
@@ -125,6 +126,8 @@ func TestEncryptedStateKeepsStickyOwnerAcrossSelectionEntrypoints(t *testing.T) 
 				t.Cleanup(result.ReleaseFunc)
 				require.Equal(t, tc.want, result.Account.ID)
 				if !tc.exclude {
+					require.Equal(t, int64(1), cache.bindings["openai:"+session], "selection preserves owner until success")
+					CompleteOpenAIStickyChange(ctx, result.Account.ID, true, false)
 					require.Equal(t, tc.want, cache.bindings["openai:"+session])
 				}
 			})

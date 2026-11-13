@@ -31,8 +31,8 @@ describe('useSchedQualitySummary', () => {
     await result.refresh([479, 503])
     expect(summary).toHaveBeenCalledWith([479, 503], expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(result.state.value).toBe('loaded')
-    expect(result.byAccount.value.get(479)?.cooling[0].group_id).toBe(53)
-    expect(result.view.value).toEqual({ at: '…', stale: false, global_enabled: true })
+    expect(result.byAccount.value.get(479)?.substandard[0].group_id).toBe(53)
+    expect(result.view.value).toEqual({ at: '2026-11-11T12:00:00Z', stale: false, global_enabled: true })
 
     hidden = true
     await result.refresh([479])

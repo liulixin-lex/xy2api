@@ -116,6 +116,7 @@
           <div v-if="hasActionsColumn" class="border-t border-gray-200 pt-3 dark:border-dark-700">
             <slot name="cell-actions" :row="row" :value="row['actions']" :expanded="actionsExpanded"></slot>
           </div>
+          <slot name="row-detail" :row="row" />
         </div>
       </div>
     </template>
@@ -887,7 +888,8 @@ const measureElement = (el: any) => {
 }
 
 const measureRowComponent = (instance: any) => {
-  measureElement((instance as ComponentPublicInstance | null)?.$el)
+  const row = instance as (ComponentPublicInstance & { rowEl?: HTMLElement | null }) | null
+  measureElement(row?.rowEl ?? row?.$el)
 }
 
 const onRowClick = (row: any) => emit('rowClick', row)
