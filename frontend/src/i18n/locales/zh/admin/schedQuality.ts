@@ -18,6 +18,11 @@ export default {
     },
     more: '+{n}',
     samples: '{n}次',
+    level: '{n}级',
+    mark: {
+      merged: '合',
+      other: '他',
+    },
     state: {
       normal: '正常',
       observing: '观察中',
@@ -44,6 +49,8 @@ export default {
       recent: '最近请求',
     },
     col: {
+      until: '恢复',
+      level: '阶梯',
       group: '分组',
       state: '状态',
       time: '时间',
@@ -146,6 +153,7 @@ export default {
     },
     unknown: '其他',
     policy: {
+      off: '关',
       gate: '质量门槛',
       ttft: '首字上限',
       error: '错误上限',
@@ -166,6 +174,8 @@ export default {
       accountRate: '账号倍率',
     },
     tip: {
+      merged: '合并各组',
+      otherGroup: '依据来自其他组',
       samples: '{n} 条',
       recentlyFull: '刚占满',
       noTakeover: '暂不接管',

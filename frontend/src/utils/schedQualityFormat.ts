@@ -1,5 +1,5 @@
 import type {
-  SchedAccountSummary, SchedMark, SchedOutcome, SchedReason, SchedRecentAttempt, SchedState, SchedVerdict, SchedDim
+  SchedAccountSummary, SchedGroupModelDetail, SchedGroupThresholds, SchedMark, SchedReason, SchedState, SchedVerdict, SchedDim
 } from '@/types/schedQuality'
 
 // Display rules shared by the list, the drawer, the board and the group settings (design spec A.1, B, C, D).
@@ -14,7 +14,6 @@ export const DASH = '—'
 
 export const SCHED_VERDICTS: readonly SchedVerdict[] = ['pass', 'marginal', 'fail', 'nodata']
 export const SCHED_STATES: readonly SchedState[] = ['normal', 'cooling']
-const SCHED_OUTCOMES: readonly SchedOutcome[] = ['ok', 'timeout', 'account_fault', 'other']
 
 /** A finite enum value from the API, or null when this UI does not know it: shown as the fallback word, neutral. */
 export function known<T extends string>(value: string | null | undefined, values: readonly T[]): T | null {
@@ -68,19 +67,6 @@ export function causeDim(reason: SchedReason): SchedDim | null {
   return null
 }
 
-/** Result word of a recent attempt (spec B.7); null for an outcome this UI does not know. */
-export function attemptResult(attempt: SchedRecentAttempt): 'ok' | 'timeout' | 'failed' | 'canceled' | null {
-  if (!known(attempt.outcome, SCHED_OUTCOMES)) return null
-  if (attempt.outcome === 'ok') return 'ok'
-  if (attempt.outcome === 'timeout') return 'timeout'
-  if (attempt.outcome === 'other' && (attempt.detail === 'client_cancel' || attempt.detail === 'unfinished')) return 'canceled'
-  return 'failed'
-}
-
-/** Attempts that do not count toward any verdict are shown in the secondary colour. */
-export const attemptWeak = (attempt: SchedRecentAttempt) =>
-  attempt.outcome === 'other' || (attempt.outcome === 'timeout' && !(attempt.stream && attempt.warm))
-
 /** Class of a number carrying a verdict. */
 export const verdictClass = (verdict: SchedVerdict) => `sq-v-${verdict}`
 
@@ -91,13 +77,6 @@ export function policyShort(policy: { ttft_seconds: number; max_error_rate: numb
     error: String(+(policy.max_error_rate * 100).toFixed(2)),
     cache: String(Math.round(policy.min_cache_ratio * 100))
   })
-}
-
-/** `HH:mm:ss` for recent attempts. */
-export function fmtClock(iso: string): string {
-  const d = new Date(iso)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
 /** `HH:mm` on the day of `now`, otherwise `MM-DD HH:mm` (local time). */
@@ -151,4 +130,28 @@ export function statusText(summary: Pick<SchedAccountSummary, 'status' | 'stop' 
   }
   if (summary.status === 'normal') return t('admin.schedQuality.state.normal')
   return t('admin.schedQuality.unknown')
+}
+
+/** The three lines of a group as shown: `10s`, `5%`, `70%`. */
+export function policyParts(policy: Pick<SchedGroupThresholds, 'ttft_seconds' | 'max_error_rate' | 'min_cache_ratio'>): Record<SchedDim, string> {
+  return {
+    ttfo: `${+policy.ttft_seconds.toFixed(2)}s`,
+    error: `${+(policy.max_error_rate * 100).toFixed(2)}%`,
+    cache: `${Math.round(policy.min_cache_ratio * 100)}%`
+  }
+}
+
+/**
+ * One dimension of a group and model in the drawer: what the verdict used and its colour. First output shows the
+ * requests over the line out of n, errors the rate, cache the ratio; n is set apart for the two rates. Red = this
+ * dimension fails the group's line, grey = too few samples (FINAL §6); merged evidence is marked.
+ */
+export function dimDetail(row: SchedGroupModelDetail, dim: SchedDim): { text: string; n: number | null; cls: string; merged: boolean } {
+  const d = row[dim]
+  const cls = d.verdict === 'fail' ? 'sq-red' : d.verdict === 'short' ? 'sq-text-3' : ''
+  const merged = d.scope === 'merged'
+  if (d.n === 0) return { text: DASH, n: null, cls: 'sq-text-3', merged: false }
+  if (dim === 'ttfo') return { text: `${row.ttfo.bad}/${d.n}`, n: null, cls, merged }
+  if (dim === 'error') return { text: fmtErrorRate(row.error.bad / d.n), n: d.n, cls, merged }
+  return { text: fmtCacheRatio(row.cache.ratio), n: d.n, cls, merged }
 }

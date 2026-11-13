@@ -5,7 +5,6 @@ export type SchedVerdictFrom = 'real'
 export type SchedState = 'normal' | 'cooling'
 export type SchedStanding = 'front' | 'back'
 export type SchedOverrideMode = 'exempt'
-export type SchedOutcome = 'ok' | 'timeout' | 'account_fault' | 'other'
 /** Cooling: speed | error | cache | acute_timeout; normal: '' | unverified. */
 export type SchedReason =
   | 'speed'
@@ -83,29 +82,7 @@ export interface SchedAccountsSummary {
   accounts: SchedAccountSummary[]
 }
 
-// ---- GET /accounts/:id ----
-
-export interface SchedModelEvidence {
-  /** Evidence key. */
-  model: string
-  /** Request model that maps to this evidence key for the account; "" when none (contract clarification K27). */
-  request_model: string
-  samples: number
-  sessions: number
-  from: string | null
-  to: string | null
-  ttfo: {
-    n: number
-    sessions: number
-    timeouts: number
-    p90_ms: number | null
-    p90_timeout: boolean
-    fail_bound_ms: number | null
-    fail_bound_timeout: boolean
-  }
-  error: { n: number; sessions: number; bad: number; rate: number | null; lcb: number | null }
-  cache: { turns: number; sessions: number; ratio: number | null }
-}
+// ---- GET /accounts/:id (contract §4.11) ----
 
 export interface SchedGroupThresholds {
   ttft_seconds: number
@@ -114,25 +91,45 @@ export interface SchedGroupThresholds {
   takeover_idle_seconds: SchedTakeoverIdleSeconds
 }
 
-export interface SchedGroupModelRow {
-  model: string
-  state: SchedState
-  level: number
-  reason: SchedReason
-  since: string | null
-  until: string | null
-  ttfo: { verdict: SchedVerdict; from: SchedVerdictFrom | null; n: number; p90_ms: number | null; p90_timeout: boolean; limit_ms: number }
-  error: { verdict: SchedVerdict; from: SchedVerdictFrom | null; n: number; rate: number | null; limit: number }
-  cache: { verdict: SchedVerdict; from: SchedVerdictFrom | null; n: number; ratio: number | null; limit: number }
+export interface SchedPolicy extends SchedGroupThresholds {
+  enabled: boolean
 }
 
-export interface SchedAccountGroup {
+/** One dimension of one group and model: the evidence the verdict used (contract §4.3) and the verdict. */
+export interface SchedDimDetail {
+  /** Where the evidence came from: this group, or every group merged when this group had too few. */
+  scope: 'own' | 'merged'
+  window_min: number
+  n: number
+  lcb: number | null
+  verdict: 'pass' | 'fail' | 'short'
+}
+
+export interface SchedGroupModelDetail {
+  model: string
+  /** The internal state; an exemption does not change it. */
+  failing: boolean
+  dims: SchedDim[]
+  /** Ladder level 0–5. */
+  level: number
+  since: string | null
+  until: string | null
+  /** Groups whose requests renewed this round (到点例外). */
+  other_group_ids: number[]
+  exempt: boolean
+  /** bad = requests over the line (timeouts included). */
+  ttfo: SchedDimDetail & { bad: number }
+  error: SchedDimDetail & { bad: number }
+  cache: SchedDimDetail & { ratio: number | null }
+}
+
+export interface SchedAccountGroupDetail {
   group_id: number
   name: string
-  gate_enabled: boolean
-  policy: SchedGroupThresholds
-  override: SchedOverride | null
-  by_model: SchedGroupModelRow[]
+  policy: SchedPolicy
+  /** The exemption in effect for this group (its own or the all-groups one). */
+  exemption: SchedExemption | null
+  by_model: SchedGroupModelDetail[]
 }
 
 export interface SchedAutoState {
@@ -149,30 +146,17 @@ export interface SchedAutoState {
   why: string
 }
 
-export interface SchedRecentAttempt {
-  at: string
-  group_id: number
-  model: string
-  stream: boolean
-  warm: boolean
-  ttfo_ms: number | null
-  outcome: SchedOutcome
-  detail: string
-}
-
 export interface SchedAccountDetail {
   account: { id: number; name: string; priority: number; rate: number; concurrency: number; in_flight: number }
   at: string
   stale: boolean
   global_enabled: boolean
+  status: SchedAccountState
+  stop: SchedStop | null
   reset_at: string | null
-  models: SchedModelEvidence[]
-  /** Every OpenAI group of the account; by_model is empty for a group without state rows (contract delta D3). */
-  groups: SchedAccountGroup[]
-  /** The override covering every group, if any. */
-  all_groups_override: SchedOverride | null
+  groups: SchedAccountGroupDetail[]
   auto_states: SchedAutoState[]
-  recent_attempts: SchedRecentAttempt[]
+  exemptions: SchedExemption[]
 }
 
 // ---- POST /accounts/:id/reset (contract §6.5) ----
@@ -204,10 +188,6 @@ export interface SchedClearAutoState {
 }
 
 // ---- GET | PUT /groups/:id/policy ----
-
-export interface SchedPolicy extends SchedGroupThresholds {
-  enabled: boolean
-}
 
 export interface SchedGroupPolicy {
   group_id: number

@@ -185,3 +185,6 @@
 
 /* Compact model select (list header, board header, group settings): 28px high, 12px text. */
 .sq-select-sm button.select-trigger { height: 28px; padding: 0 8px; border-radius: 8px; font-size: 12px; font-weight: 400; letter-spacing: normal; text-transform: none; }
+
+/* Group head row of the drawer table: the group's name and its three lines. */
+.sq-table .sq-group-head td { background: var(--sq-line-soft); }

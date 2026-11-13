@@ -18,6 +18,11 @@ export default {
     },
     more: '+{n}',
     samples: '{n}',
+    level: 'L{n}',
+    mark: {
+      merged: 'M',
+      other: 'O',
+    },
     state: {
       normal: 'Normal',
       observing: 'Observing',
@@ -44,6 +49,8 @@ export default {
       recent: 'Recent requests',
     },
     col: {
+      until: 'Back at',
+      level: 'Level',
       group: 'Group',
       state: 'State',
       time: 'Time',
@@ -146,6 +153,7 @@ export default {
     },
     unknown: 'Other',
     policy: {
+      off: 'Off',
       gate: 'Quality gate',
       ttft: 'TTFT limit',
       error: 'Error limit',
@@ -166,6 +174,8 @@ export default {
       accountRate: 'Account rate',
     },
     tip: {
+      merged: 'All groups merged',
+      otherGroup: 'From other groups',
       samples: '{n} samples',
       recentlyFull: 'Just full',
       noTakeover: 'No takeover',
