@@ -7,7 +7,7 @@ import (
 
 // RuleVersion identifies the rules in FINAL section 12, including its evidence
 // windows, strict reset boundary and cooldown ladder.
-const RuleVersion = "sched-v2.1"
+const RuleVersion = "2.0"
 
 const (
 	SpeedMinSamples = 20
@@ -22,8 +22,8 @@ const (
 type EvidenceSource string
 
 const (
-	EvidenceLocal  EvidenceSource = "local"
-	EvidenceShared EvidenceSource = "shared"
+	EvidenceLocal  EvidenceSource = "own"
+	EvidenceShared EvidenceSource = "merged"
 	EvidenceOther  EvidenceSource = "other"
 )
 
@@ -64,6 +64,7 @@ type CacheEvidence struct {
 }
 
 type Evaluation struct {
+	Kind     EvaluationKind
 	Version  string
 	Speed    SpeedEvidence
 	Error    ErrorEvidence
@@ -96,10 +97,24 @@ func IsContinuation(current, previous AttemptSample) bool {
 // of scope's account/model whose dispatch is strictly after since are eligible.
 // Windows include both endpoints and use completion time, as does the fast path.
 func Evaluate(samples []AttemptSample, scope Scope, p Policy, since, now time.Time) Evaluation {
-	return evaluate(samples, scope, p, since, now, false)
+	return EvaluateAt(samples, scope, p, since, now, EvaluateDeadline)
 }
 
-func evaluate(samples []AttemptSample, scope Scope, p Policy, since, now time.Time, other bool) Evaluation {
+// EvaluationKind makes event timing part of the rules, rather than a caller-side
+// filter of already-triggered state transitions.
+type EvaluationKind uint8
+
+const (
+	EvaluateRegular EvaluationKind = iota
+	EvaluateFast
+	EvaluateDeadline
+)
+
+func EvaluateAt(samples []AttemptSample, scope Scope, p Policy, since, now time.Time, kind EvaluationKind) Evaluation {
+	return evaluate(samples, scope, p, since, now, false, kind)
+}
+
+func evaluate(samples []AttemptSample, scope Scope, p Policy, since, now time.Time, other bool, kind EvaluationKind) Evaluation {
 	rows := completedSamples(samples, scope, since, now, other)
 	speedRows, speedWindow := selectEvidence(rows, scope.GroupID, now, 30*time.Minute, 60*time.Minute, SpeedMinSamples, speedSample, other)
 	errorRows, errorWindow := selectEvidence(rows, scope.GroupID, now, 60*time.Minute, 120*time.Minute, ErrorMinSamples, errorSample, other)
@@ -109,7 +124,7 @@ func evaluate(samples []AttemptSample, scope Scope, p Policy, since, now time.Ti
 		fastRows = fastRows[len(fastRows)-FastMinSamples:]
 		fastWindow = describeEvidence(fastRows, fastWindow.Source, fastWindow.Window)
 	}
-	e := Evaluation{Version: RuleVersion,
+	e := Evaluation{Version: RuleVersion, Kind: kind,
 		Speed: speedEvidence(speedRows, speedWindow, p),
 		Error: errorEvidence(errorRows, errorWindow),
 		Cache: cacheEvidence(cacheRows, cacheWindow, p),
@@ -118,22 +133,22 @@ func evaluate(samples []AttemptSample, scope Scope, p Policy, since, now time.Ti
 	if !p.Enabled {
 		return e
 	}
-	if e.Speed.N >= SpeedMinSamples {
+	if kind != EvaluateFast && e.Speed.N >= SpeedMinSamples {
 		e.Verdicts.Speed = VerdictPass
 		if e.Speed.LCB > SlowShareTolerance {
 			e.Verdicts.Speed = VerdictFail
 		}
 	}
-	if e.Fast.N == FastMinSamples && e.Fast.Slow >= FastMinSlow {
+	if kind != EvaluateRegular && e.Fast.N == FastMinSamples && e.Fast.Slow >= FastMinSlow {
 		e.Verdicts.Speed = VerdictFail
 	}
-	if e.Error.N >= ErrorMinSamples {
+	if kind != EvaluateFast && e.Error.N >= ErrorMinSamples {
 		e.Verdicts.Error = VerdictPass
 		if e.Error.LCB > max(ErrorRateFloor, p.MaxErrorRate) {
 			e.Verdicts.Error = VerdictFail
 		}
 	}
-	if e.Cache.Turns >= CacheMinSamples {
+	if kind != EvaluateFast && e.Cache.Turns >= CacheMinSamples {
 		e.Verdicts.Cache = VerdictPass
 		if e.Cache.Ratio < p.MinCacheRatio-CacheTolerance && e.Cache.LowSessions >= 2 {
 			e.Verdicts.Cache = VerdictFail
@@ -169,7 +184,9 @@ func speedSample(s AttemptSample) bool {
 	return s.Stream && (s.TTFOMs != nil || s.Outcome == OutcomeTimeout)
 }
 
-func errorSample(s AttemptSample) bool { return !s.ClientCanceled }
+func errorSample(s AttemptSample) bool {
+	return !s.ClientCanceled && s.Outcome != OutcomeCanceled && s.Outcome != OutcomeOther
+}
 
 func cacheSample(s AttemptSample) bool {
 	return s.Continuation && s.SessionKey != "" && s.Outcome == OutcomeOK && !s.ClientCanceled &&
@@ -224,7 +241,7 @@ func speedEvidence(rows []AttemptSample, window EvidenceWindow, p Policy) SpeedE
 	values := make([]latency, 0, len(rows))
 	for _, s := range rows {
 		// A measured first output is retained even if a later failure occurred.
-		v := latency{timeout: s.TTFOMs == nil && s.Outcome == OutcomeTimeout}
+		v := latency{timeout: s.Outcome == OutcomeTimeout}
 		if s.TTFOMs != nil {
 			v.ms = *s.TTFOMs
 		}

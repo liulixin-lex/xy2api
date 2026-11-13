@@ -348,6 +348,8 @@
     "296_scoped_admin_api_keys.sql": "03445774e2dfad32da9e23279193d1bca02953896bc3d3b8a87ba0b36b6ed577",
     "297_management_mcp_oauth.sql": "f6fe0510dfe1ce2ef2b1ec91bd51ec0c559cb4336edaeea459cfd977edcdf3d8",
     "298_anthropic_compat_profile_final.sql": "ee102c8d176fe06635ed2d65cc4ec93322787d66e483c18d66fc079aa01f945f",
+    "300_sv2_states_and_decisions.sql": "be99b0cc8a4897830679f98274717a01c3e5149b4ca178ad8fc6643f428be9fb",
+    "301_sv2_policy_values.sql": "3da88299cfc6323b3eacc888bc3bab2307512a2bcf5993bf5a3a40c8c760a606",
     "305_sv2_attempt_tokens.sql": "5843046c1219df9ed009e2378862cd30633a68eb0f16df5a714040d175a18ed0",
     "306_sv2_usage_results.sql": "5593c8ee8554a8781e98465fa0086cf5ee46b96056524a801b9b1f4a84f64155",
     "307_sv2_unbilled_requests.sql": "6be51be010ef2da50897a2ea996955d7afd0ea3afc33d18e2d831310fb810beb",

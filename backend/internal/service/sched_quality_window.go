@@ -1,157 +1,147 @@
 package service
 
 import (
-	"slices"
-	"strings"
+	"context"
+	"sort"
 	"sync"
 	"time"
 
-	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
+	q "github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 )
 
+const schedEvidenceRetention = 180 * time.Minute
+
 type schedQualityWindow struct {
-	mu      sync.Mutex
-	pending map[SchedAccountModel][]schedquality.AttemptSample
-	samples map[SchedAccountModel][]schedquality.AttemptSample
+	mu       sync.Mutex
+	pending  []q.AttemptSample
+	samples  map[SchedAccountModel][]q.AttemptSample
+	previous map[string]*q.AttemptSample
 }
 
-func (w *schedQualityWindow) add(s schedquality.AttemptSample) {
-	if s.Outcome == schedquality.OutcomeOther && !schedQualityAcuteSample(s) {
-		return
-	}
+func (w *schedQualityWindow) add(s q.AttemptSample) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.pending == nil {
-		w.pending = make(map[SchedAccountModel][]schedquality.AttemptSample)
-	}
-	k := SchedAccountModel{s.AccountID, s.Model}
-	w.pending[k] = append(w.pending[k], schedQualityCloneSample(s))
+	w.pending = append(w.pending, schedQualityCloneSample(s))
 }
 
-func schedQualityAcuteSample(s schedquality.AttemptSample) bool {
-	return s.Stream && (s.TTFOMs != nil || s.Outcome == schedquality.OutcomeTimeout)
-}
-
-// Only the cycle owns samples. Observe holds the separate queue lock briefly.
-func (w *schedQualityWindow) take(now time.Time) map[SchedAccountModel][]schedquality.AttemptSample {
+func (w *schedQualityWindow) take(now time.Time) map[SchedAccountModel][]q.AttemptSample {
 	w.mu.Lock()
 	pending := w.pending
 	w.pending = nil
 	w.mu.Unlock()
-	if w.samples == nil {
-		w.samples = make(map[SchedAccountModel][]schedquality.AttemptSample)
-	}
-	for pair, old := range w.samples {
-		w.keep(pair, schedQualityMergeSamples(old, pending[pair], now))
-		delete(pending, pair)
-	}
-	for pair, rows := range pending {
-		w.keep(pair, schedQualityMergeSamples(nil, rows, now))
-	}
+	w.merge(pending, now)
 	return w.samples
 }
 
-// Ledger pages join the current cycle without draining Observe a second time.
-func (w *schedQualityWindow) merge(rows []schedquality.AttemptSample, now time.Time) {
-	if len(rows) == 0 {
-		return
-	}
+func (w *schedQualityWindow) merge(added []q.AttemptSample, now time.Time) {
 	if w.samples == nil {
-		w.samples = make(map[SchedAccountModel][]schedquality.AttemptSample)
+		w.samples = make(map[SchedAccountModel][]q.AttemptSample)
 	}
-	byPair := make(map[SchedAccountModel][]schedquality.AttemptSample)
-	for _, row := range rows {
-		pair := SchedAccountModel{row.AccountID, row.Model}
-		byPair[pair] = append(byPair[pair], row)
+	if w.previous == nil {
+		w.previous = make(map[string]*q.AttemptSample)
 	}
-	for pair, added := range byPair {
-		w.keep(pair, schedQualityMergeSamples(w.samples[pair], added, now))
+	byPair := make(map[SchedAccountModel][]q.AttemptSample)
+	for _, s := range added {
+		pair := SchedAccountModel{s.AccountID, s.Model}
+		byPair[pair] = append(byPair[pair], s)
 	}
-}
-
-func (w *schedQualityWindow) keep(pair SchedAccountModel, rows []schedquality.AttemptSample) {
-	if len(rows) == 0 {
-		delete(w.samples, pair)
-	} else {
-		w.samples[pair] = rows
+	for pair, old := range w.samples {
+		rows := append(append([]q.AttemptSample(nil), old...), byPair[pair]...)
+		byPair[pair] = rows
 	}
-}
-
-func schedQualitySampleOrder(a, b schedquality.AttemptSample) int {
-	if order := b.StartedAt.Compare(a.StartedAt); order != 0 {
-		return order
-	}
-	return strings.Compare(b.AttemptID, a.AttemptID)
-}
-
-func schedQualityMergeSamples(old, added []schedquality.AttemptSample, now time.Time) []schedquality.AttemptSample {
-	var fresh []schedquality.AttemptSample
-	if len(added) > 0 {
-		seen := make(map[string]bool, len(old)+len(added))
-		for _, row := range old {
-			seen[row.AttemptID] = true
-		}
-		for _, row := range added {
-			if seen[row.AttemptID] || row.StartedAt.Before(now.Add(-schedquality.WindowMaxAge)) ||
-				(row.Outcome == schedquality.OutcomeOther && !schedQualityAcuteSample(row)) {
+	alive := make(map[string]bool)
+	for pair, rows := range byPair {
+		kept := make([]q.AttemptSample, 0, len(rows))
+		for _, s := range rows {
+			if s.FinishedAt.IsZero() || s.FinishedAt.Before(now.Add(-schedEvidenceRetention)) || alive[s.AttemptID] {
 				continue
 			}
-			seen[row.AttemptID] = true
-			fresh = append(fresh, schedQualityCloneSample(row))
+			alive[s.AttemptID] = true
+			kept = append(kept, schedQualityCloneSample(s))
+		}
+		if len(kept) == 0 {
+			delete(w.samples, pair)
+		} else {
+			w.samples[pair] = kept
 		}
 	}
-	rows := old
-	if len(fresh) > 0 {
-		slices.SortFunc(fresh, schedQualitySampleOrder)
-		rows = make([]schedquality.AttemptSample, 0, len(old)+len(fresh))
-		i, j := 0, 0
-		for i < len(old) && j < len(fresh) {
-			if schedQualitySampleOrder(old[i], fresh[j]) < 0 {
-				rows = append(rows, old[i])
-				i++
-			} else {
-				rows = append(rows, fresh[j])
-				j++
-			}
+	for id := range w.previous {
+		if !alive[id] {
+			delete(w.previous, id)
 		}
-		rows = append(rows, old[i:]...)
-		rows = append(rows, fresh[j:]...)
 	}
-	return schedQualityTrimSamples(rows, now)
 }
 
-// Reuse the sorted union unless time or the sample limit actually removes rows.
-func schedQualityTrimSamples(rows []schedquality.AttemptSample, now time.Time) []schedquality.AttemptSample {
-	recent, kept := 0, 0
-	eligible := func(row schedquality.AttemptSample) bool {
-		if row.StartedAt.Before(now.Add(-schedquality.WindowMaxAge)) {
-			return false
-		}
-		inRecent := row.Outcome != schedquality.OutcomeOther && recent < schedquality.WindowMaxSamples
-		if inRecent {
-			recent++
-		}
-		return inRecent || (schedQualityAcuteSample(row) && !row.StartedAt.Before(now.Add(-schedquality.AcuteWindow)))
+type schedPreviousLoader interface {
+	LoadPreviousAttempts(context.Context, []q.AttemptSample) (map[string]*q.AttemptSample, error)
+}
+
+// prepareContinuations orders all accounts together. Failed and overlapping
+// predecessors interrupt continuation; they must never be skipped.
+func (w *schedQualityWindow) prepareContinuations(ctx context.Context, loader schedPreviousLoader) error {
+	type session struct {
+		group      int64
+		model, key string
 	}
-	for _, row := range rows {
-		if eligible(row) {
-			kept++
-		}
-	}
-	if kept == len(rows) {
-		return rows
-	}
-	if kept == 0 {
-		return nil
-	}
-	out := make([]schedquality.AttemptSample, 0, kept)
-	recent = 0
-	for _, row := range rows {
-		if eligible(row) {
-			out = append(out, row)
+	bySession := make(map[session][]q.AttemptSample)
+	for _, rows := range w.samples {
+		for _, s := range rows {
+			if s.SessionKey != "" {
+				k := session{s.GroupID, s.Model, s.SessionKey}
+				bySession[k] = append(bySession[k], s)
+			}
 		}
 	}
-	return out
+	previous := make(map[string]*q.AttemptSample)
+	var missing []q.AttemptSample
+	for _, rows := range bySession {
+		sort.Slice(rows, func(i, j int) bool {
+			if rows[i].StartedAt.Equal(rows[j].StartedAt) {
+				return rows[i].AttemptID < rows[j].AttemptID
+			}
+			return rows[i].StartedAt.Before(rows[j].StartedAt)
+		})
+		for i := 0; i < len(rows); {
+			end := i + 1
+			for end < len(rows) && rows[end].StartedAt.Equal(rows[i].StartedAt) {
+				end++
+			}
+			for j := i; j < end; j++ {
+				if i > 0 {
+					p := rows[i-1]
+					previous[rows[j].AttemptID] = &p
+				} else if p, ok := w.previous[rows[j].AttemptID]; ok {
+					previous[rows[j].AttemptID] = p
+				} else {
+					missing = append(missing, rows[j])
+				}
+			}
+			i = end
+		}
+	}
+	if len(missing) > 0 {
+		found, err := loader.LoadPreviousAttempts(ctx, missing)
+		if err != nil {
+			return err
+		}
+		for _, s := range missing {
+			p := found[s.AttemptID]
+			if p != nil {
+				cloned := schedQualityCloneSample(*p)
+				p = &cloned
+			}
+			w.previous[s.AttemptID] = p
+			previous[s.AttemptID] = p
+		}
+	}
+	for pair, rows := range w.samples {
+		for i := range rows {
+			p := previous[rows[i].AttemptID]
+			rows[i].Continuation = p != nil && p.StartedAt.Before(rows[i].StartedAt) && q.IsContinuation(rows[i], *p)
+		}
+		w.samples[pair] = rows
+	}
+	return nil
 }
 
 func schedQualityCloneInt(p *int) *int {
@@ -161,12 +151,13 @@ func schedQualityCloneInt(p *int) *int {
 	n := *p
 	return &n
 }
-
-func schedQualityCloneSample(s schedquality.AttemptSample) schedquality.AttemptSample {
+func schedQualityCloneSample(s q.AttemptSample) q.AttemptSample {
 	s.TTFOMs = schedQualityCloneInt(s.TTFOMs)
 	s.CensoredMs = schedQualityCloneInt(s.CensoredMs)
 	s.PromptTokens = schedQualityCloneInt(s.PromptTokens)
 	s.PrevPromptTokens = schedQualityCloneInt(s.PrevPromptTokens)
+	s.InputTokens = schedQualityCloneInt(s.InputTokens)
 	s.CacheReadTokens = schedQualityCloneInt(s.CacheReadTokens)
+	s.CacheCreationTokens = schedQualityCloneInt(s.CacheCreationTokens)
 	return s
 }
