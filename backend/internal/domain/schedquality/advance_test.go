@@ -65,7 +65,10 @@ func TestAdvanceDeadlineException(t *testing.T) {
 		{"old-foreign-failures", func() []AttemptSample { return slowEvaluationSamples(20, 20, 30*time.Minute) }, false},
 		{"old-batch-plus-one-new-failure", func() []AttemptSample {
 			return append(slowEvaluationSamples(20, 20, 30*time.Minute), slowEvaluationSamples(1, 20, time.Minute)...)
-		}, false},
+		}, true},
+		{"old-batch-plus-one-new-success", func() []AttemptSample {
+			return append(slowEvaluationSamples(20, 20, 30*time.Minute), evaluationSamples(1, 20, time.Minute)...)
+		}, true},
 		{"foreign-slow-under-target-line", func() []AttemptSample { return evaluationSamples(20, 20, 10*time.Minute) }, false},
 		{"new-foreign-fast-path", func() []AttemptSample { return slowEvaluationSamples(6, 20, time.Minute) }, true},
 		{"completed-at-round-start-is-old", func() []AttemptSample {

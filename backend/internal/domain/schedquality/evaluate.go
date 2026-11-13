@@ -96,11 +96,11 @@ func IsContinuation(current, previous AttemptSample) bool {
 // of scope's account/model whose dispatch is strictly after since are eligible.
 // Windows include both endpoints and use completion time, as does the fast path.
 func Evaluate(samples []AttemptSample, scope Scope, p Policy, since, now time.Time) Evaluation {
-	return evaluate(samples, scope, p, since, time.Time{}, now, false)
+	return evaluate(samples, scope, p, since, now, false)
 }
 
-func evaluate(samples []AttemptSample, scope Scope, p Policy, since, completedAfter, now time.Time, other bool) Evaluation {
-	rows := completedSamples(samples, scope, since, completedAfter, now, other)
+func evaluate(samples []AttemptSample, scope Scope, p Policy, since, now time.Time, other bool) Evaluation {
+	rows := completedSamples(samples, scope, since, now, other)
 	speedRows, speedWindow := selectEvidence(rows, scope.GroupID, now, 30*time.Minute, 60*time.Minute, SpeedMinSamples, speedSample, other)
 	errorRows, errorWindow := selectEvidence(rows, scope.GroupID, now, 60*time.Minute, 120*time.Minute, ErrorMinSamples, errorSample, other)
 	cacheRows, cacheWindow := selectEvidence(rows, scope.GroupID, now, 60*time.Minute, 120*time.Minute, CacheMinSamples, cacheSample, other)
@@ -142,7 +142,7 @@ func evaluate(samples []AttemptSample, scope Scope, p Policy, since, completedAf
 	return e
 }
 
-func completedSamples(samples []AttemptSample, scope Scope, since, completedAfter, now time.Time, other bool) []AttemptSample {
+func completedSamples(samples []AttemptSample, scope Scope, since, now time.Time, other bool) []AttemptSample {
 	rows := make([]AttemptSample, 0, len(samples))
 	seen := make(map[string]bool, len(samples))
 	for _, s := range samples {
@@ -150,7 +150,6 @@ func completedSamples(samples []AttemptSample, scope Scope, since, completedAfte
 			!s.StartedAt.After(since) || s.StartedAt.After(s.FinishedAt) ||
 			s.FinishedAt.IsZero() || s.FinishedAt.After(now) ||
 			s.FinishedAt.Before(now.Add(-120*time.Minute)) ||
-			(!completedAfter.IsZero() && !s.FinishedAt.After(completedAfter)) ||
 			(other && s.GroupID == scope.GroupID) || seen[s.AttemptID] {
 			continue
 		}

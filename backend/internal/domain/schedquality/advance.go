@@ -22,11 +22,13 @@ func Advance(prev StateRow, p Policy, samples []AttemptSample, now time.Time) (S
 		if now.Before(prev.Until) {
 			return next, e
 		}
-		// Every sample used for an extension must have completed in another
-		// group after this round began. The next round moves Since, not the
-		// evidence cutoff, so the same completed batch cannot renew twice.
-		other := evaluate(samples, scope, p, prev.EvidenceSince, prev.Since, now, true)
-		if reason := other.Reason(); reason != "" {
+		// Keep the full rolling windows of other-group evidence. A completion
+		// after this round began is an additional prerequisite, not a new
+		// evidence cutoff. Moving Since prevents the same batch renewing twice.
+		other := evaluate(samples, scope, p, prev.EvidenceSince, now, true)
+		foreign := completedSamples(samples, scope, prev.EvidenceSince, now, true)
+		fresh := len(foreign) > 0 && foreign[len(foreign)-1].FinishedAt.After(prev.Since)
+		if reason := other.Reason(); fresh && reason != "" {
 			cool(reason)
 			return next, other
 		}
