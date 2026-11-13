@@ -52,9 +52,12 @@ var resilienceSessionFailureScript = redis.NewScript(`
 const sessionFailureEndField = "e:"
 
 var resilienceAvoidAddScript = redis.NewScript(`
-	redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
+	local existing = tonumber(redis.call('ZSCORE', KEYS[1], ARGV[1]) or '0')
+	local deadline = math.max(existing, tonumber(ARGV[2]))
+	redis.call('ZADD', KEYS[1], deadline, ARGV[1])
 	redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[3])
-	redis.call('PEXPIRE', KEYS[1], ARGV[4])
+	local latest = redis.call('ZREVRANGE', KEYS[1], 0, 0, 'WITHSCORES')
+	if #latest > 0 then redis.call('PEXPIREAT', KEYS[1], latest[2]) end
 	return 1
 `)
 
@@ -142,7 +145,6 @@ func (s *resilienceStore) AddSessionAvoid(ctx context.Context, groupID int64, se
 		strconv.FormatInt(accountID, 10),
 		now.Add(ttl).UnixMilli(),
 		now.UnixMilli(),
-		ttl.Milliseconds(),
 	).Err()
 }
 

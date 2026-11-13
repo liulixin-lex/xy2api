@@ -93,3 +93,24 @@ func TestStickyBindingGenerationExpiresWithBinding(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, ok)
 }
+
+func TestSessionAvoidNeverShortensExistingFailureMemory(t *testing.T) {
+	fixture := miniredis.RunT(t)
+	one := redis.NewClient(&redis.Options{Addr: fixture.Addr()})
+	two := redis.NewClient(&redis.Options{Addr: fixture.Addr()})
+	t.Cleanup(func() { _ = one.Close(); _ = two.Close() })
+	first, second := NewResilienceStore(one), NewResilienceStore(two)
+	ctx := context.Background()
+	const session = "synthetic-avoid"
+	require.NoError(t, first.AddSessionAvoid(ctx, 7, session, 1, 10*time.Minute))
+	key := sessionKey(resilienceSessionAvoidPrefix, 7, session)
+	original := one.ZScore(ctx, key, "1").Val()
+	require.NoError(t, second.AddSessionAvoid(ctx, 7, session, 1, 2*time.Minute))
+	require.Equal(t, original, one.ZScore(ctx, key, "1").Val(), "same target keeps its longer deadline")
+	require.NoError(t, second.AddSessionAvoid(ctx, 7, session, 2, 2*time.Minute))
+	require.Greater(t, one.PTTL(ctx, key).Val(), 9*time.Minute, "another target cannot shorten the set lifetime")
+	avoid, err := second.SessionAvoid(ctx, 7, session)
+	require.NoError(t, err)
+	require.Contains(t, avoid, int64(1))
+	require.Contains(t, avoid, int64(2))
+}
