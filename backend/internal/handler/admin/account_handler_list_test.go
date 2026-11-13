@@ -31,7 +31,7 @@ func TestAccountHandlerListLiteUsesCompactDTOAndETag(t *testing.T) {
 		Extra:       map[string]any{"privacy_mode": "training_off"}, Status: service.StatusActive,
 		Schedulable: true, Concurrency: 4, GroupIDs: []int64{groupID},
 		Groups:        []*service.Group{{ID: groupID, Name: "codex", Platform: service.PlatformOpenAI}},
-		AccountGroups: []service.AccountGroup{{AccountID: 501, GroupID: groupID, Priority: 2, Group: &service.Group{ID: groupID, Name: "codex", Platform: service.PlatformOpenAI}}},
+		AccountGroups: []service.AccountGroup{{AccountID: 501, GroupID: groupID, Group: &service.Group{ID: groupID, Name: "codex", Platform: service.PlatformOpenAI}}},
 		CreatedAt:     now, UpdatedAt: now,
 	}}
 	adminSvc.iqTargetSummaries = map[int64][]domain.IQTargetSummary{
