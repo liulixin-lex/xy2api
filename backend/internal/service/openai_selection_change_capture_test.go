@@ -212,3 +212,23 @@ func TestStickyChangeWSTurnFinalizesItsOwnAttempt(t *testing.T) {
 		})
 	}
 }
+
+func TestStickyChangeFinalTerminalOverridesEarlierSuccessEvidence(t *testing.T) {
+	for _, event := range []string{"response.failed", "response.incomplete", "response.cancelled"} {
+		t.Run(event, func(t *testing.T) {
+			f := selectionNewSessionFixture()
+			ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+			selected := f.session.selectOwner(ctx, 7, "session", "m", f.owner, f.candidates, selectionRequest{})
+			require.NotNil(t, selected)
+			defer selected.ReleaseFunc()
+			a := (&OpenAIGatewayService{}).beginSchedAttempt(ctx, selected.Account, nil, 0, true)
+			a.finish(nil, nil)
+			FinishOpenAIStickyForward(ctx, selected.Account.ID, &OpenAIForwardResult{OpenAIWSMode: true, UpstreamTerminalEvent: event}, nil)
+			require.Equal(t, int64(10), f.binding.owner)
+			require.Empty(t, f.binding.casKeys)
+			avoided, err := f.session.store.SessionAvoid(ctx, 7, stickyChangeAvoidSession("session"))
+			require.NoError(t, err)
+			require.Contains(t, avoided, selected.Account.ID)
+		})
+	}
+}

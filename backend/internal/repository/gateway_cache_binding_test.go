@@ -131,3 +131,41 @@ func TestStickyBindingGenerationAdoptsExistingScalar(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, changed)
 }
+
+func TestStickyBindingGenerationFencesLateFailure(t *testing.T) {
+	addr := os.Getenv("SCHEDULING_TEST_REDIS_ADDR")
+	if addr == "" {
+		addr = miniredis.RunT(t).Addr()
+	}
+	first := redis.NewClient(&redis.Options{Addr: addr})
+	second := redis.NewClient(&redis.Options{Addr: addr})
+	ctx := context.Background()
+	const group = int64(-1022)
+	key := "openai:" + uuid.NewString()
+	session := "sticky_change:" + uuid.NewString()
+	avoidKey := sessionKey(resilienceSessionAvoidPrefix, group, session)
+	t.Cleanup(func() {
+		_ = first.Del(ctx, append(sessionBindingKeys(group, key), avoidKey)...).Err()
+		_ = first.Close()
+		_ = second.Close()
+	})
+	one, two := &gatewayCache{rdb: first}, &gatewayCache{rdb: second}
+	require.NoError(t, one.SetSessionAccountID(ctx, group, key, 100, time.Hour))
+	expected, err := one.GetSessionBinding(ctx, group, key)
+	require.NoError(t, err)
+	changed, err := two.CommitSessionBinding(ctx, group, key, expected, 101, time.Hour)
+	require.NoError(t, err)
+	require.True(t, changed)
+	recorded, err := one.RecordSessionBindingFailure(ctx, group, key, session, expected, 101, 2*time.Minute)
+	require.NoError(t, err)
+	require.False(t, recorded, "an older failure cannot avoid a newly successful binding")
+	require.Zero(t, first.Exists(ctx, avoidKey).Val())
+	latest, err := two.GetSessionBinding(ctx, group, key)
+	require.NoError(t, err)
+	recorded, err = two.RecordSessionBindingFailure(ctx, group, key, session, latest, 102, 2*time.Minute)
+	require.NoError(t, err)
+	require.True(t, recorded)
+	avoided, err := NewResilienceStore(first).SessionAvoid(ctx, group, session)
+	require.NoError(t, err)
+	require.Contains(t, avoided, int64(102))
+}

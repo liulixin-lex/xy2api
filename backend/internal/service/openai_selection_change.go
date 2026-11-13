@@ -45,7 +45,6 @@ type openAIStickyChange struct {
 	target           int64
 	ttl              time.Duration
 	cache            OpenAIStickyVersionedCache
-	store            ResilienceStore
 }
 
 func noteOpenAIStickyAttemptSuccess(ctx context.Context, accountID int64) {
@@ -69,7 +68,8 @@ func FinishOpenAIStickyForward(ctx context.Context, accountID int64, result *Ope
 	succeeded := change.attemptSucceeded
 	change.mu.Unlock()
 	canceled := errors.Is(ctx.Err(), context.Canceled) || (result != nil && result.ClientDisconnect)
-	success := succeeded && err == nil && ctx.Err() == nil && result != nil && !result.PartialFailure && !canceled
+	success := succeeded && err == nil && ctx.Err() == nil && result != nil && !result.PartialFailure && !canceled &&
+		(result.UpstreamTerminalEvent == "" || result.UpstreamTerminalEvent == "response.completed" || result.UpstreamTerminalEvent == "response.done")
 	CompleteOpenAIStickyChange(ctx, accountID, success, canceled)
 }
 
@@ -103,7 +103,7 @@ func (s *OpenAIGatewayService) prepareOpenAIStickyChange(ctx context.Context, gr
 	}
 	resilience.StateFrom(ctx).SetStickyChange(&openAIStickyChange{
 		groupID: derefGroupID(groupID), session: strings.TrimSpace(session), key: key,
-		kind: "migrate", expected: expected, ttl: s.openAIStickyBindingTTL(groupID), cache: cache, store: s.resilience.store,
+		kind: "migrate", expected: expected, ttl: s.openAIStickyBindingTTL(groupID), cache: cache,
 	})
 }
 
@@ -119,7 +119,7 @@ func planOpenAIStickyReplacement(ctx context.Context, groupID *int64, session, m
 	}
 	resilience.StateFrom(ctx).SetStickyChange(&openAIStickyChange{
 		groupID: change.groupID, session: change.session, key: change.key, model: model,
-		kind: "migrate", expected: change.expected, target: selection.Account.ID, ttl: change.ttl, cache: change.cache, store: change.store,
+		kind: "migrate", expected: change.expected, target: selection.Account.ID, ttl: change.ttl, cache: change.cache,
 	})
 }
 
@@ -144,10 +144,8 @@ func CompleteOpenAIStickyChange(ctx context.Context, accountID int64, success, c
 	defer cancel()
 	if !success {
 		resilience.StateFrom(ctx).AddAvoided(accountID)
-		if change.store != nil {
-			if err := change.store.AddSessionAvoid(stateCtx, change.groupID, stickyChangeAvoidSession(change.session), accountID, openAIStickyChangeAvoidTTL); err != nil {
-				slog.WarnContext(ctx, "sched_quality.takeover_avoid_failed", "account_id", accountID, "error", err)
-			}
+		if _, err := change.cache.RecordSessionBindingFailure(stateCtx, change.groupID, change.key, stickyChangeAvoidSession(change.session), change.expected, accountID, openAIStickyChangeAvoidTTL); err != nil {
+			slog.WarnContext(ctx, "sched_quality.takeover_avoid_failed", "account_id", accountID, "error", err)
 		}
 		return
 	}

@@ -36,6 +36,7 @@ func (f *selectionSlotsFake) tryAcquireAccountSlot(_ context.Context, id int64, 
 }
 
 type selectionBindingFake struct {
+	store      ResilienceStore
 	key        string
 	ttlKeys    []string
 	casKeys    []string
@@ -100,6 +101,7 @@ func selectionNewSessionFixture() *selectionSessionFixture {
 		f.events = append(f.events, fmt.Sprintf("check:%d", a.ID))
 		return a
 	}}
+	f.binding.store = f.session.store
 	return f
 }
 func (f *selectionSessionFixture) selectNow(ctx context.Context) *AccountSelectionResult {
@@ -350,4 +352,11 @@ func TestOpenAISelectionSessionLatestViewFailureTriesSecond(t *testing.T) {
 	require.Equal(t, 1, f.slots.held)
 	result.ReleaseFunc()
 	require.Zero(t, f.slots.held)
+}
+
+func (f *selectionBindingFake) RecordSessionBindingFailure(ctx context.Context, group int64, key, session string, expected StickySessionBinding, target int64, ttl time.Duration) (bool, error) {
+	if f.owner != expected.AccountID || f.generation != expected.Generation {
+		return false, nil
+	}
+	return true, f.store.AddSessionAvoid(ctx, group, session, target, ttl)
 }

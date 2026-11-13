@@ -159,7 +159,7 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 		}
 		resilience.StateFrom(ctx).SetStickyChange(&openAIStickyChange{
 			groupID: groupID, session: strings.TrimSpace(sessionHash), key: key, model: model,
-			kind: kind, expected: expected, target: latest.ID, ttl: s.bindingTTL, cache: s.cache, store: s.store,
+			kind: kind, expected: expected, target: latest.ID, ttl: s.bindingTTL, cache: s.cache,
 		})
 		return attachSelectionProfitGate(ctx, &AccountSelectionResult{Account: latest, Acquired: true, ReleaseFunc: slot.ReleaseFunc})
 	}

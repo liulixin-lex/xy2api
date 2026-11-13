@@ -15,6 +15,7 @@ type StickySessionBinding struct {
 type OpenAIStickyVersionedCache interface {
 	GetSessionBinding(context.Context, int64, string) (StickySessionBinding, error)
 	CommitSessionBinding(context.Context, int64, string, StickySessionBinding, int64, time.Duration) (bool, error)
+	RecordSessionBindingFailure(context.Context, int64, string, string, StickySessionBinding, int64, time.Duration) (bool, error)
 }
 
 // gatewaySessionBindingReader reads a binding and its remaining lifetime in

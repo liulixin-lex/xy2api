@@ -33,6 +33,7 @@ func (r *selectionRuntimeRepo) ListAllWithFilters(context.Context, string, strin
 }
 
 type selectionRuntimeCache struct {
+	store ResilienceStore
 	schedulerTestGatewayCache
 	remaining        time.Duration
 	ttlKeys, casKeys []string
@@ -94,6 +95,7 @@ func newSelectionRuntimeFixture(t *testing.T, accounts ...Account) *selectionRun
 	cfg.Gateway.OpenAIWS.SessionHashReadOldFallback = true
 	f.loads = &selectionRuntimeLoads{schedulerTestConcurrencyCache: schedulerTestConcurrencyCache{acquiredIDs: &f.attempts, releasedIDs: &f.releases}}
 	f.svc = &OpenAIGatewayService{cfg: cfg, cache: f.cache, accountRepo: f.repo, resilience: NewResilienceService(nil, newMemResilienceStore()), concurrencyService: NewConcurrencyService(f.loads)}
+	f.cache.store = f.svc.resilience.store
 	now := time.Now()
 	f.view = selectionTestView(now)
 	board := NewOpenAISelectionBoard(f.svc, func() schedquality.View { return f.view })
@@ -261,4 +263,11 @@ func TestOpenAISelectionRuntimeFullOwnerRetryBorrowQueue(t *testing.T) {
 			})
 		})
 	}
+}
+
+func (c *selectionRuntimeCache) RecordSessionBindingFailure(ctx context.Context, group int64, key, session string, expected StickySessionBinding, target int64, ttl time.Duration) (bool, error) {
+	if c.sessionBindings[key] != expected.AccountID {
+		return false, nil
+	}
+	return true, c.store.AddSessionAvoid(ctx, group, session, target, ttl)
 }

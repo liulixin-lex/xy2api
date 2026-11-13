@@ -52,3 +52,19 @@ func (c *gatewayCache) CommitSessionBinding(ctx context.Context, groupID int64, 
 }
 
 var _ service.OpenAIStickyVersionedCache = (*gatewayCache)(nil)
+
+// The failure and the binding check share one Redis operation, so a late
+// failure cannot resurrect avoidance after a newer binding generation.
+var recordSessionBindingFailureScript = redis.NewScript(`
+if redis.call('GET', KEYS[2]) ~= ARGV[4] or redis.call('GET', KEYS[3]) ~= ARGV[5] then return 0 end
+` + resilienceAvoidAddLua)
+
+func (c *gatewayCache) RecordSessionBindingFailure(ctx context.Context, groupID int64, bindingKey, avoidSession string, expected service.StickySessionBinding, target int64, ttl time.Duration) (bool, error) {
+	if expected.AccountID <= 0 || expected.Generation == "" || target <= 0 || bindingKey == "" || avoidSession == "" || ttl <= 0 {
+		return false, errors.New("invalid versioned sticky binding failure")
+	}
+	keys := append([]string{sessionKey(resilienceSessionAvoidPrefix, groupID, avoidSession)}, sessionBindingKeys(groupID, bindingKey)...)
+	now := time.Now()
+	n, err := recordSessionBindingFailureScript.Run(ctx, c.rdb, keys, target, now.Add(ttl).UnixMilli(), now.UnixMilli(), expected.AccountID, expected.Generation).Int64()
+	return n == 1, err
+}
