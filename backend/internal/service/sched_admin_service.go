@@ -166,6 +166,12 @@ func (s *SchedAdminService) ClearOverride(ctx context.Context, a, g, op int64) e
 func schedAdminPolicy(r SchedPolicyRecord) SchedAdminPolicy {
 	return SchedAdminPolicy{GroupID: r.GroupID, Version: r.Version, Policy: schedAdminPolicyFields(r.Policy)}
 }
+func schedAdminGroupPolicy(p *SchedQualitySnapshot, group int64) schedquality.Policy {
+	if record, ok := p.Policies[group]; ok {
+		return record.Policy
+	}
+	return schedquality.DefaultPolicy()
+}
 func schedAdminPolicyFields(p schedquality.Policy) SchedAdminPolicyPolicy {
 	return SchedAdminPolicyPolicy{Enabled: p.Enabled, TTFTSeconds: p.TTFTSeconds, MaxErrorRate: p.MaxErrorRate, MinCacheRatio: p.MinCacheRatio, TakeoverIdleSeconds: p.TakeoverIdleSeconds}
 }

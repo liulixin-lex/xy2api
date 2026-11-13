@@ -154,8 +154,12 @@ func TestAccountRecoverStateUsesQualityReset(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest("POST", "/accounts/1/recover-state", nil))
 	data := schedAdminHandlerData(t, w)
-	for _, key := range []string{"reset_at", "cleared", "preserved", "failed"} {
+	for _, key := range []string{"account_id", "reset_at", "cleared", "kept", "failed"} {
 		require.Contains(t, data, key)
 	}
+	require.JSONEq(t, `["quality","session_avoid"]`, string(data["cleared"]))
+	require.JSONEq(t, `[]`, string(data["kept"]))
+	require.JSONEq(t, `[]`, string(data["failed"]))
+	require.NotContains(t, data, "preserved")
 	require.NotContains(t, data, "credentials")
 }

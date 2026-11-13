@@ -198,7 +198,7 @@ func (s *SchedAdminService) Detail(ctx context.Context, id int64) (SchedAdminAcc
 		if g == nil || g.Platform != PlatformOpenAI {
 			continue
 		}
-		x := SchedAdminAccountDetailGroups{GroupID: g.ID, Name: g.Name, Policy: schedAdminPolicyFields(p.Policies[g.ID].Policy), Exemption: schedAdminExemption(out.Exemptions, g.ID), ByModel: []SchedAdminAccountDetailGroupsByModel{}}
+		x := SchedAdminAccountDetailGroups{GroupID: g.ID, Name: g.Name, Policy: schedAdminPolicyFields(schedAdminGroupPolicy(p, g.ID)), Exemption: schedAdminExemption(out.Exemptions, g.ID), ByModel: []SchedAdminAccountDetailGroupsByModel{}}
 		for _, r := range p.RowsForAccount(id) {
 			if r.GroupID == g.ID {
 				x.ByModel = append(x.ByModel, SchedAdminGroupModel(r, x.Exemption != nil))
