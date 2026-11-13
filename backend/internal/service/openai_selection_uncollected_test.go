@@ -14,6 +14,11 @@ import (
 func selectUncollectedEndpoint(t *testing.T, f *selectionRuntimeFixture, endpoint, session string) *Account {
 	t.Helper()
 	ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+	return selectUncollectedEndpointWithContext(t, f, ctx, endpoint, session)
+}
+
+func selectUncollectedEndpointWithContext(t *testing.T, f *selectionRuntimeFixture, ctx context.Context, endpoint, session string) *Account {
+	t.Helper()
 	var result *AccountSelectionResult
 	var err error
 	switch endpoint {
@@ -90,6 +95,20 @@ func TestOpenAISelectionUncollectedEndpointsSkipMigrationAndTakeover(t *testing.
 				require.Empty(t, f.cache.ttlKeys)
 				require.Zero(t, f.loads.batches)
 			}
+		})
+	}
+}
+
+func TestOpenAISelectionManualOnlyFirstBindingKeepsExistingBehavior(t *testing.T) {
+	for _, endpoint := range []string{"images", "alpha_search", "count_tokens", "embeddings", "live"} {
+		t.Run(endpoint, func(t *testing.T) {
+			f := newUncollectedSelectionFixture(t, endpoint, 1)
+			ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+			selected := selectUncollectedEndpointWithContext(t, f, ctx, endpoint, "session")
+			require.Nil(t, pendingOpenAIStickyChange(ctx), "ManualOnly does not await a capture terminal")
+			require.NoError(t, f.svc.BindStickySessionAfterProfitAdmission(ctx, ptrInt64Selection(7), "session", selected.ID))
+			require.Equal(t, selected.ID, f.cache.sessionBindings["openai:session"], "the existing initial binding is visible without a Forward completion")
+			require.Empty(t, f.cache.casKeys)
 		})
 	}
 }
