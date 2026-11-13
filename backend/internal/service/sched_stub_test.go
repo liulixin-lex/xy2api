@@ -129,6 +129,7 @@ func (f *fakeSchedAttemptStore) DeleteBefore(_ context.Context, at time.Time) (i
 
 // fakeSchedQualityStore separates the cycle/reset lock from data access; Version covers all policies.
 type fakeSchedQualityStore struct {
+	CommitErr    error
 	mu           sync.Mutex
 	lock         sync.Mutex
 	lockReleased chan struct{}
@@ -160,6 +161,9 @@ func (f *fakeSchedQualityStore) RunCycle(_ context.Context, fn func(SchedQuality
 	f.mu.Unlock()
 	if err := fn(tx); err != nil {
 		return true, err
+	}
+	if f.CommitErr != nil {
+		return true, f.CommitErr
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
