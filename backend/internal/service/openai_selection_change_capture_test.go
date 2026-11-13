@@ -105,6 +105,7 @@ func TestStickyChangeWaitsForDeliveryAfterEOF(t *testing.T) {
 	require.Equal(t, int64(10), f.binding.owner, "upstream EOF precedes buffered client delivery")
 	require.False(t, a.done)
 	a.finish(nil, errors.New("delivery failed"))
+	FinishOpenAIStickyForward(ctx, selected.Account.ID, nil, errors.New("delivery failed"))
 	require.Equal(t, int64(10), f.binding.owner)
 	avoid, err := f.session.store.SessionAvoid(ctx, 7, stickyChangeAvoidSession("session"))
 	require.NoError(t, err)

@@ -46,6 +46,11 @@ func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *A
 		return nil
 	}
 	a := &schedAttemptCapture{state: st, ctx: ctx, accountID: account.ID, started: time.Now(), attempt: schedAttemptNoop{}}
+	if change != nil && change.target == account.ID {
+		change.mu.Lock()
+		change.activeAttempt, change.attemptSucceeded, change.attemptCanceled = a, false, false
+		change.mu.Unlock()
+	}
 	if !record {
 		st.SetCurrentAttempt(a)
 		return a
@@ -176,7 +181,7 @@ func (a *schedAttemptCapture) timeout(plan resilience.TimeoutPlan) {
 		return
 	}
 	a.done = true
-	CompleteOpenAIStickyChange(a.ctx, a.accountID, false, false)
+	noteOpenAIStickyAttemptOutcome(a, false)
 	if plan.Applied() {
 		a.attempt.FinishOther("budget_cut")
 	} else {
@@ -211,11 +216,7 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 		(!a.expectTerminal || a.terminal) && !a.benignIncomplete &&
 		(result == nil || !result.PartialFailure && (result.UpstreamTerminalEvent == "" || result.UpstreamTerminalEvent == "response.completed" || result.UpstreamTerminalEvent == "response.done"))
 
-	if success {
-		noteOpenAIStickyAttemptSuccess(a.ctx, a.accountID)
-	} else {
-		CompleteOpenAIStickyChange(a.ctx, a.accountID, false, canceled)
-	}
+	noteOpenAIStickyAttemptOutcome(a, success)
 	// This is the sole mapping from send evidence to scheduler outcomes.
 	if a.client || a.ctx.Err() != nil || errors.Is(err, context.Canceled) {
 		if a.first {
@@ -264,9 +265,11 @@ func FinishSchedAttemptAtHandlerExit(ctx context.Context) {
 	}
 	if errors.Is(ctx.Err(), context.Canceled) {
 		a.cancel()
+		CompleteOpenAIStickyChange(ctx, a.accountID, false, true)
 		return
 	}
 	a.finishUnfinished()
+	CompleteOpenAIStickyChange(ctx, a.accountID, false, false)
 }
 func (a *schedAttemptCapture) finishUnfinished() {
 	if a == nil {
@@ -276,7 +279,7 @@ func (a *schedAttemptCapture) finishUnfinished() {
 	defer a.mu.Unlock()
 	if !a.done {
 		a.done = true
-		CompleteOpenAIStickyChange(a.ctx, a.accountID, false, false)
+		noteOpenAIStickyAttemptOutcome(a, false)
 		a.attempt.FinishOther("unfinished")
 		a.state.ClearCurrentAttemptIf(a)
 	}
@@ -403,6 +406,9 @@ func (t *schedWSTurnCapture) cancel() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.active.cancel()
+	if t.active != nil {
+		CompleteOpenAIStickyChange(t.active.ctx, t.active.accountID, false, true)
+	}
 }
 
 func (a *schedAttemptCapture) markTerminal() {

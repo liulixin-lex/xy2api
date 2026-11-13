@@ -67,6 +67,9 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 		return nil
 	}
 	key := s.cacheKey(sessionHash)
+	if pending := pendingOpenAIStickyChange(ctx); pending != nil && pending.groupID == groupID && pending.session == strings.TrimSpace(sessionHash) {
+		key = pending.key
+	}
 	if key == "" {
 		return nil
 	}

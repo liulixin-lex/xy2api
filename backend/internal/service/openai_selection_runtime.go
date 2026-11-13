@@ -140,7 +140,11 @@ func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenA
 	migrate := schedquality.StandingOf(selectionState(view, gid, owner, req.RequestedModel), selectionAuto(view, now), now) == schedquality.StandBack
 	bindings, _ := s.cache.(gatewaySessionBindingReader)
 	session := selectionSession{view: s.selectionView, now: s.selectionNow, slots: s, cache: cache, store: s.resilience.store, cacheKey: s.openAISessionCacheKey, bindings: bindings, marks: &s.selectionFullMarks, bindingTTL: s.openAIStickyBindingTTL(req.GroupID)}
-	if !migrate && !session.takeoverReady(ctx, view, gid, s.openAISessionCacheKey(req.SessionHash), owner.ID, now) {
+	bindingKey := s.openAISessionCacheKey(req.SessionHash)
+	if pending := pendingOpenAIStickyChange(ctx); pending != nil && pending.groupID == gid && pending.session == req.SessionHash {
+		bindingKey = pending.key
+	}
+	if !migrate && !session.takeoverReady(ctx, view, gid, bindingKey, owner.ID, now) {
 		return nil
 	}
 	accounts, err := members()

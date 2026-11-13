@@ -36,6 +36,8 @@ type openAIStickyChange struct {
 	mu               sync.Mutex
 	done             bool
 	attemptSucceeded bool
+	attemptCanceled  bool
+	activeAttempt    *schedAttemptCapture
 	groupID          int64
 	session          string
 	key              string
@@ -47,13 +49,16 @@ type openAIStickyChange struct {
 	cache            OpenAIStickyVersionedCache
 }
 
-func noteOpenAIStickyAttemptSuccess(ctx context.Context, accountID int64) {
-	change := pendingOpenAIStickyChange(ctx)
-	if change == nil || change.target != accountID {
+func noteOpenAIStickyAttemptOutcome(attempt *schedAttemptCapture, success bool) {
+	change := pendingOpenAIStickyChange(attempt.ctx)
+	if change == nil || change.target != attempt.accountID {
 		return
 	}
 	change.mu.Lock()
-	change.attemptSucceeded = true
+	if change.activeAttempt == attempt {
+		change.attemptSucceeded = success
+		change.attemptCanceled = attempt.client || errors.Is(attempt.ctx.Err(), context.Canceled)
+	}
 	change.mu.Unlock()
 }
 
@@ -65,9 +70,9 @@ func FinishOpenAIStickyForward(ctx context.Context, accountID int64, result *Ope
 		return
 	}
 	change.mu.Lock()
-	succeeded := change.attemptSucceeded
+	succeeded, attemptCanceled := change.attemptSucceeded, change.attemptCanceled
 	change.mu.Unlock()
-	canceled := errors.Is(ctx.Err(), context.Canceled) || (result != nil && result.ClientDisconnect)
+	canceled := attemptCanceled || errors.Is(ctx.Err(), context.Canceled) || (result != nil && result.ClientDisconnect)
 	success := succeeded && err == nil && ctx.Err() == nil && result != nil && !result.PartialFailure && !canceled &&
 		(result.UpstreamTerminalEvent == "" || result.UpstreamTerminalEvent == "response.completed" || result.UpstreamTerminalEvent == "response.done")
 	CompleteOpenAIStickyChange(ctx, accountID, success, canceled)
@@ -98,6 +103,12 @@ func (s *OpenAIGatewayService) prepareOpenAIStickyChange(ctx context.Context, gr
 	}
 	key := s.openAISessionCacheKey(session)
 	expected, err := cache.GetSessionBinding(ctx, derefGroupID(groupID), key)
+	if (err == nil && expected.AccountID <= 0 || errors.Is(err, ErrStickySessionNotFound)) && s.openAISessionHashReadOldFallbackEnabled() {
+		if legacyKey := s.openAILegacySessionCacheKey(ctx, session); legacyKey != "" {
+			key = legacyKey
+			expected, err = cache.GetSessionBinding(ctx, derefGroupID(groupID), key)
+		}
+	}
 	if err != nil || expected.AccountID <= 0 {
 		return
 	}

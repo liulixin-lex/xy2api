@@ -174,21 +174,14 @@ func TestOpenAISelectionRuntimeSessionCacheAndOwnerSlotOrder(t *testing.T) {
 					f.view.States[fakeSchedViewKey{7, 10, "m"}] = schedquality.StateView{State: schedquality.StateCooling}
 				}
 				result := f.selectNow(t, ctx, "session", nil)
+				require.Equal(t, int64(1), result.Account.ID)
+				require.Equal(t, int64(1), f.cache.sessionBindings[key])
+				require.Equal(t, []int64{1}, f.attempts, "migration runs before taking the owner slot")
 				if legacy {
-					require.Equal(t, int64(10), result.Account.ID)
-					require.Equal(t, int64(10), f.cache.sessionBindings[key])
 					require.Zero(t, f.cache.sessionBindings["openai:session"])
-					if mode != "idle" {
-						require.Equal(t, []int64{10}, f.attempts)
-						require.Empty(t, f.releases)
-					}
-				} else {
-					require.Equal(t, int64(1), result.Account.ID)
-					require.Equal(t, int64(1), f.cache.sessionBindings[key])
-					require.Equal(t, []int64{1}, f.attempts, "migration runs before taking the owner slot")
 				}
-				for _, key := range append(f.cache.ttlKeys, f.cache.casKeys...) {
-					require.Equal(t, "openai:session", key)
+				for _, actualKey := range append(f.cache.ttlKeys, f.cache.casKeys...) {
+					require.Equal(t, key, actualKey)
 				}
 			})
 		}
