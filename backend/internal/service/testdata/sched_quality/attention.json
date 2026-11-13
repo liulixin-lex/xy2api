@@ -1,12 +1,1 @@
-{
-  "cooling": [
-    479,
-    503
-  ],
-  "exempt": [
-    479
-  ],
-  "demote": [
-    503
-  ]
-}
+{"substandard":[1],"exempt":[2],"observing":[3]}

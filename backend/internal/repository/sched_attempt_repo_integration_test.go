@@ -47,7 +47,7 @@ func TestSchedAttemptRepositoryIdempotenceAndDelayedInsert(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, recent, 2)
 	require.Equal(t, schedquality.OutcomeOther, recent[0].Outcome)
-	started, err := repo.LoadStartedSince(ctx, start.Add(-time.Second))
+	started, err := repo.LoadFinishedSince(ctx, start.Add(-time.Second))
 	require.NoError(t, err)
 	require.Len(t, started, 1)
 	deleted, err := repo.DeleteBefore(ctx, start.Add(-time.Second))

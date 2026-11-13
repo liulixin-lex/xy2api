@@ -12,10 +12,11 @@ import (
 const schedEvidenceRetention = 180 * time.Minute
 
 type schedQualityWindow struct {
-	mu       sync.Mutex
-	pending  []q.AttemptSample
-	samples  map[SchedAccountModel][]q.AttemptSample
-	previous map[string]*q.AttemptSample
+	mu            sync.Mutex
+	pending       []q.AttemptSample
+	samples       map[SchedAccountModel][]q.AttemptSample
+	previous      map[string]*q.AttemptSample
+	newFinishedAt time.Time
 }
 
 func (w *schedQualityWindow) add(s q.AttemptSample) {
@@ -40,6 +41,30 @@ func (w *schedQualityWindow) merge(added []q.AttemptSample, now time.Time) {
 	if w.previous == nil {
 		w.previous = make(map[string]*q.AttemptSample)
 	}
+	known := make(map[string]bool)
+	for _, rows := range w.samples {
+		for _, row := range rows {
+			known[row.AttemptID] = true
+		}
+	}
+	addedIndex := make(schedPredecessorIndex)
+	for _, row := range added {
+		addedIndex.add(row)
+	}
+	addedIndex.sort()
+	// A late predecessor can supersede a cached positive or negative lookup.
+	// Compare dispatch order, including predecessors outside the completion window.
+	for _, rows := range w.samples {
+		for _, current := range rows {
+			if previous, cached := w.previous[current.AttemptID]; cached {
+				if candidate := addedIndex.before(current); candidate != nil && closerPredecessor(current, *candidate, previous) {
+					copy := schedQualityCloneSample(*candidate)
+					previous = &copy
+				}
+				w.previous[current.AttemptID] = previous
+			}
+		}
+	}
 	byPair := make(map[SchedAccountModel][]q.AttemptSample)
 	for _, s := range added {
 		pair := SchedAccountModel{s.AccountID, s.Model}
@@ -57,6 +82,9 @@ func (w *schedQualityWindow) merge(added []q.AttemptSample, now time.Time) {
 				continue
 			}
 			alive[s.AttemptID] = true
+			if !known[s.AttemptID] && (w.newFinishedAt.IsZero() || s.FinishedAt.Before(w.newFinishedAt)) {
+				w.newFinishedAt = s.FinishedAt
+			}
 			kept = append(kept, schedQualityCloneSample(s))
 		}
 		if len(kept) == 0 {
@@ -76,67 +104,90 @@ type schedPreviousLoader interface {
 	LoadPreviousAttempts(context.Context, []q.AttemptSample) (map[string]*q.AttemptSample, error)
 }
 
-// prepareContinuations orders all accounts together. Failed and overlapping
-// predecessors interrupt continuation; they must never be skipped.
-func (w *schedQualityWindow) prepareContinuations(ctx context.Context, loader schedPreviousLoader) error {
-	type session struct {
-		group      int64
-		model, key string
+type schedSessionKey struct {
+	group          int64
+	model, session string
+}
+type schedPredecessorIndex map[schedSessionKey][]q.AttemptSample
+
+func schedSessionOf(s q.AttemptSample) schedSessionKey {
+	return schedSessionKey{s.GroupID, s.Model, s.SessionKey}
+}
+func (x schedPredecessorIndex) add(s q.AttemptSample) {
+	if s.SessionKey != "" {
+		key := schedSessionOf(s)
+		x[key] = append(x[key], s)
 	}
-	bySession := make(map[session][]q.AttemptSample)
-	for _, rows := range w.samples {
-		for _, s := range rows {
-			if s.SessionKey != "" {
-				k := session{s.GroupID, s.Model, s.SessionKey}
-				bySession[k] = append(bySession[k], s)
-			}
-		}
-	}
-	previous := make(map[string]*q.AttemptSample)
-	var missing []q.AttemptSample
-	for _, rows := range bySession {
+}
+func (x schedPredecessorIndex) sort() {
+	for _, rows := range x {
 		sort.Slice(rows, func(i, j int) bool {
 			if rows[i].StartedAt.Equal(rows[j].StartedAt) {
 				return rows[i].AttemptID < rows[j].AttemptID
 			}
 			return rows[i].StartedAt.Before(rows[j].StartedAt)
 		})
-		for i := 0; i < len(rows); {
-			end := i + 1
-			for end < len(rows) && rows[end].StartedAt.Equal(rows[i].StartedAt) {
-				end++
+	}
+}
+func (x schedPredecessorIndex) before(current q.AttemptSample) *q.AttemptSample {
+	rows := x[schedSessionOf(current)]
+	i := sort.Search(len(rows), func(i int) bool { return !rows[i].StartedAt.Before(current.StartedAt) })
+	if i == 0 {
+		return nil
+	}
+	return &rows[i-1]
+}
+
+// closerPredecessor uses the same strict dispatch ordering and tie-break as PG.
+func closerPredecessor(current, candidate q.AttemptSample, previous *q.AttemptSample) bool {
+	if current.SessionKey == "" || current.SessionKey != candidate.SessionKey || current.GroupID != candidate.GroupID || current.Model != candidate.Model || !candidate.StartedAt.Before(current.StartedAt) || candidate.StartedAt.Before(current.StartedAt.Add(-q.LedgerRetention)) {
+		return false
+	}
+	return previous == nil || candidate.StartedAt.After(previous.StartedAt) || candidate.StartedAt.Equal(previous.StartedAt) && candidate.AttemptID > previous.AttemptID
+}
+
+// Completion-window neighbors cannot prove dispatch-order adjacency: an
+// intervening failed attempt may already have left the window. Resolve every
+// new session attempt against the ledger in one batch and cache that fact.
+func (w *schedQualityWindow) prepareContinuations(ctx context.Context, loader schedPreviousLoader) error {
+	var missing []q.AttemptSample
+	for _, rows := range w.samples {
+		for _, row := range rows {
+			if _, cached := w.previous[row.AttemptID]; row.SessionKey != "" && !cached {
+				missing = append(missing, row)
 			}
-			for j := i; j < end; j++ {
-				if i > 0 {
-					p := rows[i-1]
-					previous[rows[j].AttemptID] = &p
-				} else if p, ok := w.previous[rows[j].AttemptID]; ok {
-					previous[rows[j].AttemptID] = p
-				} else {
-					missing = append(missing, rows[j])
-				}
-			}
-			i = end
 		}
 	}
 	if len(missing) > 0 {
+		visible := make(schedPredecessorIndex)
+		for _, rows := range w.samples {
+			for _, row := range rows {
+				visible.add(row)
+			}
+		}
+		visible.sort()
 		found, err := loader.LoadPreviousAttempts(ctx, missing)
 		if err != nil {
 			return err
 		}
-		for _, s := range missing {
-			p := found[s.AttemptID]
+		for _, row := range missing {
+			p := found[row.AttemptID]
 			if p != nil {
-				cloned := schedQualityCloneSample(*p)
-				p = &cloned
+				copy := schedQualityCloneSample(*p)
+				p = &copy
 			}
-			w.previous[s.AttemptID] = p
-			previous[s.AttemptID] = p
+			// Observe can precede the ledger commit. Visible attempts also
+			// correct the lookup, without skipping failed or overlapping ones.
+			if candidate := visible.before(row); candidate != nil && closerPredecessor(row, *candidate, p) {
+				copy := schedQualityCloneSample(*candidate)
+				p = &copy
+			}
+			w.previous[row.AttemptID] = p
 		}
 	}
 	for pair, rows := range w.samples {
 		for i := range rows {
-			p := previous[rows[i].AttemptID]
+			p := w.previous[rows[i].AttemptID]
 			rows[i].Continuation = p != nil && p.StartedAt.Before(rows[i].StartedAt) && q.IsContinuation(rows[i], *p)
 		}
 		w.samples[pair] = rows

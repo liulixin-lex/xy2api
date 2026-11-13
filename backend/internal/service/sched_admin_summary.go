@@ -1,429 +1,263 @@
 package service
 
 import (
+	"cmp"
 	"context"
-	"math"
 	"slices"
-	"sort"
-	"strings"
+	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 )
 
-func (s *SchedAdminService) Summary(_ context.Context, ids []int64, model string) (SchedAdminSummary, error) {
-	out := SchedAdminSummary{Accounts: []SchedAdminAccountSummary{}}
-	if len(ids) > schedquality.SummaryMaxAccounts {
-		return out, infraerrors.BadRequest("TOO_MANY_ACCOUNTS", "At most 1000 account ids are allowed")
+func schedAdminIDs(ids []int64) ([]int64, error) {
+	if len(ids) > 1000 {
+		return nil, infraerrors.BadRequest("TOO_MANY_IDS", "At most 1000 ids are allowed")
 	}
+	out := make([]int64, 0, len(ids))
+	seen := map[int64]bool{}
 	for _, id := range ids {
 		if id <= 0 {
-			return out, infraerrors.BadRequest("INVALID_ACCOUNT_ID", "Invalid account id")
+			return nil, infraerrors.BadRequest("INVALID_ID", "Invalid id")
 		}
+		if !seen[id] {
+			out = append(out, id)
+			seen[id] = true
+		}
+	}
+	return out, nil
+}
+func (s *SchedAdminService) Summary(ctx context.Context, ids []int64) (SchedAdminSummary, error) {
+	out := SchedAdminSummary{Accounts: []SchedAdminAccountSummary{}}
+	ids, err := schedAdminIDs(ids)
+	if err != nil {
+		return out, err
 	}
 	p, now := s.snapshot(), s.d.Now()
 	out.At, out.Stale, out.GlobalEnabled = schedAdminStamp(p.At), now.Sub(p.At) > schedquality.ViewMaxAge, p.GlobalEnabled
-	model = strings.TrimSpace(model)
-	type modelEvidence struct {
-		model   string
-		samples int
+	if len(ids) == 0 {
+		return out, nil
 	}
-	var defaults map[int64]modelEvidence
-	if model == "" && len(ids) > 0 {
-		defaults = make(map[int64]modelEvidence, len(ids))
-		for _, id := range ids {
-			defaults[id] = modelEvidence{}
-		}
-		for key, evidence := range p.Evidence {
-			best, requested := defaults[key.AccountID]
-			if requested && evidence.Samples > 0 && (evidence.Samples > best.samples || (evidence.Samples == best.samples && key.Model < best.model)) {
-				defaults[key.AccountID] = modelEvidence{model: key.Model, samples: evidence.Samples}
-			}
+	accounts, err := s.d.Accounts.GetByIDs(ctx, ids)
+	if err != nil {
+		return out, err
+	}
+	byID := map[int64]*Account{}
+	for _, a := range accounts {
+		if a != nil {
+			byID[a.ID] = a
 		}
 	}
 	for _, id := range ids {
-		x := SchedAdminAccountSummary{AccountID: id, Cooling: []SchedAdminAccountSummaryCooling{}, Overrides: []SchedAdminAccountSummaryOverride{}}
-		m := model
-		if m == "" {
-			m = defaults[id].model
+		a := byID[id]
+		if a == nil {
+			continue
 		}
-		v := p.Evidence[SchedAccountModel{id, m}]
-		if m != "" && v.Samples > 0 {
-			x.Model = schedAdminString(m)
+		x, err := s.accountSummary(ctx, p, a, now)
+		if err != nil {
+			return out, err
 		}
-		x.Samples, x.TTFO.N, x.Error.N, x.Cache.N = v.Samples, v.Speed.N, v.Error.N, v.Cache.Turns
-		if schedAdminEnough(v.Speed.N, v.Speed.Sessions) {
-			x.TTFO.P90Ms, x.TTFO.Timeout = schedAdminInt(v.Speed.P90Ms), v.Speed.P90Timeout
-		}
-		if schedAdminEnough(v.Error.N, v.Error.Sessions) {
-			x.Error.Rate = schedAdminFloat(v.Error.Rate)
-		}
-		if schedAdminEnough(v.Cache.Turns, v.Cache.Sessions) {
-			x.Cache.Ratio = schedAdminFloat(v.Cache.Ratio)
-		}
-		groups := map[int64]int{}
-		for _, group := range p.Members[id] {
-			groups[group] = 0
-		}
-		rows := append([]SchedGroupRow(nil), p.GroupRows[id]...)
-		sort.Slice(rows, func(i, j int) bool {
-			if rows[i].GroupID == rows[j].GroupID {
-				return rows[i].Model < rows[j].Model
-			}
-			return rows[i].GroupID < rows[j].GroupID
-		})
-		coolingAt := map[int64]int{}
-		for _, r := range rows {
-			state, member := groups[r.GroupID]
-			if !member {
-				continue
-			}
-			if r.View.State == schedquality.StateCooling {
-				groups[r.GroupID] = 2
-				testing := p.Tests[SchedAccountModel{id, r.Model}].Running
-				cooling := SchedAdminAccountSummaryCooling{GroupID: r.GroupID, Model: r.Model, Reason: string(r.View.Reason), Until: schedAdminTime(r.View.Until), WaitingTest: r.View.WaitingTest, Testing: testing}
-				if state != 2 {
-					coolingAt[r.GroupID] = len(x.Cooling)
-					x.Cooling = append(x.Cooling, cooling)
-				} else if index, ok := coolingAt[r.GroupID]; ok && testing && !x.Cooling[index].Testing {
-					x.Cooling[index] = cooling
-				}
-			} else if state != 2 && schedAdminHasReal(r.Summary) {
-				groups[r.GroupID] = 1
-			}
-		}
-		for _, state := range groups {
-			x.Groups.Total++
-			switch state {
-			case 2:
-				x.Groups.Cooling++
-			case 1:
-				x.Groups.Normal++
-			default:
-				x.Groups.Nodata++
-			}
-		}
-		for _, o := range p.Overrides {
-			if o.AccountID != id || (o.GroupID != 0 && !slices.Contains(p.Members[id], o.GroupID)) || (o.ExpiresAt != nil && !now.Before(*o.ExpiresAt)) {
-				continue
-			}
-			var expiresAt *string
-			if o.ExpiresAt != nil {
-				expiresAt = schedAdminTime(*o.ExpiresAt)
-			}
-			x.Overrides = append(x.Overrides, SchedAdminAccountSummaryOverride{GroupID: o.GroupID, Mode: schedAdminOverrideMode(o.Mode), ExpiresAt: expiresAt})
-		}
-		sort.Slice(x.Overrides, func(i, j int) bool { return x.Overrides[i].GroupID < x.Overrides[j].GroupID })
 		out.Accounts = append(out.Accounts, x)
 	}
 	return out, nil
 }
-func schedAdminHasReal(v schedquality.Summary) bool {
-	return schedAdminEnough(v.Speed.N, v.Speed.Sessions) || schedAdminEnough(v.Error.N, v.Error.Sessions) || schedAdminEnough(v.Cache.Turns, v.Cache.Sessions)
-}
-func (s *SchedAdminService) Attention(_ context.Context) (SchedAdminAttention, error) {
-	p := s.snapshot()
-	out := SchedAdminAttention{Cooling: []int64{}, Exempt: []int64{}, Demote: []int64{}}
-	now := s.d.Now()
-	exempt, demote := map[int64]bool{}, map[int64]bool{}
-	covered := map[[2]int64]bool{}
-	for _, o := range p.Overrides {
-		if (o.GroupID != 0 && !slices.Contains(p.Members[o.AccountID], o.GroupID)) || (o.ExpiresAt != nil && !now.Before(*o.ExpiresAt)) {
-			continue
+func (s *SchedAdminService) accountSummary(ctx context.Context, p *SchedQualitySnapshot, a *Account, now time.Time) (SchedAdminAccountSummary, error) {
+	out := SchedAdminAccountSummary{AccountID: a.ID, Status: "normal", ResetAt: schedAdminTime(p.ResetAt[a.ID]), Substandard: []SchedAdminSubstandard{}, Exemptions: s.exemptions(ctx, p, a, now)}
+	out.TTFO.Short, out.Error.Short, out.Cache.Short = true, true, true
+	if a.Platform == PlatformOpenAI {
+		v := p.Account(a.ID)
+		out.TTFO = SchedAdminAccountSummaryTTFO{SchedAdminMark: SchedAdminMark{N: v.Speed.N, Short: v.Speed.N < schedquality.SpeedMinSamples}, P50Ms: v.Speed.P50Ms}
+		out.Error.SchedAdminMark = SchedAdminMark{N: v.Error.N, Short: v.Error.N < schedquality.ErrorMinSamples}
+		if v.Error.N > 0 {
+			out.Error.Rate = schedAdminFloat(v.Error.Rate)
 		}
-		switch o.Mode {
-		case schedquality.OverrideExempt:
-			if !exempt[o.AccountID] {
-				exempt[o.AccountID] = true
-				out.Exempt = append(out.Exempt, o.AccountID)
-			}
-		case schedquality.OverrideDemote:
-			if !demote[o.AccountID] {
-				demote[o.AccountID] = true
-				out.Demote = append(out.Demote, o.AccountID)
-			}
-		default:
-			continue
+		out.Cache.SchedAdminMark = SchedAdminMark{N: v.Cache.Turns, Short: v.Cache.Turns < schedquality.CacheMinSamples}
+		if v.Cache.InputTokens > 0 {
+			out.Cache.Ratio = schedAdminFloat(v.Cache.Ratio)
 		}
-		covered[[2]int64{o.AccountID, o.GroupID}] = true
+		for _, r := range p.RowsForAccount(a.ID) {
+			if !schedAdminMember(a, r.GroupID) || !r.View.Failing {
+				continue
+			}
+			out.Substandard = append(out.Substandard, SchedAdminSubstandard{GroupID: r.GroupID, Model: r.Model, Dims: append([]schedquality.Dimension{}, r.View.Dims...), Until: schedAdminStamp(r.View.Until), OtherGroup: len(r.OtherGroupIDs) > 0, Exempt: schedAdminExemption(out.Exemptions, r.GroupID) != nil})
+			for _, d := range r.View.Dims {
+				switch string(d) {
+				case "ttfo":
+					out.TTFO.Red = true
+				case "error":
+					out.Error.Red = true
+				case "cache":
+					out.Cache.Red = true
+				}
+			}
+		}
+		slices.SortFunc(out.Substandard, func(a, b SchedAdminSubstandard) int {
+			if a.GroupID != b.GroupID {
+				return cmp.Compare(a.GroupID, b.GroupID)
+			}
+			return cmp.Compare(a.Model, b.Model)
+		})
+		if out.TTFO.Short && len(out.Substandard) == 0 {
+			out.Status = "observing"
+		}
 	}
-	for id, rows := range p.GroupRows {
-		if covered[[2]int64{id, 0}] {
-			continue
-		}
-		for _, r := range rows {
-			if r.View.State == schedquality.StateCooling && slices.Contains(p.Members[id], r.GroupID) && !covered[[2]int64{id, r.GroupID}] {
-				out.Cooling = append(out.Cooling, id)
-				break
-			}
-		}
+	states, err := s.autoStates(ctx, a, now)
+	if err != nil {
+		return out, err
 	}
-	sort.Slice(out.Cooling, func(i, j int) bool { return out.Cooling[i] < out.Cooling[j] })
-	sort.Slice(out.Exempt, func(i, j int) bool { return out.Exempt[i] < out.Exempt[j] })
-	sort.Slice(out.Demote, func(i, j int) bool { return out.Demote[i] < out.Demote[j] })
+	out.Stop = schedAdminStop(states)
+	if out.Stop != nil {
+		out.Status = "disabled"
+	}
 	return out, nil
 }
 
-func schedAdminMetric(n, sessions, value int) *int {
-	if !schedAdminEnough(n, sessions) {
-		return nil
+// Single-model restrictions and untriggered counters do not stop the entire account.
+func schedAdminStop(states []SchedAutoState) *SchedAdminStop {
+	order := []string{"manual_off", "error", "temp_transient", "temp_post_output", "temp_balance", "temp_usage", "temp_rule", "temp_403", "temp_auth", "temp_health", "temp_stream_timeout", "rate_limit", "overload", "expired", "quota", "quota_auto_pause", "parent_blocked", "same_site", "post_output", "proxy_circuit"}
+	for _, kind := range order {
+		for _, v := range states {
+			if v.Kind != kind || v.Scope == "model" || (v.Count != nil && v.Count[0] < v.Count[1]) {
+				continue
+			}
+			out := &SchedAdminStop{Source: "auto", Reason: kind}
+			if kind == "manual_off" {
+				out.Source = "manual"
+			}
+			if v.Until != nil && kind != "expired" {
+				out.Until = schedAdminTime(*v.Until)
+			}
+			return out
+		}
 	}
-	return schedAdminInt(value)
+	return nil
 }
-func schedAdminRatio(n, sessions int, value float64) *float64 {
-	if !schedAdminEnough(n, sessions) {
-		return nil
+func (s *SchedAdminService) Attention(ctx context.Context) (SchedAdminAttention, error) {
+	out := SchedAdminAttention{Substandard: []int64{}, Exempt: []int64{}, Observing: []int64{}}
+	ids, err := s.d.Accounts.SchedAdminAccountIDs(ctx)
+	if err != nil {
+		return out, err
 	}
-	return schedAdminFloat(value)
+	// Use one snapshot for all batches; no page can mix evaluation generations.
+	p, now := s.snapshot(), s.d.Now()
+	for start := 0; start < len(ids); start += 1000 {
+		accounts, err := s.d.Accounts.GetByIDs(ctx, ids[start:min(start+1000, len(ids))])
+		if err != nil {
+			return out, err
+		}
+		for _, a := range accounts {
+			x, err := s.accountSummary(ctx, p, a, now)
+			if err != nil {
+				return out, err
+			}
+			if x.Status == "observing" {
+				out.Observing = append(out.Observing, a.ID)
+			}
+			if len(x.Exemptions) > 0 {
+				out.Exempt = append(out.Exempt, a.ID)
+			}
+			for _, r := range x.Substandard {
+				enabled := schedAdminEffective(p, now, p.Policies[r.GroupID].Policy.Enabled)
+				if x.Stop == nil && schedAdminBelow(p, a.ID, r.GroupID, r.Exempt, enabled) {
+					out.Substandard = append(out.Substandard, a.ID)
+					break
+				}
+			}
+		}
+	}
+	slices.Sort(out.Substandard)
+	slices.Sort(out.Exempt)
+	slices.Sort(out.Observing)
+	out.Substandard = slices.Compact(out.Substandard)
+	out.Exempt = slices.Compact(out.Exempt)
+	out.Observing = slices.Compact(out.Observing)
+	return out, nil
 }
-
 func (s *SchedAdminService) Detail(ctx context.Context, id int64) (SchedAdminAccountDetail, error) {
-	out := SchedAdminAccountDetail{Models: []SchedAdminAccountDetailModels{}, Groups: []SchedAdminAccountDetailGroups{}, AutoStates: []SchedAdminAccountDetailAutoStates{}, RecentAttempts: []SchedAdminAccountDetailRecentAttempts{}}
-	a, e := s.account(ctx, id)
-	if e != nil {
-		return out, e
+	out := SchedAdminAccountDetail{Groups: []SchedAdminAccountDetailGroups{}, AutoStates: []SchedAdminAccountDetailAutoStates{}, Exemptions: []SchedAdminExemption{}}
+	a, err := s.account(ctx, id)
+	if err != nil {
+		return out, err
 	}
 	p, now := s.snapshot(), s.d.Now()
+	summary, err := s.accountSummary(ctx, p, a, now)
+	if err != nil {
+		return out, err
+	}
+	out.At, out.Stale, out.GlobalEnabled = schedAdminStamp(p.At), now.Sub(p.At) > schedquality.ViewMaxAge, p.GlobalEnabled
+	out.Status, out.Stop, out.ResetAt, out.Exemptions = summary.Status, summary.Stop, summary.ResetAt, summary.Exemptions
 	rate, _ := openAISchedulingRate(a, now, s.d.Gateway.openAIOAuthSchedulingRateMultiplier(ctx))
 	out.Account = SchedAdminAccountDetailAccount{ID: id, Name: a.Name, Priority: a.Priority, Rate: rate, Concurrency: a.Concurrency}
 	if s.d.InFlight != nil {
-		out.Account.InFlight, e = s.d.InFlight(ctx, id)
-		if e != nil {
-			return out, e
+		out.Account.InFlight, err = s.d.InFlight(ctx, id)
+		if err != nil {
+			return out, err
 		}
 	}
-	out.At, out.Stale, out.GlobalEnabled, out.TestsEnabled, out.ResetAt = schedAdminStamp(p.At), now.Sub(p.At) > schedquality.ViewMaxAge, p.GlobalEnabled, p.TestsEnabled, schedAdminTime(p.ResetAt[id])
-	models := map[string]bool{}
-	for k := range p.Evidence {
-		if k.AccountID == id {
-			models[k.Model] = true
+	for _, g := range a.Groups {
+		if g == nil || g.Platform != PlatformOpenAI {
+			continue
 		}
-	}
-	for k := range p.Tests {
-		if k.AccountID == id {
-			models[k.Model] = true
-		}
-	}
-	keys := make([]string, 0, len(models))
-	for m := range models {
-		keys = append(keys, m)
-	}
-	sort.Strings(keys)
-	for _, m := range keys {
-		v := p.Evidence[SchedAccountModel{id, m}]
-		x := SchedAdminAccountDetailModels{Model: m, Samples: v.Samples, Sessions: v.Sessions, From: schedAdminTime(v.From), To: schedAdminTime(v.To), TTFO: SchedAdminAccountDetailModelsTTFO{N: v.Speed.N, Sessions: v.Speed.Sessions, Timeouts: v.Speed.Timeouts, P90Ms: schedAdminMetric(v.Speed.N, v.Speed.Sessions, v.Speed.P90Ms), P90Timeout: v.Speed.P90Timeout, FailBoundMs: schedAdminMetric(v.Speed.N, v.Speed.Sessions, v.Speed.FailBoundMs), FailBoundTimeout: v.Speed.FailBoundTimeout, ByClass: []SchedAdminAccountDetailModelsTTFOByClass{}}, Error: SchedAdminAccountDetailModelsError{N: v.Error.N, Sessions: v.Error.Sessions, Bad: v.Error.Bad, Rate: schedAdminRatio(v.Error.N, v.Error.Sessions, v.Error.Rate), Lcb: schedAdminRatio(v.Error.N, v.Error.Sessions, v.Error.LCB)}, Cache: SchedAdminAccountDetailModelsCache{Turns: v.Cache.Turns, Sessions: v.Cache.Sessions, Ratio: schedAdminRatio(v.Cache.Turns, v.Cache.Sessions, v.Cache.Ratio)}}
-		x.RequestModel = openAIRequestModelForEvidence(a, m)
-		for c, stat := range v.Speed.ByClass {
-			var value *int
-			if stat.N > 0 {
-				value = schedAdminInt(stat.P90Ms)
+		x := SchedAdminAccountDetailGroups{GroupID: g.ID, Name: g.Name, Policy: schedAdminPolicyFields(p.Policies[g.ID].Policy), Exemption: schedAdminExemption(out.Exemptions, g.ID), ByModel: []SchedAdminAccountDetailGroupsByModel{}}
+		for _, r := range p.RowsForAccount(id) {
+			if r.GroupID == g.ID {
+				x.ByModel = append(x.ByModel, SchedAdminGroupModel(r, x.Exemption != nil))
 			}
-			x.TTFO.ByClass = append(x.TTFO.ByClass, SchedAdminAccountDetailModelsTTFOByClass{Class: schedquality.RequestClass(c).String(), N: stat.N, P90Ms: value})
 		}
-		if t, ok := p.Tests[SchedAccountModel{id, m}]; ok {
-			x.Test = schedAdminTestDetail(t)
-		}
-		out.Models = append(out.Models, x)
-	}
-	groupRows := map[int64][]SchedGroupRow{}
-	for _, r := range p.GroupRows[id] {
-		groupRows[r.GroupID] = append(groupRows[r.GroupID], r)
-	}
-	groups := make([]*Group, 0, len(a.Groups))
-	for _, group := range a.Groups {
-		if group != nil && group.Platform == PlatformOpenAI {
-			groups = append(groups, group)
-		}
-	}
-	sort.Slice(groups, func(i, j int) bool { return groups[i].ID < groups[j].ID })
-	out.AllGroupsOverride = s.override(ctx, p, id, 0, now)
-	for _, gr := range groups {
-		g := gr.ID
-		policy := p.Policies[g].Policy
-		x := SchedAdminAccountDetailGroups{GroupID: g, Name: gr.Name, GateEnabled: policy.Enabled, Policy: SchedAdminAccountDetailGroupsPolicy{TTFTSeconds: policy.TTFTSeconds, MaxErrorRate: policy.MaxErrorRate, MinCacheRatio: policy.MinCacheRatio, TakeoverIdleSeconds: policy.TakeoverIdleSeconds}, Override: s.override(ctx, p, id, g, now), ByModel: []SchedAdminAccountDetailGroupsByModel{}}
-		sort.Slice(groupRows[g], func(i, j int) bool { return groupRows[g][i].Model < groupRows[g][j].Model })
-		for _, r := range groupRows[g] {
-			x.ByModel = append(x.ByModel, schedAdminGroupModel(r, policy, p.Tests[SchedAccountModel{id, r.Model}].Running))
-		}
+		slices.SortFunc(x.ByModel, func(a, b SchedAdminAccountDetailGroupsByModel) int { return cmp.Compare(a.Model, b.Model) })
 		out.Groups = append(out.Groups, x)
 	}
-	states, e := s.autoStates(ctx, a, now)
-	if e != nil {
-		return out, e
+	slices.SortFunc(out.Groups, func(a, b SchedAdminAccountDetailGroups) int { return cmp.Compare(a.GroupID, b.GroupID) })
+	states, err := s.autoStates(ctx, a, now)
+	if err != nil {
+		return out, err
 	}
 	for _, v := range states {
-		var until *string
+		x := SchedAdminAccountDetailAutoStates{Key: v.Key, Kind: v.Kind, Scope: v.Scope, Model: v.Model, Count: v.Count, Shared: v.Shared, Clearable: v.Clearable, Why: v.Why}
 		if v.Until != nil {
-			until = schedAdminTime(*v.Until)
+			x.Until = schedAdminTime(*v.Until)
 		}
-		out.AutoStates = append(out.AutoStates, SchedAdminAccountDetailAutoStates{Key: v.Key, Kind: v.Kind, Scope: v.Scope, Model: v.Model, Until: until, Count: v.Count, Shared: v.Shared, Clearable: v.Clearable, Why: v.Why})
-	}
-	if s.d.Attempts != nil {
-		rows, e := s.d.Attempts.LoadRecentByAccount(ctx, id, schedquality.RecentAttemptsMax)
-		if e != nil {
-			return out, e
-		}
-		if len(rows) > schedquality.RecentAttemptsMax {
-			rows = rows[:schedquality.RecentAttemptsMax]
-		}
-		for _, r := range rows {
-			out.RecentAttempts = append(out.RecentAttempts, SchedAdminAccountDetailRecentAttempts{At: schedAdminStamp(r.StartedAt), GroupID: r.GroupID, Model: r.Model, Class: r.Class.String(), Stream: r.Stream, Warm: r.Warm, TTFOMs: r.TTFOMs, Outcome: r.Outcome.String(), Detail: r.Detail})
-		}
+		out.AutoStates = append(out.AutoStates, x)
 	}
 	return out, nil
 }
-func schedAdminTestDetail(t SchedTestRecord) *SchedAdminAccountDetailModelsTest {
-	t.Turns = append([]schedquality.TestTurn(nil), t.Turns...)
-	sort.SliceStable(t.Turns, func(i, j int) bool { return t.Turns[i].Turn < t.Turns[j].Turn })
-	x := &SchedAdminAccountDetailModelsTest{ID: t.ID, At: schedAdminStamp(t.StartedAt), Running: t.Running, Done: t.Done, AbortReason: t.AbortReason, Auto: t.Auto, Tiers: []SchedAdminAccountDetailModelsTestTiers{}, InputTokens: int(t.InputTokens), CachedTokens: int(t.CachedTokens), OutputTokens: int(t.OutputTokens)}
-	x.Clean = schedquality.TestClean(t.TestResult)
-	x.Kind = "full"
-	if t.Auto {
-		x.Kind = "screen"
-		for _, turn := range t.Turns {
-			if turn.Tier == schedquality.TierMedium || turn.Tier == schedquality.TierLarge {
-				x.Kind = "full"
-				break
-			}
-		}
+func schedAdminDim(w schedquality.EvidenceWindow, n int, lcb *float64, v schedquality.Verdict) SchedAdminDimDetail {
+	verdict := "short"
+	if v == schedquality.VerdictPass {
+		verdict = "pass"
 	}
-	for tier := schedquality.TierSmall; tier <= schedquality.TierLarge; tier++ {
-		v := SchedAdminAccountDetailModelsTestTiers{Tier: tier.String(), TTFOMs: []*int{}}
-		input, cached, found := 0, 0, false
-		for _, turn := range t.Turns {
-			if turn.Tier != tier {
-				continue
-			}
-			found = true
-			if turn.Turn > 1 && turn.Turn <= schedquality.TestTurnsPerTier && len(v.TTFOMs) < schedquality.TestTurnsPerTier-1 {
-				v.TTFOMs = append(v.TTFOMs, turn.TTFOMs)
-				if turn.Outcome == schedquality.OutcomeOK && turn.PromptTokens != nil && turn.PrevPromptTokens != nil && turn.CacheReadTokens != nil && *turn.PromptTokens >= *turn.PrevPromptTokens && *turn.PrevPromptTokens > 0 {
-					input += *turn.PrevPromptTokens
-					cached += min(*turn.CacheReadTokens, *turn.PrevPromptTokens)
-				}
-			}
-			if turn.Outcome == schedquality.OutcomeAccountFault {
-				v.Faults++
-			}
-			if turn.Outcome == schedquality.OutcomeTimeout {
-				v.Timeouts++
-			}
-		}
-		if input > 0 {
-			v.CacheRatio = schedAdminFloat(float64(cached) / float64(input))
-		}
-		if found {
-			x.Tiers = append(x.Tiers, v)
-		}
+	if v == schedquality.VerdictFail {
+		verdict = "fail"
 	}
-	return x
+	scope := "own"
+	if w.Source != schedquality.EvidenceLocal {
+		scope = "merged"
+	}
+	return SchedAdminDimDetail{Scope: scope, WindowMin: int(w.Window / time.Minute), N: n, LCB: lcb, Verdict: verdict}
 }
-func schedAdminSource(v schedquality.Verdict, test bool) *string {
-	if v == schedquality.VerdictNoData {
-		return nil
+
+// SchedAdminGroupModel is shared with MCP so both readers expose the same evidence.
+func SchedAdminGroupModel(r SchedGroupRow, exempt bool) SchedAdminAccountDetailGroupsByModel {
+	v, w := r.Evaluation, r.View
+	out := SchedAdminAccountDetailGroupsByModel{Model: r.Model, Failing: w.Failing, Dims: append([]schedquality.Dimension{}, w.Dims...), Level: w.Level, OtherGroupIDs: append([]int64{}, r.OtherGroupIDs...), Exempt: exempt}
+	if w.Failing {
+		out.Since, out.Until = schedAdminTime(w.Since), schedAdminTime(w.Until)
+	} else {
+		out.Dims = []schedquality.Dimension{}
+		out.OtherGroupIDs = []int64{}
 	}
-	if test {
-		return schedAdminString("test")
+	var speedLCB, errorLCB, ratio *float64
+	if v.Speed.N > 0 {
+		speedLCB = schedAdminFloat(v.Speed.LCB)
 	}
-	return schedAdminString("real")
-}
-func schedAdminGroupModel(r SchedGroupRow, p schedquality.Policy, running bool) SchedAdminAccountDetailGroupsByModel {
-	v, w, t := r.Summary, r.View, r.Test
-	x := SchedAdminAccountDetailGroupsByModel{Model: r.Model, State: w.State.String(), Level: w.Level, Reason: string(w.Reason), Since: schedAdminTime(w.Since), WaitingTest: w.WaitingTest, Testing: running, TTFO: SchedAdminAccountDetailGroupsByModelTTFO{Verdict: w.Verdicts.Speed.String(), From: schedAdminSource(w.Verdicts.Speed, w.FromTest[0]), N: v.Speed.N, P90Ms: schedAdminMetric(v.Speed.N, v.Speed.Sessions, v.Speed.P90Ms), P90Timeout: v.Speed.P90Timeout, LimitMs: int(p.TTFTSeconds * 1000)}, Error: SchedAdminAccountDetailGroupsByModelError{Verdict: w.Verdicts.Error.String(), From: schedAdminSource(w.Verdicts.Error, w.FromTest[1]), N: v.Error.N, Rate: schedAdminRatio(v.Error.N, v.Error.Sessions, v.Error.Rate), Limit: p.MaxErrorRate}, Cache: SchedAdminAccountDetailGroupsByModelCache{Verdict: w.Verdicts.Cache.String(), From: schedAdminSource(w.Verdicts.Cache, w.FromTest[2]), N: v.Cache.Turns, Ratio: schedAdminRatio(v.Cache.Turns, v.Cache.Sessions, v.Cache.Ratio), Limit: p.MinCacheRatio}}
-	x.TTFO.LimitMs = int(math.Round(p.TTFTSeconds * 1000))
-	if w.State == schedquality.StateCooling {
-		x.Until = schedAdminTime(w.Until)
+	if v.Error.N > 0 {
+		errorLCB = schedAdminFloat(v.Error.LCB)
 	}
-	if w.FromTest[0] {
-		x.TTFO.N = t.SpeedTurns
-		x.TTFO.P90Ms = nil
-		if t.SpeedWarm > 0 {
-			x.TTFO.P90Ms = schedAdminInt(t.MaxTTFOMs)
-		}
-		x.TTFO.P90Timeout = t.AnyTimeout
+	if v.Cache.InputTokens > 0 {
+		ratio = schedAdminFloat(v.Cache.Ratio)
 	}
-	if w.FromTest[1] {
-		x.Error.N = t.ErrorTurns
-		x.Error.Rate = nil
-		if t.ErrorTurns > 0 {
-			x.Error.Rate = schedAdminFloat(float64(t.Faults) / float64(t.ErrorTurns))
-		}
-	}
-	if w.FromTest[2] {
-		x.Cache.N = t.CacheTurns
-		x.Cache.Ratio = nil
-		if t.CacheTurns > 0 {
-			x.Cache.Ratio = schedAdminFloat(t.CacheRatio)
-		}
-	}
-	return x
-}
-func (s *SchedAdminService) Board(ctx context.Context, g int64, model string) (SchedAdminBoard, error) {
-	out := SchedAdminBoard{GroupID: g, Models: []string{}, Accounts: []SchedAdminBoardAccounts{}}
-	if _, e := s.group(ctx, g); e != nil {
-		return out, e
-	}
-	p, now := s.snapshot(), s.d.Now()
-	memberIDs := []int64{}
-	for id, rows := range p.GroupRows {
-		for _, row := range rows {
-			if row.GroupID == g {
-				memberIDs = append(memberIDs, id)
-				break
-			}
-		}
-	}
-	members, e := s.d.Accounts.GetByIDs(ctx, memberIDs)
-	if e != nil {
-		return out, e
-	}
-	groupAccounts := make(map[int64]*Account, len(members))
-	for _, a := range members {
-		groupAccounts[a.ID] = a
-	}
-	out.Models = schedAdminModels(p, g, groupAccounts)
-	out.Model = strings.TrimSpace(model)
-	if out.Model == "" && len(out.Models) > 0 {
-		out.Model = out.Models[0]
-	}
-	out.At, out.Stale, out.GlobalEnabled = schedAdminStamp(p.At), now.Sub(p.At) > schedquality.ViewMaxAge, p.GlobalEnabled
-	rows, e := s.d.Board.Board(ctx, g, out.Model)
-	if e != nil {
-		return out, e
-	}
-	ids := make([]int64, 0, len(rows))
-	for _, r := range rows {
-		ids = append(ids, r.AccountID)
-	}
-	accounts, e := s.d.Accounts.GetByIDs(ctx, ids)
-	if e != nil {
-		return out, e
-	}
-	names := map[int64]string{}
-	models := map[int64]string{}
-	for _, a := range accounts {
-		names[a.ID] = a.Name
-		models[a.ID] = OpenAIAttemptModel(a, out.Model)
-	}
-	for _, r := range rows {
-		model := models[r.AccountID]
-		v := p.Evidence[SchedAccountModel{r.AccountID, model}]
-		var w schedquality.StateView
-		for _, gr := range p.GroupRows[r.AccountID] {
-			if gr.GroupID == g && gr.Model == model {
-				w = gr.View
-				break
-			}
-		}
-		x := SchedAdminBoardAccounts{AccountID: r.AccountID, Name: names[r.AccountID], Rank: r.Rank, Eligible: r.Eligible, Reject: r.Reject, Standing: r.Standing.String(), State: w.State.String(), Level: w.Level, WaitingTest: w.WaitingTest, Testing: p.Tests[SchedAccountModel{r.AccountID, model}].Running, Override: s.override(ctx, p, r.AccountID, g, now), Priority: r.Priority, Rate: r.Rate, InFlight: r.InFlight, Concurrency: r.Concurrency, RecentlyFullSeconds: r.RecentlyFullSeconds, CanTakeOver: r.CanTakeOver, TTFO: SchedAdminBoardAccountsTTFO{N: v.Speed.N, Sessions: v.Speed.Sessions, P90Ms: schedAdminMetric(v.Speed.N, v.Speed.Sessions, v.Speed.P90Ms), P90Timeout: v.Speed.P90Timeout, FailBoundMs: schedAdminMetric(v.Speed.N, v.Speed.Sessions, v.Speed.FailBoundMs), FailBoundTimeout: v.Speed.FailBoundTimeout}, Error: SchedAdminBoardAccountsError{N: v.Error.N, Sessions: v.Error.Sessions, Rate: schedAdminRatio(v.Error.N, v.Error.Sessions, v.Error.Rate), Lcb: schedAdminRatio(v.Error.N, v.Error.Sessions, v.Error.LCB)}, Cache: SchedAdminBoardAccountsCache{N: v.Cache.Turns, Sessions: v.Cache.Sessions, Ratio: schedAdminRatio(v.Cache.Turns, v.Cache.Sessions, v.Cache.Ratio)}, Verdicts: SchedAdminBoardAccountsVerdicts{TTFO: w.Verdicts.Speed.String(), Error: w.Verdicts.Error.String(), Cache: w.Verdicts.Cache.String()}}
-		x.EvidenceModel = model
-		if r.RejectUntil != nil {
-			x.RejectUntil = schedAdminTime(*r.RejectUntil)
-		}
-		if w.State == schedquality.StateCooling {
-			x.Until = schedAdminTime(w.Until)
-		}
-		out.Accounts = append(out.Accounts, x)
-	}
-	return out, nil
+	out.TTFO = SchedAdminCountDetail{SchedAdminDimDetail: schedAdminDim(v.Speed.EvidenceWindow, v.Speed.N, speedLCB, v.Verdicts.Speed), Bad: v.Speed.Slow}
+	out.Error = SchedAdminCountDetail{SchedAdminDimDetail: schedAdminDim(v.Error.EvidenceWindow, v.Error.N, errorLCB, v.Verdicts.Error), Bad: v.Error.Bad}
+	out.Cache = SchedAdminCacheDetail{SchedAdminDimDetail: schedAdminDim(v.Cache.EvidenceWindow, v.Cache.Turns, nil, v.Verdicts.Cache), Ratio: ratio}
+	return out
 }

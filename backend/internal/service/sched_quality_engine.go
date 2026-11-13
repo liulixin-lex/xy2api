@@ -134,19 +134,10 @@ func (s *SchedQualityEngineService) notify(resets map[int64]time.Time) {
 	}
 }
 
-type schedEvidenceLoader interface {
-	schedPreviousLoader
-	LoadFinishedSince(context.Context, time.Time) ([]schedquality.AttemptSample, error)
-}
-
 func (s *SchedQualityEngineService) loadEvidence(ctx context.Context, now time.Time) error {
-	loader, ok := s.attempts.(schedEvidenceLoader)
-	if !ok {
-		return errors.New("attempt store does not implement v2 evidence reads")
-	}
 	cursor := s.insertedAt
 	if !s.loaded {
-		rows, err := loader.LoadFinishedSince(ctx, now.Add(-schedEvidenceRetention))
+		rows, err := s.attempts.LoadFinishedSince(ctx, now.Add(-schedEvidenceRetention))
 		if err != nil {
 			return err
 		}
@@ -180,7 +171,7 @@ func (s *SchedQualityEngineService) loadEvidence(ctx context.Context, now time.T
 		}
 		after = latest
 	}
-	if err := s.window.prepareContinuations(ctx, loader); err != nil {
+	if err := s.window.prepareContinuations(ctx, s.attempts); err != nil {
 		return err
 	}
 	s.insertedAt, s.loaded = maxSeen, true
@@ -221,6 +212,11 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) (cycleErr error) 
 	after := s.processedAt
 	if after.IsZero() {
 		after = now.Add(-5 * time.Minute)
+	} else if late := s.window.newFinishedAt; !late.IsZero() && !late.After(after) {
+		after = late.Add(-time.Microsecond)
+		if floor := now.Add(-5 * time.Minute); after.Before(floor) {
+			after = floor
+		}
 	}
 	locked, err := s.store.RunCycle(ctx, func(tx SchedQualityTx) error {
 		var err error
@@ -281,6 +277,7 @@ func (s *SchedQualityEngineService) cycle(ctx context.Context) (cycleErr error) 
 			}
 		}
 	}
+	s.window.newFinishedAt = time.Time{}
 	notifications = s.publish(d, states, overrides, resets, now)
 	return nil
 }

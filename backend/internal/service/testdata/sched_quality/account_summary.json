@@ -1,54 +1,44 @@
 {
-  "at": "…",
+  "at": "2026-11-11T12:00:00Z",
   "stale": false,
   "global_enabled": true,
   "accounts": [
     {
       "account_id": 479,
-      "model": "gpt-6.1-sol",
-      "samples": 200,
+      "status": "normal",
+      "reset_at": null,
+      "stop": null,
       "ttfo": {
-        "p90_ms": 12400,
-        "timeout": false,
-        "n": 150
+        "p50_ms": 11600,
+        "n": 42,
+        "short": false,
+        "red": true
       },
       "error": {
-        "rate": 0.005,
-        "n": 194
+        "rate": 0.018,
+        "n": 88,
+        "short": false,
+        "red": false
       },
       "cache": {
-        "ratio": 0.81,
-        "n": 120
+        "ratio": 0.74,
+        "n": 12,
+        "short": true,
+        "red": false
       },
-      "groups": {
-        "total": 5,
-        "normal": 4,
-        "cooling": 1,
-        "nodata": 0
-      },
-      "cooling": [
+      "substandard": [
         {
           "group_id": 53,
           "model": "gpt-6.1-sol",
-          "reason": "speed",
-          "until": "2026-11-11T12:04:30Z",
-          "waiting_test": false,
-          "testing": false
+          "dims": [
+            "ttfo"
+          ],
+          "until": "2026-11-11T12:30:00Z",
+          "other_group": false,
+          "exempt": false
         }
       ],
-      "cooling_more": 0,
-      "overrides": [
-        {
-          "group_id": 0,
-          "mode": "exempt",
-          "expires_at": null
-        },
-        {
-          "group_id": 53,
-          "mode": "demote",
-          "expires_at": "2026-11-12T12:00:00Z"
-        }
-      ]
+      "exemptions": []
     }
   ]
 }

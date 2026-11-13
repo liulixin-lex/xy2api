@@ -99,7 +99,7 @@ func (r *ResilienceService) Explain(ctx context.Context, groupID int64, sessionH
 	var avoided map[int64]struct{}
 	if sessionHash != "" && r.store != nil {
 		failures, _ = r.store.SessionFailures(ctx, groupID, sessionHash)
-		avoided, _ = r.store.SessionAvoid(ctx, groupID, sessionHash)
+		avoided, _ = sessionAvoidAfterReset(ctx, r.store, groupID, sessionHash, r.sessionResetAt)
 		session := &ResilienceSessionExplanation{Avoided: []int64{}}
 		for id := range avoided {
 			session.Avoided = append(session.Avoided, id)

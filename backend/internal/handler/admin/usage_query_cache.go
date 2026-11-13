@@ -57,7 +57,7 @@ func usageStatsCacheKey(filters usagestats.UsageLogFilters) string {
 }
 
 // getStatsCached 命中则返回缓存,未命中则回源 usageService 并写缓存。
-func (h *UsageHandler) getStatsCached(ctx context.Context, filters usagestats.UsageLogFilters) (*usagestats.UsageStats, bool, error) {
+func (h *UsageHandler) getStatsCached(ctx context.Context, filters usagestats.UsageLogFilters) (*usagestats.AdminRequestStats, bool, error) {
 	key := usageStatsCacheKey(filters)
 	entry, hit, err := usageStatsCache.GetOrLoad(key, func() (any, error) {
 		return h.usageService.AdminRequestStats(ctx, filters)
@@ -65,6 +65,6 @@ func (h *UsageHandler) getStatsCached(ctx context.Context, filters usagestats.Us
 	if err != nil {
 		return nil, hit, err
 	}
-	stats, err := snapshotPayloadAs[*usagestats.UsageStats](entry.Payload)
+	stats, err := snapshotPayloadAs[*usagestats.AdminRequestStats](entry.Payload)
 	return stats, hit, err
 }

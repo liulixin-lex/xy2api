@@ -179,7 +179,7 @@ func TestSchedAdminHealthCounterResetBeforeThreshold(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, result.Failed)
 	for _, key := range []string{"403_counter", "stream_timeout_counter", "health_counter"} {
-		require.NotContains(t, result.Cleared, service.SchedResetItem{Key: key, Kind: key})
+		require.NotContains(t, result.Cleared, key)
 	}
 	exists, err := cache.rdb.Exists(ctx, cache.openAIAPIKeyHealthKey(a.ID), cache.openAIAPIKeyHealthKey(a.ID)+":sequence", fmt.Sprintf("%s%d", openAI403CounterPrefix, a.ID), fmt.Sprintf("%s%d", timeoutCounterPrefix, a.ID)).Result()
 	require.NoError(t, err)
@@ -265,4 +265,20 @@ func TestSchedAdminStaleRedisTempAndConcurrentReplacement(t *testing.T) {
 			require.Zero(t, count)
 		})
 	}
+}
+
+func TestSchedAdminAttentionIncludesUnsampledUngroupedAccounts(t *testing.T) {
+	client := testEntClient(t)
+	r := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	a := mustCreateAccount(t, client, &service.Account{Name: "attention-openai", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey})
+	other := mustCreateAccount(t, client, &service.Account{Name: "attention-other", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey})
+	ids, err := r.SchedAdminAccountIDs(context.Background())
+	require.NoError(t, err)
+	require.Contains(t, ids, a.ID)
+	require.NotContains(t, ids, other.ID)
+	_, err = integrationDB.ExecContext(context.Background(), `UPDATE accounts SET deleted_at=NOW() WHERE id=$1`, a.ID)
+	require.NoError(t, err)
+	ids, err = r.SchedAdminAccountIDs(context.Background())
+	require.NoError(t, err)
+	require.NotContains(t, ids, a.ID)
 }

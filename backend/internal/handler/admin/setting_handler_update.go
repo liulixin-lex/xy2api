@@ -279,7 +279,6 @@ type UpdateSettingsRequest struct {
 	// OpenAI account scheduling
 	OpenAIOAuthSchedulingRateMultiplier *float64 `json:"openai_oauth_scheduling_rate_multiplier"`
 	SchedQualityEnabled                 *bool    `json:"sched_quality_enabled"`
-	SchedQualityTestEnabled             *bool    `json:"sched_quality_test_enabled"`
 
 	// 余额不足提醒
 	BalanceLowNotifyEnabled         *bool                   `json:"balance_low_notify_enabled"`
@@ -1892,12 +1891,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.SchedQualityEnabled
 		}(),
-		SchedQualityTestEnabled: func() bool {
-			if req.SchedQualityTestEnabled != nil {
-				return *req.SchedQualityTestEnabled
-			}
-			return previousSettings.SchedQualityTestEnabled
-		}(),
 		BalanceLowNotifyEnabled: func() bool {
 			if req.BalanceLowNotifyEnabled != nil {
 				return *req.BalanceLowNotifyEnabled
@@ -2434,7 +2427,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		PaymentVisibleMethodWxpayEnabled:        updatedSettings.PaymentVisibleMethodWxpayEnabled,
 		OpenAIOAuthSchedulingRateMultiplier:     updatedSettings.OpenAIOAuthSchedulingRateMultiplier,
 		SchedQualityEnabled:                     updatedSettings.SchedQualityEnabled,
-		SchedQualityTestEnabled:                 updatedSettings.SchedQualityTestEnabled,
 		BalanceLowNotifyEnabled:                 updatedSettings.BalanceLowNotifyEnabled,
 		BalanceLowNotifyThreshold:               updatedSettings.BalanceLowNotifyThreshold,
 		BalanceLowNotifyRechargeURL:             updatedSettings.BalanceLowNotifyRechargeURL,

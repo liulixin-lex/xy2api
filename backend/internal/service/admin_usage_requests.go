@@ -40,7 +40,7 @@ type UsageAttempt struct {
 
 type AdminUsageRequestRepository interface {
 	ListAdminRequests(context.Context, pagination.PaginationParams, usagestats.UsageLogFilters) ([]AdminUsageRecord, *pagination.PaginationResult, error)
-	AdminRequestStats(context.Context, usagestats.UsageLogFilters) (*usagestats.UsageStats, error)
+	AdminRequestStats(context.Context, usagestats.UsageLogFilters) (*usagestats.AdminRequestStats, error)
 	RequestAttempts(context.Context, string, time.Time) ([]UsageAttempt, error)
 }
 
@@ -52,7 +52,7 @@ func (s *UsageService) ListAdminRequests(ctx context.Context, params pagination.
 	return repo.ListAdminRequests(ctx, params, filters)
 }
 
-func (s *UsageService) AdminRequestStats(ctx context.Context, filters usagestats.UsageLogFilters) (*usagestats.UsageStats, error) {
+func (s *UsageService) AdminRequestStats(ctx context.Context, filters usagestats.UsageLogFilters) (*usagestats.AdminRequestStats, error) {
 	repo, ok := s.usageRepo.(AdminUsageRequestRepository)
 	if !ok {
 		return nil, fmt.Errorf("admin request repository unavailable")
