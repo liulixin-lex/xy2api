@@ -29,7 +29,8 @@ import type { SchedAccountSummary } from '@/types/schedQuality'
 import { fmtAt } from '@/utils/schedQualityFormat'
 
 // Groups column of the account list (FINAL §2, §7): one red capsule per substandard group and model,
-// `name 不达标·首字 · 12:30`, then one capsule per exemption. The model joins the name when the account is
+// `name 不达标·首字 · 12:30` with the first triggered dimension (contract §2.5; the numbers are red for all), then one
+// capsule per exemption. The model joins the name when the account is
 // substandard on more than one model. At most 3, then +N; a click opens the drawer at that group.
 const props = defineProps<{ summary?: SchedAccountSummary; loading?: boolean; groupName: (id: number) => string }>()
 const emit = defineEmits<{ open: [target: { groupId: number | null; model: string | null }] }>()
@@ -52,7 +53,7 @@ const capsules = computed<Capsule[]>(() => {
       groupId: item.group_id,
       model: item.model,
       name: manyModels ? `${props.groupName(item.group_id)} ${item.model}` : props.groupName(item.group_id),
-      state: `${[t('admin.schedQuality.state.substandard'), ...item.dims.map((dim) => t(`admin.schedQuality.dim.${dim}`))].join('·')} · ${fmtAt(item.until, now)}`,
+      state: `${t('admin.schedQuality.state.substandard')}·${t(`admin.schedQuality.dim.${item.dims[0]}`)} · ${fmtAt(item.until, now)}`,
       exempt: false
     }))
   for (const exemption of s.exemptions) {

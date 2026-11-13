@@ -70,7 +70,7 @@ func (s *GroupRepoSuite) TestCreate() {
 	s.Require().Equal("test-create", got.Name)
 }
 
-func (s *GroupRepoSuite) TestCreateFromSourcePreservesPriorityAndFiltersIneligibleAccounts() {
+func (s *GroupRepoSuite) TestCreateFromSourceUsesDefaultPriorityAndFiltersIneligibleAccounts() {
 	source := &service.Group{
 		Name:             "duplicate-source",
 		Platform:         service.PlatformOpenAI,
@@ -137,7 +137,7 @@ func (s *GroupRepoSuite) TestCreateFromSourcePreservesPriorityAndFiltersIneligib
 	var copiedPriority int
 	s.Require().NoError(rows.Scan(&copiedAccountID, &copiedPriority))
 	s.Require().Equal(oauthID, copiedAccountID)
-	s.Require().Equal(37, copiedPriority)
+	s.Require().Equal(50, copiedPriority)
 	s.Require().False(rows.Next(), "API-key and soft-deleted accounts must not be copied")
 
 	recovered, err := s.repo.FindByDuplicateOperationID(s.ctx, duplicate.DuplicateOperationID)

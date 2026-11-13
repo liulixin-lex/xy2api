@@ -144,8 +144,9 @@ func TestStickyBindingGenerationFencesLateFailure(t *testing.T) {
 	key := "openai:" + uuid.NewString()
 	session := "sticky_change:" + uuid.NewString()
 	avoidKey := sessionKey(resilienceSessionAvoidPrefix, group, session)
+	writtenKey := sessionKey(resilienceSessionAvoidWrittenPrefix, group, session)
 	t.Cleanup(func() {
-		_ = first.Del(ctx, append(sessionBindingKeys(group, key), avoidKey)...).Err()
+		_ = first.Del(ctx, append(sessionBindingKeys(group, key), avoidKey, writtenKey)...).Err()
 		_ = first.Close()
 		_ = second.Close()
 	})
@@ -159,7 +160,7 @@ func TestStickyBindingGenerationFencesLateFailure(t *testing.T) {
 	recorded, err := one.RecordSessionBindingFailure(ctx, group, key, session, expected, 101, 2*time.Minute)
 	require.NoError(t, err)
 	require.False(t, recorded, "an older failure cannot avoid a newly successful binding")
-	require.Zero(t, first.Exists(ctx, avoidKey).Val())
+	require.Zero(t, first.Exists(ctx, avoidKey, writtenKey).Val())
 	latest, err := two.GetSessionBinding(ctx, group, key)
 	require.NoError(t, err)
 	recorded, err = two.RecordSessionBindingFailure(ctx, group, key, session, latest, 102, 2*time.Minute)
@@ -168,4 +169,41 @@ func TestStickyBindingGenerationFencesLateFailure(t *testing.T) {
 	avoided, err := NewResilienceStore(first).SessionAvoid(ctx, group, session)
 	require.NoError(t, err)
 	require.Contains(t, avoided, int64(102))
+}
+
+func TestStickyFirstBindingCannotOverwriteConcurrentSuccess(t *testing.T) {
+	addr := os.Getenv("SCHEDULING_TEST_REDIS_ADDR")
+	if addr == "" {
+		addr = miniredis.RunT(t).Addr()
+	}
+	one := redis.NewClient(&redis.Options{Addr: addr})
+	two := redis.NewClient(&redis.Options{Addr: addr})
+	ctx := context.Background()
+	key := "openai:v2:first:" + uuid.NewString()
+	legacy := "openai:legacy:" + uuid.NewString()
+	keys := append(sessionBindingKeys(7, key), sessionBindingKeys(7, legacy)...)
+	t.Cleanup(func() { _ = one.Del(ctx, keys...).Err(); _ = one.Close(); _ = two.Close() })
+	first, second := &gatewayCache{rdb: one}, &gatewayCache{rdb: two}
+	var changed [2]bool
+	var errs [2]error
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i, cache := range []*gatewayCache{first, second} {
+		wg.Add(1)
+		go func(i int, cache *gatewayCache) {
+			defer wg.Done()
+			<-start
+			changed[i], errs[i] = cache.CommitSessionBinding(ctx, 7, key, service.StickySessionBinding{}, int64(i+1), time.Hour)
+		}(i, cache)
+	}
+	close(start)
+	wg.Wait()
+	require.NoError(t, errs[0])
+	require.NoError(t, errs[1])
+	require.NotEqual(t, changed[0], changed[1], "the first successful delivery establishes one owner")
+	require.NoError(t, first.DeleteSessionAccountID(ctx, 7, key))
+	require.NoError(t, second.SetSessionAccountID(ctx, 7, legacy, 10, time.Hour))
+	ok, err := first.CommitSessionBinding(ctx, 7, key, service.StickySessionBinding{LegacyKey: legacy}, 1, time.Hour)
+	require.NoError(t, err)
+	require.False(t, ok, "a newly discovered legacy owner also prevents first-binding replacement")
 }

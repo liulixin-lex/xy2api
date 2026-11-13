@@ -11,6 +11,9 @@ import (
 var usageStatsCache = newSnapshotCache(30 * time.Second)
 
 type usageStatsCacheKeyData struct {
+	Result                *int16 `json:"result"`
+	RequestID             string `json:"request_id"`
+	ModelFilterSource     string `json:"model_filter_source"`
 	StartTime             string `json:"start_time"`
 	EndTime               string `json:"end_time"`
 	UserID                int64  `json:"user_id"`
@@ -36,6 +39,7 @@ func usageStatsCacheKey(filters usagestats.UsageLogFilters) string {
 		end = filters.EndTime.UTC().Format(time.RFC3339)
 	}
 	return mustMarshalDashboardCacheKey(usageStatsCacheKeyData{
+		Result: filters.Result, RequestID: filters.RequestID, ModelFilterSource: filters.ModelFilterSource,
 		StartTime:             start,
 		EndTime:               end,
 		UserID:                filters.UserID,
@@ -56,7 +60,7 @@ func usageStatsCacheKey(filters usagestats.UsageLogFilters) string {
 func (h *UsageHandler) getStatsCached(ctx context.Context, filters usagestats.UsageLogFilters) (*usagestats.UsageStats, bool, error) {
 	key := usageStatsCacheKey(filters)
 	entry, hit, err := usageStatsCache.GetOrLoad(key, func() (any, error) {
-		return h.usageService.GetStatsWithFilters(ctx, filters)
+		return h.usageService.AdminRequestStats(ctx, filters)
 	})
 	if err != nil {
 		return nil, hit, err

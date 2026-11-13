@@ -17,11 +17,7 @@
         <tr v-for="(attempt, index) in attempts" :key="attempt.attempt_id" :data-usage-attempt="attempt.attempt_id">
           <td class="sq-r sq-num sq-text-3">{{ index + 1 }}</td>
           <td>
-            <span class="inline-flex items-center gap-1.5">
-              {{ attempt.account_name ?? `#${attempt.account_id}` }}
-              <span v-if="attempt.fallback" class="sq-text-3 text-xs">{{ t('admin.schedQuality.usage.fallback') }}</span>
-              <span v-if="attempt.takeover" class="sq-text-3 text-xs">{{ t('admin.schedQuality.usage.takeover') }}</span>
-            </span>
+            {{ attempt.account_name ?? `#${attempt.account_id}` }}
           </td>
           <td :class="attempt.outcome === 1 ? 'sq-text' : attempt.outcome === 5 ? 'sq-text-3' : 'sq-cool'">{{ outcomeWord(attempt.outcome, t) }}</td>
           <td class="sq-text-2">{{ errorClassWord(attempt.error_class, t, te) }}</td>

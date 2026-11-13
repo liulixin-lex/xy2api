@@ -24,7 +24,7 @@ func (s *OpenAIGatewayService) stickyChangeAvoid(ctx context.Context, groupID *i
 	if s == nil || s.resilience == nil || s.resilience.store == nil || session == "" {
 		return nil
 	}
-	avoided, err := s.resilience.store.SessionAvoid(ctx, derefGroupID(groupID), stickyChangeAvoidSession(session))
+	avoided, err := sessionAvoidAfterReset(ctx, s.resilience.store, derefGroupID(groupID), stickyChangeAvoidSession(session), s.resilience.sessionResetAt)
 	if err != nil {
 		return nil
 	}
@@ -47,6 +47,9 @@ type openAIStickyChange struct {
 	target           int64
 	ttl              time.Duration
 	cache            OpenAIStickyVersionedCache
+	dualWriteLegacy  bool
+	skipCommit       bool // The snapshot read failed; keep all selection writes suppressed.
+	resetAt          func(int64) time.Time
 }
 
 func noteOpenAIStickyAttemptOutcome(attempt *schedAttemptCapture, success bool) {
@@ -113,12 +116,21 @@ func (s *OpenAIGatewayService) prepareOpenAIStickyChange(ctx context.Context, gr
 			expected, err = cache.GetSessionBinding(ctx, derefGroupID(groupID), key)
 		}
 	}
-	if err != nil || expected.AccountID <= 0 {
+	unreadable := err != nil && !errors.Is(err, ErrStickySessionNotFound)
+	kind := "migrate"
+	if expected.AccountID <= 0 {
+		kind = "create"
+		key = s.openAISessionCacheKey(session)
+		expected = StickySessionBinding{LegacyKey: s.openAILegacySessionCacheKey(ctx, session)}
+	} else if openAINoStickyMigration(ctx) {
 		return
 	}
 	resilience.StateFrom(ctx).SetStickyChange(&openAIStickyChange{
 		groupID: derefGroupID(groupID), session: strings.TrimSpace(session), key: key,
-		kind: "migrate", expected: expected, ttl: s.openAIStickyBindingTTL(groupID), cache: cache,
+		kind: kind, expected: expected, ttl: s.openAIStickyBindingTTL(groupID), cache: cache,
+		dualWriteLegacy: s.openAISessionHashDualWriteOldEnabled(),
+		skipCommit:      unreadable,
+		resetAt:         s.resilience.sessionAccountResetAt,
 	})
 }
 
@@ -129,12 +141,15 @@ func planOpenAIStickyReplacement(ctx context.Context, groupID *int64, session, m
 	}
 	change.mu.Lock()
 	defer change.mu.Unlock()
-	if change.target == selection.Account.ID {
+	if change.target == selection.Account.ID && !change.done {
 		return
 	}
 	resilience.StateFrom(ctx).SetStickyChange(&openAIStickyChange{
 		groupID: change.groupID, session: change.session, key: change.key, model: model,
-		kind: "migrate", expected: change.expected, target: selection.Account.ID, ttl: change.ttl, cache: change.cache,
+		kind: change.kind, expected: change.expected, target: selection.Account.ID, ttl: change.ttl, cache: change.cache,
+		dualWriteLegacy: change.dualWriteLegacy,
+		skipCommit:      change.skipCommit,
+		resetAt:         change.resetAt,
 	})
 }
 
@@ -152,14 +167,21 @@ func CompleteOpenAIStickyChange(ctx context.Context, accountID int64, success, c
 		return
 	}
 	change.done = true
-	if canceled {
+	if canceled || change.skipCommit {
 		return
 	}
 	stateCtx, cancel := resilienceStateContext(ctx)
 	defer cancel()
 	if !success {
+		if change.expected.AccountID == 0 {
+			return
+		}
 		resilience.StateFrom(ctx).AddAvoided(accountID)
-		if _, err := change.cache.RecordSessionBindingFailure(stateCtx, change.groupID, change.key, stickyChangeAvoidSession(change.session), change.expected, accountID, openAIStickyChangeAvoidTTL); err != nil {
+		var reset time.Time
+		if change.resetAt != nil {
+			reset = change.resetAt(accountID)
+		}
+		if _, err := change.cache.RecordSessionBindingFailure(stateCtx, change.groupID, change.key, stickyChangeAvoidSession(change.session), change.expected, accountID, openAIStickyChangeAvoidTTL, reset); err != nil {
 			slog.WarnContext(ctx, "sched_quality.takeover_avoid_failed", "account_id", accountID, "error", err)
 		}
 		return
@@ -172,9 +194,19 @@ func CompleteOpenAIStickyChange(ctx context.Context, accountID int64, success, c
 	if !changed {
 		return
 	}
+	if change.dualWriteLegacy && change.expected.LegacyKey != "" {
+		if aliases, ok := change.cache.(OpenAIStickyAliasCache); ok {
+			if err := aliases.SyncSessionBindingAlias(stateCtx, change.groupID, change.key, change.expected.LegacyKey, accountID, min(change.ttl, 10*time.Minute), true); err != nil {
+				slog.WarnContext(ctx, "sched_quality.binding_alias_failed", "account_id", accountID, "error", err)
+			}
+		}
+	}
 	st := resilience.StateFrom(ctx)
 	st.ClearKeptStickyIfOwner(change.expected.AccountID)
 	st.NoteStickyBypassBindingChange()
+	if change.kind == "create" {
+		return
+	}
 	slog.InfoContext(ctx, "sched_quality.takeover", "component", "sched_quality",
 		"kind", change.kind, "gateway_request_id", st.GatewayRequestID(),
 		"group_id", change.groupID, "model", change.model,

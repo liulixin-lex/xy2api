@@ -218,6 +218,7 @@
           ref="dataTableRef"
           :columns="cols"
           :data="accounts"
+          :has-details="recoveryLines.size > 0"
           :loading="loading"
           row-key="id"
           :server-side-sort="true"

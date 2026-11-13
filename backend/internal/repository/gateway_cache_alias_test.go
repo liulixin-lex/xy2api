@@ -33,7 +33,7 @@ func testStickyBindingAliases(t *testing.T, addr string) {
 	avoid := "sticky_change:" + uuid.NewString()
 	keys := append(sessionBindingKeys(group, primary), sessionBindingKeys(group, legacy)...)
 	t.Cleanup(func() {
-		_ = first.Del(ctx, append(keys, sessionKey(resilienceSessionAvoidPrefix, group, avoid))...).Err()
+		_ = first.Del(ctx, append(keys, sessionKey(resilienceSessionAvoidPrefix, group, avoid), sessionKey(resilienceSessionAvoidWrittenPrefix, group, avoid))...).Err()
 		_ = first.Close()
 		_ = second.Close()
 	})

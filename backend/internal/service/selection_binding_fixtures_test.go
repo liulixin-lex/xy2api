@@ -37,6 +37,6 @@ func (c *selectionRebindCache) GetSessionBinding(ctx context.Context, group int6
 	return StickySessionBinding{AccountID: id, Generation: "g1"}, err
 }
 
-func (c *selectionRebindCache) RecordSessionBindingFailure(context.Context, int64, string, string, StickySessionBinding, int64, time.Duration) (bool, error) {
+func (c *selectionRebindCache) RecordSessionBindingFailure(context.Context, int64, string, string, StickySessionBinding, int64, time.Duration, ...time.Time) (bool, error) {
 	return false, nil
 }

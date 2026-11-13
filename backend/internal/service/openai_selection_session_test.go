@@ -354,9 +354,9 @@ func TestOpenAISelectionSessionLatestViewFailureTriesSecond(t *testing.T) {
 	require.Zero(t, f.slots.held)
 }
 
-func (f *selectionBindingFake) RecordSessionBindingFailure(ctx context.Context, group int64, key, session string, expected StickySessionBinding, target int64, ttl time.Duration) (bool, error) {
+func (f *selectionBindingFake) RecordSessionBindingFailure(ctx context.Context, group int64, key, session string, expected StickySessionBinding, target int64, ttl time.Duration, resetAt ...time.Time) (bool, error) {
 	if f.owner != expected.AccountID || f.generation != expected.Generation {
 		return false, nil
 	}
-	return true, f.store.AddSessionAvoid(ctx, group, session, target, ttl)
+	return true, f.store.AddSessionAvoid(ctx, group, session, target, ttl, resetAt...)
 }

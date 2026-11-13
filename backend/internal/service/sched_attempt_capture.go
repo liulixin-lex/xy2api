@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 )
@@ -56,12 +57,8 @@ func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *A
 		return a
 	}
 	groupID, sessionKey := st.SessionIdentity()
-	effort := ""
-	if parsed := extractOpenAIReasoningEffortFromBody(body, gjson.GetBytes(body, "model").String()); parsed != nil {
-		effort = *parsed
-	}
-	in := SchedAttemptStart{AccountID: account.ID, GroupID: groupID, Model: selection.Model, StickyWarm: selection.StickyWarm,
-		Effort: effort, BodyBytes: bodyBytes, Stream: stream, SessionKey: sessionKey, RequestID: st.GatewayRequestID()}
+	in := SchedAttemptStart{AccountID: account.ID, GroupID: groupID, Model: selection.Model,
+		Stream: stream, SessionKey: sessionKey, RequestID: st.GatewayRequestID()}
 	if test, ok := st.SchedTest().(*SchedTestAttempt); ok && test != nil {
 		copy := *test
 		in.Test = &copy
@@ -137,7 +134,6 @@ func (a *schedAttemptCapture) observe(data []byte) {
 			a.mu.Lock()
 			a.benignIncomplete = true
 			a.mu.Unlock()
-			return
 		}
 	}
 	failed := typ == "error" || typ == "response.failed" || typ == "response.incomplete" || typ == "response.cancelled" || typ == "response.canceled" || status == "failed" || status == "incomplete" || root.Get("error").IsObject()
@@ -188,10 +184,16 @@ func (a *schedAttemptCapture) timeout(plan resilience.TimeoutPlan) {
 	}
 	a.done = true
 	noteOpenAIStickyAttemptOutcome(a, false)
-	if plan.Applied() {
-		a.attempt.FinishOther("budget_cut")
+	if a.state.ClientCanceled() {
+		a.attempt.Finish(SchedAttemptFinish{Outcome: schedquality.Outcome(5), Detail: string(resilience.CategoryClientCancel), Usage: a.usage})
+	} else if plan.Applied() || a.first {
+		detail := string(classifyUpstreamOutcome(resilience.Outcome{Source: resilience.SourceNetwork, Err: context.DeadlineExceeded}).Category)
+		if a.first {
+			detail = string(resilience.CategoryStall)
+		}
+		a.attempt.Finish(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: detail, Usage: a.usage})
 	} else {
-		a.attempt.FinishTimeout(time.Since(a.started))
+		a.attempt.Finish(SchedAttemptFinish{Outcome: schedquality.OutcomeTimeout, Detail: string(resilience.CategoryFirstOutputTimeout), Waited: time.Since(a.started), Usage: a.usage})
 	}
 	a.state.ClearCurrentAttemptIf(a)
 }
@@ -215,52 +217,35 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 	}
 	a.done = true
 	defer a.state.ClearCurrentAttemptIf(a)
-	// Binding follows actual delivery evidence, independently of the legacy
-	// sample outcome (which still records cancellation after output as OK).
-	canceled := a.client || errors.Is(a.ctx.Err(), context.Canceled)
+	canceled := a.client || a.state.ClientCanceled()
 	success := !canceled && a.ctx.Err() == nil && err == nil && a.failure == nil &&
 		(!a.expectTerminal || a.terminal) && !a.benignIncomplete &&
 		(result == nil || !result.PartialFailure && (result.UpstreamTerminalEvent == "" || result.UpstreamTerminalEvent == "response.completed" || result.UpstreamTerminalEvent == "response.done"))
 
 	noteOpenAIStickyAttemptOutcome(a, success)
-	// This is the sole mapping from send evidence to scheduler outcomes.
-	if a.client || a.ctx.Err() != nil || errors.Is(err, context.Canceled) {
-		if a.first {
-			a.attempt.FinishOK(a.usage)
-		} else {
-			a.attempt.FinishOther("client_cancel")
-		}
-		return
-	}
-	if a.benignIncomplete && a.failure == nil {
-		a.attempt.FinishOK(a.usage)
+	// Client cancellation is an explicit delivery fact, never a generic deadline.
+	if canceled {
+		a.attempt.Finish(SchedAttemptFinish{Outcome: schedquality.Outcome(5), Detail: string(resilience.CategoryClientCancel), Usage: a.usage})
 		return
 	}
 	failure := a.failure
 	if failure == nil && err != nil {
 		var httpErr *UpstreamFailoverError
-		if errors.As(err, &httpErr) && httpErr.StatusCode >= 400 && len(httpErr.ResponseBody) > 0 {
+		if errors.As(err, &httpErr) && httpErr.StatusCode >= 400 {
 			failure = &resilience.Outcome{Source: resilience.SourceHTTP, StatusCode: httpErr.StatusCode, Body: httpErr.ResponseBody, Headers: httpErr.ResponseHeaders}
+		} else {
+			failure = &resilience.Outcome{Source: resilience.SourceNetwork, Err: err}
 		}
 	}
-	if failure != nil {
-		category := classifyUpstreamOutcome(*failure).Category
-		switch category {
-		case resilience.CategoryBalance, resilience.CategoryAuth, resilience.CategoryRateLimitReset, resilience.CategoryRateLimit, resilience.CategoryCapacityShed, resilience.CategoryModelUnsupported, resilience.CategoryClientError, resilience.CategoryUpstreamRequestRestriction:
-			a.attempt.FinishOther(string(category))
-			return
-		case resilience.CategoryTransient, resilience.CategoryStall:
-			a.attempt.FinishFault(string(category))
-			return
+	if !success {
+		detail := string(classifyUpstreamOutcome(resilience.Outcome{Source: resilience.SourceStreamEvent}).Category)
+		if failure != nil {
+			detail = string(classifyUpstreamOutcome(*failure).Category)
 		}
-		a.attempt.FinishFault("unclassified")
+		a.attempt.Finish(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: detail, Usage: a.usage})
 		return
 	}
-	if err != nil || a.expectTerminal && !a.terminal || result != nil && (result.PartialFailure || result.UpstreamTerminalEvent == "response.failed") {
-		a.attempt.FinishFault("unclassified")
-		return
-	}
-	a.attempt.FinishOK(a.usage)
+	a.attempt.Finish(SchedAttemptFinish{Outcome: schedquality.OutcomeOK, Usage: a.usage})
 }
 
 // FinishSchedAttemptAtHandlerExit only repairs outcomes invisible to the service.
@@ -269,7 +254,7 @@ func FinishSchedAttemptAtHandlerExit(ctx context.Context) {
 	if a == nil {
 		return
 	}
-	if errors.Is(ctx.Err(), context.Canceled) {
+	if resilience.StateFrom(ctx).ClientCanceled() {
 		a.cancel()
 		CompleteOpenAIStickyChange(ctx, a.accountID, false, true)
 		return
@@ -286,7 +271,7 @@ func (a *schedAttemptCapture) finishUnfinished() {
 	if !a.done {
 		a.done = true
 		noteOpenAIStickyAttemptOutcome(a, false)
-		a.attempt.FinishOther("unfinished")
+		a.attempt.Finish(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: string(resilience.CategoryTransient), Usage: a.usage})
 		a.state.ClearCurrentAttemptIf(a)
 	}
 }

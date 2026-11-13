@@ -75,8 +75,8 @@ func TestAccountHandlerSimpleModeUsesMinimalGroupReferences(t *testing.T) {
 		GroupIDs: []int64{7, 9},
 		Groups:   []*service.Group{richGroup, historicalComposite},
 		AccountGroups: []service.AccountGroup{
-			{AccountID: 3, GroupID: 7, Priority: 2, Group: richGroup, Account: &service.Account{ID: 3, Extra: map[string]any{"secret": true}}},
-			{AccountID: 3, GroupID: 9, Priority: 3, Group: historicalComposite},
+			{AccountID: 3, GroupID: 7, Group: richGroup, Account: &service.Account{ID: 3, Extra: map[string]any{"secret": true}}},
+			{AccountID: 3, GroupID: 9, Group: historicalComposite},
 		},
 	}
 	svc := &simpleModeAccountService{stubAdminService: newStubAdminService(), account: account}
@@ -127,7 +127,7 @@ func TestAccountHandlerSimpleModeUsesMinimalGroupReferences(t *testing.T) {
 			require.Len(t, accountGroups, 1)
 			accountGroup, ok := accountGroups[0].(map[string]any)
 			require.True(t, ok)
-			require.ElementsMatch(t, []string{"account_id", "group_id", "priority", "created_at", "group"}, mapKeys(accountGroup))
+			require.ElementsMatch(t, []string{"account_id", "group_id", "created_at", "group"}, mapKeys(accountGroup))
 			nestedGroup, ok := accountGroup["group"].(map[string]any)
 			require.True(t, ok)
 			require.ElementsMatch(t, []string{"id", "name", "platform", "status"}, mapKeys(nestedGroup))

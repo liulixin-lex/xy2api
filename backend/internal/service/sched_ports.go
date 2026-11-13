@@ -37,9 +37,8 @@ type SchedTestAttempt struct { // set only by the test runner
 }
 type SchedAttemptStart struct {
 	AccountID, GroupID    int64
-	Model, Effort         string
-	Stream, StickyWarm    bool
-	BodyBytes             int
+	Model                 string
+	Stream                bool
 	SessionKey, RequestID string
 	Test                  *SchedTestAttempt
 }
@@ -47,12 +46,15 @@ type SchedAttemptUsage struct {
 	// PromptTokens is total input; InputTokens excludes cache reads and writes.
 	PromptTokens, InputTokens, CacheReadTokens, CacheCreationTokens int
 }
-type SchedAttempt interface { // never nil; a disabled recorder returns a no-op handle
-	MarkFirstOutput(at time.Time)  // first call wins
-	FinishOK(u *SchedAttemptUsage) // nil when usage is unknown
-	FinishFault(detail string)
-	FinishTimeout(waited time.Duration)
-	FinishOther(detail string)
+type SchedAttemptFinish struct {
+	Outcome schedquality.Outcome
+	Detail  string
+	Waited  time.Duration
+	Usage   *SchedAttemptUsage
+}
+type SchedAttempt interface {
+	MarkFirstOutput(at time.Time)
+	Finish(SchedAttemptFinish)
 }
 type SchedAttemptRecorder interface {
 	Begin(in SchedAttemptStart) SchedAttempt
@@ -204,6 +206,13 @@ type SchedTestAdmission interface { // implemented by WP4 in openai_selection_ad
 // ---- WP4 ----
 type SchedBoardRow struct {
 	AccountID             int64
+	Name                  string
+	Layer                 string // normal | below | stopped
+	Dims                  []schedquality.Dimension
+	Until                 *time.Time
+	Exempt                bool
+	LoadRate              int
+	LastUsedAt            *time.Time
 	Rank                  int
 	Eligible              bool
 	Reject                string     // first hard-admission reason when not eligible

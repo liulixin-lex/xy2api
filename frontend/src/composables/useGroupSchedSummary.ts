@@ -13,6 +13,7 @@ export function useGroupSchedSummary() {
     const current = ++seq
     if (!groupIds.length) {
       byGroup.value = new Map()
+      loading.value = false
       return
     }
     loading.value = true
