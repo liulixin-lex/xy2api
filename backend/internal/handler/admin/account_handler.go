@@ -252,7 +252,6 @@ type simpleModeGroupReference struct {
 type simpleModeAccountGroupReference struct {
 	AccountID int64                     `json:"account_id"`
 	GroupID   int64                     `json:"group_id"`
-	Priority  int                       `json:"priority"`
 	CreatedAt time.Time                 `json:"created_at"`
 	Group     *simpleModeGroupReference `json:"group,omitempty"`
 }
@@ -334,7 +333,7 @@ func (a AccountWithConcurrency) MarshalJSON() ([]byte, error) {
 			continue
 		}
 		accountGroups = append(accountGroups, simpleModeAccountGroupReference{
-			AccountID: accountGroup.AccountID, GroupID: accountGroup.GroupID, Priority: accountGroup.Priority,
+			AccountID: accountGroup.AccountID, GroupID: accountGroup.GroupID,
 			CreatedAt: accountGroup.CreatedAt, Group: simpleModeGroupReferenceFromDTO(accountGroup.Group),
 		})
 	}

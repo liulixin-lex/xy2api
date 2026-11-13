@@ -13,12 +13,13 @@ import (
 // Redis keys of the resilience layer (design §4, §5, §8). All keys carry a
 // TTL so an abandoned session or group never leaves state behind.
 const (
-	resilienceSessionFailurePrefix = "xy:resil:sf:"
-	resilienceSessionAvoidPrefix   = "xy:resil:avoid:"
-	resilienceGroupStablePrefix    = "xy:resil:group_stable:"
-	resilienceUndeliveredPrefix    = "xy:resil:undelivered:"
-	resilienceCacheRatioPrefix     = "xy:resil:cache_ratio:"
-	resilienceFallbackKeyPrefix    = "xy:resil:fb_key:"
+	resilienceSessionFailurePrefix      = "xy:resil:sf:"
+	resilienceSessionAvoidPrefix        = "xy:resil:avoid:"
+	resilienceSessionAvoidWrittenPrefix = "xy:resil:avoid_written:"
+	resilienceGroupStablePrefix         = "xy:resil:group_stable:"
+	resilienceUndeliveredPrefix         = "xy:resil:undelivered:"
+	resilienceCacheRatioPrefix          = "xy:resil:cache_ratio:"
+	resilienceFallbackKeyPrefix         = "xy:resil:fb_key:"
 
 	// resilienceGroupStableTTL bounds a stale stability marker; the marker is
 	// refreshed whenever the group is evaluated healthy.
@@ -53,11 +54,18 @@ const sessionFailureEndField = "e:"
 
 const resilienceAvoidAddLua = `
 	local existing = tonumber(redis.call('ZSCORE', KEYS[1], ARGV[1]) or '0')
+	local written = tonumber(redis.call('HGET', KEYS[#KEYS], ARGV[1]) or '0')
+	local reset = tonumber(ARGV[#ARGV])
+	if reset > 0 and written < reset then existing = 0 end
 	local deadline = math.max(existing, tonumber(ARGV[2]))
 	redis.call('ZADD', KEYS[1], deadline, ARGV[1])
+	redis.call('HSET', KEYS[#KEYS], ARGV[1], ARGV[3])
 	redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[3])
 	local latest = redis.call('ZREVRANGE', KEYS[1], 0, 0, 'WITHSCORES')
-	if #latest > 0 then redis.call('PEXPIREAT', KEYS[1], latest[2]) end
+	if #latest > 0 then
+		redis.call('PEXPIREAT', KEYS[1], latest[2])
+		redis.call('PEXPIREAT', KEYS[#KEYS], latest[2])
+	end
 	return 1
 `
 
@@ -140,32 +148,67 @@ func (s *resilienceStore) SessionFailures(ctx context.Context, groupID int64, se
 	return out, nil
 }
 
-func (s *resilienceStore) AddSessionAvoid(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error {
+func (s *resilienceStore) AddSessionAvoid(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration, resetAt ...time.Time) error {
 	key := sessionKey(resilienceSessionAvoidPrefix, groupID, sessionHash)
-	now := time.Now()
-	return resilienceAvoidAddScript.Run(ctx, s.rdb, []string{key},
+	now := s.now()
+	return resilienceAvoidAddScript.Run(ctx, s.rdb, []string{key, sessionKey(resilienceSessionAvoidWrittenPrefix, groupID, sessionHash)},
 		strconv.FormatInt(accountID, 10),
 		now.Add(ttl).UnixMilli(),
 		now.UnixMilli(),
+		avoidResetMillis(resetAt),
 	).Err()
 }
 
+func avoidResetMillis(resetAt []time.Time) int64 {
+	if len(resetAt) == 0 || resetAt[0].IsZero() {
+		return 0
+	}
+	cutoff := resetAt[0].UnixMilli()
+	if !time.UnixMilli(cutoff).Equal(resetAt[0]) {
+		cutoff++ // Match the read-side strict comparison against a microsecond reset.
+	}
+	return cutoff
+}
+
 func (s *resilienceStore) SessionAvoid(ctx context.Context, groupID int64, sessionHash string) (map[int64]struct{}, error) {
-	key := sessionKey(resilienceSessionAvoidPrefix, groupID, sessionHash)
-	members, err := s.rdb.ZRangeArgs(ctx, redis.ZRangeArgs{
-		Key:     key,
-		Start:   strconv.FormatInt(time.Now().UnixMilli(), 10),
-		Stop:    "+inf",
-		ByScore: true,
-	}).Result()
+	records, err := s.SessionAvoidWrittenAt(ctx, groupID, sessionHash)
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[int64]struct{}, len(members))
-	for _, m := range members {
-		if id, err := strconv.ParseInt(m, 10, 64); err == nil {
-			out[id] = struct{}{}
+	out := make(map[int64]struct{}, len(records))
+	for id := range records {
+		out[id] = struct{}{}
+	}
+	return out, nil
+}
+
+var resilienceAvoidReadScript = redis.NewScript(`
+local members = redis.call('ZRANGEBYSCORE', KEYS[1], ARGV[1], '+inf')
+local result = {}
+for _, member in ipairs(members) do
+  table.insert(result, member)
+  table.insert(result, redis.call('HGET', KEYS[2], member) or '0')
+end
+return result
+`)
+
+func (s *resilienceStore) SessionAvoidWrittenAt(ctx context.Context, groupID int64, sessionHash string) (map[int64]time.Time, error) {
+	keys := []string{sessionKey(resilienceSessionAvoidPrefix, groupID, sessionHash), sessionKey(resilienceSessionAvoidWrittenPrefix, groupID, sessionHash)}
+	values, err := resilienceAvoidReadScript.Run(ctx, s.rdb, keys, s.now().UnixMilli()).StringSlice()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]time.Time, len(values)/2)
+	for i := 0; i+1 < len(values); i += 2 {
+		id, err := strconv.ParseInt(values[i], 10, 64)
+		if err != nil {
+			continue
 		}
+		var at time.Time
+		if millis, err := strconv.ParseInt(values[i+1], 10, 64); err == nil && millis > 0 {
+			at = time.UnixMilli(millis)
+		}
+		out[id] = at
 	}
 	return out, nil
 }

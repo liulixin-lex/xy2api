@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -36,12 +37,14 @@ func schedAdminTempSource(reason string) string {
 		return "health"
 	case strings.HasPrefix(reason, resilience.ReasonPrefixTransient):
 		return "transient"
-	case v.Source != "":
+	case v.Source == "auth" || strings.HasPrefix(reason, "auth:"):
+		return "auth"
+	case v.Source == "transient" || v.Source == "post_output" || v.Source == "balance" || v.Source == "usage" || v.Source == "403" || v.Source == "health" || v.Source == "stream_timeout":
 		return v.Source
 	case v.MatchedKeyword != "" || strings.HasPrefix(strings.TrimSpace(reason), "{"):
 		return "rule"
 	default:
-		return "auth"
+		return "rule"
 	}
 }
 func schedAdminLimitUntil(v any) *time.Time {
@@ -274,19 +277,22 @@ func (s *SchedAdminService) clearTempCache(ctx context.Context, a *Account) erro
 	return cache.DeleteTempUnsched(ctx, a.ID)
 }
 
-func (s *SchedAdminService) Reset(ctx context.Context, id, op int64) (SchedResetResult, error) {
-	out := SchedResetResult{Cleared: []SchedResetItem{}, Preserved: []SchedResetItem{}, Failed: []SchedResetItem{}}
+func (s *SchedAdminService) Reset(ctx context.Context, id, op int64) (SchedAdminReset, error) {
+	out := SchedAdminReset{AccountID: id, Cleared: []string{}, Kept: []SchedAdminResetKept{}, Failed: []SchedAdminResetFailed{}}
 	a, e := s.account(ctx, id)
 	if e != nil {
 		return out, e
 	}
-	finish := func(key, kind string, ok bool, e error) {
-		item := SchedResetItem{Key: key, Kind: kind}
-		if e != nil {
-			item.Error = e.Error()
-			out.Failed = append(out.Failed, item)
-		} else if ok {
-			out.Cleared = append(out.Cleared, item)
+	failed := map[string]bool{}
+	finish := func(kind string, ok bool, err error) {
+		if err != nil {
+			if !failed[kind] {
+				out.Failed = append(out.Failed, SchedAdminResetFailed{Kind: kind})
+				failed[kind] = true
+			}
+			out.Cleared = slices.DeleteFunc(out.Cleared, func(v string) bool { return v == kind })
+		} else if ok && !failed[kind] && !slices.Contains(out.Cleared, kind) {
+			out.Cleared = append(out.Cleared, kind)
 		}
 	}
 	// Capture local entries before Reset invokes this instance's ClearLocal callback.
@@ -320,11 +326,15 @@ func (s *SchedAdminService) Reset(ctx context.Context, id, op int64) (SchedReset
 		states = append(states, SchedAutoState{Key: "capability_learned", Kind: "capability_learned"})
 	}
 	sort.Slice(states, func(i, j int) bool { return states[i].Key < states[j].Key })
-	out.ResetAt, e = s.d.Engine.Reset(ctx, id)
+	resetAt, e := s.d.Engine.Reset(ctx, id)
 	if errors.Is(e, sql.ErrNoRows) || errors.Is(e, ErrAccountNotFound) {
 		return out, ErrAccountNotFound
 	}
-	finish("quality", "quality", e == nil, e)
+	finish("quality", e == nil, e)
+	if e == nil {
+		out.ResetAt = schedAdminTime(resetAt)
+		finish("session_avoid", true, nil)
+	}
 	for _, v := range states {
 		ok, e := s.clearState(ctx, a, v.Key)
 		if v.Kind == "model_transient" || v.Kind == "same_site" || v.Kind == "post_output" {
@@ -333,32 +343,37 @@ func (s *SchedAdminService) Reset(ctx context.Context, id, op int64) (SchedReset
 		if e == nil && !ok {
 			e = infraerrors.Conflict("STATE_CHANGED", "State has changed")
 		}
-		finish(v.Key, v.Kind, ok, e)
+		finish(v.Kind, ok, e)
 	}
 	for _, source := range []string{"403", "stream_timeout", "health"} {
 		if err := s.schedAdminCounters(ctx, id, source); err != nil {
-			key, kind := "temp", "temp_"+source
+			kind := "temp_" + source
 			if a.Status == StatusError && ((source == "403" && strings.Contains(a.ErrorMessage, "403")) || (source == "stream_timeout" && strings.Contains(strings.ToLower(a.ErrorMessage), "timeout"))) {
-				key, kind = "error", "error"
+				kind = "error"
 			}
-			finish(key, kind, false, err)
+			finish(kind, false, err)
 		}
 	}
-	s.ClearLocal(id, out.ResetAt)
+	s.ClearLocal(id, resetAt)
 	states, e = s.AutoStates(ctx, id)
 	if e != nil {
-		finish("auto_states", "auto_states", false, e)
+		finish("auto_states", false, e)
 	} else {
 		for _, v := range states {
 			if !v.Clearable || v.Kind == "proxy_circuit" {
-				why := v.Why
-				if v.Kind == "proxy_circuit" {
-					why = "shared_proxy"
+				item := SchedAdminResetKept{Kind: v.Kind}
+				if v.Until != nil {
+					item.Until = schedAdminTime(*v.Until)
 				}
-				out.Preserved = append(out.Preserved, SchedResetItem{Key: v.Key, Kind: v.Kind, Why: why})
+				duplicate := slices.ContainsFunc(out.Kept, func(x SchedAdminResetKept) bool {
+					return x.Kind == item.Kind && ((x.Until == nil && item.Until == nil) || (x.Until != nil && item.Until != nil && *x.Until == *item.Until))
+				})
+				if !duplicate {
+					out.Kept = append(out.Kept, item)
+				}
 			}
 		}
 	}
-	out.Preserved = append(out.Preserved, SchedResetItem{Key: "session_avoid", Kind: "session_avoid", Why: "expires_within_10m"})
+
 	return out, nil
 }

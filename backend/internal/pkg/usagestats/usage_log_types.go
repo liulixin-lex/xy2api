@@ -269,6 +269,7 @@ type PlatformDashboardStats struct {
 
 // UsageLogFilters represents filters for usage log queries
 type UsageLogFilters struct {
+	Result    *int16
 	UserID    int64
 	APIKeyID  int64
 	AccountID int64
@@ -296,6 +297,11 @@ type UsageLogFilters struct {
 
 // UsageStats represents usage statistics
 type UsageStats struct {
+	Success                  int64          `json:"success"`
+	Rescued                  int64          `json:"rescued"`
+	Failed                   int64          `json:"failed"`
+	TTFOP50Ms                *float64       `json:"ttfo_p50_ms"`
+	CacheRatio               *float64       `json:"cache_ratio"`
 	TotalRequests            int64          `json:"total_requests"`
 	TotalInputTokens         int64          `json:"total_input_tokens"`
 	TotalOutputTokens        int64          `json:"total_output_tokens"`

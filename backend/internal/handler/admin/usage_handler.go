@@ -211,168 +211,31 @@ func (h *UsageHandler) ParseExportFilters(c *gin.Context) (pagination.Pagination
 }
 
 func (h *UsageHandler) List(c *gin.Context) {
-	params, filters, ok := h.ParseExportFilters(c)
+	params, filters, ok := h.parseRequestFilters(c)
 	if !ok {
 		return
 	}
-	records, result, err := h.usageService.ListWithFilters(c.Request.Context(), params, filters)
+	records, result, err := h.usageService.ListAdminRequests(c.Request.Context(), params, filters)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 
-	response.Paginated(c, adminUsageLogResponses(c, records), result.Total, params.Page, params.PageSize)
+	response.Paginated(c, adminUsageRequestResponses(c, records), result.Total, params.Page, params.PageSize)
 }
 
 // Stats handles getting usage statistics with filters
 // GET /api/v1/admin/usage/stats
 func (h *UsageHandler) Stats(c *gin.Context) {
-	// Parse filters - same as List endpoint
-	var userID, apiKeyID, accountID, groupID int64
-	if userIDStr := c.Query("user_id"); userIDStr != "" {
-		id, err := strconv.ParseInt(userIDStr, 10, 64)
-		if err != nil {
-			response.BadRequest(c, "Invalid user_id")
-			return
-		}
-		userID = id
-	}
-
-	if apiKeyIDStr := c.Query("api_key_id"); apiKeyIDStr != "" {
-		id, err := strconv.ParseInt(apiKeyIDStr, 10, 64)
-		if err != nil {
-			response.BadRequest(c, "Invalid api_key_id")
-			return
-		}
-		apiKeyID = id
-	}
-
-	if accountIDStr := c.Query("account_id"); accountIDStr != "" {
-		id, err := strconv.ParseInt(accountIDStr, 10, 64)
-		if err != nil {
-			response.BadRequest(c, "Invalid account_id")
-			return
-		}
-		accountID = id
-	}
-
-	if groupIDStr := c.Query("group_id"); groupIDStr != "" {
-		id, err := strconv.ParseInt(groupIDStr, 10, 64)
-		if err != nil {
-			response.BadRequest(c, "Invalid group_id")
-			return
-		}
-		groupID = id
-	}
-
-	model := c.Query("model")
-	billingMode := strings.TrimSpace(c.Query("billing_mode"))
-
-	var requestType *int16
-	var stream *bool
-	if requestTypeStr := strings.TrimSpace(c.Query("request_type")); requestTypeStr != "" {
-		parsed, err := service.ParseUsageRequestType(requestTypeStr)
-		if err != nil {
-			response.BadRequest(c, err.Error())
-			return
-		}
-		value := int16(parsed)
-		requestType = &value
-	} else if streamStr := c.Query("stream"); streamStr != "" {
-		val, err := strconv.ParseBool(streamStr)
-		if err != nil {
-			response.BadRequest(c, "Invalid stream value, use true or false")
-			return
-		}
-		stream = &val
-	}
-
-	nativeCompactionV2, err := parseOptionalBoolDashboardFilter(c, "native_compaction_v2")
-	if err != nil {
-		response.BadRequest(c, "Invalid native_compaction_v2 value, use true or false")
+	_, filters, ok := h.parseRequestFilters(c)
+	if !ok {
 		return
-	}
-
-	var billingType *int8
-	if billingTypeStr := c.Query("billing_type"); billingTypeStr != "" {
-		val, err := strconv.ParseInt(billingTypeStr, 10, 8)
-		if err != nil {
-			response.BadRequest(c, "Invalid billing_type")
-			return
-		}
-		bt := int8(val)
-		billingType = &bt
-	}
-
-	var upstreamModelMismatch *bool
-	if raw := strings.TrimSpace(c.Query("upstream_model_mismatch")); raw != "" {
-		value, err := strconv.ParseBool(raw)
-		if err != nil {
-			response.BadRequest(c, "Invalid upstream_model_mismatch value, use true or false")
-			return
-		}
-		upstreamModelMismatch = &value
-	}
-
-	// Parse date range
-	userTZ := c.Query("timezone")
-	now := timezone.NowInUserLocation(userTZ)
-	var startTime, endTime time.Time
-
-	startDateStr := c.Query("start_date")
-	endDateStr := c.Query("end_date")
-
-	if startDateStr != "" && endDateStr != "" {
-		var err error
-		startTime, err = timezone.ParseInUserLocation("2006-01-02", startDateStr, userTZ)
-		if err != nil {
-			response.BadRequest(c, "Invalid start_date format, use YYYY-MM-DD")
-			return
-		}
-		endTime, err = timezone.ParseInUserLocation("2006-01-02", endDateStr, userTZ)
-		if err != nil {
-			response.BadRequest(c, "Invalid end_date format, use YYYY-MM-DD")
-			return
-		}
-		// 与 SQL 条件 created_at < end 对齐，使用次日 00:00 作为上边界（DST-safe）。
-		endTime = endTime.AddDate(0, 0, 1)
-	} else {
-		period := c.DefaultQuery("period", "today")
-		switch period {
-		case "today":
-			startTime = timezone.StartOfDayInUserLocation(now, userTZ)
-		case "week":
-			startTime = now.AddDate(0, 0, -7)
-		case "month":
-			startTime = now.AddDate(0, -1, 0)
-		default:
-			startTime = timezone.StartOfDayInUserLocation(now, userTZ)
-		}
-		endTime = now
-	}
-
-	// Build filters and call GetStatsWithFilters
-	filters := usagestats.UsageLogFilters{
-		UserID:                userID,
-		APIKeyID:              apiKeyID,
-		AccountID:             accountID,
-		GroupID:               groupID,
-		Model:                 model,
-		ModelFilterSource:     usagestats.ModelSourceRequested,
-		RequestType:           requestType,
-		Stream:                stream,
-		NativeCompactionV2:    nativeCompactionV2,
-		BillingType:           billingType,
-		BillingMode:           billingMode,
-		UpstreamModelMismatch: upstreamModelMismatch,
-		StartTime:             &startTime,
-		EndTime:               &endTime,
 	}
 
 	var stats *usagestats.UsageStats
 	// nocache: 绕过缓存直接回源,刷新者本人拿最新;不回写缓存(管理台"我刷新我自己拿最新"语义,非全局失效)。
 	if parseBoolQueryWithDefault(c.Query("nocache"), false) {
-		s, err := h.usageService.GetStatsWithFilters(c.Request.Context(), filters)
+		s, err := h.usageService.AdminRequestStats(c.Request.Context(), filters)
 		if err != nil {
 			response.ErrorFrom(c, err)
 			return

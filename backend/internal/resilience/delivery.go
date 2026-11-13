@@ -150,6 +150,17 @@ func (s *RequestState) ClientGone() bool {
 	return client != nil && client.Err() != nil
 }
 
+// ClientCanceled distinguishes an actual client cancellation from a timeout
+// or an upstream child context. Completion wins over later cleanup cancellation.
+func (s *RequestState) ClientCanceled() bool {
+	if s == nil {
+		return false
+	}
+	s.d.mu.Lock()
+	defer s.d.mu.Unlock()
+	return !s.d.finished && s.d.client != nil && s.d.client.Err() == context.Canceled
+}
+
 // Finished reports whether the handler returned.
 func (s *RequestState) Finished() bool {
 	if s == nil {

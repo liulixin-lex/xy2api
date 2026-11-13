@@ -29,6 +29,13 @@ func TestCatalogKeysAreWellFormed(t *testing.T) {
 	require.Equal(t, "GET /api/v1/pages", Key("GET", "/api/v1/pages"))
 	require.Equal(t, "GET /api/v1/administer/x", Key("GET", "/api/v1/administer/x"))
 }
+
+func TestUsageAttemptsRequireUsageView(t *testing.T) {
+	e, ok := Lookup("GET /usage/attempts")
+	require.True(t, ok)
+	require.Empty(t, Decide(e, ok, Permissions{Modules: map[Module]Level{ModuleUsage: LevelView}}).Reason)
+	require.NotEmpty(t, Decide(e, ok, Permissions{Modules: map[Module]Level{ModuleAccounts: LevelView}}).Reason)
+}
 func TestCatalogEntriesAreConsistent(t *testing.T) {
 	targets := strings.Fields("user_path_id user_path_user_id user_body_id user_body_ids apikey_owner sub_owner sub_body_owners order_owner group_rate_rows group_rpm_rows group_members attribute_value_owners")
 	fields := strings.Fields("user_create user_update user_batch_no_all user_bind_identity user_replace_group apikey_group user_search group_create group_update group_delete channel_create channel_update monitor_create monitor_update monitor_template_update monitor_template_apply account_create account_update account_bulk_update account_oauth_apply account_import_address account_url_probe proxy_create proxy_update proxy_delete redeem_safe_rows redeem_batch_rows promo_search subscription_assign subscription_update affiliate_config risk_config ops_alert_config redeem_search codex_ticket_proxy redeem_create_and_redeem sub_bulk_action aff_rate ops_runtime_alert")
@@ -155,17 +162,6 @@ func TestCatalogOpsGETUserinfoRedactions(t *testing.T) {
 		entry, ok := Lookup("GET " + path)
 		require.True(t, ok, path)
 		require.Contains(t, entry.Redact, Redaction("ops_upstream_url"), path)
-	}
-}
-
-func TestCatalogRecentStatsMatchesAccountStats(t *testing.T) {
-	recent, ok := Lookup("POST /accounts/recent-stats/batch")
-	require.True(t, ok)
-	require.Empty(t, recent.AnyOf)
-	for _, key := range []string{"POST /accounts/today-stats/batch", "POST /sched-quality/accounts/summary"} {
-		entry, ok := Lookup(key)
-		require.True(t, ok, key)
-		require.Equal(t, entry, recent, key)
 	}
 }
 

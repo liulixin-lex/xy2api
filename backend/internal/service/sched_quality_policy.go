@@ -13,11 +13,11 @@ import (
 // ValidateSchedQualityPolicy validates the persisted v4 fields without normalizing them.
 func ValidateSchedQualityPolicy(p schedquality.Policy) error {
 	valid := func(v, lo, hi float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= lo && v <= hi }
-	if !valid(p.TTFTSeconds, schedquality.PolicyTTFTMinSeconds, schedquality.PolicyTTFTMaxSeconds) {
-		return infraerrors.BadRequest("INVALID_SCHED_POLICY", "ttft_seconds must be between 0.5 and 600")
+	if math.IsNaN(p.TTFTSeconds) || math.IsInf(p.TTFTSeconds, 0) || p.TTFTSeconds <= 0 {
+		return infraerrors.BadRequest("INVALID_SCHED_POLICY", "ttft_seconds must be positive and finite")
 	}
-	if !valid(p.MaxErrorRate, 0, 1) {
-		return infraerrors.BadRequest("INVALID_SCHED_POLICY", "max_error_rate must be between 0 and 1")
+	if !valid(p.MaxErrorRate, .05, 1) {
+		return infraerrors.BadRequest("SCHED_ERROR_RATE_TOO_LOW", "max_error_rate must be between 0.05 and 1")
 	}
 	if !valid(p.MinCacheRatio, 0, 1) {
 		return infraerrors.BadRequest("INVALID_SCHED_POLICY", "min_cache_ratio must be between 0 and 1")
@@ -37,7 +37,10 @@ func (s *SchedQualityEngineService) Policy(ctx context.Context, groupID int64) (
 	if _, ok := s.members[groupID]; !ok {
 		return SchedPolicyRecord{}, infraerrors.BadRequest("INVALID_SCHED_GROUP", "quality policies require an OpenAI group")
 	}
-	p := s.policies[groupID]
+	p, ok := s.policies[groupID]
+	if !ok {
+		p.Policy = schedquality.DefaultPolicy()
+	}
 	p.GroupID = groupID
 	return p, nil
 }
@@ -76,4 +79,39 @@ func (s *SchedQualityEngineService) refreshConfig(ctx context.Context, now time.
 	}
 	s.policies, s.members, s.configAt = policies, members, now
 	return nil
+}
+
+// PreviewPolicy evaluates only ordinary rules at the last processed UTC minute.
+// The admin service adds account names, hard admission and exemption counts.
+func (s *SchedQualityEngineService) PreviewPolicy(ctx context.Context, group int64, p schedquality.Policy) ([]SchedPolicyChange, error) {
+	if err := ValidateSchedQualityPolicy(p); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.refreshConfig(ctx, s.now()); err != nil {
+		return nil, err
+	}
+	if _, ok := s.members[group]; !ok {
+		return nil, infraerrors.BadRequest("INVALID_SCHED_GROUP", "quality policies require an OpenAI group")
+	}
+	snapshot := s.snapshot.Load()
+	at := s.processedAt
+	if at.IsZero() {
+		at = snapshot.At.Add(-10 * time.Second)
+	}
+	at = at.Truncate(time.Minute)
+	out := make([]SchedPolicyChange, 0)
+	for _, account := range s.members[group] {
+		for _, row := range snapshot.RowsForAccount(account) {
+			if row.GroupID != group || row.View.Failing {
+				continue
+			}
+			evaluation := schedquality.EvaluateAt(s.window.samples[SchedAccountModel{account, row.Model}], schedquality.Scope{AccountID: account, GroupID: group, Model: row.Model}, p, row.View.EvidenceSince, at, schedquality.EvaluateRegular)
+			if dims := evaluation.Dimensions(); len(dims) > 0 {
+				out = append(out, SchedPolicyChange{AccountID: account, Model: row.Model, Dims: dims})
+			}
+		}
+	}
+	return out, nil
 }

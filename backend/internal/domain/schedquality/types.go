@@ -23,6 +23,7 @@ const (
 	OutcomeTimeout
 	OutcomeAccountFault
 	OutcomeOther
+	OutcomeCanceled
 )
 const (
 	StateNormal State = iota
@@ -82,6 +83,8 @@ func (o Outcome) String() string {
 		return "account_fault"
 	case OutcomeOther:
 		return "other"
+	case OutcomeCanceled:
+		return "canceled"
 	}
 	return ""
 }
@@ -215,6 +218,7 @@ type StateRow struct {
 	Reason        Reason
 	Since, Until  time.Time
 	EvidenceSince time.Time
+	Basis         *DecisionBasis
 }
 type Inputs struct {
 	Policy       Policy
@@ -229,6 +233,9 @@ type OverrideRef struct {
 	Expires time.Time
 } // zero Expires = no expiry
 type StateView struct {
+	Failing                    bool
+	Dims                       []Dimension
+	EvidenceSince              time.Time
 	State                      State
 	Level                      int
 	Reason                     Reason
@@ -242,6 +249,12 @@ type View interface {
 	Version() int64
 	At() time.Time // when this view was built
 	GlobalEnabled() bool
+	GroupEnabled(groupID int64) bool
+	ResetAt(accountID int64) time.Time
 	StateOf(groupID, accountID int64, model string) StateView
 	TakeoverIdle(groupID int64) (idle time.Duration, enabled bool)
+}
+
+func DefaultPolicy() Policy {
+	return Policy{TTFTSeconds: 15, MaxErrorRate: .10, MinCacheRatio: .5, TakeoverIdleSeconds: 900}
 }

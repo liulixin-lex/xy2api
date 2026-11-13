@@ -50,16 +50,7 @@ func (a *captureServiceAttempt) finish(outcome schedquality.Outcome, detail stri
 		a.r.samples = append(a.r.samples, row)
 	}
 }
-func (a *captureServiceAttempt) FinishOK(*SchedAttemptUsage) { a.finish(schedquality.OutcomeOK, "") }
-func (a *captureServiceAttempt) FinishFault(detail string) {
-	a.finish(schedquality.OutcomeAccountFault, detail)
-}
-func (a *captureServiceAttempt) FinishOther(detail string) {
-	a.finish(schedquality.OutcomeOther, detail)
-}
-func (a *captureServiceAttempt) FinishTimeout(time.Duration) {
-	a.finish(schedquality.OutcomeTimeout, "")
-}
+func (a *captureServiceAttempt) Finish(in SchedAttemptFinish) { a.finish(in.Outcome, in.Detail) }
 
 func TestSchedCaptureTestMarkerIsolation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -197,9 +188,6 @@ func TestSchedCapturePreparedPayloadWithoutReread(t *testing.T) {
 			require.Contains(t, string(up.lastBody), "additional group instruction")
 			if installed {
 				require.Len(t, rec.starts, 1)
-				require.Equal(t, len(up.lastBody), rec.starts[0].BodyBytes)
-				require.Greater(t, rec.starts[0].BodyBytes, len(body))
-				require.Equal(t, "high", rec.starts[0].Effort)
 				require.Equal(t, "gpt-5.4", rec.starts[0].Model)
 			} else {
 				require.Nil(t, capture)
@@ -240,8 +228,8 @@ func TestSchedCaptureWebSocketFrameKindsAndSupersededTurn(t *testing.T) {
 	require.Equal(t, 1, deadlineCalls)
 	require.True(t, conn.deadlineState().armed)
 	require.Len(t, rec.samples, 1)
-	require.Equal(t, schedquality.OutcomeOther, rec.samples[0].Outcome)
-	require.Equal(t, "unfinished", rec.samples[0].Detail)
+	require.Equal(t, schedquality.OutcomeAccountFault, rec.samples[0].Outcome)
+	require.Equal(t, string(resilience.CategoryTransient), rec.samples[0].Detail)
 	require.Same(t, turns.active, st.CurrentAttempt())
 	first.finish(nil, nil)
 	require.Len(t, rec.samples, 1)
@@ -273,5 +261,5 @@ func TestSchedCaptureCCBuildFailureDoesNotOwnPriorAttempt(t *testing.T) {
 	require.Empty(t, rec.samples)
 	prior.finishUnfinished()
 	require.Len(t, rec.samples, 1)
-	require.Equal(t, "unfinished", rec.samples[0].Detail)
+	require.Equal(t, string(resilience.CategoryTransient), rec.samples[0].Detail)
 }

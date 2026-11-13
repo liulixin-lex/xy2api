@@ -1075,3 +1075,6 @@ func TestCodexModelsDiscoveryProjectsWildcardMappingWithoutAllowlist(t *testing.
 		})
 	}
 }
+
+func (codexModelsSelectionView) GroupEnabled(int64) bool { return true }
+func (codexModelsSelectionView) ResetAt(int64) time.Time { return time.Time{} }

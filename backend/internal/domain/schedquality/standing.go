@@ -15,13 +15,10 @@ func (v StateView) EffectiveOverride(now time.Time) (ref OverrideRef, allGroups 
 // StandingOf: auto = GlobalEnabled() && now-At() <= ViewMaxAge.
 func StandingOf(v StateView, auto bool, now time.Time) Standing {
 	ref, _ := v.EffectiveOverride(now)
-	if ref.Mode == OverrideDemote {
-		return StandBack
-	}
 	if ref.Mode == OverrideExempt {
 		return StandFront
 	}
-	if auto && v.State == StateCooling {
+	if auto && v.Failing {
 		return StandBack
 	}
 	return StandFront

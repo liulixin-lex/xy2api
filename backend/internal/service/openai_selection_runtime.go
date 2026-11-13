@@ -28,7 +28,7 @@ func (s *OpenAIGatewayService) selectionNow() time.Time {
 }
 
 func (s *OpenAIGatewayService) selectionRequest(ctx context.Context, req OpenAIAccountScheduleRequest, loads map[int64]*AccountLoadInfo) selectionRequest {
-	return selectionRequest{ManualOnly: openAISelectionManualOnly(ctx), TokenBilled: req.UseUpstreamTokenCost, RequireCompact: req.RequireCompact, SessionHash: req.SessionHash, Loads: loads, Recent: s.recentSessionSuccess(), OAuthRateMultiplier: s.openAIOAuthSchedulingRateMultiplier(ctx)}
+	return selectionRequest{ManualOnly: openAISelectionManualOnly(ctx), TokenBilled: req.UseUpstreamTokenCost, RequireCompact: req.RequireCompact, Loads: loads, OAuthRateMultiplier: s.openAIOAuthSchedulingRateMultiplier(ctx)}
 }
 
 func (s *OpenAIGatewayService) sortSelectionAccounts(ctx context.Context, accounts []*Account, req OpenAIAccountScheduleRequest, loads map[int64]*AccountLoadInfo) {
@@ -139,7 +139,7 @@ func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenA
 	gid := derefGroupID(req.GroupID)
 	migrate := schedquality.StandingOf(selectionState(view, gid, owner, req.RequestedModel), selectionAuto(view, now), now) == schedquality.StandBack
 	bindings, _ := s.cache.(gatewaySessionBindingReader)
-	session := selectionSession{view: s.selectionView, now: s.selectionNow, slots: s, cache: cache, store: s.resilience.store, cacheKey: s.openAISessionCacheKey, bindings: bindings, marks: &s.selectionFullMarks, bindingTTL: s.openAIStickyBindingTTL(req.GroupID)}
+	session := selectionSession{view: s.selectionView, now: s.selectionNow, slots: s, cache: cache, store: s.resilience.store, cacheKey: s.openAISessionCacheKey, bindings: bindings, marks: &s.selectionFullMarks, bindingTTL: s.openAIStickyBindingTTL(req.GroupID), resetAt: s.resilience.sessionResetAt}
 	bindingKey := s.openAISessionCacheKey(req.SessionHash)
 	if pending := pendingOpenAIStickyChange(ctx); pending != nil && pending.groupID == gid && pending.session == req.SessionHash {
 		bindingKey = pending.key

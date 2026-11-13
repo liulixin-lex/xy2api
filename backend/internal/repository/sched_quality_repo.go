@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lib/pq"
 	"github.com/liulixin-lex/xy2api/ent"
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
@@ -19,7 +20,7 @@ import (
 	"golang.org/x/time/rate"
 )
 
-const schedQualityCycleLockID int64 = 734891260129
+const schedQualityCycleLockID int64 = 734891260229
 
 var (
 	schedQualityResetWarnings  = rate.NewLimiter(rate.Every(time.Minute), 1)
@@ -75,7 +76,24 @@ func (r *schedQualityRepository) RunReset(ctx context.Context, accountID int64) 
 	if err = tx.QueryRowContext(ctx, `UPDATE accounts SET extra = jsonb_set(COALESCE(extra,'{}'::jsonb),'{group_quality_reset_at}',to_jsonb(to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')),true) WHERE id=$1 RETURNING (extra->>'group_quality_reset_at')::timestamptz`, accountID).Scan(&at); err != nil {
 		return time.Time{}, err
 	}
-	if _, err = tx.ExecContext(ctx, `DELETE FROM account_quality_states WHERE account_id=$1`, accountID); err != nil {
+	rows, err := loadSchedQualityStates(ctx, tx)
+	if err != nil {
+		return time.Time{}, err
+	}
+	var decisions []schedquality.Decision
+	for _, row := range rows {
+		if row.AccountID == accountID && row.State == schedquality.StateCooling {
+			basis := schedquality.DecisionBasis{RuleVersion: schedquality.RuleVersion}
+			if row.Basis != nil {
+				basis = *row.Basis
+			}
+			decisions = append(decisions, schedquality.Decision{At: at, Scope: schedquality.Scope{AccountID: accountID, GroupID: row.GroupID, Model: row.Model}, Action: "reset", Basis: basis})
+		}
+	}
+	if err := (&schedQualityTx{ctx: ctx, tx: tx}).InsertDecisions(decisions); err != nil {
+		return time.Time{}, err
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM sched_states WHERE account_id=$1`, accountID); err != nil {
 		return time.Time{}, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -114,29 +132,51 @@ func (r *schedQualityRepository) LoadRows(ctx context.Context) ([]schedquality.S
 func loadSchedQualityStates(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }) ([]schedquality.StateRow, error) {
-	rows, err := q.QueryContext(ctx, `SELECT account_id,model,group_id,state,level,reason,since,until FROM account_quality_states ORDER BY account_id,model,group_id`)
+	rows, err := q.QueryContext(ctx, `SELECT account_id,model,group_id,failing,dims,level,since,until,evidence_since,basis FROM sched_states ORDER BY account_id,model,group_id`)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
+	defer rows.Close()
 	var out []schedquality.StateRow
 	for rows.Next() {
-		var row schedquality.StateRow
-		var until sql.NullTime
-		if err := rows.Scan(&row.AccountID, &row.Model, &row.GroupID, &row.State, &row.Level, &row.Reason, &row.Since, &until); err != nil {
+		var r schedquality.StateRow
+		var failing bool
+		var dims pq.StringArray
+		var since, until, evidence sql.NullTime
+		var raw []byte
+		if err := rows.Scan(&r.AccountID, &r.Model, &r.GroupID, &failing, &dims, &r.Level, &since, &until, &evidence, &raw); err != nil {
 			return nil, err
 		}
-		if until.Valid {
-			row.Until = until.Time
+		r.Since, r.Until, r.EvidenceSince = since.Time, until.Time, evidence.Time
+		if failing {
+			r.State = schedquality.StateCooling
 		}
-		out = append(out, row)
+		r.Basis = &schedquality.DecisionBasis{}
+		if err := json.Unmarshal(raw, r.Basis); err != nil {
+			return nil, err
+		}
+		r.Basis.Dims = nil
+		for _, dim := range dims {
+			r.Basis.Dims = append(r.Basis.Dims, schedquality.Dimension(dim))
+		}
+		if failing && len(dims) > 0 {
+			switch schedquality.Dimension(dims[0]) {
+			case schedquality.DimensionTTFO:
+				r.Reason = schedquality.ReasonSpeed
+			case schedquality.DimensionError:
+				r.Reason = schedquality.ReasonError
+			case schedquality.DimensionCache:
+				r.Reason = schedquality.ReasonCache
+			}
+		}
+		out = append(out, r)
 	}
 	return out, rows.Err()
 }
 func loadSchedQualityOverrides(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }) ([]service.SchedOverride, error) {
-	rows, err := q.QueryContext(ctx, `SELECT account_id,group_id,mode,expires_at,reason,operator_id FROM account_quality_overrides ORDER BY account_id,group_id`)
+	rows, err := q.QueryContext(ctx, `SELECT account_id,group_id,mode,expires_at,reason,operator_id FROM account_quality_overrides WHERE mode=1 ORDER BY account_id,group_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -235,21 +275,67 @@ func (t *schedQualityTx) Overrides() ([]service.SchedOverride, error) {
 func (t *schedQualityTx) ResetTimes() (map[int64]time.Time, error) {
 	return loadSchedQualityResets(t.ctx, t.tx)
 }
+func nullableQualityTime(at time.Time) any {
+	if at.IsZero() {
+		return nil
+	}
+	return at
+}
+func qualityBasis(b *schedquality.DecisionBasis) ([]byte, []string, error) {
+	if b == nil {
+		return []byte("{}"), []string{}, nil
+	}
+	raw, err := json.Marshal(b)
+	dims := make([]string, len(b.Dims))
+	for i, dim := range b.Dims {
+		dims[i] = string(dim)
+	}
+	return raw, dims, err
+}
 func (t *schedQualityTx) Upsert(rows []schedquality.StateRow) error {
 	for _, r := range rows {
-		var until any
-		if !r.Until.IsZero() {
-			until = r.Until
+		raw, dims, err := qualityBasis(r.Basis)
+		if err != nil {
+			return err
 		}
-		if _, err := t.tx.ExecContext(t.ctx, `INSERT INTO account_quality_states(account_id,model,group_id,state,level,reason,since,until) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(account_id,model,group_id) DO UPDATE SET state=EXCLUDED.state,level=EXCLUDED.level,reason=EXCLUDED.reason,since=EXCLUDED.since,until=EXCLUDED.until`, r.AccountID, r.Model, r.GroupID, r.State, r.Level, string(r.Reason), r.Since, until); err != nil {
+		_, err = t.tx.ExecContext(t.ctx, `INSERT INTO sched_states(account_id,model,group_id,failing,dims,level,since,until,evidence_since,basis)
+  VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+  ON CONFLICT(account_id,model,group_id) DO UPDATE SET failing=EXCLUDED.failing,dims=EXCLUDED.dims,level=EXCLUDED.level,since=EXCLUDED.since,until=EXCLUDED.until,evidence_since=EXCLUDED.evidence_since,basis=EXCLUDED.basis,updated_at=NOW()`,
+			r.AccountID, r.Model, r.GroupID, r.State == schedquality.StateCooling, pq.Array(dims), r.Level, nullableQualityTime(r.Since), nullableQualityTime(r.Until), nullableQualityTime(r.EvidenceSince), string(raw))
+		if err != nil {
 			return err
 		}
 	}
 	return nil
 }
+func (t *schedQualityTx) InsertDecisions(rows []schedquality.Decision) error {
+	for _, r := range rows {
+		raw, dims, err := qualityBasis(&r.Basis)
+		if err != nil {
+			return err
+		}
+		ids := r.Basis.AttemptIDs
+		if ids == nil {
+			ids = []string{}
+		}
+		_, err = t.tx.ExecContext(t.ctx, `INSERT INTO sched_decisions(at,rule_version,account_id,model,group_id,action,dims,level,until,basis,attempt_ids) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+			r.At, schedquality.RuleVersion, r.Scope.AccountID, r.Scope.Model, r.Scope.GroupID, r.Action, pq.Array(dims), r.Level, nullableQualityTime(r.Until), string(raw), pq.Array(ids))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func (r *schedQualityRepository) DeleteDecisionsBefore(ctx context.Context, before time.Time) (int64, error) {
+	result, err := r.db.ExecContext(ctx, `DELETE FROM sched_decisions WHERE at<$1`, before)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
 func (t *schedQualityTx) Delete(rows []schedquality.StateRow) error {
 	for _, r := range rows {
-		if _, err := t.tx.ExecContext(t.ctx, `DELETE FROM account_quality_states WHERE account_id=$1 AND model=$2 AND group_id=$3`, r.AccountID, r.Model, r.GroupID); err != nil {
+		if _, err := t.tx.ExecContext(t.ctx, `DELETE FROM sched_states WHERE account_id=$1 AND model=$2 AND group_id=$3`, r.AccountID, r.Model, r.GroupID); err != nil {
 			return err
 		}
 	}
@@ -277,12 +363,6 @@ type schedQualityPolicyV4 struct {
 	MaxErrorRate        float64 `json:"max_error_rate"`
 	MinCacheRatio       float64 `json:"min_cache_ratio"`
 	TakeoverIdleSeconds int     `json:"takeover_idle_seconds"`
-}
-type schedQualityPolicyV3 struct {
-	Enabled           bool    `json:"enabled"`
-	MaxTTFTP90Seconds float64 `json:"max_ttft_p90_seconds"`
-	MaxErrorRate      float64 `json:"max_error_rate"`
-	MinCacheKeepRate  float64 `json:"min_cache_keep_rate"`
 }
 
 func decodeSchedQualityPolicies(raw string) (map[int64]service.SchedPolicyRecord, int64, error) {
@@ -324,29 +404,18 @@ func decodeSchedQualityPolicy(raw json.RawMessage) (service.SchedPolicyRecord, e
 	if entry == nil {
 		return record, errors.New("policy entry must be an object")
 	}
-	if raw := entry["v4"]; len(raw) > 0 && string(raw) != "null" {
-		var v schedQualityPolicyV4
-		if err := json.Unmarshal(raw, &v); err != nil {
-			return record, err
-		}
-		record.Policy = schedquality.Policy{Enabled: v.Enabled, TTFTSeconds: v.TTFTSeconds, MaxErrorRate: v.MaxErrorRate, MinCacheRatio: v.MinCacheRatio, TakeoverIdleSeconds: v.TakeoverIdleSeconds}
-	} else {
-		var v schedQualityPolicyV3
-		if raw := entry["v3"]; len(raw) > 0 && string(raw) != "null" {
-			if err := json.Unmarshal(raw, &v); err != nil {
-				return record, err
-			}
-		} else {
-			v = schedQualityPolicyV3{MaxTTFTP90Seconds: 15, MaxErrorRate: .10, MinCacheKeepRate: .50}
-			if raw := entry["enabled"]; len(raw) > 0 {
-				if err := json.Unmarshal(raw, &v.Enabled); err != nil {
-					return record, err
-				}
-			}
-		}
-		record.Policy = schedquality.Policy{Enabled: v.Enabled, TTFTSeconds: v.MaxTTFTP90Seconds, MaxErrorRate: v.MaxErrorRate, MinCacheRatio: v.MinCacheKeepRate}
-		record.FromV3 = true
+
+	rawV4 := entry["v4"]
+	if len(rawV4) == 0 || string(rawV4) == "null" {
+		record.Policy = schedquality.DefaultPolicy()
+		return record, nil
 	}
+	var v schedQualityPolicyV4
+	if err := json.Unmarshal(rawV4, &v); err != nil {
+		return record, err
+	}
+	record.Policy = schedquality.Policy{Enabled: v.Enabled, TTFTSeconds: v.TTFTSeconds, MaxErrorRate: v.MaxErrorRate, MinCacheRatio: v.MinCacheRatio, TakeoverIdleSeconds: v.TakeoverIdleSeconds}
+
 	return record, service.ValidateSchedQualityPolicy(record.Policy)
 }
 func (r *schedQualityRepository) LoadPolicies(ctx context.Context) (map[int64]service.SchedPolicyRecord, error) {
@@ -370,7 +439,10 @@ func (r *schedQualityRepository) LoadPolicies(ctx context.Context) (map[int64]se
 		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		record := policies[id]
+		record, ok := policies[id]
+		if !ok {
+			record.Policy = schedquality.DefaultPolicy()
+		}
 		record.GroupID, record.Version = id, version
 		out[id] = record
 	}

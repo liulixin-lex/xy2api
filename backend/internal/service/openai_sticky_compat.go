@@ -121,9 +121,6 @@ func (s *OpenAIGatewayService) openAIStickyLegacyTTL(ttl time.Duration) time.Dur
 }
 
 func (s *OpenAIGatewayService) getStickySessionAccountID(ctx context.Context, groupID *int64, sessionHash string) (int64, error) {
-	if owner, ok := ctx.Value(openAIStickyReconciledKey{}).(int64); ok && owner > 0 && !s.qualityOwnsSticky(ctx, groupID, sessionHash) {
-		return owner, nil
-	}
 	if id, handled := s.qualitySticky(ctx, groupID, sessionHash); handled {
 		return id, nil
 	}
@@ -217,6 +214,9 @@ func (s *OpenAIGatewayService) setStickySessionAccountID(ctx context.Context, gr
 }
 
 func (s *OpenAIGatewayService) refreshStickySessionTTL(ctx context.Context, groupID *int64, sessionHash string, ttl time.Duration, expectedOwner ...int64) error {
+	if change := pendingOpenAIStickyChange(ctx); preservePendingOpenAIStickyBinding(ctx, groupID, sessionHash) && change.expected.AccountID == 0 {
+		return nil
+	}
 	if s.qualityOwnsSticky(ctx, groupID, sessionHash) {
 		return nil
 	}

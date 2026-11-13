@@ -3,7 +3,6 @@ package schedquality
 import (
 	"math"
 	"sort"
-	"time"
 )
 
 func WilsonLower(bad, n int) float64 {
@@ -37,57 +36,6 @@ func sortLatencies(values []latency) {
 	})
 }
 
-// values must be ascending; timeouts sort as positive infinity.
-func p90(values []latency) latency {
-	if len(values) == 0 {
-		return latency{}
-	}
-	return values[(9*len(values)+9)/10-1]
-}
-
-func failBound(values []latency) latency {
-	for b := 1; b <= len(values); b++ {
-		if WilsonLower(b, len(values)) > SlowShareTolerance {
-			return values[len(values)-b]
-		}
-	}
-	return latency{}
-}
-
-type sampleSession struct {
-	key     string
-	request bool
-}
-
-func sessionOf(s AttemptSample) sampleSession {
-	if s.SessionKey != "" {
-		return sampleSession{key: s.SessionKey}
-	}
-	if s.RequestID == "" {
-		return sampleSession{key: s.AttemptID, request: true}
-	}
-	return sampleSession{key: s.RequestID, request: true}
-}
-
 func evidenceOutcome(o Outcome) bool {
 	return o == OutcomeOK || o == OutcomeTimeout || o == OutcomeAccountFault
-}
-
-func sortedSamples(samples []AttemptSample, since, now time.Time) []AttemptSample {
-	seen := make(map[string]bool, len(samples))
-	filtered := make([]AttemptSample, 0, len(samples))
-	for _, s := range samples {
-		if seen[s.AttemptID] || !s.StartedAt.After(since) || s.StartedAt.Before(now.Add(-WindowMaxAge)) {
-			continue
-		}
-		seen[s.AttemptID] = true
-		filtered = append(filtered, s)
-	}
-	sort.Slice(filtered, func(i, j int) bool {
-		if filtered[i].StartedAt.Equal(filtered[j].StartedAt) {
-			return filtered[i].AttemptID > filtered[j].AttemptID
-		}
-		return filtered[i].StartedAt.After(filtered[j].StartedAt)
-	})
-	return filtered
 }
