@@ -1504,7 +1504,7 @@ watch(sqSummary.byAccount, (map) => {
   const fresh = new Set<string>()
   for (const summary of map.values()) {
     for (const item of summary.cooling) {
-      const key = `${summary.account_id}:${item.group_id}:${item.testing ? 'testing' : 'cooling'}`
+      const key = `${summary.account_id}:${item.group_id}:cooling`
       keys.add(key)
       if (sqShownAccounts.has(summary.account_id) && !sqSeen.has(key)) fresh.add(key)
     }

@@ -15,14 +15,6 @@
       </div>
     </template>
     <template v-if="detail && canManage" #header-actions>
-      <span v-if="testFailed" class="sq-fail-word text-sm" data-sq-test-failed>{{ t('admin.schedQuality.result.failed') }}</span>
-      <button
-        type="button"
-        class="btn btn-secondary btn-sm aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
-        :aria-disabled="testRunning || testBusy"
-        data-sq-trigger="drawer-test"
-        @click="startTest"
-      >{{ t('admin.schedQuality.action.test') }}</button>
       <template v-for="mode in OVERRIDE_MODES" :key="mode">
         <span v-if="failedGroups.has(0) && allGroupsOverride?.mode === mode" class="sq-fail-word text-sm">{{ t('admin.schedQuality.result.failed') }}</span>
         <button
@@ -146,49 +138,6 @@
         <p v-else class="sq-text-3 text-sm">—</p>
       </section>
 
-      <!-- Test -->
-      <section class="mt-8">
-        <div class="mb-3 flex items-center justify-between gap-3">
-          <h3 class="sq-section-title">{{ t('admin.schedQuality.drawer.test') }}</h3>
-          <div v-if="test" class="flex items-center gap-2 text-[13px]" data-sq-test-head>
-            <span class="text-xs font-medium text-gray-700 dark:text-gray-300">{{ t(`admin.schedQuality.test.${test.kind === 'screen' ? 'screen' : 'full'}`) }}</span>
-            <span v-if="test.running" class="sq-test">{{ t('admin.schedQuality.state.testing') }}</span>
-            <template v-else>
-              <span class="sq-text-3 sq-num">{{ fmtTestTime(test.at) }}</span>
-              <span :class="testEnd === 'done' ? 'sq-text' : 'text-gray-500 dark:text-dark-400'">{{ t(`admin.schedQuality.test.${testEnd}`) }}</span>
-            </template>
-          </div>
-        </div>
-        <div v-if="test" class="-mx-3 overflow-x-auto">
-          <!-- Same fixed widths as the groups table: 首字 sits under its 首字 (ui-proposal 7.2). -->
-          <table class="sq-table table-fixed min-w-[600px]">
-            <colgroup>
-              <col />
-              <col class="w-[112px]" />
-              <col class="w-[84px]" />
-              <col class="w-[264px]" />
-            </colgroup>
-            <thead>
-              <tr>
-                <th scope="col">{{ t('admin.schedQuality.col.class') }}</th>
-                <th aria-hidden="true" />
-                <th scope="col" class="sq-r">{{ t('admin.schedQuality.dim.ttfo') }}</th>
-                <th aria-hidden="true" />
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="tier in testTiers" :key="tier">
-                <td>{{ t(`admin.schedQuality.tier.${tier}`) }}</td>
-                <td />
-                <td class="sq-r sq-num">{{ tierTtfo(tier) }}</td>
-                <td />
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <p v-else class="sq-text-3 text-sm">{{ t('admin.schedQuality.state.nodata') }}</p>
-      </section>
-
       <!-- Recent requests -->
       <section class="mt-8">
         <h3 class="sq-section-title mb-3">{{ t('admin.schedQuality.drawer.recent') }}</h3>
@@ -264,15 +213,15 @@ import SchedOverridePopover from './SchedOverridePopover.vue'
 import SchedOverrideCapsule from './SchedOverrideCapsule.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
 import type {
-  SchedAccountGroup, SchedAutoState, SchedOverrideMode, SchedOverrideRequest, SchedRecentAttempt, SchedRequestClass, SchedTestTier
+  SchedAccountGroup, SchedAutoState, SchedOverrideMode, SchedOverrideRequest, SchedRecentAttempt, SchedRequestClass
 } from '@/types/schedQuality'
 import { secondsUntil, useSchedQualityClock, useSchedQualityPoll } from '@/composables/useSchedQuality'
 import { closeSchedDrawer, markSchedChanged, openSchedBoard, openSchedDrawer, trackSchedReload, useSchedLayers } from '@/composables/useSchedLayers'
 import { isRecovering, useAccountRecovery } from '@/composables/useAccountRecovery'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 import {
-  attemptResult, attemptWeak, enumWord, fmtCacheRatio, fmtClock, fmtCountdown, fmtErrorRate, fmtTestTime, fmtTtfo, kindName,
-  parentIdFromKey, SCHED_CLASSES, testResult
+  attemptResult, attemptWeak, enumWord, fmtCacheRatio, fmtClock, fmtCountdown, fmtErrorRate, fmtTtfo, kindName,
+  parentIdFromKey, SCHED_CLASSES
 } from '@/utils/schedQualityFormat'
 import { vRovingTabs } from '@/utils/rovingTabs'
 import { vTip } from '@/utils/tip'
@@ -290,8 +239,6 @@ const props = defineProps<{
 
 const OVERRIDE_MODES: SchedOverrideMode[] = ['demote', 'exempt']
 const CLASSES: SchedRequestClass[] = ['light', 'regular', 'heavy', 'xheavy']
-const TIERS: SchedTestTier[] = ['small', 'medium', 'large']
-const SCREEN_TIERS: SchedTestTier[] = ['small']
 const RECENT_SHORT = 10
 const RECENT_LONG = 50
 
@@ -313,10 +260,6 @@ let restoreFocus: (() => void) | null = null
 watch(() => poll.data.value, () => { restoreFocus = shellRef.value?.holdFocus() ?? null }, { flush: 'pre' })
 watch(() => poll.data.value, () => { restoreFocus?.(); restoreFocus = null }, { flush: 'post' })
 
-// A failed test (K28, same rule as the batch) shows "失败" next to 测试 through the refresh the test triggers and
-// until the next one; another account clears it.
-const testFailedRefreshes = ref(0)
-
 // Model tab: the requested model when the detail has it, else the first one.
 const tab = ref<string | null>(null)
 const targetGroupId = ref<number | null>(null)
@@ -325,7 +268,6 @@ let pendingScroll = true
 
 watch(() => [drawer.accountId, drawer.raise] as const, ([id], previous) => {
   targetGroupId.value = drawer.groupId
-  if (id !== previous?.[0]) testFailedRefreshes.value = 0
   recentAll.value = false
   pendingScroll = true
   if (previous && id === previous[0]) void poll.refresh()
@@ -375,24 +317,6 @@ const classValue = (cls: SchedRequestClass) => fmtTtfo(card.value?.ttfo.by_class
 const groupNames = computed(() => new Map(detail.value?.groups.map((g) => [g.group_id, g.name]) ?? []))
 const scopeGroups = computed(() => detail.value?.groups.map((g) => ({ id: g.group_id, name: g.name })) ?? [])
 
-// Test of the selected model (contract delta E): a screen shows only the small tier; the end word follows `clean`,
-// and a test without any round is void.
-const test = computed(() => card.value?.test ?? null)
-const testRunning = computed(() => !!test.value?.running)
-const testTiers = computed(() => (test.value?.kind === 'screen' ? SCREEN_TIERS : TIERS))
-const testEnd = computed(() => {
-  const value = test.value
-  if (!value?.tiers.length) return 'aborted'
-  return value.clean ? 'done' : 'unfinished'
-})
-function tierTtfo(tier: SchedTestTier) {
-  const row = test.value?.tiers.find((x) => x.tier === tier)
-  if (!row) return '—'
-  if (row.timeouts > 0) return t('admin.schedQuality.result.timeout')
-  const values = row.ttfo_ms.filter((v): v is number => v !== null)
-  return values.length ? fmtTtfo(Math.max(...values), false, t) : '—'
-}
-
 // Recent requests of the selected model.
 const recent = computed(() => detail.value?.recent_attempts.filter((a) => a.model === tab.value) ?? [])
 const shownRecent = computed(() => recent.value.slice(0, recentAll.value ? RECENT_LONG : RECENT_SHORT))
@@ -415,26 +339,6 @@ const recovering = computed(() => !!detail.value && isRecovering(detail.value.ac
 function startRecover() {
   const account = detail.value?.account
   if (account) void recover({ id: account.id, name: account.name }, () => props.onRecovered?.(account.id))
-}
-
-const testBusy = ref(false)
-const testFailed = computed(() => testFailedRefreshes.value > 0)
-watch(detail, () => { if (testFailedRefreshes.value > 0) testFailedRefreshes.value-- })
-async function startTest() {
-  const id = drawer.accountId
-  if (id === null || testRunning.value || testBusy.value) return
-  testBusy.value = true
-  testFailedRefreshes.value = 0
-  let result: ReturnType<typeof testResult> = 'failed'
-  try {
-    result = testResult((await schedQualityAPI.startTest(id, tab.value ?? undefined)).tests)
-  } catch {
-    // A request error is a failed test.
-  } finally {
-    testBusy.value = false
-  }
-  if (result === 'failed' && drawer.accountId === id) testFailedRefreshes.value = 2
-  void markSchedChanged()
 }
 
 const allGroupsOverride = computed(() => detail.value?.all_groups_override ?? null)

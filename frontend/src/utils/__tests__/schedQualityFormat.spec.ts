@@ -1,21 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
-import type { SchedRecentAttempt, SchedTestTicket } from '@/types/schedQuality'
-import { attemptResult, enumWord, known, SCHED_CLASSES, SCHED_STATES, SCHED_VERDICTS, testResult } from '../schedQualityFormat'
+import type { SchedRecentAttempt } from '@/types/schedQuality'
+import { attemptResult, enumWord, known, SCHED_CLASSES, SCHED_STATES, SCHED_VERDICTS } from '../schedQualityFormat'
 
-const ticket = (started: boolean, why: SchedTestTicket['why']): SchedTestTicket => ({ model: 'm', test_id: started ? 't' : '', started, why })
 const t = (key: string) => key
-
-describe('testResult (B.11, K28)', () => {
-  it('is ok only when a model started and none hit an internal error', () => {
-    expect(testResult([ticket(true, ''), ticket(false, 'too_soon')])).toBe('ok')
-    expect(testResult([ticket(true, ''), ticket(false, 'error')])).toBe('failed')
-    expect(testResult([ticket(false, 'already_running'), ticket(false, 'already_running')])).toBe('testing')
-    expect(testResult([ticket(false, 'already_running'), ticket(false, 'error')])).toBe('failed')
-    expect(testResult([ticket(false, 'not_schedulable')])).toBe('failed')
-    expect(testResult([])).toBe('failed')
-  })
-})
 
 describe('finite enums (S8)', () => {
   it('passes known values and turns unknown ones into the fallback word, never a default verdict or a raw key', () => {

@@ -1,13 +1,12 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 
-import type { SchedAccountDetail, SchedTest } from '@/types/schedQuality'
-import { fmtTestTime } from '@/utils/schedQualityFormat'
+import type { SchedAccountDetail } from '@/types/schedQuality'
 import detailFixture from '@/__tests__/fixtures/schedQuality/account_detail.json'
 import SchedAccountDrawer from '../SchedAccountDrawer.vue'
 import { closeSchedBoard, closeSchedDrawer, openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
 
-const api = vi.hoisted(() => ({ accountDetail: vi.fn(), startTest: vi.fn(), setOverride: vi.fn(), clearOverride: vi.fn(), clearAutoState: vi.fn(), reset: vi.fn() }))
+const api = vi.hoisted(() => ({ accountDetail: vi.fn(), setOverride: vi.fn(), clearOverride: vi.fn(), clearAutoState: vi.fn(), reset: vi.fn() }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: api }))
 const toast = vi.hoisted(() => ({ showSuccess: vi.fn(), showError: vi.fn() }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => toast }))
@@ -41,8 +40,8 @@ function detail(): SchedAccountDetail {
   d.groups.push({
     group_id: 54, name: '北辰组', gate_enabled: true, policy: d.groups[0].policy, override: null,
     by_model: [{
-      model: 'gpt-6.1-sol', state: 'cooling', level: 1, reason: 'cache', since: '2026-11-11T12:00:00Z', until: null, waiting_test: true, testing: false,
-      ttfo: { verdict: 'fail', from: 'test', n: 4, p90_ms: 14200, p90_timeout: false, limit_ms: 10000 },
+      model: 'gpt-6.1-sol', state: 'cooling', level: 1, reason: 'cache', since: '2026-11-11T12:00:00Z', until: null,
+      ttfo: { verdict: 'fail', from: 'real', n: 4, p90_ms: 14200, p90_timeout: false, limit_ms: 10000 },
       error: { verdict: 'pass', from: 'real', n: 30, rate: 0.02, limit: 0.05 },
       cache: { verdict: 'nodata', from: null, n: 3, ratio: null, limit: 0.9 }
     }]
@@ -63,7 +62,6 @@ beforeEach(() => {
   document.documentElement.dataset.motion = 'reduced'
   Element.prototype.scrollIntoView = vi.fn()
   api.accountDetail.mockReset().mockResolvedValue(detail())
-  api.startTest.mockReset()
   api.clearOverride.mockReset()
   api.setOverride.mockReset()
   api.reset.mockReset()
@@ -115,7 +113,7 @@ describe('SchedAccountDrawer', () => {
       'admin.schedQuality.dim.cache admin.schedQuality.aria.fail'
     ])
 
-    // Own window: the test value given by the API, a real number, and the cause square for the cooling dimension.
+    // Own window: the numbers given by the API and the cause square for the cooling dimension.
     const [ttfo, error, cache] = cells(54)
     expect(ttfo.textContent).toBe('14.2s')
     expect(ttfo.querySelector('span')!.className).toContain('sq-v-fail')
@@ -179,45 +177,12 @@ describe('SchedAccountDrawer', () => {
     expect([board.groupId, board.model]).toEqual([53, null])
   })
 
-  it('shows 失败 next to 测试 for a failed test (started + error, or a request error) until the refresh after its own (K28)', async () => {
-    api.accountDetail.mockImplementation(async () => detail())
-    const wrapper = mount(SchedAccountDrawer, { attachTo: document.body })
-    openSchedDrawer({ id: 479, name: 'acc-03' })
-    await flushPromises()
-    const mark = () => document.querySelector('[data-sq-test-failed]')
-    const runTest = async () => {
-      document.querySelector<HTMLElement>('[data-sq-trigger="drawer-test"]')!.click()
-      await flushPromises()
-    }
-
-    api.startTest.mockResolvedValueOnce({ tests: [
-      { model: 'gpt-6.1-sol', test_id: 't1', started: true, why: '' },
-      { model: 'gpt-6-astra', test_id: '', started: false, why: 'error' }
-    ] })
-    await runTest()
-    // The refresh the test triggered has landed and the mark is still there.
-    expect(api.accountDetail).toHaveBeenCalledTimes(2)
-    expect(mark()?.textContent).toBe('admin.schedQuality.result.failed')
-    expect(mark()!.className).toContain('sq-fail-word')
-    await (wrapper.vm as unknown as { refresh: () => Promise<void> }).refresh()
-    await flushPromises()
-    expect(mark()).toBeNull()
-
-    api.startTest.mockRejectedValueOnce({ status: 500, message: 'boom' })
-    await runTest()
-    expect(mark()).not.toBeNull()
-
-    api.startTest.mockResolvedValueOnce({ tests: [{ model: 'gpt-6.1-sol', test_id: 't2', started: true, why: '' }] })
-    await runTest()
-    expect(mark()).toBeNull()
-  })
-
   it('hides write actions without accounts:manage and shows the group name as text without groups:view', async () => {
     perms.granted = ['accounts:view']
     mount(SchedAccountDrawer, { attachTo: document.body })
     openSchedDrawer({ id: 479, name: 'acc-03' })
     await flushPromises()
-    for (const trigger of ['drawer-test', 'drawer-demote', 'drawer-exempt', 'drawer-reset', 'auto:model_limit:gpt-6-astra', 'override:53', 'board:53']) {
+    for (const trigger of ['drawer-demote', 'drawer-exempt', 'drawer-reset', 'auto:model_limit:gpt-6-astra', 'override:53', 'board:53']) {
       expect(document.querySelector(`[data-sq-trigger="${trigger}"]`)).toBeNull()
     }
     expect(row(53).querySelector('td')!.textContent!.trim()).toBe(detail().groups[0].name)
@@ -356,47 +321,6 @@ describe('SchedAccountDrawer — member groups and the all-groups override (cont
     trigger('drawer-exempt')!.click()
     await flushPromises()
     expect(api.clearOverride).toHaveBeenCalledWith(479, 0)
-  })
-})
-
-describe('SchedAccountDrawer — test area (contract delta E, scenario 31)', () => {
-  const at = detailFixture.models[0].test.at
-  const head = () => panel().querySelector('[data-sq-test-head]')!
-  const words = () => Array.from(head().querySelectorAll('span')).map((el) => el.textContent)
-  const table = () => head().closest('section')!.querySelector('table')!
-  const tierRows = () => Array.from(table().querySelectorAll('tbody tr')).map((tr) => Array.from(tr.querySelectorAll('td')).map((td) => td.textContent))
-  const withTest = (test: Partial<SchedTest>) => {
-    const d = detail()
-    Object.assign(d.models[0].test!, test)
-    return d
-  }
-  const small = { tier: 'small' as const, ttfo_ms: [3100, 2900], cache_ratio: 0.99, faults: 0, timeouts: 0 }
-
-  it('marks a clean screen 筛查 · time · 完成, with only the small tier and no cache column', async () => {
-    await openWith(withTest({ kind: 'screen', clean: true, tiers: [small] }))
-    expect(words()).toEqual(['admin.schedQuality.test.screen', fmtTestTime(at), 'admin.schedQuality.test.done'])
-    expect(Array.from(table().querySelectorAll('thead th')).map((th) => th.textContent)).toEqual(['admin.schedQuality.col.class', '', 'admin.schedQuality.dim.ttfo', ''])
-    expect(tierRows()).toEqual([['admin.schedQuality.tier.small', '', '3.1s', '']])
-    expect(table().textContent).not.toContain('99%')
-    // No shape or colour that reads as a verdict.
-    expect(head().querySelector('[role="img"]')).toBeNull()
-  })
-
-  it('marks a full test that ended unclean 三档 · time · 未完成, with three tiers and — for a tier without rounds', async () => {
-    const medium = { tier: 'medium' as const, ttfo_ms: [null], cache_ratio: null, faults: 0, timeouts: 1 }
-    await openWith(withTest({ kind: 'full', clean: false, auto: false, tiers: [small, medium] }))
-    expect(words()).toEqual(['admin.schedQuality.test.full', fmtTestTime(at), 'admin.schedQuality.test.unfinished'])
-    expect(tierRows().map((cells) => cells[2])).toEqual(['3.1s', 'admin.schedQuality.result.timeout', '—'])
-  })
-
-  it('calls a test without any round 作废', async () => {
-    await openWith(withTest({ kind: 'screen', clean: false, done: false, abort_reason: 'not_schedulable', tiers: [] }))
-    expect(words()).toEqual(['admin.schedQuality.test.screen', fmtTestTime(at), 'admin.schedQuality.test.aborted'])
-  })
-
-  it('shows the kind with 测试中 while the test runs', async () => {
-    await openWith(withTest({ kind: 'screen', clean: false, running: true, done: false, tiers: [] }))
-    expect(words()).toEqual(['admin.schedQuality.test.screen', 'admin.schedQuality.state.testing'])
   })
 })
 
@@ -568,22 +492,5 @@ describe('SchedAccountDrawer — red-team revisions (R2-RT-FB)', () => {
     closeSchedDrawer()
     await openWith(detail())
     expect(panel().querySelector('[data-sq-section="groups"] [data-sq-override]')).toBeNull()
-  })
-
-  it('gives the test table and the groups table the same fixed widths, so 首字 lines up at any width (P2-1)', async () => {
-    await openWith(detail())
-    const groups = panel().querySelector<HTMLTableElement>('[data-sq-section="groups"] table')!
-    const test = panel().querySelector<HTMLTableElement>('[data-sq-test-head]')!.closest('section')!.querySelector('table')!
-    const widths = (table: HTMLTableElement) => Array.from(table.querySelectorAll('col')).map((col) => Number(/w-\[(\d+)px\]/.exec(col.className)?.[1] ?? 0))
-    for (const table of [groups, test]) expect(table.className).toMatch(/\btable-fixed\b.*\bmin-w-\[600px\]/)
-    // Column 2 is 首字 in both; same width, same distance from the right edge, same flexible first column.
-    const g = widths(groups)
-    const tt = widths(test)
-    expect([g[0], tt[0]]).toEqual([0, 0])
-    expect(g[2]).toBe(tt[2])
-    expect(g.slice(1).reduce((a, b) => a + b, 0)).toBe(tt.slice(1).reduce((a, b) => a + b, 0))
-    expect(g[1]).toBe(tt[1])
-    expect(groups.querySelectorAll('thead th')[2].textContent).toBe('admin.schedQuality.dim.ttfo')
-    expect(test.querySelectorAll('thead th')[2].textContent).toBe('admin.schedQuality.dim.ttfo')
   })
 })

@@ -52,7 +52,7 @@ import { vTip } from '@/utils/tip'
 
 // Groups column of the account list (ui-proposal section 4, contract delta E): one capsule per group, the group's own
 // override winning over its cooling; the all-groups override is one capsule that stands for every group without its
-// own override. Order: all groups, own overrides, testing, cooling; at most 3, then +N (N = candidates - 3).
+// own override. Order: all groups, own overrides, cooling; at most 3, then +N (N = candidates - 3).
 // Otherwise `正常` with a dot or `暂无数据`; non-OpenAI accounts show a dash. Kept on one line for the virtualizer.
 const props = defineProps<{
   summary?: SchedAccountSummary
@@ -67,16 +67,15 @@ const emit = defineEmits<{ open: [target: { model: string | null; groupId?: numb
 const { t } = useI18n()
 
 const MAX_SHOWN = 3
-type Kind = 'exempt' | 'demote' | 'testing' | 'cooling'
+type Kind = 'exempt' | 'demote' | 'cooling'
 const STATE_KEY: Record<Kind, string> = {
   exempt: 'admin.schedQuality.state.exempted',
   demote: 'admin.schedQuality.state.demoted',
-  testing: 'admin.schedQuality.state.testing',
   cooling: 'admin.schedQuality.state.cooling'
 }
-const RANK: Record<Kind, number> = { exempt: 1, demote: 1, testing: 2, cooling: 3 }
+const RANK: Record<Kind, number> = { exempt: 1, demote: 1, cooling: 2 }
 // Exempt and demote share one manual colour (D35); the icon and the word tell them apart.
-const CLASS: Record<Kind, string> = { exempt: 'sq-capsule--manual', demote: 'sq-capsule--manual', testing: 'sq-capsule--test', cooling: 'sq-capsule--cool' }
+const CLASS: Record<Kind, string> = { exempt: 'sq-capsule--manual', demote: 'sq-capsule--manual', cooling: 'sq-capsule--cool' }
 
 interface Capsule {
   key: string
@@ -102,7 +101,7 @@ const capsules = computed<Capsule[]>(() => {
   if (!all) {
     for (const c of s.cooling) {
       if (own.has(c.group_id)) continue
-      items.push({ key: `c:${c.group_id}`, groupId: c.group_id, kind: c.testing ? 'testing' : 'cooling', model: c.model, expiresAt: null })
+      items.push({ key: `c:${c.group_id}`, groupId: c.group_id, kind: 'cooling', model: c.model, expiresAt: null })
     }
   }
   return items.sort((a, b) => (a.groupId === 0 ? -1 : b.groupId === 0 ? 1 : RANK[a.kind] - RANK[b.kind] || a.groupId - b.groupId))

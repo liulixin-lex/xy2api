@@ -11,8 +11,7 @@ import type {
   SchedGroupPolicy,
   SchedGroupPolicyUpdate,
   SchedOverrideRequest,
-  SchedResetResult,
-  SchedTestStart
+  SchedResetResult
 } from '@/types/schedQuality'
 
 const base = '/admin/sched-quality'
@@ -42,12 +41,6 @@ export async function setOverride(id: number, override: SchedOverrideRequest): P
 /** groupId 0 cancels the override that covers every group. */
 export async function clearOverride(id: number, groupId: number): Promise<void> {
   await apiClient.delete(`${base}/accounts/${id}/override`, { params: { group_id: groupId } })
-}
-
-/** Without a model the server picks up to 3 models of the account. */
-export async function startTest(id: number, model?: string): Promise<SchedTestStart> {
-  const { data } = await apiClient.post<SchedTestStart>(`${base}/accounts/${id}/test`, model ? { model } : {})
-  return data
 }
 
 export async function clearAutoState(id: number, key: string): Promise<SchedClearAutoState> {
@@ -81,7 +74,6 @@ export const schedQualityAPI = {
   reset,
   setOverride,
   clearOverride,
-  startTest,
   clearAutoState,
   getGroupPolicy,
   updateGroupPolicy,

@@ -11,7 +11,6 @@ vi.mock('vue-i18n', async () => ({
     t: (key: string, params?: Record<string, unknown>) =>
       ({
         'admin.schedQuality.state.cooling': '冷却',
-        'admin.schedQuality.state.testing': '测试中',
         'admin.schedQuality.state.normal': '正常',
         'admin.schedQuality.state.nodata': '暂无数据',
         'admin.schedQuality.state.exempted': '豁免',
@@ -28,7 +27,7 @@ type TipTarget = HTMLElement & { __tipText?: string }
 
 const base = (summaryFixture as { accounts: SchedAccountSummary[] }).accounts[0]
 const summary = (patch: Partial<SchedAccountSummary> = {}): SchedAccountSummary => ({ ...structuredClone(base), ...patch })
-const cooling = (group_id: number, testing = false) => ({ ...base.cooling[0], group_id, testing })
+const cooling = (group_id: number) => ({ ...base.cooling[0], group_id })
 const override = (group_id: number, mode: 'exempt' | 'demote', expires_at: string | null = null): SchedAccountSummaryOverride => ({ group_id, mode, expires_at })
 const names: Record<number, string> = { 53: '晨星组', 54: '北辰组', 55: '青岚组', 56: '白露组', 57: '霜降组' }
 const groupName = (id: number) => names[id] ?? `#${id}`
@@ -62,10 +61,9 @@ describe('SchedGroupsCell', () => {
     expect(w.emitted('open')?.[0][0]).toEqual({ model: 'gpt-6.1-sol', groupId: 53 })
   })
 
-  it('shows three capsules and +1 for four cooling groups; a testing group reads 测试中 and comes first', async () => {
-    const w = cell(summary({ cooling: [cooling(53), cooling(54, true), cooling(55), cooling(56)] }))
-    expect(capsules(w)).toEqual(['北辰组 测试中', '晨星组 冷却', '青岚组 冷却'])
-    expect(w.findAll('.sq-capsule')[0].classes()).toContain('sq-capsule--test')
+  it('shows three capsules and +1 for four cooling groups', async () => {
+    const w = cell(summary({ cooling: [cooling(53), cooling(54), cooling(55), cooling(56)] }))
+    expect(capsules(w)).toEqual(['晨星组 冷却', '北辰组 冷却', '青岚组 冷却'])
     expect(more(w)).toEqual(['+1'])
     await w.findAll('button').at(-1)!.trigger('click')
     expect(w.emitted('open')?.[0][0]).toEqual({ model: 'gpt-6.1-sol', toGroups: true })
@@ -88,7 +86,7 @@ describe('SchedGroupsCell', () => {
   })
 
   it('shows only the all-groups capsule, without +N, when the other groups are normal or covered by it', async () => {
-    const w = cell(summary({ cooling: [cooling(53), cooling(54, true)], overrides: [override(0, 'exempt')] }))
+    const w = cell(summary({ cooling: [cooling(53), cooling(54)], overrides: [override(0, 'exempt')] }))
     expect(capsules(w)).toEqual(['全部分组 豁免'])
     expect(more(w)).toEqual([])
     expect(w.get('.sq-capsule').classes()).toContain('sq-capsule--all')
@@ -97,15 +95,14 @@ describe('SchedGroupsCell', () => {
     expect(w.emitted('open')?.[0][0]).toEqual({ model: 'gpt-6.1-sol' })
   })
 
-  // Scenario 34: exempt and demote share one colour (manual, dashed) and differ by icon and word; cooling and
-  // testing keep their own colours.
-  it('gives exempt and demote one manual colour, told apart by icon and word, unlike cooling and testing', () => {
+  // Scenario 34: exempt and demote share one colour (manual, dashed) and differ by icon and word; cooling keeps its own.
+  it('gives exempt and demote one manual colour, told apart by icon and word, unlike cooling', () => {
     const kinds = (w: ReturnType<typeof cell>) => w.findAll('.sq-capsule').map((c) => [c.attributes('data-sq-kind'), ...c.classes().filter((name) => name.startsWith('sq-capsule--'))])
-    const manual = cell(summary({ cooling: [cooling(55, true)], overrides: [override(53, 'exempt'), override(54, 'demote')] }))
-    expect(kinds(manual)).toEqual([['exempt', 'sq-capsule--manual'], ['demote', 'sq-capsule--manual'], ['testing', 'sq-capsule--test']])
-    const [exempt, demote, testing] = manual.findAll('.sq-capsule')
+    const manual = cell(summary({ cooling: [cooling(55)], overrides: [override(53, 'exempt'), override(54, 'demote')] }))
+    expect(kinds(manual)).toEqual([['exempt', 'sq-capsule--manual'], ['demote', 'sq-capsule--manual'], ['cooling', 'sq-capsule--cool']])
+    const [exempt, demote, cool] = manual.findAll('.sq-capsule')
     expect(exempt.find('svg path').attributes('d')).not.toBe(demote.find('svg path').attributes('d'))
-    expect(testing.find('svg').exists()).toBe(false)
+    expect(cool.find('svg').exists()).toBe(false)
     expect(kinds(cell(summary()))).toEqual([['cooling', 'sq-capsule--cool']])
   })
 

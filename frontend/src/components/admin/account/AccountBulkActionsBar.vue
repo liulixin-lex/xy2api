@@ -101,7 +101,7 @@ const emit = defineEmits([
   'sched-action'
 ])
 
-const SCHED_ACTIONS = ['reset', 'demote', 'exempt', 'test'] as const
+const SCHED_ACTIONS = ['reset', 'demote', 'exempt'] as const
 const LINK = 'text-xs font-medium text-primary-700 hover:text-primary-800 dark:text-primary-300 dark:hover:text-primary-200'
 const SEP = 'mx-1 w-px self-stretch bg-gray-300 dark:bg-dark-600'
 const ITEM = 'flex w-full items-center px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-200 dark:hover:bg-dark-700'

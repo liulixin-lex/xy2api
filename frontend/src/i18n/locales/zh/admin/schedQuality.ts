@@ -26,7 +26,6 @@ export default {
     state: {
       normal: '正常',
       cooling: '冷却',
-      testing: '测试中',
       nodata: '暂无数据',
       demoted: '后排',
       exempted: '豁免',
@@ -45,7 +44,6 @@ export default {
       concurrency: '并发',
       byGroup: '各分组',
       autoStates: '自动状态',
-      test: '测试',
       recent: '最近请求',
     },
     col: {
@@ -63,18 +61,6 @@ export default {
       heavy: '重',
       xheavy: '超重',
     },
-    tier: {
-      small: '小',
-      medium: '中',
-      large: '大',
-    },
-    test: {
-      screen: '筛查',
-      full: '三档',
-      done: '完成',
-      unfinished: '未完成',
-      aborted: '作废',
-    },
     scope: {
       account: '账号',
       proxy: '代理',
@@ -88,7 +74,6 @@ export default {
       reset: '恢复',
       demote: '后排',
       exempt: '豁免',
-      test: '测试',
       undoDemote: '取消后排',
       undoExempt: '取消豁免',
       clear: '清除',
@@ -189,13 +174,11 @@ export default {
     },
     settings: {
       enabled: '质量调度',
-      tests: '主动测试',
       oauthRate: 'OAuth 倍率',
       accountRate: '账号倍率',
     },
     tip: {
       samples: '{n} 条',
-      testRounds: '测试 {n} 轮',
       recentlyFull: '刚占满',
       noTakeover: '暂不接管',
       globalOff: '质量调度 关',

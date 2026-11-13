@@ -2,28 +2,20 @@
 // the backend DTOs live in backend/internal/service/sched_admin_dto.go.
 
 export type SchedVerdict = 'pass' | 'marginal' | 'fail' | 'nodata'
-export type SchedVerdictFrom = 'real' | 'test'
+export type SchedVerdictFrom = 'real'
 export type SchedState = 'normal' | 'cooling'
 export type SchedStanding = 'front' | 'back'
 export type SchedOverrideMode = 'exempt' | 'demote'
 export type SchedRequestClass = 'light' | 'regular' | 'heavy' | 'xheavy'
-export type SchedTestTier = 'small' | 'medium' | 'large'
-/** screen: started automatically, no medium or large rounds; full: the rest (contract delta A9). */
-export type SchedTestKind = 'screen' | 'full'
 export type SchedOutcome = 'ok' | 'timeout' | 'account_fault' | 'other'
-/** Cooling: speed | error | cache | acute_timeout | test_*; normal: '' | unverified. */
+/** Cooling: speed | error | cache | acute_timeout; normal: '' | unverified. */
 export type SchedReason =
   | 'speed'
   | 'error'
   | 'cache'
   | 'acute_timeout'
-  | 'test_speed'
-  | 'test_error'
-  | 'test_cache'
   | 'unverified'
   | ''
-/** error: the model was not accepted because of an internal error (contract clarification K28). */
-export type SchedTestTicketWhy = '' | 'already_running' | 'too_soon' | 'not_schedulable' | 'error'
 /** -1 off, 0 immediately, otherwise idle seconds. */
 export type SchedTakeoverIdleSeconds = -1 | 0 | 300 | 900 | 1800
 
@@ -41,8 +33,6 @@ export interface SchedAccountSummaryCooling {
   model: string
   reason: SchedReason
   until: string | null
-  waiting_test: boolean
-  testing: boolean
 }
 
 /** A current manual override; group_id 0 covers every group (contract delta D1). */
@@ -107,33 +97,6 @@ export interface SchedClassStat {
   p90_ms: number | null
 }
 
-export interface SchedTestTierResult {
-  tier: SchedTestTier
-  /** Warm turns actually sent, in order, at most two; null for a turn without first output (see timeouts). */
-  ttfo_ms: (number | null)[]
-  /** Kept for the record; no longer shown or judged (contract delta A3). */
-  cache_ratio: number | null
-  faults: number
-  timeouts: number
-}
-
-export interface SchedTest {
-  id: string
-  at: string
-  running: boolean
-  done: boolean
-  abort_reason: string
-  auto: boolean
-  kind: SchedTestKind
-  /** Every tier with rounds has exactly rounds 1–3, all ok (contract delta A4). */
-  clean: boolean
-  /** Only tiers with at least one round. */
-  tiers: SchedTestTierResult[]
-  input_tokens: number
-  cached_tokens: number
-  output_tokens: number
-}
-
 export interface SchedModelEvidence {
   /** Evidence key. */
   model: string
@@ -155,7 +118,6 @@ export interface SchedModelEvidence {
   }
   error: { n: number; sessions: number; bad: number; rate: number | null; lcb: number | null }
   cache: { turns: number; sessions: number; ratio: number | null }
-  test: SchedTest | null
 }
 
 export interface SchedGroupThresholds {
@@ -172,8 +134,6 @@ export interface SchedGroupModelRow {
   reason: SchedReason
   since: string | null
   until: string | null
-  waiting_test: boolean
-  testing: boolean
   ttfo: { verdict: SchedVerdict; from: SchedVerdictFrom | null; n: number; p90_ms: number | null; p90_timeout: boolean; limit_ms: number }
   error: { verdict: SchedVerdict; from: SchedVerdictFrom | null; n: number; rate: number | null; limit: number }
   cache: { verdict: SchedVerdict; from: SchedVerdictFrom | null; n: number; ratio: number | null; limit: number }
@@ -219,7 +179,6 @@ export interface SchedAccountDetail {
   at: string
   stale: boolean
   global_enabled: boolean
-  tests_enabled: boolean
   reset_at: string | null
   models: SchedModelEvidence[]
   /** Every OpenAI group of the account; by_model is empty for a group without state rows (contract delta D3). */
@@ -248,19 +207,6 @@ export interface SchedOverrideRequest {
   /** null = no expiry. */
   expires_at: string | null
   reason: string
-}
-
-// ---- POST /accounts/:id/test ----
-
-export interface SchedTestTicket {
-  model: string
-  test_id: string
-  started: boolean
-  why: SchedTestTicketWhy
-}
-
-export interface SchedTestStart {
-  tests: SchedTestTicket[]
 }
 
 // ---- DELETE /accounts/:id/auto-states/:key ----
@@ -311,8 +257,6 @@ export interface SchedBoardAccount extends SchedEvidenceNumbers {
   state: SchedState
   level: number
   until: string | null
-  waiting_test: boolean
-  testing: boolean
   override: SchedOverride | null
   priority: number
   rate: number

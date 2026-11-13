@@ -178,10 +178,9 @@ function stateOf(row: SchedBoardAccount): { text: string; cls: string } {
   if (row.override?.mode === 'exempt') return { text: t('admin.schedQuality.state.exempted'), cls: 'sq-text' }
   if (!known(row.state, SCHED_STATES)) return { text: t('admin.schedQuality.unknown'), cls: 'sq-text-3' }
   if (row.state === 'cooling') {
-    if (row.testing) return { text: t('admin.schedQuality.state.testing'), cls: 'sq-test' }
     const left = secondsUntil(row.until, now.value)
     const word = t('admin.schedQuality.state.cooling')
-    return { text: !row.waiting_test && left ? `${word} ${fmtCountdown(left)}` : word, cls: 'sq-cool' }
+    return { text: left ? `${word} ${fmtCountdown(left)}` : word, cls: 'sq-cool' }
   }
   return { text: t('admin.schedQuality.state.normal'), cls: 'sq-text' }
 }

@@ -1,5 +1,5 @@
 import type {
-  SchedOutcome, SchedReason, SchedRecentAttempt, SchedRequestClass, SchedState, SchedTestTicket, SchedVerdict
+  SchedOutcome, SchedReason, SchedRecentAttempt, SchedRequestClass, SchedState, SchedVerdict
 } from '@/types/schedQuality'
 
 // Display rules shared by the list, the drawer, the board and the group settings (design spec A.1, B, C, D).
@@ -68,9 +68,9 @@ export function parentIdFromKey(key: string): number | null {
 
 /** Dimension a cooling reason points to. */
 export function causeDim(reason: SchedReason): SchedDim | null {
-  if (reason === 'speed' || reason === 'acute_timeout' || reason === 'test_speed') return 'ttfo'
-  if (reason === 'error' || reason === 'test_error') return 'error'
-  if (reason === 'cache' || reason === 'test_cache') return 'cache'
+  if (reason === 'speed' || reason === 'acute_timeout') return 'ttfo'
+  if (reason === 'error') return 'error'
+  if (reason === 'cache') return 'cache'
   return null
 }
 
@@ -81,16 +81,6 @@ export function attemptResult(attempt: SchedRecentAttempt): 'ok' | 'timeout' | '
   if (attempt.outcome === 'timeout') return 'timeout'
   if (attempt.outcome === 'other' && (attempt.detail === 'client_cancel' || attempt.detail === 'unfinished')) return 'canceled'
   return 'failed'
-}
-
-/**
- * Account result of one test request (spec B.11, contract clarification K28), for the batch and the drawer alike:
- * ok when a model started and none hit an internal error, testing when every model is already running, otherwise
- * failed. A request that throws is failed too.
- */
-export function testResult(tests: SchedTestTicket[]): 'ok' | 'testing' | 'failed' {
-  if (tests.some((ticket) => ticket.started) && !tests.some((ticket) => ticket.why === 'error')) return 'ok'
-  return tests.length && tests.every((ticket) => ticket.why === 'already_running') ? 'testing' : 'failed'
 }
 
 /** Attempts that do not count toward any verdict are shown in the secondary colour. */
@@ -107,14 +97,6 @@ export function policyShort(policy: { ttft_seconds: number; max_error_rate: numb
     error: String(+(policy.max_error_rate * 100).toFixed(2)),
     cache: String(Math.round(policy.min_cache_ratio * 100))
   })
-}
-
-/** `HH:mm`, or `MM-DD HH:mm` when not today (test start time, spec B.6). */
-export function fmtTestTime(iso: string, now = new Date()): string {
-  const d = new Date(iso)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`
-  return d.toDateString() === now.toDateString() ? hm : `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hm}`
 }
 
 /** `HH:mm:ss` for recent attempts. */

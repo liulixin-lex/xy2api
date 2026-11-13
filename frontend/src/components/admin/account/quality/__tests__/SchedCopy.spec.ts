@@ -21,7 +21,7 @@ import GroupSchedBoard from '@/components/admin/group/GroupSchedBoard.vue'
 import GroupSchedPolicyField from '@/components/admin/group/GroupSchedPolicyField.vue'
 import { closeSchedBoard, closeSchedDrawer, openSchedBoard, openSchedDrawer } from '@/composables/useSchedLayers'
 
-const api = vi.hoisted(() => ({ accountDetail: vi.fn(), groupBoard: vi.fn(), getGroupPolicy: vi.fn(), reset: vi.fn(), startTest: vi.fn(), setOverride: vi.fn() }))
+const api = vi.hoisted(() => ({ accountDetail: vi.fn(), groupBoard: vi.fn(), getGroupPolicy: vi.fn(), reset: vi.fn(), setOverride: vi.fn() }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: api }))
 vi.mock('@/composables/useAdminPermission', async () => {
   const { computed } = await vi.importActual<typeof import('vue')>('vue')
@@ -86,7 +86,6 @@ beforeEach(() => {
   api.accountDetail.mockResolvedValue(detail())
   api.groupBoard.mockResolvedValue(board())
   api.getGroupPolicy.mockResolvedValue(policyFixture)
-  api.startTest.mockResolvedValue({ tests: [{ model: 'gpt-6.1-sol', test_id: 'x', started: true, why: '' }] })
 })
 afterAll(() => { delete document.documentElement.dataset.motion })
 
@@ -99,7 +98,6 @@ describe('quality UI copy', () => {
         h(AccountRecentStatsCell, { accountId: 480 }),
         h(SchedGroupsCell, { summary, openai: true, groupName: () => '晨星组' }),
         h(SchedGroupsCell, { summary: { ...summary, cooling: [], groups: { total: 2, normal: 0, cooling: 0, nodata: 2 } }, openai: true, groupName: () => '' }),
-        h(SchedGroupsCell, { summary: { ...summary, cooling: [{ ...summary.cooling[0], testing: true }] }, openai: true, groupName: () => '北辰组' }),
         h(SchedGroupsCell, {
           summary: { ...summary, overrides: [{ group_id: 0, mode: 'exempt', expires_at: null }, { group_id: 53, mode: 'demote', expires_at: '2026-11-14T10:30:00Z' }] },
           openai: true,
@@ -111,14 +109,12 @@ describe('quality UI copy', () => {
         h(GroupSchedBoard),
         h(GroupSchedPolicyField, { groupId: 53 }),
         h(SchedOverridePopover, { show: true, mode: 'demote', anchor: null, groups: [{ id: 53, name: '晨星组' }] }),
-        h(SchedBatchDialog, { action: 'test', accounts: [{ id: 1, name: 'acc-1' }, { id: 2, name: 'acc-2' }], anchor: null, groups: [] })
+        h(SchedBatchDialog, { action: 'reset', accounts: [{ id: 1, name: 'acc-1' }, { id: 2, name: 'acc-2' }], anchor: null, groups: [] })
       ]
     })
     mount(Host, { attachTo: document.body, global: { plugins: [i18n] } })
     openSchedDrawer({ id: 479, name: 'acc-03' })
     openSchedBoard({ id: 53, name: '晨星组' })
-    await flushPromises()
-    document.querySelector<HTMLElement>('[data-sq-batch-confirm]')!.click()
     await flushPromises()
 
     const texts = rendered()

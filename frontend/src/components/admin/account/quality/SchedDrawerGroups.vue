@@ -1,7 +1,6 @@
 <template>
   <p v-if="!groups.length" class="sq-text-3 text-sm">—</p>
   <div v-else class="-mx-3 overflow-x-auto">
-    <!-- Fixed column widths, shared with the test table so 首字 lines up at any drawer width (ui-proposal 7.2). -->
     <table class="sq-table table-fixed min-w-[600px]">
       <colgroup>
         <col />
@@ -77,8 +76,7 @@ import {
 import { vTip } from '@/utils/tip'
 
 // "各分组" table of the drawer (design spec B.4). A row on the same window as the cards above shows only verdict
-// shapes (F1); a row on its own window (cooling restarted, just reset) shows its numbers coloured by its verdict;
-// numbers from tests carry the test tip.
+// shapes (F1); a row on its own window (cooling restarted, just reset) shows its numbers coloured by its verdict.
 const props = defineProps<{
   groups: SchedAccountGroup[]
   model: string | null
@@ -106,9 +104,9 @@ const hasValue = (row: SchedGroupModelRow, dim: SchedDim) =>
 const cardHasData = (card?: SchedModelEvidence) =>
   !!card && (card.ttfo.p90_ms !== null || card.ttfo.p90_timeout || card.error.rate !== null || card.cache.ratio !== null)
 
-// Same window as the cards: nothing comes from tests and every value and n matches.
+// Same window as the cards: every value and n matches.
 function sameWindow(row: SchedGroupModelRow, card?: SchedModelEvidence) {
-  if (!card || SCHED_DIMS.some((dim) => row[dim].from === 'test')) return false
+  if (!card) return false
   return row.ttfo.n === card.ttfo.n && row.ttfo.p90_ms === card.ttfo.p90_ms && row.ttfo.p90_timeout === card.ttfo.p90_timeout &&
     row.error.n === card.error.n && row.error.rate === card.error.rate &&
     row.cache.n === card.cache.turns && row.cache.ratio === card.cache.ratio
@@ -118,12 +116,11 @@ function stateOf(group: SchedAccountGroup): { text: string; cls: string } {
   const row = rowOf(group)
   if (row && !known(row.state, SCHED_STATES)) return { text: t('admin.schedQuality.unknown'), cls: 'sq-text-3' }
   if (row?.state === 'cooling') {
-    if (row.testing) return { text: t('admin.schedQuality.state.testing'), cls: 'sq-test' }
     const left = secondsUntil(row.until, props.now)
     const word = t('admin.schedQuality.state.cooling')
-    return { text: !row.waiting_test && left !== null && left > 0 ? `${word} ${fmtCountdown(left)}` : word, cls: 'sq-cool sq-num' }
+    return { text: left !== null && left > 0 ? `${word} ${fmtCountdown(left)}` : word, cls: 'sq-cool sq-num' }
   }
-  const rowData = !!row && SCHED_DIMS.some((dim) => row[dim].from !== 'test' && hasValue(row, dim))
+  const rowData = !!row && SCHED_DIMS.some((dim) => hasValue(row, dim))
   if (!rowData && !cardHasData(props.card)) return { text: t('admin.schedQuality.state.nodata'), cls: 'sq-text-3' }
   return { text: t('admin.schedQuality.state.normal'), cls: 'sq-text' }
 }
@@ -156,7 +153,6 @@ function cellOf(group: SchedAccountGroup, dim: SchedDim): Cell {
     const word = verdictWord(null)
     return { kind: 'value', text: word, cls: 'sq-text-3', tip: '', label: `${dimName(dim)} ${word}` }
   }
-  if (own.from === 'test') return value(valueText(row, dim), t('admin.schedQuality.tip.testRounds', { n: own.n }))
   if (sameWindow(row, props.card)) return verdict ? shape(verdict) : other()
   if (!hasValue(row, dim)) {
     if (!verdict) return other()

@@ -13,7 +13,7 @@ import { closeSchedDrawer, openSchedDrawer } from '@/composables/useSchedLayers'
 const { listAccounts, getById, sched, toast } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
   getById: vi.fn(),
-  sched: { summary: vi.fn(), reset: vi.fn(), startTest: vi.fn(), accountDetail: vi.fn(), groupBoard: vi.fn(), getGroupPolicy: vi.fn() },
+  sched: { summary: vi.fn(), reset: vi.fn(), accountDetail: vi.fn(), groupBoard: vi.fn(), getGroupPolicy: vi.fn() },
   toast: { showError: vi.fn(), showSuccess: vi.fn(), showInfo: vi.fn(), showWarning: vi.fn() }
 }))
 const perms = await vi.hoisted(async () => {

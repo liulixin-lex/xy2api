@@ -58,27 +58,25 @@ import schedQualityAPI from '@/api/admin/schedQuality'
 import type { SchedOverrideRequest } from '@/types/schedQuality'
 import { markSchedChanged } from '@/composables/useSchedLayers'
 import { useAdminPermission } from '@/composables/useAdminPermission'
-import { testResult } from '@/utils/schedQualityFormat'
 
-// Batch quality actions of the account list (design spec A.5, B.11). Reset and test confirm first, demote and exempt
-// use the override popover. A confirmed reset (恢复) hands the accounts back (`recover`) and runs in the background
+// Batch quality actions of the account list (design spec A.5, B.11). Reset confirms first, demote and exempt use the
+// override popover. A confirmed reset (恢复) hands the accounts back (`recover`) and runs in the background
 // with one toast (contract delta F3). The others call each account one by one, four at a time, and list it with its
 // result. A run works on what it was started with (action, request, accounts), never on the props of a later opening.
 // Closing the results stops it: accounts not yet called are "not run" and answers still on their way are dropped.
 // Until those answers are in, the run is busy and no other batch can start.
-export type SchedBatchAction = 'reset' | 'test' | 'demote' | 'exempt'
-type Result = 'ok' | 'failed' | 'testing' | 'skipped'
+export type SchedBatchAction = 'reset' | 'demote' | 'exempt'
+type Result = 'ok' | 'failed' | 'skipped'
 interface Row { id: number; name: string; result: Result | null }
-interface Batch { action: SchedBatchAction; request?: SchedOverrideRequest; rows: Row[]; next: number; stopped: boolean }
+interface Batch { action: SchedBatchAction; request: SchedOverrideRequest; rows: Row[]; next: number; stopped: boolean }
 
 const CONCURRENCY = 4
 const RESULT_KEY: Record<Result, string> = {
   ok: 'admin.schedQuality.result.ok',
   failed: 'admin.schedQuality.result.failed',
-  testing: 'admin.schedQuality.state.testing',
   skipped: 'admin.schedQuality.result.skipped'
 }
-const RESULT_CLASS: Record<Result, string> = { ok: 'sq-pass-word', failed: 'sq-fail-word text-sm font-semibold', testing: 'sq-test', skipped: 'sq-text-3' }
+const RESULT_CLASS: Record<Result, string> = { ok: 'sq-pass-word', failed: 'sq-fail-word text-sm font-semibold', skipped: 'sq-text-3' }
 
 const props = defineProps<{
   action: SchedBatchAction | null
@@ -106,7 +104,7 @@ watch(() => props.action, (action) => {
   if (!action || running) return
   batch.value = null
   rows.value = []
-  phase.value = action === 'reset' || action === 'test' ? 'confirm' : 'popover'
+  phase.value = action === 'reset' ? 'confirm' : 'popover'
 }, { immediate: true })
 
 // A confirmation not yet given closes when accounts:manage is withdrawn.
@@ -115,28 +113,21 @@ watch(canManage, (allowed) => {
 })
 
 function confirm() {
-  if (props.action !== 'reset') {
-    void run()
-    return
-  }
   const ids = props.accounts.map((account) => account.id)
   close()
   if (canManage.value) emit('recover', ids)
 }
 
-async function callOne(action: SchedBatchAction, id: number, request?: SchedOverrideRequest): Promise<Result> {
+async function callOne(id: number, request: SchedOverrideRequest): Promise<Result> {
   try {
-    if (action === 'test') {
-      return testResult((await schedQualityAPI.startTest(id)).tests)
-    }
-    await schedQualityAPI.setOverride(id, request!)
+    await schedQualityAPI.setOverride(id, request)
     return 'ok'
   } catch {
     return 'failed'
   }
 }
 
-async function run(request?: SchedOverrideRequest) {
+async function run(request: SchedOverrideRequest) {
   const action = props.action
   if (!action || running || phase.value === 'results') return
   const current: Batch = { action, request, rows: props.accounts.map((account) => ({ ...account, result: null })), next: 0, stopped: false }
@@ -149,7 +140,7 @@ async function run(request?: SchedOverrideRequest) {
   const worker = async () => {
     while (!current.stopped && current.next < live.length) {
       const index = current.next++
-      const result = await callOne(current.action, live[index].id, current.request)
+      const result = await callOne(live[index].id, current.request)
       if (!current.stopped) live[index].result = result
     }
   }

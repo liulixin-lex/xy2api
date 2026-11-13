@@ -202,7 +202,6 @@ vi.mock("vue-i18n", async () => {
     "admin.settings.payment.configGuide": "查看支付配置说明",
     "admin.settings.payment.findProvider": "查看支持的支付方式",
     "admin.schedQuality.settings.enabled": "质量调度",
-    "admin.schedQuality.settings.tests": "主动测试",
     "admin.schedQuality.settings.oauthRate": "OAuth 倍率",
     "admin.schedQuality.settings.accountRate": "账号倍率",
     "admin.schedQuality.state.invalid": "无效",
@@ -491,7 +490,6 @@ const baseSettingsResponse = {
   payment_visible_method_wxpay_enabled: true,
   openai_oauth_scheduling_rate_multiplier: 1,
   sched_quality_enabled: true,
-  sched_quality_test_enabled: true,
   balance_low_notify_enabled: false,
   balance_low_notify_threshold: 0,
   balance_low_notify_recharge_url: "",
@@ -1413,19 +1411,18 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(getProviders).toHaveBeenCalledTimes(2);
   });
 
-  it("shows the two quality switches and the OAuth rate under short names, without the retired scheduler switches", async () => {
+  it("shows the quality switch and the OAuth rate under short names, without the retired scheduler switches", async () => {
     const wrapper = mountView(); await flushPromises(); await openGatewayTab(wrapper);
     expect(wrapper.find('[data-testid="openai-oauth-scheduling-rate-multiplier"]').attributes("placeholder")).toBe("账号倍率");
     expect(wrapper.text()).toContain("OAuth 倍率");
     expect(wrapper.text()).toContain("质量调度");
-    expect(wrapper.text()).toContain("主动测试");
-    await wrapper.get('[data-testid="sched-quality-test-enabled"]').setValue(false);
+    expect(wrapper.find('[data-testid="sched-quality-test-enabled"]').exists()).toBe(false);
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
     expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({
       sched_quality_enabled: true,
-      sched_quality_test_enabled: false,
     }));
+    expect(updateSettings.mock.lastCall?.[0]).not.toHaveProperty("sched_quality_test_enabled");
     expect(wrapper.find('[data-testid="openai-advanced-scheduler-toggle"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="openai-low-rate-priority-toggle"]').exists()).toBe(false);
   });

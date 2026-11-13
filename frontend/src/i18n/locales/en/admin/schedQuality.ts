@@ -26,7 +26,6 @@ export default {
     state: {
       normal: 'Normal',
       cooling: 'Cooling',
-      testing: 'Testing',
       nodata: 'No data',
       demoted: 'Demoted',
       exempted: 'Exempt',
@@ -45,7 +44,6 @@ export default {
       concurrency: 'Concurrency',
       byGroup: 'Groups',
       autoStates: 'Auto states',
-      test: 'Test',
       recent: 'Recent requests',
     },
     col: {
@@ -63,18 +61,6 @@ export default {
       heavy: 'Heavy',
       xheavy: 'X-heavy',
     },
-    tier: {
-      small: 'Small',
-      medium: 'Medium',
-      large: 'Large',
-    },
-    test: {
-      screen: 'Screen',
-      full: 'Three tiers',
-      done: 'Done',
-      unfinished: 'Unfinished',
-      aborted: 'Void',
-    },
     scope: {
       account: 'Account',
       proxy: 'Proxy',
@@ -88,7 +74,6 @@ export default {
       reset: 'Reset',
       demote: 'Demote',
       exempt: 'Exempt',
-      test: 'Test',
       undoDemote: 'Undemote',
       undoExempt: 'Unexempt',
       clear: 'Clear',
@@ -189,13 +174,11 @@ export default {
     },
     settings: {
       enabled: 'Quality scheduling',
-      tests: 'Active tests',
       oauthRate: 'OAuth rate',
       accountRate: 'Account rate',
     },
     tip: {
       samples: '{n} samples',
-      testRounds: 'Test · {n} rounds',
       recentlyFull: 'Just full',
       noTakeover: 'No takeover',
       globalOff: 'Quality off',
