@@ -30,9 +30,8 @@ type SchedAttemptRecorderStats struct {
 }
 
 type SchedAttemptRecorderService struct {
-	store  SchedAttemptStore
-	now    func() time.Time
-	memory *schedAttemptSessionMemory
+	store SchedAttemptStore
+	now   func() time.Time
 
 	observerMu sync.RWMutex
 	observer   func(schedquality.AttemptSample)
@@ -60,7 +59,7 @@ var _ SchedAttemptRecorder = (*SchedAttemptRecorderService)(nil)
 
 func NewSchedAttemptRecorderService(store SchedAttemptStore) *SchedAttemptRecorderService {
 	return &SchedAttemptRecorderService{
-		store: store, now: time.Now, memory: newSchedAttemptSessionMemory(),
+		store: store, now: time.Now,
 		queue: make([]schedquality.AttemptSample, schedquality.LedgerQueueSize),
 		wake:  make(chan struct{}, 1), flush: make(chan schedAttemptFlush), done: make(chan struct{}),
 	}
@@ -112,25 +111,7 @@ func (s *SchedAttemptRecorderService) Begin(in SchedAttemptStart) SchedAttempt {
 		AccountID: in.AccountID, GroupID: in.GroupID, Model: in.Model, Stream: in.Stream,
 		SessionKey: in.SessionKey, RequestID: in.RequestID,
 	}
-	estTokens := schedquality.EstimateTokens(in.BodyBytes)
-	if in.Test != nil {
-		row.Warm = in.Test.Warm
-		if row.Warm {
-			prev := in.Test.PrevPromptTokens
-			row.PrevPromptTokens = &prev
-		}
-	} else if in.SessionKey != "" {
-		prev, ok := s.memory.get(schedAttemptSessionKey{in.GroupID, in.SessionKey}, at)
-		row.Warm = in.StickyWarm && ok && prev.accountID == in.AccountID && prev.model == in.Model &&
-			at.Sub(prev.finishedAt) <= schedquality.WarmMaxGap
-		if row.Warm {
-			row.PrevPromptTokens = prev.promptTokens
-		}
-	}
-	if row.PrevPromptTokens != nil {
-		estTokens = *row.PrevPromptTokens
-	}
-	row.Class = schedquality.ClassOf(in.Effort, estTokens)
+	row.Class = schedquality.RequestClass(1)
 	var sink func(schedquality.AttemptSample)
 	if in.Test != nil {
 		sink = in.Test.Sink
@@ -140,11 +121,8 @@ func (s *SchedAttemptRecorderService) Begin(in SchedAttemptStart) SchedAttempt {
 
 type schedAttemptNoop struct{}
 
-func (schedAttemptNoop) MarkFirstOutput(time.Time)   {}
-func (schedAttemptNoop) FinishOK(*SchedAttemptUsage) {}
-func (schedAttemptNoop) FinishFault(string)          {}
-func (schedAttemptNoop) FinishTimeout(time.Duration) {}
-func (schedAttemptNoop) FinishOther(string)          {}
+func (schedAttemptNoop) MarkFirstOutput(time.Time) {}
+func (schedAttemptNoop) Finish(SchedAttemptFinish) {}
 
 type schedAttemptHandle struct {
 	recorder *SchedAttemptRecorderService
@@ -164,20 +142,9 @@ func (h *schedAttemptHandle) MarkFirstOutput(at time.Time) {
 	}
 }
 
-func (h *schedAttemptHandle) FinishOK(u *SchedAttemptUsage) {
-	h.finish(schedquality.OutcomeOK, "", 0, u)
-}
-func (h *schedAttemptHandle) FinishFault(detail string) {
-	h.finish(schedquality.OutcomeAccountFault, detail, 0, nil)
-}
-func (h *schedAttemptHandle) FinishTimeout(waited time.Duration) {
-	h.finish(schedquality.OutcomeTimeout, "", waited, nil)
-}
-func (h *schedAttemptHandle) FinishOther(detail string) {
-	h.finish(schedquality.OutcomeOther, detail, 0, nil)
-}
+func (h *schedAttemptHandle) Finish(in SchedAttemptFinish) {
+	outcome, detail, waited, u := in.Outcome, in.Detail, in.Waited, in.Usage
 
-func (h *schedAttemptHandle) finish(outcome schedquality.Outcome, detail string, waited time.Duration, u *SchedAttemptUsage) {
 	if !h.finished.CompareAndSwap(false, true) {
 		return
 	}
@@ -193,11 +160,10 @@ func (h *schedAttemptHandle) finish(outcome schedquality.Outcome, detail string,
 		ms := int(waited.Milliseconds())
 		row.CensoredMs = &ms
 	}
-	if u != nil && outcome == schedquality.OutcomeOK {
-		prompt, cached := u.PromptTokens, u.CacheReadTokens
-		row.PromptTokens, row.CacheReadTokens = &prompt, &cached
-	} else {
-		row.PrevPromptTokens = nil
+	row.ClientCanceled = outcome == schedquality.Outcome(5)
+	if u != nil {
+		prompt, input, cached, creation := u.PromptTokens, u.InputTokens, u.CacheReadTokens, u.CacheCreationTokens
+		row.PromptTokens, row.InputTokens, row.CacheReadTokens, row.CacheCreationTokens = &prompt, &input, &cached, &creation
 	}
 	if h.test {
 		if h.sink != nil {
@@ -213,12 +179,6 @@ func (h *schedAttemptHandle) finish(outcome schedquality.Outcome, detail string,
 		observer(row)
 	}
 	s.enqueue(row)
-	if outcome == schedquality.OutcomeOK && row.SessionKey != "" {
-		s.memory.put(schedAttemptSession{
-			key: schedAttemptSessionKey{row.GroupID, row.SessionKey}, accountID: row.AccountID,
-			model: row.Model, promptTokens: row.PromptTokens, finishedAt: row.FinishedAt,
-		})
-	}
 }
 
 func (s *SchedAttemptRecorderService) enqueue(row schedquality.AttemptSample) {

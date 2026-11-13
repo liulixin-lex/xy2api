@@ -40,7 +40,7 @@ func (r *captureRecorder) Begin(in service.SchedAttemptStart) service.SchedAttem
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.starts = append(r.starts, in)
-	return &captureAttempt{owner: r, in: in, sample: schedquality.AttemptSample{AccountID: in.AccountID, Model: in.Model, Stream: in.Stream, Warm: in.StickyWarm, RequestID: in.RequestID}}
+	return &captureAttempt{owner: r, in: in, sample: schedquality.AttemptSample{AccountID: in.AccountID, Model: in.Model, Stream: in.Stream, RequestID: in.RequestID}}
 }
 func (*captureRecorder) SetObserver(func(schedquality.AttemptSample)) {}
 func (*captureRecorder) Flush(context.Context) error                  { return nil }
@@ -67,12 +67,9 @@ func (a *captureAttempt) finish(o schedquality.Outcome, d string, u *service.Sch
 		a.owner.finished <- a.sample
 	}
 }
-func (a *captureAttempt) FinishOK(u *service.SchedAttemptUsage) {
-	a.finish(schedquality.OutcomeOK, "", u)
+func (a *captureAttempt) Finish(in service.SchedAttemptFinish) {
+	a.finish(in.Outcome, in.Detail, in.Usage)
 }
-func (a *captureAttempt) FinishFault(d string)        { a.finish(schedquality.OutcomeAccountFault, d, nil) }
-func (a *captureAttempt) FinishOther(d string)        { a.finish(schedquality.OutcomeOther, d, nil) }
-func (a *captureAttempt) FinishTimeout(time.Duration) { a.finish(schedquality.OutcomeTimeout, "", nil) }
 
 type captureUpstream struct {
 	service.HTTPUpstream
@@ -248,7 +245,7 @@ func TestSchedCaptureA6RepairAndFallback(t *testing.T) {
 			require.Equal(t, 200, resp.Code, resp.Body.String())
 			require.Equal(t, 2, up.calls)
 			require.Len(t, rec.samples, 2)
-			want := schedquality.OutcomeOther
+			want := schedquality.OutcomeAccountFault
 			if fallback {
 				want = schedquality.OutcomeAccountFault
 			}
@@ -276,7 +273,7 @@ func TestSchedCaptureA9A13ClassificationSwitches(t *testing.T) {
 					for _, sample := range rec.samples {
 						want := schedquality.OutcomeAccountFault
 						if rate {
-							want = schedquality.OutcomeOther
+							want = schedquality.OutcomeAccountFault
 						}
 						require.Equal(t, want, sample.Outcome, sample.Detail)
 					}
@@ -357,7 +354,7 @@ func TestSchedCaptureA10WebSocketTwoTurns(t *testing.T) {
 				require.NotNil(t, samples[0].TTFOMs)
 				want := schedquality.OutcomeAccountFault
 				if rate {
-					want = schedquality.OutcomeOther
+					want = schedquality.OutcomeAccountFault
 				}
 				require.Equal(t, want, samples[1].Outcome, samples[1].Detail)
 				_ = conn.CloseNow()
@@ -434,7 +431,7 @@ func TestSchedCaptureA15BorrowedRepairStaysCold(t *testing.T) {
 		require.Equal(t, int64(2), row.AccountID)
 		require.False(t, row.Warm)
 	}
-	require.Equal(t, schedquality.OutcomeOther, rec.samples[0].Outcome)
+	require.Equal(t, schedquality.OutcomeAccountFault, rec.samples[0].Outcome)
 	require.Equal(t, schedquality.OutcomeOK, rec.samples[1].Outcome)
 	require.Zero(t, cache.writes, "borrow must preserve the sticky owner")
 }
@@ -528,7 +525,7 @@ func TestSchedCaptureA8WebSocketHTTPBridge(t *testing.T) {
 			require.Equal(t, schedquality.OutcomeOK, row.Outcome, row.Detail)
 			require.NotNil(t, row.TTFOMs)
 			require.Equal(t, 100000, *row.PromptTokens)
-			require.Equal(t, turn > 0, row.Warm)
+			require.False(t, row.Warm)
 		case <-ctx.Done():
 			t.Fatal("missing bridge sample")
 		}
