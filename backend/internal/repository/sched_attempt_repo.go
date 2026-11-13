@@ -75,10 +75,7 @@ func (r *schedAttemptRepository) read(ctx context.Context, where string, args ..
 	var result []schedquality.AttemptSample
 	for rows.Next() {
 		var row schedquality.AttemptSample
-		if err := rows.Scan(&row.AttemptID, &row.StartedAt, &row.FinishedAt, &row.AccountID, &row.GroupID,
-			&row.Model, &row.Class, &row.Stream, &row.Warm, &row.TTFOMs, &row.CensoredMs, &row.Outcome,
-			&row.Detail, &row.PromptTokens, &row.PrevPromptTokens, &row.CacheReadTokens, &row.SessionKey,
-			&row.RequestID, &row.InsertedAt); err != nil {
+		if err := rows.Scan(schedAttemptScanTargets(&row)...); err != nil {
 			return nil, err
 		}
 		result = append(result, row)
