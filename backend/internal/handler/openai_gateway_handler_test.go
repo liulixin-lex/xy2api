@@ -2090,7 +2090,7 @@ func (wsPinnedQualityView) At() time.Time                            { return ti
 func (wsPinnedQualityView) GlobalEnabled() bool                      { return true }
 func (wsPinnedQualityView) TakeoverIdle(int64) (time.Duration, bool) { return 0, true }
 func (wsPinnedQualityView) StateOf(int64, int64, string) schedquality.StateView {
-	return schedquality.StateView{State: schedquality.StateCooling}
+	return schedquality.StateView{Failing: true}
 }
 
 func wsResponseAccountCacheKey(responseID string) string {
@@ -2155,7 +2155,7 @@ func (*wsTurnQualityView) GlobalEnabled() bool                      { return tru
 func (*wsTurnQualityView) TakeoverIdle(int64) (time.Duration, bool) { return 0, true }
 func (v *wsTurnQualityView) StateOf(int64, int64, string) schedquality.StateView {
 	if v.failing.Load() {
-		return schedquality.StateView{State: schedquality.StateCooling}
+		return schedquality.StateView{Failing: true}
 	}
 	return schedquality.StateView{}
 }

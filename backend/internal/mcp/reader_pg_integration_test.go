@@ -115,8 +115,10 @@ func TestReaderPostgresReadOnlyToolMatrix(t *testing.T) {
 	beforeRedis := mini.Dump()
 	capture := &readerRedisCapture{}
 	redisClient.AddHook(capture)
-	quality := service.NewSchedQualityEngineService(nil, nil, nil, nil, nil, nil)
-	summaries := service.NewSchedAdminService(service.SchedAdminDependencies{Engine: quality, Accounts: readerHealthAccounts{db: ro}})
+	quality := service.NewSchedQualityEngineService(nil, nil, nil, nil, nil)
+	// Match production: the shared admin service has its own account repository;
+	// diagnostic SQL below still runs with the restricted reader role.
+	summaries := service.NewSchedAdminService(service.SchedAdminDependencies{Engine: quality, Accounts: readerHealthAccounts{db: writer}})
 	rreader := NewRuntimeReader(&ReaderDB{ro}, repository.NewConcurrencyCache(redisClient, 5, 60), balance, quality, summaries)
 	actor := testReaderActor()
 	actor.UserID = 7007

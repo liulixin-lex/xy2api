@@ -59,10 +59,6 @@ func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *A
 	groupID, sessionKey := st.SessionIdentity()
 	in := SchedAttemptStart{AccountID: account.ID, GroupID: groupID, Model: selection.Model,
 		Stream: stream, SessionKey: sessionKey, RequestID: st.GatewayRequestID()}
-	if test, ok := st.SchedTest().(*SchedTestAttempt); ok && test != nil {
-		copy := *test
-		in.Test = &copy
-	}
 	a.attempt = s.schedAttemptRecorder.Begin(in)
 	st.SetCurrentAttempt(a)
 	return a
@@ -274,10 +270,6 @@ func (a *schedAttemptCapture) finishUnfinished() {
 		a.attempt.Finish(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: string(resilience.CategoryTransient), Usage: a.usage})
 		a.state.ClearCurrentAttemptIf(a)
 	}
-}
-func schedTestRequest(ctx context.Context) bool {
-	test, ok := resilience.StateFrom(ctx).SchedTest().(*SchedTestAttempt)
-	return ok && test != nil
 }
 func observeSchedPayload(c *gin.Context, data []byte, eventType ...string) {
 	if c == nil || c.Request == nil {

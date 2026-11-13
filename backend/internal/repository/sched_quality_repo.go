@@ -99,6 +99,9 @@ func (r *schedQualityRepository) RunReset(ctx context.Context, accountID int64) 
 	if err = tx.Commit(); err != nil {
 		return time.Time{}, err
 	}
+	for _, decision := range decisions {
+		service.LogSchedQualityDecision(ctx, decision)
+	}
 	return at, nil
 }
 

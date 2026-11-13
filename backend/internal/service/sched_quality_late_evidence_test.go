@@ -22,7 +22,7 @@ func TestEngineLateLedgerFastEvidenceMatchesRestart(t *testing.T) {
 	f.now = f.now.Add(5 * time.Second)
 	f.cycle()
 	steady := f.view()
-	other := NewSchedQualityEngineService(f.store, f.ledger, nil, f.switches, func() time.Time { return f.now }, nil)
+	other := NewSchedQualityEngineService(f.store, f.ledger, f.switches, func() time.Time { return f.now }, nil)
 	require.NoError(t, other.cycle(context.Background()))
 	restarted := other.Snapshot().View.StateOf(10, 1, "synthetic-model")
 	require.True(t, restarted.Failing, "a replay of identical durable evidence enters fast track")

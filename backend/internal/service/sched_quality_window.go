@@ -206,7 +206,6 @@ func schedQualityCloneSample(s q.AttemptSample) q.AttemptSample {
 	s.TTFOMs = schedQualityCloneInt(s.TTFOMs)
 	s.CensoredMs = schedQualityCloneInt(s.CensoredMs)
 	s.PromptTokens = schedQualityCloneInt(s.PromptTokens)
-	s.PrevPromptTokens = schedQualityCloneInt(s.PrevPromptTokens)
 	s.InputTokens = schedQualityCloneInt(s.InputTokens)
 	s.CacheReadTokens = schedQualityCloneInt(s.CacheReadTokens)
 	s.CacheCreationTokens = schedQualityCloneInt(s.CacheCreationTokens)

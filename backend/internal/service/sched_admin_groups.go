@@ -78,7 +78,7 @@ func (s *SchedAdminService) GroupsSummary(ctx context.Context, ids []int64) (Sch
 		summary[a.ID] = x
 	}
 	for _, g := range groups {
-		policy := p.Policies[g].Policy
+		policy := schedAdminGroupPolicy(p, g)
 		x := SchedAdminGroupSummary{GroupID: g, SchedAdminPolicyPolicy: schedAdminPolicyFields(policy)}
 		v := stats[g]
 		x.Last60 = SchedAdminGroupLast60{TTFOP50Ms: v.TTFOP50Ms, FailedRate: v.FailedRate, CacheRatio: v.CacheRatio, Requests: v.Requests}

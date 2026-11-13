@@ -169,8 +169,8 @@ func TestEvaluateSampleEligibility(t *testing.T) {
 		mutate                   func(*AttemptSample)
 		speed, slow, errors, bad int
 	}{
-		{"cold-stream-counts", func(s *AttemptSample) { s.Warm = false }, 1, 0, 1, 0},
-		{"class-does-not-scale", func(s *AttemptSample) { s.Class = ClassXHeavy; s.TTFOMs = sampleInt(1001) }, 1, 1, 1, 0},
+		{"cold-stream-counts", func(s *AttemptSample) {}, 1, 0, 1, 0},
+		{"measured-first-output", func(s *AttemptSample) { s.TTFOMs = sampleInt(1001) }, 1, 1, 1, 0},
 		{"non-stream", func(s *AttemptSample) { s.Stream = false }, 0, 0, 1, 0},
 		{"first-output-timeout", func(s *AttemptSample) { s.Outcome = OutcomeTimeout; s.TTFOMs = nil }, 1, 1, 1, 1},
 		{"after-output-failure", func(s *AttemptSample) { s.Outcome = OutcomeAccountFault }, 1, 0, 1, 1},

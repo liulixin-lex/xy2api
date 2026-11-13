@@ -246,6 +246,7 @@ func (s *SchedQualityEngineService) isMember(group, account int64) bool {
 	return false
 }
 
-func logSchedDecision(ctx context.Context, d q.Decision) {
-	slog.InfoContext(ctx, "sched_quality.state", "component", "sched_quality", "at", d.At, "rule_version", q.RuleVersion, "account_id", d.Scope.AccountID, "model", d.Scope.Model, "group_id", d.Scope.GroupID, "action", d.Action, "level", d.Level, "until", d.Until, "basis", d.Basis, "attempt_ids", d.Basis.AttemptIDs)
+// LogSchedQualityDecision emits a committed decision using the shared state-event format.
+func LogSchedQualityDecision(ctx context.Context, d q.Decision) {
+	slog.InfoContext(ctx, "sched_quality.state", "component", "sched_quality", "at", d.At, "rule_version", q.RuleVersion, "account_id", d.Scope.AccountID, "model", d.Scope.Model, "group_id", d.Scope.GroupID, "action", d.Action, "dims", d.Basis.Dims, "level", d.Level, "until", d.Until, "basis", d.Basis, "attempt_ids", d.Basis.AttemptIDs)
 }

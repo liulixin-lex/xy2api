@@ -143,7 +143,6 @@ func TestSchedQualityPolicyConflictAndPreservesRawJSON(t *testing.T) {
 	require.NoError(t, err)
 	policies, err := r.LoadPolicies(ctx)
 	require.NoError(t, err)
-	require.False(t, policies[g].FromV3)
 	require.Equal(t, int64(7), policies[g].Version)
 	require.Equal(t, float64(15), policies[g].Policy.TTFTSeconds)
 	p := q.Policy{Enabled: true, TTFTSeconds: 12.5, MaxErrorRate: .05, MinCacheRatio: .8, TakeoverIdleSeconds: 900}
@@ -162,7 +161,6 @@ func TestSchedQualityPolicyConflictAndPreservesRawJSON(t *testing.T) {
 	policies, err = r.LoadPolicies(ctx)
 	require.NoError(t, err)
 	require.Equal(t, p, policies[g].Policy)
-	require.False(t, policies[g].FromV3)
 	require.Equal(t, int64(8), policies[g2].Version)
 	members, err := r.LoadMembers(ctx)
 	require.NoError(t, err)
@@ -178,7 +176,7 @@ func TestSchedQualityConcurrentPolicyCAS(t *testing.T) {
 		_, err := integrationDB.ExecContext(ctx, `DELETE FROM settings WHERE key=$1`, service.SettingKeyGroupQualityGatePolicies)
 		require.NoError(t, err)
 	})
-	p := q.Policy{TTFTSeconds: 10}
+	p := q.DefaultPolicy()
 	start := make(chan struct{})
 	results := make(chan error, 2)
 	for range 2 {
@@ -202,7 +200,7 @@ func TestSchedQualityOverrideCleanupComparesExpiry(t *testing.T) {
 	r, a, g := qualityRepoFixture(t)
 	ctx := context.Background()
 	past, future := time.Now().Add(-time.Minute), time.Now().Add(time.Hour)
-	old := service.SchedOverride{AccountID: a, GroupID: g, Mode: q.OverrideDemote, ExpiresAt: &past}
+	old := service.SchedOverride{AccountID: a, GroupID: g, Mode: q.OverrideExempt, ExpiresAt: &past}
 	require.NoError(t, r.UpsertOverride(ctx, old))
 	updated := old
 	updated.ExpiresAt = &future
@@ -222,7 +220,7 @@ func TestSchedQualityOverrideCleanupComparesExpiry(t *testing.T) {
 	require.Empty(t, overrides)
 	// Leaving the group also deletes its permanent override; the all-group one remains.
 	require.NoError(t, r.UpsertOverride(ctx, service.SchedOverride{AccountID: a, GroupID: g, Mode: q.OverrideExempt}))
-	require.NoError(t, r.UpsertOverride(ctx, service.SchedOverride{AccountID: a, Mode: q.OverrideDemote}))
+	require.NoError(t, r.UpsertOverride(ctx, service.SchedOverride{AccountID: a, Mode: q.OverrideExempt}))
 	_, err = integrationDB.ExecContext(ctx, `DELETE FROM account_groups WHERE account_id=$1`, a)
 	require.NoError(t, err)
 	_, err = r.RunCycle(ctx, func(tx service.SchedQualityTx) error {

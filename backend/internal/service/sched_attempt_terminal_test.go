@@ -68,9 +68,6 @@ func TestSchedAttemptTerminalRetainsEvidence(t *testing.T) {
 			require.Equal(t, 20, *row.CacheCreationTokens)
 			require.Equal(t, 100, *row.PromptTokens)
 			require.Equal(t, tc.first, row.TTFOMs != nil)
-			require.EqualValues(t, 1, row.Class)
-			require.False(t, row.Warm)
-			require.Nil(t, row.PrevPromptTokens)
 		})
 	}
 }

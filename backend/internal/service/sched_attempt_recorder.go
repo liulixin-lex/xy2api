@@ -102,7 +102,7 @@ func (s *SchedAttemptRecorderService) SetObserver(fn func(schedquality.AttemptSa
 }
 
 func (s *SchedAttemptRecorderService) Begin(in SchedAttemptStart) SchedAttempt {
-	if s == nil || s.stopped.Load() || (s.store == nil && in.Test == nil) {
+	if s == nil || s.stopped.Load() || s.store == nil {
 		return schedAttemptNoop{}
 	}
 	at := s.now()
@@ -111,12 +111,7 @@ func (s *SchedAttemptRecorderService) Begin(in SchedAttemptStart) SchedAttempt {
 		AccountID: in.AccountID, GroupID: in.GroupID, Model: in.Model, Stream: in.Stream,
 		SessionKey: in.SessionKey, RequestID: in.RequestID,
 	}
-	row.Class = schedquality.RequestClass(1)
-	var sink func(schedquality.AttemptSample)
-	if in.Test != nil {
-		sink = in.Test.Sink
-	}
-	return &schedAttemptHandle{recorder: s, row: row, test: in.Test != nil, sink: sink}
+	return &schedAttemptHandle{recorder: s, row: row}
 }
 
 type schedAttemptNoop struct{}
@@ -129,8 +124,6 @@ type schedAttemptHandle struct {
 	mu       sync.Mutex
 	finished atomic.Bool
 	row      schedquality.AttemptSample
-	test     bool
-	sink     func(schedquality.AttemptSample)
 }
 
 func (h *schedAttemptHandle) MarkFirstOutput(at time.Time) {
@@ -164,12 +157,6 @@ func (h *schedAttemptHandle) Finish(in SchedAttemptFinish) {
 	if u != nil {
 		prompt, input, cached, creation := u.PromptTokens, u.InputTokens, u.CacheReadTokens, u.CacheCreationTokens
 		row.PromptTokens, row.InputTokens, row.CacheReadTokens, row.CacheCreationTokens = &prompt, &input, &cached, &creation
-	}
-	if h.test {
-		if h.sink != nil {
-			h.sink(row)
-		}
-		return
 	}
 	s := h.recorder
 	s.observerMu.RLock()
