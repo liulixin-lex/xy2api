@@ -91,7 +91,6 @@ func NewSchedTestF6Fixture(t *testing.T, account *Account, up HTTPUpstream) (*Op
 		require.Zero(t, observed)
 		require.Zero(t, recorder.count)
 		require.Empty(t, recorder.memory.entries)
-		require.Nil(t, gw.openaiRecentSession)
 		owner, err := gw.getOpenAIWSStateStore().GetResponseAccount(context.Background(), 0, "resp_sched_f6")
 		require.NoError(t, err)
 		require.Zero(t, owner)

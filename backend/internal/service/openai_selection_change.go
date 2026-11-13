@@ -24,7 +24,7 @@ func (s *OpenAIGatewayService) stickyChangeAvoid(ctx context.Context, groupID *i
 	if s == nil || s.resilience == nil || s.resilience.store == nil || session == "" {
 		return nil
 	}
-	avoided, err := s.resilience.store.SessionAvoid(ctx, derefGroupID(groupID), stickyChangeAvoidSession(session))
+	avoided, err := sessionAvoidAfterReset(ctx, s.resilience.store, derefGroupID(groupID), stickyChangeAvoidSession(session), s.resilience.sessionResetAt)
 	if err != nil {
 		return nil
 	}
@@ -48,6 +48,8 @@ type openAIStickyChange struct {
 	ttl              time.Duration
 	cache            OpenAIStickyVersionedCache
 	dualWriteLegacy  bool
+	skipCommit       bool // The snapshot read failed; keep all selection writes suppressed.
+	resetAt          func(int64) time.Time
 }
 
 func noteOpenAIStickyAttemptOutcome(attempt *schedAttemptCapture, success bool) {
@@ -114,9 +116,7 @@ func (s *OpenAIGatewayService) prepareOpenAIStickyChange(ctx context.Context, gr
 			expected, err = cache.GetSessionBinding(ctx, derefGroupID(groupID), key)
 		}
 	}
-	if err != nil && !errors.Is(err, ErrStickySessionNotFound) {
-		return
-	}
+	unreadable := err != nil && !errors.Is(err, ErrStickySessionNotFound)
 	kind := "migrate"
 	if expected.AccountID <= 0 {
 		kind = "create"
@@ -129,6 +129,8 @@ func (s *OpenAIGatewayService) prepareOpenAIStickyChange(ctx context.Context, gr
 		groupID: derefGroupID(groupID), session: strings.TrimSpace(session), key: key,
 		kind: kind, expected: expected, ttl: s.openAIStickyBindingTTL(groupID), cache: cache,
 		dualWriteLegacy: s.openAISessionHashDualWriteOldEnabled(),
+		skipCommit:      unreadable,
+		resetAt:         s.resilience.sessionAccountResetAt,
 	})
 }
 
@@ -146,6 +148,8 @@ func planOpenAIStickyReplacement(ctx context.Context, groupID *int64, session, m
 		groupID: change.groupID, session: change.session, key: change.key, model: model,
 		kind: change.kind, expected: change.expected, target: selection.Account.ID, ttl: change.ttl, cache: change.cache,
 		dualWriteLegacy: change.dualWriteLegacy,
+		skipCommit:      change.skipCommit,
+		resetAt:         change.resetAt,
 	})
 }
 
@@ -163,7 +167,7 @@ func CompleteOpenAIStickyChange(ctx context.Context, accountID int64, success, c
 		return
 	}
 	change.done = true
-	if canceled {
+	if canceled || change.skipCommit {
 		return
 	}
 	stateCtx, cancel := resilienceStateContext(ctx)
@@ -173,7 +177,11 @@ func CompleteOpenAIStickyChange(ctx context.Context, accountID int64, success, c
 			return
 		}
 		resilience.StateFrom(ctx).AddAvoided(accountID)
-		if _, err := change.cache.RecordSessionBindingFailure(stateCtx, change.groupID, change.key, stickyChangeAvoidSession(change.session), change.expected, accountID, openAIStickyChangeAvoidTTL); err != nil {
+		var reset time.Time
+		if change.resetAt != nil {
+			reset = change.resetAt(accountID)
+		}
+		if _, err := change.cache.RecordSessionBindingFailure(stateCtx, change.groupID, change.key, stickyChangeAvoidSession(change.session), change.expected, accountID, openAIStickyChangeAvoidTTL, reset); err != nil {
 			slog.WarnContext(ctx, "sched_quality.takeover_avoid_failed", "account_id", accountID, "error", err)
 		}
 		return

@@ -294,9 +294,9 @@ func TestOpenAISelectionRuntimeFullOwnerRetryBorrowQueue(t *testing.T) {
 	}
 }
 
-func (c *selectionRuntimeCache) RecordSessionBindingFailure(ctx context.Context, group int64, key, session string, expected StickySessionBinding, target int64, ttl time.Duration) (bool, error) {
+func (c *selectionRuntimeCache) RecordSessionBindingFailure(ctx context.Context, group int64, key, session string, expected StickySessionBinding, target int64, ttl time.Duration, resetAt ...time.Time) (bool, error) {
 	if c.sessionBindings[key] != expected.AccountID {
 		return false, nil
 	}
-	return true, c.store.AddSessionAvoid(ctx, group, session, target, ttl)
+	return true, c.store.AddSessionAvoid(ctx, group, session, target, ttl, resetAt...)
 }

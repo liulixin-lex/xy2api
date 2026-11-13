@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -40,4 +41,27 @@ func TestStickyFirstBindingWaitsForSuccessfulDelivery(t *testing.T) {
 			}
 		})
 	}
+}
+
+type bindingReadErrorCache struct{ *selectionRuntimeCache }
+
+func (c *bindingReadErrorCache) GetSessionBinding(context.Context, int64, string) (StickySessionBinding, error) {
+	return StickySessionBinding{}, errors.New("synthetic Redis read timeout")
+}
+func (c *bindingReadErrorCache) ResolveSessionBinding(context.Context, int64, string, string, bool) (StickySessionBinding, error) {
+	return StickySessionBinding{}, errors.New("synthetic Redis read timeout")
+}
+func TestStickyFirstBindingReadFailureDoesNotBindBeforeDelivery(t *testing.T) {
+	f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
+	f.svc.cache = &bindingReadErrorCache{f.cache}
+	ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+	group := int64(7)
+	selected, _, err := f.svc.SelectAccountWithSchedulerForCapability(ctx, &group, "", "v2:synthetic", "m", nil, OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityResponses, false, false, true, PlatformOpenAI)
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	defer selected.ReleaseFunc()
+	require.NoError(t, f.svc.BindStickySessionAfterProfitAdmission(ctx, &group, "v2:synthetic", selected.Account.ID))
+	require.Zero(t, f.cache.sessionBindings["openai:v2:synthetic"], "a failed binding read must not enable a pre-delivery write")
+	CompleteOpenAIStickyChange(ctx, selected.Account.ID, true, false)
+	require.Zero(t, f.cache.sessionBindings["openai:v2:synthetic"], "without a snapshot this request cannot safely commit")
 }

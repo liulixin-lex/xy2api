@@ -24,7 +24,9 @@ func TestTakeoverFailureSharedForTwoMinutes(t *testing.T) {
 	session := "sticky_change:synthetic-takeover-failure:" + uuid.NewString()
 	bindingKey := "openai:" + uuid.NewString()
 	t.Cleanup(func() { _ = first.Del(ctx, sessionBindingKeys(group, bindingKey)...).Err() })
-	t.Cleanup(func() { _ = first.Del(ctx, sessionKey(resilienceSessionAvoidPrefix, group, session)).Err() })
+	t.Cleanup(func() {
+		_ = first.Del(ctx, sessionKey(resilienceSessionAvoidPrefix, group, session), sessionKey(resilienceSessionAvoidWrittenPrefix, group, session)).Err()
+	})
 	require.NoError(t, one.SetSessionAccountID(ctx, group, bindingKey, 100, 5*time.Minute))
 	expected, err := one.GetSessionBinding(ctx, group, bindingKey)
 	require.NoError(t, err)
@@ -42,9 +44,13 @@ func TestTakeoverFailureSharedForTwoMinutes(t *testing.T) {
 	avoid, err = two.SessionAvoid(ctx, group, session)
 	require.NoError(t, err)
 	require.Empty(t, avoid)
-	require.Zero(t, second.Exists(ctx, key).Val())
+	require.Zero(t, second.Exists(ctx, key, sessionKey(resilienceSessionAvoidWrittenPrefix, group, session)).Val())
 }
 
 func TestStickyBindingAliasesIntegration(t *testing.T) {
 	testStickyBindingAliases(t, integrationRedis.Options().Addr)
+}
+
+func TestSessionAvoidWriteMetadataIntegration(t *testing.T) {
+	testSessionAvoidWriteMetadata(t, integrationRedis.Options().Addr)
 }

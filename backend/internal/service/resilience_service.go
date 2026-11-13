@@ -32,9 +32,12 @@ type ResilienceStore interface {
 	// SessionFailures returns all counts of a session (Explain).
 	SessionFailures(ctx context.Context, groupID int64, sessionHash string) (map[int64]int64, error)
 	// AddSessionAvoid puts an account into the session avoid set for ttl.
-	AddSessionAvoid(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error
+	AddSessionAvoid(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration, resetAt ...time.Time) error
 	// SessionAvoid returns the accounts a session currently avoids.
 	SessionAvoid(ctx context.Context, groupID int64, sessionHash string) (map[int64]struct{}, error)
+	// SessionAvoidWrittenAt returns active members and their actual last write.
+	// A zero timestamp denotes a legacy record without write metadata.
+	SessionAvoidWrittenAt(ctx context.Context, groupID int64, sessionHash string) (map[int64]time.Time, error)
 
 	// MarkGroupStable records, if absent, the moment a group became healthy
 	// and returns the stored moment.
@@ -91,6 +94,8 @@ type ResilienceService struct {
 	// failingSessions marks sessions with failure counts on this instance
 	// (key -> expiry) so successes only reset counts when needed.
 	failingSessions sync.Map
+	// Installed at startup by the selection board; it reads the current view.
+	sessionResetAt func(int64) time.Time
 	// terminalRejections holds bounded, instance-local refusal evidence.
 	terminalRejections openAITerminalRejectionTracker
 	// postOutput counts recent failures after output per account for the

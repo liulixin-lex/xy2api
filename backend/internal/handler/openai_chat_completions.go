@@ -467,9 +467,6 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			h.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, reqModel, false, result), true, nil)
 		}
 
-		if selected, ok := resilience.StateFrom(c.Request.Context()).SchedSelection(); ok && selected.AccountID == account.ID {
-			h.gatewayService.RecordOpenAIRecentSessionSuccess(c.Request.Context(), apiKey.GroupID, sessionHash, account, selected.Model, result)
-		}
 		submitChatUsage(result)
 		reqLog.Debug("openai_chat_completions.request_completed",
 			zap.Int64("account_id", account.ID),
