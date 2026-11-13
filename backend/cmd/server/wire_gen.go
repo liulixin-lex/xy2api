@@ -196,13 +196,14 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	openAISelectionBoard := service.ProvideOpenAISelectionBoard(openAIGatewayService, schedQualityEngineService)
 	schedModelTransientAdmin := service.ProvideSchedModelTransientAdmin(openAIGatewayService)
 	schedAdminAccountRepository := repository.NewSchedAdminAccountRepository(client, db, schedulerCache)
+	usageService := service.NewUsageService(usageLogRepository, userRepository, client, apiKeyAuthCacheInvalidator)
 	resilienceStore := repository.NewResilienceStore(redisClient)
 	resilienceRepository := repository.NewResilienceRepository(db)
 	undeliveredRepository := repository.NewUndeliveredRepository(db)
 	resilienceService := service.ProvideResilienceService(settingRepository, resilienceStore, resilienceRepository, undeliveredRepository, accountRepository, groupRepository, rateLimitService, gatewayService, openAIGatewayService)
 	schedAdminCapability := service.ProvideSchedAdminCapability(adminService)
 	schedAttemptRecorderService := service.NewSchedAttemptRecorderService(schedAttemptStore)
-	schedAdminService := service.ProvideSchedAdminService(schedQualityEngineService, openAISelectionBoard, schedModelTransientAdmin, schedAdminAccountRepository, groupRepository, schedAttemptStore, rateLimitService, resilienceService, openAIGatewayService, schedAdminCapability, schedTestRunnerService, concurrencyService, settingService, schedAttemptRecorderService, schedObservabilityService)
+	schedAdminService := service.ProvideSchedAdminService(schedQualityEngineService, openAISelectionBoard, schedModelTransientAdmin, schedAdminAccountRepository, groupRepository, usageService, rateLimitService, resilienceService, openAIGatewayService, schedAdminCapability, concurrencyService, settingService, schedAttemptRecorderService, schedObservabilityService)
 	runtimeReader := mcp.NewRuntimeReader(readerDB, concurrencyCache, upstreamBalanceStore, schedQualityEngineService, schedAdminService)
 	mcpServer, err := mcp.NewServer(configConfig, db, readerDB, userService, operatorAccessService, settingRepository, settingService, queryReader, runtimeReader)
 	if err != nil {
@@ -212,7 +213,6 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	if err != nil {
 		return nil, err
 	}
-	usageService := service.NewUsageService(usageLogRepository, userRepository, client, apiKeyAuthCacheInvalidator)
 	usageHandler := handler.NewUsageHandler(usageService, apiKeyService, opsService, settingService)
 	usageCleanupRepository := repository.NewUsageCleanupRepository(client, db)
 	dashboardAggregationRepository := repository.NewDashboardAggregationRepository(db)
