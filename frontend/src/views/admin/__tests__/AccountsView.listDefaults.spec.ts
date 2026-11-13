@@ -15,7 +15,6 @@ vi.mock('@/api/admin', () => ({
       list: listAccounts,
       listWithEtag: vi.fn(),
       getBatchTodayStats: vi.fn().mockResolvedValue({ stats: {} }),
-      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       delete: vi.fn(),
@@ -147,7 +146,7 @@ describe('admin AccountsView list defaults and column order', () => {
     const wrapper = mountView()
     await flushPromises()
     expect(tableColumns(wrapper)).toEqual([
-      'select', 'name', 'platform_type', 'capacity', 'status', 'sq_recent', 'sq_groups', 'schedulable', 'priority',
+      'select', 'name', 'platform_type', 'capacity', 'status', 'sq_groups', 'schedulable', 'priority',
       'iq_check', 'groups', 'usage', 'upstream_billing_rate', 'upstream_balance', 'last_used_at', 'actions'
     ])
     expect(localStorage.getItem('account-hidden-columns')).toBeNull()

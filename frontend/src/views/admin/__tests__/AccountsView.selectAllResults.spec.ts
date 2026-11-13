@@ -31,7 +31,6 @@ vi.mock('@/api/admin', () => ({
       list: listAccounts,
       listWithEtag,
       getBatchTodayStats,
-      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
       getUpstreamBillingProbeSettings,
       getUpstreamBalances: vi.fn().mockResolvedValue({ items: [] }),
       batchDelete: vi.fn(),

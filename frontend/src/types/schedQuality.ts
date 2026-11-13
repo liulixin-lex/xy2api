@@ -70,25 +70,6 @@ export interface SchedAccountsSummaryRequest {
   account_ids: number[]
 }
 
-// ---- POST /admin/accounts/recent-stats/batch (contract delta C4) ----
-
-/** Set by the backend from its own thresholds; null below the sample minimum. */
-export type RecentStatsTier = 'good' | 'mid' | 'bad' | null
-
-export interface AccountRecentStats {
-  account_id: number
-  ttft: { p50_ms: number | null; n: number; tier: RecentStatsTier }
-  /** null while ops monitoring is off. */
-  error: { rate: number | null; bad: number; n: number; tier: RecentStatsTier } | null
-  cache: { ratio: number | null; n: number; tier: RecentStatsTier }
-}
-
-export interface AccountRecentStatsBatch {
-  as_of: string
-  /** One item per requested account, by account id. */
-  items: AccountRecentStats[]
-}
-
 // ---- GET /accounts/:id ----
 
 export interface SchedClassStat {

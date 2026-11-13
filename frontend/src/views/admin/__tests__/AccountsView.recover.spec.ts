@@ -32,7 +32,6 @@ vi.mock('@/api/admin', () => ({
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       getUpstreamBalances: vi.fn().mockResolvedValue({ balances: [] }),
       getTempUnschedulableStatus: vi.fn().mockResolvedValue({ active: false }),
-      getRecentStats: vi.fn().mockResolvedValue({ as_of: '', items: [] }),
       delete: vi.fn(),
       batchClearError: vi.fn(),
       batchRefresh: vi.fn(),
@@ -190,7 +189,7 @@ describe('AccountsView — recover state', () => {
   })
 
   it('still offers 恢复状态 for a cooling-only account with the quality columns hidden (scenario 37)', async () => {
-    localStorage.setItem('account-hidden-columns', JSON.stringify(['sq_groups', 'sq_recent']))
+    localStorage.setItem('account-hidden-columns', JSON.stringify(['sq_groups']))
     const wrapper = mountView()
     await flushPromises()
     // Managers load the summary whatever columns are shown.

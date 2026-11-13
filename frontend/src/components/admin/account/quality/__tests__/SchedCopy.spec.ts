@@ -13,7 +13,6 @@ import boardFixture from '@/__tests__/fixtures/schedQuality/board.json'
 import policyFixture from '@/__tests__/fixtures/schedQuality/policy.json'
 import SchedAccountDrawer from '../SchedAccountDrawer.vue'
 import SchedGroupsCell from '../SchedGroupsCell.vue'
-import AccountRecentStatsCell from '@/components/admin/account/AccountRecentStatsCell.vue'
 import SchedBatchDialog from '../SchedBatchDialog.vue'
 import SchedOverridePopover from '../SchedOverridePopover.vue'
 import SchedPauseMark from '../SchedPauseMark.vue'
@@ -94,8 +93,6 @@ describe('quality UI copy', () => {
     const summary = (summaryFixture as { accounts: SchedAccountSummary[] }).accounts[0]
     const Host = defineComponent({
       setup: () => () => [
-        h(AccountRecentStatsCell, { accountId: 479, stats: { account_id: 479, ttft: { p50_ms: 2800, n: 37, tier: 'good' }, error: null, cache: { ratio: null, n: 0, tier: null } } }),
-        h(AccountRecentStatsCell, { accountId: 480 }),
         h(SchedGroupsCell, { summary, openai: true, groupName: () => '晨星组' }),
         h(SchedGroupsCell, { summary: { ...summary, cooling: [], groups: { total: 2, normal: 0, cooling: 0, nodata: 2 } }, openai: true, groupName: () => '' }),
         h(SchedGroupsCell, {
@@ -126,7 +123,7 @@ describe('quality UI copy', () => {
     expect(texts.flatMap(nonData).filter((token) => token.length > 8)).toEqual([])
     const described = Array.from(document.querySelectorAll('.sr-only'), (el) => el.textContent?.trim() ?? '').filter(Boolean)
     expect(described.length).toBeGreaterThan(0)
-    expect(described.flatMap((text) => text.split(zhSched.schedQuality.recent.sep)).flatMap(nonData).filter((token) => !copyTokens.has(token))).toEqual([])
+    expect(described.flatMap(nonData).filter((token) => !copyTokens.has(token))).toEqual([])
   })
 
   it('names every reject code the board can return (G4 D1) and the auto_states kind (D6) with a short word', () => {

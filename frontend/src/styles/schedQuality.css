@@ -25,8 +25,7 @@
   --sq-tab-fg: #0f766e;
   --sq-ring: #0d9488;
   --sq-tip-bg: #111827;
-  /* Recent-status tiers (text colour only) and exemptions. */
-  --sq-tier-good: #047857; --sq-tier-mid: #b45309; --sq-tier-bad: #991b1b;
+  /* Exemptions. */
   --sq-manual-fg: #6d28d9; --sq-manual-bg: #f5f3ff; --sq-manual-bd: #a78bfa;
 }
 
@@ -52,7 +51,6 @@
   --sq-tab-bg: rgba(19, 78, 74, 0.3);
   --sq-tab-fg: #2dd4bf;
   --sq-tip-bg: #1f2937;
-  --sq-tier-good: #6ee7b7; --sq-tier-mid: #fbbf24; --sq-tier-bad: #f87171;
   --sq-manual-fg: #c4b5fd; --sq-manual-bg: rgba(167, 139, 250, 0.14); --sq-manual-bd: rgba(167, 139, 250, 0.6);
 }
 

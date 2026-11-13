@@ -2,7 +2,6 @@
 export default {
   schedQuality: {
     list: {
-      recent: '近期状况',
       groups: '分组',
       membership: '归组',
     },
@@ -10,10 +9,6 @@ export default {
       ttfo: '首字',
       error: '错误',
       cache: '缓存',
-    },
-    recent: {
-      samples: '{n} 次',
-      sep: '，',
     },
     filter: {
       all: '全部质量状态',

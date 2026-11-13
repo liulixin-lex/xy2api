@@ -2,7 +2,6 @@
 export default {
   schedQuality: {
     list: {
-      recent: 'Recent',
       groups: 'Groups',
       membership: 'Membership',
     },
@@ -10,10 +9,6 @@ export default {
       ttfo: 'TTFT',
       error: 'Errors',
       cache: 'Cache',
-    },
-    recent: {
-      samples: '{n} samples',
-      sep: ', ',
     },
     filter: {
       all: 'All quality states',

@@ -317,14 +317,6 @@
           <template #header-sq_groups="{ column }">
             <span class="inline-flex items-center gap-1.5">{{ column.label }}<SchedPauseMark :global-enabled="sqSummary.view.value?.global_enabled" :stale="sqSummary.view.value?.stale" /></span>
           </template>
-          <template #cell-sq_recent="{ row }">
-            <AccountRecentStatsCell
-              :account-id="row.id"
-              :stats="recentStats.byAccount.value.get(row.id)"
-              :loading="recentStats.loading.value"
-              :link="canViewUsage"
-            />
-          </template>
           <template #cell-sq_groups="{ row }">
             <SchedGroupsCell
               :summary="sqSummary.byAccount.value.get(row.id)"
@@ -546,11 +538,9 @@ import SchedPauseMark from '@/components/admin/account/quality/SchedPauseMark.vu
 import SchedQualityLayers from '@/components/admin/account/quality/SchedQualityLayers.vue'
 import SchedBatchDialog, { type SchedBatchAction } from '@/components/admin/account/quality/SchedBatchDialog.vue'
 import { useSchedQualitySummary } from '@/composables/useSchedQuality'
-import { useAccountRecentStats } from '@/composables/useAccountRecentStats'
 import { openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
 import { canRecover, isRecovering, useAccountRecovery } from '@/composables/useAccountRecovery'
 import { vTip } from '@/utils/tip'
-import AccountRecentStatsCell from '@/components/admin/account/AccountRecentStatsCell.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import AccountTableActions from '@/components/admin/account/AccountTableActions.vue'
@@ -1138,12 +1128,10 @@ const toggleColumn = (key: string) => {
   }
   saveColumnsToStorage()
   if (wasHidden) refreshShownColumns([key])
-  else if (key === 'sq_recent') recentStats.cancel()
 }
 
 // Columns that load their own data fetch it once they are shown again.
 const refreshShownColumns = (keys: string[]) => {
-  if (keys.includes('sq_recent')) refreshRecentStats()
   if (keys.includes('sq_groups')) refreshSchedSummary()
   if (keys.includes('today_stats') || keys.includes('usage')) {
     refreshTodayStatsBatch().catch((error) => {
@@ -1262,7 +1250,6 @@ const load = async (options: AccountLoadOptions = {}) => {
   requestParams.lite = '1'
   await baseLoad()
   const summary = refreshSchedSummary({ force: options.forceSummary })
-  refreshRecentStats()
   if (options.refreshTodayStats !== false) await refreshTodayStatsBatch()
   if (options.forceSummary) await summary
 }
@@ -1273,7 +1260,6 @@ const reload = async () => {
   pendingTodayStatsRefresh.value = false
   await baseReload()
   refreshSchedSummary()
-  refreshRecentStats()
   await refreshTodayStatsBatch()
 }
 
@@ -1444,7 +1430,6 @@ watch(loading, (isLoading, wasLoading) => {
   if (wasLoading && !isLoading && pendingTodayStatsRefresh.value) {
     pendingTodayStatsRefresh.value = false
     refreshSchedSummary()
-    refreshRecentStats()
     refreshTodayStatsBatch().catch((error) => {
       console.error('Failed to refresh account today stats after table load:', error)
     })
@@ -1518,13 +1503,6 @@ watch(sqSummary.byAccount, (map) => {
 // Capsules open the drawer on their own model and group.
 const openSchedFromGroups = (row: AccountListItem, target: { model: string | null; groupId?: number; toGroups?: boolean }) =>
   openSchedDrawer({ id: row.id, name: row.name }, { model: target.model, groupId: target.groupId ?? null, toGroups: target.toGroups })
-
-// ---- 近期状况 (contract delta C4): the page's accounts, after the list; not requested while the column is hidden.
-const recentStats = useAccountRecentStats()
-const refreshRecentStats = () => {
-  if (!hiddenColumns.has('sq_recent')) void recentStats.refresh(accounts.value.map(account => account.id))
-}
-const canViewUsage = computed(() => adminAccess.can('usage:view'))
 
 // One batch at a time: a closed batch is busy until the answers still on their way are in.
 const sqBatchBusy = ref(false)
@@ -1857,7 +1835,6 @@ const refreshAccountsIncrementally = async () => {
     upstreamBillingNow.value = Date.now()
 
     refreshSchedSummary()
-    refreshRecentStats()
     await refreshTodayStatsBatch()
   } catch (error) {
     console.error('Auto refresh failed:', error)
@@ -2189,7 +2166,6 @@ const allColumns = computed(() => {
     { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false },
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
-    { key: 'sq_recent', label: t('admin.schedQuality.list.recent'), sortable: false },
     { key: 'sq_groups', label: t('admin.schedQuality.list.groups'), sortable: false },
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
     { key: 'priority', label: t('admin.accounts.columns.priority'), sortable: true, class: 'text-right' },
