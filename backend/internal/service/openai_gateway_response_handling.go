@@ -79,7 +79,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		if schedResult != nil {
 			schedCapture.noteUsage(schedResult.usage)
 		}
-		schedCapture.finish(nil, schedErr)
+		schedCapture.noteError(schedErr)
 	}()
 	preludeTrace := beginOpenAIPreludeTrace(ctx, resilience.Current().NativePreludeWhitelistOn())
 	observer := upstreamResponseModelObserverFromContext(c)
@@ -1797,7 +1797,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		if schedResult != nil {
 			schedCapture.noteUsage(schedResult.usage)
 		}
-		schedCapture.finish(nil, schedErr)
+		schedCapture.noteError(schedErr)
 	}()
 	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {

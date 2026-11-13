@@ -57,3 +57,38 @@ func TestSchedPreviousBatchKeepsImmediateFailedAndStrictOrder(t *testing.T) {
 	}
 	require.True(t, found, "inclusive finish-time loading must retain a long-running attempt")
 }
+
+func TestSchedAttemptAllTerminalTokensRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	repo := &schedAttemptRepository{db: integrationDB}
+	requestID := uuid.NewString()
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(ctx, "DELETE FROM account_attempt_samples WHERE request_id=$1", requestID)
+	})
+	start := time.Now().UTC().Truncate(time.Microsecond)
+	input, read, creation, prompt, ttfo := 0, 80, 20, 100, 12
+	var batch []schedquality.AttemptSample
+	for _, outcome := range []schedquality.Outcome{1, 2, 3, 5} {
+		row := schedAttemptTestRow(8612002, start)
+		row.RequestID, row.Outcome = requestID, outcome
+		row.InputTokens, row.CacheReadTokens, row.CacheCreationTokens, row.PromptTokens = &input, &read, &creation, &prompt
+		row.TTFOMs = &ttfo
+		row.Detail = "AUTH" // Cancellation must be read from code 5, not this string.
+		row.Class, row.Warm, row.PrevPromptTokens = schedquality.ClassXHeavy, true, &prompt
+		batch = append(batch, row)
+	}
+	require.NoError(t, repo.InsertBatch(ctx, batch))
+	rows, err := repo.read(ctx, "WHERE request_id=$1", requestID)
+	require.NoError(t, err)
+	require.Len(t, rows, 4)
+	for _, row := range rows {
+		require.Equal(t, row.Outcome == 5, row.ClientCanceled)
+		require.Equal(t, 0, *row.InputTokens)
+		require.Equal(t, 80, *row.CacheReadTokens)
+		require.Equal(t, 20, *row.CacheCreationTokens)
+		require.Equal(t, 12, *row.TTFOMs)
+		require.EqualValues(t, 1, row.Class)
+		require.False(t, row.Warm)
+		require.Nil(t, row.PrevPromptTokens)
+	}
+}

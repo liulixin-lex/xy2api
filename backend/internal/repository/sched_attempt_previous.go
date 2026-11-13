@@ -13,7 +13,7 @@ func schedAttemptScanTargets(row *schedquality.AttemptSample) []any {
 	return []any{&row.AttemptID, &row.StartedAt, &row.FinishedAt, &row.AccountID, &row.GroupID,
 		&row.Model, &row.Class, &row.Stream, &row.Warm, &row.TTFOMs, &row.CensoredMs, &row.Outcome,
 		&row.Detail, &row.PromptTokens, &row.PrevPromptTokens, &row.CacheReadTokens, &row.SessionKey,
-		&row.RequestID, &row.InsertedAt}
+		&row.RequestID, &row.InsertedAt, &row.InputTokens, &row.CacheCreationTokens}
 }
 
 func (r *schedAttemptRepository) LoadFinishedSince(ctx context.Context, since time.Time) ([]schedquality.AttemptSample, error) {
@@ -68,6 +68,7 @@ func (r *schedAttemptRepository) LoadPreviousAttempts(ctx context.Context, curre
 		if err := rows.Scan(append([]any{&id}, schedAttemptScanTargets(&row)...)...); err != nil {
 			return nil, err
 		}
+		row.ClientCanceled = row.Outcome == schedquality.Outcome(5)
 		result[id] = &row
 	}
 	return result, rows.Err()
