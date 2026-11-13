@@ -1,4 +1,4 @@
-import { Comment, Fragment, defineComponent, h, isVNode, toDisplayString, type PropType, type Slots, type VNode, type VNodeArrayChildren } from 'vue'
+import { Comment, Fragment, defineComponent, h, isVNode, ref, toDisplayString, type PropType, type Slots, type VNode, type VNodeArrayChildren } from 'vue'
 import type { Column } from './types'
 
 // 与 Vue renderSlot 的回退规则一致：插槽只渲染出注释/空片段时显示默认内容。
@@ -14,9 +14,11 @@ const hasRenderableContent = (nodes: VNodeArrayChildren): boolean =>
  * 桌面表格的单行。拆成独立组件后，DataTable 因虚拟滚动重渲染时，
  * props 未变的行直接跳过，只有新进入窗口的行才执行单元格插槽；
  * 插槽内读取的响应式数据由本行自己的渲染副作用追踪，数据变化时仍按行更新。
+ * 插槽 `row-detail` 有内容时，在本行下面多渲染一行通栏；虚拟滚动只测量主行（`rowEl`）。
  */
 export default defineComponent({
   name: 'DataTableRow',
+  inheritAttrs: false,
   props: {
     row: { type: null as unknown as PropType<any>, required: true },
     index: { type: Number, required: true },
@@ -35,7 +37,9 @@ export default defineComponent({
     toggle: (_row: any, _index: number, _checked: boolean) => true,
     rowClick: (_row: any) => true
   },
-  setup(props, { emit }) {
+  setup(props, { emit, attrs, expose }) {
+    const rowEl = ref<HTMLElement | null>(null)
+    expose({ rowEl })
     const renderCell = (column: Column) => {
       const value = props.row[column.key]
       const slot = props.cellSlots[`cell-${column.key}`]
@@ -83,9 +87,11 @@ export default defineComponent({
           )
         )
       })
-      return h(
+      const row = h(
         'tr',
         {
+          ...attrs,
+          ref: rowEl,
           class: [
             'table-row-border hover:bg-gray-50 dark:hover:bg-dark-800',
             {
@@ -99,6 +105,14 @@ export default defineComponent({
         },
         cells
       )
+      const detail = props.cellSlots['row-detail']?.({ row: props.row })
+      if (!detail || !hasRenderableContent(detail)) return row
+      return h(Fragment, [
+        row,
+        h('tr', { class: 'table-row-border', 'data-row-detail': '' }, [
+          h('td', { colspan: cells.length, class: 'p-0' }, detail)
+        ])
+      ])
     }
   }
 })
