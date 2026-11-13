@@ -124,6 +124,15 @@ describe('DataTable', () => {
     expect(rows[2].get('[data-test="detail"]').text()).toBe('detail of B')
   })
 
+  it('renders every row while a detail row is open, since windowing measures main rows only (RG-010)', async () => {
+    const data = Array.from({ length: 12 }, (_, i) => ({ id: i + 1, name: `Row ${i + 1}` }))
+    const wrapper = mount(DataTable, { props: { columns: [{ key: 'name', label: 'Name' }], data, virtualizeThreshold: 10, hasDetails: true } })
+    await wrapper.vm.$nextTick()
+    expect((wrapper.vm as any).shouldVirtualize).toBe(false)
+    await wrapper.setProps({ hasDetails: false })
+    expect((wrapper.vm as any).shouldVirtualize).toBe(true)
+  })
+
   it('switches to windowed rendering once row count exceeds virtualizeThreshold', async () => {
     const data = Array.from({ length: 12 }, (_, i) => ({ id: i + 1, name: `Row ${i + 1}` }))
     const wrapper = mount(DataTable, {

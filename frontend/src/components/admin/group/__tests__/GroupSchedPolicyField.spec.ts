@@ -14,7 +14,7 @@ vi.mock('vue-i18n', async () => ({
 
 const policy = () => structuredClone(policyFixture) as SchedGroupPolicy
 const save = (w: ReturnType<typeof mount>) => (w.vm as unknown as { save: () => Promise<boolean> }).save()
-const ttft = (w: ReturnType<typeof mount>) => w.get('input[step="0.1"][min="0.1"]')
+const ttft = (w: ReturnType<typeof mount>) => w.get('input[step="0.1"][min="0"]')
 const error = (w: ReturnType<typeof mount>) => w.get('input[step="0.1"][min="5"]')
 const cache = (w: ReturnType<typeof mount>) => w.get('input[step="1"][max="100"]')
 
@@ -59,13 +59,15 @@ describe('GroupSchedPolicyField', () => {
     expect(api.updateGroupPolicy).toHaveBeenLastCalledWith(53, expect.objectContaining({ policy: expect.objectContaining({ min_cache_ratio: 0.88 }) }))
   })
 
-  it('refuses an error line under 5% and a first-output line of 0, marking them without text (FINAL §3)', async () => {
+  it('refuses an error line under 5% and a first-output line of 0, takes any first-output line above 0 (FINAL §3)', async () => {
     const w = await mountField()
     await error(w).setValue('4.9')
     expect(error(w).attributes('aria-invalid')).toBe('true')
     expect(error(w).classes()).toContain('input-error')
     await error(w).setValue('5')
     expect(error(w).attributes('aria-invalid')).toBe('false')
+    await ttft(w).setValue('0.05')
+    expect(ttft(w).attributes('aria-invalid')).toBe('false')
     await ttft(w).setValue('0')
     expect(ttft(w).attributes('aria-invalid')).toBe('true')
     expect((w.vm as unknown as { valid: boolean }).valid).toBe(false)
@@ -97,6 +99,16 @@ describe('GroupSchedPolicyField', () => {
     await flushPromises()
     expect(w.find('[data-sq-preview]').exists()).toBe(false)
     expect(api.previewGroupPolicy).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows 失败 in place of the preview when the preview request fails', async () => {
+    vi.useFakeTimers()
+    api.previewGroupPolicy.mockRejectedValueOnce({ status: 500 })
+    const w = await mountField()
+    await ttft(w).setValue('8')
+    vi.advanceTimersByTime(400)
+    await flushPromises()
+    expect(w.get('[data-sq-preview]').text()).toBe('admin.schedQuality.result.failed')
   })
 
   it('shows 失败 without reload on a save error other than 409, and clears it on the next good save', async () => {

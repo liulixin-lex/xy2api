@@ -84,9 +84,9 @@ describe('SchedGroupsCell (FINAL §2, §7)', () => {
     expect(groups(summary({ substandard: [] })).text()).toBe('—')
   })
 
-  it('shows one red capsule per substandard group: name, 不达标·dimensions, recovery time', async () => {
+  it('shows one red capsule per substandard group: name, 不达标·the first dimension, recovery time', async () => {
     const w = groups(summary({ substandard: [sub(53), sub(54, { dims: ['error', 'cache'], until: at(13, 5) })] }))
-    expect(capsules(w)).toEqual(['晨星组 不达标·首字 · 12:30', '北辰组 不达标·报错·缓存 · 13:05'])
+    expect(capsules(w)).toEqual(['晨星组 不达标·首字 · 12:30', '北辰组 不达标·报错 · 13:05'])
     expect(w.findAll('.sq-capsule').every((c) => c.classes().includes('sq-capsule--cool'))).toBe(true)
     await w.get('.sq-capsule').trigger('click')
     expect(w.emitted('open')?.[0][0]).toEqual({ groupId: 53, model: 'gpt-6.1-sol' })

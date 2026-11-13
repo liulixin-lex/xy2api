@@ -21,6 +21,7 @@
         :columns="columns"
         :data="data"
         :row-key="rowKey"
+        :has-details="expanded.size > 0"
         :loading="loading"
         :server-side-sort="serverSideSort"
         :default-sort-key="defaultSortKey"
@@ -278,7 +279,7 @@
         <template #cell-created_at="{ row, value }">
           <span class="inline-flex items-center gap-1">
             <button
-              v-if="expandable && row.gateway_request_id && hasAttempts(row)"
+              v-if="expandable && row.gateway_request_id && row.has_attempts"
               type="button"
               class="sq-focus -ml-1 inline-flex h-6 w-6 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-dark-700 dark:hover:text-gray-200"
               :aria-expanded="expanded.has(row.gateway_request_id)"
@@ -697,10 +698,9 @@ const showAccountBilling = props.showAccountBilling
 const showUpstreamEndpoint = props.showUpstreamEndpoint
 const ipGeoBatchLoading = ref(false)
 
-// 展开的请求（按网关请求号）；只有 OpenAI 的请求有尝试记录可展开。首字超过该组首字上限为黄色（FINAL §6，契约 §6.2）。
+// 展开的请求（按网关请求号）；只有尝试表里有行的请求（has_attempts）可展开。首字超过该组首字上限为黄色（FINAL §6，契约 §6.2）。
 const expanded = reactive(new Set<string>())
 const toggleExpanded = (id: string) => (expanded.has(id) ? expanded.delete(id) : expanded.add(id))
-const hasAttempts = (row: AdminUsageLog) => row.group?.platform === 'openai'
 // usage 行与无账单行的 id 来自两张表：行键带上来源（契约 §6.1）。
 const rowKey = (row: AdminUsageLog) => `${row.source ?? 'usage'}:${row.id}`
 const firstTokenClass = (row: AdminUsageLog) => (row.ttfo_over ? 'text-amber-600 dark:text-amber-400' : 'text-gray-900 dark:text-gray-100')

@@ -29,7 +29,7 @@ const DataTableStub = {
 }
 
 const row = (patch: Record<string, unknown> = {}) => ({
-  id: 1, source: 'usage', group: { platform: 'openai' }, gateway_request_id: 'gw-1', created_at: '2026-11-11T12:00:00Z', result: 2, switches: 1, fallback: false, takeover: false,
+  id: 1, source: 'usage', has_attempts: true, gateway_request_id: 'gw-1', created_at: '2026-11-11T12:00:00Z', result: 2, switches: 1, fallback: false, takeover: false,
   ttfo_over: false, first_token_ms: 4100, duration_ms: 19800, input_tokens: 800, cache_read_tokens: 3000, cache_creation_tokens: 200,
   ...patch
 })
@@ -87,7 +87,7 @@ describe('UsageTable — request results (FINAL §6)', () => {
 
     expect(mountTable([row()], false).find('[data-usage-expand]').exists()).toBe(false)
     expect(mountTable([row({ gateway_request_id: null })]).find('[data-usage-expand]').exists()).toBe(false)
-    // Only OpenAI requests have attempt records.
-    expect(mountTable([row({ group: { platform: 'anthropic' } })]).find('[data-usage-expand]').exists()).toBe(false)
+    // Only a request with rows in the attempt table opens (RG-009): an OpenAI image request has a gateway id but none.
+    expect(mountTable([row({ has_attempts: false, billing_mode: 'image' })]).find('[data-usage-expand]').exists()).toBe(false)
   })
 })
