@@ -412,6 +412,11 @@ func TestSchedQualityPolicyFloorAndRequiredFields(t *testing.T) {
 			w := request(valid)
 			require.Equal(t, 400, w.Code)
 			require.Contains(t, w.Body.String(), "SCHED_ERROR_RATE_TOO_LOW")
+			valid["max_error_rate"] = 1.01
+			w = request(valid)
+			require.Equal(t, 400, w.Code)
+			require.Contains(t, w.Body.String(), "INVALID_SCHED_POLICY")
+			require.NotContains(t, w.Body.String(), "SCHED_ERROR_RATE_TOO_LOW")
 			valid["max_error_rate"] = 0.05
 			require.Equal(t, 200, request(valid).Code)
 		})
