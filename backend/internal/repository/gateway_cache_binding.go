@@ -1,0 +1,54 @@
+package repository
+
+import (
+	"context"
+	"errors"
+	"strconv"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/liulixin-lex/xy2api/internal/service"
+	"github.com/redis/go-redis/v9"
+)
+
+var readSessionBindingScript = redis.NewScript(`
+local owner = redis.call('GET', KEYS[1])
+if not owner then return nil end
+local generation = redis.call('GET', KEYS[2])
+if not generation then
+  generation = ARGV[1]
+  redis.call('SET', KEYS[2], generation)
+  local ttl = redis.call('PTTL', KEYS[1])
+  if ttl >= 0 then redis.call('PEXPIRE', KEYS[2], ttl) end
+end
+return {owner, generation}
+`)
+
+func (c *gatewayCache) GetSessionBinding(ctx context.Context, groupID int64, sessionHash string) (service.StickySessionBinding, error) {
+	values, err := readSessionBindingScript.Run(ctx, c.rdb, sessionBindingKeys(groupID, sessionHash), uuid.NewString()).StringSlice()
+	if errors.Is(err, redis.Nil) {
+		return service.StickySessionBinding{}, service.ErrStickySessionNotFound
+	}
+	if err != nil {
+		return service.StickySessionBinding{}, err
+	}
+	owner, err := strconv.ParseInt(values[0], 10, 64)
+	return service.StickySessionBinding{AccountID: owner, Generation: values[1]}, err
+}
+
+var commitSessionBindingScript = redis.NewScript(`
+if redis.call('GET', KEYS[1]) ~= ARGV[1] or redis.call('GET', KEYS[2]) ~= ARGV[2] then return 0 end
+redis.call('SET', KEYS[1], ARGV[3], 'PX', ARGV[5])
+redis.call('SET', KEYS[2], ARGV[4], 'PX', ARGV[5])
+return 1
+`)
+
+func (c *gatewayCache) CommitSessionBinding(ctx context.Context, groupID int64, sessionHash string, expected service.StickySessionBinding, target int64, ttl time.Duration) (bool, error) {
+	if expected.AccountID <= 0 || expected.Generation == "" || target <= 0 || sessionHash == "" || ttl <= 0 {
+		return false, errors.New("invalid versioned sticky binding replacement")
+	}
+	n, err := commitSessionBindingScript.Run(ctx, c.rdb, sessionBindingKeys(groupID, sessionHash), expected.AccountID, expected.Generation, target, uuid.NewString(), ttl.Milliseconds()).Int64()
+	return n == 1, err
+}
+
+var _ service.OpenAIStickyVersionedCache = (*gatewayCache)(nil)

@@ -11,6 +11,18 @@ type OpenAIStickyRebindCache interface {
 	CompareAndSwapSessionAccountID(context.Context, int64, string, int64, int64, time.Duration) (bool, error)
 }
 
+// StickySessionBinding identifies one incarnation of a session's owner.
+// Generation is opaque and must never be reused after deletion or expiry.
+type StickySessionBinding struct {
+	AccountID  int64
+	Generation string
+}
+
+type OpenAIStickyVersionedCache interface {
+	GetSessionBinding(context.Context, int64, string) (StickySessionBinding, error)
+	CommitSessionBinding(context.Context, int64, string, StickySessionBinding, int64, time.Duration) (bool, error)
+}
+
 // gatewaySessionBindingReader reads a binding and its remaining lifetime in
 // one round trip. Every hit refreshes the binding to its full TTL, so the
 // session's idle time is TTL minus the remaining lifetime.
