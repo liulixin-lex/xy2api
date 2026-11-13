@@ -74,7 +74,6 @@ func TestSchedAttemptAllTerminalTokensRoundTrip(t *testing.T) {
 		row.InputTokens, row.CacheReadTokens, row.CacheCreationTokens, row.PromptTokens = &input, &read, &creation, &prompt
 		row.TTFOMs = &ttfo
 		row.Detail = "AUTH" // Cancellation must be read from code 5, not this string.
-		row.Class, row.Warm, row.PrevPromptTokens = schedquality.ClassXHeavy, true, &prompt
 		batch = append(batch, row)
 	}
 	require.NoError(t, repo.InsertBatch(ctx, batch))
@@ -87,8 +86,9 @@ func TestSchedAttemptAllTerminalTokensRoundTrip(t *testing.T) {
 		require.Equal(t, 80, *row.CacheReadTokens)
 		require.Equal(t, 20, *row.CacheCreationTokens)
 		require.Equal(t, 12, *row.TTFOMs)
-		require.EqualValues(t, 1, row.Class)
-		require.False(t, row.Warm)
-		require.Nil(t, row.PrevPromptTokens)
 	}
+	var legacyOK bool
+	require.NoError(t, integrationDB.QueryRow("SELECT bool_and(request_class=1 AND warm=false AND prev_prompt_tokens IS NULL) FROM account_attempt_samples WHERE request_id=$1", requestID).Scan(&legacyOK))
+	require.True(t, legacyOK)
+
 }

@@ -151,7 +151,7 @@ func TestAdvanceTimedReleaseAndManualRestore(t *testing.T) {
 
 func TestAdvanceExemptionOnlyChangesPlacement(t *testing.T) {
 	next, e := Advance(evaluationState(), evaluationPolicy(), slowEvaluationSamples(6, 10, time.Minute), evaluationNow)
-	v := StateView{Failing: next.State == StateCooling, State: next.State, Level: next.Level, Reason: next.Reason, Verdicts: e.Verdicts,
+	v := StateView{Failing: next.State == StateCooling, Level: next.Level,
 		GroupOverride: OverrideRef{Mode: OverrideExempt, Expires: evaluationNow.Add(time.Minute)}}
 	if next.State != StateCooling || e.Verdicts.Speed != VerdictFail || StandingOf(v, true, evaluationNow) != StandFront || StandingOf(v, true, evaluationNow.Add(time.Minute)) != StandBack {
 		t.Fatal("exemption must preserve internal state and expire at its deadline")

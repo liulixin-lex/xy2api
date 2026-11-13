@@ -38,9 +38,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		collabRawConflict = rawOutcome == codexCollabConflict
 	}
 	defer func() {
-		if !schedTestRequest(ctx) {
-			s.finishCacheDiagnostic(c, body, result)
-		}
+		s.finishCacheDiagnostic(c, body, result)
 	}()
 	if c != nil {
 		// Reset before any early return so failover attempts never inherit a plan.
@@ -1741,9 +1739,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	setOpenAICodexRoutingHintFromBody(req.Header, account, body)
 	logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http", req.Header, body, "not_applicable")
 	s.prepareQualityHTTP(ctx, c, account, req, body)
-	if !schedTestRequest(ctx) {
-		s.captureCacheRequestDiagnostic(c, req)
-	}
+	s.captureCacheRequestDiagnostic(c, req)
 
 	if err := applyMappedGPT55LiteCompatibility(req, account, body); err != nil {
 		return nil, err

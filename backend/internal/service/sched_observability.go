@@ -11,8 +11,6 @@ type schedObsWindow struct {
 	cycles       int64
 	cyclesFailed int64
 	cycleMSMax   int64
-	tests        int64
-	testsAborted int64
 	cooled       int64
 	released     int64
 	slowWarned   bool
@@ -45,10 +43,6 @@ func (s *SchedObservabilityService) Count(name string, n int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch name {
-	case "tests":
-		s.window.tests += n
-	case "tests_aborted":
-		s.window.testsAborted += n
 	case "cooled":
 		s.window.cooled += n
 	case "released":
@@ -85,7 +79,7 @@ func (s *SchedObservabilityService) summary(ctx context.Context) {
 	s.mu.Unlock()
 	slog.InfoContext(ctx, "sched_quality.summary", "component", "sched_quality",
 		"cycles", w.cycles, "cycles_failed", w.cyclesFailed, "cycle_ms_max", w.cycleMSMax,
-		"tests", w.tests, "tests_aborted", w.testsAborted, "cooled", w.cooled, "released", w.released)
+		"cooled", w.cooled, "released", w.released)
 }
 
 func (s *SchedObservabilityService) Start(ctx context.Context) {
