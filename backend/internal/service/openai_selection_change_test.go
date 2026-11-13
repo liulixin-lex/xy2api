@@ -87,7 +87,7 @@ func TestStickyChangeRequiresNormalTargetInSameGroup(t *testing.T) {
 			case "removed_during_acquire":
 				f.slots.after = func(int64) { f.candidates[0].GroupIDs = []int64{8} }
 			case "failing_in_this_group":
-				f.state(1, schedquality.StateView{State: schedquality.StateCooling, Until: f.now.Add(time.Minute)})
+				f.state(1, schedquality.StateView{Failing: true, Until: f.now.Add(time.Minute)})
 			}
 			require.Nil(t, f.selectNow(context.Background()))
 			require.Equal(t, int64(10), f.binding.owner)

@@ -31,7 +31,7 @@ type selectionSession struct {
 }
 
 func (s *selectionSession) takeoverReady(ctx context.Context, view schedquality.View, groupID int64, key string, owner int64, now time.Time) bool {
-	if !selectionAuto(view, now) {
+	if !selectionAuto(view, groupID, now) {
 		return false
 	}
 	idle, enabled := view.TakeoverIdle(groupID)
@@ -53,11 +53,11 @@ func (s *selectionSession) candidateAllowed(view schedquality.View, groupID int6
 		return false
 	}
 	state := selectionState(view, groupID, target, model)
-	auto := selectionAuto(view, now)
+	auto := selectionAuto(view, groupID, now)
 	if migrate {
-		return schedquality.StandingOf(state, auto, now) == schedquality.StandFront
+		return auto && schedquality.StandingOf(selectionState(view, groupID, owner, model), auto, now) == schedquality.StandBack && schedquality.StandingOf(state, auto, now) == schedquality.StandFront
 	}
-	return target.Priority < owner.Priority && schedquality.CanTakeOver(state, auto, now) && !s.marks.Recently(target.ID, now)
+	return auto && schedquality.StandingOf(selectionState(view, groupID, owner, model), auto, now) == schedquality.StandFront && target.Priority < owner.Priority && schedquality.StandingOf(state, auto, now) == schedquality.StandFront && !s.marks.Recently(target.ID, now)
 }
 
 func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessionHash, model string, owner *Account, candidates []*Account, req selectionRequest) *AccountSelectionResult {
@@ -75,7 +75,7 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 		return nil
 	}
 	now, view := s.now(), s.view()
-	migrate := schedquality.StandingOf(selectionState(view, groupID, owner, model), selectionAuto(view, now), now) == schedquality.StandBack
+	migrate := schedquality.StandingOf(selectionState(view, groupID, owner, model), selectionAuto(view, groupID, now), now) == schedquality.StandBack
 	if !migrate && !s.takeoverReady(ctx, view, groupID, key, owner.ID, now) {
 		return nil
 	}
@@ -138,9 +138,6 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 			if slot != nil && slot.ReleaseFunc != nil {
 				slot.ReleaseFunc()
 			}
-			if migrate {
-				return nil
-			}
 			continue
 		}
 		latest := s.recheck(ctx, target)
@@ -155,9 +152,6 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 		}
 		if !allowed || ctx.Err() != nil {
 			slot.ReleaseFunc()
-			if migrate {
-				return nil
-			}
 			continue
 		}
 		kind := "takeover"

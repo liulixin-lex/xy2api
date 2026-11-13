@@ -244,7 +244,6 @@ type SystemSettings struct {
 	// OpenAI account scheduling
 	OpenAIOAuthSchedulingRateMultiplier *float64 `json:"openai_oauth_scheduling_rate_multiplier"`
 	SchedQualityEnabled                 bool     `json:"sched_quality_enabled"`
-	SchedQualityTestEnabled             bool     `json:"sched_quality_test_enabled"`
 
 	// Payment configuration
 	PaymentEnabled                   bool     `json:"payment_enabled"`

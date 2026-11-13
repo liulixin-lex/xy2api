@@ -137,7 +137,7 @@ func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenA
 	}
 	now, view := s.selectionNow(), s.selectionView()
 	gid := derefGroupID(req.GroupID)
-	migrate := schedquality.StandingOf(selectionState(view, gid, owner, req.RequestedModel), selectionAuto(view, now), now) == schedquality.StandBack
+	migrate := schedquality.StandingOf(selectionState(view, gid, owner, req.RequestedModel), selectionAuto(view, gid, now), now) == schedquality.StandBack
 	bindings, _ := s.cache.(gatewaySessionBindingReader)
 	session := selectionSession{view: s.selectionView, now: s.selectionNow, slots: s, cache: cache, store: s.resilience.store, cacheKey: s.openAISessionCacheKey, bindings: bindings, marks: &s.selectionFullMarks, bindingTTL: s.openAIStickyBindingTTL(req.GroupID), resetAt: s.resilience.sessionResetAt}
 	bindingKey := s.openAISessionCacheKey(req.SessionHash)
@@ -158,7 +158,7 @@ func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenA
 		if a.Platform != req.Platform || req.RequestedModel != "" && !a.IsModelSupported(req.RequestedModel) {
 			continue
 		}
-		if a.ID != owner.ID && a.Priority < owner.Priority && schedquality.CanTakeOver(selectionState(view, gid, a, req.RequestedModel), selectionAuto(view, now), now) && !s.selectionFullMarks.Recently(a.ID, now) {
+		if a.ID != owner.ID && a.Priority < owner.Priority && (schedquality.StandingOf(selectionState(view, gid, a, req.RequestedModel), selectionAuto(view, gid, now), now) == schedquality.StandFront) && !s.selectionFullMarks.Recently(a.ID, now) {
 			possible = true
 			break
 		}

@@ -20,7 +20,7 @@ func TestSelectionAttemptFlagsFollowSelectedAccount(t *testing.T) {
 			}
 			if mode == "fallback" {
 				for _, id := range []int64{10, 1} {
-					f.view.States[fakeSchedViewKey{7, id, "m"}] = schedquality.StateView{State: schedquality.StateCooling}
+					f.view.States[fakeSchedViewKey{7, id, "m"}] = schedquality.StateView{Failing: true}
 				}
 			}
 			state := resilience.NewRequestState()
