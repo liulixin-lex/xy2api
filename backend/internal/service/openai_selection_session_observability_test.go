@@ -19,7 +19,7 @@ func TestOpenAISelectionSessionTakeoverLogging(t *testing.T) {
 				output := captureSchedObsLogs(t)
 				f := selectionNewSessionFixture()
 				if kind == "migrate" {
-					f.state(f.owner.ID, schedquality.StateView{State: schedquality.StateCooling})
+					f.state(f.owner.ID, schedquality.StateView{Failing: true})
 				}
 				f.binding.casFail = outcome == "conflict"
 				f.binding.casError = outcome == "error"

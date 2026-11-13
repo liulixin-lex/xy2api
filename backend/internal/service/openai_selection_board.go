@@ -88,12 +88,29 @@ func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model s
 		}
 		key := buildSelectionKey(view, groupID, model, account, selectionReq, now)
 		row := SchedBoardRow{AccountID: account.ID, Eligible: ok, Reject: reason, Standing: schedquality.Standing(key.Standing), Priority: key.Priority, Rate: key.Rate, Concurrency: account.Concurrency}
+		row.Name, row.Layer = account.Name, "normal"
+		row.LoadRate, row.LastUsedAt = key.LoadRate, account.LastUsedAt
+		state := selectionState(view, groupID, account, model)
+		override, _ := state.EffectiveOverride(now)
+		row.Exempt = override.Mode == schedquality.OverrideExempt
+		if key.Standing == int(schedquality.StandBack) {
+			row.Layer = "below"
+		}
+		if state.Failing {
+			row.Dims = append([]schedquality.Dimension(nil), state.Dims...)
+			if !state.Until.IsZero() {
+				until := state.Until
+				row.Until = &until
+			}
+		}
 		if !ok {
+			row.Layer = "stopped"
 			if reason == "account_scheduling_threshold" {
 				row.RejectUntil = threshold.Until
 			} else {
 				row.RejectUntil = selectionRejectUntil(ctx, s, account, model, reason, now)
 			}
+			row.Until = row.RejectUntil
 		}
 		currentlyFull := false
 		if load := loads[account.ID]; load != nil {
@@ -104,7 +121,7 @@ func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model s
 			row.RecentlyFullSeconds = max(0, int(now.Sub(at)/time.Second))
 		}
 		idle, takeover := view.TakeoverIdle(groupID)
-		row.CanTakeOver = ok && takeover && idle >= 0 && schedquality.CanTakeOver(selectionState(view, groupID, account, model), selectionAuto(view, now), now) && !currentlyFull && !b.marks.Recently(account.ID, now)
+		row.CanTakeOver = ok && takeover && idle >= 0 && (selectionAuto(view, groupID, now) && schedquality.StandingOf(selectionState(view, groupID, account, model), true, now) == schedquality.StandFront) && !currentlyFull && !b.marks.Recently(account.ID, now)
 		ordered = append(ordered, keyedRow{row, key})
 	}
 	sort.SliceStable(ordered, func(i, j int) bool {
@@ -118,9 +135,7 @@ func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model s
 	})
 	rows := make([]SchedBoardRow, 0, len(ordered))
 	for i, item := range ordered {
-		if item.row.Eligible {
-			item.row.Rank = i + 1
-		}
+		item.row.Rank = i + 1
 		rows = append(rows, item.row)
 	}
 	return rows, nil

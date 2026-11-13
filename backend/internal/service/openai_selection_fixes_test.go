@@ -19,30 +19,13 @@ func TestOpenAISelectionRuntimeFrontPriorityBeforeRateAndLoad(t *testing.T) {
 	require.Equal(t, []int64{1}, f.attempts)
 }
 
-func TestOpenAISelectionRuntimeCoolingRecoveryRestoresPriority(t *testing.T) {
+func TestOpenAISelectionRuntimeBelowRecoveryRestoresPriority(t *testing.T) {
 	f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
 	key := fakeSchedViewKey{7, 1, "m"}
-	f.view.States[key] = schedquality.StateView{State: schedquality.StateCooling}
+	f.view.States[key] = schedquality.StateView{Failing: true}
 	require.Equal(t, int64(2), f.selectNow(t, context.Background(), "", nil).Account.ID)
-	f.view.States[key] = schedquality.StateView{State: schedquality.StateNormal}
+	f.view.States[key] = schedquality.StateView{Failing: false}
 	require.Equal(t, int64(1), f.selectNow(t, context.Background(), "", nil).Account.ID)
-}
-
-func TestOpenAISelectionRuntimeManualBackWithoutAutomaticGate(t *testing.T) {
-	for _, mode := range []string{"gate_disabled", "global_disabled"} {
-		t.Run(mode, func(t *testing.T) {
-			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
-			// With no enabled group policy the published automatic state is normal.
-			f.view.Takeovers = nil
-			f.view.Enabled = mode != "global_disabled"
-			key := fakeSchedViewKey{7, 1, "m"}
-			f.view.States[key] = schedquality.StateView{GroupOverride: schedquality.OverrideRef{Mode: schedquality.OverrideDemote}}
-			require.Equal(t, int64(2), f.selectNow(t, context.Background(), "", nil).Account.ID)
-			require.Equal(t, int64(1), f.selectNow(t, context.Background(), "", map[int64]struct{}{2: {}}).Account.ID, "manual back remains selectable when alone")
-			delete(f.view.States, key)
-			require.Equal(t, int64(1), f.selectNow(t, context.Background(), "", nil).Account.ID, "cancel restores original priority")
-		})
-	}
 }
 
 func TestOpenAISelectionRuntimeCheapTakeoverPreflight(t *testing.T) {

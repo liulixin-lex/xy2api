@@ -130,7 +130,7 @@ func TestOpenAISelectionSessionCacheKey(t *testing.T) {
 				if mode == "idle" {
 					f.view.Takeovers[7] = fakeSchedTakeover{Idle: time.Minute, Enabled: true}
 				} else if mode == "migration" {
-					f.state(f.owner.ID, schedquality.StateView{State: schedquality.StateCooling})
+					f.state(f.owner.ID, schedquality.StateView{Failing: true})
 				}
 				ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
 				result := f.session.selectOwner(ctx, 7, " session ", "m", f.owner, f.candidates, selectionRequest{})
@@ -196,24 +196,16 @@ func TestOpenAISelectionSessionTakeoverRules(t *testing.T) {
 			f.state(1, schedquality.StateView{AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}})
 		}, false},
 		{"exact_view_max_age", func(f *selectionSessionFixture) { f.view.ViewAt = f.now.Add(-60 * time.Second) }, true},
-		{"manual_back", func(f *selectionSessionFixture) {
-			f.state(1, schedquality.StateView{GroupOverride: schedquality.OverrideRef{Mode: schedquality.OverrideDemote}})
+		{"below_target", func(f *selectionSessionFixture) {
+			f.state(1, schedquality.StateView{Failing: true})
 		}, false},
-		{"exempt_cooling", func(f *selectionSessionFixture) {
-			f.state(1, schedquality.StateView{State: schedquality.StateCooling, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}})
+		{"exempt_below", func(f *selectionSessionFixture) {
+			f.state(1, schedquality.StateView{Failing: true, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}})
 		}, true},
-		{"verified_level_four", func(f *selectionSessionFixture) {
-			f.state(1, schedquality.StateView{State: schedquality.StateNormal, Level: 4, Since: f.now})
+		{"normal_without_samples", func(f *selectionSessionFixture) {
+			f.state(1, schedquality.StateView{})
 		}, true},
-		{"unverified_five_minutes", func(f *selectionSessionFixture) {
-			f.state(1, schedquality.StateView{Reason: schedquality.ReasonUnverified, Since: f.now.Add(-5 * time.Minute)})
-		}, false},
-		{"unverified_thirty_minutes", func(f *selectionSessionFixture) {
-			f.state(1, schedquality.StateView{Reason: schedquality.ReasonUnverified, Since: f.now.Add(-30 * time.Minute)})
-		}, true},
-		{"unverified_exempt", func(f *selectionSessionFixture) {
-			f.state(1, schedquality.StateView{Reason: schedquality.ReasonUnverified, Since: f.now, AllOverride: schedquality.OverrideRef{Mode: schedquality.OverrideExempt}})
-		}, true},
+		{"wrong_group", func(f *selectionSessionFixture) { f.candidates[0].GroupIDs = []int64{8} }, false},
 		{"recently_full", func(f *selectionSessionFixture) { f.session.marks.Mark(1, f.now.Add(-59*time.Second)) }, false},
 		{"full_expired", func(f *selectionSessionFixture) { f.session.marks.Mark(1, f.now.Add(-60*time.Second)) }, true},
 		{"same_priority", func(f *selectionSessionFixture) { f.candidates[0].Priority = 5 }, false},
@@ -273,10 +265,7 @@ func TestOpenAISelectionSessionRechecksEveryTakeoverCondition(t *testing.T) {
 		name   string
 		change func(*selectionSessionFixture)
 	}{
-		{"unverified", func(f *selectionSessionFixture) {
-			f.state(1, schedquality.StateView{Reason: schedquality.ReasonUnverified, Since: f.now})
-		}},
-		{"back", func(f *selectionSessionFixture) { f.state(1, schedquality.StateView{State: schedquality.StateCooling}) }},
+		{"back", func(f *selectionSessionFixture) { f.state(1, schedquality.StateView{Failing: true}) }},
 		{"disabled", func(f *selectionSessionFixture) { f.view.Enabled = false }},
 		{"stale", func(f *selectionSessionFixture) { f.view.ViewAt = f.now.Add(-61 * time.Second) }},
 		{"priority", func(f *selectionSessionFixture) { f.candidates[0].Priority = 5 }},
@@ -307,20 +296,20 @@ func TestOpenAISelectionSessionMigration(t *testing.T) {
 		want  bool
 	}{
 		{"back_owner", func(*selectionSessionFixture) {}, true},
-		{"unverified_target", func(f *selectionSessionFixture) {
-			f.state(1, schedquality.StateView{Reason: schedquality.ReasonUnverified, Since: f.now})
+		{"normal_without_samples", func(f *selectionSessionFixture) {
+			f.state(1, schedquality.StateView{})
 		}, true},
-		{"no_target", func(f *selectionSessionFixture) { f.state(1, schedquality.StateView{State: schedquality.StateCooling}) }, false},
+		{"no_target", func(f *selectionSessionFixture) { f.state(1, schedquality.StateView{Failing: true}) }, false},
 		{"slot_full", func(f *selectionSessionFixture) { f.slots.failed[1] = true }, false},
 		{"target_became_back", func(f *selectionSessionFixture) {
-			f.slots.after = func(int64) { f.state(1, schedquality.StateView{State: schedquality.StateCooling}) }
+			f.slots.after = func(int64) { f.state(1, schedquality.StateView{Failing: true}) }
 		}, false},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
 			f := selectionNewSessionFixture()
 			f.candidates = f.candidates[:1]
-			f.state(10, schedquality.StateView{State: schedquality.StateCooling})
+			f.state(10, schedquality.StateView{Failing: true})
 			tt.setup(f)
 			result := f.selectNow(context.Background())
 			if tt.want {
@@ -341,7 +330,7 @@ func TestOpenAISelectionSessionLatestViewFailureTriesSecond(t *testing.T) {
 	f := selectionNewSessionFixture()
 	f.slots.after = func(id int64) {
 		if id == 1 {
-			f.state(1, schedquality.StateView{Reason: schedquality.ReasonUnverified, Since: f.now})
+			f.state(1, schedquality.StateView{Failing: true})
 		}
 	}
 	result := f.selectNow(context.Background())

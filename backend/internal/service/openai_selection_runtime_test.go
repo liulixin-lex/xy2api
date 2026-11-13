@@ -159,7 +159,7 @@ func TestOpenAISelectionRuntimeStandingPriorityRateAndBoard(t *testing.T) {
 			a, b, c, d := selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2), selectionFixtureAccount(3, 2), selectionFixtureAccount(4, 3)
 			a.RateMultiplier, b.RateMultiplier, c.RateMultiplier, d.RateMultiplier = floatPtr(0), floatPtr(.8), floatPtr(.2), floatPtr(0)
 			f := newSelectionRuntimeFixture(t, a, b, c, d)
-			f.view.States[fakeSchedViewKey{7, 1, "m"}] = schedquality.StateView{State: schedquality.StateCooling}
+			f.view.States[fakeSchedViewKey{7, 1, "m"}] = schedquality.StateView{Failing: true}
 			f.loads.acquireResults = map[int64]bool{1: true, 2: false, 3: false, 4: false}
 			f.loads.loadMap = map[int64]*AccountLoadInfo{3: {LoadRate: 90}, 2: {LoadRate: 0}, 4: {LoadRate: 0}}
 			if unavailable {
@@ -184,7 +184,7 @@ func TestOpenAISelectionRuntimeStandingPriorityRateAndBoard(t *testing.T) {
 	t.Run("all back still selects", func(t *testing.T) {
 		f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
 		for _, id := range []int64{1, 2} {
-			f.view.States[fakeSchedViewKey{7, id, "m"}] = schedquality.StateView{State: schedquality.StateCooling}
+			f.view.States[fakeSchedViewKey{7, id, "m"}] = schedquality.StateView{Failing: true}
 		}
 		require.Equal(t, int64(1), f.selectNow(t, context.Background(), "", nil).Account.ID)
 	})
@@ -207,7 +207,7 @@ func TestOpenAISelectionRuntimeSessionCacheAndOwnerSlotOrder(t *testing.T) {
 					f.cache.remaining = f.svc.openAIStickyBindingTTL(ptrInt64Selection(7)) - 2*time.Minute
 				}
 				if mode == "migration" {
-					f.view.States[fakeSchedViewKey{7, 10, "m"}] = schedquality.StateView{State: schedquality.StateCooling}
+					f.view.States[fakeSchedViewKey{7, 10, "m"}] = schedquality.StateView{Failing: true}
 				}
 				result := f.selectNow(t, ctx, "session", nil)
 				require.Equal(t, int64(1), result.Account.ID)
@@ -247,7 +247,7 @@ func TestOpenAISelectionRuntimeCandidatePoolAndLatestView(t *testing.T) {
 		f.cache.sessionBindings["openai:session"] = 10
 		f.loads.after = func(id int64) {
 			if id == 1 {
-				f.view.States[fakeSchedViewKey{7, 1, "m"}] = schedquality.StateView{State: schedquality.StateCooling}
+				f.view.States[fakeSchedViewKey{7, 1, "m"}] = schedquality.StateView{Failing: true}
 			}
 		}
 		require.Equal(t, int64(10), f.selectNow(t, context.Background(), "session", nil).Account.ID)

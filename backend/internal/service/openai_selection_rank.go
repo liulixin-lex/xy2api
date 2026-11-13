@@ -31,7 +31,7 @@ var selectionStaleViewWarning struct {
 	at time.Time
 }
 
-func selectionAuto(view schedquality.View, now time.Time) bool {
+func selectionAuto(view schedquality.View, groupID int64, now time.Time) bool {
 	if view == nil {
 		return false
 	}
@@ -44,7 +44,7 @@ func selectionAuto(view schedquality.View, now time.Time) bool {
 		selectionStaleViewWarning.Unlock()
 		return false
 	}
-	return view.GlobalEnabled()
+	return view.GlobalEnabled() && view.GroupEnabled(groupID)
 }
 
 func selectionState(view schedquality.View, groupID int64, account *Account, model string) schedquality.StateView {
@@ -56,7 +56,7 @@ func selectionState(view schedquality.View, groupID int64, account *Account, mod
 
 func buildSelectionKey(view schedquality.View, groupID int64, model string, acc *Account, req selectionRequest, now time.Time) selectionKey {
 	key := selectionKey{
-		Standing: int(schedquality.StandingOf(selectionState(view, groupID, acc, model), !req.ManualOnly && selectionAuto(view, now), now)),
+		Standing: int(schedquality.StandingOf(selectionState(view, groupID, acc, model), !req.ManualOnly && selectionAuto(view, groupID, now), now)),
 		Priority: acc.Priority, RateKnown: !req.TokenBilled, ID: acc.ID,
 	}
 	if req.TokenBilled {
