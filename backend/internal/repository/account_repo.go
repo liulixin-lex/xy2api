@@ -2326,7 +2326,7 @@ func (r *accountRepository) ListSchedulableCapacityByGroupIDs(ctx context.Contex
 			AND (a.expires_at IS NULL OR a.expires_at > $3 OR a.auto_pause_on_expired = FALSE)
 			AND (a.overload_until IS NULL OR a.overload_until <= $3)
 			AND (a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at <= $3)
-		ORDER BY ag.group_id ASC, ag.priority ASC, a.priority ASC, a.id ASC
+		ORDER BY ag.group_id ASC, a.priority ASC, a.id ASC
 	`, pq.Array(groupIDs), service.StatusActive, time.Now())
 	if err != nil {
 		return nil, err

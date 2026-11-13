@@ -4,7 +4,6 @@ package service
 
 import (
 	"bytes"
-	"container/list"
 	"log/slog"
 	"math"
 	"strings"
@@ -30,10 +29,8 @@ func TestOpenAISelectionComparator(t *testing.T) {
 	}{
 		{"standing", selectionKey{Standing: 0, Priority: 2}, selectionKey{Standing: 1, Priority: 1}},
 		{"priority", selectionKey{Priority: 1, Rate: 100, LoadRate: 100}, selectionKey{Priority: 2, Rate: 0, LoadRate: 0}},
-		{"rate", selectionKey{RateKnown: true, Rate: 1, Affinity: 1, LoadRate: 100}, selectionKey{RateKnown: true, Rate: 2}},
-		{"known_before_unknown_rate", selectionKey{RateKnown: true, Rate: 100, Affinity: 1, LoadRate: 100}, selectionKey{}},
-		{"unknown_rates_use_affinity", selectionKey{Affinity: 0, ID: 2}, selectionKey{Affinity: 1, ID: 1}},
-		{"affinity", selectionKey{Affinity: 0, LoadRate: 100}, selectionKey{Affinity: 1}},
+		{"rate", selectionKey{RateKnown: true, Rate: 1, LoadRate: 100}, selectionKey{RateKnown: true, Rate: 2}},
+		{"known_before_unknown_rate", selectionKey{RateKnown: true, Rate: 100, LoadRate: 100}, selectionKey{}},
 		{"load", selectionKey{LoadRate: 1, LastUsed: 100}, selectionKey{LoadRate: 2}},
 		{"last_used", selectionKey{LastUsed: 0, ID: 2}, selectionKey{LastUsed: 1, ID: 1}},
 		{"id", selectionKey{ID: 1}, selectionKey{ID: 2}},
@@ -93,9 +90,7 @@ func TestOpenAISelectionKeyInputs(t *testing.T) {
 	ra, rb := 2.0, 1.0
 	a.RateMultiplier = &ra
 	b.RateMultiplier = &rb
-	recent := &openAIRecentSessionSuccess{entries: make(map[openAIRecentSessionKey]*list.Element)}
-	recent.record(openAIRecentSessionKey{7, "session", "m"}, a.ID, now)
-	req := selectionRequest{SessionHash: "session", Recent: recent}
+	req := selectionRequest{}
 	ak, bk := buildSelectionKey(view, 7, "m", a, req, now), buildSelectionKey(view, 7, "m", b, req, now)
 	require.Equal(t, 0, ak.LoadRate)
 	require.Equal(t, 0, bk.LoadRate)

@@ -28,7 +28,7 @@ func (s *OpenAIGatewayService) selectionNow() time.Time {
 }
 
 func (s *OpenAIGatewayService) selectionRequest(ctx context.Context, req OpenAIAccountScheduleRequest, loads map[int64]*AccountLoadInfo) selectionRequest {
-	return selectionRequest{ManualOnly: openAISelectionManualOnly(ctx), TokenBilled: req.UseUpstreamTokenCost, RequireCompact: req.RequireCompact, SessionHash: req.SessionHash, Loads: loads, Recent: s.recentSessionSuccess(), OAuthRateMultiplier: s.openAIOAuthSchedulingRateMultiplier(ctx)}
+	return selectionRequest{ManualOnly: openAISelectionManualOnly(ctx), TokenBilled: req.UseUpstreamTokenCost, RequireCompact: req.RequireCompact, Loads: loads, OAuthRateMultiplier: s.openAIOAuthSchedulingRateMultiplier(ctx)}
 }
 
 func (s *OpenAIGatewayService) sortSelectionAccounts(ctx context.Context, accounts []*Account, req OpenAIAccountScheduleRequest, loads map[int64]*AccountLoadInfo) {

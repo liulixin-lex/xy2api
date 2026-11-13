@@ -214,7 +214,9 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	useUpstreamTokenCost bool,
 ) (selection *AccountSelectionResult, decision OpenAIAccountScheduleDecision, err error) {
 	sessionHash = monitorProbeSessionHash(ctx, sessionHash)
-	if NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && strings.TrimSpace(previousResponseID) == "" && (requiredTransport == OpenAIUpstreamTransportAny || requiredTransport == OpenAIUpstreamTransportHTTPSSE) && !openAINoStickyMigration(ctx) && !openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx) {
+	ctx = withOpenAIStickyMigrationGuard(ctx, previousResponseID, requiredTransport)
+	defer func() { s.recordOpenAISelectionFlags(ctx, groupID, requestedModel, selection) }()
+	if NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx) {
 		s.prepareOpenAIStickyChange(ctx, groupID, sessionHash)
 		defer func() { planOpenAIStickyReplacement(ctx, groupID, sessionHash, requestedModel, selection) }()
 	}
