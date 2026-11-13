@@ -42,14 +42,17 @@ type schedQualityView struct {
 	version       int64
 	at            time.Time
 	globalEnabled bool
+	resets        map[int64]time.Time
 	states        map[schedQualityKey]schedquality.StateView
 	policies      map[int64]SchedPolicyRecord
 	overrides     map[int64][]SchedOverride
 }
 
-func (v *schedQualityView) Version() int64      { return v.version }
-func (v *schedQualityView) At() time.Time       { return v.at }
-func (v *schedQualityView) GlobalEnabled() bool { return v.globalEnabled }
+func (v *schedQualityView) Version() int64            { return v.version }
+func (v *schedQualityView) At() time.Time             { return v.at }
+func (v *schedQualityView) GlobalEnabled() bool       { return v.globalEnabled }
+func (v *schedQualityView) GroupEnabled(g int64) bool { return v.policies[g].Policy.Enabled }
+func (v *schedQualityView) ResetAt(a int64) time.Time { return v.resets[a] }
 func (v *schedQualityView) StateOf(g, a int64, m string) schedquality.StateView {
 	state := v.states[schedQualityKey{a, m, g}]
 	state.GroupOverride = overrideRef(v.overrides[a], g)
@@ -84,7 +87,7 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []schedq
 		active[o.AccountID] = append(active[o.AccountID], o)
 	}
 	keys, rows := s.rowKeys(d, states)
-	view := &schedQualityView{version: version, at: evaluatedAt, globalEnabled: d.globalEnabled, states: make(map[schedQualityKey]schedquality.StateView), policies: cloneSchedPolicies(s.policies), overrides: active}
+	view := &schedQualityView{version: version, at: evaluatedAt, resets: cloneResetTimes(resets), globalEnabled: d.globalEnabled, states: make(map[schedQualityKey]schedquality.StateView), policies: cloneSchedPolicies(s.policies), overrides: active}
 	evidence := make(map[SchedAccountModel]schedquality.Summary)
 	for pair := range d.samples {
 		evidence[pair] = d.summary(pair, resets[pair.AccountID])
@@ -275,4 +278,12 @@ func cloneSchedQualityTest(r SchedTestRecord) SchedTestRecord {
 		t.CacheReadTokens = schedQualityCloneInt(t.CacheReadTokens)
 	}
 	return r
+}
+
+func (s *SchedQualitySnapshot) Account(id int64) schedquality.AccountSummary {
+	return s.Accounts[id]
+}
+
+func (s *SchedQualitySnapshot) RowsForAccount(id int64) []SchedGroupRow {
+	return s.GroupRows[id]
 }

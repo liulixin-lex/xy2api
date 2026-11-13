@@ -242,3 +242,6 @@ func (s *OpenAIGatewayService) isAccountRequestCompatibleReason(ctx context.Cont
 
 	return true, ""
 }
+
+func (emptySelectionView) GroupEnabled(int64) bool { return false }
+func (emptySelectionView) ResetAt(int64) time.Time { return time.Time{} }

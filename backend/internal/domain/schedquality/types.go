@@ -229,6 +229,9 @@ type OverrideRef struct {
 	Expires time.Time
 } // zero Expires = no expiry
 type StateView struct {
+	Failing                    bool
+	Dims                       []Dimension
+	EvidenceSince              time.Time
 	State                      State
 	Level                      int
 	Reason                     Reason
@@ -242,6 +245,8 @@ type View interface {
 	Version() int64
 	At() time.Time // when this view was built
 	GlobalEnabled() bool
+	GroupEnabled(groupID int64) bool
+	ResetAt(accountID int64) time.Time
 	StateOf(groupID, accountID int64, model string) StateView
 	TakeoverIdle(groupID int64) (idle time.Duration, enabled bool)
 }

@@ -3670,3 +3670,9 @@ func TestFCOL63HTTPContextStillPassesIngress(t *testing.T) {
 		})
 	}
 }
+
+func (wsPinnedQualityView) GroupEnabled(int64) bool { return true }
+func (wsPinnedQualityView) ResetAt(int64) time.Time { return time.Time{} }
+
+func (*wsTurnQualityView) GroupEnabled(int64) bool { return true }
+func (*wsTurnQualityView) ResetAt(int64) time.Time { return time.Time{} }

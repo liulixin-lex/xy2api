@@ -87,7 +87,8 @@ type SchedPolicyRecord struct {
 	Policy           schedquality.Policy
 	FromV3           bool
 }
-type SchedQualitySnapshot struct { // immutable; everything the admin API shows comes from one snapshot
+type SchedQualitySnapshot struct {
+	Accounts                    map[int64]schedquality.AccountSummary // immutable; everything the admin API shows comes from one snapshot
 	Version                     int64
 	At                          time.Time
 	GlobalEnabled, TestsEnabled bool
@@ -101,11 +102,12 @@ type SchedQualitySnapshot struct { // immutable; everything the admin API shows 
 	ResetAt                     map[int64]time.Time
 }
 type SchedGroupRow struct {
-	GroupID int64
-	Model   string
-	View    schedquality.StateView
-	Summary schedquality.Summary     // the window this row is judged on (starts at row.Since when a row exists)
-	Test    schedquality.TestSummary // the tests pooled for this row (zero value when none)
+	Evaluation schedquality.Evaluation
+	GroupID    int64
+	Model      string
+	View       schedquality.StateView
+	Summary    schedquality.Summary     // the window this row is judged on (starts at row.Since when a row exists)
+	Test       schedquality.TestSummary // the tests pooled for this row (zero value when none)
 }
 type SchedQualityEngine interface {
 	Start(ctx context.Context)
