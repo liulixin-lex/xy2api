@@ -159,6 +159,12 @@ export default {
       takeover: '接管',
       switches: '换号 {n} 次',
       attempts: '尝试',
+      tip: {
+        cacheTtl: '缓存写入已调整',
+        cacheHitRate: '读 ÷ 全部输入',
+        longContext: '长上下文计费',
+        tps: '输出 ÷ 总耗时',
+      },
       col: {
         result: '结果',
         firstToken: '首字',
