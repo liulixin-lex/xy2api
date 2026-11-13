@@ -99,6 +99,7 @@ type RequestState struct {
 	sessionGroupID int64
 	sessionHash    string
 	sessionRec     SessionRecorder
+	stickyChange   any // Service-owned pending binding change; completed by the send lifecycle.
 
 	// turn identifies the conversation for the failed-turn cap (design
 	// §9.7); turnFailed is set once the request counted as a failure.

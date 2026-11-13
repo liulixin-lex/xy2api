@@ -91,8 +91,6 @@ type ResilienceService struct {
 	// failingSessions marks sessions with failure counts on this instance
 	// (key -> expiry) so successes only reset counts when needed.
 	failingSessions sync.Map
-	// avoidingSessions marks sessions with avoid entries (key -> expiry).
-	avoidingSessions sync.Map
 	// terminalRejections holds bounded, instance-local refusal evidence.
 	terminalRejections openAITerminalRejectionTracker
 	// postOutput counts recent failures after output per account for the

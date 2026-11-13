@@ -936,7 +936,14 @@ func resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel string) strin
 }
 
 func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, stickyAccountID int64, requiredCapability OpenAIEndpointCapability, preferLowUpstreamRate bool) (*Account, error) {
+	excludedIDs = mergeExcluded(excludedIDs, s.stickyChangeAvoid(ctx, groupID, sessionHash))
+	if NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !openAINoStickyMigration(ctx) && !openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx) {
+		s.prepareOpenAIStickyChange(ctx, groupID, sessionHash)
+	}
 	account, _, err := s.selectAccountForModelWithExclusionsStickyHit(ctx, groupID, platform, sessionHash, requestedModel, excludedIDs, requireCompact, stickyAccountID, requiredCapability, preferLowUpstreamRate)
+	if err == nil {
+		planOpenAIStickyReplacement(ctx, groupID, sessionHash, requestedModel, &AccountSelectionResult{Account: account})
+	}
 	return account, err
 }
 
@@ -1150,6 +1157,11 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 }
 
 func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, useUpstreamTokenCost bool) (selection *AccountSelectionResult, selectionErr error) {
+	excludedIDs = mergeExcluded(excludedIDs, s.stickyChangeAvoid(ctx, groupID, sessionHash))
+	if NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !openAINoStickyMigration(ctx) && !openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx) {
+		s.prepareOpenAIStickyChange(ctx, groupID, sessionHash)
+		defer func() { planOpenAIStickyReplacement(ctx, groupID, sessionHash, requestedModel, selection) }()
+	}
 	resilience.StateFrom(ctx).ResetStickyBypassReason()
 	defer func() { selectionErr = capabilitySelectionError(ctx, selectionErr) }()
 	if cache, atomic := s.cache.(OpenAIStickyAtomicCache); atomic && openAIAtomicStickySession(sessionHash) && NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !s.qualityOwnsSticky(ctx, groupID, sessionHash) && ctx.Value(openAIStickyReconciledKey{}) == nil {

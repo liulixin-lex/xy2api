@@ -630,7 +630,6 @@ func (s *OpenAIGatewayService) AvoidOpenAIStateAccount(ctx context.Context, grou
 		avoid = 10 * time.Minute
 	}
 	_ = s.resilience.store.AddSessionAvoid(ctx, groupID, sessionHash, accountID, avoid)
-	s.resilience.avoidingSessions.Store(sessionMarkKey(groupID, sessionHash), time.Now().Add(avoid))
 	_ = s.deleteStickySessionAccountIDIfOwner(ctx, &groupID, sessionHash, accountID)
 	resilience.StateFrom(ctx).AddAvoided(accountID)
 }
@@ -667,7 +666,6 @@ func (rec *sessionFailureRecorder) Failure(ctx context.Context, groupID int64, s
 	}
 	avoid := time.Duration(cfg.Session.AvoidSeconds) * time.Second
 	_ = rec.r.store.AddSessionAvoid(stateCtx, groupID, sessionHash, accountID, avoid)
-	rec.r.avoidingSessions.Store(sessionMarkKey(groupID, sessionHash), time.Now().Add(avoid))
 	// The request that hit the streak must not keep or restore the binding.
 	resilience.StateFrom(ctx).AddAvoided(accountID)
 	_ = rec.r.store.ClearSessionFailure(stateCtx, groupID, sessionHash, accountID)
@@ -729,7 +727,7 @@ func (r *ResilienceService) sessionMarkLoop(ctx context.Context) {
 func (r *ResilienceService) sweepSessionMarks(now time.Time) {
 	r.postOutput.sweep(now)
 	r.lastResortGroups.sweep(now)
-	for _, m := range []*sync.Map{&r.failingSessions, &r.avoidingSessions} {
+	for _, m := range []*sync.Map{&r.failingSessions} {
 		m.Range(func(k, v any) bool {
 			if until, ok := v.(time.Time); !ok || now.After(until) {
 				m.Delete(k)
@@ -789,11 +787,8 @@ func (r *ResilienceService) sessionAvoid(ctx context.Context, groupID *int64, se
 	if r == nil || r.store == nil || sessionHash == "" || !resilience.Current().SessionOn() {
 		return nil
 	}
-	// Only sessions that hit a failure streak on this instance carry avoid
-	// entries worth a Redis read; every other request skips it.
-	if !r.sessionMayAvoid(derefGroupID(groupID), sessionHash) {
-		return nil
-	}
+	// A different instance may have recorded a failure. Local marks cannot
+	// establish that the shared avoidance set is empty.
 	avoid, err := r.store.SessionAvoid(ctx, derefGroupID(groupID), sessionHash)
 	if err != nil || len(avoid) == 0 {
 		return nil
@@ -815,17 +810,4 @@ func mergeExcluded(base, extra map[int64]struct{}) map[int64]struct{} {
 		out[k] = struct{}{}
 	}
 	return out
-}
-
-func (r *ResilienceService) sessionMayAvoid(groupID int64, sessionHash string) bool {
-	key := sessionMarkKey(groupID, sessionHash)
-	v, ok := r.avoidingSessions.Load(key)
-	if !ok {
-		return false
-	}
-	if until, _ := v.(time.Time); time.Now().After(until) {
-		r.avoidingSessions.Delete(key)
-		return false
-	}
-	return true
 }

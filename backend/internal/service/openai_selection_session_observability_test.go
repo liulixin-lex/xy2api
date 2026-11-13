@@ -27,8 +27,12 @@ func TestOpenAISelectionSessionTakeoverLogging(t *testing.T) {
 				ctx := resilience.WithRequestState(context.WithValue(context.Background(), ctxkey.RequestID, "client-chosen"), state)
 				result := f.selectNow(ctx)
 				if outcome != "success" {
-					require.Nil(t, result)
-					require.Empty(t, schedObsLogRecords(t, output))
+					require.NotNil(t, result)
+					result.ReleaseFunc()
+					require.Equal(t, int64(10), f.binding.owner)
+					for _, row := range schedObsLogRecords(t, output) {
+						require.NotEqual(t, "sched_quality.takeover", row["msg"])
+					}
 					require.Zero(t, f.slots.held)
 					return
 				}
