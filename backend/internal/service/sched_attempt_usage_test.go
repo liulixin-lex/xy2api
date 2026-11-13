@@ -20,7 +20,7 @@ func TestSchedUsagePreservesAllInputBuckets(t *testing.T) {
 		{"uncached", &OpenAIUsage{InputTokens: 1000}, &SchedAttemptUsage{PromptTokens: 1000, InputTokens: 1000}},
 		{"read and write", &OpenAIUsage{InputTokens: 1000, CacheReadInputTokens: 300, CacheCreationInputTokens: 100}, &SchedAttemptUsage{PromptTokens: 1000, InputTokens: 600, CacheReadTokens: 300, CacheCreationTokens: 100}},
 		{"all cached", &OpenAIUsage{InputTokens: 1000, CacheReadInputTokens: 700, CacheCreationInputTokens: 300}, &SchedAttemptUsage{PromptTokens: 1000, CacheReadTokens: 700, CacheCreationTokens: 300}},
-		{"cache evidence without total", &OpenAIUsage{CacheReadInputTokens: 300, CacheCreationInputTokens: 100}, &SchedAttemptUsage{CacheReadTokens: 300, CacheCreationTokens: 100}},
+		{"cache evidence without total", &OpenAIUsage{CacheReadInputTokens: 300, CacheCreationInputTokens: 100}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, schedUsage(tc.usage))
