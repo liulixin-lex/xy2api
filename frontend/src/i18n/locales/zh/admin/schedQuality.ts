@@ -195,7 +195,7 @@ export default {
       off: '关',
       gate: '质量门槛',
       ttft: '首字上限',
-      error: '错误上限',
+      error: '报错上限',
       cache: '缓存下限',
       takeover: '接管',
       takeoverOff: '关',

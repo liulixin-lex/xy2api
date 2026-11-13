@@ -6,7 +6,7 @@
       v-for="item in capsules.slice(0, MAX_SHOWN)"
       :key="item.key"
       type="button"
-      :class="['sq-capsule sq-focus', item.exempt ? 'sq-capsule--manual' : 'sq-capsule--cool', { 'sq-capsule--all': item.groupId === 0 }]"
+      :class="['sq-capsule sq-focus', item.exempt ? 'sq-capsule--manual' : 'sq-capsule--cool']"
       :data-sq-capsule="item.key"
       @click.stop="emit('open', { groupId: item.groupId || null, model: item.model })"
     >
