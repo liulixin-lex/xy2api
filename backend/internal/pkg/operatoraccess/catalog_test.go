@@ -14,7 +14,7 @@ import (
 
 func TestCatalogKeysAreWellFormed(t *testing.T) {
 	keys := Keys()
-	require.Len(t, keys, 542)
+	require.Len(t, keys, 543)
 	require.True(t, sort.StringsAreSorted(keys))
 	seen := map[string]bool{}
 	for _, key := range keys {
@@ -28,6 +28,13 @@ func TestCatalogKeysAreWellFormed(t *testing.T) {
 	require.Equal(t, "GET /accounts/:id", Key("GET", AdminPrefix+"/accounts/:id"))
 	require.Equal(t, "GET /api/v1/pages", Key("GET", "/api/v1/pages"))
 	require.Equal(t, "GET /api/v1/administer/x", Key("GET", "/api/v1/administer/x"))
+}
+
+func TestUsageAttemptsRequireUsageView(t *testing.T) {
+	e, ok := Lookup("GET /usage/attempts")
+	require.True(t, ok)
+	require.Empty(t, Decide(e, ok, Permissions{Modules: map[Module]Level{ModuleUsage: LevelView}}).Reason)
+	require.NotEmpty(t, Decide(e, ok, Permissions{Modules: map[Module]Level{ModuleAccounts: LevelView}}).Reason)
 }
 func TestCatalogEntriesAreConsistent(t *testing.T) {
 	targets := strings.Fields("user_path_id user_path_user_id user_body_id user_body_ids apikey_owner sub_owner sub_body_owners order_owner group_rate_rows group_rpm_rows group_members attribute_value_owners")
@@ -102,7 +109,7 @@ func TestCatalogMatchesApprovedTable(t *testing.T) {
 	raw, err := os.ReadFile("testdata/pra_catalog.json")
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(raw, &rows))
-	require.Len(t, rows, 542)
+	require.Len(t, rows, 543)
 	keys := []string{}
 	used := map[FieldRule]bool{}
 	for _, row := range rows {

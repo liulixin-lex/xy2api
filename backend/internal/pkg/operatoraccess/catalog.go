@@ -585,6 +585,7 @@ var catalog = map[string]Entry{
 	"POST /usage/exports/:id/download-ticket":                                  {Kind: KindModule, Module: "usage", Level: LevelView, Flags: []Flag{"data.export"}},
 	"GET /usage/search-api-keys":                                               {Kind: KindModule, Module: "usage", Level: LevelView},
 	"GET /usage/search-users":                                                  {Kind: KindModule, Module: "usage", Level: LevelView, AnyOf: []Module{"subscriptions"}},
+	"GET /usage/attempts":                                                      {Kind: KindModule, Module: "usage", Level: LevelView},
 	"GET /usage/stats":                                                         {Kind: KindModule, Module: "usage", Level: LevelView},
 	"GET /user-attributes":                                                     {Kind: KindModule, Module: "users", Level: LevelView},
 	"POST /user-attributes":                                                    {Kind: KindModule, Module: "users", Level: LevelManage},
