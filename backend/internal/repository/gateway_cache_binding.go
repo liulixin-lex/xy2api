@@ -37,7 +37,11 @@ func (c *gatewayCache) GetSessionBinding(ctx context.Context, groupID int64, ses
 }
 
 var commitSessionBindingScript = redis.NewScript(`
-if redis.call('GET', KEYS[1]) ~= ARGV[1] or redis.call('GET', KEYS[2]) ~= ARGV[2] then return 0 end
+if ARGV[1] == '0' and ARGV[2] == '' then
+  if redis.call('EXISTS', KEYS[1]) == 1 or (#KEYS == 4 and redis.call('EXISTS', KEYS[3]) == 1) then return 0 end
+else
+  if redis.call('GET', KEYS[1]) ~= ARGV[1] or redis.call('GET', KEYS[2]) ~= ARGV[2] then return 0 end
+end
 redis.call('SET', KEYS[1], ARGV[3], 'PX', ARGV[5])
 redis.call('SET', KEYS[2], ARGV[4], 'PX', ARGV[5])
 if #KEYS == 4 and redis.call('EXISTS', KEYS[3]) == 1 then
@@ -48,7 +52,7 @@ return 1
 `)
 
 func (c *gatewayCache) CommitSessionBinding(ctx context.Context, groupID int64, sessionHash string, expected service.StickySessionBinding, target int64, ttl time.Duration) (bool, error) {
-	if expected.AccountID <= 0 || expected.Generation == "" || target <= 0 || sessionHash == "" || ttl <= 0 {
+	if expected.AccountID < 0 || (expected.AccountID == 0) != (expected.Generation == "") || target <= 0 || sessionHash == "" || ttl <= 0 {
 		return false, errors.New("invalid versioned sticky binding replacement")
 	}
 	keys := sessionBindingKeys(groupID, sessionHash)

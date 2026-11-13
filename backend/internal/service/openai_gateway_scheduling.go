@@ -937,7 +937,7 @@ func resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel string) strin
 
 func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, stickyAccountID int64, requiredCapability OpenAIEndpointCapability, preferLowUpstreamRate bool) (*Account, error) {
 	excludedIDs = mergeExcluded(excludedIDs, s.stickyChangeAvoid(ctx, groupID, sessionHash))
-	if NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !openAINoStickyMigration(ctx) && !openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx) {
+	if NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx) {
 		s.prepareOpenAIStickyChange(ctx, groupID, sessionHash)
 	}
 	account, _, err := s.selectAccountForModelWithExclusionsStickyHit(ctx, groupID, platform, sessionHash, requestedModel, excludedIDs, requireCompact, stickyAccountID, requiredCapability, preferLowUpstreamRate)
@@ -1160,28 +1160,12 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, useUpstreamTokenCost bool) (selection *AccountSelectionResult, selectionErr error) {
 	defer func() { s.recordOpenAISelectionFlags(ctx, groupID, requestedModel, selection) }()
 	excludedIDs = mergeExcluded(excludedIDs, s.stickyChangeAvoid(ctx, groupID, sessionHash))
-	if NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !openAINoStickyMigration(ctx) && !openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx) {
+	if NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx) {
 		s.prepareOpenAIStickyChange(ctx, groupID, sessionHash)
 		defer func() { planOpenAIStickyReplacement(ctx, groupID, sessionHash, requestedModel, selection) }()
 	}
 	resilience.StateFrom(ctx).ResetStickyBypassReason()
 	defer func() { selectionErr = capabilitySelectionError(ctx, selectionErr) }()
-	if cache, atomic := s.cache.(OpenAIStickyAtomicCache); atomic && openAIAtomicStickySession(sessionHash) && NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !s.qualityOwnsSticky(ctx, groupID, sessionHash) && ctx.Value(openAIStickyReconciledKey{}) == nil {
-		initialOwner, _ := s.getStickySessionAccountID(ctx, groupID, sessionHash)
-		defer func() {
-			if selectionErr != nil || selection == nil || selection.Account == nil || initialOwner > 0 || gatewayProfitControlGateActive(ctx) {
-				return
-			}
-			owner, err := cache.ClaimSessionAccountID(ctx, derefGroupID(groupID), s.openAISessionCacheKey(sessionHash), selection.Account.ID, 30*time.Second, false)
-			if err != nil || owner <= 0 || owner == selection.Account.ID {
-				return
-			}
-			if selection.ReleaseFunc != nil {
-				selection.ReleaseFunc()
-			}
-			selection, selectionErr = s.selectAccountWithLoadAwareness(context.WithValue(ctx, openAIStickyReconciledKey{}, owner), groupID, platform, sessionHash, requestedModel, excludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost)
-		}()
-	}
 	platform = NormalizeOpenAICompatiblePlatform(platform)
 	if s.checkChannelPricingRestriction(ctx, groupID, requestedModel) {
 		slog.Warn("channel pricing restriction blocked request",

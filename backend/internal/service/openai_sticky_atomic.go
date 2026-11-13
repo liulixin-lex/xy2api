@@ -17,7 +17,6 @@ type OpenAIStickyAtomicCache interface {
 }
 
 type openAIStickyPromotionKey struct{}
-type openAIStickyReconciledKey struct{}
 
 func openAIAtomicStickySession(sessionHash string) bool {
 	return strings.HasPrefix(sessionHash, "v2:")
