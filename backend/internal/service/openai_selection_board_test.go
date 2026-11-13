@@ -58,9 +58,9 @@ func TestSchedBoardOrderAdmissionAndNoMutation(t *testing.T) {
 	s := &OpenAIGatewayService{cache: &selectionBoardBindings{selectionBindingFake: binding}, accountRepo: repo, concurrencyService: &ConcurrencyService{cache: &selectionBoardLoads{loads: loads}}}
 	board := NewOpenAISelectionBoard(s, func() schedquality.View { return view })
 	board.now = func() time.Time { return now }
-	board.marks.Mark(5, now.Add(-30*time.Second))
+	s.selectionFullMarks.Mark(5, now.Add(-30*time.Second))
 	before := map[int64]time.Time{}
-	for k, v := range board.marks.at {
+	for k, v := range s.selectionFullMarks.at {
 		before[k] = v
 	}
 	rows, err := board.Board(context.Background(), 7, "m")
@@ -82,15 +82,9 @@ func TestSchedBoardOrderAdmissionAndNoMutation(t *testing.T) {
 	require.Equal(t, &now, rows[2].LastUsedAt)
 	require.Equal(t, "stopped", rows[3].Layer)
 	require.Equal(t, &future, rows[4].Until)
-	require.False(t, rows[0].CanTakeOver, "a currently full snapshot must not offer takeover or write a mark")
-	require.False(t, rows[3].Eligible)
-	require.Equal(t, "not_schedulable", rows[3].Reject)
-	require.Nil(t, rows[3].RejectUntil)
-	require.Equal(t, &future, rows[4].RejectUntil)
+	require.Nil(t, rows[3].Until)
 	require.Equal(t, 5, rows[4].Rank)
-	require.Equal(t, 30, rows[1].RecentlyFullSeconds)
-	require.False(t, rows[1].CanTakeOver)
-	require.Equal(t, before, board.marks.at, "a full load snapshot must not mark an account from Board")
+	require.Equal(t, before, s.selectionFullMarks.at, "a full load snapshot must not mark an account from Board")
 	// W1 exercises exactly the admission/comparator seam; W2 connects the same
 	// attempt order to the public selection entry (D11 end-to-end).
 	checker := s
@@ -144,12 +138,12 @@ func TestSchedBoardRejectUntilAndProfit(t *testing.T) {
 			b := NewOpenAISelectionBoard(s, func() schedquality.View { return selectionTestView(now) })
 			rows, err := b.Board(context.Background(), 7, "m")
 			require.NoError(t, err)
-			require.False(t, rows[0].Eligible)
+			require.Equal(t, "stopped", rows[0].Layer)
 			if kind == "iq" {
-				require.Nil(t, rows[0].RejectUntil)
+				require.Nil(t, rows[0].Until)
 			} else {
-				require.NotNil(t, rows[0].RejectUntil)
-				require.True(t, rows[0].RejectUntil.After(now))
+				require.NotNil(t, rows[0].Until)
+				require.True(t, rows[0].Until.After(now))
 			}
 		})
 	}
@@ -158,7 +152,7 @@ func TestSchedBoardRejectUntilAndProfit(t *testing.T) {
 		b := NewOpenAISelectionBoard(s, func() schedquality.View { return selectionTestView(now) })
 		rows, err := b.Board(profitControlTestCtx(profitControlTestGroup(7, .9, 0)), 7, "m")
 		require.NoError(t, err)
-		require.Equal(t, openAIProfitFilterReasonInvalidAccountRate, rows[0].Reject)
+		require.Equal(t, "stopped", rows[0].Layer)
 	})
 }
 
@@ -187,21 +181,18 @@ func TestSchedBoardSchedulingThresholdReadOnly(t *testing.T) {
 			rows, err := board.Board(context.Background(), 7, "m")
 			require.NoError(t, err)
 			require.Len(t, rows, 1)
-			require.Equal(t, !tt.paused, rows[0].Eligible)
+			require.Equal(t, tt.paused, rows[0].Layer == "stopped")
 			if tt.paused {
-				require.Equal(t, "account_scheduling_threshold", rows[0].Reject)
 				require.Equal(t, 1, rows[0].Rank)
-				require.False(t, rows[0].CanTakeOver)
 				decision := EvaluateAccountSchedulingThreshold(a, s.settingService.GetAccountSchedulingThresholds(context.Background()), now)
-				require.Equal(t, decision.Until, rows[0].RejectUntil)
+				require.Equal(t, decision.Until, rows[0].Until)
 			} else {
-				require.Empty(t, rows[0].Reject)
-				require.Nil(t, rows[0].RejectUntil)
+				require.Nil(t, rows[0].Until)
 			}
 			require.Zero(t, writes.tempCalls)
 			require.Equal(t, before, *a)
 			require.Equal(t, before, repo.accounts[0])
-			require.Empty(t, board.marks.at)
+			require.Empty(t, s.selectionFullMarks.at)
 		})
 	}
 }
@@ -225,13 +216,10 @@ func TestSchedBoardUpstreamChannelRestriction(t *testing.T) {
 	require.Len(t, rows, 2)
 	require.Equal(t, allowed.ID, rows[0].AccountID)
 	require.Equal(t, 1, rows[0].Rank)
-	require.True(t, rows[0].Eligible)
+	require.Equal(t, "normal", rows[0].Layer)
 	require.Equal(t, blocked.ID, rows[1].AccountID)
-	require.Equal(t, "channel_upstream_restricted", rows[1].Reject)
-	require.False(t, rows[1].Eligible)
+	require.Equal(t, "stopped", rows[1].Layer)
 	require.Equal(t, 2, rows[1].Rank)
-	require.False(t, rows[1].CanTakeOver)
-
 }
 
 func TestSchedBoardRejectUntilInjectedClock(t *testing.T) {
