@@ -219,7 +219,7 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 		}
 	}
 	if failure != nil {
-		category := resilience.Classify(*failure, nil).Category
+		category := classifyUpstreamOutcome(*failure).Category
 		switch category {
 		case resilience.CategoryBalance, resilience.CategoryAuth, resilience.CategoryRateLimitReset, resilience.CategoryRateLimit, resilience.CategoryCapacityShed, resilience.CategoryModelUnsupported, resilience.CategoryClientError, resilience.CategoryUpstreamRequestRestriction:
 			a.attempt.FinishOther(string(category))
