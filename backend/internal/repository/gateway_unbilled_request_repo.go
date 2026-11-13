@@ -19,13 +19,13 @@ func (r *usageLogRepository) CreateUnbilledRequest(ctx context.Context, row *ser
 	_, err := r.sql.ExecContext(ctx, `INSERT INTO gateway_unbilled_requests
 		(request_id, created_at, user_id, api_key_id, group_id, account_id, platform,
 		 model, stream, result, error_class, http_status, switches, fallback, takeover,
-		 first_output_ms, duration_ms, input_tokens, cache_read_tokens, cache_creation_tokens)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+		 first_output_ms, duration_ms, input_tokens, cache_read_tokens, cache_creation_tokens, request_type)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
 		ON CONFLICT (request_id) DO NOTHING`,
 		row.RequestID, row.CreatedAt, row.UserID, row.APIKeyID, row.GroupID, row.AccountID,
 		row.Platform, row.Model, row.Stream, row.Result, row.ErrorClass, row.HTTPStatus,
 		row.Switches, row.Fallback, row.Takeover, row.FirstOutputMs, row.DurationMs,
-		row.InputTokens, row.CacheReadTokens, row.CacheCreationTokens)
+		row.InputTokens, row.CacheReadTokens, row.CacheCreationTokens, row.RequestType)
 	return err
 }
 

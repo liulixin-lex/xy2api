@@ -21,6 +21,7 @@ type GatewayUnbilledRequest struct {
 	Platform            string
 	Model               string
 	Stream              bool
+	RequestType         *int16
 	Result              int16
 	ErrorClass          string
 	HTTPStatus          *int

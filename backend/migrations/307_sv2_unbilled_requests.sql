@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS gateway_unbilled_requests (
     platform TEXT NOT NULL,
     model TEXT NOT NULL,
     stream BOOLEAN NOT NULL,
+    request_type SMALLINT,
     result SMALLINT NOT NULL CHECK (result BETWEEN 1 AND 4),
     error_class TEXT NOT NULL DEFAULT '',
     http_status INTEGER,
