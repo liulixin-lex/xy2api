@@ -5,11 +5,10 @@ import type { SchedAccountDetail } from '@/types/schedQuality'
 import detailFixture from '@/__tests__/fixtures/schedQuality/account_detail.json'
 import SchedAccountDrawer from '../SchedAccountDrawer.vue'
 import { closeSchedBoard, closeSchedDrawer, openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
+import { recoveryLines } from '@/composables/useAccountRecovery'
 
 const api = vi.hoisted(() => ({ accountDetail: vi.fn(), setOverride: vi.fn(), clearOverride: vi.fn(), clearAutoState: vi.fn(), reset: vi.fn() }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: api }))
-const toast = vi.hoisted(() => ({ showSuccess: vi.fn(), showError: vi.fn() }))
-vi.mock('@/stores/app', () => ({ useAppStore: () => toast }))
 // Reactive, so a permission change after mount reaches the mounted drawer.
 const perms = await vi.hoisted(async () => {
   const { reactive } = await import('vue')
@@ -65,8 +64,7 @@ beforeEach(() => {
   api.clearOverride.mockReset()
   api.setOverride.mockReset()
   api.reset.mockReset()
-  toast.showSuccess.mockReset()
-  toast.showError.mockReset()
+  recoveryLines.clear()
 })
 
 afterEach(() => {
@@ -348,7 +346,7 @@ describe('SchedAccountDrawer — 恢复 (contract delta F2, F3)', () => {
     expect(trigger('auto:proxy_circuit:7')).not.toBeNull()
   })
 
-  it('runs at once with one toast and no dialog, and stays greyed until the refresh after it is done (scenario 38)', async () => {
+  it('runs at once with no dialog, keeps its result line, and stays greyed until the refresh after it is done (scenario 38)', async () => {
     let answer!: (value: unknown) => void
     api.reset.mockReturnValue(new Promise((resolve) => { answer = resolve }))
     let refreshed!: () => void
@@ -366,10 +364,10 @@ describe('SchedAccountDrawer — 恢复 (contract delta F2, F3)', () => {
     expect(document.querySelector('.modal-content')).toBeNull()
 
     api.accountDetail.mockResolvedValue(withoutCooling(detail()))
-    answer({ reset_at: 'x', cleared: [], preserved: [{ key: 'session_avoid', kind: 'session_avoid', why: '' }], failed: [] })
+    const result = { account_id: 479, reset_at: 'x', cleared: ['session_avoid'], kept: [], failed: [] }
+    answer(result)
     await flushPromises()
-    expect(toast.showSuccess.mock.calls).toEqual([['admin.schedQuality.recover.ok:{"name":"…"}']])
-    expect(toast.showError).not.toHaveBeenCalled()
+    expect(recoveryLines.get(479)?.result).toEqual(result)
     expect(onRecovered).toHaveBeenCalledWith(479)
     expect(api.accountDetail.mock.calls.length).toBeGreaterThan(loads)
     expect(trigger('drawer-reset')!.getAttribute('aria-busy')).toBe('true')

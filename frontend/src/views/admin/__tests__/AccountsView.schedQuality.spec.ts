@@ -99,7 +99,7 @@ const FiltersStub = defineComponent({
   props: ['filters'],
   emits: ['update:filters', 'change'],
   setup(props, { emit }) {
-    return () => h('button', { 'data-test': 'filter-cooling', onClick: () => { emit('update:filters', { ...props.filters, sched_quality: 'cooling' }); emit('change') } })
+    return () => h('button', { 'data-test': 'filter-cooling', onClick: () => { emit('update:filters', { ...props.filters, sched_quality: 'substandard' }); emit('change') } })
   }
 })
 
@@ -122,7 +122,6 @@ function mountView(stubs: Record<string, unknown> = {}) {
         TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>' },
         DataTable: DataTableStub,
         AccountActionMenu: true,
-        AccountStatusIndicator: true,
         AccountTableActions: true,
         AccountTableFilters: FiltersStub,
         AccountBulkActionsBar: BulkBarStub,
@@ -134,7 +133,6 @@ function mountView(stubs: Record<string, unknown> = {}) {
         AccountStatsModal: true,
         ScheduledTestsPanel: true,
         SyncFromCrsModal: true,
-        TempUnschedStatusModal: true,
         ErrorPassthroughRulesModal: true,
         TLSFingerprintProfilesModal: true,
         CreateAccountModal: true,
@@ -184,18 +182,12 @@ describe('AccountsView quality columns', () => {
     wrapper.unmount()
   })
 
-  it('loads the summary for managers even with the groups column hidden', async () => {
+  it('loads the summary for every reader, even with the groups column hidden: the status column comes from it', async () => {
     localStorage.setItem('account-hidden-columns', JSON.stringify(['sq_groups']))
-    const wrapper = mountView()
-    await flushPromises()
-    expect(sched.summary).toHaveBeenCalledTimes(1)
-    wrapper.unmount()
-
-    sched.summary.mockClear()
     seedOperator({ accounts: 'view' })
     const viewer = mountView()
     await flushPromises()
-    expect(sched.summary).not.toHaveBeenCalled()
+    expect(sched.summary).toHaveBeenCalledTimes(1)
     viewer.unmount()
   })
 
@@ -248,7 +240,7 @@ describe('AccountsView quality columns', () => {
     closeSchedDrawer()
     await flushPromises()
     expect(listAccounts).toHaveBeenCalledTimes(1)
-    expect(listAccounts.mock.calls[0][2]).toMatchObject({ sched_quality: 'cooling' })
+    expect(listAccounts.mock.calls[0][2]).toMatchObject({ sched_quality: 'substandard' })
     wrapper.unmount()
   })
 
@@ -307,7 +299,7 @@ describe('AccountsView quality columns', () => {
     await (wrapper.vm as unknown as { openBulkEditFiltered: () => Promise<void> }).openBulkEditFiltered()
     await flushPromises()
     expect(listAccounts.mock.calls.length).toBeGreaterThanOrEqual(2)
-    for (const [, , filters] of listAccounts.mock.calls) expect(filters).toMatchObject({ sched_quality: 'cooling' })
+    for (const [, , filters] of listAccounts.mock.calls) expect(filters).toMatchObject({ sched_quality: 'substandard' })
     wrapper.unmount()
   })
 })

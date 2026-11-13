@@ -820,7 +820,7 @@ export async function exportData(options?: {
     sort_by?: string
     sort_order?: 'asc' | 'desc'
     group_category?: string
-    /** "normal" | "cooling" | "exempt" (contract delta D2, clarification K24). */
+    /** "observing" | "substandard" | "exempt" (contract §6.1, accounts/attention). */
     sched_quality?: string
   }
   includeProxies?: boolean

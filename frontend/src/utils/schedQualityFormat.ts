@@ -1,10 +1,10 @@
 import type {
-  SchedOutcome, SchedReason, SchedRecentAttempt, SchedState, SchedVerdict
+  SchedAccountSummary, SchedMark, SchedOutcome, SchedReason, SchedRecentAttempt, SchedState, SchedVerdict, SchedDim
 } from '@/types/schedQuality'
 
 // Display rules shared by the list, the drawer, the board and the group settings (design spec A.1, B, C, D).
 
-export type SchedDim = 'ttfo' | 'error' | 'cache'
+export type { SchedDim }
 export const SCHED_DIMS: SchedDim[] = ['ttfo', 'error', 'cache']
 
 type Translate = (key: string, values?: Record<string, unknown>) => string
@@ -98,4 +98,57 @@ export function fmtClock(iso: string): string {
   const d = new Date(iso)
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+/** `HH:mm` on the day of `now`, otherwise `MM-DD HH:mm` (local time). */
+export function fmtAt(iso: string, now = Date.now()): string {
+  const d = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`
+  return d.toDateString() === new Date(now).toDateString() ? hm : `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hm}`
+}
+
+/** Milliseconds as seconds with one decimal, or a dash. */
+export const fmtSeconds = (ms: number | null | undefined) => (ms == null ? DASH : `${(ms / 1000).toFixed(1)}s`)
+
+/**
+ * Colour of a number (FINAL §6): red when this dimension makes the account substandard in some group, grey when its
+ * sample is too small, the default colour otherwise. Red wins over grey.
+ */
+export const markClass = (mark: Pick<SchedMark, 'red' | 'short'>) => (mark.red ? 'sq-red' : mark.short ? 'sq-text-3' : '')
+
+/** Text of one account-level number: first output P50, error rate or cache ratio. */
+export function markText(summary: SchedAccountSummary, dim: SchedDim): string {
+  if (dim === 'ttfo') return fmtSeconds(summary.ttfo.p50_ms)
+  if (dim === 'error') return fmtErrorRate(summary.error.rate)
+  return fmtCacheRatio(summary.cache.ratio)
+}
+
+/** A recovery still shapes the account numbers while it is inside their 60-minute window (contract §4.11). */
+export const RECOVERY_WINDOW_MS = 60 * 60_000
+export const recoveredRecently = (resetAt: string | null, now: number) =>
+  resetAt !== null && now - Date.parse(resetAt) < RECOVERY_WINDOW_MS
+
+/**
+ * Status column (FINAL §2): 正常, 观察中 (with 恢复于 time right after a recovery), or 停用·reason·until. The stop
+ * reason uses the short word of its code; unknown codes show the fallback word.
+ */
+export function statusText(summary: Pick<SchedAccountSummary, 'status' | 'stop' | 'reset_at'>, now: number, t: Translate, te: HasKey): string {
+  const sep = ' · '
+  if (summary.status === 'disabled') {
+    const parts = [t('admin.schedQuality.state.disabled')]
+    if (summary.stop) {
+      parts.push(kindName(summary.stop.reason, t, te))
+      if (summary.stop.until) parts.push(fmtAt(summary.stop.until, now))
+    }
+    return parts.join('·')
+  }
+  if (summary.status === 'observing') {
+    const word = t('admin.schedQuality.state.observing')
+    return summary.reset_at && recoveredRecently(summary.reset_at, now)
+      ? `${word}${sep}${t('admin.schedQuality.recover.at', { time: fmtAt(summary.reset_at, now) })}`
+      : word
+  }
+  if (summary.status === 'normal') return t('admin.schedQuality.state.normal')
+  return t('admin.schedQuality.unknown')
 }

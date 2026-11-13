@@ -1,5 +1,4 @@
-// Admin API types for /admin/sched-quality (contract section 13). Field names match the JSON exactly;
-// the backend DTOs live in backend/internal/service/sched_admin_dto.go.
+// Admin API types for /admin/sched-quality (sched-v2 contract §6). Field names match the JSON exactly.
 
 export type SchedVerdict = 'pass' | 'marginal' | 'fail' | 'nodata'
 export type SchedVerdictFrom = 'real'
@@ -25,37 +24,56 @@ export interface SchedOverride {
   reason: string
 }
 
-// ---- POST /accounts/summary ----
+// ---- POST /accounts/summary (contract §4.11, §6.1) ----
 
-export interface SchedAccountSummaryCooling {
-  group_id: number
-  model: string
-  reason: SchedReason
+export type SchedDim = 'ttfo' | 'error' | 'cache'
+/** Account-level state word: 正常 / 观察中 / 停用. 「不达标」 only exists per group and model. */
+export type SchedAccountState = 'normal' | 'observing' | 'disabled'
+
+/** The stop shown in the status column: one word for manual and automatic, the source told apart by colour. */
+export interface SchedStop {
+  source: 'manual' | 'auto'
+  /** Fixed reason code; the UI maps it to a short word. */
+  reason: string
   until: string | null
 }
 
-/** A current manual override; group_id 0 covers every group (contract delta D1). */
-export interface SchedAccountSummaryOverride {
+/** red: this dimension makes the account substandard in some group (exempt included); short: n below the minimum. */
+export interface SchedMark {
+  n: number
+  short: boolean
+  red: boolean
+}
+
+export interface SchedSubstandard {
   group_id: number
-  mode: SchedOverrideMode
+  model: string
+  dims: SchedDim[]
+  until: string
+  /** The renewal is based on requests in other groups. */
+  other_group: boolean
+  exempt: boolean
+}
+
+/** group_id 0 = every group. */
+export interface SchedExemption {
+  group_id: number
   expires_at: string | null
+  reason: string
 }
 
 export interface SchedAccountSummary {
   account_id: number
-  model: string | null
-  samples: number
-  /** ttfo, error and cache are kept by the API but no longer shown in the list (contract delta C5). */
-  ttfo: { p90_ms: number | null; timeout: boolean; n: number }
-  error: { rate: number | null; n: number }
-  cache: { ratio: number | null; n: number }
-  groups: { total: number; normal: number; cooling: number; nodata: number }
-  /** One item per cooling group, all of them. */
-  cooling: SchedAccountSummaryCooling[]
-  /** Always 0. */
-  cooling_more: number
-  /** Group 0 first, then by group id. */
-  overrides: SchedAccountSummaryOverride[]
+  status: SchedAccountState
+  /** Latest manual recovery. */
+  reset_at: string | null
+  stop: SchedStop | null
+  /** Every group and model of the account, the last 60 minutes (from the latest recovery at most). */
+  ttfo: SchedMark & { p50_ms: number | null }
+  error: SchedMark & { rate: number | null }
+  cache: SchedMark & { ratio: number | null }
+  substandard: SchedSubstandard[]
+  exemptions: SchedExemption[]
 }
 
 export interface SchedAccountsSummary {
@@ -63,10 +81,6 @@ export interface SchedAccountsSummary {
   stale: boolean
   global_enabled: boolean
   accounts: SchedAccountSummary[]
-}
-
-export interface SchedAccountsSummaryRequest {
-  account_ids: number[]
 }
 
 // ---- GET /accounts/:id ----
@@ -161,13 +175,15 @@ export interface SchedAccountDetail {
   recent_attempts: SchedRecentAttempt[]
 }
 
-// ---- POST /accounts/:id/reset (also POST /admin/accounts/:id/recover-state) ----
+// ---- POST /accounts/:id/reset (contract §6.5) ----
 
+/** `kind` values are fixed codes; the UI maps them to short words. */
 export interface SchedResetResult {
+  account_id: number
   reset_at: string | null
-  cleared: { key: string; kind: string }[]
-  preserved: { key: string; kind: string; why: string }[]
-  failed: { key: string; kind: string; error: string }[]
+  cleared: string[]
+  kept: { kind: string; until: string | null }[]
+  failed: { kind: string }[]
 }
 
 // ---- PUT /accounts/:id/override ----

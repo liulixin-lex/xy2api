@@ -7,7 +7,7 @@ export default {
     },
     dim: {
       ttfo: '首字',
-      error: '错误',
+      error: '报错',
       cache: '缓存',
     },
     filter: {
@@ -17,8 +17,12 @@ export default {
       exempt: '豁免',
     },
     more: '+{n}',
+    samples: '{n}次',
     state: {
       normal: '正常',
+      observing: '观察中',
+      disabled: '停用',
+      substandard: '不达标',
       cooling: '冷却',
       nodata: '暂无数据',
       exempted: '豁免',
@@ -58,6 +62,7 @@ export default {
     },
     action: {
       reset: '恢复',
+      records: '记录',
       exempt: '豁免',
       undoExempt: '取消豁免',
       clear: '清除',
@@ -80,10 +85,9 @@ export default {
       reason: '理由',
     },
     recover: {
-      ok: '{name} 已恢复',
-      failed: '{name} 恢复失败',
-      batchOk: '已恢复 {n}',
-      batchPartial: '已恢复 {ok} · 失败 {failed}',
+      at: '恢复于 {time}',
+      cleared: '已清',
+      kept: '保留',
     },
     proxy: {
       title: '代理隔离',

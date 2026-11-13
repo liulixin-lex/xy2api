@@ -52,9 +52,9 @@ const iqOpts = computed(() => [
 ])
 const qOpts = computed(() => [
   { value: '', label: t('admin.schedQuality.filter.all') },
-  { value: 'normal', label: t('admin.schedQuality.filter.normal') },
-  { value: 'cooling', label: t('admin.schedQuality.filter.cooling') },
-  { value: 'exempt', label: t('admin.schedQuality.filter.exempt') }
+  { value: 'observing', label: t('admin.schedQuality.state.observing') },
+  { value: 'substandard', label: t('admin.schedQuality.state.substandard') },
+  { value: 'exempt', label: t('admin.schedQuality.state.exempted') }
 ])
 const gOpts = computed(() => [
   { value: '', label: t('admin.accounts.allGroups') },

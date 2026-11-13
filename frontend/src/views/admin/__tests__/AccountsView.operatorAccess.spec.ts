@@ -91,7 +91,6 @@ function mountView() {
         AccountStatsModal: true,
         ScheduledTestsPanel: true,
         SyncFromCrsModal: true,
-        TempUnschedStatusModal: true,
         ErrorPassthroughRulesModal: { name: 'ErrorPassthroughRulesModal', props: ['show', 'readonly'], template: '<div />' },
         TLSFingerprintProfilesModal: { name: 'TLSFingerprintProfilesModal', props: ['show', 'readonly'], template: '<div />' },
         CreateAccountModal: true,

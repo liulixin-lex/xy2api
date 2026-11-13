@@ -70,7 +70,6 @@ function mountView() {
           template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
         },
         DataTable: DataTableStub,
-        AccountStatusIndicator: { props: ['account'], template: '<span data-test="status-badge">{{ account.status }}</span>' },
         AccountTableActions: true,
         AccountTableFilters: true,
         AccountBulkActionsBar: true,
@@ -83,7 +82,6 @@ function mountView() {
         AccountStatsModal: true,
         ScheduledTestsPanel: true,
         SyncFromCrsModal: true,
-        TempUnschedStatusModal: true,
         ErrorPassthroughRulesModal: true,
         TLSFingerprintProfilesModal: true,
         CreateAccountModal: true,
@@ -119,7 +117,6 @@ describe('admin AccountsView stream-only state in the status column', () => {
     await flushPromises()
 
     const row = wrapper.get('[data-test="status-1"]')
-    expect(row.get('[data-test="status-badge"]').text()).toBe('active')
     expect(row.find('[data-test="stream-only-badge"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="status-2"]').find('[data-test="stream-only-badge"]').exists()).toBe(false)
 

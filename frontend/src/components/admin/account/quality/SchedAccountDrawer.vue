@@ -324,7 +324,7 @@ const recoverable = computed(() => {
 const recovering = computed(() => !!detail.value && isRecovering(detail.value.account.id))
 function startRecover() {
   const account = detail.value?.account
-  if (account) void recover({ id: account.id, name: account.name }, () => props.onRecovered?.(account.id))
+  if (account) void recover(account.id, () => props.onRecovered?.(account.id))
 }
 
 const allGroupsOverride = computed(() => detail.value?.all_groups_override ?? null)

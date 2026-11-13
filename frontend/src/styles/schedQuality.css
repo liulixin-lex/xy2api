@@ -115,6 +115,8 @@
 .sq-v-marginal { color: var(--sq-marg-fg); text-decoration: underline dotted 1px; text-underline-offset: 4px; }
 .sq-v-fail { color: var(--sq-fail-fg); font-weight: 600; text-decoration: underline dotted 2px; text-underline-offset: 4px; }
 .sq-v-nodata { color: var(--sq-text-3); }
+/* A number that makes the account substandard somewhere (FINAL §6): red, bold and underlined so it reads without colour. */
+.sq-red { color: var(--sq-fail-fg); font-weight: 600; text-decoration: underline dotted 2px; text-underline-offset: 4px; }
 
 /* Verdict shapes (no number): filled circle, ring, filled square, dash. */
 .sq-shape { display: inline-block; flex-shrink: 0; vertical-align: middle; }

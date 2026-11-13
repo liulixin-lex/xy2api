@@ -17,8 +17,12 @@ export default {
       exempt: 'Exempt',
     },
     more: '+{n}',
+    samples: '{n}',
     state: {
       normal: 'Normal',
+      observing: 'Observing',
+      disabled: 'Off',
+      substandard: 'Below',
       cooling: 'Cooling',
       nodata: 'No data',
       exempted: 'Exempt',
@@ -58,6 +62,7 @@ export default {
     },
     action: {
       reset: 'Reset',
+      records: 'Records',
       exempt: 'Exempt',
       undoExempt: 'Unexempt',
       clear: 'Clear',
@@ -80,10 +85,9 @@ export default {
       reason: 'Reason',
     },
     recover: {
-      ok: '{name} recovered',
-      failed: '{name} recovery failed',
-      batchOk: 'Recovered {n}',
-      batchPartial: 'Recovered {ok} · Failed {failed}',
+      at: 'recovered {time}',
+      cleared: 'Cleared',
+      kept: 'Kept',
     },
     proxy: {
       title: 'Proxy isolation',
