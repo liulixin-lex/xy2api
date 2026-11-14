@@ -1,8 +1,10 @@
 import type { Directive } from 'vue'
+import { anyOverlayOpen } from './overlayStack'
 
 /**
  * v-tip="text": short tip (design spec E): shown after 400ms hover or at once on keyboard focus, hidden on
- * leave, blur, scroll or Escape (Escape only closes the tip, not the layer under it). One shared element with
+ * leave, blur, scroll or Escape. With no layer open Escape only closes the tip; while a popover, panel or dialog is
+ * open the key goes on to it as well, so one press closes both (7m-2). One shared element with
  * role="tooltip"; while it is shown the target's aria-describedby also points to it (the target's own description
  * stays). No native title. Empty text = no tip. Line breaks in the text are kept. v-tip.focus: keyboard focus only.
  * The value may be a function: it is called when the tip shows, so a countdown in it needs no re-render to stay right.
@@ -81,8 +83,10 @@ function hide() {
 
 function onKeydown(event: KeyboardEvent) {
   if (event.key !== 'Escape' || !current) return
-  event.preventDefault()
-  event.stopPropagation()
+  if (!anyOverlayOpen()) {
+    event.preventDefault()
+    event.stopPropagation()
+  }
   hide()
 }
 

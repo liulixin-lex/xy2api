@@ -27,12 +27,15 @@ export const isLatinPillText = (text: string) => text.length > 0 && Array.from(t
 /**
  * East Asian wide and fullwidth characters (Unicode UAX #11, W and F) as the backend counts them
  * (service/group_alias.go, golang.org/x/text/width): Han, kana with the prolonged sound mark and middle dot (ー・),
- * Hangul syllables, Bopomofo, Yi, CJK punctuation, enclosed and compatibility CJK symbols, fullwidth forms and emoji;
- * halfwidth forms, conjoining Hangul jamo and the regional-indicator letters of flags are narrow. Common scripts agree
- * with the backend; a few rare ones, and characters newer than its width table, may not: its answer stands.
+ * Hangul syllables, Bopomofo, Yi, CJK punctuation, strokes and ideographic description characters, Kanbun, enclosed
+ * and compatibility CJK symbols, vertical and small form variants, fullwidth forms, the angle brackets 〈〉 (U+2329–232A),
+ * the trigrams and hexagrams (☰ ⚊ ䷀), the squared CJK symbols (🈂 🈐–🈱 🉀 🉠) and emoji; halfwidth forms, conjoining
+ * Hangul jamo and the regional-indicator letters of flags are narrow (7m-4). What still differs from the backend is a
+ * few rare scripts (Tangut, Nushu, Khitan, the kana supplements, Tai Xuan Jing and counting rod symbols) and characters
+ * newer than its width table: its answer stands.
  */
 // eslint-disable-next-line no-misleading-character-class -- U+3099–309A are combining kana marks, counted alone as the backend does
-const WIDE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Emoji_Presentation}\u3000-\u303e\u3099-\u30ff\u3105-\u312f\u31a0-\u31bf\u3200-\u321e\u3220-\u3247\u3250-\u33ff\ua000-\ua48c\ua490-\ua4c6\uff01-\uff60\uffe0-\uffe6]/u
+const WIDE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Emoji_Presentation}\u2329-\u232a\u2630-\u2637\u268a-\u268f\u2ff0-\u2fff\u3000-\u303e\u3099-\u30ff\u3105-\u312f\u3190-\u319f\u31a0-\u31bf\u31c0-\u31e5\u31ef\u3200-\u321e\u3220-\u3247\u3250-\u33ff\u4dc0-\u4dff\ua000-\ua48c\ua490-\ua4c6\ufe10-\ufe19\ufe30-\ufe6b\uff01-\uff60\uffe0-\uffe6\u{1f202}\u{1f210}-\u{1f231}\u{1f237}\u{1f23b}\u{1f240}-\u{1f248}\u{1f260}-\u{1f265}]/u
 const NARROW = /[\u1160-\u11ff\ud7b0-\ud7ff\uff61-\uffdc\u{1f1e6}-\u{1f1ff}]/u
 /** The white space the backend trims (Go's strings.TrimSpace); a byte-order mark is not part of it. */
 const EDGE_SPACE = /^[\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$/g

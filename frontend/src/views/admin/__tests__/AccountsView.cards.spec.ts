@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 
@@ -134,6 +134,35 @@ describe('AccountsView cards (spec 4.6)', () => {
     await flushPromises()
     expect(document.querySelector('[data-group-picker]')).toBeNull()
     expect(document.activeElement).toBe(card(1).querySelector('[data-test="row-more"]'))
+    wrapper.unmount()
+  })
+
+  it('keeps an open row menu at its button when a live update changes the height of the cards above (7m-3)', async () => {
+    const observers: Array<() => void> = []
+    vi.stubGlobal('ResizeObserver', class {
+      private targets: Element[] = []
+      constructor(callback: ResizeObserverCallback) {
+        observers.push(() => callback(this.targets.map((target) => ({ target, contentRect: target.getBoundingClientRect() }) as ResizeObserverEntry), this as unknown as ResizeObserver))
+      }
+      observe(target: Element) { this.targets.push(target) }
+      unobserve() {}
+      disconnect() { this.targets = [] }
+    })
+    onTestFinished(() => vi.unstubAllGlobals())
+    const wrapper = mountView()
+    await flushPromises()
+    const button = card(2).querySelector<HTMLElement>('[data-test="row-more"]')!
+    let top = 300
+    button.getBoundingClientRect = () => ({ top, bottom: top + 28, left: 300, right: 328, width: 28, height: 28, x: 300, y: top, toJSON: () => ({}) }) as DOMRect
+    button.click()
+    await flushPromises()
+    const menuTop = () => document.querySelector<HTMLElement>('.action-menu-content')!.style.top
+    expect(menuTop()).toBe('332px')
+
+    top = 360
+    observers.forEach((fire) => fire())
+    await flushPromises()
+    expect(menuTop()).toBe('392px')
     wrapper.unmount()
   })
 

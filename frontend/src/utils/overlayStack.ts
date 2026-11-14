@@ -43,6 +43,7 @@ export interface OverlayOptions {
 
 const layers: Layer[] = []
 let pageOpener: FocusRef | null = null
+let closedCount = 0
 
 // data-* attributes identify a re-rendered opener; Vue's scoped-style attributes (data-v-*) are not identifying.
 const snapshot = (el: Element | null): FocusRef => {
@@ -168,6 +169,7 @@ export function closeOverlay(token: symbol) {
   const index = layers.findIndex((layer) => layer.token === token)
   if (index === -1) return
   const [closed] = layers.splice(index, 1)
+  closedCount++
   const root = closed.root()
   if (root) root.inert = false
   syncOverlays()
@@ -207,6 +209,9 @@ export function insideLayerAbove(token: symbol, el: Element): boolean {
 
 /** Whether any layer is open: a dialog, drawer, popover or menu. */
 export const anyOverlayOpen = () => layers.length > 0
+
+/** How many layers have closed so far: a different count later means a layer closed in between. */
+export const overlaysClosed = () => closedCount
 
 export function isTopOverlay(token: symbol) {
   return layers[layers.length - 1]?.token === token

@@ -61,6 +61,36 @@ describe('AccountGroupPills', () => {
     vi.useRealTimers()
   })
 
+  it('is quiet only until its own layer closes; over any layer Escape closes the tip and goes on to the layer (7m-2)', async () => {
+    vi.useFakeTimers()
+    const wrapper = mountPills(1)
+    const dot = wrapper.get('[data-test="group-pill-dot"]').element
+    const tipShown = () => document.getElementById('sq-tip')?.hidden === false
+    const hover = () => {
+      dot.dispatchEvent(new Event('mouseleave'))
+      dot.dispatchEvent(new Event('mouseenter'))
+      vi.advanceTimersByTime(400)
+    }
+    const layer = { modal: false, root: () => null, panel: () => null }
+    await wrapper.get('[data-test="group-pill-dot"]').trigger('click')
+    const panel = Symbol('panel')
+    openOverlay(panel, layer)
+    closeOverlay(panel)
+    const other = Symbol('other')
+    openOverlay(other, layer)
+    hover()
+    expect(tipShown()).toBe(true)
+
+    const reached = vi.fn()
+    document.body.addEventListener('keydown', reached)
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(tipShown()).toBe(false)
+    expect(reached).toHaveBeenCalledTimes(1)
+    document.body.removeEventListener('keydown', reached)
+    closeOverlay(other)
+    vi.useRealTimers()
+  })
+
   it('has no dot without quality data: the whole pill edits', () => {
     const wrapper = mountPills(1, false)
     expect(wrapper.find('[data-test="group-pill-dot"]').exists()).toBe(false)

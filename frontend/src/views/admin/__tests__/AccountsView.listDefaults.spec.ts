@@ -134,6 +134,13 @@ describe('admin AccountsView list defaults and column order', () => {
     expect(localStorage.getItem('account-hidden-columns-v2')).toBeNull()
   })
 
+  it('fits the default columns in at most 1286px: 1302px less a 15px scrollbar does not scroll sideways (7m-1)', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const min = parseFloat(wrapper.get<HTMLElement>('.account-table').element.style.getPropertyValue('--acc-min'))
+    expect(min).toBeLessThanOrEqual(1286)
+  })
+
   it('starts over from the defaults when only the old column settings are saved', async () => {
     localStorage.setItem('account-hidden-columns', JSON.stringify(['today_stats', 'status']))
     localStorage.setItem('account-column-order', JSON.stringify(['notes', 'status']))

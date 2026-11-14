@@ -135,7 +135,7 @@ import { useLiveClock } from '@/composables/useLiveClock'
 import { usePointerCoarse } from '@/composables/usePointerCoarse'
 import { qualityOpenerKey } from '@/composables/useSchedLayers'
 import type { Account, AdminGroup } from '@/types'
-import { anyOverlayOpen } from '@/utils/overlayStack'
+import { anyOverlayOpen, overlaysClosed } from '@/utils/overlayStack'
 import { hideTip, showTipNow, vTip } from '@/utils/tip'
 import { groupPillText, isLatinPillText } from '@/utils/groupAlias'
 import { groupDotState, splitPills, worstDotState, type AccountQualityView, type GroupDotState } from './accountGroups'
@@ -201,14 +201,18 @@ function stateDetail(group: AdminGroup, state: GroupDotState): string {
 
 /**
  * A click on a hit zone that opens the quality panel or the group picker puts its tip away at once, and the tip stays
- * away while that layer is open, so the first Escape closes the layer (7i-3). Other zones' tips show as usual.
+ * away while that layer is open (7i-3); once the layer closes the zone's tip is back, even with some other layer open
+ * (7m-2). Other zones' tips show as usual.
  */
-let quiet: string | null = null
+let quiet: { zone: string; closed: number } | null = null
 const hush = (zone: string) => {
-  quiet = zone
+  quiet = { zone, closed: overlaysClosed() }
   hideTip()
 }
-const quietTip = (zone: string, text: () => string) => () => (quiet === zone && anyOverlayOpen() ? '' : text())
+const quietTip = (zone: string, text: () => string) => () => {
+  if (quiet && overlaysClosed() !== quiet.closed) quiet = null
+  return quiet?.zone === zone && anyOverlayOpen() ? '' : text()
+}
 
 function pillTip(group: AdminGroup, state: GroupDotState | null, zone: 'dot' | 'text'): string {
   const head = state

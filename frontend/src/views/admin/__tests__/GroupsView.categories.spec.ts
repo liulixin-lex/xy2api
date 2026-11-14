@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdminGroup } from '@/types'
 import GroupsView from '@/views/admin/GroupsView.vue'
 
+// The group form's categories and alias, on one page setup (7m-5).
+
 const {
   listGroups,
   createGroup,
@@ -132,8 +134,9 @@ const SelectStub = defineComponent({
   `
 })
 
-function mountView() {
+function mountView(attachTo?: HTMLElement) {
   return mount(GroupsView, {
+    attachTo,
     global: {
       stubs: {
         AppLayout: { template: '<main><slot /></main>' },
@@ -288,5 +291,66 @@ describe('GroupsView group categories', () => {
     await flushPromises()
     expect(wrapper.find('[data-test="group-category-field"]').exists()).toBe(false)
     expect(categoriesApi.list).not.toHaveBeenCalled()
+  })
+})
+
+const aliasInput = (wrapper: View) => wrapper.get('[data-test="group-alias-input"]')
+
+describe('GroupsView group alias', () => {
+  beforeEach(() => {
+    authState.isSimpleMode = false
+    localStorage.clear()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    for (const fn of [listGroups, createGroup, categoriesApi.list, categoriesApi.setGroupCategories, showSuccess, showError]) fn.mockReset()
+    listGroups.mockResolvedValue({ items: [{ ...sourceGroup, alias: '主力' }, { ...sourceGroup, id: 43, name: 'Gemini Ultra' }], total: 2, page: 1, page_size: 20, pages: 1 })
+    categoriesApi.list.mockResolvedValue([])
+    createGroup.mockResolvedValue({ ...sourceGroup, id: 77, name: 'New group' })
+  })
+  // Attached, so focus can be checked (7j-3).
+  let view: View | null = null
+  const mountAttached = () => (view = mountView(document.body))
+  afterEach(() => {
+    view?.unmount()
+    view = null
+    vi.restoreAllMocks()
+  })
+
+  it('shows the alias pill beside the group name, or the automatic text without one', async () => {
+    const wrapper = mountAttached()
+    await flushPromises()
+    expect(wrapper.findAll('[data-test="name-cell"] .alias-pill').map((pill) => pill.text())).toEqual(['主力', 'Gem'])
+  })
+
+  it('keeps a too long alias from being sent, and sends one that fits', async () => {
+    const wrapper = mountAttached()
+    await flushPromises()
+    await openCreate(wrapper)
+    await aliasInput(wrapper).setValue('ABCD')
+    ;(document.activeElement as HTMLElement | null)?.blur()
+    await wrapper.get('#create-group-form').trigger('submit')
+    await flushPromises()
+    expect(createGroup).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="group-alias-error"]').text()).toBe('admin.groups.alias.tooLong')
+    // High in a long form whose save button is at the bottom: the input takes focus, which brings it into view (7j-3).
+    expect(document.activeElement).toBe(aliasInput(wrapper).element)
+
+    await aliasInput(wrapper).setValue('新')
+    await wrapper.get('#create-group-form').trigger('submit')
+    await flushPromises()
+    expect(createGroup).toHaveBeenCalledWith(expect.objectContaining({ alias: '新' }))
+  })
+
+  it('shows the backend\'s INVALID_GROUP_ALIAS under the alias input, not as a toast, and focuses the input', async () => {
+    createGroup.mockRejectedValue({ status: 400, reason: 'INVALID_GROUP_ALIAS', message: 'alias display width must be at most 2' })
+    const wrapper = mountAttached()
+    await flushPromises()
+    await openCreate(wrapper)
+    await aliasInput(wrapper).setValue('稳')
+    ;(document.activeElement as HTMLElement | null)?.blur()
+    await wrapper.get('#create-group-form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.get('[data-test="group-alias-error"]').text()).toBe('admin.groups.alias.invalid')
+    expect(showError).not.toHaveBeenCalled()
+    expect(document.activeElement).toBe(aliasInput(wrapper).element)
   })
 })

@@ -34,4 +34,10 @@ describe('alias length', () => {
   ])('%s fits: %s', (alias, fits) => {
     expect(groupAliasFits(alias)).toBe(fits)
   })
+
+  it('counts wide the CJK symbols the backend does: brackets, trigrams, strokes, Kanbun, hexagrams, vertical and small forms, squared symbols (7m-4)', () => {
+    const firsts = [0x2329, 0x2630, 0x268a, 0x2ff0, 0x3190, 0x31c0, 0x31ef, 0x4dc0, 0xfe10, 0xfe30, 0xfe6b, 0x1f202, 0x1f210, 0x1f237, 0x1f23b, 0x1f240, 0x1f260]
+    // A wide character and two letters make 7 thirds, one too many; a narrow one would make 6.
+    expect(firsts.filter((cp) => groupAliasFits(`${String.fromCodePoint(cp)}AB`))).toEqual([])
+  })
 })
