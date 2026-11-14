@@ -382,7 +382,7 @@ useEventListener(document, 'keydown', (event: KeyboardEvent) => {
   if (event.key !== 'Escape' || !menuOpen.value) return
   event.preventDefault()
   menuOpen.value = false
-  moreRef.value?.focus()
+  moreRef.value?.focus({ preventScroll: true })
 })
 
 onMounted(() => {

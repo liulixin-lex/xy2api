@@ -1117,7 +1117,7 @@ useOverlayLayer(moreMenuOpen, {
   modal: false,
   onEscape: () => {
     moreMenuOpen.value = false
-    moreButtonRef.value?.focus()
+    moreButtonRef.value?.focus({ preventScroll: true })
   },
   onCovered: () => { moreMenuOpen.value = false }
 })

@@ -247,6 +247,21 @@ describe('SchedQualityPanel', () => {
     expect(onClick).toHaveBeenCalledTimes(1)
   })
 
+  it('moves no focus when a press outside closes it, so nothing scrolls under the pointer (7q-1)', async () => {
+    outside({ 'data-quality-opener': '7:53' }).button.focus()
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { groupId: 53 })
+    panel()!.querySelector<HTMLElement>('[data-qp-close]')!.focus()
+    // Giving focus back is what scrolled the table (focus() scrolls its target into view): none at all.
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus')
+    onTestFinished(() => focus.mockRestore())
+
+    pointerDown(outside().button)
+    await flushPromises()
+    expect(panel()).toBeNull()
+    expect(focus).not.toHaveBeenCalled()
+  })
+
   it('switches its content in place when another dot is pressed: the new name at once, the old body dimmed, no skeleton (7f-4)', async () => {
     mount(Panel, { attachTo: document.body })
     await openOn(7, { groupId: 53, model: 'gpt-b' })

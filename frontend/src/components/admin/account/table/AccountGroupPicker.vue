@@ -98,6 +98,7 @@ import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores'
 import { useGroupCategoryTabs } from '@/composables/useGroupCategoryTabs'
 import { useOverlayLayer } from '@/composables/useOverlayLayer'
+import { pressedOutside } from '@/utils/overlayStack'
 import { eligibleGroupsFor, mergeSelectableGroups, sameIdList } from '@/utils/accountGroupSelection'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { platformLabel } from '@/utils/platformColors'
@@ -202,7 +203,8 @@ function finish() {
   if (closed) return
   closed = true
   const active = document.activeElement
-  const hadFocus = !!rootRef.value?.contains(active) || (confirmedFromInside && (!active || active === document.body))
+  // Closed by a press outside: focus goes where the press puts it (7q-1).
+  const hadFocus = !pressedOutside(rootRef.value) && (!!rootRef.value?.contains(active) || (confirmedFromInside && (!active || active === document.body)))
   const id = props.account.id
   emit('close')
   if (hadFocus) {

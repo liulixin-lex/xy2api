@@ -296,7 +296,7 @@ function focusOpener(accountId: number, groupId: number | null) {
   const usable = (el: HTMLElement) => el.isConnected && !el.closest('[inert]') && !el.matches(':disabled') && (el.checkVisibility?.() ?? true)
   const exact = Array.from(document.querySelectorAll<HTMLElement>(`[data-quality-opener="${qualityOpenerKey(accountId, groupId)}"]`))
   const any = Array.from(document.querySelectorAll<HTMLElement>(`[data-quality-opener^="${accountId}:"]`))
-  ;[...exact, ...any].find(usable)?.focus()
+  ;[...exact, ...any].find(usable)?.focus({ preventScroll: true })
 }
 
 /** Escape and the close button give focus back to the opener; an outside click leaves it where the click puts it. */
