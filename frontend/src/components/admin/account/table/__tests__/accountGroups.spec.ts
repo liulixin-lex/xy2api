@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { groupDotState, groupPillText, isLatinPillText, orderGroups, splitPills, worstDotState, type AccountQualityView } from '../accountGroups'
+import { groupDotState, orderGroups, splitPills, worstDotState, type AccountQualityView } from '../accountGroups'
 
 const quality = (patch: Partial<AccountQualityView> = {}): AccountQualityView => ({
   status: 'normal',
@@ -69,24 +69,5 @@ describe('group pills', () => {
   it('keeps the groups page order', () => {
     const groups = [{ id: 3, sort_order: 2 }, { id: 1, sort_order: 2 }, { id: 9, sort_order: 0 }]
     expect(orderGroups(groups).map((group) => group.id)).toEqual([9, 1, 3])
-  })
-})
-
-describe('pill text', () => {
-  it('uses the alias when there is one', () => {
-    expect(groupPillText({ name: 'OpenAI 主力池', alias: '主力' })).toBe('主力')
-  })
-
-  it('takes the first two Chinese characters, else the first three letters and digits', () => {
-    expect(groupPillText({ name: 'GPT 主力 备用池', alias: '' })).toBe('主力')
-    expect(groupPillText({ name: 'Gemini Ultra' })).toBe('Gem')
-    expect(groupPillText({ name: 'g-4 pro' })).toBe('g4p')
-    expect(groupPillText({ name: '  ', alias: '  ' })).toBe('  ')
-  })
-
-  it('sets text made of ASCII only at the small size', () => {
-    expect(isLatinPillText('Gem')).toBe(true)
-    expect(isLatinPillText('主力')).toBe(false)
-    expect(isLatinPillText('A主')).toBe(false)
   })
 })

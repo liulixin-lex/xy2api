@@ -46,23 +46,3 @@ export function orderGroups<T extends { id: number; sort_order?: number | null }
   return [...groups].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.id - b.id)
 }
 
-const HAN = /\p{Script=Han}/u
-const ALNUM = /[A-Za-z0-9]/
-
-/**
- * A group's pill text: its alias, or when it has none, the first two Chinese characters of its name, or else its
- * first three letters and digits ("Gemini Ultra" → "Gem").
- */
-export function groupPillText(group: { name: string; alias?: string | null }): string {
-  const alias = group.alias?.trim()
-  if (alias) return alias
-  const chars = Array.from(group.name ?? '')
-  const han = chars.filter((char) => HAN.test(char))
-  if (han.length) return han.slice(0, 2).join('')
-  const alnum = chars.filter((char) => ALNUM.test(char))
-  if (alnum.length) return alnum.slice(0, 3).join('')
-  return chars.slice(0, 2).join('')
-}
-
-/** Text made of ASCII only is set at 11px so three letters fit the pill. */
-export const isLatinPillText = (text: string) => text.length > 0 && Array.from(text).every((char) => char.charCodeAt(0) < 0x80)

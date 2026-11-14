@@ -873,6 +873,15 @@ export default {
     // Groups Management
     groups: {
       liveDetail: '容量 5 秒、账号数 10 秒、费用 30 秒',
+      alias: {
+        label: '别名',
+        optional: '选填',
+        preview: '预览',
+        auto: '自动',
+        hint: '留空则自动取名称的前 2 个汉字；没有汉字时取前 3 个英数字符',
+        tooLong: '超出长度：最多 2 个汉字或 3 个英数字符（汉字算 1，其他字符算 2/3）',
+        invalid: '别名无效：最多 2 个汉字或 3 个英数字符，且不能含控制字符'
+      },
       showExclusiveBadge: '向用户显示专属标识',
       systemPrompt: {
         title: '系统提示词',

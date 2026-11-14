@@ -129,10 +129,11 @@
           default-sort-order="asc"
           @sort="handleSort"
         >
-          <template #cell-name="{ value }">
-            <span class="font-medium text-gray-900 dark:text-white">{{
-              value
-            }}</span>
+          <template #cell-name="{ row, value }">
+            <span class="inline-flex items-center gap-2">
+              <GroupAliasPill :group="row" />
+              <span class="font-medium text-fg-primary">{{ value }}</span>
+            </span>
           </template>
 
           <template #cell-id="{ value }">
@@ -519,6 +520,7 @@
             data-tour="group-form-name"
           />
         </div>
+        <GroupAliasField ref="createAliasFieldRef" v-model="createForm.alias" :name="createForm.name" />
         <div>
           <label class="input-label">{{
             t("admin.groups.form.description")
@@ -2184,6 +2186,7 @@
             data-tour="edit-group-form-name"
           />
         </div>
+        <GroupAliasField ref="editAliasFieldRef" v-model="editForm.alias" :name="editForm.name" />
         <div>
           <label class="input-label">{{
             t("admin.groups.form.description")
@@ -4426,6 +4429,8 @@ import DataTable from "@/components/common/DataTable.vue";
 import LiveStatusIndicator from "@/components/common/LiveStatusIndicator.vue";
 import PendingChangesPill from "@/components/common/PendingChangesPill.vue";
 import StatusDot from "@/components/common/StatusDot.vue";
+import GroupAliasPill from "@/components/common/GroupAliasPill.vue";
+import GroupAliasField from "@/components/admin/group/GroupAliasField.vue";
 import Pagination from "@/components/common/Pagination.vue";
 import Toggle from "@/components/common/Toggle.vue";
 import BaseDialog from "@/components/common/BaseDialog.vue";
@@ -4474,7 +4479,8 @@ import {
 import type { ChannelModelPricing } from "@/api/admin/channels";
 import { VueDraggable } from "vue-draggable-plus";
 import { createStableObjectKeyResolver } from "@/utils/stableObjectKey";
-import { extractApiErrorMessage } from "@/utils/apiError";
+import { extractApiErrorCode, extractApiErrorMessage } from "@/utils/apiError";
+import { groupAliasFits } from "@/utils/groupAlias";
 import { useAdminAccessStore } from "@/stores/adminAccess";
 import { useAdminPermission } from "@/composables/useAdminPermission";
 import { useKeyedDebouncedSearch } from "@/composables/useKeyedDebouncedSearch";
@@ -5244,6 +5250,8 @@ const editReasoningEffortPolicyRef = ref<ReasoningEffortPolicyFieldsExpose | nul
 const createSystemPromptRef = ref<InstanceType<typeof GroupSystemPromptFields> | null>(null);
 const editSystemPromptRef = ref<InstanceType<typeof GroupSystemPromptFields> | null>(null);
 const createCategoryFieldRef = ref<InstanceType<typeof GroupCategoryField> | null>(null);
+const createAliasFieldRef = ref<InstanceType<typeof GroupAliasField> | null>(null);
+const editAliasFieldRef = ref<InstanceType<typeof GroupAliasField> | null>(null);
 const editCategoryFieldRef = ref<InstanceType<typeof GroupCategoryField> | null>(null);
 
 // 固定账号获取 Codex Model Manifest（仅 openai 分组编辑对话框）
@@ -5305,6 +5313,7 @@ const submitEditAllowlistCustomEntry = () => {
 
 const createForm = reactive({
   name: "",
+  alias: "",
   description: "",
   platform: "anthropic" as GroupPlatform,
   rate_multiplier: 1.0,
@@ -5673,6 +5682,7 @@ const convertApiFormatToRoutingRules = async (
 
 const editForm = reactive({
   name: "",
+  alias: "",
   description: "",
   platform: "anthropic" as GroupPlatform,
   rate_multiplier: 1.0,
@@ -6035,6 +6045,7 @@ const closeCreateModal = () => {
   });
   clearAllAccountSearchState();
   createForm.name = "";
+  createForm.alias = "";
   createForm.description = "";
   createForm.platform = "anthropic";
   createForm.rate_multiplier = 1.0;
@@ -6179,6 +6190,7 @@ const handleCreateGroup = async () => {
     appStore.showError(t("admin.groups.nameRequired"));
     return;
   }
+  if (!groupAliasFits(createForm.alias)) return; // the alias field shows why
   if (
     supportsReasoningEffortPolicyPlatform(createForm.platform) &&
     createReasoningEffortPolicyRef.value &&
@@ -6318,6 +6330,7 @@ const handleCreateGroup = async () => {
     const payload = authStore.isSimpleMode
       ? {
           name: createForm.name,
+          alias: createForm.alias,
           description: createForm.description,
           platform: createForm.platform,
           system_prompt_config: createForm.system_prompt_config,
@@ -6334,9 +6347,8 @@ const handleCreateGroup = async () => {
       onboardingStore.nextStep(500);
     }
   } catch (error: any) {
-    appStore.showError(
-      extractApiErrorMessage(error, t("admin.groups.failedToCreate")),
-    );
+    if (extractApiErrorCode(error) === "INVALID_GROUP_ALIAS") createAliasFieldRef.value?.showServerError();
+    else appStore.showError(extractApiErrorMessage(error, t("admin.groups.failedToCreate")));
     console.error("Error creating group:", error);
     // Don't advance tour on error
   } finally {
@@ -6347,6 +6359,7 @@ const handleCreateGroup = async () => {
 const handleEdit = async (group: AdminGroup) => {
   editingGroup.value = group;
   editForm.name = group.name;
+  editForm.alias = group.alias || "";
   editForm.description = group.description || "";
   editForm.platform = group.platform;
   editForm.rate_multiplier = group.rate_multiplier;
@@ -6527,6 +6540,7 @@ const handleUpdateGroup = async () => {
     appStore.showError(t("admin.groups.nameRequired"));
     return;
   }
+  if (!groupAliasFits(editForm.alias)) return; // the alias field shows why
   if (
     supportsReasoningEffortPolicyPlatform(editForm.platform) &&
     editReasoningEffortPolicyRef.value &&
@@ -6695,6 +6709,7 @@ const handleUpdateGroup = async () => {
     const requestData = authStore.isSimpleMode
       ? {
           name: editForm.name,
+          alias: editForm.alias,
           description: editForm.description,
           system_prompt_config: editForm.system_prompt_config,
         }
@@ -6725,9 +6740,8 @@ const handleUpdateGroup = async () => {
     if (categoriesSaved) appStore.showSuccess(t("admin.groups.groupUpdated"));
     closeEditModal();
   } catch (error: any) {
-    appStore.showError(
-      extractApiErrorMessage(error, t("admin.groups.failedToUpdate")),
-    );
+    if (extractApiErrorCode(error) === "INVALID_GROUP_ALIAS") editAliasFieldRef.value?.showServerError();
+    else appStore.showError(extractApiErrorMessage(error, t("admin.groups.failedToUpdate")));
     console.error("Error updating group:", error);
   } finally {
     submitting.value = false;

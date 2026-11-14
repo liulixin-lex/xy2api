@@ -88,7 +88,8 @@ import { useLiveClock } from '@/composables/useLiveClock'
 import { qualityOpenerKey } from '@/composables/useSchedLayers'
 import type { Account, AdminGroup } from '@/types'
 import { showTipNow, vTip } from '@/utils/tip'
-import { groupDotState, groupPillText, isLatinPillText, splitPills, worstDotState, type AccountQualityView, type GroupDotState } from './accountGroups'
+import { groupPillText, isLatinPillText } from '@/utils/groupAlias'
+import { groupDotState, splitPills, worstDotState, type AccountQualityView, type GroupDotState } from './accountGroups'
 import { formatRemaining, formatShortTime, msLeft } from './accountTime'
 
 const props = defineProps<{

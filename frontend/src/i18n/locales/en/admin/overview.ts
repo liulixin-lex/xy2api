@@ -876,6 +876,15 @@ export default {
     // Groups
     groups: {
       liveDetail: 'capacity every 5 s, account counts every 10 s, costs every 30 s',
+      alias: {
+        label: 'Alias',
+        optional: 'optional',
+        preview: 'Preview',
+        auto: 'auto',
+        hint: 'Left empty, it takes the first 2 Chinese characters of the name, or else its first 3 letters and digits',
+        tooLong: 'Too long: at most 2 Chinese characters or 3 letters and digits (a Chinese character counts 1, others 2/3)',
+        invalid: 'Invalid alias: at most 2 Chinese characters or 3 letters and digits, no control characters'
+      },
       showExclusiveBadge: 'Show exclusive badge to users',
       systemPrompt: {
         title: 'System prompts',

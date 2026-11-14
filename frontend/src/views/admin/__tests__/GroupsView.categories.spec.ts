@@ -114,6 +114,7 @@ const DataTableStub = defineComponent({
     <div>
       <div data-test="columns">{{ columns.map((col) => col.key).join(',') }}</div>
       <div v-for="row in data" :key="row.id">
+        <span data-test="name-cell"><slot name="cell-name" :row="row" :value="row.name" /></span>
         <span v-if="columns.some((col) => col.key === 'category')" data-test="category-cell"><slot name="cell-category" :row="row" /></span>
         <slot name="cell-actions" :row="row" />
       </div>
@@ -287,5 +288,54 @@ describe('GroupsView group categories', () => {
     await flushPromises()
     expect(wrapper.find('[data-test="group-category-field"]').exists()).toBe(false)
     expect(categoriesApi.list).not.toHaveBeenCalled()
+  })
+})
+
+describe('GroupsView group alias', () => {
+  beforeEach(() => {
+    authState.isSimpleMode = false
+    localStorage.clear()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    for (const fn of [listGroups, createGroup, categoriesApi.list, categoriesApi.setGroupCategories, showSuccess, showError]) fn.mockReset()
+    listGroups.mockResolvedValue({ items: [{ ...sourceGroup, alias: '主力' }, { ...sourceGroup, id: 43, name: 'Gemini Ultra' }], total: 2, page: 1, page_size: 20, pages: 1 })
+    categoriesApi.list.mockResolvedValue(categories)
+    createGroup.mockResolvedValue({ ...sourceGroup, id: 77, name: 'New group' })
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('shows the alias pill beside the group name, or the automatic text without one', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.findAll('[data-test="name-cell"] .alias-pill').map((pill) => pill.text())).toEqual(['主力', 'Gem'])
+  })
+
+  it('keeps a too long alias from being sent, and sends one that fits', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await openCreate(wrapper)
+    await wrapper.get('[data-test="group-alias-input"]').setValue('ABCD')
+    await wrapper.get('#create-group-form').trigger('submit')
+    await flushPromises()
+    expect(createGroup).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="group-alias-error"]').text()).toBe('admin.groups.alias.tooLong')
+
+    await wrapper.get('[data-test="group-alias-input"]').setValue('新')
+    await wrapper.get('#create-group-form').trigger('submit')
+    await flushPromises()
+    expect(createGroup).toHaveBeenCalledWith(expect.objectContaining({ alias: '新' }))
+  })
+
+  it('shows the backend\'s INVALID_GROUP_ALIAS under the alias input, not as a toast', async () => {
+    createGroup.mockRejectedValue({ status: 400, reason: 'INVALID_GROUP_ALIAS', message: 'alias display width must be at most 2' })
+    const wrapper = mountView()
+    await flushPromises()
+    await openCreate(wrapper)
+    await wrapper.get('[data-test="group-alias-input"]').setValue('稳')
+    await wrapper.get('#create-group-form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.get('[data-test="group-alias-error"]').text()).toBe('admin.groups.alias.invalid')
+    expect(showError).not.toHaveBeenCalled()
   })
 })

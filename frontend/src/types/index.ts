@@ -825,6 +825,8 @@ export interface CreateGroupRequest {
   show_exclusive_badge?: boolean
   system_prompt_config?: GroupSystemPromptConfig
   name: string
+  /** The pill text; empty: generated from the name (utils/groupAlias). */
+  alias?: string
   description?: string | null
   platform?: GroupPlatform
   rate_multiplier?: number
@@ -895,6 +897,8 @@ export interface UpdateGroupRequest {
   show_exclusive_badge?: boolean
   system_prompt_config?: GroupSystemPromptConfig
   name?: string
+  /** The pill text; empty clears it. */
+  alias?: string
   description?: string | null
   platform?: GroupPlatform
   rate_multiplier?: number
