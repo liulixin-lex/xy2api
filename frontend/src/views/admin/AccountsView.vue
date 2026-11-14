@@ -126,6 +126,9 @@
                     @edit-groups="(event: MouseEvent) => openGroupsEditor(row, event)"
                   />
                 </template>
+                <template v-if="isColumnVisible('groups') && canPlaceGroups" #groups-action>
+                  <button type="button" class="acard-edit sq-focus" :data-groups-opener="row.id" data-test="card-edit-groups" @click="openGroupsEditor(row, $event)">{{ t('admin.accounts.editGroups') }}</button>
+                </template>
                 <template v-if="isColumnVisible('sq_recent')" #recent>
                   <AccountRecentCell card :quality="row.platform === 'openai' ? row.quality ?? null : null" />
                 </template>
@@ -318,7 +321,7 @@
       :save="saveGroups"
       @close="picker.account = null"
     />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" :recoverable="menuRecoverable(menu.acc)" :recovering="!!menu.acc && isRecovering(menu.acc.id)" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @iq-run="handleRunIQCheck" @iq-records="iqRecordsAccount = $event" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="recoverOne" @delete="handleDelete" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @manage-openai-totp="handleManageOpenAITotp" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" :recoverable="menuRecoverable(menu.acc)" :recovering="!!menu.acc && isRecovering(menu.acc.id)" @close="menu.show = false" @edit-groups="openGroupsFromMenu" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @iq-run="handleRunIQCheck" @iq-records="iqRecordsAccount = $event" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="recoverOne" @delete="handleDelete" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @manage-openai-totp="handleManageOpenAITotp" />
     <OpenAILoginImportDialog v-if="authStore.isAdmin && showOpenAILogin" :show="showOpenAILogin" :proxies="proxies" :groups="groups" @close="showOpenAILogin = false" @imported="handleDataImported" />
     <OpenAITotpDialog v-if="authStore.isAdmin && openAITotpAccount" :show="true" :account="openAITotpAccount" @close="openAITotpAccount = null" />
     <SyncFromCrsModal v-if="syncModalMounted" :show="showSync" @close="showSync = false" @synced="reload" />
@@ -1127,7 +1130,7 @@ const bulkEditModalMounted = useLazyMount(showBulkEdit)
 const tempUnschedModalMounted = useLazyMount(showTempUnsched)
 const errorPassthroughModalMounted = useLazyMount(showErrorPassthrough)
 const tlsProfilesModalMounted = useLazyMount(showTLSFingerprintProfiles)
-const menu = reactive<{ show: boolean; acc: Account | null; anchorRect: DOMRect | null }>({ show: false, acc: null, anchorRect: null })
+const menu = reactive<{ show: boolean; acc: Account | null; anchorRect: DOMRect | null; opener: HTMLElement | null }>({ show: false, acc: null, anchorRect: null, opener: null })
 
 // ---- The group picker of the groups column (spec 4.3) ----
 const picker = reactive<{ account: Pick<Account, 'id' | 'name' | 'platform'> | null; anchor: HTMLElement | null; focusSearch: boolean }>({ account: null, anchor: null, focusSearch: false })
@@ -1137,17 +1140,25 @@ const pickerRef = ref<{ requestClose: () => Promise<boolean> } | null>(null)
  * another account's it closes first and the new one opens once it has: after a save under way too (the latest click
  * wins), not when that save stops on a conflict to confirm.
  */
-const openGroupsEditor = async (row: LiveAccount, event: MouseEvent) => {
-  if (!canPlaceGroups.value) return
+const openGroupsEditor = (row: LiveAccount, event: MouseEvent) => {
   const opener = event.currentTarget as HTMLElement | null
-  const anchor = opener?.closest('td') ?? opener
+  return openGroupsEditorAt(row, opener?.closest<HTMLElement>('td, [data-groups-anchor]') ?? opener, event.detail === 0)
+}
+/** The row menu's "edit groups" (any device): beside the row's groups (cell or card section), else its "more" button. */
+const openGroupsFromMenu = (account: Account) => {
+  const row = table.record(account.id)
+  const cell = document.querySelector(`[data-groups-opener="${account.id}"]`)?.closest<HTMLElement>('td, [data-groups-anchor]')
+  if (row) void openGroupsEditorAt(row, cell ?? menu.opener, false)
+}
+const openGroupsEditorAt = async (row: LiveAccount, anchor: HTMLElement | null, focusSearch: boolean) => {
+  if (!canPlaceGroups.value) return
   if (picker.account) {
     const same = picker.account.id === row.id
     const closed = (await pickerRef.value?.requestClose()) ?? true
     if (same || !closed) return
   }
   // The picker keeps its own copy: background updates do not reach what it edits.
-  Object.assign(picker, { account: { id: row.id, name: row.name, platform: row.platform }, anchor, focusSearch: event.detail === 0 })
+  Object.assign(picker, { account: { id: row.id, name: row.name, platform: row.platform }, anchor, focusSearch })
 }
 /** Closing the picker with a change: only this cell's groups, optimistically; a failure rolls back (the picker tells). */
 const saveGroups = async (groupIds: number[], confirmMixedChannel: boolean) => {
@@ -1188,7 +1199,8 @@ const openIqRecordsById = async (id: number) => {
 }
 const openMenu = (account: Account, event: MouseEvent) => {
   menu.acc = account
-  menu.anchorRect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  menu.opener = event.currentTarget as HTMLElement
+  menu.anchorRect = menu.opener.getBoundingClientRect()
   menu.show = true
 }
 const handleTest = async (account: AccountListItem) => {
@@ -1557,6 +1569,29 @@ onUnmounted(() => cancelModalPrefetch?.())
 }
 .acard-check {
   margin: -12px -8px -12px -12px;
+}
+/* The card's "edit groups" (prototype): a text button with a 44px hit area. */
+.acard-edit {
+  position: relative;
+  height: 32px;
+  margin: -4px -10px -4px 0;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-medium);
+}
+.acard-edit::after {
+  position: absolute;
+  inset: -6px 0;
+  content: '';
+}
+@media (hover: hover) {
+  .acard-edit:hover {
+    background: var(--color-bg-control-hover);
+  }
 }
 .acard-all {
   display: flex;

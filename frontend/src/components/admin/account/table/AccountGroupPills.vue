@@ -14,40 +14,73 @@
       <Icon name="plus" size="xs" />
     </button>
 
-    <span
-      v-for="pill in shownPills"
-      :key="pill.group.id"
-      class="pill"
-      :class="{ 'pill--nodot': !pill.state }"
-      :data-group-id="pill.group.id"
-      data-test="group-pill"
-    >
+    <template v-for="pill in shownPills" :key="pill.group.id">
+      <!-- Touch (spec 4.3): the whole pill opens the quality panel on its group; a pill with no dot has nothing to open. -->
       <button
-        v-if="pill.state"
+        v-if="coarse && pill.state"
         type="button"
-        class="pill__dot"
+        class="pill pill--whole"
+        :data-group-id="pill.group.id"
         :aria-label="t('admin.accounts.table.pillDotLabel', { name: pill.group.name, state: stateLabel(pill.state) })"
-        v-tip="() => pillTip(pill.group, pill.state, 'dot')"
         :data-quality-opener="qualityOpenerKey(account.id, pill.group.id)"
-        data-test="group-pill-dot"
+        data-test="group-pill"
         @click="emit('open-quality', pill.group.id)"
       >
-        <StatusDot :tone="DOT_TONES[pill.state]" />
+        <span class="pill__dot"><StatusDot :tone="DOT_TONES[pill.state]" /></span>
+        <span class="pill__text" :class="{ 'pill__text--latin': pill.latin }">{{ pill.text }}</span>
       </button>
-      <button
-        type="button"
-        class="pill__text"
-        :class="{ 'pill__text--latin': pill.latin }"
-        :disabled="readonly"
-        :aria-label="t('admin.accounts.table.pillTextLabel', { name: pill.group.name })"
-        v-tip="() => pillTip(pill.group, pill.state, 'text')"
-        data-test="group-pill-text"
-        :data-groups-opener="account.id"
-        @click="emit('edit-groups', $event)"
-      >{{ pill.text }}</button>
-    </span>
+      <span v-else-if="coarse" class="pill pill--nodot" :data-group-id="pill.group.id" data-test="group-pill">
+        <span class="pill__text" :class="{ 'pill__text--latin': pill.latin }">{{ pill.text }}</span>
+      </span>
+      <span
+        v-else
+        class="pill"
+        :class="{ 'pill--nodot': !pill.state }"
+        :data-group-id="pill.group.id"
+        data-test="group-pill"
+      >
+        <button
+          v-if="pill.state"
+          type="button"
+          class="pill__dot"
+          :aria-label="t('admin.accounts.table.pillDotLabel', { name: pill.group.name, state: stateLabel(pill.state) })"
+          v-tip="() => pillTip(pill.group, pill.state, 'dot')"
+          :data-quality-opener="qualityOpenerKey(account.id, pill.group.id)"
+          data-test="group-pill-dot"
+          @click="emit('open-quality', pill.group.id)"
+        >
+          <StatusDot :tone="DOT_TONES[pill.state]" />
+        </button>
+        <button
+          type="button"
+          class="pill__text"
+          :class="{ 'pill__text--latin': pill.latin }"
+          :disabled="readonly"
+          :aria-label="t('admin.accounts.table.pillTextLabel', { name: pill.group.name })"
+          v-tip="() => pillTip(pill.group, pill.state, 'text')"
+          data-test="group-pill-text"
+          :data-groups-opener="account.id"
+          @click="emit('edit-groups', $event)"
+        >{{ pill.text }}</button>
+      </span>
+    </template>
 
-    <span v-if="rest.length" class="pill pill--more" :class="{ 'pill--nodot': !restWorst }" data-test="group-pill-more">
+    <!-- Touch: the whole "+N" opens the worst folded group in the quality panel, or lists them without quality data. -->
+    <button
+      v-if="rest.length && coarse"
+      type="button"
+      class="pill pill--more pill--whole"
+      :class="{ 'pill--nodot': !restWorst }"
+      :aria-label="restWorst ? t('admin.accounts.table.pillMoreWorst', { n: rest.length, state: stateLabel(restWorst.state) }) : t('admin.accounts.table.pillMoreLabel', { n: rest.length })"
+      :data-quality-opener="restWorst ? qualityOpenerKey(account.id, restWorst.group.id) : undefined"
+      data-test="group-pill-more"
+      @click="restWorst ? emit('open-quality', restWorst.group.id) : showTipNow($event.currentTarget)"
+      v-tip="moreTip"
+    >
+      <span v-if="restWorst" class="pill__dot"><StatusDot :tone="DOT_TONES[restWorst.state]" /></span>
+      <span class="pill__text">+{{ rest.length }}</span>
+    </button>
+    <span v-else-if="rest.length" class="pill pill--more" :class="{ 'pill--nodot': !restWorst }" data-test="group-pill-more">
       <button
         v-if="restWorst"
         type="button"
@@ -78,6 +111,10 @@
  * or clicking its text lists every folded group (spec 4.3, 7d-7), its dot opens the worst one. Each pill has two hit
  * zones: the dot opens the quality panel on that group, the text edits the account's groups. Non-OpenAI accounts have
  * no quality data and no dot.
+ *
+ * On a touch screen (coarse pointer, whatever the width) the whole pill opens the quality panel on its group, "+N" on
+ * the worst folded one; editing goes through the card's and the row menu's "edit groups". In the card's grid each
+ * pill's hit area is 40px high, the 8px gaps keeping neighbours' areas apart.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -85,6 +122,7 @@ import Icon from '@/components/icons/Icon.vue'
 import StatusDot, { type StatusDotTone } from '@/components/common/StatusDot.vue'
 import { iqModelLabel } from '@/components/admin/account/iqCheckPresentation'
 import { useLiveClock } from '@/composables/useLiveClock'
+import { usePointerCoarse } from '@/composables/usePointerCoarse'
 import { qualityOpenerKey } from '@/composables/useSchedLayers'
 import type { Account, AdminGroup } from '@/types'
 import { showTipNow, vTip } from '@/utils/tip'
@@ -105,6 +143,7 @@ const props = defineProps<{
 const emit = defineEmits<{ 'open-quality': [groupId: number]; 'edit-groups': [event: MouseEvent] }>()
 const { t } = useI18n()
 const now = useLiveClock()
+const coarse = usePointerCoarse()
 
 const DOT_TONES: Record<GroupDotState, StatusDotTone> = { ok: 'ok', back: 'back', exempt: 'exempt', observe: 'observe', stopped: 'off' }
 const STATE_KEYS: Record<GroupDotState, string> = { ok: 'ok', back: 'back', exempt: 'exempt', observe: 'observe', stopped: 'stopped' }
@@ -270,6 +309,27 @@ function moreTip(): string {
 }
 .pill--more .pill__text {
   color: var(--color-text-secondary);
+}
+/* Touch: one button over the whole pill; the text still cuts inside it. */
+.pill--whole {
+  position: relative;
+  border: 0;
+  padding: 0;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.pill--whole:focus-visible {
+  outline: 2px solid theme('colors.primary.500');
+  outline-offset: 1px;
+}
+.pills--card .pill--whole {
+  overflow: visible;
+}
+.pills--card .pill--whole::after {
+  position: absolute;
+  inset: -4px 0;
+  content: '';
 }
 .pill--empty {
   display: grid;

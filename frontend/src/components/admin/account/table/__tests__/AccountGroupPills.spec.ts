@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
 
 import AccountGroupPills from '../AccountGroupPills.vue'
 import type { AdminGroup } from '@/types'
@@ -16,6 +16,8 @@ const mountPills = (count: number, withQuality = true) => mount(AccountGroupPill
   props: { account: { id: 7, name: 'acc-7' } as never, groups: Array.from({ length: count }, (_, i) => group(i + 1)), quality: withQuality ? quality : null }
 })
 
+// The pointer type is one shared media query: it is read again once no pill uses it.
+enableAutoUnmount(afterEach)
 afterEach(() => {
   document.body.innerHTML = ''
 })
@@ -50,5 +52,23 @@ describe('AccountGroupPills', () => {
     expect(tip.textContent!.split('\n').slice(1).map((line) => line.split(' · ')[0])).toEqual(
       [9, 10, 11, 12].map((id) => expect.stringContaining(`Group ${id}`))
     )
+  })
+
+  it('on a touch screen opens the quality panel from the whole pill, at any width; a pill with no dot opens nothing (spec 4.3)', async () => {
+    const matchMedia = window.matchMedia
+    window.matchMedia = ((query: string) => ({ matches: false, media: query, addEventListener: () => {}, removeEventListener: () => {} })) as unknown as typeof window.matchMedia
+    const wrapper = mountPills(12)
+    expect(wrapper.find('[data-test="group-pill-dot"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="group-pill-text"]').exists()).toBe(false)
+    await wrapper.findAll('[data-test="group-pill"]')[1].trigger('click')
+    await wrapper.get('[data-test="group-pill-more"]').trigger('click')
+    expect(wrapper.emitted('open-quality')).toEqual([[2], [9]])
+    expect(wrapper.emitted('edit-groups')).toBeUndefined()
+    wrapper.unmount()
+
+    const plain = mountPills(1, false)
+    expect(plain.get('[data-test="group-pill"]').element.tagName).toBe('SPAN')
+    plain.unmount()
+    window.matchMedia = matchMedia
   })
 })

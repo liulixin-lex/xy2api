@@ -1033,6 +1033,7 @@ export default {
       bulkDeletePartial: 'Partially deleted: {success} succeeded, {failed} failed',
       bulkDeleteFailed: 'Bulk delete failed',
       recoverState: 'Recover State',
+      editGroups: 'Edit groups',
       fallbackActive: 'Fallback',
       fallbackActiveTip: 'Origin proxy {origin} expired',
       revertProxy: 'Revert proxy',

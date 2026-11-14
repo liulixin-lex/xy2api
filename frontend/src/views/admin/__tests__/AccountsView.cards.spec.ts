@@ -11,13 +11,17 @@ const { listAccounts, backendSummary, todayStats } = vi.hoisted(() => ({
   backendSummary: vi.fn(),
   todayStats: vi.fn()
 }))
+const perms = await vi.hoisted(async () => {
+  const { reactive } = await import('vue')
+  return reactive({ manage: true })
+})
 
 vi.mock('@/api/admin/schedQuality', () => ({ default: { accountDetail: vi.fn(() => new Promise(() => {})), groupBoard: vi.fn(), getGroupPolicy: vi.fn() }, backendSummary }))
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       list: listAccounts,
-      getById: vi.fn(),
+      getById: vi.fn(async (id: number) => ({ id, name: `acc-${id}`, platform: 'openai', type: 'oauth', group_ids: [53] })),
       getBatchTodayStats: todayStats,
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       getUpstreamBalances: vi.fn().mockResolvedValue({ balances: [] }),
@@ -31,7 +35,7 @@ vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError: vi.fn(), showS
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ token: 'test-token', isSimpleMode: false, isAdmin: false }) }))
 vi.mock('@/composables/useAdminPermission', async () => {
   const { computed } = await vi.importActual<typeof import('vue')>('vue')
-  return { useAdminPermission: () => ({ canView: computed(() => true), canManage: computed(() => true), has: () => true, isSuperAdmin: computed(() => true) }) }
+  return { useAdminPermission: () => ({ canView: computed(() => true), canManage: computed(() => perms.manage), has: () => true, isSuperAdmin: computed(() => true) }) }
 })
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
@@ -60,6 +64,7 @@ const vm = (wrapper: ReturnType<typeof mountView>) => wrapper.vm as unknown as {
 
 const matchMedia = window.matchMedia
 beforeEach(() => {
+  perms.manage = true
   localStorage.clear()
   document.body.innerHTML = ''
   document.documentElement.dataset.motion = 'reduced'
@@ -105,6 +110,35 @@ describe('AccountsView cards (spec 4.6)', () => {
     await flushPromises()
     expect(card(2).querySelector('[data-test="account-card-more"]')).not.toBeNull()
     expect(card(1).querySelector('[data-test="account-card-more"]')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('edits the groups from the card\'s button and from the row menu, beside the card\'s groups (spec 4.3)', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    card(2).querySelector<HTMLElement>('[data-test="card-edit-groups"]')!.click()
+    await flushPromises()
+    expect(document.querySelector('[data-group-picker]')!.getAttribute('aria-label')).toContain('acc-2')
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    await flushPromises()
+    expect(document.querySelector('[data-group-picker]')).toBeNull()
+
+    card(1).querySelector<HTMLElement>('[data-test="row-more"]')!.click()
+    await flushPromises()
+    document.querySelector<HTMLElement>('[data-test="menu-edit-groups"]')!.click()
+    await flushPromises()
+    expect(document.querySelector('[data-group-picker]')!.getAttribute('aria-label')).toContain('acc-1')
+    wrapper.unmount()
+  })
+
+  it('offers no group editing without the right to manage accounts', async () => {
+    perms.manage = false
+    const wrapper = mountView()
+    await flushPromises()
+    expect(card(1).querySelector('[data-test="card-edit-groups"]')).toBeNull()
+    card(1).querySelector<HTMLElement>('[data-test="row-more"]')!.click()
+    await flushPromises()
+    expect(document.querySelector('[data-test="menu-edit-groups"]')).toBeNull()
     wrapper.unmount()
   })
 })

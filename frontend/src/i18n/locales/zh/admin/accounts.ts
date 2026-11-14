@@ -1152,6 +1152,7 @@ export default {
       bulkDeletePartial: '部分删除成功：成功 {success} 个，失败 {failed} 个',
       bulkDeleteFailed: '批量删除失败',
       recoverState: '恢复状态',
+      editGroups: '编辑分组',
       fallbackActive: '已回退',
       fallbackActiveTip: '原代理 {origin} 已到期，当前使用备用代理',
       revertProxy: '切回原代理',

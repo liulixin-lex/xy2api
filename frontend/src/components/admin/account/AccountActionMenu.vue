@@ -45,6 +45,11 @@
               {{ t('admin.accounts.viewStats') }}
             </button>
             <div v-if="hasAccountActions" :class="DIVIDER"></div>
+            <!-- The groups editor from any device (spec 4.3): touch screens open the quality panel from a pill. -->
+            <button v-if="canPlace" :class="ITEM" data-test="menu-edit-groups" @click="$emit('edit-groups', account); $emit('close')">
+              <Icon name="grid" size="sm" :class="ICON" />
+              {{ t('admin.accounts.editGroups') }}
+            </button>
             <button v-if="canDuplicate && canPlace" :class="ITEM" @click="$emit('duplicate', account); $emit('close')">
               <Icon name="copy" size="sm" :class="ICON" />
               {{ t('admin.accounts.duplicateAccount') }}
@@ -109,7 +114,7 @@ const props = defineProps<{
   /** Its recovery is still running; the item stays first but does nothing. */
   recovering?: boolean
 }>()
-const emit = defineEmits(['iq-run', 'iq-records', 'close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow', 'manage-openai-totp', 'delete'])
+const emit = defineEmits(['iq-run', 'iq-records', 'close', 'test', 'stats', 'schedule', 'edit-groups', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow', 'manage-openai-totp', 'delete'])
 const { t } = useI18n()
 const auth = useAuthStore()
 const { canManage } = useAdminPermission('accounts')
@@ -172,14 +177,8 @@ const hasQuotaLimit = computed(() => {
   )
 })
 // 第二组（账号操作）有任一项时才画分隔线。
-const hasAccountActions = computed(() =>
-  (canDuplicate.value && canPlace.value) ||
-  canRenewCredentials.value ||
-  (auth.isAdmin && isOpenAIOAuthParent.value) ||
-  (isOpenAIOAuthParent.value && canPlace.value) ||
-  (canManage.value && supportsPrivacy.value) ||
-  (canManage.value && hasQuotaLimit.value)
-)
+// "Edit groups" shows to every manager; the other account actions add to it.
+const hasAccountActions = computed(() => canPlace.value || canRenewCredentials.value || (auth.isAdmin && isOpenAIOAuthParent.value))
 
 function onRecover() {
   if (!props.recovering) emit('recover-state', props.account)
