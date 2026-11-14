@@ -10,7 +10,7 @@
       :data-sq-capsule="item.key"
       @click.stop="emit('open', { groupId: item.groupId || null, model: item.model })"
     >
-      <span class="sq-capsule__name">{{ item.name }}</span> <span class="sq-capsule__state">{{ item.state }}</span>
+      <span class="sq-capsule__name">{{ item.name }}</span> <template v-if="item.modelShown"><span class="sq-capsule__state">{{ item.model }}</span>{{ ' ' }}</template><span class="sq-capsule__state">{{ item.state }}</span>
     </button>
     <button
       v-if="capsules.length > MAX_SHOWN"
@@ -30,14 +30,14 @@ import { fmtAt } from '@/utils/schedQualityFormat'
 
 // Groups column of the account list (FINAL §2, §7): one red capsule per substandard group and model,
 // `name 不达标·首字 · 12:30` with the first triggered dimension (contract §2.5; the numbers are red for all), then one
-// capsule per exemption. The model joins the name when the account is
-// substandard on more than one model. At most 3, then +N; a click opens the drawer at that group.
+// capsule per exemption. The model follows the name, never cut, when the account is substandard on more than one
+// model. At most 3, then +N; a click opens the drawer at that group.
 const props = defineProps<{ summary?: SchedAccountSummary; loading?: boolean; groupName: (id: number) => string }>()
 const emit = defineEmits<{ open: [target: { groupId: number | null; model: string | null }] }>()
 const { t } = useI18n()
 const MAX_SHOWN = 3
 
-interface Capsule { key: string; groupId: number; model: string | null; name: string; state: string; exempt: boolean }
+interface Capsule { key: string; groupId: number; model: string | null; modelShown: boolean; name: string; state: string; exempt: boolean }
 
 const capsules = computed<Capsule[]>(() => {
   const s = props.summary
@@ -52,7 +52,8 @@ const capsules = computed<Capsule[]>(() => {
       key: `${item.group_id}:${item.model}`,
       groupId: item.group_id,
       model: item.model,
-      name: manyModels ? `${props.groupName(item.group_id)} ${item.model}` : props.groupName(item.group_id),
+      modelShown: manyModels,
+      name: props.groupName(item.group_id),
       state: `${t('admin.schedQuality.state.substandard')}·${t(`admin.schedQuality.dim.${item.dims[0]}`)} · ${fmtAt(item.until, now)}`,
       exempt: false
     }))
@@ -61,6 +62,7 @@ const capsules = computed<Capsule[]>(() => {
       key: `exempt:${exemption.group_id}`,
       groupId: exemption.group_id,
       model: null,
+      modelShown: false,
       name: exemption.group_id === 0 ? t('admin.schedQuality.override.allGroups') : props.groupName(exemption.group_id),
       state: t('admin.schedQuality.state.exempted'),
       exempt: true
