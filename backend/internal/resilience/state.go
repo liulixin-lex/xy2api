@@ -37,8 +37,9 @@ type RequestState struct {
 	prelude preludeTrace
 
 	// requestID is generated locally, independent of client correlation IDs.
-	requestID   string
-	firstOutput time.Time
+	requestID     string
+	gatewayRecord *gatewayRequestTrace
+	firstOutput   time.Time
 	// firstOutputNoted is set once firstOutput is; later writes skip mu.
 	firstOutputNoted atomic.Bool
 	attemptProfile   AttemptProfile
@@ -360,6 +361,7 @@ func (s *RequestState) MarkOpsUpstreamSendBoundary(accountID int64) {
 		s.opsUpstreamSendBoundaries = make(map[int64]uint64)
 	}
 	s.opsUpstreamSendBoundaries[accountID] = s.opsUpstreamEventSequence
+	s.noteGatewaySendLocked(accountID)
 	s.mu.Unlock()
 }
 
@@ -575,6 +577,8 @@ func (s *RequestState) GatewayRequestID() string {
 	if s == nil {
 		return ""
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.requestID
 }
 

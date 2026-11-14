@@ -258,6 +258,9 @@ func usageRecordContext(parent context.Context, base context.Context) context.Co
 	if requestID, _ := parent.Value(ctxkey.RequestID).(string); strings.TrimSpace(requestID) != "" {
 		base = context.WithValue(base, ctxkey.RequestID, strings.TrimSpace(requestID))
 	}
+	if meta := resilience.GatewayRequestMetadataFromContext(parent); meta != nil {
+		base = resilience.WithGatewayRequestMetadata(base, meta)
+	}
 	base = service.WithInflightReservation(base, service.InflightReservationFromContext(parent))
 	// xy2api resilience: billing needs the request's delivery state; a client
 	// already gone is resolved now (design §8.2).
@@ -685,6 +688,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	c.Request = c.Request.WithContext(h.gatewayService.WithOpenAIGuardianParentAffinity(
 		c.Request.Context(), c, sessionHashBody, reqModel,
 	))
+	if !imageIntent {
+		defer beginGatewayRequest(c, func() *service.APIKey { return apiKey }, reqModel, reqStream, h.gatewayService)()
+	}
+
 	requireCompact := legacyCompact
 
 	maxAccountSwitches := h.maxAccountSwitches
@@ -870,8 +877,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			}()
 			return h.gatewayService.Forward(c.Request.Context(), c, account, attemptBody)
 		}()
-		recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, result != nil && result.SucceededForScheduling())
-		service.FinishOpenAIStickyForward(c.Request.Context(), account.ID, result, err)
+		recordOpenAIForwardUsage(c, account, result)
+		recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, gatewayOpenAICompleted(result))
+		finishOpenAIStickyForward(c, account.ID, result, err)
 		var cyberBlockBodyHTTP []byte
 		if service.GetOpsCyberPolicy(c) != nil {
 			cyberBlockBodyHTTP = sessionHashBody
@@ -1408,6 +1416,8 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 
+	defer beginGatewayRequest(c, func() *service.APIKey { return apiKey }, reqModel, reqStream, h.gatewayService)()
+
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
 	profitVetoCount := 0
@@ -1528,8 +1538,9 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			}()
 			return h.gatewayService.ForwardAsAnthropic(c.Request.Context(), c, account, forwardBody, promptCacheKey, defaultMappedModel)
 		}()
-		recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, result != nil && result.SucceededForScheduling())
-		service.FinishOpenAIStickyForward(c.Request.Context(), account.ID, result, err)
+		recordOpenAIForwardUsage(c, account, result)
+		recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, gatewayOpenAICompleted(result))
+		finishOpenAIStickyForward(c, account.ID, result, err)
 		var cyberBlockBodyMsg []byte
 		if service.GetOpsCyberPolicy(c) != nil {
 			cyberBlockBodyMsg = body
@@ -3053,6 +3064,13 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	wsPricingCtx, _ := h.gatewayService.WithOpenAIRequestPricingContext(ctx, apiKey.GroupID)
 	ctx = wsPricingCtx
 
+	beginGatewayRequest(c, func() *service.APIKey { return apiKey }, reqModel, true, h.gatewayService)
+	gatewayTurnModel := reqModel
+	resilience.StateFrom(c.Request.Context()).BeginGatewayTurn(firstTurnStartedAt)
+	defer func() { finishUnbilledGatewayRequest(c, apiKey, gatewayTurnModel, true, true, h.gatewayService) }()
+	// Local WS contexts were created before admission; retain the same trace.
+	ctx = resilience.WithRequestState(ctx, resilience.StateFrom(c.Request.Context()))
+
 	for {
 		if ctx.Err() != nil {
 			return
@@ -3281,6 +3299,16 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					writeSecurityAuditWSError(ctx, wsConn, decision)
 					return service.NewOpenAIWSClientCloseError(securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision), nil)
 				}
+				// The preceding turn is already frozen before accepting another.
+				finishUnbilledGatewayRequest(c, apiKey, gatewayTurnModel, true, true, h.gatewayService)
+				gatewayTurnModel = model
+				turnStartsMu.Lock()
+				start := turnStarts[turn]
+				turnStartsMu.Unlock()
+				if start.IsZero() {
+					start = time.Now()
+				}
+				resilience.StateFrom(ctx).BeginGatewayTurn(start)
 				if err := h.gatewayService.AdvanceOpenAIQualityTurn(ctx, account, payload, model); err != nil {
 					return err
 				}
@@ -3383,7 +3411,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					clearCyberPolicyAttemptState(c, !cyberBlockPendingAfterFailover)
 				}()
 				releaseTurnSlots()
-				turnRequestedModel := reqModel
+				turnRequestedModel := gatewayTurnModel
 				turnUpstreamModel := ""
 				if result != nil && turn > 1 {
 					if model := strings.TrimSpace(result.Model); model != "" {
@@ -3403,6 +3431,12 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					turnUpstreamModel = turnRequestedModel
 				}
 				turnUsageFields := turnMapping.ToUsageFields(turnRequestedModel, turnUpstreamModel)
+				recordForwardRecovery(c, turnErr, result != nil && result.ClientDisconnect || turnErr != nil && !errors.Is(turnErr, context.Canceled) && !errors.Is(turnErr, context.DeadlineExceeded) && openAIWSIngressEndedByClient(turnErr), gatewayOpenAICompleted(result))
+				// A retryable failure remains open across reconnect/account retries.
+				// Successful turns close now, before the next frame changes state.
+				if turnErr == nil {
+					defer finishUnbilledGatewayRequest(c, apiKey, turnRequestedModel, true, true, h.gatewayService)
+				}
 				cyberMarked := service.GetOpsCyberPolicy(c) != nil
 				h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, turnRequestedModel, turnErr != nil, cyberBlockBody, turnUsageFields, requestPayloadHash)
 				cyberBlockedThisConn, cyberBlockPendingAfterFailover = advanceOpenAIWSCyberBlockState(
@@ -3744,7 +3778,7 @@ func getContextInt64(c *gin.Context, key string) (int64, bool) {
 }
 
 func (h *OpenAIGatewayHandler) submitUsageRecordTask(parent context.Context, task service.UsageRecordTask) {
-	runDurableUsageRecordTask(parent, task, "handler.openai_gateway.usage")
+	runDurableUsageRecordTask(gatewayBillingContext(parent), task, "handler.openai_gateway.usage")
 }
 
 func (h *OpenAIGatewayHandler) submitOpenAIUsageRecordTask(parent context.Context, result *service.OpenAIForwardResult, task service.UsageRecordTask) {
@@ -3758,7 +3792,7 @@ func (h *OpenAIGatewayHandler) submitOpenAIUsageRecordTask(parent context.Contex
 }
 
 func (h *OpenAIGatewayHandler) submitMandatoryUsageRecordTask(parent context.Context, task service.UsageRecordTask) {
-	runDurableUsageRecordTask(parent, task, "handler.openai_gateway.usage")
+	runDurableUsageRecordTask(gatewayBillingContext(parent), task, "handler.openai_gateway.usage")
 }
 
 func (h *OpenAIGatewayHandler) acquireImageGenerationSlot(c *gin.Context, streamStarted bool) (func(), bool) {
@@ -4501,22 +4535,23 @@ const cyberPolicyRecordedKey = "ops_cyber_recorded"
 // cyberPolicyOpsErrorMeta carries request-scoped fields captured outside the
 // async goroutine for building the cyber ops_error_logs entry.
 type cyberPolicyOpsErrorMeta struct {
-	RequestID       string
-	ClientRequestID string
-	Platform        string
-	Model           string
-	RequestPath     string
-	Stream          bool
-	InboundEndpoint string
-	UserAgent       string
-	APIKeyPrefix    string
-	UserID          int64
-	APIKeyID        int64
-	AccountID       int64
-	GroupID         *int64
-	ClientIP        string
-	CreatedAt       time.Time
-	SessionBlockKey string
+	GatewayRequestID string
+	RequestID        string
+	ClientRequestID  string
+	Platform         string
+	Model            string
+	RequestPath      string
+	Stream           bool
+	InboundEndpoint  string
+	UserAgent        string
+	APIKeyPrefix     string
+	UserID           int64
+	APIKeyID         int64
+	AccountID        int64
+	GroupID          *int64
+	ClientIP         string
+	CreatedAt        time.Time
+	SessionBlockKey  string
 }
 
 // buildCyberPolicyOpsErrorEntry builds the ops_error_logs entry for an upstream
@@ -4526,6 +4561,7 @@ func buildCyberPolicyOpsErrorEntry(meta cyberPolicyOpsErrorMeta, mark *service.C
 	rt := int16(service.RequestTypeCyberBlocked)
 	entry := &service.OpsInsertErrorLogInput{
 		RequestID:         meta.RequestID,
+		GatewayRequestID:  meta.GatewayRequestID,
 		ClientRequestID:   meta.ClientRequestID,
 		Platform:          meta.Platform,
 		Model:             meta.Model,
@@ -4574,6 +4610,7 @@ func buildCyberSessionBlockedOpsEntry(meta cyberPolicyOpsErrorMeta) *service.Ops
 	rt := int16(service.RequestTypeCyberBlocked)
 	entry := &service.OpsInsertErrorLogInput{
 		RequestID:         meta.RequestID,
+		GatewayRequestID:  meta.GatewayRequestID,
 		ClientRequestID:   meta.ClientRequestID,
 		Platform:          meta.Platform,
 		Model:             meta.Model,
@@ -4727,6 +4764,7 @@ func (h *OpenAIGatewayHandler) enqueueCyberSessionBlockedOpsEntry(c *gin.Context
 	if c.Request != nil {
 		requestCtx = c.Request.Context()
 	}
+	meta.GatewayRequestID = resilience.StateFrom(requestCtx).GatewayRequestID()
 	meta.Platform = resolveOpsPlatform(requestCtx, apiKey, guessPlatformFromPath(meta.RequestPath))
 	if c.Request != nil {
 		meta.ClientRequestID, _ = c.Request.Context().Value(ctxkey.ClientRequestID).(string)
@@ -4813,21 +4851,22 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 		apiKeyPrefix = keyPrefix(apiKey.Key, 8)
 	}
 	opsMeta := cyberPolicyOpsErrorMeta{
-		RequestID:       requestID,
-		ClientRequestID: clientRequestID,
-		Platform:        platform,
-		Model:           model,
-		RequestPath:     requestPath,
-		Stream:          stream,
-		InboundEndpoint: inboundEndpoint,
-		UserAgent:       userAgent,
-		APIKeyPrefix:    apiKeyPrefix,
-		UserID:          userID,
-		APIKeyID:        apiKeyID,
-		AccountID:       accountID,
-		GroupID:         groupID,
-		ClientIP:        clientIPStr,
-		CreatedAt:       time.Now(),
+		GatewayRequestID: resilience.StateFrom(requestCtx).GatewayRequestID(),
+		RequestID:        requestID,
+		ClientRequestID:  clientRequestID,
+		Platform:         platform,
+		Model:            model,
+		RequestPath:      requestPath,
+		Stream:           stream,
+		InboundEndpoint:  inboundEndpoint,
+		UserAgent:        userAgent,
+		APIKeyPrefix:     apiKeyPrefix,
+		UserID:           userID,
+		APIKeyID:         apiKeyID,
+		AccountID:        accountID,
+		GroupID:          groupID,
+		ClientIP:         clientIPStr,
+		CreatedAt:        time.Now(),
 	}
 	cyberLogOnly := h.cyberPolicyLogOnly(c, apiKey)
 	if gwSvc != nil && apiKey != nil && !cyberLogOnly {
@@ -4841,8 +4880,11 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 	// Under an availability fallback the usage row keeps the origin group for
 	// limits and display and prices by the serving group, like regular usage.
 	requestState := resilience.StateFrom(requestCtx)
+	if forwardErrored && gwSvc != nil && apiKey != nil && apiKey.User != nil && account != nil && strings.TrimSpace(model) != "" {
+		requestCtx = gatewayBillingContext(requestCtx)
+	}
 	go func() {
-		ctx, cancel := context.WithTimeout(resilience.WithRequestState(context.Background(), requestState), 30*time.Second)
+		ctx, cancel := context.WithTimeout(usageRecordContext(requestCtx, resilience.WithRequestState(context.Background(), requestState)), 30*time.Second)
 		defer cancel()
 		if cmSvc != nil {
 			cmSvc.RecordCyberPolicyEvent(ctx, service.CyberPolicyRecordInput{

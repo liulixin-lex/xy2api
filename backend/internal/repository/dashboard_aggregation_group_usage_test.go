@@ -202,6 +202,7 @@ func TestDashboardAggregationRepositoryCleanupUsageLogsNonPartitionedInvalidates
 		WithArgs(earliestDeletedAt, "Asia/Shanghai").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
+	mock.ExpectExec(`DELETE FROM gateway_unbilled_requests`).WithArgs(cutoff, usageLogsCleanupBatchSize).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT closed_before::text, retained_from.*FOR UPDATE`).
 		WillReturnRows(sqlmock.NewRows([]string{"closed_before", "retained_from", "timezone_name"}).
@@ -261,6 +262,7 @@ func TestDashboardAggregationRepositoryCleanupUsageLogsPartitionedSortsAndInvali
 		WithArgs(cutoff.Add(-time.Hour), "Asia/Shanghai").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
+	mock.ExpectExec(`DELETE FROM gateway_unbilled_requests`).WithArgs(cutoff, usageLogsCleanupBatchSize).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT closed_before::text, retained_from.*FOR UPDATE`).
 		WillReturnRows(sqlmock.NewRows([]string{"closed_before", "retained_from", "timezone_name"}).

@@ -31,6 +31,7 @@ type schedAttemptCapture struct {
 	started                                    time.Time
 	first, done, client                        bool
 	expectTerminal, terminal, benignIncomplete bool
+	terminalEvent                              string
 	failure                                    *resilience.Outcome
 	usage                                      *SchedAttemptUsage
 }
@@ -43,7 +44,7 @@ func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *A
 	selection, ok := st.SchedSelection()
 	record := s.schedAttemptRecorder != nil && ok && selection.AccountID == account.ID
 	change := pendingOpenAIStickyChange(ctx)
-	if !record && (change == nil || change.target != account.ID) {
+	if !record && (change == nil || change.target != account.ID) && !st.GatewayRequestEnabled() {
 		return nil
 	}
 	a := &schedAttemptCapture{state: st, ctx: ctx, accountID: account.ID, started: time.Now(), attempt: schedAttemptNoop{}}
@@ -62,6 +63,15 @@ func (s *OpenAIGatewayService) beginSchedAttempt(ctx context.Context, account *A
 	a.attempt = s.schedAttemptRecorder.Begin(in)
 	st.SetCurrentAttempt(a)
 	return a
+}
+
+func (a *schedAttemptCapture) finishRecord(in SchedAttemptFinish) {
+	var input, read, creation *int
+	if in.Usage != nil {
+		input, read, creation = &in.Usage.InputTokens, &in.Usage.CacheReadTokens, &in.Usage.CacheCreationTokens
+	}
+	a.state.NoteGatewayAttempt(in.Outcome == schedquality.OutcomeOK, in.Detail, input, read, creation)
+	a.attempt.Finish(in)
 }
 func currentSchedAttempt(ctx context.Context) *schedAttemptCapture {
 	a, _ := resilience.StateFrom(ctx).CurrentAttempt().(*schedAttemptCapture)
@@ -90,6 +100,19 @@ func schedUsage(u *OpenAIUsage) *SchedAttemptUsage {
 		CacheReadTokens:     read,
 		CacheCreationTokens: creation,
 	}
+}
+
+func isBenignOpenAIIncomplete(payload []byte) bool {
+	root := gjson.ParseBytes(payload)
+	typ := strings.TrimSpace(root.Get("type").String())
+	if typ != "response.incomplete" && strings.TrimSpace(root.Get("status").String()) != "incomplete" {
+		return false
+	}
+	reason := strings.TrimSpace(root.Get("response.incomplete_details.reason").String())
+	if reason == "" {
+		reason = strings.TrimSpace(root.Get("incomplete_details.reason").String())
+	}
+	return reason == "max_output_tokens" || reason == "content_filter"
 }
 func (a *schedAttemptCapture) noteUsage(u *OpenAIUsage) {
 	if a == nil {
@@ -121,16 +144,20 @@ func (a *schedAttemptCapture) observe(data []byte) {
 		}
 	}
 	status := root.Get("status").String()
-	if typ == "response.incomplete" || status == "incomplete" {
-		reason := root.Get("response.incomplete_details.reason").String()
-		if reason == "" {
-			reason = root.Get("incomplete_details.reason").String()
-		}
-		if reason == "max_output_tokens" || reason == "content_filter" {
-			a.mu.Lock()
-			a.benignIncomplete = true
-			a.mu.Unlock()
-		}
+	terminalEvent := typ
+	if terminalEvent == "" && (status == "completed" || status == "failed" || status == "incomplete" || status == "cancelled" || status == "canceled") {
+		terminalEvent = "response." + status
+	}
+	if isOpenAIWSTerminalEvent(terminalEvent) || terminalEvent == "error" {
+		a.mu.Lock()
+		a.terminalEvent = terminalEvent
+		a.mu.Unlock()
+	}
+	if isBenignOpenAIIncomplete(data) {
+		a.mu.Lock()
+		a.benignIncomplete = true
+		a.mu.Unlock()
+		return
 	}
 	failed := typ == "error" || typ == "response.failed" || typ == "response.incomplete" || typ == "response.cancelled" || typ == "response.canceled" || status == "failed" || status == "incomplete" || root.Get("error").IsObject()
 	if !failed {
@@ -181,15 +208,15 @@ func (a *schedAttemptCapture) timeout(plan resilience.TimeoutPlan) {
 	a.done = true
 	noteOpenAIStickyAttemptOutcome(a, false)
 	if a.state.ClientCanceled() {
-		a.attempt.Finish(SchedAttemptFinish{Outcome: schedquality.Outcome(5), Detail: string(resilience.CategoryClientCancel), Usage: a.usage})
+		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.Outcome(5), Detail: string(resilience.CategoryClientCancel), Usage: a.usage})
 	} else if plan.Applied() || a.first {
 		detail := string(classifyUpstreamOutcome(resilience.Outcome{Source: resilience.SourceNetwork, Err: context.DeadlineExceeded}).Category)
 		if a.first {
 			detail = string(resilience.CategoryStall)
 		}
-		a.attempt.Finish(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: detail, Usage: a.usage})
+		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: detail, Usage: a.usage})
 	} else {
-		a.attempt.Finish(SchedAttemptFinish{Outcome: schedquality.OutcomeTimeout, Detail: string(resilience.CategoryFirstOutputTimeout), Waited: time.Since(a.started), Usage: a.usage})
+		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeTimeout, Detail: string(resilience.CategoryFirstOutputTimeout), Waited: time.Since(a.started), Usage: a.usage})
 	}
 	a.state.ClearCurrentAttemptIf(a)
 }
@@ -199,6 +226,12 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if result != nil {
+		result.BenignIncomplete = result.BenignIncomplete || a.benignIncomplete
+		if result.UpstreamTerminalEvent == "" {
+			result.UpstreamTerminalEvent = a.terminalEvent
+		}
+	}
 	if a.done {
 		return
 	}
@@ -215,13 +248,13 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 	defer a.state.ClearCurrentAttemptIf(a)
 	canceled := a.client || a.state.ClientCanceled()
 	success := !canceled && a.ctx.Err() == nil && err == nil && a.failure == nil &&
-		(!a.expectTerminal || a.terminal) && !a.benignIncomplete &&
-		(result == nil || !result.PartialFailure && (result.UpstreamTerminalEvent == "" || result.UpstreamTerminalEvent == "response.completed" || result.UpstreamTerminalEvent == "response.done"))
+		(!a.expectTerminal || a.terminal) &&
+		(result == nil || result.CompletedForDelivery())
 
 	noteOpenAIStickyAttemptOutcome(a, success)
 	// Client cancellation is an explicit delivery fact, never a generic deadline.
 	if canceled {
-		a.attempt.Finish(SchedAttemptFinish{Outcome: schedquality.Outcome(5), Detail: string(resilience.CategoryClientCancel), Usage: a.usage})
+		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.Outcome(5), Detail: string(resilience.CategoryClientCancel), Usage: a.usage})
 		return
 	}
 	failure := a.failure
@@ -238,10 +271,10 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 		if failure != nil {
 			detail = string(classifyUpstreamOutcome(*failure).Category)
 		}
-		a.attempt.Finish(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: detail, Usage: a.usage})
+		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: detail, Usage: a.usage})
 		return
 	}
-	a.attempt.Finish(SchedAttemptFinish{Outcome: schedquality.OutcomeOK, Usage: a.usage})
+	a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeOK, Usage: a.usage})
 }
 
 // FinishSchedAttemptAtHandlerExit only repairs outcomes invisible to the service.
@@ -267,7 +300,7 @@ func (a *schedAttemptCapture) finishUnfinished() {
 	if !a.done {
 		a.done = true
 		noteOpenAIStickyAttemptOutcome(a, false)
-		a.attempt.Finish(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: string(resilience.CategoryTransient), Usage: a.usage})
+		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Detail: string(resilience.CategoryTransient), Usage: a.usage})
 		a.state.ClearCurrentAttemptIf(a)
 	}
 }
@@ -365,6 +398,7 @@ func (t *schedWSTurnCapture) begin(s *OpenAIGatewayService, ctx context.Context,
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.active.finishUnfinished()
+	resilience.StateFrom(ctx).NoteGatewaySend(account.ID)
 	t.active = s.beginSchedAttempt(ctx, account, payload, len(payload), true)
 }
 func (t *schedWSTurnCapture) observe(payload []byte) {
@@ -401,4 +435,14 @@ func (a *schedAttemptCapture) markTerminal() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.terminal = true
+}
+
+// noteGatewayWSOutput runs after a successful client write, unlike the attempt
+// clock which measures receipt from upstream.
+func noteGatewayWSOutput(ctx context.Context, payload []byte) {
+	root := gjson.ParseBytes(payload)
+	disposition := resilience.ResponsesEventOutputDisposition(strings.TrimSpace(root.Get("type").String()), payload)
+	if disposition.Visible || semanticJSONOutput(root) {
+		resilience.StateFrom(ctx).NoteSemanticOutput(time.Now())
+	}
 }
