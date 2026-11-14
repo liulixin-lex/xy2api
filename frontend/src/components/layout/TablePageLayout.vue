@@ -47,7 +47,14 @@ onUnmounted(() => {
 /* 桌面端：Flexbox 布局 */
 .table-page-layout {
   @apply flex flex-col gap-6;
-  height: calc(100vh - 64px - 4rem); /* 减去 header + lg:p-8 的上下padding */
+}
+
+/* 从 1024px 起页面定高（视口减去页头与 lg:p-8 的上下内边距），表格在容器内滚动、表头吸顶。
+   1024 以下不定高：页面自然滚动，顶栏始终吸顶（7n-2） */
+@media (min-width: 1024px) {
+  .table-page-layout {
+    height: calc(100vh - 64px - 4rem);
+  }
 }
 
 .layout-section-fixed {

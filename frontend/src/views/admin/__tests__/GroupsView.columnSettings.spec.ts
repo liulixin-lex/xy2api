@@ -230,7 +230,7 @@ const columnKeys = (wrapper: ReturnType<typeof mount>) =>
   wrapper.get('[data-test="columns"]').text().split(',').filter(Boolean)
 
 const openColumnSettings = async (wrapper: ReturnType<typeof mount>) => {
-  await wrapper.get('button[title="Column Settings"]').trigger('click')
+  await wrapper.get('button[aria-label="Column Settings"]').trigger('click')
 }
 
 const clickColumnToggle = async (wrapper: ReturnType<typeof mount>, label: string) => {

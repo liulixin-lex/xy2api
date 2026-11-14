@@ -369,6 +369,22 @@ describe('admin UsersView', () => {
     wrapper.unmount()
   })
 
+  it('names every secondary action whose text goes below 1024px; "create" keeps its text (7o-3)', async () => {
+    listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42 })], total: 1, page: 1, page_size: 20, pages: 1 })
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+    await wrapper.get('[data-test="select-42"]').trigger('click')
+
+    const labels = wrapper.findAll('.table-toolbar__label')
+    expect(labels).toHaveLength(7)
+    for (const label of labels) {
+      expect(label.element.closest('button')!.getAttribute('aria-label')).toBe(label.text())
+    }
+    const create = wrapper.findAll('button').find((button) => button.text() === 'admin.users.createUser')!
+    expect(create.find('.table-toolbar__label').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('keeps the selection when bulk enabling is cancelled or fails', async () => {
     batchUpdateStatus.mockRejectedValue({ status: 500, message: 'database unavailable' })
     const wrapper = mountBulkDeleteView()

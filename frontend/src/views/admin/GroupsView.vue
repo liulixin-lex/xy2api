@@ -52,8 +52,9 @@
             <button
               @click="reloadGroups"
               :disabled="loading"
-              class="btn btn-secondary"
-              :title="t('common.refresh')"
+              class="btn btn-secondary max-lg:h-10 max-lg:w-10 max-lg:p-0"
+              :aria-label="t('common.refresh')"
+              v-tip="t('common.refresh')"
             >
               <Icon
                 name="refresh"
@@ -65,12 +66,11 @@
               <button
                 @click="showColumnDropdown = !showColumnDropdown"
                 class="btn btn-secondary"
-                :title="t('admin.groups.columnSettings')"
+                :aria-label="t('admin.groups.columnSettings')"
+                v-tip="t('admin.groups.columnSettings')"
               >
                 <Icon name="grid" size="md" class="mr-2" />
-                <span class="hidden md:inline">{{
-                  t("admin.groups.columnSettings")
-                }}</span>
+                <span class="table-toolbar__label">{{ t("admin.groups.columnSettings") }}</span>
               </button>
               <div
                 v-if="showColumnDropdown"
@@ -98,18 +98,19 @@
               v-if="!authStore.isSimpleMode && canManage"
               @click="openSortModal"
               class="btn btn-secondary"
-              :title="t('admin.groups.sortOrder')"
+              :aria-label="t('admin.groups.sortOrder')"
+              v-tip="t('admin.groups.sortOrder')"
             >
               <Icon name="arrowsUpDown" size="md" class="mr-2" />
-              {{ t("admin.groups.sortOrder") }}
+              <span class="table-toolbar__label">{{ t("admin.groups.sortOrder") }}</span>
             </button>
             <button
               v-if="canManage"
               @click="openCreateModal"
-              class="btn btn-primary"
+              class="btn btn-primary max-lg:gap-1.5 max-lg:px-3"
               data-tour="groups-create-btn"
             >
-              <Icon name="plus" size="md" class="mr-2" />
+              <Icon name="plus" size="md" class="mr-2 max-lg:mr-0 max-lg:h-4 max-lg:w-4" />
               {{ t("admin.groups.createGroup") }}
             </button>
           </template>
@@ -4407,6 +4408,7 @@ import Select from "@/components/common/Select.vue";
 import PlatformIcon from "@/components/common/PlatformIcon.vue";
 import { platformLabel } from "@/utils/platformColors";
 import Icon from "@/components/icons/Icon.vue";
+import { vTip } from "@/utils/tip";
 import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipliersModal.vue";
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";

@@ -15,23 +15,32 @@
 /**
  * The toolbar of a table page, in TablePageLayout's #filters slot (spec 8.6, prototype):
  * - from 1024px one row: the search and the filters on the left (the filters wrap), then the live indicator (#status)
- *   and the actions on the right;
+ *   and the actions on the right. When the actions do not fit beside the search, the whole action area moves to a row
+ *   of its own, on the right, its buttons wrapping inside it: it never covers the search or leaves the screen (7o-2);
  * - below 1024px the search has a row of its own, the filters keep to one row that scrolls sideways out to the
- *   screen's edges (select menus open in the body, so the scroll does not clip them), and the last row holds the live indicator on the left and the
- *   actions on the right, the primary one included.
+ *   screen's edges (select menus open in the body, so the scroll does not clip them), and the last row holds the live
+ *   indicator on the left and the actions on the right, the primary one included. No row is wider than the page (7n-1).
+ *
+ * A secondary action puts its text in `<span class="table-toolbar__label">`: below 1024px the text goes and the button
+ * is a 40px square with its icon alone, so the button needs an aria-label and a tip (7o-3). The primary action
+ * ("create", "add") does not use the class and keeps its text.
  */
 </script>
 
 <style scoped>
 .table-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
+  justify-content: flex-end;
   gap: 12px;
   min-width: 0;
 }
+/* Its basis is the search box: the actions share its row as long as they fit beside it, then the main part grows into
+   the room left (the filters wrapping in it). */
 .table-toolbar__main {
   display: flex;
-  flex: 1 1 auto;
+  flex: 1 1 16rem;
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
@@ -53,16 +62,20 @@
 }
 .table-toolbar__actions {
   display: flex;
-  flex: none;
+  flex: 0 1 auto;
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+  min-width: 0;
 }
 @media (max-width: 1023px) {
+  /* One column that never wraps: a wrapping column takes the width of its widest row (the filters), which then widens
+     the whole page (7n-1). */
   .table-toolbar,
   .table-toolbar__main {
     flex-direction: column;
+    flex-wrap: nowrap;
     align-items: stretch;
     gap: 8px;
   }
@@ -85,6 +98,19 @@
   }
   .table-toolbar__status {
     margin-right: auto;
+  }
+  .table-toolbar :deep(.table-toolbar__label) {
+    display: none;
+  }
+  .table-toolbar :deep(:has(> .table-toolbar__label)) {
+    width: 40px;
+    height: 40px;
+    flex: none;
+    justify-content: center;
+    padding: 0;
+  }
+  .table-toolbar :deep(:has(> .table-toolbar__label) > *) {
+    margin: 0;
   }
 }
 @media (min-width: 768px) and (max-width: 1023px) {

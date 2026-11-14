@@ -6,6 +6,7 @@
       class="tools-btn"
       :aria-expanded="open ? 'true' : 'false'"
       :aria-label="t('admin.accounts.moreActions')"
+      v-tip="t('admin.accounts.moreActions')"
       data-test="account-tools"
       @click="toggle"
     >
@@ -90,6 +91,7 @@ import Icon from '@/components/icons/Icon.vue'
 import AccountColumnSettings from '@/components/admin/account/AccountColumnSettings.vue'
 import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { getFloatingPanelPosition } from '@/utils/floatingPanel'
+import { vTip } from '@/utils/tip'
 
 export type AccountToolAction = 'bulk-edit-filtered' | 'sync-crs' | 'import' | 'openai-login' | 'export' | 'error-passthrough' | 'tls-profiles'
 
@@ -179,8 +181,9 @@ defineExpose({ close: () => { open.value = false } })
 .account-tools-menu-icon {
   @apply inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md;
 }
-/* 1024–1279: the button keeps only its icon */
-@media (min-width: 1024px) and (max-width: 1279px) {
+/* Below 1280px the button keeps only its icon (a secondary action, 7o-3); below 1024px it is a 40px square like the
+   toolbar's other controls there. */
+@media (max-width: 1279px) {
   .tools-btn {
     width: var(--control-height);
     padding: 0;
@@ -191,6 +194,12 @@ defineExpose({ close: () => { open.value = false } })
   }
   .tools-btn__icon-narrow {
     display: inline-block;
+  }
+}
+@media (max-width: 1023px) {
+  .tools-btn {
+    width: 40px;
+    height: 40px;
   }
 }
 </style>

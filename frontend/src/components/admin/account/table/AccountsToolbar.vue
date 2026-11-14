@@ -121,7 +121,7 @@
  * refresh, more actions (slot) and add.
  *
  * Below 1024px it takes TableToolbar's narrow layout: search on its own row, the filters on one row that scrolls
- * sideways, the live indicator and the actions last. The tags then all fold into "more filters" (its count and menu).
+ * sideways, the active filters as tags wrapping on a row under it (7l-3), the live indicator and the actions last.
  */
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useEventListener, useMediaQuery, useResizeObserver } from '@vueuse/core'
@@ -403,6 +403,7 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
    room left; below 1024px TableToolbar's narrow layout applies as it is. */
 @media (min-width: 1024px) {
   .tb {
+    flex-wrap: nowrap;
     align-items: center;
     gap: 8px;
   }
@@ -447,6 +448,7 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
     display: contents;
   }
   .tb-filters {
+    min-width: 0;
     margin-inline: -16px;
     padding-inline: 16px;
     overflow-x: auto;

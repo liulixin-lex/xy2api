@@ -131,8 +131,9 @@
             <button
               @click="refreshUsers"
               :disabled="loading"
-              class="btn btn-secondary px-2 md:px-3"
-              :title="t('common.refresh')"
+              class="btn btn-secondary px-3 max-lg:h-10 max-lg:w-10 max-lg:p-0"
+              :aria-label="t('common.refresh')"
+              v-tip="t('common.refresh')"
             >
               <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
             </button>
@@ -140,11 +141,12 @@
             <div class="relative" ref="filterDropdownRef">
               <button
                 @click="showFilterDropdown = !showFilterDropdown"
-                class="btn btn-secondary px-2 md:px-3"
-                :title="t('admin.users.filterSettings')"
+                class="btn btn-secondary px-3"
+                :aria-label="t('admin.users.filterSettings')"
+                v-tip="t('admin.users.filterSettings')"
               >
-                <Icon name="filter" size="sm" class="md:mr-1.5" />
-                <span class="hidden md:inline">{{ t('admin.users.filterSettings') }}</span>
+                <Icon name="filter" size="sm" class="mr-1.5" />
+                <span class="table-toolbar__label">{{ t('admin.users.filterSettings') }}</span>
               </button>
               <!-- Dropdown menu -->
               <div
@@ -194,13 +196,14 @@
             <div class="relative" ref="columnDropdownRef">
               <button
                 @click="showColumnDropdown = !showColumnDropdown"
-                class="btn btn-secondary px-2 md:px-3"
-                :title="t('admin.users.columnSettings')"
+                class="btn btn-secondary px-3"
+                :aria-label="t('admin.users.columnSettings')"
+                v-tip="t('admin.users.columnSettings')"
               >
-                <svg class="h-4 w-4 md:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                <svg class="h-4 w-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z" />
                 </svg>
-                <span class="hidden md:inline">{{ t('admin.users.columnSettings') }}</span>
+                <span class="table-toolbar__label">{{ t('admin.users.columnSettings') }}</span>
               </button>
               <!-- Dropdown menu -->
               <div
@@ -235,21 +238,24 @@
             <button
               v-if="canManage"
               @click="showAttributesModal = true"
-              class="btn btn-secondary px-2 md:px-3"
-              :title="t('admin.users.attributes.configButton')"
+              class="btn btn-secondary px-3"
+              :aria-label="t('admin.users.attributes.configButton')"
+              v-tip="t('admin.users.attributes.configButton')"
             >
-              <Icon name="cog" size="sm" class="md:mr-1.5" />
-              <span class="hidden md:inline">{{ t('admin.users.attributes.configButton') }}</span>
+              <Icon name="cog" size="sm" class="mr-1.5" />
+              <span class="table-toolbar__label">{{ t('admin.users.attributes.configButton') }}</span>
             </button>
 
             <button
               v-if="canManage && selectedCount > 0"
               class="btn btn-secondary"
               data-test="bulk-edit-limits"
+              :aria-label="t('admin.users.bulkLimits.action', { count: selectedCount })"
+              v-tip="t('admin.users.bulkLimits.action', { count: selectedCount })"
               @click="showBulkEditModal = true"
             >
               <Icon name="users" size="md" class="mr-2" />
-              {{ t('admin.users.bulkLimits.action', { count: selectedCount }) }}
+              <span class="table-toolbar__label">{{ t('admin.users.bulkLimits.action', { count: selectedCount }) }}</span>
             </button>
 
             <button
@@ -257,10 +263,12 @@
               class="btn btn-secondary"
               data-test="bulk-disable-users"
               :disabled="bulkStatusUpdating"
+              :aria-label="t('admin.users.bulkStatus.disableAction', { count: selectedCount })"
+              v-tip="t('admin.users.bulkStatus.disableAction', { count: selectedCount })"
               @click="openBulkStatus('disabled')"
             >
               <Icon name="ban" size="md" class="mr-2" />
-              {{ t('admin.users.bulkStatus.disableAction', { count: selectedCount }) }}
+              <span class="table-toolbar__label">{{ t('admin.users.bulkStatus.disableAction', { count: selectedCount }) }}</span>
             </button>
 
             <button
@@ -268,10 +276,12 @@
               class="btn btn-secondary"
               data-test="bulk-enable-users"
               :disabled="bulkStatusUpdating"
+              :aria-label="t('admin.users.bulkStatus.enableAction', { count: selectedCount })"
+              v-tip="t('admin.users.bulkStatus.enableAction', { count: selectedCount })"
               @click="openBulkStatus('active')"
             >
               <Icon name="checkCircle" size="md" class="mr-2" />
-              {{ t('admin.users.bulkStatus.enableAction', { count: selectedCount }) }}
+              <span class="table-toolbar__label">{{ t('admin.users.bulkStatus.enableAction', { count: selectedCount }) }}</span>
             </button>
 
             <button
@@ -279,14 +289,16 @@
               class="btn btn-danger"
               data-test="bulk-delete-users"
               :disabled="bulkDeleting"
+              :aria-label="t('admin.users.bulkDelete.action', { count: selectedCount })"
+              v-tip="t('admin.users.bulkDelete.action', { count: selectedCount })"
               @click="bulkDeleteIds = [...selectedIds]"
             >
               <Icon name="trash" size="md" class="mr-2" />
-              {{ t('admin.users.bulkDelete.action', { count: selectedCount }) }}
+              <span class="table-toolbar__label">{{ t('admin.users.bulkDelete.action', { count: selectedCount }) }}</span>
             </button>
 
-            <button v-if="canManage" @click="showCreateModal = true" class="btn btn-primary">
-              <Icon name="plus" size="md" class="mr-2" />
+            <button v-if="canManage" @click="showCreateModal = true" class="btn btn-primary max-lg:gap-1.5 max-lg:px-3">
+              <Icon name="plus" size="md" class="mr-2 max-lg:mr-0 max-lg:h-4 max-lg:w-4" />
               {{ t('admin.users.createUser') }}
             </button>
           </template>
@@ -842,6 +854,7 @@ import { useTableSelection } from '@/composables/useTableSelection'
 import { formatDateTime } from '@/utils/format'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import Icon from '@/components/icons/Icon.vue'
+import { vTip } from '@/utils/tip'
 
 const { t } = useI18n()
 import { adminAPI } from '@/api/admin'
