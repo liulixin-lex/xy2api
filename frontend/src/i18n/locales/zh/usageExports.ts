@@ -1,6 +1,7 @@
 export default {
   "title": "导出任务",
   "retention": "文件保留 24 小时。离开页面后仍会继续生成。",
+  "retentionShort": "保留 24 小时",
   "waiting": "请求较多，正在等待恢复。后台任务继续执行。",
   "rows": "{count} 条记录",
   "snapshot": "数据快照：{time}",

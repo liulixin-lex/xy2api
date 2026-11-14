@@ -71,11 +71,8 @@ const DataTableStub = {
   template: `
     <div data-test="data-table">
       <template v-for="column in columns" :key="column.key">
-        <div v-if="['usage', 'capacity', 'schedulable'].includes(column.key)" data-test="plain-header">
+        <div v-if="['usage', 'capacity', 'schedulable', 'upstream_billing_rate'].includes(column.key)" data-test="plain-header">
           <slot :name="'header-' + column.key" :column="column">{{ column.label }}</slot>
-        </div>
-        <div v-if="column.key === 'upstream_billing_rate'" data-test="upstream-billing-header">
-          <slot :name="'header-' + column.key" :column="column" />
         </div>
       </template>
       <div v-for="row in data" :key="row.id" data-test="account-rate">
@@ -169,14 +166,15 @@ describe('admin AccountsView usage windows hint', () => {
     expect(wrapper.get('[data-test="account-filters"]').attributes('data-group-count')).toBe('1')
   })
 
-  it('shows the capacity, scheduling and usage windows headers as plain names (ui-proposal 6.1 #12)', async () => {
+  it('shows the capacity, scheduling, usage windows and declared-rate headers as plain names, without help text', async () => {
     const wrapper = mountView()
     await flushPromises()
 
     expect(wrapper.findAll('[data-test="plain-header"]').map(header => header.text())).toEqual([
       'admin.accounts.columns.capacity',
       'admin.accounts.columns.schedulable',
-      'admin.accounts.columns.usageWindows'
+      'admin.accounts.columns.usageWindows',
+      'admin.accounts.columns.upstreamBillingRate'
     ])
     expect(wrapper.findAll('[data-test="plain-header"] [data-test="usage-windows-hint"]')).toHaveLength(0)
   })
@@ -189,20 +187,6 @@ describe('admin AccountsView usage windows hint', () => {
     const columns = wrapper.getComponent(DataTableStub).props('columns') as Array<{ key: string }>
     expect(columns.filter(column => column.key === 'usage')).toHaveLength(1)
     expect(columns.some(column => column.key === 'ollama_cloud_usage')).toBe(false)
-  })
-
-  it('renders the upstream billing trust warning next to the declared-rate column', async () => {
-    const wrapper = mountView()
-    await flushPromises()
-
-    const header = wrapper.find('[data-test="upstream-billing-header"]')
-    expect(header.exists()).toBe(true)
-    expect(header.text()).toContain('admin.accounts.columns.upstreamBillingRate')
-    expect(wrapper.findAll('[data-test="usage-windows-hint"]').some(node =>
-      node.text() === 'admin.accounts.upstreamBilling.trustWarning'
-    )).toBe(true)
-    const columns = wrapper.getComponent(DataTableStub).props('columns') as Array<{ key: string; sortable: boolean }>
-    expect(columns.find(column => column.key === 'upstream_billing_rate')?.sortable).toBe(true)
   })
 
   it('shows account multipliers with enough precision to match declared rates', async () => {

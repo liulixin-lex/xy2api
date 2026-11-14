@@ -72,7 +72,6 @@
   align-items: center;
   gap: 4px;
   height: 22px;
-  max-width: 11em;
   padding: 0 8px;
   border: 1px solid;
   border-radius: 6px;
@@ -81,12 +80,12 @@
   white-space: nowrap;
   line-height: 20px;
 }
-.sq-capsule__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The group name keeps up to 7.5 characters and truncates past that; the state word never does. */
+.sq-capsule__name { min-width: 0; max-width: 7.5em; overflow: hidden; text-overflow: ellipsis; }
 .sq-capsule__state { flex-shrink: 0; }
 .sq-capsule--cool { color: var(--sq-cool-fg); background: var(--sq-cool-bg); border-color: var(--sq-cool-bd); }
 /* Exemption: dashed border and its own small icon (D35). */
 .sq-capsule--manual { color: var(--sq-manual-fg); background: var(--sq-manual-bg); border-color: var(--sq-manual-bd); border-style: dashed; }
-.sq-capsule--all { max-width: none; }
 .sq-capsule__icon { width: 12px; height: 12px; margin-left: -2px; flex-shrink: 0; }
 
 /* A number that makes the account substandard somewhere (FINAL §6): red, bold and underlined so it reads without colour. */

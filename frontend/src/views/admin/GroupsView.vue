@@ -4683,10 +4683,7 @@ const allColumns = computed<Column[]>(() => {
   if (authStore.isSimpleMode) return basic;
   return [
     ...basic.slice(0, 3),
-    { key: "billing_type", label: t("admin.groups.columns.billingType"), sortable: true },
-    { key: "rate_multiplier", label: t("admin.groups.columns.rateMultiplier"), sortable: true },
-    { key: "is_exclusive", label: t("admin.groups.columns.type"), sortable: true },
-    { key: "category", label: t("admin.groupCategories.column"), sortable: false },
+    // FINAL §7: the scheduling columns come right after the name.
     ...GROUP_SCHED_COLUMNS.map(([key, head]) => ({
       key,
       label: t(`admin.schedQuality.groupCol.${key}`),
@@ -4694,6 +4691,10 @@ const allColumns = computed<Column[]>(() => {
       class: "text-right",
       ...(head ? { group: `sq_${head}` } : {}),
     })),
+    { key: "billing_type", label: t("admin.groups.columns.billingType"), sortable: true },
+    { key: "rate_multiplier", label: t("admin.groups.columns.rateMultiplier"), sortable: true },
+    { key: "is_exclusive", label: t("admin.groups.columns.type"), sortable: true },
+    { key: "category", label: t("admin.groupCategories.column"), sortable: false },
     basic[3],
     { key: "capacity", label: t("admin.groups.columns.capacity"), sortable: false },
     { key: "usage", label: t("admin.groups.columns.usage"), sortable: false },

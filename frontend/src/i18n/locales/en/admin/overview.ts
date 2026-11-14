@@ -892,7 +892,6 @@ export default {
         duplicateModel: 'Model {model} already has a configuration. Merge its entries before saving.'
       },
       title: 'Group Management',
-      description: 'Manage API key groups and rate multipliers',
       searchGroups: 'Search groups...',
       createGroup: 'Create Group',
       editGroup: 'Edit Group',

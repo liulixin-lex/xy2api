@@ -159,6 +159,12 @@ export default {
       takeover: 'Takeover',
       switches: '{n} switches',
       attempts: 'Attempts',
+      tip: {
+        cacheTtl: 'Cache write adjusted',
+        cacheHitRate: 'Read ÷ all input',
+        longContext: 'Long context',
+        tps: 'Output ÷ duration',
+      },
       col: {
         result: 'Result',
         firstToken: 'TTFT',

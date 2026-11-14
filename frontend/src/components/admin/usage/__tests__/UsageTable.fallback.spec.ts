@@ -80,8 +80,8 @@ describe('UsageTable availability fallback marker', () => {
     expect(wrapper.get('[data-request-id="req-plain"]').text()).toBe('Main')
   })
 
-  it.each([['zh', zh, '按兜底分组计费'], ['en', en, 'billed by the fallback group']])('%s explains fallback pricing', (_, messages, billed) => {
-    const title = messages.resilience.usage.fallbackTitle
-    expect(title).toContain(billed)
+  it('keeps the tip of the fallback marker a short name (FINAL §7: tips of 12 characters at most)', () => {
+    expect(zh.resilience.usage.fallbackTitle.length).toBeLessThanOrEqual(12)
+    expect(en.resilience.usage.fallbackTitle).toBe('Fallback group')
   })
 })

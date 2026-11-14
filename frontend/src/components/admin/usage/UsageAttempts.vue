@@ -2,7 +2,7 @@
   <div class="bg-gray-50 px-6 py-3 dark:bg-dark-800/60" data-usage-attempts>
     <span v-if="state === 'loading'" class="skeleton block h-3.5 w-64" />
     <span v-else-if="state === 'failed'" class="sq-fail-word text-sm">{{ t('admin.schedQuality.result.failed') }}</span>
-    <table v-else class="sq-table w-auto min-w-[520px]">
+    <table v-else class="sq-table !w-auto">
       <thead>
         <tr>
           <th scope="col" class="sq-r">{{ t('admin.schedQuality.col.rank') }}</th>

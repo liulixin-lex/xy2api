@@ -527,8 +527,7 @@ const routes: RouteRecordRaw[] = [
       requiresAdmin: true,
       permission: 'groups',
       title: 'Group Management',
-      titleKey: 'admin.groups.title',
-      descriptionKey: 'admin.groups.description'
+      titleKey: 'admin.groups.title'
     }
   },
   {
@@ -739,8 +738,7 @@ const routes: RouteRecordRaw[] = [
       requiresAdmin: true,
       permission: 'usage',
       title: 'Usage Records',
-      titleKey: 'admin.usage.title',
-      descriptionKey: 'admin.usage.description'
+      titleKey: 'admin.usage.title'
     }
   },
   {
