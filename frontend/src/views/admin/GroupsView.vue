@@ -26,14 +26,14 @@
               :options="platformFilterOptions"
               :placeholder="t('admin.groups.allPlatforms')"
               class="w-44"
-              @change="loadGroups"
+              @change="applyGroupFilters"
             />
             <Select
               v-model="filters.status"
               :options="statusOptions"
               :placeholder="t('admin.groups.allStatus')"
               class="w-40"
-              @change="loadGroups"
+              @change="applyGroupFilters"
             />
             <Select
               v-if="!authStore.isSimpleMode"
@@ -41,9 +41,9 @@
               :options="exclusiveOptions"
               :placeholder="t('admin.groups.allGroups')"
               class="w-44"
-              @change="loadGroups"
+              @change="applyGroupFilters"
             />
-            <GroupCategoryFilter v-if="!authStore.isSimpleMode" v-model="filters.group_category" class="w-44" @change="loadGroups" />
+            <GroupCategoryFilter v-if="!authStore.isSimpleMode" v-model="filters.group_category" class="w-44" @change="applyGroupFilters" />
           </div>
 
           <!-- Right: actions -->
@@ -51,7 +51,7 @@
             class="flex w-full flex-shrink-0 flex-wrap items-center justify-end gap-3 lg:w-auto"
           >
             <button
-              @click="loadGroups"
+              @click="reloadGroups"
               :disabled="loading"
               class="btn btn-secondary"
               :title="t('common.refresh')"
@@ -119,9 +119,11 @@
 
       <template #table>
         <DataTable
+          ref="groupsTableRef"
           :columns="columns"
           :data="groups"
           :loading="loading"
+          :row-class="groupRowClass"
           :server-side-sort="true"
           default-sort-key="sort_order"
           default-sort-order="asc"
@@ -201,7 +203,7 @@
                 >
                   <span v-if="row.daily_limit_usd" class="whitespace-nowrap">
                     <span
-                      v-if="usageLoading"
+                      v-if="!row.usage_summary"
                       class="font-medium text-gray-400 dark:text-gray-500"
                       >—</span
                     >
@@ -209,12 +211,12 @@
                       v-else
                       :class="
                         getQuotaUsageClass(
-                          usageMap.get(row.id)?.today_cost ?? 0,
+                          row.usage_summary.today_cost,
                           row.daily_limit_usd
                         )
                       "
                       >{{
-                        formatUsd(usageMap.get(row.id)?.today_cost ?? 0)
+                        formatUsd(row.usage_summary.today_cost)
                       }}</span
                     >
                     <span class="text-gray-400 dark:text-gray-500">
@@ -254,9 +256,9 @@
                   {{ t("admin.groups.usageTotal") }}
                   <span class="ml-1 font-medium text-gray-600 dark:text-gray-300"
                     >{{
-                      usageLoading
-                        ? "—"
-                        : formatUsd(usageMap.get(row.id)?.total_cost ?? 0)
+                      row.usage_summary
+                        ? formatUsd(row.usage_summary.total_cost)
+                        : "—"
                     }}</span
                   >
                 </div>
@@ -330,20 +332,20 @@
 
           <template #cell-capacity="{ row }">
             <GroupCapacityBadge
-              v-if="capacityMap.get(row.id)"
-              :concurrency-used="capacityMap.get(row.id)!.concurrencyUsed"
-              :concurrency-max="capacityMap.get(row.id)!.concurrencyMax"
-              :concurrency-group-used="capacityMap.get(row.id)!.concurrencyGroupUsed"
-              :sessions-used="capacityMap.get(row.id)!.sessionsUsed"
-              :sessions-max="capacityMap.get(row.id)!.sessionsMax"
-              :rpm-used="capacityMap.get(row.id)!.rpmUsed"
-              :rpm-max="capacityMap.get(row.id)!.rpmMax"
+              v-if="row.capacity"
+              :concurrency-used="row.capacity.concurrencyUsed"
+              :concurrency-max="row.capacity.concurrencyMax"
+              :concurrency-group-used="row.capacity.concurrencyGroupUsed"
+              :sessions-used="row.capacity.sessionsUsed"
+              :sessions-max="row.capacity.sessionsMax"
+              :rpm-used="row.capacity.rpmUsed"
+              :rpm-max="row.capacity.rpmMax"
             />
             <span v-else class="text-xs text-gray-400">—</span>
           </template>
 
           <template #cell-usage="{ row }">
-            <div v-if="usageLoading" class="text-xs text-gray-400">—</div>
+            <div v-if="!row.usage_summary" class="text-xs text-gray-400">—</div>
             <div v-else class="space-y-0.5 text-xs">
               <div class="text-gray-500 dark:text-gray-400">
                 <span class="text-gray-400 dark:text-gray-500">{{
@@ -351,7 +353,7 @@
                 }}</span>
                 <span class="ml-1 font-medium text-gray-700 dark:text-gray-300"
                   >${{
-                    formatCost(usageMap.get(row.id)?.today_cost ?? 0)
+                    formatCost(row.usage_summary.today_cost)
                   }}</span
                 >
               </div>
@@ -361,7 +363,7 @@
                 }}</span>
                 <span class="ml-1 font-medium text-gray-700 dark:text-gray-300"
                   >${{
-                    formatCost(usageMap.get(row.id)?.yesterday_cost ?? 0)
+                    formatCost(row.usage_summary.yesterday_cost)
                   }}</span
                 >
               </div>
@@ -371,7 +373,7 @@
                 }}</span>
                 <span class="ml-1 font-medium text-gray-700 dark:text-gray-300"
                   >${{
-                    formatCost(usageMap.get(row.id)?.total_cost ?? 0)
+                    formatCost(row.usage_summary.total_cost)
                   }}</span
                 >
               </div>
@@ -488,9 +490,9 @@
 
       <template #pagination>
         <Pagination
-          v-if="pagination.total > 0"
+          v-if="groupsTotal > 0"
           :page="pagination.page"
-          :total="pagination.total"
+          :total="groupsTotal"
           :page-size="pagination.page_size"
           @update:page="handlePageChange"
           @update:pageSize="handlePageSizeChange"
@@ -4384,7 +4386,7 @@
       :show="showRateMultipliersModal"
       :group="rateMultipliersGroup"
       @close="showRateMultipliersModal = false"
-      @success="loadGroups"
+      @success="reloadGroups"
     />
 
     <!-- Group RPM Overrides Modal -->
@@ -4392,7 +4394,7 @@
       :show="showRPMOverridesModal"
       :group="rpmOverridesGroup"
       @close="showRPMOverridesModal = false"
-      @success="loadGroups"
+      @success="reloadGroups"
     />
     <SchedQualityLayers />
   </AppLayout>
@@ -4445,6 +4447,8 @@ import SchedQualityLayers from "@/components/admin/account/quality/SchedQualityL
 import { openSchedBoard } from "@/composables/useSchedLayers";
 import schedQualityAPI from "@/api/admin/schedQuality";
 import type { SchedPolicy } from "@/types/schedQuality";
+import { useLiveTable } from "@/composables/useLiveTable";
+import { groupUsageOrDefault, withAccountCounts, type GroupUsageSummary } from "./liveRowDefaults";
 import { policyShort } from "@/utils/schedQualityFormat";
 import LongContextPricingFields from "@/components/admin/group/LongContextPricingFields.vue";
 import GroupSystemPromptFields from "@/components/admin/group/GroupSystemPromptFields.vue";
@@ -4788,40 +4792,21 @@ const toggleColumn = (key: string) => {
   }
   saveColumnsToStorage();
 
+  // A source skips a hidden column; once it is shown again, that source runs now.
   if (wasHidden && (key === "usage" || key === "billing_type")) {
-    loadUsageSummary();
+    void liveGroups.refresh("usage");
   }
   if (wasHidden && key === "capacity") {
-    loadCapacitySummary();
+    void liveGroups.refresh("capacity");
   }
   if (wasHidden && key === "sched_gate") {
-    void loadSchedGates();
+    void liveGroups.refresh("schedGates");
   }
 };
 
-// 「门槛」列：每个 OpenAI 分组的三个阈值简写，未启用为“—”（设计 D.3）。随列表刷新逐组读取，并发 4。
-const schedGates = reactive(new Map<number, SchedPolicy | null>());
-let schedGateSeq = 0;
-const loadSchedGates = async () => {
-  if (authStore.isSimpleMode || !isColumnVisible("sched_gate")) return;
-  const seq = ++schedGateSeq;
-  const ids = groups.value.filter((group) => group.platform === "openai").map((group) => group.id);
-  let next = 0;
-  const worker = async () => {
-    while (next < ids.length) {
-      const id = ids[next++];
-      try {
-        const record = await schedQualityAPI.getGroupPolicy(id);
-        if (seq === schedGateSeq) schedGates.set(id, record.policy);
-      } catch {
-        if (seq === schedGateSeq) schedGates.set(id, null);
-      }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(4, ids.length) }, worker));
-};
-const schedGateText = (group: AdminGroup) => {
-  const policy = group.platform === "openai" ? schedGates.get(group.id) : null;
+// 「门槛」列：每个 OpenAI 分组的三个阈值简写，未启用为“—”（设计 D.3）。每次加载后逐组读取（并发 4），不参与定时更新。
+const schedGateText = (group: LiveGroup) => {
+  const policy = group.platform === "openai" ? group.sched_policy : null;
   return policy?.enabled ? policyShort(policy, t) : "";
 };
 
@@ -5046,30 +5031,21 @@ const copyAccountsGroupOptionsForEdit = computed(() => {
   }));
 });
 
-const groups = ref<AdminGroup[]>([]);
-const loading = ref(false);
-type GroupUsageSummary = {
-  today_cost: number;
-  yesterday_cost: number;
-  total_cost: number;
+type GroupCapacity = {
+  concurrencyUsed: number;
+  concurrencyMax: number;
+  concurrencyGroupUsed: number;
+  sessionsUsed: number;
+  sessionsMax: number;
+  rpmUsed: number;
+  rpmMax: number;
 };
-
-const usageMap = ref<Map<number, GroupUsageSummary>>(new Map());
-const usageLoading = ref(false);
-const capacityMap = ref<
-  Map<
-    number,
-    {
-      concurrencyUsed: number;
-      concurrencyMax: number;
-      concurrencyGroupUsed: number;
-      sessionsUsed: number;
-      sessionsMax: number;
-      rpmUsed: number;
-      rpmMax: number;
-    }
-  >
->(new Map());
+/** A list row plus the partial sources' fields (null: the source has nothing for the group). */
+type LiveGroup = AdminGroup & {
+  usage_summary?: GroupUsageSummary;
+  capacity?: GroupCapacity | null;
+  sched_policy?: SchedPolicy | null;
+};
 const searchQuery = ref("");
 const filters = reactive({
   platform: "",
@@ -5080,15 +5056,111 @@ const filters = reactive({
 const pagination = reactive({
   page: 1,
   page_size: getPersistedPageSize(),
-  total: 0,
-  pages: 0,
 });
 const sortState = reactive({
   sort_by: "sort_order",
   sort_order: "asc" as "asc" | "desc",
 });
 
-let abortController: AbortController | null = null;
+// The list is a live table (spec 8.5): the account counts come from the page fetched again with the same query every
+// 10 s, which also counts groups that appeared or went (liveGroups.pending, taken in by liveGroups.applyPending; the
+// status, count and applyPending wait for the live indicator). Capacity (5 s) and costs (30 s) are partial sources
+// from the summary endpoints with explicit defaults; the scheduling gates run after each load and on refresh only.
+const groupListFilters = () => ({
+  platform: (filters.platform as GroupPlatform) || undefined,
+  status: filters.status as any,
+  is_exclusive: !authStore.isSimpleMode && filters.is_exclusive
+    ? filters.is_exclusive === "true"
+    : undefined,
+  search: searchQuery.value.trim() || undefined,
+  sort_by: sortState.sort_by,
+  sort_order: sortState.sort_order,
+  group_category: filters.group_category || undefined,
+});
+const liveGroups = useLiveTable<LiveGroup>({
+  getId: (group) => group.id,
+  fetchPage: async (signal) => {
+    const page = await adminAPI.groups.list(pagination.page, pagination.page_size, groupListFilters(), { signal });
+    return { ...page, items: page.items.map(withAccountCounts) };
+  },
+  membershipIntervalMs: 10_000,
+  matches: (group) => !filters.status || group.status === filters.status,
+  sources: [
+    {
+      name: "capacity",
+      intervalMs: 5000,
+      fetch: async (ids) => {
+        if (!hasVisibleCapacityColumn.value) return [];
+        const data = await adminAPI.groups.getCapacitySummary();
+        const byGroup = new Map(data.map((item) => [item.group_id, {
+          concurrencyUsed: item.concurrency_used,
+          concurrencyMax: item.concurrency_max,
+          concurrencyGroupUsed: item.concurrency_group_used,
+          sessionsUsed: item.sessions_used,
+          sessionsMax: item.sessions_max,
+          rpmUsed: item.rpm_used,
+          rpmMax: item.rpm_max,
+        }]));
+        return ids.map((id) => [id, { capacity: byGroup.get(Number(id)) ?? null }] as const);
+      },
+    },
+    {
+      name: "usage",
+      intervalMs: 30_000,
+      fetch: async (ids) => {
+        if (!hasVisibleUsageSummaryConsumer.value) return [];
+        const data = await adminAPI.groups.getUsageSummary();
+        const byGroup = new Map(data.map((item) => [item.group_id, item]));
+        return ids.map((id) => [id, { usage_summary: groupUsageOrDefault(byGroup.get(Number(id))) }] as const);
+      },
+    },
+    {
+      name: "schedGates",
+      intervalMs: 0,
+      fetch: async (ids, signal) => {
+        if (authStore.isSimpleMode || !isColumnVisible("sched_gate")) return [];
+        const policies = new Map<number, SchedPolicy | null>();
+        const openai = ids.map(Number).filter((id) => liveGroups.record(id)?.platform === "openai");
+        let next = 0;
+        const worker = async () => {
+          while (next < openai.length && !signal.aborted) {
+            const id = openai[next++];
+            try {
+              policies.set(id, (await schedQualityAPI.getGroupPolicy(id)).policy);
+            } catch {
+              policies.set(id, null);
+            }
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(4, openai.length) }, worker));
+        return ids.map((id) => [id, { sched_policy: policies.get(Number(id)) ?? null }] as const);
+      },
+    },
+  ],
+  // GroupCategoryTags read the shared category list once when they mount; rows now stay mounted across loads, so a
+  // failed first fetch is retried after each load here (a no-op once it has loaded).
+  tasks: [{
+    name: "categories",
+    intervalMs: 0,
+    run: async () => {
+      if (!authStore.isSimpleMode && isColumnVisible("category")) await groupCategories.ensureLoaded();
+    },
+  }],
+});
+const { rows: groups, loading, total: groupsTotal } = liveGroups;
+const groupsTableRef = ref<InstanceType<typeof DataTable> | null>(null);
+const groupRowClass = (row: LiveGroup) =>
+  liveGroups.transitioning.value || liveGroups.isDimmed(row.id) ? "opacity-60" : undefined;
+/** A silent reload: rows stay on screen and are replaced in place. */
+const reloadGroups = () => liveGroups.reload().catch((error) => {
+  appStore.showError(t("admin.groups.failedToLoad"));
+  console.error("Error loading groups:", error);
+});
+/** A filter or search change: back to the first row, then reload. */
+const applyGroupFilters = () => {
+  groupsTableRef.value?.scrollToTop?.();
+  return reloadGroups();
+};
 
 const showCreateModal = ref(false);
 const showEditModal = ref(false);
@@ -5884,61 +5956,6 @@ const cancelUnsupportedLive = () => {
   pendingLiveForm.value = null;
 };
 
-const loadGroups = async () => {
-  if (abortController) {
-    abortController.abort();
-  }
-  const currentController = new AbortController();
-  abortController = currentController;
-  const { signal } = currentController;
-  loading.value = true;
-  try {
-    const response = await adminAPI.groups.list(
-      pagination.page,
-      pagination.page_size,
-      {
-        platform: (filters.platform as GroupPlatform) || undefined,
-        status: filters.status as any,
-        is_exclusive: !authStore.isSimpleMode && filters.is_exclusive
-          ? filters.is_exclusive === "true"
-          : undefined,
-        search: searchQuery.value.trim() || undefined,
-        sort_by: sortState.sort_by,
-        sort_order: sortState.sort_order,
-        group_category: filters.group_category || undefined,
-      },
-      { signal },
-    );
-    if (signal.aborted) return;
-    groups.value = response.items;
-    pagination.total = response.total;
-    pagination.pages = response.pages;
-    if (hasVisibleUsageSummaryConsumer.value) {
-      loadUsageSummary();
-    } else {
-      usageLoading.value = false;
-    }
-    if (hasVisibleCapacityColumn.value) {
-      loadCapacitySummary();
-    }
-    void loadSchedGates();
-  } catch (error: any) {
-    if (
-      signal.aborted ||
-      error?.name === "AbortError" ||
-      error?.code === "ERR_CANCELED"
-    ) {
-      return;
-    }
-    appStore.showError(t("admin.groups.failedToLoad"));
-    console.error("Error loading groups:", error);
-  } finally {
-    if (abortController === currentController && !signal.aborted) {
-      loading.value = false;
-    }
-  }
-};
-
 const formatCost = (cost: number): string => {
   if (cost >= 1000) return cost.toFixed(0);
   if (cost >= 100) return cost.toFixed(1);
@@ -5965,90 +5982,31 @@ const getQuotaUsageClass = (
   return "font-medium text-gray-700 dark:text-gray-300";
 };
 
-const loadUsageSummary = async () => {
-  if (!hasVisibleUsageSummaryConsumer.value) {
-    usageLoading.value = false;
-    return;
-  }
-  usageLoading.value = true;
-  try {
-    const data = await adminAPI.groups.getUsageSummary();
-    const map = new Map<number, GroupUsageSummary>();
-    for (const item of data) {
-      map.set(item.group_id, {
-        today_cost: item.today_cost,
-        yesterday_cost: item.yesterday_cost,
-        total_cost: item.total_cost,
-      });
-    }
-    usageMap.value = map;
-  } catch (error) {
-    console.error("Error loading group usage summary:", error);
-  } finally {
-    usageLoading.value = false;
-  }
-};
-
-const loadCapacitySummary = async () => {
-  if (!hasVisibleCapacityColumn.value) {
-    return;
-  }
-  try {
-    const data = await adminAPI.groups.getCapacitySummary();
-    const map = new Map<
-      number,
-      {
-        concurrencyUsed: number;
-        concurrencyMax: number;
-        concurrencyGroupUsed: number;
-        sessionsUsed: number;
-        sessionsMax: number;
-        rpmUsed: number;
-        rpmMax: number;
-      }
-    >();
-    for (const item of data) {
-      map.set(item.group_id, {
-        concurrencyUsed: item.concurrency_used,
-        concurrencyMax: item.concurrency_max,
-        concurrencyGroupUsed: item.concurrency_group_used,
-        sessionsUsed: item.sessions_used,
-        sessionsMax: item.sessions_max,
-        rpmUsed: item.rpm_used,
-        rpmMax: item.rpm_max,
-      });
-    }
-    capacityMap.value = map;
-  } catch (error) {
-    console.error("Error loading group capacity summary:", error);
-  }
-};
-
 let searchTimeout: ReturnType<typeof setTimeout>;
 const handleSearch = () => {
   clearTimeout(searchTimeout);
   searchTimeout = setTimeout(() => {
     pagination.page = 1;
-    loadGroups();
+    void applyGroupFilters();
   }, 300);
 };
 
 const handlePageChange = (page: number) => {
   pagination.page = page;
-  loadGroups();
+  void reloadGroups();
 };
 
 const handlePageSizeChange = (pageSize: number) => {
   pagination.page_size = pageSize;
   pagination.page = 1;
-  loadGroups();
+  void reloadGroups();
 };
 
 const handleSort = (key: string, order: 'asc' | 'desc') => {
   sortState.sort_by = key;
   sortState.sort_order = order;
   pagination.page = 1;
-  loadGroups();
+  void reloadGroups();
 };
 
 const openCreateModal = () => {
@@ -6358,7 +6316,7 @@ const handleCreateGroup = async () => {
     // XY2API：分类没保存时只提示“分组已保存，分类未保存”，免得被当成创建失败
     if ((await createCategoryFieldRef.value?.save(created.id)) !== false) appStore.showSuccess(t("admin.groups.groupCreated"));
     closeCreateModal();
-    loadGroups();
+    void reloadGroups();
     // Only advance tour if active, on submit step, and creation succeeded
     if (onboardingStore.isCurrentStep('[data-tour="group-form-submit"]')) {
       onboardingStore.nextStep(500);
@@ -6750,7 +6708,7 @@ const handleUpdateGroup = async () => {
     const categoriesSaved = (await editCategoryFieldRef.value?.save(groupId)) !== false;
     // 质量门槛单独保存；没保存成功（冲突、失败）时对话框保留，再次保存时分组没改就不重复提交。
     const policySaved = (await editSchedPolicyRef.value?.save()) !== false;
-    loadGroups();
+    void reloadGroups();
     if (!policySaved) return;
     if (categoriesSaved) appStore.showSuccess(t("admin.groups.groupUpdated"));
     closeEditModal();
@@ -6810,7 +6768,7 @@ const handleDuplicate = async (group: AdminGroup) => {
     appStore.showSuccess(
       t("admin.groups.duplicateSuccess", { name: duplicate.name }),
     );
-    await loadGroups();
+    await reloadGroups();
   } catch (error: unknown) {
     appStore.showError(
       extractApiErrorMessage(error, t("admin.groups.duplicateFailed")),
@@ -7011,11 +6969,12 @@ const confirmDelete = async () => {
   if (!deletingGroup.value) return;
 
   try {
-    await adminAPI.groups.delete(deletingGroup.value.id);
+    const deletedId = deletingGroup.value.id;
+    await adminAPI.groups.delete(deletedId);
     appStore.showSuccess(t("admin.groups.groupDeleted"));
     showDeleteDialog.value = false;
     deletingGroup.value = null;
-    loadGroups();
+    liveGroups.remove(deletedId);
   } catch (error: any) {
     // 没有“加减余额”权限时只能删除没有账号的分组（409 GROUP_NOT_EMPTY）；
     // 其他情况（如超级管理员在简易模式下）保持原来的提示
@@ -7243,7 +7202,7 @@ const saveSortOrder = async () => {
     await adminAPI.groups.updateSortOrder(updates);
     appStore.showSuccess(t("admin.groups.sortOrderUpdated"));
     closeSortModal();
-    loadGroups();
+    void reloadGroups();
   } catch (error: any) {
     appStore.showError(
       error.response?.data?.detail || t("admin.groups.failedToUpdateSortOrder"),
@@ -7255,7 +7214,7 @@ const saveSortOrder = async () => {
 };
 
 onMounted(() => {
-  loadGroups();
+  void reloadGroups();
   if (!authStore.isSimpleMode) {
     void loadLiveCapability();
     loadModelAllowlistCandidates("create", 0, createForm.platform);
