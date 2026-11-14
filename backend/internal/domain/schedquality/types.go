@@ -7,7 +7,6 @@ type State int8    // StateNormal, StateCooling
 type Override int8 // OverrideNone, OverrideExempt
 type Verdict int8  // VerdictNoData, VerdictPass, VerdictFail
 type Standing int8 // StandFront, StandBack
-type Reason string
 
 const (
 	OutcomeOK Outcome = iota + 1
@@ -32,11 +31,6 @@ const (
 const (
 	StandFront Standing = iota
 	StandBack
-)
-const (
-	ReasonSpeed Reason = "speed"
-	ReasonError Reason = "error"
-	ReasonCache Reason = "cache"
 )
 
 func (o Outcome) String() string {
@@ -112,7 +106,6 @@ type StateRow struct {
 	GroupID       int64
 	State         State
 	Level         int
-	Reason        Reason
 	Since, Until  time.Time
 	EvidenceSince time.Time
 	Basis         *DecisionBasis
