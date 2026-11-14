@@ -14,9 +14,11 @@ func TestNormalizeGroupAlias(t *testing.T) {
 		valid       bool
 	}{
 		{"", "", true}, {"  \t", "", false}, {"  中文 ", "中文", true},
-		{"AB12", "AB12", true}, {"中AB", "中AB", true}, {"ＡＢ", "ＡＢ", true},
-		{"ｶﾀｶﾅ", "ｶﾀｶﾅ", true}, {"αβγδ", "αβγδ", true}, {"😀😀", "😀😀", true},
-		{"\x00", "", false}, {"中文A", "", false}, {"ABCDE", "", false}, {"ＡＢＣ", "", false},
+		{"  ABC ", "ABC", true}, {"123", "123", true}, {"AB12", "", false},
+		{"A稳", "A稳", true}, {"稳A", "稳A", true}, {"AB稳", "", false}, {"中AB", "", false},
+		{"ＡＢ", "ＡＢ", true}, {"ＡＢＣ", "", false}, {"中文字", "", false},
+		{"ｶﾀｶ", "ｶﾀｶ", true}, {"ｶﾀｶﾅ", "", false}, {"αβγ", "αβγ", true}, {"αβγδ", "", false},
+		{"😀😀", "😀😀", true}, {"\x00", "", false}, {"中文A", "", false},
 	} {
 		t.Run(tc.input, func(t *testing.T) {
 			got, err := normalizeGroupAlias(tc.input)

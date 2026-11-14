@@ -71,7 +71,7 @@ func TestGroupHandlerSimpleModeSanitizesCommercialFields(t *testing.T) {
 	require.Nil(t, created.AudioRealtimePricePerMin)
 	require.Zero(t, created.RPMLimit)
 
-	update := `{"name":"renamed","alias":"ABCD","description":"still basic","rate_multiplier":9,"is_exclusive":true,"subscription_type":"subscription","daily_limit_usd":12,"long_context_pricing_enabled":true,"model_pricing":[{"model":"claude","input_price":1}],"allow_image_generation":true,"allow_batch_image_generation":true,"video_price_720p":2,"web_search_price_per_call":3,"audio_realtime_price_per_min":4,"status":"inactive","rpm_limit":123}`
+	update := `{"name":"renamed","alias":"ABC","description":"still basic","rate_multiplier":9,"is_exclusive":true,"subscription_type":"subscription","daily_limit_usd":12,"long_context_pricing_enabled":true,"model_pricing":[{"model":"claude","input_price":1}],"allow_image_generation":true,"allow_batch_image_generation":true,"video_price_720p":2,"web_search_price_per_call":3,"audio_realtime_price_per_min":4,"status":"inactive","rpm_limit":123}`
 	req = httptest.NewRequest(http.MethodPut, "/groups/2", bytes.NewBufferString(update))
 	req.Header.Set("Content-Type", "application/json")
 	res = httptest.NewRecorder()
@@ -80,7 +80,7 @@ func TestGroupHandlerSimpleModeSanitizesCommercialFields(t *testing.T) {
 	require.Len(t, svc.updatedGroups, 1)
 	updated := svc.updatedGroups[0]
 	require.NotNil(t, updated.Alias)
-	require.Equal(t, "ABCD", *updated.Alias)
+	require.Equal(t, "ABC", *updated.Alias)
 	require.NotNil(t, updated.Description)
 	require.Equal(t, "still basic", *updated.Description)
 	require.Nil(t, updated.RateMultiplier)

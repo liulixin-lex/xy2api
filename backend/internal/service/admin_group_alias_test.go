@@ -22,7 +22,7 @@ func TestGroupAliasCreateUpdateClear(t *testing.T) {
 			_, err = svc.UpdateGroup(context.Background(), created.ID, &UpdateGroupInput{})
 			require.NoError(t, err)
 			require.Equal(t, "中A", repo.updated.Alias)
-			invalid := "ABCDE"
+			invalid := "ABCD"
 			_, err = svc.UpdateGroup(context.Background(), created.ID, &UpdateGroupInput{Alias: &invalid})
 			require.Error(t, err)
 			require.Equal(t, "中A", repo.updated.Alias)

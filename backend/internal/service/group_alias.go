@@ -13,15 +13,16 @@ func normalizeGroupAlias(alias string) (string, error) {
 		return "", infraerrors.BadRequest("INVALID_GROUP_ALIAS", "alias must not contain control characters")
 	}
 	alias = strings.TrimSpace(alias)
-	halfWidths := 0
+	// Count thirds: wide/fullwidth runes use 3 units, all others use 2.
+	widthUnits := 0
 	for _, r := range alias {
 		switch width.LookupRune(r).Kind() {
 		case width.EastAsianWide, width.EastAsianFullwidth:
-			halfWidths += 2
+			widthUnits += 3
 		default:
-			halfWidths++
+			widthUnits += 2
 		}
-		if halfWidths > 4 {
+		if widthUnits > 6 {
 			return "", infraerrors.BadRequest("INVALID_GROUP_ALIAS", "alias display width must be at most 2")
 		}
 	}
