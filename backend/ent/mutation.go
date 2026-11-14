@@ -45154,6 +45154,13 @@ type UsageLogMutation struct {
 	typ                           string
 	id                            *int64
 	request_id                    *string
+	gateway_request_id            *string
+	result                        *int16
+	addresult                     *int16
+	switches                      *int16
+	addswitches                   *int16
+	fallback                      *bool
+	takeover                      *bool
 	model                         *string
 	requested_model               *string
 	upstream_model                *string
@@ -45508,6 +45515,293 @@ func (m *UsageLogMutation) OldRequestID(ctx context.Context) (v string, err erro
 // ResetRequestID resets all changes to the "request_id" field.
 func (m *UsageLogMutation) ResetRequestID() {
 	m.request_id = nil
+}
+
+// SetGatewayRequestID sets the "gateway_request_id" field.
+func (m *UsageLogMutation) SetGatewayRequestID(s string) {
+	m.gateway_request_id = &s
+}
+
+// GatewayRequestID returns the value of the "gateway_request_id" field in the mutation.
+func (m *UsageLogMutation) GatewayRequestID() (r string, exists bool) {
+	v := m.gateway_request_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldGatewayRequestID returns the old "gateway_request_id" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldGatewayRequestID(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldGatewayRequestID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldGatewayRequestID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldGatewayRequestID: %w", err)
+	}
+	return oldValue.GatewayRequestID, nil
+}
+
+// ClearGatewayRequestID clears the value of the "gateway_request_id" field.
+func (m *UsageLogMutation) ClearGatewayRequestID() {
+	m.gateway_request_id = nil
+	m.clearedFields[usagelog.FieldGatewayRequestID] = struct{}{}
+}
+
+// GatewayRequestIDCleared returns if the "gateway_request_id" field was cleared in this mutation.
+func (m *UsageLogMutation) GatewayRequestIDCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldGatewayRequestID]
+	return ok
+}
+
+// ResetGatewayRequestID resets all changes to the "gateway_request_id" field.
+func (m *UsageLogMutation) ResetGatewayRequestID() {
+	m.gateway_request_id = nil
+	delete(m.clearedFields, usagelog.FieldGatewayRequestID)
+}
+
+// SetResult sets the "result" field.
+func (m *UsageLogMutation) SetResult(i int16) {
+	m.result = &i
+	m.addresult = nil
+}
+
+// Result returns the value of the "result" field in the mutation.
+func (m *UsageLogMutation) Result() (r int16, exists bool) {
+	v := m.result
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldResult returns the old "result" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldResult(ctx context.Context) (v *int16, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldResult is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldResult requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldResult: %w", err)
+	}
+	return oldValue.Result, nil
+}
+
+// AddResult adds i to the "result" field.
+func (m *UsageLogMutation) AddResult(i int16) {
+	if m.addresult != nil {
+		*m.addresult += i
+	} else {
+		m.addresult = &i
+	}
+}
+
+// AddedResult returns the value that was added to the "result" field in this mutation.
+func (m *UsageLogMutation) AddedResult() (r int16, exists bool) {
+	v := m.addresult
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearResult clears the value of the "result" field.
+func (m *UsageLogMutation) ClearResult() {
+	m.result = nil
+	m.addresult = nil
+	m.clearedFields[usagelog.FieldResult] = struct{}{}
+}
+
+// ResultCleared returns if the "result" field was cleared in this mutation.
+func (m *UsageLogMutation) ResultCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldResult]
+	return ok
+}
+
+// ResetResult resets all changes to the "result" field.
+func (m *UsageLogMutation) ResetResult() {
+	m.result = nil
+	m.addresult = nil
+	delete(m.clearedFields, usagelog.FieldResult)
+}
+
+// SetSwitches sets the "switches" field.
+func (m *UsageLogMutation) SetSwitches(i int16) {
+	m.switches = &i
+	m.addswitches = nil
+}
+
+// Switches returns the value of the "switches" field in the mutation.
+func (m *UsageLogMutation) Switches() (r int16, exists bool) {
+	v := m.switches
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSwitches returns the old "switches" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldSwitches(ctx context.Context) (v *int16, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSwitches is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSwitches requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSwitches: %w", err)
+	}
+	return oldValue.Switches, nil
+}
+
+// AddSwitches adds i to the "switches" field.
+func (m *UsageLogMutation) AddSwitches(i int16) {
+	if m.addswitches != nil {
+		*m.addswitches += i
+	} else {
+		m.addswitches = &i
+	}
+}
+
+// AddedSwitches returns the value that was added to the "switches" field in this mutation.
+func (m *UsageLogMutation) AddedSwitches() (r int16, exists bool) {
+	v := m.addswitches
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearSwitches clears the value of the "switches" field.
+func (m *UsageLogMutation) ClearSwitches() {
+	m.switches = nil
+	m.addswitches = nil
+	m.clearedFields[usagelog.FieldSwitches] = struct{}{}
+}
+
+// SwitchesCleared returns if the "switches" field was cleared in this mutation.
+func (m *UsageLogMutation) SwitchesCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldSwitches]
+	return ok
+}
+
+// ResetSwitches resets all changes to the "switches" field.
+func (m *UsageLogMutation) ResetSwitches() {
+	m.switches = nil
+	m.addswitches = nil
+	delete(m.clearedFields, usagelog.FieldSwitches)
+}
+
+// SetFallback sets the "fallback" field.
+func (m *UsageLogMutation) SetFallback(b bool) {
+	m.fallback = &b
+}
+
+// Fallback returns the value of the "fallback" field in the mutation.
+func (m *UsageLogMutation) Fallback() (r bool, exists bool) {
+	v := m.fallback
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldFallback returns the old "fallback" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldFallback(ctx context.Context) (v *bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldFallback is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldFallback requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldFallback: %w", err)
+	}
+	return oldValue.Fallback, nil
+}
+
+// ClearFallback clears the value of the "fallback" field.
+func (m *UsageLogMutation) ClearFallback() {
+	m.fallback = nil
+	m.clearedFields[usagelog.FieldFallback] = struct{}{}
+}
+
+// FallbackCleared returns if the "fallback" field was cleared in this mutation.
+func (m *UsageLogMutation) FallbackCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldFallback]
+	return ok
+}
+
+// ResetFallback resets all changes to the "fallback" field.
+func (m *UsageLogMutation) ResetFallback() {
+	m.fallback = nil
+	delete(m.clearedFields, usagelog.FieldFallback)
+}
+
+// SetTakeover sets the "takeover" field.
+func (m *UsageLogMutation) SetTakeover(b bool) {
+	m.takeover = &b
+}
+
+// Takeover returns the value of the "takeover" field in the mutation.
+func (m *UsageLogMutation) Takeover() (r bool, exists bool) {
+	v := m.takeover
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTakeover returns the old "takeover" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldTakeover(ctx context.Context) (v *bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTakeover is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTakeover requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTakeover: %w", err)
+	}
+	return oldValue.Takeover, nil
+}
+
+// ClearTakeover clears the value of the "takeover" field.
+func (m *UsageLogMutation) ClearTakeover() {
+	m.takeover = nil
+	m.clearedFields[usagelog.FieldTakeover] = struct{}{}
+}
+
+// TakeoverCleared returns if the "takeover" field was cleared in this mutation.
+func (m *UsageLogMutation) TakeoverCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldTakeover]
+	return ok
+}
+
+// ResetTakeover resets all changes to the "takeover" field.
+func (m *UsageLogMutation) ResetTakeover() {
+	m.takeover = nil
+	delete(m.clearedFields, usagelog.FieldTakeover)
 }
 
 // SetModel sets the "model" field.
@@ -49310,7 +49604,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 69)
+	fields := make([]string, 0, 74)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -49322,6 +49616,21 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.request_id != nil {
 		fields = append(fields, usagelog.FieldRequestID)
+	}
+	if m.gateway_request_id != nil {
+		fields = append(fields, usagelog.FieldGatewayRequestID)
+	}
+	if m.result != nil {
+		fields = append(fields, usagelog.FieldResult)
+	}
+	if m.switches != nil {
+		fields = append(fields, usagelog.FieldSwitches)
+	}
+	if m.fallback != nil {
+		fields = append(fields, usagelog.FieldFallback)
+	}
+	if m.takeover != nil {
+		fields = append(fields, usagelog.FieldTakeover)
 	}
 	if m.model != nil {
 		fields = append(fields, usagelog.FieldModel)
@@ -49534,6 +49843,16 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.AccountID()
 	case usagelog.FieldRequestID:
 		return m.RequestID()
+	case usagelog.FieldGatewayRequestID:
+		return m.GatewayRequestID()
+	case usagelog.FieldResult:
+		return m.Result()
+	case usagelog.FieldSwitches:
+		return m.Switches()
+	case usagelog.FieldFallback:
+		return m.Fallback()
+	case usagelog.FieldTakeover:
+		return m.Takeover()
 	case usagelog.FieldModel:
 		return m.Model()
 	case usagelog.FieldRequestedModel:
@@ -49681,6 +50000,16 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldAccountID(ctx)
 	case usagelog.FieldRequestID:
 		return m.OldRequestID(ctx)
+	case usagelog.FieldGatewayRequestID:
+		return m.OldGatewayRequestID(ctx)
+	case usagelog.FieldResult:
+		return m.OldResult(ctx)
+	case usagelog.FieldSwitches:
+		return m.OldSwitches(ctx)
+	case usagelog.FieldFallback:
+		return m.OldFallback(ctx)
+	case usagelog.FieldTakeover:
+		return m.OldTakeover(ctx)
 	case usagelog.FieldModel:
 		return m.OldModel(ctx)
 	case usagelog.FieldRequestedModel:
@@ -49847,6 +50176,41 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetRequestID(v)
+		return nil
+	case usagelog.FieldGatewayRequestID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetGatewayRequestID(v)
+		return nil
+	case usagelog.FieldResult:
+		v, ok := value.(int16)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetResult(v)
+		return nil
+	case usagelog.FieldSwitches:
+		v, ok := value.(int16)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSwitches(v)
+		return nil
+	case usagelog.FieldFallback:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetFallback(v)
+		return nil
+	case usagelog.FieldTakeover:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTakeover(v)
 		return nil
 	case usagelog.FieldModel:
 		v, ok := value.(string)
@@ -50311,6 +50675,12 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 // this mutation.
 func (m *UsageLogMutation) AddedFields() []string {
 	var fields []string
+	if m.addresult != nil {
+		fields = append(fields, usagelog.FieldResult)
+	}
+	if m.addswitches != nil {
+		fields = append(fields, usagelog.FieldSwitches)
+	}
 	if m.addchannel_id != nil {
 		fields = append(fields, usagelog.FieldChannelID)
 	}
@@ -50424,6 +50794,10 @@ func (m *UsageLogMutation) AddedFields() []string {
 // was not set, or was not defined in the schema.
 func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
+	case usagelog.FieldResult:
+		return m.AddedResult()
+	case usagelog.FieldSwitches:
+		return m.AddedSwitches()
 	case usagelog.FieldChannelID:
 		return m.AddedChannelID()
 	case usagelog.FieldInputTokens:
@@ -50503,6 +50877,20 @@ func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {
 // type.
 func (m *UsageLogMutation) AddField(name string, value ent.Value) error {
 	switch name {
+	case usagelog.FieldResult:
+		v, ok := value.(int16)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddResult(v)
+		return nil
+	case usagelog.FieldSwitches:
+		v, ok := value.(int16)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddSwitches(v)
+		return nil
 	case usagelog.FieldChannelID:
 		v, ok := value.(int64)
 		if !ok {
@@ -50756,6 +51144,21 @@ func (m *UsageLogMutation) AddField(name string, value ent.Value) error {
 // mutation.
 func (m *UsageLogMutation) ClearedFields() []string {
 	var fields []string
+	if m.FieldCleared(usagelog.FieldGatewayRequestID) {
+		fields = append(fields, usagelog.FieldGatewayRequestID)
+	}
+	if m.FieldCleared(usagelog.FieldResult) {
+		fields = append(fields, usagelog.FieldResult)
+	}
+	if m.FieldCleared(usagelog.FieldSwitches) {
+		fields = append(fields, usagelog.FieldSwitches)
+	}
+	if m.FieldCleared(usagelog.FieldFallback) {
+		fields = append(fields, usagelog.FieldFallback)
+	}
+	if m.FieldCleared(usagelog.FieldTakeover) {
+		fields = append(fields, usagelog.FieldTakeover)
+	}
 	if m.FieldCleared(usagelog.FieldRequestedModel) {
 		fields = append(fields, usagelog.FieldRequestedModel)
 	}
@@ -50902,6 +51305,21 @@ func (m *UsageLogMutation) FieldCleared(name string) bool {
 // error if the field is not defined in the schema.
 func (m *UsageLogMutation) ClearField(name string) error {
 	switch name {
+	case usagelog.FieldGatewayRequestID:
+		m.ClearGatewayRequestID()
+		return nil
+	case usagelog.FieldResult:
+		m.ClearResult()
+		return nil
+	case usagelog.FieldSwitches:
+		m.ClearSwitches()
+		return nil
+	case usagelog.FieldFallback:
+		m.ClearFallback()
+		return nil
+	case usagelog.FieldTakeover:
+		m.ClearTakeover()
+		return nil
 	case usagelog.FieldRequestedModel:
 		m.ClearRequestedModel()
 		return nil
@@ -51053,6 +51471,21 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldRequestID:
 		m.ResetRequestID()
+		return nil
+	case usagelog.FieldGatewayRequestID:
+		m.ResetGatewayRequestID()
+		return nil
+	case usagelog.FieldResult:
+		m.ResetResult()
+		return nil
+	case usagelog.FieldSwitches:
+		m.ResetSwitches()
+		return nil
+	case usagelog.FieldFallback:
+		m.ResetFallback()
+		return nil
+	case usagelog.FieldTakeover:
+		m.ResetTakeover()
 		return nil
 	case usagelog.FieldModel:
 		m.ResetModel()

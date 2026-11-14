@@ -38,6 +38,11 @@ func (UsageLog) Fields() []ent.Field {
 		field.String("request_id").
 			MaxLen(64).
 			NotEmpty(),
+		field.String("gateway_request_id").Optional().Nillable(),
+		field.Int16("result").Optional().Nillable(),
+		field.Int16("switches").Optional().Nillable(),
+		field.Bool("fallback").Optional().Nillable(),
+		field.Bool("takeover").Optional().Nillable(),
 		field.String("model").
 			MaxLen(100).
 			NotEmpty(),
