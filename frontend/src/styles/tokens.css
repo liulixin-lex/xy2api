@@ -1,0 +1,157 @@
+/*
+ * Semantic design tokens (ported from the approved prototype's tokens.css). Dark is the primary design; light uses
+ * the same names with its own values. Light values live on :root and dark values on .dark, matching the app's
+ * class-based dark mode. Tailwind maps the colours under theme.extend.colors (surface-*, line-*, fg-*, status-*,
+ * switch-*, tooltip-*), so components use the semantic names and never write colour values.
+ *
+ * The app's brand teal (Tailwind `primary`) and fonts stay as they are; the prototype's brand tokens are not ported.
+ * Motion tokens already live in motion.css.
+ */
+:root {
+  /* Surfaces */
+  --color-bg-page: #f3f5f8;
+  --color-bg-surface: #ffffff;
+  --color-bg-header: #f7f9fb;
+  --color-bg-row-hover: #f4f6f9;
+  --color-bg-raised: #ffffff;
+  --color-bg-control: #ffffff;
+  --color-bg-control-hover: #f3f5f8;
+  --color-bg-pill: #edf0f4;
+  --color-bg-pill-hover: #dde3eb;
+  --color-bg-target: #e9f6f4;
+  --color-bg-selected: #e8f4f2;
+
+  /* Lines */
+  --color-line-row: #edf0f4;
+  --color-line-strong: #d9dee6;
+  --color-line-control: #cdd4de;
+
+  /* Text, three levels */
+  --color-text-primary: #111827;
+  --color-text-secondary: #4d596b;
+  --color-text-muted: #5f6b7d;
+  --color-text-muted-on-pill: #5f6b7d;
+
+  /* Switches (scheduling and IQ checks): a soft teal, the full brand teal stays for primary buttons and focus */
+  --color-switch-on: oklch(0.57 0.07 185);
+  --color-switch-off: #858f9f;
+  --color-switch-thumb: #ffffff;
+  --color-switch-thumb-off: #ffffff;
+
+  /* Status fills (dots) */
+  --color-status-ok: #1f8a5b;
+  --color-status-back: #a66a07;
+  --color-status-exempt: #6b59d3;
+  --color-status-observe: #7d8798;
+  --color-status-stopped: #4a5363;
+  --color-status-error: #c43b3b;
+  --color-status-info: #2765c0;
+
+  /* Status text */
+  --color-status-ok-text: #1b7c51;
+  --color-status-back-text: #94600a;
+  --color-status-exempt-text: #5d4bc4;
+  --color-status-error-text: #bb3535;
+  --color-status-info-text: #2765c0;
+
+  /* Tooltips */
+  --color-tooltip-bg: #111827;
+  --color-tooltip-text: #f3f5f8;
+  --color-tooltip-muted: #b3bdcb;
+
+  /* Shadows, only for floating layers */
+  --shadow-popover: 0 8px 24px rgba(15, 23, 42, 0.12), 0 0 0 1px rgba(15, 23, 42, 0.06);
+  --shadow-panel: -8px 0 24px rgba(15, 23, 42, 0.08);
+
+  /* Type scale */
+  --font-size-title: 16px;
+  --line-height-title: 24px;
+  --font-size-name: 14px;
+  --line-height-name: 20px;
+  --font-size-body: 13px;
+  --line-height-body: 18px;
+  --font-size-small: 12px;
+  --line-height-small: 16px;
+  --font-size-micro: 11px;
+  --line-height-micro: 14px;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+
+  /* Spacing and radii */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-full: 999px;
+
+  /* Dense table sizes (the accounts page) */
+  --row-height: 78px;
+  --header-height: 40px;
+  --control-height: 32px;
+  --cell-pad-x: 12px;
+  --pill-width: 50px;
+  --pill-height: 20px;
+  --pill-dot-zone: 18px;
+  --pill-gap-x: 4px;
+  --pill-gap-y: 3px;
+  --dot-size: 7px;
+  --switch-width: 28px;
+  --switch-height: 16px;
+}
+
+.dark {
+  --color-bg-page: #0b111d;
+  --color-bg-surface: #0f1626;
+  --color-bg-header: #131b2d;
+  --color-bg-row-hover: #151e31;
+  --color-bg-raised: #131b2c;
+  --color-bg-control: #0f1626;
+  --color-bg-control-hover: #172034;
+  --color-bg-pill: #1c2639;
+  --color-bg-pill-hover: #283350;
+  --color-bg-target: #12262d;
+  --color-bg-selected: #13222b;
+
+  --color-line-row: #1a2335;
+  --color-line-strong: #263046;
+  --color-line-control: #2e3a52;
+
+  --color-text-primary: #e3e8ef;
+  --color-text-secondary: #98a4b6;
+  --color-text-muted: #7d899c;
+  --color-text-muted-on-pill: oklch(0.665 0.032 260);
+
+  --color-switch-on: oklch(0.54 0.05 182);
+  --color-switch-off: #46526a;
+  --color-switch-thumb: #ffffff;
+  --color-switch-thumb-off: #c7d0dc;
+
+  --color-status-ok: #52bf8d;
+  --color-status-back: #d8a647;
+  --color-status-exempt: #ab9ff2;
+  --color-status-observe: oklch(0.6 0.025 260);
+  --color-status-stopped: oklch(0.72 0.03 260);
+  --color-status-error: #f0726e;
+  --color-status-info: #6ea8ee;
+
+  --color-status-ok-text: #5cc897;
+  --color-status-back-text: #dcae55;
+  --color-status-exempt-text: #b4a9f4;
+  --color-status-error-text: #f27c78;
+  --color-status-info-text: #7cb2f0;
+
+  --color-tooltip-bg: #222c40;
+  --color-tooltip-text: #e3e8ef;
+  --color-tooltip-muted: #9aa6b8;
+
+  --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.36), 0 0 0 1px rgba(0, 0, 0, 0.2);
+  --shadow-panel: -8px 0 24px rgba(0, 0, 0, 0.28);
+}

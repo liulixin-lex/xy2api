@@ -56,7 +56,7 @@ export default defineComponent({
             h('input', {
               type: 'checkbox',
               class:
-                'h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800',
+                'h-4 w-4 rounded border-line-control bg-surface-control text-primary-600 focus:ring-primary-500',
               checked: props.selected,
               disabled: props.selectionDisabled,
               'aria-label': props.selectionLabel,
@@ -75,7 +75,7 @@ export default defineComponent({
             {
               key: column.key,
               class: [
-                'whitespace-nowrap py-4 text-sm text-gray-900 dark:text-gray-100',
+                'whitespace-nowrap py-4 text-sm text-fg-primary',
                 props.paddingClass,
                 props.stickyClasses[colIndex],
                 column.class
@@ -89,7 +89,7 @@ export default defineComponent({
         'tr',
         {
           class: [
-            'table-row-border hover:bg-gray-50 dark:hover:bg-dark-800',
+            'table-row-border hover:bg-surface-hover',
             {
               'cursor-pointer': props.clickable,
               'bg-primary-50/40 dark:bg-primary-900/10': props.selectable && props.selected
