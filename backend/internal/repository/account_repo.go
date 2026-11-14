@@ -1302,6 +1302,9 @@ func (r *accountRepository) accountListFilteredQuery(platform, accountType, stat
 
 func (r *accountRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, *pagination.PaginationResult, error) {
 	q := applyIQStatusFilter(ctx, r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode))
+	if ids, enabled := service.AccountIDsFilter(ctx); enabled {
+		q = q.Where(dbaccount.IDIn(ids...))
+	}
 	if filter, enabled := service.SchedQualityAccountFilter(ctx); enabled {
 		if !filter.Exclude {
 			q = q.Where(dbaccount.IDIn(filter.IDs...))

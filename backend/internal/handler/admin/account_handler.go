@@ -451,6 +451,14 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 // List handles listing all accounts with pagination
 // GET /api/v1/admin/accounts
 func (h *AccountHandler) List(c *gin.Context) {
+	ids, err := parseAccountListIDs(c)
+	if err != nil {
+		response.ErrorFrom(c, infraerrors.BadRequest("INVALID_ACCOUNT_IDS", err.Error()))
+		return
+	}
+	if ids != nil {
+		c.Request = c.Request.WithContext(service.WithAccountIDsFilter(c.Request.Context(), ids))
+	}
 	page, pageSize := response.ParsePagination(c)
 	platform := c.Query("platform")
 	accountType := c.Query("type")
