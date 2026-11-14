@@ -68,16 +68,6 @@ func (v Verdict) String() string {
 	}
 	return ""
 }
-func (s Standing) String() string {
-	switch s {
-	case StandFront:
-		return "front"
-	case StandBack:
-		return "back"
-	}
-	return ""
-}
-
 type AttemptSample struct {
 	AttemptID                        string
 	StartedAt, FinishedAt            time.Time
