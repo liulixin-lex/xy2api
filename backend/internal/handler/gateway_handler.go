@@ -286,6 +286,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	}
 	defer inflightRelease()
 
+	defer beginGatewayRequest(c, func() *service.APIKey { return apiKey }, reqModel, reqStream, h.gatewayService)()
+
 	// 设置请求所属分组 ID（用于渠道级功能判断，如 WebSearch 模拟）
 	parsedReq.GroupID = apiKey.GroupID
 
@@ -523,6 +525,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			} else {
 				result, err = h.geminiCompatService.Forward(requestCtx, c, account, body)
 			}
+			recordGatewayForwardUsage(c, result)
 			recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, result != nil)
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
@@ -966,6 +969,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 清理回调引用，防止 failover 重试时旧回调被错误调用
 			attemptParsedReq.OnUpstreamAccepted = nil
 
+			recordGatewayForwardUsage(c, result)
 			recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, result != nil)
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
@@ -2708,12 +2712,12 @@ func (h *GatewayHandler) maybeLogCompatibilityFallbackMetrics(reqLog *zap.Logger
 }
 
 func (h *GatewayHandler) submitUsageRecordTask(parent context.Context, task service.UsageRecordTask) {
-	runDurableUsageRecordTask(parent, task, "handler.gateway.usage")
+	runDurableUsageRecordTask(gatewayBillingContext(parent), task, "handler.gateway.usage")
 }
 
 // submitMandatoryUsageRecordTask never silently drops billing work on pool overflow.
 func (h *GatewayHandler) submitMandatoryUsageRecordTask(parent context.Context, task service.UsageRecordTask) {
-	runDurableUsageRecordTask(parent, task, "handler.gateway.usage")
+	runDurableUsageRecordTask(gatewayBillingContext(parent), task, "handler.gateway.usage")
 }
 
 // getUserMsgQueueMode 获取当前请求的 UMQ 模式
