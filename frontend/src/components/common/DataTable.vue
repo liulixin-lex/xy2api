@@ -108,7 +108,7 @@
               :key="column.key"
               :data-field="column.key"
               class="table-card__title"
-              :class="{ 'flex-none': column.key === 'select' }"
+              :class="{ 'table-card__title--select': column.key === 'select' }"
             >
               <slot :name="`cell-${column.key}`" :row="row" :value="row[column.key]" :expanded="actionsExpanded">
                 {{ column.formatter ? column.formatter(row[column.key], row) : row[column.key] }}
@@ -1341,6 +1341,11 @@ defineExpose({
   min-width: 0;
   overflow-wrap: anywhere;
   color: var(--color-text-primary);
+}
+/* A page's own select column takes only its own width, the leading column right after it: the head does not split in
+   two (a utility class would lose to the rule above). */
+.table-card__title--select {
+  flex: none;
 }
 .table-card__end {
   flex: none;
