@@ -28,7 +28,7 @@
  *
  *   <div class="relative">
  *     <PendingChangesPill :count="table.pending.value" :more="table.pendingMore.value"
- *       :label="(n) => t('…', { n })" @merge="table.applyPending()" />
+ *       :label="changesText" @merge="table.applyPending()" />
  *     <DataTable … />
  *   </div>
  */
