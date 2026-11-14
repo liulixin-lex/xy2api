@@ -73,13 +73,8 @@ type Evaluation struct {
 	Verdicts Verdicts
 }
 
-func (e Evaluation) Reason() Reason {
-	for i, v := range [...]Verdict{e.Verdicts.Speed, e.Verdicts.Error, e.Verdicts.Cache} {
-		if v == VerdictFail {
-			return [...]Reason{ReasonSpeed, ReasonError, ReasonCache}[i]
-		}
-	}
-	return ""
+func (e Evaluation) Failed() bool {
+	return e.Verdicts.Speed == VerdictFail || e.Verdicts.Error == VerdictFail || e.Verdicts.Cache == VerdictFail
 }
 
 // IsContinuation compares an attempt with the immediately preceding attempt of

@@ -26,3 +26,34 @@ func TestSchedQualityPolicyDoesNotReadLegacyFields(t *testing.T) {
 		})
 	}
 }
+
+func TestSchedQualityPolicyReadCompatibility(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want schedquality.Policy
+	}{
+		{
+			name: "legacy error line is raised to minimum",
+			raw:  `{"version":4,"groups":{"7":{"v4":{"enabled":true,"ttft_seconds":12,"max_error_rate":0.01,"min_cache_ratio":0.8,"takeover_idle_seconds":0}}}}`,
+			want: schedquality.Policy{Enabled: true, TTFTSeconds: 12, MaxErrorRate: .05, MinCacheRatio: .8, TakeoverIdleSeconds: 0},
+		},
+		{
+			name: "malformed field preserves valid siblings",
+			raw:  `{"version":4,"groups":{"7":{"v4":{"enabled":"bad","ttft_seconds":12,"max_error_rate":0.8,"min_cache_ratio":0.8,"takeover_idle_seconds":0}}}}`,
+			want: schedquality.Policy{TTFTSeconds: 12, MaxErrorRate: .8, MinCacheRatio: .8, TakeoverIdleSeconds: 0},
+		},
+		{
+			name: "invalid numeric fields are retained",
+			raw:  `{"version":4,"groups":{"7":{"v4":{"enabled":true,"ttft_seconds":-1,"max_error_rate":0.8,"min_cache_ratio":1.2,"takeover_idle_seconds":300}}}}`,
+			want: schedquality.Policy{Enabled: true, TTFTSeconds: -1, MaxErrorRate: .8, MinCacheRatio: 1.2, TakeoverIdleSeconds: 300},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			policies, version, err := decodeSchedQualityPolicies(tc.raw)
+			require.NoError(t, err)
+			require.Equal(t, int64(4), version)
+			require.Equal(t, tc.want, policies[7].Policy)
+		})
+	}
+}
