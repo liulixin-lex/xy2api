@@ -1,10 +1,5 @@
 <template>
   <div v-if="!isDesktopViewport" ref="mobileRootRef" class="table-cards space-y-3" :aria-busy="loading ? 'true' : undefined">
-    <!-- Reload with rows on screen: a thin bar at the top of the cards in view; it takes no layout space and the cards
-         stay usable. -->
-    <div v-if="refreshing" class="table-progress table-progress--cards" :style="progressStyle" aria-hidden="true" data-test="table-progress">
-      <div class="table-progress__bar"></div>
-    </div>
     <template v-if="showSkeleton">
       <div v-for="i in 5" :key="i" class="rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900">
         <div class="space-y-3">
@@ -127,6 +122,12 @@
         </div>
       </div>
     </template>
+
+    <!-- Reload with rows on screen: a thin bar on the top edge of the list; it takes no layout space and the cards stay
+         usable. Last in the list, so the cards' spacing does not change when it comes and goes. -->
+    <div v-if="refreshing" class="table-progress table-progress--cards" aria-hidden="true" data-test="table-progress">
+      <div class="table-progress__bar"></div>
+    </div>
   </div>
 
   <div
@@ -139,8 +140,8 @@
     }"
     :aria-busy="loading ? 'true' : undefined"
   >
-    <!-- Reload with rows on screen: a thin bar at the top of the rows in view; it takes no layout space. -->
-    <div v-if="refreshing" class="table-progress table-progress--table" :style="progressStyle" aria-hidden="true" data-test="table-progress">
+    <!-- Reload with rows on screen: a thin bar on the top edge of the table; it takes no layout space. -->
+    <div v-if="refreshing" class="table-progress table-progress--table" aria-hidden="true" data-test="table-progress">
       <div class="table-progress__bar"></div>
     </div>
     <table class="w-full min-w-max">
@@ -301,7 +302,6 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted, watch, nextTick, useId, type ComponentPublicInstance } from 'vue'
 import { useVirtualizer, observeElementRect as observeElementRectDefault, type Virtualizer } from '@tanstack/vue-virtual'
-import { useEventListener } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import type { Column } from './types'
 import Icon from '@/components/icons/Icon.vue'
@@ -957,7 +957,7 @@ const hasSameRowIdentitySet = (
  * What the list is seen through: the nearest ancestor that scrolls it (a dialog or drawer body; one that cannot
  * scroll, such as an overflow-hidden card, does not count) or a fixed overlay, else the document. Its `top` is the
  * first visible line: the ancestor's top, or under the sticky page header for the document (the list's
- * scroll-margin-top: 4rem, or --table-sticky-top when a page sets it).
+ * scroll-margin-top: --table-sticky-top, 4rem by default).
  */
 const viewOf = (el: HTMLElement) => {
   for (let node = el.parentElement; node && node !== document.body; node = node.parentElement) {
@@ -988,38 +988,6 @@ function scrollToTop() {
   if (view.parent) view.parent.scrollTop += delta
   else window.scrollBy(0, delta)
 }
-
-// While reloading, the progress bar rides down to the first visible line of the list, so it shows however far the list
-// is scrolled. CSS sticky cannot do this alone: the desktop wrapper scrolls sideways, which makes it the bar's sticky
-// reference even when the window scrolls (pages that are not a fixed-height table layout, and the table layout below
-// 1024px), and callers wrap the cards in overflow containers. A desktop wrapper that scrolls itself keeps the bar at
-// its top with sticky.
-const progressOffset = ref(0)
-const progressStyle = computed(() => (progressOffset.value ? { transform: `translateY(${progressOffset.value}px)` } : undefined))
-let progressView: ReturnType<typeof viewOf> | null = null
-const placeProgress = () => {
-  const list = tableWrapperRef.value ?? mobileRootRef.value
-  if (!list || !refreshing.value) return
-  if (list === tableWrapperRef.value && list.scrollHeight > list.clientHeight) {
-    progressOffset.value = 0
-    return
-  }
-  if (!progressView) progressView = viewOf(list)
-  const rect = list.getBoundingClientRect()
-  progressOffset.value = Math.round(Math.min(Math.max(progressView.top() - rect.top, 0), Math.max(rect.height - 2, 0)))
-}
-watch(
-  [refreshing, isDesktopViewport],
-  () => {
-    progressView = null
-    progressOffset.value = 0
-    placeProgress()
-  },
-  { flush: 'post' }
-)
-const progressListenerTarget = () => (refreshing.value && typeof window !== 'undefined' ? window : null)
-useEventListener(progressListenerTarget, 'scroll', placeProgress, { capture: true, passive: true })
-useEventListener(progressListenerTarget, 'resize', placeProgress, { passive: true })
 
 // A new batch that shares no row with the old one is another page, filter or sort: start it from the top. A reload
 // after a row action keeps most rows, and a passive update keeps all of them, so neither scrolls. Rows without a
@@ -1338,29 +1306,28 @@ defineExpose({
 .dark .is-scrollable :deep(.sticky-col-right) {
   box-shadow: inset 1px 0 0 theme('colors.dark.700');
 }
-/* Reload progress: a 2px bar at the top of the table in the primary colour. It never takes layout space. */
+/* Reload progress: a 2px bar on the top edge of the table or card list in the primary colour. It is positioned
+   absolutely, so it never takes layout space; it does not follow scrolling. */
 .table-progress {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
   pointer-events: none;
   overflow: hidden;
   height: 2px;
 }
 .table-progress--table {
-  position: sticky;
-  top: 0;
-  left: 0;
   z-index: 230; /* above the sticky header cells */
-  margin-bottom: -2px;
 }
-/* The page header the document scrolls under (4rem; a page may set --table-sticky-top): the progress bar and
-   scrollToTop() stop below it. */
+/* The page header the document scrolls under (--table-sticky-top, 4rem by default): scrollToTop() stops below it. */
 .table-cards {
+  position: relative;
   scroll-margin-top: var(--table-sticky-top, 4rem);
 }
-/* Moved down by script while the list is scrolled; its negative margin cancels its height and the stack's gap. */
 .table-progress--cards {
-  position: relative;
   z-index: 10;
-  margin-bottom: calc(-0.75rem - 2px);
+  margin: 0 !important; /* not part of the card stack's spacing */
   border-radius: 9999px;
 }
 .table-progress__bar {

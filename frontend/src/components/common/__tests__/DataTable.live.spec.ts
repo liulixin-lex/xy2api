@@ -38,22 +38,9 @@ const trackScrollTop = (el: Element, start: number) => {
   Object.defineProperty(el, 'scrollTop', { configurable: true, get: () => top, set: (value: number) => { top = value } })
   return () => top
 }
-const placeAt = (el: Element, top: number, height = 0) => {
-  el.getBoundingClientRect = () => ({ x: 0, y: top, top, left: 0, right: 0, bottom: top + height, width: 0, height, toJSON: () => ({}) })
+const placeAt = (el: Element, top: number) => {
+  el.getBoundingClientRect = () => ({ x: 0, y: top, top, left: 0, right: 0, bottom: top, width: 0, height: 0, toJSON: () => ({}) })
 }
-const scrollable = (el: HTMLElement, scrollHeight: number, clientHeight: number) => {
-  Object.defineProperty(el, 'scrollHeight', { configurable: true, value: scrollHeight })
-  Object.defineProperty(el, 'clientHeight', { configurable: true, value: clientHeight })
-}
-/** A container in the document for the table, with inline styles (jsdom reads them through getComputedStyle). */
-const host = (style: string) => {
-  const el = document.createElement('div')
-  el.setAttribute('style', style)
-  document.body.appendChild(el)
-  return el
-}
-const progressShift = (wrapper: { find: (selector: string) => { attributes: (name: string) => string | undefined } }) =>
-  wrapper.find('[data-test="table-progress"]').attributes('style') ?? ''
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -163,65 +150,16 @@ describe('DataTable scroll to top, more cases', () => {
   })
 })
 
-describe('DataTable progress bar in view', () => {
-  it('rides down under the page header when the page scrolls, past a card that clips but does not scroll', async () => {
-    stubViewport(false)
-    const card = host('overflow: hidden')
-    const wrapper = mount(DataTable, { props: { columns, data: rows(1, 2), rowKey: 'id' }, attachTo: card })
-    const list = wrapper.element as HTMLElement
-    list.style.scrollMarginTop = '64px'
-    placeAt(list, -300, 2000)
-    await wrapper.setProps({ loading: true })
-    expect(progressShift(wrapper)).toContain('translateY(364px)')
-
-    placeAt(list, 200, 2000) // scrolled back: the list top is in view
-    window.dispatchEvent(new Event('scroll'))
-    await nextTick()
-    expect(progressShift(wrapper)).not.toContain('translate')
-    wrapper.unmount()
-    card.remove()
-  })
-
-  it('stops at the top of a scrolling dialog body, with no page header there', async () => {
-    stubViewport(false)
-    const body = host('overflow-y: auto')
-    scrollable(body, 1000, 400)
-    placeAt(body, 100)
-    const wrapper = mount(DataTable, { props: { columns, data: rows(1, 2), rowKey: 'id' }, attachTo: body })
-    const list = wrapper.element as HTMLElement
-    list.style.scrollMarginTop = '64px'
-    placeAt(list, 40, 800)
-    await wrapper.setProps({ loading: true })
-    expect(progressShift(wrapper)).toContain('translateY(60px)')
-    wrapper.unmount()
-    body.remove()
-  })
-
-  it('follows the window on the desktop table when its wrapper does not scroll itself (tablet widths, long pages)', async () => {
-    stubViewport(true)
-    const wrapper = mount(DataTable, { props: { columns, data: rows(1, 2), rowKey: 'id' }, attachTo: document.body })
-    await nextTick()
-    const table = wrapper.get('.table-wrapper').element as HTMLElement
-    table.style.scrollMarginTop = '64px'
-    placeAt(table, -200, 1500)
-    await wrapper.setProps({ loading: true })
-    expect(progressShift(wrapper)).toContain('translateY(264px)')
-
-    await wrapper.setProps({ loading: false })
-    scrollable(table, 3000, 600) // the fixed-height layout: the wrapper scrolls, sticky keeps the bar at its top
-    await wrapper.setProps({ loading: true })
-    expect(progressShift(wrapper)).not.toContain('translate')
-    wrapper.unmount()
-  })
-})
-
 describe('DataTable mobile progress bar', () => {
-  it('comes first in the list and leaves the list classes unchanged', async () => {
+  it('comes and goes without changing the list classes or what comes before the first card', async () => {
     stubViewport(false)
     const wrapper = mount(DataTable, { props: { columns, data: rows(1, 2), rowKey: 'id' } })
+    const firstCard = wrapper.get('[data-field="name"]').element.closest('.rounded-lg')!
+    const before = firstCard.previousElementSibling
     const classes = wrapper.classes()
     await wrapper.setProps({ loading: true })
-    expect(wrapper.element.firstElementChild!.getAttribute('data-test')).toBe('table-progress')
+    expect(wrapper.find('[data-test="table-progress"]').exists()).toBe(true)
+    expect(firstCard.previousElementSibling).toBe(before) // the stack's spacing before the first card stays
     expect(wrapper.classes()).toEqual(classes)
   })
 })
