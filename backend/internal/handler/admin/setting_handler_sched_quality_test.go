@@ -14,7 +14,8 @@ import (
 )
 
 func TestSchedQualitySettings(t *testing.T) {
-	h, repo := newStepUpSwitchTestHandler(t, map[string]string{service.SettingKeySchedQualityTestEnabled: "false"})
+	const legacyTestSetting = "sched_quality_test_enabled"
+	h, repo := newStepUpSwitchTestHandler(t, map[string]string{legacyTestSetting: "false"})
 	read := func() map[string]any {
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
@@ -50,8 +51,8 @@ func TestSchedQualitySettings(t *testing.T) {
 	after := &service.SystemSettings{SchedQualityEnabled: false}
 	changed := diffSettings(before, after, nil, nil, UpdateSettingsRequest{})
 	require.Contains(t, changed, service.SettingKeySchedQualityEnabled)
-	require.NotContains(t, changed, service.SettingKeySchedQualityTestEnabled)
-	require.NotContains(t, read(), service.SettingKeySchedQualityTestEnabled)
+	require.NotContains(t, changed, legacyTestSetting)
+	require.NotContains(t, read(), legacyTestSetting)
 	require.Empty(t, diffSettings(after, after, nil, nil, UpdateSettingsRequest{}))
-	require.Equal(t, "false", repo.values[service.SettingKeySchedQualityTestEnabled], "legacy setting is retained without writes")
+	require.Equal(t, "false", repo.values[legacyTestSetting], "legacy setting is retained without writes")
 }
