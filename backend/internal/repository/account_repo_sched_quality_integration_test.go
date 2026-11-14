@@ -13,7 +13,7 @@ func (s *AccountRepoSuite) TestListWithFiltersSchedQuality() {
 	exempt := mustCreateAccount(s.T(), s.client, &service.Account{Name: "b-exempt", Platform: service.PlatformOpenAI})
 	observing := mustCreateAccount(s.T(), s.client, &service.Account{Name: "c-observing", Platform: service.PlatformOpenAI})
 	normal := mustCreateAccount(s.T(), s.client, &service.Account{Name: "d-normal", Platform: service.PlatformOpenAI})
-	other := mustCreateAccount(s.T(), s.client, &service.Account{Name: "e-other", Platform: service.PlatformAnthropic})
+	mustCreateAccount(s.T(), s.client, &service.Account{Name: "e-other", Platform: service.PlatformAnthropic})
 	for _, id := range []int64{substandard.ID, observing.ID, normal.ID} {
 		_, err := s.client.AccountGroup.Create().SetAccountID(id).SetGroupID(group.ID).Save(s.ctx)
 		s.Require().NoError(err)
@@ -56,9 +56,6 @@ func (s *AccountRepoSuite) TestListWithFiltersSchedQuality() {
 				ids = append(ids, row.ID)
 			}
 			s.Require().Equal(tc.want, ids)
-			if tc.quality == "normal" {
-				s.Require().NotContains(ids, other.ID)
-			}
 			s.Require().Equal(int64(len(tc.want)), page.Total)
 		})
 	}

@@ -179,11 +179,6 @@ func TestSchedAdminAccountFilterNormalUsesSummaryConditions(t *testing.T) {
 			require.Equal(t, tc.wantNormal, filter.IDs)
 			require.Equal(t, tc.wantNormal, wantFromSummary)
 			require.Equal(t, tc.globalEnabled && !tc.stale && tc.groupPolicy, byID[4].Substandard[0].Effective)
-			if byID[4].Substandard[0].Effective {
-				require.NotContains(t, filter.IDs, int64(4))
-			} else {
-				require.Contains(t, filter.IDs, int64(4))
-			}
 			require.False(t, byID[5].Substandard[0].Effective)
 			require.False(t, byID[6].Substandard[0].Effective)
 			for _, category := range []struct {
