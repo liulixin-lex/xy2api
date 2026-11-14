@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/lib/pq"
@@ -74,7 +75,7 @@ func (r *usageLogRepository) ListAdminRequests(ctx context.Context, params pagin
 	query := adminRequestsCTE + `SELECT source, id, gateway_request_id, result, switches, fallback, takeover,
 		created_at, user_id, api_key_id, account_id, group_id, model, request_type, stream,
 		end_to_end_first_output_ms, duration_ms, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
-		FROM requests ` + where + " ORDER BY " + usageLogOrderBy(params) + ", source ASC"
+		FROM requests ` + where + " ORDER BY " + adminRequestOrderBy(params)
 	query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2)
 	rows, err := r.sql.QueryContext(ctx, query, append(args, limit+1, params.Offset())...)
 	if err != nil {
@@ -122,6 +123,13 @@ func (r *usageLogRepository) ListAdminRequests(ctx context.Context, params pagin
 		return nil, nil, err
 	}
 	return items, paginationResultFromTotal(total, params), nil
+}
+
+func adminRequestOrderBy(params pagination.PaginationParams) string {
+	if strings.TrimSpace(params.SortBy) == "" {
+		return "created_at DESC, id DESC, source ASC"
+	}
+	return usageLogOrderBy(params) + ", source ASC"
 }
 
 func (r *usageLogRepository) hydrateAdminRequests(ctx context.Context, items []service.AdminUsageRecord) error {
