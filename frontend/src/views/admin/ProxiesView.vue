@@ -177,31 +177,16 @@
           <template #cell-address="{ row }">
             <div class="flex items-center gap-1.5">
               <code class="code text-xs">{{ row.host }}:{{ row.port }}</code>
-              <div class="relative">
-                <button
-                  type="button"
-                  class="rounded p-0.5 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400"
-                  :title="t('admin.proxies.copyProxyUrl')"
-                  @click.stop="copyProxyUrl(row)"
-                  @contextmenu.prevent="toggleCopyMenu(row.id)"
-                >
-                  <Icon name="copy" size="sm" />
-                </button>
-                <!-- 右键展开格式选择菜单 -->
-                <div
-                  v-if="copyMenuProxyId === row.id"
-                  class="absolute left-0 top-full z-50 mt-1 w-auto min-w-[180px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-500 dark:bg-dark-700"
-                >
-                  <button
-                    v-for="fmt in getCopyFormats(row)"
-                    :key="fmt.label"
-                    class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-gray-100 dark:hover:bg-dark-600"
-                    @click.stop="copyFormat(fmt.value)"
-                  >
-                    <span class="truncate font-mono text-gray-600 dark:text-gray-300">{{ fmt.label }}</span>
-                  </button>
-                </div>
-              </div>
+              <!-- 右键（触屏长按）展开格式选择菜单 -->
+              <button
+                type="button"
+                class="rounded p-0.5 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400"
+                :title="t('admin.proxies.copyProxyUrl')"
+                @click.stop="copyProxyUrl(row)"
+                @contextmenu.prevent="toggleCopyMenu(row, $event)"
+              >
+                <Icon name="copy" size="sm" />
+              </button>
             </div>
           </template>
 
@@ -411,6 +396,31 @@
         />
       </template>
     </TablePageLayout>
+
+    <!-- The copy-format menu, placed like the row menu (AccountActionMenu): in the body, under its button or above it,
+         always whole on screen; a sub-layer, so Escape closes it (7r-4). -->
+    <Teleport to="body">
+      <div
+        v-if="copyMenu"
+        ref="copyMenuRef"
+        role="menu"
+        class="fixed min-w-[180px] overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-500 dark:bg-dark-700"
+        :style="copyMenuStyle"
+        data-test="proxy-copy-menu"
+        @click.stop
+      >
+        <button
+          v-for="fmt in getCopyFormats(copyMenu.row)"
+          :key="fmt.label"
+          type="button"
+          role="menuitem"
+          class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-gray-100 dark:hover:bg-dark-600"
+          @click="copyFormat(fmt.value)"
+        >
+          <span class="truncate font-mono text-gray-600 dark:text-gray-300">{{ fmt.label }}</span>
+        </button>
+      </div>
+    </Teleport>
 
     <!-- Create Proxy Modal -->
     <BaseDialog
@@ -1016,7 +1026,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useWindowSize } from '@vueuse/core'
 import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -1106,7 +1117,43 @@ const editStatusOptions = computed(() => [
 
 const proxies = ref<Proxy[]>([])
 const visiblePasswordIds = reactive(new Set<number>())
-const copyMenuProxyId = ref<number | null>(null)
+const copyMenu = ref<{ row: Proxy; button: HTMLElement; anchor: DOMRect } | null>(null)
+const copyMenuRef = ref<HTMLElement | null>(null)
+const copyMenuPosition = ref({ top: 0, left: 0 })
+const { width: viewportWidth, height: viewportHeight } = useWindowSize()
+const COPY_MENU_PADDING = 8
+const copyMenuLayer = useOverlayLayer(() => copyMenu.value !== null, {
+  root: copyMenuRef,
+  modal: false,
+  onEscape: () => {
+    const button = copyMenu.value?.button
+    copyMenu.value = null
+    button?.focus({ preventScroll: true })
+  },
+  onCovered: () => { copyMenu.value = null }
+})
+const copyMenuStyle = computed(() => ({
+  top: `${copyMenuPosition.value.top}px`,
+  left: `${copyMenuPosition.value.left}px`,
+  maxWidth: `${Math.max(0, viewportWidth.value - COPY_MENU_PADDING * 2)}px`,
+  maxHeight: `${Math.max(0, viewportHeight.value - COPY_MENU_PADDING * 2)}px`,
+  zIndex: copyMenuLayer.zIndex.value
+}))
+// Under the button, left edges aligned, or above it when it does not fit below; then kept 8px inside the screen.
+const placeCopyMenu = () => {
+  const menu = copyMenuRef.value
+  const anchor = copyMenu.value?.anchor
+  if (!menu || !anchor) return
+  const { width, height } = menu.getBoundingClientRect()
+  const gap = 4
+  const maxTop = viewportHeight.value - height - COPY_MENU_PADDING
+  const top = anchor.bottom + gap <= maxTop ? anchor.bottom + gap : anchor.top - height - gap
+  copyMenuPosition.value = {
+    top: Math.max(COPY_MENU_PADDING, Math.min(top, maxTop)),
+    left: Math.max(COPY_MENU_PADDING, Math.min(anchor.left, viewportWidth.value - width - COPY_MENU_PADDING))
+  }
+}
+watch([copyMenuRef, copyMenu, viewportWidth, viewportHeight], placeCopyMenu, { flush: 'post' })
 const moreMenuOpen = ref(false)
 const moreButtonRef = ref<HTMLElement | null>(null)
 const moreMenuRef = ref<HTMLElement | null>(null)
@@ -2147,20 +2194,21 @@ function getCopyFormats(row: any) {
 
 function copyProxyUrl(row: any) {
   copyToClipboard(buildProxyUrl(row), t('admin.proxies.urlCopied'))
-  copyMenuProxyId.value = null
+  copyMenu.value = null
 }
 
-function toggleCopyMenu(id: number) {
-  copyMenuProxyId.value = copyMenuProxyId.value === id ? null : id
+function toggleCopyMenu(row: Proxy, event: MouseEvent) {
+  const button = event.currentTarget as HTMLElement
+  copyMenu.value = copyMenu.value?.row.id === row.id ? null : { row, button, anchor: button.getBoundingClientRect() }
 }
 
 function copyFormat(value: string) {
   copyToClipboard(value, t('admin.proxies.urlCopied'))
-  copyMenuProxyId.value = null
+  copyMenu.value = null
 }
 
 function closeMenus() {
-  copyMenuProxyId.value = null
+  copyMenu.value = null
   moreMenuOpen.value = false
 }
 
