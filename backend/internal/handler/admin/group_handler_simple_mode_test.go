@@ -48,7 +48,7 @@ func TestGroupHandlerSimpleModeSanitizesCommercialFields(t *testing.T) {
 	svc := newStubAdminService()
 	r := newSimpleModeGroupRouter(svc)
 
-	create := `{"name":"simple","description":"basic grouping","platform":"anthropic","rate_multiplier":7,"is_exclusive":true,"subscription_type":"subscription","daily_limit_usd":10,"long_context_pricing_enabled":true,"model_pricing":[{"model":"claude","input_price":1}],"allow_image_generation":true,"allow_batch_image_generation":true,"video_price_720p":2,"web_search_price_per_call":3,"audio_realtime_price_per_min":4,"rpm_limit":99}`
+	create := `{"name":"simple","alias":"简组","description":"basic grouping","platform":"anthropic","rate_multiplier":7,"is_exclusive":true,"subscription_type":"subscription","daily_limit_usd":10,"long_context_pricing_enabled":true,"model_pricing":[{"model":"claude","input_price":1}],"allow_image_generation":true,"allow_batch_image_generation":true,"video_price_720p":2,"web_search_price_per_call":3,"audio_realtime_price_per_min":4,"rpm_limit":99}`
 	req := httptest.NewRequest(http.MethodPost, "/groups", bytes.NewBufferString(create))
 	req.Header.Set("Content-Type", "application/json")
 	res := httptest.NewRecorder()
@@ -57,6 +57,7 @@ func TestGroupHandlerSimpleModeSanitizesCommercialFields(t *testing.T) {
 	require.Len(t, svc.createdGroups, 1)
 	created := svc.createdGroups[0]
 	require.Equal(t, "basic grouping", created.Description)
+	require.Equal(t, "简组", created.Alias)
 	require.Equal(t, 1.0, created.RateMultiplier)
 	require.False(t, created.IsExclusive)
 	require.Equal(t, service.SubscriptionTypeStandard, created.SubscriptionType)
@@ -70,7 +71,7 @@ func TestGroupHandlerSimpleModeSanitizesCommercialFields(t *testing.T) {
 	require.Nil(t, created.AudioRealtimePricePerMin)
 	require.Zero(t, created.RPMLimit)
 
-	update := `{"name":"renamed","description":"still basic","rate_multiplier":9,"is_exclusive":true,"subscription_type":"subscription","daily_limit_usd":12,"long_context_pricing_enabled":true,"model_pricing":[{"model":"claude","input_price":1}],"allow_image_generation":true,"allow_batch_image_generation":true,"video_price_720p":2,"web_search_price_per_call":3,"audio_realtime_price_per_min":4,"status":"inactive","rpm_limit":123}`
+	update := `{"name":"renamed","alias":"ABCD","description":"still basic","rate_multiplier":9,"is_exclusive":true,"subscription_type":"subscription","daily_limit_usd":12,"long_context_pricing_enabled":true,"model_pricing":[{"model":"claude","input_price":1}],"allow_image_generation":true,"allow_batch_image_generation":true,"video_price_720p":2,"web_search_price_per_call":3,"audio_realtime_price_per_min":4,"status":"inactive","rpm_limit":123}`
 	req = httptest.NewRequest(http.MethodPut, "/groups/2", bytes.NewBufferString(update))
 	req.Header.Set("Content-Type", "application/json")
 	res = httptest.NewRecorder()
@@ -78,6 +79,8 @@ func TestGroupHandlerSimpleModeSanitizesCommercialFields(t *testing.T) {
 	require.Equal(t, http.StatusOK, res.Code)
 	require.Len(t, svc.updatedGroups, 1)
 	updated := svc.updatedGroups[0]
+	require.NotNil(t, updated.Alias)
+	require.Equal(t, "ABCD", *updated.Alias)
 	require.NotNil(t, updated.Description)
 	require.Equal(t, "still basic", *updated.Description)
 	require.Nil(t, updated.RateMultiplier)
@@ -146,7 +149,7 @@ func TestGroupHandlerSimpleModeResponseUsesFieldAllowlist(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	svc := newStubAdminService()
 	svc.groups = []service.Group{{
-		ID: 1, Name: "basic", Description: "allowed", Platform: service.PlatformAnthropic,
+		ID: 1, Name: "basic", Alias: "简组", Description: "allowed", Platform: service.PlatformAnthropic,
 		AccountCount: 3, ActiveAccountCount: 2, RateLimitedAccountCount: 1,
 		Status: service.StatusActive, RateMultiplier: 9, RPMLimit: 42,
 		LongContextPricingEnabled: true,
@@ -169,11 +172,12 @@ func TestGroupHandlerSimpleModeResponseUsesFieldAllowlist(t *testing.T) {
 	require.Len(t, payload.Data.Items, 1)
 	item := payload.Data.Items[0]
 	require.Equal(t, "basic", item["name"])
+	require.Equal(t, "简组", item["alias"])
 	require.Equal(t, "allowed", item["description"])
 	require.Equal(t, "anthropic", item["platform"])
 	require.Equal(t, float64(3), item["account_count"])
 	require.ElementsMatch(t, []string{
-		"id", "name", "description", "platform", "status", "account_count",
+		"id", "name", "alias", "description", "platform", "status", "account_count",
 		"system_prompt_config",
 		"active_account_count", "rate_limited_account_count", "sort_order", "created_at", "updated_at",
 	}, mapKeys(item))
@@ -212,7 +216,7 @@ func TestGroupHandlerSimpleModeAllReadAndWriteResponsesUseFieldAllowlist(t *test
 	gin.SetMode(gin.TestMode)
 	svc := newStubAdminService()
 	svc.groups = []service.Group{{
-		ID: 1, Name: "basic", Description: "allowed", Platform: service.PlatformAnthropic, AccountCount: 3,
+		ID: 1, Name: "basic", Alias: "简组", Description: "allowed", Platform: service.PlatformAnthropic, AccountCount: 3,
 		Status: service.StatusActive, RateMultiplier: 9, RPMLimit: 42,
 		LongContextPricingEnabled: true,
 		ModelPricing:              []service.ChannelModelPricing{{Models: []string{"claude"}}},
