@@ -41,6 +41,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useHeldResult } from '@/composables/useHeldResult'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type { GrokQuotaProbeResult } from '@/api/admin/grok'
@@ -62,7 +63,12 @@ const { t } = useI18n()
 const visible = computed(() => props.account.platform === 'grok' && props.account.type === 'oauth')
 const loading = ref(false)
 const error = ref<string | null>(null)
-const data = ref<GrokQuotaProbeResult | null>(null)
+// The probe's answer shows until the row brings a new quota snapshot (the probe writes one).
+const probe = useHeldResult<GrokQuotaProbeResult>(() => {
+  const extra = props.account.extra as Record<string, unknown> | undefined
+  return [extra?.grok_usage_snapshot, extra?.grok_quota_snapshot, extra?.grok_billing_snapshot]
+})
+const data = computed(() => probe.current.value?.value ?? null)
 
 const extractErrorMessage = (e: unknown): string => {
   const err = e as {
@@ -101,9 +107,10 @@ const handleProbe = async () => {
   loading.value = true
   error.value = null
   try {
-    data.value = await adminAPI.grok.queryQuota(props.account.id)
-    error.value = data.value.probe_error || null
-    emit('probed', data.value)
+    const result = await adminAPI.grok.queryQuota(props.account.id)
+    probe.hold(result)
+    error.value = result.probe_error || null
+    emit('probed', result)
   } catch (e) {
     error.value = extractErrorMessage(e)
   } finally {
@@ -114,7 +121,7 @@ const handleProbe = async () => {
 watch(
   () => props.account.id,
   () => {
-    data.value = null
+    probe.clear()
     error.value = null
     loading.value = false
   }

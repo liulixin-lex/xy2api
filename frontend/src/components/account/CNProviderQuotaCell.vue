@@ -61,6 +61,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useHeldResult } from '@/composables/useHeldResult'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type { CNProviderQuotaProbeResult } from '@/api/admin/cnProviders'
@@ -78,7 +79,6 @@ const visible = computed(() => cnQuotaCellVisible(props.account))
 
 const loading = ref(false)
 const error = ref<string | null>(null)
-const data = ref<CNProviderQuotaProbeResult | null>(null)
 
 // 后端周期任务/手动探测写入的 extra 快照键（<provider>_ 前缀，与后端
 // cnQuotaExtraUpdates 对齐）。页面加载即有数据，无需等待探测。
@@ -118,6 +118,13 @@ const snapshotData = computed<CNProviderQuotaProbeResult | null>(() => {
   return { success: true, tiers } as CNProviderQuotaProbeResult
 })
 
+// What the cell shows comes from the row's snapshot; a probe's answer stands in for it until the snapshot changes.
+const probe = useHeldResult<CNProviderQuotaProbeResult>(() => [
+  snapshotData.value,
+  readExtraString(`${props.account.platform}_usage_updated_at`)
+])
+const data = computed(() => probe.current.value?.value ?? snapshotData.value)
+
 // 快照是否过期（无更新时间或超过 staleness 窗口）→ 挂载时需要自动探测。
 const snapshotIsStale = computed(() => {
   const updatedAt = readExtraString(`${props.account.platform}_usage_updated_at`)
@@ -130,7 +137,6 @@ const snapshotIsStale = computed(() => {
 // 避免静默失败导致单元格空白无提示）。
 onMounted(() => {
   if (!visible.value) return
-  data.value = snapshotData.value
   if (!snapshotIsStale.value) return
   // 模块级去抖：列表页每行一个实例，翻页/筛选/刷新会重复挂载；同一账号
   // 短时间内已自动探测过则跳过，避免对上游形成探测风暴。
@@ -174,7 +180,7 @@ const handleProbe = async () => {
     const result = await adminAPI.cnProviders.queryQuota(props.account.id)
     // 失败时保留已渲染的快照条形图（仅显示错误行），成功才覆盖。
     if (result.success) {
-      data.value = result
+      probe.hold(result)
     } else {
       error.value = result.error || t('common.error')
     }
@@ -188,7 +194,7 @@ const handleProbe = async () => {
 watch(
   () => props.account.id,
   () => {
-    data.value = null
+    probe.clear()
     error.value = null
     loading.value = false
   }
