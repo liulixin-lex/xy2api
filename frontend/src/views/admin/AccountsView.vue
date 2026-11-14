@@ -106,7 +106,7 @@
                   :quality="row.platform === 'openai' ? row.quality ?? null : null"
                   :readonly="!canPlaceGroups"
                   @open-quality="(groupId: number) => openQuality(row, groupId)"
-                  @edit-groups="openGroupsEditor(row)"
+                  @edit-groups="(event: MouseEvent) => openGroupsEditor(row, event)"
                 />
               </div>
             </template>
@@ -247,7 +247,17 @@
     <AccountStatsModal v-if="statsModalMounted" :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel v-if="schedulePanelMounted" :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" :readonly="!canManage" @close="closeSchedulePanel" />
     <IQCheckResultsModal v-if="iqRecordsAccount" :show="true" :account="iqRecordsAccount" @close="iqRecordsAccount = null" @updated="handleIQSummaryUpdated" />
-    <AccountGroupsDialog v-if="groupsDialogAccount" :account="groupsDialogAccount" :groups="groups" @close="groupsDialogAccount = null" @updated="handleAccountUpdated" />
+    <AccountGroupPicker
+      v-if="picker.account"
+      ref="pickerRef"
+      :key="picker.account.id"
+      :account="picker.account"
+      :groups="groups"
+      :anchor="picker.anchor"
+      :focus-search="picker.focusSearch"
+      :save="saveGroups"
+      @close="picker.account = null"
+    />
     <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" :recoverable="menuRecoverable(menu.acc)" :recovering="!!menu.acc && isRecovering(menu.acc.id)" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @iq-run="handleRunIQCheck" @iq-records="iqRecordsAccount = $event" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="recoverOne" @delete="handleDelete" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @manage-openai-totp="handleManageOpenAITotp" />
     <OpenAILoginImportDialog v-if="authStore.isAdmin && showOpenAILogin" :show="showOpenAILogin" :proxies="proxies" :groups="groups" @close="showOpenAILogin = false" @imported="handleDataImported" />
     <OpenAITotpDialog v-if="authStore.isAdmin && openAITotpAccount" :show="true" :account="openAITotpAccount" @close="openAITotpAccount = null" />
@@ -312,12 +322,12 @@ import Icon from '@/components/icons/Icon.vue'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
-import AccountGroupsDialog from '@/components/admin/account/AccountGroupsDialog.vue'
 import AccountStreamOnlyBadge from '@/components/admin/account/AccountStreamOnlyBadge.vue'
 import { IQ_BUILTIN_MODELS, iqRunSummary, isIQBuiltinModel } from '@/components/admin/account/iqCheckPresentation'
 import SchedBatchDialog, { type SchedBatchAction } from '@/components/admin/account/quality/SchedBatchDialog.vue'
 import SchedPauseMark from '@/components/admin/account/quality/SchedPauseMark.vue'
 import SchedQualityLayers from '@/components/admin/account/quality/SchedQualityLayers.vue'
+import AccountGroupPicker from '@/components/admin/account/table/AccountGroupPicker.vue'
 import AccountGroupPills from '@/components/admin/account/table/AccountGroupPills.vue'
 import AccountIQCell from '@/components/admin/account/table/AccountIQCell.vue'
 import AccountNameCell from '@/components/admin/account/table/AccountNameCell.vue'
@@ -1009,7 +1019,6 @@ const statsAcc = ref<Account | null>(null)
 const scheduleAcc = ref<Account | null>(null)
 const scheduleModelOptions = ref<SelectOption[]>([])
 const iqRecordsAccount = ref<Account | null>(null)
-const groupsDialogAccount = ref<AccountListItem | null>(null)
 const createModalMounted = useLazyMount(showCreate)
 const editModalMounted = useLazyMount(showEdit)
 const reAuthModalMounted = useLazyMount(showReAuth)
@@ -1024,9 +1033,35 @@ const errorPassthroughModalMounted = useLazyMount(showErrorPassthrough)
 const tlsProfilesModalMounted = useLazyMount(showTLSFingerprintProfiles)
 const menu = reactive<{ show: boolean; acc: Account | null; anchorRect: DOMRect | null }>({ show: false, acc: null, anchorRect: null })
 
-const openGroupsEditor = (row: LiveAccount) => {
-  // The dialog gets its own copy: background updates do not reach what it edits.
-  if (canPlaceGroups.value) groupsDialogAccount.value = { ...row }
+// ---- The group picker of the groups column (spec 4.3) ----
+const picker = reactive<{ account: Pick<Account, 'id' | 'name' | 'platform'> | null; anchor: HTMLElement | null; focusSearch: boolean }>({ account: null, anchor: null, focusSearch: false })
+const pickerRef = ref<{ requestClose: () => Promise<boolean> } | null>(null)
+/**
+ * A pill's text: the picker beside its cell. On the same account's pills an open picker closes (saving a change); on
+ * another account's it closes first and the new one opens once it has (not while a conflict waits for an answer).
+ */
+const openGroupsEditor = async (row: LiveAccount, event: MouseEvent) => {
+  if (!canPlaceGroups.value) return
+  const opener = event.currentTarget as HTMLElement | null
+  const anchor = opener?.closest('td') ?? opener
+  if (picker.account) {
+    const same = picker.account.id === row.id
+    const closed = (await pickerRef.value?.requestClose()) ?? true
+    if (same || !closed) return
+  }
+  // The picker keeps its own copy: background updates do not reach what it edits.
+  Object.assign(picker, { account: { id: row.id, name: row.name, platform: row.platform }, anchor, focusSearch: event.detail === 0 })
+}
+/** Closing the picker with a change: only this cell's groups, optimistically; a failure rolls back (the picker tells). */
+const saveGroups = async (groupIds: number[], confirmMixedChannel: boolean) => {
+  const id = picker.account?.id
+  if (id === undefined) return
+  await table.edit(id, 'group_ids', groupIds, async () => {
+    const updated = await adminAPI.accounts.update(id, confirmMixedChannel ? { group_ids: groupIds, confirm_mixed_channel_risk: true } : { group_ids: groupIds })
+    return updated as Partial<LiveAccount>
+  })
+  // The dots follow the new groups at once.
+  void table.refresh('quality')
 }
 const loadingDetails = new Set<number>()
 const loadAccountDetails = async (account: Pick<AccountListItem, 'id'>): Promise<Account | null> => {

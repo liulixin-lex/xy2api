@@ -2,6 +2,21 @@ import openaiTotp from './openaiTotp'
 
 export default {
     accounts: {
+      groupPicker: {
+        search: '搜索别名或全名',
+        searchLabel: '搜索分组',
+        categories: '分组分类',
+        all: '全部',
+        none: '没有可选的分组',
+        noMatch: '没有匹配“{q}”的分组',
+        selected: '已选 {n} 个',
+        closeToSave: '关闭即保存',
+        saving: '保存中…',
+        conflict: '该账号将同时属于不同渠道的分组，确认保存？',
+        confirm: '确认保存',
+        cancel: '取消',
+        inactive: '已停用',
+      },
       table: {
         nameSub: '{platform} · {type}',
         dims: { ttfo: '首字', error: '错误', cache: '缓存' },

@@ -76,6 +76,7 @@ import type { Group, GroupPlatform } from '@/types'
 import { useAuthStore } from '@/stores'
 import GroupCategoryTabs from '@/components/admin/group/GroupCategoryTabs.vue'
 import { useGroupCategoryTabs } from '@/composables/useGroupCategoryTabs'
+import { eligibleGroupsFor } from '@/utils/accountGroupSelection'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -106,24 +107,10 @@ const isSearchable = computed(() => {
   return props.searchable
 })
 
-// Filter groups by platform if specified
-const eligibleGroups = computed(() => {
-  let result = authStore.isSimpleMode
-    ? props.groups.filter((g) => g.platform !== 'composite')
-    : props.groups
-  if (props.platform) {
-    // antigravity 账户启用混合调度后，可选择 anthropic/gemini 分组
-    if (props.platform === 'antigravity' && props.mixedScheduling) {
-      result = result.filter(
-        (g) => g.platform === 'antigravity' || g.platform === 'anthropic' || g.platform === 'gemini' || g.platform === 'composite'
-      )
-    } else {
-      // 默认：只能选择同 platform 的分组；composite 分组可接收任意具体平台账号
-      result = result.filter((g) => g.platform === props.platform || g.platform === 'composite')
-    }
-  }
-  return result
-})
+// Filter groups by platform if specified (the rule is shared with the accounts page's group picker)
+const eligibleGroups = computed(() =>
+  eligibleGroupsFor(props.groups, props.platform, { mixedScheduling: props.mixedScheduling, simpleMode: authStore.isSimpleMode })
+)
 // XY2API：分类标签只在这里过滤显示，不改 groups 和已勾选的值
 const { tabs: categoryTabList, activeId: activeCategoryId, activeGroupIds: activeCategoryGroupIds, toggle: toggleCategoryTab } = useGroupCategoryTabs(() => !!props.categoryTabs, () => eligibleGroups.value)
 const filteredGroups = computed(() => {

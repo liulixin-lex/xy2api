@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent } from 'vue'
 
 import AccountsView from '../AccountsView.vue'
+import { backendSummary } from '@/api/admin/schedQuality'
 
 const {
   listAccounts,
@@ -148,12 +149,25 @@ function mountView() {
 
 type View = ReturnType<typeof mountView>
 
-const openGroupsDialog = async (wrapper: View) => {
+const openGroupPicker = async (wrapper: View) => {
   await wrapper.get('[data-account-name="acc-7"] [data-test="group-pill-text"]').trigger('click')
   await flushPromises()
 }
-const groupCheckbox = (wrapper: View, id: number) =>
-  wrapper.get<HTMLInputElement>(`[data-test="account-groups-dialog"] input[type="checkbox"][value="${id}"]`)
+// The picker is teleported to the body.
+const groupCheckbox = (id: number) =>
+  document.querySelector<HTMLInputElement>(`[data-group-picker] input[type="checkbox"][value="${id}"]`)!
+const tick = async (id: number, checked: boolean) => {
+  const box = groupCheckbox(id)
+  box.checked = checked
+  box.dispatchEvent(new Event('change'))
+  await flushPromises()
+}
+/** A click outside the picker closes it (and saves a change). */
+const clickOutside = async () => {
+  document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+  await flushPromises()
+}
+const pillTexts = (wrapper: View) => wrapper.findAll('[data-account-name="acc-7"] [data-test="group-pill-text"]').map((pill) => pill.text())
 
 const pickCategory = async (wrapper: View) => {
   await wrapper.get('[data-test="pick-category"]').trigger('click')
@@ -180,28 +194,51 @@ describe('admin AccountsView group categories', () => {
     document.body.innerHTML = ''
   })
 
-  it('opens the group dialog from the groups cell and saves only group_ids', async () => {
+  it('opens the group picker beside the groups cell and saves only group_ids once it closes', async () => {
     updateAccount.mockResolvedValue({ ...freshAccount, group_ids: [3, 1, 2] })
     const wrapper = mountView()
     await flushPromises()
     // Pills in the groups page order, each with its automatic text (no alias set)
-    expect(wrapper.findAll('[data-account-name="acc-7"] [data-test="group-pill-text"]').map((pill) => pill.text())).toEqual(['Alp', 'Gam'])
+    expect(pillTexts(wrapper)).toEqual(['Alp', 'Gam'])
 
-    await openGroupsDialog(wrapper)
+    await openGroupPicker(wrapper)
     expect(getById).toHaveBeenCalledWith(7)
-    expect(wrapper.get('[data-test="base-dialog"] h3').text()).toBe('admin.groupCategories.editAccountGroups')
-    expect(wrapper.find('[data-test="group-category-tabs"]').exists()).toBe(true)
-    expect(groupCheckbox(wrapper, 3).element.checked).toBe(true)
+    expect(document.querySelector('[data-group-picker]')!.getAttribute('aria-label')).toBe('admin.groupCategories.editAccountGroups')
+    expect(document.querySelector('[data-test="group-picker-tab-3"]')).not.toBeNull()
+    expect(groupCheckbox(3).checked).toBe(true)
 
-    await groupCheckbox(wrapper, 2).setValue(true)
-    await wrapper.get('[data-test="account-groups-confirm"]').trigger('click')
-    await flushPromises()
+    await tick(2, true)
+    expect(updateAccount).not.toHaveBeenCalled()
+    vi.mocked(backendSummary).mockClear()
+    await clickOutside()
 
     expect(updateAccount).toHaveBeenCalledTimes(1)
+    // The pills' dots follow the new groups: the summary is asked again at once.
+    expect(backendSummary).toHaveBeenCalledTimes(1)
     expect(updateAccount).toHaveBeenCalledWith(7, { group_ids: [3, 1, 2] })
-    expect(wrapper.find('[data-test="account-groups-dialog"]').exists()).toBe(false)
+    expect(document.querySelector('[data-group-picker]')).toBeNull()
     // The saved groups show at once, in the groups page order
-    expect(wrapper.findAll('[data-account-name="acc-7"] [data-test="group-pill-text"]').map((pill) => pill.text())).toEqual(['Alp', 'Bet', 'Gam'])
+    expect(pillTexts(wrapper)).toEqual(['Alp', 'Bet', 'Gam'])
+    wrapper.unmount()
+  })
+
+  it('shows the new groups in the cell while saving and puts the old ones back when the save fails', async () => {
+    let fail!: (error: unknown) => void
+    updateAccount.mockReturnValue(new Promise((_, reject) => { fail = reject }))
+    const wrapper = mountView()
+    await flushPromises()
+    await openGroupPicker(wrapper)
+    await tick(2, true)
+    await clickOutside()
+    // Optimistic: only this cell, before the answer.
+    expect(pillTexts(wrapper)).toEqual(['Alp', 'Bet', 'Gam'])
+    expect(document.querySelector('[data-test="group-picker-foot"]')!.textContent).toContain('admin.accounts.groupPicker.saving')
+
+    fail({ status: 500, message: 'boom' })
+    await flushPromises()
+    expect(pillTexts(wrapper)).toEqual(['Alp', 'Gam'])
+    expect(showError).toHaveBeenCalledTimes(1)
+    expect(document.querySelector('[data-group-picker]')).toBeNull()
     wrapper.unmount()
   })
 
@@ -229,9 +266,9 @@ describe('admin AccountsView group categories', () => {
     await flushPromises()
     await pickCategory(wrapper)
 
-    await openGroupsDialog(wrapper)
-    await groupCheckbox(wrapper, 1).setValue(false)
-    await wrapper.get('[data-test="account-groups-confirm"]').trigger('click')
+    await openGroupPicker(wrapper)
+    await tick(1, false)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     await flushPromises()
 
     expect(updateAccount).toHaveBeenCalledWith(7, { group_ids: [3] })

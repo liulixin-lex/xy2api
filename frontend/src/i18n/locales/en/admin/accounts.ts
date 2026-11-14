@@ -2,6 +2,21 @@ import openaiTotp from './openaiTotp'
 
 export default {
     accounts: {
+      groupPicker: {
+        search: 'Search alias or name',
+        searchLabel: 'Search groups',
+        categories: 'Group categories',
+        all: 'All',
+        none: 'No group to choose',
+        noMatch: 'No group matches “{q}”',
+        selected: '{n} selected',
+        closeToSave: 'saved on close',
+        saving: 'saving…',
+        conflict: 'The account will be in groups of different channels. Save anyway?',
+        confirm: 'Save',
+        cancel: 'Cancel',
+        inactive: 'Inactive',
+      },
       table: {
         nameSub: '{platform} · {type}',
         dims: { ttfo: 'TTFT', error: 'Errors', cache: 'Cache' },

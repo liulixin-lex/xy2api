@@ -78,8 +78,8 @@ function mountView() {
         HelpTooltip: { template: '<span><slot name="trigger" /></span>' },
         AccountColumnSettings: true,
         AccountPriorityCell: true,
-        AccountGroupPills: { emits: ['edit-groups'], template: '<button data-test="open-groups" @click="$emit(\'edit-groups\')">groups</button>' },
-        AccountGroupsDialog: { props: ['account'], template: '<div data-test="groups-dialog" :data-account-id="account?.id" />' },
+        AccountGroupPills: { emits: ['edit-groups'], template: '<button data-test="open-groups" @click="$emit(\'edit-groups\', $event)">groups</button>' },
+        AccountGroupPicker: { props: ['account'], template: '<div data-test="group-picker" :data-account-id="account?.id" />' },
         AccountsToolbar: { template: '<div><slot name="more-actions" /></div>' },
         AccountBulkActionsBar: true,
         Pagination: true,
@@ -204,14 +204,14 @@ describe('admin AccountsView for operators', () => {
     expect(selection.every(input => input.element.disabled === (level === 'view'))).toBe(true)
   })
 
-  it.each(['manage', 'view'] as const)('opens the groups dialog only with accounts manage, without the balance flag (%s)', async (level) => {
+  it.each(['manage', 'view'] as const)('opens the group picker only with accounts manage, without the balance flag (%s)', async (level) => {
     seedOperator({ accounts: level })
     const wrapper = mountView()
     await flushPromises()
     await wrapper.get('[data-test="groups-1"] [data-test="open-groups"]').trigger('click')
     await flushPromises()
-    expect(wrapper.find('[data-test="groups-dialog"]').exists()).toBe(level === 'manage')
-    if (level === 'manage') expect(wrapper.get('[data-test="groups-dialog"]').attributes('data-account-id')).toBe('1')
+    expect(wrapper.find('[data-test="group-picker"]').exists()).toBe(level === 'manage')
+    if (level === 'manage') expect(wrapper.get('[data-test="group-picker"]').attributes('data-account-id')).toBe('1')
   })
 
   it('shows the account name as plain text when base_url is not returned', async () => {

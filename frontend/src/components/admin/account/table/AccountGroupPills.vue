@@ -8,7 +8,8 @@
       :aria-label="t('admin.accounts.table.pillEmptyLabel', { name: account.name })"
       v-tip="t('admin.accounts.table.pillEmpty')"
       data-test="group-pill-empty"
-      @click="emit('edit-groups')"
+      :data-groups-opener="account.id"
+      @click="emit('edit-groups', $event)"
     >
       <Icon name="plus" size="xs" />
     </button>
@@ -41,7 +42,8 @@
         :aria-label="t('admin.accounts.table.pillTextLabel', { name: pill.group.name })"
         v-tip="() => pillTip(pill.group, pill.state, 'text')"
         data-test="group-pill-text"
-        @click="emit('edit-groups')"
+        :data-groups-opener="account.id"
+        @click="emit('edit-groups', $event)"
       >{{ pill.text }}</button>
     </span>
 
@@ -63,7 +65,8 @@
         :disabled="readonly"
         :aria-label="t('admin.accounts.table.pillMoreLabel', { n: rest.length })"
         v-tip="moreTip"
-        @click="emit('edit-groups')"
+        :data-groups-opener="account.id"
+        @click="emit('edit-groups', $event)"
       >+{{ rest.length }}</button>
     </span>
   </div>
@@ -96,7 +99,7 @@ const props = defineProps<{
   quality: AccountQualityView | null
   readonly?: boolean
 }>()
-const emit = defineEmits<{ 'open-quality': [groupId: number]; 'edit-groups': [] }>()
+const emit = defineEmits<{ 'open-quality': [groupId: number]; 'edit-groups': [event: MouseEvent] }>()
 const { t } = useI18n()
 const now = useLiveClock()
 

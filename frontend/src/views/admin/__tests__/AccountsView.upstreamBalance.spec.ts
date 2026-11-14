@@ -73,13 +73,6 @@ const BulkEditAccountModalStub = {
   template: '<div data-test="bulk-edit-modal" />'
 }
 
-const AccountGroupsDialogStub = {
-  name: 'AccountGroupsDialog',
-  props: ['account', 'groups'],
-  emits: ['close', 'updated'],
-  template: '<div data-test="groups-dialog" />'
-}
-
 function mountView() {
   return mount(AccountsView, {
     global: {
@@ -91,7 +84,7 @@ function mountView() {
         DataTable: DataTableStub,
         AccountColumnSettings: true,
         AccountPriorityCell: true,
-        AccountGroupsDialog: AccountGroupsDialogStub,
+        AccountGroupPicker: true,
         AccountsToolbar: true,
         AccountTableFilters: true,
         AccountBulkActionsBar: true,
