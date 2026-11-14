@@ -77,3 +77,45 @@ func TestSelectionTakeoverIdleChoices(t *testing.T) {
 		}
 	}
 }
+
+// RC-5: takeover follows the group's takeover option even when the group's
+// quality policy is absent or disabled; every account is then normal.
+func TestSelectionTakeoverWithoutGroupPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		policy   *schedquality.Policy
+		global   bool
+		elapsed  time.Duration
+		takeover bool
+	}{
+		{name: "absent/899s", global: true, elapsed: 899 * time.Second},
+		{name: "absent/900s", global: true, elapsed: 900 * time.Second, takeover: true},
+		{name: "disabled/300s", policy: &schedquality.Policy{TakeoverIdleSeconds: 300}, global: true, elapsed: 300 * time.Second, takeover: true},
+		{name: "disabled/immediate", policy: &schedquality.Policy{TakeoverIdleSeconds: 0}, global: true, takeover: true},
+		{name: "disabled/off", policy: &schedquality.Policy{TakeoverIdleSeconds: -1}, global: true, elapsed: time.Hour},
+		{name: "global_off", elapsed: time.Hour},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := selectionNewSessionFixture()
+			f.candidates = f.candidates[:1]
+			view := &schedQualityView{at: f.now, globalEnabled: tc.global, policies: map[int64]SchedPolicyRecord{}}
+			if tc.policy != nil {
+				view.policies[7] = SchedPolicyRecord{GroupID: 7, Policy: *tc.policy}
+			}
+			require.False(t, view.GroupEnabled(7))
+			f.session.view = func() schedquality.View { return view }
+			f.session.bindingTTL = 2 * time.Hour
+			f.binding.remaining = f.session.bindingTTL - tc.elapsed
+			selected := f.selectNow(context.Background())
+			if !tc.takeover {
+				require.Nil(t, selected)
+				require.Equal(t, int64(10), f.binding.owner)
+				return
+			}
+			require.NotNil(t, selected)
+			defer selected.ReleaseFunc()
+			require.Equal(t, int64(1), selected.Account.ID)
+			require.Equal(t, int64(1), f.binding.owner, "the successful takeover commits")
+		})
+	}
+}
