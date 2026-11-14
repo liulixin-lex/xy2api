@@ -48,6 +48,7 @@ export default {
         modelLimits: '{n} models rate limited',
         iqStates: { smart: 'Smart', degraded: 'Degraded', checking: 'Checking', paused: 'Paused' },
         iqTip: '{model} · {state}',
+        iqMore: '+{n}',
         iqLastRun: 'last checked {time}',
         iqRecheckIn: 'rechecks in {time}',
         iqRecheckPending: 'waiting for a recheck',

@@ -62,7 +62,7 @@ import { useI18n } from 'vue-i18n'
 import Toggle from '@/components/common/Toggle.vue'
 import Select from '@/components/common/Select.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
-import type { SchedGroupPolicy, SchedPolicy, SchedPolicyPreview, SchedTakeoverIdleSeconds } from '@/types/schedQuality'
+import type { BackendGroupPolicy, BackendPolicy, BackendPolicyPreview, SchedTakeoverIdleSeconds } from '@/api/admin/schedQualityTypes'
 import { vTip } from '@/utils/tip'
 
 // Quality gate block of the OpenAI group edit dialog (design spec D.1, D.2). Saved on its own with the policy
@@ -82,7 +82,7 @@ const props = defineProps<{ groupId: number }>()
 const { t } = useI18n()
 const ids = { ttft: `sq-ttft-${useId()}`, error: `sq-err-${useId()}`, cache: `sq-cache-${useId()}` }
 
-const record = shallowRef<SchedGroupPolicy | null>(null)
+const record = shallowRef<BackendGroupPolicy | null>(null)
 const loaded = computed(() => record.value !== null)
 const loadFailed = ref(false)
 const conflict = ref(false)
@@ -92,7 +92,7 @@ const form = reactive({ enabled: false, ttft: '10', errorPct: '5', cachePct: '90
 const edited = reactive({ ttft: false, error: false, cache: false })
 
 const pct = (ratio: number) => String(+(ratio * 100).toFixed(2))
-function fillForm(policy: SchedPolicy) {
+function fillForm(policy: BackendPolicy) {
   Object.assign(edited, { ttft: false, error: false, cache: false })
   Object.assign(form, {
     enabled: policy.enabled,
@@ -134,7 +134,7 @@ const valid = computed(() => ({
 }))
 const isValid = computed(() => valid.value.ttft && valid.value.error && valid.value.cache)
 
-const current = computed<SchedPolicy>(() => {
+const current = computed<BackendPolicy>(() => {
   const saved = record.value?.policy
   return {
     enabled: form.enabled,
@@ -153,7 +153,7 @@ const changed = computed(() => {
 })
 
 // ---- Server preview of unsaved thresholds ----
-const preview = reactive({ state: 'idle' as 'idle' | 'loading' | 'loaded' | 'failed', value: null as SchedPolicyPreview | null })
+const preview = reactive({ state: 'idle' as 'idle' | 'loading' | 'loaded' | 'failed', value: null as BackendPolicyPreview | null })
 const previewShown = computed(() => changed.value && isValid.value)
 let previewTimer: ReturnType<typeof setTimeout> | null = null
 let previewController: AbortController | null = null
@@ -165,7 +165,7 @@ function stopPreview() {
   previewController?.abort()
   previewController = null
 }
-async function runPreview(groupId: number, version: number, policy: SchedPolicy) {
+async function runPreview(groupId: number, version: number, policy: BackendPolicy) {
   const seq = ++previewSeq
   const controller = new AbortController()
   previewController = controller

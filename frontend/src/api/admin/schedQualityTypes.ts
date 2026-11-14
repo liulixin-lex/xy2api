@@ -1,9 +1,16 @@
 /**
- * Quality scheduling as backend 0.6.5 sends it (backend/internal/service/sched_admin_dto.go). The account list and
- * the quality panel read these shapes as they are.
+ * Quality scheduling as backend 0.6.5 sends and takes it (backend/internal/service/sched_admin_dto.go and
+ * internal/handler/admin/sched_quality_handler.go). Every reader uses these shapes as they are; there is no
+ * translation layer.
  *
  * - POST /admin/sched-quality/accounts/summary: BackendAccountsSummary
  * - GET /admin/sched-quality/accounts/:id: BackendAccountDetail
+ * - POST /admin/sched-quality/accounts/:id/reset: BackendResetResult
+ * - PUT | DELETE /admin/sched-quality/accounts/:id/override: SchedOverrideRequest (the exemption is the only override)
+ * - DELETE /admin/sched-quality/accounts/:id/auto-states/:key: BackendClearAutoState
+ * - GET | PUT /admin/sched-quality/groups/:id/policy (+ POST …/preview): BackendGroupPolicy, SchedGroupPolicyUpdate,
+ *   BackendPolicyPreview
+ * - GET /admin/sched-quality/groups/:id/order: BackendOrder (the group board)
  */
 
 export type BackendDim = 'ttfo' | 'error' | 'cache'
@@ -82,13 +89,16 @@ export interface BackendGroupModel {
   cache: BackendDimDetail & { ratio: number | null }
 }
 
+/** -1 off, 0 immediately, otherwise idle seconds. */
+export type SchedTakeoverIdleSeconds = -1 | 0 | 300 | 900 | 1800
+
 /** A group's thresholds (GET /groups/:id/policy carries the same fields). */
 export interface BackendPolicy {
   enabled: boolean
   ttft_seconds: number
   max_error_rate: number
   min_cache_ratio: number
-  takeover_idle_seconds: number
+  takeover_idle_seconds: SchedTakeoverIdleSeconds
 }
 
 export interface BackendDetailGroup {
@@ -130,4 +140,85 @@ export interface BackendAccountDetail {
   groups: BackendDetailGroup[]
   auto_states: BackendAutoState[]
   exemptions: BackendExemption[]
+}
+
+// ---- POST /accounts/:id/reset (also the account list's "recover state") ----
+
+export interface BackendResetResult {
+  account_id: number
+  reset_at: string | null
+  cleared: string[]
+  /** Kinds a reset leaves alone (session avoidance and the like); not failures. */
+  kept: { kind: string; until: string | null }[]
+  failed: { kind: string }[]
+}
+
+// ---- PUT /accounts/:id/override, DELETE /accounts/:id/auto-states/:key ----
+
+export interface SchedOverrideRequest {
+  /** 0 = every group of the account. */
+  group_id: number
+  mode: 'exempt'
+  /** null = no end. */
+  expires_at: string | null
+  reason: string
+}
+
+export interface BackendClearAutoState {
+  cleared: boolean
+}
+
+// ---- GET | PUT /groups/:id/policy, POST /groups/:id/policy/preview ----
+
+export interface BackendGroupPolicy {
+  group_id: number
+  version: number
+  policy: BackendPolicy
+}
+
+/** A version conflict is rejected with HTTP 409. */
+export interface SchedGroupPolicyUpdate {
+  expected_version: number
+  policy: BackendPolicy
+}
+
+/** What a policy would do to the group's accounts if saved: counts now and after, and the accounts it would turn. */
+export interface BackendPolicyPreview {
+  now: { normal: number; below: number }
+  after: { normal: number; below: number }
+  changed: { account_id: number; name: string; model: string; dims: BackendDim[] }[]
+}
+
+// ---- GET /groups/:id/order?model= (the group board) ----
+
+export interface BackendOrderRow {
+  /** Place in the selection order. */
+  rank: number
+  account_id: number
+  name: string
+  /** normal | below (at the back: substandard) | stopped (takes no part) */
+  layer: string
+  /** Failing dimensions of a row at the back. */
+  dims: BackendDim[]
+  until: string | null
+  exempt: boolean
+  priority: number
+  rate: number
+  load_rate: number
+  in_flight: number
+  concurrency: number
+  last_used_at: string | null
+}
+
+export interface BackendOrder {
+  group_id: number
+  /** Request model of this order (the group's busiest without one). */
+  model: string
+  /** Request models with samples in the group, most samples first. */
+  models: string[]
+  at: string
+  stale: boolean
+  global_enabled: boolean
+  /** In the current selection order; render as given. */
+  rows: BackendOrderRow[]
 }

@@ -12,7 +12,6 @@
 
   <SchedOverridePopover
     :show="phase === 'popover'"
-    mode="exempt"
     :anchor="anchor"
     :groups="groups"
     :default-group-id="0"
@@ -55,7 +54,7 @@ import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import SchedOverridePopover from './SchedOverridePopover.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
-import type { SchedOverrideRequest } from '@/types/schedQuality'
+import type { SchedOverrideRequest } from '@/api/admin/schedQualityTypes'
 import { markSchedChanged } from '@/composables/useSchedLayers'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 

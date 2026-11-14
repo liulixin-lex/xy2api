@@ -112,6 +112,25 @@ const cnUsageCellStubs = {
   }
 }
 
+/**
+ * The page hands the cell its usage windows (spec 8.5). This stands in for the accounts table: each request of the
+ * cell is answered from getUsage like the table's batch source, and an active query's answer becomes the row's usage.
+ */
+function mountCell(options: any) {
+  const page: { cell?: ReturnType<typeof mount> } = {}
+  const requestBatchedUsage = vi.fn(async (account: Account) => {
+    try {
+      const usage = await getUsage(account.id)
+      await page.cell?.setProps({ batchedUsage: usage ?? null, batchedUsageError: null })
+    } catch {
+      await page.cell?.setProps({ batchedUsageError: 'common.error' })
+    }
+  })
+  const onUsageLoaded = (usage: unknown) => page.cell?.setProps({ batchedUsage: usage })
+  page.cell = mount(AccountUsageCell, { ...options, props: { requestBatchedUsage, onUsageLoaded, ...options?.props } })
+  return page.cell
+}
+
 describe('AccountUsageCell', () => {
   beforeEach(() => {
     getUsage.mockReset()
@@ -132,7 +151,7 @@ describe('AccountUsageCell', () => {
 
   it.each(['oauth', 'setup-token'] as const)('renders Codex ticket status for OpenAI %s accounts', async (type) => {
     getUsage.mockResolvedValue({})
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({
           id: type === 'oauth' ? 9701 : 9702,
@@ -166,7 +185,7 @@ describe('AccountUsageCell', () => {
   })
 
   it('renders eligible Ollama Cloud state and forwards query updates', async () => {
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({
           id: 9001,
@@ -216,7 +235,7 @@ describe('AccountUsageCell', () => {
   it.each(['kimi', 'zhipu', 'deepseek', 'minimax'] as const)(
     '%s apikey 账号 Ollama Cloud eligible 时渲染 Ollama 用量单元格并跳过 CN 子单元格',
     async (platform) => {
-      const wrapper = mount(AccountUsageCell, {
+      const wrapper = mountCell({
         props: {
           account: makeAccount({
             id: 9002,
@@ -242,7 +261,7 @@ describe('AccountUsageCell', () => {
   )
 
   it('CN 平台 Ollama Cloud eligible 账号的用量更新经 account-updated 透传', async () => {
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({
           id: 9003,
@@ -277,7 +296,7 @@ describe('AccountUsageCell', () => {
     { name: '无 ollama_cloud_usage', usage: undefined },
     { name: 'eligible=false', usage: makeOllamaUsage(9004, { eligible: false }) }
   ])('普通 kimi apikey 账号（$name）仍渲染 CN 子单元格', async ({ usage }) => {
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({
           id: 9004,
@@ -302,7 +321,7 @@ describe('AccountUsageCell', () => {
   it.each(['opencode_go', 'kimi', 'zhipu', 'deepseek', 'minimax'] as const)(
     '%s 平台 OpenCode Go eligible 时只渲染 OpenCode 用量单元格并跳过 CN 子单元格',
     async (platform) => {
-      const wrapper = mount(AccountUsageCell, {
+      const wrapper = mountCell({
         props: {
           account: makeAccount({
             id: 9100,
@@ -333,7 +352,7 @@ describe('AccountUsageCell', () => {
     { name: 'opencode_go（go 模式）', platform: 'opencode_go' as const, mode: 'go' },
     { name: 'kimi（coding 模式）', platform: 'kimi' as const, mode: 'coding' }
   ])('OpenCode Go 不合格时（$name）仍渲染 CN 子单元格', async ({ platform, mode }) => {
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({
           id: 9101,
@@ -355,7 +374,7 @@ describe('AccountUsageCell', () => {
   })
 
   it('openai apikey 挂载 OpenCode Go 时在非 CN 分支渲染一次且不渲染占位符', async () => {
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({
           id: 9102,
@@ -378,7 +397,7 @@ describe('AccountUsageCell', () => {
   })
 
   it('Command Code 账号渲染额度与积分余额单元格', async () => {
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({
           id: 9103,
@@ -400,7 +419,7 @@ describe('AccountUsageCell', () => {
   })
 
   it('自定义中转的 Command Code 账号没有可查的用量接口，显示占位符', async () => {
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({
           id: 9105,
@@ -425,7 +444,7 @@ describe('AccountUsageCell', () => {
     ['kimi relay', 'kimi', { account_mode: 'payg', base_url: 'https://relay.example.com/v1' }, 'admin.accounts.upstreamBalance.seeColumn'],
     ['deepseek relay', 'deepseek', { account_mode: 'payg', base_url: 'https://relay.example.com' }, 'admin.accounts.upstreamBalance.seeColumn']
   ] as const)('%s: CN 余额子单元格与占位符按官方主机判定', async (_name, platform, credentials, placeholderTitle) => {
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({ id: 9110, platform, type: 'apikey', credentials: { api_key: 'sk-test', ...credentials } })
       },
@@ -443,7 +462,7 @@ describe('AccountUsageCell', () => {
   })
 
   it('Cline 账号渲染 ClinePass 窗口与积分余额单元格', async () => {
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({
           id: 9104,
@@ -483,7 +502,7 @@ describe('AccountUsageCell', () => {
       }
     })
 
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({
           id: 1001,
@@ -519,7 +538,7 @@ describe('AccountUsageCell', () => {
       ]
     })
 
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({
           id: 1002,
@@ -571,7 +590,7 @@ describe('AccountUsageCell', () => {
       }
     })
 
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({
           id: 2000,
@@ -632,7 +651,7 @@ describe('AccountUsageCell', () => {
       }
     })
 
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({
           id: 2001,
@@ -682,7 +701,7 @@ describe('AccountUsageCell', () => {
       }
     })
 
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({ id: 6752, platform: 'openai', type: 'oauth' })
       },
@@ -719,7 +738,7 @@ describe('AccountUsageCell', () => {
       }
     })
 
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({
           id,
@@ -742,76 +761,6 @@ describe('AccountUsageCell', () => {
 
     expect(wrapper.text()).toContain('7d|none')
     expect(wrapper.text()).not.toMatch(/Infinity|NaN/)
-  })
-
-  it('OpenAI OAuth 有现成快照时，手动刷新信号会触发 usage 重拉', async () => {
-    getUsage.mockResolvedValue({
-      five_hour: {
-        utilization: 18,
-        resets_at: '2099-03-07T12:00:00Z',
-        remaining_seconds: 3600,
-        window_stats: {
-          requests: 9,
-          tokens: 900,
-          cost: 0.09,
-          standard_cost: 0.09,
-          user_cost: 0.09
-        }
-      },
-      seven_day: {
-        utilization: 36,
-        resets_at: '2099-03-13T12:00:00Z',
-        remaining_seconds: 3600,
-        window_stats: {
-          requests: 9,
-          tokens: 900,
-          cost: 0.09,
-          standard_cost: 0.09,
-          user_cost: 0.09
-        }
-      }
-    })
-
-    const wrapper = mount(AccountUsageCell, {
-      props: {
-        account: makeAccount({
-          id: 2010,
-          platform: 'openai',
-          type: 'oauth',
-          extra: {
-            codex_usage_updated_at: '2099-03-07T10:00:00Z',
-            codex_5h_used_percent: 12,
-            codex_5h_reset_at: '2099-03-07T12:00:00Z',
-            codex_7d_used_percent: 34,
-            codex_7d_reset_at: '2099-03-13T12:00:00Z'
-          },
-          rate_limit_reset_at: null
-        }),
-        manualRefreshToken: 0
-      },
-      global: {
-        stubs: {
-          UsageProgressBar: {
-            props: ['label', 'utilization', 'resetsAt', 'windowStats', 'color'],
-            template: '<div class="usage-bar">{{ label }}|{{ utilization }}|{{ windowStats?.tokens }}</div>'
-          },
-          AccountQuotaInfo: true
-        }
-      }
-    })
-
-    await flushPromises()
-    // mount 时已经拉取一次
-    expect(getUsage).toHaveBeenCalledTimes(1)
-
-    await wrapper.setProps({ manualRefreshToken: 1 })
-    await flushPromises()
-
-    // 手动刷新再拉一次
-    expect(getUsage).toHaveBeenCalledTimes(2)
-    expect(getUsage).toHaveBeenCalledWith(2010)
-    // 单一数据源：始终使用 /usage API 值
-    expect(wrapper.text()).toContain('5h|18|900')
   })
 
   it('OpenAI OAuth 在无 codex 快照时会回退显示 usage 接口窗口', async () => {
@@ -842,7 +791,7 @@ describe('AccountUsageCell', () => {
 	  }
 	})
 
-		const wrapper = mount(AccountUsageCell, {
+		const wrapper = mountCell({
 		  props: {
 		    account: makeAccount({
 		      id: 2002,
@@ -902,7 +851,7 @@ describe('AccountUsageCell', () => {
 	    seven_day: null
 	  })
 
-		const wrapper = mount(AccountUsageCell, {
+		const wrapper = mountCell({
 		  props: {
 		    account: makeAccount({
 		      id: 2003,
@@ -958,7 +907,7 @@ describe('AccountUsageCell', () => {
       updated_at: '2026-03-07T10:00:00Z',
       extra: {}
     })
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: { account },
       global: {
         stubs: {
@@ -1014,7 +963,7 @@ describe('AccountUsageCell', () => {
 	  }
 	})
 
-		const wrapper = mount(AccountUsageCell, {
+		const wrapper = mountCell({
 		  props: {
 		    account: makeAccount({
 		      id: 2004,
@@ -1046,7 +995,7 @@ describe('AccountUsageCell', () => {
   })
 
   it('Key 账号会展示 today stats 徽章并带 A/U 提示', async () => {
-		const wrapper = mount(AccountUsageCell, {
+		const wrapper = mountCell({
 		  props: {
 		    account: makeAccount({
 		      id: 3001,
@@ -1098,7 +1047,7 @@ describe('AccountUsageCell', () => {
       grok_quota_snapshot_state: 'observed'
     })
 
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({ id: 3861, platform: 'grok', type: 'oauth', extra: {} })
       },
@@ -1133,7 +1082,7 @@ describe('AccountUsageCell', () => {
       grok_token_quota: { limit: 1_000, remaining: 250 }
     })
 
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({ id: 4402, platform: 'grok', type: 'oauth', extra: {} })
       },
@@ -1172,7 +1121,7 @@ describe('AccountUsageCell', () => {
       grok_token_quota: { limit: 2_000_000, remaining: 2_000_000 }
     })
 
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({ id: 4201, platform: 'grok', type: 'oauth', extra: {} })
       },
@@ -1219,7 +1168,7 @@ describe('AccountUsageCell', () => {
       grok_token_quota: { limit: 1_000_000, remaining: 1_000_000 }
     })
 
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({ id: 4300 + expected, platform: 'grok', type: 'oauth', extra: {} })
       },
@@ -1261,7 +1210,7 @@ describe('AccountUsageCell', () => {
       }
     })
 
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({ id: 4398, platform: 'grok', type: 'oauth', extra: {} }),
         todayStats: {
@@ -1303,7 +1252,7 @@ describe('AccountUsageCell', () => {
       }
     })
 
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({ id: 4399, platform: 'grok', type: 'oauth', extra: {} }),
         todayStats: {
@@ -1351,7 +1300,7 @@ describe('AccountUsageCell', () => {
       }
     })
 
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({ id: 4404, platform: 'grok', type: 'oauth', extra: {} })
       },
@@ -1388,7 +1337,7 @@ describe('AccountUsageCell', () => {
       }
     })
 
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({ id: 4405, platform: 'grok', type: 'oauth', extra: {} })
       },
@@ -1420,7 +1369,7 @@ describe('AccountUsageCell', () => {
       }
     })
 
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({ id: 4403, platform: 'grok', type: 'oauth', extra: {} })
       },
@@ -1459,7 +1408,7 @@ describe('AccountUsageCell', () => {
       }
     })
 
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({ id: 4410, platform: 'grok', type: 'oauth', extra: {} })
       },
@@ -1518,7 +1467,7 @@ describe('AccountUsageCell', () => {
       }
     })
 
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({ id: 4411, platform: 'grok', type: 'oauth', extra: {} })
       },
@@ -1571,7 +1520,7 @@ describe('AccountUsageCell', () => {
       }
     })
 
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({ id: 4412, platform: 'grok', type: 'oauth', extra: {} })
       },
@@ -1604,7 +1553,7 @@ describe('AccountUsageCell', () => {
       }
     })
 
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({ id: 4413, platform: 'grok', type: 'oauth', extra: {} })
       },
@@ -1634,7 +1583,7 @@ describe('AccountUsageCell', () => {
       }
     })
 
-    const usedOnly = mount(AccountUsageCell, {
+    const usedOnly = mountCell({
       props: {
         account: makeAccount({ id: 4414, platform: 'grok', type: 'oauth', extra: {} })
       },
@@ -1661,7 +1610,7 @@ describe('AccountUsageCell', () => {
         plan: 'SuperGrok Heavy'
       }
     })
-    const prepaidOnly = mount(AccountUsageCell, {
+    const prepaidOnly = mountCell({
       props: {
         account: makeAccount({ id: 4415, platform: 'grok', type: 'oauth', extra: {} })
       },
@@ -1680,7 +1629,7 @@ describe('AccountUsageCell', () => {
   })
 
   it('Key 账号在“今日统计”列可见时不重复今日数据，只留短横线', async () => {
-		const wrapper = mount(AccountUsageCell, {
+		const wrapper = mountCell({
 		  props: {
 		    account: makeAccount({ id: 3002, platform: 'anthropic', type: 'apikey' }),
 		    todayStats: { requests: 12, tokens: 3400, cost: 1.2, standard_cost: 1.2, user_cost: 2.4 },
@@ -1696,7 +1645,7 @@ describe('AccountUsageCell', () => {
   })
 
   it('Key 账号在 today stats loading 时显示骨架屏', async () => {
-		const wrapper = mount(AccountUsageCell, {
+		const wrapper = mountCell({
 		  props: {
 		    account: makeAccount({
 		      id: 3002,
@@ -1720,7 +1669,7 @@ describe('AccountUsageCell', () => {
   })
 
   it('Key 账号在无 today stats 且无配额时显示兜底短横线', async () => {
-		const wrapper = mount(AccountUsageCell, {
+		const wrapper = mountCell({
 		  props: {
 		    account: makeAccount({
 		      id: 3003,
@@ -1747,7 +1696,7 @@ describe('AccountUsageCell', () => {
   })
 
   it('Vertex 账号会在 Gemini 用量窗口里展示 today stats 徽章', async () => {
-		const wrapper = mount(AccountUsageCell, {
+		const wrapper = mountCell({
 		  props: {
 		    account: makeAccount({
 		      id: 4001,
@@ -1810,7 +1759,7 @@ describe('AccountUsageCell', () => {
       }
     })
 
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({
           id: 3001,
@@ -1853,7 +1802,7 @@ describe('AccountUsageCell', () => {
       }
     })
 
-    const wrapper = mount(AccountUsageCell, {
+    const wrapper = mountCell({
       props: {
         account: makeAccount({
           id: 3002,

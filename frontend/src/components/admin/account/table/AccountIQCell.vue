@@ -15,6 +15,7 @@
           <Icon v-if="line.state === 'checking'" name="refresh" size="xs" class="iq__spin" />{{ t(`admin.accounts.table.iqStates.${line.state}`) }}
         </span>
       </template>
+      <span v-if="more > 0" v-tip="allTip" class="iq__more" data-test="iq-more">{{ t('admin.accounts.table.iqMore', { n: more }) }}</span>
     </button>
     <span v-else class="iq__none">—</span>
   </div>
@@ -23,9 +24,9 @@
 
 <script setup lang="ts">
 /**
- * IQ check column (spec 4.4, prototype): the switch and one line per model. The words are only smart (secondary
- * colour), degraded (amber, regular weight), checking (queued included) and paused (muted); unknown and disabled
- * targets show "—". The recheck time lives in the tip.
+ * IQ check column (spec 4.4, 7c, prototype): the switch and one line per model, at most two, then "+N". The words are
+ * only smart (secondary colour), degraded (amber, regular weight), checking (queued included) and paused (muted);
+ * unknown and disabled targets show "—". The recheck time lives in the tip.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -54,16 +55,20 @@ const stateOf = (target: IQTargetSummary): LineState | null => {
   return null
 }
 
-// Enabled targets, and disabled ones that still hold a gate or are being checked by hand; at most two lines fit.
-const lines = computed(() =>
+// Enabled targets, and disabled ones that still hold a gate or are being checked by hand. Two lines fit; with more,
+// "+N" counts the rest and its tip lists every model with its state (spec 7c).
+const allLines = computed(() =>
   targets.value
     .filter((target) => target.enabled || target.gate_active || target.state === 'queued' || target.state === 'running')
     .flatMap((target) => {
       const state = stateOf(target)
       return state ? [{ model: target.model, name: iqModelLabel(target.model), state, target }] : []
     })
-    .slice(0, 2)
 )
+const lines = computed(() => allLines.value.slice(0, 2))
+const more = computed(() => allLines.value.length - lines.value.length)
+const allTip = () =>
+  allLines.value.map((line) => t('admin.accounts.table.iqTip', { model: line.target.model, state: t(`admin.accounts.table.iqStates.${line.state}`) })).join('\n')
 
 const gates = computed(() => new Map(iqGateEntries(props.account.extra as Record<string, unknown> | undefined).map((gate) => [gate.model, gate.reset_at])))
 
@@ -129,6 +134,12 @@ function lineTip(target: IQTargetSummary, state: LineState): string {
 }
 .iq__v--paused {
   color: var(--color-text-muted);
+}
+.iq__more {
+  grid-column: 1 / -1;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
 }
 .iq__spin {
   width: 11px;

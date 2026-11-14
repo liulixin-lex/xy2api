@@ -4446,7 +4446,7 @@ import GroupSchedPolicyField from "@/components/admin/group/GroupSchedPolicyFiel
 import SchedQualityLayers from "@/components/admin/account/quality/SchedQualityLayers.vue";
 import { openSchedBoard } from "@/composables/useSchedLayers";
 import schedQualityAPI from "@/api/admin/schedQuality";
-import type { SchedPolicy } from "@/types/schedQuality";
+import type { BackendPolicy } from "@/api/admin/schedQualityTypes";
 import { useLiveTable } from "@/composables/useLiveTable";
 import { groupUsageOrDefault, withAccountCounts, type GroupUsageSummary } from "./liveRowDefaults";
 import { policyShort } from "@/utils/schedQualityFormat";
@@ -5044,7 +5044,7 @@ type GroupCapacity = {
 type LiveGroup = AdminGroup & {
   usage_summary?: GroupUsageSummary;
   capacity?: GroupCapacity | null;
-  sched_policy?: SchedPolicy | null;
+  sched_policy?: BackendPolicy | null;
 };
 const searchQuery = ref("");
 const filters = reactive({
@@ -5119,7 +5119,7 @@ const liveGroups = useLiveTable<LiveGroup>({
       intervalMs: 0,
       fetch: async (ids, signal) => {
         if (authStore.isSimpleMode || !isColumnVisible("sched_gate")) return [];
-        const policies = new Map<number, SchedPolicy | null>();
+        const policies = new Map<number, BackendPolicy | null>();
         const openai = ids.map(Number).filter((id) => liveGroups.record(id)?.platform === "openai");
         let next = 0;
         const worker = async () => {

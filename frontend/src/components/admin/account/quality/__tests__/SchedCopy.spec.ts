@@ -6,8 +6,8 @@ import { defineComponent, h } from 'vue'
 import zhSched from '@/i18n/locales/zh/admin/schedQuality'
 import enSched from '@/i18n/locales/en/admin/schedQuality'
 import { kindName, rejectName } from '@/utils/schedQualityFormat'
-import type { SchedBoard } from '@/types/schedQuality'
-import boardFixture from '@/__tests__/fixtures/schedQuality/board.json'
+import type { BackendOrder } from '@/api/admin/schedQualityTypes'
+import orderFixture from '@/__tests__/fixtures/schedQuality/order.json'
 import policyFixture from '@/__tests__/fixtures/schedQuality/policy.json'
 import SchedBatchDialog from '../SchedBatchDialog.vue'
 import SchedOverridePopover from '../SchedOverridePopover.vue'
@@ -46,8 +46,7 @@ function nonData(text: string) {
   return rest.split(/\s+/).filter(Boolean)
 }
 
-// Visible text and tips; screen-reader-only descriptions are checked on their own (they may join items with the
-// list separator).
+// Visible text and tips; screen-reader-only descriptions are checked on their own.
 function rendered(): string[] {
   const out: string[] = []
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
@@ -59,9 +58,9 @@ function rendered(): string[] {
   return out
 }
 
-const board = (): SchedBoard => {
-  const b = structuredClone(boardFixture) as SchedBoard
-  b.accounts.push({ ...structuredClone(b.accounts[0]), account_id: 2, eligible: false, reject: 'model_rate_limited', reject_until: new Date(Date.now() + 60_000).toISOString() })
+const board = (): BackendOrder => {
+  const b = structuredClone(orderFixture) as BackendOrder
+  b.rows.push({ ...structuredClone(b.rows[0]), account_id: 2, name: 'acc-2', layer: 'stopped', until: new Date(Date.now() + 60_000).toISOString() })
   return b
 }
 
@@ -101,7 +100,7 @@ describe('quality UI copy', () => {
     expect(texts.filter((text) => /[。，！？；]/.test(text))).toEqual([])
     expect(texts.flatMap(nonData).filter((token) => token.length > 8)).toEqual([])
     const described = Array.from(document.querySelectorAll('.sr-only'), (el) => el.textContent?.trim() ?? '').filter(Boolean)
-    expect(described.flatMap((text) => text.split(zhSched.schedQuality.recent.sep)).flatMap(nonData).filter((token) => !copyTokens.has(token))).toEqual([])
+    expect(described.flatMap(nonData).filter((token) => !copyTokens.has(token))).toEqual([])
   })
 
   it('names every reject code the board can return (G4 D1) and the auto_states kind (D6) with a short word', () => {

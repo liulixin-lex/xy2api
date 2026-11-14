@@ -48,6 +48,7 @@ export default {
         modelLimits: '{n} 个模型限流',
         iqStates: { smart: '聪明', degraded: '降智', checking: '检测中', paused: '已暂停' },
         iqTip: '{model} · {state}',
+        iqMore: '+{n}',
         iqLastRun: '上次检测 {time}',
         iqRecheckIn: '{time} 后复检',
         iqRecheckPending: '等待复检',

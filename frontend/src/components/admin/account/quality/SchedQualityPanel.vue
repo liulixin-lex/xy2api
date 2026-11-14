@@ -152,7 +152,6 @@
 
   <SchedOverridePopover
     :show="popover.open"
-    mode="exempt"
     :anchor="popover.anchor"
     :groups="scopeGroups"
     :default-group-id="popover.groupId"
@@ -199,7 +198,7 @@ import SchedPanelGroups from './SchedPanelGroups.vue'
 import SchedOverridePopover from './SchedOverridePopover.vue'
 import schedQualityAPI, { backendSummary } from '@/api/admin/schedQuality'
 import type { BackendAccountDetail, BackendAccountSummary, BackendAutoState } from '@/api/admin/schedQualityTypes'
-import type { SchedOverrideRequest } from '@/types/schedQuality'
+import type { SchedOverrideRequest } from '@/api/admin/schedQualityTypes'
 import type { Account } from '@/types'
 
 type PanelRow = Account & { quality?: BackendAccountSummary | null }

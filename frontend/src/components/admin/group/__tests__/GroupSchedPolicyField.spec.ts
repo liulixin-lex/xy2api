@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
-import type { SchedGroupPolicy, SchedPolicyPreview } from '@/types/schedQuality'
+import type { BackendGroupPolicy, BackendPolicyPreview } from '@/api/admin/schedQualityTypes'
 import policyFixture from '@/__tests__/fixtures/schedQuality/policy.json'
 import GroupSchedPolicyField from '../GroupSchedPolicyField.vue'
 
@@ -12,8 +12,8 @@ vi.mock('vue-i18n', async () => ({
   useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => (params ? `${key}:${JSON.stringify(params)}` : key) })
 }))
 
-const policy = () => structuredClone(policyFixture) as SchedGroupPolicy
-const preview = (over: Partial<SchedPolicyPreview> = {}): SchedPolicyPreview => ({
+const policy = () => structuredClone(policyFixture) as BackendGroupPolicy
+const preview = (over: Partial<BackendPolicyPreview> = {}): BackendPolicyPreview => ({
   now: { normal: 3, below: 1 },
   after: { normal: 2, below: 2 },
   changed: [{ account_id: 7, name: 'acc-07', model: 'gpt-6.1-sol', dims: ['ttfo'] }],
@@ -151,7 +151,7 @@ describe('GroupSchedPolicyField', () => {
 
   it('drops a preview answer that a later edit replaced, shows 失败 for a failed one, and lists at most 12 names', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-    let release: (value: SchedPolicyPreview) => void = () => {}
+    let release: (value: BackendPolicyPreview) => void = () => {}
     api.previewGroupPolicy.mockImplementationOnce(() => new Promise((resolve) => { release = resolve }))
     const w = await mountField()
     await cache(w).setValue('95')

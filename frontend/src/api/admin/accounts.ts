@@ -40,7 +40,6 @@ import type {
   OpenCodeGoUsageSettings,
   OpenCodeGoUsageState
 } from '@/types'
-import { toQualityFilter, withQualityFilter } from './schedQualityCompat'
 
 /**
  * List all accounts with pagination
@@ -76,7 +75,7 @@ export async function list(
     params: {
       page,
       page_size: pageSize,
-      ...withQualityFilter(filters)
+      ...filters
     },
     signal: options?.signal
   })
@@ -155,7 +154,7 @@ export async function getUpstreamBillingRatesWithEtag(
   if (options?.etag) headers['If-None-Match'] = options.etag
 
   const response = await apiClient.get<UpstreamBillingRatesResponse>('/admin/accounts/upstream-billing-rates', {
-    params: { page, page_size: pageSize, ...withQualityFilter(filters) },
+    params: { page, page_size: pageSize, ...filters },
     headers,
     signal: options?.signal,
     validateStatus: (status) => (status >= 200 && status < 300) || status === 304
@@ -197,7 +196,7 @@ export async function listWithEtag(
     params: {
       page,
       page_size: pageSize,
-      ...withQualityFilter(filters)
+      ...filters
     },
     headers,
     signal: options?.signal,
@@ -583,16 +582,13 @@ export async function bulkUpdate(
   long_context_inherited_count?: number
   results: Array<{ account_id: number; success: boolean; error?: string }>
   }> {
-  // A bulk update by filter carries the list filters in its body; the quality value goes in the backend's words.
-  const filters = Array.isArray(accountIdsOrPayload) ? undefined : accountIdsOrPayload.filters
+  // A bulk update by filter carries the list filters in its body, the quality value as the list sends it.
   const payload = Array.isArray(accountIdsOrPayload)
     ? {
         account_ids: accountIdsOrPayload,
         ...(updates ?? {})
       }
-    : filters && typeof filters === 'object'
-      ? { ...accountIdsOrPayload, filters: withQualityFilter(filters as { sched_quality?: string }) }
-      : accountIdsOrPayload
+    : accountIdsOrPayload
   const { data } = await apiClient.post<{
     success: number
     failed: number
@@ -828,7 +824,7 @@ export async function exportData(options?: {
     sort_by?: string
     sort_order?: 'asc' | 'desc'
     group_category?: string
-    /** "normal" | "cooling" | "exempt"; sent in the backend's words (see schedQualityCompat). */
+    /** normal | substandard | exempt | observing (the backend's own values). */
     sched_quality?: string
   }
   includeProxies?: boolean
@@ -839,7 +835,7 @@ export async function exportData(options?: {
   } else if (options?.filters) {
     const { platform, type, status, group, privacy_mode, search, sort_by, sort_order } = options.filters
     const { group_category } = options.filters
-    const sched_quality = toQualityFilter(options.filters.sched_quality)
+    const { sched_quality } = options.filters
     if (platform) params.platform = platform
     if (type) params.type = type
     if (status) params.status = status
