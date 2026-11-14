@@ -25,7 +25,6 @@
   --sq-tab-bg: #f0fdfa;
   --sq-tab-fg: #0f766e;
   --sq-ring: #0d9488;
-  --sq-tip-bg: #111827;
   /* Recent-status tiers (text colour only) and manual overrides (one colour for exempt and demote). */
   --sq-tier-good: #047857; --sq-tier-mid: #b45309; --sq-tier-bad: #991b1b;
   --sq-manual-fg: #6d28d9; --sq-manual-bg: #f5f3ff; --sq-manual-bd: #a78bfa;
@@ -53,7 +52,6 @@
   --sq-target: rgba(19, 78, 74, 0.3);
   --sq-tab-bg: rgba(19, 78, 74, 0.3);
   --sq-tab-fg: #2dd4bf;
-  --sq-tip-bg: #1f2937;
   --sq-tier-good: #6ee7b7; --sq-tier-mid: #fbbf24; --sq-tier-bad: #f87171;
   --sq-manual-fg: #c4b5fd; --sq-manual-bg: rgba(167, 139, 250, 0.14); --sq-manual-bd: rgba(167, 139, 250, 0.6);
 }
@@ -161,15 +159,16 @@
 
 .sq-section-title { font-size: 14px; font-weight: 600; color: var(--sq-text); }
 
-/* Short hover tip (spec E): gray-900, white 12px; one line unless the text has line breaks. */
+/* Short hover tip (spec E): 12px on the tooltip tokens (styles/tokens.css); one line unless the text has line breaks. */
 .sq-tip {
   position: fixed;
   z-index: 1000;
   max-width: 320px;
   padding: 4px 8px;
   border-radius: 6px;
-  background: var(--sq-tip-bg);
-  color: #fff;
+  background: var(--color-tooltip-bg);
+  color: var(--color-tooltip-text);
+  box-shadow: var(--shadow-popover);
   font-size: 12px;
   line-height: 16px;
   white-space: pre;
