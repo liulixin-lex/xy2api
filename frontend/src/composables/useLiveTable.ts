@@ -6,12 +6,16 @@
  *   `unbilled:12`): the two id sequences overlap.
  * - A row object stays the same across refreshes and only fields whose value changed are assigned (arrays and objects
  *   compared by value; JSON data only). Whatever reads only unchanged fields is not re-run; a DataTable row re-renders
- *   as a whole when any field its slots read changes. Rows from reload(), the membership check, sources marked
- *   `complete` and mergeRows(…, { complete: true }) are whole rows, id field included: a field the answer leaves out is
- *   removed (the backend omits empty fields). Other sources only set the fields they carry.
+ *   as a whole when any field its slots read changes. No answer changes a row's id, not even its type.
+ * - Rows from reload(), the membership check, sources marked `complete` and mergeRows(…, { complete: true }) are whole
+ *   rows: a field the previous whole row of that record carried and this one leaves out is removed (the backend omits
+ *   empty fields); a field under edit goes once the edit is over. Fields only other sources write are kept: those
+ *   sources set the fields they carry and nothing else.
  * - reload() is the active load (page, filter, sort, manual refresh): it replaces the id list and never clears the rows
  *   on screen (`transitioning` meanwhile); stale answers are dropped. A failed load turns `status` to 'stale' and is
- *   retried on the back-off beat; the caller of reload() also gets the error.
+ *   retried on the back-off beat; the caller of reload() also gets the error. After every load that succeeds (the
+ *   engine's own retries and catch-ups too) the partial sources and the page tasks run at once, so new rows and the
+ *   stats cards do not wait a whole beat.
  * - Sources refresh the rows of the current page on their own beat without changing membership or order; tasks are
  *   page-level jobs on the same scheduler (they run with no rows too). refresh(name) runs one of them now. The
  *   membership check (default every 30 s) counts rows that appeared or went (`pending`) and dims gone rows in place;
@@ -23,7 +27,10 @@
  * - edit() writes a value at once and locks the field: no background answer writes it, nor any answer to a request
  *   sent before the edit settled. The latest edit's answer is written when it succeeds; an older edit's answer never
  *   is. When the latest edit fails the field returns to the value the server last confirmed (if it still shows the
- *   optimistic value), and the error goes back to the caller. Order changes only through reload() and sortBy().
+ *   optimistic value), and the error goes back to the caller.
+ * - Order changes only through active loads and sortBy(compare): the comparator stays in force for every later active
+ *   load until sortBy(null); updates never re-order. remove(id) takes a row off at once; answers to requests sent
+ *   before it do not bring the row back.
  *
  *   const table = useLiveTable<Account>({
  *     getId: (row) => row.id,
@@ -57,7 +64,11 @@ export interface LiveSource<T> {
   fetch: (ids: LiveRowId[], signal: AbortSignal) => Promise<LivePatches<T>>
 }
 
-/** A page-level job on the same beat machinery (for example the stats cards); it writes its own state. */
+/**
+ * A page-level job on the same beat machinery (for example the stats cards); it writes its own state. Once `signal`
+ * aborts (an active load started: the filter may have changed) the job must drop its answer instead of writing it,
+ * or the cards show the old filter's numbers until the next run.
+ */
 export interface LiveTask {
   name?: string
   intervalMs: number
@@ -97,10 +108,16 @@ export interface LiveTable<T extends object> {
   applyPending: () => Promise<void>
   pause: () => void
   resume: () => void
-  /** Runs the named sources and tasks now; resolves when their answer is in (at once during an active load). */
+  /**
+   * Runs the named sources and tasks now, paused or not, and resolves when their answer is in. Before the first load
+   * or during an active load it is remembered and runs as soon as that load ends; the promise then resolves at once.
+   */
   refresh: (name: string) => Promise<void>
-  /** Re-orders the current page once (a local sort the user asked for); updates never re-order. */
-  sortBy: (compare: (a: T, b: T) => number) => void
+  /**
+   * Re-orders the current page now (a local sort the user asked for) and every later active load the same way, until
+   * sortBy(null) restores the server's order. Updates never re-order.
+   */
+  sortBy: (compare: ((a: T, b: T) => number) | null) => void
   /** Takes a row off the page at once (after a delete). */
   remove: (id: LiveRowId) => void
   /** Merges values from an action's answer; `complete` treats each value as a whole row. Locked fields are kept. */
@@ -145,6 +162,8 @@ function entriesOf<T>(patches: LivePatches<T>): Iterable<readonly [LiveRowId, Pa
 interface Beat {
   name?: string
   intervalMs: number
+  /** Runs right after every successful active load: partial sources and page tasks. */
+  followsLoad: boolean
   run: (signal: AbortSignal) => Promise<void>
   timer: ReturnType<typeof setTimeout> | null
   controller: AbortController | null
@@ -152,8 +171,10 @@ interface Beat {
   inflight: Promise<void> | null
   failures: number
   endedAt: number
-  /** Run again as soon as the current run or the active load ends. */
+  /** Wants a run: it starts as soon as nothing holds it back (the first load, an active load, the run in flight). */
   again: boolean
+  /** That run was asked for by name: it goes ahead while paused or hidden. */
+  forced: boolean
 }
 
 /** Edits of one field. A session lasts while edits are in flight; the latest one decides the outcome. */
@@ -194,6 +215,14 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
   // Every request and every edit takes a stamp; a field ignores answers to requests stamped up to its writableAfter.
   let stamp = 0
   const guards = new Map<string, Map<string, FieldGuard>>()
+  /** The fields the last whole row of each record carried: only these can go missing from the next one. */
+  const wholeFields = new Map<string, Set<string>>()
+  /** Rows taken off by remove(), with the stamp of that moment: answers to requests sent before it may still carry them. */
+  const removed = new Map<string, number>()
+  /** The order of the page as the server sent it, for sortBy(null). */
+  let served: LiveRowId[] = []
+  let order: ((a: T, b: T) => number) | null = null
+
   function guardOf(key: string, field: string) {
     let byField = guards.get(key)
     if (!byField) guards.set(key, (byField = new Map()))
@@ -212,9 +241,22 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
   function applyRow(key: string, values: Partial<T>, requestedAt: number, complete: boolean) {
     const row = records.get(key) as Record<string, unknown> | undefined
     if (!row) return
-    for (const [field, value] of Object.entries(values)) if (writable(key, field, requestedAt)) assign(row as T, field, value)
+    const raw = toRaw(row)
+    const id = getId(raw as T)
+    // A write that would change the row's id (even only its type: 12 → '12') is skipped, so its key never changes.
+    const keepsId = (field: string, value: unknown) => Object.is(getId({ ...raw, [field]: value } as T), id)
+    for (const [field, value] of Object.entries(values)) {
+      if (writable(key, field, requestedAt) && !sameValue(row[field], value) && keepsId(field, value)) row[field] = value
+    }
     if (!complete) return
-    for (const field of Object.keys(row)) if (!hasOwn(values, field) && writable(key, field, requestedAt)) delete row[field]
+    const carried = new Set(Object.keys(values))
+    for (const field of wholeFields.get(key) ?? []) {
+      if (carried.has(field)) continue
+      // A field under edit stays; it goes with the first whole row after the edit that still leaves it out.
+      if (!writable(key, field, requestedAt)) carried.add(field)
+      else if (keepsId(field, undefined)) delete row[field]
+    }
+    wholeFields.set(key, carried)
   }
   function applyPatches(patches: LivePatches<T>, requestedAt: number, complete: boolean) {
     for (const [id, values] of entriesOf(patches)) applyRow(keyOf(id), values, requestedAt, complete)
@@ -222,13 +264,27 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
   function upsert(row: T, requestedAt: number) {
     const key = keyOf(getId(row))
     if (records.has(key)) applyRow(key, row, requestedAt, true)
-    else records.set(key, reactive({ ...row }) as T)
+    else {
+      records.set(key, reactive({ ...row }) as T)
+      wholeFields.set(key, new Set(Object.keys(row)))
+    }
+  }
+  /** Drops the rows remove() took off after this request was sent; forgets removals no later answer can carry. */
+  function withoutRemoved(items: T[], requestedAt: number) {
+    const kept = items.filter((row) => !((removed.get(keyOf(getId(row))) ?? 0) > requestedAt))
+    for (const [key, at] of removed) if (at < requestedAt) removed.delete(key)
+    return kept
+  }
+  const ordered = (list: LiveRowId[]) => {
+    const compare = order
+    return compare ? [...list].sort((a, b) => compare(records.get(keyOf(a))!, records.get(keyOf(b))!)) : list
   }
   /** Shows these ids in this order; records, guards and dim marks of ids off the page go. */
   function show(next: LiveRowId[]) {
     const keep = new Set(next.map(keyOf))
     for (const key of [...records.keys()]) if (!keep.has(key)) records.delete(key)
     for (const key of [...guards.keys()]) if (!keep.has(key)) guards.delete(key)
+    for (const key of [...wholeFields.keys()]) if (!keep.has(key)) wholeFields.delete(key)
     for (const key of [...gone]) if (!keep.has(key)) gone.delete(key)
     const current = ids.value
     if (current.length !== next.length || current.some((id, i) => keyOf(id) !== keyOf(next[i]))) ids.value = next
@@ -249,7 +305,7 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
     clearTimer(beat)
     beat.timer = setTimeout(() => {
       beat.timer = null
-      void runBeat(beat)
+      want(beat, false)
     }, delay)
   }
   function abortBeat(beat: Beat) {
@@ -257,17 +313,19 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
     beat.controller?.abort()
     beat.controller = null
   }
-  async function runBeat(beat: Beat, force = false): Promise<void> {
-    if (disposed || !started || (!force && !running())) return
-    // An active load reschedules every beat when it ends; a run asked for by name follows it.
-    if (loading.value) {
-      if (force) beat.again = true
-      return
-    }
-    if (beat.inflight) {
-      beat.again = true
-      return
-    }
+  /** Asks for a run; it starts now if nothing holds it back, else as soon as that is over. */
+  function want(beat: Beat, forced: boolean) {
+    beat.again = true
+    if (forced) beat.forced = true
+    drive(beat)
+  }
+  function drive(beat: Beat) {
+    if (disposed || !beat.again || !started || loading.value || beat.inflight) return
+    if (!beat.forced && !running()) return // catchUp() on visible / resume picks it up
+    void start(beat)
+  }
+  async function start(beat: Beat) {
+    beat.again = beat.forced = false
     clearTimer(beat)
     const controller = new AbortController()
     beat.controller = controller
@@ -288,20 +346,18 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
     if (beat.controller === controller) beat.controller = null
     failing.value = beats.some((b) => b.failures > 0)
     if (disposed) return
-    if (beat.again) {
-      beat.again = false
-      return runBeat(beat, force)
-    }
-    // An aborted run belongs to a reload or a dispose, which schedules (or not) on its own.
-    if (!controller.signal.aborted && running()) schedule(beat, delayOf(beat))
+    if (beat.again) return drive(beat)
+    // Next run, unless an active load is on (it reschedules every beat when it ends) or one is lined up already. An
+    // aborted run counts too when nothing is lined up: its load may have ended while the tab was hidden or the table
+    // paused, and the catch-up skipped the beat because this run was still out.
+    if (running() && !loading.value && (!controller.signal.aborted || beat.timer === null)) schedule(beat, delayOf(beat))
   }
-  /** After an active load: run what asked to run, schedule the rest. */
-  function resumeBeats() {
+  /** After an active load: run what asked to run (after a success: partial sources and tasks), schedule the rest. */
+  function resumeBeats(succeeded: boolean) {
     for (const beat of beats) {
-      if (beat.again) {
-        beat.again = false
-        void runBeat(beat)
-      } else if (running()) schedule(beat, delayOf(beat))
+      if (succeeded && beat.followsLoad) beat.again = true
+      if (beat.again) drive(beat)
+      else if (running()) schedule(beat, delayOf(beat))
     }
   }
   /** Visible, online or resumed: a failed load is retried at once; beats that ran within their beat just wait. */
@@ -311,16 +367,17 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
       if (!loading.value) void load(false)
       return
     }
+    if (loading.value) return // its end reschedules every beat
     const now = Date.now()
     for (const beat of beats) {
-      if (beat.inflight) continue
+      if (beat.inflight) continue // its end schedules the next run
       const due = beat.endedAt + delayOf(beat) - now
-      if (beat.failures > 0 || due <= 0) void runBeat(beat)
+      if (beat.again || beat.failures > 0 || due <= 0) want(beat, false)
       else schedule(beat, due)
     }
   }
-  const addBeat = (name: string | undefined, intervalMs: number, run: Beat['run']) =>
-    beats.push({ name, intervalMs, run, timer: null, controller: null, inflight: null, failures: 0, endedAt: 0, again: false })
+  const addBeat = (name: string | undefined, intervalMs: number, followsLoad: boolean, run: Beat['run']) =>
+    beats.push({ name, intervalMs, followsLoad, run, timer: null, controller: null, inflight: null, failures: 0, endedAt: 0, again: false, forced: false })
 
   let generation = 0
   let active: AbortController | null = null
@@ -334,28 +391,30 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
   }
 
   for (const source of options.sources ?? []) {
-    addBeat(source.name, source.intervalMs, async (signal) => {
+    const complete = source.complete === true
+    addBeat(source.name, source.intervalMs, !complete, async (signal) => {
       if (!ids.value.length) return
       const requestedAt = ++stamp
       const patches = await source.fetch([...ids.value], signal)
       // An active load or refresh(name) aborts the run; an answer that ignores the signal is still dropped.
-      if (!signal.aborted) applyPatches(patches, requestedAt, source.complete === true)
+      if (!signal.aborted) applyPatches(patches, requestedAt, complete)
     })
   }
-  for (const task of options.tasks ?? []) addBeat(task.name, task.intervalMs, task.run)
+  for (const task of options.tasks ?? []) addBeat(task.name, task.intervalMs, true, task.run)
 
   const membershipMs = options.membershipIntervalMs ?? DEFAULT_MEMBERSHIP_MS
   if (membershipMs > 0) {
-    addBeat(undefined, membershipMs, async (signal) => {
+    addBeat(undefined, membershipMs, false, async (signal) => {
       // The page on screen is not the current query while a failed load is owed; its retry settles membership.
       if (owed) return
       const requestedAt = ++stamp
       const page = await options.fetchPage(signal)
       if (signal.aborted) return
-      total.value = page.total
+      const items = withoutRemoved(page.items, requestedAt)
+      total.value = page.total - (page.items.length - items.length)
       const shown = new Set(ids.value.map(keyOf))
       const added: T[] = []
-      for (const row of page.items) {
+      for (const row of items) {
         const key = keyOf(getId(row))
         if (shown.has(key)) applyRow(key, row, requestedAt, true)
         else added.push(row)
@@ -364,7 +423,8 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
         const size = options.tail.pageSize()
         if (options.tail.enabled()) {
           for (const row of added) upsert(row, requestedAt)
-          show(page.items.map(getId).slice(0, size))
+          served = items.map(getId).slice(0, size)
+          show(served)
           pending.value = 0
           pendingMore.value = false
         } else {
@@ -373,7 +433,7 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
         }
         return
       }
-      const fresh = new Set(page.items.map((row) => keyOf(getId(row))))
+      const fresh = new Set(items.map((row) => keyOf(getId(row))))
       gone.clear()
       for (const id of ids.value) if (!fresh.has(keyOf(id))) gone.add(keyOf(id))
       pending.value = added.length + gone.size
@@ -392,19 +452,23 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
     for (const beat of beats) abortBeat(beat)
     started = true
     loading.value = true
+    let succeeded = false
     let failure: unknown = null
     try {
       const page = await options.fetchPage(controller.signal)
       if (at !== generation) return
-      for (const row of page.items) upsert(row, requestedAt)
-      show(page.items.map(getId))
-      total.value = page.total
+      const items = withoutRemoved(page.items, requestedAt)
+      for (const row of items) upsert(row, requestedAt)
+      served = items.map(getId)
+      show(ordered(served))
+      total.value = page.total - (page.items.length - items.length)
       pending.value = 0
       pendingMore.value = false
       gone.clear()
       owed = false
       loadFailures = 0
       loadFailed.value = false
+      succeeded = true
     } catch (error) {
       if (at !== generation || controller.signal.aborted || isAbort(error)) return
       owed = true
@@ -421,7 +485,7 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
             if (running() && !loading.value) void load(false)
           }, backoff(loadFailures))
         }
-        resumeBeats()
+        resumeBeats(succeeded)
       }
     }
     if (failure && fromCaller) throw failure
@@ -475,6 +539,7 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
   // ---- Page actions ----
   function remove(id: LiveRowId) {
     const key = keyOf(id)
+    removed.set(key, ++stamp)
     const next = ids.value.filter((x) => keyOf(x) !== key)
     // A row the membership check found gone is already out of the server's total.
     const wasGone = gone.delete(key)
@@ -485,16 +550,22 @@ export function useLiveTable<T extends object>(options: LiveTableOptions<T>): Li
     }
     records.delete(key)
     guards.delete(key)
+    wholeFields.delete(key)
   }
-  function sortBy(compare: (a: T, b: T) => number) {
-    show([...rows.value].sort(compare).map(getId))
+  function sortBy(compare: ((a: T, b: T) => number) | null) {
+    order = compare
+    const shown = new Set(ids.value.map(keyOf))
+    show(compare ? ordered([...ids.value]) : served.filter((id) => shown.has(keyOf(id))))
   }
   async function refresh(name: string) {
     await Promise.all(beats.filter((beat) => beat.name === name).map(async (beat) => {
-      // An answer already on its way predates the change that asked for this refresh.
+      // An answer already on its way predates the change that asked for this refresh; its end starts the new run.
       beat.controller?.abort()
+      const out = beat.inflight
+      want(beat, true)
+      if (!started || loading.value) return // remembered: runs when the load ends
+      if (out) await out
       if (beat.inflight) await beat.inflight
-      await runBeat(beat, true)
     }))
   }
   function mergeRows(patches: LivePatches<T>, mergeOptions: { complete?: boolean } = {}) {

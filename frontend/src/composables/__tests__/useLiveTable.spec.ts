@@ -11,6 +11,7 @@ interface Row {
   extra: { note: string }
   error?: string
   seen?: Date
+  today?: number
 }
 
 const row = (id: number, over: Partial<Row> = {}): Row => ({ id, name: `acc-${id}`, status: 'active', tags: ['a'], extra: { note: '' }, ...over })
@@ -122,6 +123,39 @@ describe('field-by-field merge', () => {
     table.mergeRows([[1, { ...row(1, { name: 'merged' }), error: 'x' }]], { complete: true })
     table.mergeRows([[1, { ...row(1), name: 'merged' }]], { complete: true })
     expect('error' in table.record(1)!).toBe(false)
+  })
+
+  it('keeps fields only partial sources write; drops a whole-row field once it goes missing, after its edit is over', async () => {
+    let whole = row(1, { error: 'boom' })
+    const today = vi.fn((): Promise<LivePatches<Row>> => (today.mock.calls.length === 1 ? Promise.resolve([[1, { today: 42 }]]) : deferred<LivePatches<Row>>().promise))
+    const table = engine({
+      fetchPage: async () => page({ ...whole }),
+      membershipIntervalMs: 30_000,
+      sources: [
+        { intervalMs: 3000, complete: true, fetch: async () => [[1, { ...whole }]] },
+        { intervalMs: 5000, fetch: today } // answers once, then hangs
+      ]
+    })
+    await table.reload()
+    const save = deferred<void>()
+    void table.edit(1, 'error', 'typed', () => save.promise)
+    whole = row(1)
+    await vi.advanceTimersByTimeAsync(31_000) // whole rows every 3 s and the membership check at 30 s
+    expect(table.record(1)).toMatchObject({ today: 42, error: 'typed' })
+
+    save.resolve()
+    await vi.advanceTimersByTimeAsync(3000)
+    expect('error' in table.record(1)!).toBe(false)
+    await table.reload()
+    expect(table.record(1)!.today).toBe(42)
+  })
+
+  it('never changes a row\'s id, not even its type', async () => {
+    const answer = { ...row(12, { status: 'error' }), id: '12' as unknown as number }
+    const table = engine({ fetchPage: async () => page(row(12)), sources: [{ intervalMs: 3000, complete: true, fetch: async () => ({ '12': answer }) }] })
+    await table.reload()
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(table.record(12)).toMatchObject({ id: 12, status: 'error' })
   })
 
   it('treats 12 and "12" as the same row', async () => {
@@ -292,6 +326,49 @@ describe('frozen membership', () => {
     expect(table.ids.value).toEqual([2, 1, 3])
   })
 
+  it('keeps a local sort through the engine\'s own retry load; sortBy(null) restores the server\'s order', async () => {
+    let fail = false
+    const table = engine({
+      fetchPage: async () => {
+        if (fail) throw new Error('down')
+        return page(row(1, { name: 'b' }), row(2, { name: 'a' }), row(3, { name: 'c' }))
+      }
+    })
+    await table.reload()
+    table.sortBy((x, y) => x.name.localeCompare(y.name))
+    fail = true
+    await expect(table.reload()).rejects.toThrow('down')
+    fail = false
+    await vi.advanceTimersByTimeAsync(3000) // the engine retries on its own
+    expect(table.ids.value).toEqual([2, 1, 3])
+    table.sortBy(null)
+    expect(table.ids.value).toEqual([1, 2, 3])
+  })
+
+  it('does not bring back a removed row from a membership check sent before the removal', async () => {
+    const answer = deferred<LivePage<Row>>()
+    const fetchPage = vi.fn(() => (fetchPage.mock.calls.length === 2 ? answer.promise : Promise.resolve(page(row(1), row(2)))))
+    const table = engine({ fetchPage, membershipIntervalMs: 30_000 })
+    await table.reload()
+    await vi.advanceTimersByTimeAsync(30_000) // the check is out; the server still has row 2
+    table.remove(2)
+    answer.resolve(page(row(1), row(2)))
+    await vi.advanceTimersByTimeAsync(0)
+    expect([table.ids.value, table.pending.value, table.total.value]).toEqual([[1], 0, 1])
+  })
+
+  it('does not bring back a removed row in log mode either', async () => {
+    const answer = deferred<LivePage<Row>>()
+    const fetchPage = vi.fn(() => (fetchPage.mock.calls.length === 2 ? answer.promise : Promise.resolve(page(row(2), row(1)))))
+    const table = engine({ fetchPage, membershipIntervalMs: 5000, tail: { enabled: () => true, pageSize: () => 20 } })
+    await table.reload()
+    await vi.advanceTimersByTimeAsync(5000)
+    table.remove(2)
+    answer.resolve(page(row(3), row(2), row(1)))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(table.ids.value).toEqual([3, 1])
+  })
+
   it('keeps old rows during an active load, flags the transition and drops a stale answer', async () => {
     const answers = [deferred<LivePage<Row>>(), deferred<LivePage<Row>>()]
     let call = 0
@@ -343,7 +420,7 @@ describe('frozen membership', () => {
 describe('scheduling', () => {
   it('chains requests, pauses while the tab is hidden and catches up at once when it is visible again', async () => {
     const fetch = vi.fn(async () => [] as Array<readonly [LiveRowId, Partial<Row>]>)
-    const table = engine({ fetchPage: async () => page(row(1)), sources: [{ intervalMs: 3000, fetch }] })
+    const table = engine({ fetchPage: async () => page(row(1)), sources: [{ intervalMs: 3000, complete: true, fetch }] })
     await table.reload()
     await vi.advanceTimersByTimeAsync(3000)
     expect(fetch).toHaveBeenCalledTimes(1)
@@ -377,7 +454,7 @@ describe('scheduling', () => {
       if (fail) throw new Error('down')
       return [] as Array<readonly [LiveRowId, Partial<Row>]>
     })
-    const table = engine({ fetchPage: async () => page(row(1)), sources: [{ intervalMs: 3000, fetch }] })
+    const table = engine({ fetchPage: async () => page(row(1)), sources: [{ intervalMs: 3000, complete: true, fetch }] })
     await table.reload()
     const callsAt = async (ms: number) => {
       await vi.advanceTimersByTimeAsync(ms)
@@ -399,7 +476,7 @@ describe('scheduling', () => {
 
   it('does not re-pull on visible when a source ran within its own beat', async () => {
     const fetch = vi.fn(none)
-    const table = engine({ fetchPage: async () => page(row(1)), sources: [{ intervalMs: 60_000, fetch }] })
+    const table = engine({ fetchPage: async () => page(row(1)), sources: [{ intervalMs: 60_000, complete: true, fetch }] })
     await table.reload()
     await vi.advanceTimersByTimeAsync(60_000)
     setHidden(true)
@@ -418,7 +495,8 @@ describe('scheduling', () => {
     const table = engine({ fetchPage: async () => page(row(1)), sources: [slow, failing, healthy].map((fetch) => ({ intervalMs: 3000, fetch })) })
     await table.reload()
     await vi.advanceTimersByTimeAsync(9000)
-    expect([slow, failing, healthy].map((f) => f.mock.calls.length)).toEqual([1, 2, 3]) // failing: 3 s, then +3 s, next +6 s
+    // Each runs right after the load; failing: then +3 s, then +6 s.
+    expect([slow, failing, healthy].map((f) => f.mock.calls.length)).toEqual([1, 3, 4])
     expect(table.record(1)!.status).toBe('error')
     expect(table.status.value).toBe('stale')
   })
@@ -429,7 +507,7 @@ describe('scheduling', () => {
       if (fail) throw new Error('offline')
       return []
     })
-    const table = engine({ fetchPage: async () => page(row(1)), sources: [{ intervalMs: 3000, fetch }] })
+    const table = engine({ fetchPage: async () => page(row(1)), sources: [{ intervalMs: 3000, complete: true, fetch }] })
     await table.reload()
     await vi.advanceTimersByTimeAsync(3000)
     expect(table.status.value).toBe('stale')
@@ -446,8 +524,7 @@ describe('scheduling', () => {
     const next = deferred<LivePage<Row>>()
     const fetchPage = vi.fn(async () => (fetchPage.mock.calls.length === 1 ? page(row(1, { name: 'old' })) : next.promise))
     const table = engine({ fetchPage, sources: [{ intervalMs: 3000, fetch }] })
-    await table.reload()
-    await vi.advanceTimersByTimeAsync(3000) // a source request is on its way
+    await table.reload() // the run right after it is still on its way
     const reloading = table.reload()
     expect(fetch.mock.calls[0][1].aborted).toBe(true)
     early.resolve([[1, { name: 'stale' }]]) // answered anyway
@@ -460,8 +537,9 @@ describe('scheduling', () => {
     next.resolve(page(row(1, { name: 'new' })))
     await reloading
     expect(table.record(1)!.name).toBe('new')
+    expect(fetch).toHaveBeenCalledTimes(2) // right after the load
     await vi.advanceTimersByTimeAsync(3000)
-    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(fetch).toHaveBeenCalledTimes(3)
   })
 
   it('never overlaps a source with itself, even when its request ignores the abort', async () => {
@@ -532,20 +610,97 @@ describe('scheduling', () => {
     })
     await table.reload()
     await vi.advanceTimersByTimeAsync(10_000)
-    expect([stats.mock.calls.length, rows.mock.calls.length]).toEqual([1, 0])
+    expect([stats.mock.calls.length, rows.mock.calls.length]).toEqual([2, 0]) // after the load, then on its beat
 
     await vi.advanceTimersByTimeAsync(4000)
     await table.refresh('stats')
-    expect(stats).toHaveBeenCalledTimes(2)
-    await vi.advanceTimersByTimeAsync(9999) // its beat starts over from the refresh
-    expect(stats).toHaveBeenCalledTimes(2)
-    await vi.advanceTimersByTimeAsync(1)
     expect(stats).toHaveBeenCalledTimes(3)
+    await vi.advanceTimersByTimeAsync(9999) // its beat starts over from the refresh
+    expect(stats).toHaveBeenCalledTimes(3)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(stats).toHaveBeenCalledTimes(4)
+  })
+
+  it('runs partial sources and page tasks right after every successful load, the engine\'s retry included', async () => {
+    let current = page(row(1))
+    let fail = false
+    const fetchPage = vi.fn(async () => {
+      if (fail) throw new Error('down')
+      return current
+    })
+    const partial = vi.fn(async (ids: LiveRowId[]): Promise<LivePatches<Row>> => ids.map((id) => [id, { today: 1 }] as const))
+    const whole = vi.fn(none)
+    const stats = vi.fn(async () => undefined)
+    const table = engine({
+      fetchPage,
+      membershipIntervalMs: 30_000,
+      sources: [{ intervalMs: 30_000, fetch: partial }, { intervalMs: 3000, complete: true, fetch: whole }],
+      tasks: [{ intervalMs: 30_000, run: stats }]
+    })
+    const calls = () => [partial, stats, whole, fetchPage].map((f) => f.mock.calls.length)
+    await table.reload()
+    expect(calls()).toEqual([1, 1, 0, 1]) // whole rows and the membership check keep their beat
+
+    current = page(row(2)) // another page
+    await table.reload()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(table.record(2)!.today).toBe(1)
+    expect(calls()).toEqual([2, 2, 0, 2])
+
+    fail = true
+    await expect(table.reload()).rejects.toThrow('down')
+    expect(calls()).toEqual([2, 2, 0, 3])
+    fail = false
+    await vi.advanceTimersByTimeAsync(2999)
+    await vi.advanceTimersByTimeAsync(1) // the retry at 3 s
+    expect(calls()).toEqual([3, 3, 0, 4])
+  })
+
+  it('remembers refresh() asked before the first load or during one, and runs it at once while paused', async () => {
+    const whole = vi.fn(none) // a whole-row source: no run of its own after a load
+    const next = deferred<LivePage<Row>>()
+    const fetchPage = vi.fn(() => (fetchPage.mock.calls.length === 1 ? Promise.resolve(page(row(1))) : next.promise))
+    const table = engine({ fetchPage, sources: [{ name: 'rows', intervalMs: 30_000, complete: true, fetch: whole }] })
+    await table.refresh('rows')
+    expect(whole).not.toHaveBeenCalled()
+    await table.reload()
+    expect(whole).toHaveBeenCalledTimes(1)
+
+    const reloading = table.reload()
+    await table.refresh('rows')
+    table.pause() // before the load ends
+    next.resolve(page(row(1)))
+    await reloading
+    expect(whole).toHaveBeenCalledTimes(2)
+
+    await table.refresh('rows')
+    expect(whole).toHaveBeenCalledTimes(3)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(whole).toHaveBeenCalledTimes(3) // no beat while paused
+  })
+
+  it('keeps a beat going when its aborted request outlives a load that ended while the tab was hidden', async () => {
+    const stuck = deferred<LivePatches<Row>>()
+    const fetch = vi.fn(() => (fetch.mock.calls.length === 1 ? stuck.promise : none()))
+    const next = deferred<LivePage<Row>>()
+    const fetchPage = vi.fn(() => (fetchPage.mock.calls.length === 1 ? Promise.resolve(page(row(1))) : next.promise))
+    const table = engine({ fetchPage, sources: [{ intervalMs: 3000, complete: true, fetch }] })
+    await table.reload()
+    await vi.advanceTimersByTimeAsync(3000) // out, and its request ignores the abort
+    const reloading = table.reload()
+    setHidden(true)
+    next.resolve(page(row(1)))
+    await reloading // ends while hidden: nothing is scheduled
+    setHidden(false) // the catch-up skips the beat while its run is out
+    await vi.advanceTimersByTimeAsync(0)
+    stuck.resolve([])
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(fetch).toHaveBeenCalledTimes(2)
   })
 
   it('pauses and resumes by hand, catching up on resume', async () => {
     const fetch = vi.fn(async () => [] as Array<readonly [LiveRowId, Partial<Row>]>)
-    const table = engine({ fetchPage: async () => page(row(1)), sources: [{ intervalMs: 3000, fetch }] })
+    const table = engine({ fetchPage: async () => page(row(1)), sources: [{ intervalMs: 3000, complete: true, fetch }] })
     await table.reload()
     table.pause()
     await vi.advanceTimersByTimeAsync(10_000)
