@@ -697,6 +697,13 @@ export default {
       subscriptionExpires: '到期',
       // 容量状态提示
       capacity: {
+        labels: {
+          concurrency: '并发',
+          windowCost: '窗口',
+          sessions: '会话',
+          rpm: 'RPM',
+          total: '总额'
+        },
         concurrencyGroup: '当前 {current} · 上限 {max} · 本分组 {group}',
         windowCost: {
           blocked: '5h窗口费用超限，账号暂停调度',

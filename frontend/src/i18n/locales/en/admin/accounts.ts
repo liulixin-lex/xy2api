@@ -851,6 +851,13 @@ export default {
       subscriptionExpires: 'Expires',
       // Capacity status tooltips
       capacity: {
+        labels: {
+          concurrency: 'Conc',
+          windowCost: 'Win',
+          sessions: 'Sess',
+          rpm: 'RPM',
+          total: 'Total'
+        },
         concurrencyGroup: 'Current {current} · Limit {max} · This group {group}',
         windowCost: {
           blocked: '5h window cost exceeded, account scheduling paused',

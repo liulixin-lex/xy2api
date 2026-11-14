@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <TablePageLayout class="accounts-layout">
       <template #filters>
         <AccountsToolbar
           ref="toolbarRef"
@@ -238,7 +238,7 @@
         </div>
       </template>
       <template #pagination>
-        <Pagination v-if="total > 0" :page="shownPage.page" :total="total" :page-size="shownPage.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
+        <Pagination v-if="total > 0" class="accounts-pagination" :page="shownPage.page" :total="total" :page-size="shownPage.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
       </template>
     </TablePageLayout>
     <CreateAccountModal v-if="createModalMounted" :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
@@ -597,7 +597,7 @@ const resetColumns = () => {
 // Wider tables share the room left over evenly between the columns instead of the name column (at most 300px).
 const COLUMN_WIDTHS: Record<string, [number, number]> = {
   select: [36, 40], status: [128, 140], schedulable: [52, 60], groups: [176, 176], sq_recent: [96, 120], iq_check: [148, 164],
-  capacity: [120, 140], upstream_billing_rate: [100, 124], today_stats: [132, 152], actions: [84, 104], id: [80, 88],
+  capacity: [132, 144], upstream_billing_rate: [100, 124], today_stats: [132, 152], actions: [84, 104], id: [80, 88],
   platform_type: [168, 180], priority: [112, 120], usage: [220, 240], proxy: [160, 176], rate_multiplier: [100, 112],
   upstream_balance: [140, 152], last_used_at: [120, 132], created_at: [150, 160], expires_at: [150, 160], notes: [180, 200]
 }
@@ -1348,6 +1348,15 @@ onUnmounted(() => cancelModalPrefetch?.())
 </script>
 
 <style scoped>
+/* This page only (7e-15): toolbar, table card and pagination sit closer, so a 1080px-high window shows at least ten
+   whole rows. The shared page layout and the other pages keep their spacing. */
+.accounts-layout.table-page-layout:not(.mobile-mode) {
+  gap: 12px;
+}
+.accounts-layout .accounts-pagination {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
 /* The accounts table only (prototype): fixed 78px rows, 40px header, the column widths above; other table pages keep
    the shared table's own spacing. */
 .account-table :deep(.table-wrapper) {
