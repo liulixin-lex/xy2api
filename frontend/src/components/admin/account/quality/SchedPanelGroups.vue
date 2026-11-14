@@ -24,20 +24,23 @@
         <span :class="item.state === 'ok' ? 'status-text-normal' : ''">{{ stateWord(item.state) }}</span>
         <span v-if="item.extra" class="grow__extra">{{ item.extra }}</span>
       </span>
-      <span
-        v-for="mark in item.marks"
-        :key="mark.dim"
-        v-tip="mark.tip"
-        class="mk"
-        :class="`mk--${mark.mark}`"
-        role="cell"
-        tabindex="0"
-        :aria-label="mark.tip"
-        :data-qp-mark="mark.dim"
-      >
-        <Icon v-if="mark.mark === 'pass'" name="check" size="xs" :stroke-width="2.4" />
-        <Icon v-else-if="mark.mark === 'fail'" name="x" size="xs" :stroke-width="2.4" />
-        <span v-else class="mk__dash" aria-hidden="true" />
+      <span class="grow__marks" role="none">
+        <span
+          v-for="mark in item.marks"
+          :key="mark.dim"
+          v-tip="mark.tip"
+          class="mk"
+          :class="`mk--${mark.mark}`"
+          role="cell"
+          tabindex="0"
+          :aria-label="mark.tip"
+          :data-qp-mark="mark.dim"
+        >
+          <span class="mk__l" aria-hidden="true">{{ t(`admin.schedQuality.dim.${mark.dim}`) }}</span>
+          <Icon v-if="mark.mark === 'pass'" name="check" size="xs" :stroke-width="2.4" />
+          <Icon v-else-if="mark.mark === 'fail'" name="x" size="xs" :stroke-width="2.4" />
+          <span v-else class="mk__dash" aria-hidden="true" />
+        </span>
       </span>
       <span class="grow__ops" role="cell">
         <span v-if="failedGroups.has(item.group.group_id)" class="qp-fail">{{ t('admin.schedQuality.result.failed') }}</span>
@@ -66,7 +69,8 @@
 /**
  * The quality panel's "各分组" table (prototype): per group the alias pill and full name, the state for the selected
  * model (dot and word; a back row counts down to its end, an exemption shows until when), the backend's verdict of
- * each dimension as passed / failed / too few samples, and the exemption action.
+ * each dimension as passed / failed / too few samples, and the exemption action. On a phone (under 440px) each group
+ * takes two lines, the pill and action over the state and the marks, and each mark carries its dimension's name.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -219,5 +223,47 @@ const rows = computed(() =>
   justify-content: flex-end;
   gap: 6px;
   white-space: nowrap;
+}
+.grow__marks {
+  display: contents;
+}
+.mk__l {
+  display: none;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-small);
+}
+
+/* A phone (prototype): two lines per group, the header row gone, each mark named. */
+@media (max-width: 439px) {
+  .grow--head {
+    display: none;
+  }
+  .grow {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'group ops' 'state marks';
+    row-gap: 6px;
+    padding: 10px 8px;
+  }
+  .grow__group {
+    grid-area: group;
+  }
+  .grow__state {
+    grid-area: state;
+  }
+  .grow__ops {
+    grid-area: ops;
+  }
+  .grow__marks {
+    display: flex;
+    grid-area: marks;
+    justify-content: flex-end;
+    gap: 10px;
+  }
+  .mk {
+    gap: 4px;
+  }
+  .mk__l {
+    display: block;
+  }
 }
 </style>

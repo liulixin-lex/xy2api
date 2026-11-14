@@ -89,7 +89,7 @@
  * Background updates of the row do not reach the selection while it is open.
  */
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { useEventListener } from '@vueuse/core'
+import { useEventListener, useMediaQuery } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import GroupAliasPill from '@/components/common/GroupAliasPill.vue'
@@ -284,10 +284,12 @@ useEventListener(document, 'pointerdown', (event: PointerEvent) => {
   void requestClose()
 }, { capture: true })
 
-// ---- Position: beside the cell, inside the viewport ----
+// ---- Position: beside the cell from 1024px; below 1024px under the card's "edit groups" row, right-aligned
+// (prototype "分组浮层" at 390), above it when there is no room below. Always inside the viewport. ----
 const position = reactive({ top: 0, left: 0 })
 const GAP = 4
 const MARGIN = 8
+const wide = useMediaQuery('(min-width: 1024px)')
 function place() {
   const panel = rootRef.value
   const anchor = props.anchor
@@ -296,10 +298,18 @@ function place() {
   const width = panel.offsetWidth
   const height = panel.offsetHeight
   const viewportWidth = document.documentElement.clientWidth || window.innerWidth
+  const clampLeft = (left: number) => Math.round(Math.max(MARGIN, Math.min(left, viewportWidth - width - MARGIN)))
+  const clampTop = (top: number) => Math.round(Math.max(MARGIN, Math.min(top, window.innerHeight - height - MARGIN)))
+  if (!wide.value) {
+    position.left = clampLeft(rect.right - width)
+    const below = rect.bottom + GAP
+    position.top = clampTop(below + height > window.innerHeight - MARGIN ? rect.top - height - GAP : below)
+    return
+  }
   let left = rect.right + GAP
   if (left + width > viewportWidth - MARGIN) left = rect.left - width - GAP
-  position.left = Math.round(Math.max(MARGIN, Math.min(left, viewportWidth - width - MARGIN)))
-  position.top = Math.round(Math.max(MARGIN, Math.min(rect.top, window.innerHeight - height - MARGIN)))
+  position.left = clampLeft(left)
+  position.top = clampTop(rect.top)
 }
 let frame = 0
 const schedulePlace = () => {
@@ -497,5 +507,14 @@ defineExpose({ requestClose })
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+/* Touch: rows, tabs, the search and the conflict buttons at least 40px high. */
+@media (pointer: coarse) {
+  .gp-item,
+  .gp-tab,
+  .gp-search__input,
+  .gp-conflict__acts .btn {
+    height: 40px;
+  }
 }
 </style>

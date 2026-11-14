@@ -9,8 +9,9 @@
       <div v-if="$slots.sched" class="acard__sched"><span aria-hidden="true">{{ schedLabel }}</span><slot name="sched" /></div>
       <div class="acard__ops"><slot name="ops" /></div>
     </div>
-    <section v-if="$slots.groups" class="acard__sec" data-groups-anchor>
-      <div class="acard__sec-head"><span class="acard__label">{{ groupsLabel }}</span><slot name="groups-action" /></div>
+    <section v-if="$slots.groups" class="acard__sec" data-groups-section>
+      <!-- The group picker opens under this row (its "edit groups" button), as in the prototype. -->
+      <div class="acard__sec-head" data-groups-anchor><span class="acard__label">{{ groupsLabel }}</span><slot name="groups-action" /></div>
       <slot name="groups" />
     </section>
     <section v-if="$slots.recent" class="acard__sec">

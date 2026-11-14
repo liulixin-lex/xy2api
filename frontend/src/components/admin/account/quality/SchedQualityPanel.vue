@@ -194,13 +194,14 @@
  *   with nothing to show yet.
  * - Not modal: no backdrop, the table behind stays usable. Its top edge follows the top of the table's visible area
  *   (`anchor`), never above the page header, so the toolbar stays visible and no scrolling row shows above it; it
- *   covers the table's right-hand columns.
+ *   covers the table's right-hand columns. Below 1024px it takes the whole screen (prototype), with a 44px close
+ *   button; nothing is left outside it.
  * - A pointerdown anywhere outside closes it and the click goes on as usual; on another element that opens the
  *   panel (data-quality-opener) the content switches instead; layers opened from the panel are not outside. Escape
  *   and the close button close it too and give focus back to the dot that opened it.
  */
 import { computed, nextTick, onScopeDispose, reactive, ref, shallowRef, useId, watch } from 'vue'
-import { useEventListener } from '@vueuse/core'
+import { useEventListener, useMediaQuery } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { gsap } from 'gsap'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -309,7 +310,16 @@ useEventListener(document, 'pointerdown', (event: PointerEvent) => {
 // ---- Position ----
 const top = ref(64)
 const headerBottom = () => 4 * (parseFloat(getComputedStyle(document.documentElement).fontSize) || 16)
+/** Below 1024px the panel takes the whole screen (prototype): nothing is left outside it to click. */
+const wide = useMediaQuery('(min-width: 1024px)')
+watch(wide, () => {
+  if (open.value) place()
+})
 function place() {
+  if (!wide.value) {
+    top.value = 0
+    return
+  }
   const floor = headerBottom()
   const anchorTop = props.anchor?.()?.getBoundingClientRect().top
   top.value = Math.round(Math.max(floor, anchorTop ?? floor))
@@ -729,6 +739,74 @@ onScopeDispose(() => running?.kill())
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Below 1024px (prototype): the whole screen, an obvious 44px close button. */
+@media (max-width: 1023px) {
+  .qpanel {
+    left: 0;
+    width: auto;
+    max-width: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .qp-close {
+    width: 44px;
+    height: 44px;
+    margin: -6px -12px 0 0;
+  }
+}
+/* A phone (prototype, panel under 440px): tighter padding, the two header buttons side by side at full width, the
+   tabs closer; each tab still cuts its own text. */
+@media (max-width: 439px) {
+  .qp-head {
+    padding: 8px 16px 16px;
+  }
+  .qp-title {
+    padding-top: 10px;
+  }
+  .qp-close {
+    margin: 0 -12px 0 0;
+  }
+  .qp-body {
+    padding: 16px 16px 32px;
+  }
+  .qp-actions .btn {
+    height: 36px;
+    flex: 1;
+  }
+  .qp-seg__btn {
+    padding: 0 4px;
+  }
+}
+/* Touch: every control here at least 40px to hit. The model tabs grow (each cuts its own text, so the button clips);
+   the rest keep their look and reach out with an invisible area that stays inside its row. */
+@media (pointer: coarse) {
+  .qp-seg__btn {
+    height: 40px;
+  }
+  .arow {
+    min-height: 40px;
+  }
+  .qp-close,
+  .qp-actions .btn,
+  .qpanel :deep(.qp-text-btn) {
+    position: relative;
+  }
+  .qp-close::after,
+  .qp-actions .btn::after,
+  .qpanel :deep(.qp-text-btn)::after {
+    position: absolute;
+    inset: -4px;
+    content: '';
+  }
+  .qp-actions .btn::after {
+    inset: -6px 0;
+  }
+  .qpanel :deep(.qp-text-btn)::after {
+    inset: -8px -2px;
+  }
 }
 
 .qp-section {

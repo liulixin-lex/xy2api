@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 
 import AccountGroupPicker from '../AccountGroupPicker.vue'
@@ -98,6 +98,32 @@ describe('AccountGroupPicker', () => {
     await flushPromises()
     expect(save).toHaveBeenLastCalledWith([1, 2], true)
     expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('below 1024px opens under its anchor and right-aligned with it, or above it when there is no room below', async () => {
+    const narrow = vi.spyOn(window, 'matchMedia').mockImplementation(
+      (query) => ({ matches: false, media: query, onchange: null, addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn() }) as MediaQueryList
+    )
+    const width = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(280)
+    const height = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(300)
+    let rect = { top: 400, bottom: 424, left: 16, right: 374 }
+    const anchorRect = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(() => rect as DOMRect)
+    vi.stubGlobal('innerWidth', 390)
+    vi.stubGlobal('innerHeight', 844)
+    onTestFinished(() => {
+      ;[narrow, width, height, anchorRect].forEach((spy) => spy.mockRestore())
+      vi.unstubAllGlobals()
+    })
+
+    const below = mountPicker()
+    await flushPromises()
+    expect([picker()!.style.left, picker()!.style.top]).toEqual(['94px', '428px'])
+    below.wrapper.unmount()
+
+    rect = { top: 676, bottom: 700, left: 16, right: 374 }
+    mountPicker()
+    await flushPromises()
+    expect([picker()!.style.left, picker()!.style.top]).toEqual(['94px', '372px'])
   })
 
   it('cancelling the conflict closes without sending again (the failed edit already put the old groups back)', async () => {

@@ -1140,15 +1140,17 @@ const pickerRef = ref<{ requestClose: () => Promise<boolean> } | null>(null)
  * another account's it closes first and the new one opens once it has: after a save under way too (the latest click
  * wins), not when that save stops on a conflict to confirm.
  */
+/** Where the picker opens: the row's groups cell, or on a card the head of its groups section (the "edit groups" row). */
+const groupsAnchor = (el: Element | null | undefined) =>
+  el?.closest<HTMLElement>('td') ?? el?.closest('[data-groups-section]')?.querySelector<HTMLElement>('[data-groups-anchor]') ?? null
 const openGroupsEditor = (row: LiveAccount, event: MouseEvent) => {
   const opener = event.currentTarget as HTMLElement | null
-  return openGroupsEditorAt(row, opener?.closest<HTMLElement>('td, [data-groups-anchor]') ?? opener, event.detail === 0)
+  return openGroupsEditorAt(row, groupsAnchor(opener) ?? opener, event.detail === 0)
 }
 /** The row menu's "edit groups" (any device): beside the row's groups (cell or card section), else its "more" button. */
 const openGroupsFromMenu = (account: Account) => {
   const row = table.record(account.id)
-  const cell = document.querySelector(`[data-groups-opener="${account.id}"]`)?.closest<HTMLElement>('td, [data-groups-anchor]')
-  if (row) void openGroupsEditorAt(row, cell ?? menu.opener, false)
+  if (row) void openGroupsEditorAt(row, groupsAnchor(document.querySelector(`[data-groups-opener="${account.id}"]`)) ?? menu.opener, false)
 }
 const openGroupsEditorAt = async (row: LiveAccount, anchor: HTMLElement | null, focusSearch: boolean) => {
   if (!canPlaceGroups.value) return

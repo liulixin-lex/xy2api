@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 
 import type { BackendAccountDetail, BackendDimDetail, BackendGroupModel, BackendPolicy } from '@/api/admin/schedQualityTypes'
@@ -342,6 +342,19 @@ describe('SchedQualityPanel', () => {
     tableTop = 20
     await openOn()
     expect(panel()!.style.top).toBe('64px')
+  })
+
+  it('takes the whole screen below 1024px, from the very top', async () => {
+    const narrow = vi.spyOn(window, 'matchMedia').mockImplementation(
+      (query) => ({ matches: false, media: query, onchange: null, addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn() }) as MediaQueryList
+    )
+    onTestFinished(() => narrow.mockRestore())
+    const table = document.createElement('div')
+    document.body.appendChild(table)
+    table.getBoundingClientRect = () => ({ top: 180 }) as DOMRect
+    mount(Panel, { attachTo: document.body, props: { anchor: () => table } })
+    await openOn()
+    expect(panel()!.style.top).toBe('0px')
   })
 
   it('reads the recent values from the page\'s row when it has one, and asks for the summary itself otherwise', async () => {
