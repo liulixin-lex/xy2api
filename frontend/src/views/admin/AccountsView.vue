@@ -121,10 +121,8 @@
               <div class="acell"><AccountCapacityCell :account="row" /></div>
             </template>
             <template #header-upstream_billing_rate="{ column }">
-              <div class="flex items-center gap-1">
-                <span>{{ column.label }}</span>
-                <span @click.stop><HelpTooltip :content="t('admin.accounts.upstreamBilling.trustWarning')" width-class="w-80" /></span>
-              </div>
+              <!-- Short label; the full name and the trust warning are in the tip, no info icon (7e-8). -->
+              <span class="acol-head" v-tip="() => `${t('admin.accounts.columns.upstreamBillingRateFull')}\n${t('admin.accounts.upstreamBilling.trustWarning')}`" data-test="upstream-rate-head">{{ column.label }}</span>
             </template>
             <template #cell-upstream_billing_rate="{ row }">
               <div class="acell">
@@ -318,7 +316,6 @@ import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
-import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import PendingChangesPill from '@/components/common/PendingChangesPill.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -1371,6 +1368,27 @@ onUnmounted(() => cancelModalPrefetch?.())
   line-height: var(--line-height-small);
   text-transform: none;
   white-space: nowrap;
+}
+/* Sort arrows only on the sorted column and on a sortable header under the pointer (7e-8). */
+.account-table :deep(thead th .sort-indicator) {
+  transition: opacity var(--motion-fast) var(--ease-out);
+}
+.account-table :deep(thead th .sort-indicator:not(.is-sorted)) {
+  opacity: 0;
+}
+@media (hover: hover) {
+  .account-table :deep(thead th:hover .sort-indicator) {
+    opacity: 1;
+  }
+}
+/* A header keeps to its column: a long label is cut, the tip has it whole. */
+.account-table :deep(thead th > div) {
+  min-width: 0;
+}
+.account-table :deep(.acol-head) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .account-table :deep(tbody td) {
   height: calc(var(--row-height) - 1px);

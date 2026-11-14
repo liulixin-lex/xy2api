@@ -76,7 +76,7 @@
       </button>
     </div>
 
-    <div v-if="menuOpen" ref="menuRef" class="tb-menu" role="dialog" :aria-label="t('admin.accounts.table.moreFilters')" data-test="more-filters-menu">
+    <div v-if="menuOpen" ref="menuRef" class="tb-menu" :style="{ left: `${menuLeft}px` }" role="dialog" :aria-label="t('admin.accounts.table.moreFilters')" data-test="more-filters-menu">
       <div v-if="folded.length" class="tb-menu__folded">
         <span class="tb-menu__k">{{ t('admin.accounts.table.foldedTitle') }}</span>
         <div class="tb-menu__tags">
@@ -242,7 +242,7 @@ const foldedTags = computed(() => tags.value.filter((tag) => folded.value.includ
 const menuKeys = computed(() => [...foldedSelects.value, ...moreKeys.value])
 
 const TAG_GAP = 6
-/** Tags from the left that fit the tag box; the rest fold. */
+/** Tags from the left that fit the tag box; the rest fold (a tag folded already stays folded). */
 function foldTags(): ToolbarFilterKey[] {
   const box = tagsRef.value
   if (!box) return []
@@ -250,11 +250,30 @@ function foldTags(): ToolbarFilterKey[] {
   const elements = Array.from(box.querySelectorAll<HTMLElement>('.tb-tag'))
   let used = 0
   const out: ToolbarFilterKey[] = []
-  elements.forEach((element, index) => {
-    used += element.offsetWidth + (index ? TAG_GAP : 0)
-    if (used > room + 1) out.push(element.dataset.key as ToolbarFilterKey)
-  })
+  for (const element of elements) {
+    const key = element.dataset.key as ToolbarFilterKey
+    if (element.hidden) {
+      out.push(key)
+      continue
+    }
+    used += element.offsetWidth + (used ? TAG_GAP : 0)
+    if (used > room + 1) out.push(key)
+  }
   return out
+}
+/**
+ * Folds tags until the ones shown fit. Each fold is measured again: the count it puts on "more filters" widens that
+ * button and narrows the tag box, which can push one more tag out (7e-3).
+ */
+async function foldTagsUntilStable(): Promise<ToolbarFilterKey[]> {
+  let next = foldTags()
+  for (;;) {
+    folded.value = next
+    await nextTick()
+    const again = foldTags()
+    if (again.length === next.length) return next
+    next = again
+  }
 }
 const filtersOverflow = () => {
   const filters = filtersRef.value?.getBoundingClientRect()
@@ -263,34 +282,41 @@ const filtersOverflow = () => {
 }
 
 let fitting = false
+/** A fit was asked for while one ran (a resize, a tag's text arriving): it runs again on what is there now. */
+let refit = false
 async function fit() {
-  if (fitting || !rootRef.value) return
+  if (!rootRef.value) return
+  if (fitting) {
+    refit = true
+    return
+  }
   fitting = true
   try {
-    folded.value = []
-    foldedSelects.value = []
-    await nextTick()
-    let next = foldTags()
-    folded.value = next
-    await nextTick()
-    if (next.length === tags.value.length) {
-      const selects: ToolbarFilterKey[] = []
-      for (const key of DIRECT_FOLD_ORDER) {
-        if (!filtersOverflow()) break
-        selects.push(key)
-        foldedSelects.value = [...selects]
-        await nextTick()
+    do {
+      refit = false
+      folded.value = []
+      foldedSelects.value = []
+      await nextTick()
+      const next = await foldTagsUntilStable()
+      if (next.length === tags.value.length) {
+        const selects: ToolbarFilterKey[] = []
+        for (const key of DIRECT_FOLD_ORDER) {
+          if (!filtersOverflow()) break
+          selects.push(key)
+          foldedSelects.value = [...selects]
+          await nextTick()
+        }
+        if (selects.length) {
+          folded.value = []
+          await nextTick()
+          await foldTagsUntilStable()
+        }
       }
-      if (selects.length) {
-        folded.value = []
-        await nextTick()
-        next = foldTags()
-        folded.value = next
-      }
-    }
+    } while (refit)
   } finally {
     fitting = false
   }
+  if (menuOpen.value) placeMenu()
 }
 
 useResizeObserver(rootRef, () => {
@@ -300,8 +326,21 @@ watch(() => tags.value.map((tag) => `${tag.key}:${tag.text}`).join('|'), () => {
   void fit()
 })
 
-// ---- The menu: closes on Escape and on a click outside it and its button ----
+// ---- The menu: under its button (kept inside the toolbar); closes on Escape and on a click outside it and its button ----
 const menuOpen = ref(false)
+const menuLeft = ref(0)
+function placeMenu() {
+  const root = rootRef.value?.getBoundingClientRect()
+  const button = moreRef.value?.getBoundingClientRect()
+  if (!root || !button) return
+  const width = menuRef.value?.offsetWidth ?? 0
+  menuLeft.value = Math.max(0, Math.min(button.left - root.left, root.width - width))
+}
+watch(menuOpen, async (open) => {
+  if (!open) return
+  await nextTick()
+  placeMenu()
+})
 useEventListener(document, 'mousedown', (event: MouseEvent) => {
   if (!menuOpen.value) return
   const target = event.target as Node

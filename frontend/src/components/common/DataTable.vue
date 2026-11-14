@@ -200,7 +200,8 @@
                 </slot>
                 <span
                   v-if="cell.column.sortable"
-                  class="inline-flex h-5 w-4 flex-col items-center justify-center"
+                  class="sort-indicator inline-flex h-5 w-4 flex-col items-center justify-center"
+                  :class="{ 'is-sorted': sortKey === cell.column.key }"
                   aria-hidden="true"
                 >
                   <svg
@@ -431,6 +432,10 @@ const attachDesktopTableTracking = () => {
       checkActionsColumnWidth()
     })
     resizeObserver.observe(tableWrapperRef.value)
+    // The table too: a page may narrow its columns after the wrapper's resize (the accounts page recomputes its column
+    // widths from the new width), and only the table's own size change tells that it no longer scrolls sideways.
+    const table = tableWrapperRef.value.querySelector(':scope > table')
+    if (table) resizeObserver.observe(table)
   } else {
     // 降级方案：不支持 ResizeObserver 时使用 window resize
     resizeHandler = () => {

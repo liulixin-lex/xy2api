@@ -186,16 +186,20 @@ describe('admin AccountsView usage windows hint', () => {
     expect(columns.some(column => column.key === 'ollama_cloud_usage')).toBe(false)
   })
 
-  it('renders the upstream billing trust warning next to the declared-rate column', async () => {
+  it('labels the rate column short; its tip has the full name and the trust warning, with no info icon (7e-8)', async () => {
     const wrapper = mountView()
     await flushPromises()
+    document.body.appendChild(wrapper.element)
 
     const header = wrapper.find('[data-test="upstream-billing-header"]')
     expect(header.exists()).toBe(true)
-    expect(header.text()).toContain('admin.accounts.columns.upstreamBillingRate')
-    expect(wrapper.findAll('[data-test="usage-windows-hint"]').some(node =>
-      node.text() === 'admin.accounts.upstreamBilling.trustWarning'
-    )).toBe(true)
+    expect(header.text()).toBe('admin.accounts.columns.upstreamBillingRate')
+    expect(header.find('[data-test="usage-windows-hint"]').exists()).toBe(false)
+    vi.useFakeTimers()
+    header.get('[data-test="upstream-rate-head"]').element.dispatchEvent(new Event('mouseenter'))
+    vi.advanceTimersByTime(400)
+    vi.useRealTimers()
+    expect(document.getElementById('sq-tip')!.textContent).toBe('admin.accounts.columns.upstreamBillingRateFull\nadmin.accounts.upstreamBilling.trustWarning')
     const columns = wrapper.getComponent(DataTableStub).props('columns') as Array<{ key: string; sortable: boolean }>
     expect(columns.find(column => column.key === 'upstream_billing_rate')?.sortable).toBe(true)
   })

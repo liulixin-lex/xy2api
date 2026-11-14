@@ -163,3 +163,37 @@ describe('DataTable mobile progress bar', () => {
     expect(wrapper.classes()).toEqual(classes)
   })
 })
+
+describe('DataTable sideways scroll state', () => {
+  it('drops is-scrollable when the table narrows after the wrapper resized (7e-7)', async () => {
+    stubViewport(true)
+    const observers: Array<{ callback: () => void; targets: Element[] }> = []
+    vi.stubGlobal('ResizeObserver', class {
+      targets: Element[] = []
+      constructor(public callback: () => void) { observers.push(this) }
+      observe(target: Element) { this.targets.push(target) }
+      unobserve() {}
+      disconnect() {}
+    })
+    const wrapper = mount(DataTable, { props: { columns, data: rows(1), rowKey: 'id' } })
+    await nextTick()
+    const box = wrapper.get('.table-wrapper').element as HTMLElement
+    const table = box.querySelector(':scope > table')!
+    let tableWidth = 1500
+    Object.defineProperty(box, 'clientWidth', { configurable: true, get: () => 1300 })
+    Object.defineProperty(box, 'scrollWidth', { configurable: true, get: () => Math.max(1300, tableWidth) })
+    const observer = observers.find((item) => item.targets.includes(box))!
+    // The wrapper narrowed first: the table still has its old width, so it scrolls.
+    observer.callback()
+    await nextTick()
+    expect(box.classList.contains('is-scrollable')).toBe(true)
+    // Then the page narrows its columns: only the table changes size, and it is watched too.
+    expect(observer.targets).toContain(table)
+    tableWidth = 1290
+    observer.callback()
+    await nextTick()
+    expect(box.classList.contains('is-scrollable')).toBe(false)
+    wrapper.unmount()
+    vi.unstubAllGlobals()
+  })
+})
