@@ -225,7 +225,7 @@ func CompleteOpenAIStickyChange(ctx context.Context, accountID int64, success, c
 	if openAIStickyBindingKept(ctx, change.session, change.target) {
 		return
 	}
-	changed, err := change.cache.CommitSessionBinding(stateCtx, change.groupID, change.key, change.expected, change.target, change.ttl)
+	changed, err := change.cache.CommitSessionBinding(stateCtx, change.groupID, change.key, change.expected, change.target, change.ttl, stickyChangeAvoidSession(change.session))
 	if err != nil {
 		slog.WarnContext(ctx, "sched_quality.takeover_commit_failed", "account_id", accountID, "error", err)
 		return
