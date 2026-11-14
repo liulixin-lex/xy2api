@@ -30,7 +30,7 @@ func markOpenAIStickySpillover(selection *AccountSelectionResult, spillover bool
 }
 
 func (s *OpenAIGatewayService) deleteStickySessionAccountIDIfOwner(ctx context.Context, groupID *int64, sessionHash string, owner int64) error {
-	if preservePendingOpenAIStickyBinding(ctx, groupID, sessionHash) {
+	if releasePendingOpenAIStickyOwner(ctx, groupID, sessionHash, owner) {
 		return nil
 	}
 	if s.qualityOwnsSticky(ctx, groupID, sessionHash) || s.cache == nil || owner <= 0 {

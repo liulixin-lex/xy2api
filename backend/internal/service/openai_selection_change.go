@@ -49,7 +49,11 @@ type openAIStickyChange struct {
 	cache            OpenAIStickyVersionedCache
 	dualWriteLegacy  bool
 	skipCommit       bool // The snapshot read failed; keep all selection writes suppressed.
-	resetAt          func(int64) time.Time
+	// ownerReleased: selection hit a branch that deletes the owner's binding
+	// (hard unavailable, failure streak). Only then may an ordinary placement
+	// replace an existing owner (§5.2); other bypasses serve the request elsewhere.
+	ownerReleased bool
+	resetAt       func(int64) time.Time
 }
 
 func noteOpenAIStickyAttemptOutcome(attempt *schedAttemptCapture, success bool) {
@@ -88,6 +92,30 @@ func pendingOpenAIStickyChange(ctx context.Context) *openAIStickyChange {
 func preservePendingOpenAIStickyBinding(ctx context.Context, groupID *int64, session string) bool {
 	change := pendingOpenAIStickyChange(ctx)
 	return change != nil && change.groupID == derefGroupID(groupID) && change.session == strings.TrimSpace(session)
+}
+
+// releasePendingOpenAIStickyOwner keeps the binding while a change is pending
+// and records that the eager path would have deleted the owner's binding.
+func releasePendingOpenAIStickyOwner(ctx context.Context, groupID *int64, session string, owner int64) bool {
+	if !preservePendingOpenAIStickyBinding(ctx, groupID, session) {
+		return false
+	}
+	change := pendingOpenAIStickyChange(ctx)
+	change.mu.Lock()
+	if owner == change.expected.AccountID {
+		change.ownerReleased = true
+	}
+	change.mu.Unlock()
+	return true
+}
+
+// openAIStickyBindingKept reports whether this request must not move the
+// session to target: a kept soft owner, a guardian parent session, or a child
+// thread's own rejection. The eager path skipped binding writes in these cases.
+func openAIStickyBindingKept(ctx context.Context, session string, target int64) bool {
+	state := resilience.StateFrom(ctx)
+	return !resilienceBindAllowed(ctx, target) || state.LastResort() == target ||
+		preserveOpenAIGuardianParentBinding(ctx, session) || preserveOpenAIRejectionBinding(ctx, session)
 }
 
 // Capture before selection can clear an unavailable owner or eagerly bind its
@@ -143,11 +171,15 @@ func planOpenAIStickyReplacement(ctx context.Context, groupID *int64, session, m
 	if change.target == selection.Account.ID && !change.done {
 		return
 	}
+	if change.expected.AccountID != 0 && !change.ownerReleased || openAIStickyBindingKept(ctx, change.session, selection.Account.ID) {
+		return
+	}
 	resilience.StateFrom(ctx).SetStickyChange(&openAIStickyChange{
 		groupID: change.groupID, session: change.session, key: change.key, model: model,
 		kind: change.kind, expected: change.expected, target: selection.Account.ID, ttl: change.ttl, cache: change.cache,
 		dualWriteLegacy: change.dualWriteLegacy,
 		skipCommit:      change.skipCommit,
+		ownerReleased:   change.ownerReleased,
 		resetAt:         change.resetAt,
 	})
 }
@@ -183,6 +215,9 @@ func CompleteOpenAIStickyChange(ctx context.Context, accountID int64, success, c
 		if _, err := change.cache.RecordSessionBindingFailure(stateCtx, change.groupID, change.key, stickyChangeAvoidSession(change.session), change.expected, accountID, openAIStickyChangeAvoidTTL, reset); err != nil {
 			slog.WarnContext(ctx, "sched_quality.takeover_avoid_failed", "account_id", accountID, "error", err)
 		}
+		return
+	}
+	if openAIStickyBindingKept(ctx, change.session, change.target) {
 		return
 	}
 	changed, err := change.cache.CommitSessionBinding(stateCtx, change.groupID, change.key, change.expected, change.target, change.ttl)

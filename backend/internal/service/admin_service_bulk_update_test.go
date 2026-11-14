@@ -344,13 +344,13 @@ func TestAdminServiceBulkUpdateAccounts_SchedQualityFilter(t *testing.T) {
 		wantIDs       []int64
 		invalid       bool
 	}{
-		{name: "cooling", quality: "cooling", ids: []int64{7}, bound: true, wantIDs: []int64{7}},
+		{name: "substandard", quality: "substandard", ids: []int64{7}, bound: true, wantIDs: []int64{7}},
 		{name: "exempt", quality: "exempt", ids: []int64{7}, bound: true, wantIDs: []int64{7}},
-		{name: "demote", quality: "demote", ids: []int64{11}, bound: true, wantIDs: []int64{11}},
+		{name: "observing", quality: "observing", ids: []int64{11}, bound: true, wantIDs: []int64{11}},
 		{name: "normal", quality: "normal", ids: []int64{7}, bound: true, exclude: true, wantIDs: []int64{11}},
 		{name: "normal_empty_union", quality: "normal", ids: []int64{}, bound: true, exclude: true, wantIDs: []int64{7, 11}},
-		{name: "empty", quality: "cooling", ids: []int64{}, bound: true, wantIDs: []int64{}},
-		{name: "unresolved", quality: "cooling", invalid: true},
+		{name: "empty", quality: "substandard", ids: []int64{}, bound: true, wantIDs: []int64{}},
+		{name: "unresolved", quality: "substandard", invalid: true},
 		{name: "invalid", quality: "unknown", invalid: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

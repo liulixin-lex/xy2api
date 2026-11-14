@@ -162,16 +162,6 @@ func loadSchedQualityStates(ctx context.Context, q interface {
 		for _, dim := range dims {
 			r.Basis.Dims = append(r.Basis.Dims, schedquality.Dimension(dim))
 		}
-		if failing && len(dims) > 0 {
-			switch schedquality.Dimension(dims[0]) {
-			case schedquality.DimensionTTFO:
-				r.Reason = schedquality.ReasonSpeed
-			case schedquality.DimensionError:
-				r.Reason = schedquality.ReasonError
-			case schedquality.DimensionCache:
-				r.Reason = schedquality.ReasonCache
-			}
-		}
 		out = append(out, r)
 	}
 	return out, rows.Err()
@@ -387,7 +377,7 @@ func decodeSchedQualityPolicies(raw string) (map[int64]service.SchedPolicyRecord
 			warn(key, errors.New("invalid policy group ID"))
 			continue
 		}
-		record, err := decodeSchedQualityPolicy(rawEntry)
+		record, err := decodeSchedQualityPolicy(rawEntry, key)
 		if err != nil {
 			warn(key, err)
 			continue
@@ -398,7 +388,7 @@ func decodeSchedQualityPolicies(raw string) (map[int64]service.SchedPolicyRecord
 	return out, root.Version, nil
 }
 
-func decodeSchedQualityPolicy(raw json.RawMessage) (service.SchedPolicyRecord, error) {
+func decodeSchedQualityPolicy(raw json.RawMessage, groupID string) (service.SchedPolicyRecord, error) {
 	var entry map[string]json.RawMessage
 	var record service.SchedPolicyRecord
 	if err := json.Unmarshal(raw, &entry); err != nil {
@@ -413,14 +403,63 @@ func decodeSchedQualityPolicy(raw json.RawMessage) (service.SchedPolicyRecord, e
 		record.Policy = schedquality.DefaultPolicy()
 		return record, nil
 	}
-	var v schedQualityPolicyV4
-	if err := json.Unmarshal(rawV4, &v); err != nil {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(rawV4, &fields); err != nil {
 		return record, err
 	}
-	record.Policy = schedquality.Policy{Enabled: v.Enabled, TTFTSeconds: v.TTFTSeconds, MaxErrorRate: v.MaxErrorRate, MinCacheRatio: v.MinCacheRatio, TakeoverIdleSeconds: v.TakeoverIdleSeconds}
+	if fields == nil {
+		return record, errors.New("v4 policy must be an object")
+	}
 
-	return record, service.ValidateSchedQualityPolicy(record.Policy)
+	defaults := schedquality.DefaultPolicy()
+	var issues []error
+	v := schedQualityPolicyV4{Enabled: defaults.Enabled, TTFTSeconds: defaults.TTFTSeconds, MaxErrorRate: defaults.MaxErrorRate, MinCacheRatio: defaults.MinCacheRatio, TakeoverIdleSeconds: defaults.TakeoverIdleSeconds}
+	read := func(err error) {
+		if err != nil {
+			issues = append(issues, err)
+		}
+	}
+	var fieldErr error
+	v.Enabled, fieldErr = readSchedQualityPolicyField(fields, "enabled", defaults.Enabled)
+	read(fieldErr)
+	v.TTFTSeconds, fieldErr = readSchedQualityPolicyField(fields, "ttft_seconds", defaults.TTFTSeconds)
+	read(fieldErr)
+	v.MaxErrorRate, fieldErr = readSchedQualityPolicyField(fields, "max_error_rate", defaults.MaxErrorRate)
+	read(fieldErr)
+	v.MinCacheRatio, fieldErr = readSchedQualityPolicyField(fields, "min_cache_ratio", defaults.MinCacheRatio)
+	read(fieldErr)
+	v.TakeoverIdleSeconds, fieldErr = readSchedQualityPolicyField(fields, "takeover_idle_seconds", defaults.TakeoverIdleSeconds)
+	read(fieldErr)
+	record.Policy = schedquality.Policy{Enabled: v.Enabled, TTFTSeconds: v.TTFTSeconds, MaxErrorRate: v.MaxErrorRate, MinCacheRatio: v.MinCacheRatio, TakeoverIdleSeconds: v.TakeoverIdleSeconds}
+	// The v0.6.4 editor allowed error thresholds below 5%. Keep old saved
+	// values usable during rollback/blue-green overlap, matching migration 301.
+	if record.Policy.MaxErrorRate < schedquality.ErrorRateFloor {
+		record.Policy.MaxErrorRate = schedquality.ErrorRateFloor
+	}
+	if err := service.ValidateSchedQualityPolicy(record.Policy); err != nil {
+		issues = append(issues, err)
+	}
+	if issue := errors.Join(issues...); issue != nil && schedQualityPolicyWarnings.Allow() {
+		slog.Warn("sched_quality.invalid_policy", "group_id", groupID, "error", issue)
+	}
+	return record, nil
 }
+
+func readSchedQualityPolicyField[T any](fields map[string]json.RawMessage, name string, fallback T) (T, error) {
+	raw, ok := fields[name]
+	if !ok {
+		return fallback, fmt.Errorf("%s: missing policy field", name)
+	}
+	if strings.TrimSpace(string(raw)) == "null" {
+		return fallback, fmt.Errorf("%s: null is not a policy value", name)
+	}
+	var value T
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return fallback, fmt.Errorf("%s: %w", name, err)
+	}
+	return value, nil
+}
+
 func (r *schedQualityRepository) LoadPolicies(ctx context.Context) (map[int64]service.SchedPolicyRecord, error) {
 	var raw string
 	err := r.db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1`, service.SettingKeyGroupQualityGatePolicies).Scan(&raw)
