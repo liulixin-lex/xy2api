@@ -65,6 +65,9 @@ const usageLogsEffectiveUpstreamModelIndex = "idx_usage_logs_effective_upstream_
 const usageLogsUpstreamRequestIDIndexMigration = "233_add_usage_log_upstream_request_id_index_notx.sql"
 const usageLogsUpstreamRequestIDIndex = "idx_usage_logs_upstream_request_id"
 const sv2RequestIndexesMigration = "309_sv2_request_indexes_notx.sql"
+const attemptSamplesRequestIDIndex = "idx_attempt_samples_request_id"
+const attemptSamplesSessionPreviousIndex = "idx_attempt_samples_session_previous"
+const attemptSamplesFinishedIndex = "idx_attempt_samples_finished"
 const usageLogsGatewayRequestCreatedIndex = "idx_usage_logs_gateway_request_created"
 
 type migrationChecksumCompatibilityRule struct {
@@ -312,7 +315,17 @@ func prepareNonTransactionalMigration(ctx context.Context, db migrationConnectio
 	case usageLogsUpstreamRequestIDIndexMigration:
 		return dropInvalidIndexIfPresent(ctx, db, usageLogsUpstreamRequestIDIndex)
 	case sv2RequestIndexesMigration:
-		return dropInvalidIndexIfPresent(ctx, db, usageLogsGatewayRequestCreatedIndex)
+		for _, indexName := range []string{
+			attemptSamplesRequestIDIndex,
+			attemptSamplesSessionPreviousIndex,
+			attemptSamplesFinishedIndex,
+			usageLogsGatewayRequestCreatedIndex,
+		} {
+			if err := dropInvalidIndexIfPresent(ctx, db, indexName); err != nil {
+				return err
+			}
+		}
+		return nil
 	default:
 		return nil
 	}
