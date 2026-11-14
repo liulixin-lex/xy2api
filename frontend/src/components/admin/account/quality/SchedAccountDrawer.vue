@@ -160,7 +160,8 @@ import SchedOverridePopover from './SchedOverridePopover.vue'
 import SchedOverrideCapsule from './SchedOverrideCapsule.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
 import type { SchedAccountGroup, SchedAutoState, SchedOverrideMode, SchedOverrideRequest } from '@/types/schedQuality'
-import { secondsUntil, useSchedQualityClock, useSchedQualityPoll } from '@/composables/useSchedQuality'
+import { secondsUntil, useSchedQualityPoll } from '@/composables/useSchedQuality'
+import { useLiveClock } from '@/composables/useLiveClock'
 import { closeSchedDrawer, markSchedChanged, openSchedBoard, openSchedDrawer, trackSchedReload, useSchedLayers } from '@/composables/useSchedLayers'
 import { isRecovering, useAccountRecovery } from '@/composables/useAccountRecovery'
 import { useAdminPermission } from '@/composables/useAdminPermission'
@@ -185,7 +186,7 @@ const { t, te } = useI18n()
 const { drawer, changed } = useSchedLayers()
 // Write actions need accounts:manage; without it they are not shown.
 const { canManage } = useAdminPermission('accounts')
-const now = useSchedQualityClock()
+const now = useLiveClock()
 const shellRef = ref<{ body: HTMLElement | null; holdFocus: () => () => void } | null>(null)
 const groupsRef = ref<HTMLElement | null>(null)
 

@@ -7,7 +7,8 @@ import summaryFixture from '@/__tests__/fixtures/schedQuality/account_summary.js
 const { summary } = vi.hoisted(() => ({ summary: vi.fn() }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: { summary } }))
 
-import { secondsUntil, useSchedQualityClock, useSchedQualityPoll, useSchedQualitySummary } from '../useSchedQuality'
+import { secondsUntil, useSchedQualityPoll, useSchedQualitySummary } from '../useSchedQuality'
+import { useLiveClock } from '../useLiveClock'
 
 let hidden = false
 const flush = () => new Promise((resolve) => setTimeout(resolve))
@@ -134,11 +135,11 @@ describe('useSchedQualityPoll', () => {
 })
 
 describe('cooling countdown', () => {
-  it('counts down from until on the local clock without any request', async () => {
+  it('counts down from until on the shared page clock without any request', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-11-11T12:04:00Z'))
     const scope = effectScope()
-    const now = scope.run(() => useSchedQualityClock())!
+    const now = scope.run(() => useLiveClock())!
     const until = '2026-11-11T12:04:30Z'
     expect(secondsUntil(until, now.value)).toBe(30)
 

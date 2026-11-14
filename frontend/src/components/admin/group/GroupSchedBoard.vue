@@ -122,7 +122,8 @@ import Select from '@/components/common/Select.vue'
 import SchedPauseMark from '@/components/admin/account/quality/SchedPauseMark.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
 import type { SchedBoardAccount, SchedTakeoverIdleSeconds } from '@/types/schedQuality'
-import { secondsUntil, useSchedQualityClock, useSchedQualityPoll } from '@/composables/useSchedQuality'
+import { secondsUntil, useSchedQualityPoll } from '@/composables/useSchedQuality'
+import { useLiveClock } from '@/composables/useLiveClock'
 import { closeSchedBoard, openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 import {
@@ -137,7 +138,7 @@ const { t, te } = useI18n()
 const { board, changed } = useSchedLayers()
 // The account link needs accounts:view; the name is plain text otherwise.
 const { canView: canViewAccounts } = useAdminPermission('accounts')
-const now = useSchedQualityClock()
+const now = useLiveClock()
 const shellRef = ref<{ holdFocus: () => () => void } | null>(null)
 
 // The model asked for: the opener's, then whatever is picked here; the API answers with the model it used.
