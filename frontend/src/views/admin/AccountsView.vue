@@ -58,7 +58,7 @@
           @sched-action="openSchedBatch"
         />
         <div ref="accountTableRef" class="account-table relative flex min-h-0 flex-1 flex-col overflow-hidden" :class="{ 'is-roomy': columnLayout.roomy }" :style="columnLayout.vars">
-          <PendingChangesPill :count="pending" :label="changesText" :tip="t('admin.accounts.table.changesTip')" @merge="applyPending" />
+          <PendingChangesPill :count="pending" :label="changesText" :tip="t('common.pendingChanges.tip')" @merge="applyPending" />
           <DataTable
             ref="dataTableRef"
             :columns="cols"
@@ -480,7 +480,7 @@ const table = live.table
 schedLayers.bind(table, (id) => table.record(id))
 const { rows, loading, total, pending, status: liveStatus } = table
 const accountRowClass = (row: LiveAccount) => (table.transitioning.value || table.isDimmed(row.id) ? 'opacity-60' : undefined)
-const changesText = (n: string) => t('admin.accounts.table.changes', { n })
+const changesText = (n: string) => t('common.pendingChanges.changes', { n })
 
 const dataTableRef = ref<InstanceType<typeof DataTable> | null>(null)
 const toolbarRef = ref<InstanceType<typeof AccountsToolbar> | null>(null)

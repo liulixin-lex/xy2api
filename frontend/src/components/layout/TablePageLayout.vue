@@ -58,9 +58,10 @@ onUnmounted(() => {
   @apply flex-1 min-h-0 flex flex-col;
 }
 
-/* 表格滚动容器 - 增强版表体滚动方案。颜色来自 styles/tokens.css 的语义变量，与 DataTable 一致 */
+/* 表格滚动容器 - 增强版表体滚动方案。颜色来自 styles/tokens.css 的语义变量，与 DataTable 一致。
+   relative：「有 N 条变动」提示（PendingChangesPill）在宽屏以它为定位框，落在表头带内 */
 .table-scroll-container {
-  @apply flex flex-col overflow-hidden h-full bg-surface rounded-2xl border border-line-strong shadow-sm;
+  @apply relative flex flex-col overflow-hidden h-full bg-surface rounded-2xl border border-line-strong shadow-sm;
 }
 
 .table-scroll-container :deep(.table-wrapper) {

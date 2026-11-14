@@ -14,6 +14,8 @@ export default {
       staleLabel: '数据已过时，正在重试，点击暂停'
     },
     pendingChanges: {
+      changes: '有 {n} 条变动',
+      tip: '行顺序在两次主动操作之间保持不变',
       merge: '点击合入'
     },
     loading: '加载中...',

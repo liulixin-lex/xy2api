@@ -133,7 +133,7 @@ const UsageFiltersStub = defineComponent({
     })
     return { userKeyword, accountKeyword }
   },
-  template: '<div><span data-test="user-filter-label">{{ userKeyword }}</span><span data-test="account-filter-label">{{ accountKeyword }}</span><slot name="after-reset" /></div>',
+  template: '<div><span data-test="user-filter-label">{{ userKeyword }}</span><span data-test="account-filter-label">{{ accountKeyword }}</span><slot name="status" /><slot name="after-reset" /></div>',
 })
 const UsageTableStub = {
   props: ['columns'],
@@ -849,21 +849,25 @@ describe('admin UsageView live log', () => {
     vi.useRealTimers()
   })
 
+  const mountLive = () => mount(UsageView, {
+    global: { stubs: {
+      AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
+      UsageTable: LiveUsageTableStub, UsageExportProgress: true, UsageCleanupDialog: true,
+      UserBalanceHistoryModal: true, Pagination: true, Select: true,
+      DateRangePicker: true, Icon: true, TokenUsageTrend: true,
+      ModelDistributionChart: true, GroupDistributionChart: true,
+      EndpointDistributionChart: true, UserTokenRanking: true,
+    } },
+  })
+  const shownIn = (wrapper: ReturnType<typeof mountLive>) => () =>
+    (wrapper.findComponent(LiveUsageTableStub).props('data') as Array<{ id: number; source?: string }>)
+      .map((row) => `${row.source ?? 'usage'}:${row.id}`)
+
   it('follows new records at the top on page 1, newest first, with the list top in view; otherwise only counts them', async () => {
     list.mockReset().mockResolvedValue(page('usage:2', 'unbilled:2', 'usage:1'))
-    const wrapper = mount(UsageView, {
-      global: { stubs: {
-        AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
-        UsageTable: LiveUsageTableStub, UsageExportProgress: true, UsageCleanupDialog: true,
-        UserBalanceHistoryModal: true, Pagination: true, Select: true,
-        DateRangePicker: true, Icon: true, TokenUsageTrend: true,
-        ModelDistributionChart: true, GroupDistributionChart: true,
-        EndpointDistributionChart: true, UserTokenRanking: true,
-      } },
-    })
+    const wrapper = mountLive()
     await flushPromises()
-    const shown = () => (wrapper.findComponent(LiveUsageTableStub).props('data') as Array<{ id: number; source?: string }>)
-      .map((row) => `${row.source ?? 'usage'}:${row.id}`)
+    const shown = shownIn(wrapper)
     expect(shown()).toEqual(['usage:2', 'unbilled:2', 'usage:1']) // the same id from two sources: two rows
 
     list.mockResolvedValue(page('usage:3', 'usage:2', 'unbilled:2', 'usage:1'))
@@ -883,6 +887,26 @@ describe('admin UsageView live log', () => {
     await vi.advanceTimersByTimeAsync(5000)
     expect(shown()).toEqual(['usage:4', 'usage:3', 'usage:2', 'unbilled:2', 'usage:1'])
     expect((wrapper.vm as any).liveUsage.pending.value).toBe(1)
+    wrapper.unmount()
+  })
+
+  it('offers the records that came in while away from the top as "N new records"; a click takes them in', async () => {
+    list.mockReset().mockResolvedValue(page('usage:1'))
+    const wrapper = mountLive()
+    await flushPromises()
+    const shown = shownIn(wrapper)
+    expect(wrapper.find('[data-test="live-status"]').exists()).toBe(true)
+
+    atTop = false
+    list.mockResolvedValue(page('usage:2', 'usage:1'))
+    await vi.advanceTimersByTimeAsync(5000)
+    const notice = wrapper.get('[data-test="pending-changes"]')
+    expect(notice.text()).toContain('admin.usage.newRecords')
+    expect(shown()).toEqual(['usage:1'])
+
+    await notice.trigger('click')
+    await flushPromises()
+    expect(shown()).toEqual(['usage:2', 'usage:1'])
     wrapper.unmount()
   })
 })

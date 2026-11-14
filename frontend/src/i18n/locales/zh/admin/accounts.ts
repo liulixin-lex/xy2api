@@ -76,8 +76,6 @@ export default {
         refresh: '立即刷新',
         refreshTip: '立即同步，并按当前排序与筛选重排',
         liveDetail: '状态 3 秒、质量 5 秒',
-        changes: '有 {n} 条变动',
-        changesTip: '行顺序在两次主动操作之间保持不变',
         noMatch: '没有符合条件的账号',
         noMatchHint: '调整或清除筛选后再看',
         editFailed: '保存失败，已恢复原值',

@@ -3,6 +3,9 @@
     <TablePageLayout>
       <template #filters>
         <TableToolbar>
+          <template #status>
+            <LiveStatusIndicator :status="liveStatus" :pause="liveGroups.pause" :resume="liveGroups.resume" :detail="t('admin.groups.liveDetail')" />
+          </template>
           <template #search>
             <div class="relative">
               <Icon
@@ -114,6 +117,7 @@
       </template>
 
       <template #table>
+        <PendingChangesPill :count="pending" :label="changesText" :tip="t('common.pendingChanges.tip')" @merge="applyPending" />
         <DataTable
           ref="groupsTableRef"
           :columns="columns"
@@ -377,12 +381,8 @@
           </template>
 
           <template #cell-status="{ value }">
-            <span
-              :class="[
-                'badge',
-                value === 'active' ? 'badge-success' : 'badge-danger',
-              ]"
-            >
+            <span class="inline-flex items-center gap-1.5 whitespace-nowrap" :class="{ 'status-text-normal': value === 'active' }">
+              <StatusDot :tone="value === 'active' ? 'ok' : 'off'" />
               {{ t("admin.accounts.status." + value) }}
             </span>
           </template>
@@ -4423,6 +4423,9 @@ import type { Column } from "@/components/common/types";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import TablePageLayout from "@/components/layout/TablePageLayout.vue";
 import DataTable from "@/components/common/DataTable.vue";
+import LiveStatusIndicator from "@/components/common/LiveStatusIndicator.vue";
+import PendingChangesPill from "@/components/common/PendingChangesPill.vue";
+import StatusDot from "@/components/common/StatusDot.vue";
 import Pagination from "@/components/common/Pagination.vue";
 import Toggle from "@/components/common/Toggle.vue";
 import BaseDialog from "@/components/common/BaseDialog.vue";
@@ -5061,8 +5064,8 @@ const sortState = reactive({
 });
 
 // The list is a live table (spec 8.5): the account counts come from the page fetched again with the same query every
-// 10 s, which also counts groups that appeared or went (liveGroups.pending, taken in by liveGroups.applyPending; the
-// status, count and applyPending wait for the live indicator). Capacity (5 s) and costs (30 s) are partial sources
+// 10 s, which also counts groups that appeared or went (liveGroups.pending: the changes pill, taken in by
+// liveGroups.applyPending). Capacity (5 s) and costs (30 s) are partial sources
 // from the summary endpoints with explicit defaults; the scheduling gates run after each load and on refresh only.
 const groupListFilters = () => ({
   platform: (filters.platform as GroupPlatform) || undefined,
@@ -5148,15 +5151,18 @@ const liveGroups = useLiveTable<LiveGroup>({
   }, ...schedLayers.tasks],
 });
 schedLayers.bind(liveGroups);
-const { rows: groups, loading, total: groupsTotal } = liveGroups;
+const { rows: groups, loading, total: groupsTotal, pending, status: liveStatus } = liveGroups;
+const changesText = (n: string) => t("common.pendingChanges.changes", { n });
 const groupsTableRef = ref<InstanceType<typeof DataTable> | null>(null);
 const groupRowClass = (row: LiveGroup) =>
   liveGroups.transitioning.value || liveGroups.isDimmed(row.id) ? "opacity-60" : undefined;
-/** A silent reload: rows stay on screen and are replaced in place. */
-const reloadGroups = () => liveGroups.reload().catch((error) => {
+const showLoadError = (error: unknown) => {
   appStore.showError(t("admin.groups.failedToLoad"));
   console.error("Error loading groups:", error);
-});
+};
+/** A silent reload: rows stay on screen and are replaced in place. */
+const reloadGroups = () => liveGroups.reload().catch(showLoadError);
+const applyPending = () => liveGroups.applyPending().catch(showLoadError);
 /** A filter or search change: back to the first row, then reload. */
 const applyGroupFilters = () => {
   groupsTableRef.value?.scrollToTop?.();

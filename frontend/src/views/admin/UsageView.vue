@@ -84,6 +84,9 @@
         </div>
 
         <UsageFilters v-model="filters" ref="usageFiltersRef" flat :mode="activeTab" class="border-b border-gray-100 dark:border-dark-700/50" :start-date="startDate" :end-date="endDate" :exporting="exporting" :model-options="modelNameOptions" @change="applyFilters" @refresh="refreshData" @reset="resetFilters" :can-cleanup="!adminAccess.isOperator" :can-export="has('data.export')" @cleanup="openCleanupDialog" @export="exportToExcel">
+          <template #status>
+            <LiveStatusIndicator v-if="activeTab === 'usage'" :status="liveStatus" :pause="liveUsage.pause" :resume="liveUsage.resume" :detail="t('admin.usage.liveDetail')" />
+          </template>
           <template #after-reset>
             <div v-if="activeTab !== 'ranking'" class="relative" ref="columnDropdownRef">
               <button
@@ -123,7 +126,14 @@
         </UsageFilters>
         <UsageExportTasks v-if="has('data.export')" ref="exportPanel" scope="admin" @busy="exporting = $event" />
 
-        <div v-show="activeTab === 'usage'" class="overflow-hidden rounded-b-2xl">
+        <!-- overflow-clip, not hidden: the sticky anchor below must follow the page scroll -->
+        <div v-show="activeTab === 'usage'" class="overflow-clip rounded-b-2xl">
+          <!-- "N new records" shows only while the list is away from its top (new records come in by themselves there),
+               so from 1024px it rides this zero-height anchor: in the header band while the list's top is in view,
+               under the page header once it has scrolled away. Below 1024px it is fixed under the top bar anyway. -->
+          <div class="sticky top-16 z-10 h-0">
+            <PendingChangesPill :count="pending" :more="pendingMore" :label="newRecordsText" @merge="applyPending" />
+          </div>
           <UsageTable
             ref="usageTableRef"
             flat
@@ -210,6 +220,8 @@ import type { OpsErrorLog } from '@/api/admin/ops'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'; import GroupDistributionChart from '@/components/charts/GroupDistributionChart.vue'; import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
 import EndpointDistributionChart from '@/components/charts/EndpointDistributionChart.vue'
 import Icon from '@/components/icons/Icon.vue'
+import LiveStatusIndicator from '@/components/common/LiveStatusIndicator.vue'
+import PendingChangesPill from '@/components/common/PendingChangesPill.vue'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 import { useAdminAccessStore } from '@/stores/adminAccess'
 import type { AdminUsageLog, TrendDataPoint, ModelStat, GroupStat, EndpointStat, AdminUser } from '@/types'; import type { AdminUsageStatsResponse, AdminUsageQueryParams } from '@/api/admin/usage'
@@ -429,11 +441,13 @@ const liveUsage = useLiveTable<AdminUsageLog>({
   },
   tasks: [{ name: 'stats', intervalMs: 30_000, run: (signal) => runStatsTask(signal) }]
 })
-// liveUsage.status, pending, pendingMore and applyPending wait for the live indicator and the "N changes" notice.
-const { rows: usageRows, loading: usageLoading, total: usageTotal } = liveUsage
+const { rows: usageRows, loading: usageLoading, total: usageTotal, pending, pendingMore, status: liveStatus } = liveUsage
+const newRecordsText = (n: string) => t('admin.usage.newRecords', { n })
 const usageRowClass = (row: AdminUsageLog) =>
   liveUsage.transitioning.value || liveUsage.isDimmed(usageRowId(row)) ? 'opacity-60' : undefined
-const reloadUsage = () => liveUsage.reload().catch((error) => console.error('Failed to load usage logs:', error))
+const logLoadError = (error: unknown) => console.error('Failed to load usage logs:', error)
+const reloadUsage = () => liveUsage.reload().catch(logLoadError)
+const applyPending = () => liveUsage.applyPending().catch(logLoadError)
 
 // The endpoint distribution charts come from the stats answer but follow only page opens, filter changes and manual
 // refreshes, not the 30 s beat (spec 8.5); values stay until new ones arrive.

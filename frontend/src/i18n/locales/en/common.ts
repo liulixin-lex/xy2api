@@ -14,6 +14,8 @@ export default {
       staleLabel: 'Data is out of date and retrying, click to pause'
     },
     pendingChanges: {
+      changes: '{n} changes',
+      tip: 'Row order holds between two of your own actions',
       merge: 'click to merge'
     },
     loading: 'Loading...',

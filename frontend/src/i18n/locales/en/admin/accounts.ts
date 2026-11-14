@@ -76,8 +76,6 @@ export default {
         refresh: 'Refresh now',
         refreshTip: 'Sync now and re-sort by the current sort and filters',
         liveDetail: 'status every 3 s, quality every 5 s',
-        changes: '{n} changes',
-        changesTip: 'Row order holds between two of your own actions',
         noMatch: 'No accounts match',
         noMatchHint: 'Change or clear the filters',
         editFailed: 'Not saved; the old value is back',

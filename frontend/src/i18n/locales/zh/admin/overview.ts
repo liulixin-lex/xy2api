@@ -509,6 +509,7 @@ export default {
     users: {
       title: '用户管理',
       description: '管理用户账户和权限',
+      liveDetail: '余额与并发 10 秒、用量 30 秒',
       createUser: '创建用户',
       bulkDelete: {
         action: '批量删除（{count}）',
@@ -871,6 +872,7 @@ export default {
 
     // Groups Management
     groups: {
+      liveDetail: '容量 5 秒、账号数 10 秒、费用 30 秒',
       showExclusiveBadge: '向用户显示专属标识',
       systemPrompt: {
         title: '系统提示词',

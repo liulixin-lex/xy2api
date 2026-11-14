@@ -294,6 +294,28 @@ describe('admin UsersView', () => {
     wrapper.unmount()
   })
 
+  it('shows the live indicator and, after the 10 s check finds a new user, the changes notice that takes it in', async () => {
+    vi.useFakeTimers()
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+    expect(wrapper.get('[data-test="live-status"]').attributes('data-status')).toBe('live')
+    expect(wrapper.find('[data-test="pending-changes"]').exists()).toBe(false)
+
+    listUsers.mockResolvedValue({
+      items: [createAdminUser({ id: 43, email: 'new@example.com' }), createAdminUser()],
+      total: 2, page: 1, page_size: 20, pages: 1
+    })
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(wrapper.get('[data-test="row-order"]').text()).toBe('scoped@example.com') // counted, not shown yet
+    const notice = wrapper.get('[data-test="pending-changes"]')
+    expect(notice.text()).toContain('common.pendingChanges.changes')
+
+    await notice.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="row-order"]').text()).toBe('new@example.com,scoped@example.com')
+    wrapper.unmount()
+  })
+
   it('disables users selected across pages in one request, then clears the selection and reloads', async () => {
     listUsers.mockImplementation(async (page: number) => ({
       items: [createAdminUser({ id: page === 2 ? 43 : 42 })],

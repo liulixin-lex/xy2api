@@ -3,6 +3,9 @@
     <TablePageLayout>
       <template #filters>
         <TableToolbar>
+          <template #status>
+            <LiveStatusIndicator :status="liveStatus" :pause="liveUsers.pause" :resume="liveUsers.resume" :detail="t('admin.users.liveDetail')" />
+          </template>
           <template #search>
             <div class="relative">
               <Icon
@@ -292,6 +295,7 @@
 
       <!-- Users Table -->
       <template #table>
+        <PendingChangesPill :count="pending" :label="changesText" :tip="t('common.pendingChanges.tip')" @merge="applyPending" />
         <DataTable
           ref="usersTableRef"
           :columns="columns"
@@ -605,17 +609,10 @@
           </template>
 
           <template #cell-status="{ value }">
-            <div class="flex items-center gap-1.5">
-              <span
-                :class="[
-                  'inline-block h-2 w-2 rounded-full',
-                  value === 'active' ? 'bg-green-500' : 'bg-red-500'
-                ]"
-              ></span>
-              <span class="text-sm text-gray-700 dark:text-gray-300">
-                {{ value === 'active' ? t('common.active') : t('admin.users.disabled') }}
-              </span>
-            </div>
+            <span class="inline-flex items-center gap-1.5 whitespace-nowrap" :class="{ 'status-text-normal': value === 'active' }">
+              <StatusDot :tone="value === 'active' ? 'ok' : 'off'" />
+              {{ value === 'active' ? t('common.active') : t('admin.users.disabled') }}
+            </span>
           </template>
 
           <template #cell-created_at="{ value }">
@@ -859,6 +856,9 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import TableToolbar from '@/components/layout/TableToolbar.vue'
 import DataTable from '@/components/common/DataTable.vue'
+import LiveStatusIndicator from '@/components/common/LiveStatusIndicator.vue'
+import PendingChangesPill from '@/components/common/PendingChangesPill.vue'
+import StatusDot from '@/components/common/StatusDot.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -1410,9 +1410,9 @@ const closePlatformQuotaModal = () => {
   platformQuotaUser.value = null
 }
 // The list is a live table (spec 8.5): balance, current concurrency and last activity come from the page fetched again
-// with the same query every 10 s, which also counts rows that appeared or went (liveUsers.pending; taken in by
-// liveUsers.applyPending). Usage is a 30 s partial source; platform quotas (one request per user) and attribute values
-// run after each load and on refresh only. The status, pending count and applyPending wait for the live indicator.
+// with the same query every 10 s, which also counts rows that appeared or went (liveUsers.pending: the changes pill,
+// taken in by liveUsers.applyPending). Usage is a 30 s partial source; platform quotas (one request per user) and
+// attribute values run after each load and on refresh only.
 type LiveUser = AdminUser & {
   usage_stats?: BatchUserUsageStats
   platform_quotas?: PlatformQuotaItem[]
@@ -1498,7 +1498,8 @@ const liveUsers = useLiveTable<LiveUser>({
     }
   ]
 })
-const { rows: users, loading, total: usersTotal } = liveUsers
+const { rows: users, loading, total: usersTotal, pending, status: liveStatus } = liveUsers
+const changesText = (n: string) => t('common.pendingChanges.changes', { n })
 const {
   selectedIds,
   selectedCount,
@@ -1520,6 +1521,7 @@ const showLoadError = (error: any) => {
 }
 /** A silent reload: the rows stay on screen and are replaced in place. */
 const reloadUsers = () => liveUsers.reload().catch(showLoadError)
+const applyPending = () => liveUsers.applyPending().catch(showLoadError)
 /** The manual refresh button. */
 const refreshUsers = () => reloadUsers()
 /** A filter or search change: back to the first row, then reload. */

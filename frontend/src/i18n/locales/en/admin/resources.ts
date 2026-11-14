@@ -512,6 +512,8 @@ export default {
     usage: {
       title: 'Usage Records',
       description: 'View and manage all user usage records',
+      liveDetail: 'new records every 5 s, stats every 30 s',
+      newRecords: '{n} new records',
       userFilter: 'User',
       searchUserPlaceholder: 'Search user by email...',
       searchApiKeyPlaceholder: 'Search API key by name...',

@@ -509,6 +509,7 @@ export default {
     users: {
       title: 'User Management',
       description: 'Manage users and their permissions',
+      liveDetail: 'balance and concurrency every 10 s, usage every 30 s',
       createUser: 'Create User',
       bulkDelete: {
         action: 'Delete selected ({count})',
@@ -874,6 +875,7 @@ export default {
 
     // Groups
     groups: {
+      liveDetail: 'capacity every 5 s, account counts every 10 s, costs every 30 s',
       showExclusiveBadge: 'Show exclusive badge to users',
       systemPrompt: {
         title: 'System prompts',
