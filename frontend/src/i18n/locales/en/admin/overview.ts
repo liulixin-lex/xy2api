@@ -532,6 +532,7 @@ export default {
       },
       bulkLimits: {
         action: 'Set limits ({count})',
+        label: 'Set limits',
         title: 'Set user limits',
         selectedCount: '{count} users selected',
         selectionLimit: 'Select no more than {max} users at a time.',

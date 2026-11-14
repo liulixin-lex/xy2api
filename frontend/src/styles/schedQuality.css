@@ -81,7 +81,10 @@
   box-shadow: var(--shadow-popover);
   font-size: 12px;
   line-height: 16px;
-  white-space: pre;
+  /* Its own line breaks kept; a line longer than the box (a very long email) wraps inside it instead of running out
+     of it (7s-1). Lines that fit size the box as before. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   pointer-events: none;
 }
 

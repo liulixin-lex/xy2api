@@ -2,7 +2,7 @@
   <div class="table-toolbar">
     <div class="table-toolbar__main">
       <div v-if="$slots.search" class="table-toolbar__search"><slot name="search" /></div>
-      <div v-if="$slots.filters" class="table-toolbar__filters" data-test="toolbar-filters"><slot name="filters" /></div>
+      <div v-if="filled($slots.filters)" class="table-toolbar__filters" data-test="toolbar-filters"><slot name="filters" /></div>
     </div>
     <div class="table-toolbar__actions">
       <div v-if="$slots.status" class="table-toolbar__status"><slot name="status" /></div>
@@ -12,6 +12,8 @@
 </template>
 
 <script setup lang="ts">
+import { Comment, Fragment, Text, type Slot, type VNode } from 'vue'
+
 /**
  * The toolbar of a table page, in TablePageLayout's #filters slot (spec 8.6, prototype):
  * - from 1024px one row: the search and the filters on the left, then the live indicator (#status) and the actions on
@@ -27,6 +29,18 @@
  * at every width (refresh) carries `table-toolbar__icon` and is the same square there. This is the only place the
  * square's size is set, for every page. The primary action ("create", "add") uses neither class and keeps its text.
  */
+
+/**
+ * Whether a slot renders anything: a filters slot whose filters are all switched off (the users page) renders only
+ * comments, and then takes no row and no gap (7s-3).
+ */
+const rendersSomething = (nodes: VNode[]): boolean => nodes.some((node) => {
+  if (node.type === Comment) return false
+  if (node.type === Text) return !!String(node.children).trim()
+  if (node.type === Fragment) return Array.isArray(node.children) && rendersSomething(node.children as VNode[])
+  return true
+})
+const filled = (slot: Slot | undefined) => !!slot && rendersSomething(slot())
 </script>
 
 <style scoped>

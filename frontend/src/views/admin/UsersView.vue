@@ -246,55 +246,59 @@
               <span class="table-toolbar__label">{{ t('admin.users.attributes.configButton') }}</span>
             </button>
 
+            <!-- The bulk actions are always there, disabled until a row is ticked: the toolbar keeps its rows and the
+                 table its place when the selection starts (7s-4). The count goes in the tip (read with the button on
+                 focus), so the buttons keep their width. -->
             <button
-              v-if="canManage && selectedCount > 0"
+              v-if="canManage"
               class="btn btn-secondary"
               data-test="bulk-edit-limits"
-              :aria-label="t('admin.users.bulkLimits.action', { count: selectedCount })"
+              :disabled="selectedCount === 0"
+              :aria-label="t('admin.users.bulkLimits.label')"
               v-tip="t('admin.users.bulkLimits.action', { count: selectedCount })"
               @click="showBulkEditModal = true"
             >
               <Icon name="users" size="md" class="mr-2" />
-              <span class="table-toolbar__label">{{ t('admin.users.bulkLimits.action', { count: selectedCount }) }}</span>
+              <span class="table-toolbar__label">{{ t('admin.users.bulkLimits.label') }}</span>
             </button>
 
             <button
-              v-if="canManage && selectedCount > 0"
+              v-if="canManage"
               class="btn btn-secondary"
               data-test="bulk-disable-users"
-              :disabled="bulkStatusUpdating"
-              :aria-label="t('admin.users.bulkStatus.disableAction', { count: selectedCount })"
+              :disabled="selectedCount === 0 || bulkStatusUpdating"
+              :aria-label="t('admin.users.disable')"
               v-tip="t('admin.users.bulkStatus.disableAction', { count: selectedCount })"
               @click="openBulkStatus('disabled')"
             >
               <Icon name="ban" size="md" class="mr-2" />
-              <span class="table-toolbar__label">{{ t('admin.users.bulkStatus.disableAction', { count: selectedCount }) }}</span>
+              <span class="table-toolbar__label">{{ t('admin.users.disable') }}</span>
             </button>
 
             <button
-              v-if="canManage && selectedCount > 0"
+              v-if="canManage"
               class="btn btn-secondary"
               data-test="bulk-enable-users"
-              :disabled="bulkStatusUpdating"
-              :aria-label="t('admin.users.bulkStatus.enableAction', { count: selectedCount })"
+              :disabled="selectedCount === 0 || bulkStatusUpdating"
+              :aria-label="t('admin.users.enable')"
               v-tip="t('admin.users.bulkStatus.enableAction', { count: selectedCount })"
               @click="openBulkStatus('active')"
             >
               <Icon name="checkCircle" size="md" class="mr-2" />
-              <span class="table-toolbar__label">{{ t('admin.users.bulkStatus.enableAction', { count: selectedCount }) }}</span>
+              <span class="table-toolbar__label">{{ t('admin.users.enable') }}</span>
             </button>
 
             <button
-              v-if="canManage && selectedCount > 0"
+              v-if="canManage"
               class="btn btn-danger"
               data-test="bulk-delete-users"
-              :disabled="bulkDeleting"
-              :aria-label="t('admin.users.bulkDelete.action', { count: selectedCount })"
+              :disabled="selectedCount === 0 || bulkDeleting"
+              :aria-label="t('common.delete')"
               v-tip="t('admin.users.bulkDelete.action', { count: selectedCount })"
               @click="bulkDeleteIds = [...selectedIds]"
             >
               <Icon name="trash" size="md" class="mr-2" />
-              <span class="table-toolbar__label">{{ t('admin.users.bulkDelete.action', { count: selectedCount }) }}</span>
+              <span class="table-toolbar__label">{{ t('common.delete') }}</span>
             </button>
 
             <button v-if="canManage" @click="showCreateModal = true" class="btn btn-primary max-lg:gap-1.5 max-lg:px-3">

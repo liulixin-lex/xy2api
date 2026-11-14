@@ -3,6 +3,10 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { describe, expect, it } from 'vitest'
+import { mount } from '@vue/test-utils'
+import { createCommentVNode, h } from 'vue'
+
+import TableToolbar from '../TableToolbar.vue'
 
 const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../TableToolbar.vue'), 'utf8')
 const narrow = source.match(/@media \(max-width: 1023px\) \{([\s\S]*?)\n\}/)![1]
@@ -14,6 +18,15 @@ describe('TableToolbar from 1024px', () => {
     expect(main).toContain('flex: 1 1 auto')
     expect(main).toContain('min-width: 0')
     expect(wide).toMatch(/\n\.table-toolbar \{[^{}]*flex-wrap: wrap;[^{}]*justify-content: flex-end;/)
+  })
+})
+
+describe('TableToolbar filters', () => {
+  it('takes no row and no gap when the filters slot renders nothing, as with every filter switched off (7s-3)', () => {
+    const toolbar = (filters: () => unknown[]) => mount(TableToolbar, { slots: { search: () => h('input'), filters } })
+    // Every filter behind a false v-if: the slot renders comments only.
+    expect(toolbar(() => [createCommentVNode('v-if', true), createCommentVNode('v-if', true)]).find('[data-test="toolbar-filters"]').exists()).toBe(false)
+    expect(toolbar(() => [h('select')]).find('[data-test="toolbar-filters"]').exists()).toBe(true)
   })
 })
 

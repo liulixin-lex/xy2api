@@ -532,6 +532,7 @@ export default {
       },
       bulkLimits: {
         action: '批量设置限制（{count}）',
+        label: '设置限制',
         title: '批量设置用户限制',
         selectedCount: '已选择 {count} 个用户',
         selectionLimit: '一次最多选择 {max} 个用户。',

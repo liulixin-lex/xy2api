@@ -224,8 +224,10 @@ describe('admin UsersView', () => {
     const wrapper = mountBulkDeleteView()
     await flushPromises()
 
-    expect(wrapper.find('[data-test="bulk-delete-users"]').exists()).toBe(false)
+    // Always there, disabled until a row is ticked: the toolbar keeps its rows (7s-4).
+    expect(wrapper.get('[data-test="bulk-delete-users"]').attributes('disabled')).toBeDefined()
     await wrapper.get('[data-test="select-42"]').trigger('click')
+    expect(wrapper.get('[data-test="bulk-delete-users"]').attributes('disabled')).toBeUndefined()
     await wrapper.get('[data-test="bulk-delete-users"]').trigger('click')
     expect(wrapper.get('[data-test="delete-dialog"]').text()).toContain('admin.users.bulkDelete.confirm:1')
     expect(deleteUser).not.toHaveBeenCalled()
@@ -347,7 +349,7 @@ describe('admin UsersView', () => {
     const wrapper = mountBulkDeleteView()
     await flushPromises()
 
-    expect(wrapper.find('[data-test="bulk-disable-users"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="bulk-disable-users"]').attributes('disabled')).toBeDefined()
     await wrapper.get('[data-test="select-42"]').trigger('click')
     await wrapper.get('[data-test="next-page"]').trigger('click')
     await flushPromises()
@@ -682,10 +684,10 @@ describe('admin UsersView', () => {
 
     await flushPromises()
 
-    expect(wrapper.find('[data-test="bulk-edit-limits"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="bulk-edit-limits"]').attributes('disabled')).toBeDefined()
     await wrapper.get('[data-test="select-42"]').trigger('click')
     expect(wrapper.get('[data-test="selected-keys"]').text()).toBe('42')
-    expect(wrapper.find('[data-test="bulk-edit-limits"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="bulk-edit-limits"]').attributes('disabled')).toBeUndefined()
 
     await wrapper.get('[data-test="next-page"]').trigger('click')
     await flushPromises()
@@ -704,7 +706,7 @@ describe('admin UsersView', () => {
 
     expect(listUsers.mock.calls.length).toBeGreaterThan(callsBeforeSuccess)
     expect(wrapper.get('[data-test="row-order"]').text()).toBe('refreshed-page-two@example.com')
-    expect(wrapper.find('[data-test="bulk-edit-limits"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="bulk-edit-limits"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[data-test="selected-keys"]').text()).toBe('')
   })
 })
