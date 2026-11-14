@@ -232,6 +232,40 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_usage_logs_effective_upstream_model_
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestApplyMigrationsFS_Sv2RequestIndexDropsInvalidIndexBeforeRetry(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	prepareMigrationsBootstrapExpectations(mock)
+	mock.ExpectQuery("SELECT checksum FROM schema_migrations WHERE filename = \\$1").
+		WithArgs(sv2RequestIndexesMigration).
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery("SELECT EXISTS \\(").
+		WithArgs(usageLogsGatewayRequestCreatedIndex).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectExec("DROP INDEX CONCURRENTLY IF EXISTS idx_usage_logs_gateway_request_created").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_usage_logs_gateway_request_created").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("INSERT INTO schema_migrations \\(filename, checksum\\) VALUES \\(\\$1, \\$2\\)").
+		WithArgs(sv2RequestIndexesMigration, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("SELECT pg_advisory_unlock\\(\\$1\\)").
+		WithArgs(migrationsAdvisoryLockID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	fsys := fstest.MapFS{sv2RequestIndexesMigration: &fstest.MapFile{Data: []byte(`
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_usage_logs_gateway_request_created
+    ON usage_logs (gateway_request_id, created_at)
+    WHERE gateway_request_id IS NOT NULL;
+`)}}
+
+	err = applyMigrationsFS(context.Background(), db, fsys)
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestApplyMigrationsFS_PaymentOrdersOutTradeNoUniqueMigration_FailsFastOnDuplicatePrecheck(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
