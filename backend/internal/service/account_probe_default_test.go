@@ -24,6 +24,11 @@ func TestCreateAccountProbeDefaultAndOverrides(t *testing.T) {
 		{name: "conflict", accountType: AccountTypeAPIKey, explicit: &enabled, extra: map[string]any{UpstreamBillingProbeEnabledExtraKey: false}, invalid: true},
 		{name: "invalid flag", accountType: AccountTypeAPIKey, extra: map[string]any{UpstreamBillingProbeEnabledExtraKey: "false"}, invalid: true},
 		{name: "oauth unchanged", accountType: AccountTypeOAuth},
+		{name: "oauth import true discarded", accountType: AccountTypeOAuth, extra: map[string]any{UpstreamBillingProbeEnabledExtraKey: true}},
+		{name: "oauth import false discarded", accountType: AccountTypeOAuth, extra: map[string]any{UpstreamBillingProbeEnabledExtraKey: false}},
+		{name: "oauth import invalid field discarded", accountType: AccountTypeOAuth, extra: map[string]any{UpstreamBillingProbeEnabledExtraKey: "true"}},
+		{name: "oauth explicit false discarded", accountType: AccountTypeOAuth, explicit: &disabled},
+		{name: "oauth explicit true still invalid", accountType: AccountTypeOAuth, explicit: &enabled, invalid: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &upstreamBillingProbeAccountRepo{}
@@ -38,6 +43,9 @@ func TestCreateAccountProbeDefaultAndOverrides(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Equal(t, tc.want, created.Extra[UpstreamBillingProbeEnabledExtraKey])
+			if tc.accountType != AccountTypeAPIKey {
+				require.NotContains(t, created.Extra, UpstreamBillingProbeEnabledExtraKey)
+			}
 		})
 	}
 }

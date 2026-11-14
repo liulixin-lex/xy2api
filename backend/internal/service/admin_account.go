@@ -477,17 +477,20 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	if input.Platform == PlatformTypeSafe && input.Type != AccountTypeAPIKey {
 		return nil, errors.New("typesafe accounts only support apikey credentials")
 	}
-	// The probe toggle may be supplied in either the dedicated field or imported extra.
+	// Only API-key imports may override the probe toggle through extra.
+	// Other types retain the original managed-field discard behavior.
 	requestedProbeEnabled := input.ProbeEnabled
-	if raw, exists := accountExtra[UpstreamBillingProbeEnabledExtraKey]; exists {
-		enabled, ok := raw.(bool)
-		if !ok {
-			return nil, infraerrors.BadRequest("INVALID_UPSTREAM_BILLING_PROBE_ENABLED", "upstream_billing_probe_enabled must be a boolean")
+	if input.Type == AccountTypeAPIKey {
+		if raw, exists := accountExtra[UpstreamBillingProbeEnabledExtraKey]; exists {
+			enabled, ok := raw.(bool)
+			if !ok {
+				return nil, infraerrors.BadRequest("INVALID_UPSTREAM_BILLING_PROBE_ENABLED", "upstream_billing_probe_enabled must be a boolean")
+			}
+			if requestedProbeEnabled != nil && *requestedProbeEnabled != enabled {
+				return nil, infraerrors.BadRequest("CONFLICTING_UPSTREAM_BILLING_PROBE_ENABLED", "conflicting upstream_billing_probe_enabled values")
+			}
+			requestedProbeEnabled = &enabled
 		}
-		if requestedProbeEnabled != nil && *requestedProbeEnabled != enabled {
-			return nil, infraerrors.BadRequest("CONFLICTING_UPSTREAM_BILLING_PROBE_ENABLED", "conflicting upstream_billing_probe_enabled values")
-		}
-		requestedProbeEnabled = &enabled
 	}
 	// Probe results, rate sync and usage sessions remain system-managed.
 	delete(accountExtra, UpstreamBillingProbeEnabledExtraKey)
@@ -517,7 +520,7 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	if input.IQTargets != nil {
 		account.Extra = MergeOpenAICodexTicketExtra(account.Extra, nil)
 	}
-	if requestedProbeEnabled != nil {
+	if requestedProbeEnabled != nil && (account.Type == AccountTypeAPIKey || *requestedProbeEnabled) {
 		if *requestedProbeEnabled && !isUpstreamBillingProbeAccount(account) {
 			return nil, ErrUpstreamBillingProbeAccountInvalid
 		}
