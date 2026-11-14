@@ -21,3 +21,14 @@ func (s *OpenAIGatewayService) recordOpenAISelectionFlags(ctx context.Context, g
 	takeover := change != nil && change.groupID == derefGroupID(groupID) && change.target == account.ID && change.kind == "takeover"
 	state.SetSchedSelectionFlags(account.ID, fallback, takeover)
 }
+
+// RefreshOpenAISelectionFlags recalculates per-turn fallback standing for an
+// already selected account. WebSocket turns reuse their connection account but
+// must use the current quality view when recording each request.
+func (s *OpenAIGatewayService) RefreshOpenAISelectionFlags(ctx context.Context, groupID *int64, account *Account, model string) {
+	var selection *AccountSelectionResult
+	if account != nil {
+		selection = &AccountSelectionResult{Account: account}
+	}
+	s.recordOpenAISelectionFlags(ctx, groupID, model, selection)
+}

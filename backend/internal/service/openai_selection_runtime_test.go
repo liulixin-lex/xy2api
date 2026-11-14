@@ -44,7 +44,7 @@ func (c *selectionRuntimeCache) GetSessionAccountIDWithTTL(ctx context.Context, 
 	id, err := c.GetSessionAccountID(ctx, group, key)
 	return id, c.remaining, err
 }
-func (c *selectionRuntimeCache) CommitSessionBinding(_ context.Context, _ int64, key string, expected StickySessionBinding, next int64, _ time.Duration) (bool, error) {
+func (c *selectionRuntimeCache) CommitSessionBinding(_ context.Context, _ int64, key string, expected StickySessionBinding, next int64, _ time.Duration, _ ...string) (bool, error) {
 	c.casKeys = append(c.casKeys, key)
 	if c.sessionBindings[key] != expected.AccountID {
 		return false, nil

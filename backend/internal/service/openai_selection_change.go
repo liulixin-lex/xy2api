@@ -64,7 +64,7 @@ func noteOpenAIStickyAttemptOutcome(attempt *schedAttemptCapture, success bool) 
 	change.mu.Lock()
 	if change.activeAttempt == attempt {
 		change.attemptSucceeded = success
-		change.attemptCanceled = attempt.client || errors.Is(attempt.ctx.Err(), context.Canceled)
+		change.attemptCanceled = attempt.client || attempt.state.ClientCanceled()
 	}
 	change.mu.Unlock()
 }
@@ -79,9 +79,8 @@ func FinishOpenAIStickyForward(ctx context.Context, accountID int64, result *Ope
 	change.mu.Lock()
 	succeeded, attemptCanceled := change.attemptSucceeded, change.attemptCanceled
 	change.mu.Unlock()
-	canceled := attemptCanceled || errors.Is(ctx.Err(), context.Canceled) || (result != nil && result.ClientDisconnect)
-	success := succeeded && err == nil && ctx.Err() == nil && result != nil && !result.PartialFailure && !canceled &&
-		(result.UpstreamTerminalEvent == "" || result.UpstreamTerminalEvent == "response.completed" || result.UpstreamTerminalEvent == "response.done")
+	canceled := attemptCanceled || resilience.StateFrom(ctx).ClientCanceled() || (result != nil && result.ClientDisconnect)
+	success := succeeded && err == nil && ctx.Err() == nil && !canceled && result.CompletedForDelivery()
 	CompleteOpenAIStickyChange(ctx, accountID, success, canceled)
 }
 
@@ -175,9 +174,13 @@ func planOpenAIStickyReplacement(ctx context.Context, groupID *int64, session, m
 	if change.expected.AccountID != 0 && !change.ownerReleased || openAIStickyBindingKept(ctx, change.session, selection.Account.ID) {
 		return
 	}
+	kind := "migrate"
+	if change.expected.AccountID == 0 {
+		kind = "create"
+	}
 	resilience.StateFrom(ctx).SetStickyChange(&openAIStickyChange{
 		groupID: change.groupID, session: change.session, key: change.key, model: model,
-		kind: change.kind, expected: change.expected, target: selection.Account.ID, ttl: change.ttl, cache: change.cache,
+		kind: kind, expected: change.expected, target: selection.Account.ID, ttl: change.ttl, cache: change.cache,
 		dualWriteLegacy: change.dualWriteLegacy,
 		skipCommit:      change.skipCommit,
 		ownerReleased:   change.ownerReleased,
@@ -221,7 +224,7 @@ func CompleteOpenAIStickyChange(ctx context.Context, accountID int64, success, c
 	if openAIStickyBindingKept(ctx, change.session, change.target) {
 		return
 	}
-	changed, err := change.cache.CommitSessionBinding(stateCtx, change.groupID, change.key, change.expected, change.target, change.ttl)
+	changed, err := change.cache.CommitSessionBinding(stateCtx, change.groupID, change.key, change.expected, change.target, change.ttl, stickyChangeAvoidSession(change.session))
 	if err != nil {
 		slog.WarnContext(ctx, "sched_quality.takeover_commit_failed", "account_id", accountID, "error", err)
 		return

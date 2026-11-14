@@ -19,7 +19,7 @@ import (
 )
 
 func TestStickyChangeUsesActualAttemptTerminal(t *testing.T) {
-	for _, evidence := range []string{"success", "failed_event", "partial", "unterminated", "read_error", "deadline", "timeout", "unfinished", "cancel_before_output", "cancel_after_output", "upstream_canceled", "benign_incomplete"} {
+	for _, evidence := range []string{"success", "failed_event", "partial", "unterminated", "read_error", "deadline", "internal_context_cancel", "timeout", "unfinished", "cancel_before_output", "cancel_after_output", "upstream_canceled", "max_output_tokens", "content_filter"} {
 		for _, recorder := range []bool{false, true} {
 			t.Run(evidence+map[bool]string{true: "/recorded", false: "/unrecorded"}[recorder], func(t *testing.T) {
 				f := selectionNewSessionFixture()
@@ -29,6 +29,11 @@ func TestStickyChangeUsesActualAttemptTerminal(t *testing.T) {
 					var cancel context.CancelFunc
 					ctx, cancel = context.WithDeadline(ctx, time.Now().Add(-time.Second))
 					defer cancel()
+				}
+				if evidence == "internal_context_cancel" {
+					var cancel context.CancelFunc
+					ctx, cancel = context.WithCancel(ctx)
+					cancel()
 				}
 				// Plan with a live request; expiration represents a deadline during send.
 				planning := resilience.WithRequestState(context.Background(), state)
@@ -66,20 +71,21 @@ func TestStickyChangeUsesActualAttemptTerminal(t *testing.T) {
 					result.ClientDisconnect = true
 				case "upstream_canceled":
 					err = context.Canceled
-				case "benign_incomplete":
-					a.benignIncomplete = true
+				case "max_output_tokens", "content_filter":
+					a.observe([]byte(`{"type":"response.incomplete","response":{"incomplete_details":{"reason":"` + evidence + `"}}}`))
+					result.UpstreamTerminalEvent = "response.incomplete"
 				}
 				a.finish(result, err)
 				require.Equal(t, int64(10), f.binding.owner, "attempt finish precedes forwarding completion")
 				FinishOpenAIStickyForward(ctx, selected.Account.ID, result, err)
-				if evidence == "success" {
+				if evidence == "success" || evidence == "max_output_tokens" || evidence == "content_filter" {
 					require.Equal(t, selected.Account.ID, f.binding.owner)
 				} else {
 					require.Equal(t, int64(10), f.binding.owner)
 				}
 				avoided, readErr := f.session.store.SessionAvoid(ctx, 7, stickyChangeAvoidSession("session"))
 				require.NoError(t, readErr)
-				if evidence == "success" || evidence == "cancel_before_output" || evidence == "cancel_after_output" {
+				if evidence == "success" || evidence == "max_output_tokens" || evidence == "content_filter" || evidence == "cancel_before_output" || evidence == "cancel_after_output" {
 					require.Empty(t, avoided)
 				} else {
 					require.Contains(t, avoided, selected.Account.ID)
