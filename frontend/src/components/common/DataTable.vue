@@ -3,7 +3,7 @@
     <!-- Below 1024px (spec 8.6, prototype): cards in one column, two from 768px. A card's head holds the row's leading
          column (and the select column before it), and at its right any column marked `cardHeadEnd`; the other columns
          follow as label-over-value pairs in two columns, the actions sit in the foot. A page with its own card design fills the #card slot instead; `cell` draws any
-         column's cell the way the table does. -->
+         column's cell, by its key, the way the table does. -->
     <template v-if="showSkeleton">
       <div v-for="i in 5" :key="i" class="table-card">
         <div class="table-card__head">
@@ -723,8 +723,12 @@ const resolveRowKey = (row: any, index: number) => resolveStableRowKey(row) ?? i
 
 const dataColumns = computed(() => props.columns.filter((column) => column.key !== 'actions'))
 const slots = useSlots()
-/** One column's cell for a row as the table draws it (its #cell-<key> slot, else the value): for a page's own card. */
-const CardCell: FunctionalComponent<{ column: Column; row: any }> = ({ column, row }) => {
+/**
+ * One column's cell for a row as the table draws it (its #cell-<key> slot, else the value), the column named by its
+ * key: for a page's own card, `<component :is="cell" column="usage" :row="row" />`.
+ */
+const CardCell: FunctionalComponent<{ column: string; row: any }> = ({ column: key, row }) => {
+  const column = props.columns.find((item) => item.key === key)!
   const slot = slots[`cell-${column.key}`]
   if (slot) return slot({ row, value: row[column.key], expanded: actionsExpanded.value })
   return String((column.formatter ? column.formatter(row[column.key], row) : row[column.key]) ?? '')

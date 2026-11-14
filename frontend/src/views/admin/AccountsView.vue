@@ -137,7 +137,7 @@
                   <AccountCapacityCell v-else-if="field === 'capacity'" :account="row" />
                   <UpstreamBillingRateCell v-else-if="field === 'upstream_billing_rate'" detailed :account="row" :global-probe-enabled="upstreamBillingProbeGloballyEnabled" :now="now" :probing="probingUpstreamBilling.has(row.id)" @probe="handleProbeUpstreamBilling(row)" />
                   <AccountTodayCell v-else-if="field === 'today_stats'" full :stats="row.today_stats" />
-                  <component :is="cell" v-else :column="columnByKey(field)" :row="row" />
+                  <component :is="cell" v-else :column="field" :row="row" />
                 </template>
               </AccountCard>
             </template>
@@ -640,8 +640,7 @@ const cols = computed(() => {
   const pinned = (key: string) => allColumns.value.filter((column) => column.key === key)
   return [...pinned('select'), ...pinned('name'), ...orderedToggleableColumns.value.filter((column) => !hiddenColumns.has(column.key)), ...pinned('actions')]
 })
-const columnByKey = (key: string) => allColumns.value.find((column) => column.key === key)!
-const columnLabel = (key: string) => columnByKey(key).label
+const columnLabel = (key: string) => allColumns.value.find((column) => column.key === key)!.label
 
 // ---- The narrow cards (spec 4.6) ----
 /** Columns the card's always-shown layer holds; every other shown column is a line of the expanded layer. */
@@ -676,11 +675,11 @@ const resetColumns = () => {
 
 // Column widths (prototype): fixed widths in two sizes. Compact, the ten default columns and a name column of at
 // least 188px take 1294px, so at 1440 with the navigation folded (1302px for the table) nothing scrolls sideways (7i-2);
-// capacity is 154px there, room for "label $999.99 / $999" (129px of chip, 24px of padding; 7i-1). Wider tables share
-// the room left over evenly between the columns instead of the name column (at most 300px).
+// capacity is 154px in both sizes, room for "label $999.99 / $999" (129px of chip, 24px of padding; 7i-1, 7l-11).
+// Wider tables share the room left over evenly between the columns instead of the name column (at most 300px).
 const COLUMN_WIDTHS: Record<string, [number, number]> = {
   select: [36, 40], status: [128, 140], schedulable: [52, 60], groups: [176, 176], sq_recent: [96, 120], iq_check: [148, 164],
-  capacity: [154, 144], upstream_billing_rate: [100, 124], today_stats: [132, 152], actions: [84, 104], id: [80, 88],
+  capacity: [154, 154], upstream_billing_rate: [100, 124], today_stats: [132, 152], actions: [84, 104], id: [80, 88],
   platform_type: [168, 180], priority: [112, 120], usage: [220, 240], proxy: [160, 176], rate_multiplier: [100, 112],
   upstream_balance: [140, 152], last_used_at: [120, 132], created_at: [150, 160], expires_at: [150, 160], notes: [180, 200]
 }

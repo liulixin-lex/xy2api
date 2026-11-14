@@ -200,6 +200,20 @@ describe('SchedQualityPanel switching accounts (7h)', () => {
     expect(api.accountDetail).toHaveBeenLastCalledWith(12, expect.anything())
     expect(document.activeElement).toBe(panel()!.querySelector('h2'))
   })
+
+  it('names the parent in the title at once when the page knows it, before its detail is in (7l-9)', async () => {
+    const parentDetail = deferred<BackendAccountDetail>()
+    api.accountDetail.mockImplementation(async (id: number) => (id === 12 ? parentDetail.promise : {
+      ...detail(id),
+      auto_states: [{ key: 'parent_blocked:12', kind: 'parent_blocked', scope: 'account', model: '', until: null, count: null, shared: 0, clearable: false, why: 'parent_blocked' }]
+    }))
+    const parent = { id: 12, name: 'parent-12', platform: 'openai', type: 'oauth' } as never
+    mount(Panel, { attachTo: document.body, props: { account: (id: number) => (id === 12 ? parent : undefined) } })
+    await openOn(7)
+    document.querySelector<HTMLElement>('[data-qp-trigger="goto:parent_blocked:12"]')!.click()
+    await flushPromises()
+    expect(panel()!.querySelector('h2')!.textContent).toBe('parent-12')
+  })
 })
 
 describe('SchedQualityPanel', () => {

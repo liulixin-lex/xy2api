@@ -383,7 +383,7 @@ describe('DataTable', () => {
       props: { columns: [{ key: 'name', label: 'Name' }, { key: 'usage', label: 'Usage' }], data: [{ id: 1, name: 'one', usage: 'snapshot' }], rowKey: 'id' },
       slots: {
         'cell-usage': '<b data-test="usage-cell">{{ params.value }}</b>',
-        card: `<template #card="{ row, cell }"><div data-test="own-card">{{ row.name }}<component :is="cell" :column="{ key: 'usage', label: 'Usage' }" :row="row" /></div></template>`
+        card: `<template #card="{ row, cell }"><div data-test="own-card">{{ row.name }}<component :is="cell" column="usage" :row="row" /></div></template>`
       }
     })
     const card = wrapper.get('.table-card')

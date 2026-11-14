@@ -46,9 +46,10 @@
  * remaining column, label and value (IQ check, capacity, upstream ratio, today's stats, then any optional column the
  * user shows). The page fills every slot with the table's own cells, so a card reads, dims and updates like its row.
  */
-import { useId } from 'vue'
+import { provide, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
+import { USAGE_UNFOLDED } from './AccountUsageFit.vue'
 
 defineProps<{
   /** The expanded layer's lines, in column order. */
@@ -60,6 +61,8 @@ defineProps<{
   schedLabel?: string
 }>()
 const emit = defineEmits<{ toggle: [] }>()
+// The details have room for every usage window (7l-8).
+provide(USAGE_UNFOLDED, true)
 const { t } = useI18n()
 const moreId = `acard-more-${useId()}`
 </script>

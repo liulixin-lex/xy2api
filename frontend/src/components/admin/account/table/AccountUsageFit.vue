@@ -5,6 +5,13 @@
   </div>
 </template>
 
+<script lang="ts">
+import type { InjectionKey } from 'vue'
+
+/** Provided true by a container with room for every window (the narrow card's details). */
+export const USAGE_UNFOLDED: InjectionKey<boolean> = Symbol('usage-unfolded')
+</script>
+
 <script setup lang="ts">
 /**
  * The usage windows column inside the accounts table's fixed 78px row (7e-6, 7g-3). Each window keeps to a single
@@ -14,7 +21,7 @@
  * The windows (UsageProgressBar) sign in through USAGE_WINDOW_FOLD as they mount and leave as they unmount; nothing is
  * measured or observed.
  */
-import { computed, provide, shallowReactive, type Ref } from 'vue'
+import { computed, inject, provide, shallowReactive, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { USAGE_WINDOW_FOLD } from '@/components/account/UsageProgressBar.vue'
 import { vTip } from '@/utils/tip'
@@ -24,6 +31,8 @@ const MAX_SHOWN = 4
 const SHOWN_WHEN_FOLDED = 3
 
 const { t } = useI18n()
+/** In a narrow card's details there is room: every window shows, nothing folds into "+N" (7l-8). */
+const unfolded = inject(USAGE_UNFOLDED, false)
 const roots = shallowReactive(new Set<Ref<HTMLElement | null>>())
 /** The windows in the order they are on screen (one may mount after its neighbours). */
 const windows = computed(() =>
@@ -32,7 +41,7 @@ const windows = computed(() =>
     .filter((el): el is HTMLElement => !!el)
     .sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
 )
-const foldedCount = computed(() => (windows.value.length > MAX_SHOWN ? windows.value.length - SHOWN_WHEN_FOLDED : 0))
+const foldedCount = computed(() => (!unfolded && windows.value.length > MAX_SHOWN ? windows.value.length - SHOWN_WHEN_FOLDED : 0))
 
 provide(USAGE_WINDOW_FOLD, {
   add: (root) => roots.add(root),

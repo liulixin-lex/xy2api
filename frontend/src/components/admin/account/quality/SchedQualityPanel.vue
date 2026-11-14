@@ -480,8 +480,12 @@ function gotoOf(item: BackendAutoState): { label: string; run: () => void } | nu
   if (item.kind === 'iq_gate' && props.onIqCheck) return { label: t('admin.schedQuality.goto.iq'), run: () => props.onIqCheck!(id) }
   if (item.kind === 'parent_blocked') {
     const parent = parentIdFromKey(item.key)
-    // The button goes with the old content: focus moves to the title, which reads the new account's name (7h-3).
-    return parent === null ? null : { label: t('admin.schedQuality.goto.parent'), run: () => { openSchedDrawer({ id: parent }); titleRef.value?.focus() } }
+    // The button goes with the old content: focus moves to the title, which reads the new account's name (7h-3), the
+    // parent's name the page knows until its detail is in (7l-9).
+    return parent === null ? null : {
+      label: t('admin.schedQuality.goto.parent'),
+      run: () => { openSchedDrawer({ id: parent, name: props.account?.(parent)?.name }); titleRef.value?.focus() }
+    }
   }
   if (['manual_off', 'expired', 'quota'].includes(item.kind) && props.onEdit) {
     return { label: t('admin.schedQuality.goto.edit'), run: () => props.onEdit!(id) }
