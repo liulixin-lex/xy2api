@@ -52,6 +52,23 @@ describe('AccountsToolbar', () => {
     wrapper.unmount()
   })
 
+  it('emits the filters with the one that changed, as the list request takes them (7d-12)', async () => {
+    const wrapper = mountToolbar({ platform: 'openai', iq_status: '' })
+    await flushPromises()
+    await wrapper.get('select[data-filter="quality"]').setValue('substandard')
+    expect(wrapper.emitted('change')!.at(-1)).toEqual([{ platform: 'openai', iq_status: '', sched_quality: 'substandard' }])
+    // A tag's close button clears its filter only.
+    await wrapper.get('[data-test="filter-tags"] .tb-tag[data-key="platform"] .tb-tag__x').trigger('click')
+    expect(wrapper.emitted('change')!.at(-1)).toEqual([{ platform: '', iq_status: '' }])
+    // A filter from the menu goes by its own field name.
+    await wrapper.get('[data-test="more-filters"]').trigger('click')
+    await wrapper.get('[data-test="more-filters-menu"] select[data-filter="iq"]').setValue('degraded')
+    expect(wrapper.emitted('change')!.at(-1)).toEqual([{ platform: 'openai', iq_status: 'degraded' }])
+    await wrapper.get('[data-test="accounts-search"]').setValue('acc')
+    expect(wrapper.emitted('update:search')!.at(-1)).toEqual(['acc'])
+    wrapper.unmount()
+  })
+
   it('opens "more filters" under its button, not at the toolbar\'s left edge (7e-5)', async () => {
     const wrapper = mountToolbar({})
     await flushPromises()

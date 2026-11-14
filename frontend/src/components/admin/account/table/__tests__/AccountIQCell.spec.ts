@@ -29,6 +29,22 @@ describe('AccountIQCell', () => {
     ].join('\n'))
   })
 
+  it('says only smart, degraded, checking (queued included) and paused; an unknown idle target shows no word (7d-12)', () => {
+    const words = (targets: IQTargetSummary[]) =>
+      mountCell(targets).findAll('.iq__v').map((el) => [el.text(), el.classes().find((cls) => cls.startsWith('iq__v--'))])
+    expect(words([target('gpt-6-astra', 'smart'), target('gpt-6.1-sol', 'degraded')])).toEqual([
+      ['admin.accounts.table.iqStates.smart', 'iq__v--smart'],
+      ['admin.accounts.table.iqStates.degraded', 'iq__v--degraded']
+    ])
+    expect(words([target('gpt-6-astra', 'smart', 'queued'), target('gpt-6.1-sol', 'unknown', 'paused')])).toEqual([
+      ['admin.accounts.table.iqStates.checking', 'iq__v--checking'],
+      ['admin.accounts.table.iqStates.paused', 'iq__v--paused']
+    ])
+    const none = mountCell([target('gpt-6-astra', 'unknown')])
+    expect(none.find('.iq__v').exists()).toBe(false)
+    expect(none.get('.iq__none').text()).toBe('—')
+  })
+
   it('has no +N with two models or fewer', () => {
     const wrapper = mountCell([target('gpt-6-astra', 'smart'), target('gpt-6.1-sol', 'smart')])
     expect(wrapper.findAll('[data-testid="iq-target-tag"]')).toHaveLength(2)
